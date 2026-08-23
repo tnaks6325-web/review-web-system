@@ -375,7 +375,10 @@
     //   안내문으로 들어갈 수 있으므로, 텍스트 유무로 가이드유입으로 덮어쓰지 않는다.
     let _wd = c.work_detail;
     if (typeof _wd === 'string') { try { _wd = JSON.parse(_wd); } catch (_) { _wd = null; } }
-    const inflowType = _wd && _wd.inflowType;
+    /* ★ 저장값이 없으면 서버가 실어 준 **작업오더 폴백**을 쓴다(관리자 목록 전용 필드) —
+       리뷰어 화면(work-detail)이 이미 같은 폴백을 쓰므로, 없으면 카드만 '링크유입'으로 갈렸다.
+       공개 목록 응답에는 이 필드가 없어 종전 동작 그대로. */
+    const inflowType = (_wd && _wd.inflowType) || c.orderInflowType || '';
     const hasGuide = !!(_wd && _wd.inflowGuideHtml);
     const isLinkInflow = inflowType === 'link' || (!inflowType && c.landing_url && !hasGuide);
     chips.push(isLinkInflow

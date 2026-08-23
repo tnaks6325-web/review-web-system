@@ -63,8 +63,12 @@ t('★ 구매채널은 서버가 URL 로 추측하지 않는다(판정 단일 �
 t('★ 어떤 실패에도 throw 하지 않는다 — null 을 돌려주고 화면이 사유를 말한다',
   /catch \(e\)[\s\S]*return null;/.test(cond));
 t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광고주 미노출)', (() => {
-  const i = svc.indexOf('res.condition = await tabConditionSummary');
+  /* ⚠ 2026-08-24: 총건수 초과 표시가 들어오며 `tabConditionSummary` 를 **루프 뒤 한 번** 부르고
+     그 결과를 재사용하게 됐다(호출 2회면 cap 과 조건 카드가 갈릴 수 있다). 검사 의미는 그대로 —
+     "condition 은 showEdits 안에서만 응답에 실린다" + 이제 **호출 1회**까지 함께 고정한다. */
+  const i = svc.indexOf('res.condition =');
   if (i < 0) return false;
+  if ((svc.match(/await tabConditionSummary\(/g) || []).length !== 1) return false;
   // ⚠ 고정 길이 슬라이스(i-700)로 보면 그 사이에 다른 줄이 늘어나는 순간 조용히 빨개진다
   //    (실제로 `res.statusCols` 가 들어오며 밟았다). 바로 앞의 `if (showEdits) {` 를 찾아 그 구간만 본다.
   const before = svc.slice(svc.lastIndexOf('if (showEdits) {', i), i);
@@ -72,11 +76,13 @@ t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광�
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
   const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
                              svc.indexOf("else if (role === 'advertiser') {") + 900);
-  // ⚠ 세는 것은 **대입**(`res.condition =`)이다 — 단순 언급을 세면, 같은 showEdits 블록 안에서
-  //    그 값을 재사용하는 줄(편차 경고칠이 공고 금액을 그대로 쓴다)만 늘어도 빨개진다.
-  //    지키려는 것은 "condition 을 만드는 자리가 하나이고 광고주 분기에 없다" 이므로 대입만 센다.
+  /* `res.condition` 이 몇 번 나오든(일정 등 파생 필드가 붙는다) **전부 showEdits 블록 안**이어야 한다.
+     개수로 고정하면 필드가 늘 때마다 무관한 가드가 조용히 빨개진다. */
+  const blockStart = svc.lastIndexOf('if (showEdits) {', i);
+  const advStart = svc.indexOf("else if (role === 'advertiser') {");
+  const all = []; for (let k = svc.indexOf('res.condition'); k >= 0; k = svc.indexOf('res.condition', k + 1)) all.push(k);
   return /if \(showEdits\) \{/.test(before) && !/res\.condition/.test(advBlock)
-    && (svc.match(/res\.condition\s*=[^=]/g) || []).length === 1;
+    && all.length > 0 && all.every(k => k > blockStart && k < advStart);
 })());
 t('★ 쓰기 쿼리 0 — 조건 요약은 읽기 전용', !/INSERT|UPDATE|DELETE/i.test(cond));
 
@@ -89,8 +95,13 @@ t('★ 리뷰비·리뷰타입·입금명은 "값이 있는 최신 공고"에서
     && /const typeCamp = pick\('reviewType'\)/.test(cond)
     && /const memoCamp = pick\('transferMemo'\)/.test(cond)
     && /const campFee = num\(feeCamp && feeCamp\.reviewFee\)/.test(cond)
-    // ★ 개수를 센다 — reviewType·reviewTypeLabel 두 곳이라 존재만 보면 한 곳만 되돌린 변이를 놓친다(실측)
-    && (cond.match(/campaignType: typeCamp && typeCamp\.reviewType/g) || []).length === 2
+    /* ★ 판정은 **한 번만** 하고(rtKey) 판정값·표기값이 그것을 함께 쓴다(2026-08-23 혼합 표기 추가).
+       종전엔 같은 호출이 두 곳(reviewType·reviewTypeLabel)이라 개수를 셌다 — 지금은 단일 계산이
+       더 강한 보장이라 "그 계산이 typeCamp 를 보고, 두 필드가 모두 그것에서 나오는지"를 본다. */
+    && (cond.match(/campaignType: typeCamp && typeCamp\.reviewType/g) || []).length === 1
+    && /const rtKey = resolveReviewType\(\{ campaignType: typeCamp && typeCamp\.reviewType/.test(cond)
+    && /\n      reviewType: rtKey,/.test(cond)
+    && /reviewTypeLabel: rtKey \?/.test(cond)
     && /memoCamp && memoCamp\.transferMemo/.test(cond);
 })());
 t('★ 리뷰비 구간은 리뷰비를 준 그 공고 기준(금액과 구간이 갈리지 않게)',
@@ -116,7 +127,7 @@ t('④ 삭제된 주문은 근거가 아니다', /deleted_at IS NULL/.test(rv));
 t('★ 묶음 key 는 order_capture', /'order_capture'/.test(rv));
 t('⑤ 상한은 묶음별로 센다(전체 개수로 자르면 나중 묶음이 통째로 잘린다)',
   /arr\.filter\(f => f\.slot === sl\)\.length >= _RV_MAX_PER_ROW/.test(svc));
-t('★ fail-soft — 캡처 조회가 실패해도 리뷰 이미지는 나간다', /\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(rv));
+t('★ fail-soft — 캡처 조회가 실패해도 리뷰 캡처는 나간다', /\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(rv));
 
 console.log('\n── C. 화면: 상단 3분할 · 작업세부 폐지 · 정산 통합 ──');
 t('★ 내부 렌더는 3분할(.tp3grid.c3) + 미리보기 칸 (+저장된 접힘 상태 복원)',
@@ -229,8 +240,14 @@ t('★ 머리줄 3곳(작업조건 정상·폴백 / 진행현황 / 미리보기)
   const n = (wd.match(/onclick="_topToggle\(\)"/g) || []).length;
   return n === 4;   // 작업조건 2(정상+폴백) + 진행현황 1 + 미리보기(rvhd) 1
 })());
-t('★ 광고주 진행현황 머리줄에는 접기 창구가 없다(광고주는 종전 레이아웃)',
-  /isAdv\?'':' tp3h" onclick="_topToggle\(\)"/.test(wd));
+/* ★★ 업체 뷰어도 같은 3분할·같은 접기(사용자 확정 2026-08-23) — 종전의 "광고주는 접기 없음"
+   규칙은 폐기됐다. 다른 것은 작업 조건 카드의 **내용**(업체 4줄)과 정산 자리뿐이다. */
+t('★ 진행 현황 머리줄은 내부·업체 한 벌(역할 분기 잔재 0)',
+  /<div class="tp3t tp3h" onclick="_topToggle\(\)"[^>]*>진행 현황<span class="tp3hint">/.test(wd)
+  && !/isAdv\?'':' tp3h"/.test(wd));
+t('★ 업체 뷰어도 같은 3분할을 반환한다(전용 래퍼 advcondition/advprogress 폐기)',
+  !/class="advcondition"/.test(wd) && !/class="advprogress"/.test(wd)
+  && !/if\(isAdv\) return `<div class="advcondition"/.test(wd));
 t('★ 접힘 상태는 localStorage 로 기억(작업 무관 공통) — 실패해도 무시',
   /localStorage\.getItem\('wd_top3_fold'\)/.test(wd) && /localStorage\.setItem\('wd_top3_fold','1'\)/.test(wd));
 t('★ 토글은 CSS 클래스만 — 재렌더하지 않는다(미리보기 선택·스크롤 보존)', (() => {
@@ -355,18 +372,63 @@ t('③ 리뷰비 0원을 미설정으로 말하지 않는다(근거 feeSource �
   /cd\.feeSource\s*\?/.test(cc) && /미설정/.test(cc));
 t('★ 서버가 못 주면 종전 4줄로 떨어지고 사유를 말한다(빈 값 위장 금지)',
   /if\(!cd\)\{/.test(cc) && /요약 없음/.test(cc));
+/* ★ 2026-08-23: 혼합 표기가 붙으면서 렌더가 헬퍼(_cndRtypeHtml)로 빠졌다 — 검사 의미는 불변
+   (라벨·조합 모두 서버가 준 값을 그리기만 하고, 화면에 리뷰타입 표 사본을 두지 않는다). */
+const rth = fnBody(wd, 'function _cndRtypeHtml(cd){');
 t('★ 리뷰타입 라벨은 서버가 준 값(프론트에 표 사본 금지)',
-  /cd\.reviewTypeLabel/.test(cc) && !/RF_REVIEW_TYPE_LABELS/.test(cc));
+  /_cndRtypeHtml\(cd\)/.test(cc) && /cd\.reviewTypeLabel/.test(rth)
+  && !/RF_REVIEW_TYPE_LABELS/.test(rth) && !/RF_REVIEW_TYPE_LABELS/.test(cc));
 
 console.log('\n── E. 화면: 발주 줄 + 원문 팝업 ──');
 const lk = fnBody(wd, 'function _woLinkedRow(wd){');
 t('발주 줄이 카드 맨 아래 한 줄(.tp3wo.lk)', /class="tp3wo lk"/.test(lk));
-t('★ 조작은 [⋯] 메뉴 안 — 주 화면에 파괴 버튼을 늘어놓지 않는다',
-  /prepareRoster\(\)/.test(lk) && /openWorkOrderPicker\(\)/.test(lk) && /unlinkWO\(\)/.test(lk)
-  && /class="womenu"/.test(lk));
-t('★ 메뉴 조작은 admin/master 만(종전 계약 유지)', /STATE\.role==='master'\|\|STATE\.role==='admin'/.test(lk));
-t('★ 바깥클릭·Esc 리스너는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)',
-  /_woRowMenuBound/.test(wd) && (wd.match(/STATE\._woRowMenuBound=true/g) || []).length === 1);
+/* ★★ 발주 줄의 조작은 **[원문] 하나**(사용자 확정 2026-08-23). 셋을 없앤 이유:
+   · 명단 준비 = `prepareRosterSlots` 가 seq 900000 대역 + source='manual' + row_json 없이 넣어
+     장부에서 제외되고 상태가 얼어붙는다(접수의 `createWorktableSlots` 가 이미 정확한 줄을 깐다).
+   · 연결 해제 = Track B 링크만 지우는데 접수된 작업은 `work_orders.linked_tab_*` 폴백이 살아 있어
+     **아무 일도 안 일어나고 "해제됨"이라고 말한다** — 진짜 해제는 홈 [작업 삭제].
+   · 발주 변경 = 이 화면의 연결만 바꾸는 반쪽(작업오더 표시·작업표 줄·정원은 안 따라온다).
+   되붙이면 그 사고가 그대로 재현되므로 **부재를 고정한다**(서버 라우트는 그대로 살아 있다). */
+t('★ 발주 줄 조작은 [원문] 하나 — 항목이 하나면 [⋯] 껍데기를 두지 않는다',
+  /openWoRawModal\(\)/.test(lk) && !/class="womenu"/.test(lk)
+  && (lk.match(/<button/g) || []).length === 1);
+t('★ 명단 준비·연결 해제·발주 변경은 화면에서 제거됐다(되붙이면 위 사고 재현)',
+  !/onclick="prepareRoster/.test(wd) && !/onclick="unlinkWO/.test(wd)
+  && !/>명단 준비/.test(wd) && !/>연결 해제/.test(wd) && !/>발주 변경/.test(wd)
+  && !/function prepareRoster\(/.test(wd) && !/function unlinkWO\(/.test(wd)
+  && !/function toggleWoRowMenu\(/.test(wd) && !/_woRowMenuBound/.test(wd)
+  && !/\.womenu|\.womm/.test(wd));
+t('★ openWorkOrderPicker 는 남는다 — 미연결 줄 [＋ 발주 연결]이 쓴다',
+  /openWorkOrderPicker\(\)/.test(fnBody(wd, 'function _woUnlinkedRow(wd){'))
+  && /async function openWorkOrderPicker\(\)/.test(wd));
+t('★ 미연결 줄 안내가 사라진 기능을 시키지 않는다(명단 준비 문구 0)',
+  !/명단을 준비할 수 있습니다/.test(wd));
+
+/* ★★ 메인URL(사용자 확정 2026-08-23) — 일정 **위** 첫 줄. 아픈 자리 둘:
+   ① `val()` 로 감싸면 <button> 안에 <a> 가 들어가 **링크 클릭이 수정 모달까지 연다**.
+   ② 링크 조립을 손으로 하면 http(s) 스킴 검사가 사본이 되어 `javascript:` 가 새어든다. */
+t('★ 메인URL 행이 일정 위 첫 줄이다', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return m.indexOf("['@murl'") > 0 && m.indexOf("['@murl'") < m.indexOf("['@sched'")
+    && /k==='@murl'\?murlRow/.test(m);
+})());
+t('② 링크 렌더는 공유 모듈 _woLinkHtml 단일 출처(<a> 손조립 금지)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf('const murlRow='), j = m.indexOf('const schedRow=', i);
+  const blk = m.slice(i, j);
+  return /_woLinkHtml\(/.test(blk) && !/<a\s/.test(blk);
+})());
+t('① 값이 있으면 val() 로 감싸지 않는다(링크 클릭이 수정 모달까지 열리지 않게)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf('const murlRow='), j = m.indexOf('const schedRow=', i);
+  const blk = m.slice(i, j);
+  return !/val\(/.test(blk) && /unset\('order'\)/.test(blk);   // 미설정은 작업오더 수정 창구로
+})());
+t('★ _woLinkHtml 은 http(s) 만 링크화하고 escape·noopener 를 건다', (() => {
+  const wod = F('js/work-order-detail.js');
+  const m = fnBody(wod, 'function _woLinkHtml(url) {');
+  return /\^https\?:\\\/\\\//.test(m) && /escHtml\(u\)/.test(m) && /rel="noopener/.test(m);
+})());
 t('★ 발주 원문 팝업이 종전 「작업세부」와 같은 값을 그린다(렌더러 이동)', (() => {
   const raw = fnBody(wd, 'function _woRawRowsHtml(d){');
   return /\['유입가이드',d\.inflowGuide\]/.test(raw) && /\['리뷰가이드',d\.reviewGuide\]/.test(raw)
@@ -374,15 +436,20 @@ t('★ 발주 원문 팝업이 종전 「작업세부」와 같은 값을 그린
     && /STATE\.role!=='advertiser'\?\[\['담당',d\.managerName\]\]/.test(raw);   // 담당자 실명은 내부만
 })());
 
-console.log('\n── F. 화면: 제출물 미리보기(좌 구매캡처 / 우 리뷰이미지) ──');
+console.log('\n── F. 화면: 제출물 미리보기(좌 구매캡처 / 우 리뷰캡처) ──');
 const r2 = fnBody(wd, 'function _rvRender2(pane){');
 t('_rvRender2 가 있다', !!r2);
-t('★ 두 칸 — 좌 구매 캡처 / 우 리뷰 이미지', /col\('cap'[\s\S]*col\('rev'/.test(r2));
+t('★ 두 칸 — 좌 구매 캡처 / 우 리뷰 캡처', /col\('cap'[\s\S]*col\('rev'/.test(r2));
 t('★ 칸마다 한 장(.rvone)', /class="rvone"/.test(r2));
 t('⑥ 넘김 줄은 1장일 때도 자리를 비워 둔다(visibility) — 없애면 두 칸 높이가 어긋난다',
   /n>1\?'':' style="visibility:hidden"'/.test(r2));
 t('★ 끝에서 순환하지 않는다', /Math\.max\(0,Math\.min\(n-1,/.test(fnBody(wd, 'function _rvStep(kind,delta,n){')));
-t('★ 장수는 칸 머리 배지에 남긴다(조용한 누락 금지)', /class="cnt">\$\{n\}/.test(r2));
+/* ★★ 칸 머리(🛒 구매 캡처 · 배지)는 그리지 않는다(사용자 확정 2026-08-23) — 그 한 줄을 비운
+   만큼 캡처가 커진다. 장수는 **넘김 줄이 `i+1 / n` 으로** 말하고(2장 이상), 0장은 빈 상태
+   문구가 말한다. 1장은 이미지 자체가 곧 답이라 조용한 누락이 아니다. */
+t('★ 칸 머리 배지는 없다 — 장수는 넘김 줄과 빈 상태 문구가 말한다',
+  !/class="cnt">/.test(r2) && !/rv2h/.test(r2)
+  && /\$\{i\+1\} \/ \$\{n\}/.test(r2) && /캡처 없음|미등록/.test(r2));
 t('★ "미제출"과 "이미지 미등록"을 구분해 말한다',
   /미제출/.test(r2) && /미등록/.test(r2) && /r\.submitted\?/.test(r2));
 t('★ 행이 바뀌면 장 인덱스를 0으로 되돌린다 — 남의 2장째가 그대로 보이면 안 된다',
@@ -426,9 +493,65 @@ t('★ 내부 미리보기 렌더는 반드시 _rvFill 을 거친다(한 갈래�
 t('★ 캡처는 폭에 맞춰 축소하고 세로는 칸 안에서 스크롤(contain 으로 욱여넣지 않는다)',
   /\.rv2 \.rvhold\{flex:1;min-height:0;[^}]*overflow-y:auto/.test(wd)
   && /\.rv2 \.rvone\{width:100%;height:auto;display:block\}/.test(wd));
-t('★ 광고주 뷰어(_rvRender)는 종전 그대로 — 이 래퍼는 내부 화면 전용', (() => {
+/* ★★ 미리보기 렌더러는 **한 벌**(사용자 확정 2026-08-23) — `_rvRender` 는 이제 위임만 한다.
+   종전에는 업체 뷰어가 세로 레일(pane.innerHTML 직접 조립)을 따로 그려 두 화면이 갈렸다.
+   ★ 절대배치 래퍼(`_rvFill`)를 거쳐야 캡처 높이가 상단 카드를 밀어내지 않는다. */
+t('★ 미리보기 렌더러 한 벌 — _rvRender 는 _rvRender2 위임만(세로 레일 조립 잔재 0)', (() => {
   const m = fnBody(wd, 'function _rvRender(){');
-  return !!m && !/_rvFill\(/.test(m) && /pane\.innerHTML=/.test(m);
+  return !!m && /return _rvRender2\(pane\);/.test(m) && !/pane\.innerHTML=/.test(m)
+    && !/rvmedia|rvasset|_RV_SLOT/.test(wd);
+})());
+
+console.log('\n── I. 「일정」 행(사용자 확정 2026-08-23) ──');
+/* 「일정」 = 표의 구매일자 중 **가장 이른 날 ~ 가장 늦은 날**. 아픈 자리 셋:
+   ① `fallbackAnchor` 를 빼면 `8 / 15 (토)`(연도 없음)가 전 행 null 이 되어 조용히 「—」가 된다.
+   ② 날짜 칸 찾기·해석을 여기서 다시 만들면 모집인원조절·정원 판정과 기준이 갈린다.
+   ③ 못 읽었을 때 오늘로 지어내면 있지도 않은 일정이 사실처럼 보인다(사용자 확정: 비면 「—」). */
+const schedSrc = fnBody(svc, 'function _condSchedule(');
+t('서버에 _condSchedule 이 있다', !!schedSrc);
+t('② 날짜 칸은 campaignSchedule.findDateColumnIndex 단일 출처',
+  /require\('\.\/campaignSchedule\.service'\)/.test(schedSrc) && /findDateColumnIndex\(/.test(schedSrc));
+t('② 해석은 utils/koreanDate.parseDateColumn 단일 출처',
+  /require\('\.\.\/utils\/koreanDate'\)/.test(schedSrc) && /parseDateColumn\(/.test(schedSrc));
+t('① fallbackAnchor 를 넘긴다(연도 없는 표기 보호)', /fallbackAnchor:/.test(schedSrc));
+t('★ 표(정렬된 out)에서 파생한다 — 계획표를 따로 읽지 않는다',
+  /res\.condition\.schedule = _condSchedule\(out, headers\)/.test(svc)
+  && !/campaign_daily_plans/.test(schedSrc));
+
+{ // vm 실행 — 실제 모듈을 태워 결과를 대조한다(정적 검사로는 ①③을 못 잡는다)
+  const vm = require('vm');
+  const map = { './campaignSchedule.service': '../src/services/campaignSchedule.service',
+                '../utils/koreanDate': '../src/utils/koreanDate' };
+  const sandbox = { require: (m) => { if (!map[m]) throw new Error('예상 밖 require: ' + m); return require(map[m]); }, module: {}, Date };
+  vm.createContext(sandbox);
+  vm.runInContext(schedSrc + '\n;this.__f=_condSchedule;', sandbox);
+  const f = sandbox.__f;
+  const H = ['번호', '구매일자', '수취인'];
+  const rows = iso => iso.map(v => ({ rowJson: { '번호': 1, '구매일자': v, '수취인': 'ㅇ' } }));
+  const r1 = f(rows(['9 / 11 (금)', '8 / 11 (화)', '8 / 20 (목)']), H);
+  t('① 연도 없는 표기도 읽는다 — 가장 이른 날 ~ 가장 늦은 날',
+    !!r1 && /^\d{4}-08-11$/.test(r1.start) && /^\d{4}-09-11$/.test(r1.end), JSON.stringify(r1));
+  t('③ 날짜 칸이 없으면 null(지어내지 않는다)',
+    f([{ rowJson: { '번호': 1, '수취인': 'ㅇ' } }], ['번호', '수취인']) === null);
+  t('③ 날짜 칸은 있는데 값이 전부 비면 null',
+    f(rows(['', '', '']), H) === null);
+  t('★ 빈 표·잘못된 입력은 null(throw 하지 않는다)',
+    f([], H) === null && f(null, null) === null);
+  t('★ 한 줄뿐이면 시작 = 종료', (() => { const r = f(rows(['2026-08-11']), H); return r && r.start === '2026-08-11' && r.end === '2026-08-11'; })());
+}
+
+t('★ 화면은 서버 값을 그리기만 한다 — 총건수 위에 일정 행', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return /const schedRow=/.test(m) && /cd\.schedule/.test(m)
+    && m.indexOf("['@sched'") > 0 && m.indexOf("['@sched'") < m.indexOf("['총건수'")
+    && /k==='@sched'\?schedRow/.test(m)
+    && !/findDateColumnIndex|parseDateColumn/.test(m);
+})());
+t('③ 값이 없으면 [미설정] 버튼이 아니라 「—」(고칠 창구가 없는 죽은 버튼 금지)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf('const schedRow='), j = m.indexOf('const rows=[', i);
+  const blk = m.slice(i, j);
+  return /cnna/.test(blk) && !/unset\(/.test(blk);
 })());
 
 console.log('\n── H. 시안 문서 ──');

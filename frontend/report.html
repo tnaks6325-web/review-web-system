@@ -43,7 +43,7 @@
     <div class="sub" id="sub">불러오는 중…</div>
   </div>
   <div class="wrap" id="wrap">
-    <div class="state"><div class="spin"></div>리뷰 이미지를 불러오는 중입니다…</div>
+    <div class="state"><div class="spin"></div>리뷰 캡처를 불러오는 중입니다…</div>
   </div>
   <div class="lb" id="lb" onclick="if(event.target===this)_closeLb()">
     <button class="x" onclick="_closeLb()" aria-label="닫기">&times;</button>
@@ -69,11 +69,11 @@
 
     function render(data){
       document.getElementById('title').textContent = data.title || '리뷰 보고';
-      document.getElementById('sub').textContent = `총 ${data.count}장의 리뷰 이미지`;
+      document.getElementById('sub').textContent = `총 ${data.count}장의 리뷰 캡처`;
       document.title = (data.title || '리뷰 보고') + ' — 리뷰 보고';
       var wrap=document.getElementById('wrap');
       if(!data.images || !data.images.length){
-        wrap.innerHTML = `<div class="state"><div class="ic">🗂️</div>아직 등록된 리뷰 이미지가 없습니다.</div>`;
+        wrap.innerHTML = `<div class="state"><div class="ic">🗂️</div>아직 등록된 리뷰 캡처가 없습니다.</div>`;
         return;
       }
       // 리뷰어별 그룹핑(이름 없으면 '기타')

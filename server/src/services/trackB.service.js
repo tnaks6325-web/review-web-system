@@ -74,15 +74,18 @@ function _deriveAnchor(row) {
   return _rowAnchorId(row) ? { type: 'manual', value: _rowAnchorId(row) } : null;
 }
 function _rowAnchorId(row) { return row && row.id != null ? String(row.id) : ''; }
-// 편집 가능 필드 → 형태(bool/text). '_hidden'=제거 오버레이(import행). 화이트리스트(인젝션·형오류 차단).
+// 편집 가능 필드 → 형태(bool/text). 화이트리스트(인젝션·형오류 차단).
+// ★★ '_hidden'(행 숨김 오버레이)은 **제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+//   행을 화면에서만 감추면 표의 줄 수와 진행 현황·마감자료가 서로 다른 사실을 말한다
+//   (실사고: 참여자 85명인데 게이지가 82/100). 줄을 내리는 창구는 [행 삭제]·[🧹 줄 정리] 뿐이다.
 const _EDIT_FIELD_KIND = {
   reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
-  product_name: 'text', phone8: 'text', _hidden: 'bool',
+  product_name: 'text', phone8: 'text',
 };
 // 시트 컬럼(헤더)이 제출/입금 "상태 토글"열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
 //   ★ 정확 화이트리스트 — '입금자명/입금계좌/입금일'·'리뷰제출일/리뷰미제출'·'주문자제출' 등 정보열 오탐 차단.
 //   미매칭이면 null(연동 안 함, 안전). 새 상태열 명칭은 여기 추가.
-const _SUBMIT_HEADERS = new Set(['리뷰제출', '리뷰제출여부', '리뷰제출완료', '제출']);
+const _SUBMIT_HEADERS = new Set(['리뷰', '리뷰제출', '리뷰제출여부', '리뷰제출완료', '제출']);
 const _PAID_HEADERS = new Set(['입금', '입금여부', '입금완료']);
 function _linkedToggle(header) {
   const h = String(header || '').trim();
@@ -110,9 +113,16 @@ async function projectTab({ sheetId, tabName, by = 'trackB' } = {}) {
   // 1) 로스터 임포트(review_index→campaign_participants). 기존 검증된 경로 재사용(시트 재읽기 0).
   const imp = await participants.importTabFromIndex({ sheetId, tabName, by });
   // 2) 신원키 + 주문링크 강화(라이브 order_submissions를 읽어 B에만 씀).
+  //    ★ 무시트 탭에서도 계속 돈다 — row_json 을 건드리지 않고 identity_key·주문링크만
+  //      blank-only 로 채우므로(되돌림과 무관) 관제 대조·중복 판정의 재료가 유지된다.
   const enr = await _enrichTab({ sheetId, tabName });
   // 3) seen-set: 이번 임포트에 안 보인 import행 → 비활성(하드삭제 아님, 이력 보존).
-  const rec = await _reconcileSeen({ sheetId, tabName, runStart });
+  /* ★★★ 임포트를 건너뛴 탭(무시트)에서는 **절대 돌리면 안 된다** — 이번 실행에 아무것도
+     임포트하지 않았으므로 `imported_at < runStart` 에 그 탭의 `source='import'` 활성 줄이
+     **전부** 걸려 통째로 비활성화된다(이관된 무시트 탭에 그런 줄이 남아 있다).
+     "시트에서 사라진 줄 정리" 라는 이 단계의 목적 자체가 무시트 탭에는 성립하지 않는다. */
+  const rec = (imp && imp.skipped) ? { deactivated: 0, reconcileSkipped: true }
+                                   : await _reconcileSeen({ sheetId, tabName, runStart });
   return { ...imp, ...enr, ...rec };
 }
 
@@ -527,6 +537,94 @@ async function transferOwnership({ sheetId, tabGid = null, toAdvertiserId, by = 
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
   } finally { client.release(); }
+}
+// ══════════════════════════════════════════════════════════════════════════
+// 시트 전체 소유 → 작업(탭) 단위로 펼치기 (사용자 확정 2026-08-23)
+//   업체관리의 지정 창구가 **작업(탭) 단위 하나**로 바뀌었지만, 이미 저장된 `tab_gid IS NULL`
+//   (시트 전체) 행은 그대로 살아 그 시트의 모든 탭을 계속 덮는다 — 새 탭이 생기면 자동 포함까지 된다.
+//   ★★ 무시트화(전환)는 `tab_configs.sheetless` 플래그만 켜고 `sheet_id` 는 그대로 두므로
+//      시트 축을 없애지 못한다(sheetlessCutover.service.js). 실제로 없애는 것은 이 펼치기다.
+//   ★★ 완화 금지 4종:
+//     ① 대상 탭은 **활성 작업 목록**(participants.listActiveTabs) — 화면의 미지정 판정과 같은 재료.
+//     ② **gid 없는 탭이 하나라도 있으면 그 시트는 펼치지 않는다**(fail-closed) — 그 작업은 개별
+//        소유를 만들 수 없어 시트 전체 행을 지우는 순간 **주인 없이 남는다**.
+//     ③ **다른 업체가 탭 지정으로 가져간 탭은 건너뛴다**(탭 지정 우선 = 사람이 명시한 더 강한 결정,
+//        transferOwnership 의 keptTabOverrides 와 같은 규율).
+//     ④ **미리보기 기본**(confirm !== true 면 쓰기 0) · 시트 하나당 한 트랜잭션(전부 아니면 전무).
+//   ★ 쓰기 표면 = advertiser_campaigns 한 곳(시트·장부·주문 무접촉).
+async function expandSheetOwnerships({ advertiserId = null, sheetId = null, confirm = false, by = 'admin', staffName = null } = {}) {
+  const db = getPool();
+  const where = ['ac.deleted_at IS NULL', 'ac.tab_gid IS NULL', `COALESCE(a.status,'') <> 'ended'`];
+  const vals = [];
+  if (advertiserId) { vals.push(String(advertiserId)); where.push(`ac.advertiser_id = $${vals.length}`); }
+  if (sheetId) { vals.push(String(sheetId)); where.push(`ac.sheet_id = $${vals.length}`); }
+  // staff(AE)는 자기 담당(inad_pm) 업체만 — 라우트 게이트와 이중.
+  if (staffName) { vals.push(String(staffName).trim()); where.push(`TRIM(COALESCE(a.inad_pm,'')) = TRIM($${vals.length})`); }
+  const { rows: owns } = await db.query(
+    `SELECT ac.advertiser_id AS "advertiserId", a.name AS "advertiserName", ac.sheet_id AS "sheetId"
+       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+      WHERE ${where.join(' AND ')} ORDER BY a.name, ac.sheet_id`, vals);
+  if (!owns.length) return { ok: true, dryRun: !confirm, items: [], expanded: 0, assigned: 0, skipped: 0 };
+
+  const tabs = await participants.listActiveTabs({ limit: 2000 });
+  const bySheet = new Map();
+  tabs.forEach(t => { const a = bySheet.get(t.sheetId) || []; a.push(t); bySheet.set(t.sheetId, a); });
+  const sids = [...new Set(owns.map(o => o.sheetId))];
+  const { rows: ovr } = await db.query(
+    `SELECT ac.sheet_id AS "sheetId", ac.tab_gid AS "tabGid", ac.advertiser_id AS "advertiserId", a.name AS "advertiserName"
+       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+      WHERE ac.deleted_at IS NULL AND ac.tab_gid IS NOT NULL AND ac.sheet_id = ANY($1)`, [sids]);
+
+  const items = [];
+  let expanded = 0, assigned = 0, skipped = 0;
+  for (const o of owns) {
+    const list = bySheet.get(o.sheetId) || [];
+    const title = (list[0] && list[0].spreadsheetTitle) || o.sheetId;
+    const gidless = list.filter(t => !String(t.tabGid == null ? '' : t.tabGid).trim());
+    const taken = new Map();   // gid → 그 탭을 탭지정으로 가진 타 업체
+    ovr.forEach(x => { if (x.sheetId === o.sheetId && x.advertiserId !== o.advertiserId) taken.set(String(x.tabGid), x.advertiserName); });
+    const targets = list.filter(t => {
+      const g = String(t.tabGid == null ? '' : t.tabGid).trim();
+      return g && !taken.has(g);
+    });
+    const kept = list.map(t => String(t.tabGid == null ? '' : t.tabGid).trim())
+      .filter(g => g && taken.has(g)).map(g => ({ tabGid: g, advertiserName: taken.get(g) }));
+    const row = {
+      advertiserId: o.advertiserId, advertiserName: o.advertiserName, sheetId: o.sheetId, sheetTitle: title,
+      tabs: targets.map(t => ({ tabGid: String(t.tabGid), tabName: t.tabName })),
+      keptTabOverrides: kept, gidlessCount: gidless.length,
+    };
+    // fail-closed — 모르는 채로 소유를 지우지 않는다(주인 없는 작업 금지).
+    if (!list.length) row.skipped = 'no_active_tabs';
+    else if (gidless.length) row.skipped = 'gidless_tab';
+    else if (!targets.length) row.skipped = 'all_tabs_taken';
+    if (row.skipped) { skipped++; items.push(row); continue; }
+    if (confirm) {
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        for (const t of row.tabs) {
+          await client.query(
+            `INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid, assigned_by)
+               VALUES ($1,$2,$3,$4)
+             ON CONFLICT (advertiser_id, sheet_id, COALESCE(tab_gid,'')) DO UPDATE
+               SET deleted_at = NULL, assigned_by = EXCLUDED.assigned_by`,
+            [o.advertiserId, o.sheetId, t.tabGid, String(by).slice(0, 100)]);
+        }
+        await client.query(
+          `UPDATE advertiser_campaigns SET deleted_at = NOW()
+            WHERE advertiser_id=$1 AND sheet_id=$2 AND tab_gid IS NULL AND deleted_at IS NULL`,
+          [o.advertiserId, o.sheetId]);
+        await client.query('COMMIT');
+        row.applied = true; expanded++; assigned += row.tabs.length;
+      } catch (e) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        row.skipped = 'error'; row.error = (e && e.message) || String(e); skipped++;
+      } finally { client.release(); }
+    } else { expanded++; assigned += row.tabs.length; }
+    items.push(row);
+  }
+  return { ok: true, dryRun: !confirm, items, expanded, assigned, skipped };
 }
 async function listOwnership({ advertiserId, sheetId } = {}) {
   const db = getPool();
@@ -1475,6 +1573,9 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
       const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
       return {
         sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle,
+        // 무시트 여부 — 업체 화면이 시트 제목 라벨을 그릴지 정하는 표시용 불리언(민감정보 아님).
+        // 없으면 화면이 종전대로 시트 제목을 그리므로, 이 한 칸이 빠지면 라벨 숨김이 조용히 무력화된다.
+        sheetless: t.sheetless === true,
         active: t.active !== false,
         total: t.bTotal || 0, submitted: t.bSub || 0, paid: t.bPaid || 0,
         target: t.woRecruit || null,
@@ -1617,7 +1718,6 @@ async function saveTabMemo({ sheetId, tabName, memo = '', by = '' } = {}) {
 //   ★ latestCloseout 정의 = settlementForTab 의 스텝퍼 ①(마감자료)이 이 시점부터 라이브(closeoutAvailable).
 // ══════════════════════════════════════════════════════════════════════════
 // 활성 명단(투영 물리행 + participant_edits 오버레이 합성) — 마감자료 CSV·건수의 단일 소스.
-//   ★ SF-3: 제거(_hidden) 오버레이 행은 제외(작업보드에서 안 보이는 행이 CSV에 재등장 방지),
 //     이름/수취인/차수/옵션/제출/입금 편집 보정도 반영 — workdeskTab 합성과 동일 규칙.
 async function _closeoutRoster(sheetId, tabName) {
   const db = getPool();
@@ -1654,7 +1754,6 @@ async function _closeoutRoster(sheetId, tabName) {
     if (anchor && !(anchor.type !== 'manual' && (anchorCount.get(_akey(anchor.type, anchor.value)) || 0) > 1)) {
       const k = _akey(anchor.type, anchor.value); if (editMap.has(k)) ov = editMap.get(k);
     }
-    if (ov._hidden === true) continue;   // 제거 오버레이 → 마감자료에서 제외
     const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
     out.push({
       seq: r.seq, name: pick('reviewer_name', r.name), recipient: pick('recipient_name', r.recipient),
@@ -2372,6 +2471,38 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
       ORDER BY sheet_row, capture_uploaded_at NULLS LAST`,
     [sheetId, tabName]).catch(() => ({ rows: [] }));
   for (const r of caps) push(r.sheet_row, r.capture_file_id, 'order_capture', r.capture_uploaded_at);
+  /* ── 구매 캡처 ② **공고(참여형) 좌표 주문** ────────────────────────────────────
+     ★★ 실사고(2026-08-23 「0807(올리브영)블랑카우 바디로션 100건」): 8/19 이후 제출한 9명의
+       구매 캡처가 전부 "미제출"로 보였다. 파일은 Drive 에 있고 주문에도 연결돼 있었다 —
+       **공고를 거쳐 제출한 주문은 원장 좌표가 `campaign:<공고ID>`**(submit.routes
+       `_resolveCampaignOrderScope`)라 위 탭 좌표 조회에 **한 건도 안 걸렸을 뿐**이다.
+       그 탭에 공고가 붙은 순간부터 모든 신규 제출이 이 갈래로 들어오므로, 이 조회가 없으면
+       화면이 "제출 안 했다"고 거짓말을 계속한다.
+     ★ 짝짓기는 위와 **같은 `sheet_row`** 하나 — `campaign_participants.order_submission_id`
+       링크는 오염 사례가 문서화돼 있어 쓰지 않는다(2026-08-19 장수산업 건과 같은 규율).
+     ★ 공고 매칭은 이름 → gid 폴백이고 **빈 gid 는 절을 켜지 않는다**. gid 는 **서버가
+       tab_configs 에서 다시 구한다** — 화면이 보낸 값을 믿으면 낡은 화면이 남의 공고를 끌어온다.
+     ★ 차수 재발행으로 공고가 여럿이면 전부 합류한다(같은 작업표 줄에 기록된 주문들이다).
+     ★ fail-soft: 실패해도 위에서 모은 것은 그대로 나간다. */
+  let _gid = '';
+  try {
+    const { rows: tg } = await db.query(
+      `SELECT COALESCE(tab_gid, '') AS gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+      [sheetId, tabName]);
+    _gid = (tg[0] && tg[0].gid) || '';
+  } catch (_) { _gid = ''; }
+  const { rows: campCaps } = await db.query(
+    `SELECT os.sheet_row, os.capture_file_id, os.capture_uploaded_at
+       FROM order_submissions os
+       JOIN recruit_campaigns rc
+         ON os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id
+      WHERE rc.linked_sheet_id = $1
+        AND (rc.linked_tab_name = $2 OR ($3 <> '' AND rc.linked_tab_gid = $3))
+        AND os.deleted_at IS NULL
+        AND os.sheet_row IS NOT NULL AND os.capture_file_id IS NOT NULL
+      ORDER BY os.sheet_row, os.capture_uploaded_at NULLS LAST`,
+    [sheetId, tabName, _gid]).catch(() => ({ rows: [] }));
+  for (const r of campCaps) push(r.sheet_row, r.capture_file_id, 'order_capture', r.capture_uploaded_at);
   return Object.fromEntries(out);
 }
 
@@ -2421,12 +2552,52 @@ function _collectRowJsonKeys(rows) {
    ★ 공고가 여럿(차수 재발행)이면 **살아있는 최신 하나**를 쓰고 `campaignCount` 로 그 사실을 말한다.
    ★ 매칭은 이름 → gid 폴백(리네임으로 연결이 조용히 풀리지 않게). **빈 gid 는 절을 켜지 않는다.**
    ★ 어떤 실패에도 throw 하지 않는다 — 작업보드가 이것 때문에 죽으면 안 된다. */
+/* 「일정」 = 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
+   ★★ 모집인원조절(095)이 작업표 줄의 구매일자를 다시 깔면 표가 곧 바뀌므로 **연동 코드가 없다** —
+      표를 읽는 것 자체가 연동이다(여기서 계획표를 따로 읽으면 화면과 표가 갈린다).
+   ★ 판정 사본 0 — 날짜 칸은 `campaignSchedule.findDateColumnIndex`, 해석은
+     `utils/koreanDate.parseDateColumn`. **`fallbackAnchor` 필수**(작업표 표기 `8 / 15 (토)` 는
+     연도가 한 칸도 없어 앵커가 없으면 전 행 null 로 조용히 무너진다 — W2-b F-2 와 같은 자리).
+   ★ 날짜 칸이 없거나 한 줄도 못 읽으면 **null** — 화면이 「—」로 말한다(오늘로 지어내지 않는다).
+   ★ 읽기 전용·fail-soft: 어떤 실패에도 throw 하지 않는다. */
+function _condSchedule(rows, headers) {
+  try {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return null;
+    let keys = Array.isArray(headers) ? headers.filter(h => h != null && String(h).trim() !== '') : [];
+    if (!keys.length) {
+      const seen = new Set(); keys = [];
+      for (const r of list) {
+        const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : null;
+        if (!rj) continue;
+        for (const k of Object.keys(rj)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
+      }
+    }
+    if (!keys.length) return null;
+    const { findDateColumnIndex } = require('./campaignSchedule.service');
+    const di = findDateColumnIndex(keys);
+    if (di < 0) return null;
+    const key = keys[di];
+    const raw = list.map(r => {
+      const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : {};
+      return rj[key] == null ? '' : String(rj[key]);
+    });
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const { parseDateColumn } = require('../utils/koreanDate');
+    const iso = parseDateColumn(raw, { fallbackAnchor: { y: kst.getUTCFullYear(), m: kst.getUTCMonth() + 1 } })
+      .filter(Boolean).sort();
+    if (!iso.length) return null;
+    return { start: iso[0], end: iso[iso.length - 1] };
+  } catch (_) { return null; }
+}
+
 async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null } = {}) {
   try {
     const gid = String(meta.tabGid || '').trim();
     const { rows: camps } = await db.query(
       `SELECT id, title, recruit_total AS "recruitTotal", daily_limit AS "dailyLimit",
               channel, channel_custom AS "channelCustom", review_type AS "reviewType",
+              review_type_mix AS "reviewTypeMix",
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
               status, participation_mode AS "participationMode"
@@ -2473,8 +2644,38 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       : campFee != null ? 'campaign'
       : tabFee != null ? 'tab' : null;      // null = 근거를 못 찾음(0원이라서가 아니다)
 
-    const { resolveReviewType, reviewTypeLabel } = require('../utils/reviewType');
+    const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType,
+            isFreeChoiceReviewType, FREE_CHOICE_REVIEW_LABEL } = require('../utils/reviewType');
+    const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
     const { hasCashReceiptSlot } = require('../utils/captureSlots');
+
+    /* ── 리뷰타입: 판정(행)과 표기(작업)를 분리한다 ─────────────────────────────
+       ★★ `resolveReviewType` 은 **혼합이면 null** 을 돌려준다(완화 금지) — 어느 행이 포토이고
+         어느 행이 텍스트인지는 시트 작업옵션 칸만 답할 수 있어서다. 그런데 작업 조건 카드는
+         **행이 아니라 작업**을 설명하는 자리라, 그 null 을 그대로 그리면 공고에 `혼합(포토 200 ·
+         텍스트 100)` 을 저장해 둔 작업이 `[미설정]` 로 보인다(2026-08-23 신고).
+       ★ 그래서 **판정값(`reviewType`)은 그대로 null 로 두고** 표기용 라벨·조합만 따로 싣는다
+         — 검수·캡처 슬롯이 보는 값은 한 글자도 바뀌지 않는다.
+       ★ 조합 우선순위 = **공고 저장값(106) → 연결 작업오더 문자열**(혼합 조합 프리필과 같은 순서).
+         작업오더 조합은 `parseWorkOrderReviewType` 단일 출처로 읽는다(사본 0).
+       ★ 혼합인데 조합을 모르면 **0 으로 꾸미지 않고** 빈 배열로 둔다 — 화면이 "유형별 인원
+         미입력"이라고 말한다. */
+    const rtKey = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
+    const rtMixed = !rtKey && (normalizeReviewType(typeCamp && typeCamp.reviewType) === 'mixed'
+                            || normalizeReviewType(meta.reviewType) === 'mixed');
+    /* ★ `자율리뷰`도 "미설정"이 아니다 — 사람이 적어 둔 값이다(2026-08-23 사용자 확정).
+       판정(rtKey)은 여전히 null 이고 라벨만 적힌 그대로 말한다. ★ 혼합과 **배타**. */
+    const rtFree = !rtKey && !rtMixed
+      && (isFreeChoiceReviewType(typeCamp && typeCamp.reviewType) || isFreeChoiceReviewType(meta.reviewType));
+    let rtMix = [];
+    if (rtMixed) {
+      rtMix = (normalizeReviewTypeMix(typeCamp && typeCamp.reviewTypeMix).mix || []);
+      if (!rtMix.length && wo) {
+        const p = parseWorkOrderReviewType(wo.reviewType);
+        if (p.mixed) rtMix = Object.keys(p.counts).filter(k => p.counts[k] > 0)
+                                    .map(k => ({ type: k, quantity: p.counts[k] }));
+      }
+    }
 
     let cashReceipt = null;
     try { cashReceipt = hasCashReceiptSlot(meta.captureSlots, meta.incomeType); } catch (_) { cashReceipt = null; }
@@ -2545,11 +2746,14 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
          되고, 정작 이체 서식에는 공고 값이 찍혀 화면과 파일이 갈린다(사용자 확정 2026-08-20:
          공고를 나중에 만들면 공고 설정값이 우선한다). */
       depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
-      reviewType: resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType }),
-      reviewTypeLabel: (() => {
-        const k = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
-        return k ? (reviewTypeLabel(k) || k) : null;
-      })(),
+      /* 판정값 — 혼합은 행 단위로 정할 수 없어 null(검수·슬롯이 보는 값, 규율 불변). */
+      reviewType: rtKey,
+      /* 표기값 — 혼합이면 '혼합' + 조합(아래 reviewTypeMix). 둘 다 없으면 null = [미설정]. */
+      reviewTypeLabel: rtKey ? (reviewTypeLabel(rtKey) || rtKey)
+        : rtMixed ? (reviewTypeLabel('mixed') || '혼합')
+        : rtFree ? FREE_CHOICE_REVIEW_LABEL : null,
+      reviewTypeMixed: rtMixed,
+      reviewTypeMix: rtMixed ? rtMix.map(m => ({ type: m.type, label: reviewTypeLabel(m.type) || m.type, quantity: m.quantity })) : null,
       campaignId: c ? c.id : null,
       campaignCount: camps.length,
       workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다
@@ -2778,7 +2982,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ 명의를 모르는 줄(빈 슬롯·연락처 없음)은 **세지 않는다**(null) — 화면이 배지를 그리지 않는다.
      ★ 제거 오버레이로 화면에서 빠지는 줄은 세지 않는다(카운트는 `continue` 뒤에서 한다). */
   const visitSeen = new Map();
-  const out = [], hiddenList = [];
+  const out = [];
   let ambiguousCount = 0;
   /* ★★ 채워진 줄 수 — [진행 현황] 참여자 게이지의 분자(사용자 확정 2026-08-20).
      종전 게이지는 `out.length`(= 줄 수)를 세어, 작업표 생성 때 미리 깔아 둔 **빈 슬롯**까지
@@ -2786,7 +2990,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ 판정은 `utils/rowNumbering.isFilledRow` 단일 출처 — 번호 재부여·짝 빈 줄 정리가 쓰는
        SQL(`filledSql`)과 같은 기준이라 "게이지와 정리가 다른 줄을 빈 줄로 본다" 가 불가능하다.
      ★ **마스킹 전**에 센다(광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어 전 줄이 뒤집힌다).
-     ★ 화면에서 뺀 줄(`_hidden`)은 세지 않는다 — 카운트는 `continue` 뒤에서 한다(참여횟수 배지와 같은 자리). */
+     ★ 카운트는 마스킹 앞에서 한다(참여횟수 배지와 같은 자리). */
   let filledCount = 0;
   for (const r of roster) {
     const anchor = _deriveAnchor(r);
@@ -2799,12 +3003,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       } else if (editMap.has(k)) { ov = editMap.get(k); consumed.add(k); }
       // ★ 앵커 승격 대비 — 빈 자리였을 때 **물리행 앵커**로 저장해 둔 값(예: 미리 적어 둔 송장)이
       //   주문이 붙어 order 앵커로 승격한 뒤에도 화면에서 사라지지 않게 밑에 깔아 합성한다.
-      //   같은 필드는 **현재 앵커 값이 이긴다**(더 나중·더 구체적인 근거). `_hidden` 은 제외 —
-      //   빈 자리를 치웠던 제거 표시가 실제 참여자가 배정된 줄을 숨기면 안 된다.
+      //   같은 필드는 **현재 앵커 값이 이긴다**(더 나중·더 구체적인 근거).
       const rowKey = _akey('manual', _rowAnchorId(r));
       if (!ambiguous && anchor.value !== _rowAnchorId(r) && editMap.has(rowKey)) {
-        const base = { ...editMap.get(rowKey) }; delete base._hidden;
-        ov = { ...base, ...ov }; consumed.add(rowKey);
+        ov = { ...editMap.get(rowKey), ...ov }; consumed.add(rowKey);
       }
     }
     const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
@@ -2820,10 +3022,6 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       paid: !!pick('is_paid', r.paid),
       source: r.source, hasOrder: !!r.order_submission_id,
     };
-    if (ov._hidden === true) {                          // 제거 오버레이 → 본 목록서 제외
-      if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
-      continue;
-    }
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);
@@ -2840,6 +3038,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (showEdits) {
       syn.anchorType = anchor ? anchor.type : null;
       syn.editable = editable; syn.ambiguous = ambiguous;
+      // 옛 '_hidden' 레코드(폐기된 필드)가 남아 있어도 편집 배지로 세지 않는다.
       syn.editedFields = Object.keys(ov).filter(f => f !== '_hidden');
       // 실 데이터 전량 투영: 시트 행 전체(row_json) + 제출 구매양식 원본(order). 상세 펼침용.
       syn.rowJson = (r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
@@ -2886,6 +3085,26 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       out.sort((a, b) => { const x = k(a), y = k(b); return (x.n - y.n) || (x.seq - y.seq); });
     }
   }
+  /* ── 총건수 초과 표시 ────────────────────────────────────────────────────────
+     ★★ 정원(총건수)보다 많은 사람이 실제로 들어온 경우(외부모집 수동제출·지각 확정 등)
+        **줄을 강제로 정원에 맞추지 않고** 초과된 줄을 식별해 화면이 말하게 한다(사용자 확정 2026-08-24).
+        줄을 잘라 맞추면 이미 구매한 사람이 표에서 사라진다 — 사실을 감추는 쪽이 더 나쁘다.
+     ★★ cap 판정은 작업 조건 카드와 **같은 값**(`tabConditionSummary.recruitTotal`
+        = `linkedRecruitQuota.displayRecruitTotal` 단일 출처). 여기서 다시 세면 "카드는 500인데
+        표는 다른 기준"으로 갈린다. 게이지 분모도 이 값을 쓴다(`counts.cap`).
+     ★ **무시트 작업표만** — 시트 기반 탭의 행 수는 시트가 정하고 그 총건수는 공고 값과 정상적으로
+       다를 수 있어(과거 데이터) 빨갛게 칠하면 오탐이 된다(홈 「인원/제출」 ⚠ 와 같은 규율).
+     ★ **채워진 줄만** 센다(빈 슬롯은 사람이 아니다) · 화면과 **같은 정렬**(번호 순) 뒤에 센다.
+     ★ cap 을 모르면(공고 미연결·조회 실패) 아무 표시도 하지 않는다(0 위장 금지).
+     ★ 광고주에게도 보인다(사용자 확정) — 다만 `condition` 자체는 종전대로 내부 전용이다. */
+  const _cond = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
+  const _cap = (meta[0] && meta[0].sheetless && _cond && Number(_cond.recruitTotal) > 0)
+    ? Number(_cond.recruitTotal) : null;
+  let overCount = 0;
+  if (_cap) {
+    let seen = 0;
+    for (const r of out) { if (!r.filled) continue; seen++; if (seen > _cap) { r.over = true; overCount++; } }
+  }
   // orphan: 활성 오버레이 중 어떤 활성 행에도 안 붙은 것(카운트/타입만 — PII·원장ID 비노출)
   let orphanCount = 0; const orphanByType = {};
   for (const [k] of editMap) {
@@ -2901,14 +3120,18 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 주문 원장이 살아 있는 행의 결제금액 합계. 주문 행 삭제 뒤에는 원장 soft-delete와 함께 즉시 빠진다.
     paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
     edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
-    ambiguous: ambiguousCount, hidden: hiddenList.length,
+    ambiguous: ambiguousCount,
     /* 표에서 분리한 줄(129) — 표에는 없지만 데이터는 그대로다. 숫자를 지우면 "사라진 줄" 이 된다. */
     held: heldCount, heldUnavailable: heldUnavailable || undefined,
+    /* 총건수(정원) — 게이지 분모의 단일 출처. 모르면 싣지 않는다(화면이 종전 폴백으로 접는다). */
+    cap: _cap || undefined,
+    /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
+    over: _cap ? overCount : undefined,
   };
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
   if (showEdits) {
-    res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType };
+    res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
     /* ★ 그 탭의 상태 칸(리뷰제출·입금) 헤더명 — 화면 잠금·[📎 수동 리뷰제출] 판정의 **단일 출처**.
        화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
@@ -2920,7 +3143,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
     /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
        fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
-    res.condition = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
+    res.condition = _cond;   // ★ 위에서 이미 한 번 구했다(호출 2회 금지 — cap 과 값이 갈릴 수 없다)
+    /* 「일정」 — 표(정렬된 `out`)의 구매일자에서 파생. 못 읽으면 null 로 두고 화면이 「—」로 말한다. */
+    if (res.condition) res.condition.schedule = _condSchedule(out, headers);
     /* 결제금액 편차 경고칠 — 조건 카드가 만든 공고 금액을 그대로 재사용한다(쿼리 순증 0).
        조건 조회가 실패해 null 이면 칠도 없다(근거 없는 경고 금지 — fail-soft). */
     res.priceDevCount = _attachPriceDeviation(out, res.condition);
@@ -3170,10 +3395,19 @@ function _manualReviewFileIds(fileIds) {
   return ids;
 }
 
-async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin' } = {}) {
+/**
+ * 관리자 수동 리뷰제출.
+ *
+ * ★★ `preflight:true` = **쓰기 0 사전 확인**(2026-08-21 실사고): 종전에는 화면이 캡처를 먼저
+ *   업로드한 뒤 이 함수를 불렀는데, 여기서 거부되면 **드라이브에는 파일이 남고 제출만 실패**했다
+ *   (신고 건: 재시도할 때마다 같은 줄에 캡처가 쌓였다). 이제 화면이 **붙여넣기 전에** 이 경로로
+ *   물어보고, 통과했을 때만 업로드한다. 게이트는 실제 제출과 **같은 코드**를 지난다(사본 0) —
+ *   따로 만들면 "확인은 통과인데 제출은 거부"가 된다.
+ */
+async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin', preflight = false } = {}) {
   if (!sheetId || !tabName || !rowId) throw new Error('manualWorkdeskReviewSubmit: 필수 인자 누락');
-  const ids = _manualReviewFileIds(fileIds);
-  if (!ids) return { ok: false, error: 'invalid_review_files' };
+  const ids = preflight ? [] : _manualReviewFileIds(fileIds);
+  if (!preflight && !ids) return { ok: false, error: 'invalid_review_files' };
   const db = getPool();
   const client = await db.connect();
   try {
@@ -3211,6 +3445,12 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
     if (!ir.length) { await client.query('ROLLBACK'); return { ok: false, error: 'review_history_missing' }; }
     if (participant.is_submitted || ir[0].is_submitted) {
       await client.query('ROLLBACK'); return { ok: false, error: 'already_submitted' };
+    }
+
+    // 사전 확인은 여기까지 — **쓰기 없이** 되돌리고 그 줄의 제출 칸 이름을 돌려준다.
+    if (preflight) {
+      await client.query('ROLLBACK');
+      return { ok: true, preflight: true, rowIndex: participant.seq, submitColumn: submitCol };
     }
 
     // 파일 ID를 조작해 다른 행의 첨부를 제출하지 못하도록 업로드 원장을 대조한다.
@@ -3440,6 +3680,15 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
       [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName, maxSeq + 1,
         finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
 
+    // ★★ 표시 번호를 그 자리에서 다시 매긴다 (2026-08-23 신고: "1번 행을 지웠는데 2번이 시작번호").
+    //   위 주석대로 seq 는 그대로 두고 화면 `#` 만 순번으로 계산하는데, **row_json 의 `번호` 칸**은
+    //   아무도 손대지 않아 `2,3,4…` 로 남았다. 보충 슬롯의 번호가 비어 주기 스윕이 결국 잡기는
+    //   하지만, 그 사이 담당자는 어긋난 번호를 본다(그리고 대상이 많으면 사이클 상한에 밀린다).
+    // ★ SAVEPOINT 격리 + 절대 throw 없음 — 번호 때문에 **행 삭제·주문 취소가 롤백되면 안 된다**.
+    //   실패해도 5분 스윕이 백스톱이다(구매일자 달력 편집과 같은 규율).
+    const renumbered = await require('./rowNumbering.service')
+      .renumberTabInTx(client, { sheetId, tabName, by: `row-delete:${by}`.slice(0, 100) });
+
     // 삭제된 날 -1 / 마지막 진행일 +1 = 날짜별 배치만 이동한다. 총 계획량은 바뀌지 않는다.
     // 공고를 못 고른 경우(none/ambiguous)와 날짜를 못 읽은 경우엔 계획을 건드리지 않는다.
     let planMoved = false;
@@ -3484,6 +3733,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
       finalPlanDate: finalPlan ? finalPlan.date : null,
       replacementDate: finalDateLabel || null,
       replacementSeq: replacement.rows[0] && replacement.rows[0].seq,
+      renumbered: (renumbered && renumbered.changed) || 0,
     };
 }
 
@@ -4393,6 +4643,10 @@ async function tabStatsMap({ force = false } = {}) {
                  홈의 작업 인원은 검색 명단이 아니라 실제 작업표 원장으로 보여야 하므로, 무시트 탭만
                  campaign_participants 활성 행을 쓴다. 시트 탭은 기존 index_master 집계를 그대로 유지한다. */
               CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.total_count, 0) ELSE im.row_count END AS "rowCount",
+              /* ★★ 채워진 줄 = 작업보드 상단 참여자 게이지의 분자와 **같은 판정**(rowNumbering.filledSql).
+                 홈이 여기서 따로 세면 "게이지는 208명인데 홈은 다른 숫자"로 갈린다(단일 출처 규율).
+                 시트 기반 탭의 index_master.row_count 는 이미 **이름 있는 행만** 세므로 그대로 채움 수다. */
+              CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.filled_count, 0) ELSE im.row_count END AS "filledCount",
               CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.submitted_count, 0) ELSE im.submitted_count END AS "submittedCount",
               COALESCE(paid.paid_count, 0)::int AS "paidCount",
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
@@ -4400,7 +4654,8 @@ async function tabStatsMap({ force = false } = {}) {
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
          LEFT JOIN LATERAL (
            SELECT COUNT(*) FILTER (WHERE active AND deleted_at IS NULL)::int AS total_count,
-                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND is_submitted)::int AS submitted_count
+                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND is_submitted)::int AS submitted_count,
+                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND ${require('../utils/rowNumbering').filledSql('cp')})::int AS filled_count
              FROM campaign_participants cp
             WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
          ) cp ON TRUE
@@ -4420,6 +4675,8 @@ async function tabStatsMap({ force = false } = {}) {
       map[_FIN_KEY(r.sheetId, r.tabName)] = {
         manager: r.manager || '', campaignName: r.campaignName || '', displayName: r.displayName || '',
         total: Number.isFinite(+r.rowCount) ? +r.rowCount : null,
+        // 준비된 줄(total) 과 채워진 줄(filled) 은 다른 값이다 — 홈 게이지 분자는 filled 를 쓴다.
+        filled: Number.isFinite(+r.filledCount) ? +r.filledCount : null,
         submitted: Number.isFinite(+r.submittedCount) ? +r.submittedCount : null,
         paid: +r.paidCount || 0,
         // 홈 [저장폴더] 버튼 재료 — tab_configs 를 이미 읽는 이 쿼리에 얹어 쿼리 순증 0.
@@ -4487,6 +4744,17 @@ async function tabCampaignsMap({ force = false } = {}) {
     } catch (e) {
       logger.warn(`[trackB] tabCampaignsMap 상태 재료 실패(공고 목록만 표시): ${e.message}`);
     }
+    /* ── 총건수(정원) 재료 ─────────────────────────────────────────────────────
+       홈 목록의 「인원/제출」 분모를 **작업표 줄 수가 아니라 총건수**로 그리기 위한 값이다.
+       ★★ 판정 사본을 만들지 않는다 — `displayRecruitTotal`(공고>0 이면 공고, 아니면 발주)은
+         작업 조건 카드·상태엔진이 쓰는 그 함수다. 여기서 `recruit_total` 을 그대로 실으면
+         "공고 0(미설정) + 발주 500" 인 작업이 홈에서만 0 건으로 보인다.
+       ★ 연결 작업오더 조회는 **배치 1회**(N+1 금지, linkedRecruitQuota 공유 조각).
+       ★ fail-soft — 실패하면 발주 폴백만 빠지고 공고 값으로 떨어진다(주석 자체는 살린다). */
+    const { displayRecruitTotal, linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
+    let woMap = new Map();
+    try { woMap = await linkedWorkOrdersForCampaigns(db, rows.map(r => r.id), ['recruit_count']); }
+    catch (e) { logger.warn(`[trackB] tabCampaignsMap 발주 정원 조회 실패(공고 값만 사용): ${e.message}`); }
     for (const r of rows) {
       let state = null, stateReason = null;
       try {
@@ -4495,10 +4763,14 @@ async function tabCampaignsMap({ force = false } = {}) {
           now, schedMap ? scheduleFor(schedMap, r) : null);
         state = st.state; stateReason = st.stateReason || null;
       } catch (_) { /* 판정 실패 = 상태 없음(공고 자체는 계속 보인다) */ }
+      const _wo = woMap && typeof woMap.get === 'function' ? woMap.get(r.id) : null;
+      const _rt = displayRecruitTotal(r.recruit_total, _wo && _wo.recruit_count);
       const item = {
         id: r.id, title: r.title || '', createdAt: r.created_at || null,
         status: r.status || '', participationMode: !!r.participation_mode,
         state, stateReason,
+        // 총건수(적용 정원)와 그 출처 — 0/'none' 이면 화면이 분모를 지어내지 않고 줄 수로 접는다.
+        recruitTotal: _rt.total || null, recruitTotalSource: _rt.source,
       };
       const push = (k) => { (map[k] || (map[k] = [])).push(item); };
       push(_FIN_KEY(r.linked_sheet_id, r.linked_tab_name));
@@ -4973,6 +5245,7 @@ module.exports = {
   setOwnership,
   removeOwnership,
   transferOwnership,
+  expandSheetOwnerships,
   listOwnership,
   listAdvertisersWithOwnership,
   ownedTabsForAdvertiser,

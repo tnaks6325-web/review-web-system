@@ -121,6 +121,51 @@ function displaySortKey(row, numberKey) {
   return { has, n: has ? n : Number.MAX_SAFE_INTEGER, seq: Number(row && row.seq) || 0 };
 }
 
+/* ══ 번호 집합 어긋남 판정 ═══════════════════════════════════════════════════
+   ★★ 왜 필요한가(2026-08-23 「웰스앤헬스 …500건」 실측): 담당자가 **1번 줄을 지우면**
+     표에 `2,3,4…` 가 남는다. 번호가 빈 것도 중복도 아니라 주기 스윕의 종전 세 신호
+     (빈칸·중복·짝 빈 줄)에 **하나도 걸리지 않아**, 그 작업은 다음 주문이 들어올 때까지
+     1번부터로 돌아오지 않았다(사람이 [🔢 번호 정리]를 눌러야 했다).
+   ★★ **판정은 여기 한 곳**이다 — 스캔 SQL 은 원재료(개수·최솟값·최댓값)만 세고,
+     "그래서 정리 대상인가" 는 이 순수함수가 정한다. SQL 에 조건을 적어 두면
+     화면·스윕·테스트가 서로 다른 기준을 보게 된다(`filledSql` 과 같은 규율).
+   ★ `computeRenumberPlan` 이 항상 `1..N` 을 쓰므로(위 참조) "번호 집합 = 1..N" 이
+     곧 "정리가 끝난 상태" 다. 그래서 이 판정과 실제 재번호가 갈릴 수 없다. */
+
+/** 한 번에 다시 매기는 줄 수 상한 — 재번호 쿼리의 LIMIT 과 같은 값이어야 한다. */
+const MAX_RENUMBER_ROWS = 5000;
+
+function _int(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+/**
+ * "번호가 다 차 있고 중복도 없는데 `1..N` 이 아니다" — 줄을 지운 뒤 남는 상태.
+ *
+ * @param {object} a 스캔이 센 원재료
+ * @param {number} a.total          그 탭의 활성 줄 수
+ * @param {number} a.blankNumber    번호가 빈 줄 수
+ * @param {number} a.dupNumber      중복 번호 줄 수
+ * @param {number} a.numericNumber  번호가 숫자인 줄 수
+ * @param {number|null} a.minNumber · a.maxNumber  숫자 번호의 최솟·최댓값
+ * @returns {boolean} true = 재번호가 필요하다
+ */
+function hasNumberGap(a) {
+  if (!a || typeof a !== 'object') return false;
+  const total = _int(a.total);
+  if (!total) return false;
+  /* ★★ 재번호는 앞 `MAX_RENUMBER_ROWS` 줄만 다시 매기므로, 그보다 큰 표는 여기서 무엇을 해도
+     번호 집합이 `1..N` 에 도달하지 못한다 → 대상으로 삼으면 **매 주기 같은 표를 다시 쓰는
+     무한 루프**가 된다. 그런 표는 사람이 [🔢 번호 정리]로 판단한다. */
+  if (total > MAX_RENUMBER_ROWS) return false;
+  /* ★ 빈칸·중복은 이미 다른 신호가 잡는다 — 같은 사실을 두 번 세지 않는다(가산적 신호). */
+  if (_int(a.blankNumber) > 0 || _int(a.dupNumber) > 0) return false;
+  /* 숫자가 아닌 번호가 섞여 있으면 재번호가 반드시 바꾼다(`String(i+1)` 로 다시 쓴다). */
+  if (_int(a.numericNumber) !== total) return true;
+  const min = a.minNumber == null ? null : Number(a.minNumber);
+  const max = a.maxNumber == null ? null : Number(a.maxNumber);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return true;
+  return min !== 1 || max !== total;
+}
+
 /* ══ "채워진 줄" 판정 — 표에 사람이 들어온 줄인가 ═══════════════════════════════
    ★★ **단일 출처**다. 소비처가 둘이라 갈리면 곧바로 사고가 된다:
      ① SQL(`filledSql`) — 번호 재부여·짝 빈 줄 정리·전체 스캔(`rowNumbering.service`)
@@ -168,7 +213,8 @@ function isFilledRow(row) {
 }
 
 module.exports = {
-  NUMBER_KEYS, NUMBER_KEY_RE, FILLED_FIELDS,
+  NUMBER_KEYS, NUMBER_KEY_RE, FILLED_FIELDS, MAX_RENUMBER_ROWS,
+  hasNumberGap,
   numberColumnKey, filledSql, isFilledRow,
   orderRowsForNumbering, computeRenumberPlan, displaySortKey,
 };

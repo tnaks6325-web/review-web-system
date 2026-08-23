@@ -1037,7 +1037,7 @@ var WT_EP = { stats: '/api/trackb/worktable/header-stats', template: '/api/track
    ★ 자동 적용하지 않는다: 저장된 설정이 없을 때 조용히 이 값이 쓰이면 "정하지 않았는데 정해진"
      상태가 된다(학습은 제안까지·확정은 사람이 — 이 화면의 원칙). */
 var WT_PRESET_CORE = ['번호', '구매일자', '주문자', '수취인', 'ID', '연락처', '주소',
-  '은행', '계좌번호', '예금주', '결제금액', '주문번호', '리뷰제출', '입금', '비고'];
+  '은행', '계좌번호', '예금주', '결제금액', '주문번호', '리뷰', '입금', '비고'];   // ★ 리뷰제출 칸의 표준 이름 = '리뷰'(사용자 확정 2026-08-21)
 var _wtTpl = null;      // { core:[names], channels:{key:[names]}, columns:[...], ... }
 var _wtStats = null;    // 헤더 학습 리포트(펼칠 때 1회 로드)
 
@@ -2128,6 +2128,83 @@ async function reviewTypeCleanupRun(dryRun) {
 function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
 
 /* ══════════════════════════════════════════════════════════════
+   👥 담당자 표기 정리 (★ 065 후속) — 담당자 칸에 남은 **실명**을 닉네임으로 접는다.
+
+   · 박세희 → 만두 · 박은비 → 망고 (판정은 서버 `utils/workManager` 단일 출처)
+
+   ★★ 왜 남아 있나: 065 **이전** 접수가 담당AE 실명을 그대로 넣었고, 접수 업서트는
+      blank-only 라 재접수로도 안 고쳐진다 → 홈 작업목록 담당자 칩이 만두/망고/박세희/박은비
+      넷으로 갈리고, 실명 행은 색 배지·🥟🥭·카카오 ID 매핑에서 **조용히** 빠진다.
+   ★★ 매핑되는 값만 바꾼다 — 모르는 이름(자유입력 담당자)은 손대지 않는다.
+   ★ 미리보기를 사람이 보고 결정한다(기존 행을 건드리는 작업 — 리뷰타입 정리와 같은 규율).
+   ★ 앞으로 저장되는 값은 서버가 저장 직전에 접으므로(tabconfig 저장 경로) 재발하지 않는다.
+   ══════════════════════════════════════════════════════════════ */
+/* ★ 경로는 재기준(ADMIN_SETTINGS_API)하지 않는다 — RTC_EP 와 같은 판단(양쪽 호스트에서 그대로 닿는다). */
+var MGC_EP = '/api/trackb/settings/manager-cleanup';
+
+function _managerCleanupHtml() {
+  return `
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">👥 담당자 표기 정리</span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
+          담당자는 <b>만두 · 망고</b> 두 표기로만 운영합니다(<b>만두 = 박세희 · 망고 = 박은비</b>).
+          예전에 접수된 작업은 담당자 칸에 <b>실명</b>이 그대로 들어가 있어,
+          홈 작업목록의 담당자 칩이 <b>만두 / 망고 / 박세희 / 박은비</b> 넷으로 갈립니다.
+          여기서 실명을 닉네임으로 바꿉니다.<br>
+          <b>지금 그대로 두어도 안전합니다.</b> 칩만 갈려 보일 뿐 작업 내용은 바뀌지 않습니다 —
+          다만 실명으로 남은 작업은 담당자 색 배지·🥟🥭 표시·카카오 아이디 안내에서 빠집니다.<br>
+          <b>모르는 이름은 건드리지 않습니다.</b> 앞으로 저장하는 값은 자동으로 닉네임이 됩니다.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="as-btn" id="mgcPreviewBtn" onclick="managerCleanupRun(true)">🔍 미리보기</button>
+          <button class="as-btn" id="mgcApplyBtn" style="display:none" onclick="managerCleanupRun(false)">적용하기</button>
+        </div>
+        <div id="mgcResult" style="font-size:.8rem;color:var(--t2);line-height:1.7"></div>`;
+}
+
+var _MGC_TABLE_NM = { tab_configs: '작업 탭', recruit_campaigns: '모집공고' };
+
+/** 미리보기·적용 공용. ★ dryRun=false 는 미리보기를 본 뒤에만 눌릴 수 있다(버튼이 그전엔 숨김). */
+async function managerCleanupRun(dryRun) {
+  var out = document.getElementById('mgcResult');
+  var applyBtn = document.getElementById('mgcApplyBtn');
+  if (!out) return;
+  if (!dryRun && !confirm('담당자 칸의 실명을 닉네임으로 바꿉니다.\n\n· 박세희 → 만두\n· 박은비 → 망고\n\n작업 내용·정산은 바뀌지 않고 담당자 표기만 통일됩니다.\n진행할까요?')) return;
+  out.innerHTML = '<span style="color:var(--t3)">확인 중…</span>';
+  try {
+    var j = await _postAt(MGC_EP, { dryRun: !!dryRun });
+    if (!j || j.ok === false) throw new Error((j && j.error) || '실패');
+    var rows = (j.preview || []).map(function (r) {
+      var where = _MGC_TABLE_NM[r.table] || r.table;
+      return '<li><b>' + escHtml(r.from) + '</b> → <b>' + escHtml(r.to) + '</b> · ' + where + ' ' + r.cnt + '건</li>';
+    }).join('');
+    if (!j.total) {
+      out.innerHTML = '<span style="color:var(--t2)">정리할 실명 표기가 없습니다. 이미 전부 닉네임입니다.</span>';
+      if (applyBtn) applyBtn.style.display = 'none';
+      _setNavBadge('managercleanup', '정상');
+      return;
+    }
+    if (j.dryRun) {
+      out.innerHTML = '<div style="margin-bottom:6px">대상 <b>' + j.total + '건</b></div><ul style="margin:0;padding-left:18px">' + rows + '</ul>'
+        + '<div style="margin-top:10px;color:var(--t3)">숫자를 확인한 뒤 [적용하기]를 누르세요.</div>';
+      if (applyBtn) applyBtn.style.display = '';
+      _setNavBadge('managercleanup', j.total + '건', 'warn');
+    } else {
+      out.innerHTML = '<div style="color:#0F7B4F;font-weight:700">정리 완료 — ' + j.updated + '건</div>'
+        + '<ul style="margin:6px 0 0;padding-left:18px">' + rows + '</ul>';
+      if (applyBtn) applyBtn.style.display = 'none';
+      _setNavBadge('managercleanup', '완료');
+    }
+  } catch (e) {
+    out.innerHTML = '<span style="color:#B42318">실패: ' + escHtml(e.message) + '</span>';
+  }
+}
+
+/** ★ 펼칠 때 자동으로 돌리지 않는다 — 설정 화면을 열 때마다 전 탭을 훑을 이유가 없다. */
+function loadManagerCleanup() { _setNavBadge('managercleanup', '점검'); }
+
+/* ══════════════════════════════════════════════════════════════
    📎 구매 캡처 연결 복구 — Drive 엔 있는데 링크만 빈 주문을 이어 붙인다
    ★ 경로는 재기준하지 않는다(RTC_EP 와 같은 판단 — 양쪽 호스트에서 그대로 닿는다).
    ══════════════════════════════════════════════════════════════ */
@@ -2294,8 +2371,8 @@ async function saveGateCriteria() {
   }
 }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, capturelink: _captureLinkHtml, gatecriteria: _gateCriteriaHtml, homebanner: _homeBannerHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, capturelink: loadCaptureLinkBackfill, gatecriteria: loadGateCriteria, homebanner: loadReviewerHomeBanner, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, managercleanup: _managerCleanupHtml, capturelink: _captureLinkHtml, gatecriteria: _gateCriteriaHtml, homebanner: _homeBannerHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, managercleanup: loadManagerCleanup, capturelink: loadCaptureLinkBackfill, gatecriteria: loadGateCriteria, homebanner: loadReviewerHomeBanner, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
@@ -2306,6 +2383,7 @@ async function saveGateCriteria() {
     inspectmsg: { ic: '💬', nm: '리뷰어 안내문구' },
     worktable: { ic: '📋', nm: '작업표 표준 열' },
     reviewtype: { ic: '✅', nm: '리뷰타입 정리' },
+    managercleanup: { ic: '👥', nm: '담당자 표기 정리' },
     capturelink: { ic: '📎', nm: '구매 캡처 연결 복구' },
     gatecriteria: { ic: '🚫', nm: '블랙리스트 관리기준' },
     notice:    { ic: '📣', nm: '리뷰어 공지' },
@@ -2710,6 +2788,8 @@ async function saveGateCriteria() {
   window.runRouteSweep = runRouteSweep;           // 오제출 소급 정리(실행)
   window.loadReviewTypeCleanup = loadReviewTypeCleanup;
   window.reviewTypeCleanupRun = reviewTypeCleanupRun;
+  window.loadManagerCleanup = loadManagerCleanup;
+  window.managerCleanupRun = managerCleanupRun;
   window.captureLinkRun = captureLinkRun;   // 📎 구매 캡처 연결 복구(onclick 에서 부른다)
   window.saveGateCriteria = saveGateCriteria;       /* 블랙리스트 관리기준(091) 저장 버튼 onclick */
   window.loadGateCriteria = loadGateCriteria;

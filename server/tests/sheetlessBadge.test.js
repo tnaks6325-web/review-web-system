@@ -4,7 +4,10 @@
  *
  * 고정하는 것:
  *  A. 서버가 재료를 싣는다 — 화면 3곳(홈 목록·업체관리·반영 점검)이 쓸 `sheetless` 플래그
- *  B. 광고주에게는 안 나간다 — 화이트리스트 재구성이 유일한 방어
+ *  B. 광고주 렌즈는 화이트리스트 재구성 — 표시용 `sheetless` 한 칸만 허용
+ *     (2026-08-23 사용자 확정: 무시트 작업에는 시트 제목 라벨을 그리지 않는다. 업체 화면도
+ *      같은 규칙이라 그 판정 재료가 필요하다 — 무시트 여부는 표시용 불리언이고 내부 정보가
+ *      아니다. **다른 내부 필드는 여전히 폐기**하고 스프레드 재구성도 계속 금지한다.)
  *  C. 무시트 = 죽은 링크를 만들지 않는다 — 반영 점검 tabUrl null + 사유
  *  D. 배지 렌더러는 한 벌 — 정의 1 · 호출 3, "모르면 안 그린다"
  *  E. 공고 카드 시트 버튼 — 가상 시트ID 접두 사본 일치 + 무시트면 구글 URL 미생성
@@ -65,14 +68,15 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
   }
 
   /* ══════════════ B. 광고주에게는 안 나간다 ══════════════ */
-  console.log('\n[B] 광고주 응답에는 sheetless 가 실리지 않는다 (화이트리스트 재구성)');
+  console.log('\n[B] 광고주 렌즈 = 화이트리스트 재구성 (표시용 sheetless 한 칸만)');
   {
     const src = read('src/services/trackB.service.js');
     const i = src.indexOf('async function advertiserWorkSummary');
     assert(i > 0, 'advertiserWorkSummary 를 찾지 못함');
     const body = src.slice(i, src.indexOf('\n}', src.indexOf('items: tabs.map')) + 2);
-    ok('★ 광고주 렌즈(items.map)는 sheetless 를 재구성 목록에 넣지 않는다',
-      !/sheetless/.test(body));
+    ok('★ 표시용 sheetless 한 칸(시트 제목 라벨 숨김 재료) — 이것 말고는 없다',
+      /sheetless: t\.sheetless === true,/.test(body)
+      && noLineComments(body).split('sheetless').length - 1 === 2);   // 키 + 값 참조 1쌍뿐
     // 렌즈가 화이트리스트가 아니라 스프레드(...t)로 바뀌면 이 검사는 무의미해진다 → 그 형태를 금지
     ok('★ 광고주 항목을 스프레드로 만들지 않는다(화이트리스트 유지)',
       !/items:\s*tabs\.map\([^)]*=>\s*\(\{\s*\.\.\./.test(body));
@@ -137,9 +141,12 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
     // vm 실행 — 세 상태(true / false / 필드 없음)
     const m = wd.match(/function _nsBadge\(t\)\{[\s\S]*?\n\}/);
     assert(m, '_nsBadge 정의를 찾지 못함');
+    // 판정 단일 출처 `_isNoSheet` 도 **구현을 그대로** 넣는다(스텁을 두면 판정 회귀를 여기서 못 본다)
+    const mi = wd.match(/function _isNoSheet\(t\)\{[^\n]*\}/);
+    assert(mi, '_isNoSheet 정의를 찾지 못함');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(m[0] + '\n;this.__f=_nsBadge;', sandbox);
+    vm.runInContext(mi[0] + '\n' + m[0] + '\n;this.__f=_nsBadge;', sandbox);
     const f = sandbox.__f;
     ok('sheetless=true → 무시트 배지', /무시트/.test(f({ sheetless: true })));
     ok('sheetless=false → 아무것도 안 그린다', f({ sheetless: false }) === '');

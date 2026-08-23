@@ -1,5 +1,5 @@
 /**
- * csBridge.service.js — 리뷰이미지 교체요청 ↔ C/S 문의창구 연결의 **단일 출처**.
+ * csBridge.service.js — 리뷰캡처 교체요청 ↔ C/S 문의창구 연결의 **단일 출처**.
  *
  * 왜 필요한가
  *  · 지금까지 교체요청의 승인·반려 결과는 리뷰어에게 **전혀 통지되지 않았다**
@@ -49,7 +49,7 @@ async function postReviewEditRequest(r, opts) {
     const campaignKey = campaignKeyOf(r.sheet_id, r.tab_name);
     const label = _clip(r.campaign_label || r.tab_name || '문의', 200);
     const name = _clip(r.reviewer_name || '리뷰어', 100);
-    const preview = '🖼 리뷰이미지 교체요청';
+    const preview = '🖼 리뷰캡처 교체요청';
 
     // 리뷰어가 보낸 것과 동일한 upsert — admin_unread_count 를 올려 관리자 뱃지에 잡히게 한다
     //   (요청 자체가 "확인이 필요한 도착물"이라 미확인으로 세는 게 맞다).
@@ -85,7 +85,7 @@ async function postReviewEditRequest(r, opts) {
       `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
        VALUES ($1,'reviewer',$2,$3,'review_edit',$4::jsonb)
        ON CONFLICT DO NOTHING`,
-      [threadId, name, '리뷰이미지 교체를 요청했습니다.', JSON.stringify(meta)]
+      [threadId, name, '리뷰캡처 교체를 요청했습니다.', JSON.stringify(meta)]
     );
 
     // ★ 승인/반려 도중 뒤늦게 만드는 경우(silent)에는 알림을 내지 않는다 —
@@ -150,8 +150,8 @@ async function postReviewEditDecision(r, decision, note, by, _depth) {
     // ② 자동 통지 — 관리자 발신 텍스트 메시지(리뷰어 채팅에 알림으로 뜬다)
     //   sender_name 은 로그인명으로 저장하고(책임추적), 읽는 시점에 adminNickname 이 역할별로 치환한다.
     const text = decision === 'approved'
-      ? '리뷰이미지 수정요청이 승인되었습니다.'
-      : `리뷰이미지 수정요청이 반려되었습니다.\n사유: ${_clip(note, 300)}`;
+      ? '리뷰캡처 수정요청이 승인되었습니다.'
+      : `리뷰캡처 수정요청이 반려되었습니다.\n사유: ${_clip(note, 300)}`;
     const senderName = _clip(by || '관리자', 100);
     const { rows: mRows } = await pool.query(
       `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content)
@@ -217,16 +217,27 @@ async function markReviewEditCancelled(r) {
 /* ★ `onError` 는 **가산 옵션**이다 — 반환 계약(성공 객체 | null)은 그대로 두고, 실패 사유만
      호출자에게 흘려보낸다. 이게 없으면 화면이 "보내지 못했습니다" 한 줄로 뭉개 원인을 감춘다
      (조용한 실패 금지). 기존 호출부는 넘기지 않으므로 동작 불변. */
-async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card, onError } = {}) {
+async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card, imageUrls, onError } = {}) {
   try {
-    if (!phone8 || !String(message || '').trim()) return null;
+    /* ★ 첨부는 **우리 프록시 주소만**(`utils/csImageUrls` 단일 출처) — 리뷰어 화면에 그대로 <img> 로 나간다. */
+    const imgs = require('../utils/csImageUrls').sanitizeCsImageUrls(imageUrls);
+    if (!phone8) return null;
+    if (!String(message || '').trim() && !imgs.length) return null;   // 사진만 보내는 것도 허용(답장과 같은 규칙)
     const campaignKey = campaignKeyOf(sheetId, tabName);
     const name = _clip(reviewerName || '리뷰어', 100);
-    const text = _clip(String(message).trim(), 1000);
-    const preview = _clip(text.replace(/\n/g, ' '), 120);
+    const text = _clip(String(message == null ? '' : message).trim(), 1000);
+    const preview = _clip((text || `사진 ${imgs.length}장`).replace(/\n/g, ' '), 120);
 
-    let threadId;
-    const { rows: tRows } = await pool.query(
+    /* ★★ 방 생성 · 메시지 · 방 갱신은 **한 트랜잭션**이다 (실사고 2026-08-21).
+       방을 먼저 만들고(그때 `last_message_preview` 까지 채운다) 메시지를 따로 넣던 구조라,
+       메시지 INSERT 가 실패하면 **미리보기만 있고 메시지가 0건인 빈 방**이 남았다 —
+       관리자 목록에는 보낸 것처럼 보이는데 열면 "아직 메시지가 없습니다" 인 상태(실측 신고).
+       실패하면 통째로 되돌려 **그런 방이 아예 안 생기게** 한다. */
+    const client = await pool.connect();
+    let threadId, mRows;
+    try {
+    await client.query('BEGIN');
+    const { rows: tRows } = await client.query(
       `SELECT id FROM cs_threads WHERE reviewer_phone8=$1 AND campaign_key=$2`,
       [phone8, campaignKey]
     );
@@ -234,7 +245,7 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
     else {
       // ★ 기존 스레드의 campaign_label·reviewer_name 은 덮어쓰지 않는다(위 규율 그대로) —
       //   신규 생성 시 라벨은 탭 표시명(시트 제목 미노출 원칙).
-      const { rows } = await pool.query(`
+      const { rows } = await client.query(`
         INSERT INTO cs_threads
           (reviewer_phone8, reviewer_name, campaign_key, campaign_label, campaign_source,
            status, last_message_at, last_message_preview, admin_unread_count)
@@ -263,24 +274,36 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       matchAt: card.matchAt || null,
       to: _clip(card.to, 40),
     } : null;
-    const { rows: mRows } = await pool.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
-       VALUES ($1,'admin',$2,$3,$4,$5::jsonb) RETURNING id, created_at AS "createdAt"`,
-      [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null]
-    );
-    await pool.query(
+    /* ★★ `meta` 는 **NOT NULL DEFAULT '{}'**(080) — 기본값은 컬럼을 **생략했을 때만** 적용된다.
+       카드 없는 안내(검수 반려 본문·입금 실패 안내·작업보드 선톡)는 여기서 `null` 을 넘겨
+       **23502 로 전건 실패**했고, 이 함수는 절대 throw 하지 않아 warn 로그로만 남아 있었다
+       (실측 2026-08-21 — 로컬 PG16 재현). 컬럼 목록은 그대로 두고 SQL 에서 접는다. */
+    ({ rows: mRows } = await client.query(
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta, image_urls)
+       VALUES ($1,'admin',$2,$3,$4,COALESCE($5::jsonb,'{}'::jsonb),COALESCE($6::jsonb,'[]'::jsonb))
+       RETURNING id, created_at AS "createdAt"`,
+      [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null,
+       JSON.stringify(imgs)]
+    ));
+    await client.query(
       `UPDATE cs_threads
           SET reviewer_unread_count = reviewer_unread_count + 1,
               status = 'open', last_message_at = NOW(), last_message_preview = $2, updated_at = NOW()
         WHERE id = $1`,
       [threadId, preview]
     );
+    await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;                       // 바깥 catch 가 로그·onError·null 반환을 맡는다
+    } finally { client.release(); }
+    /* ── 여기부터는 커밋된 뒤의 후처리(실시간 푸시) — 실패해도 저장은 남는다 ── */
     try {
       const nickMap = await adminNickname.getNicknameMap().catch(() => null);
       emitCsReplyToReviewer(phone8, {
         id: mRows[0].id, threadId, senderRole: 'admin',
         senderName: adminNickname.toReviewerName(senderName, nickMap),
-        content: text, imageUrls: [], createdAt: mRows[0].createdAt,
+        content: text, imageUrls: imgs, createdAt: mRows[0].createdAt,
         campaignLabel: tabName || '문의',
         msgType: meta ? 'inspect_result' : 'text', meta: meta || null,   // 실시간 푸시에도 카드가 그려지게
       });

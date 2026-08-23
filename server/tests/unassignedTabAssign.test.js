@@ -38,7 +38,7 @@ function renderUnm(STATE) {
     esc: (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     sheetTitle: (sid) => (STATE.sheetMap[sid] || {}).title || sid };
   sb.window = sb; vm.createContext(sb);
-  vm.runInContext(grab('_ovmUnassignedTabs') + '\n' + grab('_ovmUnmatchedHtml') + '\nvar _ovmUnmList=[],_ovmUnmSheets=[];', sb);
+  vm.runInContext(grab('_ovmLiveTabs') + '\n' + grab('_ovmUnassignedTabs') + '\n' + grab('_ovmTabGid') + '\n' + grab('_isNoSheet') + '\n' + grab('_ovmUnmatchedHtml') + '\nvar _ovmUnmList=[];', sb);
   return { html: sb._ovmUnmatchedHtml(), sb };
 }
 const SHEETMAP = { S1: { title: '(신규)유일기획 업무시트', tabs: [{ tabGid: '10', tabName: '유일기획_로켓_2차' }] },
@@ -59,11 +59,13 @@ t('★ 시트는 owned 인데 탭만 미지정인 건도 나온다(시트 단위
 t('신고된 무시트 작업이 나온다', /8\/19\)유일기획_쿠팡_암막커튼 20건/.test(out.html));
 t('★ onclick 은 인덱스만(탭명·시트명 문자열 보간 금지)',
   /onclick="ownAssign\(\d+\)"/.test(out.html) && !/onclick="ownAssign\('/.test(out.html));
-t('★ gid 없는 탭은 개별 지정 불가를 사유와 함께 비활성', /disabled title="탭 gid 가 없어/.test(out.html));
-t('소유가 하나도 없는 시트는 [시트 전체 지정]·[거래처 등록]을 함께 제공',
-  /ownAssignSheet\(\d+\)/.test(out.html) && /_ovmAddForSheetIdx\(\d+\)/.test(out.html));
-t('★ 이미 소유된 시트에는 시트 전체 지정을 내지 않는다(남의 소유를 덮지 않는다)',
-  (out.html.match(/ownAssignSheet\(/g) || []).length === 1);
+t('★ gid 없는 작업은 지정 불가를 사유와 함께 비활성', /disabled title="이 작업은 식별자\(gid\)가 없어/.test(out.html));
+// ★★ 사용자 확정(2026-08-23): 업체 지정 단위는 **작업(작업보드)** 하나 — 시트 전체 지정 창구는 폐지.
+//    되살리면 "시트에 새 작업이 생기면 자동으로 그 업체 소유"가 되어 미지정 목록이 다시 시트 단위로 접힌다.
+t('★★ [시트 전체 지정] 창구가 없다(폐지)', !/ownAssignSheet/.test(out.html) && !/시트 전체 지정/.test(out.html));
+t('★ 시트 단위 [거래처 등록] 버튼도 없다(등록은 지정 팝업의 ＋새 거래처)',
+  !/_ovmAddForSheetIdx/.test(out.html));
+t('작업마다 [업체 지정]이 하나씩', (out.html.match(/ownAssign\(\d+\)/g) || []).length === 2);
 
 out = renderUnm(Object.assign({}, BASE, { mapTabs: BASE.mapTabs.map(x => Object.assign({}, x, { advertiserId: 'adv_y' })) }));
 t('전부 지정되면 "모든 작업이 지정됐습니다"', /모든 작업이 업체에 지정됐습니다/.test(out.html));
@@ -80,10 +82,13 @@ t('서버 라우트 그대로(POST /ownership internal 게이트)',
   /router\.post\('\/ownership', authMiddleware, internalMiddleware/.test(ROUTES));
 t('사이드바·개요가 "미지정 작업" 단위로 말한다',
   /업체 미지정 작업<span class="n">\$\{unTabs\}/.test(HTML) && /미지정 작업 보기 · 업체 지정/.test(HTML));
+// ★★ 사용자 확정(2026-08-23): 시트 기준 폴백 표기 자체를 없앴다 — 재료를 못 받으면 사유를 말한다.
+t('★★ 사이드바에 시트 기준 표기가 없다', !/업체 미지정 시트/.test(HTML) && !/모든 시트가 지정됨/.test(HTML));
 t('드로어 제목도 작업 단위', /unm:'업체 미지정 작업'/.test(HTML));
 const foot = HTML.match(/function _ovmRenderFoot\(\)\{[\s\S]*?\n\}/)[0];
-t('★ 재료(mapTabs)를 못 받으면 종전 시트 기준 표기로 접는다(0 위장 금지)',
-  /tabsKnown/.test(foot) && /업체 미지정 시트/.test(foot));
+// ★★ 사용자 확정(2026-08-23): 시트 기준 폴백은 폐지 — 못 받으면 "불러오지 못함 ?" 으로 사유를 말한다.
+t('★ 재료(mapTabs)를 못 받으면 0 으로 위장하지 않고 사유를 말한다',
+  /tabsKnown/.test(foot) && /불러오지 못함/.test(foot) && !/시트/.test(foot));
 
 async function run(){
   /* ═══ 3. ownTransferGo — assign 실행 ═══ */
@@ -131,9 +136,12 @@ async function run(){
   go = await runGo({ S: { target: '' } });
   t('대상 미선택이면 전송 0 + 안내', go.posts.length === 0 && /지정할 거래처를 선택/.test(go.toasts.join('|')));
   go = await runGo({ S: { own: { sheetId: 'S1', tabGid: null }, mode: 'tab', picks: {} } });
-  t('탭 미선택이면 전송 0 + 안내', go.posts.length === 0 && /지정할 탭을 선택/.test(go.toasts.join('|')));
-  go = await runGo({ S: { own: { sheetId: 'S1', tabGid: null }, mode: 'all' } });
-  t('시트 전체 = tabGid null 1건', go.posts.length === 1 && go.posts[0].body.tabGid === null);
+  t('작업 미선택이면 전송 0 + 안내', go.posts.length === 0 && /지정할 작업을 선택/.test(go.toasts.join('|')));
+  // ★★ 사용자 확정(2026-08-23): tabGid:null(시트 전체) 로는 더 이상 지정·이관하지 않는다 —
+  //    되살리면 그 시트의 새 작업까지 자동으로 그 업체 소유가 되어 작업 단위 지정이 무의미해진다.
+  go = await runGo({ S: { own: { sheetId: 'S1', tabGid: null }, mode: 'all', picks: {} } });
+  t('★★ 시트 전체(tabGid null) 전송 0 — 작업을 골라야 한다',
+    go.posts.length === 0 && /선택/.test(go.toasts.join('|')));
   let n = 0;
   go = await runGo({ S: { own: { sheetId: 'S1', tabGid: null }, mode: 'tab', picks: { 0: true, 1: true } },
     results: () => (++n === 1 ? { ok: true } : { ok: false, error: '담당(inad_pm)이 아닌 업체' }) });

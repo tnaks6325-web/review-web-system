@@ -70,21 +70,24 @@ function _genCampaignId() {
 /** 공고에 연결된 작업오더의 유입방식(inflow_type)을 라이브 역조회.
  *  우선순위: work_orders.linked_campaign_id = campId(발행 시 기록) → source_work_order_id 보조.
  *  Track A 무접촉(읽기만) · 실패/미연결은 '' 폴백(fail-soft — 홀드/제출 경로에 영향 없음). */
+/* ★★ 짝짓기 규칙 사본 금지 — 정원 폴백·혼합 조합과 **같은 작업오더**를 본다
+     (`linkedRecruitQuota` 공유 조각). ⚠ 이 통합으로 **소프트삭제된 오더는 근거에서 빠진다**
+     (종전에는 `deleted_at` 필터가 없어 지워진 오더의 값도 썼다) — 레포의 반복 규율과 같은 방향이다. */
 async function _lookupInflowType(campId, sourceWoId) {
   try {
-    const { rows } = await pool.query(
-      `SELECT inflow_type
-         FROM work_orders
-        WHERE (linked_campaign_id = $1 AND $1 <> '')
-           OR (id = $2 AND $2 <> '')
-        ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC
-        LIMIT 1`,
-      [campId || '', sourceWoId || '']
-    );
-    return (rows[0] && rows[0].inflow_type) || '';
+    const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
+    const wo = await linkedWorkOrderForCampaign(
+      { id: campId || '', source_work_order_id: sourceWoId || '' }, ['inflow_type']);
+    return (wo && wo.inflow_type) || '';
   } catch (_) {
     return '';   // 컬럼/테이블 이슈 등은 조용히 폴백(라이브 핫패스 보호)
   }
+}
+
+/** 저장된 유입방식(둘 중 하나일 때만 값) — 없으면 ''(= 작업오더 폴백 대상). */
+function _savedInflowType(workDetail) {
+  const v = String((workDetail && workDetail.inflowType) || '');
+  return (v === 'guide' || v === 'link') ? v : '';
 }
 
 /**
@@ -281,7 +284,10 @@ async function _saveCampaignOptions(campaignId, options) {
 async function _ensureLinkedWorktableOptionColumn(campaignId, by = 'campaign') {
   try {
     const { rows } = await pool.query(
-      `SELECT c.linked_tab_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
+      /* ★★ 컬럼명 주의: `recruit_campaigns` 는 `linked_sheet_id` 다 — `linked_tab_sheet_id` 는
+         **`work_orders`** 의 컬럼이다(033). 그걸 여기 쓰면 42703 이 나는데 아래 catch 가
+         "해당 없음" 으로 삼켜, 이 재발 방지 훅이 **배포 이래 한 번도 안 돌았다**(2026-08-23 실측). */
+      `SELECT c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
               (SELECT COUNT(*) FROM campaign_options o
                 WHERE o.campaign_id = c.id AND COALESCE(o.status,'active') <> 'closed') AS "liveOpts"
          FROM recruit_campaigns c WHERE c.id = $1`, [campaignId]);
@@ -926,7 +932,65 @@ router.get('/:id', async (req, res, next) => {
       // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필) + 리뷰비 구간(082)
       const options = await _loadOptionsRaw(pool, id);
       const feeSchedules = await _loadFeeSchedules(pool, id);
-      return res.json({ ok: true, data: rows[0], options, feeSchedules });
+      /* ★★ 혼합 조합 프리필 보완(2026-08-21) — `review_type_mix`(106)는 2026-08-20 에 생긴
+         컬럼이고 **백필이 없다**. 그 전에 발행된 혼합 공고는 조합이 통째로 빈 배열이라
+         수정 화면이 전부 0 으로 열리고, 혼합 저장 검증(두 유형 이상)에 막혀 손댈 수가 없다.
+         → **연결 작업오더에 조합이 실려 있으면 그 값을 프리필 재료로 함께 내려준다.**
+         ★ 저장값(`review_type_mix`)은 **덮지 않는다** — 별도 필드로 주고 화면이 "작업오더에서
+           불러왔다"고 말한 뒤 사람이 저장할 때 반영된다(조용한 자동 적용 금지).
+         ★ 공고에 이미 조합이 있으면 조회하지 않는다(공고가 언제나 이긴다).
+         ★ fail-soft — 못 읽어도 수정 모달은 그대로 열린다. */
+      let orderReviewTypeMix = null;
+      let orderInflowType = null;
+      /* ★ 연결 작업오더의 **시작일** — 대조 전용(저장값을 덮지 않는다).
+         발행은 스냅샷이라 발행 뒤 오더 시작일이 바뀌어도 공고는 따라가지 않는데,
+         그 사실을 확인할 창구가 어디에도 없었다(2026-08-21 신고: 오더 8/19 · 공고 8/12).
+         ★ 시작일은 **저장값이 항상 있어** 유입방식·혼합 조합처럼 blank-only 폴백이 성립하지
+           않는다 → 값을 바꾸지 않고 화면이 "다르다"고 말하기만 한다. */
+      let orderStartDate = null;
+      /* ★★ 차수 원장(095)이 있으면 **총모집 전송값을 서버가 무시한다**(`roundsLockRecruitTotal`).
+         종전에는 그 사실을 저장한 **뒤**에야(`recruitTotalLocked` → 잠깐 뜨는 안내) 알 수 있어
+         "총인원을 200 으로 고쳐 저장했는데 다시 열면 비어 있다"가 원인 불명으로 보였다
+         (2026-08-21 신고). → 수정 모달이 **열 때부터** 그 사실을 말하고 칸을 잠그도록 재료를 준다.
+         ★ 조회 실패·095 미적용 = **null(모름)** — 화면이 "잠금 없음"으로 꾸미지 않는다. */
+      let roundsLock = null;
+      try {
+        const { rows: _rr } = await pool.query(
+          `SELECT COUNT(*)::int AS n, COALESCE(SUM(slot_count), 0)::int AS total
+             FROM campaign_rounds WHERE campaign_id = $1`, [id]);
+        const _n = Number(_rr[0] && _rr[0].n) || 0;
+        roundsLock = { locked: _n > 0, count: _n, total: Number(_rr[0] && _rr[0].total) || 0 };
+      } catch (_) { /* 095 미적용·조회 실패 = 모름(null) */ }
+      try {
+        const cur = normalizeReviewTypeMix(rows[0].review_type_mix);
+        const needMix = normalizeReviewType(rows[0].review_type) === 'mixed' && !(cur.mix || []).length;
+        /* ★★ 유입방식은 리뷰어 화면(work-detail)이 **이미** 작업오더로 폴백하는데(_lookupInflowType)
+           수정 모달만 저장값(work_detail.inflowType)만 봤다 → 값이 없으면 무조건 '링크유입'으로
+           열리고, 그대로 저장하면 그 link 가 굳어 **리뷰어 화면의 폴백을 이긴다**
+           (가이드유입 공고에 [상품 페이지 열기]가 노출 = 유입가이드 무력화). 모달도 같은 값을 보게 한다. */
+        const needInflow = !_savedInflowType(rows[0].work_detail);
+        // ★ 조회는 **한 번** — 세 값을 같은 오더에서 가져온다(같은 근거·쿼리 순증 0).
+        //   시작일은 늘 필요해 조건 없이 조회한다(모달 열 때 1회 — 목록이 아니다).
+        const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
+        const wo = await linkedWorkOrderForCampaign(rows[0], ['review_type_mix', 'inflow_type', 'start_date']);
+        if (needMix) {
+          const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
+          if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
+        }
+        if (needInflow) {
+          const v = String((wo && wo.inflow_type) || '');
+          if (v === 'guide' || v === 'link') orderInflowType = v;
+        }
+        /* ★ 화면이 `(c.start_date||'').slice(0,10)` 로 읽는 것과 **같은 변환**을 쓴다 —
+           양쪽을 다른 방식으로 자르면 같은 날짜가 다르게 보인다. */
+        if (wo && wo.start_date) {
+          const iso = new Date(wo.start_date).toISOString().slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) orderStartDate = iso;
+        }
+      } catch (e) {
+        logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일) 실패 camp=${id}: ${e.message}`);
+      }
+      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, roundsLock });
     }
     const now = new Date();
     const row = rows[0];
@@ -1812,11 +1876,31 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
       try { displayTotals.set(r.id, await displayRecruitTotalForCampaign(r)); }
       catch (e) { logger.warn(`[campaign] admin/list 작업오더 모집인원 표시 대체 실패 camp=${r.id}: ${e.message}`); }
     }));
+    /* ★★ 유입방식 폴백 재료 — 카드 칩이 리뷰어 화면(work-detail)과 **같은 값**을 보게 한다.
+       종전엔 카드만 저장값(work_detail.inflowType)만 봐서, 값이 없는 옛 공고가 카드에서는
+       '링크유입'인데 리뷰어 화면에서는 가이드유입으로 갈렸다.
+       ★ **배치 1회**(N+1 금지) · 저장값이 없는 공고만 대상 · 실패 = 미부착 = 종전 동작(fail-soft).
+       ★ `work_detail` 을 고쳐 내려보내지 않는다 — 별도 필드로만 준다(저장 시 굳지 않게). */
+    const inflowFallback = new Map();
+    try {
+      const need = rows.filter(r => !_savedInflowType(r.work_detail)).map(r => r.id);
+      if (need.length) {
+        const { linkedWorkOrdersForCampaigns } = require('../services/linkedRecruitQuota.service');
+        const m = await linkedWorkOrdersForCampaigns(pool, need, ['inflow_type']);
+        for (const [cid, wo] of m) {
+          const v = String((wo && wo.inflow_type) || '');
+          if (v === 'guide' || v === 'link') inflowFallback.set(cid, v);
+        }
+      }
+    } catch (e) {
+      logger.warn(`[campaign] admin/list 유입방식 폴백 실패(칩 없이 계속): ${e.message}`);
+    }
     const data = rows.map(r => {
       const displayTotal = displayTotals.get(r.id) || { total: Number(r.recruit_total) || 0, source: 'campaign' };
       const _sug = _archiveSuggest ? (_archiveSuggest.get(r.id) || null) : null;
       // archiveSuggest: {total, filled, full} — full=true 일 때만 화면이 [📦 보관 제안] 배지를 그린다.
-      if (!r.participation_mode) return { ...r, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source, archiveSuggest: _sug };
+      const _oif = inflowFallback.get(r.id) || null;
+      if (!r.participation_mode) return { ...r, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source, archiveSuggest: _sug, orderInflowType: _oif };
       const cnt = countsMap.get(r.id) || {
         activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
       };
@@ -1830,6 +1914,8 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
       return {
         ...r,
         archiveSuggest: _sug,
+        // 카드 유입방식 칩 폴백(표시 전용) — 저장값이 없을 때만 채워진다.
+        orderInflowType: _oif,
         // 카드 표기 전용 값. recruit_total 원본은 참여 제한/기존 정책을 위해 그대로 둔다.
         display_recruit_total: displayTotal.total,
         display_recruit_total_source: displayTotal.source,

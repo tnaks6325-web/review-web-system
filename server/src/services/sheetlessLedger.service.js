@@ -344,6 +344,35 @@ async function _assertSheetlessTab(db, sheetId, tabName, hint) {
 }
 
 /**
+ * ★★ 줄을 내린 **직후, 장부 재생성 전에** 번호를 다시 매긴다 (2026-08-23).
+ *
+ * 왜 여기인가: 담당자가 1번 줄을 내리면 표에 `2,3,4…` 가 남는데, 그건 번호가 빈 것도
+ * 중복도 아니라 주기 스윕의 종전 신호에 걸리지 않았다 — 다음 주문이 들어올 때까지
+ * (`sheetlessOrder` 의 renumberTabInTx) 1번부터로 돌아오지 않았다.
+ * **줄을 내리는 행위 자체가 트리거**여야 사람이 버튼을 누를 일이 없다.
+ *
+ * ★ 순서가 계약이다: soft-delete → **재번호** → 장부 재생성. 재생성이 row_json 을 읽어
+ *   시트 모양 배열을 만들므로, 뒤에 매기면 그 주기의 장부가 옛 번호를 싣는다.
+ * ★★ 절대 throw 하지 않는다 — 번호는 스윕·다음 주문·[🔢 번호 정리]가 다시 맞출 수 있지만,
+ *   여기서 예외가 오르면 **이미 내려간 줄의 장부 재생성이 통째로 죽는다**(막으려던 것보다 크다).
+ * ★ 쓰기 표면은 renumberTab 그대로(`campaign_participants.row_json` 의 번호 칸 하나) —
+ *   무시트 게이트·판정도 그 함수가 소유한다(사본 0).
+ */
+async function _renumberAfterRetire(sheetId, tabName, by) {
+  try {
+    const r = await require('./rowNumbering.service')
+      .renumberTab({ sheetId, tabName, by: String(`retire:${by}`).slice(0, 100) });
+    if (r && r.ok && r.changed) {
+      logger.info(`[sheetlessLedger] 줄 내린 뒤 번호 재부여 tab=${tabName} ${r.changed}줄`);
+    }
+    return r;
+  } catch (e) {
+    logger.warn(`[sheetlessLedger] 줄 내린 뒤 번호 재부여 실패(정리는 유지) tab=${tabName}: ${e.message}`);
+    return { ok: false, reason: 'failed', message: e && e.message };
+  }
+}
+
+/**
  * 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
  *
  * 왜 필요한가(운영 실측 2026-08-07 · 쿠팡(26년)): 이관 전 검색 명단은 5·6차 50명뿐이었는데
@@ -373,6 +402,9 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
   if (dryRun) return { ...r, sheetId, tabName };
   if (!r.retired) return { ...r, sheetId, tabName, indexRows: null };
 
+  /* ★★ 재번호가 **장부 재생성보다 먼저** — 아래 재생성이 row_json 을 읽는다. */
+  const renumbered = await _renumberAfterRetire(sheetId, tabName, by);
+
   /* ★ 장부 재생성이 실패하면 조용히 끝내지 않는다 — 표에서만 내려간 상태로 남으면
      다음 투영이 되살릴 수 있으므로 사유를 응답에 실어 화면이 재실행을 안내한다. */
   let ledger = null, ledgerError = null;
@@ -383,7 +415,8 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
     logger.warn(`[sheetlessLedger] 정리 후 장부 재생성 실패 tab=${tabName} — ${ledgerError}`);
   }
   logger.info(`[sheetlessLedger] 줄 정리 tab=${tabName} ${r.retired}줄 은퇴 · 명단 ${ledger ? ledger.indexRows : '?'}명 by=${by}`);
-  return { ...r, sheetId, tabName, indexRows: ledger ? ledger.indexRows : null, ledgerError };
+  return { ...r, sheetId, tabName, indexRows: ledger ? ledger.indexRows : null, ledgerError,
+           renumbered: (renumbered && renumbered.changed) || 0 };
 }
 
 /**
@@ -603,6 +636,9 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   const canceled = await require('./orderLedger.service')
     .softDeleteDuplicateOrders(cancelOsIds, `dedupe:${by}`);
 
+  /* ★★ 중복 줄을 내렸으면 번호가 비므로 곧바로 다시 매긴다(장부 재생성보다 먼저). */
+  const renumbered = await _renumberAfterRetire(sheetId, tabName, `dedupe:${by}`);
+
   let ledger = null, ledgerError = null;
   try {
     ledger = await rebuildLedgers({ sheetId, tabName, by: `dedupe:${by}` });
@@ -612,7 +648,8 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   }
   logger.info(`[sheetlessLedger] 중복 줄 정리 tab=${tabName} ${r.retired}줄 · 주문 ${canceled}건 취소 by=${by}`);
   return { ...stat, removed: r.retired, canceledOrders: canceled,
-           indexRows: ledger ? ledger.indexRows : null, ledgerError };
+           indexRows: ledger ? ledger.indexRows : null, ledgerError,
+           renumbered: (renumbered && renumbered.changed) || 0 };
 }
 
 /**
@@ -741,6 +778,9 @@ async function dedupeManual({ sheetId, tabName, keepSeq, removeSeqs = [],
   const canceled = await require('./orderLedger.service')
     .softDeleteDuplicateOrders(cancelIds, `dedupe-manual:${by}`);
 
+  /* ★★ 줄을 내렸으면 번호가 비므로 곧바로 다시 매긴다(장부 재생성보다 먼저). */
+  const renumbered = await _renumberAfterRetire(sheetId, tabName, `dedupe-manual:${by}`);
+
   let ledger = null, ledgerError = null;
   try {
     ledger = await rebuildLedgers({ sheetId, tabName, by: `dedupe-manual:${by}` });
@@ -751,7 +791,8 @@ async function dedupeManual({ sheetId, tabName, keepSeq, removeSeqs = [],
   logger.info(`[sheetlessLedger] 중복 수동 정리 tab=${tabName} 남김 ${keep} · ${r.retired}줄 내림 · ` +
     `주문 ${canceled}건 취소 by=${by}`);
   return { ...stat, removed: r.retired, canceledOrders: canceled,
-           indexRows: ledger ? ledger.indexRows : null, ledgerError };
+           indexRows: ledger ? ledger.indexRows : null, ledgerError,
+           renumbered: (renumbered && renumbered.changed) || 0 };
 }
 
 /**

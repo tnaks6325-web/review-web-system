@@ -1015,6 +1015,25 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
+// ── 시트 전체 소유 → 작업(탭) 단위 펼치기 (사용자 확정 2026-08-23 — 업체 지정은 작업 단위 하나).
+//   ★ 미리보기 기본(confirm !== true 면 쓰기 0) · staff 는 자기 담당(inad_pm) 업체만(서비스와 이중 게이트).
+router.post('/ownership/expand', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { advertiserId, sheetId, confirm } = req.body || {};
+    if (advertiserId && !(await _ownershipWriteAllowed(req, advertiserId))) {
+      return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 변경할 수 없습니다.' });
+    }
+    const staffName = _role(req) === 'staff' ? String((req.admin && req.admin.name) || '').trim() : null;
+    if (_role(req) === 'staff' && !staffName) {
+      return res.status(403).json({ ok: false, error: '로그인 정보에 담당자명이 없습니다.' });
+    }
+    res.json(await svc.expandSheetOwnerships({
+      advertiserId: advertiserId || null, sheetId: sheetId || null,
+      confirm: confirm === true, by: _by(req), staffName,
+    }));
+  } catch (err) { next(err); }
+});
+
 // ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ 내부 담당자(master/admin/staff):
 //    사용자 확정(2026-08)으로 AE 도 업체 간 재배치를 한다(광고주는 차단). 대상 검증은 서비스가
 //    fail-closed 로 한다(업체 미존재 404 · 종료 거래처 거부 · 필수값 없으면 쓰기 0 + ROLLBACK). ──
@@ -1287,6 +1306,29 @@ router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async 
   try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
   catch (err) { _pastTabErr(res, err, next); }
 });
+/* 수동 리뷰제출 사전 확인 — **쓰기 0**.
+   ★ 화면이 캡처를 올리기 **전에** 부른다: 종전에는 업로드 뒤에 거부되어 **드라이브에는 파일이
+     남고 제출만 실패**했다(2026-08-21 실사고 — 재시도마다 같은 줄에 캡처가 쌓였다).
+   ★ 게이트는 실제 제출과 같은 함수를 지난다(사본 0). 그 줄에 **이미 올라온 리뷰 캡처**도 함께
+     돌려줘, 새로 붙여넣지 않고 그것으로 제출을 끝낼 수 있게 한다(쌓인 파일이 곧 근거다).
+   ★ 캡처 조회 실패는 fail-soft — 확인 결과 자체는 나가야 한다(붙여넣기 경로는 살아 있다). */
+router.get('/workdesk/manual-review-precheck', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.query || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, preflight: true, by: _by(req) });
+    let existing = [];
+    if (out.ok && out.rowIndex != null) {
+      try {
+        const map = await svc.reviewImagesForTab({ sheetId, tabName });
+        existing = (map[String(out.rowIndex)] || [])
+          .filter(f => f && f.slot === 'review' && f.fileId)
+          .map(f => ({ fileId: f.fileId, at: f.at || null }));
+      } catch (_) { existing = []; }
+    }
+    res.json({ ...out, existing });
+  } catch (err) { next(err); }
+});
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
@@ -1362,53 +1404,12 @@ router.post('/workdesk/assign-unslotted-order', authMiddleware, internalMiddlewa
   } catch (err) { next(err); }
 });
 
-/* ── 번호 정리(표시 번호 재부여 + 담당자 blank-only 채움) ──────────────────────────
-   ★ 바꾸는 것은 `row_json` 의 `번호`·`담당자` 칸뿐 — DB `seq`(주문·리뷰·입금·투영 앵커)는 불변.
-   ★ `confirm !== true` 면 **쓰기 0 미리보기**(무엇이 몇 번으로 바뀌는지 먼저 보여준다).
-   ★ 게이트는 [번호 배정]과 같은 `internalMiddleware`(같은 표의 같은 성격 조작). */
-router.post('/worktable/renumber', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, confirm, cleanBlanks } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const svcRn = require('../services/rowNumbering.service');
-    /* ★★ 짝 빈 줄 정리는 **명시 요청일 때만**(기본 계약 = 번호만 다시 매김) — 줄을 내리는 일이
-       "번호 정리" 라는 이름 뒤에 숨으면 안 된다. ★ 정리가 **재번호보다 먼저**여야 짝 신호가 남는다. */
-    let blank = null;
-    if (cleanBlanks === true) {
-      blank = await svcRn.cleanupPairedBlanks({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
-    }
-    const out = await svcRn.renumberTab({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
-    if (blank) out.blank = blank;
-    const bad = { not_sheetless: 409, tab_not_registered: 404, disabled: 409 };
-    res.status(out.ok ? 200 : (bad[out.reason] || 400)).json(out);
-  } catch (err) {
-    if (err && (err.code === '42P01' || err.code === '42703')) {
-      return res.status(200).json({ ok: false, code: 'not_ready', error: '아직 준비되지 않았습니다(배포 반영 대기).' });
-    }
-    next(err);
-  }
-});
-/* 전체 조회 — 어느 작업에 번호·담당자 빈칸이 있는지(읽기 전용·한 쿼리 집계). */
-router.get('/worktable/renumber-scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const out = await require('../services/rowNumbering.service').scanNumbering({ limit: req.query.limit });
-    res.json(out);
-  } catch (err) {
-    if (err && (err.code === '42P01' || err.code === '42703')) {
-      return res.status(200).json({ ok: false, code: 'not_ready', error: '아직 준비되지 않았습니다(배포 반영 대기).' });
-    }
-    next(err);
-  }
-});
-/* 소급 정리 — 무시트 작업 전체. 되돌리기 어려운 광범위 조작이라 adminOrMaster. */
-router.post('/worktable/renumber-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { confirm, limit, cleanBlanks } = req.body || {};
-    const out = await require('../services/rowNumbering.service')
-      .renumberAllSheetless({ dryRun: confirm !== true, by: _by(req), limit, cleanBlanks: cleanBlanks === true });
-    res.json(out);
-  } catch (err) { next(err); }
-});
+/* ★★ 번호 정리 **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+   번호는 이제 전부 자동으로 매겨진다: 주문이 들어올 때(`sheetlessOrder`)·줄을 내릴 때
+   (`_hideParticipantInTx`·`sheetlessLedger`)는 그 자리에서, 놓친 것은 5분 스윕
+   (`worktable_renumber_sweep`)이 메운다. 전수 점검 결과 수동 대상이 0건이라 창구만 없앴고,
+   서비스(`rowNumbering.service`)는 그 자동 경로가 쓰므로 그대로 있다.
+   옛 라우트: POST /worktable/renumber · GET /worktable/renumber-scan · POST /worktable/renumber-all */
 
 // 테스트 자동제출 정리 — 테스트 전용 식별자가 모두 일치하는 경우에만 영구 제거한다.
 // 일반 주문은 이 경로로 절대 삭제할 수 없으며, 운영 주문 삭제는 위 order-delete만 사용한다.
@@ -1627,6 +1628,13 @@ const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
 const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
 const _updateHandler = _delegate(_orderRoutes, 'put', '/admin/update');
 const _adminEditHandler = _delegate(_orderRoutes, 'put', '/admin/edit');
+/* 🧪 테스트 작업오더 — 접수 → 모집공고 흐름을 실제로 눌러 보려면 `submitted` 오더가 하나 필요하다.
+   ★ 실행부는 AE 제출과 **같은 핸들러**(`POST /api/order/submit`) — 오더를 만드는 코드를 새로
+     쓰지 않는다(사본 0). 값은 화면이 채운다.
+   ★ 인트라넷 SSO 토큰(via:'intranet')은 `/api/order/*` 에 도달 불가라 여기로 위임한다.
+   ★ 게이트는 접수·발행과 같은 2단(내부인 열람 · **편집 허용명단만 생성**) — 원본(`authMiddleware`)
+     보다 **좁다**(프록시가 원본보다 넓어지면 안 된다). */
+const _woSubmitHandler = _delegate(_orderRoutes, 'post', '/submit');
 
 router.post('/work-orders/accept', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _acceptHandler(req, res, next));
@@ -1641,6 +1649,8 @@ router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnly
 // 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · 편집 허용명단만 수정).
 router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _adminEditHandler(req, res, next));
+router.post('/work-orders/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _woSubmitHandler(req, res, next));
 
 // ── 외부모집 구매양식 수동제출 ──────────────────────────────
 //   원본 `/api/manual-order/*` 는 adminOrMaster 전용인데, 인트라넷 SSO 토큰(via:'intranet')은
@@ -1955,22 +1965,32 @@ async function _riScopeQuery(req) {
   return { ok: true, sheetId: null, tabName: null, scoped: true, allow: tabs || [] };
 }
 
+/* 목록 상한 — 화면이 "최근 N건만 표시"라고 말할 수 있게 응답에 함께 싣는다. */
+const _RI_LIST_LIMIT = 200;
+
 router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res) => {
   try {
     const sc = await _riScopeQuery(req);
     if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
-    let items = await _inspectSvc.listInspections({
-      sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'open'),
+    const status = String(req.query.status || 'open');
+    /* ★ staff + 탭 미지정 → 담당 탭 스코프를 **SQL 로 내린다**(종전에는 전체에서 뽑은 200건을
+         라우트가 걸러 담당 건이 그 200건 밖이면 화면이 거의 비었고, 요약도 200 에서 잘렸다). */
+    const tabs = (sc.scoped && !sc.tabName) ? (sc.allow || []) : undefined;
+    const limit = _RI_LIST_LIMIT;
+    const items = await _inspectSvc.listInspections({
+      sheetId: sc.sheetId, tabName: sc.tabName, tabs, status, limit,
     });
-    let summary = await _inspectSvc.inspectionSummary({ sheetId: sc.sheetId, tabName: sc.tabName });
-    // staff + 탭 미지정 → 담당 탭만 남긴다(집계도 같은 기준으로 다시 센다)
-    if (sc.scoped && !sc.tabName) {
-      const allow = new Set((sc.allow || []).map(t => JSON.stringify([t.sheetId, t.tabName])));
-      items = items.filter(it => allow.has(JSON.stringify([it.sheet_id, it.tab_name])));
-      summary = { pass: 0, suspect: 0, fail: 0, pending: 0, unverifiable: 0, resolved: 0, open: 0 };
-      for (const it of items) if (summary[it.status] !== undefined) summary[it.status] += 1;
-      summary.open = summary.suspect + summary.fail;
-    }
+    const summary = await _inspectSvc.inspectionSummary({ sheetId: sc.sheetId, tabName: sc.tabName, tabs });
+    /* ★★ 오류유형별 건수는 **목록 상한과 무관한 전체 집계** — 화면이 세면 "불러온 200건"만
+         세어져 3,334건짜리 화면에 `전체 유형 200` 이 뜬다(이번 신고의 원인).
+       ★ fail-soft: 실패하면 필드를 **안 싣는다**(0 으로 꾸미지 않는다 — 화면이 종전 폴백으로
+         "표시된 N건 기준"이라고 말한다). */
+    let typeCounts = null;
+    try {
+      typeCounts = await _inspectSvc.inspectionTypeCounts({
+        sheetId: sc.sheetId, tabName: sc.tabName, tabs, status,
+      });
+    } catch (e) { logger.warn(`[review-inspect] 유형 집계 실패(무시): ${e.message}`); }
     // ★ 이 작업의 리뷰타입을 **판정 근거값과 함께** 실어 보낸다 — 구매확정 작업인데
     //   "리뷰 화면이 아님" 불량이 나오는 이유가 화면 어디에도 안 보이던 실사고(2026-08-06) 대응.
     //   읽기 전용·fail-soft(실패 = 빈 배열 = 표시만 생략, 목록은 그대로 뜬다).
@@ -1979,7 +1999,11 @@ router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res)
       reviewTypes = await require('../services/reviewTypeContext.service')
         .reviewTypeDetailsForTabs(items.map(it => ({ sheetId: it.sheet_id, tabName: it.tab_name })));
     } catch (_) { /* 표시 보조 — 목록을 죽이지 않는다 */ }
-    res.json({ ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped, reviewTypes });
+    res.json({
+      ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped, reviewTypes,
+      limit, truncated: items.length >= limit,
+      ...(typeCounts ? { typeCounts } : {}),
+    });
   } catch (err) {
     logger.warn(`[review-inspect] 목록 실패: ${err.message}`);
     res.status(500).json({ ok: false, error: '검수 목록을 불러오지 못했습니다.' });
@@ -2206,13 +2230,10 @@ router.get('/review-inspect/export.csv', authMiddleware, _reInternal, async (req
   try {
     const sc = await _riScopeQuery(req);
     if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
-    let items = await _inspectSvc.listInspections({
+    const items = await _inspectSvc.listInspections({
       sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'all'), limit: 500,
+      tabs: (sc.scoped && !sc.tabName) ? (sc.allow || []) : undefined,
     });
-    if (sc.scoped && !sc.tabName) {
-      const allow = new Set((sc.allow || []).map(t => JSON.stringify([t.sheetId, t.tabName])));
-      items = items.filter(it => allow.has(JSON.stringify([it.sheet_id, it.tab_name])));
-    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="review-inspect.csv"');
     res.send(_inspectSvc.inspectionsCsv(items));
@@ -2395,6 +2416,12 @@ router.get('/cs/participant-recipients', authMiddleware, internalMiddleware, asy
   }
 });
 
+/* 첨부 업로드 — 실행부는 `/cs/upload` 와 **같은 핸들러**(Drive `[문의첨부]` 폴더 · 8MB · 프록시 URL).
+   ★ 게이트만 내부인이다: 메시지를 보낼 수 있는 사람은 사진도 붙일 수 있어야 한다(막다른 길 금지).
+     `/cs/upload`(관리자 C/S 대화창)는 종전 adminOrMaster 그대로 둔다. */
+router.post('/cs/notify-upload', authMiddleware, internalMiddleware, (req, res, next) =>
+  _csHandlers.upload(req, res, next));
+
 // 전송 — 서버가 **그 자리에서 다시 판정**한 뒤 방을 열고 메시지를 남긴다.
 router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async (req, res) => {
   try {
@@ -2403,9 +2430,10 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
     const tabName = String(b.tabName || '');
     const ids = _msgIds(b.participantIds);
     const content = String(b.content || '').trim();
+    const imageUrls = require('../utils/csImageUrls').sanitizeCsImageUrls(b.imageUrls);
     const expect = (b.expect && typeof b.expect === 'object') ? b.expect : null;
     if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, participantIds 가 필요합니다.' });
-    if (!content) return res.status(400).json({ ok: false, error: '보낼 내용이 비어 있습니다.' });
+    if (!content && !imageUrls.length) return res.status(400).json({ ok: false, error: '보낼 내용이 비어 있습니다.' });
     if (content.length > _MSG_MAX) return res.status(400).json({ ok: false, error: `내용은 ${_MSG_MAX}자까지 보낼 수 있습니다.` });
 
     const items = await _csRecipient.resolveRecipients({ sheetId, tabName, participantIds: ids });
@@ -2427,7 +2455,7 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
       let why = '';
       const out = await _csBridge.postAdminNotice({
         sheetId, tabName, rowIndex: it.seq,
-        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by,
+        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by, imageUrls,
         onError: (e) => { why = (e && (e.message || e.code)) ? `${e.message || ''}${e.code ? ` [${e.code}]` : ''}` : ''; },
       });
       if (!out) {
@@ -2436,7 +2464,7 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
         continue;
       }
       seenPhone.set(it.phone8, it.participantId);
-      sent.push({ participantId: it.participantId, name: it.name, phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
+      sent.push({ participantId: it.participantId, name: it.name, phone: it.phoneFull || '', phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
     }
     res.json({ ok: sent.length > 0, sent, failed, merged, total: items.length });
   } catch (e) {
@@ -2479,6 +2507,9 @@ const _setHandlers = {
   //   인트라넷 SSO 토큰(via:'intranet')은 `/api/diag/*` 에 **도달 자체가 불가**라
   //   리뷰웹시스템[3버전]에서 이 정리를 부르려면 Track B 경로가 필요하다(로직 복제 0).
   reviewTypeCleanup: _delegate(require('./diag.routes'), 'post', '/review-type-cleanup'),
+  // ★ 065 후속: 담당자 실명(박세희·박은비) → 닉네임(만두·망고) 정리 — 원본은 `/api/diag/manager-cleanup`.
+  //   같은 이유(인트라넷 SSO 토큰은 `/api/diag/*` 미도달)로 Track B 경로를 함께 연다.
+  managerCleanup: _delegate(require('./diag.routes'), 'post', '/manager-cleanup'),
 };
 router.get('/settings/my-nickname', authMiddleware, internalMiddleware, (req, res, next) =>
   _setHandlers.nicknameGet(req, res, next));
@@ -2505,6 +2536,9 @@ router.post('/settings/home-banner/save', authMiddleware, adminOrMasterMiddlewar
 // ★ 087: 원본과 같은 권한(admin/master). dryRun 기본은 원본 핸들러가 판정한다.
 router.post('/settings/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _setHandlers.reviewTypeCleanup(req, res, next));
+// ★ 065 후속: 원본과 같은 권한(admin/master). 기존 행을 건드리므로 dryRun 기본도 원본이 판정한다.
+router.post('/settings/manager-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.managerCleanup(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
    시스템 오류로그 — 리뷰웹시스템[3버전] 「로그」 탭의 두 번째 서브탭
@@ -2981,36 +3015,12 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
   } catch (err) { next(err); }
 });
 
-/* 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
-   ★ 내부 담당자(master/admin/staff) — 정원 변경(날짜별 인원)과 같은 급이고, 그것과 함께 AE 에게 열었다.
-   ★ dryRun 기본(`dryRun !== false`) — 값이 빠진 요청이 곧바로 실행되지 않는다. */
-router.post('/worktable/retire-rows', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { retireRows, LedgerError } = require('../services/sheetlessLedger.service');
-    const b = req.body || {};
-    try {
-      res.json(await retireRows({
-        sheetId: b.sheetId, tabName: b.tabName, rounds: b.rounds, seqs: b.seqs,
-        dryRun: b.dryRun !== false, by: _by(req),
-      }));
-    } catch (e) {
-      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
-      throw e;
-    }
-  } catch (err) { next(err); }
-});
+/* ★★ 줄 정리(은퇴) **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+   원인이던 탈시트 이관(옛 차수가 검색 명단에 되살아남)은 끝났다. 줄을 내리는 창구는
+   [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
+   ★ 실행부 `sheetlessLedger.retireRows` 는 **중복 정리가 그대로 쓴다** — 지우지 말 것.
+   옛 라우트: POST /worktable/retire-rows */
 
-/* 무시트 작업 **장부 재생성** — 작업표(진실원본) → 장부 3권(raw 미러·index_master·review_index).
-   왜 필요한가(2026-08-19 실측): 작업표 줄을 DB 에서 직접 되살려도(오삭제 복구) 장부를 다시 만들
-   창구가 어디에도 없어 **리뷰어 검색 명단·입금 대상에 그 줄이 영영 안 돌아왔다**. 지금까지 재생성은
-   정리·이관·접수의 부수효과로만 일어났다(그 자체를 부를 길이 없다 = 복구의 막다른 길).
-   ★ 게이트 = adminOrMaster — 장부를 통째로 다시 만드는 조작이라 줄 정리(retire)와 같은 급.
-   ★ 새 판정 0 — `rebuildLedgers` 를 그대로 부른다(무시트 아님·미등록·열 구성 불명은 그쪽 fail-closed).
-   ★ 시트·Drive 무접촉 · dryRun 기본(값이 빠진 요청이 곧바로 실행되지 않는다). */
-/* 작업표 중복 줄 감시 — **읽기 전용 조회**(사람이 지금 상태를 확인하는 창구).
-   ★ 크론이 같은 함수를 주기로 돌며 달라졌을 때만 알린다. 이 라우트는 **스냅샷을 갱신하지 않는다**
-     (사람이 눌러 본 것 때문에 다음 크론 알림이 조용해지면 안 된다).
-   ★ 게이트 = adminOrMaster — 탭명·명의·줄 번호가 실리므로 중복 정리와 같은 급. */
 router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { watchDuplicateRows } = require('../services/worktableDupWatch.service');
@@ -3069,32 +3079,13 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
   } catch (err) { next(err); }
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
-   작업표 옵션 열 보장 + 선택 옵션 소급 기입 — admin/master 전용 (2026-08-20)
-   ★ 리뷰어가 고른 옵션은 원장에 살아 있는데 작업표에 칸이 없어 기입되지 않던 작업의 복구
-     창구. **미리보기(dryRun 기본) → confirm:true 로 실행**, 쓰기 표면은 장부 헤더 +
-     `row_json` 두 곳뿐이고 기입은 blank-only 다(관리자 작업지시를 덮지 않는다).
-   ══════════════════════════════════════════════════════════════════════════ */
-router.post('/worktable/option-column', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { ensureOptionColumn, OptionColumnError } = require('../services/worktableOptionColumn.service');
-    const b = req.body || {};
-    try {
-      res.json(await ensureOptionColumn({
-        sheetId: b.sheetId, tabName: b.tabName,
-        dryRun: b.confirm !== true,
-        backfill: b.backfill !== false,
-        by: _by(req),
-      }));
-    } catch (e) {
-      if (e instanceof OptionColumnError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
-      if (e && (e.code === '42P01' || e.code === '42703')) {
-        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
-      }
-      throw e;
-    }
-  } catch (err) { next(err); }
-});
+/* ★★ 옵션 열 **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+   칸은 이제 자동으로 보장된다: 작업표 생성이 옵션 배분을 보고 덧붙이고(`worktablePlan`),
+   공고 저장이 살아있는 옵션 2종 이상이면 연결 작업표에 칸을 보장한다(`campaign.routes`).
+   ★ 실행부 `worktableOptionColumn.ensureOptionColumn` 은 **그 두 자동 경로가 쓴다** — 지우지 말 것.
+   ⚠ 남은 갭: 공고 저장 훅은 *저장하는 순간에만* 돌아, 옵션 2종인데 칸이 없는 옛 작업이 남을 수 있다
+     (실측 1건). 그 경우 그 공고를 한 번 저장하면 칸이 생긴다.
+   옛 라우트: POST /worktable/option-column */
 
 /* ══════════════════════════════════════════════════════════════════════════
    작업표 줄 ↔ 주문 링크 교정 — admin/master 전용 (일회성 복구, 2026-08-19)
@@ -3151,7 +3142,9 @@ router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (
       const out = await deleteTask({
         sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
         // ★ 입금 기록까지 지우는 것은 **별도 확인**이다 — 일반 confirm 으로는 열리지 않는다.
-        confirm: b.confirm === true, forcePayment: b.forcePayment === true, by: _by(req),
+        confirm: b.confirm === true, forcePayment: b.forcePayment === true,
+        // ★ 드라이브 폴더 삭제도 **별도 확인**이다 — 일반 confirm 으로는 열리지 않는다.
+        deleteDrive: b.deleteDrive === true, by: _by(req),
       });
       // 검증 실패는 400대로 — errorHandler 의 500 마스킹에 사유가 묻히면 담당자가 손쓸 수 없다.
       if (!out.ok && (out.code === 'confirm_required' || out.code === 'payment_locked')) {

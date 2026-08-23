@@ -235,7 +235,9 @@ async function run() {
   t('★ renderOwnershipView 첫 동작 = pendingAdv 없으면 advCur 비움(히스토리 항목 ↔ 화면 일치)',
     /async function renderOwnershipView\(\)\{[\s\S]{0,500}if\(!STATE\.pendingAdv\) STATE\.advCur=null;/.test(HTML));
   t('뒤로가기 복원 경로 유지(pendingAdv → selAdv)', /STATE\.pendingAdv[\s\S]{0,300}selAdv\(ix,\{nav:!!pa\.__nav\}\)/.test(HTML));
-  for (const id of ['ownPanel', 'owntabsSect', 'advs', 'addSheet', 'taboptions', 'advSheet', 'advName',
+  // ★★ 사용자 확정(2026-08-23): 지정 단위가 **작업(작업보드)** 로 바뀌며 시트 선택 칸(#addSheet·#advSheet·
+  //    #taboptions)은 작업 선택 칸(#addTabSel·#advTabSel)으로 교체됐다 — 나머지 계약은 그대로.
+  for (const id of ['ownPanel', 'owntabsSect', 'advs', 'addTabSel', 'advTabSel', 'advName',
     'advSug', 'advNameChk', 'advPm', 'advPmChk', 'advCreateBtn', 'setvis', 'aebox']) {
     t(`기존 id 생존: #${id}`, new RegExp(`id="${id}"`).test(HTML));
   }
@@ -317,15 +319,18 @@ async function run() {
   t('★ 목록 조회 실패·예외를 화면이 종결한다(무한 "불러오는 중" 금지)',
     /catch\(err\)\{ _ovmLoadFailed\(err&&err\.message\); return; \}/.test(HTML)
     && /function _ovmLoadFailed\(why\)\{/.test(HTML) && /onclick="renderOwnershipView\(\)"/.test(HTML));
-  t('연결탭 조회 실패는 "연결된 탭 없음"이라고 행동을 지시하지 않는다',
-    /unreachable\)\s*\n?\s*return `<div class="st">연결된 탭 <span class="sthint">불러오지 못함/.test(HTML));
+  // ★ 어휘 통일(2026-08-23): '연결된 탭' → '연결된 작업'. 검사 의미 불변(실패를 "없음"으로 위장 금지).
+  t('연결 작업 조회 실패는 "없음"이라고 행동을 지시하지 않는다',
+    /unreachable\)\s*\n?\s*return `<div class="st">연결된 작업 <span class="sthint">불러오지 못함/.test(HTML));
   t('닫은 설정 패널은 Tab 순서에서 빠진다(화면 밖 폼 갇힘 방지)',
     /d\.classList\.remove\('on'\); d\.setAttribute\('aria-hidden','true'\); d\.innerHTML='';/.test(HTML));
   t('개요 행은 Enter/Space 로도 열린다', /onkeydown="if\(event\.key==='Enter'\|\|event\.key===' '\)/.test(HTML));
   t('[← 전체 개요] 복귀도 히스토리에 쌓는다(뒤로가기 헛클릭 방지)', /if\(wasAdv && !\(opt&&opt\.nav\) && typeof _navPush==='function'\) _navPush\(\);/.test(HTML));
-  t('소유 변경 후 미지정 시트 배너도 갱신(사이드바 상시 노출이라 stale 이 눈에 띈다)',
-    /async function refreshAdvCounts\(\)\{[\s\S]{0,300}owned-sheets/.test(HTML));
-  t('staff 설정 패널은 소유 시트만(막다른 길 제거)', /const keys=isAdmin\?\['link','acct','own'\]:\['own'\];/.test(HTML));
+  // ★ 사용자 확정(2026-08-23): 배너 재료가 '미지정 시트(/owned-sheets)' → **미지정 작업(mapTabs)** 로 바뀌었다.
+  //   [×] 해제 뒤에도 숫자가 옛값으로 남지 않으려면 여기서 mapTabs 를 다시 받아야 한다.
+  t('소유 변경 후 미지정 작업 배너도 갱신(사이드바 상시 노출이라 stale 이 눈에 띈다)',
+    /async function refreshAdvCounts\(\)\{[\s\S]{0,400}_ovmReloadMapTabs\(\)/.test(HTML));
+  t('staff 설정 패널은 소유 작업만(막다른 길 제거)', /const keys=isAdmin\?\['link','acct','own'\]:\['own'\];/.test(HTML));
 
   /* ═══ 6. 동적 열 구성 ═══ */
   console.log('\n6) 동적 열 구성(헤더 ≡ grid)');

@@ -75,7 +75,22 @@ function pickWorkManager(body = {}) {
   return m ? m[1].trim() : '';
 }
 
+/**
+ * 저장 직전 담당자 값 정규화 — 실명(박세희·박은비)으로 들어오면 닉네임(만두·망고)으로 접는다.
+ *
+ * ★★ 매핑되지 않는 값은 **원문 그대로 돌려준다**(완화 금지): `mapWorkManager` 의 ''
+ *   fail-safe 를 저장 경로에 그대로 쓰면, 저장에서 '' 는 "모름"이 아니라 **"해제"** 라는
+ *   다른 뜻이라 자유입력 담당자가 조용히 지워진다.
+ * ★ 빈 값은 빈 값 그대로(해제 저장 계약 불변).
+ */
+function normalizeManagerForStore(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return v;                 // '' = 해제(기존 동작 불변)
+  return mapWorkManager(v) || v;    // 실명·표기흔들림 → 닉네임 / 모르는 값 → 원문 보존
+}
+
 module.exports = {
   WORK_MANAGER_MAP, UNDECIDED,
   mapWorkManager, isUndecidedWorkManager, workManagerLabel, pickWorkManager,
+  normalizeManagerForStore,
 };

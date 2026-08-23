@@ -10,6 +10,10 @@
  */
 const { logger } = require('../utils/logger');
 
+/* 제출열 판정의 기본 키워드 — `indexBuilder`/`smartBuild` 는 런타임 설정(app_settings)이 섞인
+   자기 목록을 넘기고, 그 목록이 없는 호출부(작업표 생성)는 이 기본값을 쓴다. */
+const DEFAULT_SUBMIT_KEYWORDS = ['리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출', '리뷰'];
+
 const PAYMENT_EXACT = ['입금', '입금일', '입금일자', '입금완료', '입금확인', '입금여부', '페이백'];
 const PAYMENT_PARTIAL = ['페이백입금', '페이백', '입금'];
 const PAYMENT_EXCLUDE = ['입금명', '입금자', '예금주', '입금자명', '결제금액', '결제금', '결제일', '결제수단'];
@@ -140,54 +144,15 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
     }
   }
 
-  // ── 제출열 (P2b: DB매핑 'review_submit' 우선 → 3단계 키워드 폴백) ──
-  const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];
-  // ★★ '포스팅' 제외(2026-08-19 블로그 E2E 실측): 블로그체험단 작업표의 '포스팅제출일' 헤더가
-  //   완료신호 '제출'을 포함해 2단계에서 **리뷰제출 열로 오탐**됐다 — 제출 표시('제출')가 날짜 칸에
-  //   들어갔다가 포스팅제출일 스탬프에 덮이고, 진짜 '리뷰' 칸은 비어 is_submitted 가 장부 재생성마다
-  //   FALSE 로 무너졌다. 포스팅 계열 칸(포스팅결과URL·포스팅제출일)은 결과물·날짜 칸이지 제출 표시
-  //   칸이 아니므로 이름열과 같은 급으로 제외한다(제외 후 3단계가 '리뷰' 단독 열을 정상 채택).
-  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주', '포스팅'];
-  // ★★ 8/3 실측 사고(박은비 탭): SUBMIT_KEYWORDS에 완료신호 단어(제출/완료/submit)와 함께
-  //   넓은 catch-all인 '리뷰' 단독도 섞여 있다. 1·2단계(우선탐지)에서 '리뷰'를 그대로 매칭에
-  //   쓰면 그 자체가 SUBMIT_PRIORITY_PREFIXES('리뷰')와 항상 동시에 참이 되어 AND 조건이
-  //   무력화된다 — '리뷰가이드'(작업지시 열, 항상 값이 차 있음) 같은 열이 실제 '리뷰제출'열보다
-  //   먼저 잡혀 참여자 전원이 제출완료로 오판정됐다(2단계도 같은 이유로 동일 오탐).
-  //   → 1·2단계(우선탐지)는 완료신호 키워드만 쓰고, '리뷰' 단독 매칭은 완료신호 열이 전혀
-  //   없을 때의 최후수단(3단계, 기존 동작 그대로)에만 남긴다.
-  const SUBMIT_COMPLETION_KEYWORDS = SUBMIT_KEYWORDS.filter(k => k !== '리뷰');
-  let submitColIdx = _dbCol(dbColMap, 'review_submit', headers, drift);
-  const submitFromDb = submitColIdx >= 0;
-  if (submitColIdx < 0) {
-    for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
-      const hl = headers[hi].toLowerCase();
-      if (SUBMIT_PRIORITY_PREFIXES.some(p => hl.includes(p)) &&
-          SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
-        submitColIdx = hi;
-      }
-    }
-    if (submitColIdx < 0) {
-      for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
-        const hl = headers[hi].toLowerCase();
-        if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) continue;
-        if (SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) submitColIdx = hi;
-      }
-    }
-    // ★★ 8/4 재발(면마스크 탭 실측): 3단계(최후수단, 바로 위 두 단계가 못 찾았을 때만 도달)는
-    //   '리뷰' 단독 매칭까지 허용해야 하는 이유가 있다 — 이 탭처럼 완료열 이름이 아예 '리뷰'
-    //   뿐(리뷰제출/리뷰완료 접미 없음)인 정상 시트도 실재한다. 문제는 이 단계에 제외패턴이
-    //   없어서, 완료열이 헤더 순서상 '주문자제출'(이름열, '제출' 포함)보다 뒤에 있으면
-    //   '주문자제출'을 먼저 집어 전원 제출완료로 오판정한다(2단계에서 이미 걸러지던 예외를
-    //   3단계가 다시 무방비로 통과시킴). → 2단계와 동일하게 이름열 제외패턴을 적용해
-    //   '리뷰' 단독 매칭은 허용하되 이름류 열은 여전히 걸러낸다.
-    if (submitColIdx < 0) {
-      submitColIdx = headers.findIndex(h => {
-        const hl = h.toLowerCase();
-        if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) return false;
-        return SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()));
-      });
-    }
-  }
+  // ── 제출열 — 판정은 `findSubmitColumnIndex` 단일 출처(아래) ──
+  //   ★ 이 판정이 "그 탭의 리뷰제출 칸"을 정한다. 작업표 생성(worktablePlan)이 **같은 함수**로
+  //     "제출 칸이 있는가"를 확인해 없으면 만들어 붙인다 — 사본을 두면 "만든 칸 ≠ 읽는 칸"이 된다.
+  //   ★ `_dbCol` 은 재앵커 거부를 `drift` 에 기록하므로 **한 번만** 부른다(두 번 부르면 거부가 겹쳐 세어진다).
+  const submitDbIdx = _dbCol(dbColMap, 'review_submit', headers, drift);
+  const submitFromDb = submitDbIdx >= 0;
+  const submitColIdx = submitFromDb
+    ? submitDbIdx
+    : findSubmitColumnIndex(headers, { submitKeywords: SUBMIT_KEYWORDS });
 
   // ── 상품/URL/연락처/날짜/차수 (P2b: 해당 db_field 우선 → 키워드 폴백) ──
   const productKeywords = ['상품명', '제품명', '상품', 'product'];
@@ -293,4 +258,77 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
     .filter(Boolean);
 }
 
-module.exports = { parseTabRows, findPaymentColumnIndex, _dbCol, _isDataTabRow, _isSubmittedValue, _formatDate };
+
+/**
+ * 그 탭에서 **리뷰제출 칸이 되는 열**의 인덱스 — 없으면 -1.
+ *
+ * ★★ 판정 단일 출처다. 소비처가 둘: ① 인덱스 빌드(`parseTabRows` — 실제로 그 칸에 제출을 기록한다)
+ *   ② 작업표 생성(`worktablePlan.ensureReviewColumn` — 그 칸이 없으면 만들어 붙인다).
+ *   사본을 두면 **만든 칸과 읽는 칸이 갈려** 제출이 어디에도 안 남는다(2026-08-21 `submit_column_missing` 계열).
+ * ★ 본문은 종전 `parseTabRows` 인라인 판정 그대로다(3단계 폴백·제외패턴 포함) — 옮기기만 했다.
+ *
+ * @param {string[]} headers
+ * @param {{dbColMap?:object, drift?:object}} [opts] DB 매핑(있으면 최우선). 생성 단계처럼 매핑이 없으면 생략.
+ */
+function findSubmitColumnIndex(headers, opts = {}) {
+  const list = Array.isArray(headers) ? headers.map(h => String(h == null ? '' : h)) : [];
+  if (!list.length) return -1;
+  const dbColMap = opts.dbColMap || null;
+  const drift = opts.drift || null;
+  const kws = Array.isArray(opts.submitKeywords) && opts.submitKeywords.length
+    ? opts.submitKeywords : DEFAULT_SUBMIT_KEYWORDS;
+  return _findSubmitIdx(list, dbColMap, drift, kws);
+}
+
+function _findSubmitIdx(headers, dbColMap, drift, SUBMIT_KEYWORDS) {
+  const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];
+  // ★★ '포스팅' 제외(2026-08-19 블로그 E2E 실측): 블로그체험단 작업표의 '포스팅제출일' 헤더가
+  //   완료신호 '제출'을 포함해 2단계에서 **리뷰제출 열로 오탐**됐다 — 제출 표시('제출')가 날짜 칸에
+  //   들어갔다가 포스팅제출일 스탬프에 덮이고, 진짜 '리뷰' 칸은 비어 is_submitted 가 장부 재생성마다
+  //   FALSE 로 무너졌다. 포스팅 계열 칸(포스팅결과URL·포스팅제출일)은 결과물·날짜 칸이지 제출 표시
+  //   칸이 아니므로 이름열과 같은 급으로 제외한다(제외 후 3단계가 '리뷰' 단독 열을 정상 채택).
+  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주', '포스팅'];
+  // ★★ 8/3 실측 사고(박은비 탭): SUBMIT_KEYWORDS에 완료신호 단어(제출/완료/submit)와 함께
+  //   넓은 catch-all인 '리뷰' 단독도 섞여 있다. 1·2단계(우선탐지)에서 '리뷰'를 그대로 매칭에
+  //   쓰면 그 자체가 SUBMIT_PRIORITY_PREFIXES('리뷰')와 항상 동시에 참이 되어 AND 조건이
+  //   무력화된다 — '리뷰가이드'(작업지시 열, 항상 값이 차 있음) 같은 열이 실제 '리뷰제출'열보다
+  //   먼저 잡혀 참여자 전원이 제출완료로 오판정됐다(2단계도 같은 이유로 동일 오탐).
+  //   → 1·2단계(우선탐지)는 완료신호 키워드만 쓰고, '리뷰' 단독 매칭은 완료신호 열이 전혀
+  //   없을 때의 최후수단(3단계, 기존 동작 그대로)에만 남긴다.
+  const SUBMIT_COMPLETION_KEYWORDS = SUBMIT_KEYWORDS.filter(k => k !== '리뷰');
+  let submitColIdx = _dbCol(dbColMap, 'review_submit', headers, drift);
+  if (submitColIdx < 0) {
+    for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+      const hl = headers[hi].toLowerCase();
+      if (SUBMIT_PRIORITY_PREFIXES.some(p => hl.includes(p)) &&
+          SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+        submitColIdx = hi;
+      }
+    }
+    if (submitColIdx < 0) {
+      for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+        const hl = headers[hi].toLowerCase();
+        if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) continue;
+        if (SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) submitColIdx = hi;
+      }
+    }
+    // ★★ 8/4 재발(면마스크 탭 실측): 3단계(최후수단, 바로 위 두 단계가 못 찾았을 때만 도달)는
+    //   '리뷰' 단독 매칭까지 허용해야 하는 이유가 있다 — 이 탭처럼 완료열 이름이 아예 '리뷰'
+    //   뿐(리뷰제출/리뷰완료 접미 없음)인 정상 시트도 실재한다. 문제는 이 단계에 제외패턴이
+    //   없어서, 완료열이 헤더 순서상 '주문자제출'(이름열, '제출' 포함)보다 뒤에 있으면
+    //   '주문자제출'을 먼저 집어 전원 제출완료로 오판정한다(2단계에서 이미 걸러지던 예외를
+    //   3단계가 다시 무방비로 통과시킴). → 2단계와 동일하게 이름열 제외패턴을 적용해
+    //   '리뷰' 단독 매칭은 허용하되 이름류 열은 여전히 걸러낸다.
+    if (submitColIdx < 0) {
+      submitColIdx = headers.findIndex(h => {
+        const hl = h.toLowerCase();
+        if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) return false;
+        return SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()));
+      });
+    }
+  }
+
+  return submitColIdx;
+}
+
+module.exports = { parseTabRows, findPaymentColumnIndex, findSubmitColumnIndex, DEFAULT_SUBMIT_KEYWORDS, _dbCol, _isDataTabRow, _isSubmittedValue, _formatDate };

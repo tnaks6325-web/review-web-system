@@ -238,9 +238,14 @@ async function getPlanOverview(campaignId) {
  *  ★ 런타임 정원 판정(computeCampaignState)이 총량으로 쓰는 값과 같은 것을 본다 —
  *    시트 일정 공고는 시트 행 수(totalSlots), 그 외는 `recruit_total`.
  *    다른 값을 쓰면 "화면에서는 저장됐는데 실제로는 안 열리는" 계획이 생긴다. */
-function _totalCapFor(camp, schedule) {
+function _totalCapFor(camp, schedule, orderTotal = 0) {
   if (schedule && schedule !== 'unknown' && Number(schedule.totalSlots) > 0) return Number(schedule.totalSlots);
-  return Number(camp && camp.recruit_total) || 0;
+  /* ★★ 발주 폴백(2026-08-24) — 공고 총인원이 0(미설정)이면 **발주서 총건수가 실제 정원**이다
+     (`displayRecruitTotal` = 상태엔진·작업 조건 카드와 같은 판정). 종전엔 `recruit_total` 만 봐서
+     그런 작업은 `totalCap=0` 이 되어 **총량 게이트가 통째로 생략**됐다 — 정원이 발주에만 있는
+     작업이 운영에 흔하므로, 게이트가 가장 필요한 곳에서 꺼져 있던 셈이다. */
+  const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
+  return displayRecruitTotal(camp && camp.recruit_total, orderTotal).total;
 }
 
 async function savePlans(campaignId, body, actor) {
@@ -261,6 +266,14 @@ async function savePlans(campaignId, body, actor) {
   //     (모르면 일건수 기준의 보수적 검사로 떨어진다 — 저장을 통째로 막지 않는다).
   let schedule = null;
   try { schedule = await _scheduleFor(camp); } catch (_) { schedule = null; }
+  /* 연결 발주의 총건수 — 공고 총인원이 0 일 때 총량 게이트가 볼 값.
+     ★ fail-soft: 조회 실패면 0 = 종전 동작(공고 값만 본다). 게이트가 죽어 저장이 막히면 안 된다. */
+  let orderTotal = 0;
+  try {
+    const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');
+    const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
+    orderTotal = Number(wo && wo.recruit_count) || 0;
+  } catch (e) { logger.warn(`[campaignPlan] 연결 발주 정원 조회 실패(공고 값만 사용) camp=${campaignId}: ${e.message}`); }
 
   const today = kstTodayStr();
   const seen = new Set();
@@ -333,7 +346,7 @@ async function savePlans(campaignId, body, actor) {
        ★ 총량 0(무제한)·set 없음(해제만)은 검사 대상이 아니다.
        ★ 조회 실패는 **통과**시키고 경고만 남긴다(fail-open) — 이 게이트가 죽었다고 조절 자체가
          막히면 막다른 길이 되고, 실제로 총량을 넘겨 열리는 것은 런타임 clamp 가 막는다. */
-    const totalCap = _totalCapFor(camp, schedule);
+    const totalCap = _totalCapFor(camp, schedule, orderTotal);
     if (totalCap > 0 && set.length) {
       let sp = false;
       try { await client.query('SAVEPOINT plan_total'); sp = true; } catch (_) {}
@@ -488,6 +501,41 @@ async function savePlans(campaignId, body, actor) {
             try { await client.query('RELEASE SAVEPOINT cp_auto_rebuild'); } catch (_) {}
             worktableSync.rebuild = { ok: false, reason: err.code || 'rebuild_failed', message: err.message };
             logger.warn(`[campaignPlan] 저장 후 자동 재구성 실패(계획 저장은 유지) camp=${campaignId}: ${err.message}`);
+          }
+        }
+        /* ★★ 작업표 줄 수 대조(2026-08-24 신고 — "총건수 500인데 홈에 581") ────────────────
+           총량 게이트(위)는 **계획 합계**만 본다. 그런데 이번 사고의 여분 줄은 *계획에 없는 날짜*의
+           준비 행이었다 — 접수(작업오더 배분)가 깔아 둔 줄인데, 조절 동기화는 규율상 **저장한
+           날짜만** 손대므로 그 줄들이 그대로 남아 총건수를 넘긴다.
+           ★★ 그렇다고 **저장을 거부하지 않는다** — 그 줄은 이번 조절이 만든 것이 아니고, 막으면
+              고치러 들어온 담당자가 아무것도 못 하는 막다른 길이 된다(레포의 반복 규율).
+           ★ 대신 **사실을 응답에 실어 화면이 말한다**(조용한 누락 금지) — 이 신호가 곧 소급 정리
+              (계획 밖 날짜를 조절 대상에 넣어 다시 저장)로 가는 안내다.
+           ★ 읽기 전용 · SAVEPOINT 격리 · 어떤 실패도 저장을 되돌리지 않는다. */
+        if (totalCap > 0) {
+          let sp = false;
+          try { await client.query('SAVEPOINT cp_row_audit'); sp = true; } catch (_) {}
+          try {
+            /* ★ `campaign_participants.start_date` 는 `8 / 31 (월)` 같은 **표시 문자열(TEXT)** 이라
+                 여기서 날짜로 캐스팅하지 않는다 — 줄 수만 센다. "왜 많은지"는 추정하지 않는다
+                 (모르는 것을 지어내지 않는다 — 원인은 [📅 인원] 표에서 사람이 본다). */
+            const { rows: ar } = await client.query(
+              `SELECT COUNT(*)::int AS rows_n FROM campaign_participants
+                WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE`,
+              [camp.linked_sheet_id, camp.linked_tab_name]);
+            if (sp) await client.query('RELEASE SAVEPOINT cp_row_audit');
+            const rowsN = Number(ar[0] && ar[0].rows_n) || 0;
+            if (rowsN > totalCap) {
+              worktableSync.rowAudit = {
+                rows: rowsN, cap: totalCap, over: rowsN - totalCap,
+                message: `작업표 줄이 ${rowsN.toLocaleString()}줄로 총건수 ${totalCap.toLocaleString()}건보다 `
+                  + `${(rowsN - totalCap).toLocaleString()}줄 많습니다 — [📅 인원]에서 날짜별 인원을 확인해 주세요.`,
+              };
+              logger.warn(`[campaignPlan] 작업표 줄(${rowsN}) > 총건수(${totalCap}) camp=${campaignId}`);
+            }
+          } catch (e) {
+            if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT cp_row_audit'); } catch (_) {} }
+            logger.warn(`[campaignPlan] 작업표 줄 수 대조 실패(저장은 유지) camp=${campaignId}: ${e.message}`);
           }
         }
       } else {

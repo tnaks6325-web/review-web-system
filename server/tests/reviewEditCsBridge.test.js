@@ -1,5 +1,5 @@
 /**
- * reviewEditCsBridge.test.js — 리뷰이미지 교체요청 ↔ C/S 문의창구 연동 회귀가드
+ * reviewEditCsBridge.test.js — 리뷰캡처 교체요청 ↔ C/S 문의창구 연동 회귀가드
  * 실행: node tests/reviewEditCsBridge.test.js
  *
  * 이 연동의 위험 네 가지를 고정한다.
@@ -21,7 +21,7 @@ const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
 
-console.log('\n▶ 리뷰이미지 교체요청 ↔ C/S 연동 회귀가드\n');
+console.log('\n▶ 리뷰캡처 교체요청 ↔ C/S 연동 회귀가드\n');
 
 const MIG = R('migrations/080_cs_message_card.sql');
 const BR = R('src/services/csBridge.service.js');
@@ -102,8 +102,8 @@ t('★★ 기존 스레드의 라벨·이름을 덮어쓰지 않는다(시트제
 });
 t('★ 승인/반려는 카드를 제자리 갱신 + 통지 메시지는 따로', () => {
   assert.ok(/SET meta = meta \|\| \$2::jsonb/.test(BR), 'meta 를 통째로 덮으면 requestId·파일ID 가 날아간다');
-  assert.ok(/리뷰이미지 수정요청이 승인되었습니다\./.test(BR));
-  assert.ok(/리뷰이미지 수정요청이 반려되었습니다[\s\S]{0,40}사유/.test(BR));
+  assert.ok(/리뷰캡처 수정요청이 승인되었습니다\./.test(BR));
+  assert.ok(/리뷰캡처 수정요청이 반려되었습니다[\s\S]{0,40}사유/.test(BR));
   assert.ok(/reviewer_unread_count = reviewer_unread_count \+ 1/.test(BR));
 });
 t('★ 처리 중 뒤늦은 스레드 생성은 "새 문의" 알림을 내지 않고, 재귀는 1회 제한', () => {
@@ -196,8 +196,16 @@ t('두 조회 엔드포인트가 msgType·meta 를 내려준다', () => {
 t('★ 기존 CS 이미지 허용목록을 넓히지 않았다(파일ID로 그린다)', () => {
   assert.ok(/\/api\/drive\/image\/' \+ encodeURIComponent\(id\)/.test(CARD));
   assert.ok(/\/\^\[-\\w\]\{20,\}\$\/\.test\(id\)/.test(CARD), '파일ID 형식 검증 없이 <img src> 에 넣는다');
+  /* ⚠ 2026-08-21: 같은 정규식이 두 라우트에 복사돼 있던 것을 **단일 출처**로 옮겼다
+     (`utils/csImageUrls` — 한쪽만 넓히면 그 경로로 임의 URL 이 들어온다). 검사 의미는 불변:
+     "우리 프록시 주소만 통과한다". 소비처는 그 단일 출처를 부르는지만 본다. */
+  const U = require('../src/utils/csImageUrls');
+  assert.ok(U.sanitizeCsImageUrls(['https://x.dev/api/order/guide-image/abcdefghij0123456789']).length === 1,
+    '우리 프록시 주소가 막힌다');
+  assert.ok(U.sanitizeCsImageUrls(['https://evil.example/a.png',
+    'https://x.dev/api/order/guide-image/short']).length === 0, '이미지 허용목록이 바뀌었다');
   [['cs.routes.js', CSR], ['reviewer.routes.js', RVR]].forEach(([n, s]) =>
-    assert.ok(/\/api\\\/order\\\/guide-image\\\/\[-\\w\]\{20,\}\$/.test(s), n + ': 이미지 허용목록이 바뀌었다'));
+    assert.ok(/require\((['"]).*csImageUrls\1\)/.test(s), n + ': 허용목록 단일 출처를 부르지 않는다'));
 });
 
 /* ── 7) 사본 금지 · 배선 ───────────────────────────────────── */
@@ -206,7 +214,7 @@ t('★ 카드 렌더러는 공유 모듈 하나뿐', () => {
   assert.ok(/window\.CsReviewEditCard = \{/.test(CARD));
   [['cs-inquiry.js', CSJ], ['reviewer-cs.js', RCS], ['workdesk.html', WD]].forEach(([n, s]) => {
     assert.ok(/CsReviewEditCard\.html\(/.test(s), n + ' 가 공용 렌더러를 안 쓴다');
-    assert.ok(!/리뷰이미지 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
+    assert.ok(!/리뷰캡처 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
   });
 });
 t('네 화면이 같은 모듈을 로드한다', () => {

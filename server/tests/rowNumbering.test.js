@@ -284,9 +284,10 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
   console.log('\n[H] 전체 작업 스캔 — 한 쿼리 집계 · 읽기 전용 · 키 목록 단일 출처');
   {
     const pool = makePool([[/FROM tab_configs/i, { rows: [
-      { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', total: 187, blankNumber: 42, dupNumber: 0 },
-      { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 100, blankNumber: 0, dupNumber: 0 },
-      { sheetId: 'S3', tabName: 'T3', displayName: '위프(중복줄 정리 뒤)', total: 800, blankNumber: 0, dupNumber: 233, pairedBlank: 233 },
+      { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', total: 187, blankNumber: 42, dupNumber: 0, pairedBlank: 0, hasNumberCol: true },
+      { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 100, blankNumber: 0, dupNumber: 0, pairedBlank: 0,
+        numericNumber: 100, minNumber: 1, maxNumber: 100, hasNumberCol: true },
+      { sheetId: 'S3', tabName: 'T3', displayName: '위프(중복줄 정리 뒤)', total: 800, blankNumber: 0, dupNumber: 233, pairedBlank: 233, hasNumberCol: true },
     ] }]]);
     S.__setPoolForTest(pool);
     const r = await S.scanNumbering({});
@@ -358,9 +359,10 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const opened = [];
     const pool = makePool([
       [/FROM tab_configs tc/i, { rows: [
-        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 100, blankNumber: 5, dupNumber: 0 },
-        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 100, blankNumber: 0, dupNumber: 0 },   // 이미 정리됨
-        { sheetId: 'S3', tabName: 'T3', displayName: 'C', total: 100, blankNumber: 0, dupNumber: 7, pairedBlank: 7 },
+        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 100, blankNumber: 5, dupNumber: 0, pairedBlank: 0, hasNumberCol: true },
+        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 100, blankNumber: 0, dupNumber: 0, pairedBlank: 0,
+          numericNumber: 100, minNumber: 1, maxNumber: 100, hasNumberCol: true },   // 이미 정리됨
+        { sheetId: 'S3', tabName: 'T3', displayName: 'C', total: 100, blankNumber: 0, dupNumber: 7, pairedBlank: 7, hasNumberCol: true },
       ] }],
       [/FROM tab_configs\s+WHERE sheet_id/i, (p) => { opened.push(p[1]); return { rows: [{ sheetless: true }] }; }],
       [/FROM campaign_participants p/i, { rows: [] }],
@@ -384,7 +386,7 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
       const order = [];
       const pool2 = makePool([
         [/WITH base AS[\s\S]*pairedBlank/i, { rows: [
-          { sheetId: 'S9', tabName: 'T9', displayName: 'X', total: 10, blankNumber: 0, dupNumber: 0, pairedBlank: 3 }] }],
+          { sheetId: 'S9', tabName: 'T9', displayName: 'X', total: 10, blankNumber: 0, dupNumber: 0, pairedBlank: 3, hasNumberCol: true }] }],
         [/WITH base AS/i, () => { order.push('clean-select'); return { rows: [{ seq: 2, num: '5' }] }; }],
         [/FROM tab_configs\s+WHERE sheet_id/i, () => { order.push('renumber'); return { rows: [{ sheetless: true }] }; }],
         [/FROM campaign_participants p/i, { rows: [] }],
@@ -406,7 +408,7 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
 
     /* 사이클 상한 — 남은 것은 다음 사이클(업무 시간에 DB 를 흔들지 않는다) */
     S.__setPoolForTest(makePool([
-      [/FROM tab_configs tc/i, { rows: [1, 2, 3, 4].map(i => ({ sheetId: 'S' + i, tabName: 'T' + i, displayName: 'x', total: 9, blankNumber: 1 })) }],
+      [/FROM tab_configs tc/i, { rows: [1, 2, 3, 4].map(i => ({ sheetId: 'S' + i, tabName: 'T' + i, displayName: 'x', total: 9, blankNumber: 1, dupNumber: 0, pairedBlank: 0, hasNumberCol: true })) }],
       [/FROM tab_configs\s+WHERE sheet_id/i, { rows: [{ sheetless: true }] }],
       [/FROM campaign_participants p/i, { rows: [] }],
     ]));
@@ -417,8 +419,8 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     let calls = 0;
     S.__setPoolForTest({ query: async (sql) => {
       if (/FROM tab_configs tc/i.test(sql)) return { rows: [
-        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 9, blankNumber: 1 },
-        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 9, blankNumber: 1 }] };
+        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 9, blankNumber: 1, dupNumber: 0, pairedBlank: 0, hasNumberCol: true },
+        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 9, blankNumber: 1, dupNumber: 0, pairedBlank: 0, hasNumberCol: true }] };
       if (/FROM tab_configs\s+WHERE sheet_id/i.test(sql)) { calls++; if (calls === 1) throw new Error('boom'); return { rows: [{ sheetless: true }] }; }
       return { rows: [] };
     } });
@@ -449,81 +451,214 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 다른 크론과 분이 겹치지 않는다(기본 스케줄)', /'3-59\/5 \* \* \* \*'/.test(cronSrc));
   }
 
-  console.log('\n[G] 라우트·화면 배선');
+  /* ══════════════════════════════════════════════════════════════════════════
+     [G] 수동 창구는 **제거됐다** (사용자 확정 2026-08-23)
+
+     왜: 전수 점검에서 무시트 작업 113개 전부 대상 0건이었다 — 주문이 들어올 때·줄을
+     내릴 때 그 자리에서 매기고, 5분 스윕이 백스톱이라 사람이 누를 일이 없다.
+     ★ 지운 것은 **창구뿐** — 자동 경로가 쓰는 서비스(rowNumbering.service)는 그대로다.
+     ══════════════════════════════════════════════════════════════════════════ */
+  console.log('\n[G] 수동 창구 제거 — 자동 경로는 그대로');
   {
-    const rt = noLineComments(read('src/routes/trackB.routes.js'));
-    const blk = rt.slice(rt.indexOf("router.post('/worktable/renumber'"), rt.indexOf("router.post('/worktable/renumber-all'"));
-    ok('탭 단위 정리 = authMiddleware + internalMiddleware',
-      /router\.post\('\/worktable\/renumber',\s*authMiddleware,\s*internalMiddleware/.test(rt));
-    ok('★ confirm !== true 면 미리보기(쓰기 0)', /dryRun:\s*confirm\s*!==\s*true/.test(blk));
-    ok('★★ 줄 내리기는 명시 요청일 때만(기본 계약 = 번호만)', /if \(cleanBlanks === true\)/.test(blk));
-    ok('★★ 라우트도 정리 → 재번호 순서', blk.indexOf('cleanupPairedBlanks(') < blk.indexOf('renumberTab('));
-    ok('전체 소급 정리는 adminOrMaster',
-      /router\.post\('\/worktable\/renumber-all',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(rt));
-
+    const rt = read('src/routes/trackB.routes.js');
     const fe = read('../frontend/workdesk.html');
-    ok('★ 창구는 무시트 + 내부인일 때만',
-      /function _rnCanRenumber\(\)\{[\s\S]{0,200}sheetless === true[\s\S]{0,80}_isInternalRole\(\)/.test(fe));
-    ok('[⋯] 메뉴에 번호 정리 버튼', /openRenumberModal\(\)"[^>]*>🔢 번호 정리/.test(fe));
-    ok('★ 오버레이는 body 직속', /rnOv[\s\S]{0,600}document\.body\.appendChild\(ov\)/.test(fe));
-    ok('★ Esc 리스너는 최상위 1회', /_rnKeyBound/.test(fe));
-    /* ★ 문자열 존재만 보면 `if (false && !confirm(...))` 을 통과시킨다(변이시험 실측)
-         → **게이트 형태(`if (!confirm(`)** 자체를 고정한다. */
-    ok('★ 실행 전 confirm(번호가 바뀐다는 사실 고지)', /if \(!confirm\(`「\$\{_RN\.tabName\}」 표의 번호를/.test(fe));
-    ok('★ 프론트에 정렬 재계산 사본 없음(서버 결과만 그린다)',
-      !/orderRowsForNumbering|computeRenumberPlan/.test(fe));
+    ok('★★ 수동 라우트 3종이 없다(renumber · renumber-scan · renumber-all)',
+      !/router\.(post|get)\('\/worktable\/renumber/.test(rt));
+    ok('★★ 화면에 번호 정리 창구가 없다',
+      !/openRenumberModal|_rnCanRenumber|_rnRender|rnRunOne/.test(fe));
+    ok('★ 전용 CSS 도 남기지 않는다(#rnOv)', !/#rnOv/.test(fe));
 
-    ok('전체 조회 라우트 = adminOrMaster(읽기 전용)',
-      /router\.get\('\/worktable\/renumber-scan',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(rt));
-    ok('★ 전체 작업 진입점(탈시트 전환 헤더)', /openRenumberModal\(\{all:true\}\)"[^>]*>🔢 번호 정리/.test(fe));
-    ok('★ 모달은 한 벌 — 모드만 바뀐다(사본 금지)',
-      (fe.match(/function openRenumberModal\(/g) || []).length === 1 &&
-      /_RN\.mode === 'all'/.test(fe));
-    ok('★ 전체 모드는 작업을 안 골라도 열린다', /if \(!all && !_rnCanRenumber\(\)\) return;/.test(fe));
-    ok('★ 목록 행 실행은 인덱스만 넘긴다(작업명 보간 금지)',
-      /onclick="rnRunOne\(\$\{i\}\)"/.test(fe) && !/rnRunOne\('\$\{esc/.test(fe));
-    ok('★ 전체 실행 전 confirm(번호가 바뀐다는 사실 고지)', /if \(!confirm\(`무시트 작업 \$\{s\.needTabs\}개의 번호를/.test(fe));
-    ok('★ 실패한 작업을 조용히 넘기지 않는다', /정리하지 못한 작업/.test(fe));
-    ok('★ 목록이 잘리면 고지', /목록이 잘렸습니다/.test(fe));
+    /* ★★ 지우면 안 되는 것 — 자동 경로. 여기가 빨개지면 번호가 영영 안 매겨진다. */
+    const svc = read('src/services/rowNumbering.service.js');
+    ok('★★ 서비스는 그대로 있다', /renumberTabInTx/.test(svc) && /sweepNumbering/.test(svc));
+    ok('★★ 주문 기록이 그 자리에서 매긴다',
+      /renumberTabInTx/.test(read('src/services/sheetlessOrder.service.js')));
+    ok('★★ 줄 삭제도 그 자리에서 매긴다',
+      /renumberTabInTx/.test(read('src/services/trackB.service.js')));
+    ok('★★ 5분 스윕이 백스톱', /sweepNumbering/.test(read('src/jobs/cron.js')));
+  }
 
-    /* ── 팝업 조작성(실측 신고 2026-08-19: 121개 목록이 세로로 무한히 길어 조작 불가) ── */
-    ok('★★ 모달 높이 상한(뷰포트를 넘지 않는다)', /#rnOv \.wbl-dlg\{[^}]*max-height:86vh/.test(fe));
-    ok('★★ 본문이 스크롤 컨테이너(min-height:0 없으면 flex 자식이 내용만큼 늘어나 스크롤이 안 생긴다)',
-      /#rnOv \.wbl-db\{[^}]*flex:1;min-height:0;overflow:auto/.test(fe));
-    ok('★★ 전역 table{overflow:hidden} 상쇄(없으면 sticky 표머리가 조용히 죽는다)',
-      /#rnOv \.wbl-wrt\{[^}]*overflow:visible/.test(fe));
-    ok('★ sticky 표머리 + border-collapse:separate(collapse 에서는 sticky 가 안 먹는다)',
-      /#rnOv \.wbl-wrt\{[^}]*border-collapse:separate/.test(fe) && /#rnOv \.wbl-wrt th\{position:sticky/.test(fe));
-    ok('★ 표를 감싸는 래퍼에 overflow 를 두지 않는다(sticky 기준을 가로챈다)',
-      !/#rnOv \.rn-tw\{[^}]*overflow/.test(fe));
-    ok('★★ 검색은 행만 갈아끼운다(입력칸 재생성 = 한글 IME 파괴)',
-      /oninput="_RN\.q=this\.value;_rnRows\(\)"/.test(fe) &&
-      /function _rnRows\(\)\{[\s\S]{0,400}getElementById\('rnRows'\)/.test(fe));
-    ok('★ 기본은 정리 대상만 보기(121개를 다 늘어놓지 않는다)', /_RN\.onlyNeed !== false/.test(fe));
-    ok('★★ 화면 판정도 중복·짝 빈 줄을 포함한다(서버 대상과 갈리면 "목록엔 없는데 자동으로 바뀐다")',
-      /r\.blankNumber > 0 \|\| r\.dupNumber > 0 \|\| r\.pairedBlank > 0/.test(fe));
-    ok('★★ 실행 요청에 cleanBlanks 를 실어 보낸다', (fe.match(/cleanBlanks: true/g) || []).length === 2);
-    ok('★ 확인창이 "줄이 내려간다"를 말한다(되돌릴 수 있음 포함)', /짝 빈 줄 \$\{r\.pairedBlank\}줄은 표에서 내려갑니다\(되돌릴 수 있습니다\)/.test(fe));
-    ok('★ 짝 없는 빈 자리는 그대로 둔다고 화면이 말한다', /짝이 없는 빈 자리\(아직 안 팔린 미래 자리\)는 그대로 둡니다/.test(fe));
-    ok('★ 빈 줄 자체를 내리는 창구를 안내한다(번호 정리가 줄을 지우지 않는다)', /🧹 줄 정리\]를 쓰세요/.test(fe));
-    ok('★★ 필터·검색 중에도 실행은 원본 인덱스로(보이는 순번으로 넘기면 남의 작업을 정리한다)',
-      /const i = all\.indexOf\(r\);/.test(fe));
-    ok('★ 빈 목록도 사유를 말한다', /검색 결과가 없습니다/.test(fe) && /정리할 작업이 없습니다/.test(fe));
+  /* ══════════════════════════════════════════════════════════════════════════
+     [K] 번호 어긋남 자동 정리 (2026-08-23 신고: "1번 행을 지웠는데 2번이 시작번호")
 
-    /* ★★ 헤더 칸 수 ≡ 행 칸 수 ≡ colspan — 열을 끼워 넣을 때 가장 흔히 깨지는 자리.
-         담당자 열이 되살아나면 여기서 걸린다(사용자 확정: 담당자는 번호 정리 대상 아님). */
-    const allBlk = fe.slice(fe.indexOf('function _rnRenderAll('), fe.indexOf('function _rnNeed('));
-    const rowsBlk = fe.slice(fe.indexOf('function _rnRows('), fe.indexOf('/* 서버가 준 사유를'));
-    const th = (allBlk.match(/<th>/g) || []).length;
-    const td = (rowsBlk.match(/<td[ >]/g) || []).length - (rowsBlk.match(/<td colspan/g) || []).length;  // 빈 목록 줄 제외
-    ok('★★ 전체 목록 표는 6칸(작업·표 줄·번호 빈칸·번호 중복·짝 빈 줄·버튼)', th === 6, '헤더 ' + th);
-    ok('★★ 행 칸 수 = 헤더 칸 수', td === th, `헤더 ${th} · 행 ${td}`);
-    ok('★ 빈 목록 colspan 도 같은 칸 수', new RegExp('colspan="' + th + '"').test(rowsBlk));
-    const thead = allBlk.slice(allBlk.indexOf('<thead>'), allBlk.indexOf('</thead>'));
-    ok('★★ 표에 담당자 열이 없다', !/담당자/.test(thead) && !/담당자|blankManager/.test(rowsBlk), thead.slice(0, 120));
-    ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만<\/b> 어긋난 작업은 여기 숫자로 드러나지 않습니다/.test(fe));
-    ok('★ 자동으로 돈다는 사실을 화면이 말한다(수동 버튼은 즉시 실행용)',
-      /5분마다 자동으로 정리됩니다/.test(fe) && /5분 주기로 자동<\/b> 정리되므로/.test(fe));
+     고정하는 것:
+       ① 판정은 순수함수 hasNumberGap **한 곳** — 스캔 SQL 은 원재료(개수·최솟·최댓값)만 센다
+       ② 상한(MAX_RENUMBER_ROWS) 초과 표는 대상이 아니다 — 매 주기 다시 쓰는 무한 루프 방지
+       ③ 번호 칸이 없는 탭은 대상이 아니다 — 재번호가 no-op 인데 사이클 상한을 영구히 먹는다
+       ④ 줄을 지우는 경로가 **그 자리에서** 다시 매긴다(스윕은 백스톱)
+       ⑤ 화면은 서버가 실은 need 를 그대로 쓴다(판정 사본 0)
+     ══════════════════════════════════════════════════════════════════════════ */
+  console.log('\n[K] 번호 어긋남(1..N 아님) 자동 정리');
+  {
+    const g = (o) => U.hasNumberGap(o);
+    const base = { total: 5, blankNumber: 0, dupNumber: 0, numericNumber: 5, minNumber: 1, maxNumber: 5 };
+    ok('★★ 1번 줄을 지운 뒤(2..6) = 정리 대상', g({ ...base, minNumber: 2, maxNumber: 6 }) === true);
+    ok('★ 이미 1..N 이면 대상 아님', g(base) === false);
+    ok('★ 중간 결번(1..7 에 5줄)도 대상', g({ ...base, minNumber: 1, maxNumber: 7 }) === true);
+    ok('★ 숫자가 아닌 번호가 섞이면 대상(재번호가 반드시 바꾼다)', g({ ...base, numericNumber: 4 }) === true);
+    ok('★ 빈칸·중복은 다른 신호가 잡는다(같은 사실을 두 번 세지 않는다)',
+      g({ ...base, blankNumber: 1, minNumber: 2 }) === false && g({ ...base, dupNumber: 1, minNumber: 2 }) === false);
+    ok('★ 빈 표는 대상 아님', g({ ...base, total: 0 }) === false);
+    ok('★★ 재번호 상한을 넘는 표는 대상 아님(매 주기 다시 쓰는 무한 루프 차단)',
+      g({ total: U.MAX_RENUMBER_ROWS + 1, blankNumber: 0, dupNumber: 0,
+          numericNumber: U.MAX_RENUMBER_ROWS + 1, minNumber: 2, maxNumber: U.MAX_RENUMBER_ROWS + 2 }) === false);
+    ok('★ 최솟·최댓값을 모르면(전부 비숫자) 대상', g({ ...base, numericNumber: 5, minNumber: null, maxNumber: null }) === true);
+
+    /* 상한은 재번호 쿼리의 LIMIT 과 **같은 값**이어야 한다 — 다르면 상한 사이의 표가 영구 루프. */
+    const svc = noLineComments(read('src/services/rowNumbering.service.js'));
+    ok('★★ 상한은 utils 단일 출처(서비스가 그 값을 LIMIT 으로 쓴다)',
+      /const MAX_ROWS = MAX_RENUMBER_ROWS;/.test(svc) && /LIMIT \$\{MAX_ROWS\}/.test(svc));
+
+    /* ★★ 판정 사본 0 — SQL 은 세기만, 조건은 순수함수가. */
+    ok('★★ 스캔 SQL 에 판정 조건이 없다(원재료만 센다)',
+      /AS "numericNumber"/.test(svc) && /AS "minNumber"/.test(svc) && /AS "maxNumber"/.test(svc)
+      && !/minNumber\s*(<>|!=|=)\s*1/.test(svc.slice(svc.indexOf('WITH base AS'), svc.indexOf('LIMIT ${cap'))));
+    ok('★ 판정은 utils 의 hasNumberGap 을 부른다', /hasNumberGap\(/.test(svc));
+
+    /* 스캔이 대상 판정(need)을 항목마다 싣는다 — 스윕·화면이 같은 값을 본다. */
+    const pool = makePool([[/FROM tab_configs tc/i, { rows: [
+      { sheetId: 'S1', tabName: 'T1', displayName: '1번 지운 작업', total: 15, blankNumber: 0, dupNumber: 0,
+        pairedBlank: 0, numericNumber: 15, minNumber: 2, maxNumber: 16, hasNumberCol: true },
+      { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 15, blankNumber: 0, dupNumber: 0,
+        pairedBlank: 0, numericNumber: 15, minNumber: 1, maxNumber: 15, hasNumberCol: true },
+      { sheetId: 'S3', tabName: 'T3', displayName: '번호 칸 없음', total: 300, blankNumber: 300, dupNumber: 0,
+        pairedBlank: 0, numericNumber: 0, minNumber: null, maxNumber: null, hasNumberCol: false },
+    ] }]]);
+    S.__setPoolForTest(pool);
+    const sc = await S.scanNumbering({});
+    ok('★★ 1번을 지운 작업이 대상으로 잡힌다(종전 세 신호로는 전부 0 이었다)',
+      sc.items[0].seqGap === true && sc.items[0].need === true, JSON.stringify(sc.items[0]));
+    ok('★ 정상 작업은 대상 아님', sc.items[1].seqGap === false && sc.items[1].need === false);
+    ok('★★★ 번호 칸이 없는 탭은 대상이 아니다 — 재번호가 no_target_column 으로 아무것도 못 하는데 ' +
+       '빈칸 수가 커서 정렬 맨 앞을 차지해 **진짜 대상을 사이클 상한 밖으로 영구히 밀어냈다**',
+      sc.items[2].need === false, JSON.stringify(sc.items[2]));
+    ok('★ 대상 수도 같은 판정으로 센다', sc.needTabs === 1 && sc.seqGapTabs === 1, JSON.stringify(sc));
+
+    /* 스윕이 그 탭을 **실제로** 연다(정적 검사만으로는 조건 제거를 놓친다). */
+    const opened = [];
+    S.__setPoolForTest(makePool([
+      [/FROM tab_configs tc/i, { rows: [
+        { sheetId: 'S1', tabName: 'T1', displayName: '1번 지운 작업', total: 15, blankNumber: 0, dupNumber: 0,
+          pairedBlank: 0, numericNumber: 15, minNumber: 2, maxNumber: 16, hasNumberCol: true },
+        { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 15, blankNumber: 0, dupNumber: 0,
+          pairedBlank: 0, numericNumber: 15, minNumber: 1, maxNumber: 15, hasNumberCol: true },
+        { sheetId: 'S3', tabName: 'T3', displayName: '번호 칸 없음', total: 300, blankNumber: 300, dupNumber: 0,
+          pairedBlank: 0, numericNumber: 0, minNumber: null, maxNumber: null, hasNumberCol: false },
+      ] }],
+      [/FROM tab_configs\s+WHERE sheet_id/i, (p) => { opened.push(p[1]); return { rows: [{ sheetless: true }] }; }],
+      [/FROM campaign_participants p/i, { rows: [] }],
+    ]));
+    const sw = await S.sweepNumbering({ cap: 10 });
+    ok('★★ 스윕이 번호 어긋난 작업만 연다(정상·번호 칸 없는 탭은 열지 않는다)',
+      opened.join(',') === 'T1', opened.join(',') + ' / ' + JSON.stringify(sw));
+    ok('★ 스윕은 스캔이 실은 need 를 그대로 쓴다(조건 사본 0)',
+      /filter\(r => r\.need\)/.test(svc.slice(svc.indexOf('async function sweepNumbering'))));
+
+    /* ④ 줄을 지우는 경로가 그 자리에서 다시 매긴다 — 스윕은 백스톱이지 유일한 길이 아니다. */
+    const tbs = noLineComments(read('src/services/trackB.service.js'));
+    const hideBlk = tbs.slice(tbs.indexOf('async function _hideParticipantInTx('),
+                              tbs.indexOf('async function hideWorkdeskRow('));
+    ok('★★ 행 삭제(하드 삭제 + 빈 자리 보충)가 재번호를 부른다', /renumberTabInTx\(client,/.test(hideBlk));
+    ok('★★ SAVEPOINT 격리 경로로 부른다(번호 때문에 행 삭제·주문 취소가 롤백되면 안 된다)',
+      /renumberTabInTx/.test(hideBlk) && !/\brenumberTab\(/.test(hideBlk));
+    ok('★★ 보충 슬롯을 만든 **뒤** 다시 매긴다(그 줄까지 번호에 든다)',
+      hideBlk.indexOf('INSERT INTO campaign_participants') < hideBlk.indexOf('renumberTabInTx'));
+    ok('★★ 장부 재생성보다 먼저 매긴다(재생성이 row_json 을 읽는다)',
+      tbs.indexOf('renumberTabInTx(client,') < tbs.indexOf('_rebuildWorkdeskLedgers({ sheetId, tabName, by: `participant-delete'));
+
+    const led = noLineComments(read('src/services/sheetlessLedger.service.js'));
+    ok('★ 줄 정리·중복 정리 3경로도 같은 훅을 쓴다(사본 0)',
+      (led.match(/_renumberAfterRetire\(/g) || []).length === 4, String((led.match(/_renumberAfterRetire\(/g) || []).length));
+    const retBlk = led.slice(led.indexOf('async function retireRows('), led.indexOf('async function dedupeRows('));
+    ok('★★ 줄 정리도 장부 재생성보다 먼저 매긴다',
+      retBlk.indexOf('_renumberAfterRetire(') < retBlk.indexOf('rebuildLedgers('));
+    const hookBlk = led.slice(led.indexOf('async function _renumberAfterRetire('), led.indexOf('async function retireRows('));
+    ok('★★ 훅은 절대 throw 하지 않는다(정리는 이미 끝났다 — 번호로 되돌리면 안 된다)',
+      /try \{/.test(hookBlk) && /catch \(e\) \{/.test(hookBlk) && !/throw/.test(hookBlk));
+
+    /* ⑤ 화면 판정은 창구와 함께 사라졌다 — 이제 스윕만 need 를 본다(판정 사본이 구조적으로 0). */
+    ok('★ 화면에 need 판정 사본이 없다', !/openRenumberModal|_rnNeed/.test(read('../frontend/workdesk.html')));
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     [L] 핑퐁 차단 — 재번호는 장부(review_index)까지 다시 만든다 (2026-08-23 프로덕션 실측)
+
+     증상: 5분 스윕이 12탭을 고치면(대상 35→23) 10분 뒤 그대로 되돌아왔다(23→35).
+     원인: 무시트 탭의 진실원본은 작업표인데 `participants.importTabFromIndex` 가
+           `row_json = EXCLUDED.row_json` 로 **review_index 값을 작업표에 덮는다**
+           (TRACK_B_PROJECTION / PARTICIPANTS_AUTO_SYNC 10분 크론).
+           재번호만 장부를 안 만들어 다음 투영이 옛 번호(빈칸)를 도로 밀어 넣었다.
+     결과: 빈칸 탭이 매 사이클 앞자리를 다시 차지 → **번호 어긋남 탭은 영영 차례가 안 왔다**.
+     ══════════════════════════════════════════════════════════════════════════ */
+  console.log('\n[L] 재번호 후 장부 재생성 — 5분 고치고 10분 되돌아가던 핑퐁 차단');
+  {
+    const led = require('../src/services/sheetlessLedger.service');
+    const keep = led.rebuildLedgers;
+    const mkPool = (changed) => makePool([
+      [/FROM tab_configs WHERE sheet_id/i, { rows: [{ sheetless: true }] }],
+      [/FROM campaign_participants p/i, { rows: [
+        { id: 'a', seq: 2, row_json: { '번호': '', '구매일자': '8 / 20 (수)' }, submitted_at: null, filled: true },
+        { id: 'b', seq: 3, row_json: { '번호': '2', '구매일자': '8 / 20 (수)' }, submitted_at: null, filled: true },
+      ] }],
+      [/^UPDATE campaign_participants/i, { rowCount: changed }],
+    ]);
+
+    let calls = [];
+    led.rebuildLedgers = async (a) => { calls.push(a); return { indexRows: 2 }; };
+
+    S.__setPoolForTest(mkPool(2));
+    const r1 = await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'cron', rebuild: true });
+    ok('★★★ rebuild:true 면 장부를 다시 만든다(안 하면 10분 투영이 되돌린다)',
+      r1.ok && calls.length === 1 && calls[0].sheetId === 'S1' && calls[0].tabName === 'T1', JSON.stringify(calls));
+
+    calls = []; S.__setPoolForTest(mkPool(2));
+    await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'auto' });
+    ok('★ 기본값(미지정)은 재생성하지 않는다 — 호출부가 곧바로 재생성하는 경로 보호(중복 금지)', calls.length === 0);
+
+    calls = []; S.__setPoolForTest(mkPool(2));
+    await S.renumberTab({ sheetId: 'S1', tabName: 'T1', dryRun: true, rebuild: true });
+    ok('★★ 미리보기는 재생성하지 않는다(쓰기 0 계약)', calls.length === 0);
+
+    calls = []; S.__setPoolForTest(mkPool(0));
+    await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'cron', rebuild: true });
+    ok('★ 바뀐 줄이 없으면 재생성하지 않는다(쓸데없는 부하 0)', calls.length === 0);
+
+    /* 트랜잭션 안에서는 절대 — 그 경로는 호출부가 커밋 뒤에 재생성한다. */
+    calls = [];
+    const cli = mkPool(2);
+    cli.query = (sql, p) => { if (/SAVEPOINT|RELEASE|ROLLBACK/i.test(sql)) return { rows: [] }; return mkPool(2).query(sql, p); };
+    await S.renumberTabInTx(cli, { sheetId: 'S1', tabName: 'T1' });
+    ok('★★ 트랜잭션 안(client)에서는 재생성하지 않는다', calls.length === 0);
+    /* ★★ rebuild:true 를 **명시로 넘겨도** client 가 있으면 하지 않는다 — 재생성은 자기 커넥션으로
+         도는 무거운 작업이라 남의 트랜잭션 안에서 돌리면 잠금을 오래 쥐고 커밋 경계를 흐린다.
+         (renumberTabInTx 가 rebuild 를 안 넘기는 것만 검사하면 이 가드 제거를 놓친다 — 변이시험 실측) */
+    calls = []; await S.renumberTab({ sheetId: 'S1', tabName: 'T1', client: cli, rebuild: true, by: 'x' });
+    ok('★★★ client + rebuild:true 여도 재생성하지 않는다(가드는 호출부가 아니라 여기 있다)', calls.length === 0);
+
+    /* 재생성 실패는 조용히 넘기지 않는다 — 번호는 이미 박혔으므로 사유만 싣는다. */
+    calls = []; led.rebuildLedgers = async () => { throw Object.assign(new Error('boom'), { code: 'rebuild_failed' }); };
+    S.__setPoolForTest(mkPool(2));
+    let threw = false, r2 = null;
+    try { r2 = await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'cron', rebuild: true }); } catch (_) { threw = true; }
+    ok('★★ 재생성 실패해도 throw 하지 않고 번호는 유지', !threw && r2 && r2.ok && r2.changed === 2);
+    ok('★ 실패 사유를 응답에 싣는다(조용한 실패 금지)', r2 && r2.ledgerError === 'rebuild_failed', JSON.stringify(r2));
+    led.rebuildLedgers = keep;
+
+    /* 소비처 배선 — 사람이 누르는 경로와 크론이 모두 켜져 있어야 핑퐁이 끝난다. */
+    const svc2 = noLineComments(read('src/services/rowNumbering.service.js'));
+    const swpBlk = svc2.slice(svc2.indexOf('async function sweepNumbering('));
+    ok('★★ 주기 스윕이 재생성을 켠다', /renumberTab\(\{[^}]*rebuild: true/.test(swpBlk), swpBlk.slice(swpBlk.indexOf('renumberTab('), swpBlk.indexOf('renumberTab(') + 120));
+    const allBlk3 = svc2.slice(svc2.indexOf('async function renumberAllSheetless('), svc2.indexOf('async function scanNumbering('));
+    ok('★★ 전체 정리도 재생성을 켠다', /renumberTab\(\{[^}]*rebuild: true/.test(allBlk3));
+    /* ★ 수동 [번호 정리] 라우트는 제거됐다(2026-08-23) — 재생성을 켜는 소비처는 자동 경로 둘뿐이다.
+         창구가 되살아나면 위 §G 가 먼저 빨개진다. */
+
+    /* ★ 무시트 작업표에 row_json 을 쓰는 다른 실행부는 전부 이미 재생성한다 — 재번호만 예외였다.
+         이 관행에서 다시 이탈하면 같은 핑퐁이 되살아난다. */
+    ['sheetlessStatus.service.js', 'worktableOptionColumn.service.js', 'sheetlessOrder.service.js']
+      .forEach(f => ok(`★ 관행 확인 — ${f} 는 쓰기 뒤 장부를 재생성한다`,
+        /rebuildLedgers/.test(read('src/services/' + f))));
   }
 
   console.log(`\n✅ rowNumbering 회귀가드 통과 (${passed}케이스)`);
