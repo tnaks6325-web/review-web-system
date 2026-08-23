@@ -63,7 +63,18 @@ console.log('\n2) 필터 판정 · 렌더 (vm 실행)');
 const s0 = WD.indexOf('function _finVisible(){');
 const s1 = WD.indexOf('const WT_CAP=12;');
 assert(s0 > 0 && s1 > s0, '홈 목록 블록 추출 실패');
-const BLOCK = WD.slice(s0, s1);
+/* ★ 라벨 단일 출처(_tabLabel/_tabTip/_tabSearchText)는 이 블록 밖에 선언돼 있다.
+   **스텁이 아니라 구현을 넣는다** — 스텁을 두면 그 함수의 회귀를 여기서만 못 본다(레포 규율). */
+const _grabFn = name => {
+  const m = new RegExp('\\nfunction ' + name + '\\s*\\([^\\n]*\\n?').exec(WD);
+  assert(m, 'workdesk.html 에서 ' + name + ' 을 찾지 못했다');
+  const st = WD.indexOf('{', m.index + name.length + 10);
+  let d = 0, i = st;
+  for (; i < WD.length; i++) { const c = WD[i]; if (c === '{') d++; else if (c === '}') { d--; if (!d) break; } }
+  return WD.slice(m.index, i + 1) + '\n';
+};
+const LABEL_SRC = ['_tabLabel', '_tabTip', '_tabSearchText'].map(_grabFn).join('');
+const BLOCK = LABEL_SRC + WD.slice(s0, s1);
 t('★ 마감 체크는 isFinishCandidate 그대로(판정 사본 금지)', /f==='cand'\) return isFinishCandidate\(t\)/.test(BLOCK));
 
 const candCalls = [];

@@ -75,7 +75,7 @@ assert.ok(!/^[\w가-힣]/.test(W_FAV), 'W_FAV가 평범한 문자로 시작하�
 //   이 파일의 그룹핑 검증과 같은 코드로 확인되게(스텁을 두면 구현이 바뀌어도 테스트가 통과한다).
 // ★ 작업바 정렬(모집중 먼저, 2026-08-10)로 _wGroups/_renderTabList 이 갖게 된 의존 —
 //   구현이 아니라 **실제 함수**를 함께 뜯어 온다(스텁을 두면 정렬 규칙이 여기서만 딴판이 된다).
-const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_isNoSheet','_syncWbScrollMeter','_bindWheelScroll','isFinished','_campRank','_wRecruiting','_wTabRecruiting','_wTabPending','_wTabRank','_wSegTip'];
+const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_isNoSheet','_syncWbScrollMeter','_bindWheelScroll','isFinished','_campRank','_wRecruiting','_wTabRecruiting','_wTabPending','_wTabRank','_wSegTip','_tabLabel','_tabTip','_tabSearchText'];
 const bodies = WANT.map(name => {
   const re = new RegExp('\\n(?:async )?function ' + name.replace(/[$]/g,'\\$') + '\\s*\\(', 'g');
   const m = re.exec(script);

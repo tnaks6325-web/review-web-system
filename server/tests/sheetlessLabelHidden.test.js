@@ -105,10 +105,11 @@ console.log('\n[C] 목록 4곳 — 같은 게이트 · 구분자가 앞에 남�
     !/_isNoSheet/.test(l) && !EXEMPT.some(e => l.indexOf(e) >= 0));
   ok('★ 시트 제목을 그리는 자리에 게이트 없는 사본이 없다', bad.length === 0, bad.join('\n'));
 
-  ok('작업 탭바 칩 툴팁', /title="\$\{esc\(t\.tabName\)\}\$\{\(!_isNoSheet\(t\)&&t\.spreadsheetTitle\)/.test(WD));
+  // ★ 라벨은 작업명 우선(_tabTip)으로 바뀌었지만 **게이트는 그대로** — 이 검사가 보는 것은 시트 제목 절이다.
+  ok('작업 탭바 칩 툴팁', /title="\$\{esc\(_tabTip\(t\)\)\}\$\{\(!_isNoSheet\(t\)&&t\.spreadsheetTitle\)/.test(WD));
   ok('통합검색 서브라인 — 구분자까지 함께 뺀다',
     /\$\{_isNoSheet\(t\)\?'':' · '\+esc\(t\.spreadsheetTitle\|\|''\)\}/.test(WD));
-  ok('업체 사이드바 툴팁', /title="\$\{esc\(it\.tabName\)\}\$\{\(!_isNoSheet\(it\)&&it\.spreadsheetTitle\)/.test(WD));
+  ok('업체 사이드바 툴팁', /title="\$\{esc\(_tabTip\(it\)\)\}\$\{\(!_isNoSheet\(it\)&&it\.spreadsheetTitle\)/.test(WD));
   ok('업체 전체 작업 표 서브라인', /class="asub">\$\{_isNoSheet\(it\)\?'':_awHi\(it\.spreadsheetTitle/.test(WD));
   ok('★ 업체 대시보드 줄 — 조각으로 이어 " · 목표 N명" 이 앞에 붙지 않는다',
     /\[_isNoSheet\(it\)\?'':esc\(it\.spreadsheetTitle\|\|''\),tgt\?`목표 \$\{tgt\}명`:''\]\.filter\(Boolean\)\.join\(' · '\)/.test(WD));

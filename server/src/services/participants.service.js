@@ -647,7 +647,13 @@ async function listActiveTabs({ limit = 500 } = {}) {
             /* ★ workKind — [＋ 블로거 추가] 버튼을 어느 작업에 보일지(M5-2). tab_configs 는 이미
                조인돼 있어 **쿼리 순증 0**. 판정 최종 권한은 서버(공고 > 탭)이고 이 값은 표시용 힌트다 —
                그래서 화면은 'review' 로 **명시된** 작업만 숨기고 빈 값(미지정)은 열어 둔다(모르는 것을 단정하지 않는다). */
-            COALESCE(tc.work_kind, '') AS "workKind"
+            COALESCE(tc.work_kind, '') AS "workKind",
+            /* ★ displayName — 화면이 그리는 **작업명**(헤더 옆 ✏️ 로 편집하는 그 값).
+               종전에는 목록에 안 실려 작업바·검색·홈 목록·업체관리가 전부 **탭 이름**밖에 못 써서,
+               같은 작업이 작업보드 제목과 목록에서 다른 이름으로 보였다(실측: 「맛고」↔「0720수진코리아고양이캔」).
+               ★ 빈 값이면 화면이 종전대로 탭 이름으로 접는다(이름이 비는 일은 없다).
+               ★ 두 CTE 는 UNION ALL(SELECT *) 이라 **칸 순서가 같아야 한다** — 한쪽만 넣으면 값이 밀린다. */
+            COALESCE(tc.display_name, '') AS "displayName"
        FROM raw_sheet_tabs rst
        LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE
@@ -658,7 +664,8 @@ async function listActiveTabs({ limit = 500 } = {}) {
        SELECT tc.sheet_id AS "sheetId",
               COALESCE(NULLIF(tc.campaign_name, ''), NULLIF(tc.display_name, ''), tc.tab_name) AS "spreadsheetTitle",
               tc.tab_gid AS "tabGid", tc.tab_name AS "tabName", COALESCE(im.row_count, 0) AS "rowCount",
-              TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind"
+              TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind",
+              COALESCE(tc.display_name, '') AS "displayName"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
         WHERE COALESCE(tc.sheetless, FALSE) = TRUE
