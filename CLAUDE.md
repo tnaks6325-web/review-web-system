@@ -532,6 +532,17 @@
 - 회귀가드 `tests/dedupeLinkCorruption.test.js`(스텁 pool 로 `_enrichTab`·`dedupeRows` **실제 실행**: 863↔8/19 링크 · 두 줄이 같은 주문을 안 가리킴 · 표 번호 다르면 정리 대상 0 · 표 번호까지 같으면 종전대로 정리) · `tests/worktableRebuildLedgersRoute.test.js`.
 - 잔여(문서화): ① 링크가 **비어 있게 되는 경로**는 그대로다(투영이 새 seq 를 INSERT 할 때 링크 컬럼이 없어 NULL · 주문 기록 append 가 `ON CONFLICT DO NOTHING` 으로 스킵된 경우 · 이관 전 시트 시절에 만들어진 줄). 지금 수정은 **그 빈칸을 틀린 주문으로 채우지 않게** 한 것이다 ② 표 주문번호가 없는 작업(비번호 주문·공영쇼핑 등)은 여전히 phone8 유일 조건에만 기댄다 ③ "한 주문 = 한 줄" 을 DB 제약으로 강제하지는 않았다(부분 유니크 후보 — 정당한 다중 기록 케이스를 먼저 조사할 것).
 
+### ★★ 작업보드 [⋯] 정리 도구 4종 → 1종 (사용자 확정 2026-08-23)
+- **전수 점검 결과**(본섭 실측): 🔢 번호 정리 = 무시트 113개 작업 **전부 대상 0건**(빈칸·중복 번호 0) · 🧩 옵션 열 = 칸 생성 대상 1개·**소급 기입 0줄** · 🧹 줄 정리 = 원인이던 탈시트 이관이 종료 · ♻ 중복 정리 = **2작업 2줄**(감시망은 7그룹 8줄). → **앞의 셋은 창구를 없애고 ♻ 중복 정리만 admin/master 로 남긴다.**
+- ★★ **지운 것은 창구뿐 — 실행부는 전부 살아 있다**(자동 경로·다른 기능이 쓴다):
+  - `rowNumbering.service` → 주문 기록(`sheetlessOrder`)·줄 삭제(`_hideParticipantInTx`)가 **그 자리에서** 매기고 **5분 스윕**(`worktable_renumber_sweep`)이 백스톱.
+  - `worktableOptionColumn.ensureOptionColumn` → 작업표 생성(`worktablePlan` 자동 추가)과 **공고 저장 훅**(`campaign.routes._ensureLinkedWorktableOptionColumn`, 살아있는 옵션 2종 이상)이 호출.
+  - `sheetlessLedger.retireRows` → **♻ 중복 정리가 그대로 쓴다**(줄을 내리는 실행부).
+- **제거한 표면**: 라우트 5종(`POST /worktable/renumber` · `GET /worktable/renumber-scan` · `POST /worktable/renumber-all` · `POST /worktable/retire-rows` · `POST /worktable/option-column`) + 화면 모달 3벌·[⋯] 버튼 3개·탈시트 전환 헤더의 [🔢 번호 정리]·전용 CSS(`#rnOv`·`.wbl-wrt`).
+- ★ **줄을 내리는 창구는 둘로 정리됐다** — [행 삭제](실제 삭제 + 보충 슬롯 생성으로 총 모집수 불변) · [♻ 중복 정리]. ★ 중복 정리 게이트는 **admin/master + 무시트**(화면 `_ddCan()` ≡ 서버 `adminOrMaster`) — 줄을 내리면서 **주문 취소까지 동반**해 되돌리기가 무겁다(`_isInternalRole()` 로 넓히지 말 것).
+- ⚠ **남은 갭(문서화)**: ㉮ 공고 저장 훅은 *저장하는 순간에만* 돌아 **옵션 2종인데 칸이 없는 옛 작업**이 남을 수 있다(실측 1건 — 그 공고를 한 번 저장하면 칸이 생긴다) ㉯ **번호가 1부터 빠짐없이 채워졌고 순서만 어긋난 표**는 스캔 신호에 안 잡힌다(주문이 들어올 때 그 자리에서 다시 매겨진다) ㉰ 중복 **감시망(표 주문번호+명의)** 과 **[♻ 중복 정리](표·기록 주문번호+연락처 셋 다 일치 + 살아 있는 주문 연결 줄)** 는 판정 키가 달라 숫자가 다르다 — 도구가 못 잡는 줄은 [행 삭제]로 사람이 고른다.
+- 회귀가드: `rowNumbering`(§G 창구 부재 + 자동 경로 4곳 생존) · `sheetlessRetireRows`(§B·§F 창구 부재 + 실행부를 중복 정리가 씀 + 중복 정리 게이트 1:1) · `worktableOptionColumn`(§H 창구 부재 + 자동 경로 2곳 생존). 되살리려면 그 세 가드가 먼저 빨개진다.
+
 ### ★★★ 행 숨김 기능 폐기 — 화면에서만 줄을 빼지 않는다 (사용자 확정 2026-08-23)
 - **사고(「0807(올리브영)블랑카우 바디로션 100건」)**: 작업표에 85줄이 채워져 있는데 상단 진행 현황이 `참여자 82/100`. 원인은 옛 **`_hidden`(행 숨김 오버레이) 3줄** — 줄을 지우지 않고 **화면에서만** 빼는 기능이라 **표의 줄 수 · 진행 현황 게이지 · 마감자료(CSV)가 서로 다른 사실**을 말했다. 그 오버레이는 `participant_edits` 한 줄이라 **아무 흔적 없이** 생겼다.
 - ★★ **제거한 표면 4종(되살리지 말 것)**: ① 편집 화이트리스트 `_EDIT_FIELD_KIND._hidden`(= 저장 자체가 `field_not_editable` · 쓰기 0건) ② 작업보드 합성의 `ov._hidden === true → continue` ③ 마감자료 CSV 의 같은 제외 ④ 응답 `hiddenRows`·`counts.hidden` 과 화면 `숨김 N` 칩·복원 목록(`showHidden`).

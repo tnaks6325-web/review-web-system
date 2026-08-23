@@ -2210,24 +2210,6 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #ddOv .wbl-dlg{width:min(1080px,100%);max-height:86vh;display:flex;flex-direction:column}
 #hbOv .wbl-dlg{width:min(900px,100%);max-height:86vh;display:flex;flex-direction:column}
 #hbOv .wbl-db{flex:1;min-height:0;overflow:auto}
-/* 🔢 번호 정리 — 전체 작업 목록이 100개를 넘어 기본 460px·무한 높이로는 조작이 안 된다(실측 121개).
-   ★ `min-height:0` 이 없으면 flex 자식이 내용만큼 늘어나 **스크롤이 안 생긴다**(레포 상습 함정). */
-#rnOv .wbl-dlg{width:min(560px,100%);max-height:86vh;display:flex;flex-direction:column}
-#rnOv.rn-all .wbl-dlg{width:min(980px,100%)}        /* 전체 목록은 6칸이라 넓게 */
-#rnOv .wbl-db{flex:1;min-height:0;overflow:auto}
-/* ★★ 표를 감싸는 래퍼에 `overflow-x:auto` 를 두지 말 것 — 한 축만 지정해도 다른 축이 `auto` 가 되어
-   그 래퍼가 **sticky 기준(스크롤 조상)** 을 가로채 표 머리 고정이 조용히 죽는다(실측).
-   가로·세로 스크롤은 `.wbl-db` 한 곳이 맡는다. */
-/* ★★ 표 머리 고정 — `border-collapse:collapse` 에서는 sticky th 가 먹지 않는다(실측: 두 번 밟음).
-   `separate` 로 바꾸고 경계선은 box-shadow 로 그린다(홈 작업목록 헤더행 고정과 같은 처방). */
-/* ★★ 전역 `table{overflow:hidden}` 이 sticky 기준을 표 자신으로 만들어 머리 고정이 **조용히 죽는다**
-   — 홈 작업목록 헤더행에서 이미 겪은 함정이다(CLAUDE.md 기록). 상쇄가 없으면 `position:sticky` 는
-   계산값만 sticky 이고 실제로는 따라오지 않는다(실브라우저로만 보인다). */
-#rnOv .wbl-wrt{border-collapse:separate;border-spacing:0;overflow:visible}
-#rnOv .wbl-wrt th{position:sticky;top:0;background:var(--card,#fff);z-index:1;
-  border-bottom:0;box-shadow:inset 0 -1px 0 var(--border,#e5e7eb)}
-#rnOv .rn-tools{display:flex;gap:6px;align-items:center;margin:8px 0 2px}
-#rnOv .rn-tools input{flex:1;min-width:0;height:28px;padding:0 9px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card,#fff);color:var(--ink,#111827);box-sizing:border-box}
 /* 💬 리뷰어에게 메시지 — 받는 사람 목록이 다건이면 길어지므로 본문만 스크롤한다.
    ★ `min-height:0` 이 없으면 flex 자식이 내용만큼 늘어나 스크롤이 안 생긴다(레포 상습 함정). */
 /* ★ 화면 중앙 모달이 아니라 **누른 셀 옆**에 띄운다(구매일자 달력·[리뷰 대신 제출] 과 같은 앵커 규율).
@@ -2288,14 +2270,6 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #ddOv details[open].wbl-facts summary::before{content:'▾ '}
 .wbl-df .wbl-b:disabled{opacity:.45;cursor:not-allowed}
 .wbl-warn{margin-top:9px;font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:8px;padding:7px 10px}
-/* 🧹 줄 정리 표 — 마감 확인창(.wbl-*)의 껍데기를 그대로 쓰고 표만 더한다 */
-.wbl-wrt{width:100%;border-collapse:collapse;margin-top:9px;font-size:12px}
-.wbl-wrt th,.wbl-wrt td{padding:5px 7px;border-bottom:1px solid var(--border,#e5e7eb);text-align:right;white-space:nowrap}
-.wbl-wrt th:nth-child(-n+2),.wbl-wrt td:nth-child(-n+2){text-align:left}
-.wbl-wrt th{font-size:11px;color:var(--faint,#94a3b8);font-weight:600}
-.wbl-wrt tbody tr{cursor:pointer}
-.wbl-wrt tbody tr:hover{background:var(--hover,#f8fafc)}
-.wbl-wrt tbody tr.on{background:#eff6ff}
 /* ＋ 블로거 추가 입력칸(M5-2) — box-sizing 을 호스트 리셋에 기대지 않는다 */
 .wbl-brl{display:block;margin-top:10px;font-size:12px;font-weight:700;color:var(--t2,#475569)}
 .wbl-bri{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:9px 10px;border:1.5px solid var(--border,#e5e7eb);border-radius:8px;font-size:13px;font-family:inherit}
@@ -3649,392 +3623,6 @@ function openFinishCur(){ if(STATE.cur) _finOpen(STATE.cur); }
 function doReopen(i){ const t=(STATE.tabs||[])[i]; if(t) _finReopen(t); }
 function doReopenCur(){ if(STATE.cur) _finReopen(STATE.cur); }
 
-/* ── 🧹 줄 정리 (무시트 작업 전용) ─────────────────────────────────────────────
-   왜: 이관 전 검색 명단이 5·6차 50명이던 작업이 이관 후 216명이 됐다(옛 차수가 되살아남).
-   그 줄을 다시 내릴 창구가 어디에도 없었다.
-   ★ 재료는 **이미 받아 둔 표**(`STATE.wd.roster`)에서 차수별로 센다 — 신규 조회 0.
-   ★ 보낸 것은 **차수(사람의 의도)** 이고 대상은 **서버가 다시 고른다**(행 목록 불신 규율).
-   ★ 미리보기 → 실행 2단계. onclick 은 인덱스만(차수 문자열은 시트발이라 보간 금지). */
-let _WR = null;
-function _wrCanRetire(){
-  return !!(STATE.cur && STATE.cur.sheetless === true && _isInternalRole());
-}
-function closeRetireModal(){ const o = document.getElementById('wrOv'); if (o) o.remove(); _WR = null; }
-/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
-if (!window._wrKeyBound) {
-  window._wrKeyBound = true;
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('wrOv')) closeRetireModal(); });
-}
-function openRetireModal(){
-  if (!_wrCanRetire()) return;
-  const t = STATE.cur, roster = (STATE.wd && STATE.wd.roster) || [];
-  const g = new Map();
-  roster.forEach(r => {
-    const k = String(r.round == null ? '' : r.round).trim();
-    const o = g.get(k) || { k, n: 0, sub: 0, paid: 0, named: 0 };
-    o.n++; if (r.submitted) o.sub++; if (r.paid) o.paid++; if (String(r.name || '').trim()) o.named++;
-    g.set(k, o);
-  });
-  _WR = { sheetId: t.sheetId, tabName: t.tabName, total: roster.length, picked: new Set(), prev: null, busy: false,
-    groups: [...g.values()].sort((a, b) => String(a.k).localeCompare(String(b.k), 'ko')) };
-  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'wrOv';
-  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🧹 표에서 내릴 줄 고르기</div>
-    <div class="wbl-db" id="wrBody"></div>
-    <div class="wbl-df"><button class="wbl-b" onclick="closeRetireModal()">닫기</button>
-      <button class="wbl-b" id="wrPrev" onclick="wrPreview()">미리보기</button>
-      <button class="wbl-b dark" id="wrGo" disabled onclick="wrRun()">🧹 정리 실행</button></div></div>`;
-  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다(고른 것이 실수로 날아가지 않게)
-  _wrRender();
-}
-function wrToggle(i){
-  if (!_WR) return;
-  const k = (_WR.groups[i] || {}).k; if (k === undefined) return;
-  if (_WR.picked.has(k)) _WR.picked.delete(k); else _WR.picked.add(k);
-  _WR.prev = null; _wrRender();
-}
-function _wrRender(){
-  const b = document.getElementById('wrBody'); if (!b || !_WR) return;
-  const pickN = _WR.groups.filter(g => _WR.picked.has(g.k)).reduce((s, g) => s + g.n, 0);
-  b.innerHTML = `<b>${esc(_WR.tabName)}</b>
-    <div class="wbl-facts">고른 줄은 <b>작업보드 표와 리뷰어 검색 명단에서 함께 빠집니다</b>.
-      구글시트·주문 기록은 건드리지 않으며, 되돌릴 수 있습니다(줄은 지워지지 않고 내려갑니다).</div>
-    <table class="wbl-wrt"><thead><tr><th></th><th>차수</th><th>줄</th><th>이름</th><th>제출</th><th>입금</th></tr></thead><tbody>
-    ${_WR.groups.map((g, i) => `<tr class="${_WR.picked.has(g.k) ? 'on' : ''}" onclick="wrToggle(${i})">
-        <td><input type="checkbox" ${_WR.picked.has(g.k) ? 'checked' : ''} onclick="event.stopPropagation();wrToggle(${i})"></td>
-        <td>${g.k ? esc(g.k) : '<span style="color:var(--faint,#94a3b8)">(빈값)</span>'}</td>
-        <td>${g.n}</td><td>${g.named}</td><td>${g.sub}</td><td>${g.paid}</td></tr>`).join('')}
-    </tbody></table>
-    <div class="wbl-facts">선택 <b>${pickN}줄</b> · 표 ${_WR.total}줄 → <b>${_WR.total - pickN}줄</b></div>
-    ${_WR.prev ? `<div class="wbl-warn">미리보기 — 정리 대상 <b>${_WR.prev.matched}줄</b>(이름 있는 줄 ${_WR.prev.named} · 제출 ${_WR.prev.submitted} · 입금 ${_WR.prev.paid}${_WR.prev.withOrder ? ` · 주문 연결 ${_WR.prev.withOrder}` : ''})<br>
-        표 ${_WR.prev.boardRows}줄 → <b>${_WR.prev.boardAfter}줄</b>. 아래 [정리 실행]을 누르면 반영됩니다.</div>` : ''}
-    ${_WR.err ? `<div class="wbl-warn">${esc(_WR.err)}</div>` : ''}`;
-  const go = document.getElementById('wrGo'); if (go) go.disabled = !(_WR.prev && _WR.prev.matched > 0);
-}
-async function wrPreview(){
-  if (!_WR || _WR.busy) return;
-  if (!_WR.picked.size) { _WR.err = '정리할 차수를 하나 이상 고르세요.'; _wrRender(); return; }
-  _WR.busy = true; _WR.err = null;
-  try {
-    const j = await api('/api/trackb/worktable/retire-rows', { method: 'POST', body: JSON.stringify({
-      sheetId: _WR.sheetId, tabName: _WR.tabName, rounds: [..._WR.picked], dryRun: true }) });
-    if (!j || j.ok === false) { _WR.prev = null; _WR.err = (j && (j.error || j.message)) || '미리보기 실패'; }
-    else _WR.prev = j;
-  } catch (e) { _WR.prev = null; _WR.err = '미리보기 실패: ' + (e.message || ''); }
-  _WR.busy = false; _wrRender();
-}
-async function wrRun(){
-  if (!_WR || _WR.busy || !_WR.prev) return;
-  if (!confirm(`「${_WR.tabName}」 표에서 ${_WR.prev.matched}줄을 내립니다.\n\n` +
-    `그 줄들은 리뷰어 검색 명단에서도 빠집니다(제출 ${_WR.prev.submitted}건 · 입금 ${_WR.prev.paid}건 포함).\n` +
-    `구글시트·주문 기록은 건드리지 않고, 되돌릴 수 있습니다.\n\n계속할까요?`)) return;
-  _WR.busy = true; _wrRender();
-  try {
-    const j = await api('/api/trackb/worktable/retire-rows', { method: 'POST', body: JSON.stringify({
-      sheetId: _WR.sheetId, tabName: _WR.tabName, rounds: [..._WR.picked], dryRun: false }) });
-    if (!j || j.ok === false) { _WR.busy = false; _WR.err = (j && (j.error || j.message)) || '정리 실패'; _wrRender(); return; }
-    const idx = STATE.tabs.indexOf(STATE.cur);
-    closeRetireModal();
-    toast(`${j.retired}줄 정리${j.indexRows != null ? ` · 검색 명단 ${j.indexRows}명` : ''}`);
-    if (j.ledgerError) alert('줄은 내려갔지만 검색 명단 재생성에 실패했습니다: ' + j.ledgerError + '\n잠시 후 다시 실행해 주세요.');
-    if (idx >= 0) selTab(idx);
-  } catch (e) { _WR.busy = false; _WR.err = '정리 실패: ' + (e.message || ''); _wrRender(); }
-}
-/* ── 🧩 옵션 열 (무시트 작업 전용, 2026-08-20) ────────────────────────────────
-   왜: 리뷰어가 참여할 때 고른 옵션은 원장(`order_submissions.selected_opt_key`)에 살아 있는데,
-   작업표에 **옵션 칸이 없으면** 기입될 곳이 없어 표에도 안 뜨고 조용히 사라졌다.
-   (작업표 열 구성은 작업오더의 옵션만 보고, 공고 옵션은 참조하지 않는다.)
-   ★ 이 창구는 **칸을 만들고 이미 들어온 주문의 선택값을 소급 기입**한다.
-   ★ 미리보기(쓰기 0) → 실행 2단계. 판정·값은 전부 서버가 정한다(프론트 재계산 0).
-   ★ 기입은 blank-only — 관리자가 적어 둔 작업지시('텍스트'·'포토리뷰')는 덮지 않는다. */
-let _OC = null;
-function _ocCan(){
-  return !!(STATE.cur && STATE.cur.sheetless === true
-    && (STATE.role === 'master' || STATE.role === 'admin'));   // 서버 게이트(adminOrMaster)와 1:1
-}
-function closeOptColModal(){ const o = document.getElementById('ocOv'); if (o) o.remove(); _OC = null; }
-/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
-if (!window._ocKeyBound) {
-  window._ocKeyBound = true;
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('ocOv')) closeOptColModal(); });
-}
-function openOptColModal(){
-  if (!_ocCan()) return;
-  const t = STATE.cur;
-  _OC = { sheetId: t.sheetId, tabName: t.tabName, prev: null, err: null, busy: false };
-  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'ocOv';
-  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🧩 옵션 열</div>
-    <div class="wbl-db" id="ocBody"></div>
-    <div class="wbl-df" id="ocFoot"></div></div>`;
-  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
-  _ocRender(); ocPreview();
-}
-function _ocRender(){
-  const b = document.getElementById('ocBody'); if (!b || !_OC) return;
-  const f = document.getElementById('ocFoot');
-  const p = _OC.prev;
-  if (f) f.innerHTML = `<button class="wbl-b" onclick="closeOptColModal()">닫기</button>
-      <button class="wbl-b" onclick="ocPreview()">미리보기</button>
-      <button class="wbl-b dark" id="ocGo" disabled onclick="ocRun()">🧩 옵션 열 만들기 · 소급 기입</button>`;
-  b.innerHTML = `<b>${esc(_OC.tabName || '')}</b>
-    <div class="wbl-facts">표에 <b>옵션</b> 칸을 만들고, 리뷰어가 참여할 때 고른 옵션을 <b>이미 들어온 주문에도 소급 기입</b>합니다.<br>
-      값이 이미 적혀 있는 칸은 덮지 않습니다(관리자 작업지시 보호). 구글시트·주문 기록·정원·리뷰·입금 기록은 건드리지 않습니다.</div>
-    ${p ? `<div class="wbl-facts">
-        ${p.alreadyHadColumn ? '옵션 칸은 <b>이미 있습니다</b>.' : `옵션 칸 <b>「${esc(p.headerName)}」</b>을 새로 만듭니다.`}
-        · 소급 기입 <b>${p.backfillCount}줄</b>
-        ${p.skippedAlreadyFilled ? ` · 이미 값이 있어 건너뜀 ${p.skippedAlreadyFilled}줄` : ''}
-        ${p.skippedNoOrderOption ? ` · 고른 옵션 기록이 없는 줄 ${p.skippedNoOrderOption}줄` : ''}
-        ${p.skippedNotAnOption ? ` · <b style="color:var(--danger,#c22f2f)">이 공고의 옵션이 아니라 건너뛴 줄 ${p.skippedNotAnOption}줄</b>` : ''}</div>
-      ${(p.liveOptionKeys && p.liveOptionKeys.length) ? `<div class="wbl-facts" style="color:var(--faint,#94a3b8)">이 공고의 옵션: ${p.liveOptionKeys.map(k => esc(String(k))).join(' · ')}<br>표에는 <b>이 목록에 있는 값만</b> 적습니다(주문 원장에 남은 다른 값은 건너뜁니다).</div>` : ''}
-      ${(p.rows && p.rows.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>기입할 옵션</th></tr></thead><tbody>
-        ${p.rows.map(x => `<tr><td>${x.seq}</td><td><b>${esc(String(x.optKey))}</b></td></tr>`).join('')}
-        </tbody></table>${p.rowsTruncated ? `<div class="wbl-facts">…외 ${p.rowsTruncated}줄</div>` : ''}` : ''}
-      ${(!p.headerAdded && !p.backfillCount) ? '<div class="wbl-facts">이미 정리된 상태입니다 — 바꿀 것이 없습니다.</div>' : ''}` : ''}
-    ${_OC.err ? `<div class="wbl-warn">${esc(_OC.err)}</div>` : ''}`;
-  const go = document.getElementById('ocGo');
-  if (go) go.disabled = !(p && (p.headerAdded || p.backfillCount > 0)) || _OC.busy;
-}
-async function ocPreview(){
-  if (!_OC || _OC.busy) return;
-  _OC.busy = true; _OC.err = null; _ocRender();
-  try {
-    _OC.prev = await api('/api/trackb/worktable/option-column', {
-      method: 'POST', body: JSON.stringify({ sheetId: _OC.sheetId, tabName: _OC.tabName }) });
-    if (_OC.prev && _OC.prev.ok === false) { _OC.err = _OC.prev.error || '미리보기에 실패했습니다.'; _OC.prev = null; }
-  } catch (e) { _OC.err = (e && e.message) || '미리보기에 실패했습니다.'; _OC.prev = null; }
-  _OC.busy = false; _ocRender();
-}
-async function ocRun(){
-  if (!_OC || _OC.busy || !_OC.prev) return;
-  const p = _OC.prev;
-  const msg = `${_OC.tabName}\n\n`
-    + (p.headerAdded ? `· 표에 「${p.headerName}」 칸을 만듭니다\n` : '')
-    + (p.backfillCount ? `· 이미 들어온 주문 ${p.backfillCount}줄에 고른 옵션을 적습니다(빈 칸만)\n` : '')
-    + '\n실행할까요?';
-  if (!confirm(msg)) return;
-  _OC.busy = true; _OC.err = null; _ocRender();
-  try {
-    const r = await api('/api/trackb/worktable/option-column', {
-      method: 'POST', body: JSON.stringify({ sheetId: _OC.sheetId, tabName: _OC.tabName, confirm: true }) });
-    if (r && r.ok === false) throw new Error(r.error || '실행에 실패했습니다.');
-    if (r && r.rebuildError) toast('열은 만들었지만 장부 재생성에 실패했습니다 — [⋯] → 작업표 재구성을 실행하세요.');
-    else toast(`옵션 열 정리 완료 — ${r.headerAdded ? '칸 생성 · ' : ''}소급 ${r.backfillCount || 0}줄`);
-    closeOptColModal();
-    await reloadWorkdesk().catch(() => {});
-  } catch (e) {
-    if (_OC) { _OC.err = (e && e.message) || '실행에 실패했습니다.'; _OC.busy = false; _ocRender(); }
-    return;
-  }
-  if (_OC) _OC.busy = false;   // 성공 경로는 이미 닫혔다(_OC=null) — 닫힌 뒤 상태를 만지지 않는다
-}
-
-/* ── 🔢 번호 정리 (무시트 작업 전용) ──────────────────────────────────────────
-   왜: 준비된 줄을 다 쓰고 나면 주문이 들어올 때 줄이 이어붙는데, 그 줄은 `번호`·`담당자` 가
-   영구 빈칸이었다(매퍼가 그 두 칸을 쓰지 않는다). 게다가 뒤늦게 들어온 지난 날짜 주문이
-   맨 아래에 남아 구매일자 순서가 깨졌다.
-   ★ 바꾸는 것은 **표에 보이는 번호와 담당자뿐** — 줄의 주소(내부 번호)는 그대로다.
-   ★ 미리보기(쓰기 0) → 실행 2단계. 판정·순서는 전부 서버가 한다(프론트 재계산 0). */
-let _RN = null;
-function _rnCanRenumber(){
-  return !!(STATE.cur && STATE.cur.sheetless === true && _isInternalRole());
-}
-function closeRenumberModal(){ const o = document.getElementById('rnOv'); if (o) o.remove(); _RN = null; }
-/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
-if (!window._rnKeyBound) {
-  window._rnKeyBound = true;
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('rnOv')) closeRenumberModal(); });
-}
-/* ★ 모드 둘 — 'tab'(이 작업) · 'all'(전체 작업 조회). **모달은 한 벌**이고 모드만 바뀐다
-     (사본을 두면 한쪽에만 안내문·확인창이 생긴다). 전체 모드는 작업을 안 골라도 열린다. */
-function openRenumberModal(opt){
-  const all = !!(opt && opt.all);
-  if (!all && !_rnCanRenumber()) return;
-  const t = all ? null : STATE.cur;
-  _RN = { mode: all ? 'all' : 'tab', sheetId: t && t.sheetId, tabName: t && t.tabName,
-          prev: null, scan: null, err: null, busy: false };
-  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'rnOv';
-  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🔢 번호 정리</div>
-    <div class="wbl-db" id="rnBody"></div>
-    <div class="wbl-df" id="rnFoot"></div></div>`;
-  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
-  _rnRender();
-  if (all) rnScan(); else rnPreview();
-}
-/* 모드 전환 — 같은 모달 안에서. 이 작업이 선택돼 있지 않으면 [이 작업] 탭은 만들지 않는다. */
-function rnSetMode(m){
-  if (!_RN || _RN.busy || _RN.mode === m) return;
-  if (m === 'tab' && !_RN.tabName) return;
-  _RN.mode = m; _RN.err = null; _rnRender();
-  if (m === 'all') { if (!_RN.scan) rnScan(); } else if (!_RN.prev) rnPreview();
-}
-function _rnRender(){
-  const b = document.getElementById('rnBody'); if (!b || !_RN) return;
-  const f = document.getElementById('rnFoot');
-  const tabs = `<div class="wbl-facts" style="display:flex;gap:6px;align-items:center">
-      ${_RN.tabName ? `<button class="wbl-b${_RN.mode === 'tab' ? ' dark' : ''}" onclick="rnSetMode('tab')">이 작업</button>` : ''}
-      <button class="wbl-b${_RN.mode === 'all' ? ' dark' : ''}" onclick="rnSetMode('all')">전체 작업</button>
-      <span style="color:var(--faint,#94a3b8)">${_RN.busy ? '불러오는 중…' : ''}</span></div>`;
-  /* 폭은 모드에 따라 — 목록(6칸)은 넓게, 이 작업(설명+미리보기)은 좁게 */
-  const ov = document.getElementById('rnOv'); if (ov) ov.classList.toggle('rn-all', _RN.mode === 'all');
-  if (_RN.mode === 'all') { _rnRenderAll(b, f, tabs); return; }
-  const p = _RN.prev;
-  if (f) f.innerHTML = `<button class="wbl-b" onclick="closeRenumberModal()">닫기</button>
-      <button class="wbl-b" id="rnPrev" onclick="rnPreview()">미리보기</button>
-      <button class="wbl-b dark" id="rnGo" disabled onclick="rnRun()">🔢 번호 정리 실행</button>`;
-  b.innerHTML = tabs + `<b>${esc(_RN.tabName)}</b>
-    <div class="wbl-facts">표의 <b>번호</b>를 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매깁니다.
-      주문이 들어올 때와 <b>5분 주기로 자동</b> 정리되므로, 이 버튼은 지금 바로 돌리고 싶을 때만 쓰면 됩니다.<br>
-      구매일자를 읽을 수 없는 줄은 맨 아래로 갑니다. 담당자·줄 내용·구글시트·주문 기록·리뷰·입금 기록은 건드리지 않습니다.</div>
-    ${p ? `<div class="wbl-facts">표 <b>${p.total}줄</b> 중 바뀌는 줄 <b>${p.changed}줄</b></div>
-      ${(p.sample && p.sample.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>지금 번호</th><th>바뀔 번호</th></tr></thead><tbody>
-        ${p.sample.map(x => `<tr><td>${x.seq}</td><td>${x.from ? esc(String(x.from)) : '<span style="color:var(--faint,#94a3b8)">(빈칸)</span>'}</td>
-          <td><b>${esc(String(x.to))}</b></td></tr>`).join('')}
-        </tbody></table>${p.changed > p.sample.length ? `<div class="wbl-facts">…외 ${p.changed - p.sample.length}줄</div>` : ''}` : ''}
-      ${p.changed === 0 ? '<div class="wbl-facts">이미 정리된 상태입니다 — 바꿀 줄이 없습니다.</div>' : ''}` : ''}
-    ${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}`;
-  const go = document.getElementById('rnGo'); if (go) go.disabled = !(p && p.changed > 0) || _RN.busy;
-}
-/* 전체 작업 조회 — 어느 작업에 번호 빈칸이 있는지. 서버가 준 숫자를 그대로 그린다. */
-function _rnRenderAll(b, f, tabs){
-  const s = _RN.scan;
-  if (f) f.innerHTML = `<button class="wbl-b" onclick="closeRenumberModal()">닫기</button>
-      <button class="wbl-b" onclick="rnScan()">다시 조회</button>
-      <button class="wbl-b dark" id="rnGoAll" ${(s && s.needTabs) ? '' : 'disabled'} onclick="rnRunAll()">🔢 전체 정리 실행</button>`;
-  b.innerHTML = tabs + `
-    <div class="wbl-facts">무시트 작업 전체에서 <b>번호가 비어 있거나 중복된 줄</b>과 <b>짝 빈 줄</b>을 셉니다.
-      정리하면 <b>짝 빈 줄을 표에서 내리고</b>(되돌릴 수 있는 소프트 삭제) 번호를 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매깁니다.<br>
-      <span style="color:var(--faint,#94a3b8)">짝 빈 줄 = 같은 번호를 쓰는 채워진 줄이 있는데 이 줄은 비어 있는 경우. 짝이 없는 빈 자리(아직 안 팔린 미래 자리)는 그대로 둡니다.</span><br>
-      <b>5분마다 자동으로 정리됩니다</b> — 아래 버튼은 기다리지 않고 지금 바로 돌리는 용도입니다.<br>
-      <span style="color:var(--faint,#94a3b8)">※ 줄을 지웠을 때 남는 <b>번호 어긋남</b>(1번이 없고 2번부터 시작 등)도 함께 잡습니다. 다만 번호가 <b>1부터 빠짐없이</b> 채워져 있고 <b>순서만</b> 어긋난 작업은 여기 숫자로 드러나지 않습니다(그런 작업은 주문이 들어올 때 그 자리에서 다시 매겨집니다). 짝이 없는 빈 자리까지 내리려면 [⋯] → [🧹 줄 정리]를 쓰세요.</span></div>
-    ${s ? `<div class="wbl-facts">작업 <b>${s.tabs}개</b> 중 정리 대상 <b>${_rnNeed().length}개</b> · 번호 빈 줄 <b>${s.blankNumberRows}줄</b>${s.dupNumberRows ? ` · 번호 중복 <b>${s.dupNumberRows}줄</b>` : ''}${s.pairedBlankRows ? ` · 짝 빈 줄 <b>${s.pairedBlankRows}줄</b>` : ''}${s.seqGapTabs ? ` · 번호 어긋남 <b>${s.seqGapTabs}개</b>` : ''}
-        ${s.truncated ? ' <span style="color:var(--danger,#c22f2f)">(목록이 잘렸습니다 — 정리 후 다시 조회하세요)</span>' : ''}</div>
-      <div class="rn-tools">
-        <button class="wbl-b${_RN.onlyNeed === false ? '' : ' dark'}" id="rnOnly" onclick="_RN.onlyNeed=!(_RN.onlyNeed!==false);_rnRows()"></button>
-        <input id="rnq" placeholder="작업 검색" value="${esc(_RN.q || '')}" oninput="_RN.q=this.value;_rnRows()">
-      </div>
-      <div class="rn-tw"><table class="wbl-wrt"><thead><tr><th>작업</th><th>표 줄</th><th>번호 빈칸</th><th>번호 중복</th><th>짝 빈 줄</th><th>번호 어긋남</th><th></th></tr></thead>
-        <tbody id="rnRows"></tbody></table></div>` : ''}
-    <div id="rnErr">${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}</div>`;
-  if (s) _rnRows();
-}
-/* 정리 대상 판정 — ★★ **서버가 항목마다 실어 준 `need` 를 그대로 쓴다**(판정 사본 0).
-   여기서 조건을 다시 쓰면 "목록엔 대상인데 5분 스윕은 안 도는" 상태가 생긴다.
-   신호 넷 = 번호 빈칸 · 중복 번호 · 짝 빈 줄 · **번호 어긋남**(1..N 이 아님, 줄을 지운 뒤 상태).
-   ★ `need` 가 없는 응답(구버전 백엔드)은 종전 세 신호로 접는다 — 배포 스큐에도 목록이 비지 않게. */
-function _rnNeed(){
-  return (((_RN.scan || {}).items) || []).filter(r => (r.need != null)
-    ? r.need : (r.blankNumber > 0 || r.dupNumber > 0 || r.pairedBlank > 0));
-}
-/* 그 줄이 대상인가 — 목록 강조·행 표기가 같은 판정을 본다. */
-function _rnRowNeed(r){ return (r.need != null) ? !!r.need : !!(r.blankNumber || r.dupNumber || r.pairedBlank); }
-/* ★★ 행만 갈아끼운다 — 검색 입력칸이 든 껍데기를 다시 그리면 **한글 IME 조합이 깨진다**
-     (홈 목록 검색에서 실측된 `ㅁ며면면` 사고와 같은 자리). */
-function _rnRows(){
-  const tb = document.getElementById('rnRows'); if (!tb || !_RN || !_RN.scan) return;
-  const only = _RN.onlyNeed !== false;
-  const q = String(_RN.q || '').trim().toLowerCase();
-  const all = _RN.scan.items || [];
-  const need = _rnNeed();
-  const base = only ? need : all;
-  const rows = q ? base.filter(r => String(r.displayName || r.tabName).toLowerCase().indexOf(q) >= 0) : base;
-  const btn = document.getElementById('rnOnly');
-  if (btn) { btn.textContent = only ? `정리 대상만 (${need.length})` : `전체 보기 (${all.length})`; btn.className = 'wbl-b' + (only ? ' dark' : ''); }
-  tb.innerHTML = rows.length ? rows.map(r => {
-    const i = all.indexOf(r);                       // ★ 실행에는 **원본 인덱스**를 넘긴다(필터된 순번이 아니라)
-    return `<tr class="${_rnRowNeed(r) ? 'on' : ''}">
-      <td style="text-align:left">${esc(r.displayName || r.tabName)}</td>
-      <td>${r.total}</td>
-      <td>${r.blankNumber ? '<b>' + r.blankNumber + '</b>' : '0'}</td>
-      <td>${r.dupNumber ? '<b>' + r.dupNumber + '</b>' : '0'}</td>
-      <td>${r.pairedBlank ? '<b>' + r.pairedBlank + '</b>' : '0'}</td>
-      <td>${r.seqGap ? '<b>있음</b>' : (r.seqGap === false ? '-' : '?')}</td>
-      <td><button class="wbl-b" onclick="rnRunOne(${i})">정리</button></td></tr>`;
-  }).join('') : `<tr><td colspan="7" style="text-align:left;color:var(--faint,#94a3b8)">${
-    q ? '검색 결과가 없습니다.' : (only ? '정리할 작업이 없습니다 — 전체 작업의 번호가 모두 채워져 있습니다.' : '무시트 작업이 없습니다.')}</td></tr>`;
-}
-async function rnScan(){
-  if (!_RN || _RN.busy) return;
-  _RN.busy = true; _RN.err = null; _rnRender();
-  try {
-    const j = await api('/api/trackb/worktable/renumber-scan');
-    if (!j || j.ok === false) { _RN.scan = null; _RN.err = _RN_REASON[(j && (j.reason || j.code))] || (j && (j.error || j.message)) || '조회 실패'; }
-    else _RN.scan = j;
-  } catch (e) { _RN.scan = null; _RN.err = '조회 실패: ' + (e.message || ''); }
-  _RN.busy = false; _rnRender();
-}
-/* 목록의 한 작업만 정리 — ★ onclick 은 인덱스만(작업명은 외부발 문자열이라 보간 금지). */
-async function rnRunOne(i){
-  if (!_RN || _RN.busy || !_RN.scan) return;
-  const r = (_RN.scan.items || [])[i]; if (!r) return;
-  if (!confirm(`「${r.displayName || r.tabName}」의 번호를 구매일자 순으로 다시 매깁니다.\n\n` +
-    `번호 빈 줄 ${r.blankNumber}줄 · 중복 ${r.dupNumber || 0}줄${r.seqGap ? ' · 번호 어긋남(1번부터가 아님)' : ''} · 표 ${r.total}줄 — 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n` +
-    (r.pairedBlank ? `짝 빈 줄 ${r.pairedBlank}줄은 표에서 내려갑니다(되돌릴 수 있습니다).\n` : '') +
-    `\n계속할까요?`)) return;
-  _RN.busy = true; _rnRender();
-  try {
-    const j = await api('/api/trackb/worktable/renumber', { method: 'POST', body: JSON.stringify({
-      sheetId: r.sheetId, tabName: r.tabName, confirm: true, cleanBlanks: true }) });
-    if (!j || j.ok === false) { _RN.busy = false; _RN.err = _RN_REASON[(j && (j.reason || j.code))] || (j && (j.error || j.message)) || '번호 정리 실패'; _rnRender(); return; }
-    toast(`${r.displayName || r.tabName} — 번호 ${j.changed}줄`
-      + ((j.blank && j.blank.retired) ? ` · 짝 빈 줄 ${j.blank.retired}줄 내림` : ''));
-  } catch (e) { _RN.busy = false; _RN.err = '번호 정리 실패: ' + (e.message || ''); _rnRender(); return; }
-  _RN.busy = false;
-  await rnScan();                                  // 실제로 줄었는지 다시 세어 보여 준다
-  if (STATE.cur && STATE.cur.tabName === r.tabName) { const i2 = STATE.tabs.indexOf(STATE.cur); if (i2 >= 0) selTab(i2); }
-}
-async function rnRunAll(){
-  if (!_RN || _RN.busy || !_RN.scan) return;
-  const s = _RN.scan;
-  if (!confirm(`무시트 작업 ${s.needTabs}개의 번호를 구매일자 순으로 다시 매깁니다.\n\n` +
-    `번호 빈 줄 ${s.blankNumberRows}줄이 채워지고 중복 ${s.dupNumberRows || 0}줄이 정리되며, 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n` +
-    (s.pairedBlankRows ? `짝 빈 줄 ${s.pairedBlankRows}줄은 표에서 내려갑니다(되돌릴 수 있습니다).\n` : '') +
-    `줄의 내용·주문·리뷰·입금 기록은 그대로입니다.\n\n계속할까요?`)) return;
-  _RN.busy = true; _rnRender();
-  try {
-    const j = await api('/api/trackb/worktable/renumber-all', { method: 'POST', body: JSON.stringify({ confirm: true, cleanBlanks: true }) });
-    if (!j || j.ok === false) { _RN.busy = false; _RN.err = (j && (j.error || j.message)) || '전체 정리 실패'; _rnRender(); return; }
-    /* ★ 실패한 작업이 있으면 조용히 넘기지 않는다 — 몇 개가 안 됐는지 말한다. */
-    toast(`전체 정리 — 작업 ${j.changedTabs}개 · 번호 ${j.changedRows}줄`
-      + (j.blankRows ? ` · 짝 빈 줄 ${j.blankRows}줄 내림` : '') + (j.failed && j.failed.length ? ` (실패 ${j.failed.length}개)` : ''));
-    if (j.failed && j.failed.length) _RN.err = '정리하지 못한 작업: ' + j.failed.map(x => x.tabName).join(', ');
-  } catch (e) { _RN.busy = false; _RN.err = '전체 정리 실패: ' + (e.message || ''); _rnRender(); return; }
-  _RN.busy = false;
-  await rnScan();
-}
-/* 서버가 준 사유를 그대로 사람 말로 — "실패"로 뭉뚱그리면 무엇을 고칠지 알 수 없다. */
-const _RN_REASON = {
-  not_sheetless: '이 작업은 아직 구글시트를 진실원본으로 씁니다 — 표에서 번호를 고쳐도 시트를 다시 읽을 때 되돌아가므로 정리하지 않습니다.',
-  tab_not_registered: '등록되지 않은 작업입니다.',
-  no_target_column: '이 표에 번호·담당자 칸이 없습니다(설정 › 작업표 표준 열에서 칸을 추가하세요).',
-  disabled: '번호 자동 정리가 꺼져 있습니다(WORKTABLE_AUTO_NUMBER=0).',
-  not_ready: '아직 준비되지 않았습니다 — 배포 반영 후 다시 시도해 주세요.',
-};
-async function rnPreview(){
-  if (!_RN || _RN.busy || _RN.mode !== 'tab') return;
-  _RN.busy = true; _RN.err = null; _rnRender();
-  try {
-    const j = await api('/api/trackb/worktable/renumber', { method: 'POST', body: JSON.stringify({
-      sheetId: _RN.sheetId, tabName: _RN.tabName }) });
-    if (!j || j.ok === false) { _RN.prev = null; _RN.err = _RN_REASON[(j && (j.reason || j.code))] || (j && (j.error || j.message)) || '미리보기 실패'; }
-    else { _RN.prev = j; if (j.reason && _RN_REASON[j.reason]) _RN.err = _RN_REASON[j.reason]; }
-  } catch (e) { _RN.prev = null; _RN.err = '미리보기 실패: ' + (e.message || ''); }
-  _RN.busy = false; _rnRender();
-}
-async function rnRun(){
-  if (!_RN || _RN.busy || _RN.mode !== 'tab' || !_RN.prev || !_RN.prev.changed) return;
-  if (!confirm(`「${_RN.tabName}」 표의 번호를 구매일자 순으로 다시 매깁니다.\n\n` +
-    `바뀌는 줄 ${_RN.prev.changed}줄 — 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n` +
-    `줄의 내용·주문·리뷰·입금 기록은 그대로입니다.\n\n계속할까요?`)) return;
-  _RN.busy = true; _rnRender();
-  try {
-    const j = await api('/api/trackb/worktable/renumber', { method: 'POST', body: JSON.stringify({
-      sheetId: _RN.sheetId, tabName: _RN.tabName, confirm: true }) });
-    if (!j || j.ok === false) { _RN.busy = false; _RN.err = _RN_REASON[(j && (j.reason || j.code))] || (j && (j.error || j.message)) || '번호 정리 실패'; _rnRender(); return; }
-    const idx = STATE.tabs.indexOf(STATE.cur);
-    closeRenumberModal();
-    toast(`번호 정리 완료 — ${j.changed}줄`);
-    if (idx >= 0) selTab(idx);
-  } catch (e) { _RN.busy = false; _RN.err = '번호 정리 실패: ' + (e.message || ''); _rnRender(); }
-}
 /* ── ♻ 중복 줄 정리 (무시트 작업 전용) ────────────────────────────────────────
    왜: 2026-08-19 무시트 구매양식이 `failed` 로 강등돼 리뷰어 재제출을 유도했고, 그 중복이
    부팅 복구 잡과 겹쳐 같은 구매가 여러 줄로 쌓였다(참여자 870/800 · 901/900).
@@ -4042,10 +3630,10 @@ async function rnRun(){
    ★ 미리보기 → 확인창 → 실행 2단계. 보류 그룹은 **사유를 그대로** 보여준다(조용한 누락 금지).
    ★ 입금 회차에 담긴 줄이 섞인 그룹은 서버가 손대지 않는다 — 화면이 그 사실을 문장으로 말한다. */
 let _DD = null;
-/* ★★ 게이트는 **서버(`/worktable/dedupe-rows` = adminOrMaster)와 1:1** 이어야 한다.
-   `_wrCanRetire()` 를 그대로 쓰면 안 된다 — 그쪽은 2026-08-18 '작업보드 staff 전체권한' 으로
-   `_isInternalRole()`(staff 포함)로 넓어졌다. 따라 넓히면 AE 에게 눌러도 403 나는 버튼이 생긴다
-   (막다른 길 금지). 줄 정리와 달리 이 조작은 주문 취소까지 동반해 되돌리기가 더 무겁다. */
+/* ★★ 게이트는 **서버(`/worktable/dedupe-rows` = adminOrMaster)와 1:1** 이어야 한다(사용자 확정 2026-08-23).
+   `_isInternalRole()`(staff 포함)로 넓히면 AE 에게 눌러도 403 나는 버튼이 생긴다(막다른 길 금지).
+   이 조작은 줄을 내리면서 **주문 취소까지 동반**해 되돌리기가 무겁다 — 그래서 admin/master 전용이다.
+   ★ 작업 도구 [⋯] 에 남은 정리 창구는 이것 하나다(줄 정리·번호 정리·옵션 열은 2026-08-23 제거). */
 function _ddCan(){
   return !!(STATE.cur && STATE.cur.sheetless === true && (STATE.role === 'master' || STATE.role === 'admin'));
 }
@@ -5847,7 +5435,7 @@ function renderWorkdesk(wd){
     ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_ocCan()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ocCan()?`<button class="btn" onclick="openOptColModal()" title="표에 옵션 칸을 만들고, 리뷰어가 참여할 때 고른 옵션을 이미 들어온 주문에도 소급 기입한다(미리보기 후 실행 · 값이 있는 칸은 안 덮음)">🧩 옵션 열</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
+    ${(isMaster||_ddCan()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
     <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
          [링크 복사]·[모집인원 조절]·마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다.
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->
@@ -12186,7 +11774,6 @@ function _coRender(){
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
       <button class="btn" onclick="_ptScan()">🧹 과거 작업 시트 읽기 정리</button>
       <button class="btn" onclick="_rsScan()" title="주기 작업(RAW 미러·인덱스 빌드)이 지금 어느 시트를 왜 읽는지 — 읽기 전용">🔍 읽는 시트</button>
-      <button class="btn" onclick="openRenumberModal({all:true})" title="무시트 작업 전체에서 번호 빈칸을 조회하고 정리한다(작업별 정리 · 전체 정리)">🔢 번호 정리</button>
       <button class="btn" onclick="_coOrphans()">🧹 중복 잔재 정리</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
