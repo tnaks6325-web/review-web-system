@@ -38,7 +38,7 @@ function renderUnm(STATE) {
     esc: (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     sheetTitle: (sid) => (STATE.sheetMap[sid] || {}).title || sid };
   sb.window = sb; vm.createContext(sb);
-  vm.runInContext(grab('_ovmUnassignedTabs') + '\n' + grab('_ovmTabGid') + '\n' + grab('_ovmUnmatchedHtml') + '\nvar _ovmUnmList=[];', sb);
+  vm.runInContext(grab('_ovmUnassignedTabs') + '\n' + grab('_ovmTabGid') + '\n' + grab('_isNoSheet') + '\n' + grab('_ovmUnmatchedHtml') + '\nvar _ovmUnmList=[];', sb);
   return { html: sb._ovmUnmatchedHtml(), sb };
 }
 const SHEETMAP = { S1: { title: '(신규)유일기획 업무시트', tabs: [{ tabGid: '10', tabName: '유일기획_로켓_2차' }] },

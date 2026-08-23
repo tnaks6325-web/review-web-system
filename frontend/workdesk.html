@@ -15454,9 +15454,12 @@ function _ovmUnmatchedHtml(){
   if(!tabs.length) return `<div class="sect"><div class="st">업체 미지정 작업</div>
     <div class="empty" style="padding:16px">모든 작업이 업체에 지정됐습니다.</div></div>`;
   const rows=tabs.map((t,i)=>{
+    // ★ 무시트 작업에는 시트 라벨을 그리지 않는다(판정 단일 출처 `_isNoSheet`) —
+    //   시트 제목이 작업명과 같은 경우도 같은 말이 두 줄이 되므로 함께 접는다(표시 중복 제거).
     const gid=_ovmTabGid(t), src=sheetTitle(t.sheetId);
+    const sub=(_isNoSheet(t)||src===t.tabName)?'':src;
     return `<div class="own"><span class="ic">▤</span>
-      <div class="info"><b>${esc(t.tabName)}</b><span>${esc(src===t.tabName?'':src)}</span></div>
+      <div class="info"><b>${esc(t.tabName)}</b><span>${esc(sub)}</span></div>
       ${gid?`<button class="btn xs pri" onclick="ownAssign(${i})">업체 지정</button>`
            :`<button class="btn xs" disabled title="이 작업은 탭 gid 가 없어 지정할 수 없습니다 — [시트 반영 점검]의 gid 채우기로 gid 를 채운 뒤 지정하세요">지정 불가</button>`}</div>`;
   }).join('');
