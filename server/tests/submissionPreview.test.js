@@ -74,7 +74,7 @@ console.log('\nB) 제출현황 줄');
 
 console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 4열');
 {
-  const sb = grab(['_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   const rows = [
     { id: 'a', seq: 2, recipient: '심수현', boardNo: '1', filled: true },
     { id: 'b', seq: 3, recipient: '조성훈', boardNo: '2', filled: true },
@@ -111,7 +111,7 @@ console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 4열');
 
 console.log('\nD) 팝업 무대 — 좌우 동시');
 {
-  const sb = grab(['_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   sb.STATE.rvPop = { people: [], idx: 0, i2: { cap: 0, rev: 0 } };
   const files = [{ slot: 'order_capture', url: 'u1' }, { slot: 'order_capture', url: 'u2' }, { slot: 'review', url: 'u3' }];
   const cap = sb._rvPopCol('cap', files), rev = sb._rvPopCol('rev', files);
@@ -183,8 +183,49 @@ console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
   const ha = sb2._rvStatHtml();
   ok('★ 광고주에게는 폴더 창구를 그리지 않는다', asked === 0 && !/_rvOpenFolder/.test(ha));
 }
-ok('★ 칸 제목도 같은 창구 — cap→capture / rev→review 로 매핑',
-  /const fk=kind==='cap'\?'capture':'review';/.test(WD) && /onclick="_rvOpenFolder\('\$\{fk\}'\)"/.test(WD));
+/* ★★ 창구는 **요약 줄 하나**(사용자 확정 2026-08-21) — 칸 제목은 "지금 보고 있는 그 리뷰어의
+   제출물"을 말하는 자리라, 거기서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
+/* ★★ 칸 제목(🛒 구매 캡처 / 📷 리뷰 캡처)은 아예 그리지 않는다(사용자 확정 2026-08-23) —
+   좌=구매·우=리뷰는 위 제출현황 줄이 같은 순서로 말하고, 제목 한 줄을 비운 만큼 캡처가 커진다.
+   폴더 창구도 여기 없다(요약 줄 하나). */
+ok('★ 칸 제목 줄을 그리지 않는다 — 마크업·CSS 잔재 0', (() => {
+  const i = WD.indexOf('const col=(kind,title,emptyB,emptyS,warn)=>{');
+  const seg = WD.slice(i, WD.indexOf('\n  const left=col(', i));
+  return i > 0 && !/rv2h/.test(seg) && !/_rvOpenFolder/.test(seg) && !/_folState/.test(seg)
+    && !/rv2h/.test(WD);
+})());
+ok('★ 칸은 본문만 — .rv2c > .rv2b 한 겹',
+  /<div class="rv2c"><div class="rv2b">\$\{body\}<\/div><\/div>/.test(WD));
+ok('★ title 은 남는다 — 이미지 alt(접근성)·빈 상태 문구가 어느 칸인지 말한다',
+  /alt="\$\{esc\(title\)\}"/.test(WD) && /const left=col\('cap','구매 캡처'/.test(WD)
+  && /const right=col\('rev','리뷰 캡처'/.test(WD));
+ok('★ 캡처 칸 여백은 사방 같다(좌우=상하)', /border-radius:9px;background:var\(--card2\);padding:8px\}/.test(WD));
+ok('★ 미리보기 패널 여백도 사방 같다', /\.rvpane \.rvfill\{position:absolute;inset:0;display:flex;flex-direction:column;padding:12px\}/.test(WD));
+/* ★ 넘김 줄이 흐름에 있으면 그 높이만큼 **아래 여백만** 넓어져 사방 같기가 깨진다. */
+ok('★ 넘김 줄은 캡처 위에 띄운다(흐름 밖) — 아래 여백이 늘지 않는다',
+  /\.rv2 \.rvpg\{position:absolute;left:0;right:0;bottom:5px/.test(WD)
+  && /\.rv2 \.rv2b\{[^}]*position:relative\}/.test(WD)
+  && !/\.rv2 \.rvpg\{[^}]*margin-top/.test(WD));
+
+/* ══ H) 사람 옆 번호 = 작업보드 「번호」(boardNo) ══════════════════════════════ */
+console.log('\nH) 미리보기 번호 = 작업보드 번호');
+{
+  const sb = grab(['_rvNo', '_rvNoHtml']);
+  ok('★ 값이 있으면 "번호 N"(시트 행 seq 가 아니다)',
+    /번호 19/.test(sb._rvNoHtml({ boardNo: '19', seq: 25 })) && !/#25/.test(sb._rvNoHtml({ boardNo: '19', seq: 25 })));
+  ok('★ 없으면 지어내지 않는다 — "번호 —" + 시트 행은 툴팁으로',
+    /번호 —/.test(sb._rvNoHtml({ seq: 25 })) && /시트 행 25/.test(sb._rvNoHtml({ seq: 25 })));
+  ok('★ 공백만 있는 값도 없는 것으로 본다', /번호 —/.test(sb._rvNoHtml({ boardNo: '  ', seq: 3 })));
+}
+/* ★ 업체 뷰어의 세로 레일이 폐기되어(2026-08-23 통일) 미리보기 렌더러는 한 곳이다.
+   "같은 헬퍼를 쓴다"는 규칙은 팝업까지 포함해 아래 케이스가 함께 고정한다. */
+ok('★ 사람 줄 번호는 헬퍼 한 곳에서 — #seq 표기 부활 0',
+  (WD.match(/\$\{_rvNoHtml\(r\)\}/g) || []).length === 1 && !/<span>#\$\{esc\(r\.seq\)\}<\/span>/.test(WD));
+ok('★ 팝업도 같은 헬퍼(번호 판정 사본 0)',
+  (WD.match(/_rvNo\((x|cur)\.r\)/g) || []).length === 2
+  && !/boardNo==null\?''/.test(WD.replace(/function _rvNo\(r\)\{[^}]*\}/, '')));
+ok('★ 번호 칸 판정은 서버 단일 출처(rowNumbering.numberColumnKey) — 프론트에 키 목록 사본 없음',
+  !/\['번호'\s*,\s*'no'/.test(WD));
 ok('★ 실행부는 기존 openTabFolder 하나(새 경로·사본 0)',
   /function _rvOpenFolder\(kind\)\{ if\(STATE\.role==='advertiser'\|\|!STATE\.cur\) return; openTabFolder\(0,kind,'cur'\); \}/.test(WD));
 ok('★ 명칭 통일 — 화면에 "리뷰 이미지" 라는 말이 남아 있지 않다(리뷰 캡처)',
