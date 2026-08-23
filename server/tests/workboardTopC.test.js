@@ -76,8 +76,13 @@ t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광�
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
   const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
                              svc.indexOf("else if (role === 'advertiser') {") + 900);
+  /* `res.condition` 이 몇 번 나오든(일정 등 파생 필드가 붙는다) **전부 showEdits 블록 안**이어야 한다.
+     개수로 고정하면 필드가 늘 때마다 무관한 가드가 조용히 빨개진다. */
+  const blockStart = svc.lastIndexOf('if (showEdits) {', i);
+  const advStart = svc.indexOf("else if (role === 'advertiser') {");
+  const all = []; for (let k = svc.indexOf('res.condition'); k >= 0; k = svc.indexOf('res.condition', k + 1)) all.push(k);
   return /if \(showEdits\) \{/.test(before) && !/res\.condition/.test(advBlock)
-    && (svc.match(/res\.condition/g) || []).length === 1;
+    && all.length > 0 && all.every(k => k > blockStart && k < advStart);
 })());
 t('★ 쓰기 쿼리 0 — 조건 요약은 읽기 전용', !/INSERT|UPDATE|DELETE/i.test(cond));
 
@@ -454,6 +459,58 @@ t('★ 미리보기 렌더러 한 벌 — _rvRender 는 _rvRender2 위임만(세
   const m = fnBody(wd, 'function _rvRender(){');
   return !!m && /return _rvRender2\(pane\);/.test(m) && !/pane\.innerHTML=/.test(m)
     && !/rvmedia|rvasset|_RV_SLOT/.test(wd);
+})());
+
+console.log('\n── I. 「일정」 행(사용자 확정 2026-08-23) ──');
+/* 「일정」 = 표의 구매일자 중 **가장 이른 날 ~ 가장 늦은 날**. 아픈 자리 셋:
+   ① `fallbackAnchor` 를 빼면 `8 / 15 (토)`(연도 없음)가 전 행 null 이 되어 조용히 「—」가 된다.
+   ② 날짜 칸 찾기·해석을 여기서 다시 만들면 모집인원조절·정원 판정과 기준이 갈린다.
+   ③ 못 읽었을 때 오늘로 지어내면 있지도 않은 일정이 사실처럼 보인다(사용자 확정: 비면 「—」). */
+const schedSrc = fnBody(svc, 'function _condSchedule(');
+t('서버에 _condSchedule 이 있다', !!schedSrc);
+t('② 날짜 칸은 campaignSchedule.findDateColumnIndex 단일 출처',
+  /require\('\.\/campaignSchedule\.service'\)/.test(schedSrc) && /findDateColumnIndex\(/.test(schedSrc));
+t('② 해석은 utils/koreanDate.parseDateColumn 단일 출처',
+  /require\('\.\.\/utils\/koreanDate'\)/.test(schedSrc) && /parseDateColumn\(/.test(schedSrc));
+t('① fallbackAnchor 를 넘긴다(연도 없는 표기 보호)', /fallbackAnchor:/.test(schedSrc));
+t('★ 표(정렬된 out)에서 파생한다 — 계획표를 따로 읽지 않는다',
+  /res\.condition\.schedule = _condSchedule\(out, headers\)/.test(svc)
+  && !/campaign_daily_plans/.test(schedSrc));
+
+{ // vm 실행 — 실제 모듈을 태워 결과를 대조한다(정적 검사로는 ①③을 못 잡는다)
+  const vm = require('vm');
+  const map = { './campaignSchedule.service': '../src/services/campaignSchedule.service',
+                '../utils/koreanDate': '../src/utils/koreanDate' };
+  const sandbox = { require: (m) => { if (!map[m]) throw new Error('예상 밖 require: ' + m); return require(map[m]); }, module: {}, Date };
+  vm.createContext(sandbox);
+  vm.runInContext(schedSrc + '\n;this.__f=_condSchedule;', sandbox);
+  const f = sandbox.__f;
+  const H = ['번호', '구매일자', '수취인'];
+  const rows = iso => iso.map(v => ({ rowJson: { '번호': 1, '구매일자': v, '수취인': 'ㅇ' } }));
+  const r1 = f(rows(['9 / 11 (금)', '8 / 11 (화)', '8 / 20 (목)']), H);
+  t('① 연도 없는 표기도 읽는다 — 가장 이른 날 ~ 가장 늦은 날',
+    !!r1 && /^\d{4}-08-11$/.test(r1.start) && /^\d{4}-09-11$/.test(r1.end), JSON.stringify(r1));
+  t('③ 날짜 칸이 없으면 null(지어내지 않는다)',
+    f([{ rowJson: { '번호': 1, '수취인': 'ㅇ' } }], ['번호', '수취인']) === null);
+  t('③ 날짜 칸은 있는데 값이 전부 비면 null',
+    f(rows(['', '', '']), H) === null);
+  t('★ 빈 표·잘못된 입력은 null(throw 하지 않는다)',
+    f([], H) === null && f(null, null) === null);
+  t('★ 한 줄뿐이면 시작 = 종료', (() => { const r = f(rows(['2026-08-11']), H); return r && r.start === '2026-08-11' && r.end === '2026-08-11'; })());
+}
+
+t('★ 화면은 서버 값을 그리기만 한다 — 총건수 위에 일정 행', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return /const schedRow=/.test(m) && /cd\.schedule/.test(m)
+    && m.indexOf("['@sched'") > 0 && m.indexOf("['@sched'") < m.indexOf("['총건수'")
+    && /k==='@sched'\?schedRow/.test(m)
+    && !/findDateColumnIndex|parseDateColumn/.test(m);
+})());
+t('③ 값이 없으면 [미설정] 버튼이 아니라 「—」(고칠 창구가 없는 죽은 버튼 금지)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf('const schedRow='), j = m.indexOf('const rows=[', i);
+  const blk = m.slice(i, j);
+  return /cnna/.test(blk) && !/unset\(/.test(blk);
 })());
 
 console.log('\n── H. 시안 문서 ──');

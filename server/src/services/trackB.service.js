@@ -2545,6 +2545,45 @@ function _collectRowJsonKeys(rows) {
    ★ 공고가 여럿(차수 재발행)이면 **살아있는 최신 하나**를 쓰고 `campaignCount` 로 그 사실을 말한다.
    ★ 매칭은 이름 → gid 폴백(리네임으로 연결이 조용히 풀리지 않게). **빈 gid 는 절을 켜지 않는다.**
    ★ 어떤 실패에도 throw 하지 않는다 — 작업보드가 이것 때문에 죽으면 안 된다. */
+/* 「일정」 = 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
+   ★★ 모집인원조절(095)이 작업표 줄의 구매일자를 다시 깔면 표가 곧 바뀌므로 **연동 코드가 없다** —
+      표를 읽는 것 자체가 연동이다(여기서 계획표를 따로 읽으면 화면과 표가 갈린다).
+   ★ 판정 사본 0 — 날짜 칸은 `campaignSchedule.findDateColumnIndex`, 해석은
+     `utils/koreanDate.parseDateColumn`. **`fallbackAnchor` 필수**(작업표 표기 `8 / 15 (토)` 는
+     연도가 한 칸도 없어 앵커가 없으면 전 행 null 로 조용히 무너진다 — W2-b F-2 와 같은 자리).
+   ★ 날짜 칸이 없거나 한 줄도 못 읽으면 **null** — 화면이 「—」로 말한다(오늘로 지어내지 않는다).
+   ★ 읽기 전용·fail-soft: 어떤 실패에도 throw 하지 않는다. */
+function _condSchedule(rows, headers) {
+  try {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return null;
+    let keys = Array.isArray(headers) ? headers.filter(h => h != null && String(h).trim() !== '') : [];
+    if (!keys.length) {
+      const seen = new Set(); keys = [];
+      for (const r of list) {
+        const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : null;
+        if (!rj) continue;
+        for (const k of Object.keys(rj)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
+      }
+    }
+    if (!keys.length) return null;
+    const { findDateColumnIndex } = require('./campaignSchedule.service');
+    const di = findDateColumnIndex(keys);
+    if (di < 0) return null;
+    const key = keys[di];
+    const raw = list.map(r => {
+      const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : {};
+      return rj[key] == null ? '' : String(rj[key]);
+    });
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const { parseDateColumn } = require('../utils/koreanDate');
+    const iso = parseDateColumn(raw, { fallbackAnchor: { y: kst.getUTCFullYear(), m: kst.getUTCMonth() + 1 } })
+      .filter(Boolean).sort();
+    if (!iso.length) return null;
+    return { start: iso[0], end: iso[iso.length - 1] };
+  } catch (_) { return null; }
+}
+
 async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null } = {}) {
   try {
     const gid = String(meta.tabGid || '').trim();
@@ -3046,7 +3085,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
     /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
        fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
-    res.condition = _cond;   // ★ 위에서 이미 한 번 구했다(호출 2회 금지 — 값이 갈릴 수 없다)
+    res.condition = _cond;   // ★ 위에서 이미 한 번 구했다(호출 2회 금지 — cap 과 값이 갈릴 수 없다)
+    /* 「일정」 — 표(정렬된 `out`)의 구매일자에서 파생. 못 읽으면 null 로 두고 화면이 「—」로 말한다. */
+    if (res.condition) res.condition.schedule = _condSchedule(out, headers);
     // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
     //   화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
     res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });
