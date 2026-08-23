@@ -71,10 +71,23 @@ console.log('\n[B] 작업보드 머리 3종');
   ok('★ 시트 제목 칩에 판정을 넘긴다', /\$\{_curSheetLabel\(noSheet\)\}/.test(WD));
   ok('인자 없는 옛 호출이 남아 있지 않다', !/_curSheetLabel\(\)/.test(WD));
 
-  ok('★ `원본: 시트` 는 무시트면 안 그린다',
-    /const sotBadge=\(noSheet && sot!=='db'\) \? ''/.test(WD));
-  ok('★ `원본: Track B` 는 시트 라벨이 아니라 그대로 남는다',
-    /sot==='db'\?'Track B':'시트'/.test(WD));
+  /* ★★ 「원본: 시트」 배지는 **제거**했다(사용자 확정 2026-08-23) — 시트 기반 작업에서도 안 뜬다.
+       본섭 실측(114 전수) 상 `source_of_truth` 는 전부 `sheet` 이라 종전 조건에서도 이미
+       안 보이고 있었다. 시트 기반 작업임을 알리는 표기는 이제 **시트 제목 라벨 하나**다.
+     ★ 「원본: Track B」 는 남는다 — 시트 표기가 아니라 **cutover 상태**이고 master 의
+       [⋯] 전환 버튼과 짝이다(없애면 전환 여부를 화면에서 알 수 없다). */
+  /* ⚠ 검사 범위는 **작업보드 상단 `sotBadge` 한 곳**이다 — 파일 전체로 보면 관측 뷰의
+     `원본` 열(`o.sourceOfTruth==='db'?'Track B':'시트'`)과 전환 토스트가 걸린다.
+     그 둘은 다른 화면·다른 목적이라 이번 정리 대상이 아니다. */
+  ok('★ 작업보드 상단 `원본: 시트` 는 어떤 경우에도 안 그린다', (() => {
+    const i = WD.indexOf('const sotBadge='), j = WD.indexOf('const flipBtn=', i);
+    const blk = WD.slice(i, j);
+    return i > 0 && j > i && !/시트/.test(blk);
+  })());
+  ok('★ `원본: Track B`(cutover 상태)는 그대로 남는다',
+    /const sotBadge=\(sot==='db'\)/.test(WD) && />원본: Track B</.test(WD));
+  ok('★ 전환 버튼도 그대로 — 상태 표기를 없앤 게 아니라 시트 표기만 뺐다',
+    /flipSoT\('\$\{sot==='db'\?'sheet':'db'\}'\)/.test(WD));
 
   /* ★★ 그리드 모드 배지는 **둘 다 제거**했다(사용자 확정 2026-08-23) —
        `표 · 전체 열`(무시트) 은 전 작업이 무시트라 상시 표기였고, `시트 그리드 · 열람`(시트 기반)
