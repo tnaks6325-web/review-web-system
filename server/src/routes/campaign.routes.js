@@ -284,7 +284,10 @@ async function _saveCampaignOptions(campaignId, options) {
 async function _ensureLinkedWorktableOptionColumn(campaignId, by = 'campaign') {
   try {
     const { rows } = await pool.query(
-      `SELECT c.linked_tab_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
+      /* ★★ 컬럼명 주의: `recruit_campaigns` 는 `linked_sheet_id` 다 — `linked_tab_sheet_id` 는
+         **`work_orders`** 의 컬럼이다(033). 그걸 여기 쓰면 42703 이 나는데 아래 catch 가
+         "해당 없음" 으로 삼켜, 이 재발 방지 훅이 **배포 이래 한 번도 안 돌았다**(2026-08-23 실측). */
+      `SELECT c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
               (SELECT COUNT(*) FROM campaign_options o
                 WHERE o.campaign_id = c.id AND COALESCE(o.status,'active') <> 'closed') AS "liveOpts"
          FROM recruit_campaigns c WHERE c.id = $1`, [campaignId]);
