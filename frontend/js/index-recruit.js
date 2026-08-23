@@ -2148,10 +2148,25 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     return;
   }
   const firstProd = parsed.length ? parsed[0].productName : "";
-  renderOptRows(opts.map(o => {
+  /* ★★ **살아있는 옵션이 하나도 없으면(전부 마감) 정원은 표가 아니라 캠페인 원장이 말한다**
+     (2026-08-23 실사고 — DB 총인원 200 인데 편집 화면은 공란, 고쳐 저장해도 다시 열면 공란):
+     이 분기가 마감 옵션의 `recruitTotal: 0` 을 첫 행에 실었고, `_syncPreviewFromOptRows` 의
+     `head = live[0] || rows[0]` 가 그 마감 행을 채택해 **프리필로 실린 원장 값을 0 으로 덮었다**.
+     ★ 옵션 공고 판정은 이미 `liveOptions`(status!=='closed') 가 단일 출처인데(우레온 사고),
+       이 프리필만 `opts.length`(마감 포함)로 분기해 화면이 갈렸다.
+     ★ **마감 행 자체는 그대로 그린다** — [↩ 재개] 경로를 잃지 않는다.
+     ★ **모르는 값은 건드리지 않는다** — 원장 값이 양수일 때만 싣는다(공개 화이트리스트 뷰·구버전 백엔드). */
+  const hasLiveOpt = opts.some(o => (o.optKey || o.opt_key) && (o.status || "active") !== "closed");
+  const campQuota = campaign || {};
+  renderOptRows(opts.map((o, i) => {
     const key = o.optKey || o.opt_key || "";
     const hit = byOpt.get(key);
-    return { ...o, productName: (hit && hit.productName) || firstProd || "" };
+    const row = { ...o, productName: (hit && hit.productName) || firstProd || "" };
+    if (!hasLiveOpt && i === 0) {
+      if (Number(campQuota.recruit_total) > 0) row.recruitTotal = Number(campQuota.recruit_total);
+      if (Number(campQuota.daily_limit)   > 0) row.dailyLimit   = Number(campQuota.daily_limit);
+    }
+    return row;
   }));
 }
 
