@@ -95,8 +95,29 @@ ok('★★ 화면 칩 키 ≡ 서버 유형 키(순서까지)',
 ok('★ 주 이슈 판정에서 취소가 맨 앞(담당자에게 먼저 읽혀야 한다)',
   /for\(const k of \['cancel','duplicate','format_fail'/.test(wd));
 ok('판별 종류 라벨에 취소 화면', /order_cancel:'주문 취소 화면'/.test(wd));
+/* ★★ 문자열 존재만 보면 **어느 함수 안에 있는지**를 못 본다 — 실제로 이 블록이
+     `_riTypeLabel`(라벨 문자열을 돌려주는 함수) 안에 잘못 들어가 그 화면이 통째로
+     ReferenceError 로 죽었고, 옛 가드는 그것을 통과시켰다(2026-08-23 브라우저가 잡았다).
+     그래서 **함수 본문을 잘라서** 그 안에 있는지 본다. */
+function bodyOf(name) {
+  const i = wd.indexOf('function ' + name + '(');
+  if (i < 0) return '';
+  let d = 0, started = false;
+  for (let j = i; j < wd.length; j++) {
+    if (wd[j] === '{') { d++; started = true; }
+    else if (wd[j] === '}') { d--; if (started && d === 0) return wd.slice(i, j + 1); }
+  }
+  return '';
+}
+const actBody = bodyOf('_riCardActions'), labBody = bodyOf('_riTypeLabel');
 ok('★★ 취소 카드의 주 조치는 이동이 아니라 종결(옮길 건이 아니다)',
-  /if\(p==='cancel'\) return \{main:\{\.\.\.A\.bad/.test(wd));
+  /if\(p==='cancel'\) return \{main:\{\.\.\.A\.bad/.test(actBody));
+ok('★★ 그 블록이 라벨 함수에 잘못 들어가 있지 않다(화면 전체가 죽는다)',
+  !!labBody && !/A\.bad/.test(labBody) && /if\(p==='cancel'\) return '🚫 주문취소'/.test(labBody));
+ok('★ 유형 색 띠가 정의돼 있다(없으면 회색 t-none 으로 떨어져 신호가 죽는다)',
+  /cancel:\{cls:'t-cancel'/.test(wd) && /\.nc-type\.t-cancel\{/.test(wd));
+ok('★★ 근거 문장이 "리뷰 화면이 아니다"라고 말하지 않는다 — 담당자가 다른 칸으로 옮기려 든다',
+  (wd.match(/주문이 취소된 화면입니다 — 리뷰어가 이 작업을 취소한 것으로 보입니다/g) || []).length >= 2);
 
 console.log('\n▶ 반려 문구');
 const kinds = MSG.INSPECT_MSG_KINDS.map(k => k.key);
