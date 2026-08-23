@@ -635,6 +635,87 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ "모른다"(구버전)와 "없다"를 구분해 그린다', /r\.seqGap === false \? '-' : '\?'/.test(fe2));
   }
 
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     [L] 핑퐁 차단 — 재번호는 장부(review_index)까지 다시 만든다 (2026-08-23 프로덕션 실측)
+
+     증상: 5분 스윕이 12탭을 고치면(대상 35→23) 10분 뒤 그대로 되돌아왔다(23→35).
+     원인: 무시트 탭의 진실원본은 작업표인데 `participants.importTabFromIndex` 가
+           `row_json = EXCLUDED.row_json` 로 **review_index 값을 작업표에 덮는다**
+           (TRACK_B_PROJECTION / PARTICIPANTS_AUTO_SYNC 10분 크론).
+           재번호만 장부를 안 만들어 다음 투영이 옛 번호(빈칸)를 도로 밀어 넣었다.
+     결과: 빈칸 탭이 매 사이클 앞자리를 다시 차지 → **번호 어긋남 탭은 영영 차례가 안 왔다**.
+     ══════════════════════════════════════════════════════════════════════════ */
+  console.log('\n[L] 재번호 후 장부 재생성 — 5분 고치고 10분 되돌아가던 핑퐁 차단');
+  {
+    const led = require('../src/services/sheetlessLedger.service');
+    const keep = led.rebuildLedgers;
+    const mkPool = (changed) => makePool([
+      [/FROM tab_configs WHERE sheet_id/i, { rows: [{ sheetless: true }] }],
+      [/FROM campaign_participants p/i, { rows: [
+        { id: 'a', seq: 2, row_json: { '번호': '', '구매일자': '8 / 20 (수)' }, submitted_at: null, filled: true },
+        { id: 'b', seq: 3, row_json: { '번호': '2', '구매일자': '8 / 20 (수)' }, submitted_at: null, filled: true },
+      ] }],
+      [/^UPDATE campaign_participants/i, { rowCount: changed }],
+    ]);
+
+    let calls = [];
+    led.rebuildLedgers = async (a) => { calls.push(a); return { indexRows: 2 }; };
+
+    S.__setPoolForTest(mkPool(2));
+    const r1 = await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'cron', rebuild: true });
+    ok('★★★ rebuild:true 면 장부를 다시 만든다(안 하면 10분 투영이 되돌린다)',
+      r1.ok && calls.length === 1 && calls[0].sheetId === 'S1' && calls[0].tabName === 'T1', JSON.stringify(calls));
+
+    calls = []; S.__setPoolForTest(mkPool(2));
+    await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'auto' });
+    ok('★ 기본값(미지정)은 재생성하지 않는다 — 호출부가 곧바로 재생성하는 경로 보호(중복 금지)', calls.length === 0);
+
+    calls = []; S.__setPoolForTest(mkPool(2));
+    await S.renumberTab({ sheetId: 'S1', tabName: 'T1', dryRun: true, rebuild: true });
+    ok('★★ 미리보기는 재생성하지 않는다(쓰기 0 계약)', calls.length === 0);
+
+    calls = []; S.__setPoolForTest(mkPool(0));
+    await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'cron', rebuild: true });
+    ok('★ 바뀐 줄이 없으면 재생성하지 않는다(쓸데없는 부하 0)', calls.length === 0);
+
+    /* 트랜잭션 안에서는 절대 — 그 경로는 호출부가 커밋 뒤에 재생성한다. */
+    calls = [];
+    const cli = mkPool(2);
+    cli.query = (sql, p) => { if (/SAVEPOINT|RELEASE|ROLLBACK/i.test(sql)) return { rows: [] }; return mkPool(2).query(sql, p); };
+    await S.renumberTabInTx(cli, { sheetId: 'S1', tabName: 'T1' });
+    ok('★★ 트랜잭션 안(client)에서는 재생성하지 않는다', calls.length === 0);
+    /* ★★ rebuild:true 를 **명시로 넘겨도** client 가 있으면 하지 않는다 — 재생성은 자기 커넥션으로
+         도는 무거운 작업이라 남의 트랜잭션 안에서 돌리면 잠금을 오래 쥐고 커밋 경계를 흐린다.
+         (renumberTabInTx 가 rebuild 를 안 넘기는 것만 검사하면 이 가드 제거를 놓친다 — 변이시험 실측) */
+    calls = []; await S.renumberTab({ sheetId: 'S1', tabName: 'T1', client: cli, rebuild: true, by: 'x' });
+    ok('★★★ client + rebuild:true 여도 재생성하지 않는다(가드는 호출부가 아니라 여기 있다)', calls.length === 0);
+
+    /* 재생성 실패는 조용히 넘기지 않는다 — 번호는 이미 박혔으므로 사유만 싣는다. */
+    calls = []; led.rebuildLedgers = async () => { throw Object.assign(new Error('boom'), { code: 'rebuild_failed' }); };
+    S.__setPoolForTest(mkPool(2));
+    let threw = false, r2 = null;
+    try { r2 = await S.renumberTab({ sheetId: 'S1', tabName: 'T1', by: 'cron', rebuild: true }); } catch (_) { threw = true; }
+    ok('★★ 재생성 실패해도 throw 하지 않고 번호는 유지', !threw && r2 && r2.ok && r2.changed === 2);
+    ok('★ 실패 사유를 응답에 싣는다(조용한 실패 금지)', r2 && r2.ledgerError === 'rebuild_failed', JSON.stringify(r2));
+    led.rebuildLedgers = keep;
+
+    /* 소비처 배선 — 사람이 누르는 경로와 크론이 모두 켜져 있어야 핑퐁이 끝난다. */
+    const svc2 = noLineComments(read('src/services/rowNumbering.service.js'));
+    const swpBlk = svc2.slice(svc2.indexOf('async function sweepNumbering('));
+    ok('★★ 주기 스윕이 재생성을 켠다', /renumberTab\(\{[^}]*rebuild: true/.test(swpBlk), swpBlk.slice(swpBlk.indexOf('renumberTab('), swpBlk.indexOf('renumberTab(') + 120));
+    const allBlk3 = svc2.slice(svc2.indexOf('async function renumberAllSheetless('), svc2.indexOf('async function scanNumbering('));
+    ok('★★ 전체 정리도 재생성을 켠다', /renumberTab\(\{[^}]*rebuild: true/.test(allBlk3));
+    const rt = noLineComments(read('src/routes/trackB.routes.js'));
+    ok('★★ 수동 [번호 정리] 라우트도 재생성을 켠다', /svcRn\.renumberTab\(\{[^}]*rebuild: true/.test(rt));
+
+    /* ★ 무시트 작업표에 row_json 을 쓰는 다른 실행부는 전부 이미 재생성한다 — 재번호만 예외였다.
+         이 관행에서 다시 이탈하면 같은 핑퐁이 되살아난다. */
+    ['sheetlessStatus.service.js', 'worktableOptionColumn.service.js', 'sheetlessOrder.service.js']
+      .forEach(f => ok(`★ 관행 확인 — ${f} 는 쓰기 뒤 장부를 재생성한다`,
+        /rebuildLedgers/.test(read('src/services/' + f))));
+  }
+
   console.log(`\n✅ rowNumbering 회귀가드 통과 (${passed}케이스)`);
   process.exit(0);
 })().catch(e => { console.error('\n❌ 실패:', e.message); process.exit(1); });

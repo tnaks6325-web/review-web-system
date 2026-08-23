@@ -73,9 +73,11 @@ function _collectKeys(rows) {
  * @param {boolean} [o.dryRun=false]  true = 쓰기 0, 계획만
  * @param {string}  [o.by='auto']
  * @param {object}  [o.client]        호출부의 트랜잭션 커넥션(주문 기록과 같은 tx 안에서 돌 때)
+ * @param {boolean} [o.rebuild=false]   쓴 뒤 장부(review_index) 재생성 — ★ 아래 "핑퐁" 주석 참조.
+ *                                      호출부가 곧바로 재생성한다면 넘기지 않는다(중복 재생성 금지).
  * @returns {Promise<{ok:boolean, reason?:string, changed?:number, total?:number, sample?:Array}>}
  */
-async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', client = null } = {}) {
+async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', client = null, rebuild = false } = {}) {
   if (!sheetId || !tabName) throw new Error('renumberTab: sheetId, tabName 필수');
   if (!enabled()) return { ok: false, reason: 'disabled' };
   const db = client || getPool();
@@ -159,8 +161,29 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
       WHERE p.id = u.id AND p.deleted_at IS NULL AND p.active = TRUE`,
     [ids, nums, numKey, String(by).slice(0, 100)]);
 
+  /* ★★★ 장부(review_index)를 함께 다시 만든다 — 안 하면 **5분마다 고치고 10분마다 되돌아간다**
+     (2026-08-23 프로덕션 실측: 대상 35→23→35→23 이 5분·10분 주기로 반복).
+     무시트 탭의 진실원본은 작업표인데, `participants.importTabFromIndex` 는
+     `row_json = EXCLUDED.row_json` 로 **review_index 값을 작업표에 덮어쓴다**
+     (TRACK_B_PROJECTION / PARTICIPANTS_AUTO_SYNC 10분 크론). 재번호만 장부를 안 만들면
+     그 다음 투영이 **옛 번호(빈칸)** 를 도로 밀어 넣는다 —
+     그래서 빈칸 많은 탭이 매 사이클 앞자리를 다시 차지해 **번호 어긋남 탭은 영영 차례가 오지 않았다**.
+     ★ 무시트 탭의 다른 row_json 쓰기(상태 칸·옵션 열·구매일자·주문 기록)는 전부 이미 재생성한다 —
+       재번호만 예외였다(관행 합류).
+     ★ 트랜잭션 안(client)에서는 하지 않는다 — 그 경로는 호출부가 커밋 뒤에 재생성한다.
+     ★ 실패해도 번호는 이미 박혔다 — 사유만 싣는다(조용한 실패 금지). */
+  let ledgerError = null;
+  if (rebuild && !client && rowCount) {
+    try {
+      await require('./sheetlessLedger.service').rebuildLedgers({ sheetId, tabName, by: `renumber:${by}`.slice(0, 100) });
+    } catch (e) {
+      ledgerError = (e && (e.code || e.message)) || 'rebuild_failed';
+      logger.warn(`[rowNumbering] 재번호 후 장부 재생성 실패 tab=${tabName} — ${ledgerError}`);
+    }
+  }
+
   return { ok: true, changed: rowCount, planned: plan.changes.length, total: rows.length,
-           numberColumn: numKey, sample };
+           numberColumn: numKey, sample, ledgerError };
 }
 
 /**
@@ -211,7 +234,7 @@ async function renumberAllSheetless({ dryRun = true, by = 'admin', limit = SWEEP
           if (c && c.ok && (dryRun ? c.matched : c.retired)) { out.blankTabs++; out.blankRows += (dryRun ? c.matched : c.retired); }
         } catch (e) { logger.warn(`[rowNumbering] 짝 빈 줄 정리 실패 tab=${t.tabName}: ${e.message}`); }
       }
-      const r = await renumberTab({ sheetId: t.sheetId, tabName: t.tabName, dryRun, by });
+      const r = await renumberTab({ sheetId: t.sheetId, tabName: t.tabName, dryRun, by, rebuild: true });
       if (r.ok && r.changed) { out.changedTabs++; out.changedRows += r.changed; }
       out.details.push({ tabName: t.tabName, changed: r.changed || 0, reason: r.reason || null });
     } catch (err) {
@@ -396,8 +419,10 @@ async function sweepNumbering({ cap = 12, by = 'cron' } = {}) {
           if (c && c.ok && c.retired) { out.blankTabs++; out.blankRows += c.retired; }
         } catch (e) { logger.warn(`[rowNumbering] 짝 빈 줄 정리 실패 tab=${t.tabName}: ${e.message}`); }
       }
-      const r = await renumberTab({ sheetId: t.sheetId, tabName: t.tabName, by });
+      /* ★ 장부까지 다시 만든다 — 안 하면 10분 투영이 되돌려 다음 사이클에 같은 탭이 또 잡힌다. */
+      const r = await renumberTab({ sheetId: t.sheetId, tabName: t.tabName, by, rebuild: true });
       if (r && r.ok && r.changed) { out.changedTabs++; out.changedRows += r.changed; }
+      if (r && r.ledgerError) { out.ledgerErrors = (out.ledgerErrors || 0) + 1; }
     } catch (err) {
       out.failed++;
       logger.warn(`[rowNumbering] 스윕 실패 tab=${t.tabName}: ${err.message}`);
