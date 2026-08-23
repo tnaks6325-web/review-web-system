@@ -4419,6 +4419,10 @@ async function tabStatsMap({ force = false } = {}) {
                  홈의 작업 인원은 검색 명단이 아니라 실제 작업표 원장으로 보여야 하므로, 무시트 탭만
                  campaign_participants 활성 행을 쓴다. 시트 탭은 기존 index_master 집계를 그대로 유지한다. */
               CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.total_count, 0) ELSE im.row_count END AS "rowCount",
+              /* ★★ 채워진 줄 = 작업보드 상단 참여자 게이지의 분자와 **같은 판정**(rowNumbering.filledSql).
+                 홈이 여기서 따로 세면 "게이지는 208명인데 홈은 다른 숫자"로 갈린다(단일 출처 규율).
+                 시트 기반 탭의 index_master.row_count 는 이미 **이름 있는 행만** 세므로 그대로 채움 수다. */
+              CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.filled_count, 0) ELSE im.row_count END AS "filledCount",
               CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.submitted_count, 0) ELSE im.submitted_count END AS "submittedCount",
               COALESCE(paid.paid_count, 0)::int AS "paidCount",
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
@@ -4426,7 +4430,8 @@ async function tabStatsMap({ force = false } = {}) {
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
          LEFT JOIN LATERAL (
            SELECT COUNT(*) FILTER (WHERE active AND deleted_at IS NULL)::int AS total_count,
-                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND is_submitted)::int AS submitted_count
+                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND is_submitted)::int AS submitted_count,
+                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND ${require('../utils/rowNumbering').filledSql('cp')})::int AS filled_count
              FROM campaign_participants cp
             WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
          ) cp ON TRUE
@@ -4446,6 +4451,8 @@ async function tabStatsMap({ force = false } = {}) {
       map[_FIN_KEY(r.sheetId, r.tabName)] = {
         manager: r.manager || '', campaignName: r.campaignName || '', displayName: r.displayName || '',
         total: Number.isFinite(+r.rowCount) ? +r.rowCount : null,
+        // 준비된 줄(total) 과 채워진 줄(filled) 은 다른 값이다 — 홈 게이지 분자는 filled 를 쓴다.
+        filled: Number.isFinite(+r.filledCount) ? +r.filledCount : null,
         submitted: Number.isFinite(+r.submittedCount) ? +r.submittedCount : null,
         paid: +r.paidCount || 0,
         // 홈 [저장폴더] 버튼 재료 — tab_configs 를 이미 읽는 이 쿼리에 얹어 쿼리 순증 0.
@@ -4513,6 +4520,17 @@ async function tabCampaignsMap({ force = false } = {}) {
     } catch (e) {
       logger.warn(`[trackB] tabCampaignsMap 상태 재료 실패(공고 목록만 표시): ${e.message}`);
     }
+    /* ── 총건수(정원) 재료 ─────────────────────────────────────────────────────
+       홈 목록의 「인원/제출」 분모를 **작업표 줄 수가 아니라 총건수**로 그리기 위한 값이다.
+       ★★ 판정 사본을 만들지 않는다 — `displayRecruitTotal`(공고>0 이면 공고, 아니면 발주)은
+         작업 조건 카드·상태엔진이 쓰는 그 함수다. 여기서 `recruit_total` 을 그대로 실으면
+         "공고 0(미설정) + 발주 500" 인 작업이 홈에서만 0 건으로 보인다.
+       ★ 연결 작업오더 조회는 **배치 1회**(N+1 금지, linkedRecruitQuota 공유 조각).
+       ★ fail-soft — 실패하면 발주 폴백만 빠지고 공고 값으로 떨어진다(주석 자체는 살린다). */
+    const { displayRecruitTotal, linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
+    let woMap = new Map();
+    try { woMap = await linkedWorkOrdersForCampaigns(db, rows.map(r => r.id), ['recruit_count']); }
+    catch (e) { logger.warn(`[trackB] tabCampaignsMap 발주 정원 조회 실패(공고 값만 사용): ${e.message}`); }
     for (const r of rows) {
       let state = null, stateReason = null;
       try {
@@ -4521,10 +4539,14 @@ async function tabCampaignsMap({ force = false } = {}) {
           now, schedMap ? scheduleFor(schedMap, r) : null);
         state = st.state; stateReason = st.stateReason || null;
       } catch (_) { /* 판정 실패 = 상태 없음(공고 자체는 계속 보인다) */ }
+      const _wo = woMap && typeof woMap.get === 'function' ? woMap.get(r.id) : null;
+      const _rt = displayRecruitTotal(r.recruit_total, _wo && _wo.recruit_count);
       const item = {
         id: r.id, title: r.title || '', createdAt: r.created_at || null,
         status: r.status || '', participationMode: !!r.participation_mode,
         state, stateReason,
+        // 총건수(적용 정원)와 그 출처 — 0/'none' 이면 화면이 분모를 지어내지 않고 줄 수로 접는다.
+        recruitTotal: _rt.total || null, recruitTotalSource: _rt.source,
       };
       const push = (k) => { (map[k] || (map[k] = [])).push(item); };
       push(_FIN_KEY(r.linked_sheet_id, r.linked_tab_name));

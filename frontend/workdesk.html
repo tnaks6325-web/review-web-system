@@ -5157,6 +5157,56 @@ async function _tdGo(forcePayment){
   try{ await loadTabs(); }catch(_){ toast('삭제는 완료됐습니다. 목록 새로고침에 실패했으니 새로고침해 주세요.'); }
 }
 
+/* ── 홈 「인원/제출」 = 채워진 줄 / 총건수 ────────────────────────────────────────
+   ★★ **분모는 작업표 줄 수가 아니라 총건수**다(사용자 확정 2026-08-24).
+     종전엔 `제출 / 활성 줄 수`(무시트는 campaign_participants COUNT)를 그려서, 접수 배분표와
+     [📅 인원] 날짜별 계획이 어긋나 줄이 늘어난 작업이 **총건수 500인데 홈에는 581**로 보였다.
+     지금은 작업보드 상단 참여자 게이지와 **같은 두 값**(채워진 줄 / 총건수)을 쓴다.
+   ★★ 판정 사본 0 — 채움 수는 서버 `tabStatsMap.filled`(= rowNumbering.filledSql), 총건수는
+     서버 `campaigns[].recruitTotal`(= displayRecruitTotal: 공고>0 이면 공고, 아니면 발주)이다.
+     화면에서 다시 세거나 recruit_total 을 직접 읽지 않는다.
+   ★ **모르는 것은 지어내지 않는다** — 구버전 백엔드(filled 미동봉)는 종전 표기로 접고, 총건수를
+     못 구하면 분모를 줄 수로 접은 뒤 그 사실을 툴팁으로 말한다(0 위장 금지).
+   ★ 준비된 줄·빈 슬롯·제출·입금은 **툴팁**으로 남긴다(정보 손실 0, 줄 수는 늘리지 않는다). */
+function _finRecruitTotal(t){
+  const cs=Array.isArray(t&&t.campaigns)?t.campaigns.filter(c=>c&&c.id):[];
+  if(!cs.length) return null;
+  // 기준 공고 = 작업 조건 카드와 같은 순서(게시중 우선 → 최신). 배열은 서버가 최신순으로 준다.
+  const c=cs.find(x=>String(x.status||'')==='active')||cs[0];
+  const n=Number(c&&c.recruitTotal);
+  return Number.isFinite(n)&&n>0 ? {total:n, source:String(c.recruitTotalSource||'')} : null;
+}
+function _finProgHtml(t){
+  const s=(t&&t.stats)||{};
+  const rows=s.total==null?null:Number(s.total);
+  const sub=s.submitted==null?null:Number(s.submitted);
+  const filled=s.filled==null?null:Number(s.filled);
+  if(rows==null) return '<span class="wbl-sub">—</span>';
+  // 구버전 백엔드 = 채움 수를 모른다 → 종전 표기 그대로(조용히 다른 숫자로 바꾸지 않는다).
+  if(filled==null){
+    const p=(rows&&sub!=null)?Math.min(100,Math.round(sub/rows*100)):0;
+    return `<span class="wbl-g"><i style="width:${p}%"></i></span><span class="wbl-num">${sub==null?'—':sub}/${rows}</span>`
+      +`<span class="wbl-sub" title="이 서버는 채워진 줄 수를 아직 내려주지 않습니다 — 제출/준비된 줄로 표시합니다.">제출 기준</span>`;
+  }
+  const rt=_finRecruitTotal(t);
+  const den=rt?rt.total:rows;                       // 총건수를 못 구하면 줄 수로 접는다
+  const pct=den?Math.min(100,Math.round(filled/den*100)):0;
+  const blank=Math.max(0,rows-filled);
+  /* ★ "준비된 줄 ≠ 총건수" 경고는 **무시트 작업에만** — 시트 기반 탭의 `준비된 줄`은 미리 깔아 둔
+     슬롯이 아니라 **이미 이름이 적힌 행 수**라, 모집 중에는 총건수보다 적은 것이 정상이다. */
+  const gap=(rt&&_isNoSheet(t)&&rows!==rt.total);
+  const tip=[`채워진 줄 ${filled}명`,
+    rt?`총건수 ${rt.total}건${rt.source==='work_order'?'(발주 기준)':''}`:'총건수 미상 — 준비된 줄 수로 표시합니다',
+    `준비된 줄 ${rows}줄${blank?` (빈 슬롯 ${blank}줄)`:''}`,
+    sub==null?null:`제출 ${sub}명`,
+    s.paid==null?null:`입금 ${s.paid}명`,
+    gap?`⚠ 준비된 줄(${rows})이 총건수(${rt.total})와 다릅니다 — [📅 인원]에서 날짜별 인원을 확인하세요`:null,
+  ].filter(Boolean).join(' · ');
+  return `<span class="wbl-g" title="${esc(tip)}"><i style="width:${pct}%"></i></span>`
+    +`<span class="wbl-num" title="${esc(tip)}">${filled}/${den}${rt?'':'*'}</span>`
+    +`<span class="wbl-sub" title="${esc(tip)}">제출 ${sub==null?'—':sub}${gap?` · <b style="color:var(--warn,#b26a00)">줄 ${rows}</b>`:''}</span>`;
+}
+
 function _finBodyHtml(){
   const fin=STATE.finTab==='fin';
   const all=STATE.tabs||[];
@@ -5165,10 +5215,7 @@ function _finBodyHtml(){
   const filt=fin?'':(STATE.finFilter||'');
   const body=rows.length?rows.map(t=>{
     const s=t.stats||{}, i=all.indexOf(t);
-    const tot=s.total==null?null:s.total, sub=s.submitted==null?null:s.submitted;
-    const pct=(tot&&sub!=null)?Math.min(100,Math.round(sub/tot*100)):0;
-    const prog=tot==null?'<span class="wbl-sub">—</span>'
-      :`<span class="wbl-g"><i style="width:${pct}%"></i></span><span class="wbl-num">${sub==null?'—':sub}/${tot}</span>`;
+    const prog=_finProgHtml(t);
     const td=isTodayDone(t);
     const st=fin?`<span class="wbl-s fin">🏁 마감</span>`
       :(td?`<span class="wbl-s today">☑ 오늘 완료</span>`
