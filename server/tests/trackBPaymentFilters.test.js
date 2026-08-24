@@ -71,7 +71,7 @@ function constSource(name) {
   return line[0];
 }
 
-vm.runInContext(constSource('PM_MANAGER_NICK') + '\n' + constSource('PM_NO_MANAGER') + '\n'
+vm.runInContext(constSource('PM_MANAGER_NICK') + '\n'
   + sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmManagerMatch') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys') + '\n' + sourceOf('_pmSetWorkSelection') + '\n' + sourceOf('_pmWorkKeyRange'), sandbox);
 
 test('legacy manager names are normalized on both sides, not just one', () => {
@@ -79,22 +79,6 @@ test('legacy manager names are normalized on both sides, not just one', () => {
   // ★ 한쪽만 접으면 같은 사람이 '만두'와 '박세희' 두 칩으로 갈려, 한 칩만 고른 담당자의
   //   서식에서 나머지 절반이 조용히 빠진다.
   assert.strictEqual(sandbox._pmManagerName('\uBC15\uC138\uD76C'), '\uB9CC\uB450');
-});
-
-const PM_NONE = vm.runInContext('PM_NO_MANAGER', sandbox);   // const 선언은 sandbox 프로퍼티가 아니다
-
-test('the unassigned chip is a real group, not everything', () => {
-  const unassigned = [
-    { sheetId: 'S1', tabName: 'A', manager: '\uB9CC\uB450', amount: 1000, payable: true, excluded: false },
-    { sheetId: 'S2', tabName: 'B', manager: '', amount: 500, payable: true, excluded: false },
-  ];
-  assert.deepStrictEqual(
-    JSON.parse(JSON.stringify(sandbox._pmFilterItems(unassigned, { manager: PM_NONE }))),
-    [unassigned[1]]);
-  // 담당자 칩들의 합이 '전체'와 같아야 한다 — 어느 칩에도 안 잡히는 건이 남으면 조용한 누락이다.
-  assert.strictEqual(sandbox._pmFilterItems(unassigned, { manager: '\uB9CC\uB450' }).length
-    + sandbox._pmFilterItems(unassigned, { manager: PM_NONE }).length,
-    sandbox._pmFilterItems(unassigned, {}).length);
 });
 
 test('the download confirmation states which manager and works are being locked', () => {
@@ -106,18 +90,23 @@ test('the download confirmation states which manager and works are being locked'
   assert.match(sourceOf('_pmDownload'), /const rows = picked\.map/);
 });
 
-test('the manager chip row offers the unassigned group when such works exist', () => {
-  const bar = sourceOf('_pmFilterBar');
-  assert.match(bar, /hasNoManager/);
-  assert.match(bar, /managerButton\(PM_NO_MANAGER, *'\uB2F4\uB2F9\uC790 \uBBF8\uC9C0\uC815'\)/);
-});
-
 const rows = [
   { sheetId: 'S1', tabName: 'A', manager: '\uB9CC\uB450', amount: 1000, payable: true, excluded: false },
   { sheetId: 'S1', tabName: 'B', manager: '\uB9DD\uACE0', amount: 2200, payable: true, excluded: false },
   { sheetId: 'S2', tabName: 'A', manager: '\uB9CC\uB450', amount: 300, payable: true, excluded: true },
   { sheetId: 'S3', tabName: 'C', manager: '\uB9CC\uB450', amount: 700, payable: true, excluded: false },
 ];
+
+/* ★★ C스타일(CLAUDE.md 맨 위) — 담당자 줄은 `전체` + 실제 담당자 토글뿐이다.
+   UI 를 늘리려면 **먼저 시안으로 제안하고 사용자 선택을 받는다**(UI style proposal gate).
+   작업 중 실측: 담당자 없는 작업을 담으려고 `담당자 미지정` 칩을 임의로 붙였다가 되돌렸다. */
+test('the manager chip row stays 전체 + 담당자 toggles (C스타일)', () => {
+  const bar = sourceOf('_pmFilterBar');
+  // 칩 줄 = `전체` 하나 + 실제 담당자 목록 하나. 그 사이에 다른 버튼이 끼지 않는다.
+  assert.ok(bar.includes("${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div>"),
+    '담당자 칩 줄이 C스타일(전체 + 담당자 토글)을 벗어났다');
+  assert.doesNotMatch(workdesk, /PM_NO_MANAGER|담당자 미지정/);
+});
 
 test('manager and multiple selected works narrow the download candidates together', () => {
   const out = sandbox._pmFilterItems(rows, { manager: '\uB9CC\uB450', workKeys: ['S1||A', 'S3||C'] });
