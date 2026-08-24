@@ -2726,7 +2726,6 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     const feeCamp = pick('reviewFee');
     const typeCamp = pick('reviewType');
     const memoCamp = pick('transferMemo');
-    const bankCamp = pick('transferBank');
 
     /* 기간별 리뷰비 구간(082) — **리뷰비를 준 그 공고** 기준이어야 금액과 구간이 갈리지 않는다.
        실패해도 기존 review_fee 로 떨어진다(fail-soft). */
@@ -2750,12 +2749,17 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       : campFee != null ? 'campaign'
       : tabFee != null ? 'tab' : null;      // null = 근거를 못 찾음(0원이라서가 아니다)
 
-    /* ── 이체은행 — 입금관리(payment.service)와 **같은 판정**을 태운다(사본 금지) ──
-       ★★ 여기서 규칙을 새로 세우면 "작업 조건은 하나은행인데 이체 파일은 케이뱅크"로 갈린다.
+    /* ── 이체은행 — 입금관리(payment.service)와 **같은 공고 · 같은 판정**을 태운다(사본 금지) ──
+       ★★★ (코드리뷰 P1) 이 탭에 공고가 여럿(차수 재발행)이면 `camps`(GID 재매칭 + 활성 우선 +
+       값 있는 공고까지 훑기)로 고른 공고와, 실제 이체 계산이 쓰는 `_loadCampaigns`(이름만 일치 +
+       created_at 최신 하나)가 **다른 공고**를 고를 수 있다 — 그러면 "화면은 하나은행인데 이체
+       파일은 케이뱅크"가 된다. 그래서 은행만은 `camps` 를 안 쓰고 **이체 계산이 실제로 쓰는 그
+       공고를 그대로**(`payment.service.campaignForTab`) 가져와 같은 판정 함수로 고른다.
        순서 = 공고(사람이 정한 값) → 탭 설정 → 작업오더 물건비 자동판정(현금→하나 · 계산서/수수료→케이뱅크).
        ★ `auto` 는 **사람이 정하지 않았다**는 뜻이라 화면이 그 사실을 말한다(조용한 추정 금지). */
-    const { normalizeBankChoice, bankFromGoodsCostType, BANK_LABEL } = require('./payment.service');
-    const campBank = normalizeBankChoice(bankCamp && bankCamp.transferBank);
+    const { normalizeBankChoice, bankFromGoodsCostType, BANK_LABEL, campaignForTab } = require('./payment.service');
+    const txCamp = await campaignForTab(sheetId, tabName).catch(() => null);
+    const campBank = normalizeBankChoice(txCamp && txCamp.transferBank);
     const tabBank  = normalizeBankChoice(meta.tabTransferBank);
     const autoBank = bankFromGoodsCostType((wo && wo.goodsCostType) || '');
     const transferBank = campBank || tabBank || autoBank || null;
@@ -5349,6 +5353,7 @@ module.exports = {
   tabStatsMap,
   tabCampaignsMap,
   tabTodayProgress,
+  tabConditionSummary,   // ★ 회귀가드가 스텁 pool 로 직접 실행(코드리뷰 P1 divergence 재현)
   _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다
   __condAdvertiserLensForTest: (...a) => _condAdvertiserLens(...a),   // 담당 렌즈(브랜드 세션 분기) 실행 검증용
   identityKey,

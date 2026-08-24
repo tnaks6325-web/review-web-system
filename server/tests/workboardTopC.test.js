@@ -762,8 +762,112 @@ t('★ 저장 창구는 기존 API 하나(신규 경로 0)', (() => {
     sb.f({ transferBankLabel: null, bankSource: null })[0][2] === null);
 }
 
+async function _runP1Guards() {
+console.log('\n── M. 코드리뷰 P1 — 은행은 이체 계산과 같은 공고를 봐야 한다 ──');
+/* PR #1173 리뷰 지적(chatgpt-codex-connector): camps(GID 재매칭+활성우선+값있는공고 훑기)와
+   실제 이체가 쓰는 _loadCampaigns(이름만 일치+created_at 최신 하나)가 **다른 공고**를 고르면
+   "화면은 하나은행인데 이체 파일은 케이뱅크"가 된다. 스텁 pool 로 tabConditionSummary 를
+   **실제 실행**해 그 divergence 가 재현되지 않음을 고정한다. */
+{
+  const path = require('path');
+  const fs2 = require('fs');
+  const SRC = pp => path.join(__dirname, '..', 'src', pp);
+  const poolPath = require.resolve(SRC('db/pool'));
+  const paySvcPath = require.resolve(SRC('services/payment.service'));
+  const tbSvcPath = require.resolve(SRC('services/trackB.service'));
+
+  const withStubPool = async (handler, run) => {
+    const stub = {
+      query: async (sql, params) => handler(sql, params) || { rows: [], rowCount: 0 },
+      connect: async () => ({ query: stub.query, release() {} }),
+    };
+    const origPool = require.cache[poolPath];
+    require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, exports: stub };
+    delete require.cache[paySvcPath];
+    delete require.cache[tbSvcPath];
+    try { await run(require(tbSvcPath), stub); }
+    finally {
+      delete require.cache[paySvcPath];
+      delete require.cache[tbSvcPath];
+      if (origPool) require.cache[poolPath] = origPool; else delete require.cache[poolPath];
+    }
+  };
+
+  {
+    let picked = null;
+    // camps: 오래된(older) 공고가 active=TRUE·bank=hana / 최신(newer) 공고가 closed·bank=NULL
+    //   → camps 정렬(active DESC, created_at DESC)은 [older(active,hana), newer(closed,null)]
+    //   → 실제 이체(_loadCampaigns, created_at DESC 만)는 newer(bank=null) 하나만 본다
+    await withStubPool((sql, params) => {
+      if (/FROM recruit_campaigns\s+WHERE linked_sheet_id/.test(sql)) {
+        return { rows: [
+          { id: 'C-OLDER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+            reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: 'hana',
+            multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+            status: 'active', participationMode: true },
+          { id: 'C-NEWER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+            reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: null,
+            multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+            status: 'closed', participationMode: true },
+        ] };
+      }
+      // payment.service._loadCampaigns 의 DISTINCT ON ... ORDER BY created_at DESC — newer 하나만
+      if (/FROM recruit_campaigns c\s*$|c\.linked_sheet_id = ANY/.test(sql)) {
+        return { rows: [
+          { id: 'C-NEWER', title: 'A', sheetId: 'S1', tabName: 'T1', reviewFee: null,
+            transferBank: null, transferMemo: null, campStartDate: null, goodsCostType: '' },
+        ] };
+      }
+      return { rows: [] };
+    }, async (tb) => {
+      const cd = await tb.tabConditionSummary({ query: async (sql, params) => {
+        if (/FROM recruit_campaigns\s+WHERE linked_sheet_id/.test(sql)) {
+          return { rows: [
+            { id: 'C-OLDER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+              reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: 'hana',
+              multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+              status: 'active', participationMode: true },
+            { id: 'C-NEWER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+              reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: null,
+              multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+              status: 'closed', participationMode: true },
+          ] };
+        }
+        return { rows: [] };
+      } }, { sheetId: 'S1', tabName: 'T1', meta: {}, wo: null });
+      picked = cd;
+    });
+    t('★★ 활성 공고에 은행이 있어도, 실제 이체가 보는 최신 공고에 은행이 없으면 [미설정]이다',
+      picked && picked.transferBank === null && picked.bankSource === null,
+      picked && JSON.stringify({ transferBank: picked.transferBank, bankSource: picked.bankSource }));
+  }
+
+  t('★ campaignForTab 이 payment.service 에서 export 된다(사본 없이 재사용 가능)', (() => {
+    const svc2 = fs2.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    return /async function campaignForTab\(/.test(svc2) && /campaignForTab,/.test(svc2)
+      && /return map\[sheetId \+ '\|\|' \+ tabName\] \|\| null;/.test(svc2);
+  })());
+  t('★★ campaignForTab 이 _loadCampaigns 를 그대로 위임한다(SQL 사본 0)', (() => {
+    const svc2 = fs2.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    const fn = svc2.slice(svc2.indexOf('async function campaignForTab('), svc2.indexOf('module.exports'));
+    return /_loadCampaigns\(\[sheetId\], \[tabName\]\)/.test(fn) && !/ORDER BY/.test(fn);
+  })());
+  t('★ 조건 카드가 campaignForTab 을 쓴다(camps 픽 사본이 아니라)', (() => {
+    const src = fs2.readFileSync(SRC('services/trackB.service.js'), 'utf8');
+    const condStart = src.indexOf('async function tabConditionSummary(');
+    const condEnd = src.indexOf("logger.warn(\`[trackB] tabConditionSummary", condStart);
+    const cond2 = src.slice(condStart, condEnd);
+    return /campaignForTab\(sheetId, tabName\)/.test(cond2)
+      && !/const campBank = normalizeBankChoice\(bankCamp/.test(cond2);
+  })());
+}
+
+}
+
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));
 
-console.log(`\n✅ workboardTopC: ${pass} cases passed`);
-process.exit(0);
+_runP1Guards().then(() => {
+  console.log(`\n✅ workboardTopC: ${pass} cases passed`);
+  process.exit(0);
+}).catch(e => { console.error(e); process.exit(1); });

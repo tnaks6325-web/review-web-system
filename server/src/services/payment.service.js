@@ -1182,7 +1182,20 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
   }
 }
 
+/** ★★ 은행 계산이 실제로 쓰는 그 공고를 그대로 돌려준다(사본 금지 — 코드리뷰 P1 지적 반영).
+ *  한 탭에 공고가 여럿(차수 재발행)이면 `_loadCampaigns`(이체 계산의 유일한 진실원본)와
+ *  **정확히 같은 규칙**(이름 일치 · created_at 최신 하나 · 상태 무관 · GID 폴백 없음)으로 고른다.
+ *  워크보드의 「작업 조건」 카드가 이 함수로 은행을 그려야 "화면은 하나은행인데 이체 파일은
+ *  케이뱅크" 같은 divergence 가 구조적으로 불가능해진다(사본을 두면 두 규칙이 각자 진화한다). */
+async function campaignForTab(sheetId, tabName) {
+  if (!sheetId || !tabName) return null;
+  const map = await _loadCampaigns([sheetId], [tabName]);
+  return map[sheetId + '||' + tabName] || null;
+}
+
 module.exports = {
+  campaignForTab,
+
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName, batchFileFormat,
