@@ -281,6 +281,49 @@ async function markSheetlessPurchaseDate({ sheetId, tabName, rowIndex, dateYmd, 
   return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by });
 }
 
+/**
+ * 무시트 탭의 **주문자·수취인 칸**에 이름을 기록한다 (2026-08-24 · 리뷰내역 반영 창구).
+ *
+ * ★★ 왜 필요한가 — 리뷰어 홈 "리뷰 내역" 카드(`search.service`)의 이름은 `review_index.reviewer_name`
+ *   이고, 그 값은 **작업표의 '주문자' 계열 칸**(`orderLedger._fieldToCol(headers,'orderer')`가 찾는
+ *   헤더 — 흔히 '주문자제출')에서 온다. `review_index.recipient_name`(작업표 '수취인' 칸)은
+ *   현재 리뷰어 화면 어디에도 표시되지 않는다 — 그래도 참고용으로 함께 실제 반영시킨다.
+ * ★ 어느 칸이 주문자/수취인인가 = **`orderLedger._fieldToCol` 단일 출처**(관리자 주문 편집이 이미
+ *   쓰는 판정 — 사본을 두면 "주문 편집은 이 칸에 쓰는데 여기는 저 칸을 찾는" 드리프트가 생긴다).
+ * ★ 이 행에 연결된 주문(`order_submissions`)이 있으면 이 함수를 부르지 않는다 — 그 경우는
+ *   원장을 먼저 고치고 `writeOrderToWorktable`로 재기록해야 다음 주문 편집에 안 덮인다
+ *   (호출부 `trackB.service.setWorkdeskIdentityField` 가 분기).
+ */
+async function markSheetlessIdentityName({ sheetId, tabName, rowIndex, field, name, by = 'system' } = {}) {
+  if (!sheetId || !tabName || !rowIndex) return { handled: false };
+  if (field !== 'orderer' && field !== 'recipient') return { handled: false };
+  const text = String(name == null ? '' : name).trim();
+  if (!text) return { handled: true, ok: false, reason: 'empty_value' };
+
+  const db = getPool();
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
+  catch (_) { return { handled: false }; }
+  if (!sheetless) return { handled: false };
+
+  let headers = [];
+  try {
+    const { rows } = await db.query(
+      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+        WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
+      [sheetId, tabName]);
+    headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
+  } catch (e) {
+    return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
+  }
+  const { _fieldToCol } = require('./orderLedger.service');
+  const idx = _fieldToCol(headers, field);
+  if (idx < 0) return { handled: true, ok: false, reason: field === 'orderer' ? 'no_orderer_column' : 'no_recipient_column' };
+  const header = String(headers[idx] || '').trim();
+
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
+}
+
 /** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
 async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, mergeDeposit = false, deferRebuild = false }) {
   let nextValue = value;
@@ -435,6 +478,7 @@ module.exports = {
   markSheetlessMemo,
   markSheetlessPostDate,
   markSheetlessPurchaseDate,
+  markSheetlessIdentityName,
   backfillReviewSubmitTimes,
   REVIEW_SUBMIT_TIME_BACKFILL_DAYS,
   SUBMIT_MARK,
