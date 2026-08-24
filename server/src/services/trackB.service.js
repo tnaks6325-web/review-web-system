@@ -2513,11 +2513,35 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
   return Object.fromEntries(out);
 }
 
+/**
+ * 작업명 정리 — 저장 시점 단일 출처 (2026-08-24 실사고).
+ *
+ * 무엇이 있었나: 시트에서 칸을 복사해 붙인 값이 그대로 저장돼 이름 안에 **탭(TAB) 문자**가
+ * 박혔다(실측: "0_쟈니베어_…_500건\t—"). 화면에서는 공백처럼 보여 눈으로는 못 찾고,
+ * 붙어 온 옆 칸 값까지 이름에 남는다.
+ *
+ * ★★ 지우는 것은 **보이지 않는 문자와 공백뿐** — 글자·기호(대시 등)는 건드리지 않는다.
+ *   무엇이 군더더기인지는 내용 판단이라 사람 몫이다(조용한 자동수정 금지 규율).
+ * ★ 제어문자는 **삭제가 아니라 공백으로** 바꾼다 — 지워 버리면 "A\tB" 가 "AB" 로 붙어
+ *   원래 없던 단어가 만들어진다.
+ * ★ 정리 결과가 비면 저장을 **거부**한다(보이지 않는 문자만 친 입력 = 이름이 아니다).
+ * ★ 길이 검사는 **정리한 값** 기준(정리 전 길이로 막으면 지워질 문자 때문에 거부된다).
+ */
+function normalizeDisplayName(v) {
+  return String(v == null ? '' : v)
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')                                  // 제어문자(탭·개행 포함)
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')         // 유니코드 공백류(NBSP·전각공백…)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')                                   // 폭 없는 문자(붙여넣기 잔재)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Keeps relational tab_name stable; only the workboard-facing display name changes.
 async function setWorkdeskTitle({ sheetId, tabName, displayName } = {}) {
   const sid = String(sheetId || '').trim();
   const tab = String(tabName || '').trim();
-  const name = String(displayName == null ? '' : displayName).trim();
+  const raw = String(displayName == null ? '' : displayName);
+  const name = normalizeDisplayName(raw);
   if (!sid || !tab) throw new Error('sheetId, tabName 필수');
   if (!name) throw new Error('작업명을 입력해 주세요.');
   if (name.length > 120) throw new Error('작업명은 120자 이하로 입력해 주세요.');
@@ -2530,7 +2554,8 @@ async function setWorkdeskTitle({ sheetId, tabName, displayName } = {}) {
      RETURNING display_name AS "displayName"`,
     [sid, tab, name]
   );
-  return { ok: true, displayName: (rows[0] && rows[0].displayName) || name };
+  // ★ 값이 실제로 달라졌으면 화면이 그 사실을 말한다(조용한 자동수정 금지).
+  return { ok: true, displayName: (rows[0] && rows[0].displayName) || name, cleaned: name !== raw };
 }
 
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
@@ -5255,6 +5280,7 @@ module.exports = {
   _writebackEngine,
   workdeskTab,
   setWorkdeskTitle,
+  normalizeDisplayName,   // 작업명 정리 — 회귀가드가 실제로 돌려 본다
   setWorkdeskPurchaseDate,
   backfillWorkdeskReviewSubmitDate,
   editWorkdeskRow,
