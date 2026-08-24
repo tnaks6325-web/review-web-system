@@ -108,6 +108,18 @@ function candidateSql({ oneFile = false } = {}) {
                       WHERE ins.file_id = rs.file_id)
      AND NOT EXISTS (SELECT 1 FROM review_edit_requests er
                       WHERE er.old_file_id = rs.file_id OR er.new_file_id = rs.file_id)
+     /* ★★★ 아카이브된 차수는 "행이 사라진 것"이 아니다 (2026-08-24 Codex 리뷰 · 실측 확인).
+          차수 아카이브는 review_index 행을 review_index_archive 로 옮기고 **원본을 지운다**.
+          그러면 ㉠ rs.review_index_id 가 가리킬 행이 없어져 위 OR 근거가 곧바로 참이 되고
+          ㉡ 재생성 뒤 review_file_id 를 되붙이는 스냅샷 복원(sheetlessLedger 2-1)도
+             그 행을 못 찾아 **review_file_id 링크 제외까지 함께 무너진다**.
+          남는 방어가 아래 작업표 줄 하나뿐이라, 정상 리뷰 이미지가 유예 7일 뒤 휴지통으로 간다.
+        ★ 좌표로 막는 이유: review_index_archive 에는 review_file_id 도 원본 id 도 없어서
+          (005 스키마) **이미 아카이브된 과거 데이터**를 정확한 키로 이을 방법이 지금은 없다.
+          좌표 대조는 과거분까지 덮고, 빗나가면 **지우지 않는 쪽**으로 접힌다(제외 조건이라 안전 방향). */
+     AND NOT EXISTS (SELECT 1 FROM review_index_archive ria
+                      WHERE ria.sheet_id = rs.sheet_id AND ria.tab_name = rs.tab_name
+                        AND ria.row_index = rs.row_index)
      AND NOT EXISTS (SELECT 1 FROM campaign_participants cp
                       WHERE cp.sheet_id = rs.sheet_id AND cp.tab_name = rs.tab_name
                         AND cp.row_index = rs.row_index
@@ -285,8 +297,15 @@ async function scanFolderOrphans({ sheetId, tabName, limit = null } = {}) {
         ? await drive.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName)
         : await drive.ensureCaptureFolderPath(rootFolderId, sheetTitle, tabName);
       if (!f || !f.id) continue;
-      const listed = await drive.listFolderContents(f.id, 'image/');
-      for (const x of (listed || [])) files.push({ id: x.id, name: x.name, kind, createdTime: x.createdTime });
+      /* ★ `listFolderContents(id, mime)` 는 **완전일치**(`mimeType = '<값>'`)로 질의한다.
+         실제 파일은 `image/jpeg`·`image/png` 라 `'image/'` 로 거르면 **언제나 0건**이다
+         (2026-08-24 Codex 리뷰 · 실측 확인 — B 스캔이 통째로 무음이었다).
+         공용 래퍼를 고치면 다른 호출부까지 흔들리므로, 여기서 **접두사로 거른다**. */
+      const listed = await drive.listFolderContents(f.id);
+      for (const x of (listed || [])) {
+        if (!String(x.mimeType || '').startsWith('image/')) continue;
+        files.push({ id: x.id, name: x.name, kind, createdTime: x.createdTime });
+      }
     } catch (err) {
       /* ★ 한쪽 폴더 조회 실패가 전체를 죽이지 않는다 — 다만 조용히 넘기지 않는다. */
       logger.warn(`[orphanCapture] 폴더 조회 실패 ${tabName}/${kind}: ${err.message}`);

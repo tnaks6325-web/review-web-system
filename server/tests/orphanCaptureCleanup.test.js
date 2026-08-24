@@ -203,6 +203,69 @@ const C = (fileId, extra = {}) => Object.assign({
   }
 
 
+  console.log('\n[K] ★★★ Codex 리뷰 3종 (2026-08-24) — 전부 실측 확인 후 수정');
+  {
+    /* K-1 (P1) 아카이브된 차수를 "행이 사라졌다"로 읽으면 정상 리뷰 이미지를 지운다.
+         차수 아카이브가 review_index 행을 옮기고 원본을 지우므로 ㉠ review_index_id 가 dangling 이 되고
+         ㉡ 재생성 뒤 review_file_id 스냅샷 복원도 그 행을 못 찾아 링크 제외까지 무너진다. */
+    ok('★★★ 아카이브된 차수 행은 후보에서 제외한다',
+      /NOT EXISTS \(SELECT 1 FROM review_index_archive ria/.test(src));
+    ok('★ 제외는 그 작업·그 좌표로 잇는다(과거 아카이브분까지 덮는다)',
+      /ria\.sheet_id = rs\.sheet_id AND ria\.tab_name = rs\.tab_name[\s\S]{0,80}ria\.row_index = rs\.row_index/.test(src));
+    ok('★ 제외 블록에 있지 근거(OR) 블록에 있지 않다 — 아카이브가 삭제 근거가 되면 안 된다',
+      !/AND \(\n[\s\S]*?review_index_archive[\s\S]*?\n\s*\)/.test(src));
+
+    /* K-2 (P1) listFolderContents 는 mimeType **완전일치**로 질의한다 —
+         'image/' 로 거르면 image/jpeg·image/png 어느 것과도 안 맞아 B 스캔이 언제나 0건이었다. */
+    ok('★★★ 폴더 스캔이 mimeType 완전일치로 거르지 않는다',
+      !/listFolderContents\([^)]*'image\/'\)/.test(src));
+    ok('★ 이미지 판정은 접두사로 한다', /startsWith\('image\/'\)/.test(src));
+  }
+  {
+    /* K-2 실행 확인 — 진짜 mimeType 이 섞인 목록에서 이미지만 골라내는가. */
+    process.env.AI_REVIEW_FOLDER_ID = 'ROOT';
+    const files = [
+      { id: 'ok1', name: 'a.jpg', mimeType: 'image/jpeg', createdTime: '2020-01-01T00:00:00Z' },
+      { id: 'ok2', name: 'b.png', mimeType: 'image/png',  createdTime: '2020-01-01T00:00:00Z' },
+      { id: 'no1', name: 'c.pdf', mimeType: 'application/pdf', createdTime: '2020-01-01T00:00:00Z' },
+      { id: 'no2', name: 'd',     mimeType: 'application/vnd.google-apps.folder', createdTime: '2020-01-01T00:00:00Z' },
+    ];
+    let sawMime;
+    S.__setDriveForTest(Object.assign(makeDrive(), {
+      ensureReviewFolderPath: async () => ({ id: 'F_REVIEW' }),
+      ensureCaptureFolderPath: async () => ({ id: 'F_CAPTURE' }),
+      listFolderContents: async (id, mime) => { sawMime = mime; return id === 'F_REVIEW' ? files : []; },
+    }));
+    S.__setPoolForTest({ query: async (sql) => /FROM tab_configs/.test(String(sql))
+      ? { rows: [{ title: '시트' }] } : { rows: [], rowCount: 1 } });
+    const scan = await S.scanFolderOrphans({ sheetId: 's', tabName: 't' });
+    ok('★★★ 실제 mimeType(image/jpeg·image/png)을 후보로 잡는다',
+      scan.ok === true && scan.items.map(i => i.fileId).join() === 'ok1,ok2');
+    ok('★ 이미지가 아닌 파일·폴더는 건드리지 않는다',
+      !scan.items.some(i => /^no/.test(i.fileId)));
+    ok('★ Drive 질의에 완전일치 mime 을 넘기지 않는다', sawMime === undefined);
+    delete process.env.AI_REVIEW_FOLDER_ID;
+  }
+  {
+    /* K-3 (P2) 열린 트랜잭션에서 INSERT 가 실패하면 PG 가 tx 를 abort 로 표시한다.
+         try/catch 만으로는 fail-soft 가 성립하지 않는다 — SAVEPOINT 로 되돌려야 한다. */
+    const src2 = read('src/services/workTabDelete.service.js');
+    const del = src2.slice(src2.indexOf('async function deleteTask'),
+      src2.indexOf('async function findOrphanCampaigns'));
+    /* ⚠ `/SAVEPOINT orphan_tomb/` 만 보면 ROLLBACK·RELEASE 줄에도 걸려, **세이브포인트를
+         만드는 줄을 지워도 초록**이다(변이시험 실측). 생성문 자체와 **순서**를 고정한다. */
+    const iSp  = del.indexOf("query('SAVEPOINT orphan_tomb')");
+    const iIns = del.indexOf('INSERT INTO orphan_capture_tombstones');
+    ok('★★★ 세이브포인트를 실제로 만든다', iSp > 0);
+    ok('★★★ 만드는 것이 INSERT 보다 앞이다(뒤면 감싼 게 아니다)', iSp > 0 && iIns > 0 && iSp < iIns);
+    ok('★★★ 실패하면 되돌린다(이 한 줄이 fail-soft 의 전부)',
+      /ROLLBACK TO SAVEPOINT orphan_tomb/.test(del));
+    ok('★ 성공하면 해제한다(세이브포인트를 쌓아 두지 않는다)',
+      /RELEASE SAVEPOINT orphan_tomb/.test(del));
+    ok('★★ 되돌리기가 catch 안에 있다(로그만 남기고 넘어가면 뒤 DELETE 가 25P02 로 죽는다)',
+      /catch \(tombErr\) \{[\s\S]{0,300}ROLLBACK TO SAVEPOINT orphan_tomb/.test(del));
+  }
+
   console.log('\n[H] C종류 — 작업 소멸(묘비 134)');
   {
     const src2 = read('src/services/workTabDelete.service.js');
@@ -266,7 +329,9 @@ const C = (fileId, extra = {}) => Object.assign({
        폴더 조회가 실패해 조기 반환되면 "0건"이 나와도 가드를 시험한 게 아니다
        (그 스텁으로는 가드를 지워도 테스트가 통과해 버린다 — 검출력 0). */
     process.env.AI_REVIEW_FOLDER_ID = 'ROOT';
-    const old = { id: 'g1', name: 'g1.jpg', createdTime: '2020-01-01T00:00:00Z' };
+    /* ★ mimeType 을 실제 값으로 둔다 — Drive 는 항상 실어 보내고(fields 에 포함),
+       코드가 접두사로 거르므로 없는 값으로 두면 그건 현실이 아니라 픽스처 오류다. */
+    const old = { id: 'g1', name: 'g1.jpg', mimeType: 'image/jpeg', createdTime: '2020-01-01T00:00:00Z' };
     const drive = Object.assign(makeDrive(), {
       ensureReviewFolderPath: async () => ({ id: 'F_REVIEW' }),
       ensureCaptureFolderPath: async () => ({ id: 'F_CAPTURE' }),
@@ -287,6 +352,15 @@ const C = (fileId, extra = {}) => Object.assign({
     ok('★ 고른 것이 후보 밖이면 0건(교집합)', (r2.trashed || 0) === 0 && drive.trashed.length === 0);
     const r3 = await S.trashFolderOrphans({ sheetId: 's', tabName: 't', dryRun: false, fileIds: ['g1'] });
     ok('★ 사람이 고른 후보만 휴지통으로', r3.trashed === 1 && drive.trashed.join() === 'g1');
+    /* ★★ mimeType 을 모르는 파일은 후보로 삼지 않는다 — 모르면 건드리지 않는다(안전 방향). */
+    S.__setDriveForTest(Object.assign(makeDrive(), {
+      ensureReviewFolderPath: async () => ({ id: 'F_REVIEW' }),
+      ensureCaptureFolderPath: async () => ({ id: 'F_CAPTURE' }),
+      listFolderContents: async (id) => (id === 'F_REVIEW'
+        ? [{ id: 'unknown', name: 'x', createdTime: '2020-01-01T00:00:00Z' }] : []),
+    }));
+    const rU = await S.scanFolderOrphans({ sheetId: 's', tabName: 't' });
+    ok('★★ mimeType 을 모르는 파일은 후보가 아니다', rU.ok === true && rU.total === 0);
     delete process.env.AI_REVIEW_FOLDER_ID;
   }
 

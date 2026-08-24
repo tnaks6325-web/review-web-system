@@ -366,7 +366,14 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
        알 수 없다**(C종류 = 탐지 불가). 좌표만 남겨 두면 고아 캡처 정리가 그 뒤로도 찾는다.
        ★ 순서가 계약 — DELETE_TABLES 루프보다 **앞**이어야 한다(뒤면 읽을 원장이 없다).
        ★ 절대 삭제를 막지 않는다(fail-soft) — 묘비는 청소 편의지 삭제의 전제가 아니다.
-         다만 조용히 넘기지 않고 사유를 로그로 남긴다. */
+         다만 조용히 넘기지 않고 사유를 로그로 남긴다.
+       ★★★ **SAVEPOINT 로 격리한다**(2026-08-24 Codex 리뷰 · 완화 금지) — try/catch 만으로는
+         fail-soft 가 **성립하지 않는다**. 열린 트랜잭션 안에서 이 INSERT 가 실패하면
+         (배포 중 134 미적용 = `relation does not exist` 가 대표 사례) PostgreSQL 이 그
+         트랜잭션을 **abort 상태**로 표시해 뒤따르는 DELETE 가 전부 25P02 로 죽는다.
+         잡아서 로그만 남기면 "삭제는 계속"이 아니라 **작업 삭제 전체가 롤백**된다.
+         (CLAUDE.md 의 082 apply·번호 매기기와 같은 자리 — 같은 함정을 세 번째로 밟지 않는다.) */
+    await client.query('SAVEPOINT orphan_tomb');
     try {
       const tomb = await client.query(
         `INSERT INTO orphan_capture_tombstones
@@ -387,7 +394,10 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
         recordedTombstones = tomb.rowCount;
         logger.info(`[workTabDelete] "${tabName}" 캡처 묘비 ${tomb.rowCount}건 기록(고아 정리용)`);
       }
+      await client.query('RELEASE SAVEPOINT orphan_tomb');
     } catch (tombErr) {
+      /* ★ 되돌린 뒤에야 트랜잭션이 다시 쓸 수 있는 상태가 된다 — 이 한 줄이 fail-soft 의 전부다. */
+      try { await client.query('ROLLBACK TO SAVEPOINT orphan_tomb'); } catch (_) { /* 이미 죽었으면 어차피 아래서 드러난다 */ }
       logger.warn(`[workTabDelete] 캡처 묘비 기록 실패(삭제는 계속) "${tabName}": ${tombErr.message}`);
     }
 
