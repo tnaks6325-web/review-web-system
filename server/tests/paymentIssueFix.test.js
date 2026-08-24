@@ -1005,10 +1005,11 @@ function withStubPool(handler, run) {
   t('7k3 ★ 한 종류만 필요하면 그것만 적는다(멀쩡한 항목을 입력할 것처럼 말하지 않는다)', () => {
     const S = loadFixFns();
     S.STATE.pmFix = S._pmBuildFix([mkItem({ transferMemo: '', bank: 'hana', warnings: ['no_memo'] })]);
-    const html = S._pmFixBlock();
-    assert.ok(/통장표시/.test(html));
-    assert.ok(!/이체은행/.test(html),
-      '★ 멀쩡한 항목이 보완 줄에 들어가면 담당자가 값을 덮어쓰게 된다');
+    // ★ 안내 문구(카드 위 설명)에도 항목 이름이 나오므로 **묶은 줄만** 잘라서 본다
+    const workRow = S._pmFixBlock().slice(S._pmFixBlock().indexOf('pmfixrow work'));
+    assert.ok(/통장표시/.test(workRow));
+    assert.ok(!/이체은행/.test(workRow),
+      '★ 멀쩡한 항목이 보완 줄에 들어가면 담당자가 값을 덮어쓰게 된다: ' + workRow.slice(0, 200));
     assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1);
   });
 
