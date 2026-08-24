@@ -1630,6 +1630,9 @@
   .cndl dt:first-of-type,.cndl dd:first-of-type{border-top:0}
   .cndl dd .u{font-size:10px;font-weight:600;color:var(--faint);margin-left:2px}
   .cnna{color:var(--faint);font-weight:600}
+  /* 담당 2인 — 역할 라벨(AE팀·관리자)은 작게, 구분자는 옅게(값이 이름이라는 게 읽혀야 한다) */
+  .cndl .role{font-size:10px;font-weight:700;color:var(--faint);margin-right:3px}
+  .cndl .sep{color:var(--faint);font-weight:600;margin:0 5px}
   .cndwarn{margin-left:auto;text-transform:none;letter-spacing:0;font-size:10px;font-weight:700;
            background:var(--warn-soft);color:var(--warn);border-radius:999px;padding:0 7px}
   /* ★ 값이 있는 항목은 배지 없이 검은 글씨(사용자 확정 2026-08-20) — 배지는 **미설정에만** 남겨
@@ -6026,6 +6029,30 @@ function _condCardHtml(wd,d,m){
     const link=(typeof _woLinkHtml==='function')?_woLinkHtml(u):esc(u);
     return `<dt>메인URL</dt><dd title="${esc(u)}">${link}</dd>`;
   })();
+  /* 담당 2인(사용자 확정 2026-08-24) — 「담당  AE팀 황운하 / 관리자 만두」.
+     ★ 앞 = 그 업체를 맡은 AE(`created_by`) · 뒤 = 이 작업의 모집·공고를 맡은 리뷰웹 관리자.
+     ★★ **여기서 규율을 나누지 않는다** — 서버가 역할별로 다른 값을 실어 준다:
+       내부는 `adminRaw`(실명)까지 오고, 광고주 렌즈는 그것을 폐기하면서 `adminNick` 을
+       `닉네임 || '관리자'` 로 완결한다. 그래서 `adminNick || adminRaw` 한 줄이면
+       **내부 = 닉네임||실명 / 업체 = 닉네임||'관리자'** 가 동시에 성립한다.
+     ★ 한쪽이 없으면 **그 조각을 아예 안 적는다**(사용자 확정) — 「—」로 꾸미지 않는다.
+     ★ 둘 다 없으면 [미설정](내부) / 「—」(광고주) — `unset` 이 역할을 이미 안다.
+     ⚠ `AE팀` 은 고정 라벨이다 — `created_by` 가 인트라넷에서 오더를 낸 사람이라는 뜻이고,
+       그 사람이 항상 AE 부서라는 보장은 그 작성 경로에서 온다. */
+  const mgrRow=(()=>{
+    const mg=cd.manager||{};
+    const ae=String(mg.ae||'').trim();
+    /* ★ 관리자 조각은 **존재 여부**와 **이름**을 따로 본다:
+         `adminNick` 이 null 이 아니면 관리자가 있다(빈 문자열 = 업체 화면에서 이름을 밝히지 않음).
+         이름을 모를 때 `관리자 관리자` 로 라벨과 값이 겹치지 않게 **라벨만** 적는다. */
+    const admHas=(mg.adminNick!=null)||!!String(mg.adminRaw||'').trim();
+    const admName=String(mg.adminNick||mg.adminRaw||'').trim();
+    const parts=[];
+    if(ae)     parts.push(`<span class="role">AE팀</span>${esc(ae)}`);
+    if(admHas) parts.push(admName?`<span class="role">관리자</span>${esc(admName)}`:'관리자');
+    if(!parts.length) return `<dt>담당</dt>${unset('order')}`;
+    return `<dt>담당</dt><dd>${parts.join('<span class="sep">/</span>')}</dd>`;
+  })();
   /* 「일정」 — 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
      ★ 서버가 표에서 파생해 실어 준다(`condition.schedule`) — 화면에서 다시 세지 않는다.
      ★ 못 읽으면 **「—」**(사용자 확정) — [미설정] 버튼을 만들지 않는다. 여기엔 고칠 창구가 없고
@@ -6054,6 +6081,7 @@ function _condCardHtml(wd,d,m){
     ['@murl',null,null],
     ['@sched',null,null],
     ['@time',null,null],
+    ['@mgr',null,null],
     /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
        (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
     ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`+
@@ -6070,8 +6098,8 @@ function _condCardHtml(wd,d,m){
   ]/* ★ 광고주 표기 항목(사용자 확정 2026-08-23) — 작업명·메인URL·일정·구매시간·총건수·일건수·
        결제금액·구매채널·유입방식·리뷰타입. 나머지(다계정·현금영수증·리뷰비·입금명)는 내부 전용이라
        **서버 렌즈가 이미 값을 안 보내지만**, 빈 행까지 그리면 「—」 네 줄이 남으므로 여기서 뺀다. */
-   .filter(([k])=>!isAdv||['@murl','@sched','@time','총건수','일건수','@pay','구매채널','유입방식','리뷰타입'].includes(k))
-   .map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@time'?timeRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`)))).join('');
+   .filter(([k])=>!isAdv||['@murl','@sched','@time','@mgr','총건수','일건수','@pay','구매채널','유입방식','리뷰타입'].includes(k))
+   .map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@time'?timeRow:(k==='@mgr'?mgrRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`))))).join('');
   /* 상품명 정리 — **표시만, 원본 무접촉**(`condition.productName` 은 작업오더 원문 그대로다).
      ① `[상품/옵션/금액]` 라벨(사용자 확정 2026-08-20 시안 v2)
      ② 목록 번호 `1. `(사용자 확정 2026-08-23) — 원문이 `[상품/옵션/금액]\n1. 곰도리 … ` 형태라

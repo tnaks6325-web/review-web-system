@@ -2758,6 +2758,30 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
       inflowType: (wo && wo.inflowType) || null,
+      /* 담당 2인(사용자 확정 2026-08-24) — 「담당  AE팀 황운하 / 관리자 만두」.
+         ★ 앞 = 그 업체를 맡은 **AE**(`created_by` = 인트라넷에서 오더를 낸 사람).
+           뒤 = 이 작업의 모집·공고를 맡은 **리뷰웹 관리자**(`manager_name`).
+           ⚠ `manager_name` 은 코드 라벨이 "담당AE" 지만 **실제 값은 리뷰웹 관리자**다
+             (본섭 116건 실측: 박세희·박은비·랜덤). 라벨이 틀린 것이지 값이 틀린 게 아니다.
+         ★★ 관리자는 **닉네임**으로 적는다 — 치환은 `adminNickname.service` **단일 출처**
+           (1:1문의가 쓰는 그 맵. 사본을 만들면 두 화면의 이름이 갈린다).
+           `adminNick` = 닉네임(없으면 null) · `adminRaw` = 실명(**내부 전용** — 광고주 렌즈가 폐기).
+           화면은 `adminNick || adminRaw` 한 줄이면 되고, 그러면 **내부는 닉네임||실명 /
+           업체는 닉네임||'관리자'** 두 규율이 카드 한 벌에서 동시에 성립한다.
+         ★ 조회 실패는 빈 맵(fail-soft) — 업체 화면은 `관리자` 로 떨어지고 실명은 여전히 안 나간다. */
+      manager: await (async () => {
+        const ae = String((wo && wo.createdBy) || '').trim() || null;
+        const raw = String((wo && wo.managerName) || '').trim() || null;
+        let nick = null;
+        if (raw) {
+          try {
+            const { getNicknameMap } = require('./adminNickname.service');
+            const map = await getNicknameMap();
+            nick = (map && map[raw]) || null;
+          } catch (_) { nick = null; }
+        }
+        return { ae, adminNick: nick, adminRaw: raw };
+      })(),
       /* 구매시간(사용자 확정 2026-08-23) — **실제로 참여를 여닫는 값은 공고 시간창**이다
          (`computeCampaignState` 가 그것을 본다). 작업오더 `purchase_time` 은 그 발행 프리필
          원본일 뿐이라, 오더 텍스트만 그리면 "카드는 0~15시인데 실제로는 다른 시간에 열리는"
@@ -2836,7 +2860,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
             review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",
             special_notes AS "specialNotes", product_url AS "productUrl", start_date AS "startDate",
-            manager_name AS "managerName", status
+            manager_name AS "managerName", created_by AS "createdBy", status
        FROM work_orders
       WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
       ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
@@ -4769,6 +4793,18 @@ function _condAdvertiserLens(cd) {
     payAmount: cd.payAmount, options: Array.isArray(cd.options) ? cd.options : [],
     channel: cd.channel || null,
     inflowType: cd.inflowType || null,
+    /* 담당 2인 — ★ **실명(`adminRaw`)은 폐기**하고 여기서 fail-closed 를 완결한다:
+       닉네임이 있으면 닉네임, 없는데 **관리자는 있으면** `관리자`(리뷰어 화면과 같은 규율),
+       관리자 자체가 없으면 null → 화면이 그 조각을 아예 안 적는다(사용자 확정 2026-08-24).
+       ★ "실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 은 다르다 — 전자를 null 로 접으면
+         담당자가 없는 작업처럼 보인다. */
+    manager: (() => {
+      const m = cd.manager || {};
+      const raw = String(m.adminRaw || '').trim();
+      /* ★ 센티널 셋을 구분한다: 닉네임 문자열 = 그 이름 / **빈 문자열 = "관리자는 있는데 이름을
+         밝히지 않는다"**(화면이 라벨만 적는다 — `관리자 관리자` 중복을 피한다) / null = 담당자 없음. */
+      return { ae: m.ae || null, adminNick: m.adminNick || (raw ? '' : null), adminRaw: null };
+    })(),
     reviewTypeLabel: cd.reviewTypeLabel || null,
     reviewTypeMixed: !!cd.reviewTypeMixed,
     reviewTypeMix: cd.reviewTypeMix || null,

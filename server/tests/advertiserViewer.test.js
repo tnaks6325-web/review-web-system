@@ -364,6 +364,23 @@ async function run() {
       && !/campaignId|workOrderId|campaignCount/.test(blk)
       && /productName|productUrl|schedule|purchaseWindow|recruitTotal|dailyLimit|payAmount|channel|inflowType|reviewTypeLabel/.test(blk);
   })());
+  /* ★★ 담당 2인(사용자 확정 2026-08-24) — 업체 화면에도 「담당 AE팀 황운하 / 관리자 만두」.
+     ★ 관리자는 **닉네임**으로만 나간다 — 실명(`adminRaw`)은 렌즈가 폐기하고, 닉네임이 없으면
+       빈 문자열(= 화면이 라벨만 적음)로 fail-closed. 리뷰어 화면의 `닉네임 || '관리자'` 와 같은 규율.
+     ★ **"실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 을 구분**한다 — 전자를 null 로 접으면
+       담당자가 없는 작업처럼 보인다. */
+  ok('★ 렌즈가 관리자 실명을 지우고 fail-closed 로 완결한다', (() => {
+    const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    const i = SVC.indexOf('function _condAdvertiserLens(');
+    const blk = SVC.slice(i, SVC.indexOf('\n}', i));
+    return i > 0
+      && /adminNick: m\.adminNick \|\| \(raw \? '' : null\)/.test(blk)   // 있으면 라벨만 · 없으면 조각 자체 없음
+      && /adminRaw: null/.test(blk);                                    // 실명은 절대 안 나간다
+  })());
+  ok('★ 담당 행이 업체 표기 항목에 들어 있다', (() => {
+    const m = src.match(/\.filter\(\(\[k\]\)=>!isAdv\|\|\[([^\]]*)\]\.includes\(k\)\)/);
+    return !!m && /'@mgr'/.test(m[1]);
+  })());
   ok('★ 광고주 분기가 그 렌즈를 거친다(날것 `_cond` 금지)', (() => {
     const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
     return /res\.condition = _condAdvertiserLens\(_cond\)/.test(SVC);
