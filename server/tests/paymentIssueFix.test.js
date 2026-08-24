@@ -960,10 +960,12 @@ function withStubPool(handler, run) {
       // ★ 카드 전체 행 수(w.rows=3)와 **다른 숫자**여야 검사가 공허해지지 않는다
       //   (결제금액 없음은 작업 설정으로 못 고치는 사유 = setupRows 에 안 들어간다)
       mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 3, issues: ['no_price'], warnings: [] }),
+      // ★ 리뷰비만 비어 있는 행 — 이 사유를 합집합에서 빠뜨리면 건수가 조용히 줄어든다
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 4, issues: [], warnings: ['no_review_fee'] }),
     ]);
     const w = S.STATE.pmFix.works[0];
-    assert.strictEqual(w.rows, 3, '카드에 걸린 행 수');
-    assert.strictEqual(w.setupRows, 2, '작업 설정 보완이 필요한 행 수는 **합집합**이어야 한다');
+    assert.strictEqual(w.rows, 4, '카드에 걸린 행 수');
+    assert.strictEqual(w.setupRows, 3, '작업 설정 보완이 필요한 행 수는 **합집합**이어야 한다(세 사유 모두)');
     const html = S._pmFixBlock();
     assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1,
       '★ 사유별로 줄이 갈리면 같은 [보완] 버튼이 세 번 반복된다');
@@ -974,10 +976,10 @@ function withStubPool(handler, run) {
       assert.ok(html.includes(k), k + ' 가 줄에서 사라졌다');
     assert.ok(/상품비만/.test(html), '리뷰비가 비면 상품비만 이체된다는 경고가 남아야 한다');
     // ★ 사유별 건수를 조용히 버리지 않는다(title 로 남는다)
-    assert.ok(/이체은행 미지정 1건/.test(html) && /통장표시 없음 2건/.test(html),
+    assert.ok(/이체은행 미지정 1건/.test(html) && /통장표시 없음 2건/.test(html) && /리뷰비 미설정 3건/.test(html),
       '사유별 건수가 어디에도 남지 않았다: ' + html);
     // ★ 줄에 적히는 건수는 그 줄을 눌러 풀리는 건수(합집합)여야 한다 — 카드 전체 건수가 아니다
-    assert.ok(/>2건</.test(html) && !/>3건<\/span>[^]{0,80}_pmFixWork/.test(html),
+    assert.ok(/>3건</.test(html) && !/>4건<\/span>[^]{0,80}_pmFixWork/.test(html),
       '묶은 줄이 작업 설정으로 못 고치는 건까지 세고 있다: ' + html);
   });
 
