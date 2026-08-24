@@ -1010,7 +1010,7 @@ function withStubPool(handler, run) {
     assert.ok(/통장표시/.test(workRow));
     assert.ok(!/이체은행/.test(workRow),
       '★ 멀쩡한 항목이 보완 줄에 들어가면 담당자가 값을 덮어쓰게 된다: ' + workRow.slice(0, 200));
-    assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1);
+    assert.strictEqual((S._pmFixBlock().match(/pmfixrow work/g) || []).length, 1);
   });
 
   t('7m ★ 계좌 버튼 인덱스는 accts 배열 위치(카드 안 순번이면 남의 계좌 창이 열린다)', () => {
