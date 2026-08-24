@@ -50,8 +50,8 @@ ok('시작일 프리필', /setV\("rf_start_date", prefill\.start_date\)/.test(re
 ok('하루 진행 건수 — 텍스트형 숫자 폴백까지',
   /daily_count_text[\s\S]{0,60}match\(\/\\d\+\//.test(app) && /숫자만 추출/.test(doc));
 ok('배송유형 매핑(실배송·빈박스·택배발송대행)',
-  /WO_DELIVERY_MAP = \{ '실배송':'실배송', '빈박스':'빈박스', '택배발송대행':'택배발송대행' \}/.test(app)
-  && /실배송→실배송, 빈박스→빈박스, 택배발송대행→택배발송대행/.test(doc));
+  /const WO_DELIVERY_TYPES = \['실배송', '빈박스', '택배발송대행', '회수', '혼합'\]/.test(app)
+  && /실배송 · 빈박스 · 택배발송대행 · 회수 · 혼합/.test(doc));
 ok('팀채팅방 URL', /chat_url:\s+o\.chat_room_url/.test(app) && /팀채팅방 URL/.test(doc));
 ok('상품 URL + 자동수집 1회',
   /if \(prefill\.product_url\) setTimeout\(\(\) => \{ try \{ fetchProductInfo\(\{ auto: true \}\)/.test(rec)

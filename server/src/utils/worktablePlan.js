@@ -26,6 +26,8 @@ const { normalizeReviewTypeMix } = require('./reviewTypeMix');
 const { isBlogKind } = require('./workKind');
 const { isPostDateHeader } = require('./memoColumn');
 const { isTrackingHeader } = require('./trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
+const { deliveryBaseType, parseDeliveryType } = require('./deliveryType');   // 배송유형 기본형 판정 단일 출처(사본 금지)
+const { normalizeDeliveryTypeMix, DELIVERY_MIX_SHEET_LABELS } = require('./deliveryTypeMix');
 
 const MAX_ROWS = 2000;          // prepareRosterSlots 상한과 같은 값(폭주 방지)
 const MAX_DAYS = 400;           // 날짜 분배 무한루프 백스톱
@@ -211,7 +213,10 @@ function _scaleMix(mix, target) {
  *   시트에서 읽기 좋다. 날짜 없는 행(시작일 미정)은 마지막 한 묶음으로 취급.
  * ★ 호출 전 `_scaleMix` 로 합계 == 줄 수를 맞춰 두므로 전 행이 채워진다(캡 보정은 안전망).
  */
-function _allocByDateRatio(rowIdxs, dateOf, mix, out) {
+function _allocByDateRatio(rowIdxs, dateOf, mix, out, labelOf) {
+  /* ★ 라벨 맵 주입 — 리뷰 종류와 배송 혼합이 **같은 배분기**를 쓴다(사본 금지).
+     인자를 생략하면 종전 동작 그대로(리뷰 종류 표기). */
+  const _label = typeof labelOf === 'function' ? labelOf : (t) => REVIEW_TYPE_SHEET_LABELS[t] || null;
   const groups = [];
   let cur = null;
   for (const i of rowIdxs) {
@@ -237,7 +242,7 @@ function _allocByDateRatio(rowIdxs, dateOf, mix, out) {
     }
     let p = 0;
     remaining.forEach((r, i) => {
-      for (let k = 0; k < take[i]; k++) out[g.idxs[p++]] = REVIEW_TYPE_SHEET_LABELS[r.type] || null;
+      for (let k = 0; k < take[i]; k++) out[g.idxs[p++]] = _label(r.type);
       r.left -= take[i];
     });
     rowsLeft -= gn;
@@ -292,6 +297,63 @@ function distributeReviewTypes({ total, rowDates = [], rowOptions = [], globalMi
   for (const l of out) { if (l) bucketCount.set(l, (bucketCount.get(l) || 0) + 1); }
   const reviewBuckets = [...bucketCount.entries()].map(([label, count]) => ({ label, count }));
   return { rowReviewTypes: out, reviewBuckets, mode: optionMode ? 'option' : 'global', scaled };
+}
+
+/* ── 배송 혼합(실배송/빈박스) 배분 ──────────────────────────────────────
+   ★★ 리뷰 종류 혼합과 **같은 규율**이다 — 혼합 오더는 "어느 줄이 실배송인가"의 답이
+     행에만 있다. 조합만 저장하고 행에 안 적으면 담당자가 표에서 물류를 가를 수 없다.
+   ★ 재료 우선순위 = 구조화 컬럼(135 `work_orders.delivery_type_mix`) → **문장 파싱 폴백**
+     (`혼합(실배송 20건, 빈박스 80건)`). 폴백이 있어야 구조화 전송 이전의 과거 오더가
+     같은 경로로 흘러간다. */
+function deliveryMixFromWorkOrder(wo) {
+  const st = normalizeDeliveryTypeMix((wo && wo.delivery_type_mix) ?? undefined);
+  if (st.provided && Array.isArray(st.mix) && st.mix.length) return st.mix;
+  const parsed = parseDeliveryType(wo && wo.delivery_type);
+  if (!parsed.mix) return [];
+  const fb = normalizeDeliveryTypeMix(parsed.mix);
+  return (fb && Array.isArray(fb.mix)) ? fb.mix : [];
+}
+
+/** 회수 부속정보 — 구조화 컬럼 우선, 없으면 문장에서 읽는다(과거 오더 구제). */
+function recallInfoFromWorkOrder(wo) {
+  const o = wo || {};
+  const parsed = parseDeliveryType(o.delivery_type);
+  if (parsed.base !== '회수') return null;
+  const courier = String(o.recall_courier || (parsed.recall && parsed.recall.courier) || '').trim();
+  const product = String(o.recall_product || (parsed.recall && parsed.recall.product) || '').trim();
+  return { courier, product };
+}
+
+/**
+ * 배송 혼합 배분 — 행마다 `배송구분` 칸에 적을 표기(`실배송`·`빈박스`)를 정한다.
+ * ★ 배분기는 리뷰 종류와 **같은 `_allocByDateRatio`**(날짜별 비율 유지) — 앞 행부터 몰아
+ *   적으면 앞 날짜가 전부 실배송이 되어 물류 배분 의도가 깨진다.
+ * ★ **유형이 2가지 미만이면 행에 적지 않는다** — 한 종류뿐이면 배송유형 값이 이미 담당한다
+ *   (옵션 배분·리뷰 종류 배분의 "1개 이하 미배분"과 같은 규율).
+ */
+function distributeDeliveryTypes({ total, rowDates = [], globalMix = [] } = {}) {
+  const n = Math.max(0, parseInt(total, 10) || 0);
+  const out = new Array(n).fill(null);
+  const none = { rowDeliveryTypes: out, deliveryBuckets: [], scaled: false };
+  if (!n) return none;
+  const mix = (Array.isArray(globalMix) ? globalMix : [])
+    .filter(m => m && DELIVERY_MIX_SHEET_LABELS[m.type] && m.quantity > 0);
+  if (mix.length < 2) return none;
+  const sc = _scaleMix(mix, n);
+  if (!sc.mix.length) return none;
+  _allocByDateRatio(
+    Array.from({ length: n }, (_, i) => i),
+    (i) => (rowDates[i] ? rowDates[i].date : null),
+    sc.mix.map(m => ({ ...m })), out,
+    (t) => DELIVERY_MIX_SHEET_LABELS[t] || null,
+  );
+  const c = new Map();
+  for (const l of out) { if (l) c.set(l, (c.get(l) || 0) + 1); }
+  return {
+    rowDeliveryTypes: out,
+    deliveryBuckets: [...c.entries()].map(([label, count]) => ({ label, count })),
+    scaled: sc.scaled,
+  };
 }
 
 /**
@@ -372,6 +434,14 @@ function buildColumns({ template, channel, workTypes, tabOpts = {} } = {}) {
 /* 택배발송대행은 선택형 작업유형이 아니라 주문 이행에 필요한 고정 입력값이다.
    관리자가 작업유형 템플릿을 아직 만들지 않았어도 송장 입력 열은 빠지면 안 된다. */
 const COURIER_PROXY_TRACKING_HEADER = '택배송장번호';
+
+/* 배송 혼합 배분을 적을 칸. 리뷰 종류의 `리뷰옵션` 과 같은 자리·같은 규율(없으면 자동 추가). */
+const DELIVERY_KIND_HEADER = '배송구분';
+
+/* 회수 작업의 부속정보 칸 — 업체가 접수하는 회수택배사·회수상품명칭.
+   ★ 오더 단위 값이지만 **줄마다 채운다**: 표는 정렬·필터로 흩어지므로 줄이 스스로를 설명해야 한다
+     (옵션 값을 줄마다 적는 것과 같은 규율). */
+const RECALL_HEADERS = ['회수택배사', '회수상품명칭'];
 
 function isCourierProxyWorkOrder(wo = {}) {
   const courierProxy = wo.courier_proxy;
@@ -479,12 +549,21 @@ function ensureBlogColumns(columns) {
    ★ 조건은 전부 `work_orders` 의 **실제 칸**에서 나온다. 모르는 값·판정 실패는 **켜지 않는다**
      (틀린 열을 만드느니 담당자가 직접 켜는 게 낫다 — 이 화면의 fail-soft 원칙).
    ★ `auto`(기본·옛 저장분) = 종전 동작 = 옵션 열을 가진 유형만 옵션 2종 이상일 때. */
+/** 이 작업오더가 그 배송 유형(real|empty)을 실제로 포함하는가 — 기본형 + 혼합 조합으로 판정. */
+function _deliveryTriggerHas(wo, kind) {
+  const base = deliveryBaseType(wo && wo.delivery_type);
+  if (base === (kind === 'real' ? '실배송' : '빈박스')) return true;
+  if (base !== '혼합') return false;
+  const mix = deliveryMixFromWorkOrder(wo);
+  if (!mix.length) return true;   // 조합 미상 = 종전 동작 보존(둘 다 켬)
+  return mix.some(m => m.type === kind && m.quantity > 0);
+}
+
 function evalWorkTypeTrigger(trigger, ctx = {}) {
   const t = String(trigger || 'auto');
   const wo = ctx.workOrder || {};
   const optionCount = Math.max(0, parseInt(ctx.optionCount, 10) || 0);
   const hasOptionColumn = !!ctx.hasOptionColumn;
-  const delivery = String(wo.delivery_type == null ? '' : wo.delivery_type);
   const reviewType = String(wo.review_type == null ? '' : wo.review_type).trim();
 
   switch (t) {
@@ -493,8 +572,13 @@ function evalWorkTypeTrigger(trigger, ctx = {}) {
     case 'options_2plus': return optionCount >= 2;
     // ★ boolean 컬럼이지만 문자열('true'/'Y')로 올 수 있어 둘 다 인정한다(빈 값·false 는 안 켬).
     case 'courier_proxy': return wo.courier_proxy === true || /^(true|t|y|yes|1|예)$/i.test(String(wo.courier_proxy || ''));
-    case 'delivery_real': return /실배송|실\s*발송/.test(delivery);
-    case 'delivery_empty': return /빈박스|빈\s*박스/.test(delivery);
+    /* ★★ 배송유형은 **문장**으로 온다(`혼합(실배송 20건, 빈박스 80건)`) — 기본형으로 접어
+       판정한다. 종전 정규식은 그 문장에 글자가 들어 있다는 이유로 걸려 우연히 동작했고,
+       `혼합(실배송 0건, 빈박스 100건)` 처럼 **0건인 유형의 열까지 만들었다**.
+       ★ 조합을 못 읽으면(형식 미상) 종전처럼 둘 다 켠다 — 모른다고 열을 빼면 배분이 갈 곳을 잃는다. */
+    case 'delivery_real': return _deliveryTriggerHas(wo, 'real');
+    case 'delivery_empty': return _deliveryTriggerHas(wo, 'empty');
+    case 'delivery_recall': return deliveryBaseType(wo.delivery_type) === '회수';
     case 'review_type_set': return reviewType.length > 0;
     case 'auto':
     default:
@@ -512,6 +596,7 @@ function workTypeTriggerReason(trigger, ctx = {}) {
     case 'courier_proxy': return '작업오더 택배대행 = 예';
     case 'delivery_real': return `작업오더 배송유형 = ${String(wo.delivery_type || '실배송')}`;
     case 'delivery_empty': return `작업오더 배송유형 = ${String(wo.delivery_type || '빈박스')}`;
+    case 'delivery_recall': return `작업오더 배송유형 = ${String(wo.delivery_type || '회수')}`;
     case 'review_type_set': return `작업오더 리뷰유형 = ${String(wo.review_type || '')}`.trim();
     case 'auto': default: return `작업오더에 상품옵션 ${n}가지`;
   }
@@ -639,6 +724,33 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     });
   }
 
+  /* ★★ 배송 혼합 배분(2026-08-24 사용자 확정) — 리뷰 종류 배분과 같은 자리·같은 규율.
+     혼합 오더는 "어느 줄이 실배송인가"의 답이 행에만 있다. */
+  const dvDist = distributeDeliveryTypes({ total, rowDates, globalMix: deliveryMixFromWorkOrder(wo) });
+  if (dvDist.rowDeliveryTypes.some(Boolean) && !columns.some(c => c.name === DELIVERY_KIND_HEADER)) {
+    const [dc] = classifyHeaders([DELIVERY_KIND_HEADER], {});
+    let at = 0;
+    while (at < columns.length && columns[at].tier === 'auto') at++;
+    columns.splice(at, 0, {
+      name: dc.header, role: dc.role, label: dc.label, tier: dc.tier,
+      conflict: dc.conflict || null, origin: 'system', typeKey: null,
+    });
+  }
+
+  /* ★★ 회수 작업의 부속정보 칸 — 없으면 자동으로 덧붙인다(택배송장번호와 같은 규율).
+     칸이 없으면 업체가 알려 준 회수택배사·회수상품명칭이 표에 갈 곳을 잃는다. */
+  const recall = recallInfoFromWorkOrder(wo);
+  if (recall && (recall.courier || recall.product) && columns.length) {
+    RECALL_HEADERS.forEach((h) => {
+      if (columns.some(c => c.name === h)) return;
+      const [rc2] = classifyHeaders([h], {});
+      columns.push({
+        name: rc2.header, role: rc2.role, label: rc2.label, tier: rc2.tier,
+        conflict: rc2.conflict || null, origin: 'system', typeKey: null,
+      });
+    });
+  }
+
   const rows = [];
   for (let i = 0; i < total; i++) {
     rows.push({
@@ -647,6 +759,9 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
       dateLabel: rowDates[i] ? rowDates[i].label : null,
       optionKey: rowOptions[i] || null,
       reviewOption: rtDist.rowReviewTypes[i] || null,
+      deliveryKind: dvDist.rowDeliveryTypes[i] || null,   // `실배송`·`빈박스` — 혼합 오더에서만 채워진다
+      recallCourier: (recall && recall.courier) || null,
+      recallProduct: (recall && recall.product) || null,
     });
   }
 
@@ -710,6 +825,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (rtDist.scaled) {
     warnings.push({ code: 'review_mix_scaled', message: '리뷰 종류별 수량 합계가 총 건수와 달라 비율을 유지해 맞춰 배분했습니다.' });
   }
+  /* ★ 배송 조합도 같은 규율 — 조용한 보정 금지(리뷰 조합과 **독립**으로 판정한다). */
+  if (dvDist.scaled) {
+    warnings.push({ code: 'delivery_mix_scaled', message: '배송 유형별 수량 합계가 총 건수와 달라 비율을 유지해 맞춰 배분했습니다.' });
+  }
   /* ★ 날짜를 나눠 놓고 쓸 칸이 없으면 조용히 사라진다 — 게다가 구매일자 칸이 없으면
      시트 일정 자동 인식이 그날 모집 정원을 파생하지 못한다(발행폼 값 경로로 되돌아간다). */
   if (days.length && !columns.some(c => c.role === 'dateStr')) {
@@ -757,6 +876,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     dates: days,
     optionBuckets: buckets,
     reviewBuckets: rtDist.reviewBuckets,
+    deliveryBuckets: dvDist.deliveryBuckets,
     workTypes: allTypes,
     enabledWorkTypes: workTypes,
     suggestedWorkTypes,
@@ -778,6 +898,8 @@ module.exports = {
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
   REVIEW_SUBMIT_HEADER, ensureReviewColumn,
+  DELIVERY_KIND_HEADER, RECALL_HEADERS,
+  deliveryMixFromWorkOrder, recallInfoFromWorkOrder, distributeDeliveryTypes,
   optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
   evalWorkTypeTrigger, workTypeTriggerReason,
   MAX_ROWS,
