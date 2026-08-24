@@ -868,7 +868,8 @@
   .ovtable .ok{color:var(--safe)} .ovtable .no{color:var(--bad)} .ovtable .vs{color:var(--line2);margin:0 1px} .ovtable .diff{color:var(--bad);font-weight:700}
   .btn.xs{font-size:11px;padding:3px 9px}
   /* ── 작업 로그 팝업(2026-08-23) — 클래스는 전부 `tl` 접두(맨몸 이름은 다른 화면이 쓴다) ── */
-  .tlbox{width:min(880px,94vw);max-height:86vh;display:flex;flex-direction:column}
+  /* ★ height 고정(max-height 아님) — 탭마다 기록 수가 달라도 팝업 크기가 늘었다 줄었다 하지 않는다. */
+  .tlbox{width:min(880px,94vw);height:86vh;max-height:86vh;display:flex;flex-direction:column}
   .tlsub{font-size:12px;color:var(--muted);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tltabs{display:flex;gap:5px;flex-wrap:wrap;padding:9px 14px;border-bottom:1px solid var(--line)}
   .tltab{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;
