@@ -1006,7 +1006,13 @@ router.get('/ownership', authMiddleware, internalMiddleware, async (req, res, ne
   try { res.json({ ok: true, items: await svc.listOwnership({ advertiserId: req.query.advertiserId, sheetId: req.query.sheetId }) }); }
   catch (err) { next(err); }
 });
-async function _ownershipWriteAllowed(req, advertiserId) {
+/* ★★ 업체 지정·해제는 **담당(inad_pm) 무관 내부 담당자 전원**(사용자 확정 2026-08-24).
+   종전에는 staff 를 자기 담당 업체로 묶었는데, **이관(`/ownership/transfer`)은 이미 담당 무관**이라
+   "옮기는 건 되는데 처음 지정하는 건 막히는" 비대칭이었다. 게다가 화면(업체 지정 팝업)은 전 업체를
+   보여줘서 고르고 나서야 403 이 나는 막다른 길이었다.
+   ★ 이 함수는 **레거시 시트 전체 소유 펼치기(expand) 전용**으로만 남는다 — 그쪽은 화면 창구가 없는
+     레거시 정리 경로라 종전 스코프를 유지한다(서비스도 staffName 으로 이중 게이트). */
+async function _ownershipExpandAllowed(req, advertiserId) {
   if (_role(req) !== 'staff') return true;   // master/admin — 전체 허용(기존 시맨틱)
   return svc.staffOwnsAdvertiser({ advertiserId, staffName: (req.admin && req.admin.name) || '' });
 }
@@ -1014,11 +1020,8 @@ router.post('/ownership', authMiddleware, internalMiddleware, async (req, res, n
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
     if (!advertiserId || !sheetId) return res.status(400).json({ ok: false, error: 'advertiserId, sheetId 필수' });
-    if (!(await _ownershipWriteAllowed(req, advertiserId))) return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 지정할 수 없습니다.' });
-    // staff 자가 스코프 확장 차단: 타 AE/업체가 이미 소유한 시트는 초기매핑 대상 아님(admin 소관).
-    if (_role(req) === 'staff' && !(await svc.sheetAssignableByStaff({ sheetId, staffName: (req.admin && req.admin.name) || '' }))) {
-      return res.status(403).json({ ok: false, error: '이미 다른 업체/담당이 소유한 시트입니다. 재배치는 관리자에게 요청하세요.' });
-    }
+    // ★ 담당(inad_pm) 게이트 없음 — 내부 담당자면 어느 업체에도 지정한다(사용자 확정 2026-08-24).
+    //   되돌리기는 같은 화면의 [×] 해제·[이관]이라 막다른 길이 아니고, 광고주는 internalMiddleware 가 막는다.
     res.json({ ok: true, ...(await svc.setOwnership({ advertiserId, sheetId, tabGid: tabGid || null, by: _by(req) })) });
   } catch (err) { next(err); }
 });
@@ -1026,7 +1029,7 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
     if (!advertiserId || !sheetId) return res.status(400).json({ ok: false, error: 'advertiserId, sheetId 필수' });
-    if (!(await _ownershipWriteAllowed(req, advertiserId))) return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 해제할 수 없습니다.' });
+    // ★ 해제도 지정과 같은 범위 — 지정만 열고 해제를 막으면 잘못 지정한 것을 되돌릴 수 없다.
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
@@ -1035,7 +1038,7 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
 router.post('/ownership/expand', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, sheetId, confirm } = req.body || {};
-    if (advertiserId && !(await _ownershipWriteAllowed(req, advertiserId))) {
+    if (advertiserId && !(await _ownershipExpandAllowed(req, advertiserId))) {
       return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 변경할 수 없습니다.' });
     }
     const staffName = _role(req) === 'staff' ? String((req.admin && req.admin.name) || '').trim() : null;

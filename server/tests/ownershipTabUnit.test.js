@@ -175,8 +175,17 @@ async function run() {
   t('라우터 스택에 실제 등록(1건)', hit.length === 1);
   const line = ROUTES.split('\n').find(l => l.includes("router.post('/ownership/expand'"));
   t('★ internal 게이트(광고주·리뷰어 차단)', /authMiddleware, internalMiddleware/.test(line || ''), line);
-  t('★ 담당 아닌 업체는 거부(_ownershipWriteAllowed)',
-    /\/ownership\/expand'[\s\S]{0,700}_ownershipWriteAllowed/.test(ROUTES));
+  t('★ 펼치기는 담당 아닌 업체를 거부(레거시 정리 경로 — 종전 스코프 유지)',
+    /\/ownership\/expand'[\s\S]{0,700}_ownershipExpandAllowed/.test(ROUTES));
+  /* ★★ 반면 **업체 지정·해제는 담당 무관**이다(사용자 확정 2026-08-24) — 이관이 이미 담당 무관이라
+     "옮기는 건 되는데 처음 지정은 막히는" 비대칭이었고, 화면이 전 업체를 보여줘 막다른 길이었다. */
+  {
+    const cut = (decl) => ROUTES.slice(ROUTES.indexOf(decl), ROUTES.indexOf('\nrouter.', ROUTES.indexOf(decl) + 10));
+    t('★★ 지정에 담당·시트 게이트가 없다',
+      !/_ownershipExpandAllowed|staffOwnsAdvertiser|sheetAssignableByStaff/.test(cut("router.post('/ownership',")));
+    t('★★ 해제도 같은 범위(되돌릴 수 있어야 한다)',
+      !/_ownershipExpandAllowed|staffOwnsAdvertiser/.test(cut("router.delete('/ownership',")));
+  }
   t('★ confirm === true 일 때만 실행(미리보기 기본)', /confirm: confirm === true/.test(ROUTES));
 
   // ★ 펼치기 화면은 제거됐다(시트 UI 전면 제거) — 서버는 남겨 레거시 소유를 화면 없이도 정리한다.

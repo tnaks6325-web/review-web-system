@@ -729,11 +729,19 @@ function withStubPool(handler, run) {
     assert.ok(!/b\.reviewFee\s*\|\|/.test(seg), "★ `|| 0` 로 접으면 미전송이 '0원 지정'이 된다");
   });
 
+  t('6k ★ 묶은 줄은 말줄임 대신 접어서 다 보여준다(항목이 셋이면 좁은 카드에서 잘린다)', () => {
+    assert.ok(/\.pmfixrow\.work \.nm\{[^}]*white-space:normal/.test(HTML),
+      '묶음 줄이 nowrap 이면 "이체은행 · 통장…" 으로 잘려 무엇을 입력할지 알 수 없다');
+  });
+
   t('6g 표 [보완] 버튼은 고칠 수 있을 때만 그린다(죽은 버튼 금지)', () => {
     const tbl = HTML.slice(HTML.indexOf('function _pmTargetTable'), HTML.indexOf('function _pmBatchTable'));
-    assert.ok(/const fixable[\s\S]*?PAY_FIX_KIND/.test(tbl), '고칠 수 있는지 판정이 없다');
+    assert.ok(/const isFixable[\s\S]*?PAY_FIX_KIND/.test(tbl), '고칠 수 있는지 판정이 없다');
     assert.ok(/accountRef && it\.accountRef\.reviewerId/.test(tbl), '리뷰어 지목이 불가능한 행까지 버튼을 그린다');
-    assert.ok(/fixable \? `<button/.test(tbl), '조건부 렌더가 아니다');
+    // ★ 판정은 한 곳(isFixable)이고 **줄과 그룹 머리줄 둘 다** 그것으로 조건부 렌더한다
+    //   (머리줄에만 걸면 못 고치는 작업에 죽은 버튼이 생긴다)
+    assert.strictEqual((tbl.match(/isFixable\((?:it|g\.items\[0\])\) *\? *`<button/g) || []).length, 2,
+      '조건부 렌더가 아니거나 판정 사본이 생겼다');
   });
 
   /* ══════════════════════════════════════════════════════════
@@ -947,6 +955,47 @@ function withStubPool(handler, run) {
     assert.strictEqual((html.match(/pmfixcard/g) || []).length, 1, '카드가 하나여야 한다');
   });
 
+  t('7k2 ★★ 작업 단위 3종(이체은행·통장표시·리뷰비)은 **한 줄**로 묶인다 — 한 번 입력하면 함께 풀린다', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 1, issues: ['no_bank'], warnings: ['no_memo', 'no_review_fee'] }),
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 2, issues: [], warnings: ['no_memo', 'no_review_fee'] }),
+      // ★ 카드 전체 행 수(w.rows=3)와 **다른 숫자**여야 검사가 공허해지지 않는다
+      //   (결제금액 없음은 작업 설정으로 못 고치는 사유 = setupRows 에 안 들어간다)
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 3, issues: ['no_price'], warnings: [] }),
+      // ★ 리뷰비만 비어 있는 행 — 이 사유를 합집합에서 빠뜨리면 건수가 조용히 줄어든다
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 4, issues: [], warnings: ['no_review_fee'] }),
+    ]);
+    const w = S.STATE.pmFix.works[0];
+    assert.strictEqual(w.rows, 4, '카드에 걸린 행 수');
+    assert.strictEqual(w.setupRows, 3, '작업 설정 보완이 필요한 행 수는 **합집합**이어야 한다(세 사유 모두)');
+    const html = S._pmFixBlock();
+    assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1,
+      '★ 사유별로 줄이 갈리면 같은 [보완] 버튼이 세 번 반복된다');
+    assert.strictEqual((html.match(/_pmFixWork\(/g) || []).length, 1,
+      '작업 [보완] 버튼은 카드에 하나여야 한다(같은 팝업을 세 번 열게 하지 않는다)');
+    // 세 항목이 그 한 줄에 다 적힌다(열어보지 않고 무엇을 입력할지 알 수 있게)
+    for (const k of ['이체은행', '통장표시', '리뷰비'])
+      assert.ok(html.includes(k), k + ' 가 줄에서 사라졌다');
+    assert.ok(/상품비만/.test(html), '리뷰비가 비면 상품비만 이체된다는 경고가 남아야 한다');
+    // ★ 사유별 건수를 조용히 버리지 않는다(title 로 남는다)
+    assert.ok(/이체은행 미지정 1건/.test(html) && /통장표시 없음 2건/.test(html) && /리뷰비 미설정 3건/.test(html),
+      '사유별 건수가 어디에도 남지 않았다: ' + html);
+    // ★ 줄에 적히는 건수는 그 줄을 눌러 풀리는 건수(합집합)여야 한다 — 카드 전체 건수가 아니다
+    assert.ok(/>3건</.test(html) && !/>4건<\/span>[^]{0,80}_pmFixWork/.test(html),
+      '묶은 줄이 작업 설정으로 못 고치는 건까지 세고 있다: ' + html);
+  });
+
+  t('7k3 ★ 한 종류만 필요하면 그것만 적는다(멀쩡한 항목을 입력할 것처럼 말하지 않는다)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([mkItem({ transferMemo: '망고', bank: 'hana', warnings: ['no_review_fee'] })]);
+    const html = S._pmFixBlock();
+    assert.ok(/리뷰비/.test(html));
+    assert.ok(!/이체은행/.test(html) && !/통장표시/.test(html),
+      '★ 멀쩡한 항목이 보완 줄에 들어가면 담당자가 값을 덮어쓰게 된다');
+    assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1);
+  });
+
   t('7m ★ 계좌 버튼 인덱스는 accts 배열 위치(카드 안 순번이면 남의 계좌 창이 열린다)', () => {
     const S = loadFixFns();
     S.STATE.pmFix = S._pmBuildFix([
@@ -976,6 +1025,131 @@ function withStubPool(handler, run) {
     const html = S._pmFixBlock();
     assert.strictEqual((html.match(/pmfixcard/g) || []).length, S._PM_FIX_CARD_CAP, '상한만큼만 카드로 편다');
     assert.ok(/외 3개 작업/.test(html), '남은 작업 수 고지가 없다');
+  });
+
+  /* ══════════════════════════════════════════════════════════
+     §7B 입금 대상 표 — 같은 작업을 줄마다 되풀이하지 않는다(사용자 확정 2026-08-24)
+       실사고 아님: 50건짜리 작업에서 작업명·이체은행·통장표시가 50번 반복돼
+       정작 줄마다 다른 값(리뷰어·금액·계좌)이 묻혔다.
+     ══════════════════════════════════════════════════════════ */
+  console.log('\n§7B 입금 대상 표 그룹 묶음(_pmTargetTable)');
+
+  /** 표 렌더러를 vm 으로 꺼내 실제 실행한다(정적 검사로는 "되풀이하지 않는다"가 고정되지 않는다) */
+  function loadTableFns(items) {
+    const vm = require('vm');
+    const pick = name => {
+      const i = HTML.indexOf('function ' + name + '(');
+      assert.ok(i > 0, name + ' 를 찾지 못했다');
+      const j = HTML.indexOf('\nfunction ', i + 1);
+      return HTML.slice(i, j > 0 ? j : i + 9000);
+    };
+    const sandbox = {
+      esc: v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+      _pmNum: n => String(Number(n) || 0),
+      _pmOn: it => it.payable && !it.excluded,
+      _pmAcctSrcTip: () => '',
+      PAY_FIX_KIND: { no_bank: 'work', no_account: 'account', bank_unknown: 'account', no_holder: 'account' },
+      PAY_ISSUE_LABEL: { no_bank: '이체은행 미지정', no_account: '계좌 미등록', bank_unknown: '은행명 인식불가' },
+      STATE: { pmItems: items },
+      document: { querySelector: () => null },
+    };
+    vm.createContext(sandbox);
+    new vm.Script([pick('_pmWorkKey'), pick('_pmTargetTable'), pick('_pmFoldWork')].join('\n')).runInContext(sandbox);
+    return sandbox;
+  }
+  /** 이체 가능한 한 줄(대상) */
+  const payRow = (o = {}) => mkItem(Object.assign({
+    payable: true, bank: 'hana', bankLabel: '하나은행', bankAuto: false, transferMemo: '망고',
+    amount: 20000, productPrice: 17000, reviewFee: 3000, accountHolder: '홍길동',
+    bankName: '국민', bankOfficial: '국민은행', bankAccount: '1234', startDate: '8 / 5',
+  }, o));
+  // ★ 표 머리(thead)까지 세면 검사가 엉뚱한 이유로 빨개진다 — tbody 안만 본다
+  const tbodyOf = html => html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
+  const dataRows = html => tbodyOf(html).split('<tr').slice(1).filter(r => !/class="pmgrp"/.test(r));
+
+  t('7B-a ★★ 같은 작업 50줄이어도 작업명은 **머리줄 한 번**만 적힌다', () => {
+    const items = [];
+    for (let i = 1; i <= 50; i++) items.push(payRow({ rowIndex: i, reviewerName: 'R' + i, tabLabel: '0804)비타민,글루타치온_블로그 50건' }));
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.strictEqual((html.match(/class="pmgrp"/g) || []).length, 1, '그룹 머리줄이 하나여야 한다');
+    assert.strictEqual((html.match(/0804\)비타민/g) || []).length, 2,
+      '★ 작업명이 줄마다 되풀이된다(머리줄 본문 + title 로 2회가 정상): ' + (html.match(/0804\)비타민/g) || []).length);
+    assert.strictEqual(dataRows(html).length, 50, '줄이 사라지면 안 된다(감추는 게 아니라 안 적을 뿐)');
+  });
+
+  t('7B-b ★★ 그 작업에서 값이 **같은 칸**(이체은행·통장표시)은 머리줄로만 올린다', () => {
+    const items = [payRow({ rowIndex: 1 }), payRow({ rowIndex: 2 }), payRow({ rowIndex: 3 })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.strictEqual((html.match(/하나은행/g) || []).length, 1, '이체은행이 줄마다 반복된다');
+    assert.strictEqual((html.match(/망고/g) || []).length, 1, '통장표시가 줄마다 반복된다');
+  });
+
+  t('7B-c ★★ 값이 하나라도 다르면 그 칸은 **줄마다** 그린다(조용히 숨기지 않는다)', () => {
+    const items = [payRow({ rowIndex: 1, transferMemo: '망고' }),
+      payRow({ rowIndex: 2, transferMemo: '만두' }), payRow({ rowIndex: 3, transferMemo: '망고' })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.ok(/만두/.test(html) && (html.match(/망고/g) || []).length === 2,
+      '★ 서로 다른 통장표시가 한 값으로 뭉개졌다: ' + html);
+    // 이체은행은 셋 다 같으니 여전히 머리줄로만
+    assert.strictEqual((html.match(/하나은행/g) || []).length, 1);
+  });
+
+  t('7B-d 작업이 바뀌면 머리줄이 새로 생기고, 순서는 그대로다', () => {
+    const items = [payRow({ rowIndex: 1, tabLabel: 'A작업' }),
+      payRow({ sheetId: 'S2', rowIndex: 2, tabLabel: 'B작업' }), payRow({ sheetId: 'S2', rowIndex: 3, tabLabel: 'B작업' })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.strictEqual((html.match(/class="pmgrp"/g) || []).length, 2);
+    assert.ok(html.indexOf('A작업') < html.indexOf('B작업'), '서버가 준 순서를 바꾸면 안 된다');
+    assert.strictEqual(dataRows(html).length, 3);
+  });
+
+  t('7B-e ★ 머리줄이 선택 건수·합계를 말한다(접어도 무엇이 담겼는지 알 수 있게)', () => {
+    const items = [payRow({ rowIndex: 1 }), payRow({ rowIndex: 2, excluded: true }), payRow({ rowIndex: 3 })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.ok(/선택 2\/3건/.test(html), '선택 현황이 없다: ' + html);
+    assert.ok(/40000원/.test(html), '선택 합계가 없다');
+  });
+
+  t('7B-f ★★ 접기는 **표시 전용** — 체크 상태·이체 대상은 건드리지 않는다', () => {
+    const items = [payRow({ rowIndex: 1 }), payRow({ rowIndex: 2 })];
+    const S = loadTableFns(items);
+    S._pmTargetTable(items);                       // STATE.pmGroups 채움
+    const before = items.map(it => S._pmOn(it)).join(',');
+    S._pmFoldWork(0);                              // document 스텁이라 DOM 조작은 no-op
+    assert.strictEqual(items.map(it => S._pmOn(it)).join(','), before, '★ 접었더니 이체 대상이 달라졌다');
+    assert.strictEqual(S.STATE.pmFold[S.STATE.pmGroups[0]], true, '접힘 상태가 기록되지 않았다');
+    // 다시 그리면 그 그룹 줄만 감춰지고, 줄 자체는 남는다
+    const html = S._pmTargetTable(items);
+    assert.strictEqual(dataRows(html).length, 2, '접었다고 줄을 지우면 안 된다');
+    assert.strictEqual((html.match(/pmhide/g) || []).length, 2, '접힘이 화면에 반영되지 않았다');
+    S._pmFoldWork(0);
+    assert.ok(!S.STATE.pmFold[S.STATE.pmGroups[0]], '다시 눌러도 안 펴진다');
+  });
+
+  t('7B-g ★★ 머리줄·데이터 줄의 onclick 은 인덱스만(작업명은 시트발 문자열)', () => {
+    const items = [payRow({ rowIndex: 1, tabLabel: `x"><img src=x onerror=alert(1)>`, transferMemo: '', warnings: ['no_memo'] })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.ok(!/<img src=x/.test(html), '작업명이 이스케이프되지 않았다');
+    for (const h of html.match(/onclick="[^"]*"/g) || [])
+      assert.ok(/\((\d+)(,[^)]*)?\)/.test(h), '인덱스가 아닌 값을 넘긴다: ' + h);
+  });
+
+  t('7B-h ★ 머리줄 칸 수(colspan) = 표 머리 칸 수 — 어긋나면 표가 통째로 밀린다', () => {
+    const items = [payRow({ rowIndex: 1 })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    const heads = (html.match(/<th\b[^>]*>/g) || []).length;
+    const span = Number((html.match(/colspan="(\d+)"/) || [])[1]);
+    assert.strictEqual(span, heads, `머리줄 colspan=${span} ≠ 표 머리 ${heads}칸`);
+    // 데이터 줄의 칸 수도 같아야 한다(작업 칸을 지우지 않고 **비운다**)
+    const tds = (dataRows(html)[0].match(/<td/g) || []).length;
+    assert.strictEqual(tds, heads, `데이터 줄 ${tds}칸 ≠ 표 머리 ${heads}칸`);
   });
 
   /* ══════════════════════════════════════════════════════════

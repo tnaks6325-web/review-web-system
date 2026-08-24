@@ -1890,6 +1890,21 @@
 .pmtable td.num,.pmtable th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pmtable td.dim{color:var(--t3,#8B94A1);font-size:11.5px}
 .pmtable tr.off{opacity:.45}
+/* ── 작업 그룹 머리줄 — 같은 작업의 반복 값을 한 줄로 올린다(줄마다 되풀이 금지) ── */
+.pmtable tr.pmhide{display:none}
+.pmtable tr.pmgrp>td{background:#F3F6FB;border-top:2px solid #D9E1EC;padding:6px 9px!important}
+.pmtable tr.pmgrp:hover>td{background:#EEF3FB}
+.pmgrph{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+.pmgrph .sp{flex:1;min-width:8px}
+.pmgrph .nm{font-size:12px;font-weight:800;color:var(--t1,#1B2432);max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pmgrph .n{font-size:11px;color:var(--t3,#8B94A1);flex:0 0 auto}
+.pmgrph .pmgk{font-size:10px;color:var(--t3,#8B94A1)}
+.pmgrph .pmgsel{font-size:11px;color:var(--t2,#5C6B80);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.pmgrph .pmgsel.dim{color:var(--t3,#8B94A1)}
+.pmfold{flex:0 0 auto;width:18px;height:18px;line-height:1;border:1px solid var(--line,#D9E1EC);border-radius:5px;
+  background:#fff;color:var(--t2,#5C6B80);font-size:10px;cursor:pointer;padding:0}
+.pmfold:hover{background:#EAF1FF}
+.pmtable td.pmdim{padding-left:0;padding-right:0}
 .pmb{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;white-space:nowrap}
 .pmb.kb{background:#E0EDFF;color:#1B4F9C} .pmb.hn{background:#E5F3EE;color:#127A5E}
 .pmb.no{background:#FAE9E7;color:#B3382E} .pmb.ok{background:#E5F3EE;color:#127A5E}
@@ -1961,6 +1976,9 @@
 .pmfixcard .wh .btn{flex:0 0 auto}
 /* 화면에서 못 고치는 사유 줄 — 버튼 없이 조치 문장만(줄바꿈 허용) */
 .pmfixrow.info .nm{white-space:normal;font-size:11.5px;color:var(--t3,#8B94A1);line-height:1.5}
+/* 작업 단위 3종을 묶은 줄 — 항목이 여럿이면 말줄임 대신 접어서 다 보여준다(정보 손실 금지) */
+.pmfixrow.work .nm{white-space:normal;line-height:1.55}
+.pmfixrow.work .tail{display:block;font-size:11px;color:var(--t3,#8B94A1);margin-top:1px}
 /* 이관된 작업 시트 열기 경고 — 편집하면 시스템에 안 반영된다는 사실을 먼저 읽게 한다 */
 /* 팝업 — ★ body 직속(뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다)
    ★ 바깥클릭으로 닫지 않는다(입력해 둔 계좌·통장표시가 실수 클릭 한 번에 날아가지 않게) */
@@ -1994,6 +2012,24 @@
 .pmtabs button{padding:7px 14px;font-size:13px;font-weight:700;border:1px solid var(--line,#D8DDE5);
   border-radius:9px;background:var(--card,#fff);color:var(--t2,#5A6473);cursor:pointer}
 .pmtabs button.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C}
+/* ⚠ 원장 불일치 목록 — 클래스는 전부 `rs` 접두(기존 .row/.tbl 등과 겹치면 남의 화면이 조용히 무너진다) */
+.rswrap{font-size:13px}
+.rsnote{margin:0 0 10px;padding:9px 12px;border-radius:9px;background:var(--card2,#F5F7FA);color:var(--t2,#5A6473);line-height:1.6}
+.rsnote b{color:var(--ink,#1A2233)}
+.rstbl{width:100%;border-collapse:collapse}
+.rstbl th{text-align:left;font-size:11.5px;font-weight:800;color:var(--muted,#7A869A);padding:6px 8px;border-bottom:1px solid var(--line,#D8DDE5);white-space:nowrap}
+.rstbl td{padding:7px 8px;border-bottom:1px solid var(--line2,#EDF0F4);vertical-align:top}
+.rstbl tr.rsmoney td{background:rgba(255,146,42,.10)}   /* 돈이 걸린 칸(금액·계좌·은행·예금주) */
+.rsfield{font-weight:800;white-space:nowrap}
+.rsval{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
+.rsval.old{color:var(--t2,#5A6473)}
+.rsval.new{color:var(--ink,#1A2233);font-weight:700}
+.rsempty{color:var(--line2,#C7CEDA);font-style:italic}
+.rsact{display:flex;gap:5px;white-space:nowrap}
+.rsact button{border:1px solid var(--line,#D8DDE5);border-radius:7px;background:var(--card,#fff);
+  color:var(--t2,#5A6473);padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer}
+.rsact button.go{border-color:#1B4F9C;color:#1B4F9C}
+.rsact button[disabled]{opacity:.45;cursor:default}
 .bntools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .bntools input.q{flex:1 1 220px;min-width:180px;padding:8px 11px;font-size:13px;box-sizing:border-box;
   border:1px solid var(--line,#D8DDE5);border-radius:9px;background:var(--card,#fff);color:var(--t1,#1B1F24)}
@@ -2689,7 +2725,7 @@ function renderShell(){
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
-        <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리</button>
+        <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리<span id="pmNavBadge"></span></button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
@@ -2729,6 +2765,7 @@ function renderShell(){
   if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)
   if(isAdmin || isStaff) _riBootBadge();   // 리뷰검수 — 손볼 건수(의심+불량)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
   if(isAdmin || isStaff) _lgBootBadge();   // 로그 — 리뷰어 비정상 + 시스템 오류(admin/master만) 중요 건수 합
+  if(isAdmin) _rsBootBadge();              // 입금관리 — 시트↔원장 불일치(열린 edit 제안). 화면을 열지 않아도 보이게
 }
 /* ── C/S 미확인 뱃지 ────────────────────────────────────────
    리뷰웹시스템[3버전]에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
@@ -2739,10 +2776,10 @@ let _csBadgeTimer = null;
 function _csStartBadgePoll(){
   _csBadgeRefresh();
   if(_csBadgeTimer) clearInterval(_csBadgeTimer);
-  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible') _csBadgeRefresh(); }, CS_BADGE_POLL_MS);
+  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); } }, CS_BADGE_POLL_MS);
   if(!_csStartBadgePoll._bound){
     _csStartBadgePoll._bound = true;
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _finDayRollCheck(); } });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); _finDayRollCheck(); } });
   }
 }
 /** 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(직전 값 유지). */
@@ -5800,31 +5837,13 @@ function renderWorkdesk(wd){
 //   ★ 이미지 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍 — 파일ID만 받아 온다.
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
 function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
-/* ★★ 미리보기 썸네일 = 구글 CDN 직결 (2026-08-24 실측) ─────────────────────────
-   프록시 원본은 파일 1장당 **1.7~1.8초**(31KB 기준 · 왕복 지연이 지배)인데 같은 이미지의
-   `drive.google.com/thumbnail` 은 **0.4초 안팎**이고 바이트도 3~5배 작다(197KB → w600 27KB).
-   미리보기·카드 썸네일은 원본 화질이 필요 없는 자리라 여기만 CDN 으로 돌린다.
-   ★ **원본이 필요한 자리는 그대로 프록시**(크게 보기 팝업 · 상세 대조 · 라이트박스 · AI 판정).
-   ★ CDN 이 안 되는 파일(비공개 공유)은 `onerror` 로 **기존 프록시에 1회 폴백** — 실패해도
-     오늘과 같은 그림이 나온다(막다른 길 0). 폴백은 한 번만(무한 루프 금지).
-   ★ 프록시 URL 규칙 사본을 만들지 않는다 — `full` 은 **호출부가 이미 만든 값**을 넘긴다. */
-function _thumbUrl(id, px){
-  const s=String(id||'');
-  if(!/^[-\w]{20,}$/.test(s)) return '';
-  const w=Math.max(100, Math.min(1600, Number(px)||400));
-  return 'https://drive.google.com/thumbnail?id='+encodeURIComponent(s)+'&sz=w'+w;
-}
-/* 썸네일 <img> 속성 한 벌 — src(CDN) + data-full(원본 프록시) + onerror 폴백 */
+/* ★★ 미리보기 썸네일 = 구글 CDN 직결 — 규칙은 `js/drive-thumb.js` **한 곳**이 갖는다.
+   여기 두 함수는 그 모듈로 넘기는 얇은 위임일 뿐이다(URL 규칙 사본 0).
+   ★ 모듈을 못 불러온 경우엔 **원본 프록시로 접는다**(호출부가 이미 만든 값 — 사본 아님).
+   ★ 원본이 필요한 자리는 프록시 그대로: 크게 보기 팝업 · 검수 상세 대조 · 라이트박스 · AI 판정. */
+function _thumbUrl(id, px){ return window.DriveThumb ? DriveThumb.url(id, px) : ''; }
 function _thumbAttrs(id, px, full){
-  const t=_thumbUrl(id, px);
-  if(!t) return ` src="${esc(full||'')}"`;               // 형식 불량 = 종전 동작
-  return ` src="${esc(t)}" data-full="${esc(full||'')}" onerror="_thumbFall(this)"`;
-}
-function _thumbFall(img){
-  if(!img || img.dataset.tf) return;                      // ★ 한 번만
-  img.dataset.tf='1';
-  const u=img.getAttribute('data-full')||'';
-  if(u) img.src=u; else img.removeAttribute('src');       // 원본도 없으면 깨진 아이콘 대신 빈 칸
+  return window.DriveThumb ? DriveThumb.attrs(id, px, full) : ` src="${esc(full||'')}"`;
 }
 /* 사람 옆 번호 = **작업보드 표의 「번호」**(서버가 실어 주는 `boardNo`) — `seq`(시트 행 번호)가
    아니다. 담당자가 표에서 눈으로 보는 값과 같아야 "몇 번 줄 사람인지"가 통한다.
@@ -10197,10 +10216,125 @@ async function renderPaymentView(){
      "담고 → 내려받고 → 회차 확인"이 이어지는 흐름이라, 나누면 오늘 하던 일이 늘어난다. */
 function _pmTabsHtml(){
   const t=(k,l)=>`<button class="${STATE.pmSub===k?'on':''}" onclick="_pmSwitch('${k}')">${l}</button>`;
-  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}</div>`;
+  /* ⚠ 원장 불일치 = 시트↔원장이 갈린 주문(reverse_sync_proposals 의 열린 edit 제안).
+     **돈이 나가기 직전에 보는 화면**이라 입금관리 옆에 둔다 — 별도 nav 를 만들면 또 안 들어간다
+     (감지·조회 API 는 진작 있었는데 화면이 없어 89건이 5주간 아무도 안 본 채로 쌓였다). */
+  const n=_NAVRS.n;
+  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}${
+    t('sync','⚠ 원장 불일치'+(n===null?'':(n>0?` 🔴${n}`:'')))}</div>`;
 }
 function _pmSwitch(k){ if(STATE.pmSub===k) return; STATE.pmSub=k; _pmPaint(); }
-function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else _pmRender(); }
+function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else if(STATE.pmSub==='sync') _rsOpen(); else _pmRender(); }
+
+/* ══ ⚠ 원장 불일치 (시트→DB 역동기화 열린 제안) ═══════════════════════════════════
+   왜 필요했나: 감지·조회·적용 API 는 진작 다 있었는데(`/api/diag/reverse-sync-*` 7개)
+   **부르는 화면이 하나도 없었다.** 그래서 시스템이 89건(금액 61 + 입금대상 28)을 5주 동안
+   찾아 기록해 두고도 아무도 보지 않았고, 그중 하나가 9,900원이 99,000원으로 나간 건이다.
+
+   ★ 무인 자동적용은 금액·계좌를 **하드 제외**한다(돌이킬 수 없어서). 하지만 사람이 검토하고
+     누르는 이 경로는 적용된다 — 그 구분은 이 화면이 있어야 의미를 갖는다.
+   ★ `cancel_suspect`(삭제 의심)는 설계상 영영 플래그로만 남는다(자동취소 금지). 목록에서 빼되
+     **건수는 말한다** — 숨기면 "다 처리했다"는 거짓 안심이 된다. */
+const _NAVRS = { n:null };            // 손댈 수 있는 열린 제안 수(=edit). null = 아직 모름
+function _rsSyncNavBadge(){
+  const b=$('#pmNavBadge'); if(!b) return;
+  if(_NAVRS.n===null) return;         // 모르면 0 으로 위장하지 않는다(조용한 정상 위장 금지)
+  b.textContent = _NAVRS.n>0 ? (' 🔴'+_NAVRS.n) : '';
+}
+/** 뱃지 건수만 받아 갱신. ★ limit=1 로 총계만 받는다(`total` = 자르기 전 개수) — 목록을 끌어오지 않는다.
+ *  실패는 조용히(직전 값 유지) — 역동기화 OFF·권한 없음 등이 뱃지를 0 으로 위장하면 안 된다. */
+async function _rsBadgeRefresh(){
+  try{
+    const r=await api('/api/diag/reverse-sync-list?status=open&type=edit&limit=1');
+    if(r && r.ok) { _NAVRS.n = Number(r.total)||0; _rsSyncNavBadge(); }
+  }catch(_){ }
+}
+/** 부팅 시 1회 — 입금관리를 열지 않아도 쌓인 건수가 nav 에 보이게(C/S·로그 뱃지와 같은 규율).
+ *  ★ 부팅 1회로 끝내면 안 된다(코드리뷰 지적, C/S 뱃지가 이미 같은 지적을 받았다) — 역동기화 detect 는
+ *    3분마다 돌고 다른 관리자도 제안을 만든다. 그 뒤 쌓인 건수가 새로고침 전까지 안 보이면
+ *    이 뱃지가 막으려던 **조용한 누적**이 그대로 재현된다. 갱신은 C/S 뱃지의 기존 타이머에
+ *    얹는다 — 타이머를 새로 만들지 않고(백그라운드 두드림 순증 0), 가려져 있으면 함께 쉰다. */
+async function _rsBootBadge(){ await _rsBadgeRefresh(); }
+
+/** 원장 칸 → 사람이 읽는 이름. 표시 전용(판정 아님) — 서버 필드명을 그대로 보여주면 담당자가 못 읽는다. */
+const _RS_FIELD = { price:'결제금액', account:'계좌번호', bank:'은행', depositor:'예금주',
+  orderer:'주문자', recipient:'수취인', phone:'연락처', address:'주소',
+  user_id:'아이디', order_num:'주문번호', memo:'비고', date_str:'구매일자' };
+/** 돈이 걸린 칸 — 줄 배경을 칠해 먼저 눈에 띄게 한다(이체 사고로 직결되는 것들). */
+const _RS_MONEY = ['price','account','bank','depositor'];
+
+async function _rsOpen(){
+  const el=$('#pmbody'); if(!el) return;
+  el.innerHTML=`${_pmTabsHtml()}<div class="empty">불러오는 중…</div>`;
+  let r=null, susp=null;
+  try{
+    [r, susp] = await Promise.all([
+      api('/api/diag/reverse-sync-list?status=open&type=edit&limit=500'),
+      api('/api/diag/reverse-sync-list?status=open&type=cancel_suspect&limit=1'),
+    ]);
+  }catch(e){ r={ ok:false, error:String(e&&e.message||e) }; }
+  if(!r || !r.ok){
+    el.innerHTML=`${_pmTabsHtml()}<div class="empty">불러오지 못했습니다.${r&&r.error?' ('+esc(String(r.error))+')':''}</div>`;
+    return;
+  }
+  STATE.rsItems = r.items||[];
+  _NAVRS.n = Number(r.total)||0; _rsSyncNavBadge();
+  el.innerHTML = `${_pmTabsHtml()}${_rsHtml(r, susp)}`;
+}
+
+function _rsHtml(r, susp){
+  const items=r.items||[];
+  const suspN = (susp && susp.ok) ? (Number(susp.total)||0) : null;
+  const notes=[];
+  notes.push(`시트와 주문원장이 갈린 칸입니다. <b>왼쪽이 원장(지금 값), 오른쪽이 시트</b>입니다.
+    어느 쪽이 맞는지는 구매캡처로 확인해 주세요 — 시트가 깨져 있는 경우도 있습니다.`);
+  // ★ 잘렸으면 잘렸다고 말한다(조용한 누락 금지).
+  if(r.truncated) notes.push(`⚠ 전체 <b>${Number(r.total)||0}건</b> 중 ${items.length}건만 표시했습니다.`);
+  if(suspN) notes.push(`삭제 의심 <b>${suspN}건</b>은 여기서 처리하지 않습니다(자동취소 금지 — 주문 취소 창구에서 명시 처리).`);
+  const head=`<div class="rsnote">${notes.join('<br>')}</div>`;
+  if(!items.length) return `<div class="rswrap">${head}<div class="empty">불일치 없음 — 시트와 원장이 일치합니다.</div></div>`;
+  const rows=items.map((it,i)=>{
+    const money=_RS_MONEY.includes(it.field);
+    const v=s=>(s==null||String(s).trim()==='')?'<span class="rsempty">(빈칸)</span>':esc(String(s));
+    return `<tr class="${money?'rsmoney':''}" data-rsid="${esc(String(it.id))}">
+      <td class="rsfield">${esc(_RS_FIELD[it.field]||it.field)}</td>
+      <td>${esc(String(it.tabName||''))}</td>
+      <td>${esc(String(it.sheetRow||''))}</td>
+      <td class="rsval old">${v(it.oldValue)}</td>
+      <td class="rsval new">${v(it.newValue)}</td>
+      <td>${esc(_rsWhen(it.detectedAt))}</td>
+      <td><div class="rsact">
+        <button class="go" onclick="_rsApply(${i})" title="주문원장을 시트값으로 바꿉니다">원장을 시트값으로</button>
+        <button onclick="_rsDismiss(${i})" title="원장이 맞습니다 — 이 제안을 닫습니다">기각</button>
+      </div></td></tr>`;
+  }).join('');
+  return `<div class="rswrap">${head}<table class="rstbl">
+    <thead><tr><th>칸</th><th>작업</th><th>행</th><th>원장(지금)</th><th>시트</th><th>감지</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function _rsWhen(s){
+  if(!s) return '';
+  const d=new Date(s); if(isNaN(d.getTime())) return String(s).slice(0,16);
+  const p=x=>String(x).padStart(2,'0');
+  return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 원장을 시트값으로 적용 — 되돌리기 어려운 쓰기라 확인을 받는다(경고칠과 성격이 다르다:
+ *  저쪽은 보기만 하는 표시, 이쪽은 원장을 실제로 바꾼다). */
+async function _rsApply(i){
+  const it=(STATE.rsItems||[])[i]; if(!it) return;
+  const nm=_RS_FIELD[it.field]||it.field;
+  if(!confirm(`${it.tabName} ${it.sheetRow}행 「${nm}」\n\n원장 ${it.oldValue||'(빈칸)'}\n→ 시트 ${it.newValue||'(빈칸)'}\n\n원장을 시트값으로 바꿉니다. 진행할까요?`)) return;
+  const r=await api('/api/diag/reverse-sync-apply',{method:'POST',body:JSON.stringify({proposalId:it.id})});
+  if(!r||!r.ok){ toast('적용 실패'+(r&&r.error?' — '+r.error:'')); return; }
+  toast(`${nm} 적용됨`); _rsOpen();
+}
+async function _rsDismiss(i){
+  const it=(STATE.rsItems||[])[i]; if(!it) return;
+  const r=await api('/api/diag/reverse-sync-dismiss',{method:'POST',body:JSON.stringify({proposalId:it.id})});
+  if(!r||!r.ok){ toast('기각 실패'+(r&&r.error?' — '+r.error:'')); return; }
+  toast('기각됨'); _rsOpen();
+}
 
 async function _pmLoad(){
   const [t, b] = await Promise.all([ api('/api/trackb/payment/targets'), api('/api/trackb/payment/batches?limit=30') ]);
@@ -10466,26 +10600,74 @@ function _pmRender(){
 
 function _pmTargetTable(items){
   if(!items.length) return `<div class="empty">입금할 건이 없습니다.</div>`;
+  /* ★★ 같은 작업의 줄이 이어질 때 **작업·이체은행·통장표시·보류 사유를 줄마다 되풀이하지 않는다**
+       (사용자 확정 2026-08-24) — 50건짜리 작업이면 같은 글자가 50번 반복돼 정작 줄마다 다른 값
+       (리뷰어·금액·계좌)이 묻힌다. 작업이 바뀌는 자리에 **그룹 머리줄**을 한 줄 넣고,
+       그 작업에서 **모든 줄이 같은 값인 칸만** 머리줄로 올린다.
+     ★ 값이 하나라도 다르면 그 칸은 종전대로 줄마다 그린다(정보 손실 0 — 조용히 숨기지 않는다).
+     ★ 접기는 **표시 전용** — 접어도 체크 상태·다운로드 대상은 그대로다(머리줄이 선택 건수를 말한다).
+     ★ 그룹 판정은 `_pmWorkKey` 단일 출처(작업 선택 패널·필터와 같은 키). */
+  const groups=[];
+  for(const it of items){
+    const key=_pmWorkKey(it);
+    const last=groups[groups.length-1];
+    if(last && last.key===key) last.items.push(it);
+    else groups.push({ key, label:it.tabLabel, items:[it] });
+  }
+  STATE.pmGroups = groups.map(g=>g.key);          // 접기 토글이 참조(인덱스 → 키)
+  const fold = STATE.pmFold || (STATE.pmFold={});
+  // 그 작업의 모든 줄이 같은 값일 때만 그 값을 돌려준다(다르면 null = 줄마다 그린다)
+  const same=(g,f)=>{ const v=f(g.items[0]); return g.items.every(x=>f(x)===v) ? v : null; };
+
   // ★ onclick 에는 **배열 인덱스만** 넘긴다 — 탭명·리뷰어명은 시트에서 온 외부 문자열이라
   //   문자열로 보간하면 따옴표 하나로 탈출된다(HTML 속성은 엔티티 디코드 후 JS 로 파싱되므로
   //   `&#39;` 치환으로는 못 막는다 — 레포에서 실측된 XSS 와 같은 자리).
-  const rows = items.map(it=>{
-    const idx=(STATE.pmItems||[]).indexOf(it);
-    const on=_pmOn(it);
-    const badge = it.payable
-      ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
-      : `<span class="pmb no">보류</span>`;
-    const why = it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
-    // 그 행의 사유 중 화면에서 고칠 수 있는 것이 하나라도 있을 때만 버튼을 만든다
-    // (눌러도 아무 일 없는 버튼 금지 — 못 고치는 사유는 상단 안내 카드가 설명한다)
-    const fixable = (it.issues||[]).some(i => PAY_FIX_KIND[i] === 'work'
-      || (PAY_FIX_KIND[i] === 'account' && it.accountRef && it.accountRef.reviewerId));
-    const memoFixable = !it.transferMemo;
-    const fixBtn = fixable ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
-    return `<tr class="${on?'':'off'}">
+  const bankBadge = it => it.payable
+    ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
+    : `<span class="pmb no">보류</span>`;
+  const whyText = it => it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
+  // 그 줄의 사유 중 화면에서 고칠 수 있는 것이 하나라도 있을 때만 버튼을 만든다
+  // (눌러도 아무 일 없는 버튼 금지 — 못 고치는 사유는 위 안내 카드가 설명한다)
+  const isFixable = it => (it.issues||[]).some(i => PAY_FIX_KIND[i] === 'work'
+    || (PAY_FIX_KIND[i] === 'account' && it.accountRef && it.accountRef.reviewerId));
+  const memoCell = (it, idx) => esc(it.transferMemo||'') || (!it.transferMemo
+    ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>');
+
+  const body = groups.map((g,i)=>{
+    const hidden = !!fold[g.key];
+    const bankSig = same(g, it => it.payable ? (it.bank+'|'+(it.bankAuto?'a':'m')) : 'hold');
+    const memoSig = same(g, it => String(it.transferMemo||''));
+    const whySig  = same(g, it => whyText(it)+'|'+(isFixable(it)?'1':'0'));
+    const idx = (STATE.pmItems||[]).indexOf(g.items[0]);   // 머리줄 버튼이 가리키는 = 그 작업의 첫 줄
+                                                          // (작업 단위 값이라 어느 줄로 열어도 같은 팝업)
+    const picked  = g.items.filter(_pmOn).length;
+    const payable = g.items.filter(it=>it.payable).length;
+    const sum     = g.items.filter(_pmOn).reduce((a,c)=>a+(Number(c.amount)||0),0);
+
+    // 머리줄 — 작업명 + 건수 + (그 작업에서 값이 같은 칸들) + 선택 현황
+    const chips=[];
+    if(bankSig!==null) chips.push(bankBadge(g.items[0]));
+    if(memoSig!==null) chips.push(`<span class="pmgk">통장표시</span>${memoCell(g.items[0], idx)}`);
+    if(whySig!==null && whyText(g.items[0])) chips.push(
+      `<span class="pmwarn">${esc(whyText(g.items[0]))}</span>${isFixable(g.items[0])?`<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>`:''}`);
+    const head = `<tr class="pmgrp" data-pgh="${i}"><td colspan="11"><div class="pmgrph">`
+      + `<button class="pmfold" type="button" title="접기/펼치기" onclick="_pmFoldWork(${i})">${hidden?'▸':'▾'}</button>`
+      + `<b class="nm" title="${esc(g.label||'')}">${esc(g.label||'')}</b>`
+      + `<span class="n">${g.items.length}건</span>`
+      + chips.join('')
+      + `<span class="sp"></span>`
+      + (payable?`<span class="pmgsel">선택 ${picked}/${payable}건 · ${_pmNum(sum)}원</span>`:`<span class="pmgsel dim">이체 대상 없음</span>`)
+      + `</div></td></tr>`;
+
+    const rows = g.items.map(it=>{
+      const idx=(STATE.pmItems||[]).indexOf(it);
+      const on=_pmOn(it);
+      const why = whyText(it);
+      const fixBtn = isFixable(it) ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
+      return `<tr class="${on?'':'off'}${hidden?' pmhide':''}" data-pg="${i}">
       <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`:'—'}</td>
-      <td>${esc(it.tabLabel)}</td>
-      <td>${badge}</td>
+      <td class="pmdim"></td>
+      <td>${bankSig!==null?'':bankBadge(it)}</td>
       <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
         it.accountSource==='order'?`<span class="pmauto"${_pmAcctSrcTip(it)}>양식계좌</span>`:''}</td>
       <td>${esc(it.startDate)}</td>
@@ -10495,14 +10677,29 @@ function _pmTargetTable(items){
       <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${it.reviewFee
         ? _pmNum(it.reviewFee)
         : `<button class="btn sm" title="리뷰비가 없어 상품비만 이체됩니다 — 눌러서 설정" onclick="_pmRowMemo(${idx})">0</button>`}</td>
-      <td>${esc(it.transferMemo||'') || (memoFixable
-        ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>')}</td>
-      <td class="pmwarn">${esc(why)} ${fixBtn}</td></tr>`;
+      <td>${memoSig!==null?'':memoCell(it, idx)}</td>
+      <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>`;
+    }).join('');
+    return head+rows;
   }).join('');
+
   return `<div class="lgwrap"><table class="lgtable pmtable">
     <thead><tr><th>☑</th><th>작업</th><th>이체은행</th><th>리뷰어</th><th>구매일</th><th>은행/계좌</th><th>예금주</th>
       <th class="num">이체금액</th><th class="num">상품비+리뷰비</th><th>통장표시</th><th>보류 사유</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <tbody>${body}</tbody></table></div>`;
+}
+
+/** 작업 그룹 접기/펼치기 — **표시 전용**(체크 상태·다운로드 대상 무접촉)
+ *  ★ 전체 재렌더 대신 그 그룹 줄만 감춘다(보던 스크롤 자리를 잃지 않게)
+ *  ★ 인자는 그룹 인덱스(외부 문자열 보간 금지) */
+function _pmFoldWork(i){
+  const key=(STATE.pmGroups||[])[i]; if(!key) return;
+  const fold=STATE.pmFold||(STATE.pmFold={});
+  if(fold[key]) delete fold[key]; else fold[key]=true;
+  const on=!!fold[key];
+  const tbl=document.querySelector('#pmbody .pmtable'); if(!tbl) return;
+  tbl.querySelectorAll('tr[data-pg="'+i+'"]').forEach(tr=>{ tr.classList.toggle('pmhide', on); });
+  const h=tbl.querySelector('tr.pmgrp[data-pgh="'+i+'"] .pmfold'); if(h) h.textContent = on?'▸':'▾';
 }
 
 function _pmBatchResult(b){
@@ -10617,7 +10814,7 @@ function _pmBuildFix(items){
       // 리뷰비 — 화면은 **서버가 준 값만** 쓴다(어디서 왔는지도 서버 판정 `feeSource` 그대로).
       fee:(typeof it.reviewFee==='number'?it.reviewFee:null), feeSource:it.feeSource||null,
       tabFee:(it.tabReviewFee==null?null:it.tabReviewFee), campFee:(it.campaignReviewFee==null?null:it.campaignReviewFee),
-      needBank:false, needMemo:false, needFee:false, bankRows:0, memoRows:0, feeRows:0,
+      needBank:false, needMemo:false, needFee:false, bankRows:0, memoRows:0, feeRows:0, setupRows:0,
       accts:[], acctRows:0, _nr:new Set(), _np:new Set(), rows:0 });
     return w;
   };
@@ -10631,6 +10828,10 @@ function _pmBuildFix(items){
     // ── 작업 단위(이체은행 미지정 · 통장표시 없음) — 저장하면 그 작업의 모든 행이 함께 풀린다
     if(iss.includes('no_bank')){ w.needBank=true; w.bankRows++; }
     if(warn.includes('no_memo')){ w.needMemo=true; w.memoRows++; }
+    /* ★ 작업 설정(이체은행·통장표시·리뷰비) 보완이 필요한 행의 **합집합** —
+         카드가 그 셋을 한 줄로 묶어 보여주므로 건수도 합집합이어야 한다.
+         사유별 건수(bankRows/memoRows/feeRows)는 그 줄의 title 로 남긴다(조용한 누락 금지). */
+    if(iss.includes('no_bank') || warn.includes('no_memo') || warn.includes('no_review_fee')) w.setupRows++;
     // ★ 리뷰비 0 = 상품비만 이체된다 — 보류(막는 사유)는 아니지만 **말하지 않으면 그대로 나간다**.
     if(warn.includes('no_review_fee')){ w.needFee=true; w.feeRows++; }
     // ── 리뷰어 단위(은행명·계좌·예금주) — 원장은 평면 배열 하나로 두고(인덱스 계약 유지)
@@ -10741,9 +10942,24 @@ function _pmFixBlock(){
     const i=f.works.indexOf(w);
     const fixWork=`<button class="btn sm" onclick="_pmFixWork(${i})">보완</button>`;
     const lines=[];
-    if(w.needBank) lines.push(line('🏦','이체은행 미지정', w.bankRows, fixWork));
-    if(w.needMemo) lines.push(line('🏷','통장표시 없음', w.memoRows, fixWork));
-    if(w.needFee) lines.push(line('💵','리뷰비 미설정 — 상품비만 이체됩니다', w.feeRows, fixWork));
+    /* ★★ 작업 단위 3종(이체은행·통장표시·리뷰비)은 **한 줄**로 묶는다 —
+         세 사유 모두 같은 팝업(_pmFixWork)에서 한 번에 입력하고,
+         저장하면 그 작업의 보류가 함께 풀린다(사용자 확정 2026-08-24).
+       ★ 사유별로 줄을 나누면 **같은 [보완] 버튼이 세 번 반복**돼 "세 번 해야 하나"로 읽힌다.
+       ★ 계좌(💳)는 묶지 않는다 — 명의마다 계좌가 달라 사람별로 고쳐야 한다. */
+    const need=[];
+    if(w.needBank) need.push({ic:'🏦', short:'이체은행', long:'이체은행 미지정', n:w.bankRows});
+    if(w.needMemo) need.push({ic:'🏷', short:'통장표시', long:'통장표시 없음', n:w.memoRows});
+    if(w.needFee)  need.push({ic:'💵', short:'리뷰비',  long:'리뷰비 미설정',  n:w.feeRows});
+    if(need.length){
+      // ★ 리뷰비가 비면 **상품비만 이체**된다 — 묶어도 그 경고는 화면에 남긴다.
+      const label = need.map(p=>`${p.ic} ${p.short}`).join(' · ')
+        + (w.needFee?`<span class="tail">— 지금은 상품비만 이체됩니다</span>`:'');
+      const tip = need.map(p=>`${p.long} ${p.n}건`).join(' · ')
+        + ` — 한 번만 입력하면 이 작업의 ${w.setupRows}건이 함께 풀립니다`;
+      lines.push(`<div class="pmfixrow work"><span class="nm" title="${esc(tip)}">${label}</span>`
+        + `<span class="n">${w.setupRows}건</span>${fixWork}</div>`);
+    }
     // ★ 줄이 좁아 말줄임되어도 **누구 명의인지**는 title 로 남는다(이름만으로 구분 안 되는 케이스)
     for(const a of w.accts) lines.push(line('💳',
       `계좌 — ${_pmAcctLabel(a)}`,
@@ -16893,6 +17109,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      `/api/trackb/tabs` 는 양쪽에서 닿는 유일한 목록이라 여기서만 재기준한다(목록 사본 0). */
   window.RECRUIT_TABS_API = '/api/trackb/tabs';</script>
 <script src="api.js"></script>
+<script src="js/drive-thumb.js"></script>
 <!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
      첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
 <script src="js/work-order-detail.js?v=20260815-guide-image-strip-dba4355"></script>

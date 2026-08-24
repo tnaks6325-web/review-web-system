@@ -52,6 +52,7 @@
   </div>
 
   <script src="api.js"></script>
+  <script src="js/drive-thumb.js"></script>
   <script>
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function qparam(k){ return new URLSearchParams(location.search).get(k) || ''; }
@@ -87,8 +88,7 @@
       var html = order.map(function(name){
         var cells = groups[name].map(function(im){
           return `<div class="cell" onclick="_openLb('${esc(im.id)}')">
-            <div class="imgbox"><img loading="lazy" src="${IMG(im.id)}" alt="${esc(im.name)}"
-              onerror="this.onerror=null;this.src='${THUMB(im.id)}'"></div>
+            <div class="imgbox"><img loading="lazy"${window.DriveThumb ? DriveThumb.attrs(im.id, 400, IMG(im.id)) : ` src="${IMG(im.id)}" onerror="this.onerror=null;this.src='${THUMB(im.id)}'"`} alt="${esc(im.name)}"></div>
             <div class="cap">${esc(name)}</div>
           </div>`;
         }).join('');
