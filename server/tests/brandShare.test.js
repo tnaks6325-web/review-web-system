@@ -228,8 +228,10 @@ async function run() {
       _bnColor: () => '#2563eb',
     };
     vm.createContext(box);
+    box.$ = (sel) => (box.dom && box.dom[sel]) || null;
     for (const [nm, kd] of [['_brandOpen'], ['brandToggleRows'], ['_brandRowsHtml'], ['_brandsMerge'],
-      ['_brandsReload', 'async'], ['brandNewSubmit', 'async']]) vm.runInContext(grab(nm, kd), box);
+      ['_awItems'], ['_bmList'], ['_bmCell'], ['_bmEditHtml'], ['bmEdit'], ['bmClose'], ['bmInput'],
+      ['_brandsReload', 'async'], ['brandNewSubmit', 'async'], ['bmSave', 'async']]) vm.runInContext(grab(nm, kd), box);
     return box;
   };
 
@@ -320,6 +322,116 @@ async function run() {
   ok('★ 브랜드 관리는 작업 0건·요약 실패여도 열린다(막다른 길 금지 — 조기 반환보다 앞)',
     src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") > 0
     && src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") < src.indexOf("'진행 중인 작업이 없습니다.'}</div>`; return; }"));
+
+
+  /* ═══ 8. 브랜드 담당자(136) — 작업(탭) 단위 · 최대 2명 · 라벨 없는 자유입력 (사용자 확정 2026-08-24) ═══ */
+  // 8-1. 정규화 단일 출처
+  {
+    const norm = svc._normBrandManagers;
+    ok('정규화: 공백 정리 · 빈 값 제거 · 최대 2명',
+      JSON.stringify(norm(['  박가람   차장 ', '', '개똥이밥먹어', '세번째'])) === JSON.stringify(['박가람 차장', '개똥이밥먹어']));
+    ok('정규화: 배열이 아니면 빈 배열(모르는 입력을 지어내지 않는다)',
+      norm(null).length === 0 && norm('박가람').length === 0);
+    ok('정규화: 이름은 20자 상한', norm(['가'.repeat(50)])[0].length === 20);
+  }
+  // 8-2. 저장 — 소유 탭만(남의 작업에 담당자를 심을 수 없다) + 빈 값이면 행 삭제
+  {
+    const owned = [/WITH own AS/, () => ({ rows: [{ sheetId: 's1', tabName: 'A작업', tabGid: '1' }] })];
+    let p2 = pool([owned]); svc.__setPoolForTest(p2);
+    const bad = await svc.setTabBrandManagers({ advertiserId: 'adv-1', sheetId: 's1', tabName: '남의작업', names: ['x'] });
+    ok('★ 소유 탭이 아니면 404 + 쓰기 0건',
+      bad.ok === false && bad.code === 404 && !p2.q.some(x => /INSERT INTO trackb_tab_brand_managers/.test(x.s)));
+    p2 = pool([owned]); svc.__setPoolForTest(p2);
+    const good = await svc.setTabBrandManagers({ advertiserId: 'adv-1', sheetId: 's1', tabName: 'A작업', names: ['박가람 차장', '개똥이밥먹어', '셋째'], actor: '어니스트캄' });
+    const ins = p2.q.find(x => /INSERT INTO trackb_tab_brand_managers/.test(x.s));
+    ok('저장은 upsert 1회 + 서버가 정규화한 값을 돌려준다',
+      good.ok === true && ins && JSON.parse(ins.params[3]).length === 2 && good.managers[0] === '박가람 차장');
+    ok('★ 쓰기 표면은 그 표 하나(운영 테이블 무접촉)',
+      !p2.q.some(x => /^\s*(INSERT INTO|UPDATE|DELETE FROM)\s+(?!trackb_tab_brand_managers)/i.test(x.s)));
+    p2 = pool([owned]); svc.__setPoolForTest(p2);
+    const cleared = await svc.setTabBrandManagers({ advertiserId: 'adv-1', sheetId: 's1', tabName: 'A작업', names: ['  ', ''] });
+    ok('★ 빈 값은 행을 지운다 — "미입력"은 행 없음 하나로만 표현한다',
+      cleared.ok === true && cleared.managers.length === 0
+      && p2.q.some(x => /DELETE FROM trackb_tab_brand_managers/.test(x.s))
+      && !p2.q.some(x => /INSERT INTO trackb_tab_brand_managers/.test(x.s)));
+  }
+  // 8-3. 조회는 fail-soft(신규 표 미적용이어도 화면이 뜬다)
+  {
+    svc.__setPoolForTest({ async query() { const e = new Error('relation does not exist'); e.code = '42P01'; throw e; } });
+    ok('★ 표가 없어도 조회는 빈 값(fail-soft — 담당자만 안 보이고 화면은 그대로)',
+      (await svc.tabBrandManagersMap({ advertiserId: 'adv-1' })).size === 0
+      && (await svc.tabBrandManagersFor({ advertiserId: 'adv-1', sheetId: 's1', tabName: 'A작업' })).length === 0);
+    svc.__setPoolForTest(pool([[/WITH own AS/, () => ({ rows: [{ sheetId: 's1', tabName: 'A작업' }] })]]));
+  }
+  // 8-4. 라우터 — 브랜드 CRUD 와 같은 게이트(브랜드 링크 세션은 도달 불가)
+  {
+    const l = layers.find(x => x.path === '/brands/tab-manager');
+    ok('POST /brands/tab-manager 등록 + authMiddleware', !!l && l.methods.includes('post') && l.mw.includes('authMiddleware'));
+    ok('★ 브랜드 링크 세션은 담당자를 못 고친다(열람 전용)',
+      (await call('/brands/tab-manager', { role: 'advertiser', name: 'b', advertiser_id: 'adv-1', brand_id: 'brd_a' }, { sheetId: 's1', tabName: 'A작업', names: [] })).code === 403);
+    for (const role of ['master', 'admin', 'staff']) {
+      ok(`${role} 도 403(업체 셀프 창구)`,
+        (await call('/brands/tab-manager', { role, name: 'x', advertiser_id: 'adv-1' }, { sheetId: 's1', tabName: 'A작업', names: [] })).code === 403);
+    }
+    const wd = layers.find(x => x.path === '/workdesk');
+    const rsrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+    const wseg = rsrc.slice(rsrc.indexOf("router.get('/workdesk'"), rsrc.indexOf("router.get('/workdesk'") + 1200);
+    ok('★ /workdesk 는 brandId 를 **토큰에서만** 넘긴다(IDOR 차단)',
+      !!wd && /brandId: \(req\.admin && req\.admin\.brand_id\) \|\| null/.test(wseg) && !/req\.(query|body)\.brandId/.test(wseg));
+  }
+  // 8-5. 렌즈 — 브랜드 세션은 내부 담당을 통째로 폐기
+  {
+    const lens = svc.__condAdvertiserLensForTest;
+    const cd = { manager: { ae: '김수만', adminNick: '망고', adminRaw: '박은비', brand: ['박가람 차장'] } };
+    const br = lens(cd, { brandSession: true });
+    ok('★★ 브랜드사 화면: 내부 담당(AE·관리자)은 이름도 존재 여부도 안 나간다',
+      br.manager.ae === null && br.manager.adminNick === null && br.manager.adminRaw === null
+      && JSON.stringify(br.manager.brand) === JSON.stringify(['박가람 차장']));
+    const ag = lens(cd, { brandSession: false });
+    ok('대행사 세션: 내부 담당은 종전대로(실명만 폐기) + 업체 담당 병기',
+      ag.manager.ae === '김수만' && ag.manager.adminNick === '망고' && ag.manager.adminRaw === null
+      && ag.manager.brand.length === 1);
+    const noBrand = lens({ manager: { ae: null, adminNick: null, adminRaw: null, brand: [] } }, { brandSession: true });
+    ok('★ 미입력 브랜드사 화면은 재료가 통째로 비어 화면이 담당 행을 안 그린다',
+      noBrand.manager.ae === null && noBrand.manager.adminNick === null && noBrand.manager.brand.length === 0);
+  }
+  // 8-6. 화면 — 작업 행 인라인 입력(vm 실행)
+  {
+    const items = [{ sheetId: 's1', tabName: 'A작업', brandId: 'brd_a', idx: 1, brandManagers: ['박가람 차장'] },
+                   { sheetId: 's2', tabName: 'B작업', brandId: 'brd_a', idx: 2, brandManagers: [] }];
+    const b = brandSandbox({
+      STATE: { advWork: { items, brands: [] }, brandOpen: { brd_a: true }, bmEdit: null },
+      api: async () => ({ ok: true, managers: ['박가람 차장', '개똥이밥먹어'] }),
+    });
+    const html = b._brandRowsHtml({ id: 'brd_a' }, items, null);
+    ok('★ 담당자 칸이 행마다 있다 — 값이 있으면 이름, 없으면 입력 유도',
+      html.indexOf('박가람 차장') >= 0 && html.indexOf('＋ 담당자') >= 0);
+    ok('★ onclick 은 인덱스만(작업명·시트ID 보간 0)',
+      /bmEdit\(0\)/.test(html) && /bmEdit\(1\)/.test(html) && html.indexOf("bmEdit('s1'") < 0);
+    ok('★ 담당자 칸은 행 클릭(작업 열기)과 분리된다', /event\.stopPropagation\(\);bmEdit\(/.test(html));
+    b.bmEdit(1);
+    const edited = b._brandRowsHtml({ id: 'brd_a' }, items, null);
+    ok('누르면 그 행 아래에서 입력칸 2개가 펼쳐진다(팝업 없음)',
+      (edited.match(/<input /g) || []).length === 2 && /최대 2명/.test(edited));
+    /* ⚠ 기준값은 타이핑 **전에** 찍는다 — 뒤에 찍고 비교하면 항상 참이라 검사가 공허해진다
+       (변이시험이 실제로 이 자리를 뚫었다). 입력칸이 든 목록을 다시 그리면 한글 IME 조합이 깨진다. */
+    const before = b.renders;
+    b.bmInput(0, '박가람 차장'); b.bmInput(1, '개똥이밥먹어');
+    ok('★ 타이핑은 재렌더하지 않는다(한글 IME 조합 보호)', b.renders === before);
+    await b.bmSave();
+    ok('★ 저장하면 그 작업 행에 즉시 반영된다(재조회를 기다리지 않는다)',
+      JSON.stringify(items[1].brandManagers) === JSON.stringify(['박가람 차장', '개똥이밥먹어'])
+      && b.STATE.bmEdit === null && b.toasts.some((t) => /담당자를 저장/.test(t)));
+    // 저장 실패는 입력을 지우지 않는다
+    const b2 = brandSandbox({
+      STATE: { advWork: { items, brands: [] }, brandOpen: { brd_a: true }, bmEdit: null },
+      api: async () => ({ ok: false, error: 'not_ready' }),
+    });
+    b2.bmEdit(0); b2.bmInput(0, '박가람 차장'); await b2.bmSave();
+    ok('★ 저장 실패 시 입력을 지우지 않고 사유를 말한다',
+      b2.STATE.bmEdit && b2.STATE.bmEdit.names[0] === '박가람 차장' && /준비되지 않았습니다/.test(b2.STATE.bmEdit.err));
+  }
+  ok('세션 초기화에 담당자 편집 상태도 포함', /bmEdit:null/.test(src));
 
   console.log(`\n✅ brandShare: ${n} cases passed`);
 }
