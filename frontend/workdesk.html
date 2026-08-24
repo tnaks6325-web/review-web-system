@@ -12280,7 +12280,7 @@ async function renderSettingsView(){
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임과 블랙리스트 관리기준을 설정합니다)</b>'}</div>`;
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
   // ★ gatecriteria(블랙리스트 관리기준)는 공고별 [🚫 참여 리뷰어 관리]의 판정 기준이라 그 기능과 같은 범위(내부 담당자)로 연다.
-  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','reviewtype','managercleanup','gatecriteria','capturelink','homebanner','notice'] : ['nickname','gatecriteria'] });
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','reviewtype','managercleanup','deliverycleanup','gatecriteria','capturelink','homebanner','notice'] : ['nickname','gatecriteria'] });
 }
 
 /* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (frontend/docs/design-workdesk-home.html) ══
