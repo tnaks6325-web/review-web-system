@@ -3860,10 +3860,71 @@ function _finBarHtml(){
     `<button class="wbl-b dark" onclick="openFinishCur()">🏁 마감</button></span>`;
 }
 /* master 도구 [⋯] 드롭다운 — 리스너는 **최상위에 1회만** 등록(열 때마다 걸면 겹쳐 쌓인다). */
+/* ═══════════════════════════════════════════════════════════════════
+   [⋯] 도구 메뉴 — **할 일이 있을 때만** 띄운다 (2026-08-21 사용자 확정)
+
+   종전에는 5개 버튼이 역할·무시트 여부만 보고 상시 노출돼, 대부분의 작업에서
+   할 일 없이 떠 있었다(눌러서 미리보기를 봐야 "대상 0건"을 알 수 있었다).
+
+   ★★ **판정 재료는 그 도구가 실제로 쓰는 것과 같은 것**(사본 금지):
+     · ♻ 중복 정리 = 모달의 미리보기와 **같은 호출**(`dedupe-rows` dryRun) → `removeRows`
+     갈라지면 "배지는 0인데 열어 보면 대상이 있다"가 된다.
+
+   ★★ **모르면 숨기지 않는다(fail-open)** — 조회 실패·미도착·권한 없음은 **종전대로 노출**.
+     숨기면 "정리하고 싶은데 버튼이 없다"는 막다른 길이 된다(조용한 봉쇄 금지).
+   ★ 서버는 [⋯] 를 **열 때만** 부른다 · 같은 작업은 1회만(`_MHB.key`).
+   ═══════════════════════════════════════════════════════════════════ */
+let _MHB = null;   // { key, dedupe:number|null, busy }
+
+/* ♻ 중복 정리 대상 건수 — 아직 안 세었으면 null(= 모름 → 노출) */
+function _ddCount(){ return (_MHB && _MHB.key === _mhKey()) ? _MHB.dedupe : null; }
+function _mhKey(){ const t = STATE.cur; return t ? (t.sheetId + '\t' + t.tabName) : ''; }
+
+async function _mhToolsSync(){
+  const key = _mhKey(); if (!key) return;
+  if (_MHB && _MHB.key === key) return;          // 같은 작업은 1회만
+  _MHB = { key, dedupe: null, busy: true };
+  const t = STATE.cur;
+  try {
+    const j = await api('/api/trackb/worktable/dedupe-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: t.sheetId, tabName: t.tabName, dryRun: true }) });
+    // ★ 값이 정말 숫자로 왔을 때만 센다 — 실패/형태 불일치는 null 로 두어 **노출 쪽**으로 접는다.
+    if (_MHB && _MHB.key === key && j && j.ok !== false && typeof j.removeRows === 'number') {
+      _MHB.dedupe = j.removeRows;
+    }
+  } catch (_) { /* fail-open — null 유지 = 종전대로 노출 */ }
+  if (_MHB && _MHB.key === key) _MHB.busy = false;
+  _mhToolsRender();
+}
+/* 메뉴 내용만 다시 그린다(헤더 전체 재렌더 금지 — 열린 메뉴가 닫혀 버린다). */
+function _mhToolsRender(){
+  const box = document.getElementById('mhMenuBox');
+  if (box) box.innerHTML = _mhMenuHtml();
+}
+/* [⋯] 자체를 띄울지 — 안에 버튼이 하나라도 있어야 띄운다(빈 메뉴 금지). */
+/* [⋯] 자체를 띄울지 — 안에 버튼이 하나라도 있어야 띄운다(빈 메뉴 금지).
+   ★ `_ddCan()` 은 지금 master 전용이라 앞의 조건에 이미 삼켜지지만, **재료를 빼지 않는다** —
+     나중에 게이트가 넓어지면 여기가 자동으로 따라와야 한다(두 곳이 갈리면 "버튼은 있는데
+     [⋯] 가 안 뜬다"가 된다). */
+function _mhToolsVisible(){
+  return !!(STATE.role === 'master' || _ddCan() || _brCanAdd());
+}
+/* 메뉴 내용 — 조건부 버튼은 여기 한 곳에서만 정한다(렌더와 재렌더가 갈리지 않게). */
+function _mhMenuHtml(){
+  const isMaster = STATE.role === 'master';
+  const dd = _ddCount();                       // null = 아직 모름 → 노출(fail-open)
+  const ddShow = _ddCan() && (dd === null || dd > 0);
+  const ddBadge = (dd && dd > 0) ? ` ${dd}` : '';
+  return (STATE._flipBtnHtml || '')
+    + (isMaster ? `<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>` : '')
+    + (ddShow ? `<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리${ddBadge}</button>` : '')
+    + (_brCanAdd() ? `<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>` : '');
+}
 function toggleMhTools(ev){
   if(ev) ev.stopPropagation();
   const w=document.getElementById('mhTools'); if(!w) return;
   w.classList.toggle('open');
+  if(w.classList.contains('open')) _mhToolsSync();   // ★ 열 때만 센다(닫혀 있으면 서버를 안 부른다)
   if(!STATE._mhToolsBound){
     STATE._mhToolsBound=true;
     const close=()=>{ const t=document.getElementById('mhTools'); if(t) t.classList.remove('open'); };
@@ -3893,12 +3954,16 @@ function doReopenCur(){ if(STATE.cur) _finReopen(STATE.cur); }
    ★ 미리보기 → 확인창 → 실행 2단계. 보류 그룹은 **사유를 그대로** 보여준다(조용한 누락 금지).
    ★ 입금 회차에 담긴 줄이 섞인 그룹은 서버가 손대지 않는다 — 화면이 그 사실을 문장으로 말한다. */
 let _DD = null;
-/* ★★ 게이트는 **서버(`/worktable/dedupe-rows` = adminOrMaster)와 1:1** 이어야 한다(사용자 확정 2026-08-23).
-   `_isInternalRole()`(staff 포함)로 넓히면 AE 에게 눌러도 403 나는 버튼이 생긴다(막다른 길 금지).
-   이 조작은 줄을 내리면서 **주문 취소까지 동반**해 되돌리기가 무겁다 — 그래서 admin/master 전용이다.
+/* ★★ **권한 ≠ 노출** — 서버는 adminOrMaster, 화면 버튼은 **master 전용**이다(사용자 확정 2026-08-24).
+   2026-08-23 에 화면을 서버와 1:1 로 맞췄던 것을 **되돌린 것**이다 — admin 에게는 버튼을 내밀지
+   않는다. 이 조작은 줄을 내리면서 **주문 취소까지 동반**해 되돌리기가 무겁고, admin 이 정말
+   써야 하면 API(`POST /worktable/dedupe-rows`)로 쓴다. 같은 메뉴의 [write-back 시뮬]·
+   [그림자 투영]과 같은 패턴이다.
+   ★★★ **방향이 계약이다 — 화면이 서버보다 넓어지는 것만 금지**다(좁은 것은 의도).
+     `_isInternalRole()`(staff 포함)로 넓히면 AE 에게 눌러도 403 나는 죽은 버튼이 생긴다.
    ★ 작업 도구 [⋯] 에 남은 정리 창구는 이것 하나다(줄 정리·번호 정리·옵션 열은 2026-08-23 제거). */
 function _ddCan(){
-  return !!(STATE.cur && STATE.cur.sheetless === true && (STATE.role === 'master' || STATE.role === 'admin'));
+  return !!(STATE.cur && STATE.cur.sheetless === true && STATE.role === 'master');
 }
 function closeDedupeModal(){ const o = document.getElementById('ddOv'); if (o) o.remove(); _DD = null; }
 if (!window._ddKeyBound) {
@@ -5142,9 +5207,8 @@ function _folRow(src,i){
 function _folMat(t,src){
   if(!t) return {known:false,why:'작업 정보를 찾지 못했습니다'};
   if(src==='own'){  // 업체관리: 연결탭 응답이 폴더 재료를 직접 싣는다(추가 조회 없음)
-    // ★ 담당 밖 업체는 서버가 폴더 URL 을 비워 보낸다(folderScoped:false) — '폴더 미생성'이 아니라 그 사유를 말한다.
-    if((STATE.ownTabMeta||{}).folderScoped===false)
-      return {known:false,why:'담당하지 않은 업체의 작업입니다 — 폴더 링크는 담당 AE·관리자에게 문의하세요'};
+    // ★ 저장폴더 링크는 담당(inad_pm) 무관 내부인 전원(사용자 확정 2026-08-24) — 담당 밖이라 비우던
+    //   분기는 제거됐다(폴더를 여는 통로 /tab-folders 가 이미 내부인 전원에게 열려 있어 반쪽 규칙이었다).
     // ★ tab_configs 행 자체가 없는 탭(LEFT JOIN NULL)은 "폴더가 없다"가 아니라 "등록 정보가 없다".
     //   구버전 백엔드는 이 플래그를 안 보내므로 undefined 는 종전대로 '등록됨'으로 본다(스큐 무해).
     if(t.hasTabConfig===false)
@@ -5720,7 +5784,10 @@ function renderWorkdesk(wd){
   const sotBadge=(sot==='db')
     ? `<span class="bd sot" title="이 탭의 진실원천(원본)이 DB(Track B)로 전환된 상태입니다. 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: Track B</span>`
     : '';
-  const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
+  /* ★ 전환 버튼은 지역변수가 아니라 STATE 에 싣는다 — [⋯] 메뉴는 열 때 건수를 세고
+       **내용만 다시 그리므로**(`_mhToolsRender`), 그 시점에 이 지역변수는 이미 사라졌다.
+       한 곳(`_mhMenuHtml`)에서만 메뉴를 만들기 위한 배선이다(사본 금지). */
+  STATE._flipBtnHtml=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   // ★ 제목 행 = [작업명 · 시트 · 배지] ―― 남는 폭 ―― [마감 안내 + 🏁 마감] [⋯ 도구](master)
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
   //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
@@ -5738,7 +5805,7 @@ function renderWorkdesk(wd){
     ${planBtn}
     ${logBtn}
     ${_finBarHtml()}
-    ${(isMaster||_ddCan()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
+    ${_mhToolsVisible()?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu" id="mhMenuBox">${_mhMenuHtml()}</span></span>`:''}
     <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
          [링크 복사]·[모집인원 조절]·마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다.
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->
@@ -16338,8 +16405,7 @@ async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCu
   STATE.advLink=(lk&&lk.ok&&lk.link)||null;   // 이 업체 접속 링크(있으면 token/active)
   STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   // ★ 마감/통계 조회 실패는 플래그로 온다 — 화면이 "마감자료 검수 0건"으로 위장하지 않고 사유를 적는다.
-  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable,
-    folderScoped: rt.folderScoped===false ? false : true } : { unreachable:true };
+  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable } : { unreachable:true };
   STATE.ownItems=(r&&r.items)||[];   // 소유 캠페인(설정 패널이 읽는다)
   _ovmQ=''; _ovmF='all';
   renderOwnPanel(a, STATE.ownItems);
@@ -16443,11 +16509,8 @@ function _ownTabsHtml(){
     return `<div class="st">연결된 작업 0</div><div class="empty" style="padding:14px">연결된 작업 없음 — [소유 작업]에서 작업을 지정하면 여기 나옵니다.</div>`;
   }
   const meta=STATE.ownTabMeta||{};
-  const warn=((meta.statsUnavailable||meta.finishedUnavailable)
-    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '')
-    // ★ 담당하지 않은 업체는 서버가 폴더 링크를 내려주지 않는다 — 그 사실을 말한다(회색 버튼만 두면 오독).
-    + (meta.folderScoped===false
-      ? `<div class="ovm-warn">⚠ 담당하지 않은 업체라 <b>[자료]</b> 폴더 링크는 표시되지 않습니다(담당 AE·관리자에게 문의).</div>` : '');
+  const warn=(meta.statsUnavailable||meta.finishedUnavailable)
+    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '';
   return `<div class="st">연결된 작업 ${ot.length} <span class="sthint">최신순 — 클릭하면 작업보드로 열기 · [계약] 칸에서 바로 매칭할 수 있고, 견적·계산서·입금은 계약이 매칭된 작업만 표시</span></div>
     <div class="ovm-tools">
       <div class="tr">

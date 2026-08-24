@@ -891,22 +891,15 @@ router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, re
     // ★ 마감/통계 조회 실패는 **플래그로 고지**한다 — 조용히 빈 판정을 내려보내면 화면이 그것을
     //   "마감자료 검수 대기 0건"으로 읽어 실제 대기 건이 통째로 사라진다(088 무신호 규율).
     const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId, annotate: true });
-    // ★★ staff(AE)는 담당 업체가 아니면 **폴더 URL 을 받지 않는다**(코드리뷰가 잡은 경계):
-    //   이 목록은 업체를 골라 보는 화면이라 AE 가 남의 업체도 열 수 있는데, 응답에 Drive 링크가
-    //   실려 있으면 [자료] 버튼이 곧 담당 밖 폴더 접근 수단이 된다(/tab-folders 는 서버가 막는데
-    //   여기는 열려 있어 같은 불변식이 한쪽만 지켜지던 상태). 담당 여부는 한 쿼리(inad_pm).
-    //   ★ 지우고 조용히 넘기지 않는다 — folderScoped:false 로 **사유를 화면이 말한다**.
-    let rows = own.rows;
-    let folderScoped = true;
-    if (_role(req) === 'staff') {
-      const mine = await svc.staffOwnsAdvertiser({ advertiserId: req.query.advertiserId, staffName: req.admin && req.admin.name });
-      if (!mine) {
-        folderScoped = false;
-        rows = rows.map(r => ({ ...r, folderUrl: null, captureFolderUrl: null, cashReceipt: false, cashReceiptNote: undefined }));
-      }
-    }
-    res.json({ ok: true, items: rows, statsUnavailable: own.statsUnavailable,
-      finishedUnavailable: own.finishedUnavailable, ...(folderScoped ? {} : { folderScoped: false }) });
+    /* ★★ 저장폴더 링크는 **담당(inad_pm) 무관 내부인 전원**(사용자 확정 2026-08-24).
+       종전에는 staff 가 담당 업체가 아니면 이 목록에서 폴더 URL·현영 판정을 비워 보냈는데,
+       **폴더를 실제로 여는 통로(`GET /tab-folders`)는 이미 내부인 전원에게 열려 있어**
+       ("staff는 작업보드 전체 운영 권한이므로 담당 여부와 무관하게 폴더를 연다") 버튼만 흐린
+       반쪽 규칙이었다. 업체 지정·해제를 담당 무관으로 연 것과 같은 자리다.
+       ★ 되돌리려면 `/tab-folders` 의 스코프와 **함께** 좁힌다(한쪽만 좁히면 이 상태로 되돌아온다).
+       ★ 광고주·리뷰어는 이 라우트에 도달하지 못한다(internalMiddleware). */
+    res.json({ ok: true, items: own.rows, statsUnavailable: own.statsUnavailable,
+      finishedUnavailable: own.finishedUnavailable });
   } catch (err) { next(err); }
 });
 
@@ -3058,10 +3051,20 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
   } catch (err) { next(err); }
 });
 
-/* ★★ 줄 정리(은퇴) **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
-   원인이던 탈시트 이관(옛 차수가 검색 명단에 되살아남)은 끝났다. 줄을 내리는 창구는
-   [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
-   ★ 실행부 `sheetlessLedger.retireRows` 는 **중복 정리가 그대로 쓴다** — 지우지 말 것.
+/* ── 🧹 줄 정리(은퇴) HTTP 창구는 제거됐다 (사용자 확정 2026-08-21 / main 2026-08-23) ──
+   ★ 양쪽 갈래에서 각각 같은 결론에 도달해 지웠다 — 되살리지 말 것.
+   왜: 원래 목적(이관 때 되살아난 옛 차수 줄 되돌리기)은 이관이 **자동으로** 처리하고
+   (`sheetlessCutover` → `participants.retireInactiveImportRows`), 그 원인이던 탈시트
+   이관 자체가 끝났다. 사람이 차수를 골라 줄을 내리는 화면·API 는 평시에 쓸 일이 없고,
+   잘못 쓰면 리뷰어의 온전한 구매기록이 붙은 줄을 검색 명단에서 사라지게 한다.
+   ★ 줄을 내리는 창구는 [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
+   ★★ **서비스 함수 `sheetlessLedger.retireRows` 는 남아 있다** — 지우면 안 된다:
+      · `dedupeRows`/`dedupeManual`(♻ 중복 정리)의 실행부
+      · `rowNumbering.cleanupPairedBlanks`(🔢 번호 정리의 짝 빈 줄 정리)
+      즉 지금은 **내부 공용 실행부**일 뿐 사용자 기능이 아니다.
+   ⚠ 잔여 위험(문서화): 이관의 자동 은퇴는 fail-soft 라 실패해도 이관이 진행된다. 그때
+      차수 단위로 되돌릴 창구가 없다(중복 정리는 주문 없는 줄을 조회조차 하지 않는다).
+      그런 사고가 나면 DB 직접 조치 또는 이 창구 재도입을 검토할 것.
    옛 라우트: POST /worktable/retire-rows */
 
 router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -3272,7 +3275,7 @@ router.post('/worktable/hold-rows', authMiddleware, adminOrMasterMiddleware, asy
 });
 
 /* 작업보드 중복 줄 정리 — 2026-08-19 중복 반영 사고 수습용.
-   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 은퇴(retire-rows)와 같은 급.
+   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 되돌리기가 무겁다.
    ★ dryRun 기본 — 먼저 미리보기로 무엇이 지워지고 무엇이 보류되는지 본 뒤 실행한다.
    ★ 입금 회차(대기·완료)에 담긴 줄이 섞인 그룹은 서버가 **건드리지 않고 사유와 함께 보고**한다. */
 router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
