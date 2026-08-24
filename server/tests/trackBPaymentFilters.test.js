@@ -33,30 +33,33 @@ function test(name, fn) {
 test('payment target metadata resolves the work manager from the work order first', () => {
   assert.match(paymentService, /tc\.manager\s+AS\s+"manager"/);
   assert.match(paymentService, /wo\.work_manager\s+AS\s+"orderWorkManager"/);
-  assert.match(paymentService, /wo\.manager_name\s+AS\s+"orderManager"/);
-  assert.match(paymentService, /w\.goods_cost_type,\s*w\.work_manager,\s*w\.manager_name\s+FROM work_orders/);
-  assert.match(paymentService, /resolveWorkManager\(\{[\s\S]{0,120}orderWorkManager:\s*t\.orderWorkManager/);
+  assert.match(paymentService, /w\.goods_cost_type,\s*w\.work_manager\s+FROM work_orders/);
+  assert.match(paymentService, /resolveWorkManager\(\{\s*orderWorkManager:\s*t\.orderWorkManager/);
+  // ★★ 담당AE 실명 칸(`manager_name`)을 **읽지 않는다** — 065 이전 사고 자리(완화 금지).
+  //   (주석에 이름이 나오는 것은 무방하고, 컬럼을 실제로 참조하는 것만 막는다)
+  assert.doesNotMatch(paymentService, /\bw{1,2}\.manager_name\b/);
+  // 닉네임 치환도 `mapWorkManager` 한 곳 — 다른 이름 맵을 끌어오면 AE·관리자 이름이 칩으로 샌다.
+  assert.doesNotMatch(paymentService, /require\(['"][^'"]*adminNickname[^'"]*['"]\)/);
 });
 
-test('the work manager falls back to the tab setting only when the order says nothing', () => {
+test('the work manager comes from 작업담당(065) and falls back to the tab setting only when it says nothing', () => {
   const resolve = require('../src/services/payment.service').resolveWorkManager;
-  const nickMap = { '\uBC15\uC138\uD76C': '\uB9CC\uB450', '\uBC15\uC740\uBE44': '\uB9DD\uACE0' };
-  // 오더가 담당자를 말하면 그 값이 이긴다 — 탭 값은 접수 업서트가 blank-only 라 옛 담당자로 굳는다.
-  assert.deepStrictEqual(resolve({ orderWorkManager: '\uBC15\uC138\uD76C', tabManager: '\uB9DD\uACE0', nickMap }),
+  // 작업담당이 있으면 그 값이 이긴다 — 탭 값은 접수 업서트가 blank-only 라 옛 담당자로 굳는다.
+  assert.deepStrictEqual(resolve({ orderWorkManager: '\uBC15\uC138\uD76C', tabManager: '\uB9DD\uACE0' }),
     { manager: '\uB9CC\uB450', managerSource: 'order' });
-  // 작업담당(065)이 비었거나 랜덤이면 작업 카드가 읽는 칸(manager_name)으로 이어 본다.
-  assert.deepStrictEqual(resolve({ orderWorkManager: '\uB79C\uB364', orderManager: '\uBC15\uC138\uD76C', tabManager: '\uB9DD\uACE0', nickMap }),
-    { manager: '\uB9CC\uB450', managerSource: 'order' });
-  // 닉네임 맵이 비어도 065 매핑으로 같은 결론에 이른다(fail-soft).
-  assert.deepStrictEqual(resolve({ orderManager: '\uBC15\uC740\uBE44', tabManager: '\uB9CC\uB450', nickMap: {} }),
+  // 표기 흔들림('박세희(만두)')도 065 매핑이 흡수한다.
+  assert.deepStrictEqual(resolve({ orderWorkManager: '\uBC15\uC740\uBE44(\uB9DD\uACE0)', tabManager: '' }),
     { manager: '\uB9DD\uACE0', managerSource: 'order' });
-  // 랜덤·미매핑·오더 없음 = 오더가 담당자를 정하지 않은 것 → 탭 설정 폴백.
-  assert.deepStrictEqual(resolve({ orderManager: '\uB79C\uB364', tabManager: '\uB9CC\uB450', nickMap }),
+  // ★ 랜덤·미매핑·오더 없음 = 자동으로 아무나 배정하지 않는다(065) → 그때만 탭 설정 폴백.
+  assert.deepStrictEqual(resolve({ orderWorkManager: '\uB79C\uB364', tabManager: '\uB9CC\uB450' }),
     { manager: '\uB9CC\uB450', managerSource: 'tab' });
-  assert.deepStrictEqual(resolve({ orderManager: '', tabManager: '\uBC15\uC740\uBE44', nickMap }),
+  assert.deepStrictEqual(resolve({ orderWorkManager: '', tabManager: '\uBC15\uC740\uBE44' }),
     { manager: '\uB9DD\uACE0', managerSource: 'tab' });
+  // 탭에 매핑 밖 이름이 있으면 원문 보존(임의 해석 금지).
+  assert.deepStrictEqual(resolve({ orderWorkManager: '', tabManager: '\uAE40\uAD00\uB9AC' }),
+    { manager: '\uAE40\uAD00\uB9AC', managerSource: 'tab' });
   // 둘 다 없으면 '담당자 없음' — 추측하지 않는다.
-  assert.deepStrictEqual(resolve({ orderManager: '', tabManager: '', nickMap }),
+  assert.deepStrictEqual(resolve({ orderWorkManager: '', tabManager: '' }),
     { manager: '', managerSource: null });
 });
 
