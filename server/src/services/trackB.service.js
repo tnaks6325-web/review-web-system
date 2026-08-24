@@ -844,7 +844,7 @@ async function setAdvertiserInadPm({ advertiserId, inadPm = '', by = '' } = {}) 
 // ── 업체(거래처) 삭제 = 소프트 삭제(status='ended') + Track B 소유 매핑 소프트 해제. master/admin 전용(라우트 게이트).
 //   advertisers 는 포털과 공유하는 거래처 원장이라 하드삭제 금지 — 'ended'는 목록 필터(status<>'ended')가
 //   이미 숨김으로 취급하는 설계된 상태(가역: DB에서 status='active' 로 복구 가능). 소유 매핑도 함께 해제해
-//   sheetAssignableByStaff/카운트 등에 잔재가 남지 않게 한다. (Track A·시트 무접촉 — Track B 내부만.)
+//   소유 카운트 등에 잔재가 남지 않게 한다. (Track A·시트 무접촉 — Track B 내부만.)
 async function deleteAdvertiser({ advertiserId, by = '' } = {}) {
   if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
   const db = getPool();
@@ -891,18 +891,11 @@ async function staffOwnsAdvertiser({ advertiserId, staffName } = {}) {
   return rows.length > 0 && String(rows[0].inad_pm || '').trim() === String(staffName).trim();
 }
 
-// ── staff 초기매핑 시트 게이트: 시트가 무소유(전 업체)거나 기존 소유가 전부 자기 담당 업체일 때만
-//    staff가 새 소유를 지정할 수 있다 — 타 AE/업체가 이미 소유한 시트로의 자가 스코프 확장 차단.
-//    (초기매핑=주인 없는 시트에 첫 매핑. 이미 매핑된 시트의 재배치는 admin/master 소관.) ──
-async function sheetAssignableByStaff({ sheetId, staffName } = {}) {
-  if (!sheetId || !String(staffName || '').trim()) return false;
-  const { rows } = await getPool().query(
-    `SELECT COUNT(*)::int AS others
-       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
-      WHERE ac.sheet_id = $1 AND ac.deleted_at IS NULL
-        AND TRIM(COALESCE(a.inad_pm, '')) <> TRIM($2)`, [sheetId, String(staffName).trim()]);
-  return rows.length > 0 && Number(rows[0].others) === 0;
-}
+/* ★★ staff 초기매핑 시트 게이트(`sheetAssignableByStaff`)는 **제거됐다**(사용자 확정 2026-08-24).
+     "타 AE 업체가 이미 소유한 시트로의 자가 스코프 확장 차단"이 존재 이유였는데, 업체 지정 자체가
+     담당 무관으로 열리면서 근거가 사라졌다. ★ 죽은 판정을 남겨 두면 다음 사람이 되살린다 —
+     되살리려면 `POST /api/trackb/ownership` 의 담당 게이트와 **함께** 되살려야 한다(한쪽만 두면
+     "담당 업체인데도 시트 때문에 막히는" 반쪽 규칙이 된다). */
 
 // ── 업체 소유 시트의 전체 탭 나열(소유지정 상세 패널): 시트전체 소유=그 시트 모든 탭, 탭지정 소유=그 탭만.
 //    정렬 = "생성 최신순" 근사: 시스템에 탭 생성시각 원천이 없어 MIN(campaign_participants.first_seen_at)
@@ -5363,7 +5356,6 @@ module.exports = {
   setAdvertiserLinkLoginRequired,
   isRegisteredIntranetAdvertiser,
   staffOwnsAdvertiser,
-  sheetAssignableByStaff,
   intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
   intranetSalesSearch,
   advertiserForTab,

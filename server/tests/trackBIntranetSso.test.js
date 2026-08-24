@@ -6,7 +6,8 @@
  *      실패/연결불가/입력누락 = fail-closed. 공유키 없음(비밀번호 결속).
  *      ★ admin 승격 토큰도 via:'intranet' 격리 유지(/api/trackb/* 전용 — 1.5e).
  *   2. createAdvertiserScoped — staff는 inad_pm=자기 로그인명 강제(타 AE 명의 차단)·중복 409.
- *   3. staffOwnsAdvertiser — inad_pm TRIM 일치만 허용(소유 지정/해제 게이트).
+ *   3. staffOwnsAdvertiser — inad_pm TRIM 일치만 허용(폴더 링크 마스킹·펼치기 게이트).
+ *   3.5 업체 지정·해제는 담당 무관(2026-08-24) — 게이트 2종 부재를 고정한다.
  *   4. scopedActiveTabs forMapping — staff만 전체 개방, advertiser는 무시(스코프 유지 = 교차열람 차단).
  * 실행: node tests/trackBIntranetSso.test.js
  */
@@ -317,16 +318,32 @@ async function run() {
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '' }), false, '3d: 무명 거부');
   console.log('  3. staffOwnsAdvertiser — 자기 담당만 허용(fail-closed) ✓');
 
-  // ═══ 3.5 sheetAssignableByStaff — 타 AE 소유 시트로의 자가 스코프 확장 차단 ═══
-  svc.__setPoolForTest({ async query(sql, vals) {
-    const s = String(sql).replace(/\s+/g, ' ').trim();
-    if (/COUNT\(\*\)::int AS others/.test(s)) return { rows: [{ others: vals[0] === 'S_free' ? 0 : 2 }] };
-    return { rows: [] };
-  } });
-  assert.equal(await svc.sheetAssignableByStaff({ sheetId: 'S_free', staffName: '김수만' }), true, '3.5a: 무소유(또는 전부 자기 소유) 시트 허용');
-  assert.equal(await svc.sheetAssignableByStaff({ sheetId: 'S_taken', staffName: '김수만' }), false, '3.5b: 타 AE/업체 소유 시트 거부');
-  assert.equal(await svc.sheetAssignableByStaff({ sheetId: '', staffName: '김수만' }), false, '3.5c: 인자 누락 거부');
-  console.log('  3.5 sheetAssignableByStaff — staff 자가 스코프 확장 차단 ✓');
+  /* ═══ 3.5 업체 지정·해제는 담당(inad_pm) 무관 — 게이트 2종이 **없다**(사용자 확정 2026-08-24) ═══
+     종전: staff 는 ㉮ 자기 담당 업체에만 ㉯ 남이 안 쓰는 시트에만 지정할 수 있었다.
+     지금: 둘 다 없앴다 — **이관은 이미 담당 무관**이라 "옮기는 건 되는데 처음 지정은 막히는" 비대칭이었고,
+     화면은 전 업체를 보여줘 고르고 나서야 막히는 막다른 길이었다.
+     ★ 되살리려면 **두 게이트를 함께** 되살려야 한다(한쪽만 두면 반쪽 규칙). */
+  {
+    const routes = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
+    const grabRoute = (decl) => {   // 그 라우트 블록만 잘라서 본다(파일 전체를 보면 다른 라우트가 대신 통과시킨다)
+      const i = routes.indexOf(decl);
+      assert.ok(i > 0, '라우트 블록 존재: ' + decl);
+      return routes.slice(i, routes.indexOf("\nrouter.", i + 10));
+    };
+    assert.equal(typeof svc.sheetAssignableByStaff, 'undefined', '3.5a: 시트 선점 게이트 함수가 제거됐다(죽은 판정 부활 금지)');
+    const post = grabRoute("router.post('/ownership',");
+    const del = grabRoute("router.delete('/ownership',");
+    assert.ok(!/sheetAssignableByStaff/.test(post), '3.5b: 지정에 시트 선점 게이트가 없다');
+    assert.ok(!/staffOwnsAdvertiser|_ownershipWriteAllowed/.test(post), '3.5c: 지정에 담당 게이트가 없다');
+    assert.ok(!/staffOwnsAdvertiser|_ownershipWriteAllowed/.test(del), '3.5d: 해제에도 담당 게이트가 없다(지정만 열면 되돌릴 수 없다)');
+    // ★ 광고주·리뷰어는 여전히 막힌다 — 열린 것은 "내부 담당자 사이"뿐이다.
+    for (const decl of ["router.post('/ownership',", "router.delete('/ownership',"]) {
+      assert.ok(/authMiddleware, internalMiddleware/.test(grabRoute(decl)), '3.5e: 내부인 게이트는 그대로 — ' + decl);
+    }
+    // ★ 레거시 시트 전체 소유 펼치기(expand)는 종전 스코프 유지(화면 창구 없는 정리 경로).
+    assert.ok(/_ownershipExpandAllowed/.test(grabRoute("router.post('/ownership/expand',")), '3.5f: 펼치기는 담당 게이트 유지');
+    console.log('  3.5 업체 지정·해제 — 담당 무관(게이트 2종 부재) · 광고주 차단 유지 ✓');
+  }
 
   // ═══ 3.6 createAdvertiserScoped — 동시 생성 레이스(23505) → 409 ═══
   svc.__setPoolForTest({ async query(sql) {

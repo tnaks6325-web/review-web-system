@@ -77,6 +77,7 @@ const DELETE_TABLES = [
   'trackb_settlement_links',
   'trackb_work_order_links',
   'trackb_brand_tab_map',
+  'trackb_tab_brand_managers',   // 136 — 작업별 브랜드 담당자(사용자 확정 2026-08-24: 작업을 지우면 함께 지운다)
   'trackb_cell_colors',
   'trackb_custom_columns',
   'trackb_share_links',
