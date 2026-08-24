@@ -245,6 +245,14 @@ const C = (fileId, extra = {}) => Object.assign({
     }
     ok('후보 SQL 에서 표 별칭을 읽었다', Object.keys(alias).length >= 6, JSON.stringify(alias));
 
+    /* ★★★ **모르는 표는 넘어가면 안 된다** (2026-08-24 Codex 리뷰 · 실측 확인).
+       칸만 대조하고 표를 안 보면, 표 이름을 틀렸을 때 그 별칭의 참조가 통째로 건너뛰어져
+       `bad` 가 빈 채로 통과한다 — PG 는 거절하는데 가드는 초록. 이 가드가 막으려던
+       바로 그 사고(없는 이름으로 배포)를 다른 얼굴로 다시 통과시키는 셈이다. */
+    const unknownTables = [...new Set(Object.values(alias))].filter(t => !cols[t]);
+    ok('★★★ 후보 SQL 이 참조하는 표가 전부 실제로 존재한다', unknownTables.length === 0,
+      '마이그레이션에 없는 표: ' + unknownTables.join(', '));
+
     /* SQL 주석은 걷어낸다 — 주석 속 `rs.review_index_id` 같은 표기가 오탐이 된다. */
     const bare = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
     const bad = [];
