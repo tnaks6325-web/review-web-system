@@ -3253,6 +3253,21 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (_scS.submit_col || _scP.submit_col2) {
       res.statusCols = { submit: _scS.submit_col || null, paid: _scP.submit_col2 || null };
     }
+    /* ★ 그 탭의 '주문자'·'수취인' 칸 헤더명 — [이 셀 편집]이 실제 반영(원장·리뷰내역까지)으로
+       가는 판정의 단일 출처(2026-08-24). 판정은 관리자 주문 편집이 이미 쓰는
+       `orderLedger._fieldToCol`(사본 금지) — 여기서 새 규칙을 만들면 "주문 편집은 이 칸에 쓰는데
+       리뷰내역 반영은 저 칸을 찾는" 드리프트가 생긴다. 값이 없으면(구버전·미감지) 싣지 않는다. */
+    try {
+      const { _fieldToCol } = require('./orderLedger.service');
+      const ordererIdx = _fieldToCol(headers || [], 'orderer');
+      const recipientIdx = _fieldToCol(headers || [], 'recipient');
+      if (ordererIdx >= 0 || recipientIdx >= 0) {
+        res.identityCols = {
+          orderer: ordererIdx >= 0 ? headers[ordererIdx] : null,
+          recipient: recipientIdx >= 0 ? headers[recipientIdx] : null,
+        };
+      }
+    } catch (_) { /* fail-soft — 못 구해도 화면은 종전 오버레이 편집으로 접는다 */ }
     /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
        fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
     res.condition = _cond;   // ★ 위에서 이미 한 번 구했다(호출 2회 금지 — cap 과 값이 갈릴 수 없다)
@@ -3962,6 +3977,69 @@ async function setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by = 'ad
   }
   try { await require('./rowNumbering.service').renumberTab({ sheetId, tabName, by }); } catch (_) { /* 5분 스윕 백스톱 */ }
   return { ok: true, seq: row.seq, value: fmt, via: 'cell' };
+}
+
+/**
+ * 작업표 주문자·수취인 칸 편집 — "리뷰 내역에도 실제 반영" 창구 (2026-08-24).
+ *
+ * ★★ 리뷰어 홈의 이름은 `campaign_participants.row_json`(작업표)이 아니라 `review_index`에서
+ *   온다. 오버레이(`editWorkdeskRow`)는 작업보드 화면만 바꿀 뿐 `review_index`는 건드리지 않아
+ *   그리드에서 이름을 고쳐도 리뷰어 화면은 그대로였다(2026-08-24 실사고 — 타계정 오타 정정 요청).
+ * ★ 구매일자(`setWorkdeskPurchaseDate`)와 완전히 같은 패턴: 주문이 연결된 줄은 **원장을 먼저**
+ *   고치고 `writeOrderToWorktable`(무시트 order-edit 실행부)로 재기록 — 그래야 다음 주문
+ *   재기록이 옛 이름을 도로 덮지 않는다. 원장이 없는 준비 슬롯은 작업표 칸에 직접 기록.
+ * ★ `field='orderer'` = 리뷰 내역 카드가 실제로 보여주는 이름의 원천(대개 '주문자제출' 칸).
+ *   `field='recipient'` = 작업표 '수취인' 칸(review_index.recipient_name — 현재 리뷰어 화면
+ *   어디에도 안 뜨지만, 참고용으로 함께 진짜 반영시킨다). 어느 칸이 어디에 대응하는지는
+ *   `identityCols`(workdeskTab 응답)로 화면에 실어 준다.
+ * ★ 시트 기반 탭은 거부(409) — 시트가 진실원본, 화면은 종전 오버레이 그대로.
+ */
+async function setWorkdeskIdentityField({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
+  if (field !== 'orderer' && field !== 'recipient') return { ok: false, error: 'bad_field' };
+  const text = String(value == null ? '' : value).trim();
+  if (!text) return { ok: false, error: 'empty_value' };
+  const db = getPool();
+
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
+  catch (_) { sheetless = false; }
+  if (!sheetless) return { ok: false, error: 'not_sheetless' };
+
+  const { rows: pr } = await db.query(
+    `SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
+    [rowId, sheetId, tabName]);
+  if (!pr.length) return { ok: false, error: 'row_not_found' };
+  const row = pr[0];
+
+  if (row.order_submission_id) {
+    // 원장 먼저(진실원본) — last_edit_seq 단조증가로 역동기·stale 편집 보호(order-edit 와 동일).
+    const sql = field === 'orderer'
+      ? `UPDATE order_submissions SET orderer = $2, updated_at = NOW(),
+                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+          WHERE id = $1 AND deleted_at IS NULL`
+      : `UPDATE order_submissions SET recipient = $2, updated_at = NOW(),
+                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+          WHERE id = $1 AND deleted_at IS NULL`;
+    const { rowCount } = await db.query(sql, [row.order_submission_id, text, Date.now()]);
+    if (!rowCount) return { ok: false, error: 'order_not_found' };
+    const { rows: full } = await db.query(`SELECT * FROM order_submissions WHERE id = $1`, [row.order_submission_id]);
+    const { _osRowToOrderData } = require('./orderLedger.service');
+    const w = await require('./sheetlessOrder.service').writeOrderToWorktable({
+      sheetId, tabName, tabGid: row.tab_gid || '', sheetRow: row.seq,
+      orderData: _osRowToOrderData(full[0]), orderSubmissionId: row.order_submission_id,
+    });
+    return w && w.ok ? { ok: true, seq: row.seq, value: text, via: 'order' }
+                     : { ok: false, error: (w && w.reason) || 'write_failed', via: 'order' };
+  }
+
+  const r = await require('./sheetlessStatus.service').markSheetlessIdentityName({
+    sheetId, tabName, rowIndex: row.seq, field, name: text, by });
+  if (!r || r.handled === false || !r.ok) {
+    return { ok: false, error: (r && r.reason) || 'write_failed', via: 'cell' };
+  }
+  return { ok: true, seq: row.seq, value: text, via: 'cell' };
 }
 
 /**
@@ -5668,6 +5746,7 @@ module.exports = {
   setWorkdeskPurchaseDate,
   backfillWorkdeskReviewSubmitDate,
   setWorkdeskDepositDate,
+  setWorkdeskIdentityField,
   listCellEdits,
   editWorkdeskRow,
   revertWorkdeskEdit,

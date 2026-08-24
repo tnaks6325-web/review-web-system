@@ -7517,8 +7517,12 @@ function buildGrid(wd){
          ★ 입금 칸은 건드리지 않는다(여러 날짜가 한 칸에 들어가는 등 성격이 달라 종전 정본 복사를 유지). */
       if(statusKind==='review') editv=disp;
       const cellE = canE || (advTrackE && _isTrackingField(field));   // 업체는 송장 칸만 편집 가능
+      /* 주문자·수취인 칸 안내 — 고치면 원장·리뷰 내역까지 실제 반영된다는 것을 미리 알린다
+         (2026-08-24, 모르는 채로 고쳐 예상 밖 결과를 보는 것 방지). */
+      const idKind = (!locked && field.indexOf('col:')===0) ? _identityFieldKind(field.slice(4)) : null;
+      const idHint = idKind ? (idKind==='orderer'?'이 칸은 리뷰어 리뷰 내역 카드 이름의 원천입니다 — 고치면 즉시 반영됩니다 · ':'고치면 수취인 정보에 실제 반영됩니다 · ') : '';
       return cellE
-      ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 [💰 입금수정]으로만 고칩니다(우클릭).'):disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':''}${hist?_ehistMark(r.id,field):''}</td>`
+      ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 [💰 입금수정]으로만 고칩니다(우클릭).'):(idHint+(disp||'')))}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':''}${hist?_ehistMark(r.id,field):''}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
     };
     let tds='';
@@ -8113,19 +8117,33 @@ function _wdDpPick(d){
      바뀐 것은 입력 수단(달력)뿐이다. */
 const _WD_DATE_KEYWORDS = ['구매일', '구매날짜', '구매 날짜', '시작일', '주문일', '배정일', '진행일'];
 function _isPurchaseDateHeader(h){ const t=String(h==null?'':h).trim(); return !!t && _WD_DATE_KEYWORDS.some(k=>t.includes(k)); }
+/* '주문자'·'수취인' 칸 판정 (2026-08-24) — 서버가 workdeskTab 응답에 실어 준 identityCols
+   단일 출처만 본다(사본 금지). 리뷰 내역 카드 이름은 orderer 칸에서 온다 — 그 칸을 고쳐야
+   카드가 바뀐다. recipient 는 참고용으로 함께 실제 반영된다. 값이 없으면(구버전·미감지) null
+   = 종전 오버레이 편집 그대로. */
+function _identityFieldKind(h){
+  const ic=STATE.wd&&STATE.wd.identityCols; if(!ic) return null;
+  const t=String(h==null?'':h).trim(); if(!t) return null;
+  if(ic.orderer && t===ic.orderer) return 'orderer';
+  if(ic.recipient && t===ic.recipient) return 'recipient';
+  return null;
+}
 function beginEditCell(td){
   if(!td||!td.getAttribute||td.querySelector('input')) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
   if(!field||!(field.indexOf('col:')===0||field.indexOf('ccol:')===0)) return;
   if(_workdeskStatusKindForField(field)) return;
   if(field.indexOf('col:')===0 && _isPurchaseDateHeader(field.slice(4))){ openWdDatePicker(td); return; }
+  const idKind = field.indexOf('col:')===0 ? _identityFieldKind(field.slice(4)) : null;
   td.innerHTML=`<input class="einp" value="${esc(cur)}">`;
   const inp=td.querySelector('input'); inp.focus(); inp.select();
   let done=false;
   const restore=()=>{ const r=_gridRowById(rowId); if(r) _paintGridCell(r,field,td); else reloadWorkdesk(); };
   const finish=(nav)=>{ if(done)return; done=true;
     const val=inp.value;
-    if(val===cur) restore(); else commitCellEdit(rowId, field, val, td);   // 무변경=복원 · 변경=즉시반영+백그라운드 저장
+    if(val===cur) restore();
+    else if(idKind) commitIdentityEdit(rowId, field, idKind, val, td);   // 무시트면 원장·리뷰내역까지 실제 반영
+    else commitCellEdit(rowId, field, val, td);   // 무변경=복원 · 변경=즉시반영+백그라운드 저장
     if(nav) _navFromCell(td, nav); };
   const cancel=()=>{ if(done)return; done=true; restore(); };
   inp.addEventListener('blur',()=>finish(null));
@@ -8134,6 +8152,36 @@ function beginEditCell(td){
     else if(e.key==='Tab'){ e.preventDefault(); finish(e.shiftKey?'left':'right'); }
     else if(e.key==='Escape'){ e.preventDefault(); cancel(); }
   });
+}
+/* 주문자·수취인 칸 커밋(2026-08-24) — 무시트면 /workdesk/identity-name 으로 원장·row_json·
+   review_index 까지 실제 반영(리뷰어 리뷰 내역 카드에 즉시 나타난다). 시트 기반 탭은 서버가
+   거부(not_sheetless)하므로 그 경우만 종전 오버레이(commitCellEdit)로 폴백한다. */
+function commitIdentityEdit(rowId, field, kind, value, td){
+  const r=_gridRowById(rowId); if(!r) return;
+  const t=STATE.cur; if(!t) return;
+  const h=field.slice(4); r.cellEdits=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
+  const had=(h in r.cellEdits), prev=r.cellEdits[h];
+  r.cellEdits[h]=value; _paintGridCell(r, field, td);
+  const rollback=()=>{ if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); } };
+  api('/api/trackb/workdesk/identity-name',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field:kind,value})})
+    .then(resp=>{
+      if(resp&&resp.ok){
+        if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
+        toast((kind==='orderer'?'실제 반영됨 — 리뷰어 리뷰 내역 카드에도 즉시 적용됩니다':'실제 반영됨 — 수취인 정보에 저장됩니다')
+          +(resp.via==='order'?' · 주문 원장도 함께 교정':''));
+        reloadWorkdesk();   // '참여자' 열(물리 컬럼)까지 함께 바뀌므로 화면을 다시 받는다
+        return true;
+      }
+      rollback();
+      if(resp&&resp.error==='not_sheetless'){
+        toast('이 작업은 시트 기반이라 시트에서 고쳐야 합니다 — 표시용으로만 저장합니다');
+        commitCellEdit(rowId, field, value, td);   // 오버레이 폴백(시트가 진실원본)
+        return;
+      }
+      toast(resp&&resp.error?('저장 거부: '+resp.error):'저장 실패');
+      return false;
+    })
+    .catch(()=>{ rollback(); toast('저장 실패 — 네트워크'); return false; });
 }
 // 낙관적 커밋: 로컬 즉시 반영 → 백그라운드 저장. 실패 시 (아직 최신 값일 때만) 롤백해 더 새 편집 보호.
 function commitCellEdit(rowId, field, value, td, opt){

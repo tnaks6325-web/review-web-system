@@ -1364,6 +1364,21 @@ router.post('/workdesk/purchase-date', authMiddleware, async (req, res, next) =>
     res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+/* 작업표 '주문자'·'수취인' 칸 편집(무시트 전용) — 2026-08-24: [이 셀 편집]이 원장·리뷰내역까지
+   진짜로 반영한다(구매일자와 같은 패턴). 시트 기반 탭은 409(화면은 종전 오버레이 경로 유지).
+   스코프는 셀 편집과 동일(내부 직원 — 광고주는 field 가 택배송장 열이 아니라 자동 403). */
+router.post('/workdesk/identity-name', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, field, value } = req.body || {};
+    if (!sheetId || !tabName || !rowId || !field || value == null) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field, value 필수' });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field: 'col:' + (field === 'orderer' ? '주문자' : '수취인') });
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.setWorkdeskIdentityField({ sheetId, tabName, rowId, field, value, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
 // 리뷰제출일 백필(무시트 전용 · adminOrMaster) — 외부모집 사후 등록 건처럼 캡처 원장이 없는 줄의
 //   제출 표시를 명시 날짜로 기록한다(입금일 기록과 같은 성격). 증빙 게이트가 있는 [수동 리뷰제출]과 별개.
 router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
