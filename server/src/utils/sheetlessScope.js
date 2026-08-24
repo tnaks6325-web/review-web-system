@@ -60,6 +60,28 @@ const SHEETLESS_TABS_SQL = `
   SELECT sheet_id, tab_name, COALESCE(tab_gid,'') AS tab_gid
     FROM tab_configs WHERE COALESCE(sheetless, FALSE) = TRUE`;
 
+/**
+ * ★★ "주기 감지가 **읽어도 되는** 탭" — 제외목록이 아니라 **허용목록**이다.
+ *
+ * 제외목록(무시트 탭만 빼기)으로는 다음 둘이 새어 나간다. 실제로 밟았다(2026-08-24, #1143 배포 직후:
+ * 무시트 탭은 막혔는데 닫힌 탭 3개에서 19건이 계속 생겼다 — 전부 같은 실제 구글시트였다):
+ *   ㉮ **마감(is_closed) 탭** — sheetless=FALSE 라 무시트 목록에 안 잡힌다. 주문을 받지 않으므로
+ *      사람이 그 시트를 고칠 일이 없고, 고쳐도 반영할 곳이 없다 → 읽을 이유가 없다.
+ *   ㉯ **tab_configs 행이 아예 없는 탭** — 아카이브가 행을 지운다. 제외목록에는 담길 수조차 없는데
+ *      주문(order_submissions)에는 표식이 남아 감지 대상으로 계속 잡힌다.
+ * 위 두 가지는 이 파일의 SWEEP_SKIP_SHEET_IDS_SQL 이 **시트 단위로는 이미 인정**하는 규칙이다
+ * (㉮㉯ 주석 참조). 탭 단위에도 같은 규칙을 준다 — 판정이 시트/탭에서 갈리지 않게.
+ *
+ * ★ 허용목록이라 조회가 실패하면 **아무것도 못 읽는** 상태가 될 수 있다 → 호출부는 실패를 null 로
+ *   받아 "게이트 없음(=종전대로 읽기)"으로 처리해야 한다(fail-open). 여기서는 null 을 돌려준다.
+ * ★ 되살아나는 판정이다 — 마감을 풀거나 무시트를 재연결하면 그 즉시 다시 읽는다.
+ */
+const DETECTABLE_TABS_SQL = `
+  SELECT sheet_id, tab_name, COALESCE(tab_gid,'') AS tab_gid
+    FROM tab_configs
+   WHERE COALESCE(sheetless, FALSE) = FALSE
+     AND COALESCE(is_closed, FALSE) = FALSE`;
+
 /** 복합키 — 리터럴 NUL 금지(git 이 파일을 바이너리로 취급해 grep·가드가 무력화된다) */
 function tabKey(sheetId, tabName) {
   return String(sheetId || '') + '\u0000' + String(tabName || '');
@@ -101,6 +123,29 @@ async function sheetlessTabKeys(db) {
 }
 
 /** 집합에서 탭 판정(이름 → gid 순) */
+/**
+ * 주기 감지가 읽어도 되는 탭 집합(허용목록). 키는 sheetlessTabKeys 와 같은 규칙.
+ * @returns {Promise<Set<string>|null>} 조회 실패면 **null** — 호출부가 fail-open 으로 처리한다.
+ */
+async function detectableTabKeys(db) {
+  const out = new Set();
+  try {
+    const { rows } = await db.query(DETECTABLE_TABS_SQL);
+    for (const r of rows) {
+      out.add(tabKey(r.sheet_id, r.tab_name));
+      if (r.tab_gid) out.add(tabKey(r.sheet_id, 'gid:' + r.tab_gid));
+    }
+  } catch (_) {
+    return null;                       // ★ 빈 Set 이 아니라 null — 빈 Set 이면 전부 차단된다
+  }
+  return out;
+}
+
+/** 키 집합에 이 탭이 있나 — 무시트 목록·허용목록 둘 다 같은 판정을 쓴다(사본 0). */
+function hasTabKey(keys, sheetId, tabName, tabGid) {
+  return isSheetlessTab(keys, sheetId, tabName, tabGid);
+}
+
 function isSheetlessTab(keys, sheetId, tabName, tabGid) {
   if (!keys || !keys.size) return false;
   if (keys.has(tabKey(sheetId, tabName))) return true;
@@ -126,6 +171,9 @@ module.exports = {
   FULLY_SHEETLESS_SHEET_IDS_SQL,
   SWEEP_SKIP_SHEET_IDS_SQL,
   SHEETLESS_TABS_SQL,
+  DETECTABLE_TABS_SQL,
+  detectableTabKeys,
+  hasTabKey,
   tabKey,
   sweepSkipSheetIds,
   sheetlessTabKeys,
