@@ -454,7 +454,8 @@ ok('전사 설정으로 저장·조회된다(브라우저 localStorage 에만 �
     const svc = readS('services/worktable.service.js');
     return /function normalizeSheetId/.test(svc)
       && /templateSheetId: ''/.test(svc)
-      && /next\.templateSheetId = normalizeSheetId\(templateSheetId\)/.test(svc);
+      // ★ 저장은 `_mergeTemplate` 이 만든다(부분 저장 도입으로 이관 — 검사 의미 불변).
+      && /next\.templateSheetId = [\s\S]{0,120}normalizeSheetId\(body\.templateSheetId\)/.test(svc);
   })());
 ok('시트 주소를 붙여넣어도 ID 로 정규화(잘못된 값은 빈 값 — 추측 금지)',
   (() => {

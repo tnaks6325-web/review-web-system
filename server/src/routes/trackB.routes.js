@@ -3387,16 +3387,32 @@ router.post('/worktable/add-blogger', authMiddleware, async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+/* 표준 열 저장 — 8/23 전멸 사고 재발 방지 3종은 서비스가 판정한다(사본 금지).
+   ★★ 거부 사유는 **여기서 400 으로 명시**해야 한다 — 이 경로는 `isAdminApi`(오류 마스킹 예외)
+      목록에 없어서 그냥 throw 하면 `서버 오류가 발생했습니다.` 로 뭉개진다(무엇을 고칠지 모른다).
+   ★ `confirmClear:true` = "정말 비운다"는 사람의 명시 확인. `restore` = 그 시점으로 되돌리기. */
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { saveTemplate } = require('../services/worktable.service');
+    const { saveTemplate, restoreTemplate } = require('../services/worktable.service');
     const b = req.body || {};
-    const data = await saveTemplate({
-      core: b.core, channels: b.channels,
-      customChannels: b.customChannels, workTypes: b.workTypes,
-      templateSheetId: b.templateSheetId, by: _by(req),
-    });
-    res.json({ ok: true, data });
+    try {
+      const data = b.restore
+        ? await restoreTemplate({ at: b.restore, by: _by(req) })
+        : await saveTemplate({
+          core: b.core, channels: b.channels,
+          customChannels: b.customChannels, workTypes: b.workTypes,
+          templateSheetId: b.templateSheetId, by: _by(req),
+          confirmClear: b.confirmClear === true,
+        });
+      res.json({ ok: true, data });
+    } catch (e) {
+      const code = e && e.code;
+      if (code === 'empty_core' || code === 'bad_at' || code === 'not_found') {
+        return res.status(400).json({ ok: false, code, error: e.message, prevCoreCount: e.prevCoreCount });
+      }
+      if (code === 'read_failed') return res.status(503).json({ ok: false, code, error: e.message });
+      throw e;
+    }
   } catch (err) { next(err); }
 });
 
