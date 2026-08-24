@@ -384,7 +384,10 @@ async function run() {
   })());
   ok('★ 광고주 분기가 그 렌즈를 거친다(날것 `_cond` 금지)', (() => {
     const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
-    return /res\.condition = _condAdvertiserLens\(_cond\)/.test(SVC);
+    // ⚠ 2026-08-24: 브랜드 담당자(135)로 렌즈가 세션 종류를 받는다 — 검사 의미는 그대로(날것 금지)
+    //    이고, **브랜드 세션 여부가 토큰에서 온 값으로 전달되는지**까지 함께 고정한다.
+    return /res\.condition = _condAdvertiserLens\(_cond, \{ brandSession: !!brandId \}\)/.test(SVC)
+      && !/res\.condition = _cond;[\s\S]{0,200}role === 'advertiser'/.test(SVC);
   })());
   ok('★ 이미지 URL 은 bare API_BASE 로 만든다(window.API_BASE_URL 은 최상위 const 라 항상 undefined)', (() => {
     const i = src.indexOf('function _rvUrl(');

@@ -173,6 +173,22 @@
   .brdrow .rnm{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .brdrow .rcnt{font-size:11px;color:var(--muted);flex:none}
   .brdempty{font-size:11.5px;color:var(--faint);padding:3px 2px}
+  /* 브랜드 담당자(135) — 작업 행 안의 칩 + 그 아래 인라인 입력줄 */
+  .brdrow .rbm{font-size:11.5px;font-weight:700;background:var(--card2);border:1px solid var(--line);
+       border-radius:7px;padding:2px 8px;cursor:pointer;flex:none;max-width:210px;overflow:hidden;
+       text-overflow:ellipsis;white-space:nowrap}
+  .brdrow .rbm:hover{border-color:var(--accent);color:var(--accent)}
+  .brdrow .rbm.none{color:var(--faint);font-weight:600;border-style:dashed}
+  .brdrow .rbm .sep{color:var(--faint);font-weight:600;margin:0 4px}
+  .bmedit{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px 9px;margin:-2px 0 0;
+       background:var(--card);border:1px solid var(--accent);border-radius:8px}
+  .bmlb{font-size:11px;color:var(--muted);font-weight:700;flex:none}
+  .fldx{display:inline-flex;align-items:center;background:var(--card);border:1px solid var(--line2);
+       border-radius:7px;padding:3px 8px;min-width:148px}
+  .fldx input{border:0;outline:0;font:inherit;font-size:12.5px;width:100%;background:transparent;color:var(--ink)}
+  .fldx:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft,rgba(37,99,235,.12))}
+  .bmhint{font-size:10.5px;color:var(--faint);flex:1;min-width:120px}
+  .btn.xs.pri{background:var(--accent);border-color:var(--accent);color:#fff}
   .tgl{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
   .tgl .sw{width:30px;height:17px;border-radius:999px;background:var(--line2);position:relative;flex:none;transition:background .15s}
   .tgl .sw:after{content:"";position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;top:2px;left:2px;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .15s}
@@ -2451,7 +2467,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
               advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advQ:'', advF:'all',            // 전체 작업 검색어 · 상태 칩(all|run|done) — 화면 전환에도 유지
-              brandNew:null, brandEdit:null, brandOpen:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
+              brandNew:null, brandEdit:null, brandOpen:null, bmEdit:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
               brandId:null, advName:'',       // 094: 브랜드 링크 세션(brand_id 클레임) · 운영사(대행사) 이름(A안 표기)
               advs:[], advCur:null, tabIndex:{}, sheetMap:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
@@ -3259,13 +3275,71 @@ function _brandRowsHtml(b,items,be){
   const mine=(items||[]).filter(it=>it&&it.brandId===b.id);
   if(!mine.length) return `<div class="brdrows"><div class="brdempty">아직 귀속된 작업이 없습니다 — [작업 귀속]에서 선택하세요.</div></div>`;
   return `<div class="brdrows">${mine.map(it=>{
-    const i=_awTabIdx(it), st=_awStatus(it);
+    const i=_awTabIdx(it), st=_awStatus(it), ix=_awItems().indexOf(it);
     return `<div class="brdrow${i>=0?' go':''}"${i>=0?` onclick="selTab(${i})" title="${esc(_tabTip(it))}"`:''}>
       <span class="rdt">${esc(_awDate(it))}</span>
       <span class="rnm">${esc(_tabLabel(it))}</span>
+      ${_bmCell(it,ix)}
       <span class="rcnt">${it.total||0}명 · 제출 ${it.submitted||0}</span>
-      <span class="bb ${st.tone}">${esc(st.label)}</span></div>`;
+      <span class="bb ${st.tone}">${esc(st.label)}</span></div>${_bmEditHtml(it,ix)}`;
   }).join('')}</div>`;
+}
+/* ── 브랜드 담당자(135) — 작업 행마다 인라인 입력(사용자 확정 2026-08-24: 저장 단위 = 작업 하나) ──
+   ★ 값의 단일 출처는 `STATE.advWork.items[].brandManagers`(요약 응답) — 화면이 따로 캐시하지 않는다.
+   ★ onclick 에는 **인덱스만** 넘긴다(작업명·시트ID 는 외부발 문자열 — 보간하면 따옴표 하나로 탈출된다).
+   ★ 행 클릭은 작업 열기라 담당자 칸·입력줄은 stopPropagation 으로 분리한다. */
+function _bmList(it){ return (it&&Array.isArray(it.brandManagers)?it.brandManagers:[]).map(v=>String(v==null?'':v).trim()).filter(Boolean); }
+function _bmCell(it,ix){
+  const m=_bmList(it);
+  return `<span class="rbm${m.length?'':' none'}" onclick="event.stopPropagation();bmEdit(${ix})"
+     title="${m.length?'브랜드사 화면 「담당」 행에 이대로 나갑니다 — 눌러서 수정':'브랜드사 화면에 담당을 표시하려면 눌러서 입력하세요(최대 2명)'}">${
+    m.length?m.map(esc).join('<span class="sep">/</span>'):'＋ 담당자'}</span>`;
+}
+function _bmEditHtml(it,ix){
+  const e=STATE.bmEdit;
+  if(!e||e.ix!==ix) return '';
+  const v=e.names||['',''];
+  return `<div class="bmedit" onclick="event.stopPropagation()">
+    <span class="bmlb">담당자</span>
+    <span class="fldx"><input id="bmq0" value="${esc(v[0]||'')}" maxlength="20" placeholder="예: 박가람 차장"
+      oninput="bmInput(0,this.value)" onkeydown="bmKey(event)" autocomplete="off"></span>
+    <span class="fldx"><input id="bmq1" value="${esc(v[1]||'')}" maxlength="20" placeholder="두 번째 담당자(선택)"
+      oninput="bmInput(1,this.value)" onkeydown="bmKey(event)" autocomplete="off"></span>
+    <button class="btn xs pri" onclick="bmSave()"${e.busy?' disabled':''}>저장</button>
+    <button class="btn xs" onclick="bmClose()">취소</button>
+    ${e.err?`<span class="bnerr">${esc(e.err)}</span>`
+           :'<span class="bmhint">최대 2명 · 라벨 없이 이름만 · 브랜드사 화면 「담당」 행에 이대로 보입니다 · 비우면 그 행을 표시하지 않습니다</span>'}</div>`;
+}
+function bmEdit(ix){
+  const it=_awItems()[ix]; if(!it) return;
+  const m=_bmList(it);
+  STATE.bmEdit={ix,names:[m[0]||'',m[1]||''],err:'',busy:false};
+  _renderAdvBrands();
+  const el=$('#bmq0'); if(el){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(_){ } }
+}
+function bmClose(){ STATE.bmEdit=null; _renderAdvBrands(); }
+function bmInput(i,v){ const e=STATE.bmEdit; if(!e) return; e.names[i]=v; }   // ★ 재렌더 없음(한글 IME 조합 보호)
+function bmKey(ev){
+  if(ev.key==='Enter'){ ev.preventDefault(); bmSave(); }
+  else if(ev.key==='Escape'){ ev.preventDefault(); bmClose(); }
+}
+async function bmSave(){
+  const e=STATE.bmEdit; if(!e||e.busy) return;
+  const it=_awItems()[e.ix]; if(!it) return bmClose();
+  const names=(e.names||[]).map(v=>String(v||'').replace(/\s+/g,' ').trim()).filter(Boolean).slice(0,2);
+  e.busy=true;
+  const r=await api('/api/trackb/brands/tab-manager',{method:'POST',
+    body:JSON.stringify({sheetId:it.sheetId,tabName:it.tabName,names})}).catch(()=>null);
+  e.busy=false;
+  if(!r||!r.ok){
+    e.err=(r&&r.error==='not_ready')?'담당자 기능이 아직 준비되지 않았습니다(잠시 후 다시 시도).'
+         :((r&&r.error)||'저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    _renderAdvBrands(); return;
+  }
+  // ★ 서버가 정규화한 값을 그대로 반영한다(화면이 값을 지어내지 않는다) — 재조회를 기다리지 않는다.
+  it.brandManagers=Array.isArray(r.managers)?r.managers:names;
+  STATE.bmEdit=null; _renderAdvBrands();
+  toast(names.length?`담당자를 저장했습니다 — ${names.join(' / ')}`:'담당자를 지웠습니다 — 브랜드사 화면에 담당 행이 표시되지 않습니다');
 }
 function _brandLinkUrl(tok){ return location.origin+location.pathname.replace(/[^/]*$/,'')+'workdesk.html#adv='+encodeURIComponent(tok||''); }
 function _renderAdvBrands(){
@@ -6133,11 +6207,22 @@ function _condCardHtml(wd,d,m){
          이름을 모를 때 `관리자 관리자` 로 라벨과 값이 겹치지 않게 **라벨만** 적는다. */
     const admHas=(mg.adminNick!=null)||!!String(mg.adminRaw||'').trim();
     const admName=String(mg.adminNick||mg.adminRaw||'').trim();
+    /* 135 — 업체(대행사)가 브랜드사에게 보여주려고 직접 적은 담당자(최대 2명, 라벨 없는 자유입력).
+       ★★ **브랜드사가 보는 화면에서는 내부 담당을 대체한다**(사용자 확정 2026-08-24 A안):
+          서버 렌즈가 브랜드 세션에 ae·admin 을 아예 안 실어 주므로 여기서는 그 값만 그리면 된다.
+          업체가 아무도 안 적었으면 **담당 행 자체를 그리지 않는다**(사용자 확정 Q2 = 행 숨김)
+          — 「—」나 [미설정] 로 두면 브랜드사에게 고칠 수도 없는 빈칸을 보여주는 셈이다.
+       ★ 대행사·내부 화면에서는 내부 담당 **아래 한 줄**로 함께 보여 "브랜드사에게 무엇이 나가는지"
+         를 확인시킨다(사용자 확정 D안) — 같은 행에 섞으면 누가 우리 담당인지 구분이 사라진다. */
+    const bm=(Array.isArray(mg.brand)?mg.brand:[]).map(function(v){return String(v==null?'':v).trim();}).filter(Boolean);
+    const bmHtml=bm.map(esc).join('<span class="sep">/</span>');
+    if(STATE.brandId) return bm.length?`<dt>담당</dt><dd>${bmHtml}</dd>`:'';
     const parts=[];
     if(ae)     parts.push(`<span class="role">AE팀</span>${esc(ae)}`);
     if(admHas) parts.push(admName?`<span class="role">관리자</span>${esc(admName)}`:'관리자');
-    if(!parts.length) return `<dt>담당</dt>${unset('order')}`;
-    return `<dt>담당</dt><dd>${parts.join('<span class="sep">/</span>')}</dd>`;
+    const own=parts.length?`<dt>담당</dt><dd>${parts.join('<span class="sep">/</span>')}</dd>`
+                          :`<dt>담당</dt>${unset('order')}`;
+    return own+(bm.length?`<dt>브랜드사<br>표시</dt><dd title="브랜드사 화면의 「담당」 행에 이대로 나갑니다 — 브랜드 관리에서 작업마다 정합니다.">${bmHtml}</dd>`:'');
   })();
   /* 「일정」 — 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
      ★ 서버가 표에서 파생해 실어 준다(`condition.schedule`) — 화면에서 다시 세지 않는다.
