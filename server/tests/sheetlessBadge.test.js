@@ -126,34 +126,25 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
     });
   }
 
-  /* ══════════════ D. 배지 렌더러는 한 벌 ══════════════ */
-  console.log('\n[D] 무시트 배지 — 렌더러 한 벌 · "모르면 안 그린다"');
+  /* ══════════════ D. 무시트 배지 제거(사용자 확정 2026-08-23) ══════════════ */
+  console.log('\n[D] 「무시트」 배지 — 목록·작업보드·업체관리에서 제거됨');
   {
     const wd = readFe('workdesk.html');
-    const calls = (wd.match(/_nsBadge\(/g) || []).length;
-    ok('★ 배지 렌더러 정의 1 + 호출 3(홈 목록·작업보드 상단·업체관리) = 사본 0', calls === 4);
-    ok('홈 작업목록 줄에 배지를 붙인다', /class="wbl-nm">\$\{esc\(t\.tabName\)\}\$\{_nsBadge\(t\)\}/.test(wd));
-    ok('업체관리 연결탭 표에 배지를 붙인다', /_ovmHl\(t\.tabName,q\)\}\$\{_nsBadge\(t\)\}/.test(wd));
-    ok('작업보드 상단(광고주 제외)에 배지를 붙인다',
-      /STATE\.role==='advertiser'\?'':_nsBadge\(STATE\.cur\)/.test(wd));
-    ok('배지 CSS 는 ns- 접두 신설(남의 클래스와 충돌 없음)', /\.ns-b\{/.test(wd));
-
-    // vm 실행 — 세 상태(true / false / 필드 없음)
-    const m = wd.match(/function _nsBadge\(t\)\{[\s\S]*?\n\}/);
-    assert(m, '_nsBadge 정의를 찾지 못함');
-    // 판정 단일 출처 `_isNoSheet` 도 **구현을 그대로** 넣는다(스텁을 두면 판정 회귀를 여기서 못 본다)
-    const mi = wd.match(/function _isNoSheet\(t\)\{[^\n]*\}/);
-    assert(mi, '_isNoSheet 정의를 찾지 못함');
-    const sandbox = {};
-    vm.createContext(sandbox);
-    vm.runInContext(mi[0] + '\n' + m[0] + '\n;this.__f=_nsBadge;', sandbox);
-    const f = sandbox.__f;
-    ok('sheetless=true → 무시트 배지', /무시트/.test(f({ sheetless: true })));
-    ok('sheetless=false → 아무것도 안 그린다', f({ sheetless: false }) === '');
-    ok('★ 필드 자체가 없으면(구버전 백엔드) 안 그린다 — 모르는 것을 "시트 쓴다"로 단정하지 않는다',
-      f({}) === '' && f(null) === '' && f(undefined) === '');
-    ok('★ true 만 인정한다(문자열 "false"·1 등 느슨한 참 금지)',
-      f({ sheetless: 'false' }) === '' && f({ sheetless: 1 }) === '');
+    /* ★★ 활성 작업이 **전부 무시트**라(본섭 실측: 114 중 113, 나머지 1건은 마감) 모든 줄에
+       붙는 상시 표기가 되어 신호 구실을 못 했다 → 세 화면에서 제거.
+       ★ 되살릴 때는 "무시트면 뜬다"가 아니라 **"시트 기반이면 뜬다"** 로 뒤집을 것 —
+         그래야 희귀 케이스가 눈에 띈다(지금 그 일은 그리드 배지·시트 제목 라벨이 한다). */
+    ok('★ 렌더러·호출 전부 제거(되붙이면 상시 표기로 되돌아간다)',
+      !/_nsBadge/.test(noLineComments(wd).replace(/\/\*[\s\S]*?\*\//g, '')));
+    ok('★ 판정 단일 출처 `_isNoSheet` 는 남는다 — 시트 제목 라벨 숨김·목록·경고가 쓴다',
+      /function _isNoSheet\(t\)\{ return !!\(t && t\.sheetless===true\); \}/.test(wd)
+      && (wd.match(/_isNoSheet\(/g) || []).length >= 8);
+    ok('★ 서버 재료(`sheetless`)는 그대로 — 배지만 뺐지 판정을 없앤 게 아니다',
+      /sheetless/.test(read('src/services/trackB.service.js')));
+    /* ★ `.ns-b` CSS 와 「무시트」 문구는 **탈시트 전환 화면(`_coRows`)** 이 계속 쓴다 —
+       그 화면에서는 "이관됐다/아니다"가 곧 주제라 배지가 신호로 작동한다. */
+    ok('★ 탈시트 전환 화면의 무시트 표시는 남는다(그 화면의 주제다)',
+      /t\.sheetless\?'<span class="ns-b">무시트<\/span>':''/.test(wd) && /\.ns-b\{/.test(wd));
   }
 
   /* ══════════════ E. 공고 카드 — 시트 흔적 0 ══════════════ */

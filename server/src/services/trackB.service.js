@@ -926,6 +926,9 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
             tc.manager, tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl",
+            /* displayName = 화면이 그리는 작업명. 업체관리 연결작업 표와 광고주 화면은 이 응답을 쓰므로,
+               여기 없으면 라벨 함수가 늘 탭 이름으로 접혀 통일이 조용히 무력화된다(코드리뷰 P2). */
+            COALESCE(tc.display_name, '') AS "displayName",
             tc.capture_slots AS "captureSlots", tc.income_type AS "incomeType",
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
@@ -1573,6 +1576,10 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
       const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
       return {
         sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle,
+        // 작업명 — 업체 화면도 목록·헤더가 같은 이름을 쓰게 한다(사용자 확정 2026-08-24).
+        //   ★ 이 렌즈는 **화이트리스트 재구성**이라 명시로 실어야 한다(스프레드가 아니다).
+        //   ★ 빈 값이면 화면이 종전대로 탭 이름으로 접는다(동작 불변). 작업 이름일 뿐 PII 가 아니다.
+        displayName: t.displayName || '',
         // 무시트 여부 — 업체 화면이 시트 제목 라벨을 그릴지 정하는 표시용 불리언(민감정보 아님).
         // 없으면 화면이 종전대로 시트 제목을 그리므로, 이 한 칸이 빠지면 라벨 숨김이 조용히 무력화된다.
         sheetless: t.sheetless === true,
@@ -2600,6 +2607,8 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               review_type_mix AS "reviewTypeMix",
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
+              to_char(window_start,'HH24:MI') AS "windowStart",
+              to_char(window_end,'HH24:MI')   AS "windowEnd",
               status, participation_mode AS "participationMode"
          FROM recruit_campaigns
         WHERE linked_sheet_id = $1
@@ -2724,6 +2733,16 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
       inflowType: (wo && wo.inflowType) || null,
+      /* 구매시간(사용자 확정 2026-08-23) — **실제로 참여를 여닫는 값은 공고 시간창**이다
+         (`computeCampaignState` 가 그것을 본다). 작업오더 `purchase_time` 은 그 발행 프리필
+         원본일 뿐이라, 오더 텍스트만 그리면 "카드는 0~15시인데 실제로는 다른 시간에 열리는"
+         상태가 된다 → 총건수·일건수와 **같은 규율**로 공고 우선·발주 폴백을 화면에 넘긴다.
+         ★ 시간창 개념은 **참여형 공고에만** 있다(레거시는 없음) — 그래서 참여형일 때만 싣는다.
+         ★ 참여형인데 양쪽이 비면 그것이 곧 **자율주문**(종일 open)이다 — 빈 값이 아니라 상태다. */
+      purchaseWindow: (c && c.participationMode && c.windowStart && c.windowEnd)
+        ? { start: c.windowStart, end: c.windowEnd } : null,
+      purchaseAllDay: !!(c && c.participationMode && !c.windowStart && !c.windowEnd),
+      orderPurchaseTime: (wo && String(wo.purchaseTime || '').trim()) || null,
       inflowKeyword: (wo && wo.inflowKeyword) || null,
       multiAccount: c ? { enabled: !!c.multiAccount, dailyLimit: num(c.multiDailyLimit) } : null,
       cashReceipt,
@@ -3159,6 +3178,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     //   업체가 볼 것 = 오늘 몇 명이 채워졌나 / 오늘 몇 명 예정인가. 그 외(공고를 거친 확정 수·
     //   결제 중 홀드·합산 공고 수)는 **내부 운영 수치라 응답에서 폐기**한다 — 광고주 렌즈 규율.
     res.todayProgress = _tpAdvertiserLens(await tabTodayProgress(db, { sheetId, tabName }));
+    /* 작업 조건 카드 — 내부와 **같은 자리·같은 모양**(사용자 확정 2026-08-23). 단 렌즈를 거친다:
+       리뷰비·입금명·다계정·현금영수증·내부 식별자는 응답에서 폐기한다(위 `_condAdvertiserLens`). */
+    res.condition = _condAdvertiserLens(_cond);   // ★ 위에서 이미 구한 값(호출 2회 금지 — cap 과 갈릴 수 없다)
+    if (res.condition) res.condition.schedule = _condSchedule(out, headers);
   }
   return res;
 }
@@ -4811,6 +4834,36 @@ async function tabCampaignsMap({ force = false } = {}) {
  *  ★ `done` 은 화면이 폴백에 쓰는 값이라 **형태는 유지하되 표 기준과 같은 값**으로 둔다 →
  *    "공고를 거쳐 확정된 건 N명 · 차이 M명" 같은 **내부 문구가 애초에 만들어지지 않는다**.
  *  ★ `holds`(결제 중) · `campaignCount`(합산 공고 수)는 0/1 로 눕힌다(운영 정보). */
+/* 작업 조건 — **광고주 렌즈**(사용자 확정 2026-08-23: 업체 뷰어에도 같은 카드를 그린다).
+   ★★ **화이트리스트 재구성**(`{...cd}` 스프레드 금지) — 나중에 `tabConditionSummary` 에 필드가
+      늘어나면 스프레드는 그것을 **조용히 광고주에게 흘린다**(`_tpAdvertiserLens` 와 같은 규율).
+   ★ 내보내는 것 = 사용자가 지정한 10행의 재료뿐.
+   ★ **폐기**: `reviewFee`·`feeSource`·`depositName`(리뷰비·입금명 = 내부 정산 값) ·
+      `multiAccount`·`cashReceipt`·`incomeType`·`slotsPinned`(운영 설정) ·
+      `campaignId`·`workOrderId`·`campaignCount`(내부 식별자 — 화면 창구를 여는 열쇠이기도 하다).
+   ★ null 이면 null 그대로(카드가 종전 4줄로 떨어진다). */
+function _condAdvertiserLens(cd) {
+  if (!cd || typeof cd !== 'object') return cd || null;
+  return {
+    productName: cd.productName || '',
+    productUrl: cd.productUrl || null,
+    schedule: cd.schedule || null,
+    purchaseWindow: cd.purchaseWindow || null,
+    purchaseAllDay: !!cd.purchaseAllDay,
+    orderPurchaseTime: cd.orderPurchaseTime || null,
+    recruitTotal: cd.recruitTotal, recruitTotalSource: cd.recruitTotalSource,
+    orderRecruitCount: cd.orderRecruitCount,
+    dailyLimit: cd.dailyLimit, dailyLimitSource: cd.dailyLimitSource,
+    orderDailyCount: cd.orderDailyCount,
+    payAmount: cd.payAmount, options: Array.isArray(cd.options) ? cd.options : [],
+    channel: cd.channel || null,
+    inflowType: cd.inflowType || null,
+    reviewTypeLabel: cd.reviewTypeLabel || null,
+    reviewTypeMixed: !!cd.reviewTypeMixed,
+    reviewTypeMix: cd.reviewTypeMix || null,
+  };
+}
+
 function _tpAdvertiserLens(tp) {
   if (!tp || typeof tp !== 'object') return tp;
   const filled = (tp.sheetFilled == null) ? null : (Number(tp.sheetFilled) || 0);

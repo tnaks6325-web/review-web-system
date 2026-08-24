@@ -662,6 +662,13 @@ async function syncTabListToDB({ dryRun = true, fromCache = false, allowNewTabs 
         'UPDATE tab_configs SET tab_name = $1, tab_gid = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
         [r.newTabName, r.tabGid, r.sheetId, r.oldTabName]
       );
+      // 모집공고 연결 탭 이름도 따라간다(2026-08-24) — indexBuilder 의 같은 자리와 **같은 함수**.
+      {
+        const { renameCampaignLinkedTab } = require('../utils/campaignTabLateral');
+        const n = await renameCampaignLinkedTab(client, {
+          sheetId: r.sheetId, oldTabName: r.oldTabName, newTabName: r.newTabName, tabGid: r.tabGid });
+        if (n) logger.info(`[syncTabListToDB] 공고 연결 탭 이름 보정 ${n}건: "${r.oldTabName}" → "${r.newTabName}"`);
+      }
       // URL 교정
       const correctUrl = `https://docs.google.com/spreadsheets/d/${r.sheetId}/edit`;
       await client.query(

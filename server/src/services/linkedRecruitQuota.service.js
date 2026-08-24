@@ -324,7 +324,17 @@ async function assertCampaignRecruitTotal({ campaignId, recruitTotal }) {
   } finally { client.release(); }
 }
 
-async function syncCampaignRecruitTotal({ campaignId, recruitTotal }) {
+/**
+ * ★★ `skipWorktable` = "이번 저장에서 총정원이 한 명도 안 바뀌었다"는 호출자의 확언.
+ *   그때는 작업보드 슬롯 맞추기를 건너뛴다 — 초과 상태(채워진 줄 > 정원)인 작업은
+ *   목표가 그대로여도 delta.retire 가 잡혀 `worktableSlotDelta`/빈 슬롯 부족 두 겹에서
+ *   throw 하고, 그 throw 가 공고 저장 맨 끝에 있어 **저장은 이미 커밋됐는데 화면엔 실패**로
+ *   보였다(2026-08-24 실측 13개 작업). ★ 줄이려는 조작은 종전대로 막는다(호출자가 값이
+ *   달라졌을 때만 이 플래그를 끄므로 게이트는 그대로 산다). ★ 역방향 링크 백필
+ *   (`work_orders.linked_campaign_id`)은 **건너뛰지 않는다** — 그것까지 빠지면 연결이
+ *   조용히 비는 별개 사고가 된다.
+ */
+async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktable = false }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -337,7 +347,9 @@ async function syncCampaignRecruitTotal({ campaignId, recruitTotal }) {
       `UPDATE work_orders SET linked_campaign_id=$2, recruit_count=$3, updated_at=NOW() WHERE id=$1`,
       [order.id, campaignId, total]
     );
-    const worktable = await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
+    const worktable = skipWorktable
+      ? { synced: false, reason: 'quota_unchanged' }
+      : await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
     await client.query('COMMIT');
     return { linked: true, workOrderId: order.id, recruitTotal: total, worktable: await rebuildWorktableProjection(worktable, 'campaign-quota-sync') };
   } catch (err) {

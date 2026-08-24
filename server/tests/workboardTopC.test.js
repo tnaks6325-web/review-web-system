@@ -62,7 +62,7 @@ t('★ 구매채널은 서버가 URL 로 추측하지 않는다(판정 단일 �
   !/coupang|smartstore|naver\.com/i.test(cond));
 t('★ 어떤 실패에도 throw 하지 않는다 — null 을 돌려주고 화면이 사유를 말한다',
   /catch \(e\)[\s\S]*return null;/.test(cond));
-t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광고주 미노출)', (() => {
+t('② condition 은 두 갈래 모두 같은 호출 1회를 재사용한다(cap 과 갈릴 수 없다)', (() => {
   /* ⚠ 2026-08-24: 총건수 초과 표시가 들어오며 `tabConditionSummary` 를 **루프 뒤 한 번** 부르고
      그 결과를 재사용하게 됐다(호출 2회면 cap 과 조건 카드가 갈릴 수 있다). 검사 의미는 그대로 —
      "condition 은 showEdits 안에서만 응답에 실린다" + 이제 **호출 1회**까지 함께 고정한다. */
@@ -76,13 +76,16 @@ t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광�
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
   const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
                              svc.indexOf("else if (role === 'advertiser') {") + 900);
+  /* ★★ 2026-08-23 사용자 확정: 업체 뷰어에도 같은 카드를 그린다 — 광고주 분기에도 `condition` 이
+     실리되 **반드시 `_condAdvertiserLens` 를 거쳐야** 한다(리뷰비·입금명·내부 식별자 폐기).
+     날것(`= _cond`)으로 실으면 그 순간 전부 샌다. */
+  if (!/res\.condition = _condAdvertiserLens\(_cond\)/.test(advBlock)) return false;
+  if (/res\.condition = _cond;/.test(advBlock)) return false;
   /* `res.condition` 이 몇 번 나오든(일정 등 파생 필드가 붙는다) **전부 showEdits 블록 안**이어야 한다.
      개수로 고정하면 필드가 늘 때마다 무관한 가드가 조용히 빨개진다. */
   const blockStart = svc.lastIndexOf('if (showEdits) {', i);
   const advStart = svc.indexOf("else if (role === 'advertiser') {");
-  const all = []; for (let k = svc.indexOf('res.condition'); k >= 0; k = svc.indexOf('res.condition', k + 1)) all.push(k);
-  return /if \(showEdits\) \{/.test(before) && !/res\.condition/.test(advBlock)
-    && all.length > 0 && all.every(k => k > blockStart && k < advStart);
+  return /if \(showEdits\) \{/.test(before) && blockStart > 0 && advStart > blockStart;
 })());
 t('★ 쓰기 쿼리 0 — 조건 요약은 읽기 전용', !/INSERT|UPDATE|DELETE/i.test(cond));
 
@@ -141,10 +144,13 @@ t('★ 정산은 별도 칸이 아니라 진행 현황 하단 구역 — #setlCe
   /class="setlin\$\{STATE\.settleOpen\?' open':''\}" id="setlCell" onclick="toggleSettleDetail\(\)"/.test(wd)
   && !/tp3col setl/.test(wd)
   && /\$\('#setlCell \.setlsummary'\)/.test(wd));
-t('★ 광고주 화면은 종전 4줄(.tp3kv) 그대로 — 10항목 조건표는 내부 전용', (() => {
+/* ★★ 작업 조건 카드는 **내부·업체 한 벌**(사용자 확정 2026-08-23) — 종전에는 광고주만 4줄 요약을
+   따로 그려 두 화면이 계속 어긋났다. 무엇을 보여줄지는 **서버 렌즈**가 정하고, 화면이 광고주에게
+   따로 하는 일은 셋뿐: 10행만 그린다 · [미설정] 대신 「—」 · 발주 줄을 안 그린다. */
+t('★ 작업 조건 카드는 내부·업체 한 벌(광고주 전용 4줄 사본 0)', (() => {
   const m = fnBody(wd, 'function summaryStrip(wd,d,m,c){');
-  return /isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건<\/div><dl class="tp3kv">/.test(m)
-    && /: _condCardHtml\(wd,d,m\)/.test(m);
+  return /const cond=_condCardHtml\(wd,d,m\);/.test(m)
+    && !/isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건/.test(m);
 })());
 /* ⚠ 2026-08-19 사용자 확정: 진행 현황 폭을 작업 조건과 같게 맞추면서 2줄 배치의 근거
    (절반 폭 → 막대 26px)가 사라졌다. 게이지는 내부·광고주 **한 벌**로 되돌린다. */
@@ -232,8 +238,49 @@ t('★ 모르는 유입값은 강제 분류하지 않고 원문(오표기 금지
 t('★ 일건수 = wd.todayProgress.quota(공고 기준 칩) — 재계산 사본 0, 못 받으면 종전 폴백',
   /wd\.todayProgress\.quota!=null\)/.test(cc) && /공고 기준<\/span>/.test(cc)
   && /n\(cd\.dailyLimit\)==null\?null/.test(cc));
-t('★ 상품명 앞 [상품/옵션/금액] 라벨 제거(표시만 — 원본 무접촉)',
-  /replace\(\/\^\\s\*\\\[상품\\\/옵션\\\/금액\\\]\\s\*\/,''\)/.test(cc));
+/* ★★ 상품명은 **표시만** 다듬는다(원본 `condition.productName` 무접촉).
+   원문이 `[상품/옵션/금액]\n1. 곰도리 … (https://…)` 형태(본섭 실측)라 라벨만 벗기면
+   **목록 번호 `1. ` 가 맨 앞에 남는다**(사용자 신고 2026-08-23).
+   ⚠ 점 뒤 공백을 요구하지 않으면 `1.5L 생수` 같은 상품명의 앞이 잘려 나간다. */
+{
+  const vm = require('vm');
+  const m = cc.match(/const prod=String\([\s\S]*?;\n/);
+  t('★ 상품명 정리 코드가 있다', !!m);
+  const sb = { out: null };
+  vm.createContext(sb);
+  vm.runInContext('this.f=function(cd,d,m){' + m[0] + 'return prod;};', sb);
+  const f = (name) => sb.f({ productName: name }, {}, {});
+  t('★ [상품/옵션/금액] 라벨 제거(표시만 — 원본 무접촉)',
+    f('[상품/옵션/금액]\n곰도리 온열안대') === '곰도리 온열안대');
+  t('★ 목록 번호 `1. ` 제거 — 라벨 뒤에 붙어 오는 실제 형태',
+    f('[상품/옵션/금액]\n1. 곰도리 케어 플러스 아로마 온열안대') === '곰도리 케어 플러스 아로마 온열안대',
+    JSON.stringify(f('[상품/옵션/금액]\n1. 곰도리 케어 플러스 아로마 온열안대')));
+  t('★ 라벨 없이 번호만 있어도 제거', f('2. 위프 탈취제') === '위프 탈취제');
+  t('⚠ 소수점 상품명은 자르지 않는다(점 뒤 공백 필수)',
+    f('1.5L 생수 2개입') === '1.5L 생수 2개입', JSON.stringify(f('1.5L 생수 2개입')));
+  t('★ 번호가 없는 원문([시트참조])은 그대로', (() => {
+    const v = f('[상품/옵션/금액]\n[시트참조]\n모집인원 40명');
+    return v.startsWith('[시트참조]');
+  })());
+  t('★ 뒤쪽 번호는 건드리지 않는다(첫 줄 앞머리만)',
+    f('1. A\n2. B').indexOf('2. B') > 0);
+  /* ★★ URL 꼬리·금액 꼬리도 자른다(사용자 확정 2026-08-23) — 둘 다 **카드의 다른 행이 이미
+     말하는 값**이라(메인URL · 결제금액 · 총건수) 작업명에 다시 붙으면 이름이 안 보인다.
+     ⚠ 줄 단위로만 자를 것 — `[\s\S]*$` 로 자르면 여러 상품 줄에서 2번째부터가 통째로 사라진다. */
+  t('★ URL 꼬리 + 결제금액/인원/소계 꼬리를 자른다(사용자 신고 원문)', (() => {
+    const v = f('[상품/옵션/금액]\n1. 웰스앤헬스 천기 약도라지 삼백초캔디 목캔디, 1박스, 152g'
+      + ' (https://www.coupang.com/vp/products/9659949648?vendorItemId=95810751872)'
+      + ' - 결제금액 15,900원 / 500명 / 소계 7,950,000');
+    return v === '웰스앤헬스 천기 약도라지 삼백초캔디 목캔디, 1박스, 152g';
+  })(), JSON.stringify(f('[상품/옵션/금액]\n1. X (https://a.b/c) - 결제금액 1원 / 2명')));
+  t('★ URL 없이 금액 꼬리만 있어도 자른다', f('A상품 - 결제금액 1,000원 / 5명') === 'A상품');
+  t('⚠ 여러 상품 줄에서 2번째 줄이 사라지지 않는다(줄 단위로만 자른다)', (() => {
+    const v = f('1. A상품 (https://x.co/1) - 결제금액 1,000원 / 5명\n2. B상품 (https://x.co/2) - 결제금액 2,000원');
+    return /A상품/.test(v) && /B상품/.test(v);
+  })());
+  t('★ 상품명 속 하이픈은 자르지 않는다(`- 결제금액` 조합만)',
+    f('A-B 프리미엄 세트') === 'A-B 프리미엄 세트');
+}
 
 // 접기/펼치기 — 세 박스 일괄 + 하단선 일치
 t('★ 머리줄 3곳(작업조건 정상·폴백 / 진행현황 / 미리보기) 전부 _topToggle 로 수렴', (() => {
@@ -331,8 +378,9 @@ t('★★ 입금명 순서 = 공고 → 탭(입금관리 campMemo→tabMemo 와 
    창구가 열리는 항목만 눌린다. 창구가 없으면 평범한 텍스트(죽은 버튼 금지). */
 /* ★ 존재 검사만 하면 **함수 첫 줄에 early return 을 넣은 변이**를 놓친다(실측) —
    게이트 호출이 곧바로 오는지(= 판정을 실제로 거치는지) 형태로 고정한다. */
+/* ⚠ 광고주 갈래가 앞에 한 줄 붙었다(창구 없음 → 평범한 텍스트) — 내부 동작은 그대로다. */
 t('★ 값이 있는 항목도 창구가 있으면 누를 수 있다(모양은 검은 글씨 그대로)',
-  /const val=\(html,kind\)=>\{\s*\n?\s*const g=_cndFixGate\(cd,kind\);/.test(cc)
+  /const val=\(html,kind\)=>\{[\s\S]{0,140}?const g=_cndFixGate\(cd,kind\);/.test(cc)
   && /class="cndval"[^`]*onclick="_cndFix\('\$\{kind\}'\)"/.test(cc)
   && /: `<dd>\$\{html\}<\/dd>`/.test(cc)
   && /\.cndval\{[^}]*color:var\(--ink\)/.test(wd));
@@ -549,10 +597,51 @@ t('★ 화면은 서버 값을 그리기만 한다 — 총건수 위에 일정 �
 })());
 t('③ 값이 없으면 [미설정] 버튼이 아니라 「—」(고칠 창구가 없는 죽은 버튼 금지)', (() => {
   const m = fnBody(wd, 'function _condCardHtml(');
-  const i = m.indexOf('const schedRow='), j = m.indexOf('const rows=[', i);
-  const blk = m.slice(i, j);
+  /* ⚠ 슬라이스 끝을 `const rows=[` 로 두면 그 사이에 새 행(구매시간 등)이 들어올 때
+     그쪽의 `unset(...)` 이 걸려 조용히 빨개진다 — **바로 다음 선언**까지만 자른다. */
+  const i = m.indexOf('const schedRow='), j = m.indexOf('const timeRow=', i);
+  const blk = m.slice(i, j > i ? j : m.indexOf('const rows=[', i));
   return /cnna/.test(blk) && !/unset\(/.test(blk);
 })());
+
+console.log('\n── J. 구매시간 행(사용자 확정 2026-08-23) ──');
+/* ★★ **실제로 참여를 여닫는 값은 공고 시간창**(`computeCampaignState`)이고 작업오더
+   `purchase_time` 은 그 발행 프리필 원본일 뿐이다. 오더 텍스트만 그리면 "카드는 0~15시인데
+   실제로는 다른 시간에 열리는" 상태가 된다 → 총건수·일건수와 같은 규율(공고 우선·발주 폴백). */
+t('★ 서버가 공고 시간창을 싣는다(쿼리 순증 0 — 기존 캠페인 SELECT 에 2컬럼)',
+  /to_char\(window_start,'HH24:MI'\) AS "windowStart"/.test(cond)
+  && /to_char\(window_end,'HH24:MI'\)\s+AS "windowEnd"/.test(cond)
+  && /purchaseWindow:/.test(cond) && /orderPurchaseTime:/.test(cond));
+t('★ 시간창 개념은 참여형 공고에만 있다 — 레거시에는 싣지 않는다',
+  /purchaseWindow: \(c && c\.participationMode && c\.windowStart && c\.windowEnd\)/.test(cond)
+  && /purchaseAllDay: !!\(c && c\.participationMode && !c\.windowStart && !c\.windowEnd\)/.test(cond));
+t('★ 구매시간 행은 일정 바로 아래', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return m.indexOf("['@time'") > m.indexOf("['@sched'")
+    && m.indexOf("['@time'") < m.indexOf("['총건수'")
+    && /k==='@time'\?timeRow/.test(m);
+})());
+{
+  const vm = require('vm');
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf('const timeRow='), j = m.indexOf('const rows=[', i);
+  const sb = { esc: s => String(s == null ? '' : s), unset: () => '<dd><button class="cndset">미설정</button></dd>' };
+  vm.createContext(sb);
+  vm.runInContext('this.f=function(cd){' + m.slice(i, j) + 'return timeRow;};', sb);
+  const f = sb.f;
+  t('★ 공고 시간창이 있으면 그것(공고 기준 칩)',
+    /00:00.*15:00/.test(f({ purchaseWindow: { start: '00:00', end: '15:00' } }))
+    && /공고 기준/.test(f({ purchaseWindow: { start: '00:00', end: '15:00' } })));
+  t('★ 참여형인데 시간창이 비면 **자율주문**(빈 값이 아니라 상태)',
+    /자율/.test(f({ purchaseAllDay: true })) && /공고 기준/.test(f({ purchaseAllDay: true })));
+  t('★ 공고 값이 없으면 발주 원문 + 발주 기준 칩',
+    /0시 ~ 15시/.test(f({ orderPurchaseTime: '0시 ~ 15시', campaignId: 'c1' }))
+    && /발주 기준/.test(f({ orderPurchaseTime: '0시 ~ 15시', campaignId: 'c1' })));
+  t('★ 공고가 없으면 출처 칩을 붙이지 않는다(대조할 기준이 없다)',
+    !/발주 기준/.test(f({ orderPurchaseTime: '자율' })));
+  t('★ 둘 다 없으면 [미설정] — 작업오더 수정 창구가 있다',
+    /cndset/.test(f({})));
+}
 
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));

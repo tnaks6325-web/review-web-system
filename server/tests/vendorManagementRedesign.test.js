@@ -366,7 +366,7 @@ async function run() {
   {
     const sb = { STATE: { ownSettle: { 'S\tT1': { totalCost: 100, paidAmount: 40 }, 'S\tT2': { totalCost: 100, paidAmount: 100 } } },
       parseTabMeta: () => ({}) };
-    vm.createContext(sb); vm.runInContext(grab('_ownBrand'), sb); vm.runInContext(grab('_ovmRowMatch'), sb);
+    vm.createContext(sb); vm.runInContext(grab('_ownBrand'), sb); vm.runInContext(grab('_tabLabel'), sb); vm.runInContext(grab('_ovmRowMatch'), sb);
     const m = (t2, f) => vm.runInContext('_ovmRowMatch', sb)(t2, f, '');
     t('미매칭 필터', m({ sheetId: 'S', tabName: 'T1', salesId: null }, 'nomatch') === true
       && m({ sheetId: 'S', tabName: 'T1', salesId: 'X' }, 'nomatch') === false);

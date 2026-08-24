@@ -75,7 +75,7 @@ assert.ok(!/^[\w가-힣]/.test(W_FAV), 'W_FAV가 평범한 문자로 시작하�
 //   이 파일의 그룹핑 검증과 같은 코드로 확인되게(스텁을 두면 구현이 바뀌어도 테스트가 통과한다).
 // ★ 작업바 정렬(모집중 먼저, 2026-08-10)로 _wGroups/_renderTabList 이 갖게 된 의존 —
 //   구현이 아니라 **실제 함수**를 함께 뜯어 온다(스텁을 두면 정렬 규칙이 여기서만 딴판이 된다).
-const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_isNoSheet','_syncWbScrollMeter','_bindWheelScroll','isFinished','_campRank','_wRecruiting','_wTabRecruiting','_wTabPending','_wTabRank','_wSegTip'];
+const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_isNoSheet','_syncWbScrollMeter','_bindWheelScroll','isFinished','_campRank','_wRecruiting','_wTabRecruiting','_wTabPending','_wTabRank','_wSegTip','_tabLabel','_tabTip','_tabSearchText'];
 const bodies = WANT.map(name => {
   const re = new RegExp('\\n(?:async )?function ' + name.replace(/[$]/g,'\\$') + '\\s*\\(', 'g');
   const m = re.exec(script);
@@ -465,29 +465,22 @@ t('33. 1단 렌더: 업체 칩에만 별표(미지정·★즐겨찾기 그룹엔
   assert.ok(/class="seg advfav/.test(html), '즐겨찾기 업체 칩 강조 클래스 누락');
 });
 
-// ── 8) 선택 작업의 소속 시트 표기 ─────────────────────────────
-t('34. _curSheetLabel: 선택 작업의 시트제목을 본문 헤더용으로 반환', () => {
-  reset();
-  STATE.cur = STATE.tabs[0];
-  const out = F._curSheetLabel();
-  assert.ok(/로스터A/.test(out), '시트제목 누락: ' + out);
-  assert.ok(/mhsheet/.test(out));
+// ── 8) 선택 작업의 소속 시트 표기 — 제거됨 ────────────────────
+/* ⚠ `_curSheetLabel`(📄 시트 제목 칩)은 제거됐다(사용자 확정 2026-08-23) —
+   「무시트」·그리드 모드·「원본: 시트」 배지에 이은 시트 표기 정리의 마지막.
+   활성 작업이 전부 무시트라 이 칩도 사실상 안 뜨고 있었다.
+   ★ 다시 만든다면 "무시트면 숨김"이 아니라 **"시트 기반이면 표시"** 여야 한다
+     (반대로 만들면 또 상시 표기가 된다). 판정 `_isNoSheet` 는 그대로 남아 있다. */
+t('34. _curSheetLabel 은 제거됐다(되붙이면 상시 표기로 되돌아간다)', () => {
+  assert.strictEqual(typeof F._curSheetLabel, 'undefined');
+  assert.ok(!/mhsheet/.test(HTML.replace(/\/\*[\s\S]*?\*\//g, '')), 'CSS 흔적이 남아 있다');
 });
 
-t('35. _curSheetLabel: 제목이 없으면 sheetMap 폴백, 그래도 모르면 표기 생략', () => {
-  reset();
-  STATE.cur = { sheetId:'S2', tabName:'물티슈 80건' };            // spreadsheetTitle 없음
-  assert.ok(/로스터B/.test(F._curSheetLabel()), 'sheetMap 폴백 실패');
-  STATE.cur = { sheetId:'UNKNOWN', tabName:'x' };                  // 제목 모름 → 시트ID뿐
-  assert.strictEqual(F._curSheetLabel(), '', '의미 없는 시트ID를 그대로 노출하면 안 됨');
-  STATE.cur = null;
-  assert.strictEqual(F._curSheetLabel(), '');
-});
-
-t('36. _curSheetLabel: 시트제목 XSS 이스케이프', () => {
-  reset();
-  STATE.cur = { sheetId:'X', tabName:'t', spreadsheetTitle:'<img src=x onerror=alert(1)>' };
-  assert.ok(!/<img/.test(F._curSheetLabel()), 'XSS 통로');
+t('35. _isNoSheet 판정은 남는다 — 목록 4곳·경고·리허설 안내문이 쓴다', () => {
+  assert.strictEqual(typeof F._isNoSheet, 'function');
+  assert.strictEqual(F._isNoSheet({ sheetless: true }), true);
+  assert.strictEqual(F._isNoSheet({ sheetless: false }), false);
+  assert.strictEqual(F._isNoSheet(null), false);
 });
 
 // ── 9) 휠 → 좌우 스크롤 ───────────────────────────────────────
