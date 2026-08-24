@@ -203,6 +203,63 @@ const C = (fileId, extra = {}) => Object.assign({
   }
 
 
+  console.log('\n[L] ★★★ 후보 SQL 의 표·칸이 실제로 존재하는가 (2026-08-24 실사고)');
+  {
+    /* ⚠ **왜 이 검사가 필요한가**: 이 파일의 다른 검사는 전부 **스텁 pool** 을 쓴다.
+       스텁은 SQL 을 해석하지 않으므로 `campaign_participants.row_index` 처럼 **없는 칸**을
+       적어도 전부 초록이었다 — 그래서 A종류 자동 청소가 배포 뒤 본섭에서 매번
+       `column cp.row_index does not exist` 로 죽고 있었다(실측). 크론은 오류를 삼켜
+       조용히 아무 일도 안 했고, 화면 창구는 "서버 오류"만 돌려줬다.
+       ★ 진짜 PG 없이도 잡는다 — 마이그레이션에서 표의 칸 목록을 읽어 **정적으로 대조**한다. */
+    const migDir = path.join(__dirname, '..', 'migrations');
+    const migSql = fs.readdirSync(migDir).filter(f => f.endsWith('.sql')).sort()
+      .map(f => fs.readFileSync(path.join(migDir, f), 'utf8')).join('\n');
+
+    /** 표별 칸 목록 — CREATE TABLE + 이후 ALTER TABLE ... ADD COLUMN 까지 모은다. */
+    const cols = {};
+    let m;
+    const reCreate = /CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\(([\s\S]*?)\n\);/g;
+    while ((m = reCreate.exec(migSql))) {
+      const set = cols[m[1]] || (cols[m[1]] = new Set());
+      m[2].split('\n').map(x => x.trim()).forEach(line => {
+        const c = /^(\w+)\s+[A-Za-z]/.exec(line);
+        if (c && !/^(PRIMARY|UNIQUE|FOREIGN|CONSTRAINT|CHECK)$/i.test(c[1])) set.add(c[1]);
+      });
+    }
+    /* ⚠ `ALTER TABLE t ADD COLUMN a …, ADD COLUMN b …;` 한 문장에 여러 칸이 붙는 형태가 있다
+       (047 이 그렇다). 첫 칸만 읽으면 나머지가 "없는 칸"으로 잘못 잡힌다 — 실제로 `active` 에서
+       거짓 경보가 났다. **문장 전체를 잡아 그 안의 ADD COLUMN 을 모두** 읽는다. */
+    const reAlterStmt = /ALTER TABLE (?:IF EXISTS )?(\w+)([\s\S]*?);/gi;
+    while ((m = reAlterStmt.exec(migSql))) {
+      const set = cols[m[1]] || (cols[m[1]] = new Set());
+      let c; const reAdd = /ADD COLUMN (?:IF NOT EXISTS )?(\w+)/gi;
+      while ((c = reAdd.exec(m[2]))) set.add(c[1]);
+    }
+
+    const sql = S.__candidateSqlForTest();
+    /* 별칭 → 표 이름 (FROM/JOIN 뒤의 `표 별칭`) */
+    const alias = {};
+    const reAlias = /\b(?:FROM|JOIN)\s+(\w+)\s+(\w+)\b/g;
+    while ((m = reAlias.exec(sql))) {
+      if (!/^(WHERE|ON|AND|OR|SELECT|GROUP|ORDER|LIMIT)$/i.test(m[2])) alias[m[2]] = m[1];
+    }
+    ok('후보 SQL 에서 표 별칭을 읽었다', Object.keys(alias).length >= 6, JSON.stringify(alias));
+
+    /* SQL 주석은 걷어낸다 — 주석 속 `rs.review_index_id` 같은 표기가 오탐이 된다. */
+    const bare = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const bad = [];
+    const reRef = /\b(\w+)\.(\w+)\b/g;
+    while ((m = reRef.exec(bare))) {
+      const t = alias[m[1]];
+      if (!t || !cols[t]) continue;              // 모르는 표는 판정하지 않는다
+      if (!cols[t].has(m[2])) bad.push(`${m[1]}.${m[2]} (= ${t}.${m[2]})`);
+    }
+    ok('★★★ 후보 SQL 이 참조하는 칸이 전부 실제로 존재한다', bad.length === 0,
+      '없는 칸: ' + [...new Set(bad)].join(', '));
+    ok('★ 작업표 줄 제외는 seq 로 잇는다(campaign_participants 에 row_index 는 없다)',
+      /cp\.seq = rs\.row_index/.test(sql));
+  }
+
   console.log('\n[K] ★★★ Codex 리뷰 3종 (2026-08-24) — 전부 실측 확인 후 수정');
   {
     /* K-1 (P1) 아카이브된 차수를 "행이 사라졌다"로 읽으면 정상 리뷰 이미지를 지운다.
