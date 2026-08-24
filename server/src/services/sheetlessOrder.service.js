@@ -88,6 +88,55 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
 }
 
 /**
+ * 이 구매(orderData.dateStr)가 탭에 연결된 작업오더의 모집 일정을 벗어났는지 판정한다.
+ * ★★ 오직 **초과 접수(빈 슬롯 없음 → appendSlot)** 판정에만 쓴다 — 같은 날 초과는 여전히
+ *   받는다(2026-08-24 「전보미」 실측: 20건 오더 정원이 그날 안에 다 찼는데 21번째가 결제까지
+ *   끝낸 정상 초과였다면 받아야 한다). 거부 대상은 **날짜가 넘어간** 뒷북 접수뿐이다 —
+ *   이미 끝난 날짜의 작업표에 다음 날 구매가 섞여 들어가는 사고(같은 실측: 21번 행만 8/21).
+ * ★ 범위는 `worktablePlan.distributeDates` 로 **다시 계산**한다(작업표 생성 때와 같은 함수 —
+ *   판정 사본 0). 이미 표에 적힌 날짜값을 근거로 삼지 않는다 — 과거 초과 접수로 오염됐을 수 있다
+ *   (그 값을 기준으로 삼으면 한 번 새면 다음도 새는 자기강화 버그가 된다).
+ * ★★ fail-open — 연결된 작업오더가 없거나(참여형 공고 전용 탭 등) 일정을 모르면(시작일 미상)
+ *   판정하지 않는다(막지 않는다). 구매일을 못 읽어도 마찬가지 — "모르면 막지 않는다"는
+ *   이 파일 전체의 규율(appendSlot 도입 사유와 같다)과 같은 원칙이다.
+ */
+async function _isPastOrderWindow(client, { sheetId, tabName, dateStr }) {
+  if (!dateStr) return false;
+  try {
+    const { workOrderForTabSql } = require('../utils/workOrderLink');
+    const sql = workOrderForTabSql(['recruit_count', 'daily_count', 'start_date', 'skip_weekends', 'holidays']);
+    const { rows } = await client.query(sql, [sheetId, tabName]);
+    if (!rows.length) return false;
+    const wo = rows[0];
+
+    let holidays = [];
+    try {
+      const parsed = Array.isArray(wo.holidays) ? wo.holidays
+        : (typeof wo.holidays === 'string' && wo.holidays.trim() ? JSON.parse(wo.holidays) : []);
+      holidays = Array.isArray(parsed) ? parsed : [];
+    } catch (_) { holidays = []; }
+
+    const { distributeDates } = require('../utils/worktablePlan');
+    const { days } = distributeDates({
+      total: wo.recruit_count, daily: wo.daily_count, startDate: wo.start_date,
+      skipWeekends: wo.skip_weekends === false || wo.skip_weekends === 'false' ? false : true,
+      holidays,
+    });
+    if (!days.length) return false;                          // 일정 미상 — 판정 불가
+    const windowEnd = days[days.length - 1].date;             // 'YYYY-MM-DD' — 오더가 도는 마지막 날
+
+    const { parseDateColumn } = require('../utils/koreanDate');
+    const anchor = { y: parseInt(windowEnd.slice(0, 4), 10), m: parseInt(windowEnd.slice(5, 7), 10) };
+    const [iso] = parseDateColumn([dateStr], { fallbackAnchor: anchor });
+    if (!iso) return false;                                   // 구매일을 못 읽으면 판정하지 않는다
+    return iso > windowEnd;
+  } catch (e) {
+    logger.warn(`[sheetlessOrder] 모집 일정 범위 판정 실패(막지 않음): ${e.message}`);
+    return false;                                             // fail-open
+  }
+}
+
+/**
  * 무시트 탭의 주문을 작업표에 기록하고 장부를 다시 만든다.
  *
  * @param {object} o
@@ -252,6 +301,16 @@ async function writeOrderToWorktable({
         if (!tc.length || !tc[0].sheetless) {
           await client.query('ROLLBACK');
           return { ok: false, reason: 'no_open_slot' };
+        }
+        /* ★★ 정원 초과 접수 자체는 막지 않는다(확정된 주문은 줄이 있어야 한다) — 다만
+           그 초과가 **오더 일정을 넘어간 날짜**(뒷북)면 이 표에 붙이지 않는다. 주문은
+           원장에 이미 살아 있으므로(위 createOrderLedgerEntry) 돈을 잃지 않는다 — 여기서
+           거부되면 관제가 수동으로 확인한다(다른 append 실패 사유와 같은 경로). */
+        if (await _isPastOrderWindow(client, { sheetId, tabName, dateStr: orderData.dateStr })) {
+          await client.query('ROLLBACK');
+          logger.warn(`[sheetlessOrder] 모집 일정 이후 날짜의 초과 접수 거부 tab=${tabName} ` +
+            `dateStr=${orderData.dateStr} os=${orderSubmissionId}`);
+          return { ok: false, reason: 'overage_past_order_window' };
         }
         const appended = await require('./participants.service').appendSlot(client, {
           sheetId, tabName, tabGid: gid || null, by: 'sheetless-order-append',
@@ -561,5 +620,6 @@ module.exports = {
   reconcileCampaignWorktableLinks,
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,
+  _isPastOrderWindow,
   __setPoolForTest,
 };
