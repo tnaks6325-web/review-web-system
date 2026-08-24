@@ -1890,6 +1890,21 @@
 .pmtable td.num,.pmtable th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pmtable td.dim{color:var(--t3,#8B94A1);font-size:11.5px}
 .pmtable tr.off{opacity:.45}
+/* ── 작업 그룹 머리줄 — 같은 작업의 반복 값을 한 줄로 올린다(줄마다 되풀이 금지) ── */
+.pmtable tr.pmhide{display:none}
+.pmtable tr.pmgrp>td{background:#F3F6FB;border-top:2px solid #D9E1EC;padding:6px 9px!important}
+.pmtable tr.pmgrp:hover>td{background:#EEF3FB}
+.pmgrph{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+.pmgrph .sp{flex:1;min-width:8px}
+.pmgrph .nm{font-size:12px;font-weight:800;color:var(--t1,#1B2432);max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pmgrph .n{font-size:11px;color:var(--t3,#8B94A1);flex:0 0 auto}
+.pmgrph .pmgk{font-size:10px;color:var(--t3,#8B94A1)}
+.pmgrph .pmgsel{font-size:11px;color:var(--t2,#5C6B80);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.pmgrph .pmgsel.dim{color:var(--t3,#8B94A1)}
+.pmfold{flex:0 0 auto;width:18px;height:18px;line-height:1;border:1px solid var(--line,#D9E1EC);border-radius:5px;
+  background:#fff;color:var(--t2,#5C6B80);font-size:10px;cursor:pointer;padding:0}
+.pmfold:hover{background:#EAF1FF}
+.pmtable td.pmdim{padding-left:0;padding-right:0}
 .pmb{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;white-space:nowrap}
 .pmb.kb{background:#E0EDFF;color:#1B4F9C} .pmb.hn{background:#E5F3EE;color:#127A5E}
 .pmb.no{background:#FAE9E7;color:#B3382E} .pmb.ok{background:#E5F3EE;color:#127A5E}
@@ -10383,26 +10398,74 @@ function _pmRender(){
 
 function _pmTargetTable(items){
   if(!items.length) return `<div class="empty">입금할 건이 없습니다.</div>`;
+  /* ★★ 같은 작업의 줄이 이어질 때 **작업·이체은행·통장표시·보류 사유를 줄마다 되풀이하지 않는다**
+       (사용자 확정 2026-08-24) — 50건짜리 작업이면 같은 글자가 50번 반복돼 정작 줄마다 다른 값
+       (리뷰어·금액·계좌)이 묻힌다. 작업이 바뀌는 자리에 **그룹 머리줄**을 한 줄 넣고,
+       그 작업에서 **모든 줄이 같은 값인 칸만** 머리줄로 올린다.
+     ★ 값이 하나라도 다르면 그 칸은 종전대로 줄마다 그린다(정보 손실 0 — 조용히 숨기지 않는다).
+     ★ 접기는 **표시 전용** — 접어도 체크 상태·다운로드 대상은 그대로다(머리줄이 선택 건수를 말한다).
+     ★ 그룹 판정은 `_pmWorkKey` 단일 출처(작업 선택 패널·필터와 같은 키). */
+  const groups=[];
+  for(const it of items){
+    const key=_pmWorkKey(it);
+    const last=groups[groups.length-1];
+    if(last && last.key===key) last.items.push(it);
+    else groups.push({ key, label:it.tabLabel, items:[it] });
+  }
+  STATE.pmGroups = groups.map(g=>g.key);          // 접기 토글이 참조(인덱스 → 키)
+  const fold = STATE.pmFold || (STATE.pmFold={});
+  // 그 작업의 모든 줄이 같은 값일 때만 그 값을 돌려준다(다르면 null = 줄마다 그린다)
+  const same=(g,f)=>{ const v=f(g.items[0]); return g.items.every(x=>f(x)===v) ? v : null; };
+
   // ★ onclick 에는 **배열 인덱스만** 넘긴다 — 탭명·리뷰어명은 시트에서 온 외부 문자열이라
   //   문자열로 보간하면 따옴표 하나로 탈출된다(HTML 속성은 엔티티 디코드 후 JS 로 파싱되므로
   //   `&#39;` 치환으로는 못 막는다 — 레포에서 실측된 XSS 와 같은 자리).
-  const rows = items.map(it=>{
-    const idx=(STATE.pmItems||[]).indexOf(it);
-    const on=_pmOn(it);
-    const badge = it.payable
-      ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
-      : `<span class="pmb no">보류</span>`;
-    const why = it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
-    // 그 행의 사유 중 화면에서 고칠 수 있는 것이 하나라도 있을 때만 버튼을 만든다
-    // (눌러도 아무 일 없는 버튼 금지 — 못 고치는 사유는 상단 안내 카드가 설명한다)
-    const fixable = (it.issues||[]).some(i => PAY_FIX_KIND[i] === 'work'
-      || (PAY_FIX_KIND[i] === 'account' && it.accountRef && it.accountRef.reviewerId));
-    const memoFixable = !it.transferMemo;
-    const fixBtn = fixable ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
-    return `<tr class="${on?'':'off'}">
+  const bankBadge = it => it.payable
+    ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
+    : `<span class="pmb no">보류</span>`;
+  const whyText = it => it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
+  // 그 줄의 사유 중 화면에서 고칠 수 있는 것이 하나라도 있을 때만 버튼을 만든다
+  // (눌러도 아무 일 없는 버튼 금지 — 못 고치는 사유는 위 안내 카드가 설명한다)
+  const isFixable = it => (it.issues||[]).some(i => PAY_FIX_KIND[i] === 'work'
+    || (PAY_FIX_KIND[i] === 'account' && it.accountRef && it.accountRef.reviewerId));
+  const memoCell = (it, idx) => esc(it.transferMemo||'') || (!it.transferMemo
+    ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>');
+
+  const body = groups.map((g,i)=>{
+    const hidden = !!fold[g.key];
+    const bankSig = same(g, it => it.payable ? (it.bank+'|'+(it.bankAuto?'a':'m')) : 'hold');
+    const memoSig = same(g, it => String(it.transferMemo||''));
+    const whySig  = same(g, it => whyText(it)+'|'+(isFixable(it)?'1':'0'));
+    const idx = (STATE.pmItems||[]).indexOf(g.items[0]);   // 머리줄 버튼이 가리키는 = 그 작업의 첫 줄
+                                                          // (작업 단위 값이라 어느 줄로 열어도 같은 팝업)
+    const picked  = g.items.filter(_pmOn).length;
+    const payable = g.items.filter(it=>it.payable).length;
+    const sum     = g.items.filter(_pmOn).reduce((a,c)=>a+(Number(c.amount)||0),0);
+
+    // 머리줄 — 작업명 + 건수 + (그 작업에서 값이 같은 칸들) + 선택 현황
+    const chips=[];
+    if(bankSig!==null) chips.push(bankBadge(g.items[0]));
+    if(memoSig!==null) chips.push(`<span class="pmgk">통장표시</span>${memoCell(g.items[0], idx)}`);
+    if(whySig!==null && whyText(g.items[0])) chips.push(
+      `<span class="pmwarn">${esc(whyText(g.items[0]))}</span>${isFixable(g.items[0])?`<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>`:''}`);
+    const head = `<tr class="pmgrp" data-pgh="${i}"><td colspan="11"><div class="pmgrph">`
+      + `<button class="pmfold" type="button" title="접기/펼치기" onclick="_pmFoldWork(${i})">${hidden?'▸':'▾'}</button>`
+      + `<b class="nm" title="${esc(g.label||'')}">${esc(g.label||'')}</b>`
+      + `<span class="n">${g.items.length}건</span>`
+      + chips.join('')
+      + `<span class="sp"></span>`
+      + (payable?`<span class="pmgsel">선택 ${picked}/${payable}건 · ${_pmNum(sum)}원</span>`:`<span class="pmgsel dim">이체 대상 없음</span>`)
+      + `</div></td></tr>`;
+
+    const rows = g.items.map(it=>{
+      const idx=(STATE.pmItems||[]).indexOf(it);
+      const on=_pmOn(it);
+      const why = whyText(it);
+      const fixBtn = isFixable(it) ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
+      return `<tr class="${on?'':'off'}${hidden?' pmhide':''}" data-pg="${i}">
       <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`:'—'}</td>
-      <td>${esc(it.tabLabel)}</td>
-      <td>${badge}</td>
+      <td class="pmdim"></td>
+      <td>${bankSig!==null?'':bankBadge(it)}</td>
       <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
         it.accountSource==='order'?`<span class="pmauto"${_pmAcctSrcTip(it)}>양식계좌</span>`:''}</td>
       <td>${esc(it.startDate)}</td>
@@ -10412,14 +10475,29 @@ function _pmTargetTable(items){
       <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${it.reviewFee
         ? _pmNum(it.reviewFee)
         : `<button class="btn sm" title="리뷰비가 없어 상품비만 이체됩니다 — 눌러서 설정" onclick="_pmRowMemo(${idx})">0</button>`}</td>
-      <td>${esc(it.transferMemo||'') || (memoFixable
-        ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>')}</td>
-      <td class="pmwarn">${esc(why)} ${fixBtn}</td></tr>`;
+      <td>${memoSig!==null?'':memoCell(it, idx)}</td>
+      <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>`;
+    }).join('');
+    return head+rows;
   }).join('');
+
   return `<div class="lgwrap"><table class="lgtable pmtable">
     <thead><tr><th>☑</th><th>작업</th><th>이체은행</th><th>리뷰어</th><th>구매일</th><th>은행/계좌</th><th>예금주</th>
       <th class="num">이체금액</th><th class="num">상품비+리뷰비</th><th>통장표시</th><th>보류 사유</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <tbody>${body}</tbody></table></div>`;
+}
+
+/** 작업 그룹 접기/펼치기 — **표시 전용**(체크 상태·다운로드 대상 무접촉)
+ *  ★ 전체 재렌더 대신 그 그룹 줄만 감춘다(보던 스크롤 자리를 잃지 않게)
+ *  ★ 인자는 그룹 인덱스(외부 문자열 보간 금지) */
+function _pmFoldWork(i){
+  const key=(STATE.pmGroups||[])[i]; if(!key) return;
+  const fold=STATE.pmFold||(STATE.pmFold={});
+  if(fold[key]) delete fold[key]; else fold[key]=true;
+  const on=!!fold[key];
+  const tbl=document.querySelector('#pmbody .pmtable'); if(!tbl) return;
+  tbl.querySelectorAll('tr[data-pg="'+i+'"]').forEach(tr=>{ tr.classList.toggle('pmhide', on); });
+  const h=tbl.querySelector('tr.pmgrp[data-pgh="'+i+'"] .pmfold'); if(h) h.textContent = on?'▸':'▾';
 }
 
 function _pmBatchResult(b){
