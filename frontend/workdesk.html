@@ -15523,6 +15523,7 @@ const _HIDE_ROW_ERRORS={
   final_plan_date_invalid:'마지막 진행일의 날짜 형식을 해석하지 못했습니다. [📅 인원]에서 계획 날짜를 확인해 주세요.',
   worktable_date_column_not_found:'작업표에서 구매일자 칸을 찾지 못했습니다. 열 이름(구매일자 등)을 확인해 주세요.',
   removed_row_date_invalid:'이 행의 구매일자를 해석하지 못했습니다. 날짜 값을 확인한 뒤 다시 시도해 주세요.',
+  replacement_slot_failed:'보충할 빈 자리의 번호를 정하지 못했습니다(동시에 여러 작업이 몰렸을 수 있습니다). 잠시 후 다시 시도해 주세요.',
 };
 function _hideRowErrorText(r){
   const code=(r&&(r.error||r.code))||'';
