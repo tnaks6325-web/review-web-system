@@ -2462,12 +2462,24 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
 
 async function boot(){
   _applyVwMode();   // 로그인 화면부터 상한 적용(셸 렌더 전에도 body[data-vw] 세팅 — 스위치는 셸에서 다시 동기화)
-  // 광고주 전용 접속 링크(#adv=<token>) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
-  const advm=(location.hash||'').match(/[#&]adv=([^&]+)/);
+  // 광고주 전용 접속 링크(#a=<token>, 구 #adv=) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
+  //   ★★ A안(사용자 확정 2026-08-24): 교환 뒤에도 **해시를 지우지 않는다**. 지우면 주소창·히스토리·북마크에
+  //     남는 것이 열쇠 없는 `/workdesk` 라 재방문·새 탭·재전달이 전부 "문구 없는 로그인 화면"이 됐다(실측 신고).
+  //     이 링크는 **주소 자체가 열쇠**라 주소창에 남는 것이 새로운 노출이 아니다(유출 대비 = 회전/폐기).
+  //     ★ 대신 logout 이 해시를 지운다 — 안 지우면 로그아웃 직후 boot 이 다시 교환해 **로그아웃이 안 된다**.
+  //   ★ 짧은 키 `#a=` 우선, 이미 뿌린 `#adv=` 링크도 계속 받는다(하위호환 — 폴백 제거 금지).
+  //     정규식 `[#&]a=` 는 `#adv=` 를 매칭하지 않는다(a 다음이 = 여야 한다) — 두 키가 서로를 삼키지 않는다.
+  const advm=(location.hash||'').match(/[#&]a=([^&]+)/)||(location.hash||'').match(/[#&]adv=([^&]+)/);
   if(advm){ let t=null; try{ t=decodeURIComponent(advm[1]); }catch(_){ }
-    try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
-    if(t){ const r=await fetch(API_BASE+'/api/trackb/advertiser-link-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(x=>x.json()).catch(()=>null);
-      if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token', r.token); }
+    // ★ 주소가 깨져 토큰을 못 읽으면 **문구 없는 로그인 화면으로 흘리지 않는다**(조용한 실패 금지).
+    if(!t) return renderLogin('접속 링크 주소가 깨졌습니다. 담당자에게 링크를 다시 받아주세요.');
+    // ★ 해시가 남으므로 새로고침마다 교환이 돈다 — **같은 토큰으로 만든 세션이 아직 살아 있으면 건너뛴다**
+    //   (교환 라우트 레이트리밋 30/분 보호 + 재진입 지연 제거). 다른 업체·브랜드 링크는 토큰이 달라 정상 전환.
+    const _me0=token()?parseJwt(token()):null, _alive=!!(_me0&&_me0.exp&&_me0.exp*1000>Date.now());
+    let _last=null; try{ _last=sessionStorage.getItem('adv_link_tok'); }catch(_){ }
+    if(!(_alive && _last===t)){
+      const r=await fetch(API_BASE+'/api/trackb/advertiser-link-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(x=>x.json()).catch(()=>null);
+      if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token', r.token); try{ sessionStorage.setItem('adv_link_tok', t); }catch(_){ } }
       else return renderLogin('접속 링크가 유효하지 않거나 폐기되었습니다. 담당자에게 문의하세요.'); } }
   if (!token()) {
     if (await tryTestAutoLogin()) return boot();
@@ -2598,6 +2610,10 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){ sessionStorage.removeItem('admin_token');
+  // ★★ 접속 링크 세션은 **주소에 남은 해시가 곧 열쇠**다(A안). 여기서 지우지 않으면 바로 이어지는
+  //   boot() 이 그 토큰을 다시 교환해 **로그아웃이 되지 않는다**(공용 PC에서 다음 사람이 그대로 입장).
+  try{ sessionStorage.removeItem('adv_link_tok'); }catch(_){ }
+  try{ if(location.hash) history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
   // 역할 전환 재로그인 대비 메모리 잔재 정리
   // ★ 교체요청 목록(re)에는 **리뷰어 실명·연락처**가 들어 있다 — 역할이 바뀌어도 남아 있으면
   //   다음 사람이 그 화면을 열 때 이전 계정의 담당 범위가 잠깐 그려진다(서버 응답 전 stale 렌더).
@@ -2742,7 +2758,7 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
 //   업체관리에서 작업을 열면 작업보드로 화면이 통째로 바뀌는데 히스토리에 아무것도 안 쌓여
 //   뒤로가기가 리뷰웹시스템[3버전]을 벗어나(또는 아무 반응 없이) 버렸다. 뷰·연 작업·선택 업체를
 //   history state 로 쌓아 뒤로/앞으로가 화면 전환을 되짚게 한다.
-// ★ URL 은 건드리지 않는다(같은 URL 로도 pushState 는 별개 항목을 만든다) — #sso=/#adv=/#go=
+// ★ URL 은 건드리지 않는다(같은 URL 로도 pushState 는 별개 항목을 만든다) — #sso=/#a=/#adv=/#go=
 //   프래그먼트 계약과 충돌하지 않고, 주소를 공유해도 딥링크·PII 가 새지 않는다.
 // ★ 되살리는 것은 "어느 화면·어느 작업"까지. 그리드 필터·숨김열 같은 표 상태는 탭 전환 시
 //   초기화되는 클라이언트 상태라 복원 대상이 아니다(selTab 의 기존 계약 유지).
@@ -2780,7 +2796,9 @@ function _navSame(a,b){
 function _navPush(){
   if(_navLock) return;
   try{
-    const e=_navEntry(), url=location.pathname+location.search;
+    // ★ 해시까지 포함해 **지금 URL 그대로** 다시 쓴다 — 빼면 화면을 한 번만 전환해도 주소창의
+    //   `#a=<접속링크 토큰>` 이 증발해 재방문이 다시 막힌다(A안이 무의미해진다).
+    const e=_navEntry(), url=location.pathname+location.search+location.hash;
     if(!_navBooted){ _navBooted=true; history.replaceState(e,'',url); return; }
     if(_navSame(e, history.state)) { history.replaceState(e,'',url); return; }   // 같은 화면 재진입 = 항목 낭비 금지
     history.pushState(e,'',url);
@@ -15696,7 +15714,7 @@ async function createAdvertiser(){
 }
 // ── 광고주 전용 접속 링크(매직 링크) — master/admin 만. 광고주는 이 링크만 열면 로그인 없이
 //   이 업체 뷰(소유 탭·마스킹·읽기전용)로 진입. 유출 대비 회전/폐기 가능. 링크 CRUD = /api/trackb/advertiser-link. ──
-function _advLinkUrl(token){ return location.origin + '/workdesk#adv=' + encodeURIComponent(token); }
+function _advLinkUrl(token){ return location.origin + '/workdesk#a=' + encodeURIComponent(token); }
 function _advLinkHtml(a){
   // ★ 게이트 = 서버 /advertiser-link(internalMiddleware) 와 1:1 — AE 포함(2026-08-19 사용자 확정).
   //   여기를 admin 으로 좁히면 개요 표의 [🔗 링크복사]가 안내하는 [다시 활성]·[회전]에 갈 곳이 없다.
