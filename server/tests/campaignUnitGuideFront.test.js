@@ -14,6 +14,8 @@
  *  H. 자동점검은 **경고 전용**(게시를 막지 않는다) — 혼합 라벨 + 부분 가이드 고지
  *  I. 화면 계약(CSS) — 접힘/펼침 · 행 아래 항상 보이는 안내줄(.rf-ug-cta) · 옵션 없는 상품 그룹의 옵션명 잠금
  *  J. 안내줄 실행 검증(2026-08-24) — 형제로 붙는다 · 채워지면 "설정됨"으로 문구가 바뀐다 · 눌러야 펼쳐진다
+ *  L. 2차 확대(2026-08-24 "버튼이 너무 좁아" 신고) — 안내줄·패널을 canonical 3칸보다 크게,
+ *     글은 위·사진은 아래로 쌓는다 · compact-main 의 58px !important 캐스케이드를 이긴다
  *
  * ★ 정적 grep 이 아니라 **함수를 vm 으로 꺼내 가짜 DOM 위에서 실제 실행**한다 —
  *   "선택 단위를 존중하는가"·"가이드가 왕복하는가"는 문자열 검사로는 못 본다.
@@ -452,6 +454,58 @@ console.log('\n[K] 배선 — 값 주입은 DOM 에 붙은 뒤 · onclick 문자
   ok('이 가드 파일에도 리터럴 NUL 없음',
     fs.readFileSync(__filename, 'utf8').indexOf(NUL) < 0);
 }
+
+/* ══════════════ L. 2차 확대(2026-08-24 "버튼이 너무 좁아" 신고) ══════════════
+   안내줄·패널이 좁아 클릭 대상·입력 영역이 답답했다는 신고로, canonical 3칸(유입/리뷰/특이,
+   58px로 나란히 좁게 배치)보다 크게 키운다: 안내줄 글자·여백 확대, 패널은 글을 위·사진을
+   아래로 쌓고(옆으로 눕힌 58px 판형 폐기), 썸네일도 키운다. 옵션 행 아래는 폭 제약이 없어
+   canonical 3칸을 건드리지 않고도 이렇게 할 수 있다(사본 0 — 셀렉터로만 갈라진다). */
+console.log('\n[L] 2차 확대 — 안내줄·패널이 canonical 3칸보다 크다 · 58px 캐스케이드를 이긴다');
+{
+  ok('안내줄 글자·여백이 커졌다(.62rem·4px 8px → .74rem·9px 11px)',
+    /\.rf-unit>\.rf-ug-cta\{[^}]*padding:9px 11px[^}]*font-size:\.74rem/.test(modalSrc) &&
+    !/\.rf-unit>\.rf-ug-cta\{[^}]*font-size:\.62rem/.test(modalSrc));
+  ok('안내줄 아이콘·라벨도 커졌다', /\.rf-ug-cta-ic\{flex:none;font-size:\.92rem\}/.test(modalSrc) &&
+    /\.rf-ug-cta-tx\{[^}]*font-size:\.76rem\}/.test(modalSrc));
+  // ★ 패널이 열려도 canonical 3칸(유입/리뷰/특이)의 좁은 58px 판형은 절대 안 건드린다
+  //   (사본을 두지 않고 .rf-unit>.rf-ug 로만 갈랐다는 것을 회귀로 고정)
+  ok('canonical 3칸의 58px !important 규칙은 그대로 남아 있다(무회귀)',
+    /\.rf-compact-main \.work-compose textarea,[^{]*\{[^}]*height:58px!important/.test(modalSrc) &&
+    /\.rf-compact-main \.ig-strip\{height:58px!important/.test(modalSrc));
+  ok('패널은 글 위 · 사진 아래로 쌓는다(옆으로 눕힌 58px 판형 폐기)',
+    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap\{display:flex;flex-direction:column/.test(modalSrc));
+  ok('종전의 좁은 58px 옆배치 규칙(.rf-ug 단독 스코프)은 사라졌다(사본 부활 금지)',
+    !/#recruitModal \.rf-ug \.ig-wrap>textarea\.rform-input,#recruitModal \.rf-ug \.ig-strip\{height:58px/.test(modalSrc));
+  // ★★ compact-main 의 두 58px !important 규칙(텍스트영역·스트립)을 이겨야 한다 — 특이성이
+  //    같으면 파일 순서에 좌우된다(위 CTA 특이성 사고와 같은 함정). !important + 더 높은
+  //    특이성(.rf-compact-main .rf-unit>.rf-ug …)으로 순서 무관하게 이기는지 고정한다.
+  ok('텍스트영역 폭을 !important 로 되찾는다(더 높은 특이성)',
+    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap>textarea\.rform-input\{[^}]*height:64px!important/.test(modalSrc));
+  ok('스트립도 !important 로 전체 폭을 되찾는다(더 높은 특이성)',
+    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-strip\{[^}]*width:100%!important[^}]*min-height:78px!important/.test(modalSrc));
+  {
+    // 두 규칙 모두 compact-main 의 규칙보다 특이성이 높다 — `.rf-compact-main .rf-unit>.rf-ug`
+    // 접두가 없는 순간 `.rf-compact-main .ig-strip`/`.work-compose textarea` 와 동률로 떨어져
+    // 파일 순서에 기댄다(실측으로 이미 한 번 밟은 함정과 같은 계열).
+    const stripRule = /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-strip\{[^}]*\}/.exec(modalSrc);
+    const taRule = /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap>textarea\.rform-input\{[^}]*\}/.exec(modalSrc);
+    ok('그 두 규칙은 순서에 기대지 않을 만큼 특이성이 높다(.rf-compact-main .rf-unit> 접두)',
+      !!stripRule && !!taRule);
+  }
+  ok('빈 상태 버튼 글자도 커졌다(canonical 3칸과 다른 자리)',
+    /\.rf-unit>\.rf-ug \.ig-empty \.t1\{font-size:\.82rem/.test(modalSrc) &&
+    /\.rf-unit>\.rf-ug \.ig-empty \.t2\{font-size:\.68rem/.test(modalSrc));
+  ok('썸네일·추가 버튼도 커졌다(74px 정사각 → 70px, canonical 은 74px 그대로)',
+    /\.rf-unit>\.rf-ug \.ig-thumb,#recruitModal \.rf-unit>\.rf-ug \.ig-add\{width:70px;height:70px\}/.test(modalSrc));
+  ok('CSS 선택자는 여전히 #recruitModal 스코프(호스트 화면 오염 금지)',
+    !/\n\.rf-ug-cta\b/.test(modalSrc) && !/\n\.rf-ug\b/.test(modalSrc));
+}
+
+/* ★ 사진이 실제로 나열되고 클릭하면 확대되는지는 이 파일의 가짜 DOM(getAttribute·임의
+   속성 미지원)으로는 검증할 수 없다 — `_igRender`/`_igLbOpen`(최대 4장·라이트박스)은
+   `makeTable()` 사본에서도 화면 조작부만 스텁한다("이 가드가 보는 것은 선택 단위와
+   가이드 값"). 그 메커니즘 자체는 이 파일이 손댄 적 없고(이번 변경은 CSS뿐),
+   실제 브라우저(Playwright)로 3장 나열·클릭 확대를 확인했다. */
 
 console.log('\n✅ campaignUnitGuideFront: ' + passed + '개 통과');
 process.exit(0);
