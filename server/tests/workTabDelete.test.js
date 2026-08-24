@@ -3,9 +3,11 @@
  * 실행: node tests/workTabDelete.test.js
  *
  * 이 기능은 **되돌릴 수 없다**. 그래서 이 가드가 고정하는 것 다섯.
- *  A. **표 분류 전수** — (sheet_id, tab_name) 을 가진 표는 전부 DELETE_TABLES ∪ MONEY_TABLES 에
- *     있어야 한다. 새 표가 생겼는데 분류가 없으면 여기서 빨개진다("지워야 하는데 남는" 잔재도,
- *     "지우면 안 되는데 지워지는" 사고도 이 자리에서 막는다).
+ *  A. **표 분류 전수** — (sheet_id, tab_name) 을 가진 표는 전부 DELETE_TABLES ∪ MONEY_TABLES ∪
+ *     KEEP_TABLES 에 있어야 한다. 새 표가 생겼는데 분류가 없으면 여기서 빨개진다("지워야 하는데
+ *     남는" 잔재도, "지우면 안 되는데 지워지는" 사고도 이 자리에서 막는다).
+ *     KEEP_TABLES = 작업이 사라진 뒤에도 **일부러 남기는** 표(묘비 134). 세 목록은 서로 겹치지
+ *     않고, KEEP 에 있는 표 이름은 삭제 경로 어디에서도 DELETE 대상이 되지 않는다.
  *  B. **돈 기록은 두 번째 확인으로만 지워진다**(사용자 확정 2026-08-19) — 일반 요청은 **쓰기 0건**으로
  *     거부하고, `forcePayment:true` 일 때만 함께 지운다. 지울 때는 **대조 이력(119, RESTRICT)을
  *     먼저** 지워야 FK 로 튕기지 않고, **회차(payment_batches) 자체는 남긴다**(한 회차가 여러 작업).
@@ -24,7 +26,7 @@ let passed = 0;
 const ok = (name, cond, extra) => { assert(cond, name + (extra ? ' — ' + extra : '')); passed++; console.log('  ✓ ' + name); };
 
 const svc = require('../src/services/workTabDelete.service');
-const { DELETE_TABLES, MONEY_TABLES } = svc;
+const { DELETE_TABLES, MONEY_TABLES, KEEP_TABLES } = svc;
 
 /* ── A. 표 분류 전수 ─────────────────────────────────────────────────────── */
 console.log('\n[A] (sheet_id, tab_name) 표 전수 분류');
@@ -40,11 +42,27 @@ console.log('\n[A] (sheet_id, tab_name) 표 전수 분류');
     if (cols.some(c => /^sheet_id\b/.test(c)) && cols.some(c => /^tab_name\b/.test(c))) found.add(m[1]);
   }
   ok('마이그레이션에서 표를 찾는다', found.size >= 30, String(found.size));
-  const classified = new Set([...DELETE_TABLES, ...MONEY_TABLES.map(x => x.table)]);
+  const keep = KEEP_TABLES.map(x => x.table);
+  const classified = new Set([...DELETE_TABLES, ...MONEY_TABLES.map(x => x.table), ...keep]);
   const unclassified = [...found].filter(t => !classified.has(t));
   ok('★ 분류 없는 표가 없다(새 표가 생기면 여기서 잡힌다)', unclassified.length === 0, unclassified.join(','));
   const ghost = [...classified].filter(t => !found.has(t));
   ok('★ 존재하지 않는 표를 지우려 하지 않는다', ghost.length === 0, ghost.join(','));
+
+  /* ── 세 번째 분류(남기는 표)가 도피처가 되지 않게 못을 박는다 ──
+     "분류 없음"을 없애려고 KEEP 에 던져 넣으면 가드는 초록인데 잔재는 남는다.
+     그래서 ① 겹침 금지 ② 사유 필수 ③ 삭제 경로가 진짜로 안 건드리는지까지 본다. */
+  ok('★ 남기는 표는 삭제·돈 목록과 겹치지 않는다(분류는 하나뿐)',
+    !keep.some(t => DELETE_TABLES.includes(t) || MONEY_TABLES.some(m2 => m2.table === t)));
+  ok('★ 남기는 표마다 "왜 남기는가"가 적혀 있다(빈 도피처 금지)',
+    KEEP_TABLES.length > 0 && KEEP_TABLES.every(x => x.table && String(x.why || '').trim().length >= 10));
+  {
+    const src = readSrv('src/services/workTabDelete.service.js');
+    const bad = keep.filter(t => new RegExp('DELETE FROM ' + t + '\\b').test(src));
+    ok('★★ 남기는 표를 지우는 문장이 코드에 없다', bad.length === 0, bad.join(','));
+  }
+  ok('★ 묘비는 남기는 쪽이다(작업이 사라진 뒤에야 쓸모가 생긴다)',
+    keep.includes('orphan_capture_tombstones'));
   ok('삭제 목록에 중복이 없다', new Set(DELETE_TABLES).size === DELETE_TABLES.length);
   ok('★ 등록행(tab_configs)이 마지막(자식 → 부모 순서 계약)',
     DELETE_TABLES[DELETE_TABLES.length - 1] === 'tab_configs');

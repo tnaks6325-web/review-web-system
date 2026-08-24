@@ -95,6 +95,19 @@ const MONEY_TABLES = [
   { table: 'unconfirmed_transfer_reviews', label: '미확인 이체 검토' },
 ];
 
+/* ── 일부러 **남기는** 표 — 작업이 지워져도 살아남아야 한다 (2026-08-24) ──────────
+   ★ 왜 세 번째 분류가 필요한가: 표 분류 전수 가드(`workTabDelete.test`)는
+     (sheet_id, tab_name) 을 가진 표를 전부 "지운다/돈이라 막는다" 둘 중 하나로 요구한다.
+     묘비(134)는 **그 둘 다 아니다** — 작업이 사라진 뒤에도 남아야 뜻이 있는 표라서,
+     삭제 목록에 넣으면 기능 자체가 죽고 돈 표로 두면 거짓말이 된다.
+   ★ 여기 넣는 것은 "분류를 깜빡한 표"가 아니라 **남기기로 결정한 표**다.
+     새 표를 여기 넣으려면 "작업이 사라진 뒤에도 이 줄이 왜 필요한가"를 한 줄로 적는다.
+   ★ 이 목록의 표는 삭제 경로가 **건드리지 않는다**(DELETE 문을 만들지 않는다). */
+const KEEP_TABLES = [
+  { table: 'orphan_capture_tombstones',
+    why: '작업이 사라진 뒤 Drive 에 남은 캡처를 찾을 유일한 좌표 — 같이 지우면 영영 못 찾는다' },
+];
+
 let _pool = null;
 function _db() { return _pool || (_pool = require('../db/pool')); }
 function __setPoolForTest(p) { _pool = p; }
@@ -218,6 +231,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
 
     const deleted = {};
     let totalRows = 0;
+    let recordedTombstones = 0;   // 고아 캡처 정리용 좌표 기록 건수(청소 편의 — 삭제 결과에 영향 없음)
 
     /* ★★ 두 번째 확인을 받은 경우에만 — 돈 기록도 함께 지운다(사용자 확정 2026-08-19).
        ★ 순서 계약: 대조 이력(119, batch_item_id 가 RESTRICT)을 **먼저** 지워야 회차 항목이 지워진다.
@@ -234,6 +248,37 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
         if (r && r.rowCount) { deleted[m.table] = r.rowCount; totalRows += r.rowCount; }
       }
       logger.warn(`[workTabDelete] "${tabName}" (${sheetId}) — 입금 기록까지 삭제(확인: ${by}): ${money.map(x => `${x.label} ${x.count}`).join(' · ')}`);
+    }
+
+    /* ★★ 지우기 **직전에** 그 작업의 캡처 좌표를 묘비에 남긴다 (2026-08-24).
+       이 함수는 `review_submissions`·`order_submissions` 를 실제 DELETE 하므로, 남기지 않으면
+       Drive 파일은 남는데 그것을 가리키던 원장이 통째로 사라져 **DB 기준으로 존재를 영영
+       알 수 없다**(C종류 = 탐지 불가). 좌표만 남겨 두면 고아 캡처 정리가 그 뒤로도 찾는다.
+       ★ 순서가 계약 — DELETE_TABLES 루프보다 **앞**이어야 한다(뒤면 읽을 원장이 없다).
+       ★ 절대 삭제를 막지 않는다(fail-soft) — 묘비는 청소 편의지 삭제의 전제가 아니다.
+         다만 조용히 넘기지 않고 사유를 로그로 남긴다. */
+    try {
+      const tomb = await client.query(
+        `INSERT INTO orphan_capture_tombstones
+           (file_id, file_name, sheet_id, tab_name, reviewer_name, slot_key, reason, recorded_by)
+         SELECT rs.file_id, rs.file_name, rs.sheet_id, rs.tab_name, rs.reviewer_name,
+                rs.slot_key, 'work_deleted', $3
+           FROM review_submissions rs
+          WHERE rs.sheet_id=$1 AND rs.tab_name=$2
+            AND COALESCE(rs.slot_key,'') <> 'trashed' AND rs.file_id IS NOT NULL
+         UNION
+         SELECT os.capture_file_id, NULL, os.sheet_id, os.tab_name, os.orderer,
+                'capture', 'work_deleted', $3
+           FROM order_submissions os
+          WHERE os.sheet_id=$1 AND os.tab_name=$2 AND os.capture_file_id IS NOT NULL
+         ON CONFLICT (file_id) DO NOTHING`,
+        [sheetId, tabName, String(by || 'admin').slice(0, 100)]);
+      if (tomb.rowCount) {
+        recordedTombstones = tomb.rowCount;
+        logger.info(`[workTabDelete] "${tabName}" 캡처 묘비 ${tomb.rowCount}건 기록(고아 정리용)`);
+      }
+    } catch (tombErr) {
+      logger.warn(`[workTabDelete] 캡처 묘비 기록 실패(삭제는 계속) "${tabName}": ${tombErr.message}`);
     }
 
     for (const t of DELETE_TABLES) {
@@ -272,9 +317,10 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
           AND NOT EXISTS (SELECT 1 FROM index_master im WHERE im.sheet_id=$1)`, [sheetId]);
 
     await client.query('COMMIT');
-    logger.info(`[workTabDelete] "${tabName}" (${sheetId}) 삭제 by ${by} — 행 ${totalRows} · 공고 삭제 ${rc.rowCount} · 오더 링크 해제 ${wo.rowCount}`);
+    logger.info(`[workTabDelete] "${tabName}" (${sheetId}) 삭제 by ${by} — 행 ${totalRows} · 공고 삭제 ${rc.rowCount} · 오더 링크 해제 ${wo.rowCount}`
+      + (recordedTombstones ? ` · 캡처 묘비 ${recordedTombstones}건` : ''));
     return {
-      ok: true, sheetId, tabName, deleted, totalRows,
+      ok: true, sheetId, tabName, deleted, totalRows, recordedTombstones,
       paymentDeleted: (money.length && forcePayment === true) ? money : [],
       workOrdersUnlinked: wo.rowCount || 0, campaignsDeleted: rc.rowCount || 0,
       ownershipRemoved: ac.rowCount || 0, sheetRowRemoved: cam.rowCount || 0,
@@ -355,4 +401,4 @@ async function deleteOrphanCampaigns({ ids, confirm, by = 'admin', pool } = {}) 
   } finally { client.release(); }
 }
 
-module.exports = { previewTaskDelete, deleteTask, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, __setPoolForTest };
+module.exports = { previewTaskDelete, deleteTask, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };

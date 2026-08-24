@@ -1,19 +1,27 @@
 /**
- * orphanCaptureCleanup.test.js — 회귀가드: 고아 캡처 자동 정리 (A종류: 링크 끊김)
+ * orphanCaptureCleanup.test.js — 회귀가드: 고아 캡처 정리 (A 자동 · B·C 수동)
  * 실행: node tests/orphanCaptureCleanup.test.js
  *
  * 왜: 행 삭제·구매기록 취소도, 작업 통째 삭제도 Drive 파일을 건드리지 않아 고아 캡처가
  *   계속 쌓였고 치우는 자동 경로가 없었다. 자동으로 **파일을 지우는** 기능이므로
  *   "무엇을 지우지 않는가"를 코드보다 강하게 고정한다.
  *
+ * 고아 캡처 세 종류 (2026-08-21 기준 확정 · 2026-08-24 B·C 구현):
+ *   A 링크 끊김  — 원장은 살아 있는데 그 칸이 파일을 더는 안 가리킨다  → **크론 자동**
+ *   B 원장 없음  — Drive 에는 있는데 원장 어디에서도 안 가리킨다        → **사람 수동**
+ *   C 작업 소멸  — 작업이 통째로 지워져 원장 자체가 없어졌다(묘비 134)  → **사람 수동**
+ *
  * 고정하는 것:
  *  A. 판정 근거는 **file_id / review_index_id 뿐** — 위치키(row_index)를 근거로 쓰지 않는다
  *  B. **미리보기 기본** — dryRun 이면 Drive·DB 쓰기 0
  *  C. 후보 교집합 — 화면이 보낸 fileIds 라도 후보 밖이면 절대 안 지운다
  *  D. **TOCTOU 재검사** — 휴지통 직전에 그 한 건을 다시 확인, 조건이 풀렸으면 건너뛴다
- *  E. **휴지통만** — 영구삭제(files.delete) 호출 표면이 없다
+ *  E. **휴지통만** — 영구삭제(files.delete) 호출 표면이 없다 · 폴더 스캔은 B 전용
  *  F. 원장 표기는 휴지통 성공 뒤에만 · fileRoute 와 같은 칸(slot_key='trashed')
  *  G. 크론 배선 — 킬스위치·jobLock·유예·상한이 살아 있다
+ *  H. C종류 — ★★ 묘비 기록이 **삭제보다 앞** · 실패해도 삭제는 계속(fail-soft)
+ *  I. B종류 — ★★★ `fileIds` 없이는 **한 건도 안 지운다**(일괄 삭제 표면 없음)
+ *  J. 크론은 **A만** 돈다 — B·C 는 사람이 눌러야 움직인다
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -133,8 +141,19 @@ const C = (fileId, extra = {}) => Object.assign({
   {
     ok('files.delete 호출이 없다', !/files\.delete/.test(src));
     ok('trashFiles 만 쓴다', /trashFiles/.test(src));
-    ok('폴더 스캔(B종류)을 하지 않는다 — DB 기준만',
-      !/listFolderFilesRecursive|listFolderContents/.test(src));
+    /* 폴더 스캔은 **B종류 전용**이다(2026-08-24 B·C 추가).
+       A(자동·크론)는 여전히 DB 기준만 — A 경로 본문에 폴더 목록 호출이 새면
+       크론이 원장 밖 파일까지 지우기 시작한다. 그래서 "없다"가 아니라
+       "B 함수 안에만 있다"로 고정한다. */
+    const aPath = src.slice(src.indexOf('async function findOrphanCaptures'),
+      src.indexOf('async function findTombstonedCaptures'));
+    ok('★★ A 경로(크론)는 폴더를 스캔하지 않는다 — DB 기준만',
+      !/listFolderFilesRecursive|listFolderContents/.test(aPath));
+    const bScan = src.slice(src.indexOf('async function scanFolderOrphans'),
+      src.indexOf('async function _trashFiles'));
+    ok('★ 폴더 스캔은 B 전용 함수 안에만 있다',
+      /listFolderContents/.test(bScan)
+      && src.split('listFolderContents').length - 1 === bScan.split('listFolderContents').length - 1);
   }
 
   console.log('\n[F] 원장 표기 — 휴지통 성공 뒤에만 · fileRoute 와 같은 칸');
@@ -173,8 +192,114 @@ const C = (fileId, extra = {}) => Object.assign({
     const routes = read('src/routes/drive.routes.js');
     ok('수동 창구는 adminOrMaster 전용',
       /'\/orphan-capture-cleanup', authMiddleware, adminOrMasterMiddleware/.test(routes));
-    ok('수동 창구도 미리보기 기본', /dryRun: dryRun !== false/.test(routes));
+    /* dryRun 은 종류가 셋으로 갈리면서 한 번만 계산해 세 갈래가 나눠 쓴다(2026-08-24).
+       "명시적으로 dryRun:false 를 보내야만 실행" 이라는 계약 자체를 고정한다. */
+    ok('수동 창구도 미리보기 기본(dryRun:false 를 명시해야만 실행)',
+      /const dryRun = b\.dryRun !== false/.test(routes));
+    ok('★ 세 종류가 같은 dryRun 을 쓴다(한쪽만 바로 실행되는 일 금지)',
+      routes.split('dryRun, fileIds, by').length - 1 >= 1
+      && /trashFolderOrphans\(\{[\s\S]{0,160}dryRun/.test(routes));
     ok('수동 창구는 크론과 같은 함수를 쓴다(사본 금지)', /trashOrphanCaptures/.test(routes));
+  }
+
+
+  console.log('\n[H] C종류 — 작업 소멸(묘비 134)');
+  {
+    const src2 = read('src/services/workTabDelete.service.js');
+    /* `for (const t of DELETE_TABLES)` 는 미리보기(previewTaskDelete)에도 있다.
+       순서 계약은 **실제로 지우는** deleteTask 안에서만 뜻이 있으므로 그 본문만 본다. */
+    const del = src2.slice(src2.indexOf('async function deleteTask'),
+      src2.indexOf('async function findOrphanCampaigns'));
+    ok('★★ 묘비 기록이 DELETE_TABLES 루프보다 **앞**(뒤면 읽을 원장이 없다)',
+      del.indexOf('orphan_capture_tombstones') > 0
+      && del.indexOf('orphan_capture_tombstones') < del.indexOf('for (const t of DELETE_TABLES)'));
+    ok('★ 묘비 실패가 삭제를 막지 않는다(fail-soft)', /캡처 묘비 기록 실패\(삭제는 계속\)/.test(src2));
+    ok('★ 조용히 넘기지 않고 건수를 보고한다', /recordedTombstones/.test(src2));
+    ok('★ 재실행 안전(같은 파일 두 번 안 남긴다)', /ON CONFLICT \(file_id\) DO NOTHING/.test(src2));
+    ok('★ 이미 휴지통 처리된 파일은 안 남긴다', /slot_key,''\) <> 'trashed'/.test(src2));
+
+    const mig = read('migrations/134_orphan_capture_tombstones.sql');
+    ok('묘비 테이블 마이그레이션', /CREATE TABLE IF NOT EXISTS orphan_capture_tombstones/.test(mig));
+    ok('★ file_id 유니크', /uq_orphan_tombstone_file/.test(mig));
+    ok('★ 처리되면 지우지 않고 시각을 찍는다', /resolved_at/.test(mig));
+  }
+  {
+    const rows = [{ fileId: 'c1', fileName: 'c1.jpg', sheetId: 's', tabName: 't', reason: 'work_deleted' }];
+    const seen = [];
+    const pool = { seen, query: async (sql, params) => {
+      const q = String(sql).replace(/\s+/g, ' ').trim();
+      seen.push({ q, params });
+      return /FROM orphan_capture_tombstones t/.test(q) ? { rows } : { rows: [], rowCount: 1 };
+    } };
+    S.__setPoolForTest(pool);
+    const drive = makeDrive();
+    S.__setDriveForTest(drive);
+    const prev = await S.trashTombstonedCaptures({});
+    ok('C 도 미리보기 기본', prev.dryRun === true && drive.trashed.length === 0);
+    ok('C 미리보기는 쓰기 0', !seen.some(x => /^UPDATE|^INSERT|^DELETE/i.test(x.q)));
+    const r = await S.trashTombstonedCaptures({ dryRun: false, fileIds: ['NOPE'] });
+    ok('★ C 도 후보 교집합(고른 것 밖은 안 지운다)', r.trashed === 0 && drive.trashed.length === 0);
+
+    seen.length = 0;
+    const r2 = await S.trashTombstonedCaptures({ dryRun: false, by: '망고' });
+    ok('C 실행은 후보를 휴지통으로', r2.trashed === 1 && drive.trashed.join() === 'c1');
+    const w = seen.filter(x => /^UPDATE/i.test(x.q));
+    ok('★ 묘비는 지우지 않고 처리 시각을 찍는다',
+      w.length === 1 && /UPDATE orphan_capture_tombstones SET resolved_at = NOW\(\)/.test(w[0].q));
+    ok('★★ C 는 원장을 고치지 않는다 — 가리키던 원장이 이미 없다',
+      !seen.some(x => /UPDATE review_submissions/.test(x.q)));
+    ok('★ 이미 처리한 묘비는 두 번 찍지 않는다(resolved_at IS NULL)', /resolved_at IS NULL/.test(w[0].q));
+  }
+
+  console.log('\n[I] ★★★ B종류 — 원장 없음(Drive 스캔) · 일괄 삭제 금지');
+  {
+    const svc = read('src/services/orphanCaptureCleanup.service.js');
+    ok('★★★ fileIds 없이 실행하면 아무것도 안 지운다',
+      /fileIds 필수 — 폴더 고아는 사람이 고른 파일만 정리합니다/.test(svc));
+    ok('★ 스캔은 읽기 전용(폴더 목록 + 원장 대조)', /listFolderContents/.test(svc));
+    ok('★ 묘비에 이미 있는 파일은 B 후보가 아니다(중복 취급 금지)',
+      /FROM orphan_capture_tombstones t WHERE t\.file_id = ANY/.test(svc));
+    ok('★ 오판 위험을 화면에 문장으로 고지', /원장 기록만 실패한 정상 캡처가 섞일 수 있습니다/.test(svc));
+    ok('★ 폴더 조회 실패는 사유를 말한다(조용한 0건 금지)', /폴더 조회 실패/.test(svc));
+
+    /* ★ 스캔이 **진짜 후보를 뱉는 상태**로 만들어 놓고 부른다.
+       폴더 조회가 실패해 조기 반환되면 "0건"이 나와도 가드를 시험한 게 아니다
+       (그 스텁으로는 가드를 지워도 테스트가 통과해 버린다 — 검출력 0). */
+    process.env.AI_REVIEW_FOLDER_ID = 'ROOT';
+    const old = { id: 'g1', name: 'g1.jpg', createdTime: '2020-01-01T00:00:00Z' };
+    const drive = Object.assign(makeDrive(), {
+      ensureReviewFolderPath: async () => ({ id: 'F_REVIEW' }),
+      ensureCaptureFolderPath: async () => ({ id: 'F_CAPTURE' }),
+      listFolderContents: async (id) => (id === 'F_REVIEW' ? [old] : []),
+    });
+    S.__setDriveForTest(drive);
+    S.__setPoolForTest({ query: async (sql) => /FROM tab_configs/.test(String(sql))
+      ? { rows: [{ title: '시트' }] } : { rows: [], rowCount: 1 } });
+
+    const scan = await S.scanFolderOrphans({ sheetId: 's', tabName: 't' });
+    ok('스캔이 원장에 없는 파일을 후보로 잡는다(가드 시험 전제)',
+      scan.ok === true && scan.total === 1 && scan.items[0].fileId === 'g1');
+
+    const r = await S.trashFolderOrphans({ sheetId: 's', tabName: 't', dryRun: false });
+    ok('★★★ 후보가 있어도 fileIds 없으면 0건 — 일괄 삭제 표면이 없다',
+      (r.trashed || 0) === 0 && drive.trashed.length === 0 && /fileIds 필수/.test(r.error || ''));
+    const r2 = await S.trashFolderOrphans({ sheetId: 's', tabName: 't', dryRun: false, fileIds: ['NOPE'] });
+    ok('★ 고른 것이 후보 밖이면 0건(교집합)', (r2.trashed || 0) === 0 && drive.trashed.length === 0);
+    const r3 = await S.trashFolderOrphans({ sheetId: 's', tabName: 't', dryRun: false, fileIds: ['g1'] });
+    ok('★ 사람이 고른 후보만 휴지통으로', r3.trashed === 1 && drive.trashed.join() === 'g1');
+    delete process.env.AI_REVIEW_FOLDER_ID;
+  }
+
+  console.log('\n[J] 크론은 여전히 A만 돌린다');
+  {
+    const cron = read('src/jobs/cron.js');
+    ok('★★ 크론이 B·C 를 부르지 않는다',
+      !/trashTombstonedCaptures|trashFolderOrphans/.test(cron));
+    ok('크론은 A 만', /trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
+    const routes = read('src/routes/drive.routes.js');
+    ok('★ 수동 창구가 종류를 나눠 받는다', /kind === 'tombstoned'/.test(routes) && /kind === 'folder'/.test(routes));
+    ok('★ 미지정은 종전 동작(A)', /String\(b\.kind \|\| 'linked'\)/.test(routes));
+    ok('★ 모르는 kind 는 거부(조용한 오동작 금지)', /알 수 없는 kind/.test(routes));
   }
 
   console.log(`\n✅ orphanCaptureCleanup: ${passed} checks passed\n`);
