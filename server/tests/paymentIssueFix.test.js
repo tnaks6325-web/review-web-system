@@ -89,6 +89,86 @@ function withStubPool(handler, run) {
     assert.ok(!PA.isAmountCandidateHeader('수취인'));
   });
 
+  /* ── 엄격 판정(돈이 나가는 경로) — 2026-08-21 실사고: 9,900 이 101,000 으로 이체됨 ── */
+  t('1h ★★ 숫자 덩어리가 2개면 이어붙이지 않고 **멈춘다**(9,900원 0 → 99,000 사고)', () => {
+    for (const bad of ['9,900원 0', '9900 0', '9,900 / 2건', '9,900원(1개)']) {
+      const r = PA.parseAmountStrict(bad);
+      assert.strictEqual(r.ok, false, `'${bad}' 를 판정하면 안 된다`);
+      assert.strictEqual(r.reason, 'multi_number');
+      assert.strictEqual(r.value, 0, '★ 모호한 값에서 금액을 만들어내면 안 된다');
+    }
+    // 느슨한 쪽은 실제로 그 사고를 낸다 — 두 함수가 갈린 이유를 가드가 못박는다
+    assert.strictEqual(PA.extractAmountNumber({ '결제금액': '9,900원 0' }), 99000);
+  });
+  t('1i ★ 소수점 — 0 뿐이면 정수부(값 불변), 아니면 판정불가', () => {
+    assert.strictEqual(PA.parseAmountStrict('9900.0').ok, true);
+    assert.strictEqual(PA.parseAmountStrict('9900.0').value, 9900);
+    assert.strictEqual(PA.parseAmountStrict('9900.50').ok, false);
+    assert.strictEqual(PA.parseAmountStrict('9900.50').reason, 'decimal');
+  });
+  t('1j 정상 표기는 그대로 통과한다(실무를 막지 않는다)', () => {
+    const ok = { '9900': 9900, '9,900': 9900, '9,900원': 9900, ' 22,000 원 ': 22000, '1,980,000': 1980000, '0': 0 };
+    for (const [raw, val] of Object.entries(ok)) {
+      const r = PA.parseAmountStrict(raw);
+      assert.strictEqual(r.ok, true, `'${raw}' 가 막혔다(reason=${r.reason})`);
+      assert.strictEqual(r.value, val);
+    }
+  });
+  t('1k ★ 빈 값과 "못 읽겠다"는 다르다 — empty 만 다음 출처로 폴백해도 된다', () => {
+    assert.strictEqual(PA.parseAmountStrict('').reason, 'empty');
+    assert.strictEqual(PA.parseAmountStrict('-').reason, 'empty');
+    assert.strictEqual(PA.parseAmountStrict('미정').reason, 'empty');
+    assert.strictEqual(PA.parseAmountStrict('-5,000').reason, 'negative');
+  });
+
+  /* ── 상품비 출처 우선순위 = **작업보드에 입력된 값**(사용자 확정 2026-08-21) ── */
+  t('1l ★★ 작업보드 값이 주문원장을 이긴다(화면 9,900 · 원장 99,000 → 9,900)', () => {
+    const r = PA.resolveProductPrice({ board: { '결제금액': '9900' }, ledgerText: '99,000' });
+    assert.strictEqual(r.amount, 9900);
+    assert.strictEqual(r.source, PA.PRICE_SOURCE.BOARD);
+    assert.strictEqual(r.ledgerAmount, 99000);
+    assert.ok(r.warnings.includes('price_mismatch'), '★ 갈린 사실은 반드시 드러낸다(조용한 적용 금지)');
+    assert.deepStrictEqual(r.issues, [], '기준이 정해졌으므로 막지는 않는다');
+  });
+  t('1m ★ 사람이 고친 셀이 최우선 — 편집은 오버레이라 row_json 을 안 바꾼다', () => {
+    const r = PA.resolveProductPrice({
+      board: { '결제금액': '99000' }, boardEdit: { '결제금액': '9,900' }, ledgerText: '99000' });
+    assert.strictEqual(r.amount, 9900);
+    assert.strictEqual(r.source, PA.PRICE_SOURCE.BOARD_EDIT);
+  });
+  t('1n ★ 칸 선택은 그리드와 같은 방식(편집을 덮은 뒤 판정) — 옵션금액 편집이 결제금액을 못 이김', () => {
+    const r = PA.resolveProductPrice({
+      board: { '옵션금액': '500', '결제금액': '22,000' }, boardEdit: { '옵션금액': '9,900' } });
+    assert.strictEqual(r.amount, 22000);
+    assert.strictEqual(r.source, PA.PRICE_SOURCE.BOARD);
+  });
+  t('1o 작업보드에 값이 없을 때만 원장으로 폴백(옛 작업이 0원 보류로 남지 않게)', () => {
+    const r = PA.resolveProductPrice({ board: null, ledgerText: '30000' });
+    assert.strictEqual(r.amount, 30000);
+    assert.strictEqual(r.source, PA.PRICE_SOURCE.ORDER);
+    assert.deepStrictEqual(r.warnings, []);
+  });
+  t('1p ★ 못 읽는 값은 폴백하지 않고 막는다(엉뚱한 금액이 나가느니 보류)', () => {
+    const r = PA.resolveProductPrice({ board: { '결제금액': '9,900원 0' }, ledgerText: '9900' });
+    assert.strictEqual(r.amount, 0);
+    assert.ok(r.issues.includes('price_unreadable'));
+  });
+  t('1q ★ 사람이 금액 칸을 비웠으면 원장으로 되살리지 않는다(화면엔 없는데 돈이 나감)', () => {
+    const r = PA.resolveProductPrice({ board: { '결제금액': '99000' }, boardEdit: { '결제금액': '' }, ledgerText: '99000' });
+    assert.strictEqual(r.amount, 0);
+    assert.ok(r.issues.includes('price_unreadable'));
+    assert.strictEqual(r.reason, 'blanked');
+  });
+  t('1r ★ 원장을 특정 못하면(같은 줄에 주문 여러 건) 보류 — 아무거나 고르지 않는다', () => {
+    const r = PA.resolveProductPrice({ board: null, ledgerText: '30000', ledgerAmbiguous: true });
+    assert.strictEqual(r.amount, 0);
+    assert.ok(r.issues.includes('order_ambiguous'));
+    // 작업보드에 값이 있으면 그 값으로 나가되 사실은 알린다
+    const r2 = PA.resolveProductPrice({ board: { '결제금액': '9900' }, ledgerText: '30000', ledgerAmbiguous: true });
+    assert.strictEqual(r2.amount, 9900);
+    assert.ok(r2.warnings.includes('order_ambiguous'));
+  });
+
   /* ══════════════════════════════════════════════════════════
      §2 은행 표기 해석
      ══════════════════════════════════════════════════════════ */
@@ -133,8 +213,12 @@ function withStubPool(handler, run) {
           sheetId: 'S1', tabName: 'T1', rowIndex: 10, reviewerName: '홍길동', phone8: '12345678',
           startDate: '5 / 8 (목)', productName: '욕실화',
           amountCells: opts.amountCells || null,
+          // 그 줄이 어느 주문의 것인지 작업표가 지목한 값(같은 행에 주문이 여러 건일 때 쓴다)
+          linkedOrderId: opts.linkedOrderId || null,
         }] };
       }
+      // 작업보드 셀 편집 오버레이(col:결제금액) — 화면이 그리는 값과 이체금액을 잇는 재료
+      if (/JOIN participant_edits pe/.test(sql)) return { rows: opts.editRows || [] };
       if (/FROM recruit_campaigns c/.test(sql)) return { rows: opts.campRows || [] };
       if (/campaign_fee_schedules/.test(sql)) return { rows: [] };
       if (/FROM order_submissions/.test(sql)) return { rows: opts.orderRows || [] };
@@ -317,7 +401,7 @@ function withStubPool(handler, run) {
     });
   });
 
-  await ta('3d ★ 상품비 시트 폴백 — 주문 원장이 없어도 금액이 선다', async () => {
+  await ta('3d ★ 작업보드 표의 결제금액으로 금액이 선다(주문 원장이 없어도)', async () => {
     await withStubPool(targetsHandler({
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
       ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
@@ -325,23 +409,107 @@ function withStubPool(handler, run) {
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.productPrice, 22000);
-      assert.strictEqual(it.priceSource, 'sheet');
+      assert.strictEqual(it.priceSource, 'board');
       assert.ok(!it.issues.includes('no_price'));
       assert.ok(!it.issues.includes('zero_amount'));
       assert.strictEqual(it.payable, true);
     });
   });
 
-  await ta('3e 주문 원장이 있으면 그 값이 우선(폴백은 없을 때만)', async () => {
+  /* ★★ 계약 변경(사용자 확정 2026-08-21) — 종전엔 주문 원장이 언제나 이겼다.
+     그래서 작업보드가 9,900 인데 원장이 99,000 이면 **이체서식에 101,000**(+리뷰비)이
+     찍히고도 아무도 몰랐다(위드프렌즈 53번). 기준은 **작업보드에 입력된 값**이다. */
+  await ta('3e ★★ 작업보드 값이 주문 원장을 이긴다 — 화면에 보이는 값이 곧 이체금액', async () => {
     await withStubPool(targetsHandler({
-      orderRows: [{ sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: 30000, feeSnapshot: null, orderedAt: null }],
+      orderRows: [{ id: 'o-1', sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: '99,000', feeSnapshot: null, orderedAt: null }],
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
       ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
-      amountCells: { '결제금액': '22,000원' },
+      amountCells: { '결제금액': '9900' },
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.strictEqual(it.productPrice, 30000);
+      assert.strictEqual(it.productPrice, 9900, '★ 원장 99,000 이 이기면 이번 사고가 그대로 재발한다');
+      assert.strictEqual(it.priceSource, 'board');
+      assert.strictEqual(it.ledgerPrice, 99000, '원장 값도 실어야 화면이 두 값을 나란히 말한다');
+      assert.ok((it.warnings || []).includes('price_mismatch'));
+      assert.strictEqual(it.payable, true, '기준이 정해졌으므로 막지는 않는다');
+    });
+  });
+
+  await ta('3e2 ★ 작업보드에서 고친 셀(오버레이)이 최우선 — 편집은 row_json 을 안 바꾼다', async () => {
+    await withStubPool(targetsHandler({
+      orderRows: [{ id: 'o-1', sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: '99000', feeSnapshot: null, orderedAt: null }],
+      editRows: [{ editId: 'e-1', sheetId: 'S1', tabName: 'T1', rowIndex: 10, field: 'col:결제금액', valueText: '9,900' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '99000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.productPrice, 9900);
+      assert.strictEqual(it.priceSource, 'board_edit');
+    });
+  });
+
+  await ta('3e3 ★ 앵커가 여러 줄에 걸린 편집은 쓰지 않는다(남의 줄 금액이 되면 더 큰 사고)', async () => {
+    await withStubPool(targetsHandler({
+      // 같은 편집(editId) 이 두 줄에 붙는다 = 중복 identity/order → 화면과 같은 규율로 미적용
+      editRows: [
+        { editId: 'e-1', sheetId: 'S1', tabName: 'T1', rowIndex: 10, field: 'col:결제금액', valueText: '9,900' },
+        { editId: 'e-1', sheetId: 'S1', tabName: 'T1', rowIndex: 11, field: 'col:결제금액', valueText: '9,900' },
+      ],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '22,000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.productPrice, 22000);
+      assert.strictEqual(it.priceSource, 'board');
+    });
+  });
+
+  await ta('3e4 ★★ 못 읽는 금액은 이어붙이지 않고 보류한다(9,900원 0 → 99,000 차단)', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '9,900원 0' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.productPrice, 0);
+      assert.ok(it.issues.includes('price_unreadable'));
+      assert.ok(!it.issues.includes('no_price'), '★ 사유를 0원으로 접으면 "왜 0인지"가 사라진다');
+      assert.strictEqual(it.payable, false);
+    });
+  });
+
+  await ta('3e5 ★ 같은 시트행에 주문이 여러 건 — 작업표가 지목한 주문만 쓰고, 못 고르면 보류', async () => {
+    const two = [
+      { id: 'o-1', sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: '30000', feeSnapshot: null, orderedAt: null },
+      { id: 'o-2', sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: '9900', feeSnapshot: null, orderedAt: null },
+    ];
+    const base = {
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: null,
+    };
+    await withStubPool(targetsHandler({ ...base, orderRows: two }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.productPrice, 0, '★ 아무거나 고르면 호출마다 이체금액이 달라진다');
+      assert.ok(it.issues.includes('order_ambiguous'));
+      assert.strictEqual(it.payable, false);
+    });
+    await withStubPool(targetsHandler({ ...base, orderRows: two, linkedOrderId: 'o-2' }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.productPrice, 9900);
       assert.strictEqual(it.priceSource, 'order');
+    });
+  });
+
+  await ta('3e6 ★ 주문 원장 조회는 결정적으로 정렬한다(후보 순서가 흔들리면 금액도 흔들린다)', async () => {
+    await withStubPool(targetsHandler({}), async (svc, calls) => {
+      await svc.listPaymentTargets();
+      const q = calls.find(c => /FROM order_submissions/.test(c.sql));
+      assert.ok(q, '주문 원장 쿼리를 찾지 못했다');
+      assert.ok(/ORDER BY sheet_id, tab_name, sheet_row, submitted_at, id/.test(q.sql),
+        '★ ORDER BY 가 빠지면 같은 행의 주문 중 무엇이 이길지 비결정적이다');
     });
   });
 
@@ -727,6 +895,35 @@ function withStubPool(handler, run) {
     const seg = routes.slice(routes.indexOf("'/payment/transfer-setting'"), routes.indexOf("'/payment/reviewer-account'"));
     assert.ok(/reviewFee:\s*b\.reviewFee/.test(seg), '라우트가 리뷰비를 서비스로 넘기지 않는다');
     assert.ok(!/b\.reviewFee\s*\|\|/.test(seg), "★ `|| 0` 로 접으면 미전송이 '0원 지정'이 된다");
+  });
+
+  t('6m ★★ 표가 상품비의 **출처**를 말한다(어느 값으로 나가는지 화면에서 확인 가능해야 한다)', () => {
+    const vm = require('vm');
+    const srcLine = (HTML.match(/const PAY_PRICE_SRC\s*=\s*\{[\s\S]*?\n\};/) || [])[0];
+    assert.ok(srcLine, 'PAY_PRICE_SRC 선언을 찾지 못했다');
+    const i = HTML.indexOf('function _pmPriceSrc(');
+    assert.ok(i > 0, '_pmPriceSrc 를 찾지 못했다');
+    const sandbox = {
+      esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+      _pmNum: n => (Number(n) || 0).toLocaleString(),
+    };
+    vm.createContext(sandbox);
+    new vm.Script([srcLine.replace(/^const/, 'var'), HTML.slice(i, HTML.indexOf('\nfunction ', i + 1))].join('\n')).runInContext(sandbox);
+
+    const board = sandbox._pmPriceSrc({ priceSource: 'board', warnings: [] });
+    assert.ok(/작업보드/.test(board), '작업보드에서 읽은 값이라는 표시가 없다');
+    const edited = sandbox._pmPriceSrc({ priceSource: 'board_edit', warnings: [] });
+    assert.ok(/보드수정/.test(edited), '사람이 고친 값이라는 표시가 없다');
+    // ★ 원장과 갈린 건은 **원장 금액까지** 보여야 한다 — 이번 사고(9,900 vs 99,000)의 확인 근거
+    const gap = sandbox._pmPriceSrc({ priceSource: 'board', warnings: ['price_mismatch'], ledgerPrice: 99000 });
+    assert.ok(/≠원장/.test(gap) && /99,000/.test(gap), '갈린 원장 금액을 화면이 숨긴다: ' + gap);
+    assert.strictEqual(/≠원장/.test(board), false, '갈리지 않은 건에 경고를 띄우면 진짜 신호가 묻힌다');
+  });
+
+  t('6n 새 보류 사유에 라벨이 있다(코드값이 그대로 화면에 노출되면 안 된다)', () => {
+    for (const k of ['price_unreadable', 'order_ambiguous']) {
+      assert.ok(new RegExp(k + "\\s*:\\s*'").test(HTML), k + ' 라벨이 없다');
+    }
   });
 
   t('6g 표 [보완] 버튼은 고칠 수 있을 때만 그린다(죽은 버튼 금지)', () => {

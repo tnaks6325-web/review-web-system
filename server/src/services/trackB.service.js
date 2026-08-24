@@ -2909,6 +2909,57 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
   }
 }
 
+/**
+ * 결제금액 편차 경고칠 재료 — 행마다 `priceDev` 를 실어 준다(사용자 확정 2026-08-23).
+ *
+ * 구매양식 제출 금액(`order_submissions.price`)이 **모집공고에 설정된 1건당 결제금액**에서
+ * ±10% 이상 벗어나면, 화면이 그 줄의 **결제금액 칸**을 연주황으로 칠한다. 담당자는 그 행을 눌러
+ * 우측 구매캡처로 직접 확인한다 — **확인 팝업·승인 절차는 두지 않는다**(그 마찰이 확인을 막는다).
+ *
+ * ★★ 비교 대상이 "제출값" 인 이유: 나재형 건은 **작업보드 셀이 9,900 으로 정상**이었고 제출값만
+ *   99,000(0 하나 더) 이었다. 표시값끼리 비교하면 그 사고는 영영 안 잡힌다.
+ * ★ 기준 금액은 **옵션별 결제금액이 먼저**(그 줄이 고른 옵션) → 없으면 작업오더 1건당 금액.
+ *   재료는 `tabConditionSummary` 가 이미 만든 것을 그대로 쓴다(공고 조회 사본 0 · 쿼리 순증 0).
+ * ★ 판정(`resolvePriceDeviation`)·칸선택(`extractAmountEntry`) 둘 다 utils/paymentAmount 단일 출처다.
+ *   칠하는 칸은 **입금관리가 금액으로 읽는 그 칸**이라야 "칠은 A 칸인데 돈은 B 칸으로 나가는" 상태가 없다.
+ * @returns {number} 칠할 줄 수
+ */
+function _attachPriceDeviation(rows, condition) {
+  if (!condition || !Array.isArray(rows)) return 0;
+  const { resolvePriceDeviation, extractAmountEntry, isAmountCandidateHeader } = require('../utils/paymentAmount');
+  const norm = s => String(s == null ? '' : s).trim();
+  // 옵션별 결제금액(공고 옵션 원장). pay=0 은 "옵션 금액 미설정"이라 담지 않는다 → 작업오더 값으로 떨어진다.
+  const optPay = new Map();
+  for (const o of (condition.options || [])) {
+    const pay = Number(o && o.pay);
+    if (o && norm(o.label) && Number.isFinite(pay) && pay > 0) optPay.set(norm(o.label), pay);
+  }
+  const tabPay = Number(condition.payAmount);
+  let n = 0;
+  for (const r of rows) {
+    const ord = r && r.order;
+    if (!ord) continue;                                     // 주문 미연결 줄(빈 슬롯·수기) → 제출값이 없다
+    const expected = optPay.get(norm(ord.selectedOptKey)) || (Number.isFinite(tabPay) ? tabPay : 0);
+    const dev = resolvePriceDeviation({ submittedText: ord.price, expected });
+    if (!dev) continue;                                     // 공고 미설정·못 읽는 값·기준 미만 → 칠하지 않는다
+    const merged = Object.assign({},
+      (r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : {}, r.cellEdits || {});
+    let col = extractAmountEntry(merged).key;
+    if (!col) {
+      /* 그 칸이 비어 있으면 값 기준 선택이 안 된다 — **같은 함수**에 자리표시값을 채워 태워
+         우선순위(정확일치 → 부분일치)를 그대로 따른다. 여기서 키워드 사본을 만들면
+         `옵션금액` 이 `결제금액` 을 이기는 오배치가 난다(입금관리가 이미 밟은 함정). */
+      const probe = {};
+      for (const k of Object.keys(merged)) if (isAmountCandidateHeader(k)) probe[k] = '0';
+      col = extractAmountEntry(probe).key;
+    }
+    if (!col) continue;                                     // 금액 칸 자체가 없는 표 → 칠할 자리가 없다
+    r.priceDev = { col, submitted: dev.submitted, expected: dev.expected, pct: dev.pct };
+    n++;
+  }
+  return n;
+}
+
 async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, brandId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
@@ -3240,6 +3291,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     res.condition = _cond;   // ★ 위에서 이미 한 번 구했다(호출 2회 금지 — cap 과 값이 갈릴 수 없다)
     /* 「일정」 — 표(정렬된 `out`)의 구매일자에서 파생. 못 읽으면 null 로 두고 화면이 「—」로 말한다. */
     if (res.condition) res.condition.schedule = _condSchedule(out, headers);
+    /* 결제금액 편차 경고칠 — 조건 카드가 만든 공고 금액을 그대로 재사용한다(쿼리 순증 0).
+       조건 조회가 실패해 null 이면 칠도 없다(근거 없는 경고 금지 — fail-soft). */
+    res.priceDevCount = _attachPriceDeviation(out, res.condition);
     /* 136: 업체가 정한 브랜드 담당자 — 내부 화면에도 **함께** 보여 "브랜드사에게 무엇이 나가는지"
        를 확인시킨다(사용자 확정 D안). 소유 업체는 그 탭의 소유 판정 단일 출처에서 구한다. */
     if (res.condition) res.condition.manager = await _condBrandManagers(res.condition.manager, { sheetId, tabName });
@@ -3268,16 +3322,40 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
 // 시트 컬럼(col:<헤더>) 편집 허용 검증 — 그리드 표시와 동일 소스로 "실재 컬럼"만 허용(임의 컬럼·인젝션 차단).
 //   ★ 그리드 헤더와 정합: gid-우선 detected_headers → NULL이면 그 행 row_json 키 폴백(workdeskTab 헤더 산출과 동형).
 //   client(in-tx)로 조회해 잠근 행 문맥과 일관. tabGid 없거나 동명탭이면 gid 우선, 그다음 tab_name.
-async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson) {
-  if (!colName) return false;
+/** 그 탭의 열 이름 줄(`detected_headers`) — 없으면 빈 배열. 열 판정·원장 매핑이 함께 쓴다(사본 금지). */
+async function _tabHeaders(client, sheetId, tabName, tabGid) {
   const { rows } = await client.query(
     `SELECT detected_headers FROM raw_sheet_tabs
       WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
       ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
     [sheetId, tabGid, tabName]).catch(() => ({ rows: [] }));
   const dh = rows[0] && rows[0].detected_headers;
-  if (Array.isArray(dh) && dh.some(h => String(h == null ? '' : h).trim() === colName)) return true;
+  return Array.isArray(dh) ? dh.map(h => String(h == null ? '' : h)) : [];
+}
+
+async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson, headers) {
+  if (!colName) return false;
+  const dh = Array.isArray(headers) ? headers : await _tabHeaders(client, sheetId, tabName, tabGid);
+  if (dh.some(h => h.trim() === colName)) return true;
   return !!(rowJson && typeof rowJson === 'object' && Object.prototype.hasOwnProperty.call(rowJson, colName));
+}
+
+/**
+ * 작업보드의 그 열이 **주문 원장의 어느 칸**인가 — 모르면 null.
+ *
+ * ★★ 판정은 `orderLedger._fieldToCol` 단일 출처를 **거꾸로** 쓴다: 원장이 시트에 쓸 때 고르는
+ *   바로 그 열이면 같은 칸이다. 여기에 헤더 키워드 사본을 만들면 "쓰는 칸과 되읽는 칸"이 갈린다.
+ * ★ 매핑이 없는 열(리뷰·입금·담당자·번호 등 작업표 자체 칸)은 null → 종전대로 오버레이만 남는다.
+ *   ⚠ `비고` 는 매핑이 **있다**(정방향이 주문 memo 를 그 열에 쓴다) — 회귀가드가 이 의도를 못박는다.
+ */
+function _ledgerFieldForHeader(headers, colName) {
+  const idx = (headers || []).findIndex(h => String(h == null ? '' : h).trim() === String(colName).trim());
+  if (idx < 0) return null;
+  const { _fieldToCol, ORDER_LEDGER_EDIT_FIELDS } = require('./orderLedger.service');
+  for (const f of ORDER_LEDGER_EDIT_FIELDS) {
+    try { if (_fieldToCol(headers, f) === idx) return f; } catch (_) { /* 판정 불가 필드는 건너뛴다 */ }
+  }
+  return null;
 }
 
 // ── 리뷰웹시스템[3버전] 편집(오버레이-only, 물리컬럼 무편집) ──
@@ -3303,15 +3381,20 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const row = pr[0];
     // col:<헤더> 는 잠근 행 문맥으로 실재 컬럼 검증(그리드 표시와 동일 소스). 미실재면 거부(표시=수락 정합).
+    // ★ 그 열이 원장 칸인지도 **같은 헤더 줄 한 번 읽어** 판정한다(쿼리 순증 0).
+    let ledgerField = null;
     if (isCol) {
       // 상태값은 시스템 전용이다. 화면 잠금과 별개로 일반 셀 편집 API도 차단한다.
       if (_statusToggleForRow(field.slice(4), row)) {
         await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
       }
-      if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
+      const headers = await _tabHeaders(client, sheetId, tabName, row.tab_gid);
+      if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json, headers)) {
         await client.query('ROLLBACK'); return { ok: false, error: 'field_not_editable', field };
       }
       kind = 'text';
+      // 원장 되쓰기 대상은 **그 줄에 주문이 붙어 있을 때만**(빈 슬롯·수기 줄은 원장이 없다).
+      if (row.order_submission_id) ledgerField = _ledgerFieldForHeader(headers, field.slice(4));
     }
     let anchorType, anchorValue;
     if (row.order_submission_id) {
@@ -3374,7 +3457,38 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       }
     }
     await client.query('COMMIT');
-    return { ok: true, editId: ins.rows[0].id, anchorType, field, linkedField, value: kind === 'bool' ? vBool : vText };
+
+    /* ★★ 원장 되쓰기 (사용자 확정 2026-08-21) — "작업보드에서 고치면 원장도 그 값이 된다".
+       종전엔 셀 편집이 **오버레이 전용**이라 원장·row_json 과 갈렸고, 그 divergence 가
+       이체서식에 9,900 대신 101,000 을 찍은 사고의 절반이었다(위드프렌즈 53번).
+       담당자가 두 화면을 오가야 하는 구조 자체를 없앤다 — 화면에 확인 단계를 만들지 않는다.
+
+       ★ 쓰기는 `orderLedger.applyOrderEdit` **단일 출처**(주문원장 화면과 같은 경로)라
+         무시트 탭 작업표 재기록·시트 반영 큐·per-order 락·감사 이력이 그대로 붙는다.
+       ★ **커밋 뒤에** 돈다 — 원장 반영이 실패해도 담당자의 셀 편집은 절대 잃지 않는다.
+         대신 결과(`ledgerSync`)를 그대로 실어 보내 화면이 실패를 말한다(조용한 실패 금지).
+       ★ 주문이 붙지 않은 줄(수기 입력·빈 슬롯)과 원장 칸이 아닌 열(리뷰·입금·담당자·번호 등
+         작업표 자체 칸)은 종전 그대로 오버레이만 남는다(원장에 없는 값을 만들어내지 않는다).
+         ⚠ `비고` 는 **원장 칸이 맞다** — 정방향(`mapOrderToSheetRow`)이 주문 memo 를 그 열에 쓴다. */
+    let ledgerSync = null;
+    if (ledgerField && kind === 'text') {
+      try {
+        const r = await require('./orderLedger.service').applyOrderEdit({
+          orderSubmissionId: String(row.order_submission_id),
+          edits: [{ field: ledgerField, newValue: vText == null ? '' : vText }],
+          by, source: 'workdesk_cell',
+        });
+        ledgerSync = { field: ledgerField, ...r };
+        if (!r.ok) {
+          logger.warn(`[trackB] 셀 편집의 원장 반영 실패 os=${row.order_submission_id} field=${ledgerField} ` +
+            `reason=${r.disabled ? 'ledger_write_disabled' : r.notFound ? 'not_found' : r.skipped ? 'locked' : r.badField ? 'bad_field' : 'unknown'}`);
+        }
+      } catch (e) {
+        ledgerSync = { field: ledgerField, ok: false, error: e.message };
+        logger.warn(`[trackB] 셀 편집의 원장 반영 예외 os=${row.order_submission_id} field=${ledgerField}: ${e.message}`);
+      }
+    }
+    return { ok: true, editId: ins.rows[0].id, anchorType, field, linkedField, ledgerSync, value: kind === 'bool' ? vBool : vText };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
@@ -5338,6 +5452,7 @@ module.exports = {
   tabCampaignsMap,
   tabTodayProgress,
   _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다
+  _attachPriceDeviation,   // 회귀가드가 편차 경고칠 판정을 직접 실행해 확인한다(2026-08-23)
   __condAdvertiserLensForTest: (...a) => _condAdvertiserLens(...a),   // 담당 렌즈(브랜드 세션 분기) 실행 검증용
   identityKey,
   classifyParity,

@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+# ⚠ 슬래시를 붙이면 **디렉터리에만** 걸린다 — 워크트리에서 흔히 만드는
+#   `node_modules` **심볼릭 링크**는 걸리지 않아 그대로 커밋된다.
+#   실제로 밟았다(2026-08-23, merge 7dd58b3): 절대경로 심링크가 트리에 들어가
+#   Railway 배포 2건이 죽었다. 슬래시 없이 둘 다 막는다.
+node_modules
 
 # Runtime data
 pids

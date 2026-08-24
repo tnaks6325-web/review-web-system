@@ -26,7 +26,9 @@ const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
-const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
+// ★ 금액 판정(칸 선택 · 엄격 파싱 · 출처 우선순위)은 전부 `utils/paymentAmount` 단일 출처다.
+const { resolveProductPrice, isAmountCandidateHeader,
+        EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
@@ -152,13 +154,22 @@ async function listPaymentTargets(opts = {}) {
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
             ri.reviewer_name AS "reviewerName", ri.phone8 AS "phone8",
             ri.start_date AS "startDate", ri.product_name AS "productName",
-            -- 상품비 폴백 재료(주문 원장에 없는 행용). ★ row_json 을 통째로 끌어오지 않는다 —
-            --   '금액' 이 든 칸만 남긴 작은 객체를 만들고 **최종 판정은 extractAmountNumber** 가 한다
+            -- 상품비 재료(= 작업보드 표에 보이는 값). ★ row_json 을 통째로 끌어오지 않는다 —
+            --   '금액' 이 든 칸만 남긴 작은 객체를 만들고 **최종 판정은 resolveProductPrice** 가 한다
             --   (SQL 에 판정 사본을 두면 레거시 화면과 금액이 갈린다).
             (SELECT jsonb_object_agg(kv.key, kv.value)
                FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
               WHERE replace(kv.key, ' ', '') LIKE '%금액%'
-                 OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells"
+                 OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells",
+            -- ★ 그 줄이 **어느 주문**의 것인지 작업표가 지목한 값. 같은 시트행에 주문이 여러 건
+            --   붙어 있을 때(실사고 2026-08-19) 원장 금액을 아무거나 고르지 않기 위한 근거다.
+            (SELECT cp.order_submission_id
+               FROM campaign_participants cp
+              WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+                AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+                AND cp.order_submission_id IS NOT NULL
+              ORDER BY cp.updated_at DESC NULLS LAST, cp.id
+              LIMIT 1) AS "linkedOrderId"
        FROM review_index ri
       WHERE ${where.join(' AND ')}
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
@@ -171,11 +182,12 @@ async function listPaymentTargets(opts = {}) {
   const tabNames = [...new Set(rows.map(r => r.tabName))];
   const phone8s = [...new Set(rows.map(r => r.phone8).filter(Boolean))];
 
-  const [campMap, orderMap, acctMap, tabMap] = await Promise.all([
+  const [campMap, orderMap, acctMap, tabMap, boardEditMap] = await Promise.all([
     _loadCampaigns(sheetIds, tabNames),
     _loadOrderPrices(sheetIds, tabNames),
     _loadAccounts(phone8s),
     _loadTabMeta(sheetIds, tabNames),
+    _loadBoardAmountEdits(sheetIds, tabNames),
   ]);
 
   // ★ 연락처(뒤 8자리)로 계좌를 못 찾은 행만 **소유자 링크**로 한 번 더 찾는다.
@@ -187,20 +199,26 @@ async function listPaymentTargets(opts = {}) {
     const key = r.sheetId + '||' + r.tabName;
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
-    const ord = orderMap[key + '||' + r.rowIndex] || null;
+    // 같은 시트행에 주문이 여러 건이면 **작업표가 지목한 주문**만 쓴다(못 고르면 보류).
+    const ordPick = _pickOrder(orderMap[key + '||' + r.rowIndex], r.linkedOrderId);
+    const ord = ordPick.ord;
     // 계좌 해석 순서 = ① 등록 계좌(연락처 매칭) → ② 소유자 링크 → ③ **그 건의 제출 계좌**
     // ★ 등록 계좌가 언제나 이긴다(관리 원장이 진실원본 — 기존 동작 보존). ③ 은 등록된 계좌를
     //   어디서도 못 찾았을 때만 쓰는 마지막 근거이고, accountRef 가 없어 화면 보완 대상이 아니다.
     const acct = acctMap[r.phone8] || ownerAcctMap[key + '||' + r.rowIndex] || _orderAccount(ord, r) || null;
 
-    // 상품비 = 그 행의 실제 제출 결제금액(주문 원장).
-    // ★ 주문 원장에 없는 행(옛 작업·직원 수기 입력)은 **시트 결제금액 칸**으로 폴백한다 —
-    //   그 칸이 그 행의 실제 결제금액이고, 폴백이 없으면 그런 행은 영영 0원 보류로 남는다.
-    //   출처(priceSource)를 함께 실어 화면이 "시트에서 읽음"을 드러낸다(조용한 추정 금지).
-    const orderPrice = ord ? _int(ord.price) : 0;
-    const sheetPrice = orderPrice ? 0 : extractAmountNumber(r.amountCells);
-    const productPrice = orderPrice || sheetPrice;
-    const priceSource = orderPrice ? 'order' : (sheetPrice ? 'sheet' : null);
+    /* 상품비 = **작업보드에 입력된 값**(사용자 확정 2026-08-21).
+       판정·우선순위는 `resolveProductPrice` 단일 출처가 한다 — 여기 사본을 두면
+       "화면은 9,900 인데 이체서식은 101,000" 이 다시 벌어진다(위드프렌즈 53번 실사고).
+       ★ 출처(priceSource)와 원장값(ledgerPrice)을 함께 실어 화면이 근거를 말하게 한다. */
+    const price = resolveProductPrice({
+      board: r.amountCells,
+      boardEdit: boardEditMap[key + '||' + r.rowIndex] || null,
+      ledgerText: ord ? ord.price : null,
+      ledgerAmbiguous: ordPick.ambiguous,
+    });
+    const productPrice = price.amount;
+    const priceSource = price.source;
 
     // 리뷰비 = 082 단일 출처(스냅샷 → 구간표 → 폴백). 판정 자체는 `resolveReviewFee` 가 한다.
     // ★ 폴백 순서만 이체은행·통장표시와 **같은 규율**로 넓혔다: 공고 값 → **탭 값**(128).
@@ -250,8 +268,12 @@ async function listPaymentTargets(opts = {}) {
       if (!account) issues.push('no_account');
       if (!String(acct.accountHolder || '').trim()) issues.push('no_holder');
     }
-    if (!productPrice) issues.push('no_price');
-    if (amount <= 0) issues.push('zero_amount');
+    /* 상품비 사유는 `resolveProductPrice` 가 정한 것을 그대로 싣는다(판정 사본 금지).
+       ★ 읽을 수 없는 값(`price_unreadable`)·주문 중복(`order_ambiguous`) 은 **금액을 만들지
+         않고 막는다** — 0 원으로 접어 `no_price` 로만 말하면 "왜 0 인지"가 사라진다. */
+    for (const i of price.issues) issues.push(i);
+    if (!productPrice && !price.issues.length) issues.push('no_price');
+    if (amount <= 0 && !price.issues.length) issues.push('zero_amount');
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
     /* 리뷰비 경고는 **금액이 0이라서**가 아니라 **근거를 못 찾아서** 띄운다.
@@ -261,6 +283,9 @@ async function listPaymentTargets(opts = {}) {
        ⚠ 한계: 발행 폼에서 리뷰비 칸을 비우면 서버가 0 으로 저장하므로 "0원으로 정함"과
          "안 넣음"은 DB 에서 구분되지 않는다 — 사용자 확정(2026-08-19)으로 0 = 무상으로 읽는다. */
     if (!fee && !feeSource) warnings.push('no_review_fee');
+    /* 작업보드 값과 주문원장 값이 다르면 **막지 않고 드러낸다** — 기준은 작업보드지만
+       "원장은 99,000 인데 9,900 으로 나간다"를 사람이 모르고 지나가면 안 된다. */
+    for (const w of price.warnings) warnings.push(w);
 
     return {
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
@@ -299,6 +324,9 @@ async function listPaymentTargets(opts = {}) {
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
       accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
       productPrice, reviewFee: fee, amount, priceSource, feeSource,
+      // 상품비 근거 — 화면이 "작업보드 9,900 (원장 99,000)" 처럼 두 값을 나란히 말한다.
+      ledgerPrice: price.ledgerAmount, priceReason: price.reason,
+      orderDuplicates: ordPick.duplicates || 0,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
       transferMemo: memo, memoSource,
       issues, warnings,
@@ -313,12 +341,14 @@ function _summarize(items) {
   const s = {
     total: items.length, totalAmount: 0,
     kbank: 0, kbankAmount: 0, hana: 0, hanaAmount: 0,
-    noBank: 0, noAccount: 0, blocked: 0, noMemo: 0,
+    noBank: 0, noAccount: 0, blocked: 0, noMemo: 0, priceMismatch: 0,
   };
   for (const it of items) {
     if (it.payable) {
       s.totalAmount += it.amount;
       if ((it.warnings || []).includes('no_memo')) s.noMemo++;
+      // 작업보드 값으로 나가지만 원장과 다른 건 — 이체 전에 사람이 한 번 볼 목록이다.
+      if ((it.warnings || []).includes('price_mismatch')) s.priceMismatch++;
       if (it.bank === 'kbank') { s.kbank++; s.kbankAmount += it.amount; }
       else if (it.bank === 'hana') { s.hana++; s.hanaAmount += it.amount; }
     } else {
@@ -383,29 +413,106 @@ async function _loadCampaigns(sheetIds, tabNames) {
   return map;
 }
 
-/** 행별 실제 결제금액(상품비) + 리뷰비 스냅샷 근거 — 주문 원장 */
+/**
+ * 행별 실제 결제금액(상품비) + 리뷰비 스냅샷 근거 — 주문 원장.
+ *
+ * ★★ 한 시트행에 주문이 **여러 건** 붙어 있을 수 있다(재제출·중복 반영 — 실사고 2026-08-19).
+ *   종전에는 정렬도 없이 `map[key] = …` 로 덮어써 **어느 주문의 금액이 이길지 비결정적**이었다
+ *   (같은 화면을 두 번 열면 이체금액이 달라질 수 있었다는 뜻이다).
+ *   그래서 여기서는 **후보를 전부 모아 결정적으로 정렬만** 하고, 고르는 일은 `_pickOrder` 가
+ *   "작업표가 지목한 주문(`linkedOrderId`)" 으로 한다 — 못 고르면 **보류**(추측 금지).
+ */
 async function _loadOrderPrices(sheetIds, tabNames) {
   const map = {};
   if (!sheetIds.length) return map;
   const { rows } = await pool.query(
     // ★ order_submissions 의 제출 시각 컬럼은 **submitted_at** 이다(created_at 이 아니다 — 001:179).
     //   틀리면 42703 으로 이 쿼리가 통째로 죽어 입금대상 화면이 서버오류가 된다.
-    `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
+    `SELECT id, sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
             price, review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt",
             -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
             --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
             bank AS "bank", account AS "account", depositor AS "depositor"
        FROM order_submissions
       WHERE deleted_at IS NULL AND sheet_row IS NOT NULL
-        AND sheet_id = ANY($1) AND tab_name = ANY($2)`,
+        AND sheet_id = ANY($1) AND tab_name = ANY($2)
+      -- ★ 결정적 정렬(완화 금지) — 같은 행의 후보 순서가 호출마다 흔들리면 금액도 흔들린다.
+      ORDER BY sheet_id, tab_name, sheet_row, submitted_at, id`,
     [sheetIds, tabNames]
   );
   for (const o of rows) {
-    map[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = {
+    const k = o.sheetId + '||' + o.tabName + '||' + o.sheetRow;
+    (map[k] = map[k] || []).push({
+      id: String(o.id),
       price: o.price, feeSnapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt),
       bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
-    };
+    });
   }
+  return map;
+}
+
+/**
+ * 그 행이 쓸 주문 하나를 고른다 — **모르면 고르지 않는다**.
+ * @param {Array|null} list           그 시트행에 붙은 주문 후보(결정적 정렬 상태)
+ * @param {*} linkedOrderId           작업표(`campaign_participants.order_submission_id`)가 지목한 주문
+ * @returns {{ord:object|null, ambiguous:boolean, duplicates:number}}
+ *   ambiguous=true 면 호출부가 `order_ambiguous` 로 **보류**한다(엉뚱한 금액·계좌 방지).
+ */
+function _pickOrder(list, linkedOrderId) {
+  const all = Array.isArray(list) ? list : [];
+  if (!all.length) return { ord: null, ambiguous: false, duplicates: 0 };
+  if (all.length === 1) return { ord: all[0], ambiguous: false, duplicates: 1 };
+  const linked = linkedOrderId ? all.find(o => o.id === String(linkedOrderId)) : null;
+  if (linked) return { ord: linked, ambiguous: false, duplicates: all.length };
+  return { ord: null, ambiguous: true, duplicates: all.length };
+}
+
+/**
+ * 작업보드에서 **사람이 고친 결제금액 셀**(`participant_edits` 오버레이).
+ *
+ * ★★ 작업보드 표는 `row_json` 위에 이 오버레이를 덮어 그린다(trackB.service). 편집은
+ *   오버레이 전용이라 `row_json`·주문원장을 건드리지 않으므로, 이걸 안 보면 **화면에서
+ *   고친 금액이 이체서식에 영영 반영되지 않는다**(위드프렌즈 53번 실사고의 절반).
+ * ★ 앵커가 여러 줄에 걸리는 편집(중복 identity/order)은 **버린다** — 화면이 쓰는 게이트와
+ *   같은 규율이다(한 사람의 정정이 남의 줄 금액이 되면 그게 더 큰 사고다).
+ */
+async function _loadBoardAmountEdits(sheetIds, tabNames) {
+  const map = {};
+  if (!sheetIds.length) return map;
+  const { rows } = await pool.query(
+    `SELECT pe.id AS "editId", cp.sheet_id AS "sheetId", cp.tab_name AS "tabName",
+            cp.seq AS "rowIndex", pe.field, pe.value_text AS "valueText"
+       FROM campaign_participants cp
+       JOIN participant_edits pe
+         ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+        AND ((pe.anchor_type = 'order'    AND cp.order_submission_id::text = pe.anchor_value)
+          OR (pe.anchor_type = 'manual'   AND cp.id::text = pe.anchor_value)
+          OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+      WHERE cp.sheet_id = ANY($1) AND cp.tab_name = ANY($2)
+        AND cp.deleted_at IS NULL AND cp.active = TRUE
+        AND pe.reverted_at IS NULL AND pe.kind = 'text' AND pe.field LIKE 'col:%'
+        -- ★ 여기서는 **넓게** 거른다(상위집합) — 편집 전량을 끌어오지 않기 위한 필터일 뿐이고
+        --   어느 칸이 결제금액인지는 아래 JS 가 정한다(SQL 에 판정 사본 금지 — 메인 쿼리와 같은 규율).
+        AND (replace(pe.field, ' ', '') LIKE '%금액%' OR replace(pe.field, ' ', '') = ANY($3))`,
+    [sheetIds, tabNames, AMOUNT_EXACT_KEYS.map(k => 'col:' + k)]
+  );
+  // ★ 어떤 헤더가 '금액 후보'인지는 `isAmountCandidateHeader` 단일 출처가 판정한다(SQL 사본 금지).
+  const cells = rows.filter(e => isAmountCandidateHeader(String(e.field).slice(4)));
+  const rowsOfEdit = new Map();
+  for (const e of cells) {
+    const s = rowsOfEdit.get(e.editId) || new Set();
+    s.add(e.sheetId + '||' + e.tabName + '||' + e.rowIndex);
+    rowsOfEdit.set(e.editId, s);
+  }
+  let dropped = 0;
+  for (const e of cells) {
+    const anchored = rowsOfEdit.get(e.editId);
+    if (!anchored || anchored.size > 1) { dropped++; continue; }   // 중복 앵커 → 미적용
+    const k = e.sheetId + '||' + e.tabName + '||' + e.rowIndex;
+    (map[k] = map[k] || {})[String(e.field).slice(4)] = e.valueText == null ? '' : e.valueText;
+  }
+  // 조용한 누락 금지 — 못 쓴 편집이 있으면 수치로 남긴다(화면은 원장/장부 값으로 계산된다).
+  if (dropped) logger.warn(`[payment] 중복 앵커라 반영 못한 결제금액 편집 ${dropped}건`);
   return map;
 }
 

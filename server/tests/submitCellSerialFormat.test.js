@@ -87,7 +87,10 @@ console.log('\n[C~E] 표기 — 함수를 vm 으로 꺼내 실제 실행');
 
 console.log('\n[F] 복사(data-val) — 보이는 값, 단 입금은 종전 정본');
 {
-  const i = html.indexOf('const eCell=(field, disp, edited, extraCls, styleI, editv)=>');
+  /* ★ 인자 목록 전체를 문자열로 고정하지 않는다 — eCell 은 표시용 인자가 늘어나는 자리라
+     (실제로 밟았다: 결제금액 편차 경고칠이 `tip` 을 더하자 이 가드가 "찾지 못했다"로 죽었다)
+     이름만으로 찾고, 지키려는 것은 아래 본문 안의 **복사 규칙** 세 줄이다. */
+  const i = html.indexOf('const eCell=(');
   assert(i > 0, 'eCell 을 찾지 못했다');
   const cell = html.slice(i, html.indexOf('\n    };', i));
   ok("★ 리뷰제출 칸만 보이는 값으로 복사", /if\(statusKind==='review'\)\s*editv=disp;/.test(cell), cell.slice(0, 500));

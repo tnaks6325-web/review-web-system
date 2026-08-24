@@ -59,6 +59,10 @@ const DELETE_TABLES = [
   'raw_sheet_rows',
   'raw_sheet_tabs',
   'order_submissions',
+  // 그 주문들의 편집 이력(134). 주문이 함께 지워지므로 이력만 남길 이유가 없다(고아 기록 금지).
+  //   ★ 돈 기록(MONEY_TABLES)이 아니다 — 입금 사실이 아니라 "누가 어떤 칸을 고쳤나"의 기록이라
+  //     이것 때문에 작업 삭제를 막으면 실무만 막힌다.
+  'order_ledger_edit_log',
   'participation_links',
   'sheet_row_claims',
   'slot_locks',
