@@ -158,6 +158,21 @@
   .brdname{font-size:13px;font-weight:800;min-width:96px}
   .brdmeta{font-size:11.5px;color:var(--muted);flex:1;min-width:120px}
   .brdacts{display:flex;gap:5px;flex-wrap:wrap}
+  /* 브랜드 행 클릭 = 귀속 작업 펼침(사용자 확정 2026-08-24). 카드 자체가 열림 손잡이라 커서·caret 으로 어포던스를 준다.
+     ★ 버튼·토글은 자기 자리에서 event.stopPropagation() 으로 펼침과 분리한다(링크 복사할 때마다 펼쳐지면 안 된다). */
+  .brdcard.clk{cursor:pointer}
+  .brdcard.clk:hover{border-color:var(--line2)}
+  .brdcard.open{border-color:var(--accent);box-shadow:0 3px 12px rgba(37,99,235,.08)}
+  .brdcaret{width:12px;flex:none;font-size:9px;color:var(--faint);text-align:center;transition:transform .15s}
+  .brdcard.open .brdcaret{transform:rotate(90deg);color:var(--accent)}
+  .brdrows{display:grid;gap:5px;margin:-3px 0 3px;padding:9px 12px 10px 30px;background:var(--card2);border:1px solid var(--line);border-top:none;border-radius:0 0 11px 11px}
+  .brdrow{display:flex;align-items:center;gap:9px;padding:6px 9px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:12px}
+  .brdrow.go{cursor:pointer}
+  .brdrow.go:hover{border-color:var(--accent);background:var(--accent-soft,var(--card2))}
+  .brdrow .rdt{font-size:11px;color:var(--muted);min-width:34px;flex:none}
+  .brdrow .rnm{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .brdrow .rcnt{font-size:11px;color:var(--muted);flex:none}
+  .brdempty{font-size:11.5px;color:var(--faint);padding:3px 2px}
   .tgl{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
   .tgl .sw{width:30px;height:17px;border-radius:999px;background:var(--line2);position:relative;flex:none;transition:background .15s}
   .tgl .sw:after{content:"";position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;top:2px;left:2px;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .15s}
@@ -2436,7 +2451,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
               advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advQ:'', advF:'all',            // 전체 작업 검색어 · 상태 칩(all|run|done) — 화면 전환에도 유지
-              brandNew:null, brandEdit:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
+              brandNew:null, brandEdit:null, brandOpen:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
               brandId:null, advName:'',       // 094: 브랜드 링크 세션(brand_id 클레임) · 운영사(대행사) 이름(A안 표기)
               advs:[], advCur:null, tabIndex:{}, sheetMap:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
@@ -3155,9 +3170,12 @@ function _renderAdvHome(){
   const host=$('#main'); if(!host) return;
   const aw=STATE.advWork;
   if(!aw){ host.innerHTML=`<div class="empty">불러오는 중…</div>`; return; }
-  if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
   const v=STATE.advView||'dash';
-  if(v==='list') _renderAdvList(); else if(v==='brands'&&!STATE.brandId) _renderAdvBrands(); else _renderAdvDash();
+  // ★ 브랜드 관리는 작업이 0건이거나 요약 조회가 실패해도 열린다 — 브랜드를 만드는 화면이 작업 유무에
+  //   막히면 "메뉴는 있는데 눌러도 아무것도 없는" 막다른 길이 된다(실브라우저 실측 2026-08-24).
+  if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();
+  if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
+  if(v==='list') _renderAdvList(); else _renderAdvDash();
 }
 // ★ 표 행 빌더는 한 벌 — 대시보드 "최근 작업"은 이걸 limit 만 달리해 호출한다(사본을 두면 두 화면의 컬럼·판정이 어긋난다).
 function _awRowHtml(it){
@@ -3205,8 +3223,49 @@ function _renderAdvList(){
 //   데이터 = STATE.advWork.brands(요약 응답 동봉) + items[].brandId. 조작 후엔 요약 재수신으로 수렴.
 async function _brandsReload(){
   const s=await api('/api/trackb/my-work-summary').catch(()=>null);
-  if(s&&s.ok) STATE.advWork={items:s.items||[],settlementHidden:!!s.settlementHidden,brand:s.brand||null,brands:s.brands||[]};
+  if(s&&s.ok){
+    // ★★ brands 가 배열이 아니면(서버가 브랜드 조회에 실패해 undefined 로 내려보낸 경우) 지우지 않고 그대로 둔다 —
+    //    "모른다"를 "없다"로 접으면 멀쩡한 브랜드가 화면에서 통째로 사라진다(trackB.service advertiserWorkSummary).
+    const prev=(STATE.advWork&&Array.isArray(STATE.advWork.brands))?STATE.advWork.brands:[];
+    STATE.advWork={items:s.items||[],settlementHidden:!!s.settlementHidden,brand:s.brand||null,
+      brands:Array.isArray(s.brands)?s.brands:prev};
+  }
   _renderAdvSidebar(); if((STATE.advView||'')==='brands') _renderAdvBrands();
+  // ★ 조용한 실패 금지 — 이 요약 API 는 소유 탭 전수 + 인트라넷 정산 프록시를 도는 무거운 경로라
+  //   느리거나 죽을 수 있다. 못 불러왔으면 화면이 그 사실을 말한다(사람이 재시도해 중복 오류를 보지 않게).
+  if(!s||!s.ok) toast('목록을 새로 불러오지 못했습니다 — 잠시 후 새로고침해 주세요');
+  return !!(s&&s.ok);
+}
+// 방금 만든 브랜드를 목록에 즉시 합류시킨다(같은 id 면 갱신). 서버 응답의 brand 를 그대로 쓴다 — 화면이 값을 지어내지 않는다.
+function _brandsMerge(nb){
+  if(!nb||!nb.id) return;
+  const aw=STATE.advWork||(STATE.advWork={items:[],settlementHidden:false,brand:null,brands:[]});
+  const list=Array.isArray(aw.brands)?aw.brands:(aw.brands=[]);
+  const i=list.findIndex(x=>x&&x.id===nb.id);
+  if(i>=0) list[i]=Object.assign({},list[i],nb); else list.push(Object.assign({tabCount:0},nb));
+}
+// 브랜드 행 펼침(사용자 확정 2026-08-24) — 상태는 STATE.brandOpen{id:true}(브랜드마다 독립 토글).
+//   ★ 재료는 이미 받아 둔 items[].brandId 하나 — 신규 API 0. 표시·이동은 사이드바가 쓰는
+//     _awDate/_awStatus/_tabLabel/selTab 을 그대로 재사용한다(판정·표기 사본 0).
+function _brandOpen(id){ return !!(STATE.brandOpen&&STATE.brandOpen[id]); }
+function brandToggleRows(id){
+  const m=STATE.brandOpen||(STATE.brandOpen={});
+  if(m[id]) delete m[id]; else m[id]=true;
+  _renderAdvBrands();
+}
+function _brandRowsHtml(b,items,be){
+  if(!b||!_brandOpen(b.id)) return '';
+  if(be&&be.id===b.id) return '';   // 편집·확인 중인 카드는 모양이 통째로 바뀐다 — 그때는 접는다
+  const mine=(items||[]).filter(it=>it&&it.brandId===b.id);
+  if(!mine.length) return `<div class="brdrows"><div class="brdempty">아직 귀속된 작업이 없습니다 — [작업 귀속]에서 선택하세요.</div></div>`;
+  return `<div class="brdrows">${mine.map(it=>{
+    const i=_awTabIdx(it), st=_awStatus(it);
+    return `<div class="brdrow${i>=0?' go':''}"${i>=0?` onclick="selTab(${i})" title="${esc(_tabTip(it))}"`:''}>
+      <span class="rdt">${esc(_awDate(it))}</span>
+      <span class="rnm">${esc(_tabLabel(it))}</span>
+      <span class="rcnt">${it.total||0}명 · 제출 ${it.submitted||0}</span>
+      <span class="bb ${st.tone}">${esc(st.label)}</span></div>`;
+  }).join('')}</div>`;
 }
 function _brandLinkUrl(tok){ return location.origin+location.pathname.replace(/[^/]*$/,'')+'workdesk.html#adv='+encodeURIComponent(tok||''); }
 function _renderAdvBrands(){
@@ -3227,7 +3286,7 @@ function _renderAdvBrands(){
     if(be&&be.id===b.id&&be.mode==='delete') return `<div class="brdcard confirming">
       <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
       <span class="brdname">${esc(b.name)}</span>
-      <span class="brdmeta">삭제하면 <b>공유 링크가 즉시 무효</b>가 되고, 배정된 작업 ${b.tabCount||0}건은 미분류로 돌아갑니다.</span>
+      <span class="brdmeta">삭제하면 <b>공유 링크가 즉시 무효</b>가 되고, 귀속된 작업 ${b.tabCount||0}건은 미분류로 돌아갑니다.</span>
       <button class="btn xs danger" onclick="brandDeleteConfirm()">삭제</button>
       <button class="btn xs" onclick="brandEditClose()">취소</button>
       ${be.err?`<span class="bnerr">${esc(be.err)}</span>`:''}</div>`;
@@ -3244,16 +3303,20 @@ function _renderAdvBrands(){
       <input id="belink" class="belink" readonly value="${esc(be.url||'')}" onclick="this.select()">
       <span class="bnhint">복사가 자동으로 되지 않아 링크를 펼쳤습니다 — 선택해 복사하세요</span>
       <button class="bnx" onclick="brandEditClose()" title="닫기">✕</button></div>`;
-    return `<div class="brdcard">
+    // 행 전체가 펼침 손잡이 — 귀속된 작업을 카드 아래에 편다(사용자 확정 2026-08-24).
+    //   ★ 버튼·토글은 stopPropagation 으로 분리(링크 복사·토글이 펼침을 건드리면 안 된다).
+    const opened=_brandOpen(b.id);
+    return `<div class="brdcard clk${opened?' open':''}" onclick="brandToggleRows('${esc(b.id)}')" title="클릭하면 이 브랜드에 귀속된 작업이 아래로 펼쳐집니다">
+      <span class="brdcaret">${opened?'▾':'▸'}</span>
       <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
       <span class="brdname">${esc(b.name)}</span>
       ${be&&be.id===b.id&&be.mode==='err'?`<span class="bnerr">${esc(be.err||'')}</span>`:''}
-      <span class="brdmeta">작업 ${b.tabCount||0}건 배정${off?' · <b style="color:var(--bad)">링크 정지됨</b>':''}</span>
-      <label class="tgl${b.settlementVisible?' on':''}" title="켜면 브랜드사도 견적서·계산서·금액 칸을 봅니다 (기본: 숨김)" onclick="brandFlag('${esc(b.id)}','settlement-visible',${!b.settlementVisible});return false"><span class="sw"></span>정산 공개</label>
-      <label class="tgl${b.foldersVisible?' on':''}" title="켜면 브랜드사도 구매캡쳐·리뷰캡쳐 폴더 버튼을 봅니다 (기본: 비노출)" onclick="brandFlag('${esc(b.id)}','folders-visible',${!b.foldersVisible});return false"><span class="sw"></span>폴더 공개</label>
-      <span class="brdacts">
+      <span class="brdmeta">작업 ${b.tabCount||0}건 귀속${off?' · <b style="color:var(--bad)">링크 정지됨</b>':''}</span>
+      <label class="tgl${b.settlementVisible?' on':''}" title="켜면 브랜드사도 견적서·계산서·금액 칸을 봅니다 (기본: 숨김)" onclick="event.stopPropagation();brandFlag('${esc(b.id)}','settlement-visible',${!b.settlementVisible});return false"><span class="sw"></span>정산 공개</label>
+      <label class="tgl${b.foldersVisible?' on':''}" title="켜면 브랜드사도 구매캡쳐·리뷰캡쳐 폴더 버튼을 봅니다 (기본: 비노출)" onclick="event.stopPropagation();brandFlag('${esc(b.id)}','folders-visible',${!b.foldersVisible});return false"><span class="sw"></span>폴더 공개</label>
+      <span class="brdacts" onclick="event.stopPropagation()">
         <button class="btn xs" onclick="brandCopyLink('${esc(b.id)}')">🔗 링크 복사</button>
-        <button class="btn xs" onclick="brandAssignModal('${esc(b.id)}')">작업 배정</button>
+        <button class="btn xs" onclick="brandAssignModal('${esc(b.id)}')">작업 귀속</button>
         <button class="btn xs" onclick="brandFlag('${esc(b.id)}','link-active',${off})">${off?'링크 재개':'링크 정지'}</button>
         <button class="btn xs" onclick="brandRotate('${esc(b.id)}')" title="이전 링크를 무효화하고 새 링크 발급(유출 대응)">링크 재발급</button>
         <button class="btn xs" onclick="brandRename('${esc(b.id)}')">이름</button>
@@ -3273,10 +3336,10 @@ function _renderAdvBrands(){
   host.innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 브랜드 관리</h1>
       <span class="bd a">업체 전용</span><span style="flex:1"></span>${slot}</div>
     ${nb.err?`<div class="bnerrwrap"><span class="bnerr">${esc(nb.err)}</span></div>`:''}
-    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;max-width:860px">브랜드사별로 작업을 분류하고 <b>브랜드별 고유 링크</b>를 전달하세요. 브랜드사는 자기 브랜드에 배정된 작업만 볼 수 있고,
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;max-width:860px">브랜드사별로 작업을 분류하고 <b>브랜드별 고유 링크</b>를 전달하세요. 브랜드사는 자기 브랜드에 귀속된 작업만 볼 수 있고,
       <b>정산 정보(견적서·계산서·금액)와 자료 폴더는 기본 숨김</b> — 브랜드별 토글로 공개를 선택합니다. 브랜드사 화면에는 "운영: ${esc(STATE.name||'')}"가 표기됩니다.</p>
-    <div class="brdlist">${brands.map(card).join('')||''}
-      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 배정하지 않은 작업은 이 화면(대행사)에서만 보입니다`:(nb.open?'이름을 입력하고 Enter 를 누르세요.':'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.')}</div>
+    <div class="brdlist">${brands.map(b=>card(b)+_brandRowsHtml(b,items,be)).join('')||''}
+      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 귀속하지 않은 작업은 이 화면(대행사)에서만 보입니다`:(nb.open?'이름을 입력하고 Enter 를 누르세요.':'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.')}</div>
     </div></div>`;
   if(nb.open) _bnFocus();
 }
@@ -3311,9 +3374,14 @@ async function brandNewSubmit(){
   const r=await api('/api/trackb/brands/create',{method:'POST',body:JSON.stringify({name,color:_bnColor(brands.length)})}).catch(()=>null);
   nb.busy=false;
   if(!r||!r.ok){ STATE.brandNew={open:true,name,err:(r&&r.error)||'브랜드 추가에 실패했습니다. 잠시 후 다시 시도해 주세요.'}; _renderAdvBrands(); return; }
+  // ★★ 서버가 돌려준 브랜드를 **즉시** 목록에 넣고 그린다(사용자 신고 2026-08-24).
+  //    종전엔 아래 _brandsReload(무거운 요약 API) 한 번에 전적으로 매달려 있어, 그 요청이 느리거나
+  //    실패하면 "추가는 됐는데 화면엔 없는" 상태가 됐고 사람은 다시 눌러 서버 중복 오류를 봤다.
   STATE.brandNew={open:true,name:'',err:''};   // 입력칸 유지 = 연달아 등록
-  await _brandsReload();
+  _brandsMerge(r.brand);
+  _renderAdvSidebar(); _renderAdvBrands();
   toast(`브랜드 "${name}" 추가됨`);
+  _brandsReload();   // 배경 수렴(정렬·건수) — 실패해도 위에서 넣은 브랜드는 목록에 남는다
 }
 // 색상 자동 배정(사용자 확정: 색 선택 UI 없음) — 추가 순서대로 순환해 목록·배정 화면에서 구분된다.
 const _BN_COLORS=['#2563eb','#0e7490','#16a34a','#b45309','#e11d74','#6d5ac9'];
@@ -3380,7 +3448,7 @@ function brandCopyLink(id){
     ()=>{ STATE.brandEdit={id,mode:'link',url}; _renderAdvBrands();
           const el=$('#belink'); if(el){ el.focus(); el.select(); } });
 }
-// 작업 배정 모달(와이어프레임 B) — 체크된 작업 = 이 브랜드. 다른 브랜드 배정 작업을 체크하면 이 브랜드로 이동.
+// 작업 귀속 모달(와이어프레임 B) — 체크한 작업 = 이 브랜드. 다른 브랜드에 귀속된 작업을 체크하면 이 브랜드로 옮긴다.
 function brandAssignModal(id){
   const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
   const items=_awItems();
@@ -3389,9 +3457,9 @@ function brandAssignModal(id){
     const ob=other?((STATE.advWork.brands||[]).find(x=>x.id===it.brandId)||{}).name:'';
     return `<label class="basrow"><input type="checkbox" data-ix="${ix}" ${mine?'checked':''}>
       <span style="flex:1;font-weight:650">${esc(it.tabName)}</span>
-      ${other?`<span class="bd" title="체크하면 ${esc(b.name)}(으)로 이동">현재: ${esc(ob||'다른 브랜드')}</span>`:(mine?'<span class="bd g">배정됨</span>':'<span class="bd">미분류</span>')}</label>`;
+      ${other?`<span class="bd" title="체크하면 ${esc(b.name)}(으)로 이동">현재: ${esc(ob||'다른 브랜드')}</span>`:(mine?'<span class="bd g">귀속됨</span>':'<span class="bd">미분류</span>')}</label>`;
   }).join('');
-  _modal(`작업 배정 — ${b.name}`,
+  _modal(`작업 귀속 — ${b.name}`,
     `<p style="font-size:12px;color:var(--muted);margin:0 0 10px">체크한 작업이 <b>${esc(b.name)}</b> 브랜드사 화면에 보입니다. 체크를 해제하면 미분류로 돌아갑니다.</p>
      <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:10px" id="basList">${rows||'<div class="empty">작업이 없습니다.</div>'}</div>
      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="document.getElementById('wdModal').remove()">취소</button><button class="btn" style="background:var(--accent);border-color:var(--accent);color:#fff" onclick="brandAssignSave('${esc(id)}')">저장</button></div>`);

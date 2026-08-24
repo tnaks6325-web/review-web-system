@@ -189,7 +189,7 @@ async function run() {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   ok('브랜드 관리 사이드바 메뉴 — 브랜드 세션에는 미노출', /STATE\.brandId\?'':`<div class="awitem\$\{[^`]*advHome\('brands'\)/.test(src));
   ok('브랜드 관리 화면 렌더러(_renderAdvBrands) + 카드/토글', src.includes('function _renderAdvBrands') && src.includes('brdcard') && src.includes("brandFlag("));
-  ok('작업 배정 모달(체크박스 일괄 배정)', src.includes('function brandAssignModal') && src.includes('function brandAssignSave'));
+  ok('작업 귀속 모달(체크박스 일괄 지정)', src.includes('function brandAssignModal') && src.includes('function brandAssignSave'));
   ok('브랜드 링크 = 기존 #adv= 프래그먼트 재사용', /_brandLinkUrl[\s\S]{0,160}#adv=/.test(src));
   ok('★ A안: 브랜드 화면 상단·헤더에 운영사(대행사) 표기', src.includes('function _brandBadge') && src.includes('운영: '));
   ok('★ 미전송 칸은 컬럼째 제거(자리 남기면 "미연결"로 오해)',
@@ -197,6 +197,129 @@ async function run() {
   ok('브랜드 세션 폴더 셀은 자리도 없음', /STATE\.brandId&&!it\.folderUrl&&!it\.captureFolderUrl\) return ''/.test(src));
   ok('세션 초기화 시 브랜드 상태·body 클래스 정리(계정 전환 잔재 차단)',
     src.includes("brandId:null,advName:''") && src.includes("remove('advm','brandv','nostl','nofol')"));
+
+
+  /* ═══ 7. 브랜드 관리 화면 — 즉시 반영 · 귀속 어휘 · 행 펼침 (사용자 확정 2026-08-24) ═══
+     ★ 문자열 검사만으로는 "함수 안 어디에 있나"를 못 본다 → 함수를 vm 으로 꺼내 **실제 실행**한다. */
+  const vm = require('vm');
+  const grab = (name, kind) => {   // 함수 선언 한 개를 중괄호 매칭으로 잘라낸다
+    const head = (kind === 'async' ? 'async function ' : 'function ') + name + '(';
+    const i = src.indexOf(head); assert(i >= 0, '함수 없음: ' + name);
+    let j = src.indexOf('{', i), d = 0;
+    for (let k = j; k < src.length; k++) {
+      if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (!d) return src.slice(i, k + 1); }
+    }
+    throw new Error('중괄호 불균형: ' + name);
+  };
+  const brandSandbox = (opts = {}) => {
+    const box = {
+      STATE: opts.STATE || {}, toasts: [], renders: 0, sidebars: 0, opened: [],
+      esc: (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+      api: opts.api || (async () => ({ ok: true })),
+      toast(m) { box.toasts.push(m); },
+      _renderAdvBrands() { box.renders++; },
+      _renderAdvSidebar() { box.sidebars++; },
+      selTab(i) { box.opened.push(i); },
+      _awTabIdx: (it) => (it && it.idx != null ? it.idx : -1),
+      _awStatus: () => ({ label: '진행중', tone: 'b' }),
+      _awDate: (it) => it.date || '8/1',
+      _tabLabel: (it) => it.tabName,
+      _tabTip: (it) => it.tabName,
+      _bnColor: () => '#2563eb',
+    };
+    vm.createContext(box);
+    for (const [nm, kd] of [['_brandOpen'], ['brandToggleRows'], ['_brandRowsHtml'], ['_brandsMerge'],
+      ['_brandsReload', 'async'], ['brandNewSubmit', 'async']]) vm.runInContext(grab(nm, kd), box);
+    return box;
+  };
+
+  // 7-1. 추가 성공 → **요약 재조회가 실패해도** 목록에 즉시 남는다(신고 증상의 직접 재현)
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [] }, brandNew: { open: true, name: '웰스앤헬스' }, advView: 'brands' },
+      api: async (path) => path.indexOf('/brands/create') >= 0
+        ? { ok: true, brand: { id: 'brd_new', name: '웰스앤헬스', color: '#2563eb', linkToken: 't', linkActive: true } }
+        : null,   // ← my-work-summary 는 실패(무거운 요약 API 가 느리거나 죽은 상황)
+    });
+    await b.brandNewSubmit();
+    await new Promise((r) => setTimeout(r, 0));   // 재조회는 배경 — 한 틱 뒤 결과(고지 토스트)를 본다
+    const list = b.STATE.advWork.brands;
+    ok('★ 추가 즉시 반영 — 요약 재조회가 실패해도 새 브랜드가 목록에 남는다',
+      list.length === 1 && list[0].id === 'brd_new' && list[0].name === '웰스앤헬스');
+    ok('★ 추가 직후 목록·사이드바를 그 자리에서 다시 그린다(재조회를 기다리지 않는다)', b.renders >= 1 && b.sidebars >= 1);
+    ok('새 브랜드의 tabCount 는 0(서버가 안 준 값을 지어내지 않는다)', list[0].tabCount === 0);
+    ok('★ 재조회 실패는 조용히 넘기지 않고 문장으로 말한다', b.toasts.some((t) => /불러오지 못했습니다/.test(t)));
+    ok('추가 성공 자체도 알린다', b.toasts.some((t) => /추가됨/.test(t)));
+    ok('입력칸은 열린 채 비워진다(연달아 등록)', b.STATE.brandNew.open === true && !b.STATE.brandNew.name);
+  }
+  // 7-2. 화면 중복검사는 즉시 반영된 목록을 본다 → 같은 이름 재입력은 왕복 없이 막힌다
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [{ id: 'brd_new', name: '웰스앤헬스' }] }, brandNew: { open: true, name: '웰스앤헬스' } },
+      api: async () => { throw new Error('서버에 닿으면 안 된다'); },
+    });
+    await b.brandNewSubmit();
+    ok('★ 즉시 반영 덕에 같은 이름 재추가는 서버 왕복 없이 화면에서 막힌다',
+      /이미 "웰스앤헬스" 브랜드가 있습니다/.test(b.STATE.brandNew.err || ''));
+  }
+  // 7-3. 재조회가 브랜드를 "모른다"고 지우지 않는다
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [{ id: 'brd_a', name: '봉구' }] }, advView: 'brands' },
+      api: async () => ({ ok: true, items: [] }),   // brands 미동봉(서버 브랜드 조회 실패 = undefined)
+    });
+    const fresh = await b._brandsReload();
+    ok('★ 요약에 brands 가 없으면(모름) 기존 목록을 유지한다 — 있던 브랜드가 사라지지 않는다',
+      b.STATE.advWork.brands.length === 1 && b.STATE.advWork.brands[0].id === 'brd_a' && fresh === true);
+  }
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [{ id: 'brd_a', name: '봉구' }] }, advView: 'brands' },
+      api: async () => ({ ok: true, items: [{ sheetId: 's1', tabName: 'A' }], brands: [] }),
+    });
+    await b._brandsReload();
+    ok('빈 배열로 내려오면 그대로 반영한다(진짜 0건 = 지운다)', b.STATE.advWork.brands.length === 0);
+  }
+  // 7-4. 행 펼침 — 귀속된 작업만, 닫힘/편집 중에는 안 그린다
+  {
+    const items = [
+      { sheetId: 's1', tabName: '웰스앤헬스 천기', brandId: 'brd_a', idx: 3, total: 10, submitted: 4 },
+      { sheetId: 's2', tabName: '남의 작업', brandId: 'brd_b', idx: 4 },
+      { sheetId: 's3', tabName: '미분류 작업', brandId: null, idx: 5 },
+    ];
+    const b = brandSandbox({ STATE: { advWork: { items, brands: [] }, brandOpen: null } });
+    const brand = { id: 'brd_a', name: '웰스앤헬스' };
+    ok('닫힌 브랜드는 펼침 블록을 그리지 않는다', b._brandRowsHtml(brand, items, null) === '');
+    b.brandToggleRows('brd_a');
+    const html = b._brandRowsHtml(brand, items, null);
+    ok('★ 펼치면 그 브랜드에 귀속된 작업만 나온다(남의 작업·미분류 제외)',
+      html.indexOf('웰스앤헬스 천기') >= 0 && html.indexOf('남의 작업') < 0 && html.indexOf('미분류 작업') < 0);
+    ok('행을 누르면 그 작업이 열린다(selTab — 사이드바와 같은 경로)', /onclick="selTab\(3\)"/.test(html));
+    ok('편집·확인 중인 카드는 펼침을 접는다(카드 모양이 통째로 바뀐다)',
+      b._brandRowsHtml(brand, items, { id: 'brd_a', mode: 'rename' }) === '');
+    ok('★ 귀속 0건이면 "없다"가 아니라 다음 행동을 말한다',
+      /귀속된 작업이 없습니다/.test(b._brandRowsHtml({ id: 'brd_z' }, items, null)) === false
+      && (b.brandToggleRows('brd_z'), /귀속된 작업이 없습니다[\s\S]*작업 귀속/.test(b._brandRowsHtml({ id: 'brd_z' }, items, null))));
+    b.brandToggleRows('brd_a');
+    ok('다시 누르면 접힌다(브랜드마다 독립 토글)', b._brandRowsHtml(brand, items, null) === '' && b._brandOpen('brd_z') === true);
+  }
+  // 7-5. 어휘 — 브랜드 관리 화면에서 "배정"은 쓰지 않는다(사용자 확정: 귀속)
+  {
+    const from = src.indexOf('function _renderAdvBrands'), to = src.indexOf('async function brandAssignSave');
+    assert(from > 0 && to > from);
+    const seg = src.slice(from, to).replace(/^\s*\/\/.*$/gm, '');   // 주석 제외
+    ok('★ 브랜드 관리 화면 문구에 "배정" 없음', seg.indexOf('배정') < 0);
+    ok('버튼·설명은 "귀속"', /작업 귀속<\/button>/.test(seg) && /작업 \$\{b\.tabCount\|\|0\}건 귀속/.test(seg) && /귀속됨/.test(seg));
+  }
+  // 7-6. 행 클릭이 버튼·토글을 삼키지 않는다
+  ok('★ 카드 행 클릭 = 펼침, 버튼 묶음·토글은 stopPropagation 으로 분리',
+    /brandToggleRows\('\$\{esc\(b\.id\)\}'\)/.test(src)
+    && /class="brdacts" onclick="event\.stopPropagation\(\)"/.test(src)
+    && (src.match(/onclick="event\.stopPropagation\(\);brandFlag\(/g) || []).length === 2);
+  ok('세션 초기화에 펼침 상태도 포함(계정 전환 잔재 차단)', /brandOpen:null/.test(src));
+  ok('★ 브랜드 관리는 작업 0건·요약 실패여도 열린다(막다른 길 금지 — 조기 반환보다 앞)',
+    src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") > 0
+    && src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") < src.indexOf("'진행 중인 작업이 없습니다.'}</div>`; return; }"));
 
   console.log(`\n✅ brandShare: ${n} cases passed`);
 }
