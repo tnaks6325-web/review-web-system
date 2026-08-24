@@ -406,9 +406,63 @@ function normalizeSheetId(v) {
   return /^[a-zA-Z0-9_-]{20,}$/.test(s) ? s : '';
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   저장 안전장치 3종 (사용자 확정 2026-08-24 — 8/23 전멸 사고 재발 방지)
+   ══════════════════════════════════════════════════════════════════
+   8/23 에 이 설정이 통째로 비워져 **작업표를 아무것도 못 만드는** 상태가 됐다. 원인은
+   저장이 `_emptyTemplate()` 에서 시작하는 **전체 교체**인데 막는 장치가 하나도 없던 것.
+   어떤 요청이었는지는 이력이 없어 끝내 특정하지 못했다(성공한 POST 는 로그에도 안 남는다).
+
+   ① **빈 저장 차단(fail-closed)** — 저장된 공통 열이 있는데 0열로 저장하려 하면 **거부**한다.
+      진짜 비우려면 `confirmClear: true` 를 명시해야 한다.
+      ★ 이 하나가 사고의 **숨은 절반**까지 막는다: 조회가 실패하면 화면이 "설정 없음"처럼
+        보이는데(fail-soft 빈 템플릿), 그 상태에서 저장을 눌러도 여기서 거부된다.
+   ② **부분 저장** — `undefined` 로 온 항목은 **기존 값을 유지**한다(레포의 COALESCE 규율).
+      빈 본문 POST 한 번이 채널 열·작업유형·템플릿 시트까지 지우던 경로가 닫힌다.
+      ★ 빈 배열 `[]` 은 "비우기" 의사표시라 그대로 반영한다 — 미전송과 구분한다.
+   ③ **되돌리기** — 저장 직전 값을 같은 키 안 `history` 에 최근 10개까지 쌓는다
+      (신규 표 0 — 은행 이름 설정의 `log[]` 선례). 값이 실제로 달라졌을 때만 쌓아
+      같은 값 반복 저장으로 이력이 밀리지 않게 한다.
+   ══════════════════════════════════════════════════════════════════ */
+const HISTORY_MAX = 10;
+
+/** 이력에 남기는 스냅샷(표시·복구에 필요한 값만 — history 자체는 넣지 않는다: 재귀 방지). */
+function _snapshot(t) {
+  return {
+    at: t.updatedAt || null, by: t.updatedBy || null,
+    core: (t.core || []).slice(), channels: JSON.parse(JSON.stringify(t.channels || {})),
+    customChannels: (t.customChannels || []).map(c => ({ key: c.key, label: c.label })),
+    workTypes: JSON.parse(JSON.stringify(t.workTypes || [])),
+    templateSheetId: t.templateSheetId || '',
+  };
+}
+/** 값이 실제로 달라졌는가(이력·경합 판정) — updatedAt/By 는 제외한다. */
+function _sameValue(a, b) {
+  const pick = (t) => JSON.stringify([t.core || [], t.channels || {}, t.customChannels || [],
+    t.workTypes || [], t.templateSheetId || '']);
+  return pick(a) === pick(b);
+}
+/** 저장된 원본(이력 포함) — 저장·복구가 직전 값을 읽을 때 쓴다. 실패는 throw(모르면 안 쓴다). */
+async function _readRaw() {
+  const db = getPool();
+  const { rows } = await db.query(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [TEMPLATE_KEY]);
+  if (!rows.length || !rows[0].value) return { tpl: _emptyTemplate(), history: [] };
+  const j = JSON.parse(rows[0].value);
+  const tpl = _emptyTemplate();
+  tpl.core = _normNames(j.core);
+  tpl.customChannels = _normCustomChannels(j.customChannels);
+  tpl.workTypes = _normWorkTypes(j.workTypes);
+  channelList(tpl).forEach(c => { tpl.channels[c.key] = _normNames((j.channels || {})[c.key]); });
+  tpl.templateSheetId = normalizeSheetId(j.templateSheetId);
+  tpl.updatedAt = j.updatedAt || null;
+  tpl.updatedBy = j.updatedBy || null;
+  return { tpl, history: Array.isArray(j.history) ? j.history : [] };
+}
+
 /** 저장된 템플릿(없으면 빈 템플릿) + 분류/경고. 조회 실패는 빈 템플릿(fail-soft). */
 async function getTemplate() {
   let saved = _emptyTemplate();
+  let history = [];
   try {
     const db = getPool();
     const { rows } = await db.query(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [TEMPLATE_KEY]);
@@ -423,38 +477,141 @@ async function getTemplate() {
       saved.templateSheetId = normalizeSheetId(j.templateSheetId);
       saved.updatedAt = j.updatedAt || null;
       saved.updatedBy = j.updatedBy || null;
+      /* ③ 이력은 **요약만** 내려보낸다 — 전체 스냅샷을 실으면 이 응답을 쓰는 소비처 4곳
+         (작업표 생성·접수·공고 훅·라우트)이 매번 그 덩어리를 함께 들고 다닌다.
+         복구는 사람이 그 시각(at)을 지목할 때 서버가 원본에서 읽는다. */
+      history = (Array.isArray(j.history) ? j.history : []).map(h => ({
+        at: h.at || null, by: h.by || null,
+        coreCount: (h.core || []).length,
+        typeCount: (h.workTypes || []).length,
+        hasSheet: !!h.templateSheetId,
+      }));
     }
   } catch (err) {
     // 파싱 실패·조회 실패 모두 "설정 없음"으로 수렴 — 설정 화면이 통째로 죽지 않게.
     logger.warn(`[worktable/getTemplate] 실패 — 빈 템플릿 반환: ${err.message}`);
     saved = _emptyTemplate();
+    history = [];
   }
-  return _decorate(saved);
+  return { ..._decorate(saved), history };
 }
 
-/** 템플릿 저장. 유효성은 서버가 최종 판정(정규화 후 저장·반환). */
-async function saveTemplate({ core, channels, customChannels, workTypes, templateSheetId, by } = {}) {
-  const next = _emptyTemplate();
-  next.core = _normNames(core);
-  next.customChannels = _normCustomChannels(customChannels);
-  next.workTypes = _normWorkTypes(workTypes);
-  // 커스텀 채널 정규화에서 키가 새로 발급될 수 있으므로 **정규화된 목록 기준**으로 열을 받는다.
-  channelList(next).forEach(c => { next.channels[c.key] = _normNames((channels || {})[c.key]); });
-  next.templateSheetId = normalizeSheetId(templateSheetId);
-  next.updatedAt = new Date().toISOString();
-  next.updatedBy = String(by || '').slice(0, 100) || null;
+/** 지정 코드로 거부한다(라우트가 400 으로 매핑 — 이 경로는 오류 마스킹 예외가 아니다). */
+function _refuse(code, message, extra) {
+  const e = new Error(message);
+  e.code = code;
+  if (extra) Object.assign(e, extra);
+  return e;
+}
 
+/** 저장 본문 → 다음 값(부분 저장). `undefined` 는 "변경 없음" = 기존 값 유지. */
+function _mergeTemplate(prev, body) {
+  const next = _emptyTemplate();
+  // ★ 빈 배열 `[]` 은 "비우기" 의사표시라 그대로 반영한다 — 미전송(undefined)과 구분.
+  next.core = body.core === undefined ? (prev.core || []).slice() : _normNames(body.core);
+  next.customChannels = body.customChannels === undefined
+    ? _normCustomChannels(prev.customChannels) : _normCustomChannels(body.customChannels);
+  next.workTypes = body.workTypes === undefined
+    ? _normWorkTypes(prev.workTypes) : _normWorkTypes(body.workTypes);
+  // 커스텀 채널 정규화에서 키가 새로 발급될 수 있으므로 **정규화된 목록 기준**으로 열을 받는다.
+  const sent = body.channels;
+  channelList(next).forEach(c => {
+    const v = sent === undefined ? undefined : (sent || {})[c.key];
+    next.channels[c.key] = v === undefined ? _normNames((prev.channels || {})[c.key]) : _normNames(v);
+  });
+  next.templateSheetId = body.templateSheetId === undefined
+    ? (prev.templateSheetId || '') : normalizeSheetId(body.templateSheetId);
+  return next;
+}
+
+/** 이력 쌓기 — 값이 실제로 달라졌고, 되돌릴 값이 있을 때만(빈 템플릿은 복구 대상이 아니다). */
+function _pushHistory(history, prev, next) {
+  const list = Array.isArray(history) ? history.slice() : [];
+  if (_sameValue(prev, next)) return list;
+  if (_sameValue(prev, _emptyTemplate())) return list;
+  list.unshift(_snapshot(prev));
+  return list.slice(0, HISTORY_MAX);
+}
+
+async function _writeTemplate(next, history) {
   const db = getPool();
   await db.query(
     `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [TEMPLATE_KEY, JSON.stringify(next)]
+    [TEMPLATE_KEY, JSON.stringify({ ...next, history })]
   );
+}
+
+/**
+ * 템플릿 저장. 유효성은 서버가 최종 판정(정규화 후 저장·반환).
+ *
+ * ★ 위 "저장 안전장치 3종" 참조 — ① 빈 저장 차단 ② 부분 저장 ③ 이력.
+ * ★ 직전 값을 못 읽으면 **저장하지 않는다**(fail-closed) — 모르는 채로 전체 교체하면
+ *   그게 바로 8/23 사고다. 조회 실패는 대개 쓰기도 실패하므로 잃는 것은 없다.
+ */
+async function saveTemplate({ core, channels, customChannels, workTypes, templateSheetId, by, confirmClear } = {}) {
+  let prev, history;
+  try {
+    const raw = await _readRaw();
+    prev = raw.tpl; history = raw.history;
+  } catch (err) {
+    logger.warn(`[worktable/saveTemplate] 직전 값 조회 실패 — 저장 거부: ${err.message}`);
+    throw _refuse('read_failed', '기존 설정을 읽지 못해 저장하지 않았습니다. 잠시 뒤 다시 시도해주세요.');
+  }
+
+  const next = _mergeTemplate(prev, { core, channels, customChannels, workTypes, templateSheetId });
+
+  // ① 저장된 공통 열이 있는데 0열로 저장하려 하면 거부(명시 confirmClear 만 통과).
+  if (!next.core.length && (prev.core || []).length && confirmClear !== true) {
+    throw _refuse('empty_core',
+      `공통 열을 0개로 저장하려고 합니다 — 지금 ${prev.core.length}개가 저장돼 있습니다. 정말 비우려면 확인이 필요합니다.`,
+      { prevCoreCount: prev.core.length });
+  }
+
+  next.updatedAt = new Date().toISOString();
+  next.updatedBy = String(by || '').slice(0, 100) || null;
+  await _writeTemplate(next, _pushHistory(history, prev, next));
+  return _decorate(next);
+}
+
+/**
+ * ③ 되돌리기 — 이력의 그 시각 값으로 복구한다.
+ *
+ * ★ 복구도 저장이라 **지금 값을 이력에 남긴다**(되돌리기를 다시 되돌릴 수 있어야 한다).
+ * ★ 이력에 없는 시각은 거부(추측해서 아무 값이나 쓰지 않는다).
+ * ★ 빈 저장 차단(①)을 적용하지 않는다 — 사람이 그 시점 값을 **지목**한 것이고,
+ *   그 값이 비어 있다면 그게 그 시점의 사실이다.
+ */
+async function restoreTemplate({ at, by } = {}) {
+  const want = String(at || '').trim();
+  if (!want) throw _refuse('bad_at', '되돌릴 시점을 지정해주세요.');
+
+  let prev, history;
+  try {
+    const raw = await _readRaw();
+    prev = raw.tpl; history = raw.history;
+  } catch (err) {
+    logger.warn(`[worktable/restoreTemplate] 조회 실패 — 복구 거부: ${err.message}`);
+    throw _refuse('read_failed', '기존 설정을 읽지 못해 되돌리지 않았습니다. 잠시 뒤 다시 시도해주세요.');
+  }
+
+  const hit = (history || []).find(h => String(h && h.at || '') === want);
+  if (!hit) throw _refuse('not_found', '그 시점의 저장 이력을 찾지 못했습니다. 목록을 새로 불러와주세요.');
+
+  // 이력 스냅샷도 **정규화를 다시 거친다**(옛 형식·손상 값이 그대로 살아나지 않게).
+  const next = _mergeTemplate(_emptyTemplate(), {
+    core: hit.core, channels: hit.channels, customChannels: hit.customChannels,
+    workTypes: hit.workTypes, templateSheetId: hit.templateSheetId,
+  });
+  next.updatedAt = new Date().toISOString();
+  next.updatedBy = String(by || '').slice(0, 100) || null;
+  await _writeTemplate(next, _pushHistory(history, prev, next));
   return _decorate(next);
 }
 
 module.exports = {
-  headerStats, getTemplate, saveTemplate, normalizeSheetId, channelList,
+  headerStats, getTemplate, saveTemplate, restoreTemplate, normalizeSheetId, channelList,
+  HISTORY_MAX,
   CORE_RATIO, RARE_RATIO, TEMPLATE_KEY, CHANNEL_KEYS, MAX_COLS, MAX_NAME_LEN,
   MAX_CUSTOM_CHANNELS, MAX_WORK_TYPES, WORK_TYPE_TRIGGERS,
 };

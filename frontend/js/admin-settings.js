@@ -1049,7 +1049,13 @@ async function _wtFetch(url, body) {
   var r = await fetch(_apiBase() + url, opt);
   var j = await r.json().catch(function () { return null; });
   if (!j) throw new Error('HTTP ' + r.status);
-  if (j.ok === false) throw new Error(j.error || '요청 실패');
+  if (j.ok === false) {
+    // ★ 사유 코드를 오류에 실어 보낸다 — 호출부가 "빈 저장 거부"와 일반 실패를 갈라야 한다
+    //   (문구만으로 판정하면 문구를 고치는 순간 조용히 안 갈린다).
+    var e = new Error(j.error || '요청 실패');
+    e.code = j.code || ''; e.prevCoreCount = j.prevCoreCount;
+    throw e;
+  }
   return j;
 }
 
@@ -1150,6 +1156,9 @@ function _worktableHtml() {
           </button>
           <span id="wtSaveHint" style="font-size:.74rem;color:var(--t3)"></span>
         </div>
+
+        <!-- ③ 되돌리기 — 저장 직전 값 최근 10개. 8/23 전멸 사고 때 되돌릴 방법이 없었다. -->
+        <div id="wtHistory" style="margin-top:10px"></div>
 
         <div style="margin-top:20px;border-top:1px dashed #E5E7EB;padding-top:14px">
           <button onclick="wtToggleReport()" id="wtReportBtn"
@@ -1930,6 +1939,7 @@ async function loadWorktableTemplate() {
     if (!_wtTpl.workTypes) _wtTpl.workTypes = [];
     _wtRenderChans();  // 🌐 공통 줄 요약
     _wtRenderCols();   // 내부에서 알약 줄·미리보기까지 갱신
+    _wtRenderHistory();
     var tpl = document.getElementById('wtTplSheet');
     if (tpl) tpl.value = _wtTpl.templateSheetId || '';
     var at = document.getElementById('wtSavedAt');
@@ -1945,6 +1955,59 @@ async function loadWorktableTemplate() {
   }
 }
 
+/* ── ③ 저장 이력(되돌리기) ─────────────────────────────
+   ★ 서버가 준 **요약만** 그린다(전체 스냅샷은 안 내려온다) — 복구할 값은 서버가 원본에서 읽는다.
+   ★ 이력이 없으면 아무것도 그리지 않는다(빈 상자로 화면을 늘리지 않는다).
+   ★ onclick 은 **인덱스만** — 시각·사람 이름은 외부발 문자열이라 보간하지 않는다. */
+function _wtRenderHistory() {
+  var box = document.getElementById('wtHistory');
+  if (!box) return;
+  var h = (_wtTpl && _wtTpl.history) || [];
+  if (!h.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div style="font-size:.78rem;font-weight:700;margin-bottom:5px">최근 저장 이력 '
+    + '<span style="font-weight:500;color:var(--t3)">— 저장 직전 값으로 되돌립니다</span></div>'
+    + h.map(function (x, i) {
+      var when = String(x.at || '').replace('T', ' ').slice(0, 16) || '시각 미상';
+      var who = x.by ? ' · ' + escHtml(x.by) : '';
+      var what = '공통 ' + (x.coreCount || 0) + '열 · 작업유형 ' + (x.typeCount || 0) + '종'
+        + (x.hasSheet ? ' · 템플릿 시트 있음' : '');
+      return '<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid #F3F4F6">'
+        + '<span style="font-size:.75rem;color:var(--t2);min-width:130px">' + escHtml(when) + who + '</span>'
+        + '<span style="font-size:.75rem;color:var(--t3);flex:1">' + escHtml(what) + '</span>'
+        + '<button onclick="wtRestoreTemplate(' + i + ')" style="padding:4px 10px;background:#fff;color:#374151;'
+        + 'border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">↩ 되돌리기</button>'
+        + '</div>';
+    }).join('');
+}
+
+async function wtRestoreTemplate(i) {
+  var h = (_wtTpl && _wtTpl.history) || [];
+  var x = h[i];
+  if (!x || !x.at) return;
+  var when = String(x.at).replace('T', ' ').slice(0, 16);
+  if (!confirm(when + ' 시점 값(공통 ' + (x.coreCount || 0) + '열)으로 되돌립니다.\n\n'
+    + '지금 값은 이력에 남아 다시 되돌릴 수 있습니다.')) return;
+  try {
+    var j = await _wtFetch(WT_EP.template, { restore: x.at });
+    _wtApplySaved(j.data);
+    showToast('되돌렸습니다 (공통 ' + ((_wtTpl.core || []).length) + '개)');
+  } catch (e) { showToast('되돌리기 실패: ' + e.message, true); }
+}
+
+/** 저장·복구 응답을 화면에 반영 — 두 경로가 같은 것을 쓴다(사본 금지). */
+function _wtApplySaved(data) {
+  _wtTpl = data;
+  // ★ 서버가 정식 키를 발급할 수 있으므로(임시 `new1` → `c1`) 알약 줄까지 다시 그린다.
+  _wtRenderChans();
+  _wtRenderCols();
+  _wtRenderHistory();
+  var tpl = document.getElementById('wtTplSheet');
+  if (tpl) tpl.value = _wtTpl.templateSheetId || '';
+  var at = document.getElementById('wtSavedAt');
+  if (at) at.textContent = '최근 저장: ' + String(_wtTpl.updatedAt || '').slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '');
+  _wtDirty(false);
+}
+
 async function wtSaveTemplate() {
   if (!_wtTpl) return;
   // ★ 화면이 곧 저장값 — 배열 그대로 보낸다(쉼표 파싱 없음).
@@ -1953,9 +2016,8 @@ async function wtSaveTemplate() {
   _wtChannels().forEach(function (c) {
     channels[c.key] = ((_wtTpl.channels || {})[c.key] || []).slice();
   });
-  try {
-    var tplEl = document.getElementById('wtTplSheet');
-    var j = await _wtFetch(WT_EP.template, {
+  var tplEl = document.getElementById('wtTplSheet');
+  var payload = {
       core: _wtTpl.core, channels: channels,
       customChannels: (_wtTpl.customChannels || []).map(function (c) { return { key: c.key, label: c.label }; }),
       workTypes: _wtTypes().map(function (t) {
@@ -1965,16 +2027,23 @@ async function wtSaveTemplate() {
           autoTrigger: t.autoTrigger || 'auto', columns: (t.columns || []).slice() };
       }),
       templateSheetId: tplEl ? tplEl.value : (_wtTpl.templateSheetId || ''),
-    });
-    _wtTpl = j.data;
-    // ★ 서버가 정식 키를 발급할 수 있으므로(임시 `new1` → `c1`) 알약 줄까지 다시 그린다.
-    _wtRenderChans();
-    _wtRenderCols();
-    var tpl = document.getElementById('wtTplSheet');
-    if (tpl) tpl.value = _wtTpl.templateSheetId || '';
-    var at = document.getElementById('wtSavedAt');
-    if (at) at.textContent = '최근 저장: ' + String(_wtTpl.updatedAt || '').slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '');
-    _wtDirty(false);
+  };
+  try {
+    var j;
+    try {
+      j = await _wtFetch(WT_EP.template, payload);
+    } catch (e) {
+      /* ① 서버가 "공통 열 0개 저장"을 거부했다 — 8/23 전멸 사고의 그 경로.
+         ★ 사람이 확인해야만 통과한다(조용히 재전송 금지). 취소하면 **아무것도 저장하지 않는다**. */
+      if (e.code !== 'empty_core') throw e;
+      if (!confirm(e.message + '\n\n비우면 작업표를 만들 수 없게 됩니다.\n'
+        + '되돌리기용으로 지금 값은 이력에 남습니다.\n\n정말 비울까요?')) {
+        showToast('저장하지 않았습니다', true); return;
+      }
+      payload.confirmClear = true;
+      j = await _wtFetch(WT_EP.template, payload);
+    }
+    _wtApplySaved(j.data);
     showToast('작업표 표준 열을 저장했습니다 (' + (_wtTpl.core || []).length + '개)');
   } catch (e) { showToast('저장 실패: ' + e.message, true); }
 }
@@ -2909,6 +2978,7 @@ async function saveGateCriteria() {
   window.wtLoadPreset = wtLoadPreset;
   window.wtLoadSuggested = wtLoadSuggested;
   window.wtSaveTemplate = wtSaveTemplate;
+  window.wtRestoreTemplate = wtRestoreTemplate;
   window.wtToggleReport = wtToggleReport;
   window.loadReviewerNoticesAdmin = loadReviewerNoticesAdmin;
   window.loadReviewerHomeBanner = loadReviewerHomeBanner;

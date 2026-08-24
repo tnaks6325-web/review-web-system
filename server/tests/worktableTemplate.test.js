@@ -554,7 +554,9 @@ ok('★ 열이 담긴 채널·유형 삭제는 한 번 더 묻는다(시트 무�
   && /function wtDelType[\s\S]{0,500}confirm\([\s\S]{0,200}이미 만들어진 시트에는 영향이 없습니다/.test(setJs));
 ok('★★ 채널 키는 **서버가 발급**한다 — 화면 임시 키는 저장 응답으로 교체된다(고아 방지)',
   /_keyMinter\('c', keys\)/.test(svcSrc) && /_keyMinter\('t', keys\)/.test(svcSrc)
-  && /function wtSaveTemplate[\s\S]{0,1100}_wtRenderChans\(\)/.test(setJs));
+  // ★ 저장 응답 반영은 `_wtApplySaved` 한 벌로 모였다(되돌리기와 공용) — 고정 폭 창 대신 그 경로를 본다.
+  && /function wtSaveTemplate[\s\S]{0,1600}_wtApplySaved\(j\.data\)/.test(setJs)
+  && /function _wtApplySaved\([\s\S]{0,300}_wtRenderChans\(\)/.test(setJs));
 ok('★ 같은 이름 채널·유형 중복 추가 차단(화면·서버 양쪽)',
   /이미 있는 채널입니다/.test(setJs) && /이미 있는 작업유형 이름입니다/.test(setJs)
   && /seenLabel\.has\(label\.toLowerCase\(\)\)/.test(svcSrc));
