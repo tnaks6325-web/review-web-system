@@ -957,8 +957,12 @@ function withStubPool(handler, run) {
     S.STATE.pmFix = S._pmBuildFix([
       mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 1, issues: ['no_bank'], warnings: ['no_memo', 'no_review_fee'] }),
       mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 2, issues: [], warnings: ['no_memo', 'no_review_fee'] }),
+      // ★ 카드 전체 행 수(w.rows=3)와 **다른 숫자**여야 검사가 공허해지지 않는다
+      //   (결제금액 없음은 작업 설정으로 못 고치는 사유 = setupRows 에 안 들어간다)
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 3, issues: ['no_price'], warnings: [] }),
     ]);
     const w = S.STATE.pmFix.works[0];
+    assert.strictEqual(w.rows, 3, '카드에 걸린 행 수');
     assert.strictEqual(w.setupRows, 2, '작업 설정 보완이 필요한 행 수는 **합집합**이어야 한다');
     const html = S._pmFixBlock();
     assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1,
@@ -972,6 +976,9 @@ function withStubPool(handler, run) {
     // ★ 사유별 건수를 조용히 버리지 않는다(title 로 남는다)
     assert.ok(/이체은행 미지정 1건/.test(html) && /통장표시 없음 2건/.test(html),
       '사유별 건수가 어디에도 남지 않았다: ' + html);
+    // ★ 줄에 적히는 건수는 그 줄을 눌러 풀리는 건수(합집합)여야 한다 — 카드 전체 건수가 아니다
+    assert.ok(/>2건</.test(html) && !/>3건<\/span>[^]{0,80}_pmFixWork/.test(html),
+      '묶은 줄이 작업 설정으로 못 고치는 건까지 세고 있다: ' + html);
   });
 
   t('7k3 ★ 한 종류만 필요하면 그것만 적는다(멀쩡한 항목을 입력할 것처럼 말하지 않는다)', () => {
