@@ -1000,6 +1000,27 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
   }
 });
 
+// GET /api/campaign/my-repurchase-status?phone8=&ids=id1,id2,… — 재참여(재구매) 기간 안내(무인증 phone8 스코프)
+//   화면(카드 목록)의 "N일 후 재참여 가능"/"지금 재참여 가능" 썸네일 안내가 이 응답으로 채워진다.
+//   판정 단일 출처 = utils/repurchaseGuard(apply 게이트와 같은 기준 — 카드는 열려 있는데 참여는
+//   거부되는 불일치를 만들지 않는다). ★ 참여 이력이 아예 없는 공고는 응답 맵에 없다(=평소 카드).
+//   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 이 경로를 id로 삼킨다.
+router.get('/my-repurchase-status', applyLimiter, async (req, res, next) => {
+  try {
+    const p8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
+    if (p8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
+    const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
+    if (!ids.length) return res.json({ ok: true, status: {} });
+    const { checkRepurchaseStatusForCampaigns } = require('../utils/repurchaseGuard');
+    const map = await checkRepurchaseStatusForCampaigns(pool, { campaignIds: ids, phone8: p8 });
+    const status = {};
+    for (const [cid, v] of map) status[cid] = v;
+    res.json({ ok: true, status });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/campaign/:id — 캠페인 상세
 //   ★ M1 보안: SELECT * 무인증 반환 제거. admin/master JWT면 전체(관리자 수정 모달 호환),
 //     그 외에는 공개 화이트리스트(레거시/참여형 분기)만.
@@ -1585,6 +1606,32 @@ async function _applyParticipation(req, res, next, campPre) {
             : '같은 번호로 등록된 다른 명의가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.' });
       }
       return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 구매양식 제출까지 완료한 캠페인이에요.' });
+    }
+
+    // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)" 기준(사용자 확정 2026-08-24). 위 검사는 같은
+    //   recruit_campaigns.id 안에서만 막지만, 공고가 재발행(차수)되거나 캠페인 연결 없이 외부모집으로
+    //   등록되면 이 탭에서만 다시 잡아야 한다. 단일 출처 = utils/repurchaseGuard(외부모집 수동제출과 공용).
+    //   ★ 하드 차단·예외 없음(리뷰어 셀프 참여는 관리자 확인 창구가 없다 — 관리자 대신등록만 예외 허용).
+    //   조회 실패는 fail-open(막는 기능의 오류로 정상 참여를 막지 않는다 — 신원게이트와 같은 규율).
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      try {
+        const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
+        const rw = await checkRepurchaseWindow(client, {
+          sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, phone8: holdP8,
+        });
+        if (rw.blocked) {
+          await client.query('ROLLBACK');
+          const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
+            timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
+          });
+          return res.status(409).json({
+            ok: false, reason: 'repurchase_window', days: rw.days, availableFrom: rw.availableFrom,
+            error: `이 작업은 최근 ${rw.days}일 안에 이미 참여한 이력이 있어요 — ${dateStr} 이후 다시 참여할 수 있어요.`,
+          });
+        }
+      } catch (e) {
+        logger.warn('[campaign/apply] 재참여 기간 판정 실패(fail-open): ' + e.message);
+      }
     }
 
     // 만료 스윕은 정리 작업이지만, 부분 유니크 인덱스는 `status='applied'` 행을 즉시

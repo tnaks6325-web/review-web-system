@@ -12,6 +12,7 @@ const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
 const { submitExternalOrder, dailyRemainingForCampaign } = require('../services/manualOrder.service');
+const { checkRepurchaseWindowBatch, phone8Of } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
 
 const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로 수백 건이 들어가는 사고 방지)
@@ -83,6 +84,28 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
     if (!items.length) return res.status(400).json({ ok: false, error: '제출할 건이 없습니다' });
 
     const allowOverDaily = b.allowOverDaily === true;
+    const allowRepurchase = b.allowRepurchase === true;
+
+    /* ★★ 재참여(재구매) 기간 사전 판정 — "같은 작업(탭)" 기준(사용자 확정 2026-08-24).
+       배치를 시작하기 전에 전 건의 전화번호를 한 번에 훑어, 최근 며칠 안에 같은 탭에서 이미
+       접수된 번호가 있으면 **쓰기 0건**으로 되돌려 확인을 받는다(일 정원 사전 판정과 같은 이유
+       — 건별로 막으면 "몇 건은 들어가고 몇 건은 막힘"이 남아 담당자가 무엇이 들어갔는지 모른다).
+       ★ 서버 최종 방어는 건별 게이트(`submitExternalOrder` ⓪-1.5)가 맡는다 — 낡은 화면이 이
+       사전 판정을 건너뛰고 호출해도 그쪽에서 다시 걸린다. */
+    if (!allowRepurchase) {
+      const p8List = items.map(it => phone8Of((it.fields || {}).phone));
+      const blockedMap = await checkRepurchaseWindowBatch(pool, { sheetId, tabName, phone8List: p8List });
+      if (blockedMap.size) {
+        const blocked = items
+          .map((it, i) => ({ index: i, name: (it.fields || {}).recipient || '', p8: phone8Of((it.fields || {}).phone) }))
+          .filter(x => blockedMap.has(x.p8))
+          .map(x => ({ ...x, availableFrom: blockedMap.get(x.p8).availableFrom }));
+        return res.json({
+          ok: false, needConfirm: 'repurchase_window', blocked,
+          error: `${blocked.length}건이 최근 ${(require('../utils/repurchaseGuard').repurchaseDays)()}일 안에 이 작업에 이미 참여한 연락처입니다.`,
+        });
+      }
+    }
 
     /* ★★ 일 정원(오늘 몫) 사전 판정 — 배치를 **시작하기 전에** 한 번만 본다.
        건별로 막으면 "앞 3건은 들어가고 뒤 2건은 거절"이라는 부분 처리가 남아, 담당자가 무엇이
@@ -129,6 +152,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           adminName,
           force: b.force === true,   // 중복 경고를 확인한 뒤 재시도할 때만
           allowOverDaily,            // 오늘 정원 초과 확인을 받은 뒤 재시도할 때만
+          allowRepurchase,           // 재참여 기간 제한 확인을 받은 뒤 재시도할 때만
         });
         // ★ 초과 접수는 결과 화면에 남긴다 — 확인을 받았더라도 "조용히 넘어간" 것으로 보이면
         //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.

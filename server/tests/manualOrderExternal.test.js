@@ -837,8 +837,11 @@ console.log('\nJ. 일 정원 확인 게이트');
   ok('J22 ★★ 정원 판정 사본 금지 — daily_limit 을 직접 세지 않는다',
     /computeCampaignState/.test(svcSrc) && !/daily_limit\s*-\s*/.test(svcSrc));
   const fe = nc(F('js/manual-order.js'));
+  // ★ post(true, …) — 재구매 기간 확인(2026-08-24) 이 같은 체인에 합류하며 두 번째 인자가
+  //   생겼다(over_daily 재확인 때 이미 확정된 repurchase 확인 상태를 잃지 않게). allowOverDaily
+  //   가 true 로 재전송된다는 원래 의미는 그대로다 — repurchaseGuard.test.js 가 그 값을 고정.
   ok('J23 프론트가 확인창을 띄우고 allowOverDaily 로 재전송한다',
-    /needConfirm === 'over_daily'/.test(fe) && /post\(true\)/.test(fe));
+    /needConfirm === 'over_daily'/.test(fe) && /post\(true,/.test(fe));
   ok('J24 ★ 취소하면 아무것도 보내지 않는다', /if \(!okGo\)/.test(fe));
 }
 

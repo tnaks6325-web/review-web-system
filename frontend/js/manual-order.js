@@ -505,19 +505,42 @@
     // ★ 오늘 정원 초과는 **막지 않고 확인만 받는다**(사용자 확정 2026-08-19). 서버가 배치를
     //   시작하기 전에 판정해 `needConfirm`으로 되돌리므로, 이 시점까지 **쓰기는 0건**이다.
     //   확인하면 `allowOverDaily`로 재전송한다.
-    const post = (allowOverDaily) => api(_moBase() + '/submit', {
+    const post = (allowOverDaily, allowRepurchase) => api(_moBase() + '/submit', {
       method: 'POST',
       body: JSON.stringify({
         sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '',
         campaignId: CTX.campaignId || null,
         allowOverDaily: allowOverDaily === true,
+        allowRepurchase: allowRepurchase === true,
         items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '' })),
       }),
     });
 
     let out;
+    let _repurchaseOk = false;
     try {
-      out = await post(false);
+      out = await post(false, false);
+      // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)"에 최근 며칠 안에 같은 연락처로 이미 접수된
+      //   건이 있으면 서버가 **쓰기 0건**으로 되돌린다. 다른 사람인데 번호만 같은 경우가 있어
+      //   막지 않고 확인만 받는다(사용자 확정 2026-08-24) — over_daily와 같은 확인창 흐름.
+      if (out && out.needConfirm === 'repurchase_window') {
+        const list = (out.blocked || []).map(b => {
+          const d = b.availableFrom ? new Date(b.availableFrom).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }) : '?';
+          return `· ${b.name || '(이름없음)'} — ${d} 이후 재참여 가능`;
+        }).join('\n');
+        const okGo = confirm(
+          `${(out.blocked || []).length}건이 최근 며칠 안에 이 작업에 이미 참여한 연락처예요.\n\n${list}\n\n`
+          + `다른 사람인데 번호만 같은 경우가 아니라면 [취소]하고 확인해주세요.\n`
+          + `[확인] 그대로 강제 접수합니다.\n`
+          + `[취소] 아무것도 접수되지 않았습니다.`);
+        if (!okGo) {
+          BUSY = false;
+          if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
+          return;   // 서버는 아직 아무것도 쓰지 않았다
+        }
+        _repurchaseOk = true;
+        out = await post(false, true);
+      }
       if (out && out.needConfirm === 'over_daily') {
         const q = out.quota || {};
         // ★ 외부모집은 **이미 구매가 끝난 건의 사후 등록**이다 — 취소해도 구매가 되돌아가지
@@ -535,7 +558,7 @@
           if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
           return;   // 서버는 아직 아무것도 쓰지 않았다
         }
-        out = await post(true);
+        out = await post(true, _repurchaseOk);
       }
     } catch (e) { out = { ok: false, error: e.message }; }
 

@@ -336,8 +336,28 @@
       .cae-toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:100001;background:#111827;color:#fff;
         font-size:.8rem;font-weight:700;border-radius:10px;padding:10px 16px;max-width:86vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}
       .cae-toast.err{background:#DC2626}
+      /* ★ 재참여(재구매) 기간 안내 — 썸네일 하단 띠(시안 A, 사용자 확정 2026-08-24).
+         우상단 채널배지·좌상단 리본을 안 건드리고, 사진도 대부분 그대로 보인다. */
+      .pcard .pt-sash{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:6px 8px 7px;
+        display:flex;align-items:center;justify-content:center;gap:6px;text-align:center}
+      .pcard .pt-sash.lock{background:linear-gradient(0deg,rgba(30,41,59,.86),rgba(30,41,59,.7))}
+      .pcard .pt-sash.lock .ps-t{color:#fff;font-size:.62rem;font-weight:800}
+      .pcard .pt-sash.lock .ps-d{background:rgba(255,255,255,.18);color:#fff;font-size:.58rem;font-weight:900;
+        border-radius:99px;padding:1px 8px;flex-shrink:0}
+      .pcard .pt-sash.ready{background:linear-gradient(0deg,rgba(11,122,91,.88),rgba(18,184,134,.72))}
+      .pcard .pt-sash.ready .ps-t{color:#fff;font-size:.64rem;font-weight:900}
     `;
     document.head.appendChild(st);
+  }
+
+  /** 'YYYY-MM-DD'가 아닌 일반 ISO 일시 → 'M/D(요일)'(요일만 로컬 규칙, 시각은 버림).
+   *  재참여 가능일은 "참여 시각 + N일"이라 시:분까지 있는데, 안내 문구엔 날짜만 필요하다. */
+  function _fmtDateKo(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const yo = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')';
   }
 
   /** 참여형 카드 1장 HTML. c = /api/campaign/list 의 참여형 행.
@@ -713,6 +733,20 @@
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
 
+    // ★ 재참여(재구매) 기간 안내(사용자 확정 2026-08-24) — 리뷰어 개인별. 관리자 카드는 집계
+    //   화면이라 "내 참여 이력" 개념이 안 맞아 렌더하지 않는다. 서버 apply 게이트(같은 판정 —
+    //   utils/repurchaseGuard)와 어긋나지 않게, 값은 항상 서버(GET /my-repurchase-status)가 준다.
+    //   ★ c.repurchaseStatus 가 없으면(조회 전·평소 카드·구버전 백엔드) 아무것도 안 그린다.
+    let repurchaseSash = '';
+    let repurchaseLocked = false;
+    if (!admin && c.repurchaseStatus === 'locked' && c.repurchaseAvailableFrom) {
+      repurchaseLocked = true;
+      const dLeft = Math.max(0, Math.ceil((new Date(c.repurchaseAvailableFrom).getTime() - _now()) / 86400000));
+      repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(c.repurchaseAvailableFrom))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
+    } else if (!admin && c.repurchaseStatus === 'ready') {
+      repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ 지금 재참여 가능</span></div>`;
+    }
+
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));
     const timeIcon = (c.opensAt && c.closesAt) ? '🕑' : '⏱';
@@ -801,7 +835,11 @@
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
-    if (c.state === 'open') footer = isBlogCard
+    if (c.state === 'open' && repurchaseLocked) {
+      // ★ 참여는 실제로 서버(apply 게이트)에서 막히므로, 버튼도 그 사실을 보여준다 —
+      //   안 그러면 "카드는 열려 보이는데 눌러도 거부"라는 헷갈리는 상태가 된다.
+      footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">${_esc(_fmtDateKo(c.repurchaseAvailableFrom))} 재참여 가능</div>`;
+    } else if (c.state === 'open') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
       : `<button type="button" class="pbtn go">참여하기</button>`;
     else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
@@ -839,7 +877,7 @@
     return `
       <article class="pcard${isClosed ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}" data-camp-id="${_esc(c.id)}"
            onclick="location.href='campaign.html?id=${encodeURIComponent(c.id)}'">
-        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${editChip}${moChip}</div>
+        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${repurchaseSash}${editChip}${moChip}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
