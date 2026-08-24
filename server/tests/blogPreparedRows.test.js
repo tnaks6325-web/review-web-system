@@ -345,10 +345,20 @@ const WRITE_EXEMPT = [
     why: '탭 리네임 시에만 불리는 보정(공고 linked_tab_name 따라가기) — 준비 행을 읽는 길이 아니다' },
 ];
 
-/** 파일을 함수 단위로 자른다(선언 앞의 주석 블록은 그 함수에 딸려 간다). */
+/** 파일을 **최상위 선언 단위**로 자른다(선언 앞의 주석 블록은 그 선언에 딸려 간다).
+ *  ⚠ `function` 선언에서만 자르면 안 된다(Codex 리뷰 지적 · 실측 확인):
+ *     면제 함수 **뒤**에 `const helper = async () => { ... UPDATE ... }` 를 두면
+ *     그 화살표 함수가 면제 함수의 덩어리에 딸려 들어가 **통째로 검사에서 빠진다**.
+ *     ("새 함수는 자동으로 검사 대상"이라는 이 파일의 약속이 깨진다.)
+ *  → `const`/`let`/`var`/`class`/`module.exports` 에서도 자르고, 이름도 그 형태에서 뽑는다.
+ *    들여쓴 줄은 자르지 않으므로(함수 **안**의 지역 선언) 덩어리가 잘게 부서지지 않는다. */
 const splitFns = (src) => src.replace(/\/\/.*$/gm, '')
-  .split(/\n(?=(?:async )?function )/)
-  .map(chunk => ({ name: (chunk.match(/^\s*(?:async )?function\s+(\w+)/) || [])[1] || '', body: chunk }));
+  .split(/\n(?=(?:async\s+)?function\s|(?:const|let|var|class)\s|module\.exports\b)/)
+  .map(chunk => ({
+    name: (chunk.match(/^\s*(?:(?:async\s+)?function\s+(\w+)|(?:const|let|var|class)\s+(\w+))/) || [])
+      .slice(1).find(Boolean) || '',
+    body: chunk,
+  }));
 
 t('★ 예외 목록이 도피처가 아니다(사유 필수 · 실재 · 진입점 제외 금지)', () => {
   WRITE_EXEMPT.forEach(x => {
