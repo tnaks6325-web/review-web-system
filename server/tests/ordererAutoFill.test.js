@@ -33,8 +33,18 @@ ok('★ 주문자는 `orderer || loginName` 으로 채운다(빈 값일 때만 �
 ok('★★ 값이 오면 그 값이 이긴다 — orderer 가 왼쪽(명단 선택·타계정 명의 프리필 보존)',
   !!decl && decl[0].indexOf('orderer ||') < decl[0].indexOf('loginName'));
 
-ok('★ 로그인 이름이 없으면 채우지 않는다 — 레거시·관리자 경유는 종전대로 필수(fail-closed)',
+ok('★ 로그인 이름이 없으면 채우지 않는다 — 레거시·관리자 경유는 빈 값 그대로(종전 동작)',
   /String\(loginName \|\| ''\)\.trim\(\)/.test(submit));
+
+/* ⚠ 실측 정정(가상테스트 2026-08-24): 그 경로는 애초에 '주문자' 필수 검증 대상이 아니다 —
+   필수 검증 블록 전체가 리뷰어 제출(`if (_idPhone8.length === 8)`) 안에 있다.
+   이 사실이 바뀌면(검증이 밖으로 나오면) 레거시 제출이 갑자기 막히므로 여기서 고정한다. */
+ok('★ 필수 검증은 리뷰어 제출 전용이다(레거시 제출을 새로 막지 않는다)',
+  (() => {
+    const g = submit.indexOf('if (_idPhone8.length === 8)');
+    const v = submit.indexOf("_reqFields");
+    return g > 0 && v > g;
+  })());
 
 ok('필수 검증이 채운 값을 본다(안 보면 전 제출이 FIELDS_REQUIRED 로 막힌다)',
   /\[_orderer, '주문자'\]/.test(submit) && !/\[orderer, '주문자'\]/.test(submit));
