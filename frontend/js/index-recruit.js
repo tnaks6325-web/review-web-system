@@ -1296,6 +1296,49 @@ function rfSetCashReceipt(on) {
   if (note) note.textContent = on ? "카드와 구매 안내에 자동 표기" : "참여자에게 미노출";
   syncRecruitAutomaticBadges();
 }
+/**
+ * 회수·혼합 부속정보 채움(135) — 발행 프리필·수정 프리필 공용(사본 0).
+ * ★ 값이 없으면 **비운다** — 이전에 열어 둔 공고의 값이 남으면 그대로 저장된다.
+ */
+function _rfFillDeliveryDetail(mix, courier, product) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v === 0 || v) ? String(v) : ""; };
+  let list = mix;
+  if (typeof list === "string") { try { list = JSON.parse(list); } catch (_) { list = []; } }
+  const pick = (kind) => {
+    if (!Array.isArray(list)) return "";
+    const hit = list.find(m => m && m.type === kind);
+    return hit ? hit.quantity : "";
+  };
+  set("rf_delivery_real_count", pick("real"));
+  set("rf_delivery_empty_count", pick("empty"));
+  set("rf_recall_courier", courier || "");
+  set("rf_recall_product", product || "");
+  if (window.rfSyncDeliveryDetail) window.rfSyncDeliveryDetail();
+}
+
+/**
+ * 저장 payload 조각(135).
+ * ★★ **입력칸이 있는 화면에서만 전송한다**(옵션표·리뷰타입과 같은 원칙) — 칸이 없는 화면이
+ *   저장해도 서버 CASE 센티널이 "미전송=유지"로 읽어 설정이 조용히 안 지워진다.
+ * ★ 기본형이 아니면 빈 값을 보내 남은 부속정보를 지운다(서버도 같은 판정을 한 번 더 한다).
+ */
+function _rfDeliveryDetailPayload() {
+  const mixRow = document.getElementById("rf_delivery_mix_row");
+  const recallRow = document.getElementById("rf_recall_row");
+  if (!mixRow && !recallRow) return {};          // 부속 칸 없는 화면 = 미전송
+  const base = String(document.getElementById("rf_delivery_type")?.value || "").trim();
+  const num = (id) => Math.max(0, Number(document.getElementById(id)?.value) || 0);
+  const str = (id) => String(document.getElementById(id)?.value || "").trim();
+  return {
+    delivery_type_mix: base === "혼합"
+      ? [{ type: "real", quantity: num("rf_delivery_real_count") },
+         { type: "empty", quantity: num("rf_delivery_empty_count") }]
+      : [],
+    recall_courier: base === "회수" ? str("rf_recall_courier") : "",
+    recall_product: base === "회수" ? str("rf_recall_product") : "",
+  };
+}
+
 window.rfToggleCashReceipt = rfToggleCashReceipt;
 window.rfSetCashReceipt = rfSetCashReceipt;
 
@@ -2623,6 +2666,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
     if (el) el.value = (i === "rf_sort_order" || i === "rf_max_slots") ? "0" : "";
   });
   document.getElementById("rf_delivery_type").value = "";
+  // ★ 135: 회수·혼합 부속정보 초기화 — 남으면 다음 공고에 이전 값이 딸려간다.
+  ["rf_delivery_real_count","rf_delivery_empty_count","rf_recall_courier","rf_recall_product"]
+    .forEach(i => { const el = document.getElementById(i); if (el) el.value = ""; });
+  if (window.rfSyncDeliveryDetail) window.rfSyncDeliveryDetail();
   document.getElementById("rf_status").value = "draft";
   if (window.RecruitModal?.syncStatusButtons) window.RecruitModal.syncStatusButtons();
   // 상품정보 가져오기 초기화
@@ -2729,6 +2776,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       document.getElementById("rf_status").value       = c.status || "draft";
       if (window.RecruitModal?.syncStatusButtons) window.RecruitModal.syncStatusButtons();
       document.getElementById("rf_delivery_type").value = c.delivery_type || "";
+      /* ★ 135: 부속정보 프리필. 조합은 [{type,quantity}] 배열(서버 정규화값) 그대로 온다. */
+      _rfFillDeliveryDetail(c.delivery_type_mix, c.recall_courier, c.recall_product);
       const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = c.cash_receipt_required === true;
 
       /* 담당자 */
@@ -2901,6 +2950,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         if (notesEl) notesEl.value = prefill.notes;
       }
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
+      /* ★ 135: 작업오더의 회수·혼합 부속정보를 그대로 채운다(사람이 확인 후 저장). */
+      _rfFillDeliveryDetail(prefill.delivery_type_mix, prefill.recall_courier, prefill.recall_product);
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
       const prefillInflowType = document.getElementById("rf_inflow_type_value");
       if (prefillInflowType) prefillInflowType.value = prefill.inflowType === "guide" ? "guide" : "link";
@@ -4244,6 +4295,8 @@ async function saveRecruitPostImpl() {
     channel_custom: document.getElementById("rf_channel_custom").value.trim(),
     time_range:     document.getElementById("rf_time_range").value.trim(),
     delivery_type:  document.getElementById("rf_delivery_type").value,
+    // ★ 135: 회수·혼합 부속정보 — 부속 칸이 있는 화면에서만 실린다(빈 객체 = 미전송 = 서버 유지).
+    ..._rfDeliveryDetailPayload(),
     cash_receipt_required: !!document.getElementById("rf_cash_receipt_required")?.checked,
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,

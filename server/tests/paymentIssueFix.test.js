@@ -729,6 +729,11 @@ function withStubPool(handler, run) {
     assert.ok(!/b\.reviewFee\s*\|\|/.test(seg), "★ `|| 0` 로 접으면 미전송이 '0원 지정'이 된다");
   });
 
+  t('6k ★ 묶은 줄은 말줄임 대신 접어서 다 보여준다(항목이 셋이면 좁은 카드에서 잘린다)', () => {
+    assert.ok(/\.pmfixrow\.work \.nm\{[^}]*white-space:normal/.test(HTML),
+      '묶음 줄이 nowrap 이면 "이체은행 · 통장…" 으로 잘려 무엇을 입력할지 알 수 없다');
+  });
+
   t('6g 표 [보완] 버튼은 고칠 수 있을 때만 그린다(죽은 버튼 금지)', () => {
     const tbl = HTML.slice(HTML.indexOf('function _pmTargetTable'), HTML.indexOf('function _pmBatchTable'));
     assert.ok(/const fixable[\s\S]*?PAY_FIX_KIND/.test(tbl), '고칠 수 있는지 판정이 없다');
@@ -945,6 +950,47 @@ function withStubPool(handler, run) {
       '한 카드가 그 작업의 할 일을 전부 담아야 한다');
     const html = S._pmFixBlock();
     assert.strictEqual((html.match(/pmfixcard/g) || []).length, 1, '카드가 하나여야 한다');
+  });
+
+  t('7k2 ★★ 작업 단위 3종(이체은행·통장표시·리뷰비)은 **한 줄**로 묶인다 — 한 번 입력하면 함께 풀린다', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 1, issues: ['no_bank'], warnings: ['no_memo', 'no_review_fee'] }),
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 2, issues: [], warnings: ['no_memo', 'no_review_fee'] }),
+      // ★ 카드 전체 행 수(w.rows=3)와 **다른 숫자**여야 검사가 공허해지지 않는다
+      //   (결제금액 없음은 작업 설정으로 못 고치는 사유 = setupRows 에 안 들어간다)
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 3, issues: ['no_price'], warnings: [] }),
+      // ★ 리뷰비만 비어 있는 행 — 이 사유를 합집합에서 빠뜨리면 건수가 조용히 줄어든다
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 4, issues: [], warnings: ['no_review_fee'] }),
+    ]);
+    const w = S.STATE.pmFix.works[0];
+    assert.strictEqual(w.rows, 4, '카드에 걸린 행 수');
+    assert.strictEqual(w.setupRows, 3, '작업 설정 보완이 필요한 행 수는 **합집합**이어야 한다(세 사유 모두)');
+    const html = S._pmFixBlock();
+    assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1,
+      '★ 사유별로 줄이 갈리면 같은 [보완] 버튼이 세 번 반복된다');
+    assert.strictEqual((html.match(/_pmFixWork\(/g) || []).length, 1,
+      '작업 [보완] 버튼은 카드에 하나여야 한다(같은 팝업을 세 번 열게 하지 않는다)');
+    // 세 항목이 그 한 줄에 다 적힌다(열어보지 않고 무엇을 입력할지 알 수 있게)
+    for (const k of ['이체은행', '통장표시', '리뷰비'])
+      assert.ok(html.includes(k), k + ' 가 줄에서 사라졌다');
+    assert.ok(/상품비만/.test(html), '리뷰비가 비면 상품비만 이체된다는 경고가 남아야 한다');
+    // ★ 사유별 건수를 조용히 버리지 않는다(title 로 남는다)
+    assert.ok(/이체은행 미지정 1건/.test(html) && /통장표시 없음 2건/.test(html) && /리뷰비 미설정 3건/.test(html),
+      '사유별 건수가 어디에도 남지 않았다: ' + html);
+    // ★ 줄에 적히는 건수는 그 줄을 눌러 풀리는 건수(합집합)여야 한다 — 카드 전체 건수가 아니다
+    assert.ok(/>3건</.test(html) && !/>4건<\/span>[^]{0,80}_pmFixWork/.test(html),
+      '묶은 줄이 작업 설정으로 못 고치는 건까지 세고 있다: ' + html);
+  });
+
+  t('7k3 ★ 한 종류만 필요하면 그것만 적는다(멀쩡한 항목을 입력할 것처럼 말하지 않는다)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([mkItem({ transferMemo: '망고', bank: 'hana', warnings: ['no_review_fee'] })]);
+    const html = S._pmFixBlock();
+    assert.ok(/리뷰비/.test(html));
+    assert.ok(!/이체은행/.test(html) && !/통장표시/.test(html),
+      '★ 멀쩡한 항목이 보완 줄에 들어가면 담당자가 값을 덮어쓰게 된다');
+    assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1);
   });
 
   t('7m ★ 계좌 버튼 인덱스는 accts 배열 위치(카드 안 순번이면 남의 계좌 창이 열린다)', () => {

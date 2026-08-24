@@ -75,11 +75,12 @@ t('② condition 은 두 갈래 모두 같은 호출 1회를 재사용한다(cap
   // 광고주 분기(else if) 블록 안에 condition 이 들어가지 않는다 — 전역 [\s\S]* 로 보면
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
   const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
-                             svc.indexOf("else if (role === 'advertiser') {") + 900);
+                             svc.indexOf("else if (role === 'advertiser') {") + 1400);
   /* ★★ 2026-08-23 사용자 확정: 업체 뷰어에도 같은 카드를 그린다 — 광고주 분기에도 `condition` 이
      실리되 **반드시 `_condAdvertiserLens` 를 거쳐야** 한다(리뷰비·입금명·내부 식별자 폐기).
      날것(`= _cond`)으로 실으면 그 순간 전부 샌다. */
-  if (!/res\.condition = _condAdvertiserLens\(_cond\)/.test(advBlock)) return false;
+  // ⚠ 2026-08-24: 렌즈가 세션 종류(brandSession)를 받는다 — 검사 의미 불변(날것 금지).
+  if (!/res\.condition = _condAdvertiserLens\(_cond, \{ brandSession: !!brandId \}\)/.test(advBlock)) return false;
   if (/res\.condition = _cond;/.test(advBlock)) return false;
   /* `res.condition` 이 몇 번 나오든(일정 등 파생 필드가 붙는다) **전부 showEdits 블록 안**이어야 한다.
      개수로 고정하면 필드가 늘 때마다 무관한 가드가 조용히 빨개진다. */
@@ -666,10 +667,13 @@ t('★ 닉네임 조회 실패는 fail-soft(업체는 그래도 실명이 안 �
   const vm = require('vm');
   const m = fnBody(wd, 'function _condCardHtml(');
   const i = m.indexOf('const mgrRow='), j = m.indexOf('/* 「일정」', i);
-  const sb = { esc: s => String(s == null ? '' : s), unset: () => '<dd>UNSET</dd>' };
+  /* ⚠ 2026-08-24: 브랜드 담당자(135)로 이 블록이 `STATE.brandId`(세션 종류)를 본다 —
+     sandbox 에 STATE 를 두고 **브랜드 세션 / 대행사·내부** 두 경우를 각각 실행한다. */
+  const sb = { esc: s => String(s == null ? '' : s), unset: () => '<dd>UNSET</dd>', STATE: { brandId: null } };
   vm.createContext(sb);
   vm.runInContext('this.f=function(cd){' + m.slice(i, j) + 'return mgrRow;};', sb);
-  const f = (mgr) => sb.f({ manager: mgr }).replace(/<[^>]+>/g, '|').replace(/\|+/g, '|');
+  const f = (mgr) => { sb.STATE.brandId = null; return sb.f({ manager: mgr }).replace(/<[^>]+>/g, '|').replace(/\|+/g, '|'); };
+  const fb = (mgr) => { sb.STATE.brandId = 'brd_a'; const r = sb.f({ manager: mgr }).replace(/<[^>]+>/g, '|').replace(/\|+/g, '|'); sb.STATE.brandId = null; return r; };
   t('② 내부 = 닉네임 우선, 없으면 실명',
     f({ ae: '황운하', adminNick: '만두', adminRaw: '박세희' }) === '|담당|AE팀|황운하|/|관리자|만두|'
     && f({ ae: '황운하', adminNick: null, adminRaw: '박세희' }) === '|담당|AE팀|황운하|/|관리자|박세희|',
@@ -681,6 +685,22 @@ t('★ 닉네임 조회 실패는 fail-soft(업체는 그래도 실명이 안 �
   t('★ AE 만 없으면 관리자 조각만', f({ ae: null, adminNick: '만두' }) === '|담당|관리자|만두|');
   t('★ 둘 다 없으면 미설정/「—」 (unset 이 역할을 안다)',
     f({}) === '|담당|UNSET|' && f(null) === '|담당|UNSET|');
+  /* ── 브랜드 담당자(135, 사용자 확정 2026-08-24) ──
+     A안: 브랜드사 화면은 업체가 정한 담당으로 **대체**(내부 담당은 서버 렌즈가 이미 폐기).
+     Q2 : 업체가 안 적었으면 **담당 행 자체를 그리지 않는다**(「—」·[미설정] 금지).
+     D안: 대행사·내부 화면은 내부 담당 **아래 한 줄**로 함께 — 같은 행에 섞지 않는다. */
+  t('★ 브랜드사 화면 = 업체가 정한 담당만(라벨 없이 이름)',
+    fb({ ae: null, adminNick: null, adminRaw: null, brand: ['박가람 차장', '개똥이밥먹어'] })
+      === '|담당|박가람 차장|/|개똥이밥먹어|');
+  t('★★ 브랜드사 화면에서 미입력이면 담당 행 자체가 없다(행 숨김)',
+    fb({ ae: null, adminNick: null, adminRaw: null, brand: [] }) === '' && fb({}) === '');
+  t('★ 대행사·내부 = 내부 담당 + 「브랜드사 표시」 두 줄(같은 행에 섞지 않는다)',
+    f({ ae: '황운하', adminNick: '만두', brand: ['박가람 차장'] })
+      === '|담당|AE팀|황운하|/|관리자|만두|브랜드사|표시|박가람 차장|');
+  t('★ 업체가 안 적었으면 내부 화면은 종전 그대로(브랜드사 표시 줄 없음)',
+    f({ ae: '황운하', adminNick: '만두', brand: [] }) === '|담당|AE팀|황운하|/|관리자|만두|');
+  t('★ 내부 담당이 없고 업체 담당만 있으면 [미설정] + 브랜드사 표시',
+    f({ brand: ['박가람 차장'] }) === '|담당|UNSET|브랜드사|표시|박가람 차장|');
 }
 t('★ 담당 행은 구매시간 다음·총건수 앞', (() => {
   const m = fnBody(wd, 'function _condCardHtml(');

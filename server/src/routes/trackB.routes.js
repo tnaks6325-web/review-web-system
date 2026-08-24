@@ -948,6 +948,21 @@ router.get('/brands', authMiddleware, async (req, res, next) => {
     res.status(o.ok ? 200 : (o.code || 400)).json(o);
   } catch (err) { next(err); }
 });
+/* 136: 작업(탭)별 브랜드 담당자 — 대행사가 브랜드사에게 보여줄 자기 쪽 담당자(최대 2명, 자유입력).
+   ★ 게이트는 브랜드 CRUD 와 같은 `_advSelf` — **브랜드 링크 세션은 도달 불가**(열람 전용).
+   ★ 대상 탭 소유 검증은 서비스가 한다(남의 작업에 담당자를 심을 수 없다). */
+router.post('/brands/tab-manager', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { sheetId, tabName, names } = req.body || {};
+    const o = await svc.setTabBrandManagers({
+      advertiserId, sheetId, tabName, names,
+      actor: (req.admin && req.admin.name) || null,
+    });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
 router.post('/brands/create', authMiddleware, async (req, res, next) => {
   try {
     const advertiserId = _advSelf(req);
@@ -1056,7 +1071,8 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
     // `/tabs`와 동일하게, 작업보드 표는 모든 비리뷰어 역할이 열람할 수 있다. PII 마스킹과
     // 쓰기 권한은 역할별 service 렌즈/각 write route에서 계속 분리한다.
-    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true });
+    // ★ brandId 는 **토큰에서만**(IDOR 차단) — 작업 조건 카드의 담당 행이 세션 종류로 갈린다(136).
+    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, brandId: (req.admin && req.admin.brand_id) || null, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
@@ -1482,7 +1498,7 @@ router.post('/workdesk/test-auto-delete-cleanup', authMiddleware, async (req, re
    ★ gid 는 서버가 `tab_configs` 에서 다시 구한다(낡은 화면이 남의 공고 정원 이력을 보지 않게). */
 router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, kind, limit } = req.query;
+    const { sheetId, tabName, kind, limit, before } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     let gid = '';
@@ -1492,7 +1508,7 @@ router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
       gid = (rows[0] && rows[0].tab_gid) || '';
     } catch (_) { /* gid 미상 = 이름 매칭만(fail-soft) */ }
     const { tabActivityLog } = require('../services/tabActivityLog.service');
-    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit }));
+    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit, before }));
   } catch (err) { next(err); }
 });
 

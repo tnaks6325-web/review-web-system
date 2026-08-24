@@ -23,6 +23,9 @@ function getPool() {
 
 function __setPoolForTest(pool) {
   _pool = pool || null;
+  // ★ 풀에서 파생된 캐시(감지대상 허용목록)도 함께 버린다 — 안 버리면 앞 시나리오의 목록이
+  //   다음 시나리오에 남아 "왜 건너뛰지?"로 헤맨다(실제로 밟았다).
+  _slessKeys = null; _slessAt = 0;
 }
 
 // ★ 미러 안 된 탭에 주문이 오면 그 시트를 백그라운드로 1회 자동미러(탭당 60초 debounce)
@@ -1409,16 +1412,19 @@ async function rowIdentityMatches(os, tabContext) {
 async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false, ignoreBusy = false, useLiveHeaders = true } = {}) {
   if (process.env.SHEET_REVERSE_SYNC !== '1') return { skipped: true, reason: 'disabled' };
   if (!sheetId || !tabName) throw new Error('detectReverseSyncProposals: sheetId, tabName 필수');
-  // ★★ 무시트 탭은 읽지 않는다 — 이 함수의 존재 이유가 "시트를 사람이 고쳤나"인데,
-  //   무시트 탭은 진실원천이 작업표로 옮겨가 아무도 그 시트를 고치지 않는다. 그런데도 계속 읽으면
-  //   (a) 쿼터를 죽은 시트에 쓰고 (b) 전환 전 시트값으로 "원장을 시트값으로" 를 권하게 된다.
+  // ★★ "지금도 사람이 고칠 수 있는 시트"만 읽는다 — 이 함수의 존재 이유가 "시트를 사람이 고쳤나"인데,
+  //   그럴 수 없는 탭을 계속 읽으면 (a) 쿼터를 죽은 시트에 쓰고 (b) 낡은 시트값으로
+  //   "원장을 시트값으로" 를 권하게 된다.
   //   실측(2026-08-24): 닫히지 않은 탭 113개가 **전부** 무시트인데 detect 는 3분마다 계속 돌아
   //   하루 약 2,880콜을 썼고, 열린 제안 108건이 전원 무시트 탭 소속이었다.
+  //   ⚠ 처음엔 무시트 탭만 뺐는데(#1143) **닫힌 탭 3개에서 계속 새 제안이 생겼다** — sheetless=FALSE 라
+  //     무시트 목록에 안 잡히고, 아카이브로 tab_configs 행이 지워진 탭은 목록에 담길 수조차 없었다.
+  //     그래서 제외목록이 아니라 **허용목록**으로 뒤집었다(sheetlessScope.DETECTABLE_TABS_SQL).
   //   ★ 판정은 utils/sheetlessScope 단일 출처 — 스마트빌드·RAW 미러·변경감지가 쓰는 그 게이트다
   //     (그 파일 머리주석이 나열한 주기작업 중 역동기화만 빠져 있었다).
-  //   ★ 조회 실패는 빈 집합(fail-open) = 종전대로 읽는다 — 게이트가 죽었다고 감지를 멈추지 않는다.
-  //   ★ 영구 배제가 아니다. 시트 기반 탭을 새로 만들거나 재연결하면 그 즉시 다시 감지 대상이 된다.
-  if (await _isSheetlessTabCached(sheetId, tabName)) return { skipped: true, reason: 'sheetless_tab' };
+  //   ★ 목록을 못 얻으면 건너뛰지 않는다(fail-open) — 게이트가 죽었다고 감지를 멈추지 않는다.
+  //   ★ 영구 배제가 아니다. 마감을 풀거나 시트를 재연결하면 그 즉시 다시 감지 대상이 된다.
+  if (await _skipDetectTab(sheetId, tabName)) return { skipped: true, reason: 'tab_not_detectable' };
   const { withJobLock } = require('../utils/jobLock');
   return withJobLock('order_reconcile',
     () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }),
@@ -1432,21 +1438,24 @@ const _HEADER_SCAN_ROWS = parseInt(process.env.REVERSE_SYNC_HEADER_SCAN || '20',
  *  ★ 실패하면 빈 집합 → isSheetlessTab 이 전부 false → 종전 동작(fail-open). */
 const _SLESS_TTL_MS = 60000;
 let _slessKeys = null, _slessAt = 0;
-async function _sheetlessKeysCached() {
+/** 감지해도 되는 탭 허용목록(무시트 아님 · 마감 아님 · tab_configs 에 등록됨). null = 판정 불가. */
+async function _detectableKeysCached() {
   const now = Date.now();
-  if (_slessKeys && (now - _slessAt) < _SLESS_TTL_MS) return _slessKeys;
+  if (_slessKeys !== null && (now - _slessAt) < _SLESS_TTL_MS) return _slessKeys;
   try {
-    _slessKeys = await require('../utils/sheetlessScope').sheetlessTabKeys(getPool());
+    _slessKeys = await require('../utils/sheetlessScope').detectableTabKeys(getPool());
   } catch (e) {
-    logger.warn(`[reverseSync] 무시트 목록 조회 실패(종전대로 감지 진행): ${e.message}`);
-    _slessKeys = new Set();
+    logger.warn(`[reverseSync] 감지대상 목록 조회 실패(종전대로 감지 진행): ${e.message}`);
+    _slessKeys = null;
   }
   _slessAt = now;
   return _slessKeys;
 }
-async function _isSheetlessTabCached(sheetId, tabName, tabGid) {
-  const { isSheetlessTab } = require('../utils/sheetlessScope');
-  return isSheetlessTab(await _sheetlessKeysCached(), sheetId, tabName, tabGid);
+/** 이 탭을 감지에서 건너뛸 것인가. ★ 목록을 못 얻으면(null) 건너뛰지 않는다(fail-open). */
+async function _skipDetectTab(sheetId, tabName, tabGid) {
+  const keys = await _detectableKeysCached();
+  if (!keys) return false;
+  return !require('../utils/sheetlessScope').hasTabKey(keys, sheetId, tabName, tabGid);
 }
 
 async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }) {
@@ -1680,10 +1689,10 @@ async function _autoApplyInner({ limit, dryRun }) {
   let applied = 0, ordersApplied = 0, dismissed = 0, reverifyFail = 0, staleG6 = 0, tabsSkipped = 0;
   for (const [, tabProps] of byTab) {
     const first = tabProps[0];
-    // ★ 무시트 탭은 재검증 읽기도 하지 않는다 — detect 를 막아도 **이미 쌓인** 제안이 남아 있어
+    // ★ 감지 대상이 아닌 탭은 재검증 읽기도 하지 않는다 — detect 를 막아도 **이미 쌓인** 제안이 남아
     //   여기서 탭당 라이브 2콜(헤더+사각형)이 계속 나간다. 읽어 봐야 아무도 안 고치는 시트다.
     //   제안은 지우지 않고 그대로 둔다(사람이 화면에서 판단할 몫 — 여기서 조용히 기각하지 않는다).
-    if (await _isSheetlessTabCached(first.sheet_id, first.tab_name, first.tab_gid)) { tabsSkipped++; continue; }
+    if (await _skipDetectTab(first.sheet_id, first.tab_name, first.tab_gid)) { tabsSkipped++; continue; }
     const ctx = await loadRawTabContext(first.sheet_id, first.tab_gid, first.tab_name);
     if (!ctx || !ctx.tabGid) { tabsSkipped++; continue; }
     let headers = ctx.headers;
@@ -1856,14 +1865,15 @@ async function runReverseSyncAutoCycle({ tabsPerCycle } = {}) {
       WHERE deleted_at IS NULL AND mirror_status = 'written' AND sheet_row IS NOT NULL AND last_sheet_write_sig IS NOT NULL
       GROUP BY sheet_id, tab_name ORDER BY sheet_id, tab_name LIMIT 500`
   );
-  // ★ 무시트 탭을 여기서 걸러 낸다. detect 안에도 같은 게이트가 있지만(단일 관문), 사이클당 탭이
-  //   3개뿐이라 무시트 탭이 라운드로빈 자리를 먹으면 **진짜 시트 탭이 며칠씩 밀린다**.
-  //   ⚠ 무시트 전환은 last_sheet_write_sig 를 지우지 않는다(전환 전 시트에 써진 주문이라 표식이 남는다)
-  //     → 위 쿼리만으로는 무시트 탭이 그대로 따라 들어온다. 그게 이번 낭비의 원인이었다.
-  const _slKeys = await _sheetlessKeysCached();
-  const { isSheetlessTab } = require('../utils/sheetlessScope');
-  const tabs = rawTabs.filter(t => !isSheetlessTab(_slKeys, t.sheet_id, t.tab_name));
-  const sheetlessSkipped = rawTabs.length - tabs.length;
+  // ★ 감지 대상이 아닌 탭을 여기서 걸러 낸다. detect 안에도 같은 게이트가 있지만(단일 관문),
+  //   사이클당 탭이 3개뿐이라 그런 탭이 라운드로빈 자리를 먹으면 **진짜 시트 탭이 며칠씩 밀린다**.
+  //   ⚠ 무시트 전환도 탭 마감도 last_sheet_write_sig 를 지우지 않는다(전환·마감 전에 시트에 써진
+  //     주문이라 표식이 그대로 남는다) → 위 쿼리만으로는 그 탭들이 전부 따라 들어온다.
+  //     그게 이번 낭비의 원인이었다.
+  const _okKeys = await _detectableKeysCached();
+  const { hasTabKey } = require('../utils/sheetlessScope');
+  const tabs = _okKeys ? rawTabs.filter(t => hasTabKey(_okKeys, t.sheet_id, t.tab_name)) : rawTabs;
+  const skippedNotDetectable = rawTabs.length - tabs.length;
   let detected = 0, detectRuns = 0;
   if (tabs.length) {
     const start = _reverseAutoCursor % tabs.length;
@@ -1878,7 +1888,7 @@ async function runReverseSyncAutoCycle({ tabsPerCycle } = {}) {
     _reverseAutoCursor = (start + perCycle) % tabs.length;
   }
   const apply = await autoApplyReverseSync({});
-  return { activeTabs: tabs.length, sheetlessSkipped, detectRuns, detected, apply };
+  return { activeTabs: tabs.length, skippedNotDetectable, detectRuns, detected, apply };
 }
 
 module.exports = {
