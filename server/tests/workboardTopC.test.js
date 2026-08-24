@@ -709,6 +709,59 @@ t('★ 담당 행은 구매시간 다음·총건수 앞', (() => {
     && /k==='@mgr'\?mgrRow/.test(m);
 })());
 
+console.log('\n── L. 이체은행 — 입금 3종을 작업 조건에서 정한다(사용자 확정 2026-08-24) ──');
+/* 종전에는 입금관리 전용 팝업에서 이체은행·통장표시·리뷰비를 직접 입력했는데, 같은 값을 정하는
+   자리가 작업 조건 카드에도 있어 창구가 둘로 갈렸다. 팝업을 없애고 이 카드로 모았다. */
+t('★ 조건 카드에 이체은행 줄이 있다(리뷰비·입금명과 나란히)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return /\['이체은행','bank'/.test(m) && /\['리뷰비','fee'/.test(m) && /\['입금명','memo'/.test(m);
+})());
+t('★★ 은행 판정은 입금관리와 **같은 함수**(사본 금지 — 화면과 이체 파일이 갈리면 안 된다)', (() => {
+  const blk = cond.slice(cond.indexOf('이체은행 —'), cond.indexOf('이체은행 —') + 1200);
+  // ★ blk 은 주석 **중간**에서 시작한다 — 코드만 보려면 그 주석이 닫힌 뒤부터 자른다
+  const code = blk.slice(blk.indexOf('*/') + 2);
+  return /require\('\.\/payment\.service'\)/.test(blk)
+    && /normalizeBankChoice/.test(code) && /bankFromGoodsCostType/.test(code)
+    && !/현금|계산서/.test(code);   // 판정 규칙 문자열 사본 0(payment.service 가 소유)
+})());
+t('★ 자동 판정 값은 그 사실을 말한다(사람이 정한 값과 구분)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf("['이체은행','bank'");
+  return /bankSource==='auto'/.test(m.slice(i, i + 400)) && /자동/.test(m.slice(i, i + 400));
+})());
+t('★★ 광고주에게는 이체은행이 나가지 않는다(렌즈 화이트리스트 + 화면 목록)', (() => {
+  const lens = fnBody(svc, 'function _condAdvertiserLens(');
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const advList = (m.match(/filter\(\(\[k\]\)=>!isAdv\|\|\[([^\]]*)\]/) || [])[1] || '';
+  return !/transferBank/.test(lens) && !/이체은행/.test(advList);
+})());
+t('★ 공고 있으면 공고 모달 · 없으면 관리자만 탭 저장(리뷰비·입금명과 같은 규칙)', (() => {
+  const g = fnBody(wd, 'function _cndFixGate(');
+  return /kind==='fee'\|\|kind==='memo'\|\|kind==='bank'/.test(g) && /isAdmin/.test(g);
+})());
+t('★ 저장 창구는 기존 API 하나(신규 경로 0)', (() => {
+  const m = fnBody(wd, 'function _cndBankModal(');
+  return /payment\/transfer-setting/.test(m) && /bank:sel\.dataset\.v/.test(m)
+    && /자동\(작업오더 물건비\)/.test(m);
+})());
+{ // vm 실행 — 값·자동칩·미설정 세 갈래를 실제로 그려 본다
+  const vm = require('vm');
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf("['이체은행','bank'"), j = m.indexOf("['리뷰타입'", i);
+  const sb = { esc: v => String(v == null ? '' : v) };
+  vm.createContext(sb);
+  vm.runInContext('this.f=function(cd){return [' + m.slice(i, j) + '];};', sb);
+  const row = cd => JSON.stringify(sb.f(cd)[0]);
+  t('★ 사람이 정한 값 = 라벨만(자동 칩 없음)',
+    /하나은행/.test(row({ transferBankLabel: '하나은행', bankSource: 'campaign' }))
+    && !/자동/.test(row({ transferBankLabel: '하나은행', bankSource: 'campaign' })));
+  t('★ 자동 판정 값 = 라벨 + [자동] 칩',
+    /케이뱅크/.test(row({ transferBankLabel: '케이뱅크', bankSource: 'auto' }))
+    && /자동/.test(row({ transferBankLabel: '케이뱅크', bankSource: 'auto' })));
+  t('★★ 정할 근거가 없으면 null = [미설정](0·빈 값으로 꾸미지 않는다)',
+    sb.f({ transferBankLabel: null, bankSource: null })[0][2] === null);
+}
+
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));
 
