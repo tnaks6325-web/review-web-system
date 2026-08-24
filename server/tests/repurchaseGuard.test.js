@@ -1,0 +1,217 @@
+/**
+ * repurchaseGuard.test.js — 재참여(재구매) 기간 제한(사용자 확정 2026-08-24) 회귀가드.
+ *
+ * 배경: 8/20에 참여·구매완료한 리뷰어가 8/24에 같은 작업(탭)을 관리자 [외부모집 수동제출]
+ *   화면으로 다시 등록해도 통과됐다. 원인 = 캠페인 단위(recruit_campaigns.id + phone8) 영구
+ *   차단이 이 화면에서는 "모집공고를 지정했을 때만" 작동해, 공고 미지정으로 등록하면 24시간
+ *   중복 체크(그나마도 24시간뿐)만 남았다.
+ *
+ * ★★ 완화 금지 불변식
+ *   ① 판정 단일 출처 = utils/repurchaseGuard — 리뷰어 셀프 참여(campaign.routes)와
+ *      관리자 외부모집 수동제출(manualOrder.service)이 같은 함수를 쓴다.
+ *   ② 기준 = "같은 작업(탭)"(sheet_id, tab_name) + phone8 — recruit_campaigns.id 재발행(차수)이나
+ *      캠페인 미지정과 무관하게 잡힌다.
+ *   ③ 취소된 주문(deleted_at 有)은 세지 않는다.
+ *   ④ 모르면 막지 않는다(fail-open) — 탭·번호 판정 불가는 통과.
+ *   ⑤ 예외(강제 통과)는 관리자 외부모집 수동제출에만 있다 — 리뷰어 셀프 참여는 예외 없음.
+ *
+ * 실행: node tests/repurchaseGuard.test.js
+ */
+process.env.PGTEST_SKIP_BOOT = '1';
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const normalizeEol = (s) => s.replace(/\r\n/g, '\n');
+const readS = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8'));
+const readF = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8'));
+
+let n = 0;
+const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
+const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.stringify(got) === JSON.stringify(want));
+
+(async () => {
+  const { checkRepurchaseWindow, checkRepurchaseWindowBatch, phone8Of, repurchaseDays } =
+    require('../src/utils/repurchaseGuard');
+
+  /* ═══ 1. fail-open — 판정 불가는 항상 통과 ═══ */
+  console.log('\n[1] fail-open (모르면 막지 않는다)');
+  eq('sheetId 없음 → 통과', (await checkRepurchaseWindow({ query: async () => { throw new Error('DB 호출 금지'); } },
+    { sheetId: '', tabName: 't', phone8: '12345678' })).blocked, false);
+  eq('tabName 없음 → 통과', (await checkRepurchaseWindow({ query: async () => { throw new Error('DB 호출 금지'); } },
+    { sheetId: 's', tabName: '', phone8: '12345678' })).blocked, false);
+  eq('phone8 7자리(불완전) → 통과', (await checkRepurchaseWindow({ query: async () => { throw new Error('DB 호출 금지'); } },
+    { sheetId: 's', tabName: 't', phone8: '1234567' })).blocked, false);
+
+  const origDays = process.env.CAMPAIGN_REPARTICIPATE_DAYS;
+  process.env.CAMPAIGN_REPARTICIPATE_DAYS = '0';
+  eq('킬스위치(=0) → DB 호출 없이 통과', (await checkRepurchaseWindow({ query: async () => { throw new Error('DB 호출 금지'); } },
+    { sheetId: 's', tabName: 't', phone8: '12345678' })).blocked, false);
+  delete process.env.CAMPAIGN_REPARTICIPATE_DAYS;
+  eq('기본값 14일', repurchaseDays(), 14);
+  process.env.CAMPAIGN_REPARTICIPATE_DAYS = origDays;
+
+  /* ═══ 2. 정상 판정 — 스텁 DB ═══ */
+  console.log('\n[2] 정상 판정(스텁 pool)');
+  let lastSql = null, lastParams = null;
+  const stubDb = (rows) => ({
+    query: async (sql, params) => { lastSql = String(sql); lastParams = params; return { rows }; },
+  });
+
+  {
+    const r = await checkRepurchaseWindow(stubDb([]), { sheetId: 's1', tabName: 't1', phone: '010-8636-5441' });
+    eq('일치 없음 → 통과', r.blocked, false);
+    ok('phone은 함수 안에서 phone8로 변환됨(문자열 8자리 파라미터)', lastParams[2] === '86365441');
+    ok('쿼리에 sheet_id+tab_name 조건 포함', lastSql.includes('sheet_id = $1') && lastSql.includes('tab_name = $2'));
+    ok('★ 취소된 주문 제외 조건 포함', lastSql.includes('deleted_at IS NULL'));
+    ok('★ 기간 창은 make_interval(days=>) 파라미터화 — 하드코딩 아님', lastSql.includes('make_interval(days => $4)'));
+  }
+
+  {
+    const submittedAt = new Date('2026-08-20T05:00:00Z');
+    const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
+      { sheetId: 's1', tabName: 't1', phone8: '86365441' });
+    eq('최근 이력 있음 → 차단', r.blocked, true);
+    eq('14일 뒤가 재참여 가능일', r.availableFrom.toISOString(),
+      new Date(submittedAt.getTime() + 14 * 86400000).toISOString());
+    eq('days 필드 = 14', r.days, 14);
+  }
+
+  /* ═══ 3. 배치 판정 ═══ */
+  console.log('\n[3] checkRepurchaseWindowBatch');
+  {
+    const rows = [{ p8: '86365441', last_at: new Date('2026-08-20T00:00:00Z') }];
+    const r = await checkRepurchaseWindowBatch(stubDb(rows),
+      { sheetId: 's1', tabName: 't1', phone8List: ['86365441', '86365441', '11112222'] });
+    eq('막힌 번호만 맵에 담김(1건)', r.size, 1);
+    ok('막힌 번호가 정확히 매칭됨', r.get('86365441') && r.get('86365441').blocked === true);
+    ok('막히지 않은 번호는 맵에 없음', !r.has('11112222'));
+  }
+  {
+    const r = await checkRepurchaseWindowBatch({ query: async () => { throw new Error('호출 금지'); } },
+      { sheetId: 's1', tabName: 't1', phone8List: [] });
+    eq('빈 목록 → DB 호출 없이 빈 맵', r.size, 0);
+  }
+
+  eq('phone8Of: 하이픈·문자 제거 후 끝 8자리', phone8Of('010-8636-5441'), '86365441');
+
+  /* ═══ 4. 배선 — 리뷰어 셀프 참여(campaign.routes.js) ═══ */
+  console.log('\n[4] 배선: 리뷰어 셀프 참여');
+  const campFull = readS('routes/campaign.routes.js');
+  // ★ _applyParticipation 함수 본문만 본다 — 그 밖(예: /my-repurchase-status 라우트)에도
+  //   같은 require 문자열이 등장해 파일 전체를 훑으면 엉뚱한 자리를 짚는다.
+  const iApplyFnStart = campFull.indexOf('async function _applyParticipation');
+  ok('_applyParticipation 함수를 찾음', iApplyFnStart > -1);
+  const camp = campFull.slice(iApplyFnStart);
+  ok('★ /my-repurchase-status 라우트도 등록되어 있다(카드 표시용 배치 조회)',
+    campFull.includes(`router.get('/my-repurchase-status'`) && campFull.indexOf(`router.get('/my-repurchase-status'`) < iApplyFnStart);
+  const iBlk = camp.indexOf(`reason: 'already_submitted', error: '이미 구매양식 제출까지 완료한 캠페인이에요.'`);
+  const iGuard = camp.indexOf(`require('../utils/repurchaseGuard')`);
+  const iExpireSweep = camp.indexOf('만료 스윕은 정리 작업이지만');
+  ok('utils/repurchaseGuard 를 사용한다', iGuard > -1);
+  ok('★ 순서: 캠페인단위 영구차단 뒤 → 재구매 가드 → 만료 스윕(기존 흐름 순서 불변)',
+    iBlk > -1 && iGuard > iBlk && iExpireSweep > iGuard);
+  ok('reason: repurchase_window 반환', camp.includes(`reason: 'repurchase_window'`));
+  ok('★ camp.linked_sheet_id/linked_tab_name 기준(캠페인 재발행에도 안 흔들리는 탭 식별자)',
+    camp.includes('camp.linked_sheet_id') && camp.includes('camp.linked_tab_name'));
+  ok('★ holdP8(본계정/타계정 신원)로 판정 — 로그인 phone8만 보지 않는다', camp.includes('phone8: holdP8'));
+  ok('★★ 셀프 참여는 예외(강제 통과) 없음 — allowRepurchase 미사용',
+    !camp.slice(iGuard, iGuard + 1500).includes('allowRepurchase'));
+  ok('조회 실패는 fail-open(catch에서 warn만, ROLLBACK 없음)',
+    /catch \(e\) \{\s*logger\.warn\('\[campaign\/apply\] 재참여 기간 판정 실패/.test(camp));
+
+  /* ═══ 4b. 배선 — 카드 표시용 배치 조회 라우트 ═══ */
+  console.log('\n[4b] 배선: /my-repurchase-status 라우트(카드 배지 재료)');
+  const iMyStatusRoute = campFull.indexOf(`router.get('/my-repurchase-status'`);
+  const iIdRoute = campFull.indexOf(`router.get('/:id'`);
+  ok('★ 라우트 등록 순서: /:id 보다 앞(뒤에 두면 /:id 가 이 경로를 id로 삼킨다)',
+    iMyStatusRoute > -1 && iIdRoute > -1 && iMyStatusRoute < iIdRoute);
+  ok('phone8 형식 검증(자릿수) 있음', campFull.slice(iMyStatusRoute, iIdRoute).includes("p8.length !== 8"));
+  ok('checkRepurchaseStatusForCampaigns 사용(단일 출처)',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForCampaigns'));
+  ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
+
+  const { checkRepurchaseStatusForCampaigns } = require('../src/utils/repurchaseGuard');
+  {
+    const rows = [
+      { campaign_id: 'camp_locked', last_at: new Date(Date.now() - 4 * 86400000) },   // 4일 전 = 아직 잠김
+      { campaign_id: 'camp_ready', last_at: new Date(Date.now() - 20 * 86400000) },   // 20일 전 = 지금 가능
+    ];
+    const r = await checkRepurchaseStatusForCampaigns(stubDb(rows),
+      { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8: '86365441' });
+    eq('4일 전 참여 → locked', r.get('camp_locked').status, 'locked');
+    ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('camp_locked').availableFrom instanceof Date);
+    eq('20일 전 참여(14일 지남) → ready', r.get('camp_ready').status, 'ready');
+    ok('★ 참여 이력이 아예 없는 공고는 맵에 없음(=평소 카드, 0/false로 꾸미지 않는다)', !r.has('camp_never'));
+  }
+  {
+    const origDays = process.env.CAMPAIGN_REPARTICIPATE_DAYS;
+    process.env.CAMPAIGN_REPARTICIPATE_DAYS = '0';
+    const r = await checkRepurchaseStatusForCampaigns({ query: async () => { throw new Error('호출 금지'); } },
+      { campaignIds: ['x'], phone8: '86365441' });
+    eq('★ 킬스위치(=0) → 배지 기능도 함께 꺼짐(제한 없는데 "N일 후" 안내가 뜨는 모순 방지)', r.size, 0);
+    process.env.CAMPAIGN_REPARTICIPATE_DAYS = origDays;
+  }
+
+  /* ═══ 5. 배선 — 관리자 외부모집 수동제출(manualOrder.service.js) ═══ */
+  console.log('\n[5] 배선: 외부모집 수동제출 서비스');
+  const svc = readS('services/manualOrder.service.js');
+  ok('allowRepurchase 파라미터 존재', svc.includes('allowRepurchase = false'));
+  const iDup24h = svc.indexOf('24시간 내에 이미 접수돼 있습니다');
+  const iRepurchase = svc.indexOf(`require('../utils/repurchaseGuard')`);
+  const iCampaignDedup = svc.indexOf('이 공고에 이미 확정된 참여');
+  ok('★ 순서: 24시간 중복확인 → 재참여 가드 → 캠페인단위 확정이력(기존 순서 유지)',
+    iDup24h > -1 && iRepurchase > iDup24h && iCampaignDedup > iRepurchase);
+  // ★★ 핵심 회귀: 캠페인 지정 여부와 무관하게 항상 검사해야 한다(이번 사고의 원인이
+  //   "campaignId 없으면 검사 자체가 스킵"이었으므로, if(campaignId) 안에 갇히면 안 된다).
+  const block = svc.slice(iRepurchase - 400, iRepurchase + 900);
+  ok('★★ campaignId 유무와 무관하게 항상 검사(if(campaignId) 블록 밖)',
+    !/if \(campaignId\) \{[\s\S]{0,50}checkRepurchaseWindow/.test(block));
+  ok('강제 통과 시 접수 결과에 경고를 남긴다(조용한 우회 금지)',
+    svc.includes('재참여 기간 제한을 넘겨 접수했습니다(관리자 확인됨)'));
+  ok('repurchaseBlocked 필드로 사유를 되돌린다', svc.includes('repurchaseBlocked: true'));
+
+  /* ═══ 6. 배선 — 라우트(사전 배치 판정) ═══ */
+  console.log('\n[6] 배선: 라우트 사전 판정');
+  const rt = readS('routes/manualOrder.routes.js');
+  ok('checkRepurchaseWindowBatch import', rt.includes('checkRepurchaseWindowBatch'));
+  ok(`needConfirm: 'repurchase_window' 를 쓰기 전에(배치 시작 전) 되돌린다`,
+    rt.includes(`needConfirm: 'repurchase_window'`));
+  ok('allowRepurchase 를 서비스 호출에 전달', /allowRepurchase,\s*\/\//.test(rt));
+  const iPreCheck = rt.indexOf('checkRepurchaseWindowBatch(pool');
+  const iDailyPre = rt.indexOf('일 정원(오늘 몫) 사전 판정');
+  ok('★ 재참여 사전 판정이 일 정원 사전 판정보다 먼저(둘 다 "쓰기 전에 막는다" 원칙)',
+    iPreCheck > -1 && iDailyPre > -1 && iPreCheck < iDailyPre);
+
+  /* ═══ 7. 배선 — 프론트(관리자 확인창) ═══ */
+  console.log('\n[7] 배선: 프론트 확인창');
+  const fe = readF('js/manual-order.js');
+  ok(`needConfirm === 'repurchase_window' 분기 존재`, fe.includes(`out.needConfirm === 'repurchase_window'`));
+  ok('allowRepurchase 를 요청 본문에 싣는다', fe.includes('allowRepurchase: allowRepurchase === true'));
+  ok('★★ over_daily 재확인 체인에서도 재참여 확인 상태(_repurchaseOk)를 잃지 않는다(연쇄 확인 시 우회 방지)',
+    fe.includes('post(true, _repurchaseOk)'));
+  ok('확인 취소 시 쓰기 0건(서버 재호출 없이 return)',
+    /needConfirm === 'repurchase_window'[\s\S]{0,900}if \(!okGo\) \{[\s\S]{0,200}return;/.test(fe));
+
+  /* ═══ 8. 배선 — 리뷰어 홈 썸네일 배지(시안 A, 사용자 확정) ═══ */
+  console.log('\n[8] 배선: 리뷰어 홈 카드 배지');
+  const cc = readF('js/campaign-cards.js');
+  ok('pt-sash(하단 띠) CSS 존재 — A안', cc.includes('.pt-sash{position:absolute;left:0;right:0;bottom:0'));
+  ok('lock/ready 두 상태 모두 스타일 존재', cc.includes('.pt-sash.lock{') && cc.includes('.pt-sash.ready{'));
+  ok('★ 관리자 카드에는 렌더하지 않는다(!admin 게이트) — 집계 화면엔 "내 참여" 개념이 안 맞는다',
+    /if \(!admin && c\.repurchaseStatus === 'locked'/.test(cc));
+  ok('c.repurchaseStatus 가 없으면 빈 문자열(=평소 카드, 조용히 무동작)', cc.includes(`let repurchaseSash = '';`));
+  ok('썸네일 마크업에 삽입됨', cc.includes('${topleft}${repurchaseSash}${editChip}${moChip}'));
+  ok('★ 잠긴 상태에서 [참여하기] 버튼도 함께 막는다(카드는 열려 보이는데 실제 참여만 막히는 상태 방지)',
+    cc.includes(`if (c.state === 'open' && repurchaseLocked)`));
+
+  const idx = readF('index.html');
+  ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));
+  ok('★ 같은 (번호+공고목록) 조합은 재조회하지 않는다(재렌더→재조회 순환 방지)',
+    idx.includes('if (key === _rcRepurchaseFetchKey) return;'));
+  ok('조회 실패해도 목록 렌더 자체는 살아있다(부가 정보 취급)',
+    /catch \(_\) \{ \/\* 재참여 안내는 부가 정보/.test(idx));
+  ok('카드 데이터에 병합 후 CampCards.cardHtml 호출', idx.includes('c.repurchaseStatus = rs.status'));
+
+  console.log(`\n✅ repurchaseGuard: ${n}개 통과`);
+  process.exit(0);
+})().catch((e) => { console.error('❌ 실패:', e.message); console.error(e.stack); process.exit(1); });
