@@ -3407,7 +3407,15 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       }
     }
     await client.query('COMMIT');
-    return { ok: true, editId: ins.rows[0].id, anchorType, field, linkedField, value: kind === 'bool' ? vBool : vText };
+    // through-write(주문 원장 동기화) 재료 — 라우트가 커밋 뒤 별도로 사용한다(같은 tx 안에서 부르면
+    // 데드락 위험이 있어 route.js 에서 분리했다). row_json 은 이 함수가 건드리지 않으므로 편집 전 값 그대로.
+    const priorValue = (isCol && anchorType === 'order' && row.row_json && typeof row.row_json === 'object')
+      ? row.row_json[field.slice(4)] : undefined;
+    return {
+      ok: true, editId: ins.rows[0].id, anchorType, field, linkedField, value: kind === 'bool' ? vBool : vText,
+      orderSubmissionId: anchorType === 'order' ? anchorValue : null,
+      priorValue,
+    };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
