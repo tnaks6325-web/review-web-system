@@ -367,13 +367,7 @@ async function _smpFetch(body) {
   var r = await fetch(_apiBase() + SMP_EP, opt);
   var j = await r.json().catch(function () { return null; });
   if (!j) throw new Error('HTTP ' + r.status);
-  if (j.ok === false) {
-    // ★ 사유 코드를 오류에 실어 보낸다 — 호출부가 "빈 저장 거부"와 일반 실패를 갈라야 한다
-    //   (문구만으로 판정하면 문구를 고치는 순간 조용히 안 갈린다).
-    var e = new Error(j.error || '요청 실패');
-    e.code = j.code || ''; e.prevCoreCount = j.prevCoreCount;
-    throw e;
-  }
+  if (j.ok === false) throw new Error(j.error || '요청 실패');
   return j;
 }
 
@@ -1055,7 +1049,13 @@ async function _wtFetch(url, body) {
   var r = await fetch(_apiBase() + url, opt);
   var j = await r.json().catch(function () { return null; });
   if (!j) throw new Error('HTTP ' + r.status);
-  if (j.ok === false) throw new Error(j.error || '요청 실패');
+  if (j.ok === false) {
+    // ★ 사유 코드를 오류에 실어 보낸다 — 호출부가 "빈 저장 거부"와 일반 실패를 갈라야 한다
+    //   (문구만으로 판정하면 문구를 고치는 순간 조용히 안 갈린다).
+    var e = new Error(j.error || '요청 실패');
+    e.code = j.code || ''; e.prevCoreCount = j.prevCoreCount;
+    throw e;
+  }
   return j;
 }
 

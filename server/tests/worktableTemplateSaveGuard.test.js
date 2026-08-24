@@ -62,6 +62,16 @@ function routeBody(src, decl) {
   const j = src.indexOf('\nrouter.', i + 10);
   return src.slice(i, j > i ? j : src.length);
 }
+/* 함수 본문만 잘라 본다 — ★ 고정 폭 창(`{0,900}`)으로 자르면 **다음 함수의 코드가 대신
+   통과**시킨다(이 가드를 만들 때 실제로 밟았다: 로더의 호출을 지워도 바로 아래
+   `_wtRenderHistory` 정의가 창 안에 들어와 초록이었다). */
+function fnBody(src, decl) {
+  const i = src.indexOf(decl);
+  assert(i > -1, '함수를 찾지 못함: ' + decl);
+  const rest = src.slice(i + decl.length);
+  const m = /\n(?:async )?function /.exec(rest);
+  return rest.slice(0, m ? m.index : rest.length);
+}
 async function refuse(fn) {
   try { await fn(); return null; } catch (e) { return e; }
 }
@@ -171,17 +181,25 @@ ok('게이트는 종전대로 adminOrMaster', /router\.post\('\/worktable\/templ
 
 // ── F. 화면 배선 ───────────────────────────────────────────────
 console.log('\n[F] 화면 — 확인 후 재전송 · 이력 목록');
-ok('_wtFetch 가 사유 코드를 오류에 싣는다', /e\.code = j\.code/.test(setJs));
+/* ★ 함수 본문을 잘라서 본다 — 파일 어딘가에 있으면 통과하는 검사는 **엉뚱한 함수에 붙은
+   변경을 통과시킨다**(이 가드를 만들 때 실제로 밟았다: 같은 3줄을 가진 `_smpFetch` 에 붙어
+   저장 화면은 종전 그대로였고, 정적 검사는 초록이었다. 실브라우저가 잡았다). */
+ok('★ _wtFetch 가 사유 코드를 오류에 싣는다(다른 fetch 헬퍼가 대신 통과시키지 않는다)',
+  /e\.code = j\.code/.test(fnBody(setJs, 'async function _wtFetch(url, body)')));
 ok('★ empty_core 만 확인창을 띄운다(문구 판정 금지)', /e\.code !== 'empty_core'/.test(setJs));
 ok('★ 취소하면 아무것도 저장하지 않는다',
   /confirm\([\s\S]{0,200}\)\)\s*\{\s*\n?\s*showToast\('저장하지 않았습니다'/.test(setJs));
 ok('확인하면 confirmClear:true 로 재전송', /payload\.confirmClear = true;[\s\S]{0,80}_wtFetch\(WT_EP\.template, payload\)/.test(setJs));
 ok('이력 목록을 그린다', /function _wtRenderHistory\(\)/.test(setJs) && /id="wtHistory"/.test(setJs));
+ok('★ 화면을 열자마자 이력이 보인다 — 로더도 그린다(저장한 뒤에야 보이면 사고 직후에 못 쓴다)',
+  /_wtRenderHistory\(\)/.test(fnBody(setJs, 'async function loadWorktableTemplate()')));
 ok('★ onclick 은 인덱스만(외부발 문자열 보간 금지)',
   /wtRestoreTemplate\('\s*\+ i \+\s*'\)/.test(setJs) && !/wtRestoreTemplate\('\$\{/.test(setJs));
 ok('되돌리기는 확인창을 거친다', /async function wtRestoreTemplate[\s\S]{0,600}confirm\(/.test(setJs));
 ok('★ 저장·복구 화면 반영은 한 벌(_wtApplySaved)',
   (setJs.match(/_wtApplySaved\(/g) || []).length >= 3 && /function _wtApplySaved\(data\)/.test(setJs));
+ok('★ 저장·복구 직후에도 이력이 갱신된다(방금 남긴 값이 목록에 보여야 되돌릴 수 있다)',
+  /_wtRenderHistory\(\)/.test(fnBody(setJs, 'function _wtApplySaved(data)')));
 ok('이력이 없으면 아무것도 그리지 않는다', /if \(!h\.length\) \{ box\.innerHTML = ''; return; \}/.test(setJs));
 ok('window 에 노출(onclick 이 찾는다)', /window\.wtRestoreTemplate = wtRestoreTemplate;/.test(setJs));
 
