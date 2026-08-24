@@ -317,6 +317,9 @@ async function run() {
     && /class="brdacts" onclick="event\.stopPropagation\(\)"/.test(src)
     && (src.match(/onclick="event\.stopPropagation\(\);brandFlag\(/g) || []).length === 2);
   ok('세션 초기화에 펼침 상태도 포함(계정 전환 잔재 차단)', /brandOpen:null/.test(src));
+  ok('★ 브랜드 관리는 작업 0건·요약 실패여도 열린다(막다른 길 금지 — 조기 반환보다 앞)',
+    src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") > 0
+    && src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") < src.indexOf("'진행 중인 작업이 없습니다.'}</div>`; return; }"));
 
   console.log(`\n✅ brandShare: ${n} cases passed`);
 }

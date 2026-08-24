@@ -190,7 +190,8 @@ async function run() {
   /* ═══ 5. 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ═══ */
   ok('첫 화면 기본값 = 대시보드(STATE.advView:\'dash\')', /advView:'dash'/.test(src));
   ok('_renderAdvHome 이 advView 로 대시보드/전체 작업/브랜드 관리를 분기한다',
-    /if\(v==='list'\) _renderAdvList\(\); else if\(v==='brands'&&!STATE\.brandId\) _renderAdvBrands\(\); else _renderAdvDash\(\);/.test(src));
+    /if\(v==='brands'&&!STATE\.brandId\) return _renderAdvBrands\(\);/.test(src)
+    && /if\(v==='list'\) _renderAdvList\(\); else _renderAdvDash\(\);/.test(src));
   ok('사이드바 상단 = [대시보드] · [전체 작업] 2줄', /onclick="advHome\('dash'\)"[\s\S]{0,120}대시보드/.test(src) && /onclick="advHome\('list'\)"[\s\S]{0,120}전체 작업/.test(src));
   ok('사이드바 작업 목록을 진행 중 / 완료 그룹으로 나눈다',
     /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));

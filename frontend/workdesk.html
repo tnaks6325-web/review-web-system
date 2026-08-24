@@ -3152,9 +3152,12 @@ function _renderAdvHome(){
   const host=$('#main'); if(!host) return;
   const aw=STATE.advWork;
   if(!aw){ host.innerHTML=`<div class="empty">불러오는 중…</div>`; return; }
-  if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
   const v=STATE.advView||'dash';
-  if(v==='list') _renderAdvList(); else if(v==='brands'&&!STATE.brandId) _renderAdvBrands(); else _renderAdvDash();
+  // ★ 브랜드 관리는 작업이 0건이거나 요약 조회가 실패해도 열린다 — 브랜드를 만드는 화면이 작업 유무에
+  //   막히면 "메뉴는 있는데 눌러도 아무것도 없는" 막다른 길이 된다(실브라우저 실측 2026-08-24).
+  if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();
+  if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
+  if(v==='list') _renderAdvList(); else _renderAdvDash();
 }
 // ★ 표 행 빌더는 한 벌 — 대시보드 "최근 작업"은 이걸 limit 만 달리해 호출한다(사본을 두면 두 화면의 컬럼·판정이 어긋난다).
 function _awRowHtml(it){
