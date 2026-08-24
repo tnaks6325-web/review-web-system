@@ -31,9 +31,9 @@ const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
 const { normName } = require('./identity.service');
-// 작업담당 실명 → 리뷰웹 닉네임(만두·망고) 매핑 **단일 출처**(065). 사본·제3의 맵 금지 —
-// 두 곳이 갈리면 "탭 담당자는 만두인데 공고 담당자는 빈칸"이 된다.
-const { mapWorkManager } = require('../utils/workManager');
+// 담당자 판정 **단일 출처**(065 + 회차 #18) — payment.service·trackB.service(홈 목록)가
+// 같은 함수를 부른다. 사본을 두면 "탭 담당자는 만두인데 공고 담당자는 빈칸"이 그대로 재발한다.
+const { resolveWorkManager } = require('../utils/workManager');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
 
@@ -97,31 +97,8 @@ function normalizeBankChoice(v) {
 /** `tab_configs.transfer_bank` 에 **되돌려 쓸 때** 의 표기(= 기존 화면이 읽는 한글 라벨) */
 function tabBankLabel(bank) { return BANK_LABEL[bank] || ''; }
 
-/**
- * 입금관리의 **담당자** — 작업담당(065)의 그 값과 같아야 한다.
- *
- * ★★ 사고(2026-08-24 회차 #18): 입금관리 담당자 필터는 `tab_configs.manager` 만 봤는데,
- *    그 칸은 접수 업서트가 **blank-only**(`manager = COALESCE(NULLIF(tab_configs.manager,''), …)`)
- *    라 한 번 채워지면 재접수로도 안 바뀐다. 오더에서 작업담당이 바뀐 작업은 **옛 담당자로 굳어**
- *    "망고만 선택했는데 만두 작업의 이체건이 서식에 딸려오는" 상태가 됐다.
- *    → 기준을 작업담당 원천(`work_orders.work_manager`)으로 올리고, 탭 값은 폴백으로 내린다.
- *
- * ★★ 원천은 `work_manager` **하나뿐**이다 — `manager_name` 은 **담당AE 실명**이라 절대 쓰지 않는다
- *    (065 이전에 그 칸을 탭 담당자로 넣어 "탭 설정 담당자 옵션은 만두/망고인데 값은 AE 실명"이
- *    됐던 그 사고 자리다). 닉네임 치환도 `mapWorkManager` **한 곳**뿐 — 다른 이름 맵을 끌어오면
- *    AE·관리자 이름이 담당자 칩으로 새어 들어온다.
- * ★ 랜덤·미매핑은 **빈 값**(자동으로 아무나 배정 금지) → 그때만 탭 설정을 본다.
- *   탭 값도 매핑되면 닉네임으로 접고, 모르는 값은 **원문 보존**(임의 해석·조용한 담당자 변경 금지).
- *
- * @returns {{manager:string, managerSource:('order'|'tab'|null)}}
- */
-function resolveWorkManager({ orderWorkManager, tabManager } = {}) {
-  const fromOrder = mapWorkManager(orderWorkManager);
-  if (fromOrder) return { manager: fromOrder, managerSource: 'order' };
-  const tab = String(tabManager == null ? '' : tabManager).trim();
-  if (!tab) return { manager: '', managerSource: null };
-  return { manager: mapWorkManager(tab) || tab, managerSource: 'tab' };
-}
+/** 입금관리의 담당자는 `utils/workManager.resolveWorkManager` 를 그대로 부른다(사본 금지).
+ *  판정 규칙·사고 경위는 그 함수의 문서를 참고 — 여기서 다시 적으면 두 문서가 갈린다. */
 
 function _int(v) {
   const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);

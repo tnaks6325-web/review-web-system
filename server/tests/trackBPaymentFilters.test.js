@@ -7,6 +7,7 @@ const vm = require('vm');
 
 const workdesk = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
 const paymentService = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'payment.service.js'), 'utf8');
+const trackBService = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
 const sheetlessStatus = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'sheetlessStatus.service.js'), 'utf8');
 
 function sourceOf(name) {
@@ -26,6 +27,12 @@ function test(name, fn) {
   catch (error) { console.error('  not ok ' + name + '\n    ' + error.message); process.exitCode = 1; }
 }
 
+// ★ 위 test() 는 동기 전용 — fn 이 async 면 반환된 Promise 를 기다리지 않고 즉시 'ok' 를 찍는다
+//   (실패해도 그 뒤에야 미확인 rejection 으로 터져 로그가 어긋난다). stub pool 로 서비스를
+//   실제 실행하는 테스트는 이 큐에 담아 파일 끝에서 순서대로 await 한다.
+const _asyncTests = [];
+function testAsync(name, fn) { _asyncTests.push({ name, fn }); }
+
 /* ★★ 회차 #18 사고(2026-08-24): 입금관리 담당자는 `tab_configs.manager` 만 봤고 작업 화면은
    작업오더 담당자를 닉네임으로 바꿔 보여줬다 — 출처가 둘이라 오더에서 담당자가 바뀐 작업이
    옛 담당자 칩에 남았고, "망고만 선택"한 서식에 만두 작업의 이체건이 딸려왔다.
@@ -40,10 +47,48 @@ test('payment target metadata resolves the work manager from the work order firs
   assert.doesNotMatch(paymentService, /\bw{1,2}\.manager_name\b/);
   // 닉네임 치환도 `mapWorkManager` 한 곳 — 다른 이름 맵을 끌어오면 AE·관리자 이름이 칩으로 샌다.
   assert.doesNotMatch(paymentService, /require\(['"][^'"]*adminNickname[^'"]*['"]\)/);
+  // ★★ 판정은 utils/workManager 에서 **가져다** 쓴다 — payment.service 안에 다시 정의하면
+  //   이 함수가 두 벌이 되어 언젠가 갈린다(회차 #18 이 바로 그 갈림의 결과였다).
+  assert.match(paymentService, /require\(['"]\.\.\/utils\/workManager['"]\)/);
+  assert.doesNotMatch(paymentService, /function resolveWorkManager/);
+});
+
+/* ★★ 같은 날 신고: 홈 작업목록의 "담당" 열도 `tab_configs.manager` 를 폴백 없이 그대로
+   보여줘 같은 함정에 빠져 있었다(작업조건·모집공고는 만두인데 홈만 망고). 두 화면이
+   `resolveWorkManager` 한 함수를 부르게 해 판정이 다시 갈릴 수 없게 한다. */
+test('the home task-list manager also resolves from the work order first, not the frozen tab column', () => {
+  assert.match(trackBService, /require\(['"]\.\.\/utils\/workManager['"]\)/);
+  assert.match(trackBService, /wo\.work_manager\s+AS\s+"orderWorkManager"/);
+  assert.match(trackBService, /LEFT JOIN LATERAL[\s\S]{0,120}FROM work_orders w[\s\S]{0,200}linked_tab_sheet_id = tc\.sheet_id/);
+  assert.match(trackBService, /manager:\s*resolveWorkManager\(\{\s*orderWorkManager:\s*r\.orderWorkManager,\s*tabManager:\s*r\.manager\s*\}\)\.manager/);
+});
+
+testAsync('the home task-list stub-pool run actually prefers the live work order manager over the frozen tab value', async () => {
+  const svc = require('../src/services/trackB.service');
+  svc.__setPoolForTest({
+    query: async () => ({ rows: [
+      // 실측 그대로: 탭에는 옛 값(망고)이 굳어 있는데 작업오더는 최신 값(만두)을 말한다.
+      { sheetId: 'S1', tabName: '8/19)T', manager: '망고', orderWorkManager: '박세희',
+        campaignName: '', displayName: '', rowCount: 300, submittedCount: 35, paidCount: 0,
+        closeoutDate: null, closeoutRows: null },
+      // 오더가 담당자를 말하지 않으면(랜덤·미매핑·오더 없음) 종전대로 탭 값을 본다.
+      { sheetId: 'S2', tabName: 'T2', manager: '만두', orderWorkManager: '랜덤',
+        campaignName: '', displayName: '', rowCount: 1, submittedCount: 0, paidCount: 0,
+        closeoutDate: null, closeoutRows: null },
+    ] }),
+  });
+  const r = await svc.tabStatsMap({ force: true });
+  svc.__setPoolForTest(null);
+  assert.strictEqual(r.map['S1\t8/19)T'].manager, '만두',
+    '홈 목록이 여전히 탭에 굳은 옛 담당자(망고)를 보여준다');
+  assert.strictEqual(r.map['S2\tT2'].manager, '만두',
+    '오더가 담당자를 말하지 않을 때 탭 폴백이 깨졌다');
 });
 
 test('the work manager comes from 작업담당(065) and falls back to the tab setting only when it says nothing', () => {
-  const resolve = require('../src/services/payment.service').resolveWorkManager;
+  const resolve = require('../src/utils/workManager').resolveWorkManager;
+  // payment.service 가 다시 정의하지 않고 같은 함수를 그대로 재수출하는지(사본 금지) 고정.
+  assert.strictEqual(require('../src/services/payment.service').resolveWorkManager, resolve);
   // 작업담당이 있으면 그 값이 이긴다 — 탭 값은 접수 업서트가 blank-only 라 옛 담당자로 굳는다.
   assert.deepStrictEqual(resolve({ orderWorkManager: '\uBC15\uC138\uD76C', tabManager: '\uB9DD\uACE0' }),
     { manager: '\uB9CC\uB450', managerSource: 'order' });
@@ -105,7 +150,36 @@ test('the manager chip row stays 전체 + 담당자 toggles (C스타일)', () =>
   // 칩 줄 = `전체` 하나 + 실제 담당자 목록 하나. 그 사이에 다른 버튼이 끼지 않는다.
   assert.ok(bar.includes("${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div>"),
     '담당자 칩 줄이 C스타일(전체 + 담당자 토글)을 벗어났다');
-  assert.doesNotMatch(workdesk, /PM_NO_MANAGER|담당자 미지정/);
+  // ★ 센티널·칩 자체는 여전히 금지 — 단, "담당자 미지정" **문구**는 A안(사용자 확정)의
+  //   안내 배너(_pmUnassignedNoteHtml)에서 정상적으로 쓰인다. 금지 대상은 그 문구가 칩
+  //   함수 안으로 다시 새어 들어오는 것뿐이다(칩 줄 자체를 검사 대상으로 좁힌다).
+  assert.doesNotMatch(workdesk, /PM_NO_MANAGER/);
+  assert.doesNotMatch(bar, /담당자 미지정/);
+});
+
+/* ★★ A안(사용자 확정 2026-08-24) — 담당자가 비어 있는 작업(랜덤·미매핑·오더 없음)은 특정
+   담당자 칩을 고르면 안 보인다. 문구로만 알리고 버튼 구성(C스타일)은 그대로 두되, 그 작업의
+   작업보드로 보내 [관리자 수정] › 작업담당을 정하도록 유도한다(행동유도 — 안내만 하고 끝나지
+   않는다). '전체'에서는 어차피 다 보이므로 특정 담당자를 고른 상태에서만 뜬다. */
+test('unassigned-manager works get a nudge banner only while a specific manager chip is active', () => {
+  const render = sourceOf('_pmRender');
+  assert.match(render, /_pmFilterState\(\)\.manager \? _pmUnassignedWorks\(allItems\) : \[\]/);
+  assert.match(render, /unassignedWorks\.length\?_pmUnassignedNoteHtml\(unassignedWorks\):''/);
+  const note = sourceOf('_pmUnassignedNoteHtml');
+  assert.match(note, /담당자 미지정 작업/);
+  assert.match(note, /관리자 수정.*작업담당/);
+  // 안내는 문구뿐 아니라 실제 행동(작업보드 열기)까지 준다 — 텍스트만 있고 누를 게 없는 안내 금지.
+  assert.match(note, /_pmOpenUnassignedWork\(\$\{idx\}\)/);
+  const open = sourceOf('_pmOpenUnassignedWork');
+  assert.match(open, /switchView\('workdesk'\)/);
+  // onclick 에는 인덱스만 — 탭명은 시트/DB 발 문자열이라 보간하면 XSS 자리다(레포 관용구).
+  assert.doesNotMatch(note, /onclick="_pmOpenUnassignedWork\(\$\{esc\(/);
+});
+
+test('the unassigned-manager helper is work-level, computed the same way as the manager chips', () => {
+  const helper = sourceOf('_pmUnassignedWorks');
+  assert.match(helper, /_pmWorkEntries\(items,'',_pmOn\)/);
+  assert.match(helper, /!_pmManagerName\(it\.manager\)/);
 });
 
 test('manager and multiple selected works narrow the download candidates together', () => {
@@ -258,3 +332,10 @@ test('workboard result uses confirmed write counts instead of paid-result counts
   assert.match(workboard, /boardQueuedCount/);
   assert.doesNotMatch(workboard, /\$\{b\.resultAppliedCount\}건 반영됨/);
 });
+
+(async () => {
+  for (const { name, fn } of _asyncTests) {
+    try { await fn(); console.log('  ok ' + name); }
+    catch (error) { console.error('  not ok ' + name + '\n    ' + error.message); process.exitCode = 1; }
+  }
+})();

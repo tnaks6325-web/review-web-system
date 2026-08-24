@@ -1925,6 +1925,7 @@
 #pmbody .pmrow .btn{padding:7px 10px;border-radius:6px;font-size:11px}
 #pmbody .pmrow .btn.primary{background:#2F70E8;border-color:#2F70E8}
 #pmbody .pmnote{border:1px solid #F0D4A8;border-left:1px solid #F0D4A8;border-radius:7px;background:#FFF8ED;color:#80500F;font-size:11px;padding:8px 10px}
+#pmbody .pmnote .pmnoteacts{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 #pmbody .pmfix{border-color:#E6D5B6;border-radius:8px;background:#FFF9EF;padding:11px 12px}
 #pmbody .pmfix>h3{font-size:12px;color:#80500F}
 #pmbody .pmfixcard{border-radius:7px;padding:9px 10px}
@@ -10212,6 +10213,30 @@ function _pmWorkEntries(items, manager, isPaymentTarget){
 function _pmVisibleItems(){ return _pmFilterItems(STATE.pmItems||[], _pmFilterState()); }
 /** 담당자 칩 값 → 사람이 읽는 이름(빈 값 = 전체) */
 function _pmManagerLabel(manager){ return manager || '전체 담당자'; }
+
+/** 담당자가 비어 있는 작업(작업담당이 랜덤·미매핑·오더 없음) — 담당자 칩을 고르면 어느 쪽에도
+ *  안 잡혀 화면에서 사라진다. A안(사용자 확정 2026-08-24): 문구만 알리고 버튼 구성(C스타일)은
+ *  건드리지 않되, 그 작업의 작업보드로 바로 보내 [관리자 수정]에서 작업담당을 정하도록 유도한다. */
+function _pmUnassignedWorks(items){
+  return _pmWorkEntries(items,'',_pmOn).filter(([,it])=>!_pmManagerName(it.manager));
+}
+const _PM_UNASSIGNED_SHOW=5;
+/** ⚠ 담당자 미지정 안내 — **특정 담당자를 고른 상태에서만** 보인다(그 필터가 이 작업들을 가린다는
+ *  사실이 지금 당장 문제가 되는 순간이다. '전체'에서는 어차피 다 보이므로 안 띄운다). */
+function _pmUnassignedNoteHtml(unassigned){
+  STATE.pmUnassignedWorks=unassigned.map(([,it])=>it);
+  const shown=unassigned.slice(0,_PM_UNASSIGNED_SHOW);
+  const rest=unassigned.length-shown.length;
+  const btns=shown.map(([,it],idx)=>
+    `<button type="button" class="btn xs" onclick="_pmOpenUnassignedWork(${idx})" title="이 작업의 작업보드를 엽니다 — [관리자 수정]에서 작업담당을 정할 수 있습니다">📋 ${esc(it.tabLabel||it.tabName)}</button>`).join(' ');
+  return `<div class="pmnote">⚠ <b>담당자 미지정 작업 ${unassigned.length}개</b>는 담당자를 고르면 여기 안 보입니다 — 작업보드에서 [관리자 수정] › 작업담당을 정해 주세요.<div class="pmnoteacts">${btns}${rest>0?`<span class="pmauto">+${rest}개는 [전체]에서 확인</span>`:''}</div></div>`;
+}
+/** 미지정 안내의 [작업보드] 버튼 — 인덱스만 받는다(탭명은 시트발 문자열, onclick 문자열 보간 금지). */
+function _pmOpenUnassignedWork(idx){
+  const w=(STATE.pmUnassignedWorks||[])[idx]; if(!w) return;
+  STATE.pendingTab={ sheetId:w.sheetId, tabName:w.tabName, tabGid:w.tabGid||'', spreadsheetTitle:'' };
+  switchView('workdesk');
+}
 function _pmSelectManager(manager){
   const filter=_pmFilterState();
   STATE.pmWorkScrollTop=null;
@@ -10374,6 +10399,8 @@ function _pmRender(){
   const kb = picked('kbank'), hn = picked('hana');
   const blocked = items.filter(it=>!it.payable);
   const noMemo  = items.filter(it=>_pmOn(it) && (it.warnings||[]).includes('no_memo'));
+  // 담당자를 고른 상태에서만 뜬다 — 그 필터가 이 작업들을 가리는 순간이 곧 알려야 할 순간이다.
+  const unassignedWorks = _pmFilterState().manager ? _pmUnassignedWorks(allItems) : [];
   STATE.pmFix = _pmBuildFix(items);   // 보완 창구(작업·리뷰어) — 표의 [보완] 버튼도 이 묶음을 쓴다
 
   $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
@@ -10401,6 +10428,7 @@ function _pmRender(){
       </section>
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다.</div>`:''}
+      ${unassignedWorks.length?_pmUnassignedNoteHtml(unassignedWorks):''}
       ${_pmFixBlock()}
       ${_pmTargetTable(items)}
     </div>`;

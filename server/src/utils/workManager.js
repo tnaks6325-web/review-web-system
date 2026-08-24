@@ -89,8 +89,37 @@ function normalizeManagerForStore(raw) {
   return mapWorkManager(v) || v;    // 실명·표기흔들림 → 닉네임 / 모르는 값 → 원문 보존
 }
 
+/**
+ * 어떤 화면이든 "이 작업의 담당자" 를 보여줄 때 쓰는 **판정 단일 출처**.
+ *
+ * ★★ 사고(2026-08-24 회차 #18): 입금관리는 `tab_configs.manager` 만 봤다. 그 칸은
+ *    접수 업서트가 **blank-only**(`manager = COALESCE(NULLIF(tab_configs.manager,''), …)`)라
+ *    한 번 채워지면 재접수로도 안 바뀐다. 오더에서 작업담당이 바뀐 작업은 **옛 담당자로 굳어**
+ *    "망고만 선택했는데 만두 작업의 이체건이 서식에 딸려오는" 상태가 됐다.
+ * ★★ **홈 작업목록도 같은 함정이다**(같은 날 신고): 작업조건 카드·모집공고는 만두인데 홈
+ *    "담당" 열은 망고로 보였다 — `trackB.service.tabStatsMap` 이 `tab_configs.manager` 를
+ *    **폴백 없이 그대로** 보여줬기 때문이다(`tab_configs.manager` 를 쓰는 다른 곳은 회차 #18
+ *    사고 자리와 동일). 두 화면이 각자 이 함수를 부르면 판정이 다시 갈릴 수 없다.
+ * ★★ 원천은 `work_manager` **하나뿐**이다 — `manager_name`(담당AE 실명)은 절대 쓰지 않는다
+ *    (065 이전에 그 칸을 탭 담당자로 넣어 "옵션은 만두/망고인데 값은 AE 실명"이 됐던 그 사고
+ *    자리다). 닉네임 치환도 이 파일의 `mapWorkManager` 한 곳뿐 — 다른 이름 맵(예: C/S 닉네임)을
+ *    끌어오면 AE·관리자 이름이 담당자 칩으로 새어 들어온다.
+ * ★ 랜덤·미매핑은 **빈 값**(자동으로 아무나 배정 금지) → 그때만 탭 설정을 폴백으로 본다.
+ *   탭 값도 매핑되면 닉네임으로 접고, 모르는 값은 **원문 보존**(임의 해석·조용한 담당자 변경 금지).
+ *
+ * @param {{orderWorkManager?: string, tabManager?: string}} p
+ * @returns {{manager:string, managerSource:('order'|'tab'|null)}}
+ */
+function resolveWorkManager({ orderWorkManager, tabManager } = {}) {
+  const fromOrder = mapWorkManager(orderWorkManager);
+  if (fromOrder) return { manager: fromOrder, managerSource: 'order' };
+  const tab = String(tabManager == null ? '' : tabManager).trim();
+  if (!tab) return { manager: '', managerSource: null };
+  return { manager: mapWorkManager(tab) || tab, managerSource: 'tab' };
+}
+
 module.exports = {
   WORK_MANAGER_MAP, UNDECIDED,
   mapWorkManager, isUndecidedWorkManager, workManagerLabel, pickWorkManager,
-  normalizeManagerForStore,
+  normalizeManagerForStore, resolveWorkManager,
 };
