@@ -3142,6 +3142,13 @@ async function loadReviewerHomeBanner() {
    탭은 화면 필터일 뿐이라 렌더러는 기존 CampCards.cardHtml 한 벌 그대로(사본 0). */
 let _rcKind = (function(){ try{ const v = sessionStorage.getItem("rc_kind_v1"); return v === "blog" ? "blog" : "review"; }catch(_){ return "review"; } })();
 let _rcLastJson = null;
+/* ★ 재참여(재구매) 기간 안내(사용자 확정 2026-08-24) — 카드별로 "N일 후 재참여 가능"/
+   "지금 재참여 가능"을 썸네일에 표시한다. 목록 자체는 무인증 캐시 응답이라(카드에 개인화를
+   섞으면 캐시가 전 사용자에 공유돼 오염된다) **별도 왕복**으로 로그인 리뷰어의 phone8만 물어
+   받은 뒤, 카드 데이터에 병합해 다시 그린다(1차 렌더는 종전과 동일 — 이 조회가 실패해도
+   목록 자체는 그대로 뜬다). */
+let _rcRepurchaseStatus = {};
+let _rcRepurchaseFetchKey = "";
 function _rcKindOf(c){ return c && c.work_kind === "blog" ? "blog" : "review"; }
 function setRecruitKind(k){
   _rcKind = k === "blog" ? "blog" : "review";
@@ -3157,6 +3164,27 @@ function _rcPaintKindTabs(counts){
       b.innerHTML = (b.dataset.kind === "blog" ? "블로그체험단" : "리뷰체험단") + (n ? `<span class="n">${n}</span>` : "");
     }
   });
+}
+
+/* 재참여 안내 왕복 — 로그인 리뷰어의 phone8을 알 때만, 지금 화면에 걸린 공고 id들을 한 번에
+   묻는다(카드마다 따로 물으면 카드 수만큼 왕복이 생긴다). 같은 조합(공고 목록+번호)은
+   다시 묻지 않는다(재렌더가 재조회를 부르는 순환 방지). */
+async function _rcLoadRepurchaseStatus(ids) {
+  try {
+    const user = getSavedUser();
+    const phone8 = user && user.phone8;
+    if (!phone8 || !ids.length) return;
+    const key = phone8 + "|" + ids.slice().sort().join(",");
+    if (key === _rcRepurchaseFetchKey) return;
+    _rcRepurchaseFetchKey = key;
+    const res = await fetch(API_BASE_URL + "/api/campaign/my-repurchase-status?phone8=" + encodeURIComponent(phone8) + "&ids=" + encodeURIComponent(ids.join(",")));
+    const json = await res.json();
+    if (!json || !json.ok) return;
+    const status = json.status || {};
+    if (!Object.keys(status).length) return;   // 참여 이력이 하나도 없으면 화면이 달라지지 않는다
+    _rcRepurchaseStatus = Object.assign({}, _rcRepurchaseStatus, status);
+    if (_rcLastJson) _renderRecruitPreview(_rcLastJson);   // 병합된 데이터로 다시 그린다(위 키 덕분에 재조회는 없음)
+  } catch (_) { /* 재참여 안내는 부가 정보 — 실패해도 목록 자체는 그대로 뜬다 */ }
 }
 
 async function loadRecruitPreview() {
@@ -3186,9 +3214,15 @@ function _renderRecruitPreview(json) {
     const parts = window.CampCards
       ? CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind))
       : (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind);
+    // 재참여 안내 — 이미 받아 둔 결과가 있으면 카드 데이터에 병합(없으면 아래에서 조회 후 재렌더)
+    parts.forEach(c => {
+      const rs = _rcRepurchaseStatus[c.id];
+      if (rs) { c.repurchaseStatus = rs.status; c.repurchaseAvailableFrom = rs.availableFrom; }
+    });
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
       : "";
+    if (parts.length) _rcLoadRepurchaseStatus(parts.map(c => c.id));
     const list = (json.data || []).filter(c => c.status === "active" && !c.participation_mode && _rcKindOf(c) === _rcKind);
 
     const html = partHtml + ((list.length === 0 && !partHtml)

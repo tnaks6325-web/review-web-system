@@ -1274,7 +1274,25 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
     const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value, by: _by(req) });
-    res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json(out);
+    // 그리드 셀 편집(col:<헤더>) 성공 → 실제 주문 원장(order_submissions)에도 through-write 시도.
+    //   ★ editWorkdeskRow 트랜잭션 커밋 **뒤**, 별도 요청/락으로 수행 — 같은 tx 안에서 부르면
+    //     campaign_participants 행을 두 번 잠가 데드락 위험이 있어 라우트 레벨에서 분리했다(레드팀 지적).
+    //   ★ 광고주(advertiser)는 여기 도달하지 않는다(위 _ensureWorkdeskCellEditScope 가 role 무관 필드
+    //     범위만 검사할 뿐이라, 신원 through-write 는 내부인 전용으로 한 번 더 좁힌다).
+    let throughWrite = null;
+    const role = _role(req);
+    if (out.ok && out.orderSubmissionId && typeof field === 'string' && field.indexOf('col:') === 0 &&
+        (role === 'master' || role === 'admin' || role === 'staff')) {
+      try {
+        throughWrite = await require('../services/orderLedger.service').syncCellToOrderIdentity({
+          sheetId, tabName, header: field.slice(4), value, oldValue: out.priorValue,
+          orderSubmissionId: out.orderSubmissionId, by: _by(req),
+        });
+      } catch (e) {
+        throughWrite = { attempted: true, ok: false, reason: 'exception', message: e.message };
+      }
+    }
+    res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite });
   } catch (err) { next(err); }
 });
 /* ★★ 일괄 셀 편집(붙여넣기) — **왕복 1회**.

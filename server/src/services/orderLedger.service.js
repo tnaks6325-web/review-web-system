@@ -685,6 +685,142 @@ async function loadRawTabContext(sheetId, tabGid, tabName) {
   };
 }
 
+/**
+ * 탭의 감지 헤더 목록만 가볍게 조회 — `loadRawTabContext`(raw_sheet_rows 전체를 읽는다)보다
+ * 훨씬 싸다. `trackB.service._isTabColumn`(col: 편집 검증, editWorkdeskRow 트랜잭션 안에서 매
+ * 편집마다 실행)과 **같은 모양의 질의**다 — 그쪽은 `client`(트랜잭션 커넥션)로 읽고 여기는
+ * 커밋 후 별도 요청에서 풀 커넥션으로 읽는다(연결 컨텍스트가 달라 통합하지 않았다).
+ * gid 우선(리네임 대비), 못 찾으면 headers=[]·tabGid=''.
+ */
+async function tabDetectedHeaders(sheetId, tabGid, tabName) {
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT detected_headers, tab_gid FROM raw_sheet_tabs
+      WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
+      ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
+    [sheetId, tabGid || null, tabName]).catch(() => ({ rows: [] }));
+  const r = rows[0];
+  const headers = r && Array.isArray(r.detected_headers) ? r.detected_headers : [];
+  return { headers, tabGid: (r && r.tab_gid) || tabGid || '' };
+}
+
+/* 그리드 셀(col:<헤더>) 편집 → 주문 원장 through-write 대상 역할 → order_submissions 컬럼명.
+ *   worktableTemplate.ROLE_META 의 부분집합만 — 은행·계좌·예금주·금액·주문번호·비고는 이번 버전에서
+ *   제외한다(review_index 신원 매칭에 관여하지 않고, 잘못 매칭됐을 때 금전 데이터 오염 위험이 더 크다).
+ *   값(=order_submissions 컬럼명)은 columnMapping.service.STANDARD_FIELDS 의 key 와 **같은 표기**
+ *   (예 'user_id')다 — 오버라이드 대조(아래)에서 이 값을 그대로 조회 키로 쓴다.
+ *   ★ 'orderer'→reviewer_name 은 매핑하지 않는다 — reviewer_name(참여자 신원열)은 로그인 계정을
+ *     우선하는 별개 의미라(`writeOrderToWorktable` 참조), 시트의 "주문자" 칸 정정으로 덮으면 안 된다.
+ */
+const _OS_COL_BY_ROLE = { orderer: 'orderer', recipient: 'recipient', userId: 'user_id', phone: 'phone', address: 'address' };
+
+/**
+ * 작업보드 그리드 셀 편집(col:<헤더>)을 주문 원장(order_submissions) + 무시트 작업표(row_json)에
+ * through-write 한다 — 관리자가 표에서 연락처 등을 고쳐도 review_index(리뷰어 "리뷰 내역" 검색)에는
+ * 전혀 반영되지 않던 문제의 수정.
+ *
+ * ★★ `editWorkdeskRow`(participant_edits 오버레이 저장)가 **끝나고 커밋된 뒤, 별도 호출**에서만
+ *   쓴다 — 그 함수의 FOR UPDATE 트랜잭션 안에서 부르면, 무시트 경로가 같은 물리행을 다시 잠그려다
+ *   자기 자신을 기다려 사실상 항상 교착한다(레드팀 실증: 커넥션 풀 고갈로 전체 서비스 장애).
+ *
+ * ★★ `writeOrderToWorktable`(order_submissions 전체 필드를 그 행의 모든 매칭 컬럼에 재기입)을
+ *   재사용하지 않는다 — 그 함수는 "리뷰어가 방금 낸 폼 전체를 반영"하는 용도라 적절하지만, 이번
+ *   용도(관리자가 셀 하나만 고침)에 그대로 쓰면 관리자가 손대지 않은 다른 열(운영 메모 등)까지
+ *   조용히 값이 바뀔 수 있다. 여기서는 **편집된 그 헤더 하나만** row_json 에 갈아끼운다.
+ *
+ * ★ 그 역할에 DB 컬럼매핑 오버라이드(`tab_column_mappings`)가 걸려 있는데 지금 편집한 열과
+ *   다르면 동기화하지 않는다 — `columnResolver`(review_index 파생)는 오버라이드를 키워드보다
+ *   우선하므로, 무시하고 진행하면 "review_index 는 안 고쳐지는데 엉뚱한 값이 order_submissions
+ *   에는 들어가는" 상태가 된다.
+ *
+ * @param {object} o
+ * @param {string} o.sheetId · o.tabName        편집이 일어난 탭(그리드가 보여준 문맥)
+ * @param {string} o.header                     편집된 시트 헤더(field.slice(4))
+ * @param {*} o.value                            새 값
+ * @param {*} [o.oldValue]                       편집 **전** row_json 값(시트 기반 탭의 큐가 "내가 알던
+ *                                                옛값" 대조에 쓴다 — 없으면 라이브 셀이 비어있지 않은 한
+ *                                                `mirror_status='conflict'`로 영구 정지해 반영되지 않는다)
+ * @param {string} o.orderSubmissionId           editWorkdeskRow 가 확정한 order 앵커
+ * @param {string} [o.by]
+ * @returns {Promise<{attempted:boolean, ok:boolean, reason?:string, role?:string|null, mode?:string}>}
+ */
+async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldValue, orderSubmissionId, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !header || !orderSubmissionId) return { attempted: false, ok: false, reason: 'bad_request' };
+  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { attempted: false, ok: false, reason: 'ledger_write_disabled' };
+  if (process.env.WORKDESK_CELL_ORDER_SYNC === '0') return { attempted: false, ok: false, reason: 'disabled' };
+
+  const { headers, tabGid } = await tabDetectedHeaders(sheetId, null, tabName);
+  if (!headers.length) return { attempted: true, ok: false, reason: 'no_headers' };
+  const idx = headers.findIndex(h => String(h == null ? '' : h).trim() === header);
+  if (idx < 0) return { attempted: true, ok: false, reason: 'header_not_found' };
+
+  const { classifyHeaders } = require('../utils/worktableTemplate');   // lazy(순환참조 회피)
+  const classified = classifyHeaders(headers);
+  const role = classified[idx] && classified[idx].role;
+  const osCol = _OS_COL_BY_ROLE[role];
+  if (!osCol) return { attempted: true, ok: false, reason: 'role_not_syncable', role: role || null };
+
+  if (tabGid) {
+    const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid).catch(() => null);
+    const ov = dbColMap && dbColMap.get(osCol);
+    if (ov && ov.colIndex !== idx) return { attempted: true, ok: false, reason: 'column_mapping_mismatch', role };
+  }
+
+  const { withJobLock } = require('../utils/jobLock');
+  const { isSheetless } = require('../utils/sheetlessScope');
+  const db = getPool();
+  const editSeq = Date.now();
+  const newValue = value == null ? '' : String(value).slice(0, 2000);
+
+  const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
+    const { rows } = await db.query(
+      `UPDATE order_submissions SET ${osCol} = $2, updated_at = NOW(),
+              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+        WHERE id = $1 AND deleted_at IS NULL
+      RETURNING id, sheet_id, tab_name`,
+      [orderSubmissionId, newValue, editSeq]);
+    if (!rows.length) return { ok: false, reason: 'order_cancelled_or_missing' };
+    const os = rows[0];
+    // ★ 편집 시점에 알던 탭과 지금 주문이 속한 탭이 다르면(그 사이 재연결됨) 중단 — 잘못된 탭의
+    //   장부를 재생성하는 것보다 안 하는 게 낫다.
+    if (String(os.sheet_id) !== String(sheetId) || String(os.tab_name) !== String(tabName)) {
+      return { ok: false, reason: 'tab_mismatch' };
+    }
+
+    let isSl = false;
+    try { isSl = await isSheetless(db, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
+
+    if (isSl) {
+      const p8 = role === 'phone' ? (toPhone8(newValue) || null) : null;
+      const { rowCount } = await db.query(
+        `UPDATE campaign_participants
+            SET row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$1::text], to_jsonb($2::text), true),
+                recipient_name = CASE WHEN $3 = 'recipient' THEN COALESCE(NULLIF($2, ''), recipient_name) ELSE recipient_name END,
+                phone8         = CASE WHEN $3 = 'phone' AND $4::text IS NOT NULL THEN $4 ELSE phone8 END,
+                updated_by = 'workdesk-cell-sync', updated_at = NOW()
+          WHERE sheet_id = $5 AND tab_name = $6 AND order_submission_id = $7::uuid AND deleted_at IS NULL`,
+        [header, newValue, role, p8, os.sheet_id, os.tab_name, orderSubmissionId]);
+      if (rowCount !== 1) return { ok: false, reason: rowCount === 0 ? 'row_reassigned' : 'ambiguous_row' };
+      try {
+        await require('./sheetlessLedger.service').rebuildLedgers({ sheetId: os.sheet_id, tabName: os.tab_name, by: 'workdesk-cell-sync' });
+      } catch (e) {
+        return { ok: false, reason: 'ledger_rebuild_failed', message: e.message };
+      }
+      return { ok: true, mode: 'sheetless' };
+    }
+
+    const { enqueue } = require('./syncQueue.service');   // lazy(순환참조 회피)
+    await enqueue('order_update', {
+      orderSubmissionId, editSeq,
+      edits: [{ field: osCol, oldValue: oldValue == null ? '' : String(oldValue), newValue }],
+    });
+    return { ok: true, mode: 'queued' };
+  }, { onBusy: () => ({ ok: false, reason: 'concurrent_edit' }) });
+
+  if (out && out.mode === 'queued') { try { require('../jobs/queuePump').kickQueuePump(); } catch (_) {} }
+  return { attempted: true, ok: !!(out && out.ok), reason: out && out.reason, role, mode: out && out.mode };
+}
+
 async function claimRow({ client, sheetId, tabGid, tabName, dedupKey, candidateRows, orderId, meta = {} }) {
   const db = client || getPool();
   const candidates = (candidateRows || []).filter(r => Number.isInteger(parseInt(r, 10)) && parseInt(r, 10) > 0);
@@ -1924,6 +2060,8 @@ module.exports = {
   guardBlocksWrite,
   normalizeGuardValue,
   loadRawTabContext,
+  tabDetectedHeaders,
+  syncCellToOrderIdentity,
   claimRow,
   createOrderLedgerEntry,
   markOrderQueued,

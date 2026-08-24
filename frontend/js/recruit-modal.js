@@ -473,7 +473,7 @@
               <div class="section-heading"><div><h3>기본 설정</h3><span class="section-hint">공고 운영과 입금 기준을 설정합니다.</span></div><span class="section-count">11개 항목</span></div>
               <div class="row-form">
                 <div class="sheetless-compat-fields" hidden><select id="rf_linked_campaign" onchange="onLinkedCampaignChange(this)"><option value="">① 캠페인(시트) 선택</option></select><select id="rf_linked_tab" onchange="onLinkedTabChange(this)" disabled><option value="">② 탭 선택 (시트 먼저)</option></select><div id="rf_linked_campaign_reference"></div><div id="rf_linked_tab_reference"></div></div>
-                <div id="rf_linked_tab_info" hidden><span id="rf_linked_tab_text"></span></div><div id="rf_work_order_link_info" hidden></div><div id="rf_linked_tab_note" hidden></div>
+                <div id="rf_linked_tab_info" hidden><span id="rf_linked_tab_text"></span></div><div id="rf_work_order_link_info" hidden></div><div id="rf_linked_tab_note" style="display:none"></div>
                 <div class="form-row"><span class="form-label">유입 방식 <small>작업오더 기준</small></span><div class="form-control"><div id="rf_inflow_type_ui" class="square-toggle"><button type="button" class="active" data-inflow="link" onclick="rfSetInflowType('link',this)">링크유입</button><button type="button" data-inflow="guide" onclick="rfSetInflowType('guide',this)">가이드유입</button></div><input id="rf_inflow_type_value" type="hidden" value="link"><span class="tag public">작업오더 연동 · 상품 페이지 열기</span></div></div>
                 <div class="form-row"><span class="form-label">담당자 <em class="required">*</em></span><div class="form-control"><div id="rf_manager_btns" class="choice-set"><button class="choice rchan-btn" data-group="manager" data-val="만두" onclick="selectRfBtn('manager',this)">만두</button><button class="choice rchan-btn" data-group="manager" data-val="망고" onclick="selectRfBtn('manager',this)">망고</button></div><input id="rf_manager" type="hidden"></div></div>
                 <div class="form-row"><span class="form-label">구매채널 <em class="required">*</em></span><div class="form-control"><div id="rf_channel_btns" class="square-toggle"><button class="rchan-btn" data-group="channel" data-val="쿠팡" onclick="selectRfBtn('channel',this)">쿠팡</button><button class="rchan-btn" data-group="channel" data-val="네이버" onclick="selectRfBtn('channel',this)">네이버</button><button class="rchan-btn" data-group="channel" data-val="올리브영" onclick="selectRfBtn('channel',this)">올리브영</button><button class="rchan-btn" data-group="channel" data-val="카카오메이커스" onclick="selectRfBtn('channel',this)">카카오메이커스</button><button class="rchan-btn" data-group="channel" data-val="직접입력" onclick="selectRfBtn('channel',this)">직접입력</button></div><input id="rf_channel_custom" placeholder="채널명 직접 입력" hidden><input id="rf_channel" type="hidden"></div></div>
@@ -1037,6 +1037,14 @@
 #recruitModal .section-hint{color:#7F8A9B;font-size:10px}.section-count{color:#2563C8;font-size:10px;font-weight:850}
 #recruitModal .rf-compact-main .row-form{border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#fff}
 #recruitModal .rf-compact-main .form-row{display:grid;grid-template-columns:minmax(112px,25%) minmax(0,75%);min-height:37px;border:0;border-top:1px solid #DCE3EC;border-radius:0;background:#fff}
+/* ★★ 위 display:grid 는 브라우저 기본 규칙 [hidden]{display:none} 을 **항상 이긴다**(작성자
+   스타일시트가 UA 스타일시트보다 우선). 그래서 JS 가 el.hidden = true 로 접어도 줄이 그대로
+   보였다(2026-08-24 신고 — 배송유형이 실배송인데 "배송 조합"·"회수 정보" 가 노출). 이 레포는
+   hidden 을 여닫는 행이 늘 때마다 같은 함정을 밟으므로 **행 전체를 한 규칙으로** 막는다.
+   ★ 특이성을 .rf-compact-main 까지 붙여 위 규칙보다 확실히 높인다 — 같은 특이성이면 파일
+   순서(나중 규칙이 이김)에 좌우돼 CSS 를 재배치할 때 이 가림이 조용히 풀린다(이 파일에서
+   이미 두 번 밟은 함정). 뒤 선택자는 legacy 레이아웃용 폴백이다. */
+#recruitModal .rf-compact-main .form-row[hidden],#recruitModal .form-row[hidden]{display:none}
 #recruitModal .rf-compact-main .form-row:first-child{border-top:0}
 #recruitModal .rf-compact-main .form-label{display:flex;align-items:center;gap:6px;padding:6px 12px;background:#FBFCFE;color:#45536A;font-size:11px;font-weight:850}
 #recruitModal .rf-compact-main .form-label small{color:#94A3B8;font-weight:650}.required{color:#E15241;font-style:normal}
@@ -1082,19 +1090,28 @@
 #recruitModal .rf-parity-date-control span{flex:none;color:#2563C8;font-size:.65rem;font-weight:850}
 /* ══ 선택 단위(옵션 / 옵션 없는 상품)별 유입가이드 · 상품 그룹 옵션 유무 (migration 134) ══
    복합 작업(상품A 옵션2 + 상품B 옵션없음)의 참여 선택지는 3가지이고 가이드유입이면 각각
-   다른 유입가이드를 봐야 한다 — 행마다 🧭 버튼으로 그 선택지 전용 가이드를 접었다 편다.
+   다른 유입가이드를 봐야 한다 — 행 아래 **항상 보이는 안내줄**을 눌러 그 선택지 전용 가이드를
+   접었다 편다(2026-08-24 — 종전엔 작은 아이콘 하나뿐이라 클릭 대상인지 알아보기 어려웠다).
    ★ 마크업·위젯은 위 유입가이드 3칸(.ig-*)과 **같은 것**을 쓴다(사본 0) — 여기선 배치만 정한다. */
-/* 행 끝 도구칸: 🧭 + 삭제 두 버튼 — 26px 한 칸에는 겹친다(머리줄과 함께 옮겨야 열이 안 어긋난다) */
+/* 행 끝 도구칸: 삭제/재개 한 버튼 — 🔗 가이드 입구는 아래 안내줄(.rf-ug-cta)로 옮겨 공간을 돌려준다.
+   결제금액·옵션인원·일건수 칸도 함께 줄여 상품명·URL 칸에 여유를 더 준다. */
 #recruitModal .rf-opt-acts{display:flex;align-items:center;justify-content:flex-end;gap:2px;min-width:0}
 #recruitModal .rf-opt-row .btn-icon-sm{width:22px;height:22px;min-width:22px;flex:none;border:1px solid transparent;
   border-radius:6px;background:transparent;font-size:.68rem;line-height:1}
 #recruitModal .rf-opt-row .btn-icon-sm:hover{background:rgba(15,23,42,.06);border-color:#D5DEE9}
-#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px minmax(0,1.18fr) minmax(0,1fr) .85fr .62fr .62fr 48px}
+#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px minmax(0,1.18fr) minmax(0,1fr) .64fr .46fr .46fr 26px}
 /* ★ 옵션 없는 작업(none) 모드에는 선택지 전용 가이드가 없다 — 그 모드는 옵션 원장을 만들지
-   않으므로(readOptRows 가 빈 배열) 여기서 적어도 저장되지 않는다(조용한 소실 금지). */
-#recruitModal .rf-pm-none .rf-ug-btn{display:none}
+   않으므로(readOptRows 가 빈 배열) 여기서 적어도 저장되지 않는다(조용한 소실 금지).
+   ★★ 특이성을 아래 .rf-unit>.rf-ug-cta{display:flex} 선언보다 한 단계 높여 둔다 —
+   같은 특이성이면 파일 순서(나중 규칙이 이김)에 좌우돼, CSS 를 재배치할 때 이 가림이
+   조용히 풀린다(실측으로 잡음 — 이 파일 안에 백틱을 쓰면 템플릿 리터럴이 거기서 끊기므로
+   이 주석에도 백틱은 쓰지 않는다). */
+#recruitModal .rf-pm-none .rf-unit>.rf-ug-cta{display:none}
 /* 행이 .rf-unit 껍데기에 들어가면서 '#rf_opt_rows .rf-opt-row:last-child' 가 안 맞는다 */
 #recruitModal #rf_opt_rows .rf-unit:last-child>.rf-opt-row{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
+/* 안내줄이 이제 항상 보여 그 줄이 시각적으로 마지막 줄이다 — 패널이 열려 있을 땐(ug-on) 패널이 그 자리를 넘겨받는다 */
+#recruitModal #rf_opt_rows .rf-unit:last-child>.rf-ug-cta{border-bottom:1px solid #DCE3EC}
+#recruitModal #rf_opt_rows .rf-unit:last-child:not(.ug-on)>.rf-ug-cta{border-radius:0 0 8px 8px}
 /* 상품 그룹 머리 = 상품명 · 옵션 유무 · 총인원 · 삭제(4칸 — 종전 3칸이면 삭제가 칸 밖으로 나간다) */
 #recruitModal .rf-gp-head{grid-template-columns:minmax(0,1fr) auto .62fr 26px}
 #recruitModal .rf-gp-unit{display:inline-flex;flex:none}
@@ -1107,13 +1124,41 @@
    머리줄은 그룹마다가 아니라 표 위에 한 줄뿐이라, 칸을 지우면 그 그룹만 열이 어긋난다. */
 #recruitModal .rf-gp-noopt .rf-opt-name{pointer-events:none;opacity:.45;background:#F4F6FA}
 #recruitModal .rf-gp-noopt .rf-gp-add{display:none}
-/* 🧭 선택지 전용 유입가이드 — 평소 접힘, 버튼으로 편다 */
+/* 🔗 이 옵션 전용 유입가이드 — 행 아래 항상 보이는 안내줄(클릭 대상임이 글자로 드러난다).
+   ★★ 2026-08-24 2차(사용자 신고 "버튼이 너무 좁아") — 안내줄·패널을 canonical 3칸(유입/리뷰/특이,
+   나란히 58px로 좁게 배치)보다 여유 있게 키운다. 옵션 행 아래는 폭 제약이 없어 이렇게 키워도
+   다른 칸을 밀지 않는다. 글도 위, 사진도 아래로 쌓아 한 장 한 장이 더 잘 보이게 한다. */
+#recruitModal .rf-unit>.rf-ug-cta{display:flex;align-items:center;gap:7px;width:100%;padding:9px 11px;
+  border:0;border-bottom:1px solid #E9EEF5;background:#FBFCFE;color:#5D6B80;font:inherit;font-size:.74rem;
+  font-weight:750;line-height:1.3;cursor:pointer;text-align:left;transition:background-color .14s ease,color .14s ease}
+#recruitModal .rf-unit>.rf-ug-cta:hover{background:#EFF3F8;color:#2563C8}
+#recruitModal .rf-ug-cta-ic{flex:none;font-size:.92rem}
+#recruitModal .rf-ug-cta-tx{flex:none;color:#45536A;font-weight:850;font-size:.76rem}
+#recruitModal .rf-ug-cta-st{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#94A3B8;font-size:.68rem}
+#recruitModal .rf-ug-cta-ar{flex:none;color:#94A3B8;font-size:.66rem;transition:transform .16s ease}
+#recruitModal .rf-unit.ug-on>.rf-ug-cta .rf-ug-cta-ar{transform:rotate(180deg)}
+#recruitModal .rf-unit>.rf-ug-cta.has{background:#EDF4FF;border-bottom-color:#B9D2FB}
+#recruitModal .rf-unit>.rf-ug-cta.has .rf-ug-cta-st{color:#2563C8}
+/* 패널 자체는 평소 접힘, 안내줄을 눌러야(ug-on) 펼쳐진다 */
 #recruitModal .rf-unit>.rf-ug{display:none}
-#recruitModal .rf-unit.ug-on>.rf-ug{display:block;padding:7px 9px 9px;border-bottom:1px solid #E9EEF5;background:#F8FAFC}
-#recruitModal .rf-ug-h{display:flex;align-items:center;gap:6px;margin-bottom:5px;color:#45536A;font-size:.66rem;font-weight:850}
-#recruitModal .rf-ug-note{color:#94A3B8;font-size:.6rem;font-weight:600}
-#recruitModal .rf-ug .ig-wrap>textarea.rform-input,#recruitModal .rf-ug .ig-strip{height:58px;min-height:58px}
-#recruitModal .rf-opt-row.ug-has .rf-ug-btn{background:#EDF4FF;border-color:#B9D2FB}
+#recruitModal .rf-unit.ug-on>.rf-ug{display:block;padding:10px 11px 11px;border-bottom:1px solid #E9EEF5;background:#F8FAFC}
+#recruitModal .rf-unit.ug-on:last-child>.rf-ug{border-radius:0 0 8px 8px}
+#recruitModal .rf-ug-h{display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#45536A;font-size:.7rem;font-weight:850}
+#recruitModal .rf-ug-note{color:#94A3B8;font-size:.62rem;font-weight:600}
+/* ★ compact-main 의 텍스트영역·스트립 58px !important 규칙을 이겨야 하므로 **더 높은 특이성
+   + !important** 로 둔다 — 같은 특이성이면 파일 순서(나중 규칙이 이김)에 좌우돼 CSS 를 재배치할
+   때 이 폭이 조용히 풀린다(이 파일 안에 백틱을 쓰면 템플릿 리터럴이 거기서 끊기므로 설명에도
+   백틱은 쓰지 않는다 — 위 CTA 특이성 사고와 같은 함정). */
+#recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-wrap{display:flex;flex-direction:column;gap:8px}
+#recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-wrap>textarea.rform-input{width:100%!important;
+  min-width:0!important;height:64px!important;min-height:64px!important;resize:vertical;font-size:.78rem}
+#recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-strip{width:100%!important;height:auto!important;
+  min-height:78px!important;flex-wrap:wrap;justify-content:flex-start;padding:9px}
+#recruitModal .rf-unit>.rf-ug .ig-empty{flex:1 1 100%;flex-direction:row;justify-content:center;gap:10px;
+  padding:16px 10px;min-height:52px}
+#recruitModal .rf-unit>.rf-ug .ig-empty .t1{font-size:.82rem;font-weight:850}
+#recruitModal .rf-unit>.rf-ug .ig-empty .t2{font-size:.68rem;text-align:left;line-height:1.5}
+#recruitModal .rf-unit>.rf-ug .ig-thumb,#recruitModal .rf-unit>.rf-ug .ig-add{width:70px;height:70px}
 @media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
 @media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
 @media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}

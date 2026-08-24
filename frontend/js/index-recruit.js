@@ -1555,15 +1555,21 @@ function _ugCompose(row, key) {
   return { html: escT(plain).replace(/\n/g, "<br>") + _igImgTags(key), images };
 }
 
-/** 행의 🧭 버튼에 "가이드 있음" 표시 — 접혀 있어도 설정 상태가 보이게 */
+/** 행 아래 안내줄(.rf-ug-cta)에 "가이드 있음/없음" 표시 — 접혀 있어도 설정 상태가 보이게 */
 function _ugMark(row) {
   const key = row && row.dataset.ig;
   if (!key) return;
   const ta = document.getElementById(_IG_TA[key]);
-  const has = !!(String(ta ? ta.value : "").trim() || _igOk(key).length);
+  const n = _igOk(key).length;
+  const has = !!(String(ta ? ta.value : "").trim() || n);
   row.classList.toggle("ug-has", has);
-  const btn = row.querySelector(".rf-ug-btn");
-  if (btn) btn.title = has ? "이 선택지 전용 유입가이드가 설정되어 있습니다" : "이 선택지 전용 유입가이드";
+  const unitEl = row.closest(".rf-unit");
+  const cta = unitEl && unitEl.querySelector(".rf-ug-cta");
+  if (!cta) return;
+  cta.classList.toggle("has", has);
+  cta.title = has ? "이 선택지 전용 유입가이드가 설정되어 있습니다 — 눌러서 확인·수정" : "이 선택지 전용 유입가이드 — 눌러서 안내글·사진 추가";
+  const st = cta.querySelector(".rf-ug-cta-st");
+  if (st) st.textContent = has ? ("설정됨" + (n ? " · 사진 " + n + "장" : "")) : "비어 있음(공고 공통 안내로 표시됨)";
 }
 
 /**
@@ -2261,10 +2267,7 @@ function _buildOptRowEl(data) {
     '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액">' +
     '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="총">' +
     '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="일">' +
-    '<span class="rf-opt-acts">' +
-      '<button type="button" class="btn-icon-sm rf-ug-btn" title="이 선택지 전용 유입가이드">🧭</button>' +
-      lastBtn +
-    '</span>';
+    '<span class="rf-opt-acts">' + lastBtn + '</span>';
   const rt = d.recruitTotal ?? d.recruit_total, dl = d.dailyLimit ?? d.daily_limit, pay = d.payAmount ?? d.pay_amount;
   // 상품명은 옵션 테이블에 없던 값 — 넘겨받지 않았으면 바로 위 행에서 따라온다(반복 입력 제거)
   row.querySelector(".rf-opt-prod").value = d.productName ?? d.product_name ?? _lastOptProductName();
@@ -2303,19 +2306,30 @@ function _buildOptRowEl(data) {
   const rtEl = row.querySelector(".rf-opt-rt");
   if (rtEl) rtEl.addEventListener("input", _syncGroupTotals);
 
-  /* ── 🧭 이 선택지 전용 유입가이드(134) — 행 아래 접힘 ── */
+  /* ── 🔗 이 선택지 전용 유입가이드(134) — 행 아래 **항상 보이는** 안내줄 + 눌러서 펼치는 패널
+     ★ 종전엔 작은 아이콘(🧭) 하나뿐이라 클릭 대상인지 알아보기 어려웠다(2026-08-24 사용자 신고 —
+     "옵션별 유입가이드에 대한 공간을 확보해줘"). 패널·저장 로직(`_ugBuild`/`_ugLoad`/`_ugCompose`)은
+     한 글자도 안 바꾼다 — 바뀐 건 **입구를 찾기 쉽게** 만드는 것뿐이다(사본 0). */
   unitEl.appendChild(row);
   const ugKey = _ugNewKey();
   row.dataset.ig = ugKey;
   _ugRegister(ugKey, "선택지 유입가이드");
+  const cta = document.createElement("button");
+  cta.type = "button";
+  cta.className = "rf-ug-cta";
+  cta.innerHTML =
+    '<span class="rf-ug-cta-ic">🔗</span>' +
+    '<span class="rf-ug-cta-tx">이 옵션 전용 유입가이드</span>' +
+    '<span class="rf-ug-cta-st"></span>' +
+    '<span class="rf-ug-cta-ar">▾</span>';
+  unitEl.appendChild(cta);
   unitEl.appendChild(_ugBuild(ugKey));
   // 값 주입은 DOM 에 붙은 뒤(`_ugAttachAll`) — 여기서 getElementById 를 부르면 조용히 no-op 이 된다
   row._ugPending = {
     html: d.inflowGuideHtml ?? d.inflow_guide_html ?? "",
     images: d.inflowGuideImages ?? d.inflow_guide_images ?? [],
   };
-  const ugBtn = row.querySelector(".rf-ug-btn");
-  if (ugBtn) ugBtn.onclick = () => {
+  cta.onclick = () => {
     unitEl.classList.toggle("ug-on");
     if (unitEl.classList.contains("ug-on")) { _igBind(ugKey); _igRender(ugKey); }
   };

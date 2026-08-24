@@ -3455,10 +3455,19 @@ async function _editOneInTx(client, { sheetId, tabName, rowId, field, value, by 
       writeThrough = { column: wt.header, queued: marked, reason: marked ? undefined : 'dirty_mark_failed' };
     }
     await client.query('COMMIT');
-    return { ok: true, editId: ins.rows[0].id, anchorType, field, linkedField,
-             value: kind === 'bool' ? vBool : vText,
-             writeThrough,
-             writeThroughSkipped: (isCol && !wt.write) ? wt.reason : undefined };
+    /* through-write(주문 원장 동기화) 재료 — 라우트가 **커밋 뒤** 별도로 쓴다(같은 tx 안에서 부르면
+       데드락 위험이 있어 route.js 에서 분리했다). ★ 값은 위 row_json 반영보다 **먼저 읽어 둔**
+       메모리 스냅샷(`row`)에서 뽑으므로, 이 함수가 row_json 을 쓰더라도 편집 전 값 그대로다. */
+    const priorValue = (isCol && anchorType === 'order' && row.row_json && typeof row.row_json === 'object')
+      ? row.row_json[field.slice(4)] : undefined;
+    return {
+      ok: true, editId: ins.rows[0].id, anchorType, field, linkedField,
+      value: kind === 'bool' ? vBool : vText,
+      writeThrough,
+      writeThroughSkipped: (isCol && !wt.write) ? wt.reason : undefined,
+      orderSubmissionId: anchorType === 'order' ? anchorValue : null,
+      priorValue,
+    };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };

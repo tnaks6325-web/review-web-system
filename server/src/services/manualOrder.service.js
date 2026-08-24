@@ -257,7 +257,7 @@ async function confirmExternalApplication(client, {
  */
 async function submitExternalOrder({
   sheetId, tabName, gid, fields, campaignId, optionKey, adminName, allowOverCapacity = true, force = false,
-  allowOverDaily = false,
+  allowOverDaily = false, allowRepurchase = false,
 }) {
   const warnings = [];
   const f = fields || {};
@@ -286,6 +286,31 @@ async function submitExternalOrder({
         };
       }
     } catch (e) { warnings.push('중복 확인 실패(제출은 계속): ' + e.message); }
+  }
+
+  // ⓪-1.5 재참여(재구매) 기간 제한 — **"같은 작업(탭)" 기준**(사용자 확정 2026-08-24). 위 24시간
+  //     중복 체크는 사고 방지용이고, campaignId 별 영구 차단(⓪-2)은 그 캠페인 안에서만 본다.
+  //     이번에 문제된 사고(8/20 참여 → 4일 뒤 이 화면으로 같은 탭 재구매)는 캠페인 지정 없이
+  //     등록될 때 ⓪-2가 통째로 비활성화되면서 통과됐다 — 그래서 여기서는 campaignId 유무와
+  //     무관하게 항상 본다. 단일 출처 = utils/repurchaseGuard(리뷰어 셀프 참여와 공용).
+  //     ★ 여기만 유일하게 확인 후 강제 통과(allowRepurchase)를 허용한다(관리자가 "다른 사람인데
+  //     번호만 같다" 같은 사정을 판단해 넘길 수 있게 — 사용자 확정, 리뷰어 셀프 참여는 예외 없음).
+  if (!allowRepurchase) {
+    try {
+      const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
+      const rw = await checkRepurchaseWindow(pool, { sheetId, tabName, phone: f.phone });
+      if (rw.blocked) {
+        const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
+          timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
+        });
+        return {
+          ok: false, repurchaseBlocked: true, days: rw.days, availableFrom: rw.availableFrom,
+          error: `이 작업은 최근 ${rw.days}일 안에 같은 연락처로 이미 참여한 이력이 있습니다 — ${dateStr} 이후 다시 가능합니다. 다른 사람인데 번호만 같다면 확인 후 강제로 등록할 수 있습니다.`,
+        };
+      }
+    } catch (e) { warnings.push('재참여 기간 확인 실패(제출은 계속): ' + e.message); }
+  } else {
+    warnings.push('재참여 기간 제한을 넘겨 접수했습니다(관리자 확인됨)');
   }
 
   // ⓪-2 참여형이면 **원장 기록 전에** 확정 가능 여부를 본다 — 나중에 거절되면
