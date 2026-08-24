@@ -46,6 +46,7 @@ function makePool(sc) {
       }
       if (/COALESCE\(detected_headers, headers\) AS h FROM raw_sheet_tabs/.test(s)) return { rows: [] };
       if (/UPDATE campaign_participants SET row_json/.test(s)) return { rowCount: 1, rows: [] };
+      if (/UPDATE payment_batch_items/.test(s)) return { rowCount: sc.releaseCount == null ? 1 : sc.releaseCount, rows: [] };
       if (/UPDATE participant_edits SET reverted_at/.test(s)) return { rowCount: 1, rows: [] };
       if (/INSERT INTO participant_edits/.test(s)) return { rows: [{ id: 7 }] };
       return { rows: [], rowCount: 0 };
@@ -102,6 +103,25 @@ async function run() {
     assert.equal(r.batchLocked, true, '이체 회차에 잡힌 줄은 비워도 목록에 안 돌아온다는 사실을 말한다');
     assert.equal(rebuilds.length, 1);
     console.log('  B. 입금일 비우기 통과');
+
+    // ── B′. 비우기는 그 사람의 이체 회차 항목만 푼다(회차 전체 취소 아님, 사용자 확정 2026-08-24) ──
+    pool = makePool({ prev: '8/21', releaseCount: 1 }); svc.__setPoolForTest(pool);
+    r = await svc.setWorkdeskDepositDate({ sheetId: 'S', tabName: 'T', rowId: 'row-1', date: '', by: '망고' });
+    assert.equal(r.releasedBatchItems, 1, '풀린 항목 수를 응답이 말한다(화면 토스트 재료)');
+    const rel = pool.q.find(x => /UPDATE payment_batch_items/.test(x.s));
+    assert.ok(rel, '비울 때만 이체 회차 항목도 함께 정리한다');
+    assert.ok(/SET status='failed', fail_reason=\$4, paid_at=NULL/.test(rel.s),
+      '새 상태값을 만들지 않는다 — 기존 failed(이체 실패)를 그대로 쓴다(uq_payment_items_active 는 pending/paid 만 잠그므로 즉시 해제)');
+    assert.ok(/WHERE sheet_id=\$1 AND tab_name=\$2 AND row_index=\$3 AND status IN \('pending','paid'\)/.test(rel.s),
+      '이 사람(row_index) 항목만 — 같은 batch_id 의 다른 사람 항목·회차 상태는 무접촉');
+    assert.equal(rel.params[2], 169, '이 줄의 seq 로만 스코프');
+    assert.match(rel.params[3], /관리자\(망고\)가 작업표 입금 기록을 비워/, '왜 실패 처리됐는지 사유가 남는다(관리자 화면에 노출)');
+    // 채운 값을 다시 확정할 때는 이체 회차를 건드리지 않는다(입금 확정은 "됐다"는 뜻이라 회차와 무관).
+    pool = makePool({ prev: '' }); svc.__setPoolForTest(pool);
+    r = await svc.setWorkdeskDepositDate({ sheetId: 'S', tabName: 'T', rowId: 'row-1', date: '2026-08-21', by: '망고' });
+    assert.equal(r.releasedBatchItems, 0);
+    assert.ok(!pool.q.some(x => /UPDATE payment_batch_items/.test(x.s)), '확정(비우기 아님)은 회차 항목을 건드리지 않는다');
+    console.log("  B′. 이체 회차 부분 해제(그 사람만) 통과");
 
     // ── C. fail-closed ──
     pool = makePool({ sheetless: false }); svc.__setPoolForTest(pool);
@@ -170,6 +190,8 @@ async function run() {
     assert.ok(/const isPayCell = one && statusKind==='payment';/.test(html), '입금 칸 판정(한 칸 선택일 때)');
     assert.ok(/api\('\/api\/trackb\/workdesk\/deposit-date'/.test(html), '저장 경로는 전용 API 하나');
     assert.ok(/onclick="_wdDpClearDeposit\(\)"/.test(html), '달력에 [입금일 비우기]');
+    assert.ok(/if\(r\.releasedBatchItems\) setTimeout\(\(\)=>toast\('이체 회차 잠금도 이 사람 몫만 함께 풀렸습니다/.test(html),
+      '비우면 이체 회차도 그 사람 몫만 풀렸다고 말한다(회차 전체 취소와 다름을 명시)');
     assert.ok(/if\(S\.mode==='deposit'\)\{ _wdDpSaveDeposit\(iso\); return; \}/.test(html), '입금 모드는 구매일자 경로를 타지 않는다');
     assert.ok(/_depositMenuBlockReason/.test(html), '못 누르는 사유를 숨기지 않는다(흐린 항목 + 툴팁)');
     assert.ok(/function _ehistMark\(/.test(html) && /class="ehist"/.test(html), '편집기록이 있는 칸에 코너마크');

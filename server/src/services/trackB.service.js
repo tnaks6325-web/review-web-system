@@ -4182,6 +4182,26 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3`,
       [rowId, sheetId, tabName, header, stamp, !clearing, String(by).slice(0, 100)]);
 
+    /* ★★ 칸을 비운다 = 관리자가 "이 건은 실제로 입금되지 않았다"고 판정한 것이다(사용자 확정
+       2026-08-24) — 그런데 그 사람이 과거에 이체파일로 한 번이라도 다운로드된 적 있으면
+       `payment_batch_items` 가 pending/paid 로 남아 입금대상 추출을 계속 잠근다("다운로드 이력
+       잠금"). 그 잠금을 푸는 종전 창구는 [회차 취소] 뿐인데, 그건 **그 회차에 같이 담긴 다른
+       사람들 몫까지** 건드린다(범위 과도 — 사용자 지적). 여기서는 **이 사람의 항목 하나만** 푼다.
+       ★ 상태값은 새로 만들지 않는다 — `failed`(이체 실패)가 이미 이 테이블에서 "결국 입금되지
+       않았다"는 뜻으로 쓰이고(M2 결과 반영과 동일 의미), `uq_payment_items_active` 부분유니크가
+       pending/paid 만 잠그므로 failed 로 바꾸면 다음 회차에 즉시 다시 담길 수 있다.
+       ★ 이 항목만(sheet_id·tab_name·row_index) 건드린다 — 같은 batch_id 의 다른 사람 항목·배치
+       자체 상태는 무접촉(그 사람들의 이체는 그대로 유효하게 남는다). */
+    let releasedBatchItems = 0;
+    if (clearing) {
+      const rel = await client.query(
+        `UPDATE payment_batch_items
+            SET status='failed', fail_reason=$4, paid_at=NULL
+          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')`,
+        [sheetId, tabName, row.seq, `관리자(${String(by).slice(0, 100)})가 작업표 입금 기록을 비워 미입금으로 정정함`]);
+      releasedBatchItems = rel.rowCount;
+    }
+
     // 감사 로그(= 이 셀의 편집기록). 종전 활성 기록을 접고 새 기록을 남긴다(append-only).
     const logField = 'col:' + header;
     for (const f of [logField, 'is_paid']) {
@@ -4200,7 +4220,7 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
       [sheetId, tabName, anchor.type, anchor.value, !clearing, String(by).slice(0, 100)]);
 
     await client.query('COMMIT');
-    ctx = { seq: row.seq, header, prev };
+    ctx = { seq: row.seq, header, prev, releasedBatchItems };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* 이미 끝난 tx */ }
     if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
@@ -4231,7 +4251,8 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
     } catch (_) { batchLocked = false; }
   }
 
-  return { ok: true, seq: ctx.seq, column: ctx.header, value: stamp, prev: ctx.prev, cleared: clearing, ledger, batchLocked };
+  return { ok: true, seq: ctx.seq, column: ctx.header, value: stamp, prev: ctx.prev, cleared: clearing, ledger, batchLocked,
+    releasedBatchItems: ctx.releasedBatchItems };
 }
 
 /* ══ 이 셀의 편집기록 (구글시트 셀 편집기록과 같은 성격 · 읽기 전용) ═══════════════════════
