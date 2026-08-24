@@ -18,6 +18,8 @@ const { fetchThumbFromUrl } = require('../utils/thumbFetch');
 const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
 const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
+const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierProxyDelivery } = require('../utils/deliveryType');
+const { normalizeDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
 const { assertWorkOrderQuota, syncWorkOrderRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { projectIntranetAdvertiser, ADVERTISER_NAME_CONFLICT } = require('../services/advertiserProjection.service');
@@ -65,7 +67,9 @@ const INTAKE_EDITABLE_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
   'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_channel', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
-  'delivery_type', 'courier_proxy', 'review_type', 'review_type_mix', 'recruit_count',
+  'delivery_type', 'courier_proxy',
+  'delivery_type_mix', 'recall_courier', 'recall_product',   // 135 — 회수·혼합 부속정보(가산적: 미전송이면 문장 파싱 폴백)
+  'review_type', 'review_type_mix', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
   'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
   'sales_id', 'contract_number', 'quote_id',   // 인트라넷 계약건 — 088
@@ -219,7 +223,7 @@ function _isTrue(v) {
 }
 
 function _isCourierProxyDeliveryType(v) {
-  return /^택배\s*발송\s*대행$/.test(String(v == null ? '' : v).trim());
+  return isCourierProxyDelivery(v);   // 판정 단일 출처 = utils/deliveryType (사본 금지)
 }
 
 // 배송유형이 택배발송대행이면 courier_proxy는 파생값이다. 이전의 별도 boolean을
@@ -227,9 +231,32 @@ function _isCourierProxyDeliveryType(v) {
 function _canonicalDeliveryType(deliveryType, courierProxy) {
   const raw = String(deliveryType == null ? '' : deliveryType).trim();
   if (_isCourierProxyDeliveryType(raw) || _isTrue(courierProxy)) return '택배발송대행';
-  if (/^빈\s*(?:택배|박스)$/.test(raw)) return '빈박스';
-  if (/^실\s*배송$/.test(raw)) return '실배송';
-  return raw;
+  /* ★★ 회수·혼합은 **부속정보가 붙은 문장**으로 온다 — 기본형만 남기면 회수택배사·혼합 건수가
+     그 자리에서 증발한다. canonicalDeliveryValue 는 부속이 있으면 원문을 보존하고,
+     맨 토큰만 표준형으로 접는다(빈택배→빈박스·회수건→회수). 판정 불가값은 원문 통과(종전 계약). */
+  return canonicalDeliveryValue(raw);
+}
+
+/* ── 회수·혼합 부속정보 파생 ────────────────────────────────────────────
+   ★ 우선순위 = 인트라넷 구조화 필드 → **문장 파싱 폴백**(구조화 전송 이전 오더 구제).
+   ★ 배송유형이 그 종류가 아니면 빈 값으로 정리한다 — 이전 오더의 잔여 구성이 다음 오더로
+     번지지 않게(_reviewTypeMixJson 의 '단일 타입이면 빈 배열' 규율과 같다). */
+function _deliveryMixJson(b, deliveryType) {
+  if (deliveryBaseType(deliveryType) !== '혼합') return '[]';
+  const st = normalizeDeliveryTypeMix(b && b.delivery_type_mix);
+  if (st.provided && !st.error && Array.isArray(st.mix) && st.mix.length) return JSON.stringify(st.mix);
+  const fb = normalizeDeliveryTypeMix(parseDeliveryType(deliveryType).mix ?? undefined);
+  return JSON.stringify((!fb.error && fb.mix) || []);
+}
+
+function _recallFields(b, deliveryType) {
+  if (deliveryBaseType(deliveryType) !== '회수') return { courier: '', product: '' };
+  const parsed = parseDeliveryType(deliveryType);
+  const pick = (v, fb) => String(v == null || v === '' ? (fb || '') : v).trim().slice(0, 120);
+  return {
+    courier: pick(b && b.recall_courier, parsed.recall && parsed.recall.courier),
+    product: pick(b && b.recall_product, parsed.recall && parsed.recall.product),
+  };
 }
 
 function _courierProxyFromDelivery(deliveryType, courierProxy) {
@@ -269,8 +296,9 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        sales_id, contract_number, quote_id, skip_weekends, holidays,
        source_review_order_id, source_revision, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
-       status, created_by, work_kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,'submitted',$40,$41)
+       status, created_by, work_kind,
+       delivery_type_mix, recall_courier, recall_product)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,'submitted',$40,$41,$42,$43,$44)
      RETURNING *`,
     [
       _genOrderId(),
@@ -323,6 +351,10 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       //   "한 번도 정하지 않음"과 "리뷰로 정함"이 구분돼야 접수의 blank-only 전파가 성립한다.
       //   판정에서는 어차피 빈 값 = 리뷰라 동작은 같고 원장만 정직해진다.
       workKindForStore(b.work_kind),
+      // ★ 135: 회수·혼합 부속정보. 배송유형이 그 종류가 아니면 빈 값 — 잔여 구성이 다음 오더로 번지지 않게.
+      _deliveryMixJson(b, deliveryType),
+      _recallFields(b, deliveryType).courier,
+      _recallFields(b, deliveryType).product,
     ]
   );
   return rows[0];
@@ -477,7 +509,7 @@ function _sourceContentNextValues(b, derived) {
   };
 }
 
-const _SOURCE_JSON_COLUMNS = new Set(['product_options_json', 'guide_images', 'review_type_mix', 'holidays']);
+const _SOURCE_JSON_COLUMNS = new Set(['product_options_json', 'guide_images', 'review_type_mix', 'delivery_type_mix', 'holidays']);
 
 // 표기 차이(키 순서·공백·NULL/빈문자·DATE 객체)로 "바뀌었다"고 오판하지 않게 값을 맞춘다.
 function _sourceCanonicalJson(value) {
@@ -642,6 +674,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          work_kind = $32, source_revision = $33, intake_idempotency_key = $34,
          intranet_advertiser_id = $35, intranet_advertiser_name = $36,
          intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
+         delivery_type_mix = $41, recall_courier = $42, recall_product = $43,
          updated_at = NOW()
        WHERE id = $1 AND source_review_order_id = $40
        RETURNING *`,
@@ -658,6 +691,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         workKindForStore(b.work_kind), source.sourceRevision, source.idempotencyKey,
         source.intranetAdvertiserId, source.intranetAdvertiserName, source.intranetAdvertiserContact,
         source.intranetAdvertiserBusinessNumber, _intOrZero(b.review_fee), sourceReviewOrderId,
+        _deliveryMixJson(b, deliveryType), _recallFields(b, deliveryType).courier, _recallFields(b, deliveryType).product,
       ]
     );
     const updated = rows[0];
@@ -841,6 +875,13 @@ async function _intakeUpdateHandler(req, res, next) {
       );
       b.delivery_type = deliveryType;
       b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+      /* ★★ 배송유형이 바뀌면 부속정보도 그 종류에 맞춰 다시 세운다 — 안 하면 혼합→실배송으로
+         바꿔도 옛 조합이 남아 **작업표가 유령 배분을 돈다**(_reviewTypeMixJson 의 정리 규율과 같다).
+         ★ 명시 전송이 없으면 문장 파싱 폴백이 채우고, 종류가 아니면 빈 값으로 정리된다. */
+      b.delivery_type_mix = _deliveryMixJson(b, deliveryType);
+      const _rc = _recallFields(b, deliveryType);
+      b.recall_courier = _rc.courier;
+      b.recall_product = _rc.product;
     }
 
     // 동적 SET (전달된 수정 가능 필드만 — 부분 수정)
@@ -1094,6 +1135,13 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
       );
       b.delivery_type = deliveryType;
       b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+      /* ★★ 배송유형이 바뀌면 부속정보도 그 종류에 맞춰 다시 세운다 — 안 하면 혼합→실배송으로
+         바꿔도 옛 조합이 남아 **작업표가 유령 배분을 돈다**(_reviewTypeMixJson 의 정리 규율과 같다).
+         ★ 명시 전송이 없으면 문장 파싱 폴백이 채우고, 종류가 아니면 빈 값으로 정리된다. */
+      b.delivery_type_mix = _deliveryMixJson(b, deliveryType);
+      const _rc = _recallFields(b, deliveryType);
+      b.recall_courier = _rc.courier;
+      b.recall_product = _rc.product;
     }
 
     // 동적 SET (전달된 AE 필드만)
@@ -1672,7 +1720,8 @@ const ADMIN_EDIT_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
   'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
-  'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
+  'delivery_type', 'courier_proxy', 'delivery_type_mix', 'recall_courier', 'recall_product',
+  'review_type', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'goods_cost_type', 'work_manager',
 ];
 const ADMIN_EDIT_LABELS = {
@@ -1718,6 +1767,13 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
       );
       b.delivery_type = deliveryType;
       b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+      /* ★★ 배송유형이 바뀌면 부속정보도 그 종류에 맞춰 다시 세운다 — 안 하면 혼합→실배송으로
+         바꿔도 옛 조합이 남아 **작업표가 유령 배분을 돈다**(_reviewTypeMixJson 의 정리 규율과 같다).
+         ★ 명시 전송이 없으면 문장 파싱 폴백이 채우고, 종류가 아니면 빈 값으로 정리된다. */
+      b.delivery_type_mix = _deliveryMixJson(b, deliveryType);
+      const _rc = _recallFields(b, deliveryType);
+      b.recall_courier = _rc.courier;
+      b.recall_product = _rc.product;
     }
 
     const sets = [], vals = [], changes = [];

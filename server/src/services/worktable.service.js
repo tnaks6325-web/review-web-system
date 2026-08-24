@@ -327,6 +327,7 @@ const WORK_TYPE_TRIGGERS = [
   { key: 'courier_proxy',   label: '택배대행이 \'예\'일 때' },
   { key: 'delivery_real',   label: '배송유형이 실배송일 때' },
   { key: 'delivery_empty',  label: '배송유형이 빈박스일 때' },
+  { key: 'delivery_recall', label: '배송유형이 회수일 때' },
   { key: 'review_type_set', label: '리뷰유형이 적혀 있을 때' },
 ];
 const WORK_TYPE_TRIGGER_KEYS = new Set(WORK_TYPE_TRIGGERS.map(t => t.key));
