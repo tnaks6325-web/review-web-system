@@ -1381,6 +1381,36 @@ router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddlew
     res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+/* 관리자 수동 입금처리 (무시트 전용 · adminOrMaster) — 우클릭 [💰 입금수정].
+   ★ 입금 칸은 직접 편집이 잠긴 상태 칸이라 값을 고칠 창구가 없었다. 여기가 그 유일한 창구다.
+   ★ `date` 가 빈 값이면 **칸을 비운다**(입금 취소·오기입 정정) — 지운 값은 셀 편집기록에 남는다.
+   ★ 권한은 리뷰제출일 백필과 같은 adminOrMaster — 입금 표시는 정산·리뷰어 화면까지 바꾼다. */
+router.post('/workdesk/deposit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, date } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by: _by(req) });
+    const code = out.ok ? 200
+      : (out.error === 'not_sheetless' ? 409
+        : (out.error === 'concurrent_edit_conflict' ? 409 : 400));
+    res.status(code).json(out);
+  } catch (err) { next(err); }
+});
+/* 이 셀의 편집기록(읽기 전용) — 구글시트 셀 편집기록과 같은 성격의 인라인 팝업이 쓴다.
+   ★ 스코프는 셀 편집과 **같은 게이트**(`_ensureWorkdeskCellEditScope`) — 업체(광고주)는 자기가
+     입력하는 택배송장 칸의 기록만 볼 수 있고 다른 열의 편집 이력에는 닿지 못한다. */
+router.get('/workdesk/cell-edits', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, field, limit } = req.query || {};
+    if (!sheetId || !tabName || !rowId || !field) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field });
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.listCellEdits({ sheetId, tabName, rowId, field, limit });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
 router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId } = req.body || {};

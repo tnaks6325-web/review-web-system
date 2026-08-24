@@ -168,7 +168,7 @@ const edit = (type, value, field, text) =>
   const reason = (f, r) => vm.runInContext('_cellLockReason', sandbox)(td(f), r);
   t('사유가 칸 성격 → 줄 상태 → 계정 권한 순으로 갈린다', () => {
     assert.match(reason('col:리뷰제출'), /관리자 수동 리뷰제출/);
-    assert.match(reason('col:입금'), /직접 수정할 수 없습니다/);
+    assert.match(reason('col:입금'), /입금수정/);
     assert.match(reason('idname'), /실제 제출 리뷰어 정보/);
     assert.match(reason('col:비고', { ambiguous: true }), /중복 줄을 먼저 정리/);
     assert.match(reason('col:비고', { editable: false }), /편집 기준\(주문·신원\)이 없어/);
