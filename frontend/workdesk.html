@@ -10775,7 +10775,7 @@ function _pmBuildFix(items){
       // 리뷰비 — 화면은 **서버가 준 값만** 쓴다(어디서 왔는지도 서버 판정 `feeSource` 그대로).
       fee:(typeof it.reviewFee==='number'?it.reviewFee:null), feeSource:it.feeSource||null,
       tabFee:(it.tabReviewFee==null?null:it.tabReviewFee), campFee:(it.campaignReviewFee==null?null:it.campaignReviewFee),
-      needBank:false, needMemo:false, needFee:false, bankRows:0, memoRows:0, feeRows:0, setupRows:0,
+      needBank:false, needMemo:false, bankRows:0, memoRows:0, setupRows:0,
       accts:[], acctRows:0, _nr:new Set(), _np:new Set(), rows:0 });
     return w;
   };

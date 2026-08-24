@@ -847,6 +847,20 @@ function withStubPool(handler, run) {
     assert.strictEqual(S._pmFixBlock(), '');
   });
 
+  t('7c2b ★★ 리뷰비는 어디서도 보완 사유로 만들지 않는다(서버·화면 양쪽)', () => {
+    // 서버: 그 경고를 더는 만들지 않는다
+    const svc = read('services/payment.service.js');
+    const push = svc.match(/warnings\.push\('([a-z_]+)'\)/g) || [];
+    assert.ok(!push.some(x => x.includes('no_review_fee')),
+      '★ 리뷰비 경고가 되살아났다 — 상품비만 주는 작업이 상시 경고가 된다(0 = 리뷰비 없는 작업)');
+    // 화면: 묶음 재료에도 그 사유가 없다
+    const build = HTML.slice(HTML.indexOf('function _pmBuildFix'), HTML.indexOf('function _pmWorkRowsHtml') > 0
+      ? Math.max(HTML.indexOf('function _pmBuildFix') + 4000, 0) : HTML.indexOf('function _pmBuildFix') + 4000);
+    assert.ok(!/no_review_fee/.test(build), '★ 화면 묶음 재료에 리뷰비 사유가 되살아났다');
+    assert.ok(!/needFee/.test(HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmRowFix'))),
+      '★ 보완 카드에 리뷰비 줄이 되살아났다');
+  });
+
   t('7c3 ★ 리뷰비 창구는 **작업 조건 카드**다 — 값의 출처(스냅샷·구간)를 그곳이 말한다', () => {
     // 입금관리에는 리뷰비 입력칸이 없다(창구 하나 — 사용자 확정 2026-08-24)
     assert.ok(!/id="pmFeeIn"/.test(HTML), '★ 입금관리에 리뷰비 입력칸이 되살아났다');
