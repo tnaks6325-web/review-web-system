@@ -2702,6 +2702,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               channel, channel_custom AS "channelCustom", review_type AS "reviewType",
               review_type_mix AS "reviewTypeMix",
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
+              transfer_bank AS "transferBank",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
               to_char(window_start,'HH24:MI') AS "windowStart",
               to_char(window_end,'HH24:MI')   AS "windowEnd",
@@ -2748,6 +2749,22 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     const feeSource = feeInfo.source === 'schedule' ? 'schedule'
       : campFee != null ? 'campaign'
       : tabFee != null ? 'tab' : null;      // null = 근거를 못 찾음(0원이라서가 아니다)
+
+    /* ── 이체은행 — 입금관리(payment.service)와 **같은 공고 · 같은 판정**을 태운다(사본 금지) ──
+       ★★★ (코드리뷰 P1) 이 탭에 공고가 여럿(차수 재발행)이면 `camps`(GID 재매칭 + 활성 우선 +
+       값 있는 공고까지 훑기)로 고른 공고와, 실제 이체 계산이 쓰는 `_loadCampaigns`(이름만 일치 +
+       created_at 최신 하나)가 **다른 공고**를 고를 수 있다 — 그러면 "화면은 하나은행인데 이체
+       파일은 케이뱅크"가 된다. 그래서 은행만은 `camps` 를 안 쓰고 **이체 계산이 실제로 쓰는 그
+       공고를 그대로**(`payment.service.campaignForTab`) 가져와 같은 판정 함수로 고른다.
+       순서 = 공고(사람이 정한 값) → 탭 설정 → 작업오더 물건비 자동판정(현금→하나 · 계산서/수수료→케이뱅크).
+       ★ `auto` 는 **사람이 정하지 않았다**는 뜻이라 화면이 그 사실을 말한다(조용한 추정 금지). */
+    const { normalizeBankChoice, bankFromGoodsCostType, BANK_LABEL, campaignForTab } = require('./payment.service');
+    const txCamp = await campaignForTab(sheetId, tabName).catch(() => null);
+    const campBank = normalizeBankChoice(txCamp && txCamp.transferBank);
+    const tabBank  = normalizeBankChoice(meta.tabTransferBank);
+    const autoBank = bankFromGoodsCostType((wo && wo.goodsCostType) || '');
+    const transferBank = campBank || tabBank || autoBank || null;
+    const bankSource = campBank ? 'campaign' : tabBank ? 'tab' : transferBank ? 'auto' : null;
 
     const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType,
             isFreeChoiceReviewType, FREE_CHOICE_REVIEW_LABEL } = require('../utils/reviewType');
@@ -2885,6 +2902,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
          되고, 정작 이체 서식에는 공고 값이 찍혀 화면과 파일이 갈린다(사용자 확정 2026-08-20:
          공고를 나중에 만들면 공고 설정값이 우선한다). */
       depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
+      /* 이체은행 — 값·라벨·출처를 함께 싣는다(화면이 판정을 다시 하지 않게).
+         null = 정할 근거가 없음 = [미설정](작업오더 물건비도 비어 자동판정이 안 된 경우). */
+      transferBank, bankSource,
+      transferBankLabel: transferBank ? (BANK_LABEL[transferBank] || transferBank) : null,
       /* 판정값 — 혼합은 행 단위로 정할 수 없어 null(검수·슬롯이 보는 값, 규율 불변). */
       reviewType: rtKey,
       /* 표기값 — 혼합이면 '혼합' + 조합(아래 reviewTypeMix). 둘 다 없으면 null = [미설정]. */
@@ -2922,7 +2943,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
             tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
             tc.tab_gid AS "tabGid", tc.capture_slots AS "captureSlots",
-            tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee"
+            tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee",
+            tc.transfer_bank AS "tabTransferBank"
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
@@ -2931,7 +2953,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
             review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",
             special_notes AS "specialNotes", product_url AS "productUrl", start_date AS "startDate",
-            manager_name AS "managerName", created_by AS "createdBy", status
+            manager_name AS "managerName", created_by AS "createdBy", status,
+            goods_cost_type AS "goodsCostType"
        FROM work_orders
       WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
       ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
@@ -5526,6 +5549,7 @@ module.exports = {
   tabStatsMap,
   tabCampaignsMap,
   tabTodayProgress,
+  tabConditionSummary,   // ★ 회귀가드가 스텁 pool 로 직접 실행(코드리뷰 P1 divergence 재현)
   _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다
   __condAdvertiserLensForTest: (...a) => _condAdvertiserLens(...a),   // 담당 렌즈(브랜드 세션 분기) 실행 검증용
   identityKey,

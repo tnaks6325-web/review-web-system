@@ -254,13 +254,12 @@ async function listPaymentTargets(opts = {}) {
     if (amount <= 0) issues.push('zero_amount');
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
-    /* 리뷰비 경고는 **금액이 0이라서**가 아니라 **근거를 못 찾아서** 띄운다.
-         이 계정은 상품비만 주는 작업이 다수(실측 공고 32건 중 27건이 0원)라, 0 을 경고로 두면
-         입금관리가 상시 경고로 뒤덮여 진짜 신호(계좌·은행 미비)가 묻힌다.
-       ★ 공고·탭·스냅샷·구간표 어디서든 값이 왔으면(feeSource) 그 0 은 사람이 정한 무상이다.
-       ⚠ 한계: 발행 폼에서 리뷰비 칸을 비우면 서버가 0 으로 저장하므로 "0원으로 정함"과
-         "안 넣음"은 DB 에서 구분되지 않는다 — 사용자 확정(2026-08-19)으로 0 = 무상으로 읽는다. */
-    if (!fee && !feeSource) warnings.push('no_review_fee');
+    /* ★★ 리뷰비 0 = **리뷰비 없는 작업**이다 — 경고하지 않는다(사용자 확정 2026-08-24).
+       종전에는 "근거(feeSource)를 못 찾으면" 경고했는데, 공고가 없는 옛 작업은 근거가 구조적으로
+       없어 상시 경고로 뒤덮였다(실측: 보완 목록 37개 작업 대부분). 이 계정은 **상품비만 주는
+       작업이 다수**라 0 이 정상값이고, 그 경고가 진짜 신호(계좌·은행 미비)를 묻었다.
+       ★ 리뷰비를 정하고 싶으면 **작업보드 › 작업 조건 › 리뷰비**에서 설정한다(창구는 그대로 있다).
+       ★ `no_review_fee` 는 이제 어디서도 만들지 않는다 — 라벨·화면 분기도 함께 걷어냈다. */
 
     return {
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
@@ -1183,7 +1182,20 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
   }
 }
 
+/** ★★ 은행 계산이 실제로 쓰는 그 공고를 그대로 돌려준다(사본 금지 — 코드리뷰 P1 지적 반영).
+ *  한 탭에 공고가 여럿(차수 재발행)이면 `_loadCampaigns`(이체 계산의 유일한 진실원본)와
+ *  **정확히 같은 규칙**(이름 일치 · created_at 최신 하나 · 상태 무관 · GID 폴백 없음)으로 고른다.
+ *  워크보드의 「작업 조건」 카드가 이 함수로 은행을 그려야 "화면은 하나은행인데 이체 파일은
+ *  케이뱅크" 같은 divergence 가 구조적으로 불가능해진다(사본을 두면 두 규칙이 각자 진화한다). */
+async function campaignForTab(sheetId, tabName) {
+  if (!sheetId || !tabName) return null;
+  const map = await _loadCampaigns([sheetId], [tabName]);
+  return map[sheetId + '||' + tabName] || null;
+}
+
 module.exports = {
+  campaignForTab,
+
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName, batchFileFormat,
