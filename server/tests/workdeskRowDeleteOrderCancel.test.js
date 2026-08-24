@@ -254,7 +254,9 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     assert.strictEqual(out.planMoved, false);
     assert.strictEqual(out.replacementDate, '8/25 (월)', '작업표에서 가장 늦은 진행일 표기를 그대로 쓴다');
     const ins = log.find(l => /INSERT INTO campaign_participants/.test(l.sql));
-    assert.ok(ins && ins.params[4] === '8/25 (월)', '보충 슬롯의 구매일자가 그 값이어야 합니다');
+    // ★ 다음 번호는 이 INSERT 자체가 표 전체(SELECT MAX(seq)...)에서 계산하므로 seq 는 더 이상
+    //   자리표시자로 넘기지 않는다 — params 순서는 [sheetId, tabGid, tabName, start_date, row_json, by].
+    assert.ok(ins && ins.params[3] === '8/25 (월)', '보충 슬롯의 구매일자가 그 값이어야 합니다');
     assert.ok(!log.some(l => /campaign_plan_events/.test(l.sql)), '공고가 없으면 공고 이력도 남기지 않는다');
   }
 

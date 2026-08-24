@@ -3730,14 +3730,32 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     if (dateHeader) blank[dateHeader] = finalDateLabel;
-    const maxSeq = tabRows.reduce((max, r) => Math.max(max, Number(r.seq) || 0), 0);
-    const replacement = await client.query(
-      `INSERT INTO campaign_participants
-         (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,'worktable',$7,NOW())
-       RETURNING id, seq`,
-      [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName, maxSeq + 1,
-        finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
+    // ★★ 다음 번호는 **표 전체**(소프트삭제·비활성 줄 포함)에서 골라야 한다 — `uq_participants_seq`
+    //   는 부분 인덱스가 아니라 지워진 줄의 번호도 영구히 점유한다. 살아있는 줄(`tabRows`)만 보고
+    //   고르면, 예전에 [♻ 중복 정리]·[🧹 줄 정리] 등으로 소프트삭제된 줄이 그 위 번호를 쥐고 있을 때
+    //   그 번호와 충돌해 23505 로 행 삭제 전체가 롤백된다(2026-08-24 실사고 — 8/3 위프_블랙 탈취제
+    //   800건 탭, 예전 중복 줄 정리 잔재와 충돌).
+    // ★ `appendSlot`(주문 이어붙이기)과 **같은 계산**(`participants.MANUAL_SEQ_BASE` 미만 대역만) +
+    //   `ON CONFLICT DO NOTHING` 재시도로 맞춘다 — 이 INSERT 는 어떤 동시성 상황에서도 예외를
+    //   던지지 않으므로(충돌 시 그냥 0행 반환) SAVEPOINT 가 필요 없다. 그래도 계속 0행이면(극단적
+    //   동시경합) 조용히 넘어가지 않고 명시적으로 실패시켜 트랜잭션을 롤백한다 — 보충 없이 삭제만
+    //   반영되는 상태(총 모집인원 축소)를 만들지 않는다.
+    let replacement = null;
+    for (let attempt = 0; attempt < 5 && !replacement; attempt++) {
+      const tryInsert = await client.query(
+        `INSERT INTO campaign_participants
+           (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
+         SELECT $1, $2, $3,
+                COALESCE(MAX(seq) FILTER (WHERE seq < ${participants.MANUAL_SEQ_BASE}), 0) + 1,
+                $4, $5::jsonb, 'worktable', $6, NOW()
+           FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
+         ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
+         RETURNING id, seq`,
+        [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName,
+          finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
+      if (tryInsert.rows.length) replacement = tryInsert;
+    }
+    if (!replacement) throw new HideRowError('replacement_slot_failed');
 
     // ★★ 표시 번호를 그 자리에서 다시 매긴다 (2026-08-23 신고: "1번 행을 지웠는데 2번이 시작번호").
     //   위 주석대로 seq 는 그대로 두고 화면 `#` 만 순번으로 계산하는데, **row_json 의 `번호` 칸**은
