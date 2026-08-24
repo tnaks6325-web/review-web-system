@@ -107,7 +107,7 @@ async function run() {
   const cr = await svc.createBrand({ advertiserId: 'adv-1', name: '  메이커스  ', color: 'bad-color' });
   const ins = p2.q.find(x => /INSERT INTO trackb_brands/.test(x.s));
   ok('createBrand: 이름 trim + 잘못된 색상은 기본색 폴백 + 링크 토큰 발급',
-    ins.params[2] === '메이커스' && ins.params[3] === '#2563eb' && typeof ins.params[4] === 'string' && ins.params[4].length >= 20);
+    ins.params[2] === '메이커스' && ins.params[3] === '#2563eb' && typeof ins.params[4] === 'string' && /^[A-Za-z0-9_-]{16,}$/.test(ins.params[4]));   // 링크 토큰 = _linkToken() base64url 16자(96비트) 이상
   ok('createBrand: 빈 이름 거부', (await svc.createBrand({ advertiserId: 'adv-1', name: '  ' })).code === 400);
   ok('★ 남의 브랜드 수정 불가(advertiser_id 스코프)',
     (await (async () => { svc.__setPoolForTest(pool(baseRoutes({ notOwned: true }))); return svc.updateBrand({ advertiserId: 'adv-1', brandId: 'brd_x', action: 'rename', name: 'z' }); })()).code === 404);

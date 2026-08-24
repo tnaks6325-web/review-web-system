@@ -20,6 +20,14 @@ const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 
+// ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
+//   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
+//     사용성이다(종전 24바이트 32자). 96비트 엔트로피 + 교환 라우트 레이트리밋(30/분)이라 추측 불가.
+//   ★ 기존에 발급된 32자 토큰은 정확일치 조회라 **그대로 유효**하다 — 짧아지는 건 신규 발급분뿐.
+//   ★ 길이를 다시 늘리려면 여기 한 곳만 고친다(네 곳에 흩어져 있던 randomBytes(24) 사본을 이관).
+const LINK_TOKEN_BYTES = 12;
+function _linkToken() { return require('crypto').randomBytes(LINK_TOKEN_BYTES).toString('base64url'); }
+
 let _pool;
 let _rebuildLedgersForTest = null;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
@@ -755,7 +763,7 @@ async function ownedSheetIds() {
 }
 
 // ── 광고주 접속 링크(매직 링크) 관리 — master/admin(라우트 게이트). 업체당 1토큰(회전=교체)·폐기(active). ──
-//   토큰은 추측불가 랜덤(base64url 24B). 실제 교환(로그인)은 auth.service.loginByLinkToken. Track A 무접촉.
+//   토큰은 추측불가 랜덤(_linkToken — base64url 12B=16자). 실제 교환(로그인)은 auth.service.loginByLinkToken. Track A 무접촉.
 async function getAdvertiserLink(advertiserId) {
   if (!advertiserId) return null;
   const { rows } = await getPool().query(
@@ -767,7 +775,7 @@ async function getAdvertiserLink(advertiserId) {
 // 링크 자동 존재 보장 — 없으면 생성(있으면 유지). 업체 추가/조회 시 호출 → 모든 업체가 항상 고유 URL 보유.
 async function ensureAdvertiserLink({ advertiserId, by = '' } = {}) {
   if (!advertiserId) return null;
-  const token = require('crypto').randomBytes(24).toString('base64url');
+  const token = _linkToken();
   await getPool().query(
     `INSERT INTO trackb_advertiser_links (advertiser_id, token, active, created_by)
      VALUES ($1,$2,TRUE,$3) ON CONFLICT (advertiser_id) DO NOTHING`, [advertiserId, token, String(by).slice(0, 100)]);
@@ -777,7 +785,7 @@ async function generateAdvertiserLink({ advertiserId, by = '' } = {}) {
   if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
   const exists = await getPool().query('SELECT 1 FROM advertisers WHERE id = $1', [advertiserId]);
   if (!exists.rows.length) return { ok: false, code: 404, error: '거래처를 찾을 수 없습니다.' };
-  const token = require('crypto').randomBytes(24).toString('base64url');
+  const token = _linkToken();
   const { rows } = await getPool().query(
     `INSERT INTO trackb_advertiser_links (advertiser_id, token, active, created_by)
      VALUES ($1,$2,TRUE,$3)
@@ -1632,7 +1640,7 @@ async function createBrand({ advertiserId, name, color } = {}) {
     [advertiserId, nm]);
   if (dup.rows.length) return { ok: false, code: 400, error: `이미 "${nm}" 브랜드가 있습니다` };
   const id = 'brd_' + require('crypto').randomBytes(6).toString('hex');
-  const token = require('crypto').randomBytes(24).toString('base64url');
+  const token = _linkToken();
   const col = /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : '#2563eb';
   const { rows } = await getPool().query(
     `INSERT INTO trackb_brands (id, advertiser_id, name, color, link_token) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
@@ -1657,7 +1665,7 @@ async function updateBrand({ advertiserId, brandId, action, name, color, on } = 
   }
   if (action === 'link-active') { await db.query('UPDATE trackb_brands SET link_active=$2 WHERE id=$1', [brandId, on === true]); return { ok: true }; }
   if (action === 'link-rotate') {   // 유출 대응 — 새 토큰 발급(이전 링크 즉시 무효)
-    const token = require('crypto').randomBytes(24).toString('base64url');
+    const token = _linkToken();
     await db.query('UPDATE trackb_brands SET link_token=$2, link_active=TRUE WHERE id=$1', [brandId, token]);
     return { ok: true, linkToken: token };
   }
