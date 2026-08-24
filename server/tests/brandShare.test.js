@@ -413,8 +413,10 @@ async function run() {
     const edited = b._brandRowsHtml({ id: 'brd_a' }, items, null);
     ok('누르면 그 행 아래에서 입력칸 2개가 펼쳐진다(팝업 없음)',
       (edited.match(/<input /g) || []).length === 2 && /최대 2명/.test(edited));
-    b.bmInput(0, '박가람 차장'); b.bmInput(1, '개똥이밥먹어');
+    /* ⚠ 기준값은 타이핑 **전에** 찍는다 — 뒤에 찍고 비교하면 항상 참이라 검사가 공허해진다
+       (변이시험이 실제로 이 자리를 뚫었다). 입력칸이 든 목록을 다시 그리면 한글 IME 조합이 깨진다. */
     const before = b.renders;
+    b.bmInput(0, '박가람 차장'); b.bmInput(1, '개똥이밥먹어');
     ok('★ 타이핑은 재렌더하지 않는다(한글 IME 조합 보호)', b.renders === before);
     await b.bmSave();
     ok('★ 저장하면 그 작업 행에 즉시 반영된다(재조회를 기다리지 않는다)',

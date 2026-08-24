@@ -6222,7 +6222,7 @@ function _condCardHtml(wd,d,m){
     if(admHas) parts.push(admName?`<span class="role">관리자</span>${esc(admName)}`:'관리자');
     const own=parts.length?`<dt>담당</dt><dd>${parts.join('<span class="sep">/</span>')}</dd>`
                           :`<dt>담당</dt>${unset('order')}`;
-    return own+(bm.length?`<dt>브랜드사<br>표시</dt><dd title="브랜드사 화면의 「담당」 행에 이대로 나갑니다 — 브랜드 관리에서 작업마다 정합니다.">${bmHtml}</dd>`:'');
+    return own+(bm.length?`<dt>브랜드사<br>표시</dt><dd title="${esc(bm.join(' / '))} — 브랜드사 화면의 「담당」 행에 이대로 나갑니다(브랜드 관리에서 작업마다 정합니다).">${bmHtml}</dd>`:'');
   })();
   /* 「일정」 — 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
      ★ 서버가 표에서 파생해 실어 준다(`condition.schedule`) — 화면에서 다시 세지 않는다.
