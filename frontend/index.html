@@ -2172,7 +2172,7 @@ async function _partInfoLoadBrief(it, done){
       '<div style="font-size:.76rem;color:#047857;font-weight:800;line-height:1.5">리뷰비 입금 완료' +
       (pay.amount ? ' · ' + Number(pay.amount).toLocaleString() + '원' : '') + '</div>' +
       '<div style="font-size:.7rem;color:#374151;margin-top:2px">' +
-      (pay.paidAt ? escHtml(_partInfoPaidAt(pay.paidAt)) : '') +
+      (pay.paidAt ? escHtml(_partInfoPaidAt(pay.paidAt)) : (pay.paidDate ? escHtml(_partInfoPaidDate(pay.paidDate)) : '')) +
       (pay.memo ? ' · 입금자명 <b>' + escHtml(pay.memo) + '</b>' : '') + '</div>' +
       '</div></div>');
     else if (pay && pay.status === 'failed') rows.push(
@@ -2204,6 +2204,12 @@ function _partInfoPaidAt(v){
   const k = new Date(d.getTime() + 9*3600*1000);   // KST
   const s = k.toISOString();
   return s.slice(0,4) + '.' + s.slice(5,7) + '.' + s.slice(8,10) + ' ' + s.slice(11,16) + ' 입금';
+}
+/* 페이백 날짜 표기 — 관리자가 작업보드에서 확정한 입금일(`M/D`)은 시각이 없다.
+   ★ 서버가 준 칸 값을 **그대로** 쓴다(여기서 연도를 지어내지 않는다 — 틀린 날짜보다 짧은 날짜가 낫다). */
+function _partInfoPaidDate(v){
+  const s = String(v == null ? '' : v).trim();
+  return s ? s + ' 입금' : '';
 }
 /* 실패 안내 → 내정보(계좌) 화면으로. ★ 팝업을 닫고 이동한다(팝업 뒤에 가려 안 보이는 이동 금지). */
 function _partInfoGoAccount(){
