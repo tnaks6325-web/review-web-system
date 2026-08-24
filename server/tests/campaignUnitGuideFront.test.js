@@ -12,7 +12,8 @@
  *  F. `_ugDropAll` 은 고정 3칸(inflow/review/notes)을 **절대 안 지운다**
  *  G. `_readProdRowsRaw` 는 상품 단위 행의 optKey 를 비운다(원문 "상품명 - 옵션명" 오염 차단)
  *  H. 자동점검은 **경고 전용**(게시를 막지 않는다) — 혼합 라벨 + 부분 가이드 고지
- *  I. 화면 계약(CSS) — 접힘/펼침 · 행 끝 도구칸 · 옵션 없는 상품 그룹의 옵션명 잠금
+ *  I. 화면 계약(CSS) — 접힘/펼침 · 행 아래 항상 보이는 안내줄(.rf-ug-cta) · 옵션 없는 상품 그룹의 옵션명 잠금
+ *  J. 안내줄 실행 검증(2026-08-24) — 형제로 붙는다 · 채워지면 "설정됨"으로 문구가 바뀐다 · 눌러야 펼쳐진다
  *
  * ★ 정적 grep 이 아니라 **함수를 vm 으로 꺼내 가짜 DOM 위에서 실제 실행**한다 —
  *   "선택 단위를 존중하는가"·"가이드가 왕복하는가"는 문자열 검사로는 못 본다.
@@ -343,12 +344,18 @@ console.log('\n[H] 자동점검 — 혼합 라벨 · 부분 가이드 고지(게
 }
 
 /* ══════════════ I. 화면 계약(CSS) ══════════════ */
-console.log('\n[I] 화면 계약 — 접힘 · 행 끝 도구칸 · 옵션명 잠금');
+console.log('\n[I] 화면 계약 — 접힘 · 항상 보이는 안내줄 · 옵션명 잠금');
 {
-  ok('선택지 가이드는 평소 접혀 있다', /\.rf-unit>\.rf-ug\{display:none\}/.test(modalSrc));
+  ok('선택지 가이드 패널은 평소 접혀 있다', /\.rf-unit>\.rf-ug\{display:none\}/.test(modalSrc));
   ok('버튼을 눌러야(ug-on) 펼쳐진다', /\.rf-unit\.ug-on>\.rf-ug\{display:block/.test(modalSrc));
-  ok('행 끝 도구칸(🧭+삭제)이 겹치지 않게 마지막 트랙을 넓혔다',
-    /\.rf-pm-opt \.rf-prod-head\[data-pm="opt"\],#recruitModal \.rf-pm-opt \.rf-opt-row\{grid-template-columns:[^}]*48px\}/.test(modalSrc));
+  // ★★ 2026-08-24 — 작은 아이콘(🧭) 하나뿐이라 클릭 대상인지 알아보기 어렵다는 신고로,
+  //    입구를 행 아래 **항상 보이는 안내줄**(.rf-ug-cta)로 옮겼다. 행 끝 도구칸은 이제
+  //    삭제/재개 한 버튼만 남아 26px 로 좁아지고, 대신 결제금액·옵션인원·일건수 칸도
+  //    함께 줄여 상품명·URL 칸에 여유를 돌려준다(사용자 확정 — 두 제안을 함께 반영).
+  ok('행 끝 도구칸은 이제 삭제/재개 한 버튼뿐 — 마지막 트랙이 좁아졌다',
+    /\.rf-pm-opt \.rf-prod-head\[data-pm="opt"\],#recruitModal \.rf-pm-opt \.rf-opt-row\{grid-template-columns:[^}]*26px\}/.test(modalSrc));
+  ok('결제금액·옵션인원·일건수 칸이 좁아졌다(공간을 안내줄에 돌려준다)',
+    /\.rf-pm-opt \.rf-opt-row\{grid-template-columns:18px minmax\(0,1\.18fr\) minmax\(0,1fr\) \.64fr \.46fr \.46fr 26px\}/.test(modalSrc));
   ok('머리줄과 행이 같은 규칙으로 함께 움직인다(열 어긋남 차단)',
     /\.rf-prod-head\[data-pm="opt"\],#recruitModal \.rf-pm-opt \.rf-opt-row\{grid-template-columns/.test(modalSrc));
   // ★★ 나중에 머리줄만 따로 덮는 규칙이 생기면 같은 특이성이라 그쪽이 이겨 열이 어긋난다
@@ -360,8 +367,19 @@ console.log('\n[I] 화면 계약 — 접힘 · 행 끝 도구칸 · 옵션명 �
     while ((m = headOnly.exec(modalSrc))) if (m.index > last) after = true;
     ok('머리줄만 따로 덮는 나중 규칙이 없다', last > 0 && !after);
   }
-  ok('옵션 없는 작업(none) 모드에는 선택지 가이드 버튼이 없다(저장되지 않는 칸을 그리지 않는다)',
-    /\.rf-pm-none \.rf-ug-btn\{display:none\}/.test(modalSrc));
+  // ★★ 특이성 실측 사고(이번 작업 중 실제로 밟음): `.rf-pm-none .rf-ug-cta{display:none}` 과
+  //    `.rf-unit>.rf-ug-cta{display:flex}` 는 특이성이 같아 **나중에 오는 규칙이 이겨** 가림이
+  //    풀렸다(실브라우저로 확인). 가림 규칙은 `.rf-unit>` 한 단계를 더해 특이성을 확실히 높인다.
+  ok('옵션 없는 작업(none) 모드에는 선택지 가이드 안내줄이 없다(저장되지 않는 칸을 그리지 않는다)',
+    /\.rf-pm-none \.rf-unit>\.rf-ug-cta\{display:none\}/.test(modalSrc));
+  ok('그 가림 규칙은 특이성이 더 높다(순서에 기대지 않는다 — .rf-unit> 한 단계 추가)',
+    /\.rf-pm-none \.rf-unit>\.rf-ug-cta\{display:none\}/.test(modalSrc) &&
+    !/\.rf-pm-none \.rf-ug-cta\{display:none\}/.test(modalSrc.replace(/\.rf-pm-none \.rf-unit>\.rf-ug-cta/g, '')));
+  ok('종전 아이콘 버튼(.rf-ug-btn)은 CSS 에서 사라졌다(사본 부활 금지)', !/\.rf-ug-btn/.test(modalSrc));
+  ok('안내줄은 행 폭 전체를 쓰는 클릭 가능한 한 줄이다',
+    /\.rf-unit>\.rf-ug-cta\{display:flex[^}]*width:100%/.test(modalSrc) && /cursor:pointer/.test(modalSrc));
+  ok('가이드가 설정되어 있으면 안내줄 색이 바뀐다(has)',
+    /\.rf-unit>\.rf-ug-cta\.has\{background:#EDF4FF/.test(modalSrc));
   ok('상품 그룹 머리는 4칸(상품명·옵션 유무·총인원·삭제)',
     /\.rf-gp-head\{grid-template-columns:minmax\(0,1fr\) auto \.62fr 26px\}/.test(modalSrc));
   ok('옵션 없는 상품 그룹의 옵션명 칸은 없애지 않고 잠근다(열 어긋남 차단)',
@@ -369,12 +387,54 @@ console.log('\n[I] 화면 계약 — 접힘 · 행 끝 도구칸 · 옵션명 �
   ok('옵션 없는 상품 그룹에는 [＋ 옵션 추가] 가 없다', /\.rf-gp-noopt \.rf-gp-add\{display:none\}/.test(modalSrc));
   ok('행이 껍데기에 들어가도 마지막 줄 테두리가 산다',
     /#rf_opt_rows \.rf-unit:last-child>\.rf-opt-row\{border-bottom/.test(modalSrc));
+  ok('안내줄이 마지막 유닛의 시각적 바닥이 될 때도 테두리가 산다',
+    /#rf_opt_rows \.rf-unit:last-child>\.rf-ug-cta\{border-bottom/.test(modalSrc));
   ok('CSS 선택자는 #recruitModal 스코프(호스트 화면 오염 금지)',
     !/\n\.rf-ug\b/.test(modalSrc) && !/\n\.rf-opt-acts\b/.test(modalSrc));
 }
 
-/* ══════════════ J. 배선 ══════════════ */
-console.log('\n[J] 배선 — 값 주입은 DOM 에 붙은 뒤 · onclick 문자열 보간 0');
+/* ══════════════ J. 안내줄(.rf-ug-cta) — 실제 DOM 실행 ══════════════
+   2026-08-24 신고 대응: 작은 아이콘(🧭)만으로는 클릭 대상인지 알아보기 어려웠다.
+   정적 CSS 검사(I절)와 별개로, 실제로 행마다 안내줄이 붙고 상태 문구가 바뀌는지를
+   가짜 DOM 위에서 실행해 확인한다(문자열만 있고 실행은 안 되는 회귀를 잡는다). */
+console.log('\n[J] 안내줄 — 행마다 형제로 붙고, 채워지면 상태 문구가 바뀐다');
+{
+  const t = mixedTable();
+  const units = t.dom.byId.rf_opt_rows.querySelectorAll('.rf-unit');
+  ok('선택지 3개 = 안내줄도 3개', units.length === 3);
+
+  const unit0 = units[0], row0 = unit0.querySelectorAll('.rf-opt-row')[0], cta0 = unit0.querySelectorAll('.rf-ug-cta')[0];
+  ok('안내줄은 행의 자식이 아니라 형제다(칸 폭에 갇히지 않는다)',
+    !!cta0 && cta0.parent === unit0 && row0.querySelectorAll('.rf-ug-cta').length === 0);
+  ok('가이드가 이미 있는 선택지는 처음부터 "설정됨"을 보여준다',
+    cta0.classList.contains('has') && /설정됨/.test(cta0.querySelector('.rf-ug-cta-st').textContent));
+  ok('사진 개수도 함께 말한다(사진 1장)', /사진 1장/.test(cta0.querySelector('.rf-ug-cta-st').textContent));
+  ok('안내줄은 항상 "이 옵션 전용 유입가이드" 라벨을 보여준다(발견성)',
+    /이 옵션 전용 유입가이드/.test(cta0.innerHTML));
+
+  const unit1 = units[1], cta1 = unit1.querySelectorAll('.rf-ug-cta')[0];
+  ok('가이드가 비어 있는 선택지는 "비어 있음"을 보여준다',
+    !cta1.classList.contains('has') && /비어 있음/.test(cta1.querySelector('.rf-ug-cta-st').textContent));
+
+  ok('종전 아이콘 버튼(.rf-ug-btn) 은 어디에도 없다(사본 부활 금지)',
+    t.dom.byId.rf_opt_rows.querySelectorAll('.rf-ug-btn').length === 0);
+
+  ok('안내줄을 누르면 패널이 펼쳐진다(ug-on)', !unit1.classList.contains('ug-on'));
+  cta1.onclick();
+  ok('열림', unit1.classList.contains('ug-on'));
+  cta1.onclick();
+  ok('다시 누르면 닫힌다', !unit1.classList.contains('ug-on'));
+
+  // 글을 채운 뒤 다시 살리면(_ugAttachAll) 안내줄도 "설정됨"으로 바뀐다
+  const keyEmpty = unit1.querySelectorAll('.rf-opt-row')[0].dataset.ig;
+  t.run("document.getElementById(_IG_TA['" + keyEmpty + "']).value = '새로 채움'");
+  t.run('_ugAttachAll()');
+  ok('글을 채우면 안내줄이 즉시 "설정됨"으로 바뀐다',
+    unit1.querySelectorAll('.rf-ug-cta')[0].classList.contains('has'));
+}
+
+/* ══════════════ K. 배선 ══════════════ */
+console.log('\n[K] 배선 — 값 주입은 DOM 에 붙은 뒤 · onclick 문자열 보간 0');
 {
   ok('행 생성 시에는 값을 예약만 한다(_ugPending)', /row\._ugPending\s*=\s*\{/.test(recruitSrc));
   ok('붙인 뒤 _ugAttachAll 이 살린다', /_ugAttachAll\(\)/.test(recruitSrc));
