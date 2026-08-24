@@ -1080,6 +1080,40 @@
 #recruitModal .rf-parity-date-control{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px}
 #recruitModal .rf-parity-date-control input{min-width:0;flex:1;border:0!important;background:transparent!important;cursor:pointer}
 #recruitModal .rf-parity-date-control span{flex:none;color:#2563C8;font-size:.65rem;font-weight:850}
+/* ══ 선택 단위(옵션 / 옵션 없는 상품)별 유입가이드 · 상품 그룹 옵션 유무 (migration 134) ══
+   복합 작업(상품A 옵션2 + 상품B 옵션없음)의 참여 선택지는 3가지이고 가이드유입이면 각각
+   다른 유입가이드를 봐야 한다 — 행마다 🧭 버튼으로 그 선택지 전용 가이드를 접었다 편다.
+   ★ 마크업·위젯은 위 유입가이드 3칸(.ig-*)과 **같은 것**을 쓴다(사본 0) — 여기선 배치만 정한다. */
+/* 행 끝 도구칸: 🧭 + 삭제 두 버튼 — 26px 한 칸에는 겹친다(머리줄과 함께 옮겨야 열이 안 어긋난다) */
+#recruitModal .rf-opt-acts{display:flex;align-items:center;justify-content:flex-end;gap:2px;min-width:0}
+#recruitModal .rf-opt-row .btn-icon-sm{width:22px;height:22px;min-width:22px;flex:none;border:1px solid transparent;
+  border-radius:6px;background:transparent;font-size:.68rem;line-height:1}
+#recruitModal .rf-opt-row .btn-icon-sm:hover{background:rgba(15,23,42,.06);border-color:#D5DEE9}
+#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px minmax(0,1.18fr) minmax(0,1fr) .85fr .62fr .62fr 48px}
+/* ★ 옵션 없는 작업(none) 모드에는 선택지 전용 가이드가 없다 — 그 모드는 옵션 원장을 만들지
+   않으므로(readOptRows 가 빈 배열) 여기서 적어도 저장되지 않는다(조용한 소실 금지). */
+#recruitModal .rf-pm-none .rf-ug-btn{display:none}
+/* 행이 .rf-unit 껍데기에 들어가면서 '#rf_opt_rows .rf-opt-row:last-child' 가 안 맞는다 */
+#recruitModal #rf_opt_rows .rf-unit:last-child>.rf-opt-row{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
+/* 상품 그룹 머리 = 상품명 · 옵션 유무 · 총인원 · 삭제(4칸 — 종전 3칸이면 삭제가 칸 밖으로 나간다) */
+#recruitModal .rf-gp-head{grid-template-columns:minmax(0,1fr) auto .62fr 26px}
+#recruitModal .rf-gp-unit{display:inline-flex;flex:none}
+#recruitModal .rf-gp-unit button{min-height:24px;padding:4px 8px;border:1px solid #D5DEE9;background:#fff;color:#5D6B80;
+  font:inherit;font-size:.64rem;font-weight:800;line-height:1;cursor:pointer}
+#recruitModal .rf-gp-unit button:first-child{border-radius:5px 0 0 5px}
+#recruitModal .rf-gp-unit button:last-child{border-radius:0 5px 5px 0;border-left:0}
+#recruitModal .rf-gp-unit button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8}
+/* 옵션 없는 상품 그룹: 옵션명 칸은 쓰지 않는다. ★ 칸을 **없애지 않고 잠근다** —
+   머리줄은 그룹마다가 아니라 표 위에 한 줄뿐이라, 칸을 지우면 그 그룹만 열이 어긋난다. */
+#recruitModal .rf-gp-noopt .rf-opt-name{pointer-events:none;opacity:.45;background:#F4F6FA}
+#recruitModal .rf-gp-noopt .rf-gp-add{display:none}
+/* 🧭 선택지 전용 유입가이드 — 평소 접힘, 버튼으로 편다 */
+#recruitModal .rf-unit>.rf-ug{display:none}
+#recruitModal .rf-unit.ug-on>.rf-ug{display:block;padding:7px 9px 9px;border-bottom:1px solid #E9EEF5;background:#F8FAFC}
+#recruitModal .rf-ug-h{display:flex;align-items:center;gap:6px;margin-bottom:5px;color:#45536A;font-size:.66rem;font-weight:850}
+#recruitModal .rf-ug-note{color:#94A3B8;font-size:.6rem;font-weight:600}
+#recruitModal .rf-ug .ig-wrap>textarea.rform-input,#recruitModal .rf-ug .ig-strip{height:58px;min-height:58px}
+#recruitModal .rf-opt-row.ug-has .rf-ug-btn{background:#EDF4FF;border-color:#B9D2FB}
 @media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
 @media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
 @media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}

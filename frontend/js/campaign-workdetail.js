@@ -22,6 +22,8 @@
     + '.cwd-muted{font-size:.76rem;color:#9CA3AF}'
     + '.cwd-btn{display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#EEF1F7;color:#4B5563;'
     +   'font-size:.84rem;font-weight:800;border-radius:11px;padding:11px;font-family:inherit;margin-top:10px}'
+    /* 선택지 전용 유입가이드(134) 머리말 — 색은 리터럴 고정(호스트 CSS 변수 미의존) */
+    + '.cwd-note{font-size:.75rem;font-weight:700;color:#1b64da;background:#EFF5FF;border-radius:8px;padding:6px 8px;margin-bottom:8px}'
     + '.cwd-opt{display:flex;align-items:center;gap:10px}'
     + '.cwd-opt .nm{font-size:.9rem;font-weight:800;color:#111827}'
     + '.cwd-opt .sub{font-size:.72rem;color:#4B5563;margin-top:2px}';
@@ -152,9 +154,16 @@
     // 내가 참여한 옵션(옵션 등록 캠페인만)
     var so = d.selectedOption;
     if (o.showOption !== false && so && so.optKey) {
-      var sub = so.payAmount ? ('결제금액 ' + Number(so.payAmount).toLocaleString() + '원') : '';
+      // ★ 134 — 옵션 없는 상품은 그 상품 자체가 선택지다(키가 곧 상품명) → 라벨을 바꿔 말한다.
+      //   옵션 단위는 어느 상품의 옵션인지 함께 적는다(복합 작업은 상품이 둘 이상이라 옵션명만으론 못 가린다).
+      var isProdUnit = so.unitKind === 'product';
+      var soTitle = isProdUnit ? '✅ 내가 참여한 상품' : '✅ 내가 참여한 옵션';
+      var sub = [
+        (!isProdUnit && so.productName) ? ('상품 ' + so.productName) : '',
+        so.payAmount ? ('결제금액 ' + Number(so.payAmount).toLocaleString() + '원') : '',
+      ].filter(Boolean).join(' · ');
       html += '<div class="cwd-box" style="border-color:#3182f6">'
-        + '<div class="cwd-tt" style="color:#1b64da">✅ 내가 참여한 옵션</div>'
+        + '<div class="cwd-tt" style="color:#1b64da">' + soTitle + '</div>'
         + '<div class="cwd-opt"><div><div class="nm">' + escAttr(so.optKey) + '</div>'
         + (sub ? '<div class="sub">' + escAttr(sub) + '</div>' : '') + '</div></div></div>';
     }
@@ -188,8 +197,21 @@
     var revPack = imageListHtml(wd.reviewGuideImages, o.apiBase, '리뷰 가이드 이미지');
     var notePack = imageListHtml(wd.specialNotesImages, o.apiBase, '특이사항 이미지');
 
-    // 유입가이드
-    var guideHtml = wd.inflowGuideHtml || '';
+    /**
+     * 유입가이드 — ★★ 선택지 전용 가이드가 있으면 **그것만** 보여준다(134).
+     *
+     * 복합 작업(상품A의 옵션1 / 상품A의 옵션2 / 상품B)은 선택지마다 들어가는 길이 달라서
+     * 공고 공통 가이드 하나로는 표현되지 않는다. 그래서 그 선택지에 가이드가 붙어 있으면
+     * 그 사람에게는 그 가이드가 유일한 안내다.
+     * ★ 비어 있으면 종전 공통 가이드로 접힌다 — 옵션은 있는데 가이드는 공통뿐인
+     *   기존 공고가 그대로 동작해야 한다(가이드 0개 = 종전 동작 100%).
+     * ★ 선택지 사진은 배열(inflowGuideImages)로도 오므로 HTML 뒤에 이어 붙이고,
+     *   그 토큰을 아래 중복 판정에 함께 넘겨 같은 사진이 두 번 그려지지 않게 한다.
+     */
+    var unitGuideHtml = (so && so.inflowGuideHtml) || '';
+    var unitPack = imageListHtml(so && so.inflowGuideImages, o.apiBase, '유입가이드 이미지');
+    var usingUnitGuide = !!(unitGuideHtml || unitPack.html);
+    var guideHtml = usingUnitGuide ? (unitGuideHtml + unitPack.html) : (wd.inflowGuideHtml || '');
     // ★ seen 에 두 배열의 토큰을 함께 넘겨 같은 사진이 유입가이드 카드에 이중 노출되지 않게 한다
     //   (레거시 경로: 리뷰가이드 '평문'에 섞여 온 주소는 종전대로 유입가이드 카드에 붙는다 — 무회귀)
     var extraImgs = extractGuideImages(
@@ -209,9 +231,17 @@
      */
     // 과거 공고 중에는 작업오더 연결 정보가 빠져 inflowType이 비어 있지만, 안내문에는
     // "링크유입"이 남아 있다. 명시적으로 링크유입이라고 적힌 경우만 호환 처리한다.
-    var legacyLinkInflow = !d.inflowType && /링크\s*유입/.test(String(wd.inflowGuideHtml || '').replace(/<[^>]*>/g, ' '));
+    // ★ 판정 대상은 **지금 화면에 보이는 가이드** — 선택지 전용 가이드가 있는데 공고 공통 문구에
+    //   "링크유입"이 남아 있다고 버튼을 열면, 그 선택지의 유입 경로 지정이 통째로 무의미해진다.
+    var legacyLinkInflow = !d.inflowType
+      && /링크\s*유입/.test(String(usingUnitGuide ? unitGuideHtml : (wd.inflowGuideHtml || '')).replace(/<[^>]*>/g, ' '));
     var isLinkInflow = d.inflowType === 'link' || legacyLinkInflow || (!d.inflowType && !hasGuide);
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
+      // ★ 공통 가이드가 아니라 그 선택지 전용이라는 사실을 말한다(관리자 미리보기에서도
+      //   "어느 선택지의 안내가 보이는가"를 알아야 한다 — 조용한 치환 금지)
+      + (usingUnitGuide
+        ? '<div class="cwd-note">📌 <b>' + escAttr(so.optKey) + '</b> 선택지 전용 안내예요.</div>'
+        : '')
       + '<div class="cwd-body">' + guideHtml + extraImgs + '</div>';
     // 옵션 공고는 리뷰어가 참여 시 고른 옵션의 링크로 이동한다.
     // 옵션 링크가 비어 있는 기존 공고는 공고 공통 링크를 그대로 사용한다.
