@@ -60,6 +60,38 @@ ok('리뷰검수 렌더 블록을 추출했다', !!block);
 const detailBlock = /function riOpenDetail\(i\)\{[\s\S]*?\n\}\);\n(?=(?:\/\*[\s\S]{0,600}?\*\/\n)?async function riResolve)/.exec(src);
 ok('상세 팝업 블록을 추출했다', !!detailBlock);
 
+/* ★★ 렌더가 쓰는 **페이지 전역 도우미**를 실제 정의 그대로 샌드박스에 넣는다 (2026-08-24).
+     왜: 이 가드는 화면 코드의 **일부만 잘라** 흉내 내는데, 렌더가 잘린 바깥의 함수를 쓰기
+     시작하면 "없는 함수를 부른다"로 빨개진다 — 실제 페이지에서는 같은 <script> 안이라
+     멀쩡한데도(실측: 썸네일 CDN 전환이 `_thumbAttrs`·`_thumbUrl` 을 끌어다 쓰면서 발생).
+   ★ **손으로 흉내 낸 대역(stub)을 두지 않는다** — 페이지의 진짜 정의를 뽑아 실행한다.
+     대역을 두면 진짜 구현이 바뀌어도 가드가 눈치채지 못한다(사본 금지).
+   ★ 이름이 바뀌거나 사라지면 **여기서 먼저 빨개진다**(아래에서 존재를 단언).
+   ⚠ `isAdmin` 같은 **어디에도 없는** 프리변수는 여전히 넣지 않는다 — 그게 이 가드의 본래 표적이다. */
+const PAGE_HELPERS = ['_thumbUrl', '_thumbAttrs'];
+/* 함수 하나를 **중괄호 짝을 세어** 정확히 잘라 낸다.
+   ⚠ 정규식(`[\s\S]*?\n\}`)으로 자르면 한 줄짜리 함수에서 **다음 함수까지 딸려 온다** —
+     그러면 목록에서 이름을 빼도 옆 함수 덕에 통과해 버려 목록이 명세 구실을 못 한다(실측). */
+function cutFn(source, name) {
+  const at = source.indexOf('function ' + name + '(');
+  if (at < 0) return null;
+  const open = source.indexOf('{', at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}' && --depth === 0) return source.slice(at, i + 1);
+  }
+  return null;
+}
+const helperSrc = PAGE_HELPERS.map(name => {
+  const body = cutFn(src, name);
+  ok(`페이지 도우미 ${name} 의 실제 정의를 찾았다(이름이 바뀌면 여기서 잡힌다)`, !!body);
+  ok(`★ ${name} 만 잘라 냈다(옆 함수가 딸려 오면 목록이 명세 구실을 못 한다)`,
+    PAGE_HELPERS.filter(o => o !== name).every(o => !body.includes('function ' + o + '(')));
+  return body;
+}).join('\n');
+
 /** 아주 작은 DOM 흉내 — innerText 대신 innerHTML 문자열만 본다. */
 function makeSandbox(role, api) {
   const modal = { id: 'riModal', className: 'rimodal', style: { display: 'none' }, dataset: {}, innerHTML: '' };
@@ -85,9 +117,13 @@ function makeSandbox(role, api) {
       body: { appendChild: () => {} },
     },
     console,
+    /* ★ 썸네일 공유 모듈은 **일부러 비워 둔다** — 그러면 `_thumbAttrs` 가 문서화된
+       폴백(원본 프록시 주소)을 타므로, 모듈을 못 불러온 페이지의 동작까지 함께 확인된다. */
+    window: {},
     // ★ isAdmin 전역을 **두지 않는다** — 프리변수가 다시 들어오면 여기서 터져야 한다.
   };
   vm.createContext(sandbox);
+  vm.runInContext(helperSrc, sandbox);
   vm.runInContext(block[0], sandbox);
   vm.runInContext(detailBlock[0], sandbox);
   return sandbox;
@@ -120,7 +156,11 @@ const OKRES = { ok: true, items: ITEMS, summary: { pass: 1, suspect: 2, fail: 3,
     await vm.runInContext('_loadInspect()', sb);
     const body = sb.els['#ribody'].innerHTML, head = sb.els['#rihead'].innerHTML;
     ok(`[${role}] ★ "불러오는 중…" 이 남지 않는다(무한로딩 재발 차단)`, !/불러오는 중/.test(body));
-    ok(`[${role}] ★ 정상 응답에 오류 문구가 뜨지 않는다(렌더가 실제로 완주했다)`, !/표시하지 못했습니다/.test(body));
+    /* ★ 실패하면 **왜** 실패했는지 그 자리에서 말한다 — 화면이 사유를 괄호에 담아 그린다.
+       "오류 문구가 떴다"만 남기면 다음 사람이 원인을 처음부터 다시 파야 한다. */
+    const why = (/표시하지 못했습니다\.?\s*\(([^)]*)\)/.exec(body) || [])[1];
+    ok(`[${role}] ★ 정상 응답에 오류 문구가 뜨지 않는다(렌더가 실제로 완주했다)`
+      + (why ? ` — 렌더가 던진 사유: ${why}` : ''), !/표시하지 못했습니다/.test(body));
     ok(`[${role}] 카드가 그려진다`, /class="ricard/.test(body));
     ok(`[${role}] 헤더가 그려진다`, /리뷰검수/.test(head));
     // ⚠ 2026-08-06: [과거분 검수] 제거 → 대상 버튼을 [재검수]로 교체(검사 의미 불변)
