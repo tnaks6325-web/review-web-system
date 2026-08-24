@@ -774,11 +774,11 @@ function _woCampaignPrefill(o) {
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
     delivery_type: _woDeliveryBase(o.delivery_type),
-          // ★ 135: 회수·혼합 부속정보는 **기본형과 함께** 넘긴다 — 종전에는 맵 조회 실패로
-          //   배송유형이 통째로 빈 값이 되어 회수택배사·혼합 건수가 발행 시점에 증발했다.
-          delivery_type_mix: o.delivery_type_mix || null,
-          recall_courier: o.recall_courier || "",
-          recall_product: o.recall_product || "",
+    // ★ 135: 회수·혼합 부속정보는 **기본형과 함께** 넘긴다 — 발행 폼이 그 값을 채우고
+    //   사람이 확인한 뒤 저장하면 공고 원장에도 남는다(작업표 부속 열 보장의 재료).
+    delivery_type_mix: o.delivery_type_mix || null,
+    recall_courier: o.recall_courier || "",
+    recall_product: o.recall_product || "",
     // ★ 087: 리뷰타입 — 인트라넷 발주 폼의 값이 그대로 온다(`포토` · `구매확정` ·
     //   `혼합(포토 10건, 텍스트 20건, …)`). 표준 key 변환은 발행 폼이 하고 저장 시 서버가 다시 정규화한다.
     //   ★ 여기서 미리 변환하지 않는 이유 = 이 모듈은 상세 표시도 겸해 **원문**을 그대로 보여줘야 한다.

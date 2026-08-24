@@ -1498,7 +1498,7 @@ router.post('/workdesk/test-auto-delete-cleanup', authMiddleware, async (req, re
    ★ gid 는 서버가 `tab_configs` 에서 다시 구한다(낡은 화면이 남의 공고 정원 이력을 보지 않게). */
 router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, kind, limit } = req.query;
+    const { sheetId, tabName, kind, limit, before } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     let gid = '';
@@ -1508,7 +1508,7 @@ router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
       gid = (rows[0] && rows[0].tab_gid) || '';
     } catch (_) { /* gid 미상 = 이름 매칭만(fail-soft) */ }
     const { tabActivityLog } = require('../services/tabActivityLog.service');
-    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit }));
+    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit, before }));
   } catch (err) { next(err); }
 });
 

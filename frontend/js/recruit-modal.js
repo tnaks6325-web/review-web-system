@@ -478,6 +478,8 @@
                 <div class="form-row"><span class="form-label">담당자 <em class="required">*</em></span><div class="form-control"><div id="rf_manager_btns" class="choice-set"><button class="choice rchan-btn" data-group="manager" data-val="만두" onclick="selectRfBtn('manager',this)">만두</button><button class="choice rchan-btn" data-group="manager" data-val="망고" onclick="selectRfBtn('manager',this)">망고</button></div><input id="rf_manager" type="hidden"></div></div>
                 <div class="form-row"><span class="form-label">구매채널 <em class="required">*</em></span><div class="form-control"><div id="rf_channel_btns" class="square-toggle"><button class="rchan-btn" data-group="channel" data-val="쿠팡" onclick="selectRfBtn('channel',this)">쿠팡</button><button class="rchan-btn" data-group="channel" data-val="네이버" onclick="selectRfBtn('channel',this)">네이버</button><button class="rchan-btn" data-group="channel" data-val="올리브영" onclick="selectRfBtn('channel',this)">올리브영</button><button class="rchan-btn" data-group="channel" data-val="카카오메이커스" onclick="selectRfBtn('channel',this)">카카오메이커스</button><button class="rchan-btn" data-group="channel" data-val="직접입력" onclick="selectRfBtn('channel',this)">직접입력</button></div><input id="rf_channel_custom" placeholder="채널명 직접 입력" hidden><input id="rf_channel" type="hidden"></div></div>
                 <div class="form-row"><span class="form-label">배송유형</span><div class="form-control"><select id="rf_delivery_type" hidden><option value="">선택 안 함</option><option value="실배송">실배송</option><option value="빈박스">빈박스</option><option value="택배발송대행">택배발송대행</option><option value="회수">회수</option><option value="혼합">혼합</option></select><div id="rf_delivery_toggle" class="square-toggle"><button type="button" data-rf-delivery="실배송">실배송</button><button type="button" data-rf-delivery="빈박스">빈박스</button><button type="button" data-rf-delivery="택배발송대행">택배발송대행</button><button type="button" data-rf-delivery="회수">회수</button><button type="button" data-rf-delivery="혼합">혼합</button></div></div></div>
+                <div class="form-row" id="rf_delivery_mix_row" hidden><span class="form-label">배송 조합 <em class="required">*</em></span><div class="form-control rf-dvmix"><label>실배송 <input id="rf_delivery_real_count" type="number" min="0" step="1" oninput="rfSyncDeliveryDetail()"></label><label>빈박스 <input id="rf_delivery_empty_count" type="number" min="0" step="1" oninput="rfSyncDeliveryDetail()"></label><strong id="rf_delivery_mix_state" class="rf-dvmix-state"></strong></div></div>
+                <div class="form-row" id="rf_recall_row" hidden><span class="form-label">회수 정보 <em class="required">*</em></span><div class="form-control rf-dvrecall"><input id="rf_recall_courier" placeholder="회수택배사 (예: CJ대한통운)" maxlength="60"><input id="rf_recall_product" placeholder="회수상품명칭 (예: OO선크림 30ml)" maxlength="120"></div></div>
                 <div class="form-row"><span class="form-label">구매 시간대</span><div class="form-control"><input id="rf_time_range" type="hidden" value=""><input id="rf_window_start" type="hidden" value=""><input id="rf_window_end" type="hidden" value=""><div class="rf-time-control"><button id="rf_free_time_toggle" type="button" class="rf-time-free" aria-pressed="false" onclick="rfSetFreeTime(!this.classList.contains('on'))"><span class="rf-time-switch" aria-hidden="true"><span class="rf-time-knob"></span></span><span id="rf_free_time_state">시간 지정</span></button><div id="rf_time_range_control" class="rf-time-range"><button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button><span class="rf-time-divider" aria-hidden="true">~</span><button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button><div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden><div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div><div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div></div></div></div></div></div>
                 <div class="form-row"><span class="form-label">현금영수증</span><div class="form-control"><input type="checkbox" id="rf_cash_receipt_required" hidden><button type="button" id="rf_cashrcpt_toggle" class="switch-button" aria-pressed="false" onclick="rfToggleCashReceipt()"><span aria-hidden="true"></span></button><strong id="rf_cash_receipt_state">발행 안 함</strong><span class="tag" id="rf_cash_receipt_note">참여자에게 미노출</span></div></div>
                 <div class="form-row"><label class="form-label" for="rf_review_fee">리뷰비</label><div class="form-control"><input id="rf_review_fee" type="number" min="0" step="100" oninput="renderFeeSchedule()"></div></div>
@@ -1060,6 +1062,14 @@
 #recruitModal .rf-compact-main .ig-strip{height:58px!important;min-height:58px!important;padding:4px}
 #recruitModal .rf-compact-main .footer{display:none}.rf-compact-main .footer-copy{min-width:0;flex:1;color:#7F8A9B;font-size:10px}.rf-compact-main .footer>div{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:6px;white-space:nowrap}.rf-compact-main .btn{min-height:29px;padding:6px 10px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#526078;font-size:10px;font-weight:850}.rf-compact-main .footer .rf-savebtn{min-height:29px;padding:6px 10px;border-color:#2563EB;background:#2563EB;color:#fff;font-size:10px}
 #recruitModal #rf_linked_campaign,#recruitModal #rf_linked_tab,#recruitModal #rf_delivery_type{display:none}
+#recruitModal .rf-dvmix{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#recruitModal .rf-dvmix label{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--t2,#64748b)}
+#recruitModal .rf-dvmix input{width:82px}
+#recruitModal .rf-dvmix-state{font-size:11.5px;font-weight:700;color:var(--t2,#64748b)}
+#recruitModal .rf-dvmix-state.bad{color:#dc2626}
+#recruitModal .rf-dvmix-state.ok{color:#16a34a}
+#recruitModal .rf-dvrecall{display:flex;gap:8px;flex-wrap:wrap}
+#recruitModal .rf-dvrecall input{flex:1 1 180px;min-width:0}
 #recruitModal .rf-delivery-toggle{display:flex;flex-wrap:wrap;gap:4px}
 #recruitModal .rf-delivery-toggle button{min-height:26px;padding:4px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#fff;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
 #recruitModal .rf-delivery-toggle button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
@@ -1220,6 +1230,9 @@
   }
 
   /* 레거시 공고 → 참여형 전환(안내 카드의 버튼) — hidden 체크박스를 켜고 기존 토글을 태운다 */
+  // ★ 마크업의 oninput 이 부르므로 전역 노출 필수(없으면 조용히 ReferenceError).
+  window.rfSyncDeliveryDetail = rfSyncDeliveryDetail;
+
   window.rfLegacyConvert = function () {
     var pe = document.getElementById('rf_participation');
     if (!pe) return;
@@ -1422,9 +1435,37 @@
         delivery.dispatchEvent(new Event('change', { bubbles: true }));
       });
       delivery.addEventListener('change', syncDeliveryButtons);
+      delivery.addEventListener('change', rfSyncDeliveryDetail);
     }
     syncDeliveryButtons();
+    rfSyncDeliveryDetail();
     refreshLinkedReferences();
+  }
+
+  /**
+   * 회수·혼합 부속 행(135) — 배송유형이 그 기본형일 때만 펼친다.
+   * ★ 합계 = 총 건수 상태를 화면이 말한다 — 서버가 400 으로 막기 전에 고칠 칸을 알려 준다
+   *   (리뷰 혼합·인트라넷 리뷰오더와 같은 규율).
+   * ★ 총 건수는 진행상품 표가 파생하는 hidden(rf_recruit_total) 이 진실원본이다.
+   */
+  function rfSyncDeliveryDetail() {
+    var delivery = document.getElementById('rf_delivery_type');
+    var base = delivery ? String(delivery.value || '').trim() : '';
+    var mixRow = document.getElementById('rf_delivery_mix_row');
+    var recallRow = document.getElementById('rf_recall_row');
+    if (mixRow) mixRow.hidden = base !== '혼합';
+    if (recallRow) recallRow.hidden = base !== '회수';
+    var state = document.getElementById('rf_delivery_mix_state');
+    if (!state) return;
+    if (base !== '혼합') { state.textContent = ''; state.className = 'rf-dvmix-state'; return; }
+    var num = function (id) { var el = document.getElementById(id); return Math.max(0, Number(el && el.value) || 0); };
+    var sum = num('rf_delivery_real_count') + num('rf_delivery_empty_count');
+    var totalEl = document.getElementById('rf_recruit_total');
+    var total = Math.max(0, Number(totalEl && totalEl.value) || 0);
+    if (!total) { state.textContent = '총 건수를 먼저 정해주세요.'; state.className = 'rf-dvmix-state bad'; return; }
+    var ok = sum === total;
+    state.textContent = '합계 ' + sum + '건 / 총 건수 ' + total + '건' + (ok ? '' : ' — 일치시켜 주세요.');
+    state.className = 'rf-dvmix-state ' + (ok ? 'ok' : 'bad');
   }
 
   function syncDeliveryButtons() {
