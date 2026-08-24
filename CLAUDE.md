@@ -64,6 +64,15 @@
 - 과거에 루트로 샌 캡처는 관리자 "리뷰 캡처 정리"(`POST /api/drive/relocate-orphan-reviews`)로 `[리뷰]` 폴더 이동 + 파일명 이름↔행 결정적 링크 백필(모호하면 링크 안 함).
 - **탭 `[리뷰]` 폴더 스캔 백필**(`POST /api/drive/review-folder-backfill {sheetId, tabName, folderUrl?, dryRun?}`): 폴더에는 캡처가 있는데 원장·대표 이미지가 비어 업체 뷰어 미리보기가 "리뷰 이미지 미등록"으로 뜨는 탭용(031/032 이전 제출분·직원 수동 업로드분). 폴더 내 이미지를 나열해 파일명 이름↔행 결정적 매칭으로 백필 — 폴더 미연결 탭은 `ensureReviewFolderPath`로 자동 매핑(기존 폴더 탐색·없으면 생성) 후 `tab_configs.folder_url` 연결. relocate와의 차이 = OCR 키워드 검색·이동 없음(폴더 자체가 스코프). ★★ **링크 규칙 단일 출처 = `reviewFileLink.service.js`(`linkReviewFilesToRows`)** — relocate·백필 두 소비처가 같은 헬퍼를 쓴다(원조 relocate의 인라인 블록을 이관, 사본 금지). dryRun 기본 true. 관리자 UI = "리뷰 캡처 정리" 모달의 [선택 탭 폴더 이미지 연결] 버튼(미리보기→실행 2단계). 회귀가드 `tests/reviewFolderBackfill.test.js`(스텁 db 실행 + 사본 부재).
 
+### ★★ Drive 이미지 프록시 = 왕복 1회 (2026-08-24 실측)
+- **실측**: 리뷰검수·제출물 미리보기·업체 뷰어의 `<img>` 는 전부 `GET /api/drive/image/<id>` 를 지나는데, 31KB 캡처 한 장이 **2.0~2.6초**였다. 크기를 키워도(56KB 2.6s · 124KB 2.4s) 거의 같아 **대역폭이 아니라 왕복 지연**이 지배적이었고, **같은 파일을 세 번 요청해도 안 빨라졌다**(서버 캐시 없음).
+- ★★ **원인 = `drive.service.downloadFile` 이 파일 1장마다 `files.get` 을 두 번 쳤다**(① `fields:'mimeType, name'` 메타 ② `alt:'media'` 본문). **media 응답 헤더의 `content-type` 이 곧 그 파일의 mime** 이므로 메타 조회는 필요 없다 → **첫 호출이 곧 본문**이고 왕복이 절반이 된다.
+- ★ **헤더로 못 알아낸 경우에만 메타 1회 폴백**(fail-safe) — 헤더만 믿고 `application/octet-stream` 으로 접으면 `<img>` 가 안 그려지는 조용한 회귀가 된다. 메타까지 실패해도 **이미 받은 본문은 버리지 않는다**.
+- ★ **반환 계약 `{buffer, mimeType, name}` 불변** — `name` 은 `content-disposition` → 메타 → `fileId` 순으로 채운다. 소비처 5곳(`drive.routes` 이미지 프록시 · `order.routes` 가이드 이미지 · `fileRoute` 소급 정리 · `reviewInspect` 예시 로드·검수 스윕)은 `buffer`·`mimeType` 만 쓰지만 **계약을 좁히지 않는다**.
+- ★ **gaxios 6.x 는 응답 헤더를 소문자 키 평범한 객체로 변환**해 돌려준다(`build/src/gaxios.js` — `res.headers.forEach` 로 obj 재구성). `Headers` 객체가 아니므로 `res.headers['content-type']` 접근이 맞다. gaxios 7 로 올릴 때 이 자리를 함께 확인할 것.
+- ⚠ **잔여**: 프록시에 **서버 캐시가 여전히 없다** — 같은 이미지를 다른 사람이 보면 다시 Drive 를 친다. 브라우저 캐시(`Cache-Control: private, max-age=600`)는 **같은 브라우저에서 10분 안**에만 듣는다. 구글 네이티브 문서(Docs/Sheets)는 `alt:media` 가 실패하므로 종전처럼 thumbnail 302 폴백으로 떨어진다(더 빨리 실패할 뿐 동작 불변).
+- 회귀가드 `tests/driveDownloadSingleRoundtrip.test.js`(가짜 Drive 클라이언트를 주입해 **호출 횟수를 실제로 센다** — 기본 1회·헤더 부재 시 폴백·계약 shape·소비처 `.name` 미사용).
+
 ### 리뷰어 홈 "리뷰 내역" 제출대기/제출완료 탭
 - `index.html` 내정보/현황의 리뷰 내역은 `GET /api/search?includeSubmitted=1`로 대기+완료를 한 번에 받아 `isSubmitted`로 좌우 서브탭(기본 [제출대기]) 분리. 완료 카드는 클릭/이동 없음(초록 배지) + `review_index.review_file_at` 기반 제출일 표시 + **입금 데이터가 채워진 행은 "입금완료" 남색 배지 병기**(`isPaid` = `is_submitted2='PAID'` 또는 row_json 입금 키워드 컬럼 값 존재 — 대시보드 집계와 동일 판정, row 비우기 전 서버에서 계산). 다중 캡처 슬롯 부분 제출은 대기 탭에서 "n/m 제출" 배지. bfcache 복귀(pageshow persisted) 시 재조회.
 - **보안 가드**(`/api/search`는 무인증): 제출완료 행은 **phone8/participation_links 정확 일치 매칭에만 포함**(이름 단독·이름+전화근접 약한 키엔 미개방 — 이름만으로 타인 제출이력 스크래핑 차단), 완료 행의 `row`(행 전체 JSON)는 비워 반환(데이터 최소화). includeSubmitted 시 LIMIT 400 + `is_submitted ASC` 정렬(대기 건 절단 보호, 절단 시 완료 탭 하단 고지). 회귀가드 `tests/searchSubmittedGuard.test.js`.
