@@ -91,10 +91,11 @@ ok('인트라넷 구매채널은 작업오더에 보존한다',
 // ⚠ 088(계약건 컬럼)에서 컬럼 목록 중간에 sales_id/contract_number/quote_id 가 들어와 옛 패턴
 //   (`manager_name, work_manager, status, created_by`)이 드리프트했다 — 검사 의미는 불변(INSERT 에
 //   work_manager 가 있고 값은 pickWorkManager 에서 온다)이라 패턴만 갱신한다.
+// ⚠ 135(배송유형 5종)에서 꼬리에 delivery_type_mix·recall_* 이 붙어 `work_kind)` 가 또 드리프트했다.
 // ⚠ 099(체험단 종류)에서 컬럼 목록 꼬리에 work_kind 가 붙어 `status, created_by)` 가 다시
 //   드리프트했다 — 검사 의미는 불변(INSERT 에 work_manager 가 있고 값은 pickWorkManager 에서 온다).
 ok('신규 오더 INSERT 에 work_manager 포함(별칭·본문 폴백 경유)',
-  /manager_name, work_manager,/.test(ord) && /status, created_by, work_kind\)/.test(ord) && /pickWorkManager\(b\)/.test(ord));
+  /manager_name, work_manager,/.test(ord) && /status, created_by, work_kind,/.test(ord) && /pickWorkManager\(b\)/.test(ord));
 ok('컬럼 자동생성 안전장치(마이그레이션 실패 대비)',
   /ADD COLUMN IF NOT EXISTS work_manager/.test(ord));
 ok('마이그레이션 065 존재',

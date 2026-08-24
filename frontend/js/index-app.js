@@ -1438,7 +1438,7 @@ function _renderWorkOrderWorkspace(list) {
         <b style="font-size:11px;line-height:1.35;color:#243247">${escHtml(order.title || "(제목 없음)")}</b>
         <span style="flex:none;padding:2px 5px;border-radius:4px;background:${bg};color:${fg};font-size:9px;font-weight:800;white-space:nowrap">${WO_LABELS[status] || status}</span>
       </span>
-      <span style="display:block;margin-top:3px;color:#718096;font-size:10px">${escHtml(order.created_by || "-")} · ${order.courier_proxy ? "택배발송대행" : (order.delivery_type || "배송유형 미지정")}</span>
+      <span style="display:block;margin-top:3px;color:#718096;font-size:10px">${escHtml(order.created_by || "-")} · ${order.courier_proxy ? "택배발송대행" : ((typeof _woDeliveryBase === "function" ? _woDeliveryBase(order.delivery_type) : "") || order.delivery_type || "배송유형 미지정")}</span>
     </button>`;
   }).join("");
 
