@@ -209,13 +209,49 @@ t('판정을 유틸로 이관했다(어휘 사본 금지)', () => {
   assert.match(ORD, /return isCourierProxyDelivery\(v\);/);
 });
 
-t('★★ INSERT 컬럼 수 ≡ VALUES 항목 수(컬럼 추가 때 가장 흔히 깨지는 자리)', () => {
+/* 최상위 콤마만 세어 배열 원소 수를 구한다(중첩 호출·문자열 안의 콤마는 제외). */
+function _topLevelItems(src) {
+  const clean = src.replace(/\/\/.*$/gm, '');
+  let depth = 0, count = 1, quote = null;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (quote) { if (c === '\\') { i++; continue; } if (c === quote) quote = null; continue; }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (c === ',' && depth === 0) count++;
+  }
+  const body = clean.trim();
+  if (!body) return 0;
+  // ★ 마지막 원소 뒤 콤마(trailing comma)를 원소로 세지 않는다 — 1 차이로 조용히 빨개진다.
+  return body.endsWith(',') ? count - 1 : count;
+}
+
+t('★★ INSERT — 컬럼 수 ≡ VALUES 항목 수 ≡ **파라미터 배열 개수**', () => {
   const m = ORD.match(/INSERT INTO work_orders\s*\n\s*\(([\s\S]*?)\)\s*\n\s*VALUES \(([^)]*)\)/);
   assert.ok(m, 'INSERT 문 추출');
   const cols = m[1].split(',').map((x) => x.trim()).filter(Boolean);
   const vals = m[2].split(',').map((x) => x.trim()).filter(Boolean);
-  assert.strictEqual(cols.length, vals.length);
+  assert.strictEqual(cols.length, vals.length, '컬럼 수 ≡ VALUES 항목 수');
   ['delivery_type_mix', 'recall_courier', 'recall_product'].forEach((c) => assert.ok(cols.includes(c), c));
+
+  /* ★★ 자리표시자만 세면 "컬럼은 늘렸는데 파라미터를 빠뜨린" 변이를 놓친다(변이시험 실측).
+     실제 파라미터 배열 원소 수까지 세야 런타임 bind 오류를 커밋 전에 잡는다. */
+  const ph = new Set(vals.filter((v) => v.startsWith('$')));
+  const at = ORD.indexOf('     RETURNING *`,', ORD.indexOf('INSERT INTO work_orders'));
+  const open = ORD.indexOf('[', at);
+  const close = ORD.indexOf('\n    ]', open);
+  assert.ok(open > 0 && close > open, '파라미터 배열 추출');
+  assert.strictEqual(_topLevelItems(ORD.slice(open + 1, close)), ph.size, '파라미터 개수 ≡ 자리표시자 수');
+});
+
+t('★★ source revision UPDATE — 파라미터 개수 ≡ 자리표시자 수', () => {
+  const at = ORD.indexOf('WHERE id = $1 AND source_review_order_id = $40');
+  assert.ok(at > 0, 'source UPDATE 추출');
+  const maxPh = Math.max(...[...ORD.slice(at - 1400, at + 80).matchAll(/\$(\d+)/g)].map((x) => +x[1]));
+  const open = ORD.indexOf('[', at);
+  const close = ORD.indexOf('\n      ]', open);
+  assert.strictEqual(_topLevelItems(ORD.slice(open + 1, close)), maxPh);
 });
 
 t('부속정보 파생 — 구조화 우선, 문장 폴백, 종류가 다르면 비운다', () => {
