@@ -324,7 +324,7 @@ async function run() {
     && src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") < src.indexOf("'진행 중인 작업이 없습니다.'}</div>`; return; }"));
 
 
-  /* ═══ 8. 브랜드 담당자(135) — 작업(탭) 단위 · 최대 2명 · 라벨 없는 자유입력 (사용자 확정 2026-08-24) ═══ */
+  /* ═══ 8. 브랜드 담당자(136) — 작업(탭) 단위 · 최대 2명 · 라벨 없는 자유입력 (사용자 확정 2026-08-24) ═══ */
   // 8-1. 정규화 단일 출처
   {
     const norm = svc._normBrandManagers;

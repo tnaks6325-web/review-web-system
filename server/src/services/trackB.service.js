@@ -1576,7 +1576,7 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
   }
   const foldersOn = !brand || brand.folders_visible === true;
   const brandsOut = brandId ? undefined : (await brandsForAdvertiser({ advertiserId }).catch(() => null));
-  // 135: 작업별 브랜드 담당자 — 배치 1쿼리(fail-soft 빈 맵). 브랜드 관리 화면의 작업 행이 현재 값을 그린다.
+  // 136: 작업별 브랜드 담당자 — 배치 1쿼리(fail-soft 빈 맵). 브랜드 관리 화면의 작업 행이 현재 값을 그린다.
   const bmgr = await tabBrandManagersMap({ advertiserId });
   return {
     settlementHidden: !visible,
@@ -1698,7 +1698,7 @@ async function assignBrandTabs({ advertiserId, brandId, tabs } = {}) {
   return { ok: true, assigned: want.length };
 }
 // 브랜드 세션의 탭 스코프(라우트 _ensureThreadScope 가 호출) — 브랜드에 배정된 탭만 접근.
-/* ═══ 작업(탭)별 브랜드 담당자 (135) — 대행사가 브랜드사에게 보여줄 자기 쪽 담당자 ═══
+/* ═══ 작업(탭)별 브랜드 담당자 (136) — 대행사가 브랜드사에게 보여줄 자기 쪽 담당자 ═══
    사용자 확정 2026-08-24: 저장 단위 = 작업 하나 · 최대 2명 · 라벨 없는 자유입력.
    ★ 판정·정규화는 여기 한 곳(`_normBrandManagers`) — 라우트·화면이 각자 자르면 규칙이 갈린다.
    ★ 빈 값은 저장하지 않고 행을 지운다: "미입력" 상태를 **행 없음** 하나로만 표현한다
@@ -1760,7 +1760,7 @@ async function setTabBrandManagers({ advertiserId, sheetId, tabName, names, acto
       [advertiserId, sheetId, tabName, JSON.stringify(list), actor ? String(actor).slice(0, 60) : null]);
     return { ok: true, managers: list };
   } catch (err) {
-    if (err && err.code === '42P01') return { ok: false, code: 503, error: 'not_ready', detail: 'migration 135 미적용' };
+    if (err && err.code === '42P01') return { ok: false, code: 503, error: 'not_ready', detail: 'migration 136 미적용' };
     throw err;
   }
 }
@@ -3240,7 +3240,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     res.condition = _cond;   // ★ 위에서 이미 한 번 구했다(호출 2회 금지 — cap 과 값이 갈릴 수 없다)
     /* 「일정」 — 표(정렬된 `out`)의 구매일자에서 파생. 못 읽으면 null 로 두고 화면이 「—」로 말한다. */
     if (res.condition) res.condition.schedule = _condSchedule(out, headers);
-    /* 135: 업체가 정한 브랜드 담당자 — 내부 화면에도 **함께** 보여 "브랜드사에게 무엇이 나가는지"
+    /* 136: 업체가 정한 브랜드 담당자 — 내부 화면에도 **함께** 보여 "브랜드사에게 무엇이 나가는지"
        를 확인시킨다(사용자 확정 D안). 소유 업체는 그 탭의 소유 판정 단일 출처에서 구한다. */
     if (res.condition) res.condition.manager = await _condBrandManagers(res.condition.manager, { sheetId, tabName });
     // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
@@ -3255,7 +3255,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     res.todayProgress = _tpAdvertiserLens(await tabTodayProgress(db, { sheetId, tabName }));
     /* 작업 조건 카드 — 내부와 **같은 자리·같은 모양**(사용자 확정 2026-08-23). 단 렌즈를 거친다:
        리뷰비·입금명·다계정·현금영수증·내부 식별자는 응답에서 폐기한다(위 `_condAdvertiserLens`). */
-    /* 135: 업체가 정한 브랜드 담당자를 먼저 붙이고 렌즈를 태운다 — 렌즈가 세션 종류로 갈린다:
+    /* 136: 업체가 정한 브랜드 담당자를 먼저 붙이고 렌즈를 태운다 — 렌즈가 세션 종류로 갈린다:
        브랜드 링크 세션 = 내부 담당을 **대체**(값 없으면 담당 행 자체가 사라진다) /
        대행사 본세션 = 내부 담당과 **함께**(무엇이 나가는지 확인). */
     _cond.manager = await _condBrandManagers(_cond.manager, { sheetId, tabName, advertiserId });
@@ -4861,7 +4861,7 @@ async function tabCampaignsMap({ force = false } = {}) {
       `multiAccount`·`cashReceipt`·`incomeType`·`slotsPinned`(운영 설정) ·
       `campaignId`·`workOrderId`·`campaignCount`(내부 식별자 — 화면 창구를 여는 열쇠이기도 하다).
    ★ null 이면 null 그대로(카드가 종전 4줄로 떨어진다). */
-/* 작업 조건의 담당 재료에 업체가 정한 브랜드 담당자를 붙인다(135).
+/* 작업 조건의 담당 재료에 업체가 정한 브랜드 담당자를 붙인다(136).
    ★ 소유 업체 판정은 `advertiserForTab` 단일 출처(작업목록 그룹핑·업체관리가 쓰는 그 규칙) —
      광고주 세션은 자기 advertiserId 를 이미 알고 있으므로 조회하지 않는다.
    ★ 어떤 실패도 담당 행을 죽이지 않는다(fail-soft: 브랜드 담당만 빠지고 내부 담당은 그대로). */
