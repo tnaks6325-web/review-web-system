@@ -31,6 +31,9 @@ const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
 const { normName } = require('./identity.service');
+// 담당자 판정 **단일 출처**(065 + 회차 #18) — payment.service·trackB.service(홈 목록)가
+// 같은 함수를 부른다. 사본을 두면 "탭 담당자는 만두인데 공고 담당자는 빈칸"이 그대로 재발한다.
+const { resolveWorkManager } = require('../utils/workManager');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
 
@@ -93,6 +96,9 @@ function normalizeBankChoice(v) {
 
 /** `tab_configs.transfer_bank` 에 **되돌려 쓸 때** 의 표기(= 기존 화면이 읽는 한글 라벨) */
 function tabBankLabel(bank) { return BANK_LABEL[bank] || ''; }
+
+/** 입금관리의 담당자는 `utils/workManager.resolveWorkManager` 를 그대로 부른다(사본 금지).
+ *  판정 규칙·사고 경위는 그 함수의 문서를 참고 — 여기서 다시 적으면 두 문서가 갈린다. */
 
 function _int(v) {
   const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
@@ -271,6 +277,8 @@ async function listPaymentTargets(opts = {}) {
       // 작업보드 바로가기 재료 — ★ 화면이 gid 를 추측하지 않게 서버가 실어 준다(리네임 대비).
       tabGid: tab ? (tab.tabGid || '') : '',
       manager: tab ? (tab.manager || '') : '',
+      // 담당자를 어디서 읽었는지 — 'order' = 작업 화면과 같은 값 / 'tab' = 탭 설정 폴백
+      managerSource: tab ? (tab.managerSource || null) : null,
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
@@ -611,10 +619,13 @@ async function _loadTabMeta(sheetIds, tabNames) {
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
               tc.review_fee AS "reviewFee",
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
-              wo.goods_cost_type AS "goodsCostType"
+              wo.goods_cost_type AS "goodsCostType",
+              -- ★ 담당자 판정 원천 = 인트라넷 작업담당(065) 하나뿐
+              --   (담당AE 실명 칸은 여기서 읽지 않는다 — 065 이전 사고 자리)
+              wo.work_manager AS "orderWorkManager"
          FROM tab_configs tc
          LEFT JOIN LATERAL (
-              SELECT w.goods_cost_type FROM work_orders w
+              SELECT w.goods_cost_type, w.work_manager FROM work_orders w
                WHERE w.deleted_at IS NULL
                  AND w.linked_tab_sheet_id = tc.sheet_id
                  AND w.linked_tab_name = tc.tab_name
@@ -622,8 +633,10 @@ async function _loadTabMeta(sheetIds, tabNames) {
         WHERE tc.sheet_id = ANY($1) AND tc.tab_name = ANY($2)`,
       [sheetIds, tabNames]);
     for (const t of rows) {
+      const mgr = resolveWorkManager({ orderWorkManager: t.orderWorkManager, tabManager: t.manager });
       map[t.sheetId + '||' + t.tabName] = {
-        label: t.label, manager: t.manager || '', transferBank: t.transferBank || '', depositName: t.depositName || '',
+        label: t.label, manager: mgr.manager, managerSource: mgr.managerSource,
+        transferBank: t.transferBank || '', depositName: t.depositName || '',
         // ★ 리뷰비는 **NULL(미설정)과 0(무상 지정)을 구분**한다 — `|| 0` 으로 접으면
         //   미설정이 조용히 0원이 되어 공고 값이 있는데도 탭 폴백이 이긴 것처럼 보인다.
         reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
@@ -1200,5 +1213,5 @@ module.exports = {
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
-  compareAccountSnapshot, accountFingerprint, PaymentFixError,
+  compareAccountSnapshot, accountFingerprint, resolveWorkManager, PaymentFixError,
 };
