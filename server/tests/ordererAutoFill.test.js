@@ -86,13 +86,16 @@ ok('★ 배치(타계정 다건)는 본인 이름 안내를 감춘다 — 그 �
   /classList\.add\("of-orderer-batch"\)/.test(app)
   && /\.of-orderer-batch \.ofc-orderer-note\{display:none\}/.test(css));
 
-ok('★★ 카드 마크업 주석에 백틱이 없다 — 템플릿 리터럴이 그 자리에서 끊긴다(실측 사고)',
+ok('★★ HTML 주석에 백틱이 없다 — 템플릿 리터럴이 그 자리에서 끊긴다(실측 사고)',
   (() => {
-    const i = app.indexOf('function _buildOrderCardHtml(');
-    const j = app.indexOf('function _buildCoupangCardHtml(');
-    const body = app.slice(i, j > i ? j : i + 20000);
-    // 주석 줄(<!-- ... -->)에 백틱이 섞이면 런타임에 ReferenceError 가 난다
-    return !body.split('\n').some(l => /<!--|-->/.test(l) && l.includes('`'));
+    /* 이 파일의 `<!-- ... -->` 는 전부 템플릿 리터럴 안에 있다 — 그 안의 백틱은
+       리터럴을 조기 종료시켜 뒷부분이 코드로 파싱된다(런타임 ReferenceError).
+       ★ 줄 단위로 보면 안 된다 — 실제 사고는 **여러 줄 주석의 가운데 줄**이었다
+         (그 줄에는 <!-- 도 --> 도 없다). 주석 블록 전체를 본다. */
+    const rx = /<!--[\s\S]*?-->/g;
+    let m;
+    while ((m = rx.exec(app))) if (m[0].includes('`')) return false;
+    return true;
   })());
 
 /* ── 5. 실행 — 후보 유무에 따라 실제로 갈리는가 ──────────────────── */
