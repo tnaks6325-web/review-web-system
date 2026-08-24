@@ -137,6 +137,10 @@ const OKRES = { ok: true, items: ITEMS, summary: { pass: 1, suspect: 2, fail: 3,
     const body = sb.els['#ribody'].innerHTML, head = sb.els['#rihead'].innerHTML;
     ok(`[${role}] ★ "불러오는 중…" 이 남지 않는다(무한로딩 재발 차단)`, !/불러오는 중/.test(body));
     ok(`[${role}] ★ 정상 응답에 오류 문구가 뜨지 않는다(렌더가 실제로 완주했다)`, !/표시하지 못했습니다/.test(body));
+    /* ★ 썸네일이 **실제로 그려졌는지**까지 본다 — 오류 문구만 보면 썸네일 호출이 조용히
+       빠져도 통과한다(카드가 이미지 없이 뜨는 회귀). 규칙 자체는 previewThumbnail 가드 소유. */
+    ok(`[${role}] ★ 카드 썸네일이 CDN 속성으로 그려진다(조용히 빠지지 않는다)`,
+      /drive\.google\.com\/thumbnail/.test(body) && /data-full=/.test(body));
     ok(`[${role}] 카드가 그려진다`, /class="ricard/.test(body));
     ok(`[${role}] 헤더가 그려진다`, /리뷰검수/.test(head));
     // ⚠ 2026-08-06: [과거분 검수] 제거 → 대상 버튼을 [재검수]로 교체(검사 의미 불변)
