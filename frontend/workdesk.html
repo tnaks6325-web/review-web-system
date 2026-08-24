@@ -8213,6 +8213,9 @@ function commitCellEdit(rowId, field, value, td, opt){
       if(resp&&resp.ok){
         _recordCellUndo({rowId,field,value,had,prev,td},undoGroup);
         if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
+        if(resp.throughWrite&&resp.throughWrite.attempted===true&&resp.throughWrite.ok===false){
+          toast('표시는 저장됐지만 주문 원장 반영은 실패했습니다('+(resp.throughWrite.reason||'알 수 없음')+') — 다시 시도해주세요');
+        }
         undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
         return true;
       }
