@@ -320,5 +320,63 @@ t('★ 리뷰어 배지는 아는 어휘일 때만 접는다(모르는 값 삭�
   assert.match(cc, /_esc\(_dlBadge\(c\.delivery_type\)\)/);
 });
 
+/* ══ G. 옛 어휘 일괄 정리 도구 ═════════════════════════════════════ */
+console.log('G) 옛 어휘 일괄 정리 도구');
+
+const DIAG = read('src/routes/diag.routes.js');
+
+t('★ 판정은 utils/deliveryType 단일 출처 — SQL 에 어휘를 박지 않는다', () => {
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  assert.match(blk, /const \{ canonicalDeliveryValue \} = require\('\.\.\/utils\/deliveryType'\)/);
+  assert.ok(!/빈택배|회수건/.test(blk), '어휘 리터럴을 라우트에 박지 않는다');
+});
+
+t('★★ 미리보기가 기본 — 명시하지 않으면 쓰기 0', () => {
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  assert.match(blk, /const dryRun = req\.body\?\.dryRun !== false;/);
+  const upd = blk.indexOf('UPDATE ');
+  const gate = blk.indexOf('if (dryRun || total === 0)');
+  assert.ok(gate > 0 && upd > gate, 'UPDATE 는 dryRun 게이트 뒤에만 있다');
+});
+
+t('★ 쓰기 표면 = delivery_type 한 칸 (updated_at 도 안 건드린다)', () => {
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  const sets = blk.match(/UPDATE \$\{[a-z.]+\} SET ([^`]*) WHERE/);
+  assert.ok(sets, 'UPDATE SET 절 추출');
+  assert.strictEqual(sets[1].trim(), 'delivery_type = $2');
+  assert.strictEqual((blk.match(/UPDATE /g) || []).length, 1, 'UPDATE 는 한 곳뿐');
+  assert.ok(!/DELETE|INSERT/i.test(blk), '삭제·삽입 없음');
+});
+
+t('★ 접히는 값만 바꾼다 — 이미 표준형·판정 밖 값은 대상 아님', () => {
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  assert.match(blk, /if \(!std \|\| std === r\.raw\) continue;/);
+});
+
+t('★★ 부속 문장은 대상이 아니다 — 판정 함수가 원문을 그대로 돌려준다', () => {
+  ['회수(회수택배사: CJ대한통운)', '혼합(실배송 2건, 빈박스 3건)', '실배송', '기타배송(박스)'].forEach((v) => {
+    assert.strictEqual(DT.canonicalDeliveryValue(v), v, v + ' 은 정리 대상이 아니어야 한다');
+  });
+  ['빈택배', '회수건', '믹스'].forEach((v) => {
+    assert.notStrictEqual(DT.canonicalDeliveryValue(v), v, v + ' 은 정리 대상이어야 한다');
+  });
+});
+
+t('정리 대상 표 3종(작업 탭·모집공고·작업오더)', () => {
+  const m = DIAG.match(/const DELIVERY_TYPE_TABLES = \[([\s\S]*?)\];/);
+  assert.ok(m);
+  ['tab_configs', 'recruit_campaigns', 'work_orders'].forEach((tb) => assert.ok(m[1].includes("'" + tb + "'"), tb));
+});
+
+t('화면 배선 — 설정 탭 패널 + 미리보기→적용 2단계', () => {
+  const as = read('../frontend/js/admin-settings.js');
+  assert.match(as, /deliverycleanup: _deliveryCleanupHtml/);
+  assert.match(as, /deliverycleanup: \{ ic: '🚚', nm: '배송유형 표기 정리' \}/);
+  assert.match(as, /window\.deliveryCleanupRun = deliveryCleanupRun/);
+  assert.match(as, /var DTC_EP = '\/api\/trackb\/settings\/delivery-type-cleanup'/);
+  assert.match(as, /id="dtcApplyBtn" style="display:none"/, '적용 버튼은 미리보기 전엔 숨긴다');
+  assert.match(as, /if \(!dryRun && !confirm\(/, '적용은 확인창을 거친다');
+});
+
 console.log('\n✅ deliveryTypeVocabulary: ' + n + '개 통과');
 process.exit(0);
