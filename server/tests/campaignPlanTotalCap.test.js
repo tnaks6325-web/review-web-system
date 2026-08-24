@@ -112,8 +112,14 @@ const base = (over = {}) => ({
 
   /* 10. 판정 기준·배선 */
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'campaignPlan.service.js'), 'utf8');
-  ok('★ 총량 기준은 런타임 판정과 같다(시트 일정=totalSlots · 그 외=recruit_total)',
-    /function _totalCapFor\(camp, schedule\)[\s\S]{0,400}schedule\.totalSlots[\s\S]{0,200}camp\.recruit_total/.test(src));
+  /* ⚠ 2026-08-24: 총량 기준에 **발주 폴백**이 합류했다(공고 총인원 0 = 미설정이면 발주서 총건수가
+     실제 정원 — `displayRecruitTotal`, 상태엔진·작업 조건 카드와 같은 판정). 종전엔 `recruit_total`
+     만 봐서 그런 작업의 게이트가 통째로 꺼져 있었다. **검사 의미는 같거나 더 강하다** — 여전히
+     "런타임 판정과 같은 기준"이고, 사본을 만들지 않았음을 함께 고정한다. */
+  ok('★ 총량 기준은 런타임 판정과 같다(시트 일정=totalSlots · 그 외=displayRecruitTotal(공고→발주))',
+    /function _totalCapFor\(camp, schedule, orderTotal = 0\)[\s\S]{0,900}schedule\.totalSlots[\s\S]{0,700}displayRecruitTotal\(camp && camp\.recruit_total, orderTotal\)\.total/.test(src));
+  ok('★ 정원 판정 사본을 만들지 않는다(recruit_total 직접 반환 부활 차단)',
+    !/return Number\(camp && camp\.recruit_total\) \|\| 0;/.test(src));
   ok('★ 게이트는 캠페인 행 잠금 뒤·쓰기 앞에서 돈다',
     src.indexOf('FOR UPDATE') < src.indexOf('SAVEPOINT plan_total')
     && src.indexOf('SAVEPOINT plan_total') < src.indexOf('INSERT INTO campaign_daily_plans'));

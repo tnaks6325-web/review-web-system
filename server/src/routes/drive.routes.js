@@ -771,7 +771,7 @@ router.post('/find-candidates', authMiddleware, async (req, res, next) => {
       const curInsp = await driveService.inspectFolder(curReviewId);
       const hasReviewElsewhere = candidates.some(c => c.id !== curReviewId && c.reviewLikeCount > 0);
       if (curInsp.fileCount === 0 && hasReviewElsewhere) {
-        warnings.push('현재 연결된 리뷰폴더가 비어 있고, 리뷰 이미지가 다른 폴더에 있습니다. 위치 불일치(drift)로 보입니다.');
+        warnings.push('현재 연결된 리뷰폴더가 비어 있고, 리뷰 캡처가 다른 폴더에 있습니다. 위치 불일치(drift)로 보입니다.');
       }
     } else {
       warnings.push('현재 리뷰폴더(folder_url)가 연결되어 있지 않습니다.');
@@ -1395,7 +1395,7 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
 //
 // 배경: 업체 뷰어 리뷰 미리보기는 원장(review_submissions)·대표 이미지(review_index.review_file_*)를
 //   읽는데, 031/032 배포 이전 제출분·직원이 Drive 에 직접 넣은 캡처는 폴더에만 있고 원장이 비어
-//   "리뷰 이미지 미등록"으로 뜬다. 이 엔드포인트가 그 탭의 [리뷰] 폴더를 스캔해 파일명 이름↔행
+//   "리뷰 캡처 미등록"으로 뜬다. 이 엔드포인트가 그 탭의 [리뷰] 폴더를 스캔해 파일명 이름↔행
 //   결정적 매칭으로 백필한다(규칙 = relocate-orphan-reviews 와 공용 헬퍼 한 벌).
 //
 // relocate-orphan-reviews 와의 차이: 저쪽은 "흩어진 파일"을 OCR 전문검색(brandKeywords 필수)으로
@@ -1639,7 +1639,7 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
 // POST /api/drive/share-review-folder — 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
 //   만들어 업체 보고용 폴더 링크를 반환한다.
 //
-// 목적: 직원이 리뷰 이미지를 자기 드라이브에 복제(→ 직원 용량 차감)하지 않고도,
+// 목적: 직원이 리뷰 캡처를 자기 드라이브에 복제(→ 직원 용량 차감)하지 않고도,
 //   tnaks 소유 원본 [리뷰] 폴더 링크를 그대로 업체에 전달해 보고할 수 있게 한다.
 //   (복제 0 · 직원 용량 0 · 업체는 로그인 없이 열람·다운로드)
 //
@@ -1708,7 +1708,7 @@ router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // 업체 보고용 공개 링크 (탭 단위)
 //   - POST /report-link (관리자): 탭당 추측불가 코드 발급(재생성 시 동일 코드 재사용)
-//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 이미지 목록 반환(이미지 자체는
+//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 캡처 목록 반환(이미지 자체는
 //     기존 /api/drive/image/:id 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0)
 // ═══════════════════════════════════════════════════════════
 const _REPORT_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'; // 혼동문자 제외
@@ -1772,7 +1772,7 @@ router.post('/report-link', authMiddleware, async (req, res, next) => {
   }
 });
 
-// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 이미지 목록 (무인증)
+// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 캡처 목록 (무인증)
 //   review_submissions 원장 우선 → 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백.
 router.get('/report/:code', async (req, res, next) => {
   try {

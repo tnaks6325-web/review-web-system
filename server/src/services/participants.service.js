@@ -26,6 +26,25 @@ function _mask(phone8) {
 async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test' } = {}) {
   if (!sheetId || !tabName) throw new Error('importTabFromIndex: sheetId, tabName 필수');
   const db = getPool();
+
+  /* ★★★ 무시트 탭은 이 복사의 **방향이 반대다** — 건너뛴다 (2026-08-23).
+     시트 시절 흐름은 `시트 → review_index → 작업표` 였고 이 함수가 마지막 화살표다.
+     탈시트 이후 무시트 탭의 진실원본은 **작업표**이고 `review_index` 는 거기서 만들어진다
+     (`sheetlessLedger.rebuildLedgers`) → 그대로 두면 **결과물로 원본을 덮는다**.
+     실측(프로덕션): 5분 스윕이 고친 번호를 이 복사가 10분마다 되돌렸다(35→23→35→23 반복).
+     ★★ 게이트를 **이 함수 안**에 둔다 — 호출부가 넷(투영 크론·동기화 크론·수동 import·수동 sync)이라
+       바깥에 두면 한 곳만 빠져도 그 경로로 되돌림이 되살아난다(판정 사본 0).
+     ★★ 호출부는 **`skipped` 를 보고 `_reconcileSeen` 을 건너뛰어야 한다** — 임포트를 안 했는데
+       그 정리를 돌리면 `imported_at < runStart` 조건에 걸려 그 탭의 `source='import'` 활성 줄이
+       **전부 비활성화**된다(이관된 무시트 탭에 그런 줄이 남아 있다).
+     ★ 판정은 `utils/sheetlessScope.isSheetless` 단일 출처(조회 실패 = false = 종전 경로).
+     ★ 되돌리기: `TRACKB_PROJECT_SHEETLESS=1` 이면 종전처럼 무시트 탭도 임포트한다. */
+  if (process.env.TRACKB_PROJECT_SHEETLESS !== '1') {
+    const { isSheetless } = require('../utils/sheetlessScope');
+    if (await isSheetless(db, sheetId, tabName)) {
+      return { skipped: true, reason: 'sheetless', dryRun: !!dryRun, indexRows: 0, inserted: 0, updated: 0 };
+    }
+  }
   const { rows: idx } = await db.query(
     `SELECT reviewer_name, recipient_name, tab_gid, campaign_name, row_index, is_submitted, is_submitted2,
             submit_col, submit_col2, product_url, product_name, row_json, start_date, end_date, round, phone8
@@ -168,14 +187,16 @@ async function syncImportedTabs({ limit = 200, by = 'auto-sync' } = {}) {
       GROUP BY sheet_id, tab_name ORDER BY sheet_id, tab_name LIMIT $1`,
     [Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000)]
   );
-  let tabsSynced = 0, updated = 0, inserted = 0, errors = 0;
+  let tabsSynced = 0, updated = 0, inserted = 0, errors = 0, skipped = 0;
   for (const t of tabs) {
     try {
       const r = await importTabFromIndex({ sheetId: t.sheetId, tabName: t.tabName, by });
+      /* ★ 건너뛴 탭은 "동기화했다" 고 세지 않는다(로그가 사실과 달라진다). */
+      if (r && r.skipped) { skipped++; continue; }
       tabsSynced++; updated += r.updated || 0; inserted += r.inserted || 0;
     } catch (e) { errors++; logger.warn(`[participantsSync] ${t.tabName} 실패: ${e.message}`); }
   }
-  return { candidateTabs: tabs.length, tabsSynced, inserted, updated, errors };
+  return { candidateTabs: tabs.length, tabsSynced, inserted, updated, errors, skipped };
 }
 
 // ── Phase 2a: 참여자 직접 추가/수정/삭제 (여전히 신규 테이블만 — 라이브·시트 무영향) ──
@@ -626,7 +647,13 @@ async function listActiveTabs({ limit = 500 } = {}) {
             /* ★ workKind — [＋ 블로거 추가] 버튼을 어느 작업에 보일지(M5-2). tab_configs 는 이미
                조인돼 있어 **쿼리 순증 0**. 판정 최종 권한은 서버(공고 > 탭)이고 이 값은 표시용 힌트다 —
                그래서 화면은 'review' 로 **명시된** 작업만 숨기고 빈 값(미지정)은 열어 둔다(모르는 것을 단정하지 않는다). */
-            COALESCE(tc.work_kind, '') AS "workKind"
+            COALESCE(tc.work_kind, '') AS "workKind",
+            /* ★ displayName — 화면이 그리는 **작업명**(헤더 옆 ✏️ 로 편집하는 그 값).
+               종전에는 목록에 안 실려 작업바·검색·홈 목록·업체관리가 전부 **탭 이름**밖에 못 써서,
+               같은 작업이 작업보드 제목과 목록에서 다른 이름으로 보였다(실측: 「맛고」↔「0720수진코리아고양이캔」).
+               ★ 빈 값이면 화면이 종전대로 탭 이름으로 접는다(이름이 비는 일은 없다).
+               ★ 두 CTE 는 UNION ALL(SELECT *) 이라 **칸 순서가 같아야 한다** — 한쪽만 넣으면 값이 밀린다. */
+            COALESCE(tc.display_name, '') AS "displayName"
        FROM raw_sheet_tabs rst
        LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE
@@ -637,7 +664,8 @@ async function listActiveTabs({ limit = 500 } = {}) {
        SELECT tc.sheet_id AS "sheetId",
               COALESCE(NULLIF(tc.campaign_name, ''), NULLIF(tc.display_name, ''), tc.tab_name) AS "spreadsheetTitle",
               tc.tab_gid AS "tabGid", tc.tab_name AS "tabName", COALESCE(im.row_count, 0) AS "rowCount",
-              TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind"
+              TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind",
+              COALESCE(tc.display_name, '') AS "displayName"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
         WHERE COALESCE(tc.sheetless, FALSE) = TRUE

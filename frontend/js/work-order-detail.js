@@ -328,6 +328,13 @@ function _woDetailHtml(o) {
     //   = 종전 화면 그대로. 블로그 오더에서만 새 줄이 보인다.
     _woKv("체험단 종류", _woWorkKindLabel(o.work_kind)),
     _woSection("상품·옵션", prodText, txtR),
+    // ★ 시작일 — 모집공고 발행 프리필이 **이 값을 그대로 복사**하는데(062, `_woCampaignPrefill`)
+    //   상세 화면에는 없어서, 목록의 '제출/접수' 날짜와 공고의 '모집 시작일'이 다르면
+    //   어디서 온 값인지 확인할 길이 없었다(2026-08-21 신고: 접수 8/19인데 공고 시작일 8/12).
+    //   인트라넷 리뷰오더는 시작일을 월/일로 직접 입력하고 [이 오더로 다시 만들기]가 옛 값을
+    //   그대로 채우므로 접수일과 다른 것이 정상일 수 있다 — 그래서 **보여만 준다**(경고 아님).
+    //   ★ 값이 없는 과거 오더는 줄 자체가 안 나온다(_woKv 가 빈 값을 버림) = 종전 화면 그대로.
+    _woKv("시작일", String(o.start_date || "").slice(0, 10)),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
     _woKv("구매채널", _woChannel(o)),
@@ -936,6 +943,29 @@ function woAdminEditModal(order, opts) {
 
   var body = mk("div", "padding:14px 18px;overflow-y:auto;background:#FBFCFE", box);
 
+  /* ★★ 이 화면이 무엇인지 먼저 말한다 — 여기 값의 22칸 중 19칸이 모집공고와 겹치는데,
+     **역할이 다르다**: 이 화면 = 발주서 원문(인트라넷 "보낸 오더" 카드가 실시간 조회) ·
+     모집공고 = 리뷰어에게 보이는 값과 참여 정원. 안 밝히면 "여기서 고쳤는데 리뷰어 화면이
+     그대로"라는 오해가 난다. 반대로 접수 전에는 **작업표 계획(열·행 수·날짜 분배)이 오직 이
+     원장에서 나오므로** 여기가 유일한 창구다. */
+  var linkedCamp = !!(o.linked_campaign_id && String(o.linked_campaign_id).trim());
+  var banner = mk("div", "font-size:12px;line-height:1.6;border-radius:9px;padding:9px 12px;margin-bottom:12px;border:1px solid "
+    + (linkedCamp ? "#BFDBFE;background:#EFF6FF;color:#1E3A8A" : "#BBF7D0;background:#F0FDF4;color:#14532D"), body);
+  banner.innerHTML = linkedCamp
+    ? "여기는 <b>발주서 원문</b>입니다 — 인트라넷 <b>보낸 오더</b> 카드가 이 값을 그대로 보여줍니다.<br>"
+      + "이 오더에는 <b>모집공고가 연결돼 있어</b> 리뷰어 화면에 보이는 값과 참여 정원은 <b>공고</b>가 정합니다"
+      + "(공고 총인원·일건수가 0일 때만 아래 값이 정원으로 쓰입니다).<br>"
+      + "<b>여기서만 정하는 것</b> — 담당AE · 물건비(이체은행 자동분류) · 배송·택배대행(작업표 열 구성) · 작업표 계획."
+    : "여기는 <b>발주서 원문</b>입니다 — 아직 모집공고가 없어 <b>이 값이 곧 작업표 계획(열·행 수·날짜 분배)과 정원의 기준</b>입니다.<br>"
+      + "접수 전에 총 모집건수 · 일일 진행건수 · 시작일 · 옵션 · 리뷰타입을 여기서 맞춰 두세요.";
+
+  /* 공고가 이기는 칸에는 그 사실을 한 줄로 덧붙인다(조용한 no-op 오해 방지). */
+  function ch(base, what) {
+    if (!linkedCamp) return base || "";
+    var add = "리뷰어 화면·정원에는 연결된 모집공고의 " + what + " 값이 우선합니다.";
+    return base ? (base + " " + add) : add;
+  }
+
   var c1 = card(body, "📌 기본 정보");
   field(c1, "title", "작업명 *", { full: true, hint: "⚠ 접수된 오더의 작업명을 바꿔도 이미 등록된 시트 탭 이름은 바뀌지 않습니다.", warn: true });
   field(c1, "start_date", "시작일", { type: "date" });
@@ -946,13 +976,13 @@ function woAdminEditModal(order, opts) {
   ]);
 
   var c2 = card(body, "📦 진행 조건");
-  field(c2, "recruit_count", "총 모집건수", { type: "number" });
-  field(c2, "daily_count", "일일 진행건수", { type: "number" });
+  field(c2, "recruit_count", "총 모집건수", { type: "number", hint: ch("", "총인원") });
+  field(c2, "daily_count", "일일 진행건수", { type: "number", hint: ch("", "일 모집인원") });
   pills(c2, "delivery_type", "배송유형", [{ v: "실배송", l: "실배송" }, { v: "빈박스", l: "빈박스" }, { v: "택배발송대행", l: "택배발송대행" }]);
   pills(c2, "review_type", "리뷰타입", [
     { v: "포토", l: "포토" }, { v: "텍스트", l: "텍스트" }, { v: "구매확정", l: "구매확정" },
     { v: "별점", l: "별점" }, { v: "혼합", l: "혼합" },
-  ]);
+  ], { hint: ch("", "리뷰타입") });
   pills(c2, "goods_cost_type", "물건비", [{ v: "현금", l: "현금" }, { v: "계산서", l: "계산서" }],
     { hint: "입금관리의 은행 자동분류(하나/케이뱅크)가 이 값을 따라갑니다." });
 
@@ -960,7 +990,7 @@ function woAdminEditModal(order, opts) {
   field(c3, "product_url", "상품확인용 URL", { full: true });
   field(c3, "product_option", "상품 · 옵션 · 결제금액", { full: true, area: true });
   field(c3, "pay_amount", "결제금액(원)", { type: "number" });
-  field(c3, "review_fee", "리뷰비(원)", { type: "number", hint: "모집공고 생성 시 같은 금액으로 자동 표시됩니다." });
+  field(c3, "review_fee", "리뷰비(원)", { type: "number", hint: ch("모집공고 생성 시 같은 금액으로 자동 표시됩니다.", "리뷰비(구간표 포함)") });
   pills(c3, "inflow_type", "유입방식", [{ v: "guide", l: "가이드유입" }, { v: "link", l: "링크유입" }]);
   field(c3, "inflow_keyword", "유입 키워드", { full: true });
   field(c3, "inflow_guide", "유입가이드", { full: true, area: true, hint: "⚠ 내용을 수정하지 않으면 원본(첨부 이미지 포함)이 그대로 보존됩니다.", warn: true });

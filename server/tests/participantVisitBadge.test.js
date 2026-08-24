@@ -57,13 +57,15 @@ console.log('\n[A] 서버 — 명의(phone8)별 순번을 센다');
     ok('같은 계정 두 번째 = 2회', by[3] === 2);
     ok('명의 미상 줄은 세지 않는다(undefined — 0/1 로 꾸미지 않는다)', by[4] === undefined);
 
-    /* 화면에서 뺀 줄(_hidden 오버레이)은 세지 않는다 — 표에 없는 줄이 번호를 먹으면 뒤 줄이 밀린다 */
+    /* ★★ 행 숨김 기능은 폐기됐다(사용자 확정 2026-08-23) — 옛 `_hidden` 오버레이가 남아 있어도
+       그 줄은 표에 그대로 있고, 따라서 참여횟수도 정상적으로 센다(표의 줄 수와 배지가 갈리지 않는다). */
     const res2 = await run(
       [R(10, '가', '33333333'), R(11, '가', '33333333'), R(12, '가', '33333333')],
       [{ anchor_type: 'identity', anchor_value: 'ik11', field: '_hidden', kind: 'bool', value_bool: true, value_text: null }],
     );
     const seqs = res2.roster.map(r => [r.seq, r.visitNo]);
-    ok('제거된 줄은 번호를 먹지 않는다', JSON.stringify(seqs) === JSON.stringify([[10, 1], [12, 2]]), JSON.stringify(seqs));
+    ok('옛 숨김 오버레이가 있어도 줄이 빠지지 않고 순번도 이어진다',
+      JSON.stringify(seqs) === JSON.stringify([[10, 1], [11, 2], [12, 3]]), JSON.stringify(seqs));
 
     /* 광고주 렌즈: 마스킹 전 원본으로 세야 한다 — 마스킹 뒤에 세면 전 줄이 같은 값이 되어 1,2,3… 이 된다 */
     const res3 = await run([R(20, '가', '44444444'), R(21, '나', '55555555'), R(22, '가', '44444444')]);

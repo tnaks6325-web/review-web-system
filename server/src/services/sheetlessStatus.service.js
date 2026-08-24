@@ -45,6 +45,20 @@ function __setPoolForTest(p) { _pool = p; }
 /** 리뷰제출 칸에 쓰는 값 — Track B write-back(`_wantMark`)과 같은 표기 */
 const SUBMIT_MARK = 'O';
 
+/**
+ * 그 탭이 쓰는 상태 칸(리뷰제출·입금) 헤더명 — **줄이 아니라 탭 단위**로 해석한다.
+ * ★ 소비처가 둘이다: 무시트 상태 기록(markStatusCell)과 **관리자 수동 리뷰제출**
+ *   (수동/작업표로 추가한 줄은 `campaign_participants.submit_col` 이 비어 있다 —
+ *    그 칸은 `review_index` 복제 경로에서만 채워진다). 각자 SQL 을 쓰면 "장부는 A 칸에
+ *    쓰는데 수동 제출은 B 칸에 쓰는" 상태가 된다.
+ * @param {object} db  pool 또는 **트랜잭션 client**(잠근 tx 안에서 부를 수 있어야 한다)
+ */
+async function statusHeaderForTab(db, { sheetId, tabName, kind = 'submit' } = {}) {
+  if (!db || !sheetId || !tabName) return '';
+  const col = kind === 'paid' ? 'submit_col2' : 'submit_col';
+  return _resolveStatusHeader(db, { sheetId, tabName, col, kind });
+}
+
 async function _resolveStatusHeader(db, { sheetId, tabName, col, kind }) {
   const { rows } = await db.query(
     `SELECT ${col} AS h FROM review_index
@@ -416,6 +430,7 @@ async function backfillReviewSubmitTimes({ dryRun = true, by = 'system' } = {}) 
 
 module.exports = {
   markStatusCell,
+  statusHeaderForTab,
   verifyStatusCell,
   markSheetlessMemo,
   markSheetlessPostDate,

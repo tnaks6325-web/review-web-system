@@ -168,7 +168,12 @@ async function run() {
   ok('★ 원본(sot) 배지는 광고주에게 안 나간다(내부 용어)', /STATE\.role==='advertiser'\?'':sotBadge/.test(src));
   ok('정산 카드는 광고주 상단 조합 안에서 항상 펼침',
     /<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div>/.test(src));
-  ok('요약 스트립 광고주 = 시작일 칸(담당자 표기 없음)', /\[\['상품',d\.productOption\|\|m\.campaignName\|\|'—'\],\['시작일'/.test(src));
+  /* ⚠ 2026-08-23: 광고주 전용 4줄 요약(상품·시작일·구매시간·배송)은 폐기됐다 — 이제 내부와
+     **같은 작업 조건 카드**를 쓴다(일정·구매시간이 그 카드의 행으로 들어갔다).
+     ★ 담당자(내부 실명)를 안 붙인다는 규율은 그대로다 — 카드 폴백에서 고정한다. */
+  ok('★ 광고주 전용 4줄 요약 사본은 없다(카드 한 벌)',
+    !/\[\['상품',d\.productOption\|\|m\.campaignName\|\|'—'\],\['시작일'/.test(src));
+  ok('★ 담당자 실명은 광고주에게 안 붙는다(카드 폴백)', /\(!isAdv&&m\.manager\)/.test(src));
   ok('★ 정산 비공개·미연결은 광고주에게 같은 안내 한 줄(계약 연결·토글 용어 미노출)',
     src.includes('정산 정보가 아직 준비되지 않았습니다'));
   ok('정산 카드 6칸(_advSettleFields): 견적서/계산서/총비용/입금액/입금일/남은 입금액',
@@ -260,7 +265,7 @@ async function run() {
     /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster, advEditedHeaders\), \{[\s\S]*submitCol: sc\.submit_col,[\s\S]*submitCol2: sc2\.submit_col2,[\s\S]*\}\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
 
-  /* ═══ 7. 리뷰 이미지 미리보기(행별) ═══ */
+  /* ═══ 7. 리뷰 캡처 미리보기(행별) ═══ */
   {
     ok('\uAD11\uACE0\uC8FC \uCEEC\uB7FC \uAC12 \uD22C\uC601\uAE30\uAC00 \uD14C\uC2A4\uD2B8\uB85C \uB178\uCD9C\uB3FC \uC788\uB2E4', typeof advColumnValue === 'function');
     const trackedValue = typeof advColumnValue === 'function'
@@ -303,14 +308,83 @@ async function run() {
     ok('원장(032)에 없고 대표 이미지(031)만 있는 과거 행도 폴백으로 합류', rv['9'] && rv['9'][0].fileId === 'FILECCCCCCCCCCCCCCCCCCCC');
     ok('슬롯 라벨(현금영수증 등) 동봉', rv['3'].some(f => f.slot === 'cash_receipt'));
   }
-  ok('프론트: 그리드 행에 data-rid(선택 키)가 실린다', /<tr data-rid="\$\{esc\(r\.id\)\}"/.test(src));
-  ok('프론트: 광고주 상세은 정보·리뷰·시트 도구를 하나의 2열 작업영역으로 렌더한다',
-    /<section class="advwork"><section class="advtop">\$\{summaryStrip\(wd,d,m,c\)\}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div><\/section><aside class="rvpane" id="rvPane"><\/aside><div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><\/div><\/section>/.test(src));
-  ok('희망 시안: 좌측 정보는 우측으로 확장되고 리뷰는 시트 끝선·도구막대 하단까지 맞춘다',
-    /\.advwork\{display:grid;grid-template-columns:minmax\(0,1\.5fr\) minmax\(420px,1fr\);grid-template-areas:"top preview" "tools preview" "grid grid";gap:12px;align-items:stretch;max-width:1380px\}/.test(css)
-    && /\.advtop\{grid-area:top;display:grid;grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement";gap:12px\}/.test(css)
-    && /\.advwork \.rvpane\{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain\}/.test(css)
-    && /\.advwork \.advgw,\.advwork #gridhost\{display:contents\}#gridhost>\.gridbar\{grid-area:tools\}#gridhost>\.gswrap\{grid-area:grid\}/.test(css));
+  /* ⚠ 2026-08-24: 총건수 초과 줄에 `class="gover"` 가 조건부로 붙으며 `<tr ` 뒤가 달라졌다.
+     검사 의미는 그대로 — **행(tr)에 data-rid 가 실린다**(셀에만 있으면 tr 단위 선택이 죽는다). */
+  ok('프론트: 그리드 행에 data-rid(선택 키)가 실린다', /<tr[^>]* data-rid="\$\{esc\(r\.id\)\}"/.test(src));
+/* ★★ 업체 뷰어 상단도 **내부와 같은 3분할**(사용자 확정 2026-08-23) — 종전 세로 스택 +
+   표 옆 세로 레일은 폐기했다. 이제 작업 조건 카드까지 한 벌이라, 다른 것은 정산 자리뿐이다. */
+  ok('프론트: 광고주 상세도 같은 3분할 + 정산 카드 + 표(중복 rvPane 없음)',
+    /<section class="advwork">\$\{summaryStrip\(wd,d,m,c\)\}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div><div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><\/div><\/section>/.test(src)
+    && !/class="advtop"/.test(src)
+    // id 중복은 치명적 — 미리보기 칸은 summaryStrip 이 만드는 하나뿐이다
+    && (src.match(/id="rvPane"/g) || []).length === 1);
+  ok('★ 상단 배치는 `.tp3grid.c3` 한 벌이 정한다(업체 전용 areas 잔재 0)',
+    /\.advwork\{display:block;max-width:1380px\}/.test(css)
+    && !/grid-template-areas:"top preview"/.test(css)
+    && !/\.advtop\{/.test(css) && !/\.advcondition\{/.test(css) && !/\.advprogress\{/.test(css)
+    && !/\.advwork \.rvpane\{grid-area:preview/.test(css));
+  ok('★ 정산은 3분할 아래 별도 줄(업체 정산은 상시 펼침 6칸 — 내부의 접이식과 성질이 다르다)',
+    /\.advsettle\.setldetail\{margin-bottom:12px\}/.test(css) && /\.advwork \.tp3grid\.c3\{margin-bottom:12px\}/.test(css));
+  ok('★ 미리보기 렌더러는 한 벌 — 업체 세로 레일(.rvmedia/.rvasset)은 폐기',
+    /function _rvRender\(\)\{\s*const pane=\$\('#rvPane'\); if\(!pane\) return;\s*return _rvRender2\(pane\);\s*\}/.test(src)
+    && !/rvmedia/.test(src) && !/rvasset/.test(src) && !/_RV_SLOT/.test(src)
+    && !/rvmedia/.test(css) && !/rvasset/.test(css));
+  /* ★★ 2026-08-23 사용자 확정: 업체 뷰어도 **같은 작업 조건 카드**를 쓴다(종전 4줄 요약 폐기).
+     무엇을 보여줄지는 **서버 렌즈**(`_condAdvertiserLens`)가 정하고 — 리뷰비·입금명·다계정·
+     현금영수증·내부 식별자는 응답에 아예 없다 — 화면은 광고주에게 셋만 다르게 한다:
+     ㉮ 지정 10행만 ㉯ [미설정](내부 창구 버튼) 대신 「—」 ㉰ 발주 줄 미표시(역할 게이트가 없다). */
+  ok('★ 업체 뷰어도 작업 조건 카드는 **한 벌**(광고주 전용 4줄 사본 0)',
+    /const cond=_condCardHtml\(wd,d,m\);/.test(src)
+    && !/isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건/.test(src));
+  ok('★ 광고주에게는 발주 줄(작업오더 제목·상태·[원문])을 그리지 않는다 — 그 줄엔 역할 게이트가 없다',
+    /const woRows=isAdv\?'':`\$\{_woUnlinkedRow\(wd\)\}\$\{_woLinkedRow\(wd\)\}`/.test(src)
+    && !/\$\{_woUnlinkedRow\(wd\)\}\$\{_woLinkedRow\(wd\)\}<\/div>`/.test(src));
+  ok('★ 광고주에게는 [미설정] 배지를 그리지 않는다(내부 창구를 여는 버튼이다)',
+    /if\(isAdv\) return '<dd><span class="cnna">—<\/span><\/dd>';/.test(src));
+  ok('★ 광고주 폴백(요약 없음)에도 담당자 실명을 붙이지 않는다',
+    /\(!isAdv&&m\.manager\)/.test(src));
+  ok('★ 지정 10행만 — 다계정·현금영수증·리뷰비·입금명은 화면에서도 뺀다', (() => {
+    const m = src.match(/\.filter\(\(\[k\]\)=>!isAdv\|\|\[([^\]]*)\]\.includes\(k\)\)/);
+    if (!m) return false;
+    const keys = m[1];
+    return /'@murl'/.test(keys) && /'@sched'/.test(keys) && /'@time'/.test(keys)
+      && /'총건수'/.test(keys) && /'일건수'/.test(keys) && /'@pay'/.test(keys)
+      && /'구매채널'/.test(keys) && /'유입방식'/.test(keys) && /'리뷰타입'/.test(keys)
+      && !/'리뷰비'/.test(keys) && !/'입금명'/.test(keys)
+      && !/'다계정'/.test(keys) && !/'현금영수증'/.test(keys);
+  })());
+  /* ★★ 서버 렌즈 = **화이트리스트 재구성**(스프레드 금지) — 나중에 조건 요약에 필드가 늘면
+     스프레드는 그것을 조용히 광고주에게 흘린다(`_tpAdvertiserLens` 와 같은 규율). */
+  ok('★ 서버 렌즈가 리뷰비·입금명·내부 식별자를 폐기한다', (() => {
+    const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    const i = SVC.indexOf('function _condAdvertiserLens(');
+    const blk = SVC.slice(i, SVC.indexOf('\n}', i));
+    return i > 0 && !/\.\.\.cd/.test(blk)
+      && !/reviewFee|feeSource|depositName|multiAccount|cashReceipt|incomeType|slotsPinned/.test(blk)
+      && !/campaignId|workOrderId|campaignCount/.test(blk)
+      && /productName|productUrl|schedule|purchaseWindow|recruitTotal|dailyLimit|payAmount|channel|inflowType|reviewTypeLabel/.test(blk);
+  })());
+  /* ★★ 담당 2인(사용자 확정 2026-08-24) — 업체 화면에도 「담당 AE팀 황운하 / 관리자 만두」.
+     ★ 관리자는 **닉네임**으로만 나간다 — 실명(`adminRaw`)은 렌즈가 폐기하고, 닉네임이 없으면
+       빈 문자열(= 화면이 라벨만 적음)로 fail-closed. 리뷰어 화면의 `닉네임 || '관리자'` 와 같은 규율.
+     ★ **"실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 을 구분**한다 — 전자를 null 로 접으면
+       담당자가 없는 작업처럼 보인다. */
+  ok('★ 렌즈가 관리자 실명을 지우고 fail-closed 로 완결한다', (() => {
+    const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    const i = SVC.indexOf('function _condAdvertiserLens(');
+    const blk = SVC.slice(i, SVC.indexOf('\n}', i));
+    return i > 0
+      && /adminNick: m\.adminNick \|\| \(raw \? '' : null\)/.test(blk)   // 있으면 라벨만 · 없으면 조각 자체 없음
+      && /adminRaw: null/.test(blk);                                    // 실명은 절대 안 나간다
+  })());
+  ok('★ 담당 행이 업체 표기 항목에 들어 있다', (() => {
+    const m = src.match(/\.filter\(\(\[k\]\)=>!isAdv\|\|\[([^\]]*)\]\.includes\(k\)\)/);
+    return !!m && /'@mgr'/.test(m[1]);
+  })());
+  ok('★ 광고주 분기가 그 렌즈를 거친다(날것 `_cond` 금지)', (() => {
+    const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    return /res\.condition = _condAdvertiserLens\(_cond\)/.test(SVC);
+  })());
   ok('★ 이미지 URL 은 bare API_BASE 로 만든다(window.API_BASE_URL 은 최상위 const 라 항상 undefined)', (() => {
     const i = src.indexOf('function _rvUrl(');
     const body = src.slice(i, i + 260);
@@ -322,16 +396,20 @@ async function run() {
     && /e\.key!=='ArrowUp'&&e\.key!=='ArrowDown'/.test(src)
     && /INPUT\|SELECT\|TEXTAREA/.test(src));
   ok('행 클릭·키 이동이 위임 1회 바인딩(재렌더로 tbody 가 갈려도 유지)', /if\(STATE\._rvBound\) return; STATE\._rvBound=true;/.test(src));
-  ok('★ 미제출 행은 패널 가운데에 "리뷰 미작성 · 미제출" 표기', /리뷰 미작성 · 미제출/.test(src));
-  ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)', /리뷰 이미지 미등록/.test(src));
+/* ★ 문구는 두 칸 렌더러(`_rvRender2`)의 것으로 바뀌었지만 **구분해 말한다**는 규칙은 그대로다
+   — 미제출과 "제출 표시는 있는데 캡처가 없음"을 뭉뚱그리지 않는다. */
+  ok('★ 미제출 행은 빈 칸에 "리뷰 미제출"로 사실대로 표기(경고 톤)',
+    /r\.submitted\?'이미지 미등록':'리뷰 미제출'/.test(src) && /아직 리뷰가 제출되지 않았습니다\./.test(src)
+    && /,\s*!r\.submitted\);/.test(src));
+  ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)',
+    /제출 표시는 있으나 캡처가 등록되지 않았습니다\./.test(src));
   // 표 검색(_gsReapply) 도입으로 뒤에 호출이 하나 더 붙었다 — 검사 의미(재렌더 끝에 선택 복원 배선)는 불변.
   ok('필터·정렬 재렌더 후 선택 복원(_rvReapply)', /_fitGrid\(\); _rvReapply\(\);/.test(src));
-  ok('미리보기 패널 CSS(남는 세로 공간을 이미지에 배정 · 고정 이미지 영역 스크롤 · 미제출 안내 박스)',
-    /\.advwork \.rvpane\{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain/.test(css)
-    && /\.rvmedia\{display:grid;grid-auto-rows:minmax\(180px,1fr\);gap:8px;flex:1;min-height:0;overflow:auto\}/.test(css)
-    && /\.rvasset \.rvimg\{display:block;width:100%;height:100%;min-height:0;object-fit:contain/.test(css)
+  ok('미리보기 패널 CSS(내부와 한 벌 — 두 칸·절대배치 레이어·미제출 안내 박스)',
+    /\.tp3grid\.c3 \.rvpane\{position:relative;overflow:hidden;padding:0\}/.test(css)
+    && /\.rv2\{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr/.test(css)
     && /\.rvnone\{/.test(css) && /\.sheetgrid tbody tr\.rvon>td\{/.test(css));
-  ok('리뷰 이미지는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
+  ok('리뷰 캡처는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
     /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
     && /function _rvPopRender\(\)/.test(src)
     && /<aside class="rvplist">/.test(src)

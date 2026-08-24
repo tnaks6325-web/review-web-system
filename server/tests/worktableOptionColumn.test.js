@@ -274,35 +274,44 @@ console.log('\n[C] 게이트 · 미리보기');
     ok('★ reviewer_event_logs 를 쓰지 않는다(도배 방지)', !/reviewer_event_logs/.test(src));
   }
 
-  /* ── H. 라우터 ───────────────────────────────────────────────────────── */
-  console.log('\n[H] 라우터 스택 실검사');
+  /* ── H. 수동 창구 제거 · 자동 경로 생존 (사용자 확정 2026-08-23) ──────────
+     왜: 칸은 이제 자동으로 보장된다 — 작업표 생성이 옵션 배분을 보고 덧붙이고,
+     공고 저장이 살아있는 옵션 2종 이상이면 연결 작업표에 칸을 보장한다.
+     전수 점검(무시트 113탭)에서 수동 소급 기입 대상이 0줄이라 창구만 없앴다.
+     ★ 실행부(`ensureOptionColumn`)는 그 두 자동 경로가 쓴다 — 지우면 원인이 되살아난다.
+     ───────────────────────────────────────────────────────────────────────── */
+  console.log('\n[H] 수동 창구 제거 — 자동 경로는 그대로');
   {
     const router = require('../src/routes/trackB.routes');
     const layer = (router.stack || []).find(l => l.route && l.route.path === '/worktable/option-column');
-    ok('등록돼 있다', !!layer && !!layer.route.methods.post);
-    const names = layer.route.stack.map(s => s.name);
-    ok('authMiddleware 를 먼저 탄다', names[0] === 'authMiddleware', names.join(','));
-    ok('★ adminOrMaster 게이트', names.some(n => /adminOrMaster/i.test(n)), names.join(','));
-    const src = read('src/routes/trackB.routes.js');
-    const i = src.indexOf("router.post('/worktable/option-column'");
-    const body = src.slice(i, src.indexOf('\nrouter.', i + 10));
-    ok('★ confirm:true 가 아니면 미리보기', /dryRun: b\.confirm !== true/.test(body));
-    ok('판정 사본 0 — 서비스를 그대로 부른다', /ensureOptionColumn\(\{/.test(body));
-  }
-
-  /* ── I. 화면 ─────────────────────────────────────────────────────────── */
-  /* ★★ 2026-08-21 사용자 확정: [🧩 옵션 열] 버튼을 [⋯] 메뉴에서 **제거**했다.
-       `worktablePlan` 이 옵션 배분이 있는데 칸이 없으면 자동으로 덧붙이고(`option_column_added`)
-       공고 저장도 연결 작업표에 칸을 보장하므로, 지금 이후 만들어지는 작업에는 이 창구가
-       필요 없다. **서버 창구(`POST /api/trackb/worktable/option-column`)는 그대로 남긴다**
-       — 2026-08-20 이전에 만들어진 표의 소급 기입 경로가 사라지면 막다른 길이 된다.
-       여기서는 그 계약을 뒤집어 고정한다: 화면에 없다 · 서버에는 있다. */
-  console.log('\n[I] 화면 배선 — 버튼 제거 고정');
-  {
+    ok('★★ 수동 라우트가 없다', !layer);
     const h = read('../frontend/workdesk.html');
-    ok('★ [⋯] 메뉴에 [🧩 옵션 열] 이 없다', !/openOptColModal/.test(h));
-    ok('★ 모달 코드도 남아 있지 않다(죽은 코드 금지)', !/_ocCan|_ocRender|function ocRun/.test(h));
-    ok('★ 메뉴 노출 조건에서도 빠졌다', !/_ocCan\(\)/.test(h));
+    ok('★★ 화면에 옵션 열 창구가 없다',
+      !/openOptColModal|_ocCan\(\)|ocRun\(\)|liveOptionKeys/.test(h));
+
+    /* ★★ 지우면 안 되는 것 — 자동 경로 둘. 여기가 빨개지면 옵션이 다시 조용히 사라진다. */
+    ok('★★ 작업표 생성이 옵션 칸을 덧붙인다',
+      /option_column_added/.test(read('src/utils/worktablePlan.js')));
+    const camp = read('src/routes/campaign.routes.js').replace(/\u0000/g, '');
+    ok('★★ 공고 저장이 연결 작업표에 칸을 보장한다',
+      /_ensureLinkedWorktableOptionColumn/.test(camp) && /ensureOptionColumn\(\{/.test(camp));
+    ok('★ 그 훅은 살아있는 옵션 2종 이상일 때만(배분 규칙과 같은 기준)',
+      /Number\(r\.liveOpts \|\| 0\) < 2/.test(camp));
+    /* ★★★ 실사고 2026-08-23 — 훅이 `recruit_campaigns` 를 `c.linked_tab_sheet_id`(= work_orders 컬럼)
+       로 조회해 42703 이 났고, 자기 catch 가 "해당 없음" 으로 삼켜 **배포 이래 한 번도 안 돌았다**.
+       무신호라 아무도 몰랐다. 컬럼명을 표에 맞게 고정한다(되살아나면 옵션이 다시 조용히 사라진다). */
+    /* ⚠ 고정 폭 슬라이스 금지(함수가 자라면 조용히 어긋난다) — 함수 끝까지 자르고
+         **주석은 걷어낸다**(이 사고를 설명하는 주석 자체가 옛 컬럼명을 담고 있다). */
+    const _h0 = camp.indexOf('async function _ensureLinkedWorktableOptionColumn');
+    const hook = camp.slice(_h0, camp.indexOf('\n}', _h0) + 2)
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    ok('★★ 훅이 recruit_campaigns 의 실재 컬럼을 읽는다(linked_sheet_id)',
+      /FROM recruit_campaigns/.test(hook) && /c\.linked_sheet_id AS "sheetId"/.test(hook));
+    ok('★★ work_orders 전용 컬럼(linked_tab_sheet_id)을 쓰지 않는다', !/linked_tab_sheet_id/.test(hook));
+    ok('★ 그 컬럼이 실제로 recruit_campaigns 의 것임을 마이그레이션에서 확인',
+      /linked_sheet_id TEXT/.test(read('migrations/018_campaigns.sql')));
+    ok('★★ 실행부 서비스는 그대로 있다',
+      /function ensureOptionColumn/.test(read('src/services/worktableOptionColumn.service.js')));
   }
 
   console.log(`\n✅ worktableOptionColumn — ${passed} 케이스 통과`);

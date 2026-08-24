@@ -119,22 +119,63 @@ async function rebuildWorktableProjection(worktable, by) {
   return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
 }
 
+/**
+ * 그 공고에 연결된 작업오더 1건(읽기 전용).
+ *
+ * ★★ **짝짓기 규칙 단일 출처** — 역방향 링크(`work_orders.linked_campaign_id`) 우선 →
+ *   정방향(`recruit_campaigns.source_work_order_id`), 같으면 최근 수정 오더. 067 백필·정원
+ *   폴백·혼합 조합 프리필이 **같은 오더**를 봐야 "정원은 A 오더, 조합은 B 오더"가 안 생긴다.
+ * ★ 소프트삭제된 오더는 근거가 아니다.
+ * ★ 컬럼 이름은 화이트리스트 정규식으로 검증한다(문자열 조립 — 주입 차단).
+ */
+/* ★★ 짝짓기 SQL 조각 — 소비처가 늘어도 **규칙은 여기 한 곳**이다.
+   역방향 링크(`work_orders.linked_campaign_id`) 우선 → 정방향(`recruit_campaigns.source_work_order_id`),
+   같으면 최근 수정 오더. 067 백필·정원 폴백·혼합 조합·유입방식이 전부 이 조각을 태운다. */
+const LINKED_WO_ON = `((NULLIF(w.linked_campaign_id, '') = c.id) OR (NULLIF(c.source_work_order_id, '') = w.id))`;
+const LINKED_WO_ORDER = `(NULLIF(w.linked_campaign_id, '') = c.id) DESC, w.updated_at DESC`;
+
+/**
+ * 공고들에 연결된 작업오더 일괄 조회 → Map(campaignId → 그 오더의 요청 컬럼).
+ *
+ * ★ 소프트삭제된 오더는 근거가 아니다.
+ * ★ 컬럼 이름은 화이트리스트 정규식으로 검증한다(문자열 조립 — 주입 차단).
+ * ★ `db` 를 받는다 — 잠금 트랜잭션의 client 로도 부를 수 있어야 한다(SAVEPOINT 격리는 호출부 몫).
+ */
+async function linkedWorkOrdersForCampaigns(db, ids, columns = ['recruit_count']) {
+  const list = (Array.isArray(ids) ? ids : []).filter(Boolean).map(String);
+  const safe = (Array.isArray(columns) ? columns : []).filter(c => /^[a-z_][a-z0-9_]*$/.test(String(c)));
+  if (!list.length || !safe.length || !db || typeof db.query !== 'function') return new Map();
+  const cols = safe.map(c => `w.${c}`).join(', ');
+  const { rows } = await db.query(
+    `SELECT DISTINCT ON (c.id) c.id AS campaign_id, ${cols}
+       FROM recruit_campaigns c
+       JOIN work_orders w ON ${LINKED_WO_ON}
+      WHERE c.id = ANY($1) AND w.deleted_at IS NULL
+      ORDER BY c.id, ${LINKED_WO_ORDER}`,
+    [list]
+  );
+  const out = new Map();
+  for (const r of rows) {
+    const { campaign_id: cid, ...rest } = r;
+    out.set(cid, rest);
+  }
+  return out;
+}
+
+/** 단건 — 배치와 **같은 규칙**을 태운다(사본 0). */
+async function linkedWorkOrderForCampaign(campaign, columns = ['recruit_count']) {
+  if (!campaign || !campaign.id) return null;
+  const m = await linkedWorkOrdersForCampaigns(pool, [campaign.id], columns);
+  return m.get(String(campaign.id)) || null;
+}
+
 /** 연결 작업오더의 모집인원으로 레거시 공고의 표시 총정원을 보완한다(읽기 전용). */
 async function displayRecruitTotalForCampaign(campaign) {
   const primary = quota(campaign && campaign.recruit_total);
   if (primary > 0) return { total: primary, source: 'campaign' };
   if (!campaign || !campaign.id) return { total: 0, source: 'none' };
-  const sourceId = String(campaign.source_work_order_id || '').trim();
-  const { rows } = await pool.query(
-    `SELECT recruit_count
-       FROM work_orders
-      WHERE deleted_at IS NULL
-        AND ((linked_campaign_id = $1 AND $1 <> '') OR (id = $2 AND $2 <> ''))
-      ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC
-      LIMIT 1`,
-    [String(campaign.id), sourceId]
-  );
-  return displayRecruitTotal(primary, rows[0] && rows[0].recruit_count);
+  const wo = await linkedWorkOrderForCampaign(campaign, ['recruit_count']);
+  return displayRecruitTotal(primary, wo && wo.recruit_count);
 }
 
 /** 차수 공고에서는 뒤 차수를 보존하고 1차만 조절해 합계를 목표 정원과 일치시킨다. */
@@ -283,7 +324,17 @@ async function assertCampaignRecruitTotal({ campaignId, recruitTotal }) {
   } finally { client.release(); }
 }
 
-async function syncCampaignRecruitTotal({ campaignId, recruitTotal }) {
+/**
+ * ★★ `skipWorktable` = "이번 저장에서 총정원이 한 명도 안 바뀌었다"는 호출자의 확언.
+ *   그때는 작업보드 슬롯 맞추기를 건너뛴다 — 초과 상태(채워진 줄 > 정원)인 작업은
+ *   목표가 그대로여도 delta.retire 가 잡혀 `worktableSlotDelta`/빈 슬롯 부족 두 겹에서
+ *   throw 하고, 그 throw 가 공고 저장 맨 끝에 있어 **저장은 이미 커밋됐는데 화면엔 실패**로
+ *   보였다(2026-08-24 실측 13개 작업). ★ 줄이려는 조작은 종전대로 막는다(호출자가 값이
+ *   달라졌을 때만 이 플래그를 끄므로 게이트는 그대로 산다). ★ 역방향 링크 백필
+ *   (`work_orders.linked_campaign_id`)은 **건너뛰지 않는다** — 그것까지 빠지면 연결이
+ *   조용히 비는 별개 사고가 된다.
+ */
+async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktable = false }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -296,7 +347,9 @@ async function syncCampaignRecruitTotal({ campaignId, recruitTotal }) {
       `UPDATE work_orders SET linked_campaign_id=$2, recruit_count=$3, updated_at=NOW() WHERE id=$1`,
       [order.id, campaignId, total]
     );
-    const worktable = await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
+    const worktable = skipWorktable
+      ? { synced: false, reason: 'quota_unchanged' }
+      : await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
     await client.query('COMMIT');
     return { linked: true, workOrderId: order.id, recruitTotal: total, worktable: await rebuildWorktableProjection(worktable, 'campaign-quota-sync') };
   } catch (err) {
@@ -359,6 +412,8 @@ module.exports = {
   quota,
   displayRecruitTotal,
   displayRecruitTotalForCampaign,
+  linkedWorkOrderForCampaign,
+  linkedWorkOrdersForCampaigns,
   worktableSlotDelta,
   firstRoundQuota,
   allocateOptionQuotas,

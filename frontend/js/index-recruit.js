@@ -882,6 +882,7 @@ function onRecruitDatesChange() {
   const sDay = document.getElementById("rf_start_day");
   const dDay = document.getElementById("rf_deadline_day");
   if (sDay && sd) sDay.textContent = _rfDow(sd.value);
+  _renderStartDateOriginNote();   // 날짜를 맞추면 대조 안내가 스스로 사라진다
   if (dDay && dl) dDay.textContent = _rfDow(dl.value);
   const warn = document.getElementById("rf_deadline_warn");
   if (!warn || !dl) return;
@@ -1218,13 +1219,65 @@ function onMultiAccountToggle(on) {
   renderPartCheck();
 }
 
-function rfSetInflowType(type, button) {
+function rfSetInflowType(type, button, opts) {
   const value = type === "guide" ? "guide" : "link";
+  // ★ 사람이 누른 순간부터는 사람이 정한 값 — 출처 안내를 지운다.
+  //   (모달 오픈 말미의 동기화 호출은 `{silent:true}` 라 표식을 유지한다.)
+  if (!(opts && opts.silent)) window._rfInflowOrigin = "";
   const hidden = document.getElementById("rf_inflow_type_value");
   if (hidden) hidden.value = value;
   const root = document.getElementById("rf_inflow_type_ui");
   root?.querySelectorAll("button").forEach((el) => el.classList.toggle("active", el === button || el.dataset.inflow === value));
+  _renderInflowOriginNote();
   syncRecruitProductMainUrl();
+}
+
+/**
+ * 유입방식 출처 안내 — 조용한 대체 금지.
+ * 작업오더에서 불러왔을 때만 한 줄로 말한다(저장해야 공고에 굳는다).
+ */
+/**
+ * 연결 작업오더 시작일 대조 안내 — 값은 바꾸지 않고 "다르다"고만 말한다.
+ * ★ 경고(빨강)가 아니다 — 차수 재발행처럼 다른 것이 정상인 경우가 있고, 상시 경고가 되면
+ *   진짜 신호가 묻힌다. 사람이 위 날짜를 고쳐 저장하면 그때 반영된다.
+ * ★ 값이 같아지면 스스로 사라진다(날짜를 고치면 onRecruitDatesChange 가 다시 부른다).
+ */
+function _renderStartDateOriginNote() {
+  const el = document.getElementById("rf_start_date");
+  if (!el) return;
+  const row = el.closest(".rf-hrow") || el.closest(".form-row") || el.parentNode;
+  if (!row || !row.parentNode) return;
+  let box = document.getElementById("rf_start_date_order_note");
+  const wo = String(window._rfOrderStartDate || "");
+  const cur = String(el.value || "").slice(0, 10);
+  if (!wo || !cur || wo === cur) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "rf_start_date_order_note";
+    // ★ 행 **바깥**에 둔다 — 행에 날짜 피커 onclick 이 걸려 있어 안에 두면 안내를 누를 때마다 열린다.
+    box.style.cssText = "margin:4px 0 0;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;"
+      + "line-height:1.5;background:#EFF6FF;color:#1E40AF;border:1px solid #BFDBFE";
+    row.parentNode.insertBefore(box, row.nextSibling);
+  }
+  box.textContent = "연결된 작업오더의 시작일은 " + wo + " 입니다 — 이 공고에는 발행 당시 값 "
+    + cur + " 이 그대로 남아 있습니다(발행은 스냅샷이라 오더를 고쳐도 따라가지 않습니다). "
+    + "바꾸려면 위 날짜를 고쳐 저장하세요.";
+}
+
+function _renderInflowOriginNote() {
+  const ui = document.getElementById("rf_inflow_type_ui");
+  if (!ui || !ui.parentNode) return;
+  let box = document.getElementById("rf_inflow_origin_note");
+  if (window._rfInflowOrigin !== "order") { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "rf_inflow_origin_note";
+    box.style.cssText = "margin-top:5px;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;line-height:1.5;"
+      + "background:#ECFDF5;color:#065F46;border:1px solid #6EE7B7";
+    ui.parentNode.appendChild(box);
+  }
+  const v = document.getElementById("rf_inflow_type_value")?.value === "guide" ? "가이드유입" : "링크유입";
+  box.textContent = "이 공고에는 유입방식이 저장되어 있지 않아 작업오더 값(" + v + ")을 불러왔습니다 — 저장하면 공고에 반영됩니다.";
 }
 window.rfSetInflowType = rfSetInflowType;
 
@@ -1918,16 +1971,58 @@ function _rfQuotaNotice() { return !!_recruitEditId && _prodMode() !== "opt"; }
 function _syncQuotaLockUi() {
   const box = document.getElementById("rf_quota_lock");
   if (!box) return;
-  if (!_rfQuotaNotice()) { box.hidden = true; box.textContent = ""; return; }
+  if (!_rfQuotaNotice()) { box.hidden = true; box.textContent = ""; _syncRecruitTotalCells(); return; }
   const num = (v) => Number(v || 0);
   const rt = num(document.getElementById("rf_recruit_total")?.value);
   const dl = num(document.getElementById("rf_daily_limit")?.value);
   const fmt = (v, zero) => (v > 0 ? v.toLocaleString() + "명" : zero);
   box.hidden = false;
-  box.innerHTML =
-    '<b>⚠ 총건수과 일건수는 초기작업세팅값이므로 함부로 수정하지마세요, 필요시 모집인원조절 기능을 사용하세요</b>' +
-    '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
-    '<span>날짜별 조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 나눠 담습니다.</span>';
+  /* ★★ 차수 원장이 있으면 **서버가 총모집 전송값을 무시한다**(roundsLockRecruitTotal).
+     종전에는 그 사실을 저장한 뒤에야 알 수 있어 "고쳐 저장했는데 다시 열면 그대로"가 됐다.
+     ★ 모름(null — 구버전 백엔드·조회 실패)이면 **잠겼다고 말하지 않는다**(없는 잠금을 지어내지 않는다). */
+  const lock = window._rfRoundsLock;
+  const locked = !!(lock && lock.locked);
+  box.innerHTML = locked
+    ? '<b>🔒 이 공고의 총건수는 <u>차수 원장</u>이 관리합니다 — 여기서 고쳐도 저장되지 않습니다</b>' +
+      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 차수 ' + (Number(lock.count) || 0) + '건 · 합계 ' +
+      ((Number(lock.total) || 0).toLocaleString()) + '명 · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
+      '<span>총건수를 바꾸려면 공고 카드의 <b>[📅 인원]</b> → <b>차수 추가/제거</b>로 하세요(일건수는 여기서 바꿀 수 있습니다).</span>'
+    : '<b>⚠ 총건수과 일건수는 초기작업세팅값이므로 함부로 수정하지마세요, 필요시 모집인원조절 기능을 사용하세요</b>' +
+      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
+      '<span>날짜별 조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 나눠 담습니다.</span>'
+      /* ★ 상품 줄이 둘 이상이면 **첫 줄 총인원만** 저장된다 — 안 밝히면 둘째 줄에 친 값이 조용히 버려진다. */
+      + (document.querySelectorAll("#rf_opt_rows .rf-opt-row").length > 1
+          ? '<span>상품 줄이 여러 개예요 — <b>공고 총인원은 첫 줄 값</b>만 저장됩니다(둘째 줄부터의 총인원 칸은 반영되지 않습니다).</span>' : '');
+  _syncRecruitTotalCells();
+}
+
+/**
+ * 총인원 칸이 "고쳐도 저장되지 않는" 자리면 그 사실을 말한다.
+ * ★★ 두 자리가 조용히 버려지고 있었다(2026-08-21 실측):
+ *   ① 차수 원장이 있는 공고 — 서버가 총모집 전송값을 통째로 무시한다(roundsLockRecruitTotal).
+ *   ② '옵션 없는 작업' 수정 모드에서 **첫 줄이 아닌 행**의 총인원 —
+ *      캠페인 정원은 `_syncPreviewFromOptRows` 가 **첫 행 값**만 읽으므로 나머지 줄은 저장에 닿지 않는다.
+ * ★★ **잠그지 않는다(readOnly 금지)** — 2026-08-19 사용자 확정("총인원·일건수는 수정 화면에서도
+ *   고칠 수 있다, 경고 전용")을 되돌리지 않는다. 사유는 툴팁과 위 안내 문구가 말한다.
+ * ★ 옵션 있는 작업(opt)은 대상이 아니다 — 옵션인원은 옵션 원장 값이고 합계가 캠페인 정원이 된다.
+ */
+function _recruitTotalCellHint(index) {
+  if (!_rfQuotaNotice()) return "";
+  const lock = window._rfRoundsLock;
+  if (lock && lock.locked) return "차수 원장이 총건수를 관리합니다 — 여기서 고쳐도 저장되지 않습니다([📅 인원] → 차수 추가/제거)";
+  if (index > 0) return "공고 총인원은 첫 줄 값입니다 — 이 칸에 적은 값은 저장되지 않습니다";
+  return "";
+}
+
+function _syncRecruitTotalCells() {
+  Array.from(document.querySelectorAll("#rf_opt_rows .rf-opt-row")).forEach((row, i) => {
+    const el = row.querySelector(".rf-opt-rt");
+    if (!el) return;
+    const why = _recruitTotalCellHint(i);
+    el.title = why || (_rfQuotaNotice()
+      ? "초기 작업 세팅값입니다 — 함부로 수정하지 마세요. 날짜별 조절은 [📅 인원]에서 합니다"
+      : "");
+  });
 }
 
 /** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
@@ -2053,10 +2148,25 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     return;
   }
   const firstProd = parsed.length ? parsed[0].productName : "";
-  renderOptRows(opts.map(o => {
+  /* ★★ **살아있는 옵션이 하나도 없으면(전부 마감) 정원은 표가 아니라 캠페인 원장이 말한다**
+     (2026-08-23 실사고 — DB 총인원 200 인데 편집 화면은 공란, 고쳐 저장해도 다시 열면 공란):
+     이 분기가 마감 옵션의 `recruitTotal: 0` 을 첫 행에 실었고, `_syncPreviewFromOptRows` 의
+     `head = live[0] || rows[0]` 가 그 마감 행을 채택해 **프리필로 실린 원장 값을 0 으로 덮었다**.
+     ★ 옵션 공고 판정은 이미 `liveOptions`(status!=='closed') 가 단일 출처인데(우레온 사고),
+       이 프리필만 `opts.length`(마감 포함)로 분기해 화면이 갈렸다.
+     ★ **마감 행 자체는 그대로 그린다** — [↩ 재개] 경로를 잃지 않는다.
+     ★ **모르는 값은 건드리지 않는다** — 원장 값이 양수일 때만 싣는다(공개 화이트리스트 뷰·구버전 백엔드). */
+  const hasLiveOpt = opts.some(o => (o.optKey || o.opt_key) && (o.status || "active") !== "closed");
+  const campQuota = campaign || {};
+  renderOptRows(opts.map((o, i) => {
     const key = o.optKey || o.opt_key || "";
     const hit = byOpt.get(key);
-    return { ...o, productName: (hit && hit.productName) || firstProd || "" };
+    const row = { ...o, productName: (hit && hit.productName) || firstProd || "" };
+    if (!hasLiveOpt && i === 0) {
+      if (Number(campQuota.recruit_total) > 0) row.recruitTotal = Number(campQuota.recruit_total);
+      if (Number(campQuota.daily_limit)   > 0) row.dailyLimit   = Number(campQuota.daily_limit);
+    }
+    return row;
   }));
 }
 
@@ -2144,9 +2254,15 @@ function _syncPreviewFromOptRows() {
     /* ★★ 수정 모드(옵션 없는 작업) — 캠페인 정원은 **첫 행 칸이 곧 그 값**이다.
        합계 규칙("하나라도 0이면 무제한")을 쓰면 상품 줄이 둘 이상일 때 총량이 0(무제한)으로
        리셋된다(실사고). 사람이 첫 행에서 고친 값은 그대로 저장된다. */
-    const head = live[0] || rows[0] || {};
-    if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
-    if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+    /* ★★ 표가 **한 줄도 없으면** 정원을 다시 만들지 않는다(2026-08-21 실측 버그):
+       작업내용 상품 원문(productLines)이 빈 공고를 수정 화면에서 열면 표가 0행이 되어
+       `head = {}` → 총인원·일건수가 **0 으로 덮이고**, 그대로 저장하면 정원이 통째로
+       리셋됐다(실측: DB 500/30 인 공고가 화면에서 0/0). 프리필로 실린 원장 값을 지킨다. */
+    const head = live[0] || rows[0] || null;
+    if (head) {
+      if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
+      if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+    }
   } else {
     if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
     if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
@@ -2537,6 +2653,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
+  window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
+  window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
+  window._rfOrderStartDate = '';  // 연결 작업오더 시작일(대조용) — 지난 공고 안내 누수 방지
+  window._rfRoundsLock = null;    // 차수 원장 잠금(모름=null) — 지난 공고 상태 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
   resetRecruitReviewMixRender();
@@ -2588,6 +2708,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         throw new Error("편집용 전체 공고 정보를 받지 못했습니다. 저장할 수 없습니다.");
       }
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
+      /* ★ 차수 원장 잠금 — 서버가 총모집 전송값을 무시하는지 **열 때부터** 안다(null=모름). */
+      window._rfRoundsLock = (json && json.roundsLock && typeof json.roundsLock === "object") ? json.roundsLock : null;
       window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
       window._recruitEditLoadedFees = json.feeSchedules || [];
       document.getElementById("rf_title").value        = c.title || "";
@@ -2656,6 +2778,13 @@ async function openRecruitModal(id, prefill, woOrderId) {
         }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", (c.start_date || "").slice(0, 10));
+        /* ★ 발행은 **스냅샷**이라 발행 뒤 작업오더 시작일이 바뀌어도 공고는 따라가지 않는다.
+           그 사실을 확인할 창구가 없어 "오더는 8/19인데 공고는 8/12"가 원인 불명으로 보였다
+           (2026-08-21 신고). → 값은 **덮지 않고** 다르면 사실만 한 줄로 말한다.
+           ★ 시작일은 저장값이 항상 있어 유입방식·혼합 조합의 blank-only 폴백이 성립하지 않는다. */
+        window._rfOrderStartDate = /^\d{4}-\d{2}-\d{2}$/.test(String(json.orderStartDate || ""))
+          ? String(json.orderStartDate) : "";
+        _renderStartDateOriginNote();
         const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
         if (_skipWeekendsEl) _skipWeekendsEl.checked = c.skip_weekends === true;
         setV("rf_window_start", (c.window_start || "").slice(0, 5));
@@ -2689,9 +2818,17 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const savedReviewMix = Array.isArray(c.review_type_mix) ? c.review_type_mix : (() => {
           try { return JSON.parse(c.review_type_mix || '[]'); } catch (_) { return []; }
         })();
+        /* ★★ 혼합 조합이 비어 있으면 **연결 작업오더의 조합**으로 채운다(2026-08-21 확정).
+           `review_type_mix`(106)는 2026-08-20 에 생긴 컬럼이고 백필이 없어, 그 전에 발행된
+           혼합 공고는 조합이 전부 0 으로 열리고 저장 검증(두 유형 이상)에 막힌다.
+           ★ 저장값이 있으면 언제나 저장값이 이긴다 · 작업오더에도 없으면 빈 채로 두고
+             아래 안내가 "직접 입력해달라"고 말한다(없는 값을 지어내지 않는다). */
+        const orderReviewMix = Array.isArray(json.orderReviewTypeMix) ? json.orderReviewTypeMix : [];
+        const _useOrderMix = !savedReviewMix.length && orderReviewMix.length > 0;
+        window._rfMixOrigin = savedReviewMix.length ? '' : (_useOrderMix ? 'order' : 'empty');
         // 혼합 입력칸은 [혼합]을 선택할 때 동적으로 만들어진다. 먼저 진실원본을 채운 뒤
         // 버튼을 선택해야 저장된 구성(또는 작업오더 프리필)이 렌더링 첫 화면부터 보인다.
-        _setRecruitGlobalReviewTypeMix(savedReviewMix);
+        _setRecruitGlobalReviewTypeMix(_useOrderMix ? orderReviewMix : savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* ★ 127: 체험단 종류 복원 — blog 면 리뷰타입 카드 숨김 + 안내 배너 */
         { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = (c.work_kind === "blog") ? "blog" : (c.work_kind || ""); _rfApplyWorkKindUi(); }
@@ -2699,8 +2836,17 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _rfPickTransferBank(c.transfer_bank || "");
         setV("rf_transfer_memo", c.transfer_memo || "");
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
+        /* ★★ 유입방식 — 저장값이 없을 때만 **연결 작업오더**의 값으로 채운다(2026-08-21).
+           종전엔 `wd.inflowType === "guide" ? "guide" : "link"` 라 **값이 없으면 무조건 링크유입**으로
+           열렸고, 그대로 저장하면 그 link 가 `work_detail` 에 굳어 리뷰어 화면의 작업오더 폴백
+           (`_lookupInflowType`)을 이긴다 → 가이드유입 공고에 [🔗 상품 페이지 열기]가 노출된다.
+           ★ 저장값이 있으면(`link` 포함) **절대 덮지 않는다** — 사람이 정한 값이다.
+           ★ 작업오더에도 없으면 종전 폴백(link) 그대로. */
+        const _savedInflow = (wd.inflowType === "guide" || wd.inflowType === "link") ? wd.inflowType : "";
+        const _orderInflow = (json.orderInflowType === "guide" || json.orderInflowType === "link") ? json.orderInflowType : "";
+        window._rfInflowOrigin = (!_savedInflow && _orderInflow) ? "order" : "";
         const _inflowInput = document.getElementById("rf_inflow_type_value");
-        if (_inflowInput) _inflowInput.value = wd.inflowType === "guide" ? "guide" : "link";
+        if (_inflowInput) _inflowInput.value = _savedInflow || _orderInflow || "link";
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
@@ -2769,6 +2915,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         try { return JSON.parse(prefill.review_type_mix || '[]'); } catch (_) { return []; }
       })();
       // 작업오더 혼합 수량도 동적 입력칸보다 먼저 보관해, [혼합] 선택 시 그대로 렌더한다.
+      window._rfMixOrigin = prefillReviewMix.length ? 'order' : 'empty';
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
@@ -2834,7 +2981,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   onFeeScheduleToggle(!!document.getElementById("rf_fee_sched_on")?.checked);
   rfSetWeekendPolicy(!!document.getElementById("rf_skip_weekends")?.checked);
   rfSetMultiAccount(!!document.getElementById("rf_multi_account")?.checked);
-  rfSetInflowType(document.getElementById("rf_inflow_type_value")?.value || "link");
+  rfSetInflowType(document.getElementById("rf_inflow_type_value")?.value || "link", null, { silent: true });
   syncRecruitProductMainUrl();
   modal.classList.remove("hidden");
   modal.style.display = "";
@@ -2852,6 +2999,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
 
   /* 🔗 연결 탭이 비어 있으면 사유 + 제목 유사도 추천을 띄운다(선택돼 있으면 아무것도 안 뜬다) */
   try { _rfBindTitleSuggest(); _rfRefreshLinkedTabNote(); } catch (_) { /* 안내 실패가 모달을 막으면 안 된다 */ }
+
+  /* 🚀 작업 시작 설정 줄 — 접수 직후 마무리할 칸만 짚는다(경고 전용, 저장을 막지 않는다) */
+  try { _rfBindStartCheck(); renderRecruitStartCheck(); } catch (_) { /* 안내 실패가 모달을 막으면 안 된다 */ }
 }
 
 // 상품확인용 URL에서 썸네일/상품명/가격 가져오기 (OG/JSON-LD)
@@ -3086,6 +3236,7 @@ function renderRecruitOptionReviewMix() {
         if (input.value === '0') input.value = '';
       });
       input.addEventListener('input', () => {
+        window._rfMixOrigin = '';   // 사람이 고친 순간부터는 사람이 정한 값 — 출처 안내를 지운다
         const next = RF_REVIEW_MIX_TYPES.map((key) => ({ type: key, quantity: Number(grid.querySelector(`[data-mix-type="${key}"]`)?.value) || 0 }));
         if (card.row) _writeOptionReviewMix(card.row, next);
         else window._rfGlobalReviewTypeMix = next.filter((entry) => entry.quantity > 0);
@@ -3100,6 +3251,45 @@ function renderRecruitOptionReviewMix() {
     total.textContent = _reviewMixTotalLabel(sum, card.expected, optionMode);
     total.classList.toggle('is-invalid', sum !== card.expected);
   });
+}
+
+/**
+ * 혼합 조합의 출처 안내 — 조용한 대체 금지.
+ *  · 'order' = 공고에 저장된 조합이 없어 **연결 작업오더 값을 불러왔다**(저장해야 반영된다)
+ *  · 'empty' = 작업오더에도 조합이 없다 → 직접 입력해야 저장할 수 있다(저장 검증이 막는다)
+ * ★ 사람이 숫자를 고치면 안내를 지운다 — 그 순간부터는 사람이 정한 값이다.
+ */
+function _renderReviewMixOriginNote() {
+  const root = document.getElementById('rf_review_mix');
+  if (!root) return;
+  let box = document.getElementById('rf_review_mix_note');
+  const origin = window._rfMixOrigin || '';
+  if (!origin) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'rf_review_mix_note';
+    box.style.cssText = 'margin-bottom:6px;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;line-height:1.5';
+    root.insertBefore(box, root.firstChild);
+  }
+  if (origin === 'order') {
+    /* ★★ 합계가 총인원과 다르면 **저장이 막힌다**(validateRecruitReviewTypeMix) —
+       그런데도 "저장하면 반영됩니다"라고 말하면 화면이 거짓말을 한다(실측: 작업오더 조합
+       포토 70 + 텍스트 30 = 100건인데 총건수는 300건). 사실과 다음 행동을 말한다. */
+    const _mix = (typeof getRecruitReviewTypeMix === 'function') ? getRecruitReviewTypeMix() : [];
+    const _sum = _mix.reduce((t, r) => t + (Number(r.quantity) || 0), 0);
+    const _exp = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
+    if (_exp > 0 && _sum !== _exp) {
+      box.style.background = '#FFFBEB'; box.style.color = '#92400E'; box.style.border = '1px solid #FCD34D';
+      box.textContent = '작업오더 조합(합계 ' + _sum.toLocaleString() + '건)이 총건수 '
+        + _exp.toLocaleString() + '건과 달라 그대로 저장할 수 없습니다 — 총건수에 맞춰 조정해주세요.';
+      return;
+    }
+    box.style.background = '#ECFDF5'; box.style.color = '#065F46'; box.style.border = '1px solid #6EE7B7';
+    box.textContent = '작업오더에 적힌 리뷰 조합을 불러왔습니다 — 확인 후 저장하면 공고에 반영됩니다.';
+  } else {
+    box.style.background = '#FFFBEB'; box.style.color = '#92400E'; box.style.border = '1px solid #FCD34D';
+    box.textContent = '이 공고에는 리뷰 조합이 저장되어 있지 않고 작업오더에도 없습니다 — 유형별 인원을 직접 입력해주세요.';
+  }
 }
 
 function getRecruitReviewTypeMix() {
@@ -3125,7 +3315,7 @@ function syncRecruitReviewTypeMix() {
   const visible = reviewType === 'mixed';
   root.style.display = visible ? '' : 'none';
   if (composer) { composer.hidden = !visible; composer.classList.toggle('is-visible', visible); }
-  if (visible) renderRecruitOptionReviewMix();
+  if (visible) { renderRecruitOptionReviewMix(); _renderReviewMixOriginNote(); }
   const mix = getRecruitReviewTypeMix();
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
@@ -3179,6 +3369,88 @@ function _rfReviewTypeKey(raw) {
 }
 
 function selectChannel(btn) { selectRfBtn('channel', btn); }  /* 하위 호환 */
+
+
+/* ═══════════════════════════════════════
+   🚀 작업 시작 설정 — 접수 직후 사람이 마무리해야 하는 칸만 짚는다
+   (사용자 확정 2026-08-21: 접수하기 → 모집공고 두 단계로 합침)
+
+   ★★ 판정은 이 함수 **한 곳**이고 재료는 화면의 그 칸 자체다 — 별도 상태를 두면
+      "칩은 초록인데 저장하면 빈 값"으로 갈린다.
+   ★★ **막지 않는다**(경고 전용) — '현금영수증 발행 안 함'·'다계정 미허용'도 정상 값이라
+      미설정으로 단정할 수 없다. 그래서 그 셋은 **지금 값을 그대로 보여 주고**(눈으로 확인),
+      비어 있으면 곤란한 둘(입금명·팀채팅방)만 빨간 '미입력'으로 센다.
+   ★ 게시된 공고를 수정할 때는 뜨지 않는다(신규 발행 또는 게시 전 공고에서만).
+═══════════════════════════════════════ */
+const RF_START_ITEMS = [
+  { k: "transfer_memo", label: "입금명",   el: "rf_transfer_memo", required: true },
+  { k: "badges",        label: "안내배지", el: "rf_badge_input" },
+  { k: "cash_receipt",  label: "현금영수증", el: "rf_cashrcpt_toggle" },
+  { k: "multi_account", label: "다계정",   el: "rf_multi_account_toggle" },
+  { k: "chat_url",      label: "팀채팅방", el: "rf_chat_url", required: true },
+];
+
+/** 각 항목의 현재 상태 — { k, label, value, miss } */
+function _rfStartState() {
+  const v = id => String(document.getElementById(id)?.value || "").trim();
+  const memo = v("rf_transfer_memo");
+  const chat = v("rf_chat_url");
+  const cash = !!document.getElementById("rf_cash_receipt_required")?.checked;
+  const multi = !!document.getElementById("rf_multi_account")?.checked;
+  const nBadge = Array.isArray(_recruitBadges) ? _recruitBadges.length : 0;
+  return [
+    { k: "transfer_memo", label: "입금명",     value: memo || "미입력", miss: !memo },
+    { k: "badges",        label: "안내배지",   value: nBadge ? (nBadge + "개") : "없음", miss: false },
+    { k: "cash_receipt",  label: "현금영수증", value: cash ? "발행" : "발행 안 함", miss: false },
+    { k: "multi_account", label: "다계정",     value: multi ? "허용" : "미허용", miss: false },
+    { k: "chat_url",      label: "팀채팅방",   value: chat ? "입력됨" : "미입력", miss: !chat },
+  ];
+}
+
+/** 이 모달에서 줄을 보여줄 것인가 — 신규 발행이거나 아직 게시 전(draft)일 때만. */
+function _rfStartVisible() {
+  if (!_recruitEditId) return true;
+  return String(document.getElementById("rf_status")?.value || "") !== "active";
+}
+
+function renderRecruitStartCheck() {
+  const box = document.getElementById("rf_startcheck");
+  if (!box) return;
+  if (!_rfStartVisible()) { box.hidden = true; return; }
+  const st = _rfStartState();
+  const missN = st.filter(x => x.miss).length;
+  box.hidden = false;
+  box.className = "rf-startcheck" + (missN ? "" : " done");
+  box.innerHTML = `<span class="sct">${missN ? "🚀 작업 시작 설정 — " + missN + "개 남음" : "🚀 작업 시작 설정 — 모두 확인함"}</span>`
+    + st.map((x, i) => `<button type="button" class="scc${x.miss ? " miss" : ""}" onclick="rfStartGo(${i})"`
+      + ` title="${escHtml(x.label)} 칸으로 이동합니다">${escHtml(x.label)} <b>${escHtml(x.value)}</b></button>`).join("")
+    + `<span class="scn">나머지 값은 작업오더에서 자동으로 채워졌습니다</span>`;
+}
+
+/** 칩 클릭 → 그 칸으로 스크롤 + 포커스. ★ onclick 은 **인덱스만**(외부 문자열 보간 0). */
+function rfStartGo(i) {
+  const it = RF_START_ITEMS[i];
+  if (!it) return;
+  const el = document.getElementById(it.el);
+  if (!el) return;
+  const row = el.closest(".form-row") || el;
+  try { row.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) { row.scrollIntoView(); }
+  if (typeof el.focus === "function") { try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); } }
+}
+
+/* 값이 바뀌면 줄도 따라간다 — 편집 영역에 **위임 1회**(입력칸 DOM 을 다시 만들지 않으므로
+   한글 IME 조합이 깨지지 않는다). 토글 버튼은 click 으로도 들어온다. */
+let _rfStartBound = false;
+function _rfBindStartCheck() {
+  if (_rfStartBound) return;
+  const host = document.getElementById("recruitModal");
+  if (!host) return;
+  _rfStartBound = true;
+  const refresh = () => { try { renderRecruitStartCheck(); } catch (_) {} };
+  host.addEventListener("input", refresh);
+  host.addEventListener("change", refresh);
+  host.addEventListener("click", () => setTimeout(refresh, 0));
+}
 
 /* ═══════════════════════════════════════
    배지 입력
@@ -4033,6 +4305,8 @@ async function saveRecruitPostImpl() {
        참여형 UI가 없는 페이지(admin-siand.html 등)나 편집 로드 실패 시엔 미전송(undefined)
        → 서버 COALESCE가 기존값 유지 = 참여형 공고의 레거시 강등 사고 차단. */
   const partEl = document.getElementById("rf_participation");
+  // 정원(총건수·일건수)을 미전송했는가 — 저장 안내가 사실대로 말한다(참여형 블록 밖에서 읽는다)
+  let _quotaSkipped = false;
   if (partEl && !(window._recruitEditLoadFailed && _recruitEditId)) {
     const isPart = !!partEl.checked;
     const preserveLegacyCampaign = Boolean(_recruitEditId && window._recruitEditLoaded?.participation_mode === false);
@@ -4056,6 +4330,15 @@ async function saveRecruitPostImpl() {
          0 리셋 방지는 위 파생(수정 모드 = 첫 행 값 그대로)과 프리필이 담당하고,
          차수 있는 공고의 총모집은 서버가 무시한다(roundsLockRecruitTotal). */
       {
+        /* ★★ 로드값에 정원이 없으면(공개 화이트리스트 뷰·구버전 백엔드·로드 실패) **보내지 않는다** —
+           화면이 모르는 값을 0 으로 보내면 서버가 그대로 저장해 총량이 '무제한'으로 리셋된다.
+           미전송 = 서버 COALESCE 유지(옵션표·work_detail 과 같은 원칙). 신규 발행은 항상 보낸다. */
+        const _loaded = window._recruitEditLoaded;
+        const _quotaKnown = !_recruitEditId
+          || (!window._recruitEditLoadFailed && _loaded
+              && _loaded.recruit_total !== undefined && _loaded.daily_limit !== undefined);
+        _quotaSkipped = !_quotaKnown;   // ★ 조용히 빼지 않는다 — 저장 안내가 사실을 말한다(아래 _changed)
+        if (!_quotaKnown) { /* 미전송 = 서버 COALESCE 유지 */ } else {
         payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
         payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
         /* ★ 127: 블로그 공고의 일건수 정규화 — 표(진행상품)의 일건수가 비어도 총모집으로 채운다.
@@ -4063,6 +4346,7 @@ async function saveRecruitPostImpl() {
            모집을 조용히 막는다. 서버 create 도 같은 정규화를 하지만(이중 방어) update 는 프론트가 담당. */
         if (payload.work_kind === "blog" && !(Number(payload.daily_limit) > 0)) {
           payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;
+        }
         }
       }
       const reviewMixError = validateRecruitReviewTypeMix();
@@ -4176,6 +4460,17 @@ async function saveRecruitPostImpl() {
       throw new Error(errData.error || "저장 실패 (HTTP " + res.status + ")");
     }
     const saved = await res.json().catch(() => ({}));
+    /* ★★ **상태코드만으로 성공을 판정하지 않는다** (2026-08-23 실사고) —
+       이 API 의 errorHandler 는 GAS 호환으로 **HTTP 200 + `{ error }`** 를 돌려준다
+       (`server/src/middleware/error.middleware.js`: `res.status(200).json({ error })`).
+       그래서 서버가 거부한 저장(예: "이미 참여자 또는 구매양식이 있는 작업보드 인원보다 낮게
+       목표 인원을 설정할 수 없습니다")이 `res.ok === true` 로 통과해 **✓ 저장됨 → 모달 닫힘 →
+       「공고 수정이 반영되었습니다」 + 변경 목록에 '총 모집인원'** 까지 표시됐다. 아무것도
+       저장되지 않았는데 화면은 성공을 말하고, 다시 열면 옛 값이라 "저장해도 안 바뀐다"가 된다.
+       ★ 성공 응답에는 항상 `data` 가 있고 실패 응답에는 `error` 만 있다 — **본문으로 판정한다**. */
+    if (saved && (saved.ok === false || saved.error)) {
+      throw new Error(String(saved.error || "저장이 반영되지 않았습니다."));
+    }
     const newCampId = saved && saved.data && saved.data.id;
     /* ★ 작업오더에서 프리필로 만든 신규 공고면 → 그 오더에 linked_campaign_id 역연결 */
     if (!_recruitEditId && _woPrefillOrderId && newCampId) {
@@ -4193,6 +4488,9 @@ async function saveRecruitPostImpl() {
        토스트가 아니라 가운데 안내(campSaveFeedback)의 목록 첫 줄로(#604 토스트 예산 규율). */
     if (saved && saved.recruitTotalLocked === true) {
       _changed.unshift("⚠ 총모집은 차수 원장이 관리해 변경되지 않음 — [📅 인원]의 차수 추가/제거로");
+    }
+    if (_quotaSkipped) {
+      _changed.unshift("⚠ 총건수·일건수는 건드리지 않았습니다 — 현재 값을 불러오지 못해 그대로 두었습니다");
     }
 
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.

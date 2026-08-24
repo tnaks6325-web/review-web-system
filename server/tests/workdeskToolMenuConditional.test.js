@@ -102,10 +102,17 @@ const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid:
 
   console.log('\n[D] 권한 — 조건부 노출이 게이트를 넓히지 않는다');
   {
+    /* ⚠ 2026-08-23 사용자 재확정: 화면 게이트를 서버(`/worktable/dedupe-rows` = adminOrMaster)와
+       **1:1** 로 맞췄다(그 전 2026-08-21 확정은 master 전용이었다). 이 가드가 고정하는 것은
+       "누가 보느냐"가 아니라 **조건부 노출이 게이트를 넓히지 않는다**는 쪽이다 —
+       그래서 admin 은 뜨고(서버가 허용), staff 는 안 뜬다(서버가 403). */
     const admin = makeSandbox({ role: 'admin', roster: [R('1'), R('2')], dedupe: 5 });
     const ha = vm.runInContext('_mhMenuHtml()', admin);
-    ok('★ admin 에게는 할 일이 있어도 정리 버튼을 안 띄운다(master 전용 유지)',
-      !/openDedupeModal/.test(ha));
+    ok('★ admin 은 서버가 허용하므로 띄운다(화면 ≡ 서버 adminOrMaster)',
+      /openDedupeModal/.test(ha));
+    const adminNone = makeSandbox({ role: 'admin', roster: [R('1'), R('1')], dedupe: 0 });
+    ok('★ admin 에게도 할 일이 없으면 안 띄운다(조건부 노출은 역할과 무관)',
+      !/openDedupeModal/.test(vm.runInContext('_mhMenuHtml()', adminNone)));
     const staff = makeSandbox({ role: 'staff', roster: [R('1'), R('2')], dedupe: 5 });
     const hs = vm.runInContext('_mhMenuHtml()', staff);
     ok('★ staff 에게도 안 띄운다', !/openDedupeModal/.test(hs));

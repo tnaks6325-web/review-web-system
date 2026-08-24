@@ -74,8 +74,101 @@ assert.match(popBlock, /window\._wdRevPopBound/, '전역 리스너는 최상위 
 assert.match(popBlock, /onclick="_manualReviewDrop\(\$\{i\}\)"/, 'onclick 에는 인덱스만 넘긴다');
 // 되돌릴 수 없는 처리라 붙여넣기만으로 자동 제출하지 않는다 — [제출 처리] 한 번을 남긴다.
 assert.match(popBlock, /_manualReviewSubmit\(\)/, '제출은 사람이 누른다');
+function takeFnLate(){ return takeFn; }
 const takeFn = popBlock.match(/function _manualReviewTake\(list\)\{[\s\S]*?\n\}/)[0];
 assert.doesNotMatch(takeFn, /_manualReviewSubmit/,
   '붙여넣는 즉시 자동 제출하지 않는다(오붙여넣기 = 되돌릴 수 없는 확정)');
 
-console.log('workdeskManualReviewSubmit.test.js: OK');
+/* ── 2026-08-21 실측 `submit_column_missing` ────────────────────────────────
+   수동·작업표로 추가한 줄은 `campaign_participants.submit_col` 이 비어 있다(그 칸은
+   `review_index` 복제 경로에서만 채워진다). 상태 칸은 **탭 단위 속성**이라 그 줄만
+   제출을 못 하는 것은 사실과 다르다 → 탭 감지값으로 보완하되, 그래도 없으면 거부. */
+assert.match(service, /statusHeaderForTab\(client, \{ sheetId, tabName, kind: 'submit' \}\)/,
+  '줄에 값이 없으면 그 탭의 감지값으로 보완한다(잠근 tx 라 client 로 조회)');
+assert.match(read('src/services/sheetlessStatus.service.js'), /^\s*statusHeaderForTab,$/m,
+  '해석기는 무시트 상태 기록과 같은 것을 쓴다(사본 금지)');
+assert.match(manualBlock, /submit_column_missing/, '그래도 못 찾으면 거부한다(추측 기입 금지)');
+assert.match(workdesk, /submit_column_missing:'이 작업표에 리뷰제출 열이 없습니다/,
+  '화면은 오류 코드가 아니라 무엇을 해야 하는지를 말한다');
+assert.match(workdesk, /_MR_ERR\[k\] \|\|/, '모르는 코드는 원문을 남긴다(뭉뚱그리지 않는다)');
+
+/* ── 2026-08-21 ② 파일만 쌓이는 상태 차단 · 표준 이름 `리뷰` ────────────────────
+   신고: 캡처는 드라이브에 저장됐는데 작업보드에 제출 시각이 안 찍혔다 → 업로드가 먼저라
+   제출이 거부되면 **파일만 남았다**(재시도마다 한 장씩 쌓였다).
+     ① 붙여넣기 **전에** 사전 확인(쓰기 0) — 못 낼 상태면 첨부조차 받지 않는다
+     ② 이미 올라온 캡처로 **업로드 없이** 제출할 수 있다(쌓인 파일이 곧 근거)
+     ③ 리뷰제출 칸이 없으면 작업표 생성이 **만들어 붙인다**(표준 이름 = `리뷰`)
+     ④ "제출 칸인가" 판정은 인덱스 빌드와 **같은 함수** */
+assert.match(manualBlock, /if \(preflight\) \{[\s\S]{0,200}ROLLBACK/,
+  '사전 확인은 쓰기 없이 되돌린다');
+assert.ok(manualBlock.indexOf('if (preflight)') < manualBlock.indexOf('FROM review_submissions'),
+  '사전 확인은 파일 대조 앞에서 끝난다(파일 없이도 답한다)');
+const preAt = routes.indexOf("router.get('/workdesk/manual-review-precheck'");
+assert.ok(preAt >= 0, '사전 확인 라우트가 있다');
+const preBlock = routes.slice(preAt, preAt + 1400);
+assert.match(preBlock, /authMiddleware, internalMiddleware/, '제출과 같은 권한 게이트');
+assert.match(preBlock, /preflight: true/, '제출과 같은 함수를 사전 확인 모드로 부른다(사본 금지)');
+assert.match(preBlock, /reviewImagesForTab/, '그 줄에 이미 올라온 캡처를 함께 준다');
+
+assert.match(workdesk, /manual-review-precheck/, '화면이 붙여넣기 전에 확인한다');
+assert.match(takeFnLate(), /st\.pre&&st\.pre\.ok===false/,
+  '못 낼 상태면 첨부를 받지 않는다(드라이브에 파일이 쌓이지 않는다)');
+assert.match(workdesk, /function _manualReviewSubmitExisting/, '이미 올라온 캡처로 제출하는 경로가 있다');
+assert.doesNotMatch(
+  workdesk.slice(workdesk.indexOf('function _manualReviewSubmitExisting'), workdesk.indexOf('async function _manualReviewFinish')),
+  /review-upload/, '기존 캡처 제출은 업로드하지 않는다(같은 캡처를 또 쌓지 않는다)');
+assert.equal((workdesk.match(/\/api\/trackb\/workdesk\/manual-review-submit'/g) || []).length, 1,
+  '제출 실행부는 한 벌(_manualReviewFinish) — 붙여넣기·기존 캡처가 같은 경로를 쓴다');
+
+// ③④ 표준 이름 · 판정 단일 출처
+const plan = read('src/utils/worktablePlan.js');
+assert.match(plan, /const REVIEW_SUBMIT_HEADER = '리뷰';/, '작업표가 만드는 제출 칸의 표준 이름 = 리뷰');
+assert.match(plan, /findSubmitColumnIndex/, '존재 판정은 읽는 쪽과 같은 함수(사본 금지)');
+assert.match(plan, /ensureReviewColumn\(columns\);/, '작업표 생성이 제출 칸을 보장한다');
+assert.match(read('src/services/columnResolver.js'), /findSubmitColumnIndex,/, '판정 함수를 내보낸다');
+assert.match(read('../frontend/js/admin-settings.js'), /'주문번호', '리뷰', '입금'/, '표준 열 프리셋도 리뷰');
+assert.match(service, /_SUBMIT_HEADERS = new Set\(\['리뷰',/, '폴백 목록에도 리뷰(정확일치라 리뷰옵션·리뷰비는 안 걸린다)');
+assert.match(workdesk, /_WD_SUBMIT_HEADERS=new Set\(\['리뷰',/, '화면 폴백 목록도 같은 기준');
+
+// 스텁 pool 로 실제 실행 — 줄 값 우선 · 탭 폴백 · fail-closed 세 갈래.
+(async () => {
+  process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
+  const svc = require('../src/services/trackB.service');
+  const FID = 'FILE1234567890';
+  const mk = (part, tabCol) => {
+    const client = {
+      async query(sql) {
+        const q = String(sql).replace(/\s+/g, ' ');
+        if (/^BEGIN|^ROLLBACK|^COMMIT/.test(q)) return { rows: [] };
+        if (/FROM campaign_participants WHERE id=\$1/.test(q)) return { rows: [part] };
+        if (/FROM review_index WHERE sheet_id = \$1 AND tab_name = \$2 AND COALESCE/.test(q)) return { rows: tabCol ? [{ h: tabCol }] : [] };
+        if (/SELECT is_submitted FROM review_index/.test(q)) return { rows: [{ is_submitted: false }] };
+        if (/FROM review_submissions/.test(q)) return { rows: [{ file_id: FID }] };
+        if (/UPDATE campaign_participants/.test(q)) return { rows: [{ submit_value: '8/21 15:00' }], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
+      },
+      release() {},
+    };
+    return { async connect() { return client; } };
+  };
+  const base = { id: 'p1', seq: 444, reviewer_name: '최은지', submit_col: null, is_submitted: false,
+    source: 'manual', order_submission_id: null, identity_key: null, phone8: '0402',
+    recipient_name: '최은지', option_text: null, row_json: {} };
+  const call = () => svc.manualWorkdeskReviewSubmit({ sheetId: 's', tabName: 'T', rowId: 'p1', fileIds: [FID] });
+
+  svc.__setPoolForTest(mk(base, '리뷰제출'));
+  let r = await call();
+  assert.equal(r.ok, true, '수동 줄도 탭 감지값으로 제출된다: ' + r.error);
+  assert.equal(r.submitColumn, '리뷰제출');
+
+  svc.__setPoolForTest(mk(base, ''));
+  r = await call();
+  assert.equal(r.error, 'submit_column_missing', '탭에도 리뷰제출 열이 없으면 거부(fail-closed)');
+
+  svc.__setPoolForTest(mk({ ...base, submit_col: '리뷰' }, '리뷰제출'));
+  r = await call();
+  assert.equal(r.submitColumn, '리뷰', '줄이 들고 있는 값이 탭 폴백을 이긴다');
+
+  console.log('workdeskManualReviewSubmit.test.js: OK');
+  process.exit(0);
+})().catch(e => { console.error(e); process.exit(1); });
