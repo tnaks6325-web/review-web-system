@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>업체용 뷰어 — 담당자 표기 시안 (A/B/C/D)</title>
+<style>
+:root{
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --adv:#6d5ac9;--adv-soft:#efecfa;
+  --shadow-card:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.05);
+  --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
+  --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;color-scheme:light}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 20px 80px}
+
+/* ── 문서 머리 ── */
+h1{font-size:21px;margin:0 0 6px;letter-spacing:-.02em}
+.sub{color:var(--muted);font-size:13px;margin:0 0 18px}
+.picker{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 22px}
+.picker a{font-size:12.5px;font-weight:700;text-decoration:none;color:var(--muted);background:var(--card);
+  border:1px solid var(--line);border-radius:9px;padding:6px 13px}
+.picker a.on{color:#fff;background:var(--accent);border-color:var(--accent)}
+.facts{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 24px}
+.facts h2{font-size:13px;margin:0 0 9px;letter-spacing:-.01em}
+table.f{width:100%;border-collapse:collapse;font-size:12.5px}
+table.f th,table.f td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.f th{color:var(--faint);font-size:11px;font-weight:700}
+table.f td.n{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.k{font-family:var(--mono);font-size:11.5px;background:var(--card2);border:1px solid var(--line);
+   border-radius:5px;padding:1px 5px}
+
+/* ── 안(案) 블록 ── */
+section.opt{margin:0 0 34px}
+section.opt>header{display:flex;align-items:baseline;gap:10px;margin:0 0 4px;flex-wrap:wrap}
+section.opt h2{font-size:16px;margin:0;letter-spacing:-.02em}
+.tagpill{font-size:10px;font-weight:800;letter-spacing:.04em;border-radius:999px;padding:2px 9px;border:1px solid}
+.tagpill.same{color:var(--muted);background:var(--card2);border-color:var(--line2)}
+.tagpill.diff{color:var(--accent-deep);background:var(--accent-soft);border-color:var(--accent-line)}
+.optdesc{color:var(--muted);font-size:12.5px;margin:0 0 12px}
+
+/* ── 업체 뷰어 실물 재현 ── */
+.viewer{background:var(--paper);border:1px solid var(--line2);border-radius:14px;padding:0;overflow:hidden;
+        box-shadow:var(--shadow-card)}
+.vtop{display:flex;align-items:center;gap:12px;padding:9px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+.vtop .logo{font-weight:800;letter-spacing:-.02em;font-size:14px}
+.vtop .logo .tag{font-size:9.5px;font-weight:800;color:var(--adv);background:var(--adv-soft);
+  border:1px solid #ded7f5;padding:2px 8px;border-radius:999px;margin-left:7px;letter-spacing:.04em}
+.vtop .who{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.vbody{padding:14px 16px 18px}
+.mh{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:nowrap}
+.mh h1{font-size:18px;margin:0;font-weight:800;letter-spacing:-.02em;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bd{font-size:11px;font-weight:700;color:var(--muted);background:var(--card2);border:1px solid var(--line);
+    border-radius:999px;padding:2px 9px;white-space:nowrap;flex:none}
+
+.tp3grid{display:grid;grid-template-columns:minmax(250px,1.05fr) minmax(280px,1.1fr) minmax(230px,.95fr);
+         gap:9px;margin-bottom:8px}
+.tp3col{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-width:0}
+.tp3t{font-size:9.5px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;
+      display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.tp3hint{margin-left:auto;text-transform:none;letter-spacing:0;font-size:9.5px;font-weight:700;color:var(--faint)}
+.tp3chev{font-size:10px;color:var(--faint)}
+.cndprod{font-size:12.5px;font-weight:750;line-height:1.35;margin-bottom:7px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cndl{display:grid;grid-template-columns:62px minmax(0,1fr);gap:0 8px;font-size:11.5px;align-content:start;margin:0}
+.cndl dt{color:var(--faint);font-weight:650;padding:3px 0;border-top:1px solid var(--line)}
+.cndl dd{margin:0;font-weight:700;padding:3px 0;border-top:1px solid var(--line);
+         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cndl dt:first-of-type,.cndl dd:first-of-type{border-top:0}
+.cndl dd .u{font-size:10px;font-weight:600;color:var(--faint);margin-left:2px}
+.cndl a{color:var(--accent);text-decoration:none}
+.cnna{color:var(--faint);font-weight:600}
+.cndchip{font-size:9.5px;font-weight:700;color:var(--muted);background:var(--card2);
+  border:1px solid var(--line);border-radius:999px;padding:1px 6px;margin-left:3px}
+/* 시안 표시용 — 새로 생기는 행만 옅게 칠한다(실제 화면에는 이 색이 없다). */
+.cndl dt.newrow,.cndl dd.newrow{background:#fff7db;box-shadow:inset 0 0 0 1px #f5d67e}
+
+.tp3g{display:flex;align-items:center;gap:10px;padding:5px 0}
+.tp3g .lb{font-size:11px;color:var(--muted);font-weight:650;width:58px;flex:none}
+.tp3g .nm{font-size:16px;font-weight:800;letter-spacing:-.02em;width:92px;flex:none}
+.tp3g .nm small{font-size:10.5px;font-weight:600;color:var(--faint);margin-left:1px}
+.tp3g .track{flex:1;height:6px;border-radius:4px;background:var(--line);overflow:hidden;min-width:40px}
+.tp3g .track i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.tp3g .track i.s{background:var(--safe)}
+.tp3g .pc{font-size:10.5px;font-weight:800;width:36px;text-align:right;flex:none;color:var(--muted)}
+.rv2{display:grid;grid-template-columns:1fr 1fr;gap:9px;height:132px}
+.rv2c{border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px;
+      display:flex;align-items:center;justify-content:center}
+.rvshot{width:100%;height:100%;border-radius:6px;background:
+  repeating-linear-gradient(135deg,#e8edf4 0 8px,#eef2f7 8px 16px);
+  display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--faint);font-weight:700}
+
+/* ── 대조표 ── */
+.diff3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:11px}
+.dbox{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.dbox h3{font-size:10.5px;margin:0 0 6px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.dbox p{margin:0;font-size:12px;color:var(--muted);line-height:1.5}
+.dbox .no{color:var(--faint)}
+.dbox .yes{color:var(--accent-deep);font-weight:700}
+.dbox .fix{color:var(--safe);font-weight:700}
+
+pre.pl{margin:9px 0 0;background:#0f172a;color:#cbd5e1;border-radius:10px;padding:11px 13px;
+  font-family:var(--mono);font-size:11px;line-height:1.6;overflow:auto}
+pre.pl .del{color:#fca5a5}
+pre.pl .add{color:#86efac}
+pre.pl .cm{color:#64748b}
+
+.note{background:var(--warn-soft);border:1px solid #f3e0c0;border-radius:10px;padding:11px 13px;
+  font-size:12.5px;color:#7c4a08;margin:12px 0 0}
+.note b{color:#6b3f06}
+.note.blue{background:var(--accent-soft);border-color:var(--accent-line);color:#1e3a8a}
+.note.blue b{color:#1e3a8a}
+@media(max-width:900px){.tp3grid{grid-template-columns:1fr}.diff3{grid-template-columns:1fr}}
+</style></head><body>
+<div class="wrap">
+
+<h1>업체용 뷰어 — 담당자 표기 시안</h1>
+<p class="sub">작업오더 담당자 칸(<span class="k">manager_name</span> · <span class="k">work_manager</span> · <span class="k">created_by</span>)을 어디까지 정리할지 정하는 시안입니다. 아래 위젯으로 안을 바꿔 보세요.</p>
+
+<div class="picker" id="pick">
+  <a href="?v=A" data-v="A">A — 페이로드만 정리</a>
+  <a href="?v=B" data-v="B">B — A + 라벨 정정</a>
+  <a href="?v=C" data-v="C">C — B + 칸 정합</a>
+  <a href="?v=D" data-v="D">D — 업체에 담당 AE 노출</a>
+  <a href="?v=all" data-v="all">전체 보기</a>
+</div>
+
+<div class="facts">
+  <h2>먼저 — 본섭 작업오더 116건 전수 대조 (실측)</h2>
+  <table class="f">
+    <tr><th style="width:190px">칸</th><th>실제 들어 있는 값</th><th style="width:230px">정체</th></tr>
+    <tr><td><span class="k">manager_name</span><br><span style="font-size:11px;color:var(--bad)">코드 라벨 = "담당AE"</span></td>
+        <td class="n">박세희 42 · 박은비 34 · 랜덤 9 · 만두 1 · (빈값) 30</td>
+        <td>리뷰웹 관리자<br><span style="font-size:11px;color:var(--muted)">모집·공고관리 — AE 아님</span></td></tr>
+    <tr><td><span class="k">work_manager</span><br><span style="font-size:11px;color:var(--muted)">라벨 = "작업담당"</span></td>
+        <td class="n">박세희 15 · 박은비 9 · 랜덤 7 · (빈값) 63</td>
+        <td>같은 인물 (중복 칸)</td></tr>
+    <tr><td><span class="k">created_by</span></td>
+        <td class="n">황운하 · 이만수 · 김수만 · 정현민 · 테스트AE</td>
+        <td><b>진짜 담당 AE</b> (오더 작성자)</td></tr>
+  </table>
+  <div class="note" style="margin-top:11px">
+    <b>지금 상태</b> — 업체용 뷰어 <b>화면에는 담당자가 한 글자도 안 나옵니다</b>. 다만 서버 응답(<span class="k">res.detail</span>)이 역할 구분 없이 나가서, 개발자도구를 열면 <b>박세희·박은비 실명</b>과 리뷰 가이드·특이사항·유입가이드 원문이 그대로 보입니다.
+    리뷰어 화면에서는 같은 이름을 닉네임(만두·망고)으로 가리는 규율이 있는데 업체 쪽만 어긋나 있습니다.
+  </div>
+</div>
+
+<!-- ══════════════ A ══════════════ -->
+<section class="opt" data-opt="A">
+  <header><h2>A안 — 페이로드만 정리</h2><span class="tagpill same">업체 화면 변화 없음</span></header>
+  <p class="optdesc">서버 응답에 광고주 렌즈(화이트리스트)를 씌워 담당자 실명·가이드 원문을 <b>내려보내지 않습니다</b>. 화면은 지금과 한 픽셀도 다르지 않습니다.</p>
+  <div class="viewer" data-view></div>
+  <div class="diff3">
+    <div class="dbox"><h3>업체 화면</h3><p class="no">변화 없음 — 담당자는 원래 안 보였습니다.</p></div>
+    <div class="dbox"><h3>서버 응답</h3><p class="fix">실명·가이드 원문 제거</p></div>
+    <div class="dbox"><h3>내부 화면</h3><p class="no">변화 없음 (라벨 오류는 그대로)</p></div>
+  </div>
+<pre class="pl"><span class="cm">// 업체용 응답 res.detail</span>
+<span class="del">- managerName: "박세희"        // 리뷰웹 관리자 실명</span>
+<span class="del">- workManager: "박세희"</span>
+<span class="del">- reviewGuide: "리뷰 작성 시 …"  // 가이드 전문</span>
+<span class="del">- specialNotes: "…"</span>
+<span class="del">- inflowGuide: "&lt;p&gt;검색어 …"</span>
+<span class="add">+ (담당자·가이드 필드 없음 — 화이트리스트 통과분만)</span></pre>
+</section>
+
+<!-- ══════════════ B ══════════════ -->
+<section class="opt" data-opt="B">
+  <header><h2>B안 — A + 라벨 정정</h2><span class="tagpill same">업체 화면 변화 없음</span></header>
+  <p class="optdesc">A에 더해, 내부 화면에서 <span class="k">manager_name</span> 을 <b>"담당AE" → "작업담당"</b> 으로 고쳐 부릅니다. 표시 문자열만 바꾸는 것이라 데이터는 무접촉입니다. 업체 화면에는 그 칸이 애초에 안 나오므로 변화가 없습니다.</p>
+  <div class="viewer" data-view></div>
+  <div class="diff3">
+    <div class="dbox"><h3>업체 화면</h3><p class="no">변화 없음</p></div>
+    <div class="dbox"><h3>서버 응답</h3><p class="fix">A와 동일 (실명·가이드 제거)</p></div>
+    <div class="dbox"><h3>내부 화면</h3><p class="fix">작업오더 상세·수정 모달 라벨 정정</p></div>
+  </div>
+<pre class="pl"><span class="cm">// 내부 화면 — 작업오더 상세 / 관리자 수정 모달</span>
+<span class="del">- 담당AE : 박세희</span>
+<span class="add">+ 작업담당 : 박세희          <span class="cm">// 리뷰웹 관리자(모집·공고관리)</span></span>
+<span class="add">+ 담당AE  : 황운하          <span class="cm">// created_by = 오더 작성 AE</span></span></pre>
+</section>
+
+<!-- ══════════════ C ══════════════ -->
+<section class="opt" data-opt="C">
+  <header><h2>C안 — B + 칸 정합</h2><span class="tagpill same">업체 화면 변화 없음</span></header>
+  <p class="optdesc">B에 더해 <span class="k">manager_name</span> ↔ <span class="k">work_manager</span> 중복을 정리합니다. 지금 <b>53건은 work_manager 만 비어</b> 있어 탭 담당자 닉네임(만두·망고) 매핑이 그 건들에서 안 채워졌을 수 있습니다. 접수·닉네임 매핑에 영향이 가는 범위입니다.</p>
+  <div class="viewer" data-view></div>
+  <div class="diff3">
+    <div class="dbox"><h3>업체 화면</h3><p class="no">변화 없음</p></div>
+    <div class="dbox"><h3>서버 응답</h3><p class="fix">A와 동일</p></div>
+    <div class="dbox"><h3>내부 화면</h3><p class="fix">라벨 정정 + 탭 담당자(만두·망고) 표기 복구</p></div>
+  </div>
+  <div class="note"><b>주의</b> — 이 안만 데이터를 건드립니다(빈 <span class="k">work_manager</span> 53건 백필). 접수 업서트·닉네임 매핑을 함께 조사한 뒤 진행하는 것이 맞습니다.</div>
+</section>
+
+<!-- ══════════════ D ══════════════ -->
+<section class="opt" data-opt="D">
+  <header><h2>D안 — 업체에 담당 AE 한 줄 노출</h2><span class="tagpill diff">업체 화면이 실제로 달라지는 유일한 안</span></header>
+  <p class="optdesc">A~C 는 전부 내부·페이로드 정리라 업체가 보는 화면은 같습니다. <b>업체 화면을 실제로 바꾸는 선택지는 이것 하나</b>입니다 — 작업 조건 카드에 <b>담당</b> 행을 넣어 그 업체를 맡은 <b>AE</b>(<span class="k">created_by</span>)를 보여줍니다. 리뷰웹 관리자(박세희·박은비)는 <b>여전히 안 나갑니다</b>.</p>
+  <div class="viewer" data-view></div>
+  <div class="diff3">
+    <div class="dbox"><h3>업체 화면</h3><p class="yes">작업 조건에 「담당」 행 1줄 추가</p></div>
+    <div class="dbox"><h3>서버 응답</h3><p class="fix">렌즈에 담당 AE 이름만 허용</p></div>
+    <div class="dbox"><h3>내부 화면</h3><p class="fix">B와 동일 (라벨 정정)</p></div>
+  </div>
+  <div class="note blue"><b>정할 것</b> — 업체에게 <b>이름</b>(황운하)을 그대로 보일지, <b>부서만</b>(AE팀) 보일지. 이름을 보이면 업체가 문의할 창구가 분명해지지만, 담당이 바뀌면 그 값도 같이 관리해야 합니다.</div>
+</section>
+
+<script>
+/* 업체용 뷰어 재현 — 안(案)별로 「담당」 행 유무만 다르다. 마크업은 실제 화면과 같은 구조. */
+var COND = [
+  ['메인URL', '<a href="#" onclick="return false">https://www.coupang.com/vp/products/9659949648</a>'],
+  ['일정',    '2026-08-15<span class="u">~</span>2026-09-02'],
+  ['구매시간', '00:00<span class="u">~</span>15:00 <span class="cndchip">공고 기준</span>'],
+  ['총건수',  '500<span class="u">건</span>'],
+  ['일건수',  '발주 기준 30<span class="u">건/일</span>'],
+  ['결제금액', '상품결제금액 15,900<span class="u">원</span> / 총 7,950,000<span class="u">원</span>'],
+  ['구매채널', '쿠팡'],
+  ['유입방식', '가이드유입'],
+  ['리뷰타입', '자율리뷰']
+];
+function viewerHtml(opt){
+  var rows = COND.slice();
+  if (opt === 'D') rows.splice(3, 0, ['담당', '황운하 <span class="cndchip">AE팀</span>', true]);
+  var dl = rows.map(function(r){
+    var cls = r[2] ? ' class="newrow"' : '';
+    return '<dt'+cls+'>'+r[0]+'</dt><dd'+cls+'>'+r[1]+'</dd>';
+  }).join('');
+  return ''
+  + '<div class="vtop"><span class="logo">리뷰웹시스템<span class="tag">업체 전용</span></span>'
+  +   '<span class="who">웰스앤헬스 님</span></div>'
+  + '<div class="vbody">'
+  +   '<div class="mh"><h1>8/14(쿠팡)웰스앤헬스 약도라지 캔디 체험단 500건</h1>'
+  +     '<span class="bd">업체 전용 열람</span></div>'
+  +   '<div class="tp3grid">'
+  +     '<div class="tp3col"><div class="tp3t">작업 조건<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>'
+  +       '<div class="cndprod">웰스앤헬스 천기 약도라지 삼백초캔디 건강캔디 부모님간식 프리미엄캔디 목캔디, 1박스, 152g</div>'
+  +       '<dl class="cndl">'+dl+'</dl></div>'
+  +     '<div class="tp3col"><div class="tp3t">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>'
+  +       gauge('참여자','252','500',50,'')
+  +       gauge('리뷰제출','198','252',79,'s')
+  +       gauge('입금','176','252',70,'s')
+  +     '</div>'
+  +     '<div class="tp3col"><div class="tp3t">제출물 미리보기<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>'
+  +       '<div class="rv2"><div class="rv2c"><div class="rvshot">구매 캡처</div></div>'
+  +       '<div class="rv2c"><div class="rvshot">리뷰 캡처</div></div></div></div>'
+  +   '</div>'
+  + '</div>';
+}
+function gauge(lb,n,den,pc,cls){
+  return '<div class="tp3g"><span class="lb">'+lb+'</span>'
+    + '<span class="nm">'+n+'<small>/'+den+'</small></span>'
+    + '<span class="track"><i class="'+cls+'" style="width:'+pc+'%"></i></span>'
+    + '<span class="pc">'+pc+'%</span></div>';
+}
+(function(){
+  var v = (new URLSearchParams(location.search).get('v') || 'all').toUpperCase();
+  if (v === 'ALL') v = 'all';
+  document.querySelectorAll('[data-view]').forEach(function(el){
+    el.innerHTML = viewerHtml(el.closest('[data-opt]').getAttribute('data-opt'));
+  });
+  document.querySelectorAll('section.opt').forEach(function(s){
+    s.style.display = (v === 'all' || s.getAttribute('data-opt') === v) ? '' : 'none';
+  });
+  document.querySelectorAll('#pick a').forEach(function(a){
+    if (a.getAttribute('data-v') === (v === 'all' ? 'all' : v)) a.classList.add('on');
+  });
+})();
+</script>
+</div></body></html>
