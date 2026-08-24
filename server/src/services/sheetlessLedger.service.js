@@ -160,7 +160,8 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
 
   // ── 게이트: 무시트 탭에서만 (fail-closed) ──
   const { rows: tcRows } = await db.query(
-    `SELECT tab_gid, campaign_name, COALESCE(sheetless, FALSE) AS sheetless
+    `SELECT tab_gid, campaign_name, COALESCE(sheetless, FALSE) AS sheetless,
+            closed_rounds, archived_rounds
        FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
   if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다(접수 후 이용).');
   if (!tcRows[0].sheetless && !(dryRun && preflight)) {
@@ -169,6 +170,14 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   }
   const tabGid = String(tcRows[0].tab_gid || '');
   const campaignName = tcRows[0].campaign_name || '';
+
+  /* ★★ 차수 마감·아카이브 — **시트 경로와 같은 함수**(`closedRounds.service`)를 쓴다.
+     종전에는 이 경로가 두 칸(`closed_rounds`/`archived_rounds`)을 한 번도 읽지 않아,
+     무시트 작업에서 차수를 아카이브해도 **다음 재생성이 그대로 되살렸다**(조용한 no-op).
+     `archive.routes` 에 무시트 제외 필터가 없어 화면에서는 성공했다고 나오던 상태다.
+     ★ 조회 실패는 "제외 없음"으로 접는다 — 못 읽었다고 명단에서 사람을 빼지 않는다. */
+  const _closedRounds = require('./closedRounds.service');
+  const excludeRounds = _closedRounds.excludedRounds(tcRows[0]);
 
   // #0 같은 수동 이체 원장은 작업표를 재구성해도 잃으면 안 된다. 행 번호가 아니라
   // 리뷰어/주문 앵커로 다시 찾아 입금칸을 보강한 뒤, 그 값을 이번 장부 재료로 읽는다.
@@ -216,14 +225,21 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   try { dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid); } catch (_) {}
   const parsed = _ib.parseTabRows(values, sheetId, tabName, tabGid, campaignName, dbColMap) || [];
 
-  const submittedCount = parsed.filter(r => r.isSubmitted).length;
+  /* ★★ 명단에 실제로 들어가는 줄 = 마감·아카이브 차수를 뺀 것.
+     집계도 **같은 목록**에서 센다 — `parsed.length` 를 그대로 보고하면 화면이
+     "명단 216명"이라 말하고 실제로는 50명만 들어가는 조용한 불일치가 된다. */
+  const indexed = _closedRounds.filterRows(parsed, excludeRounds);
+  const excludedCount = parsed.length - indexed.length;
+  const submittedCount = indexed.filter(r => r.isSubmitted).length;
   const checksum = computeChecksum(JSON.stringify({ headers, n: parts.length, s: submittedCount }));
 
   if (dryRun) {
     return {
       dryRun: true, sheetId, tabName, tabGid, headerSource,
-      headers, headerRow, mirrorRows: parts.length, indexRows: parsed.length, submittedCount,
-      note: 'raw 미러는 빈 슬롯 포함 전 행 · 검색 명단은 이름 있는 행만(파서 규칙 그대로)',
+      headers, headerRow, mirrorRows: parts.length, indexRows: indexed.length, submittedCount,
+      excludedRounds: excludeRounds, excludedRows: excludedCount,
+      note: 'raw 미러는 빈 슬롯 포함 전 행 · 검색 명단은 이름 있는 행만(파서 규칙 그대로)'
+        + (excludedCount ? ` · 마감 차수 ${excludeRounds.join(',')} ${excludedCount}행 제외` : ''),
     };
   }
 
@@ -275,9 +291,18 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
 
     filesSeen = keepRows.length;
 
+    /* ★★ 마감·아카이브된 차수는 **지우기 전에** `review_index_archive` 로 옮긴다.
+       순서가 계약이다 — 아래 DELETE 가 먼저 돌면 옮길 행이 남지 않아 기록이 증발한다.
+       같은 트랜잭션(`client`)에서 돌려 부분 성공을 남기지 않는다. */
+    if (excludeRounds.length) {
+      await _closedRounds.archiveExcludedRounds({
+        sheetId, tabName, exclude: excludeRounds, db: client, by: `rebuildLedgers:${by}` });
+    }
+
     // ② 검색 명단(review_index) — 그 탭만 갈아끼운다(시트 빌더와 같은 방식)
     await client.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [sheetId, tabName]);
-    for (const r of parsed) {
+    /* ★ 제외 차수 행은 다시 넣지 않는다 — 이걸 빼면 위에서 옮겨 둔 행이 곧바로 되살아난다. */
+    for (const r of indexed) {
       await client.query(
         `INSERT INTO review_index
            (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name, row_index,
@@ -324,10 +349,13 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
     client.release();
   }
 
-  logger.info(`[sheetlessLedger] 장부 생성 tab=${tabName} 미러 ${mirrorRows}행 · 명단 ${parsed.length}행 · 헤더출처=${headerSource} by=${by}`);
+  logger.info(`[sheetlessLedger] 장부 생성 tab=${tabName} 미러 ${mirrorRows}행 · 명단 ${indexed.length}행`
+    + (excludedCount ? ` (마감 차수 ${excludeRounds.join(',')} ${excludedCount}행 제외)` : '')
+    + ` · 헤더출처=${headerSource} by=${by}`);
   return {
     ok: true, sheetId, tabName, tabGid, headerSource,
-    headers, headerRow, mirrorRows, indexRows: parsed.length, submittedCount,
+    headers, headerRow, mirrorRows, indexRows: indexed.length, submittedCount,
+    excludedRounds: excludeRounds, excludedRows: excludedCount,
     filesKept, filesSeen,
   };
 }
