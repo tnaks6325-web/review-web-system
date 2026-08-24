@@ -486,7 +486,27 @@ const WO_TRANSITIONS = {
   revision:       ['reviewing'],
 };
 
-const WO_DELIVERY_MAP = { '실배송':'실배송', '빈박스':'빈박스', '택배발송대행':'택배발송대행' };
+/* ★★ 배송유형 5종 — 서버 `utils/deliveryType.DELIVERY_TYPES` 의 **최소 사본**(회귀가드가 일치를 고정).
+   회수·혼합은 인트라넷이 `회수(회수택배사: …)` · `혼합(실배송 20건, 빈박스 80건)` 처럼 **문장**으로
+   보내므로 정확일치 맵으로는 못 받는다 → 앞머리 토큰을 기본형으로 접는다(서버와 같은 규칙). */
+const WO_DELIVERY_TYPES = ['실배송', '빈박스', '택배발송대행', '회수', '혼합'];
+const _WO_DELIVERY_RULES = [
+  { base: '택배발송대행', re: /^택배\s*발송\s*대행$/ },
+  { base: '실배송',       re: /^실\s*배송$/ },
+  { base: '빈박스',       re: /^빈\s*(?:택배|박스)$/ },   // 옛 표기 `빈택배` 도 읽어서 접는다
+  { base: '회수',         re: /^회수\s*건?$/ },           // 옛 표기 `회수건`
+  { base: '혼합',         re: /^(?:혼합|믹스|mix(?:ed)?)$/i },
+];
+/** 배송유형 문자열 → 기본형. 판정 불가면 '' (추측하지 않는다 — 틀린 값보다 빈 값). */
+function _woDeliveryBase(v) {
+  var s = String(v == null ? '' : v).trim();
+  var cut = s.indexOf('(');
+  var head = (cut >= 0 ? s.slice(0, cut) : s).trim();
+  if (!head) return '';
+  for (var i = 0; i < _WO_DELIVERY_RULES.length; i++)
+    if (_WO_DELIVERY_RULES[i].re.test(head)) return _WO_DELIVERY_RULES[i].base;
+  return '';
+}
 
 /* ★ 구매채널 = 상품 URL의 **호스트**로 판정한다.
    쿼리스트링까지 보면 `coupang.com/...?src=naver_ad` 같은 광고 링크를 네이버로 오판한다.
@@ -753,7 +773,12 @@ function _woCampaignPrefill(o) {
     review_fee:    Number(o.review_fee ?? o.reviewFee ?? 0) || 0,
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
-    delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
+    delivery_type: _woDeliveryBase(o.delivery_type),
+          // ★ 135: 회수·혼합 부속정보는 **기본형과 함께** 넘긴다 — 종전에는 맵 조회 실패로
+          //   배송유형이 통째로 빈 값이 되어 회수택배사·혼합 건수가 발행 시점에 증발했다.
+          delivery_type_mix: o.delivery_type_mix || null,
+          recall_courier: o.recall_courier || "",
+          recall_product: o.recall_product || "",
     // ★ 087: 리뷰타입 — 인트라넷 발주 폼의 값이 그대로 온다(`포토` · `구매확정` ·
     //   `혼합(포토 10건, 텍스트 20건, …)`). 표준 key 변환은 발행 폼이 하고 저장 시 서버가 다시 정규화한다.
     //   ★ 여기서 미리 변환하지 않는 이유 = 이 모듈은 상세 표시도 겸해 **원문**을 그대로 보여줘야 한다.
@@ -978,7 +1003,7 @@ function woAdminEditModal(order, opts) {
   var c2 = card(body, "📦 진행 조건");
   field(c2, "recruit_count", "총 모집건수", { type: "number", hint: ch("", "총인원") });
   field(c2, "daily_count", "일일 진행건수", { type: "number", hint: ch("", "일 모집인원") });
-  pills(c2, "delivery_type", "배송유형", [{ v: "실배송", l: "실배송" }, { v: "빈박스", l: "빈박스" }, { v: "택배발송대행", l: "택배발송대행" }]);
+  pills(c2, "delivery_type", "배송유형", WO_DELIVERY_TYPES.map(function (v) { return { v: v, l: v }; }));
   pills(c2, "review_type", "리뷰타입", [
     { v: "포토", l: "포토" }, { v: "텍스트", l: "텍스트" }, { v: "구매확정", l: "구매확정" },
     { v: "별점", l: "별점" }, { v: "혼합", l: "혼합" },
@@ -1268,7 +1293,7 @@ function woAdvertiserLinkPicker(resp, onLink) {
     WO_TRANSITIONS: WO_TRANSITIONS, WO_ACCEPT_ELIGIBLE: WO_ACCEPT_ELIGIBLE,
     _woAcceptable: _woAcceptable, _woAccepted: _woAccepted,
     _woAcceptSheetless: _woAcceptSheetless,
-    WO_DELIVERY_MAP: WO_DELIVERY_MAP, WO_CHANNEL_HOSTS: WO_CHANNEL_HOSTS,
+    WO_DELIVERY_TYPES: WO_DELIVERY_TYPES, _woDeliveryBase: _woDeliveryBase, WO_CHANNEL_HOSTS: WO_CHANNEL_HOSTS,
     _woChannelFromUrl: _woChannelFromUrl, _woChannel: _woChannel,
     _woPlainGuideToHtml: _woPlainGuideToHtml, _woReviewImgHtml: _woReviewImgHtml,
     _woBuildInflowHtml: _woBuildInflowHtml, _woFirstProductInfo: _woFirstProductInfo,

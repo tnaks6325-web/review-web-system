@@ -20,6 +20,14 @@ const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 
+// ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
+//   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
+//     사용성이다(종전 24바이트 32자). 96비트 엔트로피 + 교환 라우트 레이트리밋(30/분)이라 추측 불가.
+//   ★ 기존에 발급된 32자 토큰은 정확일치 조회라 **그대로 유효**하다 — 짧아지는 건 신규 발급분뿐.
+//   ★ 길이를 다시 늘리려면 여기 한 곳만 고친다(네 곳에 흩어져 있던 randomBytes(24) 사본을 이관).
+const LINK_TOKEN_BYTES = 12;
+function _linkToken() { return require('crypto').randomBytes(LINK_TOKEN_BYTES).toString('base64url'); }
+
 let _pool;
 let _rebuildLedgersForTest = null;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
@@ -755,7 +763,7 @@ async function ownedSheetIds() {
 }
 
 // ── 광고주 접속 링크(매직 링크) 관리 — master/admin(라우트 게이트). 업체당 1토큰(회전=교체)·폐기(active). ──
-//   토큰은 추측불가 랜덤(base64url 24B). 실제 교환(로그인)은 auth.service.loginByLinkToken. Track A 무접촉.
+//   토큰은 추측불가 랜덤(_linkToken — base64url 12B=16자). 실제 교환(로그인)은 auth.service.loginByLinkToken. Track A 무접촉.
 async function getAdvertiserLink(advertiserId) {
   if (!advertiserId) return null;
   const { rows } = await getPool().query(
@@ -767,7 +775,7 @@ async function getAdvertiserLink(advertiserId) {
 // 링크 자동 존재 보장 — 없으면 생성(있으면 유지). 업체 추가/조회 시 호출 → 모든 업체가 항상 고유 URL 보유.
 async function ensureAdvertiserLink({ advertiserId, by = '' } = {}) {
   if (!advertiserId) return null;
-  const token = require('crypto').randomBytes(24).toString('base64url');
+  const token = _linkToken();
   await getPool().query(
     `INSERT INTO trackb_advertiser_links (advertiser_id, token, active, created_by)
      VALUES ($1,$2,TRUE,$3) ON CONFLICT (advertiser_id) DO NOTHING`, [advertiserId, token, String(by).slice(0, 100)]);
@@ -777,7 +785,7 @@ async function generateAdvertiserLink({ advertiserId, by = '' } = {}) {
   if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
   const exists = await getPool().query('SELECT 1 FROM advertisers WHERE id = $1', [advertiserId]);
   if (!exists.rows.length) return { ok: false, code: 404, error: '거래처를 찾을 수 없습니다.' };
-  const token = require('crypto').randomBytes(24).toString('base64url');
+  const token = _linkToken();
   const { rows } = await getPool().query(
     `INSERT INTO trackb_advertiser_links (advertiser_id, token, active, created_by)
      VALUES ($1,$2,TRUE,$3)
@@ -1568,6 +1576,8 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
   }
   const foldersOn = !brand || brand.folders_visible === true;
   const brandsOut = brandId ? undefined : (await brandsForAdvertiser({ advertiserId }).catch(() => null));
+  // 136: 작업별 브랜드 담당자 — 배치 1쿼리(fail-soft 빈 맵). 브랜드 관리 화면의 작업 행이 현재 값을 그린다.
+  const bmgr = await tabBrandManagersMap({ advertiserId });
   return {
     settlementHidden: !visible,
     brand: brand ? { id: brand.id, name: brand.name, color: brand.color } : null,
@@ -1588,6 +1598,7 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
         target: t.woRecruit || null,
         startDate: t.woStartDate ? String(t.woStartDate).slice(0, 10) : null,
         brandId: brandByTab.get(t.sheetId + '\t' + t.tabName) || null,
+        brandManagers: bmgr.get(t.sheetId + '\t' + t.tabName) || [],
         // A안: 자료 폴더 바로가기 — 브랜드 세션은 folders_visible 토글이 꺼져 있으면 서버에서 폐기.
         folderUrl: foldersOn ? (t.folderUrl || null) : null,
         captureFolderUrl: foldersOn ? (t.captureFolderUrl || null) : null,
@@ -1632,7 +1643,7 @@ async function createBrand({ advertiserId, name, color } = {}) {
     [advertiserId, nm]);
   if (dup.rows.length) return { ok: false, code: 400, error: `이미 "${nm}" 브랜드가 있습니다` };
   const id = 'brd_' + require('crypto').randomBytes(6).toString('hex');
-  const token = require('crypto').randomBytes(24).toString('base64url');
+  const token = _linkToken();
   const col = /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : '#2563eb';
   const { rows } = await getPool().query(
     `INSERT INTO trackb_brands (id, advertiser_id, name, color, link_token) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
@@ -1657,7 +1668,7 @@ async function updateBrand({ advertiserId, brandId, action, name, color, on } = 
   }
   if (action === 'link-active') { await db.query('UPDATE trackb_brands SET link_active=$2 WHERE id=$1', [brandId, on === true]); return { ok: true }; }
   if (action === 'link-rotate') {   // 유출 대응 — 새 토큰 발급(이전 링크 즉시 무효)
-    const token = require('crypto').randomBytes(24).toString('base64url');
+    const token = _linkToken();
     await db.query('UPDATE trackb_brands SET link_token=$2, link_active=TRUE WHERE id=$1', [brandId, token]);
     return { ok: true, linkToken: token };
   }
@@ -1687,6 +1698,72 @@ async function assignBrandTabs({ advertiserId, brandId, tabs } = {}) {
   return { ok: true, assigned: want.length };
 }
 // 브랜드 세션의 탭 스코프(라우트 _ensureThreadScope 가 호출) — 브랜드에 배정된 탭만 접근.
+/* ═══ 작업(탭)별 브랜드 담당자 (136) — 대행사가 브랜드사에게 보여줄 자기 쪽 담당자 ═══
+   사용자 확정 2026-08-24: 저장 단위 = 작업 하나 · 최대 2명 · 라벨 없는 자유입력.
+   ★ 판정·정규화는 여기 한 곳(`_normBrandManagers`) — 라우트·화면이 각자 자르면 규칙이 갈린다.
+   ★ 빈 값은 저장하지 않고 행을 지운다: "미입력" 상태를 **행 없음** 하나로만 표현한다
+     (빈 배열 행이 남으면 "값이 있는데 비어 있음" 과 "미입력" 이 구분되지 않는다). */
+const BRAND_MANAGER_MAX = 2;
+const BRAND_MANAGER_NAME_MAX = 20;
+function _normBrandManagers(names) {
+  return (Array.isArray(names) ? names : [])
+    .map((v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, BRAND_MANAGER_NAME_MAX))
+    .filter(Boolean)
+    .slice(0, BRAND_MANAGER_MAX);
+}
+/* 배치 조회 — 브랜드 관리 화면(작업 목록)·요약 응답이 쓴다. 신규 표라 **미적용이면 빈 맵**(fail-soft):
+   담당자 표기가 없을 뿐 화면은 그대로 뜬다(0·빈값 위장이 아니라 "아직 아무도 안 적었다"와 같은 상태). */
+async function tabBrandManagersMap({ advertiserId } = {}) {
+  if (!advertiserId) return new Map();
+  try {
+    const { rows } = await getPool().query(
+      'SELECT sheet_id AS "sheetId", tab_name AS "tabName", managers FROM trackb_tab_brand_managers WHERE advertiser_id=$1',
+      [advertiserId]);
+    return new Map(rows.map((r) => [r.sheetId + '\t' + r.tabName, _normBrandManagers(r.managers)]));
+  } catch (err) {
+    logger.warn('[trackB] 브랜드 담당자 조회 실패(표시 생략): ' + err.message);
+    return new Map();
+  }
+}
+async function tabBrandManagersFor({ advertiserId, sheetId, tabName } = {}) {
+  if (!advertiserId || !sheetId || !tabName) return [];
+  try {
+    const { rows } = await getPool().query(
+      'SELECT managers FROM trackb_tab_brand_managers WHERE advertiser_id=$1 AND sheet_id=$2 AND tab_name=$3',
+      [advertiserId, sheetId, tabName]);
+    return rows.length ? _normBrandManagers(rows[0].managers) : [];
+  } catch (err) {
+    logger.warn('[trackB] 브랜드 담당자 조회 실패(표시 생략): ' + err.message);
+    return [];
+  }
+}
+/* 저장 — ★ 대상은 **그 대행사가 소유한 탭만**(남의 작업에 담당자를 심을 수 없다).
+   판정은 `ownedTabsForAdvertiser` 단일 출처(브랜드 귀속 화면·요약이 쓰는 그 목록). */
+async function setTabBrandManagers({ advertiserId, sheetId, tabName, names, actor = null } = {}) {
+  if (!advertiserId || !sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
+  const owned = (await ownedTabsForAdvertiser({ advertiserId })).rows
+    .some((t) => t.sheetId === sheetId && t.tabName === tabName);
+  if (!owned) return { ok: false, code: 404, error: '이 업체의 작업이 아닙니다.' };
+  const list = _normBrandManagers(names);
+  const db = getPool();
+  try {
+    if (!list.length) {
+      await db.query('DELETE FROM trackb_tab_brand_managers WHERE advertiser_id=$1 AND sheet_id=$2 AND tab_name=$3',
+        [advertiserId, sheetId, tabName]);
+      return { ok: true, managers: [] };
+    }
+    await db.query(
+      `INSERT INTO trackb_tab_brand_managers (advertiser_id, sheet_id, tab_name, managers, updated_by)
+            VALUES ($1,$2,$3,$4::jsonb,$5)
+       ON CONFLICT (advertiser_id, sheet_id, tab_name)
+       DO UPDATE SET managers=EXCLUDED.managers, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
+      [advertiserId, sheetId, tabName, JSON.stringify(list), actor ? String(actor).slice(0, 60) : null]);
+    return { ok: true, managers: list };
+  } catch (err) {
+    if (err && err.code === '42P01') return { ok: false, code: 503, error: 'not_ready', detail: 'migration 136 미적용' };
+    throw err;
+  }
+}
 async function brandTabAllowed({ brandId, advertiserId, sheetId, tabName } = {}) {
   if (!brandId || !advertiserId || !sheetId || !tabName) return false;
   const { rows } = await getPool().query(
@@ -2513,11 +2590,35 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
   return Object.fromEntries(out);
 }
 
+/**
+ * 작업명 정리 — 저장 시점 단일 출처 (2026-08-24 실사고).
+ *
+ * 무엇이 있었나: 시트에서 칸을 복사해 붙인 값이 그대로 저장돼 이름 안에 **탭(TAB) 문자**가
+ * 박혔다(실측: "0_쟈니베어_…_500건\t—"). 화면에서는 공백처럼 보여 눈으로는 못 찾고,
+ * 붙어 온 옆 칸 값까지 이름에 남는다.
+ *
+ * ★★ 지우는 것은 **보이지 않는 문자와 공백뿐** — 글자·기호(대시 등)는 건드리지 않는다.
+ *   무엇이 군더더기인지는 내용 판단이라 사람 몫이다(조용한 자동수정 금지 규율).
+ * ★ 제어문자는 **삭제가 아니라 공백으로** 바꾼다 — 지워 버리면 "A\tB" 가 "AB" 로 붙어
+ *   원래 없던 단어가 만들어진다.
+ * ★ 정리 결과가 비면 저장을 **거부**한다(보이지 않는 문자만 친 입력 = 이름이 아니다).
+ * ★ 길이 검사는 **정리한 값** 기준(정리 전 길이로 막으면 지워질 문자 때문에 거부된다).
+ */
+function normalizeDisplayName(v) {
+  return String(v == null ? '' : v)
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')                                  // 제어문자(탭·개행 포함)
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')         // 유니코드 공백류(NBSP·전각공백…)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')                                   // 폭 없는 문자(붙여넣기 잔재)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Keeps relational tab_name stable; only the workboard-facing display name changes.
 async function setWorkdeskTitle({ sheetId, tabName, displayName } = {}) {
   const sid = String(sheetId || '').trim();
   const tab = String(tabName || '').trim();
-  const name = String(displayName == null ? '' : displayName).trim();
+  const raw = String(displayName == null ? '' : displayName);
+  const name = normalizeDisplayName(raw);
   if (!sid || !tab) throw new Error('sheetId, tabName 필수');
   if (!name) throw new Error('작업명을 입력해 주세요.');
   if (name.length > 120) throw new Error('작업명은 120자 이하로 입력해 주세요.');
@@ -2530,7 +2631,8 @@ async function setWorkdeskTitle({ sheetId, tabName, displayName } = {}) {
      RETURNING display_name AS "displayName"`,
     [sid, tab, name]
   );
-  return { ok: true, displayName: (rows[0] && rows[0].displayName) || name };
+  // ★ 값이 실제로 달라졌으면 화면이 그 사실을 말한다(조용한 자동수정 금지).
+  return { ok: true, displayName: (rows[0] && rows[0].displayName) || name, cleaned: name !== raw };
 }
 
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
@@ -2733,6 +2835,30 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
       inflowType: (wo && wo.inflowType) || null,
+      /* 담당 2인(사용자 확정 2026-08-24) — 「담당  AE팀 황운하 / 관리자 만두」.
+         ★ 앞 = 그 업체를 맡은 **AE**(`created_by` = 인트라넷에서 오더를 낸 사람).
+           뒤 = 이 작업의 모집·공고를 맡은 **리뷰웹 관리자**(`manager_name`).
+           ⚠ `manager_name` 은 코드 라벨이 "담당AE" 지만 **실제 값은 리뷰웹 관리자**다
+             (본섭 116건 실측: 박세희·박은비·랜덤). 라벨이 틀린 것이지 값이 틀린 게 아니다.
+         ★★ 관리자는 **닉네임**으로 적는다 — 치환은 `adminNickname.service` **단일 출처**
+           (1:1문의가 쓰는 그 맵. 사본을 만들면 두 화면의 이름이 갈린다).
+           `adminNick` = 닉네임(없으면 null) · `adminRaw` = 실명(**내부 전용** — 광고주 렌즈가 폐기).
+           화면은 `adminNick || adminRaw` 한 줄이면 되고, 그러면 **내부는 닉네임||실명 /
+           업체는 닉네임||'관리자'** 두 규율이 카드 한 벌에서 동시에 성립한다.
+         ★ 조회 실패는 빈 맵(fail-soft) — 업체 화면은 `관리자` 로 떨어지고 실명은 여전히 안 나간다. */
+      manager: await (async () => {
+        const ae = String((wo && wo.createdBy) || '').trim() || null;
+        const raw = String((wo && wo.managerName) || '').trim() || null;
+        let nick = null;
+        if (raw) {
+          try {
+            const { getNicknameMap } = require('./adminNickname.service');
+            const map = await getNicknameMap();
+            nick = (map && map[raw]) || null;
+          } catch (_) { nick = null; }
+        }
+        return { ae, adminNick: nick, adminRaw: raw };
+      })(),
       /* 구매시간(사용자 확정 2026-08-23) — **실제로 참여를 여닫는 값은 공고 시간창**이다
          (`computeCampaignState` 가 그것을 본다). 작업오더 `purchase_time` 은 그 발행 프리필
          원본일 뿐이라, 오더 텍스트만 그리면 "카드는 0~15시인데 실제로는 다른 시간에 열리는"
@@ -2834,7 +2960,7 @@ function _attachPriceDeviation(rows, condition) {
   return n;
 }
 
-async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false } = {}) {
+async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, brandId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
   // 스코프 강제: 일반 호출은 advertiser=소유업체, staff=담당업체다. 작업보드 표 열람만
@@ -2862,7 +2988,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
             review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",
             special_notes AS "specialNotes", product_url AS "productUrl", start_date AS "startDate",
-            manager_name AS "managerName", status
+            manager_name AS "managerName", created_by AS "createdBy", status
        FROM work_orders
       WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
       ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
@@ -3168,6 +3294,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     /* 결제금액 편차 경고칠 — 조건 카드가 만든 공고 금액을 그대로 재사용한다(쿼리 순증 0).
        조건 조회가 실패해 null 이면 칠도 없다(근거 없는 경고 금지 — fail-soft). */
     res.priceDevCount = _attachPriceDeviation(out, res.condition);
+    /* 136: 업체가 정한 브랜드 담당자 — 내부 화면에도 **함께** 보여 "브랜드사에게 무엇이 나가는지"
+       를 확인시킨다(사용자 확정 D안). 소유 업체는 그 탭의 소유 판정 단일 출처에서 구한다. */
+    if (res.condition) res.condition.manager = await _condBrandManagers(res.condition.manager, { sheetId, tabName });
     // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
     //   화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
     res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });
@@ -3180,7 +3309,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     res.todayProgress = _tpAdvertiserLens(await tabTodayProgress(db, { sheetId, tabName }));
     /* 작업 조건 카드 — 내부와 **같은 자리·같은 모양**(사용자 확정 2026-08-23). 단 렌즈를 거친다:
        리뷰비·입금명·다계정·현금영수증·내부 식별자는 응답에서 폐기한다(위 `_condAdvertiserLens`). */
-    res.condition = _condAdvertiserLens(_cond);   // ★ 위에서 이미 구한 값(호출 2회 금지 — cap 과 갈릴 수 없다)
+    /* 136: 업체가 정한 브랜드 담당자를 먼저 붙이고 렌즈를 태운다 — 렌즈가 세션 종류로 갈린다:
+       브랜드 링크 세션 = 내부 담당을 **대체**(값 없으면 담당 행 자체가 사라진다) /
+       대행사 본세션 = 내부 담당과 **함께**(무엇이 나가는지 확인). */
+    _cond.manager = await _condBrandManagers(_cond.manager, { sheetId, tabName, advertiserId });
+    res.condition = _condAdvertiserLens(_cond, { brandSession: !!brandId });   // ★ 위에서 이미 구한 값(호출 2회 금지 — cap 과 갈릴 수 없다)
     if (res.condition) res.condition.schedule = _condSchedule(out, headers);
   }
   return res;
@@ -4842,7 +4975,23 @@ async function tabCampaignsMap({ force = false } = {}) {
       `multiAccount`·`cashReceipt`·`incomeType`·`slotsPinned`(운영 설정) ·
       `campaignId`·`workOrderId`·`campaignCount`(내부 식별자 — 화면 창구를 여는 열쇠이기도 하다).
    ★ null 이면 null 그대로(카드가 종전 4줄로 떨어진다). */
-function _condAdvertiserLens(cd) {
+/* 작업 조건의 담당 재료에 업체가 정한 브랜드 담당자를 붙인다(136).
+   ★ 소유 업체 판정은 `advertiserForTab` 단일 출처(작업목록 그룹핑·업체관리가 쓰는 그 규칙) —
+     광고주 세션은 자기 advertiserId 를 이미 알고 있으므로 조회하지 않는다.
+   ★ 어떤 실패도 담당 행을 죽이지 않는다(fail-soft: 브랜드 담당만 빠지고 내부 담당은 그대로). */
+async function _condBrandManagers(manager, { sheetId, tabName, advertiserId = null } = {}) {
+  const m = manager || {};
+  try {
+    let advId = advertiserId;
+    if (!advId) { const a = await advertiserForTab({ sheetId, tabName }); advId = (a && a.id) || null; }
+    if (!advId) return { ...m, brand: [] };
+    return { ...m, brand: await tabBrandManagersFor({ advertiserId: advId, sheetId, tabName }) };
+  } catch (err) {
+    logger.warn('[trackB] 브랜드 담당자 표기 실패(내부 담당만 표시): ' + err.message);
+    return { ...m, brand: [] };
+  }
+}
+function _condAdvertiserLens(cd, { brandSession = false } = {}) {
   if (!cd || typeof cd !== 'object') return cd || null;
   return {
     productName: cd.productName || '',
@@ -4858,6 +5007,23 @@ function _condAdvertiserLens(cd) {
     payAmount: cd.payAmount, options: Array.isArray(cd.options) ? cd.options : [],
     channel: cd.channel || null,
     inflowType: cd.inflowType || null,
+    /* 담당 2인 — ★ **실명(`adminRaw`)은 폐기**하고 여기서 fail-closed 를 완결한다:
+       닉네임이 있으면 닉네임, 없는데 **관리자는 있으면** `관리자`(리뷰어 화면과 같은 규율),
+       관리자 자체가 없으면 null → 화면이 그 조각을 아예 안 적는다(사용자 확정 2026-08-24).
+       ★ "실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 은 다르다 — 전자를 null 로 접으면
+         담당자가 없는 작업처럼 보인다. */
+    manager: (() => {
+      const m = cd.manager || {};
+      const raw = String(m.adminRaw || '').trim();
+      const brand = Array.isArray(m.brand) ? m.brand.filter(Boolean) : [];
+      /* ★★ 브랜드 링크 세션(브랜드사가 보는 화면)은 **업체가 정한 담당으로 대체**한다
+         (사용자 확정 2026-08-24 A안) — 내부 담당(AE·관리자)은 이름도 존재 여부도 내보내지 않는다.
+         업체가 아무도 적지 않았으면 셋 다 비어 화면이 **담당 행 자체를 그리지 않는다**(Q2 행숨김). */
+      if (brandSession) return { ae: null, adminNick: null, adminRaw: null, brand };
+      /* ★ 센티널 셋을 구분한다: 닉네임 문자열 = 그 이름 / **빈 문자열 = "관리자는 있는데 이름을
+         밝히지 않는다"**(화면이 라벨만 적는다 — `관리자 관리자` 중복을 피한다) / null = 담당자 없음. */
+      return { ae: m.ae || null, adminNick: m.adminNick || (raw ? '' : null), adminRaw: null, brand };
+    })(),
     reviewTypeLabel: cd.reviewTypeLabel || null,
     reviewTypeMixed: !!cd.reviewTypeMixed,
     reviewTypeMix: cd.reviewTypeMix || null,
@@ -5287,6 +5453,7 @@ module.exports = {
   tabTodayProgress,
   _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다
   _attachPriceDeviation,   // 회귀가드가 편차 경고칠 판정을 직접 실행해 확인한다(2026-08-23)
+  __condAdvertiserLensForTest: (...a) => _condAdvertiserLens(...a),   // 담당 렌즈(브랜드 세션 분기) 실행 검증용
   identityKey,
   classifyParity,
   projectTab,
@@ -5324,6 +5491,7 @@ module.exports = {
   quoteDocForTab,
   invoiceDocForTab,
   brandsForAdvertiser, createBrand, updateBrand, assignBrandTabs, brandTabAllowed,
+  tabBrandManagersMap, tabBrandManagersFor, setTabBrandManagers, _normBrandManagers,
   settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   __advertiserHeaderCandidatesForTest: _advertiserHeaderCandidates,
@@ -5370,6 +5538,7 @@ module.exports = {
   _writebackEngine,
   workdeskTab,
   setWorkdeskTitle,
+  normalizeDisplayName,   // 작업명 정리 — 회귀가드가 실제로 돌려 본다
   setWorkdeskPurchaseDate,
   backfillWorkdeskReviewSubmitDate,
   editWorkdeskRow,

@@ -158,6 +158,37 @@
   .brdname{font-size:13px;font-weight:800;min-width:96px}
   .brdmeta{font-size:11.5px;color:var(--muted);flex:1;min-width:120px}
   .brdacts{display:flex;gap:5px;flex-wrap:wrap}
+  /* 브랜드 행 클릭 = 귀속 작업 펼침(사용자 확정 2026-08-24). 카드 자체가 열림 손잡이라 커서·caret 으로 어포던스를 준다.
+     ★ 버튼·토글은 자기 자리에서 event.stopPropagation() 으로 펼침과 분리한다(링크 복사할 때마다 펼쳐지면 안 된다). */
+  .brdcard.clk{cursor:pointer}
+  .brdcard.clk:hover{border-color:var(--line2)}
+  .brdcard.open{border-color:var(--accent);box-shadow:0 3px 12px rgba(37,99,235,.08)}
+  .brdcaret{width:12px;flex:none;font-size:9px;color:var(--faint);text-align:center;transition:transform .15s}
+  .brdcard.open .brdcaret{transform:rotate(90deg);color:var(--accent)}
+  .brdrows{display:grid;gap:5px;margin:-3px 0 3px;padding:9px 12px 10px 30px;background:var(--card2);border:1px solid var(--line);border-top:none;border-radius:0 0 11px 11px}
+  .brdrow{display:flex;align-items:center;gap:9px;padding:6px 9px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:12px}
+  .brdrow.go{cursor:pointer}
+  .brdrow.go:hover{border-color:var(--accent);background:var(--accent-soft,var(--card2))}
+  .brdrow .rdt{font-size:11px;color:var(--muted);min-width:34px;flex:none}
+  .brdrow .rnm{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .brdrow .rcnt{font-size:11px;color:var(--muted);flex:none}
+  .brdempty{font-size:11.5px;color:var(--faint);padding:3px 2px}
+  /* 브랜드 담당자(136) — 작업 행 안의 칩 + 그 아래 인라인 입력줄 */
+  .brdrow .rbm{font-size:11.5px;font-weight:700;background:var(--card2);border:1px solid var(--line);
+       border-radius:7px;padding:2px 8px;cursor:pointer;flex:none;max-width:210px;overflow:hidden;
+       text-overflow:ellipsis;white-space:nowrap}
+  .brdrow .rbm:hover{border-color:var(--accent);color:var(--accent)}
+  .brdrow .rbm.none{color:var(--faint);font-weight:600;border-style:dashed}
+  .brdrow .rbm .sep{color:var(--faint);font-weight:600;margin:0 4px}
+  .bmedit{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px 9px;margin:-2px 0 0;
+       background:var(--card);border:1px solid var(--accent);border-radius:8px}
+  .bmlb{font-size:11px;color:var(--muted);font-weight:700;flex:none}
+  .fldx{display:inline-flex;align-items:center;background:var(--card);border:1px solid var(--line2);
+       border-radius:7px;padding:3px 8px;min-width:148px}
+  .fldx input{border:0;outline:0;font:inherit;font-size:12.5px;width:100%;background:transparent;color:var(--ink)}
+  .fldx:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft,rgba(37,99,235,.12))}
+  .bmhint{font-size:10.5px;color:var(--faint);flex:1;min-width:120px}
+  .btn.xs.pri{background:var(--accent);border-color:var(--accent);color:#fff}
   .tgl{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
   .tgl .sw{width:30px;height:17px;border-radius:999px;background:var(--line2);position:relative;flex:none;transition:background .15s}
   .tgl .sw:after{content:"";position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;top:2px;left:2px;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .15s}
@@ -467,6 +498,14 @@
   .mh-title h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .mh-title-edit{width:25px;height:25px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;font-size:14px;flex:none}
   .mh-title-edit:hover{background:var(--card2);color:var(--blue)}
+  /* 제목을 눌러도 편집(편집 권한자만 — 권한이 없으면 클래스 자체를 안 붙인다) */
+  .mh-title h1.ttl-ed{cursor:text}
+  /* ★ 입력칸은 제목과 **같은 글자 크기·굵기** — 편집을 열 때 글자가 튀면 어느 줄을 고치는지 놓친다.
+     ★ 폭은 고정 상한(제목 행이 nowrap 이라 늘어나면 오른쪽 버튼들이 밀린다) — 길면 안에서 스크롤. */
+  .mh-title-in{font-size:19px;font-weight:800;letter-spacing:-.02em;font-family:inherit;color:var(--t1,#111827);
+    width:min(460px,46vw);max-width:100%;box-sizing:border-box;padding:2px 8px;
+    border:1px solid var(--blue,#2563eb);border-radius:7px;background:var(--card,#fff);outline:none}
+  .mh-title-in:disabled{opacity:.6}
   /* ══ 작업보드 제목 행(.mh.mh-wb) — 마감 안내 문구 + [🏁 마감] 이 작업명과 **같은 행** ══════════
      ★★ nowrap 이 없으면 안 된다: flex 는 **줄바꿈을 먼저 하고 축소는 그다음**이라(줄나눔 판정은 축소 전
         max-content 기준) min-width:0 만 주면 좁은 폭에서 [마감]이 아랫줄로 떨어진다 — 시안 검증에서 실측.
@@ -1471,6 +1510,22 @@
   .owntr .note{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.55;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .owntr .chk{font-size:11.5px;margin-top:5px;min-height:15px}
   .owntr .ft{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+  /* 거래처 검색 콤보박스 — 검색어로 좁혀 고른다(목록이 30곳을 넘어 스크롤로는 못 찾는다).
+     ★ 리스트 마크업·CSS 는 기존 .advsug/.sugitem 재사용(사본 0) — 여기서는 팝업 스코프 보강만. */
+  /* ★ 후보 목록은 **흐름 안**에 둔다(absolute 금지) — `.owntr` 이 overflow-y:auto 라
+       띄우면 목록 아래쪽이 팝업 밖으로 나가 잘린다(실측 56px). 흐름에 두면 팝업이 스스로 늘어난다. */
+  .owntr .trac{position:static}
+  .owntr .trac .advsug{position:static;margin-top:4px;max-height:212px}
+  .owntr .sugitem.kb{background:var(--accent-soft)}
+  /* ★ '새 거래처 등록'은 목록 맨 아래에 **고정**한다 — 후보가 많으면 스크롤 밖으로 밀려
+       "등록된 업체가 없을 때의 탈출구"가 보이지 않는다(불투명 배경 필수 — 뒤 줄이 비친다). */
+  .owntr .sugnew{position:sticky;bottom:0;border-top:1px solid var(--line);font-weight:650;color:var(--accent);background:var(--card)}
+  .owntr .sugnew:hover,.owntr .sugnew.kb{background:var(--accent-soft)}
+  .owntr .trsel{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card2);font-size:13px}
+  .owntr .trsel b{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .owntr .trsel .pm{color:var(--faint);font-size:11.5px;flex:none}
+  .owntr .trsel .chg{margin-left:auto;flex:none;border:1px solid var(--line2);background:var(--card);color:var(--muted);border-radius:7px;padding:3px 9px;font:inherit;font-size:11.5px;cursor:pointer}
+  .owntr .trsel .chg:hover{background:var(--accent-soft);color:var(--accent)}
   /* ── 시트에서 가져오기 CSS 제거됨(사용자 확정 2026-08-23 — 업체관리에서 구글시트 창구 폐지) ── */
   .ovm-unm.imp{margin-top:6px;color:var(--accent);border-color:var(--accent)}
   .add{border:1px dashed var(--line2);border-radius:11px;padding:15px;background:var(--card2)}
@@ -1628,6 +1683,9 @@
   .cndl dt:first-of-type,.cndl dd:first-of-type{border-top:0}
   .cndl dd .u{font-size:10px;font-weight:600;color:var(--faint);margin-left:2px}
   .cnna{color:var(--faint);font-weight:600}
+  /* 담당 2인 — 역할 라벨(AE팀·관리자)은 작게, 구분자는 옅게(값이 이름이라는 게 읽혀야 한다) */
+  .cndl .role{font-size:10px;font-weight:700;color:var(--faint);margin-right:3px}
+  .cndl .sep{color:var(--faint);font-weight:600;margin:0 5px}
   .cndwarn{margin-left:auto;text-transform:none;letter-spacing:0;font-size:10px;font-weight:700;
            background:var(--warn-soft);color:var(--warn);border-radius:999px;padding:0 7px}
   /* ★ 값이 있는 항목은 배지 없이 검은 글씨(사용자 확정 2026-08-20) — 배지는 **미설정에만** 남겨
@@ -2431,7 +2489,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
               advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advQ:'', advF:'all',            // 전체 작업 검색어 · 상태 칩(all|run|done) — 화면 전환에도 유지
-              brandNew:null, brandEdit:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
+              brandNew:null, brandEdit:null, brandOpen:null, bmEdit:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
               brandId:null, advName:'',       // 094: 브랜드 링크 세션(brand_id 클레임) · 운영사(대행사) 이름(A안 표기)
               advs:[], advCur:null, tabIndex:{}, sheetMap:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
@@ -2442,12 +2500,24 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
 
 async function boot(){
   _applyVwMode();   // 로그인 화면부터 상한 적용(셸 렌더 전에도 body[data-vw] 세팅 — 스위치는 셸에서 다시 동기화)
-  // 광고주 전용 접속 링크(#adv=<token>) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
-  const advm=(location.hash||'').match(/[#&]adv=([^&]+)/);
+  // 광고주 전용 접속 링크(#a=<token>, 구 #adv=) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
+  //   ★★ A안(사용자 확정 2026-08-24): 교환 뒤에도 **해시를 지우지 않는다**. 지우면 주소창·히스토리·북마크에
+  //     남는 것이 열쇠 없는 `/workdesk` 라 재방문·새 탭·재전달이 전부 "문구 없는 로그인 화면"이 됐다(실측 신고).
+  //     이 링크는 **주소 자체가 열쇠**라 주소창에 남는 것이 새로운 노출이 아니다(유출 대비 = 회전/폐기).
+  //     ★ 대신 logout 이 해시를 지운다 — 안 지우면 로그아웃 직후 boot 이 다시 교환해 **로그아웃이 안 된다**.
+  //   ★ 짧은 키 `#a=` 우선, 이미 뿌린 `#adv=` 링크도 계속 받는다(하위호환 — 폴백 제거 금지).
+  //     정규식 `[#&]a=` 는 `#adv=` 를 매칭하지 않는다(a 다음이 = 여야 한다) — 두 키가 서로를 삼키지 않는다.
+  const advm=(location.hash||'').match(/[#&]a=([^&]+)/)||(location.hash||'').match(/[#&]adv=([^&]+)/);
   if(advm){ let t=null; try{ t=decodeURIComponent(advm[1]); }catch(_){ }
-    try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
-    if(t){ const r=await fetch(API_BASE+'/api/trackb/advertiser-link-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(x=>x.json()).catch(()=>null);
-      if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token', r.token); }
+    // ★ 주소가 깨져 토큰을 못 읽으면 **문구 없는 로그인 화면으로 흘리지 않는다**(조용한 실패 금지).
+    if(!t) return renderLogin('접속 링크 주소가 깨졌습니다. 담당자에게 링크를 다시 받아주세요.');
+    // ★ 해시가 남으므로 새로고침마다 교환이 돈다 — **같은 토큰으로 만든 세션이 아직 살아 있으면 건너뛴다**
+    //   (교환 라우트 레이트리밋 30/분 보호 + 재진입 지연 제거). 다른 업체·브랜드 링크는 토큰이 달라 정상 전환.
+    const _me0=token()?parseJwt(token()):null, _alive=!!(_me0&&_me0.exp&&_me0.exp*1000>Date.now());
+    let _last=null; try{ _last=sessionStorage.getItem('adv_link_tok'); }catch(_){ }
+    if(!(_alive && _last===t)){
+      const r=await fetch(API_BASE+'/api/trackb/advertiser-link-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(x=>x.json()).catch(()=>null);
+      if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token', r.token); try{ sessionStorage.setItem('adv_link_tok', t); }catch(_){ } }
       else return renderLogin('접속 링크가 유효하지 않거나 폐기되었습니다. 담당자에게 문의하세요.'); } }
   if (!token()) {
     if (await tryTestAutoLogin()) return boot();
@@ -2578,6 +2648,10 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){ sessionStorage.removeItem('admin_token');
+  // ★★ 접속 링크 세션은 **주소에 남은 해시가 곧 열쇠**다(A안). 여기서 지우지 않으면 바로 이어지는
+  //   boot() 이 그 토큰을 다시 교환해 **로그아웃이 되지 않는다**(공용 PC에서 다음 사람이 그대로 입장).
+  try{ sessionStorage.removeItem('adv_link_tok'); }catch(_){ }
+  try{ if(location.hash) history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
   // 역할 전환 재로그인 대비 메모리 잔재 정리
   // ★ 교체요청 목록(re)에는 **리뷰어 실명·연락처**가 들어 있다 — 역할이 바뀌어도 남아 있으면
   //   다음 사람이 그 화면을 열 때 이전 계정의 담당 범위가 잠깐 그려진다(서버 응답 전 stale 렌더).
@@ -2722,7 +2796,7 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
 //   업체관리에서 작업을 열면 작업보드로 화면이 통째로 바뀌는데 히스토리에 아무것도 안 쌓여
 //   뒤로가기가 리뷰웹시스템[3버전]을 벗어나(또는 아무 반응 없이) 버렸다. 뷰·연 작업·선택 업체를
 //   history state 로 쌓아 뒤로/앞으로가 화면 전환을 되짚게 한다.
-// ★ URL 은 건드리지 않는다(같은 URL 로도 pushState 는 별개 항목을 만든다) — #sso=/#adv=/#go=
+// ★ URL 은 건드리지 않는다(같은 URL 로도 pushState 는 별개 항목을 만든다) — #sso=/#a=/#adv=/#go=
 //   프래그먼트 계약과 충돌하지 않고, 주소를 공유해도 딥링크·PII 가 새지 않는다.
 // ★ 되살리는 것은 "어느 화면·어느 작업"까지. 그리드 필터·숨김열 같은 표 상태는 탭 전환 시
 //   초기화되는 클라이언트 상태라 복원 대상이 아니다(selTab 의 기존 계약 유지).
@@ -2760,7 +2834,9 @@ function _navSame(a,b){
 function _navPush(){
   if(_navLock) return;
   try{
-    const e=_navEntry(), url=location.pathname+location.search;
+    // ★ 해시까지 포함해 **지금 URL 그대로** 다시 쓴다 — 빼면 화면을 한 번만 전환해도 주소창의
+    //   `#a=<접속링크 토큰>` 이 증발해 재방문이 다시 막힌다(A안이 무의미해진다).
+    const e=_navEntry(), url=location.pathname+location.search+location.hash;
     if(!_navBooted){ _navBooted=true; history.replaceState(e,'',url); return; }
     if(_navSame(e, history.state)) { history.replaceState(e,'',url); return; }   // 같은 화면 재진입 = 항목 낭비 금지
     history.pushState(e,'',url);
@@ -3132,9 +3208,12 @@ function _renderAdvHome(){
   const host=$('#main'); if(!host) return;
   const aw=STATE.advWork;
   if(!aw){ host.innerHTML=`<div class="empty">불러오는 중…</div>`; return; }
-  if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
   const v=STATE.advView||'dash';
-  if(v==='list') _renderAdvList(); else if(v==='brands'&&!STATE.brandId) _renderAdvBrands(); else _renderAdvDash();
+  // ★ 브랜드 관리는 작업이 0건이거나 요약 조회가 실패해도 열린다 — 브랜드를 만드는 화면이 작업 유무에
+  //   막히면 "메뉴는 있는데 눌러도 아무것도 없는" 막다른 길이 된다(실브라우저 실측 2026-08-24).
+  if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();
+  if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
+  if(v==='list') _renderAdvList(); else _renderAdvDash();
 }
 // ★ 표 행 빌더는 한 벌 — 대시보드 "최근 작업"은 이걸 limit 만 달리해 호출한다(사본을 두면 두 화면의 컬럼·판정이 어긋난다).
 function _awRowHtml(it){
@@ -3182,8 +3261,107 @@ function _renderAdvList(){
 //   데이터 = STATE.advWork.brands(요약 응답 동봉) + items[].brandId. 조작 후엔 요약 재수신으로 수렴.
 async function _brandsReload(){
   const s=await api('/api/trackb/my-work-summary').catch(()=>null);
-  if(s&&s.ok) STATE.advWork={items:s.items||[],settlementHidden:!!s.settlementHidden,brand:s.brand||null,brands:s.brands||[]};
+  if(s&&s.ok){
+    // ★★ brands 가 배열이 아니면(서버가 브랜드 조회에 실패해 undefined 로 내려보낸 경우) 지우지 않고 그대로 둔다 —
+    //    "모른다"를 "없다"로 접으면 멀쩡한 브랜드가 화면에서 통째로 사라진다(trackB.service advertiserWorkSummary).
+    const prev=(STATE.advWork&&Array.isArray(STATE.advWork.brands))?STATE.advWork.brands:[];
+    STATE.advWork={items:s.items||[],settlementHidden:!!s.settlementHidden,brand:s.brand||null,
+      brands:Array.isArray(s.brands)?s.brands:prev};
+  }
   _renderAdvSidebar(); if((STATE.advView||'')==='brands') _renderAdvBrands();
+  // ★ 조용한 실패 금지 — 이 요약 API 는 소유 탭 전수 + 인트라넷 정산 프록시를 도는 무거운 경로라
+  //   느리거나 죽을 수 있다. 못 불러왔으면 화면이 그 사실을 말한다(사람이 재시도해 중복 오류를 보지 않게).
+  if(!s||!s.ok) toast('목록을 새로 불러오지 못했습니다 — 잠시 후 새로고침해 주세요');
+  return !!(s&&s.ok);
+}
+// 방금 만든 브랜드를 목록에 즉시 합류시킨다(같은 id 면 갱신). 서버 응답의 brand 를 그대로 쓴다 — 화면이 값을 지어내지 않는다.
+function _brandsMerge(nb){
+  if(!nb||!nb.id) return;
+  const aw=STATE.advWork||(STATE.advWork={items:[],settlementHidden:false,brand:null,brands:[]});
+  const list=Array.isArray(aw.brands)?aw.brands:(aw.brands=[]);
+  const i=list.findIndex(x=>x&&x.id===nb.id);
+  if(i>=0) list[i]=Object.assign({},list[i],nb); else list.push(Object.assign({tabCount:0},nb));
+}
+// 브랜드 행 펼침(사용자 확정 2026-08-24) — 상태는 STATE.brandOpen{id:true}(브랜드마다 독립 토글).
+//   ★ 재료는 이미 받아 둔 items[].brandId 하나 — 신규 API 0. 표시·이동은 사이드바가 쓰는
+//     _awDate/_awStatus/_tabLabel/selTab 을 그대로 재사용한다(판정·표기 사본 0).
+function _brandOpen(id){ return !!(STATE.brandOpen&&STATE.brandOpen[id]); }
+function brandToggleRows(id){
+  const m=STATE.brandOpen||(STATE.brandOpen={});
+  if(m[id]) delete m[id]; else m[id]=true;
+  _renderAdvBrands();
+}
+function _brandRowsHtml(b,items,be){
+  if(!b||!_brandOpen(b.id)) return '';
+  if(be&&be.id===b.id) return '';   // 편집·확인 중인 카드는 모양이 통째로 바뀐다 — 그때는 접는다
+  const mine=(items||[]).filter(it=>it&&it.brandId===b.id);
+  if(!mine.length) return `<div class="brdrows"><div class="brdempty">아직 귀속된 작업이 없습니다 — [작업 귀속]에서 선택하세요.</div></div>`;
+  return `<div class="brdrows">${mine.map(it=>{
+    const i=_awTabIdx(it), st=_awStatus(it), ix=_awItems().indexOf(it);
+    return `<div class="brdrow${i>=0?' go':''}"${i>=0?` onclick="selTab(${i})" title="${esc(_tabTip(it))}"`:''}>
+      <span class="rdt">${esc(_awDate(it))}</span>
+      <span class="rnm">${esc(_tabLabel(it))}</span>
+      ${_bmCell(it,ix)}
+      <span class="rcnt">${it.total||0}명 · 제출 ${it.submitted||0}</span>
+      <span class="bb ${st.tone}">${esc(st.label)}</span></div>${_bmEditHtml(it,ix)}`;
+  }).join('')}</div>`;
+}
+/* ── 브랜드 담당자(136) — 작업 행마다 인라인 입력(사용자 확정 2026-08-24: 저장 단위 = 작업 하나) ──
+   ★ 값의 단일 출처는 `STATE.advWork.items[].brandManagers`(요약 응답) — 화면이 따로 캐시하지 않는다.
+   ★ onclick 에는 **인덱스만** 넘긴다(작업명·시트ID 는 외부발 문자열 — 보간하면 따옴표 하나로 탈출된다).
+   ★ 행 클릭은 작업 열기라 담당자 칸·입력줄은 stopPropagation 으로 분리한다. */
+function _bmList(it){ return (it&&Array.isArray(it.brandManagers)?it.brandManagers:[]).map(v=>String(v==null?'':v).trim()).filter(Boolean); }
+function _bmCell(it,ix){
+  const m=_bmList(it);
+  return `<span class="rbm${m.length?'':' none'}" onclick="event.stopPropagation();bmEdit(${ix})"
+     title="${m.length?'브랜드사 화면 「담당」 행에 이대로 나갑니다 — 눌러서 수정':'브랜드사 화면에 담당을 표시하려면 눌러서 입력하세요(최대 2명)'}">${
+    m.length?m.map(esc).join('<span class="sep">/</span>'):'＋ 담당자'}</span>`;
+}
+function _bmEditHtml(it,ix){
+  const e=STATE.bmEdit;
+  if(!e||e.ix!==ix) return '';
+  const v=e.names||['',''];
+  return `<div class="bmedit" onclick="event.stopPropagation()">
+    <span class="bmlb">담당자</span>
+    <span class="fldx"><input id="bmq0" value="${esc(v[0]||'')}" maxlength="20" placeholder="예: 박가람 차장"
+      oninput="bmInput(0,this.value)" onkeydown="bmKey(event)" autocomplete="off"></span>
+    <span class="fldx"><input id="bmq1" value="${esc(v[1]||'')}" maxlength="20" placeholder="두 번째 담당자(선택)"
+      oninput="bmInput(1,this.value)" onkeydown="bmKey(event)" autocomplete="off"></span>
+    <button class="btn xs pri" onclick="bmSave()"${e.busy?' disabled':''}>저장</button>
+    <button class="btn xs" onclick="bmClose()">취소</button>
+    ${e.err?`<span class="bnerr">${esc(e.err)}</span>`
+           :'<span class="bmhint">최대 2명 · 라벨 없이 이름만 · 브랜드사 화면 「담당」 행에 이대로 보입니다 · 비우면 그 행을 표시하지 않습니다</span>'}</div>`;
+}
+function bmEdit(ix){
+  const it=_awItems()[ix]; if(!it) return;
+  const m=_bmList(it);
+  STATE.bmEdit={ix,names:[m[0]||'',m[1]||''],err:'',busy:false};
+  _renderAdvBrands();
+  const el=$('#bmq0'); if(el){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(_){ } }
+}
+function bmClose(){ STATE.bmEdit=null; _renderAdvBrands(); }
+function bmInput(i,v){ const e=STATE.bmEdit; if(!e) return; e.names[i]=v; }   // ★ 재렌더 없음(한글 IME 조합 보호)
+function bmKey(ev){
+  if(ev.key==='Enter'){ ev.preventDefault(); bmSave(); }
+  else if(ev.key==='Escape'){ ev.preventDefault(); bmClose(); }
+}
+async function bmSave(){
+  const e=STATE.bmEdit; if(!e||e.busy) return;
+  const it=_awItems()[e.ix]; if(!it) return bmClose();
+  const names=(e.names||[]).map(v=>String(v||'').replace(/\s+/g,' ').trim()).filter(Boolean).slice(0,2);
+  e.busy=true;
+  const r=await api('/api/trackb/brands/tab-manager',{method:'POST',
+    body:JSON.stringify({sheetId:it.sheetId,tabName:it.tabName,names})}).catch(()=>null);
+  e.busy=false;
+  if(!r||!r.ok){
+    e.err=(r&&r.error==='not_ready')?'담당자 기능이 아직 준비되지 않았습니다(잠시 후 다시 시도).'
+         :((r&&r.error)||'저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    _renderAdvBrands(); return;
+  }
+  // ★ 서버가 정규화한 값을 그대로 반영한다(화면이 값을 지어내지 않는다) — 재조회를 기다리지 않는다.
+  it.brandManagers=Array.isArray(r.managers)?r.managers:names;
+  STATE.bmEdit=null; _renderAdvBrands();
+  toast(names.length?`담당자를 저장했습니다 — ${names.join(' / ')}`:'담당자를 지웠습니다 — 브랜드사 화면에 담당 행이 표시되지 않습니다');
 }
 function _brandLinkUrl(tok){ return location.origin+location.pathname.replace(/[^/]*$/,'')+'workdesk.html#adv='+encodeURIComponent(tok||''); }
 function _renderAdvBrands(){
@@ -3204,7 +3382,7 @@ function _renderAdvBrands(){
     if(be&&be.id===b.id&&be.mode==='delete') return `<div class="brdcard confirming">
       <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
       <span class="brdname">${esc(b.name)}</span>
-      <span class="brdmeta">삭제하면 <b>공유 링크가 즉시 무효</b>가 되고, 배정된 작업 ${b.tabCount||0}건은 미분류로 돌아갑니다.</span>
+      <span class="brdmeta">삭제하면 <b>공유 링크가 즉시 무효</b>가 되고, 귀속된 작업 ${b.tabCount||0}건은 미분류로 돌아갑니다.</span>
       <button class="btn xs danger" onclick="brandDeleteConfirm()">삭제</button>
       <button class="btn xs" onclick="brandEditClose()">취소</button>
       ${be.err?`<span class="bnerr">${esc(be.err)}</span>`:''}</div>`;
@@ -3221,16 +3399,20 @@ function _renderAdvBrands(){
       <input id="belink" class="belink" readonly value="${esc(be.url||'')}" onclick="this.select()">
       <span class="bnhint">복사가 자동으로 되지 않아 링크를 펼쳤습니다 — 선택해 복사하세요</span>
       <button class="bnx" onclick="brandEditClose()" title="닫기">✕</button></div>`;
-    return `<div class="brdcard">
+    // 행 전체가 펼침 손잡이 — 귀속된 작업을 카드 아래에 편다(사용자 확정 2026-08-24).
+    //   ★ 버튼·토글은 stopPropagation 으로 분리(링크 복사·토글이 펼침을 건드리면 안 된다).
+    const opened=_brandOpen(b.id);
+    return `<div class="brdcard clk${opened?' open':''}" onclick="brandToggleRows('${esc(b.id)}')" title="클릭하면 이 브랜드에 귀속된 작업이 아래로 펼쳐집니다">
+      <span class="brdcaret">${opened?'▾':'▸'}</span>
       <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
       <span class="brdname">${esc(b.name)}</span>
       ${be&&be.id===b.id&&be.mode==='err'?`<span class="bnerr">${esc(be.err||'')}</span>`:''}
-      <span class="brdmeta">작업 ${b.tabCount||0}건 배정${off?' · <b style="color:var(--bad)">링크 정지됨</b>':''}</span>
-      <label class="tgl${b.settlementVisible?' on':''}" title="켜면 브랜드사도 견적서·계산서·금액 칸을 봅니다 (기본: 숨김)" onclick="brandFlag('${esc(b.id)}','settlement-visible',${!b.settlementVisible});return false"><span class="sw"></span>정산 공개</label>
-      <label class="tgl${b.foldersVisible?' on':''}" title="켜면 브랜드사도 구매캡쳐·리뷰캡쳐 폴더 버튼을 봅니다 (기본: 비노출)" onclick="brandFlag('${esc(b.id)}','folders-visible',${!b.foldersVisible});return false"><span class="sw"></span>폴더 공개</label>
-      <span class="brdacts">
+      <span class="brdmeta">작업 ${b.tabCount||0}건 귀속${off?' · <b style="color:var(--bad)">링크 정지됨</b>':''}</span>
+      <label class="tgl${b.settlementVisible?' on':''}" title="켜면 브랜드사도 견적서·계산서·금액 칸을 봅니다 (기본: 숨김)" onclick="event.stopPropagation();brandFlag('${esc(b.id)}','settlement-visible',${!b.settlementVisible});return false"><span class="sw"></span>정산 공개</label>
+      <label class="tgl${b.foldersVisible?' on':''}" title="켜면 브랜드사도 구매캡쳐·리뷰캡쳐 폴더 버튼을 봅니다 (기본: 비노출)" onclick="event.stopPropagation();brandFlag('${esc(b.id)}','folders-visible',${!b.foldersVisible});return false"><span class="sw"></span>폴더 공개</label>
+      <span class="brdacts" onclick="event.stopPropagation()">
         <button class="btn xs" onclick="brandCopyLink('${esc(b.id)}')">🔗 링크 복사</button>
-        <button class="btn xs" onclick="brandAssignModal('${esc(b.id)}')">작업 배정</button>
+        <button class="btn xs" onclick="brandAssignModal('${esc(b.id)}')">작업 귀속</button>
         <button class="btn xs" onclick="brandFlag('${esc(b.id)}','link-active',${off})">${off?'링크 재개':'링크 정지'}</button>
         <button class="btn xs" onclick="brandRotate('${esc(b.id)}')" title="이전 링크를 무효화하고 새 링크 발급(유출 대응)">링크 재발급</button>
         <button class="btn xs" onclick="brandRename('${esc(b.id)}')">이름</button>
@@ -3250,10 +3432,10 @@ function _renderAdvBrands(){
   host.innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 브랜드 관리</h1>
       <span class="bd a">업체 전용</span><span style="flex:1"></span>${slot}</div>
     ${nb.err?`<div class="bnerrwrap"><span class="bnerr">${esc(nb.err)}</span></div>`:''}
-    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;max-width:860px">브랜드사별로 작업을 분류하고 <b>브랜드별 고유 링크</b>를 전달하세요. 브랜드사는 자기 브랜드에 배정된 작업만 볼 수 있고,
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;max-width:860px">브랜드사별로 작업을 분류하고 <b>브랜드별 고유 링크</b>를 전달하세요. 브랜드사는 자기 브랜드에 귀속된 작업만 볼 수 있고,
       <b>정산 정보(견적서·계산서·금액)와 자료 폴더는 기본 숨김</b> — 브랜드별 토글로 공개를 선택합니다. 브랜드사 화면에는 "운영: ${esc(STATE.name||'')}"가 표기됩니다.</p>
-    <div class="brdlist">${brands.map(card).join('')||''}
-      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 배정하지 않은 작업은 이 화면(대행사)에서만 보입니다`:(nb.open?'이름을 입력하고 Enter 를 누르세요.':'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.')}</div>
+    <div class="brdlist">${brands.map(b=>card(b)+_brandRowsHtml(b,items,be)).join('')||''}
+      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 귀속하지 않은 작업은 이 화면(대행사)에서만 보입니다`:(nb.open?'이름을 입력하고 Enter 를 누르세요.':'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.')}</div>
     </div></div>`;
   if(nb.open) _bnFocus();
 }
@@ -3288,9 +3470,14 @@ async function brandNewSubmit(){
   const r=await api('/api/trackb/brands/create',{method:'POST',body:JSON.stringify({name,color:_bnColor(brands.length)})}).catch(()=>null);
   nb.busy=false;
   if(!r||!r.ok){ STATE.brandNew={open:true,name,err:(r&&r.error)||'브랜드 추가에 실패했습니다. 잠시 후 다시 시도해 주세요.'}; _renderAdvBrands(); return; }
+  // ★★ 서버가 돌려준 브랜드를 **즉시** 목록에 넣고 그린다(사용자 신고 2026-08-24).
+  //    종전엔 아래 _brandsReload(무거운 요약 API) 한 번에 전적으로 매달려 있어, 그 요청이 느리거나
+  //    실패하면 "추가는 됐는데 화면엔 없는" 상태가 됐고 사람은 다시 눌러 서버 중복 오류를 봤다.
   STATE.brandNew={open:true,name:'',err:''};   // 입력칸 유지 = 연달아 등록
-  await _brandsReload();
+  _brandsMerge(r.brand);
+  _renderAdvSidebar(); _renderAdvBrands();
   toast(`브랜드 "${name}" 추가됨`);
+  _brandsReload();   // 배경 수렴(정렬·건수) — 실패해도 위에서 넣은 브랜드는 목록에 남는다
 }
 // 색상 자동 배정(사용자 확정: 색 선택 UI 없음) — 추가 순서대로 순환해 목록·배정 화면에서 구분된다.
 const _BN_COLORS=['#2563eb','#0e7490','#16a34a','#b45309','#e11d74','#6d5ac9'];
@@ -3357,7 +3544,7 @@ function brandCopyLink(id){
     ()=>{ STATE.brandEdit={id,mode:'link',url}; _renderAdvBrands();
           const el=$('#belink'); if(el){ el.focus(); el.select(); } });
 }
-// 작업 배정 모달(와이어프레임 B) — 체크된 작업 = 이 브랜드. 다른 브랜드 배정 작업을 체크하면 이 브랜드로 이동.
+// 작업 귀속 모달(와이어프레임 B) — 체크한 작업 = 이 브랜드. 다른 브랜드에 귀속된 작업을 체크하면 이 브랜드로 옮긴다.
 function brandAssignModal(id){
   const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
   const items=_awItems();
@@ -3366,9 +3553,9 @@ function brandAssignModal(id){
     const ob=other?((STATE.advWork.brands||[]).find(x=>x.id===it.brandId)||{}).name:'';
     return `<label class="basrow"><input type="checkbox" data-ix="${ix}" ${mine?'checked':''}>
       <span style="flex:1;font-weight:650">${esc(it.tabName)}</span>
-      ${other?`<span class="bd" title="체크하면 ${esc(b.name)}(으)로 이동">현재: ${esc(ob||'다른 브랜드')}</span>`:(mine?'<span class="bd g">배정됨</span>':'<span class="bd">미분류</span>')}</label>`;
+      ${other?`<span class="bd" title="체크하면 ${esc(b.name)}(으)로 이동">현재: ${esc(ob||'다른 브랜드')}</span>`:(mine?'<span class="bd g">귀속됨</span>':'<span class="bd">미분류</span>')}</label>`;
   }).join('');
-  _modal(`작업 배정 — ${b.name}`,
+  _modal(`작업 귀속 — ${b.name}`,
     `<p style="font-size:12px;color:var(--muted);margin:0 0 10px">체크한 작업이 <b>${esc(b.name)}</b> 브랜드사 화면에 보입니다. 체크를 해제하면 미분류로 돌아갑니다.</p>
      <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:10px" id="basList">${rows||'<div class="empty">작업이 없습니다.</div>'}</div>
      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="document.getElementById('wdModal').remove()">취소</button><button class="btn" style="background:var(--accent);border-color:var(--accent);color:#fff" onclick="brandAssignSave('${esc(id)}')">저장</button></div>`);
@@ -5372,25 +5559,59 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t
    ★ 이제 **작업보드 상단에는 시트 기반 작업임을 알리는 표기가 없다** — 다시 필요해지면
      "무시트면 숨김"이 아니라 **"시트 기반이면 표시"** 로 만들 것(활성 작업이 전부 무시트라
      반대로 만들면 또 상시 표기가 된다). 판정은 `_isNoSheet` 를 그대로 쓰면 된다. */
-async function editWorkdeskTitle(){
+/* ══ 작업명 편집 — 제목 자리에서 바로 (사용자 확정 2026-08-24) ═══════════════════
+   종전에는 브라우저 `prompt` 창이었다. 화면이 가려져 지금 어느 작업을 고치는지 안 보이고,
+   붙여넣은 값을 눈으로 확인하기도 어려웠다(그 창구로 탭 문자가 섞인 이름이 저장됐다).
+   ★ 관용구는 업체관리 비고 편집(`editTabMemo`)과 같다 — 그 자리를 input 으로 갈아끼우고
+     Enter=저장 · Esc=취소 · 포커스가 빠지면 저장.
+   ★★ 편집 중에는 **머리를 다시 그리지 않는다** — 입력칸 DOM 이 새로 만들어지면 한글 IME
+     조합이 파괴된다(홈 목록 검색에서 실측한 `ㅁ며면면` 계열). 그래서 성공했을 때만 전체 재렌더.
+   ★ 저장에 실패하면 **입력한 내용을 지우지 않는다**(다시 칠 필요가 없게). */
+function editWorkdeskTitle(){
   if(!STATE.cur || STATE.role==='advertiser') return;
+  const wrap=$('#main')&&$('#main').querySelector('.mh-title'); if(!wrap) return;
+  if(wrap.querySelector('input')) return;                       // 이미 편집 중
   const m=(STATE.wd&&STATE.wd.meta)||{};
-  const current=m.displayName||STATE.cur.displayName||STATE.cur.tabName;
-  const displayName=(prompt('작업명을 입력하세요',current)||'').trim();
-  if(!displayName) return toast('작업명을 입력해 주세요.');
-  if(displayName.length>120) return toast('작업명은 120자 이하로 입력해 주세요.');
+  const current=m.displayName||STATE.cur.displayName||STATE.cur.tabName||'';
+  wrap.dataset.prev=wrap.innerHTML;                             // 취소·실패 시 원래 머리로 복귀
+  wrap.innerHTML='<input class="mh-title-in" type="text" maxlength="120" aria-label="작업명" '
+    +'onkeydown="_wtTitleKey(event)" onblur="saveWorkdeskTitle(this)">';
+  const inp=wrap.querySelector('input');
+  inp.value=current; inp.dataset.orig=current;
+  inp.focus(); inp.select();
+}
+function _wtTitleKey(ev){
+  if(ev.key==='Enter'){ ev.preventDefault(); ev.target.blur(); }
+  else if(ev.key==='Escape'){ ev.preventDefault(); ev.target.dataset.esc='1'; ev.target.blur(); }
+}
+async function saveWorkdeskTitle(inp){
+  const wrap=inp.closest?inp.closest('.mh-title'):null; if(!wrap) return;
+  const restore=()=>{ if(wrap.dataset.prev!=null){ wrap.innerHTML=wrap.dataset.prev; delete wrap.dataset.prev; } };
+  if(inp.dataset.esc){ restore(); return; }
+  if(inp.dataset.busy) return;                                  // 저장 중 blur 재진입 차단
+  const displayName=inp.value, orig=inp.dataset.orig||'';
+  if(!displayName.trim()){ toast('작업명을 입력해 주세요.'); restore(); return; }
+  if(displayName===orig){ restore(); return; }                  // 같은 값이면 요청하지 않는다
+  inp.dataset.busy='1'; inp.disabled=true;
   const j=await api('/api/trackb/workdesk/title',{method:'POST',body:JSON.stringify({
     sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName,displayName
   })}).catch(()=>null);
-  if(!j||!j.ok) return toast((j&&j.error)||'작업명 저장에 실패했습니다.');
-  const saved=j.displayName||displayName;
+  if(!j||!j.ok){
+    toast((j&&j.error)||'작업명 저장에 실패했습니다.');
+    delete inp.dataset.busy; inp.disabled=false; inp.focus();   // ★ 입력 내용 유지
+    return;
+  }
+  const saved=j.displayName||displayName.trim();
   STATE.cur.displayName=saved;
   const tab=(STATE.tabs||[]).find(t=>t.sheetId===STATE.cur.sheetId&&t.tabName===STATE.cur.tabName);
   if(tab) tab.displayName=saved;
   if(STATE.wd&&STATE.wd.meta) STATE.wd.meta.displayName=saved;
+  delete wrap.dataset.prev;                                     // 성공 = 전체 재렌더가 머리를 새로 그린다
   renderWorkdesk(STATE.wd);
   _renderTabList();
-  toast('작업명을 저장했습니다.');
+  // ★ 서버가 보이지 않는 문자(탭·제로폭)나 군더더기 공백을 정리했으면 **말한다**(조용한 자동수정 금지).
+  toast(j.cleaned ? '작업명을 저장했습니다 — 보이지 않는 문자·여분 공백을 정리했습니다.'
+                  : '작업명을 저장했습니다.');
 }
 function _tcell(r, field, val){   // 편집 가능 텍스트 셀
   const v = val==null?'':val;
@@ -5480,7 +5701,7 @@ function renderWorkdesk(wd){
      ★ 내부 역할만 — 리뷰어 실명·연락처가 실린다(서버 게이트와 1:1).
      ★ 옛 [편집 이력] 버튼은 이 안으로 흡수했다(같은 일을 하는 창구를 둘로 두지 않는다). */
   const logBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openTabLog()" title="이 작업의 주문·취소·리뷰·편집·정원·정산 기록을 시간순으로 봅니다.">🗒 로그</button>`;
-  $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
+  $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 class="${canEdit?'ttl-ed':''}" title="${esc(workdeskTitle)}${canEdit?' — 눌러서 작업명 수정':''}"${canEdit?' onclick="editWorkdeskTitle()"':''}>${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${warn.join('')}
     ${shareBtn}
     ${planBtn}
@@ -5990,6 +6211,41 @@ function _condCardHtml(wd,d,m){
     const link=(typeof _woLinkHtml==='function')?_woLinkHtml(u):esc(u);
     return `<dt>메인URL</dt><dd title="${esc(u)}">${link}</dd>`;
   })();
+  /* 담당 2인(사용자 확정 2026-08-24) — 「담당  AE팀 황운하 / 관리자 만두」.
+     ★ 앞 = 그 업체를 맡은 AE(`created_by`) · 뒤 = 이 작업의 모집·공고를 맡은 리뷰웹 관리자.
+     ★★ **여기서 규율을 나누지 않는다** — 서버가 역할별로 다른 값을 실어 준다:
+       내부는 `adminRaw`(실명)까지 오고, 광고주 렌즈는 그것을 폐기하면서 `adminNick` 을
+       `닉네임 || '관리자'` 로 완결한다. 그래서 `adminNick || adminRaw` 한 줄이면
+       **내부 = 닉네임||실명 / 업체 = 닉네임||'관리자'** 가 동시에 성립한다.
+     ★ 한쪽이 없으면 **그 조각을 아예 안 적는다**(사용자 확정) — 「—」로 꾸미지 않는다.
+     ★ 둘 다 없으면 [미설정](내부) / 「—」(광고주) — `unset` 이 역할을 이미 안다.
+     ⚠ `AE팀` 은 고정 라벨이다 — `created_by` 가 인트라넷에서 오더를 낸 사람이라는 뜻이고,
+       그 사람이 항상 AE 부서라는 보장은 그 작성 경로에서 온다. */
+  const mgrRow=(()=>{
+    const mg=cd.manager||{};
+    const ae=String(mg.ae||'').trim();
+    /* ★ 관리자 조각은 **존재 여부**와 **이름**을 따로 본다:
+         `adminNick` 이 null 이 아니면 관리자가 있다(빈 문자열 = 업체 화면에서 이름을 밝히지 않음).
+         이름을 모를 때 `관리자 관리자` 로 라벨과 값이 겹치지 않게 **라벨만** 적는다. */
+    const admHas=(mg.adminNick!=null)||!!String(mg.adminRaw||'').trim();
+    const admName=String(mg.adminNick||mg.adminRaw||'').trim();
+    /* 136 — 업체(대행사)가 브랜드사에게 보여주려고 직접 적은 담당자(최대 2명, 라벨 없는 자유입력).
+       ★★ **브랜드사가 보는 화면에서는 내부 담당을 대체한다**(사용자 확정 2026-08-24 A안):
+          서버 렌즈가 브랜드 세션에 ae·admin 을 아예 안 실어 주므로 여기서는 그 값만 그리면 된다.
+          업체가 아무도 안 적었으면 **담당 행 자체를 그리지 않는다**(사용자 확정 Q2 = 행 숨김)
+          — 「—」나 [미설정] 로 두면 브랜드사에게 고칠 수도 없는 빈칸을 보여주는 셈이다.
+       ★ 대행사·내부 화면에서는 내부 담당 **아래 한 줄**로 함께 보여 "브랜드사에게 무엇이 나가는지"
+         를 확인시킨다(사용자 확정 D안) — 같은 행에 섞으면 누가 우리 담당인지 구분이 사라진다. */
+    const bm=(Array.isArray(mg.brand)?mg.brand:[]).map(function(v){return String(v==null?'':v).trim();}).filter(Boolean);
+    const bmHtml=bm.map(esc).join('<span class="sep">/</span>');
+    if(STATE.brandId) return bm.length?`<dt>담당</dt><dd>${bmHtml}</dd>`:'';
+    const parts=[];
+    if(ae)     parts.push(`<span class="role">AE팀</span>${esc(ae)}`);
+    if(admHas) parts.push(admName?`<span class="role">관리자</span>${esc(admName)}`:'관리자');
+    const own=parts.length?`<dt>담당</dt><dd>${parts.join('<span class="sep">/</span>')}</dd>`
+                          :`<dt>담당</dt>${unset('order')}`;
+    return own+(bm.length?`<dt>브랜드사<br>표시</dt><dd title="${esc(bm.join(' / '))} — 브랜드사 화면의 「담당」 행에 이대로 나갑니다(브랜드 관리에서 작업마다 정합니다).">${bmHtml}</dd>`:'');
+  })();
   /* 「일정」 — 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
      ★ 서버가 표에서 파생해 실어 준다(`condition.schedule`) — 화면에서 다시 세지 않는다.
      ★ 못 읽으면 **「—」**(사용자 확정) — [미설정] 버튼을 만들지 않는다. 여기엔 고칠 창구가 없고
@@ -6018,6 +6274,7 @@ function _condCardHtml(wd,d,m){
     ['@murl',null,null],
     ['@sched',null,null],
     ['@time',null,null],
+    ['@mgr',null,null],
     /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
        (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
     ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`+
@@ -6034,8 +6291,8 @@ function _condCardHtml(wd,d,m){
   ]/* ★ 광고주 표기 항목(사용자 확정 2026-08-23) — 작업명·메인URL·일정·구매시간·총건수·일건수·
        결제금액·구매채널·유입방식·리뷰타입. 나머지(다계정·현금영수증·리뷰비·입금명)는 내부 전용이라
        **서버 렌즈가 이미 값을 안 보내지만**, 빈 행까지 그리면 「—」 네 줄이 남으므로 여기서 뺀다. */
-   .filter(([k])=>!isAdv||['@murl','@sched','@time','총건수','일건수','@pay','구매채널','유입방식','리뷰타입'].includes(k))
-   .map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@time'?timeRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`)))).join('');
+   .filter(([k])=>!isAdv||['@murl','@sched','@time','@mgr','총건수','일건수','@pay','구매채널','유입방식','리뷰타입'].includes(k))
+   .map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@time'?timeRow:(k==='@mgr'?mgrRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`))))).join('');
   /* 상품명 정리 — **표시만, 원본 무접촉**(`condition.productName` 은 작업오더 원문 그대로다).
      ① `[상품/옵션/금액]` 라벨(사용자 확정 2026-08-20 시안 v2)
      ② 목록 번호 `1. `(사용자 확정 2026-08-23) — 원문이 `[상품/옵션/금액]\n1. 곰도리 … ` 형태라
@@ -12339,7 +12596,7 @@ async function renderSettingsView(){
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임과 블랙리스트 관리기준을 설정합니다)</b>'}</div>`;
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
   // ★ gatecriteria(블랙리스트 관리기준)는 공고별 [🚫 참여 리뷰어 관리]의 판정 기준이라 그 기능과 같은 범위(내부 담당자)로 연다.
-  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','reviewtype','managercleanup','gatecriteria','capturelink','homebanner','notice'] : ['nickname','gatecriteria'] });
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','reviewtype','managercleanup','deliverycleanup','gatecriteria','capturelink','homebanner','notice'] : ['nickname','gatecriteria'] });
 }
 
 /* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (frontend/docs/design-workdesk-home.html) ══
@@ -15617,7 +15874,7 @@ async function createAdvertiser(){
 }
 // ── 광고주 전용 접속 링크(매직 링크) — master/admin 만. 광고주는 이 링크만 열면 로그인 없이
 //   이 업체 뷰(소유 탭·마스킹·읽기전용)로 진입. 유출 대비 회전/폐기 가능. 링크 CRUD = /api/trackb/advertiser-link. ──
-function _advLinkUrl(token){ return location.origin + '/workdesk#adv=' + encodeURIComponent(token); }
+function _advLinkUrl(token){ return location.origin + '/workdesk#a=' + encodeURIComponent(token); }
 function _advLinkHtml(a){
   // ★ 게이트 = 서버 /advertiser-link(internalMiddleware) 와 1:1 — AE 포함(2026-08-19 사용자 확정).
   //   여기를 admin 으로 좁히면 개요 표의 [🔗 링크복사]가 안내하는 [다시 활성]·[회전]에 갈 곳이 없다.
@@ -16200,7 +16457,8 @@ function _trOpen(o){
   const allTabs=((STATE.sheetMap[o.sheetId]||{}).tabs||[]);
   const tabs=allTabs.filter(t=>t.tabGid!=null&&String(t.tabGid).trim()!=='');
   _trS={ kind:o.kind||'transfer', own:{sheetId:o.sheetId, tabGid:o.tabGid||null}, from:o.from||null, srcLabel:o.label||'',
-    tabs, gidless:allTabs.length-tabs.length, mode:'tab', picks:{}, target:'', newName:'', newOk:false, newPm:'' };
+    tabs, gidless:allTabs.length-tabs.length, mode:'tab', picks:{}, target:'', newName:'', newOk:false, newPm:'',
+    q:'', kb:-1 };   // q/kb = 거래처 검색어·키보드 커서(화면 상태만 — 서버 계약 무관)
   let ov=document.getElementById('ownTrPop');
   if(!ov){ ov=document.createElement('div'); ov.id='ownTrPop'; ov.className='owntr-ov'; document.body.appendChild(ov); }
   ov.style.display='flex';
@@ -16210,7 +16468,7 @@ function ownTransfer(i){
   const a=STATE.advCur, o=(STATE.ownItems||[])[i]; if(!a||!o) return;
   _trOpen({kind:'transfer', from:a, sheetId:o.sheetId, tabGid:o.tabGid||null});
 }
-function _trClose(){ const ov=document.getElementById('ownTrPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } _trS=null; _trItems=[]; }
+function _trClose(){ const ov=document.getElementById('ownTrPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } _trS=null; _trItems=[]; _trAdvItems=[]; }
 function _trRender(){
   const S=_trS; if(!S) return; const ov=document.getElementById('ownTrPop'); if(!ov) return;
   const asg=S.kind==='assign';                     // 미지정 → 기존 업체 지정
@@ -16218,8 +16476,6 @@ function _trRender(){
   // ★ 시트 제목을 적지 않는다 — 업체관리 화면의 단위는 작업(작업보드) 하나다.
   const srcLabel = S.srcLabel || (whole ? '이 업체의 옛 지정(전체)'
     : (STATE.tabIndex[S.own.sheetId+'::'+S.own.tabGid]||('작업 '+S.own.tabGid)));
-  const advOpts=(STATE.advs||[]).filter(x=>!S.from||x.id!==S.from.id)
-    .map(x=>`<option value="${esc(x.id)}" ${S.target===x.id?'selected':''}>${esc(x.name)}</option>`).join('');
   /* ★★ 범위 = 작업(탭) 단위 하나 — '시트 전체' 선택지는 폐지(사용자 확정 2026-08-23).
        남은 시트 전체 소유(레거시)를 이관할 때만 이 목록이 뜨고, 옮길 작업을 골라야 한다. */
   const scopeUi = whole ? `
@@ -16233,11 +16489,7 @@ function _trRender(){
     <div class="src"><b>${esc(srcLabel)}</b><br>현재 소유: ${asg?'<span style="color:var(--warn)">미지정</span>':esc((S.from&&S.from.name)||'')}</div>
     ${scopeUi}
     <label>${asg?'지정할 거래처':'이관할 거래처'}</label>
-    <select id="trTarget" onchange="_trTargetSel()">
-      <option value="">— 업체 선택 —</option>
-      ${advOpts}
-      <option value="__new__" ${S.target==='__new__'?'selected':''}>＋ 새 거래처 등록 (인트라넷 광고주DB 검색)</option>
-    </select>
+    ${_trTargetFieldHtml(S)}
     ${S.target==='__new__'?`
       <label>새 거래처명 <span style="color:var(--faint);font-weight:400">(인트라넷 광고주DB 자동완성 — 목록에서 선택)</span></label>
       <div style="position:relative">
@@ -16254,8 +16506,105 @@ function _trRender(){
   if(S.target==='__new__'){ _trChk(); const el=document.getElementById('trNewName'); if(el&&!S.newName) setTimeout(()=>el.focus(),30); }
 }
 function _trPick(ti){ const S=_trS; if(!S) return; S.picks[ti]=!S.picks[ti]; _trRender(); }
-function _trTargetSel(){ const S=_trS; if(!S) return; const el=document.getElementById('trTarget'); S.target=(el&&el.value)||'';
-  if(S.target!=='__new__'){ S.newName=''; S.newOk=false; S.newPm=''; _trItems=[]; } _trRender(); }
+/* ── 거래처 선택 = 검색 콤보박스(실시간 자동완성) ────────────────────────────────
+   종전에는 <select> 에 전 업체를 늘어놓아 30곳이 넘으면 스크롤로 찾아야 했다.
+   ★★ 재료는 **이미 받아 둔 STATE.advs 하나** — 신규 API 0, 로컬 필터(업체명 · 담당 AE).
+   ★★ 입력 중에는 팝업을 재렌더하지 않는다 — `_trRender` 는 팝업을 innerHTML 로 통째 교체하므로
+      입력칸 DOM 이 다시 만들어져 **한글 IME 조합이 파괴된다**(같은 팝업의 `_trSuggest` 와 같은 규율).
+      타이핑 때 손대는 것은 후보 리스트(#trAdvSug)와 안내문(#trAdvHint) 둘뿐이다.
+   ★ onclick 은 **인덱스만** — 업체명은 외부발 문자열이라 보간하면 따옴표 하나로 탈출된다.
+   ★ 고른 뒤에는 리스트를 접고 "선택된 업체 + [변경]" 한 줄로 바꾼다(무엇을 골랐는지가 늘 보인다). */
+const _TR_ADV_CAP=8;                      // 한 번에 그리는 후보 수(넘치면 건수를 말한다 — 조용한 절단 금지)
+let _trAdvItems=[];                       // 마지막으로 그린 후보(인덱스 전달의 근거 — _trItems 와 같은 관용구)
+function _trAdvNorm(v){ return String(v||'').toLowerCase().replace(/\s+/g,''); }
+/* 후보 = 살아있는 업체 전체(검색어가 있으면 업체명·담당 AE 부분일치). 이관은 원 소유 업체를 뺀다. */
+function _trAdvCands(){
+  const S=_trS; if(!S) return [];
+  const q=_trAdvNorm(S.q);
+  return (STATE.advs||[])
+    .filter(x=>!S.from||x.id!==S.from.id)
+    .filter(x=>!q || _trAdvNorm(x.name).includes(q) || _trAdvNorm(x.inadPm).includes(q));
+}
+/* 선택 전 = 검색칸 + 리스트 / 선택 후 = 고른 업체 한 줄. ★ '＋ 새 거래처 등록' 경로는 유지한다. */
+function _trTargetFieldHtml(S){
+  if(S.target && S.target!=='__new__'){
+    const a=(STATE.advs||[]).find(x=>x.id===S.target);
+    return `<div class="trsel"><b>${esc((a&&a.name)||'선택한 업체')}</b>`
+      +`${a&&a.inadPm?`<span class="pm">담당 ${esc(a.inadPm)}</span>`:''}`
+      +`<button type="button" class="chg" onclick="_trAdvChange()">변경</button></div>`;
+  }
+  if(S.target==='__new__'){
+    return `<div class="trsel"><b>＋ 새 거래처 등록</b><span class="pm">인트라넷 광고주DB 검색</span>`
+      +`<button type="button" class="chg" onclick="_trAdvChange()">변경</button></div>`;
+  }
+  return `<div class="trac">
+      <input id="trAdvQ" placeholder="업체명 · 담당 AE 검색" autocomplete="off" value="${esc(S.q||'')}"
+        oninput="_trAdvInput(this.value)" onfocus="_trAdvPaint()" onkeydown="_trAdvKey(event)">
+      <div id="trAdvSug" class="advsug"></div>
+    </div>
+    <div id="trAdvHint" class="chk"></div>`;
+}
+function _trAdvInput(v){ const S=_trS; if(!S) return; S.q=v||''; S.kb=-1; _trAdvPaint(); }
+/* 리스트·안내문만 다시 그린다(팝업 재렌더 금지 = IME 보호). */
+function _trAdvPaint(){
+  const S=_trS; if(!S) return;
+  const box=document.getElementById('trAdvSug'), hint=document.getElementById('trAdvHint');
+  if(!box) return;
+  const all=_trAdvCands(); _trAdvItems=all.slice(0,_TR_ADV_CAP);
+  const rows=_trAdvItems.map((a,i)=>
+    `<div class="sugitem${S.kb===i?' kb':''}" data-ord="${i}" onclick="_trAdvPick(${i})">`
+    +`<span class="sugl"><span class="sugn">${esc(a.name)}</span></span>`
+    +`${a.inadPm?`<span class="sugm">${esc(a.inadPm)}</span>`:''}</div>`).join('');
+  const ni=_trAdvItems.length;   // '새 거래처 등록' 줄은 항상 마지막 = 키보드 커서의 마지막 칸
+  box.innerHTML=rows
+    +`<div class="sugitem sugnew${S.kb===ni?' kb':''}" data-ord="${ni}" onclick="_trAdvNew()">＋ 새 거래처 등록 (인트라넷 광고주DB 검색)</div>`;
+  box.classList.add('show');
+  if(hint){
+    // ★ "모른다"와 "없다"를 구분한다 — 목록을 못 받은 것을 "검색 결과 없음"으로 꾸미지 않는다.
+    if(!(STATE.advs||[]).length){ hint.textContent='업체 목록을 불러오지 못했습니다 — 팝업을 닫고 [새로고침] 후 다시 시도하세요.'; hint.style.color='var(--warn)'; }
+    else if(!all.length){ hint.textContent='검색과 일치하는 업체가 없습니다 — 아래 [＋ 새 거래처 등록]으로 만들 수 있습니다.'; hint.style.color='var(--warn)'; }
+    else if(all.length>_TR_ADV_CAP){ hint.textContent=`업체 ${all.length}곳 중 ${_TR_ADV_CAP}곳 표시 — 더 입력해 좁혀주세요.`; hint.style.color='var(--faint)'; }
+    else { hint.textContent=`업체 ${all.length}곳`; hint.style.color='var(--faint)'; }
+  }
+}
+function _trAdvHide(){ const b=document.getElementById('trAdvSug'); if(b){ b.classList.remove('show'); } const S=_trS; if(S) S.kb=-1; }
+/* ↑↓ 이동 · Enter 선택 · Esc 는 **리스트만** 닫는다(팝업은 [취소]로만 닫힌다 — 고른 값 보호). */
+function _trAdvKey(e){
+  const S=_trS; if(!S) return;
+  const box=document.getElementById('trAdvSug'); const open=!!(box&&box.classList.contains('show'));
+  const last=_trAdvItems.length;                       // 마지막 = 새 거래처 등록 줄
+  if(e.key==='ArrowDown'){ e.preventDefault(); if(!open){ _trAdvPaint(); return; } S.kb=Math.min((S.kb==null?-1:S.kb)+1,last); _trAdvPaint(); _trAdvScroll(); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); if(!open) return; S.kb=Math.max((S.kb==null?0:S.kb)-1,0); _trAdvPaint(); _trAdvScroll(); }
+  else if(e.key==='Enter'){
+    if(!open) return;
+    const k=(S.kb==null?-1:S.kb);
+    e.preventDefault();
+    if(k===last) _trAdvNew();
+    else if(k>=0&&_trAdvItems[k]) _trAdvPick(k);
+    else if(_trAdvItems.length===1) _trAdvPick(0);      // 후보가 하나면 Enter 로 바로 고른다
+  }
+  else if(e.key==='Escape'){ if(open){ e.preventDefault(); e.stopPropagation(); _trAdvHide(); } }
+}
+function _trAdvScroll(){ const cur=document.querySelector('#trAdvSug .sugitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
+function _trAdvPick(i){
+  const S=_trS, a=_trAdvItems[i]; if(!S||!a) return;
+  S.target=a.id; S.q=''; S.kb=-1;
+  S.newName=''; S.newOk=false; S.newPm=''; _trItems=[];   // 새 거래처 입력 잔재 폐기(구 _trTargetSel 계약 그대로)
+  _trRender();
+}
+function _trAdvNew(){
+  const S=_trS; if(!S) return;
+  S.target='__new__'; S.q=''; S.kb=-1;
+  _trRender();
+}
+function _trAdvChange(){
+  const S=_trS; if(!S) return;
+  S.target=''; S.kb=-1; S.newName=''; S.newOk=false; S.newPm=''; _trItems=[];
+  _trRender();
+  const el=document.getElementById('trAdvQ'); if(el) setTimeout(()=>el.focus(),30);
+}
+/* 리스트 바깥을 누르면 접는다 — ★ 리스너는 최상위에 **1회만**(팝업을 열 때마다 걸면 겹쳐 쌓인다). */
+document.addEventListener('click', e=>{ if(!e.target.closest('.trac')) _trAdvHide(); });
 function _trSuggest(q){
   const S=_trS; if(!S) return; S.newName=(q||'').trim();
   clearTimeout(_trSugTimer); _trChk();

@@ -1,3 +1,11 @@
-# 기존 관리자 북마크 호환 (구 index.html → /admin)
-# Cloudflare Pages: index.html은 이제 리뷰어 홈이므로
-# /admin.html 접속도 /admin으로 정규화
+# ── Cloudflare Pages 라우팅 규칙 ──
+# 이 사이트는 SPA 폴백이 켜져 있어 **없는 경로가 404 가 아니라 200 + index.html(리뷰어 홈)** 로 응답한다.
+# 그래서 짧은 별칭을 쓰려면 반드시 여기서 명시해야 한다(안 하면 광고주가 리뷰어 홈을 본다).
+
+# 업체 전용 접속 링크의 짧은 별칭 — /a#a=<token> 로도 열린다.
+#   ★ 링크 생성(_advLinkUrl)은 여전히 /workdesk 를 쓴다(사용자 확정 2026-08-24 "(나)안"):
+#     이 규칙은 Cloudflare Pages 전용이라 테섭(Railway 정적 호스트)에서는 /a 가 404 이고,
+#     링크는 location.origin 기반이라 테섭에서 복사하면 죽은 링크가 되기 때문이다.
+#     짧은 커스텀 도메인을 붙이면 그때 생성 경로도 /a 로 옮긴다.
+#   ★ 프래그먼트(#a=…)는 서버로 가지 않으므로 rewrite(200)에서도 그대로 보존된다.
+/a    /workdesk.html    200

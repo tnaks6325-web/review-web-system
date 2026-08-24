@@ -448,6 +448,23 @@ input,textarea,button{font-family:inherit}
 .of-opt-tab.selected .of-opt-tab-count{color:#92400E}
 /* 옵션 미선택 시 주문자 입력란 비활성 */
 .of-orderer-disabled{opacity:.45;pointer-events:none}
+/* ★★ 주문자 칸은 기본으로 감춘다 (사용자 확정 2026-08-24)
+   리뷰웹시스템[3버전]에서는 작업보드의 참여자 칸이 주문자 자리를 대체하고, 서버가
+   로그인한 리뷰어 이름으로 채운다(submit.routes `_orderer`) — 한 번 더 치게 하지 않는다.
+   ★ 요소는 지우지 않고 감추기만 한다 — `of_orderer` 를 참조하는 코드가 6곳이다
+     (_setOrdererDisabled·selectAcItem·onOrdererInput·_syncSharedInfoToCard·
+      _lockSharedFields·_embedRestoreForm). 지우면 그쪽이 null 을 만난다.
+   ★ 인애드명단 후보가 있는 탭에서는 JS 가 `.of-orderer-on` 을 붙여 **도로 보여준다** —
+     그 탭은 "명단에서 내 이름 고르기"가 행 배정·옵션 잠금의 진입점이다. */
+.ofc-orderer-wrap{display:none}
+.of-orderer-on .ofc-orderer-wrap{display:block}
+.ofc-orderer-note{display:flex;align-items:center;gap:5px;margin:0 0 12px;padding:7px 10px;
+  background:#F3F4F6;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563;line-height:1.4}
+.of-orderer-on .ofc-orderer-note{display:none}
+/* 배치(타계정 다건)는 카드마다 그 명의가 주문자로 간다 — 본인 이름 안내를 감춘다 */
+.of-orderer-batch .ofc-orderer-note{display:none}
+.ofc-same-orderer{display:none}
+.of-orderer-on .ofc-same-orderer{display:inline}
 /* 드롭다운 옵션 배지 */
 .ac-opt-badge{display:inline-block;font-size:.64rem;font-weight:700;padding:1px 6px;border-radius:6px;background:#FEF3C7;color:#92400E;border:1px solid #FCD34D;flex-shrink:0;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .of-ai-result.show{display:block}

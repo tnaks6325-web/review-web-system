@@ -16,6 +16,9 @@
 /*.html
   Cache-Control: no-cache
 
+/a
+  Cache-Control: no-cache
+
 /docs/*
   Cache-Control: no-cache
 

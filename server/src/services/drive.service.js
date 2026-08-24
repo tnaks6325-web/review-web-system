@@ -1079,7 +1079,33 @@ async function getFolderMeta(folderId) {
 }
 
 /**
+ * content-disposition 헤더에서 파일명 추출 (없으면 null - 지어내지 않는다)
+ */
+function _filenameFromDisposition(v) {
+  const s = String(v || '');
+  if (!s) return null;
+  // RFC 5987 filename*=UTF-8''... 우선, 없으면 filename="..."
+  let m = /filename\*\s*=\s*[^']*''([^;]+)/i.exec(s);
+  if (m) {
+    const raw = m[1].trim();
+    try { return decodeURIComponent(raw) || null; } catch (_) { return raw || null; }
+  }
+  m = /filename\s*=\s*"([^"]*)"/i.exec(s) || /filename\s*=\s*([^;]+)/i.exec(s);
+  return (m && m[1].trim()) || null;
+}
+
+/**
  * Drive 파일 내용을 서버에서 다운로드 (비공개 파일 프록시 스트리밍용)
+ *
+ * ★★ 왕복 1회 - mime 은 media 응답 헤더가 준다.
+ *   종전에는 파일 1장마다 files.get 을 **두 번**(메타 + 본문) 쳤고 프록시에 서버 캐시가
+ *   없어서, 31KB 짜리 리뷰 캡처 한 장이 실측 2.0~2.6초였다(크기와 무관 = 왕복 지연이 지배).
+ *   media 응답의 content-type 이 곧 그 파일의 mime 이므로 메타 조회가 필요 없다.
+ * ★ 헤더로 못 알아낸 경우에만 메타 1회 폴백 - 헤더만 믿고 octet-stream 으로 접으면
+ *   <img> 가 안 그려지는 조용한 회귀가 된다(종전 동작 복원 = fail-safe).
+ * ★ name 계약 불변: 헤더(content-disposition) -> 메타 -> fileId 순으로 채운다.
+ *   소비처 5곳은 buffer/mimeType 만 쓰지만 계약을 좁히지 않는다.
+ *
  * @param {string} fileId
  * @returns {{ buffer: Buffer, mimeType: string, name: string }}
  */
@@ -1089,15 +1115,26 @@ async function downloadFile(fileId) {
   let lastErr = null;
   for (const d of clients) {
     try {
-      const meta = await d.files.get({ fileId, fields: 'mimeType, name', supportsAllDrives: true });
       const res = await d.files.get(
         { fileId, alt: 'media', supportsAllDrives: true },
         { responseType: 'arraybuffer' }
       );
+      // gaxios 는 응답 헤더를 소문자 키 평범한 객체로 변환해 돌려준다
+      const hdr = (res && res.headers) || {};
+      let mimeType = String(hdr['content-type'] || hdr['Content-Type'] || '').split(';')[0].trim();
+      let name = _filenameFromDisposition(hdr['content-disposition'] || hdr['Content-Disposition']);
+      if (!mimeType || !name) {
+        // 헤더로 못 알아낸 것만 메타 1회 (기본 경로는 왕복 1회)
+        try {
+          const meta = await d.files.get({ fileId, fields: 'mimeType, name', supportsAllDrives: true });
+          mimeType = mimeType || (meta.data && meta.data.mimeType) || '';
+          name = name || (meta.data && meta.data.name) || '';
+        } catch (_) { /* 메타 실패해도 본문은 이미 받았다 */ }
+      }
       return {
         buffer: Buffer.from(res.data),
-        mimeType: (meta.data && meta.data.mimeType) || 'application/octet-stream',
-        name: (meta.data && meta.data.name) || fileId,
+        mimeType: mimeType || 'application/octet-stream',
+        name: name || fileId,
       };
     } catch (e) {
       lastErr = e;
