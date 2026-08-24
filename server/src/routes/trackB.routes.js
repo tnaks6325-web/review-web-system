@@ -891,22 +891,15 @@ router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, re
     // ★ 마감/통계 조회 실패는 **플래그로 고지**한다 — 조용히 빈 판정을 내려보내면 화면이 그것을
     //   "마감자료 검수 대기 0건"으로 읽어 실제 대기 건이 통째로 사라진다(088 무신호 규율).
     const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId, annotate: true });
-    // ★★ staff(AE)는 담당 업체가 아니면 **폴더 URL 을 받지 않는다**(코드리뷰가 잡은 경계):
-    //   이 목록은 업체를 골라 보는 화면이라 AE 가 남의 업체도 열 수 있는데, 응답에 Drive 링크가
-    //   실려 있으면 [자료] 버튼이 곧 담당 밖 폴더 접근 수단이 된다(/tab-folders 는 서버가 막는데
-    //   여기는 열려 있어 같은 불변식이 한쪽만 지켜지던 상태). 담당 여부는 한 쿼리(inad_pm).
-    //   ★ 지우고 조용히 넘기지 않는다 — folderScoped:false 로 **사유를 화면이 말한다**.
-    let rows = own.rows;
-    let folderScoped = true;
-    if (_role(req) === 'staff') {
-      const mine = await svc.staffOwnsAdvertiser({ advertiserId: req.query.advertiserId, staffName: req.admin && req.admin.name });
-      if (!mine) {
-        folderScoped = false;
-        rows = rows.map(r => ({ ...r, folderUrl: null, captureFolderUrl: null, cashReceipt: false, cashReceiptNote: undefined }));
-      }
-    }
-    res.json({ ok: true, items: rows, statsUnavailable: own.statsUnavailable,
-      finishedUnavailable: own.finishedUnavailable, ...(folderScoped ? {} : { folderScoped: false }) });
+    /* ★★ 저장폴더 링크는 **담당(inad_pm) 무관 내부인 전원**(사용자 확정 2026-08-24).
+       종전에는 staff 가 담당 업체가 아니면 이 목록에서 폴더 URL·현영 판정을 비워 보냈는데,
+       **폴더를 실제로 여는 통로(`GET /tab-folders`)는 이미 내부인 전원에게 열려 있어**
+       ("staff는 작업보드 전체 운영 권한이므로 담당 여부와 무관하게 폴더를 연다") 버튼만 흐린
+       반쪽 규칙이었다. 업체 지정·해제를 담당 무관으로 연 것과 같은 자리다.
+       ★ 되돌리려면 `/tab-folders` 의 스코프와 **함께** 좁힌다(한쪽만 좁히면 이 상태로 되돌아온다).
+       ★ 광고주·리뷰어는 이 라우트에 도달하지 못한다(internalMiddleware). */
+    res.json({ ok: true, items: own.rows, statsUnavailable: own.statsUnavailable,
+      finishedUnavailable: own.finishedUnavailable });
   } catch (err) { next(err); }
 });
 
