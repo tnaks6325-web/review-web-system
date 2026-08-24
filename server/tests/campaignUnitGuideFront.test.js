@@ -162,6 +162,10 @@ function makeTable(opts) {
     _igBind: () => {},
     _igRender: () => {},
     _readOptionReviewMix: () => [],
+    /* 정원 잠금(2026-08-19, main) — 이 하네스는 신규 발행 상태(편집 아님)라 잠금이 꺼진 채 돈다.
+       ★ 표 함수가 새 전역을 부르면 여기(또는 아래 추출 목록)에 반드시 함께 넣는다. */
+    _recruitEditId: null,
+    _rfQuotaUnlock: false,
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
@@ -177,6 +181,7 @@ function makeTable(opts) {
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows',
     '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
+    '_rfQuotaNotice', '_syncQuotaLockUi',
   ].forEach(fn => vm.runInContext(grab(recruitSrc, fn), sandbox));
   return { dom, sandbox, run: (code) => vm.runInContext(code, sandbox) };
 }
