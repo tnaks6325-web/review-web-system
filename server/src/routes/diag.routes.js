@@ -2712,16 +2712,28 @@ router.get('/reverse-sync-list', authMiddleware, adminOrMasterMiddleware, async 
     const conds = ['status = $1'];
     if (req.query.sheetId) { params.push(req.query.sheetId); conds.push(`sheet_id = $${params.length}`); }
     if (req.query.tabName) { params.push(req.query.tabName); conds.push(`tab_name = $${params.length}`); }
+    /* 종류 필터 — 화면 뱃지는 **손댈 수 있는 것만** 센다. `cancel_suspect` 는 설계상 영영 플래그로만
+       남으므로(자동취소 금지) 함께 세면 "584건"처럼 손쓸 수 없는 숫자가 떠 담당자가 곧 무시하게 된다. */
+    if (['edit', 'cancel_suspect'].includes(req.query.type)) {
+      params.push(req.query.type); conds.push(`proposal_type = $${params.length}`);
+    }
     const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const where = conds.join(' AND ');
     const { rows } = await pool.query(
       `SELECT id, os_id AS "osId", sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
               proposal_type AS "type", field, old_value AS "oldValue", new_value AS "newValue",
               status, detected_at AS "detectedAt", resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"
-         FROM reverse_sync_proposals WHERE ${conds.join(' AND ')}
+         FROM reverse_sync_proposals WHERE ${where}
         ORDER BY detected_at DESC LIMIT ${lim}`,
       params
     );
-    res.json({ ok: true, count: rows.length, items: rows });
+    /* ★★ `total` 은 **자르기 전** 개수다. 종전에는 `count: rows.length` 뿐이라 584건이 쌓여 있어도
+       limit 만큼만 보였고, 호출부는 잘렸다는 사실 자체를 알 수 없었다(조용한 누락).
+       COUNT 는 (status, proposal_type) 조건이라 인덱스를 타고, 뱃지가 limit=1 로 싸게 총계를 얻는다. */
+    const { rows: cnt } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM reverse_sync_proposals WHERE ${where}`, params);
+    const total = (cnt[0] && cnt[0].n) || 0;
+    res.json({ ok: true, count: rows.length, total, truncated: total > rows.length, items: rows });
   } catch (err) { next(err); }
 });
 
@@ -2756,6 +2768,24 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
         [p.os_id, p.new_value, editSeq]
       );
       if (!up.length) return { stale: true };
+      // ★ 같은 감지 묶음의 **형제 제안**을 살려 둔다.
+      //   한 주문에 은행·계좌·예금주가 함께 어긋나면 detect 는 같은 detected_edit_seq·detected_sig 로
+      //   제안을 여러 건 만든다(_replaceOpenProposalEdits — 실측 28건 중 세 칸이 모두 깨진 행이 있다).
+      //   그런데 바로 위 UPDATE 가 last_edit_seq 를 올리므로 두 번째 제안부터는 G6 가 stale 로 보고
+      //   **조용히 기각**해 버렸다 — 담당자가 세 칸을 다 고칠 방법이 없고, 못 고친 건은 목록에서 사라진다.
+      //   G6 가 막으려는 것은 "감지 뒤 **다른** 편집이 끼어든 경우"다. 방금 우리가 만든 편집은
+      //   같은 시트 읽기에서 나온 형제라 그 스냅샷을 무효화하지 않는다 → seq 만 이월한다.
+      //   detected_sig 까지 같을 때만 이월한다(다른 감지 회차의 제안은 그대로 stale 로 남아야 한다).
+      //   detected_edit_seq 가 null 인 제안은 애초에 G6 검사 대상이 아니므로 건드리지 않는다.
+      if (p.detected_edit_seq != null) {
+        await pool.query(
+          `UPDATE reverse_sync_proposals SET detected_edit_seq = $3
+             WHERE os_id = $1 AND id <> $2 AND status = 'open' AND proposal_type = 'edit'
+               AND detected_edit_seq = $4
+               AND detected_sig IS NOT DISTINCT FROM $5`,
+          [p.os_id, p.id, editSeq, p.detected_edit_seq, p.detected_sig]
+        );
+      }
       await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq, edits: [{ field: p.field, oldValue: p.old_value, newValue: p.new_value }] });
       return { mirrorStatus: up[0].mirror_status };
     });
