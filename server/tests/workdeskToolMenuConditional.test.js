@@ -102,17 +102,22 @@ const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid:
 
   console.log('\n[D] 권한 — 조건부 노출이 게이트를 넓히지 않는다');
   {
-    /* ⚠ 2026-08-23 사용자 재확정: 화면 게이트를 서버(`/worktable/dedupe-rows` = adminOrMaster)와
-       **1:1** 로 맞췄다(그 전 2026-08-21 확정은 master 전용이었다). 이 가드가 고정하는 것은
-       "누가 보느냐"가 아니라 **조건부 노출이 게이트를 넓히지 않는다**는 쪽이다 —
-       그래서 admin 은 뜨고(서버가 허용), staff 는 안 뜬다(서버가 403). */
+    /* ★★ 권한 ≠ 노출 (사용자 확정 2026-08-24 — 08-23 의 "화면 ≡ 서버" 를 되돌림):
+         서버 = adminOrMaster · 화면 버튼 = **master 전용**. 화면이 서버보다 **일부러 좁다**
+         (같은 메뉴의 [write-back 시뮬]·[그림자 투영]과 같은 패턴 — admin 은 API 로 쓴다).
+       ★★★ 이 가드가 고정하는 것은 **방향**이다 — 넓어지는 쪽만 금지, 좁은 것은 의도. */
     const admin = makeSandbox({ role: 'admin', roster: [R('1'), R('2')], dedupe: 5 });
     const ha = vm.runInContext('_mhMenuHtml()', admin);
-    ok('★ admin 은 서버가 허용하므로 띄운다(화면 ≡ 서버 adminOrMaster)',
-      /openDedupeModal/.test(ha));
-    const adminNone = makeSandbox({ role: 'admin', roster: [R('1'), R('1')], dedupe: 0 });
-    ok('★ admin 에게도 할 일이 없으면 안 띄운다(조건부 노출은 역할과 무관)',
-      !/openDedupeModal/.test(vm.runInContext('_mhMenuHtml()', adminNone)));
+    ok('★★ admin 에게는 할 일이 있어도 정리 버튼을 안 띄운다(master 전용)',
+      !/openDedupeModal/.test(ha));
+    /* ★★ 무시트 조건도 "넓지 않다"의 일부다 — 서버 `dedupeRows` 는 시트 기반 탭을
+         `_assertSheetlessTab` 으로 거절한다("시트에서 정리하세요"). 화면에서 빼지 않으면
+         master 에게 **눌러도 거절당하는** 버튼이 뜬다(변이시험이 이 구멍을 찾아냈다). */
+    const sheetTab = makeSandbox({ roster: [R('1'), R('2')], dedupe: 5 });
+    sheetTab.STATE.cur.sheetless = false;
+    ok('★★ 시트 기반 작업에는 master 에게도 안 띄운다(서버가 거절하는 조작)',
+      !/openDedupeModal/.test(vm.runInContext('_mhMenuHtml()', sheetTab)));
+
     const staff = makeSandbox({ role: 'staff', roster: [R('1'), R('2')], dedupe: 5 });
     const hs = vm.runInContext('_mhMenuHtml()', staff);
     ok('★ staff 에게도 안 띄운다', !/openDedupeModal/.test(hs));
