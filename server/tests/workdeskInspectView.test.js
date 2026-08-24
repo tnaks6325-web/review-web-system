@@ -54,6 +54,19 @@ ok('진입 시 자리표시자는 그대로(로딩 표시 자체는 유지)',
 /* ── B. 런타임 실행 — 프리변수·무한로딩을 실제로 재현·차단 ─────────────── */
 const block = /const _RI_LABEL = \{[\s\S]*?\n(?=\/\*\* 카드의 탭명을 눌러)/.exec(src);
 ok('리뷰검수 렌더 블록을 추출했다', !!block);
+
+/* ★★ 카드 렌더가 부르는 **썸네일 헬퍼는 구현을 그대로 넣는다**(스텁 금지 · 2026-08-24)
+   ────────────────────────────────────────────────────────────────────────
+   #1160 이 검수 카드 썸네일을 구글 CDN 직결로 바꾸면서 렌더가 `_thumbAttrs` 를 부르게 됐는데,
+   이 sandbox 가 그 함수를 안 넣어 **정상 응답인데 "표시하지 못했습니다"** 로 떨어졌다
+   (실브라우저로 확인: 실제 화면은 정상 — 가드 쪽 거짓 양성).
+   ★ 스텁을 두면 그 함수의 회귀를 여기서 못 본다 → workdesk.html 의 위임 2개와
+     공유 모듈 `js/drive-thumb.js` 를 **실제로** 올린다(레포 규율: 스텁이 아니라 구현).
+   ★ `isAdmin` 을 안 두는 원칙은 그대로 — 판정 프리변수는 여전히 여기서 터져야 한다. */
+const thumbBlock = /function _thumbUrl\(id, px\)\{[\s\S]*?\n\}\n(?=\/\* 사람 옆 번호)/.exec(src);
+ok('★ 썸네일 헬퍼(_thumbUrl·_thumbAttrs) 를 구현 그대로 추출했다',
+  !!thumbBlock && /_thumbAttrs/.test(thumbBlock[0]) && !/function _thumbAttrs\(\)\{\}/.test(thumbBlock[0]));
+const driveThumbSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'drive-thumb.js'), 'utf8');
 // 상세 팝업 + 좌우 이동 + 키보드 리스너 블록(riOpenDetail ~ keydown 리스너)
 // ★ 확인 2분화(학습 루프) 도입으로 riResolve 앞에 설명 주석 블록이 생겼다 — 주석 유무를
 //   모두 허용(검사 의미 불변: 추출 경계는 여전히 riResolve 직전).
@@ -87,7 +100,10 @@ function makeSandbox(role, api) {
     console,
     // ★ isAdmin 전역을 **두지 않는다** — 프리변수가 다시 들어오면 여기서 터져야 한다.
   };
+  sandbox.window = sandbox;      // 위임이 `window.DriveThumb` 를 본다(브라우저와 같은 모양)
   vm.createContext(sandbox);
+  vm.runInContext(driveThumbSrc, sandbox);   // 공유 모듈 구현
+  vm.runInContext(thumbBlock[0], sandbox);   // workdesk.html 의 위임 2개
   vm.runInContext(block[0], sandbox);
   vm.runInContext(detailBlock[0], sandbox);
   return sandbox;

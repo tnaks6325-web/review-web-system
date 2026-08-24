@@ -328,10 +328,53 @@ t('★ 리터럴 NUL 없음(git 이 바이너리로 취급하면 grep 가드가 
 });
 
 t('★ 읽기 전용 — 준비 행 판독 경로에 쓰기 SQL 0', () => {
-  [['workKindContext', WKC], ['workOrderLink', LINK], ['campaignTabLateral', LAT]].forEach(([n, s]) => {
+  [['workKindContext', WKC], ['workOrderLink', LINK]].forEach(([n, s]) => {
     const body = s.replace(/\/\/.*$/gm, '');
     assert.ok(!/\b(INSERT|UPDATE|DELETE)\b/i.test(body), `${n} 에 쓰기 SQL 이 있다`);
   });
+});
+
+/* ★★ campaignTabLateral 은 **파일 전체가 아니라 판독 조각만** 본다 (2026-08-24)
+   ────────────────────────────────────────────────────────────────────────
+   그 파일은 성격이 둘로 갈렸다: `campaignColLateral`(판독 경로가 쓰는 읽기 SQL 조각)과
+   `renameCampaignLinkedTab`(탭 리네임 자가치유의 UPDATE — indexBuilder·indexScan 전용,
+   준비 행 판독과 무관, 전용 가드 `campaignLinkFollowRename` 가 지킨다).
+   파일 전체를 훑던 종전 검사는 그 쓰기 함수가 합류한 순간(#1134) 빨개졌다 — 판독 경로는
+   그대로 읽기 전용인데도. 그래서 **판독 함수 본문으로 좁히고**, 대신 "그 파일의 쓰기는
+   renameCampaignLinkedTab 안에만 있다"를 함께 고정한다(검사 의미는 더 강해진다). */
+function _fnBody(src, name) {
+  const i = src.indexOf('function ' + name + '(');
+  if (i < 0) return null;
+  // ★ 매개변수 목록을 먼저 건너뛴다 — `({ sheetId, ... } = {})` 같은 구조분해의 중괄호를
+  //   본문 시작으로 세면 시그니처만 잘라 내고 "쓰기 0" 을 거짓으로 통과시킨다(실측).
+  let p = src.indexOf('(', i), pd = 0, bodyStart = -1;
+  for (let j = p; j < src.length; j++) {
+    if (src[j] === '(') pd++;
+    else if (src[j] === ')') { pd--; if (pd === 0) { bodyStart = src.indexOf('{', j); break; } }
+  }
+  if (bodyStart < 0) return null;
+  let d = 0;
+  for (let j = bodyStart; j < src.length; j++) {
+    if (src[j] === '{') d++;
+    else if (src[j] === '}') { d--; if (d === 0) return src.slice(i, j + 1); }
+  }
+  return null;
+}
+
+t('★ 읽기 전용 — campaignTabLateral 의 판독 조각(campaignColLateral)에 쓰기 SQL 0', () => {
+  const read = _fnBody(LAT, 'campaignColLateral');
+  assert.ok(read, 'campaignColLateral 함수를 찾지 못했다(이름이 바뀌었으면 이 가드를 함께 고칠 것)');
+  assert.ok(!/\b(INSERT|UPDATE|DELETE)\b/i.test(read.replace(/\/\/.*$/gm, '')),
+    'campaignColLateral 에 쓰기 SQL 이 있다');
+});
+
+t('★ campaignTabLateral 의 쓰기는 renameCampaignLinkedTab 안에만 있다(딴 곳에 새 쓰기가 생기면 잡힌다)', () => {
+  const body = LAT.replace(/\/\/.*$/gm, '');
+  const total = (body.match(/\b(INSERT|UPDATE|DELETE)\b/gi) || []).length;
+  const write = _fnBody(LAT, 'renameCampaignLinkedTab') || '';
+  const inWrite = (write.replace(/\/\/.*$/gm, '').match(/\b(INSERT|UPDATE|DELETE)\b/gi) || []).length;
+  assert.ok(total > 0 && total === inWrite,
+    `쓰기 SQL ${total}개 중 ${inWrite}개만 renameCampaignLinkedTab 안에 있다`);
 });
 
 /* ══ 8) 진짜 PG — 스텁이 해석하지 않는 SQL 의미 ═════════════ */
