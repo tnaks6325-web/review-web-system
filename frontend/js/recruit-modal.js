@@ -473,7 +473,7 @@
               <div class="section-heading"><div><h3>기본 설정</h3><span class="section-hint">공고 운영과 입금 기준을 설정합니다.</span></div><span class="section-count">11개 항목</span></div>
               <div class="row-form">
                 <div class="sheetless-compat-fields" hidden><select id="rf_linked_campaign" onchange="onLinkedCampaignChange(this)"><option value="">① 캠페인(시트) 선택</option></select><select id="rf_linked_tab" onchange="onLinkedTabChange(this)" disabled><option value="">② 탭 선택 (시트 먼저)</option></select><div id="rf_linked_campaign_reference"></div><div id="rf_linked_tab_reference"></div></div>
-                <div id="rf_linked_tab_info" hidden><span id="rf_linked_tab_text"></span></div><div id="rf_work_order_link_info" hidden></div><div id="rf_linked_tab_note" hidden></div>
+                <div id="rf_linked_tab_info" hidden><span id="rf_linked_tab_text"></span></div><div id="rf_work_order_link_info" hidden></div><div id="rf_linked_tab_note" style="display:none"></div>
                 <div class="form-row"><span class="form-label">유입 방식 <small>작업오더 기준</small></span><div class="form-control"><div id="rf_inflow_type_ui" class="square-toggle"><button type="button" class="active" data-inflow="link" onclick="rfSetInflowType('link',this)">링크유입</button><button type="button" data-inflow="guide" onclick="rfSetInflowType('guide',this)">가이드유입</button></div><input id="rf_inflow_type_value" type="hidden" value="link"><span class="tag public">작업오더 연동 · 상품 페이지 열기</span></div></div>
                 <div class="form-row"><span class="form-label">담당자 <em class="required">*</em></span><div class="form-control"><div id="rf_manager_btns" class="choice-set"><button class="choice rchan-btn" data-group="manager" data-val="만두" onclick="selectRfBtn('manager',this)">만두</button><button class="choice rchan-btn" data-group="manager" data-val="망고" onclick="selectRfBtn('manager',this)">망고</button></div><input id="rf_manager" type="hidden"></div></div>
                 <div class="form-row"><span class="form-label">구매채널 <em class="required">*</em></span><div class="form-control"><div id="rf_channel_btns" class="square-toggle"><button class="rchan-btn" data-group="channel" data-val="쿠팡" onclick="selectRfBtn('channel',this)">쿠팡</button><button class="rchan-btn" data-group="channel" data-val="네이버" onclick="selectRfBtn('channel',this)">네이버</button><button class="rchan-btn" data-group="channel" data-val="올리브영" onclick="selectRfBtn('channel',this)">올리브영</button><button class="rchan-btn" data-group="channel" data-val="카카오메이커스" onclick="selectRfBtn('channel',this)">카카오메이커스</button><button class="rchan-btn" data-group="channel" data-val="직접입력" onclick="selectRfBtn('channel',this)">직접입력</button></div><input id="rf_channel_custom" placeholder="채널명 직접 입력" hidden><input id="rf_channel" type="hidden"></div></div>
@@ -1037,6 +1037,14 @@
 #recruitModal .section-hint{color:#7F8A9B;font-size:10px}.section-count{color:#2563C8;font-size:10px;font-weight:850}
 #recruitModal .rf-compact-main .row-form{border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#fff}
 #recruitModal .rf-compact-main .form-row{display:grid;grid-template-columns:minmax(112px,25%) minmax(0,75%);min-height:37px;border:0;border-top:1px solid #DCE3EC;border-radius:0;background:#fff}
+/* ★★ 위 display:grid 는 브라우저 기본 규칙 [hidden]{display:none} 을 **항상 이긴다**(작성자
+   스타일시트가 UA 스타일시트보다 우선). 그래서 JS 가 el.hidden = true 로 접어도 줄이 그대로
+   보였다(2026-08-24 신고 — 배송유형이 실배송인데 "배송 조합"·"회수 정보" 가 노출). 이 레포는
+   hidden 을 여닫는 행이 늘 때마다 같은 함정을 밟으므로 **행 전체를 한 규칙으로** 막는다.
+   ★ 특이성을 .rf-compact-main 까지 붙여 위 규칙보다 확실히 높인다 — 같은 특이성이면 파일
+   순서(나중 규칙이 이김)에 좌우돼 CSS 를 재배치할 때 이 가림이 조용히 풀린다(이 파일에서
+   이미 두 번 밟은 함정). 뒤 선택자는 legacy 레이아웃용 폴백이다. */
+#recruitModal .rf-compact-main .form-row[hidden],#recruitModal .form-row[hidden]{display:none}
 #recruitModal .rf-compact-main .form-row:first-child{border-top:0}
 #recruitModal .rf-compact-main .form-label{display:flex;align-items:center;gap:6px;padding:6px 12px;background:#FBFCFE;color:#45536A;font-size:11px;font-weight:850}
 #recruitModal .rf-compact-main .form-label small{color:#94A3B8;font-weight:650}.required{color:#E15241;font-style:normal}

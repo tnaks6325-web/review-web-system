@@ -186,6 +186,35 @@ t('★ 해당 유형일 때만 펼친다', () => {
   assert.ok(/mixRow\.hidden = base !== '혼합'/.test(modal));
   assert.ok(/recallRow\.hidden = base !== '회수'/.test(modal));
 });
+/* ★★ 2026-08-24 실사고 — JS 는 위처럼 el.hidden 을 정확히 세우는데도 배송유형이 실배송인
+   화면에 "배송 조합"·"회수 정보" 가 그대로 보였다. 원인은 JS 가 아니라 CSS 였다:
+   `.rf-compact-main .form-row{display:grid}` 가 **브라우저 기본 규칙 [hidden]{display:none} 을
+   항상 이긴다**(작성자 스타일시트 > UA 스타일시트). 그래서 hidden 속성만으로는 안 접힌다.
+   ★ 이 회귀는 정적 grep(위 두 줄)으로는 절대 안 잡힌다 — 그 두 줄은 멀쩡히 있었다.
+     그래서 "가림 규칙이 CSS 에 있고, 그 규칙이 display:grid 보다 특이성이 높은가"를 고정한다. */
+t('★★ hidden 이 CSS display:grid 에 먹히지 않게 가림 규칙이 있다(실사고 재발 차단)', () => {
+  assert.ok(/\.form-row\[hidden\]\{display:none\}/.test(modal),
+    'form-row[hidden] 가림 규칙이 없다 — hidden 을 세워도 줄이 그대로 보인다');
+});
+t('★★ 그 가림 규칙은 순서에 기대지 않을 만큼 특이성이 높다', () => {
+  // `.rf-compact-main .form-row{display:grid}` 와 특이성이 같으면 파일 순서(나중 규칙이 이김)에
+  // 좌우돼, CSS 를 재배치하는 순간 가림이 조용히 풀린다(이 파일에서 이미 두 번 밟은 함정).
+  assert.ok(/#recruitModal \.rf-compact-main \.form-row\[hidden\]/.test(modal),
+    '.rf-compact-main 접두가 없으면 display:grid 규칙과 특이성이 같아 순서에 기댄다');
+});
+t('★ 그 규칙은 form-row 만 겨냥한다(전역 [hidden] !important 금지)', () => {
+  // 전역 `#recruitModal [hidden]{display:none!important}` 로 때우면, hidden 을 단 채
+  // style.display 로만 여는 요소(rf_linked_tab_note 계열)가 **영구히 안 보이게** 된다.
+  assert.ok(!/#recruitModal \[hidden\]\{display:none!important\}/.test(modal),
+    '전역 !important 가림은 style.display 로 여는 요소를 죽인다');
+});
+t('★ style.display 로만 여는 안내 박스에는 hidden 을 달지 않는다(영구 비표시 차단)', () => {
+  // 같은 사고의 거울상: rf_linked_tab_note 는 코드가 style.display 로만 여닫는데 마크업에
+  // hidden 이 붙어 있어 **한 번도 보인 적이 없었다**(2026-08-24 함께 발견).
+  assert.ok(/id="rf_linked_tab_note" style="display:none"/.test(modal),
+    'rf_linked_tab_note 가 hidden 이면 style.display="" 로 열어도 UA 규칙에 막혀 안 보인다');
+  assert.ok(!/id="rf_linked_tab_note" hidden/.test(modal));
+});
 t('★ 배송유형이 바뀌면 부속 행이 따라간다', () => {
   assert.ok(/delivery\.addEventListener\('change', rfSyncDeliveryDetail\)/.test(modal));
   assert.ok(/window\.rfSyncDeliveryDetail = rfSyncDeliveryDetail/.test(modal),
