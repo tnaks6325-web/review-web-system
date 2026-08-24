@@ -93,8 +93,13 @@ function routeBody(routePath) {
   assert.doesNotMatch(workdesk, /prompt\(\s*'작업명/, '★ 작업명 편집은 브라우저 prompt 창을 쓰지 않는다(인라인으로 대체).');
   assert.match(workdesk, /wrap\.innerHTML='<input class="mh-title-in"/,
     '제목 자리를 input 으로 갈아끼워야 합니다.');
-  assert.match(workdesk, /function _wtTitleKey\(ev\)\{[\s\S]*Enter[\s\S]*Escape/,
-    'Enter=저장 · Esc=취소 (업체관리 비고 편집과 같은 관용구).');
+  // ★ 함수 본문으로 잘라서 본다 — 파일 전체를 훑으면 다른 핸들러의 'Escape' 가 대신 통과시킨다
+  //   (변이시험이 실제로 뚫었다: Esc 분기를 없애도 초록이었다).
+  const keyFn = workdesk.slice(workdesk.indexOf('function _wtTitleKey(ev){'),
+    workdesk.indexOf('async function saveWorkdeskTitle('));
+  assert.match(keyFn, /Enter/, 'Enter 로 저장.');
+  assert.match(keyFn, /Escape/, 'Esc 로 취소 (업체관리 비고 편집과 같은 관용구).');
+  assert.match(keyFn, /dataset\.esc='1'/, 'Esc 는 취소 표식을 남겨 저장을 건너뛴다.');
   assert.match(workdesk, /onblur="saveWorkdeskTitle\(this\)"/, '포커스가 빠지면 저장.');
   // ★ 저장 실패 시 입력 내용을 지우지 않는다 — 다시 쳐야 하면 그건 막다른 길이다
   const saveFn = workdesk.slice(workdesk.indexOf('async function saveWorkdeskTitle('),
