@@ -15920,9 +15920,14 @@ function _relocateToggleImg(headerEl, id) {
   if (!wrap) return;
   if (wrap.style.display === 'none' || !wrap.style.display) {
     if (!wrap.dataset.loaded) {
+      /* ★ 최대 440px 로 보여주는 자리 — 원본을 먼저 받던 순서를 뒤집어 CDN 썸네일 우선(js/drive-thumb.js).
+         모듈이 없으면 종전 동작(원본 우선 + CDN 폴백) 그대로. */
       const proxy = `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
       const thumb = `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`;
-      wrap.innerHTML = `<div style="padding:4px 0 8px"><img src="${proxy}" loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block" onerror="this.onerror=null;this.src='${thumb}'"></div>`;
+      const at = window.DriveThumb
+        ? DriveThumb.attrs(id, 800, proxy)
+        : ` src="${proxy}" onerror="this.onerror=null;this.src='${thumb}'"`;
+      wrap.innerHTML = `<div style="padding:4px 0 8px"><img${at} loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block"></div>`;
       wrap.dataset.loaded = '1';
     }
     wrap.style.display = 'block';

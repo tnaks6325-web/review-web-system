@@ -74,7 +74,7 @@ const grid = body(wd, 'function buildGrid(');
 t('행 배경은 r.over 로만 켠다(화면 재판정 0)', /r\.over===true\?' class="gover"'/.test(grid));
 t('초과 배지도 r.over 로만', /r\.over===true\?' <span class="govb"/.test(grid));
 t('★ 복사 텍스트에서 초과 배지를 제거한다(셀 값에 "초과" 가 섞이지 않게)',
-  /\.revb,\.rdel,\.src,\.visit,\.lock,\.govb/.test(wd));
+  /\.ehist,\.rdel,\.src,\.visit,\.lock,\.govb/.test(wd));
 t('CSS 는 gover/govb 접두 — 맨몸 .over 를 쓰지 않는다',
   /tr\.gover>td\{/.test(wd) && /\.govb\{/.test(wd));
 

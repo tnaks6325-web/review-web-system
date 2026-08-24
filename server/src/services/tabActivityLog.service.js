@@ -179,9 +179,13 @@ const SOURCES = [
           message: `표 편집 되돌리기 — ${fieldLabel(r.field)}`, who: _clip(r.actor, 40) || '담당자',
         };
         const v = r.kind === 'bool' ? (r.value_bool ? '켬' : '끔') : _clip(r.value_text, 60);
+        /* ★ 빈 값은 “”(빈 따옴표)가 아니라 **(값 지움)** 이라고 말한다 — 관리자 수동 입금처리의
+           [입금일 비우기]처럼 "지웠다"가 곧 사건인 편집이 있는데, 빈 따옴표로 적으면 로그를
+           읽는 사람이 무슨 일이 있었는지 알 수 없다. */
+        const shown = (r.kind !== 'bool' && !String(r.value_text || '').trim()) ? '(값 지움)' : `“${v}”`;
         return {
           id: `pe:${r.id}:n`, at: r.at, kind: 'edit',
-          message: `표 편집 — ${fieldLabel(r.field)} → “${v}”`, who: _clip(r.actor, 40) || '담당자',
+          message: `표 편집 — ${fieldLabel(r.field)} → ${shown}`, who: _clip(r.actor, 40) || '담당자',
         };
       });
       return { items, hitLimit: rows.length >= limit };

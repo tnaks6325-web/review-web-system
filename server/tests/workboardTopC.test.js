@@ -709,8 +709,165 @@ t('★ 담당 행은 구매시간 다음·총건수 앞', (() => {
     && /k==='@mgr'\?mgrRow/.test(m);
 })());
 
+console.log('\n── L. 이체은행 — 입금 3종을 작업 조건에서 정한다(사용자 확정 2026-08-24) ──');
+/* 종전에는 입금관리 전용 팝업에서 이체은행·통장표시·리뷰비를 직접 입력했는데, 같은 값을 정하는
+   자리가 작업 조건 카드에도 있어 창구가 둘로 갈렸다. 팝업을 없애고 이 카드로 모았다. */
+t('★ 조건 카드에 이체은행 줄이 있다(리뷰비·입금명과 나란히)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return /\['이체은행','bank'/.test(m) && /\['리뷰비','fee'/.test(m) && /\['입금명','memo'/.test(m);
+})());
+t('★★ 은행 판정은 입금관리와 **같은 함수**(사본 금지 — 화면과 이체 파일이 갈리면 안 된다)', (() => {
+  const blk = cond.slice(cond.indexOf('이체은행 —'), cond.indexOf('이체은행 —') + 1200);
+  // ★ blk 은 주석 **중간**에서 시작한다 — 코드만 보려면 그 주석이 닫힌 뒤부터 자른다
+  const code = blk.slice(blk.indexOf('*/') + 2);
+  return /require\('\.\/payment\.service'\)/.test(blk)
+    && /normalizeBankChoice/.test(code) && /bankFromGoodsCostType/.test(code)
+    && !/현금|계산서/.test(code);   // 판정 규칙 문자열 사본 0(payment.service 가 소유)
+})());
+t('★ 자동 판정 값은 그 사실을 말한다(사람이 정한 값과 구분)', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf("['이체은행','bank'");
+  return /bankSource==='auto'/.test(m.slice(i, i + 400)) && /자동/.test(m.slice(i, i + 400));
+})());
+t('★★ 광고주에게는 이체은행이 나가지 않는다(렌즈 화이트리스트 + 화면 목록)', (() => {
+  const lens = fnBody(svc, 'function _condAdvertiserLens(');
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const advList = (m.match(/filter\(\(\[k\]\)=>!isAdv\|\|\[([^\]]*)\]/) || [])[1] || '';
+  return !/transferBank/.test(lens) && !/이체은행/.test(advList);
+})());
+t('★ 공고 있으면 공고 모달 · 없으면 관리자만 탭 저장(리뷰비·입금명과 같은 규칙)', (() => {
+  const g = fnBody(wd, 'function _cndFixGate(');
+  return /kind==='fee'\|\|kind==='memo'\|\|kind==='bank'/.test(g) && /isAdmin/.test(g);
+})());
+t('★ 저장 창구는 기존 API 하나(신규 경로 0)', (() => {
+  const m = fnBody(wd, 'function _cndBankModal(');
+  return /payment\/transfer-setting/.test(m) && /bank:sel\.dataset\.v/.test(m)
+    && /자동\(작업오더 물건비\)/.test(m);
+})());
+{ // vm 실행 — 값·자동칩·미설정 세 갈래를 실제로 그려 본다
+  const vm = require('vm');
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf("['이체은행','bank'"), j = m.indexOf("['리뷰타입'", i);
+  const sb = { esc: v => String(v == null ? '' : v) };
+  vm.createContext(sb);
+  vm.runInContext('this.f=function(cd){return [' + m.slice(i, j) + '];};', sb);
+  const row = cd => JSON.stringify(sb.f(cd)[0]);
+  t('★ 사람이 정한 값 = 라벨만(자동 칩 없음)',
+    /하나은행/.test(row({ transferBankLabel: '하나은행', bankSource: 'campaign' }))
+    && !/자동/.test(row({ transferBankLabel: '하나은행', bankSource: 'campaign' })));
+  t('★ 자동 판정 값 = 라벨 + [자동] 칩',
+    /케이뱅크/.test(row({ transferBankLabel: '케이뱅크', bankSource: 'auto' }))
+    && /자동/.test(row({ transferBankLabel: '케이뱅크', bankSource: 'auto' })));
+  t('★★ 정할 근거가 없으면 null = [미설정](0·빈 값으로 꾸미지 않는다)',
+    sb.f({ transferBankLabel: null, bankSource: null })[0][2] === null);
+}
+
+async function _runP1Guards() {
+console.log('\n── M. 코드리뷰 P1 — 은행은 이체 계산과 같은 공고를 봐야 한다 ──');
+/* PR #1173 리뷰 지적(chatgpt-codex-connector): camps(GID 재매칭+활성우선+값있는공고 훑기)와
+   실제 이체가 쓰는 _loadCampaigns(이름만 일치+created_at 최신 하나)가 **다른 공고**를 고르면
+   "화면은 하나은행인데 이체 파일은 케이뱅크"가 된다. 스텁 pool 로 tabConditionSummary 를
+   **실제 실행**해 그 divergence 가 재현되지 않음을 고정한다. */
+{
+  const path = require('path');
+  const fs2 = require('fs');
+  const SRC = pp => path.join(__dirname, '..', 'src', pp);
+  const poolPath = require.resolve(SRC('db/pool'));
+  const paySvcPath = require.resolve(SRC('services/payment.service'));
+  const tbSvcPath = require.resolve(SRC('services/trackB.service'));
+
+  const withStubPool = async (handler, run) => {
+    const stub = {
+      query: async (sql, params) => handler(sql, params) || { rows: [], rowCount: 0 },
+      connect: async () => ({ query: stub.query, release() {} }),
+    };
+    const origPool = require.cache[poolPath];
+    require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, exports: stub };
+    delete require.cache[paySvcPath];
+    delete require.cache[tbSvcPath];
+    try { await run(require(tbSvcPath), stub); }
+    finally {
+      delete require.cache[paySvcPath];
+      delete require.cache[tbSvcPath];
+      if (origPool) require.cache[poolPath] = origPool; else delete require.cache[poolPath];
+    }
+  };
+
+  {
+    let picked = null;
+    // camps: 오래된(older) 공고가 active=TRUE·bank=hana / 최신(newer) 공고가 closed·bank=NULL
+    //   → camps 정렬(active DESC, created_at DESC)은 [older(active,hana), newer(closed,null)]
+    //   → 실제 이체(_loadCampaigns, created_at DESC 만)는 newer(bank=null) 하나만 본다
+    await withStubPool((sql, params) => {
+      if (/FROM recruit_campaigns\s+WHERE linked_sheet_id/.test(sql)) {
+        return { rows: [
+          { id: 'C-OLDER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+            reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: 'hana',
+            multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+            status: 'active', participationMode: true },
+          { id: 'C-NEWER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+            reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: null,
+            multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+            status: 'closed', participationMode: true },
+        ] };
+      }
+      // payment.service._loadCampaigns 의 DISTINCT ON ... ORDER BY created_at DESC — newer 하나만
+      if (/FROM recruit_campaigns c\s*$|c\.linked_sheet_id = ANY/.test(sql)) {
+        return { rows: [
+          { id: 'C-NEWER', title: 'A', sheetId: 'S1', tabName: 'T1', reviewFee: null,
+            transferBank: null, transferMemo: null, campStartDate: null, goodsCostType: '' },
+        ] };
+      }
+      return { rows: [] };
+    }, async (tb) => {
+      const cd = await tb.tabConditionSummary({ query: async (sql, params) => {
+        if (/FROM recruit_campaigns\s+WHERE linked_sheet_id/.test(sql)) {
+          return { rows: [
+            { id: 'C-OLDER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+              reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: 'hana',
+              multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+              status: 'active', participationMode: true },
+            { id: 'C-NEWER', title: 'A', recruitTotal: null, dailyLimit: null, channel: null, channelCustom: null,
+              reviewType: null, reviewTypeMix: null, reviewFee: null, transferMemo: null, transferBank: null,
+              multiAccount: false, multiDailyLimit: null, windowStart: null, windowEnd: null,
+              status: 'closed', participationMode: true },
+          ] };
+        }
+        return { rows: [] };
+      } }, { sheetId: 'S1', tabName: 'T1', meta: {}, wo: null });
+      picked = cd;
+    });
+    t('★★ 활성 공고에 은행이 있어도, 실제 이체가 보는 최신 공고에 은행이 없으면 [미설정]이다',
+      picked && picked.transferBank === null && picked.bankSource === null,
+      picked && JSON.stringify({ transferBank: picked.transferBank, bankSource: picked.bankSource }));
+  }
+
+  t('★ campaignForTab 이 payment.service 에서 export 된다(사본 없이 재사용 가능)', (() => {
+    const svc2 = fs2.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    return /async function campaignForTab\(/.test(svc2) && /campaignForTab,/.test(svc2)
+      && /return map\[sheetId \+ '\|\|' \+ tabName\] \|\| null;/.test(svc2);
+  })());
+  t('★★ campaignForTab 이 _loadCampaigns 를 그대로 위임한다(SQL 사본 0)', (() => {
+    const svc2 = fs2.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    const fn = svc2.slice(svc2.indexOf('async function campaignForTab('), svc2.indexOf('module.exports'));
+    return /_loadCampaigns\(\[sheetId\], \[tabName\]\)/.test(fn) && !/ORDER BY/.test(fn);
+  })());
+  t('★ 조건 카드가 campaignForTab 을 쓴다(camps 픽 사본이 아니라)', (() => {
+    const src = fs2.readFileSync(SRC('services/trackB.service.js'), 'utf8');
+    const condStart = src.indexOf('async function tabConditionSummary(');
+    const condEnd = src.indexOf("logger.warn(\`[trackB] tabConditionSummary", condStart);
+    const cond2 = src.slice(condStart, condEnd);
+    return /campaignForTab\(sheetId, tabName\)/.test(cond2)
+      && !/const campBank = normalizeBankChoice\(bankCamp/.test(cond2);
+  })());
+}
+
+}
+
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));
 
-console.log(`\n✅ workboardTopC: ${pass} cases passed`);
-process.exit(0);
+_runP1Guards().then(() => {
+  console.log(`\n✅ workboardTopC: ${pass} cases passed`);
+  process.exit(0);
+}).catch(e => { console.error(e); process.exit(1); });

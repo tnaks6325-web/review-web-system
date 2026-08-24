@@ -891,22 +891,15 @@ router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, re
     // ★ 마감/통계 조회 실패는 **플래그로 고지**한다 — 조용히 빈 판정을 내려보내면 화면이 그것을
     //   "마감자료 검수 대기 0건"으로 읽어 실제 대기 건이 통째로 사라진다(088 무신호 규율).
     const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId, annotate: true });
-    // ★★ staff(AE)는 담당 업체가 아니면 **폴더 URL 을 받지 않는다**(코드리뷰가 잡은 경계):
-    //   이 목록은 업체를 골라 보는 화면이라 AE 가 남의 업체도 열 수 있는데, 응답에 Drive 링크가
-    //   실려 있으면 [자료] 버튼이 곧 담당 밖 폴더 접근 수단이 된다(/tab-folders 는 서버가 막는데
-    //   여기는 열려 있어 같은 불변식이 한쪽만 지켜지던 상태). 담당 여부는 한 쿼리(inad_pm).
-    //   ★ 지우고 조용히 넘기지 않는다 — folderScoped:false 로 **사유를 화면이 말한다**.
-    let rows = own.rows;
-    let folderScoped = true;
-    if (_role(req) === 'staff') {
-      const mine = await svc.staffOwnsAdvertiser({ advertiserId: req.query.advertiserId, staffName: req.admin && req.admin.name });
-      if (!mine) {
-        folderScoped = false;
-        rows = rows.map(r => ({ ...r, folderUrl: null, captureFolderUrl: null, cashReceipt: false, cashReceiptNote: undefined }));
-      }
-    }
-    res.json({ ok: true, items: rows, statsUnavailable: own.statsUnavailable,
-      finishedUnavailable: own.finishedUnavailable, ...(folderScoped ? {} : { folderScoped: false }) });
+    /* ★★ 저장폴더 링크는 **담당(inad_pm) 무관 내부인 전원**(사용자 확정 2026-08-24).
+       종전에는 staff 가 담당 업체가 아니면 이 목록에서 폴더 URL·현영 판정을 비워 보냈는데,
+       **폴더를 실제로 여는 통로(`GET /tab-folders`)는 이미 내부인 전원에게 열려 있어**
+       ("staff는 작업보드 전체 운영 권한이므로 담당 여부와 무관하게 폴더를 연다") 버튼만 흐린
+       반쪽 규칙이었다. 업체 지정·해제를 담당 무관으로 연 것과 같은 자리다.
+       ★ 되돌리려면 `/tab-folders` 의 스코프와 **함께** 좁힌다(한쪽만 좁히면 이 상태로 되돌아온다).
+       ★ 광고주·리뷰어는 이 라우트에 도달하지 못한다(internalMiddleware). */
+    res.json({ ok: true, items: own.rows, statsUnavailable: own.statsUnavailable,
+      finishedUnavailable: own.finishedUnavailable });
   } catch (err) { next(err); }
 });
 
@@ -1379,6 +1372,36 @@ router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddlew
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
     const out = await svc.backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value, by: _by(req) });
     res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
+/* 관리자 수동 입금처리 (무시트 전용 · adminOrMaster) — 우클릭 [💰 입금수정].
+   ★ 입금 칸은 직접 편집이 잠긴 상태 칸이라 값을 고칠 창구가 없었다. 여기가 그 유일한 창구다.
+   ★ `date` 가 빈 값이면 **칸을 비운다**(입금 취소·오기입 정정) — 지운 값은 셀 편집기록에 남는다.
+   ★ 권한은 리뷰제출일 백필과 같은 adminOrMaster — 입금 표시는 정산·리뷰어 화면까지 바꾼다. */
+router.post('/workdesk/deposit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, date } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by: _by(req) });
+    const code = out.ok ? 200
+      : (out.error === 'not_sheetless' ? 409
+        : (out.error === 'concurrent_edit_conflict' ? 409 : 400));
+    res.status(code).json(out);
+  } catch (err) { next(err); }
+});
+/* 이 셀의 편집기록(읽기 전용) — 구글시트 셀 편집기록과 같은 성격의 인라인 팝업이 쓴다.
+   ★ 스코프는 셀 편집과 **같은 게이트**(`_ensureWorkdeskCellEditScope`) — 업체(광고주)는 자기가
+     입력하는 택배송장 칸의 기록만 볼 수 있고 다른 열의 편집 이력에는 닿지 못한다. */
+router.get('/workdesk/cell-edits', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, field, limit } = req.query || {};
+    if (!sheetId || !tabName || !rowId || !field) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field });
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.listCellEdits({ sheetId, tabName, rowId, field, limit });
+    res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
 router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
@@ -3058,10 +3081,20 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
   } catch (err) { next(err); }
 });
 
-/* ★★ 줄 정리(은퇴) **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
-   원인이던 탈시트 이관(옛 차수가 검색 명단에 되살아남)은 끝났다. 줄을 내리는 창구는
-   [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
-   ★ 실행부 `sheetlessLedger.retireRows` 는 **중복 정리가 그대로 쓴다** — 지우지 말 것.
+/* ── 🧹 줄 정리(은퇴) HTTP 창구는 제거됐다 (사용자 확정 2026-08-21 / main 2026-08-23) ──
+   ★ 양쪽 갈래에서 각각 같은 결론에 도달해 지웠다 — 되살리지 말 것.
+   왜: 원래 목적(이관 때 되살아난 옛 차수 줄 되돌리기)은 이관이 **자동으로** 처리하고
+   (`sheetlessCutover` → `participants.retireInactiveImportRows`), 그 원인이던 탈시트
+   이관 자체가 끝났다. 사람이 차수를 골라 줄을 내리는 화면·API 는 평시에 쓸 일이 없고,
+   잘못 쓰면 리뷰어의 온전한 구매기록이 붙은 줄을 검색 명단에서 사라지게 한다.
+   ★ 줄을 내리는 창구는 [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
+   ★★ **서비스 함수 `sheetlessLedger.retireRows` 는 남아 있다** — 지우면 안 된다:
+      · `dedupeRows`/`dedupeManual`(♻ 중복 정리)의 실행부
+      · `rowNumbering.cleanupPairedBlanks`(🔢 번호 정리의 짝 빈 줄 정리)
+      즉 지금은 **내부 공용 실행부**일 뿐 사용자 기능이 아니다.
+   ⚠ 잔여 위험(문서화): 이관의 자동 은퇴는 fail-soft 라 실패해도 이관이 진행된다. 그때
+      차수 단위로 되돌릴 창구가 없다(중복 정리는 주문 없는 줄을 조회조차 하지 않는다).
+      그런 사고가 나면 DB 직접 조치 또는 이 창구 재도입을 검토할 것.
    옛 라우트: POST /worktable/retire-rows */
 
 router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -3272,7 +3305,7 @@ router.post('/worktable/hold-rows', authMiddleware, adminOrMasterMiddleware, asy
 });
 
 /* 작업보드 중복 줄 정리 — 2026-08-19 중복 반영 사고 수습용.
-   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 은퇴(retire-rows)와 같은 급.
+   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 되돌리기가 무겁다.
    ★ dryRun 기본 — 먼저 미리보기로 무엇이 지워지고 무엇이 보류되는지 본 뒤 실행한다.
    ★ 입금 회차(대기·완료)에 담긴 줄이 섞인 그룹은 서버가 **건드리지 않고 사유와 함께 보고**한다. */
 router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -3387,16 +3420,32 @@ router.post('/worktable/add-blogger', authMiddleware, async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+/* 표준 열 저장 — 8/23 전멸 사고 재발 방지 3종은 서비스가 판정한다(사본 금지).
+   ★★ 거부 사유는 **여기서 400 으로 명시**해야 한다 — 이 경로는 `isAdminApi`(오류 마스킹 예외)
+      목록에 없어서 그냥 throw 하면 `서버 오류가 발생했습니다.` 로 뭉개진다(무엇을 고칠지 모른다).
+   ★ `confirmClear:true` = "정말 비운다"는 사람의 명시 확인. `restore` = 그 시점으로 되돌리기. */
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { saveTemplate } = require('../services/worktable.service');
+    const { saveTemplate, restoreTemplate } = require('../services/worktable.service');
     const b = req.body || {};
-    const data = await saveTemplate({
-      core: b.core, channels: b.channels,
-      customChannels: b.customChannels, workTypes: b.workTypes,
-      templateSheetId: b.templateSheetId, by: _by(req),
-    });
-    res.json({ ok: true, data });
+    try {
+      const data = b.restore
+        ? await restoreTemplate({ at: b.restore, by: _by(req) })
+        : await saveTemplate({
+          core: b.core, channels: b.channels,
+          customChannels: b.customChannels, workTypes: b.workTypes,
+          templateSheetId: b.templateSheetId, by: _by(req),
+          confirmClear: b.confirmClear === true,
+        });
+      res.json({ ok: true, data });
+    } catch (e) {
+      const code = e && e.code;
+      if (code === 'empty_core' || code === 'bad_at' || code === 'not_found') {
+        return res.status(400).json({ ok: false, code, error: e.message, prevCoreCount: e.prevCoreCount });
+      }
+      if (code === 'read_failed') return res.status(503).json({ ok: false, code, error: e.message });
+      throw e;
+    }
   } catch (err) { next(err); }
 });
 

@@ -19,6 +19,7 @@ const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots')
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
+const { formatDepositStamp } = require('../utils/depositStamp');   // 입금 칸 표기 단일 출처(자동 반영과 같은 'M/D')
 const { resolveWorkManager } = require('../utils/workManager');   // 담당자 판정 단일 출처(065 + 회차 #18 — payment.service 와 한 벌)
 
 // ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
@@ -2702,6 +2703,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               channel, channel_custom AS "channelCustom", review_type AS "reviewType",
               review_type_mix AS "reviewTypeMix",
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
+              transfer_bank AS "transferBank",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
               to_char(window_start,'HH24:MI') AS "windowStart",
               to_char(window_end,'HH24:MI')   AS "windowEnd",
@@ -2748,6 +2750,22 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     const feeSource = feeInfo.source === 'schedule' ? 'schedule'
       : campFee != null ? 'campaign'
       : tabFee != null ? 'tab' : null;      // null = 근거를 못 찾음(0원이라서가 아니다)
+
+    /* ── 이체은행 — 입금관리(payment.service)와 **같은 공고 · 같은 판정**을 태운다(사본 금지) ──
+       ★★★ (코드리뷰 P1) 이 탭에 공고가 여럿(차수 재발행)이면 `camps`(GID 재매칭 + 활성 우선 +
+       값 있는 공고까지 훑기)로 고른 공고와, 실제 이체 계산이 쓰는 `_loadCampaigns`(이름만 일치 +
+       created_at 최신 하나)가 **다른 공고**를 고를 수 있다 — 그러면 "화면은 하나은행인데 이체
+       파일은 케이뱅크"가 된다. 그래서 은행만은 `camps` 를 안 쓰고 **이체 계산이 실제로 쓰는 그
+       공고를 그대로**(`payment.service.campaignForTab`) 가져와 같은 판정 함수로 고른다.
+       순서 = 공고(사람이 정한 값) → 탭 설정 → 작업오더 물건비 자동판정(현금→하나 · 계산서/수수료→케이뱅크).
+       ★ `auto` 는 **사람이 정하지 않았다**는 뜻이라 화면이 그 사실을 말한다(조용한 추정 금지). */
+    const { normalizeBankChoice, bankFromGoodsCostType, BANK_LABEL, campaignForTab } = require('./payment.service');
+    const txCamp = await campaignForTab(sheetId, tabName).catch(() => null);
+    const campBank = normalizeBankChoice(txCamp && txCamp.transferBank);
+    const tabBank  = normalizeBankChoice(meta.tabTransferBank);
+    const autoBank = bankFromGoodsCostType((wo && wo.goodsCostType) || '');
+    const transferBank = campBank || tabBank || autoBank || null;
+    const bankSource = campBank ? 'campaign' : tabBank ? 'tab' : transferBank ? 'auto' : null;
 
     const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType,
             isFreeChoiceReviewType, FREE_CHOICE_REVIEW_LABEL } = require('../utils/reviewType');
@@ -2885,6 +2903,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
          되고, 정작 이체 서식에는 공고 값이 찍혀 화면과 파일이 갈린다(사용자 확정 2026-08-20:
          공고를 나중에 만들면 공고 설정값이 우선한다). */
       depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
+      /* 이체은행 — 값·라벨·출처를 함께 싣는다(화면이 판정을 다시 하지 않게).
+         null = 정할 근거가 없음 = [미설정](작업오더 물건비도 비어 자동판정이 안 된 경우). */
+      transferBank, bankSource,
+      transferBankLabel: transferBank ? (BANK_LABEL[transferBank] || transferBank) : null,
       /* 판정값 — 혼합은 행 단위로 정할 수 없어 null(검수·슬롯이 보는 값, 규율 불변). */
       reviewType: rtKey,
       /* 표기값 — 혼합이면 '혼합' + 조합(아래 reviewTypeMix). 둘 다 없으면 null = [미설정]. */
@@ -2922,7 +2944,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
             tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
             tc.tab_gid AS "tabGid", tc.capture_slots AS "captureSlots",
-            tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee"
+            tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee",
+            tc.transfer_bank AS "tabTransferBank"
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
@@ -2931,7 +2954,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
             review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",
             special_notes AS "specialNotes", product_url AS "productUrl", start_date AS "startDate",
-            manager_name AS "managerName", created_by AS "createdBy", status
+            manager_name AS "managerName", created_by AS "createdBy", status,
+            goods_cost_type AS "goodsCostType"
        FROM work_orders
       WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
       ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
@@ -3958,6 +3982,201 @@ async function backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value
       WHERE id = $1 AND sheet_id = $2 AND tab_name = $3`,
     [rowId, sheetId, tabName, String(by).slice(0, 100)]);
   return { ok: true, seq, value: text, column: r.column || null };
+}
+
+
+/* ══ 관리자 수동 입금처리 (작업보드 입금 칸 · 2026-08-24 사용자 확정) ═══════════════════════
+ *
+ * ★★ 왜 별도 창구인가 — 입금 칸은 **직접 편집이 잠긴 상태 칸**이다(`_statusToggleForRow`).
+ *    그런데 이체결과 자동반영(M2)이 닿지 못한 건(외부 이체·통장 직접 송금·오기입 정정)은
+ *    사람이 고쳐야 하고, 지금까지 그 창구가 없어 "값이 틀렸는데 고칠 데가 없는" 칸이었다.
+ *    → 우클릭 [💰 입금수정] = 날짜를 **달력에서 고르거나 비우는** 단 하나의 경로.
+ *
+ * ★★ 기록은 **작업표 칸 하나**(`campaign_participants.row_json[입금열]`)에만 한다 — 그 값이
+ *    장부 재생성(`sheetlessLedger.rebuildLedgers`)을 거쳐 `review_index.is_submitted2` 로 파생되고,
+ *    그 파생값 하나가 ① 입금관리 대상 제외(`payment.service.listPaymentTargets` 의 미입금 조건)
+ *    ② 리뷰어 화면의 입금완료·페이백 날짜(`reviewer.routes` review-earnings / reviewEdit brief)
+ *    를 동시에 결정한다. 여기서 `review_index` 를 직접 UPDATE 하면 다음 재생성에 증발한다.
+ *
+ * ★★ **병합이 아니라 치환**이다 — 자동 반영(`markStatusCell` → `mergeDepositStamps`)은 이체 이력을
+ *    덧붙이는 것이 목적이라 지난 날짜를 지우지 않는다. 이 창구는 반대로 **고치고 비우는** 것이
+ *    목적이라(사용자 요청) 칸 값을 그대로 갈아끼운다. 지워진 값은 아래 감사 로그에 남는다.
+ *
+ * ★ 중복 앵커(같은 주문·신원이 여러 줄)는 거부 — 어느 줄의 입금인지 모르면 어느 줄에도 쓰지 않는다
+ *   (2026-08-19 실사고: 입금일 1건이 중복 줄 전부에 번져 입금완료가 부풀었다).
+ * ★ 감사 로그는 셀 편집과 **같은 표**(`participant_edits`)에 남긴다 — 셀 편집기록 팝업이 모든 칸을
+ *   한 곳에서 읽게 하기 위해서다(저장소를 나누면 "이 칸만 기록이 비어 보이는" 상태가 된다).
+ */
+async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
+  const raw = String(date == null ? '' : date).trim();
+  const clearing = raw === '';
+  let stamp = '';
+  if (!clearing) {
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(raw);
+    if (!m) return { ok: false, error: 'bad_date', hint: '입금일은 달력에서 골라 주세요.' };
+    const mo = Number(m[2]), d = Number(m[3]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return { ok: false, error: 'bad_date' };
+    // 표기는 입금 칸 단일 출처(`utils/depositStamp`) — 자동 반영과 같은 'M/D' 로 적는다.
+    stamp = formatDepositStamp(`${mo}/${d}`);
+  }
+
+  const db = getPool();
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
+  catch (_) { sheetless = false; }
+  if (!sheetless) return { ok: false, error: 'not_sheetless' };
+
+  const client = await db.connect();
+  let ctx = null;
+  try {
+    await client.query('BEGIN');
+    const { rows: pr } = await client.query(
+      `SELECT id, seq, source, order_submission_id, identity_key, phone8, recipient_name,
+              option_text, row_json, submit_col, submit_col2
+         FROM campaign_participants
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
+      [rowId, sheetId, tabName]);
+    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    const row = pr[0];
+
+    const anchor = _deriveAnchor(row);
+    if (!anchor) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
+    if (anchor.type === 'order') {
+      const { rows: dup } = await client.query(
+        `SELECT COUNT(*)::int AS n FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+            AND order_submission_id=$3::uuid`, [sheetId, tabName, anchor.value]);
+      if ((dup[0] && dup[0].n) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_order' }; }
+    } else if (anchor.type === 'identity') {
+      const { rows: dup } = await client.query(
+        `SELECT COUNT(*)::int AS n FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+            AND order_submission_id IS NULL AND source<>'manual' AND identity_key=$3`,
+        [sheetId, tabName, anchor.value]);
+      if ((dup[0] && dup[0].n) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_identity' }; }
+    }
+
+    // 어느 칸이 입금 열인가 = 파서가 그 탭에서 실제로 고른 헤더(사본 0 · 잠근 tx 안에서 조회).
+    let header = '';
+    try {
+      header = await require('./sheetlessStatus.service').statusHeaderForTab(client, { sheetId, tabName, kind: 'paid' });
+    } catch (e) { await client.query('ROLLBACK'); return { ok: false, error: 'lookup_failed', message: e.message }; }
+    if (!header) { await client.query('ROLLBACK'); return { ok: false, error: 'no_status_column' }; }
+
+    const rj = (row.row_json && typeof row.row_json === 'object') ? row.row_json : {};
+    const prev = String(rj[header] == null ? '' : rj[header]).trim();
+    if (prev === stamp) {
+      await client.query('ROLLBACK');
+      return { ok: true, unchanged: true, seq: row.seq, column: header, value: stamp, prev, cleared: clearing };
+    }
+
+    await client.query(
+      `UPDATE campaign_participants
+          SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
+              is_paid = $6, updated_by = $7, updated_at = NOW()
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3`,
+      [rowId, sheetId, tabName, header, stamp, !clearing, String(by).slice(0, 100)]);
+
+    // 감사 로그(= 이 셀의 편집기록). 종전 활성 기록을 접고 새 기록을 남긴다(append-only).
+    const logField = 'col:' + header;
+    for (const f of [logField, 'is_paid']) {
+      await client.query(
+        `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
+          WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5 AND field=$6 AND reverted_at IS NULL`,
+        [String(by).slice(0, 100), sheetId, tabName, anchor.type, anchor.value, f]);
+    }
+    await client.query(
+      `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
+       VALUES ($1,$2,$3,$4,$5,'text',NULL,$6,$7)`,
+      [sheetId, tabName, anchor.type, anchor.value, logField, stamp, String(by).slice(0, 100)]);
+    await client.query(
+      `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
+       VALUES ($1,$2,$3,$4,'is_paid','bool',$5,NULL,$6)`,
+      [sheetId, tabName, anchor.type, anchor.value, !clearing, String(by).slice(0, 100)]);
+
+    await client.query('COMMIT');
+    ctx = { seq: row.seq, header, prev };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* 이미 끝난 tx */ }
+    if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
+    throw e;
+  } finally { client.release(); }
+
+  /* 장부 재생성 — 입금관리 대상 제외·리뷰어 입금표시가 전부 이 파생을 읽는다.
+     ★ 실패해도 값은 작업표에 남아 다음 재생성(주문 유입 등)에 반영된다 → fail-soft 로 사실만 말한다. */
+  let ledger = 'ok';
+  try {
+    await _rebuildWorkdeskLedgers({ sheetId, tabName, by });
+  } catch (e) {
+    ledger = 'deferred';
+    logger.warn(`[workdeskDeposit] 장부 재생성 실패(값은 작업표에 기록됨) tab=${tabName} row=${ctx.seq}: ${e.message}`);
+  }
+
+  /* ★ 비웠는데도 입금관리 목록에 안 돌아오는 경우를 **미리 말한다** — 이체 회차(payment_batch_items)에
+     살아있는 항목이 있으면 대상 추출이 그 줄을 계속 제외한다(다운로드 이력 잠금). 조용히 두면
+     "비웠는데 왜 목록에 없지" 가 된다. 조회 실패는 무시(표시용). */
+  let batchLocked = false;
+  if (clearing) {
+    try {
+      const { rows: bi } = await db.query(
+        `SELECT 1 FROM payment_batch_items
+          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid') LIMIT 1`,
+        [sheetId, tabName, ctx.seq]);
+      batchLocked = bi.length > 0;
+    } catch (_) { batchLocked = false; }
+  }
+
+  return { ok: true, seq: ctx.seq, column: ctx.header, value: stamp, prev: ctx.prev, cleared: clearing, ledger, batchLocked };
+}
+
+/* ══ 이 셀의 편집기록 (구글시트 셀 편집기록과 같은 성격 · 읽기 전용) ═══════════════════════
+ * ★ 저장소는 셀 편집과 같은 `participant_edits` 하나 — 되돌린 기록(`reverted_at`)도 **지우지 않고**
+ *   그대로 보여 준다(무엇이 언제 왜 바뀌었는지가 곧 이력이다).
+ * ★ 앵커는 읽는 쪽(workdeskTab 합성)과 **같은 규칙**으로 고른다: 현재 앵커 + 물리행 앵커(승격 전에
+ *   빈 자리로 적어 둔 값). 다르게 고르면 "화면에는 보이는데 기록은 비어 있는" 칸이 생긴다.
+ */
+async function listCellEdits({ sheetId, tabName, rowId, field, limit = 20 } = {}) {
+  if (!sheetId || !tabName || !rowId || !field) return { ok: false, error: 'bad_request' };
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+  const { rows: pr } = await db.query(
+    `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+       FROM campaign_participants
+      WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL LIMIT 1`,
+    [rowId, sheetId, tabName]);
+  if (!pr.length) return { ok: false, error: 'row_not_found' };
+  const anchor = _deriveAnchor(pr[0]);
+  const pairs = [];
+  if (anchor) pairs.push(anchor);
+  const rowAnchorId = _rowAnchorId(pr[0]);
+  if (rowAnchorId && !(anchor && anchor.type === 'manual' && anchor.value === rowAnchorId)) {
+    pairs.push({ type: 'manual', value: rowAnchorId });
+  }
+  if (!pairs.length) return { ok: true, items: [] };
+
+  const { rows } = await db.query(
+    `SELECT pe.id, pe.field, pe.kind, pe.value_bool AS "valueBool", pe.value_text AS "valueText",
+            pe.created_by AS "createdBy", pe.created_at AS "createdAt",
+            pe.reverted_by AS "revertedBy", pe.reverted_at AS "revertedAt"
+       FROM participant_edits pe
+      WHERE pe.sheet_id=$1 AND pe.tab_name=$2 AND pe.field=$3
+        AND (pe.anchor_type, pe.anchor_value) IN (SELECT * FROM UNNEST($4::text[], $5::text[]))
+      ORDER BY pe.created_at DESC, pe.id DESC
+      LIMIT $6`,
+    [sheetId, tabName, field, pairs.map(p => p.type), pairs.map(p => p.value), lim]);
+
+  return {
+    ok: true,
+    items: rows.map(r => ({
+      id: r.id,
+      // 값이 비어 있으면 "지움" 이다 — 빈 칸을 그냥 빈 칸으로 그리면 무슨 일이 있었는지 안 보인다.
+      value: r.kind === 'bool' ? (r.valueBool ? '완료' : '해제') : String(r.valueText == null ? '' : r.valueText),
+      cleared: r.kind !== 'bool' && !String(r.valueText || '').trim(),
+      by: r.createdBy || '', at: r.createdAt,
+      reverted: !!r.revertedAt, revertedBy: r.revertedBy || null, revertedAt: r.revertedAt,
+    })),
+  };
 }
 
 // ── 편집 이력(감사): 이 탭의 최근 편집(활성+되돌림)을 시각·편집자·필드·값·상태로. 앵커→참여자명 best-effort. ──
@@ -5341,6 +5560,7 @@ module.exports = {
   tabStatsMap,
   tabCampaignsMap,
   tabTodayProgress,
+  tabConditionSummary,   // ★ 회귀가드가 스텁 pool 로 직접 실행(코드리뷰 P1 divergence 재현)
   _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다
   __condAdvertiserLensForTest: (...a) => _condAdvertiserLens(...a),   // 담당 렌즈(브랜드 세션 분기) 실행 검증용
   identityKey,
@@ -5429,6 +5649,8 @@ module.exports = {
   normalizeDisplayName,   // 작업명 정리 — 회귀가드가 실제로 돌려 본다
   setWorkdeskPurchaseDate,
   backfillWorkdeskReviewSubmitDate,
+  setWorkdeskDepositDate,
+  listCellEdits,
   editWorkdeskRow,
   revertWorkdeskEdit,
   manualWorkdeskReviewSubmit,

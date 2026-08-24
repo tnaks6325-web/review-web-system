@@ -310,6 +310,30 @@ router.get('/participation-brief', async (req, res) => {
       }
     } catch (_) { /* 표시용 — fail-soft */ }
 
+    /* ★ 관리자가 작업보드에서 **수동으로 확정한 입금일**(우클릭 [💰 입금수정]) — 이체 회차를 타지
+       않은 건(외부 이체·통장 직접 송금)은 `payment_batch_items` 가 없어 리뷰어 화면에 날짜가 한 번도
+       뜨지 않았다(배지만). 작업보드 입금 칸이 그 건의 유일한 근거이므로 그 값을 페이백 날짜로 쓴다.
+       ★★ 근거의 우선순위는 **이체 원장이 먼저**다 — 자동 반영이 있으면 그 값이 이긴다(위에서 이미 잡힘).
+       ★ 관리자가 칸을 비우면 여기도 자동으로 사라진다(같은 칸 하나만 본다 = 사본 0).
+       ★ 읽기 전용·fail-soft. */
+    if (!payment) {
+      try {
+        const { rows: dep } = await pool.query(
+          `SELECT btrim(COALESCE(cp.row_json ->> ri.submit_col2, '')) AS "depositCell"
+             FROM review_index ri
+             JOIN campaign_participants cp
+               ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name AND cp.seq = ri.row_index
+              AND cp.deleted_at IS NULL
+            WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+              AND COALESCE(ri.submit_col2, '') <> ''
+            LIMIT 1`,
+          [sheetId, tabName, rowIndex]
+        );
+        const cell = (dep[0] && dep[0].depositCell) || '';
+        if (cell) payment = { status: 'paid', paidDate: cell };
+      } catch (_) { /* 표시용 — fail-soft */ }
+    }
+
     /* ★ 주문취소 가능 여부 — **판정 단일 출처**(`assessReviewerCancel`)를 화면 게이트와
        실제 실행이 함께 쓴다. 버튼을 그릴지 말지를 화면이 스스로 정하면 "보이는데 거부"가 된다.
        ★ 읽기 전용·fail-soft — 실패하면 필드를 싣지 않고(=화면은 버튼 미표시) 나머지 brief 는 그대로. */
@@ -362,7 +386,7 @@ router.get('/participation-brief', async (req, res) => {
         productLines,
         reviewGuide,
         workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
-        payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'failed'} | null
+        payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'paid', paidDate} (관리자 수동 확정) | {status:'failed'} | null
         cancelable,           // ★ 주문취소 게이트 {ok, reason, message, reasons[]} — 실패 시 null
       },
     });

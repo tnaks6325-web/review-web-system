@@ -580,7 +580,22 @@
   table.sheetgrid td.cellsaved{animation:cellsaved .55s ease-out}   /* 백그라운드 저장 완료 = 초록 링 페이드(엑셀식 즉시감) */
   .chk.clk{cursor:pointer;border-radius:4px;padding:0 4px} .chk.clk:hover{background:var(--card2)} .chk.clk.edited{outline:1px solid var(--accent);outline-offset:1px}
   .einp{font:inherit;font-size:12.5px;width:100%;min-width:60px;padding:2px 5px;border:1px solid var(--accent);border-radius:5px;background:var(--card);color:var(--ink)}
-  .revb{cursor:pointer;color:var(--accent);font-size:12px;user-select:none} .revb:hover{color:var(--bad)}
+  /* 편집기록 코너마크 — 구글시트의 "이 셀에 기록이 있다" 표시와 같은 자리(오른쪽 위 삼각형). */
+  .ehist{position:absolute;top:0;right:0;width:0;height:0;border-top:6px solid var(--accent);border-left:6px solid transparent;cursor:pointer}
+  .ehist:hover{border-top-color:var(--bad)}
+  .gcell{position:relative}
+  /* 셀 편집기록 인라인 팝업(body 직속 — 표는 가로 스크롤 컨테이너라 안에 그리면 잘린다) */
+  #chPop{position:fixed;inset:0;z-index:9000}
+  #chPop .ch-box{position:absolute;min-width:250px;max-width:340px;max-height:60vh;overflow:auto;background:var(--card,#fff);
+    border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:10px 12px;font-size:12px}
+  #chPop .ch-hd{font-weight:700;margin-bottom:6px;display:flex;gap:6px;align-items:center}
+  #chPop .ch-hd .col{color:var(--t3,#6B7280);font-weight:500}
+  #chPop .ch-it{padding:6px 0;border-top:1px dashed var(--line2)}
+  #chPop .ch-it .v{font-weight:700;word-break:break-all}
+  #chPop .ch-it .v.cleared{color:var(--t3,#6B7280);font-weight:500;font-style:italic}
+  #chPop .ch-it .m{color:var(--t3,#6B7280);margin-top:2px}
+  #chPop .ch-it.rev .v{text-decoration:line-through;opacity:.65}
+  #chPop .ch-empty{color:var(--t3,#6B7280);padding:6px 0}
   .lock{font-size:10px;opacity:.5}
   tr.amb{background:color-mix(in srgb,var(--warn-soft) 40%,transparent)}
   .rmrow{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--faint);cursor:pointer;font-size:13px;line-height:1} .rmrow:hover{color:var(--bad);border-color:var(--bad)}
@@ -1890,6 +1905,21 @@
 .pmtable td.num,.pmtable th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pmtable td.dim{color:var(--t3,#8B94A1);font-size:11.5px}
 .pmtable tr.off{opacity:.45}
+/* ── 작업 그룹 머리줄 — 같은 작업의 반복 값을 한 줄로 올린다(줄마다 되풀이 금지) ── */
+.pmtable tr.pmhide{display:none}
+.pmtable tr.pmgrp>td{background:#F3F6FB;border-top:2px solid #D9E1EC;padding:6px 9px!important}
+.pmtable tr.pmgrp:hover>td{background:#EEF3FB}
+.pmgrph{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+.pmgrph .sp{flex:1;min-width:8px}
+.pmgrph .nm{font-size:12px;font-weight:800;color:var(--t1,#1B2432);max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pmgrph .n{font-size:11px;color:var(--t3,#8B94A1);flex:0 0 auto}
+.pmgrph .pmgk{font-size:10px;color:var(--t3,#8B94A1)}
+.pmgrph .pmgsel{font-size:11px;color:var(--t2,#5C6B80);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.pmgrph .pmgsel.dim{color:var(--t3,#8B94A1)}
+.pmfold{flex:0 0 auto;width:18px;height:18px;line-height:1;border:1px solid var(--line,#D9E1EC);border-radius:5px;
+  background:#fff;color:var(--t2,#5C6B80);font-size:10px;cursor:pointer;padding:0}
+.pmfold:hover{background:#EAF1FF}
+.pmtable td.pmdim{padding-left:0;padding-right:0}
 .pmb{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;white-space:nowrap}
 .pmb.kb{background:#E0EDFF;color:#1B4F9C} .pmb.hn{background:#E5F3EE;color:#127A5E}
 .pmb.no{background:#FAE9E7;color:#B3382E} .pmb.ok{background:#E5F3EE;color:#127A5E}
@@ -1998,6 +2028,24 @@
 .pmtabs button{padding:7px 14px;font-size:13px;font-weight:700;border:1px solid var(--line,#D8DDE5);
   border-radius:9px;background:var(--card,#fff);color:var(--t2,#5A6473);cursor:pointer}
 .pmtabs button.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C}
+/* ⚠ 원장 불일치 목록 — 클래스는 전부 `rs` 접두(기존 .row/.tbl 등과 겹치면 남의 화면이 조용히 무너진다) */
+.rswrap{font-size:13px}
+.rsnote{margin:0 0 10px;padding:9px 12px;border-radius:9px;background:var(--card2,#F5F7FA);color:var(--t2,#5A6473);line-height:1.6}
+.rsnote b{color:var(--ink,#1A2233)}
+.rstbl{width:100%;border-collapse:collapse}
+.rstbl th{text-align:left;font-size:11.5px;font-weight:800;color:var(--muted,#7A869A);padding:6px 8px;border-bottom:1px solid var(--line,#D8DDE5);white-space:nowrap}
+.rstbl td{padding:7px 8px;border-bottom:1px solid var(--line2,#EDF0F4);vertical-align:top}
+.rstbl tr.rsmoney td{background:rgba(255,146,42,.10)}   /* 돈이 걸린 칸(금액·계좌·은행·예금주) */
+.rsfield{font-weight:800;white-space:nowrap}
+.rsval{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
+.rsval.old{color:var(--t2,#5A6473)}
+.rsval.new{color:var(--ink,#1A2233);font-weight:700}
+.rsempty{color:var(--line2,#C7CEDA);font-style:italic}
+.rsact{display:flex;gap:5px;white-space:nowrap}
+.rsact button{border:1px solid var(--line,#D8DDE5);border-radius:7px;background:var(--card,#fff);
+  color:var(--t2,#5A6473);padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer}
+.rsact button.go{border-color:#1B4F9C;color:#1B4F9C}
+.rsact button[disabled]{opacity:.45;cursor:default}
 .bntools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .bntools input.q{flex:1 1 220px;min-width:180px;padding:8px 11px;font-size:13px;box-sizing:border-box;
   border:1px solid var(--line,#D8DDE5);border-radius:9px;background:var(--card,#fff);color:var(--t1,#1B1F24)}
@@ -2693,7 +2741,7 @@ function renderShell(){
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
-        <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리</button>
+        <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리<span id="pmNavBadge"></span></button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
@@ -2733,6 +2781,7 @@ function renderShell(){
   if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)
   if(isAdmin || isStaff) _riBootBadge();   // 리뷰검수 — 손볼 건수(의심+불량)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
   if(isAdmin || isStaff) _lgBootBadge();   // 로그 — 리뷰어 비정상 + 시스템 오류(admin/master만) 중요 건수 합
+  if(isAdmin) _rsBootBadge();              // 입금관리 — 시트↔원장 불일치(열린 edit 제안). 화면을 열지 않아도 보이게
 }
 /* ── C/S 미확인 뱃지 ────────────────────────────────────────
    리뷰웹시스템[3버전]에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
@@ -2743,10 +2792,10 @@ let _csBadgeTimer = null;
 function _csStartBadgePoll(){
   _csBadgeRefresh();
   if(_csBadgeTimer) clearInterval(_csBadgeTimer);
-  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible') _csBadgeRefresh(); }, CS_BADGE_POLL_MS);
+  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); } }, CS_BADGE_POLL_MS);
   if(!_csStartBadgePoll._bound){
     _csStartBadgePoll._bound = true;
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _finDayRollCheck(); } });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); _finDayRollCheck(); } });
   }
 }
 /** 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(직전 값 유지). */
@@ -3827,10 +3876,71 @@ function _finBarHtml(){
     `<button class="wbl-b dark" onclick="openFinishCur()">🏁 마감</button></span>`;
 }
 /* master 도구 [⋯] 드롭다운 — 리스너는 **최상위에 1회만** 등록(열 때마다 걸면 겹쳐 쌓인다). */
+/* ═══════════════════════════════════════════════════════════════════
+   [⋯] 도구 메뉴 — **할 일이 있을 때만** 띄운다 (2026-08-21 사용자 확정)
+
+   종전에는 5개 버튼이 역할·무시트 여부만 보고 상시 노출돼, 대부분의 작업에서
+   할 일 없이 떠 있었다(눌러서 미리보기를 봐야 "대상 0건"을 알 수 있었다).
+
+   ★★ **판정 재료는 그 도구가 실제로 쓰는 것과 같은 것**(사본 금지):
+     · ♻ 중복 정리 = 모달의 미리보기와 **같은 호출**(`dedupe-rows` dryRun) → `removeRows`
+     갈라지면 "배지는 0인데 열어 보면 대상이 있다"가 된다.
+
+   ★★ **모르면 숨기지 않는다(fail-open)** — 조회 실패·미도착·권한 없음은 **종전대로 노출**.
+     숨기면 "정리하고 싶은데 버튼이 없다"는 막다른 길이 된다(조용한 봉쇄 금지).
+   ★ 서버는 [⋯] 를 **열 때만** 부른다 · 같은 작업은 1회만(`_MHB.key`).
+   ═══════════════════════════════════════════════════════════════════ */
+let _MHB = null;   // { key, dedupe:number|null, busy }
+
+/* ♻ 중복 정리 대상 건수 — 아직 안 세었으면 null(= 모름 → 노출) */
+function _ddCount(){ return (_MHB && _MHB.key === _mhKey()) ? _MHB.dedupe : null; }
+function _mhKey(){ const t = STATE.cur; return t ? (t.sheetId + '\t' + t.tabName) : ''; }
+
+async function _mhToolsSync(){
+  const key = _mhKey(); if (!key) return;
+  if (_MHB && _MHB.key === key) return;          // 같은 작업은 1회만
+  _MHB = { key, dedupe: null, busy: true };
+  const t = STATE.cur;
+  try {
+    const j = await api('/api/trackb/worktable/dedupe-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: t.sheetId, tabName: t.tabName, dryRun: true }) });
+    // ★ 값이 정말 숫자로 왔을 때만 센다 — 실패/형태 불일치는 null 로 두어 **노출 쪽**으로 접는다.
+    if (_MHB && _MHB.key === key && j && j.ok !== false && typeof j.removeRows === 'number') {
+      _MHB.dedupe = j.removeRows;
+    }
+  } catch (_) { /* fail-open — null 유지 = 종전대로 노출 */ }
+  if (_MHB && _MHB.key === key) _MHB.busy = false;
+  _mhToolsRender();
+}
+/* 메뉴 내용만 다시 그린다(헤더 전체 재렌더 금지 — 열린 메뉴가 닫혀 버린다). */
+function _mhToolsRender(){
+  const box = document.getElementById('mhMenuBox');
+  if (box) box.innerHTML = _mhMenuHtml();
+}
+/* [⋯] 자체를 띄울지 — 안에 버튼이 하나라도 있어야 띄운다(빈 메뉴 금지). */
+/* [⋯] 자체를 띄울지 — 안에 버튼이 하나라도 있어야 띄운다(빈 메뉴 금지).
+   ★ `_ddCan()` 은 지금 master 전용이라 앞의 조건에 이미 삼켜지지만, **재료를 빼지 않는다** —
+     나중에 게이트가 넓어지면 여기가 자동으로 따라와야 한다(두 곳이 갈리면 "버튼은 있는데
+     [⋯] 가 안 뜬다"가 된다). */
+function _mhToolsVisible(){
+  return !!(STATE.role === 'master' || _ddCan() || _brCanAdd());
+}
+/* 메뉴 내용 — 조건부 버튼은 여기 한 곳에서만 정한다(렌더와 재렌더가 갈리지 않게). */
+function _mhMenuHtml(){
+  const isMaster = STATE.role === 'master';
+  const dd = _ddCount();                       // null = 아직 모름 → 노출(fail-open)
+  const ddShow = _ddCan() && (dd === null || dd > 0);
+  const ddBadge = (dd && dd > 0) ? ` ${dd}` : '';
+  return (STATE._flipBtnHtml || '')
+    + (isMaster ? `<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>` : '')
+    + (ddShow ? `<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리${ddBadge}</button>` : '')
+    + (_brCanAdd() ? `<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>` : '');
+}
 function toggleMhTools(ev){
   if(ev) ev.stopPropagation();
   const w=document.getElementById('mhTools'); if(!w) return;
   w.classList.toggle('open');
+  if(w.classList.contains('open')) _mhToolsSync();   // ★ 열 때만 센다(닫혀 있으면 서버를 안 부른다)
   if(!STATE._mhToolsBound){
     STATE._mhToolsBound=true;
     const close=()=>{ const t=document.getElementById('mhTools'); if(t) t.classList.remove('open'); };
@@ -3860,12 +3970,16 @@ function doReopenCur(){ if(STATE.cur) _finReopen(STATE.cur); }
    ★ 미리보기 → 확인창 → 실행 2단계. 보류 그룹은 **사유를 그대로** 보여준다(조용한 누락 금지).
    ★ 입금 회차에 담긴 줄이 섞인 그룹은 서버가 손대지 않는다 — 화면이 그 사실을 문장으로 말한다. */
 let _DD = null;
-/* ★★ 게이트는 **서버(`/worktable/dedupe-rows` = adminOrMaster)와 1:1** 이어야 한다(사용자 확정 2026-08-23).
-   `_isInternalRole()`(staff 포함)로 넓히면 AE 에게 눌러도 403 나는 버튼이 생긴다(막다른 길 금지).
-   이 조작은 줄을 내리면서 **주문 취소까지 동반**해 되돌리기가 무겁다 — 그래서 admin/master 전용이다.
+/* ★★ **권한 ≠ 노출** — 서버는 adminOrMaster, 화면 버튼은 **master 전용**이다(사용자 확정 2026-08-24).
+   2026-08-23 에 화면을 서버와 1:1 로 맞췄던 것을 **되돌린 것**이다 — admin 에게는 버튼을 내밀지
+   않는다. 이 조작은 줄을 내리면서 **주문 취소까지 동반**해 되돌리기가 무겁고, admin 이 정말
+   써야 하면 API(`POST /worktable/dedupe-rows`)로 쓴다. 같은 메뉴의 [write-back 시뮬]·
+   [그림자 투영]과 같은 패턴이다.
+   ★★★ **방향이 계약이다 — 화면이 서버보다 넓어지는 것만 금지**다(좁은 것은 의도).
+     `_isInternalRole()`(staff 포함)로 넓히면 AE 에게 눌러도 403 나는 죽은 버튼이 생긴다.
    ★ 작업 도구 [⋯] 에 남은 정리 창구는 이것 하나다(줄 정리·번호 정리·옵션 열은 2026-08-23 제거). */
 function _ddCan(){
-  return !!(STATE.cur && STATE.cur.sheetless === true && (STATE.role === 'master' || STATE.role === 'admin'));
+  return !!(STATE.cur && STATE.cur.sheetless === true && STATE.role === 'master');
 }
 function closeDedupeModal(){ const o = document.getElementById('ddOv'); if (o) o.remove(); _DD = null; }
 if (!window._ddKeyBound) {
@@ -5109,9 +5223,8 @@ function _folRow(src,i){
 function _folMat(t,src){
   if(!t) return {known:false,why:'작업 정보를 찾지 못했습니다'};
   if(src==='own'){  // 업체관리: 연결탭 응답이 폴더 재료를 직접 싣는다(추가 조회 없음)
-    // ★ 담당 밖 업체는 서버가 폴더 URL 을 비워 보낸다(folderScoped:false) — '폴더 미생성'이 아니라 그 사유를 말한다.
-    if((STATE.ownTabMeta||{}).folderScoped===false)
-      return {known:false,why:'담당하지 않은 업체의 작업입니다 — 폴더 링크는 담당 AE·관리자에게 문의하세요'};
+    // ★ 저장폴더 링크는 담당(inad_pm) 무관 내부인 전원(사용자 확정 2026-08-24) — 담당 밖이라 비우던
+    //   분기는 제거됐다(폴더를 여는 통로 /tab-folders 가 이미 내부인 전원에게 열려 있어 반쪽 규칙이었다).
     // ★ tab_configs 행 자체가 없는 탭(LEFT JOIN NULL)은 "폴더가 없다"가 아니라 "등록 정보가 없다".
     //   구버전 백엔드는 이 플래그를 안 보내므로 undefined 는 종전대로 '등록됨'으로 본다(스큐 무해).
     if(t.hasTabConfig===false)
@@ -5616,12 +5729,12 @@ function _tcell(r, field, val){   // 편집 가능 텍스트 셀
   if(!STATE.canEdit) return `<td>${esc(v||'')}</td>`;
   if(r.editable===false) return `<td>${esc(v||'')} <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span></td>`;
   const edited=(r.editedFields||[]).includes(field);
-  return `<td><span class="ecell${edited?' edited':''}" data-val="${esc(v)}" onclick="beginEdit(this,'${r.id}','${field}')">${esc(v||'—')}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+  return `<td><span class="ecell${edited?' edited':''}" data-val="${esc(v)}" onclick="beginEdit(this,'${r.id}','${field}')">${esc(v||'—')}</span></td>`;
 }
 function _bcell(r, field, val){   // 제출/입금 토글 셀
   if(!STATE.canEdit || r.editable===false) return `<td><span class="chk ${val?'y':'n'}">${val?'✓':'–'}</span></td>`;
   const edited=(r.editedFields||[]).includes(field);
-  return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}" onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':'–'}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+  return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}" onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':'–'}</span></td>`;
 }
 /* ★★ 참여자 칸 참여횟수 배지 — 시트 그리드·기본 표 **공용 한 벌**(사본을 두면 한쪽만 안 바뀐다).
    숫자는 서버가 명의(phone8)별로 센 값(`visitNo`)을 그대로 쓴다 — 화면에서 다시 세지 않는다.
@@ -5674,7 +5787,7 @@ function renderWorkdesk(wd){
       +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
     tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
       <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>
-      ${canEdit?`<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — ${noSheet?'주문 기록은':'구글시트·주문은'} 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>`:''}`;
+      ${canEdit?`<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — ${noSheet?'주문 기록은':'구글시트·주문은'} 바뀌지 않습니다(리허설). 셀 클릭으로 수정. 되돌리기 버튼은 없습니다 — 값을 다시 적어 고치고, 누가 언제 고쳤는지는 셀의 편집기록에서 봅니다.</div>`:''}`;
   }
   const sot=wd.sourceOfTruth||'sheet';
   /* ★★ 「원본: 시트」 는 그리지 않는다(사용자 확정 2026-08-23) — 시트 관련 상시 표기 정리의 마지막.
@@ -5687,7 +5800,10 @@ function renderWorkdesk(wd){
   const sotBadge=(sot==='db')
     ? `<span class="bd sot" title="이 탭의 진실원천(원본)이 DB(Track B)로 전환된 상태입니다. 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: Track B</span>`
     : '';
-  const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
+  /* ★ 전환 버튼은 지역변수가 아니라 STATE 에 싣는다 — [⋯] 메뉴는 열 때 건수를 세고
+       **내용만 다시 그리므로**(`_mhToolsRender`), 그 시점에 이 지역변수는 이미 사라졌다.
+       한 곳(`_mhMenuHtml`)에서만 메뉴를 만들기 위한 배선이다(사본 금지). */
+  STATE._flipBtnHtml=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   // ★ 제목 행 = [작업명 · 시트 · 배지] ―― 남는 폭 ―― [마감 안내 + 🏁 마감] [⋯ 도구](master)
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
   //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
@@ -5705,7 +5821,7 @@ function renderWorkdesk(wd){
     ${planBtn}
     ${logBtn}
     ${_finBarHtml()}
-    ${(isMaster||_ddCan()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
+    ${_mhToolsVisible()?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu" id="mhMenuBox">${_mhMenuHtml()}</span></span>`:''}
     <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
          [링크 복사]·[모집인원 조절]·마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다.
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->
@@ -5736,31 +5852,13 @@ function renderWorkdesk(wd){
 //   ★ 이미지 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍 — 파일ID만 받아 온다.
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
 function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
-/* ★★ 미리보기 썸네일 = 구글 CDN 직결 (2026-08-24 실측) ─────────────────────────
-   프록시 원본은 파일 1장당 **1.7~1.8초**(31KB 기준 · 왕복 지연이 지배)인데 같은 이미지의
-   `drive.google.com/thumbnail` 은 **0.4초 안팎**이고 바이트도 3~5배 작다(197KB → w600 27KB).
-   미리보기·카드 썸네일은 원본 화질이 필요 없는 자리라 여기만 CDN 으로 돌린다.
-   ★ **원본이 필요한 자리는 그대로 프록시**(크게 보기 팝업 · 상세 대조 · 라이트박스 · AI 판정).
-   ★ CDN 이 안 되는 파일(비공개 공유)은 `onerror` 로 **기존 프록시에 1회 폴백** — 실패해도
-     오늘과 같은 그림이 나온다(막다른 길 0). 폴백은 한 번만(무한 루프 금지).
-   ★ 프록시 URL 규칙 사본을 만들지 않는다 — `full` 은 **호출부가 이미 만든 값**을 넘긴다. */
-function _thumbUrl(id, px){
-  const s=String(id||'');
-  if(!/^[-\w]{20,}$/.test(s)) return '';
-  const w=Math.max(100, Math.min(1600, Number(px)||400));
-  return 'https://drive.google.com/thumbnail?id='+encodeURIComponent(s)+'&sz=w'+w;
-}
-/* 썸네일 <img> 속성 한 벌 — src(CDN) + data-full(원본 프록시) + onerror 폴백 */
+/* ★★ 미리보기 썸네일 = 구글 CDN 직결 — 규칙은 `js/drive-thumb.js` **한 곳**이 갖는다.
+   여기 두 함수는 그 모듈로 넘기는 얇은 위임일 뿐이다(URL 규칙 사본 0).
+   ★ 모듈을 못 불러온 경우엔 **원본 프록시로 접는다**(호출부가 이미 만든 값 — 사본 아님).
+   ★ 원본이 필요한 자리는 프록시 그대로: 크게 보기 팝업 · 검수 상세 대조 · 라이트박스 · AI 판정. */
+function _thumbUrl(id, px){ return window.DriveThumb ? DriveThumb.url(id, px) : ''; }
 function _thumbAttrs(id, px, full){
-  const t=_thumbUrl(id, px);
-  if(!t) return ` src="${esc(full||'')}"`;               // 형식 불량 = 종전 동작
-  return ` src="${esc(t)}" data-full="${esc(full||'')}" onerror="_thumbFall(this)"`;
-}
-function _thumbFall(img){
-  if(!img || img.dataset.tf) return;                      // ★ 한 번만
-  img.dataset.tf='1';
-  const u=img.getAttribute('data-full')||'';
-  if(u) img.src=u; else img.removeAttribute('src');       // 원본도 없으면 깨진 아이콘 대신 빈 칸
+  return window.DriveThumb ? DriveThumb.attrs(id, px, full) : ` src="${esc(full||'')}"`;
 }
 /* 사람 옆 번호 = **작업보드 표의 「번호」**(서버가 실어 주는 `boardNo`) — `seq`(시트 행 번호)가
    아니다. 담당자가 표에서 눈으로 보는 값과 같아야 "몇 번 줄 사람인지"가 통한다.
@@ -6311,6 +6409,11 @@ function _condCardHtml(wd,d,m){
     ['현금영수증','tab', cd.cashReceipt==null?null:(cd.cashReceipt?'대상':'해당 없음')],
     ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
     ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
+    /* ★ 이체은행 — 입금관리가 보는 그 값(서버가 판정해 실어 준다 · 화면 재판정 0).
+       `auto` 는 사람이 정한 게 아니라 **작업오더 물건비에서 자동 판정**된 값이라 그 사실을 말한다
+       (조용한 추정 금지 — 담당자가 "내가 정한 적 없는데 왜 하나은행?"을 확인할 수 있어야 한다). */
+    ['이체은행','bank',  cd.transferBankLabel?`${esc(cd.transferBankLabel)}`+
+      (cd.bankSource==='auto'?' <span class="cndchip" title="작업오더 물건비에서 자동 판정된 값입니다(현금→하나은행 · 계산서/수수료→케이뱅크). 직접 정하려면 누르세요.">자동</span>':''):null],
     ['리뷰타입','rtype', _cndRtypeHtml(cd)],
   ]/* ★ 광고주 표기 항목(사용자 확정 2026-08-23) — 작업명·메인URL·일정·구매시간·총건수·일건수·
        결제금액·구매채널·유입방식·리뷰타입. 나머지(다계정·현금영수증·리뷰비·입금명)는 내부 전용이라
@@ -6365,11 +6468,12 @@ function _cndFixGate(cd,kind){
     if(cd.workOrderId) return {can:true,tip:'작업오더 수정 창을 엽니다(모집 인원·일건수) — 공고를 발행하면 이 값이 프리필되고, 발행 뒤에는 공고 정원이 우선합니다.'};
     return {can:true,tip:'공고 발행 화면을 엽니다(이 작업 프리필) — 정원은 공고에서 정합니다.'};
   }
-  if(kind==='fee'||kind==='memo'){
+  if(kind==='fee'||kind==='memo'||kind==='bank'){
+    const what = kind==='fee'?'리뷰비':kind==='memo'?'입금명':'이체은행';
     if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
     return isAdmin
       ? {can:true,tip:'탭 설정에 저장합니다 — 나중에 공고를 발행하면 공고 값이 우선합니다.'}
-      : {can:false,tip:'공고가 없는 작업의 '+(kind==='fee'?'리뷰비':'입금명')+' 저장은 관리자만 할 수 있습니다.'};
+      : {can:false,tip:'공고가 없는 작업의 '+what+' 저장은 관리자만 할 수 있습니다.'};
   }
   if(kind==='rtype'){
     if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
@@ -6389,6 +6493,7 @@ async function _cndFix(kind){
     return _cndPublish(cd);                                 // 발주도 없으면 발행으로
   }
   if(kind==='order') return _cndOrderModal(cd);
+  if(kind==='bank'&&!cd.campaignId) return _cndBankModal(cd);
   if((kind==='fee'||kind==='memo')&&!cd.campaignId) return _cndTabValueModal(kind,cd);
   if(kind==='rtype'&&!cd.campaignId) return _cndRtypeModal(cd);
   if(!cd.campaignId) return _cndPublish(cd);               // 구매채널·다계정 — 공고 발행으로
@@ -6458,6 +6563,30 @@ function _cndRtypeModal(cd){
   const curLb=cd.reviewTypeLabel||'';
   document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>{ if(b.dataset.v===curLb) b.classList.add('on'); });
 }
+/* 이체은행 — 탭 설정(공고가 없을 때). 저장 창구는 리뷰비·입금명과 **같은** transfer-setting.
+   ★ 선택지는 서버가 받는 값 그대로(자동/hana/kbank) — 다른 은행을 넣으면 서버가 거부한다.
+   ★ '자동'은 값을 비우는 것 = 작업오더 물건비 판정으로 되돌린다(지우기가 아니라 되돌리기). */
+function _cndBankModal(cd){
+  const cur = cd.bankSource==='campaign'||cd.bankSource==='tab' ? (cd.transferBank||'') : '';
+  const opts=[['','🔄 자동(작업오더 물건비)'],['hana','🟩 하나은행'],['kbank','🟦 케이뱅크']];
+  _cndMini({
+    title:'🏦 이체은행 — 탭 설정',
+    body: `<div class="cndchips" id="cndBkChips">${opts.map(([v,l])=>`<button type="button" class="wbl-b${v===cur?' on':''}" data-v="${esc(v)}" onclick="_cndBkPick(this)">${esc(l)}</button>`).join('')}</div>`+
+      `<div class="cndnote">이체 파일을 어느 은행 서식으로 뽑을지 정합니다 — <b>입금관리</b>가 이 값을 씁니다.<br>`+
+      `자동으로 두면 작업오더의 물건비를 따릅니다(현금 → 하나은행 · 계산서/수수료 → 케이뱅크).<br>`+
+      `아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 공고를 발행하면 <b>공고 값이 우선</b>합니다(자동).</div>`,
+    onSave: async ()=>{
+      const sel=document.querySelector('#cndBkChips .wbl-b.on');
+      if(!sel){ _toast('이체은행을 선택해 주세요.'); return false; }
+      const t=STATE.cur;
+      const r=await api('/api/trackb/payment/transfer-setting',{method:'POST',
+        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,bank:sel.dataset.v})}).catch(()=>null);
+      if(!r||!r.ok){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return false; }
+      return true;
+    }
+  });
+}
+function _cndBkPick(el){ document.querySelectorAll('#cndBkChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 function _cndRtPick(el){ document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 /* 공고 발행 — 이 작업(탭)·작업오더 프리필로 발행 모달을 연다. 발행하면 CAMP_ON_SAVED 훅이
    작업 조건을 다시 읽어 그 값이 카드에 반영된다. 발행 권한(편집 허용명단)은 서버가 최종 방어. */
@@ -7378,7 +7507,9 @@ function buildGrid(wd){
     // 배경색 오버레이(migration 080, 드래그 범위 지정) — field 별 저장색을 인라인 style로(클래스 배경보다 우선).
     const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
     const bgStyle=(field)=>{ const c=cc[field]; return c?`background-color:${esc(c)};`:''; };
-    const eCell=(field, disp, edited, extraCls, styleI, editv)=> {
+    /* `hist` = 이 칸에 **편집기록이 남아 있는가**(오버레이 존재). 표시값(`edited`)과 분리한다 —
+       입금·리뷰제출 같은 상태 칸은 화면값이 작업표 원본이라 `edited` 는 false 지만 기록은 있다. */
+    const eCell=(field, disp, edited, extraCls, styleI, editv, hist)=> {
       const statusKind=_workdeskStatusKindForField(field);
       const locked=!!statusKind;
       /* 리뷰제출 칸은 편집이 잠겨 있어 `data-val`(편집 정본)을 읽는 곳이 **복사 하나뿐**이다(`_cellCopyText`).
@@ -7387,7 +7518,7 @@ function buildGrid(wd){
       if(statusKind==='review') editv=disp;
       const cellE = canE || (advTrackE && _isTrackingField(field));   // 업체는 송장 칸만 편집 가능
       return cellE
-      ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 이 화면에서 직접 수정할 수 없습니다.'):disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':(edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:'')}</td>`
+      ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 [💰 입금수정]으로만 고칩니다(우클릭).'):disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':''}${hist?_ehistMark(r.id,field):''}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
     };
     let tds='';
@@ -7400,15 +7531,15 @@ function buildGrid(wd){
         // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 가운데 정렬(앞여백=뒷여백).
         tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}${bgStyle('idphone')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idphone">${esc(_ph||'')}</td>`; }
       else if(c.kind==='custom'){
-        // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, revert(↩) 없음(원본 개념이 없어 되돌릴 대상이 없음).
+        // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, 편집기록 없음(원본·오버레이 개념이 없다).
         const cv=(r.customValues&&r.customValues[c.colId])||'';
-        tds+=eCell(h, cv, false, '', i, cv); }
-      else { const statusKind=_workdeskStatusKind(h); const ed=!statusKind&&(h in ceMap); const raw= ed?ceMap[h]:rj[h];
+        tds+=eCell(h, cv, false, '', i, cv, false); }
+      else { const statusKind=_workdeskStatusKind(h); const hasHist=(h in ceMap); const ed=!statusKind&&hasHist; const raw= ed?ceMap[h]:rj[h];
         const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
         const editv= ed?disp:_gridEditVal(h, raw);
         const ok=(_workdeskStatusKind(h)&&disp)?' gok':'';
         const ctr=_isCtrCol(h)?' gctr':'';   // 시트 날짜/연락처 열 가운데 정렬
-        tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv); }
+        tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv, hasHist); }
     });
     // data-p8/data-nm = 리뷰어 로그 딥링크가 이 행을 찾아 강조하는 키(표시에는 영향 없음)
     // data-rid = 행 식별자(업체 뷰어의 리뷰 미리보기 선택 키) — 셀에만 있던 것을 행에도 올려 tr 단위로 잡는다.
@@ -7805,10 +7936,10 @@ function toggleAllGGroups(){ const gb=STATE.gGroupBy; if(!gb) return;
 //   인라인 입력 → 커밋 시 로컬 모델 즉시 반영 + 해당 셀만 재도색 + 백그라운드 저장(전체 리로드/네트워크 대기 없음 = 딜레이 0).
 //   Enter=아래 셀, Tab=오른쪽, Shift+Tab=왼쪽으로 이어서 편집. Esc=취소(로컬 복원). 저장 실패/충돌 시에만 롤백·리로드.
 function _gridRowById(id){ return ((STATE.wd&&STATE.wd.roster)||[]).find(r=>String(r.id)===String(id)); }
-// 그리드 col 셀 1칸을 로컬 모델 기준으로 재도색(rowHtml의 col 분기와 동일 계산 — 편집표시/되돌리기/gempty/gok 일치).
+// 그리드 col 셀 1칸을 로컬 모델 기준으로 재도색(rowHtml의 col 분기와 동일 계산 — 편집표시/편집기록 마크/gempty/gok 일치).
 function _paintGridCell(r, field, td){
   if(!td||!field) return;
-  if(field.indexOf('ccol:')===0){   // 커스텀 열(자유메모) — 원본 개념이 없어 edited/되돌리기 없음
+  if(field.indexOf('ccol:')===0){   // 커스텀 열(자유메모) — 원본 개념이 없어 edited/편집기록 없음
     const disp=(r.customValues&&r.customValues[field.slice(5)])||'';
     td.classList.remove('edited'); td.classList.toggle('gempty', !disp);
     td.setAttribute('data-val', disp); td.setAttribute('title', disp||'');
@@ -7819,14 +7950,15 @@ function _paintGridCell(r, field, td){
   const h=field.slice(4);
   const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
   const ce=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
-  const ed=(h in ce); const raw= ed?ce[h]:rj[h];
+  const hasHist=(h in ce);
+  const ed=!_workdeskStatusKind(h)&&hasHist; const raw= ed?ce[h]:rj[h];
   const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
   const editv= ed?disp:_gridEditVal(h, raw);
   const isOk=(h==='리뷰제출'||h==='입금');
   td.classList.toggle('edited', ed); td.classList.toggle('gempty', !disp); if(isOk) td.classList.toggle('gok', !!disp);
   td.setAttribute('data-val', editv!=null?editv:disp);   // 편집 대상 값(다음 클릭 시 입력 초기값)
   td.setAttribute('title', disp||'');   // 축약된 전체값 = 호버 툴팁
-  td.innerHTML=`${esc(disp||'—')}${ed?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}`;
+  td.innerHTML=`${esc(disp||'—')}${hasHist?_ehistMark(r.id, field):''}`;
 }
 const _CELL_UNDO_MAX=100;
 const _cellUndoStack=[];
@@ -7893,21 +8025,24 @@ function _wdDpParse(v){ // 현재 값에서 초기 표시 월 추정(표기 다�
   if(m){ const now=new Date(); return {y:now.getFullYear(),mo:+m[1],d:+m[2]}; }
   return null;
 }
-function openWdDatePicker(td){
+function openWdDatePicker(td, mode){
   if(!td||!td.getAttribute) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field');
   if(!rowId||!field||field.indexOf('col:')!==0) return;
-  if(!td.classList.contains('gedit')) return;              // 잠긴 칸은 열지 않는다(편집 게이트와 동일)
+  // 입금 모드는 **잠긴 상태 칸**을 여는 유일한 예외다(게이트는 우클릭 메뉴·서버가 이미 봤다).
+  if(mode!=='deposit' && !td.classList.contains('gedit')) return;   // 잠긴 칸은 열지 않는다(편집 게이트와 동일)
+  if(mode==='deposit' && _workdeskStatusKindForField(field)!=='payment') return;
   _wdDpClose();
   const cur=_wdDpParse(td.getAttribute('data-val')||'');
   const now=new Date();
   // ★ 인라인 앵커(사용자 확정 2026-08-21): 달력은 화면 중앙이 아니라 **편집하려는 셀에 붙여** 띄운다.
   //   rect 는 열 때 1회 저장 — 스크롤로 셀이 움직이면 따라가는 대신 닫는다(우클릭 메뉴와 같은 규율).
   const rect=td.getBoundingClientRect();
-  _wdDpState={rowId, field, td, y:(cur?cur.y:now.getFullYear()), mo:(cur?cur.mo:now.getMonth()+1), sel:cur, busy:false,
+  _wdDpState={rowId, field, td, mode:(mode==='deposit'?'deposit':'purchase'),
+    y:(cur?cur.y:now.getFullYear()), mo:(cur?cur.mo:now.getMonth()+1), sel:cur, busy:false,
     anchor:{left:rect.left, top:rect.top, bottom:rect.bottom}};
   const ov=document.createElement('div'); ov.id='wdDatePick';
-  ov.innerHTML='<div class="wdp-box" role="dialog" aria-label="구매일자 선택"></div>';
+  ov.innerHTML=`<div class="wdp-box" role="dialog" aria-label="${mode==='deposit'?'입금일 선택':'구매일자 선택'}"></div>`;
   document.body.appendChild(ov);
   ov.addEventListener('mousedown',e=>{ if(e.target===ov) _wdDpClose(); });   // 바깥 클릭 = 취소(입력값 없음 — 보호할 타이핑이 없다)
   if(!window._wdDpKeyBound){ window._wdDpKeyBound=true;
@@ -7946,7 +8081,8 @@ function _wdDpRender(){
     `<div class="wdp-hd"><button class="btn" onclick="_wdDpNav(-1)">‹</button>`+
     `<b>${S.y}년 ${S.mo}월</b><button class="btn" onclick="_wdDpNav(1)">›</button></div>`+
     `<div class="wdp-grid">${['일','월','화','수','목','금','토'].map((w,i)=>`<span class="wdp-w ${i===0?'sun':(i===6?'sat':'')}">${w}</span>`).join('')}${cells}</div>`+
-    `<div class="wdp-ft">${S.busy?'저장 중…':'날짜를 누르면 바로 저장됩니다'}<span class="sp" style="flex:1"></span>`+
+    `<div class="wdp-ft">${S.busy?'저장 중…':(S.mode==='deposit'?'입금일을 누르면 바로 확정됩니다':'날짜를 누르면 바로 저장됩니다')}<span class="sp" style="flex:1"></span>`+
+    (S.mode==='deposit'?`<button class="btn" onclick="_wdDpClearDeposit()"${S.busy?' disabled':''}>입금일 비우기</button>`:'')+
     `<button class="btn" onclick="_wdDpClose()">취소</button></div>`;
   _wdDpPlace();   // 월 이동으로 높이가 변해도 다시 클램프
 }
@@ -7954,6 +8090,7 @@ function _wdDpPick(d){
   const S=_wdDpState; if(!S||S.busy)return;
   const iso=`${S.y}-${String(S.mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   const t=STATE.cur; if(!t){ _wdDpClose(); return; }
+  if(S.mode==='deposit'){ _wdDpSaveDeposit(iso); return; }   // 입금 확정은 전용 경로(원장 파생까지 바뀐다)
   const sheetless=!!(STATE.wd&&STATE.wd.meta&&STATE.wd.meta.sheetless);
   if(!sheetless){
     // 시트 기반 탭 = 종전 오버레이 경로 그대로(값만 달력이 만든 ISO — 표시 전용이라는 성질도 종전과 동일)
@@ -8049,20 +8186,151 @@ function _navFromCell(td, dir){
     const rows=[...tbody.children].filter(x=>x.tagName==='TR'&&!x.classList.contains('grouphd'));
     const ri=rows.indexOf(tr); const target=rows[ri+(dir==='down'?1:-1)]; if(target) open(target.children[ci]); }
 }
-// 되돌리기(그리드 col): 로컬 즉시 원복 + 백그라운드 revert. 실패 시 복원.
-function revertCell(ev, el){ if(ev)ev.stopPropagation();
-  const rowId=el.getAttribute('data-id'), field=el.getAttribute('data-field');
-  const td=el&&el.closest?el.closest('td'):null, r=_gridRowById(rowId);
-  if(r&&td&&field&&field.indexOf('col:')===0){
-    const h=field.slice(4), had=!!(r.cellEdits&&(h in r.cellEdits)), prev=had?r.cellEdits[h]:undefined;
-    if(r.cellEdits) delete r.cellEdits[h];
-    _paintGridCell(r, field, td);
-    const t=STATE.cur; if(!t) return;
-    api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})})
-      .catch(()=>{ if(had){ r.cellEdits=r.cellEdits||{}; r.cellEdits[h]=prev; _paintGridCell(r,field,td); } toast('되돌리기 실패'); });
-    return;
+/* ★★ 셀 되돌리기(↩) 는 **제거됐다**(사용자 확정 2026-08-24) — 되살리지 말 것.
+   버튼 한 번으로 남의 편집까지 원복되던 자리라, 고칠 때는 **값을 다시 적어** 고치고
+   무엇이 언제 누구에 의해 바뀌었는지는 셀의 [편집기록] 팝업이 말한다(기록은 지우지 않는다).
+   서버의 revert 경로(`/workdesk/revert`)는 Ctrl+Z(직전 내 편집 실행취소)만 쓴다. */
+/* ══ 셀 편집기록 (구글시트의 셀 편집기록과 같은 성격 · 인라인 팝업) ═══════════════════════
+   ★★ ↩ 되돌리기를 없앤 자리를 대신한다 — **되돌리지는 못하지만 무슨 일이 있었는지는 언제나 본다**.
+   ★ 마크(오른쪽 위 삼각형)는 기록이 있는 칸에만 그린다 — 없는 칸에 눌러 봐야 빈 팝업뿐이다.
+   ★ 팝업은 **body 직속**(표는 가로 스크롤 컨테이너라 그 안에 그리면 잘린다) · 누른 셀 옆에 붙인다
+     — 달력·수동 리뷰제출 팝오버와 같은 앵커 규율(스크롤하면 닫는다). */
+function _ehistMark(rowId, field){
+  return `<span class="ehist" role="button" tabindex="-1" title="이 셀의 편집기록 보기"`
+       + ` data-id="${esc(rowId)}" data-field="${esc(field)}" onclick="openCellHistory(event,this)"></span>`;
+}
+let _chState=null;
+function _chClose(){ const ov=document.getElementById('chPop'); if(ov)ov.remove(); _chState=null; }
+function _chPlace(){
+  const box=document.querySelector('#chPop .ch-box'), a=_chState&&_chState.anchor; if(!box||!a) return;
+  const w=box.offsetWidth||280, h=box.offsetHeight||160;
+  box.style.left=Math.max(8, Math.min(a.left, window.innerWidth-w-10))+'px';
+  box.style.top=(a.bottom+h>window.innerHeight-8 ? Math.max(8, a.top-h-4) : a.bottom+4)+'px';
+}
+/* 표기: 서버가 준 ISO → 'M/D HH:mm'(KST). ★ 값이 이상하면 지어내지 않고 빈 문자열. */
+function _chWhen(v){
+  const d=new Date(v); if(isNaN(d)) return '';
+  const k=new Date(d.getTime()+9*3600*1000).toISOString();
+  return `${Number(k.slice(5,7))}/${Number(k.slice(8,10))} ${k.slice(11,16)}`;
+}
+function _chRender(){
+  const box=document.querySelector('#chPop .ch-box'), S=_chState; if(!box||!S) return;
+  const head=`<div class="ch-hd">🕘 편집기록<span class="col">${esc(S.label||'')}</span></div>`;
+  let body;
+  if(S.loading) body='<div class="ch-empty">불러오는 중…</div>';
+  else if(S.err) body=`<div class="ch-empty">${esc(S.err)}</div>`;
+  else if(!S.items.length) body='<div class="ch-empty">이 셀에는 편집기록이 없습니다.</div>';
+  else body=S.items.map(it=>{
+    const val=it.cleared?'(값 지움)':it.value;
+    const when=_chWhen(it.at);
+    /* 되돌림(reverted)은 "그 뒤에 다른 값으로 덮였다"는 뜻이다 — 지우지 않고 그 사실을 함께 말한다. */
+    const rev=it.reverted?`<div class="m">이후 변경됨${it.revertedAt?` · ${esc(_chWhen(it.revertedAt))}`:''}</div>`:'';
+    return `<div class="ch-it${it.reverted?' rev':''}"><div class="v${it.cleared?' cleared':''}">${esc(val)}</div>`
+         + `<div class="m">${esc(when)}${when&&it.by?' · ':''}${esc(it.by||'')}</div>${rev}</div>`;
+  }).join('');
+  box.innerHTML=head+body;
+  _chPlace();
+}
+function openCellHistory(ev, el){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  const td=el&&el.closest?el.closest('td'):null;
+  const rowId=(el&&el.getAttribute('data-id'))||(td&&(td.getAttribute('data-id')||td.getAttribute('data-rid')));
+  const field=(el&&el.getAttribute('data-field'))||(td&&(td.getAttribute('data-field')||td.getAttribute('data-cfield')));
+  const t=STATE.cur;
+  if(!t||!rowId||!field) return;
+  _chClose();
+  const rect=td&&td.getBoundingClientRect?td.getBoundingClientRect():{left:120,top:120,bottom:150};
+  const label=field.indexOf('col:')===0?field.slice(4):(field.indexOf('ccol:')===0?'추가 열':field);
+  _chState={rowId, field, label, loading:true, err:'', items:[], anchor:{left:rect.left, top:rect.top, bottom:rect.bottom}};
+  const ov=document.createElement('div'); ov.id='chPop';
+  ov.innerHTML='<div class="ch-box" role="dialog" aria-label="셀 편집기록"></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('mousedown', e=>{ if(e.target===ov) _chClose(); });   // 바깥 클릭 = 닫기(읽기 전용이라 보호할 입력이 없다)
+  if(!window._chKeyBound){ window._chKeyBound=true;
+    document.addEventListener('keydown', e=>{ if(e.key==='Escape'&&document.getElementById('chPop')){ e.stopPropagation(); _chClose(); } }, true);
+    // 표가 스크롤되면 앵커 셀이 움직인다 — 따라가지 못하는 팝오버는 닫는 것이 정직하다(달력과 같은 규율).
+    window.addEventListener('scroll', ()=>{ if(document.getElementById('chPop')) _chClose(); }, true);
+    window.addEventListener('resize', ()=>{ if(document.getElementById('chPop')) _chClose(); });
   }
-  revertEdit(rowId, field);   // 비그리드(폴백) 경로
+  _chRender();
+  const want=_chState;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`
+        + `&rowId=${encodeURIComponent(rowId)}&field=${encodeURIComponent(field)}`;
+  api('/api/trackb/workdesk/cell-edits?'+q)
+    .then(r=>{ if(_chState!==want) return;
+      if(r&&r.ok) _chState.items=r.items||[];
+      else _chState.err=(r&&r.error)?('편집기록을 불러오지 못했습니다 — '+r.error):'편집기록을 불러오지 못했습니다.';
+      _chState.loading=false; _chRender(); })
+    .catch(()=>{ if(_chState!==want) return; _chState.loading=false; _chState.err='편집기록을 불러오지 못했습니다 — 네트워크'; _chRender(); });
+}
+/* 우클릭 메뉴 [🕘 편집기록] — 코너마크가 없는 칸(기록이 아직 없는 칸)에서도 확인할 수 있는 창구. */
+function _menuCellHistory(){
+  const td=_selAnchorTd(); _closeCellMenu(); if(td) openCellHistory(null, td);
+}
+/* ══ 관리자 수동 입금처리 — 우클릭 [💰 입금수정] ═══════════════════════════════════════════
+   ★★ 입금 칸은 직접 타이핑 편집이 잠긴 상태 칸이다(값 하나가 입금관리 대상·리뷰어 화면까지 바꾼다).
+      그래서 창구는 **달력 하나**다 — 날짜를 고르면 확정, [입금일 비우기]로 지운다(사용자 확정 2026-08-24).
+   ★ 저장 경로는 서버 `/api/trackb/workdesk/deposit-date` 하나(adminOrMaster · 무시트 전용).
+   ★ 저장 뒤에는 **전체 재조회**한다 — 입금 칸 하나로 입금완료 수·게이지·정산 카드가 함께 움직여
+     부분 갱신이면 화면이 거짓말을 한다(구매일자 달력과 같은 규율). */
+function _depositMenuBlockReason(td, row){
+  if(!_isInternalRole()) return '입금 처리는 내부 담당자만 할 수 있습니다';
+  if(!(STATE.role==='master'||STATE.role==='admin')) return '입금 수정은 관리자(master/admin)만 할 수 있습니다';
+  if(!(STATE.wd&&STATE.wd.meta&&STATE.wd.meta.sheetless)) return '구글시트를 아직 쓰는 작업이라 입금 칸은 시트에서 고쳐야 합니다';
+  if(!row) return '이 줄의 참여자 정보를 찾지 못했습니다';
+  if(row.ambiguous) return '같은 주문·신원이 여러 줄이라 어느 줄의 입금인지 정할 수 없습니다 — 중복 줄을 먼저 정리해 주세요';
+  return '';
+}
+function openDepositEdit(){
+  const cell=STATE._gMenuCell, td=_selAnchorTd();
+  const row=(STATE.wd&&STATE.wd.roster||[]).find(r=>String(r.id)===String(cell&&cell.rowId));
+  _closeCellMenu();
+  if(!cell||cell.statusKind!=='payment'||!td) return;
+  const why=_depositMenuBlockReason(td,row);
+  if(why){ toast(why); return; }
+  openWdDatePicker(td, 'deposit');
+}
+/* 달력 → 서버 확정. `date:''` = 칸 비우기(취소·오기입 정정). */
+function _wdDpSaveDeposit(iso){
+  const S=_wdDpState, t=STATE.cur; if(!S||!t) return;
+  const clearing=!iso;
+  S.busy=true; _wdDpRender();
+  api('/api/trackb/workdesk/deposit-date',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:S.rowId,date:iso||''})})
+    .then(r=>{
+      _wdDpClose();
+      if(r&&r.ok){
+        if(r.unchanged){ toast('입금 값이 이미 같아 그대로 두었습니다'); return; }
+        const msg=clearing
+          ? `입금일을 비웠습니다 — 리뷰어 입금표시가 사라지고 입금관리 대상으로 돌아갑니다`
+          : `입금일 확정: ${r.value||''} — 리뷰어에게 페이백 날짜가 표시되고 입금관리 대상에서 빠집니다`;
+        toast(msg + (r.ledger==='deferred' ? ' (장부 반영은 잠시 뒤 자동 완료)' : ''));
+        /* ★ 비웠는데도 목록에 안 돌아오는 경우를 조용히 두지 않는다 — 이체 회차에 잡힌 줄은 대상 추출이 계속 제외한다. */
+        if(r.batchLocked) setTimeout(()=>toast('단, 이 줄은 이체 회차에 잡혀 있어 입금관리 목록에는 아직 나오지 않습니다'),1200);
+        reloadWorkdesk();
+        return;
+      }
+      toast(_depositErrText(r));
+    })
+    .catch(()=>{ _wdDpClose(); toast('저장 실패 — 네트워크'); });
+}
+const _DEPOSIT_ERRORS={
+  not_sheetless:'구글시트를 아직 쓰는 작업이라 입금 칸은 시트에서 고쳐야 합니다.',
+  no_status_column:'이 작업표에 입금 열이 없습니다 — 열을 먼저 추가해 주세요.',
+  ambiguous_order:'같은 주문이 여러 줄에 있어 어느 줄의 입금인지 정할 수 없습니다 — 중복 줄을 먼저 정리해 주세요.',
+  ambiguous_identity:'같은 신원이 여러 줄에 있어 어느 줄의 입금인지 정할 수 없습니다 — 중복 줄을 먼저 정리해 주세요.',
+  no_stable_anchor:'이 줄은 편집 기준(주문·신원)이 없어 입금을 기록할 수 없습니다.',
+  row_not_found:'그 줄을 찾지 못했습니다 — 새로고침 후 다시 시도해 주세요.',
+  bad_date:'날짜를 달력에서 골라 주세요.',
+  concurrent_edit_conflict:'같은 줄에 다른 처리가 진행 중입니다 — 잠시 후 다시 시도해 주세요.',
+};
+function _depositErrText(r){
+  const code=r&&r.error;
+  return _DEPOSIT_ERRORS[code]||(code?('입금 수정 거부: '+code):'입금 수정 실패');
+}
+function _wdDpClearDeposit(){
+  const S=_wdDpState; if(!S||S.busy) return;
+  if(!confirm('이 줄의 입금일을 비웁니다.\n\n· 리뷰어 화면의 입금완료·페이백 날짜가 사라집니다\n· 입금관리 대상 목록에 다시 나타납니다\n· 지운 값은 셀 편집기록에 남습니다\n\n진행할까요?')) return;
+  _wdDpSaveDeposit('');
 }
 // ── 커스텀 열(행별 자유메모, migration 080) — 탭 공용 저장, 시트/write-back 무접촉 ──
 function addCustomColumnPrompt(){
@@ -8132,7 +8400,7 @@ function _ensureCellRangeUI(){
     // 표 밖을 누르면 선택 해제 — 남겨 두면 Ctrl+C 가 계속 표 범위를 가로챈다.
     if(!e.target.closest('.sheetgrid')) { _clearCellSel(); return; }
     if(!td || td.querySelector('input') || td.closest('tr.grouphd')) return;
-    if(e.target.closest('.revb')||e.target.closest('.rdel')) return;   // ↩ 되돌리기·행 버튼은 자기 동작 유지
+    if(e.target.closest('.ehist')||e.target.closest('.rdel')) return;   // 편집기록 마크·행 버튼은 자기 동작 유지
     const pos=posOf(td); if(!pos) return;
     drag={ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci };
     _setCellSel(drag, e.ctrlKey||e.metaKey);   // Ctrl(⌘) = 기존 선택에 **더한다**(떨어진 범위)
@@ -8377,7 +8645,7 @@ function _cellCopyText(td){
   const dv=td.getAttribute('data-val');
   if(dv!=null) return dv;
   const c=td.cloneNode(true);
-  c.querySelectorAll('.revb,.rdel,.src,.visit,.lock,.govb').forEach(x=>x.remove());
+  c.querySelectorAll('.ehist,.rdel,.src,.visit,.lock,.govb,.glockmark').forEach(x=>x.remove());
   const s=(c.textContent||'').trim();
   return s==='—'?'':s;
 }
@@ -8462,7 +8730,7 @@ function _cellLockReason(td, r){
   const f=td.getAttribute('data-field')||td.getAttribute('data-cfield')||'';
   const k=_workdeskStatusKindForField(f);
   if(k==='review') return '리뷰 제출은 [📎 관리자 수동 리뷰제출]로 처리합니다 — 값을 직접 고칠 수 없습니다';
-  if(k==='payment') return '입금 값은 이 화면에서 직접 수정할 수 없습니다';
+  if(k==='payment') return '입금 값은 [💰 입금수정]으로 처리합니다 — 값을 직접 고칠 수 없습니다';
   if(f==='idname'||f==='idphone') return '실제 제출 리뷰어 정보라 수정할 수 없습니다';
   if(!f) return '번호 칸은 표 구조라 수정할 수 없습니다';
   if(r&&r.ambiguous) return '같은 주문·신원이 여러 줄이라 편집이 잠겼습니다 — 중복 줄을 먼저 정리해 주세요';
@@ -8490,12 +8758,16 @@ function _openCellMenu(x,y,td){
      → 리뷰제출 칸에서는 편집 항목을 아예 그리지 않고 그 자리에 수동 제출을 둔다.
      ★ 못 누르는 사유는 숨기지 않는다(이미 제출됨 / 내부 담당자 아님) — 흐린 항목 + 사유 툴팁. */
   const isReviewCell = one && statusKind==='review';
+  /* ★★ 입금 칸의 주 행동도 "편집"이 아니라 **[💰 입금수정]** 이다(사용자 확정 2026-08-24).
+     리뷰제출 칸과 같은 규율: 잠긴 칸에 흐린 [이 셀 편집]만 남기면 할 수 있는 일이 없는 메뉴가 된다.
+     ★ 못 누르는 사유는 숨기지 않는다(관리자 아님 / 시트 기반 / 중복 줄) — 흐린 항목 + 사유 툴팁. */
+  const isPayCell = one && statusKind==='payment';
+  const payBlockReason = !isPayCell ? '' : _depositMenuBlockReason(td, selectedRow);
   const reviewBlockReason = !isReviewCell ? ''
     : (!_isInternalRole() ? '리뷰제출 처리는 내부 담당자만 할 수 있습니다'
       : ((selectedRow&&selectedRow.submitted) ? '이미 리뷰제출이 완료된 줄입니다'
         : (selectedRow ? '' : '이 줄의 참여자 정보를 찾지 못했습니다')));
   const canPaste=canE && g.some(l=>l.some(c=>c.classList.contains('gedit')));
-  const hasEdited = canE && g.some(l=>l.some(c=>c.classList.contains('edited')));
   const row=(icon,label,fn,dim,danger,title)=>`<button class="gcmrow${dim?' dim':''}${danger?' danger':''}"${dim?' disabled':''}${title?` title="${esc(title)}"`:''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
   // 주문(구매양식)이 연결된 행은 "명단에서 빼기"가 아니라 "구매기록 취소"다. 라벨이 그 사실을 말하고,
   // 서버가 master/admin만 허용하므로 그 밖의 담당자에겐 눌러도 아무 일 없는 항목을 두지 않는다.
@@ -8511,12 +8783,15 @@ function _openCellMenu(x,y,td){
       (isReviewCell
         ? row('📎','리뷰 대신 제출',"openManualReviewSubmission()",!!reviewBlockReason,false,
               reviewBlockReason||'리뷰 캡처를 붙여넣으면 이 리뷰어의 리뷰제출이 완료 처리됩니다')
-        : (one?row(isDateCol?'📅':'✏️', isDateCol?'날짜 선택':'이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):''))
+        : (isPayCell
+          ? row('💰','입금수정',"openDepositEdit()",!!payBlockReason,false,
+                payBlockReason||'달력에서 입금일을 고르거나 비웁니다 — 리뷰어 페이백 표시·입금관리 대상이 함께 바뀝니다')
+          : (one?row(isDateCol?'📅':'✏️', isDateCol?'날짜 선택':'이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):'')))
     + (msgN?row('💬', msgN>1?`리뷰어 ${msgN}명에게 메시지`:'리뷰어에게 메시지', "openReviewerMsg()", false, false,
         msgN>1?'선택한 줄의 리뷰어들에게 같은 내용을 보냅니다(같은 리뷰어는 한 번만)':'이 줄 리뷰어의 1:1 문의방으로 보냅니다'):'')
+    + (one&&(field||'')?row('🕘','편집기록','_menuCellHistory()',false,false,'이 셀을 언제 누가 어떻게 고쳤는지 봅니다(되돌리지는 않습니다)'):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')
-    + (hasEdited?row('↩','편집 되돌리기','_revertSelection()'):'')
     + (canPaint?`<div class="gcmdiv"></div><div class="gcmsw">${
         _CELL_COLORS.map(c=>`<span class="gcswatch" style="background:${c}" onclick="_applyRangeColor('${c}')" title="이 색으로 칠하기"></span>`).join('')
       }<span class="gcswatch gcclear" onclick="_applyRangeColor('')" title="배경색 지우기">✕</span></div>`:'')
@@ -9044,12 +9319,6 @@ function _menuDeleteRow(){
     return;
   }
   hideRow(rowId,{hasOrder:!!(r&&r.hasOrder)});
-}
-function _revertSelection(){
-  const g=_selectionGrid(); _closeCellMenu();
-  const tds=[].concat(...g).filter(td=>td.classList.contains('edited'));
-  if(!tds.length) return;
-  tds.forEach(td=>{ const b=td.querySelector('.revb'); if(b) revertCell(null,b); });
 }
 async function _reloadWorkdeskAfterColorSaveFailure(t){
   if(!t || !STATE.cur || STATE.cur.sheetId!==t.sheetId || STATE.cur.tabName!==t.tabName) return;
@@ -10133,10 +10402,125 @@ async function renderPaymentView(){
      "담고 → 내려받고 → 회차 확인"이 이어지는 흐름이라, 나누면 오늘 하던 일이 늘어난다. */
 function _pmTabsHtml(){
   const t=(k,l)=>`<button class="${STATE.pmSub===k?'on':''}" onclick="_pmSwitch('${k}')">${l}</button>`;
-  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}</div>`;
+  /* ⚠ 원장 불일치 = 시트↔원장이 갈린 주문(reverse_sync_proposals 의 열린 edit 제안).
+     **돈이 나가기 직전에 보는 화면**이라 입금관리 옆에 둔다 — 별도 nav 를 만들면 또 안 들어간다
+     (감지·조회 API 는 진작 있었는데 화면이 없어 89건이 5주간 아무도 안 본 채로 쌓였다). */
+  const n=_NAVRS.n;
+  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}${
+    t('sync','⚠ 원장 불일치'+(n===null?'':(n>0?` 🔴${n}`:'')))}</div>`;
 }
 function _pmSwitch(k){ if(STATE.pmSub===k) return; STATE.pmSub=k; _pmPaint(); }
-function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else _pmRender(); }
+function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else if(STATE.pmSub==='sync') _rsOpen(); else _pmRender(); }
+
+/* ══ ⚠ 원장 불일치 (시트→DB 역동기화 열린 제안) ═══════════════════════════════════
+   왜 필요했나: 감지·조회·적용 API 는 진작 다 있었는데(`/api/diag/reverse-sync-*` 7개)
+   **부르는 화면이 하나도 없었다.** 그래서 시스템이 89건(금액 61 + 입금대상 28)을 5주 동안
+   찾아 기록해 두고도 아무도 보지 않았고, 그중 하나가 9,900원이 99,000원으로 나간 건이다.
+
+   ★ 무인 자동적용은 금액·계좌를 **하드 제외**한다(돌이킬 수 없어서). 하지만 사람이 검토하고
+     누르는 이 경로는 적용된다 — 그 구분은 이 화면이 있어야 의미를 갖는다.
+   ★ `cancel_suspect`(삭제 의심)는 설계상 영영 플래그로만 남는다(자동취소 금지). 목록에서 빼되
+     **건수는 말한다** — 숨기면 "다 처리했다"는 거짓 안심이 된다. */
+const _NAVRS = { n:null };            // 손댈 수 있는 열린 제안 수(=edit). null = 아직 모름
+function _rsSyncNavBadge(){
+  const b=$('#pmNavBadge'); if(!b) return;
+  if(_NAVRS.n===null) return;         // 모르면 0 으로 위장하지 않는다(조용한 정상 위장 금지)
+  b.textContent = _NAVRS.n>0 ? (' 🔴'+_NAVRS.n) : '';
+}
+/** 뱃지 건수만 받아 갱신. ★ limit=1 로 총계만 받는다(`total` = 자르기 전 개수) — 목록을 끌어오지 않는다.
+ *  실패는 조용히(직전 값 유지) — 역동기화 OFF·권한 없음 등이 뱃지를 0 으로 위장하면 안 된다. */
+async function _rsBadgeRefresh(){
+  try{
+    const r=await api('/api/diag/reverse-sync-list?status=open&type=edit&limit=1');
+    if(r && r.ok) { _NAVRS.n = Number(r.total)||0; _rsSyncNavBadge(); }
+  }catch(_){ }
+}
+/** 부팅 시 1회 — 입금관리를 열지 않아도 쌓인 건수가 nav 에 보이게(C/S·로그 뱃지와 같은 규율).
+ *  ★ 부팅 1회로 끝내면 안 된다(코드리뷰 지적, C/S 뱃지가 이미 같은 지적을 받았다) — 역동기화 detect 는
+ *    3분마다 돌고 다른 관리자도 제안을 만든다. 그 뒤 쌓인 건수가 새로고침 전까지 안 보이면
+ *    이 뱃지가 막으려던 **조용한 누적**이 그대로 재현된다. 갱신은 C/S 뱃지의 기존 타이머에
+ *    얹는다 — 타이머를 새로 만들지 않고(백그라운드 두드림 순증 0), 가려져 있으면 함께 쉰다. */
+async function _rsBootBadge(){ await _rsBadgeRefresh(); }
+
+/** 원장 칸 → 사람이 읽는 이름. 표시 전용(판정 아님) — 서버 필드명을 그대로 보여주면 담당자가 못 읽는다. */
+const _RS_FIELD = { price:'결제금액', account:'계좌번호', bank:'은행', depositor:'예금주',
+  orderer:'주문자', recipient:'수취인', phone:'연락처', address:'주소',
+  user_id:'아이디', order_num:'주문번호', memo:'비고', date_str:'구매일자' };
+/** 돈이 걸린 칸 — 줄 배경을 칠해 먼저 눈에 띄게 한다(이체 사고로 직결되는 것들). */
+const _RS_MONEY = ['price','account','bank','depositor'];
+
+async function _rsOpen(){
+  const el=$('#pmbody'); if(!el) return;
+  el.innerHTML=`${_pmTabsHtml()}<div class="empty">불러오는 중…</div>`;
+  let r=null, susp=null;
+  try{
+    [r, susp] = await Promise.all([
+      api('/api/diag/reverse-sync-list?status=open&type=edit&limit=500'),
+      api('/api/diag/reverse-sync-list?status=open&type=cancel_suspect&limit=1'),
+    ]);
+  }catch(e){ r={ ok:false, error:String(e&&e.message||e) }; }
+  if(!r || !r.ok){
+    el.innerHTML=`${_pmTabsHtml()}<div class="empty">불러오지 못했습니다.${r&&r.error?' ('+esc(String(r.error))+')':''}</div>`;
+    return;
+  }
+  STATE.rsItems = r.items||[];
+  _NAVRS.n = Number(r.total)||0; _rsSyncNavBadge();
+  el.innerHTML = `${_pmTabsHtml()}${_rsHtml(r, susp)}`;
+}
+
+function _rsHtml(r, susp){
+  const items=r.items||[];
+  const suspN = (susp && susp.ok) ? (Number(susp.total)||0) : null;
+  const notes=[];
+  notes.push(`시트와 주문원장이 갈린 칸입니다. <b>왼쪽이 원장(지금 값), 오른쪽이 시트</b>입니다.
+    어느 쪽이 맞는지는 구매캡처로 확인해 주세요 — 시트가 깨져 있는 경우도 있습니다.`);
+  // ★ 잘렸으면 잘렸다고 말한다(조용한 누락 금지).
+  if(r.truncated) notes.push(`⚠ 전체 <b>${Number(r.total)||0}건</b> 중 ${items.length}건만 표시했습니다.`);
+  if(suspN) notes.push(`삭제 의심 <b>${suspN}건</b>은 여기서 처리하지 않습니다(자동취소 금지 — 주문 취소 창구에서 명시 처리).`);
+  const head=`<div class="rsnote">${notes.join('<br>')}</div>`;
+  if(!items.length) return `<div class="rswrap">${head}<div class="empty">불일치 없음 — 시트와 원장이 일치합니다.</div></div>`;
+  const rows=items.map((it,i)=>{
+    const money=_RS_MONEY.includes(it.field);
+    const v=s=>(s==null||String(s).trim()==='')?'<span class="rsempty">(빈칸)</span>':esc(String(s));
+    return `<tr class="${money?'rsmoney':''}" data-rsid="${esc(String(it.id))}">
+      <td class="rsfield">${esc(_RS_FIELD[it.field]||it.field)}</td>
+      <td>${esc(String(it.tabName||''))}</td>
+      <td>${esc(String(it.sheetRow||''))}</td>
+      <td class="rsval old">${v(it.oldValue)}</td>
+      <td class="rsval new">${v(it.newValue)}</td>
+      <td>${esc(_rsWhen(it.detectedAt))}</td>
+      <td><div class="rsact">
+        <button class="go" onclick="_rsApply(${i})" title="주문원장을 시트값으로 바꿉니다">원장을 시트값으로</button>
+        <button onclick="_rsDismiss(${i})" title="원장이 맞습니다 — 이 제안을 닫습니다">기각</button>
+      </div></td></tr>`;
+  }).join('');
+  return `<div class="rswrap">${head}<table class="rstbl">
+    <thead><tr><th>칸</th><th>작업</th><th>행</th><th>원장(지금)</th><th>시트</th><th>감지</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function _rsWhen(s){
+  if(!s) return '';
+  const d=new Date(s); if(isNaN(d.getTime())) return String(s).slice(0,16);
+  const p=x=>String(x).padStart(2,'0');
+  return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 원장을 시트값으로 적용 — 되돌리기 어려운 쓰기라 확인을 받는다(경고칠과 성격이 다르다:
+ *  저쪽은 보기만 하는 표시, 이쪽은 원장을 실제로 바꾼다). */
+async function _rsApply(i){
+  const it=(STATE.rsItems||[])[i]; if(!it) return;
+  const nm=_RS_FIELD[it.field]||it.field;
+  if(!confirm(`${it.tabName} ${it.sheetRow}행 「${nm}」\n\n원장 ${it.oldValue||'(빈칸)'}\n→ 시트 ${it.newValue||'(빈칸)'}\n\n원장을 시트값으로 바꿉니다. 진행할까요?`)) return;
+  const r=await api('/api/diag/reverse-sync-apply',{method:'POST',body:JSON.stringify({proposalId:it.id})});
+  if(!r||!r.ok){ toast('적용 실패'+(r&&r.error?' — '+r.error:'')); return; }
+  toast(`${nm} 적용됨`); _rsOpen();
+}
+async function _rsDismiss(i){
+  const it=(STATE.rsItems||[])[i]; if(!it) return;
+  const r=await api('/api/diag/reverse-sync-dismiss',{method:'POST',body:JSON.stringify({proposalId:it.id})});
+  if(!r||!r.ok){ toast('기각 실패'+(r&&r.error?' — '+r.error:'')); return; }
+  toast('기각됨'); _rsOpen();
+}
 
 async function _pmLoad(){
   const [t, b] = await Promise.all([ api('/api/trackb/payment/targets'), api('/api/trackb/payment/batches?limit=30') ]);
@@ -10439,43 +10823,104 @@ function _pmRender(){
 
 function _pmTargetTable(items){
   if(!items.length) return `<div class="empty">입금할 건이 없습니다.</div>`;
+  /* ★★ 같은 작업의 줄이 이어질 때 **작업·이체은행·통장표시·보류 사유를 줄마다 되풀이하지 않는다**
+       (사용자 확정 2026-08-24) — 50건짜리 작업이면 같은 글자가 50번 반복돼 정작 줄마다 다른 값
+       (리뷰어·금액·계좌)이 묻힌다. 작업이 바뀌는 자리에 **그룹 머리줄**을 한 줄 넣고,
+       그 작업에서 **모든 줄이 같은 값인 칸만** 머리줄로 올린다.
+     ★ 값이 하나라도 다르면 그 칸은 종전대로 줄마다 그린다(정보 손실 0 — 조용히 숨기지 않는다).
+     ★ 접기는 **표시 전용** — 접어도 체크 상태·다운로드 대상은 그대로다(머리줄이 선택 건수를 말한다).
+     ★ 그룹 판정은 `_pmWorkKey` 단일 출처(작업 선택 패널·필터와 같은 키). */
+  const groups=[];
+  for(const it of items){
+    const key=_pmWorkKey(it);
+    const last=groups[groups.length-1];
+    if(last && last.key===key) last.items.push(it);
+    else groups.push({ key, label:it.tabLabel, items:[it] });
+  }
+  STATE.pmGroups = groups.map(g=>g.key);          // 접기 토글이 참조(인덱스 → 키)
+  const fold = STATE.pmFold || (STATE.pmFold={});
+  // 그 작업의 모든 줄이 같은 값일 때만 그 값을 돌려준다(다르면 null = 줄마다 그린다)
+  const same=(g,f)=>{ const v=f(g.items[0]); return g.items.every(x=>f(x)===v) ? v : null; };
+
   // ★ onclick 에는 **배열 인덱스만** 넘긴다 — 탭명·리뷰어명은 시트에서 온 외부 문자열이라
   //   문자열로 보간하면 따옴표 하나로 탈출된다(HTML 속성은 엔티티 디코드 후 JS 로 파싱되므로
   //   `&#39;` 치환으로는 못 막는다 — 레포에서 실측된 XSS 와 같은 자리).
-  const rows = items.map(it=>{
-    const idx=(STATE.pmItems||[]).indexOf(it);
-    const on=_pmOn(it);
-    const badge = it.payable
-      ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
-      : `<span class="pmb no">보류</span>`;
-    const why = it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
-    // 그 행의 사유 중 화면에서 고칠 수 있는 것이 하나라도 있을 때만 버튼을 만든다
-    // (눌러도 아무 일 없는 버튼 금지 — 못 고치는 사유는 상단 안내 카드가 설명한다)
-    const fixable = (it.issues||[]).some(i => PAY_FIX_KIND[i] === 'work'
-      || (PAY_FIX_KIND[i] === 'account' && it.accountRef && it.accountRef.reviewerId));
-    const memoFixable = !it.transferMemo;
-    const fixBtn = fixable ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
-    return `<tr class="${on?'':'off'}">
+  const bankBadge = it => it.payable
+    ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
+    : `<span class="pmb no">보류</span>`;
+  const whyText = it => it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
+  // 그 줄의 사유 중 화면에서 고칠 수 있는 것이 하나라도 있을 때만 버튼을 만든다
+  // (눌러도 아무 일 없는 버튼 금지 — 못 고치는 사유는 위 안내 카드가 설명한다)
+  const isFixable = it => (it.issues||[]).some(i => PAY_FIX_KIND[i] === 'work'
+    || (PAY_FIX_KIND[i] === 'account' && it.accountRef && it.accountRef.reviewerId));
+  const memoCell = (it, idx) => esc(it.transferMemo||'') || (!it.transferMemo
+    ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>');
+
+  const body = groups.map((g,i)=>{
+    const hidden = !!fold[g.key];
+    const bankSig = same(g, it => it.payable ? (it.bank+'|'+(it.bankAuto?'a':'m')) : 'hold');
+    const memoSig = same(g, it => String(it.transferMemo||''));
+    const whySig  = same(g, it => whyText(it)+'|'+(isFixable(it)?'1':'0'));
+    const idx = (STATE.pmItems||[]).indexOf(g.items[0]);   // 머리줄 버튼이 가리키는 = 그 작업의 첫 줄
+                                                          // (작업 단위 값이라 어느 줄로 열어도 같은 팝업)
+    const picked  = g.items.filter(_pmOn).length;
+    const payable = g.items.filter(it=>it.payable).length;
+    const sum     = g.items.filter(_pmOn).reduce((a,c)=>a+(Number(c.amount)||0),0);
+
+    // 머리줄 — 작업명 + 건수 + (그 작업에서 값이 같은 칸들) + 선택 현황
+    const chips=[];
+    if(bankSig!==null) chips.push(bankBadge(g.items[0]));
+    if(memoSig!==null) chips.push(`<span class="pmgk">통장표시</span>${memoCell(g.items[0], idx)}`);
+    if(whySig!==null && whyText(g.items[0])) chips.push(
+      `<span class="pmwarn">${esc(whyText(g.items[0]))}</span>${isFixable(g.items[0])?`<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>`:''}`);
+    const head = `<tr class="pmgrp" data-pgh="${i}"><td colspan="11"><div class="pmgrph">`
+      + `<button class="pmfold" type="button" title="접기/펼치기" onclick="_pmFoldWork(${i})">${hidden?'▸':'▾'}</button>`
+      + `<b class="nm" title="${esc(g.label||'')}">${esc(g.label||'')}</b>`
+      + `<span class="n">${g.items.length}건</span>`
+      + chips.join('')
+      + `<span class="sp"></span>`
+      + (payable?`<span class="pmgsel">선택 ${picked}/${payable}건 · ${_pmNum(sum)}원</span>`:`<span class="pmgsel dim">이체 대상 없음</span>`)
+      + `</div></td></tr>`;
+
+    const rows = g.items.map(it=>{
+      const idx=(STATE.pmItems||[]).indexOf(it);
+      const on=_pmOn(it);
+      const why = whyText(it);
+      const fixBtn = isFixable(it) ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
+      return `<tr class="${on?'':'off'}${hidden?' pmhide':''}" data-pg="${i}">
       <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`:'—'}</td>
-      <td>${esc(it.tabLabel)}</td>
-      <td>${badge}</td>
+      <td class="pmdim"></td>
+      <td>${bankSig!==null?'':bankBadge(it)}</td>
       <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
         it.accountSource==='order'?`<span class="pmauto"${_pmAcctSrcTip(it)}>양식계좌</span>`:''}</td>
       <td>${esc(it.startDate)}</td>
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
       <td class="num">${_pmNum(it.amount)}</td>
-      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${it.reviewFee
-        ? _pmNum(it.reviewFee)
-        : `<button class="btn sm" title="리뷰비가 없어 상품비만 이체됩니다 — 눌러서 설정" onclick="_pmRowMemo(${idx})">0</button>`}</td>
-      <td>${esc(it.transferMemo||'') || (memoFixable
-        ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>')}</td>
-      <td class="pmwarn">${esc(why)} ${fixBtn}</td></tr>`;
+      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${_pmNum(it.reviewFee||0)}</td>
+      <td>${memoSig!==null?'':memoCell(it, idx)}</td>
+      <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>`;
+    }).join('');
+    return head+rows;
   }).join('');
+
   return `<div class="lgwrap"><table class="lgtable pmtable">
     <thead><tr><th>☑</th><th>작업</th><th>이체은행</th><th>리뷰어</th><th>구매일</th><th>은행/계좌</th><th>예금주</th>
       <th class="num">이체금액</th><th class="num">상품비+리뷰비</th><th>통장표시</th><th>보류 사유</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <tbody>${body}</tbody></table></div>`;
+}
+
+/** 작업 그룹 접기/펼치기 — **표시 전용**(체크 상태·다운로드 대상 무접촉)
+ *  ★ 전체 재렌더 대신 그 그룹 줄만 감춘다(보던 스크롤 자리를 잃지 않게)
+ *  ★ 인자는 그룹 인덱스(외부 문자열 보간 금지) */
+function _pmFoldWork(i){
+  const key=(STATE.pmGroups||[])[i]; if(!key) return;
+  const fold=STATE.pmFold||(STATE.pmFold={});
+  if(fold[key]) delete fold[key]; else fold[key]=true;
+  const on=!!fold[key];
+  const tbl=document.querySelector('#pmbody .pmtable'); if(!tbl) return;
+  tbl.querySelectorAll('tr[data-pg="'+i+'"]').forEach(tr=>{ tr.classList.toggle('pmhide', on); });
+  const h=tbl.querySelector('tr.pmgrp[data-pgh="'+i+'"] .pmfold'); if(h) h.textContent = on?'▸':'▾';
 }
 
 function _pmBatchResult(b){
@@ -10590,7 +11035,7 @@ function _pmBuildFix(items){
       // 리뷰비 — 화면은 **서버가 준 값만** 쓴다(어디서 왔는지도 서버 판정 `feeSource` 그대로).
       fee:(typeof it.reviewFee==='number'?it.reviewFee:null), feeSource:it.feeSource||null,
       tabFee:(it.tabReviewFee==null?null:it.tabReviewFee), campFee:(it.campaignReviewFee==null?null:it.campaignReviewFee),
-      needBank:false, needMemo:false, needFee:false, bankRows:0, memoRows:0, feeRows:0, setupRows:0,
+      needBank:false, needMemo:false, bankRows:0, memoRows:0, setupRows:0,
       accts:[], acctRows:0, _nr:new Set(), _np:new Set(), rows:0 });
     return w;
   };
@@ -10598,18 +11043,19 @@ function _pmBuildFix(items){
     const iss=it.issues||[], warn=it.warnings||[];
     const hasAcct = iss.some(x=>PAY_ACCT_ISSUES.includes(x));
     // 이 작업 카드에 실을 일이 하나라도 있는 행만 센다(정상 행은 카드를 만들지 않는다)
-    if(!(iss.includes('no_bank') || warn.includes('no_memo') || warn.includes('no_review_fee') || hasAcct
+    if(!(iss.includes('no_bank') || warn.includes('no_memo') || hasAcct
         || iss.includes('no_reviewer') || iss.includes('no_price'))) continue;
     const w=work(it); w.rows++;
     // ── 작업 단위(이체은행 미지정 · 통장표시 없음) — 저장하면 그 작업의 모든 행이 함께 풀린다
     if(iss.includes('no_bank')){ w.needBank=true; w.bankRows++; }
     if(warn.includes('no_memo')){ w.needMemo=true; w.memoRows++; }
-    /* ★ 작업 설정(이체은행·통장표시·리뷰비) 보완이 필요한 행의 **합집합** —
-         카드가 그 셋을 한 줄로 묶어 보여주므로 건수도 합집합이어야 한다.
-         사유별 건수(bankRows/memoRows/feeRows)는 그 줄의 title 로 남긴다(조용한 누락 금지). */
-    if(iss.includes('no_bank') || warn.includes('no_memo') || warn.includes('no_review_fee')) w.setupRows++;
+    /* ★ 작업 설정(이체은행·통장표시) 보완이 필요한 행의 **합집합** —
+         카드가 둘을 한 줄로 묶어 보여주므로 건수도 합집합이어야 한다.
+         사유별 건수(bankRows/memoRows)는 그 줄의 title 로 남긴다(조용한 누락 금지).
+       ★★ 리뷰비는 여기 없다 — **0 = 리뷰비 없는 작업**(사용자 확정 2026-08-24)이라 보완 대상이
+         아니다. 리뷰비를 정하려면 작업보드 › 작업 조건 › 리뷰비에서 설정한다. */
+    if(iss.includes('no_bank') || warn.includes('no_memo')) w.setupRows++;
     // ★ 리뷰비 0 = 상품비만 이체된다 — 보류(막는 사유)는 아니지만 **말하지 않으면 그대로 나간다**.
-    if(warn.includes('no_review_fee')){ w.needFee=true; w.feeRows++; }
     // ── 리뷰어 단위(은행명·계좌·예금주) — 원장은 평면 배열 하나로 두고(인덱스 계약 유지)
     //    작업 카드는 그 리뷰어의 인덱스를 참조만 한다(한 리뷰어가 여러 작업에 걸칠 수 있다).
     if(hasAcct){
@@ -10716,25 +11162,24 @@ function _pmFixBlock(){
 
   const cards=shown.map(w=>{
     const i=f.works.indexOf(w);
-    const fixWork=`<button class="btn sm" onclick="_pmFixWork(${i})">보완</button>`;
     const lines=[];
-    /* ★★ 작업 단위 3종(이체은행·통장표시·리뷰비)은 **한 줄**로 묶는다 —
-         세 사유 모두 같은 팝업(_pmFixWork)에서 한 번에 입력하고,
-         저장하면 그 작업의 보류가 함께 풀린다(사용자 확정 2026-08-24).
-       ★ 사유별로 줄을 나누면 **같은 [보완] 버튼이 세 번 반복**돼 "세 번 해야 하나"로 읽힌다.
-       ★ 계좌(💳)는 묶지 않는다 — 명의마다 계좌가 달라 사람별로 고쳐야 한다. */
+    /* ★★ 작업 단위(이체은행·통장표시)는 **한 줄**로 묶고, 고치는 곳은 **작업보드 › 작업 조건**이다
+         (사용자 확정 2026-08-24). 종전에는 이 자리에서 전용 팝업으로 직접 입력했는데,
+         같은 값을 정하는 창구가 **작업 조건 카드**에도 있어 둘로 갈렸다 — 창구를 하나로 모은다.
+       ★ 사유별로 줄을 나누면 같은 버튼이 두 번 반복돼 "두 번 해야 하나"로 읽힌다.
+       ★★ **리뷰비는 여기 없다** — 0 = 리뷰비 없는 작업이라 보완 대상이 아니다.
+       ★ 계좌(💳)는 묶지 않는다 — 명의마다 계좌가 달라 사람별로 고쳐야 하고, 그건 작업 조건이
+         아니라 **그 사람의 정보**라 종전대로 이 화면에서 고친다. */
     const need=[];
     if(w.needBank) need.push({ic:'🏦', short:'이체은행', long:'이체은행 미지정', n:w.bankRows});
     if(w.needMemo) need.push({ic:'🏷', short:'통장표시', long:'통장표시 없음', n:w.memoRows});
-    if(w.needFee)  need.push({ic:'💵', short:'리뷰비',  long:'리뷰비 미설정',  n:w.feeRows});
     if(need.length){
-      // ★ 리뷰비가 비면 **상품비만 이체**된다 — 묶어도 그 경고는 화면에 남긴다.
       const label = need.map(p=>`${p.ic} ${p.short}`).join(' · ')
-        + (w.needFee?`<span class="tail">— 지금은 상품비만 이체됩니다</span>`:'');
+        + `<span class="tail">— 작업보드 › 작업 조건에서 설정합니다</span>`;
       const tip = need.map(p=>`${p.long} ${p.n}건`).join(' · ')
-        + ` — 한 번만 입력하면 이 작업의 ${w.setupRows}건이 함께 풀립니다`;
+        + ` — 작업 조건에서 한 번만 정하면 이 작업의 ${w.setupRows}건이 함께 풀립니다`;
       lines.push(`<div class="pmfixrow work"><span class="nm" title="${esc(tip)}">${label}</span>`
-        + `<span class="n">${w.setupRows}건</span>${fixWork}</div>`);
+        + `<span class="n">${w.setupRows}건</span>${_pmBoardBtn(i)}</div>`);
     }
     // ★ 줄이 좁아 말줄임되어도 **누구 명의인지**는 title 로 남는다(이름만으로 구분 안 되는 케이스)
     for(const a of w.accts) lines.push(line('💳',
@@ -10757,73 +11202,21 @@ function _pmFixBlock(){
 
   return `<div class="pmfix">
     <h3>보완하면 풀리는 보류 — 작업 ${f.works.length}개</h3>
-    <div class="sub">작업별로 모았습니다. 고치면 <b>그 작업의 보류가 한 번에</b> 풀리고 다음 회차부터 파일에 포함됩니다.
-      결제금액 칸 등 표에서 확인해야 하는 값은 <b>[📋 작업보드]</b>로 그 작업의 표를 바로 엽니다.
+    <div class="sub">작업별로 모았습니다. <b>이체은행·통장표시</b>는 <b>[📋 작업보드] → 작업 조건</b>에서 정합니다 —
+      한 번 정하면 <b>그 작업의 보류가 한 번에</b> 풀리고 다음 회차부터 파일에 포함됩니다.
+      리뷰어 <b>계좌</b>는 사람마다 달라 여기서 바로 고칩니다.
       ${totals.length?`<br>화면에서 못 고치는 사유: ${totals.join(' · ')}`:''}</div>
     <div class="pmfixgrid">${cards}</div>
-    ${rest>0?`<div class="pmfixmore">외 ${rest}개 작업 — 아래 표의 [보완] 버튼으로도 고칠 수 있습니다</div>`:''}</div>`;
+    ${rest>0?`<div class="pmfixmore">외 ${rest}개 작업 — 아래 표의 [보완] 버튼으로도 그 작업의 작업보드를 열 수 있습니다</div>`:''}</div>`;
 }
 
-/* ── 작업 단위 보완 팝업(이체은행 · 통장표시) ────────────────── */
-function _pmFixWork(i){
-  const w=(STATE.pmFix&&STATE.pmFix.works||[])[i]; if(!w) return;
-  const scope = w.campaignId
-    ? `연결된 <b>모집공고</b>에 저장됩니다 — 공고 수정 화면의 [이체은행]·[통장표시]·[리뷰비]와 같은 값입니다.`
-    : `이 작업엔 연결된 모집공고가 없어 <b>탭 설정</b>에 저장됩니다 — 이체은행·통장표시는 관리자 대시보드 탭설정의 [이체은행]·[입금명]과 같은 칸이고, 리뷰비는 이 작업 전용 값입니다.`;
-  /* 리뷰비 안내 — ★ 지금 값이 **어디서 온 값인지**를 말한다(조용한 추정 금지).
-     ★ 참여 시점 스냅샷·기간별 구간(082)은 여기서 넣는 값보다 **항상 우선**이라
-       그 경우엔 "이 칸을 바꿔도 그 건들은 안 바뀐다"를 문장으로 못박는다. */
-  const feeHint = w.feeSource==='snapshot'
-    ? '지금 금액은 <b>참여 시점에 새긴 값(스냅샷)</b>입니다 — 이미 참여한 건은 이 칸을 바꿔도 그대로 유지됩니다(리뷰어가 본 금액이 진실).'
-    : w.feeSource==='schedule'
-      ? '지금 금액은 <b>공고의 기간별 리뷰비 구간</b>에서 온 값입니다 — 구간이 이 칸보다 우선하므로, 바꾸려면 공고 수정 화면의 구간표를 고치세요.'
-      : w.feeSource==='campaign'
-        ? '지금 금액은 <b>연결된 모집공고</b>의 리뷰비입니다.'
-        : w.feeSource==='tab'
-          ? '지금 금액은 <b>이 작업(탭)</b>에 저장해 둔 리뷰비입니다.'
-          : '아직 리뷰비가 없어 <b>상품비만</b> 이체됩니다. 비워 두면 계속 미설정입니다.';
-  const feeVal = (w.campFee!=null ? w.campFee : (w.tabFee!=null ? w.tabFee : (typeof w.fee==='number'&&w.fee>0 ? w.fee : '')));
-  const cur = w.bank||'';
-  const btn=(v,l)=>`<button type="button" data-v="${v}" class="${cur===v?'on':''}" onclick="_pmPickBank(this)">${l}</button>`;
-  _pmDialog({
-    title:`보류 보완 — ${esc(w.tabLabel)}`,
-    sub:`이 작업의 <b>${w.rows}건</b>이 함께 처리됩니다.`,
-    body:`
-      <div class="pmf"><label>이체은행</label>
-        <div class="pmpick" id="pmBankPick">${btn('','🔄 자동(작업오더 물건비)')}${btn('hana','🟩 하나은행')}${btn('kbank','🟦 케이뱅크')}</div>
-        <div class="hint">${w.bankSource==='auto'?'지금은 작업오더 물건비에서 자동 판정된 값입니다. ':''}자동으로 두면 작업오더의 물건비 수취방식(현금→하나 · 계산서/수수료→케이뱅크)을 따릅니다.</div></div>
-      <div class="pmf"><label>통장표시 (받는분 통장에 찍히는 이름 · 8자)</label>
-        <input id="pmMemoIn" maxlength="8" value="${esc(w.memo||'')}" placeholder="예) 파우더망고">
-        <div class="hint">비워 두면 리뷰어 통장에 무슨 돈인지 안 찍힙니다(이체 자체는 됩니다).</div></div>
-      <div class="pmf"><label>리뷰비 (원 · 이 작업의 건당 리뷰비)</label>
-        <input id="pmFeeIn" inputmode="numeric" value="${esc(String(feeVal))}" placeholder="예) 3000">
-        <div class="hint">${feeHint} 이체금액 = <b>상품비 + 리뷰비</b>입니다. 비우면 미설정으로 되돌립니다.</div></div>
-      <div class="pmf"><label>작업보드</label>
-        <div>${_pmBoardBtn(i)}</div>
-        <div class="hint">이 작업의 표(구매일자·결제금액 등)를 확인할 때 씁니다 — <b>작업보드가 진실원본</b>이라 구글시트로는 보내지 않습니다.</div></div>
-      <div class="pmscope">${scope}</div>`,
-    okLabel:'저장',
-    onOk: async ()=>{
-      const pick=document.querySelector('#pmBankPick button.on');
-      const bank=pick?(pick.dataset.v||''):'';
-      const memo=(document.querySelector('#pmMemoIn')||{}).value||'';
-      const feeRaw=String((document.querySelector('#pmFeeIn')||{}).value||'').trim();
-      // ★ 형식은 서버가 최종 판정한다 — 화면은 명백한 오입력만 막아 왕복을 아낀다.
-      if(feeRaw!=='' && !/^[0-9,]+$/.test(feeRaw)){ toast('리뷰비는 숫자로 입력해 주세요'); return false; }
-      const r=await api('/api/trackb/payment/transfer-setting',{ method:'POST', body: JSON.stringify({
-        sheetId:w.sheetId, tabName:w.tabName, campaignId:w.campaignId||null, bank, memo, reviewFee:feeRaw }) });
-      if(!r||!r.ok){ toast((r&&r.error)||'저장하지 못했습니다'); return false; }
-      // ★ 저장이 끝나면 **먼저 닫는다** — 뒤이은 안내·재조회가 실패해도 팝업이 남아
-      //   "저장이 안 됐나?"로 오해되지 않게(성공을 실패처럼 보이게 하지 않는다).
-      _pmAfterFix(`저장했습니다 — ${w.rows}건에 적용 (${r.target==='campaign'?'공고':'탭 설정'})`);
-      return true;
-    }
-  });
-}
-function _pmPickBank(el){
-  const wrap=el.parentNode; [...wrap.querySelectorAll('button')].forEach(b=>b.classList.remove('on'));
-  el.classList.add('on');
-}
+/* ── 작업 단위 값(이체은행·통장표시)은 여기서 고치지 않는다 ──────────────
+   ★★ 창구는 **작업보드 › 작업 조건 카드** 하나다(사용자 확정 2026-08-24) — 같은 값을 정하는
+     자리가 둘이면 "어디서 고쳐야 하나"가 되고, 한쪽 문구·권한만 바뀌어도 갈린다.
+     그래서 종전 `_pmFixWork` 전용 팝업(이체은행·통장표시·리뷰비 3칸)을 없애고
+     이 화면은 **[📋 작업보드]로 보내기만** 한다(`_pmOpenBoard`).
+   ★ 저장 API(`/payment/transfer-setting`)는 그대로 — 작업 조건 카드가 그것을 쓴다.
+   ★ 리뷰어 계좌(`_pmFixAcct`)는 작업 조건이 아니라 **그 사람의 정보**라 종전대로 여기서 고친다. */
 
 /* ── 리뷰어 단위 보완 팝업(은행명 · 계좌번호 · 예금주) ────────── */
 function _pmFixAcct(i){
@@ -10918,7 +11311,7 @@ function _pmRowFix(idx){
   const iss=it.issues||[];
   if(iss.includes('no_bank')){
     const i=f.works.findIndex(w=>w.sheetId===it.sheetId&&w.tabName===it.tabName);
-    if(i>=0) return _pmFixWork(i);
+    if(i>=0) return _pmOpenBoard(i);      // 작업 조건 카드에서 정한다(창구 하나)
   }
   if(iss.some(x=>PAY_ACCT_ISSUES.includes(x)) && it.accountRef && it.accountRef.reviewerId){
     const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'');
@@ -10927,12 +11320,12 @@ function _pmRowFix(idx){
   }
 }
 
-/** 표에서 작업 단위 값(통장표시·리뷰비) 클릭 — 같은 작업 팝업을 연다(이체은행과 한 칸에서 정한다) */
+/** 표에서 통장표시 [미설정] 클릭 — 그 작업의 **작업보드**를 연다(작업 조건에서 정한다) */
 function _pmRowMemo(idx){
   const it=(STATE.pmItems||[])[idx]; if(!it) return;
   const f=STATE.pmFix||{works:[]};
   const i=f.works.findIndex(w=>w.sheetId===it.sheetId&&w.tabName===it.tabName);
-  if(i>=0) return _pmFixWork(i);
+  if(i>=0) return _pmOpenBoard(i);
 }
 
 /* ★★ 확인창은 **무엇이 담기는지**를 그대로 읽어 준다(회차 #18 사고) — 담당자·작업이
@@ -15163,10 +15556,6 @@ async function saveEdit(rowId, field, value){
   reloadWorkdesk();
 }
 async function toggleBool(rowId, field, cur){ await saveEdit(rowId, field, !cur); }
-async function revertEdit(rowId, field){ const t=STATE.cur; if(!t)return;
-  const r=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})});
-  toast(r&&r.reverted?'되돌림':'되돌릴 편집 없음'); reloadWorkdesk();
-}
 // 행 삭제가 거부되는 사유는 서버만 알고 있다(연결 공고 없음·계획 없음 등 6갈래).
 // 종전처럼 '실패' 한 마디로 접으면 담당자가 무엇을 고쳐야 하는지 알 방법이 없어
 // "눌렀는데 아무 일도 안 일어난다"로 보인다. 사유와 다음 행동을 그대로 말한다.
@@ -16197,8 +16586,7 @@ async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCu
   STATE.advLink=(lk&&lk.ok&&lk.link)||null;   // 이 업체 접속 링크(있으면 token/active)
   STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   // ★ 마감/통계 조회 실패는 플래그로 온다 — 화면이 "마감자료 검수 0건"으로 위장하지 않고 사유를 적는다.
-  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable,
-    folderScoped: rt.folderScoped===false ? false : true } : { unreachable:true };
+  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable } : { unreachable:true };
   STATE.ownItems=(r&&r.items)||[];   // 소유 캠페인(설정 패널이 읽는다)
   _ovmQ=''; _ovmF='all';
   renderOwnPanel(a, STATE.ownItems);
@@ -16302,11 +16690,8 @@ function _ownTabsHtml(){
     return `<div class="st">연결된 작업 0</div><div class="empty" style="padding:14px">연결된 작업 없음 — [소유 작업]에서 작업을 지정하면 여기 나옵니다.</div>`;
   }
   const meta=STATE.ownTabMeta||{};
-  const warn=((meta.statsUnavailable||meta.finishedUnavailable)
-    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '')
-    // ★ 담당하지 않은 업체는 서버가 폴더 링크를 내려주지 않는다 — 그 사실을 말한다(회색 버튼만 두면 오독).
-    + (meta.folderScoped===false
-      ? `<div class="ovm-warn">⚠ 담당하지 않은 업체라 <b>[자료]</b> 폴더 링크는 표시되지 않습니다(담당 AE·관리자에게 문의).</div>` : '');
+  const warn=(meta.statsUnavailable||meta.finishedUnavailable)
+    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '';
   return `<div class="st">연결된 작업 ${ot.length} <span class="sthint">최신순 — 클릭하면 작업보드로 열기 · [계약] 칸에서 바로 매칭할 수 있고, 견적·계산서·입금은 계약이 매칭된 작업만 표시</span></div>
     <div class="ovm-tools">
       <div class="tr">
@@ -16900,6 +17285,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      `/api/trackb/tabs` 는 양쪽에서 닿는 유일한 목록이라 여기서만 재기준한다(목록 사본 0). */
   window.RECRUIT_TABS_API = '/api/trackb/tabs';</script>
 <script src="api.js"></script>
+<script src="js/drive-thumb.js"></script>
 <!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
      첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
 <script src="js/work-order-detail.js?v=20260815-guide-image-strip-dba4355"></script>

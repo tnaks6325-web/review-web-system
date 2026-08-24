@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'
 assert.match(html, /function _menuDeleteRow\(\)/, '행 삭제 메뉴 핸들러가 필요합니다');
 // ── 우클릭 행 삭제 = 구매기록 취소 + 총원 유지 ──
 // 경로는 hideRow 하나뿐이다(성격별로 나누면 두 경로가 곧 갈린다).
-const menuFn = html.slice(html.indexOf('function _menuDeleteRow()'), html.indexOf('function _revertSelection()'));
+const menuFn = html.slice(html.indexOf('function _menuDeleteRow()'), html.indexOf('async function _reloadWorkdeskAfterColorSaveFailure('));
 assert.ok(menuFn, '_menuDeleteRow 본문을 찾지 못했습니다');
 assert.ok(!/deleteOrderRow\(/.test(menuFn),
   '우클릭 삭제가 총원을 줄이는 order-delete 경로로 가면 안 됩니다(총 모집인원 유지가 이 기능의 목적)');
