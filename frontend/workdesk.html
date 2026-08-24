@@ -5735,31 +5735,13 @@ function renderWorkdesk(wd){
 //   ★ 이미지 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍 — 파일ID만 받아 온다.
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
 function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
-/* ★★ 미리보기 썸네일 = 구글 CDN 직결 (2026-08-24 실측) ─────────────────────────
-   프록시 원본은 파일 1장당 **1.7~1.8초**(31KB 기준 · 왕복 지연이 지배)인데 같은 이미지의
-   `drive.google.com/thumbnail` 은 **0.4초 안팎**이고 바이트도 3~5배 작다(197KB → w600 27KB).
-   미리보기·카드 썸네일은 원본 화질이 필요 없는 자리라 여기만 CDN 으로 돌린다.
-   ★ **원본이 필요한 자리는 그대로 프록시**(크게 보기 팝업 · 상세 대조 · 라이트박스 · AI 판정).
-   ★ CDN 이 안 되는 파일(비공개 공유)은 `onerror` 로 **기존 프록시에 1회 폴백** — 실패해도
-     오늘과 같은 그림이 나온다(막다른 길 0). 폴백은 한 번만(무한 루프 금지).
-   ★ 프록시 URL 규칙 사본을 만들지 않는다 — `full` 은 **호출부가 이미 만든 값**을 넘긴다. */
-function _thumbUrl(id, px){
-  const s=String(id||'');
-  if(!/^[-\w]{20,}$/.test(s)) return '';
-  const w=Math.max(100, Math.min(1600, Number(px)||400));
-  return 'https://drive.google.com/thumbnail?id='+encodeURIComponent(s)+'&sz=w'+w;
-}
-/* 썸네일 <img> 속성 한 벌 — src(CDN) + data-full(원본 프록시) + onerror 폴백 */
+/* ★★ 미리보기 썸네일 = 구글 CDN 직결 — 규칙은 `js/drive-thumb.js` **한 곳**이 갖는다.
+   여기 두 함수는 그 모듈로 넘기는 얇은 위임일 뿐이다(URL 규칙 사본 0).
+   ★ 모듈을 못 불러온 경우엔 **원본 프록시로 접는다**(호출부가 이미 만든 값 — 사본 아님).
+   ★ 원본이 필요한 자리는 프록시 그대로: 크게 보기 팝업 · 검수 상세 대조 · 라이트박스 · AI 판정. */
+function _thumbUrl(id, px){ return window.DriveThumb ? DriveThumb.url(id, px) : ''; }
 function _thumbAttrs(id, px, full){
-  const t=_thumbUrl(id, px);
-  if(!t) return ` src="${esc(full||'')}"`;               // 형식 불량 = 종전 동작
-  return ` src="${esc(t)}" data-full="${esc(full||'')}" onerror="_thumbFall(this)"`;
-}
-function _thumbFall(img){
-  if(!img || img.dataset.tf) return;                      // ★ 한 번만
-  img.dataset.tf='1';
-  const u=img.getAttribute('data-full')||'';
-  if(u) img.src=u; else img.removeAttribute('src');       // 원본도 없으면 깨진 아이콘 대신 빈 칸
+  return window.DriveThumb ? DriveThumb.attrs(id, px, full) : ` src="${esc(full||'')}"`;
 }
 /* 사람 옆 번호 = **작업보드 표의 「번호」**(서버가 실어 주는 `boardNo`) — `seq`(시트 행 번호)가
    아니다. 담당자가 표에서 눈으로 보는 값과 같아야 "몇 번 줄 사람인지"가 통한다.
@@ -16847,6 +16829,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      `/api/trackb/tabs` 는 양쪽에서 닿는 유일한 목록이라 여기서만 재기준한다(목록 사본 0). */
   window.RECRUIT_TABS_API = '/api/trackb/tabs';</script>
 <script src="api.js"></script>
+<script src="js/drive-thumb.js"></script>
 <!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
      첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
 <script src="js/work-order-detail.js?v=20260815-guide-image-strip-dba4355"></script>

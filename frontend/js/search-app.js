@@ -1910,8 +1910,11 @@ function _renderMySubmitStatus(items) {
     const opt = options.length ? ` (${escHtml(options.map(o => o.value).filter(Boolean).join("/"))})` : "";
     const done = !!it.isSubmitted;
     const when = done ? _dupWhen(it.reviewFileAt) : "";
+    /* ★ 34×44 로 그리는 자리라 원본(중앙값 276KB)을 받을 이유가 없다 — CDN 썸네일(js/drive-thumb.js).
+       모듈이 없으면 종전 원본으로 접는다(URL 규칙 사본 0). */
+    const _tu = it.reviewFileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(it.reviewFileId)}` : '';
     const thumb = (done && it.reviewFileId)
-      ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(it.reviewFileId)}" alt=""
+      ? `<img${window.DriveThumb ? DriveThumb.attrs(it.reviewFileId, 400, _tu) : ` src="${_tu}"`} alt=""
            style="width:34px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;flex:none">`
       : `<div style="width:34px;height:44px;border-radius:5px;background:#F1F3F7;flex:none"></div>`;
     return `<div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-bottom:1px solid #EEF1F5">
@@ -2443,8 +2446,9 @@ function _preRenderDup(scope, anchor) {
     ? (ord ? `같은 작업 <b>${ord}번 건</b>으로` : '같은 작업의 <b>다른 건</b>으로')
     : '<b>다른 작업</b>에';
   const when = _dupWhen(d.uploadedAt);
+  const _du = d.fileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}` : '';
   const thumb = d.fileId
-    ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}" alt=""
+    ? `<img${window.DriveThumb ? DriveThumb.attrs(d.fileId, 400, _du) : ` src="${_du}"`} alt=""
          style="width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #F3C8C4;flex:none">` : '';
   el.style.cssText = 'margin-top:8px;padding:10px 12px;border-radius:9px;background:#FEF3F2;'
     + 'border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5';

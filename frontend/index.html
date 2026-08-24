@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
+  <script src="js/drive-thumb.js"></script>
   <!-- 업로드 직전 이미지 축소(단일 출처) — 구매 캡처 보완 첨부가 413 되는 것 방지 -->
   <script src="js/image-shrink.js"></script>
   <script src="js/campaign-cards.js?v=20260817-hidden-prerequisite-c119"></script>
@@ -1837,8 +1838,10 @@ function _reEditImgUrl(fileId){
   const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
   return base + '/api/drive/image/' + encodeURIComponent(fileId);
 }
+/* ★ 썸네일 URL 규칙은 `js/drive-thumb.js` 한 곳 — 여기는 위임(사본 0).
+   모듈이 없으면 원본 프록시로 접는다(마크업의 onerror 폴백은 그대로). */
 function _reEditThumb(fileId){
-  return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(fileId) + '&sz=w400';
+  return window.DriveThumb ? DriveThumb.url(fileId, 400) : _reEditImgUrl(fileId);
 }
 
 function _reEditRegister(item){
