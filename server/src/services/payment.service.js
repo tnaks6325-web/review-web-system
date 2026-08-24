@@ -31,6 +31,9 @@ const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
 const { normName } = require('./identity.service');
+// 담당자 판정 **단일 출처**(065 + 회차 #18) — payment.service·trackB.service(홈 목록)가
+// 같은 함수를 부른다. 사본을 두면 "탭 담당자는 만두인데 공고 담당자는 빈칸"이 그대로 재발한다.
+const { resolveWorkManager } = require('../utils/workManager');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
 
@@ -93,6 +96,9 @@ function normalizeBankChoice(v) {
 
 /** `tab_configs.transfer_bank` 에 **되돌려 쓸 때** 의 표기(= 기존 화면이 읽는 한글 라벨) */
 function tabBankLabel(bank) { return BANK_LABEL[bank] || ''; }
+
+/** 입금관리의 담당자는 `utils/workManager.resolveWorkManager` 를 그대로 부른다(사본 금지).
+ *  판정 규칙·사고 경위는 그 함수의 문서를 참고 — 여기서 다시 적으면 두 문서가 갈린다. */
 
 function _int(v) {
   const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
@@ -254,13 +260,12 @@ async function listPaymentTargets(opts = {}) {
     if (amount <= 0) issues.push('zero_amount');
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
-    /* 리뷰비 경고는 **금액이 0이라서**가 아니라 **근거를 못 찾아서** 띄운다.
-         이 계정은 상품비만 주는 작업이 다수(실측 공고 32건 중 27건이 0원)라, 0 을 경고로 두면
-         입금관리가 상시 경고로 뒤덮여 진짜 신호(계좌·은행 미비)가 묻힌다.
-       ★ 공고·탭·스냅샷·구간표 어디서든 값이 왔으면(feeSource) 그 0 은 사람이 정한 무상이다.
-       ⚠ 한계: 발행 폼에서 리뷰비 칸을 비우면 서버가 0 으로 저장하므로 "0원으로 정함"과
-         "안 넣음"은 DB 에서 구분되지 않는다 — 사용자 확정(2026-08-19)으로 0 = 무상으로 읽는다. */
-    if (!fee && !feeSource) warnings.push('no_review_fee');
+    /* ★★ 리뷰비 0 = **리뷰비 없는 작업**이다 — 경고하지 않는다(사용자 확정 2026-08-24).
+       종전에는 "근거(feeSource)를 못 찾으면" 경고했는데, 공고가 없는 옛 작업은 근거가 구조적으로
+       없어 상시 경고로 뒤덮였다(실측: 보완 목록 37개 작업 대부분). 이 계정은 **상품비만 주는
+       작업이 다수**라 0 이 정상값이고, 그 경고가 진짜 신호(계좌·은행 미비)를 묻었다.
+       ★ 리뷰비를 정하고 싶으면 **작업보드 › 작업 조건 › 리뷰비**에서 설정한다(창구는 그대로 있다).
+       ★ `no_review_fee` 는 이제 어디서도 만들지 않는다 — 라벨·화면 분기도 함께 걷어냈다. */
 
     return {
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
@@ -272,6 +277,8 @@ async function listPaymentTargets(opts = {}) {
       // 작업보드 바로가기 재료 — ★ 화면이 gid 를 추측하지 않게 서버가 실어 준다(리네임 대비).
       tabGid: tab ? (tab.tabGid || '') : '',
       manager: tab ? (tab.manager || '') : '',
+      // 담당자를 어디서 읽었는지 — 'order' = 작업 화면과 같은 값 / 'tab' = 탭 설정 폴백
+      managerSource: tab ? (tab.managerSource || null) : null,
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
@@ -612,10 +619,13 @@ async function _loadTabMeta(sheetIds, tabNames) {
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
               tc.review_fee AS "reviewFee",
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
-              wo.goods_cost_type AS "goodsCostType"
+              wo.goods_cost_type AS "goodsCostType",
+              -- ★ 담당자 판정 원천 = 인트라넷 작업담당(065) 하나뿐
+              --   (담당AE 실명 칸은 여기서 읽지 않는다 — 065 이전 사고 자리)
+              wo.work_manager AS "orderWorkManager"
          FROM tab_configs tc
          LEFT JOIN LATERAL (
-              SELECT w.goods_cost_type FROM work_orders w
+              SELECT w.goods_cost_type, w.work_manager FROM work_orders w
                WHERE w.deleted_at IS NULL
                  AND w.linked_tab_sheet_id = tc.sheet_id
                  AND w.linked_tab_name = tc.tab_name
@@ -623,8 +633,10 @@ async function _loadTabMeta(sheetIds, tabNames) {
         WHERE tc.sheet_id = ANY($1) AND tc.tab_name = ANY($2)`,
       [sheetIds, tabNames]);
     for (const t of rows) {
+      const mgr = resolveWorkManager({ orderWorkManager: t.orderWorkManager, tabManager: t.manager });
       map[t.sheetId + '||' + t.tabName] = {
-        label: t.label, manager: t.manager || '', transferBank: t.transferBank || '', depositName: t.depositName || '',
+        label: t.label, manager: mgr.manager, managerSource: mgr.managerSource,
+        transferBank: t.transferBank || '', depositName: t.depositName || '',
         // ★ 리뷰비는 **NULL(미설정)과 0(무상 지정)을 구분**한다 — `|| 0` 으로 접으면
         //   미설정이 조용히 0원이 되어 공고 값이 있는데도 탭 폴백이 이긴 것처럼 보인다.
         reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
@@ -1183,10 +1195,23 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
   }
 }
 
+/** ★★ 은행 계산이 실제로 쓰는 그 공고를 그대로 돌려준다(사본 금지 — 코드리뷰 P1 지적 반영).
+ *  한 탭에 공고가 여럿(차수 재발행)이면 `_loadCampaigns`(이체 계산의 유일한 진실원본)와
+ *  **정확히 같은 규칙**(이름 일치 · created_at 최신 하나 · 상태 무관 · GID 폴백 없음)으로 고른다.
+ *  워크보드의 「작업 조건」 카드가 이 함수로 은행을 그려야 "화면은 하나은행인데 이체 파일은
+ *  케이뱅크" 같은 divergence 가 구조적으로 불가능해진다(사본을 두면 두 규칙이 각자 진화한다). */
+async function campaignForTab(sheetId, tabName) {
+  if (!sheetId || !tabName) return null;
+  const map = await _loadCampaigns([sheetId], [tabName]);
+  return map[sheetId + '||' + tabName] || null;
+}
+
 module.exports = {
+  campaignForTab,
+
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
-  compareAccountSnapshot, accountFingerprint, PaymentFixError,
+  compareAccountSnapshot, accountFingerprint, resolveWorkManager, PaymentFixError,
 };

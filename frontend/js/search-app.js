@@ -161,7 +161,11 @@ function _batchDecorateCard(cid, h) {
   if (row) {
     row.childNodes.forEach(n => { if (n.nodeType === 3 && n.textContent.trim()) n.textContent = " 1번 카드의 계좌정보와 동일하게 사용"; });
   }
-  // ④ 명의 프리필(빈 칸만 — 사용자가 이미 쓴 값은 절대 덮지 않는다)
+  /* ④ 명의 프리필(빈 칸만 — 사용자가 이미 쓴 값은 절대 덮지 않는다)
+     ★★ 배치는 카드마다 **그 명의 이름**이 주문자로 간다(서버는 값이 오면 그대로 쓴다) —
+        그래서 "로그인한 본인 이름으로 자동 기록됩니다" 안내를 여기서는 감춘다.
+        문구를 그대로 두면 화면이 거짓을 말한다(카드 머리의 명의 표기가 사실이다). */
+  document.getElementById("ofOrderCardsWrap")?.classList.add("of-orderer-batch");
   const set = (sfx, v) => { const el = document.getElementById(cid + sfx); if (el && !el.value && v) el.value = v; };
   set("_recipient", h.name); set("_orderer", h.name);
   _batchTickCard(cid, h);
@@ -1906,8 +1910,11 @@ function _renderMySubmitStatus(items) {
     const opt = options.length ? ` (${escHtml(options.map(o => o.value).filter(Boolean).join("/"))})` : "";
     const done = !!it.isSubmitted;
     const when = done ? _dupWhen(it.reviewFileAt) : "";
+    /* ★ 34×44 로 그리는 자리라 원본(중앙값 276KB)을 받을 이유가 없다 — CDN 썸네일(js/drive-thumb.js).
+       모듈이 없으면 종전 원본으로 접는다(URL 규칙 사본 0). */
+    const _tu = it.reviewFileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(it.reviewFileId)}` : '';
     const thumb = (done && it.reviewFileId)
-      ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(it.reviewFileId)}" alt=""
+      ? `<img${window.DriveThumb ? DriveThumb.attrs(it.reviewFileId, 400, _tu) : ` src="${_tu}"`} alt=""
            style="width:34px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;flex:none">`
       : `<div style="width:34px;height:44px;border-radius:5px;background:#F1F3F7;flex:none"></div>`;
     return `<div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-bottom:1px solid #EEF1F5">
@@ -2439,8 +2446,9 @@ function _preRenderDup(scope, anchor) {
     ? (ord ? `같은 작업 <b>${ord}번 건</b>으로` : '같은 작업의 <b>다른 건</b>으로')
     : '<b>다른 작업</b>에';
   const when = _dupWhen(d.uploadedAt);
+  const _du = d.fileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}` : '';
   const thumb = d.fileId
-    ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}" alt=""
+    ? `<img${window.DriveThumb ? DriveThumb.attrs(d.fileId, 400, _du) : ` src="${_du}"`} alt=""
          style="width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #F3C8C4;flex:none">` : '';
   el.style.cssText = 'margin-top:8px;padding:10px 12px;border-radius:9px;background:#FEF3F2;'
     + 'border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5';
@@ -5283,14 +5291,17 @@ async function _loadInaedList(sheetId, gid, tabName, round) {
         "| 옵션헤더:", _optionHeaders, "| 비고:", _memoHeader, "| 주문번호:", _orderNumHeader);
       // 비고/주문번호 입력란 동적 표시 + 옵션 피커 렌더링
       _renderDynamicFields();
+      _applyOrdererPicker();      // 후보가 있으면 주문자 칸을 보여준다
     } else {
       // 데이터 없어도 입력란은 항상 활성화 유지
       _setOrdererDisabled(false);
+      _applyOrdererPicker();      // 후보 0건 = 감춘 채로 둔다(서버가 로그인 이름으로 채움)
     }
   } catch (err) {
     console.warn("[자동완성] 인애드명단 로드 실패:", err.message);
     // ★ GAS 호출 실패해도 입력란은 반드시 활성화 (로드 실패가 입력 차단으로 이어지지 않도록)
     _setOrdererDisabled(false);
+    _applyOrdererPicker();
   }
 }
 
@@ -5570,6 +5581,21 @@ function selectOptionKey(key) {
   // 드롭다운 바로 열기
   const candidates = _filterInaed("");
   _renderAcList(candidates, "");
+}
+
+/* ★★ 주문자 칸 노출 판정 — 인애드명단 후보가 있을 때만 보여준다 (사용자 확정 2026-08-24)
+   ────────────────────────────────────────────────────────────────────────
+   그 명단이 있는 탭에서는 "명단에서 내 이름 고르기"가 **행 배정·옵션 잠금의 진입점**이다
+   (서버 `buildCandidateRows` 가 인애드 열 값 == 제출 주문자인 행을 우선 배정한다).
+   후보가 0건이면(무시트 작업표 = 현 운영 대부분) 칸을 감추고 서버가 로그인 이름으로 채운다.
+   ★ 판정은 이 함수 하나 — 화면·검증이 같은 값을 본다(따로 세면 "안 보이는데 필수"가 된다). */
+function _ordererPickerOn() {
+  return !!document.getElementById("ofOrderCardsWrap")?.classList.contains("of-orderer-on");
+}
+function _applyOrdererPicker() {
+  const wrap = document.getElementById("ofOrderCardsWrap");
+  if (!wrap) return;
+  wrap.classList.toggle("of-orderer-on", (_inaedNames || []).length > 0);
 }
 
 /** 주문자 입력란 비활성/활성 토글 */
@@ -6270,8 +6296,12 @@ function _buildOrderCardHtml(cid, idx, type) {
       <input id="${cid}_orderNumber" class="of-input" type="text" placeholder="캡처 분석 후 자동기입">
     </div>
 
-    <!-- 주문자 (공유 가능) -->
-    <div id="${cid}_ordererWrap" class="${lockClass}">
+    <!-- 주문자 (공유 가능) — ★ 기본은 감춤. 서버가 로그인한 리뷰어 이름으로 채운다.
+         인애드명단 후보가 있는 탭에서만 of-orderer-on 클래스로 다시 보인다(CSS).
+         ★ 이 주석에 백틱을 쓰지 말 것 — 템플릿 리터럴이 그 자리에서 끊긴다(실측 사고). -->
+    ${isFirst ? `<div class="ofc-orderer-note"><i class="fas fa-user-check"></i>
+      주문자는 로그인한 <b>본인 이름</b>으로 자동 기록됩니다.</div>` : ""}
+    <div id="${cid}_ordererWrap" class="ofc-orderer-wrap ${lockClass}">
       ${isFirst ? `
       <div class="of-field">
         <label class="of-label of-label-required" for="of_orderer">주문자</label>
@@ -6370,7 +6400,7 @@ function _buildOrderCardHtml(cid, idx, type) {
     <label class="ofc-same-row" id="${cid}_sameChkRow" for="${cid}_sameChk">
       <input type="checkbox" id="${cid}_sameChk" checked onchange="toggleSameInfo('${cid}')">
       <i class="fas fa-copy" style="font-size:.8rem"></i>
-      주문자 / 은행 / 계좌 / 예금주를 1번째 주문과 동일하게 사용
+      <span class="ofc-same-orderer">주문자 / </span>은행 / 계좌 / 예금주를 1번째 주문과 동일하게 사용
     </label>` : ""}
 
     <!-- ★ v9.14: 소득신고 입력 (소득신고 모드일 때만 표시) -->
@@ -8276,8 +8306,8 @@ async function submitOrderForm() {
 
   let hasError = false;
 
-  // 주문자 필수
-  if (!firstOrderer) { _ofShowError("of_orderer"); hasError = true; }
+  // 주문자 필수 — ★ 칸이 보일 때만(감춰져 있으면 서버가 로그인 이름으로 채운다)
+  if (_ordererPickerOn() && !firstOrderer) { _ofShowError("of_orderer"); hasError = true; }
 
   // ★ 주문번호·비고 제외 전 항목 필수 (카드별)
   //   - 주문자/은행/계좌/예금주는 "1번과 동일" 체크 시 1번 카드 값을 유효값으로 인정
@@ -8302,7 +8332,7 @@ async function submitOrderForm() {
 
     // 주문자/은행/계좌/예금주 — 공유 로직 반영한 유효값 기준
     if (!isFirst && !isCoupangCard && !chkSame) {
-      if (!gv(cid + "_orderer")) { _ofShowError(cid + "_orderer"); _missingLabels.push("주문자"); hasError = true; }
+      if (_ordererPickerOn() && !gv(cid + "_orderer")) { _ofShowError(cid + "_orderer"); _missingLabels.push("주문자"); hasError = true; }
       if (!gv(cid + "_bank"))     { _ofShowError(cid + "_bank");     _missingLabels.push("은행"); hasError = true; }
       if (!gv(cid + "_account"))  { _ofShowError(cid + "_account");  _missingLabels.push("계좌"); hasError = true; }
       if (!gv(cid + "_depositor")){ _ofShowError(cid + "_depositor");_missingLabels.push("예금주"); hasError = true; }

@@ -59,8 +59,19 @@ ok('★ renderOwnershipView: 복원 진입이 아니면 STATE.advCur 를 비운�
   const navBlock = /let _navLock=false;[\s\S]*?\r?\n\}\);\r?\n/.exec(src);
   ok('나브 블록을 찾았다', !!navBlock);
   const blk = navBlock[1] !== undefined ? navBlock[0] : navBlock[0];
-  ok('★ push/replace 는 pathname+search 만 쓴다 — location.hash 를 URL 에 실지 않는다',
-    !/location\.hash/.test(blk) && /location\.pathname\+location\.search/.test(blk));
+  // ★ 2026-08-24 사용자 확정(A안)으로 규칙이 뒤집혔다 — 이제 **해시까지 포함해 "지금 URL 그대로"** 다시 쓴다.
+  //   접속 링크(#a=<token>)는 교환 뒤에도 주소에 남겨 재방문·새 탭이 열리게 하는데, 여기서 해시를 빼면
+  //   화면을 한 번만 전환해도 그 열쇠가 증발해 A안이 무의미해진다(실측).
+  //   ★ 그래도 딥링크가 새지 않는 근거는 그대로다: #sso=/#go=/#w=/#view= 는 **소비 시점에 스스로 지워져**
+  //     _navPush 가 도는 시점에는 해시에 남아 있지 않다(아래 단언 + shareLink·reviewerLogDeeplink 가드).
+  ok('★ push/replace 는 "지금 URL 그대로"(pathname+search+hash) — 접속 링크 해시를 잃지 않는다',
+    /location\.pathname\+location\.search\+location\.hash/.test(blk));
+  ok('★ 여전히 다른 주소로 바꾸지 않는다(경로·쿼리를 조립하지 않는다)',
+    !/pushState\([^)]*['"`]\//.test(blk) && !/replaceState\([^)]*['"`]\//.test(blk));
+  ok('★ 해시를 실어도 안전한 근거 — 딥링크 3종은 소비 시점에 해시를 지운다(그래야 _navPush 가 재게시하지 않는다)',
+    /sso=([^&]+)[\s\S]{0,200}history\.replaceState/.test(src) &&
+    /_consumeGo[\s\S]{0,600}history\.replaceState/.test(src) &&
+    /_consumeShare[\s\S]{0,600}history\.replaceState/.test(src));
   ok('★ URL 인자를 항상 넘긴다(생략하면 브라우저마다 상대경로 해석이 갈린다)',
     !/pushState\([^)]*\)\s*;/.test(blk.replace(/pushState\(e,'',url\)/g, 'X')) || /pushState\(e,'',url\)/.test(blk));
 }
@@ -73,7 +84,9 @@ ok('★ renderOwnershipView: 복원 진입이 아니면 STATE.advCur 를 비운�
   let idx = -1;
   const sandbox = {
     STATE: { view: 'workdesk', cur: null, advCur: null, pendingTab: null, pendingAdv: null },
-    location: { pathname: '/workdesk.html', search: '', hash: '#sso=secret' },
+    // ★ 픽스처의 해시는 **실제로 이 시점에 남아 있을 수 있는 것**으로 둔다 — #sso=/#go=/#w= 는 소비 시점에
+    //   지워지므로 _navPush 가 볼 수 없고, 남는 것은 접속 링크(#a=) 하나다(A안).
+    location: { pathname: '/workdesk.html', search: '', hash: '#a=Ab3xK9mQ2pLwRt7d' },
     switchView: () => {},
     history: {
       get state() { return idx >= 0 ? entries[idx] : null; },
@@ -87,7 +100,8 @@ ok('★ renderOwnershipView: 복원 진입이 아니면 STATE.advCur 를 비운�
 
   sandbox._navPush();
   ok('첫 항목은 replace — 항목이 1개만 생긴다(뒤로가기 헛클릭 방지)', entries.length === 1);
-  ok('★ URL 에 해시가 실리지 않는다', h.lastUrl === '/workdesk.html');
+  ok('★ 접속 링크 해시가 URL 에 그대로 실린다(빠지면 화면 전환 한 번에 열쇠가 증발한다)',
+    h.lastUrl === '/workdesk.html#a=Ab3xK9mQ2pLwRt7d');
 
   S.view = 'ownership'; sandbox._navPush();
   S.advCur = { id: 'A1' }; sandbox._navPush();

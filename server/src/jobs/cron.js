@@ -516,6 +516,39 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
+  // ── 고아 캡처 정리(A종류: 링크 끊김): 기본 ON · 매일 새벽 4시 40분 ─────────
+  //   ★★ 왜 필요한가 — 행 삭제·구매기록 취소(`orderCancellation`)도, 작업 통째 삭제
+  //     (`workTabDelete`)도 **Drive 파일을 건드리지 않는다**. 그래서 지울수록 "폴더엔
+  //     캡처가 있는데 화면엔 리뷰 이미지 미등록"인 고아가 쌓이는데 치우는 자동 경로가
+  //     어디에도 없었다(중복 정리 도구는 같은 SHA-256 지문의 사본만 잡는다).
+  //   ★ 판정 근거는 file_id / review_index_id 뿐 — **위치키(row_index) 금지**
+  //     (번호 정리·재배정으로 수시로 깨져 멀쩡한 캡처를 지운다. 서비스 주석 참조).
+  //   ★ 삭제는 **휴지통만**(30일 복구창) · 유예 ORPHAN_CAPTURE_GRACE_DAYS(기본 7일)
+  //     · 한 회차 상한 ORPHAN_CAPTURE_CLEAN_CAP(기본 200).
+  //   되돌리기 = Railway `ORPHAN_CAPTURE_CLEAN=0`.
+  if (process.env.ORPHAN_CAPTURE_CLEAN !== '0') {
+    const occSchedule = process.env.ORPHAN_CAPTURE_CLEAN_SCHEDULE || '40 4 * * *';
+    let occRunning = false;
+    cron.schedule(occSchedule, async () => {
+      if (occRunning) return;
+      occRunning = true;
+      try {
+        const { trashOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('orphan_capture_clean',
+          () => trashOrphanCaptures({ dryRun: false, by: 'cron' }));
+        if (r && r.skipped) logger.debug('[CRON-OrphanCapture] lock busy — 양보');
+        else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
+          logger.warn(`[CRON-OrphanCapture] 휴지통 ${r.trashed}건 · 실패 ${r.failed}건`
+            + ` · 경합회피 ${r.skippedRecheck || 0}건 (유예 ${r.graceDays}일)`);
+        }
+      } catch (err) {
+        // ★ 정리가 크론을 죽이지 않는다.
+        logger.error(`[CRON-OrphanCapture] error: ${err.message}`);
+      } finally { occRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 완료된 큐 항목 정리: 매일 새벽 3시 (24시간 이상 경과) ──
   cron.schedule('0 3 * * *', async () => {
     try {

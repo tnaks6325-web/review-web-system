@@ -107,7 +107,7 @@ async function run() {
   const cr = await svc.createBrand({ advertiserId: 'adv-1', name: '  메이커스  ', color: 'bad-color' });
   const ins = p2.q.find(x => /INSERT INTO trackb_brands/.test(x.s));
   ok('createBrand: 이름 trim + 잘못된 색상은 기본색 폴백 + 링크 토큰 발급',
-    ins.params[2] === '메이커스' && ins.params[3] === '#2563eb' && typeof ins.params[4] === 'string' && ins.params[4].length >= 20);
+    ins.params[2] === '메이커스' && ins.params[3] === '#2563eb' && typeof ins.params[4] === 'string' && /^[A-Za-z0-9_-]{16,}$/.test(ins.params[4]));   // 링크 토큰 = _linkToken() base64url 16자(96비트) 이상
   ok('createBrand: 빈 이름 거부', (await svc.createBrand({ advertiserId: 'adv-1', name: '  ' })).code === 400);
   ok('★ 남의 브랜드 수정 불가(advertiser_id 스코프)',
     (await (async () => { svc.__setPoolForTest(pool(baseRoutes({ notOwned: true }))); return svc.updateBrand({ advertiserId: 'adv-1', brandId: 'brd_x', action: 'rename', name: 'z' }); })()).code === 404);
@@ -189,7 +189,7 @@ async function run() {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   ok('브랜드 관리 사이드바 메뉴 — 브랜드 세션에는 미노출', /STATE\.brandId\?'':`<div class="awitem\$\{[^`]*advHome\('brands'\)/.test(src));
   ok('브랜드 관리 화면 렌더러(_renderAdvBrands) + 카드/토글', src.includes('function _renderAdvBrands') && src.includes('brdcard') && src.includes("brandFlag("));
-  ok('작업 배정 모달(체크박스 일괄 배정)', src.includes('function brandAssignModal') && src.includes('function brandAssignSave'));
+  ok('작업 귀속 모달(체크박스 일괄 지정)', src.includes('function brandAssignModal') && src.includes('function brandAssignSave'));
   ok('브랜드 링크 = 기존 #adv= 프래그먼트 재사용', /_brandLinkUrl[\s\S]{0,160}#adv=/.test(src));
   ok('★ A안: 브랜드 화면 상단·헤더에 운영사(대행사) 표기', src.includes('function _brandBadge') && src.includes('운영: '));
   ok('★ 미전송 칸은 컬럼째 제거(자리 남기면 "미연결"로 오해)',
@@ -197,6 +197,241 @@ async function run() {
   ok('브랜드 세션 폴더 셀은 자리도 없음', /STATE\.brandId&&!it\.folderUrl&&!it\.captureFolderUrl\) return ''/.test(src));
   ok('세션 초기화 시 브랜드 상태·body 클래스 정리(계정 전환 잔재 차단)',
     src.includes("brandId:null,advName:''") && src.includes("remove('advm','brandv','nostl','nofol')"));
+
+
+  /* ═══ 7. 브랜드 관리 화면 — 즉시 반영 · 귀속 어휘 · 행 펼침 (사용자 확정 2026-08-24) ═══
+     ★ 문자열 검사만으로는 "함수 안 어디에 있나"를 못 본다 → 함수를 vm 으로 꺼내 **실제 실행**한다. */
+  const vm = require('vm');
+  const grab = (name, kind) => {   // 함수 선언 한 개를 중괄호 매칭으로 잘라낸다
+    const head = (kind === 'async' ? 'async function ' : 'function ') + name + '(';
+    const i = src.indexOf(head); assert(i >= 0, '함수 없음: ' + name);
+    let j = src.indexOf('{', i), d = 0;
+    for (let k = j; k < src.length; k++) {
+      if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (!d) return src.slice(i, k + 1); }
+    }
+    throw new Error('중괄호 불균형: ' + name);
+  };
+  const brandSandbox = (opts = {}) => {
+    const box = {
+      STATE: opts.STATE || {}, toasts: [], renders: 0, sidebars: 0, opened: [],
+      esc: (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+      api: opts.api || (async () => ({ ok: true })),
+      toast(m) { box.toasts.push(m); },
+      _renderAdvBrands() { box.renders++; },
+      _renderAdvSidebar() { box.sidebars++; },
+      selTab(i) { box.opened.push(i); },
+      _awTabIdx: (it) => (it && it.idx != null ? it.idx : -1),
+      _awStatus: () => ({ label: '진행중', tone: 'b' }),
+      _awDate: (it) => it.date || '8/1',
+      _tabLabel: (it) => it.tabName,
+      _tabTip: (it) => it.tabName,
+      _bnColor: () => '#2563eb',
+    };
+    vm.createContext(box);
+    box.$ = (sel) => (box.dom && box.dom[sel]) || null;
+    for (const [nm, kd] of [['_brandOpen'], ['brandToggleRows'], ['_brandRowsHtml'], ['_brandsMerge'],
+      ['_awItems'], ['_bmList'], ['_bmCell'], ['_bmEditHtml'], ['bmEdit'], ['bmClose'], ['bmInput'],
+      ['_brandsReload', 'async'], ['brandNewSubmit', 'async'], ['bmSave', 'async']]) vm.runInContext(grab(nm, kd), box);
+    return box;
+  };
+
+  // 7-1. 추가 성공 → **요약 재조회가 실패해도** 목록에 즉시 남는다(신고 증상의 직접 재현)
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [] }, brandNew: { open: true, name: '웰스앤헬스' }, advView: 'brands' },
+      api: async (path) => path.indexOf('/brands/create') >= 0
+        ? { ok: true, brand: { id: 'brd_new', name: '웰스앤헬스', color: '#2563eb', linkToken: 't', linkActive: true } }
+        : null,   // ← my-work-summary 는 실패(무거운 요약 API 가 느리거나 죽은 상황)
+    });
+    await b.brandNewSubmit();
+    await new Promise((r) => setTimeout(r, 0));   // 재조회는 배경 — 한 틱 뒤 결과(고지 토스트)를 본다
+    const list = b.STATE.advWork.brands;
+    ok('★ 추가 즉시 반영 — 요약 재조회가 실패해도 새 브랜드가 목록에 남는다',
+      list.length === 1 && list[0].id === 'brd_new' && list[0].name === '웰스앤헬스');
+    ok('★ 추가 직후 목록·사이드바를 그 자리에서 다시 그린다(재조회를 기다리지 않는다)', b.renders >= 1 && b.sidebars >= 1);
+    ok('새 브랜드의 tabCount 는 0(서버가 안 준 값을 지어내지 않는다)', list[0].tabCount === 0);
+    ok('★ 재조회 실패는 조용히 넘기지 않고 문장으로 말한다', b.toasts.some((t) => /불러오지 못했습니다/.test(t)));
+    ok('추가 성공 자체도 알린다', b.toasts.some((t) => /추가됨/.test(t)));
+    ok('입력칸은 열린 채 비워진다(연달아 등록)', b.STATE.brandNew.open === true && !b.STATE.brandNew.name);
+  }
+  // 7-2. 화면 중복검사는 즉시 반영된 목록을 본다 → 같은 이름 재입력은 왕복 없이 막힌다
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [{ id: 'brd_new', name: '웰스앤헬스' }] }, brandNew: { open: true, name: '웰스앤헬스' } },
+      api: async () => { throw new Error('서버에 닿으면 안 된다'); },
+    });
+    await b.brandNewSubmit();
+    ok('★ 즉시 반영 덕에 같은 이름 재추가는 서버 왕복 없이 화면에서 막힌다',
+      /이미 "웰스앤헬스" 브랜드가 있습니다/.test(b.STATE.brandNew.err || ''));
+  }
+  // 7-3. 재조회가 브랜드를 "모른다"고 지우지 않는다
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [{ id: 'brd_a', name: '봉구' }] }, advView: 'brands' },
+      api: async () => ({ ok: true, items: [] }),   // brands 미동봉(서버 브랜드 조회 실패 = undefined)
+    });
+    const fresh = await b._brandsReload();
+    ok('★ 요약에 brands 가 없으면(모름) 기존 목록을 유지한다 — 있던 브랜드가 사라지지 않는다',
+      b.STATE.advWork.brands.length === 1 && b.STATE.advWork.brands[0].id === 'brd_a' && fresh === true);
+  }
+  {
+    const b = brandSandbox({
+      STATE: { advWork: { items: [], brands: [{ id: 'brd_a', name: '봉구' }] }, advView: 'brands' },
+      api: async () => ({ ok: true, items: [{ sheetId: 's1', tabName: 'A' }], brands: [] }),
+    });
+    await b._brandsReload();
+    ok('빈 배열로 내려오면 그대로 반영한다(진짜 0건 = 지운다)', b.STATE.advWork.brands.length === 0);
+  }
+  // 7-4. 행 펼침 — 귀속된 작업만, 닫힘/편집 중에는 안 그린다
+  {
+    const items = [
+      { sheetId: 's1', tabName: '웰스앤헬스 천기', brandId: 'brd_a', idx: 3, total: 10, submitted: 4 },
+      { sheetId: 's2', tabName: '남의 작업', brandId: 'brd_b', idx: 4 },
+      { sheetId: 's3', tabName: '미분류 작업', brandId: null, idx: 5 },
+    ];
+    const b = brandSandbox({ STATE: { advWork: { items, brands: [] }, brandOpen: null } });
+    const brand = { id: 'brd_a', name: '웰스앤헬스' };
+    ok('닫힌 브랜드는 펼침 블록을 그리지 않는다', b._brandRowsHtml(brand, items, null) === '');
+    b.brandToggleRows('brd_a');
+    const html = b._brandRowsHtml(brand, items, null);
+    ok('★ 펼치면 그 브랜드에 귀속된 작업만 나온다(남의 작업·미분류 제외)',
+      html.indexOf('웰스앤헬스 천기') >= 0 && html.indexOf('남의 작업') < 0 && html.indexOf('미분류 작업') < 0);
+    ok('행을 누르면 그 작업이 열린다(selTab — 사이드바와 같은 경로)', /onclick="selTab\(3\)"/.test(html));
+    ok('편집·확인 중인 카드는 펼침을 접는다(카드 모양이 통째로 바뀐다)',
+      b._brandRowsHtml(brand, items, { id: 'brd_a', mode: 'rename' }) === '');
+    ok('★ 귀속 0건이면 "없다"가 아니라 다음 행동을 말한다',
+      /귀속된 작업이 없습니다/.test(b._brandRowsHtml({ id: 'brd_z' }, items, null)) === false
+      && (b.brandToggleRows('brd_z'), /귀속된 작업이 없습니다[\s\S]*작업 귀속/.test(b._brandRowsHtml({ id: 'brd_z' }, items, null))));
+    b.brandToggleRows('brd_a');
+    ok('다시 누르면 접힌다(브랜드마다 독립 토글)', b._brandRowsHtml(brand, items, null) === '' && b._brandOpen('brd_z') === true);
+  }
+  // 7-5. 어휘 — 브랜드 관리 화면에서 "배정"은 쓰지 않는다(사용자 확정: 귀속)
+  {
+    const from = src.indexOf('function _renderAdvBrands'), to = src.indexOf('async function brandAssignSave');
+    assert(from > 0 && to > from);
+    const seg = src.slice(from, to).replace(/^\s*\/\/.*$/gm, '');   // 주석 제외
+    ok('★ 브랜드 관리 화면 문구에 "배정" 없음', seg.indexOf('배정') < 0);
+    ok('버튼·설명은 "귀속"', /작업 귀속<\/button>/.test(seg) && /작업 \$\{b\.tabCount\|\|0\}건 귀속/.test(seg) && /귀속됨/.test(seg));
+  }
+  // 7-6. 행 클릭이 버튼·토글을 삼키지 않는다
+  ok('★ 카드 행 클릭 = 펼침, 버튼 묶음·토글은 stopPropagation 으로 분리',
+    /brandToggleRows\('\$\{esc\(b\.id\)\}'\)/.test(src)
+    && /class="brdacts" onclick="event\.stopPropagation\(\)"/.test(src)
+    && (src.match(/onclick="event\.stopPropagation\(\);brandFlag\(/g) || []).length === 2);
+  ok('세션 초기화에 펼침 상태도 포함(계정 전환 잔재 차단)', /brandOpen:null/.test(src));
+  ok('★ 브랜드 관리는 작업 0건·요약 실패여도 열린다(막다른 길 금지 — 조기 반환보다 앞)',
+    src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") > 0
+    && src.indexOf("if(v==='brands'&&!STATE.brandId) return _renderAdvBrands();") < src.indexOf("'진행 중인 작업이 없습니다.'}</div>`; return; }"));
+
+
+  /* ═══ 8. 브랜드 담당자(136) — 작업(탭) 단위 · 최대 2명 · 라벨 없는 자유입력 (사용자 확정 2026-08-24) ═══ */
+  // 8-1. 정규화 단일 출처
+  {
+    const norm = svc._normBrandManagers;
+    ok('정규화: 공백 정리 · 빈 값 제거 · 최대 2명',
+      JSON.stringify(norm(['  박가람   차장 ', '', '개똥이밥먹어', '세번째'])) === JSON.stringify(['박가람 차장', '개똥이밥먹어']));
+    ok('정규화: 배열이 아니면 빈 배열(모르는 입력을 지어내지 않는다)',
+      norm(null).length === 0 && norm('박가람').length === 0);
+    ok('정규화: 이름은 20자 상한', norm(['가'.repeat(50)])[0].length === 20);
+  }
+  // 8-2. 저장 — 소유 탭만(남의 작업에 담당자를 심을 수 없다) + 빈 값이면 행 삭제
+  {
+    const owned = [/WITH own AS/, () => ({ rows: [{ sheetId: 's1', tabName: 'A작업', tabGid: '1' }] })];
+    let p2 = pool([owned]); svc.__setPoolForTest(p2);
+    const bad = await svc.setTabBrandManagers({ advertiserId: 'adv-1', sheetId: 's1', tabName: '남의작업', names: ['x'] });
+    ok('★ 소유 탭이 아니면 404 + 쓰기 0건',
+      bad.ok === false && bad.code === 404 && !p2.q.some(x => /INSERT INTO trackb_tab_brand_managers/.test(x.s)));
+    p2 = pool([owned]); svc.__setPoolForTest(p2);
+    const good = await svc.setTabBrandManagers({ advertiserId: 'adv-1', sheetId: 's1', tabName: 'A작업', names: ['박가람 차장', '개똥이밥먹어', '셋째'], actor: '어니스트캄' });
+    const ins = p2.q.find(x => /INSERT INTO trackb_tab_brand_managers/.test(x.s));
+    ok('저장은 upsert 1회 + 서버가 정규화한 값을 돌려준다',
+      good.ok === true && ins && JSON.parse(ins.params[3]).length === 2 && good.managers[0] === '박가람 차장');
+    ok('★ 쓰기 표면은 그 표 하나(운영 테이블 무접촉)',
+      !p2.q.some(x => /^\s*(INSERT INTO|UPDATE|DELETE FROM)\s+(?!trackb_tab_brand_managers)/i.test(x.s)));
+    p2 = pool([owned]); svc.__setPoolForTest(p2);
+    const cleared = await svc.setTabBrandManagers({ advertiserId: 'adv-1', sheetId: 's1', tabName: 'A작업', names: ['  ', ''] });
+    ok('★ 빈 값은 행을 지운다 — "미입력"은 행 없음 하나로만 표현한다',
+      cleared.ok === true && cleared.managers.length === 0
+      && p2.q.some(x => /DELETE FROM trackb_tab_brand_managers/.test(x.s))
+      && !p2.q.some(x => /INSERT INTO trackb_tab_brand_managers/.test(x.s)));
+  }
+  // 8-3. 조회는 fail-soft(신규 표 미적용이어도 화면이 뜬다)
+  {
+    svc.__setPoolForTest({ async query() { const e = new Error('relation does not exist'); e.code = '42P01'; throw e; } });
+    ok('★ 표가 없어도 조회는 빈 값(fail-soft — 담당자만 안 보이고 화면은 그대로)',
+      (await svc.tabBrandManagersMap({ advertiserId: 'adv-1' })).size === 0
+      && (await svc.tabBrandManagersFor({ advertiserId: 'adv-1', sheetId: 's1', tabName: 'A작업' })).length === 0);
+    svc.__setPoolForTest(pool([[/WITH own AS/, () => ({ rows: [{ sheetId: 's1', tabName: 'A작업' }] })]]));
+  }
+  // 8-4. 라우터 — 브랜드 CRUD 와 같은 게이트(브랜드 링크 세션은 도달 불가)
+  {
+    const l = layers.find(x => x.path === '/brands/tab-manager');
+    ok('POST /brands/tab-manager 등록 + authMiddleware', !!l && l.methods.includes('post') && l.mw.includes('authMiddleware'));
+    ok('★ 브랜드 링크 세션은 담당자를 못 고친다(열람 전용)',
+      (await call('/brands/tab-manager', { role: 'advertiser', name: 'b', advertiser_id: 'adv-1', brand_id: 'brd_a' }, { sheetId: 's1', tabName: 'A작업', names: [] })).code === 403);
+    for (const role of ['master', 'admin', 'staff']) {
+      ok(`${role} 도 403(업체 셀프 창구)`,
+        (await call('/brands/tab-manager', { role, name: 'x', advertiser_id: 'adv-1' }, { sheetId: 's1', tabName: 'A작업', names: [] })).code === 403);
+    }
+    const wd = layers.find(x => x.path === '/workdesk');
+    const rsrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+    const wseg = rsrc.slice(rsrc.indexOf("router.get('/workdesk'"), rsrc.indexOf("router.get('/workdesk'") + 1200);
+    ok('★ /workdesk 는 brandId 를 **토큰에서만** 넘긴다(IDOR 차단)',
+      !!wd && /brandId: \(req\.admin && req\.admin\.brand_id\) \|\| null/.test(wseg) && !/req\.(query|body)\.brandId/.test(wseg));
+  }
+  // 8-5. 렌즈 — 브랜드 세션은 내부 담당을 통째로 폐기
+  {
+    const lens = svc.__condAdvertiserLensForTest;
+    const cd = { manager: { ae: '김수만', adminNick: '망고', adminRaw: '박은비', brand: ['박가람 차장'] } };
+    const br = lens(cd, { brandSession: true });
+    ok('★★ 브랜드사 화면: 내부 담당(AE·관리자)은 이름도 존재 여부도 안 나간다',
+      br.manager.ae === null && br.manager.adminNick === null && br.manager.adminRaw === null
+      && JSON.stringify(br.manager.brand) === JSON.stringify(['박가람 차장']));
+    const ag = lens(cd, { brandSession: false });
+    ok('대행사 세션: 내부 담당은 종전대로(실명만 폐기) + 업체 담당 병기',
+      ag.manager.ae === '김수만' && ag.manager.adminNick === '망고' && ag.manager.adminRaw === null
+      && ag.manager.brand.length === 1);
+    const noBrand = lens({ manager: { ae: null, adminNick: null, adminRaw: null, brand: [] } }, { brandSession: true });
+    ok('★ 미입력 브랜드사 화면은 재료가 통째로 비어 화면이 담당 행을 안 그린다',
+      noBrand.manager.ae === null && noBrand.manager.adminNick === null && noBrand.manager.brand.length === 0);
+  }
+  // 8-6. 화면 — 작업 행 인라인 입력(vm 실행)
+  {
+    const items = [{ sheetId: 's1', tabName: 'A작업', brandId: 'brd_a', idx: 1, brandManagers: ['박가람 차장'] },
+                   { sheetId: 's2', tabName: 'B작업', brandId: 'brd_a', idx: 2, brandManagers: [] }];
+    const b = brandSandbox({
+      STATE: { advWork: { items, brands: [] }, brandOpen: { brd_a: true }, bmEdit: null },
+      api: async () => ({ ok: true, managers: ['박가람 차장', '개똥이밥먹어'] }),
+    });
+    const html = b._brandRowsHtml({ id: 'brd_a' }, items, null);
+    ok('★ 담당자 칸이 행마다 있다 — 값이 있으면 이름, 없으면 입력 유도',
+      html.indexOf('박가람 차장') >= 0 && html.indexOf('＋ 담당자') >= 0);
+    ok('★ onclick 은 인덱스만(작업명·시트ID 보간 0)',
+      /bmEdit\(0\)/.test(html) && /bmEdit\(1\)/.test(html) && html.indexOf("bmEdit('s1'") < 0);
+    ok('★ 담당자 칸은 행 클릭(작업 열기)과 분리된다', /event\.stopPropagation\(\);bmEdit\(/.test(html));
+    b.bmEdit(1);
+    const edited = b._brandRowsHtml({ id: 'brd_a' }, items, null);
+    ok('누르면 그 행 아래에서 입력칸 2개가 펼쳐진다(팝업 없음)',
+      (edited.match(/<input /g) || []).length === 2 && /최대 2명/.test(edited));
+    /* ⚠ 기준값은 타이핑 **전에** 찍는다 — 뒤에 찍고 비교하면 항상 참이라 검사가 공허해진다
+       (변이시험이 실제로 이 자리를 뚫었다). 입력칸이 든 목록을 다시 그리면 한글 IME 조합이 깨진다. */
+    const before = b.renders;
+    b.bmInput(0, '박가람 차장'); b.bmInput(1, '개똥이밥먹어');
+    ok('★ 타이핑은 재렌더하지 않는다(한글 IME 조합 보호)', b.renders === before);
+    await b.bmSave();
+    ok('★ 저장하면 그 작업 행에 즉시 반영된다(재조회를 기다리지 않는다)',
+      JSON.stringify(items[1].brandManagers) === JSON.stringify(['박가람 차장', '개똥이밥먹어'])
+      && b.STATE.bmEdit === null && b.toasts.some((t) => /담당자를 저장/.test(t)));
+    // 저장 실패는 입력을 지우지 않는다
+    const b2 = brandSandbox({
+      STATE: { advWork: { items, brands: [] }, brandOpen: { brd_a: true }, bmEdit: null },
+      api: async () => ({ ok: false, error: 'not_ready' }),
+    });
+    b2.bmEdit(0); b2.bmInput(0, '박가람 차장'); await b2.bmSave();
+    ok('★ 저장 실패 시 입력을 지우지 않고 사유를 말한다',
+      b2.STATE.bmEdit && b2.STATE.bmEdit.names[0] === '박가람 차장' && /준비되지 않았습니다/.test(b2.STATE.bmEdit.err));
+  }
+  ok('세션 초기화에 담당자 편집 상태도 포함', /bmEdit:null/.test(src));
 
   console.log(`\n✅ brandShare: ${n} cases passed`);
 }

@@ -121,12 +121,20 @@ async function run() {
       out.statsUnavailable === false && out.rows[0].folderUrl);
   }
 
-  /* ═══ 2b. /ownership/tabs — staff 는 담당 업체가 아니면 폴더 URL 미수신 ═══ */
-  console.log('\n2b) 업체관리 목록의 staff 폴더 스코프');
-  t('담당 여부는 기존 헬퍼 한 쿼리(inad_pm)로 판정', /svc\.staffOwnsAdvertiser\(\{ advertiserId: req\.query\.advertiserId/.test(ROUTES_CODE));
-  t('★ 담당 밖이면 폴더 URL·현영 판정을 비운다', /folderUrl: null, captureFolderUrl: null, cashReceipt: false/.test(ROUTES_CODE));
-  t('★ 조용히 비우지 않고 folderScoped:false 로 고지', /folderScoped: false/.test(ROUTES_CODE));
-  t('★ admin/master 응답은 종전 그대로(플래그 미동봉)', /\.\.\.\(folderScoped \? \{\} : \{ folderScoped: false \}\)/.test(ROUTES_CODE));
+  /* ═══ 2b. /ownership/tabs — 폴더 링크는 담당 무관 내부인 전원(사용자 확정 2026-08-24) ═══
+     종전: staff 는 담당 업체가 아니면 이 목록에서 폴더 URL·현영 판정을 못 받았다.
+     지금: 그 마스킹을 없앴다 — **폴더를 실제로 여는 통로(/tab-folders)가 이미 내부인 전원에게
+     열려 있어**("staff는 작업보드 전체 운영 권한") 버튼만 흐린 반쪽 규칙이었다.
+     ★ 되돌리려면 /tab-folders 스코프와 **함께** 좁힌다(한쪽만 좁히면 지금 상태로 되돌아온다). */
+  console.log('\n2b) 업체관리 목록의 폴더 링크 — 담당 무관');
+  {
+    const i2 = ROUTES_CODE.indexOf("router.get('/ownership/tabs'");
+    const block = ROUTES_CODE.slice(i2, ROUTES_CODE.indexOf('\nrouter.', i2 + 10));
+    t('★★ 담당 여부로 폴더를 비우는 분기가 없다', !/staffOwnsAdvertiser/.test(block), block.slice(0, 200));
+    t('★★ 비우기·고지 플래그가 통째로 사라졌다(죽은 규칙 부활 금지)',
+      !/folderUrl: null|folderScoped/.test(block));
+    t('★ 광고주·리뷰어 차단은 그대로', /authMiddleware, internalMiddleware/.test(block.split('\n')[0]));
+  }
   {
     // ★ 정규식이 아니라 **핸들러를 실제로 호출**해 확인한다(스코프 판정은 실행으로만 증명된다).
     const express = require('express');
@@ -144,28 +152,27 @@ async function run() {
     svc2.ownedTabsForAdvertiser = async () => ({ rows: [{ sheetId: 'S1', tabName: 'T1',
       folderUrl: 'https://drive.google.com/drive/folders/RV', captureFolderUrl: 'https://drive.google.com/drive/folders/CAP',
       cashReceipt: true, hasTabConfig: true }], statsUnavailable: false, finishedUnavailable: false });
-    const callOwn = (role, mine) => new Promise(res => {
-      svc2.staffOwnsAdvertiser = async () => mine;
+    let mineCalls = 0;
+    svc2.staffOwnsAdvertiser = async () => { mineCalls++; return false; };   // "담당 아님" — 그래도 열려야 한다
+    const callOwn = (role) => new Promise(res => {
       h({ query: { advertiserId: 'a1' }, admin: { role, name: 'AE1' } },
         { json: b => res(b), status: () => ({ json: b => res(b) }) }, e => res({ err: String(e) }));
     });
-    const asAdmin = await callOwn('admin', false);
-    t('admin 은 종전 그대로 폴더 URL 을 받는다(플래그 미동봉)',
-      asAdmin.items[0].folderUrl && asAdmin.items[0].captureFolderUrl && asAdmin.folderScoped === undefined, JSON.stringify(asAdmin).slice(0, 130));
-    const staffMine = await callOwn('staff', true);
-    t('담당 업체면 staff 도 종전 그대로', staffMine.items[0].folderUrl && staffMine.folderScoped === undefined);
-    const staffOther = await callOwn('staff', false);
-    t('★★ 담당 밖 업체 = 폴더 URL 두 개와 현영 판정이 비워져 나간다(버튼이 우회 수단이 되지 않는다)',
-      staffOther.items[0].folderUrl === null && staffOther.items[0].captureFolderUrl === null
-      && staffOther.items[0].cashReceipt === false, JSON.stringify(staffOther.items[0]));
-    t('★ 그리고 그 사실을 folderScoped:false 로 말한다(조용히 비우지 않는다)', staffOther.folderScoped === false);
+    const asAdmin = await callOwn('admin');
+    t('admin 은 종전 그대로 폴더 URL 을 받는다', asAdmin.items[0].folderUrl && asAdmin.items[0].captureFolderUrl);
+    const staffOther = await callOwn('staff');
+    t('★★ 담당 아닌 업체여도 staff 가 폴더 URL 두 개를 받는다',
+      staffOther.items[0].folderUrl === 'https://drive.google.com/drive/folders/RV'
+      && staffOther.items[0].captureFolderUrl === 'https://drive.google.com/drive/folders/CAP',
+      JSON.stringify(staffOther.items[0]));
+    t('★ 현영 판정도 함께 돌아온다(마스킹이 이 값도 지우고 있었다)', staffOther.items[0].cashReceipt === true);
+    t('★ 고지 플래그는 응답에 없다(안내할 제한이 없다)', staffOther.folderScoped === undefined);
+    t('★★ 담당 여부를 아예 재지 않는다(불필요한 쿼리 0)', mineCalls === 0, String(mineCalls));
     t('다른 값(작업명·통계 플래그)은 그대로 나간다', staffOther.items[0].tabName === 'T1' && staffOther.statsUnavailable === false);
     svc2.ownedTabsForAdvertiser = realOwned; svc2.staffOwnsAdvertiser = realMine;
   }
-  t('프론트가 그 플래그를 소비 — 버튼은 사유를 말하고 표 상단에 안내',
-    /\(STATE\.ownTabMeta\|\|\{\}\)\.folderScoped===false/.test(HTML) && /담당하지 않은 업체라 <b>\[자료\]<\/b>/.test(HTML));
-  t('meta 에 folderScoped 를 실어 둔다(구버전 응답은 true 로 수렴 = 동작 불변)',
-    /folderScoped: rt\.folderScoped===false \? false : true/.test(HTML));
+  t('★ 화면에도 그 제한이 남아 있지 않다(죽은 안내·죽은 분기 0)',
+    !/folderScoped/.test(HTML) && !/담당하지 않은 업체라 <b>\[자료\]<\/b>/.test(HTML));
 
   /* ═══ 3. 서버 — /tab-folders?kind=info 가산 분기 ═══ */
   console.log('\n3) /tab-folders?kind=info(작업보드 상단 재료)');
@@ -295,13 +302,15 @@ async function run() {
       b[2].dis && /알 수 없습니다/.test(b[2].attrs), b[2].attrs);
   }
   {
-    // ★ own 의 두 가지 '모른다' — 담당 밖 업체 / tab_configs 행 없음
+    /* ★★ 담당 밖 업체여도 버튼은 살아 있다(사용자 확정 2026-08-24) — 폴더를 여는 통로가 이미
+       내부인 전원에게 열려 있어 여기만 흐리게 두는 것은 반쪽 규칙이었다.
+       ★ own 에 남은 '모른다'는 tab_configs 행 없음 하나뿐이다. */
     const sb = mk({});
-    sb.STATE.ownTabMeta = { folderScoped: false };
+    sb.STATE.ownTabMeta = {};
     sb.STATE.ownTabs = [{ sheetId: 'S1', tabName: 'T5', folderUrl: D('r'), captureFolderUrl: D('c'), cashReceipt: true }];
     let b = btns(vm.runInContext("_folBtnsHtml(STATE.ownTabs[0],0,'own')", sb));
-    t('★ 담당 밖 업체 = 비활성 + 문의 안내(폴더 미생성으로 위장하지 않는다)',
-      b.every(x => x.dis) && /담당하지 않은 업체/.test(b[0].attrs), b[0].attrs);
+    t('★★ 담당 밖 업체여도 3버튼 전부 활성(담당으로 흐리게 두지 않는다)',
+      b.every(x => !x.dis) && !/담당하지 않은 업체/.test(b.map(x => x.attrs).join('')), b[0].attrs);
     sb.STATE.ownTabMeta = {};
     sb.STATE.ownTabs = [{ sheetId: 'S1', tabName: 'T6', hasTabConfig: false }];
     b = btns(vm.runInContext("_folBtnsHtml(STATE.ownTabs[0],0,'own')", sb));

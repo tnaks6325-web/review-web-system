@@ -909,22 +909,15 @@ router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, re
     // ★ 마감/통계 조회 실패는 **플래그로 고지**한다 — 조용히 빈 판정을 내려보내면 화면이 그것을
     //   "마감자료 검수 대기 0건"으로 읽어 실제 대기 건이 통째로 사라진다(088 무신호 규율).
     const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId, annotate: true });
-    // ★★ staff(AE)는 담당 업체가 아니면 **폴더 URL 을 받지 않는다**(코드리뷰가 잡은 경계):
-    //   이 목록은 업체를 골라 보는 화면이라 AE 가 남의 업체도 열 수 있는데, 응답에 Drive 링크가
-    //   실려 있으면 [자료] 버튼이 곧 담당 밖 폴더 접근 수단이 된다(/tab-folders 는 서버가 막는데
-    //   여기는 열려 있어 같은 불변식이 한쪽만 지켜지던 상태). 담당 여부는 한 쿼리(inad_pm).
-    //   ★ 지우고 조용히 넘기지 않는다 — folderScoped:false 로 **사유를 화면이 말한다**.
-    let rows = own.rows;
-    let folderScoped = true;
-    if (_role(req) === 'staff') {
-      const mine = await svc.staffOwnsAdvertiser({ advertiserId: req.query.advertiserId, staffName: req.admin && req.admin.name });
-      if (!mine) {
-        folderScoped = false;
-        rows = rows.map(r => ({ ...r, folderUrl: null, captureFolderUrl: null, cashReceipt: false, cashReceiptNote: undefined }));
-      }
-    }
-    res.json({ ok: true, items: rows, statsUnavailable: own.statsUnavailable,
-      finishedUnavailable: own.finishedUnavailable, ...(folderScoped ? {} : { folderScoped: false }) });
+    /* ★★ 저장폴더 링크는 **담당(inad_pm) 무관 내부인 전원**(사용자 확정 2026-08-24).
+       종전에는 staff 가 담당 업체가 아니면 이 목록에서 폴더 URL·현영 판정을 비워 보냈는데,
+       **폴더를 실제로 여는 통로(`GET /tab-folders`)는 이미 내부인 전원에게 열려 있어**
+       ("staff는 작업보드 전체 운영 권한이므로 담당 여부와 무관하게 폴더를 연다") 버튼만 흐린
+       반쪽 규칙이었다. 업체 지정·해제를 담당 무관으로 연 것과 같은 자리다.
+       ★ 되돌리려면 `/tab-folders` 의 스코프와 **함께** 좁힌다(한쪽만 좁히면 이 상태로 되돌아온다).
+       ★ 광고주·리뷰어는 이 라우트에 도달하지 못한다(internalMiddleware). */
+    res.json({ ok: true, items: own.rows, statsUnavailable: own.statsUnavailable,
+      finishedUnavailable: own.finishedUnavailable });
   } catch (err) { next(err); }
 });
 
@@ -963,6 +956,21 @@ router.get('/brands', authMiddleware, async (req, res, next) => {
     const advertiserId = _advSelf(req);
     if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
     const o = await svc.brandsForAdvertiser({ advertiserId });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
+/* 136: 작업(탭)별 브랜드 담당자 — 대행사가 브랜드사에게 보여줄 자기 쪽 담당자(최대 2명, 자유입력).
+   ★ 게이트는 브랜드 CRUD 와 같은 `_advSelf` — **브랜드 링크 세션은 도달 불가**(열람 전용).
+   ★ 대상 탭 소유 검증은 서비스가 한다(남의 작업에 담당자를 심을 수 없다). */
+router.post('/brands/tab-manager', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { sheetId, tabName, names } = req.body || {};
+    const o = await svc.setTabBrandManagers({
+      advertiserId, sheetId, tabName, names,
+      actor: (req.admin && req.admin.name) || null,
+    });
     res.status(o.ok ? 200 : (o.code || 400)).json(o);
   } catch (err) { next(err); }
 });
@@ -1009,7 +1017,13 @@ router.get('/ownership', authMiddleware, internalMiddleware, async (req, res, ne
   try { res.json({ ok: true, items: await svc.listOwnership({ advertiserId: req.query.advertiserId, sheetId: req.query.sheetId }) }); }
   catch (err) { next(err); }
 });
-async function _ownershipWriteAllowed(req, advertiserId) {
+/* ★★ 업체 지정·해제는 **담당(inad_pm) 무관 내부 담당자 전원**(사용자 확정 2026-08-24).
+   종전에는 staff 를 자기 담당 업체로 묶었는데, **이관(`/ownership/transfer`)은 이미 담당 무관**이라
+   "옮기는 건 되는데 처음 지정하는 건 막히는" 비대칭이었다. 게다가 화면(업체 지정 팝업)은 전 업체를
+   보여줘서 고르고 나서야 403 이 나는 막다른 길이었다.
+   ★ 이 함수는 **레거시 시트 전체 소유 펼치기(expand) 전용**으로만 남는다 — 그쪽은 화면 창구가 없는
+     레거시 정리 경로라 종전 스코프를 유지한다(서비스도 staffName 으로 이중 게이트). */
+async function _ownershipExpandAllowed(req, advertiserId) {
   if (_role(req) !== 'staff') return true;   // master/admin — 전체 허용(기존 시맨틱)
   return svc.staffOwnsAdvertiser({ advertiserId, staffName: (req.admin && req.admin.name) || '' });
 }
@@ -1017,11 +1031,8 @@ router.post('/ownership', authMiddleware, internalMiddleware, async (req, res, n
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
     if (!advertiserId || !sheetId) return res.status(400).json({ ok: false, error: 'advertiserId, sheetId 필수' });
-    if (!(await _ownershipWriteAllowed(req, advertiserId))) return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 지정할 수 없습니다.' });
-    // staff 자가 스코프 확장 차단: 타 AE/업체가 이미 소유한 시트는 초기매핑 대상 아님(admin 소관).
-    if (_role(req) === 'staff' && !(await svc.sheetAssignableByStaff({ sheetId, staffName: (req.admin && req.admin.name) || '' }))) {
-      return res.status(403).json({ ok: false, error: '이미 다른 업체/담당이 소유한 시트입니다. 재배치는 관리자에게 요청하세요.' });
-    }
+    // ★ 담당(inad_pm) 게이트 없음 — 내부 담당자면 어느 업체에도 지정한다(사용자 확정 2026-08-24).
+    //   되돌리기는 같은 화면의 [×] 해제·[이관]이라 막다른 길이 아니고, 광고주는 internalMiddleware 가 막는다.
     res.json({ ok: true, ...(await svc.setOwnership({ advertiserId, sheetId, tabGid: tabGid || null, by: _by(req) })) });
   } catch (err) { next(err); }
 });
@@ -1029,7 +1040,7 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
     if (!advertiserId || !sheetId) return res.status(400).json({ ok: false, error: 'advertiserId, sheetId 필수' });
-    if (!(await _ownershipWriteAllowed(req, advertiserId))) return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 해제할 수 없습니다.' });
+    // ★ 해제도 지정과 같은 범위 — 지정만 열고 해제를 막으면 잘못 지정한 것을 되돌릴 수 없다.
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
@@ -1038,7 +1049,7 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
 router.post('/ownership/expand', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, sheetId, confirm } = req.body || {};
-    if (advertiserId && !(await _ownershipWriteAllowed(req, advertiserId))) {
+    if (advertiserId && !(await _ownershipExpandAllowed(req, advertiserId))) {
       return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 변경할 수 없습니다.' });
     }
     const staffName = _role(req) === 'staff' ? String((req.admin && req.admin.name) || '').trim() : null;
@@ -1074,7 +1085,8 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
     // `/tabs`와 동일하게, 작업보드 표는 모든 비리뷰어 역할이 열람할 수 있다. PII 마스킹과
     // 쓰기 권한은 역할별 service 렌즈/각 write route에서 계속 분리한다.
-    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true });
+    // ★ brandId 는 **토큰에서만**(IDOR 차단) — 작업 조건 카드의 담당 행이 세션 종류로 갈린다(136).
+    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, brandId: (req.admin && req.admin.brand_id) || null, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
@@ -1404,6 +1416,21 @@ router.post('/workdesk/purchase-date', authMiddleware, async (req, res, next) =>
     res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+/* 작업표 '주문자'·'수취인' 칸 편집(무시트 전용) — 2026-08-24: [이 셀 편집]이 원장·리뷰내역까지
+   진짜로 반영한다(구매일자와 같은 패턴). 시트 기반 탭은 409(화면은 종전 오버레이 경로 유지).
+   스코프는 셀 편집과 동일(내부 직원 — 광고주는 field 가 택배송장 열이 아니라 자동 403). */
+router.post('/workdesk/identity-name', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, field, value } = req.body || {};
+    if (!sheetId || !tabName || !rowId || !field || value == null) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field, value 필수' });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field: 'col:' + (field === 'orderer' ? '주문자' : '수취인') });
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.setWorkdeskIdentityField({ sheetId, tabName, rowId, field, value, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
 // 리뷰제출일 백필(무시트 전용 · adminOrMaster) — 외부모집 사후 등록 건처럼 캡처 원장이 없는 줄의
 //   제출 표시를 명시 날짜로 기록한다(입금일 기록과 같은 성격). 증빙 게이트가 있는 [수동 리뷰제출]과 별개.
 router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -1412,6 +1439,36 @@ router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddlew
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
     const out = await svc.backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value, by: _by(req) });
     res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
+/* 관리자 수동 입금처리 (무시트 전용 · adminOrMaster) — 우클릭 [💰 입금수정].
+   ★ 입금 칸은 직접 편집이 잠긴 상태 칸이라 값을 고칠 창구가 없었다. 여기가 그 유일한 창구다.
+   ★ `date` 가 빈 값이면 **칸을 비운다**(입금 취소·오기입 정정) — 지운 값은 셀 편집기록에 남는다.
+   ★ 권한은 리뷰제출일 백필과 같은 adminOrMaster — 입금 표시는 정산·리뷰어 화면까지 바꾼다. */
+router.post('/workdesk/deposit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, date } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by: _by(req) });
+    const code = out.ok ? 200
+      : (out.error === 'not_sheetless' ? 409
+        : (out.error === 'concurrent_edit_conflict' ? 409 : 400));
+    res.status(code).json(out);
+  } catch (err) { next(err); }
+});
+/* 이 셀의 편집기록(읽기 전용) — 구글시트 셀 편집기록과 같은 성격의 인라인 팝업이 쓴다.
+   ★ 스코프는 셀 편집과 **같은 게이트**(`_ensureWorkdeskCellEditScope`) — 업체(광고주)는 자기가
+     입력하는 택배송장 칸의 기록만 볼 수 있고 다른 열의 편집 이력에는 닿지 못한다. */
+router.get('/workdesk/cell-edits', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, field, limit } = req.query || {};
+    if (!sheetId || !tabName || !rowId || !field) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field });
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.listCellEdits({ sheetId, tabName, rowId, field, limit });
+    res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
 router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
@@ -1534,7 +1591,7 @@ router.post('/workdesk/test-auto-delete-cleanup', authMiddleware, async (req, re
    ★ gid 는 서버가 `tab_configs` 에서 다시 구한다(낡은 화면이 남의 공고 정원 이력을 보지 않게). */
 router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, kind, limit } = req.query;
+    const { sheetId, tabName, kind, limit, before } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     let gid = '';
@@ -1544,7 +1601,7 @@ router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
       gid = (rows[0] && rows[0].tab_gid) || '';
     } catch (_) { /* gid 미상 = 이름 매칭만(fail-soft) */ }
     const { tabActivityLog } = require('../services/tabActivityLog.service');
-    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit }));
+    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit, before }));
   } catch (err) { next(err); }
 });
 
@@ -2583,6 +2640,7 @@ const _setHandlers = {
   // ★ 065 후속: 담당자 실명(박세희·박은비) → 닉네임(만두·망고) 정리 — 원본은 `/api/diag/manager-cleanup`.
   //   같은 이유(인트라넷 SSO 토큰은 `/api/diag/*` 미도달)로 Track B 경로를 함께 연다.
   managerCleanup: _delegate(require('./diag.routes'), 'post', '/manager-cleanup'),
+  deliveryTypeCleanup: _delegate(require('./diag.routes'), 'post', '/delivery-type-cleanup'),   // 135 — 옛 배송유형 표기 정리
 };
 router.get('/settings/my-nickname', authMiddleware, internalMiddleware, (req, res, next) =>
   _setHandlers.nicknameGet(req, res, next));
@@ -2612,6 +2670,8 @@ router.post('/settings/review-type-cleanup', authMiddleware, adminOrMasterMiddle
 // ★ 065 후속: 원본과 같은 권한(admin/master). 기존 행을 건드리므로 dryRun 기본도 원본이 판정한다.
 router.post('/settings/manager-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _setHandlers.managerCleanup(req, res, next));
+router.post('/settings/delivery-type-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.deliveryTypeCleanup(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
    시스템 오류로그 — 리뷰웹시스템[3버전] 「로그」 탭의 두 번째 서브탭
@@ -3088,10 +3148,20 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
   } catch (err) { next(err); }
 });
 
-/* ★★ 줄 정리(은퇴) **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
-   원인이던 탈시트 이관(옛 차수가 검색 명단에 되살아남)은 끝났다. 줄을 내리는 창구는
-   [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
-   ★ 실행부 `sheetlessLedger.retireRows` 는 **중복 정리가 그대로 쓴다** — 지우지 말 것.
+/* ── 🧹 줄 정리(은퇴) HTTP 창구는 제거됐다 (사용자 확정 2026-08-21 / main 2026-08-23) ──
+   ★ 양쪽 갈래에서 각각 같은 결론에 도달해 지웠다 — 되살리지 말 것.
+   왜: 원래 목적(이관 때 되살아난 옛 차수 줄 되돌리기)은 이관이 **자동으로** 처리하고
+   (`sheetlessCutover` → `participants.retireInactiveImportRows`), 그 원인이던 탈시트
+   이관 자체가 끝났다. 사람이 차수를 골라 줄을 내리는 화면·API 는 평시에 쓸 일이 없고,
+   잘못 쓰면 리뷰어의 온전한 구매기록이 붙은 줄을 검색 명단에서 사라지게 한다.
+   ★ 줄을 내리는 창구는 [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
+   ★★ **서비스 함수 `sheetlessLedger.retireRows` 는 남아 있다** — 지우면 안 된다:
+      · `dedupeRows`/`dedupeManual`(♻ 중복 정리)의 실행부
+      · `rowNumbering.cleanupPairedBlanks`(🔢 번호 정리의 짝 빈 줄 정리)
+      즉 지금은 **내부 공용 실행부**일 뿐 사용자 기능이 아니다.
+   ⚠ 잔여 위험(문서화): 이관의 자동 은퇴는 fail-soft 라 실패해도 이관이 진행된다. 그때
+      차수 단위로 되돌릴 창구가 없다(중복 정리는 주문 없는 줄을 조회조차 하지 않는다).
+      그런 사고가 나면 DB 직접 조치 또는 이 창구 재도입을 검토할 것.
    옛 라우트: POST /worktable/retire-rows */
 
 router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -3302,7 +3372,7 @@ router.post('/worktable/hold-rows', authMiddleware, adminOrMasterMiddleware, asy
 });
 
 /* 작업보드 중복 줄 정리 — 2026-08-19 중복 반영 사고 수습용.
-   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 은퇴(retire-rows)와 같은 급.
+   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 되돌리기가 무겁다.
    ★ dryRun 기본 — 먼저 미리보기로 무엇이 지워지고 무엇이 보류되는지 본 뒤 실행한다.
    ★ 입금 회차(대기·완료)에 담긴 줄이 섞인 그룹은 서버가 **건드리지 않고 사유와 함께 보고**한다. */
 router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -3417,16 +3487,32 @@ router.post('/worktable/add-blogger', authMiddleware, async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+/* 표준 열 저장 — 8/23 전멸 사고 재발 방지 3종은 서비스가 판정한다(사본 금지).
+   ★★ 거부 사유는 **여기서 400 으로 명시**해야 한다 — 이 경로는 `isAdminApi`(오류 마스킹 예외)
+      목록에 없어서 그냥 throw 하면 `서버 오류가 발생했습니다.` 로 뭉개진다(무엇을 고칠지 모른다).
+   ★ `confirmClear:true` = "정말 비운다"는 사람의 명시 확인. `restore` = 그 시점으로 되돌리기. */
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { saveTemplate } = require('../services/worktable.service');
+    const { saveTemplate, restoreTemplate } = require('../services/worktable.service');
     const b = req.body || {};
-    const data = await saveTemplate({
-      core: b.core, channels: b.channels,
-      customChannels: b.customChannels, workTypes: b.workTypes,
-      templateSheetId: b.templateSheetId, by: _by(req),
-    });
-    res.json({ ok: true, data });
+    try {
+      const data = b.restore
+        ? await restoreTemplate({ at: b.restore, by: _by(req) })
+        : await saveTemplate({
+          core: b.core, channels: b.channels,
+          customChannels: b.customChannels, workTypes: b.workTypes,
+          templateSheetId: b.templateSheetId, by: _by(req),
+          confirmClear: b.confirmClear === true,
+        });
+      res.json({ ok: true, data });
+    } catch (e) {
+      const code = e && e.code;
+      if (code === 'empty_core' || code === 'bad_at' || code === 'not_found') {
+        return res.status(400).json({ ok: false, code, error: e.message, prevCoreCount: e.prevCoreCount });
+      }
+      if (code === 'read_failed') return res.status(503).json({ ok: false, code, error: e.message });
+      throw e;
+    }
   } catch (err) { next(err); }
 });
 

@@ -2712,16 +2712,28 @@ router.get('/reverse-sync-list', authMiddleware, adminOrMasterMiddleware, async 
     const conds = ['status = $1'];
     if (req.query.sheetId) { params.push(req.query.sheetId); conds.push(`sheet_id = $${params.length}`); }
     if (req.query.tabName) { params.push(req.query.tabName); conds.push(`tab_name = $${params.length}`); }
+    /* 종류 필터 — 화면 뱃지는 **손댈 수 있는 것만** 센다. `cancel_suspect` 는 설계상 영영 플래그로만
+       남으므로(자동취소 금지) 함께 세면 "584건"처럼 손쓸 수 없는 숫자가 떠 담당자가 곧 무시하게 된다. */
+    if (['edit', 'cancel_suspect'].includes(req.query.type)) {
+      params.push(req.query.type); conds.push(`proposal_type = $${params.length}`);
+    }
     const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const where = conds.join(' AND ');
     const { rows } = await pool.query(
       `SELECT id, os_id AS "osId", sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
               proposal_type AS "type", field, old_value AS "oldValue", new_value AS "newValue",
               status, detected_at AS "detectedAt", resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"
-         FROM reverse_sync_proposals WHERE ${conds.join(' AND ')}
+         FROM reverse_sync_proposals WHERE ${where}
         ORDER BY detected_at DESC LIMIT ${lim}`,
       params
     );
-    res.json({ ok: true, count: rows.length, items: rows });
+    /* ★★ `total` 은 **자르기 전** 개수다. 종전에는 `count: rows.length` 뿐이라 584건이 쌓여 있어도
+       limit 만큼만 보였고, 호출부는 잘렸다는 사실 자체를 알 수 없었다(조용한 누락).
+       COUNT 는 (status, proposal_type) 조건이라 인덱스를 타고, 뱃지가 limit=1 로 싸게 총계를 얻는다. */
+    const { rows: cnt } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM reverse_sync_proposals WHERE ${where}`, params);
+    const total = (cnt[0] && cnt[0].n) || 0;
+    res.json({ ok: true, count: rows.length, total, truncated: total > rows.length, items: rows });
   } catch (err) { next(err); }
 });
 
@@ -2756,6 +2768,24 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
         [p.os_id, p.new_value, editSeq]
       );
       if (!up.length) return { stale: true };
+      // ★ 같은 감지 묶음의 **형제 제안**을 살려 둔다.
+      //   한 주문에 은행·계좌·예금주가 함께 어긋나면 detect 는 같은 detected_edit_seq·detected_sig 로
+      //   제안을 여러 건 만든다(_replaceOpenProposalEdits — 실측 28건 중 세 칸이 모두 깨진 행이 있다).
+      //   그런데 바로 위 UPDATE 가 last_edit_seq 를 올리므로 두 번째 제안부터는 G6 가 stale 로 보고
+      //   **조용히 기각**해 버렸다 — 담당자가 세 칸을 다 고칠 방법이 없고, 못 고친 건은 목록에서 사라진다.
+      //   G6 가 막으려는 것은 "감지 뒤 **다른** 편집이 끼어든 경우"다. 방금 우리가 만든 편집은
+      //   같은 시트 읽기에서 나온 형제라 그 스냅샷을 무효화하지 않는다 → seq 만 이월한다.
+      //   detected_sig 까지 같을 때만 이월한다(다른 감지 회차의 제안은 그대로 stale 로 남아야 한다).
+      //   detected_edit_seq 가 null 인 제안은 애초에 G6 검사 대상이 아니므로 건드리지 않는다.
+      if (p.detected_edit_seq != null) {
+        await pool.query(
+          `UPDATE reverse_sync_proposals SET detected_edit_seq = $3
+             WHERE os_id = $1 AND id <> $2 AND status = 'open' AND proposal_type = 'edit'
+               AND detected_edit_seq = $4
+               AND detected_sig IS NOT DISTINCT FROM $5`,
+          [p.os_id, p.id, editSeq, p.detected_edit_seq, p.detected_sig]
+        );
+      }
       await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq, edits: [{ field: p.field, oldValue: p.old_value, newValue: p.new_value }] });
       return { mirrorStatus: up[0].mirror_status };
     });
@@ -3700,6 +3730,74 @@ router.post('/manager-cleanup', authMiddleware, adminOrMasterMiddleware, async (
       updated += rowCount;
     }
     logger.info(`[manager-cleanup] 담당자 표기 정리 ${updated}건 (${preview.map(p => `${p.table}:${p.from}→${p.to}`).join(' · ')})`);
+    res.json({ ok: true, dryRun: false, total, preview, updated });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/delivery-type-cleanup — 배송유형 칸의 **옛 어휘**를 표준 5종으로 정리
+//
+//   배경(2026-08-24 사용자 확정): 배송유형 어휘가 화면마다 갈려 있었다 —
+//     현행 모집공고 모달은 실배송·빈박스·택배발송대행인데, 인라인 공고수정 모달과
+//     구형 관리자 화면은 `빈택배`·`회수건` 을 저장하고 있었다. 그렇게 저장된 값은
+//     현행 모달 select 에 해당 option 이 없어 **다시 열면 빈 값으로 보이고, 아무것도
+//     안 건드리고 저장만 눌러도 조용히 지워질 수 있다**(COALESCE 가 빈 문자열은 안 막는다).
+//
+//   ★★ 판정은 `utils/deliveryType.canonicalDeliveryValue` **단일 출처**다 — SQL 에 어휘를
+//      박지 않는다. 그래서 표기 흔들림(`빈 택배`·`회수 건`)도 같은 규칙으로 접히고,
+//      어휘가 늘면 이 창구가 자동으로 따라온다.
+//   ★★ **접히는 값만** 바꾼다 — 모르는 값(`기타배송(박스)`)은 손대지 않는다(빈 값으로
+//      접으면 막으려던 것보다 큰 손실). 이미 표준형인 행도 대상이 아니다.
+//   ★★ **부속정보가 붙은 문장은 대상이 아니다** — `회수(회수택배사: …)` 는 원문이 곧 정보라
+//      기본형으로 줄이면 회수택배사가 증발한다(canonicalDeliveryValue 가 원문을 그대로 돌려준다).
+//   ★ 쓰기 표면 = `delivery_type` **한 칸**뿐. `updated_at` 도 건드리지 않는다 — 표기 통일이지
+//      내용 변경이 아니라, 타임스탬프를 흔들면 그것을 tiebreak 로 쓰는 곳이 함께 움직인다.
+//   ★ 기존 행을 건드리므로 **기본 dryRun**(담당자 표기 정리와 같은 규율) — 사람이 숫자를 먼저
+//      보고 [적용하기]. 안 돌려도 안전하다(읽을 때 접어서 판정하므로 화면·판정은 이미 정상).
+//
+//   body: { dryRun? = true } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+/** 정리 대상 — 배송유형 칸을 가진 표. ★ 이름은 코드 안 리터럴이라 주입 여지가 없다. */
+const DELIVERY_TYPE_TABLES = [
+  { table: 'tab_configs',       label: '작업 탭 배송유형' },
+  { table: 'recruit_campaigns', label: '모집공고 배송유형' },
+  { table: 'work_orders',       label: '작업오더 배송유형' },
+];
+router.post('/delivery-type-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { canonicalDeliveryValue } = require('../utils/deliveryType');
+    const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
+
+    const preview = [];
+    for (const t of DELIVERY_TYPE_TABLES) {
+      const { rows } = await pool.query(
+        `SELECT delivery_type AS raw, COUNT(*)::int AS cnt
+           FROM ${t.table}
+          WHERE COALESCE(btrim(delivery_type), '') <> ''
+          GROUP BY delivery_type
+          ORDER BY delivery_type`);
+      for (const r of rows) {
+        const std = canonicalDeliveryValue(r.raw);
+        if (!std || std === r.raw) continue;   // 판정 밖 값·이미 표준형·부속 문장 = 대상 아님
+        preview.push({ table: t.table, label: t.label, from: r.raw, to: std, cnt: r.cnt });
+      }
+    }
+    const total = preview.reduce((a, r) => a + r.cnt, 0);
+    if (dryRun || total === 0) {
+      return res.json({ ok: true, dryRun: true, total, preview,
+        note: total === 0 ? '정리할 옛 배송유형 표기가 없습니다.'
+                          : '실제 적용하려면 {dryRun:false} 로 다시 호출하세요.' });
+    }
+
+    let updated = 0;
+    for (const p of preview) {
+      // ★ 정확일치로만 바꾼다 — 미리보기가 보여 준 그 값만 손댄다.
+      const { rowCount } = await pool.query(
+        `UPDATE ${p.table} SET delivery_type = $2 WHERE delivery_type = $1`, [p.from, p.to]);
+      p.updated = rowCount;
+      updated += rowCount;
+    }
+    logger.info(`[delivery-type-cleanup] 배송유형 표기 정리 ${updated}건 (${preview.map(x => `${x.table}:${x.from}→${x.to}`).join(' · ')})`);
     res.json({ ok: true, dryRun: false, total, preview, updated });
   } catch (err) { next(err); }
 });

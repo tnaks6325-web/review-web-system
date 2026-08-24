@@ -190,7 +190,8 @@ async function run() {
   /* ═══ 5. 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ═══ */
   ok('첫 화면 기본값 = 대시보드(STATE.advView:\'dash\')', /advView:'dash'/.test(src));
   ok('_renderAdvHome 이 advView 로 대시보드/전체 작업/브랜드 관리를 분기한다',
-    /if\(v==='list'\) _renderAdvList\(\); else if\(v==='brands'&&!STATE\.brandId\) _renderAdvBrands\(\); else _renderAdvDash\(\);/.test(src));
+    /if\(v==='brands'&&!STATE\.brandId\) return _renderAdvBrands\(\);/.test(src)
+    && /if\(v==='list'\) _renderAdvList\(\); else _renderAdvDash\(\);/.test(src));
   ok('사이드바 상단 = [대시보드] · [전체 작업] 2줄', /onclick="advHome\('dash'\)"[\s\S]{0,120}대시보드/.test(src) && /onclick="advHome\('list'\)"[\s\S]{0,120}전체 작업/.test(src));
   ok('사이드바 작업 목록을 진행 중 / 완료 그룹으로 나눈다',
     /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));
@@ -364,9 +365,29 @@ async function run() {
       && !/campaignId|workOrderId|campaignCount/.test(blk)
       && /productName|productUrl|schedule|purchaseWindow|recruitTotal|dailyLimit|payAmount|channel|inflowType|reviewTypeLabel/.test(blk);
   })());
+  /* ★★ 담당 2인(사용자 확정 2026-08-24) — 업체 화면에도 「담당 AE팀 황운하 / 관리자 만두」.
+     ★ 관리자는 **닉네임**으로만 나간다 — 실명(`adminRaw`)은 렌즈가 폐기하고, 닉네임이 없으면
+       빈 문자열(= 화면이 라벨만 적음)로 fail-closed. 리뷰어 화면의 `닉네임 || '관리자'` 와 같은 규율.
+     ★ **"실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 을 구분**한다 — 전자를 null 로 접으면
+       담당자가 없는 작업처럼 보인다. */
+  ok('★ 렌즈가 관리자 실명을 지우고 fail-closed 로 완결한다', (() => {
+    const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    const i = SVC.indexOf('function _condAdvertiserLens(');
+    const blk = SVC.slice(i, SVC.indexOf('\n}', i));
+    return i > 0
+      && /adminNick: m\.adminNick \|\| \(raw \? '' : null\)/.test(blk)   // 있으면 라벨만 · 없으면 조각 자체 없음
+      && /adminRaw: null/.test(blk);                                    // 실명은 절대 안 나간다
+  })());
+  ok('★ 담당 행이 업체 표기 항목에 들어 있다', (() => {
+    const m = src.match(/\.filter\(\(\[k\]\)=>!isAdv\|\|\[([^\]]*)\]\.includes\(k\)\)/);
+    return !!m && /'@mgr'/.test(m[1]);
+  })());
   ok('★ 광고주 분기가 그 렌즈를 거친다(날것 `_cond` 금지)', (() => {
     const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
-    return /res\.condition = _condAdvertiserLens\(_cond\)/.test(SVC);
+    // ⚠ 2026-08-24: 브랜드 담당자(135)로 렌즈가 세션 종류를 받는다 — 검사 의미는 그대로(날것 금지)
+    //    이고, **브랜드 세션 여부가 토큰에서 온 값으로 전달되는지**까지 함께 고정한다.
+    return /res\.condition = _condAdvertiserLens\(_cond, \{ brandSession: !!brandId \}\)/.test(SVC)
+      && !/res\.condition = _cond;[\s\S]{0,200}role === 'advertiser'/.test(SVC);
   })());
   ok('★ 이미지 URL 은 bare API_BASE 로 만든다(window.API_BASE_URL 은 최상위 const 라 항상 undefined)', (() => {
     const i = src.indexOf('function _rvUrl(');

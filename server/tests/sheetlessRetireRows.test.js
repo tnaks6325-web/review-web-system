@@ -212,9 +212,17 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
     ok('★★ 화면에 줄 정리 창구가 없다',
       !/openRetireModal|_wrCanRetire|_wrRender|wrToggle/.test(wd));
     ok('★ 전용 CSS 도 남기지 않는다(.wbl-wrt)', !/\.wbl-wrt\{/.test(wd));
-    ok('★★ 남은 정리 창구는 [♻ 중복 정리] 하나 — admin/master 전용(서버와 1:1)',
-      /function _ddCan\(\)\{[\s\S]{0,200}STATE\.role === 'master' \|\| STATE\.role === 'admin'/.test(wd)
-      && /router\.post\('\/worktable\/dedupe-rows',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(routes));
+    /* ★★ 권한 ≠ 노출 (사용자 확정 2026-08-24 — 08-23 의 1:1 을 되돌림):
+         서버 = adminOrMaster · 화면 버튼 = **master 전용**. 화면이 서버보다 **일부러 좁다**.
+       ★★★ 고정하는 것은 **방향**이다 — 화면이 서버보다 넓어지는 것만 금지(좁은 것은 의도).
+         `_isInternalRole()`(staff) 로 넓히면 AE 에게 "눌러도 403" 인 죽은 버튼이 생긴다. */
+    ok('★★ 남은 정리 창구는 [♻ 중복 정리] 하나 — 서버는 adminOrMaster',
+      /router\.post\('\/worktable\/dedupe-rows',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(routes));
+    const ddCan = wd.slice(wd.indexOf('function _ddCan()'), wd.indexOf('function closeDedupeModal'));
+    ok('★★ 화면 버튼은 master 전용(admin 에게 내밀지 않는다)',
+      /STATE\.role === 'master'/.test(ddCan) && !/'admin'/.test(ddCan));
+    ok('★★★ 화면이 서버보다 넓지 않다(staff·internalRole 금지)',
+      !/_isInternalRole|'staff'/.test(ddCan));
 
     /* 아래 두 건은 탈시트 전환 화면(줄 정리와 무관) — 그대로 유지한다. */
     ok('★ 전환 화면이 연도 미상 건수를 말한다(조용한 누락 금지)',

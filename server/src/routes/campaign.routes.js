@@ -27,6 +27,8 @@ const {
 //   (화면마다 규칙을 두면 "공고는 구매확정인데 검수는 리뷰"로 갈라진다)
 const { normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix, validateReviewTypeMix, validateOptionReviewTypeMix } = require('../utils/reviewTypeMix');
+const { normalizeDeliveryTypeMix, validateDeliveryTypeMix } = require('../utils/deliveryTypeMix');
+const { deliveryBaseType } = require('../utils/deliveryType');
 const { normalizeRecruitBadges } = require('../utils/recruitBadges');
 // ★ 099: 체험단 종류(리뷰/블로그) 저장 정규화 — 판정 단일 출처. 사본을 만들지 않는다.
 const { workKindForStore, resolveWorkKind, isBlogKind } = require('../utils/workKind');
@@ -207,6 +209,15 @@ function _normalizeOptionsInput(arr) {
     out.push({
       optKey,
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
+      // ★ 134 복합 작업: 선택 단위(unit)의 소속 상품명과 종류.
+      //   unit_kind='product' = 옵션 없는 상품 자체가 선택지 → 시트 옵션 칸에 쓰지 않는다(submit.routes).
+      //   모르는 값은 'option'(종전 동작) — 추측해서 상품 단위로 승격하지 않는다.
+      productName: _normOptKey(obj.productName ?? obj.product_name),
+      unitKind: (String(obj.unitKind ?? obj.unit_kind ?? '') === 'product') ? 'product' : 'option',
+      // ★ 선택지별 유입가이드 — 저장 시 1차 정화(응답 직전 재정화와 이중 적용, §03-E 규율).
+      //   빈 값 = "이 선택지 전용 가이드 없음" = 공고 공통 가이드로 접힌다(자동 폴백).
+      inflowGuideHtml: sanitizeGuideHtml(obj.inflowGuideHtml ?? obj.inflow_guide_html ?? ''),
+      inflowGuideImages: sanitizeGuideImages(obj.inflowGuideImages ?? obj.inflow_guide_images),
       payAmount: _optNum(obj.payAmount ?? obj.pay_amount),
       recruitTotal: _optNum(obj.recruitTotal ?? obj.recruit_total),
       dailyLimit: _optNum(obj.dailyLimit ?? obj.daily_limit),
@@ -236,13 +247,18 @@ async function _saveCampaignOptions(campaignId, options) {
     if (!lock.length) { await client.query('ROLLBACK'); return; }
     for (const o of options) {
       await client.query(
-        `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),NOW())
+        `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
+                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,NOW())
          ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
            option_url=EXCLUDED.option_url, pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
            daily_limit=EXCLUDED.daily_limit, review_type_mix=EXCLUDED.review_type_mix, sort_order=EXCLUDED.sort_order,
-           status=COALESCE($9, campaign_options.status), updated_at=NOW()`,
-        [campaignId, o.optKey, o.optionUrl, o.payAmount, o.recruitTotal, o.dailyLimit, JSON.stringify(o.reviewTypeMix || []), o.sortOrder, o.status]);
+           status=COALESCE($9, campaign_options.status),
+           product_name=EXCLUDED.product_name, unit_kind=EXCLUDED.unit_kind,
+           inflow_guide_html=EXCLUDED.inflow_guide_html, inflow_guide_images=EXCLUDED.inflow_guide_images,
+           updated_at=NOW()`,
+        [campaignId, o.optKey, o.optionUrl, o.payAmount, o.recruitTotal, o.dailyLimit, JSON.stringify(o.reviewTypeMix || []), o.sortOrder, o.status,
+         o.productName || '', o.unitKind || 'option', o.inflowGuideHtml || '', JSON.stringify(o.inflowGuideImages || [])]);
     }
     const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     for (const e of existing) {
@@ -305,6 +321,41 @@ async function _ensureLinkedWorktableOptionColumn(campaignId, by = 'campaign') {
   } catch (e) {
     // not_sheetless·tab_not_registered·no_headers 는 정상적인 "해당 없음" 이다.
     logger.warn(`[campaign/options] 작업표 옵션 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
+    return null;
+  }
+}
+
+/**
+ * 회수·혼합 공고 저장 시 연결된 **무시트 작업표**에 부속 열을 보장한다(135).
+ * ★ 옵션 칸 훅(_ensureLinkedWorktableOptionColumn)과 같은 자리·같은 규율 —
+ *   **절대 throw 하지 않는다**(열 보장 실패가 공고 저장을 죽이면 안 된다).
+ * ★ 열 이름·자리·배분은 worktablePlan 단일 출처(서비스가 그것을 그대로 쓴다).
+ */
+async function _ensureLinkedWorktableDeliveryColumns(campaignId, by = 'campaign') {
+  try {
+    const { rows } = await pool.query(
+      /* ★ 컬럼명 주의: recruit_campaigns 는 linked_sheet_id 다(work_orders 의 linked_tab_sheet_id 아님) —
+         옵션 칸 훅이 이 오타로 배포 이래 한 번도 안 돌았던 자리다(2026-08-23 실측). */
+      `SELECT linked_sheet_id AS "sheetId", linked_tab_name AS "tabName",
+              delivery_type, delivery_type_mix, recall_courier, recall_product
+         FROM recruit_campaigns WHERE id = $1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.sheetId || !r.tabName) return null;
+    const base = deliveryBaseType(r.delivery_type);
+    if (base !== '혼합' && base !== '회수') return null;
+    const { ensureDeliveryColumns } = require('../services/worktableDeliveryColumn.service');
+    const out = await ensureDeliveryColumns({
+      sheetId: r.sheetId, tabName: r.tabName, deliveryBase: base,
+      mix: r.delivery_type_mix, recall: { courier: r.recall_courier, product: r.recall_product },
+      dryRun: false, backfill: true, by: `campaign:${by}`,
+    });
+    if (out && ((out.headerAdded && out.headerAdded.length) || out.backfillCount)) {
+      logger.info(`[campaign/delivery] 작업표 배송 칸 정합 ${r.sheetId}/${r.tabName} 열추가=${(out.headerAdded || []).join(',')} 소급=${out.backfillCount}`);
+    }
+    return out;
+  } catch (e) {
+    // not_applicable·not_sheetless·tab_not_registered·no_headers·no_delivery_mix 는 정상적인 "해당 없음".
+    logger.warn(`[campaign/delivery] 작업표 배송 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
     return null;
   }
 }
@@ -395,23 +446,50 @@ function _applyCurrentFee(view, schedules, now) {
 /** 캠페인 옵션 뷰 목록(정렬: 활성 먼저, 마감 하단). campState 반영해 selectable 계산. 옵션 없으면 []. */
 async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   const { rows } = await db.query(
-    `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status
+    `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status,
+            product_name, unit_kind, inflow_guide_html, inflow_guide_images
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   if (!rows.length) return [];
   const counts = await fetchOptionCounts(db, campaignId, now);
-  return rows.map(r => computeOptionView(r, counts.get(r.opt_key), campState));
+  // ★ 134: 선택지별 유입가이드는 리뷰어 화면(work-detail)으로 나가는 HTML이므로 **응답 직전 재정화**
+  //   (저장 시 1차 정화와 이중 적용 — §03-E 규율. 옛 행·직접 DB 수정분을 신뢰하지 않는다).
+  return rows.map(r => {
+    const v = computeOptionView(r, counts.get(r.opt_key), campState);
+    v.inflowGuideHtml = sanitizeGuideHtml(v.inflowGuideHtml);
+    v.inflowGuideImages = sanitizeGuideImages(v.inflowGuideImages);
+    return v;
+  });
 }
 
-/** 참여 전 공개용 옵션 뷰: 옵션명+잔여만(금액은 참여 후 공개 원칙 — payAmount·상세카운트 제외). */
+/** 참여 전 공개용 옵션 뷰: 옵션명+잔여만(금액은 참여 후 공개 원칙 — payAmount·상세카운트 제외).
+ *  ★ 134: 선택지 묶음 머리에 쓸 상품명·단위 종류는 공개(민감정보 아님 — 참여 전 카드에서
+ *    "상품A의 옵션1 / 상품A의 옵션2 / 상품B" 를 구분해 보여줘야 한다).
+ *  ★★ 선택지별 유입가이드(inflowGuideHtml/Images)는 **여기에 절대 싣지 않는다** —
+ *    가이드는 종전 공통 가이드와 같이 홀드 게이트(work-detail) 뒤에서만 공개한다. */
 function _publicOptionView(v) {
   return {
     optKey: v.optKey,
+    productName: v.productName || '',
+    unitKind: v.unitKind || 'option',
     remaining: v.remaining,           // null=무제한
     todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
     status: v.status,                 // open|soldout|today_done|closed
     selectable: v.selectable,
   };
+}
+
+/** 홀드 게이트 뒤(work-detail·관리자 미리보기)로 나가는 **옵션 목록**에서 선택지별 유입가이드를 덜어낸다(134).
+ *  목록은 옵션 변경 시트·잠금표시용이라 가이드를 쓰지 않는다 — 리뷰어가 고르지도 않은 선택지의
+ *  안내 HTML·이미지를 통째로 실어 보낼 이유가 없다(데이터 최소화 + 페이로드).
+ *  ★★ `selectedOption` 은 목록과 **같은 객체를 가리키므로 반드시 먼저 골라 두고** 목록만 사본으로 바꾼다
+ *    (여기서 원본을 지우면 내가 참여한 선택지의 가이드까지 함께 사라진다).
+ *  ★ 제거는 rest 문법(가산적) — computeOptionView 에 필드가 늘어도 그대로 흐른다. */
+function _optionListForReviewer(options) {
+  return (options || []).map(v => {
+    const { inflowGuideHtml, inflowGuideImages, ...rest } = v || {};
+    return rest;
+  });
 }
 
 /** 목록용 배치 옵션 조회(캠페인 N개 → 옵션행+카운트 2쿼리). 5초 리스트 캐시로 비용 상각.
@@ -422,7 +500,7 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   if (!list.length) return out;
   const dayStart = kstDayStartUtc(now).toISOString();
   const { rows: optRows } = await db.query(
-    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status
+    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
   const { rows: cntRows } = await db.query(
@@ -452,10 +530,17 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
 async function _loadOptionsRaw(db, campaignId) {
   const { rows } = await db.query(
     `SELECT opt_key AS "optKey", option_url AS "optionUrl", pay_amount AS "payAmount", recruit_total AS "recruitTotal", review_type_mix AS "reviewTypeMix",
-            daily_limit AS "dailyLimit", sort_order AS "sortOrder", status
+            daily_limit AS "dailyLimit", sort_order AS "sortOrder", status,
+            product_name AS "productName", unit_kind AS "unitKind",
+            inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages"
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
-  return rows;
+  // ★ 응답 직전 재정화(§03-E 이중 적용) — 저장 시 정화본이라도 옛 행·직접 DB 수정분을 신뢰하지 않는다.
+  return rows.map(r => ({
+    ...r,
+    inflowGuideHtml: sanitizeGuideHtml(r.inflowGuideHtml),
+    inflowGuideImages: sanitizeGuideImages(r.inflowGuideImages),
+  }));
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1104,6 +1189,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now, scheduleFor(_sm, camp));
       options = await _loadOptionViews(pool, id, st, now);
       if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
+      options = _optionListForReviewer(options);   // ★ 고른 뒤에 덜어낸다(selectedOption 은 원본 유지)
     }
     // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상일 때만 허용
     const canChangeOption = validHold && options.length >= 2;
@@ -2057,6 +2143,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       carry_mode, // ★ 098: 이월 반영 방식 — 발행 시 세그먼트 선택이 조용히 'auto'로 떨어지지 않게(코드리뷰 M1)
       work_kind, // ★ 099: 체험단 종류(review|blog) — 빈 값=리뷰체험단(기존 동작). 블로그면 리뷰타입 미사용
       cash_receipt_required, // 모집공고 직접 설정 — 무시트 공고도 구매 안내·배지에 반영
+      // ★ 135: 회수·혼합 부속정보. 배송유형이 그 기본형일 때만 저장하고, 아니면 비운다
+      //   (작업오더 접수의 _deliveryMixJson·_recallFields 와 같은 규율 — 유형을 바꾸면
+      //    옛 조합이 남아 작업표가 유령 배분을 돈다).
+      delivery_type_mix, recall_courier, recall_product,
     } = req.body;
 
     const requestedSkipWeekends = req.body.skip_weekends === true;
@@ -2070,6 +2160,16 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const reviewMixState = normalizeReviewTypeMix(review_type_mix);
     const reviewMixError = validateReviewTypeMix(normalizedReviewType, reviewMixState, recruit_total, { requireWhenMixed: true });
     if (reviewMixError) return res.status(400).json({ ok: false, error: reviewMixError });
+    // ★ 135: 배송 부속정보 — 리뷰 혼합과 같은 모양(합계 = 총 건수).
+    const deliveryBase = deliveryBaseType(delivery_type);
+    const deliveryMixState = normalizeDeliveryTypeMix(delivery_type_mix);
+    const deliveryMixError = validateDeliveryTypeMix(deliveryBase, deliveryMixState, recruit_total, { requireWhenMixed: true });
+    if (deliveryMixError) return res.status(400).json({ ok: false, error: deliveryMixError });
+    // ★ 기본형이 아니면 비운다 — "혼합으로 저장했다가 실배송으로 바꾼" 공고에 옛 조합이 남으면
+    //   작업표 열 보장이 있지도 않은 배분을 돌린다(order.routes 와 같은 규율).
+    const storeDeliveryMix = deliveryBase === '혼합' ? (deliveryMixState.mix || []) : [];
+    const storeRecallCourier = deliveryBase === '회수' ? String(recall_courier || '').trim() : '';
+    const storeRecallProduct = deliveryBase === '회수' ? String(recall_product || '').trim() : '';
     const normOpts = _normalizeOptionsInput(options);
     if (normalizedReviewType !== 'mixed' && normOpts) normOpts.forEach(option => { option.reviewTypeMix = []; });
     const optionReviewMixError = validateOptionReviewTypeMix(normalizedReviewType, normOpts);
@@ -2125,9 +2225,11 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
         start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
-        transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, work_kind, skip_weekends, cash_receipt_required)
+        transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, work_kind, skip_weekends, cash_receipt_required,
+        delivery_type_mix, recall_courier, recall_product)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
+               $45,$46,$47)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -2175,12 +2277,16 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         workKindForStore(work_kind),                            // ★ 099: 체험단 종류. 미전송=''(=리뷰)로 저장 — 기존 동작 불변
         effectiveSkipWeekends,
         cash_receipt_required === true,
+        JSON.stringify(storeDeliveryMix),                       // ★ 135: 혼합이 아니면 [] (유형 전환 시 옛 조합 잔류 차단)
+        storeRecallCourier,                                     // ★ 135: 회수가 아니면 '' — NOT NULL 컬럼이라 null 금지
+        storeRecallProduct,
       ]
     );
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
     if (normOpts) await _ensureLinkedWorktableOptionColumn(rows[0].id, 'create');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
+    await _ensureLinkedWorktableDeliveryColumns(rows[0].id, 'create');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
     // 작업오더와 모집공고는 별도 값이 아니라 같은 목표 인원이다. 생성 시에도 서버가
     // 역방향 링크와 작업오더 정원을 함께 저장해, 프론트 후속 호출 실패로 드리프트하지 않게 한다.
     let quotaSync = null;
@@ -2250,6 +2356,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       carry_mode, // ★ 098: 이월 반영 방식 'auto'|'hold' — undefined=유지
       cash_receipt_required, // undefined=유지 / true·false=모집공고 직접 설정
       skip_weekends, // undefined=유지 / true·false=주말 게시 직접 설정
+      // ★ 135: 회수·혼합 부속정보 — undefined=유지(부속 칸 없는 화면이 저장해도 안 지워진다).
+      delivery_type_mix, recall_courier, recall_product,
     } = req.body;
 
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
@@ -2292,6 +2400,42 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       if (effectiveReviewType !== 'mixed') reviewMixForStore = [];
       else if (reviewMixState.provided) reviewMixForStore = reviewMixState.mix;
       reviewMixCurrent = { reviewType: effectiveReviewType, reviewTypeMix: reviewMixState.mix || [] };
+    }
+
+    /* ★ 135: 배송 부속정보 — 리뷰 혼합과 **같은 모양**(현재값 병합 → 검증 → 기본형 아니면 비움).
+       null 을 넣으면 아래 CASE 센티널이 "유지"로 읽는다(미전송 = 변경 없음). */
+    let deliveryMixForStore = null;
+    let recallCourierForStore = null;
+    let recallProductForStore = null;
+    if (delivery_type !== undefined || delivery_type_mix !== undefined
+        || recall_courier !== undefined || recall_product !== undefined || recruit_total !== undefined) {
+      const { rows: curDvRows } = await pool.query(
+        `SELECT delivery_type, delivery_type_mix, recall_courier, recall_product, recruit_total
+           FROM recruit_campaigns WHERE id = $1`, [id]
+      );
+      const curDv = curDvRows[0];
+      if (!curDv) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+      const effDeliveryBase = deliveryBaseType(
+        (delivery_type === undefined || delivery_type === null) ? curDv.delivery_type : delivery_type
+      );
+      const dvMixState = normalizeDeliveryTypeMix(
+        delivery_type_mix === undefined ? curDv.delivery_type_mix : delivery_type_mix
+      );
+      const effTotal = (recruit_total === undefined || recruit_total === null || recruit_total === '')
+        ? curDv.recruit_total
+        : recruit_total;
+      const dvMixError = validateDeliveryTypeMix(effDeliveryBase, dvMixState, effTotal, {
+        requireWhenMixed: delivery_type !== undefined || recruit_total !== undefined,
+      });
+      if (dvMixError) return res.status(400).json({ ok: false, error: dvMixError });
+      // ★ 기본형을 벗어나면 남아 있던 부속정보를 함께 지운다(리뷰 혼합과 같은 규율).
+      if (effDeliveryBase !== '혼합') deliveryMixForStore = [];
+      else if (dvMixState.provided) deliveryMixForStore = dvMixState.mix;
+      if (effDeliveryBase !== '회수') { recallCourierForStore = ''; recallProductForStore = ''; }
+      else {
+        if (recall_courier !== undefined) recallCourierForStore = String(recall_courier || '').trim();
+        if (recall_product !== undefined) recallProductForStore = String(recall_product || '').trim();
+      }
     }
 
     if (normOpts) {
@@ -2486,6 +2630,12 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         work_kind = CASE WHEN $42::text IS NULL THEN work_kind ELSE $42::text END,
         skip_weekends = CASE WHEN $43::boolean IS NULL THEN skip_weekends ELSE $43::boolean END,
         cash_receipt_required = COALESCE($44::boolean, cash_receipt_required),
+        -- ★ 135: 회수·혼합 부속정보. null=유지 — 부속 칸이 없는 화면(리뷰어앱 인라인 수정 등)이
+        --   저장해도 값이 조용히 지워지지 않는다(리뷰 혼합·옵션표와 같은 원칙).
+        --   NOT NULL 컬럼이라 '지움'은 빈 배열·빈 문자열로 표현한다.
+        delivery_type_mix = CASE WHEN $46::jsonb IS NULL THEN delivery_type_mix ELSE $46::jsonb END,
+        recall_courier = CASE WHEN $47::text IS NULL THEN recall_courier ELSE $47::text END,
+        recall_product = CASE WHEN $48::text IS NULL THEN recall_product ELSE $48::text END,
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -2530,7 +2680,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (work_kind === undefined || work_kind === null) ? null : workKindForStore(work_kind),
         (skip_weekends === undefined || skip_weekends === null) ? null : skip_weekends === true,
         (cash_receipt_required === undefined || cash_receipt_required === null) ? null : cash_receipt_required === true,
-        intentionallyUnlinked,
+        intentionallyUnlinked,                                   // $45
+        // $46~$48 ★ 135: null=유지 / []·''=해제(기본형을 벗어나면 위에서 그렇게 정해진다).
+        deliveryMixForStore === null ? null : JSON.stringify(deliveryMixForStore),
+        recallCourierForStore,
+        recallProductForStore,
       ]
     );
 
@@ -2541,6 +2695,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
     if (normOpts) await _ensureLinkedWorktableOptionColumn(id, 'update');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
+    await _ensureLinkedWorktableDeliveryColumns(id, 'update');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
     // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
     //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.
     const normFees = normalizeFeeSchedules(fee_schedules);
@@ -2804,9 +2959,10 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
 
     const now = new Date();
     const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now);
-    const options = await _loadOptionViews(pool, id, st, now);
+    const optionsRaw = await _loadOptionViews(pool, id, st, now);
     // 미리보기용 대표 옵션 — 선택 가능한 첫 옵션(없으면 첫 옵션). 실제 선택이 아니라 화면 예시.
-    const sample = options.find(o => o.selectable) || options[0] || null;
+    const sample = optionsRaw.find(o => o.selectable) || optionsRaw[0] || null;
+    const options = _optionListForReviewer(optionsRaw);   // ★ 실제 리뷰어 응답과 같은 모양(미리보기 ≠ 실화면 금지)
     const workDetail = sanitizeWorkDetail(camp.work_detail);
     // 미리보기에도 모집공고 직접 설정을 우선 적용한다.
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';

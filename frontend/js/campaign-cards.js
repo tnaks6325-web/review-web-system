@@ -21,6 +21,20 @@
     if (Number.isFinite(t)) _serverOffsetMs = t - Date.now();
   }
 
+  /* ★ 배송유형 배지는 **기본형만** 그린다 — 회수·혼합은 부속정보가 붙은 문장으로 저장될 수 있어
+     ('회수(회수택배사: CJ대한통운, 회수상품명칭: …)') 원문을 그대로 그리면 배지가 카드를 덮는다.
+     ★★ **아는 어휘일 때만** 접는다 — 모르는 값('기타배송(박스)')을 괄호 앞에서 잘라내면
+       그건 다듬기가 아니라 **정보 삭제**다. 판정 불가는 원문 그대로 통과시킨다.
+     ★ 부속정보는 참여 후 작업내용에서 안내한다(참여 전 카드에 업체 물류 정보를 싣지 않는다). */
+  const _DL_BASES = ['실배송', '빈박스', '택배발송대행', '회수', '혼합'];
+  const _dlBadge = (v) => {
+    const raw = String(v == null ? '' : v).trim();
+    const cut = raw.indexOf('(');
+    if (cut <= 0) return raw;
+    const head = raw.slice(0, cut).trim();
+    return _DL_BASES.indexOf(head) >= 0 ? head : raw;
+  };
+
   function _esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -635,7 +649,7 @@
     const isBlogCard = c.work_kind === 'blog';
     const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>` : '';
     const badges = (channel || c.delivery_type || crChip || blogChip)
-      ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
+      ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(_dlBadge(c.delivery_type))}</span>` : ''}${crChip}</div>`
       : '';
     const isDraft = admin && (c.status || 'draft') === 'draft';
     // 오늘 마감 카드는 썸네일 가운데 카운트다운 오버레이가 같은 말을 하므로 리본을 겹치지 않는다
@@ -1025,9 +1039,11 @@
           <div><label class="cae-lb">배송 형태</label>
             <select id="cae_delivery" class="cae-in">
               <option value="">선택 안 함</option>
-              <option value="빈택배">빈택배</option>
               <option value="실배송">실배송</option>
-              <option value="회수건">회수건</option>
+              <option value="빈박스">빈박스</option>
+              <option value="택배발송대행">택배발송대행</option>
+              <option value="회수">회수</option>
+              <option value="혼합">혼합</option>
             </select></div>
         </div>
         <div class="cae-g2">

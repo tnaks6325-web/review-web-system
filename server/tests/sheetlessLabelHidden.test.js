@@ -83,7 +83,14 @@ console.log('\n[B] 작업보드 머리 3종');
      `원본` 열(`o.sourceOfTruth==='db'?'Track B':'시트'`)과 전환 토스트가 걸린다.
      그 둘은 다른 화면·다른 목적이라 이번 정리 대상이 아니다. */
   ok('★ 작업보드 상단 `원본: 시트` 는 어떤 경우에도 안 그린다', (() => {
-    const i = WD.indexOf('const sotBadge='), j = WD.indexOf('const flipBtn=', i);
+    const i = WD.indexOf('const sotBadge=');
+    /* 끝 앵커 = **전환 버튼 대입문**. 그 버튼 문구에 「시트로 되돌리기」가 들어 있어
+       배지 블록에 포함시키면 이 검사가 제 뜻을 잃는다. 대입 이름은 두 가지가 있다:
+       지역변수(`const flipBtn=`) / [⋯] 메뉴 재렌더용 STATE 보관(`STATE._flipBtnHtml=`).
+       **둘 중 먼저 나오는 것**을 끝으로 삼는다 — 이름이 바뀌어도 보는 범위는 같다. */
+    const cands = ['const flipBtn=', 'STATE._flipBtnHtml=']
+      .map(k => WD.indexOf(k, i)).filter(x => x > i);
+    const j = cands.length ? Math.min(...cands) : -1;
     const blk = WD.slice(i, j);
     return i > 0 && j > i && !/시트/.test(blk);
   })());

@@ -50,7 +50,7 @@ t('공유 모듈이 라벨·설명·전이표·접수판정을 갖는다', () =>
 t('★ 사본 금지 — workdesk·index-app 어디에도 두 번째 표가 없다', () => {
   assert.ok(!/const WO_STATUS\s*=/.test(HTML), 'workdesk 에 WO_STATUS 사본이 되살아났다');
   [HTML, APP].forEach((src, i) => {
-    ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_MAP', 'WO_CHANNEL_HOSTS'].forEach(n =>
+    ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_TYPES', 'WO_CHANNEL_HOSTS'].forEach(n =>
       assert.ok(!new RegExp('(const|let|var)\\s+' + n + '\\s*=').test(src),
         (i ? 'index-app' : 'workdesk') + ' 에 ' + n + ' 사본이 있다'));
   });
@@ -304,9 +304,11 @@ const callDetail = (req) => new Promise((resolve) => {
   t('legacy campaign trusted detail keeps stored options', () => {
     assert.ok(legacyTrusted.body && legacyTrusted.body.ok);
     assert.strictEqual(legacyTrusted.body.data.participation_mode, false);
+    // 134: _loadOptionsRaw 가 선택지별 유입가이드를 항상 정화해 실어 준다(빈 값이면 빈 문자열/빈 배열).
     assert.deepStrictEqual(legacyTrusted.body.options, [{
       optKey: 'standard option', optionUrl: 'https://example.com/option', payAmount: 12000,
       recruitTotal: 15, dailyLimit: 5, status: 'active',
+      inflowGuideHtml: '', inflowGuideImages: [],
     }]);
   });
   t('\u2605 플래그는 요청으로 만들 수 없다 — 오염 방어(자기 프로퍼티만 인정)', () => {

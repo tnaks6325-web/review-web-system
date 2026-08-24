@@ -837,9 +837,12 @@ async function _authoritativeHold(ctx) {
     const { rows } = await pool.query(
       `SELECT ca.phone8, ca.option_key, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id,
+              co.unit_kind AS unit_kind,
               (so.id IS NOT NULL) AS sub_alive,
               (lo.id IS NOT NULL) AS late_alive
          FROM campaign_applications ca
+         LEFT JOIN campaign_options co
+                ON co.campaign_id = ca.campaign_id AND co.opt_key = ca.option_key
          LEFT JOIN order_submissions so
                 ON so.id = ca.order_submission_id AND so.deleted_at IS NULL
          LEFT JOIN order_submissions lo
@@ -856,6 +859,9 @@ async function _authoritativeHold(ctx) {
       ctx.phone8 = srv;
     }
     ctx.optionKey = rows[0].option_key || null;
+    // ★ 134 복합 작업: 이 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이지 옵션명이 아니다.
+    //   같은 왕복에서 읽어 온다(순증 0). 모르면 'option'(종전 동작 — 추측 승격 금지).
+    ctx.unitKind = String(rows[0].unit_kind || '') === 'product' ? 'product' : 'option';
     // ★ 101: 블로그 주소도 **서버가 홀드에서 읽는다**(클라 전달 금지 — 옵션 서버권위와 같은 규율).
     //   같은 왕복이라 순증 0. 이 값이 주문 원장 INSERT 와 시트 '블로그URL' 칸으로 그대로 간다.
     ctx.blogUrl = rows[0].blog_url || null;
@@ -917,6 +923,24 @@ router.post('/order', async (req, res, next) => {
             memo, selectedOptKey, isCoupang, ncMode,
             // ★ 슬롯 매칭 파라미터 (find-slot에서 받은 값)
             slotRowNumber, slotInadName, loginPhone8, loginName } = b;
+
+    /* ★★ 주문자 = 로그인한 리뷰어 이름 (사용자 확정 2026-08-24 · "가" 안)
+       ──────────────────────────────────────────────────────────────
+       리뷰웹시스템[3버전]에서는 **작업보드의 참여자 칸이 주문자 자리를 대체**한다
+       (`sheetlessOrder` 가 참여자 이름을 `loginName || orderer || recipient` 로 정한다).
+       그래서 구매양식에서 주문자를 한 번 더 치게 하지 않고 로그인 이름으로 채운다.
+
+       ★ **값이 오면 그 값이 이긴다**(빈 값일 때만 채운다) — 두 경로가 이 규칙에 기댄다:
+         ㉮ 인애드명단이 있는 탭 = 리뷰어가 명단에서 고른 이름(그 이름이 행 배정·옵션 잠금의
+            근거다 — `buildCandidateRows` 의 인애드 열 매칭) ㉯ 타계정 다건 제출 = 카드마다
+            그 명의 이름이 프리필된다. 둘 다 로그인 이름으로 덮으면 기존 동작이 깨진다.
+       ★ **로그인 이름이 없으면 채우지 않는다**(레거시·관리자 경유 = 빈 값 그대로).
+         ⚠ 그 경로는 애초에 주문자 필수 검증 대상이 아니다 — 아래 검증 블록 전체가
+         `if (_idPhone8.length === 8)`(리뷰어 제출) 안에 있다. 이 변경 전과 동일하다
+         (가상테스트 실측: loginName 없이 주문자 없이 제출해도 종전처럼 200).
+       ★ 이 값 하나를 아래 전 소비처(필수검증·orderData·SSE)가 함께 쓴다 — 한 곳만 쓰면
+         "검증은 통과인데 원장은 빈 주문자"로 갈린다. */
+    const _orderer = String(orderer || '').trim() || String(loginName || '').trim();
 
     // ═══ 신원 게이트: 내정보(사용자명/전화/주소/계좌) 완비 + 제출정보 유사도 검증 ═══
     // - loginPhone8이 있는 리뷰어 제출에만 적용 (레거시/관리자 경유 제출은 통과)
@@ -984,7 +1008,7 @@ router.post('/order', async (req, res, next) => {
 
           // ★ 서버측 필수필드 검증 (주문번호·비고 제외 전 필드 — 리뷰어 제출에만 적용, 프론트 우회 차단)
           const _reqFields = [
-            [orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
+            [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
             [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
           ];
           const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, l]) => l);
@@ -1075,10 +1099,19 @@ router.post('/order', async (req, res, next) => {
     let effectiveOptKey = selectedOptKey;
     if (holdCtx && holdCtx.optionKey) effectiveOptKey = holdCtx.optionKey;
 
+    // ★★ 134 복합 작업 — 시트 옵션 칸에 쓸 값과 홀드 대조값을 구분한다.
+    //   옵션 없는 상품(unit_kind='product')의 선택 단위 키는 **상품명**이라, 그대로 시트 '옵션' 칸에
+    //   쓰면 8/3 "상품명이 리뷰옵션 칸을 덮은" 사고가 그대로 재현된다. 그래서 시트로 나가는 값만 비운다.
+    //   ★ 빈 값 = "안 고름" 과 같은 경로 = orderLedger 의 existingOptionKeyAt 가 배정 행의 기존
+    //     옵션값을 되쓴다(칸을 지우지 않는다 — 7/31 규율).
+    //   ★ 홀드 대조(expectedOptKey)는 **원래 단위 키 그대로** 넘긴다 — 비우면 정상 건마다 옵션
+    //     드리프트 warn 이 떠 관제 신호가 늑대소년이 된다.
+    const sheetOptKey = (holdCtx && holdCtx.unitKind === 'product') ? '' : effectiveOptKey;
+
     // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
     //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
-    const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
-                        selectedOptKey: effectiveOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '' };
+    const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
+                        selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '' };
     const ledger = await createOrderLedgerEntry({
       sheetId: orderScope.sheetId,
       tabName: orderScope.tabName,
@@ -1237,7 +1270,7 @@ router.post('/order', async (req, res, next) => {
 
     emitOrderSubmit({
       tabName, sheetId,
-      orderer: orderer || '', recipient: recipient || '',
+      orderer: _orderer || '', recipient: recipient || '',
       dbSaved: true, sheetsWritten: false, queued, usedSlot: !!slotRowNumber,
       sheetRow: ledger.sheetRow,
     });

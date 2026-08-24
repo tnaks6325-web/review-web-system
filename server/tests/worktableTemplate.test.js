@@ -314,14 +314,22 @@ ok('★ 공통 = 표준 열 한 벌(별도 개념 없음) — core 배열을 두
   && /function _wtSyncColumns[\s\S]{0,600}_wtRenderChans\(\)/.test(setJs));
 ok('★ 공통에 이미 있는 열을 채널에 또 넣지 못한다(작업표에 같은 열 2번 생성 차단)',
   /이미 공통 열입니다/.test(setJs));
-ok('공통 기본값 프리셋 15열이 사용자 확정 목록과 일치한다',
+ok('공통 기본값 프리셋 14열이 사용자 확정 목록과 일치한다',
   (() => {
     const m = /var WT_PRESET_CORE = \[([\s\S]*?)\];/.exec(setJs);
     if (!m) return false;
     const got = m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
-    const want = ['번호','구매일자','주문자','수취인','ID','연락처','주소','은행','계좌번호',
+    const want = ['번호','구매일자','수취인','ID','연락처','주소','은행','계좌번호',
                   '예금주','결제금액','주문번호','리뷰','입금','비고'];   // ★ 리뷰제출 칸의 표준 이름 = '리뷰'(2026-08-21)
     return got.length === want.length && got.every((v, i) => v === want[i]);
+  })());
+/* ★★ `주문자` 는 프리셋에 없다(사용자 확정 2026-08-24) — 참여자 칸이 그 자리를 대체한다.
+   버튼 한 번에 되살아나면 그 확정이 조용히 뒤집힌다(되살리려면 이 가드부터 고쳐야 한다).
+   ★ 열 이름으로서의 `주문자`(= orderer 역할)는 그대로 유효하다 — 위 분류 케이스는 불변. */
+ok('★ 프리셋에 `주문자` 가 없다(참여자 칸이 대체 — 사용자 확정 2026-08-24)',
+  (() => {
+    const m = /var WT_PRESET_CORE = \[([\s\S]*?)\];/.exec(setJs);
+    return !!m && !/'주문자'/.test(m[1]);
   })());
 ok('★ 프리셋은 버튼으로만 — 저장값이 없을 때 조용히 적용되지 않는다(확정은 사람이)',
   /function wtLoadPreset/.test(setJs) && /onclick="wtLoadPreset\(\)"/.test(setJs)
@@ -546,7 +554,9 @@ ok('★ 열이 담긴 채널·유형 삭제는 한 번 더 묻는다(시트 무�
   && /function wtDelType[\s\S]{0,500}confirm\([\s\S]{0,200}이미 만들어진 시트에는 영향이 없습니다/.test(setJs));
 ok('★★ 채널 키는 **서버가 발급**한다 — 화면 임시 키는 저장 응답으로 교체된다(고아 방지)',
   /_keyMinter\('c', keys\)/.test(svcSrc) && /_keyMinter\('t', keys\)/.test(svcSrc)
-  && /function wtSaveTemplate[\s\S]{0,1100}_wtRenderChans\(\)/.test(setJs));
+  // ★ 저장 응답 반영은 `_wtApplySaved` 한 벌로 모였다(되돌리기와 공용) — 고정 폭 창 대신 그 경로를 본다.
+  && /function wtSaveTemplate[\s\S]{0,1600}_wtApplySaved\(j\.data\)/.test(setJs)
+  && /function _wtApplySaved\([\s\S]{0,300}_wtRenderChans\(\)/.test(setJs));
 ok('★ 같은 이름 채널·유형 중복 추가 차단(화면·서버 양쪽)',
   /이미 있는 채널입니다/.test(setJs) && /이미 있는 작업유형 이름입니다/.test(setJs)
   && /seenLabel\.has\(label\.toLowerCase\(\)\)/.test(svcSrc));

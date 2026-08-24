@@ -337,6 +337,18 @@ async function submitExternalOrder({
       }
     } catch (e) { warnings.push('옵션 확인 실패(제출은 계속): ' + e.message); }
   }
+  // ★★ 134 복합 작업: 고른 단위가 "옵션 없는 상품"이면 그 키는 상품명이라 시트 옵션 칸에 쓰지 않는다
+  //   (리뷰어 제출 경로 submit.routes 와 같은 규율 — 8/3 상품명이 리뷰옵션 칸을 덮은 사고 재현 방지).
+  //   빈 값 = "안 고름" = 배정 행의 기존 옵션값을 되쓴다(칸을 지우지 않는다).
+  //   ★ 조회 실패는 종전 동작(그대로 사용) — fail-open.
+  if (resolvedOptKey && campaignId) {
+    try {
+      const { rows: u } = await pool.query(
+        `SELECT unit_kind FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`,
+        [campaignId, resolvedOptKey]);
+      if (u.length && String(u[0].unit_kind || '') === 'product') resolvedOptKey = '';
+    } catch (_) { /* fail-open: 종전 동작 */ }
+  }
 
   // ① 리뷰어 등록·연결 (실패해도 주문 접수는 계속 — 카톡으로 이미 약속된 구매다)
   let reviewerInfo = { registered: false, linkedOwner: null, ownerPhone8: null, warnings: [] };

@@ -71,7 +71,10 @@
     var call = 'CsReviewEditCard.zoomPair(&quot;' + _idAttr(p.oldFileId) + '&quot;,&quot;'
       + _idAttr(p.newFileId) + '&quot;,&quot;' + (p.focus === 'new' ? 'new' : 'old') + '&quot;)';
     return '<div style="' + box + '">'
-      + '<img src="' + _esc(u) + '" alt="' + _esc(caption) + '" loading="lazy"'
+      /* ★ 132×132 카드라 원본이 필요 없다 — CDN 썸네일(js/drive-thumb.js).
+         확대(zoomPair)는 아래에서 **원본 프록시**를 그대로 쓴다(대조는 원본으로). */
+      + '<img' + (window.DriveThumb ? DriveThumb.attrs(fileId, 400, u) : ' src="' + _esc(u) + '"')
+      + ' alt="' + _esc(caption) + '" loading="lazy"'
       + ' onclick="' + call + '"'
       + ' style="width:132px;height:132px;object-fit:cover;border-radius:10px;border:1.5px solid ' + tone + ';cursor:zoom-in;background:#fff;display:block">'
       + '<div style="font-size:.66rem;color:' + tone + ';font-weight:700;text-align:center;margin-top:4px">' + _esc(caption) + '</div></div>';
