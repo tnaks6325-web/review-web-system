@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>업체용 뷰어 — 담당자 표기 시안 (A/B/C/D)</title>
+<title>담당자 표기 시안 (A/B/C/D) — 업체용 뷰어 · 내부 관리 뷰어</title>
 <style>
 :root{
   --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
@@ -47,6 +47,9 @@ section.opt h2{font-size:16px;margin:0;letter-spacing:-.02em}
         box-shadow:var(--shadow-card)}
 .vtop{display:flex;align-items:center;gap:12px;padding:9px 16px;background:var(--card);border-bottom:1px solid var(--line)}
 .vtop .logo{font-weight:800;letter-spacing:-.02em;font-size:14px}
+.vtop .logo .tag.int{color:var(--accent-deep);background:var(--accent-soft);border-color:var(--accent-line)}
+.mh .btn{font:inherit;font-size:11px;font-weight:700;height:26px;padding:0 10px;border:1px solid var(--line2);
+  background:var(--card);border-radius:7px;color:var(--muted);flex:none;white-space:nowrap}
 .vtop .logo .tag{font-size:9.5px;font-weight:800;color:var(--adv);background:var(--adv-soft);
   border:1px solid #ded7f5;padding:2px 8px;border-radius:999px;margin-left:7px;letter-spacing:.04em}
 .vtop .who{margin-left:auto;font-size:11.5px;color:var(--muted)}
@@ -114,18 +117,30 @@ pre.pl .cm{color:#64748b}
 .note b{color:#6b3f06}
 .note.blue{background:var(--accent-soft);border-color:var(--accent-line);color:#1e3a8a}
 .note.blue b{color:#1e3a8a}
+.vlabel{font-size:11px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;
+  margin:14px 0 6px}
+.vlabel .vsub{text-transform:none;letter-spacing:0;font-size:11px;font-weight:600;color:var(--muted);margin-left:6px}
+.role{font-size:10px;font-weight:700;color:var(--faint);margin-right:2px}
+.sep{color:var(--faint);font-weight:600;margin:0 5px}
+.cndset{font:inherit;font-size:10px;font-weight:800;color:var(--faint);background:var(--card2);
+  border:1px solid var(--line2);border-radius:999px;padding:1px 7px;cursor:default}
+.tp3wo{margin-top:9px;padding-top:9px;border-top:1px dashed var(--line2);display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--muted)}
+.tp3wo .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.tp3wo .st{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:0 7px;font-weight:700;flex:none}
+.tp3wo .btn{margin-left:auto;font:inherit;font-size:10.5px;font-weight:700;height:24px;padding:0 10px;
+  border:1px solid var(--line2);background:var(--card);border-radius:7px;color:var(--muted);flex:none}
 @media(max-width:900px){.tp3grid{grid-template-columns:1fr}.diff3{grid-template-columns:1fr}}
 </style></head><body>
 <div class="wrap">
 
-<h1>업체용 뷰어 — 담당자 표기 시안</h1>
+<h1>담당자 표기 시안 — 업체용 뷰어 · 내부 관리 뷰어</h1>
 <p class="sub">작업오더 담당자 칸(<span class="k">manager_name</span> · <span class="k">work_manager</span> · <span class="k">created_by</span>)을 어디까지 정리할지 정하는 시안입니다. 아래 위젯으로 안을 바꿔 보세요.</p>
 
 <div class="picker" id="pick">
   <a href="?v=A" data-v="A">A — 페이로드만 정리</a>
   <a href="?v=B" data-v="B">B — A + 라벨 정정</a>
   <a href="?v=C" data-v="C">C — B + 칸 정합</a>
-  <a href="?v=D" data-v="D">D — 업체에 담당 AE 노출</a>
+  <a href="?v=D" data-v="D">D — 담당 2인 표기(업체+내부)</a>
   <a href="?v=all" data-v="all">전체 보기</a>
 </div>
 
@@ -199,20 +214,41 @@ pre.pl .cm{color:#64748b}
 
 <!-- ══════════════ D ══════════════ -->
 <section class="opt" data-opt="D">
-  <header><h2>D안 — 업체에 담당 AE 한 줄 노출</h2><span class="tagpill diff">업체 화면이 실제로 달라지는 유일한 안</span></header>
-  <p class="optdesc">A~C 는 전부 내부·페이로드 정리라 업체가 보는 화면은 같습니다. <b>업체 화면을 실제로 바꾸는 선택지는 이것 하나</b>입니다 — 작업 조건 카드에 <b>담당</b> 행을 넣어 그 업체를 맡은 <b>AE</b>(<span class="k">created_by</span>)를 보여줍니다. 리뷰웹 관리자(박세희·박은비)는 <b>여전히 안 나갑니다</b>.</p>
-  <div class="viewer" data-view></div>
+  <header><h2>D안 — 담당 2인 표기 (업체 + 내부 양쪽)</h2><span class="tagpill diff">두 화면 모두 달라진다</span></header>
+  <p class="optdesc">작업 조건 카드에 <b>담당</b> 행을 넣고 <b>두 담당자를 함께</b> 적습니다 —
+    <span class="k">담당 &nbsp; AE팀 황운하 / 관리자 만두</span>.
+    앞은 그 업체를 맡은 <b>AE</b>(<span class="k">created_by</span>), 뒤는 이 작업의 모집·공고를 맡은
+    <b>리뷰웹 관리자</b>(<span class="k">manager_name</span>)입니다.
+    <b>업체용 뷰어와 내부 관리 뷰어에 같은 행</b>이 들어갑니다.</p>
+
+  <h3 class="vlabel">업체용 뷰어</h3>
+  <div class="viewer" data-view data-mode="adv"></div>
+
+  <h3 class="vlabel">내부 관리 뷰어 <span class="vsub">(같은 자리 · 같은 문장 — 내부는 나머지 4행과 발주 줄이 더 있다)</span></h3>
+  <div class="viewer" data-view data-mode="int"></div>
+
   <div class="diff3">
     <div class="dbox"><h3>업체 화면</h3><p class="yes">작업 조건에 「담당」 행 1줄 추가</p></div>
-    <div class="dbox"><h3>서버 응답</h3><p class="fix">렌즈에 담당 AE 이름만 허용</p></div>
-    <div class="dbox"><h3>내부 화면</h3><p class="fix">B와 동일 (라벨 정정)</p></div>
+    <div class="dbox"><h3>내부 화면</h3><p class="yes">같은 「담당」 행 + 라벨 정정(B 포함)</p></div>
+    <div class="dbox"><h3>서버 응답</h3><p class="fix">렌즈에 담당 2인만 허용 — 가이드 원문·나머지 실명은 계속 폐기</p></div>
   </div>
-  <div class="note blue"><b>정할 것</b> — 업체에게 <b>이름</b>(황운하)을 그대로 보일지, <b>부서만</b>(AE팀) 보일지. 이름을 보이면 업체가 문의할 창구가 분명해지지만, 담당이 바뀌면 그 값도 같이 관리해야 합니다.</div>
+
+  <div class="note blue"><b>관리자는 닉네임으로 적습니다</b> —
+    박세희 → <b>만두</b>, 박은비 → <b>망고</b>(<span class="k">admin_nicknames</span>).
+    이 매핑은 리뷰어 1:1문의에서 이미 쓰는 단일 출처라, 여기에 붙이면 <b>업체 화면에 실명이 나가지 않으면서</b>
+    내부에서는 누구인지 그대로 통합니다. 닉네임이 없는 계정은 <span class="k">관리자</span> 한 단어로만 적습니다(fail-closed).</div>
+
+  <div class="note"><b>정할 것 두 가지</b> —
+    ① <b>AE 이름</b>을 그대로 보일지(황운하) 부서만 보일지(AE팀). 시안은 <b>부서 + 이름</b>으로 그렸습니다.
+    ② 값이 없을 때. AE 는 <span class="k">created_by</span> 라 거의 항상 있지만,
+    관리자는 <b>빈값이 30건</b>입니다 — 그때는 <span class="k">담당 &nbsp; AE팀 황운하</span> 한쪽만 적습니다(「—」로 꾸미지 않음).</div>
 </section>
 
 <script>
-/* 업체용 뷰어 재현 — 안(案)별로 「담당」 행 유무만 다르다. 마크업은 실제 화면과 같은 구조. */
-var COND = [
+/* 뷰어 재현 — 안(案) × 화면(업체/내부)별로 다른 것만 분기한다. 마크업은 실제 화면과 같은 구조.
+   ★ 담당 행 = 「AE팀 황운하 / 관리자 만두」 — 앞은 created_by(진짜 AE), 뒤는 manager_name 을
+     admin_nicknames 로 치환한 값(박세희→만두). 업체·내부가 **같은 문장**을 쓴다. */
+var BASE = [
   ['메인URL', '<a href="#" onclick="return false">https://www.coupang.com/vp/products/9659949648</a>'],
   ['일정',    '2026-08-15<span class="u">~</span>2026-09-02'],
   ['구매시간', '00:00<span class="u">~</span>15:00 <span class="cndchip">공고 기준</span>'],
@@ -223,23 +259,56 @@ var COND = [
   ['유입방식', '가이드유입'],
   ['리뷰타입', '자율리뷰']
 ];
-function viewerHtml(opt){
-  var rows = COND.slice();
-  if (opt === 'D') rows.splice(3, 0, ['담당', '황운하 <span class="cndchip">AE팀</span>', true]);
-  var dl = rows.map(function(r){
+/* 내부에만 있는 4행 — 리뷰비·입금명은 정산 값이라 업체 렌즈가 폐기한다. */
+var INTERNAL_EXTRA = {
+  '다계정': '허용 <span class="u">하루 1건</span>',
+  '현금영수증': '해당 없음',
+  '리뷰비': '0<span class="u">원</span>',
+  '입금명': '도라지캔디망고'
+};
+var MANAGER_ROW = ['담당',
+  '<span class="role">AE팀</span>황운하<span class="sep">/</span><span class="role">관리자</span>만두', true];
+
+function condRows(opt, mode){
+  var rows = BASE.slice();
+  if (opt === 'D') rows.splice(3, 0, MANAGER_ROW);          // 일정·구매시간 다음, 총건수 앞
+  if (mode !== 'int') return rows;
+  /* 내부는 다계정·현금영수증·리뷰비·입금명이 더 있다(유입방식 뒤, 리뷰타입 앞). */
+  var out = [], keys = Object.keys(INTERNAL_EXTRA);
+  rows.forEach(function(r){
+    if (r[0] === '리뷰타입') keys.forEach(function(k){ out.push([k, INTERNAL_EXTRA[k]]); });
+    out.push(r);
+  });
+  return out;
+}
+function viewerHtml(opt, mode){
+  var isInt = mode === 'int';
+  var dl = condRows(opt, mode).map(function(r){
     var cls = r[2] ? ' class="newrow"' : '';
     return '<dt'+cls+'>'+r[0]+'</dt><dd'+cls+'>'+r[1]+'</dd>';
   }).join('');
-  return ''
-  + '<div class="vtop"><span class="logo">리뷰웹시스템<span class="tag">업체 전용</span></span>'
-  +   '<span class="who">웰스앤헬스 님</span></div>'
-  + '<div class="vbody">'
-  +   '<div class="mh"><h1>8/14(쿠팡)웰스앤헬스 약도라지 캔디 체험단 500건</h1>'
-  +     '<span class="bd">업체 전용 열람</span></div>'
+  var woRow = isInt
+    ? '<div class="tp3wo"><span>📋</span><span class="nm">8/14(쿠팡)웰스앤헬스 약도라지 캔디 체험단 500건</span>'
+      + '<span class="st">reviewing</span><button class="btn" type="button">원문</button></div>'
+    : '';
+  var top = isInt
+    ? '<div class="vtop"><span class="logo">리뷰웹시스템<span class="tag int">3버전</span></span>'
+      + '<span class="who">망고 님 · 관리자</span></div>'
+    : '<div class="vtop"><span class="logo">리뷰웹시스템<span class="tag">업체 전용</span></span>'
+      + '<span class="who">웰스앤헬스 님</span></div>';
+  var head = isInt
+    ? '<div class="mh"><h1>8/14(쿠팡)웰스앤헬스 약도라지 캔디 체험단 500건</h1>'
+      + '<button class="btn" type="button">🔗 링크 복사</button>'
+      + '<button class="btn" type="button">📅 모집인원 조절</button>'
+      + '<button class="btn" type="button">🏁 마감</button></div>'
+    : '<div class="mh"><h1>8/14(쿠팡)웰스앤헬스 약도라지 캔디 체험단 500건</h1>'
+      + '<span class="bd">업체 전용 열람</span></div>';
+  return top
+  + '<div class="vbody">' + head
   +   '<div class="tp3grid">'
   +     '<div class="tp3col"><div class="tp3t">작업 조건<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>'
   +       '<div class="cndprod">웰스앤헬스 천기 약도라지 삼백초캔디 건강캔디 부모님간식 프리미엄캔디 목캔디, 1박스, 152g</div>'
-  +       '<dl class="cndl">'+dl+'</dl></div>'
+  +       '<dl class="cndl">'+dl+'</dl>'+woRow+'</div>'
   +     '<div class="tp3col"><div class="tp3t">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>'
   +       gauge('참여자','252','500',50,'')
   +       gauge('리뷰제출','198','252',79,'s')
@@ -261,7 +330,8 @@ function gauge(lb,n,den,pc,cls){
   var v = (new URLSearchParams(location.search).get('v') || 'all').toUpperCase();
   if (v === 'ALL') v = 'all';
   document.querySelectorAll('[data-view]').forEach(function(el){
-    el.innerHTML = viewerHtml(el.closest('[data-opt]').getAttribute('data-opt'));
+    el.innerHTML = viewerHtml(el.closest('[data-opt]').getAttribute('data-opt'),
+                              el.getAttribute('data-mode') || 'adv');
   });
   document.querySelectorAll('section.opt').forEach(function(s){
     s.style.display = (v === 'all' || s.getAttribute('data-opt') === v) ? '' : 'none';
