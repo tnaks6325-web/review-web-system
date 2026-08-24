@@ -643,6 +643,52 @@ t('★ 구매시간 행은 일정 바로 아래', (() => {
     /cndset/.test(f({})));
 }
 
+console.log('\n── K. 담당 2인 행(사용자 확정 2026-08-24) ──');
+/* 「담당  AE팀 황운하 / 관리자 만두」 — 앞은 그 업체를 맡은 AE(`created_by`), 뒤는 이 작업의
+   모집·공고를 맡은 리뷰웹 관리자(`manager_name`). 아픈 자리 셋:
+   ① 닉네임 매핑 사본을 만들면 1:1문의와 이름이 갈린다 → `adminNickname.service` 단일 출처.
+   ② 카드는 한 벌인데 규율이 둘(내부 실명 허용 / 업체 실명 금지) → **서버가 역할별로 다른 값**을
+      싣고 화면은 `adminNick || adminRaw` 한 줄만 본다.
+   ③ "실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 은 다르다 — 전자를 접으면 담당자가 없는
+      작업처럼 보인다. */
+t('★ 서버가 created_by 를 함께 읽는다(AE 이름 재료)',
+  /manager_name AS "managerName", created_by AS "createdBy", status/.test(svc));
+t('① 닉네임 치환은 adminNickname.service 단일 출처(사본 금지)', (() => {
+  const i = cond.indexOf('manager: await'), blk = cond.slice(i, i + 900);
+  return /require\('\.\/adminNickname\.service'\)/.test(blk) && /getNicknameMap\(\)/.test(blk)
+    && !/admin_nicknames/.test(blk);          // SQL 사본도 금지
+})());
+t('★ 닉네임 조회 실패는 fail-soft(업체는 그래도 실명이 안 나간다)', (() => {
+  const i = cond.indexOf('manager: await'), blk = cond.slice(i, i + 900);
+  return /catch \(_\) \{ nick = null; \}/.test(blk);
+})());
+{
+  const vm = require('vm');
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf('const mgrRow='), j = m.indexOf('/* 「일정」', i);
+  const sb = { esc: s => String(s == null ? '' : s), unset: () => '<dd>UNSET</dd>' };
+  vm.createContext(sb);
+  vm.runInContext('this.f=function(cd){' + m.slice(i, j) + 'return mgrRow;};', sb);
+  const f = (mgr) => sb.f({ manager: mgr }).replace(/<[^>]+>/g, '|').replace(/\|+/g, '|');
+  t('② 내부 = 닉네임 우선, 없으면 실명',
+    f({ ae: '황운하', adminNick: '만두', adminRaw: '박세희' }) === '|담당|AE팀|황운하|/|관리자|만두|'
+    && f({ ae: '황운하', adminNick: null, adminRaw: '박세희' }) === '|담당|AE팀|황운하|/|관리자|박세희|',
+    f({ ae: '황운하', adminNick: null, adminRaw: '박세희' }));
+  t('② 업체 = 렌즈가 실명을 지우고 빈 문자열을 남기면 **라벨만** 적는다(관리자 관리자 중복 금지)',
+    f({ ae: '황운하', adminNick: '', adminRaw: null }) === '|담당|AE팀|황운하|/|관리자|');
+  t('③ 관리자가 없으면 그 조각만 빠진다(「—」로 꾸미지 않는다)',
+    f({ ae: '황운하', adminNick: null, adminRaw: null }) === '|담당|AE팀|황운하|');
+  t('★ AE 만 없으면 관리자 조각만', f({ ae: null, adminNick: '만두' }) === '|담당|관리자|만두|');
+  t('★ 둘 다 없으면 미설정/「—」 (unset 이 역할을 안다)',
+    f({}) === '|담당|UNSET|' && f(null) === '|담당|UNSET|');
+}
+t('★ 담당 행은 구매시간 다음·총건수 앞', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return m.indexOf("['@mgr'") > m.indexOf("['@time'")
+    && m.indexOf("['@mgr'") < m.indexOf("['총건수'")
+    && /k==='@mgr'\?mgrRow/.test(m);
+})());
+
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));
 
