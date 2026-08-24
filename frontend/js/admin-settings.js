@@ -1033,10 +1033,13 @@ async function deleteReviewerNotice(id) {
      호스트별로 다를 이유가 없다(다르게 두면 두 화면이 서로 다른 설정을 보게 된다).
    ══════════════════════════════════════════════════════════════ */
 var WT_EP = { stats: '/api/trackb/worktable/header-stats', template: '/api/trackb/worktable/template' };
-/* 공통 기본값 프리셋(사용자 확정 15열) — [공통을 기본 N열로] 버튼이 채운다.
+/* 공통 기본값 프리셋(사용자 확정 14열) — [공통을 기본 N열로] 버튼이 채운다.
    ★ 자동 적용하지 않는다: 저장된 설정이 없을 때 조용히 이 값이 쓰이면 "정하지 않았는데 정해진"
-     상태가 된다(학습은 제안까지·확정은 사람이 — 이 화면의 원칙). */
-var WT_PRESET_CORE = ['번호', '구매일자', '주문자', '수취인', 'ID', '연락처', '주소',
+     상태가 된다(학습은 제안까지·확정은 사람이 — 이 화면의 원칙).
+   ★★ `주문자` 는 일부러 없다(사용자 확정 2026-08-24) — 리뷰웹시스템[3버전]에서는 **참여자 칸이
+     그 자리를 대체**한다(`sheetlessOrder` 가 `loginName || orderer || recipient` 로 채운다).
+     주문자 원문은 주문 원장(`order_submissions.orderer`)에 그대로 남는다. 되살리지 말 것. */
+var WT_PRESET_CORE = ['번호', '구매일자', '수취인', 'ID', '연락처', '주소',
   '은행', '계좌번호', '예금주', '결제금액', '주문번호', '리뷰', '입금', '비고'];   // ★ 리뷰제출 칸의 표준 이름 = '리뷰'(사용자 확정 2026-08-21)
 var _wtTpl = null;      // { core:[names], channels:{key:[names]}, columns:[...], ... }
 var _wtStats = null;    // 헤더 학습 리포트(펼칠 때 1회 로드)
@@ -1856,7 +1859,7 @@ function wtChMove(key, i, dir) {
   _wtAfterEdit(key);
 }
 
-/** 공통을 사용자 확정 기본 15열로 되돌린다(채널 행은 건드리지 않는다). */
+/** 공통을 사용자 확정 기본 열로 되돌린다(채널 행은 건드리지 않는다). ★ `주문자` 는 제외 — 참여자 칸이 대체한다. */
 function wtLoadPreset() {
   if (!_wtTpl) return;
   if ((_wtTpl.core || []).length && !confirm('공통 열을 기본 ' + WT_PRESET_CORE.length + '개로 바꿉니다. 채널별 열은 그대로 둡니다. 계속할까요?')) return;
