@@ -2012,6 +2012,24 @@
 .pmtabs button{padding:7px 14px;font-size:13px;font-weight:700;border:1px solid var(--line,#D8DDE5);
   border-radius:9px;background:var(--card,#fff);color:var(--t2,#5A6473);cursor:pointer}
 .pmtabs button.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C}
+/* ⚠ 원장 불일치 목록 — 클래스는 전부 `rs` 접두(기존 .row/.tbl 등과 겹치면 남의 화면이 조용히 무너진다) */
+.rswrap{font-size:13px}
+.rsnote{margin:0 0 10px;padding:9px 12px;border-radius:9px;background:var(--card2,#F5F7FA);color:var(--t2,#5A6473);line-height:1.6}
+.rsnote b{color:var(--ink,#1A2233)}
+.rstbl{width:100%;border-collapse:collapse}
+.rstbl th{text-align:left;font-size:11.5px;font-weight:800;color:var(--muted,#7A869A);padding:6px 8px;border-bottom:1px solid var(--line,#D8DDE5);white-space:nowrap}
+.rstbl td{padding:7px 8px;border-bottom:1px solid var(--line2,#EDF0F4);vertical-align:top}
+.rstbl tr.rsmoney td{background:rgba(255,146,42,.10)}   /* 돈이 걸린 칸(금액·계좌·은행·예금주) */
+.rsfield{font-weight:800;white-space:nowrap}
+.rsval{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
+.rsval.old{color:var(--t2,#5A6473)}
+.rsval.new{color:var(--ink,#1A2233);font-weight:700}
+.rsempty{color:var(--line2,#C7CEDA);font-style:italic}
+.rsact{display:flex;gap:5px;white-space:nowrap}
+.rsact button{border:1px solid var(--line,#D8DDE5);border-radius:7px;background:var(--card,#fff);
+  color:var(--t2,#5A6473);padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer}
+.rsact button.go{border-color:#1B4F9C;color:#1B4F9C}
+.rsact button[disabled]{opacity:.45;cursor:default}
 .bntools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .bntools input.q{flex:1 1 220px;min-width:180px;padding:8px 11px;font-size:13px;box-sizing:border-box;
   border:1px solid var(--line,#D8DDE5);border-radius:9px;background:var(--card,#fff);color:var(--t1,#1B1F24)}
@@ -2707,7 +2725,7 @@ function renderShell(){
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
-        <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리</button>
+        <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리<span id="pmNavBadge"></span></button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
@@ -2747,6 +2765,7 @@ function renderShell(){
   if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)
   if(isAdmin || isStaff) _riBootBadge();   // 리뷰검수 — 손볼 건수(의심+불량)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
   if(isAdmin || isStaff) _lgBootBadge();   // 로그 — 리뷰어 비정상 + 시스템 오류(admin/master만) 중요 건수 합
+  if(isAdmin) _rsBootBadge();              // 입금관리 — 시트↔원장 불일치(열린 edit 제안). 화면을 열지 않아도 보이게
 }
 /* ── C/S 미확인 뱃지 ────────────────────────────────────────
    리뷰웹시스템[3버전]에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
@@ -2757,10 +2776,10 @@ let _csBadgeTimer = null;
 function _csStartBadgePoll(){
   _csBadgeRefresh();
   if(_csBadgeTimer) clearInterval(_csBadgeTimer);
-  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible') _csBadgeRefresh(); }, CS_BADGE_POLL_MS);
+  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); } }, CS_BADGE_POLL_MS);
   if(!_csStartBadgePoll._bound){
     _csStartBadgePoll._bound = true;
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _finDayRollCheck(); } });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); _finDayRollCheck(); } });
   }
 }
 /** 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(직전 값 유지). */
@@ -10129,10 +10148,125 @@ async function renderPaymentView(){
      "담고 → 내려받고 → 회차 확인"이 이어지는 흐름이라, 나누면 오늘 하던 일이 늘어난다. */
 function _pmTabsHtml(){
   const t=(k,l)=>`<button class="${STATE.pmSub===k?'on':''}" onclick="_pmSwitch('${k}')">${l}</button>`;
-  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}</div>`;
+  /* ⚠ 원장 불일치 = 시트↔원장이 갈린 주문(reverse_sync_proposals 의 열린 edit 제안).
+     **돈이 나가기 직전에 보는 화면**이라 입금관리 옆에 둔다 — 별도 nav 를 만들면 또 안 들어간다
+     (감지·조회 API 는 진작 있었는데 화면이 없어 89건이 5주간 아무도 안 본 채로 쌓였다). */
+  const n=_NAVRS.n;
+  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}${
+    t('sync','⚠ 원장 불일치'+(n===null?'':(n>0?` 🔴${n}`:'')))}</div>`;
 }
 function _pmSwitch(k){ if(STATE.pmSub===k) return; STATE.pmSub=k; _pmPaint(); }
-function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else _pmRender(); }
+function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else if(STATE.pmSub==='sync') _rsOpen(); else _pmRender(); }
+
+/* ══ ⚠ 원장 불일치 (시트→DB 역동기화 열린 제안) ═══════════════════════════════════
+   왜 필요했나: 감지·조회·적용 API 는 진작 다 있었는데(`/api/diag/reverse-sync-*` 7개)
+   **부르는 화면이 하나도 없었다.** 그래서 시스템이 89건(금액 61 + 입금대상 28)을 5주 동안
+   찾아 기록해 두고도 아무도 보지 않았고, 그중 하나가 9,900원이 99,000원으로 나간 건이다.
+
+   ★ 무인 자동적용은 금액·계좌를 **하드 제외**한다(돌이킬 수 없어서). 하지만 사람이 검토하고
+     누르는 이 경로는 적용된다 — 그 구분은 이 화면이 있어야 의미를 갖는다.
+   ★ `cancel_suspect`(삭제 의심)는 설계상 영영 플래그로만 남는다(자동취소 금지). 목록에서 빼되
+     **건수는 말한다** — 숨기면 "다 처리했다"는 거짓 안심이 된다. */
+const _NAVRS = { n:null };            // 손댈 수 있는 열린 제안 수(=edit). null = 아직 모름
+function _rsSyncNavBadge(){
+  const b=$('#pmNavBadge'); if(!b) return;
+  if(_NAVRS.n===null) return;         // 모르면 0 으로 위장하지 않는다(조용한 정상 위장 금지)
+  b.textContent = _NAVRS.n>0 ? (' 🔴'+_NAVRS.n) : '';
+}
+/** 뱃지 건수만 받아 갱신. ★ limit=1 로 총계만 받는다(`total` = 자르기 전 개수) — 목록을 끌어오지 않는다.
+ *  실패는 조용히(직전 값 유지) — 역동기화 OFF·권한 없음 등이 뱃지를 0 으로 위장하면 안 된다. */
+async function _rsBadgeRefresh(){
+  try{
+    const r=await api('/api/diag/reverse-sync-list?status=open&type=edit&limit=1');
+    if(r && r.ok) { _NAVRS.n = Number(r.total)||0; _rsSyncNavBadge(); }
+  }catch(_){ }
+}
+/** 부팅 시 1회 — 입금관리를 열지 않아도 쌓인 건수가 nav 에 보이게(C/S·로그 뱃지와 같은 규율).
+ *  ★ 부팅 1회로 끝내면 안 된다(코드리뷰 지적, C/S 뱃지가 이미 같은 지적을 받았다) — 역동기화 detect 는
+ *    3분마다 돌고 다른 관리자도 제안을 만든다. 그 뒤 쌓인 건수가 새로고침 전까지 안 보이면
+ *    이 뱃지가 막으려던 **조용한 누적**이 그대로 재현된다. 갱신은 C/S 뱃지의 기존 타이머에
+ *    얹는다 — 타이머를 새로 만들지 않고(백그라운드 두드림 순증 0), 가려져 있으면 함께 쉰다. */
+async function _rsBootBadge(){ await _rsBadgeRefresh(); }
+
+/** 원장 칸 → 사람이 읽는 이름. 표시 전용(판정 아님) — 서버 필드명을 그대로 보여주면 담당자가 못 읽는다. */
+const _RS_FIELD = { price:'결제금액', account:'계좌번호', bank:'은행', depositor:'예금주',
+  orderer:'주문자', recipient:'수취인', phone:'연락처', address:'주소',
+  user_id:'아이디', order_num:'주문번호', memo:'비고', date_str:'구매일자' };
+/** 돈이 걸린 칸 — 줄 배경을 칠해 먼저 눈에 띄게 한다(이체 사고로 직결되는 것들). */
+const _RS_MONEY = ['price','account','bank','depositor'];
+
+async function _rsOpen(){
+  const el=$('#pmbody'); if(!el) return;
+  el.innerHTML=`${_pmTabsHtml()}<div class="empty">불러오는 중…</div>`;
+  let r=null, susp=null;
+  try{
+    [r, susp] = await Promise.all([
+      api('/api/diag/reverse-sync-list?status=open&type=edit&limit=500'),
+      api('/api/diag/reverse-sync-list?status=open&type=cancel_suspect&limit=1'),
+    ]);
+  }catch(e){ r={ ok:false, error:String(e&&e.message||e) }; }
+  if(!r || !r.ok){
+    el.innerHTML=`${_pmTabsHtml()}<div class="empty">불러오지 못했습니다.${r&&r.error?' ('+esc(String(r.error))+')':''}</div>`;
+    return;
+  }
+  STATE.rsItems = r.items||[];
+  _NAVRS.n = Number(r.total)||0; _rsSyncNavBadge();
+  el.innerHTML = `${_pmTabsHtml()}${_rsHtml(r, susp)}`;
+}
+
+function _rsHtml(r, susp){
+  const items=r.items||[];
+  const suspN = (susp && susp.ok) ? (Number(susp.total)||0) : null;
+  const notes=[];
+  notes.push(`시트와 주문원장이 갈린 칸입니다. <b>왼쪽이 원장(지금 값), 오른쪽이 시트</b>입니다.
+    어느 쪽이 맞는지는 구매캡처로 확인해 주세요 — 시트가 깨져 있는 경우도 있습니다.`);
+  // ★ 잘렸으면 잘렸다고 말한다(조용한 누락 금지).
+  if(r.truncated) notes.push(`⚠ 전체 <b>${Number(r.total)||0}건</b> 중 ${items.length}건만 표시했습니다.`);
+  if(suspN) notes.push(`삭제 의심 <b>${suspN}건</b>은 여기서 처리하지 않습니다(자동취소 금지 — 주문 취소 창구에서 명시 처리).`);
+  const head=`<div class="rsnote">${notes.join('<br>')}</div>`;
+  if(!items.length) return `<div class="rswrap">${head}<div class="empty">불일치 없음 — 시트와 원장이 일치합니다.</div></div>`;
+  const rows=items.map((it,i)=>{
+    const money=_RS_MONEY.includes(it.field);
+    const v=s=>(s==null||String(s).trim()==='')?'<span class="rsempty">(빈칸)</span>':esc(String(s));
+    return `<tr class="${money?'rsmoney':''}" data-rsid="${esc(String(it.id))}">
+      <td class="rsfield">${esc(_RS_FIELD[it.field]||it.field)}</td>
+      <td>${esc(String(it.tabName||''))}</td>
+      <td>${esc(String(it.sheetRow||''))}</td>
+      <td class="rsval old">${v(it.oldValue)}</td>
+      <td class="rsval new">${v(it.newValue)}</td>
+      <td>${esc(_rsWhen(it.detectedAt))}</td>
+      <td><div class="rsact">
+        <button class="go" onclick="_rsApply(${i})" title="주문원장을 시트값으로 바꿉니다">원장을 시트값으로</button>
+        <button onclick="_rsDismiss(${i})" title="원장이 맞습니다 — 이 제안을 닫습니다">기각</button>
+      </div></td></tr>`;
+  }).join('');
+  return `<div class="rswrap">${head}<table class="rstbl">
+    <thead><tr><th>칸</th><th>작업</th><th>행</th><th>원장(지금)</th><th>시트</th><th>감지</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function _rsWhen(s){
+  if(!s) return '';
+  const d=new Date(s); if(isNaN(d.getTime())) return String(s).slice(0,16);
+  const p=x=>String(x).padStart(2,'0');
+  return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 원장을 시트값으로 적용 — 되돌리기 어려운 쓰기라 확인을 받는다(경고칠과 성격이 다르다:
+ *  저쪽은 보기만 하는 표시, 이쪽은 원장을 실제로 바꾼다). */
+async function _rsApply(i){
+  const it=(STATE.rsItems||[])[i]; if(!it) return;
+  const nm=_RS_FIELD[it.field]||it.field;
+  if(!confirm(`${it.tabName} ${it.sheetRow}행 「${nm}」\n\n원장 ${it.oldValue||'(빈칸)'}\n→ 시트 ${it.newValue||'(빈칸)'}\n\n원장을 시트값으로 바꿉니다. 진행할까요?`)) return;
+  const r=await api('/api/diag/reverse-sync-apply',{method:'POST',body:JSON.stringify({proposalId:it.id})});
+  if(!r||!r.ok){ toast('적용 실패'+(r&&r.error?' — '+r.error:'')); return; }
+  toast(`${nm} 적용됨`); _rsOpen();
+}
+async function _rsDismiss(i){
+  const it=(STATE.rsItems||[])[i]; if(!it) return;
+  const r=await api('/api/diag/reverse-sync-dismiss',{method:'POST',body:JSON.stringify({proposalId:it.id})});
+  if(!r||!r.ok){ toast('기각 실패'+(r&&r.error?' — '+r.error:'')); return; }
+  toast('기각됨'); _rsOpen();
+}
 
 async function _pmLoad(){
   const [t, b] = await Promise.all([ api('/api/trackb/payment/targets'), api('/api/trackb/payment/batches?limit=30') ]);
