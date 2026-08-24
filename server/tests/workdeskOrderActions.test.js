@@ -50,7 +50,7 @@ t('공유 모듈이 라벨·설명·전이표·접수판정을 갖는다', () =>
 t('★ 사본 금지 — workdesk·index-app 어디에도 두 번째 표가 없다', () => {
   assert.ok(!/const WO_STATUS\s*=/.test(HTML), 'workdesk 에 WO_STATUS 사본이 되살아났다');
   [HTML, APP].forEach((src, i) => {
-    ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_MAP', 'WO_CHANNEL_HOSTS'].forEach(n =>
+    ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_TYPES', 'WO_CHANNEL_HOSTS'].forEach(n =>
       assert.ok(!new RegExp('(const|let|var)\\s+' + n + '\\s*=').test(src),
         (i ? 'index-app' : 'workdesk') + ' 에 ' + n + ' 사본이 있다'));
   });

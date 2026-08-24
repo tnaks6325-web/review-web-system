@@ -3705,6 +3705,74 @@ router.post('/manager-cleanup', authMiddleware, adminOrMasterMiddleware, async (
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/diag/delivery-type-cleanup — 배송유형 칸의 **옛 어휘**를 표준 5종으로 정리
+//
+//   배경(2026-08-24 사용자 확정): 배송유형 어휘가 화면마다 갈려 있었다 —
+//     현행 모집공고 모달은 실배송·빈박스·택배발송대행인데, 인라인 공고수정 모달과
+//     구형 관리자 화면은 `빈택배`·`회수건` 을 저장하고 있었다. 그렇게 저장된 값은
+//     현행 모달 select 에 해당 option 이 없어 **다시 열면 빈 값으로 보이고, 아무것도
+//     안 건드리고 저장만 눌러도 조용히 지워질 수 있다**(COALESCE 가 빈 문자열은 안 막는다).
+//
+//   ★★ 판정은 `utils/deliveryType.canonicalDeliveryValue` **단일 출처**다 — SQL 에 어휘를
+//      박지 않는다. 그래서 표기 흔들림(`빈 택배`·`회수 건`)도 같은 규칙으로 접히고,
+//      어휘가 늘면 이 창구가 자동으로 따라온다.
+//   ★★ **접히는 값만** 바꾼다 — 모르는 값(`기타배송(박스)`)은 손대지 않는다(빈 값으로
+//      접으면 막으려던 것보다 큰 손실). 이미 표준형인 행도 대상이 아니다.
+//   ★★ **부속정보가 붙은 문장은 대상이 아니다** — `회수(회수택배사: …)` 는 원문이 곧 정보라
+//      기본형으로 줄이면 회수택배사가 증발한다(canonicalDeliveryValue 가 원문을 그대로 돌려준다).
+//   ★ 쓰기 표면 = `delivery_type` **한 칸**뿐. `updated_at` 도 건드리지 않는다 — 표기 통일이지
+//      내용 변경이 아니라, 타임스탬프를 흔들면 그것을 tiebreak 로 쓰는 곳이 함께 움직인다.
+//   ★ 기존 행을 건드리므로 **기본 dryRun**(담당자 표기 정리와 같은 규율) — 사람이 숫자를 먼저
+//      보고 [적용하기]. 안 돌려도 안전하다(읽을 때 접어서 판정하므로 화면·판정은 이미 정상).
+//
+//   body: { dryRun? = true } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+/** 정리 대상 — 배송유형 칸을 가진 표. ★ 이름은 코드 안 리터럴이라 주입 여지가 없다. */
+const DELIVERY_TYPE_TABLES = [
+  { table: 'tab_configs',       label: '작업 탭 배송유형' },
+  { table: 'recruit_campaigns', label: '모집공고 배송유형' },
+  { table: 'work_orders',       label: '작업오더 배송유형' },
+];
+router.post('/delivery-type-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { canonicalDeliveryValue } = require('../utils/deliveryType');
+    const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
+
+    const preview = [];
+    for (const t of DELIVERY_TYPE_TABLES) {
+      const { rows } = await pool.query(
+        `SELECT delivery_type AS raw, COUNT(*)::int AS cnt
+           FROM ${t.table}
+          WHERE COALESCE(btrim(delivery_type), '') <> ''
+          GROUP BY delivery_type
+          ORDER BY delivery_type`);
+      for (const r of rows) {
+        const std = canonicalDeliveryValue(r.raw);
+        if (!std || std === r.raw) continue;   // 판정 밖 값·이미 표준형·부속 문장 = 대상 아님
+        preview.push({ table: t.table, label: t.label, from: r.raw, to: std, cnt: r.cnt });
+      }
+    }
+    const total = preview.reduce((a, r) => a + r.cnt, 0);
+    if (dryRun || total === 0) {
+      return res.json({ ok: true, dryRun: true, total, preview,
+        note: total === 0 ? '정리할 옛 배송유형 표기가 없습니다.'
+                          : '실제 적용하려면 {dryRun:false} 로 다시 호출하세요.' });
+    }
+
+    let updated = 0;
+    for (const p of preview) {
+      // ★ 정확일치로만 바꾼다 — 미리보기가 보여 준 그 값만 손댄다.
+      const { rowCount } = await pool.query(
+        `UPDATE ${p.table} SET delivery_type = $2 WHERE delivery_type = $1`, [p.from, p.to]);
+      p.updated = rowCount;
+      updated += rowCount;
+    }
+    logger.info(`[delivery-type-cleanup] 배송유형 표기 정리 ${updated}건 (${preview.map(x => `${x.table}:${x.from}→${x.to}`).join(' · ')})`);
+    res.json({ ok: true, dryRun: false, total, preview, updated });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/diag/participation-cleanup — 리뷰어 교차노출 오염 정리(participation_links)
 //   배경: 과거 구매양식 제출이 가드/시트쓰기 검증 전에 "낙관적 claim 행"에 신원을 미리 찍어,
 //        미러 stale·로스터 선기입 탭에서 '다른 리뷰어의 행'에 phone8을 남겼다(리뷰어 교차노출).

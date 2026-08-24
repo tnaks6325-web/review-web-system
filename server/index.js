@@ -37,6 +37,8 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'sales_id'],                    // 088 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'guide_images'],                // 090 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'source_review_order_id'],      // 102 — 원본 오더 식별자(중복 수신 방지)
+  ['work_orders', 'delivery_type_mix'],           // 135 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
+  ['recruit_campaigns', 'delivery_type_mix'],     // 135 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['work_orders', 'source_revision'],             // 102 — 원본 수정 버전
   ['work_orders', 'intake_idempotency_key'],      // 102 — 네트워크 재시도 키
   ['work_orders', 'intranet_advertiser_id'],      // 102 — 원본 광고주 식별자
