@@ -322,11 +322,14 @@ function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', se
   console.log('\n[E] 화면 창구 — 미리보기 → 확인 → 실행');
   const wd = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
   ok('[⋯] 도구 메뉴에 중복 정리 버튼', /onclick="openDedupeModal\(\)"/.test(wd));
-  /* ★★ 화면 게이트 = 서버 게이트(adminOrMaster). `_wrCanRetire()` 재사용 금지 —
-     그쪽은 staff 까지 열려 있어 따라 넓히면 AE 에게 403 나는 죽은 버튼이 생긴다. */
-  ok('★ 게이트는 무시트 + master/admin(서버 adminOrMaster 와 1:1)',
-    /function _ddCan\(\)\{[\s\S]{0,240}sheetless === true[\s\S]{0,120}'master'[\s\S]{0,40}'admin'/.test(wd));
-  ok('★ staff 까지 열린 _wrCanRetire 를 재사용하지 않는다',
+  /* ★★ 2026-08-21 사용자 확정: 화면 노출은 **master 전용** — 서버(adminOrMaster)보다 **일부러 좁다**.
+     admin 도 권한은 있지만 [⋯] 메뉴에 버튼을 띄우지 않는다(줄 정리 `_wrCanRetire` 와 같은 규율).
+     고정하는 것은 **서버보다 넓지 않다**는 것 — 넓히면 "눌러도 403" 인 죽은 버튼이 된다. */
+  ok('★ 게이트는 무시트 + master (서버 adminOrMaster 보다 좁게)',
+    /function _ddCan\(\)\{[\s\S]{0,240}sheetless === true[\s\S]{0,120}STATE\.role === 'master'/.test(wd));
+  ok('★ 화면 게이트가 서버보다 넓지 않다(staff 에게 안 띄운다)',
+    !/function _ddCan\(\)\{[\s\S]{0,240}_isInternalRole\(\)/.test(wd));
+  ok('★ 사본 금지 — _wrCanRetire 를 재사용하지 않는다',
     !/function _ddCan\(\)\{[^}]*_wrCanRetire\(\)/.test(wd));
   ok('미리보기는 dryRun:true', /ddPreview[\s\S]{0,400}dryRun: true/.test(wd));
   ok('실행은 확인창을 거친다', /async function ddRun[\s\S]{0,600}confirm\(/.test(wd));

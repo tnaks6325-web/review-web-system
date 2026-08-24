@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
@@ -1852,6 +1852,54 @@ router.get('/image/:id', async (req, res) => {
     logger.warn(`[drive] image 프록시 실패(${id}): ${err.message} → thumbnail 폴백`);
     return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w1600`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/orphan-capture-cleanup — 고아 캡처 미리보기·정리 (세 종류 한 창구)
+//
+// A 'linked'(기본) 링크 끊김 — 원장은 살아 있는데 그 칸이 파일을 더는 안 가리킨다
+//     크론(매일 04:40, `ORPHAN_CAPTURE_CLEAN`)이 하는 일과 **완전히 같은 함수**를 부른다.
+//     사본을 두면 "자동 정리와 손으로 누른 정리가 다른 것을 지우는" 드리프트가 생긴다.
+// C 'tombstoned'  작업 소멸 — 작업이 통째로 지워져 원장 자체가 없다(묘비 134 가 좌표를 남긴다)
+// B 'folder'      원장 없음 — Drive 폴더에는 있는데 원장 어디에서도 안 가리킨다
+//     ★★★ B 는 **사람이 고른 파일만**(`fileIds` 필수) 처리한다. "원장에 없다"에는
+//        업로드는 됐는데 기록만 실패한 **정상 캡처**가 섞이므로 일괄 삭제 표면을 두지 않는다.
+//     ★ 그래서 B·C 는 크론이 절대 부르지 않는다 — 사람이 눌러야만 움직인다.
+//
+// body: { kind? ('linked'|'tombstoned'|'folder', 기본 'linked'), dryRun? (기본 true),
+//         fileIds?: string[], sheetId?/tabName? (folder 필수) }
+//   ★ fileIds 를 줘도 서버가 후보를 다시 골라 **교집합**만 처리한다(화면 목록 불신).
+//   ★ 삭제는 휴지통만(30일 복구창) — 영구삭제 API 를 쓰지 않는다.
+//   ★ 모르는 kind 는 400 으로 거부한다 — 오타가 조용히 A 를 실행하면 안 된다.
+// ═══════════════════════════════════════════════════════════
+router.post('/orphan-capture-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const by = (req.admin && req.admin.name) || 'admin';
+    const dryRun = b.dryRun !== false;   // ★ 기본 미리보기 — 실행은 dryRun:false 를 명시해야만
+    const fileIds = Array.isArray(b.fileIds) && b.fileIds.length ? b.fileIds : null;
+    const svc = require('../services/orphanCaptureCleanup.service');
+
+    /* kind — 어떤 종류의 고아를 다루는가. 미지정은 종전 동작(A) 그대로.
+         'linked'(기본) A 링크 끊김   — 크론이 자동으로 도는 것과 같은 함수
+         'tombstoned'   C 작업 소멸   — 묘비(134) 기준, 사람이 실행
+         'folder'       B 원장 없음   — Drive 스캔, **고른 파일만** 실행 */
+    const kind = String(b.kind || 'linked');
+    if (kind === 'tombstoned') {
+      return res.json(await svc.trashTombstonedCaptures({ dryRun, fileIds, by }));
+    }
+    if (kind === 'folder') {
+      if (!b.sheetId || !b.tabName) {
+        return res.status(400).json({ ok: false, error: 'folder 종류는 sheetId, tabName 이 필요합니다.' });
+      }
+      return res.json(await svc.trashFolderOrphans({
+        sheetId: b.sheetId, tabName: b.tabName, fileIds, dryRun, by }));
+    }
+    if (kind !== 'linked') {
+      return res.status(400).json({ ok: false, error: `알 수 없는 kind: ${kind}` });
+    }
+    return res.json(await svc.trashOrphanCaptures({ dryRun, fileIds, by }));
+  } catch (err) { return next(err); }
 });
 
 module.exports = router;
