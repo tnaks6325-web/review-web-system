@@ -327,11 +327,57 @@ t('★ 리터럴 NUL 없음(git 이 바이너리로 취급하면 grep 가드가 
     assert.ok(!s.includes(String.fromCharCode(0)), `${n} 에 리터럴 NUL 이 있다`));
 });
 
-t('★ 읽기 전용 — 준비 행 판독 경로에 쓰기 SQL 0', () => {
-  [['workKindContext', WKC], ['workOrderLink', LINK], ['campaignTabLateral', LAT]].forEach(([n, s]) => {
-    const body = s.replace(/\/\/.*$/gm, '');
-    assert.ok(!/\b(INSERT|UPDATE|DELETE)\b/i.test(body), `${n} 에 쓰기 SQL 이 있다`);
+/* ★★ 판독 경로에 쓰기가 섞이면 **조회할 때마다 데이터가 바뀐다** — 준비 행 판독은 화면
+     렌더·집계에서 수시로 불린다. 그래서 이 셋은 읽기 전용이어야 한다.
+
+   ⚠ 2026-08-24: 파일 **전체**를 검사하다 보니 같은 파일에 사는 **판독 경로가 아닌**
+     함수까지 걸렸다(`campaignTabLateral.renameCampaignLinkedTab` — 탭 리네임 때만 불리는
+     의도적 writer, 실측 사고 「맛고」 탭 수습). 검사 범위를 **함수 단위**로 좁힌다.
+
+   ★★★ 좁히기가 도피처가 되면 안 된다 — 그래서 다음 셋을 함께 못 박는다:
+     ① 기본은 여전히 **전부 검사** — 예외로 뺀 함수만 빠진다(새 함수는 자동으로 검사 대상)
+     ② 예외마다 **왜 판독 경로가 아닌지** 적는다(빈 도피처 금지)
+     ③ 예외 이름이 **그 파일에 실제로 있어야 한다**(이름이 바뀌면 조용히 무력화되므로)
+     ④ **판독 진입점 자체는 예외로 뺄 수 없다**(그걸 빼면 이 검사가 아무것도 안 본다) */
+const READ_ENTRYPOINTS = ['campaignColLateral', 'workOrderForTabSql', 'workKindForTab'];
+const WRITE_EXEMPT = [
+  { fn: 'renameCampaignLinkedTab',
+    why: '탭 리네임 시에만 불리는 보정(공고 linked_tab_name 따라가기) — 준비 행을 읽는 길이 아니다' },
+];
+
+/** 파일을 함수 단위로 자른다(선언 앞의 주석 블록은 그 함수에 딸려 간다). */
+const splitFns = (src) => src.replace(/\/\/.*$/gm, '')
+  .split(/\n(?=(?:async )?function )/)
+  .map(chunk => ({ name: (chunk.match(/^\s*(?:async )?function\s+(\w+)/) || [])[1] || '', body: chunk }));
+
+t('★ 예외 목록이 도피처가 아니다(사유 필수 · 실재 · 진입점 제외 금지)', () => {
+  WRITE_EXEMPT.forEach(x => {
+    assert.ok(x.fn && String(x.why || '').trim().length >= 10, `${x.fn} 에 사유가 없다`);
+    assert.ok(!READ_ENTRYPOINTS.includes(x.fn), `${x.fn} 은 판독 진입점이라 예외로 뺄 수 없다`);
+    assert.ok([WKC, LINK, LAT].some(s => new RegExp('function\\s+' + x.fn + '\\b').test(s)),
+      `${x.fn} 이 어느 파일에도 없다(이름이 바뀌었으면 예외도 함께 고쳐야 한다)`);
   });
+});
+
+t('★ 읽기 전용 — 준비 행 판독 경로에 쓰기 SQL 0', () => {
+  const exempt = new Set(WRITE_EXEMPT.map(x => x.fn));
+  [['workKindContext', WKC], ['workOrderLink', LINK], ['campaignTabLateral', LAT]].forEach(([n, s]) => {
+    splitFns(s).forEach(({ name, body }) => {
+      if (exempt.has(name)) return;
+      assert.ok(!/\b(INSERT|UPDATE|DELETE)\b/i.test(body),
+        `${n}${name ? '.' + name : ''} 에 쓰기 SQL 이 있다`);
+    });
+  });
+});
+
+t('★★ 판독 진입점은 반드시 검사된다(좁히기가 그것까지 빼지 않았는지 실측)', () => {
+  const exempt = new Set(WRITE_EXEMPT.map(x => x.fn));
+  const seen = new Set();
+  [WKC, LINK, LAT].forEach(s => splitFns(s).forEach(({ name }) => {
+    if (name && !exempt.has(name)) seen.add(name);
+  }));
+  READ_ENTRYPOINTS.forEach(fn =>
+    assert.ok(seen.has(fn), `판독 진입점 ${fn} 이 검사 범위에서 빠졌다`));
 });
 
 /* ══ 8) 진짜 PG — 스텁이 해석하지 않는 SQL 의미 ═════════════ */
