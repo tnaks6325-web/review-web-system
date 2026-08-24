@@ -31,6 +31,10 @@ const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
 const { normName } = require('./identity.service');
+// 작업담당 실명 → 리뷰웹 닉네임(만두·망고) 매핑 단일 출처(065). 사본을 두면 화면마다 담당자가 갈린다.
+const { mapWorkManager } = require('../utils/workManager');
+// 작업 조건 카드가 담당자를 닉네임으로 바꿀 때 쓰는 그 맵(사본 금지 — 두 화면의 이름이 갈린다).
+const { getNicknameMap } = require('./adminNickname.service');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
 
@@ -93,6 +97,39 @@ function normalizeBankChoice(v) {
 
 /** `tab_configs.transfer_bank` 에 **되돌려 쓸 때** 의 표기(= 기존 화면이 읽는 한글 라벨) */
 function tabBankLabel(bank) { return BANK_LABEL[bank] || ''; }
+
+/**
+ * 입금관리의 **담당자** — 작업 화면(작업 조건 카드)이 보여주는 그 값과 같아야 한다.
+ *
+ * ★★ 사고(2026-08-24 회차 #18): 입금관리 담당자 필터는 `tab_configs.manager` 만 봤고,
+ *    작업 화면은 작업오더(`work_orders.manager_name`)를 닉네임으로 바꿔 보여줬다.
+ *    출처가 둘이라 오더 담당자가 나중에 바뀐 작업은 **탭 값이 옛 담당자로 남아**,
+ *    "망고만 선택했는데 만두 작업의 이체건이 서식에 딸려오는" 상태가 됐다.
+ *    → 판정 출처를 작업오더로 맞추고(작업 화면과 한 벌), 탭 설정은 **오더가 담당자를
+ *      말해주지 않을 때(랜덤·미매핑·오더 없음)만** 쓰는 폴백으로 내린다.
+ *
+ * ★★ 탭 값이 낡는 이유는 접수 업서트가 **blank-only**(`manager = COALESCE(NULLIF(tab_configs.manager,''), …)`)
+ *    이기 때문이다 — 한 번 채워진 뒤로는 재접수로도 영영 안 바뀐다. 그래서 폴백이지 기준이 아니다.
+ *
+ * ★ 오더 쪽 원천은 둘: `work_manager`(인트라넷 작업담당, 065 표준키) → `manager_name`
+ *   (라벨은 '담당AE' 지만 실제 값이 리뷰웹 관리자 — 작업 조건 카드가 읽는 그 칸).
+ * ★ 닉네임 치환은 `adminNickname` 맵 → `mapWorkManager`(065) 순서 — 둘 다 기존 단일 출처이고,
+ *   어느 쪽도 모르는 값은 **원문을 그대로** 둔다(임의 해석 금지 · 조용한 담당자 변경 금지).
+ *
+ * @returns {{manager:string, managerSource:('order'|'tab'|null)}}
+ */
+function resolveWorkManager({ orderWorkManager, orderManager, tabManager, nickMap } = {}) {
+  const nick = v => {
+    const raw = String(v == null ? '' : v).trim();
+    return raw ? ((nickMap && nickMap[raw]) || mapWorkManager(raw) || '') : '';
+  };
+  const fromOrder = nick(orderWorkManager) || nick(orderManager);
+  if (fromOrder) return { manager: fromOrder, managerSource: 'order' };
+  const tab = String(tabManager == null ? '' : tabManager).trim();
+  if (!tab) return { manager: '', managerSource: null };
+  // 탭에 실명이 저장돼 있어도 화면에는 닉네임 하나로 보인다(같은 사람이 칩 둘로 갈리지 않게).
+  return { manager: mapWorkManager(tab) || tab, managerSource: 'tab' };
+}
 
 function _int(v) {
   const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
@@ -272,6 +309,8 @@ async function listPaymentTargets(opts = {}) {
       // 작업보드 바로가기 재료 — ★ 화면이 gid 를 추측하지 않게 서버가 실어 준다(리네임 대비).
       tabGid: tab ? (tab.tabGid || '') : '',
       manager: tab ? (tab.manager || '') : '',
+      // 담당자를 어디서 읽었는지 — 'order' = 작업 화면과 같은 값 / 'tab' = 탭 설정 폴백
+      managerSource: tab ? (tab.managerSource || null) : null,
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
@@ -612,19 +651,27 @@ async function _loadTabMeta(sheetIds, tabNames) {
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
               tc.review_fee AS "reviewFee",
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
-              wo.goods_cost_type AS "goodsCostType"
+              wo.goods_cost_type AS "goodsCostType",
+              -- ★ 담당자 판정 원천 — 인트라넷 작업담당(065) + 작업 화면이 읽는 칸
+              wo.work_manager AS "orderWorkManager", wo.manager_name AS "orderManager"
          FROM tab_configs tc
          LEFT JOIN LATERAL (
-              SELECT w.goods_cost_type FROM work_orders w
+              SELECT w.goods_cost_type, w.work_manager, w.manager_name FROM work_orders w
                WHERE w.deleted_at IS NULL
                  AND w.linked_tab_sheet_id = tc.sheet_id
                  AND w.linked_tab_name = tc.tab_name
                ORDER BY w.created_at DESC LIMIT 1) wo ON TRUE
         WHERE tc.sheet_id = ANY($1) AND tc.tab_name = ANY($2)`,
       [sheetIds, tabNames]);
+    // 담당자 닉네임 맵 — 조회 실패는 빈 맵(fail-soft, 작업 카드와 같은 규율)
+    let nickMap = {};
+    try { nickMap = await getNicknameMap(); } catch (_) { nickMap = {}; }
     for (const t of rows) {
+      const mgr = resolveWorkManager({
+        orderWorkManager: t.orderWorkManager, orderManager: t.orderManager, tabManager: t.manager, nickMap });
       map[t.sheetId + '||' + t.tabName] = {
-        label: t.label, manager: t.manager || '', transferBank: t.transferBank || '', depositName: t.depositName || '',
+        label: t.label, manager: mgr.manager, managerSource: mgr.managerSource,
+        transferBank: t.transferBank || '', depositName: t.depositName || '',
         // ★ 리뷰비는 **NULL(미설정)과 0(무상 지정)을 구분**한다 — `|| 0` 으로 접으면
         //   미설정이 조용히 0원이 되어 공고 값이 있는데도 탭 폴백이 이긴 것처럼 보인다.
         reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
@@ -1188,5 +1235,5 @@ module.exports = {
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
-  compareAccountSnapshot, accountFingerprint, PaymentFixError,
+  compareAccountSnapshot, accountFingerprint, resolveWorkManager, PaymentFixError,
 };

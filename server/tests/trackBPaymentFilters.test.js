@@ -26,17 +26,87 @@ function test(name, fn) {
   catch (error) { console.error('  not ok ' + name + '\n    ' + error.message); process.exitCode = 1; }
 }
 
-test('payment target metadata includes the work manager', () => {
+/* ★★ 회차 #18 사고(2026-08-24): 입금관리 담당자는 `tab_configs.manager` 만 봤고 작업 화면은
+   작업오더 담당자를 닉네임으로 바꿔 보여줬다 — 출처가 둘이라 오더에서 담당자가 바뀐 작업이
+   옛 담당자 칩에 남았고, "망고만 선택"한 서식에 만두 작업의 이체건이 딸려왔다.
+   → 담당자 판정은 작업 화면과 같은 출처(작업오더)를 우선한다. 완화 = 사고 재발. */
+test('payment target metadata resolves the work manager from the work order first', () => {
   assert.match(paymentService, /tc\.manager\s+AS\s+"manager"/);
-  assert.match(paymentService, /manager:\s*t\.manager\s*\|\|\s*''/);
+  assert.match(paymentService, /wo\.work_manager\s+AS\s+"orderWorkManager"/);
+  assert.match(paymentService, /wo\.manager_name\s+AS\s+"orderManager"/);
+  assert.match(paymentService, /w\.goods_cost_type,\s*w\.work_manager,\s*w\.manager_name\s+FROM work_orders/);
+  assert.match(paymentService, /resolveWorkManager\(\{[\s\S]{0,120}orderWorkManager:\s*t\.orderWorkManager/);
+});
+
+test('the work manager falls back to the tab setting only when the order says nothing', () => {
+  const resolve = require('../src/services/payment.service').resolveWorkManager;
+  const nickMap = { '\uBC15\uC138\uD76C': '\uB9CC\uB450', '\uBC15\uC740\uBE44': '\uB9DD\uACE0' };
+  // 오더가 담당자를 말하면 그 값이 이긴다 — 탭 값은 접수 업서트가 blank-only 라 옛 담당자로 굳는다.
+  assert.deepStrictEqual(resolve({ orderWorkManager: '\uBC15\uC138\uD76C', tabManager: '\uB9DD\uACE0', nickMap }),
+    { manager: '\uB9CC\uB450', managerSource: 'order' });
+  // 작업담당(065)이 비었거나 랜덤이면 작업 카드가 읽는 칸(manager_name)으로 이어 본다.
+  assert.deepStrictEqual(resolve({ orderWorkManager: '\uB79C\uB364', orderManager: '\uBC15\uC138\uD76C', tabManager: '\uB9DD\uACE0', nickMap }),
+    { manager: '\uB9CC\uB450', managerSource: 'order' });
+  // 닉네임 맵이 비어도 065 매핑으로 같은 결론에 이른다(fail-soft).
+  assert.deepStrictEqual(resolve({ orderManager: '\uBC15\uC740\uBE44', tabManager: '\uB9CC\uB450', nickMap: {} }),
+    { manager: '\uB9DD\uACE0', managerSource: 'order' });
+  // 랜덤·미매핑·오더 없음 = 오더가 담당자를 정하지 않은 것 → 탭 설정 폴백.
+  assert.deepStrictEqual(resolve({ orderManager: '\uB79C\uB364', tabManager: '\uB9CC\uB450', nickMap }),
+    { manager: '\uB9CC\uB450', managerSource: 'tab' });
+  assert.deepStrictEqual(resolve({ orderManager: '', tabManager: '\uBC15\uC740\uBE44', nickMap }),
+    { manager: '\uB9DD\uACE0', managerSource: 'tab' });
+  // 둘 다 없으면 '담당자 없음' — 추측하지 않는다.
+  assert.deepStrictEqual(resolve({ orderManager: '', tabManager: '', nickMap }),
+    { manager: '', managerSource: null });
 });
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys') + '\n' + sourceOf('_pmSetWorkSelection') + '\n' + sourceOf('_pmWorkKeyRange'), sandbox);
+function constSource(name) {
+  const line = workdesk.match(new RegExp('^const ' + name + '=.*$', 'm'));
+  assert.ok(line, name + ' must exist');
+  return line[0];
+}
 
-test('legacy manager name is normalized to mango', () => {
+vm.runInContext(constSource('PM_MANAGER_NICK') + '\n' + constSource('PM_NO_MANAGER') + '\n'
+  + sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmManagerMatch') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys') + '\n' + sourceOf('_pmSetWorkSelection') + '\n' + sourceOf('_pmWorkKeyRange'), sandbox);
+
+test('legacy manager names are normalized on both sides, not just one', () => {
   assert.strictEqual(sandbox._pmManagerName('\uBC15\uC740\uBE44'), '\uB9DD\uACE0');
+  // ★ 한쪽만 접으면 같은 사람이 '만두'와 '박세희' 두 칩으로 갈려, 한 칩만 고른 담당자의
+  //   서식에서 나머지 절반이 조용히 빠진다.
+  assert.strictEqual(sandbox._pmManagerName('\uBC15\uC138\uD76C'), '\uB9CC\uB450');
+});
+
+const PM_NONE = vm.runInContext('PM_NO_MANAGER', sandbox);   // const 선언은 sandbox 프로퍼티가 아니다
+
+test('the unassigned chip is a real group, not everything', () => {
+  const unassigned = [
+    { sheetId: 'S1', tabName: 'A', manager: '\uB9CC\uB450', amount: 1000, payable: true, excluded: false },
+    { sheetId: 'S2', tabName: 'B', manager: '', amount: 500, payable: true, excluded: false },
+  ];
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(sandbox._pmFilterItems(unassigned, { manager: PM_NONE }))),
+    [unassigned[1]]);
+  // 담당자 칩들의 합이 '전체'와 같아야 한다 — 어느 칩에도 안 잡히는 건이 남으면 조용한 누락이다.
+  assert.strictEqual(sandbox._pmFilterItems(unassigned, { manager: '\uB9CC\uB450' }).length
+    + sandbox._pmFilterItems(unassigned, { manager: PM_NONE }).length,
+    sandbox._pmFilterItems(unassigned, {}).length);
+});
+
+test('the download confirmation states which manager and works are being locked', () => {
+  const confirmText = sourceOf('_pmDownloadConfirmText');
+  assert.match(confirmText, /_pmManagerLabel\(filter\.manager\)/);
+  assert.match(confirmText, /\uC791\uC5C5 \$\{works\.length\}\uAC1C/);
+  assert.match(sourceOf('_pmDownload'), /confirm\(_pmDownloadConfirmText\(label, picked\)\)/);
+  // 확인창에 실린 목록과 실제로 담기는 목록은 **같은 배열**이어야 한다(사본을 두면 갈린다).
+  assert.match(sourceOf('_pmDownload'), /const rows = picked\.map/);
+});
+
+test('the manager chip row offers the unassigned group when such works exist', () => {
+  const bar = sourceOf('_pmFilterBar');
+  assert.match(bar, /hasNoManager/);
+  assert.match(bar, /managerButton\(PM_NO_MANAGER, *'\uB2F4\uB2F9\uC790 \uBBF8\uC9C0\uC815'\)/);
 });
 
 const rows = [

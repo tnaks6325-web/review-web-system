@@ -368,7 +368,11 @@ t('★ 다운로드 전 확인 + 잠금 안내가 있다(되돌리기 어려운 
   const fn = wd.match(/async function _pmDownload[\s\S]*?\n}/);
   assert.ok(fn, '_pmDownload 없음');
   assert.ok(/confirm\(/.test(fn[0]), '확인 없이 회차가 만들어진다');
-  assert.ok(/잠겨/.test(fn[0]), '잠금 사실을 안내하지 않는다');
+  // 확인창 문구는 빌더 한 곳에서 만든다(담당자·작업까지 함께 읽어 준다 — 회차 #18).
+  const text = wd.match(/function _pmDownloadConfirmText[\s\S]*?\n}/);
+  assert.ok(text, '_pmDownloadConfirmText 없음');
+  assert.ok(/잠겨/.test(text[0]), '잠금 사실을 안내하지 않는다');
+  assert.ok(/담당자:/.test(text[0]), '무엇이 담기는지(담당자)를 말하지 않는다');
 });
 
 t('★ 보류·통장표시 미설정 건을 화면에 드러낸다(조용한 누락 금지)', () => {
