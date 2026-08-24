@@ -1961,6 +1961,9 @@
 .pmfixcard .wh .btn{flex:0 0 auto}
 /* 화면에서 못 고치는 사유 줄 — 버튼 없이 조치 문장만(줄바꿈 허용) */
 .pmfixrow.info .nm{white-space:normal;font-size:11.5px;color:var(--t3,#8B94A1);line-height:1.5}
+/* 작업 단위 3종을 묶은 줄 — 항목이 여럿이면 말줄임 대신 접어서 다 보여준다(정보 손실 금지) */
+.pmfixrow.work .nm{white-space:normal;line-height:1.55}
+.pmfixrow.work .tail{display:block;font-size:11px;color:var(--t3,#8B94A1);margin-top:1px}
 /* 이관된 작업 시트 열기 경고 — 편집하면 시스템에 안 반영된다는 사실을 먼저 읽게 한다 */
 /* 팝업 — ★ body 직속(뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다)
    ★ 바깥클릭으로 닫지 않는다(입력해 둔 계좌·통장표시가 실수 클릭 한 번에 날아가지 않게) */
@@ -10549,7 +10552,7 @@ function _pmBuildFix(items){
       // 리뷰비 — 화면은 **서버가 준 값만** 쓴다(어디서 왔는지도 서버 판정 `feeSource` 그대로).
       fee:(typeof it.reviewFee==='number'?it.reviewFee:null), feeSource:it.feeSource||null,
       tabFee:(it.tabReviewFee==null?null:it.tabReviewFee), campFee:(it.campaignReviewFee==null?null:it.campaignReviewFee),
-      needBank:false, needMemo:false, needFee:false, bankRows:0, memoRows:0, feeRows:0,
+      needBank:false, needMemo:false, needFee:false, bankRows:0, memoRows:0, feeRows:0, setupRows:0,
       accts:[], acctRows:0, _nr:new Set(), _np:new Set(), rows:0 });
     return w;
   };
@@ -10563,6 +10566,10 @@ function _pmBuildFix(items){
     // ── 작업 단위(이체은행 미지정 · 통장표시 없음) — 저장하면 그 작업의 모든 행이 함께 풀린다
     if(iss.includes('no_bank')){ w.needBank=true; w.bankRows++; }
     if(warn.includes('no_memo')){ w.needMemo=true; w.memoRows++; }
+    /* ★ 작업 설정(이체은행·통장표시·리뷰비) 보완이 필요한 행의 **합집합** —
+         카드가 그 셋을 한 줄로 묶어 보여주므로 건수도 합집합이어야 한다.
+         사유별 건수(bankRows/memoRows/feeRows)는 그 줄의 title 로 남긴다(조용한 누락 금지). */
+    if(iss.includes('no_bank') || warn.includes('no_memo') || warn.includes('no_review_fee')) w.setupRows++;
     // ★ 리뷰비 0 = 상품비만 이체된다 — 보류(막는 사유)는 아니지만 **말하지 않으면 그대로 나간다**.
     if(warn.includes('no_review_fee')){ w.needFee=true; w.feeRows++; }
     // ── 리뷰어 단위(은행명·계좌·예금주) — 원장은 평면 배열 하나로 두고(인덱스 계약 유지)
@@ -10673,9 +10680,24 @@ function _pmFixBlock(){
     const i=f.works.indexOf(w);
     const fixWork=`<button class="btn sm" onclick="_pmFixWork(${i})">보완</button>`;
     const lines=[];
-    if(w.needBank) lines.push(line('🏦','이체은행 미지정', w.bankRows, fixWork));
-    if(w.needMemo) lines.push(line('🏷','통장표시 없음', w.memoRows, fixWork));
-    if(w.needFee) lines.push(line('💵','리뷰비 미설정 — 상품비만 이체됩니다', w.feeRows, fixWork));
+    /* ★★ 작업 단위 3종(이체은행·통장표시·리뷰비)은 **한 줄**로 묶는다 —
+         세 사유 모두 같은 팝업(_pmFixWork)에서 한 번에 입력하고,
+         저장하면 그 작업의 보류가 함께 풀린다(사용자 확정 2026-08-24).
+       ★ 사유별로 줄을 나누면 **같은 [보완] 버튼이 세 번 반복**돼 "세 번 해야 하나"로 읽힌다.
+       ★ 계좌(💳)는 묶지 않는다 — 명의마다 계좌가 달라 사람별로 고쳐야 한다. */
+    const need=[];
+    if(w.needBank) need.push({ic:'🏦', short:'이체은행', long:'이체은행 미지정', n:w.bankRows});
+    if(w.needMemo) need.push({ic:'🏷', short:'통장표시', long:'통장표시 없음', n:w.memoRows});
+    if(w.needFee)  need.push({ic:'💵', short:'리뷰비',  long:'리뷰비 미설정',  n:w.feeRows});
+    if(need.length){
+      // ★ 리뷰비가 비면 **상품비만 이체**된다 — 묶어도 그 경고는 화면에 남긴다.
+      const label = need.map(p=>`${p.ic} ${p.short}`).join(' · ')
+        + (w.needFee?`<span class="tail">— 지금은 상품비만 이체됩니다</span>`:'');
+      const tip = need.map(p=>`${p.long} ${p.n}건`).join(' · ')
+        + ` — 한 번만 입력하면 이 작업의 ${w.setupRows}건이 함께 풀립니다`;
+      lines.push(`<div class="pmfixrow work"><span class="nm" title="${esc(tip)}">${label}</span>`
+        + `<span class="n">${w.setupRows}건</span>${fixWork}</div>`);
+    }
     // ★ 줄이 좁아 말줄임되어도 **누구 명의인지**는 title 로 남는다(이름만으로 구분 안 되는 케이스)
     for(const a of w.accts) lines.push(line('💳',
       `계좌 — ${_pmAcctLabel(a)}`,
