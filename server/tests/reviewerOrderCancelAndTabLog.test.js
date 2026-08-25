@@ -105,7 +105,7 @@ ok('★ 모든 소스 쿼리에 LIMIT 이 있다',
 ok('★ 빈 gid 는 절을 켜지 않는다', /\$3 <> ''[\s\S]{0,40}linked_tab_gid=\$3/.test(LOGSVC));
 t('★★ 유형 목록이 화면 탭의 단일 출처', () => {
   const m = require('../src/services/tabActivityLog.service');
-  assert.deepStrictEqual(m.LOG_KIND_KEYS, ['order', 'cancel', 'review', 'edit', 'quota', 'money', 'sys']);
+  assert.deepStrictEqual(m.LOG_KIND_KEYS, ['order', 'cancel', 'review', 'inspect', 'edit', 'quota', 'money', 'sys']);
   m.LOG_KINDS.forEach(k => assert.ok(k.label, k.key + ' 라벨 없음'));
 });
 t('★★ 병합·정렬·자르기를 실제로 실행한다', async () => {
@@ -249,6 +249,12 @@ ok('★ 화면이 덜 차면 한 묶음 더 당겨 온다(스크롤이 안 생�
   /scrollHeight<=bd\.clientHeight\+8/.test(WD));
 ok('★ 늦게 온 응답이 화면을 덮지 않는다(유형 연타)', /seq!==_tlSeq/.test(WD));
 ok('★ 클래스는 tl 접두(맨몸 이름 금지)', !/^\s*\.tabs\{/m.test(WD.slice(WD.indexOf('.tlbox{'), WD.indexOf('.tlwho{'))));
+ok('★★ 작업 로그 검수 탭은 미처리 목록만 기존 검수 API로 읽는다',
+  /_tlKind==='inspect'/.test(WD) && /review-inspect\/list\?status=open/.test(WD));
+ok('★★ 작업 로그 검수도 기존 정상·불량·재검수·이동·중복제거 실행부를 재사용한다',
+  /riResolve\(r\.file_id,'ok'\)/.test(WD) && /riBadPopup\(i\)/.test(WD)
+  && /riReinspectTab\(i\)/.test(WD) && /riDedupPopup\(i\)/.test(WD) && /riMoreMenu\(i\)/.test(WD));
+ok('★ 처리 완료 카드는 10초 뒤 목록에서 제거한다', /},10000\);/.test(WD) && /방금 처리됨/.test(WD));
 
 setTimeout(() => {
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);

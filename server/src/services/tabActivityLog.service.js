@@ -29,6 +29,9 @@ const LOG_KINDS = [
   { key: 'order',  label: '주문' },
   { key: 'cancel', label: '취소' },
   { key: 'review', label: '리뷰' },
+  // 검수는 타임라인 이력이 아니라 "지금 처리할 대상" 카드다. 화면이 같은 작업 로그 탭
+  // 목록을 쓰되 별도 검수 API로 읽고 기존 검수 실행부로 처리한다(새 원장 0).
+  { key: 'inspect', label: '검수' },
   { key: 'edit',   label: '편집' },
   { key: 'quota',  label: '정원' },
   { key: 'money',  label: '정산' },
