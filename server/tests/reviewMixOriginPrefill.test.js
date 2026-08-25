@@ -50,14 +50,14 @@ function rest() {
   console.log('\n── B. 서버 응답(관리자 상세) ──');
   const routes = fs.readFileSync(path.join(root, 'server/src/routes/campaign.routes.js'), 'utf8');
   t('관리자 상세가 작업오더 조합을 프리필 재료로 함께 내려준다',
-    /feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, roundsLock \}\);/.test(routes));
+    /feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock \}\);/.test(routes));
   t('★ 공고에 조합이 있으면 조회하지 않는다(공고가 언제나 이긴다)',
     /!\(cur\.mix \|\| \[\]\)\.length/.test(routes));
   t('★ 혼합이 아닌 공고는 대상이 아니다', /normalizeReviewType\(rows\[0\]\.review_type\) === 'mixed'/.test(routes));
   t('★ 저장값(review_type_mix)을 덮지 않는다 — 별도 필드로만 준다',
     !/data: \{ \.\.\.rows\[0\], review_type_mix/.test(routes));
   t('★ fail-soft — 못 읽어도 수정 모달은 열린다',
-    /작업오더 프리필\(혼합 조합·유입방식·시작일\) 실패/.test(routes));
+    /작업오더 프리필\(혼합 조합·유입방식·시작일·안내값\) 실패/.test(routes));
   t('★ 짝짓기 규칙 사본을 만들지 않는다', /linkedWorkOrderForCampaign \} = require\('\.\.\/services\/linkedRecruitQuota\.service'\)/.test(routes));
 
   console.log('\n── C. 화면 프리필·안내 ──');
@@ -106,7 +106,7 @@ function rest() {
   // ★ 세 값(혼합 조합·유입방식·시작일)을 **한 번의 조회**로 가져온다 — 사본 조회가 늘면 근거가 갈린다.
   //   (시작일이 합류하며 조건부 조회가 무조건 조회로 바뀌었다 — 검사 의미는 "조회는 1회"로 불변.)
   t('★ 혼합 조합과 **한 번의 조회**로 가져온다(같은 근거·쿼리 순증 0)',
-    /linkedWorkOrderForCampaign\(rows\[0\], \['review_type_mix', 'inflow_type', 'start_date'\]\)/.test(routes)
+    /'review_type_mix', 'inflow_type', 'start_date',[\s\S]{0,160}'product_url', 'review_guide', 'special_notes', 'inflow_guide', 'guide_images'/.test(routes)
     && (routes.match(/linkedWorkOrderForCampaign\(rows\[0\]/g) || []).length === 1);
   t('★ 관리자 목록은 **배치 1회**(N+1 금지) · 저장값 없는 공고만 대상',
     /linkedWorkOrdersForCampaigns \} = require\('\.\.\/services\/linkedRecruitQuota\.service'\)/.test(routes)
