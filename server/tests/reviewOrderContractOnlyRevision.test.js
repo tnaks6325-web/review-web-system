@@ -179,12 +179,14 @@ async function run() {
     assert.strictEqual(calls.sync, 0, 'syncWorkOrderRecruitTotal 이 호출됐다');
   });
 
-  await t('② 잠긴 오더에서 작업 내용이 바뀌면 종전대로 409 + 바뀐 칸을 알려준다', async () => {
-    const { res } = await call(baseOrder(), Object.assign({}, BODY, { title: '제목을 바꾼 요청' }));
+  // ⚠ 2026-08-25 사용자 확정으로 규칙이 바뀌었다 — 접수된 오더라도 안내 문구·사진·이름은
+  //   고칠 수 있다(작업명 포함). 잠긴 칸(정원·일정·열 구성·금액·시트)만 409 다.
+  //   자세한 갈래는 reviewOrderContentEditAfterAccept 가드가 본다.
+  await t('② 잠긴 칸이 바뀌면 종전대로 409 + 바뀐 칸을 알려준다', async () => {
+    const { res } = await call(baseOrder(), Object.assign({}, BODY, { start_date: '2026-12-25' }));
     assert.strictEqual(res.statusCode, 409);
-    assert.match(res.body.error, /이미 접수·게시 기준이 확정된/);
-    assert.ok(Array.isArray(res.body.changed_fields) && res.body.changed_fields.includes('title'),
-      'changed_fields 에 title 이 없다: ' + JSON.stringify(res.body.changed_fields));
+    assert.ok(Array.isArray(res.body.changed_fields) && res.body.changed_fields.includes('start_date'),
+      'changed_fields 에 start_date 가 없다: ' + JSON.stringify(res.body.changed_fields));
   });
 
   await t('② 인원 변경도 계약 전용으로 오해하지 않는다', async () => {

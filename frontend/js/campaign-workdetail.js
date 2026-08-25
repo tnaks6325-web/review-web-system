@@ -125,17 +125,30 @@
    *   꺾쇠 글자가 태그로 오인돼 삭제된다 — 서버 sanitizeGuideHtml.js 주석 참조).
    * ★ 호스트는 신뢰 베이스로 재구성 — 배열에 담긴 주소의 임의 호스트를 그대로 쓰지 않는다
    *   (extractGuideImages 와 같은 규율). 우리 프록시 형식이 아니면 그리지 않는다.
+   *
+   * ★★ `seenHtml` — **이미 그려질 HTML 에 있는 사진은 여기서 다시 그리지 않는다**(2026-08-25 실사고).
+   *   선택지 전용 유입가이드는 편집 위젯이 같은 사진을 **안내글 HTML 안의 <img> 와 배열 양쪽에**
+   *   저장한다(`_ugCompose` — 가산적이라 어느 한쪽이 정화에 걸려도 유실되지 않는 구조).
+   *   그리는 쪽이 접지 않으면 1장을 넣어도 **화면에 2장**이 된다(실측).
+   *   ★ 접는 판정은 extractGuideImages 와 **같은 방식**(파일ID 토큰이 그 HTML 에 있는가) —
+   *     여기서 규칙을 새로 만들면 두 경로가 서로 다른 사진을 접는다.
+   *   ★ **인자를 안 넘기면 종전 동작 100%**(리뷰가이드·특이사항은 평문 필드라 짝이 되는 HTML 이 없다).
+   *   ★ 접는 것은 **정확히 그 토큰이 있을 때만** — 애매하면 그린다(사진이 사라지는 쪽이 더 나쁘다).
+   * @param {string} [seenHtml] 이미 그려질 HTML(여기에 있는 사진은 건너뛴다)
    * @returns {{html:string, tokens:string[]}} tokens = 중복 판정용 파일ID
    */
-  function imageListHtml(list, apiBase, alt) {
+  function imageListHtml(list, apiBase, alt, seenHtml) {
     var base = apiBase != null ? apiBase : (typeof window.API_BASE_URL !== 'undefined' ? window.API_BASE_URL : '');
     if (!list || !list.length) return { html: '', tokens: [] };
+    var seen = String(seenHtml || '');
     var html = '', tokens = [], used = {};
     for (var i = 0; i < list.length; i++) {
       var m = String(list[i] || '').match(/\/api\/order\/guide-image\/([-\w]{20,})$/);
       if (!m || used[m[1]]) continue;
       used[m[1]] = 1;
+      // ★ 토큰은 이미 본 것으로 기록해 둔다(안 그리더라도) — 아래 유입가이드 추출의 중복 판정 재료다
       tokens.push(m[1]);
+      if (seen && seen.indexOf(m[1]) >= 0) continue;   // 이미 HTML 에 있는 사진 — 두 번 그리지 않는다
       html += '<img src="' + escAttr(base + '/api/order/guide-image/' + m[1]) + '" alt="' + escAttr(alt || '첨부 이미지') + '">';
     }
     return { html: html, tokens: tokens };
@@ -209,7 +222,8 @@
      *   그 토큰을 아래 중복 판정에 함께 넘겨 같은 사진이 두 번 그려지지 않게 한다.
      */
     var unitGuideHtml = (so && so.inflowGuideHtml) || '';
-    var unitPack = imageListHtml(so && so.inflowGuideImages, o.apiBase, '유입가이드 이미지');
+    // ★ 같은 사진이 안내글 HTML 과 배열 양쪽에 저장되므로(위 imageListHtml 주석) HTML 을 넘겨 접는다
+    var unitPack = imageListHtml(so && so.inflowGuideImages, o.apiBase, '유입가이드 이미지', unitGuideHtml);
     var usingUnitGuide = !!(unitGuideHtml || unitPack.html);
     var guideHtml = usingUnitGuide ? (unitGuideHtml + unitPack.html) : (wd.inflowGuideHtml || '');
     // ★ seen 에 두 배열의 토큰을 함께 넘겨 같은 사진이 유입가이드 카드에 이중 노출되지 않게 한다

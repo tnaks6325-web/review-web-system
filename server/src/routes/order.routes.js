@@ -506,8 +506,46 @@ function _sourceContentNextValues(b, derived) {
     skip_weekends: _boolOrNull(b.skip_weekends),
     holidays: _holidaysJson(b.holidays),
     work_kind: workKindForStore(b.work_kind),
+    // ★★ 회수·혼합 부속정보(135)는 **요청이 실제로 보냈을 때만** 비교 대상에 넣는다.
+    //   이 칸을 보내지 않던 시절의 오더가 문장 파싱 폴백 때문에 "바뀐 것"으로 읽혀
+    //   계약 후속 매칭이 새로 막히는 일을 만들지 않는다(2026-08-20 실장애와 같은 자리).
+    //   ★ 빠뜨리면 그 칸만 고친 요청이 "바뀐 게 없다"로 읽혀 **저장했다고 답하면서 값을 버린다**.
+    ...(b.delivery_type_mix === undefined ? {} : { delivery_type_mix: _deliveryMixJson(b, derived.deliveryType) }),
+    ...(b.recall_courier === undefined ? {} : { recall_courier: _recallFields(b, derived.deliveryType).courier }),
+    ...(b.recall_product === undefined ? {} : { recall_product: _recallFields(b, derived.deliveryType).product }),
   };
 }
+
+// ★★ 접수된 뒤에도 원본에서 고칠 수 있는 칸 (사용자 확정 2026-08-25).
+//   종전에는 접수(광고주 확정)·게시가 끝나면 **내용 수정이 전부** 409 로 막혀, 가이드 오타
+//   하나를 고치려 해도 인트라넷에는 저장되고 리뷰웹에는 안 붙는 어긋남만 쌓였다.
+//   ★ 여기 있는 칸은 접수 이후 **아무 계산에도 쓰이지 않는다** — 작업명은 접수 때 탭·공고
+//     이름을 만들고 끝, 담당AE 는 접수 때 업무포털로 넘어가고 끝, 나머지는 표시·발행
+//     프리필 전용이다. 작업표 열·줄·날짜, 정원, 금액, 시트/공고 연결은 하나도 안 바뀐다.
+//   ★★ 넓히지 말 것 — 정원(recruit_count·daily_count)·일정(start_date·skip_weekends·
+//     holidays)·열 구성(purchase_channel·review_type·delivery_type·courier_proxy·
+//     work_kind·product_options_json)·금액·work_sheet_url 은 이미 깔린 작업표와 어긋난다.
+//     그쪽은 리뷰웹시스템 작업보드에서 고친다.
+//   ★ 값 계산은 _sourceContentNextValues 하나에서 나온다(사본 0) — 여기서 따로 계산하면
+//     "부분 수정으로 저장한 값 ≠ 전체 수정으로 저장한 값" 이 된다.
+const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflow_keyword',
+  'inflow_guide', 'guide_images', 'review_guide', 'special_notes'];
+
+// 사람이 읽는 칸 이름 — 409 문구가 "무엇을 못 고쳤는지"를 말한다(코드명 노출 금지).
+const SOURCE_FIELD_LABELS = {
+  title: '작업명', start_date: '시작일', product_option: '상품·옵션',
+  product_options_json: '상품 구성', pay_amount: '결제금액', review_fee: '리뷰비',
+  daily_count: '일 모집인원', daily_count_text: '일 모집인원 표기', purchase_channel: '구매채널',
+  purchase_time: '구매시간대', inflow_keyword: '유입 검색어', inflow_type: '유입방식',
+  inflow_guide: '유입 가이드', guide_images: '첨부 이미지', delivery_type: '배송유형',
+  courier_proxy: '택배대행', review_type: '리뷰타입', review_type_mix: '리뷰 조합',
+  recruit_count: '총 모집인원', review_guide: '리뷰 가이드', special_notes: '특이사항',
+  product_url: '상품 주소', work_sheet_url: '작업시트', goods_cost_type: '물건비',
+  manager_name: '담당AE', work_manager: '작업담당', skip_weekends: '주말 제외',
+  delivery_type_mix: '실배송·빈박스 건수', recall_courier: '회수 택배사', recall_product: '회수 상품명칭',
+  holidays: '휴무일', work_kind: '체험단 종류',
+};
+const _sourceFieldLabel = column => SOURCE_FIELD_LABELS[column] || column;
 
 const _SOURCE_JSON_COLUMNS = new Set(['product_options_json', 'guide_images', 'review_type_mix', 'delivery_type_mix', 'holidays']);
 
@@ -600,13 +638,22 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     const contentChanges = contractMatchAllowed
       ? _sourceContentChanges(current, b, { optionsJson, deliveryType, courierProxy })
       : [];
-    const contractOnly = contractMatchAllowed && contentChanges.length === 0;
-    if (sourceEditLocked && !contractOnly) {
+    // 접수 뒤에도 고칠 수 있는 칸(안내 문구·사진·이름)만 바뀐 요청이면 그 칸만 갱신한다.
+    // 계약 후속 매칭(바뀐 내용 0)도 같은 경로다 — 잠긴 칸에는 어느 쪽도 손대지 못한다.
+    const blockedChanges = contentChanges.filter(column => !SOURCE_EDIT_AFTER_ACCEPT.includes(column));
+    const partialEdit = contractMatchAllowed && blockedChanges.length === 0;
+    if (sourceEditLocked && !partialEdit) {
+      const names = blockedChanges.map(_sourceFieldLabel);
       return res.status(409).json({
         ok: false,
-        error: '이미 접수·게시 기준이 확정된 작업오더는 원본 리뷰오더에서 변경할 수 없습니다.',
+        error: names.length
+          ? `이미 접수된 작업오더라 이 칸은 원본에서 바꿀 수 없습니다: ${names.join(', ')}`
+            + ' — 리뷰웹시스템 작업보드에서 고쳐주세요.'
+            + ' (작업명·담당AE·상품 주소·유입 검색어·가이드·첨부 이미지·특이사항은 여기서 바꿀 수 있습니다)'
+          : '이미 접수·게시 기준이 확정된 작업오더는 원본 리뷰오더에서 변경할 수 없습니다.',
         work_order_id: current.id,
         changed_fields: contentChanges,
+        blocked_fields: blockedChanges,
       });
     }
 
@@ -633,30 +680,49 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       });
     }
 
-    // 계약 후속 매칭 — 계약·광고주 칸만 갱신한다. 작업 내용·인원이 그대로라 정원 검증과
-    // 작업표 동기화는 건드리지 않는다(접수팀이 잡아둔 상태를 그대로 보존).
-    if (contractOnly) {
-      const { rows: matched } = await pool.query(
-        `UPDATE work_orders SET
-           sales_id = $2, contract_number = $3, quote_id = $4,
-           source_revision = $5, intake_idempotency_key = $6,
-           intranet_advertiser_id = $7, intranet_advertiser_name = $8,
-           intranet_advertiser_contact = $9, intranet_advertiser_business_number = $10,
+    // 접수된 오더의 부분 수정 — 계약·광고주 칸 + 허용된 안내 칸만 갱신한다.
+    // ★ 잠긴 칸은 이 SET 목록에 아예 없다(코드 실수로도 못 쓴다).
+    // ★ 작업 내용·인원이 그대로라 정원 검증과 작업표 동기화는 건드리지 않는다
+    //   (접수팀이 잡아둔 상태를 그대로 보존).
+    if (partialEdit) {
+      const nextValues = _sourceContentNextValues(b, { optionsJson, deliveryType, courierProxy });
+      // ★ 실제로 달라진 칸만 쓴다 — 바뀐 것이 없으면(계약 후속 매칭) 내용 칸은 SET 에
+      //   아예 안 들어가 종전 동작과 한 글자도 다르지 않다.
+      //   칸 이름은 우리 화이트리스트를 거친 리터럴뿐이라 문자열 조립이 안전하다(주입 없음).
+      const editable = contentChanges
+        .filter(column => SOURCE_EDIT_AFTER_ACCEPT.includes(column) && /^[a-z_]+$/.test(column));
+      const params = [current.id];
+      const sets = editable.map(column => {
+        params.push(nextValues[column]);
+        return `${column} = $${params.length}`;
+      });
+      const add = value => { params.push(value); return `$${params.length}`; };
+      const sql = `UPDATE work_orders SET
+           ${sets.map(part => `${part},`).join('\n           ')}
+           sales_id = ${add(String(b.sales_id || '').trim())},
+           contract_number = ${add(String(b.contract_number || '').trim())},
+           quote_id = ${add(String(b.quote_id || '').trim())},
+           source_revision = ${add(source.sourceRevision)},
+           intake_idempotency_key = ${add(source.idempotencyKey)},
+           intranet_advertiser_id = ${add(source.intranetAdvertiserId)},
+           intranet_advertiser_name = ${add(source.intranetAdvertiserName)},
+           intranet_advertiser_contact = ${add(source.intranetAdvertiserContact)},
+           intranet_advertiser_business_number = ${add(source.intranetAdvertiserBusinessNumber)},
            updated_at = NOW()
-         WHERE id = $1 AND source_review_order_id = $11
-         RETURNING *`,
-        [
-          current.id,
-          String(b.sales_id || '').trim(), String(b.contract_number || '').trim(), String(b.quote_id || '').trim(),
-          source.sourceRevision, source.idempotencyKey,
-          source.intranetAdvertiserId, source.intranetAdvertiserName,
-          source.intranetAdvertiserContact, source.intranetAdvertiserBusinessNumber,
-          sourceReviewOrderId,
-        ]
-      );
+         WHERE id = $1 AND source_review_order_id = ${add(sourceReviewOrderId)}
+         RETURNING *`;
+      const { rows: matched } = await pool.query(sql, params);
       const linked = matched[0];
-      _emitWorkOrderNew(linked, { event: 'source_contract_match', source_revision: source.sourceRevision });
-      return res.json({ ok: true, data: linked, contract_only: true });
+      const contractOnly = contentChanges.length === 0;
+      _emitWorkOrderNew(linked, {
+        event: contractOnly ? 'source_contract_match' : 'source_partial_edit',
+        source_revision: source.sourceRevision,
+      });
+      return res.json({
+        ok: true, data: linked,
+        contract_only: contractOnly,
+        edited_fields: contentChanges,
+      });
     }
 
     // 원본 리뷰오더의 목표 인원이 바뀌면 연결된 공고도 같은 값으로 저장한다.
