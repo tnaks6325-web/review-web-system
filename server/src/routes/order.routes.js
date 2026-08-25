@@ -796,7 +796,9 @@ router.get('/intake/list', async (req, res, next) => {
     }
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
-              inflow_type, work_kind, review_guide, special_notes, inflow_guide, product_url,
+              inflow_type, work_kind,
+              -- 카드 첫 화면에서 자주 보는 짧은 값만 가산한다. 긴 안내 문구·HTML은
+              -- /intake/:id 상세 조회로만 보내 목록 폴링 응답이 200건분으로 불어나지 않게 한다.
               purchase_time, delivery_type, review_type, pay_amount, daily_count,
               work_sheet_url, linked_campaign_id, chat_room_url, admin_memo,
               source_review_order_id, source_revision, intranet_advertiser_id, created_at, updated_at,
