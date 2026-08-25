@@ -225,6 +225,17 @@ ok('★★ 옛 [편집 이력] 버튼·모달은 흡수됐다(창구 둘 금지)
 ok('★ 유형 탭은 서버가 준 kinds 를 그린다(라벨 사본 0)',
   /_tlKinds=r\.kinds\|\|_tlKinds/.test(WD) && /const kinds=_tlKinds\|\|\[\]/.test(WD)
   && !/'정산'\]/.test(WD.slice(WD.indexOf('function _tlPaintTabs'), WD.indexOf('function _tlPaintBody'))));
+ok('★★ 리뷰어 이름은 본계정만 또는 "본계정 타계 수취인"으로 단일 표기한다',
+  /function _reviewerLabel\(owner, recipient\)/.test(LOGSVC)
+  && /return `\$\{main\} 타계 \$\{used\}`/.test(LOGSVC)
+  && /_reviewerLabel\(r\.orderer, r\.recipient\)/.test(LOGSVC));
+ok('★★ 리뷰 캡처·검수 로그도 작업표의 본계정/수취인 이름으로 구분한다',
+  /ri\.reviewer_name AS owner_name, ri\.recipient_name/.test(LOGSVC)
+  && /_reviewerLabel\(r\.owner_name \|\| r\.reviewer_name, r\.recipient_name \|\| r\.reviewer_name\)/.test(LOGSVC));
+ok('★★ 작업 로그는 바깥 클릭으로 닫히지 않고 Esc 또는 닫기 버튼으로만 닫힌다',
+  /ov\._esc=e=>\{ if\(e\.key==='Escape'/.test(WD)
+  && !/ov\.addEventListener\('click',e=>\{ if\(e\.target===ov\) closeTabLog\(\); \}\);/.test(WD)
+  && /onclick="closeTabLog\(\)">닫기<\/button>/.test(WD));
 ok('★★ 유형 탭 오른쪽에 실시간 로그 검색창이 있고, 메시지·담당자·시간을 즉시 필터링한다',
   /class="tlsearch"/.test(WD) && /oninput="tlSearch\(this\.value\)"/.test(WD)
   && /function tlSearch\(v\)/.test(WD) && /\[e\.message,e\.who,e\.at,e\.kind\]/.test(WD));

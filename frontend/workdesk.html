@@ -9440,8 +9440,9 @@ function openTabLog(){
   let ov=document.getElementById('tlov');
   if(!ov){
     ov=document.createElement('div'); ov.id='tlov'; ov.className='modalov';
-    /* 로그는 읽기 전용이라 잃을 입력이 없다 → 바깥 클릭·Esc 로 닫는다(취소 시트와 반대). */
-    ov.addEventListener('click',e=>{ if(e.target===ov) closeTabLog(); });
+    /* 로그는 실수로 닫히지 않게 우측 상단 [닫기] 또는 Esc로만 닫는다. */
+    ov._esc=e=>{ if(e.key==='Escape' && ov.style.display==='flex'){ e.preventDefault(); closeTabLog(); } };
+    document.addEventListener('keydown',ov._esc);
     document.body.appendChild(ov);
   }
   ov.style.display='flex';
