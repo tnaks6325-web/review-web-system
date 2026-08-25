@@ -312,6 +312,14 @@ async function csLoadOrderContext(threadId) {
     if (!d || d.ok === false) throw new Error((d && d.error) || "불러오기 실패");
     if (_csActiveThreadId !== threadId) return;   // 그새 다른 방으로 이동
     wrap.innerHTML = _csCtxHtml(d);
+    /* ★ 그 주문이 기록된 줄 번호를 링크 문맥에 얹는다 — 한 사람이 같은 작업에 여러 번 참여했을 때
+         "이 문의의 그 건"을 정확히 짚는 키. 도착이 헤더보다 늦어도 되도록 **덧붙이기만** 한다
+         (문맥 자체를 여기서 만들지 않는다 — 작업 미지정 문의에 링크가 생기면 안 된다). */
+    if (_csGoCtx) {
+      const o = d.order || {}, sh = d.sheet || {};
+      const row = o.sheetRow || sh.rowIndex || '';
+      _csGoCtx.row = row ? String(row) : '';
+    }
   } catch (err) {
     if (_csActiveThreadId !== threadId) return;
     wrap.innerHTML = `<div style="flex:1;color:#9CA3AF;font-size:.76rem">주문정보를 불러오지 못했습니다 (${escHtml(err.message)})</div>`;
@@ -370,6 +378,51 @@ function _csCtxHtml(d) {
   return orderCard + histCard;
 }
 
+/* ══ 문의방 제목 → 그 작업의 작업보드(새 탭·해당 리뷰어 행 강조) ═════════════════════
+   ★★ 실행부 사본 0 — 작업보드의 **리뷰어 로그 딥링크(`#go=`)와 같은 계약**을 그대로 쓴다
+     ({s:시트, t:작업, g:gid, p:연락처8, n:이름, st:시트제목}). 받는 쪽(`_consumeGo` →
+     `pendingTab`/`pendingFocus` → `_applyPendingFocus`)이 이미 "행을 찾아 스크롤+강조,
+     못 찾으면 사유를 토스트"까지 한다. 여기서 새 규칙을 만들면 두 창구가 갈린다.
+   ★ 서버 변경 0 — 필요한 재료(campaignKey="시트ID||작업명", 연락처, 이름)가 이미 스레드
+     응답에 실려 온다.
+   ★★ 링크가 권한을 넓히지 않는다 — 새 탭도 평소처럼 서버 스코프 검증(canAccessTab)을
+     그대로 거친다. 토큰을 함께 싣는 이유는 새 탭이 sessionStorage 를 물려받지 못해
+     로그인 화면으로 떨어지기 때문이며, **사람에게 건네는 주소가 아니라 자기 새 탭**이다
+     (로그 탭 `_logOpenWorkdesk` 와 같은 선례).                                        */
+var _csGoCtx = null;   // ★ onclick 에 시트발 문자열을 보간하지 않는다 — 열려 있는 방은 하나뿐이라 인자가 없다
+
+// campaignKey("시트ID||작업명") → {sheetId, tabName}. 형식이 아니면 null(추측하지 않는다).
+function _csGoParseKey(key) {
+  var ck = (key == null ? '' : String(key));
+  var sep = ck.indexOf('||');
+  if (sep < 0) return null;
+  var sheetId = ck.slice(0, sep), tabName = ck.slice(sep + 2);
+  if (!sheetId || !tabName) return null;
+  return { sheetId: sheetId, tabName: tabName };
+}
+
+/* 목적지 경로 — 작업보드는 workdesk 한 곳뿐이라 재기준 훅을 두지 않고 현재 주소에서 조립한다.
+   ★ 확장자 유무를 **유지**한다: Pages 는 `/workdesk`, 테섭(Railway)·로컬은 `/workdesk.html`
+     로 열리므로 한쪽으로 고정하면 반대쪽에서 죽은 링크가 된다.                          */
+function _csWorkdeskPath() {
+  var p = String(location.pathname || '');
+  return p.replace(/[^/]*$/, function (last) { return /\.html?$/i.test(last) ? 'workdesk.html' : 'workdesk'; });
+}
+
+// 문의방 제목 클릭 → 그 작업보드를 새 탭으로.
+function csOpenWorkboard(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }   // 헤더 전체에 걸린 접기/펼치기와 분리
+  var c = _csGoCtx;
+  if (!c) return;
+  var payload = { s: c.sheetId, t: c.tabName, g: '', p: c.phone8 || '', n: c.name || '',
+                  st: c.sheetTitle || '', r: c.row || '' };   // r = 그 주문이 기록된 줄 번호(있으면 정확히 짚는다)
+  var url = location.origin + _csWorkdeskPath() + '#go=' + encodeURIComponent(JSON.stringify(payload));
+  var tk = '';
+  try { tk = sessionStorage.getItem('admin_token') || ''; } catch (_) { }
+  if (tk) url += '&sso=' + encodeURIComponent(tk);
+  window.open(url, '_blank', 'noopener');   // noopener = 새 탭이 이 창을 조작하지 못하게
+}
+
 async function csReloadConversation(threadId) {
   if (_csActiveThreadId !== threadId) return;
   try {
@@ -379,7 +432,19 @@ async function csReloadConversation(threadId) {
     const camp = document.getElementById("csConvCampaign");
     if (camp) {
       const sheet = t.companyLabel ? ` <span style="color:#9CA3AF">· 시트: ${escHtml(t.companyLabel)}</span>` : '';
-      camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${escHtml(t.campaignLabel || '문의')}${sheet}`;
+      const label = escHtml(t.campaignLabel || '문의');
+      // ★ 작업이 지정된 문의만 링크 — 일반 문의(campaign_key 빈 값)는 갈 곳이 없어 종전대로 글자로 둔다.
+      const go = _csGoParseKey(t.campaignKey);
+      if (go) {
+        _csGoCtx = { sheetId: go.sheetId, tabName: go.tabName,
+                     phone8: t.reviewerPhone8 || '', name: t.reviewerName || '', sheetTitle: t.companyLabel || '' };
+        camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ` +
+          `<a href="#" class="cs-camp-link" onclick="csOpenWorkboard(event)"` +
+          ` title="이 작업의 작업보드를 새 탭으로 엽니다 — 이 리뷰어의 행을 찾아 표시합니다">${label} ↗</a>${sheet}`;
+      } else {
+        _csGoCtx = null;
+        camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${label}${sheet}`;
+      }
     }
     const memo = document.getElementById("csMemoText");
     if (memo && document.activeElement !== memo) memo.value = t.adminMemo || "";
@@ -630,7 +695,7 @@ function csReloadAfterReviewEdit() {
        고정)은 그대로 두고 대화창만 상한을 받으므로, 남는 폭은 부모 flex row(gap:12px)
        안에서 오른쪽으로 자연히 흘러간다 — 별도 스페이서 요소가 필요 없다(flex:1 이
        max-width 에서 멈추고, 형제가 없어 남는 공간을 아무도 못 가져간다). */
-  var HTML = "      <div id=\"tab-cs-inquiry\" class=\"admin-tab-pane\" style=\"padding:16px\">\n        <div class=\"admin-section-header\" style=\"margin-bottom:12px\">\n          <span style=\"font-size:.95rem;font-weight:700;color:var(--t1,#0F172A)\"><i class=\"fas fa-comments\" style=\"color:var(--p,#3182F6);margin-right:6px\"></i>\ub9ac\ubdf0\uc5b4 C/S \ubb38\uc758</span>\n          <div style=\"display:flex;gap:6px;margin-left:auto;align-items:center\">\n            <input id=\"csSearchInput\" type=\"text\" placeholder=\"\ub9ac\ubdf0\uc5b4/\ucea0\ud398\uc778 \uac80\uc0c9...\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none;width:150px\"\n              oninput=\"csFilterRooms(this.value)\">\n            <select id=\"csStatusFilter\" onchange=\"loadCsRooms()\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none\">\n              <option value=\"all\">\uc804\uccb4</option>\n              <option value=\"open\" selected>\uc9c4\ud589\uc911</option>\n              <option value=\"closed\">\uc885\ub8cc</option>\n            </select>\n            <button onclick=\"loadCsRooms()\" style=\"padding:6px 12px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px\">\n              <i class=\"fas fa-sync-alt\"></i> \uc0c8\ub85c\uace0\uce68\n            </button>\n          </div>\n        </div>\n        <style>\n          .cs-room-row{ cursor:pointer; transition:background .12s; }\n          .cs-room-row:hover{ background:#f9fafb; }\n          .cs-room-active{ background:#eef5ff !important; box-shadow:inset 3px 0 0 #3182f6; }\n          .cs-conv-head{ cursor:pointer; user-select:none; transition:background .12s; }\n          .cs-conv-head:hover{ background:#f7fafd; }\n          .cs-conv-hint{ opacity:0; transition:opacity .15s; font-size:.68rem; color:#94A3B8; }\n          .cs-conv-head:hover .cs-conv-hint{ opacity:1; }\n          .cs-conv-chev{ color:#94A3B8; font-size:.78rem; transition:transform .18s; }\n          .cs-conv-chev[data-fold]{ transform:rotate(-90deg); }\n        </style>\n        <!-- \uc88c\uce21: \ucc44\ud305\ubc29 \ubaa9\ub85d / \uc6b0\uce21: \ub300\ud654\ucc3d (\uc778\ub77c\uc778 \ubd84\ud560) -->\n        <div style=\"display:flex;gap:12px;align-items:stretch;height:calc(100vh - 250px);min-height:480px\">\n          <div id=\"csRoomListWrap\" style=\"width:360px;flex-shrink:0;overflow-y:auto;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07))\">\n            <div style=\"padding:30px;text-align:center;color:var(--t3,#94A3B8)\">\n              <i class=\"fas fa-circle-notch fa-spin\"></i> \ubd88\ub7ec\uc624\ub294 \uc911...\n            </div>\n          </div>\n          <div id=\"csConvPane\" style=\"flex:1;min-width:0;max-width:860px;display:flex;flex-direction:column;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07));overflow:hidden\">\n            <div style=\"margin:auto;text-align:center;color:var(--t3,#94A3B8);padding:40px\">\n              <i class=\"fas fa-comments\" style=\"font-size:2rem;display:block;margin-bottom:10px;opacity:.4\"></i>\n              \uc67c\ucabd\uc5d0\uc11c \ubb38\uc758\ubc29\uc744 \uc120\ud0dd\ud558\uc138\uc694\n            </div>\n          </div>\n        </div>\n      </div><!-- /tab-cs-inquiry -->";
+  var HTML = "      <div id=\"tab-cs-inquiry\" class=\"admin-tab-pane\" style=\"padding:16px\">\n        <div class=\"admin-section-header\" style=\"margin-bottom:12px\">\n          <span style=\"font-size:.95rem;font-weight:700;color:var(--t1,#0F172A)\"><i class=\"fas fa-comments\" style=\"color:var(--p,#3182F6);margin-right:6px\"></i>\ub9ac\ubdf0\uc5b4 C/S \ubb38\uc758</span>\n          <div style=\"display:flex;gap:6px;margin-left:auto;align-items:center\">\n            <input id=\"csSearchInput\" type=\"text\" placeholder=\"\ub9ac\ubdf0\uc5b4/\ucea0\ud398\uc778 \uac80\uc0c9...\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none;width:150px\"\n              oninput=\"csFilterRooms(this.value)\">\n            <select id=\"csStatusFilter\" onchange=\"loadCsRooms()\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none\">\n              <option value=\"all\">\uc804\uccb4</option>\n              <option value=\"open\" selected>\uc9c4\ud589\uc911</option>\n              <option value=\"closed\">\uc885\ub8cc</option>\n            </select>\n            <button onclick=\"loadCsRooms()\" style=\"padding:6px 12px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px\">\n              <i class=\"fas fa-sync-alt\"></i> \uc0c8\ub85c\uace0\uce68\n            </button>\n          </div>\n        </div>\n        <style>\n          .cs-room-row{ cursor:pointer; transition:background .12s; }\n          .cs-room-row:hover{ background:#f9fafb; }\n          .cs-room-active{ background:#eef5ff !important; box-shadow:inset 3px 0 0 #3182f6; }\n          .cs-conv-head{ cursor:pointer; user-select:none; transition:background .12s; }\n          .cs-conv-head:hover{ background:#f7fafd; }\n          .cs-conv-hint{ opacity:0; transition:opacity .15s; font-size:.68rem; color:#94A3B8; }\n          .cs-conv-head:hover .cs-conv-hint{ opacity:1; }\n          .cs-conv-chev{ color:#94A3B8; font-size:.78rem; transition:transform .18s; }\n          .cs-conv-chev[data-fold]{ transform:rotate(-90deg); }\n          .cs-camp-link{ color:#2563EB; font-weight:600; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:2px; cursor:pointer; }\n          .cs-camp-link:hover{ color:#1D4ED8; text-decoration-style:solid; }\n        </style>\n        <!-- \uc88c\uce21: \ucc44\ud305\ubc29 \ubaa9\ub85d / \uc6b0\uce21: \ub300\ud654\ucc3d (\uc778\ub77c\uc778 \ubd84\ud560) -->\n        <div style=\"display:flex;gap:12px;align-items:stretch;height:calc(100vh - 250px);min-height:480px\">\n          <div id=\"csRoomListWrap\" style=\"width:360px;flex-shrink:0;overflow-y:auto;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07))\">\n            <div style=\"padding:30px;text-align:center;color:var(--t3,#94A3B8)\">\n              <i class=\"fas fa-circle-notch fa-spin\"></i> \ubd88\ub7ec\uc624\ub294 \uc911...\n            </div>\n          </div>\n          <div id=\"csConvPane\" style=\"flex:1;min-width:0;max-width:860px;display:flex;flex-direction:column;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07));overflow:hidden\">\n            <div style=\"margin:auto;text-align:center;color:var(--t3,#94A3B8);padding:40px\">\n              <i class=\"fas fa-comments\" style=\"font-size:2rem;display:block;margin-bottom:10px;opacity:.4\"></i>\n              \uc67c\ucabd\uc5d0\uc11c \ubb38\uc758\ubc29\uc744 \uc120\ud0dd\ud558\uc138\uc694\n            </div>\n          </div>\n        </div>\n      </div><!-- /tab-cs-inquiry -->";
 
   function mount(hostId) {
     var host = document.getElementById(hostId || "csInquiryMount");
@@ -658,6 +723,8 @@ function csReloadAfterReviewEdit() {
     csCanActOnReviewEdit: csCanActOnReviewEdit, csReloadAfterReviewEdit: csReloadAfterReviewEdit,
     // 사진 첨부(파일선택·Ctrl+V·드래그앤드롭) — 생성 HTML의 onclick/onchange/onpaste 문자열이 이름으로 찾는다
     csPickFiles: csPickFiles, csRemoveAttach: csRemoveAttach, csHandlePaste: csHandlePaste,
+    // 문의방 제목 → 그 작업의 작업보드(새 탭·해당 리뷰어 행 강조). 생성 HTML 의 onclick 이 이름으로 찾는다
+    csOpenWorkboard: csOpenWorkboard,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];
   window.CsInquiry = { mount: mount, html: HTML };

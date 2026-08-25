@@ -2594,7 +2594,7 @@ function _consumeGo(){
   const g=_GO; _GO=null;
   STATE.view='workdesk';
   STATE.pendingTab={ sheetId:g.s, tabName:g.t, tabGid:g.g||'', spreadsheetTitle:g.st||'' };
-  STATE.pendingFocus={ phone8:String(g.p||''), name:String(g.n||'') };
+  STATE.pendingFocus={ phone8:String(g.p||''), name:String(g.n||''), row:String(g.r||'') };
   try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
 }
 // 공유 링크 소비: 코드를 서버에 물어 대상(작업 or 업체)을 받아 예약한다.
@@ -7347,8 +7347,20 @@ function _applyPendingFocus(final){
   // 속성 선택자 값은 JSON.stringify 로 따옴표+이스케이프(따옴표·역슬래시가 든 값이 와도 선택자가 안 깨짐)
   const sel=(attr,v)=>'tr['+attr+'='+JSON.stringify(String(v))+']';
   let tr=null;
-  if(f.phone8) tr=body.querySelector(sel('data-p8',f.phone8));
-  if(!tr && f.name) tr=body.querySelector(sel('data-nm',f.name));   // 연락처가 비었거나 바뀐 행 폴백
+  /* ★ 1순위 = 그 주문이 기록된 줄 번호(C/S 문의방 딥링크가 실어 준다) — 한 사람이 같은 작업에
+       여러 번 참여했을 때 "그 문의의 그 건"을 정확히 짚는 유일한 키.
+     ★★ 다만 줄 번호는 재배정·정리로 사람이 바뀔 수 있어 **그 줄의 신원을 확인**하고,
+        어긋나면 채택하지 않고 아래 폴백으로 내려간다(엉뚱한 사람 행을 짚지 않는다). */
+  if(f.row){ const cand=body.querySelector(sel('data-seq',String(f.row)));
+    if(cand){ const cp8=cand.getAttribute('data-p8')||'', cnm=cand.getAttribute('data-nm')||'';
+      const okP8=f.phone8 && cp8===f.phone8, okNm=f.name && cnm===f.name;
+      // 신원 재료가 아예 없으면(둘 다 빈 값) 줄 번호만 믿는다 — 그때는 그것이 유일한 근거다
+      if(okP8||okNm||(!f.phone8&&!f.name)) tr=cand; } }
+  // 2순위 = 연락처(본계정 참여면 그 줄 연락처와 같다)
+  if(!tr && f.phone8) tr=body.querySelector(sel('data-p8',f.phone8));
+  /* 3순위 = 참여자 이름. ★ 참여자 칸은 **로그인 본계정 이름**이고 수취인 칸이 명의(타계정)라
+     (sheetlessOrder: reviewer_name = loginName), **타계정으로 참여한 건도 이 폴백으로 찾힌다**. */
+  if(!tr && f.name) tr=body.querySelector(sel('data-nm',f.name));
   if(!tr){
     if(final){ STATE.pendingFocus=null;
       _toast(`${f.name||'해당 리뷰어'} 행을 이 명단에서 찾지 못했습니다 — 필터가 걸려 있거나 명단에서 제거된 행일 수 있습니다.`); }
@@ -7550,7 +7562,7 @@ function buildGrid(wd){
     // data-rid = 행 식별자(업체 뷰어의 리뷰 미리보기 선택 키) — 셀에만 있던 것을 행에도 올려 tr 단위로 잡는다.
     /* ★ 초과 줄은 배경으로 식별한다(사용자 확정 2026-08-24). 판정은 서버(`r.over`) 단일 출처 —
        화면에서 다시 세면 게이지·표·홈이 갈린다. 담당자가 칠한 셀 배경색(인라인)은 그대로 이긴다. */
-    return `<tr${r.over===true?' class="gover"':''} data-rid="${esc(r.id)}" data-p8="${esc(r.phone8||'')}" data-nm="${esc(r.name||'')}">${tds}</tr>`;
+    return `<tr${r.over===true?' class="gover"':''} data-rid="${esc(r.id)}" data-seq="${esc(r.seq==null?'':r.seq)}" data-p8="${esc(r.phone8||'')}" data-nm="${esc(r.name||'')}">${tds}</tr>`;
   };
   // 본문 행 배열(청크 렌더용) — 그룹 여부에 따라
   let bodyArr=[], emptyBody='';
