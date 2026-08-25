@@ -2344,6 +2344,31 @@ function _buildOptRowEl(data) {
     unitEl.classList.toggle("ug-on");
     if (unitEl.classList.contains("ug-on")) { _igBind(ugKey); _igRender(ugKey); }
   };
+
+  /* ── 🧩 이 선택지 리뷰 조합(2026-08-25) — 유입가이드 줄 바로 아래, **같은 규격**의 접이줄.
+     리뷰타입이 '혼합'이고 옵션 원장을 만드는 모드(opt)일 때만 보인다(`syncRecruitReviewTypeMix`). */
+  /* ★ `typeof` 가드 — 런타임엔 항상 있지만 **블록 단위 vm 추출 회귀가드**의 sandbox 에는
+     이 함수들이 없어 가드가 없으면 그 테스트들이 ReferenceError 로 죽는다(레포 관용구). */
+  if (typeof _mxBuild === "function") {
+    const mxCta = document.createElement("button");
+    mxCta.type = "button";
+    mxCta.className = "rf-mx-cta";
+    mxCta.innerHTML =
+      '<span class="rf-ug-cta-ic">🧩</span>' +
+      '<span class="rf-ug-cta-tx">이 옵션 리뷰 조합</span>' +
+      '<span class="rf-ug-cta-st"></span>' +
+      '<span class="rf-ug-cta-ar">▾</span>';
+    unitEl.appendChild(mxCta);
+    unitEl.appendChild(_mxBuild(row));
+    mxCta.onclick = () => { unitEl.classList.toggle("mx-on"); };
+    /* 인원이 바뀌면 기준값이 바뀐다 — 접이줄·균형바를 따라 갱신(패널은 다시 그리지 않는다) */
+    const rtMx = row.querySelector(".rf-opt-rt");
+    if (rtMx) rtMx.addEventListener("input", () => {
+      _mxMark(row);
+      if (typeof syncRecruitReviewTypeMix === "function") syncRecruitReviewTypeMix();
+    });
+    _mxMark(row);
+  }
   return unitEl;
 }
 
@@ -2485,12 +2510,25 @@ function _rfRowProductName(row) {
   return String((el && el.value) || "").trim();
 }
 
-function readOptRows() {
+/**
+ * 진행상품 표의 **선택 단위** 목록 — 리뷰어가 고르는 한 줄이 하나다.
+ *  · 옵션 없는 상품 = 그 상품 자체가 선택지 하나(키가 곧 상품명)
+ *  · 옵션 있는 상품 = 옵션 하나하나가 선택지
+ * ★★ 저장(readOptRows)과 **리뷰 조합 입력**이 같은 목록을 봐야 한다 — 갈리면
+ *   "화면엔 넣을 칸이 없는데 저장은 그 선택지의 조합을 요구"하는 막다른 길이 된다
+ *   (2026-08-25 실사고: `_reviewMixRows` 는 옵션명 칸이 채워진 행만 세어, 옵션 없는
+ *    상품 3개짜리 오더가 전역 카드 한 장만 받고 저장이 영구히 막혔다).
+ * ★ 상품 단위 중복 제거는 **closed 걸러내기보다 먼저** — 순서를 바꾸면 첫 행이 마감일 때
+ *   같은 상품의 둘째 행이 대신 선택되어 두 목록이 어긋난다.
+ */
+function _optUnitEntries(opts) {
+  /* ★ 구조분해 기본값 시그니처를 쓰지 않는다 — 회귀가드의 함수 추출기가 첫 닫는 중괄호에서
+     끊어 SyntaxError 를 낸다(실측). 인자는 안에서 푼다.
+     ★ 이 주석에 백틱이나 중괄호 글자를 쓰지 말 것 — 같은 추출기가 또 끊긴다. */
+  const activeOnly = !!(opts && opts.activeOnly);
   const out = [];
-  if (_prodMode() !== "opt") return out;
   const seenProductBox = new Set();
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
-    const optionUrl = String(r.querySelector(".rf-opt-url")?.value || "").trim();
     const productName = _rfRowProductName(r);
     const unitKind = _rfGroupUnit(r);
     let optKey;
@@ -2501,9 +2539,21 @@ function readOptRows() {
       seenProductBox.add(box);
       optKey = productName.replace(/\|/g, "").trim();
     } else {
-      optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
+      optKey = String(r.querySelector(".rf-opt-name")?.value || "").replace(/\|/g, "").trim();
       if (!optKey) return;                     // 옵션명 없는 행 = 단일상품 — 옵션 원장에는 넣지 않는다
     }
+    const closed = r.dataset.status === "closed";
+    if (activeOnly && closed) return;
+    out.push({ row: r, optKey, unitKind, productName, closed });
+  });
+  return out;
+}
+
+function readOptRows() {
+  const out = [];
+  if (_prodMode() !== "opt") return out;
+  _optUnitEntries().forEach(({ row: r, optKey, unitKind, productName }) => {
+    const optionUrl = String(r.querySelector(".rf-opt-url")?.value || "").trim();
     const guide = _ugCompose(r, r.dataset.ig);
     out.push({
       optKey,
@@ -3004,6 +3054,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
+  window._rfOrderReviewTypeMix = [];   // 모달을 새로 열면 지난 공고의 기준을 비운다
   window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
   window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   window._rfOrderStartDate = '';  // 연결 작업오더 시작일(대조용) — 지난 공고 안내 누수 방지
@@ -3181,6 +3232,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         window._rfMixOrigin = savedReviewMix.length ? '' : (_useOrderMix ? 'order' : 'empty');
         // 혼합 입력칸은 [혼합]을 선택할 때 동적으로 만들어진다. 먼저 진실원본을 채운 뒤
         // 버튼을 선택해야 저장된 구성(또는 작업오더 프리필)이 렌더링 첫 화면부터 보인다.
+        window._rfOrderReviewTypeMix = orderReviewMix;   // 🧩 [자동 배분]의 기준(오더 조합)
         _setRecruitGlobalReviewTypeMix(_useOrderMix ? orderReviewMix : savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* ★ 127: 체험단 종류 복원 — blog 면 리뷰타입 카드 숨김 + 안내 배너 */
@@ -3271,6 +3323,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       })();
       // 작업오더 혼합 수량도 동적 입력칸보다 먼저 보관해, [혼합] 선택 시 그대로 렌더한다.
       window._rfMixOrigin = prefillReviewMix.length ? 'order' : 'empty';
+      window._rfOrderReviewTypeMix = prefillReviewMix;   // 🧩 [자동 배분]의 기준(오더 조합)
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
@@ -3463,9 +3516,129 @@ function _setRecruitGlobalReviewTypeMix(mix) {
     .map((type) => ({ type, quantity: byType.get(type) }));
 }
 
+/* 유형 라벨 한 곳 — 행 패널과 전역 카드가 같은 이름을 쓴다 */
+const RF_MIX_LABEL = { photo: '포토', text: '텍스트', confirm: '구매확정', star: '별점' };
+
+/**
+ * 🧩 선택지 리뷰 조합 패널 — 유입가이드 패널(`_ugBuild`)과 **같은 규격**으로 행 아래에 접힌다.
+ * ★ 값의 진실원본은 종전 그대로 `row.dataset.reviewTypeMix`(`_read/_writeOptionReviewMix`) —
+ *   저장 경로(`readOptRows`)가 그 값을 그대로 싣는다(새 저장소 0).
+ */
+function _mxBuild(row) {
+  const box = document.createElement('div');
+  box.className = 'rf-mx';
+  const head = document.createElement('div');
+  head.className = 'rf-mx-h';
+  const ttl = document.createElement('span');
+  ttl.className = 'rf-mx-ttl';
+  ttl.textContent = '리뷰 조합';
+  const base = document.createElement('span');
+  base.className = 'rf-mx-base';
+  const auto = document.createElement('button');
+  auto.type = 'button';
+  auto.className = 'rf-mx-auto';
+  auto.textContent = '자동 배분';
+  auto.onclick = () => _mxAuto(row);
+  head.append(ttl, base, auto);
+  const grid = document.createElement('div');
+  grid.className = 'rf-mx-grid';
+  RF_REVIEW_MIX_TYPES.forEach((type) => {
+    const label = document.createElement('label');
+    const nm = document.createElement('span');
+    nm.textContent = RF_MIX_LABEL[type];
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = '0'; inp.inputMode = 'numeric';
+    inp.dataset.mxType = type;
+    inp.value = String(_mixQuantity(_readOptionReviewMix(row), type));
+    inp.addEventListener('focus', () => { if (inp.value === '0') inp.value = ''; });
+    inp.addEventListener('input', () => {
+      window._rfMixOrigin = '';       // 사람이 고친 순간부터는 사람이 정한 값
+      _writeOptionReviewMix(row, RF_REVIEW_MIX_TYPES.map((k) => ({
+        type: k,
+        quantity: Number(grid.querySelector(`[data-mx-type="${k}"]`)?.value) || 0,
+      })));
+      /* ★ 패널을 다시 그리지 않는다 — 입력칸 DOM 을 새로 만들면 조합 중이던 숫자·커서를 잃는다.
+         접이줄 글자와 균형바만 갈아끼운다(유입가이드 `_ugMark` 와 같은 규율). */
+      _mxMark(row);
+      if (typeof syncRecruitReviewTypeMix === 'function') syncRecruitReviewTypeMix();
+    });
+    label.append(nm, inp);
+    grid.appendChild(label);
+  });
+  const bal = document.createElement('div');
+  bal.className = 'rf-mx-bal';
+  box.append(head, grid, bal);
+  return box;
+}
+
+/** 작업오더 전체 조합 비율로 그 줄 인원을 나눠 담는다(제안까지 — 사람이 고칠 수 있다) */
+function _mxAuto(row) {
+  const q = Math.max(0, Number(row.querySelector('.rf-opt-rt')?.value) || 0);
+  if (q <= 0) { if (typeof showToast === 'function') showToast('인원을 먼저 입력해주세요.'); return; }
+  const src = (window._rfOrderReviewTypeMix || window._rfGlobalReviewTypeMix || []);
+  const w = RF_REVIEW_MIX_TYPES.map((t) => {
+    const hit = src.find((x) => x && x.type === t);
+    return Math.max(0, Number(hit?.quantity) || 0);
+  });
+  const tot = w.reduce((a, b) => a + b, 0);
+  if (!tot) { if (typeof showToast === 'function') showToast('기준이 될 작업오더 조합이 없습니다 — 직접 입력해주세요.'); return; }
+  const raw = w.map((x) => q * x / tot);
+  const base = raw.map(Math.floor);
+  let rest = q - base.reduce((a, b) => a + b, 0);
+  raw.map((v, i) => [v - base[i], i]).sort((a, b) => b[0] - a[0])
+    .forEach(([, i], k) => { if (k < rest) base[i] += 1; });
+  _writeOptionReviewMix(row, RF_REVIEW_MIX_TYPES.map((t, i) => ({ type: t, quantity: base[i] })));
+  const box = row.closest('.rf-unit')?.querySelector('.rf-mx');
+  if (box) RF_REVIEW_MIX_TYPES.forEach((t, i) => {
+    const el = box.querySelector(`[data-mx-type="${t}"]`);
+    if (el) el.value = String(base[i]);
+  });
+  _mxMark(row);
+  if (typeof syncRecruitReviewTypeMix === 'function') syncRecruitReviewTypeMix();
+}
+
+/** 접이줄 글자 + 균형바 — 접혀 있어도 상태가 보이게(유입가이드 `_ugMark` 와 대칭) */
+function _mxMark(row) {
+  const unitEl = row && row.closest ? row.closest('.rf-unit') : null;
+  if (!unitEl) return;
+  const q = Math.max(0, Number(row.querySelector('.rf-opt-rt')?.value) || 0);
+  const mix = _readOptionReviewMix(row);
+  const v = _mixVerdict(_reviewMixKey(row), q, mix);
+  const parts = RF_REVIEW_MIX_TYPES
+    .filter((t) => _mixQuantity(mix, t) > 0)
+    .map((t) => `${RF_MIX_LABEL[t]} ${_mixQuantity(mix, t)}`);
+  const cta = unitEl.querySelector('.rf-mx-cta');
+  if (cta) {
+    cta.classList.toggle('ok', v.ok);
+    cta.classList.toggle('ng', !v.ok && v.kind === 'bad');
+    const st = cta.querySelector('.rf-ug-cta-st');
+    if (st) st.textContent = v.ok ? `✓ ${parts.join(' · ')}` : (parts.length ? `⚠ ${parts.join(' · ')} — ${v.short}` : `⚠ ${v.short}`);
+    cta.title = v.ok ? '이 선택지의 리뷰 조합이 인원과 맞습니다' : '눌러서 유형별 인원을 입력하세요';
+  }
+  const box = unitEl.querySelector('.rf-mx');
+  if (box) {
+    const base = box.querySelector('.rf-mx-base');
+    if (base) base.textContent = q > 0 ? `기준 · 인원 ${q}명` : '인원 미입력';
+    const bal = box.querySelector('.rf-mx-bal');
+    if (bal) {
+      bal.className = `rf-mx-bal ${v.ok ? 'ok' : (v.kind === 'warn' ? 'warn' : 'ng')}`;
+      bal.textContent = v.ok ? `합계 ${v.sum}명 · 인원 ${q}명과 딱 맞습니다.` : `합계 ${v.sum}명 · ${v.short}${v.kind === 'bad' ? ' — 저장불가' : ''}`;
+    }
+  }
+}
+/** 표 전체 접이줄 갱신(인원·이름이 바뀌면 판정이 달라진다) */
+function _mxMarkAll() {
+  document.querySelectorAll('#rf_opt_rows .rf-opt-row').forEach((r) => _mxMark(r));
+}
+
+/* ★ 조합을 받을 줄 = 저장이 옵션으로 만드는 줄(활성분). `_optUnitEntries` 단일 출처. */
 function _reviewMixRows() {
-  return Array.from(document.querySelectorAll('#rf_opt_rows .rf-opt-row'))
-    .filter((row) => row.dataset.status !== 'closed' && String(row.querySelector('.rf-opt-name')?.value || '').trim());
+  return _optUnitEntries({ activeOnly: true }).map((e) => e.row);
+}
+/* 그 줄이 저장될 때의 키 — 서버 오류 문구가 이 이름으로 나오므로 화면도 같은 이름을 쓴다 */
+function _reviewMixKey(row) {
+  const hit = _optUnitEntries({ activeOnly: true }).find((e) => e.row === row);
+  return hit ? hit.optKey : '';
 }
 
 function _readOptionReviewMix(row) {
@@ -3485,8 +3658,8 @@ function _writeOptionReviewMix(row, mix) {
 }
 
 function getRecruitOptionReviewTypeMix() {
-  return _reviewMixRows().map((row) => ({
-    optKey: String(row.querySelector('.rf-opt-name')?.value || '').trim(),
+  return _optUnitEntries({ activeOnly: true }).map(({ row, optKey }) => ({
+    optKey,
     recruitTotal: Math.max(0, Number(row.querySelector('.rf-opt-rt')?.value) || 0),
     reviewTypeMix: _readOptionReviewMix(row),
   }));
@@ -3499,6 +3672,26 @@ function _isOptionReviewMix() {
 function _mixQuantity(mix, type) {
   const hit = (mix || []).find((entry) => entry?.type === type);
   return Math.max(0, Math.floor(Number(hit?.quantity) || 0));
+}
+
+/**
+ * 선택지 한 줄의 조합 판정 — **접이줄 표시·패널 균형바·저장 검증이 같은 함수**를 본다.
+ * 사본을 두면 "줄은 초록인데 저장은 거부"가 된다.
+ * `error` 문구는 서버(`validateOptionReviewTypeMix`)가 돌려주는 것과 같은 뜻으로 적는다.
+ */
+function _mixVerdict(optKey, quota, mix) {
+  const list = Array.isArray(mix) ? mix : [];
+  const sum = list.reduce((t, r) => t + (Number(r?.quantity) || 0), 0);
+  const used = list.filter((r) => (Number(r?.quantity) || 0) > 0).length;
+  const q = Math.max(0, Math.floor(Number(quota) || 0));
+  const name = String(optKey || '').trim() || '이름 없음';
+  if (q <= 0) return { ok: false, kind: 'warn', short: '인원을 먼저 입력해주세요.', error: `옵션 ${name}의 인원을 먼저 입력해주세요.`, sum };
+  if (sum === 0)  return { ok: false, kind: 'bad', short: '미입력', error: `옵션 ${name}에 두 가지 이상 리뷰방식을 입력해주세요.`, sum };
+  if (used < 2)   return { ok: false, kind: 'bad', short: '두 가지 이상 유형이 필요합니다', error: `옵션 ${name}에 두 가지 이상 리뷰방식을 입력해주세요.`, sum };
+  if (sum !== q)  return { ok: false, kind: 'bad',
+    short: sum > q ? `인원 ${q}명보다 ${sum - q}명 초과` : `인원 ${q}명보다 ${q - sum}명 부족`,
+    error: `옵션 ${name}의 리뷰 조합 합계를 옵션인원 ${q}명과 일치시켜주세요.`, sum };
+  return { ok: true, kind: 'ok', short: '', error: '', sum };
 }
 
 function _reviewMixTotalLabel(sum, expected, optionMode) {
@@ -3670,7 +3863,15 @@ function syncRecruitReviewTypeMix() {
   const visible = reviewType === 'mixed';
   root.style.display = visible ? '' : 'none';
   if (composer) { composer.hidden = !visible; composer.classList.toggle('is-visible', visible); }
-  if (visible) { renderRecruitOptionReviewMix(); _renderReviewMixOriginNote(); }
+  /* ★ 접이줄은 **혼합 + 옵션 원장을 만드는 모드**일 때만 — 그 밖에서는 여기서 적어도
+     `readOptRows` 가 빈 배열이라 저장되지 않는다(조용한 소실 금지, 유입가이드 줄과 같은 규율). */
+  const optWrap = document.getElementById('rf_opt_wrap');
+  const rowMode = visible && _isOptionReviewMix();
+  if (optWrap) optWrap.classList.toggle('rf-mx-on', rowMode);
+  if (rowMode) _mxMarkAll();
+  /* 행별로 받는 동안에는 전역 카드를 그리지 않는다 — 두 곳에서 받으면 값이 갈린다 */
+  if (visible && !rowMode) { renderRecruitOptionReviewMix(); _renderReviewMixOriginNote(); }
+  else if (visible) { resetRecruitReviewMixRender(); _renderReviewMixOriginNote(); }
   const mix = getRecruitReviewTypeMix();
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
@@ -3688,11 +3889,9 @@ function validateRecruitReviewTypeMix() {
   if (reviewType !== 'mixed') return '';
   const mix = syncRecruitReviewTypeMix();
   if (_isOptionReviewMix()) {
-    const options = getRecruitOptionReviewTypeMix();
-    for (const option of options) {
-      const sum = option.reviewTypeMix.reduce((total, row) => total + row.quantity, 0);
-      if (option.reviewTypeMix.length < 2) return `옵션 ${option.optKey}에 두 가지 이상 리뷰방식을 입력해주세요.`;
-      if (option.recruitTotal <= 0 || sum !== option.recruitTotal) return `옵션 ${option.optKey}의 리뷰 조합 합계를 옵션인원 ${option.recruitTotal}명과 일치시켜주세요.`;
+    for (const option of getRecruitOptionReviewTypeMix()) {
+      const v = _mixVerdict(option.optKey, option.recruitTotal, option.reviewTypeMix);
+      if (!v.ok) return v.error;
     }
     return '';
   }
