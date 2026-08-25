@@ -232,6 +232,20 @@ function _normalizeOptionsInput(arr) {
   return out;
 }
 
+/** 가이드유입은 실제 참여 가능한 선택지마다 안내가 있어야 한다.
+ * 공통 유입가이드는 레거시 공고를 읽는 호환값일 뿐, 신규 공고의 누락을 메우지 않는다. */
+function _validateActiveUnitInflowGuides(inflowType, options) {
+  if (inflowType !== 'guide' || !Array.isArray(options)) return '';
+  const missing = options
+    .filter(option => option && option.status !== 'closed')
+    .filter(option => !String(option.inflowGuideHtml || '').trim()
+      && !(Array.isArray(option.inflowGuideImages) && option.inflowGuideImages.length))
+    .map(option => option.optKey || option.productName || '이름 없는 선택지');
+  return missing.length
+    ? `가이드유입은 모든 활성 상품·옵션에 유입가이드를 설정해야 합니다: ${missing.join(', ')}`
+    : '';
+}
+
 /** 옵션 저장(replace-set): 제공 옵션 upsert + 목록에서 빠진 기존 옵션은 참여자 있으면 closed, 없으면 삭제.
  *  ★ 참여자 있는 옵션은 절대 삭제하지 않음(기록·정원 보호).
  *  ★★ 원자성·상호배제(레드/블루 #2·#7): 자체 트랜잭션 + recruit_campaigns 행 FOR UPDATE로
@@ -2277,6 +2291,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     if (normalizedReviewType !== 'mixed' && normOpts) normOpts.forEach(option => { option.reviewTypeMix = []; });
     const optionReviewMixError = validateOptionReviewTypeMix(normalizedReviewType, normOpts);
     if (optionReviewMixError) return res.status(400).json({ ok: false, error: optionReviewMixError });
+    const inflowGuideError = _validateActiveUnitInflowGuides(_savedInflowType(work_detail), normOpts);
+    if (inflowGuideError) return res.status(400).json({ ok: false, error: inflowGuideError });
     const normalizedBadges = normalizeRecruitBadges(badges, {
       cashReceiptRequired: cash_receipt_required === true,
       channel: channel || '',
@@ -2553,6 +2569,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       if (effectiveReviewTypeForOptions !== 'mixed') normOpts.forEach(option => { option.reviewTypeMix = []; });
       const optionReviewMixError = validateOptionReviewTypeMix(effectiveReviewTypeForOptions, normOpts);
       if (optionReviewMixError) return res.status(400).json({ ok: false, error: optionReviewMixError });
+      const requestedInflowType = _savedInflowType(work_detail);
+      if (requestedInflowType) {
+        const inflowGuideError = _validateActiveUnitInflowGuides(requestedInflowType, normOpts);
+        if (inflowGuideError) return res.status(400).json({ ok: false, error: inflowGuideError });
+      }
     }
 
     // 자동 배지는 어떤 저장 경로에서도 같은 조건으로 계산한다. 그래서 오래된 화면이나 API 직접 호출이
@@ -2636,7 +2657,18 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       }
     }
 
-    const wdPrepared = _prepWorkDetail(work_detail); // undefined=유지, null=비움, 문자열=교체
+    /* 신규 편집기는 공통 유입가이드 필드를 더 보내지 않는다. work_detail은 통째 저장되므로
+       기존 공고를 제목 등 다른 값만 고쳐 저장할 때 레거시 공통 안내가 지워지지 않게 병합한다. */
+    let effectiveWorkDetail = work_detail;
+    if (work_detail && typeof work_detail === 'object'
+      && !Object.prototype.hasOwnProperty.call(work_detail, 'inflowGuideHtml')) {
+      const { rows: legacyWorkDetailRows } = await pool.query(
+        'SELECT work_detail FROM recruit_campaigns WHERE id = $1', [id]
+      );
+      const legacyWorkDetail = sanitizeWorkDetail(legacyWorkDetailRows[0]?.work_detail) || {};
+      effectiveWorkDetail = { ...work_detail, inflowGuideHtml: legacyWorkDetail.inflowGuideHtml || '' };
+    }
+    const wdPrepared = _prepWorkDetail(effectiveWorkDetail); // undefined=유지, null=비움, 문자열=교체
 
     // ★ 095: 차수 원장이 있는 공고의 총모집(recruit_total)은 차수 합계가 진실원본 —
     //   수정 모달 재전송(진행상품 표 파생 hidden 값)이 차수 추가분을 조용히 되돌리지 않게

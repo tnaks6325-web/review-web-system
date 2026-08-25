@@ -380,16 +380,9 @@
         <div class="rf-cb">
           <!-- ★ 세 칸 모두 같은 구조: [입력창][첨부 이미지 스트립] (rows=3 통일 — 칸마다 높이가 다르면
                오른쪽 썸네일 크기·[＋] 위치가 줄마다 달라진다). 스트립 동작은 index-recruit.js 의 _ig* 함수. -->
-          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유입가이드</span>
-            <div>
-              <div class="ig-wrap">
-                <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
-                <div class="ig-strip" id="rf_ig_inflow" tabindex="0" data-igf="inflow"></div>
-                <input type="file" id="rf_igf_inflow" accept="image/*" multiple class="ig-file" onchange="igPickFiles('inflow',this)">
-              </div>
-              <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</div>
-              <div class="ig-msg" id="rf_igm_inflow"></div>
-              <div id="rf_clean_inflow"></div>
+          <div id="rf_legacy_inflow_row" class="rf-hrow rf-hrow-top" hidden><span class="rf-hl">기존 공통 유입안내</span>
+            <div><div id="rf_legacy_inflow" class="rf-legacy-inflow" aria-live="polite"></div>
+              <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">기존 공고 안내입니다. 새 공고는 상품·옵션별 유입가이드만 사용합니다.</div>
             </div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">리뷰가이드</span>
             <div>
@@ -500,7 +493,7 @@
                 <div class="form-row tall"><span class="form-label">안내배지</span><div class="form-control"><div class="badge-field"><div id="rf_badge_presets" class="badge-presets"><button type="button" onclick="addPresetBadge('3.3% 공제')">+ 3.3% 공제</button><button type="button" onclick="addPresetBadge('텍스트 제공')">+ 텍스트 제공</button><button type="button" onclick="addPresetBadge('옵션지정')">+ 옵션지정</button><button type="button" onclick="addPresetBadge('일반결제')">+ 일반결제</button></div><div id="rf_badges_wrap" class="badge-wrap" onclick="document.getElementById('rf_badge_input').focus()"><input id="rf_badge_input" placeholder="배지 직접 입력 후 Enter" onkeydown="handleBadgeInput(event)"></div></div></div></div>
                 <div class="form-row"><span class="form-label">공고 썸네일 URL</span><div class="form-control thumb-url-control"><input id="rf_thumb_url" type="url" placeholder="쿠팡 이미지 주소 붙여넣기"><button type="button" class="product-link-button thumb-product-link" onclick="openRecruitProductUrl()" title="상품 URL 바로가기" aria-label="상품 URL 바로가기">↗</button><input id="rf_thumb_file" type="file" accept="image/*" onchange="uploadCampThumb(this)"><span id="rf_thumb_preview_wrap" class="rf-thumb-preview-wrap" hidden><img id="rf_thumb_preview" alt="썸네일 미리보기"><span id="rf_thumb_preview_state">미리<br>보기</span></span></div></div>
                 <div class="form-row thumb-guide-row"><span class="form-label">공고 썸네일 적용방법</span><div class="form-control">상품페이지에서 썸네일 우클릭→이미지 주소 복사 후 붙혀넣으세요.</div></div>
-                <div class="form-row tall"><span class="form-label">유입 가이드</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_inflow" class="rform-input"></textarea><div id="rf_ig_inflow" class="work-image-strip ig-strip" data-igf="inflow"></div><input id="rf_igf_inflow" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('inflow',this)"></div><div id="rf_igm_inflow"></div><div id="rf_clean_inflow"></div></div></div>
+                <div id="rf_legacy_inflow_row" class="form-row tall" hidden><span class="form-label">기존 공통 유입안내</span><div class="form-control"><div id="rf_legacy_inflow" class="rf-legacy-inflow" aria-live="polite"></div><div class="rf-legacy-inflow-note">기존 공고 안내입니다. 새 공고는 상품·옵션별 유입가이드만 사용합니다.</div></div></div>
                 <div class="form-row tall"><span class="form-label">리뷰 가이드</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_review" class="rform-input"></textarea><div id="rf_ig_review" class="work-image-strip ig-strip" data-igf="review"></div><input id="rf_igf_review" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('review',this)"></div><div id="rf_igm_review"></div><div id="rf_clean_review"></div></div></div>
                 <div class="form-row tall"><span class="form-label">특이사항</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_notes" class="rform-input"></textarea><div id="rf_ig_notes" class="work-image-strip ig-strip" data-igf="notes"></div><input id="rf_igf_notes" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('notes',this)"></div><div id="rf_igm_notes"></div></div></div>
               </div><input id="rf_landing_url" type="hidden"><input id="rf_thumbnail" type="hidden"><input id="rf_product_name" type="hidden"><input id="rf_price" type="hidden"></section>
@@ -1273,7 +1266,7 @@
       case 'prod': { var r = document.getElementById('rf_opt_rows'); return (r && r.children.length) ? 'ok' : ''; }
       case 'cond': return (_val('rf_start_date') || _val('rf_window_start')) ? 'ok' : '';
       case 'fee':  return _val('rf_review_fee') ? 'ok' : '';
-      case 'work': return (_val('rf_wd_inflow') || _val('rf_wd_review')) ? 'ok' : '';
+      case 'work': return _val('rf_wd_review') ? 'ok' : '';
     }
     return '';
   }
