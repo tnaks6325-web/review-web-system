@@ -894,6 +894,10 @@
   .tlwhen{font-size:11.3px;color:var(--muted);flex:none;font-variant-numeric:tabular-nums}
   .tlmsg{font-size:12.8px;font-weight:600}
   .tlwho{font-size:11.4px;color:var(--muted);margin-top:2px}
+  /* 작업 로그의 검수는 아직 손볼 것만 — 완료 항목은 10초 동안만 남겨 즉시 처리 결과를 확인시킨다. */
+  .tlins{display:grid;gap:10px}.tlicard{display:grid;grid-template-columns:108px minmax(0,1fr);gap:11px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+  .tlicard.fail{border-left:4px solid var(--bad)} .tlicard.suspect{border-left:4px solid var(--warn)} .tlicard.done{opacity:.55;background:var(--card2)}
+  .tlithumb{width:108px;height:108px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card2);cursor:zoom-in}.tlithumb img{width:100%;height:100%;object-fit:cover}.tlihead{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}.tlihead b{font-size:13px}.tlimeta{font-size:11px;color:var(--muted)}.tlireason{font-size:12px;line-height:1.5;margin:7px 0}.tliacts{display:flex;gap:5px;flex-wrap:wrap}.tliacts .btn{height:28px;padding:0 9px;font-size:11px}.tliacts .bad{color:var(--bad);border-color:#f3b7bd}@media(max-width:560px){.tlicard{grid-template-columns:1fr}.tlithumb{width:100%;height:180px}}
   /* ── 그리드 제거 × · 편집 이력 모달 ── */
   .rdel{margin-left:6px;padding:1px 5px;border:1px solid color-mix(in srgb,var(--bad) 35%,var(--line));border-radius:5px;background:var(--card);color:var(--bad);font:700 10.5px/1.35 inherit;cursor:pointer;opacity:0;transition:opacity .12s,background .12s,border-color .12s} tr:hover .rdel,.rdel:focus-visible{opacity:1}.rdel:hover{background:var(--bad-soft);border-color:var(--bad)}.rdel:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   /* 공유 링크 복사 완료 — 화면 중앙에서 천천히 사라지는 알림(사용자 확정 2026-08-19).
@@ -9444,6 +9448,43 @@ function openTabLog(){
 function closeTabLog(){ const ov=document.getElementById('tlov'); if(ov) ov.style.display='none'; }
 function tlPick(k){ if(_tlKind===k) return; _tlKind=k; _tlLoad(); }
 
+/* 검수 탭은 과거 이력 대신 이 작업에서 지금 처리할 의심·불량 카드다. 목록/권한/처리는
+   리뷰검수의 기존 API·실행부를 그대로 쓴다. */
+async function _tlLoadInspect(){
+  const t=STATE.cur, bd=document.getElementById('tlbd'); if(!t||!bd) return;
+  bd.innerHTML='<div class="empty">검수 대상을 불러오는 중…</div>';
+  try{
+    const r=await api('/api/trackb/review-inspect/list?status=open&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+    if(!r||!r.ok) throw new Error((r&&r.error)||'조회 실패');
+    STATE.tlInspect={items:r.items||[], done:Object.create(null), truncated:!!r.truncated, summary:r.summary||null};
+    _tlPaintTabs(); _tlPaintInspect();
+  }catch(e){ bd.innerHTML=`<div class="empty">검수 대상을 불러오지 못했습니다 — ${esc((e&&e.message)||'')}<br><button class="btn xs" style="margin-top:8px" onclick="_tlLoadInspect()">다시 시도</button></div>`; }
+}
+function _tlPaintInspect(){
+  const bd=document.getElementById('tlbd'), st=STATE.tlInspect||{items:[],done:{}}; if(!bd) return;
+  const rows=st.items||[];
+  const more=st.truncated?`<div class="tlwarn">미처리 검수 대상이 많아 최근 ${rows.length}건만 표시합니다. <button class="btn xs" onclick="tlInspectFull()">리뷰검수 전체 보기</button></div>`:'';
+  bd.innerHTML=more+(rows.length?`<div class="tlins">${rows.map((r,i)=>_tlInspectCard(r,i,!!st.done[r.file_id])).join('')}</div>`
+    :`<div class="empty">${st.truncated?'표시한 검수 대상은 모두 처리했습니다. 전체 미처리 대상은 리뷰검수 화면에서 계속 확인하세요.':'이 작업의 미처리 검수 대상이 없습니다.'}${st.truncated?' <button class="btn xs" onclick="tlInspectFull()">리뷰검수 전체 보기</button>':''}</div>`);
+}
+function _tlInspectCard(r,i,done){
+  const isFail=r.status==='fail', thumb=_riImg(r.file_id), reasons=_riReasons(r.checks||{});
+  return `<article class="tlicard ${isFail?'fail':'suspect'}${done?' done':''}" id="tli-${i}">
+    <div class="tlithumb" onclick="tlInspectZoom(${i})">${thumb?`<img${_thumbAttrs(r.file_id,400,thumb)} alt="검수 캡처" loading="lazy">`:'<span class="tlimeta">이미지 없음</span>'}</div>
+    <div><div class="tlihead"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b><span class="ribdg ${isFail?'ri-f':'ri-s'}">${isFail?'불량':'의심'}</span>${done?'<span class="tlimeta">✓ 방금 처리됨</span>':''}</div>
+      <div class="tlimeta">${esc(_fmtTs(r.inspected_at||r.created_at))}</div><div class="tlireason">${reasons.length?reasons.map(esc).join('<br>'):'판정 근거를 확인하세요.'}</div>
+      ${done?'':`<div class="tliacts"><button class="btn" onclick="tlInspectDetail(${i})">리뷰검수 화면 열기</button><button class="btn pri" onclick="tlInspectAction('ok',${i})">✓ 정상(오탐)</button><button class="btn bad" onclick="tlInspectAction('bad',${i})">✕ 불량</button>${(STATE.role==='master'||STATE.role==='admin')?`<button class="btn" onclick="tlInspectAction('reinspect',${i})">♻ 재검수</button>`:''}<button class="btn" onclick="tlInspectAction('route',${i})">파일 이동</button><button class="btn" onclick="tlInspectAction('dedup',${i})">중복 제거</button></div>`}
+    </div></article>`;
+}
+function _tlUseInspect(i){ const st=STATE.tlInspect; const r=st&&st.items&&st.items[i]; if(!r) return null; STATE.ri=st.items; STATE.riContext='tablog'; return r; }
+function tlInspectZoom(i){ if(_tlUseInspect(i)) riZoom(i); }
+function tlInspectDetail(i){ const r=_tlUseInspect(i); if(!r) return; closeTabLog(); STATE.riContext=null; STATE.riTab={sheetId:r.sheet_id,tabName:r.tab_name}; STATE.riType='all'; switchView('inspect'); }
+function tlInspectFull(){ const t=STATE.cur; if(!t) return; closeTabLog(); STATE.riContext=null; STATE.riTab={sheetId:t.sheetId,tabName:t.tabName}; STATE.riType='all'; switchView('inspect'); }
+function tlInspectAction(kind,i){ const r=_tlUseInspect(i); if(!r) return; if(kind==='ok') return riResolve(r.file_id,'ok'); if(kind==='bad') return riBadPopup(i); if(kind==='reinspect') return riReinspectTab(i); if(kind==='dedup') return riDedupPopup(i); if(kind==='route') return riMoreMenu(i); }
+function _tlInspectDone(fileId,resolution){ const st=STATE.tlInspect; if(!st) return _loadInspect(); st.done[fileId]=true; _tlPaintInspect(); setTimeout(()=>{ const cur=STATE.tlInspect; if(!cur||!cur.done[fileId]) return; cur.items=cur.items.filter(r=>r.file_id!==fileId); delete cur.done[fileId]; if(_tlKind==='inspect'&&document.getElementById('tlov')?.style.display==='flex') _tlPaintInspect(); },10000); }
+function _riAfterAction(fileId,resolution){ if(STATE.riContext==='tablog') return _tlInspectDone(fileId,resolution); _loadInspect(); }
+function _riAfterReinspect(){ if(STATE.riContext==='tablog') return _tlLoadInspect(); _loadInspect(); }
+
 /** 줄 마크업 단일 출처 — 첫 그리기·이어 붙이기 공용. */
 function _tlEvHtml(e){
   return `<div class="tlev k-${esc(e.kind)}"><div class="tltop"><span class="tlwhen">${esc(_fmtTs(e.at))}</span>`
@@ -9460,6 +9501,7 @@ async function _tlFetch(before){
 /** 처음부터 다시(모달 열기·유형 전환) */
 async function _tlLoad(){
   const t=STATE.cur; if(!t) return;
+  if(_tlKind==='inspect') return _tlLoadInspect();
   const seq=++_tlSeq;                       // ★ 유형을 연달아 바꿔도 늦게 온 응답이 화면을 덮지 않는다
   _tlBusy=true; _tlItems=[]; _tlSeen=Object.create(null); _tlNext=null; _tlEnd=false; _tlPartial=false;
   _tlFailed=[]; _tlErr=''; _tlLoaded=0; _tlPaintTabs();
@@ -13613,6 +13655,7 @@ function riZoom(i, which){
 function _riImg(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
 
 async function renderInspectView(){
+  STATE.riContext=null;   // 작업 로그 카드에서 온 일회성 처리 후에도 본래 검수 화면은 자기 목록을 갱신한다.
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rihead"></div><div id="ribody"><div class="empty">불러오는 중…</div></div></div>`;
   await _loadInspect();
 }
@@ -14101,7 +14144,7 @@ async function _riRouteExec(i, target, notifyMsg){
     else alert('예시 등록 실패: '+((pr&&pr.error)||''));
   }
   riCloseDetail();
-  _loadInspect();
+  _riAfterAction(r.file_id,'ok');
 }
 /* 중복파일 제거(#562 확정 기본값) — **나중 제출본(지금 파일)을 휴지통**, 이전 제출본 보존.
    팝업이 두 장을 나란히 보여 무엇이 지워지고 무엇이 남는지 명시한다. 종결 = 불량 맞음(중복). */
@@ -14145,7 +14188,7 @@ async function _riDedupExec(i, notifyMsg){
       card:_riCardOf(r,'duplicate',{ matchProduct: dup.matchReviewer?'':'', matchAt: dup.matchAt||null })})});
   if(!res||!res.ok){ alert('제거 실패: '+((res&&res.error)||'')); return; }
   riCloseDetail();
-  _loadInspect();
+  _riAfterAction(r.file_id,'bad');
 }
 /* ★ 채널 불일치는 **문장 한 줄**로 쓴다 — 종전 "작업 쿠팡 / 캡처 네이버" 병기는 어느 쪽이
    작업이고 어느 쪽이 제출물인지 순간적으로 뒤집혀 읽혔다(실사용 신고 — 반려 사유로 그대로
@@ -14287,7 +14330,7 @@ async function riResolve(fileId, resolution, close){
   const r=await api('/api/trackb/review-inspect/resolve',{method:'POST',body:JSON.stringify({fileId, resolution: resolution||''})});
   if(!r||!r.ok){ alert('확인 처리 실패: '+((r&&r.error)||'')); return; }
   if(close) riCloseDetail();
-  _loadInspect();
+  _riAfterAction(fileId,resolution);
 }
 /* ── 리뷰어 안내문구 — 설정(설정 › 리뷰어 안내문구)이 진실원본 ──────────
    ★ 서버 표를 그대로 받아 쓴다(프론트 사본 금지 — 설정과 실제 전송이 갈리지 않게).
@@ -14367,7 +14410,7 @@ async function riBadSubmit(){
   if(send && (!res.notify || !res.notify.sent))
     alert('불량으로 확인했습니다.\n⚠ 반려 안내 전송 실패: '+((res.notify&&res.notify.error)||'알 수 없는 오류'));
   if(st.fromDetail) riCloseDetail();
-  _loadInspect();
+  _riAfterAction(r.file_id,'bad');
 }
 /* 일괄 정상 처리 — 그 작업의 미확인 의심·불량 전부를 [정상(오탐)]으로 종결(대량 백로그용).
    상품명 의심 건은 캡처 표기를 그 탭 인정 상품명으로 함께 학습한다(서버 resolve-bulk). */
@@ -14527,9 +14570,9 @@ async function riReinspectTab(i){
                       : { sheetId:t.sheetId, tabName:t.tabName, limit:100 };
   const r=await api('/api/trackb/review-inspect/reinspect',{method:'POST',body:JSON.stringify(body)});
   if(!r||!r.ok){ alert('재검수 실패: '+((r&&r.error)||'')); return; }
-  if(r.busy){ alert(`판정 ${r.reset||0}건을 초기화했습니다.\n검수가 이미 돌고 있어 순서대로 다시 매겨집니다(최대 10분).`); _loadInspect(); return; }
+  if(r.busy){ alert(`판정 ${r.reset||0}건을 초기화했습니다.\n검수가 이미 돌고 있어 순서대로 다시 매겨집니다(최대 10분).`); _riAfterReinspect(); return; }
   alert(`재검수 완료 — 초기화 ${r.reset||0}건 / 재판정 ${r.done||0}건 / 실패 ${r.failed||0}건`);
-  _loadInspect();
+  _riAfterReinspect();
 }
 /* ★ [↻ 과거분 검수]·[CSV] 는 제거했다(사용자 확정 2026-08-06 — 기능 불필요).
    과거분 따라잡기는 10분 크론이 계속 돈다(수동 버튼만 없앤 것). 서버 라우트는 남아 있어
