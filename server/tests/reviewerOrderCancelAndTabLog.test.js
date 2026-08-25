@@ -232,6 +232,10 @@ ok('★★ 리뷰어 이름은 본계정만 또는 "본계정 타계 수취인"�
 ok('★★ 리뷰 캡처·검수 로그도 작업표의 본계정/수취인 이름으로 구분한다',
   /ri\.reviewer_name AS owner_name, ri\.recipient_name/.test(LOGSVC)
   && /_reviewerLabel\(r\.owner_name \|\| r\.reviewer_name, r\.recipient_name \|\| r\.reviewer_name\)/.test(LOGSVC));
+ok('★★ 리뷰 검수 로그는 첫 줄에 계정 표기, 보조 줄에는 리뷰어·행만 남긴다',
+  /message: `리뷰 캡처 검수 — \$\{_reviewerLabel\(/.test(LOGSVC)
+  && /who: `리뷰어\$\{r\.row_index \? ` · \$\{r\.row_index\}행` : ''\}`/.test(LOGSVC)
+  && !/const lab = \{ fail: '불량'/.test(LOGSVC));
 ok('★★ 작업 로그는 바깥 클릭으로 닫히지 않고 Esc 또는 닫기 버튼으로만 닫힌다',
   /ov\._esc=e=>\{ if\(e\.key==='Escape'/.test(WD)
   && !/ov\.addEventListener\('click',e=>\{ if\(e\.target===ov\) closeTabLog\(\); \}\);/.test(WD)
