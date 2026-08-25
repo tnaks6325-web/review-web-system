@@ -1279,6 +1279,50 @@ function _renderInflowOriginNote() {
   const v = document.getElementById("rf_inflow_type_value")?.value === "guide" ? "가이드유입" : "링크유입";
   box.textContent = "이 공고에는 유입방식이 저장되어 있지 않아 작업오더 값(" + v + ")을 불러왔습니다 — 저장하면 공고에 반영됩니다.";
 }
+
+/* 7번 — 발행 뒤 바뀐 작업오더의 안내성 값을, 공고에 저장된 값이 없을 때만 제안한다.
+   ★ 공고 값은 사람이 정한 값이므로 절대 덮지 않는다. ★ work_detail을 서버에서 바꿔
+   내려보내지 않는다(저장 전 자동 고정 방지). ★ 이미 쓰는 발행 프리필 조립기를 재사용한다. */
+function _rfApplyOrderContentPrefill(order, wd) {
+  order = order || {}; wd = wd || {};
+  const text = v => String(v || '').trim();
+  const hasImages = v => Array.isArray(v) && v.length > 0;
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
+  const applied = [];
+
+  if (!text(document.getElementById('rf_landing_url')?.value) && text(order.productUrl)) {
+    set('rf_product_url', text(order.productUrl));
+    set('rf_landing_url', text(order.productUrl));
+    applied.push('상품 URL');
+  }
+  if (!text(wd.reviewGuide) && !hasImages(wd.reviewGuideImages)
+      && (text(order.reviewGuide) || hasImages(order.reviewGuideImages))) {
+    set('rf_wd_review', text(order.reviewGuide));
+    if (typeof _igSetList === 'function') _igSetList('review', order.reviewGuideImages || []);
+    applied.push('리뷰 가이드');
+  }
+  if (!text(wd.specialNotes) && !hasImages(wd.specialNotesImages)
+      && (text(order.specialNotes) || hasImages(order.specialNotesImages))) {
+    set('rf_wd_notes', text(order.specialNotes));
+    if (typeof _igSetList === 'function') _igSetList('notes', order.specialNotesImages || []);
+    applied.push('특이사항');
+  }
+  if (!text(wd.inflowGuideHtml) && text(order.inflowHtml)) {
+    const ta = document.getElementById('rf_wd_inflow');
+    if (ta) {
+      window._wdInflowRawHtml = order.inflowHtml;
+      ta.value = typeof _igLoadInflowHtml === 'function' ? _igLoadInflowHtml(order.inflowHtml) : text(order.inflowGuide);
+      ta.dataset.rawHtml = '1';
+      ta.addEventListener('input', () => { ta.dataset.rawHtml = ''; }, { once: true });
+      applied.push('유입 안내');
+    }
+  }
+  if (typeof _igRenderAll === 'function') _igRenderAll();
+  if (applied.length) {
+    showToast('공고에 저장된 값이 없는 ' + applied.join('·') + '을 작업오더에서 불러왔습니다. 저장하면 공고에 반영됩니다.');
+  }
+  return applied;
+}
 window.rfSetInflowType = rfSetInflowType;
 
 function rfToggleCashReceipt() {
@@ -3281,6 +3325,25 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _igSetList("review", wd.reviewGuideImages);     // 🖼 리뷰가이드·특이사항 첨부(배열)
         _igSetList("notes", wd.specialNotesImages);
         _igRenderAll();
+        /* ★ 7번: 저장값이 비어 있을 때만 연결 작업오더의 최신 안내성 값을 제안한다.
+           공고 저장값은 위에서 먼저 복원됐고, 이 함수는 그것을 덮지 않는다. */
+        const orderContent = json.orderCampaignContent || null;
+        if (orderContent) {
+          const orderPrefill = (typeof _woCampaignPrefill === 'function')
+            ? _woCampaignPrefill({
+              product_url: orderContent.productUrl, review_guide: orderContent.reviewGuide,
+              special_notes: orderContent.specialNotes, inflow_guide: orderContent.inflowGuide,
+              guide_images: orderContent.guideImages, inflow_type: orderContent.inflowType,
+            }) : {};
+          _rfApplyOrderContentPrefill({
+            ...orderContent,
+            reviewGuideImages: orderPrefill.wd_review_images,
+            specialNotesImages: orderPrefill.wd_notes_images,
+            // 평문 유입안내도 비워 두지 않는다. _igComposeInflow가 원문을 그대로 보존하므로
+            // 저장 시 HTML 경로로 바꾸거나 내용을 잃지 않는다.
+            inflowHtml: orderPrefill.wd_inflow_html || orderPrefill.wd_inflow_text || '',
+          }, wd);
+        }
         setV("rf_thumbnail", c.thumbnail_url || "");
         setV("rf_thumb_url", c.thumbnail_url || "");
         _syncCampThumbUrlPreview();

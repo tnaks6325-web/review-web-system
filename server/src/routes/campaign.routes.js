@@ -1080,8 +1080,12 @@ router.get('/:id', async (req, res, next) => {
            불러왔다"고 말한 뒤 사람이 저장할 때 반영된다(조용한 자동 적용 금지).
          ★ 공고에 이미 조합이 있으면 조회하지 않는다(공고가 언제나 이긴다).
          ★ fail-soft — 못 읽어도 수정 모달은 그대로 열린다. */
-      let orderReviewTypeMix = null;
-      let orderInflowType = null;
+       let orderReviewTypeMix = null;
+       let orderInflowType = null;
+       // 7번: 발행 뒤 수정된 안내성 값은 공고 저장값이 비어 있을 때만 화면에 제안한다.
+       // work_detail에 섞어 넣지 않는다. 저장 전에는 여전히 작업오더가 근거이고, 사람이
+       // 확인해 저장한 뒤에만 공고의 값이 된다.
+       let orderCampaignContent = null;
       /* ★ 연결 작업오더의 **시작일** — 대조 전용(저장값을 덮지 않는다).
          발행은 스냅샷이라 발행 뒤 오더 시작일이 바뀌어도 공고는 따라가지 않는데,
          그 사실을 확인할 창구가 어디에도 없었다(2026-08-21 신고: 오더 8/19 · 공고 8/12).
@@ -1109,10 +1113,13 @@ router.get('/:id', async (req, res, next) => {
            열리고, 그대로 저장하면 그 link 가 굳어 **리뷰어 화면의 폴백을 이긴다**
            (가이드유입 공고에 [상품 페이지 열기]가 노출 = 유입가이드 무력화). 모달도 같은 값을 보게 한다. */
         const needInflow = !_savedInflowType(rows[0].work_detail);
-        // ★ 조회는 **한 번** — 세 값을 같은 오더에서 가져온다(같은 근거·쿼리 순증 0).
+        // ★ 조회는 **한 번** — 모든 값을 같은 오더에서 가져온다(같은 근거·쿼리 순증 0).
         //   시작일은 늘 필요해 조건 없이 조회한다(모달 열 때 1회 — 목록이 아니다).
         const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
-        const wo = await linkedWorkOrderForCampaign(rows[0], ['review_type_mix', 'inflow_type', 'start_date']);
+        const wo = await linkedWorkOrderForCampaign(rows[0], [
+          'review_type_mix', 'inflow_type', 'start_date',
+          'product_url', 'review_guide', 'special_notes', 'inflow_guide', 'guide_images',
+        ]);
         if (needMix) {
           const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
           if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
@@ -1127,10 +1134,20 @@ router.get('/:id', async (req, res, next) => {
           const iso = new Date(wo.start_date).toISOString().slice(0, 10);
           if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) orderStartDate = iso;
         }
+        if (wo) {
+          orderCampaignContent = {
+            productUrl: String(wo.product_url || ''),
+            reviewGuide: String(wo.review_guide || ''),
+            specialNotes: String(wo.special_notes || ''),
+            inflowGuide: String(wo.inflow_guide || ''),
+            guideImages: wo.guide_images || null,
+            inflowType: String(wo.inflow_type || ''),
+          };
+        }
       } catch (e) {
-        logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일) 실패 camp=${id}: ${e.message}`);
+        logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일·안내값) 실패 camp=${id}: ${e.message}`);
       }
-      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, roundsLock });
+      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock });
     }
     const now = new Date();
     const row = rows[0];
