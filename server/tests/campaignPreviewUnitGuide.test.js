@@ -81,11 +81,17 @@ console.log('\n[A] 서버 — 미리보기 응답에만 선택지 가이드 재�
 /* ══════════════ B·C. 프론트 배선 ══════════════ */
 console.log('\n[B·C] 프론트 — 재료 확보 시점과 단일 출처');
 {
-  const iSeed = pageSrc.indexOf('if(!j.optionGuides && j.selectedOption && j.selectedOption.optKey)');
-  const iAssign = pageSrc.indexOf('    _detail = j;\n    if(j.serverNow) CampCards.setServerNow(j.serverNow);');
-  ok('구버전 백엔드 폴백 시드가 있다', iSeed > 0);
+  /* ★★ 파일 전체 위치로 비교하면 안 된다 — `_detail = j` 는 실제 리뷰어 경로(enterJoined)에도
+     있어서, 시드가 그 함수로 옮겨져도 "앞" 조건이 참이 되어 통과한다(변이시험이 실제로 뚫었다).
+     **미리보기 함수 본문을 잘라** 그 안에서 본다. */
+  const pvFn = grab(pageSrc, '_enterPreview');
+  const iSeed = pvFn.indexOf('if(!j.optionGuides && j.selectedOption && j.selectedOption.optKey)');
+  const iAssign = pvFn.indexOf('_detail = j;');
+  ok('구버전 백엔드 폴백 시드가 **미리보기 진입 함수 안에** 있다', iSeed > 0);
   ok('★★ 시드는 `_detail = j` **앞** — 시뮬레이션이 selectedOption 을 덮기 전에 떠 둔다',
     iAssign > 0 && iSeed < iAssign);
+  ok('★ 시드는 그 함수에 **한 번만**(딴 곳으로 옮겨 두 벌이 되지 않게)',
+    (pageSrc.match(/if\(!j\.optionGuides && j\.selectedOption/g) || []).length === 1);
 
   ok('★ 재료 해석 함수 _pvPickOption 이 있다', /function _pvPickOption\(optionKey\)\{/.test(pageSrc));
   ok('★★ 사본 금지 — 가상 참여가 그 함수를 쓴다',
