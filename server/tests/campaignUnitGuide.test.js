@@ -180,10 +180,16 @@ t('⑤ unitKind 는 홀드 조회 같은 왕복에서 읽는다(쿼리 순증 0)
 });
 
 t('⑤ 외부모집 수동제출도 같은 규율(product 단위면 옵션 칸 미기입·fail-open)', () => {
-  assert.match(manual, /SELECT unit_kind FROM campaign_options WHERE campaign_id = \$1 AND opt_key = \$2/);
-  assert.match(manual, /if \(u\.length && String\(u\[0\]\.unit_kind \|\| ''\) === 'product'\) resolvedOptKey = '';/);
-  const i = manual.indexOf('SELECT unit_kind FROM campaign_options');
-  const around = manual.slice(i - 400, i + 500);
+  /* ⚠ 2026-08-25(138): 같은 왕복에서 `product_name` 도 읽는다(선택 상품을 「상품」 칸으로 보낸다).
+     검사 의미는 불변 — 여전히 unit_kind 를 읽어 product 단위면 옵션 칸을 비운다. */
+  assert.match(manual, /SELECT unit_kind(?:, product_name)? FROM campaign_options WHERE campaign_id = \$1 AND opt_key = \$2/);
+  assert.match(manual, /String\(u\[0\]\.unit_kind \|\| ''\) === 'product'\) resolvedOptKey = '';/);
+  /* ⚠ 앵커는 **유일한 문자열**이어야 한다 — 'FROM campaign_options WHERE campaign_id = $1' 은
+     이 파일에 2번 나와(옵션 목록 조회가 먼저) 고정 폭 창이 엉뚱한 쿼리를 잡는다(2026-08-25 실측). */
+  const i = manual.indexOf('SELECT unit_kind');
+  assert.notEqual(i, -1, 'unit_kind 조회가 있어야 한다');
+  assert.equal(manual.indexOf('SELECT unit_kind', i + 1), -1, '앵커가 유일해야 한다');
+  const around = manual.slice(i, i + 700);
   assert.match(around, /catch \(_\) \{ \/\* fail-open/, '조회 실패는 종전 동작');
 });
 

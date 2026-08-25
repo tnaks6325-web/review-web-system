@@ -838,6 +838,7 @@ async function _authoritativeHold(ctx) {
       `SELECT ca.phone8, ca.option_key, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id,
               co.unit_kind AS unit_kind,
+              co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
               (lo.id IS NOT NULL) AS late_alive
          FROM campaign_applications ca
@@ -862,6 +863,10 @@ async function _authoritativeHold(ctx) {
     // ★ 134 복합 작업: 이 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이지 옵션명이 아니다.
     //   같은 왕복에서 읽어 온다(순증 0). 모르면 'option'(종전 동작 — 추측 승격 금지).
     ctx.unitKind = String(rows[0].unit_kind || '') === 'product' ? 'product' : 'option';
+    /* ★ 138 선택 상품 — 같은 왕복에서 읽는다(순증 0). 137 데이터 모델상 선택 단위는 언제나
+       (상품, 옵션) 짝이다: unit_kind='product' 면 상품명이 곧 선택 키이고, 'option' 이면
+       product_name 이 그 옵션이 속한 상품이다. 그래서 **어느 쪽이든 상품 칸에 적을 값이 있다**. */
+    ctx.productName = String(rows[0].product_name || '');
     // ★ 101: 블로그 주소도 **서버가 홀드에서 읽는다**(클라 전달 금지 — 옵션 서버권위와 같은 규율).
     //   같은 왕복이라 순증 0. 이 값이 주문 원장 INSERT 와 시트 '블로그URL' 칸으로 그대로 간다.
     ctx.blogUrl = rows[0].blog_url || null;
@@ -1111,7 +1116,10 @@ router.post('/order', async (req, res, next) => {
     // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
     //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
     const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
-                        selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '' };
+                        selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
+                        /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
+                           옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
+                        selectedProduct: (holdCtx && holdCtx.productName) || '' };
     const ledger = await createOrderLedgerEntry({
       sheetId: orderScope.sheetId,
       tabName: orderScope.tabName,
