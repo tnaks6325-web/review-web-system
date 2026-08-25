@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>상품별 리뷰 조합 입력 시안 — 혼합 리뷰</title>
+<style>
+  :root{
+    --bg:#F3F5F9; --card:#fff; --line:#E5E7EB; --line2:#DCE3EC; --ink:#111827; --sub:#6B7280;
+    --blue:#1b64da; --blue2:#3182f6; --blue-bg:#EEF4FF;
+    --green:#0B7A5B; --green-bg:#E8F7F1; --green-bd:#8ED9BE;
+    --red:#C2323B; --red-bg:#FEF2F2; --red-bd:#FCA5A5;
+    --amber:#92400E; --amber-bg:#FFFBEB; --amber-bd:#FCD34D;
+    --slate:#334155;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+       background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 20px 90px}
+  header.page h1{font-size:1.3rem;font-weight:900;margin:0 0 8px}
+  header.page p{margin:0 0 4px;color:var(--sub);font-size:.85rem;line-height:1.7}
+  header.page b{color:var(--ink)}
+  code{background:#EEF1F6;border-radius:4px;padding:1px 5px;font-size:.78em}
+
+  .now{margin:18px 0 6px;background:#fff;border:1px solid var(--line);border-left:4px solid var(--red);
+       border-radius:10px;padding:14px 16px}
+  .now h2{margin:0 0 8px;font-size:.92rem;font-weight:900}
+  .now p{margin:0 0 8px;font-size:.82rem;color:var(--sub);line-height:1.75}
+  .now .err{background:var(--red-bg);border:1px solid var(--red-bd);color:var(--red);border-radius:8px;
+       padding:9px 12px;font-size:.78rem;font-weight:800;line-height:1.6}
+  .now .flow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:.74rem;font-weight:800}
+  .now .flow span{background:#F1F4FA;border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--slate)}
+  .now .flow span.bad{background:var(--red-bg);border-color:var(--red-bd);color:var(--red)}
+
+  .optbar{display:flex;gap:8px;margin:24px 0 18px;flex-wrap:wrap;align-items:center}
+  .optbar button{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:9px 16px;
+    font-size:.82rem;font-weight:800;color:var(--sub);cursor:pointer;font-family:inherit}
+  .optbar button.on{border-color:var(--blue);background:var(--blue);color:#fff;box-shadow:0 3px 10px rgba(27,100,218,.28)}
+  .optbar .hint{font-size:.72rem;color:var(--sub);margin-left:6px}
+
+  section.opt{display:none} section.opt.on{display:block}
+  .optd{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:18px}
+  .optd h2{font-size:.95rem;font-weight:900;margin:0 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .optd .tag{font-size:.62rem;font-weight:900;border-radius:6px;padding:3px 8px;background:var(--blue-bg);color:var(--blue)}
+  .optd .tag.rec{background:#ECFDF5;color:var(--green)}
+  .optd p{margin:0;font-size:.8rem;color:var(--sub);line-height:1.75}
+  .optd .pro,.optd .con{display:block;font-size:.75rem;font-weight:800;margin-top:7px}
+  .optd .pro{color:#0F766E} .optd .con{color:var(--amber)}
+
+  .stage{background:#E9EDF4;border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:22px}
+  .stage .cap{font-size:.7rem;font-weight:800;color:var(--sub);margin-bottom:10px;letter-spacing:.02em}
+
+  /* ── 공통: 유형 입력 그리드 ── */
+  .mixgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .mixgrid label{display:grid;grid-template-columns:52px minmax(0,1fr);align-items:center;gap:5px;
+    font-size:.68rem;font-weight:800;color:#617087}
+  .mixgrid input{width:100%;height:30px;min-width:0;padding:0 7px;border:1px solid #D5DDE8;border-radius:6px;
+    text-align:right;font-size:.8rem;font-weight:700;color:var(--ink);font-family:inherit;
+    appearance:textfield;-moz-appearance:textfield}
+  .mixgrid input::-webkit-outer-spin-button,.mixgrid input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .mixgrid input:focus{outline:2px solid var(--blue2);outline-offset:-1px;border-color:var(--blue2)}
+
+  /* ── 공통: 상태 바 ── */
+  .bal{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:8px;
+    padding:0 10px;height:34px;font-size:.75rem;font-weight:800;border:1px solid transparent;box-sizing:border-box}
+  .bal.ok{background:var(--green-bg);border-color:var(--green-bd);color:var(--green)}
+  .bal.bad{background:var(--red-bg);border-color:var(--red-bd);color:var(--red)}
+  .bal.warn{background:var(--amber-bg);border-color:var(--amber-bd);color:var(--amber)}
+  .bal .n{font-variant-numeric:tabular-nums}
+
+  .btn{border:1px solid var(--line2);background:#fff;border-radius:8px;padding:6px 11px;font-size:.72rem;
+    font-weight:800;color:var(--slate);cursor:pointer;font-family:inherit;white-space:nowrap}
+  .btn:hover{border-color:#B9C6DC;background:#F8FAFD}
+  .btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.pri:hover{background:#1857c0}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ══════ A안: 모달 폼 안 인라인 ══════ */
+  .formcol{max-width:470px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .frow{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+  .flab{width:62px;flex:0 0 62px;font-size:.74rem;font-weight:800;color:#617087;padding-top:7px}
+  .fctl{flex:1;min-width:0}
+  .rtbtns{display:flex;gap:4px;flex-wrap:wrap}
+  .rtbtns button{border:1px solid var(--line2);background:#fff;border-radius:7px;padding:6px 9px;
+    font-size:.72rem;font-weight:800;color:var(--sub);cursor:pointer;font-family:inherit}
+  .rtbtns button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .composer{margin-top:8px;padding:9px;border:1px solid var(--line2);border-radius:8px;background:#F8FAFC}
+  .mcard+.mcard{margin-top:9px;padding-top:9px;border-top:1px solid #E3E9F2}
+  .mhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;
+    font-size:.7rem;color:#617087}
+  .mhead strong{color:#172033;font-size:.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mhead .q{white-space:nowrap;font-weight:800}
+  .mstat{margin-top:6px;font-size:.68rem;font-weight:800;border-radius:6px;padding:4px 7px}
+  .mstat.ok{background:var(--green-bg);color:var(--green)}
+  .mstat.bad{background:var(--red-bg);color:var(--red)}
+
+  /* ══════ B안: 전용 모달 ══════ */
+  .trigrow{max-width:470px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .trigbox{border:1px solid var(--line2);border-radius:9px;background:#F8FAFC;padding:10px}
+  .trigline{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .trigsum{font-size:.72rem;font-weight:800;color:var(--slate);line-height:1.6}
+  .trigsum em{font-style:normal;color:var(--red)}
+  .trigsum i{font-style:normal;color:var(--green)}
+
+  .modal{background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,28,55,.22);max-width:680px;
+    margin:0 auto;overflow:hidden;border:1px solid #D9E1EE}
+  .mtop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;
+    border-bottom:1px solid var(--line)}
+  .mtop h3{margin:0;font-size:.95rem;font-weight:900}
+  .mtop .x{border:none;background:transparent;font-size:1.1rem;color:#94A3B8;cursor:pointer;line-height:1}
+  .mbody{padding:14px 18px;max-height:60vh;overflow:auto}
+  .mnote{background:var(--blue-bg);border:1px solid #C7DAFB;color:#1B4A9E;border-radius:8px;padding:8px 11px;
+    font-size:.74rem;font-weight:700;line-height:1.65;margin-bottom:12px}
+  .pcard{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-bottom:11px;background:#fff}
+  .pcard.ng{border-color:var(--red-bd);background:#FFFCFC}
+  .pcard.okc{border-color:var(--green-bd);background:#FCFEFD}
+  .phead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+  .pname{font-size:.84rem;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pmeta{font-size:.7rem;color:var(--sub);font-weight:700;white-space:nowrap;display:flex;gap:8px;align-items:center}
+  .pmeta b{color:var(--ink);font-size:.78rem}
+  .pbal{margin-top:9px}
+  .mfoot{border-top:1px solid var(--line);padding:12px 18px;background:#FAFBFD}
+  .totrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .chip{font-size:.68rem;font-weight:800;border-radius:999px;padding:4px 10px;background:#F1F4FA;
+    border:1px solid var(--line);color:var(--slate);white-space:nowrap}
+  .chip.d{background:var(--amber-bg);border-color:var(--amber-bd);color:var(--amber)}
+  .mact{display:flex;align-items:center;justify-content:space-between;gap:10px}
+
+  /* ══════ C안: 표 안 접이식 ══════ */
+  .tbl{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .thead,.trow{display:grid;grid-template-columns:minmax(0,1fr) 92px 78px 74px 150px 30px;gap:8px;
+    align-items:center;padding:9px 12px;font-size:.75rem}
+  .thead{background:#F5F7FB;border-bottom:1px solid var(--line);font-weight:800;color:#617087;font-size:.68rem}
+  .trow{border-bottom:1px solid #EEF1F6}
+  .trow .nm{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .trow input.cell{width:100%;height:28px;padding:0 7px;border:1px solid #D5DDE8;border-radius:6px;
+    text-align:right;font-size:.75rem;font-family:inherit;font-weight:700;
+    appearance:textfield;-moz-appearance:textfield}
+  .trow input.cell::-webkit-outer-spin-button,.trow input.cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .mixbtn{width:100%;text-align:left;border:1px solid var(--line2);background:#F8FAFC;border-radius:7px;
+    padding:5px 8px;font-size:.7rem;font-weight:800;cursor:pointer;font-family:inherit;color:var(--slate);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mixbtn.ng{border-color:var(--red-bd);background:var(--red-bg);color:var(--red)}
+  .mixbtn.okb{border-color:var(--green-bd);background:var(--green-bg);color:var(--green)}
+  .caret{border:none;background:transparent;color:#94A3B8;cursor:pointer;font-size:.8rem;font-family:inherit}
+  .drawer{padding:11px 12px 14px;background:#F8FAFC;border-bottom:1px solid #EEF1F6}
+  .drawer .dh{font-size:.7rem;font-weight:800;color:#617087;margin-bottom:7px;display:flex;
+    justify-content:space-between;align-items:center;gap:8px}
+
+  .footnote{margin-top:22px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+  .footnote h3{margin:0 0 8px;font-size:.9rem;font-weight:900}
+  .footnote ul{margin:0;padding-left:18px}
+  .footnote li{font-size:.79rem;color:var(--sub);line-height:1.85;margin-bottom:5px}
+  .footnote li b{color:var(--ink)}
+  .q{background:var(--amber-bg);border:1px solid var(--amber-bd);border-radius:9px;padding:10px 13px;margin-top:10px}
+  .q b{color:var(--amber);font-size:.8rem}
+  .q p{margin:5px 0 0;font-size:.78rem;color:#7C4A11;line-height:1.7}
+  @media(max-width:760px){
+    .thead,.trow{grid-template-columns:minmax(0,1fr) 70px 60px 130px 28px}
+    .thead span:nth-child(4),.trow > *:nth-child(4){display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>상품별 리뷰 조합 입력 — 시안 3안</h1>
+  <p>상품이 여러 개인데 리뷰 타입이 <b>혼합</b>인 작업에서, <b>상품마다 유형별 인원을 따로</b> 입력하는 화면입니다.</p>
+  <p>보기: <code>?v=A</code> · <code>?v=B</code> · <code>?v=C</code> 를 붙이면 그 안만 단독으로 열립니다. 숫자는 세 안이 <b>같은 값</b>을 공유하니 한 곳에서 고치면 다른 안에도 그대로 반영됩니다.</p>
+</header>
+
+<div class="now">
+  <h2>지금 무엇이 막혀 있나</h2>
+  <p>화면은 <b>「전체 모집」 한 칸</b>으로만 조합을 받는데, 저장할 때 시스템은 <b>상품마다 따로</b> 검사합니다.
+     그래서 전체 합계(750명)를 아무리 정확히 맞춰도 저장이 안 되고, 상품별로 넣을 칸이 화면에 없어서 <b>고칠 방법도 없습니다</b>.</p>
+  <div class="err">저장하지 못했습니다 — 옵션 "풍성한 진간장 F 13L x 1통": 혼합 리뷰는 두 가지 이상 유형의 수량을 입력해주세요.</div>
+  <div class="flow">
+    <span>화면 입력 : 전체 750명 (포토 500 · 텍스트 200 · 별점 50)</span>
+    <span>→ 저장 검사 : 상품 3개를 각각 확인</span>
+    <span class="bad">→ 상품별 조합이 비어 있음 → 거부</span>
+  </div>
+</div>
+
+<div class="optbar" id="optbar">
+  <button data-v="A" onclick="pick('A')">A안 · 폼 안에 그대로 펼치기</button>
+  <button data-v="B" onclick="pick('B')">B안 · 전용 모달</button>
+  <button data-v="C" onclick="pick('C')">C안 · 상품 표 안 접이식</button>
+  <span class="hint">세 안 모두 실제로 입력·계산됩니다.</span>
+</div>
+
+<!-- ══════════════ A안 ══════════════ -->
+<section class="opt" id="secA">
+  <div class="optd">
+    <h2>A안 — 지금 자리에 상품 카드를 그대로 쌓는다 <span class="tag">화면 이동 없음</span></h2>
+    <p>「리뷰 타입 · 혼합」 아래 지금 있는 그 자리에, 상품 수만큼 카드가 쌓입니다. 새 창이 없고 폼을 벗어나지 않습니다.</p>
+    <span class="pro">좋은 점 — 클릭이 늘지 않습니다. 지금 코드가 이미 이 모양으로 그릴 수 있어 가장 작게 고칩니다.</span>
+    <span class="con">아쉬운 점 — 모달 칸이 좁아 상품이 4~5개만 되어도 폼이 길어지고, 상품별 인원(기준값)이 저 위 표에 있어 눈이 왔다 갔다 합니다.</span>
+  </div>
+  <div class="stage">
+    <div class="cap">모집공고 등록 모달 · 왼쪽 입력 칸 (폭 그대로 재현)</div>
+    <div class="formcol">
+      <div class="frow">
+        <div class="flab">리뷰 타입</div>
+        <div class="fctl">
+          <div class="rtbtns">
+            <button>자율리뷰</button><button>포토</button><button>텍스트</button>
+            <button>구매확정</button><button>별점</button><button class="on">혼합</button>
+          </div>
+          <div class="composer" id="A_composer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ B안 ══════════════ -->
+<section class="opt" id="secB">
+  <div class="optd">
+    <h2>B안 — 상품별 조합 전용 모달 <span class="tag rec">요청하신 방향 · 권장</span></h2>
+    <p>폼에는 <b>요약 한 줄 + [상품별 조합 설정] 버튼</b>만 두고, 누르면 넓은 창에서 상품마다 입력합니다. 상품 이름·인원·금액이 카드 머리에 함께 보여 기준이 눈앞에 있습니다.</p>
+    <span class="pro">좋은 점 — 넓게 볼 수 있어 상품이 많아도 안 무너집니다. [자동 배분]·[전체 상태]를 크게 둘 수 있고, 폼은 오히려 짧아집니다.</span>
+    <span class="con">아쉬운 점 — 창을 열고 닫는 클릭이 한 번 늘어납니다.</span>
+  </div>
+  <div class="stage">
+    <div class="cap">① 폼에 남는 것 — 요약 한 줄</div>
+    <div class="trigrow">
+      <div class="frow" style="margin-bottom:0">
+        <div class="flab">리뷰 타입</div>
+        <div class="fctl">
+          <div class="rtbtns" style="margin-bottom:8px">
+            <button>자율리뷰</button><button>포토</button><button>텍스트</button>
+            <button>구매확정</button><button>별점</button><button class="on">혼합</button>
+          </div>
+          <div class="trigbox">
+            <div class="trigline">
+              <div class="trigsum" id="B_sum">—</div>
+              <button class="btn pri" onclick="openB()">상품별 조합 설정</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cap" style="margin-top:20px">② 누르면 열리는 창</div>
+    <div class="modal">
+      <div class="mtop">
+        <h3>상품별 리뷰 조합</h3>
+        <button class="x" title="닫기">✕</button>
+      </div>
+      <div class="mbody">
+        <div class="mnote">상품마다 <b>유형 두 가지 이상</b>을 넣고, 그 상품의 <b>인원과 합계가 딱 맞아야</b> 저장됩니다.</div>
+        <div id="B_cards"></div>
+      </div>
+      <div class="mfoot">
+        <div class="totrow" id="B_tot"></div>
+        <div class="mact">
+          <button class="btn" onclick="autoAll()">전체 자동 배분</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="resetAll()">비우기</button>
+            <button class="btn pri" id="B_ok" onclick="trySave()">적용</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ C안 ══════════════ -->
+<section class="opt" id="secC">
+  <div class="optd">
+    <h2>C안 — 진행상품 표 안에서 줄마다 펼치기 <span class="tag">기준값이 같은 줄에</span></h2>
+    <p>지금 있는 진행상품 표에 <b>「리뷰 조합」 칸</b>을 하나 더 두고, 누르면 그 줄 아래가 펼쳐집니다. 인원 칸 바로 옆이라 무엇에 맞춰야 하는지 한 줄에서 보입니다.</p>
+    <span class="pro">좋은 점 — 인원을 고치면서 바로 조합을 고칠 수 있고, 평소엔 접혀 있어 상품이 많아도 조용합니다.</span>
+    <span class="con">아쉬운 점 — 표가 가로로 한 칸 넓어집니다. 좁은 화면에서는 칸을 접어야 합니다.</span>
+  </div>
+  <div class="stage">
+    <div class="cap">모집공고 등록 모달 · 진행상품 표</div>
+    <div class="tbl">
+      <div class="thead">
+        <span>상품명</span><span style="text-align:right">결제금액</span><span style="text-align:right">인원</span>
+        <span style="text-align:right">일건수</span><span>리뷰 조합</span><span></span>
+      </div>
+      <div id="C_rows"></div>
+    </div>
+    <div style="max-width:720px;margin-top:12px" id="C_tot"></div>
+  </div>
+</section>
+
+<div class="footnote">
+  <h3>세 안이 공통으로 지키는 규칙</h3>
+  <ul>
+    <li><b>기준은 그 상품의 인원</b> — 카드가 맞춰야 하는 숫자는 표에 적힌 그 상품 인원(500 / 200 / 50)입니다. 전체 750은 그 합일 뿐입니다.</li>
+    <li><b>두 가지 이상</b> — 상품 하나가 한 유형만 가지면 저장되지 않습니다(지금 서버 규칙 그대로).</li>
+    <li><b>맞을 때만 저장</b> — 초과·부족·한 유형은 전부 빨강 「저장불가」, 딱 맞으면 초록 「저장가능」. 화면이 <b>몇 명 모자란지</b>를 말합니다.</li>
+    <li><b>모르는 값을 지어내지 않음</b> — 인원이 비어 있으면 조합을 자동으로 채우지 않고 "인원을 먼저 입력해주세요"라고 말합니다.</li>
+    <li><b>자동 배분은 제안까지</b> — 버튼을 눌러야 채워지고, 채운 뒤 사람이 고칠 수 있습니다.</li>
+  </ul>
+  <div class="q">
+    <b>확인이 필요한 것 하나</b>
+    <p>상품별 합계를 정확히 맞추면, <b>유형별 전체 합계가 작업오더에 적힌 조합과 몇 명 어긋날 수 있습니다</b>(500·200·50 을 비율로 나누면 끝수가 남습니다).
+       무작위 4,000회로 확인해 보니 <b>상품별 합계는 언제나 정확</b>하고, 유형별 전체 합계만 <b>±1명 정도</b> 어긋나는 경우가 있었습니다(지금 예시 750명은 정확히 떨어집니다).
+       ㉮ 상품별 합을 우선하고 전체 유형 합계가 1~2명 달라지는 것을 허용할지, ㉯ 전체 유형 합계를 고정하고 남는 끝수는 사람이 직접 맞출지 정해주세요.
+       어긋난 유형은 모달 하단에 주황 칩으로 알려주도록 해 두었습니다.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+/* ─────────── 공유 상태 (세 안이 같은 값을 본다) ─────────── */
+var TYPES=[['photo','포토'],['text','텍스트'],['confirm','구매확정'],['star','별점']];
+var S={
+  total:750,
+  order:{photo:500,text:200,confirm:0,star:50},   /* 작업오더에 적힌 전체 조합 */
+  products:[
+    {name:'풍성한 진간장 F 13L x 1통', pay:18000, quota:500, daily:20, mix:{photo:0,text:0,confirm:0,star:0}, open:true},
+    {name:'풍성한 진간장 13L x 1통',   pay:17400, quota:200, daily:10, mix:{photo:0,text:0,confirm:0,star:0}, open:false},
+    {name:'풍성한 진간장 S 13L x 1통', pay:14300, quota:50,  daily:5,  mix:{photo:0,text:0,confirm:0,star:0}, open:false}
+  ]
+};
+function n(v){ v=Math.floor(Number(v)||0); return v<0?0:v; }
+function sumMix(m){ var s=0; TYPES.forEach(function(t){ s+=n(m[t[0]]); }); return s; }
+function usedTypes(m){ var c=0; TYPES.forEach(function(t){ if(n(m[t[0]])>0) c++; }); return c; }
+function fmt(v){ return Number(v).toLocaleString('ko-KR'); }
+
+/* 그 상품 한 줄의 판정 — 화면 세 곳이 같은 함수를 쓴다 */
+function state(p){
+  var s=sumMix(p.mix), q=n(p.quota);
+  if(q<=0)          return {ok:false,cls:'warn',msg:'이 상품의 인원을 먼저 입력해주세요.'};
+  if(s===0)         return {ok:false,cls:'bad', msg:'유형별 인원을 입력해주세요. — 저장불가'};
+  if(usedTypes(p.mix)<2) return {ok:false,cls:'bad', msg:'두 가지 이상 유형이 필요합니다. — 저장불가'};
+  if(s>q)           return {ok:false,cls:'bad', msg:'인원 '+fmt(q)+'명보다 '+fmt(s-q)+'명 초과입니다. — 저장불가'};
+  if(s<q)           return {ok:false,cls:'bad', msg:'인원 '+fmt(q)+'명보다 '+fmt(q-s)+'명 부족입니다. — 저장불가'};
+  return {ok:true,cls:'ok',msg:'인원 '+fmt(q)+'명과 딱 맞습니다. — 저장가능'};
+}
+function mixLabel(p){
+  var parts=[];
+  TYPES.forEach(function(t){ if(n(p.mix[t[0]])>0) parts.push(t[1]+' '+fmt(n(p.mix[t[0]]))); });
+  return parts.length?parts.join(' · '):'미입력';
+}
+
+/* ─────────── 자동 배분 ─────────── */
+function spread(total, weights){                 /* 최대잔여법 — 합계가 정확히 total */
+  var w=weights.reduce(function(a,b){return a+b;},0)||1;
+  var raw=weights.map(function(x){ return total*x/w; });
+  var base=raw.map(Math.floor);
+  var rest=total-base.reduce(function(a,b){return a+b;},0);
+  var idx=raw.map(function(v,i){ return [v-base[i], i]; }).sort(function(a,b){ return b[0]-a[0]; });
+  for(var i=0;i<rest && idx.length;i++) base[idx[i%idx.length][1]]++;
+  return base;
+}
+function fixRow(p){                              /* 그 상품 합계를 인원에 정확히 맞춘다(끝수는 가장 큰 유형에서) */
+  var guard=0;
+  while(sumMix(p.mix)!==n(p.quota) && guard++<400){
+    var d=n(p.quota)-sumMix(p.mix);
+    var keys=TYPES.map(function(t){return t[0];}).sort(function(a,b){ return n(p.mix[b])-n(p.mix[a]); });
+    var k=d>0?keys[0]:keys.filter(function(x){return n(p.mix[x])>0;})[0];
+    if(!k) break;
+    p.mix[k]=n(p.mix[k])+(d>0?1:-1);
+  }
+}
+function autoAll(){
+  var qs=S.products.map(function(p){ return n(p.quota); });
+  S.products.forEach(function(p){ TYPES.forEach(function(t){ p.mix[t[0]]=0; }); });
+  TYPES.forEach(function(t){
+    var tot=n(S.order[t[0]]); if(!tot) return;
+    var got=spread(tot, qs);
+    S.products.forEach(function(p,i){ p.mix[t[0]]=got[i]; });
+  });
+  S.products.forEach(fixRow);
+  render();
+}
+function autoOne(i){
+  var p=S.products[i];
+  var w=TYPES.map(function(t){ return n(S.order[t[0]]); });
+  var got=spread(n(p.quota), w);
+  TYPES.forEach(function(t,k){ p.mix[t[0]]=got[k]; });
+  fixRow(p);
+  render();
+}
+function resetAll(){
+  S.products.forEach(function(p){ TYPES.forEach(function(t){ p.mix[t[0]]=0; }); });
+  render();
+}
+function setVal(i,key,v){ S.products[i].mix[key]=n(v); render(); }
+function setQuota(i,v){ S.products[i].quota=n(v); render(); }
+
+/* 저장 시도 — 서버가 실제로 돌려주는 문구 그대로 */
+function trySave(){
+  for(var i=0;i<S.products.length;i++){
+    var p=S.products[i], st=state(p), s=sumMix(p.mix);
+    if(st.ok) continue;
+    if(usedTypes(p.mix)<2) return alert('저장하지 못했습니다 — 옵션 "'+p.name+'": 혼합 리뷰는 두 가지 이상 유형의 수량을 입력해주세요.');
+    return alert('저장하지 못했습니다 — 옵션 "'+p.name+'": 리뷰 조합 합계('+fmt(s)+'명)를 총인원('+fmt(n(p.quota))+'명)과 일치시켜주세요.');
+  }
+  alert('저장했습니다 — 상품 '+S.products.length+'건의 리뷰 조합이 공고에 반영됩니다.');
+}
+
+/* ─────────── 렌더 ─────────── */
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function gridHtml(i,p,size){
+  var h='<div class="mixgrid">';
+  TYPES.forEach(function(t){
+    h+='<label><span>'+t[1]+'</span><input type="number" min="0" inputmode="numeric" value="'+n(p.mix[t[0]])+'"'
+      +' oninput="setVal('+i+',\''+t[0]+'\',this.value)" onfocus="if(this.value===\'0\')this.value=\'\'"></label>';
+  });
+  return h+'</div>';
+}
+function typeTotals(){
+  var out={};
+  TYPES.forEach(function(t){
+    var s=0; S.products.forEach(function(p){ s+=n(p.mix[t[0]]); });
+    out[t[0]]=s;
+  });
+  return out;
+}
+
+function renderA(){
+  var box=document.getElementById('A_composer'); if(!box) return;
+  var h='';
+  S.products.forEach(function(p,i){
+    var st=state(p);
+    h+='<div class="mcard">'
+      +'<div class="mhead"><strong title="'+esc(p.name)+'">'+esc(p.name)+'</strong>'
+      +'<span class="q">인원 '+fmt(n(p.quota))+'명</span></div>'
+      +gridHtml(i,p)
+      +'<div class="mstat '+(st.ok?'ok':'bad')+'">합계 '+fmt(sumMix(p.mix))+'명 · '+st.msg+'</div>'
+      +'</div>';
+  });
+  box.innerHTML=h;
+}
+
+function renderB(){
+  var cards=document.getElementById('B_cards'); if(!cards) return;
+  var h='';
+  S.products.forEach(function(p,i){
+    var st=state(p);
+    h+='<div class="pcard '+(st.ok?'okc':'ng')+'">'
+      +'<div class="phead"><div class="pname" title="'+esc(p.name)+'">'+esc(p.name)+'</div>'
+      +'<div class="pmeta"><span>'+fmt(p.pay)+'원</span><span>인원 <b>'+fmt(n(p.quota))+'</b>명</span>'
+      +'<button class="btn" onclick="autoOne('+i+')">자동 배분</button></div></div>'
+      +gridHtml(i,p)
+      +'<div class="bal '+st.cls+' pbal"><span>합계 <span class="n">'+fmt(sumMix(p.mix))+'</span>명</span><span>'+st.msg+'</span></div>'
+      +'</div>';
+  });
+  cards.innerHTML=h;
+
+  var tt=typeTotals(), chips='';
+  TYPES.forEach(function(t){
+    var got=tt[t[0]], want=n(S.order[t[0]]);
+    var diff=got-want;
+    chips+='<span class="chip'+(diff!==0?' d':'')+'">'+t[1]+' '+fmt(got)
+      +(diff!==0?' <b>('+(diff>0?'+':'')+fmt(diff)+')</b>':'')+'</span>';
+  });
+  var allOk=S.products.every(function(p){ return state(p).ok; });
+  var qsum=S.products.reduce(function(a,p){ return a+n(p.quota); },0);
+  document.getElementById('B_tot').innerHTML=
+    '<span class="chip" style="font-weight:900">상품 인원 합 '+fmt(qsum)+'명 / 총건수 '+fmt(S.total)+'명</span>'+chips
+    +(Object.keys(tt).some(function(k){ return tt[k]!==n(S.order[k]); })
+      ? '<span class="chip d">작업오더 조합과 다른 유형이 있습니다</span>' : '');
+  var ok=document.getElementById('B_ok'); if(ok) ok.disabled=!allOk;
+
+  var sum=document.getElementById('B_sum');
+  if(sum){
+    var bad=S.products.filter(function(p){ return !state(p).ok; }).length;
+    sum.innerHTML = bad
+      ? '상품 '+S.products.length+'건 중 <em>'+bad+'건</em>이 아직 맞지 않습니다 — 눌러서 상품별로 입력하세요.'
+      : '상품 '+S.products.length+'건 모두 <i>입력 완료</i> — '+S.products.map(function(p){ return esc(p.name.slice(0,8))+' '+fmt(n(p.quota)); }).join(' · ');
+  }
+}
+
+function renderC(){
+  var rows=document.getElementById('C_rows'); if(!rows) return;
+  var h='';
+  S.products.forEach(function(p,i){
+    var st=state(p);
+    h+='<div class="trow">'
+      +'<div class="nm" title="'+esc(p.name)+'">'+esc(p.name)+'</div>'
+      +'<div style="text-align:right">'+fmt(p.pay)+'</div>'
+      +'<div><input class="cell" type="number" min="0" value="'+n(p.quota)+'" oninput="setQuota('+i+',this.value)"></div>'
+      +'<div style="text-align:right">'+p.daily+'</div>'
+      +'<div><button class="mixbtn '+(st.ok?'okb':'ng')+'" onclick="toggleC('+i+')">'
+        +(st.ok?'✓ ':'⚠ ')+esc(mixLabel(p))+'</button></div>'
+      +'<div><button class="caret" onclick="toggleC('+i+')">'+(p.open?'▲':'▼')+'</button></div>'
+      +'</div>';
+    if(p.open){
+      h+='<div class="drawer">'
+        +'<div class="dh"><span>'+esc(p.name)+' — 인원 '+fmt(n(p.quota))+'명에 맞춰 나눠주세요</span>'
+        +'<button class="btn" onclick="autoOne('+i+')">자동 배분</button></div>'
+        +gridHtml(i,p)
+        +'<div class="bal '+st.cls+'" style="margin-top:8px"><span>합계 <span class="n">'+fmt(sumMix(p.mix))+'</span>명</span><span>'+st.msg+'</span></div>'
+        +'</div>';
+    }
+  });
+  rows.innerHTML=h;
+
+  var allOk=S.products.every(function(p){ return state(p).ok; });
+  var bad=S.products.filter(function(p){ return !state(p).ok; }).length;
+  document.getElementById('C_tot').innerHTML=
+    '<div class="bal '+(allOk?'ok':'bad')+'" style="height:auto;padding:9px 12px">'
+    +'<span>'+(allOk?'상품 '+S.products.length+'건 모두 인원과 맞습니다. — 저장가능'
+                    :'상품 '+bad+'건의 조합이 인원과 맞지 않습니다. — 저장불가')+'</span>'
+    +'<button class="btn" onclick="autoAll()">전체 자동 배분</button></div>';
+}
+function toggleC(i){ S.products[i].open=!S.products[i].open; render(); }
+function openB(){ pick('B'); window.scrollTo({top:document.getElementById('secB').offsetTop, behavior:'smooth'}); }
+
+function render(){ renderA(); renderB(); renderC(); }
+
+/* ─────────── 안 전환 ─────────── */
+function pick(v){
+  ['A','B','C'].forEach(function(k){
+    document.getElementById('sec'+k).classList.toggle('on', k===v);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('#optbar button'), function(b){
+    b.classList.toggle('on', b.dataset.v===v);
+  });
+}
+(function(){
+  var m=/[?&]v=([ABC])/i.exec(location.search);
+  render();
+  if(m){ pick(m[1].toUpperCase()); document.getElementById('optbar').style.display='none'; }
+  else  { pick('B'); }
+})();
+</script>
+</body>
+</html>
