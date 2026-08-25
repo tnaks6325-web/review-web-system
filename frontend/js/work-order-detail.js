@@ -723,7 +723,9 @@ function _woOptionRows(o) {
           // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.
           recruitTotal: Math.max(0, Number(op.count) || 0),
           dailyLimit: Math.max(0, Number(op.daily_limit ?? op.dailyLimit ?? op.daily) || 0),
-          reviewTypeMix: optionReviewTypeMix(op),
+          // "옵션 없음"은 옵션 행이 아니라 상품 자체 선택지다. 이 형태도 인트라넷이
+          // base.review_type_mix 에 보낸 상품별 조합을 써야 발행 검증에서 재입력이 생기지 않는다.
+          reviewTypeMix: isNone ? productReviewTypeMix(prod) : optionReviewTypeMix(op),
         });
       }
     } else if (name) {

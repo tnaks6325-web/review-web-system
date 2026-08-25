@@ -166,13 +166,15 @@ const COMPOSITE = {
   const noneish = s._woOptionRows({
     product_options_json: JSON.stringify([{
       name: '상품C', url: 'https://coupang.com/C', product_mode: 'opt',
-      base: { pay: 8000, guide: '상품C 유입' },
+      base: { pay: 8000, guide: '상품C 유입', review_type_mix: [{ type: 'photo', quantity: 6 }, { type: 'text', quantity: 4 }] },
       options: [{ label: '옵션 없음', pay: 8000, count: 10 }],
     }]),
   });
   ok('★ "옵션 없음"류는 상품 단위로 떨어지고 상품 가이드를 쓴다',
     noneish.length === 1 && noneish[0].unitKind === 'product' && noneish[0].optKey === ''
     && /상품C 유입/.test(noneish[0].inflowGuideHtml));
+  ok('★ "옵션 없음" 대체 행도 상품(base) 리뷰 조합을 쓴다',
+    JSON.stringify(noneish[0].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 6 }, { type: 'text', quantity: 4 }]));
 
   // 종전 오더(가이드 없음) 무회귀
   const legacy = s._woOptionRows({
