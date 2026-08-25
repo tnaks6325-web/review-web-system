@@ -1058,7 +1058,7 @@ router.get('/my-repurchase-status', applyLimiter, async (req, res, next) => {
 // GET /api/campaign/:id — 캠페인 상세
 //   ★ M1 보안: SELECT * 무인증 반환 제거. admin/master JWT면 전체(관리자 수정 모달 호환),
 //     그 외에는 공개 화이트리스트(레거시/참여형 분기)만.
-router.get('/:id', async (req, res, next) => {
+async function getCampaignDetail(req, res, next) {
   try {
     const { id } = req.params;
     const { rows } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
@@ -1168,7 +1168,12 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-});
+}
+
+// 관리자 수정 모달은 /admin 네임스페이스를 사용한다. 기존 상세 핸들러를
+// 재사용해 공개 뷰로 축약되지 않으면서도 Track B와 동일한 프리필 응답을 유지한다.
+router.get('/admin/:id', authMiddleware, adminOrMasterMiddleware, getCampaignDetail);
+router.get('/:id', getCampaignDetail);
 
 // GET /api/campaign/:id/applications — 참여 카운트 (공개)
 //   ★ M1 보안: 신청자 실명 명단 무인증 반환 제거 — count만 반환(프론트 소비처 없음 확인).

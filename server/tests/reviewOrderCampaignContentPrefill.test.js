@@ -11,6 +11,9 @@ let pass = 0;
 const t = (name, ok) => { assert.ok(ok, name); console.log('  ✓ ' + name); pass++; };
 
 console.log('\n── 7. 작업오더 안내성 값 → 모집공고 blank-only 프리필 ──');
+t('관리자 수정 모달 상세 경로가 인증된 기존 전체 상세 핸들러를 재사용한다',
+  /router\.get\('\/admin\/:id', authMiddleware, adminOrMasterMiddleware, getCampaignDetail\)/.test(server)
+  && /router\.get\('\/:id', getCampaignDetail\)/.test(server));
 t('서버는 기존 연결 작업오더 조회 한 번에 필요한 값만 더 가져온다',
   /'product_url', 'review_guide', 'special_notes', 'inflow_guide', 'guide_images'/.test(server)
   && (server.match(/linkedWorkOrderForCampaign\(rows\[0\]/g) || []).length === 1);
