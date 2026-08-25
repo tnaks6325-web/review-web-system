@@ -487,7 +487,7 @@
                 <div class="form-row"><span class="form-label">이체은행</span><div class="form-control"><div id="rf_transfer_bank_btns" class="choice-set"><button class="choice rchan-btn" data-group="transfer_bank" data-val="" onclick="selectRfBtn('transfer_bank',this)">자동</button><button class="choice rchan-btn" data-group="transfer_bank" data-val="hana" onclick="selectRfBtn('transfer_bank',this)">하나은행</button><button class="choice rchan-btn" data-group="transfer_bank" data-val="kbank" onclick="selectRfBtn('transfer_bank',this)">케이뱅크</button></div><input id="rf_transfer_bank" type="hidden"></div></div>
                 <div class="form-row"><span class="form-label">기간별 리뷰비</span><div class="form-control"><input type="checkbox" id="rf_fee_sched_on" hidden><button type="button" id="rf_fee_sched_toggle" class="switch-button" aria-pressed="false" onclick="rfToggleFeeSchedule()"><span aria-hidden="true"></span></button><strong id="feeScheduleState">사용 안 함</strong></div></div>
                 <div id="rf_fee_sched_section" class="fee-schedule" style="display:none"><div class="fee-schedule-inner"><div class="fee-schedule-box"><div class="fee-head"><span>적용 시작일</span><span>리뷰비</span><span>메모</span><span></span></div><div id="rf_fee_rows"></div><button type="button" class="fee-add rchan-btn" onclick="addFeeRow()">+ 리뷰비 구간 추가</button><div id="rf_fee_summary"></div><div id="rf_fee_check"></div></div></div></div>
-                <div class="form-row"><label class="form-label" for="rf_chat_url">팀채팅방 <em class="required">*</em></label><div class="form-control"><input id="rf_chat_url" type="url"></div></div>
+                <div class="form-row"><label class="form-label" for="rf_chat_url">팀채팅방</label><div class="form-control"><input id="rf_chat_url" type="url"></div></div>
                 <div class="form-row clickable-date-row" onclick="rfOpenStartDatePicker(event)"><span class="form-label">모집 시작일 <em class="required">*</em></span><div class="form-control"><div class="date-control"><input id="rf_start_date" type="date" onchange="onRecruitDatesChange()"><span id="rf_start_day">날짜 변경</span></div></div></div>
                 <div class="form-row"><span class="form-label">주말 포함 여부</span><div class="form-control"><input type="checkbox" id="rf_skip_weekends" hidden><div id="rf_skip_weekends_toggle" class="square-toggle"><button type="button" data-weekend="include" onclick="rfSetWeekendPolicy(false,this)">주말 포함</button><button type="button" data-weekend="exclude" onclick="rfSetWeekendPolicy(true,this)">주말 제외</button></div><span class="tag public" id="weekendNotice">주말 카드 노출 · 신청 차단</span></div></div>
                 <div class="form-row"><span class="form-label">다계정 허용</span><div class="form-control"><input type="checkbox" id="rf_multi_account" hidden><div id="rf_multi_account_toggle" class="square-toggle"><button type="button" data-multi="off" onclick="rfSetMultiAccount(false,this)">미허용</button><button type="button" data-multi="on" onclick="rfSetMultiAccount(true,this)">허용</button></div><span class="tag" id="accountNote">기본 제한 적용</span><div id="rf_multi_section" hidden><input id="rf_multi_daily" type="number" min="0" value="1"><input id="rf_sub_ttl" type="number" min="1" value="15"></div></div></div>
@@ -921,9 +921,7 @@
    ★ 막지 않는다(경고 전용) · 클릭하면 그 칸으로 데려간다 · 색은 리터럴(테마 없는 호스트). */
 #recruitModal .rf-startcheck{display:flex;align-items:center;gap:7px;flex-wrap:wrap;
   margin:0 0 10px;padding:9px 12px;border:1px solid #FDE68A;background:#FFFBEB;border-radius:10px}
-#recruitModal .rf-startcheck.done{border-color:#BBF7D0;background:#F0FDF4}
 #recruitModal .rf-startcheck .sct{font-size:.74rem;font-weight:800;color:#92400E;white-space:nowrap}
-#recruitModal .rf-startcheck.done .sct{color:#14532D}
 #recruitModal .rf-startcheck .scc{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:700;
   padding:3px 9px;border-radius:999px;border:1px solid #E2E8F0;background:#fff;color:#334155;cursor:pointer}
 #recruitModal .rf-startcheck .scc:hover{border-color:#94A3B8}
@@ -1244,7 +1242,8 @@
   function _railMark(key) {
     switch (key) {
       case 'link':
-        return (_val('rf_manager') && _val('rf_channel') && _val('rf_chat_url')) ? 'ok' : 'req';
+        /* ★ 팀채팅방은 필수가 아니다(2026-08-25) — 여기서만 요구하면 시작 설정 줄과 갈린다. */
+        return (_val('rf_manager') && _val('rf_channel')) ? 'ok' : 'req';
       case 'prod': { var r = document.getElementById('rf_opt_rows'); return (r && r.children.length) ? 'ok' : ''; }
       case 'cond': return (_val('rf_start_date') || _val('rf_window_start')) ? 'ok' : '';
       case 'fee':  return _val('rf_review_fee') ? 'ok' : '';

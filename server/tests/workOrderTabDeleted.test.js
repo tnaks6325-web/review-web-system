@@ -152,11 +152,17 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
   ok('★ 저장을 막지 않는다 — 저장 차단 경로에 이 판정이 없다',
     !/_rfStartState|_rfStartVisible/.test(rc.slice(rc.indexOf('async function saveRecruitPostImpl'),
       rc.indexOf('async function saveRecruitPostImpl') + 12000)));
-  ok('★ 정상 값도 "미설정"으로 단정하지 않는다(빈 값이 곤란한 둘만 miss)',
-    /miss: !memo/.test(rc) && /miss: !chat/.test(rc)
+  ok('★ 필수 여부는 RF_START_ITEMS[].required 단일 출처 — miss 를 손으로 적지 않는다',
+    /miss: req\("transfer_memo"\) && !memo/.test(rc) && /miss: req\("chat_url"\) && !chat/.test(rc)
     && /value: cash \? "발행" : "발행 안 함", miss: false/.test(rc)
     && /value: multi \? "허용" : "미허용", miss: false/.test(rc));
-  ok('onclick 은 **인덱스만**(라벨·값 보간 0)', /onclick="rfStartGo\(\$\{i\}\)"/.test(rc));
+  ok('★★ 팀채팅방은 필수가 아니다(2026-08-25) — 목록·폼 `*`·레일 셋 다에서 빠졌다',
+    !/k: "chat_url"[^\n]*required: true/.test(rc)
+    && !/for="rf_chat_url">팀채팅방 <em class="required">/.test(rm)
+    && !/_val\('rf_manager'\) && _val\('rf_channel'\) && _val\('rf_chat_url'\)/.test(rm));
+  ok('★★ 필수인데 비어 있는 칸만 그린다(정상 값은 표기 0) + 없으면 줄을 감춘다',
+    /filter\(o => o\.x\.miss\)/.test(rc) && /if \(!miss\.length\) \{ box\.hidden = true; return; \}/.test(rc));
+  ok('onclick 은 **인덱스만**(라벨·값 보간 0)', /onclick="rfStartGo\(\$\{o\.i\}\)"/.test(rc));
   ok('★ 값이 바뀌면 줄도 따라간다 — 위임 1회(입력칸을 다시 만들지 않아 IME 안전)',
     /let _rfStartBound = false/.test(rc) && /host\.addEventListener\("input", refresh\)/.test(rc));
   ok('모달을 열 때 1회 렌더 + 실패해도 모달을 막지 않는다',
@@ -181,7 +187,8 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
   };
   vm.createContext(sb2);
   const pick = name => { const a = rc.indexOf('function ' + name); return rc.slice(a, rc.indexOf('\n}', a) + 2); };
-  vm.runInContext(pick('_rfStartState') + '\n' + pick('_rfStartVisible') + '\n;this.__st=_rfStartState;this.__vis=_rfStartVisible;', sb2);
+  const ITEMS = rc.slice(rc.indexOf('const RF_START_ITEMS'), rc.indexOf('];', rc.indexOf('const RF_START_ITEMS')) + 2);
+  vm.runInContext(ITEMS + '\n' + pick('_rfStartState') + '\n' + pick('_rfStartVisible') + '\n;this.__st=_rfStartState;this.__vis=_rfStartVisible;', sb2);
   const st = sb2.__st();
   ok('★ 빈 입금명은 빨간 미입력, 채워진 팀채팅방은 통과',
     st[0].miss === true && st[0].value === '미입력' && st[4].miss === false);
@@ -189,6 +196,40 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
     st[2].value === '발행' && st[3].value === '미허용' && !st[2].miss && !st[3].miss);
   ok('★ 배지는 개수로', st[1].value === '1개');
   ok('게시 전이면 줄을 보여준다', sb2.__vis() === true);
+
+  // 실제 렌더 — 필수 미입력만 칩으로 나오는지, 없으면 줄이 감춰지는지
+  {
+    const box = { hidden: true, className: '', innerHTML: '' };
+    const vals = { memo: '', chat: '' };
+    const sb3 = {
+      _recruitBadges: ['현영건'],
+      _recruitEditId: null,
+      escHtml: x => String(x == null ? '' : x),
+      document: {
+        getElementById: id => ({
+          rf_startcheck: box,
+          rf_transfer_memo: { value: vals.memo },
+          rf_chat_url: { value: vals.chat },
+          rf_cash_receipt_required: { checked: false },
+          rf_multi_account: { checked: false },
+          rf_status: { value: 'draft' },
+        })[id] || null,
+      },
+    };
+    vm.createContext(sb3);
+    vm.runInContext(ITEMS + '\n' + pick('_rfStartState') + '\n' + pick('_rfStartVisible') + '\n'
+      + pick('renderRecruitStartCheck') + '\n;this.__render=renderRecruitStartCheck;', sb3);
+    sb3.__render();
+    ok('★★ 입금명만 비면 칩도 입금명 하나뿐 — 정상 값(팀채팅방·현금영수증·다계정·배지)은 표기 0',
+      box.hidden === false && /입금명/.test(box.innerHTML) && /1개 남음/.test(box.innerHTML)
+      && !/팀채팅방|현금영수증|다계정|안내배지/.test(box.innerHTML));
+    ok('★ 칩 onclick 은 그 칸의 인덱스(0=입금명)', /rfStartGo\(0\)/.test(box.innerHTML));
+    vals.memo = '망고';
+    box.hidden = false; box.innerHTML = 'x';
+    sb3.__render();
+    ok('★★ 입금명을 채우면(팀채팅방이 비어 있어도) 줄 자체가 사라진다',
+      box.hidden === true);
+  }
 }
 
 console.log('\n[G] 관리자 수정 모달 — 발주서 원문임을 말한다');
