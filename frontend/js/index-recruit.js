@@ -2620,6 +2620,10 @@ function readOptRows() {
  * 글 또는 사진만 있어도 유효하며, 마감 선택지는 리뷰어가 고를 수 없으므로 제외한다. */
 function validateActiveUnitInflowGuides(inflowType) {
   if (inflowType !== "guide") return "";
+  // 옵션 없는 단일상품은 아직 선택지 원장을 만들지 않는다. 이 모드에 전용 가이드 입력을
+  // 제공하지 않으면서 검증만 걸면 새 공고를 저장할 수 없으므로, 실제 저장 선택지가 있는
+  // 옵션 모드에서만 이 검증을 적용한다.
+  if (_prodMode() !== "opt") return "";
   const missing = [];
   _optUnitEntries({ activeOnly: true }).forEach(({ row, optKey, productName }) => {
     const guide = _ugCompose(row, row.dataset.ig);

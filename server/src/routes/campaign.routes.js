@@ -2571,7 +2571,17 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       if (optionReviewMixError) return res.status(400).json({ ok: false, error: optionReviewMixError });
       const requestedInflowType = _savedInflowType(work_detail);
       if (requestedInflowType) {
-        const inflowGuideError = _validateActiveUnitInflowGuides(requestedInflowType, normOpts);
+        // 레거시 공통 가이드는 새 입력으로는 고칠 수 없지만, 제목·일정 같은 무관한 수정에서
+        // 선택지 가이드 누락으로 막히면 안 된다. 저장 직전의 보존 병합과 같은 원본을 여기서도
+        // 먼저 읽어 검증의 호환 분기로 쓴다.
+        const { rows: legacyGuideRows } = await pool.query(
+          'SELECT work_detail FROM recruit_campaigns WHERE id = $1', [id]
+        );
+        const legacyGuideDetail = sanitizeWorkDetail(legacyGuideRows[0]?.work_detail) || {};
+        const hasLegacySharedGuide = String(legacyGuideDetail.inflowGuideHtml || '').trim().length > 0;
+        const inflowGuideError = hasLegacySharedGuide
+          ? ''
+          : _validateActiveUnitInflowGuides(requestedInflowType, normOpts);
         if (inflowGuideError) return res.status(400).json({ ok: false, error: inflowGuideError });
       }
     }
