@@ -3,344 +3,287 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>상품별 리뷰 조합 입력 시안 — 혼합 리뷰</title>
+<title>선택지별 리뷰 조합 · 유입가이드 시안 (C안 확정)</title>
 <style>
   :root{
     --bg:#F3F5F9; --card:#fff; --line:#E5E7EB; --line2:#DCE3EC; --ink:#111827; --sub:#6B7280;
-    --blue:#1b64da; --blue2:#3182f6; --blue-bg:#EEF4FF;
+    --blue:#1b64da; --blue2:#3182f6; --blue-bg:#EEF4FF; --blue-bd:#C7DAFB;
     --green:#0B7A5B; --green-bg:#E8F7F1; --green-bd:#8ED9BE;
     --red:#C2323B; --red-bg:#FEF2F2; --red-bd:#FCA5A5;
     --amber:#92400E; --amber-bg:#FFFBEB; --amber-bd:#FCD34D;
-    --slate:#334155;
+    --slate:#334155; --violet:#5B4BC4; --violet-bg:#F1EFFC; --violet-bd:#CFC7F2;
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
        background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1180px;margin:0 auto;padding:26px 20px 90px}
+  .wrap{max-width:1120px;margin:0 auto;padding:26px 20px 90px}
   header.page h1{font-size:1.3rem;font-weight:900;margin:0 0 8px}
-  header.page p{margin:0 0 4px;color:var(--sub);font-size:.85rem;line-height:1.7}
+  header.page p{margin:0 0 5px;color:var(--sub);font-size:.85rem;line-height:1.75}
   header.page b{color:var(--ink)}
   code{background:#EEF1F6;border-radius:4px;padding:1px 5px;font-size:.78em}
+  .pickbadge{display:inline-block;background:#ECFDF5;color:var(--green);border:1px solid var(--green-bd);
+    border-radius:999px;padding:3px 11px;font-size:.7rem;font-weight:900;margin-left:6px;vertical-align:2px}
 
-  .now{margin:18px 0 6px;background:#fff;border:1px solid var(--line);border-left:4px solid var(--red);
+  .why{margin:18px 0 22px;background:#fff;border:1px solid var(--line);border-left:4px solid var(--red);
        border-radius:10px;padding:14px 16px}
-  .now h2{margin:0 0 8px;font-size:.92rem;font-weight:900}
-  .now p{margin:0 0 8px;font-size:.82rem;color:var(--sub);line-height:1.75}
-  .now .err{background:var(--red-bg);border:1px solid var(--red-bd);color:var(--red);border-radius:8px;
+  .why h2{margin:0 0 8px;font-size:.92rem;font-weight:900}
+  .why p{margin:0 0 9px;font-size:.82rem;color:var(--sub);line-height:1.8}
+  .why .err{background:var(--red-bg);border:1px solid var(--red-bd);color:var(--red);border-radius:8px;
        padding:9px 12px;font-size:.78rem;font-weight:800;line-height:1.6}
-  .now .flow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:.74rem;font-weight:800}
-  .now .flow span{background:#F1F4FA;border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--slate)}
-  .now .flow span.bad{background:var(--red-bg);border-color:var(--red-bd);color:var(--red)}
-
-  .optbar{display:flex;gap:8px;margin:24px 0 18px;flex-wrap:wrap;align-items:center}
-  .optbar button{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:9px 16px;
-    font-size:.82rem;font-weight:800;color:var(--sub);cursor:pointer;font-family:inherit}
-  .optbar button.on{border-color:var(--blue);background:var(--blue);color:#fff;box-shadow:0 3px 10px rgba(27,100,218,.28)}
-  .optbar .hint{font-size:.72rem;color:var(--sub);margin-left:6px}
-
-  section.opt{display:none} section.opt.on{display:block}
-  .optd{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:18px}
-  .optd h2{font-size:.95rem;font-weight:900;margin:0 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .optd .tag{font-size:.62rem;font-weight:900;border-radius:6px;padding:3px 8px;background:var(--blue-bg);color:var(--blue)}
-  .optd .tag.rec{background:#ECFDF5;color:var(--green)}
-  .optd p{margin:0;font-size:.8rem;color:var(--sub);line-height:1.75}
-  .optd .pro,.optd .con{display:block;font-size:.75rem;font-weight:800;margin-top:7px}
-  .optd .pro{color:#0F766E} .optd .con{color:var(--amber)}
 
   .stage{background:#E9EDF4;border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:22px}
-  .stage .cap{font-size:.7rem;font-weight:800;color:var(--sub);margin-bottom:10px;letter-spacing:.02em}
+  .cap{font-size:.7rem;font-weight:800;color:var(--sub);margin:0 0 10px;letter-spacing:.02em}
+  .cap.sp{margin-top:22px}
 
-  /* ── 공통: 유형 입력 그리드 ── */
+  /* ── 공고 공통 유입가이드(폴백 원본) ── */
+  .common{background:#fff;border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:14px}
+  .common h3{margin:0 0 8px;font-size:.8rem;font-weight:900;display:flex;align-items:center;gap:7px}
+  .common .tg{font-size:.62rem;font-weight:900;border-radius:6px;padding:3px 8px;background:var(--violet-bg);
+    color:var(--violet);border:1px solid var(--violet-bd)}
+  .common .body{display:flex;gap:12px;align-items:flex-start}
+  .common .tx{flex:1;min-width:0;font-size:.76rem;color:var(--sub);line-height:1.75;white-space:pre-line}
+  .shots{display:flex;gap:6px;flex-wrap:wrap}
+  .shot{width:46px;height:58px;border-radius:7px;border:1px solid var(--line2);position:relative;
+    background:linear-gradient(140deg,#E7EEFB,#D6E2F7);display:flex;align-items:center;justify-content:center;
+    font-size:.6rem;font-weight:800;color:#7C90B4;overflow:hidden}
+  .shot .rm{position:absolute;top:2px;right:2px;width:15px;height:15px;border-radius:50%;border:none;
+    background:rgba(17,24,39,.62);color:#fff;font-size:.6rem;line-height:1;cursor:pointer;padding:0}
+
+  /* ── 진행상품 표 ── */
+  .tbl{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .thead,.trow{display:grid;grid-template-columns:minmax(0,1fr) 84px 72px 64px 136px 150px 28px;gap:8px;
+    align-items:center;padding:9px 12px;font-size:.75rem}
+  .thead{background:#F5F7FB;border-bottom:1px solid var(--line);font-weight:800;color:#617087;font-size:.67rem}
+  .thead .r{text-align:right}
+  .grow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;
+    padding:8px 12px;background:#FAFBFE;border-bottom:1px solid #EEF1F6;font-size:.75rem}
+  .grow .gn{font-weight:900;display:flex;align-items:center;gap:7px;min-width:0}
+  .grow .gn span.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .obadge{font-size:.6rem;font-weight:900;border-radius:6px;padding:2px 7px;background:var(--blue-bg);
+    color:var(--blue);border:1px solid var(--blue-bd);white-space:nowrap}
+  .grow .gq{font-size:.7rem;color:var(--sub);font-weight:800;white-space:nowrap}
+  .trow{border-bottom:1px solid #EEF1F6}
+  .trow.sub{background:#fff}
+  .trow .nm{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;
+    align-items:center;gap:6px;min-width:0}
+  .trow.sub .nm{padding-left:14px;position:relative}
+  .trow.sub .nm::before{content:"└";position:absolute;left:2px;color:#B6C2D4;font-weight:400}
+  .trow .r{text-align:right}
+  .cell{width:100%;height:28px;padding:0 7px;border:1px solid #D5DDE8;border-radius:6px;text-align:right;
+    font-size:.75rem;font-family:inherit;font-weight:700;appearance:textfield;-moz-appearance:textfield}
+  .cell::-webkit-outer-spin-button,.cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .cell:focus{outline:2px solid var(--blue2);outline-offset:-1px;border-color:var(--blue2)}
+
+  .chipbtn{width:100%;text-align:left;border:1px solid var(--line2);background:#F8FAFC;border-radius:7px;
+    padding:5px 8px;font-size:.69rem;font-weight:800;cursor:pointer;font-family:inherit;color:var(--slate);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chipbtn:hover{border-color:#B9C6DC}
+  .chipbtn.ng{border-color:var(--red-bd);background:var(--red-bg);color:var(--red)}
+  .chipbtn.okb{border-color:var(--green-bd);background:var(--green-bg);color:var(--green)}
+  .chipbtn.gset{border-color:var(--violet-bd);background:var(--violet-bg);color:var(--violet)}
+  .chipbtn.gnone{color:#8A97A8}
+  .caret{border:none;background:transparent;color:#94A3B8;cursor:pointer;font-size:.78rem;font-family:inherit}
+  .muted{font-size:.68rem;color:#9AA6B6;font-weight:700}
+
+  /* ── 드로어 ── */
+  .drawer{padding:12px 12px 14px;background:#F7F9FC;border-bottom:1px solid #EEF1F6}
+  .dgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:12px}
+  @media(max-width:880px){.dgrid{grid-template-columns:1fr}}
+  .dbox{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+  .dbox.hl{box-shadow:0 0 0 2px rgba(49,130,246,.35)}
+  .dh{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+  .dh h4{margin:0;font-size:.78rem;font-weight:900;display:flex;align-items:center;gap:6px}
+  .dh .base{font-size:.68rem;font-weight:800;color:var(--sub);white-space:nowrap}
+
   .mixgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
-  .mixgrid label{display:grid;grid-template-columns:52px minmax(0,1fr);align-items:center;gap:5px;
-    font-size:.68rem;font-weight:800;color:#617087}
-  .mixgrid input{width:100%;height:30px;min-width:0;padding:0 7px;border:1px solid #D5DDE8;border-radius:6px;
-    text-align:right;font-size:.8rem;font-weight:700;color:var(--ink);font-family:inherit;
+  .mixgrid label{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:5px;
+    font-size:.67rem;font-weight:800;color:#617087}
+  .mixgrid input{width:100%;height:29px;min-width:0;padding:0 6px;border:1px solid #D5DDE8;border-radius:6px;
+    text-align:right;font-size:.78rem;font-weight:700;font-family:inherit;
     appearance:textfield;-moz-appearance:textfield}
   .mixgrid input::-webkit-outer-spin-button,.mixgrid input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .mixgrid input:focus{outline:2px solid var(--blue2);outline-offset:-1px;border-color:var(--blue2)}
 
-  /* ── 공통: 상태 바 ── */
   .bal{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:8px;
-    padding:0 10px;height:34px;font-size:.75rem;font-weight:800;border:1px solid transparent;box-sizing:border-box}
+    padding:0 10px;height:32px;font-size:.72rem;font-weight:800;border:1px solid transparent;margin-top:9px}
   .bal.ok{background:var(--green-bg);border-color:var(--green-bd);color:var(--green)}
   .bal.bad{background:var(--red-bg);border-color:var(--red-bd);color:var(--red)}
   .bal.warn{background:var(--amber-bg);border-color:var(--amber-bd);color:var(--amber)}
   .bal .n{font-variant-numeric:tabular-nums}
 
-  .btn{border:1px solid var(--line2);background:#fff;border-radius:8px;padding:6px 11px;font-size:.72rem;
+  /* 유입가이드 편집(사진 왼쪽 · 글 오른쪽 — 지금 화면 규격 그대로) */
+  .ug{display:flex;gap:9px;align-items:stretch}
+  .ugstrip{width:112px;flex:0 0 112px;border:1px dashed #C9D5E6;border-radius:8px;background:#FBFCFE;
+    padding:7px;display:flex;flex-wrap:wrap;gap:5px;align-content:flex-start}
+  .ugadd{width:46px;height:58px;border:1px dashed #B9C6DC;border-radius:7px;background:#fff;cursor:pointer;
+    color:#8A97A8;font-size:.66rem;font-weight:800;font-family:inherit;line-height:1.3}
+  .ugadd:hover{border-color:var(--blue2);color:var(--blue)}
+  .ug textarea{flex:1;min-width:0;min-height:76px;padding:7px 9px;border:1px solid #D5DDE8;border-radius:7px;
+    font-size:.75rem;font-family:inherit;line-height:1.65;resize:vertical}
+  .ug textarea:focus{outline:2px solid var(--blue2);outline-offset:-1px;border-color:var(--blue2)}
+  .ugst{margin-top:8px;border-radius:8px;padding:6px 9px;font-size:.7rem;font-weight:800;line-height:1.55}
+  .ugst.set{background:var(--violet-bg);border:1px solid var(--violet-bd);color:var(--violet)}
+  .ugst.none{background:#F1F4FA;border:1px solid var(--line);color:#617087}
+
+  .btn{border:1px solid var(--line2);background:#fff;border-radius:8px;padding:6px 11px;font-size:.71rem;
     font-weight:800;color:var(--slate);cursor:pointer;font-family:inherit;white-space:nowrap}
   .btn:hover{border-color:#B9C6DC;background:#F8FAFD}
   .btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
   .btn.pri:hover{background:#1857c0}
   .btn:disabled{opacity:.45;cursor:not-allowed}
 
-  /* ══════ A안: 모달 폼 안 인라인 ══════ */
-  .formcol{max-width:470px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-  .frow{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
-  .flab{width:62px;flex:0 0 62px;font-size:.74rem;font-weight:800;color:#617087;padding-top:7px}
-  .fctl{flex:1;min-width:0}
-  .rtbtns{display:flex;gap:4px;flex-wrap:wrap}
-  .rtbtns button{border:1px solid var(--line2);background:#fff;border-radius:7px;padding:6px 9px;
-    font-size:.72rem;font-weight:800;color:var(--sub);cursor:pointer;font-family:inherit}
-  .rtbtns button.on{background:var(--blue);border-color:var(--blue);color:#fff}
-  .composer{margin-top:8px;padding:9px;border:1px solid var(--line2);border-radius:8px;background:#F8FAFC}
-  .mcard+.mcard{margin-top:9px;padding-top:9px;border-top:1px solid #E3E9F2}
-  .mhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;
-    font-size:.7rem;color:#617087}
-  .mhead strong{color:#172033;font-size:.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mhead .q{white-space:nowrap;font-weight:800}
-  .mstat{margin-top:6px;font-size:.68rem;font-weight:800;border-radius:6px;padding:4px 7px}
-  .mstat.ok{background:var(--green-bg);color:var(--green)}
-  .mstat.bad{background:var(--red-bg);color:var(--red)}
-
-  /* ══════ B안: 전용 모달 ══════ */
-  .trigrow{max-width:470px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-  .trigbox{border:1px solid var(--line2);border-radius:9px;background:#F8FAFC;padding:10px}
-  .trigline{display:flex;align-items:center;justify-content:space-between;gap:8px}
-  .trigsum{font-size:.72rem;font-weight:800;color:var(--slate);line-height:1.6}
-  .trigsum em{font-style:normal;color:var(--red)}
-  .trigsum i{font-style:normal;color:var(--green)}
-
-  .modal{background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,28,55,.22);max-width:680px;
-    margin:0 auto;overflow:hidden;border:1px solid #D9E1EE}
-  .mtop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;
-    border-bottom:1px solid var(--line)}
-  .mtop h3{margin:0;font-size:.95rem;font-weight:900}
-  .mtop .x{border:none;background:transparent;font-size:1.1rem;color:#94A3B8;cursor:pointer;line-height:1}
-  .mbody{padding:14px 18px;max-height:60vh;overflow:auto}
-  .mnote{background:var(--blue-bg);border:1px solid #C7DAFB;color:#1B4A9E;border-radius:8px;padding:8px 11px;
-    font-size:.74rem;font-weight:700;line-height:1.65;margin-bottom:12px}
-  .pcard{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-bottom:11px;background:#fff}
-  .pcard.ng{border-color:var(--red-bd);background:#FFFCFC}
-  .pcard.okc{border-color:var(--green-bd);background:#FCFEFD}
-  .phead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
-  .pname{font-size:.84rem;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .pmeta{font-size:.7rem;color:var(--sub);font-weight:700;white-space:nowrap;display:flex;gap:8px;align-items:center}
-  .pmeta b{color:var(--ink);font-size:.78rem}
-  .pbal{margin-top:9px}
-  .mfoot{border-top:1px solid var(--line);padding:12px 18px;background:#FAFBFD}
-  .totrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-  .chip{font-size:.68rem;font-weight:800;border-radius:999px;padding:4px 10px;background:#F1F4FA;
+  .foot{margin-top:12px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:12px 14px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .chip{font-size:.67rem;font-weight:800;border-radius:999px;padding:4px 10px;background:#F1F4FA;
     border:1px solid var(--line);color:var(--slate);white-space:nowrap}
   .chip.d{background:var(--amber-bg);border-color:var(--amber-bd);color:var(--amber)}
-  .mact{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .facts{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
-  /* ══════ C안: 표 안 접이식 ══════ */
-  .tbl{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  .thead,.trow{display:grid;grid-template-columns:minmax(0,1fr) 92px 78px 74px 150px 30px;gap:8px;
-    align-items:center;padding:9px 12px;font-size:.75rem}
-  .thead{background:#F5F7FB;border-bottom:1px solid var(--line);font-weight:800;color:#617087;font-size:.68rem}
-  .trow{border-bottom:1px solid #EEF1F6}
-  .trow .nm{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .trow input.cell{width:100%;height:28px;padding:0 7px;border:1px solid #D5DDE8;border-radius:6px;
-    text-align:right;font-size:.75rem;font-family:inherit;font-weight:700;
-    appearance:textfield;-moz-appearance:textfield}
-  .trow input.cell::-webkit-outer-spin-button,.trow input.cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-  .mixbtn{width:100%;text-align:left;border:1px solid var(--line2);background:#F8FAFC;border-radius:7px;
-    padding:5px 8px;font-size:.7rem;font-weight:800;cursor:pointer;font-family:inherit;color:var(--slate);
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mixbtn.ng{border-color:var(--red-bd);background:var(--red-bg);color:var(--red)}
-  .mixbtn.okb{border-color:var(--green-bd);background:var(--green-bg);color:var(--green)}
-  .caret{border:none;background:transparent;color:#94A3B8;cursor:pointer;font-size:.8rem;font-family:inherit}
-  .drawer{padding:11px 12px 14px;background:#F8FAFC;border-bottom:1px solid #EEF1F6}
-  .drawer .dh{font-size:.7rem;font-weight:800;color:#617087;margin-bottom:7px;display:flex;
-    justify-content:space-between;align-items:center;gap:8px}
-
-  .footnote{margin-top:22px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px}
-  .footnote h3{margin:0 0 8px;font-size:.9rem;font-weight:900}
-  .footnote ul{margin:0;padding-left:18px}
-  .footnote li{font-size:.79rem;color:var(--sub);line-height:1.85;margin-bottom:5px}
-  .footnote li b{color:var(--ink)}
-  .q{background:var(--amber-bg);border:1px solid var(--amber-bd);border-radius:9px;padding:10px 13px;margin-top:10px}
+  .notes{margin-top:22px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+  .notes h3{margin:0 0 8px;font-size:.9rem;font-weight:900}
+  .notes ul{margin:0;padding-left:18px}
+  .notes li{font-size:.79rem;color:var(--sub);line-height:1.85;margin-bottom:5px}
+  .notes li b{color:var(--ink)}
+  .q{background:var(--amber-bg);border:1px solid var(--amber-bd);border-radius:9px;padding:10px 13px;margin-top:12px}
   .q b{color:var(--amber);font-size:.8rem}
-  .q p{margin:5px 0 0;font-size:.78rem;color:#7C4A11;line-height:1.7}
-  @media(max-width:760px){
-    .thead,.trow{grid-template-columns:minmax(0,1fr) 70px 60px 130px 28px}
-    .thead span:nth-child(4),.trow > *:nth-child(4){display:none}
-  }
+  .q p{margin:5px 0 0;font-size:.78rem;color:#7C4A11;line-height:1.75}
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <header class="page">
-  <h1>상품별 리뷰 조합 입력 — 시안 3안</h1>
-  <p>상품이 여러 개인데 리뷰 타입이 <b>혼합</b>인 작업에서, <b>상품마다 유형별 인원을 따로</b> 입력하는 화면입니다.</p>
-  <p>보기: <code>?v=A</code> · <code>?v=B</code> · <code>?v=C</code> 를 붙이면 그 안만 단독으로 열립니다. 숫자는 세 안이 <b>같은 값</b>을 공유하니 한 곳에서 고치면 다른 안에도 그대로 반영됩니다.</p>
+  <h1>선택지별 리뷰 조합 · 유입가이드 <span class="pickbadge">C안 확정</span></h1>
+  <p>상품이 여러 개이고 리뷰 타입이 <b>혼합</b>인 작업에서, <b>리뷰어가 고르는 선택지 하나하나마다</b>
+     ① 유형별 인원(리뷰 조합) ② 그 선택지 전용 유입가이드를 함께 입력하는 화면입니다.</p>
+  <p><b>선택지</b>란 — 옵션이 없는 상품은 <b>그 상품 자체</b>가 선택지 하나이고, 옵션이 있는 상품은 <b>옵션 하나하나</b>가 선택지입니다.
+     아래 표는 두 경우를 섞어 놓았습니다. (A·B안은 미채택)</p>
+  <p>숫자와 가이드는 실제로 입력·계산됩니다. 저장 버튼을 누르면 지금 시스템이 돌려주는 문구 그대로 알려줍니다.</p>
 </header>
 
-<div class="now">
-  <h2>지금 무엇이 막혀 있나</h2>
-  <p>화면은 <b>「전체 모집」 한 칸</b>으로만 조합을 받는데, 저장할 때 시스템은 <b>상품마다 따로</b> 검사합니다.
-     그래서 전체 합계(750명)를 아무리 정확히 맞춰도 저장이 안 되고, 상품별로 넣을 칸이 화면에 없어서 <b>고칠 방법도 없습니다</b>.</p>
+<div class="why">
+  <h2>왜 필요한가 — 지금은 막다른 길입니다</h2>
+  <p>화면은 <b>「전체 모집」 한 칸</b>으로만 조합을 받는데, 저장할 때 시스템은 <b>선택지마다 따로</b> 검사합니다.
+     그래서 전체 750명을 정확히 맞춰도 거부되고, <b>선택지별로 넣을 칸이 화면에 없어 고칠 방법도 없습니다.</b></p>
   <div class="err">저장하지 못했습니다 — 옵션 "풍성한 진간장 F 13L x 1통": 혼합 리뷰는 두 가지 이상 유형의 수량을 입력해주세요.</div>
-  <div class="flow">
-    <span>화면 입력 : 전체 750명 (포토 500 · 텍스트 200 · 별점 50)</span>
-    <span>→ 저장 검사 : 상품 3개를 각각 확인</span>
-    <span class="bad">→ 상품별 조합이 비어 있음 → 거부</span>
+</div>
+
+<div class="stage">
+  <div class="cap">모집공고 등록 모달 · 진행상품 표</div>
+
+  <div class="common">
+    <h3>공고 공통 유입가이드 <span class="tg">선택지 가이드가 비어 있으면 이 안내가 나갑니다</span></h3>
+    <div class="body">
+      <div class="shots"><div class="shot">공통 1</div><div class="shot">공통 2</div></div>
+      <div class="tx">네이버에서 「풍성한 진간장」 검색 → 스토어 진입 → 상품 상세로 들어가 주세요.
+찜하기 · 장바구니를 먼저 눌러 주세요.</div>
+    </div>
+  </div>
+
+  <div class="tbl">
+    <div class="thead">
+      <span>상품 / 옵션</span><span class="r">결제금액</span><span class="r">인원</span><span class="r">일건수</span>
+      <span>리뷰 조합</span><span>유입가이드</span><span></span>
+    </div>
+    <div id="rows"></div>
+  </div>
+
+  <div class="foot">
+    <div class="chips" id="chips"></div>
+    <div class="facts">
+      <div class="bal" id="allbal" style="margin:0;flex:1;min-width:240px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="autoAll()">전체 자동 배분</button>
+        <button class="btn" onclick="resetAll()">조합 비우기</button>
+        <button class="btn pri" onclick="trySave()">저장</button>
+      </div>
+    </div>
   </div>
 </div>
 
-<div class="optbar" id="optbar">
-  <button data-v="A" onclick="pick('A')">A안 · 폼 안에 그대로 펼치기</button>
-  <button data-v="B" onclick="pick('B')">B안 · 전용 모달</button>
-  <button data-v="C" onclick="pick('C')">C안 · 상품 표 안 접이식</button>
-  <span class="hint">세 안 모두 실제로 입력·계산됩니다.</span>
-</div>
-
-<!-- ══════════════ A안 ══════════════ -->
-<section class="opt" id="secA">
-  <div class="optd">
-    <h2>A안 — 지금 자리에 상품 카드를 그대로 쌓는다 <span class="tag">화면 이동 없음</span></h2>
-    <p>「리뷰 타입 · 혼합」 아래 지금 있는 그 자리에, 상품 수만큼 카드가 쌓입니다. 새 창이 없고 폼을 벗어나지 않습니다.</p>
-    <span class="pro">좋은 점 — 클릭이 늘지 않습니다. 지금 코드가 이미 이 모양으로 그릴 수 있어 가장 작게 고칩니다.</span>
-    <span class="con">아쉬운 점 — 모달 칸이 좁아 상품이 4~5개만 되어도 폼이 길어지고, 상품별 인원(기준값)이 저 위 표에 있어 눈이 왔다 갔다 합니다.</span>
-  </div>
-  <div class="stage">
-    <div class="cap">모집공고 등록 모달 · 왼쪽 입력 칸 (폭 그대로 재현)</div>
-    <div class="formcol">
-      <div class="frow">
-        <div class="flab">리뷰 타입</div>
-        <div class="fctl">
-          <div class="rtbtns">
-            <button>자율리뷰</button><button>포토</button><button>텍스트</button>
-            <button>구매확정</button><button>별점</button><button class="on">혼합</button>
-          </div>
-          <div class="composer" id="A_composer"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════ B안 ══════════════ -->
-<section class="opt" id="secB">
-  <div class="optd">
-    <h2>B안 — 상품별 조합 전용 모달 <span class="tag rec">요청하신 방향 · 권장</span></h2>
-    <p>폼에는 <b>요약 한 줄 + [상품별 조합 설정] 버튼</b>만 두고, 누르면 넓은 창에서 상품마다 입력합니다. 상품 이름·인원·금액이 카드 머리에 함께 보여 기준이 눈앞에 있습니다.</p>
-    <span class="pro">좋은 점 — 넓게 볼 수 있어 상품이 많아도 안 무너집니다. [자동 배분]·[전체 상태]를 크게 둘 수 있고, 폼은 오히려 짧아집니다.</span>
-    <span class="con">아쉬운 점 — 창을 열고 닫는 클릭이 한 번 늘어납니다.</span>
-  </div>
-  <div class="stage">
-    <div class="cap">① 폼에 남는 것 — 요약 한 줄</div>
-    <div class="trigrow">
-      <div class="frow" style="margin-bottom:0">
-        <div class="flab">리뷰 타입</div>
-        <div class="fctl">
-          <div class="rtbtns" style="margin-bottom:8px">
-            <button>자율리뷰</button><button>포토</button><button>텍스트</button>
-            <button>구매확정</button><button>별점</button><button class="on">혼합</button>
-          </div>
-          <div class="trigbox">
-            <div class="trigline">
-              <div class="trigsum" id="B_sum">—</div>
-              <button class="btn pri" onclick="openB()">상품별 조합 설정</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="cap" style="margin-top:20px">② 누르면 열리는 창</div>
-    <div class="modal">
-      <div class="mtop">
-        <h3>상품별 리뷰 조합</h3>
-        <button class="x" title="닫기">✕</button>
-      </div>
-      <div class="mbody">
-        <div class="mnote">상품마다 <b>유형 두 가지 이상</b>을 넣고, 그 상품의 <b>인원과 합계가 딱 맞아야</b> 저장됩니다.</div>
-        <div id="B_cards"></div>
-      </div>
-      <div class="mfoot">
-        <div class="totrow" id="B_tot"></div>
-        <div class="mact">
-          <button class="btn" onclick="autoAll()">전체 자동 배분</button>
-          <div style="display:flex;gap:8px">
-            <button class="btn" onclick="resetAll()">비우기</button>
-            <button class="btn pri" id="B_ok" onclick="trySave()">적용</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════ C안 ══════════════ -->
-<section class="opt" id="secC">
-  <div class="optd">
-    <h2>C안 — 진행상품 표 안에서 줄마다 펼치기 <span class="tag">기준값이 같은 줄에</span></h2>
-    <p>지금 있는 진행상품 표에 <b>「리뷰 조합」 칸</b>을 하나 더 두고, 누르면 그 줄 아래가 펼쳐집니다. 인원 칸 바로 옆이라 무엇에 맞춰야 하는지 한 줄에서 보입니다.</p>
-    <span class="pro">좋은 점 — 인원을 고치면서 바로 조합을 고칠 수 있고, 평소엔 접혀 있어 상품이 많아도 조용합니다.</span>
-    <span class="con">아쉬운 점 — 표가 가로로 한 칸 넓어집니다. 좁은 화면에서는 칸을 접어야 합니다.</span>
-  </div>
-  <div class="stage">
-    <div class="cap">모집공고 등록 모달 · 진행상품 표</div>
-    <div class="tbl">
-      <div class="thead">
-        <span>상품명</span><span style="text-align:right">결제금액</span><span style="text-align:right">인원</span>
-        <span style="text-align:right">일건수</span><span>리뷰 조합</span><span></span>
-      </div>
-      <div id="C_rows"></div>
-    </div>
-    <div style="max-width:720px;margin-top:12px" id="C_tot"></div>
-  </div>
-</section>
-
-<div class="footnote">
-  <h3>세 안이 공통으로 지키는 규칙</h3>
+<div class="notes">
+  <h3>이 화면이 지키는 규칙</h3>
   <ul>
-    <li><b>기준은 그 상품의 인원</b> — 카드가 맞춰야 하는 숫자는 표에 적힌 그 상품 인원(500 / 200 / 50)입니다. 전체 750은 그 합일 뿐입니다.</li>
-    <li><b>두 가지 이상</b> — 상품 하나가 한 유형만 가지면 저장되지 않습니다(지금 서버 규칙 그대로).</li>
-    <li><b>맞을 때만 저장</b> — 초과·부족·한 유형은 전부 빨강 「저장불가」, 딱 맞으면 초록 「저장가능」. 화면이 <b>몇 명 모자란지</b>를 말합니다.</li>
-    <li><b>모르는 값을 지어내지 않음</b> — 인원이 비어 있으면 조합을 자동으로 채우지 않고 "인원을 먼저 입력해주세요"라고 말합니다.</li>
+    <li><b>기준은 그 선택지의 인원</b> — 옵션이 없으면 상품 인원, 옵션이 있으면 그 옵션 인원입니다. 전체 750은 그 합일 뿐입니다.</li>
+    <li><b>두 가지 이상 유형</b> — 선택지 하나가 한 유형만 가지면 저장되지 않습니다(지금 시스템 규칙 그대로).</li>
+    <li><b>맞을 때만 저장</b> — 초과·부족·한 유형은 빨강 「저장불가」, 딱 맞으면 초록 「저장가능」. <b>몇 명 모자란지</b>를 숫자로 말합니다.</li>
+    <li><b>유입가이드는 비워도 됩니다</b> — 비우면 위의 공고 공통 안내가 그대로 나갑니다. 그 사실을 칸에 적어 둡니다(「공통 사용」).</li>
+    <li><b>가이드는 글과 사진 둘 다</b> — 사진은 왼쪽, 글은 오른쪽(지금 화면과 같은 배치). 실제 화면에서는 붙여넣기·끌어놓기로도 사진이 들어갑니다.</li>
+    <li><b>모르는 값을 지어내지 않습니다</b> — 인원이 비어 있으면 조합을 자동으로 채우지 않고 "인원을 먼저 입력해주세요"라고 말합니다.</li>
     <li><b>자동 배분은 제안까지</b> — 버튼을 눌러야 채워지고, 채운 뒤 사람이 고칠 수 있습니다.</li>
+    <li><b>옵션이 있는 상품은 상품 줄에 입력칸을 두지 않습니다</b> — 그 줄은 합계를 보여줄 뿐이고, 실제로 정하는 곳은 옵션 줄입니다(두 곳에서 정하면 어긋납니다).</li>
   </ul>
   <div class="q">
-    <b>확인이 필요한 것 하나</b>
-    <p>상품별 합계를 정확히 맞추면, <b>유형별 전체 합계가 작업오더에 적힌 조합과 몇 명 어긋날 수 있습니다</b>(500·200·50 을 비율로 나누면 끝수가 남습니다).
-       무작위 4,000회로 확인해 보니 <b>상품별 합계는 언제나 정확</b>하고, 유형별 전체 합계만 <b>±1명 정도</b> 어긋나는 경우가 있었습니다(지금 예시 750명은 정확히 떨어집니다).
-       ㉮ 상품별 합을 우선하고 전체 유형 합계가 1~2명 달라지는 것을 허용할지, ㉯ 전체 유형 합계를 고정하고 남는 끝수는 사람이 직접 맞출지 정해주세요.
-       어긋난 유형은 모달 하단에 주황 칩으로 알려주도록 해 두었습니다.</p>
+    <b>아직 정해주셔야 하는 것 하나</b>
+    <p>선택지별 합계를 정확히 맞추면 <b>유형별 전체 합계가 작업오더에 적힌 조합과 ±1명 어긋날 수 있습니다</b>(끝수 때문입니다).
+       무작위 4,000회로 확인한 결과 <b>선택지별 합계는 언제나 정확</b>했고 전체 유형 합계만 1~2명 차이가 났습니다.
+       ㉮ 지금처럼 선택지별 합을 우선하고 전체 유형 합계가 조금 달라지는 것을 허용할지, ㉯ 전체 유형 합계를 고정하고 남는 끝수는 사람이 맞출지 정해주세요.
+       지금 시안은 ㉮로 동작하고, 어긋난 유형은 아래 주황 칩으로 알려줍니다.</p>
   </div>
 </div>
 
 </div>
 
 <script>
-/* ─────────── 공유 상태 (세 안이 같은 값을 본다) ─────────── */
+/* ══════════ 상태 ══════════
+   선택지(unit) = 리뷰어가 고르는 한 줄. 옵션 없는 상품은 그 상품이 곧 선택지 하나다.
+   리뷰 조합·유입가이드는 **선택지마다** 붙는다(지금 저장 구조와 같다).            */
 var TYPES=[['photo','포토'],['text','텍스트'],['confirm','구매확정'],['star','별점']];
+var PH=0;
+function ph(t){ return {id:'ph'+(++PH), name:t}; }
 var S={
   total:750,
   order:{photo:500,text:200,confirm:0,star:50},   /* 작업오더에 적힌 전체 조합 */
   products:[
-    {name:'풍성한 진간장 F 13L x 1통', pay:18000, quota:500, daily:20, mix:{photo:0,text:0,confirm:0,star:0}, open:true},
-    {name:'풍성한 진간장 13L x 1통',   pay:17400, quota:200, daily:10, mix:{photo:0,text:0,confirm:0,star:0}, open:false},
-    {name:'풍성한 진간장 S 13L x 1통', pay:14300, quota:50,  daily:5,  mix:{photo:0,text:0,confirm:0,star:0}, open:false}
+    { name:'풍성한 진간장 F 13L x 1통', hasOpt:false, pay:18000, daily:20,
+      units:[ {opt:'', quota:500, mix:z(), guide:{text:'네이버 검색 「진간장 F」 → 상단 광고 제외하고 스토어 진입', photos:[ph('가이드')]}, open:true, hl:'' } ] },
+    { name:'풍성한 진간장 13L x 1통', hasOpt:true, pay:17400, daily:10,
+      units:[ {opt:'13L 단품', quota:120, mix:z(), guide:{text:'', photos:[]}, open:false, hl:''},
+              {opt:'13L 2입',  quota:80,  mix:z(), guide:{text:'2입 상세페이지로 바로 들어가 주세요', photos:[]}, open:false, hl:''} ] },
+    { name:'풍성한 진간장 S 13L x 1통', hasOpt:false, pay:14300, daily:5,
+      units:[ {opt:'', quota:50, mix:z(), guide:{text:'', photos:[]}, open:false, hl:'' } ] }
   ]
 };
+function z(){ return {photo:0,text:0,confirm:0,star:0}; }
+function allUnits(){
+  var out=[];
+  S.products.forEach(function(p,pi){ p.units.forEach(function(u,ui){ out.push({p:p,u:u,pi:pi,ui:ui}); }); });
+  return out;
+}
+function unitName(p,u){ return u.opt ? u.opt : p.name; }
+function optKey(p,u){ return u.opt ? u.opt : p.name; }   /* 저장 시 키 — 옵션 없으면 상품명이 키다 */
+
 function n(v){ v=Math.floor(Number(v)||0); return v<0?0:v; }
+function fmt(v){ return Number(v).toLocaleString('ko-KR'); }
 function sumMix(m){ var s=0; TYPES.forEach(function(t){ s+=n(m[t[0]]); }); return s; }
 function usedTypes(m){ var c=0; TYPES.forEach(function(t){ if(n(m[t[0]])>0) c++; }); return c; }
-function fmt(v){ return Number(v).toLocaleString('ko-KR'); }
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 
-/* 그 상품 한 줄의 판정 — 화면 세 곳이 같은 함수를 쓴다 */
-function state(p){
-  var s=sumMix(p.mix), q=n(p.quota);
-  if(q<=0)          return {ok:false,cls:'warn',msg:'이 상품의 인원을 먼저 입력해주세요.'};
-  if(s===0)         return {ok:false,cls:'bad', msg:'유형별 인원을 입력해주세요. — 저장불가'};
-  if(usedTypes(p.mix)<2) return {ok:false,cls:'bad', msg:'두 가지 이상 유형이 필요합니다. — 저장불가'};
-  if(s>q)           return {ok:false,cls:'bad', msg:'인원 '+fmt(q)+'명보다 '+fmt(s-q)+'명 초과입니다. — 저장불가'};
-  if(s<q)           return {ok:false,cls:'bad', msg:'인원 '+fmt(q)+'명보다 '+fmt(q-s)+'명 부족입니다. — 저장불가'};
+/* 판정 — 표 칩·드로어·저장이 같은 함수를 쓴다(사본 금지) */
+function state(u){
+  var s=sumMix(u.mix), q=n(u.quota);
+  if(q<=0)               return {ok:false,cls:'warn',msg:'이 선택지의 인원을 먼저 입력해주세요.'};
+  if(s===0)              return {ok:false,cls:'bad', msg:'유형별 인원을 입력해주세요. — 저장불가'};
+  if(usedTypes(u.mix)<2) return {ok:false,cls:'bad', msg:'두 가지 이상 유형이 필요합니다. — 저장불가'};
+  if(s>q)                return {ok:false,cls:'bad', msg:'인원 '+fmt(q)+'명보다 '+fmt(s-q)+'명 초과입니다. — 저장불가'};
+  if(s<q)                return {ok:false,cls:'bad', msg:'인원 '+fmt(q)+'명보다 '+fmt(q-s)+'명 부족입니다. — 저장불가'};
   return {ok:true,cls:'ok',msg:'인원 '+fmt(q)+'명과 딱 맞습니다. — 저장가능'};
 }
-function mixLabel(p){
+function mixLabel(u){
   var parts=[];
-  TYPES.forEach(function(t){ if(n(p.mix[t[0]])>0) parts.push(t[1]+' '+fmt(n(p.mix[t[0]]))); });
+  TYPES.forEach(function(t){ if(n(u.mix[t[0]])>0) parts.push(t[1]+' '+fmt(n(u.mix[t[0]]))); });
   return parts.length?parts.join(' · '):'미입력';
 }
+/* 유입가이드 상태 — 글이든 사진이든 하나라도 있으면 "설정됨" */
+function guideSet(u){ return !!(String(u.guide.text||'').trim() || u.guide.photos.length); }
+function guideLabel(u){
+  if(!guideSet(u)) return '공통 사용';
+  var n0=u.guide.photos.length;
+  return '설정됨'+(n0?' · 사진 '+n0+'장':'');
+}
 
-/* ─────────── 자동 배분 ─────────── */
-function spread(total, weights){                 /* 최대잔여법 — 합계가 정확히 total */
+/* ══════════ 자동 배분 ══════════ */
+function spread(total, weights){                    /* 최대잔여법 — 합계가 정확히 total */
   var w=weights.reduce(function(a,b){return a+b;},0)||1;
   var raw=weights.map(function(x){ return total*x/w; });
   var base=raw.map(Math.floor);
@@ -349,179 +292,196 @@ function spread(total, weights){                 /* 최대잔여법 — 합계�
   for(var i=0;i<rest && idx.length;i++) base[idx[i%idx.length][1]]++;
   return base;
 }
-function fixRow(p){                              /* 그 상품 합계를 인원에 정확히 맞춘다(끝수는 가장 큰 유형에서) */
+function fixRow(u){                                 /* 그 선택지 합을 인원에 정확히 맞춘다 */
   var guard=0;
-  while(sumMix(p.mix)!==n(p.quota) && guard++<400){
-    var d=n(p.quota)-sumMix(p.mix);
-    var keys=TYPES.map(function(t){return t[0];}).sort(function(a,b){ return n(p.mix[b])-n(p.mix[a]); });
-    var k=d>0?keys[0]:keys.filter(function(x){return n(p.mix[x])>0;})[0];
+  while(sumMix(u.mix)!==n(u.quota) && guard++<500){
+    var d=n(u.quota)-sumMix(u.mix);
+    var keys=TYPES.map(function(t){return t[0];}).sort(function(a,b){ return n(u.mix[b])-n(u.mix[a]); });
+    var k=d>0?keys[0]:keys.filter(function(x){return n(u.mix[x])>0;})[0];
     if(!k) break;
-    p.mix[k]=n(p.mix[k])+(d>0?1:-1);
+    u.mix[k]=n(u.mix[k])+(d>0?1:-1);
   }
 }
 function autoAll(){
-  var qs=S.products.map(function(p){ return n(p.quota); });
-  S.products.forEach(function(p){ TYPES.forEach(function(t){ p.mix[t[0]]=0; }); });
+  var us=allUnits(), qs=us.map(function(x){ return n(x.u.quota); });
+  us.forEach(function(x){ x.u.mix=z(); });
   TYPES.forEach(function(t){
     var tot=n(S.order[t[0]]); if(!tot) return;
     var got=spread(tot, qs);
-    S.products.forEach(function(p,i){ p.mix[t[0]]=got[i]; });
+    us.forEach(function(x,i){ x.u.mix[t[0]]=got[i]; });
   });
-  S.products.forEach(fixRow);
+  us.forEach(function(x){ fixRow(x.u); });
   render();
 }
-function autoOne(i){
-  var p=S.products[i];
-  var w=TYPES.map(function(t){ return n(S.order[t[0]]); });
-  var got=spread(n(p.quota), w);
-  TYPES.forEach(function(t,k){ p.mix[t[0]]=got[k]; });
-  fixRow(p);
+function autoOne(pi,ui){
+  var u=S.products[pi].units[ui];
+  var got=spread(n(u.quota), TYPES.map(function(t){ return n(S.order[t[0]]); }));
+  TYPES.forEach(function(t,k){ u.mix[t[0]]=got[k]; });
+  fixRow(u);
   render();
 }
-function resetAll(){
-  S.products.forEach(function(p){ TYPES.forEach(function(t){ p.mix[t[0]]=0; }); });
-  render();
-}
-function setVal(i,key,v){ S.products[i].mix[key]=n(v); render(); }
-function setQuota(i,v){ S.products[i].quota=n(v); render(); }
+function resetAll(){ allUnits().forEach(function(x){ x.u.mix=z(); }); render(); }
 
-/* 저장 시도 — 서버가 실제로 돌려주는 문구 그대로 */
+/* ══════════ 입력 ══════════ */
+function setMix(pi,ui,key,v){ S.products[pi].units[ui].mix[key]=n(v); render(); }
+function setQuota(pi,ui,v){ S.products[pi].units[ui].quota=n(v); render(); }
+/* 타이핑 중에는 표의 칩과 **그 드로어의** 상태줄만 갱신한다.
+   ★ 입력칸이 든 영역을 다시 그리면 한글 조합이 깨진다(ㅁ며면면 계열).
+   ★ 상태줄은 반드시 **자기 드로어 안**에서 찾는다 — 드로어를 둘 열어 두면
+     document.querySelector 는 첫 번째 것을 집어 남의 줄을 바꾼다(실측). */
+function setGuideText(pi,ui,el){
+  S.products[pi].units[ui].guide.text=el.value;
+  var box=el.closest('.dbox'), st=box && box.querySelector('.ugst');
+  if(st) paintUgStatus(st, S.products[pi].units[ui]);
+  renderRowChips();
+}
+function paintUgStatus(st,u){
+  var set=guideSet(u);
+  st.className='ugst '+(set?'set':'none');
+  st.textContent=set?'이 선택지 전용 안내가 설정되어 있습니다 — 리뷰어에게 이 내용이 나갑니다.'
+                    :'비어 있습니다 — 공고 공통 유입가이드가 그대로 나갑니다.';
+}
+function addPhoto(pi,ui){
+  var u=S.products[pi].units[ui];
+  if(u.guide.photos.length>=4){ alert('사진은 선택지마다 4장까지입니다.'); return; }
+  u.guide.photos.push(ph('사진 '+(u.guide.photos.length+1)));
+  render();
+}
+function rmPhoto(pi,ui,i){ S.products[pi].units[ui].guide.photos.splice(i,1); render(); }
+function toggle(pi,ui,which){
+  var u=S.products[pi].units[ui];
+  if(which && !u.open){ u.open=true; u.hl=which; }
+  else if(which && u.open && u.hl!==which){ u.hl=which; }
+  else { u.open=!u.open; u.hl=u.open?(which||''):''; }
+  render();
+}
+
+/* ══════════ 저장 ══════════ */
 function trySave(){
-  for(var i=0;i<S.products.length;i++){
-    var p=S.products[i], st=state(p), s=sumMix(p.mix);
+  var us=allUnits();
+  for(var i=0;i<us.length;i++){
+    var p=us[i].p, u=us[i].u, st=state(u);
     if(st.ok) continue;
-    if(usedTypes(p.mix)<2) return alert('저장하지 못했습니다 — 옵션 "'+p.name+'": 혼합 리뷰는 두 가지 이상 유형의 수량을 입력해주세요.');
-    return alert('저장하지 못했습니다 — 옵션 "'+p.name+'": 리뷰 조합 합계('+fmt(s)+'명)를 총인원('+fmt(n(p.quota))+'명)과 일치시켜주세요.');
+    var key=optKey(p,u), s=sumMix(u.mix);
+    if(n(u.quota)<=0) return alert('저장하지 못했습니다 — 옵션 "'+key+'": 인원을 먼저 입력해주세요.');
+    if(usedTypes(u.mix)<2) return alert('저장하지 못했습니다 — 옵션 "'+key+'": 혼합 리뷰는 두 가지 이상 유형의 수량을 입력해주세요.');
+    return alert('저장하지 못했습니다 — 옵션 "'+key+'": 리뷰 조합 합계('+fmt(s)+'명)를 총인원('+fmt(n(u.quota))+'명)과 일치시켜주세요.');
   }
-  alert('저장했습니다 — 상품 '+S.products.length+'건의 리뷰 조합이 공고에 반영됩니다.');
+  var g=us.filter(function(x){ return guideSet(x.u); }).length;
+  alert('저장했습니다 — 선택지 '+us.length+'건의 리뷰 조합과 유입가이드 '+g+'건이 공고에 반영됩니다.\n'
+        +'가이드를 비워 둔 '+(us.length-g)+'건은 공고 공통 안내가 나갑니다.');
 }
 
-/* ─────────── 렌더 ─────────── */
-function esc(s){ return String(s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function gridHtml(i,p,size){
+/* ══════════ 렌더 ══════════ */
+function mixGridHtml(pi,ui,u){
   var h='<div class="mixgrid">';
   TYPES.forEach(function(t){
-    h+='<label><span>'+t[1]+'</span><input type="number" min="0" inputmode="numeric" value="'+n(p.mix[t[0]])+'"'
-      +' oninput="setVal('+i+',\''+t[0]+'\',this.value)" onfocus="if(this.value===\'0\')this.value=\'\'"></label>';
+    h+='<label><span>'+t[1]+'</span><input type="number" min="0" inputmode="numeric" value="'+n(u.mix[t[0]])+'"'
+      +' oninput="setMix('+pi+','+ui+',\''+t[0]+'\',this.value)" onfocus="if(this.value===\'0\')this.value=\'\'"></label>';
   });
   return h+'</div>';
 }
-function typeTotals(){
-  var out={};
-  TYPES.forEach(function(t){
-    var s=0; S.products.forEach(function(p){ s+=n(p.mix[t[0]]); });
-    out[t[0]]=s;
+function guideHtml(pi,ui,u){
+  var sh='';
+  u.guide.photos.forEach(function(p,i){
+    sh+='<div class="shot">'+esc(p.name)+'<button class="rm" title="빼기" onclick="rmPhoto('+pi+','+ui+','+i+')">✕</button></div>';
   });
-  return out;
+  if(u.guide.photos.length<4) sh+='<button class="ugadd" onclick="addPhoto('+pi+','+ui+')">＋<br>사진</button>';
+  var set=guideSet(u);
+  return '<div class="ug">'
+    +'<div class="ugstrip">'+sh+'</div>'
+    +'<textarea placeholder="유입 경로, 검색어, 진입 순서를 적어주세요&#10;이곳을 선택한 뒤 이미지를 붙여넣어도 됩니다."'
+    +' oninput="setGuideText('+pi+','+ui+',this)">'+esc(u.guide.text)+'</textarea>'
+    +'</div>'
+    +'<div class="ugst"></div>';
 }
-
-function renderA(){
-  var box=document.getElementById('A_composer'); if(!box) return;
-  var h='';
-  S.products.forEach(function(p,i){
-    var st=state(p);
-    h+='<div class="mcard">'
-      +'<div class="mhead"><strong title="'+esc(p.name)+'">'+esc(p.name)+'</strong>'
-      +'<span class="q">인원 '+fmt(n(p.quota))+'명</span></div>'
-      +gridHtml(i,p)
-      +'<div class="mstat '+(st.ok?'ok':'bad')+'">합계 '+fmt(sumMix(p.mix))+'명 · '+st.msg+'</div>'
-      +'</div>';
+function render(){
+  var box=document.getElementById('rows'), h='';
+  S.products.forEach(function(p,pi){
+    if(p.hasOpt){
+      var q=p.units.reduce(function(a,u){ return a+n(u.quota); },0);
+      h+='<div class="grow"><div class="gn"><span class="nm" title="'+esc(p.name)+'">'+esc(p.name)+'</span>'
+        +'<span class="obadge">옵션 '+p.units.length+'개</span></div>'
+        +'<div class="gq">'+fmt(p.pay)+'원 · 합계 '+fmt(q)+'명 — 조합·가이드는 옵션 줄에서 정합니다</div></div>';
+    }
+    p.units.forEach(function(u,ui){
+      var st=state(u), gs=guideSet(u);
+      h+='<div class="trow'+(p.hasOpt?' sub':'')+'">'
+        +'<div class="nm" title="'+esc(unitName(p,u))+'">'+esc(unitName(p,u))+'</div>'
+        +'<div class="r">'+fmt(p.pay)+'</div>'
+        +'<div><input class="cell" type="number" min="0" value="'+n(u.quota)+'" oninput="setQuota('+pi+','+ui+',this.value)"></div>'
+        +'<div class="r">'+p.daily+'</div>'
+        +'<div><button class="chipbtn '+(st.ok?'okb':'ng')+'" onclick="toggle('+pi+','+ui+',\'mix\')">'
+          +(st.ok?'✓ ':'⚠ ')+esc(mixLabel(u))+'</button></div>'
+        +'<div><button class="chipbtn '+(gs?'gset':'gnone')+'" onclick="toggle('+pi+','+ui+',\'ug\')">'
+          +(gs?'🔗 ':'· ')+esc(guideLabel(u))+'</button></div>'
+        +'<div><button class="caret" onclick="toggle('+pi+','+ui+',\'\')">'+(u.open?'▲':'▼')+'</button></div>'
+        +'</div>';
+      if(u.open){
+        h+='<div class="drawer"><div class="dgrid">'
+          +'<div class="dbox'+(u.hl==='mix'?' hl':'')+'">'
+            +'<div class="dh"><h4>리뷰 조합</h4>'
+            +'<div style="display:flex;gap:8px;align-items:center">'
+            +'<span class="base">기준 · 인원 '+fmt(n(u.quota))+'명</span>'
+            +'<button class="btn" onclick="autoOne('+pi+','+ui+')">자동 배분</button></div></div>'
+            +mixGridHtml(pi,ui,u)
+            +'<div class="bal '+st.cls+'"><span>합계 <span class="n">'+fmt(sumMix(u.mix))+'</span>명</span><span>'+st.msg+'</span></div>'
+          +'</div>'
+          +'<div class="dbox'+(u.hl==='ug'?' hl':'')+'">'
+            +'<div class="dh"><h4>유입가이드</h4><span class="base">이 선택지 전용 · 사진 4장까지</span></div>'
+            +guideHtml(pi,ui,u)
+          +'</div>'
+        +'</div></div>';
+      }
+    });
   });
   box.innerHTML=h;
-}
-
-function renderB(){
-  var cards=document.getElementById('B_cards'); if(!cards) return;
-  var h='';
-  S.products.forEach(function(p,i){
-    var st=state(p);
-    h+='<div class="pcard '+(st.ok?'okc':'ng')+'">'
-      +'<div class="phead"><div class="pname" title="'+esc(p.name)+'">'+esc(p.name)+'</div>'
-      +'<div class="pmeta"><span>'+fmt(p.pay)+'원</span><span>인원 <b>'+fmt(n(p.quota))+'</b>명</span>'
-      +'<button class="btn" onclick="autoOne('+i+')">자동 배분</button></div></div>'
-      +gridHtml(i,p)
-      +'<div class="bal '+st.cls+' pbal"><span>합계 <span class="n">'+fmt(sumMix(p.mix))+'</span>명</span><span>'+st.msg+'</span></div>'
-      +'</div>';
+  /* 상태줄은 그리는 곳이 한 곳(paintUgStatus)이라 타이핑 중 갱신과 문구가 갈릴 수 없다 */
+  Array.prototype.forEach.call(box.querySelectorAll('.drawer'), function(dr,i){
+    var open=allUnits().filter(function(y){ return y.u.open; })[i];
+    var st=dr.querySelector('.ugst');
+    if(open && st) paintUgStatus(st, open.u);
   });
-  cards.innerHTML=h;
-
-  var tt=typeTotals(), chips='';
+  renderFoot();
+}
+/* 타이핑 중에는 표의 칩만 갈아끼운다(입력칸 DOM 을 다시 만들면 한글 조합이 깨진다) */
+function renderRowChips(){
+  var i=0;
+  Array.prototype.forEach.call(document.querySelectorAll('#rows .trow'), function(row){
+    var x=allUnits()[i++]; if(!x) return;
+    var b=row.querySelectorAll('.chipbtn')[1]; if(!b) return;
+    var gs=guideSet(x.u);
+    b.className='chipbtn '+(gs?'gset':'gnone');
+    b.textContent=(gs?'🔗 ':'· ')+guideLabel(x.u);
+  });
+  renderFoot();
+}
+function renderFoot(){
+  var us=allUnits();
+  var tt={}; TYPES.forEach(function(t){ tt[t[0]]=0; });
+  us.forEach(function(x){ TYPES.forEach(function(t){ tt[t[0]]+=n(x.u.mix[t[0]]); }); });
+  var chips='';
+  var qsum=us.reduce(function(a,x){ return a+n(x.u.quota); },0);
+  chips+='<span class="chip" style="font-weight:900">선택지 '+us.length+'개 · 인원 합 '+fmt(qsum)+'명 / 총건수 '+fmt(S.total)+'명</span>';
+  var drift=false;
   TYPES.forEach(function(t){
-    var got=tt[t[0]], want=n(S.order[t[0]]);
-    var diff=got-want;
-    chips+='<span class="chip'+(diff!==0?' d':'')+'">'+t[1]+' '+fmt(got)
-      +(diff!==0?' <b>('+(diff>0?'+':'')+fmt(diff)+')</b>':'')+'</span>';
+    var got=tt[t[0]], want=n(S.order[t[0]]), d=got-want;
+    if(d!==0) drift=true;
+    chips+='<span class="chip'+(d!==0?' d':'')+'">'+t[1]+' '+fmt(got)+(d!==0?' <b>('+(d>0?'+':'')+fmt(d)+')</b>':'')+'</span>';
   });
-  var allOk=S.products.every(function(p){ return state(p).ok; });
-  var qsum=S.products.reduce(function(a,p){ return a+n(p.quota); },0);
-  document.getElementById('B_tot').innerHTML=
-    '<span class="chip" style="font-weight:900">상품 인원 합 '+fmt(qsum)+'명 / 총건수 '+fmt(S.total)+'명</span>'+chips
-    +(Object.keys(tt).some(function(k){ return tt[k]!==n(S.order[k]); })
-      ? '<span class="chip d">작업오더 조합과 다른 유형이 있습니다</span>' : '');
-  var ok=document.getElementById('B_ok'); if(ok) ok.disabled=!allOk;
+  if(drift) chips+='<span class="chip d">작업오더 조합과 다른 유형이 있습니다</span>';
+  var g=us.filter(function(x){ return guideSet(x.u); }).length;
+  chips+='<span class="chip">전용 유입가이드 '+g+' / '+us.length+'개 · 나머지는 공통 사용</span>';
+  document.getElementById('chips').innerHTML=chips;
 
-  var sum=document.getElementById('B_sum');
-  if(sum){
-    var bad=S.products.filter(function(p){ return !state(p).ok; }).length;
-    sum.innerHTML = bad
-      ? '상품 '+S.products.length+'건 중 <em>'+bad+'건</em>이 아직 맞지 않습니다 — 눌러서 상품별로 입력하세요.'
-      : '상품 '+S.products.length+'건 모두 <i>입력 완료</i> — '+S.products.map(function(p){ return esc(p.name.slice(0,8))+' '+fmt(n(p.quota)); }).join(' · ');
-  }
+  var bad=us.filter(function(x){ return !state(x.u).ok; }).length;
+  var bar=document.getElementById('allbal');
+  bar.className='bal '+(bad?'bad':'ok');
+  bar.innerHTML='<span>'+(bad? '선택지 '+bad+'개의 조합이 인원과 맞지 않습니다. — 저장불가'
+                              : '선택지 '+us.length+'개 모두 인원과 맞습니다. — 저장가능')+'</span>'
+               +'<span class="n">'+fmt(qsum)+'명</span>';
 }
-
-function renderC(){
-  var rows=document.getElementById('C_rows'); if(!rows) return;
-  var h='';
-  S.products.forEach(function(p,i){
-    var st=state(p);
-    h+='<div class="trow">'
-      +'<div class="nm" title="'+esc(p.name)+'">'+esc(p.name)+'</div>'
-      +'<div style="text-align:right">'+fmt(p.pay)+'</div>'
-      +'<div><input class="cell" type="number" min="0" value="'+n(p.quota)+'" oninput="setQuota('+i+',this.value)"></div>'
-      +'<div style="text-align:right">'+p.daily+'</div>'
-      +'<div><button class="mixbtn '+(st.ok?'okb':'ng')+'" onclick="toggleC('+i+')">'
-        +(st.ok?'✓ ':'⚠ ')+esc(mixLabel(p))+'</button></div>'
-      +'<div><button class="caret" onclick="toggleC('+i+')">'+(p.open?'▲':'▼')+'</button></div>'
-      +'</div>';
-    if(p.open){
-      h+='<div class="drawer">'
-        +'<div class="dh"><span>'+esc(p.name)+' — 인원 '+fmt(n(p.quota))+'명에 맞춰 나눠주세요</span>'
-        +'<button class="btn" onclick="autoOne('+i+')">자동 배분</button></div>'
-        +gridHtml(i,p)
-        +'<div class="bal '+st.cls+'" style="margin-top:8px"><span>합계 <span class="n">'+fmt(sumMix(p.mix))+'</span>명</span><span>'+st.msg+'</span></div>'
-        +'</div>';
-    }
-  });
-  rows.innerHTML=h;
-
-  var allOk=S.products.every(function(p){ return state(p).ok; });
-  var bad=S.products.filter(function(p){ return !state(p).ok; }).length;
-  document.getElementById('C_tot').innerHTML=
-    '<div class="bal '+(allOk?'ok':'bad')+'" style="height:auto;padding:9px 12px">'
-    +'<span>'+(allOk?'상품 '+S.products.length+'건 모두 인원과 맞습니다. — 저장가능'
-                    :'상품 '+bad+'건의 조합이 인원과 맞지 않습니다. — 저장불가')+'</span>'
-    +'<button class="btn" onclick="autoAll()">전체 자동 배분</button></div>';
-}
-function toggleC(i){ S.products[i].open=!S.products[i].open; render(); }
-function openB(){ pick('B'); window.scrollTo({top:document.getElementById('secB').offsetTop, behavior:'smooth'}); }
-
-function render(){ renderA(); renderB(); renderC(); }
-
-/* ─────────── 안 전환 ─────────── */
-function pick(v){
-  ['A','B','C'].forEach(function(k){
-    document.getElementById('sec'+k).classList.toggle('on', k===v);
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('#optbar button'), function(b){
-    b.classList.toggle('on', b.dataset.v===v);
-  });
-}
-(function(){
-  var m=/[?&]v=([ABC])/i.exec(location.search);
-  render();
-  if(m){ pick(m[1].toUpperCase()); document.getElementById('optbar').style.display='none'; }
-  else  { pick('B'); }
-})();
+render();
 </script>
 </body>
 </html>
