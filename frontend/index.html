@@ -2917,10 +2917,26 @@ async function loadReviewerNoticesHome() {
 }
 
 /* ═══ 모집공고 미리보기 (홈 인라인) ═══ */
+let _repurchaseStatus = {};
+let _repurchaseStatusKey = '';
 async function loadRecruitPreview() {
   try {
     const res = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
+    // 공고 목록은 공용 캐시라 개인 상태를 싣지 않는다. 소유자 번호 하나만 보내면
+    // 서버가 등록 타계정까지 확장해 계정별 상태를 반환한다.
+    const user = getSavedUser();
+    const ids = (json.data || []).filter(c => c.participation_mode && c.status !== 'closed').map(c => c.id);
+    const p8 = user && String(user.phone8 || '').replace(/\D/g, '').slice(-8);
+    const statusKey = p8 + '|' + ids.slice().sort().join(',');
+    if (p8 && p8.length === 8 && ids.length && statusKey !== _repurchaseStatusKey) {
+      _repurchaseStatusKey = statusKey;
+      try {
+        const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?phone8=' + encodeURIComponent(p8) + '&ids=' + encodeURIComponent(ids.join(',')));
+        const sj = await sr.json();
+        _repurchaseStatus = (sj && sj.ok && sj.status) ? sj.status : {};
+      } catch (_) { _repurchaseStatus = {}; }
+    }
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈(campaign-cards.js)로 렌더 —
     //   카드 탭 시 전용 상세(campaign.html)로 이동해 참여·작업내용·인라인 제출 진행.
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
@@ -2928,6 +2944,7 @@ async function loadRecruitPreview() {
     const parts = window.CampCards
       ? CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed"))
       : (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+    parts.forEach(c => { if (_repurchaseStatus[c.id]) c.repurchase = _repurchaseStatus[c.id]; });
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
       : "";

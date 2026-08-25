@@ -239,10 +239,18 @@ async function confirmExternalApplication(client, {
  * @returns {{ok:boolean, orderSubmissionId?:string, sheetRow?:number, warnings:string[], error?:string, ...}}
  */
 async function submitExternalOrder({
-  sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
+  sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false, allowRepurchase = false,
 }) {
   const warnings = [];
   const f = fields || {};
+  if (!allowRepurchase) {
+    try {
+      const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
+      const rw = await checkRepurchaseWindow(pool, { sheetId, tabName, phone: f.phone });
+      if (rw.blocked) return { ok: false, repurchaseBlocked: true, days: rw.days, availableFrom: rw.availableFrom,
+        error: `이 참여계정은 최근 ${rw.days}일 안에 같은 작업에 참여한 이력이 있습니다.` };
+    } catch (e) { warnings.push('재참여 기간 확인 실패(제출은 계속): ' + e.message); }
+  } else warnings.push('재참여 기간 제한을 관리자 확인으로 넘겨 접수했습니다');
   const phoneDigits = digits(f.phone);
   const p8 = phoneDigits.slice(-8);
   if (phoneDigits.length < 10) {

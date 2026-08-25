@@ -111,6 +111,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           targetApplicationId: it.targetApplicationId || null,
           adminName,
           force: b.force === true,   // 중복 경고를 확인한 뒤 재시도할 때만
+          allowRepurchase: b.allowRepurchase === true, // 재참여 기간 예외는 관리자 확인 때만
         });
         results.push({ index: i, name: f.recipient || '', ...r });
       } catch (e) {

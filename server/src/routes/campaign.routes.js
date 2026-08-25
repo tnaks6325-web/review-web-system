@@ -913,6 +913,26 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
   }
 });
 
+router.get('/my-repurchase-status', applyLimiter, async (req, res, next) => {
+  try {
+    const ownerP8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
+    if (ownerP8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
+    const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
+    if (!ids.length) return res.json({ ok: true, status: {} });
+    const { rows } = await pool.query('SELECT name, sub_accounts FROM reviewers WHERE phone8 = $1 LIMIT 1', [ownerP8]);
+    let subs = rows[0] && rows[0].sub_accounts || [];
+    if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
+    if (!Array.isArray(subs)) subs = [];
+    const accounts = [{ phone8: ownerP8, type: 'self', displayName: String(rows[0] && rows[0].name || '본계정') }];
+    for (const sub of subs) { const p8 = String(sub && sub.phone || '').replace(/\D/g, '').slice(-8); if (p8.length === 8 && p8 !== ownerP8 && !accounts.some(a => a.phone8 === p8)) accounts.push({ phone8:p8, type:'sub', displayName:String(sub && sub.name || '타계정') }); }
+    const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
+    const byAccount = await checkRepurchaseStatusForAccounts(pool, { campaignIds: ids, phone8List: accounts.map(a => a.phone8) });
+    const status = {};
+    for (const id of ids) { const a = accounts.map(x => ({ ...x, ...(byAccount.get(x.phone8)?.get(id) || { status:'ready' }) })); if (a.some(x => byAccount.get(x.phone8)?.has(id))) status[id] = { accounts:a, readyAccounts:a.filter(x => x.status === 'ready').map(x => x.phone8) }; }
+    res.json({ ok: true, status });
+  } catch (err) { next(err); }
+});
+
 // GET /api/campaign/:id — 캠페인 상세
 //   ★ M1 보안: SELECT * 무인증 반환 제거. admin/master JWT면 전체(관리자 수정 모달 호환),
 //     그 외에는 공개 화이트리스트(레거시/참여형 분기)만.
@@ -1420,6 +1440,19 @@ async function _applyParticipation(req, res, next, campPre) {
             : '같은 번호로 등록된 다른 명의가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.' });
       }
       return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 구매양식 제출까지 완료한 캠페인이에요.' });
+    }
+
+    // 실제 선택 명의(본계정 또는 타계정)의 번호로 최종 차단한다.
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      try {
+        const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
+        const rw = await checkRepurchaseWindow(client, { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, phone8: holdP8 });
+        if (rw.blocked) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ ok:false, reason:'repurchase_window', days:rw.days, availableFrom:rw.availableFrom,
+            error:`이 참여계정은 최근 ${rw.days}일 안에 이미 참여한 이력이 있어요. 재참여 가능일 이후 다시 참여해 주세요.` });
+        }
+      } catch (e) { logger.warn('[campaign/apply] 재참여 기간 판정 실패(fail-open): ' + e.message); }
     }
 
     // 만료 스윕은 정리 작업이지만, 부분 유니크 인덱스는 `status='applied'` 행을 즉시
