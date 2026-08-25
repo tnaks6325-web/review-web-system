@@ -8,6 +8,7 @@
      admin.html 과 **같은 CDN·같은 버전**을 쓰므로 두 화면의 아이콘이 어긋나지 않는다.
      못 불러와도 글자만 빠질 뿐 동작은 그대로(모듈은 아이콘에 기능을 걸지 않는다). -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="css/payment-c-style.css"/>
 <style>
   /* ═══ Clarity Console 공용 UI 키트 토큰 — 단일 블루 액센트 + 쿨그레이 뉴트럴, tabular-nums ═══ */
@@ -655,10 +656,13 @@
   table.sheetgrid td.gstatuslock .glockmark{margin-left:4px;color:var(--faint);font-size:10px}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
   td.gidlock{cursor:default}   /* 참여자·연락처 = 실제 제출 신원(수정 불가) */
-  .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;max-width:1380px;flex-wrap:wrap}
   .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
   .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
   .gridbar .gselstat{margin-left:auto}
+  /* 작업보드 상단 3분할의 오른쪽 끝(제출물 미리보기)과 맞춘다. 표는 계속 전체 폭을 쓴다. */
+  .gridbar .grid-export{order:100;margin-left:auto}
+  @media(max-width:760px){.gridbar .grid-export{margin-left:0}}
 
   /* ══ 오늘 참여현황(툴바 맨 앞 = 표 왼쪽 위) — 시안 C+B 믹스 · docs/design-grid-today-progress.html ══
      `◔ 8/10 (월) 참여현황 12/20명` — 오늘 채워야 할 인원 대비 지금까지 구매(제출 확정)한 인원.
@@ -7327,6 +7331,29 @@ function gCellDisp(r,h){
   const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
   return ed?(raw==null?'':String(raw)):_gridVal(h, raw);
 }
+/* 작업보드 XLSX 내려받기 — 화면에 보이는 열과 현재 필터·정렬 순서를 그대로 내보낸다.
+   수식으로 해석될 수 있는 앞글자는 텍스트로 고정해, 외부 시트 값의 수식 실행을 막는다. */
+function _workdeskXlsxValue(value){
+  const text=String(value==null?'':value);
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+function downloadWorkdeskXlsx(){
+  if(typeof XLSX==='undefined'){ toast('엑셀 저장 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'); return; }
+  const cols=STATE.gVCols||[], rows=STATE.gRows||[];
+  if(!cols.length){ toast('내려받을 작업보드가 없습니다.'); return; }
+  const data=[cols.map(c=>_workdeskXlsxValue(_colLabel(c.key)))];
+  rows.forEach(row=>data.push(cols.map(c=>_workdeskXlsxValue(gCellDisp(row,c.key)))));
+  const sheet=XLSX.utils.aoa_to_sheet(data);
+  sheet['!cols']=cols.map(c=>({wch:Math.min(40,Math.max(10,String(_colLabel(c.key)).length+4,
+    ...rows.map(r=>String(gCellDisp(r,c.key)||'').length+2)))}));
+  if(data.length>1) sheet['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:cols.length-1}})};
+  const book=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book,sheet,'작업보드');
+  const rawName=(STATE.cur&&STATE.cur.tabName)||'작업보드';
+  const safeName=String(rawName).replace(/[\\/:*?"<>|]/g,'_').slice(0,80)||'작업보드';
+  // 한국 운영 화면이므로 날짜가 UTC 자정에 전날로 밀리지 않게 KST를 쓴다(KST는 DST 없음).
+  const today=new Date(Date.now()+9*60*60*1000).toISOString().slice(0,10).replace(/-/g,'');
+  XLSX.writeFile(book,`${safeName}_작업보드_${today}.xlsx`);
+}
 // ── 청크 렌더: 첫 화면만 즉시 그리고 나머지 행은 프레임마다 append(대형 표 렌더 프리즈 방지) ──
 // Payment history is stored in one cell, but filtering must expose each date.
 function gFilterValues(r,col){
@@ -7616,6 +7643,7 @@ function buildGrid(wd){
         <span class="cnt" id="gsCnt"></span>
         <span class="nav2"><button class="nb2" id="gsPrev" title="이전 결과 (Shift+Enter)" onclick="_gsStep(-1)">▲</button><button class="nb2" id="gsNext" title="다음 결과 (Enter)" onclick="_gsStep(1)">▼</button></span>
       </div>
+      <button class="btn xs grid-export" type="button" title="현재 보이는 열과 필터·정렬된 행을 XLSX로 저장합니다" onclick="downloadWorkdeskXlsx()"><i class="fas fa-download"></i> 내려받기</button>
       <span class="gsmsg" id="gsMsg"></span>
       ${nSel?`<span class="gselact"><b>${nSel}개 열 선택</b><button class="btn xs pri" onclick="hideSelectedCols()">숨기기</button><button class="btn xs" onclick="clearColSel()">취소</button></span>`:''}
       <label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
