@@ -234,6 +234,29 @@ async function run() {
     assert.strictEqual(updates.length, 0);
   });
 
+  // ★★ 아래 둘은 **위 게이트에서 이미 걸러져 도달하지 않는 2차 방어선**이다(변이시험 실측 —
+  //   핸들러를 아무리 돌려도 이 줄을 지운 변이가 잡히지 않는다). 그렇다고 지우면 위 게이트가
+  //   한 번 헐거워지는 순간 그대로 시트·정원 칸이 쓰기에 실린다. 존재 자체를 고정한다.
+  await t('⑦ 저장 직전에도 허용목록을 한 번 더 본다(2차 방어선 — 지우지 말 것)', async () => {
+    // ⚠ 끝 표시는 **시작점 뒤에서** 찾는다 — 파일 앞쪽에 같은 문구가 있어 그냥 찾으면
+    //   잘라낸 조각이 빈 문자열이 되고 검사가 조용히 무의미해진다(개발 중 실제로 밟았다).
+    const from = SRC.indexOf('if (partialEdit) {');
+    const block = SRC.slice(from, SRC.indexOf('RETURNING *', from));
+    assert.ok(block.length > 200, '검사할 조각을 못 잘랐다');
+    assert.ok(/\.filter\(column =>[^\n]*SOURCE_EDIT_AFTER_ACCEPT\.includes\(column\)/.test(block),
+      '쓰기 칸 목록을 만들 때 허용목록 검사가 사라졌다');
+  });
+
+  await t('⑦ 칸 이름은 형식 검사를 통과한 것만 SQL 에 넣는다(주입 차단 — 지우지 말 것)', async () => {
+    // ⚠ 끝 표시는 **시작점 뒤에서** 찾는다 — 파일 앞쪽에 같은 문구가 있어 그냥 찾으면
+    //   잘라낸 조각이 빈 문자열이 되고 검사가 조용히 무의미해진다(개발 중 실제로 밟았다).
+    const from = SRC.indexOf('if (partialEdit) {');
+    const block = SRC.slice(from, SRC.indexOf('RETURNING *', from));
+    assert.ok(block.length > 200, '검사할 조각을 못 잘랐다');
+    assert.ok(/\/\^\[a-z_\]\+\$\/\.test\(column\)/.test(block),
+      '칸 이름 형식 검사가 사라졌다 — 칸 이름은 문자열로 조립되므로 주입 경로가 열린다');
+  });
+
   console.log(`\nreviewOrderContentEditAfterAccept: ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 }
