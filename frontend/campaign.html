@@ -915,6 +915,7 @@ let _subs = null;          // 소유자의 타계정 목록(profile get 캐시)
 let _acctSel = null;       // 시트에서 고른 명의 { type:'self'|'sub', name, phone8, phone }
 let _acctOptKey = null;    // 옵션 공고에서 명의 선택 후 이어질 옵션키
 const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
+let _repurchaseAccounts = {};
 
 function multiEnabled(){ return !!(_camp && _camp.multi_account_mode === true); }
 
@@ -931,6 +932,7 @@ async function loadSubs(force){
     let list = (j && j.profile && j.profile.subAccounts) || [];
     if(typeof list === 'string'){ try{ list = JSON.parse(list); }catch(_){ list = []; } }
     _subs = Array.isArray(list) ? list.filter(x => x && x.name && x.phone) : [];
+    try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?phone8=' + encodeURIComponent(s.phone8) + '&ids=' + encodeURIComponent(CAMP_ID)); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
   }catch(_){ _subs = []; }
   return _subs;
 }
@@ -942,11 +944,11 @@ function _acctRows(){
   const s = getSession(); if(!s) return [];
   const held = _allHolds();
   const rows = [{ type:'self', name: s.name, phone8: s.phone8, phone: s.phone8,
-                  state: held[s.phone8] ? 'joined' : 'ok' }];
+                  state: held[s.phone8] ? 'joined' : ((_repurchaseAccounts[s.phone8] && _repurchaseAccounts[s.phone8].status === 'locked') ? 'repurchase' : 'ok'), repurchase:_repurchaseAccounts[s.phone8] || null }];
   (_subs || []).forEach((x, i) => {
     const p8 = _p8(x.phone);
     rows.push({ type:'sub', idx:i, name:String(x.name||'').trim(), phone8:p8, phone:String(x.phone||''),
-      state: held[p8] ? 'joined' : (p8 === s.phone8 ? 'same_phone' : (p8.length !== 8 ? 'invalid' : 'ok')) });
+      state: held[p8] ? 'joined' : (p8 === s.phone8 ? 'same_phone' : (p8.length !== 8 ? 'invalid' : ((_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'locked') ? 'repurchase' : 'ok'))), repurchase:_repurchaseAccounts[p8] || null });
   });
   // 서버가 거절한 명의는 잠금(자리는 점유되지 않았고, 사유를 그대로 보여준다)
   rows.forEach(r => { if(_acctBlocked[r.phone8] && r.state === 'ok'){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
@@ -967,6 +969,7 @@ function _acctStateText(r){
   return r.state === 'joined' ? '이 공고에 참여중'
     : r.state === 'same_phone' ? '본계정과 같은 번호 — 별도 참여 불가'
     : r.state === 'invalid' ? '전화번호를 확인해주세요'
+    : r.state === 'repurchase' ? ((r.repurchase && r.repurchase.availableFrom ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) : '재참여 가능일') + ' 이후 재참여 가능')
     : r.state === 'nocredit' ? base + '참여권 없음 — 일반 모집 제출완료 후 가능'
     : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }

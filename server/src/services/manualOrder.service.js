@@ -327,6 +327,7 @@ async function submitExternalOrder({
 
   // ⓪-2 참여형이면 **원장 기록 전에** 확정 가능 여부를 본다 — 나중에 거절되면
   //     시트 행만 생기고 정원은 안 깎이는 어긋난 상태가 남는다.
+  let selectedApplication = null;
   if (campaignId) {
     try {
       const { rows: pre } = await pool.query(
@@ -335,7 +336,16 @@ async function submitExternalOrder({
       if (pre.length) {
         return { ok: false, duplicate: true, error: `이 공고에 이미 확정된 참여(#${pre[0].id})가 있습니다` };
       }
-      if (!parseInt(targetApplicationId, 10)) {
+      const selectedId = parseInt(targetApplicationId, 10);
+      if (selectedId) {
+        const { rows: selected } = await pool.query(
+          `SELECT id, status, option_key FROM campaign_applications
+            WHERE id = $1 AND campaign_id = $2 AND phone8 = $3`, [selectedId, campaignId, p8]);
+        if (!selected.length || !['applied', 'expired', 'cancelled'].includes(selected[0].status)) {
+          return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청을 찾을 수 없거나 확정할 수 없는 상태입니다' };
+        }
+        selectedApplication = selected[0];
+      } else {
         const { rows: existing } = await pool.query(
           `SELECT id FROM campaign_applications
             WHERE campaign_id = $1 AND phone8 = $2
@@ -369,6 +379,7 @@ async function submitExternalOrder({
   // ①-0 옵션 확정 — 화면 값 → 살아있는 홀드 → 공고에 옵션이 하나뿐이면 그것.
   //   (셋 다 아니면 배정 행의 기존 값을 되쓴다 — 아래 ② 뒤에서 처리)
   let resolvedOptKey = String(optionKey || '').trim();
+  if (!resolvedOptKey && selectedApplication && selectedApplication.option_key) resolvedOptKey = selectedApplication.option_key;
   if (!resolvedOptKey && campaignId) {
     try {
       const { rows: h } = await pool.query(
