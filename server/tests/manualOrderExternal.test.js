@@ -220,11 +220,21 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
 {
   const c = stubClient([
     [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 0 }]],
-    [/status = 'applied'/i, [{ id: 42 }]],
+    [/status IN \('applied', 'expired', 'cancelled'\)/i, [{ id: 42 }]],
   ]);
   const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '1', orderSubmissionId: 'os-1' });
-  ok('B20 살아있는 신청이 있으면 새로 만들지 않고 그것을 확정', r.ok === true && r.applicationId === 42);
-  ok('B21 그 경우 INSERT 는 실행되지 않는다', !c.log.some(q => /INSERT INTO campaign_applications/.test(q.sql)));
+  ok('B20 기존 신청이 있으면 전화번호만으로 자동 확정하지 않는다',
+    r.ok === false && r.reason === 'application_selection_required');
+  ok('B21 선택 누락 시 INSERT 없이 운영자 선택을 요구한다', !c.log.some(q => /INSERT INTO campaign_applications/.test(q.sql)));
+}
+{
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 0 }]],
+    [/id = \$1 AND campaign_id = \$2 AND phone8 = \$3 FOR UPDATE/i, [{ id: 42, status: 'expired' }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '1', targetApplicationId: 42, orderSubmissionId: 'os-1' });
+  ok('B22 운영자가 선택한 신청만 확정한다(만료 건 포함)', r.ok === true && r.applicationId === 42);
+  ok('B23 선택 확정은 새 신청 INSERT를 만들지 않는다', !c.log.some(q => /INSERT INTO campaign_applications/.test(q.sql)));
 }
 {
   const c = stubClient([
@@ -232,23 +242,23 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
     [/INSERT INTO campaign_applications/i, [{ id: 77 }]],
   ]);
   const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '1' });
-  ok('B22 신청 이력이 없으면 submitted 로 새 행 생성', r.ok === true && r.applicationId === 77);
-  ok('B23 ★ 잠금 계층 — 캠페인 행을 FOR UPDATE 로 먼저 잠근다',
+  ok('B24 신청 이력이 없으면 submitted 로 새 행 생성', r.ok === true && r.applicationId === 77);
+  ok('B25 ★ 잠금 계층 — 캠페인 행을 FOR UPDATE 로 먼저 잠근다',
     /FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(c.log[0].sql));
 }
 
 console.log('\nB3. 서비스 구조(원장 단일 진입점)');
 {
   const src = nc(R('src/services/manualOrder.service.js'));
-  ok('B24 원장은 createOrderLedgerEntry 재사용(행배정 인라인 복제 금지)',
+  ok('B26 원장은 createOrderLedgerEntry 재사용(행배정 인라인 복제 금지)',
     src.includes('createOrderLedgerEntry(') && !src.includes('claimRow('));
-  ok('B25 시트 반영은 기존 큐(order_append) 경유', src.includes("enqueue('order_append'"));
-  ok('B26 큐 등록 성공은 markOrderQueued 로 상태 반영', src.includes('markOrderQueued('));
-  ok('B27 ★ 계좌 덮어쓰기 경로(saveBankInfo/saveAddress)를 쓰지 않는다',
+  ok('B27 시트 반영은 기존 큐(order_append) 경유', src.includes("enqueue('order_append'"));
+  ok('B28 큐 등록 성공은 markOrderQueued 로 상태 반영', src.includes('markOrderQueued('));
+  ok('B29 ★ 계좌 덮어쓰기 경로(saveBankInfo/saveAddress)를 쓰지 않는다',
     !src.includes('saveBankInfo') && !src.includes('saveAddress'));
-  ok('B28 리뷰어 등록은 registerReviewer 단일 경로', src.includes('registerReviewer(')
+  ok('B30 리뷰어 등록은 registerReviewer 단일 경로', src.includes('registerReviewer(')
     && !/INSERT INTO reviewers/i.test(src));
-  ok('B29 홀드 문맥을 넘기지 않는다(이중 확정 방지)', !src.includes('campaignHold:'));
+  ok('B31 홀드 문맥을 넘기지 않는다(이중 확정 방지)', !src.includes('campaignHold:'));
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -299,6 +309,8 @@ console.log('\nD. 프론트 배선');
     mo.includes('onFile') && mo.includes('type="file"'));
   ok('D2c ★ 셀 수정 시 오류 재판정이 양방향 — 지운 칸이 정상으로 남지 않는다',
     /it\.ok = !bad;/.test(mo) && /const missing = REQUIRED\.filter/.test(mo));
+  ok('D2d 참여형 수동제출은 관리자 신청목록에서 후보를 읽고 명시 선택값을 전송한다',
+    mo.includes('/applications') && mo.includes('targetApplicationId') && mo.includes('신청 선택 필수'));
   ok('D3 파싱은 서버 파서에 맡긴다(프론트 사본 금지)',
     mo.includes('/api/manual-order/preview') && !/split\('\/'\)/.test(mo));
   ok('D4 제출은 인증 라우트로만', mo.includes('/api/manual-order/submit'));
