@@ -581,14 +581,25 @@ function _woChannel(o) {
  *    그래서 **첫 상품만** 보던 종전 판정을 전 상품으로 넓힌다 — 하나라도 'opt' 면 표는 옵션 모드로 연다
  *    (상품 단위 줄은 행마다 `unitKind:'product'` 로 구분되므로 표 모드와 충돌하지 않는다).
  *  ★ 전부 'none' 이라고 **명시**했으면 그것도 신호다 — 'none' 을 돌려줘 옵션 칸 없는 표로 연다.
- *  ★ 명시가 하나도 없으면(구버전 오더) 빈 값 = 종전 추론 규칙(동작 불변). */
+ *  ★ 명시가 하나도 없으면(구버전 오더) 빈 값 = 종전 추론 규칙(동작 불변).
+ *
+ *  ★★★ 상품이 둘 이상이면 전부 'none' 이어도 **'opt'** 다 (2026-08-24 실사고 · 사용자 확정)
+ *    137 모델에서 선택 단위는 "리뷰어가 고르는 한 줄"이고 `unit_kind='product'` 인 상품은
+ *    **그 상품 자체가 선택지 하나**다. 상품이 3개면 선택지도 3개이므로 표는 옵션 모드로 열어야 한다.
+ *    'none' 으로 열면 발행 폼이 그 3줄을 옵션 원장에 **한 줄도 저장하지 않아**
+ *    (`readOptRows` 가 `_prodMode() !== "opt"` 에서 조기 return) 상품별 유입가이드가 통째로
+ *    사라지고, 리뷰어에게는 공고 공통 안내만 보인다(실측: 프리필엔 사진 3장이 그대로 실려 오는데
+ *    저장 payload 의 options 가 `[]`).
+ *    ★ 상품 1개 + 옵션 없음은 종전 그대로 'none' — 그건 선택지가 하나뿐인 진짜 단일상품이다.
+ *    ★ 옵션 칸이 화면에 뜨는 것은 표기일 뿐이고, 상품 단위 줄은 옵션명 칸을 비운 채
+ *      `unitKind:'product'` 로 저장된다(`opt_key` = 상품명, 시트 옵션 칸에는 쓰지 않는다). */
 function _woProductMode(o) {
   try {
     const products = JSON.parse(o.product_options_json || "[]");
     if (!Array.isArray(products) || !products.length) return "";
     const modes = products.map(p => String((p && p.product_mode) || ""));
     if (modes.some(m => m === "opt")) return "opt";
-    if (modes.some(m => m === "none")) return "none";
+    if (modes.some(m => m === "none")) return products.length > 1 ? "opt" : "none";
     return "";
   } catch (_) {
     return "";

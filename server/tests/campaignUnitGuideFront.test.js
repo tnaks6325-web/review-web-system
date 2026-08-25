@@ -185,6 +185,8 @@ function makeTable(opts) {
     '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
     '_rfQuotaNotice', '_syncQuotaLockUi',
+    // ★ 작업오더 → 발행 프리필 → 저장까지 한 줄로 잇는 end-to-end 절(N)에서 쓴다
+    'parseProductLinesToRows', 'applyProductRowsFromOrder',
   ].forEach(fn => vm.runInContext(grab(recruitSrc, fn), sandbox));
   return { dom, sandbox, run: (code) => vm.runInContext(code, sandbox) };
 }
@@ -506,6 +508,85 @@ console.log('\n[L] 2차 확대 — 안내줄·패널이 canonical 3칸보다 크
    `makeTable()` 사본에서도 화면 조작부만 스텁한다("이 가드가 보는 것은 선택 단위와
    가이드 값"). 그 메커니즘 자체는 이 파일이 손댄 적 없고(이번 변경은 CSS뿐),
    실제 브라우저(Playwright)로 3장 나열·클릭 확대를 확인했다. */
+
+/* ══════════════ N. 작업오더 → 발행 → 저장 (end-to-end) ══════════════
+   ★★★ 2026-08-24 실사고: "상품 3개 · 전부 옵션 없음" 오더의 **상품별 유입가이드가 통째로
+   사라졌다**. 프리필까지는 사진이 정상으로 실려 왔는데(기존 가드가 거기까지만 봤다) 발행 폼이
+   'none' 모드로 열려 `readOptRows` 가 조기 return 하는 바람에 저장 payload 의 options 가 `[]`
+   였다 — 즉 **가드가 끊긴 구간에서 정확히 터졌다**. 그래서 여기서는 프리필이 아니라
+   **저장 payload 까지** 실행으로 잇는다(중간 어디가 끊겨도 이 절이 빨개진다). */
+console.log('\n[N] 작업오더 → 발행 → 저장 — 상품별 가이드가 저장 payload 까지 살아남는다');
+{
+  const P_IMG = (t) => 'https://api.example.com/api/order/guide-image/' + t;
+
+  /* ★★ 프리필을 손으로 짓지 않고 **작업오더 모듈의 진짜 함수**로 만든다 —
+     `_woProductMode`(표 모드)와 `_woOptionRows`(선택 단위·가이드)는 `_woCampaignPrefill` 이
+     그대로 실어 보내는 두 값이다(그 배선은 campaignUnitGuideWorkOrder [D] 가 고정).
+     이렇게 해야 판정이 되돌아갔을 때 **이 절도 함께 빨개진다** — 프리필을 하드코딩하면
+     정작 이번에 터진 구간(모드 판정)이 가드 밖으로 빠진다. */
+  const wodSrc = read('frontend/js/work-order-detail.js');
+  const wsb = { console };
+  wsb.window = wsb;
+  vm.createContext(wsb);
+  vm.runInContext(grabConst(wodSrc, '_WO_UNIT_GUIDE_IMG_MAX'), wsb);
+  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woProductUnitSrc', '_woOptionRows', '_woProductMode']
+    .forEach(n => vm.runInContext(grab(wodSrc, n), wsb));
+
+  /** 상품 n개 · 전부 "옵션 없음" 오더 → 발행 프리필(작업오더 모듈이 실제로 내리는 값) */
+  const mkPrefill = (n) => {
+    const order = { product_options_json: JSON.stringify(Array.from({ length: n }, (_, i) => ({
+      name: '상품' + (i + 1), product_mode: 'none',
+      base: { pay: 10000 + i, count: 100 * (i + 1), daily: 5 }, options: [],
+      guide: { text: '상품' + (i + 1) + ' 유입', images: [P_IMG(String.fromCharCode(97 + i).repeat(21))] },
+    }))) };
+    return { productMode: wsb._woProductMode(order), options: wsb._woOptionRows(order) };
+  };
+
+  // (1) 상품 3개 · 전부 옵션 없음 — 사용자가 신고한 바로 그 구성
+  {
+    const t = makeTable();
+    t.sandbox._pf = mkPrefill(3);
+    t.run('applyProductRowsFromOrder(_pf)');
+    const out = JSON.parse(t.run('JSON.stringify(readOptRows())'));
+    ok('★★★ 상품 3개가 저장 payload 에 그대로 실린다(종전엔 0개였다)', out.length === 3);
+    ok('★★★ 세 상품 모두 자기 유입가이드를 들고 간다(사진 포함)',
+      out.every((o, i) => /상품/.test(o.inflowGuideHtml) && o.inflowGuideImages.length === 1)
+      && out[0].inflowGuideImages[0] !== out[1].inflowGuideImages[0]);
+    ok('★ 선택 단위는 상품(unit_kind=product) — 옵션명 칸이 아니라 상품명이 키다',
+      out.every(o => o.unitKind === 'product') && out[1].optKey === '상품2');
+    ok('★ 정원은 상품별 값이 그대로(첫 행 값으로 뭉개지지 않는다)',
+      out[0].recruitTotal === 100 && out[1].recruitTotal === 200 && out[2].recruitTotal === 300);
+    // ★ 가짜 DOM 은 value 를 문자열로 강제하지 않는다(실제 input 은 강제) — 숫자로 비교한다
+    ok('★ 캠페인 총인원은 상품 정원의 합(600) — 표가 정원의 단일 출처',
+      Number(t.dom.byId.rf_recruit_total.value) === 600);
+  }
+
+  // (2) 상품 1개 · 옵션 없음 — 진짜 단일상품은 **종전 그대로** 옵션 원장을 만들지 않는다
+  {
+    const t = makeTable();
+    t.sandbox._pf = mkPrefill(1);
+    t.run('applyProductRowsFromOrder(_pf)');
+    ok('★ 단일상품 공고는 종전 그대로 옵션을 만들지 않는다(우레온 규율 무회귀)',
+      t.run('JSON.stringify(readOptRows())') === '[]');
+    ok('★ 그 화면은 "옵션 없는 작업" 모드다', t.run('_prodMode()') === 'none');
+  }
+
+  // (3) 복합(옵션 상품 + 무옵션 상품) — 종전 동작 그대로
+  {
+    const t = makeTable();
+    t.sandbox._pf = { productMode: 'opt', options: [
+      { productName: '상품A', unitKind: 'option', optKey: '옵션1', payAmount: 12000, recruitTotal: 30,
+        inflowGuideHtml: '<p>옵션1</p>', inflowGuideImages: [P_IMG('1'.repeat(24))] },
+      { productName: '상품B', unitKind: 'product', optKey: '상품B', payAmount: 9000, recruitTotal: 7,
+        inflowGuideHtml: '<p>상품B</p>', inflowGuideImages: [P_IMG('2'.repeat(24))] },
+    ] };
+    t.run('applyProductRowsFromOrder(_pf)');
+    const out = JSON.parse(t.run('JSON.stringify(readOptRows())'));
+    ok('★ 복합 오더는 종전 그대로 선택지 2개 · 가이드 2개(무회귀)',
+      out.length === 2 && out[0].unitKind === 'option' && out[1].unitKind === 'product'
+      && out.every(o => o.inflowGuideImages.length === 1));
+  }
+}
 
 console.log('\n✅ campaignUnitGuideFront: ' + passed + '개 통과');
 process.exit(0);
