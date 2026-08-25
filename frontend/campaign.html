@@ -1167,11 +1167,47 @@ async function _joinWithOption(optionKey){
   return openAcctSheet(optionKey);
 }
 
+/**
+ * 미리보기에서 고른 선택지 = 목록의 그 옵션 + **그 선택지 전용 유입가이드**.
+ *
+ * ★★ 서버가 주는 `options` 는 실제 리뷰어 응답과 같은 모양이라 선택지별 유입가이드가
+ *   **덜어져 있다**(고르지도 않은 선택지의 안내 HTML·사진을 리뷰어에게 통째로 보내지 않는 규칙).
+ *   그대로 고르면 가이드 없는 껍데기가 되어 "등록된 유입가이드가 없어요" 가 뜬다
+ *   (2026-08-25 실측 — 미리보기는 항상 옵션을 고르고 들어가는 흐름이라 선택지 전 건이 그렇게 보였다).
+ *   실제 리뷰어 경로는 참여·옵션변경 뒤 서버(work-detail)를 다시 물어보므로 정상이다.
+ * ★ 재료는 미리보기 전용 optionGuides 맵 **하나** — 진입 시점에 확보한다(구버전 백엔드는
+ *   서버가 고른 selectedOption 으로 그 자리에서 맵을 만든다). 출처를 둘로 두면 시뮬레이션이
+ *   selectedOption 을 덮은 뒤 한쪽만 조용히 갈린다.
+ * ★★ 둘 다 없으면(구버전 백엔드) **가이드를 덧붙이지 않고 "모른다"고 돌려준다** —
+ *   호출부가 그 사실을 말한다(없는 것으로 꾸미면 이번 사고가 그대로 재현된다).
+ * ★★ 사본 금지 — 가상 참여·가상 옵션변경이 이 함수 하나를 쓴다(따로 고르면 한쪽만 가이드를 잃는다).
+ * ★ 서버를 부르지 않는다(미리보기는 서버 상태 무변경 — 이 전제를 회귀가드가 고정한다).
+ */
+function _pvPickOption(optionKey){
+  const options = (_detail && _detail.options) || (_camp && _camp.options) || [];
+  const base = optionKey
+    ? (options.find(o => String(o.optKey) === String(optionKey)) || null)
+    : ((_detail && _detail.selectedOption) || null);
+  if(!base) return { opt:null, guideKnown:true };
+  const g = ((_detail && _detail.optionGuides) || {})[base.optKey];
+  if(!g) return { opt: base, guideKnown:false };
+  return {
+    opt: Object.assign({}, base, {
+      inflowGuideHtml: g.inflowGuideHtml || '',
+      inflowGuideImages: Array.isArray(g.inflowGuideImages) ? g.inflowGuideImages : [],
+    }),
+    guideKnown: true,
+  };
+}
+/** 가이드 재료를 못 받았을 때의 고지 — 조용히 "없어요" 로 넘기지 않는다. */
+const _PV_GUIDE_UNKNOWN = '이 선택지의 유입가이드를 불러오지 못했어요 — 새로고침 후 다시 확인해주세요.';
+
 /** 관리자 미리보기 전용 가상 참여. 서버/스토리지에 전혀 기록하지 않는다. */
 function _pvSimulateApply(optionKey){
   if(!PREVIEW || !_detail) return;
   const options = _detail.options || (_camp && _camp.options) || [];
-  const selectedOption = optionKey ? (options.find(o => String(o.optKey) === String(optionKey)) || null) : (_detail.selectedOption || null);
+  const picked = _pvPickOption(optionKey);
+  const selectedOption = picked.opt;
   _detail = {
     ..._detail,
     application: { ...(_detail.application || {}), id:'preview', status:'applied', optionKey: selectedOption ? selectedOption.optKey : null },
@@ -1182,13 +1218,16 @@ function _pvSimulateApply(optionKey){
   hideOptSheet();
   _pvStep = 'joined';
   _renderJoinedView(_detail, null);
-  toast('가상 참여로 작업가이드를 열었습니다. 실제 참여 기록은 남지 않습니다.');
+  toast(picked.guideKnown
+    ? '가상 참여로 작업가이드를 열었습니다. 실제 참여 기록은 남지 않습니다.'
+    : _PV_GUIDE_UNKNOWN);
 }
 
 /** 관리자 미리보기 전용 가상 옵션 변경. 서버 요청·재고·참여 기록을 만들지 않는다. */
 function _pvSimulateChangeOption(newKey){
   if(!PREVIEW || !_detail) return;
-  const selectedOption = (_detail.options || []).find(o => String(o.optKey) === String(newKey));
+  const picked = _pvPickOption(newKey);         // ★ 참여와 같은 재료·같은 함수(가이드 유실 방지)
+  const selectedOption = picked.opt;
   if(!_pvOptionSelectable(selectedOption)) return toast('선택한 옵션은 현재 마감 상태예요');
   _detail = {
     ..._detail,
@@ -1198,7 +1237,9 @@ function _pvSimulateChangeOption(newKey){
   };
   hideOptSheet();
   _renderJoinedView(_detail, null);
-  toast('가상 옵션을 변경했습니다. 실제 참여 기록은 남지 않습니다.');
+  toast(picked.guideKnown
+    ? '가상 옵션을 변경했습니다. 실제 참여 기록은 남지 않습니다.'
+    : _PV_GUIDE_UNKNOWN);
 }
 
 /** @param sub {name,phone}|null — 있으면 타계정 명의로 참여(서버가 sub_accounts로 재검증) */
@@ -1757,6 +1798,14 @@ async function _enterPreview(){
             : r.status === 403 ? '관리자 권한이 필요해요.'
             : ((j.error || '미리보기를 불러오지 못했어요.')));
       return;
+    }
+    /* 구버전 백엔드 폴백 — 선택지별 가이드 맵을 안 주면 서버가 고른 선택지 하나만이라도
+       재료로 남긴다. ★ 가상 참여가 _detail 을 통째로 갈아치우며 selectedOption 을 덮으므로
+       **여기서 미리** 떠 둬야 한다(뒤에서 읽으면 두 번째 선택부터 가이드를 잃는다 — 실측). */
+    if(!j.optionGuides && j.selectedOption && j.selectedOption.optKey){
+      j.optionGuides = { [j.selectedOption.optKey]: {
+        inflowGuideHtml: j.selectedOption.inflowGuideHtml || '',
+        inflowGuideImages: j.selectedOption.inflowGuideImages || [] } };
     }
     _detail = j;
     if(j.serverNow) CampCards.setServerNow(j.serverNow);

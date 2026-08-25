@@ -5045,6 +5045,41 @@ function _renderCardPreview() {
   el.innerHTML = CampCards.cardHtml(_buildCardPreviewData(), { admin: false });
 }
 
+/**
+ * 오른쪽 미리보기에 쓸 **첫 선택지 전용 유입가이드**(사용자 확정 2026-08-25).
+ *
+ * ★ 종전엔 selectedOption 을 넘기지 않아, 선택지별 가이드를 설정해 둔 공고인데도
+ *   미리보기가 항상 "등록된 유입가이드가 없어요" 로 보였다(공통 칸을 비워 두는 것이 정상 운영).
+ * ★★ 저장할 값과 **같은 조립 함수**(_ugCompose)를 쓴다 — 공통 가이드가 _igComposeInflow 를
+ *   쓰는 것과 같은 규율이라, 미리보기와 저장본이 갈라질 수 없다.
+ * ★ 마감 행은 건너뛴다(리뷰어가 고를 수 없는 선택지를 대표로 보여주지 않는다).
+ * ★ 가이드가 비어 있으면 **넘기지 않는다** → 종전대로 공고 공통 가이드가 그려진다(무회귀).
+ * ★ 옵션 카드는 showOption:false 라 안 그려진다 — 바뀌는 것은 유입가이드 한 칸뿐이고,
+ *   어느 선택지의 안내인지는 공용 렌더러가 배지로 말한다.
+ * ★ 선택지가 여럿이면 각각은 [리뷰어 화면] 전체 미리보기에서 옵션을 골라 확인한다.
+ */
+function _rfFirstUnitGuide() {
+  if (typeof _prodMode === "function" && _prodMode() !== "opt") return null;
+  const rows = Array.from(document.querySelectorAll("#rf_opt_rows .rf-opt-row"));
+  for (const r of rows) {
+    if (r.dataset.status === "closed") continue;
+    const key = r.dataset.ig;
+    if (!key) continue;
+    const g = _ugCompose(r, key);
+    const html = String((g && g.html) || "").trim();
+    const imgs = (g && Array.isArray(g.images)) ? g.images : [];
+    if (!html && !imgs.length) continue;
+    const unitKind = _rfGroupUnit(r);
+    const productName = _rfRowProductName(r);
+    const optKey = (unitKind === "product"
+      ? String(productName || "")
+      : String(r.querySelector(".rf-opt-name")?.value || "")).replace(/\|/g, "").trim();
+    if (!optKey) continue;
+    return { optKey, productName, unitKind, inflowGuideHtml: html, inflowGuideImages: imgs };
+  }
+  return null;
+}
+
 function _renderPreview() {
   _renderCardPreview();   // 목록 카드는 CampWorkDetail 유무와 무관하게 항상 최신 반영
   const card = document.getElementById("rf_preview_card");
@@ -5076,6 +5111,8 @@ function _renderPreview() {
     },
     landingUrl: _v("rf_landing_url"),
     inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)
+    // ★ 선택지별 가이드를 설정한 공고는 첫 선택지 것을 보여준다(없으면 null = 공통 가이드 = 종전 동작)
+    selectedOption: _rfFirstUnitGuide(),
   }, { showOption: false, apiBase: (typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "") });
 
   /* 전체 흐름(참여 전 → 작업가이드 → 제출완료)은 실제 리뷰어 페이지를 새 탭으로 —
