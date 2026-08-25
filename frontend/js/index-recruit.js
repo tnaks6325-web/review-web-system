@@ -4102,8 +4102,18 @@ function _rfBindStartCheck() {
   if (!host) return;
   _rfStartBound = true;
   const refresh = () => { try { renderRecruitStartCheck(); } catch (_) {} };
-  host.addEventListener("input", refresh);
-  host.addEventListener("change", refresh);
+  // 캡처 단계에서 받는다. 다른 편집기 핸들러가 bubble 단계에서 전파를 멈춰도
+  // 상단의 안내가 화면의 실제 입력값보다 뒤처지지 않게 한다.
+  host.addEventListener("input", refresh, true);
+  host.addEventListener("change", refresh, true);
+  // 입금명은 시작 점검의 유일한 필수 항목이다. 위임 이벤트와 별도로 직접
+  // 연결해 IME 확정·브라우저 자동완성처럼 일반 input 흐름이 흔들리는 경우도 보완한다.
+  const memoInput = document.getElementById("rf_transfer_memo");
+  if (memoInput) {
+    memoInput.addEventListener("input", refresh);
+    memoInput.addEventListener("change", refresh);
+    memoInput.addEventListener("compositionend", refresh);
+  }
   host.addEventListener("click", () => setTimeout(refresh, 0));
 }
 

@@ -163,8 +163,10 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
   ok('★★ 필수인데 비어 있는 칸만 그린다(정상 값은 표기 0) + 없으면 줄을 감춘다',
     /filter\(o => o\.x\.miss\)/.test(rc) && /if \(!miss\.length\) \{ box\.hidden = true; return; \}/.test(rc));
   ok('onclick 은 **인덱스만**(라벨·값 보간 0)', /onclick="rfStartGo\(\$\{o\.i\}\)"/.test(rc));
-  ok('★ 값이 바뀌면 줄도 따라간다 — 위임 1회(입력칸을 다시 만들지 않아 IME 안전)',
-    /let _rfStartBound = false/.test(rc) && /host\.addEventListener\("input", refresh\)/.test(rc));
+  ok('★ 값이 바뀌면 줄도 따라간다 — 캡처 위임 + 입금명 직접 감지(IME·자동완성 보완)',
+    /let _rfStartBound = false/.test(rc)
+    && /host\.addEventListener\("input", refresh, true\)/.test(rc)
+    && /memoInput\.addEventListener\("compositionend", refresh\)/.test(rc));
   ok('모달을 열 때 1회 렌더 + 실패해도 모달을 막지 않는다',
     /try \{ _rfBindStartCheck\(\); renderRecruitStartCheck\(\); \} catch/.test(rc));
   ok('CSS 는 #recruitModal 스코프 + 리터럴 색', /#recruitModal \.rf-startcheck\{/.test(rm)
