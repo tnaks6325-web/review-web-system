@@ -366,12 +366,18 @@ async function submitExternalOrder({
   //   (리뷰어 제출 경로 submit.routes 와 같은 규율 — 8/3 상품명이 리뷰옵션 칸을 덮은 사고 재현 방지).
   //   빈 값 = "안 고름" = 배정 행의 기존 옵션값을 되쓴다(칸을 지우지 않는다).
   //   ★ 조회 실패는 종전 동작(그대로 사용) — fail-open.
+  /* ★ 138 선택 상품 — 옵션 칸을 비우는 위 규율은 그대로 두고, 그 상품명을 **별개의 「상품」 칸**으로
+     흘려보낸다(리뷰어 제출 경로와 같은 규율). 같은 왕복에서 읽으므로 쿼리 순증 0. */
+  let resolvedProduct = '';
   if (resolvedOptKey && campaignId) {
     try {
       const { rows: u } = await pool.query(
-        `SELECT unit_kind FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`,
+        `SELECT unit_kind, product_name FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`,
         [campaignId, resolvedOptKey]);
-      if (u.length && String(u[0].unit_kind || '') === 'product') resolvedOptKey = '';
+      if (u.length) {
+        resolvedProduct = String(u[0].product_name || '');
+        if (String(u[0].unit_kind || '') === 'product') resolvedOptKey = '';
+      }
     } catch (_) { /* fail-open: 종전 동작 */ }
   }
 
@@ -391,6 +397,7 @@ async function submitExternalOrder({
     dateStr: todayKstDateStr(), orderNum: f.orderNum || '',
     memo: `외부모집 수동제출${adminName ? ' · ' + adminName : ''}`,
     selectedOptKey: resolvedOptKey || '',
+    selectedProduct: resolvedProduct || '',   // ★ 138 — 고른 상품은 「상품」 칸으로(옵션 칸과 별개)
   };
   const ledger = await createOrderLedgerEntry({
     sheetId, tabName, gid, orderData,

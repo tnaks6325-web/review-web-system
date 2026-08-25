@@ -55,14 +55,19 @@ function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
  *   patch = 덮어쓸 {헤더명: 값}. 매퍼가 `null` 을 준 칸(관리자 보호열 등)은 들어가지 않는다.
  */
 function buildRowPatch(headers, orderData, currentRowJson = {}) {
-  const { mapOrderToSheetRow, optionWriteColumns } = require('./orderLedger.service');
+  const { mapOrderToSheetRow, optionWriteColumns, productWriteColumns } = require('./orderLedger.service');
   const mapped = mapOrderToSheetRow(headers || [], orderData || {});
   const optCols = new Set(optionWriteColumns(headers || []));
+  /* ★ 138 선택 상품 칸 — 판정은 매퍼 파생 단일 출처(`productWriteColumns`). 옵션 칸과 **같은
+     blank-only 규율**을 건다: 관리자가 적어 둔 상품명을 리뷰어 제출이 덮으면 안 된다. */
+  const prodCols = new Set(productWriteColumns(headers || []));
   const blankOnly = process.env.ORDER_OPTION_BLANK_ONLY !== '0';
 
   const patch = {};
   const optionSuppressed = [];
+  const productSuppressed = [];
   let optionWritten = false;
+  let productWritten = false;
   (headers || []).forEach((h, i) => {
     const val = mapped[i];
     if (val === null || val === undefined) return;          // 매퍼가 "쓰지 않음"이라 한 칸
@@ -72,7 +77,12 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
       const cur = String((currentRowJson || {})[name] == null ? '' : (currentRowJson || {})[name]).trim();
       if (cur) { optionSuppressed.push({ header: name, want: String(val), cur }); return; }
     }
+    if (prodCols.has(i) && blankOnly) {
+      const cur = String((currentRowJson || {})[name] == null ? '' : (currentRowJson || {})[name]).trim();
+      if (cur) { productSuppressed.push({ header: name, want: String(val), cur }); return; }
+    }
     if (optCols.has(i) && String(val).trim()) optionWritten = true;
+    if (prodCols.has(i) && String(val).trim()) productWritten = true;
     patch[name] = String(val);
   });
 
@@ -84,7 +94,14 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
   const wantOpt = String((orderData || {}).selectedOptKey || '').trim();
   const optionUnmapped = (wantOpt && !optionWritten && !optionSuppressed.length) ? wantOpt : '';
 
-  return { patch, optionSuppressed, optionUnmapped };
+  /* ★★ 138 — 상품도 **같은 조용한 누락 차단**을 건다. 복합유형 작업(137)에서 리뷰어가 고른
+     "옵션 없는 상품"은 옵션 칸에 쓰지 않으므로(8/3 규율), 「상품」 칸이 없으면 그 선택이
+     표에서 통째로 사라진다 — 2026-08-25 「업소용 간장」이 정확히 그 상태였고 **경고조차 없었다**.
+     ★ 보존(blank-only)으로 안 쓴 것과는 **다른 신호**다(그쪽은 값이 이미 있는 정상 동작). */
+  const wantProd = String((orderData || {}).selectedProduct || '').trim();
+  const productUnmapped = (wantProd && !productWritten && !productSuppressed.length) ? wantProd : '';
+
+  return { patch, optionSuppressed, optionUnmapped, productSuppressed, productUnmapped };
 }
 
 /**
@@ -141,6 +158,8 @@ async function writeOrderToWorktable({
   const client = await db.connect();
   let optionSuppressed = [];
   let optionUnmapped = '';
+  let productSuppressed = [];
+  let productUnmapped = '';
   // ★★ `seq` 는 try 밖에서 선언한다 — 아래 catch·완결 표시·신원 링크·로그가 전부 이 값을 쓴다.
   //   try 안에서 `let` 으로 선언하면 블록 스코프라 커밋 뒤 `markOrderWritten(…, seq)` 부터
   //   ReferenceError 가 나고, 마지막 logger.info 에서 함수 밖으로 던져진다. 그러면 행은 이미
@@ -268,6 +287,8 @@ async function writeOrderToWorktable({
     const built = buildRowPatch(headers, orderData, currentRowJson);
     optionSuppressed = built.optionSuppressed;
     optionUnmapped = built.optionUnmapped || '';
+    productSuppressed = built.productSuppressed || [];
+    productUnmapped = built.productUnmapped || '';
     const merged = { ...currentRowJson, ...built.patch };
 
     const reviewerName = String(loginName || orderData.orderer || orderData.recipient || '').slice(0, 200);
@@ -372,8 +393,27 @@ async function writeOrderToWorktable({
     } catch (_) { /* 관측 실패가 쓰기를 막지 않는다 */ }
   }
 
+  if (productSuppressed.length) {
+    logger.warn(`[sheetlessOrder] 상품 칸 보존(blank-only) tab=${tabName} seq=${seq} ` +
+      productSuppressed.map(s => `${s.header}: "${s.cur}" 유지`).join(' · '));
+  }
+
+  /* ★ 138 — 「상품」 칸이 없어 **리뷰어가 고른 상품이 표에서 사라지는** 경우. 옵션 칸과 같은 규율:
+     조용히 넘기지 않는다. 조치는 공고 저장(연결 작업표에 상품 칸 보장) 또는 작업표 재구성. */
+  if (productUnmapped) {
+    logger.warn(`[sheetlessOrder] ⚠️ 상품 기입 칸 없음 — 리뷰어가 고른 상품이 표에 안 들어감 ` +
+      `tab=${tabName} seq=${seq} 선택="${productUnmapped}" os=${orderSubmissionId}`);
+    try {
+      require('./errorLog.service').logAbnormal({
+        flow: 'order_mirror', step: 'product_column_missing', severity: 'warn',
+        error: new Error(`product column missing: "${productUnmapped}"`),
+        context: { sheetId, tabName, tabGid: gid, sheetRow: seq, orderSubmissionId },
+      });
+    } catch (_) { /* 관측 실패가 쓰기를 막지 않는다 */ }
+  }
+
   logger.info(`[sheetlessOrder] 즉시 완결 tab=${tabName} seq=${seq} os=${orderSubmissionId}${recovered ? ' (복구)' : ''}`);
-  return { ok: true, written: true, seq, ledger, optionSuppressed, optionUnmapped };
+  return { ok: true, written: true, seq, ledger, optionSuppressed, optionUnmapped, productSuppressed, productUnmapped };
 }
 
 /**
@@ -431,7 +471,7 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
   const { rows } = await db.query(
     `SELECT os.id, os.orderer, os.recipient, os.user_id, os.phone, os.address,
             os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
-            os.memo, os.selected_opt_key,
+            os.memo, os.selected_opt_key, os.selected_product,
             ca.phone8 AS login_phone8, ca.owner_phone8, r.name AS login_name,
             rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid
        FROM order_submissions os
@@ -466,6 +506,7 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
           address: row.address, bank: row.bank, account: row.account, depositor: row.depositor,
           price: row.price, dateStr: row.date_str, orderNum: row.order_num, memo: row.memo,
           selectedOptKey: row.selected_opt_key,
+          selectedProduct: row.selected_product,   // ★ 138 — 복구 재기록도 같은 상품값
         },
       });
       if (out.ok) result.written++;

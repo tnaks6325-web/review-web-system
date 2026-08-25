@@ -326,6 +326,40 @@ async function _ensureLinkedWorktableOptionColumn(campaignId, by = 'campaign') {
 }
 
 /**
+ * 공고 저장 시 연결된 **무시트 작업표**에 「상품」 칸을 보장하고 선택을 소급 기입한다(138).
+ * ★ 옵션 칸 훅과 같은 자리·같은 규율 — **절대 throw 하지 않는다**(열 보장 실패가 공고 저장을 죽이면 안 된다).
+ * ★★ 문턱은 **상품 2종 이상**(살아있는 옵션 기준) — 상품이 하나면 리뷰어가 고를 여지가 없어
+ *   적을 값이 없다(옵션 칸 훅의 "옵션 2종 이상"과 같은 기준).
+ * ★ 컬럼명 주의: recruit_campaigns 는 linked_sheet_id 다(work_orders 의 linked_tab_sheet_id 아님) —
+ *   옵션 칸 훅이 이 오타로 배포 이래 한 번도 안 돌았던 자리다(2026-08-23 실측).
+ */
+async function _ensureLinkedWorktableProductColumn(campaignId, by = 'campaign') {
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
+              (SELECT COUNT(DISTINCT o.product_name) FROM campaign_options o
+                WHERE o.campaign_id = c.id AND COALESCE(o.status,'active') <> 'closed'
+                  AND COALESCE(o.product_name,'') <> '') AS "liveProducts"
+         FROM recruit_campaigns c WHERE c.id = $1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.sheetId || !r.tabName) return null;
+    if (Number(r.liveProducts || 0) < 2) return null;
+    const { ensureProductColumn } = require('../services/worktableProductColumn.service');
+    const out = await ensureProductColumn({
+      sheetId: r.sheetId, tabName: r.tabName, dryRun: false, backfill: true, by: `campaign:${by}`,
+    });
+    if (out && (out.headerAdded || out.backfillCount)) {
+      logger.info(`[campaign/products] 작업표 상품 칸 정합 ${r.sheetId}/${r.tabName} 열추가=${out.headerAdded} 소급=${out.backfillCount}`);
+    }
+    return out;
+  } catch (e) {
+    // not_sheetless·tab_not_registered·no_live_products 는 정상적인 "해당 없음" 이다.
+    logger.warn(`[campaign/products] 작업표 상품 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
+    return null;
+  }
+}
+
+/**
  * 회수·혼합 공고 저장 시 연결된 **무시트 작업표**에 부속 열을 보장한다(135).
  * ★ 옵션 칸 훅(_ensureLinkedWorktableOptionColumn)과 같은 자리·같은 규율 —
  *   **절대 throw 하지 않는다**(열 보장 실패가 공고 저장을 죽이면 안 된다).
@@ -2333,6 +2367,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
     if (normOpts) await _ensureLinkedWorktableOptionColumn(rows[0].id, 'create');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
+    if (normOpts) await _ensureLinkedWorktableProductColumn(rows[0].id, 'create');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
     await _ensureLinkedWorktableDeliveryColumns(rows[0].id, 'create');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
     // 작업오더와 모집공고는 별도 값이 아니라 같은 목표 인원이다. 생성 시에도 서버가
     // 역방향 링크와 작업오더 정원을 함께 저장해, 프론트 후속 호출 실패로 드리프트하지 않게 한다.
@@ -2742,6 +2777,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
     if (normOpts) await _ensureLinkedWorktableOptionColumn(id, 'update');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
+    if (normOpts) await _ensureLinkedWorktableProductColumn(id, 'update');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
     await _ensureLinkedWorktableDeliveryColumns(id, 'update');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
     // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
     //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.

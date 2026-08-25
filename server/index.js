@@ -93,6 +93,9 @@ const REQUIRED_SCHEMA = [
   ['campaign_applications', 'decided_at'],
   ['campaign_applications', 'decided_by'],
   ['campaign_applications', 'reject_reason'],
+  // 138 — 리뷰어가 고른 **상품**(복합유형 작업). 주문 원장 INSERT 목록에 들어가므로
+  //   없으면 **구매양식 제출이 전면 42703**(101 blog_url 과 같은 자리).
+  ['order_submissions', 'selected_product'],
 ];
 
 async function _runOneMigration(pool, sql) {

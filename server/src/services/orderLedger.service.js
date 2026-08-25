@@ -217,6 +217,13 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
 //   (버그이력: 옛 규칙 key==='id' 는 헤더 '쿠팡id'를 못 잡아 쿠팡탭 id열이 영구 공란이었다.)
 const _ID_EXACT_ADMIN = ['번호', 'no', '#'];
 const _ID_ADMIN_KW = ['인애드', '카톡', '닉네임', '상품', '상품명'];
+
+/* ── 138 선택 상품 칸 ────────────────────────────────────────────────────────────
+   복합유형 작업(137)의 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이라, 옵션 칸에 쓰면
+   관리자 작업지시('텍스트'·'포토리뷰')를 덮는다(8/3 사고). 그래서 **옵션과 다른 칸**에 적는다.
+   ★ 좌측 정렬 우선순위(사용자 확정 2026-08-25) = 상품 > 옵션 > 리뷰옵션. */
+const PRODUCT_HEADER = '상품';
+const PRODUCT_HEADER_KEY = PRODUCT_HEADER.toLowerCase();
 function _isIdHeader(key) {
   const k = String(key || '').toLowerCase().trim();
   if (!k) return false;
@@ -253,6 +260,15 @@ function mapOrderToSheetRow(headers, orderData = {}) {
   return (headers || []).map((h, colIdx) => {
     const key = String(h || '').toLowerCase().trim();
     if (_ID_EXACT_ADMIN.includes(key)) return null;
+    /* ★★ 138 선택 상품 — 자리는 `_ID_ADMIN_KW`('상품' 포함) **바로 앞**이어야 한다.
+         그 목록이 상품류 헤더를 통째로 보호열로 막으므로, 뒤에 두면 이 규칙에 영영 도달 못 한다.
+       ★★ **정확일치 `상품` 하나만** 연다 — `상품명`·`상품URL`·`상품아이디` 는 관리자가 적어 두는
+         칸이라 계속 보호열로 남는다(includes 로 넓히면 그 값들을 덮는다).
+       ★★ 값이 없으면 `''` 가 아니라 **`null`(=안 씀)** — 빈 문자열은 **그 칸을 지우는 쓰기**가
+         된다(7/31 옵션 칸 사고와 같은 메커니즘). 그래서 상품 값이 없는 기존 주문은 이 규칙이
+         생기기 전과 **바이트 동일**하게 동작한다(무회귀의 근거).
+       ★ 덮어쓰기 방지(blank-only)는 호출부가 한다 — 옵션 칸과 같은 규율. */
+    if (key === PRODUCT_HEADER_KEY) return orderData.selectedProduct || null;
     if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return null;
     /* ★★ 101 블로그URL(블로그 주소) — **주소·URL 규칙보다 먼저** 본다.
          `블로그주소` 는 아래 `key.includes('주소')` 에 걸려 **배송 주소가 그 칸에 찍히고**,
@@ -364,6 +380,22 @@ function optionWriteColumns(headers) {
  *   관리자 사전등록이 매퍼가 안 쓰는 칸에 주소를 넣어 리뷰어 제출 때 다른 칸이 채워지는 사고.
  *   ★ 센티널에 공백·NUL 금지(매퍼가 trim, NUL은 git이 바이너리 취급 — 실측으로 밟은 함정).
  */
+/**
+ * ★★ "매퍼가 실제로 **선택 상품**을 기입하는 열" — 옵션 칸과 **같은 기법**으로 매퍼에서 파생한다(138).
+ *   헤더 문자열로 따로 찾으면(`key === '상품'` 사본) **쓰는 칸 ≠ 보존(blank-only) 판정 칸** 으로 갈려,
+ *   관리자가 적어 둔 상품명을 덮는 사고가 그 틈으로 되살아난다.
+ * ★ 센티널에 공백·NUL 금지(매퍼가 trim, NUL 은 git 이 바이너리 취급 — 실측으로 밟은 함정).
+ */
+const _PRODUCT_SENTINEL = '__SELECTEDPRODUCT_SENTINEL__';
+function productWriteColumns(headers) {
+  const n = (headers || []).length;
+  if (!n) return [];
+  const mapped = mapOrderToSheetRow(headers, { selectedProduct: _PRODUCT_SENTINEL });
+  const out = [];
+  mapped.forEach((v, i) => { if (v === _PRODUCT_SENTINEL) out.push(i); });
+  return out;
+}
+
 const _BLOG_SENTINEL = '__BLOGURL_SENTINEL__';
 function blogUrlWriteColumns(headers) {
   const n = (headers || []).length;
@@ -899,8 +931,8 @@ async function createOrderLedgerEntry(input) {
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo, blog_url,
-       dedup_key, mirror_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULL,'pending')
+       selected_product, dedup_key, mirror_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NULL,'pending')
      RETURNING id`;
   const orderInsertParams = [
     sheetId,
@@ -921,6 +953,9 @@ async function createOrderLedgerEntry(input) {
     orderData.price || '',
     orderData.memo || '',
     orderData.blogUrl || null,   // ★ 101 — 없으면 NULL(빈 문자열로 굳히지 않는다: 나중 전파/사전등록이 COALESCE 로 채운다)
+    /* ★ 138 선택 상품 — 컬럼이 NOT NULL DEFAULT '' 라 빈 문자열이 곧 "안 고름"이다.
+       원장에 남겨야 무시트 재기록·큐 재시도·reconcile 이 같은 값을 다시 쓴다(_osRowToOrderData). */
+    orderData.selectedProduct || '',
   ];
 
   let orderSubmissionId;
@@ -1246,7 +1281,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   const { rows } = await db.query(
     `SELECT os.id, os.sheet_id, os.tab_name, os.gid, os.tab_gid, os.dedup_key,
             os.orderer, os.recipient, os.user_id, os.phone, os.address,
-            os.order_num, os.date_str, os.selected_opt_key, os.bank, os.account,
+            os.order_num, os.date_str, os.selected_opt_key, os.selected_product, os.bank, os.account,
             os.depositor, os.price, os.memo, os.mirror_status, os.sheet_row, os.sheet_error
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
@@ -1286,6 +1321,8 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       address: row.address, orderNum: row.order_num, dateStr: row.date_str,
       selectedOptKey: row.selected_opt_key, bank: row.bank, account: row.account,
       depositor: row.depositor, price: row.price, memo: row.memo,
+      // ★ 138 — 재기록도 같은 상품값을 쓴다(빠지면 복구 한 번에 「상품」 칸이 비워진다).
+      selectedProduct: row.selected_product,
     };
     // ★ D4 보강(리뷰 should-fix): INSERT↔dedup_key UPDATE 사이 크래시로 dedup_key가 NULL이면,
     //   여기서 osid(row.id) 폴백을 넣어 재계산해야 원래 osid 키와 일치(없으면 약한 rcp 키로 떨어져 #5 충돌 재발).
@@ -1447,6 +1484,8 @@ function _osRowToOrderData(os) {
     memo: os.memo, dateStr: os.date_str, selectedOptKey: os.selected_opt_key,
     // ★ 101: 큐 재시도·reconcile 재기록도 같은 값을 쓴다(제출 시점과 시트 기입이 갈리지 않게).
     blogUrl: os.blog_url,
+    // ★ 138: 선택 상품도 같은 이유로 재기록 재료에 들어간다 — 빠지면 재기록 한 번에 도로 사라진다.
+    selectedProduct: os.selected_product,
   };
 }
 
@@ -2051,6 +2090,8 @@ module.exports = {
   optionColIndexes,
   existingOptionKeyAt,
   optionWriteColumns,
+  productWriteColumns,   // 138 — 선택 상품 기입 칸(매퍼 파생 · 사본 금지)
+  PRODUCT_HEADER,        // 138 — 작업표 「상품」 열 이름 단일 출처
   blogUrlWriteColumns,
   filterOptionWritesBlankOnly,
   _colIdxFromRange,

@@ -156,6 +156,33 @@ function optionKeysFromWorkOrder(wo) {
   return out;
 }
 
+/**
+ * ★★ 138 — 이 작업오더가 리뷰어에게 **상품을 고르게 하는가**(복합유형 작업 137).
+ *   `optionKeysFromWorkOrder` 는 각 상품의 `options[]` 만 모으므로 **옵션 없는 상품은 한 개도 안 잡힌다** —
+ *   2026-08-25 「업소용 간장」(상품 3개·옵션 0개)이 정확히 그래서 옵션 배분이 비었고, 그 결과
+ *   "고른 값을 적을 칸"이 아무 데도 만들어지지 않았다.
+ * ★ 여기서는 **상품 이름**만 센다(옵션 유무 무관) — 상품이 2개 이상이면 리뷰어가 고르는 축이 하나 늘고,
+ *   그 선택을 적을 칸이 필요하다. 1개면 고를 여지가 없어 칸을 만들지 않는다(옵션 배분과 같은 문턱).
+ * ★ 판정 불가·깨진 JSON 은 **빈 배열**(칸을 만들지 않는다 — 틀린 열을 만드느니 안 만든다).
+ */
+function productKeysFromWorkOrder(wo) {
+  const out = [];
+  const seen = new Set();
+  try {
+    const arr = JSON.parse((wo && wo.product_options_json) || '[]');
+    if (Array.isArray(arr)) {
+      for (const p of arr) {
+        const nm = String((p && (p.name != null ? p.name : p.product_name)) || '').trim();
+        if (!nm) continue;
+        const k = nm.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k); out.push(nm);
+      }
+    }
+  } catch (_) { /* 깨진 JSON 은 상품 없음으로 */ }
+  return out;
+}
+
 /* ── 리뷰 종류(포토/텍스트/구매확정/별점) 배분 재료 ──────────────────────
    혼합 수량은 두 곳에 실려 온다(migration 107·인트라넷 구조 신호):
      · 오더 전체 : `work_orders.review_type_mix` = [{type:'photo',quantity:10}, …]
@@ -724,6 +751,29 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     });
   }
 
+  /* ★★ 138 「상품」 칸 — 복합유형 작업(137)에서 리뷰어가 고른 **상품**을 적는 전용 칸.
+     상품이 곧 선택지인 작업(옵션 없는 상품 2개 이상)은 그 값을 옵션 칸에 쓰지 않으므로
+     (8/3 상품명이 작업지시 칸을 덮은 사고 규율 — 유지), 칸이 없으면 선택이 통째로 사라진다.
+     ★★ 자리 = **상품옵션 칸 바로 앞**(사용자 확정 2026-08-25 좌측 정렬 = 상품 > 옵션 > 리뷰옵션).
+       옵션 칸이 없으면 자동 열(번호·구매일자) 바로 뒤.
+     ★ 판정은 매퍼 파생 단일 출처(`productWriteColumns`) — 여기서 '상품' 규칙을 다시 만들면
+       **만든 칸 ≠ 쓰는 칸** 으로 갈려 빈 열만 하나 늘어난다. */
+  const productKeys = productKeysFromWorkOrder(wo);
+  if (productKeys.length >= 2) {
+    const { productWriteColumns } = require('../services/orderLedger.service');
+    const names = columns.map(c => c && c.name);
+    if (!productWriteColumns(names).length) {
+      const { PRODUCT_HEADER } = require('../services/orderLedger.service');
+      const [pc] = classifyHeaders([PRODUCT_HEADER], {});
+      let at = columns.findIndex(c => c.role === 'option' && !isReviewOptionHeader(c.name));
+      if (at < 0) { at = 0; while (at < columns.length && columns[at].tier === 'auto') at++; }
+      columns.splice(at, 0, {
+        name: pc.header, role: pc.role, label: pc.label, tier: pc.tier,
+        conflict: pc.conflict || null, origin: 'system', typeKey: null,
+      });
+    }
+  }
+
   /* ★★ 배송 혼합 배분(2026-08-24 사용자 확정) — 리뷰 종류 배분과 같은 자리·같은 규율.
      혼합 오더는 "어느 줄이 실배송인가"의 답이 행에만 있다. */
   const dvDist = distributeDeliveryTypes({ total, rowDates, globalMix: deliveryMixFromWorkOrder(wo) });
@@ -819,6 +869,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (buckets.length && columns.some(c => c.origin === 'system' && c.role === 'option' && !isReviewOptionHeader(c.name))) {
     warnings.push({ code: 'option_column_added', message: '표준 열에 옵션 칸이 없어 시스템이 「옵션」 열을 추가했습니다(리뷰어가 고른 옵션이 이 칸에 기입됩니다).' });
   }
+  /* ★ 138 — 상품 칸도 시스템이 만들었으면 **말한다**(조용한 자동 추가 금지 — 옵션 칸과 같은 규율). */
+  if (columns.some(c => c.origin === 'system' && c.name === '상품')) {
+    warnings.push({ code: 'product_column_added', message: '상품이 여러 개라 시스템이 「상품」 열을 추가했습니다(리뷰어가 고른 상품이 이 칸에 기입됩니다).' });
+  }
   if (optionCountFallbackSum != null) {
     warnings.push({ code: 'option_count_mismatch', message: `작업오더의 옵션별 수량 합계(${optionCountFallbackSum}건)가 총 건수(${total}건)와 달라 균등 배분했습니다.` });
   }
@@ -898,6 +952,7 @@ module.exports = {
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
   REVIEW_SUBMIT_HEADER, ensureReviewColumn,
+  productKeysFromWorkOrder,   // 138 — 상품 축 판정(작업오더 기준)
   DELIVERY_KIND_HEADER, RECALL_HEADERS,
   deliveryMixFromWorkOrder, recallInfoFromWorkOrder, distributeDeliveryTypes,
   optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
