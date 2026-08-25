@@ -245,6 +245,80 @@ console.log('\n[F] 선택지 목록 — 상품별 묶음 머리');
   ok('묶음 머리 CSS(.optgrp) 존재', /\.optgrp\{/.test(pageSrc));
 }
 
+/* ══════════════ H. 같은 사진을 두 번 그리지 않는다 (2026-08-25 실사고) ══════════════ */
+console.log('\n[H] 렌더러 — 안내글 HTML 과 배열에 같이 담긴 사진은 한 번만');
+{
+  /* 왜 있나: 선택지 유입가이드 편집 위젯(_ugCompose)은 같은 사진을 **안내글 HTML 안의 <img> 와
+     배열 양쪽에** 저장한다(가산적 — 어느 한쪽이 정화에 걸려도 유실되지 않는 구조).
+     그리는 쪽이 접지 않아 **1장을 넣었는데 화면에 2장**이 나왔다(사용자 신고 + 브라우저 재현).
+     ★ 저장 형태는 그대로 두고 그리는 쪽이 접는다 — 이미 두 벌로 저장된 공고까지 그 자리에서 정상화된다. */
+  const TOK_A = 'cccccccccccccccccccccc', TOK_B = 'dddddddddddddddddddddd';
+  const U = t => 'https://api.example.com/api/order/guide-image/' + t;
+  const imgs = h => (String(h).match(/<img/g) || []).length;
+  const guideOf = (html) => {
+    const i = html.indexOf('🧭 유입가이드');
+    assert(i > 0, '유입가이드 카드 없음');
+    const j = html.indexOf('<div class="cwd-box"', i);
+    return html.slice(i, j > 0 ? j : html.length);
+  };
+
+  // ① 같은 사진이 양쪽에 — 한 번만 그린다(이번 사고)
+  const dup = M.cardsHtml({
+    workDetail: { inflowGuideHtml: '' },
+    selectedOption: { optKey: '상품A', unitKind: 'product',
+      inflowGuideHtml: '<p>검색어</p><img src="' + U(TOK_A) + '">', inflowGuideImages: [U(TOK_A)] },
+  }, { apiBase: 'https://api.example.com' });
+  ok('★★ 안내글과 배열에 같이 담긴 사진은 **한 번만** 그린다', imgs(guideOf(dup)) === 1);
+  ok('★ 안내글의 글자는 그대로 남는다', /검색어/.test(dup));
+
+  // ② 서로 다른 사진은 둘 다 그린다(접기가 과하지 않다)
+  const two = M.cardsHtml({
+    workDetail: { inflowGuideHtml: '' },
+    selectedOption: { optKey: '상품A', unitKind: 'product',
+      inflowGuideHtml: '<img src="' + U(TOK_A) + '">', inflowGuideImages: [U(TOK_B)] },
+  }, { apiBase: 'https://api.example.com' });
+  ok('★★ 서로 다른 사진은 둘 다 그린다(사진이 사라지지 않는다)', imgs(guideOf(two)) === 2);
+
+  // ③ 배열에만 있는 사진(안내글에 <img> 없음) — 종전대로 그린다
+  const arrOnly = M.cardsHtml({
+    workDetail: { inflowGuideHtml: '' },
+    selectedOption: { optKey: '상품A', unitKind: 'product',
+      inflowGuideHtml: '<p>글만</p>', inflowGuideImages: [U(TOK_A)] },
+  }, { apiBase: 'https://api.example.com' });
+  ok('★ 배열에만 있는 사진은 그대로 그린다(무회귀)', imgs(guideOf(arrOnly)) === 1);
+
+  // ④ 사진이 전부 접혀도 "선택지 전용 가이드" 판정은 유지된다(공통으로 되돌아가지 않는다)
+  const foldAll = M.cardsHtml({
+    workDetail: { inflowGuideHtml: '<b>공통 가이드</b>' },
+    selectedOption: { optKey: '상품A', unitKind: 'product',
+      inflowGuideHtml: '<img src="' + U(TOK_A) + '">', inflowGuideImages: [U(TOK_A)] },
+  }, { apiBase: 'https://api.example.com' });
+  ok('★★ 사진이 전부 접혀도 공통 가이드로 되돌아가지 않는다', !/공통 가이드/.test(guideOf(foldAll)));
+  ok('★ 그때도 선택지 전용이라고 말한다', /선택지 전용 안내예요/.test(foldAll));
+
+  // ⑤ 리뷰가이드·특이사항은 짝이 되는 HTML 이 없다 — 접기 인자 없이 종전 동작
+  const plainFields = M.cardsHtml({
+    workDetail: { inflowGuideHtml: '', reviewGuide: '리뷰 안내', specialNotes: '특이사항',
+                  reviewGuideImages: [U(TOK_A)], specialNotesImages: [U(TOK_B)] },
+  }, { apiBase: 'https://api.example.com' });
+  ok('★ 리뷰가이드 사진은 종전대로 그려진다(무회귀)',
+    imgs(plainFields.slice(plainFields.indexOf('📝 리뷰 가이드'))) >= 1);
+  ok('★ 특이사항 사진도 종전대로', imgs(plainFields.slice(plainFields.indexOf('📌 특이사항'))) >= 1);
+
+  // ⑥ 배선·계약
+  ok('★ imageListHtml 이 접기 인자를 받는다',
+    /function imageListHtml\(list, apiBase, alt, seenHtml\)/.test(rendererSrc));
+  ok('★★ 선택지 가이드 호출만 그 인자를 넘긴다(짝이 되는 HTML 이 있는 자리)',
+    /imageListHtml\(so && so\.inflowGuideImages, o\.apiBase, '유입가이드 이미지', unitGuideHtml\)/.test(rendererSrc));
+  ok('★ 리뷰가이드·특이사항 호출은 종전 그대로(인자 없음)',
+    /imageListHtml\(wd\.reviewGuideImages, o\.apiBase, '리뷰 가이드 이미지'\)/.test(rendererSrc)
+    && /imageListHtml\(wd\.specialNotesImages, o\.apiBase, '특이사항 이미지'\)/.test(rendererSrc));
+  ok('★★ 접는 판정은 extractGuideImages 와 같은 방식(토큰이 그 HTML 에 있는가)',
+    /seen && seen\.indexOf\(m\[1\]\) >= 0/.test(rendererSrc));
+  ok('★★ 접어도 토큰은 기록한다 — 아래 중복 판정 재료가 사라지지 않게',
+    /tokens\.push\(m\[1\]\);\s*\n\s*if \(seen && seen\.indexOf/.test(rendererSrc));
+}
+
 /* ══════════════ G. 위생 ══════════════ */
 console.log('\n[G] 소스 위생');
 {
