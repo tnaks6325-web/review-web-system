@@ -413,8 +413,10 @@
        리뷰어 화면(work-detail)이 이미 같은 폴백을 쓰므로, 없으면 카드만 '링크유입'으로 갈렸다.
        공개 목록 응답에는 이 필드가 없어 종전 동작 그대로. */
     const inflowType = (_wd && _wd.inflowType) || c.orderInflowType || '';
-    const hasGuide = !!(_wd && _wd.inflowGuideHtml);
-    const isLinkInflow = inflowType === 'link' || (!inflowType && c.landing_url && !hasGuide);
+    /* 신규 공고는 공통 유입가이드가 없다. 안내 텍스트의 존재 여부로 링크유입을
+       추론하면 선택지 전용 가이드만 있는 공고를 링크유입으로 오표기한다.
+       명시값이 없는 오래된 공고에만 종전 URL 폴백을 남긴다. */
+    const isLinkInflow = inflowType === 'link' || (!inflowType && !!c.landing_url);
     chips.push(isLinkInflow
       ? '<span class="sp-chip flow">링크유입</span>'
       : '<span class="sp-chip flow">가이드유입</span>');

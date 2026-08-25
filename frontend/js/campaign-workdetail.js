@@ -249,6 +249,9 @@
     //   "링크유입"이 남아 있다고 버튼을 열면, 그 선택지의 유입 경로 지정이 통째로 무의미해진다.
     var legacyLinkInflow = !d.inflowType
       && /링크\s*유입/.test(String(usingUnitGuide ? unitGuideHtml : (wd.inflowGuideHtml || '')).replace(/<[^>]*>/g, ' '));
+    /* `inflowType`이 있는 신규 공고는 값만 단일 출처로 쓴다. 공통 가이드 제거 뒤
+       비어 있는 안내를 링크유입으로 해석하면 가이드유입에서 잘못된 구매 버튼이 열린다.
+       값이 없던 레거시 공고만 기존 문구/빈 안내 폴백을 허용한다. */
     var isLinkInflow = d.inflowType === 'link' || legacyLinkInflow || (!d.inflowType && !hasGuide);
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
       // ★ 공통 가이드가 아니라 그 선택지 전용이라는 사실을 말한다(관리자 미리보기에서도
