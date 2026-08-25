@@ -24,6 +24,18 @@
  */
 const { logger } = require('../utils/logger');
 
+/**
+ * 작업 로그의 리뷰어 표기 단일 출처.
+ * `본계정`만 쓰면 본인 이름만, 수취인(실사용 계정)이 다르면 `본계정 타계 수취인`으로 밝힌다.
+ * 이름이 비어 있거나 레거시 행이라도 기록 자체를 숨기지 않도록 가능한 이름 하나를 남긴다.
+ */
+function _reviewerLabel(owner, recipient) {
+  const main = _clip(owner, 40);
+  const used = _clip(recipient, 40);
+  if (main && used && main.replace(/\s/g, '') !== used.replace(/\s/g, '')) return `${main} 타계 ${used}`;
+  return main || used || '이름 없음';
+}
+
 /** 유형 — 화면 탭이 이 목록을 그대로 그린다(라벨 사본 0). */
 const LOG_KINDS = [
   { key: 'order',  label: '주문' },
@@ -54,13 +66,13 @@ const SOURCES = [
     async run(db, { sheetId, tabName, limit, before, want }) {
       /* ★ 한 행이 접수·취소 두 항목을 내므로 **UNION ALL 로 항목 단위로 편다**(위 ① 규율). */
       const { rows } = await db.query(
-        `SELECT x.id, x.sheet_row, x.name, x.price, x.canceled_by, x.ev, x.at FROM (
-            SELECT id, sheet_row, COALESCE(NULLIF(recipient,''), orderer, '') AS name,
+        `SELECT x.id, x.sheet_row, x.orderer, x.recipient, x.price, x.canceled_by, x.ev, x.at FROM (
+            SELECT id, sheet_row, orderer, recipient,
                    price, canceled_by, 'order'::text AS ev, submitted_at AS at
               FROM order_submissions
              WHERE sheet_id=$1 AND tab_name=$2 AND submitted_at IS NOT NULL
             UNION ALL
-            SELECT id, sheet_row, COALESCE(NULLIF(recipient,''), orderer, '') AS name,
+            SELECT id, sheet_row, orderer, recipient,
                    price, canceled_by, 'cancel'::text AS ev, deleted_at AS at
               FROM order_submissions
              WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
@@ -70,9 +82,10 @@ const SOURCES = [
           ORDER BY x.at DESC
           LIMIT $3`, [sheetId, tabName, limit, want, before]);
       const items = rows.map(r => {
+        const name = _reviewerLabel(r.orderer, r.recipient);
         if (r.ev === 'order') return {
           id: `o:${r.id}:n`, at: r.at, kind: 'order',
-          message: `구매양식 접수 — ${_clip(r.name, 40) || '이름 없음'}`,
+          message: `구매양식 접수 — ${name}`,
           who: `리뷰어${r.sheet_row ? ` · ${r.sheet_row}행` : ''}${r.price ? ` · 결제금액 ${_clip(r.price, 20)}` : ''}`,
         };
         /* ★ 누가 취소했는지 그대로 말한다 — `canceled_by` 는 `reviewer:1234`·`dedupe:…`·담당자명이다.
@@ -83,7 +96,7 @@ const SOURCES = [
           : (by || '담당자');
         return {
           id: `o:${r.id}:c`, at: r.at, kind: 'cancel',
-          message: `주문 취소 — ${_clip(r.name, 40) || '이름 없음'}`,
+          message: `주문 취소 — ${name}`,
           who: `${whoLabel}${r.sheet_row ? ` · ${r.sheet_row}행` : ''}`,
         };
       });
@@ -121,16 +134,25 @@ const SOURCES = [
     async run(db, { sheetId, tabName, limit, before }) {
       // 한 사람이 여러 장을 올려도 **제출 한 번**으로 접는다(장 수는 함께 말한다).
       const { rows } = await db.query(
-        `SELECT MAX(uploaded_at) AS at, row_index, reviewer_name, COUNT(*)::int AS n
-           FROM review_submissions
-          WHERE sheet_id=$1 AND tab_name=$2 AND uploaded_at IS NOT NULL
-          GROUP BY row_index, reviewer_name
-         HAVING ($4::timestamptz IS NULL OR MAX(uploaded_at) <= $4::timestamptz)
-          ORDER BY MAX(uploaded_at) DESC LIMIT $3`, [sheetId, tabName, limit, before]);
+        `WITH submitted AS (
+           SELECT MAX(uploaded_at) AS at, row_index, reviewer_name, COUNT(*)::int AS n
+             FROM review_submissions
+            WHERE sheet_id=$1 AND tab_name=$2 AND uploaded_at IS NOT NULL
+            GROUP BY row_index, reviewer_name
+           HAVING ($4::timestamptz IS NULL OR MAX(uploaded_at) <= $4::timestamptz)
+         )
+         SELECT s.*, ri.reviewer_name AS owner_name, ri.recipient_name
+           FROM submitted s
+           LEFT JOIN LATERAL (
+             SELECT reviewer_name, recipient_name FROM review_index
+              WHERE sheet_id=$1 AND tab_name=$2 AND row_index=s.row_index
+              LIMIT 1
+           ) ri ON TRUE
+          ORDER BY s.at DESC LIMIT $3`, [sheetId, tabName, limit, before]);
       const items = rows.map(r => ({
         id: `rs:${r.row_index == null ? '-' : r.row_index}:${_clip(r.reviewer_name, 40)}`,
         at: r.at, kind: 'review',
-        message: `리뷰 캡처 제출 — ${_clip(r.reviewer_name, 40) || '이름 없음'}`,
+        message: `리뷰 캡처 제출 — ${_reviewerLabel(r.owner_name || r.reviewer_name, r.recipient_name || r.reviewer_name)}`,
         who: `리뷰어${r.row_index ? ` · ${r.row_index}행` : ''} · ${r.n}장`,
       }));
       return { items, hitLimit: rows.length >= limit };
@@ -141,18 +163,24 @@ const SOURCES = [
     kinds: ['review'],
     async run(db, { sheetId, tabName, limit, before }) {
       const { rows } = await db.query(
-        `SELECT id, COALESCE(resolved_at, updated_at, created_at) AS at,
-                status, resolution, reviewer_name, row_index, resolved_by
-           FROM review_inspections
-          WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('fail','suspect','resolved')
-            AND ($4::timestamptz IS NULL OR COALESCE(resolved_at, updated_at, created_at) <= $4::timestamptz)
-          ORDER BY COALESCE(resolved_at, updated_at, created_at) DESC LIMIT $3`, [sheetId, tabName, limit, before]);
+        `SELECT i.id, COALESCE(i.resolved_at, i.updated_at, i.created_at) AS at,
+                i.status, i.resolution, i.reviewer_name, i.row_index, i.resolved_by,
+                ri.reviewer_name AS owner_name, ri.recipient_name
+           FROM review_inspections i
+           LEFT JOIN LATERAL (
+             SELECT reviewer_name, recipient_name FROM review_index
+              WHERE sheet_id=i.sheet_id AND tab_name=i.tab_name AND row_index=i.row_index
+              LIMIT 1
+           ) ri ON TRUE
+          WHERE i.sheet_id=$1 AND i.tab_name=$2 AND i.status IN ('fail','suspect','resolved')
+            AND ($4::timestamptz IS NULL OR COALESCE(i.resolved_at, i.updated_at, i.created_at) <= $4::timestamptz)
+          ORDER BY COALESCE(i.resolved_at, i.updated_at, i.created_at) DESC LIMIT $3`, [sheetId, tabName, limit, before]);
       const lab = { fail: '불량', suspect: '의심', resolved: '확인 완료' };
       const items = rows.map(r => ({
         id: `ri:${r.id}`,
         at: r.at, kind: 'review',
         message: `리뷰 캡처 검수 — ${lab[r.status] || r.status}${r.resolution === 'ok' ? '(정상으로 종결)' : r.resolution === 'bad' ? '(불량으로 종결)' : ''}`,
-        who: [_clip(r.resolved_by, 40) || '시스템', _clip(r.reviewer_name, 40), r.row_index ? `${r.row_index}행` : ''].filter(Boolean).join(' · '),
+        who: [_clip(r.resolved_by, 40) || '시스템', _reviewerLabel(r.owner_name || r.reviewer_name, r.recipient_name || r.reviewer_name), r.row_index ? `${r.row_index}행` : ''].filter(Boolean).join(' · '),
       }));
       return { items, hitLimit: rows.length >= limit };
     },
