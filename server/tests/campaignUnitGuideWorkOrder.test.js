@@ -130,7 +130,7 @@ const COMPOSITE = {
     },
     {
       name: '상품B', url: 'https://coupang.com/B',
-      base: { pay: 9000, daily_limit: 3, guide: '상품B 유입', guide_images: [img('2'.repeat(24))] },
+      base: { pay: 9000, daily_limit: 3, guide: '상품B 유입', guide_images: [img('2'.repeat(24))], review_type_mix: [{ type: 'photo', quantity: 25 }, { type: 'text', quantity: 15 }] },
       options: [],
     },
   ]),
@@ -154,6 +154,8 @@ const COMPOSITE = {
     o1.optionUrl === 'https://coupang.com/A');
   ok('옵션에 링크가 있으면 그것이 이긴다', o2.optionUrl === 'https://coupang.com/A?opt=2');
   ok('상품 단위 줄의 링크 = 그 상품 메인 URL', pb.optionUrl === 'https://coupang.com/B');
+  ok('★ 상품 단위 줄도 base.review_type_mix 를 모집공고 조합으로 보존한다',
+    JSON.stringify(pb.reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 25 }, { type: 'text', quantity: 15 }]));
 
   // 무회귀 — 종전 필드
   ok('종전 필드(옵션명·결제금액·정원·일건수)는 그대로',

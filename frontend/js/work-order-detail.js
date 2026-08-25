@@ -685,6 +685,9 @@ function _woOptionRows(o) {
       return mix;
     }, []);
   };
+  // 옵션 없는 상품도 리뷰어가 고르는 선택지 하나다. 인트라넷의 상품별 혼합 조합은
+  // base.review_type_mix 에 실리므로, 옵션 행과 같은 정화 규칙으로 모집공고 행에 보존한다.
+  const productReviewTypeMix = prod => optionReviewTypeMix(prod && (prod.base || prod));
   const clean = s => String(s || "").replace(/\|/g, "").trim();
   const rows = [];
   for (const prod of arr) {
@@ -734,6 +737,7 @@ function _woOptionRows(o) {
         //   0 으로 두면 그 선택지만 "무제한"이 되어 복합 작업의 정원 합계가 통째로 무너진다(테섭 실측).
         recruitTotal: Math.max(0, Number(prod.base && prod.base.count) || 0), dailyLimit: baseDaily,
         inflowGuideHtml: ug.html, inflowGuideImages: ug.images,
+        reviewTypeMix: productReviewTypeMix(prod),
       });
     }
   }
