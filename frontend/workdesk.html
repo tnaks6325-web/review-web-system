@@ -871,10 +871,17 @@
   /* ★ height 고정(max-height 아님) — 탭마다 기록 수가 달라도 팝업 크기가 늘었다 줄었다 하지 않는다. */
   .tlbox{width:min(880px,94vw);height:86vh;max-height:86vh;display:flex;flex-direction:column}
   .tlsub{font-size:12px;color:var(--muted);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tltabs{display:flex;gap:5px;flex-wrap:wrap;padding:9px 14px;border-bottom:1px solid var(--line)}
+  .tltabs{display:flex;gap:5px;align-items:center;padding:9px 14px;border-bottom:1px solid var(--line)}
+  .tltablist{display:flex;gap:5px;flex:1;min-width:0;flex-wrap:wrap}
   .tltab{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;
          padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
   .tltab.on{background:color-mix(in srgb,var(--accent) 10%,#fff);border-color:var(--accent);color:var(--accent-deep)}
+  .tlsearch{margin-left:auto;position:relative;flex:none}
+  .tlsearch input{width:188px;padding:6px 26px 6px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;font-size:12px}
+  .tlsearch input:focus{outline:2px solid color-mix(in srgb,var(--accent) 28%,transparent);outline-offset:1px;border-color:var(--accent)}
+  .tlsearch::after{content:'⌕';position:absolute;right:9px;top:4px;color:var(--muted);font-size:17px;pointer-events:none}
+  .tlsearchcount{font-size:10.5px;color:var(--muted);white-space:nowrap;margin-left:4px}
+  @media(max-width:700px){.tltabs{flex-wrap:wrap}.tlsearch{margin-left:auto}.tlsearch input{width:160px}}
   /* ★ flex 자식은 기본 min-height:auto — 없으면 스크롤이 안 생기고 내용만큼 늘어난다(레포 상습 함정). */
   .tlbd{flex:1;min-height:0;overflow:auto;padding:12px 16px 18px}
   .tlwarn{background:color-mix(in srgb,var(--warn) 9%,#fff);border:1px solid color-mix(in srgb,var(--warn) 30%,var(--line));
@@ -9426,7 +9433,7 @@ function _applyRangeColor(color){
      ★ 겹쳐 오는 경계 항목은 서버가 준 `id` 로 걸러낸다(화면이 동일성 규칙을 지어내지 않는다).
      ★ **끝을 지어내지 않는다** — 커서를 못 받았거나(구버전 백엔드) 실패하면 자동 이어받기를
        멈추고 사유와 [다시 시도]를 남긴다(조용히 "여기까지"로 접지 않는다). */
-var _tlKind='all', _tlBusy=false, _tlItems=[], _tlSeen=null, _tlNext=null, _tlEnd=false, _tlPartial=false,
+var _tlKind='all', _tlQuery='', _tlBusy=false, _tlItems=[], _tlSeen=null, _tlNext=null, _tlEnd=false, _tlPartial=false,
     _tlKinds=[], _tlFailed=[], _tlErr='', _tlSeq=0, _tlLoaded=0;
 function openTabLog(){
   const t=STATE.cur; if(!t){ toast('작업을 먼저 선택하세요.'); return; }
@@ -9443,10 +9450,25 @@ function openTabLog(){
       <span style="flex:1"></span><button class="btn xs" onclick="closeTabLog()">닫기</button></div>
     <div class="tltabs" id="tltabs"></div>
     <div class="modalbd tlbd" id="tlbd"><div class="empty">불러오는 중…</div></div></div>`;
-  _tlKind='all'; _tlLoad();
+  _tlKind='all'; _tlQuery=''; _tlLoad();
 }
 function closeTabLog(){ const ov=document.getElementById('tlov'); if(ov) ov.style.display='none'; }
 function tlPick(k){ if(_tlKind===k) return; _tlKind=k; _tlLoad(); }
+/* 입력 즉시 현재 목록을 거르고, 빈 화면이면 과거 묶음도 계속 이어 받아 검색 결과를 찾는다. */
+function tlSearch(v){
+  _tlQuery=String(v||'').trim().toLocaleLowerCase();
+  /* 입력 중 탭 영역을 다시 그리면 input 자신이 교체되어 포커스가 매 글자마다 사라진다. */
+  _tlUpdateSearchCount(); _tlPaintBody();
+  if(_tlQuery) setTimeout(_tlAfterGrow,0);
+}
+function _tlShownItems(){
+  if(!_tlQuery) return _tlItems;
+  return _tlItems.filter(e=>[e.message,e.who,e.at,e.kind].join(' ').toLocaleLowerCase().includes(_tlQuery));
+}
+function _tlUpdateSearchCount(){
+  const el=document.getElementById('tlsearchcount');
+  if(el) el.textContent=_tlQuery?`검색 ${_tlShownItems().length}건`:'';
+}
 
 /* 검수 탭은 과거 이력 대신 이 작업에서 지금 처리할 의심·불량 카드다. 목록/권한/처리는
    리뷰검수의 기존 API·실행부를 그대로 쓴다. */
@@ -9544,6 +9566,7 @@ async function _tlMore(){
   const added=_tlTake(r);
   _tlBusy=false;
   if(added.length) _tlAppend(added);
+  _tlUpdateSearchCount();
   _tlPaintWarn(); _tlFoot();
   if(added.length) _tlAfterGrow();
 }
@@ -9569,16 +9592,20 @@ function _tlTake(r){
 function _tlPaintTabs(){
   const box=document.getElementById('tltabs'); if(!box) return;
   const kinds=_tlKinds||[];
-  box.innerHTML=[['all','전체']].concat(kinds.map(k=>[k.key,k.label]))
-    .map(([k,l])=>`<button class="tltab${_tlKind===k?' on':''}" onclick="tlPick('${k}')">${esc(l)}</button>`).join('');
+  const shown=_tlShownItems().length;
+  box.innerHTML=`<div class="tltablist">`+[['all','전체']].concat(kinds.map(k=>[k.key,k.label]))
+    .map(([k,l])=>`<button class="tltab${_tlKind===k?' on':''}" onclick="tlPick('${k}')">${esc(l)}</button>`).join('')
+    +`</div><label class="tlsearch"><input id="tlsearchinput" type="search" value="${esc(_tlQuery)}" oninput="tlSearch(this.value)" placeholder="로그 검색" aria-label="작업 로그 검색"></label>`
+    +`<span class="tlsearchcount" id="tlsearchcount">${_tlQuery?`검색 ${shown}건`:''}</span>`;
 }
 function _tlPaintBody(){
   const bd=document.getElementById('tlbd'); if(!bd) return;
-  bd.innerHTML=`<div id="tlwarn"></div><div class="tl" id="tllist">${_tlItems.map(_tlEvHtml).join('')}</div>`
+  const shown=_tlShownItems();
+  bd.innerHTML=`<div id="tlwarn"></div><div class="tl" id="tllist">${shown.map(_tlEvHtml).join('')}</div>`
     +`<div class="tlmore" id="tlfoot"></div>`;
-  if(!_tlItems.length){
+  if(!shown.length){
     const l=document.getElementById('tllist');
-    if(l) l.outerHTML=`<div class="empty" id="tllist">${_tlKind==='all'?'아직 기록이 없습니다.':'이 유형의 기록이 없습니다.'}</div>`;
+    if(l) l.outerHTML=`<div class="empty" id="tllist">${_tlQuery?'검색 결과가 없습니다.':(_tlKind==='all'?'아직 기록이 없습니다.':'이 유형의 기록이 없습니다.')}</div>`;
   }
   _tlPaintWarn(); _tlFoot();
   /* ★ 스크롤 감시는 이 요소에 매번 다시 건다 — 모달을 열 때마다 `#tlbd` 가 새로 만들어진다. */
@@ -9593,7 +9620,8 @@ function _tlPaintWarn(){
 function _tlAppend(items){
   const l=document.getElementById('tllist'); if(!l) return _tlPaintBody();
   if(!l.classList.contains('tl')) return _tlPaintBody();   // 빈 상태 자리표시자였다면 통째로 다시
-  l.insertAdjacentHTML('beforeend', items.map(_tlEvHtml).join(''));
+  const shown=_tlQuery ? items.filter(e=>[e.message,e.who,e.at,e.kind].join(' ').toLocaleLowerCase().includes(_tlQuery)) : items;
+  if(shown.length) l.insertAdjacentHTML('beforeend', shown.map(_tlEvHtml).join(''));
 }
 function _tlFoot(){
   const f=document.getElementById('tlfoot'); if(!f) return;
@@ -9601,11 +9629,12 @@ function _tlFoot(){
     +`<button class="btn xs" style="margin-left:6px" onclick="_tlMore()">다시 시도</button>`; return; }
   if(_tlBusy){ f.textContent='더 불러오는 중…'; return; }
   if(!_tlItems.length){ f.textContent=''; return; }
+  const count=_tlQuery?`검색 ${_tlShownItems().length}건 · `:'';
   f.innerHTML=_tlEnd
     ? (_tlPartial
-        ? `여기까지만 표시했습니다 · ${_tlItems.length}건 — 더 과거는 불러오지 못했습니다.`
-        : `이 작업의 처음까지 모두 불러왔습니다 · 총 ${_tlItems.length}건`)
-    : `아래로 내리면 더 과거를 불러옵니다 · 지금까지 ${_tlItems.length}건 `
+        ? `${count}여기까지만 표시했습니다 · ${_tlItems.length}건 — 더 과거는 불러오지 못했습니다.`
+        : `${count}이 작업의 처음까지 모두 불러왔습니다 · 총 ${_tlItems.length}건`)
+    : `${count}아래로 내리면 더 과거를 불러옵니다 · 지금까지 ${_tlItems.length}건 `
       +`<button class="btn xs" style="margin-left:6px" onclick="_tlMore()">더 보기</button>`;
 }
 /** 화면이 아직 덜 찼으면(스크롤이 안 생겨 감시가 안 돈다) 한 묶음 더 당겨 온다. */

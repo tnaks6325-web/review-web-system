@@ -225,6 +225,11 @@ ok('★★ 옛 [편집 이력] 버튼·모달은 흡수됐다(창구 둘 금지)
 ok('★ 유형 탭은 서버가 준 kinds 를 그린다(라벨 사본 0)',
   /_tlKinds=r\.kinds\|\|_tlKinds/.test(WD) && /const kinds=_tlKinds\|\|\[\]/.test(WD)
   && !/'정산'\]/.test(WD.slice(WD.indexOf('function _tlPaintTabs'), WD.indexOf('function _tlPaintBody'))));
+ok('★★ 유형 탭 오른쪽에 실시간 로그 검색창이 있고, 메시지·담당자·시간을 즉시 필터링한다',
+  /class="tlsearch"/.test(WD) && /oninput="tlSearch\(this\.value\)"/.test(WD)
+  && /function tlSearch\(v\)/.test(WD) && /\[e\.message,e\.who,e\.at,e\.kind\]/.test(WD));
+ok('★ 검색 중 더 받아온 과거 기록도 같은 검색어로 걸러 보여 준다',
+  /const shown=_tlQuery \? items\.filter/.test(WD) && /if\(_tlQuery\) setTimeout\(_tlAfterGrow,0\)/.test(WD));
 ok('★★ 못 받은 소스를 말한다(0건으로 꾸미지 않는다)',
   /_tlFailed=r\.failed\|\|\[\]/.test(WD) && /_tlFailed&&_tlFailed\.length/.test(WD));
 ok('★★ 자리표시자를 깐 함수는 예외에도 화면을 종결시킨다',
@@ -235,7 +240,7 @@ ok('★★ 줄 마크업은 _tlEvHtml 한 벌(첫 그리기·이어 붙이기 �
 ok('★★ 바닥 근처에 닿으면 더 과거를 불러온다',
   /bd\.onscroll=\(\)=>\{[\s\S]{0,160}_tlMore\(\)/.test(WD));
 ok('★★ 이어 붙일 때 목록을 다시 그리지 않는다(보던 자리 유지)',
-  /insertAdjacentHTML\('beforeend', items\.map\(_tlEvHtml\)/.test(WD));
+  /insertAdjacentHTML\('beforeend', shown\.map\(_tlEvHtml\)/.test(WD));
 ok('★★ 커서가 없으면(구버전 백엔드) 자동 이어받기를 멈춘다',
   /_tlNext=\(r&&r\.hasMore&&r\.nextBefore\)\?r\.nextBefore:null/.test(WD)
   && /if\(!_tlNext\)\{[\s\S]{0,40}_tlEnd=true/.test(WD));
