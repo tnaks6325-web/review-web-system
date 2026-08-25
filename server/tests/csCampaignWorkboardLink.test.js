@@ -123,6 +123,18 @@ t('7. 시트·작업·연락처·이름이 실려 왕복 복원된다(한글·�
   assert.strictEqual(p.n, '심인선');
 });
 
+t('7b. 줄 번호가 문맥에 있으면 그 값이 실제로 실린다(키만 있고 값이 비면 무의미)', () => {
+  const r = openWith(Object.assign({}, CTX, { row: '115' }));
+  const p = JSON.parse(decodeURIComponent(r.opened[0].url.match(/#go=([^&]+)/)[1]));
+  assert.strictEqual(p.r, '115', '줄 번호를 안 실으면 여러 번 참여한 사람의 "그 건"을 못 짚는다');
+});
+
+t('7c. 줄 번호가 없으면 빈 값 — 종전 동작(연락처·이름)으로 자연 폴백', () => {
+  const r = openWith(CTX);   // row 없음
+  const p = JSON.parse(decodeURIComponent(r.opened[0].url.match(/#go=([^&]+)/)[1]));
+  assert.strictEqual(p.r, '', '없는 줄 번호를 지어내면 엉뚱한 행을 짚는다');
+});
+
 t('8. 정보는 프래그먼트(#)로만 — 서버 로그·Referer 에 연락처가 안 실린다', () => {
   const r = openWith(CTX);
   const url = r.opened[0].url;
