@@ -128,7 +128,34 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
   return map;
 }
 
+// 여러 명의의 공고별 재참여 상태를 한 번에 계산한다.
+async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone8List } = {}) {
+  const days = repurchaseDays();
+  const out = new Map();
+  const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
+  const phones = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
+  if (days <= 0 || !ids.length || !phones.length) return out;
+  const { rows } = await dbOrClient.query(
+    `SELECT rc.id AS campaign_id, RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
+            MAX(os.submitted_at) AS last_submitted_at
+       FROM recruit_campaigns rc
+       JOIN order_submissions os ON os.sheet_id = rc.linked_sheet_id AND os.tab_name = rc.linked_tab_name
+      WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
+        AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
+      GROUP BY rc.id, RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)`, [ids, phones]);
+  const now = Date.now();
+  for (const r of rows) {
+    const at = new Date(r.last_submitted_at || r.last_at);
+    const availableFrom = new Date(at.getTime() + days * 86400000);
+    const status = availableFrom.getTime() > now ? 'locked' : 'ready';
+    const p8 = r.phone8 || r.p8;
+    if (!out.has(p8)) out.set(p8, new Map());
+    out.get(p8).set(String(r.campaign_id), { status, lastSubmittedAt: at, availableFrom });
+  }
+  return out;
+}
+
 module.exports = {
-  checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseStatusForCampaigns,
+  checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseStatusForCampaigns, checkRepurchaseStatusForAccounts,
   phone8Of, repurchaseDays,
 };

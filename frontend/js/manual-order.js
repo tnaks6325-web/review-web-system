@@ -50,7 +50,7 @@
   }
 
   let CTX = null;      // { sheetId, tabName, gid, campaignId, title }
-  let ROWS = [];       // 파싱 결과 + 캡처 상태
+  let ROWS = [];       // 파싱 결과 + 캡처 상태 + targetApplicationId
   let STAGED = [];     // 1단계에서 먼저 받아 둔 구매캡쳐(줄이 나뉜 뒤 수취인 이름으로 배정)
   let BUSY = false;
 
@@ -112,6 +112,7 @@
 .mo-pick:hover{color:#1b64da}
 .mo-msg{font-size:10.5px;line-height:1.5;margin-top:3px}
 .mo-msg.e{color:#B91C1C} .mo-msg.w{color:#B45309}
+.mo-appsel{width:100%;font:inherit;font-size:10.5px;border:1px solid #D7DCE5;border-radius:6px;padding:4px;background:#fff;color:#191F28}
 .mo-res{display:flex;gap:9px;align-items:flex-start;border:1px solid #EFEFF3;border-radius:11px;padding:10px 12px;margin-bottom:7px;background:#fff}
 .mo-res.ok{background:#F0FDF4;border-color:#BBF7D0} .mo-res.no{background:#FEF2F2;border-color:#FEE2E2}
 .mo-res .ci{width:20px;height:20px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800}
@@ -315,8 +316,9 @@
       r = await api(_moBase() + '/preview', { method: 'POST', body: JSON.stringify({ text }) });
     } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
-    ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null }));
+    ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null, applications: [], targetApplicationId: '' }));
     distributeStaged();   // 1단계에서 먼저 받아 둔 캡처를 수취인 이름으로 각 줄에 붙인다
+    await loadApplicationCandidates();
     if (r.repairedCount) console.info('[ManualOrder] 자동보정 ' + r.repairedCount + '건');
     if (r.truncated) alert(`한 번에 최대 50건까지 처리합니다. ${r.truncated}건은 제외되었습니다.`);
     renderPreview();
@@ -340,6 +342,12 @@
     // 붙여넣기가 안 먹는 브라우저(파이어폭스 등)를 위한 파일 선택 폴백 — 첨부 경로가 하나뿐이면 막힌다
     const capPick = `<label class="mo-pick">파일 선택<input type="file" accept="image/*" hidden
         onchange="ManualOrder.onFile(event,${i})"></label>`;
+    const apps = Array.isArray(it.applications) ? it.applications : [];
+    const appSelect = !CTX.campaignId ? '' : (apps.length
+      ? `<select class="mo-appsel" onchange="ManualOrder.pickApplication(${i},this.value)">
+          <option value="">신청 선택 필수</option>${apps.map(a => `<option value="${esc(a.id)}" ${String(it.targetApplicationId) === String(a.id) ? 'selected' : ''}>#${esc(a.id)} · ${esc(a.applicant_name || '')} · ${esc(a.status)} · ${esc(a.applied_at || '')}</option>`).join('')}
+        </select><div class="mo-msg w">기존 신청은 반드시 선택해야 합니다</div>`
+      : '<span class="mo-bdg grn">기존 신청 없음</span>');
     return `<tr class="${bad ? 'bad' : ''}">
       <td style="width:22px;color:#8B95A1">${i + 1}${fixBdg ? '<div style="margin-top:3px">' + fixBdg + '</div>' : ''}</td>
       <td style="width:96px">${inp('reviewerName')}${sub ? '<span class="mo-bdg vio">타계정</span>' : '<span class="mo-bdg grn">본인</span>'}</td>
@@ -351,9 +359,10 @@
       <td style="width:110px">${inp('account')}</td>
       <td style="width:74px">${inp('depositor')}</td>
       <td style="width:74px">${inp('price')}</td>
-      <td style="width:104px">
+      <td style="width:130px">
         <div class="${capCls}" tabindex="0" onpaste="ManualOrder.onPaste(event,${i})" onclick="this.focus()">${capTxt}</div>
         ${capPick}
+        ${appSelect}
         ${msgs}
       </td>
     </tr>`;
@@ -370,7 +379,7 @@
           <table class="mo-tbl">
             <thead><tr>
               <th></th><th>리뷰어</th><th>수취인</th><th>아이디</th><th>전화번호</th><th>주소</th>
-              <th>은행</th><th>계좌번호</th><th>예금주</th><th>금액</th><th>구매캡쳐</th>
+              <th>은행</th><th>계좌번호</th><th>예금주</th><th>금액</th><th>구매캡쳐 · 참여신청</th>
             </tr></thead>
             <tbody>${ROWS.map(rowHtml).join('')}</tbody>
           </table>
@@ -378,6 +387,7 @@
         <div class="mo-hint">
           · 칸을 눌러 바로 수정할 수 있습니다 · 오류가 있는 줄은 제출에서 제외됩니다<br>
           · 구매캡쳐 칸을 클릭하고 <b>Ctrl+V</b> 하면 첨부됩니다 — 캡처 속 주문번호를 자동으로 읽습니다<br>
+          · 참여형 공고에서 기존 신청이 보이면 <b>확정할 신청을 반드시 선택</b>하세요. 전화번호만으로 새 신청을 자동 확정하지 않습니다<br>
           · <b>🔧 자동보정 / 🤖 AI 보정</b> 표시가 붙은 줄은 <b>슬래시(/)가 빠진 자리를 시스템이 찾아 나눈 것</b>입니다 — 값이 맞는지 꼭 확인하세요
         </div>
       </div>`,
@@ -386,6 +396,24 @@
   }
 
   function back() { renderInput(); }
+
+  async function loadApplicationCandidates() {
+    if (!CTX || !CTX.campaignId || !ROWS.length) return;
+    let data = [];
+    try {
+      const r = await api('/api/campaign/admin/' + encodeURIComponent(CTX.campaignId) + '/applications');
+      data = r && r.ok && Array.isArray(r.data) ? r.data : [];
+    } catch (_) { return; }
+    const p8 = v => String(v || '').replace(/\D/g, '').slice(-8);
+    ROWS.forEach(row => {
+      const key = p8(row.fields && row.fields.phone);
+      row.applications = key ? data.filter(a => String(a.phone8 || '') === key && ['applied', 'expired', 'cancelled'].includes(a.status)) : [];
+    });
+  }
+
+  function pickApplication(i, id) {
+    const row = ROWS[i]; if (row) row.targetApplicationId = id || '';
+  }
 
   const REQUIRED = ['reviewerName', 'recipient', 'phone', 'address', 'bank', 'account', 'depositor', 'price'];
 
@@ -512,7 +540,7 @@
         campaignId: CTX.campaignId || null,
         allowOverDaily: allowOverDaily === true,
         allowRepurchase: allowRepurchase === true,
-        items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '' })),
+        items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '', targetApplicationId: x.r.targetApplicationId || null })),
       }),
     });
 
@@ -633,7 +661,7 @@
   }
 
   window.ManualOrder = {
-    open, close, parse, back, edit, submit,
+    open, close, parse, back, edit, submit, pickApplication,
     onPaste, onFile,                                    // 2단계 표의 줄별 첨부
     onTextPaste, onStagePaste, onDrop, onStageFiles, unstage,   // 1단계 보관함
   };

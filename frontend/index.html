@@ -3174,7 +3174,8 @@ async function _rcLoadRepurchaseStatus(ids) {
     const user = getSavedUser();
     const phone8 = user && user.phone8;
     if (!phone8 || !ids.length) return;
-    const key = phone8 + "|" + ids.slice().sort().join(",");
+    // 상태는 시간에 따라 바뀌므로 목록 재조회 때마다 영구 캐시하지 않는다(1분 단위 갱신).
+    const key = phone8 + "|" + ids.slice().sort().join(",") + "|" + Math.floor(Date.now() / 60000);
     if (key === _rcRepurchaseFetchKey) return;
     _rcRepurchaseFetchKey = key;
     const res = await fetch(API_BASE_URL + "/api/campaign/my-repurchase-status?phone8=" + encodeURIComponent(phone8) + "&ids=" + encodeURIComponent(ids.join(",")));
@@ -3217,7 +3218,7 @@ function _renderRecruitPreview(json) {
     // 재참여 안내 — 이미 받아 둔 결과가 있으면 카드 데이터에 병합(없으면 아래에서 조회 후 재렌더)
     parts.forEach(c => {
       const rs = _rcRepurchaseStatus[c.id];
-      if (rs) { c.repurchaseStatus = rs.status; c.repurchaseAvailableFrom = rs.availableFrom; }
+      if (rs) c.repurchase = rs;
     });
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')

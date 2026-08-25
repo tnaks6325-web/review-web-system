@@ -739,15 +739,13 @@
     //   화면이라 "내 참여 이력" 개념이 안 맞아 렌더하지 않는다. 서버 apply 게이트(같은 판정 —
     //   utils/repurchaseGuard)와 어긋나지 않게, 값은 항상 서버(GET /my-repurchase-status)가 준다.
     //   ★ c.repurchaseStatus 가 없으면(조회 전·평소 카드·구버전 백엔드) 아무것도 안 그린다.
+    const repAccounts = (c.repurchase && Array.isArray(c.repurchase.accounts)) ? c.repurchase.accounts : [];
+    const repReady = repAccounts.filter(a => a && a.status === 'ready');
+    const repLocked = repAccounts.filter(a => a && a.status === 'locked');
     let repurchaseSash = '';
-    let repurchaseLocked = false;
-    if (!admin && c.repurchaseStatus === 'locked' && c.repurchaseAvailableFrom) {
-      repurchaseLocked = true;
-      const dLeft = Math.max(0, Math.ceil((new Date(c.repurchaseAvailableFrom).getTime() - _now()) / 86400000));
-      repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(c.repurchaseAvailableFrom))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
-    } else if (!admin && c.repurchaseStatus === 'ready') {
-      repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ 지금 재참여 가능</span></div>`;
-    }
+    const repurchaseLocked = !admin && repAccounts.length > 0 && !repReady.length && repLocked.length > 0;
+    if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
+    else if (repurchaseLocked) { const d = repLocked[0].availableFrom; const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000)); repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`; }
 
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));
@@ -840,7 +838,7 @@
     if (c.state === 'open' && repurchaseLocked) {
       // ★ 참여는 실제로 서버(apply 게이트)에서 막히므로, 버튼도 그 사실을 보여준다 —
       //   안 그러면 "카드는 열려 보이는데 눌러도 거부"라는 헷갈리는 상태가 된다.
-      footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">${_esc(_fmtDateKo(c.repurchaseAvailableFrom))} 재참여 가능</div>`;
+      footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">재참여 가능일 이후 다시 참여할 수 있어요</div>`;
     } else if (c.state === 'open') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
       : `<button type="button" class="pbtn go">참여하기</button>`;

@@ -1059,10 +1059,22 @@ router.get('/my-repurchase-status', applyLimiter, async (req, res, next) => {
     if (p8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return res.json({ ok: true, status: {} });
-    const { checkRepurchaseStatusForCampaigns } = require('../utils/repurchaseGuard');
-    const map = await checkRepurchaseStatusForCampaigns(pool, { campaignIds: ids, phone8: p8 });
+    const { rows } = await pool.query('SELECT name, sub_accounts FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]);
+    let subs = (rows[0] && rows[0].sub_accounts) || [];
+    if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
+    if (!Array.isArray(subs)) subs = [];
+    const accounts = [{ phone8: p8, type: 'self', displayName: String((rows[0] && rows[0].name) || '본계정') }];
+    for (const sub of subs) {
+      const subP8 = String((sub && sub.phone) || '').replace(/\D/g, '').slice(-8);
+      if (subP8.length === 8 && subP8 !== p8 && !accounts.some(a => a.phone8 === subP8)) accounts.push({ phone8: subP8, type: 'sub', displayName: String((sub && sub.name) || '타계정') });
+    }
+    const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
+    const map = await checkRepurchaseStatusForAccounts(pool, { campaignIds: ids, phone8List: accounts.map(a => a.phone8) });
     const status = {};
-    for (const [cid, v] of map) status[cid] = v;
+    for (const cid of ids) {
+      const states = accounts.map(a => ({ ...a, ...(map.get(a.phone8)?.get(cid) || { status: 'ready' }) }));
+      if (states.some(a => map.get(a.phone8)?.has(cid))) status[cid] = { accounts: states, readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8) };
+    }
     res.json({ ok: true, status });
   } catch (err) {
     next(err);

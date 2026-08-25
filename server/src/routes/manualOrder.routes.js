@@ -72,7 +72,7 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
 });
 
 // ── 제출 ─────────────────────────────────────────────────────
-// body: { sheetId, tabName, gid, campaignId?, items:[{fields, optionKey?, orderNum?}] }
+// body: { sheetId, tabName, gid, campaignId?, items:[{fields, optionKey?, targetApplicationId?}] }
 // ★ 건별 독립 처리 — 일부 실패해도 성공 건은 접수된다(카톡 재수집 비용 회피).
 router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -149,6 +149,9 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           fields: f,
           campaignId: campaignId || null,
           optionKey: it.optionKey || '',
+          // 참여형 수동확정은 전화번호만으로 홀드를 고르지 않는다. 관리자가 선택한 신청 ID를
+          // 서버가 캠페인·명의와 함께 다시 검증한다(재참여 직후 새 홀드 오확정 방지).
+          targetApplicationId: it.targetApplicationId || null,
           adminName,
           force: b.force === true,   // 중복 경고를 확인한 뒤 재시도할 때만
           allowOverDaily,            // 오늘 정원 초과 확인을 받은 뒤 재시도할 때만
