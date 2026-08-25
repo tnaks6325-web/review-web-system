@@ -9456,15 +9456,16 @@ async function _tlLoadInspect(){
   try{
     const r=await api('/api/trackb/review-inspect/list?status=open&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
     if(!r||!r.ok) throw new Error((r&&r.error)||'조회 실패');
-    STATE.tlInspect={items:r.items||[], done:Object.create(null)};
+    STATE.tlInspect={items:r.items||[], done:Object.create(null), truncated:!!r.truncated, summary:r.summary||null};
     _tlPaintTabs(); _tlPaintInspect();
   }catch(e){ bd.innerHTML=`<div class="empty">검수 대상을 불러오지 못했습니다 — ${esc((e&&e.message)||'')}<br><button class="btn xs" style="margin-top:8px" onclick="_tlLoadInspect()">다시 시도</button></div>`; }
 }
 function _tlPaintInspect(){
   const bd=document.getElementById('tlbd'), st=STATE.tlInspect||{items:[],done:{}}; if(!bd) return;
   const rows=st.items||[];
-  bd.innerHTML=rows.length?`<div class="tlins">${rows.map((r,i)=>_tlInspectCard(r,i,!!st.done[r.file_id])).join('')}</div>`
-    :'<div class="empty">이 작업의 미처리 검수 대상이 없습니다.</div>';
+  const more=st.truncated?`<div class="tlwarn">미처리 검수 대상이 많아 최근 ${rows.length}건만 표시합니다. <button class="btn xs" onclick="tlInspectFull()">리뷰검수 전체 보기</button></div>`:'';
+  bd.innerHTML=more+(rows.length?`<div class="tlins">${rows.map((r,i)=>_tlInspectCard(r,i,!!st.done[r.file_id])).join('')}</div>`
+    :`<div class="empty">${st.truncated?'표시한 검수 대상은 모두 처리했습니다. 전체 미처리 대상은 리뷰검수 화면에서 계속 확인하세요.':'이 작업의 미처리 검수 대상이 없습니다.'}${st.truncated?' <button class="btn xs" onclick="tlInspectFull()">리뷰검수 전체 보기</button>':''}</div>`);
 }
 function _tlInspectCard(r,i,done){
   const isFail=r.status==='fail', thumb=_riImg(r.file_id), reasons=_riReasons(r.checks||{});
@@ -9477,9 +9478,10 @@ function _tlInspectCard(r,i,done){
 }
 function _tlUseInspect(i){ const st=STATE.tlInspect; const r=st&&st.items&&st.items[i]; if(!r) return null; STATE.ri=st.items; STATE.riContext='tablog'; return r; }
 function tlInspectZoom(i){ if(_tlUseInspect(i)) riZoom(i); }
-function tlInspectDetail(i){ const r=_tlUseInspect(i); if(!r) return; STATE.riContext=null; STATE.riTab={sheetId:r.sheet_id,tabName:r.tab_name}; STATE.riType='all'; switchView('inspect'); }
+function tlInspectDetail(i){ const r=_tlUseInspect(i); if(!r) return; closeTabLog(); STATE.riContext=null; STATE.riTab={sheetId:r.sheet_id,tabName:r.tab_name}; STATE.riType='all'; switchView('inspect'); }
+function tlInspectFull(){ const t=STATE.cur; if(!t) return; closeTabLog(); STATE.riContext=null; STATE.riTab={sheetId:t.sheetId,tabName:t.tabName}; STATE.riType='all'; switchView('inspect'); }
 function tlInspectAction(kind,i){ const r=_tlUseInspect(i); if(!r) return; if(kind==='ok') return riResolve(r.file_id,'ok'); if(kind==='bad') return riBadPopup(i); if(kind==='reinspect') return riReinspectTab(i); if(kind==='dedup') return riDedupPopup(i); if(kind==='route') return riMoreMenu(i); }
-function _tlInspectDone(fileId,resolution){ const st=STATE.tlInspect; if(!st) return _loadInspect(); st.done[fileId]=true; _tlPaintInspect(); setTimeout(()=>{ const cur=STATE.tlInspect; if(!cur||!cur.done[fileId]) return; cur.items=cur.items.filter(r=>r.file_id!==fileId); delete cur.done[fileId]; _tlPaintInspect(); },10000); }
+function _tlInspectDone(fileId,resolution){ const st=STATE.tlInspect; if(!st) return _loadInspect(); st.done[fileId]=true; _tlPaintInspect(); setTimeout(()=>{ const cur=STATE.tlInspect; if(!cur||!cur.done[fileId]) return; cur.items=cur.items.filter(r=>r.file_id!==fileId); delete cur.done[fileId]; if(_tlKind==='inspect'&&document.getElementById('tlov')?.style.display==='flex') _tlPaintInspect(); },10000); }
 function _riAfterAction(fileId,resolution){ if(STATE.riContext==='tablog') return _tlInspectDone(fileId,resolution); _loadInspect(); }
 function _riAfterReinspect(){ if(STATE.riContext==='tablog') return _tlLoadInspect(); _loadInspect(); }
 

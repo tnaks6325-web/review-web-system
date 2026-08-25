@@ -255,6 +255,9 @@ ok('★★ 작업 로그 검수도 기존 정상·불량·재검수·이동·중
   /riResolve\(r\.file_id,'ok'\)/.test(WD) && /riBadPopup\(i\)/.test(WD)
   && /riReinspectTab\(i\)/.test(WD) && /riDedupPopup\(i\)/.test(WD) && /riMoreMenu\(i\)/.test(WD));
 ok('★ 처리 완료 카드는 10초 뒤 목록에서 제거한다', /},10000\);/.test(WD) && /방금 처리됨/.test(WD));
+ok('★★ 검수 목록이 잘렸으면 전체 검수 화면으로 안내한다', /truncated:!!r\.truncated/.test(WD) && /리뷰검수 전체 보기/.test(WD));
+ok('★★ 완료 타이머는 다른 작업 로그 탭을 덮어쓰지 않는다', /_tlKind==='inspect'&&document\.getElementById\('tlov'\)/.test(WD));
+ok('★ 상세 검수 화면으로 갈 때 작업 로그 모달을 닫는다', /function tlInspectDetail[\s\S]{0,180}closeTabLog\(\)/.test(WD));
 
 setTimeout(() => {
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
