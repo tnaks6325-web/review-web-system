@@ -506,6 +506,13 @@ function _sourceContentNextValues(b, derived) {
     skip_weekends: _boolOrNull(b.skip_weekends),
     holidays: _holidaysJson(b.holidays),
     work_kind: workKindForStore(b.work_kind),
+    // ★★ 회수·혼합 부속정보(135)는 **요청이 실제로 보냈을 때만** 비교 대상에 넣는다.
+    //   이 칸을 보내지 않던 시절의 오더가 문장 파싱 폴백 때문에 "바뀐 것"으로 읽혀
+    //   계약 후속 매칭이 새로 막히는 일을 만들지 않는다(2026-08-20 실장애와 같은 자리).
+    //   ★ 빠뜨리면 그 칸만 고친 요청이 "바뀐 게 없다"로 읽혀 **저장했다고 답하면서 값을 버린다**.
+    ...(b.delivery_type_mix === undefined ? {} : { delivery_type_mix: _deliveryMixJson(b, derived.deliveryType) }),
+    ...(b.recall_courier === undefined ? {} : { recall_courier: _recallFields(b, derived.deliveryType).courier }),
+    ...(b.recall_product === undefined ? {} : { recall_product: _recallFields(b, derived.deliveryType).product }),
   };
 }
 
@@ -535,6 +542,7 @@ const SOURCE_FIELD_LABELS = {
   recruit_count: '총 모집인원', review_guide: '리뷰 가이드', special_notes: '특이사항',
   product_url: '상품 주소', work_sheet_url: '작업시트', goods_cost_type: '물건비',
   manager_name: '담당AE', work_manager: '작업담당', skip_weekends: '주말 제외',
+  delivery_type_mix: '실배송·빈박스 건수', recall_courier: '회수 택배사', recall_product: '회수 상품명칭',
   holidays: '휴무일', work_kind: '체험단 종류',
 };
 const _sourceFieldLabel = column => SOURCE_FIELD_LABELS[column] || column;
