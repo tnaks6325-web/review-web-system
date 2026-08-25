@@ -318,6 +318,8 @@
       .cae-toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:100001;background:#111827;color:#fff;
         font-size:.8rem;font-weight:700;border-radius:10px;padding:10px 16px;max-width:86vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}
       .cae-toast.err{background:#DC2626}
+      .pcard .pt-repurchase{margin-top:6px;padding:5px 7px;border-radius:7px;font-size:.62rem;font-weight:800;line-height:1.35}
+      .pcard .pt-repurchase.ready{background:#DCFCE7;color:#166534}.pcard .pt-repurchase.lock{background:#FEF3C7;color:#92400E}
     `;
     document.head.appendChild(st);
   }
@@ -679,6 +681,12 @@
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
 
+    const repAccounts = (c.repurchase && Array.isArray(c.repurchase.accounts)) ? c.repurchase.accounts : [];
+    const repReady = repAccounts.filter(a => a && a.status === 'ready');
+    const repLocked = repAccounts.filter(a => a && a.status === 'locked');
+    const repOnlyLocked = repAccounts.length > 0 && !repReady.length && repLocked.length > 0;
+    const repLabel = a => (a.type === 'sub' ? '타계정 ' : '본계정 ') + (a.displayName || '');
+    const repHtml = repAccounts.length ? (repReady.length ? `<div class="pt-repurchase ready">✅ ${_esc(repLabel(repReady[0]))}로 재참여 가능</div>` : `<div class="pt-repurchase lock">⏳ ${_esc(repLabel(repLocked[0]))} 재참여 대기 중</div>`) : '';
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));
     const timeIcon = (c.opensAt && c.closesAt) ? '🕑' : '⏱';
@@ -759,7 +767,8 @@
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
-    if (c.state === 'open') footer = isBlogCard
+    if (c.state === 'open' && repOnlyLocked) footer = `<button type="button" class="pbtn off">재참여 대기 중</button>`;
+    else if (c.state === 'open') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
       : `<button type="button" class="pbtn go">참여하기</button>`;
     else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
@@ -786,7 +795,7 @@
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
-          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>${repHtml}
           ${gauge}
           ${_roundsLine(c)}
           ${_adminSpec(c)}
