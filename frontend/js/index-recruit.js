@@ -2772,6 +2772,9 @@ function applyProductRowsFromOrder(prefill) {
       optKey: o.optKey || o.opt_key || "",
       payAmount: o.payAmount || o.pay_amount || 0,
       recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
+      // 작업오더가 선택지 단위로 보낸 혼합 조합은 행 dataset의 진실원본이다.
+      // 이 매핑에서 빼면 공고 생성 직후 모든 선택지가 "미입력"으로 초기화된다.
+      reviewTypeMix: o.reviewTypeMix ?? o.review_type_mix ?? [],
     }));
   // 옵션 없는 단일 상품은 표가 모집공고의 정원 단일 출처다. 인트라넷이
   // 총인원·일건수를 상품 행이 아니라 오더 상단에 보낸 경우, 0인 행을 그대로
