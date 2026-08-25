@@ -2616,6 +2616,21 @@ function readOptRows() {
   return out;
 }
 
+/** 가이드유입 신규 공고는 실제 참여 가능한 모든 선택지에 안내가 있어야 한다.
+ * 글 또는 사진만 있어도 유효하며, 마감 선택지는 리뷰어가 고를 수 없으므로 제외한다. */
+function validateActiveUnitInflowGuides(inflowType) {
+  if (inflowType !== "guide") return "";
+  const missing = [];
+  _optUnitEntries({ activeOnly: true }).forEach(({ row, optKey, productName }) => {
+    const guide = _ugCompose(row, row.dataset.ig);
+    if (String(guide.html || "").trim() || (Array.isArray(guide.images) && guide.images.length)) return;
+    missing.push(optKey || productName || "이름 없는 선택지");
+  });
+  return missing.length
+    ? "가이드유입은 모든 활성 상품·옵션에 유입가이드를 설정해야 합니다: " + missing.join(", ")
+    : "";
+}
+
 /** 표의 모든 행(옵션명 없는 단일상품 포함) — 작업내용 원문·정원 합계 산출용
  *  ★ '옵션 없는 작업' 모드에서는 optKey 를 읽지 않는다 — 숨은 칸의 잔여값이
  *    작업내용 원문(`rf_wd_product`)에 "상품명 - 옵션명"으로 새어 나가는 것을 막는다. */
@@ -2850,9 +2865,9 @@ function _optSummary() {
   if (dup) msgs.push("⚠ 옵션명 중복(저장 불가)");
   // 경고 전용 자동점검 — 게시를 막지 않는다(옵션 칸 자동점검과 같은 규율)
   if (namelessMsg) msgs.push(namelessMsg);
-  const withGuide = active.filter(o => String(o.inflowGuideHtml || "").trim()).length;
+  const withGuide = active.filter(o => String(o.inflowGuideHtml || "").trim() || (Array.isArray(o.inflowGuideImages) && o.inflowGuideImages.length)).length;
   if (withGuide && withGuide < active.length) {
-    msgs.push("⚠ 선택지 전용 유입가이드가 " + withGuide + "/" + active.length + "개만 설정됨 — 나머지는 공고 공통 가이드가 보입니다");
+    msgs.push("⚠ 선택지 유입가이드가 " + withGuide + "/" + active.length + "개만 설정됨 — 가이드유입 공고는 저장할 수 없습니다");
   }
   el.innerHTML = msgs.join(" · ");
   el.style.color = (msgs.length > 1) ? "#B45309" : "var(--t3)";
@@ -3309,6 +3324,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
         //   편집모드도 raw 모드로 복원 — 아니면 "다른 필드만 고쳐 저장"해도 escape 경로가 태그를 문자로 게시(라운드트립 파괴)
         {
           const _rawInflow = String(wd.inflowGuideHtml || "");
+          const _legacyRow = document.getElementById("rf_legacy_inflow_row");
+          const _legacyBox = document.getElementById("rf_legacy_inflow");
+          if (_legacyRow && _legacyBox) {
+            _legacyRow.hidden = !_rawInflow;
+            _legacyBox.innerHTML = _rawInflow;
+          }
           const _inflowTa2 = document.getElementById("rf_wd_inflow");
           // 🖼 사진은 본문에서 떼어 오른쪽 썸네일로 — 남는 글만 textarea 로 들어간다
           const _inflowText = _igLoadInflowHtml(_rawInflow);
@@ -5028,7 +5049,7 @@ async function saveRecruitPostImpl() {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
         // 작업오더가 연결되지 않은 직접 등록 공고도 링크/가이드 유입을 정확히 재현할 수 있게 저장한다.
         inflowType:      document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link",
-        inflowGuideHtml: _igComposeInflow(),
+        // 공통 유입가이드는 신규 공고에서 생성하지 않는다. 레거시 값은 서버가 보존한다.
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
         /* 🖼 리뷰가이드·특이사항 첨부(평문 칸이라 배열로 따로) — 위젯 상태를 그대로 전송한다.
@@ -5050,6 +5071,10 @@ async function saveRecruitPostImpl() {
         const invalidOptionUrl = payload.options.find(option =>
           String(option.optionUrl || "").trim() && !_rfHttpUrl(option.optionUrl));
         if (invalidOptionUrl) { renderPartCheck(); _rfSaveBlocked("옵션 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
+        const inflowGuideError = validateActiveUnitInflowGuides(
+          document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link"
+        );
+        if (inflowGuideError) { renderPartCheck(); _rfSaveBlocked(inflowGuideError, { go: _rfGoToCheck }); return; }
       }
     }
   }
@@ -5356,7 +5381,7 @@ function _renderPreview() {
   const _v = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ""; };
 
   // 유입가이드: 저장할 값과 **같은 조립 함수**를 쓴다 — 미리보기와 실제 저장본이 갈라질 수 없다.
-  const inflowHtml = _igComposeInflow();
+  const inflowHtml = ""; // 신규 미리보기는 선택지별 가이드만 표시한다.
 
   // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
   const ttlEl = document.getElementById("rf_prev_ttl");

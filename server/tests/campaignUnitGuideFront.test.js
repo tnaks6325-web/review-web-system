@@ -332,12 +332,12 @@ console.log('\n[G] 작업내용 원문 — 상품 단위는 "상품명 - 옵션�
 }
 
 /* ══════════════ H. 자동점검 = 경고 전용 ══════════════ */
-console.log('\n[H] 자동점검 — 혼합 라벨 · 부분 가이드 고지(게시는 막지 않는다)');
+console.log('\n[H] 자동점검 — 혼합 라벨 · 부분 가이드 고지');
 {
   const t = mixedTable();
   const html = t.dom.byId.rf_opt_summary.innerHTML;
   ok('혼합이면 "선택지 N개(옵션 a · 상품 b)" 로 센다', /선택지 3개\(옵션 2 · 상품 1\)/.test(html));
-  ok('일부 선택지만 가이드가 있으면 고지', /선택지 전용 유입가이드가 2\/3개만 설정됨/.test(html));
+  ok('일부 선택지만 가이드가 있으면 저장 차단 고지', /선택지 유입가이드가 2\/3개만 설정됨 — 가이드유입 공고는 저장할 수 없습니다/.test(html));
 
   const t2 = makeTable();
   t2.sandbox._seed = [{ productName: '상품A', unitKind: 'option', optKey: '옵A' }, { productName: '상품A', unitKind: 'option', optKey: '옵B' }];
@@ -613,6 +613,14 @@ console.log('\n[N] 작업오더 → 발행 → 저장 — 상품별 가이드가
       out.length === 2 && out[0].unitKind === 'option' && out[1].unitKind === 'product'
       && out.every(o => o.inflowGuideImages.length === 1));
   }
+}
+
+console.log('\n[O] 공통 유입가이드 종료 — 신규 입력 제거 · 레거시 읽기 전용');
+{
+  ok('신규 공통 유입가이드 textarea가 없다', !/id="rf_wd_inflow"/.test(modalSrc));
+  ok('기존 공통 안내는 읽기 전용 영역으로만 남는다', /id="rf_legacy_inflow"/.test(modalSrc));
+  ok('신규 저장 payload가 공통 HTML을 만들지 않는다', !/inflowGuideHtml:\s*_igComposeInflow\(\)/.test(recruitSrc));
+  ok('활성 선택지 가이드 누락 검증이 있다', /function validateActiveUnitInflowGuides\(/.test(recruitSrc));
 }
 
 console.log('\n✅ campaignUnitGuideFront: ' + passed + '개 통과');
