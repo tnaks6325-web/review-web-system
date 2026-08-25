@@ -3010,6 +3010,27 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     // 미리보기용 대표 옵션 — 선택 가능한 첫 옵션(없으면 첫 옵션). 실제 선택이 아니라 화면 예시.
     const sample = optionsRaw.find(o => o.selectable) || optionsRaw[0] || null;
     const options = _optionListForReviewer(optionsRaw);   // ★ 실제 리뷰어 응답과 같은 모양(미리보기 ≠ 실화면 금지)
+    /**
+     * ★★ 미리보기 전용 재료 — 선택지별 유입가이드 맵(optKey → {html, images}).
+     *
+     * 위 `options` 는 실제 리뷰어 응답과 같은 모양이라 선택지별 가이드가 **덜어져 있다**
+     * (고르지도 않은 선택지의 안내 HTML·사진을 리뷰어에게 통째로 보내지 않는 규칙).
+     * 그런데 미리보기 화면은 옵션을 고를 때 그 목록에서 선택지를 다시 찾으므로,
+     * 재료가 없으면 **고르는 순간 가이드가 사라진다**(2026-08-25 실측 — 미리보기는 항상
+     * 옵션을 고르고 들어가는 흐름이라 선택지 전 건이 "등록된 유입가이드가 없어요"로 보였다).
+     *
+     * ★ 목록의 모양은 그대로 두고(계약 불변) 재료만 따로 싣는다.
+     * ★ 이 경로는 adminOrMaster 게이트 뒤 — 관리자는 그 값을 편집하는 주체다.
+     * ★ 리뷰어 경로(`/work-detail`)는 무접촉: 거기는 서버가 고른 selectedOption 이 원본이라 정상이다.
+     */
+    const optionGuides = {};
+    for (const o of optionsRaw) {
+      if (!o || !o.optKey) continue;
+      optionGuides[o.optKey] = {
+        inflowGuideHtml: o.inflowGuideHtml || '',
+        inflowGuideImages: Array.isArray(o.inflowGuideImages) ? o.inflowGuideImages : [],
+      };
+    }
     const workDetail = sanitizeWorkDetail(camp.work_detail);
     // 미리보기에도 모집공고 직접 설정을 우선 적용한다.
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';
@@ -3030,6 +3051,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
       },
       options,
       selectedOption: sample,
+      optionGuides,                         // 미리보기에서 고른 선택지의 유입가이드 재료(가산 필드)
       canChangeOption: false,               // 미리보기에서는 옵션 변경 불가(서버 상태 무변경)
       workDetail,
       inflowType,
