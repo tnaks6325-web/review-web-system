@@ -182,7 +182,7 @@ function makeTable(opts) {
     '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', 'setProdMode', '_convertProdRows',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows',
-    '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName',
+    '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
     '_rfQuotaNotice', '_syncQuotaLockUi',
     // ★ 작업오더 → 발행 프리필 → 저장까지 한 줄로 잇는 end-to-end 절(N)에서 쓴다

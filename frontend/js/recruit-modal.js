@@ -1105,6 +1105,32 @@
    조용히 풀린다(실측으로 잡음 — 이 파일 안에 백틱을 쓰면 템플릿 리터럴이 거기서 끊기므로
    이 주석에도 백틱은 쓰지 않는다). */
 #recruitModal .rf-pm-none .rf-unit>.rf-ug-cta{display:none}
+/* 🧩 선택지 리뷰 조합 접이줄 — 유입가이드 줄과 같은 규격(아이콘/글자/상태/화살표 클래스 공용).
+   노출 판정은 JS 가 한다(혼합 + 옵션 원장 모드일 때만 rf-mx-on) — CSS 로 두 조건을 겹쳐 두면
+   특이성 순서에 좌우돼 조용히 풀린다. */
+#recruitModal .rf-unit>.rf-mx-cta{display:none;align-items:center;gap:7px;width:100%;border:none;border-top:1px solid #E9EEF5;background:#F8FAFC;padding:6px 10px;cursor:pointer;font-family:inherit;text-align:left}
+#recruitModal .rf-mx-on .rf-unit>.rf-mx-cta{display:flex}
+#recruitModal .rf-unit>.rf-mx-cta:hover{background:#EFF3F8}
+#recruitModal .rf-unit>.rf-mx-cta.ok{background:#E8F7F1;border-top-color:#8ED9BE}
+#recruitModal .rf-unit>.rf-mx-cta.ok .rf-ug-cta-st{color:#0B7A5B}
+#recruitModal .rf-unit>.rf-mx-cta.ng{background:#FEF2F2;border-top-color:#FCA5A5}
+#recruitModal .rf-unit>.rf-mx-cta.ng .rf-ug-cta-st{color:#C2323B}
+#recruitModal .rf-unit.mx-on>.rf-mx-cta .rf-ug-cta-ar{transform:rotate(180deg)}
+#recruitModal .rf-unit>.rf-mx{display:none}
+#recruitModal .rf-mx-on .rf-unit.mx-on>.rf-mx{display:block;padding:9px 11px 10px;border-top:1px solid #E9EEF5;background:#FBFCFE}
+#recruitModal .rf-mx-h{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+#recruitModal .rf-mx-ttl{font-size:.72rem;font-weight:900;color:#172033}
+#recruitModal .rf-mx-base{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.66rem;font-weight:800;color:#617087}
+#recruitModal .rf-mx-auto{flex:none;border:1px solid #DCE3EC;background:#fff;border-radius:6px;padding:4px 9px;font-size:.66rem;font-weight:800;color:#334155;cursor:pointer;font-family:inherit}
+#recruitModal .rf-mx-auto:hover{border-color:#B9C6DC;background:#F8FAFD}
+#recruitModal .rf-mx-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+#recruitModal .rf-mx-grid label{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:4px;font-size:.64rem;font-weight:800;color:#617087}
+#recruitModal .rf-mx-grid input{width:100%;min-width:0;height:26px;padding:0 6px;border:1px solid #D5DDE8;border-radius:5px;text-align:right;font-size:.72rem;font-weight:700;color:#172033;font-family:inherit;appearance:textfield;-moz-appearance:textfield}
+#recruitModal .rf-mx-grid input::-webkit-outer-spin-button,#recruitModal .rf-mx-grid input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+#recruitModal .rf-mx-bal{margin-top:7px;border-radius:6px;padding:5px 8px;font-size:.66rem;font-weight:800;border:1px solid transparent}
+#recruitModal .rf-mx-bal.ok{background:#E8F7F1;border-color:#8ED9BE;color:#0B7A5B}
+#recruitModal .rf-mx-bal.ng{background:#FEF2F2;border-color:#FCA5A5;color:#C2323B}
+#recruitModal .rf-mx-bal.warn{background:#FFFBEB;border-color:#FCD34D;color:#92400E}
 /* 행이 .rf-unit 껍데기에 들어가면서 '#rf_opt_rows .rf-opt-row:last-child' 가 안 맞는다 */
 #recruitModal #rf_opt_rows .rf-unit:last-child>.rf-opt-row{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
 /* 안내줄이 이제 항상 보여 그 줄이 시각적으로 마지막 줄이다 — 패널이 열려 있을 땐(ug-on) 패널이 그 자리를 넘겨받는다 */
