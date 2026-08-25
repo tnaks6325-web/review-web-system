@@ -1510,13 +1510,15 @@ function _ugBuild(key) {
   const box = document.createElement("div");
   box.className = "rf-ug";
   box.dataset.ug = key;
+  // ★ 사진(스트립)이 왼쪽, 글이 오른쪽 — 인트라넷 리뷰오더와 같은 규격
+  //   (작업지시서: inadd-webapp docs/specs/unit-guide-attach-spec.md §1·§4)
+  //   "비우면 공통 가이드가 나갑니다"류 설명문은 안내줄 배지가 대신하므로 넣지 않는다.
   box.innerHTML =
-    '<div class="rf-ug-h">🧭 이 선택지 전용 유입가이드' +
-      '<span class="rf-ug-note">비우면 공고 공통 유입가이드가 그대로 보입니다</span></div>' +
+    '<div class="rf-ug-h">유입가이드</div>' +
     '<div class="work-compose ig-wrap">' +
-      '<textarea id="rf_wd_' + key + '" class="rform-input" rows="3" ' +
-        'placeholder="이 선택지를 고른 리뷰어에게만 보일 유입 경로 안내"></textarea>' +
       '<div class="work-image-strip ig-strip" id="rf_ig_' + key + '" tabindex="0" data-igf="' + key + '"></div>' +
+      '<textarea id="rf_wd_' + key + '" class="rform-input" rows="3" ' +
+        'placeholder="유입 경로, 검색어, 진입 순서를 적어주세요&#10;이곳을 선택 후 이미지를 붙여넣어도 됩니다."></textarea>' +
       '<input type="file" id="rf_igf_' + key + '" accept="image/*" multiple class="ig-file">' +
     '</div>' +
     '<div class="ig-msg" id="rf_igm_' + key + '"></div>';
@@ -1621,8 +1623,17 @@ function _igRender(field) {
   const strip = document.getElementById("rf_ig_" + field);
   if (!strip) return;
   const list = window._igState[field] || [];
+  // 선택지 전용 칸은 **드롭 타일이 맨 왼쪽**, 사진이 그 오른쪽으로 이어붙는다(리뷰오더와 같은 배치).
+  // canonical 3칸(유입·리뷰·특이)은 종전대로 사진 뒤에 [추가] 타일이 붙는다.
+  const lead = _UG_KEY_RE.test(field);
   let h = "";
-  if (!list.length) {
+  if (lead) {
+    const full = list.length >= _IG_MAX;
+    h = `<button type="button" class="ig-lead${full ? " off" : ""}"${full ? "" : ' data-igadd="1"'}
+           title="${full ? `사진은 최대 ${_IG_MAX}장까지 넣을 수 있어요` : "끌어다 놓거나 클릭해 고르기"}">
+           <span class="t1">사진 끌어다 놓기</span><span class="t2">클릭해 고르기 · 최대 ${_IG_MAX}장</span></button>`;
+  }
+  if (!list.length && !lead) {
     h = `<button type="button" class="ig-empty" data-igadd="1">
            <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V<br>클릭</span></button>`;
   } else {
@@ -1636,7 +1647,7 @@ function _igRender(field) {
               <span class="ig-x" data-igdel="${i}" title="이 사진 빼기">✕</span>
             </button>`;
     });
-    if (list.length < _IG_MAX) {
+    if (!lead && list.length < _IG_MAX) {
       h += `<button type="button" class="ig-add" data-igadd="1" title="사진 추가">
               <span class="plus">＋</span><span>추가</span></button>`;
     }

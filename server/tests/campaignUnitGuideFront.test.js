@@ -474,17 +474,17 @@ console.log('\n[L] 2차 확대 — 안내줄·패널이 canonical 3칸보다 크
   ok('canonical 3칸의 58px !important 규칙은 그대로 남아 있다(무회귀)',
     /\.rf-compact-main \.work-compose textarea,[^{]*\{[^}]*height:58px!important/.test(modalSrc) &&
     /\.rf-compact-main \.ig-strip\{height:58px!important/.test(modalSrc));
-  ok('패널은 글 위 · 사진 아래로 쌓는다(옆으로 눕힌 58px 판형 폐기)',
-    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap\{display:flex;flex-direction:column/.test(modalSrc));
+  ok('패널은 사진 왼쪽 · 글 오른쪽 2열이다(3차 통일 규격)',
+    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap\{display:grid!important;\s*grid-template-columns:auto minmax\(180px,1fr\)/.test(modalSrc));
   ok('종전의 좁은 58px 옆배치 규칙(.rf-ug 단독 스코프)은 사라졌다(사본 부활 금지)',
     !/#recruitModal \.rf-ug \.ig-wrap>textarea\.rform-input,#recruitModal \.rf-ug \.ig-strip\{height:58px/.test(modalSrc));
   // ★★ compact-main 의 두 58px !important 규칙(텍스트영역·스트립)을 이겨야 한다 — 특이성이
   //    같으면 파일 순서에 좌우된다(위 CTA 특이성 사고와 같은 함정). !important + 더 높은
   //    특이성(.rf-compact-main .rf-unit>.rf-ug …)으로 순서 무관하게 이기는지 고정한다.
-  ok('텍스트영역 폭을 !important 로 되찾는다(더 높은 특이성)',
-    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap>textarea\.rform-input\{[^}]*height:64px!important/.test(modalSrc));
-  ok('스트립도 !important 로 전체 폭을 되찾는다(더 높은 특이성)',
-    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-strip\{[^}]*width:100%!important[^}]*min-height:78px!important/.test(modalSrc));
+  ok('텍스트영역 높이를 --ug-h 로 되찾는다(더 높은 특이성)',
+    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap>textarea\.rform-input\{[^}]*height:var\(--ug-h\)!important/.test(modalSrc));
+  ok('스트립도 !important 로 폭·높이를 되찾는다(사진 수만큼 오른쪽으로 자란다)',
+    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-strip\{[^}]*width:auto!important[^}]*height:var\(--ug-h\)!important/.test(modalSrc));
   {
     // 두 규칙 모두 compact-main 의 규칙보다 특이성이 높다 — `.rf-compact-main .rf-unit>.rf-ug`
     // 접두가 없는 순간 `.rf-compact-main .ig-strip`/`.work-compose textarea` 와 동률로 떨어져
@@ -494,13 +494,40 @@ console.log('\n[L] 2차 확대 — 안내줄·패널이 canonical 3칸보다 크
     ok('그 두 규칙은 순서에 기대지 않을 만큼 특이성이 높다(.rf-compact-main .rf-unit> 접두)',
       !!stripRule && !!taRule);
   }
-  ok('빈 상태 버튼 글자도 커졌다(canonical 3칸과 다른 자리)',
-    /\.rf-unit>\.rf-ug \.ig-empty \.t1\{font-size:\.82rem/.test(modalSrc) &&
-    /\.rf-unit>\.rf-ug \.ig-empty \.t2\{font-size:\.68rem/.test(modalSrc));
-  ok('썸네일·추가 버튼도 커졌다(74px 정사각 → 70px, canonical 은 74px 그대로)',
-    /\.rf-unit>\.rf-ug \.ig-thumb,#recruitModal \.rf-unit>\.rf-ug \.ig-add\{width:70px;height:70px\}/.test(modalSrc));
+  ok('맨 왼쪽 드롭 타일(.ig-lead)이 132px 로 자리를 지킨다',
+    /\.rf-unit>\.rf-ug \.ig-lead\{flex:none;width:132px;height:var\(--ug-h\)/.test(modalSrc));
+  ok('썸네일·추가 버튼은 스트립과 같은 높이다(아래로 쌓지 않는다)',
+    /\.rf-unit>\.rf-ug \.ig-thumb\{width:88px;height:var\(--ug-h\)/.test(modalSrc) &&
+    /\.rf-unit>\.rf-ug \.ig-add\{width:88px;height:var\(--ug-h\)\}/.test(modalSrc));
+  ok('높이는 --ug-h 한 값으로 묶는다(글칸·타일·썸네일이 같이 움직인다)',
+    /#recruitModal \.rf-unit>\.rf-ug\{--ug-h:96px\}/.test(modalSrc));
   ok('CSS 선택자는 여전히 #recruitModal 스코프(호스트 화면 오염 금지)',
     !/\n\.rf-ug-cta\b/.test(modalSrc) && !/\n\.rf-ug\b/.test(modalSrc));
+}
+
+/* ══════════════ M. 3차 통일(2026-08-25) — 리뷰오더와 같은 규격 ══════════════
+   인트라넷 리뷰오더 등록 폼과 모집공고 수정 모달이 같은 일을 하면서 다르게 생겨 있었다.
+   작업지시서(inadd-webapp docs/specs/unit-guide-attach-spec.md)대로 배치·문구를 맞춘다:
+   사진 왼쪽 · 글 오른쪽 · 드롭 타일이 맨 왼쪽 · 안내문 삭제 · placeholder 두 줄. */
+console.log('\n[M] 3차 통일 — 배치·문구가 리뷰오더와 같다');
+{
+  const build = grab(recruitSrc, '_ugBuild');
+  const iStrip = build.indexOf('ig-strip');
+  const iTa = build.indexOf('<textarea');
+  ok('마크업에서 스트립이 글칸보다 먼저 온다(= 사진이 왼쪽)', iStrip >= 0 && iTa > iStrip);
+  ok('글칸 안내는 두 줄 — 둘째 줄이 붙여넣기를 알린다',
+    /유입 경로, 검색어, 진입 순서를 적어주세요&#10;이곳을 선택 후 이미지를 붙여넣어도 됩니다\./.test(build));
+  ok('칸마다 반복되던 설명문은 사라졌다(안내줄 배지가 대신한다)',
+    !/비우면 공고 공통 유입가이드가 그대로 보입니다/.test(recruitSrc) &&
+    !/이 선택지를 고른 리뷰어에게만 보일 유입 경로 안내/.test(recruitSrc));
+
+  const render = grab(recruitSrc, '_igRender');
+  ok('선택지 칸만 드롭 타일을 맨 앞에 둔다(canonical 3칸은 종전대로)',
+    /const lead = _UG_KEY_RE\.test\(field\)/.test(render) &&
+    /if \(lead\)/.test(render) && /if \(!list\.length && !lead\)/.test(render) &&
+    /if \(!lead && list\.length < _IG_MAX\)/.test(render));
+  ok('드롭 타일 문구도 리뷰오더와 같다',
+    /사진 끌어다 놓기/.test(render) && /클릭해 고르기 · 최대 \$\{_IG_MAX\}장/.test(render));
 }
 
 /* ★ 사진이 실제로 나열되고 클릭하면 확대되는지는 이 파일의 가짜 DOM(getAttribute·임의

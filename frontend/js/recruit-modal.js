@@ -1143,22 +1143,40 @@
 #recruitModal .rf-unit>.rf-ug{display:none}
 #recruitModal .rf-unit.ug-on>.rf-ug{display:block;padding:10px 11px 11px;border-bottom:1px solid #E9EEF5;background:#F8FAFC}
 #recruitModal .rf-unit.ug-on:last-child>.rf-ug{border-radius:0 0 8px 8px}
-#recruitModal .rf-ug-h{display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#45536A;font-size:.7rem;font-weight:850}
+#recruitModal .rf-ug-h{display:flex;align-items:center;gap:6px;margin-bottom:7px;color:#3E4D64;font-size:.76rem;font-weight:850}
 #recruitModal .rf-ug-note{color:#94A3B8;font-size:.62rem;font-weight:600}
 /* ★ compact-main 의 텍스트영역·스트립 58px !important 규칙을 이겨야 하므로 **더 높은 특이성
    + !important** 로 둔다 — 같은 특이성이면 파일 순서(나중 규칙이 이김)에 좌우돼 CSS 를 재배치할
    때 이 폭이 조용히 풀린다(이 파일 안에 백틱을 쓰면 템플릿 리터럴이 거기서 끊기므로 설명에도
    백틱은 쓰지 않는다 — 위 CTA 특이성 사고와 같은 함정). */
-#recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-wrap{display:flex;flex-direction:column;gap:8px}
+/* ★★ 2026-08-25 3차 — 인트라넷 리뷰오더와 **같은 규격**으로 맞춘다(최종 B안).
+   사진(스트립) 왼쪽 · 글 오른쪽 · 높이는 --ug-h 한 값 · 사진은 아래로 쌓지 않고 오른쪽으로 자란다.
+   작업지시서: inadd-webapp docs/specs/unit-guide-attach-spec.md
+   compact-main 의 58px !important 캐스케이드를 이겨야 하므로 특이성 + !important 를 유지한다. */
+#recruitModal .rf-unit>.rf-ug{--ug-h:96px}
+#recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-wrap{display:grid!important;
+  grid-template-columns:auto minmax(180px,1fr);gap:8px;align-items:start}
 #recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-wrap>textarea.rform-input{width:100%!important;
-  min-width:0!important;height:64px!important;min-height:64px!important;resize:vertical;font-size:.78rem}
-#recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-strip{width:100%!important;height:auto!important;
-  min-height:78px!important;flex-wrap:wrap;justify-content:flex-start;padding:9px}
-#recruitModal .rf-unit>.rf-ug .ig-empty{flex:1 1 100%;flex-direction:row;justify-content:center;gap:10px;
-  padding:16px 10px;min-height:52px}
-#recruitModal .rf-unit>.rf-ug .ig-empty .t1{font-size:.82rem;font-weight:850}
-#recruitModal .rf-unit>.rf-ug .ig-empty .t2{font-size:.68rem;text-align:left;line-height:1.5}
-#recruitModal .rf-unit>.rf-ug .ig-thumb,#recruitModal .rf-unit>.rf-ug .ig-add{width:70px;height:70px}
+  min-width:0!important;height:var(--ug-h)!important;min-height:var(--ug-h)!important;resize:none;font-size:.78rem}
+#recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-strip{width:auto!important;height:var(--ug-h)!important;
+  min-height:var(--ug-h)!important;flex-wrap:nowrap;justify-content:flex-start;gap:8px;padding:0;
+  border:0;background:transparent;overflow:visible}
+/* 맨 왼쪽 드롭 타일 — 사진이 없든 있든 자리를 지킨다 */
+#recruitModal .rf-unit>.rf-ug .ig-lead{flex:none;width:132px;height:var(--ug-h);padding:8px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;
+  border:2px dashed #CDDFFA;border-radius:10px;background:#F8FBFF;font-family:inherit;text-align:center;
+  transition:background .15s,border-color .15s}
+#recruitModal .rf-unit>.rf-ug .ig-lead:hover{background:#EEF5FF;border-color:#6B9AE8}
+#recruitModal .rf-unit>.rf-ug .ig-lead .t1{color:#2469D8;font-size:.74rem;font-weight:850}
+#recruitModal .rf-unit>.rf-ug .ig-lead .t2{color:#7BA0D6;font-size:.64rem;line-height:1.4}
+#recruitModal .rf-unit>.rf-ug .ig-lead.off{cursor:default;opacity:.55}
+#recruitModal .rf-unit>.rf-ug .ig-strip.drag .ig-lead{background:#EEF5FF;border-color:#6B9AE8;border-style:solid}
+#recruitModal .rf-unit>.rf-ug .ig-thumb{width:88px;height:var(--ug-h);border-radius:10px}
+#recruitModal .rf-unit>.rf-ug .ig-add{width:88px;height:var(--ug-h)}
+@media (max-width:1100px){
+  #recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-wrap{grid-template-columns:1fr}
+  #recruitModal .rf-compact-main .rf-unit>.rf-ug .ig-strip{overflow-x:auto!important}
+}
 @media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
 @media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
 @media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}
