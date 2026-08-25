@@ -312,6 +312,14 @@ async function csLoadOrderContext(threadId) {
     if (!d || d.ok === false) throw new Error((d && d.error) || "불러오기 실패");
     if (_csActiveThreadId !== threadId) return;   // 그새 다른 방으로 이동
     wrap.innerHTML = _csCtxHtml(d);
+    /* ★ 그 주문이 기록된 줄 번호를 링크 문맥에 얹는다 — 한 사람이 같은 작업에 여러 번 참여했을 때
+         "이 문의의 그 건"을 정확히 짚는 키. 도착이 헤더보다 늦어도 되도록 **덧붙이기만** 한다
+         (문맥 자체를 여기서 만들지 않는다 — 작업 미지정 문의에 링크가 생기면 안 된다). */
+    if (_csGoCtx) {
+      const o = d.order || {}, sh = d.sheet || {};
+      const row = o.sheetRow || sh.rowIndex || '';
+      _csGoCtx.row = row ? String(row) : '';
+    }
   } catch (err) {
     if (_csActiveThreadId !== threadId) return;
     wrap.innerHTML = `<div style="flex:1;color:#9CA3AF;font-size:.76rem">주문정보를 불러오지 못했습니다 (${escHtml(err.message)})</div>`;
@@ -406,7 +414,8 @@ function csOpenWorkboard(ev) {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }   // 헤더 전체에 걸린 접기/펼치기와 분리
   var c = _csGoCtx;
   if (!c) return;
-  var payload = { s: c.sheetId, t: c.tabName, g: '', p: c.phone8 || '', n: c.name || '', st: c.sheetTitle || '' };
+  var payload = { s: c.sheetId, t: c.tabName, g: '', p: c.phone8 || '', n: c.name || '',
+                  st: c.sheetTitle || '', r: c.row || '' };   // r = 그 주문이 기록된 줄 번호(있으면 정확히 짚는다)
   var url = location.origin + _csWorkdeskPath() + '#go=' + encodeURIComponent(JSON.stringify(payload));
   var tk = '';
   try { tk = sessionStorage.getItem('admin_token') || ''; } catch (_) { }

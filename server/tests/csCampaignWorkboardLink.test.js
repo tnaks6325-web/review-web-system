@@ -199,5 +199,81 @@ t('18. 링크 스타일이 모듈 CSS 에 있다(테마 없는 호스트에서�
   assert.ok(/\.cs-camp-link\{[^}]*cursor:pointer/.test(CS), '누를 수 있어 보여야 한다');
 });
 
+// ══ 6. 행 찾기 우선순위 — workdesk `_applyPendingFocus` 실제 실행 ═══════════════
+//   ★★ 타계정 참여 건은 표의 **연락처가 어긋난다**(주문 연락처 = 그 명의 번호).
+//      대신 **참여자 칸은 로그인 본계정 이름**이라(sheetlessOrder: reviewer_name = loginName)
+//      이름 폴백이 그 건을 잡는다 — 이 계약이 깨지면 타계정 문의가 행을 영영 못 찾는다.
+function focusRun(rows, focus) {
+  const src = grab(WD, '_applyPendingFocus');
+  const TRS = rows.map(r => ({ seq: String(r.seq == null ? '' : r.seq), p8: r.p8 || '', nm: r.nm || '',
+    hit: false, scrolled: false,
+    getAttribute(a) { return a === 'data-p8' ? this.p8 : a === 'data-nm' ? this.nm : a === 'data-seq' ? this.seq : null; },
+    classList: { _o: null, add(c) { if (c === 'rowhit') this._o.hit = true; }, remove() { } },
+    scrollIntoView() { this.scrolled = true; } }));
+  TRS.forEach(t => { t.classList._o = t; });
+  const toasts = [];
+  const sandbox = {
+    STATE: { pendingFocus: focus },
+    document: { getElementById: id => (id === 'gbody' ? {
+      querySelector(sel) {
+        const m = String(sel).match(/tr\[data-(p8|nm|seq)="((?:[^"\\]|\\.)*)"\]/);
+        if (!m) return null;
+        const v = m[2].replace(/\\(.)/g, '$1');
+        return TRS.find(t => (m[1] === 'p8' ? t.p8 : m[1] === 'nm' ? t.nm : t.seq) === v) || null;
+      } } : null) },
+    _toast: msg => { toasts.push(msg); },
+    setTimeout: () => 0, console,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox);
+  sandbox._applyPendingFocus(true);
+  return { hit: TRS.find(t => t.hit) || null, toasts, TRS };
+}
+
+t('19. 줄 번호가 오면 그 줄을 정확히 짚는다(같은 사람이 여러 번 참여해도)', () => {
+  const rows = [{ seq: 40, p8: '41425414', nm: '심인선' }, { seq: 115, p8: '41425414', nm: '심인선' }];
+  const r = focusRun(rows, { row: '115', phone8: '41425414', name: '심인선' });
+  assert.ok(r.hit, '행을 못 찾았다');
+  assert.strictEqual(r.hit.seq, '115', '줄 번호를 안 보면 첫 참여 행이 잡혀 "이 문의의 그 건"이 아니게 된다');
+});
+
+t('20. ★ 타계정 참여 — 연락처가 어긋나도 참여자 이름으로 찾는다', () => {
+  // 표: 참여자=본계정(심인선) · 수취인=명의(명지수) · 연락처=명의 번호
+  const rows = [{ seq: 77, p8: '99998888', nm: '심인선' }];
+  const r = focusRun(rows, { row: '', phone8: '41425414', name: '심인선' });
+  assert.ok(r.hit, '타계정 건을 못 찾으면 이 기능의 절반이 죽는다');
+  assert.strictEqual(r.hit.seq, '77');
+});
+
+t('21. 줄 번호가 가리키는 사람이 다르면 채택하지 않고 폴백한다(엉뚱한 행 금지)', () => {
+  const rows = [{ seq: 115, p8: '11112222', nm: '다른사람' }, { seq: 200, p8: '41425414', nm: '심인선' }];
+  const r = focusRun(rows, { row: '115', phone8: '41425414', name: '심인선' });
+  assert.ok(r.hit, '폴백이 동작해야 한다');
+  assert.strictEqual(r.hit.seq, '200', '재배정·줄정리로 번호가 밀린 표에서 남의 행을 짚으면 안 된다');
+});
+
+t('22. 못 찾으면 조용히 넘어가지 않고 사유를 말한다', () => {
+  const r = focusRun([{ seq: 1, p8: '00000000', nm: '갑' }], { row: '9', phone8: '41425414', name: '심인선' });
+  assert.ok(!r.hit, '없는 사람을 짚으면 안 된다');
+  assert.strictEqual(r.toasts.length, 1, '안내 없이 아무 일도 안 일어나면 고장으로 읽힌다');
+  assert.ok(/심인선/.test(r.toasts[0]), '누구를 못 찾았는지 말해야 한다');
+});
+
+t('23. 줄 번호가 없으면 종전 동작 그대로(로그 딥링크 무회귀)', () => {
+  const rows = [{ seq: 5, p8: '41425414', nm: '심인선' }];
+  const r = focusRun(rows, { row: '', phone8: '41425414', name: '심인선' });
+  assert.ok(r.hit && r.hit.seq === '5');
+});
+
+t('24. 표의 행에 줄 번호가 심어져 있다(없으면 1순위가 영영 안 맞는다)', () => {
+  assert.ok(/data-seq="\$\{esc\(r\.seq/.test(WD), '그리드 <tr> 의 data-seq 누락');
+});
+
+t('25. 주문정보가 오면 줄 번호를 문맥에 덧붙인다 — 문맥 자체를 만들지는 않는다', () => {
+  assert.ok(/if \(_csGoCtx\) \{[\s\S]{0,400}_csGoCtx\.row =/.test(CS),
+    '작업 미지정 문의에 링크가 생기면 안 되므로 **덧붙이기만** 해야 한다');
+  assert.ok(/o\.sheetRow \|\| sh\.rowIndex/.test(CS), '주문 원장 → 명단 순 폴백 누락');
+});
+
 console.log('\n' + (fail ? `❌ ${fail} failed / ${pass} passed` : `✅ ${pass} checks passed`));
 process.exit(fail ? 1 : 0);
