@@ -3732,9 +3732,15 @@ function selectChannel(btn) { selectRfBtn('channel', btn); }  /* 하위 호환 *
 
    ★★ 판정은 이 함수 **한 곳**이고 재료는 화면의 그 칸 자체다 — 별도 상태를 두면
       "칩은 초록인데 저장하면 빈 값"으로 갈린다.
-   ★★ **막지 않는다**(경고 전용) — '현금영수증 발행 안 함'·'다계정 미허용'도 정상 값이라
-      미설정으로 단정할 수 없다. 그래서 그 셋은 **지금 값을 그대로 보여 주고**(눈으로 확인),
-      비어 있으면 곤란한 둘(입금명·팀채팅방)만 빨간 '미입력'으로 센다.
+   ★★ **막지 않는다**(경고 전용) — 여기서 미입력을 세도 저장은 그대로 된다.
+   ★★ **필수인데 비어 있는 칸만 그린다**(사용자 확정 2026-08-25) — '현금영수증 발행 안 함'·
+      '다계정 미허용'·'안내배지 1개'·'팀채팅방'은 전부 **정상 값**이라 미설정으로 단정할 수 없고,
+      그 값들을 줄에 늘어놓으면 정작 손봐야 하는 칸(입금명)이 그 사이에 묻힌다.
+      → `required` 인 칸이 비었을 때만 칩을 그리고, 그런 칸이 없으면 **줄 자체를 감춘다**.
+   ★★ **팀채팅방은 필수가 아니다**(사용자 확정 2026-08-25) — 저장(`saveRecruitPostImpl`)도 서버도
+      이 값을 요구하지 않으므로 required 로 두면 "빨갛게 뜨는데 없어도 저장되는" 거짓 신호가 된다.
+      폼의 `*` 표시와 왼쪽 레일 판정(`_railMark('link')`)에서도 **같이** 뺐다 — 한 곳만 빼면 화면이 갈린다.
+   ★ 필수 여부의 단일 출처는 `RF_START_ITEMS[].required` — `miss` 를 손으로 적지 않는다.
    ★ 게시된 공고를 수정할 때는 뜨지 않는다(신규 발행 또는 게시 전 공고에서만).
 ═══════════════════════════════════════ */
 const RF_START_ITEMS = [
@@ -3742,7 +3748,7 @@ const RF_START_ITEMS = [
   { k: "badges",        label: "안내배지", el: "rf_badge_input" },
   { k: "cash_receipt",  label: "현금영수증", el: "rf_cashrcpt_toggle" },
   { k: "multi_account", label: "다계정",   el: "rf_multi_account_toggle" },
-  { k: "chat_url",      label: "팀채팅방", el: "rf_chat_url", required: true },
+  { k: "chat_url",      label: "팀채팅방", el: "rf_chat_url" },   /* 필수 아님(2026-08-25) */
 ];
 
 /** 각 항목의 현재 상태 — { k, label, value, miss } */
@@ -3753,12 +3759,13 @@ function _rfStartState() {
   const cash = !!document.getElementById("rf_cash_receipt_required")?.checked;
   const multi = !!document.getElementById("rf_multi_account")?.checked;
   const nBadge = Array.isArray(_recruitBadges) ? _recruitBadges.length : 0;
+  const req = k => !!(RF_START_ITEMS.find(x => x.k === k) || {}).required;   /* 필수 여부 단일 출처 */
   return [
-    { k: "transfer_memo", label: "입금명",     value: memo || "미입력", miss: !memo },
-    { k: "badges",        label: "안내배지",   value: nBadge ? (nBadge + "개") : "없음", miss: false },
+    { k: "transfer_memo", label: "입금명",     value: memo || "미입력", miss: req("transfer_memo") && !memo },
+    { k: "badges",        label: "안내배지",   value: nBadge ? (nBadge + "개") : "없음", miss: req("badges") && !nBadge },
     { k: "cash_receipt",  label: "현금영수증", value: cash ? "발행" : "발행 안 함", miss: false },
     { k: "multi_account", label: "다계정",     value: multi ? "허용" : "미허용", miss: false },
-    { k: "chat_url",      label: "팀채팅방",   value: chat ? "입력됨" : "미입력", miss: !chat },
+    { k: "chat_url",      label: "팀채팅방",   value: chat ? "입력됨" : "미입력", miss: req("chat_url") && !chat },
   ];
 }
 
@@ -3773,12 +3780,15 @@ function renderRecruitStartCheck() {
   if (!box) return;
   if (!_rfStartVisible()) { box.hidden = true; return; }
   const st = _rfStartState();
-  const missN = st.filter(x => x.miss).length;
+  /* ★ 필수인데 비어 있는 칸만 그린다 — 정상 값(발행 안 함·미허용·배지 N개·팀채팅방)은 표기하지 않는다.
+     인덱스(i)는 그대로 넘겨야 rfStartGo 가 RF_START_ITEMS 의 그 칸을 찾는다(먼저 map 하고 거른다). */
+  const miss = st.map((x, i) => ({ x, i })).filter(o => o.x.miss);
+  if (!miss.length) { box.hidden = true; return; }   // 손볼 것이 없으면 줄 자체를 감춘다
   box.hidden = false;
-  box.className = "rf-startcheck" + (missN ? "" : " done");
-  box.innerHTML = `<span class="sct">${missN ? "🚀 작업 시작 설정 — " + missN + "개 남음" : "🚀 작업 시작 설정 — 모두 확인함"}</span>`
-    + st.map((x, i) => `<button type="button" class="scc${x.miss ? " miss" : ""}" onclick="rfStartGo(${i})"`
-      + ` title="${escHtml(x.label)} 칸으로 이동합니다">${escHtml(x.label)} <b>${escHtml(x.value)}</b></button>`).join("")
+  box.className = "rf-startcheck";
+  box.innerHTML = `<span class="sct">🚀 작업 시작 설정 — ${miss.length}개 남음</span>`
+    + miss.map(o => `<button type="button" class="scc miss" onclick="rfStartGo(${o.i})"`
+      + ` title="${escHtml(o.x.label)} 칸으로 이동합니다">${escHtml(o.x.label)} <b>${escHtml(o.x.value)}</b></button>`).join("")
     + `<span class="scn">나머지 값은 작업오더에서 자동으로 채워졌습니다</span>`;
 }
 
