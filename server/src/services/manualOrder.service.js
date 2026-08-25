@@ -186,7 +186,7 @@ async function dailyRemainingForCampaign(db, campaignId, now = new Date()) {
  * @returns {{ok:boolean, applicationId?:number, skipped?:string, error?:string}}
  */
 async function confirmExternalApplication(client, {
-  campaignId, name, phone, phone8, optionKey, orderSubmissionId, allowOverCapacity,
+  campaignId, name, phone, phone8, optionKey, orderSubmissionId, allowOverCapacity, targetApplicationId,
   sheetId, gid, tabName,
 }) {
   const { rows: cRows } = await client.query(
@@ -223,20 +223,32 @@ async function confirmExternalApplication(client, {
     }
   }
 
-  // 살아있는 applied 홀드가 있으면 그것을 확정(중복 행 생성 방지), 없으면 새로 만든다
-  const { rows: live } = await client.query(
-    `SELECT id FROM campaign_applications
-      WHERE campaign_id = $1 AND phone8 = $2 AND status = 'applied'
-      ORDER BY applied_at DESC LIMIT 1 FOR UPDATE`, [campaignId, phone8]);
-
   let appId;
-  if (live.length) {
-    appId = live[0].id;
+  const selectedId = parseInt(targetApplicationId, 10);
+  if (selectedId) {
+    const { rows: selected } = await client.query(
+      `SELECT id, status FROM campaign_applications
+        WHERE id = $1 AND campaign_id = $2 AND phone8 = $3 FOR UPDATE`,
+      [selectedId, campaignId, phone8]);
+    if (!selected.length) return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청을 찾을 수 없거나 연락처가 일치하지 않습니다' };
+    if (!['applied', 'expired', 'cancelled'].includes(selected[0].status)) {
+      return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청은 확정할 수 있는 상태가 아닙니다' };
+    }
+    appId = selected[0].id;
     await client.query(
       `UPDATE campaign_applications
           SET status = 'submitted', submitted_at = NOW(), order_submission_id = $2, option_key = COALESCE($3, option_key)
         WHERE id = $1`, [appId, orderSubmissionId, optionKey || null]);
   } else {
+    const { rows: candidates } = await client.query(
+      `SELECT id FROM campaign_applications
+        WHERE campaign_id = $1 AND phone8 = $2
+          AND status IN ('applied', 'expired', 'cancelled')
+        ORDER BY applied_at DESC LIMIT 2 FOR UPDATE`, [campaignId, phone8]);
+    if (candidates.length) {
+      return { ok: false, reason: 'application_selection_required',
+        error: '기존 참여 신청이 있어 자동 확정하지 않았습니다. 해당 신청을 선택해 다시 제출해주세요' };
+    }
     const ins = await client.query(
       `INSERT INTO campaign_applications
          (campaign_id, applicant_name, applicant_phone, phone8, status, applied_at, submitted_at, order_submission_id, option_key, is_popular_snapshot)
@@ -256,7 +268,7 @@ async function confirmExternalApplication(client, {
  * @returns {{ok:boolean, orderSubmissionId?:string, sheetRow?:number, warnings:string[], error?:string, ...}}
  */
 async function submitExternalOrder({
-  sheetId, tabName, gid, fields, campaignId, optionKey, adminName, allowOverCapacity = true, force = false,
+  sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
   allowOverDaily = false, allowRepurchase = false,
 }) {
   const warnings = [];
@@ -322,6 +334,16 @@ async function submitExternalOrder({
           WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`, [campaignId, p8]);
       if (pre.length) {
         return { ok: false, duplicate: true, error: `이 공고에 이미 확정된 참여(#${pre[0].id})가 있습니다` };
+      }
+      if (!parseInt(targetApplicationId, 10)) {
+        const { rows: existing } = await pool.query(
+          `SELECT id FROM campaign_applications
+            WHERE campaign_id = $1 AND phone8 = $2
+              AND status IN ('applied', 'expired', 'cancelled') LIMIT 1`, [campaignId, p8]);
+        if (existing.length) {
+          return { ok: false, reason: 'application_selection_required',
+            error: '기존 참여 신청이 있습니다. 확정할 신청을 선택해주세요' };
+        }
       }
     } catch (e) { warnings.push('참여 이력 확인 실패(제출은 계속): ' + e.message); }
   }
@@ -425,6 +447,7 @@ async function submitExternalOrder({
       const r = await confirmExternalApplication(client, {
         campaignId, name: f.recipient || '', phone: f.phone || '', phone8: p8,
         optionKey: resolvedOptKey, orderSubmissionId: ledger.orderSubmissionId, allowOverCapacity,
+        targetApplicationId,
         sheetId, gid: ledger.tabGid || gid || '', tabName,
       });
       if (r.ok) { await client.query('COMMIT'); application = r; if (r.overCapacity) warnings.push('모집 정원을 초과해 확정했습니다'); }
