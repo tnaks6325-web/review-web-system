@@ -175,12 +175,12 @@ const SOURCES = [
           WHERE i.sheet_id=$1 AND i.tab_name=$2 AND i.status IN ('fail','suspect','resolved')
             AND ($4::timestamptz IS NULL OR COALESCE(i.resolved_at, i.updated_at, i.created_at) <= $4::timestamptz)
           ORDER BY COALESCE(i.resolved_at, i.updated_at, i.created_at) DESC LIMIT $3`, [sheetId, tabName, limit, before]);
-      const lab = { fail: '불량', suspect: '의심', resolved: '확인 완료' };
       const items = rows.map(r => ({
         id: `ri:${r.id}`,
         at: r.at, kind: 'review',
-        message: `리뷰 캡처 검수 — ${lab[r.status] || r.status}${r.resolution === 'ok' ? '(정상으로 종결)' : r.resolution === 'bad' ? '(불량으로 종결)' : ''}`,
-        who: [_clip(r.resolved_by, 40) || '시스템', _reviewerLabel(r.owner_name || r.reviewer_name, r.recipient_name || r.reviewer_name), r.row_index ? `${r.row_index}행` : ''].filter(Boolean).join(' · '),
+        /* 첫 줄은 검수 대상의 본계정/타계정, 보조 줄은 작업표 좌표만 — 처리자·판정은 여기서 섞지 않는다. */
+        message: `리뷰 캡처 검수 — ${_reviewerLabel(r.owner_name || r.reviewer_name, r.recipient_name || r.reviewer_name)}`,
+        who: `리뷰어${r.row_index ? ` · ${r.row_index}행` : ''}`,
       }));
       return { items, hitLimit: rows.length >= limit };
     },
