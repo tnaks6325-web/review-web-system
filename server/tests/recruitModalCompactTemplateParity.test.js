@@ -1,9 +1,8 @@
 /**
  * Approved compact-row recruitment editor contract.
  *
- * The live modal deliberately shares its desktop geometry and navigation
- * grouping with the approved compact-rows reference.  This is a source-level
- * guard because the editor is assembled by a browser JavaScript module.
+ * This is a source-level guard because the editor is assembled by a browser
+ * JavaScript module.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -13,22 +12,17 @@ const root = path.join(__dirname, '..', '..');
 const modal = fs.readFileSync(path.join(root, 'frontend', 'js', 'recruit-modal.js'), 'utf8');
 const recruit = fs.readFileSync(path.join(root, 'frontend', 'js', 'index-recruit.js'), 'utf8');
 
-assert(/class="modal-box rf-box"[^>]*max-width:1020px/.test(modal),
-  '모집공고 편집 팝업은 승인 시안의 1020px 데스크톱 폭을 사용해야 합니다.');
-
-['link', 'prod', 'cond'].forEach((step) => {
-  assert(modal.includes(`data-rf-step="${step}"`), `${step} 단계가 좌측 레일에 있어야 합니다.`);
-});
-['fee', 'work'].forEach((step) => {
-  assert(!modal.includes(`data-rf-step="${step}"`), `${step}은 별도 좌측 단계가 아니어야 합니다.`);
-});
-
-assert(modal.includes('진행상품 · 상품 정보'),
-  '진행상품과 상품 정보는 하나의 좌측 단계로 표기해야 합니다.');
-assert(/if \(act === 'pub' \|\| act === 'fee'\) act = 'link'/.test(modal),
-  '입금 영역을 지날 때 좌측 단계는 연결·기본으로 유지해야 합니다.');
-assert(/if \(act === 'work'\) act = 'prod'/.test(modal),
-  '작업내용을 지날 때 좌측 단계는 진행상품·상품 정보로 유지해야 합니다.');
+assert(/class="modal-box rf-box"[^>]*max-width:1124px/.test(modal),
+  '모집공고 설정 팝업은 미리보기를 포함한 데스크톱 폭을 유지해야 합니다.');
+assert(!/class="rf-rail"/.test(modal) && !/data-rf-step=/.test(modal),
+  '좌측 단계 사이드바는 렌더링하지 않아야 합니다.');
+assert(!modal.includes('작업보드와 공고의 기준 정보 및 입금 기준을 먼저 확인합니다.'),
+  '중앙 상단의 연결·기본 안내 문구는 없어야 합니다.');
+const compact = modal.slice(modal.indexOf('class="rf-main rf-compact-main"'));
+assert(compact.indexOf('startup-setting-bar') < compact.indexOf('id="editorScroller"'),
+  '작업 시작 설정 바는 스크롤 영역 위에 고정되어야 합니다.');
+assert(compact.indexOf('id="editorScroller"') < compact.indexOf('for="rf_title"'),
+  '공고 제목 행은 스크롤 영역 안에 있어야 합니다.');
 assert(/#recruitModal \.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal),
   '승인 시안의 25/75 라벨·입력 열 비율을 사용해야 합니다.');
 assert(/#recruitModal \.rf-compact-main \.form-control>input:not\(\[type=checkbox\]\),#recruitModal \.rf-compact-main \.form-control>textarea\{[^}]*height:26px/.test(modal),
@@ -42,5 +36,12 @@ assert(['상품 메인 URL', '공고 썸네일 URL', '모집이월 방식', '입
   '승인된 라벨은 런타임 모달에 모두 남아 있어야 합니다.');
 assert((recruit.match(/refreshLinkedReferences/g) || []).length >= 3,
   '작업오더 프리필 후 읽기 전용 연결값을 다시 그려야 합니다.');
+assert(['다음날에 더하기', '남은 날에 나눠담기', '종료일 뒤에 붙이기']
+  .every((label) => modal.includes(label)),
+  '모집이월 방식은 세 가지 선택지를 제공해야 합니다.');
+assert(/rfCarrySet\("extend", \{ silent: true \}\)/.test(recruit),
+  '신규 공고의 모집이월 기본값은 종료일 뒤에 붙이기여야 합니다.');
+assert(!modal.includes('마감 · 보류 · 인원 제한 세부 설정'),
+  '효용이 낮은 묶음형 세부설정은 노출하지 않아야 합니다.');
 
 console.log('recruitModalCompactTemplateParity: passed');
