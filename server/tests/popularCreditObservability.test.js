@@ -18,7 +18,7 @@ assert(routes.includes('COALESCE(ca.is_popular_snapshot, rc.is_popular)'), 'obse
 assert(routes.includes('ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.submitted_at, ca.id)'), 'normal credits must be FIFO ordered');
 assert(routes.includes('WHERE ns.id = ca.id) AS popular_purpose'), 'control API must return the matched purpose marker');
 assert(trackB.includes('WHERE os.id = cp.order_submission_id'), 'workdesk marker must follow the linked order only');
-assert(trackB.includes('popularPurpose: r.popularPurpose === true'), 'workdesk row must expose purpose marker');
+assert(trackB.includes('popularPurpose: showEdits && r.popularPurpose === true'), 'workdesk marker must remain internal-only');
 assert(control.includes('🔥 인기상품목적 참여건'), 'control UI must label the matched entry');
 assert(workdesk.includes('🔥 인기상품목적 참여건'), 'workdesk UI must label the matched entry');
 assert(workdesk.includes('이후 인기상품 참여권으로 실제 사용되었습니다'), 'workdesk detail must explain the label');
