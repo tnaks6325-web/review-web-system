@@ -5795,7 +5795,7 @@ function renderWorkdesk(wd){
   } else {
     const rows=(wd.roster||[]).map((r,displayIndex)=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${displayIndex+1}</td>`+
       `<td class="gidlock" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}`+
-      `${r.source==='manual'?' <span class="src manual">수동</span>':''}${_visitBadge(r)}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
+      `${r.source==='manual'?' <span class="src manual">수동</span>':''}${_visitBadge(r)}${r.popularPurpose?' <span class="src" style="background:#FFF7ED;color:#9A3412" title="이 일반상품 구매양식 제출은 이후 인기상품 참여 1건의 참여권으로 실제 사용되었습니다">🔥 인기상품목적 참여건</span>':''}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
       `<td class="ph">${esc(_fmtPhone(r.phone8))}</td>`+
       _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
       _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
@@ -15878,6 +15878,7 @@ function renderDetail(r){
   const o=r.order;
   // 시트 행 표시에 셀 편집(col: 오버레이) 반영 — 그리드 셀과 상세 패널 값 일치(표시 전용).
   const rj=Object.assign({}, (r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{}, (r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{});
+  const purposeHtml = r.popularPurpose ? `<div class="dcard"><div class="dch">🔥 참여 목적</div><div class="dnone">인기상품목적 참여건 — 이 일반상품 구매양식 제출은 이후 인기상품 참여권으로 실제 사용되었습니다.</div></div>` : '';
   const orderHtml = o ? `<div class="dcard"><div class="dch">🛒 제출 구매양식 (DB 원장)</div><div class="dgrid">${
       _dpair('주문번호',o.order_num)+_dpair('수취인',o.recipient||o.orderer)+_dpair('연락처',o.phone)+_dpair('주소',o.address)+
       _dpair('옵션',o.selectedOptKey)+_dpair('금액',o.price)+_dpair('제출시각',_fmtTs(o.submittedAt))+
@@ -15888,7 +15889,7 @@ function renderDetail(r){
   const sheetHtml = keys.length
     ? `<div class="dcard"><div class="dch">📋 시트 행 전체 (${keys.length}칸)</div><div class="dgrid">${keys.map(k=>_dpair(k,rj[k])).join('')}</div></div>`
     : `<div class="dcard"><div class="dch">📋 시트 행</div><div class="dnone">행 스냅샷 없음 — 그림자 투영을 다시 실행하세요.</div></div>`;
-  return `<div class="detwrap">${orderHtml}${sheetHtml}</div>`;
+  return `<div class="detwrap">${purposeHtml}${orderHtml}${sheetHtml}</div>`;
 }
 function toggleDetail(id){
   const existing=document.getElementById('det-'+id);
