@@ -62,7 +62,6 @@ router.get('/threads', async (req, res, next) => {
       LEFT JOIN reviewers rv ON rv.phone8 = t.reviewer_phone8
       ${whereSql}
       ORDER BY (t.admin_unread_count > 0) DESC, COALESCE(t.last_message_at, t.created_at) DESC
-      LIMIT 500
     `, params);
 
     const totalUnread = rows.reduce((s, r) => s + (r.adminUnread || 0), 0);
