@@ -1210,7 +1210,11 @@ function rfCarrySet(mode, opts) {
   if (note) note.textContent = m === "extend" ? "기본" : (m === "next" ? "다음날" : "분산");
   const campaignId = window._recruitEditLoaded && window._recruitEditLoaded.id;
   if (campaignId && !(opts && opts.silent)) {
-    try { localStorage.setItem("rf_carry_strategy_v1_" + campaignId, m); } catch (_) {}
+    try {
+      localStorage.setItem("rf_carry_strategy_v1_" + campaignId, m);
+      // 인원 조절 공용 모달의 시작값도 즉시 같은 방식으로 맞춘다.
+      sessionStorage.setItem("cdp_carry_mode_" + campaignId, m);
+    } catch (_) {}
   }
 }
 window.rfCarrySet = rfCarrySet;
