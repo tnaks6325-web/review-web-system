@@ -687,14 +687,16 @@
     + '#cdpModal .cdp-carry .where{margin-top:9px;font-size:.7rem;line-height:1.6;color:#7c3d09;background:#fff3e2;border:1px solid #f8d5aa;border-radius:8px;padding:8px 11px}'
     + '#cdpModal .cdp-carry .cmp{margin-top:7px;font-size:.66rem;color:#8a7a63}'
     + '#cdpModal .cdp-carry .cmp b{color:#7c3d09}'
-    /* 요약과 보충 방식은 좌측에 압축하고, 날짜별 계획은 넓은 오른쪽 영역을 쓴다. */
-    + '#cdpModal .cdp-fix{display:grid;grid-template-columns:185px minmax(0,1fr);column-gap:12px;align-items:start}'
-    + '#cdpModal .cdp-fix>.cdp-note,#cdpModal .cdp-fix>.cdp-bal,#cdpModal .cdp-fix>.cdp-sub{grid-column:1/-1}'
-    + '#cdpModal .cdp-stat{grid-column:1;margin-bottom:8px;padding:10px}#cdpModal .cdp-stat .bar{display:none}'
-    + '#cdpModal .cdp-stat .kv{gap:6px}#cdpModal .cdp-stat .kv span{display:block;width:100%}'
-    + '#cdpModal .cdp-carry{grid-column:1;margin:0;padding:9px}.cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:none}'
-    + '#cdpModal .cdp-seg{grid-template-columns:1fr;gap:3px;padding:0;background:none}#cdpModal .cdp-seg button{border:1px solid #eadcc8;padding:7px;text-align:left}#cdpModal .cdp-seg button small{display:none}'
-    + '#cdpModal .cdp-sub{grid-column:2;grid-row:1;margin-top:4px}#cdpModal .cdp-fix>.cdp-bal{grid-column:2;grid-row:2;margin-top:0}'
+    /* 시안과 같은 두 칼럼 구조: 좌측은 요약·배정 방식, 우측만 날짜별 계획을 조절한다. */
+    + '#cdpModal .cdp-bd{padding:0}#cdpModal .cdp-layout{display:grid;grid-template-columns:205px minmax(0,1fr);flex:1;min-height:0}'
+    + '#cdpModal .cdp-side{padding:18px;border-right:1px solid var(--border,#e5e7eb);background:var(--bg2,#f8fafc);overflow-y:auto}'
+    + '#cdpModal .cdp-main{padding:18px 20px 0;display:flex;flex-direction:column;min-height:0}'
+    + '#cdpModal .cdp-fix{padding:0;flex:0 0 auto}#cdpModal .cdp-sc{padding:0 0 14px;overflow-y:auto;flex:1 1 auto;min-height:0}'
+    + '#cdpModal .cdp-stat{margin:0 0 16px;padding:0;border:0;background:none}#cdpModal .cdp-stat .bar{display:block}'
+    + '#cdpModal .cdp-stat .kv{display:block;margin-top:13px}#cdpModal .cdp-stat .kv span{display:block;padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb)}'
+    + '#cdpModal .cdp-carry{margin:0;padding:0;border:0;background:none}.cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:none}'
+    + '#cdpModal .cdp-seg{grid-template-columns:1fr;gap:5px;padding:0;background:none}#cdpModal .cdp-seg button{border:1px solid #d5e0ef;background:#fff;padding:8px;text-align:left}#cdpModal .cdp-seg button small{display:block}'
+    + '#cdpModal .cdp-side>.cdp-note{margin:16px 0 0;border:0;background:#fff8e5;padding:10px;font-size:.68rem;color:#99500d}'
     /* ── ③ 배분 균형 바(요구 ⑥) — 높이는 "일치(초록)" 기준 41px 로 고정한다.
           상태마다 바가 커졌다 작아지면 아래 표가 위아래로 흔들려 조절하던 줄을 놓친다(사용자 확정). */
     + '#cdpModal .cdp-bal{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px;padding:0 13px;margin-bottom:11px;border:1.5px solid;display:flex;align-items:center;gap:11px;flex-wrap:nowrap;overflow:hidden}'
@@ -706,7 +708,7 @@
     + '#cdpModal .cdp-bal.ok{background:#ecfdf3;border-color:#86dfae;color:#14653a}'
     + '#cdpModal .cdp-bal.over{background:#fef2f2;border-color:#f4a9a9;color:#a81f1f}'
     + '#cdpModal .cdp-bal.under{background:#eff5ff;border-color:#a9c6f6;color:#1b46a8}'
-    + '@media (max-width:700px){#cdpModal .cdp-fix{display:block}#cdpModal .cdp-stat .bar{display:block}#cdpModal .cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:block}#cdpModal .cdp-seg{grid-template-columns:1fr}#cdpModal .cdp-sub{margin-top:0}}'
+    + '@media (max-width:700px){#cdpModal .cdp-layout{display:block}#cdpModal .cdp-side{border-right:0;border-bottom:1px solid var(--border,#e5e7eb)}#cdpModal .cdp-main{padding:16px}#cdpModal .cdp-stat .kv{display:flex;gap:8px;flex-wrap:wrap}#cdpModal .cdp-stat .kv span{width:auto;border:0;padding:0}#cdpModal .cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:block}#cdpModal .cdp-seg{grid-template-columns:1fr}}'
     + '@media (max-width:560px){#cdpModal .cdp-bal{height:auto;min-height:41px;padding:9px 12px;flex-wrap:wrap}'
     + '#cdpModal .cdp-bal .l1{white-space:normal}#cdpModal .cdp-seg{grid-template-columns:1fr}}'
     + '#cdpModal .cdp-row{display:grid;grid-template-columns:86px 1fr 152px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px dashed var(--border,#eef2f7)}'
@@ -1292,16 +1294,17 @@
         + '</div></div>';
     }
 
-    // ★ 고정 영역(.cdp-fix) = 안내·현황·이월 방식·균형 바·표 머리 / 스크롤(.cdp-sc) = 날짜 목록부터
+    // 좌측 고정 요약/방식 + 우측 날짜별 계획. 목록·작업보드가 같은 공용 모달을 쓴다.
     bd.innerHTML =
-      '<div class="cdp-fix">'
+      '<div class="cdp-layout"><aside class="cdp-side">'
+      + statBlk
+      + carryBlk
+      + wkNote
+      + '</aside><section class="cdp-main"><div class="cdp-fix">'
       + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
       + wtNote
       + schNote
-      + wkNote
-      + statBlk
       + offNote
-      + carryBlk
       + heldBlk
       // ★ 코드리뷰 M1: 총원 충족 시 closed 가 영속되어 있어 차수를 추가해도 게시를 켜기 전에는
       //   모집이 재개되지 않는다(자동 재오픈은 수동 마감과 구분 불가라 하지 않음) — 화면이 말한다.
@@ -1344,7 +1347,7 @@
       + (j.roundsDrift ? '<div class="cdp-note warn">⚠ 총모집(' + (j.recruitTotal || 0) + ')이 차수 합계(' + (j.roundsTotal || 0) + ')와 다릅니다 — 다른 창구에서 총모집이 바뀐 흔적입니다. 차수를 추가/제거하면 합계로 다시 맞춰집니다.</div>' : '')
       + '</div>'
       + histHtml()
-      + '</div>';   // .cdp-sc 닫기
+      + '</div></section></div>';   // .cdp-sc · .cdp-main · .cdp-layout 닫기
 
     // ★★ 스크롤 위치 복원 — render 가 본문을 통째로 갈아치우므로 스크롤 컨테이너도 새로 만들어진다.
     //   복원하지 않으면 −/＋ 한 번에 목록이 맨 위로 튀어 **조절하던 줄을 놓친다**(종전에는 본문
