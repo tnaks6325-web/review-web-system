@@ -123,7 +123,7 @@ function nextOpenDate(c, fromDateStr, sch, plans) {
   if (!first) return null;
   let d = first;
   for (let i = 0; i < NEXT_OPEN_SCAN_DAYS && d; i++) {
-    const closed = isWeekendClosedOn(c, d) || planOverrideFor(plans, d) === 0;
+    const closed = isWeekendClosedOn(c, d, plans) || planOverrideFor(plans, d) === 0;
     if (!closed) return d;
     d = sch ? nextWorkDate(sch, d) : addIsoDays(d, 1);
   }

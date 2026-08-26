@@ -41,21 +41,24 @@ function _isoWeekday(isoDate) {
  * ★ 판정 불가(형식 밖 값)는 **막지 않는다** — 모른다고 날짜를 건너뛰면 카운트다운이 엉뚱한
  *   날을 가리킨다(막는 쪽은 weekendPublicationState 가 오늘 기준으로 최종 판정한다).
  */
-function isWeekendClosedOn(campaign, isoDate) {
+function isWeekendClosedOn(campaign, isoDate, plans = null) {
   if (!campaign || campaign.skip_weekends !== true) return false;
+  // 날짜별 모집계획(095)에 주말 인원이 명시되면 그 날짜만 공고 설정보다 우선해 연다.
+  // 0명은 휴무라는 기존 계약을 유지한다.
+  if (plans && Number(plans[isoDate]) > 0) return false;
   const weekday = _isoWeekday(isoDate);
   if (weekday === null) return false;
   return weekday === 0 || weekday === 6;
 }
 
-function weekendPublicationState(campaign, now = new Date()) {
+function weekendPublicationState(campaign, now = new Date(), plans = null) {
   if (!campaign || campaign.skip_weekends !== true) {
     return { blocked: false, reason: null, message: null, resumesOn: null };
   }
   const today = _kstDateParts(now);
   const todayIso = _kstIsoDate(today);
   const weekday = _isoWeekday(todayIso);
-  if (!isWeekendClosedOn(campaign, todayIso)) {
+  if (!isWeekendClosedOn(campaign, todayIso, plans)) {
     return { blocked: false, reason: null, message: null, resumesOn: null };
   }
   const daysUntilMonday = weekday === 6 ? 2 : 1;

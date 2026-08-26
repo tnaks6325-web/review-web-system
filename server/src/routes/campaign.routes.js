@@ -636,7 +636,7 @@ function _weekendResume(row, weekend, counts, now, schedule) {
 /** 공개 뷰: 레거시/참여형 분기 + 참여형은 상태엔진 페이로드 병합 */
 function _publicView(row, counts, now, schedule) {
   if (!row.participation_mode) {
-    const weekend = weekendPublicationState(row, now);
+    const weekend = weekendPublicationState(row, now, counts && counts.plans);
     const resume = _weekendResume(row, weekend, counts, now, null);
     return {
       ..._pick(row, PUBLIC_FIELDS_LEGACY),
@@ -651,7 +651,7 @@ function _publicView(row, counts, now, schedule) {
   const st = computeCampaignState(row, counts || {
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
   }, now, schedule);
-  const weekend = weekendPublicationState(row, now);
+  const weekend = weekendPublicationState(row, now, counts && counts.plans);
   const resume = _weekendResume(row, weekend, counts, now, schedule);
   return {
     ..._pick(row, PUBLIC_FIELDS_PARTICIPATION),
@@ -1519,16 +1519,6 @@ async function _applyParticipation(req, res, next, campPre) {
     if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
     const camp = cRows[0];
     const now = new Date();
-    const weekend = weekendPublicationState(camp, now);
-    if (weekend.blocked) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({
-        ok: false,
-        reason: weekend.reason,
-        resumesOn: weekend.resumesOn,
-        error: weekend.message,
-      });
-    }
 
     // ★ 타계정 게이트 1(063): 공고 토글(§09-1 기본 불가) + 명의 형식 + 같은번호 배제(phone8=시스템 신원키 보호)
     if (isSubApply) {
@@ -1557,6 +1547,16 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
     const countsMap = await fetchCampaignCounts(client, [id], now);
+    const weekend = weekendPublicationState(camp, now, countsMap.get(id) && countsMap.get(id).plans);
+    if (weekend.blocked) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        ok: false,
+        reason: weekend.reason,
+        resumesOn: weekend.resumesOn,
+        error: weekend.message,
+      });
+    }
     // ★ 카드 표시와 동일한 일정을 참여 게이트에도 적용(불일치 = 오픈처럼 보이는데 참여 거부 / 그 반대).
     //   1분 캐시라 보통 추가 쿼리 없음. 잠금 커넥션(client)으로 읽어 커넥션 고갈 교착을 피한다.
     const schedMap = await deriveSchedules(client, tabsOfCampaigns([camp]), now);
