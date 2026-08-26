@@ -1175,12 +1175,13 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /\.cdp-fix\{/.test(CDP) && /\.cdp-sc\{[^}]*overflow-y:auto/.test(CDP));
   ok('8-1 ★ flex 자식에 min-height:0 (없으면 스크롤이 안 생기고 내용만큼 늘어난다)',
     /\.cdp-bd\{[^}]*min-height:0/.test(CDP) && /\.cdp-sc\{[^}]*min-height:0/.test(CDP));
-  ok('8-2 렌더가 두 영역을 실제로 만든다(표 머리는 고정 쪽, 목록부터 스크롤 쪽)', (() => {
-    const a = CDP.indexOf("'<div class=\"cdp-fix\">'");
-    const b = CDP.indexOf("'</div><div class=\"cdp-sc\">'");
+  ok('8-2 렌더가 공용 좌측 요약과 우측 고정/스크롤 계획 영역을 만든다', (() => {
+    const layout = CDP.indexOf("'<div class=\"cdp-layout\"><aside class=\"cdp-side\">'");
+    const a = CDP.indexOf('class="cdp-fix"', layout);
+    const b = CDP.indexOf('class="cdp-sc"', a);
     const sub = CDP.indexOf('날짜별 모집 계획 — 게이지 드래그');
     const rows = CDP.indexOf("'<div id=\"cdpRows\">'");
-    return a > 0 && b > a && sub > a && sub < b && rows > b;
+    return layout > 0 && a > layout && b > a && sub > a && sub < b && rows > b;
   })());
   ok('8-3 ★ 조절해도 보던 자리를 지킨다(render 가 스크롤 컨테이너를 새로 만든다)',
     /S\._scrollTop/.test(CDP) && /sc\.scrollTop = S\._scrollTop/.test(CDP)

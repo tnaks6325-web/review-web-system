@@ -177,6 +177,26 @@ async function getPlanOverview(campaignId) {
     logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 예외 camp=${camp.id}: ${e.message}`);
   }
 
+  // 모집인원 조절의 진행·잔여·자동 맞춤은 작업보드와 같은 기준을 쓴다.
+  // 무시트 작업표가 연결된 경우에는 모집공고 제출 원장보다, 실제 참여자가 채워진
+  // 작업표 행이 운영상 완료 수량의 권위다. 작업표를 읽지 못하면 기존 제출 원장으로
+  // 안전하게 폴백한다.
+  let plannerSubmittedAll = Number(allQ[0] && allQ[0].n) || 0;
+  let plannerByDateSubmitted = byDateSubmitted;
+  let plannerProgressSource = 'applications';
+  if (sheetlessLinked === true && Array.isArray(worktableDates)) {
+    plannerByDateSubmitted = {};
+    plannerSubmittedAll = 0;
+    for (const row of worktableDates) {
+      const date = String((row && row.date) || '').slice(0, 10);
+      const filled = Math.max(0, Number(row && row.filled) || 0);
+      if (!date || filled <= 0) continue;
+      plannerByDateSubmitted[date] = filled;
+      plannerSubmittedAll += filled;
+    }
+    plannerProgressSource = 'worktable_filled';
+  }
+
   return {
     campaignId: camp.id,
     title: camp.title || '',
@@ -200,7 +220,7 @@ async function getPlanOverview(campaignId) {
     //   저장 전까지는 표시일 뿐 정원을 바꾸지 않는다(정원은 저장된 날짜별 계획이 정한다).
     carryPending,
     // 오늘 확정분 — 화면의 "배분해야 할 인원" = recruit_total − (전체 확정 − 오늘 확정)
-    todaySubmitted: byDateSubmitted[today] || 0,
+    todaySubmitted: plannerByDateSubmitted[today] || 0,
     // 손대지 않았을 때 **오늘 실제로 열리는 정원**(computeCampaignState 판정 그대로).
     //   null = 계산 불가 → 화면은 균형 모드를 켜지 않는다(잘못된 기준으로 저장 판정 금지).
     todayNaturalQuota,
@@ -215,9 +235,10 @@ async function getPlanOverview(campaignId) {
     plans: plansQ.rows.map(r => ({
       date: r.date, count: Number(r.count) || 0, updatedBy: r.updated_by || '', updatedAt: r.updated_at,
     })),
-    byDateSubmitted,
+    byDateSubmitted: plannerByDateSubmitted,
     todayUsed,
-    submittedAll: Number(allQ[0] && allQ[0].n) || 0,
+    submittedAll: plannerSubmittedAll,
+    progressSource: plannerProgressSource,
     rounds,
     roundsTotal,
     // 차수 합계 ≠ 총모집 = 드리프트(다른 창구가 총모집을 고친 흔적) — 화면이 경고한다.
