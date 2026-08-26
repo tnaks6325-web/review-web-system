@@ -499,7 +499,7 @@ router.get('/review-earnings', async (req, res, next) => {
     // 시트 색인으로 이미 보이는 주문은 NOT EXISTS로 제외해 이중 집계를 막는다.
     const { rows: sheetlessOrders } = await pool.query(
       `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
-              ca.campaign_id AS "campaignId", os.price,
+              COALESCE(ca.campaign_id, NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), '')) AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
               COALESCE(rc.review_fee, 0) AS "reviewFee",
@@ -509,10 +509,14 @@ router.get('/review-earnings', async (req, res, next) => {
          LEFT JOIN campaign_participants cp
            ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL
          LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
-         LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+         -- 오래된/복구된 무시트 주문은 campaign_application_id가 비어 있을 수 있다.
+         -- 이때 원장 좌표 campaign:<공고ID>는 이미 검증된 작업표 연결키이므로 같은 공고로 복원한다.
+         LEFT JOIN recruit_campaigns rc
+           ON rc.id = COALESCE(ca.campaign_id, NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''))
         WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
           AND os.deleted_at IS NULL
-          AND ca.campaign_id IS NOT NULL
+          -- 신청 FK가 비어 있어도 campaign:<공고ID> 좌표가 실제 공고를 가리키면 리뷰 내역에 노출한다.
+          AND rc.id IS NOT NULL
           /* ★★ 이중 집계 방지 — 위치키만 보면 참여형(무시트) 주문은 **절대** 걸러지지 않는다:
              원장 좌표가 campaign:<공고ID>(submit.routes _resolveCampaignOrderScope)이고
              sheet_row 에는 작업표 seq 가 들어가 review_index 좌표와 계가 다르다.
