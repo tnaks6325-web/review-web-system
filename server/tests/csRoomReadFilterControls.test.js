@@ -23,12 +23,14 @@ ok('새로고침은 아이콘만 가진 정사각 버튼이다', /cs-refresh-con
 ok('새로고침 정사각 규격이 있다', /\.cs-refresh-control\{width:32px;min-width:32px;padding:0\}/.test(html));
 ok('읽음/안읽음은 adminUnread 기준으로만 걸러진다',
   /_csReadFilter === 'read'.*adminUnread > 0/.test(src) && /_csReadFilter === 'unread'.*adminUnread > 0/.test(src));
-ok('목록 조회는 상태와 무관하게 전체를 받아온다', /csAdminThreads", status: "all", q: ""/.test(src));
+ok('목록 조회는 상태와 무관하게 전체를 페이지 단위로 받아온다', /csAdminThreads", status: "all", q: "", limit: pageSize, offset: 0/.test(src));
 ok('방을 열면 캐시의 미확인 수와 읽음/안읽음 목록도 즉시 갱신한다',
   /const cached = _csRooms\.find\(r => r\.id === threadId\)/.test(src) && /cached\.adminUnread = 0/.test(src));
 ok('전체 접기 상태는 필터가 바뀐 현재 그룹에도 적용된다',
   /if \(_csAllGroupsFolded\) _csFoldedGroupKeys = new Set\(_csVisibleGroupKeys\)/.test(src));
 const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'cs.routes.js'), 'utf8');
-ok('전체 이력 때문에 목록 첫 진입이 무한 대기하지 않도록 최신 500건으로 제한한다', /LIMIT 500\b/.test(route));
+ok('목록은 제한된 페이지로 조회하고 다음 페이지 존재 여부를 반환한다',
+  /LIMIT \$\$\{params\.length \+ 1\} OFFSET \$\$\{params\.length \+ 2\}/.test(route) && /hasMore: rows\.length === limit/.test(route));
+ok('첫 페이지를 그린 뒤 오래된 방은 백그라운드 페이지로 이어 받는다', /function _csLoadRemainingRooms/.test(src));
 
 console.log(`\n✅ csRoomReadFilterControls: ${n} cases passed`);
