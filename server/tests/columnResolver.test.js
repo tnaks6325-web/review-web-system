@@ -24,7 +24,8 @@ function run() {
     ['1', '홍길동주문', '김수취', '010-1234-5678', 'O', '완료', '샴푸'],
     ['2', '', '', '', '', '', ''], // 이름 없음 → 필터
   ];
-  const r1 = parseTabRows(v1, 's1', 'tabA', 'gidA', '캠페인A', KW);
+  const r1 = parseTabRows(v1, 's1', 'tabA', 'gidA', '캠페인A', KW,
+    new Map([['review_submit', { colIndex: 4, header: '리뷰제출' }]]));
   assert.equal(r1.length, 1, '이름 없는 행은 제외');
   const a = r1[0];
   assert.equal(a.name, '홍길동주문');
@@ -40,7 +41,8 @@ function run() {
   const paymentDateHeader = parseTabRows([
     ['번호', '주문자', '연락처', '리뷰제출', '입금일'],
     ['1', '테스터', '010-1111-2222', 'O', ''],
-  ], 's-payment-date', 'payment-date', 'gid-payment-date', '입금일 테스트', KW);
+  ], 's-payment-date', 'payment-date', 'gid-payment-date', '입금일 테스트', KW,
+    new Map([['review_submit', { colIndex: 3, header: '리뷰제출' }]]));
   assert.equal(paymentDateHeader[0].submitCol2, '입금일');
   assert.equal(paymentDateHeader[0].isSubmitted2, 'NONE');
   assert.equal(a.campaignName, '캠페인A');
@@ -51,7 +53,8 @@ function run() {
     ['번호', '수취인', '주문자', '전화번호', '리뷰', '입금'],
     ['1', '박수취', '이주문', '01099998888', '', ''],
   ];
-  const r2 = parseTabRows(v2, 's2', 'tabB', 'gidB', null, KW);
+  const r2 = parseTabRows(v2, 's2', 'tabB', 'gidB', null, KW,
+    new Map([['review_submit', { colIndex: 4, header: '리뷰' }]]));
   assert.equal(r2.length, 1);
   assert.equal(r2[0].name, '이주문', '★ 주문자 우선: 수취인이 왼쪽이어도 주문자가 이름열');
   assert.equal(r2[0].recipientName, '박수취', '★ 주문자 우선 시 수취인은 recipientName로');
@@ -65,7 +68,8 @@ function run() {
     ['번호', '인애드명단', '주문자제출', '수취인', '연락처', '리뷰제출'],
     ['1', '인애드A', '제출한이름', '받는이', '010-2222-3333', 'O'],
   ];
-  const r2b = parseTabRows(v2b, 's2b', 'tabB2', 'g', null, KW);
+  const r2b = parseTabRows(v2b, 's2b', 'tabB2', 'g', null, KW,
+    new Map([['review_submit', { colIndex: 5, header: '리뷰제출' }]]));
   assert.equal(r2b[0].name, '제출한이름', '★ 주문자제출 열이 이름열(주문자 포함매칭)');
 
   // ── 케이스2c: 주문자열이 없으면 나머지 NAME_KEYWORDS(수취인) 폴백 ──
@@ -73,7 +77,8 @@ function run() {
     ['번호', '수취인', '연락처', '리뷰제출'],
     ['1', '수취만', '010-4444-5555', 'O'],
   ];
-  const r2c = parseTabRows(v2c, 's2c', 'tabB3', 'g', null, KW);
+  const r2c = parseTabRows(v2c, 's2c', 'tabB3', 'g', null, KW,
+    new Map([['review_submit', { colIndex: 3, header: '리뷰제출' }]]));
   assert.equal(r2c[0].name, '수취만', '★ 주문자 없으면 수취인 폴백');
 
   // ── 케이스3: 깊은 헤더(메타 행 선행) + 입금열 없음(isSubmitted2 null) ──
@@ -83,7 +88,8 @@ function run() {
     ['번호', '이름', '연락처', '제출완료'],
     ['1', '최이름', '010-1111-2222', '제출'],
   ];
-  const r3 = parseTabRows(v3, 's3', 'tabC', 'gidC', '캠C', KW);
+  const r3 = parseTabRows(v3, 's3', 'tabC', 'gidC', '캠C', KW,
+    new Map([['review_submit', { colIndex: 3, header: '제출완료' }]]));
   assert.equal(r3.length, 1);
   assert.equal(r3[0].name, '최이름');
   assert.equal(r3[0].recipientName, null, '수취인열 없음 → null');
@@ -103,7 +109,8 @@ function run() {
     ['1', '', '8 / 3 (월)', '텍스트', '박은비', '박은비', '010-8221-7191', '', ''],   // 미제출: 리뷰가이드만 값 있음
     ['2', '', '8 / 3 (월)', '텍스트', '조혜진', '조혜진', '010-2299-9096', 'O', ''],  // 제출완료: 리뷰제출='O'
   ];
-  const r4b = parseTabRows(v4b, 's4b', 'tabD2', 'gidD2', 'D2', KW);
+  const r4b = parseTabRows(v4b, 's4b', 'tabD2', 'gidD2', 'D2', KW,
+    new Map([['review_submit', { colIndex: 7, header: '리뷰제출' }]]));
   assert.equal(r4b[0].submitCol, '리뷰제출', "★ 제출열이 '리뷰가이드'가 아니라 '리뷰제출'로 잡혀야 함");
   assert.equal(r4b[0].isSubmitted, false, "★ 리뷰가이드만 값이 있고 리뷰제출은 공란 → 미제출");
   assert.equal(r4b[1].isSubmitted, true, "리뷰제출='O' → 제출완료");
@@ -117,7 +124,8 @@ function run() {
     ['66', '망고', '8 / 4 (화)', '서규리', '2026080459290341', '서규리', '서규리', 'skr1919', '010-3808-4882', '', '', ''],   // 미제출: 리뷰 공란
     ['1', '망고', '7 / 29 (수)', '', '2026072966259711', '이보윤', '이보윤', 'ls444', '010-8982-2059', '7/30 12:02', '7/31', ''],  // 제출완료
   ];
-  const r4c = parseTabRows(v4c, 's4c', 'tabD3', 'gidD3', 'D3', KW);
+  const r4c = parseTabRows(v4c, 's4c', 'tabD3', 'gidD3', 'D3', KW,
+    new Map([['review_submit', { colIndex: 9, header: '리뷰' }]]));
   assert.equal(r4c[0].submitCol, '리뷰', "★ 제출열이 '주문자제출'이 아니라 '리뷰'로 잡혀야 함(bare 리뷰 열은 3단계에서 허용)");
   assert.equal(r4c[0].isSubmitted, false, "★ 리뷰 열이 공란이면 주문자제출에 이름이 있어도 미제출");
   assert.equal(r4c[1].isSubmitted, true, "리뷰 열에 값 있으면 제출완료");
@@ -129,7 +137,8 @@ function run() {
     ['1', '', '2026.4.23', '김지현', '2026042333403631', '김지현', '김지현', 'kjhu929', '010-8326-2237', '주소', '국민', '578601-01-301307', '김지현', '69900', 'TRUE', '5/7', 'url'],
     ['6', '', '2026.4.23', '곽혜련', '2026042331659801', '곽혜련', '곽혜련', 'khr1457', '010-6803-1457', '주소', '우리', '1002-053-875785', '곽혜련', '39900', '', '', ''],
   ];
-  const r4d = parseTabRows(v4d, 's4d', 'tabD4', 'gidD4', 'D4', KW);
+  const r4d = parseTabRows(v4d, 's4d', 'tabD4', 'gidD4', 'D4', KW,
+    new Map([['review_submit', { colIndex: 14, header: '리뷰캡쳐본' }]]));
   assert.equal(r4d[0].submitCol, '리뷰캡쳐본', "★ 제출열이 '주문자제출'이 아니라 '리뷰캡쳐본'으로 잡혀야 함");
   assert.equal(r4d[0].isSubmitted, true, "리뷰캡쳐본='TRUE' → 제출완료");
   assert.equal(r4d[1].isSubmitted, false, "리뷰캡쳐본 공란 → 미제출");
@@ -150,29 +159,29 @@ function run() {
   assert.equal(r5[0].isSubmitted, true, 'col4 값 "O" → true');
   assert.equal(r5[0].submitCol2, '입금', 'DB payment→col6');
   assert.equal(r5[0].isSubmitted2, 'PAID', 'col6 "완료" → PAID');
-  // 대조: dbColMap 없으면 키워드 = 리뷰제출(col5, 빈값) → false
+  // 대조: review_submit 매핑이 없으면 키워드 추측 없이 안전하게 미제출.
   const r5b = parseTabRows(v5, 's5', 't5', 'g5', 'C5', KW);
-  assert.equal(r5b[0].submitCol, '리뷰제출', '매핑 없으면 키워드(리뷰접두사)');
-  assert.equal(r5b[0].isSubmitted, false, 'col5 빈값 → false');
+  assert.equal(r5b[0].submitCol, '', '매핑 없으면 제출열 미선택');
+  assert.equal(r5b[0].isSubmitted, false, '매핑 없으면 항상 미제출');
 
-  // ── 케이스6: 재앵커 불일치(저장헤더≠현재헤더) → 키워드 폴백 ──
+  // ── 케이스6: 재앵커 불일치(저장헤더≠현재헤더) → 안전하게 미제출 ──
   const v6 = [
     ['번호', '주문자', '수취인', '연락처', '완료', '리뷰제출'],
     ['1', '주문킴', '수취킴', '010-1234-5678', 'O', ''],
   ];
   const map6 = new Map([['review_submit', { colIndex: 4, header: '리뷰완료' }]]); // 현재 headers[4]='완료'≠'리뷰완료'
   const r6 = parseTabRows(v6, 's6', 't6', 'g6', 'C6', KW, map6);
-  assert.equal(r6[0].submitCol, '리뷰제출', '★ 재앵커 불일치 → 키워드 폴백(col5)');
+  assert.equal(r6[0].submitCol, '', '★ 재앵커 불일치 → 키워드 폴백 금지');
 
-  // ── 케이스7: col_index 범위밖 → 키워드 폴백 ──
+  // ── 케이스7: col_index 범위밖 → 안전하게 미제출 ──
   const v7 = [
     ['번호', '주문자', '수취인', '연락처', '리뷰제출'],
     ['1', '주문킴', '수취킴', '010-1234-5678', 'O'],
   ];
   const map7 = new Map([['review_submit', { colIndex: 99, header: '리뷰제출' }]]); // 범위밖
   const r7 = parseTabRows(v7, 's7', 't7', 'g7', 'C7', KW, map7);
-  assert.equal(r7[0].submitCol, '리뷰제출', '★ 범위밖 colIndex → 키워드 폴백');
-  assert.equal(r7[0].isSubmitted, true);
+  assert.equal(r7[0].submitCol, '', '★ 범위밖 colIndex → 키워드 폴백 금지');
+  assert.equal(r7[0].isSubmitted, false);
 
   // ── 케이스8: DB recipient가 키워드 미검출 열을 지정(재앵커 통과) ──
   const v8 = [
@@ -219,7 +228,7 @@ function run() {
   assert.deepEqual(meta11a.drift[0], {
     field: 'review_submit', reason: 'reanchor', storedCol: 4, storedHeader: '리뷰완료', currentHeader: '완료',
   }, '★ reanchor drift 상세');
-  assert.equal(meta11a.fields.review_submit.src, 'keyword', '거부 후 키워드 폴백으로 보고');
+  assert.equal(meta11a.fields.review_submit.src, 'none', '거부 후 제출열 미선택으로 보고');
   const meta11b = {};
   parseTabRows(v7, 's7', 't7', 'g7', 'C7', KW, map7, meta11b);
   assert.equal(meta11b.drift.length, 1, '범위밖 거부 1건');

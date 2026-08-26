@@ -30,20 +30,28 @@ const STANDARD_FIELDS = [
   { key: 'inad_name',     label: '인애드명단',    defaultOwner: 'sheet',  match: 'includes', keywords: ['인애드'] },
   { key: 'nickname',      label: '닉네임/카톡',   defaultOwner: 'sheet',  match: 'includes', keywords: ['닉네임', '카톡'] },
   { key: 'order_num',     label: '주문번호',      defaultOwner: 'db',     match: 'includes', keywords: ['주문번호', 'ordernum'] },
+  { key: 'tracking_number', label: '송장번호',    defaultOwner: 'shared', match: 'includes', keywords: ['택배송장번호', '송장번호', '운송장번호', '롯데송장번호'] },
   { key: 'phone',         label: '연락처',        defaultOwner: 'db',     match: 'includes', keywords: ['연락처', '전화', '핸드폰', '휴대폰', '전번', 'phone'] },
   { key: 'address',       label: '주소',          defaultOwner: 'db',     match: 'includes', keywords: ['주소', 'address'] },
   { key: 'bank',          label: '은행',          defaultOwner: 'db',     match: 'includes', keywords: ['은행', 'bank'] },
   { key: 'account',       label: '계좌',          defaultOwner: 'db',     match: 'includes', keywords: ['계좌', 'account'] },
   { key: 'price',         label: '금액',          defaultOwner: 'db',     match: 'includes', keywords: ['금액', '가격', 'price'] },
   { key: 'depositor',     label: '예금주',        defaultOwner: 'db',     match: 'includes', keywords: ['예금주', 'depositor'] },
-  { key: 'orderer',       label: '주문자',        defaultOwner: 'db',     match: 'includes', keywords: ['주문자', 'orderer'] },
+  // 작업보드에서 사람의 역할은 주문자/리뷰어가 아니라 '참여자'로 통일한다.
+  // DB의 reviewer_name은 하위 호환용 저장 컬럼이며 신규 매핑 키로 쓰지 않는다.
+  { key: 'participant',   label: '참여자',        defaultOwner: 'db',     match: 'includes', keywords: ['참여자', '인애드명단', '주문자제출', '주문자', 'orderer'] },
   { key: 'recipient',     label: '수취인',        defaultOwner: 'db',     match: 'includes', keywords: ['수취인', '받는분'] },
-  { key: 'review_submit', label: '리뷰제출',      defaultOwner: 'shared', match: 'includes', keywords: ['리뷰제출', '리뷰완료', '리뷰작성', '리뷰'] },
-  { key: 'payment',       label: '입금',          defaultOwner: 'shared', match: 'includes', keywords: ['입금', '페이백'] },
+  // 리뷰 상태·증빙·옵션은 서로 다른 데이터다. 셋을 한 필드로 추측하면 제출완료 오판정이 난다.
+  { key: 'review_option', label: '리뷰옵션',      defaultOwner: 'shared', match: 'includes', keywords: ['리뷰옵션', '포토/텍스트'] },
+  { key: 'review_capture', label: '리뷰캡쳐',     defaultOwner: 'shared', match: 'includes', keywords: ['리뷰캡쳐본', '리뷰캡처본', '캡쳐본', '캡처본'] },
+  // '리뷰' 단독은 상태/옵션/캡처를 구별할 수 없으므로 자동 매핑하지 않고 관리자가 선택한다.
+  { key: 'review_submit', label: '리뷰제출',      defaultOwner: 'shared', match: 'includes', keywords: ['리뷰제출', '리뷰완료', '리뷰작성'] },
+  { key: 'payment_status', label: '입금일',       defaultOwner: 'shared', match: 'includes', keywords: ['입금일', '입금여부', '입금완료', '입금', '페이백'] },
   { key: 'round',         label: '차수',          defaultOwner: 'sheet',  match: 'includes', keywords: ['차수', '회차', 'round'] },
-  { key: 'product',       label: '상품',          defaultOwner: 'sheet',  match: 'includes', keywords: ['상품', '제품', 'product'] },
+  { key: 'product_code',  label: '상품번호',      defaultOwner: 'sheet',  match: 'includes', keywords: ['상품번호'] },
+  { key: 'product',       label: '상품',          defaultOwner: 'sheet',  match: 'includes', keywords: ['상품명', '상품', '제품', 'product'] },
   { key: 'user_id',       label: '아이디',        defaultOwner: 'db',     match: 'includes', keywords: ['아이디', 'userid', '로그인'] },
-  { key: 'order_date',    label: '구매일/날짜',   defaultOwner: 'shared', match: 'includes', keywords: ['구매일', '주문일', '일자', '날짜', 'date'] },
+  { key: 'order_date',    label: '구매일자',      defaultOwner: 'shared', match: 'includes', keywords: ['구매일', '주문일', '일자', '날짜', 'date'] },
   { key: 'option',        label: '옵션',          defaultOwner: 'shared', match: 'includes', keywords: ['옵션', 'option'] },
   { key: 'memo',          label: '비고/메모',     defaultOwner: 'shared', match: 'includes', keywords: ['비고', '특이사항', 'memo'] },
   // 마지막 폴백: 이름/성함 → 수취인 (모호하므로 최하위, 사용자가 교정)
@@ -216,7 +224,9 @@ async function saveMapping(sheetId, tabGid, tabName, columns, updatedBy) {
 /**
  * P2b: 인덱스 빌더용 경량 매핑 — db_field → { colIndex, header } Map.
  *   columnResolver가 컬럼감지를 "DB매핑 우선"으로 하기 위한 입력.
- *   매핑이 없거나(미설정 탭) sheetId/tabGid가 없으면 null → 빌더는 키워드 전용(P2a 동일).
+ *   리뷰제출(review_submit)은 자동추측 기록을 신뢰하지 않는다. 관리자가 명시 저장한
+ *   매핑만 반환해 키워드 오인식으로 제출완료가 되는 일을 막는다.
+ *   매핑이 없거나(미설정 탭) sheetId/tabGid가 없으면 null이다.
  *   같은 db_field가 여러 컬럼에 매핑되면 가장 앞(작은 col_index)만 사용(determinism).
  * @returns {Promise<Map<string,{colIndex:number,header:string|null}>|null>}
  */
@@ -225,7 +235,7 @@ async function getTabColumnIndexMap(sheetId, tabGid) {
   let rows;
   try {
     ({ rows } = await pool.query(
-      `SELECT col_index, header_text, db_field
+      `SELECT col_index, header_text, db_field, updated_by
          FROM tab_column_mappings
         WHERE sheet_id = $1 AND tab_gid = $2 AND db_field IS NOT NULL
         ORDER BY col_index ASC`,
@@ -240,6 +250,7 @@ async function getTabColumnIndexMap(sheetId, tabGid) {
   for (const r of rows) {
     if (!r.db_field || m.has(r.db_field)) continue;       // 첫(최소 col_index) 매핑만
     if (!Number.isInteger(r.col_index) || r.col_index < 0) continue;
+    if (r.db_field === 'review_submit' && String(r.updated_by || '').startsWith('auto:')) continue;
     m.set(r.db_field, { colIndex: r.col_index, header: r.header_text != null ? String(r.header_text) : null });
   }
   return m.size ? m : null;
@@ -258,9 +269,10 @@ async function getTabColumnIndexMap(sheetId, tabGid) {
 //     재파싱이 불필요(무변경)하고, 전 탭 백필 시 쿼터 폭풍을 막는다.
 // ═══════════════════════════════════════════════════════════
 
-// 자동 기록 대상 = columnResolver가 DB 오버라이드를 소비하는 6필드만.
+// 자동 기록 대상 = columnResolver가 DB 오버라이드를 소비하는 필드만.
 // name(PII 가드)·url/날짜(resolver 미소비 → 죽은 매핑 방지)는 기록하지 않는다.
-const RECORDABLE_FIELDS = ['recipient', 'review_submit', 'product', 'phone', 'round', 'payment'];
+// review_submit은 자동기록 금지: 작업별 약속 컬럼을 명시 저장한 경우만 제출 상태에 쓴다.
+const RECORDABLE_FIELDS = ['recipient', 'product', 'phone', 'round', 'payment'];
 
 let _testPool = null;
 function __setPoolForTest(p) { _testPool = p || null; }
