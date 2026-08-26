@@ -532,7 +532,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('모달 경로 = /api/trackb/* 공용(재기준 불필요)', /'\/api\/trackb\/campaigns\/'/.test(modal));
   ok('★ 질문은 조절 한 묶음당 한 번(디바운스)', /SETTLE_MS = 700/.test(modal) && /scheduleSettle/.test(modal));
   ok('★ 분산 범위 = 축소 전 종료일까지(시안 실측 규칙)', /prevEnd/.test(modal) && /untilN/.test(modal));
-  ok('저장은 confirm 경유([확정 저장])', /window\.confirm\('아래 조절을 저장할까요/.test(modal));
+  ok('확정 저장은 브라우저 confirm 없이 즉시 요청한다',
+    !/window\.confirm\('아래 조절을 저장할까요/.test(modal)
+    && /즉시 저장한 뒤/.test(modal));
   ok('마운트 body 직속', /document\.body\.appendChild/.test(modal));
   ok('★ onclick 에 서버 문자열 보간 없음(XSS 규율)', !/onclick="[^"]*\$\{/.test(modal));
   // ★★ 시트 일정 공고도 조절 가능 — 읽기 전용 잠금이 되살아나면 실패한다(사용자 확정 2026-08-07)
@@ -549,11 +551,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★★ 코드리뷰 #3 — "기본" 판정이 baseFor 단일 출처를 지켜야 한다. defaultDaily 로 비교하면
   //   ① 시트 15인 날을 20(=daily_limit)으로 올릴 때 조절이 조용히 삭제되고(setPlan)
   //   ② 시트 30인 날을 22로 줄여도 축소 질문이 안 뜬다(settle).
-  ok('★ setPlan/settle/기본으로/저장확인/눈금선이 baseFor 를 쓴다(defaultDaily 사본 금지)',
+  ok('★ setPlan/settle/기본으로/눈금선이 baseFor 를 쓴다(defaultDaily 사본 금지)',
     /if \(v === baseFor\(d\) && S\.base\[d\] == null\) delete S\.plan\[d\];/.test(modal)
     && /var dl = baseFor\(d\);/.test(modal)
     && /commitValue\(d2, baseFor\(d2\)\)/.test(modal)
-    && /x\.count === baseFor\(x\.date\)/.test(modal)
     && /baseFor\(d\) \/ scale \* 100/.test(modal));
   ok('★ 코드리뷰 #4: 총량·예상 종료일이 시트 총량(scheduleTotal)을 본다',
     /function totalFor\(\)/.test(modal) && /S\.data\.scheduleTotal/.test(modal)
@@ -1167,11 +1168,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /if \(balanceOn\(\)\) \{ S\.notes\.push\(fmtMD\(d\) \+ ' ' \+ start \+ '→' \+ fin\); render\(\); return; \}/.test(CDP));
   ok('7w ★ 숫자 직접 입력은 change 에서만 반영(입력 중 재렌더 = 한글 IME 파괴)',
     /wrap\.addEventListener\('change', function/.test(CDP) && !/addEventListener\('input'/.test(CDP));
-  // ★ 확인창은 **실제로 보내는 날 수**를 말해야 한다 — "구간 전체가 확정된다"고 하면
-  //   손댄 날만 보내는 지금 동작을 과장해 거짓 고지가 된다(코드리뷰 🟡4).
-  ok('7x ★ 저장 확인창이 실제 고정 범위를 정확히 말한다(과장 금지)',
-    /고정되는 날은 위 ' \+ \(set\.length \+ remove\.length\) \+ '일뿐이고, 나머지 날은 종전대로 열립니다/.test(CDP)
-    && /자동 이월이 더 얹히지 않습니다/.test(CDP));
+  ok('7x ★ 확정 저장은 확인창 없이 즉시 저장하고 결과는 토스트로 알린다',
+    /브라우저 확인창을 한 번 더 띄우지 않고/.test(CDP)
+    && /toast\('저장했습니다/.test(CDP));
   ok('7x-2 ★ 자동+다음날의 "저장할 것 없음"은 "이미 반영 중"이라고 말한다(미반영 오독 금지)',
     /이월 ' \+ carry \+ '명은 이미 오늘 정원에 반영되어 있습니다/.test(CDP)
     && /carry > 0 && S\.carryMode === 'next' && j\.carryMode !== 'hold'/.test(CDP));
