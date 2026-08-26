@@ -951,15 +951,15 @@
      이 구간에서만 고정 레이아웃+압축 여백으로 화면 안에 맞추고, 더 좁은 창은 기존처럼 스크롤을 보존한다. */
   @media(min-width:1500px){
     #rvbody table.lgtable{min-width:0;table-layout:fixed}
-    #rvbody table.lgtable th,#rvbody table.lgtable td{padding-left:6px;padding-right:6px;overflow:hidden;text-overflow:ellipsis}
-    #rvbody table.lgtable th:nth-child(1){width:68px} #rvbody table.lgtable th:nth-child(2){width:54px}
-    #rvbody table.lgtable th:nth-child(3){width:154px} #rvbody table.lgtable th:nth-child(5){width:70px}
-    #rvbody table.lgtable th:nth-child(6){width:116px} #rvbody table.lgtable th:nth-child(7){width:82px}
-    #rvbody table.lgtable th:nth-child(8){width:102px} #rvbody table.lgtable th:nth-child(9){width:76px}
-    #rvbody table.lgtable th:nth-child(10){width:52px} #rvbody table.lgtable th:nth-child(11){width:82px}
-    #rvbody table.lgtable th:nth-child(12){width:136px} #rvbody table.lgtable th:nth-child(13){width:66px}
-    #rvbody table.lgtable th:nth-child(14){width:54px} #rvbody table.lgtable th:nth-child(15){width:154px}
-    #rvbody table.lgtable th:nth-child(16){width:84px} #rvbody table.lgtable th:nth-child(17){width:50px}
+    #rvbody table.lgtable>thead>tr>th,#rvbody table.lgtable>tbody>tr:not(.rvsubrow)>td{padding-left:6px;padding-right:6px;overflow:hidden;text-overflow:ellipsis}
+    #rvbody table.lgtable>thead>tr>th:nth-child(1){width:68px} #rvbody table.lgtable>thead>tr>th:nth-child(2){width:54px}
+    #rvbody table.lgtable>thead>tr>th:nth-child(3){width:154px} #rvbody table.lgtable>thead>tr>th:nth-child(5){width:70px}
+    #rvbody table.lgtable>thead>tr>th:nth-child(6){width:116px} #rvbody table.lgtable>thead>tr>th:nth-child(7){width:82px}
+    #rvbody table.lgtable>thead>tr>th:nth-child(8){width:102px} #rvbody table.lgtable>thead>tr>th:nth-child(9){width:76px}
+    #rvbody table.lgtable>thead>tr>th:nth-child(10){width:52px} #rvbody table.lgtable>thead>tr>th:nth-child(11){width:82px}
+    #rvbody table.lgtable>thead>tr>th:nth-child(12){width:136px} #rvbody table.lgtable>thead>tr>th:nth-child(13){width:66px}
+    #rvbody table.lgtable>thead>tr>th:nth-child(14){width:54px} #rvbody table.lgtable>thead>tr>th:nth-child(15){width:154px}
+    #rvbody table.lgtable>thead>tr>th:nth-child(16){width:84px} #rvbody table.lgtable>thead>tr>th:nth-child(17){width:50px}
     #rvbody table.lgtable td.c-addr{max-width:none}
   }
   .lgtable .c-hold{width:104px}                       /* 예금주 — 한글 6~7자(남궁하늘가람)까지 한 줄 */

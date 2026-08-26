@@ -100,6 +100,9 @@ ok('FHD에서는 등록리뷰어DB가 전폭을 쓰고 17열을 화면 안에 �
   /#rvhead \.mh\{max-width:none\}/.test(css)
   && /#rvbody \.lgwrap\{max-width:none\}/.test(css)
   && /@media\(min-width:1500px\)\{[\s\S]{0,250}?#rvbody table\.lgtable\{min-width:0;table-layout:fixed\}/.test(css));
+ok('FHD 압축 규칙은 바깥 등록리뷰어 표의 직접 셀에만 적용한다(타계정 상세표 보존)',
+  /table\.lgtable>thead>tr>th,#rvbody table\.lgtable>tbody>tr:not\(\.rvsubrow\)>td/.test(css)
+  && /table\.lgtable>thead>tr>th:nth-child\(1\)/.test(css));
 ok('연락처 변경 버튼 문구는 번호변경이다', />번호변경<\/button><\/td>/.test(jsNoComment));
 
 /* ── ④ 타계정 펼침 ── */
