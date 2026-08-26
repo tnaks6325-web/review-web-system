@@ -7,6 +7,7 @@
  */
 const express = require('express');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const svc = require('../services/trackB.service');
@@ -2784,6 +2785,29 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
       logger.warn('[reviewers] 블랙리뷰어 주석 집계 실패(fail-soft): ' + e.message);
     }
     res.json({ ok: true, items: rows, total: cnt[0].n, limit, offset, ...(statsUnavailable ? { statsUnavailable: true } : {}) });
+  } catch (err) { next(err); }
+});
+
+/* 리뷰어 홈 바로가기 — 관리자만 발급할 수 있는, 해당 탭 한정의 짧은 로그인 교환권.
+   URL에 이름/번호를 그대로 싣거나 관리자 브라우저의 localStorage를 바꾸지 않는다. */
+router.post('/reviewers/home-link', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = String((req.body && req.body.id) || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ ok: false, error: '리뷰어 id가 올바르지 않습니다.' });
+    }
+    const { rows } = await pool.query(
+      `SELECT name, phone8 FROM reviewers WHERE id = $1 AND status = 'active' LIMIT 1`, [id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: '활성 리뷰어를 찾을 수 없습니다.' });
+    const reviewer = rows[0];
+    const ticket = jwt.sign(
+      { scope: 'reviewer_home_admin', name: reviewer.name, phone8: reviewer.phone8 },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m', issuer: 'review-web-system' }
+    );
+    logger.info(`[reviewers/home-link] ${_by(req)} — ${String(reviewer.phone8 || '').slice(-4)}`);
+    res.json({ ok: true, ticket });
   } catch (err) { next(err); }
 });
 

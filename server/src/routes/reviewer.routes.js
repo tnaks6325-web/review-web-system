@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { registerLimiter, imageApiLimiter, campaignTokenLimiter } = require('../middleware/rateLimit.middleware');
 const { issueCampaignToken } = require('../services/reviewerCampaignEditor.service');
@@ -42,6 +43,30 @@ router.post('/campaign-token', campaignTokenLimiter, async (req, res, next) => {
     if (!result.ok) return res.status(401).json(result);
     res.json(result);
   } catch (err) {
+    next(err);
+  }
+});
+
+// 관리자 등록리뷰어DB에서 새 탭으로 연 리뷰어 홈의 로그인 교환.
+// 교환권은 Track B의 adminOrMaster 경로에서만 발급되고 5분 뒤 만료된다.
+// 브라우저 공용 localStorage 대신 새 탭의 sessionStorage에만 저장하게 해 관리자 화면을 건드리지 않는다.
+router.post('/home-session', async (req, res, next) => {
+  try {
+    const ticket = String((req.body && req.body.ticket) || '');
+    const p = jwt.verify(ticket, process.env.JWT_SECRET, { issuer: 'review-web-system' });
+    if (!p || p.scope !== 'reviewer_home_admin' || !p.name || !/^\d{8}$/.test(String(p.phone8 || ''))) {
+      return res.status(401).json({ ok: false, error: '유효하지 않은 리뷰어 홈 링크입니다.' });
+    }
+    const { rows } = await pool.query(
+      `SELECT name, phone, phone8 FROM reviewers WHERE name = $1 AND phone8 = $2 AND status = 'active' LIMIT 1`,
+      [String(p.name), String(p.phone8)]
+    );
+    if (!rows.length) return res.status(401).json({ ok: false, error: '유효하지 않은 리뷰어 홈 링크입니다.' });
+    res.json({ ok: true, user: rows[0] });
+  } catch (err) {
+    if (err && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err.name)) {
+      return res.status(401).json({ ok: false, error: '리뷰어 홈 링크가 만료되었거나 유효하지 않습니다.' });
+    }
     next(err);
   }
 });
