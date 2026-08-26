@@ -148,6 +148,16 @@ async function seed() {
     assert.equal(t.productTotal, 13900, '주문 결제금액도 유지한다');
   });
 
+  await ta('무시트 작업표 키는 오래된 신청 FK보다 우선한다', async () => {
+    await seed();
+    await pool.query('DELETE FROM review_index');
+    await pool.query("INSERT INTO recruit_campaigns(id,title,review_fee) VALUES ('old-campaign','old',0)");
+    await pool.query("INSERT INTO campaign_applications(id,campaign_id,phone8) VALUES (2,'old-campaign',$1)", [P8]);
+    await pool.query('UPDATE order_submissions SET campaign_application_id = 2');
+    const r = await call('get', '/review-earnings', { query: { phone8: P8 } });
+    assert.equal(r.body.totals.count, 1, '현재 작업표 공고 키로 주문을 찾아 표시한다');
+  });
+
   await ta('작업표 줄이 소프트삭제면 이중집계 방지 근거가 아니다', async () => {
     await seed();
     await pool.query('UPDATE campaign_participants SET deleted_at = NOW()');
