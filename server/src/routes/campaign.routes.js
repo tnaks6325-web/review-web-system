@@ -1081,6 +1081,43 @@ router.get('/my-repurchase-status', applyLimiter, async (req, res, next) => {
   }
 });
 
+// 관리자 정적 경로는 반드시 '/:id'보다 앞에 둔다. 그렇지 않으면 Express가 'admin'을
+// id로 해석해 목록·감사 API가 캠페인 상세 핸들러로 빠질 수 있다.
+router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, _adminCampaignList);
+
+// GET /api/campaign/admin/popular-credit-audit — 인기상품 참여권 운영 집계(PII 미반환)
+router.get('/admin/popular-credit-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      WITH popular_uses AS (
+        SELECT ca.id, ca.phone8, ca.status, ca.applied_at
+          FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+         WHERE rc.participation_mode IS TRUE
+           AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS TRUE
+           AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))
+      ), reconstructed AS (
+        SELECT pu.id, pu.status,
+          (SELECT COUNT(*) FROM campaign_applications normal_ca JOIN recruit_campaigns normal_rc ON normal_rc.id = normal_ca.campaign_id
+            WHERE normal_ca.phone8 = pu.phone8 AND normal_rc.participation_mode IS TRUE
+              AND COALESCE(normal_ca.is_popular_snapshot, normal_rc.is_popular) IS NOT TRUE
+              AND normal_ca.status = 'submitted' AND normal_ca.submitted_at <= pu.applied_at) AS normal_before,
+          (SELECT COUNT(*) FROM popular_uses prior_pu WHERE prior_pu.phone8 = pu.phone8
+             AND (prior_pu.applied_at < pu.applied_at OR (prior_pu.applied_at = pu.applied_at AND prior_pu.id < pu.id))) AS popular_before
+        FROM popular_uses pu
+      )
+      SELECT COUNT(*)::int AS total_popular_uses,
+             COUNT(*) FILTER (WHERE status = 'submitted')::int AS submitted_uses,
+             COUNT(*) FILTER (WHERE status = 'applied')::int AS active_holds,
+             COUNT(*) FILTER (WHERE normal_before > popular_before)::int AS reconstructed_compliant,
+             COUNT(*) FILTER (WHERE normal_before <= popular_before)::int AS needs_review
+        FROM reconstructed
+    `);
+    res.json({ ok: true, data: rows[0], scope: 'all_campaigns_snapshot_based_current_state',
+      note: '현재 유효 인기 사용건을 구매양식 제출 시점 기준으로 재구성한 집계입니다. 취소·만료된 과거 시점 상태는 판정하지 않습니다.',
+      calculatedAt: new Date().toISOString() });
+  } catch (err) { next(err); }
+});
+
 // GET /api/campaign/:id — 캠페인 상세
 //   ★ M1 보안: SELECT * 무인증 반환 제거. admin/master JWT면 전체(관리자 수정 모달 호환),
 //     그 외에는 공개 화이트리스트(레거시/참여형 분기)만.
@@ -2022,7 +2059,7 @@ async function _fetchLateCounts(pool, campaignIds) {
  *   불일치가 생기므로 계산 경로를 하나로 묶는다.
  *   ops = 관리자 전용 운영 수치(진행중 홀드·오늘 제출·누적 확정·지각) — 리뷰어 응답엔 없다.
  */
-router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+async function _adminCampaignList(req, res, next) {
   try {
     await _ensureTables();
     const now = new Date();
@@ -2182,7 +2219,7 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
   } catch (err) {
     next(err);
   }
-});
+}
 
 /* POST /api/campaign/admin/:id/archive {archived:true|false} — 보관/보관 해제 (130)
    ★ 게이트는 adminOrMaster(정원·총량 변경과 같은 급 — 남의 업체 공고를 치울 수 있다).
@@ -2961,13 +2998,32 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     const { id } = req.params;
     // ★ M3 리뷰 #11: hold_token(열람·취소 열쇠)은 관제에 불필요 — 브라우저로 내리지 않음(컬럼 화이트리스트)
     const { rows } = await pool.query(
-      `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
-              status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
-              order_submission_id, late_order_id, option_key, owner_phone8, dismissed_at,
-              dismissed_by, blog_url, reject_reason, decided_at, decided_by
-       FROM campaign_applications
-       WHERE campaign_id = $1
-       ORDER BY applied_at ASC`,
+      `WITH normal_submissions AS (
+          SELECT ca.id, ca.phone8, ca.submitted_at,
+                 ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.submitted_at, ca.id) AS credit_no
+            FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+           WHERE rc.participation_mode IS TRUE
+             AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS NOT TRUE
+             AND ca.status = 'submitted'
+        ), popular_uses AS (
+          SELECT ca.id, ca.phone8, ca.applied_at,
+                 ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.applied_at, ca.id) AS credit_no
+            FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+           WHERE rc.participation_mode IS TRUE
+             AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS TRUE
+             AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))
+        )
+       SELECT ca.id, ca.campaign_id, ca.applicant_name, ca.applicant_phone, ca.applicant_inad,
+              ca.status, ca.sheet_row_added, ca.applied_at, ca.phone8, ca.expires_at, ca.submitted_at,
+              ca.order_submission_id, ca.late_order_id, ca.option_key, ca.owner_phone8, ca.dismissed_at,
+              ca.dismissed_by, ca.blog_url, ca.reject_reason, ca.decided_at, ca.decided_by,
+              EXISTS (SELECT 1 FROM normal_submissions ns JOIN popular_uses pu
+                        ON pu.phone8 = ns.phone8 AND pu.credit_no = ns.credit_no
+                       AND ns.submitted_at <= pu.applied_at
+                       WHERE ns.id = ca.id) AS popular_purpose
+       FROM campaign_applications ca
+       WHERE ca.campaign_id = $1
+       ORDER BY ca.applied_at ASC`,
       [id]
     );
     // 🧩 옵션별 현황(061 3단계 관제): 옵션 뷰(정원·잔여·상태) + 금액 포함(관리자 전용)

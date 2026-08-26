@@ -2963,14 +2963,34 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
   // 명단(활성) — 앵커 도출에 필요한 컬럼 포함
   const { rows: roster } = await db.query(
-    `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8,
-            round, option_text AS option, product_name AS product,
-            is_submitted AS submitted, is_paid AS paid, source,
-            order_submission_id, identity_key, row_json, submit_col, submit_col2
-       FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE
-        AND held_at IS NULL
-      ORDER BY seq`, [sheetId, tabName]);
+    `WITH normal_submissions AS (
+        SELECT ca.id, ca.phone8, ca.submitted_at,
+               ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.submitted_at, ca.id) AS credit_no
+          FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+         WHERE rc.participation_mode IS TRUE
+           AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS NOT TRUE
+           AND ca.status = 'submitted'
+      ), popular_uses AS (
+        SELECT ca.id, ca.phone8, ca.applied_at,
+               ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.applied_at, ca.id) AS credit_no
+          FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+         WHERE rc.participation_mode IS TRUE
+           AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS TRUE
+           AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))
+      )
+     SELECT cp.id, cp.seq, cp.reviewer_name AS name, cp.recipient_name AS recipient, cp.phone8,
+            cp.round, cp.option_text AS option, cp.product_name AS product,
+            cp.is_submitted AS submitted, cp.is_paid AS paid, cp.source,
+            cp.order_submission_id, cp.identity_key, cp.row_json, cp.submit_col, cp.submit_col2,
+            EXISTS (SELECT 1 FROM order_submissions os
+                      JOIN normal_submissions ns ON ns.id = os.campaign_application_id
+                      JOIN popular_uses pu ON pu.phone8 = ns.phone8 AND pu.credit_no = ns.credit_no
+                                           AND ns.submitted_at <= pu.applied_at
+                     WHERE os.id = cp.order_submission_id AND os.deleted_at IS NULL) AS "popularPurpose"
+       FROM campaign_participants cp
+      WHERE cp.sheet_id=$1 AND cp.tab_name=$2 AND cp.deleted_at IS NULL AND cp.active = TRUE
+        AND cp.held_at IS NULL
+      ORDER BY cp.seq`, [sheetId, tabName]);
   /* ★★ 표에서 분리(보관)한 줄 — **화면에서만** 뺀다(129, 사용자 확정 2026-08-19).
      장부 재생성·리뷰어 검색·입금대상 추출은 `deleted_at` 만 보므로 그대로다(무접촉).
      ★ 조용히 빼지 않는다 — 건수를 실어 보내 화면이 "분리 N건" 을 말하고 되돌릴 수 있게 한다.
@@ -3133,6 +3153,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       submitted: !!pick('is_submitted', r.submitted),
       paid: !!pick('is_paid', r.paid),
       source: r.source, hasOrder: !!r.order_submission_id,
+      popularPurpose: r.popularPurpose === true,
     };
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */

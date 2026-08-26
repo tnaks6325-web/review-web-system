@@ -4665,6 +4665,10 @@ async function _loadCampControl(campId) {
       else if (r.status === "blog_rejected") st = chip("#FEF3C7", "#92400E", "↩ 반려");
       else st = chip("#FEE2E2", "#B91C1C", "구매시간만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
+      // 단순 일반 참여가 아니라, 서버의 FIFO 크레딧 매칭에서 실제 인기상품 사용건과
+      // 짝지어진 일반상품 제출만 별도로 표시한다.
+      const popularPurpose = r.popular_purpose === true
+        ? chip("#FFF7ED", "#9A3412", "🔥 인기상품목적 참여건") : "";
       // 👥 063: 명의 구분 — 타계정 건은 소유자(본계정) 뒤4자리를 함께 표기(묶음 추적)
       const acct = _isSubRow(r) ? chip("#F1EAFE", "#7C3AED", "타 · 본계정 ***" + String(r.owner_phone8).slice(-4)) : "";
       // ★ 리뷰 #4: 확정 버튼은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
@@ -4685,7 +4689,7 @@ async function _loadCampControl(campId) {
       return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
         <b style="min-width:64px">${escT(r.applicant_name)}</b>
         <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
-        ${st}${late}${acct}
+        ${st}${late}${popularPurpose}${acct}
         <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
         ${actions}
       </div>`;
