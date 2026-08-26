@@ -57,12 +57,26 @@ const thead = /<thead><tr>([\s\S]*?)<\/tr><\/thead>/.exec(
 const cols = [...thead[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(m => m[1].trim());
 /* 2026-08-05 자동 블랙리뷰어(091-2)로 갱신: 타계정 뒤에 누적참여·이전 리뷰,
    삭제 바로 왼쪽에 참여설정 — 나머지 순서는 종전 사용자 확정 그대로. */
-const want = ['이름', '연락처', '주소', '은행', '계좌번호', '예금주', '주민번호', '소득유형', '타계정', '누적참여', '이전 리뷰', '등록일'];
-ok(`앞 12개 = ${want.join(' · ')}`, JSON.stringify(cols.slice(0, 12)) === JSON.stringify(want));
+const want = ['리뷰어 홈', '이름', '연락처', '주소', '은행', '계좌번호', '예금주', '주민번호', '소득유형', '타계정', '누적참여', '이전 리뷰', '등록일'];
+ok(`앞 13개 = ${want.join(' · ')}`, JSON.stringify(cols.slice(0, 13)) === JSON.stringify(want));
 ok('그 뒤에 상태·관리자 메모·참여설정·삭제(기존 열을 지우지 않았고 토글은 삭제 바로 왼쪽)',
-  cols[12] === '상태' && cols[13] === '관리자 메모' && cols[14] === '참여설정' && cols.length === 16);
+  cols[13] === '상태' && cols[14] === '관리자 메모' && cols[15] === '참여설정' && cols.length === 17);
 ok(`펼침행 colspan(${/colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) ? 'RV_COLSPAN' : '?'}) 이 열 수와 같다`,
-  /const RV_COLSPAN = 16;/.test(jsNoComment) && /colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) && cols.length === 16);
+  /const RV_COLSPAN = 17;/.test(jsNoComment) && /colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) && cols.length === 17);
+
+console.log('\n②-1 실시간 검색 · 리뷰어 홈 바로가기');
+ok('검색 입력마다 180ms 후 서버 검색을 다시 한다',
+  /oninput="_rvSearchInput\(this,event\)"/.test(jsNoComment) && /function _rvSearchInput[\s\S]{0,500}?setTimeout[\s\S]{0,300}?_loadReviewers\(\)/.test(jsNoComment));
+ok('느린 이전 검색 응답이 최신 결과를 덮지 않는다',
+  /requestId!==STATE\.rvRequestId\) return/.test(jsNoComment));
+ok('이름 왼쪽에 리뷰어 홈 버튼이 있고 행 인덱스로만 연다',
+  /<th style="width:72px">리뷰어 홈<\/th><th class="c-nm">이름/.test(jsNoComment)
+  && /onclick="_rvOpenHome\(\$\{i\}\)"/.test(jsNoComment));
+ok('홈 링크는 관리자 전용 API로 발급하고 새 탭을 연다',
+  /function _rvOpenHome[\s\S]{0,900}?window\.open\('', '_blank'\)[\s\S]{0,900}?\/api\/trackb\/reviewers\/home-link/.test(jsNoComment));
+ok('홈 교환권 발급은 adminOrMaster이고 5분짜리 서명 토큰이다',
+  /router\.post\('\/reviewers\/home-link', authMiddleware, adminOrMasterMiddleware/.test(routes)
+  && /scope: 'reviewer_home_admin'/.test(routes) && /expiresIn: '5m'/.test(routes));
 
 /* ── ③ 줄바꿈 금지 ── */
 console.log('\n③ 주소 말고는 전부 한 줄(행 높이 붕괴 방지)');

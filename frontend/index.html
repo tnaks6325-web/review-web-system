@@ -1043,12 +1043,36 @@
    리뷰어 홈 JS
 ═══════════════════════════════════════ */
 const USER_KEY = "iad_reviewer_user";
+const HOME_SESSION_KEY = "iad_reviewer_home_session";
 
 function getSavedUser() {
-  try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e) { return null; }
+  try {
+    // 관리자 바로가기 탭은 sessionStorage만 사용한다. 같은 브라우저의 다른 탭 로그인은 건드리지 않는다.
+    return JSON.parse(sessionStorage.getItem(HOME_SESSION_KEY) || localStorage.getItem(USER_KEY));
+  } catch(e) { return null; }
 }
 
-function initPage() {
+async function consumeAdminReviewerHomeLink() {
+  const ticket = new URLSearchParams(location.search).get('admin_reviewer_ticket');
+  if (!ticket) return false;
+  try {
+    const res = await fetch(API_BASE_URL + '/api/reviewer/home-session', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket })
+    });
+    const json = await res.json();
+    if (!json || !json.ok || !json.user) throw new Error((json && json.error) || '로그인 링크를 확인하지 못했습니다.');
+    sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify({ ...json.user, loginAt: Date.now(), adminPreview: true }));
+    history.replaceState(null, '', location.pathname + location.hash); // 주소·복사 기록에 교환권을 남기지 않는다.
+    return true;
+  } catch (e) {
+    history.replaceState(null, '', location.pathname + location.hash);
+    showToast(e && e.message ? e.message : '리뷰어 홈 로그인에 실패했습니다.');
+    return false;
+  }
+}
+
+async function initPage() {
+  await consumeAdminReviewerHomeLink();
   const user = getSavedUser();
   if (user && user.name) {
     showHome(user);
@@ -1185,7 +1209,9 @@ function syncSearchSession(user) {
     phone8: user.phone8 || "",
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
-  localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
+  // 관리자 바로가기 탭은 다른 탭의 검색/리뷰어 로그인까지 바꾸지 않는다.
+  const store = user && user.adminPreview ? sessionStorage : localStorage;
+  store.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
 }
 
 async function doLogin() {
@@ -1246,6 +1272,8 @@ function _highlightLoginField(field) {
 }
 
 function doLogout() {
+  sessionStorage.removeItem(HOME_SESSION_KEY);
+  sessionStorage.removeItem("rapp_reviewer_auth");
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem("rapp_reviewer_auth");
   sessionStorage.removeItem("rapp_camp_edit_token");

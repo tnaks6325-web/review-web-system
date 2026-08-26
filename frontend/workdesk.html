@@ -14658,11 +14658,13 @@ async function renderReviewersView(){
   await _loadReviewers();
 }
 async function _loadReviewers(){
+  const requestId=(STATE.rvRequestId||0)+1; STATE.rvRequestId=requestId;
   const qs = new URLSearchParams({ limit:String(RV_PAGE), offset:String(STATE.rvOffset||0) });
   if(STATE.rvq) qs.set('q', STATE.rvq);
   if(STATE.rvStatus) qs.set('status', STATE.rvStatus);
   if(STATE.rvFlag) qs.set('flag', STATE.rvFlag);   // 자동 블랙리뷰어 필터(blacklist/available/candidate/overdue)
   const r = await api('/api/trackb/reviewers?'+qs.toString());
+  if(requestId!==STATE.rvRequestId) return; // 느린 이전 검색 응답이 최신 실시간 결과를 덮지 않는다.
   const b=$('#rvbody');
   if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">리뷰어 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _renderRvHead(0); return; }
   STATE.rv = r.items||[]; STATE.rvTotal = r.total|0;
@@ -14682,8 +14684,9 @@ function _renderRvHead(total){
       <option value="active"${STATE.rvStatus==='active'?' selected':''}>활성</option>
       <option value="inactive"${STATE.rvStatus==='inactive'?' selected':''}>비활성</option>
     </select>
-    <input id="rvq" class="ovsearch" style="width:240px" placeholder="이름 / 연락처 / 계좌번호 검색 후 Enter"
+    <input id="rvq" class="ovsearch" style="width:240px" placeholder="이름 / 연락처 / 계좌번호 실시간 검색"
            value="${esc(STATE.rvq||'')}"
+           oninput="_rvSearchInput(this,event)" oncompositionend="_rvSearchInput(this,null,true)"
            onkeydown="if(event.key==='Enter'){STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers();}">
     <button class="btn" onclick="STATE.rvOffset=0;_loadReviewers()">새로고침</button></div>
     <div class="ovnote">리뷰어 등록 원장입니다. <b>주민등록번호·계좌번호가 그대로 표시</b>되니 화면공유·스크린샷에 주의하세요.
@@ -14695,9 +14698,19 @@ function _renderRvHead(total){
       <span style="font-size:.68rem;color:var(--muted)">판정 기준: 기한경과 = 미제출 14일↑ · 리뷰미작성 = 미제출 30일↑ — 설정 › 블랙리스트 관리기준</span>
     </div>`;
 }
+let _rvSearchTimer=null;
+function _rvSearchInput(el, ev, force){
+  if(!el || (!force && ev && ev.isComposing)) return;
+  clearTimeout(_rvSearchTimer);
+  _rvSearchTimer=setTimeout(()=>{
+    const q=el.value.trim();
+    if(q===String(STATE.rvq||'')) return;
+    STATE.rvq=q; STATE.rvOffset=0; _loadReviewers();
+  }, 180);
+}
 /* 컬럼 순서는 **사용자 확정**: 이름·연락처·주소·은행·계좌번호·예금주·주민번호·소득유형·타계정·등록일.
    상태·관리자메모·삭제는 그 뒤에 붙인다(요청에 없던 기존 열이라 지우지 않고 뒤로 보냈다). */
-const RV_COLSPAN = 16;   // 13 + 누적참여·이전 리뷰·참여설정(091-2 자동 블랙리뷰어)
+const RV_COLSPAN = 17;   // 리뷰어 홈 + 13 + 누적참여·이전 리뷰·참여설정(091-2 자동 블랙리뷰어)
 function _renderRvBody(){
   const rows = STATE.rv||[];
   const b=$('#rvbody');
@@ -14706,7 +14719,7 @@ function _renderRvBody(){
   const fmtD = iso => iso? new Date(iso).toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',year:'2-digit',month:'2-digit',day:'2-digit'}):'';
   b.innerHTML=`<div class="lgwrap"><table class="lgtable">
     <thead><tr>
-      <th class="c-nm">이름</th><th class="c-ph">연락처</th><th>주소</th>
+      <th style="width:72px">리뷰어 홈</th><th class="c-nm">이름</th><th class="c-ph">연락처</th><th>주소</th>
       <th class="c-bank">은행</th><th class="c-num" style="width:126px">계좌번호</th><th class="c-hold">예금주</th>
       <th class="c-num" style="width:112px">주민번호</th><th style="width:86px">소득유형</th>
       <th style="width:58px">타계정</th>
@@ -14716,6 +14729,7 @@ function _renderRvBody(){
       <th style="width:96px">참여설정</th><th style="width:56px"></th>
     </tr></thead><tbody>${rows.map((r,i)=>`
       <tr>
+        <td style="text-align:center"><button type="button" class="btn" style="padding:3px 7px;font-size:.68rem;border-radius:6px" onclick="_rvOpenHome(${i})" title="이 리뷰어로 로그인된 아이에이리뷰 홈을 새 탭에서 엽니다">홈 열기</button></td>
         <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
         <td class="c-ph">${dash(r.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvPhone(${i})" title="로그인 번호를 변경합니다(새 번호=본계정, 지금 번호=타계정)">변경</button></td>
         <td class="c-addr" title="${esc(r.address||'')}">${dash(r.address)}</td>
@@ -14745,6 +14759,16 @@ function _renderRvBody(){
       </tr>
       <tr class="rvsubrow" data-rvsub="${i}" hidden><td colspan="${RV_COLSPAN}"></td></tr>`).join('')}</tbody></table></div>
     ${_rvPager()}`;
+}
+async function _rvOpenHome(i){
+  const row=(STATE.rv||[])[i]; if(!row || !row.id) return;
+  const tab=window.open('', '_blank');
+  if(!tab){ toast('팝업이 차단되었습니다. 브라우저에서 새 탭 열기를 허용해주세요.'); return; }
+  try{
+    const r=await api('/api/trackb/reviewers/home-link',{method:'POST',body:JSON.stringify({id:row.id})});
+    if(!r || !r.ok || !r.ticket) throw new Error((r&&r.error)||'리뷰어 홈 링크를 만들지 못했습니다.');
+    tab.location.href='/?admin_reviewer_ticket='+encodeURIComponent(r.ticket);
+  }catch(e){ tab.close(); toast(e&&e.message?e.message:'리뷰어 홈을 열지 못했습니다.'); }
 }
 /* ── 자동 블랙리뷰어 표시(091-2) — 누적참여·이전 리뷰·참여설정 토글 ──
    ★ 집계 실패(statsUnavailable)는 '?' — 0건·정상으로 꾸미지 않는다(무신호 금지).
