@@ -8370,15 +8370,14 @@ function openCellHistory(ev, el){
 function _menuCellHistory(){
   const td=_selAnchorTd(); _closeCellMenu(); if(td) openCellHistory(null, td);
 }
-/* ══ 관리자 수동 입금처리 — 우클릭 [💰 입금수정] ═══════════════════════════════════════════
+/* ══ 내부 담당자 수동 입금처리 — 우클릭 [💰 입금수정] ═══════════════════════════════════════
    ★★ 입금 칸은 직접 타이핑 편집이 잠긴 상태 칸이다(값 하나가 입금관리 대상·리뷰어 화면까지 바꾼다).
       그래서 창구는 **달력 하나**다 — 날짜를 고르면 확정, [입금일 비우기]로 지운다(사용자 확정 2026-08-24).
-   ★ 저장 경로는 서버 `/api/trackb/workdesk/deposit-date` 하나(adminOrMaster · 무시트 전용).
+   ★ 저장 경로는 서버 `/api/trackb/workdesk/deposit-date` 하나(내부 담당자 · 무시트 전용).
    ★ 저장 뒤에는 **전체 재조회**한다 — 입금 칸 하나로 입금완료 수·게이지·정산 카드가 함께 움직여
      부분 갱신이면 화면이 거짓말을 한다(구매일자 달력과 같은 규율). */
 function _depositMenuBlockReason(td, row){
   if(!_isInternalRole()) return '입금 처리는 내부 담당자만 할 수 있습니다';
-  if(!(STATE.role==='master'||STATE.role==='admin')) return '입금 수정은 관리자(master/admin)만 할 수 있습니다';
   if(!(STATE.wd&&STATE.wd.meta&&STATE.wd.meta.sheetless)) return '구글시트를 아직 쓰는 작업이라 입금 칸은 시트에서 고쳐야 합니다';
   if(!row) return '이 줄의 참여자 정보를 찾지 못했습니다';
   if(row.ambiguous) return '같은 주문·신원이 여러 줄이라 어느 줄의 입금인지 정할 수 없습니다 — 중복 줄을 먼저 정리해 주세요';

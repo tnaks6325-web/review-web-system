@@ -11,7 +11,7 @@
  *   C. fail-closed — 시트 기반 · 중복 앵커 · 입금 열 없음 · 잘못된 날짜 = 쓰기 0건
  *   D. 감사 로그 — 셀 편집과 **같은 표**(participant_edits)에 append-only 로 남는다
  *   E. listCellEdits — 그 칸의 기록만(되돌림 포함) · 앵커는 읽는 쪽과 같은 규칙
- *   F. 라우트 — deposit-date(adminOrMaster) · cell-edits(셀 편집 스코프)
+ *   F. 라우트 — deposit-date(내부 담당자) · cell-edits(셀 편집 스코프)
  *   G. 프론트 — ↩ 버튼 부재 · 입금 칸 메뉴 = [💰 입금수정] · 편집기록 마크/팝업 배선
  *   H. 리뷰어 화면 — 관리자 확정 입금일이 페이백 날짜로 나간다(이체 원장이 있으면 그쪽 우선)
  *
@@ -173,7 +173,7 @@ async function run() {
 
     // ── F. 라우트 배선 ──
     const routes = fs.readFileSync(path.join(ROOT, 'src', 'routes', 'trackB.routes.js'), 'utf8');
-    assert.ok(/deposit-date', authMiddleware, adminOrMasterMiddleware/.test(routes), '입금 수정 = adminOrMaster(정산·리뷰어 화면까지 바꾼다)');
+    assert.ok(/deposit-date', authMiddleware, internalMiddleware/.test(routes), '입금 수정 = 내부 담당자(master/admin/staff), 광고주는 차단한다');
     const ce = routes.indexOf("router.get('/workdesk/cell-edits'");
     assert.ok(ce >= 0, 'cell-edits 라우트 존재');
     const ceBody = routes.slice(ce, routes.indexOf('router.', ce + 10));
@@ -218,7 +218,7 @@ async function run() {
     assert.equal(reason({}, { id: 'r1' }), '', 'master + 무시트 + 단일 앵커 = 실행 가능');
     assert.match(reason({}, { id: 'r1', ambiguous: true }), /중복 줄/, '중복 줄은 사유를 말한다');
     sandbox.STATE = { role: 'staff', wd: { meta: { sheetless: true } } };
-    assert.match(reason({}, { id: 'r1' }), /관리자\(master\/admin\)/, 'AE 는 사유와 함께 흐리게(서버 adminOrMaster 와 1:1)');
+    assert.equal(reason({}, { id: 'r1' }), '', 'AE도 작업보드 입금수정을 할 수 있다(서버 internalMiddleware 와 1:1)');
     sandbox.STATE = { role: 'master', wd: { meta: { sheetless: false } } };
     assert.match(reason({}, { id: 'r1' }), /시트에서 고쳐야/, '시트 기반 탭은 화면도 서버와 같은 말을 한다');
     console.log("  G′. 화면 함수 vm 실행 통과");

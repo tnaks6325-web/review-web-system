@@ -1407,11 +1407,11 @@ router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddlew
     res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
-/* 관리자 수동 입금처리 (무시트 전용 · adminOrMaster) — 우클릭 [💰 입금수정].
+/* 내부 담당자 수동 입금처리 (무시트 전용 · master/admin/staff) — 우클릭 [💰 입금수정].
    ★ 입금 칸은 직접 편집이 잠긴 상태 칸이라 값을 고칠 창구가 없었다. 여기가 그 유일한 창구다.
    ★ `date` 가 빈 값이면 **칸을 비운다**(입금 취소·오기입 정정) — 지운 값은 셀 편집기록에 남는다.
-   ★ 권한은 리뷰제출일 백필과 같은 adminOrMaster — 입금 표시는 정산·리뷰어 화면까지 바꾼다. */
-router.post('/workdesk/deposit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+   ★ 내부 담당자에게만 허용한다. 입금 표시는 정산·리뷰어 화면까지 바꾸므로 광고주는 계속 차단한다. */
+router.post('/workdesk/deposit-date', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, date } = req.body || {};
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
