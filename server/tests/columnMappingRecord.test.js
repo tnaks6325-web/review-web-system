@@ -41,10 +41,10 @@ const META = {
 
 async function run() {
   // ── 정상 기록: 원자 INSERT 1회, 가드 절 포함, name/url/none 제외 ──
-  let pool = makePool({ rowCount: 5 });
+  let pool = makePool({ rowCount: 4 });
   svc.__setPoolForTest(pool);
   let r = await svc.recordDetectedMappings({ sheetId: 'sheet1', tabGid: '99', tabName: '탭A', meta: META });
-  assert.deepEqual(r, { recorded: 5 });
+  assert.deepEqual(r, { recorded: 4 });
   assert.equal(pool.q.length, 1, '쿼리 1회(원자 INSERT)만');
   const ins = pool.q[0];
   assert.ok(/INSERT INTO tab_column_mappings/.test(ins.s), 'tab_column_mappings INSERT');
@@ -59,7 +59,8 @@ async function run() {
   assert.ok(!flat.includes('name'), '★ name(PII) 미기록');
   assert.ok(!flat.includes('url') && !flat.includes('start_date') && !flat.includes('end_date'), 'resolver 미소비 필드 미기록');
   assert.ok(!flat.includes('round'), '미검출(none) 필드 미기록');
-  for (const f of ['recipient', 'review_submit', 'product', 'phone', 'payment']) {
+  assert.ok(!flat.includes('review_submit'), '★ review_submit은 자동탐지로 기록하지 않음');
+  for (const f of ['recipient', 'product', 'phone', 'payment']) {
     assert.ok(flat.includes(f), `${f} 기록됨`);
   }
   console.log('  정상 기록(원자 INSERT·가드·제외 규칙) 통과');

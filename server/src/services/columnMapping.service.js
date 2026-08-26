@@ -216,7 +216,9 @@ async function saveMapping(sheetId, tabGid, tabName, columns, updatedBy) {
 /**
  * P2b: 인덱스 빌더용 경량 매핑 — db_field → { colIndex, header } Map.
  *   columnResolver가 컬럼감지를 "DB매핑 우선"으로 하기 위한 입력.
- *   매핑이 없거나(미설정 탭) sheetId/tabGid가 없으면 null → 빌더는 키워드 전용(P2a 동일).
+ *   리뷰제출(review_submit)은 자동추측 기록을 신뢰하지 않는다. 관리자가 명시 저장한
+ *   매핑만 반환해 키워드 오인식으로 제출완료가 되는 일을 막는다.
+ *   매핑이 없거나(미설정 탭) sheetId/tabGid가 없으면 null이다.
  *   같은 db_field가 여러 컬럼에 매핑되면 가장 앞(작은 col_index)만 사용(determinism).
  * @returns {Promise<Map<string,{colIndex:number,header:string|null}>|null>}
  */
@@ -225,7 +227,7 @@ async function getTabColumnIndexMap(sheetId, tabGid) {
   let rows;
   try {
     ({ rows } = await pool.query(
-      `SELECT col_index, header_text, db_field
+      `SELECT col_index, header_text, db_field, updated_by
          FROM tab_column_mappings
         WHERE sheet_id = $1 AND tab_gid = $2 AND db_field IS NOT NULL
         ORDER BY col_index ASC`,
@@ -240,6 +242,7 @@ async function getTabColumnIndexMap(sheetId, tabGid) {
   for (const r of rows) {
     if (!r.db_field || m.has(r.db_field)) continue;       // 첫(최소 col_index) 매핑만
     if (!Number.isInteger(r.col_index) || r.col_index < 0) continue;
+    if (r.db_field === 'review_submit' && String(r.updated_by || '').startsWith('auto:')) continue;
     m.set(r.db_field, { colIndex: r.col_index, header: r.header_text != null ? String(r.header_text) : null });
   }
   return m.size ? m : null;
@@ -258,9 +261,10 @@ async function getTabColumnIndexMap(sheetId, tabGid) {
 //     재파싱이 불필요(무변경)하고, 전 탭 백필 시 쿼터 폭풍을 막는다.
 // ═══════════════════════════════════════════════════════════
 
-// 자동 기록 대상 = columnResolver가 DB 오버라이드를 소비하는 6필드만.
+// 자동 기록 대상 = columnResolver가 DB 오버라이드를 소비하는 필드만.
 // name(PII 가드)·url/날짜(resolver 미소비 → 죽은 매핑 방지)는 기록하지 않는다.
-const RECORDABLE_FIELDS = ['recipient', 'review_submit', 'product', 'phone', 'round', 'payment'];
+// review_submit은 자동기록 금지: 작업별 약속 컬럼을 명시 저장한 경우만 제출 상태에 쓴다.
+const RECORDABLE_FIELDS = ['recipient', 'product', 'phone', 'round', 'payment'];
 
 let _testPool = null;
 function __setPoolForTest(p) { _testPool = p || null; }
