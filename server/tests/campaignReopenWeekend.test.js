@@ -39,7 +39,7 @@ console.log('\n[1] 주말 판정 단일 출처');
 {
   const src = read('src/services/campaignState.service.js');
   ok('★★ 상태엔진이 게시 차단과 같은 함수를 쓴다(isWeekendClosedOn require — 판정 사본 0)',
-    /require\('\.\/campaignWeekend\.service'\)/.test(src) && /isWeekendClosedOn\(c, d\)/.test(src));
+    /require\('\.\/campaignWeekend\.service'\)/.test(src) && /isWeekendClosedOn\(c, d, plans\)/.test(src));
   ok('★ "무조건 내일" 헬퍼(kstTomorrowStr) 부재 — 되살리면 신고 건이 그대로 재현된다',
     !/kstTomorrowStr/.test(src));
   ok('주말 판정과 게시 차단이 같은 날짜에 대해 어긋나지 않는다(토요일)',

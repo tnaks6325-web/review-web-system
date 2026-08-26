@@ -132,6 +132,9 @@
    *  ★ baseFor 와 재배분이 같은 판정을 쓴다(사본을 두면 "표는 0인데 재배분은 30"이 된다). */
   function policyClosed(d) {
     if (!S || !S.data || S.data.skipWeekends !== true) return false;
+    // 공고의 기본 주말 제외보다 이 화면에서 확정할 날짜별 인원 계획이 우선한다.
+    // 0명은 기존대로 휴무이며, 1명 이상인 주말만 모집을 연다.
+    if (S.plan && Number(S.plan[d]) > 0) return false;
     var k = dayKind(d);
     return k === 'sat' || k === 'hol';
   }
@@ -642,7 +645,7 @@
   /* ── 마운트(body 직속) ───────────────────────────────────── */
   var CSS = ''
     + '#cdpModal{position:fixed;inset:0;z-index:10050;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.55)}'
-    + '#cdpModal .cdp-box{background:var(--card,#fff);color:var(--t1,#1f2937);width:min(680px,94vw);max-height:92vh;display:flex;flex-direction:column;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.28);overflow:hidden}'
+    + '#cdpModal .cdp-box{background:var(--card,#fff);color:var(--t1,#1f2937);width:min(920px,94vw);max-height:92vh;display:flex;flex-direction:column;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.28);overflow:hidden}'
     + '#cdpModal .cdp-hd{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--border,#e5e7eb);background:var(--bg2,#f9fafb);font-weight:800;font-size:.85rem}'
     + '#cdpModal .cdp-x{margin-left:auto;border:0;background:none;font-size:1.05rem;cursor:pointer;color:var(--t3,#9ca3af)}'
     /* ★★ 위(안내·현황·이월 방식·균형 바·표 머리)는 **고정**, 스크롤은 날짜 목록부터
@@ -684,6 +687,14 @@
     + '#cdpModal .cdp-carry .where{margin-top:9px;font-size:.7rem;line-height:1.6;color:#7c3d09;background:#fff3e2;border:1px solid #f8d5aa;border-radius:8px;padding:8px 11px}'
     + '#cdpModal .cdp-carry .cmp{margin-top:7px;font-size:.66rem;color:#8a7a63}'
     + '#cdpModal .cdp-carry .cmp b{color:#7c3d09}'
+    /* 요약과 보충 방식은 좌측에 압축하고, 날짜별 계획은 넓은 오른쪽 영역을 쓴다. */
+    + '#cdpModal .cdp-fix{display:grid;grid-template-columns:185px minmax(0,1fr);column-gap:12px;align-items:start}'
+    + '#cdpModal .cdp-fix>.cdp-note,#cdpModal .cdp-fix>.cdp-bal,#cdpModal .cdp-fix>.cdp-sub{grid-column:1/-1}'
+    + '#cdpModal .cdp-stat{grid-column:1;margin-bottom:8px;padding:10px}#cdpModal .cdp-stat .bar{display:none}'
+    + '#cdpModal .cdp-stat .kv{gap:6px}#cdpModal .cdp-stat .kv span{display:block;width:100%}'
+    + '#cdpModal .cdp-carry{grid-column:1;margin:0;padding:9px}.cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:none}'
+    + '#cdpModal .cdp-seg{grid-template-columns:1fr;gap:3px;padding:0;background:none}#cdpModal .cdp-seg button{border:1px solid #eadcc8;padding:7px;text-align:left}#cdpModal .cdp-seg button small{display:none}'
+    + '#cdpModal .cdp-sub{grid-column:2;grid-row:1;margin-top:4px}#cdpModal .cdp-fix>.cdp-bal{grid-column:2;grid-row:2;margin-top:0}'
     /* ── ③ 배분 균형 바(요구 ⑥) — 높이는 "일치(초록)" 기준 41px 로 고정한다.
           상태마다 바가 커졌다 작아지면 아래 표가 위아래로 흔들려 조절하던 줄을 놓친다(사용자 확정). */
     + '#cdpModal .cdp-bal{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px;padding:0 13px;margin-bottom:11px;border:1.5px solid;display:flex;align-items:center;gap:11px;flex-wrap:nowrap;overflow:hidden}'
@@ -695,6 +706,7 @@
     + '#cdpModal .cdp-bal.ok{background:#ecfdf3;border-color:#86dfae;color:#14653a}'
     + '#cdpModal .cdp-bal.over{background:#fef2f2;border-color:#f4a9a9;color:#a81f1f}'
     + '#cdpModal .cdp-bal.under{background:#eff5ff;border-color:#a9c6f6;color:#1b46a8}'
+    + '@media (max-width:700px){#cdpModal .cdp-fix{display:block}#cdpModal .cdp-stat .bar{display:block}#cdpModal .cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:block}#cdpModal .cdp-seg{grid-template-columns:1fr}#cdpModal .cdp-sub{margin-top:0}}'
     + '@media (max-width:560px){#cdpModal .cdp-bal{height:auto;min-height:41px;padding:9px 12px;flex-wrap:wrap}'
     + '#cdpModal .cdp-bal .l1{white-space:normal}#cdpModal .cdp-seg{grid-template-columns:1fr}}'
     + '#cdpModal .cdp-row{display:grid;grid-template-columns:86px 1fr 152px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px dashed var(--border,#eef2f7)}'
@@ -1144,12 +1156,11 @@
           : '아래에서 <b>[주말 기준으로 재배분]</b>을 누르면 오늘 이후 일정을 새 설정으로 다시 깝니다(총량 유지).')
         + '</div>';
     } else {
-      var _wkBad = weekendConflicts();
-      if (_wkBad.length) {
-        wkNote = '<div class="cdp-note warn">⚠ 이 공고는 <b>주말 제외</b>인데 <b>' + _wkBad.length + '일</b>('
-          + _esc(_wkBad.slice(0, 4).map(fmtMD).join(' · ')) + (_wkBad.length > 4 ? ' 외' : '')
-          + ')에 인원이 배정돼 있습니다 — <b>그 날은 신청이 막혀 아무도 참여할 수 없습니다.</b>'
-          + ' <button type="button" class="cdp-btn sm" onclick="CampaignDailyPlan._rebalance()">주말 기준으로 재배분</button></div>';
+      var _wkOpen = (S.horiz || []).filter(function (d) {
+        return (dayKind(d) === 'sat' || dayKind(d) === 'hol') && Number(S.plan[d]) > 0;
+      });
+      if (_wkOpen.length) {
+        wkNote = '<div class="cdp-note">주말 일정 <b>' + _wkOpen.length + '일</b>은 모집 오픈됩니다.</div>';
       }
     }
 
