@@ -3882,9 +3882,9 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     return { ok: false, error: 'order_lookup_failed' };
   }
 
-  // 구매기록 취소는 금액·시트 주문값을 함께 바꾸므로 order-delete 와 같은 권한을 요구한다.
+  // 구매기록 취소는 금액·시트 주문값을 함께 바꾸므로 내부 담당자만 허용한다.
   // (actorRole 미전달 = 옛 호출부 → 종전대로 통과. 라우트가 항상 넘긴다.)
-  if (liveOrderId && actorRole && !(actorRole === 'master' || actorRole === 'admin')) {
+  if (liveOrderId && actorRole && !['master', 'admin', 'staff'].includes(actorRole)) {
     return { ok: false, error: 'order_cancel_forbidden' };
   }
 

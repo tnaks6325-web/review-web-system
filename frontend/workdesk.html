@@ -8874,9 +8874,9 @@ function _openCellMenu(x,y,td){
   const canPaste=canE && g.some(l=>l.some(c=>c.classList.contains('gedit')));
   const row=(icon,label,fn,dim,danger,title)=>`<button class="gcmrow${dim?' dim':''}${danger?' danger':''}"${dim?' disabled':''}${title?` title="${esc(title)}"`:''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
   // 주문(구매양식)이 연결된 행은 "명단에서 빼기"가 아니라 "구매기록 취소"다. 라벨이 그 사실을 말하고,
-  // 서버가 master/admin만 허용하므로 그 밖의 담당자에겐 눌러도 아무 일 없는 항목을 두지 않는다.
+  // 서버와 같이 내부 담당자에게만 허용한다. 광고주에게는 눌러도 실행되지 않는 항목을 두지 않는다.
   const menuRowHasOrder=!!(selectedRow&&selectedRow.hasOrder);
-  const menuCanOrderDelete=(STATE.role==='master'||STATE.role==='admin');
+  const menuCanOrderDelete=_isInternalRole();
   const isDateCol = field && field.indexOf('col:')===0 && _isPurchaseDateHeader(field.slice(4));
   /* 💬 리뷰어에게 메시지 — 그 줄(들)의 리뷰어에게 1:1 문의방을 열고 보낸다.
      ★ 광고주에겐 그리지 않는다(서버 게이트와 1:1). 받는 사람 판정은 **서버가** 하므로
@@ -8910,7 +8910,7 @@ function _openCellMenu(x,y,td){
         menuRowHasOrder&&!menuCanOrderDelete,
         true,
         menuRowHasOrder
-          ? (menuCanOrderDelete?'이 행의 구매양식을 취소하고 작업표에서 제거합니다 · 총원·금액 반영':'구매기록이 연결된 행 삭제는 관리자(master/admin)만 할 수 있습니다')
+          ? (menuCanOrderDelete?'이 행의 구매양식을 취소하고 작업표에서 제거합니다 · 총원·금액 반영':'구매기록이 연결된 행 삭제는 내부 담당자만 할 수 있습니다')
           : '이 행을 작업표와 리뷰어 참여내역에서 제거합니다')}`:'');
   m.classList.add('show');
   const w=m.offsetWidth||210, h=m.offsetHeight||160;
@@ -9418,8 +9418,8 @@ async function _manualReviewDateOnly(){
 function _menuDeleteRow(){
   const rowId=STATE._gMenuRowId; _closeCellMenu(); if(!rowId) return;
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(rowId));
-  if(r&&r.hasOrder&&!(STATE.role==='master'||STATE.role==='admin')){   // 메뉴에서 이미 잠갔지만 최종 방어
-    alert('구매기록이 연결된 행 삭제는 관리자(master/admin)만 할 수 있습니다.');
+  if(r&&r.hasOrder&&!_isInternalRole()){   // 메뉴에서 이미 잠갔지만 최종 방어
+    alert('구매기록이 연결된 행 삭제는 내부 담당자만 할 수 있습니다.');
     return;
   }
   hideRow(rowId,{hasOrder:!!(r&&r.hasOrder)});
@@ -15726,7 +15726,7 @@ async function toggleBool(rowId, field, cur){ await saveEdit(rowId, field, !cur)
 // 종전처럼 '실패' 한 마디로 접으면 담당자가 무엇을 고쳐야 하는지 알 방법이 없어
 // "눌렀는데 아무 일도 안 일어난다"로 보인다. 사유와 다음 행동을 그대로 말한다.
 const _HIDE_ROW_ERRORS={
-  order_cancel_forbidden:'구매기록이 연결된 행 삭제는 관리자(master/admin)만 할 수 있습니다.',
+  order_cancel_forbidden:'구매기록이 연결된 행 삭제는 내부 담당자만 할 수 있습니다.',
   order_lookup_failed:'이 행의 구매기록을 확인하지 못해 중단했습니다(구매양식이 남은 채 행만 사라지지 않도록). 잠시 후 다시 시도해 주세요.',
   concurrent_cancel:'같은 주문에 다른 처리가 진행 중입니다. 잠시 후 다시 시도해 주세요.',
   order_cancel_failed:'구매기록 취소에 실패해 행도 지우지 않았습니다(둘은 함께 처리됩니다). 다시 시도해 주세요.',
