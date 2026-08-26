@@ -530,7 +530,10 @@ router.get('/review-earnings', async (req, res, next) => {
                AND ((ri.sheet_id = os.sheet_id
                      AND ri.tab_name = os.tab_name
                      AND ri.row_index = os.sheet_row)
+                 -- 같은 작업표 자리라도 기존 이력이 이미 제출완료면 새 주문을 가리지 않는다.
+                 -- 미제출 행만 같은 참여의 중복 후보가 될 수 있다.
                  OR (cp.id IS NOT NULL
+                     AND NOT COALESCE(ri.is_submitted, FALSE)
                      AND ri.sheet_id = cp.sheet_id
                      AND ri.tab_name = cp.tab_name
                      AND ri.row_index = cp.seq))

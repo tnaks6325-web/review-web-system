@@ -165,6 +165,14 @@ async function seed() {
     assert.equal(r.body.totals.count, 1, '공고 조인 실패가 리뷰어 참여 이력을 숨기지 않는다');
   });
 
+  await ta('같은 작업표 순번의 완료 이력은 새 미제출 주문을 가리지 않는다', async () => {
+    await seed();
+    await pool.query('UPDATE review_index SET is_submitted = TRUE, is_submitted2 = \'PAID\'');
+    const r = await call('get', '/review-earnings', { query: { phone8: P8 } });
+    assert.equal(r.body.totals.count, 1, '새 주문은 참여중으로 별도 표시한다');
+    assert.equal(r.body.doneTotals.count, 1, '기존 완료 이력도 유지한다');
+  });
+
   await ta('작업표 줄이 소프트삭제면 이중집계 방지 근거가 아니다', async () => {
     await seed();
     await pool.query('UPDATE campaign_participants SET deleted_at = NOW()');
