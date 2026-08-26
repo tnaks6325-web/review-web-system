@@ -136,6 +136,9 @@ function _renderCsRooms(list) {
     groups.get(key).rows.push(r);
   });
   _csVisibleGroupKeys = [...groups.keys()];
+  // 필터를 바꿔도 "전체 펼치기" 표기와 실제 접힘 상태가 어긋나지 않게 현재 그룹으로 재결속한다.
+  if (_csAllGroupsFolded) _csFoldedGroupKeys = new Set(_csVisibleGroupKeys);
+  else _csFoldedGroupKeys = new Set([..._csFoldedGroupKeys].filter(key => groups.has(key)));
   let html = "";
   let groupIndex = 0;
   for (const [campKey, grp] of groups) {
@@ -470,6 +473,12 @@ async function csReloadConversation(threadId) {
   try {
     const data = await gasGet({ action: "csAdminMessages", threadId });
     if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    // 서버가 열람과 함께 미확인을 0으로 만든다. 필터/배지도 같은 사실을 즉시 반영한다.
+    const cached = _csRooms.find(r => r.id === threadId);
+    if (cached && cached.adminUnread > 0) {
+      cached.adminUnread = 0;
+      _renderCsRooms(_csVisibleRooms());
+    }
     const t = data.thread || {};
     const camp = document.getElementById("csConvCampaign");
     if (camp) {

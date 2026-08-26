@@ -24,5 +24,11 @@ ok('새로고침 정사각 규격이 있다', /\.cs-refresh-control\{width:32px;
 ok('읽음/안읽음은 adminUnread 기준으로만 걸러진다',
   /_csReadFilter === 'read'.*adminUnread > 0/.test(src) && /_csReadFilter === 'unread'.*adminUnread > 0/.test(src));
 ok('목록 조회는 상태와 무관하게 전체를 받아온다', /csAdminThreads", status: "all", q: ""/.test(src));
+ok('방을 열면 캐시의 미확인 수와 읽음/안읽음 목록도 즉시 갱신한다',
+  /const cached = _csRooms\.find\(r => r\.id === threadId\)/.test(src) && /cached\.adminUnread = 0/.test(src));
+ok('전체 접기 상태는 필터가 바뀐 현재 그룹에도 적용된다',
+  /if \(_csAllGroupsFolded\) _csFoldedGroupKeys = new Set\(_csVisibleGroupKeys\)/.test(src));
+const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'cs.routes.js'), 'utf8');
+ok('상태·검색 제어가 없는 목록에서 500건 상한으로 방이 누락되지 않는다', !/LIMIT 500\b/.test(route));
 
 console.log(`\n✅ csRoomReadFilterControls: ${n} cases passed`);
