@@ -560,6 +560,7 @@
     if (!need) return;
     var ds = (S.horiz || []).filter(function (d) { return baseFor(d) > 0 || planFor(d) > 0; });
     var cap = dayCeil(), guard = 0;
+    var extendEnd = null;
     // 종료일 연장은 기존 작업표의 0명 행에 막히지 않고, 기본 일건수 단위로 새 날짜를 연다.
     // 단, 주말 제외 공고는 명시 계획이 있는 주말(baseFor>0)만 열 수 있다.
     var extendSlot = function (d) {
@@ -569,12 +570,14 @@
       return Math.min(cap, Math.max(0, Number(S.data.defaultDaily) || 0));
     };
     if (need > 0 && S.carryMode === 'extend') {
-      // 마지막 부분일(예: 15명)을 먼저 기본 일건수(예: 35명)까지 채운다.
+      // 종료일 연장은 과거/오늘을 절대 건드리지 않는다. 마지막 진행일의 부분 수량만
+      // 기본 일건수까지 채운 뒤, 그 다음 날짜부터 새 수량을 붙인다.
       var filledDays = (S.horiz || []).filter(function (d) { return planFor(d) > 0; });
-      for (var ex = filledDays.length - 1; ex >= 0 && need > 0; ex--) {
-        var exd = filledDays[ex], exSlot = extendSlot(exd);
-        var exPut = Math.min(Math.max(0, exSlot - planFor(exd)), need);
-        if (exPut > 0) { S.plan[exd] = planFor(exd) + exPut; need -= exPut; }
+      extendEnd = filledDays.length ? filledDays[filledDays.length - 1] : null;
+      if (extendEnd && extendEnd !== S.data.today) {
+        var exSlot = extendSlot(extendEnd);
+        var exPut = Math.min(Math.max(0, exSlot - planFor(extendEnd)), need);
+        if (exPut > 0) { S.plan[extendEnd] = planFor(extendEnd) + exPut; need -= exPut; }
       }
     }
     if (S.carryMode === 'spread') {
@@ -618,7 +621,9 @@
       /* ★ 구간에 이미 올라와 있는 **0 명 준비일**(작업표에 빈 줄이 남은 날)을 먼저 채운다 —
          건너뛰고 새 날을 만들면 준비된 줄을 두고 뒤에 줄을 더 만드는 꼴이 된다.
          next·spread 는 위 루프가 이미 채웠으므로 여기서는 no-op 이다(extend 전용 경로). */
-      (S.horiz || []).forEach(function (dz) {
+      (S.horiz || []).filter(function (dz) {
+        return S.carryMode !== 'extend' || !extendEnd || dz > extendEnd;
+      }).forEach(function (dz) {
         if (need <= 0 || planFor(dz) > 0) return;
         var bz = S.carryMode === 'extend' ? extendSlot(dz) : baseFor(dz); if (bz <= 0) return;
         var putz = Math.min(bz, need, cap);
@@ -626,7 +631,9 @@
       });
     }
     if (need > 0) {
-      var d3 = S.horiz.length ? addDays(S.horiz[S.horiz.length - 1], 1) : baseDate(), g2 = 0;
+      var d3 = (S.carryMode === 'extend' && extendEnd)
+        ? addDays(extendEnd, 1)
+        : (S.horiz.length ? addDays(S.horiz[S.horiz.length - 1], 1) : baseDate()), g2 = 0;
       while (need > 0 && g2++ < 400 && S.horiz.length < MAX_ROWS) {
         var b = S.carryMode === 'extend' ? extendSlot(d3) : baseFor(d3);
         if (b > 0) { var v = Math.min(b, need); S.plan[d3] = v; S.horiz.push(d3); need -= v; }
