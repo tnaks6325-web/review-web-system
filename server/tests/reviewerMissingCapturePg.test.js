@@ -138,6 +138,16 @@ async function seed() {
     assert.equal(t.productTotal, 13900, '금액도 그대로');
   });
 
+  await ta('신청 FK가 비어도 campaign:<id> 작업표 키로 리뷰 내역에 표시한다', async () => {
+    await seed();
+    await pool.query('DELETE FROM review_index');
+    await pool.query('UPDATE order_submissions SET campaign_application_id = NULL');
+    const r = await call('get', '/review-earnings', { query: { phone8: P8 } });
+    const t = r.body && r.body.totals;
+    assert.equal(t.count, 1, '공고 키를 복원한 주문이 리뷰 내역에 나타난다');
+    assert.equal(t.productTotal, 13900, '주문 결제금액도 유지한다');
+  });
+
   await ta('작업표 줄이 소프트삭제면 이중집계 방지 근거가 아니다', async () => {
     await seed();
     await pool.query('UPDATE campaign_participants SET deleted_at = NOW()');

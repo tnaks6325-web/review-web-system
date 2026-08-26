@@ -18,6 +18,16 @@ assert.match(
 );
 assert.match(
   body,
+  /substring\(os\.sheet_id from '\^campaign:\(\.\+\)\$'\)/,
+  'a sheetless campaign:<id> ledger key must recover the campaign when the application FK is absent'
+);
+assert.match(
+  body,
+  /AND rc\.id IS NOT NULL/,
+  'a recovered campaign key must be eligible for reviewer review earnings'
+);
+assert.match(
+  body,
   /LEFT JOIN campaign_participants cp ON cp\.order_submission_id = os\.id/,
   'the workboard participant row must be available as the payment amount fallback'
 );
