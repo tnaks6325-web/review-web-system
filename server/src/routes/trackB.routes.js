@@ -2441,9 +2441,8 @@ router.post('/review-inspect/sweep', authMiddleware, adminOrMasterMiddleware, as
 /* ══════════════════════════════════════════════════════════════
    C/S 문의창구 — 리뷰웹시스템[3버전] 상단탭
 
-   ★ **master/admin 전용**(`adminOrMasterMiddleware`) — 기존 `/api/cs/*` 정책을 그대로 옮겼다
-     (cs.routes.js 머리말: "staff(영업담당자)·리뷰어는 접근 불가"). 문의 본문에는
-     리뷰어 실명·연락처·주소·주문정보가 그대로 실려 담당 스코프로 나눌 수 있는 데이터가 아니다.
+   ★ **내부 담당자 전용**(`internalMiddleware`) — master/admin/AE(staff)가 리뷰어 C/S를 함께 처리한다.
+     문의 본문에는 리뷰어 실명·연락처·주소·주문정보가 있으므로 외부 역할은 차단한다.
    ★ Track B 경로에 두는 이유: 인트라넷 SSO 토큰(`via:'intranet'`)은 authMiddleware가
      `/api/trackb/*` 로만 격리해 `/api/cs/*` 에 **도달 자체가 불가능**하다.
      로직은 한 줄도 베끼지 않고 기존 cs 라우트 핸들러에 그대로 위임한다.
@@ -2460,21 +2459,21 @@ const _csHandlers = {
   memo:         _delegate(_csRoutes, 'post', '/memo'),
 };
 // 경로 모양은 `/api/cs/*` 와 1:1 — 프론트가 베이스 문자열만 갈아끼워 같은 모듈을 쓴다.
-router.get('/cs/threads', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.get('/cs/threads', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.threads(req, res, next));
-router.get('/cs/unread-count', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.get('/cs/unread-count', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.unread(req, res, next));
-router.get('/cs/messages', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.get('/cs/messages', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.messages(req, res, next));
-router.get('/cs/order-context', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.get('/cs/order-context', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.orderContext(req, res, next));
-router.post('/cs/reply', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.post('/cs/reply', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.reply(req, res, next));
-router.post('/cs/upload', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.post('/cs/upload', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.upload(req, res, next));
-router.post('/cs/status', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.post('/cs/status', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.status(req, res, next));
-router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+router.post('/cs/memo', authMiddleware, internalMiddleware, (req, res, next) =>
   _csHandlers.memo(req, res, next));
 
 /* ── 작업보드 → 리뷰어에게 메시지 (관리자가 문의방을 먼저 연다) ──────────────────────
@@ -2482,9 +2481,8 @@ router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next
    이미 있다(`csBridge.postAdminNotice` — 리뷰검수 반려·입금 실패 안내가 쓰는 그 함수).
    여기서는 **부르는 창구만** 연다: 로직 복제 0 · 마이그레이션 0 · 신규 저장소 0.
 
-   ★ 게이트 = 내부인 전원(광고주 차단, 사용자 확정 2026-08-21). C/S 본문 조회 8경로가
-     master/admin 전용인 것과 다른데, 이건 **보내는 창구**라 담당자가 쓰는 기능이다.
-     ⚠ 그래서 AE 는 보낼 수는 있어도 그 방의 대화는 C/S 탭에서 못 본다 — 화면이 그 사실을 말한다.
+   ★ 게이트 = 내부인 전원(광고주 차단, 사용자 확정 2026-08-21). C/S 본문 조회 8경로도
+     같은 내부 역할에 열어 AE가 보낸 뒤의 대화를 C/S 탭에서 이어서 처리한다.
    ★ 대상은 화면이 보낸 번호가 아니라 **서버가 줄에서 다시 도출**한다(`csRecipient` 단일 출처).
      낡은 화면·조작 요청이 남의 방을 여는 경로를 만들지 않는다. */
 const _csRecipient = require('../services/csRecipient.service');

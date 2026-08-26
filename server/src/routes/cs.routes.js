@@ -1,7 +1,7 @@
 /**
- * C/S 문의창구 — 관리자 API
- * 모든 라우트는 JWT(authMiddleware) + 관리자/마스터(adminOrMasterMiddleware) 전용.
- * staff(영업담당자)·리뷰어는 접근 불가.
+ * C/S 문의창구 — 내부 담당자 API
+ * 모든 라우트는 JWT(authMiddleware) + 내부 역할(master/admin/staff) 전용.
+ * 리뷰어·광고주는 접근 불가.
  *
  * 동적 /:id 경로는 프론트 gasGet/gasPost 래퍼가 미지원이라, 전부 평면 경로 + body/query id 사용.
  */
@@ -10,11 +10,16 @@ const router = express.Router();
 const pool = require('../db/pool');
 const adminNickname = require('../services/adminNickname.service');
 const { logger } = require('../utils/logger');
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const { emitCsReplyToReviewer, broadcast } = require('../utils/sse');
 
-// 이하 모든 라우트 보호
-router.use(authMiddleware, adminOrMasterMiddleware);
+// 이하 모든 라우트 보호. AE(staff)도 리뷰어 C/S를 조회·답변할 수 있다.
+function internalMiddleware(req, res, next) {
+  const role = req.user?.role;
+  if (role === 'master' || role === 'admin' || role === 'staff') return next();
+  return res.status(403).json({ ok: false, error: '권한 없음' });
+}
+router.use(authMiddleware, internalMiddleware);
 
 // ── 첨부 이미지 URL 검증: 우리 서버의 guide-image 프록시 URL만 허용 ──
 //   화면에 <img src>로 나가므로 자유 문자열 금지(외부 URL·스킴 주입 차단). 메시지당 최대 5장.

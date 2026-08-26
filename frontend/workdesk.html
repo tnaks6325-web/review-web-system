@@ -2793,7 +2793,7 @@ function renderShell(){
   // 첫 진입 기본 뷰 = 홈(시안 B 타일 런처형 · ① nav 상시 유지). 광고주는 홈이 없다(전용 대시보드 유지).
   // 딥링크(#go=·#view=)는 boot 이 STATE.view 를 먼저 세팅하므로 종전대로 그 화면으로 직행한다.
   switchView(STATE.view||(isAdv?'workdesk':'home'));
-  if(isAdmin) _csStartBadgePoll();
+  if(isAdmin || isStaff) _csStartBadgePoll();
   if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)
   if(isAdmin || isStaff) _riBootBadge();   // 리뷰검수 — 손볼 건수(의심+불량)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
   if(isAdmin || isStaff) _lgBootBadge();   // 로그 — 리뷰어 비정상 + 시스템 오류(admin/master만) 중요 건수 합
@@ -9024,7 +9024,7 @@ function _rmRenderForm(){
     <textarea id="rmText" placeholder="보낼 내용을 입력하세요 (최대 1000자)"></textarea>
     <div class="rmatt" id="rmAtt"></div>
     <div class="rmsub">보내면 리뷰어에게 <b>즉시 도착</b>합니다 · 보낸 메시지는 회수할 수 없습니다.</div>
-    ${(STATE.role==='master'||STATE.role==='admin')?'':'<div class="rmwarn">보낸 뒤 리뷰어의 <b>답장은 관리자(master/admin)</b>가 C/S 문의창구에서 확인합니다.</div>'}`;
+    ${(STATE.role==='master'||STATE.role==='admin')?'':'<div class="rmwarn">보낸 뒤 리뷰어의 <b>답장은 내 C/S 문의창구</b>에서 확인하고 이어서 상담할 수 있습니다.</div>'}`;
   const att=document.getElementById('rmAtt');
   if(att){
     // 드래그앤드롭도 붙여넣기와 **같은 함수**로 수렴한다(사본을 두면 한쪽만 제한이 풀린다)
@@ -10491,10 +10491,10 @@ async function _edRemove(id,name){
    ★ 이미지 교체요청(시안 C)은 이 화면 **위의 대기 큐 띠**로 얹는다 — 문의 화면은 손대지 않고
      (목록·대화창·cs-inquiry.js 무변경) 위에 한 겹 더 놓는 방식이라 두 기능이 영역으로 구분된다. */
 async function renderCsView(){
-  const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  const isInternal = _isInternalRole();
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="csTopNote"></div><div id="reQueueMount"></div><div id="csInquiryMount"></div></div>`;
   _reRenderQueue();          // 띠 자리를 먼저 잡아 두고(불러오는 중) 아래 문의 화면을 붙인다
-  if(isAdmin){
+  if(isInternal){
     if(!window.CsInquiry){ $('#csInquiryMount').innerHTML=`<div class="empty">문의창구 모듈(js/cs-inquiry.js)을 불러오지 못했습니다.</div>`; }
     else{
       CsInquiry.mount('csInquiryMount');
@@ -10504,12 +10504,8 @@ async function renderCsView(){
       try{ await loadCsRooms(); }catch(_){ }   // nav 뱃지는 모듈의 CS_ON_BADGE 훅이 따라온다
     }
   }else{
-    // AE — 문의 본문은 안 그린다. "왜 없는지"를 **맨 위에서** 말해주지 않으면 고장으로 오해한다
-    //   (목록 아래에 두면 카드가 길어 화면 밖으로 밀린다 — 실측).
     $('#csTopNote').innerHTML=`<div class="ovnote">
-      리뷰어 문의 본문에는 실명·연락처·주소·주문정보가 포함되어 <b>관리자만 열람</b>합니다.
-      담당 업체의 <b>이미지 교체요청</b>은 아래에서 그대로 처리하실 수 있고,
-      처리하면 <b>리뷰어 채팅에 안내가 자동 전송</b>됩니다.</div>`;
+      리뷰어 C/S 문의는 <b>내부 담당자만 열람</b>할 수 있습니다.</div>`;
   }
   await _loadReedit();
 }

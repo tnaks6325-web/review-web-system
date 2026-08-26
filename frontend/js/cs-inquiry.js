@@ -675,8 +675,7 @@ async function csRejectReviewEdit(requestId, opts) {
 function csReloadAfterReviewEdit() {
   try { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); } catch (_) {}
   // ★ 문의방 목록은 **C/S 화면이 실제로 떠 있을 때만** 다시 읽는다.
-  //   전용 탭(AE)에서 처리한 경우 AE 는 /cs/threads(adminOrMaster)에 403 이고,
-  //   async 함수의 rejection 은 sync try 로 안 잡혀 콘솔에 unhandled rejection 이 남는다.
+  //   화면이 떠 있을 때만 갱신해 불필요한 목록 요청과 숨은 화면의 렌더를 막는다.
   try {
     if (document.getElementById('csRoomListWrap')) {
       const p = loadCsRooms();
