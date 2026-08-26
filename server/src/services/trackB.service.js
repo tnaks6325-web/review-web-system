@@ -3153,7 +3153,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       submitted: !!pick('is_submitted', r.submitted),
       paid: !!pick('is_paid', r.paid),
       source: r.source, hasOrder: !!r.order_submission_id,
-      popularPurpose: r.popularPurpose === true,
+      // 운영 목적 분류는 내부 작업보드 로그에서만 보인다. 광고주 렌즈에는 노출하지 않는다.
+      popularPurpose: showEdits && r.popularPurpose === true,
     };
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
