@@ -714,14 +714,18 @@
     + '#cdpModal .cdp-bal.ok{background:#ecfdf3;border-color:#86dfae;color:#14653a}'
     + '#cdpModal .cdp-bal.over{background:#fef2f2;border-color:#f4a9a9;color:#a81f1f}'
     + '#cdpModal .cdp-bal.under{background:#eff5ff;border-color:#a9c6f6;color:#1b46a8}'
-    + '@media (max-width:700px){#cdpModal .cdp-layout{display:block}#cdpModal .cdp-side{border-right:0;border-bottom:1px solid var(--border,#e5e7eb)}#cdpModal .cdp-main{padding:16px}#cdpModal .cdp-stat .kv{display:flex;gap:8px;flex-wrap:wrap}#cdpModal .cdp-stat .kv span{width:auto;border:0;padding:0}#cdpModal .cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:block}#cdpModal .cdp-seg{grid-template-columns:1fr}}'
+    + '@media (max-width:700px){#cdpModal .cdp-layout{display:block}#cdpModal .cdp-side{border-right:0;border-bottom:1px solid var(--border,#e5e7eb)}#cdpModal .cdp-main{padding:16px}#cdpModal .cdp-stat .kv{display:flex;gap:8px;flex-wrap:wrap}#cdpModal .cdp-stat .kv span{width:auto;border:0;padding:0}#cdpModal .cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:block}#cdpModal .cdp-seg{grid-template-columns:1fr}#cdpModal .cdp-colhead,#cdpModal .cdp-row{grid-template-columns:88px 44px 42px minmax(120px,1fr);column-gap:7px}#cdpModal .cdp-row{padding:6px 2px}#cdpModal .cdp-ctl{gap:4px}#cdpModal .cdp-st{width:24px;height:24px}#cdpModal .cdp-d{font-size:.68rem}#cdpModal .cdp-state{font-size:.6rem}}'
     + '@media (max-width:560px){#cdpModal .cdp-bal{height:auto;min-height:41px;padding:9px 12px;flex-wrap:wrap}'
     + '#cdpModal .cdp-bal .l1{white-space:normal}#cdpModal .cdp-seg{grid-template-columns:1fr}}'
-    + '#cdpModal .cdp-row{display:grid;grid-template-columns:86px 1fr 152px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px dashed var(--border,#eef2f7)}'
+    /* 날짜별 계획표: 시안의 날짜·상태·일 건수·조절 4열을 공용 모달의 실제 행 구조로 쓴다. */
+    + '#cdpModal .cdp-colhead,#cdpModal .cdp-row{display:grid;grid-template-columns:148px 72px 66px minmax(190px,1fr);align-items:center;column-gap:12px}'
+    + '#cdpModal .cdp-colhead{height:37px;border-bottom:1px solid var(--border,#e5e7eb);font-size:.68rem;color:var(--t3,#718096)}'
+    + '#cdpModal .cdp-colhead .n{text-align:right}'
+    + '#cdpModal .cdp-row{min-height:54px;padding:6px 8px;border-bottom:1px solid var(--border,#edf1f5)}'
     + '#cdpModal .cdp-row.hascarry{background:#fffaf2;border-radius:8px}'
     + '#cdpModal .cdp-row.today{background:var(--bg2,#f0f7ff);border-radius:8px}'
     + '#cdpModal .cdp-row.zero{opacity:.72}'
-    + '#cdpModal .cdp-d{font-size:.74rem;color:var(--t2,#334155)}'
+    + '#cdpModal .cdp-d{font-size:.76rem;font-weight:800;color:var(--t2,#334155)}'
     + '#cdpModal .cdp-tag{display:inline-block;font-size:.6rem;font-weight:800;border-radius:999px;padding:0 6px;margin-left:4px;vertical-align:1px}'
     + '#cdpModal .cdp-tag.tdy{color:#1d4ed8;background:#dbeafe}'
     + '#cdpModal .cdp-tag.adj{color:#92400e;background:#fef3c7}'
@@ -730,23 +734,24 @@
     + '#cdpModal .cdp-d.hol{color:#dc2626;font-weight:800}'
     + '#cdpModal .cdp-d.sat{color:#2563eb;font-weight:800}'
     + '#cdpModal .cdp-tag.hol{color:#b91c1c;background:#fee2e2;max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-    + '#cdpModal .cdp-g{position:relative;height:24px;border-radius:12px;background:var(--bg2,#f1f5f9);cursor:ew-resize;user-select:none;touch-action:none}'
+    + '#cdpModal .cdp-state{font-size:.68rem;color:var(--t3,#7b8799)}#cdpModal .cdp-state.open{color:#3866c9;font-weight:700}'
+    + '#cdpModal .cdp-g{position:relative;height:8px;border-radius:8px;background:var(--bg2,#f1f5f9);cursor:ew-resize;user-select:none;touch-action:none;flex:1}'
     + '#cdpModal .cdp-g .f{position:absolute;left:0;top:0;bottom:0;border-radius:12px;background:linear-gradient(90deg,#60a5fa,#3b82f6)}'
     // 이월분은 같은 막대 안에서 주황으로 이어 붙여 "여기에 이월이 얹혔다"를 눈으로 보여준다
     + '#cdpModal .cdp-g .cy{position:absolute;top:0;bottom:0;border-radius:0 12px 12px 0;background:linear-gradient(90deg,#fbbf24,#f59e0b);pointer-events:none}'
     + '#cdpModal .cdp-g .c{position:absolute;left:0;top:0;bottom:0;border-radius:12px 0 0 12px;background:#1d4ed8;opacity:.5;pointer-events:none}'
     + '#cdpModal .cdp-g .b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--t3,#94a3b8);pointer-events:none}'
-    + '#cdpModal .cdp-g .k{position:absolute;top:50%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 1px 4px rgba(15,23,42,.25);pointer-events:none}'
-    + '#cdpModal .cdp-ctl{display:flex;align-items:center;gap:4px;justify-content:flex-end}'
-    + '#cdpModal .cdp-num{width:80px;text-align:center;font-weight:800;font-size:.84rem}'
-    + '#cdpModal .cdp-num small{display:block;font-weight:400;font-size:.58rem;color:var(--t3,#94a3b8);line-height:1.3;word-break:keep-all}'
+    + '#cdpModal .cdp-g .k{position:absolute;top:50%;transform:translate(-50%,-50%);width:15px;height:15px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 1px 4px rgba(15,23,42,.25);pointer-events:none}'
+    + '#cdpModal .cdp-ctl{display:flex;align-items:center;gap:9px;min-width:0}'
+    + '#cdpModal .cdp-num{text-align:right;font-weight:800;font-size:.92rem;font-variant-numeric:tabular-nums}'
+    + '#cdpModal .cdp-num small{display:none}'
     + '#cdpModal .cdp-num small i,#cdpModal .cdp-num small em{font-style:normal;white-space:nowrap}'
     /* ★ 라벨은 말줄임이 아니라 **줄바꿈**한다 — 오늘 줄의 "＋이월 N"이 잘리면 이월이 어디에
        얹혔는지가 화면에서 사라진다(주황 막대만 남아 숫자를 못 읽는다). 줄 높이가 조금 늘 뿐이다. */
     + '#cdpModal .cdp-num small em{font-style:normal;color:#b45309;font-weight:800}'
     + '#cdpModal .cdp-in{box-sizing:border-box;width:100%;border:1px solid transparent;background:none;text-align:center;font-family:inherit;font-size:.84rem;font-weight:800;color:var(--t1,#1f2430);padding:1px 2px;border-radius:5px;font-variant-numeric:tabular-nums}'
     + '#cdpModal .cdp-in:focus{border-color:#2f6fed;background:var(--card,#fff);outline:none}'
-    + '#cdpModal .cdp-st{width:25px;height:25px;border-radius:8px;border:1px solid var(--border,#cbd5e1);background:var(--card,#fff);color:var(--t1,#334155);font-size:.9rem;font-weight:800;cursor:pointer;line-height:1}'
+    + '#cdpModal .cdp-st{width:27px;height:27px;flex:0 0 auto;border-radius:7px;border:1px solid var(--border,#cbd5e1);background:var(--card,#fff);color:var(--t1,#334155);font-size:.9rem;font-weight:800;cursor:pointer;line-height:1}'
     + '#cdpModal .cdp-reset{border:0;background:none;color:var(--t3,#94a3b8);font-size:.62rem;cursor:pointer;text-decoration:underline;padding:0}'
     + '#cdpModal .cdp-end{margin-top:10px;background:var(--bg2,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:10px;padding:9px 13px;font-size:.76rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}'
     + '#cdpModal .cdp-end b{color:#1b64da}'
@@ -1059,31 +1064,27 @@
       // ★ 공휴일·일요일 = 빨강 / 토요일 = 파랑 — 배분을 짤 때 쉬는 날이 한눈에 보여야 한다.
       //   공휴일 이름은 title 로만(줄이 길어지면 게이지가 밀린다).
       var dk = dayKind(d), hol = holidayName(d);
+      var weekendOpen = !!dk && v > 0;
+      var stateText = weekendOpen ? '모집 오픈' : (rest ? '휴무' : (isToday ? '오늘' : (adjusted ? '조절' : '기본')));
       return '<div class="cdp-row' + (isToday ? ' today' : '') + (cy > 0 ? ' hascarry' : '') + (rest ? ' zero' : '') + '">'
         + '<span class="cdp-d' + (dk ? ' ' + dk : '') + '"' + (hol ? ' title="' + _esc(hol) + '"' : '') + '>' + _esc(fmtMD(d))
         + (hol ? '<span class="cdp-tag hol">' + _esc(hol) + '</span>' : '')
-        + (isToday ? '<span class="cdp-tag tdy">오늘</span>' : '')
-        + (rest ? '<span class="cdp-tag rst">휴무</span>' : '')
-        + (adjusted ? '<span class="cdp-tag adj">조절</span>' : '') + '</span>'
-        + '<div class="cdp-g" data-i="' + i + '">'
+        + '</span>'
+        + '<span class="cdp-state' + (weekendOpen ? ' open' : '') + '" title="' + _esc(rowLabelPlain || stateText) + '">' + stateText + '</span>'
+        + '<span class="cdp-num">'
+        + (bal
+          ? '<input type="text" inputmode="numeric" class="cdp-in" data-i="' + i + '" value="' + v + '"' + (killOff ? ' disabled' : '') + '>'
+          : v)
+        + '<small>' + rowLabel + '</small></span>'
+        + '<div class="cdp-ctl">'
+        + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="-1"' + (killOff ? ' disabled' : '') + '>−</button>'
+        + '<div class="cdp-g" data-i="' + i + '" aria-label="' + _esc(fmtMD(d)) + ' 모집인원 조절">'
         + '<div class="f" style="width:' + fw + '%"></div>'
-        // ★ 주황 폭을 plan−base 로 그리면 **사람이 손으로 올린 인원**까지 이월처럼 보인다(시안 실측)
         + (cy > 0 ? '<div class="cy" style="left:' + fw + '%;width:' + Math.max(0, pw - fw) + '%"></div>' : '')
         + (conf > 0 ? '<div class="c" style="width:' + cw + '%"></div>' : '')
         + '<div class="b" style="left:' + bw + '%"></div>'
         + '<div class="k" style="left:' + pw + '%"></div>'
         + '</div>'
-        + '<div class="cdp-ctl">'
-        + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="-1"' + (killOff ? ' disabled' : '') + '>−</button>'
-        + '<span class="cdp-num">'
-        + (bal
-          ? '<input type="text" inputmode="numeric" class="cdp-in" data-i="' + i + '" value="' + v + '"' + (killOff ? ' disabled' : '') + '>'
-          : v)
-        // ★ "기본 N ＋이월 M" 의 N 은 이월이 얹힌 **출발선**이라야 N+M 이 실제 값과 맞는다 —
-        //   저장된 조절이 있는 날에 자연 기본값을 적으면 표의 숫자와 라벨이 어긋난다.
-        // ★ 오늘 줄도 이월을 반드시 말한다 — "확정·진행 N"으로 덮으면 이월 30명이 오늘에 얹혔는데
-        //   화면 어디에도 그 사실이 없다(막대만 주황). 좁으면 말줄임되므로 title 로 전문을 남긴다.
-        + '<small' + (rowLabel ? ' title="' + _esc(rowLabelPlain) + '"' : '') + '>' + rowLabel + '</small></span>'
         + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="1"' + (killOff ? ' disabled' : '') + '>＋</button>'
         + '</div></div>';
     }).join('');
@@ -1318,6 +1319,7 @@
         + (j.scheduleDriven === true ? '<small>(시트 행 수)</small>' : ''))
       + ' · 확정 <b>' + done + '명</b></span></div>'
       + '</div><div class="cdp-sc">'
+      + '<div class="cdp-colhead"><span>날짜</span><span>상태</span><span class="n">일 건수</span><span>조절</span></div>'
       + '<div id="cdpRows">' + rows + '</div>'
       + '<div class="cdp-end"><span>예상 종료일: <b>' + _esc(endTxt) + '</b> '
       + (endTxt !== S.baseEnd ? '<span class="chg">(원래 ' + _esc(S.baseEnd) + ' → 변경됨)</span>' : '') + '</span>'
