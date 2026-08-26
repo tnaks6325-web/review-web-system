@@ -183,8 +183,9 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   const roundFromDb = roundIdx >= 0;
   if (roundIdx < 0) roundIdx = headers.findIndex(h => roundKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
 
-  // ── 입금열 (P2b: DB매핑 'payment' 우선 → 정확/부분/제외 키워드 폴백) ──
-  let paymentColIdx = _dbCol(dbColMap, 'payment', headers, drift);
+  // ── 입금일 (표준 키 payment_status, 레거시 payment 매핑도 읽기 호환) ──
+  let paymentColIdx = _dbCol(dbColMap, 'payment_status', headers, drift);
+  if (paymentColIdx < 0) paymentColIdx = _dbCol(dbColMap, 'payment', headers, drift);
   const paymentFromDb = paymentColIdx >= 0;
   if (paymentColIdx < 0) paymentColIdx = findPaymentColumnIndex(headers);
 

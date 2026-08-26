@@ -40,6 +40,19 @@ const META = {
 };
 
 async function run() {
+  // ── 작업보드 표준 컬럼 사전: 역할이 다른 리뷰 상태/증빙/옵션을 분리한다. ──
+  const keys = new Set(svc.getFieldRegistry().map(f => f.key));
+  for (const key of ['participant', 'order_date', 'product', 'option', 'review_submit', 'review_capture', 'review_option', 'payment_status', 'tracking_number']) {
+    assert.ok(keys.has(key), `${key} 표준 필드 존재`);
+  }
+  assert.equal(svc.autoGuessField('주문자제출'), 'participant', '주문자제출은 참여자');
+  assert.equal(svc.autoGuessField('리뷰옵션'), 'review_option', '리뷰옵션은 제출 상태가 아님');
+  assert.equal(svc.autoGuessField('리뷰캡쳐본'), 'review_capture', '캡처 증빙 분리');
+  assert.equal(svc.autoGuessField('리뷰'), null, '모호한 리뷰 단독 헤더는 자동 매핑 금지');
+  assert.equal(svc.autoGuessField('택배송장번호(롯데택배)'), 'tracking_number', '송장 컬럼 표준화');
+  assert.equal(svc.autoGuessField('입금'), 'payment_status', '입금일/상태 표준화');
+  console.log('  작업보드 표준 컬럼 사전 통과');
+
   // ── 정상 기록: 원자 INSERT 1회, 가드 절 포함, name/url/none 제외 ──
   let pool = makePool({ rowCount: 4 });
   svc.__setPoolForTest(pool);
