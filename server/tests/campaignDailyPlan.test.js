@@ -1183,6 +1183,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     const rows = CDP.indexOf("'<div id=\"cdpRows\">'");
     return layout > 0 && a > layout && b > a && sub > a && sub < b && rows > b;
   })());
+  ok('8-2a 날짜별 계획표는 날짜·상태·일 건수·조절 4열을 렌더한다',
+    /cdp-colhead[^]*날짜[^]*상태[^]*일 건수[^]*조절/.test(CDP)
+    && /grid-template-columns:148px 72px 66px minmax\(190px,1fr\)/.test(CDP)
+    && /cdp-state/.test(CDP));
   ok('8-3 ★ 조절해도 보던 자리를 지킨다(render 가 스크롤 컨테이너를 새로 만든다)',
     /S\._scrollTop/.test(CDP) && /sc\.scrollTop = S\._scrollTop/.test(CDP)
     && /sc\.addEventListener\('scroll'/.test(CDP));
