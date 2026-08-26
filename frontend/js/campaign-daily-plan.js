@@ -690,13 +690,19 @@
     /* 시안과 같은 두 칼럼 구조: 좌측은 요약·배정 방식, 우측만 날짜별 계획을 조절한다. */
     + '#cdpModal .cdp-bd{padding:0}#cdpModal .cdp-layout{display:grid;grid-template-columns:205px minmax(0,1fr);flex:1;min-height:0}'
     + '#cdpModal .cdp-side{padding:18px;border-right:1px solid var(--border,#e5e7eb);background:var(--bg2,#f8fafc);overflow-y:auto}'
-    + '#cdpModal .cdp-main{padding:18px 20px 0;display:flex;flex-direction:column;min-height:0}'
+    + '#cdpModal .cdp-main{padding:24px 28px 0;display:flex;flex-direction:column;min-height:0}'
     + '#cdpModal .cdp-fix{padding:0;flex:0 0 auto}#cdpModal .cdp-sc{padding:0 0 14px;overflow-y:auto;flex:1 1 auto;min-height:0}'
     + '#cdpModal .cdp-stat{margin:0 0 16px;padding:0;border:0;background:none}#cdpModal .cdp-stat .bar{display:block}'
     + '#cdpModal .cdp-stat .kv{display:block;margin-top:13px}#cdpModal .cdp-stat .kv span{display:block;padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb)}'
     + '#cdpModal .cdp-carry{margin:0;padding:0;border:0;background:none}.cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:none}'
     + '#cdpModal .cdp-seg{grid-template-columns:1fr;gap:5px;padding:0;background:none}#cdpModal .cdp-seg button{border:1px solid #d5e0ef;background:#fff;padding:8px;text-align:left}#cdpModal .cdp-seg button small{display:block}'
     + '#cdpModal .cdp-side>.cdp-note{margin:16px 0 0;border:0;background:#fff8e5;padding:10px;font-size:.68rem;color:#99500d}'
+    /* 기본 화면은 현황·배정방식·날짜 조절만 보여 준다. 이력/복구/설명은 접어서 필요할 때만 연다. */
+    + '#cdpModal .cdp-more{margin:10px 0 14px;border-top:1px solid var(--border,#e5e7eb);color:var(--t2,#4d5768)}'
+    + '#cdpModal .cdp-more summary{cursor:pointer;padding:10px 0;font-size:.7rem;font-weight:700;color:#68778f}'
+    + '#cdpModal .cdp-more[open] summary{color:var(--t1,#1f2430)}'
+    + '#cdpModal .cdp-more .cdp-note{margin:0 0 8px}.cdp-more .cdp-sec{margin-top:8px}.cdp-more .cdp-hist{margin-top:10px}'
+    + '#cdpModal .cdp-publish{margin:0 0 10px;padding:9px 12px;border-left:3px solid #f59e0b;background:#fffbeb;color:#925b13;font-size:.72rem;line-height:1.45}'
     /* ── ③ 배분 균형 바(요구 ⑥) — 높이는 "일치(초록)" 기준 41px 로 고정한다.
           상태마다 바가 커졌다 작아지면 아래 표가 위아래로 흔들려 조절하던 줄을 놓친다(사용자 확정). */
     + '#cdpModal .cdp-bal{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px;padding:0 13px;margin-bottom:11px;border:1.5px solid;display:flex;align-items:center;gap:11px;flex-wrap:nowrap;overflow:hidden}'
@@ -1302,21 +1308,10 @@
       + wkNote
       + '</aside><section class="cdp-main"><div class="cdp-fix">'
       + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
-      + wtNote
-      + schNote
-      + offNote
-      + heldBlk
-      // ★ 코드리뷰 M1: 총원 충족 시 closed 가 영속되어 있어 차수를 추가해도 게시를 켜기 전에는
-      //   모집이 재개되지 않는다(자동 재오픈은 수동 마감과 구분 불가라 하지 않음) — 화면이 말한다.
       + (j.status !== 'active'
-        ? '<div class="cdp-note warn">⚠ 현재 게시 상태가 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b>입니다 — 조절·차수는 저장되지만, <b>모집 재개는 공고 카드의 게시 토글을 켜야</b> 시작됩니다.</div>'
+        ? '<div class="cdp-publish">현재 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b> 상태입니다. 모집을 다시 열려면 공고 카드에서 게시를 켜세요.</div>'
         : '')
       + balBlk
-      + (bal && S.outside && S.outside.length
-        ? '<div class="cdp-note">이 구간 밖(시작일 이전·예상 종료일 이후)에 저장해 둔 계획이 <b>'
-          + S.outside.length + '일</b> 있습니다 — 아래 표에는 안 나오지만 <b>그대로 유지</b>되고, '
-          + '총량에 도달하면 열리지 않습니다.</div>'
-        : '')
       + '<div class="cdp-sub"><span>날짜별 모집 계획 — 게이지 드래그 또는 −/＋' + (bal ? ' · 숫자 직접 입력' : '') + '</span>'
       + '<span>' + (j.scheduleDriven === true ? '기본 <b>시트 구매일자 기준</b>' : '기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b>')
       + (bal ? ' · 한 날 최대 <b>' + target + '명</b>' : ' · 총량 <b>' + (tot > 0 ? tot + '명' : '무제한') + '</b>'
@@ -1328,11 +1323,14 @@
       + (endTxt !== S.baseEnd ? '<span class="chg">(원래 ' + _esc(S.baseEnd) + ' → 변경됨)</span>' : '') + '</span>'
       + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan._revert()" style="padding:5px 10px;font-size:.66rem">'
       + (bal ? '이 방식의 기본 배치로 되돌리기' : '조절 전으로 되돌리기') + '</button></div>'
+      + '<details class="cdp-more"><summary>추가 설정 및 조정 이력</summary>'
+      + wtNote + schNote + offNote + heldBlk
+      + (bal && S.outside && S.outside.length
+        ? '<div class="cdp-note">이 구간 밖(시작일 이전·예상 종료일 이후)에 저장해 둔 계획이 <b>' + S.outside.length + '일</b> 있습니다. 아래 날짜 목록에는 표시하지 않지만 그대로 유지됩니다.</div>'
+        : '')
       + '<div class="cdp-note">' + (bal
-        ? '주황 막대가 <b>이월분</b>입니다. 어떤 날을 줄이면 그만큼이 부족분이 되고, 위에서 고른 방식대로 [자동 맞춤]이 되돌립니다. '
-          + '<b>총량은 어떤 조절로도 변하지 않으며</b>, 배분 합계가 남은 배분수와 <b>정확히 같을 때만</b> 저장됩니다.'
-        : '줄이면 "빠진 인원 처리(종료일 연장/남은 날 분산)"를 묻고, 늘리면 다른 날은 그대로입니다. '
-          + '총량은 어느 조절로도 변하지 않으며(도달까지 모집 계속), 총량 추가는 아래 [＋ 차수 추가]로만 합니다.')
+        ? '주황 막대는 <b>이월분</b>입니다. 배분 합계가 남은 배분수와 같을 때 저장할 수 있습니다.'
+        : '총량은 일 건수 조절로 바뀌지 않습니다. 총량 변경은 차수 추가에서만 할 수 있습니다.')
       + '</div>'
       + '<div class="cdp-sec"><div class="h"><span>차수 (물량 추가 이력)</span>'
       + '<span><button type="button" class="cdp-btn" onclick="CampaignDailyPlan._roundForm()">＋ 차수 추가</button>'
@@ -1347,6 +1345,7 @@
       + (j.roundsDrift ? '<div class="cdp-note warn">⚠ 총모집(' + (j.recruitTotal || 0) + ')이 차수 합계(' + (j.roundsTotal || 0) + ')와 다릅니다 — 다른 창구에서 총모집이 바뀐 흔적입니다. 차수를 추가/제거하면 합계로 다시 맞춰집니다.</div>' : '')
       + '</div>'
       + histHtml()
+      + '</details>'
       + '</div></section></div>';   // .cdp-sc · .cdp-main · .cdp-layout 닫기
 
     // ★★ 스크롤 위치 복원 — render 가 본문을 통째로 갈아치우므로 스크롤 컨테이너도 새로 만들어진다.
