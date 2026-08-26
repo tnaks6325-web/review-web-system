@@ -1193,23 +1193,25 @@ async function openTestCampaignModal() {
 }
 if (typeof window !== "undefined") window.openTestCampaignModal = openTestCampaignModal;
 
-/* ⏸ 098 이월 반영 세그먼트(자동/보류) — 보류를 고르는 순간 무슨 일이 생기는지 문장으로 미리
-   말한다(조용한 전환 금지 — 시안 확정). 값은 hidden rf_carry_mode 하나가 진실(저장이 그걸 읽는다). */
+/* 모집이월 배치 방식 — 실제 날짜별 배분은 [인원 조절]의 공용 계산기를 사용한다.
+   공고 설정에서는 다음 배분을 열 때의 기본 선택만 정한다. 기존 carry_mode(auto/hold)는
+   과거 보류 공고 호환용으로 자동 값으로 보존한다. */
 function rfCarrySet(mode, opts) {
-  const m = mode === "hold" ? "hold" : "auto";
+  const m = ["next", "spread", "extend"].includes(mode) ? mode : "extend";
   const hid = document.getElementById("rf_carry_mode");
-  if (hid) hid.value = m;
-  const a = document.getElementById("rf_carry_auto");
-  const h = document.getElementById("rf_carry_hold");
-  if (a && h) {
-    a.classList.toggle("active", m === "auto");
-    h.classList.toggle("active", m === "hold");
-    a.style.background = ""; a.style.color = "";
-    h.style.background = ""; h.style.color = "";
+  if (hid) hid.value = "auto";
+  const strategy = document.getElementById("rf_carry_strategy");
+  if (strategy) strategy.value = m;
+  ["next", "spread", "extend"].forEach(key => {
+    const button = document.getElementById("rf_carry_" + key);
+    if (button) button.classList.toggle("active", key === m);
+  });
+  const note = document.getElementById("rf_carry_strategy_note");
+  if (note) note.textContent = m === "extend" ? "기본" : (m === "next" ? "다음날" : "분산");
+  const campaignId = window._recruitEditLoaded && window._recruitEditLoaded.id;
+  if (campaignId && !(opts && opts.silent)) {
+    try { localStorage.setItem("rf_carry_strategy_v1_" + campaignId, m); } catch (_) {}
   }
-  const note = document.getElementById("rf_carry_hold_note");
-  // 프리필·초기화(silent)에서는 고지문을 접어 둔다 — 사람이 보류를 "직접 고른" 순간에만 펼친다
-  if (note) note.style.display = (m === "hold" && !(opts && opts.silent)) ? "" : "none";
 }
 window.rfCarrySet = rfCarrySet;
 
@@ -3131,8 +3133,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   syncRecruitReviewTypeMix();
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "30";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
-  /* ⏸ 098 이월 반영 초기화 — 신규 공고 기본 [자동](현행) */
-  if (typeof rfCarrySet === "function" && document.getElementById("rf_carry_mode")) rfCarrySet("auto", { silent: true });
+  /* 모집이월 기본 = 종료일 뒤에 붙이기 */
+  if (typeof rfCarrySet === "function" && document.getElementById("rf_carry_mode")) rfCarrySet("extend", { silent: true });
   /* 👥 타계정 참여(063) 초기화 — 신규 공고 기본 [불가] */
   const _maEl = document.getElementById("rf_multi_account");
   if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
@@ -3158,7 +3160,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _rfTransferHint(prefill && prefill.goods_cost_type);
 
   if (id) {
-    titleEl.innerHTML = `<i class="fas fa-pen"></i> 모집공고 수정`;
+    titleEl.innerHTML = `<i class="fas fa-pen"></i> 모집공고 설정`;
     /* 기존 데이터 로드 */
     try {
       /* ★ 경로는 호스트가 재기준한다(_campApi) — 관리자 대시보드는 종전 그대로 무인증 공개
@@ -3270,8 +3272,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_product_url", c.landing_url || "");
         setV("rf_hold_ttl", c.hold_ttl_min ?? 30);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
-        /* ⏸ 098 이월 반영 방식 복원 */
-        if (typeof rfCarrySet === "function") rfCarrySet(c.carry_mode === "hold" ? "hold" : "auto", { silent: true });
+        /* 모집이월 방식 복원 — 서버 저장 이전 공고는 새 기본값으로 안전하게 연다. */
+        if (typeof rfCarrySet === "function") {
+          let carryStrategy = "extend";
+          try { carryStrategy = localStorage.getItem("rf_carry_strategy_v1_" + c.id) || carryStrategy; } catch (_) {}
+          rfCarrySet(carryStrategy, { silent: true });
+        }
         /* 👥 타계정 참여(063) 복원 */
         {
           const _ma = document.getElementById("rf_multi_account");
@@ -3384,7 +3390,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       showToast("공고 데이터 로드 실패: " + e.message, "error");
     }
   } else {
-    titleEl.innerHTML = `<i class="fas fa-bullhorn"></i> 모집공고 등록`;
+    titleEl.innerHTML = `<i class="fas fa-bullhorn"></i> 모집공고 설정`;
     /* ★ 작업오더 프리필 — 원장에 기록된 값은 공고 폼에도 표시하고 관리자가 최종 확인한다. */
     if (prefill) {
       if (prefill.title)        document.getElementById("rf_title").value = prefill.title;
