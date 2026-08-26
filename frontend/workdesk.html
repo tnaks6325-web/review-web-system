@@ -839,11 +839,11 @@
      차지해 버튼이 "페이지 오른쪽 끝"에 붙었다. 아래에서 폭을 캡한 데이터 영역(표·카드)과
      같은 폭으로 .mh 도 캡해야 버튼이 "그 데이터의 오른쪽 끝"에 붙는다(사용자 확정 — 작업오더
      스크린샷 기준). 넷 다 위에서 정한 값과 그대로 맞춘다: 작업오더 1120 · 모집공고 1380 ·
-     등록리뷰어DB 1400 · 리뷰어 로그 1300. .mh 자체는 공유 클래스라 손대지 않고(다른 뷰까지
+     등록리뷰어DB는 FHD 전폭 · 리뷰어 로그 1300. .mh 자체는 공유 클래스라 손대지 않고(다른 뷰까지
      캡되면 안 됨) 뷰 헤더 id 로 스코프한다. */
   #wohead .mh{max-width:1120px}
   #rchead .mh{max-width:1380px}
-  #rvhead .mh{max-width:1400px}
+  #rvhead .mh{max-width:none}
   #lghead .mh{max-width:1300px}
 
   /* 작업오더·등록리뷰어DB·리뷰어 로그 — 셋 다 같은 클래스(.lgwrap>.lgtable)를 공유하는데
@@ -851,10 +851,10 @@
      → 뷰 컨테이너 id 로 스코프해 셋을 따로 제한한다(마크업·공유 클래스 무변경, C/S 대화창과
      같은 원리: 표는 width:100% 그대로 두고 감싸는 폭만 좁혀 hug-left + 오른쪽 여백).
        작업오더(#wobody)   1120px — 고정 열 합 ≈650px, 유동은 "작업명" 하나뿐
-       등록리뷰어DB(#rvbody) 1400px — 12열 중 "주소"만 유동, 나머지가 이미 촘촘함
+       등록리뷰어DB(#rvbody) FHD 전폭 — 17열이라 1400px 상한에서는 불필요한 가로 스크롤이 생김
        리뷰어 로그(#lgbody)  1300px — "오류내용"·"조치안내" 두 문장형 칸이라 다른 표보다 여유 필요 */
   #wobody .lgwrap{max-width:1120px}
-  #rvbody .lgwrap{max-width:1400px}
+  #rvbody .lgwrap{max-width:none}
   #lgbody .lgwrap{max-width:1300px}
   /* 설정 — 입력 칸이 대부분 자체 max-width 를 갖는 폼이라 표보다 좁아도 된다.
      넓은 화면에서 설명 문장이 한 줄로 길게 늘어나 읽기 어려워지는 것만 막는다.
@@ -946,6 +946,22 @@
      ⚠ 중첩된 타계정표(table.rvsubtbl)는 .lgtable 이 아니라서 이 규칙에 안 걸린다(주소가 온전히 보인다). */
   #rvbody table.lgtable th, #rvbody table.lgtable td{white-space:nowrap}
   #rvbody table.lgtable td.c-addr{white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  /* FHD(≥1500px)에서는 등록리뷰어DB만 작업보드처럼 가용 폭 전체를 쓴다.
+     열이 17개라 내용 기준 auto 레이아웃을 두면 긴 메모/주소가 표를 밀어 가로 스크롤을 만든다.
+     이 구간에서만 고정 레이아웃+압축 여백으로 화면 안에 맞추고, 더 좁은 창은 기존처럼 스크롤을 보존한다. */
+  @media(min-width:1500px){
+    #rvbody table.lgtable{min-width:0;table-layout:fixed}
+    #rvbody table.lgtable th,#rvbody table.lgtable td{padding-left:6px;padding-right:6px;overflow:hidden;text-overflow:ellipsis}
+    #rvbody table.lgtable th:nth-child(1){width:68px} #rvbody table.lgtable th:nth-child(2){width:54px}
+    #rvbody table.lgtable th:nth-child(3){width:154px} #rvbody table.lgtable th:nth-child(5){width:70px}
+    #rvbody table.lgtable th:nth-child(6){width:116px} #rvbody table.lgtable th:nth-child(7){width:82px}
+    #rvbody table.lgtable th:nth-child(8){width:102px} #rvbody table.lgtable th:nth-child(9){width:76px}
+    #rvbody table.lgtable th:nth-child(10){width:52px} #rvbody table.lgtable th:nth-child(11){width:82px}
+    #rvbody table.lgtable th:nth-child(12){width:136px} #rvbody table.lgtable th:nth-child(13){width:66px}
+    #rvbody table.lgtable th:nth-child(14){width:54px} #rvbody table.lgtable th:nth-child(15){width:154px}
+    #rvbody table.lgtable th:nth-child(16){width:84px} #rvbody table.lgtable th:nth-child(17){width:50px}
+    #rvbody table.lgtable td.c-addr{max-width:none}
+  }
   .lgtable .c-hold{width:104px}                       /* 예금주 — 한글 6~7자(남궁하늘가람)까지 한 줄 */
   .lgtable .c-num{font-variant-numeric:tabular-nums}  /* 계좌번호·주민번호·등록일 */
   .lgtable .c-bank{width:90px}                        /* 은행 — "카카오뱅크"(5자) 기준 */
@@ -14731,7 +14747,7 @@ function _renderRvBody(){
       <tr>
         <td style="text-align:center"><button type="button" class="btn" style="padding:3px 7px;font-size:.68rem;border-radius:6px" onclick="_rvOpenHome(${i})" title="이 리뷰어로 로그인된 아이에이리뷰 홈을 새 탭에서 엽니다">홈 열기</button></td>
         <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
-        <td class="c-ph">${dash(r.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvPhone(${i})" title="로그인 번호를 변경합니다(새 번호=본계정, 지금 번호=타계정)">변경</button></td>
+        <td class="c-ph">${dash(r.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvPhone(${i})" title="로그인 번호를 변경합니다(새 번호=본계정, 지금 번호=타계정)">번호변경</button></td>
         <td class="c-addr" title="${esc(r.address||'')}">${dash(r.address)}</td>
         <td class="c-bank">${dash(r.bankName)}</td>
         <td class="c-num">${dash(r.bankAccount)}</td>

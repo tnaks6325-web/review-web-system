@@ -96,6 +96,11 @@ ok('예금주 폭 104px — 한글 6~7자가 한 줄로 들어간다(원래 신�
 ok('은행 폭 90px — "카카오뱅크"(5자) 기준', /\.lgtable \.c-bank\{width:90px\}/.test(css));
 ok('★ 삭제·저장 버튼도 nowrap — 두 글자가 접히면 그 행만 16px 높아진다(실측)',
   /\.rvdel\{[^}]*white-space:nowrap/.test(css) && /\.rvmemosave\{[^}]*white-space:nowrap/.test(css));
+ok('FHD에서는 등록리뷰어DB가 전폭을 쓰고 17열을 화면 안에 고정 배치한다',
+  /#rvhead \.mh\{max-width:none\}/.test(css)
+  && /#rvbody \.lgwrap\{max-width:none\}/.test(css)
+  && /@media\(min-width:1500px\)\{[\s\S]{0,250}?#rvbody table\.lgtable\{min-width:0;table-layout:fixed\}/.test(css));
+ok('연락처 변경 버튼 문구는 번호변경이다', />번호변경<\/button><\/td>/.test(jsNoComment));
 
 /* ── ④ 타계정 펼침 ── */
 console.log('\n④ 타계정 클릭 → 행 바로 아래 펼침');
