@@ -55,7 +55,7 @@ function restoreCancel() { delete require.cache[cancelPath]; }
       await args.beforeCancelCommit(client);   // 같은 트랜잭션의 client 를 넘긴다
       return { ok: true, cleared: true };
     });
-    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'staff' });
     restoreCancel();
     assert.ok(seen, '살아 있는 구매양식이 있으면 주문 취소 경로를 타야 합니다');
     assert.strictEqual(typeof seen.beforeCancelCommit, 'function', '행 제거는 취소와 같은 트랜잭션이어야 합니다');
@@ -93,12 +93,12 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     assert.strictEqual(out.error, 'not_sheetless', '사유를 그대로 전달해야 합니다');
   }
 
-  // ③ 권한: 구매기록이 붙은 행은 master/admin 만 — 쓰기 쿼리 0
+  // ③ 권한: 구매기록이 붙은 행은 내부 담당자만 — 외부 역할은 쓰기 쿼리 0
   {
     const { pool, log } = makeStubPool({ liveOrder: true });
     svc.__setPoolForTest(pool);
     stubCancel(async () => { throw new Error('취소 경로에 도달하면 안 됩니다'); });
-    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: 'AE', actorRole: 'staff' });
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '광고주', actorRole: 'advertiser' });
     restoreCancel();
     assert.strictEqual(out.ok, false);
     assert.strictEqual(out.error, 'order_cancel_forbidden');
