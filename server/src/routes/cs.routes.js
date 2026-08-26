@@ -62,6 +62,8 @@ router.get('/threads', async (req, res, next) => {
       LEFT JOIN reviewers rv ON rv.phone8 = t.reviewer_phone8
       ${whereSql}
       ORDER BY (t.admin_unread_count > 0) DESC, COALESCE(t.last_message_at, t.created_at) DESC
+      -- C/S 전체 이력은 커질 수 있다. 목록 첫 진입이 무한 대기하지 않도록 최신 500건만 렌더한다.
+      LIMIT 500
     `, params);
 
     const totalUnread = rows.reduce((s, r) => s + (r.adminUnread || 0), 0);

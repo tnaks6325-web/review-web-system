@@ -29,6 +29,6 @@ ok('방을 열면 캐시의 미확인 수와 읽음/안읽음 목록도 즉시 �
 ok('전체 접기 상태는 필터가 바뀐 현재 그룹에도 적용된다',
   /if \(_csAllGroupsFolded\) _csFoldedGroupKeys = new Set\(_csVisibleGroupKeys\)/.test(src));
 const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'cs.routes.js'), 'utf8');
-ok('상태·검색 제어가 없는 목록에서 500건 상한으로 방이 누락되지 않는다', !/LIMIT 500\b/.test(route));
+ok('전체 이력 때문에 목록 첫 진입이 무한 대기하지 않도록 최신 500건으로 제한한다', /LIMIT 500\b/.test(route));
 
 console.log(`\n✅ csRoomReadFilterControls: ${n} cases passed`);
