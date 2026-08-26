@@ -23,8 +23,8 @@ assert.match(
 );
 assert.match(
   body,
-  /AND rc\.id IS NOT NULL/,
-  'a recovered campaign key must be eligible for reviewer review earnings'
+  /AND \(rc\.id IS NOT NULL OR os\.sheet_id LIKE 'campaign:%'\)/,
+  'a sheetless worktable key must remain visible even when its campaign metadata is missing'
 );
 assert.match(
   body,

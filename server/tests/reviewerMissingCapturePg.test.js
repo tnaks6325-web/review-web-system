@@ -158,6 +158,13 @@ async function seed() {
     assert.equal(r.body.totals.count, 1, '현재 작업표 공고 키로 주문을 찾아 표시한다');
   });
 
+  await ta('공고 메타가 없어도 campaign:<id> 작업표 주문은 리뷰 내역에 표시한다', async () => {
+    await seed();
+    await pool.query('DELETE FROM review_index, recruit_campaigns');
+    const r = await call('get', '/review-earnings', { query: { phone8: P8 } });
+    assert.equal(r.body.totals.count, 1, '공고 조인 실패가 리뷰어 참여 이력을 숨기지 않는다');
+  });
+
   await ta('작업표 줄이 소프트삭제면 이중집계 방지 근거가 아니다', async () => {
     await seed();
     await pool.query('UPDATE campaign_participants SET deleted_at = NOW()');

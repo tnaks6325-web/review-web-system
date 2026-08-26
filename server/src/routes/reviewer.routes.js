@@ -515,8 +515,9 @@ router.get('/review-earnings', async (req, res, next) => {
            ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
         WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
           AND os.deleted_at IS NULL
-          -- 신청 FK가 비어 있어도 campaign:<공고ID> 좌표가 실제 공고를 가리키면 리뷰 내역에 노출한다.
-          AND rc.id IS NOT NULL
+          -- 신청 FK·공고 메타가 누락됐어도 campaign:<공고ID> 작업표 주문은 리뷰어에게 숨기지 않는다.
+          -- 공고 메타는 리뷰비·썸네일 보강용일 뿐, 참여 이력 노출의 전제는 아니다.
+          AND (rc.id IS NOT NULL OR os.sheet_id LIKE 'campaign:%')
           /* ★★ 이중 집계 방지 — 위치키만 보면 참여형(무시트) 주문은 **절대** 걸러지지 않는다:
              원장 좌표가 campaign:<공고ID>(submit.routes _resolveCampaignOrderScope)이고
              sheet_row 에는 작업표 seq 가 들어가 review_index 좌표와 계가 다르다.
