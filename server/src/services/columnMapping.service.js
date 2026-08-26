@@ -43,7 +43,7 @@ const STANDARD_FIELDS = [
   { key: 'recipient',     label: '수취인',        defaultOwner: 'db',     match: 'includes', keywords: ['수취인', '받는분'] },
   // 리뷰 상태·증빙·옵션은 서로 다른 데이터다. 셋을 한 필드로 추측하면 제출완료 오판정이 난다.
   { key: 'review_option', label: '리뷰옵션',      defaultOwner: 'shared', match: 'includes', keywords: ['리뷰옵션', '포토/텍스트'] },
-  { key: 'review_capture', label: '리뷰캡쳐본',   defaultOwner: 'shared', match: 'includes', keywords: ['리뷰캡쳐본', '리뷰캡처본', '캡쳐본', '캡처본'] },
+  { key: 'review_capture', label: '리뷰캡쳐',     defaultOwner: 'shared', match: 'includes', keywords: ['리뷰캡쳐본', '리뷰캡처본', '캡쳐본', '캡처본'] },
   // '리뷰' 단독은 상태/옵션/캡처를 구별할 수 없으므로 자동 매핑하지 않고 관리자가 선택한다.
   { key: 'review_submit', label: '리뷰제출',      defaultOwner: 'shared', match: 'includes', keywords: ['리뷰제출', '리뷰완료', '리뷰작성'] },
   { key: 'payment_status', label: '입금일',       defaultOwner: 'shared', match: 'includes', keywords: ['입금일', '입금여부', '입금완료', '입금', '페이백'] },
@@ -51,7 +51,7 @@ const STANDARD_FIELDS = [
   { key: 'product_code',  label: '상품번호',      defaultOwner: 'sheet',  match: 'includes', keywords: ['상품번호'] },
   { key: 'product',       label: '상품',          defaultOwner: 'sheet',  match: 'includes', keywords: ['상품명', '상품', '제품', 'product'] },
   { key: 'user_id',       label: '아이디',        defaultOwner: 'db',     match: 'includes', keywords: ['아이디', 'userid', '로그인'] },
-  { key: 'order_date',    label: '구매일/날짜',   defaultOwner: 'shared', match: 'includes', keywords: ['구매일', '주문일', '일자', '날짜', 'date'] },
+  { key: 'order_date',    label: '구매일자',      defaultOwner: 'shared', match: 'includes', keywords: ['구매일', '주문일', '일자', '날짜', 'date'] },
   { key: 'option',        label: '옵션',          defaultOwner: 'shared', match: 'includes', keywords: ['옵션', 'option'] },
   { key: 'memo',          label: '비고/메모',     defaultOwner: 'shared', match: 'includes', keywords: ['비고', '특이사항', 'memo'] },
   // 마지막 폴백: 이름/성함 → 수취인 (모호하므로 최하위, 사용자가 교정)
