@@ -46,20 +46,38 @@ let _csReadFilter = 'all';       // all | read | unread — 서버 상태가 아
 let _csAllGroupsFolded = false;
 let _csFoldedGroupKeys = new Set();
 let _csVisibleGroupKeys = [];
+let _csRoomLoadGeneration = 0;
 
 async function loadCsRooms() {
   const wrap = document.getElementById("csRoomListWrap");
   if (!wrap) return;
+  const generation = ++_csRoomLoadGeneration;
+  const pageSize = 100;
   wrap.innerHTML = '<div style="padding:30px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
   try {
-    // C/S 목록은 항상 전 상태를 받아 읽음/안읽음만 화면에서 즉시 전환한다.
-    const data = await gasGet({ action: "csAdminThreads", status: "all", q: "" });
+    // 첫 페이지는 즉시 표시하고, 오래된 방은 배경 페이지로 이어 받아 첫 진입을 막지 않는다.
+    const data = await gasGet({ action: "csAdminThreads", status: "all", q: "", limit: pageSize, offset: 0 });
     if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
     _csRooms = data.threads || [];
     _renderCsRooms(_csVisibleRooms());
     csUpdateBadge(data.totalUnread || 0);
+    if (data.hasMore) void _csLoadRemainingRooms(generation, pageSize, _csRooms.length);
   } catch (err) {
     wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#EF4444;font-size:.85rem">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+async function _csLoadRemainingRooms(generation, pageSize, offset) {
+  while (generation === _csRoomLoadGeneration) {
+    const data = await gasGet({ action: "csAdminThreads", status: "all", q: "", limit: pageSize, offset });
+    if (!data || data.ok === false || generation !== _csRoomLoadGeneration) return;
+    const rows = data.threads || [];
+    if (!rows.length) return;
+    const seen = new Set(_csRooms.map(r => r.id));
+    _csRooms.push(...rows.filter(r => !seen.has(r.id)));
+    _renderCsRooms(_csVisibleRooms());
+    offset += rows.length;
+    if (!data.hasMore) return;
   }
 }
 

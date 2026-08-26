@@ -31,6 +31,8 @@ router.get('/threads', async (req, res, next) => {
   try {
     const status = (req.query.status || 'all').toString();
     const q = (req.query.q || '').toString().trim();
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
+    const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
 
     const where = [];
     const params = [];
@@ -62,10 +64,11 @@ router.get('/threads', async (req, res, next) => {
       LEFT JOIN reviewers rv ON rv.phone8 = t.reviewer_phone8
       ${whereSql}
       ORDER BY (t.admin_unread_count > 0) DESC, COALESCE(t.last_message_at, t.created_at) DESC
-    `, params);
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `, [...params, limit, offset]);
 
     const totalUnread = rows.reduce((s, r) => s + (r.adminUnread || 0), 0);
-    res.json({ ok: true, threads: rows, total: rows.length, totalUnread });
+    res.json({ ok: true, threads: rows, total: rows.length, totalUnread, hasMore: rows.length === limit });
   } catch (err) {
     next(err);
   }
