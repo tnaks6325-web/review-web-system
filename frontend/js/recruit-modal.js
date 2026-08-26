@@ -28,22 +28,11 @@
   var HTML = `<div id="recruitModal" class="modal-overlay hidden" style="display:none">
   <div class="modal-box rf-box" style="max-width:1124px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
     <div class="modal-header">
-      <h3 id="recruitModalTitle"><i class="fas fa-bullhorn"></i> 모집공고 등록</h3>
+      <h3 id="recruitModalTitle"><i class="fas fa-bullhorn"></i> 모집공고 설정</h3>
       <button class="btn-icon-sm" onclick="closeRecruitModal()"><i class="fas fa-times"></i></button>
     </div>
-    <!-- 좌: 레일(목차·배치 편집) / 중: 입력 카드 / 우: 미리보기(고정).
-         미리보기를 아래로 쌓으면 입력란이 화면 밖으로 밀려 "고치면서 확인"이 안 된다 — 옆으로.
-         좁은 화면은 CSS가 레일을 접고 세로로 되돌린다. -->
+    <!-- 중앙 편집 / 우측 미리보기. 좌측 단계 레일은 긴 설정 흐름을 끊어 제거했다. -->
     <div class="rf-split">
-      <nav class="rf-rail" aria-label="모집공고 편집 단계">
-        <div class="rf-rail-t">모집공고 편집<span>현재 단계가 자동으로 바뀝니다.</span></div>
-        <div id="rfRailList" class="rf-step-list">
-          <button type="button" class="rf-step on" data-rf-step="link"><span class="rf-step-no">1</span><span>연결 · 기본</span><span class="rf-rmk" data-mk="link"></span></button>
-          <button type="button" class="rf-step" data-rf-step="prod"><span class="rf-step-no">2</span><span>진행상품 · 상품 정보</span><span class="rf-rmk" data-mk="prod"></span></button>
-          <button type="button" class="rf-step" data-rf-step="cond"><span class="rf-step-no">3</span><span>모집 조건</span><span class="rf-rmk" data-mk="cond"></span></button>
-        </div>
-        <div id="rf_side_audit" class="rf-side-audit"><div class="rf-side-audit-head"><span>자동 점검</span><strong id="rf_side_audit_score">–</strong></div><div id="rf_part_check"></div></div>
-      </nav>
       <!-- 이전 카드 편집기는 렌더링하지 않는다. 필드 순서 이동식 UI를 방지한다. -->
       <template id="rf_legacy_card_editor_markup"><div class="rf-main">
     <div id="editorScroller" class="modal-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:0" tabindex="0" aria-label="모집공고 수정 항목">
@@ -458,10 +447,13 @@
       </div></template><!-- /legacy rf-main -->
       <div class="rf-main rf-compact-main">
         <section class="editor">
-          <header class="editor-head"><div><h2 id="rf_editor_title">연결 · 기본</h2><p id="rf_editor_description">작업보드와 공고의 기준 정보 및 입금 기준을 먼저 확인합니다.</p></div><span class="autosaved">자동 저장됨</span></header>
-          <div class="title-control-bar"><label class="title-control-label" for="rf_title"><span>공고 제목</span><input id="rf_title" type="text" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"></label><div id="rf_status_buttons" class="square-toggle"><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
-          <div id="rf_startcheck" class="rf-startcheck" hidden></div>
+          <div class="startup-setting-bar"><div><strong>작업 시작 설정</strong><span>시작 전 상태를 확인하고 설정을 저장하세요.</span></div><div id="rf_startcheck" class="rf-startcheck" hidden></div><div id="rf_status_buttons" class="square-toggle"><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
           <div id="editorScroller" class="compact-editor-scroller" tabindex="0" aria-label="모집공고 수정 항목">
+            <section class="section rf-public-settings">
+              <div class="title-control-bar"><label class="title-control-label" for="rf_title"><span>공고 제목</span><input id="rf_title" type="text" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"></label></div>
+              <div class="row-form"><div class="form-row"><span class="form-label">모집이월 방식</span><div class="form-control"><input id="rf_carry_mode" type="hidden" value="auto"><input id="rf_carry_strategy" type="hidden" value="extend"><div class="square-toggle carry-strategy"><button type="button" id="rf_carry_next" onclick="rfCarrySet('next')">다음날에 더하기</button><button type="button" id="rf_carry_spread" onclick="rfCarrySet('spread')">남은 날에 나눠담기</button><button type="button" id="rf_carry_extend" onclick="rfCarrySet('extend')">종료일 뒤에 붙이기</button></div><span class="tag public" id="rf_carry_strategy_note">기본</span></div></div></div>
+              <input id="rf_deadline" type="hidden"><input id="rf_deadline_day" type="hidden"><input id="rf_deadline_warn" type="hidden"><input id="rf_max_slots" type="hidden" value="0"><input id="rf_close_buffer" type="hidden" value="10"><input id="rf_hold_ttl" type="hidden" value="15">
+            </section>
             <section class="section" data-sec="link">
               <div class="section-heading"><div><h3>기본 설정</h3><span class="section-hint">공고 운영과 입금 기준을 설정합니다.</span></div><span class="section-count">11개 항목</span></div>
               <div class="row-form">
@@ -497,7 +489,6 @@
                 <div class="form-row tall"><span class="form-label">리뷰 가이드</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_review" class="rform-input"></textarea><div id="rf_ig_review" class="work-image-strip ig-strip" data-igf="review"></div><input id="rf_igf_review" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('review',this)"></div><div id="rf_igm_review"></div><div id="rf_clean_review"></div></div></div>
                 <div class="form-row tall"><span class="form-label">특이사항</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_notes" class="rform-input"></textarea><div id="rf_ig_notes" class="work-image-strip ig-strip" data-igf="notes"></div><input id="rf_igf_notes" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('notes',this)"></div><div id="rf_igm_notes"></div></div></div>
               </div><input id="rf_landing_url" type="hidden"><input id="rf_thumbnail" type="hidden"><input id="rf_product_name" type="hidden"><input id="rf_price" type="hidden"></section>
-            <section class="section" data-sec="cond" id="rf_part_section" data-part-only><div class="row-form"><div class="form-row"><span class="form-label">모집이월 방식</span><div class="form-control"><input id="rf_carry_mode" type="hidden" value="auto"><div class="square-toggle"><button type="button" id="rf_carry_auto" onclick="rfCarrySet('auto')">자동 반영</button><button type="button" id="rf_carry_hold" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" hidden></div></div></div></div><details class="advanced"><summary>마감 · 보류 · 인원 제한 세부 설정</summary><div class="row-form"><div class="form-row"><span class="form-label">모집 마감</span><div class="form-control"><input id="rf_deadline" type="date" onchange="onRecruitDatesChange()"><span id="rf_deadline_day"></span></div></div><div class="form-row"><span class="form-label">최대 참여 제한</span><div class="form-control"><input id="rf_max_slots" type="number"></div></div><div class="form-row"><span class="form-label">마감 버퍼</span><div class="form-control"><input id="rf_close_buffer" type="number"><input id="rf_hold_ttl" type="number" hidden></div></div><div id="rf_deadline_warn" hidden></div></div></details></section>
             <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" hidden><input type="hidden" id="rf_work_kind">
           </div>
           <footer class="footer modal-footer"><span class="footer-copy">필수 항목을 확인하면 게시할 수 있습니다.</span><div><button type="button" class="btn" onclick="closeRecruitModal()">취소</button><button type="button" id="recruitSaveBtnInline" class="rf-savebtn" onclick="saveRecruitPost()">변경 저장</button></div></footer>
@@ -1016,12 +1007,14 @@
 #recruitModal .rf-compact-main .editor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 22px 14px;border-bottom:1px solid #DCE3EC}
 #recruitModal .rf-compact-main .editor-head h2{margin:0;font-size:19px;letter-spacing:-.04em}
 #recruitModal .rf-compact-main .editor-head p{margin:3px 0 0;color:#7F8A9B;font-size:11px}
-#recruitModal .autosaved{padding:4px 6px;border-radius:5px;background:#EDF8F5;color:#15803D;font-size:10px;font-weight:850;white-space:nowrap}
-#recruitModal .title-control-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:7px 22px;border-bottom:1px solid #DCE3EC;background:#FBFCFE}
+#recruitModal .startup-setting-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 22px;border-bottom:1px solid #DCE3EC;background:#FFF9E8;flex:none}
+#recruitModal .startup-setting-bar strong{display:block;color:#92400E;font-size:12px;font-weight:900}.startup-setting-bar span{display:block;margin-top:2px;color:#A16207;font-size:10px;font-weight:650}
+#recruitModal .title-control-bar{display:grid;grid-template-columns:minmax(0,1fr);align-items:center;gap:10px;padding:0 0 12px;border-bottom:0;background:#fff}
 #recruitModal .title-control-label{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-width:0;color:#45536A;font-size:11px;font-weight:850}
 #recruitModal .title-control-label input{min-width:0;width:100%;height:26px;padding:0 9px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#172033;font-size:12px;font-weight:750}
 #recruitModal .rf-compact-main #editorScroller{flex:1;min-height:0;overflow-y:auto;padding:0 22px 20px;background:#fff}
 #recruitModal .rf-compact-main .section{padding:17px 0 20px;border-bottom:1px solid #DCE3EC;background:transparent}
+#recruitModal .rf-compact-main .rf-public-settings{padding-top:14px}
 #recruitModal .rf-compact-main .section:last-of-type{border-bottom:0}
 #recruitModal .rf-compact-main .section-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
 #recruitModal .rf-compact-main .section-heading h3{margin:0;color:#172033;font-size:14px;letter-spacing:-.025em}
@@ -1058,6 +1051,7 @@
 #recruitModal .rf-compact-main .rf-review-type-row .form-control{display:block}.rf-compact-main .review-type-buttons{width:100%}#recruitModal .rf-compact-main .mixed-review-composer{margin-top:7px;padding:7px;border:1px solid #DCE3EC;border-radius:6px;background:#F8FAFC}#recruitModal .rf-compact-main .mixed-review-card+.mixed-review-card{margin-top:7px;padding-top:7px;border-top:1px solid #E3E9F2}#recruitModal .rf-compact-main .mixed-review-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;color:#617087;font-size:10px}#recruitModal .rf-compact-main .mixed-review-heading strong{color:#172033}.rf-compact-main .mixed-review-total{color:#64748B;font-weight:800}.rf-compact-main .mixed-review-total.is-invalid{color:#DC2626}#recruitModal .rf-compact-main .mixed-review-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}#recruitModal .rf-compact-main .mixed-review-grid label{display:grid;grid-template-columns:48px minmax(0,1fr);align-items:center;gap:4px;color:#617087;font-size:9px;font-weight:800}.rf-compact-main .mixed-review-type-label{white-space:nowrap;text-align:left}.rf-compact-main .mixed-review-grid input{width:100%;height:24px;min-width:0;padding:0 5px;border:1px solid #D5DDE8;border-radius:5px;text-align:right;color:#172033;font-size:10px;appearance:textfield;-moz-appearance:textfield}.rf-compact-main .mixed-review-grid input::-webkit-outer-spin-button,.rf-compact-main .mixed-review-grid input::-webkit-inner-spin-button,.rf-compact-main .rf-opt-pay::-webkit-outer-spin-button,.rf-compact-main .rf-opt-pay::-webkit-inner-spin-button,.rf-compact-main .rf-opt-rt::-webkit-outer-spin-button,.rf-compact-main .rf-opt-rt::-webkit-inner-spin-button,.rf-compact-main .rf-opt-dl::-webkit-outer-spin-button,.rf-compact-main .rf-opt-dl::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}.rf-compact-main .rf-opt-pay,.rf-compact-main .rf-opt-rt,.rf-compact-main .rf-opt-dl{appearance:textfield;-moz-appearance:textfield}
 #recruitModal .rf-compact-main .product-main-url{border-top:1px solid #DCE3EC;background:#FBFCFE}.rf-compact-main .product-main-url .form-label{background:#F5F7FA}.rf-compact-main .product-main-url .form-control{gap:6px}.rf-compact-main .product-main-url input{min-width:0;flex:1}.rf-compact-main .rbadge-chip.automatic{border-color:#B9D2FB!important;background:#EDF4FF!important;color:#2563C8!important}
 #recruitModal .rf-compact-main .work-compose{display:grid;grid-template-columns:minmax(220px,1fr) 128px;gap:6px;align-items:stretch;width:100%}.rf-compact-main .work-compose textarea,#recruitModal .rf-compact-main #rf_wd_inflow,#recruitModal .rf-compact-main #rf_wd_review,#recruitModal .rf-compact-main #rf_wd_notes{width:100%;min-width:220px;height:58px!important}.rf-compact-main .work-image-strip{justify-self:end;width:128px!important;height:58px;min-width:0;min-height:58px;border:1px dashed #C9D6E8;border-radius:6px;background:#FBFCFE}.rf-compact-main .advanced{margin-top:8px;border:1px solid #DCE3EC;border-radius:8px;background:#FBFCFE}.rf-compact-main .advanced summary{padding:9px 11px;color:#58667D;font-size:10px;font-weight:850;cursor:pointer}
+#recruitModal .rf-compact-main .carry-strategy{gap:4px}.rf-compact-main .carry-strategy button{white-space:nowrap}
 #recruitModal .rf-compact-main .ig-strip{height:58px!important;min-height:58px!important;padding:4px}
 #recruitModal .rf-compact-main .footer{display:none}.rf-compact-main .footer-copy{min-width:0;flex:1;color:#7F8A9B;font-size:10px}.rf-compact-main .footer>div{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:6px;white-space:nowrap}.rf-compact-main .btn{min-height:29px;padding:6px 10px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#526078;font-size:10px;font-weight:850}.rf-compact-main .footer .rf-savebtn{min-height:29px;padding:6px 10px;border-color:#2563EB;background:#2563EB;color:#fff;font-size:10px}
 #recruitModal #rf_linked_campaign,#recruitModal #rf_linked_tab,#recruitModal #rf_delivery_type{display:none}
