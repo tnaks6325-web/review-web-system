@@ -1796,28 +1796,8 @@
     // 균형 모드 저장 게이트(버튼 우회 방어) — **초과**·저장 상한 초과는 보내지 않는다.
     //   ★ 부족은 보낸다(2026-08-19 확정: 그만큼만 모집하고 작업표도 그 수로 줄어든다).
     if (balanceOn() && (diffPlan() > 0 || set.length + remove.length > MAX_ROWS)) return;
-    // ★ "기본"은 날짜마다 다를 수 있다(시트 일정 공고 = 그날 시트 행 수) — 한 값으로 적으면 거짓말
-    var lines = set.map(function (x) { return '· ' + fmtMD(x.date) + ' → ' + x.count + '명' + (x.count === baseFor(x.date) ? ' (기본과 동일)' : ''); })
-      .concat(remove.map(function (d) { return '· ' + fmtMD(d) + ' → 기본(' + baseFor(d) + '명)으로 해제'; }));
-    // 구간 전체를 저장하는 균형 모드는 줄이 100개를 넘을 수 있다 — 다 적으면 읽지 못하므로 요약한다
-    var body = lines.length > 12
-      ? lines.slice(0, 10).join('\n') + '\n… 외 ' + (lines.length - 10) + '건 (총 ' + lines.length + '일 · 합계 '
-        + set.reduce(function (s, x) { return s + x.count; }, 0) + '명)'
-      : lines.join('\n');
-    // ★ 저장 범위를 과장하지 않는다 — 실제로 보내는 것은 **손댄 날뿐**이고, 그 날들만
-    //   "그 값이 그날의 전부"가 되어 자동 이월이 얹히지 않는다. 나머지 날은 종전대로 열린다.
-    // ★ 부족하게 저장하면 "총량은 변하지 않는다"는 사실이 아니다 — 그만큼만 모집하고
-    //   작업표의 줄도 그 수로 줄어든다. 확인창이 실제로 일어날 일을 말한다.
-    var _short = balanceOn() ? (targetTotal() - sumPlan()) : 0;
-    var tail = balanceOn()
-      ? '\n\n배분 합계 ' + sumPlan() + '명 / 남은 배분수 ' + targetTotal() + '명.'
-        + (_short > 0
-          ? '\n★ ' + _short + '명 적게 모집합니다 — 작업표의 남는 빈 줄도 함께 정리됩니다.'
-          : ' 총량은 변하지 않습니다.')
-        + '\n고정되는 날은 위 ' + (set.length + remove.length) + '일뿐이고, 나머지 날은 종전대로 열립니다'
-        + (set.length ? '(고정한 날에는 자동 이월이 더 얹히지 않습니다).' : '.')
-      : '\n\n총량은 변하지 않습니다.';
-    if (!window.confirm('아래 조절을 저장할까요?\n\n' + body + tail)) return;
+    // [확정 저장] 자체가 의도적인 최종 동작이다. 브라우저 확인창을 한 번 더 띄우지 않고
+    // 즉시 저장한 뒤, 결과(성공·실패·작업표 동기화 상태)는 화면 토스트로만 알린다.
     // 098 보류 잔량 차감 — 균형 모드는 "지금 계획에 실제로 얹혀 있는 이월"이 곧 반영량이다
     var apply = balanceOn()
       ? (S.data.carryMode === 'hold' ? carryPlaced() : 0)
