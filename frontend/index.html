@@ -1072,13 +1072,23 @@ async function consumeAdminReviewerHomeLink() {
 }
 
 async function initPage() {
-  await consumeAdminReviewerHomeLink();
+  const hasAdminReviewerTicket = new URLSearchParams(location.search).has('admin_reviewer_ticket');
+  const exchanged = await consumeAdminReviewerHomeLink();
+  // 만료·위조·통신실패한 관리자 링크가 같은 브라우저의 기존 리뷰어 localStorage로
+  // 폴백하면 다른 사람 홈을 여는 사고가 난다. 이 경우는 반드시 로그인 화면에 남긴다.
+  if (hasAdminReviewerTicket && !exchanged) {
+    document.getElementById("viewLogin").style.display = "";
+    document.getElementById("viewHome").style.display = "none";
+    return false;
+  }
   const user = getSavedUser();
   if (user && user.name) {
     showHome(user);
+    return true;
   } else {
     document.getElementById("viewLogin").style.display = "";
     document.getElementById("viewHome").style.display = "none";
+    return false;
   }
 }
 
@@ -2935,8 +2945,8 @@ function showToast(msg) {
 }
 
 // Enter key support
-document.addEventListener("DOMContentLoaded", () => {
-  initPage();
+document.addEventListener("DOMContentLoaded", async () => {
+  await initPage();
   loadRecruitPreview();
   applyRecruitView();
   // ★ #my / #info 해시 진입 시 내정보/현황 탭 자동 오픈 (구매양식 내정보 게이트 배너 링크용)

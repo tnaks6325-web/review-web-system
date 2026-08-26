@@ -77,6 +77,11 @@ ok('홈 링크는 관리자 전용 API로 발급하고 새 탭을 연다',
 ok('홈 교환권 발급은 adminOrMaster이고 5분짜리 서명 토큰이다',
   /router\.post\('\/reviewers\/home-link', authMiddleware, adminOrMasterMiddleware/.test(routes)
   && /scope: 'reviewer_home_admin'/.test(routes) && /expiresIn: '5m'/.test(routes));
+const home = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
+ok('만료·실패한 관리자 홈 링크는 기존 localStorage 리뷰어로 폴백하지 않는다',
+  /hasAdminReviewerTicket && !exchanged[\s\S]{0,400}?viewLogin/.test(home));
+ok('관리자 링크 교환이 끝난 뒤에만 해시 탭을 처리한다',
+  /DOMContentLoaded", async \(\) => \{\s*await initPage\(\);[\s\S]{0,500}?location\.hash/.test(home));
 
 /* ── ③ 줄바꿈 금지 ── */
 console.log('\n③ 주소 말고는 전부 한 줄(행 높이 붕괴 방지)');
