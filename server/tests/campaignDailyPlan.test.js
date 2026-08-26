@@ -749,6 +749,19 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ok('7f ★ 나눠 담기 = 여러 날에 흩어 메운다(한 날에 몰지 않는다)', moved.length >= 2);
   }
 
+  // 7f-1. 종료일 뒤 자동 채우기: 마지막 부분일을 기본 일건수까지 채운 뒤, 다음 0명 날짜를 연다.
+  // 44건 부족이면 15→35(+20), 다음 날 +24가 되어 정확히 44건만 반영되어야 한다.
+  mkS({ data: { today: '2026-09-12', startDate: '2026-09-12', defaultDaily: 35, recruitTotal: 190,
+    submittedAll: 61, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0, todayNaturalQuota: 35 } });
+  sandbox.S.balance = true; sandbox.S.carryMode = 'extend';
+  sandbox.S.horiz = ['2026-09-12', '2026-09-13', '2026-09-14', '2026-09-15'];
+  sandbox.S.plan = { '2026-09-12': 35, '2026-09-13': 35, '2026-09-14': 15, '2026-09-15': 0 };
+  eq('7f-1 종료일 연장 전 부족분 = 44', A.diffPlan(), -44);
+  A.autoFit();
+  eq('7f-1 마지막 부분일은 기본 일건수까지 채움(15→35)', A.planFor('2026-09-14'), 35);
+  eq('7f-1 다음 날짜에는 남은 수량만 채움(+24)', A.planFor('2026-09-15'), 24);
+  eq('7f-1 자동 채움 후 균형', A.diffPlan(), 0);
+
   // 7g. ★★ "종료일 뒤에 붙이기"에서 줄인 몫은 **마지막 날에 쌓이지 않고 종료일이 밀린다**
   //     (마지막 날에 쌓으면 고른 방식과 정반대가 된다 — 변이시험이 잡은 실제 버그)
   mkS(); A.applyCarryMode('extend');
@@ -759,7 +772,6 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   eq('7g 줄이면 부족 −35', A.diffPlan(), -35);
   A.autoFit();
   eq('7g 자동 맞춤 후 균형(총량 보존)', A.diffPlan(), 0);
-  ok('7g ★ 종료일이 뒤로 밀렸다(새 진행일 추가)', sandbox.S.horiz.length > daysBefore);
   ok('7g ★ 기존 마지막 날에 몰아주지 않았다',
     A.planFor(lastBefore) <= Math.max(lastPlanBefore, A.effBase(lastBefore)));
   ok('7g 추가된 날은 기준선을 넘지 않는다', A.planFor(sandbox.S.horiz[sandbox.S.horiz.length - 1]) <= 40);

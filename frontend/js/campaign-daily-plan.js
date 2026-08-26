@@ -560,6 +560,23 @@
     if (!need) return;
     var ds = (S.horiz || []).filter(function (d) { return baseFor(d) > 0 || planFor(d) > 0; });
     var cap = dayCeil(), guard = 0;
+    // 종료일 연장은 기존 작업표의 0명 행에 막히지 않고, 기본 일건수 단위로 새 날짜를 연다.
+    // 단, 주말 제외 공고는 명시 계획이 있는 주말(baseFor>0)만 열 수 있다.
+    var extendSlot = function (d) {
+      var base = baseFor(d);
+      if (base > 0) return Math.min(cap, base);
+      if (S.data.skipWeekends === true && dayKind(d)) return 0;
+      return Math.min(cap, Math.max(0, Number(S.data.defaultDaily) || 0));
+    };
+    if (need > 0 && S.carryMode === 'extend') {
+      // 마지막 부분일(예: 15명)을 먼저 기본 일건수(예: 35명)까지 채운다.
+      var filledDays = (S.horiz || []).filter(function (d) { return planFor(d) > 0; });
+      for (var ex = filledDays.length - 1; ex >= 0 && need > 0; ex--) {
+        var exd = filledDays[ex], exSlot = extendSlot(exd);
+        var exPut = Math.min(Math.max(0, exSlot - planFor(exd)), need);
+        if (exPut > 0) { S.plan[exd] = planFor(exd) + exPut; need -= exPut; }
+      }
+    }
     if (S.carryMode === 'spread') {
       // ★ 한 명씩 돌리는 루프(최악 240만 회)는 큰 부족분에서 화면을 얼린다 — 몫/나머지로 한 번에.
       //   여력이 모자란 날이 있으면 남은 몫만 다시 돌린다(최대 몇 회).
@@ -603,7 +620,7 @@
          next·spread 는 위 루프가 이미 채웠으므로 여기서는 no-op 이다(extend 전용 경로). */
       (S.horiz || []).forEach(function (dz) {
         if (need <= 0 || planFor(dz) > 0) return;
-        var bz = baseFor(dz); if (bz <= 0) return;
+        var bz = S.carryMode === 'extend' ? extendSlot(dz) : baseFor(dz); if (bz <= 0) return;
         var putz = Math.min(bz, need, cap);
         if (putz > 0) { S.plan[dz] = putz; need -= putz; }
       });
@@ -611,7 +628,7 @@
     if (need > 0) {
       var d3 = S.horiz.length ? addDays(S.horiz[S.horiz.length - 1], 1) : baseDate(), g2 = 0;
       while (need > 0 && g2++ < 400 && S.horiz.length < MAX_ROWS) {
-        var b = baseFor(d3);
+        var b = S.carryMode === 'extend' ? extendSlot(d3) : baseFor(d3);
         if (b > 0) { var v = Math.min(b, need); S.plan[d3] = v; S.horiz.push(d3); need -= v; }
         d3 = addDays(d3, 1);
       }
@@ -680,9 +697,9 @@
     + '#cdpModal .cdp-carry .d{font-size:.68rem;color:#7b6a52;line-height:1.55;margin-bottom:9px}'
     + '#cdpModal .cdp-seg{display:grid;grid-template-columns:repeat(3,1fr);gap:0;background:#f3ede3;border-radius:9px;padding:3px}'
     + '#cdpModal .cdp-seg button{border:0;background:none;padding:8px 5px;border-radius:7px;cursor:pointer;font-family:inherit;font-size:.71rem;font-weight:700;color:#6b6152;line-height:1.35}'
-    + '#cdpModal .cdp-seg button.on{background:#fff;color:#92400e;box-shadow:0 1px 4px rgba(60,40,10,.16)}'
+    + '#cdpModal .cdp-seg button.on{background:#eef4ff;border-color:#5d83e6;color:#315aba;box-shadow:0 1px 4px rgba(60,40,10,.12)}'
     + '#cdpModal .cdp-seg button small{display:block;font-weight:600;font-size:.6rem;color:#a1937f;margin-top:2px}'
-    + '#cdpModal .cdp-seg button.on small{color:#b06d29}'
+    + '#cdpModal .cdp-seg button.on small{color:#5875b7}'
     + '#cdpModal .cdp-seg .df{display:inline-block;font-size:.54rem;background:#fde68a;color:#78350f;border-radius:4px;padding:0 4px;margin-left:3px;vertical-align:1px}'
     + '#cdpModal .cdp-carry .where{margin-top:9px;font-size:.7rem;line-height:1.6;color:#7c3d09;background:#fff3e2;border:1px solid #f8d5aa;border-radius:8px;padding:8px 11px}'
     + '#cdpModal .cdp-carry .cmp{margin-top:7px;font-size:.66rem;color:#8a7a63}'
@@ -696,6 +713,7 @@
     + '#cdpModal .cdp-stat .kv{display:block;margin-top:13px}#cdpModal .cdp-stat .kv span{display:block;padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb)}'
     + '#cdpModal .cdp-carry{margin:0;padding:0;border:0;background:none}.cdp-carry .d,#cdpModal .cdp-carry .where,#cdpModal .cdp-carry .cmp{display:none}'
     + '#cdpModal .cdp-seg{grid-template-columns:1fr;gap:5px;padding:0;background:none}#cdpModal .cdp-seg button{border:1px solid #d5e0ef;background:#fff;padding:8px;text-align:left}#cdpModal .cdp-seg button small{display:block}'
+    + '#cdpModal .cdp-side .cdp-carry .d,#cdpModal .cdp-side .cdp-carry .where,#cdpModal .cdp-side .cdp-carry .cmp{display:none!important}'
     + '#cdpModal .cdp-side>.cdp-note{margin:16px 0 0;border:0;background:#fff8e5;padding:10px;font-size:.68rem;color:#99500d}'
     /* 기본 화면은 현황·배정방식·날짜 조절만 보여 준다. 이력/복구/설명은 접어서 필요할 때만 연다. */
     + '#cdpModal .cdp-more{margin:10px 0 14px;border-top:1px solid var(--border,#e5e7eb);color:var(--t2,#4d5768)}'
@@ -1095,16 +1113,20 @@
 
     /* ── ① 진행 현황(요구 ②③) — 조절 시점의 현재모집인원/총건수·이월·종료일 ── */
     var done = Number(j.submittedAll) || 0, tot = totalFor(), carry = carryAmt();
+    // 배지와 [자동 채우기]는 같은 "현재 계획의 부족 수량"을 말해야 한다.
+    // 과거 미달(carryPending)보다 현재 부족분이 크면 그 값을 우선 보여 준다.
+    var carryNeed = carry === null ? null
+      : (bal ? Math.max(carry, Math.max(0, -diffPlan())) : carry);
     var workLeft = (S.horiz || []).filter(function (d) { return planFor(d) > 0; }).length;
     var statBlk = '<div class="cdp-stat"><div class="r1">'
       + '<span class="big">모집 현황 <em>' + done + '</em> / ' + (tot > 0 ? tot : '무제한') + (tot > 0 ? '명' : '') + '</span>'
       // ★ 시트 일정 공고는 그날 정원을 시트가 정해 **이월 개념이 적용되지 않는다** — 여기서 "?"를
       //   띄우면 담당자가 "조회 실패"로 오독해 원인을 엉뚱한 데서 찾는다(heldBlk '해당 없음'과 같은 규율).
       + (j.scheduleDriven === true ? ''
-        : carry === null
+        : carryNeed === null
           ? '<span class="cdp-cb un" title="기준선 조회 실패 등으로 이월 인원을 계산하지 못했습니다">↩ 이월 ?</span>'
-          : (carry > 0
-            ? '<span class="cdp-cb" title="어제까지의 계획 대비 못 채운 인원입니다">↩ 이월 ' + carry + '명</span>'
+          : (carryNeed > 0
+            ? '<span class="cdp-cb" title="현재 계획에서 추가 배정이 필요한 수량입니다">↩ 이월 ' + carryNeed + '명</span>'
             : ''))
       + '</div>'
       + (tot > 0 ? '<div class="bar"><i style="width:' + Math.min(100, done / tot * 100).toFixed(1) + '%"></i></div>' : '')
@@ -1168,15 +1190,14 @@
       var _wkOpen = (S.horiz || []).filter(function (d) {
         return (dayKind(d) === 'sat' || dayKind(d) === 'hol') && Number(S.plan[d]) > 0;
       });
-      if (_wkOpen.length) {
-        wkNote = '<div class="cdp-note">주말 일정 <b>' + _wkOpen.length + '일</b>은 모집 오픈됩니다.</div>';
-      }
+      // 주말에 계획 인원이 있으면 해당 날짜는 일반 진행일처럼 모집된다.
+      // 같은 사실을 사이드바에 반복 안내하지 않는다.
     }
 
     var carryBlk = '';
     // ★ 재배분 직후에는 이월 배치 블록을 그리지 않는다 — 이월은 재배분에 이미 녹아 있어
     //   "이월 N명이 어디에도 얹혀 있지 않습니다"가 거짓 문구가 된다(창구도 둘이 된다).
-    if (bal && !S.rebalanced && carry !== null && carry > 0) {
+    if (bal && !S.rebalanced && carryNeed !== null && carryNeed > 0) {
       var placed = carryPlaced(), cds = carryDays(), where = '';
       if (S.carryMode === 'extend') {
         var lastD = null;
@@ -1219,7 +1240,7 @@
         for (var li = h.dates.length - 1; li >= 0; li--) if (h.plan[h.dates[li]] > 0) return fmtMD(h.dates[li]);
         return '-';
       };
-      carryBlk = '<div class="cdp-carry"><div class="t">이월 <b>' + carry + '명</b> 보충 투입 방식</div>'
+      carryBlk = '<div class="cdp-carry"><div class="t">이월 보충 투입 방식</div>'
         + '<div class="d">어제까지 못 채운 <b>' + carry + '명</b>을 어느 날에 얹을지 정합니다. 총량은 어느 방식에서도 변하지 않고, <b>종료일만 달라집니다</b>.'
         + (j.carryMode === 'hold' ? ' 이 공고는 <b>이월 보류</b> 설정이라 저장하기 전까지는 자동으로 얹히지 않습니다.' : '')
         + '</div>'
