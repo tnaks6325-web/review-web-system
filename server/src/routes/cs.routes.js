@@ -59,7 +59,22 @@ router.get('/threads', async (req, res, next) => {
         t.last_message_preview AS "lastMessagePreview",
         t.admin_unread_count   AS "adminUnread",
         t.created_at           AS "createdAt",
-        rv.admin_memo          AS "adminMemo"
+        rv.admin_memo          AS "adminMemo",
+        -- 목록의 업체명 검색도 대화 상세와 같은 출처·우선순위를 쓴다.
+        -- campaign_key는 sheetId||tabName 형식이며 tabName 안의 || 는 첫 구분자 뒤에
+        -- 그대로 남겨 상세 조회의 split 규칙과 일치한다.
+        COALESCE(
+          (SELECT ri.campaign_name FROM review_index ri
+            WHERE ri.sheet_id = split_part(t.campaign_key, '||', 1)
+              AND ri.tab_name = substring(t.campaign_key FROM position('||' IN t.campaign_key) + 2)
+              AND COALESCE(ri.campaign_name, '') <> ''
+            LIMIT 1),
+          (SELECT tc.campaign_name FROM tab_configs tc
+            WHERE tc.sheet_id = split_part(t.campaign_key, '||', 1)
+              AND tc.tab_name = substring(t.campaign_key FROM position('||' IN t.campaign_key) + 2)
+              AND COALESCE(tc.campaign_name, '') <> ''
+            LIMIT 1),
+          '') AS "companyLabel"
       FROM cs_threads t
       LEFT JOIN reviewers rv ON rv.phone8 = t.reviewer_phone8
       ${whereSql}

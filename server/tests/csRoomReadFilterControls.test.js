@@ -37,6 +37,8 @@ ok('전체 접기 상태는 필터가 바뀐 현재 그룹에도 적용된다',
 const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'cs.routes.js'), 'utf8');
 ok('목록은 제한된 페이지로 조회하고 다음 페이지 존재 여부를 반환한다',
   /LIMIT \$\$\{params\.length \+ 1\} OFFSET \$\$\{params\.length \+ 2\}/.test(route) && /hasMore: rows\.length === limit/.test(route));
+ok('목록 응답은 업체명 검색을 위해 상세와 같은 두 출처에서 companyLabel을 채운다',
+  /review_index ri/.test(route) && /tab_configs tc/.test(route) && /AS "companyLabel"/.test(route));
 ok('첫 페이지를 그린 뒤 오래된 방은 백그라운드 페이지로 이어 받는다', /function _csLoadRemainingRooms/.test(src));
 
 console.log(`\n✅ csRoomReadFilterControls: ${n} cases passed`);
