@@ -882,6 +882,7 @@ function onRecruitDatesChange() {
   const sDay = document.getElementById("rf_start_day");
   const dDay = document.getElementById("rf_deadline_day");
   if (sDay && sd) sDay.textContent = _rfDow(sd.value);
+  window.RecruitModal?.syncStartDateControl?.();
   _renderStartDateOriginNote();   // 날짜를 맞추면 대조 안내가 스스로 사라진다
   if (dDay && dl) dDay.textContent = _rfDow(dl.value);
   const warn = document.getElementById("rf_deadline_warn");
