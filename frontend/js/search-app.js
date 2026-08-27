@@ -121,21 +121,14 @@ const _BATCH_DONE_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.campId)
 function _batchLoadDone() { try { return JSON.parse(sessionStorage.getItem(_BATCH_DONE_KEY) || "{}") || {}; } catch (_) { return {}; } }
 function _batchSaveDone(d) { try { sessionStorage.setItem(_BATCH_DONE_KEY, JSON.stringify(d)); } catch (_) { /* noop */ } }
 
-/** 부팅 판정 — 어떤 예외·미달 조건도 null(단건)로 수렴한다. */
+/**
+ * 다계정 참여도 application 하나씩 별도 제출한다.
+ *
+ * 과거 배포본이 남긴 `batch=1` URL/세션을 열어도 이 함수가 항상 null을 돌려주므로,
+ * A 명의 화면에서 B·C 명의의 주문 카드가 함께 생성될 수 없다.
+ */
 function _batchBoot() {
-  try {
-    if (!_EMBED_CTX || _PREVIEW_MODE) return null;                  // ★ 관리자 미리보기 절대 금지
-    if (window._ncMode) return null;                                // ★ nc 2카드 고정과 겹치면 배송지 오염
-    if (new URLSearchParams(location.search).get("batch") !== "1") return null;
-    const raw = sessionStorage.getItem("camp_batch_" + (_EMBED_CTX.campId || ""));
-    if (!raw) return null;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr) || arr.length < 2) return null;
-    if (arr.length > MAX_ORDER_CARDS) return null;                  // ★ 조용한 누락 금지 — 전량 단건으로
-    if (!arr.every(h => h && h.app && h.holdToken && String(h.phone8 || "").length === 8)) return null;
-    if (_EMBED_CTX.app && !arr.some(h => String(h.app) === String(_EMBED_CTX.app))) return null; // stale 스냅샷
-    return { holds: arr, byCid: {}, byP8: {}, byApp: {}, files: {}, small: {}, done: _batchLoadDone() };
-  } catch (_) { return null; }
+  return null;
 }
 
 /** 배치 카드 장식: 명의 헤더 · 만료 카운트다운 · 프리필 · sameChk 해제 · 삭제버튼 제거 */
