@@ -941,7 +941,6 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             tm.memo,
             EXISTS (SELECT 1 FROM index_master im WHERE im.status = 'active' AND im.sheet_id = t.sheet_id
                       AND (im.tab_gid = t.tab_gid OR im.tab_name = t.tab_name)) AS "active"
-       FROM tabs t
        /*
         * 업체 작업목록의 「제출」은 작업보드 진행 카드와 같은 진실원본을 쓴다.
         * campaign_participants.is_submitted는 검수/정산 상태 플래그라 재투영보다
@@ -949,19 +948,66 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
         * 행별로 파서가 잡은 submit_col을 우선하고, 수동·무시트 행처럼 그것이 비어
         * 있으면 해당 탭 review_index의 실제 리뷰제출 헤더를 쓴다.
         */
+       FROM tabs t
        LEFT JOIN LATERAL (
          SELECT NULLIF(MAX(NULLIF(BTRIM(ri.submit_col), '')), '') AS submit_header
            FROM review_index ri
           WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
        ) submit_header ON TRUE
        LEFT JOIN LATERAL (
+         /* workdeskTab과 같은 앵커 규율:
+            - 현재 앵커의 셀 편집이 원본 셀보다 우선
+            - 주문/identity 앵커가 중복이면 어떤 행에도 적용하지 않음
+            - 앵커 승격 전 저장한 물리행(manual) 편집은 현재 앵커보다 낮은 우선순위
+            이 규칙이 없으면 업체 목록과 실제 작업표가 다시 달라진다. */
+         WITH active_rows AS (
+           SELECT cp.*,
+                  CASE WHEN cp.order_submission_id IS NOT NULL THEN 'order'
+                       WHEN cp.source = 'manual' THEN 'manual'
+                       WHEN NULLIF(BTRIM(cp.identity_key), '') IS NOT NULL THEN 'identity'
+                       ELSE NULL END AS anchor_type,
+                  CASE WHEN cp.order_submission_id IS NOT NULL THEN cp.order_submission_id::text
+                       WHEN cp.source = 'manual' THEN cp.id::text
+                       WHEN NULLIF(BTRIM(cp.identity_key), '') IS NOT NULL THEN cp.identity_key
+                       ELSE NULL END AS anchor_value
+             FROM campaign_participants cp
+            WHERE cp.sheet_id = t.sheet_id AND (cp.tab_gid = t.tab_gid OR cp.tab_name = t.tab_name)
+              AND cp.deleted_at IS NULL AND cp.active = TRUE
+         ), anchored_rows AS (
+           SELECT ar.*, COUNT(*) OVER (PARTITION BY ar.anchor_type, ar.anchor_value) AS anchor_count
+             FROM active_rows ar
+         )
          SELECT MIN(cp.first_seen_at) AS first_seen,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL)::int AS total,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
-                  AND NULLIF(BTRIM(cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)), '') IS NOT NULL)::int AS submitted,
+                  AND NULLIF(BTRIM(COALESCE(
+                    CASE WHEN cp.anchor_type IS NOT NULL
+                              AND (cp.anchor_type = 'manual' OR cp.anchor_count = 1)
+                         THEN CASE WHEN current_edit.kind = 'bool' THEN CASE WHEN current_edit.value_bool THEN 'O' ELSE '' END
+                                   ELSE current_edit.value_text END END,
+                    CASE WHEN cp.anchor_type IS NOT NULL AND cp.anchor_type <> 'manual' AND cp.anchor_count = 1
+                         THEN CASE WHEN manual_edit.kind = 'bool' THEN CASE WHEN manual_edit.value_bool THEN 'O' ELSE '' END
+                                   ELSE manual_edit.value_text END END,
+                    cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
+                  )), '') IS NOT NULL)::int AS submitted,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.is_paid)::int AS paid
-           FROM campaign_participants cp
-          WHERE cp.sheet_id = t.sheet_id AND (cp.tab_gid = t.tab_gid OR cp.tab_name = t.tab_name)
+           FROM anchored_rows cp
+           LEFT JOIN LATERAL (
+             SELECT e.kind, e.value_bool, e.value_text
+               FROM participant_edits e
+              WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
+                AND e.anchor_type = cp.anchor_type AND e.anchor_value = cp.anchor_value
+                AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
+              LIMIT 1
+           ) current_edit ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT e.kind, e.value_bool, e.value_text
+               FROM participant_edits e
+              WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
+                AND e.anchor_type = 'manual' AND e.anchor_value = cp.id::text
+                AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
+              LIMIT 1
+           ) manual_edit ON TRUE
        ) cnt ON TRUE
        LEFT JOIN tab_configs tc ON tc.sheet_id = t.sheet_id AND tc.tab_name = t.tab_name
        LEFT JOIN LATERAL (
