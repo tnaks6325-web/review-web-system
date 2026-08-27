@@ -14706,14 +14706,14 @@ function _renderRvHead(total){
       <option value="active"${STATE.rvStatus==='active'?' selected':''}>활성</option>
       <option value="inactive"${STATE.rvStatus==='inactive'?' selected':''}>비활성</option>
     </select>
-    <input id="rvq" class="ovsearch" style="width:240px" placeholder="이름 / 연락처 / 계좌번호 실시간 검색"
-           value="${esc(STATE.rvq||'')}"
-           oninput="_rvSearchInput(this,event)" oncompositionend="_rvSearchInput(this,null,true)"
-           onkeydown="if(event.key==='Enter'){STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers();}">
     <button class="btn" onclick="STATE.rvOffset=0;_loadReviewers()">새로고침</button></div>
     <div class="ovnote">리뷰어 등록 원장입니다. <b>주민등록번호·계좌번호가 그대로 표시</b>되니 화면공유·스크린샷에 주의하세요.
       수정은 <b>관리자 메모·참여설정</b>만 가능합니다(이름·연락처·계좌 등은 조회 전용).</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 16px 10px">
+      <input id="rvq" class="ovsearch" style="width:240px" placeholder="이름 / 연락처 / 계좌번호 실시간 검색"
+             value="${esc(STATE.rvq||'')}"
+             oninput="_rvSearchInput(this,event)" oncompositionend="_rvSearchInput(this,null,true)"
+             onkeydown="if(event.key==='Enter'){STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers();}">
       ${[['','전체'],['available','참여가능'],['blacklist','블랙리스트'],['candidate','🚨 후보 (미작성 1건↑)'],['overdue','기한경과만']]
         .map(([f,lb])=>`<button class="btn" style="padding:3px 12px;border-radius:999px;font-size:.72rem${(STATE.rvFlag||'')===f?';background:#111827;border-color:#111827;color:#fff':''}"
           onclick="_rvSetFlag('${f}')">${lb}</button>`).join('')}
