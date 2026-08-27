@@ -3314,8 +3314,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ cap 을 모르면(공고 미연결·조회 실패) 아무 표시도 하지 않는다(0 위장 금지).
      ★ 광고주에게도 보인다(사용자 확정) — 다만 `condition` 자체는 종전대로 내부 전용이다. */
   const _cond = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
-  const _cap = (meta[0] && meta[0].sheetless && _cond && Number(_cond.recruitTotal) > 0)
-    ? Number(_cond.recruitTotal) : null;
+  /* 총 모집완료 표기는 시트/무시트 모두 작업 조건의 총건수를 쓴다. 반면 초과행 칠하기는
+     시트 기반 과거 표에 오탐을 내지 않도록 종전처럼 무시트에만 한정한다. */
+  const _recruitCap = (_cond && Number(_cond.recruitTotal) > 0) ? Number(_cond.recruitTotal) : null;
+  const _cap = (meta[0] && meta[0].sheetless) ? _recruitCap : null;
   let overCount = 0;
   if (_cap) {
     let seen = 0;
@@ -3342,6 +3344,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     held: heldCount, heldUnavailable: heldUnavailable || undefined,
     /* 총건수(정원) — 게이지 분모의 단일 출처. 모르면 싣지 않는다(화면이 종전 폴백으로 접는다). */
     cap: _cap || undefined,
+    /* 총 모집완료 표기용 기준. 시트 기반은 초과행 색칠과 달리 이 값을 사용해야 한다. */
+    completionCap: _recruitCap || undefined,
     /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
     over: _cap ? overCount : undefined,
   };
