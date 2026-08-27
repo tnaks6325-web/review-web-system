@@ -67,12 +67,11 @@ ok(`펼침행 colspan(${/colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) ? 'RV_COL
 console.log('\n②-1 실시간 검색 · 리뷰어 홈 바로가기');
 ok('검색 입력마다 180ms 후 서버 검색을 다시 한다',
   /oninput="_rvSearchInput\(this,event\)"/.test(jsNoComment) && /function _rvSearchInput[\s\S]{0,500}?setTimeout[\s\S]{0,300}?_loadReviewers\(\)/.test(jsNoComment));
-ok('검색창은 상태/블랙리스트 필터 행의 맨 왼쪽에 있다', () => {
+ok('검색창은 상태/블랙리스트 필터 행의 맨 왼쪽에 있다', (() => {
   const head = (/function _renderRvHead\(total\)[\s\S]*?\n\}/.exec(jsNoComment) || [''])[0];
   const row = (/margin:0 16px 10px">([\s\S]*?)<\/div>`;/.exec(head) || ['',''])[1];
-  assert.ok(row.indexOf('id="rvq"') > -1, '필터 행에 검색창이 없다');
-  assert.ok(row.indexOf('id="rvq"') < row.indexOf("[['','전체']"), '검색창이 필터 버튼보다 왼쪽이 아니다');
-});
+  return row.indexOf('id="rvq"') > -1 && row.indexOf('id="rvq"') < row.indexOf("[['','전체']");
+})());
 ok('느린 이전 검색 응답이 최신 결과를 덮지 않는다',
   /requestId!==STATE\.rvRequestId\) return/.test(jsNoComment));
 ok('이름 왼쪽에 리뷰어 홈 버튼이 있고 행 인덱스로만 연다',
