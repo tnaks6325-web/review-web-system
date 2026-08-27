@@ -16,13 +16,19 @@ let n = 0;
 const ok = (name, condition) => { assert(condition, name); n++; console.log('  ✓ ' + name); };
 
 ok('드롭다운 상태 필터가 렌더링되지 않는다', !/id="csStatusFilter"/.test(html));
-ok('검색 입력창이 렌더링되지 않는다', !/id="csSearchInput"/.test(html));
+ok('새 검색창은 새로고침 바로 오른쪽에 렌더링된다',
+  /cs-refresh-control[\s\S]*?csRoomSearchInput/.test(html));
+ok('검색창은 채팅 목록 폭 안에서 남은 너비를 모두 쓴다',
+  /\.cs-room-controls\{[^}]*width:360px/.test(html) && /\.cs-room-search\{[^}]*flex:1/.test(html));
 ok('전체 접기/펼치기 토글이 있다', /id="csFoldAllBtn"/.test(html) && /csToggleAllGroups\(\)/.test(html));
 ok('읽음·안읽음 사각 버튼이 있다', /id="csReadFilter-read"/.test(html) && /id="csReadFilter-unread"/.test(html));
 ok('새로고침은 아이콘만 가진 정사각 버튼이다', /cs-refresh-control[^>]*>[\s\S]*?<i class="fas fa-sync-alt"><\/i><\/button>/.test(html));
 ok('새로고침 정사각 규격이 있다', /\.cs-refresh-control\{width:32px;min-width:32px;padding:0\}/.test(html));
 ok('읽음/안읽음은 adminUnread 기준으로만 걸러진다',
   /_csReadFilter === 'read'.*adminUnread > 0/.test(src) && /_csReadFilter === 'unread'.*adminUnread > 0/.test(src));
+ok('키워드 입력마다 채팅방 캐시를 즉시 검색한다',
+  /function csSetRoomSearch\(keyword\)/.test(src) && /_renderCsRooms\(_csVisibleRooms\(\)\)/.test(src) &&
+  /r\.reviewerName, r\.reviewerPhone8, r\.campaignLabel, r\.companyLabel, r\.lastMessagePreview/.test(src));
 ok('목록 조회는 상태와 무관하게 전체를 페이지 단위로 받아온다', /csAdminThreads", status: "all", q: "", limit: pageSize, offset: 0/.test(src));
 ok('방을 열면 캐시의 미확인 수와 읽음/안읽음 목록도 즉시 갱신한다',
   /const cached = _csRooms\.find\(r => r\.id === threadId\)/.test(src) && /cached\.adminUnread = 0/.test(src));
@@ -31,6 +37,8 @@ ok('전체 접기 상태는 필터가 바뀐 현재 그룹에도 적용된다',
 const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'cs.routes.js'), 'utf8');
 ok('목록은 제한된 페이지로 조회하고 다음 페이지 존재 여부를 반환한다',
   /LIMIT \$\$\{params\.length \+ 1\} OFFSET \$\$\{params\.length \+ 2\}/.test(route) && /hasMore: rows\.length === limit/.test(route));
+ok('목록 응답은 업체명 검색을 위해 상세와 같은 두 출처에서 companyLabel을 채운다',
+  /review_index ri/.test(route) && /tab_configs tc/.test(route) && /AS "companyLabel"/.test(route));
 ok('첫 페이지를 그린 뒤 오래된 방은 백그라운드 페이지로 이어 받는다', /function _csLoadRemainingRooms/.test(src));
 
 console.log(`\n✅ csRoomReadFilterControls: ${n} cases passed`);
