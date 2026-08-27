@@ -177,14 +177,20 @@ const CNT = (id, o) => Object.assign({
   vm.runInContext(
     'const esc=' + /const esc=(s=>[\s\S]*?);\n/.exec(WD)[1] + ';\n'
     + cut('function _fmtKDate(v){', '// 입금 컬럼:')
-    + cut('function _tpHtml(tp){', '// 시트형 그리드:'), sandbox);
-  const tp = (o) => sandbox._tpHtml(o);
+    + cut('function _tpHtml(tp, totals){', '// 시트형 그리드:'), sandbox);
+  const tp = (o, totals) => sandbox._tpHtml(o, totals);
   const TODAY = '2026-08-10';   // 월요일
 
   t('필드 자체가 없으면 아무것도 그리지 않는다(광고주·구버전 백엔드)', tp(undefined) === '' && tp(null) === '');
 
+  let h = tp(undefined, { filled: 800, completionCap: 800 });
+  t('★ 총 모집 완료는 날짜 없이 "총 모집인원 800/800 달성!"으로 표기',
+    /class="tprog totaldone"/.test(h) && /총 모집인원/.test(h) && /800/.test(h) && /\/800/.test(h) && /달성!/.test(h) && !/8\/10/.test(h), h);
+  h = tp({ ok: true, dateStr: TODAY, quota: 20, done: 21 }, { filled: 801, completionCap: 800 });
+  t('★ 총건수 초과 데이터는 완료로 덮지 않고 기존 초과 표기를 유지', /class="tprog over"/.test(h) && !/totaldone/.test(h), h);
+
   /* ── B안(사용자 확정 2026-08-10): 표기 기준 = 작업표 ─────────────────────── */
-  let h = tp({ ok: true, dateStr: TODAY, quota: 42, done: 8, holds: 0, sheetFilled: 27, campaignCount: 1 });
+  h = tp({ ok: true, dateStr: TODAY, quota: 42, done: 8, holds: 0, sheetFilled: 27, campaignCount: 1 });
   t('★ 표 기준으로 표기한다(27/42) — 공고 확정(8)이 아니라', />27</.test(h) && /\/42명/.test(h) && !/>8</.test(h), h);
   t('★ 차이는 숨기지 않고 툴팁이 말한다(지각 확정 대기·수기 입력 신호)',
     /공고를 거쳐 확정된 건 8명/.test(h) && /차이 19명/.test(h), h);
@@ -226,7 +232,7 @@ const CNT = (id, o) => Object.assign({
   /* ══ 4) 툴바 배선 · CSS 계약 ═════════════════════════════════════════════ */
   console.log('\n4) 툴바 배선 · CSS 계약');
   t('★ 칩은 툴바 맨 앞 = 검색창 왼쪽(사용자 지시)',
-    /<div class="gridbar">\s*\$\{_tpHtml\(wd\.todayProgress\)\}\s*<div class="gsearch">/.test(WD));
+    /<div class="gridbar">\s*\$\{_tpHtml\(wd\.todayProgress,wd\.counts\)\}\s*<div class="gsearch">/.test(WD));
   t('★ 칩 높이 28px — 툴바의 다른 컨트롤과 같다(표가 아래로 안 밀린다)',
     /\.tprog\{[^}]*height:28px/.test(WD));
   t('도넛은 conic-gradient(외부 이미지·SVG 0)', /\.tprog \.ring\{[^}]*conic-gradient/.test(WD));
@@ -247,8 +253,12 @@ const CNT = (id, o) => Object.assign({
   // (나중에 공고 제목 같은 외부 문자열을 툴팁에 넣는 순간 속성 탈출이 된다.)
   // ★★ 반드시 _tpHtml **본문 안에서** 볼 것 — `title="${esc(tip)}"` 는 이 파일의 다른 기능에도
   //   4곳 더 있어서, 파일 전체를 보면 여기서 esc 를 빼도 남의 것이 대신 통과시킨다(변이시험 실측).
-  const TP_FN = cut('function _tpHtml(tp){', '// 시트형 그리드:');
+  const TP_FN = cut('function _tpHtml(tp, totals){', '// 시트형 그리드:');
   t('★ title 속성도 escape 를 거친다(외부 문자열이 들어와도 안전하게)', /title="\$\{esc\(tip\)\}"/.test(TP_FN));
+  t('총 모집 완료는 서버의 filled/completionCap만으로 판정(오늘 정원 재계산 금지)',
+    /totals\.filled/.test(TP_FN) && /totals\.completionCap/.test(TP_FN) && /totalFilled===totalCap/.test(TP_FN));
+  t('시트 기반도 총 모집완료 기준을 받되 초과행 표시는 무시트에만 유지',
+    /const _recruitCap/.test(SVC_SRC) && /completionCap: _recruitCap/.test(SVC_SRC) && /meta\[0\] && meta\[0\]\.sheetless/.test(SVC_SRC));
 
   console.log(`\n✅ 통과 ${pass}건\n`);
   process.exit(0);

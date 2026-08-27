@@ -684,6 +684,12 @@
   .tprog.done .ring{background:conic-gradient(var(--safe) calc(var(--p,0) * 1%),#e3e9f1 0)}
   .tprog.done .d,.tprog.done .num{color:#15803d}
   .tprog.done .sfx{color:#15803d;border-color:#cdeed8;background:var(--safe-soft)}
+  /* 총 모집인원이 모두 채워진 완료 상태는 오늘 날짜·일일 목표 대신 전체 목표를 말한다.
+     `counts.filled === counts.completionCap` 일 때만 붙으므로 초과 데이터는 이 모양으로 덮지 않는다. */
+  .tprog.totaldone{gap:7px;padding:0 7px 0 12px;border-color:#cdeed8;background:#fff}
+  .tprog.totaldone .totlbl{font-size:11px;color:var(--muted);font-weight:750}
+  .tprog.totaldone .num{color:#15803d}.tprog.totaldone .num b{font-size:14px}
+  .tprog.totaldone .sfx{color:#15803d;border-color:transparent;background:var(--safe-soft);padding:2px 8px}
   .tprog.over .ring{background:conic-gradient(#e08a1e calc(var(--p,0) * 1%),#e3e9f1 0)}
   .tprog.over .d,.tprog.over .num{color:#a2530a}
   .tprog.over .sfx{color:#a2530a;border-color:#f0dcc0;background:var(--warn-soft)}
@@ -7446,7 +7452,17 @@ function _toast(msg){
       총량 clamp 를 모르는 두 번째 기준이 생겨 **툴바와 모집공고 카드의 숫자가 갈린다**
       (`todayNaturalQuota` 를 서버가 실어 보내는 것과 같은 이유).
    ★ 필드 자체가 없으면(광고주 응답·구버전 백엔드) **아무것도 그리지 않는다** — 모르는 것을 0으로 꾸미지 않는다. */
-function _tpHtml(tp){
+function _tpHtml(tp, totals){
+  /* 총 모집 완료 판정 = 서버 단일 출처(`counts.filled`, `counts.completionCap`).
+     오늘 참여현황의 일일 quota/done을 여기서 합산·재계산하면 날짜별 조절/이월과 분리된다.
+     ★ 정확히 같을 때만 완료: 초과 행은 기존 `over` 경고를 숨기지 않는다. */
+  const totalCap=totals&&totals.completionCap!=null?Number(totals.completionCap):0;
+  const totalFilled=totals&&totals.filled!=null?Number(totals.filled):null;
+  if(Number.isFinite(totalCap) && totalCap>0 && Number.isFinite(totalFilled) && totalFilled===totalCap){
+    const tip=`총 모집인원 ${totalFilled}/${totalCap}명 — 작업표의 채워진 줄이 총건수에 도달했습니다.`;
+    return `<span class="tprog totaldone" title="${esc(tip)}"><span class="totlbl">총 모집인원</span>`+
+      `<span class="num"><b>${totalFilled}</b><i>/${totalCap}</i></span><span class="sfx">✓ 달성!</span></span>`;
+  }
   if(!tp || typeof tp!=='object') return '';
   const d = esc(_fmtKDate(String(tp.dateStr||'')));             // '2026-08-10' → '8/10 (월)' (표기 단일 출처)
   // ★★ 표기 기준 = **표(작업표)** (사용자 확정 2026-08-10, B안) — 아래 표에 오늘 채워진 줄 수를 그대로 쓴다.
@@ -7658,7 +7674,7 @@ function buildGrid(wd){
   //   필터·정렬·숨김으로 툴바가 다시 그려져도 치던 검색어가 날아가지 않게.
   const gsVal=esc(STATE.gSearch||'');
   return `<div class="gridbar">
-      ${_tpHtml(wd.todayProgress)}
+      ${_tpHtml(wd.todayProgress,wd.counts)}
       <div class="gsearch"><span class="ic">🔍</span>
         <input id="gsInput" type="text" placeholder="표 안에서 찾기…" autocomplete="off" value="${gsVal}"
                oninput="_gsInput(this.value)" onkeydown="_gsKey(event)">
