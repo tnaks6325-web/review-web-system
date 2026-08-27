@@ -99,9 +99,9 @@ const ROLE_META = {
                fill: '구매양식 [결제금액] 입력값이 들어갑니다' },
   orderNum:  { label: '주문번호',  tier: 'core',    order: 130,
                fill: '구매양식 [주문번호] 입력값이 들어갑니다(구매 캡처에서 자동 인식되면 그 값)' },
-  submit:    { label: '리뷰제출',  tier: 'status',  order: 140,
+  submit:    { label: '리뷰',      tier: 'status',  order: 140,
                fill: '구매양식 제출값 없음 — 리뷰 캡처가 접수되면 시스템·관리자가 표시하는 상태 칸입니다' },
-  paid:      { label: '입금',      tier: 'status',  order: 150,
+  paid:      { label: '입금일',    tier: 'status',  order: 150,
                fill: '구매양식 제출값 없음 — 입금 처리 시 표시되는 상태 칸입니다' },
   memo:      { label: '비고',      tier: 'core',    order: 160,
                fill: '구매양식 [비고] 입력값이 들어갑니다(시스템 복구 표기가 함께 남을 수 있음)' },
@@ -170,7 +170,9 @@ function classifyHeaders(headers, opts = {}) {
           : (key === '차수' ? 'round'
             : (key === '리뷰옵션' ? 'review_option_instruction'
               : (key === '송장번호' ? 'tracking_number' : null)))));
-    if (submitName && key === submitName) role = 'submit';
+    if (key === '리뷰') role = 'submit';
+    else if (key === '입금일') role = 'paid';
+    else if (submitName && key === submitName) role = 'submit';
     else if (paidName && key === paidName) role = 'paid';
     else if (stagedRole) role = stagedRole;
     else role = mapperRole;

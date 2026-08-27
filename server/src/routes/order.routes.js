@@ -837,6 +837,7 @@ router.delete('/intake/:id', async (req, res, next) => {
        WHERE id = $1`,
       [id, (b.deleted_by || '').toString().trim(), (b.deleted_by_name || '').toString().trim()]
     );
+
     logger.info(`[order] 인트라넷 작업오더 삭제: ${id} (by ${b.deleted_by || '?'})`);
     res.json({ ok: true, id });
   } catch (err) {
@@ -1507,6 +1508,15 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
         workKindForStore(o.work_kind),  // $14 — 체험단 종류(099). 빈 값 = 리뷰 = 종전 동작.
       ]
     );
+
+    // 작업오더에서 확정된 규격을 실제 탭에도 고정한다. 재접수는 기존 탭의
+    // 규격을 낮추지 않으며, v1 과거 탭은 종전 판정으로 남는다.
+    if (Number(o.workboard_schema_version || 1) === 2) {
+      await pool.query(
+        `UPDATE tab_configs SET workboard_schema_version = 2
+          WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName]
+      );
+    }
 
     // ════════════════════════════════════════════════════════════════════
     // 7) 장부 채우기 — 여기도 두 경로가 갈린다(재료가 다르다).

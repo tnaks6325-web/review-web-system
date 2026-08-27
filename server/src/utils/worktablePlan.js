@@ -336,7 +336,12 @@ function ensureV2VariableColumns(columns, { showRound, showTracking } = {}) {
   }
   if (blockers.length) return blockers;
 
-  _removeRoles(columns, new Set(['round', 'product', 'option_1', 'option_2', 'review_option_instruction', 'tracking_number']));
+  // v2 상태열도 시스템 계약이다. 예전 템플릿의 리뷰제출/입금 명칭을 남기면
+  // 키워드 파서가 다시 다른 열을 고를 수 있으므로 제거 후 정확한 두 열만 재삽입한다.
+  _removeRoles(columns, new Set(['round', 'product', 'option_1', 'option_2', 'review_option_instruction', 'tracking_number', 'submit', 'paid']));
+  for (let i = columns.length - 1; i >= 0; i--) {
+    if (['리뷰제출', '입금', '입금일자'].includes(String(columns[i].name || '').trim())) columns.splice(i, 1);
+  }
 
   if (showRound) {
     columns.splice(_roleIndex(columns, 'seq'), 0, systemVariableColumn('차수', 'round'));
@@ -347,6 +352,8 @@ function ensureV2VariableColumns(columns, { showRound, showTracking } = {}) {
   // 실제 1·2차 옵션 열의 필요 여부는 caller가 후속으로 빈 값 열을 빼는 것이 아니라
   // 원본 구조에서 결정해야 한다. 이 함수는 이미 필요한 열만 받도록 아래에서 삽입한다.
   columns.splice(dateIndex + 1, 0, ...productColumns);
+  const memoIndex = _roleIndex(columns, 'memo');
+  columns.splice(memoIndex, 0, systemVariableColumn('리뷰', 'status'), systemVariableColumn('입금일', 'status'));
   return blockers;
 }
 

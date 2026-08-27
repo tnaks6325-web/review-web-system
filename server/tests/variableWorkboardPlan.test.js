@@ -41,7 +41,7 @@ test('v2는 차수·상품·리뷰옵션·송장번호를 고정 앵커에 만�
   assert.equal(plan.canCreate, true);
   assert.deepEqual(plan.columns.map(column => column.name), [
     '차수', '번호', '구매일자', '상품', '1차옵션', '리뷰옵션',
-    '수취인', '연락처', '주소', '주문번호', '비고', '송장번호',
+    '수취인', '연락처', '주소', '주문번호', '리뷰', '입금일', '비고', '송장번호',
   ]);
   assert.deepEqual(plan.rows.map(row => [row.roundLabel, row.reviewOptionLabel]), [['2차', '포토'], ['2차', '포토']]);
   const values = planToSheetValues(plan);
