@@ -54,10 +54,10 @@ console.log('\n[B] 옵션 칸 판정 불변 — 리뷰어 안내·검수가 이 
 {
   const H = ['번호', '상품', '옵션', '리뷰옵션'];
   const optCols = LEDGER.optionWriteColumns(H).map(i => H[i]);
-  ok('★ 리뷰옵션은 여전히 옵션 칸으로 센다(빼면 리뷰어 「포토리뷰」 안내와 검수 판정이 죽는다)',
-    optCols.includes('리뷰옵션'), optCols.join(','));
+  ok('★ 리뷰옵션은 상품 옵션 기입처에서 제외한다(주문 옵션이 리뷰형태를 덮지 않는다)',
+    !optCols.includes('리뷰옵션'), optCols.join(','));
   ok('「상품」 칸은 옵션 칸이 아니다', !optCols.includes('상품'), optCols.join(','));
-  ok('옵션 칸 목록에 상품이 섞이지 않는다', optCols.join(',') === '옵션,리뷰옵션');
+  ok('옵션 칸 목록에 상품·리뷰옵션이 섞이지 않는다', optCols.join(',') === '옵션');
 }
 
 /* ── C. 좌측 정렬 우선순위 ──────────────────────────────────────────────── */

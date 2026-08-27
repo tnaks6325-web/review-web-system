@@ -59,6 +59,22 @@ async function statusHeaderForTab(db, { sheetId, tabName, kind = 'submit' } = {}
   return _resolveStatusHeader(db, { sheetId, tabName, col, kind });
 }
 
+async function _v2StatusHeaders(db, { sheetId, tabName }) {
+  const { rows: configs } = await db.query(
+    `SELECT tab_gid, workboard_schema_version FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]
+  );
+  if (Number(configs[0] && configs[0].workboard_schema_version) !== 2) return null;
+  const { rows: tabRows } = await db.query(
+    `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+      WHERE sheet_id=$1 AND tab_name=$2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`, [sheetId, tabName]
+  );
+  const headers = Array.isArray(tabRows[0] && tabRows[0].h) ? tabRows[0].h : [];
+  const bindings = await require('./statusColumnBinding.service').loadV2StatusBindings(db, {
+    sheetId, tabGid: configs[0] && configs[0].tab_gid, headers,
+  });
+  return { submit: bindings.review_submit.header, paid: bindings.payment_status.header };
+}
+
 async function _resolveStatusHeader(db, { sheetId, tabName, col, kind }) {
   const { rows } = await db.query(
     `SELECT ${col} AS h FROM review_index
@@ -106,14 +122,17 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
   }
   if (!sheetless) return { handled: false };
 
+  let v2Headers = null;
+  try { v2Headers = await _v2StatusHeaders(db, { sheetId, tabName }); }
+  catch (e) { return { handled: true, ok: false, reason: e.code || 'status_binding_failed', message: e.message }; }
   const col = kind === 'submit' ? 'submit_col' : 'submit_col2';
-  const mark = String(value || '').trim() || (kind === 'submit' ? SUBMIT_MARK : '');
+  const mark = String(value || '').trim() || (kind === 'submit' ? (v2Headers ? '제출' : SUBMIT_MARK) : '');
   if (!mark) return { handled: true, ok: false, reason: 'empty_value' };
 
   // ── 그 탭이 쓰는 상태 칸 헤더명(파서가 감지한 값) ──
   let header = '';
   try {
-    header = await _resolveStatusHeader(db, { sheetId, tabName, col, kind });
+    header = v2Headers ? v2Headers[kind] : await _resolveStatusHeader(db, { sheetId, tabName, col, kind });
   } catch (e) {
     return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
   }
@@ -143,8 +162,11 @@ async function verifyStatusCell({ sheetId, tabName, rowIndex, kind, value = '' }
   }
   if (!sheetless) return { handled: false };
 
+  let v2Headers = null;
+  try { v2Headers = await _v2StatusHeaders(db, { sheetId, tabName }); }
+  catch (e) { return { handled: true, ok: false, reason: e.code || 'status_binding_failed', message: e.message }; }
   const col = kind === 'submit' ? 'submit_col' : 'submit_col2';
-  const header = await _resolveStatusHeader(db, { sheetId, tabName, col, kind });
+  const header = v2Headers ? v2Headers[kind] : await _resolveStatusHeader(db, { sheetId, tabName, col, kind });
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
   // `workdeskTab` renders campaign_participants.row_json directly.  The RAW

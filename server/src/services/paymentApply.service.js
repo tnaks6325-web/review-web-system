@@ -71,6 +71,22 @@ async function recordDeposits(client, items, opts = {}) {
   let updated = 0;
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
+    // v2의 입금일은 결제 처리 메모가 아니라 "리뷰가 제출된 뒤"에만 쓸 수 있는
+    // 확정 상태다. 이 검사는 같은 transaction 안에서 먼저 수행하여 선입금을
+    // payment_records/review_index 어느 쪽에도 남기지 않는다.
+    const { rows: stateRows } = await client.query(
+      `SELECT COALESCE(tc.workboard_schema_version, 1) AS schema_version, ri.is_submitted
+         FROM tab_configs tc
+         LEFT JOIN review_index ri
+           ON ri.sheet_id=tc.sheet_id AND ri.tab_name=tc.tab_name AND ri.row_index=$3
+        WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`,
+      [item.sheetId, item.tabName, rowIndex]
+    );
+    if (Number(stateRows[0] && stateRows[0].schema_version) === 2 && !stateRows[0].is_submitted) {
+      const error = new Error('리뷰 제출 전에는 입금 처리할 수 없습니다.');
+      error.code = 'payment_before_review';
+      throw error;
+    }
     const r = await client.query(
       `UPDATE review_index SET is_submitted2 = 'PAID'
        WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
