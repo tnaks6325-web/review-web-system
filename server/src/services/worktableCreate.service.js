@@ -23,6 +23,7 @@ const pool = require('../db/pool');
 const sheetsSvc = require('./sheets.service');
 const { buildWorktablePlan } = require('../utils/worktablePlan');
 const { getTemplate } = require('./worktable.service');
+const { WorkboardSchemaError, assertSupportedWorkboardSchemaVersion } = require('./workboardSchema.service');
 
 /** 헤더 줄 위치를 찾는다(템플릿의 메타 영역·공지문 줄을 건너뛰기 위해). */
 const { detectSheetHeader } = require('../utils/sheetHeader');
@@ -34,7 +35,9 @@ async function _loadWorkOrder(id) {
   const { rows } = await pool.query(
     `SELECT id, title, start_date, recruit_count, daily_count, product_url,
             product_option, product_options_json, work_sheet_url, status,
-            skip_weekends, holidays
+            skip_weekends, holidays, workboard_schema_version,
+            work_series_id, work_round, delivery_type, courier_proxy,
+            review_type, review_type_mix, source_revision
        FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
   return rows[0] || null;
 }
@@ -43,7 +46,7 @@ async function _loadWorkOrder(id) {
  * 계획을 시트 행 배열로 변환.
  * ★ 열 이름이 곧 어느 칸에 쓸지를 정한다 — `plan.columns[i].role` 로 판정하므로
  *   여기서 키워드 규칙을 다시 만들지 않는다(분류는 매퍼 파생 단일 출처).
- * ★ 시스템이 값을 넣는 칸은 **번호(seq)·구매일자(dateStr)·옵션(option)** 셋뿐이다.
+ * ★ 시스템이 값을 넣는 칸은 번호·구매일자와 v2 상품·1차옵션·2차옵션이다.
  *   나머지는 빈 칸으로 두고 리뷰어 구매양식 제출이 채운다(기존 경로 그대로).
  */
 function planToSheetValues(plan) {
@@ -51,14 +54,24 @@ function planToSheetValues(plan) {
   const idxSeq = plan.columns.findIndex(c => c.role === 'seq');
   const idxDate = plan.columns.findIndex(c => c.role === 'dateStr');
   const idxOpt = plan.columns.findIndex(c => c.role === 'option');
+  const idxProduct = plan.columns.findIndex(c => c.role === 'product');
+  const idxOption1 = plan.columns.findIndex(c => c.role === 'option_1');
+  const idxOption2 = plan.columns.findIndex(c => c.role === 'option_2');
+  const idxRound = plan.columns.findIndex(c => c.role === 'round');
+  const idxReviewOption = plan.columns.findIndex(c => c.role === 'review_option_instruction');
   const body = plan.rows.map(r => {
     const row = new Array(header.length).fill('');
     if (idxSeq >= 0) row[idxSeq] = String(r.seq);
     if (idxDate >= 0 && r.dateLabel) row[idxDate] = r.dateLabel;   // `M / D (요일)` — 063 시트 일정 인식이 읽는 형식
     if (idxOpt >= 0 && r.optionKey) row[idxOpt] = r.optionKey;
+    if (idxProduct >= 0 && r.selection?.productName) row[idxProduct] = r.selection.productName;
+    if (idxOption1 >= 0 && r.selection?.option1Value) row[idxOption1] = r.selection.option1Value;
+    if (idxOption2 >= 0 && r.selection?.option2Value) row[idxOption2] = r.selection.option2Value;
+    if (idxRound >= 0 && r.roundLabel) row[idxRound] = r.roundLabel;
+    if (idxReviewOption >= 0 && r.reviewOptionLabel) row[idxReviewOption] = r.reviewOptionLabel;
     return row;
   });
-  return { header, body, filled: { seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0 } };
+  return { header, body, filled: { seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0, product: idxProduct >= 0, option1: idxOption1 >= 0, option2: idxOption2 >= 0, round: idxRound >= 0, reviewOption: idxReviewOption >= 0 } };
 }
 
 /** A1 표기 열 문자(0-based index → 'A','B',…,'AA'). */
@@ -106,6 +119,12 @@ async function _resolveHeaderRow(sheetId, gid, fallback = 2) {
 async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', fileTitle = '', tabName = '', templateSheetId: tplSheetId = '', planOptions = {}, by = 'admin' } = {}) {
   const wo = await _loadWorkOrder(workOrderId);
   if (!wo) return { ok: false, error: '작업오더를 찾을 수 없습니다.' };
+  try {
+    assertSupportedWorkboardSchemaVersion(wo.workboard_schema_version);
+  } catch (error) {
+    if (error instanceof WorkboardSchemaError) return { ok: false, code: error.code, error: error.message };
+    throw error;
+  }
 
   // ★ 계획은 **서버가 다시 계산**한다 — 화면이 보낸 행 목록을 믿지 않는다.
   const template = await getTemplate();

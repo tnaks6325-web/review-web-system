@@ -19,6 +19,8 @@
 const { classifyHeaders } = require('./worktableTemplate');
 const { CASH_RECEIPT_CHANNELS } = require('./cashReceiptChannels');
 const { isSheetHeaderRow } = require('./sheetHeader');
+const { selectionKey } = require('../services/productOptions.service');
+const { isCourierProxy, roundSpec, reviewOptionAssignments } = require('../services/variableWorkboard.service');
 
 const MAX_ROWS = 2000;          // prepareRosterSlots 상한과 같은 값(폭주 방지)
 const MAX_DAYS = 400;           // 날짜 분배 무한루프 백스톱
@@ -138,16 +140,55 @@ function optionKeysFromWorkOrder(wo) {
   return out;
 }
 
+// v2는 label이 아닌 상품·단계 값을 배정 단위로 삼는다. 이 함수는 원본을
+// 역분해하지 않으며, 구조가 없으면 빈 배열을 돌려 작업표 생성을 막는 쪽을 택한다.
+function stagedSelectionsFromWorkOrder(wo) {
+  const out = [];
+  const seen = new Set();
+  try {
+    const arr = JSON.parse((wo && wo.product_options_json) || '[]');
+    if (!Array.isArray(arr)) return [];
+    for (const product of arr) {
+      const productName = String(product?.name || '').trim();
+      const mode = String(product?.product_mode || '').trim();
+      const options = Array.isArray(product?.options) ? product.options : [];
+      if (!productName || (mode !== 'opt' && mode !== 'none')) return [];
+      if (mode === 'none') {
+        if (options.length) return [];
+        const key = selectionKey(productName, '', '');
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push({ productName, option1Name: '', option1Value: '', option2Name: '', option2Value: '', selectionKey: key, count: product?.base?.count, review_type_mix: product?.review_type_mix || product?.reviewTypeMix || [] });
+        }
+        continue;
+      }
+      if (!options.length) return [];
+      for (const option of options) {
+        const option1Name = String(option?.option_1?.name || '').trim();
+        const option1Value = String(option?.option_1?.value || '').trim();
+        const option2Name = String(option?.option_2?.name || '').trim();
+        const option2Value = String(option?.option_2?.value || '').trim();
+        if (!option1Name || !option1Value || (!!option2Name !== !!option2Value)) return [];
+        const key = selectionKey(productName, option1Value, option2Value);
+        if (seen.has(key)) return [];
+        seen.add(key);
+        out.push({ productName, option1Name, option1Value, option2Name, option2Value, selectionKey: key, count: option?.count, review_type_mix: option?.review_type_mix || option?.reviewTypeMix || [] });
+      }
+    }
+  } catch (_) { return []; }
+  return out;
+}
+
 /**
  * 옵션 배분 — 지정 수량이 있으면 그대로, 없으면 균등(나머지는 앞 옵션부터 1개씩).
  * ★ 옵션이 1개 이하면 배분하지 않는다(옵션 칸을 비워 둔다 — 선택지가 하나뿐이면 기입 의미가 없다).
  */
-function distributeOptions({ total, options = [] } = {}) {
+function distributeOptions({ total, options = [], includeSingle = false } = {}) {
   const n = Math.max(0, parseInt(total, 10) || 0);
   const keys = (options || [])
     .map(o => (typeof o === 'string' ? { key: o, count: null } : { key: String((o && o.key) || ''), count: o && o.count }))
     .filter(o => o.key.trim());
-  if (!n || keys.length < 2) return { buckets: [], rowOptions: new Array(n).fill(null) };
+  if (!n || (!includeSingle && keys.length < 2) || !keys.length) return { buckets: [], rowOptions: new Array(n).fill(null) };
 
   const explicit = keys.filter(k => Number.isInteger(parseInt(k.count, 10)) && parseInt(k.count, 10) >= 0);
   let buckets;
@@ -216,6 +257,7 @@ function buildColumns({ template, channel, workTypes, tabOpts = {} } = {}) {
 /* 택배발송대행은 선택형 작업유형이 아니라 주문 이행에 필요한 고정 입력값이다.
    관리자가 작업유형 템플릿을 아직 만들지 않았어도 송장 입력 열은 빠지면 안 된다. */
 const COURIER_PROXY_TRACKING_HEADER = '택배송장번호';
+const V2_COURIER_PROXY_TRACKING_HEADER = '송장번호';
 
 function isCourierProxyWorkOrder(wo = {}) {
   const courierProxy = wo.courier_proxy;
@@ -239,6 +281,96 @@ function systemCourierTrackingColumn() {
     origin: 'system',
     typeKey: 'courier_proxy',
   };
+}
+
+function systemVariableColumn(header, typeKey) {
+  const [classified] = classifyHeaders([header], {});
+  return {
+    name: classified.header,
+    role: classified.role,
+    label: classified.label,
+    tier: classified.tier,
+    conflict: classified.conflict || null,
+    origin: 'system',
+    typeKey,
+  };
+}
+
+function systemStagedColumn(header) {
+  const [classified] = classifyHeaders([header], {});
+  return {
+    name: classified.header, role: classified.role, label: classified.label,
+    tier: classified.tier, conflict: classified.conflict || null,
+    origin: 'system', typeKey: 'staged_options',
+  };
+}
+
+function ensureStagedColumns(columns, selections) {
+  const has = (role) => columns.some(column => column.role === role);
+  if (!has('product')) columns.push(systemStagedColumn('상품'));
+  if (selections.some(selection => selection.option1Value) && !has('option_1')) columns.push(systemStagedColumn('1차옵션'));
+  if (selections.some(selection => selection.option2Value) && !has('option_2')) columns.push(systemStagedColumn('2차옵션'));
+}
+
+function _removeRoles(columns, roles) {
+  for (let i = columns.length - 1; i >= 0; i--) {
+    if (roles.has(columns[i].role)) columns.splice(i, 1);
+  }
+}
+
+function _roleIndex(columns, role) {
+  return columns.findIndex(column => column.role === role);
+}
+
+/**
+ * v2 시스템 가변열은 템플릿 작업유형 선택에 의존하지 않는다. 기존 Group 2의
+ * 끝 append 결과도 여기서 제거한 뒤, 사용자 확정 앵커 사이에 정확히 재삽입한다.
+ */
+function ensureV2VariableColumns(columns, { showRound, showTracking } = {}) {
+  const blockers = [];
+  const required = ['seq', 'dateStr', 'orderNum', 'memo'];
+  for (const role of required) {
+    if (_roleIndex(columns, role) < 0) {
+      blockers.push({ code: 'v2_required_anchor_missing', message: `v2 작업표에 필요한 ${role} 앵커 열이 없습니다.` });
+    }
+  }
+  if (blockers.length) return blockers;
+
+  // v2 상태열도 시스템 계약이다. 예전 템플릿의 리뷰제출/입금 명칭을 남기면
+  // 키워드 파서가 다시 다른 열을 고를 수 있으므로 제거 후 정확한 두 열만 재삽입한다.
+  _removeRoles(columns, new Set(['round', 'product', 'option_1', 'option_2', 'review_option_instruction', 'tracking_number', 'submit', 'paid']));
+  for (let i = columns.length - 1; i >= 0; i--) {
+    if (['리뷰제출', '입금', '입금일자'].includes(String(columns[i].name || '').trim())) columns.splice(i, 1);
+  }
+
+  if (showRound) {
+    columns.splice(_roleIndex(columns, 'seq'), 0, systemVariableColumn('차수', 'round'));
+  }
+
+  const dateIndex = _roleIndex(columns, 'dateStr');
+  const productColumns = [systemVariableColumn('상품', 'staged_options')];
+  // 실제 1·2차 옵션 열의 필요 여부는 caller가 후속으로 빈 값 열을 빼는 것이 아니라
+  // 원본 구조에서 결정해야 한다. 이 함수는 이미 필요한 열만 받도록 아래에서 삽입한다.
+  columns.splice(dateIndex + 1, 0, ...productColumns);
+  const memoIndex = _roleIndex(columns, 'memo');
+  columns.splice(memoIndex, 0, systemVariableColumn('리뷰', 'status'), systemVariableColumn('입금일', 'status'));
+  return blockers;
+}
+
+function placeV2StagedColumns(columns, selections) {
+  const productIndex = _roleIndex(columns, 'product');
+  if (productIndex < 0) return;
+  const extras = [];
+  if (selections.some(selection => selection.option1Value)) extras.push(systemVariableColumn('1차옵션', 'staged_options'));
+  if (selections.some(selection => selection.option2Value)) extras.push(systemVariableColumn('2차옵션', 'staged_options'));
+  extras.push(systemVariableColumn('리뷰옵션', 'review_type'));
+  columns.splice(productIndex + 1, 0, ...extras);
+}
+
+function placeV2TrackingColumn(columns, enabled) {
+  if (!enabled) return;
+  const memoIndex = _roleIndex(columns, 'memo');
+  if (memoIndex >= 0) columns.splice(memoIndex + 1, 0, systemVariableColumn(V2_COURIER_PROXY_TRACKING_HEADER, 'courier_proxy'));
 }
 
 /* ── 작업유형 자동 선택 조건 ─────────────────────────────────────────────
@@ -304,7 +436,8 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
      "정하지 않았는데 정해진" 표가 만들어진다(설정 프리셋과 같은 규율). */
   const workTypes = (Array.isArray(o.workTypes) ? o.workTypes : []).map(k => String(k || '').trim()).filter(Boolean);
   const columns = buildColumns({ template, channel, workTypes });
-  if (isCourierProxyWorkOrder(wo) && !hasCourierTrackingColumn(columns)) {
+  const isV2 = Number(wo.workboard_schema_version) === 2;
+  if (!isV2 && isCourierProxyWorkOrder(wo) && !hasCourierTrackingColumn(columns)) {
     columns.push(systemCourierTrackingColumn());
   }
 
@@ -337,12 +470,41 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     .filter(h => !!parseYmd(h))
     .map(h => ymdStr(parseYmd(h))))].sort();
 
-  const optKeys = o.options != null ? o.options : optionKeysFromWorkOrder(wo);
+  const stagedSelections = isV2 ? stagedSelectionsFromWorkOrder(wo) : [];
+  const selectionByKey = new Map(stagedSelections.map(selection => [selection.selectionKey, selection]));
+  const sourceOptions = stagedSelections.map(selection => ({ key: selection.selectionKey, count: selection.count }));
+  const optKeys = o.options != null ? o.options : (isV2 ? sourceOptions : optionKeysFromWorkOrder(wo));
   /* 자동 선택 조건이 세는 "옵션 가지 수" — 배분 형태({key,count})로 와도 같은 수를 센다. */
   const optionKindCount = (Array.isArray(optKeys) ? optKeys : [])
     .map(x => (typeof x === 'string' ? x : String((x && x.key) || ''))).filter(v => v.trim()).length;
-  const { buckets, rowOptions } = distributeOptions({ total, options: optKeys });
+  const { buckets, rowOptions } = distributeOptions({ total, options: optKeys, includeSingle: isV2 });
   const { days, rowDates } = distributeDates({ total, daily, startDate, skipWeekends, holidays });
+
+  const rowSelections = [];
+  for (let i = 0; i < total; i++) {
+    rowSelections.push(rowOptions[i] ? (selectionByKey.get(rowOptions[i]) || {
+      productName: '', option1Name: '', option1Value: rowOptions[i], option2Name: '', option2Value: '', selectionKey: rowOptions[i],
+    }) : null);
+  }
+
+  const round = isV2 ? roundSpec(wo) : { label: '', blocker: null };
+  const courier = isV2 ? isCourierProxy(wo) : { enabled: false, blocker: null };
+  let reviewOptions = { labels: new Array(total).fill(''), blocker: null };
+  let variableColumnBlockers = [];
+  if (isV2 && stagedSelections.length) {
+    variableColumnBlockers = ensureV2VariableColumns(columns, { showRound: !!round.label, showTracking: courier.enabled });
+    if (!variableColumnBlockers.length) {
+      placeV2StagedColumns(columns, stagedSelections);
+      placeV2TrackingColumn(columns, courier.enabled);
+    }
+    reviewOptions = reviewOptionAssignments({
+      total,
+      selections: stagedSelections,
+      rowSelections,
+      reviewType: wo.review_type,
+      reviewTypeMix: wo.review_type_mix,
+    });
+  }
 
   const rows = [];
   for (let i = 0; i < total; i++) {
@@ -351,6 +513,9 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
       date: rowDates[i] ? rowDates[i].date : null,
       dateLabel: rowDates[i] ? rowDates[i].label : null,
       optionKey: rowOptions[i] || null,
+      selection: rowSelections[i],
+      roundLabel: round.label,
+      reviewOptionLabel: reviewOptions.labels[i] || '',
     });
   }
 
@@ -359,6 +524,13 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (!total) blockers.push({ code: 'no_total', message: '만들 건수가 0입니다. 총 건수를 입력하세요.' });
   if (total >= MAX_ROWS) blockers.push({ code: 'too_many', message: `한 번에 만들 수 있는 최대 행은 ${MAX_ROWS}개입니다.` });
   if (!columns.length) blockers.push({ code: 'no_columns', message: '표준 열이 정해지지 않았습니다. 설정 › 작업표 표준 열에서 먼저 정하세요.' });
+  if (isV2 && !stagedSelections.length) {
+    blockers.push({ code: 'invalid_staged_options', message: 'v2 작업의 상품·1차옵션·2차옵션 원본이 올바르지 않습니다.' });
+  }
+  if (round.blocker) blockers.push({ code: round.blocker, message: '차수 원본(work_series_id/work_round)이 올바르지 않습니다.' });
+  if (courier.blocker) blockers.push({ code: courier.blocker, message: '배송유형과 택배발송대행 값이 일치하지 않습니다.' });
+  if (reviewOptions.blocker) blockers.push({ code: reviewOptions.blocker, message: '리뷰유형 또는 유형별 수량을 행별로 확정할 수 없습니다.' });
+  blockers.push(...variableColumnBlockers);
   const optSum = buckets.reduce((a, b) => a + b.count, 0);
   if (buckets.length && optSum !== total) {
     blockers.push({ code: 'option_sum', message: `옵션 배분 합계(${optSum})가 총 건수(${total})와 다릅니다.` });
@@ -394,7 +566,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     const outside = holidays.filter(h => h < first || h > last);
     if (outside.length) warnings.push({ code: 'holiday_outside', message: `제외 날짜 중 진행 기간 밖이라 영향이 없는 날: ${outside.join(', ')}` });
   }
-  if (buckets.length && !columns.some(c => c.role === 'option')) {
+  if (!isV2 && buckets.length && !columns.some(c => c.role === 'option')) {
     warnings.push({ code: 'no_option_column', message: '옵션을 나눴지만 표에 옵션 열이 없어 기입되지 않습니다. 공통 열에 옵션 칸을 추가하세요.' });
   }
   /* ★ 날짜를 나눠 놓고 쓸 칸이 없으면 조용히 사라진다 — 게다가 구매일자 칸이 없으면
@@ -461,7 +633,7 @@ function _channelChoices(template) {
 
 module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions,
-  optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
+  optionKeysFromWorkOrder, stagedSelectionsFromWorkOrder, ensureStagedColumns, channelFromUrl, channelLabel, sheetDateStr,
   evalWorkTypeTrigger, workTypeTriggerReason,
   MAX_ROWS,
 };

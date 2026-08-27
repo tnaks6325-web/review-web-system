@@ -86,7 +86,7 @@ function _dbCol(dbColMap, field, headers, drift = null) {
  *   meta.fields = { name|recipient|review_submit|product|url|phone|start_date|end_date|round|payment:
  *                   { col, header, src: 'db'|'keyword'|'none' } }
  */
-function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbColMap = null, meta = null) {
+function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbColMap = null, meta = null, statusBindings = null) {
   const { NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES } = kw;
   const drift = meta ? [] : null;
   if (meta) { meta.headerRowIdx = -1; meta.fields = null; meta.drift = drift; }
@@ -142,7 +142,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
 
   // ── 제출열 (P2b: DB매핑 'review_submit' 우선 → 3단계 키워드 폴백) ──
   const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];
-  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주'];
+  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주', '리뷰옵션', '리뷰가이드'];
   // ★★ 8/3 실측 사고(박은비 탭): SUBMIT_KEYWORDS에 완료신호 단어(제출/완료/submit)와 함께
   //   넓은 catch-all인 '리뷰' 단독도 섞여 있다. 1·2단계(우선탐지)에서 '리뷰'를 그대로 매칭에
   //   쓰면 그 자체가 SUBMIT_PRIORITY_PREFIXES('리뷰')와 항상 동시에 참이 되어 AND 조건이
@@ -151,7 +151,9 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   //   → 1·2단계(우선탐지)는 완료신호 키워드만 쓰고, '리뷰' 단독 매칭은 완료신호 열이 전혀
   //   없을 때의 최후수단(3단계, 기존 동작 그대로)에만 남긴다.
   const SUBMIT_COMPLETION_KEYWORDS = SUBMIT_KEYWORDS.filter(k => k !== '리뷰');
-  let submitColIdx = _dbCol(dbColMap, 'review_submit', headers, drift);
+  const isV2 = !!statusBindings;
+  if (isV2) require('./statusColumnBinding.service').validateV2StatusBindings(headers, statusBindings);
+  let submitColIdx = isV2 ? statusBindings.review_submit.colIndex : _dbCol(dbColMap, 'review_submit', headers, drift);
   const submitFromDb = submitColIdx >= 0;
   if (submitColIdx < 0) {
     for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
@@ -221,8 +223,12 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   if (roundIdx < 0) roundIdx = headers.findIndex(h => roundKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
 
   // ── 입금열 (P2b: DB매핑 'payment' 우선 → 정확/부분/제외 키워드 폴백) ──
-  let paymentColIdx = _dbCol(dbColMap, 'payment', headers, drift);
-  const paymentFromDb = paymentColIdx >= 0;
+  let paymentColIdx = isV2 ? statusBindings.payment_status.colIndex : _dbCol(dbColMap, 'payment_status', headers, drift);
+  let paymentFromDb = paymentColIdx >= 0;
+  if (paymentColIdx < 0) {
+    paymentColIdx = _dbCol(dbColMap, 'payment', headers, drift);
+    paymentFromDb = paymentColIdx >= 0;
+  }
   if (paymentColIdx < 0) paymentColIdx = findPaymentColumnIndex(headers);
 
   // ── 감지 provenance 보고 (meta out-param) — 반환값/파싱에는 영향 없음 ──
@@ -252,12 +258,16 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
       if (!name) return null;
 
       const submitVal = submitColIdx >= 0 ? String(row[submitColIdx] || '').trim() : '';
-      const isSubmitted = _isSubmittedValue(submitVal, SUBMITTED_VALUES);
+      const isSubmitted = isV2
+        ? require('./statusColumnBinding.service').isV2ReviewSubmitted(submitVal)
+        : _isSubmittedValue(submitVal, SUBMITTED_VALUES);
 
       const paymentVal = paymentColIdx >= 0 ? String(row[paymentColIdx] || '').trim() : '';
       let isSubmitted2 = null;
       if (paymentColIdx >= 0) {
-        isSubmitted2 = paymentVal && _isSubmittedValue(paymentVal, SUBMITTED_VALUES) ? 'PAID' : 'NONE';
+        isSubmitted2 = paymentVal && (isV2
+          ? require('./statusColumnBinding.service').isV2PaymentSubmitted(paymentVal)
+          : _isSubmittedValue(paymentVal, SUBMITTED_VALUES)) ? 'PAID' : 'NONE';
       }
 
       let phone8 = null;

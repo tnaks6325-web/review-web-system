@@ -88,6 +88,14 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
   const { buildWorktablePlan } = require('../utils/worktablePlan');
   const { getTemplate } = require('./worktable.service');
   const { planToSheetValues } = require('./worktableCreate.service');
+  const { WorkboardSchemaError, assertSupportedWorkboardSchemaVersion } = require('./workboardSchema.service');
+
+  try {
+    assertSupportedWorkboardSchemaVersion(wo.workboard_schema_version);
+  } catch (error) {
+    if (error instanceof WorkboardSchemaError) return { ok: false, code: error.code, error: error.message };
+    throw error;
+  }
 
   const template = await getTemplate();
   const plan = buildWorktablePlan({ workOrder: wo, template, options: planOptions || {} });
@@ -129,7 +137,8 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
     headerRow, columns: header, rows, filled,
     warnings: plan.warnings,
     // 실제 쓰기는 호출부(접수 라우트)가 등록과 같은 흐름에서 수행한다 — 아래 `persist` 참조.
-    persist: () => persistSheetlessWorktable({ sheetId, gid, tabName: title, campaignName, headerRow, columns: header, rows, by }),
+    persist: () => persistSheetlessWorktable({ sheetId, gid, tabName: title, campaignName, headerRow, columns: header, rows, by,
+      workboardSchemaVersion: Number(wo.workboard_schema_version || 1) }),
   };
 }
 
@@ -139,9 +148,17 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
  * ★ 호출 순서 계약: tab_configs 에 `sheetless=TRUE` 로 등록된 **뒤에** 불러야 한다.
  *   `rebuildLedgers` 가 fail-closed 로 그 플래그를 확인하기 때문(시트 기반 탭 덮어쓰기 차단).
  */
-async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, headerRow, columns, rows, by = 'admin' } = {}) {
+async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, headerRow, columns, rows, by = 'admin', workboardSchemaVersion = 1 } = {}) {
   const participants = require('./participants.service');
   const { rebuildLedgers } = require('./sheetlessLedger.service');
+
+  // 생성 전에 고정 상태열 계약을 남긴다. 실패하면 슬롯/장부를 만들지 않아
+  // '표시는 됐지만 어느 상태열을 읽는지 모르는' v2 탭이 남지 않는다.
+  if (Number(workboardSchemaVersion) === 2) {
+    await require('./statusColumnBinding.service').seedV2StatusBindings(require('../db/pool'), {
+      sheetId, tabGid: gid, tabName, headers: columns, by,
+    });
+  }
 
   // ① 작업표 행 — **기존 함수 재사용**(사본 금지). seq = 작업표 행 번호, source='worktable',
   //    ON CONFLICT DO NOTHING(멱등·비파괴 — 재접수해도 이미 있는 줄은 안 건드린다).
