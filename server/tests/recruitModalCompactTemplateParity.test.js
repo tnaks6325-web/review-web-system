@@ -36,6 +36,10 @@ assert(compact.indexOf('startup-setting-bar') < compact.indexOf('id="editorScrol
   '작업 시작 설정 바는 스크롤 영역 위에 고정되어야 합니다.');
 assert(!compact.includes('시작 전 상태를 확인하고 설정을 저장하세요.'),
   '작업 시작 설정 바의 보조 안내 문구는 표시하지 않는다');
+assert(!compact.includes('id="rf_status_buttons"'),
+  '모집공고 설정에서는 상태 버튼을 표시하지 않는다');
+assert(compact.includes('id="rf_status" hidden'),
+  '저장 호환을 위한 상태 필드는 숨김으로 유지한다');
 const startCheckRender = recruit.slice(recruit.indexOf('function renderRecruitStartCheck()'), recruit.indexOf('\n/** 칩 클릭'));
 assert(!/box\.innerHTML[\s\S]*?🚀 작업 시작 설정 —/.test(startCheckRender),
   '미설정 배지는 카드 안에서 제목과 남은 개수를 반복하지 않는다');
