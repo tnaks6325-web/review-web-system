@@ -3124,6 +3124,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ **마스킹 전**에 센다(광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어 전 줄이 뒤집힌다).
      ★ 카운트는 마스킹 앞에서 한다(참여횟수 배지와 같은 자리). */
   let filledCount = 0;
+  /*
+   * 진행 현황의 "제출완료"는 제출 상태 플래그가 아니라, 사용자가 작업표에서 실제로
+   * 확인하는 리뷰제출 칸의 값으로 센다. 플래그/인덱스는 재투영 전에는 뒤처질 수 있어
+   * 표에 707건이 보여도 카드가 535건에 머무는 식의 불일치가 난다.
+   *
+   * `pick`을 통해 셀 편집 오버레이도 함께 반영한다. 따라서 카드와 현재 표의 보이는
+   * 리뷰제출 열은 같은 원본을 보며, 제출 상태 플래그는 기존 검수·정산 흐름에만 남긴다.
+   */
+  let reviewSubmitCellCount = 0;
   for (const r of roster) {
     const anchor = _deriveAnchor(r);
     let ov = {}, editable = !!anchor, ambiguous = false;
@@ -3160,6 +3169,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);
     if (syn.filled) filledCount++;
+    const submitHeader = String(r.submit_col || '').trim();
+    const submitCellValue = submitHeader
+      ? pick('col:' + submitHeader, (r.row_json && r.row_json[submitHeader]))
+      : '';
+    if (String(submitCellValue == null ? '' : submitCellValue).trim()) reviewSubmitCellCount++;
     /* ★ 작업보드 표의 「번호」 칸 값 — 미리보기 팝업 목록이 쓴다. `seq`(시트 실제 행 번호)와는
        다른 값이라(원래 1 차이) 화면이 둘을 헷갈리면 안 된다. 칸 이름 판정은 `numberColumnKey`
        단일 출처이고, 담당자가 셀을 고쳤으면 그 값이 이긴다(표와 같게). 칸이 없으면 빈 값. */
@@ -3249,7 +3263,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     total: out.length,
     /* 채워진 줄(사람이 들어온 줄) — 참여자 게이지의 분자. `total`(줄 수)과의 차이 = 빈 슬롯. */
     filled: filledCount,
-    submitted: out.filter(r => r.submitted).length,
+    /* 실제 작업표의 리뷰제출 칸에 값이 있는 행 수. `is_submitted`는 이 카드 기준이 아니다. */
+    submitted: reviewSubmitCellCount,
     paid: out.filter(r => r.paid).length,
     // 주문 원장이 살아 있는 행의 결제금액 합계. 주문 행 삭제 뒤에는 원장 soft-delete와 함께 즉시 빠진다.
     paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
