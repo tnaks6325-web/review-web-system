@@ -102,6 +102,11 @@ t('12. 서버: 내 미첨부 주문 조회는 phone8 스코프 + 컷오프 적�
   assert.ok(/phone8\.length !== 8/.test(body), 'phone8 검증 없음(타인 조회 가능)');
   assert.ok(/RIGHT\(regexp_replace/.test(body), '연락처 끝 8자리 매칭이 아님');
   assert.ok(/capture_uploaded_at IS NULL/.test(body), '미첨부 조건 없음');
+  assert.ok(/NOT EXISTS[\s\S]*review_index[\s\S]*ri\.is_submitted = TRUE/.test(body),
+    '리뷰 제출완료 참여를 보완 알림에서 제외하지 않는다');
+  assert.ok(/campaign_participants cp[\s\S]*cp\.order_submission_id = os\.id/.test(body),
+    '불변 주문 링크로 완료 참여를 확인하지 않는다');
+  assert.ok(/review_index_archive/.test(body), '보관된 완료 참여가 보완 알림에서 되살아난다');
   assert.ok(/deleted_at IS NULL/.test(body), '취소된 주문까지 보완 요청하면 안 됨');
   assert.ok(/reviewer_log_capture_cutoff/.test(body), '컷오프 미적용 → 과거 주문까지 독촉하게 된다');
   assert.ok(!/\b(UPDATE|INSERT|DELETE)\b/i.test(body), '조회 엔드포인트인데 쓰기 쿼리가 있음');
