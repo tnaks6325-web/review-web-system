@@ -2796,8 +2796,10 @@ router.post('/reviewers/home-link', authMiddleware, adminOrMasterMiddleware, asy
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
       return res.status(400).json({ ok: false, error: '리뷰어 id가 올바르지 않습니다.' });
     }
+    // 구형 등록 행은 status가 NULL일 수 있으며 목록 화면도 이를 활성으로 표기한다.
+    // 명시적으로 inactive인 경우만 막아 화면/홈 링크의 활성 판정을 일치시킨다.
     const { rows } = await pool.query(
-      `SELECT name, phone8 FROM reviewers WHERE id = $1 AND status = 'active' LIMIT 1`, [id]
+      `SELECT name, phone8 FROM reviewers WHERE id = $1 AND COALESCE(status, 'active') = 'active' LIMIT 1`, [id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: '활성 리뷰어를 찾을 수 없습니다.' });
     const reviewer = rows[0];
