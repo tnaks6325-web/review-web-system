@@ -1346,6 +1346,26 @@ function rfSetCashReceipt(on) {
   if (note) note.textContent = on ? "카드와 구매 안내에 자동 표기" : "참여자에게 미노출";
   syncRecruitAutomaticBadges();
 }
+
+function rfToggleChatRoom() {
+  const input = document.getElementById("rf_chat_enabled");
+  rfSetChatRoom(!input?.checked);
+}
+function rfSetChatRoom(on) {
+  const enabled = !!on;
+  const input = document.getElementById("rf_chat_enabled");
+  const toggle = document.getElementById("rf_chat_toggle");
+  const state = document.getElementById("rf_chat_state");
+  const urlWrap = document.getElementById("rf_chat_url_wrap");
+  if (input) input.checked = enabled;
+  toggle?.classList.toggle("on", enabled);
+  toggle?.setAttribute("aria-pressed", String(enabled));
+  if (state) state.textContent = enabled ? "사용함" : "사용안함";
+  if (urlWrap) urlWrap.hidden = !enabled;
+}
+window.rfToggleChatRoom = rfToggleChatRoom;
+window.rfSetChatRoom = rfSetChatRoom;
+
 /**
  * 회수·혼합 부속정보 채움(135) — 발행 프리필·수정 프리필 공용(사본 0).
  * ★ 값이 없으면 **비운다** — 이전에 열어 둔 공고의 값이 남으면 그대로 저장된다.
@@ -3126,6 +3146,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
   const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false;
+  rfSetChatRoom(false);
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
@@ -3200,6 +3221,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       // restored into the visible compact fields.
       { const notesEl = document.getElementById("rf_notes"); if (notesEl) notesEl.value = c.notes || ""; }
       document.getElementById("rf_chat_url").value     = c.chat_url || "";
+      rfSetChatRoom(!!c.chat_url);
       // ★ 064: 노출 순서 UI 제거 — 요소가 남아있는 구버전 화면만 프리필(null-safe)
       { const _so = document.getElementById("rf_sort_order"); if (_so) _so.value = c.sort_order ?? 0; }
       document.getElementById("rf_max_slots").value    = c.max_slots ?? 0;
@@ -3403,7 +3425,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.time_range)   document.getElementById("rf_time_range").value = prefill.time_range;
       if (prefill.max_slots)    document.getElementById("rf_max_slots").value = prefill.max_slots;
       if (prefill.review_fee != null && prefill.review_fee !== "") document.getElementById("rf_review_fee").value = prefill.review_fee;
-      if (prefill.chat_url)     document.getElementById("rf_chat_url").value = prefill.chat_url;
+      if (prefill.chat_url) {
+        document.getElementById("rf_chat_url").value = prefill.chat_url;
+        rfSetChatRoom(true);
+      }
       if (prefill.notes) {
         const notesEl = document.getElementById("rf_notes");
         if (notesEl) notesEl.value = prefill.notes;
@@ -4917,8 +4942,10 @@ async function saveRecruitPostImpl() {
   const channel  = document.getElementById("rf_channel").value.trim();
   const manager  = document.getElementById("rf_manager").value.trim();
   const chatUrl  = document.getElementById("rf_chat_url").value.trim();
+  const chatEnabled = !!document.getElementById("rf_chat_enabled")?.checked;
   if (!title)   { _rfSaveBlocked("공고 제목을 입력해주세요."); document.getElementById("rf_title").focus(); return; }
   if (!channel) { _rfSaveBlocked("구매채널을 선택해주세요."); return; }
+  if (chatEnabled && !chatUrl) { _rfSaveBlocked("팀채팅방 URL을 입력해주세요."); document.getElementById("rf_chat_url").focus(); return; }
 
   const tabKey      = document.getElementById("rf_linked_tab").value || "";
   const [sid, tab]  = tabKey ? tabKey.split("||") : ["", ""];
@@ -4939,7 +4966,7 @@ async function saveRecruitPostImpl() {
     // ★ 유의사항(notes)은 **입력칸이 있는 화면에서만** 전송한다(옵션표·리뷰타입과 같은 원칙).
     //   지금 편집기에는 이 칸이 없는데 종전처럼 ''를 보내면 서버 COALESCE 가 '지움'으로 받아
     //   **저장할 때마다 유의사항이 조용히 삭제**된다 → 아래 조건부 전송으로 대체(미전송=유지).
-    chat_url:       chatUrl,
+    chat_url:       chatEnabled ? chatUrl : "",
     linked_sheet_id: sid,
     linked_tab_name: tab,
     linked_tab_gid:  (tabMeta && tabMeta.tabGid) || "",
