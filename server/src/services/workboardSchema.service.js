@@ -1,7 +1,7 @@
 'use strict';
 
-// 작업표 열 규격은 원본 오더 생성 시점에만 결정한다. 현재 릴리스는 v1만
-// 생성·처리하며, v2는 후속 열 자동화가 모두 배포될 때까지 fail-closed 한다.
+// 작업표 열 규격은 원본 오더 생성 시점에만 결정한다. v2는 상품·단계형 옵션
+// 원본 검증과 전용 열 생성·동기화가 함께 배포된 뒤에만 활성화한다.
 const LEGACY_WORKBOARD_SCHEMA_VERSION = 1;
 const AUTOMATED_WORKBOARD_SCHEMA_VERSION = 2;
 const VALID_WORKBOARD_SCHEMA_VERSIONS = new Set([
@@ -10,6 +10,7 @@ const VALID_WORKBOARD_SCHEMA_VERSIONS = new Set([
 ]);
 const SUPPORTED_WORKBOARD_SCHEMA_VERSIONS = new Set([
   LEGACY_WORKBOARD_SCHEMA_VERSION,
+  AUTOMATED_WORKBOARD_SCHEMA_VERSION,
 ]);
 
 class WorkboardSchemaError extends Error {

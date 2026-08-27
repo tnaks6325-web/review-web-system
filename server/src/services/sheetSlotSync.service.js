@@ -79,6 +79,14 @@ async function readPreparedRows(db, { sheetId, tabGid, tabName = '', includeCell
     const headerRow = head.rows[det.headerRowIndex - 1].row_index;   // 배열 인덱스(1-based) → 시트 실제 행 번호
     const optIdx = (optionWriteColumns(headers) || [])[0];
     const optCol = Number.isInteger(optIdx) ? optIdx : -1;
+    const stagedCols = {
+      product: headers.findIndex(h => /^(상품|product)$/i.test(String(h || '').trim())),
+      option1: headers.findIndex(h => /^(1차|1st)\s*옵션$/i.test(String(h || '').trim())),
+      option2: headers.findIndex(h => /^(2차|2nd)\s*옵션$/i.test(String(h || '').trim())),
+    };
+    // 단계형 작업표는 세 칸을 함께 읽어야 한다. 첫 옵션칸만 읽으면 화이트/105가
+    // 단일값으로 축소돼 캠페인 옵션 식별과 준비행 동기화가 갈린다.
+    const readCells = includeCells || (stagedCols.product >= 0 && stagedCols.option1 >= 0);
 
     // ★★ `cells->>$n::int` 의 `::int` 를 절대 빼지 말 것 — cells 는 JSONB **배열**이라
     //   캐스트가 없으면 `jsonb ->> text`(객체 키 조회)로 해석되어 **에러 없이 전 행 NULL** 이 된다
@@ -87,7 +95,7 @@ async function readPreparedRows(db, { sheetId, tabGid, tabName = '', includeCell
     //   (`filled`). 날짜 기준 경로에는 붙이지 않는다 — 필요 없는 비용을 늘리지 않는다.
     const filledSql = `EXISTS (SELECT 1 FROM jsonb_array_elements_text(cells) v WHERE btrim(v) <> '')`;
     let body;
-    if (includeCells) {
+    if (readCells) {
       body = await db.query(
         `SELECT row_index, cells FROM raw_sheet_rows
           WHERE sheet_id = $1 AND tab_gid = $2 AND row_index > $3 ORDER BY row_index`,
@@ -115,12 +123,16 @@ async function readPreparedRows(db, { sheetId, tabGid, tabName = '', includeCell
     }
 
     const rows = body.rows.map(r => {
-      const cells = includeCells ? (Array.isArray(r.cells) ? normalizeCells(r.cells) : []) : null;
-      const d = includeCells ? (dateIdx >= 0 ? (cells[dateIdx] || '') : '') : (r.d == null ? '' : String(r.d));
-      const o = includeCells ? (optCol >= 0 ? (cells[optCol] || '') : '')
+      const cells = readCells ? (Array.isArray(r.cells) ? normalizeCells(r.cells) : []) : null;
+      const d = readCells ? (dateIdx >= 0 ? (cells[dateIdx] || '') : '') : (r.d == null ? '' : String(r.d));
+      const o = readCells ? (optCol >= 0 ? (cells[optCol] || '') : '')
                              : (r.o == null ? '' : String(r.o));
-      const filled = includeCells ? rowHasValue(cells) : r.filled === true;
-      return { seq: r.row_index, dateRaw: String(d).trim(), optionText: String(o).trim(), filled, cells };
+      const stagedText = readCells && stagedCols.product >= 0 && stagedCols.option1 >= 0
+        ? [cells[stagedCols.product], cells[stagedCols.option1], stagedCols.option2 >= 0 ? cells[stagedCols.option2] : '']
+          .map(v => String(v || '').trim()).filter(Boolean).join(' · ')
+        : '';
+      const filled = readCells ? rowHasValue(cells) : r.filled === true;
+      return { seq: r.row_index, dateRaw: String(d).trim(), optionText: stagedText || String(o).trim(), filled, cells };
     });
 
     const kst = new Date(now.getTime() + 9 * 3600 * 1000);

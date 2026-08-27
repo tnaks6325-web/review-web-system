@@ -67,6 +67,12 @@ const ROLE_META = {
                fill: '리뷰어가 제출한 날짜를 시스템이 "M / D (요일)" 형식으로 기록합니다(리뷰어 입력 아님)' },
   option:    { label: '옵션',      tier: 'work',    order: 30,
                fill: '리뷰어가 참여할 때 고른 옵션명이 들어갑니다(칸이 비어 있을 때만 — 미리 적어둔 작업지시는 보존)' },
+  product:   { label: '상품',      tier: 'work',    order: 31,
+               fill: 'v2 작업 생성 시 상품 원본에서 자동 기입됩니다' },
+  option_1:  { label: '1차옵션',   tier: 'work',    order: 32,
+               fill: 'v2 작업 생성 시 1차 옵션값이 자동 기입됩니다' },
+  option_2:  { label: '2차옵션',   tier: 'work',    order: 33,
+               fill: 'v2 작업 생성 시 2차 옵션값이 자동 기입됩니다' },
   orderer:   { label: '주문자',    tier: 'core',    order: 40,
                fill: '구매양식 [주문자] 입력값이 들어갑니다' },
   recipient: { label: '수취인',    tier: 'core',    order: 50,
@@ -152,8 +158,12 @@ function classifyHeaders(headers, opts = {}) {
     //   `submit_col`/`submit_col2` 는 그 탭에서 실제로 관측된 열 이름이라 키워드 추측보다 구체적이다.
     //   실측 함정: `submit_col2='입금일자'` 는 매퍼의 '일자' 규칙에 걸려 dateStr(구매일자)로 잡힌다 →
     //   먼저 보지 않으면 **입금 상태 칸이 "자동 채움 구매일자"로 보고**된다.
+    const stagedRole = key === '상품' || key === 'product' ? 'product'
+      : (/^(?:1차|1st)\s*옵션$/.test(key) ? 'option_1'
+        : (/^(?:2차|2nd)\s*옵션$/.test(key) ? 'option_2' : null));
     if (submitName && key === submitName) role = 'submit';
     else if (paidName && key === paidName) role = 'paid';
+    else if (stagedRole) role = stagedRole;
     else role = mapperRole;
 
     if (!role && _isSeqHeader(header)) role = 'seq';

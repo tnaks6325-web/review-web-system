@@ -10,6 +10,10 @@ const {
   WorkboardSchemaError,
   assertSupportedWorkboardSchemaVersion,
 } = require('../services/workboardSchema.service');
+const {
+  ProductOptionsError,
+  normalizeProductOptionsJson,
+} = require('../services/productOptions.service');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
@@ -260,9 +264,11 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
     sourceReviewOrderId: '', sourceRevision: 0, workboardSchemaVersion: LEGACY_WORKBOARD_SCHEMA_VERSION, idempotencyKey: '', intranetAdvertiserId: '',
     intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '',
   };
-  const optionsJson = (typeof b.product_options_json === 'string')
-    ? b.product_options_json
-    : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
+  const optionsJson = b._normalized_product_options_json !== undefined
+    ? b._normalized_product_options_json
+    : ((typeof b.product_options_json === 'string')
+      ? b.product_options_json
+      : (b.product_options_json ? JSON.stringify(b.product_options_json) : ''));
   const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
   const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
   const { rows } = await pool.query(
@@ -483,6 +489,16 @@ router.post('/intake', async (req, res, next) => {
     }
     if (sourceContract) {
       try {
+        b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json, {
+          requireStructured: sourceContract.workboardSchemaVersion === 2,
+        }).json;
+      } catch (err) {
+        if (err instanceof ProductOptionsError) {
+          return res.status(400).json({ ok: false, code: err.code, error: err.message });
+        }
+        throw err;
+      }
+      try {
         assertSupportedWorkboardSchemaVersion(sourceContract.workboardSchemaVersion);
       } catch (err) {
         if (err instanceof WorkboardSchemaError) {
@@ -581,6 +597,16 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       return res.status(400).json({ ok: false, error: '원본 리뷰오더 ID가 요청 경로와 일치해야 합니다.' });
     }
     try {
+      b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json, {
+        requireStructured: source.workboardSchemaVersion === 2,
+      }).json;
+    } catch (err) {
+      if (err instanceof ProductOptionsError) {
+        return res.status(400).json({ ok: false, code: err.code, error: err.message });
+      }
+      throw err;
+    }
+    try {
       assertSupportedWorkboardSchemaVersion(source.workboardSchemaVersion);
     } catch (err) {
       if (err instanceof WorkboardSchemaError) {
@@ -638,9 +664,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       });
     }
 
-    const optionsJson = typeof b.product_options_json === 'string'
-      ? b.product_options_json
-      : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
+    const optionsJson = b._normalized_product_options_json;
     const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
     const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
     // 원본 리뷰오더의 목표 인원이 바뀌면 연결된 공고도 같은 값으로 저장한다.

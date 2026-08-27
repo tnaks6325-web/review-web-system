@@ -18,11 +18,9 @@ test('누락된 규격은 기존 작업표와 같은 v1으로 고정한다', () 
   assert.strictEqual(normalizeWorkboardSchemaVersion(), LEGACY_WORKBOARD_SCHEMA_VERSION);
 });
 
-test('지원 예정 v2는 유효하지만 현재 생성 경로에서 fail-closed 한다', () => {
+test('단계형 상품·옵션 소비자가 준비된 v2는 생성 경로에서 허용한다', () => {
   assert.strictEqual(normalizeWorkboardSchemaVersion(2), AUTOMATED_WORKBOARD_SCHEMA_VERSION);
-  assert.throws(() => assertSupportedWorkboardSchemaVersion(2), (error) => (
-    error instanceof WorkboardSchemaError && error.code === 'schema_not_supported'
-  ));
+  assert.strictEqual(assertSupportedWorkboardSchemaVersion(2), AUTOMATED_WORKBOARD_SCHEMA_VERSION);
 });
 
 test('정의되지 않은 규격은 수신 단계에서 거부한다', () => {

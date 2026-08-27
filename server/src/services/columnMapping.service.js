@@ -44,6 +44,8 @@ const STANDARD_FIELDS = [
   { key: 'product',       label: '상품',          defaultOwner: 'sheet',  match: 'includes', keywords: ['상품', '제품', 'product'] },
   { key: 'user_id',       label: '아이디',        defaultOwner: 'db',     match: 'includes', keywords: ['아이디', 'userid', '로그인'] },
   { key: 'order_date',    label: '구매일/날짜',   defaultOwner: 'shared', match: 'includes', keywords: ['구매일', '주문일', '일자', '날짜', 'date'] },
+  { key: 'option_1',      label: '1차옵션',       defaultOwner: 'sheet',  match: 'includes', keywords: ['1차옵션', '1st option'] },
+  { key: 'option_2',      label: '2차옵션',       defaultOwner: 'sheet',  match: 'includes', keywords: ['2차옵션', '2nd option'] },
   { key: 'option',        label: '옵션',          defaultOwner: 'shared', match: 'includes', keywords: ['옵션', 'option'] },
   { key: 'memo',          label: '비고/메모',     defaultOwner: 'shared', match: 'includes', keywords: ['비고', '특이사항', 'memo'] },
   // 마지막 폴백: 이름/성함 → 수취인 (모호하므로 최하위, 사용자가 교정)

@@ -1,6 +1,7 @@
 const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
 const { logger } = require('../utils/logger');
 const { findSameDayDuplicateInTx, sameDayDuplicateLockKey } = require('./orderDuplicate.service');
+const { parseSelectionKey } = require('./productOptions.service');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
@@ -162,6 +163,21 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
   }
 
   const selectedOptKey = String(orderData.selectedOptKey || '').trim();
+  const stagedSelection = parseSelectionKey(selectedOptKey);
+  const stagedCols = {
+    product: (headers || []).findIndex(h => /^(상품|product)$/i.test(String(h || '').trim())),
+    option1: (headers || []).findIndex(h => /^(1차|1st)\s*옵션$/i.test(String(h || '').trim())),
+    option2: (headers || []).findIndex(h => /^(2차|2nd)\s*옵션$/i.test(String(h || '').trim())),
+  };
+  if (stagedSelection && stagedCols.product >= 0 && stagedCols.option1 >= 0) {
+    for (const row of rows) {
+      if (countFilledForAssignment(headers, row.cells) >= FILLED_THRESHOLD) continue;
+      const matches = String(row.cells[stagedCols.product] || '').trim().toLowerCase() === stagedSelection.productName.toLowerCase()
+        && String(row.cells[stagedCols.option1] || '').trim().toLowerCase() === stagedSelection.option1Value.toLowerCase()
+        && (stagedCols.option2 < 0 || String(row.cells[stagedCols.option2] || '').trim().toLowerCase() === stagedSelection.option2Value.toLowerCase());
+      if (matches && isUnfilledOrderRow(headers, row.cells)) pushUnique(candidates, seen, row.rowIndex);
+    }
+  }
   const optParts = selectedOptKey ? selectedOptKey.split('|').map(v => v.trim().toLowerCase()) : [];
   const optColIndices = [];
   (headers || []).forEach((h, idx) => {
@@ -238,6 +254,7 @@ function _singleIdCol(headers) {
 
 function mapOrderToSheetRow(headers, orderData = {}) {
   const optParts = String(orderData.selectedOptKey || '').split('|').map(v => v.trim());
+  const stagedSelection = parseSelectionKey(orderData.selectedOptKey);
   let optColCounter = 0;
   // ★ id열은 탭 전체에서 '정확히 1개'일 때만 채운다(단일 쿠팡id/네이버id/id). NC(네이버+쿠팡)
   //   동시탭은 id열이 2개라 채널구분 불가 → 오기입 방지 위해 둘 다 공란(현행과 동일=무회귀). 판정은 선행규칙 뒤.
@@ -245,6 +262,9 @@ function mapOrderToSheetRow(headers, orderData = {}) {
 
   return (headers || []).map((h, colIdx) => {
     const key = String(h || '').toLowerCase().trim();
+    if (stagedSelection && (key === '상품' || key === 'product')) return stagedSelection.productName;
+    if (stagedSelection && /^(1차|1st)\s*옵션$/.test(key)) return stagedSelection.option1Value;
+    if (stagedSelection && /^(2차|2nd)\s*옵션$/.test(key)) return stagedSelection.option2Value;
     if (_ID_EXACT_ADMIN.includes(key)) return null;
     if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return null;
     /* ★★ 101 블로그URL(블로그 주소) — **주소·URL 규칙보다 먼저** 본다.
