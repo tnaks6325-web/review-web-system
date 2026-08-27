@@ -26,6 +26,8 @@ assert.match(modal, /\.row-form\.calendar-open\{overflow:visible\}[\s\S]*\.rf-st
   '열린 미니달력은 다음 설정 행 위에 겹쳐 표시되어야 합니다.');
 assert.match(recruit, /RecruitModal\?\.syncStartDateControl\?\.\(\)/,
   '시작일을 프리필하거나 변경해도 표시용 날짜가 동기화되어야 합니다.');
+assert.match(recruit, /function closeRecruitModal\(\) \{[\s\S]{0,160}RecruitModal\?\.closeStartDateCalendar\?\.\(\)/,
+  '모달을 닫을 때 열린 미니달력도 함께 닫아 다음 공고에 남지 않아야 합니다.');
 assert.match(recruit, /function rfSetChatRoom\(on\)[\s\S]*state\.textContent = enabled \? "사용함" : "사용안함";[\s\S]*urlWrap\.hidden = !enabled;/,
   '팀채팅방 토글은 상태 문구와 URL 입력란 표시를 함께 전환해야 합니다.');
 assert.match(recruit, /rfSetChatRoom\(false\);[\s\S]*document\.getElementById\("rf_chat_url"\)\.value\s+= c\.chat_url \|\| "";[\s\S]*rfSetChatRoom\(!!c\.chat_url\);/,

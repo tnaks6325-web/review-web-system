@@ -3591,6 +3591,7 @@ async function fetchProductInfo(opts) {
 
 function closeRecruitModal() {
   const modal = document.getElementById("recruitModal");
+  window.RecruitModal?.closeStartDateCalendar?.();
   modal.classList.add("hidden");
   modal.style.display = "none";
   document.body.classList.remove("rf-recruit-modal-open");

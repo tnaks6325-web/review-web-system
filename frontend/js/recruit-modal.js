@@ -1731,6 +1731,7 @@
     syncStatusButtons: syncStatusButtons,
     setStatus: setStatus,
     syncStartDateControl: rfSyncStartDateControl,
+    closeStartDateCalendar: rfCloseStartDateCalendar,
   };
   window.rfToggleStartDateCalendar = rfToggleStartDateCalendar;
   // 스크립트가 마운트 지점 뒤에 로드되면 즉시, 아니면 DOM 준비 후
