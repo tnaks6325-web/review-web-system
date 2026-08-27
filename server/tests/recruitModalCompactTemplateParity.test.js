@@ -34,6 +34,13 @@ assert(!modal.includes('작업보드와 공고의 기준 정보 및 입금 기�
 const compact = modal.slice(modal.indexOf('class="rf-main rf-compact-main"'));
 assert(compact.indexOf('startup-setting-bar') < compact.indexOf('id="editorScroller"'),
   '작업 시작 설정 바는 스크롤 영역 위에 고정되어야 합니다.');
+assert(!compact.includes('시작 전 상태를 확인하고 설정을 저장하세요.'),
+  '작업 시작 설정 바의 보조 안내 문구는 표시하지 않는다');
+const startCheckRender = recruit.slice(recruit.indexOf('function renderRecruitStartCheck()'), recruit.indexOf('\n/** 칩 클릭'));
+assert(!/box\.innerHTML[\s\S]*?🚀 작업 시작 설정 —/.test(startCheckRender),
+  '미설정 배지는 카드 안에서 제목과 남은 개수를 반복하지 않는다');
+assert(!/box\.innerHTML[\s\S]*?나머지 값은 작업오더에서 자동으로 채워졌습니다/.test(startCheckRender),
+  '작업오더 자동 채움 안내는 카드 안에 반복하지 않는다');
 assert(compact.indexOf('id="editorScroller"') < compact.indexOf('for="rf_title"'),
   '공고 제목 행은 스크롤 영역 안에 있어야 합니다.');
 assert(/#recruitModal \.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal),

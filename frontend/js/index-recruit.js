@@ -4086,10 +4086,8 @@ function renderRecruitStartCheck() {
   if (!miss.length) { box.hidden = true; return; }   // 손볼 것이 없으면 줄 자체를 감춘다
   box.hidden = false;
   box.className = "rf-startcheck";
-  box.innerHTML = `<span class="sct">🚀 작업 시작 설정 — ${miss.length}개 남음</span>`
-    + miss.map(o => `<button type="button" class="scc miss" onclick="rfStartGo(${o.i})"`
-      + ` title="${escHtml(o.x.label)} 칸으로 이동합니다">${escHtml(o.x.label)} <b>${escHtml(o.x.value)}</b></button>`).join("")
-    + `<span class="scn">나머지 값은 작업오더에서 자동으로 채워졌습니다</span>`;
+  box.innerHTML = miss.map(o => `<button type="button" class="scc miss" onclick="rfStartGo(${o.i})"`
+    + ` title="${escHtml(o.x.label)} 칸으로 이동합니다">${escHtml(o.x.label)} <b>${escHtml(o.x.value)}</b></button>`).join("");
 }
 
 /** 칩 클릭 → 그 칸으로 스크롤 + 포커스. ★ onclick 은 **인덱스만**(외부 문자열 보간 0). */

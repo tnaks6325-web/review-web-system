@@ -169,8 +169,8 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
     && /memoInput\.addEventListener\("compositionend", refresh\)/.test(rc));
   ok('모달을 열 때 1회 렌더 + 실패해도 모달을 막지 않는다',
     /try \{ _rfBindStartCheck\(\); renderRecruitStartCheck\(\); \} catch/.test(rc));
-  ok('CSS 는 #recruitModal 스코프 + 리터럴 색', /#recruitModal \.rf-startcheck\{/.test(rm)
-    && /#recruitModal \.rf-startcheck \.scc\.miss\{[^}]*#B91C1C/.test(rm));
+  ok('CSS 는 #recruitModal 스코프 + 새 미설정 배지 리터럴 색', /#recruitModal \.rf-startcheck\{/.test(rm)
+    && /#recruitModal \.rf-startcheck \.scc\.miss\{[^}]*#C2410C/.test(rm));
 
   // 실제 실행 — 두 갈래
   const sb2 = {
@@ -223,8 +223,8 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
       + pick('renderRecruitStartCheck') + '\n;this.__render=renderRecruitStartCheck;', sb3);
     sb3.__render();
     ok('★★ 입금명만 비면 칩도 입금명 하나뿐 — 정상 값(팀채팅방·현금영수증·다계정·배지)은 표기 0',
-      box.hidden === false && /입금명/.test(box.innerHTML) && /1개 남음/.test(box.innerHTML)
-      && !/팀채팅방|현금영수증|다계정|안내배지/.test(box.innerHTML));
+      box.hidden === false && /입금명/.test(box.innerHTML)
+      && !/작업 시작 설정|남음|팀채팅방|현금영수증|다계정|안내배지/.test(box.innerHTML));
     ok('★ 칩 onclick 은 그 칸의 인덱스(0=입금명)', /rfStartGo\(0\)/.test(box.innerHTML));
     vals.memo = '망고';
     box.hidden = false; box.innerHTML = 'x';

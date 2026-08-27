@@ -447,7 +447,7 @@
       </div></template><!-- /legacy rf-main -->
       <div class="rf-main rf-compact-main">
         <section class="editor">
-          <div class="startup-setting-bar"><div><strong>작업 시작 설정</strong><span>시작 전 상태를 확인하고 설정을 저장하세요.</span></div><div id="rf_startcheck" class="rf-startcheck" hidden></div><div id="rf_status_buttons" class="square-toggle"><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
+          <div class="startup-setting-bar"><div><strong>작업 시작 설정</strong></div><div id="rf_startcheck" class="rf-startcheck" hidden></div><div id="rf_status_buttons" class="square-toggle"><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
           <div id="editorScroller" class="compact-editor-scroller" tabindex="0" aria-label="모집공고 수정 항목">
             <section class="section rf-public-settings">
               <div class="title-control-bar"><label class="title-control-label" for="rf_title"><span>공고 제목</span><input id="rf_title" type="text" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"></label></div>
@@ -903,15 +903,12 @@
 #recruitModal .modal-header h3{font-size:.92rem;letter-spacing:-.025em}
 /* 🚀 작업 시작 설정 — 접수 직후 사람이 마무리해야 하는 칸만 짚어 주는 줄.
    ★ 막지 않는다(경고 전용) · 클릭하면 그 칸으로 데려간다 · 색은 리터럴(테마 없는 호스트). */
-#recruitModal .rf-startcheck{display:flex;align-items:center;gap:7px;flex-wrap:wrap;
-  margin:0 0 10px;padding:9px 12px;border:1px solid #FDE68A;background:#FFFBEB;border-radius:10px}
-#recruitModal .rf-startcheck .sct{font-size:.74rem;font-weight:800;color:#92400E;white-space:nowrap}
+#recruitModal .rf-startcheck{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0;padding:0;border:0;background:transparent}
 #recruitModal .rf-startcheck .scc{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:700;
-  padding:3px 9px;border-radius:999px;border:1px solid #E2E8F0;background:#fff;color:#334155;cursor:pointer}
-#recruitModal .rf-startcheck .scc:hover{border-color:#94A3B8}
-#recruitModal .rf-startcheck .scc.miss{border-color:#FCA5A5;background:#FEF2F2;color:#B91C1C}
+  padding:4px 8px;border-radius:6px;border:1px solid #FECACA;background:#FFF7F7;color:#C2410C;cursor:pointer}
+#recruitModal .rf-startcheck .scc:hover{border-color:#FB7185;background:#FFF1F2}
+#recruitModal .rf-startcheck .scc.miss{border-color:#FCA5A5;background:#FFF7F7;color:#C2410C}
 #recruitModal .rf-startcheck .scc b{font-weight:800}
-#recruitModal .rf-startcheck .scn{font-size:.66rem;color:#7F8A9B;margin-left:auto;white-space:nowrap}
 #recruitModal .rf-rail{width:197px;padding:14px 10px;background:#FBFCFE;overflow:hidden}
 #recruitModal .rf-rail-t{padding:2px 8px 12px;color:#172033;font-size:.82rem;letter-spacing:-.025em}
 #recruitModal .rf-rail-t span{display:block;margin-top:4px;color:#7F8A9B;font-size:.62rem;font-weight:600;letter-spacing:0}
@@ -1008,7 +1005,7 @@
 #recruitModal .rf-compact-main .editor-head h2{margin:0;font-size:19px;letter-spacing:-.04em}
 #recruitModal .rf-compact-main .editor-head p{margin:3px 0 0;color:#7F8A9B;font-size:11px}
 #recruitModal .startup-setting-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 22px;border-bottom:1px solid #DCE3EC;background:#FFF9E8;flex:none}
-#recruitModal .startup-setting-bar strong{display:block;color:#92400E;font-size:12px;font-weight:900}.startup-setting-bar span{display:block;margin-top:2px;color:#A16207;font-size:10px;font-weight:650}
+#recruitModal .startup-setting-bar strong{display:block;color:#92400E;font-size:12px;font-weight:900}
 #recruitModal .title-control-bar{display:grid;grid-template-columns:minmax(0,1fr);align-items:center;gap:10px;padding:0 0 12px;border-bottom:0;background:#fff}
 #recruitModal .title-control-label{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-width:0;color:#45536A;font-size:11px;font-weight:850}
 #recruitModal .title-control-label input{min-width:0;width:100%;height:26px;padding:0 9px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#172033;font-size:12px;font-weight:750}
