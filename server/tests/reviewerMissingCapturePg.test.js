@@ -49,7 +49,7 @@ async function call(method, routePath, req) {
 
 async function schema() {
   await pool.query(`
-    DROP TABLE IF EXISTS review_index, tab_configs, recruit_campaigns, campaign_applications,
+    DROP TABLE IF EXISTS review_index, review_index_archive, tab_configs, recruit_campaigns, campaign_applications,
       order_submissions, campaign_participants, reviewers, app_settings, campaign_fee_schedules CASCADE;
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
     CREATE TABLE review_index (
@@ -58,6 +58,9 @@ async function schema() {
       product_url TEXT, product_name TEXT, submit_col TEXT, submit_col2 TEXT, row_json JSONB,
       start_date TEXT, end_date TEXT, round TEXT, phone8 TEXT, recipient_name TEXT,
       review_file_id TEXT, review_file_at TIMESTAMPTZ, built_at TIMESTAMPTZ DEFAULT NOW());
+    CREATE TABLE review_index_archive (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT, row_index INT,
+      is_submitted BOOLEAN DEFAULT FALSE);
     CREATE TABLE tab_configs (
       sheet_id TEXT, tab_name TEXT, tab_gid TEXT, display_name TEXT, campaign_name TEXT,
       sheetless BOOLEAN DEFAULT FALSE, PRIMARY KEY (sheet_id, tab_name));
@@ -80,7 +83,7 @@ async function schema() {
 }
 
 async function seed() {
-  await pool.query('TRUNCATE review_index, tab_configs, recruit_campaigns, campaign_applications, order_submissions, campaign_participants');
+  await pool.query('TRUNCATE review_index, review_index_archive, tab_configs, recruit_campaigns, campaign_applications, order_submissions, campaign_participants');
   await pool.query(
     `INSERT INTO recruit_campaigns(id,title,linked_sheet_id,linked_tab_name,review_fee)
      VALUES ('c1',$1,$2,$3,0)`, [TITLE, SHEET, TAB]);
@@ -118,6 +121,30 @@ async function seed() {
     const r = await call('get', '/my-missing-captures', { query: { phone8: P8 } });
     const it = (r.body && r.body.items || [])[0];
     assert.equal(it.displayName, TAB, '이름이 비지 않는다');
+  });
+
+  await ta('리뷰 제출완료 참여는 구매 캡처가 없어도 보완 알림에서 제외한다', async () => {
+    await seed();
+    await pool.query('UPDATE review_index SET is_submitted = TRUE WHERE sheet_id = $1 AND tab_name = $2 AND row_index = 5', [SHEET, TAB]);
+    const r = await call('get', '/my-missing-captures', { query: { phone8: P8 } });
+    assert.equal((r.body && r.body.items || []).length, 0, '완료된 참여를 다시 보완 대상으로 노출하면 안 된다');
+  });
+
+  await ta('보관된 리뷰 제출완료 참여도 구매 캡처 보완 알림에서 제외한다', async () => {
+    await seed();
+    await pool.query('INSERT INTO review_index_archive(sheet_id,tab_name,row_index,is_submitted) VALUES ($1,$2,5,TRUE)', [SHEET, TAB]);
+    await pool.query('DELETE FROM review_index');
+    const r = await call('get', '/my-missing-captures', { query: { phone8: P8 } });
+    assert.equal((r.body && r.body.items || []).length, 0, '보관 뒤에 완료 알림이 되살아나면 안 된다');
+  });
+
+  await ta('주문 링크가 없는 기존 시트 작업은 과거 완료 행과 충돌할 수 있어 보완 알림을 유지한다', async () => {
+    await seed();
+    await pool.query('DELETE FROM campaign_participants');
+    await pool.query('UPDATE order_submissions SET sheet_id = $1, tab_name = $2, sheet_row = 5', [SHEET, TAB]);
+    await pool.query('UPDATE review_index SET is_submitted = TRUE WHERE sheet_id = $1 AND tab_name = $2 AND row_index = 5', [SHEET, TAB]);
+    const r = await call('get', '/my-missing-captures', { query: { phone8: P8 } });
+    assert.equal((r.body && r.body.items || []).length, 1, '행 좌표만으로 새 참여의 알림을 숨기면 안 된다');
   });
 
   await ta('받을 예정 — 같은 참여를 두 번 세지 않는다(건수·금액)', async () => {

@@ -1163,6 +1163,32 @@ router.get('/my-missing-captures', async (req, res, next) => {
        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
          AND os.deleted_at IS NULL
          AND os.capture_uploaded_at IS NULL
+         /* 구매 캡처가 빠졌더라도, 연결된 참여 작업의 리뷰가 제출완료라면 이미 끝난
+            작업이다. 홈과 리뷰 내역 상단의 보완 알림에서 다시 독촉하지 않는다.
+            campaign_participants.order_submission_id → 작업표 행의 불변 주문 링크로만
+            확인한다. 시트/행 좌표만으로 묶으면 과거 완료 행과 새 참여가 충돌할 수 있으므로,
+            링크가 없는 옛 작업은 fail-soft로 종전처럼 보완을 안내한다. 활성/보관 인덱스를
+            함께 보므로 완료 탭·차수 보관 뒤에도 알림이 되살아나지 않는다. */
+         AND NOT EXISTS (
+           SELECT 1
+             FROM (
+               SELECT sheet_id, tab_name, row_index, is_submitted FROM review_index
+               UNION ALL
+               SELECT sheet_id, tab_name, row_index, is_submitted FROM review_index_archive
+             ) ri
+            WHERE ri.is_submitted = TRUE
+              AND (
+                EXISTS (
+                  SELECT 1
+                    FROM campaign_participants cp
+                   WHERE cp.order_submission_id = os.id
+                     AND cp.deleted_at IS NULL
+                     AND cp.sheet_id = ri.sheet_id
+                     AND cp.tab_name = ri.tab_name
+                     AND cp.seq = ri.row_index
+                )
+              )
+         )
          AND os.submitted_at > NOW() - ($2 || ' days')::interval
          AND ($3::timestamptz IS NULL OR os.submitted_at > $3::timestamptz)
        ORDER BY os.submitted_at DESC
