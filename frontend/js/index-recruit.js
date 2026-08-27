@@ -3101,7 +3101,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 상품정보 가져오기 초기화
   ["rf_product_url","rf_thumbnail","rf_thumb_url","rf_product_name","rf_price"].forEach(i => { const el = document.getElementById(i); if (el) el.value = ""; });
   const _pp = document.getElementById("rf_product_preview"); if (_pp) _pp.style.display = "none";
-  document.getElementById("rf_channel_custom").style.display = "none";
+  const _channelCustomWrap = document.getElementById("rf_channel_custom_wrap");
+  if (_channelCustomWrap) _channelCustomWrap.hidden = true;
+  const _channelCustom = document.getElementById("rf_channel_custom");
+  if (_channelCustom) { _channelCustom.hidden = true; _channelCustom.style.display = "none"; }
   document.querySelectorAll(".rchan-btn").forEach(b => b.classList.remove("active"));
   /* ★ 버튼군의 hidden 값도 함께 되돌린다 — 강조만 지우면 지난 공고의 값(예 'mixed')이
      남아, 리뷰타입을 안 실은 신규 발행에서 혼합 입력칸이 빈 채로 켜져 저장이 막힌다.
@@ -3219,10 +3222,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const chanVal = c.channel || "";
       const chanBtn = document.querySelector(`#rf_channel_btns .rchan-btn[data-val="${chanVal}"]`);
       if (chanBtn) {
-        chanBtn.classList.add("active");
-        document.getElementById("rf_channel").value = chanVal;
+        // 클릭과 동일한 경로를 써야 직접입력 래퍼의 hidden 속성도 함께 풀린다.
+        selectRfBtn("channel", chanBtn);
         if (chanVal === "직접입력") {
-          document.getElementById("rf_channel_custom").style.display = "";
           document.getElementById("rf_channel_custom").value = c.channel_custom || "";
         }
       }
@@ -3584,8 +3586,16 @@ function selectRfBtn(group, btn) {
   if (group === 'channel') {
     document.getElementById('rf_channel').value = val;
     const customInput = document.getElementById('rf_channel_custom');
-    customInput.style.display = val === '직접입력' ? '' : 'none';
-    if (val !== '직접입력') customInput.value = '';
+    const customWrap = document.getElementById('rf_channel_custom_wrap');
+    const isCustom = val === '직접입력';
+    // 컴팩트 모달은 hidden 속성을 사용한다. style.display만 바꾸면 hidden의
+    // !important 규칙에 막혀 작업오더에서 온 실제 채널명이 보이지 않는다.
+    if (customWrap) customWrap.hidden = !isCustom;
+    if (customInput) {
+      customInput.hidden = !isCustom;
+      customInput.style.display = isCustom ? '' : 'none';
+      if (!isCustom) customInput.value = '';
+    }
     syncRecruitAutomaticBadges();
   } else if (group === 'manager') {
     document.getElementById('rf_manager').value = val;
