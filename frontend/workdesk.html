@@ -5100,7 +5100,7 @@ function _finProgHtml(t){
   /* ★ "준비된 줄 ≠ 총건수" 경고는 **무시트 작업에만** — 시트 기반 탭의 `준비된 줄`은 미리 깔아 둔
      슬롯이 아니라 **이미 이름이 적힌 행 수**라, 모집 중에는 총건수보다 적은 것이 정상이다. */
   const gap=(rt&&_isNoSheet(t)&&rows!==rt.total);
-  /* ★ 정원을 넘겨 채워진 경우 — 숫자는 이미 `501/500` 으로 보이므로 **색으로만** 말한다.
+  /* ★ 정원을 넘겨 채워진 경우 — `501/500`과 보조문구의 초과 건수로 함께 알린다.
      기준(총건수)은 작업보드 게이지·표 초과 판정과 같은 값(공고>0 이면 공고, 아니면 발주). */
   /* ★★ **무시트 작업만** — 서버(`workdeskTab`)가 `meta.sheetless` 일 때만 행에 `over` 를 붙이므로,
      여기서 게이트를 빼면 시트 기반 탭에서 홈만 붉어지고 "표에서 붉은 줄로 표시합니다"가 **거짓말**이 된다
@@ -5114,9 +5114,13 @@ function _finProgHtml(t){
     over?`⚠ 총건수(${rt.total})를 ${over}명 넘겨 들어왔습니다 — 작업보드 표에서 붉은 줄로 표시합니다`:null,
     gap?`⚠ 준비된 줄(${rows})이 총건수(${rt.total})와 다릅니다 — [📅 인원]에서 날짜별 인원을 확인하세요`:null,
   ].filter(Boolean).join(' · ');
+  // 총건수를 넘긴 경우에는 "줄 102"처럼 원인을 다시 적지 않고, 초과분만 바로 읽히게 한다.
+  const aux=over
+    ? ` · <b style="color:var(--danger,#c22f2f)">${over}건초과</b>`
+    : (gap?` · <b style="color:var(--warn,#b26a00)">줄 ${rows}</b>`:'');
   return `<span class="wbl-g" title="${esc(tip)}"><i style="width:${pct}%"></i></span>`
     +`<span class="wbl-num${over?' isover':''}" title="${esc(tip)}">${filled}/${den}${rt?'':'*'}</span>`
-    +`<span class="wbl-sub" title="${esc(tip)}">제출 ${sub==null?'—':sub}${gap?` · <b style="color:var(--warn,#b26a00)">줄 ${rows}</b>`:''}</span>`;
+    +`<span class="wbl-sub" title="${esc(tip)}">제출 ${sub==null?'—':sub}${aux}</span>`;
 }
 
 function _finBodyHtml(){
