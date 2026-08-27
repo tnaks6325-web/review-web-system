@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { buildWorktablePlan } = require('../src/utils/worktablePlan');
 const { planToSheetValues } = require('../src/services/worktableCreate.service');
+const { autoGuessField } = require('../src/services/columnMapping.service');
+const { optionWriteColumns } = require('../src/services/orderLedger.service');
 const previewRoute = fs.readFileSync(require.resolve('../src/routes/trackB.routes'), 'utf8');
 
 const template = {
@@ -70,4 +72,9 @@ test('v2는 표준 앵커가 없으면 append하지 않고 차단한다', () => 
 
 test('미리보기와 직접 생성 조회는 v2 가변열 원본을 모두 읽는다', () => {
   assert.match(previewRoute, /work_series_id, work_round, delivery_type, courier_proxy,[\s\S]{0,80}review_type, review_type_mix/);
+});
+
+test('리뷰옵션은 리뷰제출이나 상품 옵션 쓰기 대상으로 추정되지 않는다', () => {
+  assert.equal(autoGuessField('리뷰옵션'), 'review_option');
+  assert.deepEqual(optionWriteColumns(['리뷰옵션', '1차옵션']), [1]);
 });

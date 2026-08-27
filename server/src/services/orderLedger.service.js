@@ -5,6 +5,10 @@ const { parseSelectionKey } = require('./productOptions.service');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
+const REVIEW_OPTION_HEADERS = new Set(['리뷰옵션', 'review option', 'review_option']);
+function isReviewOptionHeader(value) {
+  return REVIEW_OPTION_HEADERS.has(String(value || '').toLowerCase().trim());
+}
 // ★ 캠페인 준비(설정) 컬럼 — 관리자가 모집 전 미리 채워두는 열(주문 데이터가 아님).
 //   "행 점유(채워짐)" 카운트(countFilledForAssignment)에서 제외해야, 이 열들이 채워진 준비행이
 //   '점유됨'으로 오판돼 배정 후보에서 빠지고 주문이 하단(작업범위 밖)에 append되는 사고를 막는다.
@@ -262,6 +266,9 @@ function mapOrderToSheetRow(headers, orderData = {}) {
 
   return (headers || []).map((h, colIdx) => {
     const key = String(h || '').toLowerCase().trim();
+    // v2 리뷰유형 지시값은 상품 주문 옵션도, 구매양식 제출 대상도 아니다.
+    // null은 buildBatchUpdateData에서 쓰기 자체를 생략해 미리 채운 값을 보존한다.
+    if (isReviewOptionHeader(key)) return null;
     if (stagedSelection && (key === '상품' || key === 'product')) return stagedSelection.productName;
     if (stagedSelection && /^(1차|1st)\s*옵션$/.test(key)) return stagedSelection.option1Value;
     if (stagedSelection && /^(2차|2nd)\s*옵션$/.test(key)) return stagedSelection.option2Value;
@@ -302,7 +309,7 @@ function optionColIndexes(headers) {
   const out = [];
   (headers || []).forEach((h, i) => {
     const key = String(h || '').toLowerCase().trim();
-    if (key.includes('옵션') || key.includes('option')) out.push(i);
+    if (!isReviewOptionHeader(key) && (key.includes('옵션') || key.includes('option'))) out.push(i);
   });
   return out;
 }

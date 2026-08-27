@@ -38,6 +38,9 @@ const STANDARD_FIELDS = [
   { key: 'depositor',     label: '예금주',        defaultOwner: 'db',     match: 'includes', keywords: ['예금주', 'depositor'] },
   { key: 'orderer',       label: '주문자',        defaultOwner: 'db',     match: 'includes', keywords: ['주문자', 'orderer'] },
   { key: 'recipient',     label: '수취인',        defaultOwner: 'db',     match: 'includes', keywords: ['수취인', '받는분'] },
+  // `리뷰옵션`은 작업지시이며 리뷰 제출 상태가 아니다. 정확 일치를 먼저 두어
+  // 넓은 review_submit 키워드가 포토/텍스트 값을 완료 상태로 오인하지 못하게 한다.
+  { key: 'review_option', label: '리뷰옵션',      defaultOwner: 'sheet',  match: 'exact',    keywords: ['리뷰옵션'] },
   { key: 'review_submit', label: '리뷰제출',      defaultOwner: 'shared', match: 'includes', keywords: ['리뷰제출', '리뷰완료', '리뷰작성', '리뷰'] },
   { key: 'payment',       label: '입금',          defaultOwner: 'shared', match: 'includes', keywords: ['입금', '페이백'] },
   { key: 'round',         label: '차수',          defaultOwner: 'sheet',  match: 'includes', keywords: ['차수', '회차', 'round'] },
