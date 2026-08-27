@@ -18,6 +18,14 @@ assert.match(modal, /id="rf_channel_custom_wrap" class="channel-custom-field" hi
   '직접입력 채널은 작업오더에서 받은 실제 채널명을 설명과 함께 표시해야 합니다.');
 assert.match(modal, /\.channel-custom-field\[hidden\]\{display:none\}/,
   '고정 채널 선택 시 직접입력 채널 카드가 hidden 속성으로 완전히 숨겨져야 합니다.');
+assert.match(modal, /id="rf_chat_enabled" hidden>[\s\S]*id="rf_chat_toggle" class="switch-button"[\s\S]*사용안함[\s\S]*id="rf_chat_url_wrap" class="rf-chat-url-field" hidden/,
+  '팀채팅방은 기본 사용안함 토글이며, URL 입력란은 사용함일 때만 표시할 수 있어야 합니다.');
+assert.match(recruit, /function rfSetChatRoom\(on\)[\s\S]*state\.textContent = enabled \? "사용함" : "사용안함";[\s\S]*urlWrap\.hidden = !enabled;/,
+  '팀채팅방 토글은 상태 문구와 URL 입력란 표시를 함께 전환해야 합니다.');
+assert.match(recruit, /rfSetChatRoom\(false\);[\s\S]*document\.getElementById\("rf_chat_url"\)\.value\s+= c\.chat_url \|\| "";[\s\S]*rfSetChatRoom\(!!c\.chat_url\);/,
+  '신규 공고는 사용안함으로 시작하고, URL이 있는 기존 공고는 사용함으로 복원해야 합니다.');
+assert.match(recruit, /chat_url:\s+chatEnabled \? chatUrl : ""/,
+  '팀채팅방을 사용안함으로 저장하면 기존 URL을 비워야 합니다.');
 assert.match(recruit, /customWrap\.hidden = !isCustom;[\s\S]{0,220}customInput\.hidden = !isCustom;/,
   '직접입력 선택 시 hidden 속성도 해제해 컴팩트 모달에서 실제 채널명이 보여야 합니다.');
 assert.match(recruit, /selectRfBtn\("channel", chanBtn\);[\s\S]{0,180}c\.channel_custom \|\| ""/,
