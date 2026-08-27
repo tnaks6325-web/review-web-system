@@ -1,5 +1,7 @@
 'use strict';
 
+const { WorkboardSchemaError, normalizeWorkboardSchemaVersion } = require('./workboardSchema.service');
+
 /**
  * Intranet review-order source contract.
  *
@@ -34,11 +36,21 @@ function _boundedText(value, label, maxLength, required = false) {
   return result;
 }
 
+function _workboardSchemaVersion(value) {
+  try {
+    return normalizeWorkboardSchemaVersion(value);
+  } catch (error) {
+    if (error instanceof WorkboardSchemaError) throw new SourceContractError(error.message);
+    throw error;
+  }
+}
+
 function normalizeReviewOrderSourceContract(input) {
   const body = input || {};
   const raw = {
     sourceReviewOrderId: _string(body.source_review_order_id),
     sourceRevision: body.source_revision,
+    workboardSchemaVersion: body.workboard_schema_version,
     idempotencyKey: _string(body.idempotency_key),
     intranetAdvertiserId: _string(body.intranet_advertiser_id),
     intranetAdvertiserName: _string(body.intranet_advertiser_name),
@@ -47,7 +59,7 @@ function normalizeReviewOrderSourceContract(input) {
   };
 
   const hasAny = Boolean(
-    raw.sourceReviewOrderId || raw.sourceRevision !== undefined || raw.idempotencyKey || raw.intranetAdvertiserId
+    raw.sourceReviewOrderId || raw.sourceRevision !== undefined || raw.workboardSchemaVersion !== undefined || raw.idempotencyKey || raw.intranetAdvertiserId
       || raw.intranetAdvertiserName || raw.intranetAdvertiserContact || raw.intranetAdvertiserBusinessNumber
   );
   if (!hasAny) return null;
@@ -64,6 +76,7 @@ function normalizeReviewOrderSourceContract(input) {
   return {
     sourceReviewOrderId: _safeIdentifier(raw.sourceReviewOrderId, '원본 오더 ID', 128),
     sourceRevision,
+    workboardSchemaVersion: _workboardSchemaVersion(raw.workboardSchemaVersion),
     idempotencyKey: _safeIdentifier(raw.idempotencyKey, '재시도 키', 160),
     intranetAdvertiserId: raw.intranetAdvertiserId
       ? _safeIdentifier(raw.intranetAdvertiserId, '인트라넷 광고주 ID', 128)

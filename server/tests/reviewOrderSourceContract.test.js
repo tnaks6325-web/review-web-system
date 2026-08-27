@@ -32,6 +32,7 @@ test('신규 형식은 원본 ID·버전·재시도 키를 정규화한다', () 
     {
       sourceReviewOrderId: 'ro_20260812_001',
       sourceRevision: 2,
+      workboardSchemaVersion: 1,
       idempotencyKey: 'ro_20260812_001:2',
       intranetAdvertiserId: 'adv_1042',
       intranetAdvertiserName: '제주 수산 주식회사',
@@ -39,6 +40,17 @@ test('신규 형식은 원본 ID·버전·재시도 키를 정규화한다', () 
       intranetAdvertiserBusinessNumber: '123-45-67890',
     }
   );
+});
+
+test('작업표 규격은 누락 시 v1이며 정의된 v1·v2만 계약으로 수신한다', () => {
+  const base = {
+    source_review_order_id: 'ro_20260812_001',
+    source_revision: 1,
+    idempotency_key: 'ro_20260812_001:1',
+  };
+  assert.strictEqual(normalizeReviewOrderSourceContract(base).workboardSchemaVersion, 1);
+  assert.strictEqual(normalizeReviewOrderSourceContract({ ...base, workboard_schema_version: 2 }).workboardSchemaVersion, 2);
+  assert.throws(() => normalizeReviewOrderSourceContract({ ...base, workboard_schema_version: 3 }), SourceContractError);
 });
 
 test('신규 형식의 식별자 일부만 전달하면 거부한다', () => {

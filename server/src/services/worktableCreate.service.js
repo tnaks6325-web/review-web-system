@@ -23,6 +23,7 @@ const pool = require('../db/pool');
 const sheetsSvc = require('./sheets.service');
 const { buildWorktablePlan } = require('../utils/worktablePlan');
 const { getTemplate } = require('./worktable.service');
+const { WorkboardSchemaError, assertSupportedWorkboardSchemaVersion } = require('./workboardSchema.service');
 
 /** 헤더 줄 위치를 찾는다(템플릿의 메타 영역·공지문 줄을 건너뛰기 위해). */
 const { detectSheetHeader } = require('../utils/sheetHeader');
@@ -34,7 +35,7 @@ async function _loadWorkOrder(id) {
   const { rows } = await pool.query(
     `SELECT id, title, start_date, recruit_count, daily_count, product_url,
             product_option, product_options_json, work_sheet_url, status,
-            skip_weekends, holidays
+            skip_weekends, holidays, workboard_schema_version
        FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
   return rows[0] || null;
 }
@@ -106,6 +107,12 @@ async function _resolveHeaderRow(sheetId, gid, fallback = 2) {
 async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', fileTitle = '', tabName = '', templateSheetId: tplSheetId = '', planOptions = {}, by = 'admin' } = {}) {
   const wo = await _loadWorkOrder(workOrderId);
   if (!wo) return { ok: false, error: '작업오더를 찾을 수 없습니다.' };
+  try {
+    assertSupportedWorkboardSchemaVersion(wo.workboard_schema_version);
+  } catch (error) {
+    if (error instanceof WorkboardSchemaError) return { ok: false, code: error.code, error: error.message };
+    throw error;
+  }
 
   // ★ 계획은 **서버가 다시 계산**한다 — 화면이 보낸 행 목록을 믿지 않는다.
   const template = await getTemplate();

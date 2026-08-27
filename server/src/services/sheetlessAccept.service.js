@@ -88,6 +88,14 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
   const { buildWorktablePlan } = require('../utils/worktablePlan');
   const { getTemplate } = require('./worktable.service');
   const { planToSheetValues } = require('./worktableCreate.service');
+  const { WorkboardSchemaError, assertSupportedWorkboardSchemaVersion } = require('./workboardSchema.service');
+
+  try {
+    assertSupportedWorkboardSchemaVersion(wo.workboard_schema_version);
+  } catch (error) {
+    if (error instanceof WorkboardSchemaError) return { ok: false, code: error.code, error: error.message };
+    throw error;
+  }
 
   const template = await getTemplate();
   const plan = buildWorktablePlan({ workOrder: wo, template, options: planOptions || {} });

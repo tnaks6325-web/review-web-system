@@ -5,6 +5,11 @@ const {
   SourceContractError,
   normalizeReviewOrderSourceContract,
 } = require('../services/reviewOrderSourceContract.service');
+const {
+  LEGACY_WORKBOARD_SCHEMA_VERSION,
+  WorkboardSchemaError,
+  assertSupportedWorkboardSchemaVersion,
+} = require('../services/workboardSchema.service');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
@@ -144,6 +149,7 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_kind            TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_review_order_id TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_revision        INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS workboard_schema_version SMALLINT NOT NULL DEFAULT 1 CHECK (workboard_schema_version IN (1, 2))`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intake_idempotency_key TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_id TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_name TEXT DEFAULT ''`);
@@ -251,7 +257,7 @@ function _holidaysJson(v) {
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy, sourceContract) {
   const source = sourceContract || {
-    sourceReviewOrderId: '', sourceRevision: 0, idempotencyKey: '', intranetAdvertiserId: '',
+    sourceReviewOrderId: '', sourceRevision: 0, workboardSchemaVersion: LEGACY_WORKBOARD_SCHEMA_VERSION, idempotencyKey: '', intranetAdvertiserId: '',
     intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '',
   };
   const optionsJson = (typeof b.product_options_json === 'string')
@@ -266,10 +272,10 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        review_type, review_type_mix, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
        sales_id, contract_number, quote_id, skip_weekends, holidays,
-       source_review_order_id, source_revision, intake_idempotency_key, intranet_advertiser_id,
+       source_review_order_id, source_revision, workboard_schema_version, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
        status, created_by, work_kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,'submitted',$40,$41)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,'submitted',$41,$42)
      RETURNING *`,
     [
       _genOrderId(),
@@ -312,6 +318,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       _holidaysJson(b.holidays),
       source.sourceReviewOrderId,
       source.sourceRevision,
+      source.workboardSchemaVersion,
       source.idempotencyKey,
       source.intranetAdvertiserId,
       source.intranetAdvertiserName,
@@ -474,6 +481,16 @@ router.post('/intake', async (req, res, next) => {
       }
       throw err;
     }
+    if (sourceContract) {
+      try {
+        assertSupportedWorkboardSchemaVersion(sourceContract.workboardSchemaVersion);
+      } catch (err) {
+        if (err instanceof WorkboardSchemaError) {
+          return res.status(409).json({ ok: false, code: err.code, error: err.message });
+        }
+        throw err;
+      }
+    }
 
     // A matching retry returns the original work order. A different key or
     // version for the same source is intentionally not treated as a new order.
@@ -563,6 +580,14 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!source || source.sourceReviewOrderId !== sourceReviewOrderId) {
       return res.status(400).json({ ok: false, error: '원본 리뷰오더 ID가 요청 경로와 일치해야 합니다.' });
     }
+    try {
+      assertSupportedWorkboardSchemaVersion(source.workboardSchemaVersion);
+    } catch (err) {
+      if (err instanceof WorkboardSchemaError) {
+        return res.status(409).json({ ok: false, code: err.code, error: err.message });
+      }
+      throw err;
+    }
 
     const { rows: currentRows } = await pool.query(
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`,
@@ -571,6 +596,15 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     const current = currentRows[0];
     if (!current) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
+    }
+    if (Number(current.workboard_schema_version || LEGACY_WORKBOARD_SCHEMA_VERSION) !== source.workboardSchemaVersion) {
+      return res.status(409).json({
+        ok: false,
+        code: 'workboard_schema_immutable',
+        error: '작업표 규격은 원본 작업오더 생성 후 변경할 수 없습니다.',
+        work_order_id: current.id,
+        workboard_schema_version: current.workboard_schema_version || LEGACY_WORKBOARD_SCHEMA_VERSION,
+      });
     }
     if (current.deleted_at || current.status === 'done' || current.status === 'published'
       || current.linked_campaign_id || current.advertiser_id) {
