@@ -126,10 +126,12 @@ async function writeOrderToWorktable({
   //     재기록(reconcile)·관리자 편집과의 경합까지 직렬화한다.
   const client = await db.connect();
   let optionSuppressed = [];
+  // 트랜잭션 뒤의 장부·완결·신원 링크도 확정된 같은 행 번호를 사용한다.
+  // 블록 내부 let 이면 기록은 성공해도 후속 완료 단계가 ReferenceError 로 끊긴다.
+  let seq = requestedSeq;
   try {
     await client.query('BEGIN');
     let cur;
-    let seq = requestedSeq;
     if (seq != null) {
       ({ rows: cur } = await client.query(
         `SELECT id, seq, row_json FROM campaign_participants

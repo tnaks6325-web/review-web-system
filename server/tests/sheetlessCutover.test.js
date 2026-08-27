@@ -120,7 +120,7 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
 
 (async () => {
   /* ══════════════ A. 라우터 스택 ══════════════ */
-  console.log('\n[A] 라우트 6종 · adminOrMaster');
+  console.log('\n[A] 라우트 7종 · adminOrMaster');
   {
     const r = require('../src/routes/trackB.routes');
     const found = {};
@@ -131,11 +131,11 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     }
     const keys = Object.keys(found);
     const coreKeys = keys.filter(k => k !== 'POST /sheetless/review-submit-time-backfill');
-    ok('6경로 전부 등록: ' + coreKeys.join(', '), coreKeys.length === 6
+    ok('7경로 전부 등록: ' + coreKeys.join(', '), coreKeys.length === 7
       && found['GET /sheetless/list'] && found['GET /sheetless/checklist']
       && found['GET /sheetless/slot-sweep']
       && found['POST /sheetless/cutover'] && found['POST /sheetless/cutover-active-server-only']
-      && found['POST /sheetless/reconnect']);
+      && found['POST /sheetless/reconnect'] && found['POST /sheetless/ledger-sweep']);
     ok('★ 전부 authMiddleware + adminOrMaster (AE·광고주 도달 불가)',
       coreKeys.every(k => found[k].includes('authMiddleware') && found[k].includes('adminOrMasterMiddleware')));
     ok('submission-time backfill stays master-only',
