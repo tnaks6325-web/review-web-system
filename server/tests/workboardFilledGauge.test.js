@@ -59,8 +59,10 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
   const poolPath = require.resolve('../src/db/pool');
   const orig = require.cache[poolPath];
   const rosterRows = [
-    { id: 'r1', seq: 164, name: '조연숙', recipient: '조연숙', phone8: '96689776', order_submission_id: null, row_json: {}, source: 'worktable' },
-    { id: 'r2', seq: 165, name: '이혜선', recipient: '이혜선', phone8: '90739194', order_submission_id: null, row_json: {}, source: 'worktable', submitted: true },
+    // 무시트 수동 생성 행: submit_col은 비어 있지만 탭 상태 헤더의 실제 셀 값은 있다.
+    { id: 'r1', seq: 164, name: '조연숙', recipient: '조연숙', phone8: '96689776', order_submission_id: null, row_json: { 리뷰제출: '8/10 22:49' }, source: 'worktable' },
+    // 플래그는 false지만 표 셀에 값이 있다. 카드 기준은 반드시 이 값을 센다.
+    { id: 'r2', seq: 165, name: '이혜선', recipient: '이혜선', phone8: '90739194', order_submission_id: null, row_json: { 리뷰제출: '8/4 13:53' }, source: 'worktable', submitted: false },
     { id: 'r3', seq: 170, name: '', recipient: '', phone8: '', order_submission_id: null, row_json: {}, source: 'worktable' },   // 빈 슬롯
     { id: 'r4', seq: 171, name: null, recipient: null, phone8: null, order_submission_id: null, row_json: {}, source: 'worktable' }, // 빈 슬롯
   ];
@@ -70,7 +72,8 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
       if (/FROM tab_configs tc/.test(q)) return { rows: [{ displayName: 't', sheetless: true }] };
       // ★ 더 좁은 조건(명단 조회)을 **먼저** — 스텁은 SQL 을 해석하지 않으므로 순서가 곧 판정이다
       //   (넓은 분기를 앞에 두면 명단이 빈 배열로 가로채여 "0 명" 을 정상으로 읽는다).
-      if (/FROM campaign_participants/.test(q) && /ORDER BY seq/.test(q)) return { rows: rosterRows };
+      if (/FROM campaign_participants cp/.test(q) && /ORDER BY cp\.seq/.test(q)) return { rows: rosterRows };
+      if (/SELECT submit_col AS h FROM review_index/.test(q)) return { rows: [{ h: '리뷰제출' }] };
       return { rows: [] };
     },
   };
@@ -82,6 +85,8 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
     const res = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'master', allowAllWorkdesk: true });
     ok('★ counts.filled = 채워진 줄만(빈 슬롯 2줄 제외)', res.counts.filled === 2, JSON.stringify(res.counts));
     ok('counts.total 은 종전대로 줄 수(정보 보존)', res.counts.total === 4, String(res.counts.total));
+    ok('★ counts.submitted = is_submitted 플래그가 아닌 실제 리뷰제출 셀 값 수', res.counts.submitted === 2, JSON.stringify(res.counts));
+    ok('★ 수동 생성 무시트 행(submit_col 없음)도 탭 상태 헤더로 실제 셀을 센다', res.counts.submitted === 2, JSON.stringify(res.counts));
 
     if (orig) require.cache[poolPath] = orig; else delete require.cache[poolPath];
     console.log(`\n✅ ${passed} passed\n`);
