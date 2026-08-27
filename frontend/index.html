@@ -1815,18 +1815,14 @@ function renderReviewSubTab() {
 
       const itemLines = items.map(item => {
         const taskDate = item.startDate || "";
-        const taskName = _taskLabel(item, "");
-        const optionName = item.productName || "";
-        const roundTxt = item.round ? ` · ${item.round}` : "";
-        const taskParts = [];
-        if (taskDate) taskParts.push(taskDate);
-        if (taskName) taskParts.push(taskName);
-        if (optionName) taskParts.push("옵션:" + optionName);
-        const taskLabel = taskParts.join(" ") || "작업 정보 없음";
+        // 같은 참여상품 그룹에서는 상품명을 줄마다 반복하지 않는다.
+        // 리뷰어 본인 이름이 아니라 실제 해당 주문의 수취인(타계정 참여 명의)을 말한다.
+        const participantName = _partInfoParticipantName(item);
+        const rowLabel = [taskDate, participantName].filter(Boolean).join(" ") || "참여 건";
         const doneDate = isDone ? _fmtReviewDate(item.reviewFileAt) : '';
         return `<div class="result-group-item">
           <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
-          <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
+          <span class="result-group-item-label">${escHtml(rowLabel)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
           ${isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
           <span class="result-group-item-badge${isDone ? ' done' : ''}${item.isOrderPending ? ' order ' + _orderStageClass(item.orderStage) : ''}">${isDone ? '제출완료' : item.isOrderPending ? _orderStageLabel(item.orderStage, true) : escHtml(_pendingBadgeText(item))}</span>
           ${isDone ? _reEditBtnHtml(item) : ''}
@@ -1838,7 +1834,6 @@ function renderReviewSubTab() {
           <i class="fas fa-user-circle" style="font-size:1.4rem;color:${isDone ? 'var(--ok)' : 'var(--p)'};flex-shrink:0"></i>
           <div style="flex:1;min-width:0">
             <div class="result-group-name">${escHtml(campLabel || itemName)}</div>
-            ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(itemName)}</div>` : ""}
           </div>
           <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
           ${(groupClickable || isDone) ? '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>' : ''}
@@ -2126,6 +2121,14 @@ function _partInfoLabel(it){
   const o = it.productName ? ('옵션:' + it.productName) : '';
   return [d, t, o].filter(Boolean).join(' ') || (it.displayName || '참여 작업');
 }
+/** 같은 상품으로 묶인 줄에 표시할 실제 참여 명의. 리뷰어 본인 이름은 대체값으로 쓰지 않는다. */
+function _partInfoParticipantName(it){
+  const row = (it && it.row && typeof it.row === 'object') ? it.row : {};
+  return String((it && (it.recipientName || it.recipient || it.orderer)) || row['수취인'] || row['주문자'] || '').trim();
+}
+function _partInfoGroupRowLabel(it){
+  return [it && it.startDate, _partInfoParticipantName(it)].filter(Boolean).join(' ') || '참여 건';
+}
 
 function openPartInfoSheet(items, opts){
   opts = opts || {};
@@ -2159,11 +2162,11 @@ function openPartInfoSheet(items, opts){
     : '<span style="font-size:.6rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">미제출</span>';
   const listRows = many
     ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">' + list.map(x =>
-        '<div style="font-size:.74rem;color:#374151;display:flex;gap:6px;align-items:center"><i class="fas fa-box" style="color:#3182f6;font-size:.66rem;flex:none"></i><span style="min-width:0">' + escHtml(_partInfoLabel(x)) + '</span></div>').join('') + '</div>'
+        '<div style="font-size:.74rem;color:#374151;display:flex;gap:6px;align-items:center"><i class="fas fa-box" style="color:#3182f6;font-size:.66rem;flex:none"></i><span style="min-width:0">' + escHtml(_partInfoGroupRowLabel(x)) + '</span></div>').join('') + '</div>'
     : '';
   document.getElementById('partInfoBody').innerHTML =
     '<div style="font-size:.9rem;font-weight:800;color:#111827;line-height:1.4">' + escHtml(_partInfoLabel(it)) + statusChip + '</div>' +
-    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + escHtml(it.displayName || '') + (many ? (' · 총 ' + list.length + '건') : '') + '</div>' +
+    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + (many ? ('총 ' + list.length + '건') : escHtml(it.displayName || '')) + '</div>' +
     listRows +
     '<div id="partInfoDetail" style="border:1px solid #EEF1F7;border-radius:11px;margin-top:11px;padding:9px 11px;font-size:.74rem;color:#9CA3AF">' +
       '<i class="fas fa-circle-notch fa-spin"></i> 상품 정보 불러오는 중…</div>' +
@@ -2289,9 +2292,12 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
       html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF1F7">'
         + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">제출할 참여 건을 선택하세요</div>'
         + submitItems.map((x, i) => {
-          const recipient = String(x.recipient || x.orderer || (x.row && (x.row["수취인"] || x.row["주문자"])) || '').trim();
-          const label = recipient ? ('수취인 ' + recipient) : ((i + 1) + '번째 참여 건');
-          return '<button onclick="_partInfoSubmit(' + i + ')" style="display:block;width:100%;text-align:left;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.82rem;font-weight:800;border-radius:11px;padding:11px 12px;margin-top:' + (i ? '6' : '0') + '">📤 ' + escHtml(label) + ' 리뷰 제출하기</button>';
+          const recipient = _partInfoParticipantName(x);
+          const label = recipient || ((i + 1) + '번째 참여 건');
+          return '<button onclick="_partInfoSubmit(' + i + ')" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;border:1.5px solid #BFDBFE;cursor:pointer;background:#fff;color:#1D4ED8;font-size:.82rem;font-weight:800;border-radius:12px;padding:11px 12px;margin-top:' + (i ? '8' : '0') + ';box-shadow:0 2px 7px rgba(37,99,235,.08)">'
+            + '<span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;flex:none;border-radius:50%;background:#DBEAFE;color:#2563EB;font-size:.72rem">' + (i + 1) + '</span>'
+            + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">이 참여 건만 리뷰 제출</span></span>'
+            + '<i class="fas fa-chevron-right" style="color:#60A5FA;font-size:.72rem"></i></button>';
         }).join('')
         + '</div>';
     }
