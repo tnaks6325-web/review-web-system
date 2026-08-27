@@ -966,11 +966,9 @@ function rfSyncPurchaseTimeValue() {
   const range = document.getElementById("rf_time_range");
   const startButton = document.getElementById("rf_window_start_button");
   const endButton = document.getElementById("rf_window_end_button");
-  const state = document.getElementById("rf_free_time_state");
   if (range) range.value = free ? "자유시간대" : (start && end ? `${start} ~ ${end}` : "");
   if (startButton) startButton.textContent = start || "시작";
   if (endButton) endButton.textContent = end || "종료";
-  if (state) state.textContent = free ? "자유시간대" : "시간 지정";
   if (typeof renderPartCheck === "function") renderPartCheck();
   if (typeof _onPreviewInput === "function") _onPreviewInput();
 }
@@ -1020,10 +1018,16 @@ function rfSetTimePickerPart(part, value) {
 
 function rfSetFreeTime(isFreeTime) {
   const toggle = document.getElementById("rf_free_time_toggle");
+  const scheduled = document.getElementById("rf_scheduled_time_toggle");
   const range = document.getElementById("rf_time_range_control");
   if (!toggle || !range) return;
   toggle.classList.toggle("on", isFreeTime);
   toggle.setAttribute("aria-pressed", String(isFreeTime));
+  toggle.classList.toggle("active", isFreeTime);
+  if (scheduled) {
+    scheduled.classList.toggle("active", !isFreeTime);
+    scheduled.setAttribute("aria-pressed", String(!isFreeTime));
+  }
   range.classList.toggle("is-disabled", isFreeTime);
   ["rf_window_start_button", "rf_window_end_button"].forEach(id => {
     const button = document.getElementById(id);
