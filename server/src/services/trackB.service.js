@@ -3124,6 +3124,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ **마스킹 전**에 센다(광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어 전 줄이 뒤집힌다).
      ★ 카운트는 마스킹 앞에서 한다(참여횟수 배지와 같은 자리). */
   let filledCount = 0;
+  // 무시트 작업표에서 수동으로 만든 참여 줄은 submit_col을 들고 있지 않는다. 그 경우에도
+  // 실제 표가 쓰는 탭 단위 상태 헤더를 읽어야 "셀에는 O가 있는데 카드 0건"이 되지 않는다.
+  let tabSubmitHeader = String((roster.find(r => String(r.submit_col || '').trim()) || {}).submit_col || '').trim();
+  if (!tabSubmitHeader) {
+    try {
+      tabSubmitHeader = String(await require('./sheetlessStatus.service')
+        .statusHeaderForTab(db, { sheetId, tabName, kind: 'submit' }) || '').trim();
+    } catch (_) { /* 헤더를 모르면 값 없는 것으로 처리한다 — 플래그로 추측하지 않는다. */ }
+  }
   /*
    * 진행 현황의 "제출완료"는 제출 상태 플래그가 아니라, 사용자가 작업표에서 실제로
    * 확인하는 리뷰제출 칸의 값으로 센다. 플래그/인덱스는 재투영 전에는 뒤처질 수 있어
@@ -3169,7 +3178,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);
     if (syn.filled) filledCount++;
-    const submitHeader = String(r.submit_col || '').trim();
+    const submitHeader = String(r.submit_col || tabSubmitHeader || '').trim();
     const submitCellValue = submitHeader
       ? pick('col:' + submitHeader, (r.row_json && r.row_json[submitHeader]))
       : '';
