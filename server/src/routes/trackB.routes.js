@@ -2796,12 +2796,13 @@ router.post('/reviewers/home-link', authMiddleware, adminOrMasterMiddleware, asy
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
       return res.status(400).json({ ok: false, error: '리뷰어 id가 올바르지 않습니다.' });
     }
-    // 구형 등록 행은 status가 NULL일 수 있으며 목록 화면도 이를 활성으로 표기한다.
-    // 명시적으로 inactive인 경우만 막아 화면/홈 링크의 활성 판정을 일치시킨다.
+    // 관리자용 "홈 열기"는 참여 가능 여부와 별개로 **등록된 리뷰어**를 관찰하는 기능이다.
+    // status는 구형 데이터에 여러 표현(NULL/활성/기타)이 섞여 있어 로그인 가능 여부 판정에 쓰지 않는다.
+    // 발급 권한은 adminOrMaster, 교환 시에도 등록 레코드를 다시 확인하므로 임의 계정 발급은 불가하다.
     const { rows } = await pool.query(
-      `SELECT name, phone8 FROM reviewers WHERE id = $1 AND COALESCE(status, 'active') = 'active' LIMIT 1`, [id]
+      `SELECT name, phone8 FROM reviewers WHERE id = $1 LIMIT 1`, [id]
     );
-    if (!rows.length) return res.status(404).json({ ok: false, error: '활성 리뷰어를 찾을 수 없습니다.' });
+    if (!rows.length) return res.status(404).json({ ok: false, error: '등록 리뷰어를 찾을 수 없습니다.' });
     const reviewer = rows[0];
     const ticket = jwt.sign(
       { scope: 'reviewer_home_admin', name: reviewer.name, phone8: reviewer.phone8 },

@@ -57,9 +57,9 @@ router.post('/home-session', async (req, res, next) => {
     if (!p || p.scope !== 'reviewer_home_admin' || !p.name || !/^\d{8}$/.test(String(p.phone8 || ''))) {
       return res.status(401).json({ ok: false, error: '유효하지 않은 리뷰어 홈 링크입니다.' });
     }
-    // home-link 발급과 같은 활성 규칙: 구형 NULL은 활성, 명시적 inactive만 차단.
+    // 관리자 홈 링크 발급과 같은 규칙: status와 무관하게 현재 등록 레코드만 재확인한다.
     const { rows } = await pool.query(
-      `SELECT name, phone, phone8 FROM reviewers WHERE name = $1 AND phone8 = $2 AND COALESCE(status, 'active') = 'active' LIMIT 1`,
+      `SELECT name, phone, phone8 FROM reviewers WHERE name = $1 AND phone8 = $2 LIMIT 1`,
       [String(p.name), String(p.phone8)]
     );
     if (!rows.length) return res.status(401).json({ ok: false, error: '유효하지 않은 리뷰어 홈 링크입니다.' });
