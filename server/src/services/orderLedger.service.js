@@ -926,13 +926,14 @@ async function createOrderLedgerEntry(input) {
     skipSheetMirror = false,
     campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
     sameDayDuplicateGuard, // 구매양식의 오늘 동일 제출 차단(선택 입력)
+    source = 'order_submit', // 호출 시 확정한 접수 출처도 최초 INSERT와 함께 보존한다.
   } = input;
   // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo, blog_url,
-       selected_product, dedup_key, mirror_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NULL,'pending')
+       selected_product, source, dedup_key, mirror_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending')
      RETURNING id`;
   const orderInsertParams = [
     sheetId,
@@ -956,6 +957,7 @@ async function createOrderLedgerEntry(input) {
     /* ★ 138 선택 상품 — 컬럼이 NOT NULL DEFAULT '' 라 빈 문자열이 곧 "안 고름"이다.
        원장에 남겨야 무시트 재기록·큐 재시도·reconcile 이 같은 값을 다시 쓴다(_osRowToOrderData). */
     orderData.selectedProduct || '',
+    source || 'order_submit',
   ];
 
   let orderSubmissionId;
