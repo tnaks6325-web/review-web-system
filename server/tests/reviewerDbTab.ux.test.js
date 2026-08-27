@@ -81,8 +81,12 @@ ok('홈 링크는 관리자 전용 API로 발급하고 새 탭을 연다',
   /function _rvOpenHome[\s\S]{0,900}?window\.open\('', '_blank'\)[\s\S]{0,900}?\/api\/trackb\/reviewers\/home-link/.test(jsNoComment));
 ok('홈 교환권 발급은 adminOrMaster이고 5분짜리 서명 토큰이다',
   /router\.post\('\/reviewers\/home-link', authMiddleware, adminOrMasterMiddleware/.test(routes)
-  && /scope: 'reviewer_home_admin'/.test(routes) && /expiresIn: '5m'/.test(routes));
+  && /scope: 'reviewer_home_admin'/.test(routes) && /expiresIn: '5m'/.test(routes)
+  && /COALESCE\(status, 'active'\) = 'active'/.test(routes));
 const home = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
+const reviewerRoutes = fs.readFileSync(path.join(root, 'server', 'src', 'routes', 'reviewer.routes.js'), 'utf8');
+ok('홈 세션 교환도 NULL status를 활성으로 해석해 링크 발급 규칙과 일치한다',
+  /home-session[\s\S]{0,1400}?COALESCE\(status, 'active'\) = 'active'/.test(reviewerRoutes));
 ok('만료·실패한 관리자 홈 링크는 기존 localStorage 리뷰어로 폴백하지 않는다',
   /hasAdminReviewerTicket && !exchanged[\s\S]{0,400}?viewLogin/.test(home));
 ok('관리자 링크 교환이 끝난 뒤에만 해시 탭을 처리한다',
