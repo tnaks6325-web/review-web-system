@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const { buildWorktablePlan, stagedSelectionsFromWorkOrder } = require('../src/utils/worktablePlan');
 const createSource = fs.readFileSync(require.resolve('../src/services/worktableCreate.service'), 'utf8');
 
-const template = { core: ['번호', '구매일자', '수취인', '연락처', '주소'], channels: {}, workTypes: [] };
+const template = { core: ['번호', '구매일자', '수취인', '연락처', '주소', '주문번호', '비고'], channels: {}, workTypes: [] };
 const workOrder = {
   workboard_schema_version: 2,
   recruit_count: 3,
@@ -28,7 +28,7 @@ test('v2 계획은 상품·1차·2차 옵션을 한 배정 단위로 보존한�
   assert.equal(selections.length, 2);
   assert.deepEqual(selections[0], {
     productName: '티셔츠', option1Name: '컬러', option1Value: '화이트',
-    option2Name: '사이즈', option2Value: '105', selectionKey: '티셔츠 · 화이트 · 105', count: 2,
+    option2Name: '사이즈', option2Value: '105', selectionKey: '티셔츠 · 화이트 · 105', count: 2, review_type_mix: [],
   });
 
   const plan = buildWorktablePlan({ workOrder, template });

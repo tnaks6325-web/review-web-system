@@ -73,6 +73,12 @@ const ROLE_META = {
                fill: 'v2 작업 생성 시 1차 옵션값이 자동 기입됩니다' },
   option_2:  { label: '2차옵션',   tier: 'work',    order: 33,
                fill: 'v2 작업 생성 시 2차 옵션값이 자동 기입됩니다' },
+  round:     { label: '차수',      tier: 'work',    order: 34,
+               fill: 'v2 작업의 차수 추가 결과가 자동 기입됩니다' },
+  review_option_instruction: { label: '리뷰옵션', tier: 'work', order: 35,
+               fill: 'v2 작업 생성 시 확정된 리뷰유형이 자동 기입됩니다' },
+  tracking_number: { label: '송장번호', tier: 'work', order: 36,
+               fill: '택배발송대행 작업에서 발송 처리 시 기록합니다' },
   orderer:   { label: '주문자',    tier: 'core',    order: 40,
                fill: '구매양식 [주문자] 입력값이 들어갑니다' },
   recipient: { label: '수취인',    tier: 'core',    order: 50,
@@ -160,7 +166,10 @@ function classifyHeaders(headers, opts = {}) {
     //   먼저 보지 않으면 **입금 상태 칸이 "자동 채움 구매일자"로 보고**된다.
     const stagedRole = key === '상품' || key === 'product' ? 'product'
       : (/^(?:1차|1st)\s*옵션$/.test(key) ? 'option_1'
-        : (/^(?:2차|2nd)\s*옵션$/.test(key) ? 'option_2' : null));
+        : (/^(?:2차|2nd)\s*옵션$/.test(key) ? 'option_2'
+          : (key === '차수' ? 'round'
+            : (key === '리뷰옵션' ? 'review_option_instruction'
+              : (key === '송장번호' ? 'tracking_number' : null)))));
     if (submitName && key === submitName) role = 'submit';
     else if (paidName && key === paidName) role = 'paid';
     else if (stagedRole) role = stagedRole;

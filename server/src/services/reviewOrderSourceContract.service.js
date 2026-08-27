@@ -45,12 +45,22 @@ function _workboardSchemaVersion(value) {
   }
 }
 
+function _workRound(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 2147483647) {
+    throw new SourceContractError('작업 차수는 1 이상의 정수여야 합니다.');
+  }
+  return n;
+}
+
 function normalizeReviewOrderSourceContract(input) {
   const body = input || {};
   const raw = {
     sourceReviewOrderId: _string(body.source_review_order_id),
     sourceRevision: body.source_revision,
     workboardSchemaVersion: body.workboard_schema_version,
+    workSeriesId: _string(body.work_series_id),
+    workRound: body.work_round,
     idempotencyKey: _string(body.idempotency_key),
     intranetAdvertiserId: _string(body.intranet_advertiser_id),
     intranetAdvertiserName: _string(body.intranet_advertiser_name),
@@ -59,7 +69,7 @@ function normalizeReviewOrderSourceContract(input) {
   };
 
   const hasAny = Boolean(
-    raw.sourceReviewOrderId || raw.sourceRevision !== undefined || raw.workboardSchemaVersion !== undefined || raw.idempotencyKey || raw.intranetAdvertiserId
+    raw.sourceReviewOrderId || raw.sourceRevision !== undefined || raw.workboardSchemaVersion !== undefined || raw.workSeriesId || raw.workRound !== undefined || raw.idempotencyKey || raw.intranetAdvertiserId
       || raw.intranetAdvertiserName || raw.intranetAdvertiserContact || raw.intranetAdvertiserBusinessNumber
   );
   if (!hasAny) return null;
@@ -73,10 +83,20 @@ function normalizeReviewOrderSourceContract(input) {
     throw new SourceContractError('수정 버전은 1 이상의 정수여야 합니다.');
   }
 
+  const workboardSchemaVersion = _workboardSchemaVersion(raw.workboardSchemaVersion);
+  const workRound = raw.workRound === undefined ? 1 : _workRound(raw.workRound);
+  const workSeriesId = raw.workSeriesId
+    ? _safeIdentifier(raw.workSeriesId, '작업 계열 ID', 128)
+    : '';
+  if (workboardSchemaVersion === 2 && !workSeriesId) {
+    throw new SourceContractError('v2 작업에는 작업 계열 ID가 필요합니다.');
+  }
   return {
     sourceReviewOrderId: _safeIdentifier(raw.sourceReviewOrderId, '원본 오더 ID', 128),
     sourceRevision,
-    workboardSchemaVersion: _workboardSchemaVersion(raw.workboardSchemaVersion),
+    workboardSchemaVersion,
+    workSeriesId,
+    workRound,
     idempotencyKey: _safeIdentifier(raw.idempotencyKey, '재시도 키', 160),
     intranetAdvertiserId: raw.intranetAdvertiserId
       ? _safeIdentifier(raw.intranetAdvertiserId, '인트라넷 광고주 ID', 128)

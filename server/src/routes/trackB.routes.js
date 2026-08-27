@@ -2608,7 +2608,10 @@ router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMidd
 
     const { rows } = await pool.query(
       `SELECT id, title, start_date, recruit_count, daily_count, product_url,
-              product_option, product_options_json, work_sheet_url, status
+              product_option, product_options_json, work_sheet_url, status,
+              skip_weekends, holidays, workboard_schema_version,
+              work_series_id, work_round, delivery_type, courier_proxy,
+              review_type, review_type_mix, source_revision
          FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
     const wo = rows[0];
     if (!wo) return res.json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });

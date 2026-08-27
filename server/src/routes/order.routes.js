@@ -154,6 +154,8 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_review_order_id TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_revision        INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS workboard_schema_version SMALLINT NOT NULL DEFAULT 1 CHECK (workboard_schema_version IN (1, 2))`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_series_id TEXT NOT NULL DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_round INTEGER NOT NULL DEFAULT 1 CHECK (work_round >= 1)`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intake_idempotency_key TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_id TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_name TEXT DEFAULT ''`);
@@ -262,7 +264,7 @@ function _holidaysJson(v) {
 async function _insertWorkOrder(b, createdBy, sourceContract) {
   const source = sourceContract || {
     sourceReviewOrderId: '', sourceRevision: 0, workboardSchemaVersion: LEGACY_WORKBOARD_SCHEMA_VERSION, idempotencyKey: '', intranetAdvertiserId: '',
-    intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '',
+    intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '', workSeriesId: '', workRound: 1,
   };
   const optionsJson = b._normalized_product_options_json !== undefined
     ? b._normalized_product_options_json
@@ -280,8 +282,8 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        sales_id, contract_number, quote_id, skip_weekends, holidays,
        source_review_order_id, source_revision, workboard_schema_version, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
-       status, created_by, work_kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,'submitted',$41,$42)
+       status, created_by, work_kind, work_series_id, work_round)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,'submitted',$41,$42,$43,$44)
      RETURNING *`,
     [
       _genOrderId(),
@@ -335,6 +337,8 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       //   "한 번도 정하지 않음"과 "리뷰로 정함"이 구분돼야 접수의 blank-only 전파가 성립한다.
       //   판정에서는 어차피 빈 값 = 리뷰라 동작은 같고 원장만 정직해진다.
       workKindForStore(b.work_kind),
+      source.workSeriesId,
+      source.workRound,
     ]
   );
   return rows[0];
@@ -630,6 +634,15 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         error: '작업표 규격은 원본 작업오더 생성 후 변경할 수 없습니다.',
         work_order_id: current.id,
         workboard_schema_version: current.workboard_schema_version || LEGACY_WORKBOARD_SCHEMA_VERSION,
+      });
+    }
+    if (String(current.work_series_id || '') !== String(source.workSeriesId || '')
+      || Number(current.work_round || 1) !== Number(source.workRound || 1)) {
+      return res.status(409).json({
+        ok: false,
+        code: 'work_round_immutable',
+        error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.',
+        work_order_id: current.id,
       });
     }
     if (current.deleted_at || current.status === 'done' || current.status === 'published'

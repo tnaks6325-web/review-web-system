@@ -35,7 +35,9 @@ async function _loadWorkOrder(id) {
   const { rows } = await pool.query(
     `SELECT id, title, start_date, recruit_count, daily_count, product_url,
             product_option, product_options_json, work_sheet_url, status,
-            skip_weekends, holidays, workboard_schema_version
+            skip_weekends, holidays, workboard_schema_version,
+            work_series_id, work_round, delivery_type, courier_proxy,
+            review_type, review_type_mix, source_revision
        FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
   return rows[0] || null;
 }
@@ -55,6 +57,8 @@ function planToSheetValues(plan) {
   const idxProduct = plan.columns.findIndex(c => c.role === 'product');
   const idxOption1 = plan.columns.findIndex(c => c.role === 'option_1');
   const idxOption2 = plan.columns.findIndex(c => c.role === 'option_2');
+  const idxRound = plan.columns.findIndex(c => c.role === 'round');
+  const idxReviewOption = plan.columns.findIndex(c => c.role === 'review_option_instruction');
   const body = plan.rows.map(r => {
     const row = new Array(header.length).fill('');
     if (idxSeq >= 0) row[idxSeq] = String(r.seq);
@@ -63,9 +67,11 @@ function planToSheetValues(plan) {
     if (idxProduct >= 0 && r.selection?.productName) row[idxProduct] = r.selection.productName;
     if (idxOption1 >= 0 && r.selection?.option1Value) row[idxOption1] = r.selection.option1Value;
     if (idxOption2 >= 0 && r.selection?.option2Value) row[idxOption2] = r.selection.option2Value;
+    if (idxRound >= 0 && r.roundLabel) row[idxRound] = r.roundLabel;
+    if (idxReviewOption >= 0 && r.reviewOptionLabel) row[idxReviewOption] = r.reviewOptionLabel;
     return row;
   });
-  return { header, body, filled: { seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0, product: idxProduct >= 0, option1: idxOption1 >= 0, option2: idxOption2 >= 0 } };
+  return { header, body, filled: { seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0, product: idxProduct >= 0, option1: idxOption1 >= 0, option2: idxOption2 >= 0, round: idxRound >= 0, reviewOption: idxReviewOption >= 0 } };
 }
 
 /** A1 표기 열 문자(0-based index → 'A','B',…,'AA'). */
