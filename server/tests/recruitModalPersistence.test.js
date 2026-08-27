@@ -16,6 +16,8 @@ assert.match(modal, /id="rf_channel_btns" class="square-toggle"><button class="r
   '컴팩트 구매채널 버튼은 기존 선택값을 복원할 수 있는 클래스가 있어야 합니다.');
 assert.match(modal, /id="rf_channel_custom_wrap" class="channel-custom-field" hidden>[\s\S]*직접입력 채널명[\s\S]*작업오더 값이 자동 반영/,
   '직접입력 채널은 작업오더에서 받은 실제 채널명을 설명과 함께 표시해야 합니다.');
+assert.match(modal, /\.channel-custom-field\[hidden\]\{display:none\}/,
+  '고정 채널 선택 시 직접입력 채널 카드가 hidden 속성으로 완전히 숨겨져야 합니다.');
 assert.match(recruit, /customWrap\.hidden = !isCustom;[\s\S]{0,220}customInput\.hidden = !isCustom;/,
   '직접입력 선택 시 hidden 속성도 해제해 컴팩트 모달에서 실제 채널명이 보여야 합니다.');
 assert.match(recruit, /selectRfBtn\("channel", chanBtn\);[\s\S]{0,180}c\.channel_custom \|\| ""/,

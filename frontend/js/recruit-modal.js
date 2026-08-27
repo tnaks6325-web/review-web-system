@@ -1037,6 +1037,7 @@
 #recruitModal .rf-compact-main .choice,#recruitModal .rf-compact-main .square-toggle button{min-height:26px;padding:4px 8px;border:1px solid #D6DEE9;border-radius:5px;background:#fff;color:#617087;font-size:10px;font-weight:850;line-height:1;transition:transform .18s cubic-bezier(.16,1,.3,1),border-color .18s cubic-bezier(.16,1,.3,1),background-color .18s cubic-bezier(.16,1,.3,1),box-shadow .18s cubic-bezier(.16,1,.3,1)}
 #recruitModal .rf-compact-main .choice.active,#recruitModal .rf-compact-main .choice.selected,#recruitModal .rf-compact-main .square-toggle button.on,#recruitModal .rf-compact-main .square-toggle button.active{border-color:#2769DF;background:#2769DF;color:#fff;box-shadow:none}
 #recruitModal .rf-compact-main .channel-custom-field{display:grid;grid-template-columns:auto minmax(150px,1fr);align-items:center;gap:5px 7px;width:100%;margin-top:5px;padding:5px 7px;border:1px solid #B9D2FB;border-radius:6px;background:#F5F9FF}
+#recruitModal .rf-compact-main .channel-custom-field[hidden]{display:none}
 #recruitModal .rf-compact-main .channel-custom-label{color:#2563C8;font-size:10px;font-weight:850;white-space:nowrap}
 #recruitModal .rf-compact-main .channel-custom-field input{min-width:0;width:100%;height:25px;padding:0 7px;border:1px solid #C9DCF9;border-radius:5px;background:#fff;color:#172033;font-size:11px;font-weight:750}
 #recruitModal .rf-compact-main .channel-custom-hint{grid-column:1 / -1;color:#60738F;font-size:9px;font-weight:650;line-height:1.3}
