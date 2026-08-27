@@ -119,6 +119,42 @@ async function rebuildWorktableProjection(worktable, by) {
   return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
 }
 
+// 과거의 빈 초과 슬롯만 정리한다. 잠금 뒤 기존 정원 동기화의 보호 규칙을 재사용한다.
+async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, by = 'overflow-cleanup' } = {}) {
+  const cap = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+  const { rows: campaigns } = await pool.query(
+    `SELECT id, linked_sheet_id, linked_tab_name, linked_tab_gid, recruit_total
+       FROM recruit_campaigns WHERE COALESCE(recruit_total, 0) > 0
+        AND COALESCE(linked_sheet_id, '') <> '' AND COALESCE(linked_tab_name, '') <> ''
+      ORDER BY updated_at DESC LIMIT $1`, [cap]);
+  const out = { ok: true, dryRun: !!dryRun, scanned: campaigns.length, retired: 0, skipped: 0, items: [] };
+  for (const campaign of campaigns) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const checked = await assertWorktableSlotsInTx(client, campaign, campaign.recruit_total);
+      if (!checked.checked || !checked.retire) { await client.query('ROLLBACK'); out.skipped++; continue; }
+      if (dryRun) {
+        await client.query('ROLLBACK');
+        out.items.push({ campaignId: campaign.id, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
+          target: checked.target, wouldRetire: checked.retire });
+        continue;
+      }
+      const changed = await syncWorktableSlotsInTx(client, campaign, campaign.recruit_total, by);
+      await client.query('COMMIT');
+      const rebuilt = await rebuildWorktableProjection(changed, by);
+      out.retired += changed.retire || 0;
+      out.items.push({ campaignId: campaign.id, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
+        target: changed.target,
+        retired: changed.retire || 0, projection: rebuilt.projection || null });
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      out.items.push({ campaignId: campaign.id, error: err.message, code: err.code || null });
+    } finally { client.release(); }
+  }
+  return out;
+}
+
 /**
  * 그 공고에 연결된 작업오더 1건(읽기 전용).
  *
@@ -421,4 +457,5 @@ module.exports = {
   assertCampaignRecruitTotal,
   syncCampaignRecruitTotal,
   syncWorkOrderRecruitTotal,
+  cleanupOverflowEmptyWorktableSlots,
 };

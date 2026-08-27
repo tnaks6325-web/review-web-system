@@ -2463,6 +2463,20 @@ router.post('/sheetless-worktable-recover', authMiddleware, adminOrMasterMiddlew
   } catch (err) { next(err); }
 });
 
+// POST /api/diag/cleanup-overflow-worktable-slots — 빈 301/300·501/500 같은 과거 초과 슬롯만 정리.
+router.post('/cleanup-overflow-worktable-slots', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const { cleanupOverflowEmptyWorktableSlots } = require('../services/linkedRecruitQuota.service');
+    const out = await cleanupOverflowEmptyWorktableSlots({
+      dryRun: b.dryRun !== false,
+      limit: Math.min(Math.max(parseInt(b.limit, 10) || 200, 1), 1000),
+      by: (req.admin && req.admin.name) || (req.user && (req.user.name || req.user.username)) || 'admin',
+    });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-mirror-repair — 작업보드 줄은 있는데 원장만 미완결(`failed` 등)로 굳은
 //   주문의 완결 표시를 정정한다. 판정 근거 = `campaign_participants.order_submission_id` 링크
 //   (기록 성공 후에만 남는 값 — 복구 잡이 "이미 반영됨"을 판정하는 근거와 같다).
