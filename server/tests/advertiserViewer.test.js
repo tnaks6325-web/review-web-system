@@ -100,6 +100,11 @@ async function run() {
   ok('settlementHidden=false + 항목 1건', sum.settlementHidden === false && sum.items.length === 1);
   const it = sum.items[0];
   ok('카운트·목표·시작일 동봉', it.total === 675 && it.submitted === 651 && it.paid === 651 && it.target === 750 && it.startDate === '2026-04-21');
+  const svcSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+  ok('업체 작업목록 제출 수는 제출 플래그가 아닌 작업표 리뷰제출 셀을 집계한다',
+    /submit_header\.submit_header/.test(svcSrc)
+    && /cp\.row_json\s*->>\s*COALESCE\(NULLIF\(BTRIM\(cp\.submit_col\), ''\), submit_header\.submit_header\)/.test(svcSrc)
+    && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_submitted\)::int AS submitted/.test(svcSrc));
   ok('★ 내부 필드(비고 memo·담당 manager·salesId) 는 항목에 아예 없다 — 화면에서만 감추는 건 보안연극',
     !('memo' in it) && !('manager' in it) && !('salesId' in it));
   ok('정산: 총비용=견적서 금액 우선(11,250,000) · 입금액=입금매칭 누계(8,000,000)',

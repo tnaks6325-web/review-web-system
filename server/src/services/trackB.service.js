@@ -942,10 +942,23 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             EXISTS (SELECT 1 FROM index_master im WHERE im.status = 'active' AND im.sheet_id = t.sheet_id
                       AND (im.tab_gid = t.tab_gid OR im.tab_name = t.tab_name)) AS "active"
        FROM tabs t
+       /*
+        * 업체 작업목록의 「제출」은 작업보드 진행 카드와 같은 진실원본을 쓴다.
+        * campaign_participants.is_submitted는 검수/정산 상태 플래그라 재투영보다
+        * 늦을 수 있어, 표에 리뷰제출 값이 있어도 목록이 예전 숫자에 남을 수 있다.
+        * 행별로 파서가 잡은 submit_col을 우선하고, 수동·무시트 행처럼 그것이 비어
+        * 있으면 해당 탭 review_index의 실제 리뷰제출 헤더를 쓴다.
+        */
+       LEFT JOIN LATERAL (
+         SELECT NULLIF(MAX(NULLIF(BTRIM(ri.submit_col), '')), '') AS submit_header
+           FROM review_index ri
+          WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
+       ) submit_header ON TRUE
        LEFT JOIN LATERAL (
          SELECT MIN(cp.first_seen_at) AS first_seen,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL)::int AS total,
-                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.is_submitted)::int AS submitted,
+                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
+                  AND NULLIF(BTRIM(cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)), '') IS NOT NULL)::int AS submitted,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.is_paid)::int AS paid
            FROM campaign_participants cp
           WHERE cp.sheet_id = t.sheet_id AND (cp.tab_gid = t.tab_gid OR cp.tab_name = t.tab_name)
