@@ -112,8 +112,8 @@ async function assertWorktableSlotsInTx(client, campaign, target) {
   return { checked: true, ...worktableSlotDelta({ current: rows.length, protectedCount: rows.filter(r => !_worktableSlotEmpty(r)).length, target }) };
 }
 
-async function rebuildWorktableProjection(worktable, by) {
-  if (!worktable || !worktable.synced || (!worktable.add && !worktable.retire)) return worktable;
+async function rebuildWorktableProjection(worktable, by, force = false) {
+  if (!worktable || !worktable.synced || (!force && !worktable.add && !worktable.retire)) return worktable;
   const { rebuildLedgers } = require('./sheetlessLedger.service');
   const rebuilt = await rebuildLedgers({ sheetId: worktable.sheetId, tabName: worktable.tabName, by: String(by).slice(0, 100) });
   return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
@@ -122,10 +122,30 @@ async function rebuildWorktableProjection(worktable, by) {
 // 과거의 빈 초과 슬롯만 정리한다. 잠금 뒤 기존 정원 동기화의 보호 규칙을 재사용한다.
 async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, by = 'overflow-cleanup' } = {}) {
   const cap = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+  const pendingBy = `overflow-cleanup-pending:${String(by).slice(0, 70)}`;
+  const rebuiltBy = `overflow-cleanup-rebuilt:${String(by).slice(0, 70)}`;
   const { rows: campaigns } = await pool.query(
-    `SELECT id, linked_sheet_id, linked_tab_name, linked_tab_gid, recruit_total
-       FROM recruit_campaigns WHERE COALESCE(recruit_total, 0) > 0
-        AND COALESCE(linked_sheet_id, '') <> '' AND COALESCE(linked_tab_name, '') <> ''
+    `WITH candidates AS (
+       SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at,
+              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL) AS live_slots,
+              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL
+                AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
+                AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
+                AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
+                AND cp.order_submission_id IS NULL) AS empty_slots,
+              BOOL_OR(cp.deleted_at IS NOT NULL AND cp.updated_by LIKE 'overflow-cleanup-pending:%') AS pending_projection
+         FROM recruit_campaigns rc
+         JOIN tab_configs tc ON tc.sheet_id = rc.linked_sheet_id AND tc.tab_name = rc.linked_tab_name
+                            AND COALESCE(tc.sheetless, FALSE) = TRUE
+         LEFT JOIN campaign_participants cp ON cp.sheet_id = rc.linked_sheet_id AND cp.tab_name = rc.linked_tab_name
+        WHERE COALESCE(rc.recruit_total, 0) > 0
+          AND COALESCE(rc.linked_sheet_id, '') <> '' AND COALESCE(rc.linked_tab_name, '') <> ''
+        GROUP BY rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at
+     )
+     SELECT id, linked_sheet_id, linked_tab_name, linked_tab_gid, recruit_total, pending_projection
+       FROM candidates
+      WHERE (live_slots > recruit_total AND empty_slots >= live_slots - recruit_total)
+         OR COALESCE(pending_projection, FALSE)
       ORDER BY updated_at DESC LIMIT $1`, [cap]);
   const out = { ok: true, dryRun: !!dryRun, scanned: campaigns.length, retired: 0, skipped: 0, items: [] };
   for (const campaign of campaigns) {
@@ -133,16 +153,27 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
     try {
       await client.query('BEGIN');
       const checked = await assertWorktableSlotsInTx(client, campaign, campaign.recruit_total);
-      if (!checked.checked || !checked.retire) { await client.query('ROLLBACK'); out.skipped++; continue; }
+      const retryProjection = !!campaign.pending_projection;
+      if (!checked.checked || (!checked.retire && !retryProjection)) { await client.query('ROLLBACK'); out.skipped++; continue; }
       if (dryRun) {
         await client.query('ROLLBACK');
         out.items.push({ campaignId: campaign.id, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
-          target: checked.target, wouldRetire: checked.retire });
+          target: checked.target, wouldRetire: checked.retire, wouldRebuildProjection: retryProjection || !!checked.retire });
         continue;
       }
-      const changed = await syncWorktableSlotsInTx(client, campaign, campaign.recruit_total, by);
-      await client.query('COMMIT');
-      const rebuilt = await rebuildWorktableProjection(changed, by);
+      const changed = checked.retire
+        ? await syncWorktableSlotsInTx(client, campaign, campaign.recruit_total, pendingBy)
+        : { synced: true, add: 0, retire: 0, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name, target: checked.target };
+      if (checked.retire) await client.query('COMMIT');
+      else await client.query('ROLLBACK');
+      const rebuilt = await rebuildWorktableProjection(changed, by, retryProjection);
+      await pool.query(
+        `UPDATE campaign_participants
+            SET updated_by=$3, updated_at=NOW()
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
+            AND updated_by LIKE 'overflow-cleanup-pending:%'`,
+        [campaign.linked_sheet_id, campaign.linked_tab_name, rebuiltBy]
+      );
       out.retired += changed.retire || 0;
       out.items.push({ campaignId: campaign.id, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
         target: changed.target,

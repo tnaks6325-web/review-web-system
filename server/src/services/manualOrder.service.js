@@ -436,6 +436,9 @@ async function submitExternalOrder({
     sheetId, tabName, gid, orderData,
     slotRowNumber: null,
     loginPhone8: p8, loginName: f.recipient || '',
+    // 작업표의 정원 밖 완성 행 허용은 이 출처가 DB에 확정돼야만 가능하다.
+    // 사후 best-effort UPDATE로 두면 일시 오류 때 정상 외부모집 건이 빈 슬롯 취급된다.
+    source: SOURCE_EXTERNAL,
     // 신규 신청 행을 우리가 직접 만들어 확정하므로 홀드 문맥은 넘기지 않는다(이중 확정 방지)
   });
 
@@ -443,11 +446,6 @@ async function submitExternalOrder({
   //   원장(selected_opt_key)이나 신청(option_key)으로 역주입하지 않는다 —
   //   관리자 작업지시값이 "리뷰어가 고른 옵션"으로 굳어 정원·CS·정산이 오독한다.
   //   (역주입은 리뷰어 제출 경로와도 갈려 "수동제출만 다르게 동작"하는 드리프트를 만든다.)
-
-  // 출처 표시 — 목록에서 대리제출 건을 구분
-  try {
-    await pool.query('UPDATE order_submissions SET source = $2 WHERE id = $1', [ledger.orderSubmissionId, SOURCE_EXTERNAL]);
-  } catch (_) { /* 표시 실패는 접수에 영향 없음 */ }
 
   // ③ 참여형이면 정원 차감
   let application = null;
