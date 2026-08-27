@@ -2280,8 +2280,21 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
     html += '<div style="text-align:center;font-size:.7rem;color:#9CA3AF;border:1.5px dashed #D1D5DB;border-radius:11px;padding:10px">연결된 팀 채팅방이 없어요</div>';
   }
   if (!done){
-    const n = (_partInfoSubmitItems && _partInfoSubmitItems.length > 1) ? (' (' + _partInfoSubmitItems.length + '건)') : '';
-    html += '<button onclick="_partInfoSubmit()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">📤 리뷰제출하기' + n + '</button>';
+    const submitItems = _partInfoSubmitItems || [];
+    if (submitItems.length <= 1) {
+      html += '<button onclick="_partInfoSubmit(0)" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">📤 리뷰제출하기</button>';
+    } else {
+      // 같은 캠페인에 여러 명의/주문이 있어도 제출은 반드시 행(application)별로 분리한다.
+      // 한 번에 넘기면 이미 제출한 건을 포함해 전부 작성해야 하는 것처럼 보여 오제출을 유발한다.
+      html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF1F7">'
+        + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">제출할 참여 건을 선택하세요</div>'
+        + submitItems.map((x, i) => {
+          const recipient = String(x.recipient || x.orderer || (x.row && (x.row["수취인"] || x.row["주문자"])) || '').trim();
+          const label = recipient ? ('수취인 ' + recipient) : ((i + 1) + '번째 참여 건');
+          return '<button onclick="_partInfoSubmit(' + i + ')" style="display:block;width:100%;text-align:left;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.82rem;font-weight:800;border-radius:11px;padding:11px 12px;margin-top:' + (i ? '6' : '0') + '">📤 ' + escHtml(label) + ' 리뷰 제출하기</button>';
+        }).join('')
+        + '</div>';
+    }
   }
   html += reEditHtml;
   html += csBtnHtml;
@@ -2449,7 +2462,17 @@ function _partInfoOpenReEdit(){
 }
 function _partInfoOpenChat(){ if (_partInfoChatUrl) window.open(_partInfoChatUrl, '_blank', 'noopener'); }
 function _partInfoOpenProduct(){ if (_partInfoProductUrl) window.open(_partInfoProductUrl, '_blank', 'noopener'); }
-function _partInfoSubmit(){ const items = _partInfoSubmitItems; closePartInfo(); if (items && items.length) goToSubmit(items); }
+/**
+ * 리뷰내역의 묶음 카드는 표시만 함께 한다. 실제 제출 화면에는 선택한 한 행만 전달한다.
+ * index 인자가 없거나 잘못된 다건 요청은 막아, 새 호출부가 다시 전체 배열을 제출하는 회귀를 차단한다.
+ */
+function _partInfoSubmit(index){
+  const items = _partInfoSubmitItems || [];
+  const i = Number(index);
+  if (!Number.isInteger(i) || i < 0 || i >= items.length) return toast('제출할 참여 건을 선택해주세요');
+  closePartInfo();
+  goToSubmit([items[i]]);
+}
 function _escAttrX(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ═══════════════════════════════════════
