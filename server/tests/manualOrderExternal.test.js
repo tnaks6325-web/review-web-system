@@ -402,6 +402,10 @@ console.log('\nE. 데이터 보전 가드');
     !/existingOptionKeyAt\(ledger\.tabContext, ledger\.sheetRow\)/.test(src)
     && !/UPDATE order_submissions SET selected_opt_key = \$2 WHERE id = \$1/.test(src));
 
+  ok('E9b ★ 무시트 외부모집은 배정 빈 행이 없어도 작업표 기록을 시도한다(원장 출처 게이트가 초과행 여부를 판정)',
+    /if \(isSl\) \{[\s\S]{0,900}?writeOrderToWorktable\([\s\S]{0,500}?sheetRow: ledger\.sheetRow/.test(src)
+    && !/if \(ledger\.sheetRow\) \{\s*let isSl/.test(src));
+
   ok('E10 ★ 공유 매퍼는 건드리지 않았다 — order_cancel의 칸 비우기·TrackB 컬럼 disjoint 마스크가 ""에 의존',
     /return orderData\.dateStr \|\| '';/.test(R('src/services/orderLedger.service.js')));
 }

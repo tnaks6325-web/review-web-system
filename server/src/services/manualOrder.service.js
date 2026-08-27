@@ -473,19 +473,20 @@ async function submitExternalOrder({
   //   ★ 판정은 `sheetlessScope` 단일 출처. 실패 시 종전 경로(fail-open) — 큐 실행부가 최종 방어.
   let queued = false;
   let sheetlessDone = null;
-  if (ledger.sheetRow) {
-    let isSl = false;
-    try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); } catch (_) { isSl = false; }
-    if (isSl) {
-      try {
-        sheetlessDone = await require('./sheetlessOrder.service').writeOrderToWorktable({
-          sheetId, tabName, tabGid: ledger.tabGid || gid || '',
-          sheetRow: ledger.sheetRow, orderData, orderSubmissionId: ledger.orderSubmissionId,
-          loginPhone8: p8, loginName: f.recipient || '',
-        });
-      } catch (e) { sheetlessDone = { ok: false, reason: 'exception', message: e.message }; }
-      if (!sheetlessDone.ok) warnings.push('작업표 기록 실패(자동복구 대상): ' + (sheetlessDone.message || sheetlessDone.reason));
-    }
+  let isSl = false;
+  try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); } catch (_) { isSl = false; }
+  if (isSl) {
+    /* 외부모집은 원장 출처가 admin_external이고 수취인·연락처가 확정된 경우에만 작업표 서비스가
+       정원 밖의 완성 행을 허용한다. 그래서 sheetRow가 없어도 호출해야 하며, 일반 경로에는 이
+       서비스가 호출되지 않는다. */
+    try {
+      sheetlessDone = await require('./sheetlessOrder.service').writeOrderToWorktable({
+        sheetId, tabName, tabGid: ledger.tabGid || gid || '',
+        sheetRow: ledger.sheetRow, orderData, orderSubmissionId: ledger.orderSubmissionId,
+        loginPhone8: p8, loginName: f.recipient || '',
+      });
+    } catch (e) { sheetlessDone = { ok: false, reason: 'exception', message: e.message }; }
+    if (!sheetlessDone.ok) warnings.push('작업표 기록 실패(자동복구 대상): ' + (sheetlessDone.message || sheetlessDone.reason));
   }
   if (ledger.sheetRow && !sheetlessDone) {
     try {
@@ -506,7 +507,7 @@ async function submitExternalOrder({
       await markOrderMirrorFailed(ledger.orderSubmissionId, e);
       warnings.push('시트 반영 예약 실패(자동복구 대상): ' + e.message);
     }
-  } else if (!ledger.sheetRow) {
+  } else if (!ledger.sheetRow && !sheetlessDone) {
     warnings.push('빈 행을 찾지 못해 보류 — 자동복구가 하단에 기록합니다');
   }
 

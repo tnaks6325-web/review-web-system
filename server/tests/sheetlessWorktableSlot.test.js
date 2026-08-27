@@ -9,11 +9,19 @@ assert.ok(/order_submission_id = \$3::uuid/.test(source), 'idempotent retry must
 assert.ok(/FOR UPDATE SKIP LOCKED/.test(source), 'concurrent submissions must claim different open slots');
 assert.ok(/order_submission_id IS NULL/.test(source), 'only an unlinked slot may be claimed');
 assert.ok(/order_submission_id = \$9::uuid/.test(source), 'the claimed worktable row must link to the order ledger');
-/* ★★ 2026-08-19 사용자 확정으로 규칙이 바뀌었다 — **확정된 주문에는 줄이 있어야 한다**.
-   빈 자리가 없다고 미반영으로 두면 결제한 리뷰어가 어느 표에도 없고 복구가 같은 실패를 반복한다.
-   대신 ① 무시트로 등록된 탭에서만 ② 쓰기 소유자(participants.service) 를 통해 ③ 탭 advisory 락
-   안에서만 이어붙인다. 이 세 조건을 지운 채 append 를 열면 시트 기반 표 오염·번호 충돌이 난다. */
-assert.ok(/appendSlot\(client/.test(source), 'a confirmed order with no open slot must extend the worktable, not be dropped');
+/* ★★ 작업보드의 모집 정원은 실제 행 수와 같아야 한다. 일반 제출·재시도·복구는 빈 슬롯이
+   없으면 행을 늘리지 않고, 외부모집 수동제출만 원장의 출처·수취인·연락처를 확인한 뒤 예외로
+   이어붙일 수 있다. 이 경계가 풀리면 300건 작업에 빈 301번 슬롯이 생긴다. */
+assert.ok(/async function _isConfirmedExternalManualOrder/.test(source), 'external-manual overflow gate must exist');
+assert.ok(/order\.source === 'admin_external'/.test(source), 'only admin_external orders may overflow the planned row count');
+assert.ok(/order\.recipient/.test(source) && /phone_digits/.test(source), 'overflow must require confirmed recipient and phone data');
+assert.ok(/const confirmedExternalManual = await _isConfirmedExternalManualOrder/.test(source), 'no-slot branch must check the ledger-backed external-manual gate');
+assert.ok(/if \(!confirmedExternalManual\) \{[\s\S]{0,360}?reason: 'no_open_slot'/.test(source),
+  'ordinary no-slot writes must roll back instead of preparing an overflow row');
+assert.ok(/confirmedExternalManual[\s\S]{0,1400}?appendSlot\(client/.test(source),
+  'only the confirmed external-manual branch may append a physical overflow row');
+assert.ok(/const confirmedExternalManual = await _isConfirmedExternalManualOrder\(client, orderSubmissionId\);[\s\S]{0,420}?없는 지정 행 거부/.test(source),
+  'a missing explicitly assigned row must also reject ordinary orders instead of recreating an overflow slot');
 /* ★ "문자열이 있나"로 재면 호출을 죽여도(`if(false)` · 다른 함수로 교체) 통과한다 —
    변이시험이 실제로 뚫었다. 호출 형태와 **순서**를 고정한다. */
 assert.ok(/await client\.query\('SELECT pg_advisory_xact_lock\(hashtext\(\$1\)\)'/.test(source),
@@ -34,9 +42,10 @@ assert.ok(/rc\.source_work_order_id = wo\.id[\s\S]*?wo\.linked_campaign_id = rc\
 const recoverySrc = (() => {
   const i = source.indexOf('async function recoverUnwrittenSheetlessOrders(');
   assert.ok(i > -1, 'recovery function not found');
-  const m = /\n\}\n/g; m.lastIndex = i;
-  const e = m.exec(source);
-  return source.slice(i, e ? e.index : source.length);
+  const nextDoc = source.indexOf('작업보드 줄은 **이미 있는데**', i);
+  const e = source.lastIndexOf('/**', nextDoc);
+  assert.ok(e > i, 'recovery function end not found');
+  return source.slice(i, e);
 })();
 assert.ok(!/os\.sheet_id LIKE 'campaign:%'/.test(recoverySrc), 'recovery must include pre-transition campaign orders that still carry legacy sheet keys');
 assert.ok(/JOIN campaign_applications ca/.test(source), 'recovery must be scoped by the verified campaign application, not a client-supplied sheet key');

@@ -213,9 +213,8 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
         orderData: { recipient: '나중', phone: '010-0000-1111' }, orderSubmissionId: 'os-2',
       });
       const ins = log.client.find(c => /INSERT INTO campaign_participants/.test(c.sql));
-      ok('표 끝을 넘어 배정되면 그 자리에 줄을 만든다', r.ok === true && !!ins);
-      ok("새 줄 source='worktable' (상태 칸이 켜지는 값 — 'manual' 금지)", /'worktable'/.test(ins.sql));
-      ok('이미 있으면 덮지 않는다(ON CONFLICT DO NOTHING)', /ON CONFLICT .*DO NOTHING/.test(ins.sql));
+      ok('일반 주문은 없는 지정 행도 만들지 않는다', r.ok === false && r.reason === 'no_open_slot' && !ins);
+      ok('없는 지정 행을 거부할 때 트랜잭션을 되돌린다', log.client.some(c => c.sql === 'ROLLBACK'));
     }
     {
       // 장부 재생성 실패 = 완결로 찍지 않는다(표엔 있는데 검색은 안 되는 상태 차단)

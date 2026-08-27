@@ -45,6 +45,29 @@ function _phone8(v) {
 // 중복 판정 키 정규화 — SQL 쪽 regexp_replace(…, '\D', '', 'g') 와 **같은 규칙**이어야 한다.
 function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
 
+/*
+ * 작업표 정원을 넘겨 줄을 만들 수 있는 유일한 경우.
+ *
+ * 외부모집 수동제출은 이미 외부에서 구매가 확정된 건을 사후 기록하는 흐름이라, 준비된
+ * 슬롯이 모두 찬 경우에도 실제 주문 행 하나를 남길 필요가 있다. 반대로 일반 제출·재시도·
+ * 복구는 이 분기로 들어오면 안 된다. 이 확인을 호출자가 준 플래그가 아니라 원장 행에서
+ * 다시 하는 이유는, 빈 301번 "준비 슬롯"이 일반 경로에서 생기는 일을 재발시키지 않기 위해서다.
+ */
+async function _isConfirmedExternalManualOrder(client, orderSubmissionId) {
+  const { rows } = await client.query(
+    `SELECT source,
+            NULLIF(btrim(COALESCE(recipient, '')), '') AS recipient,
+            regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS phone_digits
+       FROM order_submissions
+      WHERE id = $1::uuid AND deleted_at IS NULL
+      FOR KEY SHARE`, [orderSubmissionId]);
+  const order = rows[0];
+  return !!(order
+    && order.source === 'admin_external'
+    && order.recipient
+    && String(order.phone_digits || '').length >= 8);
+}
+
 /**
  * 주문 값 → 작업표 행에 병합할 `row_json` 조각.
  *
@@ -259,12 +282,18 @@ async function writeOrderToWorktable({
             LIMIT 1`, [sheetId, tabName]));
       }
       if (!cur.length) {
-        /* ★★ 빈 자리가 없다고 주문을 미반영으로 두지 않는다 — **확정된 주문에는 줄이 있어야 한다**.
-           작업표가 진실원본인 지금 "준비된 줄 수만큼만 받는다"로 두면, 결제한 리뷰어가 어느 표에도
-           없는 상태가 되고 복구 잡이 같은 실패(`no_open_slot`)를 영원히 반복한다(반복 이상현상).
-           ★ 쓰기 소유자 규율 — `campaign_participants` INSERT 는 participants.service 가 한다. */
-        /* ★ fail-closed — 무시트로 등록된 탭에서만 이어붙인다. 시트 기반 탭에 줄을 만들면
-           그 표의 진실원본(시트)과 갈라진다(장부 재생성도 `not_sheetless` 로 거부한다). */
+        /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 여기서 줄을 이어붙이면 300건 작업에
+           빈 301번 슬롯이 남고, 작업보드 집계도 301/300으로 틀어진다. 예외는 외부모집 수동제출의
+           확정 주문뿐이며, 원장 출처·수취인·연락처를 같은 트랜잭션에서 다시 확인한다. */
+        const confirmedExternalManual = await _isConfirmedExternalManualOrder(client, orderSubmissionId);
+        if (!confirmedExternalManual) {
+          await client.query('ROLLBACK');
+          logger.warn(`[sheetlessOrder] 빈 슬롯 없음 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} os=${orderSubmissionId}`);
+          return { ok: false, reason: 'no_open_slot' };
+        }
+        /* ★ 외부모집 수동제출만: 실제로 확정된 주문 데이터를 곧바로 채울 행을 하나 추가한다.
+           append와 UPDATE는 같은 트랜잭션이므로 중간 실패 시 ROLLBACK되어 빈 행이 남지 않는다.
+           ★ fail-closed — 무시트로 등록된 탭에서만 이어붙인다. */
         const { rows: tc } = await client.query(
           `SELECT COALESCE(sheetless, FALSE) AS sheetless FROM tab_configs
             WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
@@ -276,8 +305,7 @@ async function writeOrderToWorktable({
           sheetId, tabName, tabGid: gid || null, by: 'sheetless-order-append',
         });
         if (!appended) { await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
-        // 준비된 줄을 넘겨 이어붙였다는 사실은 남긴다(정원 대비 실제 반영 수 대조용).
-        logger.warn(`[sheetlessOrder] 준비된 빈 자리가 없어 줄을 이어붙임 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
+        logger.warn(`[sheetlessOrder] 외부모집 수동제출 확정 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
         cur = [appended];
       }
       seq = Number(cur[0].seq);
@@ -310,13 +338,19 @@ async function writeOrderToWorktable({
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3`,
         [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId]);
     } else {
-      // 행 번호가 명시된 레거시 복구만 표 끝 append를 허용한다. 신규 무시트 접수는 위의
-      // 준비 슬롯 선점만 사용하므로 모집 인원을 초과해 작업보드 행을 만들지 않는다.
+      // 행 번호가 명시됐어도 없는 번호에 일반 주문 행을 만들면, 오래된 행배정 값 하나가
+      // 모집 인원을 넘는 빈 슬롯을 재생성한다. 실제 외부모집 수동제출만 예외로 허용한다.
       if (requestedSeq == null) {
         await client.query('ROLLBACK');
         return { ok: false, reason: 'no_open_slot' };
       }
-      // 표 끝을 넘어 배정된 경우(append) — 그 자리에 줄을 만든다.
+      const confirmedExternalManual = await _isConfirmedExternalManualOrder(client, orderSubmissionId);
+      if (!confirmedExternalManual) {
+        await client.query('ROLLBACK');
+        logger.warn(`[sheetlessOrder] 없는 지정 행 거부 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} seq=${requestedSeq} os=${orderSubmissionId}`);
+        return { ok: false, reason: 'no_open_slot' };
+      }
+      // 외부모집 수동제출의 확정 주문만: 표 끝을 넘어 배정된 그 자리에 완성 행을 만든다.
       //   ★ source='worktable' — `importTabFromIndex` 상태 CASE 가 인정하는 값(신규 값 금지).
       await client.query(
         `INSERT INTO campaign_participants
