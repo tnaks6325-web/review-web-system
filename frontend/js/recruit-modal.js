@@ -447,7 +447,7 @@
       </div></template><!-- /legacy rf-main -->
       <div class="rf-main rf-compact-main">
         <section class="editor">
-          <div class="startup-setting-bar"><div><strong>작업 시작 설정</strong></div><div id="rf_startcheck" class="rf-startcheck" hidden></div><div id="rf_status_buttons" class="square-toggle"><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
+          <div class="startup-setting-bar"><div><strong>작업 시작 설정</strong></div><div id="rf_startcheck" class="rf-startcheck" hidden></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
           <div id="editorScroller" class="compact-editor-scroller" tabindex="0" aria-label="모집공고 수정 항목">
             <section class="section rf-public-settings">
               <div class="title-control-bar"><label class="title-control-label" for="rf_title"><span>공고 제목</span><input id="rf_title" type="text" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"></label></div>
