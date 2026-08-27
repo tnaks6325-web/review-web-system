@@ -473,7 +473,7 @@
                 <div class="form-row"><span class="form-label">기간별 리뷰비</span><div class="form-control"><input type="checkbox" id="rf_fee_sched_on" hidden><button type="button" id="rf_fee_sched_toggle" class="switch-button" aria-pressed="false" onclick="rfToggleFeeSchedule()"><span aria-hidden="true"></span></button><strong id="feeScheduleState">사용 안 함</strong></div></div>
                 <div id="rf_fee_sched_section" class="fee-schedule" style="display:none"><div class="fee-schedule-inner"><div class="fee-schedule-box"><div class="fee-head"><span>적용 시작일</span><span>리뷰비</span><span>메모</span><span></span></div><div id="rf_fee_rows"></div><button type="button" class="fee-add rchan-btn" onclick="addFeeRow()">+ 리뷰비 구간 추가</button><div id="rf_fee_summary"></div><div id="rf_fee_check"></div></div></div></div>
                 <div class="form-row"><span class="form-label">팀채팅방</span><div class="form-control"><input type="checkbox" id="rf_chat_enabled" hidden><button type="button" id="rf_chat_toggle" class="switch-button" aria-pressed="false" onclick="rfToggleChatRoom()"><span aria-hidden="true"></span></button><strong id="rf_chat_state">사용안함</strong><div id="rf_chat_url_wrap" class="rf-chat-url-field" hidden><input id="rf_chat_url" type="url" placeholder="팀채팅방 URL을 입력하세요" aria-label="팀채팅방 URL"></div></div></div>
-                <div class="form-row clickable-date-row" onclick="rfOpenStartDatePicker(event)"><span class="form-label">모집 시작일 <em class="required">*</em></span><div class="form-control"><div class="date-control"><input id="rf_start_date" type="date" onchange="onRecruitDatesChange()"><span id="rf_start_day">날짜 변경</span></div></div></div>
+                <div class="form-row"><span class="form-label">모집 시작일 <em class="required">*</em></span><div class="form-control"><div id="rf_start_date_control" class="date-control"><input id="rf_start_date" type="date" onchange="onRecruitDatesChange()" tabindex="-1"><button id="rf_start_date_trigger" type="button" aria-haspopup="dialog" aria-expanded="false" onclick="rfToggleStartDateCalendar(event)"><span id="rf_start_date_text">날짜 선택</span><span id="rf_start_day">날짜 변경</span><i class="fas fa-calendar-alt" aria-hidden="true"></i></button><div id="rf_start_calendar" class="rf-start-calendar" role="dialog" aria-label="모집 시작일 선택" hidden></div></div></div></div>
                 <div class="form-row"><span class="form-label">주말 포함 여부</span><div class="form-control"><input type="checkbox" id="rf_skip_weekends" hidden><div id="rf_skip_weekends_toggle" class="square-toggle"><button type="button" data-weekend="include" onclick="rfSetWeekendPolicy(false,this)">주말 포함</button><button type="button" data-weekend="exclude" onclick="rfSetWeekendPolicy(true,this)">주말 제외</button></div><span class="tag public" id="weekendNotice">주말 카드 노출 · 신청 차단</span></div></div>
                 <div class="form-row"><span class="form-label">다계정 허용</span><div class="form-control"><input type="checkbox" id="rf_multi_account" hidden><div id="rf_multi_account_toggle" class="square-toggle"><button type="button" data-multi="off" onclick="rfSetMultiAccount(false,this)">미허용</button><button type="button" data-multi="on" onclick="rfSetMultiAccount(true,this)">허용</button></div><span class="tag" id="accountNote">기본 제한 적용</span><div id="rf_multi_section" hidden><input id="rf_multi_daily" type="number" min="0" value="1"><input id="rf_sub_ttl" type="number" min="1" value="15"></div></div></div>
               </div>
@@ -1009,7 +1009,7 @@
 #recruitModal .rf-compact-main .section-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
 #recruitModal .rf-compact-main .section-heading h3{margin:0;color:#172033;font-size:14px;letter-spacing:-.025em}
 #recruitModal .section-hint{color:#7F8A9B;font-size:10px}.section-count{color:#2563C8;font-size:10px;font-weight:850}
-#recruitModal .rf-compact-main .row-form{border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#fff}
+#recruitModal .rf-compact-main .row-form{border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#fff}#recruitModal .rf-compact-main .row-form.calendar-open{overflow:visible}
 #recruitModal .rf-compact-main .form-row{display:grid;grid-template-columns:minmax(112px,25%) minmax(0,75%);min-height:37px;border:0;border-top:1px solid #DCE3EC;border-radius:0;background:#fff}
 /* ★★ 위 display:grid 는 브라우저 기본 규칙 [hidden]{display:none} 을 **항상 이긴다**(작성자
    스타일시트가 UA 스타일시트보다 우선). 그래서 JS 가 el.hidden = true 로 접어도 줄이 그대로
@@ -1033,7 +1033,26 @@
 #recruitModal .rf-compact-main .channel-custom-field[hidden]{display:none}
 #recruitModal .rf-compact-main .rf-chat-url-field{flex:1 1 220px;min-width:180px}
 #recruitModal .rf-compact-main .rf-chat-url-field[hidden]{display:none}
-#recruitModal .rf-compact-main .rf-chat-url-field input{width:100%}
+#recruitModal .rf-compact-main .rf-chat-url-field input{width:100%;height:26px;padding:0 8px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#172033;font-size:11px;font-weight:700;outline:none}
+#recruitModal .rf-compact-main .rf-chat-url-field input::placeholder{color:#9AA7B8;font-weight:600}
+#recruitModal .rf-compact-main .rf-chat-url-field input:focus{border-color:#86AFEA;box-shadow:0 0 0 2px rgba(39,105,223,.12)}
+#recruitModal .rf-compact-main .date-control{position:relative;display:block;width:178px}
+#recruitModal .rf-compact-main .date-control>input{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none}
+#recruitModal .rf-compact-main .date-control>button{display:flex;align-items:center;width:100%;height:26px;padding:0 7px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#172033;cursor:pointer;font-family:inherit}
+#recruitModal .rf-compact-main .date-control>button:focus-visible{outline:2px solid #93C5FD;outline-offset:1px}
+#recruitModal .rf-compact-main #rf_start_date_text{flex:1;text-align:left;font-size:11px;font-weight:750;letter-spacing:.01em}
+#recruitModal .rf-compact-main .date-control>button #rf_start_day{margin-left:3px;color:#617087;font-size:10px;font-weight:750}
+#recruitModal .rf-compact-main .date-control>button i{margin-left:6px;color:#44536A;font-size:12px}
+#recruitModal .rf-compact-main .rf-start-calendar{position:absolute;z-index:40;top:calc(100% + 5px);left:0;width:222px;padding:10px;border:1px solid #DCE3EC;border-radius:7px;background:#fff;box-shadow:0 8px 18px rgba(15,23,42,.12)}
+#recruitModal .rf-compact-main .rf-start-calendar[hidden]{display:none}
+#recruitModal .rf-compact-main .rf-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:#172033;font-size:10px;font-weight:850}
+#recruitModal .rf-compact-main .rf-cal-head button{width:20px;height:20px;padding:0;border:0;border-radius:4px;background:transparent;color:#53637A;cursor:pointer;font:700 15px/1 inherit}
+#recruitModal .rf-compact-main .rf-cal-head button:hover{background:#EFF4FF;color:#2563C8}
+#recruitModal .rf-compact-main .rf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+#recruitModal .rf-compact-main .rf-cal-weekday{padding:3px 0;color:#94A3B8;font-size:9px;font-weight:800}
+#recruitModal .rf-compact-main .rf-cal-day{height:23px;padding:0;border:0;border-radius:4px;background:transparent;color:#53637A;cursor:pointer;font:700 10px/1 inherit}
+#recruitModal .rf-compact-main .rf-cal-day:hover{background:#EFF4FF;color:#2563C8}
+#recruitModal .rf-compact-main .rf-cal-day.is-selected{background:#2769DF;color:#fff}
 #recruitModal .rf-compact-main .channel-custom-label{color:#2563C8;font-size:10px;font-weight:850;white-space:nowrap}
 #recruitModal .rf-compact-main .channel-custom-field input{min-width:0;width:100%;height:25px;padding:0 7px;border:1px solid #C9DCF9;border-radius:5px;background:#fff;color:#172033;font-size:11px;font-weight:750}
 #recruitModal .rf-compact-main .channel-custom-hint{grid-column:1 / -1;color:#60738F;font-size:9px;font-weight:650;line-height:1.3}
@@ -1584,12 +1603,63 @@
     });
   }
 
-  function rfOpenStartDatePicker(event) {
-    if (event && event.target && event.target.closest('input,button,label')) return;
-    var startDate = document.getElementById('rf_start_date');
-    if (!startDate) return;
-    try { if (typeof startDate.showPicker === 'function') startDate.showPicker(); } catch (_) {}
-    startDate.focus();
+  var rfStartCalendarMonth = null;
+  function rfDateParts(value) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    return m ? { year: +m[1], month: +m[2] - 1, day: +m[3] } : null;
+  }
+  function rfDateValue(year, month, day) {
+    return String(year) + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+  }
+  function rfSyncStartDateControl() {
+    var input = document.getElementById('rf_start_date');
+    var text = document.getElementById('rf_start_date_text');
+    var day = document.getElementById('rf_start_day');
+    var p = rfDateParts(input && input.value);
+    if (!text || !day) return;
+    if (!p) { text.textContent = '날짜 선택'; day.textContent = '날짜 변경'; return; }
+    text.textContent = String(p.year) + '. ' + String(p.month + 1).padStart(2, '0') + '. ' + String(p.day).padStart(2, '0') + '.';
+    var days = ['일', '월', '화', '수', '목', '금', '토'];
+    day.textContent = '(' + days[new Date(Date.UTC(p.year, p.month, p.day)).getUTCDay()] + ')';
+  }
+  function rfRenderStartDateCalendar() {
+    var calendar = document.getElementById('rf_start_calendar');
+    var input = document.getElementById('rf_start_date');
+    if (!calendar || !input) return;
+    var picked = rfDateParts(input.value);
+    var now = new Date();
+    if (!rfStartCalendarMonth) rfStartCalendarMonth = picked ? { year: picked.year, month: picked.month } : { year: now.getFullYear(), month: now.getMonth() };
+    var year = rfStartCalendarMonth.year, month = rfStartCalendarMonth.month;
+    var first = new Date(Date.UTC(year, month, 1)).getUTCDay();
+    var last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    var html = '<div class="rf-cal-head"><button type="button" data-cal-move="-1" aria-label="이전 달">‹</button><strong>' + year + '년 ' + (month + 1) + '월</strong><button type="button" data-cal-move="1" aria-label="다음 달">›</button></div><div class="rf-cal-grid">';
+    ['일','월','화','수','목','금','토'].forEach(function (name) { html += '<span class="rf-cal-weekday">' + name + '</span>'; });
+    for (var blank = 0; blank < first; blank++) html += '<span></span>';
+    for (var date = 1; date <= last; date++) { var value = rfDateValue(year, month, date); html += '<button type="button" class="rf-cal-day' + (input.value === value ? ' is-selected' : '') + '" data-cal-date="' + value + '">' + date + '</button>'; }
+    calendar.innerHTML = html + '</div>';
+    calendar.querySelectorAll('[data-cal-move]').forEach(function (button) { button.addEventListener('click', function () { var next = new Date(Date.UTC(year, month + Number(button.dataset.calMove), 1)); rfStartCalendarMonth = { year: next.getUTCFullYear(), month: next.getUTCMonth() }; rfRenderStartDateCalendar(); }); });
+    calendar.querySelectorAll('[data-cal-date]').forEach(function (button) { button.addEventListener('click', function () { input.value = button.dataset.calDate; onRecruitDatesChange(); rfCloseStartDateCalendar(); }); });
+  }
+  function rfCloseStartDateCalendar() {
+    var calendar = document.getElementById('rf_start_calendar');
+    var trigger = document.getElementById('rf_start_date_trigger');
+    var rowForm = document.getElementById('rf_start_date_control')?.closest('.row-form');
+    if (calendar) calendar.hidden = true;
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    if (rowForm) rowForm.classList.remove('calendar-open');
+  }
+  function rfToggleStartDateCalendar(event) {
+    event?.preventDefault(); event?.stopPropagation();
+    var calendar = document.getElementById('rf_start_calendar');
+    var trigger = document.getElementById('rf_start_date_trigger');
+    var rowForm = document.getElementById('rf_start_date_control')?.closest('.row-form');
+    if (!calendar || !trigger) return;
+    if (!calendar.hidden) { rfCloseStartDateCalendar(); return; }
+    rfStartCalendarMonth = null;
+    rfRenderStartDateCalendar();
+    calendar.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    if (rowForm) rowForm.classList.add('calendar-open');
   }
 
   function syncStatusButtons() {
@@ -1660,7 +1730,10 @@
     refreshLinkedReferences: refreshLinkedReferences,
     syncStatusButtons: syncStatusButtons,
     setStatus: setStatus,
+    syncStartDateControl: rfSyncStartDateControl,
+    closeStartDateCalendar: rfCloseStartDateCalendar,
   };
+  window.rfToggleStartDateCalendar = rfToggleStartDateCalendar;
   // 스크립트가 마운트 지점 뒤에 로드되면 즉시, 아니면 DOM 준비 후
   if (!mount()) document.addEventListener('DOMContentLoaded', function () { mount(); });
 })();
