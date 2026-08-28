@@ -9,6 +9,7 @@ const {
   LEGACY_WORKBOARD_SCHEMA_VERSION,
   WorkboardSchemaError,
   assertSupportedWorkboardSchemaVersion,
+  isAutomatedWorkboardEnabled,
 } = require('../services/workboardSchema.service');
 const {
   ProductOptionsError,
@@ -475,6 +476,16 @@ router.post('/intake', async (req, res, next) => {
           source_revision: existing.source_revision,
         });
       }
+    }
+
+    // 기존 원본의 재시도는 위에서 idempotent로 반환한다. 이 지점은 새 작업만 막아
+    // 긴급 복귀 때 이미 만든 v2 작업의 원본 이력까지 끊지 않는다.
+    if (sourceContract && sourceContract.workboardSchemaVersion === 2 && !isAutomatedWorkboardEnabled()) {
+      return res.status(409).json({
+        ok: false,
+        code: 'workboard_v2_disabled',
+        error: '새 작업표 자동 규격은 현재 보류 중입니다. 기존 규격으로 다시 전송해 주세요.',
+      });
     }
 
     let data;

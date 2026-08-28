@@ -6,6 +6,7 @@ const {
   SourceContractError,
   normalizeReviewOrderSourceContract,
 } = require('../src/services/reviewOrderSourceContract.service');
+const { isAutomatedWorkboardEnabled } = require('../src/services/workboardSchema.service');
 
 let passed = 0;
 function test(name, fn) {
@@ -57,6 +58,12 @@ test('작업표 규격은 누락 시 v1이며 정의된 v1·v2만 계약으로 �
   assert.strictEqual(v2.workRound, 2);
   assert.throws(() => normalizeReviewOrderSourceContract({ ...base, workboard_schema_version: 2 }), SourceContractError);
   assert.throws(() => normalizeReviewOrderSourceContract({ ...base, workboard_schema_version: 3 }), SourceContractError);
+});
+
+test('v2 생성은 본섭 킬스위치를 명시적으로 켠 경우에만 연다', () => {
+  assert.strictEqual(isAutomatedWorkboardEnabled({}), false);
+  assert.strictEqual(isAutomatedWorkboardEnabled({ WORKBOARD_V2_ENABLED: 'true' }), true);
+  assert.strictEqual(isAutomatedWorkboardEnabled({ WORKBOARD_V2_ENABLED: '0' }), false);
 });
 
 test('신규 형식의 식별자 일부만 전달하면 거부한다', () => {
