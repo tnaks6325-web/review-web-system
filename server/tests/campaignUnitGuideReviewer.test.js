@@ -138,9 +138,15 @@ const IMG = 'https://api.example.com/api/order/guide-image/bbbbbbbbbbbbbbbbbbbbb
   }, { apiBase: 'https://api.example.com' });
   ok('선택지 전용 가이드가 있으면 그 가이드를 보여준다', withUnit.includes('옵션A 전용'));
   ok('★ 그때 공고 공통 가이드는 보여주지 않는다(치환)', !withUnit.includes('공통 가이드'));
-  ok('★ 치환 사실을 문장으로 말한다(조용한 치환 금지)',
-    withUnit.includes('cwd-note') && withUnit.includes('선택지 전용 안내'));
-  ok('안내 문장에 선택지 이름이 들어간다', withUnit.includes('옵션A'));
+  ok('★ 선택지명 반복 안내문은 붙이지 않는다',
+    !withUnit.includes('cwd-note') && !withUnit.includes('선택지 전용 안내'));
+  ok('선택지 카드의 이름은 그대로 보인다', withUnit.includes('옵션A'));
+
+  const adminPreview = M.cardsHtml({
+    workDetail: common, inflowType: 'guide',
+    selectedOption: { optKey: '옵션A', productName: '상품A', unitKind: 'option', inflowGuideHtml: '<b>옵션A 전용</b>' },
+  }, { apiBase: 'https://api.example.com', showOption: false, showUnitGuideIdentity: true });
+  ok('관리자 인라인 미리보기만 선택지 식별 안내를 유지한다', adminPreview.includes('선택지 전용 안내'));
 
   const noUnit = M.cardsHtml({
     workDetail: common, inflowType: 'guide',
@@ -154,7 +160,7 @@ const IMG = 'https://api.example.com/api/order/guide-image/bbbbbbbbbbbbbbbbbbbbb
     selectedOption: { optKey: '상품B', unitKind: 'product', inflowGuideImages: [IMG] },
   }, { apiBase: 'https://api.example.com' });
   ok('★ 글 없이 사진만 있어도 선택지 전용으로 인정(사진이 통째로 사라지지 않는다)',
-    imgOnly.includes(IMG) && !imgOnly.includes('공통 가이드') && imgOnly.includes('선택지 전용 안내'));
+    imgOnly.includes(IMG) && !imgOnly.includes('공통 가이드') && !imgOnly.includes('선택지 전용 안내'));
 
   const noOpt = M.cardsHtml({ workDetail: common }, { apiBase: 'https://api.example.com' });
   ok('선택지 자체가 없는 공고는 종전 그대로', noOpt.includes('공통 가이드') && !noOpt.includes('선택지 전용 안내'));
@@ -294,7 +300,7 @@ console.log('\n[H] 렌더러 — 안내글 HTML 과 배열에 같이 담긴 사�
       inflowGuideHtml: '<img src="' + U(TOK_A) + '">', inflowGuideImages: [U(TOK_A)] },
   }, { apiBase: 'https://api.example.com' });
   ok('★★ 사진이 전부 접혀도 공통 가이드로 되돌아가지 않는다', !/공통 가이드/.test(guideOf(foldAll)));
-  ok('★ 그때도 선택지 전용이라고 말한다', /선택지 전용 안내예요/.test(foldAll));
+  ok('★ 사진이 전부 접혀도 선택지명 반복 안내문을 만들지 않는다', !/선택지 전용 안내예요/.test(foldAll));
 
   // ⑤ 리뷰가이드·특이사항은 짝이 되는 HTML 이 없다 — 접기 인자 없이 종전 동작
   const plainFields = M.cardsHtml({

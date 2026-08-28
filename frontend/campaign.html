@@ -1490,11 +1490,18 @@ function _renderJoinedView(j, h){
     show('vJoined');
 }
 
-// 참여 후: 내가 고른 옵션 카드(+변경 버튼) — 옵션 미등록 캠페인은 숨김
+// 옵션 없는 단일상품은 선택지가 곧 상품 본문이다. 이미 바로 아래 상품 카드에 같은
+// 상품명·결제금액이 표시되므로 별도 "내가 참여한 옵션" 카드를 내지 않는다.
+function _isSingleProductUnitCampaign(j){
+  const options = j && Array.isArray(j.options) ? j.options : [];
+  return options.length === 1 && options[0] && options[0].unitKind === 'product';
+}
+
+// 참여 후: 내가 고른 옵션 카드(+변경 버튼) — 옵션 미등록·단일상품 캠페인은 숨김
 function renderJoinedOption(j){
   const box = $('joinedOptionBox');
   const so = j && j.selectedOption;
-  if(!(j && j.options && j.options.length && so)){ box.style.display = 'none'; return; }
+  if(!(j && j.options && j.options.length && so) || _isSingleProductUnitCampaign(j)){ box.style.display = 'none'; return; }
   box.style.display = '';
   // ★ 134 — 복합 작업은 상품이 둘 이상이라 옵션명만으론 어느 상품인지 못 가린다.
   //   옵션 없는 상품(unitKind='product')은 줄 이름이 곧 상품명이라 상품 표기를 겹쳐 적지 않는다.
