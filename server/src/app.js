@@ -51,6 +51,9 @@ app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('combined'));
+// 제한기에 의해 바로 끝나는 429도 관측해야 실제 제한 경로를 추적할 수 있다.
+// rateLimiter 뒤에 두면 429는 finish 메트릭 자체를 남기지 못해 오류율 0%로 보인다.
+app.use(metricsMiddleware);
 app.use('/api/', rateLimiter);
 
 // PR preview can be pointed at production data for verification.  Keep this
@@ -65,7 +68,6 @@ if (readOnlyPreview) {
     return res.status(403).json({ ok: false, error: '읽기 전용 프리뷰에서는 저장할 수 없습니다.' });
   });
 }
-app.use(metricsMiddleware);  // API 메트릭 수집
 
 // ── 라우터 등록 ──
 // 검색/인덱스 (Section 5)
