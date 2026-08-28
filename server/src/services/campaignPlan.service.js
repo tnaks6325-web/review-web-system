@@ -581,8 +581,19 @@ async function savePlans(campaignId, body, actor) {
     // raw/review 원장이 이전 날짜를 유지한다. 커밋 후 같은 탭의 투영을 즉시 재생성해
     // 저장 결과와 작업보드 표를 같은 요청 안에서 맞춘다.
     let worktableProjection = null;
+    let worktableNumbering = null;
     if (projectionTarget) {
       try {
+        // 조절로 새로 생긴 준비 행의 DB seq와 화면 `번호`는 별도 값이다. 신규 경로는
+        // sheetlessDailyPlan에서 함께 채우고, 기존 빈 번호·날짜 재배치로 생긴 순서 틀어짐은
+        // 여기서 활성 행 전체를 1..N으로 보정한다. 이후 장부를 재생성해 다음 동기화에서
+        // 빈 번호가 되돌아오지 않게 한다.
+        const { renumberTab } = require('./rowNumbering.service');
+        worktableNumbering = await renumberTab({
+          ...projectionTarget,
+          by: actor || 'campaign-plan',
+          rebuild: false,
+        });
         const { rebuildLedgers } = require('./sheetlessLedger.service');
         const rebuilt = await rebuildLedgers({ ...projectionTarget, by: actor || 'campaign-plan' });
         worktableProjection = {
@@ -603,7 +614,7 @@ async function savePlans(campaignId, body, actor) {
       }
     }
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} 계획 저장 — set ${set.length} / remove ${remove.length}`);
-    return { applied: set.length + remove.length, worktableSync, worktableProjection };
+    return { applied: set.length + remove.length, worktableSync, worktableNumbering, worktableProjection };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
