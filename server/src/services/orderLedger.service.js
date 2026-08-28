@@ -764,14 +764,39 @@ async function tabDetectedHeaders(sheetId, tabGid, tabName) {
 }
 
 /* 그리드 셀(col:<헤더>) 편집 → 주문 원장 through-write 대상 역할 → order_submissions 컬럼명.
- *   worktableTemplate.ROLE_META 의 부분집합만 — 은행·계좌·예금주·금액·주문번호·비고는 이번 버전에서
- *   제외한다(review_index 신원 매칭에 관여하지 않고, 잘못 매칭됐을 때 금전 데이터 오염 위험이 더 크다).
+ *   worktableTemplate.ROLE_META 의 부분집합만 — 은행·계좌·예금주·주문번호·비고는 제외한다.
+ *   결제금액은 운영자가 작업보드에서 바로 정정할 수 있도록 원장과 무시트 작업표에도 함께 쓴다.
  *   값(=order_submissions 컬럼명)은 columnMapping.service.STANDARD_FIELDS 의 key 와 **같은 표기**
  *   (예 'user_id')다 — 오버라이드 대조(아래)에서 이 값을 그대로 조회 키로 쓴다.
  *   ★ 'orderer'→reviewer_name 은 매핑하지 않는다 — reviewer_name(참여자 신원열)은 로그인 계정을
  *     우선하는 별개 의미라(`writeOrderToWorktable` 참조), 시트의 "주문자" 칸 정정으로 덮으면 안 된다.
  */
-const _OS_COL_BY_ROLE = { orderer: 'orderer', recipient: 'recipient', userId: 'user_id', phone: 'phone', address: 'address' };
+const _OS_COL_BY_ROLE = { orderer: 'orderer', recipient: 'recipient', userId: 'user_id', phone: 'phone', address: 'address', price: 'price' };
+
+// 원장 금액은 TEXT지만, 작업보드에서의 정정은 원화 정수만 받는다. 표시용 쉼표/"원"은 허용하되
+// 음수·소수·수식 같은 값은 막아 정산 집계(regexp_replace 기반)에 다른 값이 섞이지 않게 한다.
+function normalizeWorkdeskPrice(value) {
+  const raw = String(value == null ? '' : value).trim();
+  const compact = raw.replace(/원\s*$/, '').replace(/[\s,]/g, '');
+  if (!/^\d+$/.test(compact)) return null;
+  const n = Number(compact);
+  if (!Number.isSafeInteger(n)) return null;
+  return String(n);
+}
+
+// 라우트가 오버레이를 저장하기 전에 금액열인지 알아내는 공용 판정. 헤더 별칭(상품가격/금액/price)
+// 도 worktableTemplate의 같은 분류기를 쓰므로, 표시값만 바뀌고 원장이 거절되는 분리 상태를 막는다.
+async function normalizeWorkdeskColumnValue({ sheetId, tabName, header, value } = {}) {
+  if (!sheetId || !tabName || !header) return { isPrice: false, ok: true, value };
+  const { headers } = await tabDetectedHeaders(sheetId, null, tabName);
+  const idx = headers.findIndex(h => String(h == null ? '' : h).trim() === header);
+  if (idx < 0) return { isPrice: false, ok: true, value };
+  const { classifyHeaders } = require('../utils/worktableTemplate');
+  const role = (classifyHeaders(headers)[idx] || {}).role;
+  if (role !== 'price') return { isPrice: false, ok: true, value, role: role || null };
+  const normalized = normalizeWorkdeskPrice(value);
+  return { isPrice: true, ok: normalized != null, value: normalized, role };
+}
 
 /**
  * 작업보드 그리드 셀 편집(col:<헤더>)을 주문 원장(order_submissions) + 무시트 작업표(row_json)에
@@ -829,15 +854,18 @@ async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldVal
   const { isSheetless } = require('../utils/sheetlessScope');
   const db = getPool();
   const editSeq = Date.now();
-  const newValue = value == null ? '' : String(value).slice(0, 2000);
+  const newValue = role === 'price'
+    ? normalizeWorkdeskPrice(value)
+    : (value == null ? '' : String(value).slice(0, 2000));
+  if (newValue == null) return { attempted: true, ok: false, reason: 'invalid_price', role };
 
   const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
     const { rows } = await db.query(
       `UPDATE order_submissions SET ${osCol} = $2, updated_at = NOW(),
               last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
-        WHERE id = $1 AND deleted_at IS NULL
+        WHERE id = $1 AND sheet_id = $4 AND tab_name = $5 AND deleted_at IS NULL
       RETURNING id, sheet_id, tab_name`,
-      [orderSubmissionId, newValue, editSeq]);
+      [orderSubmissionId, newValue, editSeq, sheetId, tabName]);
     if (!rows.length) return { ok: false, reason: 'order_cancelled_or_missing' };
     const os = rows[0];
     // ★ 편집 시점에 알던 탭과 지금 주문이 속한 탭이 다르면(그 사이 재연결됨) 중단 — 잘못된 탭의
@@ -856,6 +884,7 @@ async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldVal
             SET row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$1::text], to_jsonb($2::text), true),
                 recipient_name = CASE WHEN $3 = 'recipient' THEN COALESCE(NULLIF($2, ''), recipient_name) ELSE recipient_name END,
                 phone8         = CASE WHEN $3 = 'phone' AND $4::text IS NOT NULL THEN $4 ELSE phone8 END,
+                price          = CASE WHEN $3 = 'price' THEN $2 ELSE price END,
                 updated_by = 'workdesk-cell-sync', updated_at = NOW()
           WHERE sheet_id = $5 AND tab_name = $6 AND order_submission_id = $7::uuid AND deleted_at IS NULL`,
         [header, newValue, role, p8, os.sheet_id, os.tab_name, orderSubmissionId]);
@@ -2131,6 +2160,8 @@ module.exports = {
   normalizeGuardValue,
   loadRawTabContext,
   tabDetectedHeaders,
+  normalizeWorkdeskPrice,
+  normalizeWorkdeskColumnValue,
   syncCellToOrderIdentity,
   claimRow,
   createOrderLedgerEntry,
