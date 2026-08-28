@@ -108,6 +108,10 @@ console.log('\n[B2] 계산 위치 — 마스킹 전');
   //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
   ok('판정 사본 없음 — utils 를 import 해 쓴다',
     /isFilledRow: _isFilledRow[\s\S]{0,80}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
+  ok('모집일 부족분은 내부 작업보드에서만 저장된 계획 합계로 계산한다',
+    /showEdits && _cond && _cond\.campaignId && _recruitCap/.test(src)
+    && /SUM\(planned_count\)/.test(src)
+    && /scheduleUnassigned: scheduleUnassigned > 0 \? scheduleUnassigned : undefined/.test(src));
 }
 
 console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실행');
@@ -152,4 +156,13 @@ console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실
   const noEmpty = run({ total: 134, filled: 134, submitted: 100, paid: 90 });
   ok('빈 슬롯이 없으면 툴팁에 "(빈 슬롯 …)" 을 붙이지 않는다',
     /title="채워진 줄 134명 · 준비된 줄 134줄"/.test(noEmpty));
+
+  const shortfall = run({ total: 200, filled: 168, submitted: 135, paid: 86, scheduleUnassigned: 32 });
+  ok('★ 모집일 계획이 부족할 때만 정확한 부족 건수를 표시한다',
+    /! 모집일 미설정 32건/.test(shortfall), shortfall.slice(0, 1000));
+  const planned = run({ total: 200, filled: 168, submitted: 135, paid: 86, scheduleUnassigned: 0 });
+  ok('모집일 계획이 모두 설정되면 경고를 표시하지 않는다', !/모집일 미설정/.test(planned));
+  sandbox.STATE.role = 'advertiser';
+  const advertiser = run({ total: 200, filled: 168, submitted: 135, paid: 86, scheduleUnassigned: 32 });
+  ok('모집일 계획 부족분은 광고주 화면에 표시하지 않는다', !/모집일 미설정/.test(advertiser));
 }

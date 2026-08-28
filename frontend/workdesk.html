@@ -1693,6 +1693,10 @@
   .tp3g .track i{display:block;height:100%;border-radius:4px;background:var(--accent)}
   .tp3g .track i.s{background:var(--safe)}
   .tp3g .pc{font-size:10.5px;font-weight:800;width:36px;text-align:right;flex:none;color:var(--muted)}
+  /* 저장된 모집일 계획 합계가 총 모집건수에 못 미칠 때만 보여 주는 내부 운영 경고.
+     초과 배정은 저장 경로에서 막으므로 이 자리는 "미설정"만 말한다. */
+  .tp3schedulewarn{margin-top:7px;padding:6px 8px;border:1px solid #f3d49a;border-radius:7px;
+                   background:var(--warn-soft);color:var(--warn);font-size:11px;font-weight:800;line-height:1.25}
   /* 정산 — 카드 클릭 = 하단 상세(스텝퍼) 펼침/접기(종전 .mcell.setl 계약 그대로) */
   .tp3col.setl{cursor:pointer}
   .tp3col.setl:hover{border-color:var(--accent-line);background:var(--card2)}
@@ -6161,6 +6165,9 @@ function summaryStrip(wd,d,m,c){
     :((d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||filled||0);
   /* ★ 초과 수는 **서버 판정만** 쓴다 — 못 받으면 표시하지 않는다(화면에서 다시 세면 표와 갈린다). */
   const overN=(c.over!=null)?Math.max(0,+c.over||0):0;
+  /* 모집일 계획 부족은 서버가 총건수와 저장된 계획 합계로 한 번만 판정한다.
+     광고주 응답에는 필드 자체가 없고, 화면도 방어적으로 내부에서만 렌더한다. */
+  const scheduleUnassigned=!isNaN(Number(c.scheduleUnassigned))?Math.max(0,Number(c.scheduleUnassigned)):0;
   const pT=target?Math.round(filled/target*100):0, pS=filled?Math.round((c.submitted||0)/filled*100):0, pP=filled?Math.round((c.paid||0)/filled*100):0;
   const slots=+c.total||0, empty=Math.max(0,slots-filled);
   const filledTip=(c.filled==null)?'':`채워진 줄 ${filled}명 · 준비된 줄 ${slots}줄${empty?` (빈 슬롯 ${empty}줄)`:''}`;
@@ -6184,11 +6191,13 @@ function summaryStrip(wd,d,m,c){
      갱신이 $('#setlCell .setlsummary').outerHTML 교체라 여기서 이름을 바꾸면 두 번째 갱신부터 죽는다. */
   const setlIn=isAdv?'':`<div class="setlin${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
+  const scheduleWarning=(!isAdv&&scheduleUnassigned>0)
+    ? `<div class="tp3schedulewarn">! 모집일 미설정 ${scheduleUnassigned.toLocaleString()}건</div>` : '';
   const prog=`<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
     gg('참여자',filled,target||filled,pT,'',filledTip+(overN?`${filledTip?' · ':''}⚠ 총건수(${target})를 ${overN}명 넘겨 들어왔습니다 — 표에서 붉은 줄로 표시합니다`:''),overN)+
     gg('제출완료',c.submitted||0,filled,pS,'s')+
     gg('입금완료',c.paid||0,filled,pP)+
-    `<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
+    scheduleWarning+`<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
   /* ★★ 상단 3분할(작업 조건 · 진행 현황 · 제출물 미리보기)은 **내부·업체 뷰어 한 벌**이다
      (사용자 확정 2026-08-23) — 종전에는 업체만 세로 스택 + 표 옆 세로 레일이라 같은 화면이
      두 모양으로 갈렸다. 다른 것은 **작업 조건 카드의 내용뿐**(업체는 종전 4줄 유지 — 10항목

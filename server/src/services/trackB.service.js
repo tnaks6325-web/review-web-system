@@ -3289,6 +3289,21 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      시트 기반 과거 표에 오탐을 내지 않도록 종전처럼 무시트에만 한정한다. */
   const _recruitCap = (_cond && Number(_cond.recruitTotal) > 0) ? Number(_cond.recruitTotal) : null;
   const _cap = (meta[0] && meta[0].sheetless) ? _recruitCap : null;
+  /* 모집일 미설정 수 = 작업 조건의 총 모집건수 - 저장된 일자별 모집 계획 합계.
+     저장 시 총량 초과는 막혀 있으므로 화면에는 부족분만 낸다. 계획 테이블이 아직 없는 구버전
+     DB/조회 실패는 0으로 위장하지 않고 필드를 생략해 경고 오탐을 막는다. */
+  let scheduleUnassigned;
+  if (showEdits && _cond && _cond.campaignId && _recruitCap) {
+    try {
+      const { rows: planTotal } = await db.query(
+        `SELECT COALESCE(SUM(planned_count), 0)::int AS planned
+           FROM campaign_daily_plans WHERE campaign_id=$1`, [_cond.campaignId]);
+      const planned = Number(planTotal[0] && planTotal[0].planned);
+      if (Number.isFinite(planned)) scheduleUnassigned = Math.max(0, _recruitCap - planned);
+    } catch (e) {
+      logger.warn(`[trackB] 모집일 계획 합계 조회 실패: ${e.message}`);
+    }
+  }
   let overCount = 0;
   if (_cap) {
     let seen = 0;
@@ -3317,6 +3332,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     cap: _cap || undefined,
     /* 총 모집완료 표기용 기준. 시트 기반은 초과행 색칠과 달리 이 값을 사용해야 한다. */
     completionCap: _recruitCap || undefined,
+    /* 총건수 대비 저장된 모집일 계획 부족분. 0이면 화면에 경고를 만들지 않는다. */
+    scheduleUnassigned: scheduleUnassigned > 0 ? scheduleUnassigned : undefined,
     /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
     over: _cap ? overCount : undefined,
   };
