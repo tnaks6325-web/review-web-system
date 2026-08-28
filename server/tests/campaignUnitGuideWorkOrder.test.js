@@ -226,15 +226,29 @@ console.log('\n[B2] product_mode — 상품별 명시 신호');
   ok('★ 명시가 있으면 옵션 줄이 0개여도 상품 줄을 그대로 넘긴다',
     sb._woOptionRows(allNone).length === 2 && sb._woOptionRows(allNone).every(r => r.unitKind === 'product'));
 
-  /* ★ 상품이 하나뿐이면 종전 그대로 'none' — 그건 선택지가 하나뿐인 진짜 단일상품이라
-     옵션 원장을 만들 이유가 없다(우레온 사고 규율: 추측을 옵션으로 승격시키지 않는다). */
+  /* ★ 상품 하나·옵션 없음은 가이드가 없을 때만 종전 'none'을 유지한다.
+     상품 가이드가 있으면 그 상품 자체를 선택 단위로 저장해야 안내가 사라지지 않는다. */
   const oneNone = {
     product_options_json: JSON.stringify([
       { name: '상품X', product_mode: 'none', base: { pay: 1000 }, options: [] },
     ]),
   };
-  ok('★ 상품 1개 + 옵션 없음은 종전 그대로 none(단일상품 공고 무회귀)',
+  ok('★ 가이드 없는 상품 1개 + 옵션 없음은 종전 그대로 none(단일상품 공고 무회귀)',
     sb._woProductMode(oneNone) === 'none');
+
+  const oneNoneWithGuide = {
+    product_options_json: JSON.stringify([
+      { name: '상품가이드', product_mode: 'none', base: { pay: 1000, count: 5 }, options: [],
+        guide: { text: '상품가이드 검색 후 구매', images: ['https://api.example.com/api/order/guide-image/singleProductGuide123'] } },
+    ]),
+  };
+  const singleGuideRows = sb._woOptionRows(oneNoneWithGuide);
+  ok('★★ 단일상품의 상품 가이드도 opt 모드로 열어 입력·저장 대상이 된다',
+    sb._woProductMode(oneNoneWithGuide) === 'opt'
+    && singleGuideRows.length === 1
+    && singleGuideRows[0].unitKind === 'product'
+    && /상품가이드 검색 후 구매/.test(singleGuideRows[0].inflowGuideHtml)
+    && singleGuideRows[0].inflowGuideImages.length === 1);
 
   /* ★ 상품이 하나여도 **옵션이 있다고 명시**하면 opt — 가장 흔한 단일상품 옵션공고다.
      (상품 개수 판정을 넣으면서 'opt' 우선 판정이 지워져도 위 두 케이스는 결과가 같아

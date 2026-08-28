@@ -588,14 +588,17 @@ console.log('\n[N] 작업오더 → 발행 → 저장 — 상품별 가이드가
       Number(t.dom.byId.rf_recruit_total.value) === 600);
   }
 
-  // (2) 상품 1개 · 옵션 없음 — 진짜 단일상품은 **종전 그대로** 옵션 원장을 만들지 않는다
+  // (2) 상품 1개 · 옵션 없음 + 상품 가이드 — 상품 자체를 하나의 저장 선택지로 다룬다.
+  //     그래야 모집공고의 전용 유입가이드 입력칸과 리뷰어 작업내용까지 같은 값으로 이어진다.
   {
     const t = makeTable();
     t.sandbox._pf = mkPrefill(1);
     t.run('applyProductRowsFromOrder(_pf)');
-    ok('★ 단일상품 공고는 종전 그대로 옵션을 만들지 않는다(우레온 규율 무회귀)',
-      t.run('JSON.stringify(readOptRows())') === '[]');
-    ok('★ 그 화면은 "옵션 없는 작업" 모드다', t.run('_prodMode()') === 'none');
+    const out = JSON.parse(t.run('JSON.stringify(readOptRows())'));
+    ok('★★ 단일상품의 상품 가이드도 저장 payload에 남는다',
+      out.length === 1 && out[0].unitKind === 'product' && out[0].optKey === '상품1'
+      && /상품1 유입/.test(out[0].inflowGuideHtml) && out[0].inflowGuideImages.length === 1);
+    ok('★★ 전용 유입가이드 입력·저장 영역을 여는 opt 모드다', t.run('_prodMode()') === 'opt');
   }
 
   // (3) 복합(옵션 상품 + 무옵션 상품) — 종전 동작 그대로
