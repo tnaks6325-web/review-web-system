@@ -29,12 +29,14 @@ function createVirtualDb() {
       state.backup = { id: 'backup-1', targets: JSON.parse(params[0]), state: 'sealed' };
       return { rows: [{ id: state.backup.id }] };
     }
-    if (/SELECT to_jsonb\(t\)/.test(q)) {
+    if (/WITH copied AS \([\s\S]*INSERT INTO workboard_consolidation_backup_records/.test(q)) {
       const table = Object.keys(snapshotRows).find(name => new RegExp(`FROM ${name} `).test(q));
-      return { rows: (snapshotRows[table] || []).map(data => ({ data })) };
+      const rows = snapshotRows[table] || [];
+      for (const data of rows) state.backupRecords.push({ table, data });
+      return { rows: [{ n: rows.length }] };
     }
-    if (/INSERT INTO workboard_consolidation_backup_records/.test(q)) {
-      state.backupRecords.push({ table: params[1], data: JSON.parse(params[2]) }); return { rows: [] };
+    if (/SELECT table_name, row_data[\s\S]*FROM workboard_consolidation_backup_records/.test(q)) {
+      return { rows: state.backupRecords.map(r => ({ table_name: r.table, row_data: r.data })) };
     }
     if (/UPDATE workboard_consolidation_backups/.test(q)) return { rows: [] };
     if (/SELECT targets FROM workboard_consolidation_backups/.test(q)) return { rows: [state.backup] };
