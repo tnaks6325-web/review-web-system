@@ -108,8 +108,8 @@ console.log('\n[B2] 계산 위치 — 마스킹 전');
   //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
   ok('판정 사본 없음 — utils 를 import 해 쓴다',
     /isFilledRow: _isFilledRow[\s\S]{0,80}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
-  ok('모집일 부족분은 내부 작업보드에서만 저장된 계획 합계로 계산한다',
-    /showEdits && _cond && _cond\.campaignId && _recruitCap/.test(src)
+  ok('모집일 부족분은 무시트 내부 작업보드에서만 저장된 계획 합계로 계산한다',
+    /showEdits && meta\[0\] && meta\[0\]\.sheetless && _cond && _cond\.campaignId && _recruitCap/.test(src)
     && /SUM\(planned_count\)/.test(src)
     && /scheduleUnassigned: scheduleUnassigned > 0 \? scheduleUnassigned : undefined/.test(src));
 }

@@ -3290,10 +3290,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const _recruitCap = (_cond && Number(_cond.recruitTotal) > 0) ? Number(_cond.recruitTotal) : null;
   const _cap = (meta[0] && meta[0].sheetless) ? _recruitCap : null;
   /* 모집일 미설정 수 = 작업 조건의 총 모집건수 - 저장된 일자별 모집 계획 합계.
+     무시트 작업표는 달력(campaign_daily_plans)이 날짜별 정원의 진실원본이므로 합계를 그대로
+     비교할 수 있다. 시트 기반은 이 테이블이 "조절한 날"만 보관하고 나머지는 시트 일정이
+     정하므로, 합산하면 정상 일정까지 미설정으로 오인한다 — 그 경우에는 표시하지 않는다.
      저장 시 총량 초과는 막혀 있으므로 화면에는 부족분만 낸다. 계획 테이블이 아직 없는 구버전
      DB/조회 실패는 0으로 위장하지 않고 필드를 생략해 경고 오탐을 막는다. */
   let scheduleUnassigned;
-  if (showEdits && _cond && _cond.campaignId && _recruitCap) {
+  if (showEdits && meta[0] && meta[0].sheetless && _cond && _cond.campaignId && _recruitCap) {
     try {
       const { rows: planTotal } = await db.query(
         `SELECT COALESCE(SUM(planned_count), 0)::int AS planned
