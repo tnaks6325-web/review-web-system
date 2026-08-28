@@ -7,11 +7,11 @@
  * 보이는데 리뷰어 화면은 여전히 옛 값을 봐서 참여가 "안 보이는" 상태가 됐다.
  *
  * 수정 = `syncCellToOrderIdentity`(orderLedger.service.js) — editWorkdeskRow 가 오버레이를
- * 커밋한 **뒤**, 라우트 레벨에서 별도로 호출해 신원 5필드(주문자·수취인·아이디·연락처·주소)만
+ * 커밋한 **뒤**, 라우트 레벨에서 별도로 호출해 신원 5필드와 결제금액을
  * 실제 주문 원장 + (무시트 탭이면) 작업표 row_json 까지 갱신한다.
  *
  * 이 가드가 지키는 것:
- *  §1 역할 화이트리스트 — 5필드만 동기화, 은행·계좌·금액 등은 대상 아님
+ *  §1 역할 화이트리스트 — 신원 5필드와 결제금액만 동기화, 은행·계좌 등은 대상 아님
  *  §2 킬스위치 · 사전조건 (env 는 호출마다 읽는다 — child process 불필요)
  *  §3 취소/존재하지 않는 주문 = 쓰기 0건
  *  §4 무시트 경로 — 편집된 그 헤더 한 칸만 갱신(전체 재기입 아님) · phone8 정규화 · TOCTOU
@@ -105,9 +105,9 @@ function rawTabsRow(tabGid) {
 (async function main() {
 
 /* ══════════════ §1 역할 화이트리스트 ══════════════ */
-console.log('\n§1 역할 화이트리스트 — 신원 5필드만 동기화 대상');
+console.log('\n§1 역할 화이트리스트 — 신원 5필드와 결제금액만 동기화 대상');
 
-t('1a 5개 역할 → order_submissions 컬럼명이 정확하다', () => {
+t('1a 신원 5개 역할과 결제금액 → order_submissions 컬럼명이 정확하다', () => {
   const svc = require(SRC('services/orderLedger.service'));
   // 함수 자체는 export 안 됐지만(_OS_COL_BY_ROLE), classifyHeaders 를 통해 간접 검증한다.
   const { classifyHeaders } = require(SRC('utils/worktableTemplate'));
@@ -126,12 +126,12 @@ t('1a 5개 역할 → order_submissions 컬럼명이 정확하다', () => {
   assert.strictEqual(roles[14], 'memo');
 });
 
-await ta('1b ★ 은행·계좌·금액·주문번호·비고 열 편집은 role_not_syncable — 쓰기 0건', async () => {
+await ta('1b ★ 은행·계좌·주문번호·비고 열 편집은 role_not_syncable — 쓰기 0건', async () => {
   process.env.ORDER_LEDGER_WRITE_ENABLED = 'true';
   await withStubPool(
     (sql) => { if (/FROM raw_sheet_tabs/.test(sql)) return { rows: [rawTabsRow()] }; return { rows: [], rowCount: 0 }; },
     async (svc, calls) => {
-      for (const header of ['은행', '계좌번호', '예금주', '결제금액', '주문번호', '비고']) {
+      for (const header of ['은행', '계좌번호', '예금주', '주문번호', '비고']) {
         calls.length = 0;
         const out = await svc.syncCellToOrderIdentity({ sheetId: 'S1', tabName: 'T1', header, value: 'x', orderSubmissionId: 'o1' });
         assert.strictEqual(out.attempted, true, header);
@@ -139,6 +139,41 @@ await ta('1b ★ 은행·계좌·금액·주문번호·비고 열 편집은 role
         assert.strictEqual(out.reason, 'role_not_syncable', header);
         assert.ok(!calls.some(c => /UPDATE order_submissions|UPDATE campaign_participants/.test(c.sql)), header + ' — 쓰기 쿼리가 나가면 안 된다');
       }
+    });
+  delete process.env.ORDER_LEDGER_WRITE_ENABLED;
+});
+
+await ta('1c ★ 결제금액은 쉼표/원 표기를 원화 정수로 정규화해 원장과 무시트 작업표에 함께 쓴다', async () => {
+  process.env.ORDER_LEDGER_WRITE_ENABLED = 'true';
+  await withSheetlessOk(() => withStubPool(
+    (sql) => {
+      if (/FROM raw_sheet_tabs/.test(sql)) return { rows: [rawTabsRow()] };
+      if (/FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
+      if (/UPDATE order_submissions/.test(sql)) return { rows: [{ id: 'o1', sheet_id: 'S1', tab_name: 'T1' }] };
+      if (/UPDATE campaign_participants/.test(sql)) return { rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    async (svc, calls) => {
+      const out = await svc.syncCellToOrderIdentity({ sheetId: 'S1', tabName: 'T1', header: '결제금액', value: '13,090원', orderSubmissionId: 'o1' });
+      assert.strictEqual(out.ok, true, JSON.stringify(out));
+      assert.strictEqual(out.role, 'price');
+      const os = calls.find(c => /UPDATE order_submissions/.test(c.sql));
+      const cp = calls.find(c => /UPDATE campaign_participants/.test(c.sql));
+      assert.strictEqual(os.params[1], '13090');
+      assert.strictEqual(cp.params[1], '13090');
+      assert.ok(/price\s+= CASE WHEN \$3 = 'price' THEN \$2 ELSE price END/.test(cp.sql));
+    }));
+  delete process.env.ORDER_LEDGER_WRITE_ENABLED;
+});
+
+await ta('1d ★ 결제금액이 원화 정수가 아니면 원장/작업표에 쓰지 않는다', async () => {
+  process.env.ORDER_LEDGER_WRITE_ENABLED = 'true';
+  await withStubPool(
+    (sql) => { if (/FROM raw_sheet_tabs/.test(sql)) return { rows: [rawTabsRow()] }; return { rows: [], rowCount: 0 }; },
+    async (svc, calls) => {
+      const out = await svc.syncCellToOrderIdentity({ sheetId: 'S1', tabName: 'T1', header: '결제금액', value: '-13090', orderSubmissionId: 'o1' });
+      assert.strictEqual(out.reason, 'invalid_price');
+      assert.ok(!calls.some(c => /UPDATE order_submissions|UPDATE campaign_participants/.test(c.sql)));
     });
   delete process.env.ORDER_LEDGER_WRITE_ENABLED;
 });
@@ -217,7 +252,8 @@ t('3b ★★ UPDATE order_submissions 문장 자체가 deleted_at IS NULL 조건
   const body = read('services/orderLedger.service.js').slice(
     read('services/orderLedger.service.js').indexOf('async function syncCellToOrderIdentity'));
   const upd = body.slice(0, body.indexOf('RETURNING id, sheet_id, tab_name'));
-  assert.ok(/WHERE id = \$1 AND deleted_at IS NULL/.test(upd), 'UPDATE 절에 deleted_at IS NULL 이 없다');
+  assert.ok(/WHERE id = \$1 AND sheet_id = \$4 AND tab_name = \$5 AND deleted_at IS NULL/.test(upd),
+    'UPDATE 절에 현재 작업의 sheet/tab + deleted_at IS NULL 조건이 없다');
 });
 
 await ta('3c 편집 시점에 알던 탭과 지금 주문이 속한 탭이 다르면(재연결됨) tab_mismatch — 쓰기 중단', async () => {
@@ -549,6 +585,32 @@ t('8c 편집 자체가 실패(out.ok=false)면 through-write 를 시도하지 �
   assert.ok(editIdx > 0 && guardIdx > editIdx, 'through-write 게이트는 editWorkdeskRow 호출 뒤에 있어야 한다');
 });
 
+t('8c-1 ★ 결제금액은 오버레이 저장 전에 같은 정규화·검증을 거친다(실패 시 금액 분리 방지)', () => {
+  const body = read('routes/trackB.routes.js');
+  const i = body.indexOf("router.post('/workdesk/edit'");
+  const fn = body.slice(i, body.indexOf("router.post('/workdesk/revert'"));
+  assert.ok(/normalizeWorkdeskColumnValue\(\{ sheetId, tabName, header: field\.slice\(4\), value \}\)/.test(fn));
+  assert.ok(/normalized\.isPrice && !normalized\.ok/.test(fn));
+  assert.ok(/value: normalizedValue/.test(fn));
+  assert.ok(/결제금액은 0 이상의 원화 정수/.test(fn));
+});
+
+t('8c-2 ★ 상품가격·금액·price 별칭도 표준 분류기 기준으로 금액 검증한다', () => {
+  const body = read('services/orderLedger.service.js');
+  const i = body.indexOf('async function normalizeWorkdeskColumnValue');
+  const fn = body.slice(i, body.indexOf('async function syncCellToOrderIdentity', i));
+  assert.ok(/classifyHeaders\(headers\)/.test(fn));
+  assert.ok(/role !== 'price'/.test(fn));
+  assert.ok(/normalizeWorkdeskPrice\(value\)/.test(fn));
+});
+
+t('3d ★ 다른 작업으로 재연결된 주문은 UPDATE 조건에서 차단한다(금액 오염 방지)', () => {
+  const body = read('services/orderLedger.service.js');
+  const i = body.indexOf('async function syncCellToOrderIdentity');
+  const fn = body.slice(i, body.indexOf('async function claimRow', i));
+  assert.ok(/WHERE id = \$1 AND sheet_id = \$4 AND tab_name = \$5 AND deleted_at IS NULL/.test(fn));
+});
+
 t('8d 예외를 삼키지 않고 응답에 실패 사유를 싣는다(조용한 실패 금지)', () => {
   const body = read('routes/trackB.routes.js');
   const i = body.indexOf("router.post('/workdesk/edit'");
@@ -580,8 +642,10 @@ await ta('8f ★★ 라우터 스택 실검사 — /workdesk/edit 핸들러가 �
   svc.editWorkdeskRow = async () => ({ ok: true, editId: 1, anchorType: 'order', field: 'col:연락처', linkedField: null, value: 'x', orderSubmissionId: 'o1', priorValue: 'old' });
   const led = require(SRC('services/orderLedger.service'));
   const origSync = led.syncCellToOrderIdentity;
+  const origNormalize = led.normalizeWorkdeskColumnValue;
   let syncArgs = null;
   led.syncCellToOrderIdentity = async (a) => { syncArgs = a; return { attempted: true, ok: true, mode: 'sheetless' }; };
+  led.normalizeWorkdeskColumnValue = async ({ value }) => ({ isPrice: false, ok: true, value });
   try {
     const resp = await new Promise((resolve) => {
       handler(
@@ -615,6 +679,7 @@ await ta('8f ★★ 라우터 스택 실검사 — /workdesk/edit 핸들러가 �
   } finally {
     svc.editWorkdeskRow = origEdit;
     led.syncCellToOrderIdentity = origSync;
+    led.normalizeWorkdeskColumnValue = origNormalize;
   }
 });
 

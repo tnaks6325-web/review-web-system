@@ -1256,7 +1256,17 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName, rowId, field, value } = req.body || {};
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
     const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value, by: _by(req) });
+    // 결제금액은 오버레이를 먼저 저장한 뒤 원장이 거절하면 화면/원장 금액이 갈라진다.
+    // 표준 금액열은 저장 전에 동일한 정규화·검증을 태워 둘 중 하나만 바뀌는 상태를 막는다.
+    const ledger = require('../services/orderLedger.service');
+    const normalized = typeof field === 'string' && field.indexOf('col:') === 0
+      ? await ledger.normalizeWorkdeskColumnValue({ sheetId, tabName, header: field.slice(4), value })
+      : { isPrice: false, ok: true, value };
+    const normalizedValue = normalized.value;
+    if (normalized.isPrice && !normalized.ok) {
+      return res.status(400).json({ ok: false, error: '결제금액은 0 이상의 원화 정수로 입력해 주세요.' });
+    }
+    const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value: normalizedValue, by: _by(req) });
     // 그리드 셀 편집(col:<헤더>) 성공 → 실제 주문 원장(order_submissions)에도 through-write 시도.
     //   ★ editWorkdeskRow 트랜잭션 커밋 **뒤**, 별도 요청/락으로 수행 — 같은 tx 안에서 부르면
     //     campaign_participants 행을 두 번 잠가 데드락 위험이 있어 라우트 레벨에서 분리했다(레드팀 지적).
@@ -1268,7 +1278,7 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
         (role === 'master' || role === 'admin' || role === 'staff')) {
       try {
         throughWrite = await require('../services/orderLedger.service').syncCellToOrderIdentity({
-          sheetId, tabName, header: field.slice(4), value, oldValue: out.priorValue,
+          sheetId, tabName, header: field.slice(4), value: normalizedValue, oldValue: out.priorValue,
           orderSubmissionId: out.orderSubmissionId, by: _by(req),
         });
       } catch (e) {
