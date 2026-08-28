@@ -22,6 +22,7 @@
     + '.cwd-muted{font-size:.76rem;color:#9CA3AF}'
     + '.cwd-btn{display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#EEF1F7;color:#4B5563;'
     +   'font-size:.84rem;font-weight:800;border-radius:11px;padding:11px;font-family:inherit;margin-top:10px}'
+    + '.cwd-note{font-size:.75rem;font-weight:700;color:#1b64da;background:#EFF5FF;border-radius:8px;padding:6px 8px;margin-bottom:8px}'
     + '.cwd-opt{display:flex;align-items:center;gap:10px}'
     + '.cwd-opt .nm{font-size:.9rem;font-weight:800;color:#111827}'
     + '.cwd-opt .sub{font-size:.72rem;color:#4B5563;margin-top:2px}';
@@ -251,9 +252,14 @@
        비어 있는 안내를 링크유입으로 해석하면 가이드유입에서 잘못된 구매 버튼이 열린다.
        값이 없던 레거시 공고만 기존 문구/빈 안내 폴백을 허용한다. */
     var isLinkInflow = d.inflowType === 'link' || legacyLinkInflow || (!d.inflowType && !hasGuide);
-    // 상품별 가이드의 본문·사진 자체가 안내의 전부다. 선택지명 반복 문구를 붙이면
-    // 단일상품에서 상품 카드와 같은 이름이 세 번 노출돼 읽기만 방해한다.
+    // 리뷰어 화면은 상품별 가이드의 본문·사진만 보여 준다. 선택지명 반복 문구는
+    // 단일상품에서 상품 카드와 같은 이름을 세 번 노출시켜 읽기만 방해한다.
+    // 단, 관리자 인라인 미리보기는 첫 선택지 가이드를 대표로 보여 주므로, 어떤
+    // 선택지인지 확인할 수 있게 호출부가 명시한 경우에만 배지를 유지한다.
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
+      + (usingUnitGuide && o.showUnitGuideIdentity
+        ? '<div class="cwd-note">📌 <b>' + escAttr(so.optKey) + '</b> 선택지 전용 안내예요.</div>'
+        : '')
       + '<div class="cwd-body">' + guideHtml + extraImgs + '</div>';
     // 옵션 공고는 리뷰어가 참여 시 고른 옵션의 링크로 이동한다.
     // 옵션 링크가 비어 있는 기존 공고는 공고 공통 링크를 그대로 사용한다.

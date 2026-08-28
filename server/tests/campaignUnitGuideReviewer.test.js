@@ -142,6 +142,12 @@ const IMG = 'https://api.example.com/api/order/guide-image/bbbbbbbbbbbbbbbbbbbbb
     !withUnit.includes('cwd-note') && !withUnit.includes('선택지 전용 안내'));
   ok('선택지 카드의 이름은 그대로 보인다', withUnit.includes('옵션A'));
 
+  const adminPreview = M.cardsHtml({
+    workDetail: common, inflowType: 'guide',
+    selectedOption: { optKey: '옵션A', productName: '상품A', unitKind: 'option', inflowGuideHtml: '<b>옵션A 전용</b>' },
+  }, { apiBase: 'https://api.example.com', showOption: false, showUnitGuideIdentity: true });
+  ok('관리자 인라인 미리보기만 선택지 식별 안내를 유지한다', adminPreview.includes('선택지 전용 안내'));
+
   const noUnit = M.cardsHtml({
     workDetail: common, inflowType: 'guide',
     selectedOption: { optKey: '옵션A', productName: '상품A', unitKind: 'option' },
