@@ -581,8 +581,19 @@ async function savePlans(campaignId, body, actor) {
     // raw/review 원장이 이전 날짜를 유지한다. 커밋 후 같은 탭의 투영을 즉시 재생성해
     // 저장 결과와 작업보드 표를 같은 요청 안에서 맞춘다.
     let worktableProjection = null;
+    let worktableNumbering = null;
     if (projectionTarget) {
       try {
+        // 조절로 새로 생긴 준비 행의 DB seq와 화면 `번호`는 별도 값이다. 신규 경로는
+        // sheetlessDailyPlan에서 함께 채우고, 기존 빈 번호·날짜 재배치로 생긴 순서 틀어짐은
+        // 여기서 활성 행 전체를 1..N으로 보정한다. 이후 장부를 재생성해 다음 동기화에서
+        // 빈 번호가 되돌아오지 않게 한다.
+        const { renumberTab } = require('./rowNumbering.service');
+        worktableNumbering = await renumberTab({
+          ...projectionTarget,
+          by: actor || 'campaign-plan',
+          rebuild: false,
+        });
         const { rebuildLedgers } = require('./sheetlessLedger.service');
         const rebuilt = await rebuildLedgers({ ...projectionTarget, by: actor || 'campaign-plan' });
         worktableProjection = {
@@ -603,7 +614,7 @@ async function savePlans(campaignId, body, actor) {
       }
     }
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} 계획 저장 — set ${set.length} / remove ${remove.length}`);
-    return { applied: set.length + remove.length, worktableSync, worktableProjection };
+    return { applied: set.length + remove.length, worktableSync, worktableNumbering, worktableProjection };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
@@ -639,9 +650,18 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
       [campaignId, actor || null, JSON.stringify({ today, plannedDates: worktableRebuild.plannedDates, ...worktableRebuild })]);
     await client.query('COMMIT');
     try {
+      // 수동 재구성도 신규 행을 만들 수 있다. 삭제 이력 뒤에서는 DB seq가 연속되지 않을 수
+      // 있으므로, 화면 번호는 저장 경로와 동일하게 활성 행 기준으로 1..N 재정렬한다.
+      const { renumberTab } = require('./rowNumbering.service');
+      const worktableNumbering = await renumberTab({
+        ...target,
+        by: actor || 'campaign-plan-rebuild',
+        rebuild: false,
+      });
       const { rebuildLedgers } = require('./sheetlessLedger.service');
       const r = await rebuildLedgers({ ...target, by: actor || 'campaign-plan-rebuild' });
-      return { worktableRebuild, worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
+      return { worktableRebuild, worktableNumbering,
+        worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
     } catch (cause) {
       logger.error(`[campaignPlan] 작업표 재구성 투영 실패 camp=${campaignId}: ${cause.message}`);
       const e = new Error('작업표 날짜는 재구성됐지만 작업보드 갱신에 실패했습니다. 다시 실행해주세요.');

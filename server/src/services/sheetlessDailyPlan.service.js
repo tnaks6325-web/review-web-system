@@ -24,6 +24,7 @@
 
 const { logger } = require('../utils/logger');
 const pool = require('../db/pool');
+const { numberColumnKey } = require('../utils/rowNumbering');
 
 let _pool = null;
 function getPool() { return _pool || pool; }
@@ -39,6 +40,21 @@ function _kstDateLabel(iso) {
   //   파서는 둘 다 읽지만 사람이 보는 표·CSV 가 갈리므로 사본을 두지 않는다.
   const { sheetDateStr } = require('../utils/worktablePlan');
   return sheetDateStr({ y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) });
+}
+
+/** 새 준비 행은 DB 식별 번호(`seq`)와 화면의 번호 칸을 함께 만든다.
+ *
+ * 작업표의 `seq` 는 주문·투영의 고정 앵커이고, 화면의 `번호` 는 row_json 안의 별도 표시값이다.
+ * 모집인원 조절로 행을 늘릴 때 둘 중 하나만 쓰면 새 행이 존재해도 화면에는 번호가 빈칸으로
+ * 보인다. 표준 열에 번호 칸이 없는 작업표에는 새 열을 만들지 않는다.
+ */
+function _newPlannedRowJson(headers, dateHeader, dateValue, seq) {
+  const rowJson = {};
+  headers.forEach(h => { rowJson[h] = ''; });
+  const numberHeader = numberColumnKey(headers);
+  if (numberHeader) rowJson[numberHeader] = String(seq);
+  rowJson[dateHeader] = dateValue;
+  return rowJson;
 }
 
 /** 첫 조절 직전의 작업표 날짜별 인원을 보존한다. 이후 행을 재배치해도 [기본으로]의 기준은 바뀌지 않는다. */
@@ -191,11 +207,9 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
       // ★ 번호는 **함수 시작에 한 번** 구해 이어 쓴다 — 날짜마다 다시 구하면서 누적 카운터를
       //   더하면 번호가 건너뛰며 폭주한다(실측: 200줄짜리 표에 seq 1100).
       if (nextSeq === 0) nextSeq = await _nextSeqStart(client, sheetId, tabName);
-      const blank = {};
-      headers.forEach(h => { blank[h] = ''; });
       for (let i = 0; i < need; i++) {
         const value = _kstDateLabel(date);
-        const rowJson = { ...blank, [dateHeader]: value };
+        const rowJson = _newPlannedRowJson(headers, dateHeader, value, nextSeq);
         await client.query(
           `INSERT INTO campaign_participants
              (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
@@ -314,7 +328,6 @@ async function rebuildAdjustedPlansToWorktable({ client, sheetId, tabName, plans
          FROM (VALUES ${vals.join(',')}) AS v(id,value) WHERE p.id=v.id`, params);
   }
   const seqStart = await _nextSeqStart(client, sheetId, tabName);
-  const blank = {}; headers.forEach(h => { blank[h] = ''; });
   const inserts = assignments.filter(a => !a.row);
   for (let i = 0; i < inserts.length; i++) {
     const value = _kstDateLabel(inserts[i].date);
@@ -323,7 +336,7 @@ async function rebuildAdjustedPlansToWorktable({ client, sheetId, tabName, plans
          (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,'worktable',$7,NOW())`,
       [sheetId, rows[0].tab_gid || null, tabName, seqStart + i, value,
-        JSON.stringify({ ...blank, [dateHeader]: value }), String(by).slice(0, 100)]);
+        JSON.stringify(_newPlannedRowJson(headers, dateHeader, value, seqStart + i)), String(by).slice(0, 100)]);
   }
   return { ok: true, dateHeader, plannedDates: wanted.size, reassigned: changed.filter(c => c.value).length,
     cleared: changed.filter(c => !c.value).length, created: inserts.length, protectedRows: [...fixedByDate.values()].reduce((a, n) => a + n, 0) };
