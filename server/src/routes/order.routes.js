@@ -313,7 +313,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
        status, created_by, work_kind, delivery_type_mix, recall_courier, recall_product,
        work_series_id, work_round)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,'submitted',$40,$41,$42,$43,$44,$45,$46)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,'submitted',$41,$42,$43,$44,$45,$46,$47)
      RETURNING *`,
     [
       _genOrderId(),
@@ -513,6 +513,9 @@ router.post('/intake', async (req, res, next) => {
     _emitWorkOrderNew(data);
     res.json({ ok: true, data });
   } catch (err) {
+    // 인트라넷은 HTTP 실패를 기준으로 재시도를 판정한다. 다만 next(err)로 넘겨
+    // Sentry·최근 오류·이상 로그의 공통 관측 경로는 반드시 유지한다.
+    err.intakeHttp500 = true;
     next(err);
   }
 });

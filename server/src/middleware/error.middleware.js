@@ -84,6 +84,16 @@ function errorHandler(err, req, res, next) {
   if (err.status === 401) {
     return res.status(401).json({ error: err.message });
   }
+
+  // 작업오더 접수는 인트라넷이 HTTP 상태로 전송 실패를 재시도한다. 이 표식은
+  // intake 경로에서만 부여되며, 위의 공통 관측 처리를 거친 뒤 안전한 계약으로 응답한다.
+  if (err.intakeHttp500) {
+    return res.status(500).json({
+      ok: false,
+      code: 'order_intake_failed',
+      error: '작업오더 접수 중 오류가 발생했습니다.',
+    });
+  }
   /* ★★ 본문 크기 초과(413) — GAS 호환 200 으로 접지 않는다.
      이건 "기다리면 풀리는 실패"가 아니라 **더 줄여 보내야 풀리는 실패**라, 클라이언트가
      429(분당 상한)와 구분할 수 있어야 재시도 전략이 갈린다(구매 캡처 업로드 경로).
