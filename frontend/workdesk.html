@@ -5797,7 +5797,7 @@ function renderWorkdesk(wd){
   /* 무시트 판정은 여기서 한 번 — 헤더의 시트 표기 3종(시트 제목·원본·그리드 배지)이 같은 값을 본다.
      meta 가 이 탭의 권위값이고, 없으면(구버전) 목록 항목으로 접는다. */
   const noSheet=_isNoSheet(m)||_isNoSheet(STATE.cur);
-  // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 화이트리스트 컬럼만 열람 전용.
+  // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 차단 목록을 제외한 컬럼을 열람 전용.
   const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
   /* ★ 표에서 분리(보관)한 줄 — **삭제가 아니다**. 숫자를 안 보여주면 "사라진 줄"이 된다.
@@ -7543,7 +7543,7 @@ function buildGrid(wd){
   _syncSelectionStat();
   const H=wd.headers||[];
   // 컬럼 기술자: 신원 2열(참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
-  // `seq`는 DB 행 앵커이므로 화면 열로 만들지 않는다. 광고주 그리드는 신원열도 제외하고 시트 화이트리스트 컬럼만 보인다.
+  // `seq`는 DB 행 앵커이므로 화면 열로 만들지 않는다. 광고주 그리드는 DB 신원열과 서버 차단 목록 컬럼을 제외한다.
   const idCols = STATE.role==='advertiser' ? [] : [{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];
   // 커스텀 열(행별 자유메모, migration 080) — 시트 헤더 뒤에 이어붙임. 광고주 그리드는 서버가 애초에 내려주지 않음.
   const customCols=(wd.customColumns||[]).map(c=>({key:'ccol:'+c.id, kind:'custom', colId:c.id}));
