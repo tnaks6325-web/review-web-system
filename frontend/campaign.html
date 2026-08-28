@@ -326,6 +326,8 @@ let _camp = null;          // /api/campaign/:id 공개 페이로드
 let _detail = null;        // work-detail 응답
 let _holdTick = null;
 let _pollTimer = null;
+let _campaignLoadPromise = null; // 같은 화면의 동시 새로고침은 하나의 요청만 사용
+let _campaign429Retried = false; // 429 자동 재시도는 제한 창마다 한 번만
 let _afterLogin = null;    // 본인확인 성공 후 이어서 할 동작
 let _pvStep = 'pre';       // 미리보기 현재 단계
 let _pvForceOpen = true;   // 미리보기 ①단계를 '모집중'으로 가정해 보여줄지(마감·게시전 공고 확인용)
@@ -1844,9 +1846,35 @@ function _pvBlock(what){
 }
 
 /* ═══ 초기 로드 ═══ */
-async function loadCampaign(){
-  const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID));
-  const j = await r.json();
+function _retryAfterMs(response){
+  const raw = response && response.headers && response.headers.get('Retry-After');
+  const seconds = Number(raw);
+  if(Number.isFinite(seconds) && seconds > 0) return Math.min(65000, Math.max(1000, Math.ceil(seconds * 1000)));
+  const retryAt = Date.parse(raw || '');
+  if(Number.isFinite(retryAt)) return Math.min(65000, Math.max(1000, retryAt - Date.now()));
+  return 62000; // 서버의 1분 제한 창을 넘긴다. 짧은 반복 재시도는 같은 창을 다시 소진한다.
+}
+
+function _scheduleCampaign429Retry(waitMs){
+  if(_campaign429Retried) return;
+  _campaign429Retried = true;
+  toast('요청이 많아요. 약 ' + Math.ceil(waitMs / 1000) + '초 후 다시 불러올게요.');
+  setTimeout(()=>{
+    loadCampaign().catch(()=>{}); // 재시도 실패는 현재 안내를 유지하고 무한 재시도하지 않는다.
+  }, waitMs);
+}
+
+function loadCampaign(){
+  if(_campaignLoadPromise) return _campaignLoadPromise;
+  _campaignLoadPromise = (async ()=>{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID));
+    if(r.status === 429){
+      const waitMs = _retryAfterMs(r);
+      _scheduleCampaign429Retry(waitMs);
+      throw new Error('요청이 너무 많습니다. 잠시 후 다시 시도하세요.');
+    }
+    const j = await r.json();
+    _campaign429Retried = false;
   if(!j.ok) throw new Error(j.error || '캠페인을 찾을 수 없어요');
   if(j.serverNow) CampCards.setServerNow(j.serverNow);
   _camp = j.data;
@@ -1861,6 +1889,9 @@ async function loadCampaign(){
   if(!onPre) return;                                   // 데이터(_camp)만 갱신하고 화면 전환은 생략
   if(PREVIEW && _pvStep !== 'pre') return;
   renderPre();
+  })();
+  _campaignLoadPromise = _campaignLoadPromise.finally(()=>{ _campaignLoadPromise = null; });
+  return _campaignLoadPromise;
 }
 /** KST 날짜 문자열(YYYY-MM-DD) */
 function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0,10); }
