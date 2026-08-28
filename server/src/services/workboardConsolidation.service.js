@@ -372,6 +372,12 @@ async function setControlMode({ mode, targets = [], by = '' } = {}) {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('workboard_consolidation_control'))`);
     if (mode === 'pilot') {
       await assertApprovedTargets(client, normalized);
+      // pilot은 시스템 전체에서 정확히 1건이다. 다른 작업으로 시험 대상을 바꾸면 이전
+      // pilot을 먼저 mapped로 내리지 않을 경우 두 작업이 동시에 새 경로를 타게 된다.
+      await client.query(
+        `UPDATE workboard_consolidation_targets SET rollout_state = 'mapped', updated_by = $1, updated_at = NOW()
+          WHERE rollout_state = 'pilot'`, [String(by || '').slice(0, 100)]
+      );
       const { rows } = await client.query(
         `SELECT workboard_id FROM workboard_consolidation_targets
           WHERE sheet_id = $1 AND tab_name = $2 AND rollout_state = 'mapped' FOR UPDATE`,

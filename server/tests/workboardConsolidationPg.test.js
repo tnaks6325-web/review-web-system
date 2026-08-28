@@ -22,7 +22,7 @@ test('실제 PostgreSQL: sealed 백업 → 가산 연결 → legacy 복귀 → �
     tabName: i === 0 ? tabName : `실제 PG 승인목록 검증 ${i}`,
   }));
   let backupId = null;
-  let workboardId = null;
+  const workboardIds = [];
   try {
     await pool.query(
       `INSERT INTO tab_configs(sheet_id, tab_name, display_name, sheetless)
@@ -33,20 +33,29 @@ test('실제 PostgreSQL: sealed 백업 → 가산 연결 → legacy 복귀 → �
     const approved = await consolidation.approveLegacyTargets({ targets, by: 'test' });
     assert.equal(approved.approved, 120, '정확히 승인한 기존 무시트 작업만 잠금');
 
+    const pilotTargets = targets.slice(0, 2);
     const backup = await consolidation.createPreCutoverBackup({
-      targets: [{ sheetId, tabName }], reason: 'postgres-integration-test', createdBy: 'test',
+      targets: pilotTargets, reason: 'postgres-integration-test', createdBy: 'test',
     });
     backupId = backup.backupId;
-    assert.equal(backup.recordCounts.tab_configs, 1, '원본 작업 설정을 sealed 백업에 보관');
+    assert.equal(backup.recordCounts.tab_configs, 2, '두 pilot 후보의 원본 작업 설정을 sealed 백업에 보관');
 
     const linked = await consolidation.createAdditiveMappings({
-      backupId, targets: [{ sheetId, tabName }], by: 'test',
+      backupId, targets: pilotTargets, by: 'test',
     });
-    workboardId = linked.mappings[0].workboardId;
+    workboardIds.push(...linked.mappings.map(x => x.workboardId));
     const mapped = await pool.query(
       'SELECT workboard_id FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2', [sheetId, tabName]
     );
-    assert.equal(mapped.rows[0].workboard_id, workboardId, '새 작업보드 ID가 가산 연결됨');
+    assert.equal(mapped.rows[0].workboard_id, workboardIds[0], '새 작업보드 ID가 가산 연결됨');
+
+    await consolidation.setControlMode({ mode: 'pilot', targets: [pilotTargets[0]], by: 'test-a' });
+    await consolidation.setControlMode({ mode: 'pilot', targets: [pilotTargets[1]], by: 'test-b' });
+    const pilots = await pool.query(
+      `SELECT sheet_id, tab_name FROM workboard_consolidation_targets WHERE rollout_state = 'pilot'`
+    );
+    assert.equal(pilots.rows.length, 1, 'pilot 대상을 바꿔도 활성 시험 작업은 정확히 1건');
+    assert.equal(pilots.rows[0].sheet_id, pilotTargets[1].sheetId, '마지막 선택 작업만 pilot으로 유지');
 
     const control = await consolidation.rollbackToLegacy({ backupId, by: 'test' });
     assert.equal(control.mode, 'legacy', '새 경로 즉시 차단');
@@ -72,7 +81,7 @@ test('실제 PostgreSQL: sealed 백업 → 가산 연결 → legacy 복귀 → �
       await pool.query('DELETE FROM workboard_consolidation_backups WHERE id = $1', [backupId]);
     }
     await pool.query(`DELETE FROM workboard_consolidation_targets WHERE sheet_id LIKE $1`, [`${sheetId}%`]);
-    if (workboardId) await pool.query('DELETE FROM workboards WHERE id = $1', [workboardId]);
+    if (workboardIds.length) await pool.query('DELETE FROM workboards WHERE id = ANY($1::uuid[])', [workboardIds]);
     await pool.query(`DELETE FROM tab_configs WHERE sheet_id LIKE $1`, [`${sheetId}%`]);
     await pool.end();
   }

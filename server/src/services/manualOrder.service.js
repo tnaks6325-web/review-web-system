@@ -480,9 +480,14 @@ async function submitExternalOrder({
   //   ★ 판정은 `sheetlessScope` 단일 출처. 실패 시 종전 경로(fail-open) — 큐 실행부가 최종 방어.
   let queued = false;
   let sheetlessDone = null;
-  let isSl = false;
-  try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); } catch (_) { isSl = false; }
-  if (isSl && queuedWorkboardApply) {
+  // resolveQueuedWorkboardTarget가 이미 sheetless+승인+연결을 확인한 새 경로는 두 번째 조회에
+  // 의존하지 않는다. 이 조회가 일시 실패해도 주문이 큐 없이 pending으로 고립되면 안 된다.
+  let isSl = queuedWorkboardApply;
+  if (!queuedWorkboardApply) {
+    try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); }
+    catch (_) { isSl = false; }
+  }
+  if (queuedWorkboardApply) {
     try {
       await enqueue('workboard_apply', {
         sheetId, tabName, tabGid: ledger.tabGid || gid || '', orderSubmissionId: ledger.orderSubmissionId,

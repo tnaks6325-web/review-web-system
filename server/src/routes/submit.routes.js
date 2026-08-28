@@ -1184,9 +1184,9 @@ router.post('/order', async (req, res, next) => {
           });
           await markOrderQueued(ledger.orderSubmissionId);
           queued = true;
+          sheetlessDone = { ok: true, queued: true };
         } catch (queueErr) {
-          await markOrderMirrorFailed(ledger.orderSubmissionId, queueErr);
-          logger.error(`[submit/order] workboard_apply 큐 등록 실패: ${queueErr.message}`);
+          sheetlessDone = { ok: false, reason: 'queue_enqueue_failed', message: queueErr.message };
         }
       } else try {
         /* ★★ 공고에 작업보드가 아직 없으면 **그 자리에서 만들어 연결**한다(사람이 시트탭을

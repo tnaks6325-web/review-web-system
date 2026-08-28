@@ -12,6 +12,8 @@ const service = read('src/services/workboardConsolidation.service.js');
 const route = read('src/routes/workboardConsolidation.routes.js');
 const app = read('src/app.js');
 const orderLedgerUi = read('../frontend/js/index-order-ledger.js');
+const submitRoute = read('src/routes/submit.routes.js');
+const manualOrder = read('src/services/manualOrder.service.js');
 let passed = 0;
 function ok(name, value) { assert.ok(value, name); passed++; }
 
@@ -33,5 +35,15 @@ ok('전체 전환 뒤 새 작업도 자동으로 enabled 상태가 됨',
   /source = 'new_work' AND workboard_id IS NOT NULL/.test(service));
 ok('주문 원장 화면에서 실패 이유와 개별 다시 처리를 제공',
   /실패 이유/.test(orderLedgerUi) && /_olRetry/.test(orderLedgerUi) && /syncQueueRetry/.test(orderLedgerUi));
+ok('새 큐 제출은 sheetlessDone을 항상 채워 저장 후 500 오류를 막음',
+  /sheetlessDone = \{ ok: true, queued: true \}/.test(submitRoute)
+  && /sheetlessDone = \{ ok: false, reason: 'queue_enqueue_failed'/.test(submitRoute));
+ok('pilot 변경 전에 기존 pilot을 mapped로 내려 정확히 1건만 유지',
+  /WHERE rollout_state = 'pilot'/.test(service)
+  && service.indexOf("WHERE rollout_state = 'pilot'") < service.indexOf("SET rollout_state = 'pilot'"));
+ok('수동 제출의 승인된 새 경로는 두 번째 무시트 조회 없이 반드시 큐 등록',
+  /let isSl = queuedWorkboardApply;/.test(manualOrder)
+  && /if \(!queuedWorkboardApply\) \{[\s\S]{0,240}isSheetless/.test(manualOrder)
+  && /if \(queuedWorkboardApply\) \{[\s\S]{0,240}enqueue\('workboard_apply'/.test(manualOrder));
 
 console.log(`workboardConsolidation: ${passed}개 통과`);
