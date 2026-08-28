@@ -650,9 +650,18 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
       [campaignId, actor || null, JSON.stringify({ today, plannedDates: worktableRebuild.plannedDates, ...worktableRebuild })]);
     await client.query('COMMIT');
     try {
+      // 수동 재구성도 신규 행을 만들 수 있다. 삭제 이력 뒤에서는 DB seq가 연속되지 않을 수
+      // 있으므로, 화면 번호는 저장 경로와 동일하게 활성 행 기준으로 1..N 재정렬한다.
+      const { renumberTab } = require('./rowNumbering.service');
+      const worktableNumbering = await renumberTab({
+        ...target,
+        by: actor || 'campaign-plan-rebuild',
+        rebuild: false,
+      });
       const { rebuildLedgers } = require('./sheetlessLedger.service');
       const r = await rebuildLedgers({ ...target, by: actor || 'campaign-plan-rebuild' });
-      return { worktableRebuild, worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
+      return { worktableRebuild, worktableNumbering,
+        worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
     } catch (cause) {
       logger.error(`[campaignPlan] 작업표 재구성 투영 실패 camp=${campaignId}: ${cause.message}`);
       const e = new Error('작업표 날짜는 재구성됐지만 작업보드 갱신에 실패했습니다. 다시 실행해주세요.');

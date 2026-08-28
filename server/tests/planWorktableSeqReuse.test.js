@@ -86,6 +86,13 @@ async function runSeqCase() {
   ok('★ 모달 기준선도 active = TRUE 로 센다(그리드·실행과 같은 기준)',
     /FROM campaign_participants\s*\n\s*WHERE sheet_id = \$1 AND tab_name = \$2 AND deleted_at IS NULL AND active = TRUE/.test(src));
 
+  /* 수동 [작업표 재구성]도 증원 행을 만들 수 있다. 삭제된 seq 뒤에 새 행을 만들면
+     seq 자체는 일부러 건너뛰므로, 저장 경로처럼 화면 번호를 다시 채워야 한다. */
+  const rebuildSrc = planSrc.slice(planSrc.indexOf('async function rebuildWorktableFromPlans'));
+  ok('★ 수동 작업표 재구성도 장부 재생성 전에 화면 번호를 정리한다',
+    /const \{ renumberTab \} = require\('\.\/rowNumbering\.service'\);/.test(rebuildSrc)
+    && rebuildSrc.indexOf('renumberTab({') < rebuildSrc.indexOf('rebuildLedgers({ ...target'));
+
   console.log(`\nplanWorktableSeqReuse: ${passed} passed`);
   process.exit(0);
 })();
