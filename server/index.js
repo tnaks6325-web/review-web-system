@@ -40,6 +40,10 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'delivery_type_mix'],           // 135 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['recruit_campaigns', 'delivery_type_mix'],     // 135 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['work_orders', 'source_revision'],             // 102 — 원본 수정 버전
+  ['work_orders', 'workboard_schema_version'],    // 135 — 작업표 열 규격(원본 생성 시점 고정)
+  ['work_orders', 'work_series_id'],              // 136 — 같은 작업의 차수 계열(원본 수신·작업표 생성)
+  ['work_orders', 'work_round'],                  // 136 — 차수 표기(원본 수신·작업표 생성)
+  ['tab_configs', 'workboard_schema_version'],    // 137 — 탭별 V2 상태열 바인딩의 규격 고정
   ['work_orders', 'intake_idempotency_key'],      // 102 — 네트워크 재시도 키
   ['work_orders', 'intranet_advertiser_id'],      // 102 — 원본 광고주 식별자
   ['work_orders', 'intranet_advertiser_name'],    // 102 — 원본 광고주명 스냅샷
@@ -98,6 +102,13 @@ const REQUIRED_SCHEMA = [
   ['order_submissions', 'selected_product'],
 ];
 
+// V2 상태 표시는 열 이름 추측을 하지 않고, 생성 시점의 위치를 이 표에 고정한다.
+// 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
+// 컬럼 프리플라이트와 함께 부팅을 막는다.
+const REQUIRED_TABLES = [
+  'tab_status_column_bindings',                   // 137 — 리뷰/입금일 상태열 위치 바인딩
+];
+
 async function _runOneMigration(pool, sql) {
   const client = await pool.connect();
   let broken = false;
@@ -128,18 +139,28 @@ async function _runOneMigration(pool, sql) {
 async function assertSchemaReady() {
   const pool = require('./src/db/pool');
   let rows;
+  let tableRows;
   try {
     const tuples = REQUIRED_SCHEMA.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(',');
     ({ rows } = await pool.query(
       `SELECT table_name, column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND (table_name, column_name) IN (${tuples})`,
       REQUIRED_SCHEMA.flat()));
+    ({ rows: tableRows } = await pool.query(
+      `SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
+      [REQUIRED_TABLES]
+    ));
   } catch (err) {
     logger.warn(`[migrate] 스키마 프리플라이트 조회 실패(부팅 계속): ${err.message}`);
     return;
   }
   const have = new Set(rows.map(r => `${r.table_name}.${r.column_name}`));
-  const missing = REQUIRED_SCHEMA.map(([t, c]) => `${t}.${c}`).filter(k => !have.has(k));
+  const haveTables = new Set(tableRows.map(r => r.table_name));
+  const missing = [
+    ...REQUIRED_SCHEMA.map(([t, c]) => `${t}.${c}`).filter(k => !have.has(k)),
+    ...REQUIRED_TABLES.filter(t => !haveTables.has(t)).map(t => `table:${t}`),
+  ];
   if (!missing.length) return;
   logger.error(`[migrate] ❌ 필수 스키마 누락 → 부팅 거부: ${missing.join(', ')}`);
   logger.error('[migrate]    조치: 마이그레이션 로그 확인 후 재배포 / 긴급 우회: ALLOW_SCHEMA_DRIFT=1');

@@ -120,7 +120,7 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
 
 (async () => {
   /* ══════════════ A. 라우터 스택 ══════════════ */
-  console.log('\n[A] 라우트 8종 · adminOrMaster');
+  console.log('\n[A] 라우트 9종 · adminOrMaster');
   {
     const r = require('../src/routes/trackB.routes');
     const found = {};

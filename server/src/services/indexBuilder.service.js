@@ -948,14 +948,14 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
 // 탭 데이터 파싱 (기존 로직 100% 유지)
 // ═══════════════════════════════════════════════════════════
 
-function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null, meta = null) {
+function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null, meta = null, statusBindings = null) {
   // ★ P2a: 컬럼감지·행파싱을 공용 columnResolver로 위임 — 동일 로직·동일 kw라 출력 100% 동일.
   //   smartBuild._parseTabRows도 같은 공용함수를 사용해 두 빌더의 인덱싱이 일치한다(진동 제거).
   //   ★ P2b: dbColMap(있으면) 전달 — DB컬럼매핑 우선 감지. 없으면(null) P2a와 100% 동일.
   //   ★ meta(있으면): 감지 provenance out-param — index_master.detect_source/drift 기록용.
   return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
     NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
-  }, dbColMap, meta);
+  }, dbColMap, meta, statusBindings);
 }
 
 function _isDataTabRow(cells) {

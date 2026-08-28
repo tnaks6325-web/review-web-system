@@ -675,7 +675,7 @@ ok('★ 리뷰옵션 칸은 상품옵션 기입처로 세지 않는다 — no_op
     /* ★ 2026-08-20: 리뷰옵션 칸만 있으면 상품옵션 칸을 **따로 만든다**(리뷰옵션은 기입처가 아니다).
        종전 기대값(`no_option_column` 경고)은 자동 추가로 대체됐고, 검사의 요지
        "리뷰옵션을 상품옵션으로 세지 않는다"는 그대로다. */
-    return p.columns.filter(c => c.role === 'option').length === 2      // 리뷰옵션 + 새로 만든 옵션
+    return p.columns.filter(c => /^(옵션|리뷰옵션)$/.test(c.name)).length === 2 // 역할은 분리하되 두 열은 함께 존재
       && p.columns.some(c => c.name === '옵션' && c.origin === 'system')
       && p.warnings.some(w => w.code === 'option_column_added')
       && !p.warnings.some(w => w.code === 'duplicate_role' && /option/.test(w.message));
@@ -697,7 +697,7 @@ ok('★ 미리보기가 리뷰 배분을 그린다(reviewBuckets + 리뷰옵션 
       && /r\.reviewOption\|\|'—'/.test(w);
   })());
 ok('★ plan 라우트 SELECT 에 리뷰 배분 재료가 실린다(빠지면 미리보기 ≠ 실제 표)',
-  /review_type, review_type_mix, skip_weekends, holidays, courier_proxy, delivery_type/.test(routes));
+  /skip_weekends, holidays, workboard_schema_version,[\s\S]{0,120}work_series_id, work_round, delivery_type, courier_proxy,[\s\S]{0,120}review_type, review_type_mix/.test(routes));
 ok('★ 접수 확인창의 휴무일 — 화면에서 안 건드렸으면 계획 값 그대로(빈 배열 = 오더 휴무일 삭제 사고)',
   /Array\.isArray\(f\.holidays\)\?f\.holidays:\(\(_WTP\.plan&&_WTP\.plan\.holidays\)\|\|\[\]\)/.test(readF('workdesk.html')));
 

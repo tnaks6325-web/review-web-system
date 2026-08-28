@@ -5,6 +5,16 @@ const {
   SourceContractError,
   normalizeReviewOrderSourceContract,
 } = require('../services/reviewOrderSourceContract.service');
+const {
+  LEGACY_WORKBOARD_SCHEMA_VERSION,
+  WorkboardSchemaError,
+  assertSupportedWorkboardSchemaVersion,
+  isAutomatedWorkboardEnabled,
+} = require('../services/workboardSchema.service');
+const {
+  ProductOptionsError,
+  normalizeProductOptionsJson,
+} = require('../services/productOptions.service');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
@@ -149,6 +159,9 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_kind            TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_review_order_id TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_revision        INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS workboard_schema_version SMALLINT NOT NULL DEFAULT 1 CHECK (workboard_schema_version IN (1, 2))`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_series_id TEXT NOT NULL DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_round INTEGER NOT NULL DEFAULT 1 CHECK (work_round >= 1)`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intake_idempotency_key TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_id TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_name TEXT DEFAULT ''`);
@@ -279,12 +292,14 @@ function _holidaysJson(v) {
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy, sourceContract) {
   const source = sourceContract || {
-    sourceReviewOrderId: '', sourceRevision: 0, idempotencyKey: '', intranetAdvertiserId: '',
-    intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '',
+    sourceReviewOrderId: '', sourceRevision: 0, workboardSchemaVersion: LEGACY_WORKBOARD_SCHEMA_VERSION, idempotencyKey: '', intranetAdvertiserId: '',
+    intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '', workSeriesId: '', workRound: 1,
   };
-  const optionsJson = (typeof b.product_options_json === 'string')
-    ? b.product_options_json
-    : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
+  const optionsJson = b._normalized_product_options_json !== undefined
+    ? b._normalized_product_options_json
+    : ((typeof b.product_options_json === 'string')
+      ? b.product_options_json
+      : (b.product_options_json ? JSON.stringify(b.product_options_json) : ''));
   const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
   const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
   const { rows } = await pool.query(
@@ -294,11 +309,11 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        review_type, review_type_mix, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
        sales_id, contract_number, quote_id, skip_weekends, holidays,
-       source_review_order_id, source_revision, intake_idempotency_key, intranet_advertiser_id,
+       source_review_order_id, source_revision, workboard_schema_version, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
-       status, created_by, work_kind,
-       delivery_type_mix, recall_courier, recall_product)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,'submitted',$40,$41,$42,$43,$44)
+       status, created_by, work_kind, delivery_type_mix, recall_courier, recall_product,
+       work_series_id, work_round)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,'submitted',$40,$41,$42,$43,$44,$45,$46)
      RETURNING *`,
     [
       _genOrderId(),
@@ -341,6 +356,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       _holidaysJson(b.holidays),
       source.sourceReviewOrderId,
       source.sourceRevision,
+      source.workboardSchemaVersion,
       source.idempotencyKey,
       source.intranetAdvertiserId,
       source.intranetAdvertiserName,
@@ -355,6 +371,8 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       _deliveryMixJson(b, deliveryType),
       _recallFields(b, deliveryType).courier,
       _recallFields(b, deliveryType).product,
+      source.workSeriesId,
+      source.workRound,
     ]
   );
   return rows[0];
@@ -413,6 +431,26 @@ router.post('/intake', async (req, res, next) => {
       }
       throw err;
     }
+    if (sourceContract) {
+      try {
+        b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json, {
+          requireStructured: sourceContract.workboardSchemaVersion === 2,
+        }).json;
+      } catch (err) {
+        if (err instanceof ProductOptionsError) {
+          return res.status(400).json({ ok: false, code: err.code, error: err.message });
+        }
+        throw err;
+      }
+      try {
+        assertSupportedWorkboardSchemaVersion(sourceContract.workboardSchemaVersion);
+      } catch (err) {
+        if (err instanceof WorkboardSchemaError) {
+          return res.status(409).json({ ok: false, code: err.code, error: err.message });
+        }
+        throw err;
+      }
+    }
 
     // A matching retry returns the original work order. A different key or
     // version for the same source is intentionally not treated as a new order.
@@ -438,6 +476,16 @@ router.post('/intake', async (req, res, next) => {
           source_revision: existing.source_revision,
         });
       }
+    }
+
+    // 기존 원본의 재시도는 위에서 idempotent로 반환한다. 이 지점은 새 작업만 막아
+    // 긴급 복귀 때 이미 만든 v2 작업의 원본 이력까지 끊지 않는다.
+    if (sourceContract && sourceContract.workboardSchemaVersion === 2 && !isAutomatedWorkboardEnabled()) {
+      return res.status(409).json({
+        ok: false,
+        code: 'workboard_v2_disabled',
+        error: '새 작업표 자동 규격은 현재 보류 중입니다. 기존 규격으로 다시 전송해 주세요.',
+      });
     }
 
     let data;
@@ -613,6 +661,24 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!source || source.sourceReviewOrderId !== sourceReviewOrderId) {
       return res.status(400).json({ ok: false, error: '원본 리뷰오더 ID가 요청 경로와 일치해야 합니다.' });
     }
+    try {
+      b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json, {
+        requireStructured: source.workboardSchemaVersion === 2,
+      }).json;
+    } catch (err) {
+      if (err instanceof ProductOptionsError) {
+        return res.status(400).json({ ok: false, code: err.code, error: err.message });
+      }
+      throw err;
+    }
+    try {
+      assertSupportedWorkboardSchemaVersion(source.workboardSchemaVersion);
+    } catch (err) {
+      if (err instanceof WorkboardSchemaError) {
+        return res.status(409).json({ ok: false, code: err.code, error: err.message });
+      }
+      throw err;
+    }
 
     const { rows: currentRows } = await pool.query(
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`,
@@ -622,11 +688,17 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!current) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
     }
-    const optionsJson = typeof b.product_options_json === 'string'
-      ? b.product_options_json
-      : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
+    const optionsJson = b._normalized_product_options_json;
     const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
     const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+
+    if (Number(current.workboard_schema_version || LEGACY_WORKBOARD_SCHEMA_VERSION) !== source.workboardSchemaVersion) {
+      return res.status(409).json({ ok: false, code: 'workboard_schema_immutable', error: '작업표 규격은 원본 작업오더 생성 후 변경할 수 없습니다.', work_order_id: current.id });
+    }
+    if (String(current.work_series_id || '') !== String(source.workSeriesId || '')
+      || Number(current.work_round || 1) !== Number(source.workRound || 1)) {
+      return res.status(409).json({ ok: false, code: 'work_round_immutable', error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.', work_order_id: current.id });
+    }
 
     // 접수·게시 기준이 확정된 오더는 원본에서 내용을 바꾸지 못한다.
     // 단 계약 후속 매칭(작업 내용은 그대로 · 계약/광고주 칸만 채움)은 예외다 —
@@ -890,6 +962,7 @@ router.delete('/intake/:id', async (req, res, next) => {
        WHERE id = $1`,
       [id, (b.deleted_by || '').toString().trim(), (b.deleted_by_name || '').toString().trim()]
     );
+
     logger.info(`[order] 인트라넷 작업오더 삭제: ${id} (by ${b.deleted_by || '?'})`);
     res.json({ ok: true, id });
   } catch (err) {
@@ -1599,6 +1672,15 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
         workKindForStore(o.work_kind),  // $14 — 체험단 종류(099). 빈 값 = 리뷰 = 종전 동작.
       ]
     );
+
+    // 작업오더에서 확정된 규격을 실제 탭에도 고정한다. 재접수는 기존 탭의
+    // 규격을 낮추지 않으며, v1 과거 탭은 종전 판정으로 남는다.
+    if (Number(o.workboard_schema_version || 1) === 2) {
+      await pool.query(
+        `UPDATE tab_configs SET workboard_schema_version = 2
+          WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName]
+      );
+    }
 
     // ════════════════════════════════════════════════════════════════════
     // 7) 장부 채우기 — 여기도 두 경로가 갈린다(재료가 다르다).

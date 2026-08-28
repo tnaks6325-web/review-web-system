@@ -31,7 +31,7 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 console.log('\n[A] 주문 → 작업표 row_json (매퍼 파생 · 옵션 blank-only)');
 {
   const HEADERS = ['번호', '구매일자', '수취인', '연락처', '주소', '은행', '계좌번호',
-                   '예금주', '결제금액', '주문번호', '리뷰옵션', '옵션금액', '비고'];
+                   '예금주', '결제금액', '주문번호', '옵션', '리뷰옵션', '옵션금액', '비고'];
   const ORDER = {
     orderer: '김주문', recipient: '김수취', phone: '010-1111-2222', address: '서울시 A로 1',
     bank: '국민', account: '123-456', depositor: '김주문', price: '22000',
@@ -50,14 +50,16 @@ console.log('\n[A] 주문 → 작업표 row_json (매퍼 파생 · 옵션 blank-
   ok('빈 칸으로 지우는 쓰기를 만들지 않는다(비고는 빈 값이어도 매퍼 계약대로 실림)',
     typeof patch['비고'] === 'string');
 
-  // 옵션 blank-only — 기존 작업지시('포토리뷰')를 덮지 않는다
-  const cur = { 리뷰옵션: '포토리뷰' };
+  // 리뷰옵션은 구매 옵션이 아니라 시스템 작업지시다. 주문 제출값이 덮으면 안 된다.
+  ok('리뷰옵션은 구매 옵션 쓰기 대상이 아니다', !('리뷰옵션' in patch));
+  // 옵션 blank-only — 기존 작업지시를 덮지 않는다
+  const cur = { 옵션: '포토리뷰' };
   const r2 = slOrder.buildRowPatch(HEADERS, ORDER, cur);
-  ok('옵션 칸에 값이 있으면 덮지 않는다(blank-only)', !('리뷰옵션' in r2.patch));
+  ok('옵션 칸에 값이 있으면 덮지 않는다(blank-only)', !('옵션' in r2.patch));
   ok('보존한 사실을 돌려준다(조용한 누락 금지)',
     r2.optionSuppressed.length === 1 && r2.optionSuppressed[0].cur === '포토리뷰');
-  const r3 = slOrder.buildRowPatch(HEADERS, ORDER, { 리뷰옵션: '   ' });
-  ok('공백만 있는 옵션 칸은 빈 칸으로 본다(리뷰어 선택이 들어간다)', r3.patch['리뷰옵션'] === '레드');
+  const r3 = slOrder.buildRowPatch(HEADERS, ORDER, { 옵션: '   ' });
+  ok('공백만 있는 옵션 칸은 빈 칸으로 본다(리뷰어 선택이 들어간다)', r3.patch['옵션'] === '레드');
 
   const src = noLineComments(srv('src/services/sheetlessOrder.service.js'));
   ok('매핑 규칙 사본 0 — orderLedger 의 매퍼를 그대로 쓴다',
@@ -199,7 +201,7 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       ok('장부를 다시 만든다(검색·리뷰내역이 즉시 따라오게)', calls.rebuild === 1);
       ok('완결 표시는 장부 재생성 뒤', calls.written === 1);
       ok('신원 링크는 기록 성공 후에만(낙관적 선기입 금지)', calls.ident === 1);
-      ok('기존 옵션 값은 보존됐다고 보고한다', r.optionSuppressed.length === 1);
+      ok('리뷰옵션은 주문 옵션 쓰기 대상이 아니므로 기존 값이 그대로 남는다', r.optionSuppressed.length === 0);
       const upd = log.client.find(c => /UPDATE campaign_participants/.test(c.sql));
       ok('작업보드 표에 뜨도록 이름·연락처도 채운다(표가 비지 않게)',
         upd.params.includes('김로그인') && upd.params.includes('12345678'));

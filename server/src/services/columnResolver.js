@@ -90,7 +90,7 @@ function _dbCol(dbColMap, field, headers, drift = null) {
  *   meta.fields = { name|recipient|review_submit|product|url|phone|start_date|end_date|round|payment:
  *                   { col, header, src: 'db'|'keyword'|'none' } }
  */
-function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbColMap = null, meta = null) {
+function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbColMap = null, meta = null, statusBindings = null) {
   const { NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES } = kw;
   const drift = meta ? [] : null;
   if (meta) { meta.headerRowIdx = -1; meta.fields = null; meta.drift = drift; }
@@ -144,15 +144,51 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
     }
   }
 
-  // ── 제출열 — 판정은 `findSubmitColumnIndex` 단일 출처(아래) ──
-  //   ★ 이 판정이 "그 탭의 리뷰제출 칸"을 정한다. 작업표 생성(worktablePlan)이 **같은 함수**로
-  //     "제출 칸이 있는가"를 확인해 없으면 만들어 붙인다 — 사본을 두면 "만든 칸 ≠ 읽는 칸"이 된다.
-  //   ★ `_dbCol` 은 재앵커 거부를 `drift` 에 기록하므로 **한 번만** 부른다(두 번 부르면 거부가 겹쳐 세어진다).
-  const submitDbIdx = _dbCol(dbColMap, 'review_submit', headers, drift);
-  const submitFromDb = submitDbIdx >= 0;
-  const submitColIdx = submitFromDb
-    ? submitDbIdx
-    : findSubmitColumnIndex(headers, { submitKeywords: SUBMIT_KEYWORDS });
+  // ── 제출열 (P2b: DB매핑 'review_submit' 우선 → 3단계 키워드 폴백) ──
+  const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];
+  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주', '리뷰옵션', '리뷰가이드'];
+  // ★★ 8/3 실측 사고(박은비 탭): SUBMIT_KEYWORDS에 완료신호 단어(제출/완료/submit)와 함께
+  //   넓은 catch-all인 '리뷰' 단독도 섞여 있다. 1·2단계(우선탐지)에서 '리뷰'를 그대로 매칭에
+  //   쓰면 그 자체가 SUBMIT_PRIORITY_PREFIXES('리뷰')와 항상 동시에 참이 되어 AND 조건이
+  //   무력화된다 — '리뷰가이드'(작업지시 열, 항상 값이 차 있음) 같은 열이 실제 '리뷰제출'열보다
+  //   먼저 잡혀 참여자 전원이 제출완료로 오판정됐다(2단계도 같은 이유로 동일 오탐).
+  //   → 1·2단계(우선탐지)는 완료신호 키워드만 쓰고, '리뷰' 단독 매칭은 완료신호 열이 전혀
+  //   없을 때의 최후수단(3단계, 기존 동작 그대로)에만 남긴다.
+  const SUBMIT_COMPLETION_KEYWORDS = SUBMIT_KEYWORDS.filter(k => k !== '리뷰');
+  const isV2 = !!statusBindings;
+  if (isV2) require('./statusColumnBinding.service').validateV2StatusBindings(headers, statusBindings);
+  let submitColIdx = isV2 ? statusBindings.review_submit.colIndex : _dbCol(dbColMap, 'review_submit', headers, drift);
+  const submitFromDb = submitColIdx >= 0;
+  if (submitColIdx < 0) {
+    for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+      const hl = headers[hi].toLowerCase();
+      if (SUBMIT_PRIORITY_PREFIXES.some(p => hl.includes(p)) &&
+          SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+        submitColIdx = hi;
+      }
+    }
+    if (submitColIdx < 0) {
+      for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+        const hl = headers[hi].toLowerCase();
+        if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) continue;
+        if (SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) submitColIdx = hi;
+      }
+    }
+    // ★★ 8/4 재발(면마스크 탭 실측): 3단계(최후수단, 바로 위 두 단계가 못 찾았을 때만 도달)는
+    //   '리뷰' 단독 매칭까지 허용해야 하는 이유가 있다 — 이 탭처럼 완료열 이름이 아예 '리뷰'
+    //   뿐(리뷰제출/리뷰완료 접미 없음)인 정상 시트도 실재한다. 문제는 이 단계에 제외패턴이
+    //   없어서, 완료열이 헤더 순서상 '주문자제출'(이름열, '제출' 포함)보다 뒤에 있으면
+    //   '주문자제출'을 먼저 집어 전원 제출완료로 오판정한다(2단계에서 이미 걸러지던 예외를
+    //   3단계가 다시 무방비로 통과시킴). → 2단계와 동일하게 이름열 제외패턴을 적용해
+    //   '리뷰' 단독 매칭은 허용하되 이름류 열은 여전히 걸러낸다.
+    if (submitColIdx < 0) {
+      submitColIdx = headers.findIndex(h => {
+        const hl = h.toLowerCase();
+        if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) return false;
+        return SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()));
+      });
+    }
+}
 
   // ── 상품/URL/연락처/날짜/차수 (P2b: 해당 db_field 우선 → 키워드 폴백) ──
   const productKeywords = ['상품명', '제품명', '상품', 'product'];
@@ -191,8 +227,12 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   if (roundIdx < 0) roundIdx = headers.findIndex(h => roundKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
 
   // ── 입금열 (P2b: DB매핑 'payment' 우선 → 정확/부분/제외 키워드 폴백) ──
-  let paymentColIdx = _dbCol(dbColMap, 'payment', headers, drift);
-  const paymentFromDb = paymentColIdx >= 0;
+  let paymentColIdx = isV2 ? statusBindings.payment_status.colIndex : _dbCol(dbColMap, 'payment_status', headers, drift);
+  let paymentFromDb = paymentColIdx >= 0;
+  if (paymentColIdx < 0) {
+    paymentColIdx = _dbCol(dbColMap, 'payment', headers, drift);
+    paymentFromDb = paymentColIdx >= 0;
+  }
   if (paymentColIdx < 0) paymentColIdx = findPaymentColumnIndex(headers);
 
   // ── 감지 provenance 보고 (meta out-param) — 반환값/파싱에는 영향 없음 ──
@@ -222,12 +262,16 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
       if (!name) return null;
 
       const submitVal = submitColIdx >= 0 ? String(row[submitColIdx] || '').trim() : '';
-      const isSubmitted = _isSubmittedValue(submitVal, SUBMITTED_VALUES);
+      const isSubmitted = isV2
+        ? require('./statusColumnBinding.service').isV2ReviewSubmitted(submitVal)
+        : _isSubmittedValue(submitVal, SUBMITTED_VALUES);
 
       const paymentVal = paymentColIdx >= 0 ? String(row[paymentColIdx] || '').trim() : '';
       let isSubmitted2 = null;
       if (paymentColIdx >= 0) {
-        isSubmitted2 = paymentVal && _isSubmittedValue(paymentVal, SUBMITTED_VALUES) ? 'PAID' : 'NONE';
+        isSubmitted2 = paymentVal && (isV2
+          ? require('./statusColumnBinding.service').isV2PaymentSubmitted(paymentVal)
+          : _isSubmittedValue(paymentVal, SUBMITTED_VALUES)) ? 'PAID' : 'NONE';
       }
 
       let phone8 = null;
