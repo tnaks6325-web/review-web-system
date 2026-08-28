@@ -214,17 +214,19 @@ async function writeOrderToWorktable({
        별도 트랜잭션에서 잡히므로 중첩(=교착) 이 생기지 않는다. */
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
       [`sheetless_worktable:${sheetId}:${tabName}`]);
-    // 직원 수정과 늦은 큐가 경합해도 최신 원장값이 이긴다. 이 잠금은 아래 작업보드 쓰기가
-    // 끝날 때까지 직원 UPDATE를 기다리게 하고, 먼저 끝난 직원 수정은 여기서 다시 읽힌다.
-    const { rows: freshOrders } = await client.query(
-      `SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
-      [orderSubmissionId]
-    );
-    if (!freshOrders.length || freshOrders[0].mirror_status === 'canceled') {
-      await client.query('ROLLBACK');
-      return { ok: true, written: false, reason: 'deleted_or_canceled' };
+    // 새 큐 경로에서는 직원 수정과 늦은 반영이 경합해도 최신 원장값이 이긴다. 기존 무시트
+    // 즉시 반영은 호출 직전에 만든 orderData를 그대로 써서, 전환 전 동작과 쿼리 수를 보존한다.
+    if (workboardId) {
+      const { rows: freshOrders } = await client.query(
+        `SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
+        [orderSubmissionId]
+      );
+      if (!freshOrders.length || freshOrders[0].mirror_status === 'canceled') {
+        await client.query('ROLLBACK');
+        return { ok: true, written: false, reason: 'deleted_or_canceled' };
+      }
+      orderData = ledgerSvc._osRowToOrderData(freshOrders[0]);
     }
-    orderData = ledgerSvc._osRowToOrderData(freshOrders[0]);
     let cur;
     if (seq != null) {
       ({ rows: cur } = await client.query(

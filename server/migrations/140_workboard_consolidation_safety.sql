@@ -21,4 +21,3 @@ CREATE INDEX IF NOT EXISTS idx_workboard_consolidation_targets_state
 CREATE INDEX IF NOT EXISTS idx_workboard_consolidation_targets_workboard
   ON workboard_consolidation_targets(workboard_id)
   WHERE workboard_id IS NOT NULL;
-
