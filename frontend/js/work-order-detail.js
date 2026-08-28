@@ -590,7 +590,10 @@ function _woChannel(o) {
  *    (`readOptRows` 가 `_prodMode() !== "opt"` 에서 조기 return) 상품별 유입가이드가 통째로
  *    사라지고, 리뷰어에게는 공고 공통 안내만 보인다(실측: 프리필엔 사진 3장이 그대로 실려 오는데
  *    저장 payload 의 options 가 `[]`).
- *    ★ 상품 1개 + 옵션 없음은 종전 그대로 'none' — 그건 선택지가 하나뿐인 진짜 단일상품이다.
+ *    ★ 상품 1개 + 옵션 없음도, 그 상품에 전용 유입가이드가 있으면 'opt' 다.
+ *      단일 선택지라 해도 가이드를 입력·저장할 원장이 필요하다. 이때 행은 여전히
+ *      `unitKind:'product'` 이므로 옵션명이나 작업표 옵션 칸으로 오인하지 않는다.
+ *      가이드가 없는 단일상품만 종전대로 'none'으로 둔다.
  *    ★ 옵션 칸이 화면에 뜨는 것은 표기일 뿐이고, 상품 단위 줄은 옵션명 칸을 비운 채
  *      `unitKind:'product'` 로 저장된다(`opt_key` = 상품명, 시트 옵션 칸에는 쓰지 않는다). */
 function _woProductMode(o) {
@@ -599,7 +602,13 @@ function _woProductMode(o) {
     if (!Array.isArray(products) || !products.length) return "";
     const modes = products.map(p => String((p && p.product_mode) || ""));
     if (modes.some(m => m === "opt")) return "opt";
-    if (modes.some(m => m === "none")) return products.length > 1 ? "opt" : "none";
+    if (modes.some(m => m === "none")) {
+      if (products.length > 1) return "opt";
+      // 단일상품 가이드도 상품별 가이드 편집·저장 영역의 대상이다.
+      // `_woOptionRows`가 product 단위 행으로 만들고, opt 모드만 그 행을 campaign_options에 저장한다.
+      const guide = _woUnitGuide(_woProductUnitSrc(products[0]));
+      return (guide.html || guide.images.length) ? "opt" : "none";
+    }
     return "";
   } catch (_) {
     return "";
