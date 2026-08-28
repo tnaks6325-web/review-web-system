@@ -234,7 +234,7 @@ async function run() {
     && /if\(\(a\.advView\|\|''\)!==\(b\.advView\|\|''\)\) return false;/.test(src)
     && /if\(st\.advView\) STATE\.advView=st\.advView;/.test(src));
 
-  /* ═══ 6. 리뷰제출 컬럼 선점(_advertiserColumns) ═══ */
+  /* ═══ 6. 광고주 컬럼 차단 목록(_advertiserColumns) ═══ */
   const advCols = svc.__advertiserColumnsForTest;
   const advHeaderCandidates = svc.__advertiserHeaderCandidatesForTest;
   const advColumnValue = svc.__advertiserColumnValueForTest;
@@ -246,19 +246,17 @@ async function run() {
     ok('동기화가 오래된 detected_headers 에 없는 택배송장도 행 데이터 키에서 보완한다',
       advCols(recovered).includes('택배송장'));
 
-    // 실측 신고: 리뷰제출 열 헤더가 키워드에 안 걸리는 탭(카페/블로그 발행)에서 그 열이 통째로 빠졌다.
+    // 차단 목록 전환 뒤에는 리뷰제출 열 헤더가 어떤 이름이든 원본 순서대로 남는다.
     const hs = ['번호', '구매날짜', '수취인', '연락처', '주소', '결제금액', '카페/블로그 발행', '입금'];
-    ok('★ 상태 칸(submit_col)이 키워드에 안 걸려도 리뷰제출 열이 나온다',
+    ok('★ 상태 칸 이름이 키워드에 안 걸려도 원본 컬럼으로 나온다',
       advCols(hs, { submitCol: '카페/블로그 발행', submitCol2: '입금' }).includes('카페/블로그 발행'));
     ok('★ 출력 순서 = 결제금액 → 리뷰제출 → 입금(사용자 요청 위치)', (() => {
       const o = advCols(hs, { submitCol: '카페/블로그 발행', submitCol2: '입금' });
       return o.indexOf('결제금액') < o.indexOf('카페/블로그 발행') && o.indexOf('카페/블로그 발행') < o.indexOf('입금');
     })());
-    ok('선점 없이(기존 동작) 호출하면 그 열은 여전히 빠진다 = 이 선점이 실제 원인 해소',
-      !advCols(hs).includes('카페/블로그 발행'));
-    // 두 번째 사고: '입금일자'는 위쪽 구매일자 규칙(/일자|날짜/)이 먼저 삼켜 오배치가 났다.
+    ok('옵션 없이 호출해도 같은 원본 컬럼이 나온다', advCols(hs).includes('카페/블로그 발행'));
     const hs2 = ['번호', '구매일자', '수취인', '연락처', '주소', '결제금액', '리뷰제출일', '입금일자'];
-    ok('★ 상태 칸 선점이 구매일자 규칙의 입금일자 삼킴을 막는다', (() => {
+    ok('★ 원본 순서를 유지해 구매일자와 입금일자가 모두 나온다', (() => {
       const o = advCols(hs2, { submitCol: '리뷰제출일', submitCol2: '입금일자' });
       return o.includes('입금일자') && o.includes('구매일자') && o.indexOf('구매일자') < o.indexOf('입금일자');
     })());
@@ -266,11 +264,11 @@ async function run() {
       !advCols(hs, { submitCol: '없는열' }).includes('없는열'));
     ok('opts 없이 호출한 결과는 종전과 동일(무회귀)',
       JSON.stringify(advCols(hs2)) === JSON.stringify(advCols(hs2, {})));
-    ok('★ 화이트리스트 밖 컬럼(은행·계좌)은 여전히 안 나온다',
-      !advCols(['수취인', '은행', '계좌번호', '예금주'], { submitCol: '계좌번호' }).includes('은행'));
+    ok('★ 다섯 차단 컬럼(은행·계좌·예금주)은 나오지 않는다',
+      JSON.stringify(advCols(['수취인', '은행', '계좌번호', '예금주'])) === JSON.stringify(['수취인']));
   }
-  ok('workdeskTab 이 보완된 헤더 후보와 roster 의 submit_col/submit_col2 를 광고주 헤더 산출에 넘긴다',
-    /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster, advEditedHeaders\), \{[\s\S]*submitCol: sc\.submit_col,[\s\S]*submitCol2: sc2\.submit_col2,[\s\S]*\}\)/.test(
+  ok('workdeskTab 이 보완된 헤더 후보를 광고주 차단 목록에 넘긴다',
+    /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster, advEditedHeaders\)\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
 
   /* ═══ 7. 리뷰 캡처 미리보기(행별) ═══ */

@@ -2487,50 +2487,26 @@ async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMappi
 
 function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합키(정렬무관, 값에 탭 없음)
 
-// 광고주(외부) 노출 화이트리스트 — 주문/배송/정산 컬럼만. 시트 헤더에서 개념별 키워드로 매칭(출력 순서=이 목록 순).
-//   ★ 데이터 최소화: 여기 없는 컬럼(은행/계좌번호/예금주 등)은 rowJson에서도 제외해 전송 → 네트워크 페이로드에도 안 실림.
-//   신원열(참여자 이름·phone8)은 프론트가 광고주 그리드에서 아예 렌더 안 함(별도). 값은 전체 노출(사용자 정책).
-const _ADV_COL_RULES = [
-  ['번호',      /^\s*(번호|no\.?|순번|연번)\s*$/i],
-  ['구매일자',  /구매\s*일자|구매일|주문\s*일자|주문일|결제\s*일|일자|날짜|date/i],
-  ['주문번호',  /주문\s*번호|order\s*num/i],
-  ['수취인',    /수취인|수령인|받는\s*분|받는분|수령자/],
-  ['ID',        /아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i],
-  ['연락처',    /연락처|휴대폰|핸드폰|전화|폰\s*번호|^\s*hp\s*$|mobile/i],
-  ['주소',      /주소|배송지/],
-  // 택배송장 = 업체가 발송 현황을 확인하는 배송 대행 업무 데이터. 택배·송장 조합만 정확히 허용해
-  // 비고성 배송 컬럼을 넓게 노출하지 않으며, 원본 헤더명은 그대로 보존한다.
-  ['택배송장',  TRACKING_HEADER_RE],
-  // 결제금액 = 결제/구매/상품/주문 금액 또는 단독 '금액'만(전체문자열). 바로 '금액' 부분일치 금지 →
-  //   입금액·환급액·수수료금액 등 다른 금액 컬럼을 결제금액으로 오매칭해 노출하는 것 방지(요청 = 결제금액 하나).
-  ['결제금액',  /결제\s*금액|구매\s*금액|상품\s*금액|주문\s*금액|결제액|결제가|^\s*금액\s*$/],
-  ['리뷰제출일', /리뷰\s*제출|리뷰\s*링크|리뷰\s*url|리뷰\s*완료|리뷰\s*인증|제출일/i],
-  // 입금일 = '입금'(단독=시트 관행상 입금일) 또는 입금+날짜/상태 접미만 허용(화이트리스트 접미). 전체문자열 앵커라
-  //   입금자·입금명·입금정보·입금메모·입금주·입금계좌·입금은행·입금자명 등 이름/계좌/자유텍스트 컬럼은 매칭 안 됨(PII 유출 차단).
-  ['입금일',    /^\s*입금\s*(완료|확인|처리)?\s*(일|일자|날짜|여부|상태)?\s*$/],
-];
-// opts.submitCol / submitCol2 = 그 탭의 "리뷰제출 / 입금" 상태 칸 헤더명(review_index → campaign_participants 복제값).
-// ★★ 상태 칸이 키워드 판정을 이긴다(worktable 분류기와 같은 규율) — 먼저 **선점**해야 하는 이유 2가지:
-//   ① 리뷰제출 열 헤더가 키워드에 안 걸리는 탭(예 '카페/블로그 발행')에서 그 열이 통째로 빠졌다(실제 신고).
-//   ② 반대로 '입금일자' 같은 헤더는 위쪽 구매일자 규칙(/일자|날짜/)이 먼저 삼켜, 구매일자 칸에 입금일이
-//      들어가고 입금 칸은 사라지는 오배치가 난다. 선점하면 두 사고가 동시에 막힌다.
-function _advertiserColumns(rawHeaders, opts = {}) {
-  const hs = (rawHeaders || []).map(h => String(h == null ? '' : h).trim()).filter(Boolean);
-  const pin = {};
-  const pinHeader = (concept, name) => {
-    const v = String(name == null ? '' : name).trim(); if (!v) return;
-    const hit = hs.find(h => h === v);                       // 실재하는 헤더만(정확 일치)
-    if (hit && !Object.values(pin).includes(hit)) pin[concept] = hit;
-  };
-  pinHeader('리뷰제출일', opts.submitCol);
-  pinHeader('입금일', opts.submitCol2);
-  const used = new Set(Object.values(pin)), out = [];
-  for (const [concept, re] of _ADV_COL_RULES) {
-    if (pin[concept]) { out.push(pin[concept]); continue; }   // 선점된 상태 칸(출력 순서는 규칙 순서 그대로)
-    const hit = hs.find(h => !used.has(h) && re.test(h));
-    if (hit) { used.add(hit); out.push(hit); }   // 개념당 첫 매칭 헤더 1개, 요청 순서 유지
-  }
-  return out;
+// 광고주(외부) 노출 차단 목록 — 요청한 신원·정산정보 다섯 종류만 제외하고 원본 시트 컬럼을 모두 연다.
+//   ★ 데이터 최소화: 제외한 컬럼은 rowJson에서도 빼서 화면만이 아니라 네트워크 페이로드에도 싣지 않는다.
+//   신원열(참여자 이름·DB 연락처)은 프론트가 광고주 그리드에서 별도로 렌더하지 않으며, 동명 시트 열도 여기서 차단한다.
+function _isAdvertiserRestrictedHeader(header) {
+  const key = String(header == null ? '' : header).replace(/\s+/g, '').toLowerCase();
+  return /참여자/.test(key)
+    || /연락처|전화|핸드폰|휴대폰|전번|phone/.test(key)
+    || /은행|bank/.test(key)
+    || /계좌|account/.test(key)
+    || /예금주/.test(key);
+}
+
+function _advertiserColumns(rawHeaders) {
+  const seen = new Set();
+  return (rawHeaders || []).filter(header => {
+    const value = String(header == null ? '' : header).trim();
+    if (!value || value === 'id' || seen.has(value) || _isAdvertiserRestrictedHeader(value)) return false;
+    seen.add(value);
+    return true;
+  });
 }
 
 // raw_sheet_tabs.detected_headers 는 시트 동기화 시점의 스냅샷이라, 열이 추가된 직후에는 실제 행 데이터의
@@ -3140,13 +3116,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
     if (showEdits) headers = raw;                                   // 내부: 시트 전체 헤더
     else {
-      // 광고주: 화이트리스트만. 그 탭의 상태 칸(리뷰제출/입금)은 키워드보다 우선 선점 —
-      //   헤더가 키워드에 안 걸리는 탭에서 리뷰제출 열이 통째로 빠지던 것을 막는다.
-      const sc = roster.find(r => r.submit_col) || {}, sc2 = roster.find(r => r.submit_col2) || {};
-      advHeaders = _advertiserColumns(_advertiserHeaderCandidates(raw, roster, advEditedHeaders), {
-        submitCol: sc.submit_col,
-        submitCol2: sc2.submit_col2,
-      });
+      // 광고주: 차단 목록의 다섯 신원·정산 정보만 제외하고 원본 컬럼을 유지한다.
+      advHeaders = _advertiserColumns(_advertiserHeaderCandidates(raw, roster, advEditedHeaders));
       headers = advHeaders;
     }
   }
@@ -3268,7 +3239,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       syn.customValues = (ak && customValMap.get(ak)) || {};
       syn.cellColors = (ak && cellColorMap.get(ak)) || {};
     } else if (role === 'advertiser' && advHeaders) {
-      // 광고주: 화이트리스트 컬럼만 · 전체값(마스킹 없음, 사용자 정책). 미포함 컬럼(은행/계좌 등)은 rowJson에 안 담음(데이터 최소화).
+      // 광고주: 허용된 원본 컬럼 전체값. 차단 컬럼(참여자·연락처·은행·계좌번호·예금주)은 rowJson에 안 담음.
       const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
       const cur = {};
       for (const h of advHeaders) cur[h] = _advertiserColumnValue(rj, ov, h);
