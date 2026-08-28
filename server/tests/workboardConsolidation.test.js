@@ -23,6 +23,9 @@ ok('백업은 sealed 상태로 생성', /state TEXT NOT NULL DEFAULT 'sealed'/.t
 ok('백업 레코드는 원문 JSONB를 보관', /row_data JSONB NOT NULL/.test(migration));
 ok('백업 대상은 최대 120건으로 제한', /const MAX_TARGETS = 120/.test(service));
 ok('백업은 repeatable-read와 advisory lock으로 일관성을 확보', /BEGIN ISOLATION LEVEL REPEATABLE READ/.test(service) && /workboard_consolidation_backup/.test(service));
+ok('백업 세부 기록은 행별 왕복 없이 테이블별 묶음 저장',
+  /WITH copied AS \([\s\S]{0,180}INSERT INTO workboard_consolidation_backup_records[\s\S]{0,240}SELECT \$1, \$2, to_jsonb\(t\)/.test(service)
+  && /SELECT table_name, row_data[\s\S]{0,180}ORDER BY ordinal/.test(service));
 ok('연결 변경은 sealed 백업과 동일한 대상만 허용', /backup_target_mismatch/.test(service) && /state = 'sealed'/.test(service));
 ok('연결 변경 저널이 있어야 ID를 비우는 롤백을 허용', /workboard_consolidation_link_events/.test(migration) && /revertAdditiveMappings/.test(service));
 ok('즉시 롤백은 legacy 경로만 되살린다', /mode = 'legacy'/.test(service));

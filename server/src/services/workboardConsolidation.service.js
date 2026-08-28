@@ -244,25 +244,36 @@ async function createPreCutoverBackup({ targets, reason = '', createdBy = '' } =
     for (const table of SNAPSHOT_TABLES) {
       const exists = await client.query(`SELECT to_regclass($1) AS name`, [`public.${table.name}`]);
       if (!exists.rows[0].name) continue;
-      const { rows } = await client.query(
-        `SELECT to_jsonb(t) AS data
-           FROM ${table.name} t
-          WHERE EXISTS (
-            SELECT 1 FROM jsonb_to_recordset($1::jsonb) AS x(sheet_id text, tab_name text)
-             WHERE ${table.predicate}
-          )
-          ORDER BY t.id`,
-        [JSON.stringify(normalized.map(x => ({ sheet_id: x.sheetId, tab_name: x.tabName })))]
+      // 한 행마다 원격 DB 왕복을 만들면 운영 120건 백업이 수분 동안 거래를 붙잡는다.
+      // 같은 repeatable-read 거래 안에서 테이블별 INSERT ... SELECT 한 번으로 복사하고,
+      // 마지막에 저장된 사본을 한 번만 읽어 검사값을 만든다. 원본 선택 조건과 id 순서는
+      // 기존 방식 그대로이며, 중간 실패 시 헤더와 세부 사본이 함께 롤백된다.
+      const { rows: inserted } = await client.query(
+        `WITH copied AS (
+           INSERT INTO workboard_consolidation_backup_records(backup_id, table_name, row_data)
+           SELECT $1, $2, to_jsonb(t)
+             FROM ${table.name} t
+            WHERE EXISTS (
+              SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS x(sheet_id text, tab_name text)
+               WHERE ${table.predicate}
+            )
+            ORDER BY t.id
+           RETURNING 1
+         )
+         SELECT COUNT(*)::int AS n FROM copied`,
+        [backupId, table.name, JSON.stringify(normalized.map(x => ({ sheet_id: x.sheetId, tab_name: x.tabName })))]
       );
-      counts[table.name] = rows.length;
-      for (const row of rows) {
-        const data = row.data;
-        digest.update(table.name).update(JSON.stringify(data));
-        await client.query(
-          `INSERT INTO workboard_consolidation_backup_records(backup_id, table_name, row_data)
-           VALUES ($1, $2, $3::jsonb)`, [backupId, table.name, JSON.stringify(data)]
-        );
-      }
+      counts[table.name] = inserted[0] ? inserted[0].n : 0;
+    }
+
+    const { rows: savedRecords } = await client.query(
+      `SELECT table_name, row_data
+         FROM workboard_consolidation_backup_records
+        WHERE backup_id = $1
+        ORDER BY ordinal`, [backupId]
+    );
+    for (const row of savedRecords) {
+      digest.update(row.table_name).update(JSON.stringify(row.row_data));
     }
 
     const checksum = digest.digest('hex');
