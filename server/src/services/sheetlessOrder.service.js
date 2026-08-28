@@ -141,10 +141,28 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
  */
 async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
-  orderSubmissionId, loginPhone8 = '', loginName = '', recovered = false,
+  orderSubmissionId, workboardId = null, loginPhone8 = '', loginName = '', recovered = false,
 } = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
+
+  // 새 통폐합 경로에서는 작업보드 ID가 진짜 대상이다. 전달된 예전 키는 그 작업보드에
+  // 연결된 호환키로 다시 확정하고, 불일치·보관 보드는 쓰지 않는다.
+  if (workboardId) {
+    const { rows: boardTargets } = await db.query(
+      `SELECT tc.sheet_id, tc.tab_name, COALESCE(tc.tab_gid, '') AS tab_gid
+         FROM workboards w
+         JOIN tab_configs tc ON tc.workboard_id = w.id
+        WHERE w.id = $1 AND w.state = 'active' LIMIT 1`, [workboardId]
+    );
+    if (!boardTargets.length) return { ok: false, reason: 'workboard_not_active' };
+    if (boardTargets[0].sheet_id !== sheetId || boardTargets[0].tab_name !== tabName) {
+      return { ok: false, reason: 'workboard_target_mismatch' };
+    }
+    sheetId = boardTargets[0].sheet_id;
+    tabName = boardTargets[0].tab_name;
+    tabGid = boardTargets[0].tab_gid || tabGid;
+  }
 
   const ledgerSvc = require('./orderLedger.service');
   const { loadRawTabContext, markOrderWritten } = ledgerSvc;
@@ -196,19 +214,32 @@ async function writeOrderToWorktable({
        별도 트랜잭션에서 잡히므로 중첩(=교착) 이 생기지 않는다. */
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
       [`sheetless_worktable:${sheetId}:${tabName}`]);
+    // 직원 수정과 늦은 큐가 경합해도 최신 원장값이 이긴다. 이 잠금은 아래 작업보드 쓰기가
+    // 끝날 때까지 직원 UPDATE를 기다리게 하고, 먼저 끝난 직원 수정은 여기서 다시 읽힌다.
+    const { rows: freshOrders } = await client.query(
+      `SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
+      [orderSubmissionId]
+    );
+    if (!freshOrders.length || freshOrders[0].mirror_status === 'canceled') {
+      await client.query('ROLLBACK');
+      return { ok: true, written: false, reason: 'deleted_or_canceled' };
+    }
+    orderData = ledgerSvc._osRowToOrderData(freshOrders[0]);
     let cur;
     if (seq != null) {
       ({ rows: cur } = await client.query(
         `SELECT id, seq, row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
-          FOR UPDATE`, [sheetId, tabName, seq]));
+            AND ($4::uuid IS NULL OR workboard_id = $4)
+          FOR UPDATE`, [sheetId, tabName, seq, workboardId]));
     } else {
       // 재시도는 이미 연결된 행을 먼저 잠근다. 없을 때만 준비된 빈 슬롯을 선점한다.
       ({ rows: cur } = await client.query(
         `SELECT id, seq, row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
             AND order_submission_id = $3::uuid
-          FOR UPDATE`, [sheetId, tabName, orderSubmissionId]));
+            AND ($4::uuid IS NULL OR workboard_id = $4)
+          FOR UPDATE`, [sheetId, tabName, orderSubmissionId, workboardId]));
       // ★★ 빈 슬롯을 새로 먹기 전에 "같은 구매가 이미 이 표에 있는가" 를 본다.
       //   무시트 경로는 시트 시절의 `sheet_row_claims`(=(sheet,tab,dedup_key) 유니크)를 건너뛰고
       //   `campaign_participants.order_submission_id` 도 유니크가 아니라, **주문원장 행이 하나 더 생기면
@@ -273,13 +304,14 @@ async function writeOrderToWorktable({
         ({ rows: cur } = await client.query(
           `SELECT id, seq, row_json FROM campaign_participants
             WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+              AND ($3::uuid IS NULL OR workboard_id = $3)
               AND order_submission_id IS NULL
               AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL
               AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
               AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
             ORDER BY seq
             FOR UPDATE SKIP LOCKED
-            LIMIT 1`, [sheetId, tabName]));
+            LIMIT 1`, [sheetId, tabName, workboardId]));
       }
       if (!cur.length) {
         /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 여기서 줄을 이어붙이면 300건 작업에
@@ -302,7 +334,7 @@ async function writeOrderToWorktable({
           return { ok: false, reason: 'no_open_slot' };
         }
         const appended = await require('./participants.service').appendSlot(client, {
-          sheetId, tabName, tabGid: gid || null, by: 'sheetless-order-append',
+          sheetId, tabName, tabGid: gid || null, workboardId, by: 'sheetless-order-append',
         });
         if (!appended) { await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
         logger.warn(`[sheetlessOrder] 외부모집 수동제출 확정 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
@@ -334,9 +366,10 @@ async function writeOrderToWorktable({
                 phone8         = COALESCE(NULLIF($7,''), phone8),
                 option_text    = COALESCE(NULLIF($8,''), option_text),
                 order_submission_id = $9::uuid,
+                workboard_id = COALESCE($10::uuid, workboard_id),
                 updated_by = 'sheetless-order', updated_at = NOW()
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3`,
-        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId]);
+        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId, workboardId]);
     } else {
       // 행 번호가 명시됐어도 없는 번호에 일반 주문 행을 만들면, 오래된 행배정 값 하나가
       // 모집 인원을 넘는 빈 슬롯을 재생성한다. 실제 외부모집 수동제출만 예외로 허용한다.
@@ -355,11 +388,11 @@ async function writeOrderToWorktable({
       await client.query(
         `INSERT INTO campaign_participants
            (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8,
-            option_text, order_submission_id, row_json, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::jsonb,'worktable','sheetless-order',NOW())
+            option_text, order_submission_id, row_json, workboard_id, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::jsonb,$11::uuid,'worktable','sheetless-order',NOW())
          ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
         [sheetId, gid || null, tabName, seq, reviewerName, recipientName, p8,
-         optText || null, orderSubmissionId, JSON.stringify(merged)]);
+         optText || null, orderSubmissionId, JSON.stringify(merged), workboardId]);
     }
     /* ── 번호·담당자 자동 채움 + 구매일자 기준 재번호 ────────────────────────────
        ★ 이어붙인 줄은 `row_json` 이 비어 있어 `번호`·`담당자` 가 영구 빈칸으로 남았다

@@ -64,7 +64,11 @@ function stubPool(handlers) {
       core: ['번호', '구매일자', '수취인', '연락처', '주소', '결제금액', '리뷰제출', '입금'],
       channels: { coupang: ['쿠팡ID'] }, workTypes: [],
     });
+    const consolidation = require('../src/services/workboardConsolidation.service');
+    const originalEnsureNew = consolidation.ensureNewWorkTarget;
+    consolidation.ensureNewWorkTarget = async () => ({ ok: true, source: 'new_work', rolloutState: 'mapped', workboardId: 'wb-new' });
     const out = await svc.ensureCampaignWorktable({ campaignId: 'c2', by: 'test' });
+    consolidation.ensureNewWorkTarget = originalEnsureNew;
     ok('created=true 로 새 작업보드를 돌려준다', out.ok === true && out.created === true);
     ok('★ 가상 시트ID(wt_ 접두) — 구글 시트가 아니다', /^wt_[0-9a-f]{20}$/.test(out.sheetId));
     const again = require('../src/services/sheetlessAccept.service').virtualSheetIdForOrder('campaign:c2');

@@ -100,6 +100,12 @@ const REQUIRED_SCHEMA = [
   // 138 — 리뷰어가 고른 **상품**(복합유형 작업). 주문 원장 INSERT 목록에 들어가므로
   //   없으면 **구매양식 제출이 전면 42703**(101 blog_url 과 같은 자리).
   ['order_submissions', 'selected_product'],
+  // 139~140 — 작업보드 통폐합. 이 열이 없는데 서버가 뜨면 구매양식 제출 중 새 경로가 42703으로 실패한다.
+  ['tab_configs', 'workboard_id'],
+  ['work_orders', 'workboard_id'],
+  ['recruit_campaigns', 'workboard_id'],
+  ['order_submissions', 'workboard_id'],
+  ['campaign_participants', 'workboard_id'],
 ];
 
 // V2 상태 표시는 열 이름 추측을 하지 않고, 생성 시점의 위치를 이 표에 고정한다.
@@ -107,6 +113,12 @@ const REQUIRED_SCHEMA = [
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
   'tab_status_column_bindings',                   // 137 — 리뷰/입금일 상태열 위치 바인딩
+  'workboards',
+  'workboard_consolidation_controls',
+  'workboard_consolidation_backups',
+  'workboard_consolidation_backup_records',
+  'workboard_consolidation_link_events',
+  'workboard_consolidation_targets',
 ];
 
 async function _runOneMigration(pool, sql) {

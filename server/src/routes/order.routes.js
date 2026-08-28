@@ -1772,6 +1772,23 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       [id, nextStatus, sheetId, tabName, gid, (req.admin?.name || ''), (gidCorrected ? tabSheetUrl : null)]
     );
 
+    let workboardMapping = null;
+    if (wantSheetless) {
+      try {
+        workboardMapping = await require('../services/workboardConsolidation.service').ensureNewWorkTarget({
+          sheetId, tabName, by: `order-accept:${req.admin?.name || ''}`,
+        });
+      } catch (mappingErr) {
+        logger.error(`[order/accept] 새 작업보드 ID 연결 실패: ${mappingErr.message}`);
+        return res.status(500).json({
+          ok: false,
+          error: '작업은 등록됐지만 작업보드 연결을 완료하지 못했습니다. 같은 작업을 다시 접수해 주세요.',
+          detail: mappingErr.message,
+          work_order_id: id,
+        });
+      }
+    }
+
     // 8b) 정산 계약 자동 연결 (088) — 인트라넷 리뷰오더 등록에서 고른 계약을 그대로 이 탭에 매칭한다.
     //   ★★ 이것이 "계약 매칭을 따로 하지 않아도 되는" 이유. 리뷰웹의 계약 매칭 화면은 이 규칙 이전에
     //      들어온 과거 작업건을 메우는 용도로만 남는다.
@@ -1812,6 +1829,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       gidCorrected,       // true = 사람이 고른 탭으로 URL 의 죽은 gid 를 교정해 접수함
       settlementLinked,   // linked | already | kept_existing | failed | null(계약 미첨부 오더)
       advertiserProjection,
+      workboardMapping,
       sheetless: wantSheetless || undefined,
       // 무시트일 때만: 만든 작업표 줄 수·장부 결과(실패 사유 포함 — 조용한 누락 금지)
       worktable: wantSheetless ? {
