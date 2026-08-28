@@ -56,6 +56,21 @@ async function enqueue(type, payload, maxRetry = 3) {
   }
 }
 
+async function markWorkboardQueueOrderState(item, queueStatus, err) {
+  if (!item || !['workboard_apply', 'workboard_legacy_apply'].includes(item.type)) return;
+  let payload = item.payload || {};
+  try { if (typeof payload === 'string') payload = JSON.parse(payload); }
+  catch (_) { return; }
+  if (!payload.orderSubmissionId) return;
+  await pool.query(
+    `UPDATE order_submissions
+        SET mirror_status = CASE WHEN $2 = 'failed' THEN 'failed' ELSE 'queued' END,
+            sheet_error = CASE WHEN $2 = 'failed' THEN $3 ELSE NULL END, updated_at = NOW()
+      WHERE id = $1 AND mirror_status <> 'written' AND deleted_at IS NULL`,
+    [payload.orderSubmissionId, queueStatus, String((err && err.message) || err || '').slice(0, 500)]
+  );
+}
+
 // ── 큐 처리 (pending → processing → done/failed) ──
 async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType = null } = {}) {
   const startTime = Date.now();
@@ -147,6 +162,7 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType 
           `UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
           [newStatus, err.message.substring(0, 500), item.id]
         );
+        await markWorkboardQueueOrderState(item, newStatus, err);
 
         if (newStatus === 'failed') {
           failed++;
@@ -638,6 +654,17 @@ async function _executeItem(item) {
       break;
     }
 
+    case 'workboard_apply': {
+      // 새 통폐합 경로. legacy/미이관 대상이면 __defer로 pending을 유지해 기존 직접 경로와 섞지 않는다.
+      await require('./workboardQueueApply.service').applyQueuedWorkboardOrder(payload);
+      break;
+    }
+
+    case 'workboard_legacy_apply': {
+      await require('./workboardQueueApply.service').applyLegacyRecoveryOrder(payload);
+      break;
+    }
+
     case 'order_append': {
       let { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId, recovered, recoverReason, dedupKey } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
@@ -1007,11 +1034,12 @@ async function retryItem(id) {
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = NULL
      WHERE id = $1 AND status = 'failed'
-     RETURNING id, type`,
+     RETURNING id, type, payload`,
     [id]
   );
   if (rows.length === 0) throw new Error(`id=${id}인 실패 항목을 찾을 수 없습니다.`);
-  return rows[0];
+  await markWorkboardQueueOrderState(rows[0], 'pending', null);
+  return { id: rows[0].id, type: rows[0].type };
 }
 
 // ── 모든 실패 항목 재시도 ──
@@ -1262,6 +1290,7 @@ async function drainOrderQueue(orderSubmissionId, { maxItems = 5 } = {}) {
       const newStatus = (newAttempts >= item.max_retry && !isQuotaError) ? 'failed' : 'pending';
       await pool.query(`UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
         [newStatus, String(err.message || '').substring(0, 500), item.id]);
+      await markWorkboardQueueOrderState(item, newStatus, err);
       failed++;
       if (isQuotaError) break;
     }

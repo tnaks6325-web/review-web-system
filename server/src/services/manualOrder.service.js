@@ -432,10 +432,19 @@ async function submitExternalOrder({
     selectedOptKey: resolvedOptKey || '',
     selectedProduct: resolvedProduct || '',   // ★ 138 — 고른 상품은 「상품」 칸으로(옵션 칸과 별개)
   };
+  let queuedWorkboardApply = false;
+  try {
+    const target = await require('./workboardQueueApply.service').resolveQueuedWorkboardTarget({ sheetId, tabName });
+    queuedWorkboardApply = !!target.enabled;
+  } catch (e) {
+    logger.warn(`[manual-order] 작업보드 큐 대상 판정 실패 — 기존 경로 유지: ${e.message}`);
+  }
   const ledger = await createOrderLedgerEntry({
     sheetId, tabName, gid, orderData,
     slotRowNumber: null,
     loginPhone8: p8, loginName: f.recipient || '',
+    skipSheetMirror: queuedWorkboardApply,
+    deferSheetlessApply: queuedWorkboardApply,
     // 작업표의 정원 밖 완성 행 허용은 이 출처가 DB에 확정돼야만 가능하다.
     // 사후 best-effort UPDATE로 두면 일시 오류 때 정상 외부모집 건이 빈 슬롯 취급된다.
     source: SOURCE_EXTERNAL,
@@ -471,9 +480,27 @@ async function submitExternalOrder({
   //   ★ 판정은 `sheetlessScope` 단일 출처. 실패 시 종전 경로(fail-open) — 큐 실행부가 최종 방어.
   let queued = false;
   let sheetlessDone = null;
-  let isSl = false;
-  try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); } catch (_) { isSl = false; }
-  if (isSl) {
+  // resolveQueuedWorkboardTarget가 이미 sheetless+승인+연결을 확인한 새 경로는 두 번째 조회에
+  // 의존하지 않는다. 이 조회가 일시 실패해도 주문이 큐 없이 pending으로 고립되면 안 된다.
+  let isSl = queuedWorkboardApply;
+  if (!queuedWorkboardApply) {
+    try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); }
+    catch (_) { isSl = false; }
+  }
+  if (queuedWorkboardApply) {
+    try {
+      await enqueue('workboard_apply', {
+        sheetId, tabName, tabGid: ledger.tabGid || gid || '', orderSubmissionId: ledger.orderSubmissionId,
+        loginPhone8: p8, loginName: f.recipient || '',
+      });
+      await markOrderQueued(ledger.orderSubmissionId);
+      queued = true;
+      try { require('../jobs/queuePump').kickQueuePump(); } catch (_) {}
+    } catch (e) {
+      await markOrderMirrorFailed(ledger.orderSubmissionId, e);
+      warnings.push('작업보드 반영 예약 실패: ' + e.message);
+    }
+  } else if (isSl) {
     /* 외부모집은 원장 출처가 admin_external이고 수취인·연락처가 확정된 경우에만 작업표 서비스가
        정원 밖의 완성 행을 허용한다. 그래서 sheetRow가 없어도 호출해야 하며, 일반 경로에는 이
        서비스가 호출되지 않는다. */
@@ -486,7 +513,7 @@ async function submitExternalOrder({
     } catch (e) { sheetlessDone = { ok: false, reason: 'exception', message: e.message }; }
     if (!sheetlessDone.ok) warnings.push('작업표 기록 실패(자동복구 대상): ' + (sheetlessDone.message || sheetlessDone.reason));
   }
-  if (ledger.sheetRow && !sheetlessDone) {
+  if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
     try {
       await enqueue('order_append', {
         sheetId, tabName, gid: ledger.tabGid || gid || '',
@@ -505,7 +532,7 @@ async function submitExternalOrder({
       await markOrderMirrorFailed(ledger.orderSubmissionId, e);
       warnings.push('시트 반영 예약 실패(자동복구 대상): ' + e.message);
     }
-  } else if (!ledger.sheetRow && !sheetlessDone) {
+  } else if (!ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
     warnings.push('빈 행을 찾지 못해 보류 — 자동복구가 하단에 기록합니다');
   }
 

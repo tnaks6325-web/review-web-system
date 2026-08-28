@@ -1120,11 +1120,22 @@ router.post('/order', async (req, res, next) => {
                         /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
                         selectedProduct: (holdCtx && holdCtx.productName) || '' };
+    // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
+    // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
+    let queuedWorkboardApply = false;
+    try {
+      const target = await require('../services/workboardQueueApply.service')
+        .resolveQueuedWorkboardTarget({ sheetId: orderScope.sheetId, tabName: orderScope.tabName });
+      queuedWorkboardApply = !!target.enabled;
+    } catch (targetErr) {
+      logger.warn(`[submit/order] workboard_apply 대상 판정 실패 — 기존 경로 유지: ${targetErr.message}`);
+    }
     const ledger = await createOrderLedgerEntry({
       sheetId: orderScope.sheetId,
       tabName: orderScope.tabName,
       gid: orderScope.gid,
       skipSheetMirror: orderScope.sheetless,
+      deferSheetlessApply: queuedWorkboardApply,
       orderData,
       slotRowNumber: slotRowNumber || null,
       loginPhone8: loginPhone8 || '',
@@ -1163,8 +1174,21 @@ router.post('/order', async (req, res, next) => {
     // 참여형 무시트 주문은 `campaign:*` 원장 키와 별도로, 공고에 연결된 DB 작업보드의
     // 빈 슬롯 하나를 즉시 선점한다. sheetRow가 없는 것은 정상이며 서비스가 원자적으로 배정한다.
     let sheetlessDone = null;
+    let queued = false;
     if (orderScope.sheetless) {
-      try {
+      if (queuedWorkboardApply) {
+        try {
+          await enqueue('workboard_apply', {
+            sheetId: orderScope.sheetId, tabName: orderScope.tabName, gid: orderScope.gid || '',
+            orderSubmissionId: ledger.orderSubmissionId, loginPhone8: loginPhone8 || '', loginName: loginName || '',
+          });
+          await markOrderQueued(ledger.orderSubmissionId);
+          queued = true;
+          sheetlessDone = { ok: true, queued: true };
+        } catch (queueErr) {
+          sheetlessDone = { ok: false, reason: 'queue_enqueue_failed', message: queueErr.message };
+        }
+      } else try {
         /* ★★ 공고에 작업보드가 아직 없으면 **그 자리에서 만들어 연결**한다(사람이 시트탭을
            고르는 절차 없음 — 탈 구글시트). 종전에는 여기서 `no_worktable_mapping` 으로 주문을
            failed 로 강등하고 critical 로그를 남겼는데, 그 주문은 `campaign:*` 키라 큐 복구가
@@ -1200,7 +1224,7 @@ router.post('/order', async (req, res, next) => {
         });
       }
     }
-    if (ledger.sheetRow) {
+    if (ledger.sheetRow && !queuedWorkboardApply) {
       let isSl = false;
       try {
         isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName);
@@ -1227,8 +1251,7 @@ router.post('/order', async (req, res, next) => {
       }
     }
 
-    let queued = false;
-    if (ledger.sheetRow && !sheetlessDone) {
+    if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
       try {
         await enqueue('order_append', {
           sheetId,
@@ -1270,7 +1293,8 @@ router.post('/order', async (req, res, next) => {
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
       // 무시트는 DB 작업보드 기록까지 성공한 경우에만 완결이다.
-      mirrorStatus: orderScope.sheetless ? (sheetlessDone && sheetlessDone.ok ? 'written' : 'failed')
+      mirrorStatus: queuedWorkboardApply ? (queued ? 'queued' : 'failed')
+        : orderScope.sheetless ? (sheetlessDone && sheetlessDone.ok ? 'written' : 'failed')
         : (sheetlessDone && sheetlessDone.ok) ? 'written'
         : queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
       campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내
@@ -1290,7 +1314,9 @@ router.post('/order', async (req, res, next) => {
       try {
         // ★ 상시 배치(ORDER_BATCH_AUTO=1): 주문은 배치 스케줄러가 탭별로 묶어 근실시간 반영
         //   (단건 펌프보다 throttle 효율 수십배). 미설정 시 기존 단건 펌프(되돌리기).
-        if (process.env.ORDER_BATCH_AUTO === '1') {
+        if (queuedWorkboardApply) {
+          require('../jobs/queuePump').kickQueuePump();
+        } else if (process.env.ORDER_BATCH_AUTO === '1') {
           // ★ 공정화 #1: 제출한 탭을 타깃으로 전달 → 그 탭이 글로벌 우선순위 밖이어도 이 사이클에 직접 드레인(즉시성).
           require('../jobs/orderBatchScheduler').kickOrderBatch(sheetId, tabName);
         } else {

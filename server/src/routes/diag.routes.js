@@ -3582,7 +3582,13 @@ router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req,
     const sql = `SELECT id, sheet_id AS "sheetId", tab_name AS "tabName", orderer, recipient, user_id AS "userId",
             phone, address, bank, account, depositor, price, order_num AS "orderNum", date_str AS "dateStr",
             selected_opt_key AS "selectedOptKey", memo, mirror_status AS "mirrorStatus", sheet_row AS "sheetRow",
-            source, deleted_at AS "deletedAt", last_edit_seq AS "lastEditSeq", submitted_at AS "submittedAt"
+            sheet_error AS "sheetError", source, deleted_at AS "deletedAt", last_edit_seq AS "lastEditSeq",
+            submitted_at AS "submittedAt",
+            (SELECT jsonb_build_object('id',sq.id,'status',sq.status,'attempts',sq.attempts,'maxRetry',sq.max_retry)
+               FROM sync_queue sq
+              WHERE sq.payload->>'orderSubmissionId'=order_submissions.id::text
+                AND sq.type IN ('workboard_apply','workboard_legacy_apply')
+              ORDER BY sq.created_at DESC LIMIT 1) AS queue
        FROM order_submissions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
        ORDER BY submitted_at DESC, id DESC LIMIT ${lim + 1}`;
     const { rows } = await pool.query(sql, params);

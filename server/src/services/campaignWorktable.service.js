@@ -108,6 +108,11 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
           SET linked_sheet_id = $2, linked_tab_name = $3, linked_tab_gid = $4, updated_at = NOW()
         WHERE id = $1`, [campaignId, sheetId, title, gid]);
 
+    // 탭 생성·공고 연결·작업보드 ID 부여는 한 번에 성공하거나 함께 취소한다.
+    await require('./workboardConsolidation.service').ensureNewWorkTarget({
+      sheetId, tabName: title, by: `campaign-worktable:${by}`, client,
+    });
+
     await client.query('COMMIT');
     made = { sheetId, tabName: title, tabGid: gid, columns };
   } catch (err) {

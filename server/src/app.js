@@ -35,6 +35,7 @@ const mappingRoutes  = require('./routes/mapping.routes');
 const participantsRoutes = require('./routes/participants.routes');
 const trackBRoutes = require('./routes/trackB.routes');
 const reviewEditRoutes = require('./routes/reviewEdit.routes');
+const workboardConsolidationRoutes = require('./routes/workboardConsolidation.routes');
 
 const app = express();
 
@@ -124,6 +125,7 @@ app.use('/api/trackb', trackBRoutes);              // Track B(평행 트랙) —
 
 // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체)
 app.use('/api/review-edit', reviewEditRoutes);
+app.use('/api/workboard-consolidation', workboardConsolidationRoutes);
 
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);

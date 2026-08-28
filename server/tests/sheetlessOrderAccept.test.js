@@ -155,6 +155,13 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       const client = {
         query: async (sql, params) => {
           log.client.push({ sql: String(sql).trim(), params });
+          if (/SELECT \* FROM order_submissions/.test(sql)) {
+            const id = params[0];
+            const values = id === 'os-1'
+              ? { recipient: '김수취', phone: '010-1234-5678', selected_opt_key: '레드' }
+              : id === 'os-2' ? { recipient: '나중', phone: '010-0000-1111' } : {};
+            return { rows: [{ id, mirror_status: 'pending', ...values }] };
+          }
           // ⚠ 컬럼 목록은 구현이 늘릴 수 있다(seq 추가 등) — 열 이름을 고정하면 가드가 조용히 빨개진다.
           if (/SELECT id,[\s\S]*?row_json FROM campaign_participants/.test(sql)) {
             return { rows: exists ? [{ id: 'p1', row_json: curRowJson }] : [] };
@@ -260,9 +267,9 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     const ol = noLineComments(srv('src/services/orderLedger.service.js'));
 
     ok('① 리뷰어 제출: 무시트면 큐 미경유', /isSheetless\(/.test(sub) && /writeOrderToWorktable\(/.test(sub));
-    ok('① 제출은 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone\)/.test(sub));
+    ok('① 제출은 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(sub));
     ok('② 외부모집 수동제출도 같은 분기', /isSheetless\(/.test(man) && /writeOrderToWorktable\(/.test(man));
-    ok('② 수동제출도 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone\)/.test(man));
+    ok('② 수동제출도 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(man));
     // ★★ 백스톱이 핵심 — 이관 전에 쌓여 있던 큐·새 호출부·판정 실패분이 여기서 막힌다
     ok('③ 큐 실행부 백스톱: 쓰기 직전 다시 판정', /isSheetless\(pool, sheetId, tabName\)/.test(sq));
     // ★ 위치가 곧 방어다 — 시트를 **읽기 전에** 막아야 한다. 함수 본문 안에서 순서를 본다

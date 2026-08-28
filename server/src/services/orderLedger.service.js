@@ -980,6 +980,7 @@ async function createOrderLedgerEntry(input) {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
     skipSheetMirror = false,
+    deferSheetlessApply = false, // workboard_apply 큐가 실제 작업보드 반영 후 written으로 전이한다.
     campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
     sameDayDuplicateGuard, // 구매양식의 오늘 동일 제출 차단(선택 입력)
     source = 'order_submit', // 호출 시 확정한 접수 출처도 최초 INSERT와 함께 보존한다.
@@ -1107,15 +1108,16 @@ async function createOrderLedgerEntry(input) {
   if (skipSheetMirror) {
     await db.query(
       `UPDATE order_submissions
-          SET mirror_status = 'written', sheet_error = NULL
+          SET mirror_status = CASE WHEN $2 THEN 'pending' ELSE 'written' END,
+              sheet_error = CASE WHEN $2 THEN 'workboard_apply_pending' ELSE NULL END
         WHERE id = $1`,
-      [orderSubmissionId]
+      [orderSubmissionId, !!deferSheetlessApply]
     );
     return {
       orderSubmissionId,
       dedupKey,
       sheetRow: null,
-      claim: { row: null, error: 'db_only' },
+      claim: { row: null, error: deferSheetlessApply ? 'workboard_apply_pending' : 'db_only' },
       tabContext: null,
       tabGid: gid || '',
       headers: [],
