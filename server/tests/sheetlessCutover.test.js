@@ -131,13 +131,13 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     }
     const keys = Object.keys(found);
     const coreKeys = keys.filter(k => k !== 'POST /sheetless/review-submit-time-backfill');
-    // ⚠ 잔재 정리 2경로 + 읽는 범위 진단 1경로 합류(2026-08-19) — 검사 의미는 불변(전부 adminOrMaster 뒤).
-    ok('9경로 전부 등록: ' + coreKeys.join(', '), coreKeys.length === 9
+    // ⚠ 잔재 정리 2 + 장부 재생성 스윕 1 + 읽는 범위 진단 1 합류(2026-08-19) — 검사 의미는 불변(전부 adminOrMaster 뒤).
+    ok('10경로 전부 등록: ' + coreKeys.join(', '), coreKeys.length === 10
       && found['GET /sheetless/list'] && found['GET /sheetless/checklist']
       && found['GET /sheetless/slot-sweep']
       && found['GET /sheetless/orphan-tabs'] && found['POST /sheetless/orphan-tabs/close']
       && found['POST /sheetless/cutover'] && found['POST /sheetless/cutover-active-server-only']
-      && found['POST /sheetless/reconnect']
+      && found['POST /sheetless/reconnect'] && found['POST /sheetless/ledger-sweep']
       && found['GET /sheetless/read-scope']);
     ok('★ 전부 authMiddleware + adminOrMaster (AE·광고주 도달 불가)',
       coreKeys.every(k => found[k].includes('authMiddleware') && found[k].includes('adminOrMasterMiddleware')));

@@ -61,6 +61,8 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'tab_deleted_at'],              // 134 — 작업 삭제 시 UPDATE 목록(없으면 홈 작업목록 [작업 삭제]가 전면 42703)
   ['work_orders', 'review_type_mix'],             // 107 — 인트라넷 혼합 리뷰 수량의 원장 보존·모집공고 프리필
   ['recruit_campaigns', 'skip_weekends'],         // 104 — public weekend publication guard
+  ['participant_edits', 'wrote_row_json'],        // 130 — 셀 편집 INSERT 목록(없으면 작업보드 편집 전면 42703)
+  ['tab_configs', 'ledger_dirty_at'],             // 130 — 편집 tx 의 장부 재생성 예약(dirty 마킹)
   ['recruit_campaigns', 'cash_receipt_required'], // 105 — 모집공고 현금영수증 직접 설정·공개 안내
   ['recruit_campaigns', 'review_type_mix'],       // 106 — 혼합 리뷰 유형별 모집 수량(발행 전 합계 검증)
   ['campaign_options', 'review_type_mix'],        // 109 — 옵션별 혼합 리뷰 수량(옵션 정원별 검증)

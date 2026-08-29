@@ -600,6 +600,26 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
+  // ── 무시트 장부 재생성 스윕(130) — 편집 tx 가 찍은 dirty 를 탭당 1회 재생성 ──
+  //   ★ 편집 경로에서 rebuild 를 빼낸 짝. 실패하면 dirty 가 남아 다음 주기에 재시도(자가치유).
+  //   ★ 킬스위치 SHEETLESS_LEDGER_SWEEP=0 (그러면 편집은 오버레이로만 남는다).
+  if (process.env.SHEETLESS_LEDGER_SWEEP !== '0') {
+    let ledgerSweepRunning = false;
+    cron.schedule(process.env.SHEETLESS_LEDGER_SWEEP_SCHEDULE || '* * * * *', async () => {
+      if (ledgerSweepRunning) return;
+      ledgerSweepRunning = true;
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        const { sweepDirtyLedgers } = require('../services/sheetlessLedgerSweep.service');
+        await withJobLock('sheetless_ledger_sweep', () => sweepDirtyLedgers({ by: 'cron' }));
+      } catch (err) {
+        logger.warn(`[CRON-LedgerSweep] ${err.message}`);
+      } finally {
+        ledgerSweepRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분`);
 }
 

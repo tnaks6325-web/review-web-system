@@ -5689,6 +5689,7 @@ function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.c
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
 async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t; _clearCellUndoHistory();
+  try{ _wtNoticed={}; }catch(_){}   // 130 — 쓰기-through 사유 안내는 작업마다 새로 한 번씩
   // opt.nav = 뒤로/앞으로 복원으로 열린 것 → 히스토리에 다시 쌓지 않는다(그 항목이 이미 이 상태다)
   if(!(opt&&opt.nav)) _navPush();
   // ★ 여는 탭이 현재 세그먼트에 없으면 그 탭의 업체 그룹으로 강제 이동.
@@ -8091,28 +8092,58 @@ function _undoLatestCellGroup(){
   _cellUndoBusy=true;
   (async()=>{
   try{
-    while(group.entries.length){
-      const entry=group.entries[group.entries.length-1], r=_gridRowById(entry.rowId);
-      if(!r||!r.cellEdits||r.cellEdits[entry.field.slice(4)]!==entry.value){ toast('현재 셀 값이 바뀌어 실행취소할 수 없습니다'); return true; }
-      let resp;
-      if(entry.had){
-        resp=await api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:entry.rowId,field:entry.field,value:entry.prev})});
-        if(!(resp&&resp.ok)){ toast(resp&&resp.error?('실행취소 실패: '+resp.error):'실행취소 실패'); return true; }
-        r.cellEdits[entry.field.slice(4)]=entry.prev;
-      }else{
-        resp=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:entry.rowId,field:entry.field})});
-        if(!(resp&&resp.ok&&resp.reverted)){ toast(resp&&resp.error?('실행취소 실패: '+resp.error):'실행취소 실패'); return true; }
-        delete r.cellEdits[entry.field.slice(4)];
-      }
-      _paintGridCell(r,entry.field,entry.td);
-      group.entries.pop();
-    }
-    _cellUndoStack.pop();
-    toast(group.kind==='paste'?'붙여넣기를 되돌렸습니다':'셀 편집을 되돌렸습니다');
+    const out=await _undoRunGroup(group, t);
+    // 못 되돌린 것(값이 바뀌었거나 실패)은 그룹에 남겨 다시 시도할 수 있게 한다
+    group.entries=out.stale.concat(out.failed);
+    if(!group.entries.length) _cellUndoStack.pop();
+    const what=group.kind==='paste'?'붙여넣기':'셀 편집';
+    if(out.ok&&!group.entries.length) toast(what+'를 되돌렸습니다'+(out.superseded?(' · '+out.superseded+'칸은 원본이 그 사이 바뀌어 유지'):''));
+    else if(out.ok) toast(out.ok+'칸 되돌림 · '+group.entries.length+'칸은 값이 바뀌어 그대로 둡니다');
+    else toast('되돌릴 수 없습니다 — 현재 값이 바뀌었거나 저장에 실패했습니다');
   }catch(_){ toast('실행취소 실패 - 네트워크를 확인하세요'); }
   finally{ _cellUndoBusy=false; }
   })();
   return true;
+}
+/* 실행취소 저장도 묶음 왕복(edit-batch / revert-batch).
+   칸마다 왕복하면 500칸 붙여넣기의 실행취소가 전역 리미터(분당 120)에 잘린다
+   (실측: 500칸 되돌리기에서 63건이 리미터로 실패).
+   한 칸이 막혀도 전체를 포기하지 않는다 — 되돌릴 수 있는 칸은 되돌리고
+   남은 칸 수를 말한다(옛 경로는 첫 칸에서 통째로 중단했다). */
+async function _undoRunGroup(group, t){
+  // 마지막에 기록된 것부터 · 같은 칸이 두 번 있으면 마지막 것만(현재 값 대조 규칙 유지)
+  const seen={}, plan=[];
+  for(let i=group.entries.length-1;i>=0;i--){
+    const e=group.entries[i], k=e.rowId+'|'+e.field;
+    if(seen[k]) continue; seen[k]=1; plan.push(e);
+  }
+  const doable=[], stale=[];
+  plan.forEach(e=>{
+    const r=_gridRowById(e.rowId), h=e.field.slice(4);
+    if(r&&r.cellEdits&&r.cellEdits[h]===e.value) doable.push(e); else stale.push(e);
+  });
+  let ok=0, superseded=0; const failed=[];
+  const send=async (list, url, mkBody, apply)=>{
+    for(let f=0; f<list.length; f+=_PASTE_CHUNK){
+      const part=list.slice(f, f+_PASTE_CHUNK);
+      let resp=null;
+      try{ resp=await api(url,{method:'POST',body:JSON.stringify(mkBody(part))}); }catch(_){ resp=null; }
+      if(!resp||!resp.ok||!Array.isArray(resp.results)){ part.forEach(e=>failed.push(e)); continue; }
+      resp.results.forEach((rr,i)=>{
+        const e=part[i]; if(!e) return;
+        if(rr&&rr.ok){ ok++; if(rr.reason==='superseded') superseded++; apply(e); }
+        else failed.push(e);
+      });
+    }
+  };
+  // 이전 값이 있던 칸 = 그 값으로 되쓴다 / 없던 칸 = 오버레이 제거
+  await send(doable.filter(e=>e.had), '/api/trackb/workdesk/edit-batch',
+    part=>({sheetId:t.sheetId,tabName:t.tabName,edits:part.map(e=>({rowId:e.rowId,field:e.field,value:e.prev}))}),
+    e=>{ const r=_gridRowById(e.rowId); if(r&&r.cellEdits){ r.cellEdits[e.field.slice(4)]=e.prev; _paintGridCell(r,e.field,e.td); } });
+  await send(doable.filter(e=>!e.had), '/api/trackb/workdesk/revert-batch',
+    part=>({sheetId:t.sheetId,tabName:t.tabName,reverts:part.map(e=>({rowId:e.rowId,field:e.field}))}),
+    e=>{ const r=_gridRowById(e.rowId); if(r&&r.cellEdits){ delete r.cellEdits[e.field.slice(4)]; _paintGridCell(r,e.field,e.td); } });
+  return {ok:ok, superseded:superseded, failed:failed, stale:stale};
 }
 window.WorkdeskUndo=_undoLatestCellGroup;
 /* ── 미니달력 모달 (#wdDatePick · body 직속 — 표는 가로 스크롤 컨테이너라 안에 그리면 잘린다) ──
@@ -8283,6 +8314,45 @@ function commitIdentityEdit(rowId, field, kind, value, td){
     .catch(()=>{ rollback(); toast('저장 실패 — 네트워크'); return false; });
 }
 // 낙관적 커밋: 로컬 즉시 반영 → 백그라운드 저장. 실패 시 (아직 최신 값일 때만) 롤백해 더 새 편집 보호.
+/* 무시트 쓰기-through(130) 거부 사유 — "왜 이 칸만 검색 명단에 안 뜨나"를 화면이 말한다.
+   ★ 붙여넣기 500칸에서 같은 토스트가 500번 뜨지 않게 **사유별 1회**로 접는다. */
+var _WT_SKIP_MSG={
+  sheet_backed:'', disabled:'', not_sheet_column:'', not_applicable:'', tab_not_registered:'',
+  dry_run:'관측 모드입니다 — 화면 표시만 반영되고 원본에는 아직 쓰지 않습니다',
+  not_in_allowlist:'이 칸은 화면 표시에만 반영됩니다 — 검색 명단·정산 원본에는 반영되지 않습니다',
+  header_not_in_ledger:'이 칸은 장부 열 구성에 없어 화면 표시에만 반영됩니다',
+  status_column:'상태 칸이라 원본에는 반영하지 않습니다',
+  payment_column:'입금 판정에 쓰이는 칸이라 원본에는 반영하지 않습니다',
+  amount_column:'이체 금액 판정에 쓰이는 칸이라 원본에는 반영하지 않습니다',
+  order_number_column:'주문 연결 판정에 쓰이는 칸이라 원본에는 반영하지 않습니다',
+  name_column:'이름 칸은 원본에 반영하지 않습니다(명단에서 줄이 사라질 수 있습니다)',
+  identity_column:'연락처 칸은 원본에 반영하지 않습니다 — 등록리뷰어DB에서 변경하세요',
+  no_tab_gid:'탭 연결 정보가 없어 원본에 반영하지 못했습니다 — 관리자에게 알려주세요',
+  lookup_failed:'원본 반영 여부를 확인하지 못했습니다(화면 표시만 반영)',
+  keywords_unavailable:'원본 반영 여부를 확인하지 못했습니다(화면 표시만 반영)'
+};
+var _wtNoticed={};
+function _wtNotice(resp){
+  if(!resp) return;
+  var sk=resp.writeThroughSkipped;
+  if(sk && _WT_SKIP_MSG[sk] && !_wtNoticed[sk]){ _wtNoticed[sk]=1; toast(_WT_SKIP_MSG[sk]); return; }
+  if(resp.writeThrough && resp.writeThrough.queued===false && !_wtNoticed._dirty){
+    _wtNoticed._dirty=1; toast('원본에는 저장됐지만 장부 반영 예약에 실패했습니다 — 관리자에게 알려주세요');
+  }
+}
+
+/* 셀 낙관 반영 + 되돌리기 한 벌 — 단건 저장(commitCellEdit)과 일괄 붙여넣기가 같은 규칙을 쓴다.
+   사본을 두면 한쪽만 롤백이 어긋나 화면과 서버가 갈린다. */
+function _applyCellLocal(rowId, field, value, td){
+  const r=_gridRowById(rowId); if(!r||!field||field.indexOf("col:")!==0) return null;
+  const h=field.slice(4);
+  r.cellEdits=(r.cellEdits&&typeof r.cellEdits==="object")?r.cellEdits:{};
+  const had=(h in r.cellEdits), prev=r.cellEdits[h];
+  r.cellEdits[h]=value; _paintGridCell(r, field, td);
+  return { had:had, prev:prev, rollback:function(){
+    if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); }
+  } };
+}
 function commitCellEdit(rowId, field, value, td, opt){
   const r=_gridRowById(rowId); if(!r||!field) return;
   const t=STATE.cur; if(!t) return;
@@ -8301,15 +8371,14 @@ function commitCellEdit(rowId, field, value, td, opt){
     return;
   }
   if(field.indexOf('col:')!==0) return;
-  const h=field.slice(4); r.cellEdits=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
-  const had=(h in r.cellEdits), prev=r.cellEdits[h];
+  const st=_applyCellLocal(rowId, field, value, td); if(!st) return;
+  const had=st.had, prev=st.prev, rollback=st.rollback;
   const undoGroup=(opt&&opt.undoGroup)||_beginCellUndoGroup('edit');
   undoGroup.pending++;
-  r.cellEdits[h]=value; _paintGridCell(r, field, td);
-  const rollback=()=>{ if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); } };
   return api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})
     .then(resp=>{
       if(resp&&resp.ok){
+        _wtNotice(resp);
         _recordCellUndo({rowId,field,value,had,prev,td},undoGroup);
         if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
         if(resp.throughWrite&&resp.throughWrite.attempted===true&&resp.throughWrite.ok===false){
@@ -8537,6 +8606,9 @@ function _cellUnderPoint(x,y){
   for(const el of stack){ const td=el&&el.closest?el.closest('#gbody td'):null; if(td) return td; }
   return null;
 }
+// ★ 저장은 이 크기로 나눠 보낸다 — 한 요청이 길어지면 게이트웨이가 끊어
+//   "저장은 됐는데 결과를 모르는" 상태가 된다(테섭 실측 502). 묶음당 왕복 1회.
+const _PASTE_CHUNK=50;
 function _ensureCellRangeUI(){
   if(STATE._gColorInit) return; STATE._gColorInit=true;
   if(!$('#gcellmenu')){ const p=document.createElement('div'); p.className='gcellmenu'; p.id='gcellmenu'; document.body.appendChild(p); }
@@ -8868,9 +8940,80 @@ function _pasteIntoSelection(text){
   if(jobs.length>_PASTE_MAX){ toast(`한 번에 ${_PASTE_MAX}칸까지 붙여넣을 수 있습니다 (선택 ${jobs.length}칸) — 범위를 나눠 주세요`); return; }
   if(jobs.length>20 && !confirm(`${jobs.length}개 칸의 값을 붙여넣습니다. 진행할까요?`)) return;
   const undoGroup=_beginCellUndoGroup('paste');
-  Promise.all(jobs.map(j=>commitCellEdit(j.rowId, j.field, j.val, j.td, {undoGroup})))
-    .then(()=>_finishCellUndoGroup(undoGroup));
-  toast(`${jobs.length}개 칸 붙여넣음${locked?` · 잠긴 칸 ${locked}개 건너뜀`:''}`);
+  _pasteCommitBatch(jobs, undoGroup, locked);
+}
+/* ★★ 붙여넣기 저장 = **왕복 1회**(`/workdesk/edit-batch`).
+   칸마다 요청을 보내면 전역 리미터(분당 120)와 서버 커넥션 풀에 먼저 막혀
+   500칸 붙여넣기가 구조적으로 완주하지 못한다(실측 419/500 커넥션 타임아웃).
+   ★ 화면 반영·되돌리기 기록 규칙은 종전과 같다 — 성공한 칸만 확정하고 실패한 칸은 되돌린다.
+   ★ 실패 사유는 뭉뚱그리지 않고 가장 많은 사유를 함께 말한다(같은 토스트 수백 번 금지). */
+function _pasteCommitBatch(jobs, undoGroup, locked){
+  const t=STATE.cur; if(!t){ _finishCellUndoGroup(undoGroup); return; }
+  const staged=[];
+  jobs.forEach(j=>{ const st=_applyCellLocal(j.rowId, j.field, j.val, j.td); if(st) staged.push({job:j, st:st}); });
+  if(!staged.length){ _finishCellUndoGroup(undoGroup); return; }
+  undoGroup.pending+=staged.length;
+  toast(staged.length+'개 칸 저장 중…'+(locked?(' · 잠긴 칸 '+locked+'개 건너뜀'):''));
+  /* ★ 한 요청이 길어지지 않게 나눠 보낸다 — DB 왕복이 느린 배포에서 500칸을 한 요청에 담으면
+     게이트웨이가 끊어(실측 502) **저장은 됐는데 결과를 모르는** 최악의 상태가 된다.
+     칸당 왕복(옛 경로)이 아니라 묶음당 왕복이라 리미터(분당 120)에는 여유가 크다. */
+  let done=0, okN=0, noticed=false; const reasons={}; let aborted=false;
+  const sendChunk=(from)=>{
+    if(aborted) return Promise.resolve();
+    const part=staged.slice(from, from+_PASTE_CHUNK);
+    if(!part.length) return Promise.resolve();
+    const edits=part.map(x=>({rowId:x.job.rowId, field:x.job.field, value:x.job.val}));
+    return api('/api/trackb/workdesk/edit-batch',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,edits:edits})})
+      .then(resp=>{
+        if(!resp||!resp.ok||!Array.isArray(resp.results)){
+          aborted=true;
+          part.forEach(x=>x.st.rollback());
+          toast(resp&&resp.error?('붙여넣기 거부: '+resp.error):'붙여넣기 실패');
+          return;
+        }
+        _pasteApplyResults(part, resp.results, undoGroup, s=>{ okN+=s.ok; s.reasons.forEach(w=>{ reasons[w]=(reasons[w]||0)+1; }); if(!noticed&&s.notice){ _wtNotice(s.notice); noticed=true; } });
+        done+=part.length;
+        if(done<staged.length) toast(done+' / '+staged.length+'칸 저장 중…');
+        return sendChunk(from+_PASTE_CHUNK);
+      });
+  };
+  sendChunk(0)
+    .then(()=>{
+      undoGroup.pending=Math.max(0,undoGroup.pending-staged.length);
+      _finishCellUndoGroup(undoGroup);
+      if(aborted){
+        // 이미 저장된 앞 묶음은 되돌리지 않는다 — 서버에 남은 값을 화면에서만 지우면 더 어긋난다
+        if(okN) toast(okN+'개까지 저장됨 · 나머지는 중단되었습니다');
+        return;
+      }
+      const failN=staged.length-okN;
+      if(!failN){ toast(okN+'개 칸 붙여넣음'); return; }
+      const top=Object.keys(reasons).sort(function(a,b){ return reasons[b]-reasons[a]; })[0];
+      toast(okN+'개 저장 · '+failN+'개 실패'+(top?(' — '+top):''));
+      if(reasons['concurrent_edit_conflict']) reloadWorkdesk();
+    })
+    .catch(()=>{
+      undoGroup.pending=Math.max(0,undoGroup.pending-staged.length);
+      _finishCellUndoGroup(undoGroup);
+      toast(okN?(okN+'개까지 저장됨 · 네트워크 오류로 중단'):'붙여넣기 실패 — 네트워크');
+    });
+}
+/* 묶음 응답 반영 — 성공한 칸만 확정하고 실패한 칸만 되돌린다(단건과 같은 규칙). */
+function _pasteApplyResults(part, results, undoGroup, report){
+  let ok=0, notice=null; const reasons=[];
+  results.forEach((r,i)=>{
+    const x=part[i]; if(!x) return;
+    if(r&&r.ok){
+      ok++;
+      if(!notice) notice=r;
+      _recordCellUndo({rowId:x.job.rowId, field:x.job.field, value:x.job.val, had:x.st.had, prev:x.st.prev, td:x.job.td}, undoGroup);
+      if(x.job.td&&x.job.td.classList){ const td=x.job.td; td.classList.add('cellsaved'); setTimeout(function(){ td.classList.remove('cellsaved'); },600); }
+    } else {
+      x.st.rollback();
+      reasons.push((r&&r.error)||'실패');
+    }
+  });
+  report({ok:ok, reasons:reasons, notice:notice});
 }
 /* 우클릭 메뉴 — 편집·복사·붙여넣기·되돌리기·배경색을 한 곳에서.
    ★ **body 직속**(표는 가로 스크롤 컨테이너 안이라 그 안에 그리면 잘린다) · onclick 에 시트 문자열 보간 없음. */
