@@ -504,9 +504,11 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /carry_mode, carry_strategy, skip_weekends/.test(routeSrc)
     && /carry_strategy = COALESCE\(\$49, carry_strategy\)/.test(routeSrc)
     && /carry_strategy, work_kind, skip_weekends/.test(routeSrc));
+  const legacyPublicFields = (routeSrc.match(/const PUBLIC_FIELDS_LEGACY = \[[\s\S]*?\];/) || [''])[0];
+  const participationPublicFields = (routeSrc.match(/const PUBLIC_FIELDS_PARTICIPATION = \[[\s\S]*?\];/) || [''])[0];
   ok('139 공개 카드 응답 화이트리스트도 전략을 전달',
-    /PUBLIC_FIELDS_LEGACY[\s\S]*'carry_strategy'/.test(routeSrc)
-    && /PUBLIC_FIELDS_PARTICIPATION[\s\S]*'carry_strategy'/.test(routeSrc));
+    legacyPublicFields.includes("'carry_strategy'")
+    && participationPublicFields.includes("'carry_strategy'"));
   ok('139 날짜별 조절 모달도 서버 저장 전략을 우선 사용',
     /S\.carryMode \|\| j\.carryStrategy \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE/.test(cdp)
     && /carryStrategy: carryStrategy\(camp\)/.test(readS('services/campaignPlan.service.js')));
