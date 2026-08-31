@@ -712,6 +712,8 @@ function _scopedEditorView(row) {
     sort_order: row.sort_order, max_slots: row.max_slots,
     // ★ 098: 이월 반영 방식(허용명단 리뷰어도 세그먼트 프리필·변경 가능 — 확정 ③)
     carry_mode: row.carry_mode || 'auto',
+    // ★ 139: 배치 전략은 보류 설정과 별도다. 기존 NULL은 서버 상태엔진과 같이 next로 해석한다.
+    carry_strategy: ['next', 'spread', 'extend'].includes(row.carry_strategy) ? row.carry_strategy : 'next',
     // 작업내용은 **읽기 전용 프리필**로만 포함 — 수정 모달에서 "지금 어떤 유입가이드가 걸려 있는지"를
     // 육안 확인하는 용도. 저장 경로(_scopedCampaignEdit)는 여전히 work_detail을 화이트리스트에서
     // 제외하므로 쓰기 표면은 넓어지지 않는다. 내용도 이미 홀드 보유 리뷰어에게 공개되는 값이고
@@ -767,6 +769,8 @@ async function _scopedCampaignEdit(req, res) {
   //   수정할 수 있는 신원이라 같은 급. 알 수 없는 값·미전송 = 유지. 반영(carryApply)은 여전히
   //   adminOrMaster 전용 API 라 스코프 토큰이 보류분을 열 수는 없다.
   const carry_mode = ['auto', 'hold'].includes(b.carry_mode) ? b.carry_mode : (c.carry_mode || 'auto');
+  const carry_strategy = ['next', 'spread', 'extend'].includes(b.carry_strategy)
+    ? b.carry_strategy : (['next', 'spread', 'extend'].includes(c.carry_strategy) ? c.carry_strategy : 'next');
 
   // 참여형 활성화 게이트 재적용(linked_*는 현재값 — 편집 불가라 우회 불가)
   if (status === 'active') {
@@ -779,11 +783,11 @@ async function _scopedCampaignEdit(req, res) {
        title=$2, status=$3, delivery_type=$4, review_fee=$5, time_range=$6,
        thumbnail_url=$7, landing_url=$8, window_start=$9, window_end=$10,
        daily_limit=$11, recruit_total=$12, sort_order=$13, max_slots=$14,
-       carry_mode=$15, updated_at=NOW()
+       carry_mode=$15, carry_strategy=$16, updated_at=NOW()
      WHERE id=$1 RETURNING *`,
     [id, title, status, delivery_type, review_fee, time_range,
      thumbnail_url, landing_url, window_start || null, window_end || null,
-     daily_limit, recruit_total, sort_order, max_slots, carry_mode]
+     daily_limit, recruit_total, sort_order, max_slots, carry_mode, carry_strategy]
   );
   // ★ 095(Codex P1): 잠금 검사와 UPDATE 사이 "첫 차수 추가" 경합 자가치유(PUT 본 라우트와 동일)
   try {
@@ -965,7 +969,7 @@ router.get('/list', async (req, res, next) => {
                participation_mode, thumbnail_url, daily_limit, recruit_total,
                window_start, window_end, close_buffer_min, hold_ttl_min, start_date,
                multi_account_mode, sub_hold_ttl_min, is_popular,
-               carry_mode, skip_weekends, cash_receipt_required  -- ★ 098(코드리뷰 B1): dailyQuota 가 읽는다 — 빠지면 목록은 자동 이월
+               carry_mode, carry_strategy, skip_weekends, cash_receipt_required  -- ★ 098/139: 상태엔진 입력. 빠지면 목록·apply 정원이 갈린다.
                            --   정원, apply(SELECT *)는 보류 정원을 봐서 "카드는 열렸는데 참여 거부"
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
@@ -2307,6 +2311,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       transfer_bank, transfer_memo, // ★ 086: 입금 이체은행(kbank|hana, 빈 값=자동)·받는분 통장표시
       review_type, review_type_mix, // 혼합 시 유형별 수량을 함께 저장(합계=총인원)
       carry_mode, // ★ 098: 이월 반영 방식 — 발행 시 세그먼트 선택이 조용히 'auto'로 떨어지지 않게(코드리뷰 M1)
+      carry_strategy, // ★ 139: next|spread|extend — 공고 설정의 실제 이월 배치 규칙
       work_kind, // ★ 099: 체험단 종류(review|blog) — 빈 값=리뷰체험단(기존 동작). 블로그면 리뷰타입 미사용
       cash_receipt_required, // 모집공고 직접 설정 — 무시트 공고도 구매 안내·배지에 반영
       // ★ 135: 회수·혼합 부속정보. 배송유형이 그 기본형일 때만 저장하고, 아니면 비운다
@@ -2393,11 +2398,11 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
         start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
-        transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, work_kind, skip_weekends, cash_receipt_required,
+        transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, carry_strategy, work_kind, skip_weekends, cash_receipt_required,
         delivery_type_mix, recall_courier, recall_product)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
                $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
-               $45,$46,$47)
+               $45,$46,$47,$48)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -2442,6 +2447,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         normalizedReviewType,                                   // ★ 087: 판정 불가·미전송=NULL(기존 동작)
         JSON.stringify(normalizedReviewType === 'mixed' ? (reviewMixState.mix || []) : []),
         carry_mode === 'hold' ? 'hold' : 'auto',                // ★ 098: auto/hold 만 — 그 외 전부 기본 auto(현행)
+        ['next', 'spread', 'extend'].includes(carry_strategy) ? carry_strategy : 'next', // ★ 139: 구 UI 미전송=기존 next
         workKindForStore(work_kind),                            // ★ 099: 체험단 종류. 미전송=''(=리뷰)로 저장 — 기존 동작 불변
         effectiveSkipWeekends,
         cash_receipt_required === true,
@@ -2523,6 +2529,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       review_type, review_type_mix, // undefined=유지 / mixed면 유형별 수량을 함께 갱신
       work_kind,   // ★ 099: undefined=유지 / ''=해제
       carry_mode, // ★ 098: 이월 반영 방식 'auto'|'hold' — undefined=유지
+      carry_strategy, // ★ 139: 이월 배치 전략 next|spread|extend — undefined=유지
       cash_receipt_required, // undefined=유지 / true·false=모집공고 직접 설정
       skip_weekends, // undefined=유지 / true·false=주말 게시 직접 설정
       // ★ 135: 회수·혼합 부속정보 — undefined=유지(부속 칸 없는 화면이 저장해도 안 지워진다).
@@ -2820,6 +2827,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
                            WHEN $39::text = '' THEN NULL ELSE $39::text END,
         review_type_mix = CASE WHEN $40::jsonb IS NULL THEN review_type_mix ELSE $40::jsonb END,
         carry_mode = COALESCE($41, carry_mode),
+        carry_strategy = COALESCE($49, carry_strategy),
         -- ★ 099: 체험단 종류. null=유지 / ''=미지정으로 해제 — 리뷰타입과 같은 CASE 센티널.
         --   ★ 체험단 종류 UI 가 없는 화면(리뷰어앱 인라인 수정 등)이 저장해도 설정이 안 풀린다.
         work_kind = CASE WHEN $42::text IS NULL THEN work_kind ELSE $42::text END,
@@ -2880,6 +2888,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         deliveryMixForStore === null ? null : JSON.stringify(deliveryMixForStore),
         recallCourierForStore,
         recallProductForStore,
+        // $49 ★ 139: 세그먼트가 없는 옛 화면은 미전송=유지. 알 수 없는 값도 유지해
+        // 잘못된 API 호출이 기존 공고 전략을 next로 되돌리지 않게 한다.
+        ['next', 'spread', 'extend'].includes(carry_strategy) ? carry_strategy : null,
       ]
     );
 

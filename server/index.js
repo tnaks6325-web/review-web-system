@@ -71,6 +71,7 @@ const REQUIRED_SCHEMA = [
   ['campaign_options', 'inflow_guide_html'],
   ['campaign_options', 'inflow_guide_images'],
   ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
+  ['recruit_campaigns', 'carry_strategy'],        // 139 — 이월 배치 전략(next/spread/extend)·공개 /list 상태엔진 입력
   // 130 — 보관(폐기). 공개 /list·관리자 /admin/list 의 WHERE 절에 들어가므로 컬럼이 없으면
   //   **리뷰어 공고목록·관리자 모집공고 탭이 전면 42703**(무신호 장애) — 085 와 같은 규율.
   ['recruit_campaigns', 'archived_at'],

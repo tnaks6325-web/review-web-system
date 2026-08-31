@@ -936,7 +936,9 @@
     //   무조건 'next' 로 깔면 이월이 오늘에 다시 얹힌 배치가 그려져 **저장이 되돌아간 것처럼 보인다**
     //   (실제 저장값은 그대로다 — 화면만 다른 방식으로 다시 제안한 것). 기억은 화면 상태일 뿐이라
     //   sessionStorage 에 담고, 실패해도 무시한다(사생활 보호 모드 등).
-    var want = S.carryMode || _loadMode() || DEFAULT_CARRY_MODE;
+    // 공고 설정에서 저장한 전략이 실제 서버 정원과 같은 출발점이다. sessionStorage는
+    // 과거 화면 상태 호환용 폴백만 맡긴다(다른 브라우저의 공고 설정을 덮지 않는다).
+    var want = S.carryMode || j.carryStrategy || _loadMode() || DEFAULT_CARRY_MODE;
     /* ★ 고른 방식으로 못 펼치면 기본값 → 그것도 안 되면 next(가장 단순한 배치)로 접는다 —
          어떤 경우에도 균형 표가 통째로 비지 않게. */
     if (!applyCarryMode(want) && want !== DEFAULT_CARRY_MODE) applyCarryMode(DEFAULT_CARRY_MODE);

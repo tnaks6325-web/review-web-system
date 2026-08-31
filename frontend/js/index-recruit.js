@@ -1198,9 +1198,8 @@ async function openTestCampaignModal() {
 }
 if (typeof window !== "undefined") window.openTestCampaignModal = openTestCampaignModal;
 
-/* 모집이월 배치 방식 — 실제 날짜별 배분은 [인원 조절]의 공용 계산기를 사용한다.
-   공고 설정에서는 다음 배분을 열 때의 기본 선택만 정한다. 기존 carry_mode(auto/hold)는
-   과거 보류 공고 호환용으로 자동 값으로 보존한다. */
+/* 모집이월 배치 방식 — 공고에 carry_strategy(next|spread|extend)로 저장하고
+   서버 상태엔진이 실제 오늘 정원을 계산한다. carry_mode(auto|hold)는 보류 기능 전용이다. */
 function rfCarrySet(mode, opts) {
   const m = ["next", "spread", "extend"].includes(mode) ? mode : "extend";
   const hid = document.getElementById("rf_carry_mode");
@@ -1213,14 +1212,6 @@ function rfCarrySet(mode, opts) {
   });
   const note = document.getElementById("rf_carry_strategy_note");
   if (note) note.textContent = m === "extend" ? "기본" : (m === "next" ? "다음날" : "분산");
-  const campaignId = window._recruitEditLoaded && window._recruitEditLoaded.id;
-  if (campaignId && !(opts && opts.silent)) {
-    try {
-      localStorage.setItem("rf_carry_strategy_v1_" + campaignId, m);
-      // 인원 조절 공용 모달의 시작값도 즉시 같은 방식으로 맞춘다.
-      sessionStorage.setItem("cdp_carry_mode_" + campaignId, m);
-    } catch (_) {}
-  }
 }
 window.rfCarrySet = rfCarrySet;
 
@@ -3305,10 +3296,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_product_url", c.landing_url || "");
         setV("rf_hold_ttl", c.hold_ttl_min ?? 30);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
-        /* 모집이월 방식 복원 — 서버 저장 이전 공고는 새 기본값으로 안전하게 연다. */
+        /* 모집이월 방식 복원 — 서버 저장 이전 공고는 현행 next로 열어 일정 변동을 막는다. */
         if (typeof rfCarrySet === "function") {
-          let carryStrategy = "extend";
-          try { carryStrategy = localStorage.getItem("rf_carry_strategy_v1_" + c.id) || carryStrategy; } catch (_) {}
+          const carryStrategy = ["next", "spread", "extend"].includes(c.carry_strategy)
+            ? c.carry_strategy : "next";
           rfCarrySet(carryStrategy, { silent: true });
         }
         /* 👥 타계정 참여(063) 복원 */
@@ -5077,6 +5068,10 @@ async function saveRecruitPostImpl() {
       /* ⏸ 098 이월 반영 방식 — ★ 세그먼트 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 유지) */
       if (document.getElementById("rf_carry_mode")) {
         payload.carry_mode = document.getElementById("rf_carry_mode").value === "hold" ? "hold" : "auto";
+      }
+      if (document.getElementById("rf_carry_strategy")) {
+        const carryStrategy = document.getElementById("rf_carry_strategy").value;
+        payload.carry_strategy = ["next", "spread", "extend"].includes(carryStrategy) ? carryStrategy : "extend";
       }
       /* 👥 타계정 참여(063) — ★ 토글 UI 있는 페이지에서만 전송(없으면 미전송=서버 COALESCE 기존값 유지,
          옵션표·work_detail과 동일 원칙: 축약 화면 저장이 설정을 조용히 끄지 않게) */
