@@ -17,7 +17,7 @@
  */
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { kstTodayStr, dateOnlyStr, isCarryHold, heldCarry, pendingCarry, fetchCampaignCounts,
+const { kstTodayStr, dateOnlyStr, isCarryHold, carryStrategy, heldCarry, pendingCarry, fetchCampaignCounts,
   computeCampaignState } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -214,6 +214,8 @@ async function getPlanOverview(campaignId) {
     planEnabled: process.env.CAMPAIGN_DAILY_PLAN !== '0',
     // 이월 보류(098) — carryHeld: null=계산 불가(조회 실패·기준선 없음), 숫자=잔여 보류 인원
     carryMode: isCarryHold(camp) ? 'hold' : 'auto',
+    // ★ 139: 공고 설정의 실제 배치 전략. NULL(배포 전 공고)은 현행 next로 해석한다.
+    carryStrategy: carryStrategy(camp),
     carryHeld,
     carryAppliedSum,
     // 이월(미달) 인원 — 화면이 날짜에 배치하는 재료. null = 계산 불가(0 으로 꾸미지 않는다).

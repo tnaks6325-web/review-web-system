@@ -107,6 +107,25 @@ eq('carry 없어도(기준선 조회 실패) 오늘 조절값은 적용 — 조�
 eq('미래 날짜 계획은 오늘 정원에 영향 없음',
   S.dailyQuota(CAMP, 80, carry(80), ctx({ [d(3)]: 5 })), 40);
 
+// ★ 139: 모집공고 설정의 배치 전략은 서버 정원 계산에 직접 반영된다.
+// 기존 NULL은 next로 해석해 배포만으로 운영 중인 공고를 재배치하지 않는다.
+{
+  const strategyCamp = { ...CAMP, daily_limit: 20, recruit_total: 80 };
+  const strategyCarry = { startDate: d(-1), today, submittedSince: 15 }; // 첫날 20명 중 15명 확정 → 미달 5
+  eq('139 기존 공고의 전략 NULL = 현행 다음날 가산',
+    S.carryStrategy(strategyCamp), 'next');
+  eq('139 다음날 더하기 = 미달 5가 다음날 정원에 가산',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'next' }, 15, strategyCarry), 25);
+  eq('139 종료일 뒤에 붙이기 = 다음날은 기본 일건수 유지',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'extend' }, 15, strategyCarry), 20);
+  eq('139 남은 날에 나눠담기 = 원래 종료일까지 분산',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'spread' }, 15, strategyCarry), 22);
+  eq('139 명시 날짜계획은 종료일 연장보다 우선',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'extend' }, 15, strategyCarry, ctx({ [today]: 12 })), 12);
+  eq('139 종료일 연장도 총원 잔여량 clamp 유지',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'extend' }, 77, strategyCarry), 3);
+}
+
 // 킬스위치 — require 시점 상수라 자식 프로세스로 검증(계획 무시 = 전건 기존 동작)
 {
   const out = execFileSync(process.execPath, ['-e', `
@@ -467,6 +486,27 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ 총량 clamp 생존', /Math\.min\(q, rt - before\)/.test(st));
   ok('계획 로더 SAVEPOINT 격리(082 규율)', /SAVEPOINT cdp_plans/.test(st) && /ROLLBACK TO SAVEPOINT cdp_plans/.test(st));
   ok('42P01 네거티브 캐시', /_planTableMissingAt/.test(st));
+  const mig139 = readM('139_campaign_carry_strategy.sql');
+  const ir = readF('js/index-recruit.js');
+  const cdp = readF('js/campaign-daily-plan.js');
+  const routeSrc = readS('routes/campaign.routes.js');
+  ok('139 전략 컬럼은 재실행 안전하게 추가',
+    /ADD COLUMN IF NOT EXISTS carry_strategy TEXT DEFAULT 'next'/.test(mig139));
+  ok('139 전략은 보류(carry_mode)와 별도이며 서버가 next|spread|extend만 해석',
+    /function carryStrategy\(c\)/.test(st)
+    && /new Set\(\['next', 'spread', 'extend'\]\)/.test(st)
+    && /strategy !== 'extend'/.test(st));
+  ok('139 신규 공고 설정은 전략을 저장하고 편집 시 서버값을 복원',
+    /payload\.carry_strategy/.test(ir)
+    && /c\.carry_strategy/.test(ir)
+    && !/localStorage\.getItem\("rf_carry_strategy_v1_"/.test(ir));
+  ok('139 생성·수정·공개 목록이 전략을 같은 값으로 전달',
+    /carry_mode, carry_strategy, skip_weekends/.test(routeSrc)
+    && /carry_strategy = COALESCE\(\$49, carry_strategy\)/.test(routeSrc)
+    && /carry_strategy, work_kind, skip_weekends/.test(routeSrc));
+  ok('139 날짜별 조절 모달도 서버 저장 전략을 우선 사용',
+    /S\.carryMode \|\| j\.carryStrategy \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE/.test(cdp)
+    && /carryStrategy: carryStrategy\(camp\)/.test(readS('services/campaignPlan.service.js')));
 
   // 라우터 스택 실검사(문자열 grep 이 아니라 실제 등록 확인)
   const trackB = require('../src/routes/trackB.routes');
@@ -598,7 +638,18 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       const sql = mig;
       await c.query(sql);
       await c.query(sql);   // idempotent(재실행 안전)
+      await c.query(mig139);
+      await c.query(mig139); // 전략 컬럼도 재실행 안전
       ok('마이그레이션 2회 적용 무사(idempotent)', true);
+      const { rows: strategyColumn } = await c.query(`
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'recruit_campaigns'
+          AND column_name = 'carry_strategy'
+      `);
+      ok('이월 전략 컬럼 생성 + 기존 공고 기본값 next',
+        strategyColumn.length === 1 && String(strategyColumn[0].column_default || '').includes("'next'"));
       await c.query(`INSERT INTO recruit_campaigns (id, title) VALUES ('t1','x') ON CONFLICT DO NOTHING`);
       await c.query(`DELETE FROM campaign_daily_plans WHERE campaign_id='t1'`);
       await c.query(`INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count) VALUES ('t1','2026-08-10',20)`);
@@ -1230,7 +1281,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★ applyOverview 는 저장 직후에도 다시 도는데 무조건 'next' 로 깔면 이월이 오늘에 다시 얹혀
   //   **저장이 되돌아간 것처럼 보인다**(실제 저장값은 그대로 — 화면만 다른 방식으로 재제안).
   ok('9-1 ★ 재조회 시 고른 방식을 그대로 쓴다(무조건 기본값 금지)',
-    /var want = S\.carryMode \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE;/.test(CDP)
+    /var want = S\.carryMode \|\| j\.carryStrategy \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE;/.test(CDP)
     && /if \(!applyCarryMode\(want\) && want !== DEFAULT_CARRY_MODE\) applyCarryMode\(DEFAULT_CARRY_MODE\);/.test(CDP));
   ok('9-1 옛 배선(무조건 next)이 남아 있지 않다', !/^\s*applyCarryMode\('next'\);$/m.test(CDP));
   ok('9-2 방식을 고르면 기억한다(재오픈에도 유지)',

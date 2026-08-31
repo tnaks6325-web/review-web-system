@@ -238,6 +238,13 @@ const CARRY_HOLD_ENABLED = process.env.CAMPAIGN_CARRY_HOLD !== '0';
 function isCarryHold(c) {
   return CARRY_HOLD_ENABLED && String((c && c.carry_mode) || 'auto') === 'hold';
 }
+// ★ 139: 이월 "보류"와 "배치"는 다른 개념이다. 기존 공고의 NULL/알 수 없는 값은
+// 현행 next로 접어 배포만으로 이미 운영 중인 공고의 정원이 바뀌지 않게 한다.
+const CARRY_STRATEGIES = new Set(['next', 'spread', 'extend']);
+function carryStrategy(c) {
+  const value = String((c && c.carry_strategy) || 'next');
+  return CARRY_STRATEGIES.has(value) ? value : 'next';
+}
 // ★ 상한 — 이월이 아무리 쌓여도 하루 한도의 이 배수를 넘지 않는다.
 //   상한이 없으면 오래 미달한 캠페인이 어느 날 갑자기 수십 건을 한꺼번에 열어
 //   시트 기입·검수 인력이 감당 못 하는 버스트가 난다.
@@ -282,7 +289,11 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
     q = dl;
     // ★ 098: 보류 공고는 자동 이월을 얹지 않는다 — 미달분은 보류 잔량(heldCarry)으로 쌓이고
     //   관리자가 날짜별 계획으로 골라 반영한다. 총량 clamp 는 그대로라 물량 소실은 없다.
-    if (!isCarryHold(c) && CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
+    const strategy = carryStrategy(c);
+    // extend는 일건수만 열어 미달분을 뒤 날짜로 자연스럽게 넘긴다. 총량 clamp가
+    // 남은 인원을 계속 보장하므로 물량은 소실되지 않는다. 명시 계획일은 위 ov 분기에서
+    // 이미 우선하므로 수동 조절을 덮지 않는다.
+    if (!isCarryHold(c) && strategy !== 'extend' && CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
       const sd = dateOnlyStr(c.start_date);
       const anchor = (sd && sd > carry.startDate) ? sd : carry.startDate;   // 늦게 시작한 캠페인은 자기 시작일부터
       const days = _dayDiff(anchor, carry.today) + 1;                        // 오늘 포함 경과일수
@@ -299,6 +310,13 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
         const done = Number(carry.submittedSince) || 0;
         q = Math.min(planned - done, dl * CARRY_CAP_MULT);
         if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 그날 계획(기본 일건수)을 줄이지 않는다
+        // spread는 원래 종료일까지 남은 진행일에 현재 미달분을 고르게 나눈다.
+        // 총원이 없는 공고는 끝점을 알 수 없으므로 현행 next로 안전하게 유지한다.
+        if (strategy === 'spread' && rt > 0 && q > dl) {
+          const totalDays = Math.max(1, Math.ceil(rt / dl));
+          const remainingDays = Math.max(1, totalDays - (days - 1));
+          q = dl + Math.ceil((q - dl) / remainingDays);
+        }
       }
     }
   }
@@ -979,6 +997,7 @@ module.exports = {
   APPLY_BLOCK_REASON,
   KST_OFFSET_MS,
   CARRY_CAP_MULT,
+  carryStrategy,
   isCarryHold,
   pendingCarry,
   heldCarry,
