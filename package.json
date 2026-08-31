@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "sync:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sync-status.ps1",
+    "sync:status:strict": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sync-status.ps1 -Strict"
+  },
   "dependencies": {
     "csv-parse": "^6.2.1"
   }
