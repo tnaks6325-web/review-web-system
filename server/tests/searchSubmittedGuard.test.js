@@ -83,7 +83,7 @@ async function run() {
   reviewRows = [makeRow()];
   await searchByName('홍길동', '12345678');
   let sql = mainSql();
-  assert.ok(sql.includes('ri.is_submitted = FALSE'), '1: 기본은 is_submitted=FALSE 필터');
+  assert.ok(sql.includes('COALESCE(cp.is_submitted, ri.is_submitted) = FALSE'), '1: 기본은 참여자 제출 상태=FALSE 필터');
   assert.ok(!sql.includes('is_submitted ASC'), '1: 기본은 정렬 프리픽스 없음');
   assert.ok(sql.includes('LIMIT 200'), '1: 기본 LIMIT 200');
   console.log('  1. 기본(옵션 미지정) 기존 쿼리 불변 ✓');
@@ -97,12 +97,12 @@ async function run() {
   const r2 = await searchByName('홍길동', '12345678', { includeSubmitted: true });
   sql = mainSql();
   assert.ok(
-    sql.includes('(ri.is_submitted = FALSE OR ri.phone8 = ANY('),
+    sql.includes('(COALESCE(cp.is_submitted, ri.is_submitted) = FALSE OR ri.phone8 = ANY('),
     '2: 제출완료 행은 phone8/확정신원 일치 시에만 (이름/근접 매칭엔 미개방)'
   );
   assertPlGated(sql, '2 이름+phone8');   // pl 신원키는 stale 교차노출 차단 게이트 뒤에만
   assert.ok(!/WHERE TRUE/.test(sql), '2: 하이브리드 분기에 무조건 TRUE 해제 금지');
-  assert.ok(sql.includes('ORDER BY ri.is_submitted ASC'), '2: 미제출 우선 정렬(대기 건 LIMIT 보호)');
+  assert.ok(sql.includes('ORDER BY COALESCE(cp.is_submitted, ri.is_submitted) ASC'), '2: 미제출 우선 정렬(대기 건 LIMIT 보호)');
   assert.ok(sql.includes('LIMIT 400'), '2: 완료 포함 시 LIMIT 상향');
   // 데이터 최소화: 제출완료 행 row 비움 + 대기 행 row 유지
   const pending = r2.results.find(x => !x.isSubmitted);
@@ -121,7 +121,7 @@ async function run() {
   reviewRows = [makeRow()];
   await searchByName('홍길동', '', { includeSubmitted: true });
   sql = mainSql();
-  assert.ok(sql.includes('ri.is_submitted = FALSE'), '3: 이름 단독은 항상 FALSE 필터');
+  assert.ok(sql.includes('COALESCE(cp.is_submitted, ri.is_submitted) = FALSE'), '3: 이름 단독은 항상 참여자 제출 상태=FALSE 필터');
   assert.ok(!sql.includes('is_submitted ASC') && !/WHERE TRUE/.test(sql), '3: 이름 단독은 완료 미개방');
   assert.ok(sql.includes('LIMIT 200'), '3: 이름 단독 LIMIT 200 유지');
   console.log('  3. 이름 단독 — includeSubmitted 무시 ✓');
@@ -135,7 +135,7 @@ async function run() {
   assert.ok(/WHERE TRUE/.test(sql), '4: phone8 단독 분기는 필터 해제');
   assert.ok(sql.includes('ri.phone8 = ANY('), '4: 매칭은 phone8/확정신원 한정');
   assertPlGated(sql, '4 phone8단독');
-  assert.ok(sql.includes('LIMIT 400') && sql.includes('ri.is_submitted ASC'), '4: LIMIT 상향 + 대기 우선');
+  assert.ok(sql.includes('LIMIT 400') && sql.includes('COALESCE(cp.is_submitted, ri.is_submitted) ASC'), '4: LIMIT 상향 + 대기 우선');
   assert.equal(r4.results[0].isPaid, true, '4: 입금 키워드 컬럼 값 존재 → isPaid=true (폴백)');
   assert.deepEqual(r4.results[0].row, {}, '4: isPaid 판정 후에도 완료 행 row는 비움');
   console.log('  4. phone8 단독 — 필터 해제(강한 키 매칭) + isPaid 폴백 ✓');

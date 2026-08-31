@@ -254,7 +254,10 @@ async function searchByName(query, phone8, opts = {}) {
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
   // 제출완료 포함은 phone8(8자리)이 있을 때만 유효 — 이름 단독 분기에서는 무시
   const includeSubmitted = !!(opts && opts.includeSubmitted) && p8.length === 8;
-  const orderPrefix = includeSubmitted ? 'ri.is_submitted ASC, ' : '';
+  // 작업보드 참여자 행이 제출 상태의 진실원본이다. 참여자 원본이 없는 과거 이력만
+  // review_index 값을 보조로 사용해 기존 완료 내역을 보존한다.
+  const submittedState = 'COALESCE(cp.is_submitted, ri.is_submitted)';
+  const orderPrefix = includeSubmitted ? `${submittedState} ASC, ` : '';
   // 완료 이력이 합산되므로 LIMIT 상향(대기 건은 정렬 프리픽스로 보호됨)
   const limit = includeSubmitted ? 400 : 200;
 
@@ -274,7 +277,7 @@ async function searchByName(query, phone8, opts = {}) {
     ri.sheet_id          AS "sheetId",
     ri.tab_gid           AS "gid",
     ri.row_index         AS "rowIndex",
-    ri.is_submitted      AS "isSubmitted",
+    ${submittedState}    AS "isSubmitted",
     ri.product_name      AS "productName",
     ri.product_url       AS "productUrl",
     ri.start_date        AS "startDate",
@@ -322,8 +325,8 @@ async function searchByName(query, phone8, opts = {}) {
 
     // ★ 제출완료 행은 강한 신원키(phone8/확정신원) 일치 시에만 포함 — 약한 키(이름+근접)는 대기 건만
     const submittedCond = includeSubmitted
-      ? `(ri.is_submitted = FALSE OR ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))`
-      : 'ri.is_submitted = FALSE';
+      ? `(${submittedState} = FALSE OR ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))`
+      : `${submittedState} = FALSE`;
 
     sql = `
       SELECT ${SELECT_FIELDS},
@@ -341,6 +344,8 @@ async function searchByName(query, phone8, opts = {}) {
              END::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
@@ -370,11 +375,13 @@ async function searchByName(query, phone8, opts = {}) {
     mergePhoneList = phoneList;
     const phoneListParam = paramIdx++;
     // 이 분기는 매칭 자체가 강한 신원키(phone8/확정신원)뿐 → 제출완료 포함 시 필터만 해제
-    const submittedCond = includeSubmitted ? 'TRUE' : 'ri.is_submitted = FALSE';
+    const submittedCond = includeSubmitted ? 'TRUE' : `${submittedState} = FALSE`;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
@@ -398,7 +405,9 @@ async function searchByName(query, phone8, opts = {}) {
              1.0::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      WHERE ri.is_submitted = FALSE
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+      WHERE ${submittedState} = FALSE
         AND tc.sheet_id IS NOT NULL
         AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
@@ -575,9 +584,10 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
   let sql;
   const params = [];
   let paramIdx = 1;
+  const submittedState = 'COALESCE(cp.is_submitted, ri.is_submitted)';
   // ★ 보안 가드(본검색과 동일): 제출완료 행은 phone8 정확 일치 매칭에만 포함,
   //   이름 매칭(ILIKE 부분일치 포함)에는 절대 열지 않는다
-  const orderPrefix = includeSubmitted ? 'ri.is_submitted ASC, ' : '';
+  const orderPrefix = includeSubmitted ? `${submittedState} ASC, ` : '';
   const limit = includeSubmitted ? 400 : 200;
 
   if (q && p8.length === 8) {
@@ -585,12 +595,14 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     const nameParam = paramIdx++;
     const phoneParam = paramIdx++;
     const submittedCond = includeSubmitted
-      ? `(ri.is_submitted = FALSE OR ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))`
-      : 'ri.is_submitted = FALSE';
+      ? `(${submittedState} = FALSE OR ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))`
+      : `${submittedState} = FALSE`;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
@@ -607,11 +619,13 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     params.push(`%${q}%`, p8);
   } else if (p8.length === 8) {
     const phoneParam = paramIdx++;
-    const submittedCond = includeSubmitted ? 'TRUE' : 'ri.is_submitted = FALSE';
+    const submittedCond = includeSubmitted ? 'TRUE' : `${submittedState} = FALSE`;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
@@ -628,7 +642,9 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      WHERE ri.is_submitted = FALSE
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+      WHERE ${submittedState} = FALSE
         AND tc.sheet_id IS NOT NULL
         AND (ri.reviewer_name ILIKE $${nameParam}
              OR ri.recipient_name ILIKE $${nameParam})

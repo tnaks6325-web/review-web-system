@@ -569,6 +569,13 @@ router.post('/review', async (req, res, next) => {
            WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
           [sheetId, tabName, rowIndex]
         );
+        // 제출 상태의 진실원본은 작업보드 참여자 행이다. 시트 기반 탭도 같은 상태를
+        // 함께 확정해야 리뷰어 화면이 인덱스 재생성 시점에 따라 되돌아가지 않는다.
+        await pool.query(
+          `UPDATE campaign_participants SET is_submitted = TRUE, updated_at = NOW()
+           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
+          [sheetId, tabName, rowIndex]
+        );
         dbUpdated = result.rowCount > 0;
 
         /* ★★ 무시트 탭은 위 UPDATE 가 **다음 장부 재생성에 지워진다**(주문 한 건만 들어와도).

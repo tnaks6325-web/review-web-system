@@ -140,7 +140,7 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
   //   담당자가 열을 추가해야 표시가 남는다(모르면 "왜 입금 표시가 안 뜨지"가 된다).
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
-  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by,
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by, kind,
     mergeDeposit: kind === 'paid', deferRebuild });
 }
 
@@ -347,7 +347,7 @@ async function markSheetlessIdentityName({ sheetId, tabName, rowIndex, field, na
 }
 
 /** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
-async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, mergeDeposit = false, deferRebuild = false }) {
+async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, kind = null, mergeDeposit = false, deferRebuild = false }) {
   let nextValue = value;
   if (mergeDeposit) {
     try {
@@ -365,9 +365,10 @@ async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, va
     const r = await db.query(
       `UPDATE campaign_participants
           SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
+              is_submitted = CASE WHEN $6::text = 'submit' THEN TRUE ELSE is_submitted END,
               updated_at = NOW()
         WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
-      [sheetId, tabName, rowIndex, header, nextValue]);
+      [sheetId, tabName, rowIndex, header, nextValue, kind]);
     if (!r.rowCount) return { handled: true, ok: false, reason: 'row_not_found', column: header };
   } catch (e) {
     return { handled: true, ok: false, reason: 'write_failed', message: e.message, column: header };
