@@ -602,6 +602,9 @@ const PUBLIC_FIELDS_LEGACY = [
   'delivery_type', 'review_fee', 'badges', 'notes', 'chat_url',
   'status', 'sort_order', 'max_slots', 'current_slots', 'deadline',
   'description', 'linked_sheet_id', 'linked_tab_name', 'created_at',
+  // ★ 139: 공개 목록도 서버가 저장한 이월 배치 방식을 전달해야 카드·일정 모달이
+  // 다음날 가산 기본값으로 되돌아가지 않는다. 민감정보가 아닌 운영 규칙값이다.
+  'carry_strategy',
   'is_popular', // ★ 064: [인기!] 배지(표시용 — 선행참여 게이트는 참여형 apply에서만 판정)
   'work_kind',  // ★ 127: 리뷰어 홈 공고 탭(리뷰/블로그) 필터 재료 — 레거시 공고도 같은 축으로 갈린다
 ];
@@ -611,6 +614,8 @@ const PUBLIC_FIELDS_PARTICIPATION = [
   'thumbnail_url', 'created_at',
   'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
   'multi_account_mode', 'sub_hold_ttl_min', // ★ 063: 카드 "타계정 가능" 배지(§09-4)+타계정 10분 안내. multi_daily_limit는 비공개(409 사유로만 전달)
+  // ★ 139: 서버 영속 이월 방식. 이 값이 없으면 프런트가 이전 next 동작으로 폴백한다.
+  'carry_strategy',
   'is_popular', // ★ 064: [인기!] 배지 + 선행참여 안내
   'work_kind',  // ★ 101: 블로그 공고면 참여 시 블로그 주소를 받아야 한다(작업 종류 — 민감정보 아님)
 ];
