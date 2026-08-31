@@ -363,11 +363,23 @@ router.post('/reopen-slots', authMiddleware, async (req, res, next) => {
 
     // 실제 재오픈
     const { rows: reopenedRows } = await pool.query(
-      `UPDATE review_index ri
-          SET is_submitted = FALSE, built_at = NOW()
-        WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.is_submitted = TRUE
-          AND ${coverCond}
-        RETURNING ri.row_index`,
+      `WITH reopened AS (
+         UPDATE review_index ri
+            SET is_submitted = FALSE, built_at = NOW()
+          WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.is_submitted = TRUE
+            AND ${coverCond}
+          RETURNING ri.row_index
+       ), participant_reset AS (
+         UPDATE campaign_participants cp
+            SET is_submitted = FALSE,
+                updated_at = NOW(),
+                updated_by = 'reopen-slots'
+           FROM reopened r
+          WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = r.row_index
+            AND cp.active = TRUE AND cp.deleted_at IS NULL
+          RETURNING cp.seq
+       )
+       SELECT row_index FROM reopened`,
       [sheetId, tabName, required, required.length]
     );
     const reopened = reopenedRows.length;
