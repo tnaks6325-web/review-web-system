@@ -3,7 +3,8 @@
 두 컴퓨터의 기준은 각자 폴더의 `main`이 아니라 GitHub의 `origin/main`이다. 이 명령은 저장소에 남은 오래된 추적 정보에 기대지 않고 GitHub의 `main`을 직접 다시 받은 뒤, 현재 작업이 최신 기준에서 얼마나 앞·뒤인지와 저장되지 않은 변경이 있는지를 같은 형식으로 보여 준다.
 
 ```powershell
-.\scripts\sync-status.ps1
+# PowerShell 실행 정책과 무관하게 동작합니다.
+npm.cmd run sync:status
 ```
 
 `state`가 `aligned`이면 이 컴퓨터의 `main`은 공통 기준과 같다. `main_out_of_date`면 저장되지 않은 변경이 없는지 확인한 뒤 아래 명령으로만 갱신한다.
@@ -18,5 +19,7 @@ git pull --ff-only origin main
 자동 검사에서 최신 기준을 포함하는지만 확인하려면 아래처럼 사용한다. 저장되지 않은 변경이 있거나 공통 기준보다 뒤처지면 종료 코드 2로 끝난다.
 
 ```powershell
-.\scripts\sync-status.ps1 -Strict
+npm.cmd run sync:status:strict
 ```
+
+PowerShell에서 `npm`이 실행 정책 오류로 막히면 `npm.cmd`를 사용한다. 명령은 반드시 이 저장소 폴더에서 실행한다.
