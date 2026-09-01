@@ -436,7 +436,13 @@ function distributeDeliveryTypes({ total, rowDates = [], globalMix = [] } = {}) 
  * 옵션 배분 — 지정 수량이 있으면 그대로, 없으면 균등(나머지는 앞 옵션부터 1개씩).
  * ★ 옵션이 1개 이하면 배분하지 않는다(옵션 칸을 비워 둔다 — 선택지가 하나뿐이면 기입 의미가 없다).
  */
-function distributeOptions({ total, options = [], includeSingle = false } = {}) {
+function normalizeProductDistributionMode(value) {
+  return String(value == null ? '' : value).trim().toLowerCase() === 'sequential'
+    ? 'sequential'
+    : 'balanced';
+}
+
+function distributeOptions({ total, options = [], includeSingle = false, distributionMode = 'balanced' } = {}) {
   const n = Math.max(0, parseInt(total, 10) || 0);
   const keys = (options || [])
     .map(o => (typeof o === 'string' ? { key: o, count: null } : { key: String((o && o.key) || ''), count: o && o.count }))
@@ -452,7 +458,25 @@ function distributeOptions({ total, options = [], includeSingle = false } = {}) 
     buckets = keys.map((k, i) => ({ key: k.key, count: base + (i < rem ? 1 : 0) }));
   }
   const rowOptions = [];
-  for (const b of buckets) for (let i = 0; i < b.count && rowOptions.length < n; i++) rowOptions.push(b.key);
+  if (normalizeProductDistributionMode(distributionMode) === 'sequential') {
+    for (const b of buckets) {
+      for (let i = 0; i < b.count && rowOptions.length < n; i++) rowOptions.push(b.key);
+    }
+  } else {
+    /* 기본값: 상품·옵션을 입력 순서대로 한 번씩 순환한다. 날짜는 이 행 순서를 그대로
+       하루 배정량으로 나누므로, 1번→2번→3번→4번이 날짜 경계에서도 끊기지 않는다. */
+    const remaining = buckets.map(bucket => bucket.count);
+    while (rowOptions.length < n) {
+      let added = false;
+      for (let i = 0; i < buckets.length && rowOptions.length < n; i++) {
+        if (remaining[i] <= 0) continue;
+        rowOptions.push(buckets[i].key);
+        remaining[i] -= 1;
+        added = true;
+      }
+      if (!added) break;
+    }
+  }
   while (rowOptions.length < n) rowOptions.push(null);   // 합계 미달분은 빈 칸(경고로 알린다)
   return { buckets, rowOptions };
 }
@@ -855,7 +879,12 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   /* 자동 선택 조건이 세는 "옵션 가지 수" — 배분 형태({key,count})로 와도 같은 수를 센다. */
   const optionKindCount = (Array.isArray(optKeys) ? optKeys : [])
     .map(x => (typeof x === 'string' ? x : String((x && x.key) || ''))).filter(v => v.trim()).length;
-  const { buckets, rowOptions } = distributeOptions({ total, options: optKeys, includeSingle: isV2 });
+  const productDistributionMode = normalizeProductDistributionMode(
+    o.productDistributionMode != null ? o.productDistributionMode : wo.product_distribution_mode,
+  );
+  const { buckets, rowOptions } = distributeOptions({
+    total, options: optKeys, includeSingle: isV2, distributionMode: productDistributionMode,
+  });
   /* ★★ 127: 블로그체험단은 구매일자를 **미리 정할 수 없다**(모집·승인된 블로거가 생기면 그때 구매).
      날짜를 깔면 리뷰 규칙(그날 정원 파생)이 잘못 작동하므로 구매일자 칸을 통째로 비워 둔다 —
      바를참스킨 0804 시트(번호 1~50 + 구매일자 빈 칸)가 곧 블로그 표의 정상 모양이다. */
@@ -1118,6 +1147,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     columns,
     rows,
     dates: days,
+    productDistributionMode,
     optionBuckets: buckets,
     reviewBuckets: rtDist.reviewBuckets,
     deliveryBuckets: dvDist.deliveryBuckets,
@@ -1138,7 +1168,7 @@ function _channelChoices(template) {
 }
 
 module.exports = {
-  buildWorktablePlan, buildColumns, distributeDates, distributeOptions,
+  buildWorktablePlan, buildColumns, distributeDates, distributeOptions, normalizeProductDistributionMode,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
   REVIEW_SUBMIT_HEADER, ensureReviewColumn,

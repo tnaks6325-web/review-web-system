@@ -192,6 +192,13 @@ async function writeOrderToWorktable({
 
   const requestedSeq = sheetRow == null ? null : parseInt(sheetRow, 10);
   if (sheetRow != null && (!Number.isInteger(requestedSeq) || requestedSeq < 1)) return { ok: false, reason: 'bad_row' };
+  // 예정된 상품·옵션 행은 모집공고에서 선택한 조합만 채울 수 있다.
+  // 큐 작업표는 트랜잭션 안에서 최신 원장값으로 교체될 수 있으므로, 선택 키도 반드시
+  // 그 교체 뒤에 다시 계산한다. 옵션 없는 상품은 option_text에 상품명이 미리 채워져 있지만
+  // 선택 값은 selectedProduct로만 들어온다. 이때는 상품명을 **행 선택 키**로만 쓰고 옵션 칸에
+  // 쓰지는 않는다.
+  let selectedOptKey = '';
+  let scheduledUnitKey = '';
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -227,17 +234,19 @@ async function writeOrderToWorktable({
       }
       orderData = ledgerSvc._osRowToOrderData(freshOrders[0]);
     }
+    selectedOptKey = String(orderData.selectedOptKey || '').trim();
+    scheduledUnitKey = selectedOptKey || String(orderData.selectedProduct || '').trim();
     let cur;
     if (seq != null) {
       ({ rows: cur } = await client.query(
-        `SELECT id, seq, row_json FROM campaign_participants
+        `SELECT id, seq, option_text, row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
             AND ($4::uuid IS NULL OR workboard_id = $4)
           FOR UPDATE`, [sheetId, tabName, seq, workboardId]));
     } else {
       // 재시도는 이미 연결된 행을 먼저 잠근다. 없을 때만 준비된 빈 슬롯을 선점한다.
       ({ rows: cur } = await client.query(
-        `SELECT id, seq, row_json FROM campaign_participants
+        `SELECT id, seq, option_text, row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
             AND order_submission_id = $3::uuid
             AND ($4::uuid IS NULL OR workboard_id = $4)
@@ -304,16 +313,17 @@ async function writeOrderToWorktable({
       }
       if (!cur.length) {
         ({ rows: cur } = await client.query(
-          `SELECT id, seq, row_json FROM campaign_participants
+          `SELECT id, seq, option_text, row_json FROM campaign_participants
             WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
               AND ($3::uuid IS NULL OR workboard_id = $3)
               AND order_submission_id IS NULL
               AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL
               AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
               AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
-            ORDER BY seq
+              AND ($4 = '' OR NULLIF(btrim(COALESCE(option_text, '')), '') IS NULL OR option_text = $4)
+            ORDER BY CASE WHEN option_text = $4 THEN 0 ELSE 1 END, seq
             FOR UPDATE SKIP LOCKED
-            LIMIT 1`, [sheetId, tabName, workboardId]));
+            LIMIT 1`, [sheetId, tabName, workboardId, scheduledUnitKey]));
       }
       if (!cur.length) {
         /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 여기서 줄을 이어붙이면 300건 작업에
@@ -345,6 +355,10 @@ async function writeOrderToWorktable({
       seq = Number(cur[0].seq);
     }
 
+    if (cur[0] && scheduledUnitKey && cur[0].option_text && String(cur[0].option_text) !== scheduledUnitKey) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'scheduled_option_mismatch' };
+    }
     const currentRowJson = (cur[0] && cur[0].row_json && typeof cur[0].row_json === 'object') ? cur[0].row_json : {};
     const built = buildRowPatch(headers, orderData, currentRowJson);
     optionSuppressed = built.optionSuppressed;
@@ -357,7 +371,7 @@ async function writeOrderToWorktable({
     const recipientName = String(orderData.recipient || '').slice(0, 200);
     const p8 = _phone8(orderData.phone) || String(loginPhone8 || '').replace(/\D/g, '').slice(-8);
     // ★ 옵션은 리뷰어가 고른 값만 원장에 — 시트값 역주입 금지(C′ 규율). 빈 값이면 기존 값 보존.
-    const optText = String(orderData.selectedOptKey || '').trim();
+    const optText = selectedOptKey;
 
     if (cur.length) {
       await client.query(
