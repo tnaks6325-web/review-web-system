@@ -16,6 +16,29 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
   }
 
   try {
+    const phone8 = cleanPhone.slice(-8);
+    // 본계정으로 이미 있는 번호의 재등록은 아래 ON CONFLICT 경로가 종전처럼 처리한다.
+    // 반면 다른 본계정의 타계정으로 먼저 등록된 번호를 새 본계정으로 만들면, 로그인·검색·정산의
+    // phone8 신원축이 둘로 갈라진다. 저장 형태가 구형 문자열/비정상 값이어도 조회가 죽지 않게
+    // JSON 배열만 펼쳐 확인하고, 이름과 무관하게 번호 뒤 8자리 충돌을 차단한다.
+    const { rows: subOwnerRows } = await pool.query(
+      `SELECT 1
+         FROM reviewers r
+        WHERE EXISTS (
+          SELECT 1
+            FROM jsonb_array_elements(CASE WHEN jsonb_typeof(r.sub_accounts)='array'
+                                           THEN r.sub_accounts ELSE '[]'::jsonb END) AS sub(value)
+           WHERE RIGHT(regexp_replace(COALESCE(sub.value->>'phone',''), '[^0-9]', '', 'g'), 8) = $1
+        )
+        LIMIT 1`, [phone8]);
+    if (subOwnerRows.length > 0) {
+      return {
+        ok: false,
+        reason: 'phone_registered_as_sub_account',
+        error: '이 번호는 이미 타계정으로 등록되어 있어 새 리뷰어로 등록할 수 없습니다. 타계정 정보를 삭제한 뒤 다시 시도해주세요.',
+      };
+    }
+
     // UNIQUE(phone) 제약을 활용한 중복 처리
     const result = await pool.query(`
       INSERT INTO reviewers (name, phone, consent)
