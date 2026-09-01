@@ -14704,7 +14704,10 @@ async function renderReviewersView(){
   STATE.rvOffset = STATE.rvOffset||0;
   await _loadReviewers();
 }
-async function _loadReviewers(){
+/* The live-search path must keep #rvq itself alive. Replacing #rvhead removes
+   the focused input; then an empty search's next Backspace reaches browser
+   history instead of the input. */
+async function _loadReviewers({preserveSearchInput=false}={}){
   const requestId=(STATE.rvRequestId||0)+1; STATE.rvRequestId=requestId;
   const qs = new URLSearchParams({ limit:String(RV_PAGE), offset:String(STATE.rvOffset||0) });
   if(STATE.rvq) qs.set('q', STATE.rvq);
@@ -14713,18 +14716,19 @@ async function _loadReviewers(){
   const r = await api('/api/trackb/reviewers?'+qs.toString());
   if(requestId!==STATE.rvRequestId) return; // 느린 이전 검색 응답이 최신 실시간 결과를 덮지 않는다.
   const b=$('#rvbody');
-  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">리뷰어 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _renderRvHead(0); return; }
+  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">리뷰어 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; preserveSearchInput?_refreshRvHead(0):_renderRvHead(0); return; }
   STATE.rv = r.items||[]; STATE.rvTotal = r.total|0;
   STATE.rvStatsUnavailable = r.statsUnavailable === true;   // 집계 실패 = '?' 표기(0으로 꾸미지 않음)
-  _renderRvHead(r.total|0);
+  if(preserveSearchInput) _refreshRvHead(r.total|0);
+  else _renderRvHead(r.total|0);
   _renderRvBody();
 }
 function _rvSetFlag(f){ STATE.rvFlag = (STATE.rvFlag===f?'':f); STATE.rvOffset=0; _loadReviewers(); }
 function _renderRvHead(total){
   const from=(STATE.rvOffset|0)+1, to=Math.min((STATE.rvOffset|0)+RV_PAGE, total);
   $('#rvhead').innerHTML=`<div class="mh"><h1>등록리뷰어DB</h1>
-    <span class="bd g">${total.toLocaleString()}명</span>
-    ${total?`<span class="bd">${from}–${to}</span>`:''}
+    <span class="bd g" id="rvTotal">${total.toLocaleString()}명</span>
+    <span class="bd" id="rvRange"${total?'':' hidden'}>${total?`${from}–${to}`:''}</span>
     <span class="sp" style="flex:1"></span>
     <select class="ovsearch" style="width:110px" onchange="STATE.rvStatus=this.value;STATE.rvOffset=0;_loadReviewers()">
       <option value=""${!STATE.rvStatus?' selected':''}>상태 전체</option>
@@ -14738,12 +14742,20 @@ function _renderRvHead(total){
       <input id="rvq" class="ovsearch" style="width:240px" placeholder="이름 / 연락처 / 계좌번호 실시간 검색"
              value="${esc(STATE.rvq||'')}"
              oninput="_rvSearchInput(this,event)" oncompositionend="_rvSearchInput(this,null,true)"
-             onkeydown="if(event.key==='Enter'){STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers();}">
+             onkeydown="if(event.key==='Enter'){event.preventDefault();STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers({preserveSearchInput:true});}">
       ${[['','전체'],['available','참여가능'],['blacklist','블랙리스트'],['candidate','🚨 후보 (미작성 1건↑)'],['overdue','기한경과만']]
         .map(([f,lb])=>`<button class="btn" style="padding:3px 12px;border-radius:999px;font-size:.72rem${(STATE.rvFlag||'')===f?';background:#111827;border-color:#111827;color:#fff':''}"
           onclick="_rvSetFlag('${f}')">${lb}</button>`).join('')}
       <span style="font-size:.68rem;color:var(--muted)">판정 기준: 기한경과 = 미제출 14일↑ · 리뷰미작성 = 미제출 30일↑ — 설정 › 블랙리스트 관리기준</span>
     </div>`;
+}
+/* Update only values outside the input. #rvq retains focus, selection and IME
+   state while a search response updates the reviewer table. */
+function _refreshRvHead(total){
+  const from=(STATE.rvOffset|0)+1, to=Math.min((STATE.rvOffset|0)+RV_PAGE, total);
+  const totalEl=$('#rvTotal'), rangeEl=$('#rvRange');
+  if(totalEl) totalEl.textContent=total.toLocaleString()+'명';
+  if(rangeEl){ rangeEl.hidden=!total; rangeEl.textContent=total?`${from}–${to}`:''; }
 }
 let _rvSearchTimer=null;
 function _rvSearchInput(el, ev, force){
@@ -14752,7 +14764,7 @@ function _rvSearchInput(el, ev, force){
   _rvSearchTimer=setTimeout(()=>{
     const q=el.value.trim();
     if(q===String(STATE.rvq||'')) return;
-    STATE.rvq=q; STATE.rvOffset=0; _loadReviewers();
+    STATE.rvq=q; STATE.rvOffset=0; _loadReviewers({preserveSearchInput:true});
   }, 180);
 }
 /* 컬럼 순서는 **사용자 확정**: 이름·연락처·주소·은행·계좌번호·예금주·주민번호·소득유형·타계정·등록일.

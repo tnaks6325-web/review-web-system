@@ -66,7 +66,7 @@ ok(`펼침행 colspan(${/colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) ? 'RV_COL
 
 console.log('\n②-1 실시간 검색 · 리뷰어 홈 바로가기');
 ok('검색 입력마다 180ms 후 서버 검색을 다시 한다',
-  /oninput="_rvSearchInput\(this,event\)"/.test(jsNoComment) && /function _rvSearchInput[\s\S]{0,500}?setTimeout[\s\S]{0,300}?_loadReviewers\(\)/.test(jsNoComment));
+  /oninput="_rvSearchInput\(this,event\)"/.test(jsNoComment) && /function _rvSearchInput[\s\S]{0,500}?setTimeout[\s\S]{0,300}?_loadReviewers\(/.test(jsNoComment));
 ok('검색창은 상태/블랙리스트 필터 행의 맨 왼쪽에 있다', (() => {
   const head = (/function _renderRvHead\(total\)[\s\S]*?\n\}/.exec(jsNoComment) || [''])[0];
   const row = (/margin:0 16px 10px">([\s\S]*?)<\/div>`;/.exec(head) || ['',''])[1];
@@ -74,6 +74,16 @@ ok('검색창은 상태/블랙리스트 필터 행의 맨 왼쪽에 있다', (()
 })());
 ok('느린 이전 검색 응답이 최신 결과를 덮지 않는다',
   /requestId!==STATE\.rvRequestId\) return/.test(jsNoComment));
+ok('★ 실시간 검색 응답은 검색창 헤더를 재생성하지 않는다(빈 값 Backspace 뒤로가기 방지)',
+  /_loadReviewers\(\{preserveSearchInput:true\}\)/.test(jsNoComment)
+  && /if\(preserveSearchInput\) _refreshRvHead\(r\.total\|0\);/.test(jsNoComment)
+  && /function _refreshRvHead\(total\)[\s\S]{0,700}?textContent/.test(jsNoComment));
+ok('★ 검색 중 갱신은 건수 표기만 바꾸고 #rvq 를 담은 헤더 innerHTML을 건드리지 않는다', (() => {
+  const start=jsNoComment.indexOf('function _refreshRvHead(total)');
+  const end=jsNoComment.indexOf('let _rvSearchTimer', start);
+  const refresh=start<0||end<0?'':jsNoComment.slice(start,end);
+  return refresh.includes("$('#rvTotal')") && refresh.includes("$('#rvRange')") && !refresh.includes('innerHTML');
+})());
 ok('이름 왼쪽에 리뷰어 홈 버튼이 있고 행 인덱스로만 연다',
   /<th style="width:72px">리뷰어 홈<\/th><th class="c-nm">이름/.test(jsNoComment)
   && /onclick="_rvOpenHome\(\$\{i\}\)"/.test(jsNoComment));
