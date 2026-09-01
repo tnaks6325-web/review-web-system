@@ -67,6 +67,9 @@ test('인트라넷 옵션 없는 상품별 base 조합은 접수 작업표와 �
   ].map(([name, photo, text]) => ({
     name,
     product_mode: 'none',
+    // 전환기 저장분의 빈 최상위 배열/문자열은 유효한 base 조합을 가리면 안 된다.
+    review_type_mix: name.includes('갈고') ? '[]' : [],
+    ...(name.includes('갈옥') ? { reviewTypeMix: '[]' } : {}),
     base: { count: 5, daily: 5, review_type_mix: mix(photo, text) },
     options: [],
   }));
