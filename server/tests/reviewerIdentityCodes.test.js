@@ -10,6 +10,7 @@ const reviewer = read('src/routes/reviewer.routes.js');
 const trackB = read('src/routes/trackB.routes.js');
 const ledger = read('src/services/orderLedger.service.js');
 const participation = read('src/services/participation.service.js');
+const reviewerService = read('src/services/reviewer.service.js');
 const identity = require('../src/services/reviewerIdentity.service');
 
 let passed = 0;
@@ -40,8 +41,13 @@ ok('participation: 링크 upsert는 코드 FK를 비어있을 때만 보강', /C
 
 // owner 로그인은 모든 명의/별칭을 병합해 보되, apply 정책은 위의 실참여자 키와 분리된다.
 ok('my-status: 코드 소유자 범위를 phone8 ANY로 조회', /getOwnerScopeByLoginPhone8[\s\S]*?ri\.phone8 = ANY\(\$1\)/.test(reviewer));
-ok('my-applications: 이름 LIKE가 아니라 소유자 범위로 병합', /WHERE \(ca\.phone8 = ANY\(\$1\) OR ca\.owner_phone8 = ANY\(\$1\)\)/.test(reviewer));
+ok('my-applications: 이름 LIKE가 아니라 소유자 범위로 병합', /WHERE \(ca\.phone8 = ANY\(\$1\) OR ca\.owner_phone8 = ANY\(\$1\) OR ca\.owner_reviewer_id = \$2\)/.test(reviewer));
 ok('admin: 전체 충돌 dry-run과 단일 bootstrap endpoint 존재', /identity-codes\/dry-run/.test(trackB) && /identity-codes\/:id\/bootstrap/.test(trackB));
 ok('admin: 이름 및 번호 변경은 preview+confirm+환경승인', /identity-codes\/:id\/change/.test(trackB) && /REVIEWER_IDENTITY_CHANGE_ENABLED/.test(read('src/services/reviewerIdentity.service.js')));
+// P1: 닫힌 별칭을 phone8 범위에 섞으면 번호 재사용 뒤 남의 이력이 보인다. 과거 행은 고정 UUID로만 병합한다.
+ok('번호 재사용: 닫힌 alias를 phone8 조회 범위에 넣지 않음', !/alias_phone8/.test(read('src/services/reviewerIdentity.service.js').slice(read('src/services/reviewerIdentity.service.js').indexOf('async function getOwnerScopeByLoginPhone8'))));
+ok('과거 코드 이력: my-status는 participation_links 소유자 FK로 병합', /pl\.owner_reviewer_id = \$2/.test(reviewer));
+ok('타계정 배열 재정렬: 변경 전 identity 현재값과 name+phone8을 대조', /subs\[index\]\.name[\s\S]*?identity\.current_name[\s\S]*?subs\[index\]\.phone[\s\S]*?identity\.current_phone8/.test(read('src/services/reviewerIdentity.service.js')));
+ok('코드 부여 뒤 profile 배열 일괄 변경은 차단', /identity_accounts_locked/.test(reviewerService) && /SELECT reviewer_no FROM reviewers/.test(reviewerService));
 
 console.log(`\n✅ reviewerIdentityCodes: ${passed}개 통과`);

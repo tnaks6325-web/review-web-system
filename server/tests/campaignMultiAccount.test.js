@@ -68,7 +68,7 @@ const pub = (routes.match(/PUBLIC_FIELDS_PARTICIPATION = \[[\s\S]*?\];/) || ['']
 ok('공개필드: multi_account_mode 배지 노출 + multi_daily_limit 비공개', pub.includes("'multi_account_mode'") && !pub.includes("'multi_daily_limit'"));
 ok('/list SELECT에 multi_account_mode 포함(목록 카드 배지 — 명시 컬럼 SELECT 함정)', /hold_ttl_min, start_date,\s+multi_account_mode, sub_hold_ttl_min/.test(routes));
 // ── my-status ──
-ok('my-status: 소유자 병합(phone8 OR owner_phone8, 코드 범위 지원)', /\(ca\.phone8 = ANY\(\$1\) OR ca\.owner_phone8 = ANY\(\$1\)\)/.test(reviewer));
+ok('my-status: 소유자 병합(phone8 OR owner_phone8, 코드 FK 범위 지원)', /\(ca\.phone8 = ANY\(\$1\) OR ca\.owner_phone8 = ANY\(\$1\) OR ca\.owner_reviewer_id = \$2\)/.test(reviewer));
 ok('my-status: isSub만 노출(ownerPhone8 원문 미반환 — 무인증 PII 역유출 차단)', /AS "isSub"/.test(reviewer) && !/AS "ownerPhone8"/.test(reviewer));
 // ── findSubAccount 순수함수 ──
 const subs = [{ name: '이 영희', phone: '010-1111-2222', address: '' }, { name: '박민준', phone: '01033334444' }];

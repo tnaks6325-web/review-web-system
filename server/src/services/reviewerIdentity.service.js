@@ -324,6 +324,13 @@ async function applyIdentityChange({ reviewerId, memberNo, name, phone, by = 'ad
       const subs = asSubAccounts(reviewer.sub_accounts);
       const index = wanted.memberNo - 1;
       if (!subs[index]) throw new ReviewerIdentityError('identity_seed_mismatch', '기존 타계정 순서가 코드 신원과 달라 변경을 중단했습니다.');
+      // member_no는 bootstrap 당시 배열 위치가 아니라 **그 위치의 당시 신원과 함께** 유효하다.
+      // 기존 프로필 화면에서 앞 행을 삭제/재정렬하면 위치만으로는 다른 사람을 덮어쓸 수 있으므로,
+      // 잠근 identity의 현재 name+phone8과 일치하지 않으면 자동 변경을 중단한다.
+      if (String(subs[index].name || '').trim() !== String(identity.current_name || '').trim()
+          || toPhone8(subs[index].phone) !== toPhone8(identity.current_phone8)) {
+        throw new ReviewerIdentityError('identity_seed_mismatch', '타계정 목록이 코드 신원과 달라 변경을 중단했습니다. 타계정 코드를 다시 점검해주세요.');
+      }
       subs[index] = { ...subs[index], name: wanted.name, phone: wanted.phone };
       draft.sub_accounts = subs;
     }
@@ -383,7 +390,9 @@ async function resolveParticipantIdentity({ client = pool, ownerReviewerId, part
 }
 
 // 소유자 로그인(본계정)에서 보여줄 전체 명의 범위. 코드 활성 전에도 기존 sub_accounts로
-// 동일한 조회 범위를 유지한다. 코드 활성 후의 과거 이름/번호는 aliases의 열린/닫힌 값까지 포함한다.
+// 동일한 조회 범위를 유지한다. 닫힌 별칭은 "예전 번호"일 뿐 다른 소유자에게 재등록될 수 있으므로
+// phone8 단독 조회 범위에 절대 넣지 않는다. 코드가 켜진 뒤의 과거 행은 owner/participant FK로만
+// 합산해야 한다(번호 재사용 시 남의 주문/참여 이력이 섞이는 정보노출 방지).
 async function getOwnerScopeByLoginPhone8(loginPhone8) {
   const phone8 = toPhone8(loginPhone8);
   if (!phone8) return { phone8s: [] };
@@ -399,16 +408,13 @@ async function getOwnerScopeByLoginPhone8(loginPhone8) {
   }
   try {
     const identityRows = await pool.query(
-      `SELECT i.id, i.current_phone8, a.phone8 AS alias_phone8
+      `SELECT i.id, i.current_phone8
          FROM reviewer_identities i
-         LEFT JOIN reviewer_identity_aliases a ON a.identity_id = i.id
         WHERE i.owner_reviewer_id = $1 AND i.status <> 'separated'`, [owner.id]
     );
     for (const row of identityRows.rows) {
       const current = toPhone8(row.current_phone8);
-      const alias = toPhone8(row.alias_phone8);
       if (current) phones.add(current);
-      if (alias) phones.add(alias);
     }
   } catch (err) {
     // rollout 중 테이블이 아직 없다면 기존 범위로만 계속 응답한다.

@@ -214,8 +214,8 @@ router.get('/my-applications', async (req, res, next) => {
     if (reviewerRows.length === 0) {
       return res.json({ ok: true, applications: [], message: '등록된 리뷰어를 찾을 수 없습니다.' });
     }
-    let phoneList = [phone8];
-    try { phoneList = (await require('../services/reviewerIdentity.service').getOwnerScopeByLoginPhone8(phone8)).phone8s || phoneList; }
+    let phoneList = [phone8], ownerReviewerId = null;
+    try { const scope = await require('../services/reviewerIdentity.service').getOwnerScopeByLoginPhone8(phone8); phoneList = scope.phone8s || phoneList; ownerReviewerId = scope.ownerReviewerId || null; }
     catch (scopeErr) { logger.warn('[my-applications] 코드 스코프 조회 실패(현재 번호만): ' + scopeErr.message); }
 
     // 2. campaign_applications에서 소유자 전체의 신청 이력 조회. 표시/정산 집계는 소유자 기준이되,
@@ -236,12 +236,12 @@ router.get('/my-applications', async (req, res, next) => {
         rc.status AS "campaignStatus"
       FROM campaign_applications ca
       LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
-      WHERE (ca.phone8 = ANY($1) OR ca.owner_phone8 = ANY($1))
+      WHERE (ca.phone8 = ANY($1) OR ca.owner_phone8 = ANY($1) OR ca.owner_reviewer_id = $2)
         -- 작업보드에서 참여행을 삭제하며 취소된 건은 리뷰어의 참여이력에서 제외한다.
         AND ca.status <> 'cancelled'
       ORDER BY ca.applied_at DESC
       LIMIT 50
-    `, [phoneList]);
+    `, [phoneList, ownerReviewerId]);
 
     res.json({ ok: true, applications: appRows, total: appRows.length });
   } catch (err) {
@@ -256,8 +256,8 @@ router.get('/my-status', async (req, res, next) => {
     if (!phone8 || phone8.length !== 8) {
       return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     }
-    let phoneList = [phone8];
-    try { phoneList = (await require('../services/reviewerIdentity.service').getOwnerScopeByLoginPhone8(phone8)).phone8s || phoneList; }
+    let phoneList = [phone8], ownerReviewerId = null;
+    try { const scope = await require('../services/reviewerIdentity.service').getOwnerScopeByLoginPhone8(phone8); phoneList = scope.phone8s || phoneList; ownerReviewerId = scope.ownerReviewerId || null; }
     catch (scopeErr) { logger.warn('[my-status] 코드 스코프 조회 실패(현재 번호만): ' + scopeErr.message); }
 
     // review_index에서 본계정 코드 스코프의 모든 참여 내역 조회 (시트 기반)
@@ -283,7 +283,8 @@ router.get('/my-status', async (req, res, next) => {
         tc.is_closed AS "isClosed"
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      WHERE ri.phone8 = ANY($1)
+      LEFT JOIN participation_links pl ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
+      WHERE (ri.phone8 = ANY($1) OR pl.owner_reviewer_id = $2)
         -- 작업보드에서 실제 삭제된 정확한 참여 행은 리뷰어의 참여내역에도 노출하지 않는다.
         AND NOT EXISTS (
           SELECT 1 FROM workdesk_participant_deletions wd
@@ -292,7 +293,7 @@ router.get('/my-status', async (req, res, next) => {
         )
       ORDER BY ri.built_at DESC
       LIMIT 100
-    `, [phoneList]);
+    `, [phoneList, ownerReviewerId]);
 
     // 진행단계 매핑:
     // 배정됨(review_index에 있음) → 리뷰제출(is_submitted=true) → 입금완료(is_submitted2='PAID')
@@ -329,7 +330,7 @@ router.get('/my-status', async (req, res, next) => {
         tc.is_closed AS "isClosed"
       FROM order_submissions os
       LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
-      WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+      WHERE (RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1) OR os.owner_reviewer_id = $2)
         AND os.deleted_at IS NULL
         -- 주문 원장은 감사용으로 남겨도, 실제 삭제된 작업보드 참여행의 주문은 리뷰어
         -- 참여현황에 다시 나타나면 안 된다.
@@ -339,7 +340,7 @@ router.get('/my-status', async (req, res, next) => {
         )
       ORDER BY os.submitted_at DESC
       LIMIT 100
-    `, [phoneList]);
+    `, [phoneList, ownerReviewerId]);
 
     for (const o of orderRows) {
       // 이미 시트에 반영돼 review_index가 대표하는 주문은 건너뜀(중복 방지)
@@ -384,12 +385,12 @@ router.get('/my-status', async (req, res, next) => {
                rc.title, rc.thumbnail_url AS "thumbnailUrl"
           FROM campaign_applications ca
           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE (ca.phone8 = ANY($1) OR ca.owner_phone8 = ANY($1))
+         WHERE (ca.phone8 = ANY($1) OR ca.owner_phone8 = ANY($1) OR ca.owner_reviewer_id = $2)
            AND ((ca.status = 'applied' AND ca.expires_at > NOW())
                 OR ca.status = 'blog_pending')
          ORDER BY ca.applied_at DESC
          LIMIT 20
-      `, [phoneList]);
+      `, [phoneList, ownerReviewerId]);
       for (const h of holdRows) {
         items.unshift({
           id: `hold-${h.id}`,
