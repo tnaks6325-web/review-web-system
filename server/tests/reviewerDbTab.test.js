@@ -72,8 +72,14 @@ function build({ q = '', status = '', limit = 50, offset = 0 }) {
   if (q) {
     const d = q.replace(/[^0-9]/g, '');
     const ors = [];
-    params.push('%' + q + '%'); ors.push(`name ILIKE $${params.length}`);
-    if (d.length >= 4) { params.push('%' + d + '%'); ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`); }
+    params.push('%' + q + '%');
+    const nameLikeParam = params.length;
+    ors.push(`name ILIKE $${nameLikeParam}`);
+    ors.push(`EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(reviewers.sub_accounts)='array' THEN reviewers.sub_accounts ELSE '[]'::jsonb END) AS sub(value) WHERE COALESCE(sub.value->>'name', '') ILIKE $${nameLikeParam})`);
+    if (d.length >= 4) {
+      params.push('%' + d + '%'); ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`);
+      params.push('%' + d + '%'); ors.push(`REGEXP_REPLACE(COALESCE(bank_account,''),'[^0-9]','','g') LIKE $${params.length}`);
+    }
     where.push('(' + ors.join(' OR ') + ')');
   }
   if (status) { params.push(status); where.push(`status = $${params.length}`); }
@@ -115,6 +121,11 @@ CASES.forEach(([label, opt]) => {
 t('페이지 크기 상한이 있다(전 행 덤프 방지)', () => {
   const fn = SRC.slice(SRC.indexOf("router.get('/reviewers'"), SRC.indexOf("router.post('/reviewers/memo'"));
   assert.ok(/Math\.min\(200,/.test(fn), 'limit 상한이 없으면 목록 하나로 전 리뷰어를 덤프할 수 있다');
+});
+t('타계정 이름도 같은 이름 검색 파라미터로 조회한다(추가 바인드 누락 방지)', () => {
+  const fn = SRC.slice(SRC.indexOf("router.get('/reviewers'"), SRC.indexOf("router.post('/reviewers/memo'"));
+  assert.ok(/const nameLikeParam = params\.length;[\s\S]{0,900}?COALESCE\(sub\.value->>'name', ''\) ILIKE \$\$\{nameLikeParam\}/.test(fn),
+    '타계정 이름 EXISTS 또는 본계정 이름과 공유하는 파라미터가 없음');
 });
 t('메모는 id(UUID) 로만 지목하고 길이를 자른다', () => {
   const fn = SRC.slice(SRC.indexOf("router.post('/reviewers/memo'"));

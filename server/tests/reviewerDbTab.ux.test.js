@@ -128,13 +128,22 @@ ok('연락처 변경 버튼 문구는 번호변경이다', />번호변경<\/butt
 console.log('\n④ 타계정 클릭 → 행 바로 아래 펼침');
 ok('타계정 수가 0보다 크면 버튼, 0이면 그냥 숫자(누를 게 없는 걸 누르게 하지 않는다)',
   /\(r\.subCount\|0\)>0[\s\S]{0,260}?onclick="_rvToggleSub\(/.test(jsNoComment));
+ok('검색어가 있으면 타계정이 있는 모든 검색 결과를 자동으로 펼친다(본계정·타계정 이름 모두 동일)',
+  /const autoOpenSub = !!String\(STATE\.rvq\|\|''\)\.trim\(\) && \(r\.subCount\|0\)>0;/.test(jsNoComment)
+  && /class="rvsubbtn\$\{autoOpenSub\?' on':''\}"/.test(jsNoComment)
+  && /data-rvsub="\$\{i\}"\$\{autoOpenSub\?'':' hidden'\}/.test(jsNoComment));
+ok('자동으로 펼친 타계정은 한 번만 만들고, 이후 클릭으로 접고 다시 펼칠 수 있다',
+  /autoOpenSub\?' data-filled="1"':''/.test(jsNoComment)
+  && /autoOpenSub\?_rvSubHtml\(r\):''/.test(jsNoComment));
 ok('펼침행이 그 리뷰어 행 **바로 다음**에 렌더된다',
-  /<\/tr>\s*<tr class="rvsubrow" data-rvsub="\$\{i\}" hidden>/.test(jsNoComment));
+  /<\/tr>\s*<tr class="rvsubrow" data-rvsub="\$\{i\}"/.test(jsNoComment));
 ok('내용은 열 때 한 번만 만든다(dataset.filled — 목록 50행 동시 렌더 방지)',
   /_rvToggleSub[\s\S]{0,400}?tr\.dataset\.filled/.test(jsNoComment));
 ok('서버가 이미 주는 subAccounts 를 쓴다(신규 엔드포인트 0)',
   /_rvSubHtml[\s\S]{0,400}?r\.subAccounts/.test(jsNoComment)
   && /sub_accounts AS "subAccounts"/.test(routes));
+ok('타계정 이름 검색은 본계정 행을 한 번만 찾는다(EXISTS + 안전한 JSON 배열 처리)',
+  /EXISTS \([\s\S]{0,500}?jsonb_array_elements\(CASE WHEN jsonb_typeof\(reviewers\.sub_accounts\)='array'[\s\S]{0,500}?COALESCE\(sub\.value->>'name', ''\) ILIKE \$\$\{nameLikeParam\}/.test(routes));
 ok('문자열로 저장된 구형 sub_accounts 도 파싱한다',
   /typeof r\.subAccounts==='string' \? JSON\.parse/.test(jsNoComment));
 ok('계좌 3종이 비면 "본인 공통계좌 사용" 로 표기(빈칸=누락 오해 방지)',

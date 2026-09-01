@@ -2715,7 +2715,17 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
       const d = q.replace(/[^0-9]/g, '');
       const ors = [];
       params.push('%' + q + '%');
-      ors.push(`name ILIKE $${params.length}`);
+      const nameLikeParam = params.length;
+      ors.push(`name ILIKE $${nameLikeParam}`);
+      // 타계정 이름으로도 그 타계정을 등록한 본계정 행을 찾는다. JSON 배열이 아니었던
+      // 구형/비정상 데이터도 빈 배열로 취급해 검색 자체가 500으로 깨지지 않게 한다.
+      // 같은 본계정에 여러 타계정이 맞아도 EXISTS 이므로 본계정 행은 한 번만 나온다.
+      ors.push(`EXISTS (
+        SELECT 1
+          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(reviewers.sub_accounts)='array'
+                                         THEN reviewers.sub_accounts ELSE '[]'::jsonb END) AS sub(value)
+         WHERE COALESCE(sub.value->>'name', '') ILIKE $${nameLikeParam}
+      )`);
       if (d.length >= 4) {
         params.push('%' + d + '%');
         ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`);
