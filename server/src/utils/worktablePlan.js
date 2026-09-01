@@ -176,7 +176,9 @@ function stagedSelectionsFromWorkOrder(wo) {
         const key = selectionKey(productName, '', '');
         if (!seen.has(key)) {
           seen.add(key);
-          out.push({ productName, option1Name: '', option1Value: '', option2Name: '', option2Value: '', selectionKey: key, count: product?.base?.count, review_type_mix: product?.review_type_mix || product?.reviewTypeMix || [] });
+          // 인트라넷의 옵션 없는 상품 조합은 `base.review_type_mix`에 저장된다.
+          // 종전 최상위 필드가 있는 레거시 오더를 먼저 보존한 뒤에만 그 계약을 폴백으로 읽는다.
+          out.push({ productName, option1Name: '', option1Value: '', option2Name: '', option2Value: '', selectionKey: key, count: product?.base?.count, review_type_mix: product?.review_type_mix || product?.reviewTypeMix || product?.base?.review_type_mix || [] });
         }
         continue;
       }

@@ -329,8 +329,8 @@ console.log('\n[D] 배선 — 상세 본문 · 발행 프리필');
   const sb = { console, p: { options: null } };
   vm.createContext(sb);
   sb.p.options = [
-    { productName: '상품A', optKey: '옵션1', unitKind: 'option', inflowGuideHtml: '<p>옵션1</p>', inflowGuideImages: [img('1'.repeat(24))], optionUrl: 'https://coupang.com/A', payAmount: 12000, recruitTotal: 30, dailyLimit: 5 },
-    { productName: '상품B', optKey: '', unit_kind: 'product', inflow_guide_html: '<p>상품B</p>', inflow_guide_images: [img('2'.repeat(24))], optionUrl: 'https://coupang.com/B', payAmount: 9000 },
+    { productName: '상품A', optKey: '옵션1', unitKind: 'option', inflowGuideHtml: '<p>옵션1</p>', inflowGuideImages: [img('1'.repeat(24))], optionUrl: 'https://coupang.com/A', payAmount: 12000, recruitTotal: 30, dailyLimit: 5, reviewTypeMix: [{ type: 'photo', quantity: 24 }, { type: 'text', quantity: 6 }] },
+    { productName: '상품B', optKey: '', unit_kind: 'product', inflow_guide_html: '<p>상품B</p>', inflow_guide_images: [img('2'.repeat(24))], optionUrl: 'https://coupang.com/B', payAmount: 9000, reviewTypeMix: [{ type: 'photo', quantity: 4 }, { type: 'text', quantity: 1 }] },
   ];
   const mapped = vm.runInContext('(' + mapExpr + ')', sb);
   ok('★★ 발행 프리필이 unitKind 를 통과시킨다(상품 단위가 이름 없는 옵션 줄로 무너지지 않는다)',
@@ -339,6 +339,9 @@ console.log('\n[D] 배선 — 상세 본문 · 발행 프리필');
     /옵션1/.test(mapped[0].inflowGuideHtml) && mapped[0].inflowGuideImages.length === 1
     && /상품B/.test(mapped[1].inflowGuideHtml) && mapped[1].inflowGuideImages.length === 1);
   ok('snake_case 별칭도 받는다(서버·인트라넷 표기 차 흡수)', mapped[1].unitKind === 'product');
+  ok('★★ 모집공고 설정 행에도 선택지별 리뷰 조합을 그대로 보존한다',
+    JSON.stringify(mapped[0].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 24 }, { type: 'text', quantity: 6 }])
+    && JSON.stringify(mapped[1].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 4 }, { type: 'text', quantity: 1 }]));
   ok('모르는 unitKind 는 option 으로 접는다(종전 동작)',
     (sb.p.options = [{ optKey: 'x', unitKind: 'weird' }], vm.runInContext('(' + mapExpr + ')', sb)[0].unitKind === 'option'));
 }

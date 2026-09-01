@@ -57,6 +57,38 @@ test('복수 선택지 혼합 리뷰에 선택지별 수량이 없으면 생성�
   assert.ok(plan.blockers.some(blocker => blocker.code === 'review_mix_assignment_missing'));
 });
 
+test('인트라넷 옵션 없는 상품별 base 조합은 접수 작업표와 모집공고 설정에 쓸 20행으로 보존한다', () => {
+  const mix = (photo, text) => [{ type: 'photo', quantity: photo }, { type: 'text', quantity: text }];
+  const products = [
+    ['제주 은갈치', 4, 1],
+    ['갈고 순살 듀오세트', 4, 1],
+    ['갈옥 순살 듀오세트', 3, 2],
+    ['정성 500갈치 1호', 3, 2],
+  ].map(([name, photo, text]) => ({
+    name,
+    product_mode: 'none',
+    base: { count: 5, daily: 5, review_type_mix: mix(photo, text) },
+    options: [],
+  }));
+  const plan = buildWorktablePlan({
+    workOrder: baseWorkOrder({
+      recruit_count: 20,
+      daily_count: 5,
+      review_type: 'mixed',
+      review_type_mix: mix(14, 6),
+      product_options_json: JSON.stringify(products),
+    }),
+    template,
+  });
+
+  assert.equal(plan.canCreate, true);
+  assert.equal(plan.rows.length, 20);
+  assert.deepEqual(plan.rows.reduce((counts, row) => {
+    counts[row.reviewOptionLabel] = (counts[row.reviewOptionLabel] || 0) + 1;
+    return counts;
+  }, {}), { 포토: 14, 텍스트: 6 });
+});
+
 test('v1은 가변 시스템 열을 만들지 않는다', () => {
   const legacy = baseWorkOrder({ workboard_schema_version: 1, work_round: 2, review_type: 'photo' });
   const plan = buildWorktablePlan({ workOrder: legacy, template });
