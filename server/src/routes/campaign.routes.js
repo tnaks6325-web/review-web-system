@@ -1611,7 +1611,7 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 등록 리뷰어만(레드 #12) — 조회 대상은 항상 "소유자"(로그인 p8). ★ 063: sub_accounts 동봉(명의 검증용)
     const reg = await client.query(
-      `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
+      `SELECT id, name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
          FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]);
     if (!reg.rows.length) {
       await client.query('ROLLBACK');
@@ -1689,6 +1689,24 @@ async function _applyParticipation(req, res, next, campPre) {
             return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
               error: '이 번호는 이미 리뷰어로 직접 등록되어 있어요. 해당 번호의 본인 계정으로 로그인해서 참여해주세요.' });
           }
+        }
+      }
+    }
+
+    // 코드 기반 새 쓰기는 전체 충돌정리와 bootstrap이 끝난 뒤 환경변수로만 활성화한다.
+    // 활성 상태에서 코드 신원을 못 찾으면 phone8만으로 조용히 기록하지 않는다. 그렇게 하면
+    // "소유자 표시에는 합산되지만 실제 참여자 제한은 불명확"한 반쪽 데이터를 만들게 된다.
+    let codeIdentity = null;
+    {
+      const identitySvc = require('../services/reviewerIdentity.service');
+      if (identitySvc.isWriteEnabled()) {
+        codeIdentity = await identitySvc.resolveParticipantIdentity({
+          client, ownerReviewerId: reg.rows[0].id, participantPhone8: holdP8,
+        });
+        if (!codeIdentity) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ ok: false, reason: 'participant_identity_not_ready',
+            error: '참여자 코드가 아직 준비되지 않았습니다. 관리자에게 코드 등록 상태를 확인해주세요.' });
         }
       }
     }
@@ -1868,6 +1886,14 @@ async function _applyParticipation(req, res, next, campPre) {
        VALUES ($1,$2,$3,$4,$5,$12,$6,$7,$8,$9,$10,$11)
        RETURNING id, status, expires_at, option_key`,
       [id, insName, insPhone, holdP8, p8, insExpires, holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true, insStatus]);
+    if (codeIdentity) {
+      await client.query(
+        `UPDATE campaign_applications
+            SET owner_reviewer_id = $2, participant_identity_id = $3
+          WHERE id = $1`,
+        [ins.rows[0].id, codeIdentity.ownerReviewerId, codeIdentity.id]
+      );
+    }
     await client.query('COMMIT');
     logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
       (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));

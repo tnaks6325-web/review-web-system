@@ -396,6 +396,18 @@ async function writeOrderToWorktable({
         [sheetId, gid || null, tabName, seq, reviewerName, recipientName, p8,
          optText || null, orderSubmissionId, JSON.stringify(merged), workboardId]);
     }
+    // 주문원장에 이미 확정된 코드 신원을 작업표 참여행에도 그대로 전파한다. 여기서 이름/번호로
+    // 다시 찾지 않으므로, 제출 후 프로필이 바뀌어도 이 행의 실제 참여자 귀속은 고정된다.
+    await client.query(
+      `UPDATE campaign_participants cp
+          SET owner_reviewer_id = os.owner_reviewer_id,
+              participant_identity_id = os.participant_identity_id
+         FROM order_submissions os
+        WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3
+          AND os.id = $4::uuid
+          AND os.owner_reviewer_id IS NOT NULL AND os.participant_identity_id IS NOT NULL`,
+      [sheetId, tabName, seq, orderSubmissionId]
+    );
     /* ── 번호·담당자 자동 채움 + 구매일자 기준 재번호 ────────────────────────────
        ★ 이어붙인 줄은 `row_json` 이 비어 있어 `번호`·`담당자` 가 영구 빈칸으로 남았다
          (매퍼가 그 두 칸을 쓰지 않는다). 여기서 그 탭 전체를 구매일자 순으로 다시 매긴다.
@@ -433,9 +445,15 @@ async function writeOrderToWorktable({
   }
   try {
     const { recordParticipationLink } = require('./participation.service');
+    const { rows: identityRows } = await pool.query(
+      `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
+         FROM order_submissions WHERE id = $1`, [orderSubmissionId]
+    );
+    const codeIdentity = identityRows[0] || {};
     await recordParticipationLink({
       sheetId, tabName, rowIndex: seq, phone8: loginPhone8,
-      phone: orderData.phone, name: loginName || orderData.orderer, source: 'sheetless_order' });
+      phone: orderData.phone, name: loginName || orderData.orderer, source: 'sheetless_order',
+      ownerReviewerId: codeIdentity.ownerReviewerId, participantIdentityId: codeIdentity.participantIdentityId });
     await ledgerSvc.recordReviewIdentity({
       sheetId, tabName, tabGid: gid, rowIndex: seq, phone8: loginPhone8,
       phone: orderData.phone, name: loginName || orderData.orderer, recipient: orderData.recipient });

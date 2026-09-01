@@ -262,6 +262,18 @@ async function handleReviewerProfile(body = {}) {
     }
     if (!Array.isArray(subs)) subs = [];
     if (subs.length > 50) return { ok: false, error: '타계정은 최대 50명까지 등록할 수 있습니다.' };
+    // 코드가 부여된 소유자는 배열을 통째로 바꾸면 member_no와 실제 참여자 UUID의 대응이
+    // 깨질 수 있다. 코드 관리 화면에 "타계정 추가/분리" 절차가 생기기 전까지는 fail-closed.
+    // 기존(코드 미부여) 리뷰어의 종전 프로필 저장은 그대로 허용한다.
+    try {
+      const coded = await pool.query('SELECT reviewer_no FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]);
+      if (coded.rows.length && coded.rows[0].reviewer_no != null) {
+        return { ok: false, code: 'identity_accounts_locked',
+          error: '코드가 부여된 타계정은 여기서 변경할 수 없습니다. 관리자 코드 관리 절차를 이용해주세요.' };
+      }
+    } catch (identityErr) {
+      if (!identityErr || identityErr.code !== '42703') throw identityErr;
+    }
     const phone8s = new Set();
     for (const sub of subs) {
       const subPhone8 = String(sub && sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
