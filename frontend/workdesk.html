@@ -14786,7 +14786,11 @@ function _renderRvBody(){
       <th class="c-num" style="width:78px">등록일</th>
       <th style="width:58px">상태</th><th style="width:176px">관리자 메모</th>
       <th style="width:96px">참여설정</th><th style="width:56px"></th>
-    </tr></thead><tbody>${rows.map((r,i)=>`
+    </tr></thead><tbody>${rows.map((r,i)=>{
+      // 이름 검색 결과는 본계정·타계정 구분 없이 타계정 목록을 즉시 보여 준다.
+      // 상태/블랙리스트 필터만 바꾼 경우에는 목록을 불필요하게 열지 않는다.
+      const autoOpenSub = !!String(STATE.rvq||'').trim() && (r.subCount|0)>0;
+      return `
       <tr>
         <td style="text-align:center"><button type="button" class="btn" style="padding:3px 7px;font-size:.68rem;border-radius:6px" onclick="_rvOpenHome(${i})" title="이 리뷰어로 로그인된 아이에이리뷰 홈을 새 탭에서 엽니다">홈 열기</button></td>
         <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
@@ -14798,8 +14802,8 @@ function _renderRvBody(){
         <td class="c-num">${dash(r.residentNum)}</td>
         <td>${dash(r.incomeType)}</td>
         <td style="text-align:center">${(r.subCount|0)>0
-            ? `<button type="button" class="rvsubbtn" data-rvi="${i}" onclick="_rvToggleSub(${i},this)"
-                 title="타계정 정보 펼치기">${r.subCount}<span class="rvcar">▾</span></button>`
+            ? `<button type="button" class="rvsubbtn${autoOpenSub?' on':''}" data-rvi="${i}" onclick="_rvToggleSub(${i},this)"
+                 title="${autoOpenSub?'검색 결과로 자동 펼쳐짐 — 클릭해 접거나 펼칠 수 있습니다':'타계정 정보 펼치기'}">${r.subCount}<span class="rvcar">▾</span></button>`
             : '<span style="color:var(--muted)">0</span>'}</td>
         <td>${_rvStatsCell(r)}</td>
         <td>${_rvReviewCell(r)}</td>
@@ -14816,7 +14820,8 @@ function _renderRvBody(){
         <td style="text-align:center"><button type="button" class="rvdel" onclick="_rvDelete(${i})"
               title="이 리뷰어를 삭제합니다">삭제</button></td>
       </tr>
-      <tr class="rvsubrow" data-rvsub="${i}" hidden><td colspan="${RV_COLSPAN}"></td></tr>`).join('')}</tbody></table></div>
+      <tr class="rvsubrow" data-rvsub="${i}"${autoOpenSub?'':' hidden'}><td colspan="${RV_COLSPAN}"${autoOpenSub?' data-filled="1"':''}>${autoOpenSub?_rvSubHtml(r):''}</td></tr>`;
+    }).join('')}</tbody></table></div>
     ${_rvPager()}`;
 }
 async function _rvOpenHome(i){
