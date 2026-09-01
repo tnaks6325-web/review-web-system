@@ -210,6 +210,10 @@ async function run() {
     /function _awProgress\(it\)\{[\s\S]{0,360}submitted\/target/.test(src)
     && /\.bb\.advprog\{[^}]*width:80px[^}]*justify-content:center[^}]*font-variant-numeric:tabular-nums/.test(css)
     && /class="bb advprog \$\{st\.tone\}"/.test(src));
+  const awTargetBody = (src.match(/function _awTarget\(it\)\{[\s\S]{0,240}\n\}/) || [''])[0];
+  ok('총건수 미설정 작업은 제목의 숫자를 추정값으로 쓰지 않는다',
+    /Number\(it&&it\.target\)[\s\S]{0,160}Number\.isFinite\(t\)&&t>0/.test(awTargetBody)
+    && !awTargetBody.includes('tabName'));
   ok('★ 정산 파생(남은 입금액=총비용−입금액) 단일 출처 _awSetl',
     /function _awSetl\(it\)\{[\s\S]{0,320}Math\.max\(tc-\(pa\|\|0\),0\)/.test(src));
   ok('★ 표 행 빌더는 한 벌(_awRowHtml) — 대시보드 최근 작업은 limit 만 달리해 재사용(사본 금지)',
@@ -222,7 +226,8 @@ async function run() {
   ok('★ 정산 노출 OFF 업체는 금액 KPI·정산 패널을 통째로 뺀다(빈 0원 표시 금지)',
     /\+\(setlOn\?`<div class="adkpi"><div class="k">총 계약금액/.test(src) && /const pipe=setlOn\?/.test(src));
   ok('제출 진척은 진행 중 작업의 제출 ÷ 총건수만 집계(내부 활성 작업행 미사용)',
-    /running\.forEach\(it=>\{ rSub\+=\+it\.submitted\|\|0; rTgt\+=_awTarget\(it\); \}\);/.test(src)
+    /running\.forEach\(it=>\{[\s\S]{0,140}const p=_awProgress\(it\);[\s\S]{0,160}rSub\+=p\.submitted; rTgt\+=p\.target;/.test(src)
+    && /!hasUnknownTotal&&rTgt\?Math\.min\(100,Math\.round\(rSub\/rTgt\*100\)\):null/.test(src)
     && /총건수 대비 제출 \$\{sPct\}%/.test(src));
   ok('총 계약금액 KPI 가 정산 미연결 건수를 부제로 고지한다(조용한 누락 금지)', /미연결 \$\{unlinked\}건/.test(src));
   ok('확인 필요 = 잔액(큰 순) → 계산서 미발행 → 미확인 코멘트, 최대 5건',

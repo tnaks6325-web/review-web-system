@@ -3160,11 +3160,11 @@ function _awDate(it){   // 'M/D' 표기(사이드바 아바타·목록 첫 컬�
   return '—';
 }
 function _awMoney(n){ return (n==null||isNaN(+n))?'—':(+n).toLocaleString('ko-KR'); }
-// ★ 목표 인원 단일 출처 — 발주 연동값(recruit_count) 우선, 없으면 탭명 끝 "N건" 파싱 폴백.
-//   둘 다 없으면 0(목표 미설정). 참여수(total)를 목표로 쓰던 폴백은 진행률이 무조건 100%가 되는 거짓말이라 금지.
+// ★ 업체 총건수 단일 출처 — 서버가 확정해 준 작업보드 정원만 사용한다.
+//   제목의 "N건"은 설명 문구일 수 있어 진행률·완료 판정에 추정값으로 쓰지 않는다.
 function _awTarget(it){
-  const t=+it.target||0; if(t) return t;
-  const m=String(it.tabName||'').match(/(\d+)\s*건/); return m?+m[1]:0;
+  const t=Number(it&&it.target);
+  return Number.isFinite(t)&&t>0?Math.round(t):0;
 }
 // A안: 자료 폴더 바로가기 버튼 한 벌 — 표 셀(미니)·상세 헤더(big) 공용. 미연결은 회색 배지로 자리 유지(컬럼 정렬 보호).
 // A안(사용자 확정): 브랜드 화면에도 운영 주체(대행사)를 표기 — 문의처가 분명해진다.
@@ -3671,9 +3671,13 @@ function _renderAdvDash(){
   const items=_awItems(), aw=STATE.advWork, setlOn=_awSetlOn();
   const running=items.filter(it=>!_awDone(it)), doneList=items.filter(_awDone);
   // 업체 대시보드도 총건수 대비 제출만 쓴다. 활성 작업행은 내부 준비 상태라 노출·분모 사용 금지.
-  let rTgt=0,rSub=0;
-  running.forEach(it=>{ rSub+=+it.submitted||0; rTgt+=_awTarget(it); });
-  const sPct=rTgt?Math.min(100,Math.round(rSub/rTgt*100)):null;
+  let rTgt=0,rSub=0,hasUnknownTotal=false;
+  running.forEach(it=>{
+    const p=_awProgress(it);
+    if(!p.target){ hasUnknownTotal=true; return; }
+    rSub+=p.submitted; rTgt+=p.target;
+  });
+  const sPct=!hasUnknownTotal&&rTgt?Math.min(100,Math.round(rSub/rTgt*100)):null;
   // 정산 집계(연결된 건만) — 미연결 건수는 조용히 빼지 않고 부제로 고지한다.
   const linked=setlOn?items.filter(it=>it.settlement):[];
   let totalCost=0,paidSum=0,restSum=0,restCnt=0,qAcc=0,invIssued=0,payDone=0;
@@ -3687,7 +3691,7 @@ function _renderAdvDash(){
   const unlinked=setlOn?(items.length-linked.length):0;
   // ① KPI — 정산 노출 OFF 업체는 금액 2칸을 통째로 뺀다(빈 0원 표시 금지).
   const kpis=`<div class="adkpi acc"><div class="k">진행 중 작업</div><div class="v">${running.length}<small>건</small></div><div class="s">완료 ${doneList.length}건 · 전체 ${items.length}건</div><span class="ic">🚀</span></div>`
-    +`<div class="adkpi"><div class="k">제출 진척 (진행 중)</div><div class="v">${running.length?`${rSub}<small>/ ${rTgt||'—'}</small>`:'—'}</div><div class="s">${running.length&&sPct!=null?`총건수 대비 제출 ${sPct}%`:'총건수를 확인할 수 없습니다'}</div><span class="ic">📈</span></div>`
+    +`<div class="adkpi"><div class="k">제출 진척 (진행 중)</div><div class="v">${running.length&&sPct!=null?`${rSub}<small>/ ${rTgt}</small>`:'—'}</div><div class="s">${running.length&&sPct!=null?`총건수 대비 제출 ${sPct}%`:'총건수를 확인할 수 없습니다'}</div><span class="ic">📈</span></div>`
     +(setlOn?`<div class="adkpi"><div class="k">총 계약금액</div><div class="v">${_awMoney(totalCost)}<small>원</small></div><div class="s">정산 연결 ${linked.length}건${unlinked?` · 미연결 ${unlinked}건`:''}</div><span class="ic">🧾</span></div>`
       +`<div class="adkpi rest${restSum===0?' zero':''}"><div class="k">미입금 잔액</div><div class="v">${_awMoney(restSum)}<small>원</small></div><div class="s">${restCnt?`${restCnt}건 — 아래 [확인 필요] 참조`:'남은 입금액이 없습니다'}</div><span class="ic">⏳</span></div>`:'');
   // ② 진행 중 작업 게이지 — 제출 ÷ 총건수. 내부 작업행·준비 슬롯은 업체 화면에서 쓰지 않는다.
