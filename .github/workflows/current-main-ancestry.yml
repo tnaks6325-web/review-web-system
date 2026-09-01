@@ -1,0 +1,32 @@
+name: Current main ancestry
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  current-main-ancestry:
+    name: Current main ancestry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Require the latest main to be an ancestor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "This PR does not include the current origin/main." >&2
+            echo "Update the branch from main, then rerun the checks." >&2
+            exit 1
+          fi
