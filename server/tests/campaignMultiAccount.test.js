@@ -68,7 +68,7 @@ const pub = (routes.match(/PUBLIC_FIELDS_PARTICIPATION = \[[\s\S]*?\];/) || ['']
 ok('공개필드: multi_account_mode 배지 노출 + multi_daily_limit 비공개', pub.includes("'multi_account_mode'") && !pub.includes("'multi_daily_limit'"));
 ok('/list SELECT에 multi_account_mode 포함(목록 카드 배지 — 명시 컬럼 SELECT 함정)', /hold_ttl_min, start_date,\s+multi_account_mode, sub_hold_ttl_min/.test(routes));
 // ── my-status ──
-ok('my-status: 소유자 병합(phone8 OR owner_phone8)', /\(ca\.phone8 = \$1 OR ca\.owner_phone8 = \$1\)/.test(reviewer));
+ok('my-status: 소유자 병합(phone8 OR owner_phone8, 코드 범위 지원)', /\(ca\.phone8 = ANY\(\$1\) OR ca\.owner_phone8 = ANY\(\$1\)\)/.test(reviewer));
 ok('my-status: isSub만 노출(ownerPhone8 원문 미반환 — 무인증 PII 역유출 차단)', /AS "isSub"/.test(reviewer) && !/AS "ownerPhone8"/.test(reviewer));
 // ── findSubAccount 순수함수 ──
 const subs = [{ name: '이 영희', phone: '010-1111-2222', address: '' }, { name: '박민준', phone: '01033334444' }];
@@ -80,6 +80,6 @@ ok('findSubAccount: 문자열(이중 인코딩) 파싱 벨트', findSubAccount(J
 ok('findSubAccount: 비배열/파싱실패 null', findSubAccount('not-json', '이영희', '11112222') === null && findSubAccount(null, '이영희', '11112222') === null);
 // ── 관리자 3필드 ──
 ok('admin create/update: multi 3필드 편집 지원', /multi_account_mode = COALESCE\(\$33, multi_account_mode\)/.test(routes) && /multi_account_mode === true,/.test(routes));
-ok('관제 SELECT: owner_phone8 동봉(3단계 묶음 표시 준비)', /order_submission_id, late_order_id, option_key, owner_phone8/.test(routes));
+ok('관제 SELECT: owner_phone8 동봉(3단계 묶음 표시 준비)', /ca\.order_submission_id, ca\.late_order_id, ca\.option_key, ca\.owner_phone8/.test(routes));
 
 console.log(`\n✅ campaignMultiAccount: ${passed}개 통과`);

@@ -2771,7 +2771,7 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
     const { rows: cnt } = await pool.query(`SELECT COUNT(*)::int AS n FROM reviewers ${w}`, params);
     params.push(limit); params.push(offset);
     const { rows } = await pool.query(
-      `SELECT id, name, phone, phone8, status, consent,
+      `SELECT id, name, phone, phone8, reviewer_no AS "reviewerNo", status, consent,
               income_type AS "incomeType", resident_num AS "residentNum",
               address, bank_name AS "bankName", bank_account AS "bankAccount",
               account_holder AS "accountHolder",
@@ -2806,6 +2806,64 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
     }
     res.json({ ok: true, items: rows, total: cnt[0].n, limit, offset, ...(statsUnavailable ? { statsUnavailable: true } : {}) });
   } catch (err) { next(err); }
+});
+
+/* 리뷰어 코드 기반 — Phase 1. 기존 phone8 판정·참여 흐름은 전혀 읽거나 쓰지 않는다.
+   GET은 전역 충돌/비정상 하위계정을 찾아내기 위한 dry-run이고, POST는 환경변수 승인+명시 confirm
+   없이는 절대 쓰지 않는다. 일괄 자동부여는 이 경로에 deliberately 두지 않는다. */
+function _reviewerIdentityError(res, err, next) {
+  const code = err && err.code;
+  if (code === 'not_found') return res.status(404).json({ ok: false, code, error: err.message });
+  if (['bad_id', 'bad_member_no', 'bad_name', 'bad_phone', 'invalid_identity_seed', 'no_change'].includes(code)) return res.status(400).json({ ok: false, code, error: err.message, issues: err.issues });
+  if (['bootstrap_disabled', 'change_disabled', 'phone8_conflict', 'identity_seed_mismatch', 'identity_inactive', 'identity_not_found'].includes(code)) {
+    return res.status(409).json({ ok: false, code, error: err.message, conflicts: err.conflicts });
+  }
+  return next(err);
+}
+
+router.get('/reviewers/identity-codes/dry-run', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const identitySvc = require('../services/reviewerIdentity.service');
+    const out = await identitySvc.previewBootstrap();
+    res.json({ ok: true, ...out });
+  } catch (err) { _reviewerIdentityError(res, err, next); }
+});
+
+router.get('/reviewers/identity-codes/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const identitySvc = require('../services/reviewerIdentity.service');
+    res.json({ ok: true, ...(await identitySvc.listForOwner(String(req.params.id || '').trim())) });
+  } catch (err) { _reviewerIdentityError(res, err, next); }
+});
+
+router.post('/reviewers/identity-codes/:id/bootstrap', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const reviewerId = String(req.params.id || '').trim();
+    const identitySvc = require('../services/reviewerIdentity.service');
+    if ((req.body || {}).confirm !== true) {
+      const out = await identitySvc.previewBootstrap({ reviewerId });
+      return res.json({ ok: false, needConfirm: true, ...out });
+    }
+    res.json({ ok: true, ...(await identitySvc.bootstrapOne({ reviewerId, by: _by(req) })) });
+  } catch (err) { _reviewerIdentityError(res, err, next); }
+});
+
+// 코드가 있는 참여자만 이름·번호를 바꿀 수 있다. 최초 호출은 읽기 전용 미리보기이고,
+// 실제 쓰기는 명시 confirm + 서버 환경승인 둘 다 필요하다.
+router.post('/reviewers/identity-codes/:id/change', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const identitySvc = require('../services/reviewerIdentity.service');
+    const reviewerId = String(req.params.id || '').trim();
+    const b = req.body || {};
+    if (b.confirm !== true) {
+      return res.json({ ok: false, needConfirm: true, ...(await identitySvc.previewIdentityChange({
+        reviewerId, memberNo: b.memberNo, name: b.name, phone: b.phone,
+      })) });
+    }
+    res.json({ ok: true, ...(await identitySvc.applyIdentityChange({
+      reviewerId, memberNo: b.memberNo, name: b.name, phone: b.phone, by: _by(req),
+    })) });
+  } catch (err) { _reviewerIdentityError(res, err, next); }
 });
 
 /* 리뷰어 홈 바로가기 — 관리자만 발급할 수 있는, 해당 탭 한정의 짧은 로그인 교환권.
@@ -2915,6 +2973,20 @@ router.post('/reviewers/delete', authMiddleware, adminOrMasterMiddleware, async 
     if (!who.length) return res.status(404).json({ ok: false, error: '해당 리뷰어를 찾을 수 없습니다.' });
     const r = who[0];
     const p8 = String(r.phone8 || '');
+
+    // 코드 신원이 하나라도 있으면 DB FK에 맡겨 500으로 끝내지 않고, 관리자가 먼저 inactive/
+    // separated 절차를 밟도록 명확히 막는다. 코드·별칭·제출 이력을 남긴 채 reviewer만 지우는 것은 금지.
+    try {
+      const linked = await pool.query(
+        'SELECT 1 FROM reviewer_identities WHERE owner_reviewer_id = $1 LIMIT 1', [id]
+      );
+      if (linked.rows.length) {
+        return res.status(409).json({ ok: false, code: 'identity_delete_blocked',
+          error: '코드가 부여된 리뷰어는 삭제할 수 없습니다. 참여자를 비활성/분리한 뒤 별도 보존 절차로 처리해주세요.' });
+      }
+    } catch (identityErr) {
+      if (!identityErr || identityErr.code !== '42P01') throw identityErr;
+    }
 
     // 이력 집계(삭제 대상이 아니라 **경고 재료**). 쿼리 하나가 실패해도 나머지는 센다.
     const counts = { orders: 0, applications: 0, inquiries: 0 };

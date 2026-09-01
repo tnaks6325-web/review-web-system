@@ -1047,6 +1047,17 @@ async function createOrderLedgerEntry(input) {
       orderSubmissionId = ins.rows[0].id;
       dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
       await client.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+      // 신청 행에서 이미 확정한 (소유자, 실제참여자) 쌍을 같은 트랜잭션으로 주문원장에 복사한다.
+      // phone8 재해석이나 이름 재매칭을 하지 않아, 이후 이름/번호가 바뀌어도 제출 당시 신원이 흔들리지 않는다.
+      await client.query(
+        `UPDATE order_submissions os
+            SET owner_reviewer_id = ca.owner_reviewer_id,
+                participant_identity_id = ca.participant_identity_id
+           FROM campaign_applications ca
+          WHERE os.id = $1 AND ca.id = $2
+            AND ca.owner_reviewer_id IS NOT NULL AND ca.participant_identity_id IS NOT NULL`,
+        [orderSubmissionId, campaignHold.applicationId]
+      );
       await client.query('SAVEPOINT hold_confirm');
       try {
         const { confirmHoldInTx } = require('./campaignHold.service'); // 지연 require(순환 방지 — 기존 패턴)

@@ -14793,8 +14793,8 @@ function _renderRvBody(){
       return `
       <tr>
         <td style="text-align:center"><button type="button" class="btn" style="padding:3px 7px;font-size:.68rem;border-radius:6px" onclick="_rvOpenHome(${i})" title="이 리뷰어로 로그인된 아이에이리뷰 홈을 새 탭에서 엽니다">홈 열기</button></td>
-        <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
-        <td class="c-ph">${dash(r.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvPhone(${i})" title="로그인 번호를 변경합니다(새 번호=본계정, 지금 번호=타계정)">번호변경</button></td>
+        <td class="c-nm" style="font-weight:700">${esc(r.name||'')}${r.reviewerNo!=null?` <span class="bd" style="font-size:.62rem" title="소유자 코드 · 본계정 실제 참여자 ${esc(String(r.reviewerNo).padStart(4,'0'))}-0">${esc(String(r.reviewerNo).padStart(4,'0'))}</span>`:''}</td>
+        <td class="c-ph">${dash(r.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvIdentityChange(${i},0)" title="코드 신원을 기준으로 이름과 번호를 변경합니다. 코드 미등록 행은 기존 번호변경 절차로 안내됩니다.">이름 및 번호변경</button></td>
         <td class="c-addr" title="${esc(r.address||'')}">${dash(r.address)}</td>
         <td class="c-bank">${dash(r.bankName)}</td>
         <td class="c-num">${dash(r.bankAccount)}</td>
@@ -14906,9 +14906,9 @@ function _rvSubHtml(r){
     <table class="rvsubtbl"><thead><tr>
       <th style="width:80px">이름</th><th style="width:124px">연락처</th><th style="width:118px">주민번호</th>
       <th style="width:90px">소득자명</th><th>주소</th><th style="width:230px">계좌</th>
-    </tr></thead><tbody>${subs.map(s=>`<tr>
+    </tr></thead><tbody>${subs.map((s,subIndex)=>`<tr>
       <td style="font-weight:700">${dash(s.name)}</td>
-      <td style="font-variant-numeric:tabular-nums">${dash(s.phone)}</td>
+      <td style="font-variant-numeric:tabular-nums">${dash(s.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvIdentityChange(${(STATE.rv||[]).indexOf(r)},${subIndex+1})">이름 및 번호변경</button></td>
       <td style="font-variant-numeric:tabular-nums">${dash(s.jumin)}</td>
       <td>${dash(s.incomeName)}</td>
       <td>${dash(s.address)}</td>
@@ -14994,6 +14994,48 @@ function _rvPhone(i){
   window._rvPhEsc=(e)=>{ if(e.key==='Escape') _rvPhClose(); };
   document.addEventListener('keydown',window._rvPhEsc);
   const inp=document.getElementById('rvPhInput'); if(inp) inp.focus();
+}
+/* 코드 기반 이름 및 번호변경. 코드가 아직 없는 행은 종전 번호승격 UI로만 보낸다(레거시
+   데이터를 새 모델로 억지 변환하지 않는다). 코드가 있으면 1차 preview가 서버의 충돌·현재값을
+   돌려주고, 2차 confirm 때에만 별칭 추가+현재값 갱신이 실행된다. */
+function _rvIdentityChange(i, memberNo){
+  const row=(STATE.rv||[])[i]; if(!row) return;
+  if(row.reviewerNo==null){ _rvPhone(i); return; }
+  let current={name:row.name||'',phone:row.phone||''};
+  if(memberNo>0){
+    let subs=[]; try{ subs=typeof row.subAccounts==='string'?JSON.parse(row.subAccounts||'[]'):(row.subAccounts||[]); }catch(_){ subs=[]; }
+    if(!subs[memberNo-1]){ _toast('타계정 코드를 찾지 못했습니다. 목록을 새로고침 후 다시 시도해주세요.'); return; }
+    current={name:subs[memberNo-1].name||'',phone:subs[memberNo-1].phone||''};
+  }
+  _rvPhClose();
+  const code=String(row.reviewerNo).padStart(4,'0')+'-'+memberNo;
+  const d=document.createElement('div'); d.id='rvPhWrap';
+  d.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML=`<div style="background:#fff;color:#111827;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px"><b style="font-size:.95rem">이름 및 번호변경 · ${esc(code)}</b><span style="flex:1"></span><button type="button" class="btn" onclick="_rvPhClose()">닫기</button></div>
+    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:.8rem;color:#475569">현재: <b>${esc(current.name)}</b> · <b>${esc(current.phone)}</b></div>
+      <label style="font-size:.78rem;color:#6b7280">이름</label><input id="rvIdName" class="ovsearch" value="${esc(current.name)}" style="width:100%">
+      <label style="font-size:.78rem;color:#6b7280">새 연락처</label><input id="rvIdPhone" class="ovsearch" inputmode="numeric" value="${esc(current.phone)}" style="width:100%">
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 11px;font-size:.74rem;color:#1e3a8a;line-height:1.55">과거 이름·번호는 삭제하지 않고 이 코드의 이력으로 보존합니다. 소유자 화면에서는 이전 참여·제출기록도 계속 합산되며, 동일 공고 제한은 이 실제 참여자 코드에만 적용됩니다.</div>
+      <div id="rvIdOut"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn" onclick="_rvPhClose()">취소</button><button type="button" class="btn pri" id="rvIdGo" onclick="_rvIdentityCheck(${i},${memberNo})">확인</button></div>
+    </div></div>`;
+  document.body.appendChild(d); window._rvPhEsc=(e)=>{if(e.key==='Escape')_rvPhClose();}; document.addEventListener('keydown',window._rvPhEsc);
+  document.getElementById('rvIdName')?.focus();
+}
+async function _rvIdentityCheck(i, memberNo){
+  const row=(STATE.rv||[])[i], name=document.getElementById('rvIdName')?.value.trim(), phone=(document.getElementById('rvIdPhone')?.value||'').replace(/[^0-9]/g,''), out=document.getElementById('rvIdOut'), go=document.getElementById('rvIdGo');
+  if(!row||!out) return; if(go)go.disabled=true; out.innerHTML='<div style="font-size:.78rem;color:#6b7280">변경 가능 여부 확인 중…</div>';
+  let r; try{r=await api('/api/trackb/reviewers/identity-codes/'+encodeURIComponent(row.id)+'/change',{method:'POST',body:JSON.stringify({memberNo,name,phone})});}catch(_){r=null;} if(go)go.disabled=false;
+  if(!r){out.innerHTML='<div style="font-size:.78rem;color:#b91c1c">확인하지 못했습니다 — 잠시 후 다시 시도해주세요.</div>';return;}
+  if(r.error&&!r.needConfirm){out.innerHTML=`<div style="font-size:.78rem;color:#b91c1c">${esc(r.error)}</div>`;return;}
+  const p=r.requested||{}; out.innerHTML=`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:.76rem;color:#334155;line-height:1.65"><b>${esc(r.code||'')}</b><br>${esc((r.current||{}).name||'')} · ${esc((r.current||{}).phone||'')} → <b>${esc(p.name||name)}</b> · <b>${esc(p.phone||phone)}</b></div><div style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px"><button type="button" class="btn pri" onclick="_rvIdentityApply(${i},${memberNo})">이대로 변경</button></div>`;
+}
+async function _rvIdentityApply(i, memberNo){
+  const row=(STATE.rv||[])[i], name=document.getElementById('rvIdName')?.value.trim(), phone=(document.getElementById('rvIdPhone')?.value||'').replace(/[^0-9]/g,''), out=document.getElementById('rvIdOut'); if(!row||!out)return;
+  if(!confirm(`${row.name||''}의 실제 참여자 ${String(row.reviewerNo).padStart(4,'0')}-${memberNo} 정보를\n${name} / ${phone} 로 변경할까요?\n\n과거 이름·번호는 이력으로 보존됩니다.`))return;
+  out.innerHTML='<div style="font-size:.78rem;color:#6b7280">변경 중…</div>'; const r=await api('/api/trackb/reviewers/identity-codes/'+encodeURIComponent(row.id)+'/change',{method:'POST',body:JSON.stringify({memberNo,name,phone,confirm:true})});
+  if(r&&r.ok){_rvPhClose();_toast(`${r.code||'참여자'}의 이름 및 번호를 변경했습니다.`);_loadReviewers();}else out.innerHTML=`<div style="font-size:.78rem;color:#b91c1c">변경하지 못했습니다${r&&r.error?': '+esc(r.error):''}</div>`;
 }
 /* 1단계 — 서버에 물어만 본다(쓰기 0). 차단 사유가 있으면 [변경] 버튼을 만들지 않는다. */
 async function _rvPhCheck(i){

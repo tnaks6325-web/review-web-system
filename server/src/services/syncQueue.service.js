@@ -550,9 +550,15 @@ async function _executeBatch(items, sheetId, tabName) {
         continue;  // 이미 written(다른 경로가 먼저 씀) → 신원기록 생략(이중 흡수)
       }
       try {
+        const { rows: codeRows } = await pool.query(
+          `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
+             FROM order_submissions WHERE id = $1`, [x.p.orderSubmissionId]
+        );
+        const codeIdentity = codeRows[0] || {};
         await recordParticipationLink({ sheetId, tabName: ctxTab, rowIndex: x.sheetRow,
           phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
-          name: x.p.loginName || (x.orderData && x.orderData.orderer), source: 'order_batch_drain' });
+          name: x.p.loginName || (x.orderData && x.orderData.orderer), source: 'order_batch_drain',
+          ownerReviewerId: codeIdentity.ownerReviewerId, participantIdentityId: codeIdentity.participantIdentityId });
         await recordReviewIdentity({ sheetId, tabName: ctxTab, tabGid: ctxGid, rowIndex: x.sheetRow,
           phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
           name: x.p.loginName || (x.orderData && x.orderData.orderer), recipient: x.orderData && x.orderData.recipient });
@@ -779,11 +785,17 @@ async function _executeItem(item) {
           ));
         }
 
+        const { rows: codeRows } = await pool.query(
+          `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
+             FROM order_submissions WHERE id = $1`, [orderSubmissionId]
+        );
+        const codeIdentity = codeRows[0] || {};
         await recordParticipationLink({
           sheetId, tabName: tabContext.tabName || tabName, rowIndex: sheetRow,
           phone8: loginPhone8, phone: orderData && orderData.phone,
           name: loginName || (orderData && orderData.orderer),
           source: 'order_submit_queue',
+          ownerReviewerId: codeIdentity.ownerReviewerId, participantIdentityId: codeIdentity.participantIdentityId,
         });
         await recordReviewIdentity({
           sheetId, tabName: tabContext.tabName || tabName, tabGid: tabContext.tabGid || gid,
