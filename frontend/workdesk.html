@@ -489,6 +489,8 @@
   .bb{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
   .bb.ok{background:var(--accent-soft);color:var(--accent-deep)}
   .bb.safe{background:var(--safe-soft);color:var(--safe)}
+  /* 업체 진행 배지: 1%·10%·100%가 모두 같은 100% 기준 폭을 쓴다. 수치 변화로 목록 열이 흔들리지 않는다. */
+  .bb.advprog{box-sizing:border-box;width:80px;justify-content:center;white-space:nowrap;font-variant-numeric:tabular-nums}
   .bb.warn{background:var(--warn-soft);color:var(--warn)}
   .bb.bad{background:var(--bad-soft);color:var(--bad)}
   .main{padding:18px 22px;overflow:auto}
@@ -3158,11 +3160,11 @@ function _awDate(it){   // 'M/D' 표기(사이드바 아바타·목록 첫 컬�
   return '—';
 }
 function _awMoney(n){ return (n==null||isNaN(+n))?'—':(+n).toLocaleString('ko-KR'); }
-// ★ 목표 인원 단일 출처 — 발주 연동값(recruit_count) 우선, 없으면 탭명 끝 "N건" 파싱 폴백.
-//   둘 다 없으면 0(목표 미설정). 참여수(total)를 목표로 쓰던 폴백은 진행률이 무조건 100%가 되는 거짓말이라 금지.
+// ★ 업체 총건수 단일 출처 — 서버가 확정해 준 작업보드 정원만 사용한다.
+//   제목의 "N건"은 설명 문구일 수 있어 진행률·완료 판정에 추정값으로 쓰지 않는다.
 function _awTarget(it){
-  const t=+it.target||0; if(t) return t;
-  const m=String(it.tabName||'').match(/(\d+)\s*건/); return m?+m[1]:0;
+  const t=Number(it&&it.target);
+  return Number.isFinite(t)&&t>0?Math.round(t):0;
 }
 // A안: 자료 폴더 바로가기 버튼 한 벌 — 표 셀(미니)·상세 헤더(big) 공용. 미연결은 회색 배지로 자리 유지(컬럼 정렬 보호).
 // A안(사용자 확정): 브랜드 화면에도 운영 주체(대행사)를 표기 — 문의처가 분명해진다.
@@ -3194,15 +3196,20 @@ function _awFolderHead(){
   if(!it||(!it.folderUrl&&!it.captureFolderUrl)) return '';
   return `<span class="folhead">${_awFolderBtns(it,true)}</span>`;
 }
-function _awStatus(it){   // 진행상황 칩 {label, tone}
-  const target=_awTarget(it), total=+it.total||0, sub=+it.submitted||0;
-  const done=(total>0&&sub>=total&&(!target||total>=target))||it.active===false;
-  if(done) return {label:'완료',tone:'safe'};
-  const pct=target?Math.round(total/target*100):null;
-  return {label:pct!=null?`진행중 ${pct}%`:'진행중',tone:'ok'};
+function _awProgress(it){
+  const target=_awTarget(it), submitted=Math.max(+it.submitted||0,0);
+  // 업체 진행률은 내부 작업행이 아니라 "제출 ÷ 총건수" 한 기준만 쓴다.
+  const percent=target>0?Math.min(100,Math.round(submitted/target*100)):null;
+  return {target,submitted,percent};
+}
+function _awStatus(it){   // 진행상황 칩 {label, tone, done}
+  const p=_awProgress(it);
+  const done=it.active===false||(p.target>0&&p.submitted>=p.target);
+  const state=done?'완료':'진행중';
+  return {label:p.percent!=null?`${state} ${p.percent}%`:`${state} —`,tone:done?'safe':'ok',done};
 }
 // ★ 진행/완료 판정 단일 출처 — 사이드바 그룹·KPI·게이지·표 칩이 전부 이 함수를 본다(갈리면 화면끼리 어긋난다).
-function _awDone(it){ return _awStatus(it).label==='완료'; }
+function _awDone(it){ return _awStatus(it).done; }
 function _awSetlOn(){ return !(STATE.advWork&&STATE.advWork.settlementHidden); }
 // ★ 정산 파생값 단일 출처 — 남은 입금액 = 총비용 − 입금액(화면 파생, 서버 저장 없음).
 //   표 행·KPI·파이프라인·확인필요가 같은 식을 봐야 "표는 3,250,000인데 KPI는 다른 값"이 안 생긴다.
@@ -3281,7 +3288,7 @@ function _renderAdvSidebar(){
     return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(_tabTip(it))}${(!_isNoSheet(it)&&it.spreadsheetTitle)?' · '+esc(it.spreadsheetTitle):''}">
       <span class="ava">${esc(_awDate(it))}</span>
       <span class="nm">${_awHi(_tabLabel(it))}<i>${esc(st.label)}</i></span>
-      ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb ${st.tone}">${st.label==='완료'?'완료':'진행'}</span></div>`;
+      ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb advprog ${st.tone}">${esc(st.label)}</span></div>`;
   };
   const grp=(list,label)=> list.length?`<div class="awgh">${label} <span class="cnt">${list.length}</span></div>`+list.map(itemHtml).join(''):'';
   host.innerHTML = nav+`<div class="awdiv"></div>`
@@ -3314,8 +3321,8 @@ function _awRowHtml(it){
   return `<div class="awlrow" onclick="selTab(${i})" title="${esc(_tabTip(it))}">
     <span class="adate">${esc(_awDate(it))}</span>
     <span class="anm"><b>${_awHi(_tabLabel(it))}</b><span class="asub">${_isNoSheet(it)?'':_awHi(it.spreadsheetTitle||'')}</span></span>
-    <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
-    <span class="acnt"><b>${it.total||0}</b>${_awTarget(it)?`/${_awTarget(it)}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
+    <span><span class="bb advprog ${st.tone}">${esc(st.label)}</span></span>
+    <span class="acnt"><b>${_awTarget(it)||'—'}</b>건 · 제출 <b class="c-sub">${it.submitted||0}</b> · 입금 <b class="c-paid">${it.paid||0}</b></span>
     <span class="afol">${_awFolderBtns(it)}</span>
     <span>${s?`<span class="bb docv ${qs?qt:''}" onclick="awDocOpen(event,'quote',${i})" title="견적서 열람">${qs?esc(qs):'—'}</span>`:'<span class="bb" title="매칭된 견적서가 아직 없습니다">—</span>'}</span>
     <span>${s?`<span class="bb docv ${iv?(ivt||''):''}" onclick="awDocOpen(event,'invoice',${i})" title="세금계산서 열람">${iv?esc(iv):'—'}</span>`:'<span class="bb" title="매칭된 계약이 아직 없습니다">—</span>'}</span>
@@ -3328,7 +3335,7 @@ function _awRowHtml(it){
 function _awMD(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[2]}/${+m[3]}`:String(d||'').slice(0,10); }
 function _awListHtml(items, limit){
   const rows=(limit?items.slice(0,limit):items).map(_awRowHtml).join('');
-  return `<div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>자료 폴더</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>${rows}</div>`;
+  return `<div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>총건수·제출·입금</span><span>자료 폴더</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>${rows}</div>`;
 }
 // ── 화면 A-2: 전체 작업(목록 표) ──
 function _renderAdvList(){
@@ -3391,8 +3398,8 @@ function _brandRowsHtml(b,items,be){
       <span class="rdt">${esc(_awDate(it))}</span>
       <span class="rnm">${esc(_tabLabel(it))}</span>
       ${_bmCell(it,ix)}
-      <span class="rcnt">${it.total||0}명 · 제출 ${it.submitted||0}</span>
-      <span class="bb ${st.tone}">${esc(st.label)}</span></div>${_bmEditHtml(it,ix)}`;
+      <span class="rcnt">총 ${_awTarget(it)||'—'}건 · 제출 ${it.submitted||0}</span>
+      <span class="bb advprog ${st.tone}">${esc(st.label)}</span></div>${_bmEditHtml(it,ix)}`;
   }).join('')}</div>`;
 }
 /* ── 브랜드 담당자(136) — 작업 행마다 인라인 입력(사용자 확정 2026-08-24: 저장 단위 = 작업 하나) ──
@@ -3663,10 +3670,14 @@ async function brandAssignSave(id){
 function _renderAdvDash(){
   const items=_awItems(), aw=STATE.advWork, setlOn=_awSetlOn();
   const running=items.filter(it=>!_awDone(it)), doneList=items.filter(_awDone);
-  // 참여 진척은 "진행 중" 작업만 — 끝난 숫자가 섞이면 진척이 희석된다.
-  let rTot=0,rTgt=0,rSub=0;
-  running.forEach(it=>{ rTot+=+it.total||0; rSub+=+it.submitted||0; rTgt+=(_awTarget(it)||+it.total||0); });
-  const rPct=rTgt?Math.round(rTot/rTgt*100):0, sPct=rTot?Math.round(rSub/rTot*100):0;
+  // 업체 대시보드도 총건수 대비 제출만 쓴다. 활성 작업행은 내부 준비 상태라 노출·분모 사용 금지.
+  let rTgt=0,rSub=0,hasUnknownTotal=false;
+  running.forEach(it=>{
+    const p=_awProgress(it);
+    if(!p.target){ hasUnknownTotal=true; return; }
+    rSub+=p.submitted; rTgt+=p.target;
+  });
+  const sPct=!hasUnknownTotal&&rTgt?Math.min(100,Math.round(rSub/rTgt*100)):null;
   // 정산 집계(연결된 건만) — 미연결 건수는 조용히 빼지 않고 부제로 고지한다.
   const linked=setlOn?items.filter(it=>it.settlement):[];
   let totalCost=0,paidSum=0,restSum=0,restCnt=0,qAcc=0,invIssued=0,payDone=0;
@@ -3680,23 +3691,20 @@ function _renderAdvDash(){
   const unlinked=setlOn?(items.length-linked.length):0;
   // ① KPI — 정산 노출 OFF 업체는 금액 2칸을 통째로 뺀다(빈 0원 표시 금지).
   const kpis=`<div class="adkpi acc"><div class="k">진행 중 작업</div><div class="v">${running.length}<small>건</small></div><div class="s">완료 ${doneList.length}건 · 전체 ${items.length}건</div><span class="ic">🚀</span></div>`
-    +`<div class="adkpi"><div class="k">참여 진척 (진행 중)</div><div class="v">${running.length?`${rTot}<small>/ ${rTgt||'—'}</small>`:'—'}</div><div class="s">${running.length?`리뷰 제출 ${rSub}건 (${sPct}%)`:'진행 중인 작업 없음'}</div><span class="ic">📈</span></div>`
+    +`<div class="adkpi"><div class="k">제출 진척 (진행 중)</div><div class="v">${running.length&&sPct!=null?`${rSub}<small>/ ${rTgt}</small>`:'—'}</div><div class="s">${running.length&&sPct!=null?`총건수 대비 제출 ${sPct}%`:'총건수를 확인할 수 없습니다'}</div><span class="ic">📈</span></div>`
     +(setlOn?`<div class="adkpi"><div class="k">총 계약금액</div><div class="v">${_awMoney(totalCost)}<small>원</small></div><div class="s">정산 연결 ${linked.length}건${unlinked?` · 미연결 ${unlinked}건`:''}</div><span class="ic">🧾</span></div>`
       +`<div class="adkpi rest${restSum===0?' zero':''}"><div class="k">미입금 잔액</div><div class="v">${_awMoney(restSum)}<small>원</small></div><div class="s">${restCnt?`${restCnt}건 — 아래 [확인 필요] 참조`:'남은 입금액이 없습니다'}</div><span class="ic">⏳</span></div>`:'');
-  // ② 진행 중 작업 게이지 — 진한 막대=제출, 연한=참여했지만 미제출. 합계 폭 = 참여율.
+  // ② 진행 중 작업 게이지 — 제출 ÷ 총건수. 내부 작업행·준비 슬롯은 업체 화면에서 쓰지 않는다.
   const prog=running.length?running.map(it=>{
     const i=_awTabIdx(it); if(i<0) return '';
-    const tgt=_awTarget(it), tot=+it.total||0, sub=+it.submitted||0;
-    // 목표 있음 → 진행률 = 참여/목표. 목표 미설정 → 제출률(제출/참여)로 대체 표기(무조건 100% 금지).
-    const pct=tgt?Math.round(tot/tgt*100):(tot?Math.round(sub/tot*100):null);
-    const base=tgt||tot;
-    const w1=base?Math.min(sub/base*100,100):0, w2=base?Math.max(Math.min((tot-sub)/base*100,100-w1),0):0;
+    const {target:tgt,submitted:sub,percent:pct}=_awProgress(it);
+    const w1=pct==null?0:pct, w2=0;
     return `<div class="adprow" onclick="selTab(${i})" title="${esc(_tabTip(it))}">
       <span class="pd">${esc(_awDate(it))}</span>
-      <span class="pn"><b>${esc(_tabLabel(it))}</b><i>${[_isNoSheet(it)?'':esc(it.spreadsheetTitle||''),tgt?`목표 ${tgt}명`:''].filter(Boolean).join(' · ')}</i></span>
+      <span class="pn"><b>${esc(_tabLabel(it))}</b><i>${[_isNoSheet(it)?'':esc(it.spreadsheetTitle||''),tgt?`총 ${tgt}건`:''].filter(Boolean).join(' · ')}</i></span>
       <span class="adgauge"><span class="adbar"><i class="b1" style="width:${w1.toFixed(1)}%"></i><i class="b2" style="width:${w2.toFixed(1)}%"></i></span>
-        <span class="adglab"><span>참여 <b>${tot}</b> · 제출 <b>${sub}</b></span><span>${tgt?`목표 ${tgt}`:''}</span></span></span>
-      <span class="ppct"${tgt?'':' title="목표 미설정 — 제출률(제출/참여) 기준"'}>${pct!=null?pct+'%':'—'}</span></div>`;
+        <span class="adglab"><span>총 <b>${tgt||'—'}</b> · 제출 <b>${sub}</b></span><span>${tgt?`제출 ${pct}%`:''}</span></span></span>
+      <span class="ppct"${tgt?'':' title="총건수를 확인할 수 없습니다"'}>${pct!=null?pct+'%':'—'}</span></div>`;
   }).join(''):`<div class="empty" style="padding:14px">진행 중인 작업이 없습니다.</div>`;
   // ③ 정산 파이프라인(견적→계산서→입금) — 연결된 건 기준
   const pipe=setlOn?`<div class="adpanel"><div class="pt">정산 현황</div>
