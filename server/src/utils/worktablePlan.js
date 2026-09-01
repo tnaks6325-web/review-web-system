@@ -176,7 +176,10 @@ function stagedSelectionsFromWorkOrder(wo) {
         const key = selectionKey(productName, '', '');
         if (!seen.has(key)) {
           seen.add(key);
-          out.push({ productName, option1Name: '', option1Value: '', option2Name: '', option2Value: '', selectionKey: key, count: product?.base?.count, review_type_mix: product?.review_type_mix || product?.reviewTypeMix || [] });
+          // 인트라넷의 옵션 없는 상품 조합은 `base.review_type_mix`에 저장된다.
+          // 종전 최상위 필드는 유효한 조합이 있을 때만 우선한다. 전환기 오더의 빈 []/"[]"는
+          // truthy 라도 base 조합을 가리면 안 된다(그러면 작업표 생성이 다시 막힌다).
+          out.push({ productName, option1Name: '', option1Value: '', option2Name: '', option2Value: '', selectionKey: key, count: product?.base?.count, review_type_mix: firstUsableReviewTypeMix(product?.review_type_mix, product?.reviewTypeMix, product?.base?.review_type_mix) });
         }
         continue;
       }
@@ -234,6 +237,11 @@ function _mixOf(raw) {
   if (typeof v === 'string') { try { v = v.trim() ? JSON.parse(v) : []; } catch (_) { v = []; } }
   const st = normalizeReviewTypeMix(v);
   return (st && Array.isArray(st.mix)) ? st.mix : [];
+}
+
+/** 전환기 필드 중 실제 리뷰 수량이 든 첫 값을 고른다. 빈 배열·빈 JSON은 폴백을 막지 않는다. */
+function firstUsableReviewTypeMix(...candidates) {
+  return candidates.find(candidate => _mixOf(candidate).length) || [];
 }
 
 function reviewMixFromWorkOrder(wo) {
