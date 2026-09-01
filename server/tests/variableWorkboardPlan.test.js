@@ -92,6 +92,62 @@ test('인트라넷 옵션 없는 상품별 base 조합은 접수 작업표와 �
   }, {}), { 포토: 14, 텍스트: 6 });
 });
 
+test('기본 균등 분산은 상품·옵션 순서를 순환해 날짜 경계에서도 다음 조합으로 이어진다', () => {
+  const products = ['1번 상품', '2번 상품', '3번 상품', '4번 상품'].map((name, index) => ({
+    name,
+    product_mode: 'opt',
+    options: [{ option_1: { name: '옵션', value: index % 2 ? 'b옵션' : 'a옵션' }, count: 5, review_type_mix: [{ type: 'photo', quantity: 5 }] }],
+  }));
+  const plan = buildWorktablePlan({
+    workOrder: baseWorkOrder({
+      recruit_count: 20,
+      daily_count: 2,
+      start_date: '2026-09-01',
+      product_options_json: JSON.stringify(products),
+      // legacy/empty value도 새 기본값과 같아야 한다.
+      product_distribution_mode: null,
+    }),
+    template,
+  });
+
+  assert.equal(plan.productDistributionMode, 'balanced');
+  assert.deepEqual(plan.rows.slice(0, 8).map(row => [row.date, row.selection.productName, row.selection.option1Value]), [
+    ['2026-09-01', '1번 상품', 'a옵션'],
+    ['2026-09-01', '2번 상품', 'b옵션'],
+    ['2026-09-02', '3번 상품', 'a옵션'],
+    ['2026-09-02', '4번 상품', 'b옵션'],
+    ['2026-09-03', '1번 상품', 'a옵션'],
+    ['2026-09-03', '2번 상품', 'b옵션'],
+    ['2026-09-04', '3번 상품', 'a옵션'],
+    ['2026-09-04', '4번 상품', 'b옵션'],
+  ]);
+  const values = planToSheetValues(plan);
+  const product = values.header.indexOf('상품');
+  const option = values.header.indexOf('1차옵션');
+  assert.deepEqual(values.body.slice(0, 4).map(row => [row[product], row[option]]), [
+    ['1번 상품', 'a옵션'], ['2번 상품', 'b옵션'],
+    ['3번 상품', 'a옵션'], ['4번 상품', 'b옵션'],
+  ]);
+});
+
+test('순차 진행을 선택하면 한 상품·옵션의 배정 수량을 모두 소진한 뒤 다음 조합으로 넘어간다', () => {
+  const products = ['1번 상품', '2번 상품'].map((name, index) => ({
+    name,
+    product_mode: 'opt',
+    options: [{ option_1: { name: '옵션', value: index ? 'b옵션' : 'a옵션' }, count: 3, review_type_mix: [{ type: 'photo', quantity: 3 }] }],
+  }));
+  const plan = buildWorktablePlan({
+    workOrder: baseWorkOrder({
+      recruit_count: 6, daily_count: 2, product_distribution_mode: 'sequential',
+      product_options_json: JSON.stringify(products),
+    }),
+    template,
+  });
+
+  assert.equal(plan.productDistributionMode, 'sequential');
+  assert.deepEqual(plan.rows.map(row => row.selection.productName), ['1번 상품', '1번 상품', '1번 상품', '2번 상품', '2번 상품', '2번 상품']);
+});
+
 test('v1은 가변 시스템 열을 만들지 않는다', () => {
   const legacy = baseWorkOrder({ workboard_schema_version: 1, work_round: 2, review_type: 'photo' });
   const plan = buildWorktablePlan({ workOrder: legacy, template });

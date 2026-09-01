@@ -37,7 +37,7 @@ async function _loadWorkOrder(id) {
             product_option, product_options_json, work_sheet_url, status,
             skip_weekends, holidays, workboard_schema_version,
             work_series_id, work_round, delivery_type, courier_proxy,
-            review_type, review_type_mix, source_revision
+            review_type, review_type_mix, product_distribution_mode, source_revision
        FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
   return rows[0] || null;
 }

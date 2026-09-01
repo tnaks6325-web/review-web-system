@@ -89,7 +89,7 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
   const items = pm[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').split(',').map(x => x.trim()).filter(Boolean);
   const ph = vals.filter(v => v.startsWith('$')).length;
   ok('★ 자리표시자 수 ≡ 파라미터 수', items.length === ph, `${items.length} vs ${ph}`);
-  ok('마지막 파라미터가 선택 상품', /selectedProduct/.test(items[items.length - 1]));
+  ok('주문 파라미터에 선택 상품을 포함한다', items.some(item => /selectedProduct/.test(item)));
 
   ok('재기록 재료 ①(_osRowToOrderData)에 선택 상품', /selectedProduct: os\.selected_product/.test(s));
   ok('재기록 재료 ②(reconcile)에 선택 상품', /selectedProduct: row\.selected_product/.test(s));
@@ -97,6 +97,17 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
   const sl = read('src/services/sheetlessOrder.service.js');
   ok('재기록 재료 ③(무시트 복구)에 선택 상품', /selectedProduct: row\.selected_product/.test(sl));
   ok('무시트 복구 SELECT 이 그 컬럼을 읽는다', /os\.selected_product/.test(sl));
+  ok('옵션 없는 상품도 상품명으로 예정 슬롯을 찾는다',
+    /scheduledUnitKey = selectedOptKey \|\| String\(orderData\.selectedProduct \|\| ''\)\.trim\(\)/.test(sl));
+  ok('큐 원장을 다시 읽은 뒤에 선택 키를 계산한다',
+    /orderData = ledgerSvc\._osRowToOrderData\(freshOrders\[0\]\);[\s\S]{0,180}scheduledUnitKey =/.test(sl));
+  ok('상품명은 행 선택에만 쓰고 옵션 칸 기록은 계속 옵션 키만 쓴다',
+    /const optText = selectedOptKey;/.test(sl) && /workboardId, scheduledUnitKey\]\)\);/.test(sl));
+
+  const create = read('src/services/worktableCreate.service.js');
+  const preview = read('src/routes/trackB.routes.js');
+  ok('시트 생성 조회가 투입방식을 읽는다', /review_type_mix, product_distribution_mode, source_revision/.test(create));
+  ok('작업표 미리보기도 투입방식을 읽는다', /review_type_mix, product_distribution_mode, source_revision/.test(preview));
 
   const sub = read('src/routes/submit.routes.js');
   ok('제출이 홀드에서 상품명을 읽는다', /co\.product_name AS product_name/.test(sub));

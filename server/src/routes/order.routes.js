@@ -75,7 +75,7 @@ const AE_FIELDS = [
 // updated_by / updated_by_name 은 감사용으로 별도 처리(컨텐츠 수정으로 카운트하지 않음).
 const INTAKE_EDITABLE_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
-  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_channel', 'purchase_time',
+  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'product_distribution_mode', 'purchase_channel', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
   'delivery_type', 'courier_proxy',
   'delivery_type_mix', 'recall_courier', 'recall_product',   // 135 — 회수·혼합 부속정보(가산적: 미전송이면 문장 파싱 폴백)
@@ -106,6 +106,7 @@ async function _ensureTables() {
         pay_amount      INTEGER DEFAULT 0,
         review_fee      INTEGER DEFAULT 0,
         daily_count     INTEGER DEFAULT 0,
+        product_distribution_mode TEXT NOT NULL DEFAULT 'balanced',
         purchase_time   TEXT DEFAULT '',
         inflow_keyword  TEXT DEFAULT '',
         inflow_type     TEXT DEFAULT '',
@@ -138,6 +139,7 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_type          TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide         TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS daily_count_text     TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_distribution_mode TEXT NOT NULL DEFAULT 'balanced'`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_options_json TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS review_fee INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS review_type_mix JSONB NOT NULL DEFAULT '[]'::jsonb`);
@@ -195,6 +197,11 @@ function _dateOrNull(v) {
 function _intOrZero(v) {
   const n = parseInt(v, 10);
   return Number.isFinite(n) ? n : 0;
+}
+
+// 상품·옵션 행 순서: 새 기본값은 균등 순환, 명시한 순차 진행만 sequential로 보관한다.
+function _productDistributionMode(v) {
+  return String(v == null ? '' : v).trim().toLowerCase() === 'sequential' ? 'sequential' : 'balanced';
 }
 
 // guide_images(090 · 칸=칸 매핑 2단계): 첨부 이미지 URL 배열 → 정규화된 JSON 문자열.
@@ -304,7 +311,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
   const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
   const { rows } = await pool.query(
     `INSERT INTO work_orders
-      (id, title, start_date, product_option, product_options_json, pay_amount, review_fee, daily_count, daily_count_text,
+      (id, title, start_date, product_option, product_options_json, pay_amount, review_fee, daily_count, daily_count_text, product_distribution_mode,
        purchase_channel, purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
        review_type, review_type_mix, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
@@ -313,7 +320,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
        status, created_by, work_kind, delivery_type_mix, recall_courier, recall_product,
        work_series_id, work_round)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,'submitted',$41,$42,$43,$44,$45,$46,$47)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,'submitted',$42,$43,$44,$45,$46,$47,$48)
      RETURNING *`,
     [
       _genOrderId(),
@@ -325,6 +332,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       _intOrZero(b.review_fee),
       b.daily_count || 0,
       b.daily_count_text || '',
+      _productDistributionMode(b.product_distribution_mode),
       String(b.purchase_channel || '').trim(),
       b.purchase_time || '',
       b.inflow_keyword || '',
@@ -536,6 +544,7 @@ function _sourceContentNextValues(b, derived) {
     review_fee: _intOrZero(b.review_fee),
     daily_count: _intOrZero(b.daily_count),
     daily_count_text: b.daily_count_text || '',
+    product_distribution_mode: _productDistributionMode(b.product_distribution_mode),
     purchase_channel: String(b.purchase_channel || '').trim(),
     purchase_time: b.purchase_time || '',
     inflow_keyword: b.inflow_keyword || '',
@@ -586,7 +595,7 @@ const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflo
 const SOURCE_FIELD_LABELS = {
   title: '작업명', start_date: '시작일', product_option: '상품·옵션',
   product_options_json: '상품 구성', pay_amount: '결제금액', review_fee: '리뷰비',
-  daily_count: '일 모집인원', daily_count_text: '일 모집인원 표기', purchase_channel: '구매채널',
+  daily_count: '일 모집인원', daily_count_text: '일 모집인원 표기', product_distribution_mode: '투입방식', purchase_channel: '구매채널',
   purchase_time: '구매시간대', inflow_keyword: '유입 검색어', inflow_type: '유입방식',
   inflow_guide: '유입 가이드', guide_images: '첨부 이미지', delivery_type: '배송유형',
   courier_proxy: '택배대행', review_type: '리뷰타입', review_type_mix: '리뷰 조합',
@@ -815,7 +824,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          work_kind = $32, source_revision = $33, intake_idempotency_key = $34,
          intranet_advertiser_id = $35, intranet_advertiser_name = $36,
          intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
-         delivery_type_mix = $41, recall_courier = $42, recall_product = $43,
+         delivery_type_mix = $41, recall_courier = $42, recall_product = $43, product_distribution_mode = $44,
          updated_at = NOW()
        WHERE id = $1 AND source_review_order_id = $40
        RETURNING *`,
@@ -833,6 +842,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         source.intranetAdvertiserId, source.intranetAdvertiserName, source.intranetAdvertiserContact,
         source.intranetAdvertiserBusinessNumber, _intOrZero(b.review_fee), sourceReviewOrderId,
         _deliveryMixJson(b, deliveryType), _recallFields(b, deliveryType).courier, _recallFields(b, deliveryType).product,
+        _productDistributionMode(b.product_distribution_mode),
       ]
     );
     const updated = rows[0];
@@ -1050,6 +1060,7 @@ async function _intakeUpdateHandler(req, res, next) {
       else if (f === 'guide_images') vals.push(_guideImagesJson(b[f]));   // 배열 → 정규화 JSON(090)
       else if (f === 'skip_weekends') vals.push(_boolOrNull(b[f]));       // 097 — 안 보냄/끔 구분
       else if (f === 'holidays') vals.push(_holidaysJson(b[f]));          // 097 — 배열 → 정규화 JSON
+      else if (f === 'product_distribution_mode') vals.push(_productDistributionMode(b[f]));
       // ★ 099: 저장 시점에 표준 key 로 정규화한다 — 인트라넷은 라벨('블로그체험단')을 보낼 수도,
       //   코드값을 보낼 수도 있는데 원장에 두 표기가 섞이면 SQL 로 거르는 곳(준비 행 판정 등)이
       //   둘 다 알아야 한다. 판정 함수는 어차피 둘 다 읽지만 **원장은 한 표기로 굳힌다**.
@@ -1891,7 +1902,7 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
 // ═══════════════════════════════════════════════════════════
 const ADMIN_EDIT_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
-  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_time',
+  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'product_distribution_mode', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
   'delivery_type', 'courier_proxy', 'delivery_type_mix', 'recall_courier', 'recall_product',
   'review_type', 'recruit_count',
@@ -1900,7 +1911,7 @@ const ADMIN_EDIT_FIELDS = [
 const ADMIN_EDIT_LABELS = {
   title: '작업명', start_date: '시작일', manager_name: '담당AE', product_option: '상품·옵션',
   product_options_json: '상품옵션표', pay_amount: '결제금액', review_fee: '리뷰비', daily_count: '일일건수',
-  daily_count_text: '일일건수(텍스트)', purchase_time: '구매시간대', inflow_keyword: '유입키워드',
+  daily_count_text: '일일건수(텍스트)', product_distribution_mode: '투입방식', purchase_time: '구매시간대', inflow_keyword: '유입키워드',
   inflow_type: '유입방식', inflow_guide: '유입가이드', delivery_type: '배송유형',
   courier_proxy: '택배대행', review_type: '리뷰타입', recruit_count: '총모집',
   review_guide: '리뷰가이드', special_notes: '특이사항', product_url: '상품URL',
@@ -1967,6 +1978,9 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
         if (String(b[f]).trim() === '') continue;
         nv = _intOrZero(b[f]);
         curCmp = String(_intOrZero(o[f])); nvCmp = String(nv);
+      } else if (f === 'product_distribution_mode') {
+        nv = _productDistributionMode(b[f]);
+        curCmp = _productDistributionMode(o[f]); nvCmp = nv;
       } else {
         nv = String(b[f]);
         if (!nv.trim()) continue;                         // 빈 값 = 변경 없음
