@@ -936,6 +936,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
+            rc.recruit_total AS "recruitTotal",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
             tm.memo,
@@ -1015,6 +1016,16 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           WHERE l.sheet_id = t.sheet_id AND l.tab_name = t.tab_name AND l.deleted_at IS NULL
           ORDER BY l.created_at DESC LIMIT 1
        ) wo ON TRUE
+       /* 업체 화면의 총건수도 작업 조건 카드와 같은 적용 정원(공고 우선, 없으면 발주)을 쓴다.
+          활성 작업행 수는 내부 투영·정리용 값일 뿐 업체에게 "총 건수"로 보이면 안 된다. */
+       LEFT JOIN LATERAL (
+         SELECT recruit_total
+           FROM recruit_campaigns rc
+          WHERE rc.linked_sheet_id = t.sheet_id
+            AND (rc.linked_tab_name = t.tab_name OR (t.tab_gid IS NOT NULL AND rc.linked_tab_gid = t.tab_gid))
+          ORDER BY (rc.status = 'active') DESC, rc.created_at DESC
+          LIMIT 1
+       ) rc ON TRUE
        LEFT JOIN LATERAL (
          SELECT s.sales_id, s.contract_number FROM trackb_settlement_links s
           WHERE s.sheet_id = t.sheet_id AND s.tab_name = t.tab_name AND s.deleted_at IS NULL
@@ -1638,6 +1649,10 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
     brands: brandsOut && brandsOut.ok ? brandsOut.brands : undefined,
     items: tabs.map(t => {
       const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
+      // 총건수는 작업보드와 같은 공고 우선·발주 폴백 정원이다. bTotal(활성 작업행)은
+      // 광고주 응답에서 버린다. 작업행 준비 상태가 "총 건수"로 오해되는 것을 구조적으로 막는다.
+      const { total: recruitTotal } = require('./linkedRecruitQuota.service')
+        .displayRecruitTotal(t.recruitTotal, t.woRecruit);
       return {
         sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle,
         // 작업명 — 업체 화면도 목록·헤더가 같은 이름을 쓰게 한다(사용자 확정 2026-08-24).
@@ -1648,8 +1663,8 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
         // 없으면 화면이 종전대로 시트 제목을 그리므로, 이 한 칸이 빠지면 라벨 숨김이 조용히 무력화된다.
         sheetless: t.sheetless === true,
         active: t.active !== false,
-        total: t.bTotal || 0, submitted: t.bSub || 0, paid: t.bPaid || 0,
-        target: t.woRecruit || null,
+        submitted: t.bSub || 0, paid: t.bPaid || 0,
+        target: recruitTotal || null,
         startDate: t.woStartDate ? String(t.woStartDate).slice(0, 10) : null,
         brandId: brandByTab.get(t.sheetId + '\t' + t.tabName) || null,
         brandManagers: bmgr.get(t.sheetId + '\t' + t.tabName) || [],

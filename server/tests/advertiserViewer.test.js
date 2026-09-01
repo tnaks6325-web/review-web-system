@@ -37,7 +37,7 @@ function pool(routes) {
 const ownedRow = {
   sheetId: 'S1', spreadsheetTitle: '어니스트캄_업무시트 1', tabGid: '11',
   tabName: '4/21(쿠팡)엘라비에_선크림 750건', rowCount: 750, firstSeenAt: null,
-  bTotal: 675, bSub: 651, bPaid: 651, manager: '만두', woRecruit: 750, woStartDate: '2026-04-21',
+  bTotal: 675, bSub: 651, bPaid: 651, manager: '만두', recruitTotal: 800, woRecruit: 750, woStartDate: '2026-04-21',
   salesId: 'sales-1', contractNumber: 'C-2026-041',
   closeoutDate: null, closeoutRows: null, closeoutSubs: null, memo: '내부 비고 텍스트', active: true,
 };
@@ -99,7 +99,9 @@ async function run() {
   const sum = await svc.advertiserWorkSummary({ advertiserId: 'adv-1' });
   ok('settlementHidden=false + 항목 1건', sum.settlementHidden === false && sum.items.length === 1);
   const it = sum.items[0];
-  ok('카운트·목표·시작일 동봉', it.total === 675 && it.submitted === 651 && it.paid === 651 && it.target === 750 && it.startDate === '2026-04-21');
+  ok('업체 항목은 총건수·제출·입금·시작일만 동봉(활성 작업행 수 미노출)',
+    it.total === undefined && it.submitted === 651 && it.paid === 651 && it.target === 800 && it.startDate === '2026-04-21');
+  ok('업체 총건수는 활성 작업행·발주보다 공고 모집 정원을 우선한다', it.target === 800 && it.target !== ownedRow.bTotal && it.target !== ownedRow.woRecruit);
   const svcSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
   ok('업체 작업목록 제출 수는 제출 플래그가 아닌 작업표 리뷰제출 셀을 집계한다',
     /submit_header\.submit_header/.test(svcSrc)
@@ -163,8 +165,8 @@ async function run() {
   ok('loadTabs 가 광고주면 /my-work-summary 를 함께 받는다', src.includes("api('/api/trackb/my-work-summary')"));
 
   // ── 화면 A: 내 작업 목록 표 ──
-  ok('화면 A 컬럼: 시작일·진행상황·견적서·계산서·총비용·입금액·입금일·남은 입금액',
-    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>참여·제출·입금<\/span><span>자료 폴더<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
+  ok('화면 A 컬럼: 시작일·진행상황·총건수/제출/입금·견적서·계산서·총비용·입금액·입금일·남은 입금액',
+    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>총건수·제출·입금<\/span><span>자료 폴더<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
   ok('남은 입금액 = 총비용 − 입금액 파생(0원 = 완납 표시)', /Math\.max\(tc-\(pa\|\|0\),0\)/.test(src) && src.includes("'0 ✓'"));
   ok('화면 A 컨테이너 폭 상한(1380px)', /#advHome\{max-width:1380px\}/.test(css));
 
@@ -202,8 +204,12 @@ async function run() {
   ok('사이드바 상단 = [대시보드] · [전체 작업] 2줄', /onclick="advHome\('dash'\)"[\s\S]{0,120}대시보드/.test(src) && /onclick="advHome\('list'\)"[\s\S]{0,120}전체 작업/.test(src));
   ok('사이드바 작업 목록을 진행 중 / 완료 그룹으로 나눈다',
     /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));
-  ok('★ 진행/완료 판정 단일 출처 _awDone(=_awStatus) — 사이드바·KPI·게이지가 같은 함수를 본다',
-    /function _awDone\(it\)\{ return _awStatus\(it\)\.label==='완료'; \}/.test(src));
+  ok('★ 진행/완료 판정 단일 출처 _awDone(=_awStatus.done) — 사이드바·KPI·게이지가 같은 함수를 본다',
+    /function _awDone\(it\)\{ return _awStatus\(it\)\.done; \}/.test(src));
+  ok('업체 진행률은 제출 ÷ 총건수이고, 100% 기준 고정 폭 배지를 쓴다',
+    /function _awProgress\(it\)\{[\s\S]{0,360}submitted\/target/.test(src)
+    && /\.bb\.advprog\{[^}]*width:80px[^}]*justify-content:center[^}]*font-variant-numeric:tabular-nums/.test(css)
+    && /class="bb advprog \$\{st\.tone\}"/.test(src));
   ok('★ 정산 파생(남은 입금액=총비용−입금액) 단일 출처 _awSetl',
     /function _awSetl\(it\)\{[\s\S]{0,320}Math\.max\(tc-\(pa\|\|0\),0\)/.test(src));
   ok('★ 표 행 빌더는 한 벌(_awRowHtml) — 대시보드 최근 작업은 limit 만 달리해 재사용(사본 금지)',
@@ -211,12 +217,13 @@ async function run() {
     && /function _awListHtml\(items, limit\)/.test(src)
     && /_awListHtml\(items, RECENT\)/.test(src)
     && (src.match(/class="awlhead"/g) || []).length === 1);
-  ok('KPI 4칸: 진행 중 작업 · 참여 진척 · 총 계약금액 · 미입금 잔액',
-    /진행 중 작업<\/div>/.test(src) && /참여 진척 \(진행 중\)/.test(src) && /총 계약금액/.test(src) && /미입금 잔액/.test(src));
+  ok('KPI 4칸: 진행 중 작업 · 제출 진척 · 총 계약금액 · 미입금 잔액',
+    /진행 중 작업<\/div>/.test(src) && /제출 진척 \(진행 중\)/.test(src) && /총 계약금액/.test(src) && /미입금 잔액/.test(src));
   ok('★ 정산 노출 OFF 업체는 금액 KPI·정산 패널을 통째로 뺀다(빈 0원 표시 금지)',
     /\+\(setlOn\?`<div class="adkpi"><div class="k">총 계약금액/.test(src) && /const pipe=setlOn\?/.test(src));
-  ok('참여 진척은 진행 중 작업만 집계(끝난 숫자가 진척을 희석하지 않게)',
-    /running\.forEach\(it=>\{ rTot\+=\+it\.total\|\|0; rSub\+=\+it\.submitted\|\|0;/.test(src));
+  ok('제출 진척은 진행 중 작업의 제출 ÷ 총건수만 집계(내부 활성 작업행 미사용)',
+    /running\.forEach\(it=>\{ rSub\+=\+it\.submitted\|\|0; rTgt\+=_awTarget\(it\); \}\);/.test(src)
+    && /총건수 대비 제출 \$\{sPct\}%/.test(src));
   ok('총 계약금액 KPI 가 정산 미연결 건수를 부제로 고지한다(조용한 누락 금지)', /미연결 \$\{unlinked\}건/.test(src));
   ok('확인 필요 = 잔액(큰 순) → 계산서 미발행 → 미확인 코멘트, 최대 5건',
     /\.filter\(x=>x\.rest>0\)\.sort\(\(a,b\)=>b\.rest-a\.rest\)/.test(src)
