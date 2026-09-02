@@ -9,8 +9,8 @@
  * ★★ 완화 금지 불변식
  *   ① 판정 단일 출처 = utils/repurchaseGuard — 리뷰어 셀프 참여(campaign.routes)와
  *      관리자 외부모집 수동제출(manualOrder.service)이 같은 함수를 쓴다.
- *   ② 기준 = "같은 작업(탭)"(sheet_id, tab_name) + phone8 — recruit_campaigns.id 재발행(차수)이나
- *      캠페인 미지정과 무관하게 잡힌다.
+ *   ② 기준 = "같은 작업 전체"(sheet_id + tab_configs.campaign_name) + phone8 — 구매일별 탭이
+ *      달라도 같은 작업명으로 묶이며, 작업명 없는 레거시 탭만 (sheet_id, tab_name)으로 폴백한다.
  *   ③ 취소된 주문(deleted_at 有)은 세지 않는다.
  *   ④ 모르면 막지 않는다(fail-open) — 탭·번호 판정 불가는 통과.
  *   ⑤ 예외(강제 통과)는 관리자 외부모집 수동제출에만 있다 — 리뷰어 셀프 참여는 예외 없음.
@@ -61,7 +61,10 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     const r = await checkRepurchaseWindow(stubDb([]), { sheetId: 's1', tabName: 't1', phone: '010-8636-5441' });
     eq('일치 없음 → 통과', r.blocked, false);
     ok('phone은 함수 안에서 phone8로 변환됨(문자열 8자리 파라미터)', lastParams[2] === '86365441');
-    ok('쿼리에 sheet_id+tab_name 조건 포함', lastSql.includes('sheet_id = $1') && lastSql.includes('tab_name = $2'));
+  ok('쿼리에 기준 sheet_id 조건 포함', lastSql.includes('os.sheet_id = $1'));
+  ok('★ 같은 작업명(campaign_name)으로 구매일별 탭을 묶음',
+    lastSql.includes('scope.work_name') && lastSql.includes('submitted_tab.campaign_name'));
+  ok('★ 작업명 없는 레거시 탭만 tab_name 단위 폴백', lastSql.includes('scope.work_name IS NULL AND os.tab_name = $2'));
     ok('★ 취소된 주문 제외 조건 포함', lastSql.includes('deleted_at IS NULL'));
     ok('★ 기간 창은 make_interval(days=>) 파라미터화 — 하드코딩 아님', lastSql.includes('make_interval(days => $4)'));
   }
@@ -111,7 +114,7 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 순서: 캠페인단위 영구차단 뒤 → 재구매 가드 → 만료 스윕(기존 흐름 순서 불변)',
     iBlk > -1 && iGuard > iBlk && iExpireSweep > iGuard);
   ok('reason: repurchase_window 반환', camp.includes(`reason: 'repurchase_window'`));
-  ok('★ camp.linked_sheet_id/linked_tab_name 기준(캠페인 재발행에도 안 흔들리는 탭 식별자)',
+  ok('★ camp.linked_sheet_id/linked_tab_name를 시작점으로 같은 작업 전체를 판정',
     camp.includes('camp.linked_sheet_id') && camp.includes('camp.linked_tab_name'));
   ok('★ holdP8(본계정/타계정 신원)로 판정 — 로그인 phone8만 보지 않는다', camp.includes('phone8: holdP8'));
   ok('★★ 셀프 참여는 예외(강제 통과) 없음 — allowRepurchase 미사용',
@@ -126,28 +129,28 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 라우트 등록 순서: /:id 보다 앞(뒤에 두면 /:id 가 이 경로를 id로 삼킨다)',
     iMyStatusRoute > -1 && iIdRoute > -1 && iMyStatusRoute < iIdRoute);
   ok('phone8 형식 검증(자릿수) 있음', campFull.slice(iMyStatusRoute, iIdRoute).includes("p8.length !== 8"));
-  ok('checkRepurchaseStatusForCampaigns 사용(단일 출처)',
-    campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForCampaigns'));
+  ok('checkRepurchaseStatusForAccounts 사용(본계정·타계정 단일 출처)',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForAccounts'));
   ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
 
-  const { checkRepurchaseStatusForCampaigns } = require('../src/utils/repurchaseGuard');
+  const { checkRepurchaseStatusForAccounts } = require('../src/utils/repurchaseGuard');
   {
     const rows = [
-      { campaign_id: 'camp_locked', last_at: new Date(Date.now() - 4 * 86400000) },   // 4일 전 = 아직 잠김
-      { campaign_id: 'camp_ready', last_at: new Date(Date.now() - 20 * 86400000) },   // 20일 전 = 지금 가능
+      { campaign_id: 'camp_locked', phone8: '86365441', last_submitted_at: new Date(Date.now() - 4 * 86400000) },
+      { campaign_id: 'camp_ready', phone8: '86365441', last_submitted_at: new Date(Date.now() - 20 * 86400000) },
     ];
-    const r = await checkRepurchaseStatusForCampaigns(stubDb(rows),
-      { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8: '86365441' });
-    eq('4일 전 참여 → locked', r.get('camp_locked').status, 'locked');
-    ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('camp_locked').availableFrom instanceof Date);
-    eq('20일 전 참여(14일 지남) → ready', r.get('camp_ready').status, 'ready');
-    ok('★ 참여 이력이 아예 없는 공고는 맵에 없음(=평소 카드, 0/false로 꾸미지 않는다)', !r.has('camp_never'));
+    const r = await checkRepurchaseStatusForAccounts(stubDb(rows),
+      { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8List: ['86365441'] });
+    eq('4일 전 참여 → locked', r.get('86365441').get('camp_locked').status, 'locked');
+    ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('86365441').get('camp_locked').availableFrom instanceof Date);
+    eq('20일 전 참여(14일 지남) → ready', r.get('86365441').get('camp_ready').status, 'ready');
+    ok('★ 참여 이력이 아예 없는 공고는 맵에 없음(=평소 카드, 0/false로 꾸미지 않는다)', !r.get('86365441').has('camp_never'));
   }
   {
     const origDays = process.env.CAMPAIGN_REPARTICIPATE_DAYS;
     process.env.CAMPAIGN_REPARTICIPATE_DAYS = '0';
-    const r = await checkRepurchaseStatusForCampaigns({ query: async () => { throw new Error('호출 금지'); } },
-      { campaignIds: ['x'], phone8: '86365441' });
+    const r = await checkRepurchaseStatusForAccounts({ query: async () => { throw new Error('호출 금지'); } },
+      { campaignIds: ['x'], phone8List: ['86365441'] });
     eq('★ 킬스위치(=0) → 배지 기능도 함께 꺼짐(제한 없는데 "N일 후" 안내가 뜨는 모순 방지)', r.size, 0);
     process.env.CAMPAIGN_REPARTICIPATE_DAYS = origDays;
   }
@@ -198,8 +201,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('pt-sash(하단 띠) CSS 존재 — A안', cc.includes('.pt-sash{position:absolute;left:0;right:0;bottom:0'));
   ok('lock/ready 두 상태 모두 스타일 존재', cc.includes('.pt-sash.lock{') && cc.includes('.pt-sash.ready{'));
   ok('★ 관리자 카드에는 렌더하지 않는다(!admin 게이트) — 집계 화면엔 "내 참여" 개념이 안 맞는다',
-    /if \(!admin && c\.repurchaseStatus === 'locked'/.test(cc));
-  ok('c.repurchaseStatus 가 없으면 빈 문자열(=평소 카드, 조용히 무동작)', cc.includes(`let repurchaseSash = '';`));
+    cc.includes('const repurchaseLocked = !admin') && cc.includes('if (!admin && repReady.length)'));
+  ok('c.repurchase 가 없으면 빈 문자열(=평소 카드, 조용히 무동작)', cc.includes(`let repurchaseSash = '';`));
   ok('썸네일 마크업에 삽입됨', cc.includes('${topleft}${repurchaseSash}${editChip}${moChip}'));
   ok('★ 잠긴 상태에서 [참여하기] 버튼도 함께 막는다(카드는 열려 보이는데 실제 참여만 막히는 상태 방지)',
     cc.includes(`if (c.state === 'open' && repurchaseLocked)`));
@@ -210,7 +213,7 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     idx.includes('if (key === _rcRepurchaseFetchKey) return;'));
   ok('조회 실패해도 목록 렌더 자체는 살아있다(부가 정보 취급)',
     /catch \(_\) \{ \/\* 재참여 안내는 부가 정보/.test(idx));
-  ok('카드 데이터에 병합 후 CampCards.cardHtml 호출', idx.includes('c.repurchaseStatus = rs.status'));
+  ok('카드 데이터에 계정별 상태를 병합 후 CampCards.cardHtml 호출', idx.includes('if (rs) c.repurchase = rs'));
 
   console.log(`\n✅ repurchaseGuard: ${n}개 통과`);
   process.exit(0);
