@@ -60,11 +60,11 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
   const orig = require.cache[poolPath];
   const rosterRows = [
     // 무시트 수동 생성 행: submit_col은 비어 있지만 탭 상태 헤더의 실제 셀 값은 있다.
-    { id: 'r1', seq: 164, name: '조연숙', recipient: '조연숙', phone8: '96689776', order_submission_id: '00000000-0000-4000-8000-000000000001', row_json: { 리뷰제출: '8/10 22:49' }, source: 'worktable' },
+    { id: 'r1', seq: 164, name: '조연숙', recipient: '조연숙', phone8: '96689776', order_submission_id: '00000000-0000-4000-8000-000000000001', row_json: { 구매일자: '8 / 10 (월)', 리뷰제출: '8/10 22:49' }, source: 'worktable' },
     // 같은 주문을 가리키는 과거 복제 행: 제출 건수에는 보이지만 집행금액은 한 번만 더해야 한다.
-    { id: 'r2', seq: 165, name: '이혜선', recipient: '이혜선', phone8: '90739194', order_submission_id: '00000000-0000-4000-8000-000000000001', row_json: { 리뷰제출: '8/4 13:53' }, source: 'worktable', submitted: false },
+    { id: 'r2', seq: 165, name: '이혜선', recipient: '이혜선', phone8: '90739194', order_submission_id: '00000000-0000-4000-8000-000000000001', row_json: { 구매일자: '8 / 11 (화)', 리뷰제출: '8/4 13:53' }, source: 'worktable', submitted: false },
     // 원장 price 는 비어 있고 실제 작업표 결제금액 칸에만 있는 레거시 주문.
-    { id: 'r3', seq: 166, name: '김도윤', recipient: '김도윤', phone8: '80549321', order_submission_id: '00000000-0000-4000-8000-000000000002', row_json: { 리뷰제출: '8/5 10:10', 결제금액: '100,000원' }, source: 'worktable', submitted: false },
+    { id: 'r3', seq: 166, name: '김도윤', recipient: '김도윤', phone8: '80549321', order_submission_id: '00000000-0000-4000-8000-000000000002', row_json: { 구매일자: '8 / 12 (수)', 리뷰제출: '8/5 10:10', 결제금액: '100,000원' }, source: 'worktable', submitted: false },
     { id: 'r4', seq: 170, name: '', recipient: '', phone8: '', order_submission_id: null, row_json: {}, source: 'worktable' },   // 빈 슬롯
     { id: 'r5', seq: 171, name: null, recipient: null, phone8: null, order_submission_id: null, row_json: {}, source: 'worktable' }, // 빈 슬롯
   ];
@@ -77,6 +77,8 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
       //   (넓은 분기를 앞에 두면 명단이 빈 배열로 가로채여 "0 명" 을 정상으로 읽는다).
       if (/FROM campaign_participants cp/.test(q) && /ORDER BY cp\.seq/.test(q)) return { rows: rosterRows };
       if (/SELECT submit_col AS h FROM review_index/.test(q)) return { rows: [{ h: '리뷰제출' }] };
+      if (/FROM recruit_campaigns/.test(q)) return { rows: [{ id: 'camp-1', recruitTotal: 4 }] };
+      if (/FROM campaign_daily_plans/.test(q)) return { rows: [{ date: '2026-08-13', count: 1 }] };
       if (/FROM order_submissions WHERE id = ANY/.test(q)) return { rows: [
         { id: '00000000-0000-4000-8000-000000000001', price: '100,000원' },
         { id: '00000000-0000-4000-8000-000000000002', price: '' },
@@ -96,6 +98,15 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
     ok('★ 수동 생성 무시트 행(submit_col 없음)도 탭 상태 헤더로 실제 셀을 센다', res.counts.submitted === 3, JSON.stringify(res.counts));
     ok('★ 누적집행은 중복 주문을 한 번만 더하고, 원장 금액이 비면 작업표 결제금액으로 폴백', res.counts.executionAmount === 200000, JSON.stringify(res.counts));
     ok('★ 잔여집행 = 작업오더 총 결제금액 − 누적집행', res.counts.executionTotalAmount === 300000 && res.counts.remainingExecutionAmount === 100000, JSON.stringify(res.counts));
+    ok('★ 과거 완료 3행과 미래 계획 1건이 다른 날짜여도 모두 반영해 모집일 미설정 경고를 내지 않는다',
+      res.counts.scheduleUnassigned === undefined, JSON.stringify(res.counts));
+
+    // 날짜가 사라진 채워진 행은 "배정됨"으로 만들지 않는다. 실제 날짜 2행 + 미래 계획 1건만
+    // 반영해 부족 1건을 유지해야, 비표준/빈 날짜 작업의 경고가 조용히 사라지지 않는다.
+    delete rosterRows[2].row_json.구매일자;
+    const partial = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'master', allowAllWorkdesk: true });
+    ok('★ 날짜 없는 채워진 행은 보정에서 제외해 부족 경고를 유지한다',
+      partial.counts.scheduleUnassigned === 1, JSON.stringify(partial.counts));
 
     if (orig) require.cache[poolPath] = orig; else delete require.cache[poolPath];
     console.log(`\n✅ ${passed} passed\n`);
@@ -117,9 +128,11 @@ console.log('\n[B2] 계산 위치 — 마스킹 전');
   //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
   ok('판정 사본 없음 — utils 를 import 해 쓴다',
     /isFilledRow: _isFilledRow[\s\S]{0,80}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
-  ok('모집일 부족분은 무시트 내부 작업보드에서만 저장된 계획 합계로 계산한다',
+  ok('모집일 부족분은 무시트 내부 작업보드에서 날짜별 계획과 실제 배정으로 계산한다',
     /showEdits && meta\[0\] && meta\[0\]\.sheetless && _cond && _cond\.campaignId && _recruitCap/.test(src)
-    && /SUM\(planned_count\)/.test(src)
+    && /SELECT to_char\(plan_date,'YYYY-MM-DD'\) AS date, planned_count AS count/.test(src)
+    && /_filledScheduledRowsByDate\(out, headers\)/.test(src)
+    && /Math\.max\(plannedByDate\.get\(date\) \|\| 0, actualByDate\.get\(date\) \|\| 0\)/.test(src)
     && /scheduleUnassigned: scheduleUnassigned > 0 \? scheduleUnassigned : undefined/.test(src));
 }
 

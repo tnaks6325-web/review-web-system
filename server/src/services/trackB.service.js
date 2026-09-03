@@ -2746,6 +2746,49 @@ function _condSchedule(rows, headers) {
   } catch (_) { return null; }
 }
 
+/* 모집일 경고의 보정 근거: 이미 사람/주문이 채워진 작업표 행을 표에 표시되는 구매일자로
+   묶은 수다. 과거 무시트 전환 작업은 `campaign_daily_plans`에 조절한
+   일부 날짜만 남고, 완료된 행의 날짜는 작업표에만 남아 있을 수 있다. 그 경우 계획 합계만
+   비교하면 완료 작업을 미설정으로 오인한다.
+   ★ `out`은 마스킹 전 내부 렌즈에서 만들며 `filled`도 같은 시점에 확정된다. 날짜 셀 편집
+   오버레이가 있으면 화면에서 보이는 값이 우선한다. 날짜 열을 못 찾거나 파싱할 수 없으면
+   null로 실패 닫기 — 빈/비표준 날짜를 "배정됨"으로 세어 경고를 숨기지 않는다.
+   ★ 읽기 전용 순수 계산이다. 모집계획 저장·작업표 재구성·번호 재정렬 경로를 호출하지 않는다. */
+function _filledScheduledRowsByDate(rows, headers) {
+  try {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return null;
+    let keys = Array.isArray(headers) ? headers.filter(h => h != null && String(h).trim() !== '') : [];
+    if (!keys.length) {
+      const seen = new Set(); keys = [];
+      for (const r of list) {
+        const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : null;
+        if (!rj) continue;
+        for (const k of Object.keys(rj)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
+      }
+    }
+    const { findDateColumnIndex } = require('./campaignSchedule.service');
+    const di = findDateColumnIndex(keys);
+    if (di < 0) return null;
+    const key = keys[di];
+    const raw = list.map(r => {
+      const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : {};
+      const edits = (r && r.cellEdits && typeof r.cellEdits === 'object') ? r.cellEdits : {};
+      const v = Object.prototype.hasOwnProperty.call(edits, key) ? edits[key] : rj[key];
+      return v == null ? '' : String(v);
+    });
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const { parseDateColumn } = require('../utils/koreanDate');
+    const parsed = parseDateColumn(raw, { fallbackAnchor: { y: kst.getUTCFullYear(), m: kst.getUTCMonth() + 1 } });
+    const byDate = new Map();
+    for (let i = 0; i < list.length; i++) {
+      if (!list[i] || list[i].filled !== true || !parsed[i]) continue;
+      byDate.set(parsed[i], (byDate.get(parsed[i]) || 0) + 1);
+    }
+    return byDate;
+  } catch (_) { return null; }
+}
+
 async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null } = {}) {
   try {
     const gid = String(meta.tabGid || '').trim();
@@ -3327,20 +3370,36 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      시트 기반 과거 표에 오탐을 내지 않도록 종전처럼 무시트에만 한정한다. */
   const _recruitCap = (_cond && Number(_cond.recruitTotal) > 0) ? Number(_cond.recruitTotal) : null;
   const _cap = (meta[0] && meta[0].sheetless) ? _recruitCap : null;
-  /* 모집일 미설정 수 = 작업 조건의 총 모집건수 - 저장된 일자별 모집 계획 합계.
+  /* 모집일 미설정 수 = 작업 조건의 총 모집건수 - 유효한 날짜 배정량.
      무시트 작업표는 달력(campaign_daily_plans)이 날짜별 정원의 진실원본이므로 합계를 그대로
-     비교할 수 있다. 시트 기반은 이 테이블이 "조절한 날"만 보관하고 나머지는 시트 일정이
+     비교할 수 있다. 단, 과거에 완료된 무시트 작업은 조절한 날만 계획 테이블에 남고 실제
+     날짜 배정은 작업표 행에만 남아 있을 수 있다. 이때는 날짜별로 작업표의 실제 배정과 저장
+     계획 중 큰 값을 합산한다. 같은 날은 이중 계산하지 않고, 과거 완료분과 미래 계획분이 서로
+     다른 날이면 모두 반영한다. 시트 기반은 이 테이블이 "조절한 날"만 보관하고 나머지는 시트 일정이
      정하므로, 합산하면 정상 일정까지 미설정으로 오인한다 — 그 경우에는 표시하지 않는다.
      저장 시 총량 초과는 막혀 있으므로 화면에는 부족분만 낸다. 계획 테이블이 아직 없는 구버전
      DB/조회 실패는 0으로 위장하지 않고 필드를 생략해 경고 오탐을 막는다. */
   let scheduleUnassigned;
   if (showEdits && meta[0] && meta[0].sheetless && _cond && _cond.campaignId && _recruitCap) {
     try {
-      const { rows: planTotal } = await db.query(
-        `SELECT COALESCE(SUM(planned_count), 0)::int AS planned
+      const { rows: plans } = await db.query(
+        `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
            FROM campaign_daily_plans WHERE campaign_id=$1`, [_cond.campaignId]);
-      const planned = Number(planTotal[0] && planTotal[0].planned);
-      if (Number.isFinite(planned)) scheduleUnassigned = Math.max(0, _recruitCap - planned);
+      const plannedByDate = new Map();
+      for (const plan of plans) {
+        const date = String(plan && plan.date || '').slice(0, 10);
+        const count = Number(plan && plan.count);
+        if (date && Number.isFinite(count)) plannedByDate.set(date, Math.max(0, count));
+      }
+      const actualByDate = _filledScheduledRowsByDate(out, headers);
+      let scheduled = 0;
+      if (actualByDate == null) {
+        for (const count of plannedByDate.values()) scheduled += count;
+      } else {
+        const dates = new Set([...plannedByDate.keys(), ...actualByDate.keys()]);
+        for (const date of dates) scheduled += Math.max(plannedByDate.get(date) || 0, actualByDate.get(date) || 0);
+      }
+      scheduleUnassigned = Math.max(0, _recruitCap - scheduled);
     } catch (e) {
       logger.warn(`[trackB] 모집일 계획 합계 조회 실패: ${e.message}`);
     }
