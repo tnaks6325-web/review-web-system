@@ -146,7 +146,8 @@ async function rebuildWorktableProjection(worktable, by, force = false) {
   return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
 }
 
-// 과거의 빈 초과 슬롯만 정리한다. 잠금 뒤 기존 정원 동기화의 보호 규칙을 재사용한다.
+// 과거의 빈 초과 슬롯만 정리한다. 수동 진단 API와 자동 복구 크론이 같은 경로를 사용한다.
+// 잠금 뒤 기존 정원 동기화의 보호 규칙을 재사용하므로 참여·주문 행은 절대 은퇴하지 않는다.
 async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, by = 'overflow-cleanup' } = {}) {
   const cap = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
   const pendingBy = `overflow-cleanup-pending:${String(by).slice(0, 70)}`;
@@ -154,8 +155,8 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
   const { rows: campaigns } = await pool.query(
     `WITH candidates AS (
        SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at,
-              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL) AS live_slots,
-              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL
+              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL AND cp.active = TRUE) AS live_slots,
+              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL AND cp.active = TRUE
                 AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
                 AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
                 AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
@@ -165,9 +166,10 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
          JOIN tab_configs tc ON tc.sheet_id = rc.linked_sheet_id AND tc.tab_name = rc.linked_tab_name
                             AND COALESCE(tc.sheetless, FALSE) = TRUE
          LEFT JOIN campaign_participants cp ON cp.sheet_id = rc.linked_sheet_id AND cp.tab_name = rc.linked_tab_name
-        WHERE COALESCE(rc.recruit_total, 0) > 0
+        WHERE rc.participation_mode AND rc.status = 'active' AND rc.archived_at IS NULL
+          AND COALESCE(rc.recruit_total, 0) > 0
           AND COALESCE(rc.linked_sheet_id, '') <> '' AND COALESCE(rc.linked_tab_name, '') <> ''
-        GROUP BY rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at
+       GROUP BY rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at
      )
      SELECT id, linked_sheet_id, linked_tab_name, linked_tab_gid, recruit_total, pending_projection
        FROM candidates
@@ -193,6 +195,18 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
         : { synced: true, add: 0, retire: 0, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name, target: checked.target };
       if (checked.retire) await client.query('COMMIT');
       else await client.query('ROLLBACK');
+      // 슬롯 은퇴 뒤 화면 번호는 DB seq와 별개로 활성 행 1..N 이어야 한다. 수동 버튼을
+      // 누르지 않아도 자동 복구 한 번으로 행 수·마지막 번호·투영 원장을 함께 맞춘다.
+      let numbering = null;
+      if (checked.retire || retryProjection) {
+        const { renumberTab } = require('./rowNumbering.service');
+        numbering = await renumberTab({
+          sheetId: campaign.linked_sheet_id,
+          tabName: campaign.linked_tab_name,
+          by: String(by).slice(0, 100),
+          rebuild: false,
+        });
+      }
       const rebuilt = await rebuildWorktableProjection(changed, by, retryProjection);
       await pool.query(
         `UPDATE campaign_participants
@@ -204,7 +218,7 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
       out.retired += changed.retire || 0;
       out.items.push({ campaignId: campaign.id, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
         target: changed.target,
-        retired: changed.retire || 0, projection: rebuilt.projection || null });
+        retired: changed.retire || 0, numbering, projection: rebuilt.projection || null });
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (_) {}
       out.items.push({ campaignId: campaign.id, error: err.message, code: err.code || null });
