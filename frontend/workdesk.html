@@ -3143,6 +3143,9 @@ function renderWorkdeskView(){
     const seg=ev.target&&ev.target.closest&&ev.target.closest('#segwrap .seg');
     if(seg){
       if(ev.target.closest('.segstar')) return;
+      // 원래 document 바깥클릭 정리가 하던 검색 결과 닫기를 여기서도 수행한다.
+      // 이 클릭은 아래에서 전파를 소비하므로, 그대로 두면 검색 팝오버가 메뉴를 덮을 수 있다.
+      const results=$('#sres'); if(results) results.classList.remove('show');
       ev.stopPropagation(); wPickSeg(seg.dataset.k); return;
     }
     const item=ev.target&&ev.target.closest&&ev.target.closest('#taskmenu .wtab[data-i]');

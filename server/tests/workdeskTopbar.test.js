@@ -32,6 +32,7 @@ t('업체 클릭은 드롭다운 토글, 작업 클릭은 선택 후 드롭다�
   assert.match(html, /작업목록 · \$\{esc\(g\.label\)\}/);
   assert.match(html, /#segwrap \.seg,#taskmenu/, '바깥 클릭 닫기 범위가 드롭다운을 포함하지 않음');
   assert.match(view, /taskbar\.onclick=function\(ev\)/, '작업바 클릭 위임이 없음');
+  assert.match(view, /const results=\$\('#sres'\); if\(results\) results\.classList\.remove\('show'\);/, '업체 클릭이 열린 검색 결과를 닫지 않음');
   assert.match(view, /ev\.stopPropagation\(\); wPickSeg\(seg\.dataset\.k\);/, '업체 클릭이 바깥 클릭 닫기와 분리되지 않음');
   assert.match(view, /ev\.stopPropagation\(\); wPickTask\(\+item\.dataset\.i\);/, '작업 선택이 드롭다운 밖 클릭으로 번지지 않음');
   assert.doesNotMatch(html, /onclick="wPickSeg\(this\.dataset\.k\)"/, '재렌더되는 업체 칩에 인라인 토글이 남아 이중 실행될 수 있음');
