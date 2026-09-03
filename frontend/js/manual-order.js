@@ -603,6 +603,12 @@
       const t = (res && typeof res.index === 'number') ? targets[res.index] : targets[k];
       const src = t && t.r;
       if (!res || !res.ok || !src || !src.capture || !res.orderSubmissionId) continue;
+      const capSession = res.captureSession || {};
+      if (!capSession.id || !capSession.token) {
+        res.captureAttached = false;
+        (res.warnings = res.warnings || []).push('구매캡쳐 제출 세션을 발급받지 못했습니다');
+        continue;
+      }
       try {
         const up = await api('/api/image/image-upload', {
           method: 'POST',
@@ -611,6 +617,8 @@
             fileName: (src.fields.recipient || '주문캡처') + '.' + (src.capture.mime === 'image/png' ? 'png' : 'jpg'),
             tabName: CTX.tabName, sheetId: CTX.sheetId, displayName: CTX.title || '',
             orderSubmissionId: res.orderSubmissionId,
+            captureSessionId: capSession.id,
+            captureSessionToken: capSession.token,
           }),
         });
         res.captureAttached = !!(up && up.ok);

@@ -640,7 +640,9 @@ router.post('/organize-capture', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/save-capture', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, folderUrl } = req.body;
+    const { sheetId, tabName } = req.body;
+    // 공개 구매양식이 사용하던 이름(captureFolderUrl)과 관리자 API 이름(folderUrl)을 함께 받는다.
+    const folderUrl = req.body.folderUrl || req.body.captureFolderUrl || '';
     if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
 
     await pool.query(

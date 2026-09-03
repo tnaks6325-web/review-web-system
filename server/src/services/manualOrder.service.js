@@ -23,6 +23,7 @@ const { enqueue } = require('./syncQueue.service');
 const { registerReviewer } = require('./reviewer.service');
 const { findSubAccount } = require('./identity.service');
 const { digits } = require('../utils/slashForm');
+const purchaseSessions = require('./purchaseSubmissionSession.service');
 
 /** 외부 대리제출 건의 출처 표시.
  *  ★ diag의 `order-manual-add`가 `order_submissions.source='manual'`을 쓰므로 그 값과 겹치면
@@ -549,9 +550,22 @@ async function submitExternalOrder({
   logger.info(`[manual-order] 외부제출 tab=${tabName} name=${f.recipient} osid=${ledger.orderSubmissionId}`
     + (application ? ` app=${application.applicationId}` : '') + ` by=${adminName || '?'}`);
 
+  let captureSession = null;
+  try {
+    captureSession = await purchaseSessions.issueForOrder({
+      orderSubmissionId: ledger.orderSubmissionId,
+      captureSheetId: sheetId,
+      captureTabName: tabName,
+      source: SOURCE_EXTERNAL,
+    });
+  } catch (e) {
+    warnings.push('구매캡처 제출 세션 발급 실패: ' + e.message);
+  }
+
   return {
     ok: true,
     orderSubmissionId: ledger.orderSubmissionId,
+    captureSession,
     sheetRow: ledger.sheetRow || null,
     queued,
     reviewerRegistered: reviewerInfo.registered,

@@ -19,6 +19,7 @@ const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.servic
 const { mirrorOneSheet } = require('../services/rawMirror.service');
 const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistration');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
+const purchaseSessions = require('../services/purchaseSubmissionSession.service');
 
 // ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
 // 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
@@ -1313,19 +1314,35 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 // POST /api/image/upload — 주문캡처 이미지 Drive 업로드 (새 3단계 구조)
 //
 // 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [구매캡처]
-// 프론트엔드 페이로드:
-//   { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId,
-//     savedCaptureFolderUrl }
-//
-// 폴더 접근 우선순위:
-//   1. savedCaptureFolderUrl (프론트엔드 전달)
-//   2. tab_configs.capture_folder_url (DB)
-//   3. 자동 생성 (ensureCaptureFolderPath)
+// 프론트엔드 페이로드는 이미지와 서버가 발급한 주문ID·세션ID·세션토큰을 함께 보낸다.
+// 폴더 좌표는 클라이언트 값이 아니라 세션에 고정된 sheetId/tabName만 사용한다.
+// tab_configs.capture_folder_url이 없으면 ensureCaptureFolderPath로 만들고 서버가 직접 저장한다.
 // ═══════════════════════════════════════════════════════════
 router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
   try {
-    const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId, savedCaptureFolderUrl } = req.body;
+    const { imageBase64, mimeType, fileName, displayName, round,
+            orderSubmissionId, captureSessionId, captureSessionToken } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
+
+    // 구매캡처는 서버가 주문 응답으로 발급한 세션과 주문 ID가 모두 맞아야 한다.
+    // 이름·최근시각 추정이나 클라이언트가 보낸 폴더 URL은 신뢰하지 않는다.
+    const uploadCtx = await purchaseSessions.inspectForUpload({
+      sessionId: captureSessionId,
+      sessionToken: captureSessionToken,
+      orderSubmissionId,
+    });
+    if (!uploadCtx.ok) {
+      return res.status(403).json({ ok: false, code: uploadCtx.code, error: '구매캡처 제출 세션이 유효하지 않습니다. 구매양식을 다시 열어주세요.' });
+    }
+    if (uploadCtx.alreadyCompleted) {
+      return res.json({ ok: true, alreadyCompleted: true, fileId: uploadCtx.captureFileId });
+    }
+    const claimed = await purchaseSessions.markUploading({ sessionId: captureSessionId, orderSubmissionId });
+    if (!claimed) {
+      return res.status(409).json({ ok: false, code: 'capture_upload_in_progress', retryable: true, error: '같은 구매캡처가 이미 업로드 중입니다.' });
+    }
+    const sheetId = uploadCtx.captureSheetId;
+    const tabName = uploadCtx.captureTabName;
 
     const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
@@ -1337,16 +1354,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     let targetFolderId = null;
     let captureFolderUrl = null;
 
-    // STEP 1: savedCaptureFolderUrl (프론트엔드 전달)
-    if (savedCaptureFolderUrl) {
-      targetFolderId = driveService.extractFolderIdFromUrl(savedCaptureFolderUrl);
-      if (targetFolderId) {
-        captureFolderUrl = savedCaptureFolderUrl;
-        logger.info(`[image-upload] savedCaptureFolderUrl 사용: ${targetFolderId}`);
-      }
-    }
-
-    // STEP 2: tab_configs.capture_folder_url (DB)
+    // STEP 1: 세션에 고정된 작업의 tab_configs.capture_folder_url
     if (!targetFolderId && sheetId && tabName) {
       const { rows } = await pool.query(
         'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
@@ -1361,11 +1369,11 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       }
     }
 
-    // STEP 3: 자동 생성 (3단계 구조: 시트제목 → 탭명 → [구매캡처])
+    // STEP 2: 자동 생성 (3단계 구조: 시트제목 → 탭명 → [구매캡처])
     if (!targetFolderId) {
       try {
         // 시트 제목 조회
-        let sheetTitle = displayName || tabName || '기타';
+        let sheetTitle = tabName || '기타';
         if (sheetId) {
           try {
             // campaign_name에서 먼저 조회
@@ -1401,7 +1409,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
         }
       } catch (folderErr) {
         logger.error(`[image-upload] 폴더 생성 실패: ${folderErr.message}`);
-        targetFolderId = rootFolderId;
+        throw folderErr;
       }
     }
 
@@ -1412,7 +1420,12 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     }
 
     // ── 3단계: 중복 파일 처리 (동일 이름 → 휴지통 이동) ──
-    const finalFileName = fileName || `캡처_${Date.now()}.jpg`;
+    const rawName = String(fileName || '주문캡처.jpg');
+    const dot = rawName.lastIndexOf('.');
+    const baseName = (dot > 0 ? rawName.slice(0, dot) : rawName).slice(0, 80) || '주문캡처';
+    const ext = (dot > 0 ? rawName.slice(dot + 1) : 'jpg').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'jpg';
+    // 같은 주문의 네트워크 재시도는 같은 파일명으로 수렴하고, 동명이인의 파일은 충돌하지 않는다.
+    const finalFileName = `${baseName}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}.${ext}`;
     try {
       await driveService.trashDuplicateFile(targetFolderId, finalFileName);
     } catch (trashErr) {
@@ -1426,55 +1439,56 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 
     logger.info(`[image-upload] 업로드 완료: ${uploaded.name} → ${uploaded.id}`);
 
-    // ── 캡처↔주문 연결(062, best-effort) — "캡처 미첨부" 감지·중요알림의 근거 ──
-    //   ① orderSubmissionId 직접 연결(신형 프론트) ② 없으면 같은 탭 최근 24h 동일 수취인/주문자 폴백.
-    //   실패해도 업로드 자체는 유효(연결은 관측용 메타데이터).
+    // ── 캡처↔주문 연결 — 세션+주문ID 정확일치, 주문 단위 직렬화 ──
+    let finalLinkedFileId = uploaded.id;
     try {
-      const osId = String(req.body.orderSubmissionId || '').trim();
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(osId)) {
-        await pool.query(
-          `UPDATE order_submissions SET capture_file_id = $2, capture_uploaded_at = NOW()
-            WHERE id = $1 AND capture_uploaded_at IS NULL`,
-          [osId, uploaded.id]
-        );
-      } else if (sheetId && tabName && finalFileName) {
-        // 파일명 규칙: {수취인}.ext 또는 {수취인}_{주문자}.ext (search-app.js) → 첫 토큰이 수취인
-        const nameBase = String(finalFileName).replace(/\.[^.]+$/, '').split('_')[0].replace(/\s+/g, '');
-        if (nameBase) {
-          await pool.query(
-            `UPDATE order_submissions SET capture_file_id = $3, capture_uploaded_at = NOW()
-              WHERE id = (SELECT id FROM order_submissions
-                           WHERE sheet_id = $1 AND tab_name = $2
-                             AND capture_uploaded_at IS NULL AND deleted_at IS NULL
-                             AND submitted_at > NOW() - interval '24 hours'
-                             AND (replace(COALESCE(recipient, ''), ' ', '') = $4
-                                  OR replace(COALESCE(orderer, ''), ' ', '') = $4)
-                           ORDER BY submitted_at DESC LIMIT 1)`,
-            [sheetId, tabName, uploaded.id, nameBase]
-          );
-        }
+      const linked = await purchaseSessions.completeCapture({
+        sessionId: captureSessionId,
+        sessionToken: captureSessionToken,
+        orderSubmissionId,
+        captureFileId: uploaded.id,
+      });
+      if (!linked.ok) throw Object.assign(new Error(linked.code), { code: linked.code });
+      finalLinkedFileId = linked.captureFileId || uploaded.id;
+      // 다른 세션이 먼저 같은 주문을 완료했으면 이번에 올라간 패배 파일만 휴지통으로 보낸다.
+      if (linked.alreadyCompleted && linked.captureFileId && linked.captureFileId !== uploaded.id) {
+        try { await driveService.trashFiles([{ id: uploaded.id, name: uploaded.name }]); }
+        catch (cleanupErr) { logger.warn(`[image-upload] 동시 업로드 패배 파일 정리 실패: ${cleanupErr.message}`); }
       }
     } catch (linkErr) {
-      logger.warn(`[image-upload] 캡처↔주문 연결 실패(무시): ${linkErr.message}`);
+      await purchaseSessions.markFailed({ sessionId: captureSessionId, orderSubmissionId, code: linkErr.code || 'db_link_failed' });
+      logger.error(`[image-upload] 캡처↔주문 연결 실패: ${linkErr.message}`);
+      return res.status(503).json({
+        ok: false,
+        code: 'capture_link_failed',
+        retryable: true,
+        error: '캡처 파일은 임시 저장됐지만 주문 연결에 실패했습니다. 다시 시도해주세요.',
+      });
     }
 
     // ── SSE 알림 ──
     emitImageUpload({
       fileName: uploaded.name,
-      fileId: uploaded.id,
+      fileId: finalLinkedFileId,
       tabName: tabName || '',
       displayName: displayName || '',
     });
 
     res.json({
       ok: true,
-      fileId: uploaded.id,
+      fileId: finalLinkedFileId,
+      alreadyCompleted: finalLinkedFileId !== uploaded.id,
       fileName: uploaded.name,
       webViewLink: uploaded.webViewLink || '',
       webContentLink: uploaded.webContentLink || '',
       captureFolderUrl: captureFolderUrl || '',
     });
   } catch (err) {
+    await purchaseSessions.markFailed({
+      sessionId: req.body && req.body.captureSessionId,
+      orderSubmissionId: req.body && req.body.orderSubmissionId,
+      code: err.code || 'upload_failed',
+    });
     logger.error(`[image-upload] ${err.message}`);
     logAbnormal({
       flow: 'order_submit', step: 'image_upload', source: 'external_api', error: err,

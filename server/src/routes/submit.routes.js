@@ -20,6 +20,7 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 // ═══════════════════════════════════════════════════════════
 const { requiredSlotKeys, effectiveCaptureSlots } = require('../utils/captureSlots');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
+const purchaseSessions = require('../services/purchaseSubmissionSession.service');
 
 // ═══════════════════════════════════════════════════════════
 // 블로그체험단(099) — memo 가 들어갈 열은 종류에 따라 우선순위가 다르다.
@@ -927,6 +928,20 @@ async function _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx }) {
   };
 }
 
+async function _issueCaptureSession(orderSubmissionId, target, source = 'order_submit') {
+  try {
+    return await purchaseSessions.issueForOrder({
+      orderSubmissionId,
+      captureSheetId: target && target.sheetId || '',
+      captureTabName: target && target.tabName || '',
+      source,
+    });
+  } catch (err) {
+    logger.error(`[submit/order] 구매캡처 세션 발급 실패(주문은 저장됨): ${err.message}`);
+    return null;
+  }
+}
+
 router.post('/order', async (req, res, next) => {
   try {
     const b = req.body;
@@ -976,9 +991,15 @@ router.post('/order', async (req, res, next) => {
     if (holdCtx && holdCtx.doneKind) {
       logger.info(`[submit/order] 멱등 통과(이미 접수된 홀드) app=${holdCtx.applicationId} ` +
         `kind=${holdCtx.doneKind} os=${holdCtx.doneOrderId}`);
+      const captureSession = await _issueCaptureSession(
+        holdCtx.doneOrderId,
+        orderScope.worktable || orderScope,
+        'order_retry'
+      );
       return res.json({
         ok: true, alreadySubmitted: true, dbSaved: true, sheetsWritten: false, queued: false,
         orderSubmissionId: holdCtx.doneOrderId, mirrorStatus: '',
+        captureSession,
         campaignHold: holdCtx.doneKind,     // 'confirmed' | 'late' — 부모 화면이 거짓말하지 않게
       });
     }
@@ -1182,6 +1203,7 @@ router.post('/order', async (req, res, next) => {
     // 빈 슬롯 하나를 즉시 선점한다. sheetRow가 없는 것은 정상이며 서비스가 원자적으로 배정한다.
     let sheetlessDone = null;
     let queued = false;
+    let captureTarget = orderScope.worktable || orderScope;
     if (orderScope.sheetless) {
       if (queuedWorkboardApply) {
         try {
@@ -1218,6 +1240,7 @@ router.post('/order', async (req, res, next) => {
               loginPhone8: loginPhone8 || '', loginName: loginName || '',
             })
           : { ok: false, reason: 'no_worktable_mapping' };
+        if (wt) captureTarget = wt;
       } catch (slErr) {
         sheetlessDone = { ok: false, reason: 'exception', message: slErr.message };
       }
@@ -1300,6 +1323,7 @@ router.post('/order', async (req, res, next) => {
       });
     }
 
+    const captureSession = await _issueCaptureSession(ledger.orderSubmissionId, captureTarget, 'order_submit');
     res.json({
       ok: true,
       dbSaved: true,
@@ -1309,6 +1333,7 @@ router.post('/order', async (req, res, next) => {
       slotRowNumber: slotRowNumber ? parseInt(slotRowNumber) : null,
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
+      captureSession,
       // 무시트는 DB 작업보드 기록까지 성공한 경우에만 완결이다.
       mirrorStatus: queuedWorkboardApply ? (queued ? 'queued' : 'failed')
         : orderScope.sheetless ? (sheetlessDone && sheetlessDone.ok ? 'written' : 'failed')
