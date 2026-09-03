@@ -1249,7 +1249,11 @@ async function getCampaignDetail(req, res, next) {
       // 리뷰어앱 공고수정 스코프 토큰 = 프리필 필요 필드만(민감/구조필드 미노출, 레드팀 #4)
       return res.json({ ok: true, data: _scopedEditorView(rows[0]) });
     }
-    if (_isAdminReq(req)) {
+    const isAdminDetail = _isAdminReq(req);
+    if (isAdminDetail) {
+      // 이 뒤의 옵션·구간·작업보드 추가 조회가 실패해도, 이미 검증된 관리자 상세 요청이라는
+      // 사실을 오류 미들웨어에 전달한다. HTTP 입력으로 만들 수 없는 서버 전용 own-property다.
+      Object.defineProperty(req, '_trustedCampaignAdminError', { value: true, enumerable: false });
       // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필) + 리뷰비 구간(082)
       const options = await _loadOptionsRaw(pool, id);
       const feeSchedules = await _loadFeeSchedules(pool, id);
@@ -1685,7 +1689,9 @@ async function _applyParticipation(req, res, next, campPre) {
     // 동시에 통과할 수 있다. 탭 키 xact 락으로 표 기준 일일 정원 판정을 하나로 직렬화한다.
     if (camp.linked_sheet_id && camp.linked_tab_name) {
       await client.query(
-        `SELECT pg_advisory_xact_lock(hashtext('camp_tab_daily:' || $1::text || E'\\000' || $2::text))`,
+        // 두 int 키 advisory lock: 작업표 ID에는 네임스페이스를 붙이고, 탭명은 별도 키로 둔다.
+        // PostgreSQL text에는 NUL(0x00)을 넣을 수 없으므로 문자열 구분자로 E'\\000'을 쓰면 안 된다.
+        `SELECT pg_advisory_xact_lock(hashtext('camp_tab_daily:' || $1::text), hashtext($2::text))`,
         [camp.linked_sheet_id, camp.linked_tab_name]);
     }
     const countsMap = await fetchCampaignCounts(client, [id], now);

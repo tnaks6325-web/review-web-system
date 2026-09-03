@@ -25,8 +25,8 @@ const t = (name, fn) => { try { fn(); console.log('ok -', name); } catch (e) { f
 t('★ 이 검사의 전제 — errorHandler 는 실패를 HTTP 200 + { error } 로 돌려준다', () => {
   if (!/res\.status\(200\)\.json\(\{\s*\n?\s*error:/.test(errMw))
     throw new Error('errorHandler 가 200+{error} 를 돌려주지 않는다면 이 가드의 전제가 바뀐 것이다 — 저장 판정도 함께 재검토할 것');
-  if (!/req\.path\.startsWith\('\/api\/campaign\/'\)/.test(errMw))
-    throw new Error('/api/campaign/ 이 isAdminApi 에서 빠지면 사유가 마스킹돼 화면이 원인을 못 말한다');
+  if (!/isCampaignAdminRequest[\s\S]{0,180}req\.path\.startsWith\('\/api\/campaign\/'\)[\s\S]{0,80}req\.admin/.test(errMw))
+    throw new Error('관리자 캠페인 요청만 원문 오류를 받고, 공개 참여 요청은 마스킹해야 한다');
 });
 
 t('저장 응답은 본문으로 판정한다 — ok:false 또는 error 면 실패', () => {

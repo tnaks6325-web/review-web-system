@@ -31,6 +31,14 @@ ok('045: 스윕 부분 인덱스 존재', /idx_campaign_apps_sweep[\s\S]*?WHERE 
 // 레드 #3: apply 잠금 계층(캠페인 행 직렬화 → write-skew 차단)
 ok('apply: 캠페인 행 FOR UPDATE', /_applyParticipation[\s\S]*?FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(routes));
 ok('apply: phone8 advisory xact lock', /pg_advisory_xact_lock\(hashtext\('camp_hold_phone:/.test(routes));
+// 공유 작업표의 재발행 공고끼리도 일일 정원 판정을 직렬화한다. PostgreSQL text에는
+// NUL(0x00)을 넣을 수 없으므로, 두 int-key advisory lock으로 식별한다.
+const tabDailyLockStart = routes.indexOf("pg_advisory_xact_lock(hashtext('camp_tab_daily:'");
+const tabDailyLock = tabDailyLockStart < 0 ? '' : routes.slice(tabDailyLockStart, tabDailyLockStart + 260);
+ok('apply: 공유 작업표 일일 정원 advisory lock',
+  tabDailyLock.includes("pg_advisory_xact_lock(hashtext('camp_tab_daily:' || $1::text), hashtext($2::text))"));
+ok('apply: 작업표 잠금 SQL에 NUL 구분자를 만들지 않음',
+  !tabDailyLock.includes("E'\\\\000'") && !tabDailyLock.includes('\u0000'));
 ok('apply: 23505 백스톱(duplicate_hold)', /duplicate_hold/.test(routes));
 ok('apply: 재참여 전 만료 applied 홀드를 같은 grace 경계로 정리',
   /UPDATE campaign_applications[\s\S]*?SET status = 'expired'[\s\S]*?expires_at <= NOW\(\) - make_interval[\s\S]*?HOLD_GRACE_SEC/.test(routes));
