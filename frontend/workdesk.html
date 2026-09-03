@@ -5715,7 +5715,8 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t
   _wtOpen(t);         // ★ 작업을 여는 모든 경로(그룹 탭·검색·홈 목록·딥링크)가 여기로 수렴 → 열린 줄에 추가
   $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
-  renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t); }
+  // 주문 반영 직후에도 같은 URL을 다시 읽으므로, 이전 응답을 재사용하지 않고 최신 작업표를 받는다.
+  renderWorkdesk(await api('/api/trackb/workdesk?'+q,{cache:'no-store'})); loadParity(t); }
 // 선택된 작업이 소속한 시트제목 — 상단 2단 탭에서 뺀 정보를 여기서 한 번만 보여준다.
 //   탭 객체의 값이 없으면 sheetMap 폴백(관측·업체관리에서 넘어온 탭도 표기되게).
 /* ★★ 무시트 작업에는 시트 제목을 그리지 않는다(사용자 확정 2026-08-23).
@@ -16032,7 +16033,7 @@ function openExternalManualOrder(){
 }
 async function reloadWorkdesk(){ _clearCellUndoHistory(); const t=STATE.cur; if(!t)return;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
-  renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t);
+  renderWorkdesk(await api('/api/trackb/workdesk?'+q,{cache:'no-store'})); loadParity(t);
 }
 // ── 행 상세 펼치기: 제출한 구매양식 원본(DB) + 시트 행 전체 ──
 function _dpair(k,v){ const s=(v==null?'':String(v)); return `<div class="dpair"><span class="dk">${esc(k)}</span><span class="dv">${esc(s)||'—'}</span></div>`; }

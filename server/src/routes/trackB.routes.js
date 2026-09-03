@@ -1071,6 +1071,8 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
     // ★ brandId 는 **토큰에서만**(IDOR 차단) — 작업 조건 카드의 담당 행이 세션 종류로 갈린다(136).
     const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, brandId: (req.admin && req.admin.brand_id) || null, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
+    // 인증된 작업표는 주문·셀 편집 직후에도 URL이 같으므로 어떤 캐시도 이전 합성 결과를 재사용하지 않는다.
+    res.set('Cache-Control', 'private, no-store');
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
