@@ -7268,19 +7268,17 @@ async function refreshUnseen(){
 // 초밀도 최소폭: 짧은 열은 콘텐츠 기준으로 대폭 축소, 긴 열(주소 등)은 자동 레이아웃이 콘텐츠만큼 확장(무잘림).
 // table-layout:fixed에서 이 값은 '실제 열 너비'(auto 시절엔 최소폭). 신원열(참여자/연락처)은 이름+배지·번호가 안 잘리게 여유, 데이터열은 초밀도 유지(초과분 …+툴팁).
 // 구매일자=73("12/31 (월)" 핏)·연락처=120(phone "010-0000-0000" + 좌우 여백, 가운데 정렬)·주소=450(전체표시) — 요청 반영. 모든 열이 고정폭(유동 열 없음).
-const _COLW={'#':35,'참여자':105,'연락처':120,'번호':43,'담당자':56,'구매일자':73,'인애드명단':74,'주문자제출':74,'수취인':62,'id':102,'주소':450,'은행':88,'계좌번호':114,'예금주':60,'결제금액':66,'리뷰제출':102,'입금':96,'주문번호':121,'비고(닉네임)':84};
+const _GRID_CELL_PAD=19; const _GRID_HEAD_PAD=29;
+const _GRID_BODY_FONT='12px Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif';
+const _GRID_HEAD_FONT='700 10.5px Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif';
+let _gridMeasureCtx=null; const _gridMeasureCache=new Map();
+// 컬럼 폭 = 헤더와 전체 작업보드에서 가장 긴 표시값. 필터/정렬은 폭을 바꾸지 않는다.
+function _gridTextPx(value,font){ const text=String(value==null?'':value).replace(/\s+/g,' '),key=font+'\\0'+text; if(_gridMeasureCache.has(key))return _gridMeasureCache.get(key); let width=0; try{if(!_gridMeasureCtx&&typeof document!=='undefined')_gridMeasureCtx=document.createElement('canvas').getContext('2d');if(_gridMeasureCtx){_gridMeasureCtx.font=font;width=_gridMeasureCtx.measureText(text).width;}}catch(_){} if(!width)width=[...text].reduce((sum,ch)=>sum+(ch.charCodeAt(0)>255?12:7.2),0);_gridMeasureCache.set(key,width);return width;}
+function _gridAutoColumnWidths(wd,cols){const widths=new Map(),rows=Array.isArray(wd&&wd.roster)?wd.roster:[];(cols||[]).forEach(c=>{const h=c.key;let widest=_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD;rows.forEach(r=>{widest=Math.max(widest,_gridTextPx(gCellDisp(r,h),_GRID_BODY_FONT)+_GRID_CELL_PAD);});widths.set(h,Math.ceil(widest));});return widths;}
 // 광고주 그리드 전용 폭(한 줄 표시) — 내부 그리드(_COLW)와 분리. 각 값의 최대 표기와 셀 좌우 여백을 포함한다.
 //   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=680px로 긴 도로명 주소도 한 줄로 우선 표시한다.
 //   _fitGrid가 표폭을 이 합으로 고정하므로, 좁은 화면은 값이 줄바꿈되지 않고 가로 스크롤로 전체를 볼 수 있다.
-const _ADV_COLW={'#':32,'번호':40,'구매일자':76,'주문번호':128,'수취인':72,'연락처':128,'주소':680,'택배송장':160,'결제금액':80,'리뷰제출':112,'리뷰제출일':112,'입금':88,'입금일':88};
-function _colW(h){
-  if(typeof h==='string' && h.indexOf('ccol:')===0) return 130;   // 커스텀 열(자유메모) 고정폭 — 역할 무관
-  if(STATE.role==='advertiser'){
-    if(/아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i.test(String(h==null?'':h))) return 112;  // ID열(시트명 다양)
-    return _ADV_COLW[h]!=null?_ADV_COLW[h]:(_COLW[h]||76);
-  }
-  return _COLW[h]||76;
-}
+function _colW(h){ const widths=STATE.gColWidths; return widths instanceof Map&&widths.has(h)?widths.get(h):Math.ceil(_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD); }
 // 커스텀 열 표시명(원본 시트 헤더는 그대로 key=label, 커스텀 열은 id 대신 사용자가 지은 이름을 보여준다).
 function _colLabel(key){
   if(typeof key==='string' && key.indexOf('ccol:')===0){
@@ -7567,6 +7565,7 @@ function buildGrid(wd){
   const cols0=[...idCols, ...H.map(h=>({key:h,kind:'col'})), ...customCols];
   const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
   const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
+  STATE.gColWidths=_gridAutoColumnWidths(wd,vcols);                            // 내부·업체용 공통: 최장 표시값 폭
   const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
   const fset=new Set(['참여자','연락처', ...H.slice(0, fzIdx+1)]);             // 고정 대상 집합(key)
   let frozenN=0; for(const c of vcols){ if(fset.has(c.key)) frozenN++; else break; } // 표시 컬럼 기준 연속 고정 접두수
@@ -8055,6 +8054,7 @@ function _paintGridCell(r, field, td){
     td.classList.remove('edited'); td.classList.toggle('gempty', !disp);
     td.setAttribute('data-val', disp); td.setAttribute('title', disp||'');
     td.innerHTML=esc(disp||'—');
+    _syncGridColumnWidths();
     return;
   }
   if(field.indexOf('col:')!==0) return;
@@ -8070,6 +8070,16 @@ function _paintGridCell(r, field, td){
   td.setAttribute('data-val', editv!=null?editv:disp);   // 편집 대상 값(다음 클릭 시 입력 초기값)
   td.setAttribute('title', disp||'');   // 축약된 전체값 = 호버 툴팁
   td.innerHTML=`${esc(disp||'—')}${hasHist?_ehistMark(r.id, field):''}`;
+  _syncGridColumnWidths();
+}
+// 인라인 편집 뒤에는 표를 다시 만들지 않고 폭/고정열 오프셋만 갱신해 다음 셀 이동을 보존한다.
+function _syncGridColumnWidths(){
+  const wd=STATE.wd,cols=STATE.gVCols,tbl=document.querySelector('.gridscroll table.sheetgrid');
+  if(!wd||!Array.isArray(cols)||!tbl)return;
+  STATE.gColWidths=_gridAutoColumnWidths(wd,cols);
+  const head=tbl.tHead&&tbl.tHead.rows[0];if(!head)return;let left=0;
+  cols.forEach((c,i)=>{const w=_colW(c.key),frozen=!!(head.cells[i]&&head.cells[i].classList.contains('gfz'));tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${i+1})`).forEach(cell=>{cell.style.minWidth=w+'px';cell.style.width=w+'px';if(frozen)cell.style.left=left+'px';});if(frozen)left+=w;});
+  _fitGrid();
 }
 const _CELL_UNDO_MAX=100;
 const _cellUndoStack=[];
