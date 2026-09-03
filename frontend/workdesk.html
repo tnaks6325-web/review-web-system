@@ -1832,8 +1832,9 @@
   .tp3grid.c3.fold .tp3col{padding-bottom:0}
   .tp3grid.c3.fold .tp3col > :not(.tp3t){display:none}
   .tp3grid.c3.fold .tp3col .tp3t{margin-bottom:0}
-  /* 미리보기는 접혀도 같은 11px/13px 여백과 40px 제목행을 유지해 제목이 흔들리지 않는다. */
-  .tp3grid.c3.fold .rvpane .rvfill{position:static;padding:11px 13px}
+  /* 미리보기는 접혀도 같은 상단·가로 여백과 40px 제목행을 유지해 제목이 흔들리지 않는다.
+     아래 여백은 없애 단일 열에서도 다른 접힌 카드와 높이가 정확히 맞는다. */
+  .tp3grid.c3.fold .rvpane .rvfill{position:static;padding:11px 13px 0}
   .tp3grid.c3.fold .rvfill > :not(.rvhd){display:none}
   .tp3grid.c3.fold .rvfill .rvhd{margin-bottom:0}
   .tp3grid.c3.fold .wdcsmini-pane{height:auto;max-height:none;min-height:0}
