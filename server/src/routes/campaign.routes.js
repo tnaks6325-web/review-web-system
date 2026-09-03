@@ -296,6 +296,35 @@ async function _saveCampaignOptions(campaignId, options) {
   }
 }
 
+// 실제 상품명·주문·참여 이력과 분리된, 작업보드 탭 전용 표시값이다.
+// 빈 값은 별칭 해제이며 화면은 기존 상품명으로 폴백한다.
+function _normalizeWorkboardDisplayName(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function _saveWorkboardDisplayName({ sheetId, tabName, displayName }) {
+  const sid = String(sheetId || '').trim();
+  const tab = String(tabName || '').trim();
+  const name = _normalizeWorkboardDisplayName(displayName);
+  if (!sid || !tab) throw new Error('작업보드 표시명은 연결된 작업보드에서만 설정할 수 있습니다.');
+  if (name.length > 100) throw new Error('작업보드 표시명은 100자 이하로 입력해주세요.');
+  const { rows } = await pool.query(
+    `INSERT INTO tab_configs (sheet_id, tab_name, workboard_display_name, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+       workboard_display_name = EXCLUDED.workboard_display_name,
+       updated_at = NOW()
+     RETURNING workboard_display_name`,
+    [sid, tab, name]
+  );
+  return (rows[0] && rows[0].workboard_display_name) || '';
+}
+
 /**
  * ★★ 공고 옵션 ↔ 작업표 옵션 칸 정합 (2026-08-20 실측 사고) ─────────────────────
  * 작업표 열 구성(`worktablePlan.buildColumns`)은 **작업오더의 옵션만** 본다 —
@@ -1144,6 +1173,20 @@ async function getCampaignDetail(req, res, next) {
       // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필) + 리뷰비 구간(082)
       const options = await _loadOptionsRaw(pool, id);
       const feeSchedules = await _loadFeeSchedules(pool, id);
+      // 표시명은 탭 설정에만 저장한다. 공고 행에 중복 저장하면 실제 상품명과 역할이 섞인다.
+      let workboardDisplayName = '';
+      if (rows[0].linked_sheet_id && rows[0].linked_tab_name) {
+        try {
+          const { rows: tabRows } = await pool.query(
+            `SELECT COALESCE(workboard_display_name, '') AS name
+               FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+            [rows[0].linked_sheet_id, rows[0].linked_tab_name]
+          );
+          workboardDisplayName = String((tabRows[0] && tabRows[0].name) || '');
+        } catch (e) {
+          logger.warn(`[campaign] 작업보드 표시명 조회 실패 camp=${id}: ${e.message}`);
+        }
+      }
       /* ★★ 혼합 조합 프리필 보완(2026-08-21) — `review_type_mix`(106)는 2026-08-20 에 생긴
          컬럼이고 **백필이 없다**. 그 전에 발행된 혼합 공고는 조합이 통째로 빈 배열이라
          수정 화면이 전부 0 으로 열리고, 혼합 저장 검증(두 유형 이상)에 막혀 손댈 수가 없다.
@@ -1219,7 +1262,7 @@ async function getCampaignDetail(req, res, next) {
       } catch (e) {
         logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일·안내값) 실패 camp=${id}: ${e.message}`);
       }
-      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock });
+      return res.json({ ok: true, data: { ...rows[0], workboard_display_name: workboardDisplayName }, options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock });
     }
     const now = new Date();
     const row = rows[0];
@@ -2345,6 +2388,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       carry_strategy, // ★ 139: next|spread|extend — 공고 설정의 실제 이월 배치 규칙
       work_kind, // ★ 099: 체험단 종류(review|blog) — 빈 값=리뷰체험단(기존 동작). 블로그면 리뷰타입 미사용
       cash_receipt_required, // 모집공고 직접 설정 — 무시트 공고도 구매 안내·배지에 반영
+      workboard_display_name, // 탭 단위 표시 별칭(실제 상품명·주문/참여 이력은 무접촉)
       // ★ 135: 회수·혼합 부속정보. 배송유형이 그 기본형일 때만 저장하고, 아니면 비운다
       //   (작업오더 접수의 _deliveryMixJson·_recallFields 와 같은 규율 — 유형을 바꾸면
       //    옛 조합이 남아 작업표가 유령 배분을 돈다).
@@ -2402,6 +2446,14 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const effectiveSkipWeekends = sourceWorkOrder
       ? sourceWorkOrder.skipWeekends
       : requestedSkipWeekends;
+    const hasWorkboardDisplayName = Object.prototype.hasOwnProperty.call(req.body, 'workboard_display_name');
+    const workboardDisplayName = _normalizeWorkboardDisplayName(workboard_display_name);
+    if (hasWorkboardDisplayName && workboardDisplayName.length > 100) {
+      return res.status(400).json({ ok: false, error: '작업보드 표시명은 100자 이하로 입력해주세요.' });
+    }
+    if (hasWorkboardDisplayName && (!lSheet || !lTab)) {
+      return res.status(400).json({ ok: false, error: '작업보드 표시명은 연결된 작업보드에서만 설정할 수 있습니다.' });
+    }
 
     /* ★ 127: 블로그 공고의 일건수 정규화 — 블로그는 '그날 정원' 개념이 없다(구매일 미정·승인제).
        일건수가 비면 총모집(무제한이면 9999)으로 채워 활성화 게이트·상태엔진(daily_done 판정)이
@@ -2490,6 +2542,9 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
+    if (hasWorkboardDisplayName) {
+      rows[0].workboard_display_name = await _saveWorkboardDisplayName({ sheetId: lSheet, tabName: lTab, displayName: workboardDisplayName });
+    }
     if (normOpts) await _ensureLinkedWorktableOptionColumn(rows[0].id, 'create');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     if (normOpts) await _ensureLinkedWorktableProductColumn(rows[0].id, 'create');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
     await _ensureLinkedWorktableDeliveryColumns(rows[0].id, 'create');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
@@ -2562,6 +2617,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       carry_mode, // ★ 098: 이월 반영 방식 'auto'|'hold' — undefined=유지
       carry_strategy, // ★ 139: 이월 배치 전략 next|spread|extend — undefined=유지
       cash_receipt_required, // undefined=유지 / true·false=모집공고 직접 설정
+      workboard_display_name, // undefined=유지 / ''=표시명 해제(실제 상품명으로 폴백)
       skip_weekends, // undefined=유지 / true·false=주말 게시 직접 설정
       // ★ 135: 회수·혼합 부속정보 — undefined=유지(부속 칸 없는 화면이 저장해도 안 지워진다).
       delivery_type_mix, recall_courier, recall_product,
@@ -2731,6 +2787,22 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         }
       } catch (e) {
         logger.warn(`[campaign] 연결탭 보정 조회 실패(무시): ${e.message}`);
+      }
+    }
+    const hasWorkboardDisplayName = Object.prototype.hasOwnProperty.call(req.body, 'workboard_display_name');
+    const workboardDisplayName = _normalizeWorkboardDisplayName(workboard_display_name);
+    if (hasWorkboardDisplayName && workboardDisplayName.length > 100) {
+      return res.status(400).json({ ok: false, error: '작업보드 표시명은 100자 이하로 입력해주세요.' });
+    }
+    if (hasWorkboardDisplayName) {
+      const { rows: displayScopeRows } = await pool.query(
+        'SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1', [id]
+      );
+      const displayScope = displayScopeRows[0] || {};
+      const displaySheet = intentionallyUnlinked ? '' : (lSheet || displayScope.linked_sheet_id || '');
+      const displayTab = intentionallyUnlinked ? '' : (lTab || displayScope.linked_tab_name || '');
+      if (!displaySheet || !displayTab) {
+        return res.status(400).json({ ok: false, error: '작업보드 표시명은 연결된 작업보드에서만 설정할 수 있습니다.' });
       }
     }
 
@@ -2931,6 +3003,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
+    if (hasWorkboardDisplayName) {
+      rows[0].workboard_display_name = await _saveWorkboardDisplayName({
+        sheetId: rows[0].linked_sheet_id, tabName: rows[0].linked_tab_name, displayName: workboardDisplayName,
+      });
+    }
     if (normOpts) await _ensureLinkedWorktableOptionColumn(id, 'update');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     if (normOpts) await _ensureLinkedWorktableProductColumn(id, 'update');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
     await _ensureLinkedWorktableDeliveryColumns(id, 'update');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)

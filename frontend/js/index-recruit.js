@@ -485,6 +485,7 @@ function onLinkedCampaignChange(camSel) {
   if (!sid) {
     tabSel.innerHTML = `<option value="">② 탭 선택 (캠페인 먼저 선택)</option>`;
     tabSel.disabled = true;
+    _syncWorkboardDisplayNameInput();
     return;
   }
   /* 해당 sheetId의 탭만 필터링 */
@@ -501,6 +502,7 @@ function onLinkedCampaignChange(camSel) {
     tabSel.innerHTML = `<option value="">해당 캠페인에 탭 없음</option>`;
   }
   try { _rfRefreshLinkedTabNote(); } catch (_) {}   // 시트를 바꾸면 탭이 비므로 안내를 다시 판단
+  _syncWorkboardDisplayNameInput();
 }
 
 /* 탭 선택 시 → 연결 정보 표시 */
@@ -526,6 +528,7 @@ function onLinkedTabChange(sel) {
   }
   refreshRecruitCashReceipt();   // 탭이 바뀌면 현금영수증 발행 여부 재판정(읽기 전용 표시)
   refreshOptColumnAudit();       // 탭이 바뀌면 옵션 칸 실태 재조회(자동점검 경고용)
+  _syncWorkboardDisplayNameInput();
 }
 
 /* ═══════════════════════════════════════
@@ -3072,6 +3075,29 @@ function _rfApplyWorkKindUi() {
   } else if (note) note.style.display = "none";
 }
 
+function _ensureWorkboardDisplayNameInput() {
+  let input = document.getElementById('rf_workboard_display_name');
+  if (input) return input;
+  const anchor = document.getElementById('rf_product_main_url') || document.getElementById('rf_opt_wrap');
+  if (!anchor) return null;
+  const row = document.createElement('div');
+  row.className = 'form-row';
+  row.id = 'rf_workboard_display_name_row';
+  row.innerHTML = '<label class="form-label" for="rf_workboard_display_name">작업보드 표시명</label>' +
+    '<div class="form-control"><input id="rf_workboard_display_name" type="text" maxlength="100" placeholder="연결된 작업보드에서만 설정할 수 있습니다.">' +
+    '<span class="rf-help">작업보드의 상품 표기만 바뀌며 주문·리뷰어 이력의 실제 상품명은 유지됩니다.</span></div>';
+  anchor.insertAdjacentElement('afterend', row);
+  return document.getElementById('rf_workboard_display_name');
+}
+
+function _syncWorkboardDisplayNameInput() {
+  const input = _ensureWorkboardDisplayNameInput();
+  if (!input) return;
+  const linked = !!document.getElementById('rf_linked_tab')?.value;
+  input.disabled = !linked;
+  input.placeholder = linked ? '예) 체크오 아르테미스 비타민 300정' : '연결된 작업보드에서만 설정할 수 있습니다.';
+}
+
 async function openRecruitModal(id, prefill, woOrderId) {
   _recruitEditId = id || null;
   _woPrefillOrderId = (!id && woOrderId) ? woOrderId : null;
@@ -3098,6 +3124,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
 
   const modal    = document.getElementById("recruitModal");
   const titleEl  = document.getElementById("recruitModalTitle");
+  const workboardDisplayNameInput = _ensureWorkboardDisplayNameInput();
 
   switchRecruitPane("basic");   // 열 때는 항상 첫 탭 — 지난번 탭이 남으면 어디를 보는지 헷갈린다
 
@@ -3132,6 +3159,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _rfLinkedMiss = null; _rfSugCache = [];
   { const _n = document.getElementById("rf_linked_tab_note"); if (_n) { _n.style.display = "none"; _n.innerHTML = ""; } }
   _populateCampaignSelect();   /* 1단계 캠페인 드롭다운 초기화 */
+  if (workboardDisplayNameInput) workboardDisplayNameInput.value = '';
+  _syncWorkboardDisplayNameInput();
   _syncSourceWorkOrderLinkUi();
 
   /* ⚡ 참여형(M2) 필드 초기화 */
@@ -3261,6 +3290,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _rfLinkedMiss = { source: "campaign", tabName: c.linked_tab_name,
                           sheetId: c.linked_sheet_id || "", orderId: null };
       }
+      if (workboardDisplayNameInput) workboardDisplayNameInput.value = c.workboard_display_name || '';
+      _syncWorkboardDisplayNameInput();
 
       /* ⚡ 참여형(M2) 필드 복원 */
       {
@@ -4982,6 +5013,10 @@ async function saveRecruitPostImpl() {
     // work-detail 유입방식 역조회의 보조키(주: linked_campaign_id). 편집 시엔 미전송=COALESCE 유지.
     source_work_order_id: (!_recruitEditId && _woPrefillOrderId) ? _woPrefillOrderId : undefined,
   };
+  const workboardDisplayNameInput = document.getElementById('rf_workboard_display_name');
+  if (workboardDisplayNameInput && !workboardDisplayNameInput.disabled) {
+    payload.workboard_display_name = workboardDisplayNameInput.value.trim();
+  }
 
   /* 유의사항 — 입력칸이 있는 화면에서만 전송(없으면 미전송 = 서버가 기존 값 유지) */
   {

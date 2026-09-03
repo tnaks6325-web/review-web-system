@@ -2879,6 +2879,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     };
 
     return {
+      workboardDisplayName: String(meta.workboardDisplayName || '').trim() || null,
       productName: (wo && wo.productOption) || meta.campaignName || '',
       /* ★★ 총건수·일건수 = **정원 판정과 같은 값**(사용자 확정 2026-08-21) — 공고 값이 있으면
          그 값, 0(미설정)이면 발주서 값이 **실제 정원으로 적용**된다(campaignState.effectiveQuota).
@@ -2990,7 +2991,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const maskPII = role === 'advertiser';       // 광고주(외부)만 마스킹 · AE(내부)는 전체
   const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin/staff)
   const { rows: meta } = await db.query(
-    `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.manager, tc.review_type AS "reviewType",
+    `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.workboard_display_name AS "workboardDisplayName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
             tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
             tc.tab_gid AS "tabGid", tc.capture_slots AS "captureSlots",
@@ -5343,6 +5344,7 @@ async function _condBrandManagers(manager, { sheetId, tabName, advertiserId = nu
 function _condAdvertiserLens(cd, { brandSession = false } = {}) {
   if (!cd || typeof cd !== 'object') return cd || null;
   return {
+    workboardDisplayName: cd.workboardDisplayName || null,
     productName: cd.productName || '',
     productUrl: cd.productUrl || null,
     schedule: cd.schedule || null,

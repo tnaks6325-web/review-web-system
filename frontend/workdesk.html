@@ -1729,6 +1729,8 @@
   /* ① 작업 조건 10항목 — 작고 조밀하게(11.5px · 줄높이 22px) */
   .cndprod{font-size:12.5px;font-weight:750;line-height:1.35;margin-bottom:7px;
            display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  button.cndprod{width:100%;padding:0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+  button.cndprod:hover{text-decoration:underline;text-decoration-color:#94A3B8}
   .cndl{display:grid;grid-template-columns:62px minmax(0,1fr);gap:0 8px;font-size:11.5px;align-content:start;margin:0}
   .cndl dt{color:var(--faint);font-weight:650;padding:3px 0;border-top:1px solid var(--line)}
   .cndl dd{margin:0;font-weight:700;padding:3px 0;border-top:1px solid var(--line);
@@ -6485,7 +6487,8 @@ function _condCardHtml(wd,d,m){
         라벨만 벗기면 번호가 맨 앞에 남는다.
      ★ 점 뒤 **공백을 필수**로 둔다 — `\d+\.` 만 보면 `1.5L 생수` 같은 상품명의 앞을 잘라먹는다.
      ★ 여기서 URL 꼬리는 건드리지 않는다(요청 범위 밖 · 긴 이름은 `.cndprod` 가 한 줄로 접는다). */
-  const prod=String(cd.productName||d.productOption||m.campaignName||'')
+  const workboardDisplayName=String(cd.workboardDisplayName||'').trim();
+  const prod=workboardDisplayName||String(cd.productName||d.productOption||m.campaignName||'')
     .replace(/^\s*\[상품\/옵션\/금액\]\s*/,'')
     .replace(/^\s*\d{1,3}\.\s+/,'')
     /* ③ URL 꼬리 · ④ 금액/인원/소계 꼬리(사용자 확정 2026-08-23) — 둘 다 **이 카드의 다른 행이
@@ -6498,7 +6501,9 @@ function _condCardHtml(wd,d,m){
     .trim();
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
   return `<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">작업 조건${many}<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
-    `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`+
+    `${(()=>{const gate=_cndFixGate(cd,'displayName');return gate.can
+      ? `<button type="button" class="cndprod" onclick="_cndFix('displayName')" title="${esc(gate.tip)}">${esc(prod)||'<span class="cnna">—</span>'}</button>`
+      : `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`;})()}`+
     `<dl class="cndl">${rows}</dl>${woRows}</div>`;
 }
 /* [미설정] 창구 — 항목마다 **이미 있는 창구**로 보낸다(새 저장 경로 0).
@@ -6522,6 +6527,9 @@ function _cndFixGate(cd,kind){
   if(kind==='order') return cd.campaignId
     ? {can:true,tip:'모집공고 설정을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 반영됩니다.'}
     : {can:true,tip:'모집공고 설정을 엽니다 — 연결 작업오더 값은 미리 채우기만 하며 저장은 공고에 합니다.'};
+  if(kind==='displayName') return cd.campaignId
+    ? {can:true,tip:'모집공고 설정을 엽니다 — 저장하면 이 작업보드의 상품 표기만 변경됩니다.'}
+    : {can:false,tip:'작업보드 표시명은 연결된 모집공고 설정에서 저장할 수 있습니다.'};
   if(kind==='quota'){
     if(cd.campaignId) return {can:true,tip:'모집인원 조절 창을 엽니다 — 정원은 차수·이월·날짜별 조절과 함께 그곳에서 정합니다.'};
     return {can:true,tip:'모집공고 설정을 엽니다 — 연결 작업오더 값은 미리 채우기만 하며 정원은 공고에서 저장합니다.'};
@@ -6549,7 +6557,7 @@ async function _cndFix(kind){
     if(cd.campaignId) return openCurrentCampaignDailyPlan();
     return _cndPublish(cd);                                 // 작업오더 값은 공고 프리필로만 사용
   }
-  if(kind==='order'){
+  if(kind==='order'||kind==='displayName'){
     if(!cd.campaignId) return _cndPublish(cd);
     if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
     return openRecruitModal(String(cd.campaignId));
@@ -7362,6 +7370,14 @@ function _fmtSubmitCell(v){
   return _serialToMDHM(parseFloat(s)) || s;
 }
 
+// 탭 설정의 별칭은 실제 rowJson·참여 원장에는 절대 쓰지 않고, 화면/내려받기용 표기에서만 적용한다.
+function _isWorkboardProductHeader(h){
+  return ['상품','상품명','제품명'].includes(String(h==null?'':h).replace(/\s+/g,''));
+}
+function _workboardDisplayName(){
+  return String(STATE.wd&&STATE.wd.condition&&STATE.wd.condition.workboardDisplayName||'').trim();
+}
+
 function gCellDisp(r,h){
   if(h==='#') return String(r.seq==null?'':r.seq);
   if(typeof h==='string' && h.indexOf('ccol:')===0) return (r.customValues&&r.customValues[h.slice(5)])||'';
@@ -7369,6 +7385,8 @@ function gCellDisp(r,h){
     if(h==='참여자') return r.name||'';
     if(h==='연락처') return _fmtPhone(r.phone8||'');
   }
+  const displayName=_workboardDisplayName();
+  if(displayName&&_isWorkboardProductHeader(h)) return displayName;
   const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
   const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
   const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
