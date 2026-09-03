@@ -653,7 +653,13 @@ async function listActiveTabs({ limit = 500 } = {}) {
                같은 작업이 작업보드 제목과 목록에서 다른 이름으로 보였다(실측: 「맛고」↔「0720수진코리아고양이캔」).
                ★ 빈 값이면 화면이 종전대로 탭 이름으로 접는다(이름이 비는 일은 없다).
                ★ 두 CTE 는 UNION ALL(SELECT *) 이라 **칸 순서가 같아야 한다** — 한쪽만 넣으면 값이 밀린다. */
-            COALESCE(tc.display_name, '') AS "displayName"
+            COALESCE(tc.display_name, '') AS "displayName",
+            /* 최신 작업 정렬은 동기화 시각이 아니라 최초 관측 시각을 쓴다.
+               업체관리의 생성 최신순 근사와 같은 원천이며, 활성 탭 키 인덱스로만 좁힌다. */
+            COALESCE((SELECT MIN(cp.first_seen_at)
+                        FROM campaign_participants cp
+                       WHERE cp.sheet_id = rst.sheet_id AND cp.tab_name = rst.tab_name
+                         AND cp.deleted_at IS NULL), rst.mirrored_at) AS "firstSeenAt"
        FROM raw_sheet_tabs rst
        LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE
@@ -665,7 +671,11 @@ async function listActiveTabs({ limit = 500 } = {}) {
               COALESCE(NULLIF(tc.campaign_name, ''), NULLIF(tc.display_name, ''), tc.tab_name) AS "spreadsheetTitle",
               tc.tab_gid AS "tabGid", tc.tab_name AS "tabName", COALESCE(im.row_count, 0) AS "rowCount",
               TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind",
-              COALESCE(tc.display_name, '') AS "displayName"
+              COALESCE(tc.display_name, '') AS "displayName",
+              COALESCE((SELECT MIN(cp.first_seen_at)
+                        FROM campaign_participants cp
+                       WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
+                         AND cp.deleted_at IS NULL), tc.sheetless_at, tc.updated_at) AS "firstSeenAt"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
         WHERE COALESCE(tc.sheetless, FALSE) = TRUE

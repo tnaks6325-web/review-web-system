@@ -777,7 +777,8 @@
      (.top/.tb1 은 스스로 스크롤하지 않아 padding 방식 유지 — tb1 의 스크롤러는 자식 .segwrap 이라 안전) */
   .tb2    {margin-inline:max(12px, calc((100% - var(--app-max)) / 2))}
   /* 작업보드 상단: 업체목록과 열린탭은 고정하고, 업체별 작업목록은 클릭 시 드롭다운으로만 연다. */
-  .taskbar.wb-topbar{position:relative;background:var(--card);border-bottom:1px solid var(--line)}
+  /* 일반 배치 작업바는 sticky 규칙의 top 오프셋을 물려받으면 헤더 높이만큼 빈칸이 생긴다. */
+  .taskbar.wb-topbar{position:relative;top:auto;background:var(--card);border-bottom:1px solid var(--line)}
   .taskbar.wb-topbar .wb-tier{display:flex;align-items:center;gap:7px;min-height:40px;border-bottom:1px solid var(--line);box-sizing:border-box}
   .taskbar.wb-topbar .wb-company{background:var(--card);padding-block:3px}
   .taskbar.wb-topbar .wb-task{align-items:center;gap:3px;min-height:40px;background:#f9fbfe;margin-inline:max(14px, calc((100% - var(--app-max)) / 2));padding:5px 0;overflow-x:auto}
@@ -5636,6 +5637,9 @@ function _wTabPending(t){
 }
 // 0 = 모집중 · 1 = 모집 종료 + 리뷰 대기 · 2 = 그 외(전건 제출·공고 없음)
 function _wTabRank(t){ return _wTabRecruiting(t) ? 0 : (_wTabPending(t) > 0 ? 1 : 2); }
+// 작업 생성 시각의 단일 재료 = 서버가 보낸 최초 관측 시각. 시트 재동기화 시각으로 정렬하면
+// 오래된 작업도 동기화만으로 위로 올라가므로 쓰지 않는다. 값이 없는 레거시는 원래 목록 순서를 보존한다.
+function _wTabNewestAt(t){ const ms=Date.parse((t&&t.firstSeenAt)||''); return Number.isFinite(ms)?ms:0; }
 /* 업체목록 배치 = 계정 원장. 즐겨찾기와 달리 배열 순서가 의미이므로 Set에 얹지 않는다. */
 function _advOrderLSKey(){ return 'wd_advertiser_order_v1_'+_favUser(); }
 function _advOrderLoadLocal(){ try{ const a=JSON.parse(localStorage.getItem(_advOrderLSKey())||'[]'); return Array.isArray(a)?a.filter(x=>typeof x==='string'&&x):[]; }catch(_){ return []; } }
@@ -5680,12 +5684,12 @@ function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '
   // ★ 마감 작업은 상단 작업바(1·2단)에서 제외 = "작업보드에는 진행 중만"(업체 칩 개수도 자동으로 진행 중 기준).
   //   인덱스는 STATE.tabs 원본 그대로 유지 → selTab(i) 계약 불변(건너뛰기만 한다).
   STATE.tabs.forEach((t,i)=>{ if(isFinished(t)) return; if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
-  // 작업(2단) 정렬: 모집중 → 리뷰 대기 → 나머지. 같은 등급이면 남은 건수가 많은 순,
-  //   그래도 같으면 **원래 순서(인덱스)** 로 = 안정 정렬(재렌더마다 칩이 뒤바뀌지 않는다).
+  // 업체별 작업목록: 즐겨찾기를 언제나 먼저, 그 다음에는 최신 작업부터 보여준다.
+  // 생성 시각이 없는 레거시끼리만 원래 인덱스로 안정 정렬해 재렌더마다 순서가 뒤바뀌지 않는다.
   const sortIdxs = a => a.sort((x,y)=>{
     const tx=STATE.tabs[x], ty=STATE.tabs[y];
-    const rx=_wTabRank(tx), ry=_wTabRank(ty); if(rx!==ry) return rx-ry;
-    const px=_wTabPending(tx), py=_wTabPending(ty); if(px!==py) return py-px;
+    const fx=isFav(tx), fy=isFav(ty); if(fx!==fy) return fx?-1:1;
+    const dx=_wTabNewestAt(tx), dy=_wTabNewestAt(ty); if(dx!==dy) return dy-dx;
     return x-y;
   });
   sortIdxs(favIdx); groups.forEach(sortIdxs);
