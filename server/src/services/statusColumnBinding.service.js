@@ -65,13 +65,41 @@ async function seedV2StatusBindings(db, { sheetId, tabGid, tabName, headers, by 
   return validateV2StatusBindings(headers, stored);
 }
 
-async function loadV2StatusBindings(db, { sheetId, tabGid, headers }) {
+async function loadV2StatusBindings(db, { sheetId, tabGid, tabName = '', headers }) {
+  // 저장된 위치가 우연히 맞더라도, 현재 헤더가 중복/누락이면 상태 열로 쓸 수 없다.
+  // 이 선검증이 없으면 '리뷰'가 두 개인 작업표에서 옛 좌표 하나를 임의로 신뢰하게 된다.
+  const canonical = buildV2StatusBindings(headers);
   const { rows } = await db.query(
     `SELECT role, header_text, col_index FROM tab_status_column_bindings
       WHERE sheet_id=$1 AND tab_gid=$2`, [sheetId, String(tabGid)]
   );
   const stored = Object.fromEntries(rows.map(r => [r.role, { header: r.header_text, colIndex: Number(r.col_index) }]));
-  return validateV2StatusBindings(headers, stored);
+  try {
+    return validateV2StatusBindings(headers, stored);
+  } catch (error) {
+    if (!(error instanceof StatusColumnBindingError) || error.code !== 'v2_status_binding_drift') throw error;
+
+    /*
+     * 열 삽입·이동만으로 저장 좌표가 밀린 경우에는 정확한 상태 열 이름이 각각 하나씩
+     * 존재한다는 사실을 다시 증명한 뒤에만 좌표를 갱신한다. 이름이 누락되거나 중복되면
+     * buildV2StatusBindings가 fail-closed로 중단하므로, 작업지시 열을 상태 열로 추정하지 않는다.
+     */
+    for (const [role, binding] of Object.entries(canonical)) {
+      await db.query(
+        `INSERT INTO tab_status_column_bindings
+           (sheet_id, tab_gid, tab_name, role, header_text, col_index, workboard_schema_version, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,2,'auto-rebind')
+         ON CONFLICT (sheet_id, tab_gid, role) DO UPDATE
+           SET header_text=EXCLUDED.header_text,
+               col_index=EXCLUDED.col_index,
+               workboard_schema_version=2,
+               created_by='auto-rebind',
+               created_at=NOW()`,
+        [sheetId, String(tabGid), tabName, role, binding.header, binding.colIndex]
+      );
+    }
+    return canonical;
+  }
 }
 
 module.exports = { STATUS_HEADERS, StatusColumnBindingError, buildV2StatusBindings, validateV2StatusBindings,

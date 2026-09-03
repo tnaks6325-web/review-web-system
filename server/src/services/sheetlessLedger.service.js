@@ -228,7 +228,7 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
     `SELECT workboard_schema_version FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]
   );
   if (Number(configRows[0] && configRows[0].workboard_schema_version) === 2) {
-    statusBindings = await require('./statusColumnBinding.service').loadV2StatusBindings(db, { sheetId, tabGid, headers });
+    statusBindings = await require('./statusColumnBinding.service').loadV2StatusBindings(db, { sheetId, tabGid, tabName, headers });
   }
   const parsed = _ib.parseTabRows(values, sheetId, tabName, tabGid, campaignName, dbColMap, null, statusBindings) || [];
 

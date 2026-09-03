@@ -655,9 +655,12 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
  */
 const REPAIRABLE_MIRROR_STATUSES = ['failed', 'pending', 'pending_no_row'];
 
-async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 'mirror-repair' } = {}) {
+async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 'mirror-repair', orderSubmissionIds = null } = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
+  const ids = Array.isArray(orderSubmissionIds) && orderSubmissionIds.length
+    ? [...new Set(orderSubmissionIds.map(v => String(v || '').trim()).filter(Boolean))]
+    : null;
   const { rows } = await db.query(
     `SELECT os.id, os.mirror_status, os.tab_name,
             (SELECT MIN(cp.seq) FROM campaign_participants cp
@@ -668,8 +671,9 @@ async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 
         AND os.mirror_status = ANY($1::text[])
         AND EXISTS (SELECT 1 FROM campaign_participants cp
                      WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL)
+        AND ($3::uuid[] IS NULL OR os.id = ANY($3::uuid[]))
       ORDER BY os.submitted_at ASC
-      LIMIT $2`, [REPAIRABLE_MIRROR_STATUSES, lim]);
+      LIMIT $2`, [REPAIRABLE_MIRROR_STATUSES, lim, ids]);
 
   const byStatus = {};
   rows.forEach(r => { byStatus[r.mirror_status] = (byStatus[r.mirror_status] || 0) + 1; });

@@ -70,7 +70,7 @@ async function _v2StatusHeaders(db, { sheetId, tabName }) {
   );
   const headers = Array.isArray(tabRows[0] && tabRows[0].h) ? tabRows[0].h : [];
   const bindings = await require('./statusColumnBinding.service').loadV2StatusBindings(db, {
-    sheetId, tabGid: configs[0] && configs[0].tab_gid, headers,
+    sheetId, tabGid: configs[0] && configs[0].tab_gid, tabName, headers,
   });
   return { submit: bindings.review_submit.header, paid: bindings.payment_status.header };
 }

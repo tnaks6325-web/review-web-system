@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildV2StatusBindings, validateV2StatusBindings, isV2ReviewSubmitted, isV2PaymentSubmitted } = require('../src/services/statusColumnBinding.service');
+const { buildV2StatusBindings, validateV2StatusBindings, isV2ReviewSubmitted, isV2PaymentSubmitted, loadV2StatusBindings } = require('../src/services/statusColumnBinding.service');
 const { parseTabRows } = require('../src/services/columnResolver');
 const { recordDeposits } = require('../src/services/paymentApply.service');
 
@@ -17,6 +17,39 @@ test('v2 상태열은 정확한 헤더·위치만 바인딩한다', () => {
   assert.deepEqual(bindings.review_submit, { header: '리뷰', colIndex: 3 });
   assert.throws(() => validateV2StatusBindings(['번호', '주문자', '리뷰', '리뷰옵션', '입금일'], bindings),
     /변경되어 처리를 중단/);
+});
+
+test('v2 상태열은 정확한 단일 헤더가 이동한 경우에만 좌표를 자동 재동기화한다', async () => {
+  const calls = [];
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    if (/^SELECT role/.test(sql.trim())) {
+      return { rows: [
+        { role: 'review_submit', header_text: '리뷰', col_index: 2 },
+        { role: 'payment_status', header_text: '입금일', col_index: 3 },
+      ] };
+    }
+    return { rows: [] };
+  }};
+  const bindings = await loadV2StatusBindings(db, {
+    sheetId: 's', tabGid: '1', headers: ['번호', '주문자', '신규열', '리뷰', '입금일'],
+  });
+  assert.deepEqual(bindings, {
+    review_submit: { header: '리뷰', colIndex: 3 },
+    payment_status: { header: '입금일', colIndex: 4 },
+  });
+  assert.equal(calls.filter(c => /ON CONFLICT \(sheet_id, tab_gid, role\) DO UPDATE/.test(c.sql)).length, 2);
+});
+
+test('v2 상태열 자동 재동기화는 중복 상태 헤더를 허용하지 않는다', async () => {
+  const db = { query: async () => ({ rows: [
+    { role: 'review_submit', header_text: '리뷰', col_index: 1 },
+    { role: 'payment_status', header_text: '입금일', col_index: 2 },
+  ] }) };
+  await assert.rejects(
+    loadV2StatusBindings(db, { sheetId: 's', tabGid: '1', headers: ['리뷰', '리뷰', '입금일'] }),
+    error => error.code === 'v2_status_binding_missing'
+  );
 });
 
 test('v2는 리뷰옵션·임의 입금 텍스트를 상태로 인정하지 않는다', () => {
