@@ -1902,6 +1902,26 @@ router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, asy
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
+// 공고 설정의 "모집이월 방식"과 [📅 인원] 팝업이 같은 저장값을 쓴다.
+// 계획을 바로 펼칠 수 없는 수동 조절 상태에서도 선택을 잃지 않게 별도 저장한다.
+router.put('/campaigns/:id/carry-strategy', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const campaignId = String(req.params.id);
+    const carryStrategy = String((req.body || {}).carryStrategy || (req.body || {}).carry_strategy || '');
+    if (!['next', 'spread', 'extend'].includes(carryStrategy)) {
+      return res.status(400).json({ ok: false, code: 'bad_carry_strategy', error: '유효하지 않은 모집이월 방식입니다.' });
+    }
+    const { rows } = await pool.query(
+      `UPDATE recruit_campaigns
+          SET carry_strategy = $2, updated_at = NOW()
+        WHERE id = $1
+      RETURNING carry_strategy`,
+      [campaignId, carryStrategy]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, code: 'not_found', error: '캠페인을 찾을 수 없습니다.' });
+    res.json({ ok: true, carryStrategy: rows[0].carry_strategy });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
 router.post('/campaigns/:id/worktable-rebuild', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { rebuildWorktableFromPlans, getPlanOverview } = require('../services/campaignPlan.service');

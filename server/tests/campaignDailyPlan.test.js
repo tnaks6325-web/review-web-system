@@ -163,6 +163,14 @@ const CNT = (over = {}) => ({
   eq('조절 20 다 차면 daily_done', st.state, 'daily_done');
 }
 {
+  // ★ 회귀: 시트 일정이 없는 공고도 0명 계획은 "오늘 모집 완료"가 아니라 휴무다.
+  // 이 분기가 없으면 총 500명 중 252명처럼 남은 자리가 있어도 dailyQuota=0에 걸려
+  // 카드가 오늘 완료·다음 계획일 재오픈으로 잘못 보인다.
+  const st = S.computeCampaignState(CAMP, CNT({ plans: { [today]: 0, [d(1)]: 40 } }));
+  eq('★ 무시트 0명 계획 = 휴무(rest_day)', st.stateReason, 'rest_day');
+  eq('★ 무시트 0명 계획의 다음 진행일', st.nextWorkDate, d(1));
+}
+{
   // ★★ 시트 일정 캠페인(063)도 조절 가능(사용자 확정 2026-08-07 — 종전 "계획 무시" 규칙 폐기).
   //   규칙 = **조절한 날짜만** 리뷰웹이 이기고, 조절하지 않은 날은 종전대로 시트가 정한다.
   //   되돌리면 휴무일·일정종료 공고의 이월을 어디서도 조절할 수 없던 상태로 회귀한다.
@@ -1295,6 +1303,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /catch \(_\) \{ return null; \}/.test(CDP) && /catch \(_\) \{\}/.test(CDP));
   ok('9-2 모르는 값은 쓰지 않는다(저장된 쓰레기 값 방어)',
     /CARRY_MODES\.indexOf\(v\) >= 0 \? v : null/.test(CDP));
+  ok('9-3 ★ 수동 조절 상태에도 세 이월 방식 버튼을 표시하고 공고에 저장한다',
+    /if \(!bal && carryNeed !== null && carryNeed > 0\)/.test(CDP)
+    && /'\/carry-strategy'/.test(CDP)
+    && /router\.put\('\/campaigns\/:id\/carry-strategy'/.test(rtB));
 
   console.log(`\n✅ campaignDailyPlan: ${n}개 통과`);
   process.exit(0);   // trackB.routes require 가 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)
