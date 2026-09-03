@@ -65,27 +65,36 @@ async function seedV2StatusBindings(db, { sheetId, tabGid, tabName, headers, by 
   return validateV2StatusBindings(headers, stored);
 }
 
-async function loadV2StatusBindings(db, { sheetId, tabGid, tabName = '', headers }) {
-  // 저장된 위치가 우연히 맞더라도, 현재 헤더가 중복/누락이면 상태 열로 쓸 수 없다.
-  // 이 선검증이 없으면 '리뷰'가 두 개인 작업표에서 옛 좌표 하나를 임의로 신뢰하게 된다.
-  const canonical = buildV2StatusBindings(headers);
-  const { rows } = await db.query(
-    `SELECT role, header_text, col_index FROM tab_status_column_bindings
-      WHERE sheet_id=$1 AND tab_gid=$2`, [sheetId, String(tabGid)]
-  );
-  const stored = Object.fromEntries(rows.map(r => [r.role, { header: r.header_text, colIndex: Number(r.col_index) }]));
+async function _rebindV2StatusBindings(db, { sheetId, tabGid, tabName, headers, canonical }) {
+  const client = typeof db.connect === 'function' ? await db.connect() : db;
+  const ownsTransaction = client !== db;
   try {
-    return validateV2StatusBindings(headers, stored);
-  } catch (error) {
-    if (!(error instanceof StatusColumnBindingError) || error.code !== 'v2_status_binding_drift') throw error;
+    if (ownsTransaction) await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT role, header_text, col_index FROM tab_status_column_bindings
+        WHERE sheet_id=$1 AND tab_gid=$2 FOR UPDATE`, [sheetId, String(tabGid)]
+    );
+    const current = Object.fromEntries(rows.map(r => [r.role, { header: r.header_text, colIndex: Number(r.col_index) }]));
+    try {
+      // 다른 요청이 먼저 동기화했으면 불필요한 쓰기를 하지 않는다.
+      validateV2StatusBindings(headers, current);
+      if (ownsTransaction) await client.query('COMMIT');
+      return current;
+    } catch (error) {
+      if (!(error instanceof StatusColumnBindingError) || error.code !== 'v2_status_binding_drift') throw error;
+    }
 
-    /*
-     * 열 삽입·이동만으로 저장 좌표가 밀린 경우에는 정확한 상태 열 이름이 각각 하나씩
-     * 존재한다는 사실을 다시 증명한 뒤에만 좌표를 갱신한다. 이름이 누락되거나 중복되면
-     * buildV2StatusBindings가 fail-closed로 중단하므로, 작업지시 열을 상태 열로 추정하지 않는다.
-     */
+    /* (sheet_id, tab_gid, col_index)는 UNIQUE라서 한 칸 이동 시에도 개별 UPDATE는 충돌할 수 있다.
+       저장된 두 역할을 먼저 충돌하지 않는 임시 대역으로 함께 옮긴 뒤, 최종 좌표를 기록한다. */
+    await client.query(
+      `UPDATE tab_status_column_bindings
+          SET col_index = col_index + 1000000
+        WHERE sheet_id=$1 AND tab_gid=$2
+          AND role = ANY(ARRAY['review_submit', 'payment_status'])`,
+      [sheetId, String(tabGid)]
+    );
     for (const [role, binding] of Object.entries(canonical)) {
-      await db.query(
+      await client.query(
         `INSERT INTO tab_status_column_bindings
            (sheet_id, tab_gid, tab_name, role, header_text, col_index, workboard_schema_version, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,2,'auto-rebind')
@@ -98,7 +107,31 @@ async function loadV2StatusBindings(db, { sheetId, tabGid, tabName = '', headers
         [sheetId, String(tabGid), tabName, role, binding.header, binding.colIndex]
       );
     }
+    if (ownsTransaction) await client.query('COMMIT');
     return canonical;
+  } catch (error) {
+    if (ownsTransaction) await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    if (ownsTransaction) client.release();
+  }
+}
+
+async function loadV2StatusBindings(db, { sheetId, tabGid, tabName = '', headers, allowRebind = true }) {
+  // 저장된 위치가 우연히 맞더라도, 현재 헤더가 중복/누락이면 상태 열로 쓸 수 없다.
+  // 이 선검증이 없으면 '리뷰'가 두 개인 작업표에서 옛 좌표 하나를 임의로 신뢰하게 된다.
+  const canonical = buildV2StatusBindings(headers);
+  const { rows } = await db.query(
+    `SELECT role, header_text, col_index FROM tab_status_column_bindings
+      WHERE sheet_id=$1 AND tab_gid=$2`, [sheetId, String(tabGid)]
+  );
+  const stored = Object.fromEntries(rows.map(r => [r.role, { header: r.header_text, colIndex: Number(r.col_index) }]));
+  try {
+    return validateV2StatusBindings(headers, stored);
+  } catch (error) {
+    if (!(error instanceof StatusColumnBindingError) || error.code !== 'v2_status_binding_drift') throw error;
+    if (!allowRebind) throw error;
+    return _rebindV2StatusBindings(db, { sheetId, tabGid, tabName, headers, canonical });
   }
 }
 

@@ -58,6 +58,9 @@ function stubPool(answer) {
     ok('지정 주문만 복구 대상으로 제한할 수 있다',
       /os\.id = ANY\(\$3::uuid\[\]\)/.test(targetedSql.sql) &&
       targetedSql.params[2][0] === 'aaaaaaaa-0000-0000-0000-000000000001' && targeted.scanned === 0);
+    await slOrder.repairWrittenMarkForBoardRows({ dryRun: true, orderSubmissionIds: [] });
+    ok('명시적으로 빈 주문 목록은 전체 복구로 넓어지지 않는다',
+      Array.isArray(s.calls[2].params[2]) && s.calls[2].params[2].length === 0);
   }
 
   /* ══════════════ B. dryRun · 쓰기 표면 ══════════════ */

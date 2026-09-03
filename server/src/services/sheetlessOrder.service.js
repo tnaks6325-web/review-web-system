@@ -658,7 +658,8 @@ const REPAIRABLE_MIRROR_STATUSES = ['failed', 'pending', 'pending_no_row'];
 async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 'mirror-repair', orderSubmissionIds = null } = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
-  const ids = Array.isArray(orderSubmissionIds) && orderSubmissionIds.length
+  // null = 필터 미지정(기존 전체 복구), [] = 명시적으로 선택한 주문 없음(0건)이다.
+  const ids = Array.isArray(orderSubmissionIds)
     ? [...new Set(orderSubmissionIds.map(v => String(v || '').trim()).filter(Boolean))]
     : null;
   const { rows } = await db.query(

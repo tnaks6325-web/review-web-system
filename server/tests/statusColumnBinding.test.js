@@ -38,7 +38,26 @@ test('v2 상태열은 정확한 단일 헤더가 이동한 경우에만 좌표�
     review_submit: { header: '리뷰', colIndex: 3 },
     payment_status: { header: '입금일', colIndex: 4 },
   });
+  assert.ok(calls.some(c => /SET col_index = col_index \+ 1000000/.test(c.sql)));
   assert.equal(calls.filter(c => /ON CONFLICT \(sheet_id, tab_gid, role\) DO UPDATE/.test(c.sql)).length, 2);
+});
+
+test('v2 상태열 dry-run 검증은 바인딩을 수정하지 않는다', async () => {
+  const calls = [];
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    return { rows: [
+      { role: 'review_submit', header_text: '리뷰', col_index: 2 },
+      { role: 'payment_status', header_text: '입금일', col_index: 3 },
+    ] };
+  }};
+  await assert.rejects(
+    loadV2StatusBindings(db, {
+      sheetId: 's', tabGid: '1', headers: ['번호', '주문자', '신규열', '리뷰', '입금일'], allowRebind: false,
+    }),
+    error => error.code === 'v2_status_binding_drift'
+  );
+  assert.equal(calls.length, 1);
 });
 
 test('v2 상태열 자동 재동기화는 중복 상태 헤더를 허용하지 않는다', async () => {
