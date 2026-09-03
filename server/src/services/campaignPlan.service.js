@@ -285,7 +285,7 @@ async function savePlans(campaignId, body, actor) {
   if (!rawSet.length && !rawRemove.length) { const e = new Error('변경할 내용이 없습니다.'); e.code = 'empty'; throw e; }
   if (rawSet.length + rawRemove.length > MAX_PLAN_ENTRIES) { const e = new Error(`한 번에 ${MAX_PLAN_ENTRIES}일까지만 저장할 수 있습니다.`); e.code = 'too_many'; throw e; }
 
-  const camp = await _loadCampaign(campaignId);
+  let camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 인원 조절을 지원합니다.'); e.code = 'not_participation'; throw e; }
   // ★★ 시트 일정 캠페인도 조절 가능(사용자 확정 2026-08-07 — 종전 `schedule_driven` 거부 해제):
   //   저장한 날짜만 리뷰웹이 이기고(computeCampaignState 의 planOverrideFor), 저장하지 않은 날은
@@ -341,7 +341,16 @@ async function savePlans(campaignId, body, actor) {
     await client.query('BEGIN');
     // 캠페인 행 잠금 — apply 게이트(잠금 후 재집계)와 직렬화: "오늘 정원 축소"와 "신청"이
     // 동시에 달리면 축소 하한(확정+홀드) 검사가 낡은 값을 보게 되는 write-skew 차단.
-    await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
+    const { rows: lockedCampaignRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
+    if (!lockedCampaignRows.length) { const e = new Error('캠페인을 찾을 수 없습니다.'); e.code = 'not_found'; throw e; }
+    // 잠금 전 읽은 총정원으로 작업표를 되돌리지 않도록, 이후 모든 슬롯 판단은 잠금된 최신 행을 쓴다.
+    camp = lockedCampaignRows[0];
+    try { schedule = await _scheduleFor(camp); } catch (_) { schedule = null; }
+    try {
+      const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');
+      const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
+      orderTotal = Number(wo && wo.recruit_count) || 0;
+    } catch (e) { logger.warn(`[campaignPlan] 잠금 후 연결 발주 정원 재조회 실패(공고 값만 사용) camp=${campaignId}: ${e.message}`); }
 
     // 원칙 ⑤: 오늘 계획은 "오늘 확정 + 유효 홀드" 아래로 못 내린다(참여 취소는 이 기능의 일이 아님).
     // 해제(remove)로 기본값 복귀해도 결과가 하한 밑이면 같은 이유로 거부(모순된 화면 방지).
@@ -570,7 +579,8 @@ async function savePlans(campaignId, body, actor) {
            ★ 대신 **사실을 응답에 실어 화면이 말한다**(조용한 누락 금지) — 이 신호가 곧 소급 정리
               (계획 밖 날짜를 조절 대상에 넣어 다시 저장)로 가는 안내다.
            ★ 읽기 전용 · SAVEPOINT 격리 · 어떤 실패도 저장을 되돌리지 않는다. */
-        if (totalCap > 0) {
+        if (totalCap > 0 && !(worktableSync.slotCap && worktableSync.slotCap.reason === 'shared_worktable')
+          && !(worktableSync.slotCap && worktableSync.slotCap.afterRebuild && worktableSync.slotCap.afterRebuild.reason === 'shared_worktable')) {
           let sp = false;
           try { await client.query('SAVEPOINT cp_row_audit'); sp = true; } catch (_) {}
           try {
@@ -662,7 +672,7 @@ async function savePlans(campaignId, body, actor) {
 
 /** 관리자가 명시적으로 실행하는 빈 준비 행 날짜 재구성. 일반 저장과 달리 과거의 빈 오염 행도 정리한다. */
 async function rebuildWorktableFromPlans(campaignId, actor) {
-  const camp = await _loadCampaign(campaignId);
+  let camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 작업표 재구성을 지원합니다.'); e.code = 'not_participation'; throw e; }
   if (!camp.linked_sheet_id || !camp.linked_tab_name) { const e = new Error('연결된 작업표가 없습니다.'); e.code = 'worktable_not_linked'; throw e; }
   const today = kstTodayStr();
@@ -670,7 +680,9 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
   let target = null;
   try {
     await client.query('BEGIN');
-    await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    const { rows: lockedCampaignRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    if (!lockedCampaignRows.length) { const e = new Error('캠페인을 찾을 수 없습니다.'); e.code = 'not_found'; throw e; }
+    camp = lockedCampaignRows[0];
     const { isSheetless } = require('../utils/sheetlessScope');
     if (!await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
       const e = new Error('이 작업표는 시트 원본으로 설정되어 있어 안전하게 재구성할 수 없습니다. 먼저 무시트 작업표 설정을 확인해주세요.');
@@ -682,7 +694,14 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
     /* [작업표 재구성]도 날짜만 다시 배열하고 남은 빈 슬롯을 방치하면 번호가 총건수를
        넘길 수 있다. 저장 경로와 같은 공통 동기화로 먼저 활성 슬롯 수를 맞춘 뒤 재배치한다. */
     let worktableSlotCap = null;
-    const totalCap = Number(camp.recruit_total) || 0;
+    // 레거시 공고는 recruit_total=0 이더라도 연결 발주의 모집인원이 실제 상한이다.
+    let orderTotal = 0;
+    try {
+      const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');
+      const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
+      orderTotal = Number(wo && wo.recruit_count) || 0;
+    } catch (e) { logger.warn(`[campaignPlan] 작업표 재구성 연결 발주 정원 조회 실패 camp=${campaignId}: ${e.message}`); }
+    const totalCap = _totalCapFor(camp, null, orderTotal);
     if (totalCap > 0) {
       const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
       worktableSlotCap = await syncWorktableSlotsInTx(

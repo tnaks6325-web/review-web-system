@@ -40,6 +40,16 @@ async function run() {
         { linked_sheet_id: 'sheet', linked_tab_name: 'tab' }, 1, 'row-cap-test'),
       err => err.code === 'recruit_quota_worktable_below_used',
     );
+
+    const sharedClient = {
+      async query(sql) {
+        if (/FROM recruit_campaigns/.test(String(sql))) return { rows: [{ id: 'other-campaign' }, { id: 'this-campaign' }] };
+        throw new Error(`participants must not be changed for a shared worktable: ${sql}`);
+      },
+    };
+    const shared = await quota.syncWorktableSlotsInTx(sharedClient,
+      { id: 'this-campaign', linked_sheet_id: 'sheet', linked_tab_name: 'tab' }, 4, 'row-cap-test');
+    assert.deepStrictEqual({ synced: shared.synced, reason: shared.reason }, { synced: false, reason: 'shared_worktable' });
   } finally {
     scope.isSheetless = before;
   }
@@ -49,7 +59,11 @@ async function run() {
     /rebuildWorktableFromPlans[\s\S]*syncWorktableSlotsInTx[\s\S]*rebuildAdjustedPlansToWorktable/,
     '수동 작업표 재구성도 슬롯 상한 동기화 뒤에 날짜를 재배치해야 합니다.',
   );
-  console.log('worktableRowCapInvariant: 3 passed');
+  assert.match(planSource, /_totalCapFor\(camp, null, orderTotal\)/,
+    '수동 재구성도 연결 발주 정원을 포함한 실제 총건수를 상한으로 써야 합니다.');
+  assert.match(planSource, /SELECT \* FROM recruit_campaigns WHERE id=\$1 FOR UPDATE/,
+    '수동 재구성은 잠금된 최신 공고 행으로 상한을 계산해야 합니다.');
+  console.log('worktableRowCapInvariant: 5 passed');
 }
 
 run().catch(err => {
