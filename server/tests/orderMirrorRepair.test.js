@@ -46,7 +46,9 @@ function stubPool(answer) {
     ok('무시트 참여형 좌표만 본다', /os\.sheet_id LIKE 'campaign:%'/.test(sql));
     ok('상태는 파라미터 배열로 제한한다', /os\.mirror_status = ANY\(\$1::text\[\]\)/.test(sql));
     ok('작업보드 링크가 있는 주문만(EXISTS)', /EXISTS \(SELECT 1 FROM campaign_participants cp/.test(sql));
-    ok('★ 소프트삭제된 줄은 근거가 아니다', /cp\.order_submission_id = os\.id AND cp\.deleted_at IS NULL/.test(sql));
+    ok('★ 소프트삭제·비활성·다른 작업보드 줄은 근거가 아니다',
+      /cp\.deleted_at IS NULL AND cp\.active = TRUE/.test(sql) &&
+      /cp\.workboard_id = os\.workboard_id/.test(sql));
     ok('삭제된 주문은 건드리지 않는다', /os\.deleted_at IS NULL/.test(sql));
     ok('화이트리스트를 파라미터로 넘긴다', JSON.stringify(s.calls[0].params[0]) === JSON.stringify(slOrder.REPAIRABLE_MIRROR_STATUSES));
     ok('빈 결과는 0건 보고', out.scanned === 0 && out.repaired === 0);
