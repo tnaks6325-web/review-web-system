@@ -1301,9 +1301,11 @@ async function intranetSalesForAdvertiser(advertiserName) {
   const mine = (r) => cm.contractAdvertiserNames(r).some(n => cm.normalizeKey(n) === key);
   const out = new Map();
   let reached = false;
+  let failed = false;
   // 단일 limit 으로 자르면 오래된 계약이 조용히 빠진다. 인트라넷 테이블 API의 page 계약을 끝까지
-  // 따라가되, 비정상 프록시가 같은 페이지를 되돌려도 무한 반복하지 않도록 새 id가 없으면 멈춘다.
-  const fetchAll = async (query) => {
+  // 따라가되, `where` 가 무시돼 첫 페이지부터 다른 업체가 섞이면 즉시 중단한다. 비정상 프록시가
+  // 같은 페이지를 되돌려도 무한 반복하지 않도록 새 id가 없으면 멈춘다.
+  const fetchAll = async (query, { exactFirstPage = false } = {}) => {
     const rows = [];
     const seen = new Set();
     const pageSize = 500;
@@ -1312,6 +1314,11 @@ async function intranetSalesForAdvertiser(advertiserName) {
       const j = await _intranetGet(`${query}${sep}limit=${pageSize}&page=${page}&sort=created_at&order=DESC`);
       reached = true;
       const pageRows = Array.isArray(j.data) ? j.data : [];
+      // 누락된 컬럼의 where 절은 API가 조용히 무시할 수 있다. 이 경우 전 계약을 끝까지 순회하지 않고
+      // 이름 검색 폴백으로 넘긴다. 정상 정확일치 결과에 타 업체 계약을 허용하지 않는 보수적 판정이다.
+      if (exactFirstPage && page === 1 && pageRows.some(raw => !mine(_mapSales(raw)))) {
+        return { rows: [], ignoredFilter: true };
+      }
       let added = 0;
       for (const raw of pageRows) {
         const id = String(raw && raw.id || '');
@@ -1321,20 +1328,24 @@ async function intranetSalesForAdvertiser(advertiserName) {
       }
       if (pageRows.length < pageSize || !added) break;
     }
-    return rows;
+    return { rows, ignoredFilter: false };
   };
   const cols = nm.includes('=') ? [] : ['business_name', 'advertiser_name'];   // '=' 포함 이름은 where 파서가 못 씀
   for (const col of cols) {
     try {
-      for (const raw of await fetchAll(`/api/tables/sales?where=${encodeURIComponent(`${col}=${nm}`)}`)) { const r = _mapSales(raw); if (mine(r)) out.set(r.salesId, r); }
-    } catch (e) { logger.warn(`[trackB] 인트라넷 계약 조회 실패(${col}): ${e.message}`); }
+      const got = await fetchAll(`/api/tables/sales?where=${encodeURIComponent(`${col}=${nm}`)}`, { exactFirstPage: true });
+      if (!got.ignoredFilter) for (const raw of got.rows) { const r = _mapSales(raw); if (mine(r)) out.set(r.salesId, r); }
+    } catch (e) { failed = true; logger.warn(`[trackB] 인트라넷 계약 조회 실패(${col}): ${e.message}`); }
   }
   // 폴백: 정확일치 조회로 0건이면 이름 검색 후 같은 기준으로 다시 거른다(표기·컬럼 차이 흡수).
   if (!out.size) {
     try {
-      for (const raw of await fetchAll(`/api/tables/sales?search=${encodeURIComponent(nm)}`)) { const r = _mapSales(raw); if (mine(r)) out.set(r.salesId, r); }
-    } catch (e) { logger.warn(`[trackB] 인트라넷 계약 검색 실패: ${e.message}`); }
+      const got = await fetchAll(`/api/tables/sales?search=${encodeURIComponent(nm)}`);
+      for (const raw of got.rows) { const r = _mapSales(raw); if (mine(r)) out.set(r.salesId, r); }
+    } catch (e) { failed = true; logger.warn(`[trackB] 인트라넷 계약 검색 실패: ${e.message}`); }
   }
+  // 여러 페이지 중 하나라도 실패하면 일부만 캐시해 완전한 계약 목록처럼 보이지 않는다.
+  if (failed) return { ok: false, error: 'intranet_unreachable', items: [] };
   if (!reached) return { ok: false, error: 'intranet_unreachable', items: [] };
   const items = [...out.values()];
   if (_intraSalesByAdvCache.size > 200) _intraSalesByAdvCache.clear();   // 업체 수만큼 무한정 쌓이지 않게(단순 상한)

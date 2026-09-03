@@ -259,7 +259,8 @@ async function run() {
   assert.ok(/\(계약명 없음\)/.test(noWhy), '7q: 계약명 후보가 모두 비면 그 사실을 표기(빈칸 금지)');
   assert.ok(/_lkRowHtml\(s,i,r\.recommendedSalesId\)/.test(HTML), '7r: 행 빌더는 한 벌(사본 금지)');
   assert.ok(/lkmodalbox[^]{0,240}overflow-y:auto/.test(HTML), '7r2: 계약 목록은 팝업 본문에서 스크롤');
-  assert.ok(/page=\$\{page\}/.test(SVC) && /pageRows\.length < pageSize/.test(SVC), '7r3: 업체 일치 계약 목록은 페이지 끝까지 조회');
+  assert.ok(/page=\$\{page\}/.test(SVC) && /exactFirstPage/.test(SVC) && /ignoredFilter/.test(SVC), '7r3: 업체 일치 계약은 필터 무시를 감지한 뒤 페이지 끝까지 조회');
+  assert.ok(/if \(failed\) return \{ ok: false, error: 'intranet_unreachable'/.test(SVC), '7r3b: 페이지 조회 일부 실패를 완전 목록으로 캐시하지 않는다');
   assert.ok(/contractItems/.test(SVC), '7r4: 계약 품목을 후보 응답에 포함');
   assert.ok(/setlmatchbtn/.test(HTML) && /매칭된 계약이 없습니다/.test(HTML) === false, '7r5: 미매칭 진입점은 상단 버튼만, 하단 빈 정산 블록 없음');
   console.log('     시안 C 행 렌더러 실행 검증 ✓');
