@@ -28,6 +28,15 @@ assert.match(mini, /campaignKey: sheetId \+ '\|\|' \+ tabName/, '작업별 C/S �
 assert.match(mini, /csAdminThreads/, 'C/S 메뉴와 같은 방 목록 API를 사용한다');
 assert.match(mini, /csAdminMessages/, 'C/S 메뉴와 같은 메시지 API를 사용한다');
 assert.match(mini, /csAdminReply/, '작업보드 답장도 C/S 메뉴와 같은 쓰기 API를 사용한다');
+assert.match(mini, /csAdminUpload/, '작업보드 미니도 기존 C/S 이미지 업로드 API를 사용한다');
+assert.match(mini, /clipboardData.*items[\s\S]*getAsFile/s, '작업보드 미니에서 클립보드 이미지를 붙여넣어 첨부한다');
+assert.match(mini, /addEventListener\('drop'/, '작업보드 미니에서 드래그앤드롭 이미지를 첨부한다');
+assert.match(mini, /pending\.some\(item => !item\.url\)/, '이미지 업로드가 끝나기 전에는 전송하지 않는다');
+assert.match(mini, /imageUrls \}/, '첨부 이미지 URL을 같은 C/S 답장 API로 전송한다');
+assert.match(mini, /pendingImages\(\)\.push\(item\)[\s\S]*await readFile/, '비동기 파일 읽기 전에 첨부 슬롯을 예약해 5장 제한을 지킨다');
+assert.match(mini, /isCurrentComposer\(uploadState, uploadThreadId\)/, '방을 바꾸면 이전 방에서 시작한 첨부 배치를 이어 보내지 않는다');
+assert.match(mini, /!form\.contains\(event\.relatedTarget\)/, '드래그가 입력 영역 밖으로 나가면 드롭 안내를 닫는다');
+assert.match(workdesk, /wdcsmini-drop-overlay\.on\{display:flex\}/, '드롭 중인 이미지는 미니 C/S 입력 영역에서 시각적으로 안내한다');
 assert.match(mini, /window\.addEventListener\('cs:sse'/, '서버 이벤트가 오면 미니 C/S도 새로 읽는다');
 assert.match(mini, /isMountedAndVisible\(\).*state = null/s, '사라진 작업보드에서는 SSE가 메시지 읽음 처리를 만들지 않는다');
 assert.match(mini, /data\.ok === false \|\| data\.error/, '전송·조회는 transport error 응답도 실패로 처리한다');
