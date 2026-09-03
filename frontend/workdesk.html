@@ -3135,6 +3135,25 @@ function renderWorkdeskView(){
     <div class="main" id="main"><div class="empty">위에서 작업을 선택하세요.</div></div>
     <div class="rail" id="rail"></div></div>`;
   _syncRailToggle(); _syncWideToggle();
+  // 업체 칩은 드래그 가능한 요소라 인라인 onclick 만으로 처리하면, 드래그·상단 바깥클릭
+  // 정리와 같은 버블 단계에서 메뉴가 바로 다시 닫힐 수 있다. 작업바 한 곳에서 위임해
+  // 클릭을 소비한다. 다시 그려지는 칩/드롭다운에도 항상 같은 배선이 유지된다.
+  const taskbar=$('#taskbar');
+  if(taskbar) taskbar.onclick=function(ev){
+    const seg=ev.target&&ev.target.closest&&ev.target.closest('#segwrap .seg');
+    if(seg){
+      if(ev.target.closest('.segstar')) return;
+      // 원래 document 바깥클릭 정리가 하던 검색 결과 닫기를 여기서도 수행한다.
+      // 이 클릭은 아래에서 전파를 소비하므로, 그대로 두면 검색 팝오버가 메뉴를 덮을 수 있다.
+      const results=$('#sres'); if(results) results.classList.remove('show');
+      ev.stopPropagation(); wPickSeg(seg.dataset.k); return;
+    }
+    const item=ev.target&&ev.target.closest&&ev.target.closest('#taskmenu .wtab[data-i]');
+    if(item){
+      if(ev.target.closest('.tstar')) return;
+      ev.stopPropagation(); wPickTask(+item.dataset.i);
+    }
+  };
   _watchChrome();   // 헤더·작업바 실측(줄바꿈/스크롤바로 높이가 바뀌면 ResizeObserver가 따라감)
   _bindWheelScroll();   // 업체·열린탭 휠 → 좌우 이동
   loadTabs();
@@ -5709,7 +5728,7 @@ function _renderTaskMenu(){
     +(g.idxs.length?g.idxs.map(i=>{
       const t=STATE.tabs[i],on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName,n=_wUnseen(i),f=isFav(t);
       const rk=_wTabRank(t),dot=rk===0?'<i class="tdot rec" title="모집중"></i>':(rk===1?'<i class="tdot pend" title="모집 종료 · 리뷰 대기"></i>':'');
-      return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="wPickTask(${i})" title="${esc(_tabTip(t))}${(!_isNoSheet(t)&&t.spreadsheetTitle)?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(_tabLabel(t))}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+      return `<div class="wtab${on?' on':''}" data-i="${i}" title="${esc(_tabTip(t))}${(!_isNoSheet(t)&&t.spreadsheetTitle)?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(_tabLabel(t))}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
     }).join(''):'<div class="wb-menu-empty">이 업체에 진행 중인 작업이 없습니다.</div>');
   const bar=$('#taskbar'), chip=[...document.querySelectorAll('#segwrap .seg')].find(el=>el.dataset.k===key);
   if(bar&&chip){ const br=bar.getBoundingClientRect(),cr=chip.getBoundingClientRect(); menu.style.setProperty('--wb-menu-left',Math.max(8,cr.left-br.left)+'px'); }
@@ -5741,7 +5760,7 @@ function _renderTabList(){
     const star=(isFavSeg||g.key==='')?'' :
       `<span class="segstar${af?' on':''}" title="${af?'업체 즐겨찾기 해제':'업체 즐겨찾기 — 왼쪽 우선 정렬'}" onclick="toggleAdvFav(event,this)">${af?'★':'☆'}</span>`;
     const movable=!isFavSeg&&g.key!=='';
-    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" title="${esc(_wSegTip(g))}" onclick="wPickSeg(this.dataset.k)"${movable?' draggable="true" ondragstart="advDragStart(event,this.dataset.k)" ondragover="advDragOver(event,this.dataset.k)" ondragleave="advDragLeave(event)" ondrop="advDrop(event,this.dataset.k)" ondragend="advDragEnd()"':''}>${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
+    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" title="${esc(_wSegTip(g))}"${movable?' draggable="true" ondragstart="advDragStart(event,this.dataset.k)" ondragover="advDragOver(event,this.dataset.k)" ondragleave="advDragLeave(event)" ondrop="advDrop(event,this.dataset.k)" ondragend="advDragEnd()"':''}>${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
   }).join('');
   // 고정 작업목록 행은 만들지 않는다. 업체를 눌렀을 때만 드롭다운에서 고른다.
   seghost.scrollLeft=_sx; _syncWbScrollMeter(seghost); _renderTaskMenu();
