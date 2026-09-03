@@ -10372,7 +10372,9 @@ async function _woCampaign(id){
   // 연결 탭 드롭다운은 _recruitTabList 에 의존한다 — 모달을 열기 전에 반드시 채운다(await).
   try{ if(typeof loadRecruitTabOptions==='function') await loadRecruitTabOptions(); }catch(_){ }
   try{
-    if(o.linked_campaign_id) await openRecruitModal(o.linked_campaign_id);
+    // 삭제된 공고 ID가 작업오더에 남아 있을 수 있다. 이때 404면 공유 모달이
+    // 작업오더 프리필 신규 발행으로 안전하게 전환하도록 원본과 오더 ID를 함께 넘긴다.
+    if(o.linked_campaign_id) await openRecruitModal(o.linked_campaign_id, _woCampaignPrefill(o), id);
     else await openRecruitModal(null, _woCampaignPrefill(o), id);
   }catch(e){ _toast('모달 열기 실패: '+(e&&e.message||'')); }
 }

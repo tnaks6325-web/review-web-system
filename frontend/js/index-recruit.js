@@ -3224,7 +3224,23 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const res  = await fetch(_detailUrl, {
         headers: _getAuthHeaders()
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
+      /*
+       * 작업오더의 linked_campaign_id 는 과거에 발행했던 공고를 가리키는 참고값이다.
+       * 공고를 삭제하면 작업오더 원본은 보존되지만 이 ID는 즉시 비어지지 않을 수 있다.
+       * 그 상태에서 수정 모드만 열면, 아래의 초기화가 끝난 빈 폼이 그대로 남는다.
+       *
+       * 호출자가 작업오더 프리필을 함께 넘긴 경우에만 404를 신규 발행으로 전환한다.
+       * 401/403/5xx를 '삭제'로 오인해 중복 공고를 만들지 않고, 기존 공고를 편집할 때도
+       * 명시적으로 전달받은 작업오더 원본이 없으면 평소 오류 처리를 유지한다.
+       */
+      if (!res.ok) {
+        if (res.status === 404 && prefill) {
+          showToast("연결된 모집공고가 삭제되어 작업오더 값으로 새 공고를 준비했습니다.", "warning");
+          return openRecruitModal(null, prefill, woOrderId);
+        }
+        throw new Error((json && json.error) || `공고 정보를 불러오지 못했습니다. (HTTP ${res.status})`);
+      }
       const c = json.data || json;
       // 수정 모달에는 전체 편집 응답만 허용한다. 공개용 축약 응답으로 저장하면 기존 값이 빈값으로 덮인다.
       if (!Object.prototype.hasOwnProperty.call(c, "work_detail")) {
