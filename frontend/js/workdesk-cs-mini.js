@@ -10,8 +10,16 @@
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const host = () => state && document.getElementById(state.hostId);
+  const isMountedAndVisible = () => {
+    const root = host();
+    return !!(root && root.isConnected && root.getClientRects().length);
+  };
   const roomForWork = (room) => String(room && room.campaignKey || '') === state.campaignKey;
   const byId = (id) => (state.rooms || []).find(room => String(room.id) === String(id));
+  const requestError = (data, fallback) => {
+    if (!data || data.ok === false || data.error) return (data && data.error) || fallback;
+    return '';
+  };
   const time = (iso) => {
     const date = new Date(iso || '');
     return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -77,10 +85,17 @@
   async function loadMore(revision, generation, offset) {
     while (state && state.revision === revision && state.generation === generation) {
       const data = await gasGet({ action: 'csAdminThreads', status: 'all', q: '', limit: 100, offset });
-      if (!data || data.ok === false || !state || state.revision !== revision || state.generation !== generation) return;
+      if (requestError(data, '불러오기 실패') || !state || state.revision !== revision || state.generation !== generation) return;
       const seen = new Set(state.rooms.map(room => String(room.id)));
-      const more = (data.threads || []).filter(room => roomForWork(room) && !seen.has(String(room.id)));
-      if (more.length) { state.rooms.push(...more); render(); }
+      const more = (data.threads || []).filter(room => roomForWork(room));
+      if (more.length) {
+        more.forEach(room => {
+          const index = state.rooms.findIndex(existing => String(existing.id) === String(room.id));
+          if (index >= 0) state.rooms[index] = room;
+          else if (!seen.has(String(room.id))) state.rooms.push(room);
+        });
+        render();
+      }
       offset += (data.threads || []).length;
       if (!data.hasMore || !(data.threads || []).length) return;
     }
@@ -94,11 +109,18 @@
     render();
     try {
       const data = await gasGet({ action: 'csAdminThreads', status: 'all', q: '', limit: 100, offset: 0 });
-      if (!data || data.ok === false) throw new Error((data && data.error) || '불러오기 실패');
+      const error = requestError(data, '불러오기 실패');
+      if (error) throw new Error(error);
       if (!state || state.revision !== revision || state.generation !== generation) return;
+      const previousActive = byId(state.activeThreadId);
       state.rooms = (data.threads || []).filter(roomForWork);
+      /* 현재 방이 2페이지 이후에 있을 수 있다. 첫 페이지를 읽자마자 선택을 지우면 SSE·답장 뒤
+         대화가 닫히므로, 나머지 페이지를 찾는 동안에는 마지막 알려진 방을 임시로 유지한다. */
+      if (state.activeThreadId && !byId(state.activeThreadId)) {
+        if (data.hasMore && previousActive) state.rooms.push(previousActive);
+        else { state.activeThreadId = null; state.thread = null; state.messages = []; }
+      }
       state.loading = false;
-      if (state.activeThreadId && !byId(state.activeThreadId)) { state.activeThreadId = null; state.thread = null; state.messages = []; }
       render();
       if (!state.activeThreadId && state.rooms.length) void openRoom(state.rooms[0].id);
       if (data.hasMore) void loadMore(revision, generation, 100);
@@ -118,7 +140,8 @@
     render();
     try {
       const data = await gasGet({ action: 'csAdminMessages', threadId });
-      if (!data || data.ok === false) throw new Error((data && data.error) || '불러오기 실패');
+      const error = requestError(data, '불러오기 실패');
+      if (error) throw new Error(error);
       if (state !== activeState || String(state.activeThreadId) !== String(threadId)) return;
       state.thread = data.thread || byId(threadId);
       state.messages = data.messages || [];
@@ -144,7 +167,8 @@
     state.draft = ''; input.value = ''; input.disabled = true;
     try {
       const data = await gasPost({ action: 'csAdminReply', threadId: state.activeThreadId, content, imageUrls: [] });
-      if (!data || data.ok === false) throw new Error((data && data.error) || '전송 실패');
+      const error = requestError(data, '전송 실패');
+      if (error) throw new Error(error);
       await openRoom(state.activeThreadId);
       void loadRooms();
       if (document.getElementById('csRoomListWrap') && typeof window.loadCsRooms === 'function') void window.loadCsRooms();
@@ -166,6 +190,9 @@
 
   window.addEventListener('cs:sse', (event) => {
     if (!state) return;
+    /* 다른 화면으로 이동해 카드가 사라졌다면 메시지를 다시 읽지 않는다.
+       csAdminMessages는 열람 처리까지 수행하므로 숨은 카드의 SSE 재조회가 미확인을 지우면 안 된다. */
+    if (!isMountedAndVisible()) { state = null; return; }
     const data = event && event.detail && event.detail.data || {};
     if (data.threadId && String(data.threadId) === String(state.activeThreadId)) void openRoom(state.activeThreadId);
     void loadRooms();

@@ -19,6 +19,9 @@ assert.match(mini, /csAdminThreads/, 'C/S 메뉴와 같은 방 목록 API를 사
 assert.match(mini, /csAdminMessages/, 'C/S 메뉴와 같은 메시지 API를 사용한다');
 assert.match(mini, /csAdminReply/, '작업보드 답장도 C/S 메뉴와 같은 쓰기 API를 사용한다');
 assert.match(mini, /window\.addEventListener\('cs:sse'/, '서버 이벤트가 오면 미니 C/S도 새로 읽는다');
+assert.match(mini, /isMountedAndVisible\(\).*state = null/s, '사라진 작업보드에서는 SSE가 메시지 읽음 처리를 만들지 않는다');
+assert.match(mini, /data\.ok === false \|\| data\.error/, '전송·조회는 transport error 응답도 실패로 처리한다');
+assert.match(mini, /data\.hasMore && previousActive/, '후속 페이지를 읽는 동안 선택 대화방을 유지한다');
 assert.match(shared, /window\.dispatchEvent\(new CustomEvent\('cs:sse'/, '공유 C/S SSE 훅이 미니 C/S에 이벤트를 전달한다');
 
 console.log('workdesk C/S mini contract passed');
