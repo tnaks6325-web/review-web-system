@@ -3184,6 +3184,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
   }
   // 제출한 구매양식 원본(order_submissions) — 링크된 주문의 실제 제출 내용. 내부(master/admin)만 PII 상세 노출.
+  // 업체 화면에는 주문별 원본 대신 집행 합계 계산에 필요한 결제금액만 읽는다. 이 합계는 작업 조건에
+  // 이미 노출된 총 결제금액과 같은 작업 단위 정보이며, 주문자·수령인 등 PII는 절대 조회하지 않는다.
   let ordMap = new Map();
   if (showEdits) {
     const orderIds = [...new Set(roster.map(r => r.order_submission_id).filter(Boolean).map(String))];
@@ -3195,6 +3197,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
            FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
         [orderIds]).catch(() => ({ rows: [] }));
       ordMap = new Map(ords.map(o => [String(o.id), o]));
+    }
+  } else if (role === 'advertiser') {
+    const orderIds = [...new Set(roster.map(r => r.order_submission_id).filter(Boolean).map(String))];
+    if (orderIds.length) {
+      const { rows: ords } = await db.query(
+        `SELECT id, price FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+        [orderIds]).catch(() => ({ rows: [] }));
+      ordMap = new Map(ords.map(o => [String(o.id), { price: o.price }]));
     }
   }
   // 시트형 그리드용: 시트 실제 헤더 순서(raw_sheet_tabs.detected_headers = 주문원장이 쓰는 열 순서 원본).
@@ -3463,10 +3473,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 하위 호환: 주문 행 전체의 결제금액 합계(주문 삭제 미리보기 등 기존 소비처가 사용).
     paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
     // 누적집행 = 실제 작업표의 리뷰제출 칸이 채워진 주문의 결제금액 합계.
-    executionAmount: showEdits ? executionAmount : undefined,
+    // 업체에는 주문 원본이 아니라 이 작업 단위 합계만 보낸다.
+    executionAmount,
     // 잔여집행의 기준은 작업오더에 저장된 총 결제금액이다. 총액이 없으면 화면도 금액을 지어내지 않는다.
-    executionTotalAmount: showEdits && _cond && _cond.payAmount != null ? Number(_cond.payAmount) : undefined,
-    remainingExecutionAmount: showEdits && _cond && _cond.payAmount != null
+    executionTotalAmount: _cond && _cond.payAmount != null ? Number(_cond.payAmount) : undefined,
+    remainingExecutionAmount: _cond && _cond.payAmount != null
       ? Math.max(0, Number(_cond.payAmount) - executionAmount) : undefined,
     edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
     ambiguous: ambiguousCount,

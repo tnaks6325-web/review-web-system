@@ -98,6 +98,12 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
     ok('★ 수동 생성 무시트 행(submit_col 없음)도 탭 상태 헤더로 실제 셀을 센다', res.counts.submitted === 3, JSON.stringify(res.counts));
     ok('★ 누적집행은 중복 주문을 한 번만 더하고, 원장 금액이 비면 작업표 결제금액으로 폴백', res.counts.executionAmount === 200000, JSON.stringify(res.counts));
     ok('★ 잔여집행 = 작업오더 총 결제금액 − 누적집행', res.counts.executionTotalAmount === 300000 && res.counts.remainingExecutionAmount === 100000, JSON.stringify(res.counts));
+    const advertiserRes = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'advertiser', allowAllWorkdesk: true });
+    ok('★ 업체 뷰어도 주문 원본 없이 누적·잔여 집행 합계를 받는다',
+      advertiserRes.counts.executionAmount === 200000
+      && advertiserRes.counts.executionTotalAmount === 300000
+      && advertiserRes.counts.remainingExecutionAmount === 100000,
+    JSON.stringify(advertiserRes.counts));
     ok('★ 과거 완료 3행과 미래 계획 1건이 다른 날짜여도 모두 반영해 모집일 미설정 경고를 내지 않는다',
       res.counts.scheduleUnassigned === undefined, JSON.stringify(res.counts));
 
