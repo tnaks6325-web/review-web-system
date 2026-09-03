@@ -106,6 +106,27 @@ console.log('\n[A2] 지나간 날짜의 빈 줄은 표 맨 아래(사용자 확�
   ok('★ 지난 빈 줄의 번호가 마지막 직전으로 간다', byId.pb === 4 && byId.nd === 5, JSON.stringify(byId));
 }
 
+console.log('\n[A3] 외부모집 수동제출만 배정 행 순서 우선');
+{
+  const rows = [
+    { id: 'm3', seq: 26, iso: '2026-09-03', submittedAt: '2026-09-03T04:12:34Z', orderSource: 'admin_external' },
+    { id: 'm1', seq: 22, iso: '2026-09-03', submittedAt: '2026-09-03T04:10:40Z', orderSource: 'admin_external' },
+    { id: 'm2', seq: 23, iso: '2026-09-03', submittedAt: '2026-09-03T04:12:17Z', orderSource: 'admin_external' },
+    { id: 'n2', seq: 40, iso: '2026-09-03', submittedAt: '2026-09-03T04:09:00Z', orderSource: 'reviewer' },
+    { id: 'n1', seq: 41, iso: '2026-09-03', submittedAt: '2026-09-03T04:08:00Z', orderSource: 'reviewer' },
+  ];
+  const order = U.orderRowsForNumbering(rows).map(r => r.id).join(',');
+  ok('★ admin_external 은 제출시각과 무관하게 배정 행(seq) 순', order.indexOf('m1') < order.indexOf('m2') && order.indexOf('m2') < order.indexOf('m3'), order);
+  ok('★ 일반 구매양식 제출끼리는 기존 제출시각 순', order.indexOf('n1') < order.indexOf('n2'), order);
+  ok('★ 혼합 비교도 결정적이다(수동제출 그룹 → 일반 제출 그룹)', order === 'm1,m2,m3,n1,n2', order);
+
+  const dateLess = U.orderRowsForNumbering([
+    { id: 'external', seq: 99, iso: null, submittedAt: null, orderSource: 'admin_external' },
+    { id: 'normal', seq: 1, iso: null, submittedAt: null, orderSource: 'reviewer' },
+  ]).map(r => r.id).join(',');
+  ok('★ 날짜 없는 행은 기존 seq 안정정렬을 유지', dateLess === 'normal,external', dateLess);
+}
+
 console.log('\n[B] 바뀌는 줄만 · 같은 값 재기록 없음');
 {
   const rows = [
