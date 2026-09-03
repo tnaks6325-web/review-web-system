@@ -7710,7 +7710,7 @@ function _canEditCells(){
 
 function _gridDefaultFreezeUpto(headers){
   // 작업표 표준 열은 수취인을 신원·배송 경계로 쓴다. 구형 탭은 해당 열이 없을 때만 종전 연락처 고정을 유지한다.
-  return (headers||[]).find(h=>/^(수취인|수령인|받는\s*분)$/.test(String(h||'').trim()))||null;
+  return (headers||[]).find(h=>/^(수취인(?:명)?|수령인|받는\s*분)$/.test(String(h||'').trim()))||null;
 }
 function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
@@ -7845,7 +7845,7 @@ function buildGrid(wd){
   STATE._pendingBody = (bodyArr.length>_GRID_CHUNK) ? { gen:STATE._gridGen, rows:bodyArr.slice(_GRID_CHUNK) } : null;
   // 툴바(고정 열 · 행 그룹 · 접기/펼치기 · 숨긴 열 · 필터 초기화 · 편집 이력)
   const fzOpts=[`<option value=""${STATE.freezeUpto==null?' selected':''}>기본(수취인까지)</option>`]
-    .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
+    .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','수취인명','수령인','받는 분','주소'].includes(h))
       .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto!=null&&STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
   const grpOpts=['<option value="">그룹 없음</option>']
     .concat(H.map(h=>`<option value="${esc(h)}"${STATE.gGroupBy===h?' selected':''}>${esc(h)} 기준</option>`)).join('');

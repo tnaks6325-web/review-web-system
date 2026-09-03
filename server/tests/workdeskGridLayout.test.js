@@ -6,6 +6,8 @@ const workdesk = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.h
 
 assert.match(workdesk, /function _gridDefaultFreezeUpto\(headers\)/,
   '수취인 고정 기본값을 계산하는 단일 함수가 필요합니다.');
+assert.match(workdesk, /수취인\(\?:명\)\?/,
+  '수취인명도 수취인 열의 호환 별칭으로 취급해야 합니다.');
 assert.match(workdesk, /기본\(수취인까지\)/,
   '고정열 기본값은 수취인까지라고 표시해야 합니다.');
 assert.match(workdesk, /const freezeUpto=STATE\.freezeUpto==null\?defaultFreeze:STATE\.freezeUpto;/,
