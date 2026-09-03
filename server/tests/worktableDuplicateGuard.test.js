@@ -13,7 +13,7 @@ function ok(name, cond) { assert.ok(cond, name); console.log('  ✓ ' + name); p
 const HEADERS = ['번호', '수취인', '연락처', '주소', '결제금액', '주문번호', '비고'];
 
 // ── 스텁 pool: 중복 줄 조회에만 응답하고 나머지는 빈 결과 ──────────────
-function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} } } = {}) {
+function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} }, linked = true } = {}) {
   const log = { client: [], released: 0 };
   const client = {
     query: async (sql, params) => {
@@ -25,6 +25,9 @@ function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', se
       //   (실제로 이 가드가 그 이유로 빨간 상태였다 — 제품 버그가 아니라 스텁 노후).
       if (/JOIN order_submissions os2/.test(q)) return { rows: dupRow ? [dupRow] : [] };   // 1차(링크 조인)
       if (/%주문번호%/.test(q)) return { rows: dupTableRow ? [dupTableRow] : [] };          // 2차(표 주문번호+명의)
+      if (/SELECT id FROM campaign_participants/.test(q) && /order_submission_id = \$4::uuid/.test(q)) {
+        return { rows: linked ? [{ id: 'p9' }] : [] };
+      }
       if (/order_submission_id = \$3::uuid/.test(q)) return { rows: [] };          // 내 링크 없음
       if (/order_submission_id IS NULL/.test(q)) return { rows: openSlot ? [openSlot] : [] };
       return { rows: [], rowCount: 1 };
@@ -85,6 +88,18 @@ function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', se
       ok('중복이 없으면 정상 기록(무회귀)', r.ok === true && r.written === true && r.seq === 42);
       ok('빈 슬롯 선점을 실행한다', sqls.some(s => /order_submission_id IS NULL/.test(s)));
       ok('COMMIT 한다', sqls.includes('COMMIT'));
+    }
+    { // UPDATE/INSERT가 성공처럼 보여도 실제 주문 링크가 없으면 완료로 끝내지 않는다
+      const { db, log } = makeStub({ dupRow: null, linked: false });
+      slOrder.__setPoolForTest(db);
+      const r = await slOrder.writeOrderToWorktable({
+        sheetId: 'wt_x', tabName: 'T1', tabGid: '77',
+        orderData: ORDER, orderSubmissionId: 'os-unlinked', loginPhone8: '90411926',
+      });
+      ok('주문 링크 검증 실패는 workboard_row_not_linked로 반환한다',
+        r.ok === false && r.reason === 'workboard_row_not_linked');
+      ok('검증 실패는 COMMIT하지 않고 ROLLBACK한다',
+        log.client.some(c => c.sql === 'ROLLBACK') && !log.client.some(c => c.sql === 'COMMIT'));
     }
     { // 주문번호가 짧으면(비번호 쿠팡 등) 판정하지 않는다 — 모르면 막지 않는다
       const { db, log } = makeStub({ dupRow: { seq: 7, order_submission_id: 'os-x' } });
