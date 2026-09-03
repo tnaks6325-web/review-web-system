@@ -223,6 +223,11 @@ async function getPlanOverview(campaignId) {
     carryPending,
     // 오늘 확정분 — 화면의 "배분해야 할 인원" = recruit_total − (전체 확정 − 오늘 확정)
     todaySubmitted: plannerByDateSubmitted[today] || 0,
+    // ★ 날짜계획 저장 총량 게이트와 **동일한 제출 원장**. 무시트 작업표의 채움 수는 운영 진행
+    // 표시에는 더 정확할 수 있지만, savePlans 는 campaign_applications를 잠근 뒤 검사한다.
+    // 수동 게이지의 상한·저장 가능 여부는 이 두 값을 써야 서버와 한 건도 어긋나지 않는다.
+    planGateSubmittedAll: Number(allQ[0] && allQ[0].n) || 0,
+    planGateTodaySubmitted: byDateSubmitted[today] || 0,
     // 손대지 않았을 때 **오늘 실제로 열리는 정원**(computeCampaignState 판정 그대로).
     //   null = 계산 불가 → 화면은 균형 모드를 켜지 않는다(잘못된 기준으로 저장 판정 금지).
     todayNaturalQuota,
@@ -384,7 +389,8 @@ async function savePlans(campaignId, body, actor) {
              FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`,
           [campaignId, kstDayStartUtc().toISOString()]);
         if (sp) await client.query('RELEASE SAVEPOINT plan_total');
-        const planned = new Map(planRows.map(r => [r.date, Number(r.count) || 0]));
+        const beforePlans = new Map(planRows.map(r => [r.date, Number(r.count) || 0]));
+        const planned = new Map(beforePlans);
         for (const x of set) planned.set(x.date, x.count);
         for (const dt of remove) planned.delete(dt);
         const confirmedAll = Number(cfRows[0] && cfRows[0].all_n) || 0;
@@ -395,12 +401,22 @@ async function savePlans(campaignId, body, actor) {
         const todayPart = planned.has(today) ? Math.max(planned.get(today), confirmedToday) : confirmedToday;
         const need = (confirmedAll - confirmedToday) + todayPart + future;
         if (need > totalCap) {
-          const e = new Error(
-            `총 모집 ${totalCap.toLocaleString()}명을 넘겨 조절할 수 없습니다 — `
-            + `확정 ${confirmedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
-            + `${(need - totalCap).toLocaleString()}명을 줄여주세요.`);
-          e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = confirmedAll;
-          throw e;
+          /* 이미 총량보다 큰 옛 계획은 줄여야 복구된다. 종전에는 30→20처럼 명백한 축소도
+             결과가 아직 초과라는 이유로 거부돼 한 번에 전부 고치지 못하면 영구히 막혔다.
+             기존 명시 계획을 낮추거나 해제하는 변경만 통과시키고, 새 날짜·증원은 계속 거부한다. */
+          const onlyReductions = set.length > 0
+            && set.every(x => beforePlans.has(x.date) && Number(x.count) <= Number(beforePlans.get(x.date)))
+            && (remove.length > 0 || set.some(x => Number(x.count) < Number(beforePlans.get(x.date))));
+          if (onlyReductions) {
+            logger.warn(`[campaignPlan] 총량 초과 계획 축소 저장 허용 camp=${campaignId} need=${need} cap=${totalCap}`);
+          } else {
+            const e = new Error(
+              `총 모집 ${totalCap.toLocaleString()}명을 넘겨 조절할 수 없습니다 — `
+              + `확정 ${confirmedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
+              + `${(need - totalCap).toLocaleString()}명을 줄여주세요.`);
+            e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = confirmedAll;
+            throw e;
+          }
         }
       } catch (e) {
         if (e && e.code === 'over_total') throw e;

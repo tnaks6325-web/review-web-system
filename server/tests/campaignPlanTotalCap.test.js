@@ -81,6 +81,15 @@ const base = (over = {}) => ({
   await assert.rejects(P.savePlans('c1', { set: [{ date: d(1), count: 60 }] }, 't'), (e) => e.code === 'over_total');
   ok('★ 이미 저장된 미래 계획(150)과 이번 조절(60)을 합쳐 판정', true);
 
+  /* 4-1. 이미 초과된 옛 계획은 축소를 저장할 수 있어야 복구 가능하다.
+     새 날짜/증원은 그대로 over_total로 막고, 같은 명시 계획을 낮추는 경우만 허용한다. */
+  STUB = base({ plans: [{ date: d(1), count: 250 }] });
+  const recover = await P.savePlans('c1', { set: [{ date: d(1), count: 220 }] }, 't');
+  ok('★ 이미 초과된 계획도 축소(250→220)만은 저장해 복구할 수 있다', recover.applied === 1);
+  STUB = base({ plans: [{ date: d(1), count: 250 }] });
+  await assert.rejects(P.savePlans('c1', { set: [{ date: d(1), count: 260 }] }, 't'), (e) => e.code === 'over_total');
+  ok('★ 이미 초과된 계획을 더 늘리는 저장은 계속 over_total 거부', true);
+
   /* 5. 같은 날짜를 덮어쓰면 옛 값이 아니라 새 값으로 센다 */
   STUB = base({ plans: [{ date: d(1), count: 190 }] });
   const over5 = await P.savePlans('c1', { set: [{ date: d(1), count: 30 }] }, 't');
@@ -123,6 +132,8 @@ const base = (over = {}) => ({
   ok('★ 게이트는 캠페인 행 잠금 뒤·쓰기 앞에서 돈다',
     src.indexOf('FOR UPDATE') < src.indexOf('SAVEPOINT plan_total')
     && src.indexOf('SAVEPOINT plan_total') < src.indexOf('INSERT INTO campaign_daily_plans'));
+  ok('★ 초과 상태 예외는 기존 명시 계획을 낮추는 경우로만 한정한다',
+    /const onlyReductions = set\.length > 0\s*&&\s*set\.every\(x =>[\s\S]{0,180}beforePlans\.has\(x\.date\)[\s\S]{0,140}x\.count\) <= Number\(beforePlans\.get\(x\.date\)\)/.test(src));
   const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
   ok('★ over_total 은 400대로 매핑된다(errorHandler 500 마스킹 방지)', /over_total: 4\d\d/.test(routes));
 
