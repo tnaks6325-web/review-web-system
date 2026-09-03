@@ -22,6 +22,38 @@ const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campai
 const { extractAmountNumber } = require('../utils/paymentAmount');
 const { normalizeStoredBanner, validateBannerInput, toPublicBanner } = require('../utils/reviewerHomeBanner');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
+const {
+  issueReviewerSession,
+  verifyReviewerSession,
+  reviewerSessionMiddleware,
+} = require('../services/reviewerSession.service');
+const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
+
+function sendReviewerIdentityError(res, err, next) {
+  if (err instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
+    return res.status(err.status || 400).json({ ok: false, code: err.code, error: err.message });
+  }
+  return next(err);
+}
+
+async function bindProfileOwnerWhenEnabled(req, res, next) {
+  if (!reviewerOrderIdentity.isEnabled()) return next();
+  try {
+    const token = req.headers['x-reviewer-token'];
+    if (!token) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인이 필요합니다.' });
+    const session = verifyReviewerSession(token);
+    const { rows } = await pool.query('SELECT phone8 FROM reviewers WHERE id = $1 LIMIT 1', [session.ownerReviewerId]);
+    if (rows.length !== 1) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
+    req.body = { ...(req.body || {}), phone8: rows[0].phone8, ownerReviewerId: session.ownerReviewerId };
+    req.reviewer = session;
+    next();
+  } catch (err) {
+    if (err && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err.name)) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인이 만료되었거나 유효하지 않습니다.' });
+    }
+    next(err);
+  }
+}
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -60,11 +92,18 @@ router.post('/home-session', async (req, res, next) => {
     }
     // 관리자 홈 링크 발급과 같은 규칙: status와 무관하게 현재 등록 레코드만 재확인한다.
     const { rows } = await pool.query(
-      `SELECT name, phone, phone8 FROM reviewers WHERE name = $1 AND phone8 = $2 LIMIT 1`,
+      `SELECT id, name, phone, phone8 FROM reviewers WHERE name = $1 AND phone8 = $2 LIMIT 2`,
       [String(p.name), String(p.phone8)]
     );
-    if (!rows.length) return res.status(401).json({ ok: false, error: '유효하지 않은 리뷰어 홈 링크입니다.' });
-    res.json({ ok: true, user: rows[0] });
+    if (rows.length !== 1) return res.status(401).json({ ok: false, error: '유효하지 않거나 중복된 리뷰어 홈 링크입니다.' });
+    const reviewerToken = issueReviewerSession({
+      ownerReviewerId: rows[0].id,
+      loginName: rows[0].name,
+      loginPhone8: rows[0].phone8,
+      loginKind: 'self',
+    });
+    const { id: _id, ...user } = rows[0];
+    res.json({ ok: true, user, reviewerToken });
   } catch (err) {
     if (err && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err.name)) {
       return res.status(401).json({ ok: false, error: '리뷰어 홈 링크가 만료되었거나 유효하지 않습니다.' });
@@ -78,7 +117,15 @@ router.get('/verify', async (req, res, next) => {
   try {
     const { name, phone8 } = req.query;
     const result = await verifyReviewer(name, phone8);
-    res.json(result);
+    if (!result.ok) return res.json(result);
+    const reviewerToken = issueReviewerSession({
+      ownerReviewerId: result._ownerReviewerId,
+      loginName: result.name,
+      loginPhone8: result._loginPhone8,
+      loginKind: result._loginKind,
+    });
+    const { _ownerReviewerId, _loginPhone8, _loginKind, ...publicResult } = result;
+    res.json({ ...publicResult, reviewerToken });
   } catch (err) {
     console.error('[verify] Error:', err.message, err.stack);
     res.status(500).json({ ok: false, error: '로그인 처리 중 오류: ' + err.message });
@@ -119,13 +166,49 @@ router.post('/delete', authMiddleware, async (req, res, next) => {
 
 // POST /api/reviewer/profile — 프로필 관리 (GAS: getReviewerProfile/saveSubAccounts/saveIncomeInfo)
 // 리뷰어 본인이 phone8을 통해 접근 (인증 불필요 — phone8이 사실상 인증 토큰 역할)
-router.post('/profile', async (req, res, next) => {
+router.post('/profile', bindProfileOwnerWhenEnabled, async (req, res, next) => {
   try {
     const result = await handleReviewerProfile(req.body);
     res.json(result);
   } catch (err) {
     next(err);
   }
+});
+
+// 서명된 리뷰어 세션에 귀속된 프로필. phone8 단독 조회와 달리 동명이인/중복번호를 섞지 않는다.
+router.get('/profile/secure', reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    res.json(await reviewerOrderIdentity.getSecureProfile(req.reviewer.ownerReviewerId));
+  } catch (err) { return sendReviewerIdentityError(res, err, next); }
+});
+
+// 명의별 공통 쇼핑 아이디. 구매양식의 체크박스를 선택한 경우에만 프론트가 이 경로를 호출한다.
+router.patch('/profile/identities/:identityKey/shopping-id', reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    res.json(await reviewerOrderIdentity.saveShoppingId(
+      req.reviewer.ownerReviewerId,
+      decodeURIComponent(String(req.params.identityKey || '')),
+      req.body && req.body.shoppingId
+    ));
+  } catch (err) { return sendReviewerIdentityError(res, err, next); }
+});
+
+router.post('/order-identity-context', reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    res.json(await reviewerOrderIdentity.getParticipationIdentityContext(req.body || {}, req.reviewer));
+  } catch (err) { return sendReviewerIdentityError(res, err, next); }
+});
+
+router.post('/order-identity-match', imageApiLimiter, reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    res.json(await reviewerOrderIdentity.matchCapture(req.body || {}, req.reviewer));
+  } catch (err) { return sendReviewerIdentityError(res, err, next); }
+});
+
+router.post('/order-identity-match/manual-confirm', imageApiLimiter, reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    res.json(await reviewerOrderIdentity.manualConfirm(req.body || {}, req.reviewer));
+  } catch (err) { return sendReviewerIdentityError(res, err, next); }
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -139,15 +222,16 @@ router.post('/profile', async (req, res, next) => {
 //   (최종 게이트는 /api/submit/order 서버검증).
 // ═══════════════════════════════════════════════════════════
 // ★ Gemini 비용 보호: 이미지 API와 동일한 리미터 적용 (무인증 엔드포인트 DoS 방지)
-router.post('/identity-precheck', imageApiLimiter, async (req, res) => {
+router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, async (req, res) => {
   try {
     const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
     const p8 = String(req.body?.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
     if (p8.length !== 8) return res.json({ ok: false, error: 'phone8이 필요합니다.' });
 
+    const profileScope = req.reviewer && req.reviewer.ownerReviewerId;
     const { rows } = await pool.query(
       `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
-       FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]
+       FROM reviewers WHERE ${profileScope ? 'id' : 'phone8'} = $1 LIMIT 1`, [profileScope || p8]
     );
     if (rows.length === 0) return res.json({ ok: false, error: '등록된 리뷰어가 아닙니다.' });
 

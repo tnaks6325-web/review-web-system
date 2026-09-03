@@ -65,8 +65,11 @@ ok('추가참여 버튼은 참여형 타계정 공고에서만 노출', /addBtn\
 // ── UI 구성 ──
 ok('명의 선택 시트 + 미등록 안내 시트 존재', /id="acctSheet"/.test(camp) && /id="acctEmpty"/.test(camp));
 ok('참여 후 명의 카드·전환 칩·추가참여 버튼', /id="acctBox"/.test(camp) && /id="acctSwitch"/.test(camp) && /id="addSubBtn"/.test(camp));
-ok('타계정 목록은 기존 무인증 profile API 재사용(신규 엔드포인트 없음)',
-  /action:'get', phone8: s\.phone8/.test(camp) && !/multi-status/.test(camp));
+ok('타계정 목록은 서명 세션 기반 secure profile API로 소유자 범위를 고정',
+  /\/api\/reviewer\/profile\/secure/.test(camp) && /headers:_getAuthHeaders\(\)/.test(camp));
+ok('타계정이 있는 허용 공고는 명의를 먼저 선택한 뒤 옵션으로 이동',
+  /if\(multiEnabled\(\)\)[\s\S]{0,180}if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(camp)
+  && /function _continueInitialAcct\(\)/.test(camp));
 ok('제출 완료: 그 명의만 정리하고 남은 명의는 이어서 진행 CTA', /clearHold\(done\.phone8\)/.test(camp) && /doneNextBtn/.test(camp));
 
 // ── 등록 유도 → 복귀 ──

@@ -98,11 +98,17 @@ async function verifyReviewer(name, phone8) {
 
   // 1) 직접 매칭
   const { rows } = await pool.query(
-    'SELECT name, phone FROM reviewers WHERE phone8 = $1 AND name = $2 LIMIT 1', [p8, n]
+    'SELECT id, name, phone FROM reviewers WHERE phone8 = $1 AND name = $2 LIMIT 2', [p8, n]
   );
 
-  if (rows.length > 0) {
-    return { ok: true, name: rows[0].name, phone: rows[0].phone };
+  if (rows.length === 1) {
+    return {
+      ok: true, name: rows[0].name, phone: rows[0].phone,
+      _ownerReviewerId: rows[0].id, _loginKind: 'self', _loginPhone8: p8,
+    };
+  }
+  if (rows.length > 1) {
+    return { ok: false, code: 'AMBIGUOUS_REVIEWER', error: '같은 로그인 정보가 여러 계정에 등록되어 있어 안전하게 로그인할 수 없습니다. 관리자에게 문의해주세요.' };
   }
 
   // 2) 타계정(sub_accounts) 매칭 — 메인 계정으로 자동 로그인
@@ -110,12 +116,13 @@ async function verifyReviewer(name, phone8) {
   //   행도 매칭 대상에 포함한다 — 아래 JS 루프가 문자열이면 JSON.parse로 복구한다.
   //   (jsonb_array_length 는 스칼라에서 에러를 던지므로 jsonb_typeof 로 분기)
   const { rows: subRows } = await pool.query(
-    `SELECT name, phone, sub_accounts FROM reviewers
+    `SELECT id, name, phone, sub_accounts FROM reviewers
      WHERE sub_accounts IS NOT NULL
        AND ( (jsonb_typeof(sub_accounts) = 'array' AND jsonb_array_length(sub_accounts) > 0)
              OR jsonb_typeof(sub_accounts) = 'string' )`
   );
 
+  const subMatches = [];
   for (const row of subRows) {
     try {
       // JSONB: pg 드라이버가 자동 파싱하므로 이미 배열일 수 있음
@@ -128,13 +135,22 @@ async function verifyReviewer(name, phone8) {
         if (subName === n && subPhone8 === p8) {
           // ★ A안: 같은 번호·다른 이름 — 입력한 이름(타계정)을 그대로 신원으로 유지
           //   (기존: 주계정 이름으로 접혀 "정영민"→"김정곤"이 되던 문제 해결)
-          return { ok: true, name: subName, phone: sub.phone || row.phone, mainName: row.name, subAccountLogin: true };
+          subMatches.push({
+            ok: true, name: subName, phone: sub.phone || row.phone,
+            mainName: row.name, subAccountLogin: true,
+            _ownerReviewerId: row.id, _loginKind: 'sub', _loginPhone8: p8,
+          });
         }
       }
     } catch (_) {
       // sub_accounts 파싱 실패 시 무시
       continue;
     }
+  }
+
+  if (subMatches.length === 1) return subMatches[0];
+  if (subMatches.length > 1) {
+    return { ok: false, code: 'AMBIGUOUS_REVIEWER', error: '같은 타계정 로그인 정보가 여러 소유자에게 등록되어 있어 안전하게 로그인할 수 없습니다. 관리자에게 문의해주세요.' };
   }
 
   // 3) 매칭 실패 — 원인별 세부 에러 메시지
@@ -228,9 +244,13 @@ async function handleReviewerProfile(body = {}) {
     bankName, bankAccount, accountHolder,      // saveBankInfo
     onlyIfEmpty,                               // saveBankInfo — 빈 칸만 채움(구매양식 제출 후 자동 저장)
     address,                                   // saveAddress
+    ownerReviewerId,                           // 서명 리뷰어 세션 사용 시 UUID 스코프
   } = body;
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
   if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리 필요' };
+  const scopedById = /^[0-9a-f-]{36}$/i.test(String(ownerReviewerId || ''));
+  const scopeColumn = scopedById ? 'id' : 'phone8';
+  const scopeValue = scopedById ? String(ownerReviewerId) : p8;
 
   if (action === 'get') {
     const { rows } = await pool.query(
@@ -238,7 +258,7 @@ async function handleReviewerProfile(body = {}) {
               bank_name AS "bankName", bank_account AS "bankAccount",
               account_holder AS "accountHolder", address,
               sub_accounts AS "subAccounts", status
-       FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]
+       FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 1`, [scopeValue]
     );
     if (rows.length === 0) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
     // sub_accounts는 TEXT로 저장된 JSON — 배열로 파싱하여 반환
@@ -265,15 +285,43 @@ async function handleReviewerProfile(body = {}) {
     // 코드가 부여된 소유자는 배열을 통째로 바꾸면 member_no와 실제 참여자 UUID의 대응이
     // 깨질 수 있다. 코드 관리 화면에 "타계정 추가/분리" 절차가 생기기 전까지는 fail-closed.
     // 기존(코드 미부여) 리뷰어의 종전 프로필 저장은 그대로 허용한다.
+    let currentSubs = [];
     try {
-      const coded = await pool.query('SELECT reviewer_no FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]);
+      const coded = await pool.query(
+        `SELECT reviewer_no, sub_accounts FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 1`,
+        [scopeValue]
+      );
       if (coded.rows.length && coded.rows[0].reviewer_no != null) {
         return { ok: false, code: 'identity_accounts_locked',
           error: '코드가 부여된 타계정은 여기서 변경할 수 없습니다. 관리자 코드 관리 절차를 이용해주세요.' };
       }
+      if (coded.rows.length) {
+        currentSubs = coded.rows[0].sub_accounts;
+        if (typeof currentSubs === 'string') {
+          try { currentSubs = JSON.parse(currentSubs); } catch (_) { currentSubs = []; }
+        }
+        if (!Array.isArray(currentSubs)) currentSubs = [];
+      }
     } catch (identityErr) {
       if (!identityErr || identityErr.code !== '42703') throw identityErr;
     }
+    // 명의의 공통 아이디는 전용 PATCH 경로에서만 변경한다. 구버전/캐시된 프로필 화면이
+    // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
+    // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
+    const sig = (sub) => `${String(sub && sub.name || '').replace(/\s+/g, '')}|${String(sub && sub.phone || '').replace(/\D/g, '').slice(-8)}`;
+    const usedOld = new Set();
+    subs.forEach((sub, idx) => {
+      let oldIdx = currentSubs.findIndex((old, i) => !usedOld.has(i) && sig(old) === sig(sub));
+      if (oldIdx < 0 && currentSubs[idx] && !usedOld.has(idx)) oldIdx = idx;
+      if (oldIdx < 0) return;
+      usedOld.add(oldIdx);
+      const old = currentSubs[oldIdx] || {};
+      const savedId = old.shoppingId != null ? old.shoppingId : old.shopping_id;
+      if (savedId != null) {
+        sub.shoppingId = String(savedId);
+        delete sub.shopping_id;
+      }
+    });
     const phone8s = new Set();
     for (const sub of subs) {
       const subPhone8 = String(sub && sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
@@ -282,8 +330,8 @@ async function handleReviewerProfile(body = {}) {
       phone8s.add(subPhone8);
     }
     await pool.query(
-      'UPDATE reviewers SET sub_accounts = $1::jsonb WHERE phone8 = $2',
-      [JSON.stringify(subs), p8]
+      `UPDATE reviewers SET sub_accounts = $1::jsonb WHERE ${scopeColumn} = $2`,
+      [JSON.stringify(subs), scopeValue]
     );
     return { ok: true };
   }
@@ -298,8 +346,8 @@ async function handleReviewerProfile(body = {}) {
       `UPDATE reviewers SET
          income_type  = COALESCE(NULLIF($1, ''), income_type),
          resident_num = COALESCE(NULLIF($2, ''), resident_num)
-       WHERE phone8 = $3`,
-      [incType, resNum, p8]
+       WHERE ${scopeColumn} = $3`,
+      [incType, resNum, scopeValue]
     );
     return { ok: true };
   }
@@ -324,8 +372,8 @@ async function handleReviewerProfile(body = {}) {
                                ELSE COALESCE(NULLIF($2, ''), bank_account) END,
          account_holder = CASE WHEN $4::bool AND COALESCE(account_holder, '') <> '' THEN account_holder
                                ELSE COALESCE(NULLIF($3, ''), account_holder) END
-       WHERE phone8 = $5`,
-      [bn, ba, ah, fillOnly, p8]
+       WHERE ${scopeColumn} = $5`,
+      [bn, ba, ah, fillOnly, scopeValue]
     );
     return { ok: true, fillOnly };
   }
@@ -333,7 +381,7 @@ async function handleReviewerProfile(body = {}) {
   if (action === 'saveAddress') {
     // 본인 주소 저장(빈 문자열이면 초기화 허용)
     const addr = (address == null ? '' : address).toString().trim();
-    await pool.query(`UPDATE reviewers SET address = $1 WHERE phone8 = $2`, [addr, p8]);
+    await pool.query(`UPDATE reviewers SET address = $1 WHERE ${scopeColumn} = $2`, [addr, scopeValue]);
     return { ok: true };
   }
 

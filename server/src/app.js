@@ -50,7 +50,9 @@ initSentry(app);
 // ── 미들웨어 ──
 app.use(helmet());
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' }));
+// 프론트가 허용하는 10MB 이미지의 base64(JSON)는 약 13.4MB다. 10MB 본문 상한이면
+// UI에서 통과한 파일이 서버에서 413으로 실패하므로 인코딩 여유만큼 맞춘다(업로드 리미터는 별도 유지).
+app.use(express.json({ limit: '15mb' }));
 app.use(morgan('combined'));
 // 제한기에 의해 바로 끝나는 429도 관측해야 실제 제한 경로를 추적할 수 있다.
 // rateLimiter 뒤에 두면 429는 finish 메트릭 자체를 남기지 못해 오류율 0%로 보인다.

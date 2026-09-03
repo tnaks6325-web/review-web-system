@@ -32,7 +32,7 @@ ok('apply: profile_missing 403 + missing 목록 반환', /reason: 'profile_missi
   ok('apply: 게이트는 홀드 INSERT 이전(자리 미점유) — profile_missing이 INSERT보다 앞 (063 owner_phone8 · 082 리뷰비 스냅샷 포함)',
     _iGate > 0 && _iIns > 0 && _iGate < _iIns);
 }
-ok('apply: 등록 조회가 프로필 필드 포함(name/address/bank_*) + 063 sub_accounts', /SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts\s+FROM reviewers/.test(routes));
+ok('apply: 등록 조회가 UUID와 프로필 필드 포함(name/address/bank_*) + 063 sub_accounts', /SELECT id, name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts\s+FROM reviewers/.test(routes));
 
 // ── 변경② 공고 등록/수정 참여형 필드 ──
 for (const f of ['participation_mode', 'thumbnail_url', 'landing_url', 'daily_limit', 'recruit_total', 'window_start', 'window_end', 'close_buffer_min', 'hold_ttl_min', 'work_detail', 'source_work_order_id']) {

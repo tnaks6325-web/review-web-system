@@ -46,6 +46,60 @@ const _EMBED_CTX = (() => {
 })();
 /** 미리보기(제출 차단) 단일 판정 — embed 컨텍스트 안에서만 참이 될 수 있다. */
 const _PREVIEW_MODE = !!(_EMBED_CTX && _EMBED_CTX.preview);
+let _activeIdentityContext = null;
+let _identityContextPromise = null;
+
+function _reviewerIdentityRequestBody(extra) {
+  return Object.assign({
+    campaignId: _EMBED_CTX?.campId || "",
+    campaignApplicationId: _EMBED_CTX?.app || "",
+    holdToken: _EMBED_CTX?.holdToken || "",
+  }, extra || {});
+}
+
+async function _loadOrderIdentityContext() {
+  if (!_EMBED_CTX || _PREVIEW_MODE || !_EMBED_CTX.app) return null;
+  if (_identityContextPromise) return _identityContextPromise;
+  _identityContextPromise = (async () => {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-context", {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify(_reviewerIdentityRequestBody()),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || "참여 명의를 확인하지 못했습니다.");
+    _activeIdentityContext = data;
+    const identity = data.selectedIdentity || {};
+    (_orderCardIds || []).forEach((cid) => {
+      const idEl = document.getElementById(cid + "_userId");
+      if (idEl && !idEl.value) idEl.value = identity.shoppingId || "";
+      if (idEl) idEl.dataset.savedValue = identity.shoppingId || "";
+      const who = document.getElementById(cid + "_identityWho");
+      if (who) who.textContent = (identity.name || "선택 명의") + " 명의 주문인지 확인합니다.";
+    });
+    return data;
+  })().catch((err) => { _identityContextPromise = null; throw err; });
+  return _identityContextPromise;
+}
+
+function _invalidateIdentityApproval(cid) {
+  const st = _cardAiState[cid]; if (!st) return;
+  st.approvalToken = "";
+  const box = document.getElementById(cid + "_identityStatus");
+  if (box && st.extracted) {
+    if (st.reviewToken) _renderIdentityMatchState(cid, "REVIEW", ["수정한 정보를 직접 확인해주세요."], true);
+    else _renderIdentityMatchState(cid, "REVIEW", ["입력 정보가 변경되었습니다. 캡처를 다시 분석해주세요."], false);
+  }
+}
+
+function _selectShoppingIdSave(cid) {
+  const selected = document.getElementById(cid + "_saveIdChk");
+  if (!selected || !selected.checked) return;
+  (_orderCardIds || []).forEach((otherCid) => {
+    if (otherCid === cid) return;
+    const other = document.getElementById(otherCid + "_saveIdChk");
+    if (other) other.checked = false;
+  });
+}
 function _embedPost(msg) {
   if (_EMBED_CTX && window.parent !== window) {
     try { window.parent.postMessage(msg, location.origin); } catch (_) { /* noop */ }
@@ -530,17 +584,19 @@ function _loadAuthSession() {
       localStorage.removeItem(REVIEWER_AUTH_KEY);
       return null;
     }
+    if (!obj.reviewerToken) return null;
     return obj;
   } catch(_) { return null; }
 }
 
 /** 세션 저장 (phone8 포함 → 동명이인 구분) */
-function _saveAuthSession(name, verified, registeredMember, phone8) {
+function _saveAuthSession(name, verified, registeredMember, phone8, reviewerToken) {
   const obj = {
     name,
     verified,
     registeredMember,
     phone8: (phone8 || "").replace(/[^0-9]/g, ""), // 뒤 8자리 숫자만
+    reviewerToken: reviewerToken || "",
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
   localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(obj));
@@ -998,7 +1054,7 @@ async function _doLoginDirect() {
     }
 
     // 성공
-    _saveAuthSession(data.name || name, true, true, data.phone8 || phone8);
+    _saveAuthSession(data.name || name, true, true, data.phone8 || phone8, data.reviewerToken);
     _applyLoginUI(data.name || name);
     const ni = document.getElementById("nameInput");
     if (ni) ni.value = data.name || name;
@@ -1058,7 +1114,7 @@ async function _doLoginWithLookup() {
     }
 
     // 성공
-    _saveAuthSession(name, true, true, data.phone8 || phone8);
+    _saveAuthSession(name, true, true, data.phone8 || phone8, data.reviewerToken);
     _applyLoginUI(name);
     const ni = document.getElementById("nameInput");
     if (ni) ni.value = name;
@@ -1102,7 +1158,7 @@ async function _doLogin() {
     if (!data.ok) {
       _showLoginErr(data.error || "인증에 실패했습니다. 다시 시도해주세요."); return;
     }
-    _saveAuthSession(name, true, true, data.phone8 || phone8);
+    _saveAuthSession(name, true, true, data.phone8 || phone8, data.reviewerToken);
     _applyLoginUI(name);
 
     // ★ Phase 5: 구매양식 대기 중이면 폼으로 복귀
@@ -1248,7 +1304,9 @@ async function _submitRegister(name, phone, p1, p2) {
     if (data && data.ok) {
       const regPhone8 = (p1 + p2).slice(-8);
       showToast("등록 완료! 자동 로그인합니다.", "success");
-      _saveAuthSession(name, true, true, regPhone8);
+      const login = await gasGet({ action: "verifyReviewer", name, phone8: regPhone8 });
+      if (!login?.ok || !login.reviewerToken) throw new Error(login?.error || "등록 후 로그인 세션을 발급하지 못했습니다.");
+      _saveAuthSession(login.name || name, true, true, login.phone8 || regPhone8, login.reviewerToken);
       _applyLoginUI(name);
 
       // ★ v9.14: authScreen 등록 시 소득정보 입력 시 백그라운드 저장
@@ -4920,7 +4978,7 @@ function initOrderFormMode() {
     return true; // 일반 초기화 스킵
   }
   // 로그인 완료 상태 → 슬롯 매칭 정보 전역 저장
-  window._slotAuth = { name: authSession.name, phone8: authSession.phone8 || "" };
+  window._slotAuth = { name: authSession.name, phone8: authSession.phone8 || "", reviewerToken: authSession.reviewerToken || "" };
 
   // 헤더 제목 설정: "상품명의 구매양식 제출"
   const titleEl    = document.getElementById("orderFormTitle");
@@ -5017,6 +5075,11 @@ function initOrderFormMode() {
   //   ★ 관리자 미리보기 제외: 이 함수는 localStorage의 리뷰어 세션을 직접 읽으므로,
   //     관리자 브라우저에 남아 있던 세션의 계좌번호·예금주가 미리보기 화면에 찍힐 수 있다(PII 노출).
   if (!_PREVIEW_MODE) {
+    if (_EMBED_CTX) {
+      _loadOrderIdentityContext().catch(e => {
+        showToast(e.message || "참여 명의를 확인하지 못했습니다.", "error");
+      });
+    }
     _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
 
     // ★ 내정보(사용자명/전화/주소/계좌) 미등록 안내 배너 (비차단 — 제출 시 차단)
@@ -6215,6 +6278,8 @@ function _buildOrderCardHtml(cid, idx, type) {
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
       <div class="ofc-ai-section-title">📸 구매 캡처 <span style="font-weight:800;color:#fff;background:#E5484D;border-radius:4px;padding:1px 5px;font-size:.6rem;vertical-align:middle">필수</span></div>
+      <div id="${cid}_identityWho" style="font-size:.72rem;color:#4B5563;margin:0 0 8px">선택한 참여 명의와 주문 정보를 확인합니다.</div>
+      <div id="${cid}_identityStatus" style="display:none;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55"></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
@@ -6319,23 +6384,24 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_userId">아이디</label>
       <input id="${cid}_userId" class="of-input" type="text" placeholder="쇼핑몰 아이디" oninput="_ofClearError('${cid}_userId')">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
     </div>
     <div class="of-error-msg" id="${cid}_userId_err"><i class="fas fa-exclamation-circle"></i> 아이디는 필수 입력 항목입니다.</div>
 
     <!-- 수취인 -->
     <div class="of-field">
       <label class="of-label of-label-required">수취인</label>
-      <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient')">
+      <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
     </div>
     <!-- 연락처 -->
     <div class="of-field">
       <label class="of-label of-label-required">연락처</label>
-      <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone')" maxlength="13">
+      <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
     </div>
     <!-- 배송주소 -->
     <div class="of-field">
       <label class="of-label of-label-required">배송주소</label>
-      <input id="${cid}_address" class="of-input" type="text" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address')">
+      <input id="${cid}_address" class="of-input" type="text" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')">
     </div>
 
     <!-- 은행/계좌/예금주 (공유 가능) -->
@@ -6856,6 +6922,7 @@ async function _loadInlineProfile() {
       if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
       if (!Array.isArray(subs)) subs = [];
       _renderInlineSubList(subs);
+      await _loadSecureIdentityProfile();
     } else {
       // 프로필 미등록 상태
       const phoneEl = document.getElementById("inlineSelfPhone");
@@ -6864,6 +6931,42 @@ async function _loadInlineProfile() {
   } catch(e) {
     console.warn("[inlineProfile]", e.message);
   }
+}
+
+async function _loadSecureIdentityProfile() {
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/secure", { headers: _getAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok || !data?.ok || !Array.isArray(data.profile?.identities)) return;
+    window._secureReviewerProfile = data.profile;
+    const self = data.profile.identities.find(x => x.type === "self");
+    const input = document.getElementById("inlineSelfShoppingId");
+    if (input && self) {
+      input.value = self.shoppingId || "";
+      input.dataset.identityKey = self.identityKey || "self";
+      input.dataset.savedValue = self.shoppingId || "";
+    }
+    _renderInlineSubList(_parseSubAccounts(window._reviewerProfile?.subAccounts));
+  } catch (e) { console.warn("[secureProfile]", e.message); }
+}
+
+async function _saveIdentityShoppingId(position) {
+  const input = position === 0
+    ? document.getElementById("inlineSelfShoppingId")
+    : document.getElementById("inlineSubShoppingId_" + (position - 1));
+  if (!input?.dataset.identityKey) { showToast("명의 정보를 다시 불러온 뒤 저장해주세요.", "warning"); return; }
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/"
+      + encodeURIComponent(input.dataset.identityKey) + "/shopping-id", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ shoppingId: input.value.trim() }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || "저장하지 못했습니다.");
+    input.dataset.savedValue = data.shoppingId || "";
+    showToast("아이디가 이 명의에 저장되었습니다.", "success");
+    await _loadSecureIdentityProfile();
+  } catch (e) { showToast(e.message || "아이디 저장에 실패했습니다.", "error"); }
 }
 
 /** 리뷰어 프로필 모달 열기 */
@@ -7020,7 +7123,7 @@ async function saveSubAccount() {
   };
 
   if (editIdx >= 0 && editIdx < subs.length) {
-    subs[editIdx] = newSub; // 수정
+    subs[editIdx] = { ...subs[editIdx], ...newSub }; // 공통 아이디 등 확장 필드 보존
   } else {
     if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
     subs.push(newSub); // 추가
@@ -7377,7 +7480,7 @@ async function confirmSaveInlineSubAccount() {
   };
 
   if (editIdx >= 0 && editIdx < subs.length) {
-    subs[editIdx] = newSub;
+    subs[editIdx] = { ...subs[editIdx], ...newSub }; // 공통 아이디 등 확장 필드 보존
   } else {
     if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
     subs.push(newSub);
@@ -7424,10 +7527,14 @@ function _renderInlineSubList(subs) {
     const jDisplay = subJd.length === 13
       ? subJd.slice(0,6) + "-" + subJd.slice(6,7) + "••••••"
       : (subJd ? "등록됨" : "-");
+    const secureSub = (window._secureReviewerProfile?.identities || []).filter(x => x.type === "sub")[idx] || null;
+    const shoppingId = secureSub?.shoppingId || sub.shoppingId || "";
+    const identityKey = secureSub?.identityKey || "";
     return `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">
       <div style="flex:1;min-width:0">
         <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
         <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
+        <div style="display:flex;gap:5px;margin-top:5px"><input id="inlineSubShoppingId_${idx}" data-identity-key="${escHtml(identityKey)}" data-saved-value="${escHtml(shoppingId)}" value="${escHtml(shoppingId)}" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:5px 7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem"><button onclick="_saveIdentityShoppingId(${idx + 1})" style="padding:4px 8px;border:1px solid #93C5FD;border-radius:6px;background:#EFF6FF;color:#2563EB;font-size:.65rem;font-weight:700">저장</button></div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         <button onclick="editInlineSubAccount(${idx})" style="padding:3px 7px;background:#EFF6FF;color:#2563EB;border:1.5px solid #93C5FD;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">수정</button>
@@ -7587,13 +7694,14 @@ function onCardImgDrop(e, cid) {
 
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
-  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.lastBase64=""; st.lastMime=""; st.extracted=null; }
+  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.lastBase64=""; st.lastMime=""; st.extracted=null; st.extractToken=""; st.approvalToken=""; st.reviewToken=""; }
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
   document.getElementById(cid+"_aiLoading").classList.remove("show");
   document.getElementById(cid+"_aiResult").classList.remove("show");
   document.getElementById(cid+"_aiError").style.display = "none";
+  const identityStatus = document.getElementById(cid+"_identityStatus"); if (identityStatus) identityStatus.style.display = "none";
   // ★ ai-locked 필드 잠금 해제 헬퍼
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
@@ -7668,12 +7776,12 @@ async function _callCardExtractAi(cid, base64, mimeType) {
 
   // 카운트다운
   if (st.countdownId) clearInterval(st.countdownId);
-  let remaining = 15;
+  let remaining = 35;
   const countEl = document.getElementById(cid+"_aiCountdown");
   const barEl   = document.getElementById(cid+"_aiBar");
   const tick = () => {
     if (countEl) { countEl.textContent = remaining; countEl.style.color = remaining<=3?"#DC2626":"#3182f6"; }
-    if (barEl)   barEl.style.width = (remaining/15*100)+"%";
+    if (barEl)   barEl.style.width = (remaining/35*100)+"%";
     remaining--;
   };
   tick();
@@ -7682,14 +7790,14 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   // Abort
   if (st.abortCtrl) st.abortCtrl.abort();
   st.abortCtrl = new AbortController();
-  const tid = setTimeout(() => { st.abortCtrl.abort(); st.abortCtrl = null; }, 15000);
+  const tid = setTimeout(() => { st.abortCtrl.abort(); st.abortCtrl = null; }, 35000);
 
   try {
     const payload = { action: "extractOrderImage", imageBase64: base64, mimeType };
     let json;
     try {
       // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
-      json = await gasPostUpload(payload);
+      json = await gasPostUpload(payload, 35000);
       clearTimeout(tid);
     } catch(fe) {
       clearTimeout(tid);
@@ -7701,10 +7809,18 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     _stopCardCountdown(cid);
     document.getElementById(cid+"_aiLoading").classList.remove("show");
     const lblDone = document.getElementById(cid+"_imgLabel"); if (lblDone) lblDone.textContent = "분석 완료 ✓";
-    if (!json || json.error) { _showCardAiError(cid, json?.error||"알 수 없는 오류", true); return; }
+    if (!json || json.error) {
+      st.extractToken = json?.extractToken || "";
+      st.imageHash = json?.imageHash || "";
+      _showCardAiError(cid, json?.error||"알 수 없는 오류", true);
+      _renderIdentityMatchState(cid, "ERROR", ["AI 분석을 완료하지 못했습니다."], !!st.extractToken);
+      return;
+    }
 
-    st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"" };
-    _showCardAiResult(cid, st.extracted);
+    st.extractToken = json.extractToken || "";
+    st.imageHash = json.imageHash || "";
+    st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
+    await _matchCardIdentity(cid);
 
     // 주문번호 자동 입력
     if (st.extracted.orderNumber) {
@@ -7721,6 +7837,72 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     document.getElementById(cid+"_aiLoading").classList.remove("show");
     _showCardAiError(cid, err.message, true);
   }
+}
+
+function _cardIdentityForm(cid) {
+  return {
+    recipient: (document.getElementById(cid + "_recipient")?.value || "").trim(),
+    phone: (document.getElementById(cid + "_phone")?.value || "").trim(),
+    address: (document.getElementById(cid + "_address")?.value || "").trim(),
+  };
+}
+
+function _renderIdentityMatchState(cid, status, reasons, canManual) {
+  const box = document.getElementById(cid + "_identityStatus"); if (!box) return;
+  const palette = status === "MATCH"
+    ? ["#ECFDF5", "#6EE7B7", "#065F46"]
+    : status === "MISMATCH" ? ["#FEF2F2", "#FCA5A5", "#991B1B"]
+    : ["#FFFBEB", "#FCD34D", "#92400E"];
+  box.style.cssText = `display:block;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55;background:${palette[0]};border:1px solid ${palette[1]};color:${palette[2]}`;
+  const title = status === "MATCH" ? "✅ 선택 명의와 주문 정보가 일치합니다."
+    : status === "MISMATCH" ? "⛔ 선택 명의와 다른 주문으로 판단됩니다."
+    : status === "ERROR" ? "⚠️ AI 분석 장애 — 직접 확인이 필요합니다."
+    : "⚠️ 일부 정보가 애매해 직접 확인이 필요합니다.";
+  box.innerHTML = '<b>' + title + '</b>'
+    + ((reasons || []).length ? '<div style="margin-top:3px">' + (reasons || []).map(_safeText).join(' · ') + '</div>' : '')
+    + (canManual ? `<button type="button" onclick="_manualConfirmIdentity('${cid}')" style="margin-top:7px;width:100%;padding:7px;border:1px solid ${palette[1]};border-radius:7px;background:#fff;color:${palette[2]};font-weight:800;cursor:pointer">이 주문이 선택 명의의 주문임을 직접 확인</button>` : '');
+}
+
+async function _matchCardIdentity(cid) {
+  const st = _cardAiState[cid]; if (!st?.extracted || !st.extractToken) return;
+  try {
+    await _loadOrderIdentityContext();
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match", {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify(_reviewerIdentityRequestBody({ extractToken: st.extractToken, extracted: st.extracted })),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || "명의를 확인하지 못했습니다.");
+    st.approvalToken = data.approvalToken || "";
+    st.reviewToken = data.reviewToken || "";
+    if (data.resolved) st.extracted = { ...st.extracted, ...data.resolved };
+    _showCardAiResult(cid, st.extracted);
+    if (data.status === "MATCH" || data.status === "REVIEW") applyCardAiResult(cid);
+    _renderIdentityMatchState(cid, data.status, data.reasons || [], data.status === "REVIEW" && !!st.reviewToken);
+  } catch (err) {
+    st.approvalToken = "";
+    _showCardAiResult(cid, st.extracted);
+    _renderIdentityMatchState(cid, "ERROR", [err.message], false);
+  }
+}
+
+async function _manualConfirmIdentity(cid) {
+  const st = _cardAiState[cid]; if (!st) return;
+  const mode = st.reviewToken ? "review" : "ai_error";
+  if (!confirm("주문 캡처와 입력 정보를 직접 확인했으며, 현재 선택한 명의의 주문이 맞습니까?")) return;
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify(_reviewerIdentityRequestBody({
+        mode, manualConfirmed: true, reviewToken: st.reviewToken || "",
+        extractToken: st.extractToken || "", extracted: st.extracted || {}, formFields: _cardIdentityForm(cid),
+      })),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || "수동 확인을 저장하지 못했습니다.");
+    st.approvalToken = data.approvalToken || "";
+    _renderIdentityMatchState(cid, "MATCH", ["사용자가 주문 정보를 직접 확인했습니다."], false);
+  } catch (err) { showToast(err.message, "error"); }
 }
 
 function _stopCardCountdown(cid) {
@@ -8214,6 +8396,56 @@ function _proceedOrderSubmit() {
   submitOrderForm();
 }
 
+async function _prepareIdentityApprovals(orders) {
+  if (!_EMBED_CTX || _PREVIEW_MODE) return true;
+  try { await _loadOrderIdentityContext(); }
+  catch (e) { showToast(e.message, "error"); return false; }
+  for (const order of orders) {
+    const st = _cardAiState[order.cid] || {};
+    const hasCapture = String(order.imgThumbSrc || "").startsWith("data:");
+    if (hasCapture) {
+      if (!st.approvalToken) {
+        _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
+          [st.extractToken ? "명의 확인을 완료해주세요." : "캡처 AI 분석을 다시 시도해주세요."],
+          !!(st.reviewToken || (st.extractToken && !st.extracted)));
+        document.getElementById(order.cid + "_identityStatus")?.scrollIntoView({ behavior:"smooth", block:"center" });
+        showToast("캡처의 참여 명의 확인을 완료해주세요.", "warning");
+        return false;
+      }
+      order.identityApprovalToken = st.approvalToken;
+      continue;
+    }
+    if (!window._captureSkipped) {
+      showToast("캡처 없이 제출하려면 예외 확인 버튼을 먼저 선택해주세요.", "warning");
+      return false;
+    }
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
+      method:"POST", headers:{ "Content-Type":"application/json", ..._getAuthHeaders() },
+      body:JSON.stringify(_reviewerIdentityRequestBody({
+        mode:"no_capture", manualConfirmed:true,
+        formFields:{ recipient:order.recipient, phone:order.phone, address:order.address },
+      })),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) { showToast(data?.error || "무캡처 확인에 실패했습니다.", "error"); return false; }
+    order.identityApprovalToken = data.approvalToken;
+  }
+  return true;
+}
+
+async function _saveOrderShoppingIdIfRequested(order) {
+  const checkbox = document.getElementById(order.cid + "_saveIdChk");
+  if (!checkbox?.checked || !_activeIdentityContext?.selectedIdentity?.identityKey) return;
+  const response = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/"
+    + encodeURIComponent(_activeIdentityContext.selectedIdentity.identityKey) + "/shopping-id", {
+    method:"PATCH", headers:{ "Content-Type":"application/json", ..._getAuthHeaders() },
+    body:JSON.stringify({ shoppingId: order.userId || "" }),
+  });
+  const data = await response.json();
+  if (!response.ok || !data?.ok) throw new Error(data?.error || "아이디를 명의에 저장하지 못했습니다.");
+  checkbox.checked = false;
+}
+
 /** 관리자 미리보기 전용 완료 처리. 주문·첨부·작업보드 API를 호출하지 않는다. */
 function _finishPreviewSubmit() {
   _closeOrderConfirm();
@@ -8304,7 +8536,7 @@ async function submitOrderForm() {
 
   // ★ 주문번호·비고 제외 전 항목 필수 (카드별)
   //   - 주문자/은행/계좌/예금주는 "1번과 동일" 체크 시 1번 카드 값을 유효값으로 인정
-  //   - nc모드 2번(쿠팡) 카드는 주문자/은행/계좌/예금주/수취인/연락처/주소를 1번 카드에서 재사용하므로 검사 제외
+  //   - nc모드 2번(쿠팡)도 캡처에서 확인한 수취인/연락처/주소를 독립 기록
   const _missingLabels = [];
   _orderCardIds.forEach((cid, idx) => {
     const isFirst = idx === 0;
@@ -8316,9 +8548,7 @@ async function submitOrderForm() {
       [cid + "_userId", "아이디"],
       [cid + "_price", "결제금액"],
     ];
-    if (!isCoupangCard) {
-      perCard.push([cid + "_recipient", "수취인"], [cid + "_phone", "연락처"], [cid + "_address", "배송주소"]);
-    }
+    perCard.push([cid + "_recipient", "수취인"], [cid + "_phone", "연락처"], [cid + "_address", "배송주소"]);
     perCard.forEach(([id, label]) => {
       if (!gv(id)) { _ofShowError(id); _missingLabels.push(label); hasError = true; }
     });
@@ -8337,7 +8567,7 @@ async function submitOrderForm() {
   if (!firstDepositor) { _ofShowError("of_depositor"); _missingLabels.push("예금주"); hasError = true; }
 
   // ★ nc 모드: 쿠팡 결제금액 필수 + 동일인 검증 확인
-  if (window._ncMode && _orderCardIds.length >= 2) {
+  if (window._ncMode && _orderCardIds.length >= 2 && !_activeIdentityContext) {
     const coupangCid = _orderCardIds[1];
     const cpPrice = gv(coupangCid + "_price");
     if (!cpPrice) {
@@ -8375,7 +8605,7 @@ async function submitOrderForm() {
     _resetBtn(); return;
   }
 
-  // ★ 별표(*) 포함 검사: 수취인/연락처/주소에 *가 남아있으면 제출 차단
+  // ★ 가림문자 포함 검사: 자동 보완되지 않은 값은 그대로 제출하지 않는다.
   {
     let asteriskFound = false;
     let asteriskField = null;
@@ -8387,7 +8617,7 @@ async function submitOrderForm() {
       ];
       for (const f of fieldsToCheck) {
         const el = document.getElementById(f.id);
-        if (el && el.value.includes("*")) {
+        if (el && /[*＊●○◯◉•]/.test(el.value)) {
           asteriskFound = true;
           if (!asteriskField) asteriskField = el;
           el.classList.add("of-input--error");
@@ -8396,7 +8626,7 @@ async function submitOrderForm() {
     }
     if (asteriskFound) {
       if (asteriskField) asteriskField.scrollIntoView({ behavior: "smooth", block: "center" });
-      showToast("⚠️ 양식에 *표시가 포함된 경우 제출이 불가합니다.\n별표(*)를 제거한 뒤 정확한 정보를 입력해주세요.", "error");
+      showToast("⚠️ 자동 보완되지 않은 가림 문자가 남아 있습니다.\n정확한 정보를 입력한 뒤 수동 확인해주세요.", "error");
       _resetBtn(); return;
     }
   }
@@ -8426,11 +8656,11 @@ async function submitOrderForm() {
     const priceRaw = document.getElementById(cid+"_price")?.value || "";
     const price    = priceRaw.replace(/[^0-9]/g, "");
 
-    // 쿠팡 카드: recipient/phone/address는 네이버 카드에서 가져옴 (배송지 통일)
-    const naverCid = _orderCardIds[0];
-    const recipient = isCoupangCard ? gv(naverCid+"_recipient") : gv(cid+"_recipient");
-    const phone     = isCoupangCard ? gv(naverCid+"_phone")     : gv(cid+"_phone");
-    const address   = isCoupangCard ? gv(naverCid+"_address")   : gv(cid+"_address");
+    // 각 쇼핑몰 캡처에서 확인한 값을 그대로 기록한다. 같은 장소라도 도로명/지번 표기가 다를 수 있어
+    // 네이버 값을 쿠팡 카드에 복사하면 캡처 원문 보존 및 승인토큰 결속이 깨진다.
+    const recipient = gv(cid+"_recipient");
+    const phone     = gv(cid+"_phone");
+    const address   = gv(cid+"_address");
 
     // ★ v9.14: 카드별 소득신고 정보 수집
     // - 1번 카드: 직접 입력값 사용
@@ -8482,6 +8712,7 @@ async function submitOrderForm() {
       extractedPhone:     _cardAiState[cid]?.extracted?.phone     || "",
       extractedAddress:   _cardAiState[cid]?.extracted?.address   || "",
       identityConfirmed:  false
+      ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
   });
 
@@ -8491,7 +8722,11 @@ async function submitOrderForm() {
 
   // ═══ 내정보 게이트 + 신원 사전검증 (제출 전) ═══
   // 프로필(사용자명/전화/주소/계좌) 미등록 → 차단, 신원 불일치 → 타계정 등록/확인 다이얼로그
-  {
+  if (_activeIdentityContext || (_EMBED_CTX && !_PREVIEW_MODE)) {
+    if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 선택 명의 확인 중...';
+    const ready = await _prepareIdentityApprovals(orders);
+    if (!ready) { _resetBtn(); return; }
+  } else {
     const _idAuth = window._slotAuth || {};
     if (_idAuth.phone8) {
       if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 내정보 대조 중...';
@@ -8594,6 +8829,7 @@ async function submitOrderForm() {
       extractedPhone:     o.extractedPhone     || "",
       extractedAddress:   o.extractedAddress   || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
+      identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정
       //   배치는 **그 카드에 결속된 홀드**를 싣는다(요청 1건 = 홀드 1건이라는 서버 계약 그대로).
       ...(bh ? {
@@ -8666,6 +8902,10 @@ async function submitOrderForm() {
       if (!res.ok) throw new Error(res.error||"제출 실패");
 
       successCount++;
+      if (o.saveShoppingId) {
+        try { await _saveOrderShoppingIdIfRequested(o); }
+        catch (saveErr) { showToast("주문은 접수됐지만 아이디 저장에 실패했습니다: " + saveErr.message, "warning"); }
+      }
       // ★ DB-first: 이 시점에 주문은 서버 DB에 확정 저장됨. 시트 반영 상태를 수집(완료화면 안내용).
       mirrorStatuses.push(String(res.mirrorStatus || (res.queued ? "queued" : "")));
       // ★ 배치: 명의별 결과를 모은다. 단수 값 하나로 화면을 정하면 5건 중 4건이 지각이어도
