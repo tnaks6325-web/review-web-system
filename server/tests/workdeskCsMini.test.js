@@ -15,7 +15,7 @@ assert.match(workdesk, /WorkdeskCsMini\.mount\('workdeskCsMini', \{ sheetId: STA
 assert.match(workdesk, /tp3grid c3\$\{csMini\?' csmini':''\}/, '내부 작업보드에서만 네 번째 C/S 카드를 추가한다');
 assert.match(workdesk, /STATE\.role!=='advertiser'/, '광고주에게 C/S 대화를 노출하지 않는다');
 assert.match(workdesk, /\.tp3grid\.c3\.csmini\{grid-template-columns:minmax\(230px,370fr\).*minmax\(340px,460fr\)/, 'QHD에서 C/S 미니 폭을 넓힌 네 번째 카드 비율을 쓴다');
-assert.match(workdesk, /\.tp3grid\.c3\.csmini \.wdcsmini-pane\{[^}]*align-self:stretch;[^}]*height:auto;[^}]*min-height:330px;[^}]*max-height:none/s, '넓은 화면에서 C/S 미니 높이를 다른 상단 카드와 같은 그리드 행으로 맞춘다');
+assert.match(workdesk, /\.tp3grid\.c3\.csmini \.wdcsmini-pane\{[^}]*align-self:stretch;[^}]*height:auto;[^}]*min-height:330px;[^}]*max-height:none;[^}]*contain:size/s, '긴 C/S 목록은 행 높이를 밀지 않고 다른 상단 카드와 같은 그리드 행으로 맞춘다');
 assert.match(workdesk, /@media\(max-width:1500px\)\{[\s\S]*?\.wdcsmini-pane\{[^}]*height:300px;[^}]*max-height:300px/, '중간 화면에서 C/S 미니 높이를 300px로 제한한다');
 assert.match(mini, /wdcsmini-head tp3t tp3h[^>]*onclick="_topToggle\(\)"/, 'C/S 제목행은 기존 상단 카드와 같은 접기/펼치기 제목행을 쓴다');
 assert.match(workdesk, /\.tp3grid\.c3\.fold \.wdcsmini-body\{display:none\}/, '상단 접기 시 C/S 대화 본문도 함께 접힌다');
