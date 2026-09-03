@@ -167,8 +167,18 @@ async function dailyRemainingForCampaign(db, campaignId, now = new Date()) {
     const { fetchCampaignCounts, computeCampaignState } = require('./campaignState.service');
     const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('./campaignSchedule.service');
     const counts = await fetchCampaignCounts(db, [campaignId], now);
+    let stateCounts = counts.get(campaignId);
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      try {
+        const { todayFilledForTab } = require('./tabFilled.service');
+        const filled = await todayFilledForTab(db, camp.linked_sheet_id, camp.linked_tab_name, now);
+        if (filled != null) stateCounts = { ...(stateCounts || {}), tableTodayFilled: Math.max(0, Number(filled) || 0) };
+      } catch (e) {
+        logger.warn(`[manual-order] 작업표 오늘 채움 집계 실패(공고 신청 기준 유지) camp=${campaignId}: ${e.message}`);
+      }
+    }
     const sch = await deriveSchedules(db, tabsOfCampaigns([camp]), now);
-    const st = computeCampaignState(camp, counts.get(campaignId), now, scheduleFor(sch, camp));
+    const st = computeCampaignState(camp, stateCounts, now, scheduleFor(sch, camp));
     const quota = Number(st.dailyQuota) || 0;
     if (quota <= 0) return null;                      // 무제한·정원 개념 없음 = 판정하지 않는다
     const todayCount = Number(st.todayCount) || 0;

@@ -5425,7 +5425,10 @@ async function tabTodayProgress(db, { sheetId, tabName } = {}) {
 
     let quota = 0, done = 0, holds = 0, state = null, stateReason = null;
     for (const r of live) {
-      const counts = countsMap.get(r.id) || { activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0 };
+      const rawCounts = countsMap.get(r.id) || { activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0 };
+      // 카드의 분자(sheetFilled)와 상태 게이트가 갈라지지 않게, 같은 작업표 수를 상태엔진에도 준다.
+      const counts = base.sheetFilled == null ? rawCounts
+        : { ...rawCounts, tableTodayFilled: Math.max(0, Number(base.sheetFilled) || 0) };
       const st = computeCampaignState(r, counts, now, schedMap ? scheduleFor(schedMap, r) : null);
       quota += Number(st.dailyQuota) || 0;
       done += Number(counts.todaySubmitted) || 0;

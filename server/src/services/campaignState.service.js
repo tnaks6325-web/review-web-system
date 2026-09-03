@@ -329,7 +329,8 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
  * 상태 판정 (순수 함수 — DB 없이 테스트 가능)
  * @param c      recruit_campaigns 행 (participation_mode, status, window_start, window_end,
  *               close_buffer_min, hold_ttl_min, daily_limit, recruit_total)
- * @param counts { activeHolds, todayActiveHolds, submittedAll, todaySubmitted, submittedBeforeToday }
+ * @param counts { activeHolds, todayActiveHolds, submittedAll, todaySubmitted, submittedBeforeToday,
+ *                 tableTodayFilled? }
  *               (유효 홀드 = applied AND expires_at>now 로 이미 집계된 값)
  * @param now    Date
  * @returns { state, todayCount, dailyQuota, serverNow, opensAt, closesAt, cutoffAt }
@@ -369,7 +370,17 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
             sch.totalSlots) - submittedBefore))
     : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
         { today: todayStr, plans: counts.plans || null }, eff);
-  const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
+  const applicationTodayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
+  /*
+   * 관리자 카드의 "오늘 모집 N/N"과 실제 일일 마감 게이트는 반드시 같은 작업표 기준을 쓴다.
+   * tableTodayFilled 는 연결 작업표에서 오늘 구매일자로 채워진 줄 수이며, 수기입력·외부모집·지각
+   * 참여처럼 campaign_applications 를 거치지 않은 정상 작업도 포함한다. 값이 없는 호출부는 기존
+   * 공고 신청 집계를 유지하고, 둘 다 있으면 누락 투영 때문에 공고 신청 수가 더 큰 경우도 보존한다.
+   */
+  const tableTodayFilled = Number(counts.tableTodayFilled);
+  const todayCount = Number.isFinite(tableTodayFilled)
+    ? Math.max(applicationTodayCount, Math.max(0, tableTodayFilled))
+    : applicationTodayCount;
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
   const bufferMin = Number(c.close_buffer_min ?? 10) || 0;

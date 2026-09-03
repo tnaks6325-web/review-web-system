@@ -712,6 +712,31 @@ function _publicView(row, counts, now, schedule) {
   };
 }
 
+/* 작업표 기준 오늘 채움 수를 상태엔진 입력에 붙인다. null/실패는 기존 공고 신청 집계를 그대로
+ * 쓰며, 0으로 덮어 쓰지 않는다. 카드에 보이는 "오늘 모집 N/N"이 일일 마감 게이트와 같은
+ * 기준을 보게 하는 유일한 접점이다. */
+function _withTableTodayFilled(counts, tableTodayFilled) {
+  if (tableTodayFilled == null) return counts;
+  return { ...(counts || {}), tableTodayFilled: Math.max(0, Number(tableTodayFilled) || 0) };
+}
+
+function _withMappedTableTodayFilled(counts, row, filled) {
+  if (!filled || !row || !row.linked_sheet_id || !row.linked_tab_name) return counts;
+  const key = filled.key(row.linked_sheet_id, row.linked_tab_name);
+  return filled.map.has(key) ? _withTableTodayFilled(counts, filled.map.get(key)) : counts;
+}
+
+async function _withFreshTableTodayFilled(db, row, counts, now) {
+  if (!row || !row.linked_sheet_id || !row.linked_tab_name) return counts;
+  try {
+    const { todayFilledForTab } = require('../services/tabFilled.service');
+    return _withTableTodayFilled(counts, await todayFilledForTab(db, row.linked_sheet_id, row.linked_tab_name, now));
+  } catch (e) {
+    logger.warn(`[campaign] 상태용 작업표 오늘 채움 집계 실패 — 공고 신청 기준 유지: ${e.message}`);
+    return counts;
+  }
+}
+
 /** 요청의 JWT를 검증해 decoded 반환(없거나 무효면 null) */
 function _decodeReq(req) {
   const authHeader = req.headers['authorization'];
@@ -1044,7 +1069,8 @@ router.get('/list', async (req, res, next) => {
     // ★ 시트 일정 파생(063) — 자체 1분 캐시라 목록 캐시 밖에서 호출해도 저비용. 실패=null(폴백).
     const schedMap = await deriveSchedules(pool, tabsOfCampaigns(rows), now);
     const data = rows.map(r => {
-      const view = _publicView(r, countsMap.get(r.id), now, scheduleFor(schedMap, r));
+      const viewCounts = _withMappedTableTodayFilled(countsMap.get(r.id), r, filledMap);
+      const view = _publicView(r, viewCounts, now, scheduleFor(schedMap, r));
       _applyCurrentFee(view, feeMap && feeMap.get(r.id), now);   // ★ 082: 카드 리뷰비 = 오늘 구간
       if (crMap) view.cashReceiptRequired = crMap.get(r.id) === true;   // 조회 실패면 필드 자체가 없음(배지 미표시)
       // 표 기준 오늘 참여(B안) — 카드가 작업보드와 같은 숫자를 쓰기 위한 재료.
@@ -1268,7 +1294,10 @@ async function getCampaignDetail(req, res, next) {
     const row = rows[0];
     const countsMap = row.participation_mode ? await fetchCampaignCounts(pool, [id], now) : null;
     const schedMap = row.participation_mode ? await deriveSchedules(pool, tabsOfCampaigns([row]), now) : null;
-    const view = _publicView(row, countsMap && countsMap.get(id), now, schedMap && scheduleFor(schedMap, row));
+    const detailCounts = row.participation_mode
+      ? await _withFreshTableTodayFilled(pool, row, countsMap && countsMap.get(id), now)
+      : null;
+    const view = _publicView(row, detailCounts, now, schedMap && scheduleFor(schedMap, row));
     _applyCurrentFee(view, await _loadFeeSchedules(pool, id), now);   // ★ 082: 오늘 구간 리뷰비
     // ★ D안 ①: 참여 전 상세에도 현금영수증 대상 여부(불리언만 — 상세 안내는 참여 후 work-detail)
     const _crm = await _cashReceiptFlags([row]);
@@ -1599,6 +1628,7 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
     const countsMap = await fetchCampaignCounts(client, [id], now);
+    const stateCounts = await _withFreshTableTodayFilled(client, camp, countsMap.get(id), now);
     const weekend = weekendPublicationState(camp, now, countsMap.get(id) && countsMap.get(id).plans);
     if (weekend.blocked) {
       await client.query('ROLLBACK');
@@ -1612,7 +1642,7 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★ 카드 표시와 동일한 일정을 참여 게이트에도 적용(불일치 = 오픈처럼 보이는데 참여 거부 / 그 반대).
     //   1분 캐시라 보통 추가 쿼리 없음. 잠금 커넥션(client)으로 읽어 커넥션 고갈 교착을 피한다.
     const schedMap = await deriveSchedules(client, tabsOfCampaigns([camp]), now);
-    const st = computeCampaignState(camp, countsMap.get(id), now, scheduleFor(schedMap, camp));
+    const st = computeCampaignState(camp, stateCounts, now, scheduleFor(schedMap, camp));
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
@@ -2234,13 +2264,14 @@ async function _adminCampaignList(req, res, next) {
       const cnt = countsMap.get(r.id) || {
         activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
       };
+      const stateCnt = _withMappedTableTodayFilled(cnt, r, _filled);
       const _sch = schedMap ? scheduleFor(schedMap, r) : null;
-      const st = computeCampaignState(r, cnt, now, _sch);
+      const st = computeCampaignState(r, stateCnt, now, _sch);
       /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼
          토요일 관리자 카드가 "오늘 모집 0/30 · 모집중"으로 보였다(리뷰어는 신청 불가인데).
          카드 렌더러의 weekend 분기(_zeroQuotaNote·footer)가 이미 이 값을 기다리고 있었다. */
       const _weekend = weekendPublicationState(r, now);
-      const _resume = _weekendResume(r, _weekend, cnt, now, _sch);
+      const _resume = _weekendResume(r, _weekend, stateCnt, now, _sch);
       return {
         ...r,
         archiveSuggest: _sug,
