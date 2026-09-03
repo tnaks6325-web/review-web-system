@@ -164,6 +164,32 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 작업보드 큐 누락 복구: 홀수 분마다(DB-only) ───────────────────────
+  // ORDER_BATCH_AUTO=1은 위 시트 리컨실을 끄고, 시트 배치 대상에서도 무시트 탭을 제외한다.
+  // 그래서 원장 저장 뒤 workboard_apply INSERT만 실패한 주문은 실행 주체가 없었다.
+  // 최근 48시간 중 기존 큐 이력이 전혀 없는 2분 이상 지난 주문만 재등록하며,
+  // 같은 order_reconcile 락으로 기존 리컨실과 겹치지 않는다. 큐 소비는 기존 30초 워커 하나가 계속 담당한다.
+  if (process.env.WORKBOARD_RECONCILE_CRON !== '0') {
+    const wbReconcileSchedule = process.env.WORKBOARD_RECONCILE_CRON_SCHEDULE || '1-59/2 * * * *';
+    cron.schedule(wbReconcileSchedule, async () => {
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        const { recoverMissingWorkboardQueues } = require('../services/workboardQueueApply.service');
+        const r = await withJobLock('order_reconcile', () => recoverMissingWorkboardQueues({
+          limit: parseInt(process.env.WORKBOARD_RECONCILE_LIMIT || '100', 10),
+          staleSeconds: parseInt(process.env.WORKBOARD_RECONCILE_STALE_SECONDS || '120', 10),
+          sinceHours: parseInt(process.env.WORKBOARD_RECONCILE_WINDOW_HOURS || '48', 10),
+        }));
+        if (r && (r.requeued > 0 || r.failed > 0)) {
+          logger.info(`[CRON-WorkboardReconcile] scanned=${r.scanned} requeued=${r.requeued} failed=${r.failed}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-WorkboardReconcile] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'workboard_reconcile', error: err, context: { job: 'workboard_reconcile' } });
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── written 사후검증(유령 written 감지·자가치유 + 캡처미첨부/적체 한글로그): 기본 ON ──
   //   7/24 이지유 사건 재발방지: written 주문의 기록 행을 RAW 미러와 신원대조 →
   //   행이동=포인터 보정 / 소실=critical 알림+failed 강등(reconcile 재기록) / 반복소실=stuck_manual.

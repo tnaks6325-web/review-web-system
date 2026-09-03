@@ -20,4 +20,10 @@ ok('큐 대기 중에는 원장을 written으로 조기 전이하지 않는다',
 ok('제출은 pilot 대상만 workboard_apply를 enqueue한다', /enqueue\('workboard_apply'/.test(submit) && /queuedWorkboardApply/.test(submit));
 ok('새 경로 큐는 일반 order_append 배치가 아니라 queuePump로 즉시 소비한다', /if \(queuedWorkboardApply\)[\s\S]{0,140}kickQueuePump/.test(submit));
 ok('직접 반영은 새 큐 대상에서 실행하지 않는다', /if \(ledger\.sheetRow && !queuedWorkboardApply\)/.test(submit));
+ok('큐 누락 복구는 기존 큐 이력이 한 건도 없는 주문만 고른다',
+  /NOT EXISTS \([\s\S]*?FROM sync_queue sq[\s\S]*?sq\.type = 'workboard_apply'[\s\S]*?orderSubmissionId/.test(queueApply));
+ok('큐 누락 복구는 제출 직후 정상 enqueue와 경합하지 않도록 유예한다',
+  /submitted_at < NOW\(\) - make_interval\(secs => \$2::int\)/.test(queueApply));
+ok('큐 누락 복구는 현재 활성 작업보드와 rollout 상태를 함께 검증한다',
+  /JOIN workboards w[\s\S]*?w\.state = 'active'[\s\S]*?t\.rollout_state = 'enabled'/.test(queueApply));
 console.log(`workboardQueueApply: ${passed}개 통과`);
