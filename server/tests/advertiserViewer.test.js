@@ -207,6 +207,8 @@ async function run() {
     /function _awProgress\(it\)\{[\s\S]{0,360}submitted\/target/.test(src)
     && /\.bb\.advprog\{[^}]*width:80px[^}]*justify-content:center[^}]*font-variant-numeric:tabular-nums/.test(css)
     && /\$\{st\.done\?`<span class="bb advprog \$\{st\.tone\}">\$\{esc\(st\.label\)\}<\/span>`:''\}/.test(src));
+  ok('진행 중 목록에는 날짜 사각 썸네일을 두지 않고, 완료 목록에서만 표시한다',
+    /\$\{st\.done\?`<span class="ava">\$\{esc\(_awDate\(it\)\)\}<\/span>`:''\}/.test(src));
   const awTargetBody = (src.match(/function _awTarget\(it\)\{[\s\S]{0,240}\n\}/) || [''])[0];
   ok('총건수 미설정 작업은 제목의 숫자를 추정값으로 쓰지 않는다',
     /Number\(it&&it\.target\)[\s\S]{0,160}Number\.isFinite\(t\)&&t>0/.test(awTargetBody)

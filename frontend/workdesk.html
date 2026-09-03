@@ -3371,7 +3371,7 @@ function _renderAdvSidebar(){
     const i=_awTabIdx(it); if(i<0) return '';
     const on=cur&&cur.sheetId===it.sheetId&&cur.tabName===it.tabName, st=_awStatus(it), n=_wUnseen(i);
     return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(_tabTip(it))}${(!_isNoSheet(it)&&it.spreadsheetTitle)?' · '+esc(it.spreadsheetTitle):''}">
-      <span class="ava">${esc(_awDate(it))}</span>
+      ${st.done?`<span class="ava">${esc(_awDate(it))}</span>`:''}
       <span class="nm">${_awHi(_tabLabel(it))}<i>${esc(st.label)}</i></span>
       ${n?`<span class="unb">💬${n}</span>`:''}${st.done?`<span class="bb advprog ${st.tone}">${esc(st.label)}</span>`:''}</div>`;
   };
