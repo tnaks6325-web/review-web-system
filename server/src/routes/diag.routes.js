@@ -2487,8 +2487,14 @@ router.post('/order-mirror-repair', authMiddleware, adminOrMasterMiddleware, asy
     const b = req.body || {};
     const limit = Math.min(parseInt(b.limit, 10) || 500, 2000);
     const dryRun = b.dryRun !== false;          // ★ 명시적으로 false 일 때만 실제 정정
+    if (b.orderSubmissionIds != null && !Array.isArray(b.orderSubmissionIds)) {
+      return res.status(400).json({ ok: false, error: 'orderSubmissionIds는 배열이어야 합니다.' });
+    }
+    const orderSubmissionIds = Array.isArray(b.orderSubmissionIds)
+      ? b.orderSubmissionIds.slice(0, 100)
+      : null;
     const by = (req.admin && req.admin.name) || 'admin';
-    const out = await repairWrittenMarkForBoardRows({ limit, dryRun, by });
+    const out = await repairWrittenMarkForBoardRows({ limit, dryRun, by, orderSubmissionIds });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });

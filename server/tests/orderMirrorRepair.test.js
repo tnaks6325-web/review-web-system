@@ -50,6 +50,17 @@ function stubPool(answer) {
     ok('삭제된 주문은 건드리지 않는다', /os\.deleted_at IS NULL/.test(sql));
     ok('화이트리스트를 파라미터로 넘긴다', JSON.stringify(s.calls[0].params[0]) === JSON.stringify(slOrder.REPAIRABLE_MIRROR_STATUSES));
     ok('빈 결과는 0건 보고', out.scanned === 0 && out.repaired === 0);
+    const targeted = await slOrder.repairWrittenMarkForBoardRows({
+      dryRun: true,
+      orderSubmissionIds: ['aaaaaaaa-0000-0000-0000-000000000001'],
+    });
+    const targetedSql = s.calls[1];
+    ok('지정 주문만 복구 대상으로 제한할 수 있다',
+      /os\.id = ANY\(\$3::uuid\[\]\)/.test(targetedSql.sql) &&
+      targetedSql.params[2][0] === 'aaaaaaaa-0000-0000-0000-000000000001' && targeted.scanned === 0);
+    await slOrder.repairWrittenMarkForBoardRows({ dryRun: true, orderSubmissionIds: [] });
+    ok('명시적으로 빈 주문 목록은 전체 복구로 넓어지지 않는다',
+      Array.isArray(s.calls[2].params[2]) && s.calls[2].params[2].length === 0);
   }
 
   /* ══════════════ B. dryRun · 쓰기 표면 ══════════════ */
@@ -114,8 +125,11 @@ function stubPool(answer) {
     ok('★ dryRun 은 명시적 false 일 때만 꺼진다(값 없는 요청이 곧바로 쓰지 않는다)',
       /const dryRun = b\.dryRun !== false;/.test(d));
     ok('라우트에 판정 사본 없음(서비스 호출뿐)',
-      /repairWrittenMarkForBoardRows\(\{ limit, dryRun, by \}\)/.test(d) &&
+      /repairWrittenMarkForBoardRows\(\{ limit, dryRun, by, orderSubmissionIds \}\)/.test(d) &&
       !/mirror_status = ANY/.test(d.split("router.post('/order-mirror-repair'")[1].split('router.')[0]));
+    ok('지정 주문 목록은 배열일 때만 전달하고 최대 100건으로 제한한다',
+      /!Array\.isArray\(b\.orderSubmissionIds\)/.test(d) &&
+      /b\.orderSubmissionIds\.slice\(0, 100\)/.test(d));
   }
 
   /* ══════════════ D. 자동 인계 cron ══════════════ */
