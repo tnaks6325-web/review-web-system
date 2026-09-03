@@ -57,6 +57,28 @@ test('복수 선택지 혼합 리뷰에 선택지별 수량이 없으면 생성�
   assert.ok(plan.blockers.some(blocker => blocker.code === 'review_mix_assignment_missing'));
 });
 
+test('v2 자율리뷰는 행별 유형을 강제하지 않고 빈 리뷰옵션으로 작업표를 만든다', () => {
+  const plan = buildWorktablePlan({
+    workOrder: baseWorkOrder({
+      recruit_count: 300,
+      daily_count: 30,
+      review_type: '자율리뷰',
+      product_options_json: JSON.stringify([{
+        name: '체크오 아르타민 제로 레몬',
+        product_mode: 'none',
+        base: { count: 300 },
+        options: [],
+      }]),
+    }),
+    template,
+  });
+
+  assert.equal(plan.canCreate, true);
+  assert.equal(plan.rows.length, 300);
+  assert.ok(plan.rows.every(row => row.reviewOptionLabel === ''));
+  assert.ok(!plan.blockers.some(blocker => /review_type|review_mix/.test(blocker.code)));
+});
+
 test('인트라넷 옵션 없는 상품별 base 조합은 접수 작업표와 모집공고 설정에 쓸 20행으로 보존한다', () => {
   const mix = (photo, text) => [{ type: 'photo', quantity: photo }, { type: 'text', quantity: text }];
   const products = [
