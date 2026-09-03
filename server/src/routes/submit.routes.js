@@ -1248,6 +1248,16 @@ router.post('/order', async (req, res, next) => {
           sheetlessDone = { ok: false, reason: 'exception', message: slErr.message };
         }
         if (!sheetlessDone.ok) {
+          // ★ 원장에는 행 배정값이 있어도, 무시트 작업표 기록 자체가 실패하면
+          // pending으로 방치하면 안 된다. 실패 원인을 남겨야 복구 작업과 화면이
+          // "제출됨 + 작업표 미반영"을 명확히 구분할 수 있다.
+          // 상태 저장도 같은 DB 장애로 실패할 수 있다. 원장은 이미 커밋됐으므로,
+          // 그 2차 실패가 구매양식 전체의 실패 응답으로 바뀌어 재제출을 유도하면 안 된다.
+          try {
+            await markOrderMirrorFailed(ledger.orderSubmissionId, sheetlessDone.message || sheetlessDone.reason);
+          } catch (statusErr) {
+            logger.error(`[submit/order] 무시트 실패상태 저장 실패(원장 저장은 완료): ${statusErr.message}`);
+          }
           logger.error(`[submit/order] 무시트 기록 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
           logAbnormal({
             flow: 'order_submit', step: 'sheetless_write', severity: 'critical',
