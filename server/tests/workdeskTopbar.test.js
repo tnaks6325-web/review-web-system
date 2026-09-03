@@ -49,6 +49,13 @@ t('드래그 순서는 자동 정렬보다 우선하고, 계정별 로컬 캐시
   assert.match(html, /_advOrderSyncFromServer\(\);/);
 });
 
+t('계정 전환·초기 동기화 경합과 미지정 업체 작업 선택을 보존한다', () => {
+  assert.match(html, /advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0/);
+  assert.match(html, /const version=STATE\._advOrderVersion\|\|0;/);
+  assert.match(html, /if\(\(STATE\._advOrderVersion\|\|0\)!==version\)/);
+  assert.match(html, /if\(key==null\|\|!g\)/);
+});
+
 t('서버는 사용자별 순서 원장을 제공하며, 마이그레이션 누락을 조용히 성공으로 꾸미지 않는다', () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS trackb_workdesk_advertiser_order/);
   assert.match(route, /router\.get\('\/workdesk\/advertiser-order', authMiddleware/);

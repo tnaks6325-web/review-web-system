@@ -2578,7 +2578,8 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
-                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
+                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
+                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,campsUnavailable:false,finFilter:'' });
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
@@ -2799,7 +2800,8 @@ function logout(){ sessionStorage.removeItem('admin_token');
   //   **이전 계정 목록을 새 계정 서버 행에 저장**한다(코드리뷰 blocker).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false,
-                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
+                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
+                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,
                         finUnavailable:false,statsUnavailable:false,dailyUnavailable:false,finTruncated:false,worktabsUnavailable:false,
                         campEdit:null,campsUnavailable:false,finFilter:'' });
@@ -5606,17 +5608,27 @@ function _advOrderLoadLocal(){ try{ const a=JSON.parse(localStorage.getItem(_adv
 function _advOrderSaveLocal(){ try{ localStorage.setItem(_advOrderLSKey(),JSON.stringify(STATE.advOrder||[])); }catch(_){ } }
 function _advOrderList(){ if(!STATE._advOrderLoaded){ STATE.advOrder=_advOrderLoadLocal(); STATE._advOrderLoaded=true; } return STATE.advOrder||[]; }
 async function _advOrderSyncFromServer(){
+  // 부팅 GET보다 사용자의 첫 드래그가 앞서면, 늦은 응답으로 새 순서를 되돌리지 않는다.
+  const version=STATE._advOrderVersion||0;
   try{ const r=await api('/api/trackb/workdesk/advertiser-order');
     if(!(r&&r.ok&&Array.isArray(r.advertiserKeys))) return;
-    STATE.advOrder=r.advertiserKeys; STATE._advOrderLoaded=true; _advOrderSaveLocal(); _renderTabList();
+    if((STATE._advOrderVersion||0)!==version){
+      STATE._advOrderBootSynced=true;
+      if(STATE._advOrderDirty) _advOrderPush(STATE._advOrderVersion||0);
+      return;
+    }
+    STATE._advOrderBootSynced=true;
+    STATE.advOrder=r.advertiserKeys; STATE._advOrderLoaded=true; STATE._advOrderDirty=false; _advOrderSaveLocal(); _renderTabList();
   }catch(_){ }
 }
-async function _advOrderPush(){
-  try{ const r=await api('/api/trackb/workdesk/advertiser-order',{method:'POST',body:JSON.stringify({advertiserKeys:STATE.advOrder||[]})});
-    if(!(r&&r.ok)) toast((r&&r.error)||'업체목록 순서를 저장하지 못했습니다.');
+async function _advOrderPush(version){
+  const savedVersion=version==null?(STATE._advOrderVersion||0):version, keys=(STATE.advOrder||[]).slice();
+  try{ const r=await api('/api/trackb/workdesk/advertiser-order',{method:'POST',body:JSON.stringify({advertiserKeys:keys})});
+    if(r&&r.ok){ if((STATE._advOrderVersion||0)===savedVersion) STATE._advOrderDirty=false; return; }
+    toast((r&&r.error)||'업체목록 순서를 저장하지 못했습니다.');
   }catch(_){ toast('업체목록 순서를 저장하지 못했습니다.'); }
 }
-function _advOrderCommit(keys){ STATE.advOrder=keys; STATE._advOrderLoaded=true; _advOrderSaveLocal(); _advOrderPush(); _renderTabList(); }
+function _advOrderCommit(keys){ STATE.advOrder=keys; STATE._advOrderLoaded=true; STATE._advOrderDirty=true; STATE._advOrderVersion=(STATE._advOrderVersion||0)+1; _advOrderSaveLocal(); _advOrderPush(STATE._advOrderVersion); _renderTabList(); }
 function _advOrderKeys(){ return _wGroups().filter(g=>g.key!==W_FAV&&g.key!=='').map(g=>g.key); }
 function advDragStart(ev,k){ if(!k||k===W_FAV) return; STATE._advDrag=k; if(ev.dataTransfer){ ev.dataTransfer.effectAllowed='move'; try{ev.dataTransfer.setData('text/plain',k);}catch(_){ } } if(ev.currentTarget) ev.currentTarget.classList.add('drag'); }
 function advDragOver(ev,k){ if(!STATE._advDrag||!k||k===W_FAV||STATE._advDrag===k) return; ev.preventDefault(); if(ev.dataTransfer) ev.dataTransfer.dropEffect='move'; if(ev.currentTarget) ev.currentTarget.classList.add('over'); }
@@ -5689,7 +5701,7 @@ function _wActiveSeg(gs){
 function _renderTaskMenu(){
   const menu=$('#taskmenu'); if(!menu) return;
   const key=STATE.wMenu, gs=_wGroups(), g=gs.find(x=>x.key===key);
-  if(!key||!g){ menu.hidden=true; menu.innerHTML=''; return; }
+  if(key==null||!g){ menu.hidden=true; menu.innerHTML=''; return; }
   const cur=STATE.cur;
   menu.innerHTML=`<div class="wb-menu-head"><span>작업목록 · ${esc(g.label)}</span><span class="cnt">${g.idxs.length}</span></div>`
     +(g.idxs.length?g.idxs.map(i=>{
