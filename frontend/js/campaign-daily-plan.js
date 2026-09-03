@@ -190,6 +190,21 @@
   }
   /** 배분해야 할 인원 = 총량 − 어제까지 확정 (오늘 줄부터 종료일까지의 합계 목표) */
   function targetTotal() { return Math.max(0, totalFor() - doneBefore()); }
+  /** 수동 명시계획의 총량 상한은 savePlans 와 같은 제출 원장을 사용한다.
+   *  무시트 작업표의 filled 수는 운영 진행 표시에 쓰이지만, 저장 트랜잭션은
+   *  campaign_applications 를 다시 잠가 검사하므로 이를 섞으면 화면과 저장 결과가 갈린다. */
+  function planGateSubmittedAll() {
+    return Math.max(0, Number(S.data.planGateSubmittedAll != null
+      ? S.data.planGateSubmittedAll : S.data.submittedAll) || 0);
+  }
+  function planGateTodaySubmitted() {
+    return Math.max(0, Number(S.data.planGateTodaySubmitted != null
+      ? S.data.planGateTodaySubmitted : (S.data.todaySubmitted != null
+        ? S.data.todaySubmitted : (S.data.byDateSubmitted || {})[S.data.today])) || 0);
+  }
+  function manualTargetTotal() {
+    return Math.max(0, totalFor() - Math.max(0, planGateSubmittedAll() - planGateTodaySubmitted()));
+  }
   /** 이월(미달) 인원 — 서버 계산값 그대로. null = 계산 불가(0 으로 꾸미지 않는다).
    *  ★ 저장해 둔 앞 날짜 계획을 여기서 빼지 않는다 — "이월 배치"와 "무관한 상향 조절"을
    *    구분할 수 없어, 무관한 +N 이 실제로 남아 있는 이월을 **0으로 숨겨** 배치 창구가
@@ -403,17 +418,94 @@
    *  ★ 서버 MAX_DAY_COUNT(9999)를 넘기면 savePlans 가 bad_count 로 **저장 전체를 거부**한다. */
   var MAX_DAY = 9999;
   function dayCeil() { return balanceOn() ? Math.min(MAX_DAY, Math.max(1, targetTotal())) : MAX_DAY; }
+  /** 수동 표에서도 서버 총량 게이트와 같은 "명시 계획" 합계를 미리 계산한다.
+   *  서버는 과거 확정 + 오늘 계획(오늘 확정과 큰 값) + 미래 명시 계획만 더한다. 자연 정원은
+   *  런타임 총량 clamp가 맡으므로 여기서 더하면 정상적인 조절까지 막히게 된다. */
+  function manualPlanTotal() {
+    if (totalFor() <= 0) return 0;
+    var today = String(S.data.today || '').slice(0, 10), future = 0, todayPlan = null;
+    Object.keys(S.plan || {}).forEach(function (raw) {
+      var d = String(raw || '').slice(0, 10);
+      if (!d || d < today) return;
+      var v = Math.max(0, Number(S.plan[raw]) || 0);
+      if (d === today) todayPlan = v;
+      else future += v;
+    });
+    var todaySubmitted = planGateTodaySubmitted();
+    return Math.max(todaySubmitted, todayPlan == null ? 0 : todayPlan) + future;
+  }
+  function manualDiffPlan() { return manualPlanTotal() - manualTargetTotal(); }
+  /** 이미 초과된 기존 계획을 정상화할 때는, 저장 전까지 계속 초과라는 이유로 줄이는 변경까지
+   *  막으면 복구할 수 없다. 새 날짜·증원은 금지하고 기존 명시 계획의 축소/해제만 통과시킨다. */
+  function manualOnlyReductions() {
+    var keys = {}, changed = false;
+    Object.keys(S.plan || {}).forEach(function (d) { keys[d] = 1; });
+    Object.keys(S.base || {}).forEach(function (d) { keys[d] = 1; });
+    return Object.keys(keys).every(function (d) {
+      var now = S.plan[d], before = S.base[d];
+      if (now === before) return true;
+      changed = true;
+      if (now == null) return before != null;  // 계획 해제 = 축소
+      if (before == null) return false;        // 새 명시 계획 = 서버 총량상 증원
+      return Number(now) <= Number(before);
+    }) && changed;
+  }
+  function manualContribution(d) {
+    var day = String(d || '').slice(0, 10), today = String(S.data.today || '').slice(0, 10);
+    var stored = S.plan[d] != null ? Math.max(0, Number(S.plan[d]) || 0) : null;
+    if (day !== today) return stored == null ? 0 : stored;
+    var submitted = planGateTodaySubmitted();
+    return Math.max(submitted, stored == null ? 0 : stored);
+  }
   /** ★★ 사람이 조절할 때의 상한 = **그 날 값 + 아직 남은 배분수**(사용자 확정 2026-08-19).
    *   합계가 총건수를 넘는 값은 **경고가 아니라 아예 들어가지 않는다** — 게이지 드래그·[＋]·숫자
    *   직접 입력 세 창구가 전부 commitValue/dragTo 를 거치므로 이 함수 하나가 단일 출처다.
    *  ★ 이미 초과 상태로 열린 공고(작업표 프리필이 총량을 안 보고 심은 계획 등)는 여유가 음수라
    *    상한 = 지금 값 → **늘리기만 막히고 줄이는 것은 언제나 가능**하다(되돌릴 길을 없애지 않는다).
-   *  ★ 균형 모드가 아니면 합계 개념 자체가 없다(성긴 14일 표) → 종전대로 MAX_DAY. */
+   *  ★ 수동 표도 명시 계획은 서버 총량 게이트를 통과해야 하므로 같은 상한을 적용한다.
+   *  이미 화면에 보이는 기본 정원은 보존해, 초과 상태에서는 늘리기만 막고 줄이는 길은 남긴다. */
   function maxFor(d) {
-    if (!balanceOn()) return MAX_DAY;
+    if (!balanceOn()) {
+      if (totalFor() <= 0) return MAX_DAY;
+      var manualRoom = manualTargetTotal() - manualPlanTotal();
+      var manualCap = manualContribution(d) + Math.max(0, manualRoom);
+      return Math.min(MAX_DAY, Math.max(minFor(d), planFor(d), manualCap));
+    }
     var cur = (d == null) ? 0 : planFor(d);
     var room = targetTotal() - sumPlan();               // 남은 배분수(음수 = 이미 초과)
     return Math.min(MAX_DAY, Math.max(minFor(d), cur + Math.max(0, room)));
+  }
+
+  /** 수동 상태의 "종료일 뒤에 붙이기" 제안. 시트 일정은 원본 시트 밖 날짜를 만들 수 없고,
+   *  작업표 미연결 공고는 줄이 생기지 않으므로 무시트 작업표에만 명시 날짜계획을 추가한다.
+   *  현재 날짜계획을 덮지 않고 마지막 기존 날짜 다음에만 채우며, 반영은 [확정 저장] 전까지 없다. */
+  function manualExtendPlan() {
+    if (balanceOn()) return { ok: false, reason: 'balanced' };
+    if (totalFor() <= 0) return { ok: false, reason: 'unlimited' };
+    if (S.data.scheduleDriven === true) return { ok: false, reason: 'sheet' };
+    if (S.data.worktableLinked !== true) return { ok: false, reason: 'unlinked' };
+    var daily = Math.max(0, Math.min(MAX_DAY, Number(S.data.defaultDaily) || 0));
+    if (daily <= 0) return { ok: false, reason: 'daily_zero' };
+    var need = manualTargetTotal() - manualPlanTotal();
+    if (need <= 0) return { ok: false, reason: need < 0 ? 'over' : 'full' };
+    var anchor = baseDate();
+    Object.keys(S.plan || {}).forEach(function (d) { if (String(d).slice(0, 10) > anchor) anchor = String(d).slice(0, 10); });
+    (S.data.worktableDates || []).forEach(function (x) {
+      var d = String((x && x.date) || '').slice(0, 10);
+      if (d > anchor) anchor = d;
+    });
+    var additions = [], d = addDays(anchor, 1), guard = 0, left = need;
+    while (left > 0 && guard++ < 400) {
+      if (!policyClosed(d)) {
+        additions.push({ date: d, count: Math.min(daily, left) });
+        left -= Math.min(daily, left);
+      }
+      d = addDays(d, 1);
+    }
+    if (left > 0 || dirtyDates().length + additions.length > MAX_ROWS) return { ok: false, reason: 'too_many' };
+    additions.forEach(function (x) { S.plan[x.date] = x.count; });
+    S.notes.push('종료일 뒤에 ' + additions.length + '일 추가 · ' + need + '명');
+    return { ok: true, count: need, days: additions.length, end: additions[additions.length - 1].date };
   }
 
   /* ══ 주말 정책 재배분 (사용자 요청 2026-08-21 ①②) ═══════════════════════
@@ -1263,11 +1355,13 @@
         + '<div class="cmp">방식별 종료일 — 다음날에 <b>' + _esc(em('next')) + '</b> · 나눠 담기 <b>' + _esc(em('spread'))
         + '</b> · 뒤에 붙이기 <b>' + _esc(em('extend')) + '</b></div></div>';
     }
-    // 균형 배분표를 만들 수 없는 완전 수동 상태에서도 방식 선택은 숨기지 않는다.
-    // 선택은 공고에 즉시 저장되고, 날짜별 계획을 다시 만들 수 있을 때 동일 방식으로 배분된다.
+    // 균형 배분표를 만들 수 없는 수동 상태에서도 방식 선택은 숨기지 않는다.
+    // 무시트 작업표의 "종료일 뒤"는 선택 즉시 남은 총량만큼의 날짜계획안을 만들고,
+    // [확정 저장] 전까지는 실제 모집일·작업표에 반영하지 않는다.
     if (!bal && carryNeed !== null && carryNeed > 0) {
       carryBlk = '<div class="cdp-carry"><div class="t">모집이월 방식</div>'
-        + '<div class="d">현재 날짜별 계획을 자동 배분할 수 없어 <b>수동 조절</b> 상태입니다. 아래 선택은 공고 설정과 함께 저장되며, 계획을 다시 잡을 때 같은 방식으로 적용됩니다.</div>'
+        + '<div class="d">현재 날짜별 계획을 자동으로 읽을 수 없어 <b>수동 조절</b> 상태입니다. '
+        + '<b>종료일 뒤에 붙이기</b>는 남은 총량 안에서 종료일 다음 날짜의 계획안을 만들며, [확정 저장] 후 반영됩니다.</div>'
         + '<div class="cdp-seg">'
         + segBtn('next', '다음날에 더하기', '다음 진행일 우선')
         + segBtn('spread', '남은 날에 나눠 담기', '남은 진행일에 분산')
@@ -1276,7 +1370,7 @@
     }
 
     /* ── ③ 배분 균형 바(요구 ⑥) — 초과=빨강 / 부족=파랑 / 일치=초록, 일치일 때만 저장 ── */
-    var balBlk = '', diff = 0, target = targetTotal();
+    var balBlk = '', diff = 0, target = targetTotal(), manualPlanned = 0;
     if (bal) {
       diff = diffPlan();
       var cls = diff === 0 ? 'ok' : (diff > 0 ? 'over' : 'under');
@@ -1298,6 +1392,21 @@
           : '<button type="button" class="cdp-btn sm" onclick="CampaignDailyPlan._autoFit()">자동으로 '
             + Math.abs(diff) + '건 ' + (diff > 0 ? '줄이기' : '채우기') + '</button>')
         + '</div>';
+    } else if (tot > 0) {
+      // 수동 표도 서버 savePlans의 총량 산식(명시 계획만 합산)을 그대로 보여 준다.
+      manualPlanned = manualPlanTotal();
+      var manualTarget = manualTargetTotal();
+      diff = manualPlanned - manualTarget;
+      var manualCls = diff > 0 ? 'over' : (diff === 0 ? 'ok' : 'under');
+      var manualIco = diff > 0 ? '▲' : (diff === 0 ? '✓' : '▼');
+      var manualL1 = '명시 계획 <span class="num">' + manualPlanned + '</span> / 배정 가능 <span class="num">' + manualTarget + '</span>건';
+      manualL1 += diff > 0
+        ? ' — <span class="num">' + diff + '</span>건 초과 · <b>저장불가</b>'
+        : diff === 0
+          ? ' — <b>추가 배정 불가</b>'
+          : ' · 추가 가능 <span class="num">' + (-diff) + '</span>건';
+      balBlk = '<div class="cdp-bal ' + manualCls + '"><div class="ico">' + manualIco + '</div>'
+        + '<div class="txt"><div class="l1">' + manualL1 + '</div></div></div>';
     }
 
     var roundsHtml = (j.rounds || []).map(function (r, i) {
@@ -1424,10 +1533,16 @@
           ? '지금은 이월 인원이 없어 방식별로 달라지는 것이 없습니다 — 저장할 변경이 없습니다'
           : '남은건수와 딱 맞습니다 — 저장할 변경이 없습니다';
     } else {
-      save.disabled = killOff || S.saving || !dirty;
-      hint.textContent = dirty
-        ? '조절 ' + dirty + '일 — [확정 저장]을 눌러야 반영됩니다'
-        : '조절은 [확정 저장]을 눌러야 반영됩니다 · 차수는 즉시 반영';
+      var manualOver = totalFor() > 0 && manualDiffPlan() > 0;
+      var manualRecovery = manualOver && manualOnlyReductions();
+      save.disabled = killOff || S.saving || !dirty || (manualOver && !manualRecovery);
+      hint.textContent = manualOver
+        ? (manualRecovery
+          ? '아직 ' + manualDiffPlan() + '건 초과지만 이번 저장은 기존 계획을 줄이는 변경만 포함합니다 — 저장가능'
+          : '명시 계획이 배정 가능 인원보다 ' + manualDiffPlan() + '건 많습니다 — 기존 계획을 줄인 뒤 저장해주세요')
+        : dirty
+          ? '조절 ' + dirty + '일 · 추가 가능 ' + Math.max(0, manualTargetTotal() - manualPlanTotal()) + '건 — [확정 저장]을 눌러야 반영됩니다'
+          : '조절은 [확정 저장]을 눌러야 반영됩니다 · 차수는 즉시 반영';
     }
     syncRebuildBtn();
   }
@@ -1477,10 +1592,11 @@
     if (next === cur) {
       if (next === minFor(d) && d === S.data.today && minFor(d) > 0) {
         toast('이미 확정·진행 중인 ' + minFor(d) + '명 아래로는 줄일 수 없습니다');
-      } else if (want > cap && balanceOn()) {
+      } else if (want > cap && totalFor() > 0) {
         // ★ 막고 끝내지 않는다 — 왜 안 올라가는지와 다음 행동을 말한다(죽은 조작 금지)
         toast('총 ' + totalFor() + '건을 넘길 수 없습니다 — 남은건수 '
-          + Math.max(0, targetTotal() - sumPlan()) + '건. 다른 날을 줄이거나 [차수 추가]로 총량을 늘려주세요');
+          + Math.max(0, (balanceOn() ? targetTotal() : manualTargetTotal()) - (balanceOn() ? sumPlan() : manualPlanTotal()))
+          + '건. 다른 날을 줄이거나 [차수 추가]로 총량을 늘려주세요');
       }
       if (S.sessions[d]) scheduleSettle(d);
       return;
@@ -1616,7 +1732,25 @@
       }
     }
     if (!balanceOn()) {
-      toast('모집이월 방식을 저장했습니다 — 날짜별 계획을 설정하면 이 방식으로 배분됩니다');
+      if (m !== 'extend') {
+        toast('모집이월 방식을 저장했습니다 — 수동 조절 시에도 총량 한도 안에서만 반영됩니다');
+        return;
+      }
+      var proposal = manualExtendPlan();
+      if (proposal.ok) {
+        render();
+        toast('종료일 뒤 ' + proposal.days + '일에 ' + proposal.count + '명 계획안을 만들었습니다 — [확정 저장]을 누르면 반영됩니다');
+      } else if (proposal.reason === 'over') {
+        toast('현재 명시 계획이 총량을 초과했습니다 — 초과분을 줄인 뒤 종료일 연장을 다시 선택해주세요');
+      } else if (proposal.reason === 'full') {
+        toast('남은 모집 인원이 모두 계획에 반영되어 추가로 붙일 수 없습니다');
+      } else if (proposal.reason === 'sheet') {
+        toast('시트 일정 공고는 종료일 밖 날짜를 자동으로 만들 수 없습니다 — 시트 일정에서 추가해주세요');
+      } else if (proposal.reason === 'unlinked') {
+        toast('작업표 연결을 확인할 수 없어 종료일 뒤 계획을 만들지 않았습니다');
+      } else {
+        toast('기본 일건수 또는 저장 가능 날짜 수를 확인할 수 없어 종료일 연장안을 만들지 못했습니다');
+      }
       return;
     }
     if (m === before) return;
@@ -1829,7 +1963,8 @@
     if (!set.length && !remove.length) return;
     // 균형 모드 저장 게이트(버튼 우회 방어) — **초과**·저장 상한 초과는 보내지 않는다.
     //   ★ 부족은 보낸다(2026-08-19 확정: 그만큼만 모집하고 작업표도 그 수로 줄어든다).
-    if (balanceOn() && (diffPlan() > 0 || set.length + remove.length > MAX_ROWS)) return;
+    if ((balanceOn() && (diffPlan() > 0 || set.length + remove.length > MAX_ROWS))
+        || (!balanceOn() && totalFor() > 0 && manualDiffPlan() > 0 && !manualOnlyReductions())) return;
     // [확정 저장] 자체가 의도적인 최종 동작이다. 브라우저 확인창을 한 번 더 띄우지 않고
     // 즉시 저장한 뒤, 결과(성공·실패·작업표 동기화 상태)는 화면 토스트로만 알린다.
     // 098 보류 잔량 차감 — 균형 모드는 "지금 계획에 실제로 얹혀 있는 이월"이 곧 반영량이다

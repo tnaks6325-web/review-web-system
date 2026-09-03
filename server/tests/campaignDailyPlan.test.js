@@ -708,9 +708,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   vm.runInContext(partDate + '\n' + partBal + '\n' + partPay
     // 엔진이 부르는 바깥 함수(행 하한) — 오늘은 확정·진행 인원 아래로 못 줄인다
     + '\nfunction minFor(d){ return d === S.data.today ? (S.data.todayUsed || 0) : 0; }'
+    + '\nfunction dirtyDates(){ var out=[]; Object.keys(S.plan || {}).forEach(function(d){ if ((S.plan[d] == null) !== (S.base[d] == null) || (S.plan[d] != null && S.plan[d] !== S.base[d])) out.push(d); }); return out; }'
     + '\nthis.api = { walkDays, buildHorizon, applyCarryMode, carryOn, carryPlaced, carryDays,'
     + ' autoFit, maxFor, dayCeil, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor,'
-    + ' payload, naturalFor, carryAmt, CARRY_MODES, MAX_ROWS, MAX_DAY,'
+    + ' payload, naturalFor, carryAmt, manualTargetTotal, manualPlanTotal, manualDiffPlan, manualOnlyReductions, manualExtendPlan, CARRY_MODES, MAX_ROWS, MAX_DAY,'
     + ' holidayName, dayKind, fmtMD, FIXED_HOLIDAYS, LUNAR_HOLIDAYS, DEFAULT_CARRY_MODE };',
     sandbox);
   const A = sandbox.api;
@@ -781,6 +782,40 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★ 오늘 하한(확정·진행 인원)이 상한보다 크면 하한이 이긴다(음수·역전 방지)
   mkS({ data: { todayUsed: 999 } }); A.applyCarryMode('next');
   ok('7e 오늘 하한이 상한을 넘어서지 않는다', A.maxFor('2026-08-08') >= 999);
+
+  // 7e-1. ★ 수동 상태도 서버 총량 게이트와 같은 명시 계획 합계를 미리 제한한다.
+  // 작업표의 0명 날짜가 이어져 균형 표를 만들 수 없어도, 500명 중 252명 모집이면
+  // 게이지·종료일 연장 모두 남은 248명까지만 제안해야 한다.
+  mkS({ data: {
+    today: '2026-09-03', startDate: '2026-09-03', defaultDaily: 30, recruitTotal: 500,
+    submittedAll: 252, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0, todayNaturalQuota: 0,
+    worktableLinked: true, worktableDates: [{ date: '2026-09-20', slots: 0 }], carryPending: 332,
+  } });
+  eq('7e-1 수동 명시 계획의 배정 가능 총량 = 500 − 252', A.targetTotal(), 248);
+  eq('7e-1 수동 초기 명시 계획 = 0', A.manualPlanTotal(), 0);
+  eq('7e-1 수동 게이지도 총 잔여 248명까지만 올릴 수 있다', A.maxFor('2026-09-03'), 248);
+  sandbox.S.data.submittedAll = 240;                   // 작업표 filled 진행 표시는 240명일 수 있다
+  sandbox.S.data.planGateSubmittedAll = 252;           // 저장 게이트의 applications 확정은 252명
+  sandbox.S.data.planGateTodaySubmitted = 0;
+  eq('7e-1 작업표 진행 수와 달라도 수동 상한은 서버 제출 원장(252명)을 따른다', A.manualTargetTotal(), 248);
+  sandbox.S.data.submittedAll = 252;
+  delete sandbox.S.data.planGateSubmittedAll;
+  delete sandbox.S.data.planGateTodaySubmitted;
+  const ext = A.manualExtendPlan();
+  ok('7e-1 종료일 뒤 수동 연장안 생성', ext.ok === true, ext);
+  eq('7e-1 종료일 뒤 연장안은 잔여 총량만 배정', ext.count, 248);
+  eq('7e-1 종료일 뒤 연장안은 30명 단위 + 마지막 8명', sandbox.S.plan['2026-09-21'], 30);
+  eq('7e-1 마지막 연장일은 잔여분만', sandbox.S.plan['2026-09-29'], 8);
+  eq('7e-1 연장안 뒤 명시 계획 합계는 총량과 일치', A.manualDiffPlan(), 0);
+  eq('7e-1 합계를 다 채우면 게이지를 더 올릴 수 없다', A.maxFor('2026-09-21'), 30);
+  sandbox.S.plan['2026-10-01'] = 9;
+  ok('7e-1 이미 초과한 수동 계획은 줄일 수 있게 현재값까지만 유지',
+    A.maxFor('2026-10-01') === 9 && A.manualDiffPlan() > 0);
+  sandbox.S.base = { '2026-09-21': 300, '2026-10-01': 20 };
+  sandbox.S.plan = { '2026-09-21': 250, '2026-10-01': 9 };
+  ok('7e-1 초과 상태에서도 기존 계획을 줄이는 저장은 복구 경로로 허용', A.manualOnlyReductions() === true);
+  sandbox.S.plan['2026-10-02'] = 1;
+  ok('7e-1 초과 상태에서 새 날짜 증원은 복구 저장으로 위장할 수 없다', A.manualOnlyReductions() === false);
 
   // 7f. ★★ 요구 ⑥ — 초과/부족을 만들고 [자동 맞춤]이 고른 방식대로 되돌린다
   for (const mode of ['next', 'spread', 'extend']) {
@@ -1199,8 +1234,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /var cur = planFor\(d\), want = Math\.round\(next\), cap = maxFor\(d\);/.test(CDP)
     && /next = Math\.max\(minFor\(d\), Math\.min\(cap, want\)\);/.test(CDP));
   ok('7n-3 ★ 막고 끝내지 않는다 — 총건수·남은건수를 문장으로 말한다',
-    /want > cap && balanceOn\(\)/.test(CDP)
+    /want > cap && totalFor\(\) > 0/.test(CDP)
     && /총 ' \+ totalFor\(\) \+ '건을 넘길 수 없습니다 — 남은건수 /.test(CDP)
+    && /balanceOn\(\) \? sumPlan\(\) : manualPlanTotal\(\)/.test(CDP)
     && /\[차수 추가\]로 총량을 늘려주세요/.test(CDP));
   ok('7o ★ 알림창 높이는 "일치" 기준 41px 고정(상태마다 표가 흔들리면 조절하던 줄을 놓친다)',
     /\.cdp-bal\{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px/.test(CDP));
@@ -1215,7 +1251,8 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /segBtn\('extend', '종료일 뒤에 붙이기'/.test(CDP));
   ok('7r ★ 저장 게이트 = 초과 아님 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
     /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(CDP)
-    && /if \(balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)\) return;/.test(CDP));
+    && /balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)/.test(CDP)
+    && /!balanceOn\(\) && totalFor\(\) > 0 && manualDiffPlan\(\) > 0/.test(CDP));
   ok('7s ★ 저장 상한은 서버 MAX_PLAN_ENTRIES 와 같은 값(넘으면 사유를 말하고 잠근다)',
     A.MAX_ROWS === 120
     && /const MAX_PLAN_ENTRIES = 120;/.test(readS('services/campaignPlan.service.js'))
@@ -1307,6 +1344,21 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /if \(!bal && carryNeed !== null && carryNeed > 0\)/.test(CDP)
     && /'\/carry-strategy'/.test(CDP)
     && /router\.put\('\/campaigns\/:id\/carry-strategy'/.test(rtB));
+  ok('9-4 ★ 수동 종료일 연장은 무시트 작업표에만 남은 총량을 계획안으로 만들고 저장 전에는 반영하지 않는다',
+    /function manualExtendPlan\(\)/.test(CDP)
+    && /S\.data\.worktableLinked !== true/.test(CDP)
+    && /var need = manualTargetTotal\(\) - manualPlanTotal\(\);/.test(CDP)
+    && /m !== 'extend'/.test(CDP)
+    && /manualExtendPlan\(\)/.test(CDP));
+  ok('9-5 ★ 수동 게이지·저장 버튼도 명시 계획 총량을 넘기지 않는다',
+    /function manualPlanTotal\(\)/.test(CDP)
+    && /function manualTargetTotal\(\)/.test(CDP)
+    && /planGateSubmittedAll/.test(CDP) && /planGateTodaySubmitted/.test(CDP)
+    && /var manualRoom = manualTargetTotal\(\) - manualPlanTotal\(\);/.test(CDP)
+    && /var manualOver = totalFor\(\) > 0 && manualDiffPlan\(\) > 0;/.test(CDP)
+    && /function manualOnlyReductions\(\)/.test(CDP)
+    && /추가 가능 <span class="num">/.test(CDP)
+    && /planGateSubmittedAll: Number\(allQ\[0\] && allQ\[0\]\.n\) \|\| 0/.test(readS('services/campaignPlan.service.js')));
 
   console.log(`\n✅ campaignDailyPlan: ${n}개 통과`);
   process.exit(0);   // trackB.routes require 가 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)
