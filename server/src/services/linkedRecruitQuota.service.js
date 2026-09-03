@@ -150,6 +150,9 @@ async function rebuildWorktableProjection(worktable, by, force = false) {
 // 잠금 뒤 기존 정원 동기화의 보호 규칙을 재사용하므로 참여·주문 행은 절대 은퇴하지 않는다.
 async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, by = 'overflow-cleanup' } = {}) {
   const cap = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+  // renumberTab은 대형 비정상 표를 부분 번호정리하지 않도록 상한을 둔다. 초과 탭을
+  // 먼저 줄이고 부분 번호만 재생성하면 중복 번호를 새로 만들 수 있으므로 자동 정리 대상에서 제외한다.
+  const { MAX_RENUMBER_ROWS } = require('../utils/rowNumbering');
   const pendingBy = `overflow-cleanup-pending:${String(by).slice(0, 70)}`;
   const rebuiltBy = `overflow-cleanup-rebuilt:${String(by).slice(0, 70)}`;
   const { rows: campaigns } = await pool.query(
@@ -168,7 +171,14 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
          LEFT JOIN campaign_participants cp ON cp.sheet_id = rc.linked_sheet_id AND cp.tab_name = rc.linked_tab_name
         WHERE rc.participation_mode AND rc.status = 'active' AND rc.archived_at IS NULL
           AND COALESCE(rc.recruit_total, 0) > 0
+          AND COALESCE(rc.recruit_total, 0) <= ${Number(MAX_RENUMBER_ROWS) || 5000}
           AND COALESCE(rc.linked_sheet_id, '') <> '' AND COALESCE(rc.linked_tab_name, '') <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM recruit_campaigns shared
+             WHERE shared.id <> rc.id
+               AND shared.participation_mode AND shared.status = 'active' AND shared.archived_at IS NULL
+               AND shared.linked_sheet_id = rc.linked_sheet_id AND shared.linked_tab_name = rc.linked_tab_name
+          )
        GROUP BY rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at
      )
      SELECT id, linked_sheet_id, linked_tab_name, linked_tab_gid, recruit_total, pending_projection
@@ -183,6 +193,12 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
       await client.query('BEGIN');
       const checked = await assertWorktableSlotsInTx(client, campaign, campaign.recruit_total);
       const retryProjection = !!campaign.pending_projection;
+      if (checked.checked && checked.target > Number(MAX_RENUMBER_ROWS)) {
+        await client.query('ROLLBACK');
+        out.skipped++;
+        out.items.push({ campaignId: campaign.id, reason: 'renumber_limit', target: checked.target });
+        continue;
+      }
       if (!checked.checked || (!checked.retire && !retryProjection)) { await client.query('ROLLBACK'); out.skipped++; continue; }
       if (dryRun) {
         await client.query('ROLLBACK');

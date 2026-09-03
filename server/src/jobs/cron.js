@@ -268,7 +268,11 @@ function startCronJobs() {
         const r = await withJobLock('worktable_cap_autofix', () => cleanupOverflowEmptyWorktableSlots({
           dryRun: false, limit: capRepairLimit, by: `cron:${source}`,
         }));
-        if (r && !r.skipped && (r.retired || (r.items || []).some(x => x && x.projection))) {
+        const failures = (r && r.items || []).filter(x => x && x.error);
+        if (failures.length) {
+          logger.warn(`[CRON-WorktableCap] source=${source} failed=${failures.length} `
+            + failures.map(x => `camp=${x.campaignId || '?'}:${x.code || x.error}`).join(' | '));
+        } else if (r && !r.skipped && (r.retired || (r.items || []).some(x => x && x.projection))) {
           logger.info(`[CRON-WorktableCap] source=${source} scanned=${r.scanned} retired=${r.retired} skipped=${r.skipped}`);
         }
       } catch (err) {
