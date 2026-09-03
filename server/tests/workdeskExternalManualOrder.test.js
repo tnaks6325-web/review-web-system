@@ -21,6 +21,13 @@ assert.ok(
   && workdesk.includes('_emoSyncBtn();'),
   '수동제출 버튼은 단일 렌더러(_emoBtnHtml)로 두 화면에 그리고, 명단 도착 시 채워야 합니다.'
 );
+const gridStart = workdesk.indexOf('function buildGrid(wd)');
+const gridEnd = workdesk.indexOf('// 그리드만 가볍게 재렌더', gridStart);
+const gridBody = workdesk.slice(gridStart, gridEnd);
+assert.ok(
+  /addCustomColumnPrompt\(\).*?<span id="emoBtnBox">\$\{_emoBtnHtml\(\)\}<\/span>[\s\S]*?_folBarHtml\(\)/.test(gridBody),
+  '외부모집 수동제출 버튼은 열 추가 버튼 바로 오른쪽에 있어야 합니다.'
+);
 assert.ok(
   workdesk.includes('function openExternalManualOrder()'),
   '작업보드는 공용 외부모집 수동제출 모달을 여는 함수를 제공해야 합니다.'

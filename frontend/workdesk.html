@@ -625,7 +625,7 @@
   .dpair .dk{flex:none;width:96px;color:var(--faint);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .dpair .dv{flex:1;color:var(--ink);word-break:break-word}
   .dnone{font-size:12px;color:var(--faint);padding:4px 0}
   /* ── 시트형 그리드(열람) ── */
-  .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 300px - var(--tbh));background:var(--card)}   /* 상단 작업바 높이만큼 차감(전체화면 시 --tbh=0 → 원래 높이 복귀) */
+  .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 210px - var(--tbh));background:var(--card)}   /* 하단의 남는 작업 영역을 표에 돌려줘 한 화면에 약 3행 더 표시 · 전체화면 시 --tbh=0 */
   /* table-layout:fixed = 열 너비 고정 → 브라우저가 모든 셀 내용을 측정 안 함(렌더 비용 급감). overflow:visible = 상단 table{overflow:hidden} 무효화 → thead sticky 동작.
      ★ min-width:0 = 컨테이너 100% 스트레치 해제. 표폭은 _fitGrid 가 '보이는 열 고정폭의 합'으로 못박는다 →
        창을 아무리 넓혀도 열 너비가 변하지 않고(같은 자리에 같은 데이터), 남는 공간은 우측 여백으로 남는다.
@@ -671,6 +671,7 @@
   .gridbar .gselstat{margin-left:auto}
   /* 작업보드 상단 3분할의 오른쪽 끝(제출물 미리보기)과 맞춘다. 표는 계속 전체 폭을 쓴다. */
   .gridbar .grid-export{order:100;margin-left:auto}
+  .gridbar #emoBtnBox .btn{margin-top:0!important}
   @media(max-width:760px){.gridbar .grid-export{margin-left:0}}
 
   /* ══ 오늘 참여현황(툴바 맨 앞 = 표 왼쪽 위) — 시안 C+B 믹스 · docs/design-grid-today-progress.html ══
@@ -7707,6 +7708,10 @@ function _canEditCells(){
   return STATE.role==='advertiser' && ((STATE.wd&&STATE.wd.roster)||[]).some(r=>r&&r.trackingEditable===true);
 }
 
+function _gridDefaultFreezeUpto(headers){
+  // 작업표 표준 열은 수취인을 신원·배송 경계로 쓴다. 구형 탭은 해당 열이 없을 때만 종전 연락처 고정을 유지한다.
+  return (headers||[]).find(h=>/^(수취인(?:명)?|수령인|받는\s*분)$/.test(String(h||'').trim()))||null;
+}
 function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
   _ensureCellRangeUI();  // 셀 범위 드래그(복사·붙여넣기·배경색) + 우클릭 편집(1회 바인딩, 위임)
@@ -7724,7 +7729,9 @@ function buildGrid(wd){
   const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
   const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
   STATE.gColWidths=_gridAutoColumnWidths(wd,vcols);                            // 내부·업체용 공통: 최장 표시값 폭
-  const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
+  const defaultFreeze=_gridDefaultFreezeUpto(H);
+  const freezeUpto=STATE.freezeUpto==null?defaultFreeze:STATE.freezeUpto;
+  const fzIdx = freezeUpto ? H.indexOf(freezeUpto) : -1;
   const fset=new Set(['참여자','연락처', ...H.slice(0, fzIdx+1)]);             // 고정 대상 집합(key)
   let frozenN=0; for(const c of vcols){ if(fset.has(c.key)) frozenN++; else break; } // 표시 컬럼 기준 연속 고정 접두수
   const lefts=[]; let acc=0; for(let i=0;i<vcols.length;i++){ lefts[i]=acc; acc+=_colW(vcols[i].key); }
@@ -7837,9 +7844,9 @@ function buildGrid(wd){
   STATE._gridGen=(STATE._gridGen||0)+1;
   STATE._pendingBody = (bodyArr.length>_GRID_CHUNK) ? { gen:STATE._gridGen, rows:bodyArr.slice(_GRID_CHUNK) } : null;
   // 툴바(고정 열 · 행 그룹 · 접기/펼치기 · 숨긴 열 · 필터 초기화 · 편집 이력)
-  const fzOpts=['<option value="">기본(연락처까지)</option>']
-    .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
-      .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
+  const fzOpts=[`<option value=""${STATE.freezeUpto==null?' selected':''}>기본(수취인까지)</option>`]
+    .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','수취인명','수령인','받는 분','주소'].includes(h))
+      .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto!=null&&STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
   const grpOpts=['<option value="">그룹 없음</option>']
     .concat(H.map(h=>`<option value="${esc(h)}"${STATE.gGroupBy===h?' selected':''}>${esc(h)} 기준</option>`)).join('');
   const nHid=STATE.gHidden.size, hasFilt=Object.values(STATE.gFilters).some(s=>s&&s.size);
@@ -7864,11 +7871,11 @@ function buildGrid(wd){
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${(!STATE.canEdit&&_canEditCells())?`<span class="gsmsg" title="다른 칸은 열람 전용입니다">택배송장 칸은 입력할 수 있습니다 — 셀 우클릭 → ✏️ 이 셀 편집</span>`:''}
-      ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
+      ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button><span id="emoBtnBox">${_emoBtnHtml()}</span>`:''}
       ${_folBarHtml()}
       <output id="gselstat" class="gselstat" aria-live="polite" hidden></output></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
-    <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>`;
+    <div id="addbox"></div>`;
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;

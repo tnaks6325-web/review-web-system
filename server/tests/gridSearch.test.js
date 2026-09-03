@@ -56,7 +56,7 @@ console.log('\n── A. 배치·구성(시안 C) ──');
 //   그 왼쪽에 올 수 있는 것은 **읽기 전용 표기**(오늘 참여현황 칩, docs/design-grid-today-progress.html)뿐 —
 //   고정 열·행 그룹·숨긴 열 같은 조작 컨트롤이 검색창 앞에 끼어들면 이 단언이 깨진다.
 ok('★ 검색창이 툴바(.gridbar) 앞쪽(참여현황 표기 다음)에 온다 = 표 왼쪽 위',
-  /return `<div class="gridbar">\s*(\$\{_tpHtml\(wd\.todayProgress\)\}\s*)?<div class="gsearch">/.test(src));
+  /return `<div class="gridbar">\s*(\$\{_tpHtml\(wd\.todayProgress(?:,wd\.counts)?\)\}\s*)?<div class="gsearch">/.test(src));
 ok('입력·카운터·이전/다음 버튼이 한 덩이(입력칸 안)로 들어간다',
   /id="gsInput"/.test(src) && /id="gsCnt"/.test(src) && /id="gsPrev"/.test(src) && /id="gsNext"/.test(src));
 ok('실시간 검색 배선(oninput) + 키 조작 배선(onkeydown)',
