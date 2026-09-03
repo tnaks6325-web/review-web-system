@@ -1682,6 +1682,12 @@
   .tp3col{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-width:0}
   .tp3t{font-size:9.5px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;
         display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  /* 상단 네 카드의 제목행은 제출물 미리보기 기준(11px/750)으로 통일한다.
+     조건·진행·미리보기는 카드 가장자리까지 제목행을 넓혀 C/S와 같은 전폭 클릭 영역을 쓴다. */
+  .tp3grid.c3 .topcardhd{box-sizing:border-box;display:flex;align-items:center;gap:7px;width:100%;min-height:40px;padding:11px 13px;
+                          font-size:11px;font-weight:750;line-height:18px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+  .tp3grid.c3 .tp3col > .topcardhd{width:calc(100% + 26px);margin:-11px -13px 8px}
+  .tp3grid.c3 .rvpane .rvfill > .topcardhd{width:calc(100% + 26px);margin:-11px -13px 8px}
   /* 작업 조건 — 라벨/값 2열. 값은 min-width:0 이라야 긴 상품명이 카드를 밀지 않고 …축약된다(title 툴팁 보존) */
   .tp3kv{display:grid;grid-template-columns:58px minmax(0,1fr);gap:3px 8px;font-size:12.5px;margin:0}
   .tp3kv dt{font-size:11px;color:var(--faint);font-weight:650;padding-top:1px}
@@ -1811,7 +1817,7 @@
   /* ★ 미리보기 칸은 **높이를 요구하지 않는다** — 내용은 절대배치 레이어(.rvfill) 안에서만 흐르므로
      행 높이는 왼쪽 두 카드가 정한다(min-height 330 이 바닥). padding 은 레이어가 갖는다. */
   .tp3grid.c3 .rvpane{position:relative;overflow:hidden;padding:0}
-  .tp3grid.c3 .rvpane .rvfill{position:absolute;inset:0;display:flex;flex-direction:column;padding:12px}
+  .tp3grid.c3 .rvpane .rvfill{position:absolute;inset:0;display:flex;flex-direction:column;padding:11px 13px}
   /* ── 접기/펼치기(시안 v2) — 머리줄 클릭 = 세 박스 일괄. 접히면 머리줄만 남는다.
      ★ min-height 해제·rvfill static 전환이 한 벌 — 하나만 빠지면 접혀도 높이가 안 줄거나
        미리보기만 껍데기 높이로 남아 하단선이 어긋난다. */
@@ -1823,9 +1829,11 @@
   .tp3h .tp3chev{color:var(--faint);font-size:11px;transition:transform .18s;margin-left:4px}
   .tp3grid.c3.fold .tp3chev{transform:rotate(-90deg)}
   .tp3grid.c3.fold .tp3col,.tp3grid.c3.fold .rvpane{min-height:0}
+  .tp3grid.c3.fold .tp3col{padding-bottom:0}
   .tp3grid.c3.fold .tp3col > :not(.tp3t){display:none}
   .tp3grid.c3.fold .tp3col .tp3t{margin-bottom:0}
-  .tp3grid.c3.fold .rvpane .rvfill{position:static;padding:8px 12px}
+  /* 미리보기는 접혀도 같은 11px/13px 여백과 40px 제목행을 유지해 제목이 흔들리지 않는다. */
+  .tp3grid.c3.fold .rvpane .rvfill{position:static;padding:11px 13px}
   .tp3grid.c3.fold .rvfill > :not(.rvhd){display:none}
   .tp3grid.c3.fold .rvfill .rvhd{margin-bottom:0}
   .tp3grid.c3.fold .wdcsmini-pane{height:auto;max-height:none;min-height:0}
@@ -6086,7 +6094,7 @@ function _rvStep(kind,delta,n){
   _rvRender();
 }
 function _rvRender2(pane){
-  const hd=`<div class="rvhd tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+_rvStatHtml();
+  const hd=`<div class="rvhd tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+_rvStatHtml();
   if(STATE.rvImgs===null&&!STATE.rvSel){ _rvFill(pane, hd+`<div class="rvnone"><b>불러오는 중…</b></div>`); return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
   if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 캡처가 여기 표시됩니다.</span></div>`); return; }
@@ -6275,7 +6283,7 @@ function summaryStrip(wd,d,m,c){
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
   const scheduleWarning=(!isAdv&&scheduleUnassigned>0)
     ? `<div class="tp3schedulewarn">! 모집일 미설정 ${scheduleUnassigned.toLocaleString()}건</div>` : '';
-  const prog=`<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
+  const prog=`<div class="tp3col"><div class="tp3t tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
     gg('참여자',filled,target||filled,pT,'',filledTip+(overN?`${filledTip?' · ':''}⚠ 총건수(${target})를 ${overN}명 넘겨 들어왔습니다 — 표에서 붉은 줄로 표시합니다`:''),overN)+
     gg('제출완료',c.submitted||0,filled,pS,'s')+
     gg('입금완료',c.paid||0,filled,pP)+
@@ -6344,7 +6352,7 @@ function _condCardHtml(wd,d,m){
               ['모집',(d.recruitCount||'—')+((!isAdv&&m.manager)?(' · '+m.manager):'')],
               ['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
       .map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('');
-    return `<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">작업 조건<span class="cndwarn" title="작업 조건 요약을 불러오지 못했습니다 — 아래는 발주 값입니다.">요약 없음</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
+    return `<div class="tp3col"><div class="tp3t tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">작업 조건<span class="cndwarn" title="작업 조건 요약을 불러오지 못했습니다 — 아래는 발주 값입니다.">요약 없음</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
       `<dl class="tp3kv">${kv}</dl>${woRows}</div>`;
   }
   const n=v=>(v==null?null:Number(v));
@@ -6578,7 +6586,7 @@ function _condCardHtml(wd,d,m){
     .replace(/\s*[-–—]\s*결제금액[^\n]*/g,'')
     .trim();
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
-  return `<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">작업 조건${many}<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
+  return `<div class="tp3col"><div class="tp3t tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">작업 조건${many}<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
     `${(()=>{const gate=_cndFixGate(cd,'displayName');return gate.can
       ? `<button type="button" class="cndprod" onclick="_cndFix('displayName')" title="${esc(gate.tip)}">${esc(prod)||'<span class="cnna">—</span>'}</button>`
       : `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`;})()}`+

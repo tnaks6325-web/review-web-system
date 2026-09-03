@@ -57,7 +57,7 @@
           : '<div class="wdcsmini-thread-empty">아직 메시지가 없습니다.</div>';
     const status = state.thread && state.thread.status === 'closed' ? '종료' : '진행중';
     root.innerHTML = `<div class="wdcsmini" aria-label="이 작업의 C/S 대화">`+
-      `<div class="wdcsmini-head tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">C/S 대화<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span><button type="button" data-open-cs>전체보기 ↗</button></div>`+
+      `<div class="wdcsmini-head tp3t tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">C/S 대화<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span><button type="button" data-open-cs>전체보기 ↗</button></div>`+
       `<div class="wdcsmini-body"><aside class="wdcsmini-list"><div class="wdcsmini-listhead">채팅 목록 <b>${rooms.length}</b></div>${list}</aside>`+
         `<section class="wdcsmini-conversation"><div class="wdcsmini-context"><b>${active ? esc(active.reviewerName || '리뷰어') : '대화 선택'}</b><span>${active ? status : esc(state.label)}</span></div>`+
           `<div class="wdcsmini-messages">${messages}</div>`+
