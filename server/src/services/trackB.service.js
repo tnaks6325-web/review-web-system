@@ -1519,11 +1519,34 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
 //   계산서 = 인트라넷 tax_invoices(sales_id 역링크, 인트라넷 0087)를 프록시 — 발행 요약만(원본은 홈택스).
 //   게이트는 settlementForTab 과 동일: 탭에 링크된 계약만 도달 + 광고주 settlement_visible.
 const crypto = require('crypto');
+// 인트라넷 PDF가 사용하는 활성 브랜드 에셋을 같은 데이터 URI로 전달한다.
+// 견적서는 광고주 정산 표시 게이트를 통과한 뒤에만 이 값을 받으며, 변경 반영을 위해 짧게만 캐시한다.
+let _quoteBrandAssetsCache = { at: 0, value: null };
+function _quoteBrandAssetUri(row) {
+  const mime = String(row && row.mime_type || '').toLowerCase();
+  const raw = String(row && row.file_data || '').replace(/\s/g, '');
+  if (!/^image\/(png|jpeg|jpg|webp|svg\+xml)$/.test(mime) || !raw || raw.length > 3 * 1024 * 1024 || !/^[a-z0-9+/=]+$/i.test(raw)) return '';
+  return `data:${mime};base64,${raw}`;
+}
+async function _quoteBrandAssets() {
+  const now = Date.now();
+  if (_quoteBrandAssetsCache.value && now - _quoteBrandAssetsCache.at < 5 * 60 * 1000) return _quoteBrandAssetsCache.value;
+  const types = ['logo_horizontal', 'logo_stamp', 'logo_square', 'company_seal'];
+  const rows = await Promise.all(types.map(type =>
+    _intranetGet(`/api/brand-assets/active/${type}`).then(j => _quoteBrandAssetUri(j && j.data)).catch(() => '')
+  ));
+  const value = { logoHorizontal: rows[0], logoStamp: rows[1], logoSquare: rows[2], companySeal: rows[3] };
+  _quoteBrandAssetsCache = { at: now, value };
+  return value;
+}
 function _mapQuoteFull(q) {
   if (!q) return null;
   let items = [];
   try { items = JSON.parse(q.items || '[]'); } catch (_) { items = []; }
   if (!Array.isArray(items)) items = [];
+  let outsourcingItems = [];
+  try { outsourcingItems = JSON.parse(q.outsourcing_items || '[]'); } catch (_) { outsourcingItems = []; }
+  if (!Array.isArray(outsourcingItems)) outsourcingItems = [];
   return {
     quoteNumber: String(q.quote_number || '').trim(),
     quoteType: q.quote_type || 'online_marketing',
@@ -1537,13 +1560,15 @@ function _mapQuoteFull(q) {
     })),
     supplyAmount: Number(q.supply_amount) || 0, vatAmount: Number(q.vat_amount) || 0,
     totalAmount: Number(q.total_amount) || 0,
+    // 상품구입비용 견적서의 3.3% 산출 근거도 인트라넷 PDF와 동일하게 표시한다.
+    outsourcingItems: outsourcingItems.slice(0, 50),
     status: q.status || 'draft', sentAt: q.sent_at || null, acceptedAt: q.accepted_at || null,
   };
 }
 // 내용 해시 — 상태 포함(내용이 같아도 draft→accepted 전이가 새 버전 = "초안/최종" 자동 라벨 근거).
 function _quoteHash(quote) {
   const basis = JSON.stringify([quote.quoteNumber, quote.quoteType, quote.receiver, quote.workName,
-    quote.quoteDate, quote.items, quote.supplyAmount, quote.vatAmount, quote.totalAmount, quote.status]);
+    quote.quoteDate, quote.items, quote.outsourcingItems, quote.supplyAmount, quote.vatAmount, quote.totalAmount, quote.status]);
   return crypto.createHash('sha256').update(basis).digest('hex').slice(0, 32);
 }
 // 스냅샷 적재(append-only) — 최신 버전과 해시가 같으면 write 0회. 경합의 UNIQUE 충돌은 무해(다음 조회로 수렴).
@@ -1583,7 +1608,9 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
   const versions = rows.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload }));
   // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
   if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
-  return { linked: true, contractNumber: link.contractNumber || '', proxyDown, versions };
+  // 실제 인트라넷 PDF와 같은 로고·직인을 사용한다. 에셋 조회 실패는 문서 본문을 막지 않는다.
+  const brandAssets = await _quoteBrandAssets();
+  return { linked: true, contractNumber: link.contractNumber || '', proxyDown, versions, brandAssets };
 }
 // 계산서(전자세금계산서) 발행 요약 — sales 상태 + tax_invoices 이력(sales_id 역링크).
 async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserId = null, brandId = null } = {}) {

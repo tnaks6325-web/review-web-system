@@ -7010,6 +7010,7 @@ const _SETTLE_PAY={unpaid:['미입금','bad'],partial:['부분입금','warn'],pa
 //   계산서 = 전자세금계산서(tax_invoices) 발행 요약 카드(원본은 홈택스·수신 이메일).
 const _QDOC_ST={draft:['초안','warn'],sent:['발송됨','ok'],accepted:['최종 · 수락됨','safe'],rejected:['반려','bad'],expired:['만료','warn']};
 let _QDOC=null;   // 열린 팝업의 versions 캐시(탭 전환용)
+let _QDOC_ASSETS={}; // 인트라넷 PDF와 같은 활성 로고·직인(data URI)
 function awDocOpen(ev,kind,i){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }
   const t=(i!=null?STATE.tabs[i]:null)||(STATE.settle&&STATE.settle.tab)||STATE.cur; if(!t) return;
@@ -7027,6 +7028,7 @@ function _qdocBody(r){
   const vs=(r.versions||[]).filter(v=>v&&v.payload);
   if(!vs.length) return `<div class="empty" style="padding:24px">${r.proxyDown?'인트라넷 연결이 원활하지 않습니다. 잠시 후 다시 시도해 주세요.':'이 계약에 등록된 견적서가 아직 없습니다.'}</div>`;
   _QDOC=vs;
+  _QDOC_ASSETS=r.brandAssets||{};
   const cur=vs.length-1;
   const tabs=vs.map((v,ix)=>{ const st=_QDOC_ST[v.payload.status]||[v.payload.status||'',''];
     return `<span class="qvtab${ix===cur?' on':''}" data-ix="${ix}" onclick="_qdocShow(${ix})">v${v.version}<i class="qvt ${st[1]||''}">${esc(st[0])}</i>${v.capturedAt?` ${esc(_awMD(String(v.capturedAt)))}`:''}</span>`; }).join('');
@@ -7038,39 +7040,43 @@ function _qdocShow(ix){
   const p=document.getElementById('qdocPane'); if(p) p.innerHTML=_qdocHtml(_QDOC[ix].payload);
   document.querySelectorAll('.qvtab').forEach(el=>el.classList.toggle('on',+el.dataset.ix===ix));
 }
+function _qdocAsset(name){ return String(_QDOC_ASSETS&&_QDOC_ASSETS[name]||''); }
+function _qdocTax33Rows(raw){
+  const xs=Array.isArray(raw)?raw:[];
+  return xs.reduce((out,it)=>{
+    if(!it||it.item_type!=='product_cost'||it.product_cost_type!=='계산서발행+수수료'||it.fee_method!=='tax33') return out;
+    const qty=Math.max(1,Math.floor(Number(it.qty||1))), unit=Number(it.unit_price||0)||(Number(it.product_cost||0)/qty);
+    if(!(unit>0)) return out;
+    const report=Math.floor((unit/.967)/10)*10, income=Math.floor((report*.03)/10)*10, local=Math.floor((income*.1)/10)*10;
+    out.push({name:String(it.name||'체험단 상품비')+(qty>1?` (${qty}개)`:''),transfer:unit*qty,report:report*qty,income:income*qty,local:local*qty,total:(income+local)*qty}); return out;
+  },[]);
+}
+function _qdocTax33Html(rows,headerBg,thBg,thColor){
+  if(!rows.length) return '';
+  const body=rows.map((r,i)=>`<tr><td style="border:.5px solid #cbd5e1;padding:5px;text-align:center">${i+1}</td><td style="border:.5px solid #cbd5e1;padding:5px 7px">${esc(r.name)}</td><td style="border:.5px solid #cbd5e1;padding:5px;text-align:right">${r.transfer.toLocaleString()}</td><td style="border:.5px solid #cbd5e1;padding:5px;text-align:right">${r.report.toLocaleString()}</td><td style="border:.5px solid #cbd5e1;padding:5px;text-align:right">${r.income.toLocaleString()}</td><td style="border:.5px solid #cbd5e1;padding:5px;text-align:right">${r.local.toLocaleString()}</td><td style="border:.5px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold">${r.total.toLocaleString()}</td></tr>`).join('');
+  return `<section style="margin-top:16px;page-break-inside:avoid"><div style="background:${headerBg};border:.5px solid #cbd5e1;border-bottom:0;padding:7px 9px;font-size:13px;font-weight:bold;color:${thColor}">소득세 발생 근거 계산식 <span style="font-size:10px;font-weight:normal;color:#475569;margin-left:6px">신고금액 = 통장지급액 ÷ 96.7% (각 단계 10원 단위 절사)</span></div><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:${thBg};color:${thColor}"><th style="border:.5px solid #cbd5e1;padding:5px;width:6%">번호</th><th style="border:.5px solid #cbd5e1;padding:5px;width:29%">상품명</th><th style="border:.5px solid #cbd5e1;padding:5px;width:14%">통장지급액</th><th style="border:.5px solid #cbd5e1;padding:5px;width:14%">신고금액</th><th style="border:.5px solid #cbd5e1;padding:5px;width:12%">소득세3%</th><th style="border:.5px solid #cbd5e1;padding:5px;width:12%">지방세10%</th><th style="border:.5px solid #cbd5e1;padding:5px;width:13%">납부세액</th></tr></thead><tbody>${body}</tbody></table></section>`;
+}
 function _qdocHtml(q){
-  const isP=q.quoteType==='product_purchase', won=n=>(Number(n)||0).toLocaleString('ko-KR');
-  const rows=(q.items||[]).filter(it=>it&&(it.name||it.amount)).map(it=>
-    `<tr><td>${esc(it.name)}${it.note?` <span style="color:#98a2b3;font-size:10px">(${esc(it.note)})</span>`:''}</td><td>${won(it.unitPrice)}</td><td>${won(it.count)}</td><td>${won(it.amount)}</td>${isP?'':`<td>${won(it.tax)}</td>`}</tr>`).join('');
-  const st=_QDOC_ST[q.status]||[q.status||'',''];
-  return `<div class="qdoc ${isP?'torange':'tblue'}">
-    <div class="qtitle">${isP?'상품구입비용 견적서':'견 적 서'}</div>
-    <div class="qno">${q.quoteNumber?`No. ${esc(q.quoteNumber)} · `:''}${q.quoteDate?`견적일자 ${esc(q.quoteDate)} · `:''}${q.validPeriod?`유효기간: ${esc(q.validPeriod)} · `:''}상태: ${esc(st[0])}</div>
-    <div class="qmeta">
-      <div><span class="k">수신</span><b>${esc(q.receiver||'—')}</b></div>
-      <div><span class="k">작업명</span>${esc(q.workName||'—')}</div>
-      ${q.managerName?`<div><span class="k">담당자</span>${esc(q.managerName)}${q.managerPhone?` (${esc(q.managerPhone)})`:''}</div>`:''}
-      <div><span class="k">발신</span>인애드 ${isP?'상품구입':'온라인마케팅'}</div>
-    </div>
-    <table><tr><th>품목</th><th>단가</th><th>수량</th><th>${isP?'금액':'공급가액'}</th>${isP?'':'<th>세액</th>'}</tr>${rows||'<tr><td colspan="5" style="text-align:center;color:#98a2b3">품목 없음</td></tr>'}</table>
-    <div class="qsum"><span>공급가액 ${won(q.supplyAmount)}</span>${isP?'':`<span>부가세 ${won(q.vatAmount)}</span>`}<span>합계 <b>₩ ${won(q.totalAmount)}</b></span></div>
-  </div>`;
+  // 인트라넷 _buildQuotePdfHtml과 같은 한 장(794×1123) 문서. 화면용 요약을 별도로 만들지 않는다.
+  const isOnline=q.quoteType==='online_marketing', items=Array.isArray(q.items)?q.items:[];
+  const d=String(q.quoteDate||'').split('-'), date=d.length===3?`${d[0]}년 ${d[1]}월 ${d[2]}일`:String(q.quoteDate||'');
+  const filled=items.filter(it=>it&&(it.name||it.unitPrice||it.count)), taxRows=_qdocTax33Rows(q.outsourcingItems), rowH=filled.length<=8?34:(filled.length<=12?26:22), rowCount=Math.max(filled.length,taxRows.length?Math.max(1,Math.min(2,filled.length)):5), pad=rowH<=26?2:4;
+  const supply=items.reduce((n,it)=>n+(Number(it.amount)||0),0), savedTotal=Number(q.totalAmount)||0, vat=isOnline?(savedTotal>0?savedTotal-supply:items.reduce((n,it)=>n+(Number(it.tax)||0),0)):0, total=savedTotal||supply+vat;
+  const titleColor=isOnline?'#2563EB':'#EA580C', headerBg=isOnline?'#EFF6FF':'#FFF7ED', thBg=isOnline?'#DBEAFE':'#FFEDD5', thColor=isOnline?'#1E40AF':'#9A3412';
+  const cell=(align,content)=>`<td style="border:.5px solid #cbd5e1;height:${rowH}px;vertical-align:middle;padding:${pad}px 8px;font-size:12px;line-height:1.3;text-align:${align}">${content}</td>`;
+  const rows=Array.from({length:rowCount},(_,i)=>{const it=filled[i]||{}, price=it.unitPrice?Number(it.unitPrice).toLocaleString():'', amount=it.amount?Number(it.amount).toLocaleString():'', count=it.count||''; return `<tr>${cell('left',esc(it.name||''))}${cell('center',price)}${cell('center',count)}${cell('center',amount)}${isOnline?cell('center',it.tax?Number(it.tax).toLocaleString():''):''}${cell('center',esc(it.note||''))}</tr>`;}).join('');
+  const watermark=_qdocAsset('logoSquare')?`<img src="${_qdocAsset('logoSquare')}" alt="" aria-hidden="true" style="position:absolute;top:50%;left:50%;width:440px;height:440px;transform:translate(-50%,-50%);object-fit:contain;opacity:.06;pointer-events:none;z-index:0">`:'';
+  const horizontal=_qdocAsset('logoHorizontal'), stamp=_qdocAsset('logoStamp'), seal=_qdocAsset('companySeal');
+  const supplierName=`<span style="position:relative;display:inline-block;white-space:nowrap">㈜인애드컴퍼니${seal?`<img src="${seal}" alt="법인 인감" style="position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:54px;height:54px;object-fit:contain;mix-blend-mode:multiply;pointer-events:none">`:''}</span>`;
+  const th=`background:${thBg};color:${thColor};border:.5px solid #cbd5e1;padding:8px;font-size:12px;font-weight:bold;text-align:center`;
+  const head=(width,label)=>`<th style="${th};width:${width}">${label}</th>`;
+  const heads=isOnline?[['25%','품명'],['13%','단가(원)'],['10%','횟수(*)'],['15%','합계금액(=)'],['13%','세액(*10%)'],['24%','비고']].map(x=>head(x[0],x[1])).join(''):[['30%','품명'],['15%','단가(원)'],['10%','횟수(*)'],['20%','합계금액(=)'],['25%','비고']].map(x=>head(x[0],x[1])).join('');
+  const bank=isOnline?['🏛 NH농협은행','#00843D','301-0311-6835-61 ㈜인애드컴퍼니']:['🏦 KEB 하나은행','#008C8C','402-911726-38507 김수만'];
+  return `<div class="qdoc-official-page" style="width:794px;height:1123px;background:#fff;font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo','Noto Sans KR',sans-serif;color:#333;position:relative;padding:40px 50px;box-sizing:border-box;overflow:hidden">${watermark}<div style="position:relative;z-index:1"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;border-bottom:3px solid ${titleColor};padding-bottom:16px"><h1 style="font-size:28px;font-weight:bold;color:${titleColor};margin:0;letter-spacing:2px">${isOnline?'온라인마케팅 견적서':'상품 구입 비용'}</h1>${horizontal?`<img src="${horizontal}" alt="IN AD COMPANY" style="height:32px;object-fit:contain">`:'<b style="color:#2563EB;font-size:16px">IN AD COMPANY</b>'}</div><div style="display:flex;gap:16px;margin-bottom:20px"><div style="flex:1;border:.5px solid #cbd5e1;border-radius:4px;overflow:hidden"><table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="height:30px"><td style="width:70px;background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;padding:4px">수 신</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1">${esc(q.receiver||'')}</td></tr><tr style="height:30px"><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;padding:4px">작업명</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1">${esc(q.workName||'')}</td></tr><tr style="height:30px"><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;padding:4px">견적일자</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1">${esc(date)}</td></tr><tr style="height:30px"><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;padding:4px">유효기간</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1">${esc(q.validPeriod||'견적일로부터 7일')}</td></tr><tr style="height:30px"><td colspan="2" style="text-align:center;padding:4px;color:#555">아래와 같이 견적합니다.</td></tr></table></div><div style="flex:1.3;border:.5px solid #cbd5e1;border-radius:4px;overflow:hidden"><table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="height:30px"><td rowspan="5" style="width:24px;background:${headerBg};text-align:center;font-weight:bold;writing-mode:vertical-lr;letter-spacing:6px;border-right:.5px solid #cbd5e1;border-bottom:.5px solid #cbd5e1;padding:4px;color:${thColor}">공급자</td><td style="width:60px;background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px">등록번호</td><td colspan="3" style="padding:4px 8px;border-bottom:.5px solid #cbd5e1;text-align:center">311-87-02345</td></tr><tr style="height:30px"><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px">대표자</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;width:80px">김수만</td><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px;width:55px">상호명</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1">${supplierName}</td></tr><tr style="height:30px"><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px">주 소</td><td colspan="3" style="padding:4px 8px;border-bottom:.5px solid #cbd5e1;font-size:11px">경기도 안산시 단원구 고잔로 51, 204호(타워아이즈빌 2층)</td></tr><tr style="height:30px"><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px">업 태</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1">서비스업</td><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px">종 목</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1">온라인 광고업</td></tr><tr style="height:30px"><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px">담당자</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1">${esc(q.managerName||'')}</td><td style="background:${headerBg};text-align:center;font-weight:bold;border-bottom:.5px solid #cbd5e1;border-right:.5px solid #cbd5e1;padding:4px">전화번호</td><td style="padding:4px 8px;border-bottom:.5px solid #cbd5e1">${esc(q.managerPhone||'')}</td></tr></table></div></div><table style="width:100%;border-collapse:collapse;margin-bottom:8px"><thead><tr>${heads}</tr></thead><tbody>${rows}</tbody></table>${isOnline?'':`<div style="text-align:center;margin:24px 0 8px;font-size:14px;line-height:1.8;color:#333">하나은행 402-911726-38507 김수만<br>계좌로 현금 입금 요청 드립니다.</div>`}<table style="width:100%;border-collapse:collapse;margin-top:16px"><tr><td style="width:50%;border:.5px solid #cbd5e1;height:32px;text-align:center;font-weight:bold;font-size:13px;padding:6px">공급가액</td><td style="width:50%;border:.5px solid #cbd5e1;height:32px;text-align:center;font-size:13px;padding:6px 12px">${supply.toLocaleString()}</td></tr><tr><td style="border:.5px solid #cbd5e1;height:32px;text-align:center;font-weight:bold;font-size:13px;padding:6px">부가가치세액</td><td style="border:.5px solid #cbd5e1;height:32px;text-align:center;font-size:13px;padding:6px 12px">${isOnline?vat.toLocaleString():'해당 없음'}</td></tr><tr><td style="border:.5px solid #cbd5e1;height:36px;text-align:center;font-weight:bold;font-size:14px;padding:6px">합계 금액</td><td style="border:.5px solid #cbd5e1;height:36px;text-align:center;font-size:18px;font-weight:bold;padding:6px 12px">${total.toLocaleString()}</td></tr></table><table style="width:100%;border-collapse:collapse;margin-top:4px"><tr><td style="border:.5px solid #cbd5e1;width:15%;background:${headerBg};height:36px;text-align:center;font-weight:bold;font-size:13px;padding:6px">입금계좌</td><td style="border:.5px solid #cbd5e1;width:20%;height:36px;text-align:center;font-weight:bold;font-size:13px;color:${bank[1]};padding:6px">${bank[0]}</td><td style="border:.5px solid #cbd5e1;height:36px;text-align:center;font-size:14px;padding:6px">${bank[2]}</td></tr></table>${_qdocTax33Html(taxRows,headerBg,thBg,thColor)}<div style="display:flex;justify-content:center;align-items:center;margin-top:${taxRows.length?14:28}px;gap:24px"><span style="font-size:26px;font-weight:bold;color:#333;letter-spacing:3px">(주)인애드컴퍼니</span>${stamp?`<img src="${stamp}" alt="직인" style="width:70px;height:70px;border-radius:50%;object-fit:cover">`:''}</div><div style="border-top:2px solid #e5e7eb;margin-top:20px"></div></div></div>`;
 }
 function _qdocPrint(){
   const p=document.getElementById('qdocPane'); if(!p) return;
-  const css=`body{font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;padding:24px}
-    .qdoc{max-width:680px;margin:0 auto;border:1px solid #d0d9e4;border-radius:10px;padding:22px 26px}
-    .qtitle{text-align:center;font-size:19px;font-weight:800;letter-spacing:.35em;margin-bottom:4px}
-    .tblue .qtitle{color:#1a3a8f}.torange .qtitle{color:#b45309}
-    .qno{text-align:center;font-size:11px;color:#98a2b3;margin-bottom:16px}
-    .qmeta{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;font-size:12px;margin-bottom:14px}
-    .qmeta .k{color:#98a2b3;display:inline-block;min-width:52px}
-    table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px}
-    th{font-weight:800;padding:7px 9px;border:1px solid #d0d9e4}
-    .tblue th{background:#eef3fd;color:#1a3a8f}.torange th{background:#fdf6ec;color:#b45309}
-    td{padding:7px 9px;border:1px solid #e6eaf0;text-align:right} td:first-child{text-align:left}
-    .qsum{display:flex;justify-content:flex-end;gap:22px;font-size:13px;padding:10px;border-radius:8px}
-    .tblue .qsum{background:#eef3fd}.torange .qsum{background:#fdf6ec}`;
+  const css='@page{size:A4;margin:0}body{margin:0;background:#fff}.qdoc-official-page{margin:0 auto}';
   const w=window.open('','_blank'); if(!w) return;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>견적서</title><style>${css}</style></head><body>${p.innerHTML}</body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>w.print(),250);
@@ -9963,7 +9969,8 @@ function _modal(title, bodyHtml){
     o.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(17,24,39,.5);display:flex;align-items:center;justify-content:center;padding:20px';
     o.addEventListener('click',e=>{ if(e.target===o) o.remove(); });
     document.body.appendChild(o); }
-  o.innerHTML=`<div style="background:var(--card);border-radius:14px;width:720px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
+  const officialQuote=String(bodyHtml||'').includes('qdoc-official-page');
+  o.innerHTML=`<div style="background:var(--card);border-radius:14px;width:${officialQuote?'940px':'720px'};max-width:96vw;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
     <div style="display:flex;align-items:center;gap:10px;padding:13px 17px;border-bottom:1px solid var(--line)">
       <b style="flex:1;font-size:14px">${esc(title)}</b>
       <button class="btn" onclick="document.getElementById('wdModal').remove()">닫기</button></div>
