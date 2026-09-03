@@ -59,10 +59,25 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
   if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { synced: false, reason: 'no_worktable_link' };
   const { isSheetless } = require('../utils/sheetlessScope');
   if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { synced: false, reason: 'not_sheetless' };
+  // 작업표는 탭 단위의 물리 행이라 두 공고가 같은 활성 탭을 공유하면 현재 공고의
+  // 정원만으로 줄 수를 맞출 수 없다. 그 상태에서 빈 행을 정리하면 다른 공고의
+  // 준비 자리를 지울 수 있으므로, 탭 단위 목표를 별도로 만들기 전까지는 안전하게 건너뛴다.
+  if (campaign.id) {
+    const { rows: shared } = await client.query(
+      `SELECT id FROM recruit_campaigns
+        WHERE participation_mode AND status='active' AND archived_at IS NULL
+          AND linked_sheet_id=$1 AND linked_tab_name=$2
+        FOR UPDATE`,
+      [campaign.linked_sheet_id, campaign.linked_tab_name]
+    );
+    if (shared.some(r => String(r.id) !== String(campaign.id))) {
+      return { synced: false, reason: 'shared_worktable', sharedCampaignIds: shared.map(r => String(r.id)) };
+    }
+  }
   const { rows } = await client.query(
     `SELECT id, seq, tab_gid, reviewer_name, recipient_name, phone8, order_submission_id
        FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
       ORDER BY seq FOR UPDATE`, [campaign.linked_sheet_id, campaign.linked_tab_name]
   );
   const fixed = rows.filter(r => !_worktableSlotEmpty(r));
@@ -103,10 +118,22 @@ async function assertWorktableSlotsInTx(client, campaign, target) {
   if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { checked: false, reason: 'no_worktable_link' };
   const { isSheetless } = require('../utils/sheetlessScope');
   if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { checked: false, reason: 'not_sheetless' };
+  if (campaign.id) {
+    const { rows: shared } = await client.query(
+      `SELECT id FROM recruit_campaigns
+        WHERE participation_mode AND status='active' AND archived_at IS NULL
+          AND linked_sheet_id=$1 AND linked_tab_name=$2
+        FOR UPDATE`,
+      [campaign.linked_sheet_id, campaign.linked_tab_name]
+    );
+    if (shared.some(r => String(r.id) !== String(campaign.id))) {
+      return { checked: false, reason: 'shared_worktable', sharedCampaignIds: shared.map(r => String(r.id)) };
+    }
+  }
   const { rows } = await client.query(
     `SELECT reviewer_name, recipient_name, phone8, order_submission_id
        FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL FOR UPDATE`,
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE FOR UPDATE`,
     [campaign.linked_sheet_id, campaign.linked_tab_name]
   );
   return { checked: true, ...worktableSlotDelta({ current: rows.length, protectedCount: rows.filter(r => !_worktableSlotEmpty(r)).length, target }) };
@@ -482,6 +509,7 @@ module.exports = {
   linkedWorkOrderForCampaign,
   linkedWorkOrdersForCampaigns,
   worktableSlotDelta,
+  syncWorktableSlotsInTx,
   firstRoundQuota,
   allocateOptionQuotas,
   assertWorkOrderQuota,
