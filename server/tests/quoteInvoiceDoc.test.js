@@ -12,7 +12,8 @@
  *      - 같은 내용 재조회 → 스냅샷 추가 0회(해시 동일)
  *      - 상태 전이(draft→accepted) → v2 적재(초안/최종 자동 라벨 근거)
  *   3. invoiceDocForTab: tax_invoices 역링크 요약 + 팝빌 UID 는 뒤 4자리만(전체 미노출).
- *   4. 프론트 배선: 목록 표 견적서/계산서 칸 클릭 → awDocOpen, 버전 탭, 인쇄, 원본(홈택스) 안내.
+ *   4. 프론트 배선: 목록 표 견적서/계산서 칸 클릭 → awDocOpen, 인트라넷 PDF와 같은 실물 견적서 페이지,
+ *      버전 탭, 인쇄, 원본(홈택스) 안내.
  *
  * 실행: node tests/quoteInvoiceDoc.test.js
  */
@@ -58,6 +59,9 @@ global.fetch = async (url) => {
   if (u.includes('/api/tables/sales/')) return { ok: true, json: async () => ({ data: {
     id: 'sales-doc1', contract_number: 'C-2026-100', advertiser_name: '어니스트캄', product_name: '선스틱',
     amount: 1650000, invoice_status: 'issued', invoice_date: '2026-07-31', payment_status: 'partial',
+  } }) };
+  if (u.includes('/api/brand-assets/active/')) return { ok: true, json: async () => ({ data: {
+    mime_type: 'image/png', file_data: 'aGVsbG8=',
   } }) };
   return { ok: false, json: async () => ({}) };
 };
@@ -109,6 +113,7 @@ async function run() {
   ok('품목 JSON 파싱(이름·단가·수량·금액·세액)', p1.items.length === 1 && p1.items[0].unitPrice === 15000 && p1.items[0].tax === 150000);
   ok('견적 유형·수신자·합계 동봉', p1.quoteType === 'online_marketing' && p1.receiver === '어니스트캄 귀하' && p1.totalAmount === 1650000);
   ok('상태 draft(초안 라벨 근거)', p1.status === 'draft');
+  ok('실물 견적서용 활성 로고·직인 data URI 동봉', d1.brandAssets && d1.brandAssets.logoHorizontal === 'data:image/png;base64,aGVsbG8=' && d1.brandAssets.companySeal === 'data:image/png;base64,aGVsbG8=');
 
   // 같은 내용 재조회 — 스냅샷 추가 0
   await svc.quoteDocForTab({ sheetId: 's1', tabName: 't1', role: 'advertiser', advertiserId: 'adv-1' });
@@ -142,7 +147,9 @@ async function run() {
   ok('버전 탭(초안/최종 자동 라벨) 렌더', src.includes("_QDOC_ST={draft:['초안'") && src.includes('qvtab'));
   ok('인쇄/PDF 저장 버튼', src.includes('_qdocPrint'));
   ok('계산서 원본(홈택스) 안내 문구', src.includes('국세청 홈택스'));
-  ok('상품구입비용 견적서(orange·부가세 없음) 분기', src.includes("quoteType==='product_purchase'") && src.includes('상품구입비용 견적서'));
+  ok('인트라넷 PDF와 같은 단일 실물 견적서 페이지(794×1123) 렌더', src.includes('qdoc-official-page') && src.includes('width:794px;height:1123px'));
+  ok('인트라넷 활성 로고·직인·워터마크를 실물 문서에 적용', src.includes('_QDOC_ASSETS=r.brandAssets||{}') && src.includes("_qdocAsset('companySeal')") && src.includes("_qdocAsset('logoSquare')"));
+  ok('상품구입비용·3.3% 근거표도 공식 PDF 기준으로 분기', src.includes("quoteType==='online_marketing'") && src.includes('상품 구입 비용') && src.includes('_qdocTax33Rows(q.outsourcingItems)'));
 
   console.log(`\n✅ quoteInvoiceDoc: ${n} cases passed`);
 }
