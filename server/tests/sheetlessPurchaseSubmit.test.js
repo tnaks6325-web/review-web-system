@@ -48,8 +48,10 @@ test('sheetless worktable write failure is persisted instead of leaving the ledg
   const end = submit.indexOf('if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply)', start);
   const branch = submit.slice(start, end);
   assert.ok(start >= 0 && end > start, 'sheetless follow-up branch is missing');
-  assert.ok(/if \(!sheetlessDone\.ok\) \{[\s\S]*?await markOrderMirrorFailed\(ledger\.orderSubmissionId, sheetlessDone\.message \|\| sheetlessDone\.reason\)/.test(branch),
+  assert.ok(/if \(!sheetlessDone\.ok\) \{[\s\S]*?try \{[\s\S]*?await markOrderMirrorFailed\(ledger\.orderSubmissionId, sheetlessDone\.message \|\| sheetlessDone\.reason\)[\s\S]*?\} catch \(statusErr\)/.test(branch),
     'failed sheetless worktable writes must persist failed status and the reason');
+  assert.ok(/무시트 실패상태 저장 실패\(원장 저장은 완료\)/.test(branch),
+    'a secondary status-write failure must not turn a saved submission into a client-visible failure');
 });
 
 test('campaign confirmation can explicitly bypass old sheet binding after server hold verification', () => {
