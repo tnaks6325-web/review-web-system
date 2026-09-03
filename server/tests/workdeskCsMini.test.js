@@ -18,6 +18,9 @@ assert.match(workdesk, /\.tp3grid\.c3\.csmini\{grid-template-columns:minmax\(230
 assert.match(workdesk, /\.tp3grid\.c3\.csmini \.wdcsmini-pane\{[^}]*align-self:stretch;[^}]*height:auto;[^}]*min-height:330px;[^}]*max-height:none;[^}]*contain:size/s, '긴 C/S 목록은 행 높이를 밀지 않고 다른 상단 카드와 같은 그리드 행으로 맞춘다');
 assert.match(workdesk, /@media\(max-width:1500px\)\{[\s\S]*?\.wdcsmini-pane\{[^}]*height:300px;[^}]*max-height:300px/, '중간 화면에서 C/S 미니 높이를 300px로 제한한다');
 assert.match(mini, /wdcsmini-head tp3t tp3h[^>]*onclick="_topToggle\(\)"/, 'C/S 제목행은 기존 상단 카드와 같은 접기/펼치기 제목행을 쓴다');
+assert.match(workdesk, /\.tp3grid\.c3 \.topcardhd\{[^}]*min-height:40px;[^}]*font-size:11px;[^}]*font-weight:750/s, '상단 네 카드 제목행은 제출물 미리보기 기준의 같은 크기를 쓴다');
+assert.match(workdesk, /\.tp3grid\.c3 \.tp3col > \.topcardhd\{[^}]*width:calc\(100% \+ 26px\);[^}]*margin:-11px -13px 8px/s, '작업 조건과 진행 현황 제목행은 카드 전폭을 클릭 영역으로 쓴다');
+assert.match(workdesk, /\.tp3grid\.c3\.fold \.rvpane \.rvfill\{position:static;padding:11px 13px 0\}/, '제출물 미리보기 제목행은 접혀도 위치를 유지하고 아래 여백을 남기지 않는다');
 assert.match(workdesk, /\.tp3grid\.c3\.fold \.wdcsmini-body\{display:none\}/, '상단 접기 시 C/S 대화 본문도 함께 접힌다');
 assert.match(mini, /event\.stopPropagation\(\).*switchView\('cs'\)/, 'C/S 전체보기 버튼은 접기 대신 전체 C/S로 이동한다');
 assert.match(mini, /campaignKey: sheetId \+ '\|\|' \+ tabName/, '작업별 C/S 범위는 기존 campaignKey 규칙을 사용한다');
