@@ -65,7 +65,8 @@ async function resolveQueuedWorkboardTarget({ sheetId, tabName } = {}) {
 }
 
 async function applyQueuedWorkboardOrder({
-  sheetId, tabName, tabGid = '', orderSubmissionId, loginPhone8 = '', loginName = '', recovered = false,
+  sheetId, tabName, tabGid = '', orderSubmissionId, loginPhone8 = '', loginName = '',
+  missingQueueRecovery = false,
 } = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) throw new Error('payload 누락: sheetId, tabName, orderSubmissionId');
   const target = await resolveQueuedWorkboardTarget({ sheetId, tabName });
@@ -104,7 +105,7 @@ async function applyQueuedWorkboardOrder({
     workboardId: target.workboardId,
     orderData: _osRowToOrderData(order), orderSubmissionId, loginPhone8, loginName,
     // 큐 누락 복구기가 만든 payload만 허용한다. write 함수가 원장 조건을 다시 검증한다.
-    allowRecoveredQueueOverflow: recovered === true,
+    allowMissingQueueRecoveryOverflow: missingQueueRecovery === true,
   });
   if (!out || !out.ok) throw new Error(`작업보드 반영 실패: ${(out && (out.message || out.reason)) || 'unknown'}`);
   // 동일 주문이 이미 반영된 경우도 큐는 수렴 완료다. 새 슬롯을 만들지 않았다는 사실을 남긴다.
@@ -182,7 +183,8 @@ async function recoverMissingWorkboardQueues({ limit = 100, staleSeconds = 120, 
     try {
       await enqueue('workboard_apply', {
         sheetId: row.sheet_id, tabName: row.tab_name, gid: row.gid || '',
-        orderSubmissionId: row.id, loginPhone8: '', loginName: '', recovered: true,
+        orderSubmissionId: row.id, loginPhone8: '', loginName: '',
+        recovered: true, missingQueueRecovery: true,
       });
       await require('./orderLedger.service').markOrderQueued(row.id);
       result.requeued++;

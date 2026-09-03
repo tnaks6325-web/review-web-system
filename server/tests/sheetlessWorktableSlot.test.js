@@ -14,7 +14,7 @@ assert.ok(/order_submission_id = \$9::uuid/.test(source), 'the claimed worktable
    필드를 다시 확인한 뒤 이어붙일 수 있다. 이 경계가 풀리면 빈 901번 준비 슬롯이 생긴다. */
 assert.ok(/async function _canAppendConfirmedOverflowOrder/.test(source), 'ledger-backed overflow gate must exist');
 assert.ok(/order\.source === 'admin_external'/.test(source), 'existing admin_external overflow path must remain');
-assert.ok(/allowRecoveredQueueOverflow/.test(source) && /order\.source !== 'order_submit'/.test(source),
+assert.ok(/allowMissingQueueRecoveryOverflow/.test(source) && /order\.source !== 'order_submit'/.test(source),
   'only an explicitly recovered order_submit may use the second overflow path');
 assert.ok(/order\.recipient/.test(source) && /phone_digits/.test(source) && /order\.order_num/.test(source),
   'recovered overflow must require confirmed recipient, phone, and order number data');

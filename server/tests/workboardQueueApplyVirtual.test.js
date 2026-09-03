@@ -50,7 +50,7 @@ test('가상 통합: pilot 주문은 작업보드 기록 함수로 1회 전달�
     assert.equal(captured.orderSubmissionId, 'os-1');
     assert.equal(captured.sheetId, 'wt-a');
     assert.equal(captured.orderData.price, '10000');
-    assert.equal(captured.allowRecoveredQueueOverflow, false, '일반 큐는 초과 슬롯 권한이 없어야 한다');
+    assert.equal(captured.allowMissingQueueRecoveryOverflow, false, '일반 큐는 초과 슬롯 권한이 없어야 한다');
     assert.ok(db.calls.some(x => /UPDATE order_submissions SET workboard_id/.test(x.sql)), '원장에 workboard_id 연결');
   } finally {
     sheetlessOrder.writeOrderToWorktable = original;
@@ -68,9 +68,29 @@ test('가상 통합: 48시간 큐 누락 복구 payload만 초과 슬롯 권한�
   sheetlessOrder.writeOrderToWorktable = async input => { captured = input; return { ok: true, written: true, seq: 901 }; };
   try {
     await queueApply.applyQueuedWorkboardOrder({
-      sheetId: 'wt-a', tabName: 'A', tabGid: '7', orderSubmissionId: 'os-1', recovered: true,
+      sheetId: 'wt-a', tabName: 'A', tabGid: '7', orderSubmissionId: 'os-1',
+      recovered: true, missingQueueRecovery: true,
     });
-    assert.equal(captured.allowRecoveredQueueOverflow, true);
+    assert.equal(captured.allowMissingQueueRecoveryOverflow, true);
+  } finally {
+    sheetlessOrder.writeOrderToWorktable = original;
+    consolidation.__setPoolForTest(null);
+    queueApply.__setPoolForTest(null);
+  }
+});
+
+test('가상 통합: 일반 실패 재시도의 recovered 표식은 초과 슬롯 권한이 아니다', async () => {
+  const db = fakePool('pilot');
+  consolidation.__setPoolForTest(db);
+  queueApply.__setPoolForTest(db);
+  const original = sheetlessOrder.writeOrderToWorktable;
+  let captured = null;
+  sheetlessOrder.writeOrderToWorktable = async input => { captured = input; return { ok: true, written: true, seq: 2 }; };
+  try {
+    await queueApply.applyQueuedWorkboardOrder({
+      sheetId: 'wt-a', tabName: 'A', orderSubmissionId: 'os-1', recovered: true,
+    });
+    assert.equal(captured.allowMissingQueueRecoveryOverflow, false);
   } finally {
     sheetlessOrder.writeOrderToWorktable = original;
     consolidation.__setPoolForTest(null);

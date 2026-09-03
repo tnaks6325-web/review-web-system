@@ -40,6 +40,7 @@ const originalMarkQueued = orderLedger.markOrderQueued;
   assert.strictEqual(marked.length, 1);
   assert.strictEqual(enqueued[0].type, 'workboard_apply');
   assert.strictEqual(enqueued[0].payload.recovered, true);
+  assert.strictEqual(enqueued[0].payload.missingQueueRecovery, true);
 
   const dry = await service.recoverMissingWorkboardQueues({ limit: 2, staleSeconds: 120, sinceHours: 48, dryRun: true });
   assert.deepStrictEqual(dry, { scanned: 2, requeued: 0, failed: 0, dryRun: true });

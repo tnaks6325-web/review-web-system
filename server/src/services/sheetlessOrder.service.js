@@ -55,7 +55,7 @@ function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
  * 확인해 초과 행을 허용한다. 단순 재시도나 호출자 플래그 하나만으로는 열리지 않는다.
  */
 async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-  allowRecoveredQueueOverflow = false, workboardId = null,
+  allowMissingQueueRecoveryOverflow = false, workboardId = null,
 } = {}) {
   const { rows } = await client.query(
     `SELECT source,
@@ -70,7 +70,7 @@ async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
   const identified = !!(order && order.recipient && String(order.phone_digits || '').length >= 8);
   if (!identified) return false;
   if (order.source === 'admin_external') return true; // 기존 외부모집 수동제출 규칙 보존
-  if (!allowRecoveredQueueOverflow || order.source !== 'order_submit' || !order.order_num || !workboardId) return false;
+  if (!allowMissingQueueRecoveryOverflow || order.source !== 'order_submit' || !order.order_num || !workboardId) return false;
   if (!['pending', 'pending_no_row', 'failed', 'queued'].includes(String(order.mirror_status || ''))) return false;
   if (!order.workboard_id || String(order.workboard_id) !== String(workboardId)) return false;
   const submittedAt = new Date(order.submitted_at).getTime();
@@ -148,13 +148,13 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
  * @param {string} o.orderSubmissionId
  * @param {string} [o.loginPhone8] · [o.loginName]
  * @param {boolean} [o.recovered]        복구 재기록(비고 표기용 — 시트 경로와 같은 의미)
- * @param {boolean} [o.allowRecoveredQueueOverflow] 큐 누락 복구 주문만 초과 행 허용
+ * @param {boolean} [o.allowMissingQueueRecoveryOverflow] 큐 자체가 누락된 복구 주문만 초과 행 허용
  * @returns {Promise<{ok:boolean, written?:boolean, reason?:string, ledger?:object}>}
  */
 async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
   orderSubmissionId, workboardId = null, loginPhone8 = '', loginName = '', recovered = false,
-  allowRecoveredQueueOverflow = false,
+  allowMissingQueueRecoveryOverflow = false,
 } = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
@@ -342,7 +342,7 @@ async function writeOrderToWorktable({
         /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문과
            최근 48시간 내 큐 누락 복구 주문뿐이며, 원장 필드를 같은 트랜잭션에서 다시 확인한다. */
         const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-          allowRecoveredQueueOverflow, workboardId,
+          allowMissingQueueRecoveryOverflow, workboardId,
         });
         if (!confirmedOverflow) {
           await client.query('ROLLBACK');
@@ -414,7 +414,7 @@ async function writeOrderToWorktable({
         return { ok: false, reason: 'no_open_slot' };
       }
       const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-        allowRecoveredQueueOverflow, workboardId,
+        allowMissingQueueRecoveryOverflow, workboardId,
       });
       if (!confirmedOverflow) {
         await client.query('ROLLBACK');
