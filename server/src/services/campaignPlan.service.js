@@ -514,7 +514,18 @@ async function savePlans(campaignId, body, actor) {
           today,
           by: actor || 'campaign-plan',
         });
-        if (!worktableSync.skipped) {
+        /* 모집계획의 합계만 제한하면 과거 조절에서 남은 빈 준비 행은 계속 살아 있어
+           "총건수 500 · 번호 751"처럼 작업표 슬롯 수가 정원과 갈라진다. 날짜 이동/생성 뒤
+           같은 트랜잭션에서 공통 슬롯 동기화기를 실행해 활성 행 수를 총정원에 맞춘다.
+           이 함수는 참여자·수취인·연락처·주문이 있는 행을 절대 은퇴시키지 않고, 남는 빈 행만
+           가장 큰 seq부터 soft-delete 한다. 정원보다 채워진 행이 많으면 저장 전체를 롤백한다. */
+        if (totalCap > 0) {
+          const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
+          worktableSync.slotCap = await syncWorktableSlotsInTx(
+            client, camp, totalCap, actor || 'campaign-plan-slot-cap'
+          );
+        }
+        if (!worktableSync.skipped || (worktableSync.slotCap && (worktableSync.slotCap.add || worktableSync.slotCap.retire))) {
           projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
         }
         /* ★★ 조절을 저장하면 **오늘 이후 전체를 자동 재구성**한다(사용자 확정 2026-08-19).
@@ -541,6 +552,14 @@ async function savePlans(campaignId, body, actor) {
             worktableSync.rebuild = { ok: false, reason: err.code || 'rebuild_failed', message: err.message };
             logger.warn(`[campaignPlan] 저장 후 자동 재구성 실패(계획 저장은 유지) camp=${campaignId}: ${err.message}`);
           }
+        }
+        /* 재구성은 모자란 계획 행을 새로 만들 수도 있으므로, 마지막에도 같은 잠금 동기화를
+           한 번 더 통과시킨다. 이 시점이 커밋 직전의 최종 불변식 검사다. */
+        if (totalCap > 0) {
+          const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
+          worktableSync.slotCap.afterRebuild = await syncWorktableSlotsInTx(
+            client, camp, totalCap, actor || 'campaign-plan-slot-cap-final'
+          );
         }
         /* ★★ 작업표 줄 수 대조(2026-08-24 신고 — "총건수 500인데 홈에 581") ────────────────
            총량 게이트(위)는 **계획 합계**만 본다. 그런데 이번 사고의 여분 줄은 *계획에 없는 날짜*의
@@ -660,12 +679,28 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
     const plans = (await client.query(
       `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
          FROM campaign_daily_plans WHERE campaign_id=$1 AND plan_date >= $2::date ORDER BY plan_date`, [campaignId, today])).rows;
+    /* [작업표 재구성]도 날짜만 다시 배열하고 남은 빈 슬롯을 방치하면 번호가 총건수를
+       넘길 수 있다. 저장 경로와 같은 공통 동기화로 먼저 활성 슬롯 수를 맞춘 뒤 재배치한다. */
+    let worktableSlotCap = null;
+    const totalCap = Number(camp.recruit_total) || 0;
+    if (totalCap > 0) {
+      const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
+      worktableSlotCap = await syncWorktableSlotsInTx(
+        client, camp, totalCap, actor || 'campaign-plan-rebuild-slot-cap'
+      );
+    }
     const { rebuildAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
     const worktableRebuild = await rebuildAdjustedPlansToWorktable({ client, sheetId: camp.linked_sheet_id,
       tabName: camp.linked_tab_name, plans, today, by: actor || 'campaign-plan-rebuild' });
+    if (totalCap > 0) {
+      const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
+      worktableSlotCap.afterRebuild = await syncWorktableSlotsInTx(
+        client, camp, totalCap, actor || 'campaign-plan-rebuild-slot-cap-final'
+      );
+    }
     target = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
     await client.query(`INSERT INTO campaign_plan_events (campaign_id,actor,action,detail) VALUES ($1,$2,'worktable_rebuild',$3)`,
-      [campaignId, actor || null, JSON.stringify({ today, plannedDates: worktableRebuild.plannedDates, ...worktableRebuild })]);
+      [campaignId, actor || null, JSON.stringify({ today, plannedDates: worktableRebuild.plannedDates, ...worktableRebuild, slotCap: worktableSlotCap })]);
     await client.query('COMMIT');
     try {
       // 수동 재구성도 신규 행을 만들 수 있다. 삭제 이력 뒤에서는 DB seq가 연속되지 않을 수
@@ -678,7 +713,7 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
       });
       const { rebuildLedgers } = require('./sheetlessLedger.service');
       const r = await rebuildLedgers({ ...target, by: actor || 'campaign-plan-rebuild' });
-      return { worktableRebuild, worktableNumbering,
+      return { worktableRebuild, worktableSlotCap, worktableNumbering,
         worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
     } catch (cause) {
       logger.error(`[campaignPlan] 작업표 재구성 투영 실패 camp=${campaignId}: ${cause.message}`);

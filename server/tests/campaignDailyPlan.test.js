@@ -379,13 +379,20 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     const keep = {
       sync: sdp.syncAdjustedPlansToWorktable, defaults: sdp.loadWorktableDefaults,
       rebuild: sdp.rebuildAdjustedPlansToWorktable, ledgers: led.rebuildLedgers, isSheetless: scope.isSheetless,
+      slotCap: require('../src/services/linkedRecruitQuota.service').syncWorktableSlotsInTx,
       sheet: CAMP_ROW.linked_sheet_id, tab: CAMP_ROW.linked_tab_name,
     };
+    const quotaSvc = require('../src/services/linkedRecruitQuota.service');
     CAMP_ROW.linked_sheet_id = 'wt_abc'; CAMP_ROW.linked_tab_name = '위프800';
     scope.isSheetless = async () => true;
     sdp.loadWorktableDefaults = async () => new Map();
     sdp.syncAdjustedPlansToWorktable = async () => ({ ok: true, moved: 1, cleared: 0 });
     led.rebuildLedgers = async () => ({ mirrorRows: 1, indexRows: 1, submittedCount: 0 });
+    const capSeen = [];
+    quotaSvc.syncWorktableSlotsInTx = async (client, campaign, target, by) => {
+      capSeen.push({ client, campaign, target, by });
+      return { synced: true, target, add: 0, retire: 3 };
+    };
 
     const planRows = [{ date: d(1), count: 20 }, { date: d(2), count: 20 }];
     const stubWithPlans = () => {
@@ -408,6 +415,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       /* ★ 부분일치로 보면 RELEASE/ROLLBACK TO 가 대신 통과시킨다(변이시험 실측) — 정확일치로 본다. */
       CALLS.some(c => c.sql.trim() === 'SAVEPOINT cp_auto_rebuild'));
     ok('★ 결과를 응답에 실어 화면이 말할 수 있다', !!(r.worktableSync && r.worktableSync.rebuild));
+    ok('★★ 모집계획 저장도 활성 작업표 행 수를 총정원으로 동기화',
+      capSeen.length === 2 && capSeen.every(x => x.campaign === CAMP_ROW && x.target === CAMP_ROW.recruit_total)
+      && r.worktableSync.slotCap.retire === 3 && r.worktableSync.slotCap.afterRebuild.retire === 3);
 
     // ② 재구성이 실패해도 계획 저장은 살아남는다(throw 없음 · ROLLBACK TO 만)
     sdp.rebuildAdjustedPlansToWorktable = async () => { const e = new Error('boom'); e.code = 'worktable_rebuild_below_used'; throw e; };
@@ -434,6 +444,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
 
     sdp.syncAdjustedPlansToWorktable = keep.sync; sdp.loadWorktableDefaults = keep.defaults;
     sdp.rebuildAdjustedPlansToWorktable = keep.rebuild; led.rebuildLedgers = keep.ledgers;
+    quotaSvc.syncWorktableSlotsInTx = keep.slotCap;
     scope.isSheetless = keep.isSheetless;
     CAMP_ROW.linked_sheet_id = keep.sheet; CAMP_ROW.linked_tab_name = keep.tab;
     STUB = baseStub();

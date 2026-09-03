@@ -482,6 +482,7 @@ module.exports = {
   linkedWorkOrderForCampaign,
   linkedWorkOrdersForCampaigns,
   worktableSlotDelta,
+  syncWorktableSlotsInTx,
   firstRoundQuota,
   allocateOptionQuotas,
   assertWorkOrderQuota,
