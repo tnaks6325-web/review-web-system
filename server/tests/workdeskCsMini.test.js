@@ -16,6 +16,9 @@ assert.match(workdesk, /tp3grid c3\$\{csMini\?' csmini':''\}/, '내부 작업보
 assert.match(workdesk, /STATE\.role!=='advertiser'/, '광고주에게 C/S 대화를 노출하지 않는다');
 assert.match(workdesk, /\.tp3grid\.c3\.csmini \.wdcsmini-pane\{[^}]*align-self:start;[^}]*height:330px;[^}]*max-height:330px/s, '넓은 화면에서 C/S 미니 높이를 기존 상단 카드 기준으로 제한한다');
 assert.match(workdesk, /@media\(max-width:1500px\)\{[\s\S]*?\.wdcsmini-pane\{[^}]*height:300px;[^}]*max-height:300px/, '중간 화면에서 C/S 미니 높이를 300px로 제한한다');
+assert.match(mini, /wdcsmini-head tp3t tp3h[^>]*onclick="_topToggle\(\)"/, 'C/S 제목행은 기존 상단 카드와 같은 접기/펼치기 제목행을 쓴다');
+assert.match(workdesk, /\.tp3grid\.c3\.fold \.wdcsmini-body\{display:none\}/, '상단 접기 시 C/S 대화 본문도 함께 접힌다');
+assert.match(mini, /event\.stopPropagation\(\).*switchView\('cs'\)/, 'C/S 전체보기 버튼은 접기 대신 전체 C/S로 이동한다');
 assert.match(mini, /campaignKey: sheetId \+ '\|\|' \+ tabName/, '작업별 C/S 범위는 기존 campaignKey 규칙을 사용한다');
 assert.match(mini, /csAdminThreads/, 'C/S 메뉴와 같은 방 목록 API를 사용한다');
 assert.match(mini, /csAdminMessages/, 'C/S 메뉴와 같은 메시지 API를 사용한다');
