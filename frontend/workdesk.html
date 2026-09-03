@@ -557,7 +557,7 @@
   .cc{flex:1;min-width:170px;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;transition:transform .25s var(--ease),box-shadow .2s,border-color .2s}
   .cc:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.08);border-color:var(--accent-line)}
   .cc .big{font-size:20px;font-weight:800;letter-spacing:-.02em} .cc .big small{font-size:11.5px;font-weight:600;color:var(--faint);margin-left:2px}
-  .tp3money{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}.tp3money b{font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .tp3money{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}.tp3money+.tp3money{margin-top:0;padding-top:5px;border-top:0}.tp3money b{font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
   .cc .lb{font-size:11px;font-weight:600;color:var(--muted);margin-top:0} .cc.s .big{color:var(--safe)} .cc.p .big{color:var(--accent-deep)}
   /* KPI 게이지(도넛) — 키트 cc-gauge */
   .gauge{width:44px;height:44px;position:relative;flex:none}
@@ -6249,7 +6249,10 @@ function summaryStrip(wd,d,m,c){
     gg('참여자',filled,target||filled,pT,'',filledTip+(overN?`${filledTip?' · ':''}⚠ 총건수(${target})를 ${overN}명 넘겨 들어왔습니다 — 표에서 붉은 줄로 표시합니다`:''),overN)+
     gg('제출완료',c.submitted||0,filled,pS,'s')+
     gg('입금완료',c.paid||0,filled,pP)+
-    scheduleWarning+`<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
+    /* 누적집행은 활성 주문 전체가 아니라, 작업표에서 실제로 리뷰제출 완료된 주문만 합산한다.
+       잔여집행은 작업오더의 총 결제금액에서 뺀다. 총액이 없는 작업은 0원으로 꾸미지 않는다. */
+    scheduleWarning+`<div class="tp3money" title="작업표의 리뷰제출 칸이 채워진 주문의 결제금액 누계"><span>누적집행</span><b>${_wonFmt(c.executionAmount||0)}</b></div>`+
+    `<div class="tp3money" title="작업오더 총 결제금액에서 누적집행을 뺀 금액"><span>잔여집행</span><b>${c.remainingExecutionAmount==null?'—':_wonFmt(c.remainingExecutionAmount)}</b></div>${setlIn}</div>`;
   /* ★★ 상단 3분할(작업 조건 · 진행 현황 · 제출물 미리보기)은 **내부·업체 뷰어 한 벌**이다
      (사용자 확정 2026-08-23) — 종전에는 업체만 세로 스택 + 표 옆 세로 레일이라 같은 화면이
      두 모양으로 갈렸다. 다른 것은 **작업 조건 카드의 내용뿐**(업체는 종전 4줄 유지 — 10항목

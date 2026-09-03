@@ -60,20 +60,27 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
   const orig = require.cache[poolPath];
   const rosterRows = [
     // 무시트 수동 생성 행: submit_col은 비어 있지만 탭 상태 헤더의 실제 셀 값은 있다.
-    { id: 'r1', seq: 164, name: '조연숙', recipient: '조연숙', phone8: '96689776', order_submission_id: null, row_json: { 리뷰제출: '8/10 22:49' }, source: 'worktable' },
-    // 플래그는 false지만 표 셀에 값이 있다. 카드 기준은 반드시 이 값을 센다.
-    { id: 'r2', seq: 165, name: '이혜선', recipient: '이혜선', phone8: '90739194', order_submission_id: null, row_json: { 리뷰제출: '8/4 13:53' }, source: 'worktable', submitted: false },
-    { id: 'r3', seq: 170, name: '', recipient: '', phone8: '', order_submission_id: null, row_json: {}, source: 'worktable' },   // 빈 슬롯
-    { id: 'r4', seq: 171, name: null, recipient: null, phone8: null, order_submission_id: null, row_json: {}, source: 'worktable' }, // 빈 슬롯
+    { id: 'r1', seq: 164, name: '조연숙', recipient: '조연숙', phone8: '96689776', order_submission_id: '00000000-0000-4000-8000-000000000001', row_json: { 리뷰제출: '8/10 22:49' }, source: 'worktable' },
+    // 같은 주문을 가리키는 과거 복제 행: 제출 건수에는 보이지만 집행금액은 한 번만 더해야 한다.
+    { id: 'r2', seq: 165, name: '이혜선', recipient: '이혜선', phone8: '90739194', order_submission_id: '00000000-0000-4000-8000-000000000001', row_json: { 리뷰제출: '8/4 13:53' }, source: 'worktable', submitted: false },
+    // 원장 price 는 비어 있고 실제 작업표 결제금액 칸에만 있는 레거시 주문.
+    { id: 'r3', seq: 166, name: '김도윤', recipient: '김도윤', phone8: '80549321', order_submission_id: '00000000-0000-4000-8000-000000000002', row_json: { 리뷰제출: '8/5 10:10', 결제금액: '100,000원' }, source: 'worktable', submitted: false },
+    { id: 'r4', seq: 170, name: '', recipient: '', phone8: '', order_submission_id: null, row_json: {}, source: 'worktable' },   // 빈 슬롯
+    { id: 'r5', seq: 171, name: null, recipient: null, phone8: null, order_submission_id: null, row_json: {}, source: 'worktable' }, // 빈 슬롯
   ];
   const stub = {
     query: async (sql) => {
       const q = String(sql);
       if (/FROM tab_configs tc/.test(q)) return { rows: [{ displayName: 't', sheetless: true }] };
+      if (/FROM work_orders/.test(q)) return { rows: [{ payAmount: 300000, recruitCount: 3 }] };
       // ★ 더 좁은 조건(명단 조회)을 **먼저** — 스텁은 SQL 을 해석하지 않으므로 순서가 곧 판정이다
       //   (넓은 분기를 앞에 두면 명단이 빈 배열로 가로채여 "0 명" 을 정상으로 읽는다).
       if (/FROM campaign_participants cp/.test(q) && /ORDER BY cp\.seq/.test(q)) return { rows: rosterRows };
       if (/SELECT submit_col AS h FROM review_index/.test(q)) return { rows: [{ h: '리뷰제출' }] };
+      if (/FROM order_submissions WHERE id = ANY/.test(q)) return { rows: [
+        { id: '00000000-0000-4000-8000-000000000001', price: '100,000원' },
+        { id: '00000000-0000-4000-8000-000000000002', price: '' },
+      ] };
       return { rows: [] };
     },
   };
@@ -83,10 +90,12 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
 
   (async () => {
     const res = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'master', allowAllWorkdesk: true });
-    ok('★ counts.filled = 채워진 줄만(빈 슬롯 2줄 제외)', res.counts.filled === 2, JSON.stringify(res.counts));
-    ok('counts.total 은 종전대로 줄 수(정보 보존)', res.counts.total === 4, String(res.counts.total));
-    ok('★ counts.submitted = is_submitted 플래그가 아닌 실제 리뷰제출 셀 값 수', res.counts.submitted === 2, JSON.stringify(res.counts));
-    ok('★ 수동 생성 무시트 행(submit_col 없음)도 탭 상태 헤더로 실제 셀을 센다', res.counts.submitted === 2, JSON.stringify(res.counts));
+    ok('★ counts.filled = 채워진 줄만(빈 슬롯 2줄 제외)', res.counts.filled === 3, JSON.stringify(res.counts));
+    ok('counts.total 은 종전대로 줄 수(정보 보존)', res.counts.total === 5, String(res.counts.total));
+    ok('★ counts.submitted = is_submitted 플래그가 아닌 실제 리뷰제출 셀 값 수', res.counts.submitted === 3, JSON.stringify(res.counts));
+    ok('★ 수동 생성 무시트 행(submit_col 없음)도 탭 상태 헤더로 실제 셀을 센다', res.counts.submitted === 3, JSON.stringify(res.counts));
+    ok('★ 누적집행은 중복 주문을 한 번만 더하고, 원장 금액이 비면 작업표 결제금액으로 폴백', res.counts.executionAmount === 200000, JSON.stringify(res.counts));
+    ok('★ 잔여집행 = 작업오더 총 결제금액 − 누적집행', res.counts.executionTotalAmount === 300000 && res.counts.remainingExecutionAmount === 100000, JSON.stringify(res.counts));
 
     if (orig) require.cache[poolPath] = orig; else delete require.cache[poolPath];
     console.log(`\n✅ ${passed} passed\n`);
@@ -138,13 +147,16 @@ console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실
   vm.runInContext(code, sandbox);
   const run = c => sandbox.summaryStrip({}, { recruitCount: 200 }, {}, c);
 
-  const now = run({ total: 200, filled: 134, submitted: 134, paid: 119 });
+  const now = run({ total: 200, filled: 134, submitted: 134, paid: 119, executionAmount: 900000, remainingExecutionAmount: 100000 });
   ok('★ 참여자 분자 = 채워진 줄(134)', /참여자<\/span><span class="nm">134<small>\/200<\/small>/.test(now), now.slice(0, 400));
   ok('★ 참여자 % = 채워진 줄 / 총건수(67%)', />67%<\/span>/.test(now));
   ok('★ 제출완료 분모도 채워진 줄(134/134)', /제출완료<\/span><span class="nm">134<small>\/134<\/small>/.test(now));
   ok('★ 입금완료 분모도 채워진 줄(119/134)', /입금완료<\/span><span class="nm">119<small>\/134<\/small>/.test(now));
   ok('★ 준비된 줄은 사라지지 않는다 — 툴팁이 말한다',
     /title="채워진 줄 134명 · 준비된 줄 200줄 \(빈 슬롯 66줄\)"/.test(now), now.slice(0, 600));
+  ok('★ 진행 현황 금액은 누적집행·잔여집행으로 표시한다',
+    /누적집행<\/span><b>900000<\/b>/.test(now) && /잔여집행<\/span><b>100000<\/b>/.test(now)
+      && !/>결제금액<\//.test(now), now.slice(0, 1400));
 
   const legacy = run({ total: 200, submitted: 134, paid: 119 });   // 구버전 백엔드(filled 없음)
   ok('★ filled 미동봉이면 종전 동작(줄 수 기준)으로 접는다',

@@ -13,6 +13,7 @@
  * ═══════════════════════════════════════════════════════════
  */
 const { logger } = require('../utils/logger');
+const { extractAmountNumber } = require('../utils/paymentAmount');
 const participants = require('./participants.service');
 const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 판정 단일 출처(순수함수)
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
@@ -3188,6 +3189,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
    * 리뷰제출 열은 같은 원본을 보며, 제출 상태 플래그는 기존 검수·정산 흐름에만 남긴다.
    */
   let reviewSubmitCellCount = 0;
+  // 진행 현황의 금액도 "제출완료"와 정확히 같은 작업표 리뷰제출 칸을 기준으로 한다.
+  // is_submitted 플래그만 보면 재투영 전 카드 건수와 표의 제출 칸이 다시 갈릴 수 있다.
+  let executionAmount = 0;
+  const executionOrderIds = new Set();
   for (const r of roster) {
     const anchor = _deriveAnchor(r);
     let ov = {}, editable = !!anchor, ambiguous = false;
@@ -3206,6 +3211,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       }
     }
     const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
+    const order = r.order_submission_id ? (ordMap.get(String(r.order_submission_id)) || null) : null;
     const syn = {
       id: r.id, seq: r.seq,
       name: pick('reviewer_name', r.name),
@@ -3228,7 +3234,23 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     const submitCellValue = submitHeader
       ? pick('col:' + submitHeader, (r.row_json && r.row_json[submitHeader]))
       : '';
-    if (String(submitCellValue == null ? '' : submitCellValue).trim()) reviewSubmitCellCount++;
+    const reviewSubmitted = !!String(submitCellValue == null ? '' : submitCellValue).trim();
+    if (reviewSubmitted) {
+      reviewSubmitCellCount++;
+      /* 주문이 제출된 행만 집행으로 본다. 원장 금액이 비어 있는 레거시 행은 실제 작업표의
+         결제금액 칸(오버레이 포함)을 같은 공용 판정으로 읽는다. 같은 주문이 중복 행에 연결된
+         과거 작업표는 한 번만 더한다 — 실제 구매가 복제돼 누적집행이 부풀면 안 된다. */
+      const orderId = r.order_submission_id ? String(r.order_submission_id) : '';
+      if (!orderId || !executionOrderIds.has(orderId)) {
+        if (orderId) executionOrderIds.add(orderId);
+        const amountRow = { ...((r.row_json && typeof r.row_json === 'object') ? r.row_json : {}) };
+        for (const [field, value] of Object.entries(ov)) {
+          if (field.indexOf('col:') === 0) amountRow[field.slice(4)] = value;
+        }
+        const orderPrice = Number(String(order && order.price || '').replace(/[^0-9]/g, '')) || 0;
+        executionAmount += orderPrice || extractAmountNumber(amountRow);
+      }
+    }
     /* ★ 작업보드 표의 「번호」 칸 값 — 미리보기 팝업 목록이 쓴다. `seq`(시트 실제 행 번호)와는
        다른 값이라(원래 1 차이) 화면이 둘을 헷갈리면 안 된다. 칸 이름 판정은 `numberColumnKey`
        단일 출처이고, 담당자가 셀을 고쳤으면 그 값이 이긴다(표와 같게). 칸이 없으면 빈 값. */
@@ -3245,7 +3267,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       syn.editedFields = Object.keys(ov).filter(f => f !== '_hidden');
       // 실 데이터 전량 투영: 시트 행 전체(row_json) + 제출 구매양식 원본(order). 상세 펼침용.
       syn.rowJson = (r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
-      syn.order = r.order_submission_id ? (ordMap.get(String(r.order_submission_id)) || null) : null;
+      syn.order = order;
       // 시트 컬럼 편집(col:<헤더>) 오버레이 → 그리드 셀 합성용 {헤더: 값}. 앵커 게이트(ambiguous면 ov={}이라 자동 미적용).
       const ce = {}; for (const k in ov) { if (k.indexOf('col:') === 0) ce[k.slice(4)] = ov[k]; }
       syn.cellEdits = ce;
@@ -3341,8 +3363,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     /* 실제 작업표의 리뷰제출 칸에 값이 있는 행 수. `is_submitted`는 이 카드 기준이 아니다. */
     submitted: reviewSubmitCellCount,
     paid: out.filter(r => r.paid).length,
-    // 주문 원장이 살아 있는 행의 결제금액 합계. 주문 행 삭제 뒤에는 원장 soft-delete와 함께 즉시 빠진다.
+    // 하위 호환: 주문 행 전체의 결제금액 합계(주문 삭제 미리보기 등 기존 소비처가 사용).
     paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
+    // 누적집행 = 실제 작업표의 리뷰제출 칸이 채워진 주문의 결제금액 합계.
+    executionAmount: showEdits ? executionAmount : undefined,
+    // 잔여집행의 기준은 작업오더에 저장된 총 결제금액이다. 총액이 없으면 화면도 금액을 지어내지 않는다.
+    executionTotalAmount: showEdits && _cond && _cond.payAmount != null ? Number(_cond.payAmount) : undefined,
+    remainingExecutionAmount: showEdits && _cond && _cond.payAmount != null
+      ? Math.max(0, Number(_cond.payAmount) - executionAmount) : undefined,
     edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
     ambiguous: ambiguousCount,
     /* 표에서 분리한 줄(129) — 표에는 없지만 데이터는 그대로다. 숫자를 지우면 "사라진 줄" 이 된다. */
