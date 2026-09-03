@@ -1158,11 +1158,21 @@ router.post('/order', async (req, res, next) => {
     } catch (targetErr) {
       logger.warn(`[submit/order] workboard_apply 대상 판정 실패 — 기존 경로 유지: ${targetErr.message}`);
     }
+    /*
+     * `orderScope.sheetless`는 참여형 공고의 서버 소유 범위만 표시한다. 반면 일반 구매양식은
+     * 기존 호환 범위를 그대로 받아 false일 수 있어도, 대상 탭 자체는 이미 무시트·통폐합
+     * workboard_apply 대상일 수 있다. 둘을 섞으면 원장은 시트 행을 선점하고(legacy),
+     * 실제 반영은 큐 방식으로 판단한 뒤 큐 등록 분기를 건너뛰는 고아 pending 주문이 생긴다.
+     *
+     * 따라서 승인된 큐 대상 여부가 반영 방식을 최종 결정한다. 큐 대상이면 원장도 시트
+     * 미러를 건너뛰며, 아래에서 반드시 workboard_apply를 enqueue한다.
+     */
+    const skipSheetMirrorForWrite = !!orderScope.sheetless || queuedWorkboardApply;
     const ledger = await createOrderLedgerEntry({
       sheetId: orderScope.sheetId,
       tabName: orderScope.tabName,
       gid: orderScope.gid,
-      skipSheetMirror: orderScope.sheetless,
+      skipSheetMirror: skipSheetMirrorForWrite,
       deferSheetlessApply: queuedWorkboardApply,
       orderData,
       slotRowNumber: slotRowNumber || null,
@@ -1175,8 +1185,9 @@ router.post('/order', async (req, res, next) => {
       campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone }, skipTabBinding: orderScope.sheetless } : undefined,
       // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
       // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
-      // crossDay: 무시트 경로는 claim(dedup_key 유니크)을 건너뛰므로 날짜를 넘는 같은 구매도 막는다.
-      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData, crossDay: !!orderScope.sheetless },
+      // crossDay: 실제로 시트 claim을 건너뛴 모든 경로는 날짜를 넘는 같은 구매도 막는다.
+      // workboard_apply 대상도 원장 단계에서 claim을 만들지 않으므로 sheetless와 같은 보호가 필요하다.
+      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData, crossDay: skipSheetMirrorForWrite },
     });
 
     if (ledger && ledger.duplicateOrderSubmissionId) {
@@ -1204,20 +1215,22 @@ router.post('/order', async (req, res, next) => {
     let sheetlessDone = null;
     let queued = false;
     let captureTarget = orderScope.worktable || orderScope;
-    if (orderScope.sheetless) {
-      if (queuedWorkboardApply) {
-        try {
-          await enqueue('workboard_apply', {
-            sheetId: orderScope.sheetId, tabName: orderScope.tabName, gid: orderScope.gid || '',
-            orderSubmissionId: ledger.orderSubmissionId, loginPhone8: loginPhone8 || '', loginName: loginName || '',
-          });
-          await markOrderQueued(ledger.orderSubmissionId);
-          queued = true;
-          sheetlessDone = { ok: true, queued: true };
-        } catch (queueErr) {
-          sheetlessDone = { ok: false, reason: 'queue_enqueue_failed', message: queueErr.message };
-        }
-      } else try {
+    // 큐 대상 판정은 참여형 여부보다 우선한다. 이 분기가 orderScope.sheetless 안에 있으면
+    // 일반 구매양식에서 "큐도 직접기록도 하지 않는" 상태가 다시 생긴다.
+    if (queuedWorkboardApply) {
+      try {
+        await enqueue('workboard_apply', {
+          sheetId: orderScope.sheetId, tabName: orderScope.tabName, gid: orderScope.gid || '',
+          orderSubmissionId: ledger.orderSubmissionId, loginPhone8: loginPhone8 || '', loginName: loginName || '',
+        });
+        await markOrderQueued(ledger.orderSubmissionId);
+        queued = true;
+        sheetlessDone = { ok: true, queued: true };
+      } catch (queueErr) {
+        sheetlessDone = { ok: false, reason: 'queue_enqueue_failed', message: queueErr.message };
+      }
+    } else if (orderScope.sheetless) {
+      try {
         /* ★★ 공고에 작업보드가 아직 없으면 **그 자리에서 만들어 연결**한다(사람이 시트탭을
            고르는 절차 없음 — 탈 구글시트). 종전에는 여기서 `no_worktable_mapping` 으로 주문을
            failed 로 강등하고 critical 로그를 남겼는데, 그 주문은 `campaign:*` 키라 큐 복구가
@@ -1244,15 +1257,22 @@ router.post('/order', async (req, res, next) => {
       } catch (slErr) {
         sheetlessDone = { ok: false, reason: 'exception', message: slErr.message };
       }
-      if (!sheetlessDone.ok) {
+    }
+    // 큐 등록 실패와 직접 기록 실패는 모두 원장에 실패 상태를 남긴다. 여기서 공통 처리하지
+    // 않으면 "큐 등록을 시도했지만 실패"한 주문이 pending으로 남아 자동복구 대상에서도
+    // 혼동될 수 있다.
+    if (sheetlessDone && !sheetlessDone.ok) {
+      try {
         await markOrderMirrorFailed(ledger.orderSubmissionId, sheetlessDone.message || sheetlessDone.reason);
-        logger.error(`[submit/order] 작업보드 기록 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
-        logAbnormal({
-          flow: 'order_submit', step: 'sheetless_worktable_write', severity: 'critical',
-          error: new Error(`작업보드 기록 실패: ${sheetlessDone.reason}`),
-          context: { campaignId: holdCtx && holdCtx.campaignId, orderSubmissionId: ledger.orderSubmissionId },
-        });
+      } catch (statusErr) {
+        logger.error(`[submit/order] 작업표 실패상태 저장 실패(원장 저장은 완료): ${statusErr.message}`);
       }
+      logger.error(`[submit/order] 작업보드 반영 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
+      logAbnormal({
+        flow: 'order_submit', step: queuedWorkboardApply ? 'workboard_apply_enqueue' : 'sheetless_worktable_write', severity: 'critical',
+        error: new Error(`작업보드 반영 실패: ${sheetlessDone.reason}`),
+        context: { campaignId: holdCtx && holdCtx.campaignId, orderSubmissionId: ledger.orderSubmissionId },
+      });
     }
     if (ledger.sheetRow && !queuedWorkboardApply) {
       let isSl = false;
@@ -1314,7 +1334,7 @@ router.post('/order', async (req, res, next) => {
           context: { sheetId, tabName, type: 'order_append', orderSubmissionId: ledger.orderSubmissionId },
         });
       }
-    } else if (!ledger.sheetRow && !orderScope.sheetless) {
+    } else if (!ledger.sheetRow && !skipSheetMirrorForWrite) {
       logger.warn(`[submit/order] RAW 행 배정 실패: sheet=${sheetId}, tab=${tabName}, orderSubmissionId=${ledger.orderSubmissionId}`);
       logAbnormal({
         flow: 'order_submit', step: 'row_claim', severity: 'warn',

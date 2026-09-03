@@ -33,7 +33,9 @@ test('embedded purchase form opens and submits without sheet parameters', () => 
 test('server uses a DB-only campaign scope and writes the verified order to the DB worktable', () => {
   assert.ok(/async function _resolveCampaignOrderScope/.test(submit), 'server-owned campaign scope resolver is missing');
   assert.ok(/sheetless: true/.test(submit), 'DB-only campaign branch is missing');
-  assert.ok(/skipSheetMirror: orderScope\.sheetless/.test(submit), 'sheetless submissions must skip Google Sheet mirroring');
+  assert.ok(/skipSheetMirror: skipSheetMirrorForWrite/.test(submit), 'sheetless submissions must skip Google Sheet mirroring');
+  assert.ok(/const skipSheetMirrorForWrite = !!orderScope\.sheetless \|\| queuedWorkboardApply/.test(submit),
+    'an approved queued workboard target must skip legacy sheet-row claiming even for a non-campaign submission');
   assert.ok(/if \(!orderScope\) \{[\s\S]*?참여 문맥/.test(submit), 'anonymous sheetless submission must remain blocked');
   assert.ok(/if \(skipSheetMirror\) \{[\s\S]*?mirror_status = 'written'/.test(ledger),
     'DB-only submission must finish without row claim or sync queue');
@@ -52,6 +54,41 @@ test('sheetless worktable write failure is persisted instead of leaving the ledg
     'failed sheetless worktable writes must persist failed status and the reason');
   assert.ok(/무시트 실패상태 저장 실패\(원장 저장은 완료\)/.test(branch),
     'a secondary status-write failure must not turn a saved submission into a client-visible failure');
+});
+
+test('approved workboard queue targets always enqueue outside the campaign-only branch', () => {
+  const queueStart = submit.indexOf('if (queuedWorkboardApply) {');
+  const queueEnd = submit.indexOf('} else if (orderScope.sheetless) {', queueStart);
+  const queueBranch = submit.slice(queueStart, queueEnd);
+  assert.ok(queueStart >= 0 && queueEnd > queueStart, 'queued workboard branch must precede the campaign-only direct branch');
+  assert.ok(/enqueue\('workboard_apply'/.test(queueBranch) && /await markOrderQueued\(ledger\.orderSubmissionId\)/.test(queueBranch),
+    'an approved target must either be queued and marked queued before any direct-write branch is considered');
+});
+
+test('queued workboard targets use no-row duplicate protection and do not emit a RAW-row failure', () => {
+  assert.ok(/crossDay: skipSheetMirrorForWrite/.test(submit),
+    'every path that skips sheet-row claiming must use cross-day duplicate protection');
+  assert.ok(/else if \(!ledger\.sheetRow && !skipSheetMirrorForWrite\)/.test(submit),
+    'an intentional workboard queue target must not be reported as a RAW row-claim failure');
+});
+
+test('failed workboard queue registration is durably re-enqueued by reconciliation', () => {
+  const reconcileStart = ledger.indexOf('async function reconcileStuckOrders');
+  const reconcile = ledger.slice(reconcileStart);
+  assert.ok(/resolveQueuedWorkboardTarget/.test(reconcile),
+    'reconciliation must re-evaluate workboard queue targets');
+  assert.ok(/type = 'workboard_apply'/.test(reconcile) && /await enqueue\('workboard_apply'/.test(reconcile),
+    'a failed workboard queue registration must be re-enqueued by exact order submission ID');
+  assert.ok(/await markOrderQueued\(row\.id\)/.test(reconcile),
+    'successful re-enqueue must restore the durable queued state');
+});
+
+test('queued workboard registration failure is persisted rather than left pending', () => {
+  const dispatchStart = submit.indexOf('if (queuedWorkboardApply) {');
+  const dispatchEnd = submit.indexOf('if (ledger.sheetRow && !queuedWorkboardApply)', dispatchStart);
+  const dispatch = submit.slice(dispatchStart, dispatchEnd);
+  assert.ok(/if \(sheetlessDone && !sheetlessDone\.ok\) \{[\s\S]*?await markOrderMirrorFailed\(ledger\.orderSubmissionId, sheetlessDone\.message \|\| sheetlessDone\.reason\)/.test(dispatch),
+    'a failed queue registration must transition the durable order ledger to failed');
 });
 
 test('campaign confirmation can explicitly bypass old sheet binding after server hold verification', () => {
