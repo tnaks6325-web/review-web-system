@@ -6694,8 +6694,15 @@ async function submitOrderForm() {
             displayName: ctx.displayName || "",  // 상품명 → 캠페인폴더명
             tabName:     ctx.tabName,            // 탭명 → 인덱스폴더명 기준
             round:       ctx.round       || "",  // 차수 → 폴더명에 삽입
-            sheetId:     ctx.sheetId     || ""   // ★ 탭명 변경 대응: ID로 세부목록 조회
+            sheetId:     ctx.sheetId     || "",  // ★ 탭명 변경 대응: ID로 세부목록 조회
+            orderSubmissionId: res.orderSubmissionId || "",
+            captureSessionId: res.captureSession && res.captureSession.id || "",
+            captureSessionToken: res.captureSession && res.captureSession.token || ""
           };
+
+          if (!uploadPayload.orderSubmissionId || !uploadPayload.captureSessionId || !uploadPayload.captureSessionToken) {
+            throw new Error("구매캡처 제출 세션을 발급받지 못했습니다.");
+          }
 
           // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 — 진행률 표시 + 2회 재시도
           let upJson = null;
@@ -6714,26 +6721,6 @@ async function submitOrderForm() {
           }
           if (upJson && upJson.ok) {
             console.log("[이미지 업로드] 완료:", upJson.fileUrl);
-            // ── 캡처 폴더 URL을 세부목록에 저장 (대시보드 바로가기 버튼용) ──
-            if (upJson.captureFolderUrl) {
-              try {
-                // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
-                const sfJson = await gasPost({
-                  action:           "saveCaptureFolder",
-                  sheetId:          ctx.sheetId  || "",
-                  sheetUrl:         ctx.sheetUrl || "",
-                  tabName:          ctx.tabName,
-                  captureFolderUrl: upJson.captureFolderUrl
-                });
-                if (sfJson && sfJson.ok) {
-                  console.log("[캡처폴더 저장] 완료:", upJson.captureFolderUrl);
-                } else {
-                  console.warn("[캡처폴더 저장] 실패:", sfJson?.error);
-                }
-              } catch(sfErr) {
-                console.warn("[캡처폴더 저장] 실패 (무시):", sfErr.message);
-              }
-            }
           } else {
             console.warn("[이미지 업로드] 실패:", upJson?.error);
           }

@@ -21,6 +21,7 @@ const adminNickname = require('../services/adminNickname.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { extractAmountNumber } = require('../utils/paymentAmount');
 const { normalizeStoredBanner, validateBannerInput, toPublicBanner } = require('../utils/reviewerHomeBanner');
+const purchaseSessions = require('../services/purchaseSubmissionSession.service');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -1133,7 +1134,7 @@ router.post('/home-banner/save', authMiddleware, adminOrMasterMiddleware, async 
 //   자기 주문에 캡처가 빠졌다는 걸 알 방법이 없어 관리자가 개별 독촉해야 한다.
 //   리뷰어 홈에서 스스로 보완하게 하면 그 왕복이 사라진다.
 // 노출은 my-status 와 같은 수준(phone8 = 연락처 끝 8자리 소유자만 자기 건 조회) + 필드 최소화.
-//   첨부는 기존 업로드 경로(/api/image/image-upload + orderSubmissionId) 재사용 — 신규 쓰기 표면 0.
+//   첨부는 기존 업로드 경로를 재사용하되 조회 응답에서 발급한 세션+주문ID를 함께 검증한다.
 // ═══════════════════════════════════════════════════════════
 router.get('/my-missing-captures', async (req, res, next) => {
   try {
@@ -1159,6 +1160,8 @@ router.get('/my-missing-captures', async (req, res, next) => {
     const { rows } = await pool.query(`
       SELECT os.id, os.tab_name AS "tabName", os.recipient, os.orderer,
              os.submitted_at AS "submittedAt", os.sheet_id AS "sheetId",
+             COALESCE(NULLIF(rc.linked_sheet_id, ''), os.sheet_id) AS "captureSheetId",
+             COALESCE(NULLIF(rc.linked_tab_name, ''), os.tab_name) AS "captureTabName",
              COALESCE(NULLIF(rc.title, ''), NULLIF(wt.display_name, ''), NULLIF(wt.tab_name, ''),
                       NULLIF(tc.display_name, ''), NULLIF(tc.campaign_name, '')) AS "displayName",
              COALESCE(NULLIF(rc.title, ''), NULLIF(tc.campaign_name, '')) AS "campaignName"
@@ -1202,7 +1205,20 @@ router.get('/my-missing-captures', async (req, res, next) => {
        ORDER BY os.submitted_at DESC
        LIMIT 30`, [phone8, String(days), cutoff]);
 
-    res.json({ ok: true, count: rows.length, items: rows });
+    const items = await Promise.all(rows.map(async row => {
+      try {
+        const captureSession = await purchaseSessions.issueForOrder({
+          orderSubmissionId: row.id,
+          captureSheetId: row.captureSheetId,
+          captureTabName: row.captureTabName,
+          source: 'reviewer_capture_retry',
+        });
+        return { ...row, captureSession };
+      } catch (_) {
+        return { ...row, captureSession: null };
+      }
+    }));
+    res.json({ ok: true, count: items.length, items });
   } catch (err) { next(err); }
 });
 

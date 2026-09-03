@@ -1555,6 +1555,11 @@ function _mcOnFile(input) {
     if (!b64) { alert('이미지를 읽지 못했습니다.'); return; }
     const ext = mime === 'image/png' ? 'png' : (mime === 'image/webp' ? 'webp' : 'jpg');
     const nameBase = (it.recipient || it.orderer || '주문캡처');
+    const capSession = it.captureSession || {};
+    if (!capSession.id || !capSession.token) {
+      alert('구매캡처 제출 세션을 발급받지 못했습니다. 목록을 새로고침한 뒤 다시 시도해주세요.');
+      return;
+    }
     try {
       const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
       const r = await fetch(base + '/api/image/image-upload', {
@@ -1563,6 +1568,8 @@ function _mcOnFile(input) {
           imageBase64: b64, mimeType: mime, fileName: nameBase + '.' + ext,
           displayName: it.displayName || '', tabName: it.tabName || '', sheetId: it.sheetId || '',
           orderSubmissionId: it.id,        // ← 이 키로 서버가 capture_uploaded_at 을 채운다
+          captureSessionId: capSession.id,
+          captureSessionToken: capSession.token,
         }),
       }).then(x => x.json());
       if (!r || !r.ok) throw new Error((r && r.error) || '업로드 실패');

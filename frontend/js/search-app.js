@@ -8532,19 +8532,6 @@ async function submitOrderForm() {
 
   // ── 각 주문 순차 제출 ──
   let successCount = 0;
-  let firstCaptureFolderUrl = "";
-  /* ★ 업로드가 순차 큐로 바뀌면서 완료 시점이 제출 루프보다 늦어질 수 있다 →
-     캡처폴더 URL 저장은 "먼저 성공한 업로드가 한 번만" 하는 헬퍼로 옮긴다(중복 저장 방지). */
-  let _capFolderSaved = false;
-  const _saveCaptureFolderOnce = async (url) => {
-    if (!url || _capFolderSaved) return;
-    _capFolderSaved = true;
-    firstCaptureFolderUrl = url;
-    try {
-      const sfJ = await gasPost({ action:"saveCaptureFolder", sheetId:ctx.sheetId||"", sheetUrl:ctx.sheetUrl||"", tabName:ctx.tabName, captureFolderUrl:url });
-      if (sfJ?.ok) console.log("[캡처폴더] 저장 완료");
-    } catch(sfErr) { console.warn("[캡처폴더] 저장 실패:", sfErr.message); }
-  };
   const mirrorStatuses = [];   // ★ 제출 응답의 시트반영 상태(queued/failed/pending_no_row) 수집 → 완료화면 즉시 안내용
 
   const results = [];   // ★ 배치: 명의별 결과(부모 화면이 단수 값 하나로 거짓말하지 않게)
@@ -8717,9 +8704,10 @@ async function submitOrderForm() {
             }
             const _ext = (m) => m==="image/png"?"png":m==="image/webp"?"webp":"jpg";
             const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
-            // ★ 캡처↔주문 연결(062): 제출 응답의 orderSubmissionId 를 실어 서버가 order_submissions 에
-            //   capture_file_id/capture_uploaded_at 을 기록 → "캡처 미첨부" 자동 감지·중요알림의 근거.
-            const upPayload = { action:"uploadOrderImage", imageBase64:b64, mimeType:mime, fileName:namePart+"."+_ext(mime), displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:_osId };
+            const _capSession = res && res.captureSession;
+            if (!_capSession || !_capSession.id || !_capSession.token) throw new Error("구매캡처 제출 세션을 발급받지 못했습니다.");
+            // 서버 발급 세션+주문ID를 함께 보내며 서버는 세션에 고정된 작업 좌표만 사용한다.
+            const upPayload = { action:"uploadOrderImage", imageBase64:b64, mimeType:mime, fileName:namePart+"."+_ext(mime), displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:_osId, captureSessionId:_capSession.id, captureSessionToken:_capSession.token };
             // ★ 재시도: 이 업로드가 실패하면 서버는 capture_uploaded_at 이 비어 있어
             //   "구매캡쳐 미첨부"로 자동 감지한다 → 실제로는 첨부한 리뷰어에게 잘못된 독촉이 나간다.
             //   과거엔 1회 실패 시 console.warn 만 하고 조용히 끝나 이 오탐의 주원인이었다.
@@ -8744,7 +8732,6 @@ async function submitOrderForm() {
               const wait = st === 429 ? 62000 : 1500 * Math.pow(2, attempt);   // 1.5s → 3s → 6s
               await new Promise(r2 => setTimeout(r2, wait));
             }
-            if (upJson?.ok && upJson.captureFolderUrl) _saveCaptureFolderOnce(upJson.captureFolderUrl);
             // ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 리뷰어는 첨부했다고 믿고 창을 닫아버린다.
             if (!upJson?.ok) {
               console.warn(`[이미지 업로드 ${_idx}] 최종 실패:`, upErrLast && upErrLast.message);
@@ -8815,7 +8802,7 @@ async function submitOrderForm() {
     } catch(bankErr) { console.warn("[saveBankInfo] 오류:", bankErr.message); }
   }
 
-  // 캡처폴더 URL 저장은 _saveCaptureFolderOnce(업로드 성공 시점)가 한 번만 수행한다.
+  // 캡처폴더 URL은 업로드 서버가 세션에 고정된 작업 좌표로 직접 저장한다.
 
   window._submitOrderFormInProgress = false;
 
