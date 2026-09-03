@@ -730,11 +730,64 @@ async function _withFreshTableTodayFilled(db, row, counts, now) {
   if (!row || !row.linked_sheet_id || !row.linked_tab_name) return counts;
   try {
     const { todayFilledForTab } = require('../services/tabFilled.service');
-    return _withTableTodayFilled(counts, await todayFilledForTab(db, row.linked_sheet_id, row.linked_tab_name, now));
+    const { rows } = await db.query(
+      `SELECT * FROM recruit_campaigns
+        WHERE participation_mode = TRUE AND status = 'active'
+          AND linked_sheet_id = $1 AND linked_tab_name = $2`,
+      [row.linked_sheet_id, row.linked_tab_name]);
+    const peers = rows.length ? rows : [row];
+    const peerCounts = await fetchCampaignCounts(db, peers.map(r => r.id), now);
+    if (counts) peerCounts.set(row.id, counts);
+    const peerSchedules = await deriveSchedules(db, tabsOfCampaigns(peers), now);
+    const tableTodayFilled = await todayFilledForTab(db, row.linked_sheet_id, row.linked_tab_name, now);
+    if (tableTodayFilled == null) return counts;
+    const key = `${row.linked_sheet_id}\u0000${row.linked_tab_name}`;
+    const grouped = _groupedTableTodayCounts(peers, peerCounts,
+      { map: new Map([[key, tableTodayFilled]]), key: (sheetId, tabName) => `${sheetId}\u0000${tabName}` },
+      now, peerSchedules);
+    return grouped.get(row.id) || counts;
   } catch (e) {
     logger.warn(`[campaign] 상태용 작업표 오늘 채움 집계 실패 — 공고 신청 기준 유지: ${e.message}`);
     return counts;
   }
+}
+
+/* 같은 탭을 공유한 재발행 공고는 표의 오늘 채움 수가 공통 분자다. 개별 공고마다 그 수를
+ * 대입하면 서로의 정원을 침범해 조기 마감한다. 따라서 탭 단위로 정원·확정 신청·유효 홀드를
+ * 합산해 상태엔진에 한 번만 전달한다. */
+function _groupedTableTodayCounts(rows, countsMap, filled, now, schedMap) {
+  const out = new Map();
+  if (!filled || !filled.map || !filled.key) return out;
+  const groups = new Map();
+  for (const row of (rows || [])) {
+    if (!row || !row.participation_mode || String(row.status || 'active') !== 'active' ||
+        !row.linked_sheet_id || !row.linked_tab_name) continue;
+    const key = filled.key(row.linked_sheet_id, row.linked_tab_name);
+    if (!filled.map.has(key)) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  for (const [key, group] of groups) {
+    let tableTodayQuota = 0, tableTodaySubmitted = 0, tableTodayActiveHolds = 0;
+    for (const row of group) {
+      const raw = (countsMap && countsMap.get(row.id)) || {};
+      const rawState = computeCampaignState(row, raw, now, schedMap ? scheduleFor(schedMap, row) : null);
+      tableTodayQuota += Number(rawState.dailyQuota) || 0;
+      tableTodaySubmitted += Math.max(0, Number(raw.todaySubmitted) || 0);
+      tableTodayActiveHolds += Math.max(0, Number(raw.todayActiveHolds) || 0);
+    }
+    for (const row of group) {
+      const raw = (countsMap && countsMap.get(row.id)) || {};
+      out.set(row.id, {
+        ...raw,
+        tableTodayFilled: Math.max(0, Number(filled.map.get(key)) || 0),
+        tableTodayQuota,
+        tableTodaySubmitted,
+        tableTodayActiveHolds,
+      });
+    }
+  }
+  return out;
 }
 
 /** 요청의 JWT를 검증해 decoded 반환(없거나 무효면 null) */
@@ -1068,8 +1121,9 @@ router.get('/list', async (req, res, next) => {
     }
     // ★ 시트 일정 파생(063) — 자체 1분 캐시라 목록 캐시 밖에서 호출해도 저비용. 실패=null(폴백).
     const schedMap = await deriveSchedules(pool, tabsOfCampaigns(rows), now);
+    const groupedTableCounts = _groupedTableTodayCounts(rows, countsMap, filledMap, now, schedMap);
     const data = rows.map(r => {
-      const viewCounts = _withMappedTableTodayFilled(countsMap.get(r.id), r, filledMap);
+      const viewCounts = groupedTableCounts.get(r.id) || countsMap.get(r.id);
       const view = _publicView(r, viewCounts, now, scheduleFor(schedMap, r));
       _applyCurrentFee(view, feeMap && feeMap.get(r.id), now);   // ★ 082: 카드 리뷰비 = 오늘 구간
       if (crMap) view.cashReceiptRequired = crMap.get(r.id) === true;   // 조회 실패면 필드 자체가 없음(배지 미표시)
@@ -1627,6 +1681,13 @@ async function _applyParticipation(req, res, next, campPre) {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('camp_hold_phone:' || $1::text))`, [holdP8]);
 
     // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
+    // 같은 작업표에 재발행 공고가 여럿이면 공통 정원을 보므로, 공고별 행 락만으로는 교차 신청이
+    // 동시에 통과할 수 있다. 탭 키 xact 락으로 표 기준 일일 정원 판정을 하나로 직렬화한다.
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('camp_tab_daily:' || $1::text || E'\\000' || $2::text))`,
+        [camp.linked_sheet_id, camp.linked_tab_name]);
+    }
     const countsMap = await fetchCampaignCounts(client, [id], now);
     const stateCounts = await _withFreshTableTodayFilled(client, camp, countsMap.get(id), now);
     const weekend = weekendPublicationState(camp, now, countsMap.get(id) && countsMap.get(id).plans);
@@ -2220,6 +2281,7 @@ async function _adminCampaignList(req, res, next) {
     } catch (e) {
       logger.warn(`[campaign] admin/list 표 기준 집계 실패 — 종전(공고 기준) 표기로 폴백: ${e.message}`);
     }
+    const _groupedTableCounts = _groupedTableTodayCounts(rows, countsMap, _filled, now, schedMap);
     /* ★ 130: 보관 **제안** 재료 — 연결 작업표의 모든 줄이 채워졌는가(사용자 확정 조건).
        자동 보관은 하지 않는다. 화면이 배지로 제안하고 실행은 사람이 누른다.
        ★ null = 판정 실패 → 제안 없음(0/0 을 "다 찼다"로 읽지 않는다). */
@@ -2264,7 +2326,7 @@ async function _adminCampaignList(req, res, next) {
       const cnt = countsMap.get(r.id) || {
         activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
       };
-      const stateCnt = _withMappedTableTodayFilled(cnt, r, _filled);
+      const stateCnt = _groupedTableCounts.get(r.id) || cnt;
       const _sch = schedMap ? scheduleFor(schedMap, r) : null;
       const st = computeCampaignState(r, stateCnt, now, _sch);
       /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼

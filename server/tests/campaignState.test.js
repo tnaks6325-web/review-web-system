@@ -83,6 +83,27 @@ ok('작업표 오늘 채움 30/30 = daily_done (공고 신청 집계가 적어�
   assert.strictEqual(st.state, 'daily_done');
 });
 
+ok('작업표 확정 9건 + 아직 표에 없는 유효 홀드 1건 = 10/10 daily_done', () => {
+  const counts = { ...ZERO, todaySubmitted: 0, todayActiveHolds: 1, tableTodayFilled: 9 };
+  const st = computeCampaignState({ ...CAMP, daily_limit: 10 }, counts, kst('14:30'));
+  assert.strictEqual(st.todayCount, 10);
+  assert.strictEqual(st.state, 'daily_done');
+});
+
+ok('공유 작업표는 합산 정원으로 판정해 12/20에서 조기 마감하지 않는다', () => {
+  const counts = {
+    ...ZERO,
+    tableTodayFilled: 12,
+    tableTodayQuota: 20,
+    tableTodaySubmitted: 12,
+    tableTodayActiveHolds: 0,
+  };
+  const st = computeCampaignState({ ...CAMP, daily_limit: 10 }, counts, kst('14:30'));
+  assert.strictEqual(st.dailyQuota, 20);
+  assert.strictEqual(st.todayCount, 12);
+  assert.strictEqual(st.state, 'open');
+});
+
 ok('작업표 수 미전달이면 종전 공고 신청 집계로 유지', () => {
   const counts = { ...ZERO, todaySubmitted: 4 };
   assert.strictEqual(computeCampaignState({ ...CAMP, daily_limit: 30 }, counts, kst('14:30')).state, 'open');
