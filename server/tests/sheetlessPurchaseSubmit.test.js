@@ -65,6 +65,24 @@ test('approved workboard queue targets always enqueue outside the campaign-only 
     'an approved target must either be queued and marked queued before any direct-write branch is considered');
 });
 
+test('queued workboard targets use no-row duplicate protection and do not emit a RAW-row failure', () => {
+  assert.ok(/crossDay: skipSheetMirrorForWrite/.test(submit),
+    'every path that skips sheet-row claiming must use cross-day duplicate protection');
+  assert.ok(/else if \(!ledger\.sheetRow && !skipSheetMirrorForWrite\)/.test(submit),
+    'an intentional workboard queue target must not be reported as a RAW row-claim failure');
+});
+
+test('failed workboard queue registration is durably re-enqueued by reconciliation', () => {
+  const reconcileStart = ledger.indexOf('async function reconcileStuckOrders');
+  const reconcile = ledger.slice(reconcileStart);
+  assert.ok(/resolveQueuedWorkboardTarget/.test(reconcile),
+    'reconciliation must re-evaluate workboard queue targets');
+  assert.ok(/type = 'workboard_apply'/.test(reconcile) && /await enqueue\('workboard_apply'/.test(reconcile),
+    'a failed workboard queue registration must be re-enqueued by exact order submission ID');
+  assert.ok(/await markOrderQueued\(row\.id\)/.test(reconcile),
+    'successful re-enqueue must restore the durable queued state');
+});
+
 test('queued workboard registration failure is persisted rather than left pending', () => {
   const dispatchStart = submit.indexOf('if (queuedWorkboardApply) {');
   const dispatchEnd = submit.indexOf('if (ledger.sheetRow && !queuedWorkboardApply)', dispatchStart);

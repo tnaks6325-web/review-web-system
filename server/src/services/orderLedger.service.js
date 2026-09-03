@@ -1337,6 +1337,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   const db = getPool();
   const { enqueue } = require('./syncQueue.service'); // lazy: require 순환 회피
   const _metaByTab = new Map(); // F2/J-2: 사이클 내 getSpreadsheetMeta 중복콜 제거(시트당 1콜)
+  const _queuedTargetByTab = new Map(); // 큐 대상 판정도 탭별 1회만 조회한다.
 
   const params = [staleQueuedMinutes];
   let sheetFilter = '';
@@ -1376,7 +1377,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   const tabCount = new Map();
   const tabCursors = new Map(); // tabKey → 마지막 배정 append 행(순차 커서, 20행 한계 제거)
 
-  /* ★★ 무시트 탭(탈 구글시트 W2)은 **큐로 복구하지 않는다** — 큐는 구글시트에 쓴다.
+  /* ★★ 무시트 탭(탈 구글시트 W2)은 **order_append 큐로 복구하지 않는다** — 큐는 구글시트에 쓴다.
      대신 같은 자리에서 작업표 기록을 다시 시도한다(그게 무시트의 "반영"이다).
      ★ 목록에서 통째로 빼면 그 주문은 영영 복구되지 않는다 → 반드시 대체 경로를 준다. */
   const _slKeys = await require('../utils/sheetlessScope').sheetlessTabKeys(db);
@@ -1403,6 +1404,42 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     //   하단에 다시 적히므로, 큐가 비고란에 [시스템 재기록 · 확인요망]으로 남겨 사람이 확인하게 한다.
     //   (일반 복구는 [시스템 재기록].) sheet_error 는 배정 성공 시 NULL 로 지워지므로 여기서 읽어 전달.
     const recoverReason = /^ghost written/.test(String(row.sheet_error || '')) ? 'lost' : '';
+
+    // workboard_apply 전환 탭은 일반 주문이라도 원장 단계에서 sheet_row를 만들지 않는다.
+    // enqueue 직후 DB/네트워크 오류가 나면 failed 상태만 남을 수 있으므로, reconcile이 같은
+    // 주문 ID의 살아있는 큐를 확인한 뒤 정확히 한 번 다시 등록한다. 이 분기는 일반 sheetless
+    // 직접기록보다 먼저 실행해야 기존 RAW 행 배정 경로로 되돌아가지 않는다.
+    let queuedTarget;
+    try {
+      if (_queuedTargetByTab.has(tabKey)) {
+        queuedTarget = _queuedTargetByTab.get(tabKey);
+      } else {
+        queuedTarget = await require('./workboardQueueApply.service').resolveQueuedWorkboardTarget({
+          sheetId: row.sheet_id, tabName: row.tab_name,
+        });
+        _queuedTargetByTab.set(tabKey, queuedTarget);
+      }
+    } catch (_) {
+      queuedTarget = null; // 대상 판정 실패는 기존 복구 경로를 보존한다.
+    }
+    if (queuedTarget && queuedTarget.enabled) {
+      if (dryRun) { result.requeued++; continue; }
+      try {
+        const { rows: dup } = await db.query(
+          `SELECT 1 FROM sync_queue WHERE type = 'workboard_apply' AND status IN ('pending','processing')
+             AND (payload->>'orderSubmissionId') = $1 LIMIT 1`,
+          [String(row.id)]
+        );
+        if (dup.length) { result.requeued++; continue; }
+        await enqueue('workboard_apply', {
+          sheetId: row.sheet_id, tabName: row.tab_name, gid,
+          orderSubmissionId: row.id, loginPhone8: '', loginName: '', recovered: true,
+        });
+        await markOrderQueued(row.id);
+        result.requeued++;
+      } catch (_) { result.stillStuck++; }
+      continue;
+    }
 
     // ── 무시트 탭: 큐 대신 작업표 재기록 ──────────────────────────────
     if (isSheetlessTab(_slKeys, row.sheet_id, row.tab_name, gid)) {

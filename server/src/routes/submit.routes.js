@@ -1185,8 +1185,9 @@ router.post('/order', async (req, res, next) => {
       campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone }, skipTabBinding: orderScope.sheetless } : undefined,
       // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
       // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
-      // crossDay: 무시트 경로는 claim(dedup_key 유니크)을 건너뛰므로 날짜를 넘는 같은 구매도 막는다.
-      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData, crossDay: !!orderScope.sheetless },
+      // crossDay: 실제로 시트 claim을 건너뛴 모든 경로는 날짜를 넘는 같은 구매도 막는다.
+      // workboard_apply 대상도 원장 단계에서 claim을 만들지 않으므로 sheetless와 같은 보호가 필요하다.
+      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData, crossDay: skipSheetMirrorForWrite },
     });
 
     if (ledger && ledger.duplicateOrderSubmissionId) {
@@ -1333,7 +1334,7 @@ router.post('/order', async (req, res, next) => {
           context: { sheetId, tabName, type: 'order_append', orderSubmissionId: ledger.orderSubmissionId },
         });
       }
-    } else if (!ledger.sheetRow && !orderScope.sheetless) {
+    } else if (!ledger.sheetRow && !skipSheetMirrorForWrite) {
       logger.warn(`[submit/order] RAW 행 배정 실패: sheet=${sheetId}, tab=${tabName}, orderSubmissionId=${ledger.orderSubmissionId}`);
       logAbnormal({
         flow: 'order_submit', step: 'row_claim', severity: 'warn',
