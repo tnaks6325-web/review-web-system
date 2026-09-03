@@ -791,7 +791,9 @@ console.log('\nJ. 일 정원 확인 게이트');
   let writes = 0;
   poolMod.query = async (sql) => {
     const q = String(sql);
-    if (!/^\s*SELECT/i.test(q)) writes++;
+    // 재참여 사전 확인은 `WITH ... SELECT` 읽기 쿼리다. 선두 WITH만으로 쓰기로 오인하지 않되,
+    // 데이터 변경 CTE는 INSERT/UPDATE/DELETE 키워드가 있으므로 계속 쓰기로 센다.
+    if (!/^\s*(?:SELECT|WITH)\b/i.test(q) || /\b(?:INSERT|UPDATE|DELETE)\b/i.test(q)) writes++;
     return /FROM recruit_campaigns WHERE id/i.test(q)
       ? { rows: [{ id: 'c1', participation_mode: true, status: 'active', daily_limit: 15, recruit_total: 0,
                    window_start: null, window_end: null, start_date: null }] }

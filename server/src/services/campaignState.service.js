@@ -329,7 +329,8 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
  * 상태 판정 (순수 함수 — DB 없이 테스트 가능)
  * @param c      recruit_campaigns 행 (participation_mode, status, window_start, window_end,
  *               close_buffer_min, hold_ttl_min, daily_limit, recruit_total)
- * @param counts { activeHolds, todayActiveHolds, submittedAll, todaySubmitted, submittedBeforeToday }
+ * @param counts { activeHolds, todayActiveHolds, submittedAll, todaySubmitted, submittedBeforeToday,
+ *                 tableTodayFilled?, tableTodayQuota?, tableTodaySubmitted?, tableTodayActiveHolds? }
  *               (유효 홀드 = applied AND expires_at>now 로 이미 집계된 값)
  * @param now    Date
  * @returns { state, todayCount, dailyQuota, serverNow, opensAt, closesAt, cutoffAt }
@@ -358,7 +359,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   //   조절하지 않은 날은 종전대로 시트가 정한다 — 진실원본이 통째로 넘어오지 않아, 시트를 계속
   //   고쳐 쓰는 운영과 공존한다. 조절을 해제하면 그 날은 즉시 시트 값으로 복귀한다.
   const ovToday = planOverrideFor(counts.plans || null, todayStr);
-  const quota = sch
+  const campaignQuota = sch
     ? (ovToday !== null
         // 명시 조절일 = 그 값이 그날의 전부(095 규율 — 이월을 얹지도 빼지도 않는다).
         //   ★ 총량 clamp 는 유지: 시트 총건수를 넘겨 열 수는 없다(095 불변식 ②).
@@ -369,7 +370,32 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
             sch.totalSlots) - submittedBefore))
     : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
         { today: todayStr, plans: counts.plans || null }, eff);
-  const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
+  // 동일 탭을 공유한 재발행 공고는 표의 채움 수가 탭 전체 수다. 호출부가 탭 전체 정원·신청·홀드를
+  // 함께 전달하면 각 공고에 같은 표 수를 개별 정원으로 적용하지 않고 공유 정원으로 판정한다.
+  const tableTodayQuota = Number(counts.tableTodayQuota);
+  const quota = Number.isFinite(tableTodayQuota) ? Math.max(0, tableTodayQuota) : campaignQuota;
+  const ownTodaySubmitted = Math.max(0, Number(counts.todaySubmitted) || 0);
+  const ownTodayActiveHolds = Math.max(0, Number(counts.todayActiveHolds) || 0);
+  const groupedTodaySubmitted = Number(counts.tableTodaySubmitted);
+  const groupedTodayActiveHolds = Number(counts.tableTodayActiveHolds);
+  const todaySubmitted = Number.isFinite(groupedTodaySubmitted)
+    ? Math.max(0, groupedTodaySubmitted)
+    : ownTodaySubmitted;
+  const todayActiveHolds = Number.isFinite(groupedTodayActiveHolds)
+    ? Math.max(0, groupedTodayActiveHolds)
+    : ownTodayActiveHolds;
+  /*
+   * 관리자 카드의 "오늘 모집 N/N"과 실제 일일 마감 게이트는 반드시 같은 작업표 기준을 쓴다.
+   * tableTodayFilled 는 연결 작업표에서 오늘 구매일자로 채워진 줄 수이며, 수기입력·외부모집·지각
+   * 참여처럼 campaign_applications 를 거치지 않은 정상 작업도 포함한다. 값이 없는 호출부는 기존
+   * 공고 신청 집계를 유지하고, 둘 다 있으면 누락 투영 때문에 공고 신청 수가 더 큰 경우도 보존한다.
+   * 표에는 확정 행만 있으므로, 아직 표에 쓰이지 않은 유효 홀드는 별도로 더한다.
+   */
+  const tableTodayFilled = Number(counts.tableTodayFilled);
+  const confirmedTodayCount = Number.isFinite(tableTodayFilled)
+    ? Math.max(todaySubmitted, Math.max(0, tableTodayFilled))
+    : todaySubmitted;
+  const todayCount = confirmedTodayCount + todayActiveHolds;
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
   const bufferMin = Number(c.close_buffer_min ?? 10) || 0;

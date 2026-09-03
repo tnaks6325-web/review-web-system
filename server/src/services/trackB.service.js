@@ -5424,10 +5424,33 @@ async function tabTodayProgress(db, { sheetId, tabName } = {}) {
     ]);
 
     let quota = 0, done = 0, holds = 0, state = null, stateReason = null;
+    // 재발행 공고가 같은 탭을 공유하면 표의 채움 수는 탭 전체 값이다. 개별 공고에 그대로
+    // 적용하지 않고, 각 공고의 일일 정원을 합친 공유 정원과 전체 신청·홀드로 판정한다.
+    const rawByCampaign = new Map();
+    let sharedQuota = 0, sharedSubmitted = 0, sharedHolds = 0;
     for (const r of live) {
-      const counts = countsMap.get(r.id) || { activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0 };
+      const raw = countsMap.get(r.id) || { activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0 };
+      rawByCampaign.set(r.id, raw);
+      const rawState = computeCampaignState(r, raw, now, schedMap ? scheduleFor(schedMap, r) : null);
+      sharedQuota += Number(rawState.dailyQuota) || 0;
+      sharedSubmitted += Math.max(0, Number(raw.todaySubmitted) || 0);
+      sharedHolds += Math.max(0, Number(raw.todayActiveHolds) || 0);
+    }
+    for (const r of live) {
+      const rawCounts = rawByCampaign.get(r.id);
+      // 카드의 분자(sheetFilled)와 상태 게이트가 갈라지지 않게, 같은 작업표 수를 상태엔진에도 준다.
+      const counts = base.sheetFilled == null ? rawCounts
+        : {
+          ...rawCounts,
+          tableTodayFilled: Math.max(0, Number(base.sheetFilled) || 0),
+          tableTodayQuota: sharedQuota,
+          tableTodaySubmitted: sharedSubmitted,
+          tableTodayActiveHolds: sharedHolds,
+        };
       const st = computeCampaignState(r, counts, now, schedMap ? scheduleFor(schedMap, r) : null);
-      quota += Number(st.dailyQuota) || 0;
+      quota = base.sheetFilled == null
+        ? quota + (Number(st.dailyQuota) || 0)
+        : Math.max(quota, Number(st.dailyQuota) || 0);
       done += Number(counts.todaySubmitted) || 0;
       holds += Number(counts.todayActiveHolds) || 0;
       // 여럿이면 "가장 열려 있는" 상태를 대표로 — 하나라도 열려 있으면 아직 받는 중이다.

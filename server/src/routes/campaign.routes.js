@@ -712,6 +712,84 @@ function _publicView(row, counts, now, schedule) {
   };
 }
 
+/* 작업표 기준 오늘 채움 수를 상태엔진 입력에 붙인다. null/실패는 기존 공고 신청 집계를 그대로
+ * 쓰며, 0으로 덮어 쓰지 않는다. 카드에 보이는 "오늘 모집 N/N"이 일일 마감 게이트와 같은
+ * 기준을 보게 하는 유일한 접점이다. */
+function _withTableTodayFilled(counts, tableTodayFilled) {
+  if (tableTodayFilled == null) return counts;
+  return { ...(counts || {}), tableTodayFilled: Math.max(0, Number(tableTodayFilled) || 0) };
+}
+
+function _withMappedTableTodayFilled(counts, row, filled) {
+  if (!filled || !row || !row.linked_sheet_id || !row.linked_tab_name) return counts;
+  const key = filled.key(row.linked_sheet_id, row.linked_tab_name);
+  return filled.map.has(key) ? _withTableTodayFilled(counts, filled.map.get(key)) : counts;
+}
+
+async function _withFreshTableTodayFilled(db, row, counts, now) {
+  if (!row || !row.linked_sheet_id || !row.linked_tab_name) return counts;
+  try {
+    const { todayFilledForTab } = require('../services/tabFilled.service');
+    const { rows } = await db.query(
+      `SELECT * FROM recruit_campaigns
+        WHERE participation_mode = TRUE AND status = 'active'
+          AND linked_sheet_id = $1 AND linked_tab_name = $2`,
+      [row.linked_sheet_id, row.linked_tab_name]);
+    const peers = rows.length ? rows : [row];
+    const peerCounts = await fetchCampaignCounts(db, peers.map(r => r.id), now);
+    if (counts) peerCounts.set(row.id, counts);
+    const peerSchedules = await deriveSchedules(db, tabsOfCampaigns(peers), now);
+    const tableTodayFilled = await todayFilledForTab(db, row.linked_sheet_id, row.linked_tab_name, now);
+    if (tableTodayFilled == null) return counts;
+    const key = `${row.linked_sheet_id}\u0000${row.linked_tab_name}`;
+    const grouped = _groupedTableTodayCounts(peers, peerCounts,
+      { map: new Map([[key, tableTodayFilled]]), key: (sheetId, tabName) => `${sheetId}\u0000${tabName}` },
+      now, peerSchedules);
+    return grouped.get(row.id) || counts;
+  } catch (e) {
+    logger.warn(`[campaign] 상태용 작업표 오늘 채움 집계 실패 — 공고 신청 기준 유지: ${e.message}`);
+    return counts;
+  }
+}
+
+/* 같은 탭을 공유한 재발행 공고는 표의 오늘 채움 수가 공통 분자다. 개별 공고마다 그 수를
+ * 대입하면 서로의 정원을 침범해 조기 마감한다. 따라서 탭 단위로 정원·확정 신청·유효 홀드를
+ * 합산해 상태엔진에 한 번만 전달한다. */
+function _groupedTableTodayCounts(rows, countsMap, filled, now, schedMap) {
+  const out = new Map();
+  if (!filled || !filled.map || !filled.key) return out;
+  const groups = new Map();
+  for (const row of (rows || [])) {
+    if (!row || !row.participation_mode || String(row.status || 'active') !== 'active' ||
+        !row.linked_sheet_id || !row.linked_tab_name) continue;
+    const key = filled.key(row.linked_sheet_id, row.linked_tab_name);
+    if (!filled.map.has(key)) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  for (const [key, group] of groups) {
+    let tableTodayQuota = 0, tableTodaySubmitted = 0, tableTodayActiveHolds = 0;
+    for (const row of group) {
+      const raw = (countsMap && countsMap.get(row.id)) || {};
+      const rawState = computeCampaignState(row, raw, now, schedMap ? scheduleFor(schedMap, row) : null);
+      tableTodayQuota += Number(rawState.dailyQuota) || 0;
+      tableTodaySubmitted += Math.max(0, Number(raw.todaySubmitted) || 0);
+      tableTodayActiveHolds += Math.max(0, Number(raw.todayActiveHolds) || 0);
+    }
+    for (const row of group) {
+      const raw = (countsMap && countsMap.get(row.id)) || {};
+      out.set(row.id, {
+        ...raw,
+        tableTodayFilled: Math.max(0, Number(filled.map.get(key)) || 0),
+        tableTodayQuota,
+        tableTodaySubmitted,
+        tableTodayActiveHolds,
+      });
+    }
+  }
+  return out;
+}
+
 /** 요청의 JWT를 검증해 decoded 반환(없거나 무효면 null) */
 function _decodeReq(req) {
   const authHeader = req.headers['authorization'];
@@ -1043,8 +1121,10 @@ router.get('/list', async (req, res, next) => {
     }
     // ★ 시트 일정 파생(063) — 자체 1분 캐시라 목록 캐시 밖에서 호출해도 저비용. 실패=null(폴백).
     const schedMap = await deriveSchedules(pool, tabsOfCampaigns(rows), now);
+    const groupedTableCounts = _groupedTableTodayCounts(rows, countsMap, filledMap, now, schedMap);
     const data = rows.map(r => {
-      const view = _publicView(r, countsMap.get(r.id), now, scheduleFor(schedMap, r));
+      const viewCounts = groupedTableCounts.get(r.id) || countsMap.get(r.id);
+      const view = _publicView(r, viewCounts, now, scheduleFor(schedMap, r));
       _applyCurrentFee(view, feeMap && feeMap.get(r.id), now);   // ★ 082: 카드 리뷰비 = 오늘 구간
       if (crMap) view.cashReceiptRequired = crMap.get(r.id) === true;   // 조회 실패면 필드 자체가 없음(배지 미표시)
       // 표 기준 오늘 참여(B안) — 카드가 작업보드와 같은 숫자를 쓰기 위한 재료.
@@ -1268,7 +1348,10 @@ async function getCampaignDetail(req, res, next) {
     const row = rows[0];
     const countsMap = row.participation_mode ? await fetchCampaignCounts(pool, [id], now) : null;
     const schedMap = row.participation_mode ? await deriveSchedules(pool, tabsOfCampaigns([row]), now) : null;
-    const view = _publicView(row, countsMap && countsMap.get(id), now, schedMap && scheduleFor(schedMap, row));
+    const detailCounts = row.participation_mode
+      ? await _withFreshTableTodayFilled(pool, row, countsMap && countsMap.get(id), now)
+      : null;
+    const view = _publicView(row, detailCounts, now, schedMap && scheduleFor(schedMap, row));
     _applyCurrentFee(view, await _loadFeeSchedules(pool, id), now);   // ★ 082: 오늘 구간 리뷰비
     // ★ D안 ①: 참여 전 상세에도 현금영수증 대상 여부(불리언만 — 상세 안내는 참여 후 work-detail)
     const _crm = await _cashReceiptFlags([row]);
@@ -1598,7 +1681,15 @@ async function _applyParticipation(req, res, next, campPre) {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('camp_hold_phone:' || $1::text))`, [holdP8]);
 
     // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
+    // 같은 작업표에 재발행 공고가 여럿이면 공통 정원을 보므로, 공고별 행 락만으로는 교차 신청이
+    // 동시에 통과할 수 있다. 탭 키 xact 락으로 표 기준 일일 정원 판정을 하나로 직렬화한다.
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('camp_tab_daily:' || $1::text || E'\\000' || $2::text))`,
+        [camp.linked_sheet_id, camp.linked_tab_name]);
+    }
     const countsMap = await fetchCampaignCounts(client, [id], now);
+    const stateCounts = await _withFreshTableTodayFilled(client, camp, countsMap.get(id), now);
     const weekend = weekendPublicationState(camp, now, countsMap.get(id) && countsMap.get(id).plans);
     if (weekend.blocked) {
       await client.query('ROLLBACK');
@@ -1612,7 +1703,7 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★ 카드 표시와 동일한 일정을 참여 게이트에도 적용(불일치 = 오픈처럼 보이는데 참여 거부 / 그 반대).
     //   1분 캐시라 보통 추가 쿼리 없음. 잠금 커넥션(client)으로 읽어 커넥션 고갈 교착을 피한다.
     const schedMap = await deriveSchedules(client, tabsOfCampaigns([camp]), now);
-    const st = computeCampaignState(camp, countsMap.get(id), now, scheduleFor(schedMap, camp));
+    const st = computeCampaignState(camp, stateCounts, now, scheduleFor(schedMap, camp));
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
@@ -2190,6 +2281,7 @@ async function _adminCampaignList(req, res, next) {
     } catch (e) {
       logger.warn(`[campaign] admin/list 표 기준 집계 실패 — 종전(공고 기준) 표기로 폴백: ${e.message}`);
     }
+    const _groupedTableCounts = _groupedTableTodayCounts(rows, countsMap, _filled, now, schedMap);
     /* ★ 130: 보관 **제안** 재료 — 연결 작업표의 모든 줄이 채워졌는가(사용자 확정 조건).
        자동 보관은 하지 않는다. 화면이 배지로 제안하고 실행은 사람이 누른다.
        ★ null = 판정 실패 → 제안 없음(0/0 을 "다 찼다"로 읽지 않는다). */
@@ -2234,13 +2326,14 @@ async function _adminCampaignList(req, res, next) {
       const cnt = countsMap.get(r.id) || {
         activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
       };
+      const stateCnt = _groupedTableCounts.get(r.id) || cnt;
       const _sch = schedMap ? scheduleFor(schedMap, r) : null;
-      const st = computeCampaignState(r, cnt, now, _sch);
+      const st = computeCampaignState(r, stateCnt, now, _sch);
       /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼
          토요일 관리자 카드가 "오늘 모집 0/30 · 모집중"으로 보였다(리뷰어는 신청 불가인데).
          카드 렌더러의 weekend 분기(_zeroQuotaNote·footer)가 이미 이 값을 기다리고 있었다. */
       const _weekend = weekendPublicationState(r, now);
-      const _resume = _weekendResume(r, _weekend, cnt, now, _sch);
+      const _resume = _weekendResume(r, _weekend, stateCnt, now, _sch);
       return {
         ...r,
         archiveSuggest: _sug,
