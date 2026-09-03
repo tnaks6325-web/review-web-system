@@ -1731,8 +1731,26 @@
         내용이 넘치면 발주 줄이 리뷰타입 줄 위로 겹친다(실측). min-height + stretch. */
   .tp3grid.c3{grid-template-columns:minmax(230px,439fr) minmax(230px,439fr) minmax(330px,659fr);align-items:stretch}
   .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:330px}
-  @media(max-width:1100px){.tp3grid.c3{grid-template-columns:1fr}
-    .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:0}.tp3grid.c3 .rvpane{min-height:340px}}
+  /* 내부 작업보드의 C/S는 상단 메뉴와 같은 방을 작업 단위로만 좁혀 보여 주는 미니 창이다.
+     QHD에서는 네 번째 카드가 오른쪽에 붙고, 폭이 줄면 아래 전폭으로 내려가 표·카드를 밀어내지 않는다. */
+  .tp3grid.c3.csmini{grid-template-columns:minmax(230px,390fr) minmax(230px,390fr) minmax(330px,560fr) minmax(260px,320fr);max-width:1720px}
+  .tp3grid.c3 .wdcsmini-pane{min-width:0;min-height:330px;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  .wdcsmini{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--ink);background:var(--card)}
+  .wdcsmini-head{display:flex;align-items:center;justify-content:space-between;padding:10px 11px;border-top:3px solid var(--accent);border-bottom:1px solid var(--line);font-size:11.5px;font-weight:800}
+  .wdcsmini-head span{display:flex;align-items:center;gap:6px}.wdcsmini-head i{width:7px;height:7px;border-radius:50%;background:#f07c5a;box-shadow:0 0 0 3px #fff1ed}
+  .wdcsmini-head button{border:0;background:transparent;color:var(--accent-deep);font:inherit;font-size:10px;font-weight:750;cursor:pointer}
+  .wdcsmini-body{display:grid;grid-template-columns:minmax(94px,.8fr) minmax(150px,1.3fr);flex:1;min-height:0}
+  .wdcsmini-list{min-width:0;overflow-y:auto;padding:6px;border-right:1px solid var(--line);background:var(--card2)}
+  .wdcsmini-listhead{display:flex;justify-content:space-between;padding:2px 3px 6px;color:var(--faint);font-size:10px;font-weight:800}.wdcsmini-listhead b{color:var(--accent)}
+  .wdcsmini-room{position:relative;display:flex;width:100%;gap:5px;align-items:flex-start;padding:7px 3px;border:0;border-radius:6px;background:transparent;color:var(--muted);text-align:left;cursor:pointer}.wdcsmini-room:hover{background:var(--chip)}.wdcsmini-room.on{background:var(--accent-soft);color:var(--accent-deep)}
+  .wdcsmini-avatar{flex:0 0 20px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:#e2e8f4;color:#6474d8;font-size:9px;font-weight:850}.wdcsmini-room.on .wdcsmini-avatar{background:var(--accent);color:#fff}
+  .wdcsmini-roomcopy{min-width:0;display:block;flex:1}.wdcsmini-roomcopy b,.wdcsmini-roomcopy small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.wdcsmini-roomcopy b{font-size:10px}.wdcsmini-roomcopy small{margin-top:2px;color:var(--faint);font-size:9px}.wdcsmini-room em{position:absolute;right:2px;top:5px;min-width:13px;padding:1px 3px;border-radius:8px;background:#ed725c;color:#fff;text-align:center;font-size:8px;font-style:normal;font-weight:850}
+  .wdcsmini-conversation{min-width:0;min-height:0;display:flex;flex-direction:column}.wdcsmini-context{display:flex;justify-content:space-between;gap:6px;padding:8px 9px;border-bottom:1px solid var(--line);background:#f6f7ff}.wdcsmini-context b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.wdcsmini-context span{flex:none;color:var(--accent-deep);font-size:9px;font-weight:750}
+  .wdcsmini-messages{flex:1;min-height:0;overflow-y:auto;padding:8px;background:#fbfcfe}.wdcsmini-message{display:flex;flex-direction:column;align-items:flex-start;margin-bottom:8px}.wdcsmini-message.mine{align-items:flex-end}.wdcsmini-sender{margin:0 2px 2px;color:var(--faint);font-size:9px;font-weight:750}.wdcsmini-bubble{max-width:94%;padding:7px 8px;border:1px solid var(--line);border-radius:4px 8px 8px;background:#fff;font-size:10px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.wdcsmini-message.mine .wdcsmini-bubble{border-color:var(--accent-soft);border-radius:8px 4px 8px 8px;background:var(--accent-soft);color:var(--accent-deep)}.wdcsmini-message time{margin-top:2px;color:var(--faint);font-size:8px}.wdcsmini-images{display:flex;flex-wrap:wrap;gap:4px}.wdcsmini-images img{width:52px;height:52px;object-fit:cover;border:1px solid var(--line);border-radius:6px;cursor:zoom-in}.wdcsmini-thread-empty,.wdcsmini-empty{padding:18px 7px;color:var(--faint);font-size:10px;text-align:center}.wdcsmini-error{padding:18px;color:#b45309;font-size:11px;line-height:1.5}
+  .wdcsmini-compose{display:flex;gap:5px;padding:7px;border-top:1px solid var(--line)}.wdcsmini-compose input{min-width:0;flex:1;border:1px solid var(--line2);border-radius:6px;padding:6px;color:var(--ink);font:inherit;font-size:10px;outline:0}.wdcsmini-compose input:focus{border-color:var(--accent)}.wdcsmini-compose button{border:0;border-radius:6px;background:var(--accent);color:#fff;padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer}.wdcsmini-compose button:disabled{opacity:.45;cursor:default}
+  @media(max-width:1500px){.tp3grid.c3.csmini{grid-template-columns:minmax(230px,1fr) minmax(230px,1fr) minmax(330px,1.5fr);max-width:1380px}.tp3grid.c3.csmini .wdcsmini-pane{grid-column:1/-1;min-height:300px}.tp3grid.c3.csmini .wdcsmini-body{grid-template-columns:190px minmax(0,1fr)}}
+  @media(max-width:1100px){.tp3grid.c3,.tp3grid.c3.csmini{grid-template-columns:1fr}
+    .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:0}.tp3grid.c3 .rvpane{min-height:340px}.tp3grid.c3.csmini .wdcsmini-pane{grid-column:auto;min-height:330px}.tp3grid.c3.csmini .wdcsmini-body{grid-template-columns:130px minmax(0,1fr)}}
   /* ① 작업 조건 10항목 — 작고 조밀하게(11.5px · 줄높이 22px) */
   .cndprod{font-size:12.5px;font-weight:750;line-height:1.35;margin-bottom:7px;
            display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -5893,6 +5911,11 @@ function renderWorkdesk(wd){
     ${STATE.role==='advertiser'
       ? `<section class="advwork">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div><div id="gridhost">${tableSection}</div>`}`;
+  /* 작업보드 C/S는 상단 메뉴 C/S와 같은 threadId·메시지 API를 사용한다.
+     탭을 바꿔 렌더할 때마다 현재 시트/작업명으로 다시 마운트해 이전 작업 대화가 남지 않게 한다. */
+  if (STATE.role!=='advertiser' && document.getElementById('workdeskCsMini') && window.WorkdeskCsMini) {
+    WorkdeskCsMini.mount('workdeskCsMini', { sheetId: STATE.cur.sheetId, tabName: STATE.cur.tabName, label: workdeskTitle });
+  }
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
   //   남은 청크가 없을 때(작은 표)는 여기서 바로 '못 찾음'까지 확정한다.
@@ -6258,7 +6281,10 @@ function summaryStrip(wd,d,m,c){
      두 모양으로 갈렸다. 다른 것은 **작업 조건 카드의 내용뿐**(업체는 종전 4줄 유지 — 10항목
      조건표는 리뷰비·입금명이 실려 내부 전용이다)과 정산 자리뿐이다.
      ★ 미리보기를 표 옆 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다 → 상단 한 줄에서 끝낸다. */
-  return `<div class="tp3grid c3${_topFolded()?' fold':''}">${cond}${prog}<aside class="rvpane" id="rvPane"></aside></div>`;
+  /* C/S는 내부 운영 역할에서만 보인다. 작업보드와 상단 C/S는 같은 campaignKey의 같은 방을 읽고,
+     광고주에게는 리뷰어 연락처·대화가 노출되지 않도록 패널 자체를 만들지 않는다. */
+  const csMini=isAdv?'':`<aside class="wdcsmini-pane" id="workdeskCsMini" aria-label="이 작업의 C/S 대화"></aside>`;
+  return `<div class="tp3grid c3${csMini?' csmini':''}${_topFolded()?' fold':''}">${cond}${prog}<aside class="rvpane" id="rvPane"></aside>${csMini}</div>`;
 }
 
 /* ══ 작업 조건 10항목(내부 화면) ══════════════════════════════════════════════
@@ -17679,6 +17705,8 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
 <!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
+<!-- 작업보드 우측 미니 C/S — 같은 C/S API의 현재 작업 방만 축약 표시 -->
+<script src="js/workdesk-cs-mini.js"></script>
 <!-- 설정 탭(내 닉네임·회사 사업자번호·리뷰어 소식·공지) — 관리자 대시보드와 같은 화면 코드.
      서버 경로만 Track B 네임스페이스로 돌린다(인트라넷 SSO 토큰은 /api/admin/*·/api/tab/*·
      /api/reviewer/* 에 도달 자체가 불가능 → /api/trackb/settings/* 프록시). -->

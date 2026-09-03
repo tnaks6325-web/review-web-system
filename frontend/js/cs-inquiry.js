@@ -704,6 +704,9 @@ function csOnSSE(evtType, data) {
   if (_csActiveThreadId && data.threadId === _csActiveThreadId) {
     try { csReloadConversation(_csActiveThreadId); } catch(_){}
   }
+  // 작업보드 미니 C/S도 같은 서버 이벤트를 구독한다. 전역 상태를 복제하지 않고
+  // 이벤트만 전달해, 같은 방의 읽음·답장 상태를 다시 조회하게 한다.
+  try { window.dispatchEvent(new CustomEvent('cs:sse', { detail: { evtType, data } })); } catch (_) {}
 }
 
 /* ── 리뷰캡처 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
