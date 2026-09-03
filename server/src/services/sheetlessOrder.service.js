@@ -665,13 +665,17 @@ async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 
   const { rows } = await db.query(
     `SELECT os.id, os.mirror_status, os.tab_name,
             (SELECT MIN(cp.seq) FROM campaign_participants cp
-              WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL) AS seq
+              WHERE cp.order_submission_id = os.id
+                AND cp.deleted_at IS NULL AND cp.active = TRUE
+                AND (os.workboard_id IS NULL OR cp.workboard_id = os.workboard_id)) AS seq
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
         AND os.sheet_id LIKE 'campaign:%'
         AND os.mirror_status = ANY($1::text[])
         AND EXISTS (SELECT 1 FROM campaign_participants cp
-                     WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL)
+                     WHERE cp.order_submission_id = os.id
+                       AND cp.deleted_at IS NULL AND cp.active = TRUE
+                       AND (os.workboard_id IS NULL OR cp.workboard_id = os.workboard_id))
         AND ($3::uuid[] IS NULL OR os.id = ANY($3::uuid[]))
       ORDER BY os.submitted_at ASC
       LIMIT $2`, [REPAIRABLE_MIRROR_STATUSES, lim, ids]);
