@@ -203,10 +203,10 @@ async function run() {
     /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));
   ok('★ 진행/완료 판정 단일 출처 _awDone(=_awStatus.done) — 사이드바·KPI·게이지가 같은 함수를 본다',
     /function _awDone\(it\)\{ return _awStatus\(it\)\.done; \}/.test(src));
-  ok('업체 진행률은 제출 ÷ 총건수이고, 100% 기준 고정 폭 배지를 쓴다',
+  ok('업체 진행률은 제출 ÷ 총건수이며, 완료 목록에만 고정 폭 상태 배지를 둔다',
     /function _awProgress\(it\)\{[\s\S]{0,360}submitted\/target/.test(src)
     && /\.bb\.advprog\{[^}]*width:80px[^}]*justify-content:center[^}]*font-variant-numeric:tabular-nums/.test(css)
-    && /class="bb advprog \$\{st\.tone\}"/.test(src));
+    && /\$\{st\.done\?`<span class="bb advprog \$\{st\.tone\}">\$\{esc\(st\.label\)\}<\/span>`:''\}/.test(src));
   const awTargetBody = (src.match(/function _awTarget\(it\)\{[\s\S]{0,240}\n\}/) || [''])[0];
   ok('총건수 미설정 작업은 제목의 숫자를 추정값으로 쓰지 않는다',
     /Number\(it&&it\.target\)[\s\S]{0,160}Number\.isFinite\(t\)&&t>0/.test(awTargetBody)

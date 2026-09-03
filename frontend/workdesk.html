@@ -3373,7 +3373,7 @@ function _renderAdvSidebar(){
     return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(_tabTip(it))}${(!_isNoSheet(it)&&it.spreadsheetTitle)?' · '+esc(it.spreadsheetTitle):''}">
       <span class="ava">${esc(_awDate(it))}</span>
       <span class="nm">${_awHi(_tabLabel(it))}<i>${esc(st.label)}</i></span>
-      ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb advprog ${st.tone}">${esc(st.label)}</span></div>`;
+      ${n?`<span class="unb">💬${n}</span>`:''}${st.done?`<span class="bb advprog ${st.tone}">${esc(st.label)}</span>`:''}</div>`;
   };
   const grp=(list,label)=> list.length?`<div class="awgh">${label} <span class="cnt">${list.length}</span></div>`+list.map(itemHtml).join(''):'';
   host.innerHTML = nav+`<div class="awdiv"></div>`
