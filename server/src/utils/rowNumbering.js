@@ -53,7 +53,7 @@ function _txt(v) { return v == null ? '' : String(v).trim(); }
 
 /**
  * 번호 부여 순서대로 줄을 정렬한다(원본 배열 불변).
- * @param {Array<{seq:number, iso?:string|null, submittedAt?:(Date|string|null)}>} rows
+ * @param {Array<{seq:number, iso?:string|null, submittedAt?:(Date|string|null), orderSource?:string}>} rows
  * @returns {Array} 같은 원소들을 정렬한 새 배열
  */
 function orderRowsForNumbering(rows, opts = {}) {
@@ -69,15 +69,29 @@ function orderRowsForNumbering(rows, opts = {}) {
     if (today && iso < today && r && r.filled === false) return 1;  // ⑤ 지나간 날짜의 빈 줄
     return 0;
   };
+  // 외부모집 수동제출은 관리자가 미리 배정한 작업표 행이 운영상의 확정 순서다.
+  // 일반 구매양식 제출의 실제 제출시각 순서는 그대로 유지한다. 둘이 같은 날짜에
+  // 섞이면 수동제출 그룹을 먼저 두어 비교기가 비추이적으로 되는 것을 막는다.
+  const isExternalManual = r => _txt(r && r.orderSource) === 'admin_external';
   return (Array.isArray(rows) ? rows.slice() : []).sort((a, b) => {
     const ra = rank(a), rb = rank(b);
     if (ra !== rb) return ra - rb;
     const ai = _txt(a && a.iso), bi = _txt(b && b.iso);
     if (ai && bi && ai !== bi) return ai < bi ? -1 : 1; // ① 구매일자 asc ('YYYY-MM-DD' 문자열 비교 = 날짜 비교)
+    // 날짜를 해석하지 못한 행은 기존 seq 안정정렬 계약을 그대로 따른다.
+    // 따라서 외부모집 우선 규칙은 같은 유효 구매일자 안에서만 적용한다.
+    const sameParsedPurchaseDate = Boolean(ai && bi && ai === bi);
+    if (sameParsedPurchaseDate) {
+      const aExternal = isExternalManual(a), bExternal = isExternalManual(b);
+      if (aExternal !== bExternal) return aExternal ? -1 : 1; // ② 외부모집 수동제출은 배정 행 그룹 우선
+      if (aExternal && bExternal) {
+        return (Number(a && a.seq) || 0) - (Number(b && b.seq) || 0); // ③ 수동제출은 배정 행(seq) 순
+      }
+    }
     const at = t(a && a.submittedAt), bt = t(b && b.submittedAt);
-    if ((at == null) !== (bt == null)) return at == null ? 1 : -1;  // ② 주문 없는 빈 슬롯은 그 날짜 뒤
-    if (at != null && bt != null && at !== bt) return at - bt;      // ② 제출 시각 asc
-    return (Number(a && a.seq) || 0) - (Number(b && b.seq) || 0);   // ③ 안정 정렬
+    if ((at == null) !== (bt == null)) return at == null ? 1 : -1;  // ④ 주문 없는 빈 슬롯은 그 날짜 뒤
+    if (at != null && bt != null && at !== bt) return at - bt;      // ④ 일반 제출은 제출 시각 asc
+    return (Number(a && a.seq) || 0) - (Number(b && b.seq) || 0);   // ⑤ 안정 정렬
   });
 }
 

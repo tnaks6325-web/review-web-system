@@ -93,6 +93,7 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
      ★ 주문이 취소(soft-delete)된 줄은 시각을 쓰지 않는다 — 살아 있는 주문만 순서의 근거다. */
   const { rows } = await db.query(
     `SELECT p.id, p.seq, p.row_json, os.submitted_at AS submitted_at,
+            COALESCE(os.source, '') AS order_source,
             ${FILLED_SQL} AS filled
        FROM campaign_participants p
        LEFT JOIN order_submissions os
@@ -136,6 +137,7 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
     const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
     return {
       id: r.id, seq: r.seq, iso: iso[i] || null, submittedAt: r.submitted_at || null,
+      orderSource: r.order_source || '',
       number: rj[numKey], filled: r.filled === true,
     };
   }), { hasNumberCol: true, today: todayIso });
