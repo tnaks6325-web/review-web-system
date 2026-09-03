@@ -7694,7 +7694,7 @@ function onCardImgDrop(e, cid) {
 
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
-  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.lastBase64=""; st.lastMime=""; st.extracted=null; st.extractToken=""; st.approvalToken=""; st.reviewToken=""; }
+  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.extractToken=""; st.approvalToken=""; st.reviewToken=""; st.matchError=false; }
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
@@ -7766,6 +7766,12 @@ function _retryCardAi(cid) {
 
 async function _callCardExtractAi(cid, base64, mimeType) {
   const st = _cardAiState[cid]; if (!st) return;
+  const requestId = (Number(st.analysisRequestId) || 0) + 1;
+  st.analysisRequestId = requestId;
+  // 새 캡처를 분석하기 시작하는 순간 이전 캡처의 추출/검토/승인 증명은 모두 폐기한다.
+  // 새 분석이 실패해도 과거 승인토큰으로 제출되는 stale-capture 우회를 막는다.
+  st.extracted = null; st.extractToken = ""; st.imageHash = "";
+  st.approvalToken = ""; st.reviewToken = ""; st.matchError = false;
   const gasUrl = APP_CONFIG.GAS_WEB_APP_URL;
   if (!gasUrl) { _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
   st.lastBase64 = base64; st.lastMime = mimeType;
@@ -7789,8 +7795,12 @@ async function _callCardExtractAi(cid, base64, mimeType) {
 
   // Abort
   if (st.abortCtrl) st.abortCtrl.abort();
-  st.abortCtrl = new AbortController();
-  const tid = setTimeout(() => { st.abortCtrl.abort(); st.abortCtrl = null; }, 35000);
+  const abortCtrl = new AbortController();
+  st.abortCtrl = abortCtrl;
+  const tid = setTimeout(() => {
+    abortCtrl.abort();
+    if (st.abortCtrl === abortCtrl) st.abortCtrl = null;
+  }, 35000);
 
   try {
     const payload = { action: "extractOrderImage", imageBase64: base64, mimeType };
@@ -7799,8 +7809,10 @@ async function _callCardExtractAi(cid, base64, mimeType) {
       // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
       json = await gasPostUpload(payload, 35000);
       clearTimeout(tid);
+      if (st.analysisRequestId !== requestId) return;
     } catch(fe) {
       clearTimeout(tid);
+      if (st.analysisRequestId !== requestId) return;
       _stopCardCountdown(cid);
       document.getElementById(cid+"_aiLoading").classList.remove("show");
       _showCardAiError(cid, fe.name==="AbortError" ? "⏱ 15초 안에 응답이 없었습니다." : "이미지 전송 실패: "+fe.message, true);
@@ -7820,7 +7832,8 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
     st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
-    await _matchCardIdentity(cid);
+    await _matchCardIdentity(cid, requestId);
+    if (st.analysisRequestId !== requestId) return;
 
     // 주문번호 자동 입력
     if (st.extracted.orderNumber) {
@@ -7833,6 +7846,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
       _ncVerifyIdentity(cid, st.extracted);
     }
   } catch(err) {
+    if (st.analysisRequestId !== requestId) return;
     _stopCardCountdown(cid);
     document.getElementById(cid+"_aiLoading").classList.remove("show");
     _showCardAiError(cid, err.message, true);
@@ -7863,16 +7877,23 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
     + (canManual ? `<button type="button" onclick="_manualConfirmIdentity('${cid}')" style="margin-top:7px;width:100%;padding:7px;border:1px solid ${palette[1]};border-radius:7px;background:#fff;color:${palette[2]};font-weight:800;cursor:pointer">이 주문이 선택 명의의 주문임을 직접 확인</button>` : '');
 }
 
-async function _matchCardIdentity(cid) {
+async function _matchCardIdentity(cid, requestId) {
   const st = _cardAiState[cid]; if (!st?.extracted || !st.extractToken) return;
   try {
     await _loadOrderIdentityContext();
+    if (requestId != null && st.analysisRequestId !== requestId) return;
     const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match", {
       method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify(_reviewerIdentityRequestBody({ extractToken: st.extractToken, extracted: st.extracted })),
     });
     const data = await response.json();
-    if (!response.ok || !data?.ok) throw new Error(data?.error || "명의를 확인하지 못했습니다.");
+    if (requestId != null && st.analysisRequestId !== requestId) return;
+    if (!response.ok || !data?.ok) {
+      const error = new Error(data?.error || "명의를 확인하지 못했습니다.");
+      error.canManualIdentityCheck = response.status >= 500;
+      throw error;
+    }
+    st.matchError = false;
     st.approvalToken = data.approvalToken || "";
     st.reviewToken = data.reviewToken || "";
     if (data.resolved) st.extracted = { ...st.extracted, ...data.resolved };
@@ -7880,15 +7901,19 @@ async function _matchCardIdentity(cid) {
     if (data.status === "MATCH" || data.status === "REVIEW") applyCardAiResult(cid);
     _renderIdentityMatchState(cid, data.status, data.reasons || [], data.status === "REVIEW" && !!st.reviewToken);
   } catch (err) {
+    if (requestId != null && st.analysisRequestId !== requestId) return;
     st.approvalToken = "";
+    // 인증·문맥·증명 오류(4xx)는 재로그인/재분석 대상이다. 서버/AI 장애와 네트워크
+    // 실패만 수동 확인 대상으로 열고, 서버가 다시 결정적 불일치를 검사한다.
+    st.matchError = err.canManualIdentityCheck !== false;
     _showCardAiResult(cid, st.extracted);
-    _renderIdentityMatchState(cid, "ERROR", [err.message], false);
+    _renderIdentityMatchState(cid, "ERROR", [err.message], !!(st.matchError && st.extractToken));
   }
 }
 
 async function _manualConfirmIdentity(cid) {
   const st = _cardAiState[cid]; if (!st) return;
-  const mode = st.reviewToken ? "review" : "ai_error";
+  const mode = st.reviewToken ? "review" : (st.matchError && st.extracted ? "match_error" : "ai_error");
   if (!confirm("주문 캡처와 입력 정보를 직접 확인했으며, 현재 선택한 명의의 주문이 맞습니까?")) return;
   try {
     const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
@@ -8407,7 +8432,7 @@ async function _prepareIdentityApprovals(orders) {
       if (!st.approvalToken) {
         _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
           [st.extractToken ? "명의 확인을 완료해주세요." : "캡처 AI 분석을 다시 시도해주세요."],
-          !!(st.reviewToken || (st.extractToken && !st.extracted)));
+          !!(st.reviewToken || (st.extractToken && (!st.extracted || st.matchError))));
         document.getElementById(order.cid + "_identityStatus")?.scrollIntoView({ behavior:"smooth", block:"center" });
         showToast("캡처의 참여 명의 확인을 완료해주세요.", "warning");
         return false;

@@ -903,6 +903,7 @@ function onOptSheetConfirm(){
    서버 계약: apply body에 subName/subPhone 있으면 타계정 참여. 서버가 소유자 sub_accounts로
    명의를 재검증하고, 응답 phone8 = "명의" p8(= 홀드 키). 화면 상태는 클라 추정이고 최종 권위는 서버 409. */
 let _subs = null;          // 소유자의 타계정 목록(profile get 캐시)
+let _subsLoadError = null; // 조회 실패를 타계정 0개로 오인해 명의 선택을 건너뛰지 않는다
 let _acctSel = null;       // 시트에서 고른 명의 { type:'self'|'sub', name, phone8, phone }
 let _acctOptKey = null;    // 옵션 공고에서 명의 선택 후 이어질 옵션키
 let _acctNext = 'apply';   // apply | option — 최초 참여는 명의를 먼저 고른 뒤 옵션으로 이동
@@ -919,12 +920,14 @@ async function loadSubs(force){
   try{
     const r = await fetch(API_BASE_URL + '/api/reviewer/profile/secure', { headers:_getAuthHeaders() });
     const j = await r.json().catch(()=>({}));
+    if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || '명의 정보를 불러오지 못했습니다.');
     const identities = (j && j.profile && j.profile.identities) || [];
     _subs = Array.isArray(identities)
       ? identities.filter(x => x && x.type === 'sub' && x.name && x.phone)
       : [];
+    _subsLoadError = null;
     try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?phone8=' + encodeURIComponent(s.phone8) + '&ids=' + encodeURIComponent(CAMP_ID)); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
-  }catch(_){ _subs = []; }
+  }catch(e){ _subs = null; _subsLoadError = e; }
   return _subs;
 }
 
@@ -1001,6 +1004,7 @@ async function openAcctSheet(optionKey, next){
   _acctOptKey = optionKey || null;
   _acctNext = next || 'apply';
   await loadSubs();
+  if(_subsLoadError){ toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요'); return; }
   await loadPopCredit();          // ★ 명의별 참여권이 도착한 뒤에 그린다(모르면 종전대로 그린다)
   // 타계정이 하나도 없고 본계정도 이미 참여중이면 → 등록 유도
   const rows = _acctRows();
@@ -1053,6 +1057,7 @@ async function onAddSubJoin(){
   if(PREVIEW) return _pvBlock('타계정 추가참여');
   const s = getSession(); if(!s) return needLogin(onAddSubJoin);
   await loadSubs();
+  if(_subsLoadError) return toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요');
   if(!(_subs || []).length) return openAcctEmpty();
   return openAcctSheet(null, 'option');
 }
@@ -1152,6 +1157,7 @@ async function onJoin(){
     if(!s) return needLogin(onJoin);
     if(multiEnabled()) {
       await loadSubs();
+      if(_subsLoadError) return toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요');
       // 타계정이 하나 이상인 허용 공고에서만 명의를 먼저 고른다.
       if((_subs || []).length) return openAcctSheet(null, 'option');
     }

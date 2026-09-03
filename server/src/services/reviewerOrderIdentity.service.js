@@ -480,6 +480,13 @@ async function manualConfirm(body, reviewer) {
     const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
     if (extract.extractOk) throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', 'AI 분석 성공 건은 명의 매칭 결과를 먼저 확인해주세요.', 409);
     imageHash = extract.imageHash; extractedHash = extract.fieldsHash; reasonCodes = ['ai_extract_failed'];
+  } else if (mode === 'match_error') {
+    // 캡처 추출은 끝났지만 주소 의미비교 등 명의 매칭 단계의 AI가 장애난 경우.
+    // 클라이언트가 임의 필드를 만들어 우회하지 못하게 성공 추출증명을 다시 검증하고,
+    // 아래 공통 결정적 불일치 검사(useGemini:false)를 통과한 건만 수동 확인시킨다.
+    const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
+    if (!extract.extractOk) throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', '캡처 추출에 실패한 건은 AI 분석 장애 확인 절차를 이용해주세요.', 409);
+    imageHash = extract.imageHash; extractedHash = extract.fieldsHash; reasonCodes = ['identity_match_unavailable'];
   } else if (mode === 'no_capture') {
     reasonCodes = ['no_capture_exception'];
   } else {

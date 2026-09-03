@@ -84,6 +84,26 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:manual.approvalToken }, reviewer);
   });
 
+  await test('명의 매칭 AI 장애도 성공 추출증명과 결정적 불일치 재검사 후 수동확인 가능하다', async () => {
+    const extracted = { ...selectedFields };
+    const proof = identity.issueExtractionProof({ imageHash:'9'.repeat(64), extracted, ok:true });
+    const manual = await identity.manualConfirm({
+      ...base, mode:'match_error', manualConfirmed:true, extractToken:proof.extractToken,
+      extracted, formFields:selectedFields,
+    }, reviewer);
+    assert.strictEqual(manual.mode, 'match_error');
+    await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:manual.approvalToken }, reviewer);
+  });
+
+  await test('명의 매칭 장애 수동확인도 다른 명의의 입력은 차단한다', async () => {
+    const otherFields = { recipient:'박영희', phone:'010-9999-8888', address:'부산 해운대구 센텀로 20 202동 505호' };
+    const proof = identity.issueExtractionProof({ imageHash:'8'.repeat(64), extracted:otherFields, ok:true });
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'match_error', manualConfirmed:true, extractToken:proof.extractToken,
+      extracted:otherFields, formFields:otherFields,
+    }, reviewer), (err) => err.code === 'IDENTITY_MISMATCH');
+  });
+
   await test('캡처 없이 제출 예외도 사용자 확인 토큰을 발급한다', async () => {
     const manual = await identity.manualConfirm({
       ...base, mode:'no_capture', manualConfirmed:true, formFields:selectedFields,

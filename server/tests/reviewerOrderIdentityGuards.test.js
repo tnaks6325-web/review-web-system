@@ -68,11 +68,18 @@ ok('과거 다명의 일괄 제출 부팅은 명시적으로 비활성화돼 카
 ok('구매양식은 체크한 경우에만 제출 성공 뒤 명의 아이디 저장 API를 호출한다',
   /saveShoppingId:\s*!!document\.getElementById\(cid\+"_saveIdChk"\)/.test(appJs)
   && /if \(o\.saveShoppingId\)[\s\S]{0,180}?_saveOrderShoppingIdIfRequested/.test(appJs));
+ok('새 캡처 분석 시작 시 이전 캡처 승인·검토·추출 토큰을 모두 폐기한다',
+  /새 캡처를 분석하기 시작하는 순간[\s\S]{0,260}?st\.approvalToken = ""; st\.reviewToken = ""; st\.matchError = false/.test(appJs));
+ok('연속 캡처 분석의 늦은 응답은 request id로 폐기해 최신 캡처 증명을 덮지 못한다',
+  /const requestId = \(Number\(st\.analysisRequestId\) \|\| 0\) \+ 1/.test(appJs)
+  && (appJs.match(/st\.analysisRequestId !== requestId/g) || []).length >= 5
+  && /_matchCardIdentity\(cid, requestId\)/.test(appJs));
 ok('공통 아이디 저장 체크는 카드 한 장만 선택 가능하다',
   /onchange="_selectShoppingIdSave\('\$\{cid\}'\)"/.test(appJs)
   && /other\.checked = false/.test(appJs));
-ok('AI 장애와 무캡처 예외는 명시 수동확인 토큰을 거친다',
-  /mode = st\.reviewToken \? "review" : "ai_error"/.test(appJs)
+ok('AI 추출·명의매칭 장애와 무캡처 예외는 명시 수동확인 토큰을 거친다',
+  /st\.matchError && st\.extracted \? "match_error" : "ai_error"/.test(appJs)
+  && /mode === 'match_error'/.test(service)
   && /mode:"no_capture", manualConfirmed:true/.test(appJs));
 ok('NC 주문도 각 캡처의 수취인·전화·주소를 독립 적용한다',
   /const recipient = gv\(cid\+"_recipient"\)/.test(appJs)

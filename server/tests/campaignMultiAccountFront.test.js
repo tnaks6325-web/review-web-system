@@ -67,6 +67,10 @@ ok('명의 선택 시트 + 미등록 안내 시트 존재', /id="acctSheet"/.tes
 ok('참여 후 명의 카드·전환 칩·추가참여 버튼', /id="acctBox"/.test(camp) && /id="acctSwitch"/.test(camp) && /id="addSubBtn"/.test(camp));
 ok('타계정 목록은 서명 세션 기반 secure profile API로 소유자 범위를 고정',
   /\/api\/reviewer\/profile\/secure/.test(camp) && /headers:_getAuthHeaders\(\)/.test(camp));
+ok('secure profile 조회 실패는 타계정 0개로 취급하지 않고 최초 명의 선택을 차단',
+  /let _subsLoadError = null/.test(camp)
+  && /catch\(e\)\{ _subs = null; _subsLoadError = e; \}/.test(camp)
+  && /if\(_subsLoadError\) return toast\('명의 정보를 불러오지 못했습니다/.test(camp));
 ok('타계정이 있는 허용 공고는 명의를 먼저 선택한 뒤 옵션으로 이동',
   /if\(multiEnabled\(\)\)[\s\S]{0,180}if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(camp)
   && /function _continueInitialAcct\(\)/.test(camp));
