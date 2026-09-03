@@ -176,6 +176,9 @@ ok('CSS 는 제출(주문·리뷰) 4열 목록·2분할 무대를 갖는다',
   /\.rvplitem\{width:100%;display:grid;grid-template-columns:38px minmax\(0,1fr\) 42px 42px/.test(WD)
   && /\.rvplsubmit\{grid-column:3 \/ 5/.test(WD)
   && /\.rvpcols\{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr/.test(WD));
+ok('UI-LAYOUT-01 — 인라인 필터가 목록 높이를 바꿔도 사이드바 가로폭은 고정',
+  /\.ui-stable-vscroll\{overflow-y:scroll;scrollbar-gutter:stable\}/.test(WD)
+  && /<aside class="rvplist ui-stable-vscroll">/.test(WD));
 ok('★ 세로로 긴 캡처가 칸을 뚫지 않는다(min-height:0)', /\.rvpbody\{flex:1;min-height:0;/.test(WD));
 ok('좁은 화면은 필터 포함 목록 머리를 접고 무대를 위아래로', /\.rvplhd,\.rvplcols,\.rvplfilter\{display:none\}/.test(WD) && /\.rvpcols\{grid-template-columns:1fr;grid-template-rows:1fr 1fr\}/.test(WD));
 ok('시안 문서가 있다', fs.existsSync(path.join(__dirname, '..', '..', 'frontend/docs/design-submission-preview.html')));
