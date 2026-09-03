@@ -9,18 +9,23 @@ assert.ok(/order_submission_id = \$3::uuid/.test(source), 'idempotent retry must
 assert.ok(/FOR UPDATE SKIP LOCKED/.test(source), 'concurrent submissions must claim different open slots');
 assert.ok(/order_submission_id IS NULL/.test(source), 'only an unlinked slot may be claimed');
 assert.ok(/order_submission_id = \$9::uuid/.test(source), 'the claimed worktable row must link to the order ledger');
-/* ★★ 작업보드의 모집 정원은 실제 행 수와 같아야 한다. 일반 제출·재시도·복구는 빈 슬롯이
-   없으면 행을 늘리지 않고, 외부모집 수동제출만 원장의 출처·수취인·연락처를 확인한 뒤 예외로
-   이어붙일 수 있다. 이 경계가 풀리면 300건 작업에 빈 301번 슬롯이 생긴다. */
-assert.ok(/async function _isConfirmedExternalManualOrder/.test(source), 'external-manual overflow gate must exist');
-assert.ok(/order\.source === 'admin_external'/.test(source), 'only admin_external orders may overflow the planned row count');
-assert.ok(/order\.recipient/.test(source) && /phone_digits/.test(source), 'overflow must require confirmed recipient and phone data');
-assert.ok(/const confirmedExternalManual = await _isConfirmedExternalManualOrder/.test(source), 'no-slot branch must check the ledger-backed external-manual gate');
-assert.ok(/if \(!confirmedExternalManual\) \{[\s\S]{0,360}?reason: 'no_open_slot'/.test(source),
+/* ★★ 작업보드의 모집 정원은 실제 행 수와 같아야 한다. 일반 제출·재시도는 빈 슬롯이 없으면
+   행을 늘리지 않는다. 외부모집 수동제출 또는 최근 48시간 큐 누락 복구 주문만 원장의 확정
+   필드를 다시 확인한 뒤 이어붙일 수 있다. 이 경계가 풀리면 빈 901번 준비 슬롯이 생긴다. */
+assert.ok(/async function _canAppendConfirmedOverflowOrder/.test(source), 'ledger-backed overflow gate must exist');
+assert.ok(/order\.source === 'admin_external'/.test(source), 'existing admin_external overflow path must remain');
+assert.ok(/allowRecoveredQueueOverflow/.test(source) && /order\.source !== 'order_submit'/.test(source),
+  'only an explicitly recovered order_submit may use the second overflow path');
+assert.ok(/order\.recipient/.test(source) && /phone_digits/.test(source) && /order\.order_num/.test(source),
+  'recovered overflow must require confirmed recipient, phone, and order number data');
+assert.ok(/submittedAt > Date\.now\(\) - 48 \* 60 \* 60 \* 1000/.test(source), 'recovered overflow must be limited to the last 48 hours');
+assert.ok(/String\(order\.workboard_id\) !== String\(workboardId\)/.test(source), 'recovered overflow must match the target workboard');
+assert.ok(/const confirmedOverflow = await _canAppendConfirmedOverflowOrder/.test(source), 'no-slot branch must check the ledger-backed overflow gate');
+assert.ok(/if \(!confirmedOverflow\) \{[\s\S]{0,360}?reason: 'no_open_slot'/.test(source),
   'ordinary no-slot writes must roll back instead of preparing an overflow row');
-assert.ok(/confirmedExternalManual[\s\S]{0,1400}?appendSlot\(client/.test(source),
-  'only the confirmed external-manual branch may append a physical overflow row');
-assert.ok(/const confirmedExternalManual = await _isConfirmedExternalManualOrder\(client, orderSubmissionId\);[\s\S]{0,420}?없는 지정 행 거부/.test(source),
+assert.ok(/confirmedOverflow[\s\S]{0,1400}?appendSlot\(client/.test(source),
+  'only the confirmed overflow branch may append a physical overflow row');
+assert.ok(/const confirmedOverflow = await _canAppendConfirmedOverflowOrder\(client, orderSubmissionId,[\s\S]{0,520}?없는 지정 행 거부/.test(source),
   'a missing explicitly assigned row must also reject ordinary orders instead of recreating an overflow slot');
 /* ★ "문자열이 있나"로 재면 호출을 죽여도(`if(false)` · 다른 함수로 교체) 통과한다 —
    변이시험이 실제로 뚫었다. 호출 형태와 **순서**를 고정한다. */

@@ -64,7 +64,9 @@ async function resolveQueuedWorkboardTarget({ sheetId, tabName } = {}) {
   return { enabled: true, workboardId: tab.workboardId, mode: control.mode };
 }
 
-async function applyQueuedWorkboardOrder({ sheetId, tabName, tabGid = '', orderSubmissionId, loginPhone8 = '', loginName = '' } = {}) {
+async function applyQueuedWorkboardOrder({
+  sheetId, tabName, tabGid = '', orderSubmissionId, loginPhone8 = '', loginName = '', recovered = false,
+} = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) throw new Error('payload 누락: sheetId, tabName, orderSubmissionId');
   const target = await resolveQueuedWorkboardTarget({ sheetId, tabName });
   if (!target.enabled) throw deferred(`workboard_apply 보류: ${target.reason}`);
@@ -101,6 +103,8 @@ async function applyQueuedWorkboardOrder({ sheetId, tabName, tabGid = '', orderS
     sheetId, tabName, tabGid: tabGid || order.tab_gid || order.gid || '',
     workboardId: target.workboardId,
     orderData: _osRowToOrderData(order), orderSubmissionId, loginPhone8, loginName,
+    // 큐 누락 복구기가 만든 payload만 허용한다. write 함수가 원장 조건을 다시 검증한다.
+    allowRecoveredQueueOverflow: recovered === true,
   });
   if (!out || !out.ok) throw new Error(`작업보드 반영 실패: ${(out && (out.message || out.reason)) || 'unknown'}`);
   // 동일 주문이 이미 반영된 경우도 큐는 수렴 완료다. 새 슬롯을 만들지 않았다는 사실을 남긴다.

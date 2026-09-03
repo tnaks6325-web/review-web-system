@@ -46,26 +46,37 @@ function _phone8(v) {
 function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
 
 /*
- * 작업표 정원을 넘겨 줄을 만들 수 있는 유일한 경우.
+ * 작업표 정원을 넘겨 줄을 만들 수 있는 경우.
  *
  * 외부모집 수동제출은 이미 외부에서 구매가 확정된 건을 사후 기록하는 흐름이라, 준비된
- * 슬롯이 모두 찬 경우에도 실제 주문 행 하나를 남길 필요가 있다. 반대로 일반 제출·재시도·
- * 복구는 이 분기로 들어오면 안 된다. 이 확인을 호출자가 준 플래그가 아니라 원장 행에서
- * 다시 하는 이유는, 빈 301번 "준비 슬롯"이 일반 경로에서 생기는 일을 재발시키지 않기 위해서다.
+ * 슬롯이 모두 찬 경우에도 실제 주문 행 하나를 남길 필요가 있다. 여기에 더해 최근 48시간 내
+ * `workboard_apply` 큐 자체가 누락돼 복구기가 다시 넣은 일반 구매 주문도 이미 결제가 끝난
+ * 원장이다. 이 경우에만 복구 표식 + 원장 상태·작업보드 연결·수취인·연락처·주문번호를 모두
+ * 확인해 초과 행을 허용한다. 단순 재시도나 호출자 플래그 하나만으로는 열리지 않는다.
  */
-async function _isConfirmedExternalManualOrder(client, orderSubmissionId) {
+async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
+  allowRecoveredQueueOverflow = false, workboardId = null,
+} = {}) {
   const { rows } = await client.query(
     `SELECT source,
             NULLIF(btrim(COALESCE(recipient, '')), '') AS recipient,
-            regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS phone_digits
+            regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS phone_digits,
+            NULLIF(btrim(COALESCE(order_num, '')), '') AS order_num,
+            mirror_status, submitted_at, workboard_id
        FROM order_submissions
       WHERE id = $1::uuid AND deleted_at IS NULL
       FOR KEY SHARE`, [orderSubmissionId]);
   const order = rows[0];
-  return !!(order
-    && order.source === 'admin_external'
-    && order.recipient
-    && String(order.phone_digits || '').length >= 8);
+  const identified = !!(order && order.recipient && String(order.phone_digits || '').length >= 8);
+  if (!identified) return false;
+  if (order.source === 'admin_external') return true; // 기존 외부모집 수동제출 규칙 보존
+  if (!allowRecoveredQueueOverflow || order.source !== 'order_submit' || !order.order_num || !workboardId) return false;
+  if (!['pending', 'pending_no_row', 'failed', 'queued'].includes(String(order.mirror_status || ''))) return false;
+  if (!order.workboard_id || String(order.workboard_id) !== String(workboardId)) return false;
+  const submittedAt = new Date(order.submitted_at).getTime();
+  return Number.isFinite(submittedAt)
+    && submittedAt <= Date.now() + 5 * 60 * 1000
+    && submittedAt > Date.now() - 48 * 60 * 60 * 1000;
 }
 
 /**
@@ -137,11 +148,13 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
  * @param {string} o.orderSubmissionId
  * @param {string} [o.loginPhone8] · [o.loginName]
  * @param {boolean} [o.recovered]        복구 재기록(비고 표기용 — 시트 경로와 같은 의미)
+ * @param {boolean} [o.allowRecoveredQueueOverflow] 큐 누락 복구 주문만 초과 행 허용
  * @returns {Promise<{ok:boolean, written?:boolean, reason?:string, ledger?:object}>}
  */
 async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
   orderSubmissionId, workboardId = null, loginPhone8 = '', loginName = '', recovered = false,
+  allowRecoveredQueueOverflow = false,
 } = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
@@ -326,16 +339,17 @@ async function writeOrderToWorktable({
             LIMIT 1`, [sheetId, tabName, workboardId, scheduledUnitKey]));
       }
       if (!cur.length) {
-        /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 여기서 줄을 이어붙이면 300건 작업에
-           빈 301번 슬롯이 남고, 작업보드 집계도 301/300으로 틀어진다. 예외는 외부모집 수동제출의
-           확정 주문뿐이며, 원장 출처·수취인·연락처를 같은 트랜잭션에서 다시 확인한다. */
-        const confirmedExternalManual = await _isConfirmedExternalManualOrder(client, orderSubmissionId);
-        if (!confirmedExternalManual) {
+        /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문과
+           최근 48시간 내 큐 누락 복구 주문뿐이며, 원장 필드를 같은 트랜잭션에서 다시 확인한다. */
+        const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
+          allowRecoveredQueueOverflow, workboardId,
+        });
+        if (!confirmedOverflow) {
           await client.query('ROLLBACK');
           logger.warn(`[sheetlessOrder] 빈 슬롯 없음 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} os=${orderSubmissionId}`);
           return { ok: false, reason: 'no_open_slot' };
         }
-        /* ★ 외부모집 수동제출만: 실제로 확정된 주문 데이터를 곧바로 채울 행을 하나 추가한다.
+        /* ★ 허용된 확정 주문만: 주문 데이터를 곧바로 채울 행을 하나 추가한다.
            append와 UPDATE는 같은 트랜잭션이므로 중간 실패 시 ROLLBACK되어 빈 행이 남지 않는다.
            ★ fail-closed — 무시트로 등록된 탭에서만 이어붙인다. */
         const { rows: tc } = await client.query(
@@ -349,7 +363,7 @@ async function writeOrderToWorktable({
           sheetId, tabName, tabGid: gid || null, workboardId, by: 'sheetless-order-append',
         });
         if (!appended) { await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
-        logger.warn(`[sheetlessOrder] 외부모집 수동제출 확정 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
+        logger.warn(`[sheetlessOrder] 확정된 초과 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
         cur = [appended];
       }
       seq = Number(cur[0].seq);
@@ -394,18 +408,20 @@ async function writeOrderToWorktable({
       }
     } else {
       // 행 번호가 명시됐어도 없는 번호에 일반 주문 행을 만들면, 오래된 행배정 값 하나가
-      // 모집 인원을 넘는 빈 슬롯을 재생성한다. 실제 외부모집 수동제출만 예외로 허용한다.
+      // 모집 인원을 넘는 빈 슬롯을 재생성한다. 위와 같은 확정 초과 주문만 예외로 허용한다.
       if (requestedSeq == null) {
         await client.query('ROLLBACK');
         return { ok: false, reason: 'no_open_slot' };
       }
-      const confirmedExternalManual = await _isConfirmedExternalManualOrder(client, orderSubmissionId);
-      if (!confirmedExternalManual) {
+      const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
+        allowRecoveredQueueOverflow, workboardId,
+      });
+      if (!confirmedOverflow) {
         await client.query('ROLLBACK');
         logger.warn(`[sheetlessOrder] 없는 지정 행 거부 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} seq=${requestedSeq} os=${orderSubmissionId}`);
         return { ok: false, reason: 'no_open_slot' };
       }
-      // 외부모집 수동제출의 확정 주문만: 표 끝을 넘어 배정된 그 자리에 완성 행을 만든다.
+      // 확정 초과 주문만: 표 끝을 넘어 배정된 그 자리에 완성 행을 만든다.
       //   ★ source='worktable' — `importTabFromIndex` 상태 CASE 가 인정하는 값(신규 값 금지).
       const inserted = await client.query(
         `INSERT INTO campaign_participants
@@ -739,5 +755,6 @@ module.exports = {
   reconcileCampaignWorktableLinks,
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,
+  __canAppendConfirmedOverflowOrderForTest: _canAppendConfirmedOverflowOrder,
   __setPoolForTest,
 };
