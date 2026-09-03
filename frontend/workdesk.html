@@ -9511,7 +9511,7 @@ function _menuDeleteRow(){
 async function _reloadWorkdeskAfterColorSaveFailure(t){
   if(!t || !STATE.cur || STATE.cur.sheetId!==t.sheetId || STATE.cur.tabName!==t.tabName) return;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
-  const fresh=await api('/api/trackb/workdesk?'+q).catch(()=>null);
+  const fresh=await api('/api/trackb/workdesk?'+q,{cache:'no-store'}).catch(()=>null);
   if(fresh&&fresh.ok&&STATE.cur&&STATE.cur.sheetId===t.sheetId&&STATE.cur.tabName===t.tabName) renderWorkdesk(fresh);
 }
 function _applyRangeColor(color){
