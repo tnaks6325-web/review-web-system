@@ -1734,11 +1734,14 @@
   /* 내부 작업보드의 C/S는 상단 메뉴와 같은 방을 작업 단위로만 좁혀 보여 주는 미니 창이다.
      QHD에서는 네 번째 카드가 오른쪽에 붙고, 폭이 줄면 아래 전폭으로 내려가 표·카드를 밀어내지 않는다. */
   .tp3grid.c3.csmini{grid-template-columns:minmax(230px,390fr) minmax(230px,390fr) minmax(330px,560fr) minmax(260px,320fr);max-width:1720px}
-  .tp3grid.c3 .wdcsmini-pane{min-width:0;min-height:330px;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  /* C/S 미니는 같은 상단 카드의 기본 높이(330px)까지만 쓴다. 제출 캡처가 길어
+     같은 그리드 행이 커져도 이 패널까지 늘어나지 않으며, 목록·대화만 내부에서 스크롤한다. */
+  .tp3grid.c3.csmini .wdcsmini-pane{min-width:0;align-self:start;height:330px;min-height:0;max-height:330px;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:12px}
   .wdcsmini{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--ink);background:var(--card)}
-  .wdcsmini-head{display:flex;align-items:center;justify-content:space-between;padding:10px 11px;border-top:3px solid var(--accent);border-bottom:1px solid var(--line);font-size:11.5px;font-weight:800}
-  .wdcsmini-head span{display:flex;align-items:center;gap:6px}.wdcsmini-head i{width:7px;height:7px;border-radius:50%;background:#f07c5a;box-shadow:0 0 0 3px #fff1ed}
-  .wdcsmini-head button{border:0;background:transparent;color:var(--accent-deep);font:inherit;font-size:10px;font-weight:750;cursor:pointer}
+  /* 제목행은 작업 조건·진행 현황·제출물 미리보기와 같은 tp3 제목행을 쓴다.
+     우측 전체보기만 독립 동작하며, 제목행 클릭은 네 블록의 접기/펼치기를 함께 바꾼다. */
+  .wdcsmini-head{justify-content:flex-start;padding:11px 13px;border-bottom:1px solid var(--line);margin-bottom:0}
+  .wdcsmini-head button{margin-left:3px;border:0;background:transparent;color:var(--accent-deep);font:inherit;font-size:10px;font-weight:750;cursor:pointer}
   .wdcsmini-body{display:grid;grid-template-columns:minmax(94px,.8fr) minmax(150px,1.3fr);flex:1;min-height:0}
   .wdcsmini-list{min-width:0;overflow-y:auto;padding:6px;border-right:1px solid var(--line);background:var(--card2)}
   .wdcsmini-listhead{display:flex;justify-content:space-between;padding:2px 3px 6px;color:var(--faint);font-size:10px;font-weight:800}.wdcsmini-listhead b{color:var(--accent)}
@@ -1748,9 +1751,9 @@
   .wdcsmini-conversation{min-width:0;min-height:0;display:flex;flex-direction:column}.wdcsmini-context{display:flex;justify-content:space-between;gap:6px;padding:8px 9px;border-bottom:1px solid var(--line);background:#f6f7ff}.wdcsmini-context b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.wdcsmini-context span{flex:none;color:var(--accent-deep);font-size:9px;font-weight:750}
   .wdcsmini-messages{flex:1;min-height:0;overflow-y:auto;padding:8px;background:#fbfcfe}.wdcsmini-message{display:flex;flex-direction:column;align-items:flex-start;margin-bottom:8px}.wdcsmini-message.mine{align-items:flex-end}.wdcsmini-sender{margin:0 2px 2px;color:var(--faint);font-size:9px;font-weight:750}.wdcsmini-bubble{max-width:94%;padding:7px 8px;border:1px solid var(--line);border-radius:4px 8px 8px;background:#fff;font-size:10px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.wdcsmini-message.mine .wdcsmini-bubble{border-color:var(--accent-soft);border-radius:8px 4px 8px 8px;background:var(--accent-soft);color:var(--accent-deep)}.wdcsmini-message time{margin-top:2px;color:var(--faint);font-size:8px}.wdcsmini-images{display:flex;flex-wrap:wrap;gap:4px}.wdcsmini-images img{width:52px;height:52px;object-fit:cover;border:1px solid var(--line);border-radius:6px;cursor:zoom-in}.wdcsmini-thread-empty,.wdcsmini-empty{padding:18px 7px;color:var(--faint);font-size:10px;text-align:center}.wdcsmini-error{padding:18px;color:#b45309;font-size:11px;line-height:1.5}
   .wdcsmini-compose{display:flex;gap:5px;padding:7px;border-top:1px solid var(--line)}.wdcsmini-compose input{min-width:0;flex:1;border:1px solid var(--line2);border-radius:6px;padding:6px;color:var(--ink);font:inherit;font-size:10px;outline:0}.wdcsmini-compose input:focus{border-color:var(--accent)}.wdcsmini-compose button{border:0;border-radius:6px;background:var(--accent);color:#fff;padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer}.wdcsmini-compose button:disabled{opacity:.45;cursor:default}
-  @media(max-width:1500px){.tp3grid.c3.csmini{grid-template-columns:minmax(230px,1fr) minmax(230px,1fr) minmax(330px,1.5fr);max-width:1380px}.tp3grid.c3.csmini .wdcsmini-pane{grid-column:1/-1;min-height:300px}.tp3grid.c3.csmini .wdcsmini-body{grid-template-columns:190px minmax(0,1fr)}}
+  @media(max-width:1500px){.tp3grid.c3.csmini{grid-template-columns:minmax(230px,1fr) minmax(230px,1fr) minmax(330px,1.5fr);max-width:1380px}.tp3grid.c3.csmini .wdcsmini-pane{grid-column:1/-1;height:300px;min-height:0;max-height:300px}.tp3grid.c3.csmini .wdcsmini-body{grid-template-columns:190px minmax(0,1fr)}}
   @media(max-width:1100px){.tp3grid.c3,.tp3grid.c3.csmini{grid-template-columns:1fr}
-    .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:0}.tp3grid.c3 .rvpane{min-height:340px}.tp3grid.c3.csmini .wdcsmini-pane{grid-column:auto;min-height:330px}.tp3grid.c3.csmini .wdcsmini-body{grid-template-columns:130px minmax(0,1fr)}}
+    .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:0}.tp3grid.c3 .rvpane{min-height:340px}.tp3grid.c3.csmini .wdcsmini-pane{grid-column:auto;height:330px;min-height:0;max-height:330px}.tp3grid.c3.csmini .wdcsmini-body{grid-template-columns:130px minmax(0,1fr)}}
   /* ① 작업 조건 10항목 — 작고 조밀하게(11.5px · 줄높이 22px) */
   .cndprod{font-size:12.5px;font-weight:750;line-height:1.35;margin-bottom:7px;
            display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -1823,6 +1826,8 @@
   .tp3grid.c3.fold .rvpane .rvfill{position:static;padding:8px 12px}
   .tp3grid.c3.fold .rvfill > :not(.rvhd){display:none}
   .tp3grid.c3.fold .rvfill .rvhd{margin-bottom:0}
+  .tp3grid.c3.fold .wdcsmini-pane{height:auto;max-height:none;min-height:0}
+  .tp3grid.c3.fold .wdcsmini-body{display:none}
   .cndchip{display:inline-block;background:var(--chip,#eef4ff);color:var(--p,#2456c9);border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
              border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px}
@@ -6294,8 +6299,8 @@ function summaryStrip(wd,d,m,c){
      예외는 **구매채널의 URL 판정 하나** — 그 판정의 단일 출처가 공유 모듈
      `work-order-detail.js._woChannelFromUrl` 이라 서버에 사본을 만들지 않았다.
    ★ 서버가 못 주면(구버전 백엔드·조회 실패) 종전 4줄로 떨어지고 사유를 말한다(빈 값 위장 금지). */
-/* ── 상단 세 박스 접기/펼치기(사용자 확정 2026-08-20 시안 v2) ──────────────────
-   ★ 어느 박스의 머리줄을 눌러도 **세 박스가 함께** 접히고 펼쳐진다(개별 접기 없음 —
+/* ── 상단 블록 접기/펼치기(사용자 확정 2026-08-20 시안 v2) ──────────────────
+   ★ 어느 박스의 머리줄을 눌러도 **네 블록이 함께** 접히고 펼쳐진다(개별 접기 없음 —
      하단선 높이가 항상 일치해야 한다는 확정과 한 몸). 상태는 localStorage(작업 무관 공통).
    ★ 접힘은 CSS 클래스 토글만 — 재렌더하지 않는다(미리보기 선택·스크롤을 잃지 않게). */
 function _topFolded(){ try{ return localStorage.getItem('wd_top3_fold')==='1'; }catch(_){ return false; } }
