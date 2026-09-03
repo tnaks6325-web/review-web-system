@@ -166,6 +166,9 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
           if (/SELECT id,[\s\S]*?row_json FROM campaign_participants/.test(sql)) {
             return { rows: exists ? [{ id: 'p1', row_json: curRowJson }] : [] };
           }
+          if (/SELECT id FROM campaign_participants/.test(sql) && /order_submission_id = \$4::uuid/.test(sql)) {
+            return { rows: exists ? [{ id: 'p1' }] : [] };
+          }
           return { rows: [], rowCount: 1 };
         },
         release: () => { log.released++; },

@@ -374,7 +374,7 @@ async function writeOrderToWorktable({
     const optText = selectedOptKey;
 
     if (cur.length) {
-      await client.query(
+      const persisted = await client.query(
         `UPDATE campaign_participants
             SET row_json = $4::jsonb,
                 reviewer_name  = COALESCE(NULLIF($5,''), reviewer_name),
@@ -386,6 +386,12 @@ async function writeOrderToWorktable({
                 updated_by = 'sheetless-order', updated_at = NOW()
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3`,
         [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId, workboardId]);
+      // UPDATE 대상이 사라졌다면 "완결"로 진행하면 안 된다. 이 함수의 성공은 실제 작업표 행과
+      // 주문 원장이 연결됐다는 뜻이어야 한다.
+      if (persisted.rowCount !== 1) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'workboard_row_not_linked', message: '선점한 작업표 행을 갱신하지 못했습니다.' };
+      }
     } else {
       // 행 번호가 명시됐어도 없는 번호에 일반 주문 행을 만들면, 오래된 행배정 값 하나가
       // 모집 인원을 넘는 빈 슬롯을 재생성한다. 실제 외부모집 수동제출만 예외로 허용한다.
@@ -401,14 +407,35 @@ async function writeOrderToWorktable({
       }
       // 외부모집 수동제출의 확정 주문만: 표 끝을 넘어 배정된 그 자리에 완성 행을 만든다.
       //   ★ source='worktable' — `importTabFromIndex` 상태 CASE 가 인정하는 값(신규 값 금지).
-      await client.query(
+      const inserted = await client.query(
         `INSERT INTO campaign_participants
            (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8,
             option_text, order_submission_id, row_json, workboard_id, source, updated_by, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::jsonb,$11::uuid,'worktable','sheetless-order',NOW())
-         ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
+         ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
+         RETURNING id`,
         [sheetId, gid || null, tabName, seq, reviewerName, recipientName, p8,
          optText || null, orderSubmissionId, JSON.stringify(merged), workboardId]);
+      // 지정 행이 다른 행과 충돌해 INSERT가 0건이면, 종전에는 이후 단계가 그대로 진행되어
+      // "큐 done + 작업표 미기록"이 될 수 있었다. 이 경우는 재시도 가능한 실패다.
+      if (inserted.rowCount !== 1) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'workboard_row_not_linked', message: '지정 작업표 행이 이미 점유되어 주문을 연결하지 못했습니다.' };
+      }
+    }
+    // SQL 성공 여부가 아니라, 이 주문이 목표 작업표 행에 실제 연결됐는지를 완료 조건으로 삼는다.
+    // workboardId가 있는 통폐합 큐는 다른 작업보드의 동명 탭 행을 성공으로 오인하지 않는다.
+    const { rows: linkedRows } = await client.query(
+      `SELECT id FROM campaign_participants
+        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3
+          AND order_submission_id = $4::uuid AND deleted_at IS NULL
+          AND ($5::uuid IS NULL OR workboard_id = $5)
+        FOR SHARE`,
+      [sheetId, tabName, seq, orderSubmissionId, workboardId]
+    );
+    if (linkedRows.length !== 1) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'workboard_row_not_linked', message: '작업표 행과 주문 원장 연결을 검증하지 못했습니다.' };
     }
     // 주문원장에 이미 확정된 코드 신원을 작업표 참여행에도 그대로 전파한다. 여기서 이름/번호로
     // 다시 찾지 않으므로, 제출 후 프로필이 바뀌어도 이 행의 실제 참여자 귀속은 고정된다.
