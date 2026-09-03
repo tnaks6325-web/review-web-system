@@ -1263,6 +1263,17 @@
         + '<div class="cmp">방식별 종료일 — 다음날에 <b>' + _esc(em('next')) + '</b> · 나눠 담기 <b>' + _esc(em('spread'))
         + '</b> · 뒤에 붙이기 <b>' + _esc(em('extend')) + '</b></div></div>';
     }
+    // 균형 배분표를 만들 수 없는 완전 수동 상태에서도 방식 선택은 숨기지 않는다.
+    // 선택은 공고에 즉시 저장되고, 날짜별 계획을 다시 만들 수 있을 때 동일 방식으로 배분된다.
+    if (!bal && carryNeed !== null && carryNeed > 0) {
+      carryBlk = '<div class="cdp-carry"><div class="t">모집이월 방식</div>'
+        + '<div class="d">현재 날짜별 계획을 자동 배분할 수 없어 <b>수동 조절</b> 상태입니다. 아래 선택은 공고 설정과 함께 저장되며, 계획을 다시 잡을 때 같은 방식으로 적용됩니다.</div>'
+        + '<div class="cdp-seg">'
+        + segBtn('next', '다음날에 더하기', '다음 진행일 우선')
+        + segBtn('spread', '남은 날에 나눠 담기', '남은 진행일에 분산')
+        + segBtn('extend', '종료일 뒤에 붙이기', '기존 일 인원 유지')
+        + '</div></div>';
+    }
 
     /* ── ③ 배분 균형 바(요구 ⑥) — 초과=빨강 / 부족=파랑 / 일치=초록, 일치일 때만 저장 ── */
     var balBlk = '', diff = 0, target = targetTotal();
@@ -1584,11 +1595,32 @@
     render();
   }
   /** 이월 보충 투입 방식 전환(요구 ④) — 고른 방식대로 이월을 재배치한다 */
-  function _mode(m) {
-    if (!S || !S.data || !balanceOn() || CARRY_MODES.indexOf(m) < 0) return;
-    if (S.data.planEnabled === false || m === S.carryMode) return;
+  async function _mode(m) {
+    if (!S || !S.data || CARRY_MODES.indexOf(m) < 0) return;
+    if (S.data.planEnabled === false) { toast('날짜별 모집계획 기능이 꺼져 있어 방식을 바꿀 수 없습니다'); return; }
+    var before = S.carryMode || S.data.carryStrategy || DEFAULT_CARRY_MODE;
+    if (m !== before) {
+      // 먼저 선택을 보이되, 저장 실패 시 이전 값으로 되돌린다. 세션만 바뀌는 유령 연동을 막는다.
+      S.carryMode = m;
+      _saveMode(m);
+      render();
+      try {
+        var saved = await _req('PUT', EP + encodeURIComponent(S.campId) + '/carry-strategy', { carryStrategy: m });
+        S.data.carryStrategy = CARRY_MODES.indexOf(saved.carryStrategy) >= 0 ? saved.carryStrategy : m;
+      } catch (e) {
+        S.carryMode = before;
+        _saveMode(before);
+        render();
+        toast('모집이월 방식 저장 실패: ' + (e.message || e));
+        return;
+      }
+    }
+    if (!balanceOn()) {
+      toast('모집이월 방식을 저장했습니다 — 날짜별 계획을 설정하면 이 방식으로 배분됩니다');
+      return;
+    }
+    if (m === before) return;
     if (!applyCarryMode(m)) { toast('이 방식으로는 구간을 펼치지 못했습니다'); return; }
-    _saveMode(m);        // 저장·재조회·재오픈에도 고른 방식이 유지되게(화면 상태만)
     var e = endDate();
     toast(m === 'next' ? '이월을 다음 진행일에 얹었습니다 — 종료일 ' + (e ? fmtMD(e) : '-')
       : m === 'spread' ? '이월을 진행일에 나눠 담았습니다 — 종료일 ' + (e ? fmtMD(e) : '-')

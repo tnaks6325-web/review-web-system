@@ -496,6 +496,20 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     nextOpenDate(c, todayStr, sch, counts.plans || null),
     openMinutesFor(c));
 
+  // 명시적으로 0명을 저장한 날은 "오늘 정원을 다 채움"이 아니라 관리자가 정한 휴무다.
+  // 시트 일정이 없는 공고도 같은 의미로 처리해야, 0명 계획 구간이 `daily_done`으로
+  // 떨어지며 "오늘 모집 완료"라고 잘못 보이는 일이 없다. 다음 실제 진행일은
+  // nextOpenDate 하나로 구해 카드·참여 게이트·재오픈 안내가 모두 같은 날짜를 본다.
+  if (ovToday === 0) {
+    const nw = nextOpenDate(c, todayStr, sch, counts.plans || null);
+    const openIso = kstDateAtIso(nw, openMinutesFor(c));
+    return {
+      ...payload, state: 'daily_done', stateReason: 'rest_day', nextWorkDate: nw,
+      opensAt: openIso || payload.opensAt,
+      reopensAt: openIso || null,
+    };
+  }
+
   const t = kstMinutesOfDay(now);
   if (!allDay && t < startMin) return { ...payload, state: 'preopen' };
   if (!allDay && t >= endMin) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
