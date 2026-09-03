@@ -775,9 +775,8 @@
      줄여 탭·스크롤바가 상한에서 정확히 잘린다. 배경은 부모 .taskbar 가 같은 var(--card)라 여백 띠 없음.
      (.top/.tb1 은 스스로 스크롤하지 않아 padding 방식 유지 — tb1 의 스크롤러는 자식 .segwrap 이라 안전) */
   .tb2    {margin-inline:max(12px, calc((100% - var(--app-max)) / 2))}
-  /* 작업보드 상단 3단 · 시안 1(연속 필드): 기존 tb0/tb1/tb2 렌더 계약은 그대로 두고,
-     업체 → 업체 작업 → 열린 작업이 한 조작 영역으로 읽히도록 표현만 통일한다. */
-  .taskbar.wb-topbar{background:var(--card);border-bottom:1px solid var(--line)}
+  /* 작업보드 상단: 업체목록과 열린탭은 고정하고, 업체별 작업목록은 클릭 시 드롭다운으로만 연다. */
+  .taskbar.wb-topbar{position:relative;background:var(--card);border-bottom:1px solid var(--line)}
   .taskbar.wb-topbar .wb-tier{display:flex;align-items:center;gap:7px;min-height:40px;border-bottom:1px solid var(--line);box-sizing:border-box}
   .taskbar.wb-topbar .wb-company{background:var(--card);padding-block:3px}
   .taskbar.wb-topbar .wb-task{align-items:center;gap:3px;min-height:40px;background:#f9fbfe;margin-inline:max(14px, calc((100% - var(--app-max)) / 2));padding:5px 0;overflow-x:auto}
@@ -799,6 +798,7 @@
   .taskbar.wb-topbar .seg{gap:5px;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;letter-spacing:-.018em}
   .taskbar.wb-topbar .seg.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
   .taskbar.wb-topbar .seg.on .cnt{background:#d8e8ff;color:var(--accent-deep)}
+  .taskbar.wb-topbar .seg[draggable="true"]{cursor:grab}.taskbar.wb-topbar .seg[draggable="true"].drag{opacity:.45;cursor:grabbing}.taskbar.wb-topbar .seg[draggable="true"].over{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
   .taskbar.wb-topbar .seg.favseg.on{background:#fff7dc;border-color:#efd696;color:#8a6200}
   .taskbar.wb-topbar .seg.favseg.on .fs{color:#b97900}
   .taskbar.wb-topbar .wtab{height:28px;gap:5px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-family:"Noto Sans KR","Malgun Gothic","Segoe UI",sans-serif;font-size:11px;font-weight:700;letter-spacing:-.018em;line-height:15px}
@@ -811,6 +811,10 @@
   .taskbar.wb-topbar .wt0.td,.taskbar.wb-topbar .wt0.td.on{background:var(--card2);border-color:var(--line);color:var(--faint)}
   .taskbar.wb-topbar .wt0add{align-self:center;margin:0;border-style:solid;border-radius:7px;padding:5px 8px}
   .taskbar.wb-topbar .wt0note{align-self:center;margin:0}
+  /* 작업목록은 상시 두 번째 행이 아니라 업체를 눌렀을 때만 바로 아래에 뜬다. */
+  .taskbar.wb-topbar .wb-task-menu{position:absolute;z-index:85;top:41px;left:var(--wb-menu-left,12px);display:flex;flex-direction:column;gap:3px;width:min(420px,calc(100vw - 24px));max-height:min(360px,calc(100vh - 132px));overflow:auto;padding:8px;border:1px solid #b7cfef;border-radius:10px;background:#fff;box-shadow:0 14px 30px rgba(23,55,100,.18)}
+  .taskbar.wb-topbar .wb-task-menu[hidden]{display:none}.taskbar.wb-topbar .wb-menu-head{display:flex;align-items:center;gap:6px;padding:2px 3px 5px;color:#315f9f;font-size:11px;font-weight:800}.taskbar.wb-topbar .wb-menu-head .cnt{margin-left:auto}
+  .taskbar.wb-topbar .wb-task-menu .wtab{width:100%;min-height:32px;height:auto;box-sizing:border-box}.taskbar.wb-topbar .wb-task-menu .tn{max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.taskbar.wb-topbar .wb-menu-empty{padding:10px 7px;color:var(--faint);font-size:11px;font-weight:700}
   @media(max-width:860px){.taskbar.wb-topbar .wb-company{gap:6px}.taskbar.wb-topbar .wsearch{width:142px}.taskbar.wb-topbar .segdiv{display:none}.taskbar.wb-topbar .segwrap{width:auto}.taskbar.wb-topbar .wb-task,.taskbar.wb-topbar .wb-open{margin-inline:12px}}
   .wrap   {padding-inline:max( 0px, calc((100% - var(--app-max)) / 2))}
   .ovwrap {padding-inline:max(22px, calc((100% - var(--app-max)) / 2))}
@@ -2574,7 +2578,8 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
-                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
+                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
+                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,campsUnavailable:false,finFilter:'' });
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
@@ -2795,7 +2800,8 @@ function logout(){ sessionStorage.removeItem('admin_token');
   //   **이전 계정 목록을 새 계정 서버 행에 저장**한다(코드리뷰 blocker).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false,
-                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
+                        worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
+                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,
                         finUnavailable:false,statsUnavailable:false,dailyUnavailable:false,finTruncated:false,worktabsUnavailable:false,
                         campEdit:null,campsUnavailable:false,finFilter:'' });
@@ -3002,7 +3008,7 @@ function _syncWbScrollMeter(el){
   if(el.classList&&el.classList.toggle) el.classList.toggle('wb-scrollable',max>1);
 }
 function _bindWheelScroll(){
-  ['segwrap','tb2','tb0'].forEach(id=>{
+  ['segwrap','tb0'].forEach(id=>{
     const el=document.getElementById(id);
     if(!el || el._wheelBound) return;   // 컨테이너는 재렌더로 새로 생기므로 엘리먼트 자체에 표시
     el._wheelBound=true;
@@ -3120,7 +3126,7 @@ function renderWorkdeskView(){
         <div class="segdiv"></div>
         <div class="segwrap" id="segwrap"></div>
       </div>
-      <div class="tb2 wb-tier wb-task" id="tb2"><span class="wb-tier-label">&#51089;&#50629;&#47785;&#47197;</span><span class="b2empty">불러오는 중…</span></div>
+      <div class="wb-task-menu" id="taskmenu" hidden></div>
       <div class="tb0 wb-tier wb-open" id="tb0"><span class="wb-tier-label">&#50676;&#47536;&#53485;</span></div>
     </div>
     <div class="wrap${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
@@ -3128,7 +3134,7 @@ function renderWorkdeskView(){
     <div class="rail" id="rail"></div></div>`;
   _syncRailToggle(); _syncWideToggle();
   _watchChrome();   // 헤더·작업바 실측(줄바꿈/스크롤바로 높이가 바뀌면 ResizeObserver가 따라감)
-  _bindWheelScroll();   // 1·2단 휠 → 좌우 이동
+  _bindWheelScroll();   // 업체·열린탭 휠 → 좌우 이동
   loadTabs();
 }
 async function loadTabs(){
@@ -3152,7 +3158,7 @@ async function loadTabs(){
     else _renderAdvHome();
     return;
   }
-  if(!r||!r.ok){ const b=$('#tb2'); if(b) b.innerHTML=`<span class="b2empty">작업 목록은 관리자 로그인에서 제공됩니다.</span>`; return; }
+  if(!r||!r.ok){ const b=$('#segwrap'); if(b) b.innerHTML=''; _renderTaskMenu(); return; }
   // ★ 작업바 로드는 stats=1 을 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다) — 대신 이미 받아둔
   //   통계를 **이월**해 마감 후보 배지가 화면을 오갈 때마다 사라졌다 나타나지 않게 한다(_finStatsAt 캐시와 정합).
   const _prevStats={}, _prevFin={}, _prevTd={}, _prevCamp={};
@@ -3184,6 +3190,7 @@ async function loadTabs(){
   if(document.getElementById('wblMount')) _finRenderList();
   refreshUnseen();           // 미확인(스레드) 배지 최초 조회 — 도착 시 재렌더
   _favSyncFromServer();      // 서버 원본으로 정렬(개인화·기기 무관) — 도착 시 재렌더
+  _advOrderSyncFromServer(); // 업체 드래그 배치 서버 원본 — 세션 만료 뒤에도 같은 순서
   _renderWorktabs();         // 열린 작업 줄(0단) — 로컬 캐시로 즉시
   _wtSyncFromServer();       // 서버 원본(계정 귀속) — 도착 시 재렌더
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
@@ -5595,7 +5602,46 @@ function _wTabPending(t){
 }
 // 0 = 모집중 · 1 = 모집 종료 + 리뷰 대기 · 2 = 그 외(전건 제출·공고 없음)
 function _wTabRank(t){ return _wTabRecruiting(t) ? 0 : (_wTabPending(t) > 0 ? 1 : 2); }
+/* 업체목록 배치 = 계정 원장. 즐겨찾기와 달리 배열 순서가 의미이므로 Set에 얹지 않는다. */
+function _advOrderLSKey(){ return 'wd_advertiser_order_v1_'+_favUser(); }
+function _advOrderLoadLocal(){ try{ const a=JSON.parse(localStorage.getItem(_advOrderLSKey())||'[]'); return Array.isArray(a)?a.filter(x=>typeof x==='string'&&x):[]; }catch(_){ return []; } }
+function _advOrderSaveLocal(){ try{ localStorage.setItem(_advOrderLSKey(),JSON.stringify(STATE.advOrder||[])); }catch(_){ } }
+function _advOrderList(){ if(!STATE._advOrderLoaded){ STATE.advOrder=_advOrderLoadLocal(); STATE._advOrderLoaded=true; } return STATE.advOrder||[]; }
+async function _advOrderSyncFromServer(){
+  // 부팅 GET보다 사용자의 첫 드래그가 앞서면, 늦은 응답으로 새 순서를 되돌리지 않는다.
+  const version=STATE._advOrderVersion||0;
+  try{ const r=await api('/api/trackb/workdesk/advertiser-order');
+    if(!(r&&r.ok&&Array.isArray(r.advertiserKeys))) return;
+    if((STATE._advOrderVersion||0)!==version){
+      STATE._advOrderBootSynced=true;
+      if(STATE._advOrderDirty) _advOrderPush(STATE._advOrderVersion||0);
+      return;
+    }
+    STATE._advOrderBootSynced=true;
+    STATE.advOrder=r.advertiserKeys; STATE._advOrderLoaded=true; STATE._advOrderDirty=false; _advOrderSaveLocal(); _renderTabList();
+  }catch(_){ }
+}
+async function _advOrderPush(version){
+  const savedVersion=version==null?(STATE._advOrderVersion||0):version, keys=(STATE.advOrder||[]).slice();
+  try{ const r=await api('/api/trackb/workdesk/advertiser-order',{method:'POST',body:JSON.stringify({advertiserKeys:keys})});
+    if(r&&r.ok){ if((STATE._advOrderVersion||0)===savedVersion) STATE._advOrderDirty=false; return; }
+    toast((r&&r.error)||'업체목록 순서를 저장하지 못했습니다.');
+  }catch(_){ toast('업체목록 순서를 저장하지 못했습니다.'); }
+}
+function _advOrderCommit(keys){ STATE.advOrder=keys; STATE._advOrderLoaded=true; STATE._advOrderDirty=true; STATE._advOrderVersion=(STATE._advOrderVersion||0)+1; _advOrderSaveLocal(); _advOrderPush(STATE._advOrderVersion); _renderTabList(); }
+function _advOrderKeys(){ return _wGroups().filter(g=>g.key!==W_FAV&&g.key!=='').map(g=>g.key); }
+function advDragStart(ev,k){ if(!k||k===W_FAV) return; STATE._advDrag=k; if(ev.dataTransfer){ ev.dataTransfer.effectAllowed='move'; try{ev.dataTransfer.setData('text/plain',k);}catch(_){ } } if(ev.currentTarget) ev.currentTarget.classList.add('drag'); }
+function advDragOver(ev,k){ if(!STATE._advDrag||!k||k===W_FAV||STATE._advDrag===k) return; ev.preventDefault(); if(ev.dataTransfer) ev.dataTransfer.dropEffect='move'; if(ev.currentTarget) ev.currentTarget.classList.add('over'); }
+function advDragLeave(ev){ if(ev.currentTarget) ev.currentTarget.classList.remove('over'); }
+function advDragEnd(){ STATE._advDrag=null; document.querySelectorAll('#segwrap .seg.over,#segwrap .seg.drag').forEach(el=>el.classList.remove('over','drag')); }
+function advDrop(ev,k){
+  if(!STATE._advDrag||!k||k===W_FAV) return; ev.preventDefault();
+  const from=STATE._advDrag; STATE._advDrag=null; if(from===k) return advDragEnd();
+  const list=_advOrderKeys(), a=list.indexOf(from), b=list.indexOf(k); if(a<0||b<0) return advDragEnd();
+  list.splice(a,1); const at=list.indexOf(k); list.splice(a<b?at+1:at,0,from); _advOrderCommit(list);
+}
 function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '' (미지정)
+  const manual=new Map(_advOrderList().map((k,i)=>[k,i]));
   const favIdx=[], groups=new Map();
   // ★ 마감 작업은 상단 작업바(1·2단)에서 제외 = "작업보드에는 진행 중만"(업체 칩 개수도 자동으로 진행 중 기준).
   //   인덱스는 STATE.tabs 원본 그대로 유지 → selTab(i) 계약 불변(건너뛰기만 한다).
@@ -5618,6 +5664,8 @@ function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '
     stat[k]={rec,pend,pendRows}; });
   const gkeys=[...groups.keys()].sort((a,b)=>{
     if(!a) return 1; if(!b) return -1;
+    const ma=manual.has(a)?manual.get(a):Number.MAX_SAFE_INTEGER, mb=manual.has(b)?manual.get(b):Number.MAX_SAFE_INTEGER;
+    if(ma!==mb) return ma-mb;                  // 사람이 드래그한 배치가 자동 우선순위보다 항상 우선
     const fa=isAdvFav(a), fb=isAdvFav(b);
     if(fa!==fb) return fa?-1:1;
     if(stat[a].rec!==stat[b].rec) return stat[b].rec-stat[a].rec;
@@ -5650,24 +5698,37 @@ function _wActiveSeg(gs){
     if(ci>=0){ const g=gs.find(g=>g.key!==W_FAV&&g.idxs.includes(ci)); if(g) return g.key; } }
   return gs.length?gs[0].key:null;
 }
+function _renderTaskMenu(){
+  const menu=$('#taskmenu'); if(!menu) return;
+  const key=STATE.wMenu, gs=_wGroups(), g=gs.find(x=>x.key===key);
+  if(key==null||!g){ menu.hidden=true; menu.innerHTML=''; return; }
+  const cur=STATE.cur;
+  menu.innerHTML=`<div class="wb-menu-head"><span>작업목록 · ${esc(g.label)}</span><span class="cnt">${g.idxs.length}</span></div>`
+    +(g.idxs.length?g.idxs.map(i=>{
+      const t=STATE.tabs[i],on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName,n=_wUnseen(i),f=isFav(t);
+      const rk=_wTabRank(t),dot=rk===0?'<i class="tdot rec" title="모집중"></i>':(rk===1?'<i class="tdot pend" title="모집 종료 · 리뷰 대기"></i>':'');
+      return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="wPickTask(${i})" title="${esc(_tabTip(t))}${(!_isNoSheet(t)&&t.spreadsheetTitle)?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(_tabLabel(t))}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+    }).join(''):'<div class="wb-menu-empty">이 업체에 진행 중인 작업이 없습니다.</div>');
+  const bar=$('#taskbar'), chip=[...document.querySelectorAll('#segwrap .seg')].find(el=>el.dataset.k===key);
+  if(bar&&chip){ const br=bar.getBoundingClientRect(),cr=chip.getBoundingClientRect(); menu.style.setProperty('--wb-menu-left',Math.max(8,cr.left-br.left)+'px'); }
+  menu.hidden=false;
+}
 function _renderTabList(){
   // 광고주 = 좌측 사이드바(세그먼트/탭바 없음). 첫 화면(대시보드)이 떠 있으면 함께 갱신 —
   //   미확인 코멘트 수(refreshUnseen)가 [확인 필요] 위젯의 재료라 사이드바만 다시 그리면 그 항목이 stale 로 남는다.
   if(STATE.role==='advertiser'){ _renderAdvSidebar(); if(!STATE.cur) _renderAdvHome(); return; }
   if(!STATE._favLoaded){ STATE.favs=_favLoad(); STATE._favLoaded=true; }
-  const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업보드 뷰가 아닐 때
-  const taskLabel='<span class="wb-tier-label">&#51089;&#50629;&#47785;&#47197;</span>';
+  const seghost=$('#segwrap'); if(!seghost) return;   // 작업보드 뷰가 아닐 때
   const gs=_wGroups();
-  if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=taskLabel+`<span class="b2empty">활성 작업 없음</span>`; _syncWbScrollMeter(seghost); _syncWbScrollMeter(tabhost); return; }
+  if(!STATE.tabs.length){ seghost.innerHTML=''; _renderTaskMenu(); _syncWbScrollMeter(seghost); return; }
   // ★ 탭은 있는데 전부 마감이면 그룹이 0개다 — 위 분기(STATE.tabs.length)를 못 타므로 여기서 따로 말한다.
   //   안 그러면 "이 그룹에 작업이 없습니다"가 뜨는데 그룹 자체가 없어서 문구가 어긋난다.
-  if(!gs.length){ seghost.innerHTML='';
-    tabhost.innerHTML=taskLabel+`<span class="b2empty">진행 중인 작업이 없습니다 — 마감한 작업은 🏠 홈 › 작업 목록 › 마감 보관함에 있습니다.</span>`; _syncWbScrollMeter(seghost); _syncWbScrollMeter(tabhost); return; }
+  if(!gs.length){ seghost.innerHTML=''; _renderTaskMenu(); _syncWbScrollMeter(seghost); return; }
   const seg=_wActiveSeg(gs); STATE.wSeg=seg;
   // innerHTML 교체는 가로 스크롤 위치를 0으로 되감는다 → 업체가 많으면 방금 고른 칩이 화면 밖으로 사라짐.
   //   교체 전 위치를 저장했다가 복원하고, "선택이 실제로 바뀐 경우에만" 활성 항목을 시야로 끌어온다
   //   (매 렌더마다 스크롤하면 사용자가 손으로 밀어둔 위치와 싸운다).
-  const _sx=seghost.scrollLeft, _tx=tabhost.scrollLeft;
+  const _sx=seghost.scrollLeft;
   const _selKey=String(seg)+'␟'+(STATE.cur?(STATE.cur.sheetId+'␟'+STATE.cur.tabName):'');
   const _selChanged=(STATE._wLastSel!==_selKey); STATE._wLastSel=_selKey;
   // 1단: 세그먼트
@@ -5677,30 +5738,19 @@ function _renderTabList(){
     // 별표는 업체 칩에만. 키는 data-k(esc 적용)로만 전달 — 업체명에 따옴표·&가 있어도 인라인 onclick 문자열이 안 깨짐
     const star=(isFavSeg||g.key==='')?'' :
       `<span class="segstar${af?' on':''}" title="${af?'업체 즐겨찾기 해제':'업체 즐겨찾기 — 왼쪽 우선 정렬'}" onclick="toggleAdvFav(event,this)">${af?'★':'☆'}</span>`;
-    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" title="${esc(_wSegTip(g))}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
+    const movable=!isFavSeg&&g.key!=='';
+    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" title="${esc(_wSegTip(g))}" onclick="wPickSeg(this.dataset.k)"${movable?' draggable="true" ondragstart="advDragStart(event,this.dataset.k)" ondragover="advDragOver(event,this.dataset.k)" ondragleave="advDragLeave(event)" ondrop="advDrop(event,this.dataset.k)" ondragend="advDragEnd()"':''}>${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
   }).join('');
-  // 2단: 선택 그룹의 탭
-  const g=gs.find(x=>x.key===seg);
-  const cur=STATE.cur;
-  tabhost.innerHTML = taskLabel + ((g&&g.idxs.length) ? g.idxs.map(i=>{
-    const t=STATE.tabs[i], on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName, f=isFav(t), n=_wUnseen(i);
-    // 시트제목은 탭마다 붙이지 않는다(줄이 길어져 탭이 몇 개만 보임) — 선택 시 본문 헤더에 표기.
-    //   여기선 호버 툴팁으로만 확인 가능.
-    // 정렬 등급을 점으로 — 왜 이 순서인지 눈으로 읽히게(초록=모집중 · 앰버=리뷰 대기 · 등급 2는 점 없음).
-    const rk=_wTabRank(t), dot=rk===0?'<i class="tdot rec" title="모집중"></i>':(rk===1?'<i class="tdot pend" title="모집 종료 · 리뷰 대기"></i>':'');
-    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(_tabTip(t))}${(!_isNoSheet(t)&&t.spreadsheetTitle)?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(_tabLabel(t))}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
-  }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`);
-  // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
-  seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
-  _syncWbScrollMeter(seghost); _syncWbScrollMeter(tabhost);
+  // 고정 작업목록 행은 만들지 않는다. 업체를 눌렀을 때만 드롭다운에서 고른다.
+  seghost.scrollLeft=_sx; _syncWbScrollMeter(seghost); _renderTaskMenu();
   if(_selChanged){
     const a=seghost.querySelector('.seg.on'); if(a&&a.scrollIntoView) a.scrollIntoView({inline:'nearest',block:'nearest'});
-    const b=tabhost.querySelector('.wtab.on'); if(b&&b.scrollIntoView) b.scrollIntoView({inline:'nearest',block:'nearest'});
   }
   // ★ 여기서 refreshUnseen을 부르지 않는다(순수 렌더). 배지는 STATE.unseen 캐시로 그리고, 갱신은
   //   loadTabs(최초)·스레드 열람 후에만 호출 → 탭 전환/즐겨찾기 토글마다 불필요한 조회가 나가지 않고 재귀도 없다.
 }
-function wPickSeg(k){ STATE.wSeg=k; _renderTabList(); }
+function wPickSeg(k){ STATE.wSeg=k; STATE.wMenu=(STATE.wMenu===k?null:k); _renderTabList(); }
+function wPickTask(i){ STATE.wMenu=null; selTab(i); }
 
 // ── 통합검색: 모든 업체의 탭명·업체명·시트제목을 가로질러 검색 → 선택 시 그 업체 세그먼트로 이동 + 탭 열기 ──
 function wSearch(q){
@@ -5739,6 +5789,7 @@ function wSearchKey(e){
 function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.classList.toggle('kb',+el.dataset.ord===STATE.wKb));
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
+document.addEventListener('click', e=>{ if(!e.target.closest('#segwrap .seg,#taskmenu')){ if(STATE.wMenu!=null){ STATE.wMenu=null; _renderTaskMenu(); } } });
 async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t; _clearCellUndoHistory();
   // opt.nav = 뒤로/앞으로 복원으로 열린 것 → 히스토리에 다시 쌓지 않는다(그 항목이 이미 이 상태다)
   if(!(opt&&opt.nav)) _navPush();
@@ -5748,6 +5799,7 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t
   //   2단엔 엉뚱한 업체 탭이 활성표시 없이 남는다. 즐겨찾기 그룹에 있으면 그대로 둔다(맥락 유지).
   const _gs=_wGroups();
   if(!_gs.some(g=>g.key===STATE.wSeg && g.idxs.includes(i))) STATE.wSeg=(t.advertiserName||'');
+  STATE.wMenu=null;
   // 탭 전환 = 헤더 구성이 달라지므로 그리드 뷰 상태(필터/숨김/그룹/정렬/정산펼침) 초기화
   STATE.gFilters={}; STATE.gHidden=new Set(); STATE.gGroupBy=null; STATE.gCollapsed=new Set(); STATE.gSort=null; STATE.gSelCols=[]; STATE.freezeUpto=null; STATE.settleOpen=false; closeGColMenu(); closeGHidMenu();
   // ★ 표 검색도 초기화 — 다른 작업의 검색어가 남아 있으면 "왜 여기만 노랗지"가 된다

@@ -5133,6 +5133,43 @@ async function setWorkdeskFavorites(ownerKey, favorites) {
   return { ok: true, count: arr.length };
 }
 
+/** 업체목록 드래그 배치 — 계정별 순서 있는 배열. 업체명은 화면용 문자열이므로 엄격히 길이·중복만 제한한다. */
+async function getWorkdeskAdvertiserOrder(ownerKey) {
+  const k = String(ownerKey || '').trim();
+  if (!k) return { ok: true, advertiserKeys: [] };
+  try {
+    const { rows } = await getPool().query(
+      `SELECT advertiser_keys AS "advertiserKeys" FROM trackb_workdesk_advertiser_order WHERE owner_key=$1 LIMIT 1`, [k]);
+    const v = rows[0] && rows[0].advertiserKeys;
+    return { ok: true, advertiserKeys: Array.isArray(v) ? v.filter(x => typeof x === 'string') : [] };
+  } catch (err) {
+    logger.warn(`[trackB] getWorkdeskAdvertiserOrder 실패(기존 자동정렬 유지): ${err.message}`);
+    return { ok: false, advertiserKeys: [], advertiserOrderUnavailable: true };
+  }
+}
+async function setWorkdeskAdvertiserOrder(ownerKey, advertiserKeys) {
+  const k = String(ownerKey || '').trim();
+  if (!k) return { ok: false, error: 'no_owner' };
+  const seen = new Set();
+  const arr = (Array.isArray(advertiserKeys) ? advertiserKeys : [])
+    .filter(x => typeof x === 'string' && x.trim().length > 0 && x.length <= 300 && !seen.has(x) && seen.add(x))
+    .slice(0, 1000);
+  try {
+    await getPool().query(
+      `INSERT INTO trackb_workdesk_advertiser_order (owner_key, advertiser_keys, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (owner_key) DO UPDATE SET advertiser_keys=EXCLUDED.advertiser_keys, updated_at=NOW()`,
+      [k, JSON.stringify(arr)]);
+  } catch (err) {
+    if (err && err.code === '42P01') {
+      logger.error(`[trackB] trackb_workdesk_advertiser_order 테이블 없음(migration 143 미적용): ${err.message}`);
+      return { ok: false, code: 'not_ready', error: '업체목록 배치 저장이 아직 준비되지 않았습니다(migration 143 미적용).' };
+    }
+    throw err;
+  }
+  return { ok: true, count: arr.length };
+}
+
 // ══ 작업 "마감"(전사 공통) + 작업목록 통계 — 리뷰웹시스템[3버전] 작업보드/홈 ══════════════
 //   PRD: frontend/docs/prd-workboard-worktabs.html (v1.2). migration 088.
 //   ★★ 화면 분류 전용 — 시트·리뷰어 화면·검색·인덱스·주문 경로 무접촉. 쓰기 표면 = trackb_tab_finished 하나뿐.
@@ -5903,6 +5940,8 @@ module.exports = {
   ambiguousRowReport,
   getWorkdeskFavorites,
   setWorkdeskFavorites,
+  getWorkdeskAdvertiserOrder,
+  setWorkdeskAdvertiserOrder,
   getWorkdeskWorktabs,
   setWorkdeskWorktabs,
   dailyDoneMap,

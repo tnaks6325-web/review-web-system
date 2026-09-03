@@ -117,6 +117,7 @@ const REQUIRED_SCHEMA = [
 const REQUIRED_TABLES = [
   'tab_status_column_bindings',                   // 137 — 리뷰/입금일 상태열 위치 바인딩
   'purchase_submission_sessions',                // 146 — 구매양식 제출 세션·주문ID 기반 캡처 연결
+  'trackb_workdesk_advertiser_order',             // 143 — 작업보드 업체목록 개인별 배치
   'workboards',
   'workboard_consolidation_controls',
   'workboard_consolidation_backups',

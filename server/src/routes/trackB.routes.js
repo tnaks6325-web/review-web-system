@@ -300,6 +300,19 @@ router.post('/workdesk/favorites', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── 작업보드 업체목록 배치(로그인 계정별·순서 보존) ──
+// 즐겨찾기는 집합이라 순서를 표현할 수 없다. 드래그 결과는 별도 배열 원장으로만 저장한다.
+router.get('/workdesk/advertiser-order', authMiddleware, async (req, res, next) => {
+  try { res.json(await svc.getWorkdeskAdvertiserOrder(_by(req))); }
+  catch (err) { next(err); }
+});
+router.post('/workdesk/advertiser-order', authMiddleware, async (req, res, next) => {
+  try {
+    const out = await svc.setWorkdeskAdvertiserOrder(_by(req), req.body && req.body.advertiserKeys);
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 관측 대시보드: 투영된 전 탭 롤업(카운트 대조 + 준비도) — 내부 담당자(master/admin/staff) ──
 //   coverage = 투영완료/총작업 · 미투영 요약(읽기 전용). items 는 **투영된 탭만** 담으므로 미투영 탭은
 //   목록에 아예 없다 → 분모를 따로 실어 보내야 화면이 "총 몇 개 중 몇 개"를 말할 수 있다.
