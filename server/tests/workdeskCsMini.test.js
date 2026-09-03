@@ -19,6 +19,7 @@ assert.match(workdesk, /\.tp3grid\.c3\.csmini \.wdcsmini-pane\{[^}]*align-self:s
 assert.match(workdesk, /@media\(max-width:1500px\)\{[\s\S]*?\.wdcsmini-pane\{[^}]*height:300px;[^}]*max-height:300px/, '중간 화면에서 C/S 미니 높이를 300px로 제한한다');
 assert.match(mini, /wdcsmini-head tp3t tp3h[^>]*onclick="_topToggle\(\)"/, 'C/S 제목행은 기존 상단 카드와 같은 접기/펼치기 제목행을 쓴다');
 assert.match(workdesk, /\.tp3grid\.c3 \.topcardhd\{[^}]*min-height:40px;[^}]*font-size:11px;[^}]*font-weight:750/s, '상단 네 카드 제목행은 제출물 미리보기 기준의 같은 크기를 쓴다');
+assert.match(workdesk, /\.wdcsmini-head\.topcardhd\{height:40px;min-height:40px\}/, 'C\/S 제목행도 버튼·경계선과 무관하게 40px로 고정한다');
 assert.match(workdesk, /\.tp3grid\.c3 \.tp3col > \.topcardhd\{[^}]*width:calc\(100% \+ 26px\);[^}]*margin:-11px -13px 8px/s, '작업 조건과 진행 현황 제목행은 카드 전폭을 클릭 영역으로 쓴다');
 assert.match(workdesk, /\.tp3grid\.c3\.fold \.rvpane \.rvfill\{position:static;padding:11px 13px 0\}/, '제출물 미리보기 제목행은 접혀도 위치를 유지하고 아래 여백을 남기지 않는다');
 assert.match(workdesk, /\.tp3grid\.c3\.fold \.wdcsmini-body\{display:none\}/, '상단 접기 시 C/S 대화 본문도 함께 접힌다');
