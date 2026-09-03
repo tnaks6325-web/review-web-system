@@ -14,6 +14,8 @@ assert.match(workdesk, /id="workdeskCsMini"/, '작업보드에 미니 C/S 마운
 assert.match(workdesk, /WorkdeskCsMini\.mount\('workdeskCsMini', \{ sheetId: STATE\.cur\.sheetId, tabName: STATE\.cur\.tabName/, '현재 작업 좌표로만 미니 C/S를 연다');
 assert.match(workdesk, /tp3grid c3\$\{csMini\?' csmini':''\}/, '내부 작업보드에서만 네 번째 C/S 카드를 추가한다');
 assert.match(workdesk, /STATE\.role!=='advertiser'/, '광고주에게 C/S 대화를 노출하지 않는다');
+assert.match(workdesk, /\.tp3grid\.c3\.csmini \.wdcsmini-pane\{[^}]*align-self:start;[^}]*height:330px;[^}]*max-height:330px/s, '넓은 화면에서 C/S 미니 높이를 기존 상단 카드 기준으로 제한한다');
+assert.match(workdesk, /@media\(max-width:1500px\)\{[\s\S]*?\.wdcsmini-pane\{[^}]*height:300px;[^}]*max-height:300px/, '중간 화면에서 C/S 미니 높이를 300px로 제한한다');
 assert.match(mini, /campaignKey: sheetId \+ '\|\|' \+ tabName/, '작업별 C/S 범위는 기존 campaignKey 규칙을 사용한다');
 assert.match(mini, /csAdminThreads/, 'C/S 메뉴와 같은 방 목록 API를 사용한다');
 assert.match(mini, /csAdminMessages/, 'C/S 메뉴와 같은 메시지 API를 사용한다');
