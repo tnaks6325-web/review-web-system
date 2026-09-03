@@ -72,7 +72,7 @@ console.log('\nB) 제출현황 줄');
   ok('★ filled 미동봉(구버전)이면 줄 수로 접는다 — 게이지와 같은 폴백', / \/ 200</.test(sb._rvStatHtml()));
 }
 
-console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 4열');
+console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 제출(주문/리뷰) 4열');
 {
   const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   const rows = [
@@ -107,6 +107,34 @@ console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 4열');
   const eh = sb._rvPopItem(evil, 5, false);
   ok('★ 따옴표 섞인 수취인·번호가 onclick 을 탈출하지 못한다',
     /onclick="_rvPopPick\(5\)"/.test(eh) && !/alert\(1\)/.test(eh.split('onclick=')[1].split(' ')[0]), eh);
+}
+
+console.log('\nC-1) 제출 인라인 필터 — 네 수치만 실제 행으로 연결');
+{
+  const sb = grab(['_rvKindFiles', '_rvPopHas', '_rvPopFilterPeople', '_rvPopCounts', '_rvPopFilterSet', '_rvPopFilterHtml']);
+  const people = [
+    { r: { id: 'a' }, files: [{ slot: 'order_capture' }, { slot: 'review' }] },
+    { r: { id: 'b' }, files: [{ slot: 'order_capture' }] },
+    { r: { id: 'c' }, files: [{ slot: 'review' }] },
+    { r: { id: 'd' }, files: [] }
+  ];
+  sb.STATE.rvPop = { people, allPeople: people, idx: 0, i2: { cap: 0, rev: 0 }, filter: null, filterOpen: true };
+  const h = sb._rvPopFilterHtml(sb.STATE.rvPop);
+  ok('현황은 총건수 / 주문 / 리뷰와 제출·미제출 네 수치로 표시',
+    /4건/.test(h) && /주문/.test(h) && /리뷰/.test(h) && /제출/.test(h) && /미제출/.test(h)
+    && /_rvPopFilterSet\('cap',true\)/.test(h) && /_rvPopFilterSet\('rev',true\)/.test(h)
+    && /_rvPopFilterSet\('cap',false\)/.test(h) && /_rvPopFilterSet\('rev',false\)/.test(h), h);
+  ok('수치 = 주문 제출 2 / 리뷰 제출 2 / 주문 미제출 2 / 리뷰 미제출 2',
+    (h.match(/>2<\/button>/g) || []).length === 4, h);
+  sb._rvPopFilterSet('cap', true);
+  ok('주문 제출 수치만 누르면 주문 캡처가 있는 행만 남는다',
+    sb.STATE.rvPop.people.map(x => x.r.id).join() === 'a,b');
+  sb._rvPopFilterSet('rev', false);
+  ok('리뷰 미제출 수치만 누르면 리뷰가 없는 행만 남는다',
+    sb.STATE.rvPop.people.map(x => x.r.id).join() === 'b,d');
+  sb._rvPopFilterSet('rev', false);
+  ok('같은 수치를 한 번 더 누르면 별도 전체 필터 없이 원래 목록으로 복귀',
+    sb.STATE.rvPop.filter === null && sb.STATE.rvPop.people.length === 4);
 }
 
 console.log('\nD) 팝업 무대 — 좌우 동시');
@@ -144,11 +172,12 @@ ok('★ 패널 제목 아래에 제출현황이 붙는다', /tp3chev">∨<\/span
 ok('★ 누른 장이 열린다 — 전역 인덱스를 갈래+순번으로 옮긴다', /i2\[k\]=Math\.max\(0,_rvKindFiles\(files,k\)\.findIndex/.test(WD));
 ok('★ 사람을 바꾸면 칸 위치를 초기화한다(_rvPopPick·_rvPopStep 둘 다)',
   /_rvPopPick\(idx\)\{[^}]*p\.i2=\{cap:0,rev:0\};/.test(WD) && /_rvPopStep\(delta\)\{[^}]*p\.i2=\{cap:0,rev:0\};/.test(WD));
-ok('CSS 는 4열 목록·2분할 무대를 갖는다',
-  /\.rvplitem\{width:100%;display:grid;grid-template-columns:38px minmax\(0,1fr\) 30px 30px/.test(WD)
+ok('CSS 는 제출(주문·리뷰) 4열 목록·2분할 무대를 갖는다',
+  /\.rvplitem\{width:100%;display:grid;grid-template-columns:38px minmax\(0,1fr\) 42px 42px/.test(WD)
+  && /\.rvplsubmit\{grid-column:3 \/ 5/.test(WD)
   && /\.rvpcols\{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr/.test(WD));
 ok('★ 세로로 긴 캡처가 칸을 뚫지 않는다(min-height:0)', /\.rvpbody\{flex:1;min-height:0;/.test(WD));
-ok('좁은 화면은 목록 머리를 접고 무대를 위아래로', /\.rvplhd,\.rvplcols\{display:none\}/.test(WD) && /\.rvpcols\{grid-template-columns:1fr;grid-template-rows:1fr 1fr\}/.test(WD));
+ok('좁은 화면은 필터 포함 목록 머리를 접고 무대를 위아래로', /\.rvplhd,\.rvplcols,\.rvplfilter\{display:none\}/.test(WD) && /\.rvpcols\{grid-template-columns:1fr;grid-template-rows:1fr 1fr\}/.test(WD));
 ok('시안 문서가 있다', fs.existsSync(path.join(__dirname, '..', '..', 'frontend/docs/design-submission-preview.html')));
 
 console.log('\nF) rowNumbering 계약(서버가 기대는 것)');

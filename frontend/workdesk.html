@@ -324,10 +324,14 @@
   .rvpopov{position:fixed;inset:0;z-index:240;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(15,35,42,.5)}
   .rvpop{width:min(1160px,calc(100vw - 56px));height:min(720px,calc(100vh - 56px));background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28);display:grid;grid-template-columns:318px minmax(0,1fr)}
   .rvplist{border-right:1px solid var(--line);overflow-y:auto;background:var(--card2);padding:12px}.rvplhd{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin:3px 4px 9px}
-  /* ★ 목록 = 번호 / 수취인 / 🛒 / 📷 (사용자 확정) — 번호는 **작업보드 표의 「번호」**(seq 아님) */
-  .rvplcols{display:grid;grid-template-columns:38px minmax(0,1fr) 30px 30px;gap:6px;align-items:center;padding:4px 9px;font-size:9.5px;font-weight:800;color:var(--faint)}
-  .rvplcols .c{text-align:center}
-  .rvplitem{width:100%;display:grid;grid-template-columns:38px minmax(0,1fr) 30px 30px;gap:6px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}.rvplitem:hover{background:var(--card);border-color:var(--line)}.rvplitem.on{background:var(--card);border-color:var(--accent-line);color:var(--accent-deep);font-weight:750}
+  /* 목록 = 번호 / 수취인 / 제출(주문·리뷰). 제출은 한 묶음으로 헤더·필터를 공유한다. */
+  .rvplcols{display:grid;grid-template-columns:38px minmax(0,1fr) 42px 42px;gap:6px;align-items:center;padding:4px 9px;font-size:9.5px;font-weight:800;color:var(--faint)}
+  .rvplcols .c{text-align:center}.rvplsubmit{grid-column:3 / 5;width:100%;border:0;border-radius:5px;background:transparent;color:var(--faint);font:inherit;font-weight:800;letter-spacing:.03em;cursor:pointer;padding:3px}.rvplsubmit:hover,.rvplsubmit.on{background:var(--accent-soft);color:var(--accent-deep)}
+  .rvplcolfilter{border:0;border-radius:5px;background:transparent;color:var(--faint);font:inherit;font-weight:800;cursor:pointer;padding:3px}.rvplcolfilter:hover,.rvplcolfilter.on{background:var(--accent-soft);color:var(--accent-deep)}
+  .rvplfilter{margin:3px 4px 8px;padding:8px;border:1px solid var(--accent-line);border-radius:8px;background:var(--card);box-shadow:0 4px 12px rgba(20,35,42,.09)}
+  .rvplfilter .fhead,.rvplfilter .frow{display:grid;grid-template-columns:minmax(0,1fr) 1fr 1fr;gap:4px;align-items:center;text-align:center;font-size:10px}.rvplfilter .fhead{margin-bottom:3px;color:var(--faint);font-weight:800}.rvplfilter .fhead span:first-child{text-align:left}
+  .rvplfilter .frow{margin-top:4px}.rvplfilter .frow b{text-align:left;color:var(--muted);font-size:10px}.rvplfilter button{min-height:27px;border:1px solid var(--line);border-radius:6px;background:var(--card2);color:var(--ink);font:inherit;font-size:11px;font-weight:800;cursor:pointer}.rvplfilter button:hover,.rvplfilter button.on{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent-deep)}.rvplfilter button.n{color:var(--warn)}
+  .rvplitem{width:100%;display:grid;grid-template-columns:38px minmax(0,1fr) 42px 42px;gap:6px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}.rvplitem:hover{background:var(--card);border-color:var(--line)}.rvplitem.on{background:var(--card);border-color:var(--accent-line);color:var(--accent-deep);font-weight:750}
   .rvplitem .no{font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint);font-weight:700}.rvplitem.on .no{color:var(--accent-deep)}
   .rvplitem .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rvplitem .mk{text-align:center;font-size:12px;line-height:1}.rvplitem .mk.y{color:var(--safe)}.rvplitem .mk.n{color:var(--line2)}
@@ -346,7 +350,7 @@
   .rvppg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;font-size:10.5px;color:var(--muted);font-weight:700}
   .rvppg button{font:inherit;font-size:12px;line-height:1;padding:3px 9px;border-radius:6px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer}
   .rvppg button:disabled{opacity:.35;cursor:default}.rvpmeta{position:absolute;left:22px;top:15px;font-size:12px;font-weight:750;color:var(--muted)}.rvpmeta span{font-weight:600;color:var(--faint);margin-left:5px}.rvpclose{position:absolute;right:14px;top:12px;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer;z-index:1}.rvpclose:hover{border-color:var(--accent-line);color:var(--accent-deep);background:var(--card2)}
-  @media(max-width:760px){.rvpopov{padding:14px}.rvpop{width:calc(100vw - 28px);height:calc(100vh - 28px);grid-template-columns:1fr;grid-template-rows:150px minmax(0,1fr)}.rvplist{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow:auto;padding:10px}.rvplhd,.rvplcols{display:none}.rvplitem{width:auto;min-width:max-content;padding:7px 9px;display:flex;gap:7px}.rvpstage{padding:42px 12px 12px}.rvpcols{grid-template-columns:1fr;grid-template-rows:1fr 1fr}.rvpmeta{left:12px}.rvpclose{right:10px;top:8px}}
+  @media(max-width:760px){.rvpopov{padding:14px}.rvpop{width:calc(100vw - 28px);height:calc(100vh - 28px);grid-template-columns:1fr;grid-template-rows:150px minmax(0,1fr)}.rvplist{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow:auto;padding:10px}.rvplhd,.rvplcols,.rvplfilter{display:none}.rvplitem{width:auto;min-width:max-content;padding:7px 9px;display:flex;gap:7px}.rvpstage{padding:42px 12px 12px}.rvpcols{grid-template-columns:1fr;grid-template-rows:1fr 1fr}.rvpmeta{left:12px}.rvpclose{right:10px;top:8px}}
   .sheetgrid tbody tr.rvon>td{background:var(--accent-soft)}
   .sheetgrid tbody tr.rvon>td.gfz{background:var(--accent-soft)}
   /* 사이드바 그룹(진행 중 / 완료) 구분 */
@@ -6105,10 +6109,30 @@ function _rvOpen(rid,fileIndex){
   const i2={cap:0,rev:0};
   if(f){ const k=(f.slot==='order_capture')?'cap':'rev';
          i2[k]=Math.max(0,_rvKindFiles(files,k).findIndex(x=>x.fileId===f.fileId)); }
-  STATE.rvPop={people,idx,i2}; _rvPopRender();
+  STATE.rvPop={people,allPeople:people,idx,i2,filter:null,filterOpen:false}; _rvPopRender();
 }
 function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.idx=idx; p.i2={cap:0,rev:0}; _rvPopRender(); }
 function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.i2={cap:0,rev:0}; _rvPopRender(); }
+/* 제출 필터의 분모는 팝업에 나열되는 "채워진 줄" 전부다. 행 자체의 submitted 값이 아니라
+   이 팝업이 실제로 표시하는 파일 갈래를 써야 주문/리뷰 각각의 ✓·✗와 숫자가 어긋나지 않는다. */
+function _rvPopHas(x,kind){ return _rvKindFiles(x&&x.files,kind).length>0; }
+function _rvPopFilterPeople(p){
+  const all=Array.isArray(p&&p.allPeople)?p.allPeople:(p&&p.people)||[];
+  const f=p&&p.filter;
+  return f?all.filter(x=>_rvPopHas(x,f.kind)===f.submitted):all;
+}
+function _rvPopCounts(p){
+  const all=Array.isArray(p&&p.allPeople)?p.allPeople:(p&&p.people)||[];
+  return {total:all.length,cap:all.filter(x=>_rvPopHas(x,'cap')).length,rev:all.filter(x=>_rvPopHas(x,'rev')).length};
+}
+function _rvPopFilterToggle(){ const p=STATE.rvPop; if(!p) return; p.filterOpen=!p.filterOpen; _rvPopRender(); }
+function _rvPopFilterSet(kind,submitted){
+  const p=STATE.rvPop; if(!p) return;
+  /* 같은 수치를 다시 누르면 전체 목록으로 돌아간다. 별도 다섯 번째 "전체" 필터를 만들지 않는다. */
+  if(p.filter&&p.filter.kind===kind&&p.filter.submitted===submitted) p.filter=null;
+  else p.filter={kind,submitted};
+  p.people=_rvPopFilterPeople(p); p.idx=0; p.i2={cap:0,rev:0}; p.filterOpen=false; _rvPopRender();
+}
 /* 칸 안에서 장 넘김 — ★ 끝에서 순환하지 않는다(어디까지 봤는지 잃는다). */
 function _rvPopStep2(kind,delta,n){ const i2=_rvPopIdx(); i2[kind]=Math.max(0,Math.min(n-1,(i2[kind]||0)+delta)); _rvPopRender(); }
 function _rvPopClose(){ STATE.rvPop=null; const ov=document.getElementById('rvpop'); if(ov) ov.remove(); }
@@ -6140,19 +6164,33 @@ function _rvPopItem(x,i,on){
     `<span class="mk ${nc?'y':'n'}">${nc?'✓':'✗'}</span>`+
     `<span class="mk ${nr?'y':'n'}">${nr?'✓':'✗'}</span></button>`;
 }
+function _rvPopFilterHtml(p){
+  if(!p.filterOpen) return '';
+  const c=_rvPopCounts(p), f=p.filter;
+  const btn=(kind,submitted,n,label)=>`<button type="button" class="${submitted?'':'n'}${f&&f.kind===kind&&f.submitted===submitted?' on':''}" onclick="_rvPopFilterSet('${kind}',${submitted})" title="${esc(label+' '+n+'건만 보기')}">${n}</button>`;
+  return `<div class="rvplfilter" role="dialog" aria-label="제출물 필터">`+
+    `<div class="fhead"><span>${c.total}건</span><span>주문</span><span>리뷰</span></div>`+
+    `<div class="frow"><b>제출</b>${btn('cap',true,c.cap,'주문 제출')}${btn('rev',true,c.rev,'리뷰 제출')}</div>`+
+    `<div class="frow"><b>미제출</b>${btn('cap',false,c.total-c.cap,'주문 미제출')}${btn('rev',false,c.total-c.rev,'리뷰 미제출')}</div>`+
+  `</div>`;
+}
 function _rvPopRender(){
-  const p=STATE.rvPop; if(!p||!p.people.length){ _rvPopClose(); return; }
-  const cur=p.people[p.idx], who=_rvWho(cur.r);
-  const no=_rvNo(cur.r);
+  const p=STATE.rvPop; if(!p){ _rvPopClose(); return; }
+  if(!Array.isArray(p.allPeople)) p.allPeople=p.people||[];
+  p.people=_rvPopFilterPeople(p);
+  if(!p.people.length){ p.idx=0; }
+  else if(p.idx>=p.people.length) p.idx=0;
+  const cur=p.people[p.idx], who=cur?_rvWho(cur.r):'';
+  const no=cur?_rvNo(cur.r):'';
   let ov=document.getElementById('rvpop'); if(!ov){ ov=document.createElement('div'); ov.id='rvpop'; ov.className='rvpopov'; document.body.appendChild(ov); }
   ov.innerHTML=`<section class="rvpop" role="dialog" aria-modal="true" aria-label="제출물 크게 보기">`+
-    `<aside class="rvplist"><div class="rvplhd">참여자<span class="cnt">${p.people.length}명</span></div>`+
-      `<div class="rvplcols"><span>번호</span><span>수취인</span><span class="c">🛒</span><span class="c">📷</span></div>`+
+    `<aside class="rvplist"><div class="rvplhd">참여자<span class="cnt">${p.people.length}${p.filter?' / '+p.allPeople.length:''}명</span></div>`+
+      `<div class="rvplcols"><span>번호</span><span>수취인</span><button type="button" class="rvplsubmit${p.filterOpen?' on':''}" onclick="_rvPopFilterToggle()">제출 ${p.filterOpen?'⌃':'⌄'}</button><span></span><span></span><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='cap'?' on':''}" onclick="_rvPopFilterToggle()">주문</button><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='rev'?' on':''}" onclick="_rvPopFilterToggle()">리뷰</button></div>`+
+      _rvPopFilterHtml(p)+
       p.people.map((x,i)=>_rvPopItem(x,i,i===p.idx)).join('')+
     `</aside>`+
     `<div class="rvpstage"><button type="button" class="rvpclose" aria-label="닫기" onclick="_rvPopClose()">×</button>`+
-      `<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div>`+
-      `<div class="rvpcols">${_rvPopCol('cap',cur.files)}${_rvPopCol('rev',cur.files)}</div>`+
+      (cur?`<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div><div class="rvpcols">${_rvPopCol('cap',cur.files)}${_rvPopCol('rev',cur.files)}</div>`:`<div class="rvpempty warn"><b>조건에 맞는 참여자가 없습니다</b><span>제출 필터를 다시 눌러 전체 목록으로 돌아가세요.</span></div>`)+
     `</div></section>`;
 }
 
