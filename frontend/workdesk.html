@@ -323,7 +323,10 @@
   .rvnone.warn b{color:var(--warn)}
   .rvpopov{position:fixed;inset:0;z-index:240;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(15,35,42,.5)}
   .rvpop{width:min(1160px,calc(100vw - 56px));height:min(720px,calc(100vh - 56px));background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28);display:grid;grid-template-columns:318px minmax(0,1fr)}
-  .rvplist{border-right:1px solid var(--line);overflow-y:auto;background:var(--card2);padding:12px}.rvplhd{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin:3px 4px 9px}
+  /* UI-LAYOUT-01 — 인라인 패널을 열고 닫아 목록 높이가 바뀌는 세로 스크롤 영역은
+     항상 스크롤바 폭을 예약한다. 조건부 스크롤바로 헤더·행·버튼이 좌우로 흔들리면 안 된다. */
+  .ui-stable-vscroll{overflow-y:scroll;scrollbar-gutter:stable}
+  .rvplist{border-right:1px solid var(--line);background:var(--card2);padding:12px}.rvplhd{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin:3px 4px 9px}
   /* 목록 = 번호 / 수취인 / 제출(주문·리뷰). 제출은 한 묶음으로 헤더·필터를 공유한다. */
   .rvplcols{display:grid;grid-template-columns:38px minmax(0,1fr) 42px 42px;gap:6px;align-items:center;padding:4px 9px;font-size:9.5px;font-weight:800;color:var(--faint)}
   .rvplcols .c{text-align:center}.rvplsubmit{grid-column:3 / 5;width:100%;border:0;border-radius:5px;background:transparent;color:var(--faint);font:inherit;font-weight:800;letter-spacing:.03em;cursor:pointer;padding:3px}.rvplsubmit:hover,.rvplsubmit.on{background:var(--accent-soft);color:var(--accent-deep)}
@@ -6184,7 +6187,7 @@ function _rvPopRender(){
   const no=cur?_rvNo(cur.r):'';
   let ov=document.getElementById('rvpop'); if(!ov){ ov=document.createElement('div'); ov.id='rvpop'; ov.className='rvpopov'; document.body.appendChild(ov); }
   ov.innerHTML=`<section class="rvpop" role="dialog" aria-modal="true" aria-label="제출물 크게 보기">`+
-    `<aside class="rvplist"><div class="rvplhd">참여자<span class="cnt">${p.people.length}${p.filter?' / '+p.allPeople.length:''}명</span></div>`+
+    `<aside class="rvplist ui-stable-vscroll"><div class="rvplhd">참여자<span class="cnt">${p.people.length}${p.filter?' / '+p.allPeople.length:''}명</span></div>`+
       `<div class="rvplcols"><span>번호</span><span>수취인</span><button type="button" class="rvplsubmit${p.filterOpen?' on':''}" onclick="_rvPopFilterToggle()">제출 ${p.filterOpen?'⌃':'⌄'}</button><span></span><span></span><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='cap'?' on':''}" onclick="_rvPopFilterToggle()">주문</button><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='rev'?' on':''}" onclick="_rvPopFilterToggle()">리뷰</button></div>`+
       _rvPopFilterHtml(p)+
       p.people.map((x,i)=>_rvPopItem(x,i,i===p.idx)).join('')+
