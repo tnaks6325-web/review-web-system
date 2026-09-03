@@ -43,6 +43,15 @@ test('server uses a DB-only campaign scope and writes the verified order to the 
     'DB-only submission must be written to the worktable, not only the order ledger');
 });
 
+test('sheetless worktable write failure is persisted instead of leaving the ledger pending', () => {
+  const start = submit.indexOf('if (ledger.sheetRow && !queuedWorkboardApply)');
+  const end = submit.indexOf('if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply)', start);
+  const branch = submit.slice(start, end);
+  assert.ok(start >= 0 && end > start, 'sheetless follow-up branch is missing');
+  assert.ok(/if \(!sheetlessDone\.ok\) \{[\s\S]*?await markOrderMirrorFailed\(ledger\.orderSubmissionId, sheetlessDone\.message \|\| sheetlessDone\.reason\)/.test(branch),
+    'failed sheetless worktable writes must persist failed status and the reason');
+});
+
 test('campaign confirmation can explicitly bypass old sheet binding after server hold verification', () => {
   assert.ok(/skipTabBinding/.test(holds), 'DB-only campaign confirmation flag is missing');
   assert.ok(/if \(!skipTabBinding && !tabMatchesCampaign\(camp, sheetId, gid, tabName\)\)/.test(holds),
