@@ -248,6 +248,41 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 무시트 작업표 정원 자동 복구 ─────────────────────────────────────────────
+  //   날짜별 조절·발주 정원 변경·과거 장애로 "총 500 / 줄 751"처럼 벌어진 경우를
+  //   사람이 [작업표 재구성] 버튼으로 고치지 않아도 자동으로 수렴시킨다.
+  //   빈 초과 슬롯만 후순위부터 soft-delete하고, 같은 실행에서 번호 1..N 및 원장을 재생성한다.
+  //   공유 탭·비활성 행은 서비스가 안전하게 건너뛴다. 멀티 인스턴스는 DB 락으로 1회만 실행.
+  //   끄기: WORKTABLE_CAP_AUTOFIX=0. 기본 5분, 배포 직후에도 30초 후 한 번 실행한다.
+  if (process.env.WORKTABLE_CAP_AUTOFIX !== '0') {
+    const capRepairSchedule = process.env.WORKTABLE_CAP_AUTOFIX_SCHEDULE || '1-59/5 * * * *';
+    const capRepairLimit = Math.min(Math.max(parseInt(process.env.WORKTABLE_CAP_AUTOFIX_LIMIT || '30', 10) || 30, 1), 200);
+    const capRepairBootDelay = Math.min(Math.max(parseInt(process.env.WORKTABLE_CAP_AUTOFIX_BOOT_DELAY_MS || '30000', 10) || 30000, 10000), 300000);
+    let capRepairRunning = false;
+    const runCapRepair = async (source) => {
+      if (capRepairRunning) return;
+      capRepairRunning = true;
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        const { cleanupOverflowEmptyWorktableSlots } = require('../services/linkedRecruitQuota.service');
+        const r = await withJobLock('worktable_cap_autofix', () => cleanupOverflowEmptyWorktableSlots({
+          dryRun: false, limit: capRepairLimit, by: `cron:${source}`,
+        }));
+        const failures = (r && r.items || []).filter(x => x && x.error);
+        if (failures.length) {
+          logger.warn(`[CRON-WorktableCap] source=${source} failed=${failures.length} `
+            + failures.map(x => `camp=${x.campaignId || '?'}:${x.code || x.error}`).join(' | '));
+        } else if (r && !r.skipped && (r.retired || (r.items || []).some(x => x && x.projection))) {
+          logger.info(`[CRON-WorktableCap] source=${source} scanned=${r.scanned} retired=${r.retired} skipped=${r.skipped}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-WorktableCap] source=${source} error: ${err.message}`);
+      } finally { capRepairRunning = false; }
+    };
+    setTimeout(() => { void runCapRepair('boot'); }, capRepairBootDelay);
+    cron.schedule(capRepairSchedule, () => { void runCapRepair('cron'); }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 시트→DB 역동기화 무인 사이클(detect+constrained auto-apply): 기본 OFF ──
   //   REVERSE_SYNC_AUTO=1 에서만 동작(SHEET_REVERSE_SYNC=1·ORDER_LEDGER_WRITE_ENABLED=true 추가게이트는 서비스 내부).
   //   활성탭 라운드로빈 detect → 안전필드만 apply시점 라이브 재검증 후 자동적용(전용 락 reverse_sync_auto).
