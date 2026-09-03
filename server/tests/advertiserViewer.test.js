@@ -430,7 +430,7 @@ async function run() {
   ok('리뷰 캡처는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
     /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
     && /function _rvPopRender\(\)/.test(src)
-    && /<aside class="rvplist">/.test(src)
+    && /<aside class="rvplist ui-stable-vscroll">/.test(src)
     && /class="rvpclose"[^>]*onclick="_rvPopClose\(\)"/.test(src)
     // ⚠ 제출물 미리보기(2026-08-21) — 목록이 4열(번호/수취인/🛒/📷)이 되며 폭이 늘었고
     //    무대가 좌우 2분할이 됐다. 검사 의미는 불변 — 팝업은 [작성자 목록 | 무대] 2단이다.
