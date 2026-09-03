@@ -1733,10 +1733,11 @@
   .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:330px}
   /* 내부 작업보드의 C/S는 상단 메뉴와 같은 방을 작업 단위로만 좁혀 보여 주는 미니 창이다.
      QHD에서는 네 번째 카드가 오른쪽에 붙고, 폭이 줄면 아래 전폭으로 내려가 표·카드를 밀어내지 않는다. */
-  .tp3grid.c3.csmini{grid-template-columns:minmax(230px,390fr) minmax(230px,390fr) minmax(330px,560fr) minmax(260px,320fr);max-width:1720px}
-  /* C/S 미니는 같은 상단 카드의 기본 높이(330px)까지만 쓴다. 제출 캡처가 길어
-     같은 그리드 행이 커져도 이 패널까지 늘어나지 않으며, 목록·대화만 내부에서 스크롤한다. */
-  .tp3grid.c3.csmini .wdcsmini-pane{min-width:0;align-self:start;height:330px;min-height:0;max-height:330px;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  /* QHD에서는 C/S를 충분히 넓힌 네 번째 카드로 두고, 네 카드의 하단선은 같은 그리드 행에서 맞춘다. */
+  .tp3grid.c3.csmini{grid-template-columns:minmax(230px,370fr) minmax(230px,370fr) minmax(330px,540fr) minmax(340px,460fr);max-width:1720px}
+  /* C/S도 작업 조건·진행 현황·제출물 미리보기와 같은 stretch 규칙을 쓴다.
+     대화 목록과 메시지는 이 카드 안에서만 스크롤해 네 카드의 세로 길이가 항상 일치한다. */
+  .tp3grid.c3.csmini .wdcsmini-pane{min-width:0;align-self:stretch;height:auto;min-height:330px;max-height:none;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:12px}
   .wdcsmini{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--ink);background:var(--card)}
   /* 제목행은 작업 조건·진행 현황·제출물 미리보기와 같은 tp3 제목행을 쓴다.
      우측 전체보기만 독립 동작하며, 제목행 클릭은 네 블록의 접기/펼치기를 함께 바꾼다. */
