@@ -376,7 +376,15 @@ const _ACTION_MAP = {
 // ═══════════════════════════════════════════════════════════
 function _getAuthHeaders() {
   const token = sessionStorage.getItem('admin_token');
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
+  const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+  try {
+    const raw = sessionStorage.getItem('rapp_reviewer_auth') || localStorage.getItem('rapp_reviewer_auth');
+    const reviewer = raw ? JSON.parse(raw) : null;
+    if (reviewer && reviewer.reviewerToken && (!reviewer.expAt || Date.now() <= reviewer.expAt)) {
+      headers['X-Reviewer-Token'] = reviewer.reviewerToken;
+    }
+  } catch (_) { /* 손상된 로컬 세션은 헤더에 싣지 않는다 */ }
+  return headers;
 }
 
 /**
@@ -592,8 +600,8 @@ function _xhrPost(url, jsonBody, timeoutMs, onProgress) {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     // JWT 인증 헤더
-    const token = sessionStorage.getItem('admin_token');
-    if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+    const headers = _getAuthHeaders();
+    Object.keys(headers).forEach((key) => xhr.setRequestHeader(key, headers[key]));
     xhr.timeout = timeoutMs;
 
     // 업로드 진행률

@@ -20,6 +20,7 @@ const { mirrorOneSheet } = require('../services/rawMirror.service');
 const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistration');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
+const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
 
 // ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
 // 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
@@ -1279,9 +1280,12 @@ router.get('/drive-diag', authMiddleware, async (req, res) => {
 // 프론트엔드 기대 응답: { ok, orderNumber, recipient, phone, address, price, orderer, ... }
 // ═══════════════════════════════════════════════════════════
 router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
+  let imageHash = '';
   try {
     const { imageBase64, mimeType } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
+
+    imageHash = reviewerOrderIdentity.hashImageBase64(imageBase64);
 
     const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg');
     // result: { ok, orderNumber, recipient, phone, address, price, orderer, productName, orderDate, store, elapsed }
@@ -1295,18 +1299,23 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
       });
     }
 
-    res.json(result);
+    const proof = reviewerOrderIdentity.issueExtractionProof({ imageHash, extracted: result, ok: !!result.ok });
+    res.json({ ...result, ...proof });
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
     logAbnormal({
       flow: 'image_extract', step: 'gemini_call', source: 'external_api', error: err,
       context: { path: req.path, method: 'POST' },
     });
-    res.json({
+    const failed = {
       ok: false,
       error: err.message || '이미지 분석 중 오류가 발생했습니다.',
       orderNumber: '', recipient: '', phone: '', address: '', price: ''
-    });
+    };
+    const proof = imageHash
+      ? reviewerOrderIdentity.issueExtractionProof({ imageHash, extracted: failed, ok: false, errorCode: err.code || err.name || 'extract_failed' })
+      : {};
+    res.json({ ...failed, ...proof });
   }
 });
 

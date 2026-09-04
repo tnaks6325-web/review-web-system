@@ -347,12 +347,14 @@ function getSession(){
     const s = JSON.parse(raw);
     if(!s || Date.now() > (s.expAt||0)) return null;
     if(!s.phone8 || String(s.phone8).length !== 8) return null;
+    // 구버전 phone8 전용 세션은 소유자 UUID가 결속되지 않았다. 한 번만 다시 로그인해 서명 세션으로 승격한다.
+    if(!s.reviewerToken) return null;
     return s;
   }catch(_){ return null; }
 }
-function saveSession(name, phone8){
+function saveSession(name, phone8, reviewerToken){
   const session = { name, verified:true, registeredMember:true,
-    phone8:String(phone8).replace(/\D/g,'').slice(-8), expAt: Date.now()+12*60*60*1000 };
+    phone8:String(phone8).replace(/\D/g,'').slice(-8), reviewerToken:reviewerToken||'', expAt: Date.now()+12*60*60*1000 };
   localStorage.setItem('rapp_reviewer_auth', JSON.stringify(session));
   try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8})); }catch(_){}
   return session;
@@ -368,7 +370,7 @@ async function doVerify(){
     const r = await fetch(API_BASE_URL + '/api/reviewer/verify?phone8=' + encodeURIComponent(p8) + '&name=' + encodeURIComponent(name));
     const j = await r.json();
     if(!j || !j.ok){ toast(j && j.error ? j.error : '등록된 리뷰어를 찾을 수 없어요'); return; }
-    saveSession(j.name || name, p8);
+    saveSession(j.name || name, p8, j.reviewerToken);
     hideSheet();
     const fn = _afterLogin; _afterLogin = null;
     if(fn) fn();
@@ -891,7 +893,8 @@ function openChangeOptSheet(){
 function hideOptSheet(){ $('optSheet').style.display = 'none'; }
 function onOptSheetConfirm(){
   if(!_optSheetSel) return toast('옵션을 선택해주세요');
-  if(_optSheetMode === 'join') _joinWithOption(_optSheetSel);          // 타계정 가능 공고면 명의 선택으로 이어짐
+  if(_optSheetMode === 'join_identity') { hideOptSheet(); _applyInitialAcct(_optSheetSel); }
+  else if(_optSheetMode === 'join') _joinWithOption(_optSheetSel);
   else if(_optSheetMode === 'join_sub'){ hideOptSheet(); openAcctSheet(_optSheetSel); }  // 추가참여: 옵션 → 명의
   else _doChangeOption(_optSheetSel);
 }
@@ -900,28 +903,31 @@ function onOptSheetConfirm(){
    서버 계약: apply body에 subName/subPhone 있으면 타계정 참여. 서버가 소유자 sub_accounts로
    명의를 재검증하고, 응답 phone8 = "명의" p8(= 홀드 키). 화면 상태는 클라 추정이고 최종 권위는 서버 409. */
 let _subs = null;          // 소유자의 타계정 목록(profile get 캐시)
+let _subsLoadError = null; // 조회 실패를 타계정 0개로 오인해 명의 선택을 건너뛰지 않는다
 let _acctSel = null;       // 시트에서 고른 명의 { type:'self'|'sub', name, phone8, phone }
 let _acctOptKey = null;    // 옵션 공고에서 명의 선택 후 이어질 옵션키
+let _acctNext = 'apply';   // apply | option — 최초 참여는 명의를 먼저 고른 뒤 옵션으로 이동
+let _initialAcctSel = null;
 const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
 let _repurchaseAccounts = {};
 
 function multiEnabled(){ return !!(_camp && _camp.multi_account_mode === true); }
 
-/** 타계정 목록 로드(무인증 profile API — 본인 phone8 스코프, 내정보 화면과 동일 경로) */
+/** 타계정 목록 로드 — 로그인 서명 토큰의 소유자 UUID 범위만 조회 */
 async function loadSubs(force){
   if(_subs && !force) return _subs;
   const s = getSession(); if(!s) return (_subs = []);
   try{
-    const r = await fetch(API_BASE_URL + '/api/reviewer/profile', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ action:'get', phone8: s.phone8 })
-    });
+    const r = await fetch(API_BASE_URL + '/api/reviewer/profile/secure', { headers:_getAuthHeaders() });
     const j = await r.json().catch(()=>({}));
-    let list = (j && j.profile && j.profile.subAccounts) || [];
-    if(typeof list === 'string'){ try{ list = JSON.parse(list); }catch(_){ list = []; } }
-    _subs = Array.isArray(list) ? list.filter(x => x && x.name && x.phone) : [];
+    if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || '명의 정보를 불러오지 못했습니다.');
+    const identities = (j && j.profile && j.profile.identities) || [];
+    _subs = Array.isArray(identities)
+      ? identities.filter(x => x && x.type === 'sub' && x.name && x.phone)
+      : [];
+    _subsLoadError = null;
     try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?phone8=' + encodeURIComponent(s.phone8) + '&ids=' + encodeURIComponent(CAMP_ID)); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
-  }catch(_){ _subs = []; }
+  }catch(e){ _subs = null; _subsLoadError = e; }
   return _subs;
 }
 
@@ -993,10 +999,12 @@ function renderAcctList(){
       ? '참여권이 남은 명의가 없어요. 일반 모집을 구매양식 제출까지 완료하면 그 명의로 참여할 수 있어요.'
       : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
 }
-async function openAcctSheet(optionKey){
+async function openAcctSheet(optionKey, next){
   if(PREVIEW) return _pvBlock('참여하기');
   _acctOptKey = optionKey || null;
+  _acctNext = next || 'apply';
   await loadSubs();
+  if(_subsLoadError){ toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요'); return; }
   await loadPopCredit();          // ★ 명의별 참여권이 도착한 뒤에 그린다(모르면 종전대로 그린다)
   // 타계정이 하나도 없고 본계정도 이미 참여중이면 → 등록 유도
   const rows = _acctRows();
@@ -1004,6 +1012,7 @@ async function openAcctSheet(optionKey){
     return openAcctEmpty();
   }
   renderAcctList();
+  $('acctSheetGo').textContent = _acctNext === 'option' ? '이 명의로 계속' : '이 명의로 참여';
   $('acctSheet').style.display = 'flex';
 }
 function hideAcctSheet(){ $('acctSheet').style.display = 'none'; }
@@ -1018,30 +1027,39 @@ function onAcctSheetConfirm(){
   if(!_acctSel) return toast('참여할 명의를 선택해주세요');
   hideAcctSheet();
   const sel = _acctSel;
+  if(_acctNext === 'option') {
+    _initialAcctSel = sel;
+    return _continueInitialAcct();
+  }
   _doApply(_acctOptKey, sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null);
+}
+function _applyInitialAcct(optionKey){
+  const sel = _initialAcctSel; _initialAcctSel = null;
+  if(!sel) return toast('참여할 명의를 다시 선택해주세요');
+  return _doApply(optionKey, sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null);
+}
+function _continueInitialAcct(){
+  const opts = (_camp && _camp.options) || [];
+  if(!opts.length) return _applyInitialAcct(null);
+  const pickable = opts.filter(o => o.selectable);
+  if(!pickable.length){ _initialAcctSel = null; toast('지금은 선택 가능한 옵션이 없어요'); return loadCampaign(); }
+  if(pickable.length === 1) return _applyInitialAcct(pickable[0].optKey);
+  _optSheetMode = 'join_identity';
+  $('optSheetTitle').textContent = '참여할 옵션 선택';
+  $('optSheetDesc').textContent = (_initialAcctSel?.name || '선택 명의') + ' 명의로 참여할 옵션을 골라주세요.';
+  $('optSheetNote').textContent = '선택한 명의와 옵션으로 자리가 잡혀요.';
+  $('optSheetGo').textContent = '이 옵션으로 참여';
+  _renderOptSheetList(opts, null);
+  $('optSheet').style.display = 'flex';
 }
 /** 참여 후 화면의 [＋타계정으로 추가참여하기] */
 async function onAddSubJoin(){
   if(PREVIEW) return _pvBlock('타계정 추가참여');
   const s = getSession(); if(!s) return needLogin(onAddSubJoin);
   await loadSubs();
+  if(_subsLoadError) return toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요');
   if(!(_subs || []).length) return openAcctEmpty();
-  // 옵션 공고면 옵션부터 고르고, 아니면 바로 명의 선택
-  const opts = (_camp && _camp.options) || [];
-  const pickable = opts.filter(o => o.selectable);
-  if(opts.length){
-    if(!pickable.length){ toast('지금은 선택 가능한 옵션이 없어요'); return; }
-    if(pickable.length === 1) return openAcctSheet(pickable[0].optKey);
-    _optSheetMode = 'join_sub';
-    $('optSheetTitle').textContent = '추가참여할 옵션 선택';
-    $('optSheetDesc').textContent = '타계정으로 참여할 옵션을 골라주세요.';
-    $('optSheetNote').textContent = '옵션을 고르면 다음 화면에서 명의를 선택해요.';
-    $('optSheetGo').textContent = '이 옵션으로 계속';
-    _renderOptSheetList(opts, null);
-    $('optSheet').style.display = 'flex';
-    return;
-  }
-  return openAcctSheet(null);
+  return openAcctSheet(null, 'option');
 }
 
 /** 참여 후 화면의 명의 패널 — 타계정 참여가 있을 때만 노출(본계정 단독은 현행과 동일한 화면) */
@@ -1137,6 +1155,12 @@ async function onJoin(){
   if(!PREVIEW){
     const s = getSession();
     if(!s) return needLogin(onJoin);
+    if(multiEnabled()) {
+      await loadSubs();
+      if(_subsLoadError) return toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요');
+      // 타계정이 하나 이상인 허용 공고에서만 명의를 먼저 고른다.
+      if((_subs || []).length) return openAcctSheet(null, 'option');
+    }
   }
   const opts = (_camp && _camp.options) || [];
   if(opts.length){

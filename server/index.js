@@ -23,6 +23,8 @@ const MIG_LOCK_RETRIES = 3;
 // 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
 // /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
 const REQUIRED_SCHEMA = [
+  ['reviewers', 'shopping_id'],                    // 147 — 명의별 공통 쇼핑 아이디(본인)
+  ['reviewer_identities', 'shopping_id'],          // 147 — 코드 명의별 공통 쇼핑 아이디
   ['campaign_applications', 'owner_phone8'],       // 063 — apply INSERT·my-status·관제
   ['recruit_campaigns', 'multi_account_mode'],     // 063 — 공개 /list 명시 SELECT
   ['recruit_campaigns', 'multi_daily_limit'],      // 063 — apply 게이트·공고 저장
@@ -115,6 +117,7 @@ const REQUIRED_SCHEMA = [
 // 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
+  'reviewer_identity_match_audits',                // 147 — 캡처/수동 명의확인 비식별 감사기록
   'tab_status_column_bindings',                   // 137 — 리뷰/입금일 상태열 위치 바인딩
   'purchase_submission_sessions',                // 146 — 구매양식 제출 세션·주문ID 기반 캡처 연결
   'trackb_workdesk_advertiser_order',             // 143 — 작업보드 업체목록 개인별 배치

@@ -791,7 +791,6 @@
         <!-- 본인 통합 카드 (내 등록정보 + 계좌) -->
         <article class="pf-acct self">
           <div class="pf-head">
-            <div class="pf-avatar" id="pfSelfAvatar"></div>
             <div class="pf-id"><div class="pf-nm">
               <span class="pf-who" id="inlineSelfName">-</span>
               <span class="pf-ph" id="inlineSelfPhone">-</span>
@@ -801,6 +800,8 @@
           <div class="pf-lines">
             <div class="pf-ln"><span class="pf-k">주소</span>
               <span class="pf-v"><span id="inlineSelfAddress" class="pf-muted">미등록</span><button id="btnAddAddress" class="pf-edit" onclick="openAddressForm()">추가</button></span></div>
+            <div class="pf-ln"><span class="pf-k">아이디</span>
+              <span class="pf-v" style="display:flex;gap:6px;align-items:center"><input id="pfSelfShoppingId" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem"><button class="pf-edit" onclick="saveIdentityShoppingId(0)">저장</button></span></div>
             <div class="pf-ln"><span class="pf-k">계좌</span>
               <span class="pf-v"><span id="pfBankLine" class="pf-muted">미등록</span><button id="btnAddBankInfo" class="pf-edit" onclick="openBankForm()">등록</button></span></div>
             <div class="pf-ln"><span class="pf-k">소득</span>
@@ -1011,7 +1012,7 @@
     <button class="tab-home on" onclick="switchTab('home')"><i class="fas fa-house"></i>홈</button>
     <button class="tab-review" onclick="switchTab('review')"><i class="fas fa-clipboard-list"></i>리뷰내역</button>
     <button id="tabBtnCs" class="tab-cs" onclick="switchTab('cs')" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:0;right:8px;min-width:16px;height:16px;padding:0 4px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:16px;text-align:center;border-radius:8px;box-sizing:border-box"></span></button>
-    <button class="tab-my" onclick="switchTab('my')"><i class="fas fa-id-card"></i>내정보/현황</button>
+    <button class="tab-my" onclick="switchTab('my')"><i class="fas fa-id-card"></i>내정보</button>
     <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
   </div>
 
@@ -1055,7 +1056,7 @@ async function consumeAdminReviewerHomeLink() {
     });
     const json = await res.json();
     if (!json || !json.ok || !json.user) throw new Error((json && json.error) || '로그인 링크를 확인하지 못했습니다.');
-    sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify({ ...json.user, loginAt: Date.now(), adminPreview: true }));
+    sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify({ ...json.user, reviewerToken: json.reviewerToken || "", loginAt: Date.now(), adminPreview: true }));
     history.replaceState(null, '', location.pathname + location.hash); // 주소·복사 기록에 교환권을 남기지 않는다.
     return true;
   } catch (e) {
@@ -1075,7 +1076,19 @@ async function initPage() {
     document.getElementById("viewHome").style.display = "none";
     return false;
   }
-  const user = getSavedUser();
+  let user = getSavedUser();
+  if (user && user.name && user.phone8 && !user.reviewerToken) {
+    try {
+      const r = await fetch(API_BASE_URL + "/api/reviewer/verify?phone8=" + encodeURIComponent(user.phone8)
+        + "&name=" + encodeURIComponent(user.name));
+      const j = await r.json();
+      if (j?.ok && j.reviewerToken) {
+        user = { ...user, name:j.name || user.name, phone:j.phone || user.phone, reviewerToken:j.reviewerToken };
+        const store = user.adminPreview ? sessionStorage : localStorage;
+        store.setItem(user.adminPreview ? HOME_SESSION_KEY : USER_KEY, JSON.stringify(user));
+      }
+    } catch (_) { /* 프로필의 기존 읽기 기능은 유지하고 보안 API만 재로그인 후 사용 */ }
+  }
   if (user && user.name) {
     showHome(user);
     return true;
@@ -1211,6 +1224,7 @@ function syncSearchSession(user) {
     verified: true,
     registeredMember: true,
     phone8: user.phone8 || "",
+    reviewerToken: user.reviewerToken || "",
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
   // 관리자 바로가기 탭은 다른 탭의 검색/리뷰어 로그인까지 바꾸지 않는다.
@@ -1236,7 +1250,7 @@ async function doLogin() {
     const json = await res.json();
 
     if (json.ok) {
-      const user = { name: json.name, phone: json.phone, phone8: phone, loginAt: Date.now() };
+      const user = { name: json.name, phone: json.phone, phone8: phone, reviewerToken: json.reviewerToken || "", loginAt: Date.now() };
       localStorage.setItem(USER_KEY, JSON.stringify(user));
       showHome(user);
     } else {
@@ -1301,8 +1315,6 @@ async function loadInlineProfile(user) {
   // 즉시 이름 표시
   const nameEl = document.getElementById("inlineSelfName");
   if (nameEl) nameEl.textContent = name || "-";
-  const avEl0 = document.getElementById("pfSelfAvatar");
-  if (avEl0) avEl0.textContent = ((name || "?").charAt(0)) || "?";
   section.style.display = "";
 
   try {
@@ -1311,8 +1323,6 @@ async function loadInlineProfile(user) {
       const p = res.profile;
       window._reviewerProfile = { ...res, ...p, found: true };
       if (nameEl) nameEl.textContent = p.name || name || "-";
-      if (avEl0) avEl0.textContent = (((p.name || name || "?").trim()).charAt(0)) || "?";
-
       const phoneEl = document.getElementById("inlineSelfPhone");
       if (phoneEl) phoneEl.textContent = p.phone || "-";
       
@@ -1362,6 +1372,7 @@ async function loadInlineProfile(user) {
       if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
       if (!Array.isArray(subs)) subs = [];
       renderInlineSubList(subs);
+      await loadSecureIdentityProfile();
     } else {
       const phoneEl = document.getElementById("inlineSelfPhone");
       if (phoneEl) phoneEl.textContent = "-";
@@ -1369,6 +1380,47 @@ async function loadInlineProfile(user) {
   } catch(e) {
     console.warn("[inlineProfile]", e.message);
   }
+}
+
+async function loadSecureIdentityProfile() {
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/secure", { headers: _getAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok || !data?.ok || !Array.isArray(data.profile?.identities)) return;
+    window._secureReviewerProfile = data.profile;
+    const self = data.profile.identities.find(x => x.type === "self");
+    const selfInput = document.getElementById("pfSelfShoppingId");
+    if (selfInput && self) {
+      selfInput.value = self.shoppingId || "";
+      selfInput.dataset.identityKey = self.identityKey || "self";
+      selfInput.dataset.savedValue = self.shoppingId || "";
+    }
+    const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
+    renderInlineSubList(subs);
+  } catch (e) {
+    console.warn("[secureProfile]", e.message);
+  }
+}
+
+async function saveIdentityShoppingId(subIndex) {
+  const input = subIndex === 0
+    ? document.getElementById("pfSelfShoppingId")
+    : document.getElementById("pfSubShoppingId_" + (subIndex - 1));
+  if (!input || !input.dataset.identityKey) { showToast("명의 정보를 다시 불러온 뒤 저장해주세요."); return; }
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/"
+      + encodeURIComponent(input.dataset.identityKey) + "/shopping-id", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ shoppingId: input.value.trim() }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || "저장하지 못했습니다.");
+    input.value = data.shoppingId || "";
+    input.dataset.savedValue = data.shoppingId || "";
+    showToast("아이디가 이 명의에 저장되었습니다.");
+    await loadSecureIdentityProfile();
+  } catch (e) { showToast(e.message || "아이디 저장에 실패했습니다."); }
 }
 
 /* ═══════════════════════════════════════
@@ -2491,10 +2543,11 @@ function renderInlineSubList(subs) {
     } else {
       jHtml = '<span class="pf-muted">미등록</span>';
     }
-    const initial = escHtml(((sub.name || '?').trim().charAt(0)) || '?');
+    const secureSub = (window._secureReviewerProfile?.identities || []).filter(x => x.type === "sub")[idx] || null;
+    const shoppingId = secureSub?.shoppingId || sub.shoppingId || "";
+    const identityKey = secureSub?.identityKey || "";
     return `<article class="pf-acct">
       <div class="pf-head">
-        <div class="pf-avatar">${initial}</div>
         <div class="pf-id"><div class="pf-nm">
           <span class="pf-who">${escHtml(sub.name || '-')}</span>
           <span class="pf-ph">${escHtml(sub.phone || '')}</span>
@@ -2507,6 +2560,7 @@ function renderInlineSubList(subs) {
       </div>
       <div class="pf-lines">
         <div class="pf-ln"><span class="pf-k">주소</span><span class="pf-v">${addrHtml}</span></div>
+        <div class="pf-ln"><span class="pf-k">아이디</span><span class="pf-v" style="display:flex;gap:6px;align-items:center"><input id="pfSubShoppingId_${idx}" data-identity-key="${_escAttrX(identityKey)}" data-saved-value="${_escAttrX(shoppingId)}" value="${_escAttrX(shoppingId)}" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem"><button class="pf-edit" onclick="saveIdentityShoppingId(${idx + 1})">저장</button></span></div>
         <div class="pf-ln"><span class="pf-k">계좌</span><span class="pf-v">${bankHtml}</span></div>
         <div class="pf-ln"><span class="pf-k">소득</span><span class="pf-v">${incHtml}${_dot}${jHtml}</span></div>
       </div>

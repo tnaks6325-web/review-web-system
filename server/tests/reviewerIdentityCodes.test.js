@@ -48,6 +48,6 @@ ok('admin: 이름 및 번호 변경은 preview+confirm+환경승인', /identity-
 ok('번호 재사용: 닫힌 alias를 phone8 조회 범위에 넣지 않음', !/alias_phone8/.test(read('src/services/reviewerIdentity.service.js').slice(read('src/services/reviewerIdentity.service.js').indexOf('async function getOwnerScopeByLoginPhone8'))));
 ok('과거 코드 이력: my-status는 participation_links 소유자 FK로 병합', /pl\.owner_reviewer_id = \$2/.test(reviewer));
 ok('타계정 배열 재정렬: 변경 전 identity 현재값과 name+phone8을 대조', /subs\[index\]\.name[\s\S]*?identity\.current_name[\s\S]*?subs\[index\]\.phone[\s\S]*?identity\.current_phone8/.test(read('src/services/reviewerIdentity.service.js')));
-ok('코드 부여 뒤 profile 배열 일괄 변경은 차단', /identity_accounts_locked/.test(reviewerService) && /SELECT reviewer_no FROM reviewers/.test(reviewerService));
+ok('코드 부여 뒤 profile 배열 일괄 변경은 차단', /identity_accounts_locked/.test(reviewerService) && /SELECT reviewer_no, sub_accounts FROM reviewers/.test(reviewerService));
 
 console.log(`\n✅ reviewerIdentityCodes: ${passed}개 통과`);

@@ -21,6 +21,8 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 const { requiredSlotKeys, effectiveCaptureSlots } = require('../utils/captureSlots');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
+const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
+const { verifyReviewerSession } = require('../services/reviewerSession.service');
 
 // ═══════════════════════════════════════════════════════════
 // 블로그체험단(099) — memo 가 들어갈 열은 종류에 따라 우선순위가 다르다.
@@ -1004,7 +1006,40 @@ router.post('/order', async (req, res, next) => {
       });
     }
 
-    if (_idPhone8.length === 8) {
+    const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
+    if (_newIdentityGate) {
+      try {
+        const reviewerToken = req.headers['x-reviewer-token'];
+        if (!reviewerToken) {
+          return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인이 만료되었습니다. 다시 로그인해주세요.' });
+        }
+        const reviewerSession = verifyReviewerSession(reviewerToken);
+        const _reqFields = [
+          [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
+          [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
+        ];
+        const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, label]) => label);
+        if (_emptyFields.length) {
+          return res.status(400).json({ ok: false, code: 'FIELDS_REQUIRED', error: `필수 항목이 비어 있습니다: ${_emptyFields.join(', ')}` });
+        }
+        await reviewerOrderIdentity.verifyApprovalForSubmission({
+          ...b,
+          campaignApplicationId: holdCtx.applicationId,
+          campaignId: holdCtx.campaignId,
+          holdToken: holdCtx.holdToken,
+          recipient, phone, address,
+        }, reviewerSession);
+      } catch (gateErr) {
+        if (gateErr instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
+          return res.status(gateErr.status || 400).json({ ok: false, code: gateErr.code, error: gateErr.message });
+        }
+        if (gateErr && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(gateErr.name)) {
+          return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인이 만료되었거나 유효하지 않습니다.' });
+        }
+        logger.error(`[order-identity] 새 명의 게이트 오류(차단): ${gateErr.message}`);
+        return res.status(503).json({ ok: false, code: 'IDENTITY_GATE_UNAVAILABLE', error: '명의 확인을 완료할 수 없습니다. 잠시 후 다시 시도하거나 수동 확인해주세요.' });
+      }
+    } else if (_idPhone8.length === 8) {
       try {
         const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
         let { rows: _rvRows } = await pool.query(

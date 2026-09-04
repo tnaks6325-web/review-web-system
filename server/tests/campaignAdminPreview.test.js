@@ -89,7 +89,7 @@ for (const [label, re] of [
   //   규칙은 그대로다 — 서버 상태를 바꾸지 않는다. 아래에서 그 시뮬레이션에 **서버 호출이 0** 임을 못박는다.
   ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvSimulateChangeOption/],
   // ★ 063 2단계 신규 진입점도 동일 차단(명의 선택·타계정 추가참여)
-  ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
+  ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey, next\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   ['타계정 추가참여(onAddSubJoin)', /async function onAddSubJoin\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
 ]) ok('④ 미리보기에서 ' + label + ' 차단', re.test(camp));
 ok('④ 미리보기에서 명의 전환(switchAcct)도 무동작', /async function switchAcct\(p8\)\{\s*\n\s*if\(PREVIEW\) return;/.test(camp));
@@ -186,7 +186,7 @@ ok('⑦-R4 수정 모달 미리보기 버튼은 참여형일 때만(레거시 �
   && /id="rf_preview_full"[\s\S]{0,240}display:none/.test((readF('js/recruit-modal.js') + readF('admin.html'))));
 ok('⑦-R5 미리보기는 잔여 리뷰어 세션을 쓰지 않음(타인 계좌·실명 노출 차단)',
   /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};/.test(sapp)
-  && /if \(!_PREVIEW_MODE\) \{\s*\n\s*_prefillBankFromProfile\(\)/.test(sapp));
+  && /if \(!_PREVIEW_MODE\) \{[\s\S]{0,500}_prefillBankFromProfile\(\)/.test(sapp));
 ok('⑦-R6 미리보기 단계 전환 시만 iframe 재로드 생략(리뷰어는 항상 재로드 = TOCTOU 봉합 유지)',
   /if\(!PREVIEW \|\| frame\.getAttribute\('src'\) !== _src\)\{/.test(camp));
 ok('⑦-R8b 참여 취소 후에는 참여 전 화면으로 명시 복귀(가드로 인한 정체 방지)',
