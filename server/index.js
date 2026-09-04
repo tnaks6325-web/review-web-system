@@ -57,6 +57,12 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'advertiser_id'],              // 103 — 접수된 리뷰웹 광고주 연결
   ['review_inspections', 'resolution'],           // 092 — 리뷰검수 목록 SELECT·확인 UPDATE(없으면 리뷰검수 탭 전면 42703)
   ['tab_configs', 'inspect_product_aliases'],     // 092 — 기대값 조회·별칭 학습(조회는 fail-soft지만 대조가 조용히 죽는다)
+  ['review_inspections', 'product_resolution'],   // 148 — 상품명 축 사람 판정(건 전체 resolution 과 분리)
+  ['review_inspections', 'product_resolution_note'], // 148 — 판정 근거 메모
+  ['review_inspections', 'product_resolved_at'],  // 148 — 상품명 판정 시각
+  ['review_inspections', 'product_resolved_by'],  // 148 — 상품명 판정자
+  ['review_inspections', 'product_cluster_key'],  // 148 — 동일 OCR 군집 소급 종결
+  ['tab_configs', 'inspect_product_rules'],       // 148 — 작업 한정 상품명 exact 학습 규칙
   ['tab_configs', 'review_fee'],                  // 128 — 입금관리 보류 보완의 작업 단위 리뷰비(없으면 탭 메타가 fail-soft 로 조용히 죽어 이체은행·통장표시까지 함께 미설정으로 보인다)
   ['tab_configs', 'workboard_display_name'],      // 145 — 작업조건·내부/업체 작업보드의 표시 전용 상품명
   ['tab_configs', 'sheetless'],                   // 096 — 크론 단속·장부 생성기·접수 업서트(없으면 무시트 경로 전면 42703)
