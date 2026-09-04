@@ -702,7 +702,7 @@ async function advertiserOverview() {
        --   그 탭이 두 own 행에 모두 매칭돼 작업 수가 이중 계수된다(이관을 탭→시트 순으로 두 번 하면 즉시 도달).
        --   연결탭 표(ownedTabsForAdvertiser)는 tabs CTE 의 DISTINCT ON 이 접어 주므로, 여기만 두면 두 화면이 갈린다.
        SELECT DISTINCT o.advertiser_id AS "advertiserId", t.sheet_id AS "sheetId",
-              t.tab_gid AS "tabGid", t.tab_name AS "tabName"
+              t.tab_gid AS "tabGid", t.tab_name AS "tabName", wo.created_at AS "latestRequestAt"
          FROM tabs t JOIN own o ON o.sheet_id = t.sheet_id AND (
               o.tab_gid = t.tab_gid
               -- ★ 탭지정>시트전체 배제(ownedTabsForAdvertiser 와 같은 규칙) — 없으면 이관된 탭이
@@ -710,7 +710,19 @@ async function advertiserOverview() {
               OR (o.tab_gid IS NULL AND NOT EXISTS (
                     SELECT 1 FROM advertiser_campaigns x
                      WHERE x.deleted_at IS NULL AND x.sheet_id = t.sheet_id
-                       AND x.tab_gid = t.tab_gid AND x.advertiser_id <> o.advertiser_id)))`);
+                       AND x.tab_gid = t.tab_gid AND x.advertiser_id <> o.advertiser_id)))
+         /* 최신 작업의뢰 = 이 작업표에 연결된 work_orders.created_at 최신값.
+            Track B 수동 링크와 Track A 승인 링크를 함께 읽되 work_orders 는 수정하지 않는다. */
+         LEFT JOIN LATERAL (
+           SELECT w.created_at
+             FROM work_orders w
+            WHERE w.deleted_at IS NULL AND (
+                  (w.linked_tab_sheet_id = t.sheet_id AND w.linked_tab_name = t.tab_name)
+                  OR EXISTS (SELECT 1 FROM trackb_work_order_links l
+                              WHERE l.work_order_id = w.id AND l.sheet_id = t.sheet_id
+                                AND l.tab_name = t.tab_name AND l.deleted_at IS NULL))
+            ORDER BY w.created_at DESC LIMIT 1
+         ) wo ON TRUE`);
     ownRows = rows;
   } catch (err) {
     logger.warn(`[trackB] advertiserOverview 소유탭 조회 실패: ${err.message}`);
@@ -745,8 +757,11 @@ async function advertiserOverview() {
   for (const r of ownRows) {
     const k = _FIN_KEY(r.sheetId, r.tabName);
     const g = String(r.tabGid == null ? '' : r.tabGid).trim();
-    const a = (out.byAdvertiser[r.advertiserId] ||= { works: 0, noMatch: 0, finishCand: 0 });
+    const a = (out.byAdvertiser[r.advertiserId] ||= { works: 0, noMatch: 0, finishCand: 0, latestRequestAt: null });
     a.works += 1;
+    if (r.latestRequestAt && (!a.latestRequestAt || new Date(r.latestRequestAt) > new Date(a.latestRequestAt))) {
+      a.latestRequestAt = r.latestRequestAt;
+    }
     if (!out.contractsUnavailable && !linked.has(k)) a.noMatch += 1;
     // 마감 여부는 이름 우선 → gid 폴백(탭 리네임으로 마감이 조용히 풀리지 않게 — 088 과 같은 규칙)
     const finished = !!(fin.map[k] || (g && fin.map[_FIN_GKEY(r.sheetId, g)]));
@@ -937,6 +952,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
+            wo.work_order_created_at AS "workOrderCreatedAt",
             rc.recruit_total AS "recruitTotal",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
@@ -1013,9 +1029,25 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
        ) cnt ON TRUE
        LEFT JOIN tab_configs tc ON tc.sheet_id = t.sheet_id AND tc.tab_name = t.tab_name
        LEFT JOIN LATERAL (
-         SELECT w.recruit_count, w.start_date FROM trackb_work_order_links l JOIN work_orders w ON w.id = l.work_order_id
-          WHERE l.sheet_id = t.sheet_id AND l.tab_name = t.tab_name AND l.deleted_at IS NULL
-          ORDER BY l.created_at DESC LIMIT 1
+         /* 상세값은 명시 Track B 링크를 우선하고, 목록 정렬용 최신 의뢰시각은 전체 후보의 MAX로 분리한다.
+            최신 Track A 폴백이 명시 링크보다 상세값까지 덮으면 작업 조건 카드가 다른 오더를 보여준다. */
+         SELECT ranked.recruit_count, ranked.start_date,
+                ranked.created_at AS work_order_created_at,
+                MAX(ranked.created_at) OVER () AS latest_work_order_created_at
+           FROM (
+             SELECT w.recruit_count, w.start_date, w.created_at,
+                    CASE WHEN EXISTS (SELECT 1 FROM trackb_work_order_links l
+                                      WHERE l.work_order_id = w.id AND l.sheet_id = t.sheet_id
+                                        AND l.tab_name = t.tab_name AND l.deleted_at IS NULL)
+                         THEN 0 ELSE 1 END AS link_rank
+               FROM work_orders w
+              WHERE w.deleted_at IS NULL AND (
+                    (w.linked_tab_sheet_id = t.sheet_id AND w.linked_tab_name = t.tab_name)
+                    OR EXISTS (SELECT 1 FROM trackb_work_order_links l
+                                WHERE l.work_order_id = w.id AND l.sheet_id = t.sheet_id
+                                  AND l.tab_name = t.tab_name AND l.deleted_at IS NULL))
+           ) ranked
+          ORDER BY ranked.link_rank, ranked.created_at DESC LIMIT 1
        ) wo ON TRUE
        /* 업체 화면의 총건수도 작업 조건 카드와 같은 적용 정원(공고 우선, 없으면 발주)을 쓴다.
           활성 작업행 수는 내부 투영·정리용 값일 뿐 업체에게 "총 건수"로 보이면 안 된다. */
@@ -1038,7 +1070,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           ORDER BY c.created_at DESC, c.id DESC LIMIT 1
        ) co ON TRUE
        LEFT JOIN trackb_tab_memos tm ON tm.sheet_id = t.sheet_id AND tm.tab_name = t.tab_name
-      ORDER BY COALESCE(cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
+      ORDER BY COALESCE(wo.latest_work_order_created_at, cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
   // ── 자료 폴더 바로가기(시안 A) 재료 — ★ 쿼리 순증 0(tab_configs 를 이미 조인하고 있다).
   //   현영 대상 여부는 captureSlots.hasCashReceiptSlot 단일 규칙(홈 버튼·/tab-folders 와 같은 함수).
   //   ★ 판정 원재료(capture_slots JSONB·income_type)는 응답에서 **버린다** — 316행 × JSONB 는 그냥
