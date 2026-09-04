@@ -369,6 +369,13 @@ input,textarea,button{font-family:inherit}
 .of-input{flex:1;border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.88rem;color:var(--t1);background:var(--card);outline:none;transition:border-color .15s}
 .of-input:focus{border-color:var(--p);box-shadow:0 0 0 3px rgba(49,130,246,.12)}
 .of-input::placeholder{color:var(--t3);font-size:.82rem}
+.of-textarea{min-height:54px;resize:vertical;line-height:1.45;font-family:inherit}
+.of-save-id{white-space:normal}
+.of-identity-context{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:7px;margin:0 0 9px;padding:9px 10px;color:#5B21B6;border:1px solid #DDD6FE;border-left:4px solid #6D28D9;border-radius:10px;background:#F5F3FF;font-size:.72rem;line-height:1.35}
+.of-identity-context .of-identity-kicker{font-size:.62rem;font-weight:800;color:#7C3AED;letter-spacing:.04em;white-space:nowrap}
+.of-identity-context .of-identity-name{min-width:0;overflow:hidden;color:#4C1D95;font-size:.82rem;font-weight:800;text-overflow:ellipsis;white-space:nowrap}
+.of-identity-context .of-identity-kind{padding:2px 7px;color:#6D28D9;border-radius:999px;background:#EDE9FE;font-size:.62rem;font-weight:800;white-space:nowrap}
+.of-identity-context .of-identity-help{grid-column:2 / 4;color:#7C6A9E;font-size:.64rem}
 /* ── 주문 캡처 이미지 업로드 & AI 추출 ── */
 .of-img-zone{border:2px dashed #a6c8fb;border-radius:12px;background:#f7faff;padding:20px 16px;text-align:center;cursor:pointer;transition:all .18s;margin-bottom:14px;position:relative}
 .of-img-zone:hover,.of-img-zone.drag-over{border-color:var(--p);background:#e8f1fe}
@@ -608,6 +615,53 @@ input,textarea,button{font-family:inherit}
 .info-banner{display:flex;gap:10px;align-items:flex-start;background:var(--p-l);border-radius:var(--rs);padding:12px 14px;font-size:.81rem;color:var(--p-d);line-height:1.6}
 .info-banner i{flex-shrink:0;margin-top:2px}.info-banner code{background:#fff;padding:1px 5px;border-radius:4px;font-family:monospace;font-size:.78rem}
 @media(max-width:480px){.header-text h1{font-size:1rem}.pane-card{padding:16px 14px}.screen-body{padding:12px}.ig-label{width:74px;font-size:.72rem;padding:9px 10px}}
+
+/* 구매양식 모바일 전용 레이아웃
+   짧은 항목은 좌측 라벨 + 우측 입력, 긴 배송주소·비고만 한 줄 전체를 사용한다. */
+@media(max-width:600px){
+  #screenOrderForm,#screenOrderForm .screen-body,#screenOrderForm .of-order-card,#screenOrderForm .ofc-ai-section{min-width:0;max-width:100%}
+  #screenOrderForm .screen-body{width:100%;padding:10px 12px 30px!important;overflow-x:hidden}
+  body.embed-mode #screenOrderForm .screen-body{padding-top:4px!important}
+  body.embed-mode #orderFormReviewerInfo,body.embed-mode #orderFormProductCard{display:none!important}
+  #screenOrderForm .pane-card{margin-bottom:9px!important;padding:10px 12px!important;border-radius:13px}
+  #screenOrderForm .of-order-card{padding:11px;margin-bottom:10px;border-width:1.5px;border-radius:16px}
+  #screenOrderForm .ofc-header{margin-bottom:9px;padding-bottom:8px}
+  #screenOrderForm .ofc-ai-section{margin-bottom:10px;padding:10px;border-radius:12px}
+  #screenOrderForm .ofc-ai-section-title{margin-bottom:6px}
+  #screenOrderForm .of-identity-context{margin-bottom:7px;padding:8px 9px}
+  #screenOrderForm .of-img-zone{margin-bottom:9px;padding:13px 10px;border-width:1.5px;border-radius:11px}
+  #screenOrderForm .of-img-zone .oiz-icon{margin-bottom:3px;font-size:1.45rem}
+  #screenOrderForm .of-img-zone .oiz-title{font-size:.8rem!important}
+  #screenOrderForm .of-img-zone .oiz-sub{font-size:.68rem;line-height:1.45}
+  #screenOrderForm .of-img-preview{margin-bottom:7px!important}
+  #screenOrderForm .ofc-ai-loading,#screenOrderForm .ofc-ai-result,#screenOrderForm .ofc-ai-error{margin-bottom:7px;padding:8px 9px}
+  #screenOrderForm .of-field{display:grid;grid-template-columns:76px minmax(0,1fr);align-items:center;gap:8px;margin-bottom:8px}
+  #screenOrderForm .of-label{width:auto;min-width:0;color:#344054;font-size:.75rem;line-height:1.25;text-align:left;word-break:keep-all}
+  #screenOrderForm .of-input,#screenOrderForm .of-autocomplete-wrap{width:100%;min-width:0;max-width:100%}
+  #screenOrderForm .of-input{min-height:42px;padding:7px 10px;border-width:1px;border-radius:11px;font-size:.9rem;box-sizing:border-box}
+  #screenOrderForm .of-textarea{min-height:58px;padding:8px 10px;overflow-wrap:anywhere}
+  #screenOrderForm .of-field--stack{grid-template-columns:minmax(0,1fr);gap:4px}
+  #screenOrderForm .of-field--stack>.of-label,#screenOrderForm .of-field--stack>.of-input{grid-column:1}
+  #screenOrderForm .of-save-id{grid-column:2;margin:-2px 0 1px!important;font-size:.67rem!important;line-height:1.35}
+  #screenOrderForm .of-save-id input{flex:0 0 auto}
+  #screenOrderForm .of-error-msg{margin-top:-3px;margin-bottom:6px;margin-left:84px}
+  #screenOrderForm .of-option-picker{margin-bottom:10px;padding:10px 11px}
+  #screenOrderForm .ofc-orderer-note,#screenOrderForm .ofc-shared-notice{margin-bottom:8px;padding:7px 9px}
+  #screenOrderForm .nc-addr-notice,#screenOrderForm .nc-verify-box,#screenOrderForm .nc-manual-check{margin-bottom:8px;padding:8px 10px}
+  #screenOrderForm .btn-add-order-card{margin-bottom:10px;padding:11px}
+  #screenOrderForm #ofFinalGuide{margin-bottom:9px!important;font-size:.76rem!important}
+  #screenOrderForm #btnOrderFormSubmit{min-height:52px;padding:12px 14px!important;border-radius:14px!important;font-size:.96rem!important;box-shadow:0 10px 24px rgba(49,130,246,.24)}
+  #screenOrderForm .of-modal-overlay{padding:14px!important}
+  #screenOrderForm .of-modal-card{max-width:340px!important;padding:21px 17px 17px!important;border-radius:18px!important}
+}
+@media(max-width:340px){
+  #screenOrderForm .screen-body{padding-right:9px!important;padding-left:9px!important}
+  #screenOrderForm .of-order-card{padding:9px}
+  #screenOrderForm .of-field{grid-template-columns:70px minmax(0,1fr);gap:6px}
+  #screenOrderForm .of-field--stack{grid-template-columns:minmax(0,1fr)}
+  #screenOrderForm .of-label{font-size:.71rem}
+  #screenOrderForm .of-error-msg{margin-left:76px}
+}
 /* ── 관리자 화면 너비 확장 ── */
 .admin-body{padding-top:0;max-width:1800px;width:100%;margin:0 auto;padding-left:24px;padding-right:24px;box-sizing:border-box}
 #screenAdmin .app-header .header-inner{max-width:1800px}

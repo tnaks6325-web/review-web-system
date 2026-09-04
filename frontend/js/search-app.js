@@ -74,7 +74,18 @@ async function _loadOrderIdentityContext() {
       if (idEl && !idEl.value) idEl.value = identity.shoppingId || "";
       if (idEl) idEl.dataset.savedValue = identity.shoppingId || "";
       const who = document.getElementById(cid + "_identityWho");
-      if (who) who.textContent = (identity.name || "선택 명의") + " 명의 주문인지 확인합니다.";
+      if (who) {
+        const identityName = identity.name || "선택 명의";
+        const identityKind = identity.type === "sub" ? "타계정" : "본계정";
+        const phoneDigits = String(identity.phone || "").replace(/[^0-9]/g, "");
+        const maskedPhone = phoneDigits ? "***" + phoneDigits.slice(-4) : "";
+        who.innerHTML = '<span class="of-identity-kicker">현재 참여 명의</span>'
+          + '<strong class="of-identity-name">' + _safeText(identityName) + '</strong>'
+          + '<span class="of-identity-kind">' + identityKind + '</span>'
+          + '<span class="of-identity-help">' + (maskedPhone ? _safeText(maskedPhone) + ' · ' : '')
+          + 'AI가 캡처와 이 명의를 확인합니다.</span>';
+        who.setAttribute("aria-label", "현재 참여 명의 " + identityName + " " + identityKind);
+      }
     });
     return data;
   })().catch((err) => { _identityContextPromise = null; throw err; });
@@ -6284,7 +6295,12 @@ function _buildOrderCardHtml(cid, idx, type) {
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
       <div class="ofc-ai-section-title">📸 구매 캡처 <span style="font-weight:800;color:#fff;background:#E5484D;border-radius:4px;padding:1px 5px;font-size:.6rem;vertical-align:middle">필수</span></div>
-      <div id="${cid}_identityWho" style="font-size:.72rem;color:#4B5563;margin:0 0 8px">선택한 참여 명의와 주문 정보를 확인합니다.</div>
+      <div id="${cid}_identityWho" class="of-identity-context" aria-label="선택한 참여 명의 확인">
+        <span class="of-identity-kicker">현재 참여 명의</span>
+        <strong class="of-identity-name">선택한 참여 명의</strong>
+        <span class="of-identity-kind">AI 확인</span>
+        <span class="of-identity-help">AI가 캡처와 이 명의를 확인합니다.</span>
+      </div>
       <div id="${cid}_identityStatus" style="display:none;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55"></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
@@ -6356,7 +6372,7 @@ function _buildOrderCardHtml(cid, idx, type) {
 
     <!-- 주문번호 -->
     <div class="of-field">
-      <label class="of-label">주문번호</label>
+      <label class="of-label" for="${cid}_orderNumber">주문번호</label>
       <input id="${cid}_orderNumber" class="of-input" type="text" placeholder="캡처 분석 후 자동기입">
     </div>
 
@@ -6390,31 +6406,31 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_userId">아이디</label>
       <input id="${cid}_userId" class="of-input" type="text" placeholder="쇼핑몰 아이디" oninput="_ofClearError('${cid}_userId')">
-      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
+      <label class="of-save-id" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
     </div>
     <div class="of-error-msg" id="${cid}_userId_err"><i class="fas fa-exclamation-circle"></i> 아이디는 필수 입력 항목입니다.</div>
 
     <!-- 수취인 -->
     <div class="of-field">
-      <label class="of-label of-label-required">수취인</label>
+      <label class="of-label of-label-required" for="${cid}_recipient">수취인</label>
       <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
     </div>
     <!-- 연락처 -->
     <div class="of-field">
-      <label class="of-label of-label-required">연락처</label>
+      <label class="of-label of-label-required" for="${cid}_phone">연락처</label>
       <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
     </div>
     <!-- 배송주소 -->
-    <div class="of-field">
-      <label class="of-label of-label-required">배송주소</label>
-      <input id="${cid}_address" class="of-input" type="text" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')">
+    <div class="of-field of-field--stack">
+      <label class="of-label of-label-required" for="${cid}_address">배송주소</label>
+      <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
     </div>
 
     <!-- 은행/계좌/예금주 (공유 가능) -->
     <div id="${cid}_bankWrap" class="${lockClass}">
       ${isFirst ? `
       <div class="of-field">
-        <label class="of-label of-label-required">은행</label>
+        <label class="of-label of-label-required" for="of_bank">은행</label>
         <div class="of-autocomplete-wrap">
           <input id="of_bank" class="of-input" type="text" placeholder="은행명 (클릭시 선택도 가능)" autocomplete="off"
             oninput="onBankInput(this);_ofClearError('of_bank')" onkeydown="onBankKeydown(event)" onfocus="onBankFocus()" onblur="onBankBlur()">
@@ -6422,38 +6438,38 @@ function _buildOrderCardHtml(cid, idx, type) {
         </div>
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">계좌</label>
+        <label class="of-label of-label-required" for="of_account">계좌</label>
         <input id="of_account" class="of-input" type="text" placeholder="계좌번호" oninput="_ofClearError('of_account')">
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">예금주</label>
+        <label class="of-label of-label-required" for="of_depositor">예금주</label>
         <input id="of_depositor" class="of-input" type="text" placeholder="예금주 이름" oninput="_ofClearError('of_depositor')">
       </div>` : `
       <div class="of-field">
-        <label class="of-label of-label-required">은행</label>
+        <label class="of-label of-label-required" for="${cid}_bank">은행</label>
         <input id="${cid}_bank" class="of-input" type="text" placeholder="은행명" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_bank')">
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">계좌</label>
+        <label class="of-label of-label-required" for="${cid}_account">계좌</label>
         <input id="${cid}_account" class="of-input" type="text" placeholder="계좌번호" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_account')">
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">예금주</label>
+        <label class="of-label of-label-required" for="${cid}_depositor">예금주</label>
         <input id="${cid}_depositor" class="of-input" type="text" placeholder="예금주" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_depositor')">
       </div>`}
     </div>
 
     <!-- 결제금액 -->
     <div class="of-field">
-      <label class="of-label of-label-required">결제금액</label>
+      <label class="of-label of-label-required" for="${cid}_price">결제금액</label>
       <input id="${cid}_price" class="of-input" type="text" placeholder="결제한 금액 (예: 47,000)"
         oninput="formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')" inputmode="numeric">
     </div>
 
     <!-- 비고 (모든 카드에 표시) -->
-    <div class="of-field" id="${cid}_memo_wrap">
-      <label class="of-label" id="${cid}_memo_label">비고</label>
-      <input id="${cid}_memo" class="of-input" type="text" placeholder="포스팅URL 또는 기타메모 입력">
+    <div class="of-field of-field--stack" id="${cid}_memo_wrap">
+      <label class="of-label" id="${cid}_memo_label" for="${cid}_memo">비고</label>
+      <textarea id="${cid}_memo" class="of-input of-textarea" rows="2" placeholder="포스팅URL 또는 기타메모 입력"></textarea>
     </div>
 
     <div style="font-size:.7rem;color:var(--t3);padding:6px 8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
