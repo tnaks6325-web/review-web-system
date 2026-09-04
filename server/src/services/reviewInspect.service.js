@@ -552,7 +552,7 @@ function _bigramDice(a, b) {
 
 function _quantityMap(s) {
   const out = new Map();
-  const text = String(s || '').normalize('NFKC').toLowerCase();
+  const text = _cleanProductForMatch(s).normalize('NFKC').toLowerCase();
   const re = /(\d+(?:\.\d+)?)\s*(년형|세대|mah|kg|mg|ml|cm|mm|g|l|정|포|개|박스|매|캡슐|입|종|세트|인치|%)/gi;
   let m;
   while ((m = re.exec(text))) {
@@ -572,7 +572,7 @@ function _quantityConflicts(expected, observed) {
   }
   // 단위가 없는 연도·모델·옵션 숫자도 상품 식별자다. 한쪽 누락까지 포함해 순서가
   // 조금이라도 다르면 자동 통과하지 않는다(예: 2025 ↔ 2026, S24 ↔ S25).
-  const numberSeq = s => String(s || '').normalize('NFKC').match(/\d+(?:\.\d+)?/g) || [];
+  const numberSeq = s => _cleanProductForMatch(s).normalize('NFKC').match(/\d+(?:\.\d+)?/g) || [];
   const expectedNumbers = numberSeq(expected), observedNumbers = numberSeq(observed);
   if (JSON.stringify(expectedNumbers) !== JSON.stringify(observedNumbers)) {
     conflicts.push({ unit: 'number_sequence', expected: expectedNumbers, observed: observedNumbers });
