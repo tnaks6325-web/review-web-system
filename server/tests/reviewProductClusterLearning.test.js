@@ -96,6 +96,50 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     ok('D1: 상품명 군집만 소급 종결하고 다른 오류는 open 유지');
   }
 
+  // D2. 미통과는 checks 에도 남되 상품명 축을 제외한 다른 오류만 open 여부를 정한다
+  {
+    const seed = productRow('F1');
+    const withDuplicate = productRow('F2', { extra: { duplicate: { verdict: 'warn', matchFileId: 'OLD' } } });
+    const calls = [];
+    const pool = { query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (/FROM review_inspections WHERE file_id/.test(sql)) return { rows: [seed] };
+      if (/FROM review_inspections\s+WHERE sheet_id/.test(sql)) return { rows: [seed, withDuplicate] };
+      if (/SELECT inspect_product_rules/.test(sql)) return { rows: [{ inspect_product_rules: [] }] };
+      return { rows: [], rowCount: 1 };
+    } };
+    svc.__setPoolForTest(pool);
+    const out = await svc.resolveProductCluster({ fileId: 'F1', verdict: 'fail', by: '관리자' });
+    assert.strictEqual(out.remainsOpen, 1);
+    const updates = calls.filter(c => /UPDATE review_inspections/.test(c.sql));
+    assert.strictEqual(updates[0].params[2], 'resolved', '상품명 단독 fail 은 bad 로 전체 종결');
+    assert.strictEqual(updates[0].params[7], 'bad');
+    assert.strictEqual(updates[1].params[2], 'suspect', '다른 warn 이 남은 건만 open');
+    assert.strictEqual(JSON.parse(updates[1].params[1]).product.verdict, 'fail', '확정 fail 근거 보존');
+    ok('D2: 미통과 근거 보존 + 다른 축만으로 open 여부 계산');
+  }
+
+  // D3. 500개를 넘겨도 오래된 exact 규칙을 조용히 버리지 않는다
+  {
+    const seed = productRow('F1');
+    const oldRules = Array.from({ length: 500 }, (_, i) => ({ id: `old-${i}`, clusterKey: `old-key-${i}`, verdict: 'pass' }));
+    const calls = [];
+    const pool = { query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (/FROM review_inspections WHERE file_id/.test(sql)) return { rows: [seed] };
+      if (/FROM review_inspections\s+WHERE sheet_id/.test(sql)) return { rows: [seed] };
+      if (/SELECT inspect_product_rules/.test(sql)) return { rows: [{ inspect_product_rules: oldRules }] };
+      return { rows: [], rowCount: 1 };
+    } };
+    svc.__setPoolForTest(pool);
+    await svc.resolveProductCluster({ fileId: 'F1', verdict: 'pass', by: '관리자' });
+    const ruleWrite = calls.find(c => /inspect_product_rules = \$1::jsonb/.test(c.sql));
+    const saved = JSON.parse(ruleWrite.params[0]);
+    assert.strictEqual(saved.length, 501);
+    assert.ok(saved.some(r => r.clusterKey === 'old-key-499'));
+    ok('D3: 501번째 판단도 기존 exact 규칙을 축출하지 않음');
+  }
+
   // E. 판단불가/기준오류는 현재 군집만 끝내고 미래 규칙을 만들지 않는다
   {
     const seed = productRow('F1');
@@ -131,6 +175,7 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     assert.ok(/'\/review-inspect\/product-clusters', authMiddleware, adminOrMasterMiddleware/.test(routes));
     assert.ok(/'\/review-inspect\/product-clusters\/decide', authMiddleware, adminOrMasterMiddleware/.test(routes));
     assert.ok(front.includes('riOpenProductClusters') && front.includes("riProductDecide('pass')") && front.includes("riProductDecide('baseline_error')"));
+    assert.ok(!/rules = \[rule,[^\n]*\.slice\(0, 500\)/.test(serviceSrc), 'exact 규칙 500개 조용한 축출 금지');
     ok('F1: 148 스키마 프리플라이트 + 관리자 전용 API + 4선택 UI');
   }
 

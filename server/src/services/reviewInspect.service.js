@@ -1522,10 +1522,17 @@ function _humanResolveProductCheck(checks, verdict) {
     machineVerdict: pr.machineVerdict || pr.verdict || 'warn',
     humanVerdict: verdict,
     humanResolved: true,
-    // 현재 군집은 사람이 끝냈다. fail 정답도 별도 컬럼에 남기고 open 유형에서는 제거한다.
-    verdict: 'pass',
+    // 사람이 확정한 fail 은 checks 에도 남긴다. status 계산에서만 이 축을 제외해야
+    // 복합 경고 카드와 유형 집계에서 "확정된 상품 불일치"가 사라지지 않는다.
+    verdict: verdict === 'fail' ? 'fail' : 'pass',
   };
   return out;
+}
+
+/** 상품명 축은 이번 군집 판단으로 끝났으므로, 나머지 축만으로 카드 open 여부를 계산한다. */
+function _statusAfterProductDecision(checks) {
+  const pr = (checks && checks.product && typeof checks.product === 'object') ? checks.product : {};
+  return computeStatus({ ...checks, product: { ...pr, verdict: 'pass' } });
 }
 
 async function _withProductDecisionTx(fn) {
@@ -1567,7 +1574,9 @@ async function _saveProductClusterRule(client, { seed, clusterKey, verdict, note
     createdAt: (previous && previous.createdAt) || new Date().toISOString(),
     updatedAt: new Date().toISOString(), evidenceCount: Number(evidenceCount) || 1,
   };
-  rules = [rule, ...rules.filter(r => !(r && r.clusterKey === clusterKey))].slice(0, 500);
+  // exact 규칙은 오래됐다는 이유만으로 버리면 안 된다. 501번째 판단이 1번째 판단을
+  // 되살려 다시 의심으로 보내므로, 명시적 보존정책이 생기기 전까지 전부 유지한다.
+  rules = [rule, ...rules.filter(r => !(r && r.clusterKey === clusterKey))];
   await client.query(
     `UPDATE tab_configs SET inspect_product_rules = $1::jsonb, updated_at = NOW()
       WHERE sheet_id = $2 AND tab_name = $3`,
@@ -1626,7 +1635,7 @@ async function resolveProductCluster({ fileId, verdict, note, by } = {}) {
     let resolved = 0, remainsOpen = 0;
     for (const row of targets) {
       const checks = _humanResolveProductCheck(row.checks, decision);
-      const remainingStatus = computeStatus(checks);
+      const remainingStatus = _statusAfterProductDecision(checks);
       const closesWhole = remainingStatus === 'pass' || remainingStatus === 'unverifiable';
       const nextStatus = closesWhole ? 'resolved' : remainingStatus;
       const wholeResolution = closesWhole
@@ -1718,10 +1727,14 @@ async function resolveInspection({ fileId, by, resolution } = {}) {
   const rkind = _RESOLUTIONS.includes(resolution) ? resolution : null;
   const { rows } = await _db().query(
     `UPDATE review_inspections
-        SET status = 'resolved', resolution = COALESCE($3, resolution),
+        SET status = 'resolved',
+            resolution = CASE
+              WHEN product_resolution = 'fail' THEN 'bad'
+              ELSE COALESCE($3, resolution)
+            END,
             resolved_at = NOW(), resolved_by = $2, updated_at = NOW()
       WHERE file_id = $1 AND status <> 'resolved'
-      RETURNING sheet_id, tab_name, ocr_product, checks`,
+      RETURNING sheet_id, tab_name, ocr_product, checks, product_resolution`,
     [fileId, by || '', rkind]
   );
   let aliasAdded = 0;

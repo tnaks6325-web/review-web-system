@@ -14311,6 +14311,7 @@ function _riCardActions(r,i){
     dedup:{h:`riDedupPopup(${i})`,t:'🗑 중복파일 제거'},
     names:{h:`riProductNames(${i})`,t:'⚙ 기대 상품명'},
     promote:{h:`riPromoteSample(${i})`,t:'🖼 예시로 등록'},
+    cluster:{h:`riOpenProductClusters()`,t:'🏷 군집판단에서 기준 변경'},
   };
   const isReceiptSlot=r.slot_key==='receipt';
   const moves=isReceiptSlot?[A.mvV,A.mvC]:[A.mvR,A.mvC];
@@ -14336,7 +14337,13 @@ function _riCardActions(r,i){
     //   렌더러가 이 형태(주 조치 = riBadPopup)를 감지해 [✓ 정상] | [✕ 불량] 좌우 반반으로 편다.
     return {main:{...A.bad,t:'✕ 불량',m:'m-red'}, subs:[A.ok], more:moves};
   }
-  if(p==='product') return {main:{...A.ok,t:'✓ 정상 — 이 표기를 별칭으로 학습',m:'m-green'}, subs:[A.names,A.bad], more:moves};
+  if(p==='product'){
+    // exact 미통과 규칙 또는 이미 확정된 미통과는 일반 [정상]으로 뒤집지 않는다.
+    // 기준을 바꾸려면 군집판단으로 들어가 명시적으로 새 결정을 내려야 한다.
+    const lockedFail=(c.product&&c.product.verdict==='fail')||r.product_resolution==='fail';
+    if(lockedFail) return {main:{...A.bad,t:'✕ 상품 불일치 확정',m:'m-red'}, subs:[A.cluster,A.names], more:moves};
+    return {main:{...A.ok,t:'✓ 정상 — 이 표기를 별칭으로 학습',m:'m-green'}, subs:[A.names,A.bad], more:moves};
+  }
   if(p==='channel') return {main:{...A.ok,t:'✓ 정상 — 채널 추정 오인',m:'m-blue'}, subs:[A.promote,A.bad], more:moves};
   if(p==='similarity') return {main:{...A.detail,t:'👁 겹친 제출과 나란히 보기',m:'m-vio'}, subs:[A.bad,A.ok], more:moves};
   return {main:{...A.detail,t:'👁 반복 제출 확인',m:'m-slate'}, subs:[A.ok,A.bad], more:moves};   // author
