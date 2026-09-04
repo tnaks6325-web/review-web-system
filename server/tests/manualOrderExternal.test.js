@@ -193,10 +193,11 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
 {
   const c = stubClient([
     [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 0 }]],
-    [/status = 'submitted' LIMIT 1/i, [{ id: 55 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 56 }]],
   ]);
   const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '11112222' });
-  ok('B16 같은 명의의 확정 참여가 이미 있으면 차단(이중 차감 금지)', r.ok === false && /이미 확정된 참여/.test(r.error));
+  ok('B16 기간 판정을 통과한 같은 명의의 반복 참여는 새 확정으로 기록',
+    r.ok === true && r.applicationId === 56 && !c.log.some(q => /status = 'submitted' LIMIT 1/i.test(q.sql)));
 }
 {
   const c = stubClient([
@@ -417,8 +418,8 @@ console.log('\nE. 데이터 보전 가드');
   ok('E13 ★ 24시간 내 같은 연락처 재접수는 막는다(재붙여넣기 = 예상되는 복구 동작)',
     /submitted_at > NOW\(\) - interval '24 hours'/.test(src) && /duplicate: true/.test(src));
   ok('E14 중복 확인은 force 로만 우회', /if \(!force\) \{/.test(src));
-  ok('E15 ★ 확정 불가한 참여형 건은 원장 기록 **전에** 걸러낸다(시트만 쓰이고 정원은 안 깎이는 상태 방지)',
-    src.indexOf("status = 'submitted' LIMIT 1") < src.indexOf('createOrderLedgerEntry('));
+  ok('E15 ★ 재참여 기간 게이트는 원장 기록 **전에** 실행(차단됐는데 주문만 생기는 상태 방지)',
+    src.indexOf('if (!allowRepurchase)') < src.indexOf('createOrderLedgerEntry('));
   ok('E16 ★ 등록된 리뷰어 번호를 남의 타계정으로 붙이지 않는다(063과 같은 정책 스위치)',
     src.includes('CAMPAIGN_SUB_REGISTERED_POLICY') && src.includes('sub_accounts'));
   ok('E17 큐 등록 후 kick — cron까지 시트에 안 뜨던 문제', /kickOrderBatch\(sheetId, tabName\)/.test(src));

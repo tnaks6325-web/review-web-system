@@ -194,9 +194,11 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('allowRepurchase 파라미터 존재', svc.includes('allowRepurchase = false'));
   const iDup24h = svc.indexOf('24시간 내에 이미 접수돼 있습니다');
   const iRepurchase = svc.indexOf(`require('../utils/repurchaseGuard')`);
-  const iCampaignDedup = svc.indexOf('이 공고에 이미 확정된 참여');
-  ok('★ 순서: 24시간 중복확인 → 재참여 가드 → 캠페인단위 확정이력(기존 순서 유지)',
-    iDup24h > -1 && iRepurchase > iDup24h && iCampaignDedup > iRepurchase);
+  const iLedger = svc.indexOf('createOrderLedgerEntry({');
+  ok('★ 순서: 24시간 중복확인 → 재참여 가드 → 주문 원장 기록',
+    iDup24h > -1 && iRepurchase > iDup24h && iLedger > iRepurchase);
+  ok('★ 수동제출에도 campaign_applications submitted 영구차단이 남아 있지 않음',
+    !svc.includes("status = 'submitted' LIMIT 1"));
   // ★★ 핵심 회귀: 캠페인 지정 여부와 무관하게 항상 검사해야 한다(이번 사고의 원인이
   //   "campaignId 없으면 검사 자체가 스킵"이었으므로, if(campaignId) 안에 갇히면 안 된다).
   const block = svc.slice(iRepurchase - 400, iRepurchase + 900);
