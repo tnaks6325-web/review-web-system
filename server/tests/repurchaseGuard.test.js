@@ -48,6 +48,15 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     { sheetId: 's', tabName: 't', phone8: '12345678' })).blocked, false);
   delete process.env.CAMPAIGN_REPARTICIPATE_DAYS;
   eq('기본값 14일', repurchaseDays(), 14);
+  eq('공고 설정 7일', repurchaseDays(7), 7);
+  eq('공고 설정 21일', repurchaseDays(21), 21);
+  eq('공고 설정 제한 없음(0일)', repurchaseDays(0), 0);
+  eq('공고 설정 범위 밖이면 기본값', repurchaseDays(366), 14);
+  eq('공고별 제한 없음(0일) → DB 호출 없이 통과',
+    (await checkRepurchaseWindow({ query: async () => { throw new Error('DB 호출 금지'); } },
+      { sheetId: 's', tabName: 't', phone8: '12345678', days: 0 })).blocked, false);
+  process.env.CAMPAIGN_REPARTICIPATE_DAYS = '0';
+  eq('운영 킬스위치 0은 공고별 21일보다 우선', repurchaseDays(21), 0);
   process.env.CAMPAIGN_REPARTICIPATE_DAYS = origDays;
 
   /* ═══ 2. 정상 판정 — 스텁 DB ═══ */
@@ -77,6 +86,14 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     eq('14일 뒤가 재참여 가능일', r.availableFrom.toISOString(),
       new Date(submittedAt.getTime() + 14 * 86400000).toISOString());
     eq('days 필드 = 14', r.days, 14);
+  }
+  {
+    const submittedAt = new Date('2026-08-20T05:00:00Z');
+    const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
+      { sheetId: 's1', tabName: 't1', phone8: '86365441', days: 7 });
+    eq('공고별 7일 값이 SQL 기간 파라미터에 적용', lastParams[3], 7);
+    eq('공고별 7일 뒤가 재참여 가능일', r.availableFrom.toISOString(),
+      new Date(submittedAt.getTime() + 7 * 86400000).toISOString());
   }
 
   /* ═══ 3. 배치 판정 ═══ */
@@ -136,14 +153,16 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   const { checkRepurchaseStatusForAccounts } = require('../src/utils/repurchaseGuard');
   {
     const rows = [
-      { campaign_id: 'camp_locked', phone8: '86365441', last_submitted_at: new Date(Date.now() - 4 * 86400000) },
-      { campaign_id: 'camp_ready', phone8: '86365441', last_submitted_at: new Date(Date.now() - 20 * 86400000) },
+      { campaign_id: 'camp_locked', repurchase_days: 21, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
+      { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
+      { campaign_id: 'camp_unlimited', repurchase_days: 0, phone8: '86365441', last_submitted_at: new Date(Date.now() - 1 * 86400000) },
     ];
     const r = await checkRepurchaseStatusForAccounts(stubDb(rows),
       { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8List: ['86365441'] });
-    eq('4일 전 참여 → locked', r.get('86365441').get('camp_locked').status, 'locked');
+    eq('10일 전 참여 + 공고별 21일 → locked', r.get('86365441').get('camp_locked').status, 'locked');
     ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('86365441').get('camp_locked').availableFrom instanceof Date);
-    eq('20일 전 참여(14일 지남) → ready', r.get('86365441').get('camp_ready').status, 'ready');
+    eq('10일 전 참여 + 공고별 7일 → ready', r.get('86365441').get('camp_ready').status, 'ready');
+    ok('공고별 제한 없음(0일)은 상태 맵에서도 제외', !r.get('86365441').has('camp_unlimited'));
     ok('★ 참여 이력이 아예 없는 공고는 맵에 없음(=평소 카드, 0/false로 꾸미지 않는다)', !r.get('86365441').has('camp_never'));
   }
   {

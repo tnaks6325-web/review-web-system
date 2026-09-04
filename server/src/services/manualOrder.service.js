@@ -281,6 +281,7 @@ async function confirmExternalApplication(client, {
 async function submitExternalOrder({
   sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
   allowOverDaily = false, allowRepurchase = false,
+  repurchaseDaysOverride,
 }) {
   const warnings = [];
   const f = fields || {};
@@ -320,8 +321,13 @@ async function submitExternalOrder({
   //     번호만 같다" 같은 사정을 판단해 넘길 수 있게 — 사용자 확정, 리뷰어 셀프 참여는 예외 없음).
   if (!allowRepurchase) {
     try {
-      const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
-      const rw = await checkRepurchaseWindow(pool, { sheetId, tabName, phone: f.phone });
+      const { checkRepurchaseWindow, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
+      const effectiveRepurchaseDays = repurchaseDaysOverride === undefined
+        ? await resolveCampaignRepurchaseDays(pool, campaignId)
+        : repurchaseDaysOverride;
+      const rw = await checkRepurchaseWindow(pool, {
+        sheetId, tabName, phone: f.phone, days: effectiveRepurchaseDays,
+      });
       if (rw.blocked) {
         const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
           timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',

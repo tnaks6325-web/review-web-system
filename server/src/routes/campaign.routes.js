@@ -307,6 +307,16 @@ function _normalizeWorkboardDisplayName(value) {
     .trim();
 }
 
+function _normalizeRepurchaseDays(value, fallback) {
+  if (value === undefined || value === null) return { value: fallback };
+  const raw = typeof value === 'number' ? String(value) : (typeof value === 'string' ? value.trim() : '');
+  const days = Number(raw);
+  if (!/^\d{1,3}$/.test(raw) || !Number.isInteger(days) || days < 0 || days > 365) {
+    return { error: '재참여 제한 기간은 제한 없음(0일) 또는 1~365일로 설정해주세요.' };
+  }
+  return { value: days };
+}
+
 async function _saveWorkboardDisplayName({ sheetId, tabName, displayName }) {
   const sid = String(sheetId || '').trim();
   const tab = String(tabName || '').trim();
@@ -1904,6 +1914,7 @@ async function _applyParticipation(req, res, next, campPre) {
         const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
         const rw = await checkRepurchaseWindow(client, {
           sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, phone8: holdP8,
+          days: camp.repurchase_days,
         });
         if (rw.blocked) {
           await client.query('ROLLBACK');
@@ -2478,6 +2489,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
       start_date, // ★ 062: 시작일(YYYY-MM-DD) — 시작일 전 게시 시 오픈예정 카운트다운
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min, // ★ 063: 타계정 추가참여(§09-1·5·2)
+      repurchase_days, // ★ 148: 공고별 재참여 제한(0=제한 없음, 1~365일)
       options, // ★ 061: 상품옵션 목록(참여형)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 저장, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트 공고) — 목록에서만 숨김, 참여는 정상
@@ -2501,6 +2513,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
+    const repurchaseDaysState = _normalizeRepurchaseDays(repurchase_days, 14);
+    if (repurchaseDaysState.error) return res.status(400).json({ ok: false, error: repurchaseDaysState.error });
     const normalizedReviewType = normalizeReviewType(review_type);
     const reviewMixState = normalizeReviewTypeMix(review_type_mix);
     const reviewMixError = validateReviewTypeMix(normalizedReviewType, reviewMixState, recruit_total, { requireWhenMixed: true });
@@ -2581,10 +2595,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
         start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
         transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, carry_strategy, work_kind, skip_weekends, cash_receipt_required,
-        delivery_type_mix, recall_courier, recall_product)
+        delivery_type_mix, recall_courier, recall_product, repurchase_days)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
                $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
-               $45,$46,$47,$48)
+               $45,$46,$47,$48,$49)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -2636,6 +2650,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         JSON.stringify(storeDeliveryMix),                       // ★ 135: 혼합이 아니면 [] (유형 전환 시 옛 조합 잔류 차단)
         storeRecallCourier,                                     // ★ 135: 회수가 아니면 '' — NOT NULL 컬럼이라 null 금지
         storeRecallProduct,
+        repurchaseDaysState.value,
       ]
     );
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
@@ -2707,6 +2722,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       // ★ 063: 타계정 추가참여(전부 optional — 미전달 시 COALESCE로 기존값 유지).
       //   ※ 아래 UPDATE의 $33~$35가 이 이름들을 참조하므로 구조분해 누락 = 수정 저장 전면 ReferenceError(500).
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min,
+      repurchase_days, // ★ 148: undefined/null=유지, 0=제한 없음, 1~365일
       options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 교체, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트) — undefined=유지, true/false=명시 변경
@@ -2725,6 +2741,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
+    const repurchaseDaysState = _normalizeRepurchaseDays(repurchase_days, null);
+    if (repurchaseDaysState.error) return res.status(400).json({ ok: false, error: repurchaseDaysState.error });
 
     // ★ 062: 시간창 유효값 — ''=비움(자율주문 전환), null/undefined=유지, 'HH:MM'=설정.
     //   auto_order=true(카드 인라인 편집기)는 강제 비움 — 종전엔 스코프 라우트만 해석해
@@ -3041,6 +3059,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         delivery_type_mix = CASE WHEN $46::jsonb IS NULL THEN delivery_type_mix ELSE $46::jsonb END,
         recall_courier = CASE WHEN $47::text IS NULL THEN recall_courier ELSE $47::text END,
         recall_product = CASE WHEN $48::text IS NULL THEN recall_product ELSE $48::text END,
+        repurchase_days = COALESCE($50::integer, repurchase_days),
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -3093,6 +3112,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         // $49 ★ 139: 세그먼트가 없는 옛 화면은 미전송=유지. 알 수 없는 값도 유지해
         // 잘못된 API 호출이 기존 공고 전략을 next로 되돌리지 않게 한다.
         ['next', 'spread', 'extend'].includes(carry_strategy) ? carry_strategy : null,
+        repurchaseDaysState.value,                                // $50 ★ 148: null=유지, 0=제한 없음
       ]
     );
 

@@ -16,12 +16,27 @@
  *
  * ★ 취소된 주문(deleted_at 有)은 세지 않는다 — 취소한 구매까지 재참여를 막으면 안 된다.
  * ★ 모르면 막지 않는다(fail-open) — 탭·번호를 판정할 수 없으면 통과시킨다.
- * ★ 킬스위치 겸 상한 조절: env CAMPAIGN_REPARTICIPATE_DAYS(기본 14, 0=제한 없음).
+ * ★ 공고별 기간은 recruit_campaigns.repurchase_days(0=제한 없음)에 저장한다.
+ * ★ env CAMPAIGN_REPARTICIPATE_DAYS는 기존 공고/미지정 호출의 기본값(기본 14)이자
+ *   0일 때 전체 기능을 즉시 끄는 운영 킬스위치다.
  */
 
-function repurchaseDays() {
+function repurchaseDays(campaignDays) {
   const n = parseInt(process.env.CAMPAIGN_REPARTICIPATE_DAYS, 10);
-  return Number.isFinite(n) && n >= 0 ? n : 14;
+  const globalDays = Number.isFinite(n) && n >= 0 ? n : 14;
+  if (globalDays <= 0) return 0;
+  if (campaignDays === undefined || campaignDays === null || campaignDays === '') return globalDays;
+  const selected = Number(campaignDays);
+  return Number.isInteger(selected) && selected >= 0 && selected <= 365 ? selected : globalDays;
+}
+
+/** 관리자 수동제출처럼 캠페인 행을 아직 읽지 않은 경로에서 공고별 기간을 한 번 조회한다. */
+async function resolveCampaignRepurchaseDays(dbOrClient, campaignId) {
+  const fallback = repurchaseDays();
+  if (fallback <= 0 || !campaignId) return fallback;
+  const { rows } = await dbOrClient.query(
+    'SELECT repurchase_days FROM recruit_campaigns WHERE id = $1 LIMIT 1', [campaignId]);
+  return repurchaseDays(rows[0] && rows[0].repurchase_days);
 }
 
 function phone8Of(phone) {
@@ -31,11 +46,11 @@ function phone8Of(phone) {
 /**
  * 그 작업 전체에 이 계정(phone8)이 최근 N일 안에 이미 구매양식을 낸 적이 있는지 확인한다.
  * @param {object} dbOrClient - pool 또는 트랜잭션 client (.query 인터페이스)
- * @param {{sheetId:string, tabName:string, phone?:string, phone8?:string}} p
+ * @param {{sheetId:string, tabName:string, phone?:string, phone8?:string, days?:number}} p
  * @returns {Promise<{blocked:boolean, days:number, lastSubmittedAt:Date|null, availableFrom:Date|null}>}
  */
-async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, phone, phone8 } = {}) {
-  const days = repurchaseDays();
+async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, phone, phone8, days: campaignDays } = {}) {
+  const days = repurchaseDays(campaignDays);
   const p8 = phone8 || phone8Of(phone);
   if (days <= 0 || !sheetId || !tabName || p8.length !== 8) {
     return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
@@ -78,11 +93,11 @@ async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, phone, phon
 /**
  * 여러 번호를 한 번에 확인(외부모집 일괄 접수용) — 같은 작업 전체를 왕복 1회로 판정한다.
  * @param {object} dbOrClient
- * @param {{sheetId:string, tabName:string, phone8List:string[]}} p
+ * @param {{sheetId:string, tabName:string, phone8List:string[], days?:number}} p
  * @returns {Promise<Map<string,{blocked:boolean, lastSubmittedAt:Date, availableFrom:Date}>>} phone8 → 결과(막힌 것만 담김)
  */
-async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, phone8List } = {}) {
-  const days = repurchaseDays();
+async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, phone8List, days: campaignDays } = {}) {
+  const days = repurchaseDays(campaignDays);
   const map = new Map();
   const list = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
   if (days <= 0 || !sheetId || !tabName || !list.length) return map;
@@ -118,7 +133,7 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, phone8
   for (const r of rows) {
     const lastSubmittedAt = r.last_at;
     map.set(r.p8, {
-      blocked: true, lastSubmittedAt,
+      blocked: true, days, lastSubmittedAt,
       availableFrom: new Date(new Date(lastSubmittedAt).getTime() + days * 86400000),
     });
   }
@@ -139,13 +154,12 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, phone8
  * @returns {Promise<Map<string, {status:'locked'|'ready', lastSubmittedAt:Date, availableFrom?:Date}>>}
  */
 async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phone8 } = {}) {
-  const days = repurchaseDays();
   const map = new Map();
   const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
   const p8 = String(phone8 || '');
-  if (days <= 0 || !ids.length || p8.length !== 8) return map;
+  if (repurchaseDays() <= 0 || !ids.length || p8.length !== 8) return map;
   const { rows } = await dbOrClient.query(
-    `SELECT rc.id AS campaign_id, MAX(os.submitted_at) AS last_at
+    `SELECT rc.id AS campaign_id, rc.repurchase_days, MAX(os.submitted_at) AS last_at
        FROM recruit_campaigns rc
        LEFT JOIN tab_configs base_tab
          ON base_tab.sheet_id = rc.linked_sheet_id
@@ -166,16 +180,18 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
           ))
           OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
         )
-      GROUP BY rc.id`,
+      GROUP BY rc.id, rc.repurchase_days`,
     [ids, p8]);
   const now = Date.now();
   for (const r of rows) {
+    const days = repurchaseDays(r.repurchase_days);
+    if (days <= 0) continue;
     const lastSubmittedAt = r.last_at;
     const availableFromMs = new Date(lastSubmittedAt).getTime() + days * 86400000;
     if (availableFromMs > now) {
-      map.set(String(r.campaign_id), { status: 'locked', lastSubmittedAt, availableFrom: new Date(availableFromMs) });
+      map.set(String(r.campaign_id), { status: 'locked', days, lastSubmittedAt, availableFrom: new Date(availableFromMs) });
     } else {
-      map.set(String(r.campaign_id), { status: 'ready', lastSubmittedAt });
+      map.set(String(r.campaign_id), { status: 'ready', days, lastSubmittedAt });
     }
   }
   return map;
@@ -183,13 +199,13 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
 
 // 여러 명의의 공고별 재참여 상태를 한 번에 계산한다.
 async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone8List } = {}) {
-  const days = repurchaseDays();
   const out = new Map();
   const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
   const phones = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
-  if (days <= 0 || !ids.length || !phones.length) return out;
+  if (repurchaseDays() <= 0 || !ids.length || !phones.length) return out;
   const { rows } = await dbOrClient.query(
-    `SELECT rc.id AS campaign_id, RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
+    `SELECT rc.id AS campaign_id, rc.repurchase_days,
+            RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
             MAX(os.submitted_at) AS last_submitted_at
        FROM recruit_campaigns rc
        LEFT JOIN tab_configs base_tab
@@ -208,20 +224,23 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
           ))
           OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
         )
-      GROUP BY rc.id, RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)`, [ids, phones]);
+      GROUP BY rc.id, rc.repurchase_days,
+               RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)`, [ids, phones]);
   const now = Date.now();
   for (const r of rows) {
+    const days = repurchaseDays(r.repurchase_days);
+    if (days <= 0) continue;
     const at = new Date(r.last_submitted_at || r.last_at);
     const availableFrom = new Date(at.getTime() + days * 86400000);
     const status = availableFrom.getTime() > now ? 'locked' : 'ready';
     const p8 = r.phone8 || r.p8;
     if (!out.has(p8)) out.set(p8, new Map());
-    out.get(p8).set(String(r.campaign_id), { status, lastSubmittedAt: at, availableFrom });
+    out.get(p8).set(String(r.campaign_id), { status, days, lastSubmittedAt: at, availableFrom });
   }
   return out;
 }
 
 module.exports = {
   checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseStatusForCampaigns, checkRepurchaseStatusForAccounts,
-  phone8Of, repurchaseDays,
+  phone8Of, repurchaseDays, resolveCampaignRepurchaseDays,
 };

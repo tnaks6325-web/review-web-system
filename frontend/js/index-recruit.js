@@ -1434,6 +1434,63 @@ function rfSetMultiAccount(on, button) {
 }
 window.rfSetMultiAccount = rfSetMultiAccount;
 
+function _rfRenderRepurchaseDays() {
+  const valueEl = document.getElementById("rf_repurchase_days");
+  const customEl = document.getElementById("rf_repurchase_custom_days");
+  const customWrap = document.getElementById("rf_repurchase_custom_wrap");
+  const help = document.getElementById("rf_repurchase_help");
+  const raw = valueEl?.value ?? "";
+  const days = Number(raw);
+  const valid = raw !== "" && Number.isInteger(days) && days >= 0 && days <= 365;
+  const presets = [0, 7, 14, 21];
+  const custom = customWrap && !customWrap.hidden;
+  document.querySelectorAll("#rf_repurchase_days_toggle button").forEach((el) => {
+    const key = el.dataset.repurchaseDays;
+    el.classList.toggle("active", custom ? key === "custom" : valid && key === String(days));
+  });
+  if (!help) return;
+  help.classList.toggle("is-error", !valid || (custom && days < 1));
+  if (!valid || (custom && days < 1)) {
+    help.textContent = "1~365일 사이의 제한 기간을 입력해주세요.";
+  } else if (days === 0) {
+    help.textContent = "이 모집공고는 과거 구매 이력을 확인하지 않고 바로 재참여를 허용합니다.";
+  } else {
+    help.textContent = `구매양식 제출 시각부터 ${days}일 · 같은 작업과 참여자 전화번호 기준`;
+  }
+  if (custom && customEl && presets.includes(days)) customEl.value = raw;
+}
+
+function rfSetRepurchaseDays(value, button) {
+  const valueEl = document.getElementById("rf_repurchase_days");
+  const customEl = document.getElementById("rf_repurchase_custom_days");
+  const customWrap = document.getElementById("rf_repurchase_custom_wrap");
+  if (!valueEl || !customWrap) return;
+  if (value === "custom") {
+    customWrap.hidden = false;
+    valueEl.value = "";
+    if (customEl) { customEl.value = ""; setTimeout(() => customEl.focus(), 0); }
+  } else {
+    const days = Number(value);
+    if (!Number.isInteger(days) || days < 0 || days > 365) return;
+    valueEl.value = String(days);
+    customWrap.hidden = [0, 7, 14, 21].includes(days);
+    if (!customWrap.hidden && customEl) customEl.value = String(days);
+  }
+  if (button) {
+    document.querySelectorAll("#rf_repurchase_days_toggle button")
+      .forEach((el) => el.classList.toggle("active", el === button));
+  }
+  _rfRenderRepurchaseDays();
+}
+
+function rfSetRepurchaseCustomDays(input) {
+  const valueEl = document.getElementById("rf_repurchase_days");
+  if (valueEl) valueEl.value = String(input?.value || "").trim();
+  _rfRenderRepurchaseDays();
+}
+window.rfSetRepurchaseDays = rfSetRepurchaseDays;
+window.rfSetRepurchaseCustomDays = rfSetRepurchaseCustomDays;
+
 /** "2시~4시" / "14:00~16:00" / "17시 오픈 이후~19시까지" → {start:'14:00', end:'16:00'} (실패 시 null)
  *  구매시간대 특성상 1~8시는 오후로 해석(+12). 프리필용 — 최종 확정은 관리자 확인. */
 function _parsePurchaseTime(text) {
@@ -3193,6 +3250,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
   const _mdEl = document.getElementById("rf_multi_daily"); if (_mdEl) _mdEl.value = "1";
   const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "15";
+  /* 🔁 공고별 재참여 제한(148) — 신규 기본 14일 */
+  if (document.getElementById("rf_repurchase_days")) rfSetRepurchaseDays(14);
   /* ★ v2: 참여형이 기본 — 신규 공고는 항상 켜져 열린다(스위치 UI 제거·hidden 체크박스 유지).
      레거시(일반) 공고를 편집할 땐 아래 프리필의 else 분기가 다시 끈다. */
   const _partEl = document.getElementById("rf_participation");
@@ -3355,6 +3414,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
           if (_ma) { _ma.checked = c.multi_account_mode === true; onMultiAccountToggle(_ma.checked); }
           const _md = document.getElementById("rf_multi_daily"); if (_md) _md.value = c.multi_daily_limit ?? 0;
           const _st = document.getElementById("rf_sub_ttl"); if (_st) _st.value = c.sub_hold_ttl_min ?? 15;
+        }
+        /* 🔁 공고별 재참여 제한(148) 복원 — 컬럼 도입 전 응답은 종전 기본 14일 */
+        if (document.getElementById("rf_repurchase_days")) {
+          const _rd = Number(c.repurchase_days ?? 14);
+          rfSetRepurchaseDays(Number.isInteger(_rd) && _rd >= 0 && _rd <= 365 ? _rd : 14);
         }
         /* 🧪 085 리뷰어 미노출 복원 */
         {
@@ -4861,6 +4925,7 @@ const _RF_DIFF_FIELDS = [
   ["multi_account_mode","타계정 참여"],
   ["multi_daily_limit", "타계정 하루한도"],
   ["sub_hold_ttl_min",  "타계정 자리 유효시간"],
+  ["repurchase_days",   "재참여 제한"],
   ["skip_weekends",     "주말 포함 여부"],
   ["reviewer_hidden",   "리뷰어에게 숨김"],
   ["transfer_bank",     "이체은행"],
@@ -5032,6 +5097,20 @@ async function saveRecruitPostImpl() {
   const workboardDisplayNameInput = document.getElementById('rf_workboard_display_name');
   if (workboardDisplayNameInput && !workboardDisplayNameInput.disabled) {
     payload.workboard_display_name = workboardDisplayNameInput.value.trim();
+  }
+
+  /* 🔁 공고별 재참여 제한 — hidden 값은 프리셋/직접입력 UI의 단일 저장값이다. */
+  {
+    const _repurchaseEl = document.getElementById("rf_repurchase_days");
+    if (_repurchaseEl) {
+      const _rawDays = String(_repurchaseEl.value ?? "").trim();
+      const _days = Number(_rawDays);
+      if (_rawDays === "" || !Number.isInteger(_days) || _days < 0 || _days > 365) {
+        _rfSaveBlocked("재참여 제한 기간은 제한 없음 또는 1~365일로 설정해주세요.");
+        return;
+      }
+      payload.repurchase_days = _days;
+    }
   }
 
   /* 유의사항 — 입력칸이 있는 화면에서만 전송(없으면 미전송 = 서버가 기존 값 유지) */
