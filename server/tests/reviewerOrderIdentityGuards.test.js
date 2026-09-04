@@ -8,6 +8,7 @@ const service = read('src/services/reviewerOrderIdentity.service.js');
 const reviewerRoutes = read('src/routes/reviewer.routes.js');
 const submitRoutes = read('src/routes/submit.routes.js');
 const reviewerServiceSource = read('src/services/reviewer.service.js');
+const corsMiddleware = read('src/middleware/cors.middleware.js');
 const diagRoutes = read('src/routes/diag.routes.js');
 const gemini = read('src/services/gemini.service.js');
 const migration = read('migrations/147_reviewer_shopping_identity_match.sql');
@@ -30,6 +31,8 @@ ok('명의별 공통 아이디와 비식별 감사원장을 가산형 마이그�
 ok('리뷰어 프로필 신규 경로는 서명 세션과 소유자 UUID로만 접근한다',
   /profile\/secure', reviewerSessionMiddleware/.test(reviewerRoutes)
   && /req\.reviewer\.ownerReviewerId/.test(reviewerRoutes));
+ok('리뷰어 세션 헤더는 Cloudflare와 Railway 사이 CORS preflight에서 허용한다',
+  /allowedHeaders:\s*\[[^\]]*['"]X-Reviewer-Token['"]/.test(corsMiddleware));
 ok('기능 활성 시 레거시 profile 및 precheck도 phone8 단독 접근을 허용하지 않는다',
   /router\.post\('\/profile', bindProfileOwnerWhenEnabled/.test(reviewerRoutes)
   && /router\.post\('\/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled/.test(reviewerRoutes));
