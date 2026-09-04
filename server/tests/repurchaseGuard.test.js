@@ -30,7 +30,8 @@ const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + nam
 const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.stringify(got) === JSON.stringify(want));
 
 (async () => {
-  const { checkRepurchaseWindow, checkRepurchaseWindowBatch, phone8Of, repurchaseDays } =
+  const { checkRepurchaseWindow, checkRepurchaseWindowBatch, phone8Of, repurchaseDays,
+    repurchaseWindowFromSubmittedAt } =
     require('../src/utils/repurchaseGuard');
 
   /* ═══ 1. fail-open — 판정 불가는 항상 통과 ═══ */
@@ -58,6 +59,15 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   process.env.CAMPAIGN_REPARTICIPATE_DAYS = '0';
   eq('운영 킬스위치 0은 공고별 21일보다 우선', repurchaseDays(21), 0);
   process.env.CAMPAIGN_REPARTICIPATE_DAYS = origDays;
+  {
+    const submittedAt = new Date('2026-09-04T00:00:00Z');
+    eq('같은 공고 제출도 14일 안에는 차단',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-17T23:59:59Z').getTime()).blocked, true);
+    eq('같은 공고 제출도 14일 경과 후 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-18T00:00:01Z').getTime()).blocked, false);
+    eq('같은 공고 제출도 제한 없음(0일)이면 즉시 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 0, submittedAt.getTime()).blocked, false);
+  }
 
   /* ═══ 2. 정상 판정 — 스텁 DB ═══ */
   console.log('\n[2] 정상 판정(스텁 pool)');
@@ -79,7 +89,7 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   }
 
   {
-    const submittedAt = new Date('2026-08-20T05:00:00Z');
+    const submittedAt = new Date(Date.now() - 86400000);
     const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
       { sheetId: 's1', tabName: 't1', phone8: '86365441' });
     eq('최근 이력 있음 → 차단', r.blocked, true);
@@ -88,7 +98,7 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     eq('days 필드 = 14', r.days, 14);
   }
   {
-    const submittedAt = new Date('2026-08-20T05:00:00Z');
+    const submittedAt = new Date(Date.now() - 86400000);
     const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
       { sheetId: 's1', tabName: 't1', phone8: '86365441', days: 7 });
     eq('공고별 7일 값이 SQL 기간 파라미터에 적용', lastParams[3], 7);
@@ -124,12 +134,16 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   const camp = campFull.slice(iApplyFnStart);
   ok('★ /my-repurchase-status 라우트도 등록되어 있다(카드 표시용 배치 조회)',
     campFull.includes(`router.get('/my-repurchase-status'`) && campFull.indexOf(`router.get('/my-repurchase-status'`) < iApplyFnStart);
-  const iBlk = camp.indexOf(`reason: 'already_submitted', error: '이미 구매양식 제출까지 완료한 캠페인이에요.'`);
+  const iFallback = camp.indexOf('sameCampaignSubmittedAt = b0.submitted_at');
   const iGuard = camp.indexOf(`require('../utils/repurchaseGuard')`);
   const iExpireSweep = camp.indexOf('만료 스윕은 정리 작업이지만');
   ok('utils/repurchaseGuard 를 사용한다', iGuard > -1);
-  ok('★ 순서: 캠페인단위 영구차단 뒤 → 재구매 가드 → 만료 스윕(기존 흐름 순서 불변)',
-    iBlk > -1 && iGuard > iBlk && iExpireSweep > iGuard);
+  ok('★ 순서: 같은 공고 제출시각 폴백 → 재구매 가드 → 만료 스윕',
+    iFallback > -1 && iGuard > iFallback && iExpireSweep > iGuard);
+  ok('★ 같은 공고 제출을 already_submitted로 영구 차단하지 않는다',
+    !camp.includes(`reason: 'already_submitted'`));
+  ok('★ 비연결/레거시 공고도 같은 공고 제출시각으로 기간을 계산',
+    camp.includes('repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime())'));
   ok('reason: repurchase_window 반환', camp.includes(`reason: 'repurchase_window'`));
   ok('★ camp.linked_sheet_id/linked_tab_name를 시작점으로 같은 작업 전체를 판정',
     camp.includes('camp.linked_sheet_id') && camp.includes('camp.linked_tab_name'));

@@ -1867,68 +1867,56 @@ async function _applyParticipation(req, res, next, campPre) {
     // 구매양식이 정상 제출되어 status='submitted'가 된 건만 참여 완료로 본다.
     //   신규 사유: blocked_by_other_owner(=남이 이 번호를 명의로 선점 = 사칭/오등록 신호),
     //             same_phone_other_name(=같은번호 다른명의 A안이 phone8 키잉으로 접힌 경우의 원인 설명).
-    const holdNameCandidate = isSubApply ? String((subEntry && subEntry.name) || subName).trim() : name;
     const blk = await client.query(
-      `SELECT status, applicant_name, owner_phone8
+      `SELECT owner_phone8, submitted_at
          FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted'
         ORDER BY submitted_at DESC NULLS LAST
         LIMIT 1`,
       [id, holdP8]);
+    let sameCampaignSubmittedAt = null;
     if (blk.rows.length) {
       const b0 = blk.rows[0];
       const blockedByOther = !!b0.owner_phone8 && String(b0.owner_phone8) !== p8;
-      await client.query('ROLLBACK');
       if (blockedByOther) {
+        await client.query('ROLLBACK');
         logger.warn(`[campaign/apply] 타소유자 선점 차단 camp=${id} 명의=***${holdP8.slice(-4)} ` +
           `선점owner=***${String(b0.owner_phone8).slice(-4)} 요청owner=***${p8.slice(-4)} status=${b0.status}`);
         return res.status(409).json({ ok: false, reason: 'blocked_by_other_owner',
           error: '이 번호는 다른 계정에서 이미 참여 신청했어요. 본인 번호가 맞다면 고객센터로 알려주세요.' });
       }
-      if (b0.status === 'submitted') {
-        return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 참여 완료한 캠페인이에요.' });
-      }
-      const { normName } = require('../services/identity.service');
-      const usedBy = String(b0.applicant_name || '').trim();
-      if (normName(usedBy) && normName(usedBy) !== normName(holdNameCandidate)) {
-        // ★ 이름 공개는 "요청자가 그 번호에 대한 근거를 가진 경우"로 제한 —
-        //   자기참여(그 번호로 로그인) 또는 내 소유로 귀속된 행. 레거시(owner NULL) 행을 타계정 명의로
-        //   조회하는 경우엔 이름을 숨긴다(무인증 API로 남의 실명을 캐는 통로 차단).
-        const nameSafe = !isSubApply || String(b0.owner_phone8 || '') === p8;
-        return res.status(409).json({ ok: false, reason: 'same_phone_other_name',
-          usedBy: nameSafe ? usedBy : undefined,
-          error: nameSafe
-            ? `같은 번호로 등록된 다른 명의(${usedBy})가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.`
-            : '같은 번호로 등록된 다른 명의가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.' });
-      }
-      return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 구매양식 제출까지 완료한 캠페인이에요.' });
+      // 같은 공고의 제출완료도 영구 차단하지 않는다. 아래 공고별 기간 판정의 폴백 시각으로 사용해
+      // 제한 없음(0일)과 기간 경과 후 재참여가 실제 신청 경로에서도 그대로 동작하게 한다.
+      sameCampaignSubmittedAt = b0.submitted_at;
     }
 
-    // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)" 기준(사용자 확정 2026-08-24). 위 검사는 같은
-    //   recruit_campaigns.id 안에서만 막지만, 공고가 재발행(차수)되거나 캠페인 연결 없이 외부모집으로
-    //   등록되면 이 탭에서만 다시 잡아야 한다. 단일 출처 = utils/repurchaseGuard(외부모집 수동제출과 공용).
+    // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)" 기준(사용자 확정 2026-08-24).
+    //   공고가 재발행(차수)돼도 작업 전체를 확인하고, 주문 원장이 아직 없는 레거시/비연결 공고는
+    //   위에서 읽은 같은 공고 제출시각으로 폴백한다. 단일 기간 계산 = utils/repurchaseGuard.
     //   ★ 하드 차단·예외 없음(리뷰어 셀프 참여는 관리자 확인 창구가 없다 — 관리자 대신등록만 예외 허용).
     //   조회 실패는 fail-open(막는 기능의 오류로 정상 참여를 막지 않는다 — 신원게이트와 같은 규율).
-    if (camp.linked_sheet_id && camp.linked_tab_name) {
-      try {
-        const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
-        const rw = await checkRepurchaseWindow(client, {
+    try {
+      const { checkRepurchaseWindow, repurchaseWindowFromSubmittedAt } = require('../utils/repurchaseGuard');
+      let rw = repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime());
+      if (camp.linked_sheet_id && camp.linked_tab_name) {
+        const workRw = await checkRepurchaseWindow(client, {
           sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, phone8: holdP8,
           days: camp.repurchase_days,
         });
-        if (rw.blocked) {
-          await client.query('ROLLBACK');
-          const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
-            timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
-          });
-          return res.status(409).json({
-            ok: false, reason: 'repurchase_window', days: rw.days, availableFrom: rw.availableFrom,
-            error: `이 작업은 최근 ${rw.days}일 안에 이미 참여한 이력이 있어요 — ${dateStr} 이후 다시 참여할 수 있어요.`,
-          });
-        }
-      } catch (e) {
-        logger.warn('[campaign/apply] 재참여 기간 판정 실패(fail-open): ' + e.message);
+        if (workRw.blocked) rw = workRw;
       }
+      if (rw.blocked) {
+        await client.query('ROLLBACK');
+        const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
+          timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
+        });
+        return res.status(409).json({
+          ok: false, reason: 'repurchase_window', days: rw.days, availableFrom: rw.availableFrom,
+          error: `이 작업은 최근 ${rw.days}일 안에 이미 참여한 이력이 있어요 — ${dateStr} 이후 다시 참여할 수 있어요.`,
+        });
+      }
+    } catch (e) {
+      logger.warn('[campaign/apply] 재참여 기간 판정 실패(fail-open): ' + e.message);
     }
 
     // 만료 스윕은 정리 작업이지만, 부분 유니크 인덱스는 `status='applied'` 행을 즉시

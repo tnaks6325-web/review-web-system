@@ -43,6 +43,20 @@ function phone8Of(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-8);
 }
 
+/** 같은 공고 제출 이력처럼 이미 읽어 둔 시각에도 동일한 기간 계산을 적용한다. */
+function repurchaseWindowFromSubmittedAt(submittedAt, campaignDays, nowMs = Date.now()) {
+  const days = repurchaseDays(campaignDays);
+  if (days <= 0 || !submittedAt) {
+    return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
+  }
+  const lastSubmittedAt = new Date(submittedAt);
+  if (!Number.isFinite(lastSubmittedAt.getTime())) {
+    return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
+  }
+  const availableFrom = new Date(lastSubmittedAt.getTime() + days * 86400000);
+  return { blocked: availableFrom.getTime() > nowMs, days, lastSubmittedAt, availableFrom };
+}
+
 /**
  * 그 작업 전체에 이 계정(phone8)이 최근 N일 안에 이미 구매양식을 낸 적이 있는지 확인한다.
  * @param {object} dbOrClient - pool 또는 트랜잭션 client (.query 인터페이스)
@@ -85,9 +99,7 @@ async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, phone, phon
       LIMIT 1`,
     [sheetId, tabName, p8, days]);
   if (!rows.length) return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
-  const lastSubmittedAt = rows[0].submitted_at;
-  const availableFrom = new Date(new Date(lastSubmittedAt).getTime() + days * 86400000);
-  return { blocked: true, days, lastSubmittedAt, availableFrom };
+  return repurchaseWindowFromSubmittedAt(rows[0].submitted_at, days);
 }
 
 /**
@@ -242,5 +254,5 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
 
 module.exports = {
   checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseStatusForCampaigns, checkRepurchaseStatusForAccounts,
-  phone8Of, repurchaseDays, resolveCampaignRepurchaseDays,
+  phone8Of, repurchaseDays, repurchaseWindowFromSubmittedAt, resolveCampaignRepurchaseDays,
 };
