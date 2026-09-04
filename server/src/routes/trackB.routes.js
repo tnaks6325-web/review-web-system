@@ -2353,6 +2353,27 @@ router.post('/review-inspect/product-clusters/decide', authMiddleware, adminOrMa
   }
 });
 
+/* 고신뢰 상품명 OCR 자동처리 — 먼저 dry-run으로 영향 건수를 확인하고 명시 확인값 후 실행한다.
+   다른 상품으로 단정하는 자동 fail은 금지하고, 숫자 충돌 없는 96% 이상 유사 군집만 pass한다. */
+router.post('/review-inspect/product-clusters/auto-resolve', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await _inspectSvc.autoResolveProductClusters({
+      sheetId: String(b.sheetId || '') || null,
+      tabName: String(b.tabName || '') || null,
+      dryRun: b.dryRun !== false,
+      confirm: String(b.confirm || ''),
+      snapshotToken: String(b.snapshotToken || ''),
+      clusterKeys: Array.isArray(b.clusterKeys) ? b.clusterKeys : [],
+      by: (req.admin && req.admin.name) || '',
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) {
+    logger.warn(`[review-inspect] 상품명 고신뢰 자동처리 실패: ${err.message}`);
+    res.status(500).json({ ok: false, error: '상품명 고신뢰 자동처리에 실패했습니다.' });
+  }
+});
+
 /* 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결(대량 백로그용).
    ★ adminOrMaster — 대량 종결은 되돌리기 어렵다(건별 확인은 종전대로 staff 담당 탭 허용).
    ★ resolution 'ok' 면 상품명 의심 건의 캡처 표기를 그 탭 인정 별칭으로 함께 학습한다. */
