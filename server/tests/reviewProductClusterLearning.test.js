@@ -56,6 +56,10 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     assert.strictEqual(safe.eligible, true);
     assert.strictEqual(safe.reason, 'high_confidence_ocr');
     assert.strictEqual(safe.bestExpected.startsWith('넛세린'), true, '작업오더 구조문구는 기대 상품에서 제외');
+    const numberedSafe = svc.classifyProductNameForAuto(
+      '낫세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개',
+      ['1. 넛세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개 (https:']);
+    assert.strictEqual(numberedSafe.eligible, true, '작업오더 목록번호 1.은 상품 숫자 충돌로 세지 않음');
     const numberConflict = svc.classifyProductNameForAuto(
       '장수돌침대 28년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트',
       ['장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트']);
