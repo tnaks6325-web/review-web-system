@@ -83,6 +83,8 @@ ok('★ 별칭은 정규식 검증 — 문자열 조립 주입 차단', (() => {
   try { IIT.issueTypeCountSql("checks; DROP TABLE review_inspections; --"); return false; }
   catch (_) { return true; }
 })());
+ok('상품명 군집의 기계 원판정 SQL도 단일 유틸에서 파생',
+  /machineVerdict/.test(IIT.productMachineWarningSql('i.checks')));
 
 /* ═══ ⑤ 서비스·라우트 배선 ══════════════════════════════════════════ */
 console.log('\n▶ 배선');

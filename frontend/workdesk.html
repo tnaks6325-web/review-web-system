@@ -1310,6 +1310,30 @@
   .risbs img{width:100%;border:1px solid var(--line);border-radius:8px}
   .riocr{font-size:12px;line-height:1.6;background:var(--bg2,#F6F8FA);border:1px solid var(--line);border-radius:9px;padding:9px 11px;white-space:pre-wrap}
   .rimft{padding:11px 14px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+  /* 상품명 군집 판단(148) — 한 번의 선택으로 같은 작업의 동일 OCR 군집을 종결한다. */
+  .riplab{position:fixed;inset:0;z-index:9050;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(12,22,17,.58)}
+  .riplab-in{width:min(1180px,100%);max-height:94vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid #CBD5D0;border-radius:18px;background:var(--card);box-shadow:0 24px 80px rgba(15,35,25,.28)}
+  .riplab-h{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line);background:#F7FAF8}
+  .riplab-h b{font-size:15px}.riplab-h .progress{font-size:11px;color:var(--muted)}
+  .riplab-body{display:grid;grid-template-columns:270px minmax(0,1fr);min-height:620px;overflow:hidden}
+  .riplab-q{overflow:auto;padding:8px;border-right:1px solid var(--line);background:#FAFCFB}
+  .riplab-qi{width:100%;display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:7px;align-items:center;border:1px solid transparent;border-radius:9px;background:transparent;padding:9px;text-align:left;cursor:pointer}
+  .riplab-qi:hover{background:#F0F5F2}.riplab-qi.on{border-color:#B9D0C3;background:#EAF5EE}
+  .riplab-qi .id{font:800 10px var(--mono);color:#17724A}.riplab-qi .tx{min-width:0}.riplab-qi .tx b,.riplab-qi .tx span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .riplab-qi .tx b{font-size:11px}.riplab-qi .tx span{margin-top:2px;font-size:9.5px;color:var(--muted)}.riplab-qi .cnt{font:800 10px var(--mono);color:#8A5B00}
+  .riplab-main{overflow:auto;padding:22px 24px}.riplab-meta{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:13px}
+  .riplab-meta h2{flex:1;min-width:220px;margin:0;font-size:20px;letter-spacing:-.04em}.riplab-pill{border-radius:999px;padding:5px 9px;background:#FFF1C9;color:#7A5105;font-size:10px;font-weight:800}
+  .riplab-pair{overflow:hidden;border:1px solid #D4DDD7;border-radius:13px}.riplab-row{display:grid;grid-template-columns:105px minmax(0,1fr);min-height:68px}.riplab-row+.riplab-row{border-top:1px dashed #C8D2CC}
+  .riplab-row label{display:flex;align-items:center;padding:12px;background:#EDF2EF;border-right:1px solid #D7DFDA;font:800 10px var(--mono);color:#536159}.riplab-row.ocr label{background:#E8EDFF;color:#3157D5}
+  .riplab-row div{display:flex;align-items:center;padding:13px 16px;font-size:14px;font-weight:700;line-height:1.55;word-break:keep-all}.riplab-row.ocr div{color:#2845A4}
+  .riplab-imgs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.riplab-imgs img{display:block;width:100%;height:142px;object-fit:cover;border:1px solid var(--line);border-radius:9px;background:var(--bg2);cursor:zoom-in}
+  .riplab-note{margin:13px 0 0;padding:10px 12px;border:1px solid #DDE5E0;border-radius:9px;background:#F6F9F7;color:#526159;font-size:11px;line-height:1.5}
+  .riplab-decisions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px}.riplab-d{min-height:58px;display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:11px;background:var(--card);padding:10px 12px;text-align:left;cursor:pointer}
+  .riplab-d:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(20,45,32,.08)}.riplab-d .key{display:grid;place-items:center;width:24px;height:24px;flex:none;border:1px solid currentColor;border-radius:7px;font:800 10px var(--mono)}.riplab-d b,.riplab-d small{display:block}.riplab-d b{font-size:12px}.riplab-d small{margin-top:2px;color:var(--muted);font-size:9.5px}
+  .riplab-d.pass{color:#17724A}.riplab-d.fail{color:#B83B2D}.riplab-d.unknown{color:#8A5B00}.riplab-d.baseline{color:#6C46AD}
+  .riplab-memo{width:100%;min-height:58px;margin-top:9px;resize:vertical;border:1px solid var(--line);border-radius:9px;padding:9px 10px;background:#FBFCFB;font-size:11px;line-height:1.45}
+  .riplab-empty{display:grid;place-items:center;min-height:560px;padding:30px;text-align:center}.riplab-empty b{display:block;font-size:20px}.riplab-empty span{display:block;margin-top:7px;color:var(--muted);font-size:11px}
+  @media(max-width:820px){.riplab{padding:0}.riplab-in{max-height:100vh;height:100%;border-radius:0}.riplab-body{grid-template-columns:1fr;overflow:auto}.riplab-q{display:flex;flex:none;overflow:auto;border-right:0;border-bottom:1px solid var(--line)}.riplab-qi{min-width:210px}.riplab-main{overflow:visible;padding:17px 14px}.riplab-decisions{grid-template-columns:1fr}.riplab-imgs img{height:105px}}
   /* 판별 예시이미지 등록 */
   .risgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
   .risbox{border:1px solid var(--line);border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:6px}
@@ -14108,6 +14132,7 @@ function _riRenderHead(sum){
     ${t?`<button class="btn" onclick="riOpenProductNames()">⚙ 기대 상품명</button>`:''}
     ${isAdmin?`<button class="btn"${reOn?'':' style="opacity:.5"'} onclick="riReinspectTab()" title="${reOn?'공고 리뷰타입을 뒤늦게 바꿨을 때(예: 구매확정) 지금 걸러 놓은 건들의 판정을 새 기준으로 다시 매깁니다':'유형 칩이나 작업을 먼저 고르세요 — 그 대상만 다시 검수합니다'}">${reLbl}</button>`:''}
     ${t&&isAdmin?`<button class="btn" onclick="riResolveAllTab()" title="이 작업의 미확인 의심·불량 전부를 정상(오탐)으로 종결 — 상품명 의심 건은 인정 표기로 학습됩니다">✔ 일괄 정상</button>`:''}
+    ${isAdmin?`<button class="btn" onclick="riOpenProductClusters()" title="같은 작업·같은 기대 상품명·같은 OCR 표기를 묶어 한 번만 판단합니다">🏷 상품명 군집판단</button>`:''}
     ${isAdmin?`<button class="btn" onclick="riOpenSamples()">🖼 판별 예시</button>`:''}
     <button class="btn" onclick="_loadInspect()">새로고침</button></div>
     <div class="ovnote">리뷰 캡처가 업체에 전달되기 전에 자동으로 거른 결과입니다. <b>제출은 막지 않으며</b> 다시 받을지는 확인 후 결정합니다.
@@ -14128,7 +14153,7 @@ function _riIssueTypes(r){
   if(c.format&&(c.format.got||c.format.kind)==='order_cancel') out.push('cancel');
   if(c.format&&c.format.verdict==='fail') out.push('format_fail');
   if(c.format&&c.format.verdict==='warn'&&c.format.expectedChannel) out.push('channel');
-  if(c.product&&c.product.verdict==='warn') out.push('product');
+  if(c.product&&(c.product.verdict==='warn'||c.product.verdict==='fail')) out.push('product');
   if(c.duplicate&&(c.duplicate.verdict==='fail'||c.duplicate.verdict==='warn')) out.push('duplicate');
   if(c.similarity&&c.similarity.verdict==='warn') out.push('similarity');
   if(c.author&&c.author.verdict==='warn') out.push('author');
@@ -14352,6 +14377,7 @@ function _riCardActions(r,i){
     dedup:{h:`riDedupPopup(${i})`,t:'🗑 중복파일 제거'},
     names:{h:`riProductNames(${i})`,t:'⚙ 기대 상품명'},
     promote:{h:`riPromoteSample(${i})`,t:'🖼 예시로 등록'},
+    cluster:{h:`riOpenProductClusters()`,t:'🏷 군집판단에서 기준 변경'},
   };
   const isReceiptSlot=r.slot_key==='receipt';
   const moves=isReceiptSlot?[A.mvV,A.mvC]:[A.mvR,A.mvC];
@@ -14377,7 +14403,13 @@ function _riCardActions(r,i){
     //   렌더러가 이 형태(주 조치 = riBadPopup)를 감지해 [✓ 정상] | [✕ 불량] 좌우 반반으로 편다.
     return {main:{...A.bad,t:'✕ 불량',m:'m-red'}, subs:[A.ok], more:moves};
   }
-  if(p==='product') return {main:{...A.ok,t:'✓ 정상 — 이 표기를 별칭으로 학습',m:'m-green'}, subs:[A.names,A.bad], more:moves};
+  if(p==='product'){
+    // exact 미통과 규칙 또는 이미 확정된 미통과는 일반 [정상]으로 뒤집지 않는다.
+    // 기준을 바꾸려면 군집판단으로 들어가 명시적으로 새 결정을 내려야 한다.
+    const lockedFail=(c.product&&c.product.verdict==='fail')||r.product_resolution==='fail';
+    if(lockedFail) return {main:{...A.bad,t:'✕ 상품 불일치 확정',m:'m-red'}, subs:[A.cluster,A.names], more:moves};
+    return {main:{...A.ok,t:'✓ 정상 — 이 표기를 별칭으로 학습',m:'m-green'}, subs:[A.names,A.bad], more:moves};
+  }
   if(p==='channel') return {main:{...A.ok,t:'✓ 정상 — 채널 추정 오인',m:'m-blue'}, subs:[A.promote,A.bad], more:moves};
   if(p==='similarity') return {main:{...A.detail,t:'👁 겹친 제출과 나란히 보기',m:'m-vio'}, subs:[A.bad,A.ok], more:moves};
   return {main:{...A.detail,t:'👁 반복 제출 확인',m:'m-slate'}, subs:[A.ok,A.bad], more:moves};   // author
@@ -14586,7 +14618,7 @@ function _riReasons(c, opt){
   }
   if(c.format && c.format.verdict==='warn' && c.format.expectedChannel)
     out.push(_riChanReason(c.format));
-  if(c.product && c.product.verdict==='warn')
+  if(c.product && (c.product.verdict==='warn'||c.product.verdict==='fail'))
     out.push(`상품명 다름 — 캡처 "${(c.product.ocr||'').slice(0,40)}"`);
   if(skipRel){ /* 같은 파일·본문 겹침은 관계 줄이 말한다 */ }
   else if(c.duplicate && c.duplicate.verdict==='warn' && c.duplicate.sameReviewerOtherTab)
@@ -14606,6 +14638,93 @@ function riFilterTab(i){
   STATE.riType='all';   // 탭 전환 = 유형 필터 초기화
   _loadInspect();
 }
+
+/* ── 상품명 군집판단(148) ───────────────────────────────────────────
+   건 전체 정상/불량과 **상품명 축 정답을 분리**한다. 같은 군집을 한 번 판단하면 현재
+   백로그 전체에 소급하고, pass/fail 은 같은 작업의 exact 규칙으로만 저장한다. */
+const _RI_PRODUCT_LABEL={pass:'통과 · 같은 상품',fail:'미통과 · 다른 상품',unknown:'판단불가',baseline_error:'기준 상품명 오류'};
+let _riProductLab={clusters:[],idx:0,totalRows:0,totalClusters:0,truncated:false,busy:false,changed:false};
+
+async function riOpenProductClusters(){
+  if(!(STATE.role==='master'||STATE.role==='admin')) return;
+  let m=$('#riProductLab');
+  if(!m){ m=document.createElement('div');m.id='riProductLab';m.className='riplab';document.body.appendChild(m); }
+  m.innerHTML=`<div class="riplab-in"><div class="riplab-h"><b>🏷 상품명 군집판단</b><span class="progress">불러오는 중…</span><span class="sp" style="flex:1"></span><button class="btn" onclick="riProductLabClose()">닫기</button></div><div class="riplab-empty"><div><b>상품명 군집을 묶고 있습니다</b><span>목록 200건 제한과 무관하게 전체 의심건을 읽습니다.</span></div></div></div>`;
+  m.style.display='flex';
+  const t=STATE.riTab;
+  let url='/api/trackb/review-inspect/product-clusters?limit=500';
+  if(t) url+='&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName);
+  try{
+    const r=await api(url);
+    if(!r||!r.ok) throw new Error((r&&r.error)||'조회 실패');
+    _riProductLab={clusters:r.clusters||[],idx:0,totalRows:Number(r.totalRows)||0,totalClusters:Number(r.totalClusters)||0,truncated:!!r.truncated,busy:false,changed:false};
+    _riProductLabRender();
+  }catch(e){
+    m.innerHTML=`<div class="riplab-in"><div class="riplab-h"><b>🏷 상품명 군집판단</b><span class="sp" style="flex:1"></span><button class="btn" onclick="riProductLabClose()">닫기</button></div><div class="riplab-empty"><div><b>군집을 불러오지 못했습니다</b><span>${esc((e&&e.message)||e)}</span><button class="btn" style="margin-top:12px" onclick="riOpenProductClusters()">다시 시도</button></div></div></div>`;
+  }
+}
+
+function _riProductLabRender(){
+  const m=$('#riProductLab');if(!m)return;
+  const rows=_riProductLab.clusters||[];
+  if(!rows.length){
+    m.innerHTML=`<div class="riplab-in"><div class="riplab-h"><b>🏷 상품명 군집판단</b><span class="sp" style="flex:1"></span><button class="btn" onclick="riProductLabClose()">닫기</button></div><div class="riplab-empty"><div><b>판단할 상품명 군집이 없습니다</b><span>선택한 범위의 상품명 의심이 모두 처리됐습니다.</span></div></div></div>`;
+    return;
+  }
+  _riProductLab.idx=Math.max(0,Math.min(_riProductLab.idx,rows.length-1));
+  const c=rows[_riProductLab.idx];
+  const q=rows.map((x,i)=>`<button class="riplab-qi${i===_riProductLab.idx?' on':''}" onclick="riProductLabPick(${i})"><span class="id">${i+1}</span><span class="tx"><b>${esc(x.tabName||'')}</b><span>${esc(x.observed||'')}</span></span><span class="cnt">${_riN(x.count)}건</span></button>`).join('');
+  const imgs=(c.sampleFileIds||[]).map((id,i)=>`<img${_thumbAttrs(id,400,_riImg(id))} alt="군집 대표 캡처 ${i+1}" loading="lazy" onclick="riProductZoom(${i})">`).join('');
+  const learned=`통과·미통과는 <b>${esc(c.tabName||'이 작업')}</b> 안에서 정확히 같은 기대값과 OCR 표기에만 적용됩니다. 판단불가·기준오류는 미래 규칙을 만들지 않습니다.`;
+  m.innerHTML=`<div class="riplab-in">
+    <div class="riplab-h"><b>🏷 상품명 군집판단</b><span class="progress">${_riN(_riProductLab.totalRows)}건 · ${_riN(_riProductLab.totalClusters)}군집${_riProductLab.truncated?' · 상위 군집 표시':''}</span><span class="sp" style="flex:1"></span><button class="btn" onclick="riProductLabClose()">닫기</button></div>
+    <div class="riplab-body"><aside class="riplab-q">${q}</aside><main class="riplab-main">
+      <div class="riplab-meta"><h2>${esc(c.tabName||'상품명 의심')}</h2><span class="riplab-pill">같은 표기 ${_riN(c.count)}건</span></div>
+      <div class="riplab-pair"><div class="riplab-row"><label>기준 상품명</label><div>${esc((c.expected||[]).join(' / ')||'기대값 없음')}</div></div><div class="riplab-row ocr"><label>화면 판독</label><div>${esc(c.observed||'판독값 없음')}</div></div></div>
+      ${imgs?`<div class="riplab-imgs">${imgs}</div>`:''}
+      <div class="riplab-note">${learned}</div>
+      <div class="riplab-decisions">
+        <button class="riplab-d pass" onclick="riProductDecide('pass')"><span class="key">1</span><span><b>통과 · 같은 상품</b><small>${_riN(c.count)}건 종결 + 이 작업 exact 규칙</small></span></button>
+        <button class="riplab-d fail" onclick="riProductDecide('fail')"><span class="key">2</span><span><b>미통과 · 다른 상품</b><small>${_riN(c.count)}건 상품명 불일치로 기록</small></span></button>
+        <button class="riplab-d unknown" onclick="riProductDecide('unknown')"><span class="key">3</span><span><b>판단불가</b><small>현재 군집만 종결 · 학습하지 않음</small></span></button>
+        <button class="riplab-d baseline" onclick="riProductDecide('baseline_error')"><span class="key">4</span><span><b>기준 상품명 오류</b><small>기대값 수정 대상으로 분리</small></span></button>
+      </div>
+      <textarea class="riplab-memo" id="riProductMemo" maxlength="500" placeholder="판단 메모 · 선택사항"></textarea>
+    </main></div></div>`;
+}
+function riProductLabPick(i){if(_riProductLab.busy)return;_riProductLab.idx=Math.max(0,Math.min(Number(i)||0,_riProductLab.clusters.length-1));_riProductLabRender();}
+function riProductZoom(i){const c=(_riProductLab.clusters||[])[_riProductLab.idx];const id=c&&(c.sampleFileIds||[])[Number(i)];const url=_riImg(id);if(url&&typeof woImageModal==='function')woImageModal(url);}
+function riProductLabClose(){const m=$('#riProductLab');if(m)m.remove();if(_riProductLab.changed)_loadInspect();}
+
+async function riProductDecide(verdict){
+  if(_riProductLab.busy||!_RI_PRODUCT_LABEL[verdict])return;
+  const c=(_riProductLab.clusters||[])[_riProductLab.idx];if(!c)return;
+  const makesRule=verdict==='pass'||verdict==='fail';
+  const msg=`${_RI_PRODUCT_LABEL[verdict]}로 판단할까요?\n\n· 현재 동일 군집 ${_riN(c.count)}건의 상품명 축을 함께 종결합니다.${makesRule?'\n· 앞으로 이 작업에서 정확히 같은 쌍은 같은 기준을 적용합니다.':'\n· 미래 자동판정 규칙은 만들지 않습니다.'}\n· 다른 중복·형식·본문 문제는 그대로 남습니다.`;
+  if(!confirm(msg))return;
+  _riProductLab.busy=true;
+  try{
+    const r=await api('/api/trackb/review-inspect/product-clusters/decide',{method:'POST',body:JSON.stringify({fileId:c.seedFileId,verdict,note:($('#riProductMemo')||{}).value||''})});
+    if(!r||!r.ok)throw new Error((r&&r.error)||'저장 실패');
+    _riProductLab.changed=true;
+    _riProductLab.totalRows=Math.max(0,_riProductLab.totalRows-(Number(r.affected)||0));
+    _riProductLab.totalClusters=Math.max(0,_riProductLab.totalClusters-1);
+    _riProductLab.clusters.splice(_riProductLab.idx,1);
+    if(_riProductLab.idx>=_riProductLab.clusters.length)_riProductLab.idx=Math.max(0,_riProductLab.clusters.length-1);
+    _toast(`상품명 군집 ${_riN(r.affected||0)}건 처리${r.remainsOpen?` · 다른 사유 ${_riN(r.remainsOpen)}건은 계속 표시`:''}`);
+    _riProductLab.busy=false;_riProductLabRender();
+  }catch(e){_riProductLab.busy=false;alert('상품명 판단 저장 실패: '+((e&&e.message)||e));}
+}
+
+document.addEventListener('keydown',(e)=>{
+  const m=$('#riProductLab');if(!m||_riProductLab.busy)return;
+  const tag=((e.target&&e.target.tagName)||'').toLowerCase();if(tag==='input'||tag==='textarea'||tag==='select')return;
+  const map={'1':'pass','2':'fail','3':'unknown','4':'baseline_error'};
+  if(map[e.key]){e.preventDefault();riProductDecide(map[e.key]);}
+  else if(e.key==='ArrowLeft'){e.preventDefault();riProductLabPick(_riProductLab.idx-1);}
+  else if(e.key==='ArrowRight'){e.preventDefault();riProductLabPick(_riProductLab.idx+1);}
+  else if(e.key==='Escape'){e.preventDefault();riProductLabClose();}
+});
 /* 상세는 **여러 건을 연달아 훑는 화면**이다 — 한 건 보고 닫고 다음 카드를 찾아 다시 누르는 왕복을
    없애려고 ← → 로 옆 건으로 옮겨 다닌다. 순서는 화면의 카드 순서 그대로(STATE.ri). */
 function riOpenDetail(i){

@@ -116,6 +116,11 @@ function seqPool(handlers) {
     const prod = F.act(R({ product: { verdict: 'warn' } }), 2);
     assert.ok(/riResolve\('F','ok'\)/.test(prod.main.h) && /별칭으로 학습/.test(prod.main.t));
     assert.ok(prod.subs.some(a => /riProductNames\(2\)/.test(a.h)), '보조 = ⚙ 기대 상품명');
+    const learnedFail = F.act(R({ product: { verdict: 'fail', learnedRuleId: 'r2' } }), 2);
+    assert.ok(/riBadPopup\(2\)/.test(learnedFail.main.h) && /상품 불일치 확정/.test(learnedFail.main.t));
+    assert.ok(![learnedFail.main, ...learnedFail.subs].some(a => /riResolve\([^)]*'ok'/.test(a.h)),
+      'exact 미통과 재발에는 일반 정상/별칭 학습 경로가 없다');
+    assert.ok(learnedFail.subs.some(a => /riOpenProductClusters/.test(a.h)), '기준 변경은 군집판단으로만');
     const chan = F.act(R({ format: { verdict: 'warn', expectedChannel: 'coupang' } }), 2);
     assert.ok(/riResolve\('F','ok'\)/.test(chan.main.h) && /추정 오인/.test(chan.main.t));
     assert.ok(chan.subs.some(a => /riPromoteSample\(2\)/.test(a.h)), '보조 = 🖼 예시로 등록');

@@ -44,8 +44,9 @@ const ISSUE_RULES = [
   },
   {
     key: 'product',
-    js: (c) => !!(c.product && c.product.verdict === 'warn'),
-    sql: (a) => `${a}->'product'->>'verdict' = 'warn'`,
+    // 기계 불일치는 warn, 사람이 같은 exact 쌍을 미통과로 학습한 뒤의 재발은 fail.
+    js: (c) => !!(c.product && (c.product.verdict === 'warn' || c.product.verdict === 'fail')),
+    sql: (a) => `${a}->'product'->>'verdict' IN ('warn','fail')`,
   },
   {
     key: 'duplicate',
@@ -88,4 +89,14 @@ function issueTypeCountSql(col = 'checks') {
     .join(',\n           ');
 }
 
-module.exports = { ISSUE_RULES, ISSUE_KEYS, issueTypesOf, issueTypeCountSql };
+/** 사람이 재판정하기 전의 상품명 기계 경고. 군집 조회·소급 대상이 같은 식을 공유한다. */
+function productMachineWarningSql(col = 'checks') {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(String(col))) {
+    throw new Error('invalid checks column');
+  }
+  return `COALESCE(${col}->'product'->>'machineVerdict', ${col}->'product'->>'verdict') = 'warn'`;
+}
+
+module.exports = {
+  ISSUE_RULES, ISSUE_KEYS, issueTypesOf, issueTypeCountSql, productMachineWarningSql,
+};

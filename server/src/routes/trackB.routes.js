@@ -2319,6 +2319,40 @@ router.get('/review-inspect/route-stats', authMiddleware, adminOrMasterMiddlewar
   }
 });
 
+/* 상품명 의심 군집 — 같은 작업·기대후보·OCR 표기를 한 번만 판단한다.
+   ★ 규칙이 이후 제출에도 적용되므로 조회·판정 모두 adminOrMaster 전용.
+   ★ 건 전체 resolution 과 분리된 product_resolution 에 기록한다. */
+router.get('/review-inspect/product-clusters', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const sheetId = String(req.query.sheetId || '');
+    const tabName = String(req.query.tabName || '');
+    const out = await _inspectSvc.listProductClusters({
+      sheetId: sheetId || null, tabName: tabName || null, limit: req.query.limit,
+    });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    logger.warn(`[review-inspect] 상품명 군집 조회 실패: ${err.message}`);
+    res.status(500).json({ ok: false, error: '상품명 군집을 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/review-inspect/product-clusters/decide', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const fileId = String(b.fileId || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await _inspectSvc.resolveProductCluster({
+      fileId, verdict: String(b.verdict || ''), note: String(b.note || ''),
+      by: (req.admin && req.admin.name) || '',
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) {
+    logger.warn(`[review-inspect] 상품명 군집 판단 실패: ${err.message}`);
+    res.status(500).json({ ok: false, error: '상품명 군집 판단을 저장하지 못했습니다.' });
+  }
+});
+
 /* 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결(대량 백로그용).
    ★ adminOrMaster — 대량 종결은 되돌리기 어렵다(건별 확인은 종전대로 staff 담당 탭 허용).
    ★ resolution 'ok' 면 상품명 의심 건의 캡처 표기를 그 탭 인정 별칭으로 함께 학습한다. */

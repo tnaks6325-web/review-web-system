@@ -547,6 +547,62 @@ function matchProductName(ocr, expectedList) {
   return { verdict: 'warn', expected: list, ocr: String(ocr) };
 }
 
+/* ── 상품명 군집 학습(148) ──────────────────────────────────────────
+ * 기존 탭 별칭은 OCR 문장 전체를 기대 후보에 더해 혼합상품 탭에서 너무 넓게 통과할 수 있다.
+ * 새 규칙은 **같은 시트·탭 + 같은 기대 후보 묶음 + 같은 OCR 표기**에만 적용한다.
+ * 사람이 A6(브랜드 다름·고유 제품명 같음)을 통과시킨 결과가 다른 상품으로 번지지 않게
+ * 정확 일치 규칙으로 시작하고, 통계가 쌓인 뒤에만 별도 승격할 수 있도록 한다. */
+const PRODUCT_DECISIONS = ['pass', 'fail', 'unknown', 'baseline_error'];
+
+function _productExpectedSignature(expectedList) {
+  const seen = new Set();
+  const vals = [];
+  for (const raw of (Array.isArray(expectedList) ? expectedList : [])) {
+    const n = _normProduct(_cleanProductForMatch(raw));
+    if (!n || seen.has(n)) continue;
+    seen.add(n); vals.push(n);
+  }
+  return vals.sort().join('|');
+}
+
+/** 같은 작업 안에서 동일 판단을 한 번만 받기 위한 안정 키. PII·리뷰본문은 넣지 않는다. */
+function productClusterKey({ sheetId, tabName, expectedList, ocr } = {}) {
+  const expectedSig = _productExpectedSignature(expectedList);
+  const observedNorm = _normProduct(_cleanProductForMatch(ocr));
+  if (!sheetId || !tabName || !expectedSig || !observedNorm) return '';
+  return crypto.createHash('sha256')
+    .update([String(sheetId), String(tabName), expectedSig, observedNorm].join('\u0000'))
+    .digest('hex').slice(0, 24);
+}
+
+function _parseProductRules(value) {
+  let rows = value;
+  if (typeof rows === 'string') {
+    try { rows = JSON.parse(rows); } catch (_) { rows = []; }
+  }
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(r => r && r.active !== false && typeof r.clusterKey === 'string');
+}
+
+/** 사람 규칙을 기계 판정에 적용. fail도 제출 차단이 아니라 사후 검수의 fail 표시일 뿐이다. */
+function applyProductRule(check, rules, { sheetId, tabName } = {}) {
+  const base = (check && typeof check === 'object') ? { ...check } : { verdict: 'skip' };
+  const key = productClusterKey({ sheetId, tabName, expectedList: base.expected, ocr: base.ocr });
+  if (!key) return { check: base, clusterKey: '' };
+  const rule = _parseProductRules(rules).find(r => r.clusterKey === key && (r.verdict === 'pass' || r.verdict === 'fail'));
+  if (!rule) return { check: base, clusterKey: key };
+  return {
+    clusterKey: key,
+    check: {
+      ...base,
+      machineVerdict: base.machineVerdict || base.verdict,
+      verdict: rule.verdict,
+      learnedVerdict: rule.verdict,
+      learnedRuleId: String(rule.id || ''),
+    },
+  };
+}
+
 /** 항목별 판정 → 종합 status. 하나라도 fail → fail / warn 있으면 suspect / 나머지 pass. */
 function computeStatus(checks) {
   const vs = Object.values(checks || {}).map(c => (c && c.verdict) || 'skip');
@@ -634,7 +690,7 @@ async function _workOrderForTab({ sheetId, tabName } = {}) {
 
 /** 탭 설정에서 기대 채널·기대 상품명·리뷰타입을 읽는다. 실패는 빈 값(대조 생략). */
 async function loadTabExpectations({ sheetId, tabName } = {}) {
-  const out = { expectedChannel: null, productNames: [], reviewType: null, workKind: null };
+  const out = { expectedChannel: null, productNames: [], productRules: [], reviewType: null, workKind: null };
   if (!sheetId || !tabName) return out;
   try {
     // ★ LATERAL 최신 1행 — 서브쿼리를 둘로 나누면 채널과 커스텀값이 서로 **다른 공고**에서
@@ -645,7 +701,8 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     //   그대로 두고, 리뷰타입만 리네임(gid 폴백)·차수 재발행(값 있는 최신 공고)에 강한 규칙을 쓴다.
     //   두 규칙을 한 LATERAL 에 합치면 채널 짝이 깨진다.
     const { rows } = await _db().query(
-      `SELECT c.inspect_product_names, c.inspect_product_aliases, c.review_type AS tab_review_type,
+      `SELECT c.inspect_product_names, c.inspect_product_aliases, c.inspect_product_rules,
+              c.review_type AS tab_review_type,
               c.work_kind AS tab_work_kind,
               rc.channel, rc.channel_custom, rt.review_type AS camp_review_type,
               wk.work_kind AS camp_work_kind
@@ -663,6 +720,7 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     );
     const r = rows[0];
     if (!r) return out;
+    out.productRules = _parseProductRules(r.inspect_product_rules);
     const ch = r.channel === '직접입력' ? (r.channel_custom || '') : (r.channel || '');
     out.expectedChannel = expectedChannelKey(ch);
     // ★ 087: 행 단위 값(시트 작업옵션 칸)은 여기서 알 수 없다 → 공고 > 탭 순서만 본다.
@@ -1038,6 +1096,8 @@ async function inspectSubmission({
     checks.product = (isReview && !_isBlogTab)
       ? matchProductName(cls && cls.productName, exp.productNames)
       : { verdict: 'skip' };
+    const learnedProduct = applyProductRule(checks.product, exp.productRules, { sheetId, tabName });
+    checks.product = learnedProduct.check;
 
     // ③ 같은 파일 — 슬롯 무관(영수증 재탕도 잡을 값어치가 있다)
     // ★ 같은 리뷰어가 **다른 작업**에 낸 같은 캡처는 "한 화면에 여러 리뷰"일 수 있다 →
@@ -1065,6 +1125,7 @@ async function inspectSubmission({
       ocrText: (cls && cls.reviewText) || null,
       ocrAuthor: (cls && cls.authorMask) || null,
       fileHash: hash, confidence: (cls && cls.confidence) || null,
+      productClusterKey: learnedProduct.clusterKey || null,
     });
     return { status, checks };
   } catch (e) {
@@ -1079,20 +1140,69 @@ async function _upsertInspection(p) {
       `INSERT INTO review_inspections
          (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
           channel, device, ocr_product, ocr_text, ocr_author, file_hash, ai_confidence,
-          inspected_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW())
+          product_cluster_key, inspected_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())
        ON CONFLICT (file_id) DO UPDATE
-          SET status = EXCLUDED.status, checks = EXCLUDED.checks,
+          SET status = CASE
+                WHEN review_inspections.product_resolution IS NOT NULL
+                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                THEN CASE
+                  WHEN EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
+                               WHERE c.value->>'verdict' = 'fail') THEN 'fail'
+                  WHEN EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
+                               WHERE c.value->>'verdict' = 'warn') THEN 'suspect'
+                  ELSE 'resolved' END
+                ELSE EXCLUDED.status END,
+              checks = CASE
+                WHEN review_inspections.product_resolution IS NOT NULL
+                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                THEN jsonb_set(EXCLUDED.checks, '{product}',
+                       COALESCE(jsonb_extract_path(review_inspections.checks, 'product'), '{}'::jsonb), true)
+                ELSE EXCLUDED.checks END,
               channel = EXCLUDED.channel, device = EXCLUDED.device,
               ocr_product = EXCLUDED.ocr_product, ocr_text = EXCLUDED.ocr_text,
               ocr_author = EXCLUDED.ocr_author, file_hash = EXCLUDED.file_hash,
               ai_confidence = EXCLUDED.ai_confidence,
+              product_cluster_key = EXCLUDED.product_cluster_key,
+              product_resolution = CASE
+                WHEN review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                  THEN review_inspections.product_resolution ELSE NULL END,
+              product_resolution_note = CASE
+                WHEN review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                  THEN review_inspections.product_resolution_note ELSE NULL END,
+              product_resolved_at = CASE
+                WHEN review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                  THEN review_inspections.product_resolved_at ELSE NULL END,
+              product_resolved_by = CASE
+                WHEN review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                  THEN review_inspections.product_resolved_by ELSE NULL END,
+              resolution = CASE
+                WHEN review_inspections.product_resolution IS NOT NULL
+                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                  AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
+                                  WHERE c.value->>'verdict' IN ('warn','fail'))
+                THEN CASE review_inspections.product_resolution
+                  WHEN 'pass' THEN 'ok' WHEN 'fail' THEN 'bad' ELSE review_inspections.resolution END
+                ELSE review_inspections.resolution END,
+              resolved_at = CASE
+                WHEN review_inspections.product_resolution IS NOT NULL
+                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                  AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
+                                  WHERE c.value->>'verdict' IN ('warn','fail'))
+                THEN NOW() ELSE review_inspections.resolved_at END,
+              resolved_by = CASE
+                WHEN review_inspections.product_resolution IS NOT NULL
+                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                  AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
+                                  WHERE c.value->>'verdict' IN ('warn','fail'))
+                THEN COALESCE(review_inspections.product_resolved_by, review_inspections.resolved_by)
+                ELSE review_inspections.resolved_by END,
               row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
               inspected_at = NOW(), updated_at = NOW(),
               attempts = review_inspections.attempts + 1`,
       [p.fileId, p.sheetId, p.tabName, p.rowIndex ?? null, p.reviewerName || null, p.slotKey || 'review',
        p.status, JSON.stringify(p.checks || {}), p.channel, p.device, p.ocrProduct, p.ocrText,
-       p.ocrAuthor, p.fileHash, p.confidence]
+       p.ocrAuthor, p.fileHash, p.confidence, p.productClusterKey || null]
     );
   } catch (e) {
     logger.warn(`[reviewInspect] 판정 기록 실패(무시): ${e.message}`);
@@ -1252,7 +1362,7 @@ async function runInspectSweep({ limit } = {}) {
  * 관리자 검수 탭(M3) 조회
  * ════════════════════════════════════════════════════════════════ */
 
-const { ISSUE_KEYS, issueTypeCountSql } = require('../utils/inspectIssueTypes');
+const { ISSUE_KEYS, issueTypeCountSql, productMachineWarningSql } = require('../utils/inspectIssueTypes');
 
 const _LIST_STATUSES = ['pending', 'pass', 'suspect', 'fail', 'unverifiable', 'resolved'];
 
@@ -1271,7 +1381,9 @@ async function listInspections({ sheetId, tabName, tabs, status = 'open', limit 
   const { rows } = await _db().query(
     `SELECT i.id, i.file_id, i.sheet_id, i.tab_name, i.row_index, i.reviewer_name, i.slot_key,
             i.status, i.checks, i.channel, i.ocr_product, i.ocr_text, i.ai_confidence,
-            i.resolution, i.inspected_at, i.resolved_at, i.resolved_by, i.created_at,
+            i.resolution, i.product_resolution, i.product_resolution_note,
+            i.product_resolved_at, i.product_resolved_by, i.product_cluster_key,
+            i.inspected_at, i.resolved_at, i.resolved_by, i.created_at,
             s.file_url, s.file_name
        FROM review_inspections i
        LEFT JOIN review_submissions s ON s.file_id = i.file_id
@@ -1355,6 +1467,207 @@ async function inspectionTypeCounts({ sheetId, tabName, tabs, status = 'open' } 
   return out;
 }
 
+/** 상품명 의심을 동일 작업·기대후보·OCR 표기 기준으로 묶는다. 목록 200건 상한과 무관하다. */
+async function listProductClusters({ sheetId, tabName, tabs, limit = 120 } = {}) {
+  const { where, params } = _riScope({ sheetId, tabName, tabs });
+  where.push(`i.status IN ('suspect','fail')`);
+  where.push(`i.product_resolution IS NULL`);
+  where.push(productMachineWarningSql('i.checks'));
+  const scanCap = 10000;
+  params.push(scanCap);
+  const { rows } = await _db().query(
+    `SELECT i.file_id, i.sheet_id, i.tab_name, i.checks, i.ocr_product, i.created_at
+       FROM review_inspections i
+      WHERE ${where.join(' AND ')}
+      ORDER BY i.created_at DESC
+      LIMIT $${params.length}`,
+    params
+  );
+  const grouped = new Map();
+  let unclustered = 0;
+  for (const row of rows) {
+    const pr = (row.checks && row.checks.product) || {};
+    const key = productClusterKey({
+      sheetId: row.sheet_id, tabName: row.tab_name,
+      expectedList: pr.expected, ocr: row.ocr_product || pr.ocr,
+    });
+    if (!key) { unclustered++; continue; }
+    let g = grouped.get(key);
+    if (!g) {
+      g = {
+        clusterKey: key, sheetId: row.sheet_id, tabName: row.tab_name,
+        expected: Array.isArray(pr.expected) ? pr.expected : [],
+        observed: String(row.ocr_product || pr.ocr || ''), count: 0,
+        seedFileId: row.file_id, sampleFileIds: [], latestAt: row.created_at || null,
+      };
+      grouped.set(key, g);
+    }
+    g.count++;
+    if (g.sampleFileIds.length < 3) g.sampleFileIds.push(row.file_id);
+  }
+  const clusters = [...grouped.values()]
+    .sort((a, b) => b.count - a.count || String(b.latestAt || '').localeCompare(String(a.latestAt || '')))
+    .slice(0, Math.min(Math.max(Number(limit) || 120, 1), 500));
+  return {
+    clusters, totalRows: rows.length, totalClusters: grouped.size, unclustered,
+    truncated: rows.length >= scanCap || clusters.length < grouped.size,
+  };
+}
+
+function _humanResolveProductCheck(checks, verdict) {
+  const out = (checks && typeof checks === 'object') ? JSON.parse(JSON.stringify(checks)) : {};
+  const pr = (out.product && typeof out.product === 'object') ? out.product : {};
+  out.product = {
+    ...pr,
+    machineVerdict: pr.machineVerdict || pr.verdict || 'warn',
+    humanVerdict: verdict,
+    humanResolved: true,
+    // 사람이 확정한 fail 은 checks 에도 남긴다. status 계산에서만 이 축을 제외해야
+    // 복합 경고 카드와 유형 집계에서 "확정된 상품 불일치"가 사라지지 않는다.
+    verdict: verdict === 'fail' ? 'fail' : 'pass',
+  };
+  return out;
+}
+
+/** 상품명 축은 이번 군집 판단으로 끝났으므로, 나머지 축만으로 카드 open 여부를 계산한다. */
+function _statusAfterProductDecision(checks) {
+  const pr = (checks && checks.product && typeof checks.product === 'object') ? checks.product : {};
+  return computeStatus({ ...checks, product: { ...pr, verdict: 'pass' } });
+}
+
+async function _withProductDecisionTx(fn) {
+  const pool = _db();
+  if (typeof pool.connect !== 'function') return fn(pool);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const out = await fn(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    if (typeof client.release === 'function') client.release();
+  }
+}
+
+async function _saveProductClusterRule(client, { seed, clusterKey, verdict, note, by, evidenceCount }) {
+  if (verdict !== 'pass' && verdict !== 'fail') return false;
+  const { rows } = await client.query(
+    `SELECT inspect_product_rules FROM tab_configs
+      WHERE sheet_id = $1 AND tab_name = $2 FOR UPDATE`,
+    [seed.sheet_id, seed.tab_name]
+  );
+  if (!rows.length) throw new Error('상품명 기준을 저장할 작업 설정이 없습니다.');
+  let rules = rows[0].inspect_product_rules;
+  if (typeof rules === 'string') { try { rules = JSON.parse(rules); } catch (_) { rules = []; } }
+  if (!Array.isArray(rules)) rules = [];
+  const pr = (seed.checks && seed.checks.product) || {};
+  const previous = rules.find(r => r && r.clusterKey === clusterKey);
+  const rule = {
+    id: (previous && previous.id) || `pr_${clusterKey.slice(0, 16)}`,
+    version: 1, active: true, clusterKey, verdict,
+    expectedSig: _productExpectedSignature(pr.expected),
+    observedNorm: _normProduct(_cleanProductForMatch(seed.ocr_product || pr.ocr || '')),
+    note: String(note || '').slice(0, 500), createdBy: String(by || '').slice(0, 100),
+    createdAt: (previous && previous.createdAt) || new Date().toISOString(),
+    updatedAt: new Date().toISOString(), evidenceCount: Number(evidenceCount) || 1,
+  };
+  // exact 규칙은 오래됐다는 이유만으로 버리면 안 된다. 501번째 판단이 1번째 판단을
+  // 되살려 다시 의심으로 보내므로, 명시적 보존정책이 생기기 전까지 전부 유지한다.
+  rules = [rule, ...rules.filter(r => !(r && r.clusterKey === clusterKey))];
+  await client.query(
+    `UPDATE tab_configs SET inspect_product_rules = $1::jsonb, updated_at = NOW()
+      WHERE sheet_id = $2 AND tab_name = $3`,
+    [JSON.stringify(rules), seed.sheet_id, seed.tab_name]
+  );
+  return true;
+}
+
+/**
+ * 한 상품명 군집을 사람 판단 한 번으로 종결하고 pass/fail exact 규칙을 작업에 저장한다.
+ * 건 전체 resolution 을 상품명 정답으로 쓰지 않는다: 다른 축이 남으면 그 건은 계속 open 이다.
+ */
+async function resolveProductCluster({ fileId, verdict, note, by } = {}) {
+  const decision = String(verdict || '');
+  if (!fileId || !PRODUCT_DECISIONS.includes(decision)) {
+    return { ok: false, error: 'fileId와 올바른 상품명 판단이 필요합니다.' };
+  }
+  return _withProductDecisionTx(async (client) => {
+    const seedRows = await client.query(
+      `SELECT file_id, sheet_id, tab_name, checks, ocr_product, status, product_resolution
+         FROM review_inspections WHERE file_id = $1 LIMIT 1 FOR UPDATE`,
+      [fileId]
+    );
+    const seed = seedRows.rows[0];
+    if (!seed) return { ok: false, error: '검수 건을 찾을 수 없습니다.' };
+    if (seed.product_resolution) return { ok: false, error: '이미 상품명 판단이 끝난 건입니다.' };
+    const seedPr = (seed.checks && seed.checks.product) || {};
+    if ((seedPr.machineVerdict || seedPr.verdict) !== 'warn') {
+      return { ok: false, error: '상품명 의심 건이 아닙니다.' };
+    }
+    const clusterKey = productClusterKey({
+      sheetId: seed.sheet_id, tabName: seed.tab_name,
+      expectedList: seedPr.expected, ocr: seed.ocr_product || seedPr.ocr,
+    });
+    if (!clusterKey) return { ok: false, error: '이 건은 군집 키를 만들 수 없습니다.' };
+
+    const candidateRows = await client.query(
+      `SELECT file_id, sheet_id, tab_name, checks, ocr_product, status
+         FROM review_inspections
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND status IN ('suspect','fail') AND product_resolution IS NULL
+          AND ${productMachineWarningSql('checks')}
+        FOR UPDATE`,
+      [seed.sheet_id, seed.tab_name]
+    );
+    const targets = candidateRows.rows.filter(row => {
+      const pr = (row.checks && row.checks.product) || {};
+      return productClusterKey({
+        sheetId: row.sheet_id, tabName: row.tab_name,
+        expectedList: pr.expected, ocr: row.ocr_product || pr.ocr,
+      }) === clusterKey;
+    });
+    if (!targets.length) return { ok: false, error: '처리할 미확인 군집이 없습니다.' };
+
+    const cleanNote = String(note || '').trim().slice(0, 500);
+    let resolved = 0, remainsOpen = 0;
+    for (const row of targets) {
+      const checks = _humanResolveProductCheck(row.checks, decision);
+      const remainingStatus = _statusAfterProductDecision(checks);
+      const closesWhole = remainingStatus === 'pass' || remainingStatus === 'unverifiable';
+      const nextStatus = closesWhole ? 'resolved' : remainingStatus;
+      const wholeResolution = closesWhole
+        ? (decision === 'pass' ? 'ok' : decision === 'fail' ? 'bad' : null)
+        : null;
+      await client.query(
+        `UPDATE review_inspections
+            SET checks = $2::jsonb, status = $3,
+                product_resolution = $4, product_resolution_note = $5,
+                product_resolved_at = NOW(), product_resolved_by = $6,
+                product_cluster_key = $7,
+                resolution = CASE WHEN $3 = 'resolved' THEN $8 ELSE resolution END,
+                resolved_at = CASE WHEN $3 = 'resolved' THEN NOW() ELSE resolved_at END,
+                resolved_by = CASE WHEN $3 = 'resolved' THEN $6 ELSE resolved_by END,
+                updated_at = NOW()
+          WHERE file_id = $1 AND status IN ('suspect','fail')`,
+        [row.file_id, JSON.stringify(checks), nextStatus, decision, cleanNote,
+         String(by || '').slice(0, 100), clusterKey, wholeResolution]
+      );
+      resolved++;
+      if (!closesWhole) remainsOpen++;
+    }
+    const ruleSaved = await _saveProductClusterRule(client, {
+      seed, clusterKey, verdict: decision, note: cleanNote, by, evidenceCount: targets.length,
+    });
+    return {
+      ok: true, clusterKey, decision, affected: resolved, remainsOpen, ruleSaved,
+      learnedScope: ruleSaved ? { sheetId: seed.sheet_id, tabName: seed.tab_name } : null,
+    };
+  });
+}
+
 /**
  * 관리자 확인 종결. ★ 원판정(checks)은 지우지 않는다 — 나중에 "왜 통과시켰나"를
  * 되짚을 수 있어야 기준을 고칠 수 있다(오탐 누적이 임계값 조정의 근거다).
@@ -1398,6 +1711,14 @@ function _aliasCandidate(row) {
   if (!row) return null;
   const pr = (row.checks && row.checks.product) || {};
   if (pr.verdict !== 'warn') return null;
+  /* ★ 전체 검수 [정상]은 상품명에 대한 답이 아닐 수 있다. 예를 들어 상품명과
+       중복 경고가 함께 뜬 건을 담당자가 종결했다고 해서 OCR 상품명을 탭 전체
+       별칭으로 승격하면 오탐이 학습값을 오염시킨다. 별칭 학습은 상품명 경고만
+       단독으로 남은 과거 호환 흐름에 한정하고, 복합 사유는 전용 군집판단에서만
+       상품별 결정을 받는다. */
+  const hasOtherOpenIssue = Object.entries(row.checks || {}).some(([key, check]) =>
+    key !== 'product' && check && (check.verdict === 'warn' || check.verdict === 'fail'));
+  if (hasOtherOpenIssue) return null;
   const v = _cleanProductForMatch(row.ocr_product || pr.ocr || '');
   return v && v.length >= 4 ? v : null;   // 너무 짧은 조각은 별칭으로 안 삼는다(아무거나 통과 방지)
 }
@@ -1406,10 +1727,14 @@ async function resolveInspection({ fileId, by, resolution } = {}) {
   const rkind = _RESOLUTIONS.includes(resolution) ? resolution : null;
   const { rows } = await _db().query(
     `UPDATE review_inspections
-        SET status = 'resolved', resolution = COALESCE($3, resolution),
+        SET status = 'resolved',
+            resolution = CASE
+              WHEN product_resolution = 'fail' THEN 'bad'
+              ELSE COALESCE($3, resolution)
+            END,
             resolved_at = NOW(), resolved_by = $2, updated_at = NOW()
       WHERE file_id = $1 AND status <> 'resolved'
-      RETURNING sheet_id, tab_name, ocr_product, checks`,
+      RETURNING sheet_id, tab_name, ocr_product, checks, product_resolution`,
     [fileId, by || '', rkind]
   );
   let aliasAdded = 0;
@@ -1551,7 +1876,7 @@ function inspectionsCsv(rows) {
     const o = [];
     if (c?.format?.verdict === 'fail') o.push('리뷰 화면 아님');
     if (c?.format?.verdict === 'warn') o.push('채널 다름');
-    if (c?.product?.verdict === 'warn') o.push('상품명 다름');
+    if (c?.product?.verdict === 'warn' || c?.product?.verdict === 'fail') o.push('상품명 다름');
     if (c?.duplicate?.verdict === 'fail') o.push(`같은 파일(${c.duplicate.matchTab || ''} ${c.duplicate.matchReviewer || ''})`.trim());
     if (c?.similarity?.verdict === 'warn') o.push(`본문 ${Math.round((c.similarity.score || 0) * 100)}% 겹침`);
     if (c?.author?.verdict === 'warn') o.push(`작성자 표기 재사용(${(c.author.others || []).join(',')})`);
@@ -1572,15 +1897,18 @@ module.exports = {
   loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
   loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
-  listInspections, inspectionSummary, inspectionTypeCounts, resolveInspection, resolveInspectionsBulk, inspectionScope,
+  listInspections, inspectionSummary, inspectionTypeCounts,
+  listProductClusters, resolveProductCluster,
+  resolveInspection, resolveInspectionsBulk, inspectionScope,
   notifyInspectionReject,
   resolveReviewerPhone8,
   classifyDuplicateContext,
-  hashBase64, matchProductName, computeStatus,
+  hashBase64, matchProductName, computeStatus, productClusterKey, applyProductRule,
   loadTabExpectations, findDuplicate, findOwnDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,
   ENABLED, PRECHECK_ENABLED, PRECHECK_BLOCK,
   BLOCK_CONFIDENCE, SIM_THRESHOLD, MIN_TEXT, SIM_LEN_RATIO, BLOCK_EXEMPT_CHANNELS,
   parseSampleUrls, SAMPLE_SLOT_CAP, SAMPLE_ATTACH_CAP, _trimSamples,
+  PRODUCT_DECISIONS,
   __setPoolForTest,
 };
