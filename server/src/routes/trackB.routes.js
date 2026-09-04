@@ -2363,6 +2363,8 @@ router.post('/review-inspect/product-clusters/auto-resolve', authMiddleware, adm
       tabName: String(b.tabName || '') || null,
       dryRun: b.dryRun !== false,
       confirm: String(b.confirm || ''),
+      snapshotToken: String(b.snapshotToken || ''),
+      clusterKeys: Array.isArray(b.clusterKeys) ? b.clusterKeys : [],
       by: (req.admin && req.admin.name) || '',
     });
     res.status(out.ok ? 200 : 400).json(out);

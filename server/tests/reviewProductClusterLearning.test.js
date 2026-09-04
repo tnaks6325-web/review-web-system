@@ -61,6 +61,11 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
       ['장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트']);
     assert.strictEqual(numberConflict.eligible, false);
     assert.strictEqual(numberConflict.reason, 'numeric_conflict');
+    const bareNumberConflict = svc.classifyProductNameForAuto(
+      '프리미엄 에디션 초경량 무선 청소기 모델 2026',
+      ['프리미엄 에디션 초경량 무선 청소기 모델 2025']);
+    assert.strictEqual(bareNumberConflict.eligible, false, '단위 없는 연도·모델 숫자도 자동통과 금지');
+    assert.strictEqual(bareNumberConflict.reason, 'numeric_conflict');
     assert.strictEqual(svc.classifyProductNameForAuto('바디로션', ['바디워시']).eligible, false);
     assert.strictEqual(svc.matchProductName('상품 상세페이지', ['[상품', '[합계] 최종모집인원 200명']).verdict, 'skip',
       '작업오더 구조문구만 있으면 상품명 기준 없음으로 처리');
@@ -94,6 +99,8 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     const preview = await svc.autoResolveProductClusters({ dryRun: true });
     assert.strictEqual(preview.eligibleClusters, 1);
     assert.strictEqual(preview.eligibleRows, 1);
+    assert.strictEqual(preview.clusterKeys.length, 1);
+    assert.strictEqual(preview.snapshotToken.length, 32);
     const denied = await svc.autoResolveProductClusters({ dryRun: false });
     assert.strictEqual(denied.ok, false);
     assert.strictEqual(calls, 2, '두 실행 모두 목록 조회만 하고 판정 UPDATE는 하지 않음');
@@ -215,6 +222,7 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     assert.ok(/'\/review-inspect\/product-clusters\/auto-resolve', authMiddleware, adminOrMasterMiddleware/.test(routes));
     assert.ok(front.includes('riOpenProductClusters') && front.includes("riProductDecide('pass')") && front.includes("riProductDecide('baseline_error')"));
     assert.ok(front.includes('단독 OCR 표기') && front.includes('riProductAutoResolve'));
+    assert.ok(front.includes('snapshotToken:p.snapshotToken') && front.includes('clusterKeys:p.clusterKeys'));
     assert.ok(!/rules = \[rule,[^\n]*\.slice\(0, 500\)/.test(serviceSrc), 'exact 규칙 500개 조용한 축출 금지');
     ok('F1: 148 스키마 프리플라이트 + 관리자 전용 API + 4선택 UI');
   }

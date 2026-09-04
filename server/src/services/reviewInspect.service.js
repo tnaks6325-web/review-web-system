@@ -570,7 +570,21 @@ function _quantityConflicts(expected, observed) {
     if (!other || [...values].some(v => other.has(v))) continue;
     conflicts.push({ unit, expected: [...values], observed: [...other] });
   }
+  // 단위가 없는 연도·모델·옵션 숫자도 상품 식별자다. 한쪽 누락까지 포함해 순서가
+  // 조금이라도 다르면 자동 통과하지 않는다(예: 2025 ↔ 2026, S24 ↔ S25).
+  const numberSeq = s => String(s || '').normalize('NFKC').match(/\d+(?:\.\d+)?/g) || [];
+  const expectedNumbers = numberSeq(expected), observedNumbers = numberSeq(observed);
+  if (JSON.stringify(expectedNumbers) !== JSON.stringify(observedNumbers)) {
+    conflicts.push({ unit: 'number_sequence', expected: expectedNumbers, observed: observedNumbers });
+  }
   return conflicts;
+}
+
+function _autoSnapshotToken(clusterKeys) {
+  const keys = [...new Set((Array.isArray(clusterKeys) ? clusterKeys : []).map(String).filter(Boolean))].sort();
+  return crypto.createHash('sha256')
+    .update([PRODUCT_AUTO_TRIAGE_VERSION, ...keys].join('\u0000'))
+    .digest('hex').slice(0, 32);
 }
 
 function classifyProductNameForAuto(ocr, expectedList) {
@@ -1635,9 +1649,21 @@ async function listProductClusters({ sheetId, tabName, tabs, limit = 120, includ
 }
 
 /** 고신뢰 OCR 오타/말줄임 군집만 pass 처리. 미통과·판단불가를 자동으로 만들지 않는다. */
-async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun = true, confirm } = {}) {
+async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun = true, confirm,
+  snapshotToken, clusterKeys } = {}) {
   const snapshot = await listProductClusters({ sheetId, tabName, tabs, includeAll: true });
-  const eligible = snapshot.clusters.filter(g => g.triage && g.triage.eligible);
+  const currentEligible = snapshot.clusters.filter(g => g.triage && g.triage.eligible);
+  let eligible = currentEligible;
+  if (!dryRun) {
+    const confirmedKeys = [...new Set((Array.isArray(clusterKeys) ? clusterKeys : []).map(String).filter(Boolean))];
+    if (!confirmedKeys.length || _autoSnapshotToken(confirmedKeys) !== String(snapshotToken || '')) {
+      return { ok: false, error: '확인한 자동처리 스냅샷이 없거나 일치하지 않습니다.' };
+    }
+    const confirmed = new Set(confirmedKeys);
+    // 확인 이후 새로 들어온 군집은 절대 이번 실행에 포함하지 않는다.
+    eligible = currentEligible.filter(g => confirmed.has(g.clusterKey));
+  }
+  const eligibleKeys = eligible.map(g => g.clusterKey);
   const preview = {
     ok: true, dryRun: !!dryRun, version: PRODUCT_AUTO_TRIAGE_VERSION,
     threshold: PRODUCT_AUTO_DICE_THRESHOLD,
@@ -1646,6 +1672,7 @@ async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun =
     eligibleSingletons: eligible.filter(g => g.count === 1).length,
     totalClusters: snapshot.totalClusters, totalRows: snapshot.totalRows,
     singletonClusters: snapshot.singletonClusters,
+    snapshotToken: _autoSnapshotToken(eligibleKeys), clusterKeys: eligibleKeys,
     samples: eligible.slice(0, 12).map(g => ({
       tabName: g.tabName, count: g.count, observed: g.observed,
       expected: g.triage.bestExpected, score: g.triage.score,
@@ -1655,20 +1682,27 @@ async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun =
   if (confirm !== 'AUTO_PASS_V1') return { ...preview, ok: false, error: '자동처리 확인값이 필요합니다.' };
 
   let processedClusters = 0, affected = 0, remainsOpen = 0, skipped = 0;
+  const errors = [];
   for (const g of eligible.slice(0, 200)) {
-    const result = await resolveProductCluster({
-      fileId: g.seedFileId, verdict: 'pass',
-      note: `${PRODUCT_AUTO_TRIAGE_VERSION}; dice=${g.triage.score}; numeric-conflict=none`,
-      by: `AUTO:${PRODUCT_AUTO_TRIAGE_VERSION}:${String(by || 'system').slice(0, 60)}`,
-    });
-    if (!result || !result.ok) { skipped++; continue; }
-    processedClusters++;
-    affected += Number(result.affected) || 0;
-    remainsOpen += Number(result.remainsOpen) || 0;
+    try {
+      const result = await resolveProductCluster({
+        fileId: g.seedFileId, verdict: 'pass',
+        note: `${PRODUCT_AUTO_TRIAGE_VERSION}; dice=${g.triage.score}; numeric-conflict=none`,
+        by: `AUTO:${PRODUCT_AUTO_TRIAGE_VERSION}:${String(by || 'system').slice(0, 60)}`,
+      });
+      if (!result || !result.ok) { skipped++; continue; }
+      processedClusters++;
+      affected += Number(result.affected) || 0;
+      remainsOpen += Number(result.remainsOpen) || 0;
+    } catch (err) {
+      skipped++;
+      errors.push({ clusterKey: g.clusterKey, error: String((err && err.message) || err).slice(0, 160) });
+      logger.warn(`[reviewInspect] 상품명 자동처리 군집 건너뜀(${g.clusterKey}): ${(err && err.message) || err}`);
+    }
   }
   return {
     ...preview, dryRun: false, processedClusters, affected, remainsOpen, skipped,
-    hasMore: eligible.length > 200,
+    errors: errors.slice(0, 20), hasMore: eligible.length > 200,
   };
 }
 
