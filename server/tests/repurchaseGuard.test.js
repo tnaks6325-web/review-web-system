@@ -159,6 +159,10 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     iFallback > -1 && iGuard > iFallback && iExpireSweep > iGuard);
   ok('★ 같은 공고 제출을 already_submitted로 영구 차단하지 않는다',
     !camp.includes(`reason: 'already_submitted'`));
+  ok('★ 셀프 참여 선검사도 연결 주문이 취소된 신청 이력을 제외',
+    camp.includes('order_submission_id IS NULL OR EXISTS') &&
+    camp.includes('linked_os.id = campaign_applications.order_submission_id') &&
+    camp.includes('linked_os.deleted_at IS NULL'));
   ok('★ 비연결/레거시 공고도 같은 공고 제출시각으로 기간을 계산',
     camp.includes('repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime())'));
   ok('reason: repurchase_window 반환', camp.includes(`reason: 'repurchase_window'`));

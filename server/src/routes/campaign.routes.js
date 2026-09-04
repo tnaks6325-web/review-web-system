@@ -1878,6 +1878,11 @@ async function _applyParticipation(req, res, next, campPre) {
       `SELECT owner_phone8, submitted_at
          FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted'
+          AND (order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = campaign_applications.order_submission_id
+               AND linked_os.deleted_at IS NULL
+          ))
         ORDER BY submitted_at DESC NULLS LAST
         LIMIT 1`,
       [id, holdP8]);
