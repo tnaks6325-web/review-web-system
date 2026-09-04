@@ -1434,6 +1434,23 @@ function rfSetMultiAccount(on, button) {
 }
 window.rfSetMultiAccount = rfSetMultiAccount;
 
+function _rfIsReviewerScopedEditor() {
+  try {
+    const fullAdminToken = sessionStorage.getItem("admin_token") || localStorage.getItem("admin_token");
+    return !fullAdminToken && !!sessionStorage.getItem("rapp_camp_edit_token");
+  } catch (_) {
+    return false;
+  }
+}
+
+function _rfSyncRepurchaseEditorAccess() {
+  const row = document.querySelector("#recruitModal .repurchase-row");
+  if (!row) return;
+  const hidden = _rfIsReviewerScopedEditor();
+  row.hidden = hidden;
+  row.style.display = hidden ? "none" : "";
+}
+
 function _rfRenderRepurchaseDays() {
   const valueEl = document.getElementById("rf_repurchase_days");
   const customEl = document.getElementById("rf_repurchase_custom_days");
@@ -3182,6 +3199,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const modal    = document.getElementById("recruitModal");
   const titleEl  = document.getElementById("recruitModalTitle");
   const workboardDisplayNameInput = _ensureWorkboardDisplayNameInput();
+  _rfSyncRepurchaseEditorAccess();
 
   switchRecruitPane("basic");   // 열 때는 항상 첫 탭 — 지난번 탭이 남으면 어디를 보는지 헷갈린다
 
@@ -5102,7 +5120,7 @@ async function saveRecruitPostImpl() {
   /* 🔁 공고별 재참여 제한 — hidden 값은 프리셋/직접입력 UI의 단일 저장값이다. */
   {
     const _repurchaseEl = document.getElementById("rf_repurchase_days");
-    if (_repurchaseEl) {
+    if (_repurchaseEl && !_rfIsReviewerScopedEditor()) {
       const _rawDays = String(_repurchaseEl.value ?? "").trim();
       const _days = Number(_rawDays);
       if (_rawDays === "" || !Number.isInteger(_days) || _days < 0 || _days > 365) {

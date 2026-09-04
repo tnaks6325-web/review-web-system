@@ -50,6 +50,12 @@ for (const label of ['7일', '14일', '21일', '직접입력', '제한 없음'])
 assert.ok(modal.includes('id="rf_repurchase_custom_days"') && modal.includes('max="365"'), '직접입력 1~365일 UI');
 assert.ok(recruit.includes('payload.repurchase_days = _days'), '저장 payload 포함');
 assert.ok(recruit.includes('c.repurchase_days ?? 14'), '편집 시 서버 저장값 복원');
+assert.ok(recruit.includes('sessionStorage.getItem("rapp_camp_edit_token")'),
+  '리뷰어용 제한 편집 세션을 식별');
+assert.ok(recruit.includes('row.hidden = hidden') && recruit.includes('row.style.display = hidden ? "none" : ""'),
+  '제한 편집 화면에서는 저장되지 않는 재참여 설정을 숨김');
+assert.ok(recruit.includes('if (_repurchaseEl && !_rfIsReviewerScopedEditor())'),
+  '제한 편집 세션에서는 재참여 값을 payload에 싣지 않음');
 assert.ok(recruit.includes('rfSetRepurchaseDays(14)'), '신규 공고 기본 14일 초기화');
 
 console.log('PASS campaign-specific repurchase days persistence and enforcement wiring');
