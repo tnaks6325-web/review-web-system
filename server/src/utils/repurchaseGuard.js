@@ -16,28 +16,57 @@
  *
  * ★ 취소된 주문(deleted_at 有)은 세지 않는다 — 취소한 구매까지 재참여를 막으면 안 된다.
  * ★ 모르면 막지 않는다(fail-open) — 탭·번호를 판정할 수 없으면 통과시킨다.
- * ★ 킬스위치 겸 상한 조절: env CAMPAIGN_REPARTICIPATE_DAYS(기본 14, 0=제한 없음).
+ * ★ 공고별 기간은 recruit_campaigns.repurchase_days(0=제한 없음)에 저장한다.
+ * ★ env CAMPAIGN_REPARTICIPATE_DAYS는 기존 공고/미지정 호출의 기본값(기본 14)이자
+ *   0일 때 전체 기능을 즉시 끄는 운영 킬스위치다.
  */
 
-function repurchaseDays() {
+function repurchaseDays(campaignDays) {
   const n = parseInt(process.env.CAMPAIGN_REPARTICIPATE_DAYS, 10);
-  return Number.isFinite(n) && n >= 0 ? n : 14;
+  const globalDays = Number.isFinite(n) && n >= 0 ? n : 14;
+  if (globalDays <= 0) return 0;
+  if (campaignDays === undefined || campaignDays === null || campaignDays === '') return globalDays;
+  const selected = Number(campaignDays);
+  return Number.isInteger(selected) && selected >= 0 && selected <= 365 ? selected : globalDays;
+}
+
+/** 관리자 수동제출처럼 캠페인 행을 아직 읽지 않은 경로에서 공고별 기간을 한 번 조회한다. */
+async function resolveCampaignRepurchaseDays(dbOrClient, campaignId) {
+  const fallback = repurchaseDays();
+  if (fallback <= 0 || !campaignId) return fallback;
+  const { rows } = await dbOrClient.query(
+    'SELECT repurchase_days FROM recruit_campaigns WHERE id = $1 LIMIT 1', [campaignId]);
+  return repurchaseDays(rows[0] && rows[0].repurchase_days);
 }
 
 function phone8Of(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-8);
 }
 
+/** 같은 공고 제출 이력처럼 이미 읽어 둔 시각에도 동일한 기간 계산을 적용한다. */
+function repurchaseWindowFromSubmittedAt(submittedAt, campaignDays, nowMs = Date.now()) {
+  const days = repurchaseDays(campaignDays);
+  if (days <= 0 || !submittedAt) {
+    return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
+  }
+  const lastSubmittedAt = new Date(submittedAt);
+  if (!Number.isFinite(lastSubmittedAt.getTime())) {
+    return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
+  }
+  const availableFrom = new Date(lastSubmittedAt.getTime() + days * 86400000);
+  return { blocked: availableFrom.getTime() > nowMs, days, lastSubmittedAt, availableFrom };
+}
+
 /**
  * 그 작업 전체에 이 계정(phone8)이 최근 N일 안에 이미 구매양식을 낸 적이 있는지 확인한다.
  * @param {object} dbOrClient - pool 또는 트랜잭션 client (.query 인터페이스)
- * @param {{sheetId:string, tabName:string, phone?:string, phone8?:string}} p
+ * @param {{sheetId?:string, tabName?:string, campaignId?:string, phone?:string, phone8?:string, days?:number}} p
  * @returns {Promise<{blocked:boolean, days:number, lastSubmittedAt:Date|null, availableFrom:Date|null}>}
  */
-async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, phone, phone8 } = {}) {
-  const days = repurchaseDays();
+async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, campaignId, phone, phone8, days: campaignDays } = {}) {
+  const days = repurchaseDays(campaignDays);
   const p8 = phone8 || phone8Of(phone);
-  if (days <= 0 || !sheetId || !tabName || p8.length !== 8) {
+  if (days <= 0 || ((!sheetId || !tabName) && !campaignId) || p8.length !== 8) {
     return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
   }
   const { rows } = await dbOrClient.query(
@@ -49,43 +78,54 @@ async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, phone, phon
           LIMIT 1
        ) AS work_name
      )
-     SELECT os.submitted_at
-       FROM order_submissions os
-       LEFT JOIN tab_configs submitted_tab
-         ON submitted_tab.sheet_id = os.sheet_id
-        AND submitted_tab.tab_name = os.tab_name
-       CROSS JOIN scope
-      WHERE os.sheet_id = $1
-        AND (
-          (scope.work_name IS NOT NULL AND (
-            os.repurchase_work_key = $1 || E'\\x1f' || scope.work_name
-            OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = scope.work_name
+     , history AS (
+       SELECT os.submitted_at
+         FROM order_submissions os
+         LEFT JOIN tab_configs submitted_tab
+           ON submitted_tab.sheet_id = os.sheet_id
+          AND submitted_tab.tab_name = os.tab_name
+         CROSS JOIN scope
+        WHERE $1::text IS NOT NULL AND $2::text IS NOT NULL
+          AND os.sheet_id = $1
+          AND (
+            (scope.work_name IS NOT NULL AND (
+              os.repurchase_work_key = $1 || E'\\x1f' || scope.work_name
+              OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = scope.work_name
+            ))
+            OR (scope.work_name IS NULL AND os.tab_name = $2)
+          )
+          AND os.deleted_at IS NULL
+          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
+          AND os.submitted_at >= NOW() - make_interval(days => $4)
+       UNION ALL
+       SELECT ca.submitted_at
+         FROM campaign_applications ca
+        WHERE ca.campaign_id = $5
+          AND ca.phone8 = $3
+          AND ca.status = 'submitted'
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
           ))
-          OR (scope.work_name IS NULL AND os.tab_name = $2)
-        )
-        AND os.deleted_at IS NULL
-        AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
-        AND os.submitted_at >= NOW() - make_interval(days => $4)
-      ORDER BY os.submitted_at DESC
-      LIMIT 1`,
-    [sheetId, tabName, p8, days]);
-  if (!rows.length) return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
-  const lastSubmittedAt = rows[0].submitted_at;
-  const availableFrom = new Date(new Date(lastSubmittedAt).getTime() + days * 86400000);
-  return { blocked: true, days, lastSubmittedAt, availableFrom };
+          AND ca.submitted_at >= NOW() - make_interval(days => $4)
+     )
+     SELECT MAX(submitted_at) AS submitted_at FROM history`,
+    [sheetId || null, tabName || null, p8, days, campaignId || null]);
+  if (!rows.length || !rows[0].submitted_at) return { blocked: false, days, lastSubmittedAt: null, availableFrom: null };
+  return repurchaseWindowFromSubmittedAt(rows[0].submitted_at, days);
 }
 
 /**
  * 여러 번호를 한 번에 확인(외부모집 일괄 접수용) — 같은 작업 전체를 왕복 1회로 판정한다.
  * @param {object} dbOrClient
- * @param {{sheetId:string, tabName:string, phone8List:string[]}} p
+ * @param {{sheetId?:string, tabName?:string, campaignId?:string, phone8List:string[], days?:number}} p
  * @returns {Promise<Map<string,{blocked:boolean, lastSubmittedAt:Date, availableFrom:Date}>>} phone8 → 결과(막힌 것만 담김)
  */
-async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, phone8List } = {}) {
-  const days = repurchaseDays();
+async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, campaignId, phone8List, days: campaignDays } = {}) {
+  const days = repurchaseDays(campaignDays);
   const map = new Map();
   const list = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
-  if (days <= 0 || !sheetId || !tabName || !list.length) return map;
+  if (days <= 0 || ((!sheetId || !tabName) && !campaignId) || !list.length) return map;
   const { rows } = await dbOrClient.query(
     `WITH scope AS (
        SELECT (
@@ -95,34 +135,122 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, phone8
           LIMIT 1
        ) AS work_name
      )
-     SELECT RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS p8,
-            MAX(os.submitted_at) AS last_at
-       FROM order_submissions os
-       LEFT JOIN tab_configs submitted_tab
-         ON submitted_tab.sheet_id = os.sheet_id
-        AND submitted_tab.tab_name = os.tab_name
-       CROSS JOIN scope
-      WHERE os.sheet_id = $1
-        AND (
-          (scope.work_name IS NOT NULL AND (
-            os.repurchase_work_key = $1 || E'\\x1f' || scope.work_name
-            OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = scope.work_name
+     , history AS (
+       SELECT RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS p8,
+              os.submitted_at
+         FROM order_submissions os
+         LEFT JOIN tab_configs submitted_tab
+           ON submitted_tab.sheet_id = os.sheet_id
+          AND submitted_tab.tab_name = os.tab_name
+         CROSS JOIN scope
+        WHERE $1::text IS NOT NULL AND $2::text IS NOT NULL
+          AND os.sheet_id = $1
+          AND (
+            (scope.work_name IS NOT NULL AND (
+              os.repurchase_work_key = $1 || E'\\x1f' || scope.work_name
+              OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = scope.work_name
+            ))
+            OR (scope.work_name IS NULL AND os.tab_name = $2)
+          )
+          AND os.deleted_at IS NULL
+          AND os.submitted_at >= NOW() - make_interval(days => $3)
+          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($4::text[])
+       UNION ALL
+       SELECT ca.phone8 AS p8, ca.submitted_at
+         FROM campaign_applications ca
+        WHERE ca.campaign_id = $5
+          AND ca.status = 'submitted'
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
           ))
-          OR (scope.work_name IS NULL AND os.tab_name = $2)
-        )
-        AND os.deleted_at IS NULL
-        AND os.submitted_at >= NOW() - make_interval(days => $3)
-        AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($4::text[])
-      GROUP BY 1`,
-    [sheetId, tabName, days, list]);
+          AND ca.submitted_at >= NOW() - make_interval(days => $3)
+          AND ca.phone8 = ANY($4::text[])
+     )
+     SELECT p8, MAX(submitted_at) AS last_at
+       FROM history
+      GROUP BY p8`,
+    [sheetId || null, tabName || null, days, list, campaignId || null]);
   for (const r of rows) {
     const lastSubmittedAt = r.last_at;
     map.set(r.p8, {
-      blocked: true, lastSubmittedAt,
+      blocked: true, days, lastSubmittedAt,
       availableFrom: new Date(new Date(lastSubmittedAt).getTime() + days * 86400000),
     });
   }
   return map;
+}
+
+/**
+ * 지각 주문 수동확정용: 대상 주문의 실제 제출시각 전후 N일 안에 다른 제출이 있는지 확인한다.
+ * 현재 시각 기준 판정과 달리 과거 사건을 뒤늦게 확정하므로 양방향 시간차를 본다.
+ */
+async function checkRepurchaseConflictAt(dbOrClient, {
+  sheetId, tabName, campaignId, phone8, days: campaignDays,
+  targetSubmittedAt, excludeApplicationId, excludeOrderSubmissionId,
+} = {}) {
+  const days = repurchaseDays(campaignDays);
+  const p8 = phone8Of(phone8);
+  const target = new Date(targetSubmittedAt);
+  if (days <= 0 || ((!sheetId || !tabName) && !campaignId) || p8.length !== 8 || !Number.isFinite(target.getTime())) {
+    return { blocked: false, days, conflictingSubmittedAt: null };
+  }
+  const { rows } = await dbOrClient.query(
+    `WITH scope AS (
+       SELECT (
+         SELECT NULLIF(BTRIM(campaign_name), '')
+           FROM tab_configs
+          WHERE sheet_id = $1 AND tab_name = $2
+          LIMIT 1
+       ) AS work_name
+     ), history AS (
+       SELECT os.submitted_at
+         FROM order_submissions os
+         LEFT JOIN tab_configs submitted_tab
+           ON submitted_tab.sheet_id = os.sheet_id
+          AND submitted_tab.tab_name = os.tab_name
+         CROSS JOIN scope
+        WHERE $1::text IS NOT NULL AND $2::text IS NOT NULL
+          AND os.sheet_id = $1
+          AND os.id IS DISTINCT FROM $8::uuid
+          AND os.deleted_at IS NULL
+          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
+          AND (
+            (scope.work_name IS NOT NULL AND (
+              os.repurchase_work_key = $1 || E'\\x1f' || scope.work_name
+              OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = scope.work_name
+            ))
+            OR (scope.work_name IS NULL AND os.tab_name = $2)
+          )
+          AND os.submitted_at > $5::timestamptz - make_interval(days => $4)
+          AND os.submitted_at < $5::timestamptz + make_interval(days => $4)
+       UNION ALL
+       SELECT ca.submitted_at
+         FROM campaign_applications ca
+        WHERE ca.campaign_id = $6
+          AND ca.phone8 = $3
+          AND ca.status = 'submitted'
+          AND ca.id IS DISTINCT FROM $7::integer
+          AND ca.order_submission_id IS DISTINCT FROM $8::uuid
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
+          ))
+          AND ca.submitted_at > $5::timestamptz - make_interval(days => $4)
+          AND ca.submitted_at < $5::timestamptz + make_interval(days => $4)
+     )
+     SELECT submitted_at
+       FROM history
+      ORDER BY ABS(EXTRACT(EPOCH FROM (submitted_at - $5::timestamptz)))
+      LIMIT 1`,
+    [sheetId || null, tabName || null, p8, days, target, campaignId || null,
+      excludeApplicationId || null, excludeOrderSubmissionId || null]
+  );
+  return {
+    blocked: rows.length > 0,
+    days,
+    conflictingSubmittedAt: rows.length ? rows[0].submitted_at : null,
+  };
 }
 
 /**
@@ -139,13 +267,12 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, phone8
  * @returns {Promise<Map<string, {status:'locked'|'ready', lastSubmittedAt:Date, availableFrom?:Date}>>}
  */
 async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phone8 } = {}) {
-  const days = repurchaseDays();
   const map = new Map();
   const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
   const p8 = String(phone8 || '');
-  if (days <= 0 || !ids.length || p8.length !== 8) return map;
+  if (repurchaseDays() <= 0 || !ids.length || p8.length !== 8) return map;
   const { rows } = await dbOrClient.query(
-    `SELECT rc.id AS campaign_id, MAX(os.submitted_at) AS last_at
+    `SELECT rc.id AS campaign_id, rc.repurchase_days, MAX(os.submitted_at) AS last_at
        FROM recruit_campaigns rc
        LEFT JOIN tab_configs base_tab
          ON base_tab.sheet_id = rc.linked_sheet_id
@@ -166,16 +293,18 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
           ))
           OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
         )
-      GROUP BY rc.id`,
+      GROUP BY rc.id, rc.repurchase_days`,
     [ids, p8]);
   const now = Date.now();
   for (const r of rows) {
+    const days = repurchaseDays(r.repurchase_days);
+    if (days <= 0) continue;
     const lastSubmittedAt = r.last_at;
     const availableFromMs = new Date(lastSubmittedAt).getTime() + days * 86400000;
     if (availableFromMs > now) {
-      map.set(String(r.campaign_id), { status: 'locked', lastSubmittedAt, availableFrom: new Date(availableFromMs) });
+      map.set(String(r.campaign_id), { status: 'locked', days, lastSubmittedAt, availableFrom: new Date(availableFromMs) });
     } else {
-      map.set(String(r.campaign_id), { status: 'ready', lastSubmittedAt });
+      map.set(String(r.campaign_id), { status: 'ready', days, lastSubmittedAt });
     }
   }
   return map;
@@ -183,45 +312,63 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
 
 // 여러 명의의 공고별 재참여 상태를 한 번에 계산한다.
 async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone8List } = {}) {
-  const days = repurchaseDays();
   const out = new Map();
   const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
   const phones = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
-  if (days <= 0 || !ids.length || !phones.length) return out;
+  if (repurchaseDays() <= 0 || !ids.length || !phones.length) return out;
   const { rows } = await dbOrClient.query(
-    `SELECT rc.id AS campaign_id, RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
-            MAX(os.submitted_at) AS last_submitted_at
-       FROM recruit_campaigns rc
-       LEFT JOIN tab_configs base_tab
-         ON base_tab.sheet_id = rc.linked_sheet_id
-        AND base_tab.tab_name = rc.linked_tab_name
-       JOIN order_submissions os ON os.sheet_id = rc.linked_sheet_id
-       LEFT JOIN tab_configs submitted_tab
-         ON submitted_tab.sheet_id = os.sheet_id
-        AND submitted_tab.tab_name = os.tab_name
-      WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
-        AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
-        AND (
-          (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (
-            os.repurchase_work_key = rc.linked_sheet_id || E'\\x1f' || BTRIM(base_tab.campaign_name)
-            OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = NULLIF(BTRIM(base_tab.campaign_name), '')
+    `WITH campaign_history AS (
+       SELECT rc.id AS campaign_id, rc.repurchase_days,
+              RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
+              os.submitted_at
+         FROM recruit_campaigns rc
+         LEFT JOIN tab_configs base_tab
+           ON base_tab.sheet_id = rc.linked_sheet_id
+          AND base_tab.tab_name = rc.linked_tab_name
+         JOIN order_submissions os ON os.sheet_id = rc.linked_sheet_id
+         LEFT JOIN tab_configs submitted_tab
+           ON submitted_tab.sheet_id = os.sheet_id
+          AND submitted_tab.tab_name = os.tab_name
+        WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
+          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
+          AND (
+            (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (
+              os.repurchase_work_key = rc.linked_sheet_id || E'\\x1f' || BTRIM(base_tab.campaign_name)
+              OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = NULLIF(BTRIM(base_tab.campaign_name), '')
+            ))
+            OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
+          )
+       UNION ALL
+       SELECT rc.id AS campaign_id, rc.repurchase_days, ca.phone8, ca.submitted_at
+         FROM recruit_campaigns rc
+         JOIN campaign_applications ca ON ca.campaign_id = rc.id
+        WHERE rc.id = ANY($1::text[])
+          AND ca.status = 'submitted'
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
           ))
-          OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
-        )
-      GROUP BY rc.id, RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)`, [ids, phones]);
+          AND ca.phone8 = ANY($2::text[])
+     )
+     SELECT campaign_id, repurchase_days, phone8, MAX(submitted_at) AS last_submitted_at
+       FROM campaign_history
+      GROUP BY campaign_id, repurchase_days, phone8`, [ids, phones]);
   const now = Date.now();
   for (const r of rows) {
+    const days = repurchaseDays(r.repurchase_days);
+    if (days <= 0) continue;
     const at = new Date(r.last_submitted_at || r.last_at);
     const availableFrom = new Date(at.getTime() + days * 86400000);
     const status = availableFrom.getTime() > now ? 'locked' : 'ready';
     const p8 = r.phone8 || r.p8;
     if (!out.has(p8)) out.set(p8, new Map());
-    out.get(p8).set(String(r.campaign_id), { status, lastSubmittedAt: at, availableFrom });
+    out.get(p8).set(String(r.campaign_id), { status, days, lastSubmittedAt: at, availableFrom });
   }
   return out;
 }
 
 module.exports = {
-  checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseStatusForCampaigns, checkRepurchaseStatusForAccounts,
-  phone8Of, repurchaseDays,
+  checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseConflictAt,
+  checkRepurchaseStatusForCampaigns, checkRepurchaseStatusForAccounts,
+  phone8Of, repurchaseDays, repurchaseWindowFromSubmittedAt, resolveCampaignRepurchaseDays,
 };

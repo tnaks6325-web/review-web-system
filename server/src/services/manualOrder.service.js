@@ -216,12 +216,6 @@ async function confirmExternalApplication(client, {
     }
   }
 
-  // 같은 (캠페인, 명의)로 이미 확정된 참여가 있으면 중복 차단(리뷰어 apply와 같은 규칙)
-  const { rows: dup } = await client.query(
-    `SELECT id FROM campaign_applications
-      WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`, [campaignId, phone8]);
-  if (dup.length) return { ok: false, error: `이 캠페인에 이미 확정된 참여(#${dup[0].id})가 있습니다` };
-
   // 정원 확인 — 외부모집은 이미 약속된 건이라 기본 허용하되, 초과 사실은 호출부에 알린다
   const total = Number(cRows[0].recruit_total) || 0;
   let overCapacity = false;
@@ -281,6 +275,7 @@ async function confirmExternalApplication(client, {
 async function submitExternalOrder({
   sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
   allowOverDaily = false, allowRepurchase = false,
+  repurchaseDaysOverride,
 }) {
   const warnings = [];
   const f = fields || {};
@@ -312,7 +307,7 @@ async function submitExternalOrder({
   }
 
   // ⓪-1.5 재참여(재구매) 기간 제한 — **"같은 작업(탭)" 기준**(사용자 확정 2026-08-24). 위 24시간
-  //     중복 체크는 사고 방지용이고, campaignId 별 영구 차단(⓪-2)은 그 캠페인 안에서만 본다.
+  //     중복 체크는 사고 방지용이고, 이 기간 판정이 반복 참여 허용 여부의 단일 정책이다.
   //     이번에 문제된 사고(8/20 참여 → 4일 뒤 이 화면으로 같은 탭 재구매)는 캠페인 지정 없이
   //     등록될 때 ⓪-2가 통째로 비활성화되면서 통과됐다 — 그래서 여기서는 campaignId 유무와
   //     무관하게 항상 본다. 단일 출처 = utils/repurchaseGuard(리뷰어 셀프 참여와 공용).
@@ -320,8 +315,13 @@ async function submitExternalOrder({
   //     번호만 같다" 같은 사정을 판단해 넘길 수 있게 — 사용자 확정, 리뷰어 셀프 참여는 예외 없음).
   if (!allowRepurchase) {
     try {
-      const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
-      const rw = await checkRepurchaseWindow(pool, { sheetId, tabName, phone: f.phone });
+      const { checkRepurchaseWindow, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
+      const effectiveRepurchaseDays = repurchaseDaysOverride === undefined
+        ? await resolveCampaignRepurchaseDays(pool, campaignId)
+        : repurchaseDaysOverride;
+      const rw = await checkRepurchaseWindow(pool, {
+        sheetId, tabName, campaignId, phone: f.phone, days: effectiveRepurchaseDays,
+      });
       if (rw.blocked) {
         const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
           timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
@@ -336,17 +336,11 @@ async function submitExternalOrder({
     warnings.push('재참여 기간 제한을 넘겨 접수했습니다(관리자 확인됨)');
   }
 
-  // ⓪-2 참여형이면 **원장 기록 전에** 확정 가능 여부를 본다 — 나중에 거절되면
+  // ⓪-2 참여형이면 **원장 기록 전에** 확정할 기존 신청을 명시적으로 고른다 — 나중에 거절되면
   //     시트 행만 생기고 정원은 안 깎이는 어긋난 상태가 남는다.
   let selectedApplication = null;
   if (campaignId) {
     try {
-      const { rows: pre } = await pool.query(
-        `SELECT id FROM campaign_applications
-          WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`, [campaignId, p8]);
-      if (pre.length) {
-        return { ok: false, duplicate: true, error: `이 공고에 이미 확정된 참여(#${pre[0].id})가 있습니다` };
-      }
       const selectedId = parseInt(targetApplicationId, 10);
       if (selectedId) {
         const { rows: selected } = await pool.query(

@@ -12,7 +12,7 @@ const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
 const { submitExternalOrder, dailyRemainingForCampaign } = require('../services/manualOrder.service');
-const { checkRepurchaseWindowBatch, phone8Of } = require('../utils/repurchaseGuard');
+const { checkRepurchaseWindowBatch, phone8Of, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
 
 const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로 수백 건이 들어가는 사고 방지)
@@ -85,6 +85,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
 
     const allowOverDaily = b.allowOverDaily === true;
     const allowRepurchase = b.allowRepurchase === true;
+    const effectiveRepurchaseDays = await resolveCampaignRepurchaseDays(pool, campaignId);
 
     /* ★★ 재참여(재구매) 기간 사전 판정 — "같은 작업(탭)" 기준(사용자 확정 2026-08-24).
        배치를 시작하기 전에 전 건의 전화번호를 한 번에 훑어, 최근 며칠 안에 같은 탭에서 이미
@@ -94,7 +95,9 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
        사전 판정을 건너뛰고 호출해도 그쪽에서 다시 걸린다. */
     if (!allowRepurchase) {
       const p8List = items.map(it => phone8Of((it.fields || {}).phone));
-      const blockedMap = await checkRepurchaseWindowBatch(pool, { sheetId, tabName, phone8List: p8List });
+      const blockedMap = await checkRepurchaseWindowBatch(pool, {
+        sheetId, tabName, campaignId, phone8List: p8List, days: effectiveRepurchaseDays,
+      });
       if (blockedMap.size) {
         const blocked = items
           .map((it, i) => ({ index: i, name: (it.fields || {}).recipient || '', p8: phone8Of((it.fields || {}).phone) }))
@@ -102,7 +105,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           .map(x => ({ ...x, availableFrom: blockedMap.get(x.p8).availableFrom }));
         return res.json({
           ok: false, needConfirm: 'repurchase_window', blocked,
-          error: `${blocked.length}건이 최근 ${(require('../utils/repurchaseGuard').repurchaseDays)()}일 안에 이 작업에 이미 참여한 연락처입니다.`,
+          error: `${blocked.length}건이 최근 ${effectiveRepurchaseDays}일 안에 이 작업에 이미 참여한 연락처입니다.`,
         });
       }
     }
@@ -156,6 +159,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           force: b.force === true,   // 중복 경고를 확인한 뒤 재시도할 때만
           allowOverDaily,            // 오늘 정원 초과 확인을 받은 뒤 재시도할 때만
           allowRepurchase,           // 재참여 기간 제한 확인을 받은 뒤 재시도할 때만
+          repurchaseDaysOverride: effectiveRepurchaseDays, // 선택한 모집공고의 저장값(사전·최종 판정 일치)
         });
         // ★ 초과 접수는 결과 화면에 남긴다 — 확인을 받았더라도 "조용히 넘어간" 것으로 보이면
         //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.

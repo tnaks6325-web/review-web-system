@@ -30,7 +30,8 @@ const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + nam
 const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.stringify(got) === JSON.stringify(want));
 
 (async () => {
-  const { checkRepurchaseWindow, checkRepurchaseWindowBatch, phone8Of, repurchaseDays } =
+  const { checkRepurchaseWindow, checkRepurchaseWindowBatch, phone8Of, repurchaseDays,
+    repurchaseWindowFromSubmittedAt } =
     require('../src/utils/repurchaseGuard');
 
   /* ═══ 1. fail-open — 판정 불가는 항상 통과 ═══ */
@@ -48,7 +49,25 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     { sheetId: 's', tabName: 't', phone8: '12345678' })).blocked, false);
   delete process.env.CAMPAIGN_REPARTICIPATE_DAYS;
   eq('기본값 14일', repurchaseDays(), 14);
+  eq('공고 설정 7일', repurchaseDays(7), 7);
+  eq('공고 설정 21일', repurchaseDays(21), 21);
+  eq('공고 설정 제한 없음(0일)', repurchaseDays(0), 0);
+  eq('공고 설정 범위 밖이면 기본값', repurchaseDays(366), 14);
+  eq('공고별 제한 없음(0일) → DB 호출 없이 통과',
+    (await checkRepurchaseWindow({ query: async () => { throw new Error('DB 호출 금지'); } },
+      { sheetId: 's', tabName: 't', phone8: '12345678', days: 0 })).blocked, false);
+  process.env.CAMPAIGN_REPARTICIPATE_DAYS = '0';
+  eq('운영 킬스위치 0은 공고별 21일보다 우선', repurchaseDays(21), 0);
   process.env.CAMPAIGN_REPARTICIPATE_DAYS = origDays;
+  {
+    const submittedAt = new Date('2026-09-04T00:00:00Z');
+    eq('같은 공고 제출도 14일 안에는 차단',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-17T23:59:59Z').getTime()).blocked, true);
+    eq('같은 공고 제출도 14일 경과 후 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-18T00:00:01Z').getTime()).blocked, false);
+    eq('같은 공고 제출도 제한 없음(0일)이면 즉시 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 0, submittedAt.getTime()).blocked, false);
+  }
 
   /* ═══ 2. 정상 판정 — 스텁 DB ═══ */
   console.log('\n[2] 정상 판정(스텁 pool)');
@@ -67,16 +86,33 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 작업명 없는 레거시 탭만 tab_name 단위 폴백', lastSql.includes('scope.work_name IS NULL AND os.tab_name = $2'));
     ok('★ 취소된 주문 제외 조건 포함', lastSql.includes('deleted_at IS NULL'));
     ok('★ 기간 창은 make_interval(days=>) 파라미터화 — 하드코딩 아님', lastSql.includes('make_interval(days => $4)'));
+    ok('★ 같은 공고 submitted 폴백과 주문 원장 중 최신 시각을 사용',
+      lastSql.includes('campaign_applications ca') && lastSql.includes('MAX(submitted_at) AS submitted_at'));
   }
 
   {
-    const submittedAt = new Date('2026-08-20T05:00:00Z');
+    const submittedAt = new Date(Date.now() - 86400000);
     const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
       { sheetId: 's1', tabName: 't1', phone8: '86365441' });
     eq('최근 이력 있음 → 차단', r.blocked, true);
     eq('14일 뒤가 재참여 가능일', r.availableFrom.toISOString(),
       new Date(submittedAt.getTime() + 14 * 86400000).toISOString());
     eq('days 필드 = 14', r.days, 14);
+  }
+  {
+    const submittedAt = new Date(Date.now() - 86400000);
+    const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
+      { sheetId: 's1', tabName: 't1', phone8: '86365441', days: 7 });
+    eq('공고별 7일 값이 SQL 기간 파라미터에 적용', lastParams[3], 7);
+    eq('공고별 7일 뒤가 재참여 가능일', r.availableFrom.toISOString(),
+      new Date(submittedAt.getTime() + 7 * 86400000).toISOString());
+  }
+  {
+    const submittedAt = new Date(Date.now() - 2 * 86400000);
+    const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
+      { campaignId: 'legacy-campaign', phone8: '86365441', days: 14 });
+    eq('작업 탭 연결이 없어도 같은 공고 submitted 이력으로 차단', r.blocked, true);
+    eq('공고 id가 SQL 폴백 파라미터에 전달', lastParams[4], 'legacy-campaign');
   }
 
   /* ═══ 3. 배치 판정 ═══ */
@@ -88,6 +124,14 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     eq('막힌 번호만 맵에 담김(1건)', r.size, 1);
     ok('막힌 번호가 정확히 매칭됨', r.get('86365441') && r.get('86365441').blocked === true);
     ok('막히지 않은 번호는 맵에 없음', !r.has('11112222'));
+    ok('배치도 같은 공고 submitted 폴백을 포함', lastSql.includes('campaign_applications ca'));
+  }
+  {
+    const rows = [{ p8: '86365441', last_at: new Date(Date.now() - 2 * 86400000) }];
+    const r = await checkRepurchaseWindowBatch(stubDb(rows),
+      { campaignId: 'legacy-campaign', phone8List: ['86365441'], days: 14 });
+    eq('작업 탭 연결 없는 수동제출 배치도 공고 이력으로 차단', r.get('86365441').blocked, true);
+    eq('배치 공고 id가 SQL 폴백 파라미터에 전달', lastParams[4], 'legacy-campaign');
   }
   {
     const r = await checkRepurchaseWindowBatch({ query: async () => { throw new Error('호출 금지'); } },
@@ -107,15 +151,25 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   const camp = campFull.slice(iApplyFnStart);
   ok('★ /my-repurchase-status 라우트도 등록되어 있다(카드 표시용 배치 조회)',
     campFull.includes(`router.get('/my-repurchase-status'`) && campFull.indexOf(`router.get('/my-repurchase-status'`) < iApplyFnStart);
-  const iBlk = camp.indexOf(`reason: 'already_submitted', error: '이미 구매양식 제출까지 완료한 캠페인이에요.'`);
+  const iFallback = camp.indexOf('sameCampaignSubmittedAt = b0.submitted_at');
   const iGuard = camp.indexOf(`require('../utils/repurchaseGuard')`);
   const iExpireSweep = camp.indexOf('만료 스윕은 정리 작업이지만');
   ok('utils/repurchaseGuard 를 사용한다', iGuard > -1);
-  ok('★ 순서: 캠페인단위 영구차단 뒤 → 재구매 가드 → 만료 스윕(기존 흐름 순서 불변)',
-    iBlk > -1 && iGuard > iBlk && iExpireSweep > iGuard);
+  ok('★ 순서: 같은 공고 제출시각 폴백 → 재구매 가드 → 만료 스윕',
+    iFallback > -1 && iGuard > iFallback && iExpireSweep > iGuard);
+  ok('★ 같은 공고 제출을 already_submitted로 영구 차단하지 않는다',
+    !camp.includes(`reason: 'already_submitted'`));
+  ok('★ 셀프 참여 선검사도 연결 주문이 취소된 신청 이력을 제외',
+    camp.includes('order_submission_id IS NULL OR EXISTS') &&
+    camp.includes('linked_os.id = campaign_applications.order_submission_id') &&
+    camp.includes('linked_os.deleted_at IS NULL'));
+  ok('★ 비연결/레거시 공고도 같은 공고 제출시각으로 기간을 계산',
+    camp.includes('repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime())'));
   ok('reason: repurchase_window 반환', camp.includes(`reason: 'repurchase_window'`));
   ok('★ camp.linked_sheet_id/linked_tab_name를 시작점으로 같은 작업 전체를 판정',
     camp.includes('camp.linked_sheet_id') && camp.includes('camp.linked_tab_name'));
+  ok('★ 셀프 참여 가드는 campaignId도 전달해 원장·공고 이력 중 최신값을 사용',
+    camp.includes('campaignId: id, phone8: holdP8'));
   ok('★ holdP8(본계정/타계정 신원)로 판정 — 로그인 phone8만 보지 않는다', camp.includes('phone8: holdP8'));
   ok('★★ 셀프 참여는 예외(강제 통과) 없음 — allowRepurchase 미사용',
     !camp.slice(iGuard, iGuard + 1500).includes('allowRepurchase'));
@@ -128,23 +182,66 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   const iIdRoute = campFull.indexOf(`router.get('/:id'`);
   ok('★ 라우트 등록 순서: /:id 보다 앞(뒤에 두면 /:id 가 이 경로를 id로 삼킨다)',
     iMyStatusRoute > -1 && iIdRoute > -1 && iMyStatusRoute < iIdRoute);
-  ok('phone8 형식 검증(자릿수) 있음', campFull.slice(iMyStatusRoute, iIdRoute).includes("p8.length !== 8"));
-  ok('checkRepurchaseStatusForAccounts 사용(본계정·타계정 단일 출처)',
+  ok('★ 카드 상태 조회는 서명된 리뷰어 세션 필수',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('reviewerSessionMiddleware'));
+  ok('★ 인증 뒤 제한을 적용하고 서명 세션 명의로 rate-limit 버킷을 분리',
+    campFull.includes("router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter") &&
+    campFull.includes('req.reviewer && req.reviewer.loginPhone8'));
+  ok('★ 요청 phone8을 신원으로 쓰지 않고 세션 소유자 ID로 계정을 조회',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('[req.reviewer.ownerReviewerId]') &&
+    !campFull.slice(iMyStatusRoute, iIdRoute).includes('req.query.phone8'));
+  ok('★ 자유 편집 타계정은 이력 조회 신원으로 사용하지 않음',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind !== 'self'") &&
+    !campFull.slice(iMyStatusRoute, iIdRoute).includes('SELECT name, phone8, sub_accounts') &&
+    !campFull.slice(iMyStatusRoute, iIdRoute).includes('for (const sub of subs)'));
+  ok('계정별 상태 배치 계산 단일 출처 사용',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForAccounts'));
   ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
 
-  const { checkRepurchaseStatusForAccounts } = require('../src/utils/repurchaseGuard');
+  const { checkRepurchaseStatusForAccounts, checkRepurchaseConflictAt } = require('../src/utils/repurchaseGuard');
   {
+    let statusSql = '';
     const rows = [
-      { campaign_id: 'camp_locked', phone8: '86365441', last_submitted_at: new Date(Date.now() - 4 * 86400000) },
-      { campaign_id: 'camp_ready', phone8: '86365441', last_submitted_at: new Date(Date.now() - 20 * 86400000) },
+      { campaign_id: 'camp_locked', repurchase_days: 21, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
+      { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
+      { campaign_id: 'camp_unlimited', repurchase_days: 0, phone8: '86365441', last_submitted_at: new Date(Date.now() - 1 * 86400000) },
     ];
-    const r = await checkRepurchaseStatusForAccounts(stubDb(rows),
+    const r = await checkRepurchaseStatusForAccounts({ query: async (sql) => { statusSql = String(sql); return { rows }; } },
       { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8List: ['86365441'] });
-    eq('4일 전 참여 → locked', r.get('86365441').get('camp_locked').status, 'locked');
+    eq('10일 전 참여 + 공고별 21일 → locked', r.get('86365441').get('camp_locked').status, 'locked');
     ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('86365441').get('camp_locked').availableFrom instanceof Date);
-    eq('20일 전 참여(14일 지남) → ready', r.get('86365441').get('camp_ready').status, 'ready');
+    eq('10일 전 참여 + 공고별 7일 → ready', r.get('86365441').get('camp_ready').status, 'ready');
+    ok('공고별 제한 없음(0일)은 상태 맵에서도 제외', !r.get('86365441').has('camp_unlimited'));
     ok('★ 참여 이력이 아예 없는 공고는 맵에 없음(=평소 카드, 0/false로 꾸미지 않는다)', !r.get('86365441').has('camp_never'));
+    ok('★ 주문 원장이 없는 같은 공고 submitted 이력도 상태 조회 폴백에 포함',
+      statusSql.includes('campaign_applications ca') && statusSql.includes("ca.status = 'submitted'"));
+    ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
+      statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
+      statusSql.includes('linked_os.deleted_at IS NULL'));
+    eq('★ 셀프·배치·카드·지각확정의 신청 이력 폴백이 모두 취소 주문을 제외',
+      (readS('utils/repurchaseGuard.js').match(/ca\.order_submission_id IS NULL OR EXISTS/g) || []).length, 4);
+  }
+  {
+    let conflictSql = '';
+    const r = await checkRepurchaseConflictAt({ query: async (sql, params) => {
+      conflictSql = String(sql);
+      eq('지각 확정 기준시각 파라미터', new Date(params[4]).toISOString(), '2026-09-04T00:00:00.000Z');
+      eq('대상 신청 제외 파라미터', params[6], 77);
+      eq('대상 주문 제외 파라미터', params[7], '11111111-1111-4111-8111-111111111111');
+      return { rows: [{ submitted_at: new Date('2026-09-10T00:00:00Z') }] };
+    } }, {
+      sheetId: 's', tabName: 't', campaignId: 'c', phone8: '86365441', days: 14,
+      targetSubmittedAt: '2026-09-04T00:00:00Z', excludeApplicationId: 77,
+      excludeOrderSubmissionId: '11111111-1111-4111-8111-111111111111',
+    });
+    ok('지각 확정은 기간 안의 다른 제출을 충돌로 반환', r.blocked && r.days === 14);
+    ok('지각 확정은 현재시각이 아니라 대상시각 전후를 비교',
+      conflictSql.includes("$5::timestamptz - make_interval(days => $4)") &&
+      conflictSql.includes("$5::timestamptz + make_interval(days => $4)"));
+    ok('지각 확정은 대상 신청·주문 자체와 취소 주문을 제외',
+      conflictSql.includes('ca.id IS DISTINCT FROM $7::integer') &&
+      conflictSql.includes('os.id IS DISTINCT FROM $8::uuid') &&
+      conflictSql.includes('linked_os.deleted_at IS NULL'));
   }
   {
     const origDays = process.env.CAMPAIGN_REPARTICIPATE_DAYS;
@@ -161,9 +258,11 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('allowRepurchase 파라미터 존재', svc.includes('allowRepurchase = false'));
   const iDup24h = svc.indexOf('24시간 내에 이미 접수돼 있습니다');
   const iRepurchase = svc.indexOf(`require('../utils/repurchaseGuard')`);
-  const iCampaignDedup = svc.indexOf('이 공고에 이미 확정된 참여');
-  ok('★ 순서: 24시간 중복확인 → 재참여 가드 → 캠페인단위 확정이력(기존 순서 유지)',
-    iDup24h > -1 && iRepurchase > iDup24h && iCampaignDedup > iRepurchase);
+  const iLedger = svc.indexOf('createOrderLedgerEntry({');
+  ok('★ 순서: 24시간 중복확인 → 재참여 가드 → 주문 원장 기록',
+    iDup24h > -1 && iRepurchase > iDup24h && iLedger > iRepurchase);
+  ok('★ 수동제출에도 campaign_applications submitted 영구차단이 남아 있지 않음',
+    !svc.includes("status = 'submitted' LIMIT 1"));
   // ★★ 핵심 회귀: 캠페인 지정 여부와 무관하게 항상 검사해야 한다(이번 사고의 원인이
   //   "campaignId 없으면 검사 자체가 스킵"이었으므로, if(campaignId) 안에 갇히면 안 된다).
   const block = svc.slice(iRepurchase - 400, iRepurchase + 900);
@@ -172,11 +271,15 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('강제 통과 시 접수 결과에 경고를 남긴다(조용한 우회 금지)',
     svc.includes('재참여 기간 제한을 넘겨 접수했습니다(관리자 확인됨)'));
   ok('repurchaseBlocked 필드로 사유를 되돌린다', svc.includes('repurchaseBlocked: true'));
+  ok('★ 건별 최종 가드도 campaignId를 전달해 공고 submitted 폴백을 적용',
+    svc.includes('sheetId, tabName, campaignId, phone: f.phone'));
 
   /* ═══ 6. 배선 — 라우트(사전 배치 판정) ═══ */
   console.log('\n[6] 배선: 라우트 사전 판정');
   const rt = readS('routes/manualOrder.routes.js');
   ok('checkRepurchaseWindowBatch import', rt.includes('checkRepurchaseWindowBatch'));
+  ok('★ 배치 사전 가드도 campaignId를 전달해 공고 submitted 폴백을 적용',
+    rt.includes('sheetId, tabName, campaignId, phone8List: p8List'));
   ok(`needConfirm: 'repurchase_window' 를 쓰기 전에(배치 시작 전) 되돌린다`,
     rt.includes(`needConfirm: 'repurchase_window'`));
   ok('allowRepurchase 를 서비스 호출에 전달', /allowRepurchase,\s*\/\//.test(rt));
@@ -208,12 +311,28 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     cc.includes(`if (c.state === 'open' && repurchaseLocked)`));
 
   const idx = readF('index.html');
+  const detailPage = readF('campaign.html');
   ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));
+  ok('★ 카드 상태 조회에 리뷰어 세션 토큰을 전달',
+    idx.includes('headers: { "X-Reviewer-Token": reviewerToken }'));
+  ok('★ 홈 표시 세션에 토큰이 없으면 동일 인물의 서명 세션에서 복원',
+    idx.includes('store.getItem("rapp_reviewer_auth")') && idx.includes('samePhone && sameName'));
+  ok('★ 만료 토큰은 초기화 때 갱신하고 상태 조회 401도 한 번 갱신 후 재시도',
+    idx.includes('!_reviewerTokenFresh(user.reviewerToken)') &&
+    idx.includes('if (res.status === 401)') && idx.includes('_refreshReviewerHomeSession(user)'));
+  ok('★ 공고 상세 상태 조회도 인증 헤더를 보내고 phone8 쿼리를 쓰지 않음',
+    detailPage.includes("'/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }") &&
+    !detailPage.includes("'/api/campaign/my-repurchase-status?phone8='"));
+  ok('★ 공고 상세 로그인이 홈 표시 세션에도 서명 토큰을 보존',
+    detailPage.includes('reviewerToken:session.reviewerToken'));
   ok('★ 같은 (번호+공고목록) 조합은 재조회하지 않는다(재렌더→재조회 순환 방지)',
     idx.includes('if (key === _rcRepurchaseFetchKey) return;'));
   ok('조회 실패해도 목록 렌더 자체는 살아있다(부가 정보 취급)',
     /catch \(_\) \{ \/\* 재참여 안내는 부가 정보/.test(idx));
   ok('카드 데이터에 계정별 상태를 병합 후 CampCards.cardHtml 호출', idx.includes('if (rs) c.repurchase = rs'));
+  ok('★ 상태 응답 교체 전 요청 공고의 옛 캐시를 지워 0일 전환 즉시 잠금 해제',
+    idx.includes('ids.forEach(id => { delete nextStatus[id]; });') &&
+    !idx.includes('if (!Object.keys(status).length) return;'));
 
   console.log(`\n✅ repurchaseGuard: ${n}개 통과`);
   process.exit(0);

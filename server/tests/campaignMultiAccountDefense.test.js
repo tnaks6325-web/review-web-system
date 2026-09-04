@@ -81,9 +81,9 @@ async function callHandler(method, routePath, req) {
   ok('D1: 차단은 타계정 참여 경로에서만(자기참여 무영향)',
     routes.indexOf("'sub_is_registered_reviewer'") > routes.indexOf('const holdP8 = isSubApply'));
 
-  ok('D1b: 기존 사유 코드 불변(프론트 문구 계약)',
-    routes.includes("'already_submitted'") && !routes.includes("'already_today'"));
-  ok('D1b: 귀속 판별 사유 신설', routes.includes("'blocked_by_other_owner'") && routes.includes("'same_phone_other_name'"));
+  ok('D1b: 제출완료 재참여는 공고별 기간 사유를 사용(영구차단 금지)',
+    routes.includes("'repurchase_window'") && !routes.includes("'already_submitted'") && !routes.includes("'already_today'"));
+  ok('D1b: 타소유자 귀속 충돌은 기간과 무관하게 차단', routes.includes("'blocked_by_other_owner'"));
   ok('D1b: done/hist 2쿼리 → 1쿼리(왕복 순증 0)',
     !/const done = await client\.query/.test(routes) && !/const hist = await client\.query/.test(routes)
     && /const blk = await client\.query/.test(routes));
