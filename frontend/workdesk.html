@@ -42,7 +42,7 @@
      --toph = 상단 헤더(.top) 실제 높이. .top은 flex-wrap이라 역할별 버튼 수·화면폭에 따라 한 줄(≈57px)에서
      두 줄(≈93px+)로 늘어난다 → 상수로 박으면 좁은 화면에서 작업바가 헤더 뒤로 숨는다. 둘 다 _measureChrome()이
      실측해 덮어쓰고(아래 값은 첫 프레임용 근사치), 전체화면이면 작업바가 display:none이라 측정값이 자연히 0이 된다. */
-  :root{--tbh:92px;--toph:57px;--app-max:1920px}
+  :root{--tbh:92px;--toph:57px;--app-max:2560px}
   .wrap{display:grid;grid-template-columns:1fr 300px;min-height:calc(100vh - var(--toph) - var(--tbh))}
   .wrap.railhidden{grid-template-columns:1fr}                 /* 우측 레일 숨김 → 1열(메인 전체폭) */
   .wrap.railhidden .rail{display:none}
@@ -761,7 +761,7 @@
   /* ── 관측 대시보드 ── */
   .ovwrap{padding:18px 22px;overflow:auto;height:calc(100vh - 50px)}
 
-  /* ── 화면 폭 상한 (우측 상단 FHD/QHD 토글) ────────────────────────────────────────
+  /* ── 화면 폭 상한 (QHD 2560px 고정) ──────────────────────────────────────────────
      창을 넓힐수록 헤더·업체 칩·탭·본문이 끝없이 따라 늘어나던 것을 --app-max 에서 멈춘다.
      ★ 래퍼를 새로 넣지 않고 padding-inline 한 줄로 처리한다 — .top/.taskbar 는 sticky 배경이라
        요소 자체에 max-width 를 걸면 넓은 화면에서 배경 띠가 화면 중앙만 덮어 스크롤 시 끊긴다.
@@ -820,26 +820,10 @@
   @media(max-width:860px){.taskbar.wb-topbar .wb-company{gap:6px}.taskbar.wb-topbar .wsearch{width:142px}.taskbar.wb-topbar .segdiv{display:none}.taskbar.wb-topbar .segwrap{width:auto}.taskbar.wb-topbar .wb-task,.taskbar.wb-topbar .wb-open{margin-inline:12px}}
   .wrap   {padding-inline:max( 0px, calc((100% - var(--app-max)) / 2))}
   .ovwrap {padding-inline:max(22px, calc((100% - var(--app-max)) / 2))}
-  body[data-vw="fhd"]{--app-max:1920px}   /* :root 기본값과 같은 값을 body 에도 명시 — 상한이 :root 한 줄에만 매달리지 않게 */
-  body[data-vw="qhd"]{--app-max:2560px}
-  /* 업체(광고주) 뷰어: 상한 1680px 고정 — FHD/QHD 토글 미노출(시안 design-advertiser-viewer.html).
-     ★ 선언 순서가 규칙: data-vw 뒤(같은 특이성이라 뒤가 이겨 광고주 고정이 확정) · widemode 앞(전체화면은 여전히 해제). */
+  /* 업체(광고주) 뷰어: 상한 1680px 고정(시안 design-advertiser-viewer.html).
+     ★ 선언 순서가 규칙: QHD 기본값 뒤(같은 특이성이라 뒤가 이겨 광고주 고정이 확정) · widemode 앞(전체화면은 여전히 해제). */
   body.advm{--app-max:1680px}
   body.widemode{--app-max:100vw}
-
-  /* 좌우 슬라이딩 2단 스위치(FHD ↔ QHD). 라벨 폭을 44px 로 고정해야 노브 이동거리가 정확히 한 칸 */
-  .vwsw{position:relative;display:inline-flex;align-items:center;background:var(--card2);border:1px solid var(--line);
-    border-radius:9px;padding:3px;cursor:pointer;user-select:none;flex:none}
-  .vwsw b{position:relative;z-index:1;width:44px;text-align:center;line-height:26px;
-    font-size:11px;font-weight:800;letter-spacing:.04em;color:var(--faint);transition:color .16s}
-  .vwsw .vwknob{position:absolute;top:3px;left:3px;width:44px;height:26px;border-radius:7px;background:var(--accent);
-    box-shadow:0 1px 3px rgba(37,99,235,.34);transition:transform .18s cubic-bezier(.4,0,.2,1)}
-  .vwsw[data-on="qhd"] .vwknob{transform:translateX(44px)}
-  .vwsw[data-on="fhd"] b:nth-of-type(1),
-  .vwsw[data-on="qhd"] b:nth-of-type(2){color:#fff}
-  .vwsw:hover{border-color:var(--accent-line)}
-  .vwsw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  @media(prefers-reduced-motion:reduce){.vwsw .vwknob{transition:none}}
 
   /* 모집공고 카드를 담는 컨테이너 너비 상한 — 카드 자체(min 258px, admin.html 과 공유하는
      js/campaign-cards.js 의 .pcards-grid.pc-admin)는 그대로 두고, 그 카드를 품는 공간만 여기서
@@ -860,7 +844,7 @@
      차지해 버튼이 "페이지 오른쪽 끝"에 붙었다. 아래에서 폭을 캡한 데이터 영역(표·카드)과
      같은 폭으로 .mh 도 캡해야 버튼이 "그 데이터의 오른쪽 끝"에 붙는다(사용자 확정 — 작업오더
      스크린샷 기준). 넷 다 위에서 정한 값과 그대로 맞춘다: 작업오더 1120 · 모집공고 1380 ·
-     등록리뷰어DB는 FHD 전폭 · 리뷰어 로그 1300. .mh 자체는 공유 클래스라 손대지 않고(다른 뷰까지
+     등록리뷰어DB는 QHD 가용 폭 · 리뷰어 로그 1300. .mh 자체는 공유 클래스라 손대지 않고(다른 뷰까지
      캡되면 안 됨) 뷰 헤더 id 로 스코프한다. */
   #wohead .mh{max-width:1120px}
   #rchead .mh{max-width:1380px}
@@ -872,7 +856,7 @@
      → 뷰 컨테이너 id 로 스코프해 셋을 따로 제한한다(마크업·공유 클래스 무변경, C/S 대화창과
      같은 원리: 표는 width:100% 그대로 두고 감싸는 폭만 좁혀 hug-left + 오른쪽 여백).
        작업오더(#wobody)   1120px — 고정 열 합 ≈650px, 유동은 "작업명" 하나뿐
-       등록리뷰어DB(#rvbody) FHD 전폭 — 17열이라 1400px 상한에서는 불필요한 가로 스크롤이 생김
+       등록리뷰어DB(#rvbody) QHD 가용 폭 — 17열이라 1400px 상한에서는 불필요한 가로 스크롤이 생김
        리뷰어 로그(#lgbody)  1300px — "오류내용"·"조치안내" 두 문장형 칸이라 다른 표보다 여유 필요 */
   #wobody .lgwrap{max-width:1120px}
   #rvbody .lgwrap{max-width:none}
@@ -967,7 +951,7 @@
      ⚠ 중첩된 타계정표(table.rvsubtbl)는 .lgtable 이 아니라서 이 규칙에 안 걸린다(주소가 온전히 보인다). */
   #rvbody table.lgtable th, #rvbody table.lgtable td{white-space:nowrap}
   #rvbody table.lgtable td.c-addr{white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
-  /* FHD(≥1500px)에서는 등록리뷰어DB만 작업보드처럼 가용 폭 전체를 쓴다.
+  /* 넓은 데스크톱(≥1500px)에서는 등록리뷰어DB만 작업보드처럼 가용 폭 전체를 쓴다.
      열이 17개라 내용 기준 auto 레이아웃을 두면 긴 메모/주소가 표를 밀어 가로 스크롤을 만든다.
      이 구간에서만 고정 레이아웃+압축 여백으로 화면 안에 맞추고, 더 좁은 창은 기존처럼 스크롤을 보존한다. */
   @media(min-width:1500px){
@@ -2653,7 +2637,6 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               settleOpen:false, _gMenuCol:null, _gMenuInit:false, _gDragInit:false };
 
 async function boot(){
-  _applyVwMode();   // 로그인 화면부터 상한 적용(셸 렌더 전에도 body[data-vw] 세팅 — 스위치는 셸에서 다시 동기화)
   // 광고주 전용 접속 링크(#a=<token>, 구 #adv=) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
   //   ★★ A안(사용자 확정 2026-08-24): 교환 뒤에도 **해시를 지우지 않는다**. 지우면 주소창·히스토리·북마크에
   //     남는 것이 열쇠 없는 `/workdesk` 라 재방문·새 탭·재전달이 전부 "문구 없는 로그인 화면"이 됐다(실측 신고).
@@ -2872,17 +2855,12 @@ function renderShell(){
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
-      ${isAdv?'':`<div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
-           aria-label="화면 폭 상한 전환" title="화면 폭 상한 — FHD 1920px / QHD 2560px (열 너비는 어느 쪽이든 고정)"
-           onclick="toggleVwMode()"
-           onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();toggleVwMode();}"><span class="vwknob"></span><b>FHD</b><b>QHD</b></div>`}
       <button class="btn railtgl" id="railToggle" onclick="toggleRail()" style="display:none" title="우측 사이드바(협업/댓글·Parity) 숨기기/표시"></button>
       <button class="btn widetgl" id="wideToggle" onclick="toggleWide()" style="display:none" title="작업 목록·우측 레일을 숨겨 표를 화면 전체폭으로 (Esc로 해제)"></button>
       <span class="rolebadge">${isAdv?esc(STATE.name||'업체'):esc(STATE.role||'?')+(STATE.name?(' · '+esc(STATE.name)):'')}</span>
       <button class="btn" onclick="logout()">로그아웃</button>
     </div>
     <div id="viewroot"></div>`;
-  _applyVwMode();               // 저장된 FHD/QHD 모드를 스위치·body에 반영(셸을 다시 그릴 때마다)
   // 첫 진입 기본 뷰 = 홈(시안 B 타일 런처형 · ① nav 상시 유지). 광고주는 홈이 없다(전용 대시보드 유지).
   // 딥링크(#go=·#view=)는 boot 이 STATE.view 를 먼저 세팅하므로 종전대로 그 화면으로 직행한다.
   switchView(STATE.view||(isAdv?'workdesk':'home'));
@@ -2915,23 +2893,6 @@ async function _csBadgeRefresh(){
   }catch(_){ }
 }
 
-// ── 화면 폭 상한 모드 (FHD 1920 / QHD 2560) ──────────────────────────────────────
-//   순수 표시 설정이라 서버·계정과 무관하게 localStorage 로만 저장한다(브라우저=모니터 1:1 대응).
-//   저장값이 없거나 읽기 실패면 FHD — 좁은 쪽이 안전한 기본값(QHD 기본이면 FHD 모니터에서 상한이 무의미해진다).
-const VW_KEY='wd_viewport_mode';
-function _vwMode(){ try{ return localStorage.getItem(VW_KEY)==='qhd' ? 'qhd' : 'fhd'; }catch(_){ return 'fhd'; } }
-function _applyVwMode(){
-  const m=_vwMode();
-  document.body.dataset.vw=m;
-  const sw=document.getElementById('vwToggle');
-  if(sw){ sw.dataset.on=m; sw.setAttribute('aria-checked', m==='qhd'?'true':'false'); }
-}
-function setVwMode(m){
-  try{ localStorage.setItem(VW_KEY, m==='qhd'?'qhd':'fhd'); }catch(_){ }
-  _applyVwMode();
-  _measureChrome();   // 상한 변경 → .top 줄바꿈이 달라질 수 있음(--toph 재실측). 표폭은 고정이라 _fitGrid 불필요
-}
-function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
 /* ★ 'reedit'(옛 전용 탭)은 'cs' 로 흡수됐다 — 이미지 교체요청이 C/S 문의 화면 위의 대기 큐가 됐다.
    옛 이름을 여기서 한 번 갈아끼운다: 브라우저 히스토리에 남은 항목(_navApply)·북마크·
    외부 호출이 뷰 없는 상태로 떨어져 빈 화면이 되는 것을 막는다(뷰 이름 하나만 옮기면 되게). */
