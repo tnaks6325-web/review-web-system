@@ -508,6 +508,106 @@ function _cleanProductForMatch(s) {
     .trim();
 }
 
+/* ── 상품명 OCR 안전 자동처리(v1) ────────────────────────────────────
+ * 사람이 한 번도 보지 않은 단독 OCR 군집은 반복 증거가 없다. 따라서 자동 통과는
+ * 긴 문장의 한두 글자 OCR 오인식·끝 잘림처럼 **거의 동일한 경우**만 허용한다.
+ * 용량·수량·연식이 서로 다르면 문장 전체가 닮아도 절대 자동 통과시키지 않는다. */
+const PRODUCT_AUTO_TRIAGE_VERSION = 'product-auto-v1';
+const PRODUCT_AUTO_DICE_THRESHOLD = 0.96;
+
+function _autoNormProduct(s) {
+  return _cleanProductForMatch(s).normalize('NFKC').toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+function _isProductStructureLine(s) {
+  const n = _autoNormProduct(s);
+  return n === '상품'
+    || n.startsWith('합계최종모집인원')
+    || n.startsWith('최종모집인원');
+}
+
+function _realProductCandidates(expectedList) {
+  return (Array.isArray(expectedList) ? expectedList : [])
+    .map(s => String(s || '').trim())
+    .filter(s => s && !_isProductStructureLine(s) && _autoNormProduct(s));
+}
+
+function _bigramDice(a, b) {
+  if (a === b) return a ? 1 : 0;
+  if (a.length < 2 || b.length < 2) return 0;
+  const pairs = new Map();
+  for (let i = 0; i < a.length - 1; i++) {
+    const p = a.slice(i, i + 2);
+    pairs.set(p, (pairs.get(p) || 0) + 1);
+  }
+  let overlap = 0;
+  for (let i = 0; i < b.length - 1; i++) {
+    const p = b.slice(i, i + 2);
+    const left = pairs.get(p) || 0;
+    if (left > 0) { overlap++; pairs.set(p, left - 1); }
+  }
+  return (2 * overlap) / ((a.length - 1) + (b.length - 1));
+}
+
+function _quantityMap(s) {
+  const out = new Map();
+  const text = String(s || '').normalize('NFKC').toLowerCase();
+  const re = /(\d+(?:\.\d+)?)\s*(년형|세대|mah|kg|mg|ml|cm|mm|g|l|정|포|개|박스|매|캡슐|입|종|세트|인치|%)/gi;
+  let m;
+  while ((m = re.exec(text))) {
+    const unit = m[2].toLowerCase();
+    if (!out.has(unit)) out.set(unit, new Set());
+    out.get(unit).add(m[1]);
+  }
+  return out;
+}
+
+function _quantityConflicts(expected, observed) {
+  const a = _quantityMap(expected), b = _quantityMap(observed), conflicts = [];
+  for (const [unit, values] of a.entries()) {
+    const other = b.get(unit);
+    if (!other || [...values].some(v => other.has(v))) continue;
+    conflicts.push({ unit, expected: [...values], observed: [...other] });
+  }
+  return conflicts;
+}
+
+function classifyProductNameForAuto(ocr, expectedList) {
+  const candidates = _realProductCandidates(expectedList);
+  const observedNorm = _autoNormProduct(ocr);
+  if (!candidates.length) {
+    return { eligible: false, reason: 'no_expected', score: 0, lengthRatio: 0,
+      bestExpected: '', conflicts: [], version: PRODUCT_AUTO_TRIAGE_VERSION };
+  }
+  if (!observedNorm) {
+    return { eligible: false, reason: 'no_ocr', score: 0, lengthRatio: 0,
+      bestExpected: '', conflicts: [], version: PRODUCT_AUTO_TRIAGE_VERSION };
+  }
+  let bestExpected = '', score = -1;
+  for (const expected of candidates) {
+    const s = _bigramDice(observedNorm, _autoNormProduct(expected));
+    if (s > score) { score = s; bestExpected = expected; }
+  }
+  const expectedNorm = _autoNormProduct(bestExpected);
+  const minLength = Math.min(observedNorm.length, expectedNorm.length);
+  const maxLength = Math.max(observedNorm.length, expectedNorm.length);
+  const lengthRatio = maxLength ? minLength / maxLength : 0;
+  const conflicts = _quantityConflicts(bestExpected, ocr);
+  let reason = 'low_similarity';
+  if (conflicts.length) reason = 'numeric_conflict';
+  else if (minLength < 12) reason = 'too_short';
+  else if (lengthRatio < 0.75) reason = 'length_gap';
+  else if (score >= PRODUCT_AUTO_DICE_THRESHOLD) reason = 'high_confidence_ocr';
+  else if (score >= 0.85) reason = 'borderline_similarity';
+  return {
+    eligible: reason === 'high_confidence_ocr', reason,
+    score: Math.round(score * 10000) / 10000,
+    lengthRatio: Math.round(lengthRatio * 10000) / 10000,
+    bestExpected, conflicts, version: PRODUCT_AUTO_TRIAGE_VERSION,
+  };
+}
+
 /**
  * 캡처 속 상품명 ↔ 기대 상품명 대조.
  * ★ 쇼핑몰 화면은 상품명을 줄여 쓰거나 말줄임(…)하므로 **부분 포함도 일치로 인정**한다.
@@ -530,12 +630,13 @@ function _mergeProductNames(base, extra) {
 function matchProductName(ocr, expectedList) {
   const list = (Array.isArray(expectedList) ? expectedList : [])
     .map(s => String(s || '').trim()).filter(Boolean);
+  const comparable = _realProductCandidates(list);
   // ★ 말줄임·번호·URL 을 벗긴 뒤 대조한다(_cleanProductForMatch) — 벗기지 않으면
   //   "이노크아든 …다회용…" vs "1. 이노크아든 …교체형 (https:" 처럼 같은 상품이 다름으로 나온다.
   const o = _normProduct(_cleanProductForMatch(ocr));
-  if (!list.length) return { verdict: 'skip', expected: [], ocr: String(ocr || '') };
+  if (!comparable.length) return { verdict: 'skip', expected: list, ocr: String(ocr || '') };
   if (!o) return { verdict: 'skip', expected: list, ocr: '' };
-  for (const e of list) {
+  for (const e of comparable) {
     const n = _normProduct(_cleanProductForMatch(e));
     if (!n) continue;
     if (o.includes(n) || n.includes(o)) return { verdict: 'pass', expected: list, ocr: String(ocr) };
@@ -1468,7 +1569,7 @@ async function inspectionTypeCounts({ sheetId, tabName, tabs, status = 'open' } 
 }
 
 /** 상품명 의심을 동일 작업·기대후보·OCR 표기 기준으로 묶는다. 목록 200건 상한과 무관하다. */
-async function listProductClusters({ sheetId, tabName, tabs, limit = 120 } = {}) {
+async function listProductClusters({ sheetId, tabName, tabs, limit = 120, includeAll = false } = {}) {
   const { where, params } = _riScope({ sheetId, tabName, tabs });
   where.push(`i.status IN ('suspect','fail')`);
   where.push(`i.product_resolution IS NULL`);
@@ -1494,23 +1595,80 @@ async function listProductClusters({ sheetId, tabName, tabs, limit = 120 } = {})
     if (!key) { unclustered++; continue; }
     let g = grouped.get(key);
     if (!g) {
+      const triage = classifyProductNameForAuto(row.ocr_product || pr.ocr || '', pr.expected);
+      const realExpected = _realProductCandidates(pr.expected);
       g = {
         clusterKey: key, sheetId: row.sheet_id, tabName: row.tab_name,
-        expected: Array.isArray(pr.expected) ? pr.expected : [],
+        // 작업오더 구조문구는 화면에서 제외하되 군집 키는 기존 사람 판정 보존을 위해 그대로 둔다.
+        expected: realExpected,
         observed: String(row.ocr_product || pr.ocr || ''), count: 0,
         seedFileId: row.file_id, sampleFileIds: [], latestAt: row.created_at || null,
+        triage,
       };
       grouped.set(key, g);
     }
     g.count++;
     if (g.sampleFileIds.length < 3) g.sampleFileIds.push(row.file_id);
   }
-  const clusters = [...grouped.values()]
-    .sort((a, b) => b.count - a.count || String(b.latestAt || '').localeCompare(String(a.latestAt || '')))
+  const allClusters = [...grouped.values()]
+    .sort((a, b) => b.count - a.count || String(b.latestAt || '').localeCompare(String(a.latestAt || '')));
+  const clusters = includeAll ? allClusters : allClusters
     .slice(0, Math.min(Math.max(Number(limit) || 120, 1), 500));
+  const triageReasons = {};
+  for (const g of allClusters) {
+    const code = (g.triage && g.triage.reason) || 'unknown';
+    if (!triageReasons[code]) triageReasons[code] = { clusters: 0, rows: 0, singletons: 0 };
+    triageReasons[code].clusters++;
+    triageReasons[code].rows += g.count;
+    if (g.count === 1) triageReasons[code].singletons++;
+  }
+  const eligible = allClusters.filter(g => g.triage && g.triage.eligible);
   return {
     clusters, totalRows: rows.length, totalClusters: grouped.size, unclustered,
+    singletonClusters: allClusters.filter(g => g.count === 1).length,
+    autoPassClusters: eligible.length,
+    autoPassRows: eligible.reduce((n, g) => n + g.count, 0),
+    autoPassSingletons: eligible.filter(g => g.count === 1).length,
+    triageReasons, triageVersion: PRODUCT_AUTO_TRIAGE_VERSION,
     truncated: rows.length >= scanCap || clusters.length < grouped.size,
+  };
+}
+
+/** 고신뢰 OCR 오타/말줄임 군집만 pass 처리. 미통과·판단불가를 자동으로 만들지 않는다. */
+async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun = true, confirm } = {}) {
+  const snapshot = await listProductClusters({ sheetId, tabName, tabs, includeAll: true });
+  const eligible = snapshot.clusters.filter(g => g.triage && g.triage.eligible);
+  const preview = {
+    ok: true, dryRun: !!dryRun, version: PRODUCT_AUTO_TRIAGE_VERSION,
+    threshold: PRODUCT_AUTO_DICE_THRESHOLD,
+    eligibleClusters: eligible.length,
+    eligibleRows: eligible.reduce((n, g) => n + g.count, 0),
+    eligibleSingletons: eligible.filter(g => g.count === 1).length,
+    totalClusters: snapshot.totalClusters, totalRows: snapshot.totalRows,
+    singletonClusters: snapshot.singletonClusters,
+    samples: eligible.slice(0, 12).map(g => ({
+      tabName: g.tabName, count: g.count, observed: g.observed,
+      expected: g.triage.bestExpected, score: g.triage.score,
+    })),
+  };
+  if (dryRun) return preview;
+  if (confirm !== 'AUTO_PASS_V1') return { ...preview, ok: false, error: '자동처리 확인값이 필요합니다.' };
+
+  let processedClusters = 0, affected = 0, remainsOpen = 0, skipped = 0;
+  for (const g of eligible.slice(0, 200)) {
+    const result = await resolveProductCluster({
+      fileId: g.seedFileId, verdict: 'pass',
+      note: `${PRODUCT_AUTO_TRIAGE_VERSION}; dice=${g.triage.score}; numeric-conflict=none`,
+      by: `AUTO:${PRODUCT_AUTO_TRIAGE_VERSION}:${String(by || 'system').slice(0, 60)}`,
+    });
+    if (!result || !result.ok) { skipped++; continue; }
+    processedClusters++;
+    affected += Number(result.affected) || 0;
+    remainsOpen += Number(result.remainsOpen) || 0;
+  }
+  return {
+    ...preview, dryRun: false, processedClusters, affected, remainsOpen, skipped,
+    hasMore: eligible.length > 200,
   };
 }
 
@@ -1898,12 +2056,13 @@ module.exports = {
   loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
   listInspections, inspectionSummary, inspectionTypeCounts,
-  listProductClusters, resolveProductCluster,
+  listProductClusters, resolveProductCluster, autoResolveProductClusters,
   resolveInspection, resolveInspectionsBulk, inspectionScope,
   notifyInspectionReject,
   resolveReviewerPhone8,
   classifyDuplicateContext,
   hashBase64, matchProductName, computeStatus, productClusterKey, applyProductRule,
+  classifyProductNameForAuto,
   loadTabExpectations, findDuplicate, findOwnDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,
   ENABLED, PRECHECK_ENABLED, PRECHECK_BLOCK,

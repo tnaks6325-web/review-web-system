@@ -1328,6 +1328,9 @@
   .riplab-row div{display:flex;align-items:center;padding:13px 16px;font-size:14px;font-weight:700;line-height:1.55;word-break:keep-all}.riplab-row.ocr div{color:#2845A4}
   .riplab-imgs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.riplab-imgs img{display:block;width:100%;height:142px;object-fit:cover;border:1px solid var(--line);border-radius:9px;background:var(--bg2);cursor:zoom-in}
   .riplab-note{margin:13px 0 0;padding:10px 12px;border:1px solid #DDE5E0;border-radius:9px;background:#F6F9F7;color:#526159;font-size:11px;line-height:1.5}
+  .riplab-auto{margin:0 0 14px;padding:11px 13px;border:1px solid #C9DBFF;border-radius:11px;background:#F2F6FF;color:#294A88;font-size:11px;line-height:1.55}
+  .riplab-auto b{font-size:13px}.riplab-auto .why{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.riplab-auto .why span{padding:3px 7px;border-radius:999px;background:#fff;border:1px solid #D9E4FA;color:#52627F;font-size:9.5px}
+  .riplab-autobtn{border-color:#89A9EE!important;color:#244FA8!important;background:#EEF4FF!important;font-weight:800!important}
   .riplab-decisions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px}.riplab-d{min-height:58px;display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:11px;background:var(--card);padding:10px 12px;text-align:left;cursor:pointer}
   .riplab-d:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(20,45,32,.08)}.riplab-d .key{display:grid;place-items:center;width:24px;height:24px;flex:none;border:1px solid currentColor;border-radius:7px;font:800 10px var(--mono)}.riplab-d b,.riplab-d small{display:block}.riplab-d b{font-size:12px}.riplab-d small{margin-top:2px;color:var(--muted);font-size:9.5px}
   .riplab-d.pass{color:#17724A}.riplab-d.fail{color:#B83B2D}.riplab-d.unknown{color:#8A5B00}.riplab-d.baseline{color:#6C46AD}
@@ -14643,7 +14646,8 @@ function riFilterTab(i){
    건 전체 정상/불량과 **상품명 축 정답을 분리**한다. 같은 군집을 한 번 판단하면 현재
    백로그 전체에 소급하고, pass/fail 은 같은 작업의 exact 규칙으로만 저장한다. */
 const _RI_PRODUCT_LABEL={pass:'통과 · 같은 상품',fail:'미통과 · 다른 상품',unknown:'판단불가',baseline_error:'기준 상품명 오류'};
-let _riProductLab={clusters:[],idx:0,totalRows:0,totalClusters:0,truncated:false,busy:false,changed:false};
+const _RI_TRIAGE_LABEL={no_expected:'기준 상품명 없음',no_ocr:'OCR 표기 없음',numeric_conflict:'용량·수량·연식 숫자 충돌',too_short:'표기가 너무 짧음',length_gap:'길이 차이 큼·혼합 가능',borderline_similarity:'유사하지만 자동 기준 미달',low_similarity:'유사도 부족',high_confidence_ocr:'고신뢰 OCR 오타·잘림'};
+let _riProductLab={clusters:[],idx:0,totalRows:0,totalClusters:0,singletonClusters:0,autoPassClusters:0,autoPassRows:0,autoPassSingletons:0,triageReasons:{},truncated:false,busy:false,changed:false};
 
 async function riOpenProductClusters(){
   if(!(STATE.role==='master'||STATE.role==='admin')) return;
@@ -14657,7 +14661,7 @@ async function riOpenProductClusters(){
   try{
     const r=await api(url);
     if(!r||!r.ok) throw new Error((r&&r.error)||'조회 실패');
-    _riProductLab={clusters:r.clusters||[],idx:0,totalRows:Number(r.totalRows)||0,totalClusters:Number(r.totalClusters)||0,truncated:!!r.truncated,busy:false,changed:false};
+    _riProductLab={clusters:r.clusters||[],idx:0,totalRows:Number(r.totalRows)||0,totalClusters:Number(r.totalClusters)||0,singletonClusters:Number(r.singletonClusters)||0,autoPassClusters:Number(r.autoPassClusters)||0,autoPassRows:Number(r.autoPassRows)||0,autoPassSingletons:Number(r.autoPassSingletons)||0,triageReasons:r.triageReasons||{},truncated:!!r.truncated,busy:false,changed:false};
     _riProductLabRender();
   }catch(e){
     m.innerHTML=`<div class="riplab-in"><div class="riplab-h"><b>🏷 상품명 군집판단</b><span class="sp" style="flex:1"></span><button class="btn" onclick="riProductLabClose()">닫기</button></div><div class="riplab-empty"><div><b>군집을 불러오지 못했습니다</b><span>${esc((e&&e.message)||e)}</span><button class="btn" style="margin-top:12px" onclick="riOpenProductClusters()">다시 시도</button></div></div></div>`;
@@ -14676,13 +14680,16 @@ function _riProductLabRender(){
   const q=rows.map((x,i)=>`<button class="riplab-qi${i===_riProductLab.idx?' on':''}" onclick="riProductLabPick(${i})"><span class="id">${i+1}</span><span class="tx"><b>${esc(x.tabName||'')}</b><span>${esc(x.observed||'')}</span></span><span class="cnt">${_riN(x.count)}건</span></button>`).join('');
   const imgs=(c.sampleFileIds||[]).map((id,i)=>`<img${_thumbAttrs(id,400,_riImg(id))} alt="군집 대표 캡처 ${i+1}" loading="lazy" onclick="riProductZoom(${i})">`).join('');
   const learned=`통과·미통과는 <b>${esc(c.tabName||'이 작업')}</b> 안에서 정확히 같은 기대값과 OCR 표기에만 적용됩니다. 판단불가·기준오류는 미래 규칙을 만들지 않습니다.`;
+  const reasons=Object.entries(_riProductLab.triageReasons||{}).filter(([k,v])=>k!=='high_confidence_ocr'&&Number(v&&v.singletons)>0).sort((a,b)=>Number(b[1].singletons)-Number(a[1].singletons)).map(([k,v])=>`<span>${esc(_RI_TRIAGE_LABEL[k]||k)} ${_riN(v.singletons)}군집</span>`).join('');
+  const selectedWhy=(c.triage&&_RI_TRIAGE_LABEL[c.triage.reason])||'자동 판단 근거 없음';
   m.innerHTML=`<div class="riplab-in">
-    <div class="riplab-h"><b>🏷 상품명 군집판단</b><span class="progress">${_riN(_riProductLab.totalRows)}건 · ${_riN(_riProductLab.totalClusters)}군집${_riProductLab.truncated?' · 상위 군집 표시':''}</span><span class="sp" style="flex:1"></span><button class="btn" onclick="riProductLabClose()">닫기</button></div>
+    <div class="riplab-h"><b>🏷 상품명 군집판단</b><span class="progress">${_riN(_riProductLab.totalRows)}건 · ${_riN(_riProductLab.totalClusters)}군집${_riProductLab.truncated?' · 상위 군집 표시':''}</span><span class="sp" style="flex:1"></span>${_riProductLab.autoPassClusters?`<button class="btn riplab-autobtn" onclick="riProductAutoResolve()">안전 자동처리 ${_riN(_riProductLab.autoPassClusters)}군집</button>`:''}<button class="btn" onclick="riProductLabClose()">닫기</button></div>
     <div class="riplab-body"><aside class="riplab-q">${q}</aside><main class="riplab-main">
+      <div class="riplab-auto"><b>단독 OCR 표기 ${_riN(_riProductLab.singletonClusters)}군집</b> · 같은 표기의 반복 증거가 없어 보수적으로 분리합니다. 이 중 숫자 충돌이 없고 96% 이상 닮은 ${_riN(_riProductLab.autoPassSingletons)}군집만 자동 통과할 수 있습니다.<div class="why">${reasons||'<span>사람 확인 대기 없음</span>'}</div></div>
       <div class="riplab-meta"><h2>${esc(c.tabName||'상품명 의심')}</h2><span class="riplab-pill">같은 표기 ${_riN(c.count)}건</span></div>
       <div class="riplab-pair"><div class="riplab-row"><label>기준 상품명</label><div>${esc((c.expected||[]).join(' / ')||'기대값 없음')}</div></div><div class="riplab-row ocr"><label>화면 판독</label><div>${esc(c.observed||'판독값 없음')}</div></div></div>
       ${imgs?`<div class="riplab-imgs">${imgs}</div>`:''}
-      <div class="riplab-note">${learned}</div>
+      <div class="riplab-note"><b>자동 판단 상태:</b> ${esc(selectedWhy)}${c.triage&&c.triage.score?` · 유사도 ${(Number(c.triage.score)*100).toFixed(1)}%`:''}<br>${learned}</div>
       <div class="riplab-decisions">
         <button class="riplab-d pass" onclick="riProductDecide('pass')"><span class="key">1</span><span><b>통과 · 같은 상품</b><small>${_riN(c.count)}건 종결 + 이 작업 exact 규칙</small></span></button>
         <button class="riplab-d fail" onclick="riProductDecide('fail')"><span class="key">2</span><span><b>미통과 · 다른 상품</b><small>${_riN(c.count)}건 상품명 불일치로 기록</small></span></button>
@@ -14695,6 +14702,24 @@ function _riProductLabRender(){
 function riProductLabPick(i){if(_riProductLab.busy)return;_riProductLab.idx=Math.max(0,Math.min(Number(i)||0,_riProductLab.clusters.length-1));_riProductLabRender();}
 function riProductZoom(i){const c=(_riProductLab.clusters||[])[_riProductLab.idx];const id=c&&(c.sampleFileIds||[])[Number(i)];const url=_riImg(id);if(url&&typeof woImageModal==='function')woImageModal(url);}
 function riProductLabClose(){const m=$('#riProductLab');if(m)m.remove();if(_riProductLab.changed)_loadInspect();}
+
+async function riProductAutoResolve(){
+  if(_riProductLab.busy)return;
+  const t=STATE.riTab||{};_riProductLab.busy=true;
+  try{
+    const scope={sheetId:t.sheetId||'',tabName:t.tabName||''};
+    const p=await api('/api/trackb/review-inspect/product-clusters/auto-resolve',{method:'POST',body:JSON.stringify({...scope,dryRun:true})});
+    if(!p||!p.ok)throw new Error((p&&p.error)||'자동처리 계산 실패');
+    if(!p.eligibleClusters){_toast('현재 안전 자동처리 가능한 군집이 없습니다.');_riProductLab.busy=false;return;}
+    const msg=`고신뢰 OCR ${_riN(p.eligibleClusters)}군집 · ${_riN(p.eligibleRows)}건을 통과 처리할까요?\n\n· 숫자·용량·수량·연식 충돌이 없는 96% 이상 유사 표기만 처리합니다.\n· 미통과/판단불가 건은 자동으로 결정하지 않습니다.\n· 다른 검수 사유는 그대로 남습니다.`;
+    if(!confirm(msg)){_riProductLab.busy=false;return;}
+    const r=await api('/api/trackb/review-inspect/product-clusters/auto-resolve',{method:'POST',body:JSON.stringify({...scope,dryRun:false,confirm:'AUTO_PASS_V1'})});
+    if(!r||!r.ok)throw new Error((r&&r.error)||'자동처리 실패');
+    _toast(`고신뢰 상품명 ${_riN(r.processedClusters)}군집 · ${_riN(r.affected)}건 자동 통과`);
+    await riOpenProductClusters();
+    _riProductLab.changed=true;
+  }catch(e){_riProductLab.busy=false;alert('상품명 자동처리 실패: '+((e&&e.message)||e));}
+}
 
 async function riProductDecide(verdict){
   if(_riProductLab.busy||!_RI_PRODUCT_LABEL[verdict])return;

@@ -48,6 +48,25 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
   assert.strictEqual(svc.applyProductRule(machine, [{ id: 'x', clusterKey: a6Key, verdict: 'unknown' }], { sheetId: 'S', tabName: 'T' }).check.verdict, 'warn');
   ok('B1: pass/fail exact 규칙만 적용하고 기계 원판정 보존');
 
+  // B2. 단독 OCR 안전 자동처리: 긴 오타/잘림만 통과, 숫자 충돌·낮은 유사도는 보류
+  {
+    const safe = svc.classifyProductNameForAuto(
+      '낫세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개',
+      ['[상품', '넛세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개', '[합계] 최종모집인원 200명']);
+    assert.strictEqual(safe.eligible, true);
+    assert.strictEqual(safe.reason, 'high_confidence_ocr');
+    assert.strictEqual(safe.bestExpected.startsWith('넛세린'), true, '작업오더 구조문구는 기대 상품에서 제외');
+    const numberConflict = svc.classifyProductNameForAuto(
+      '장수돌침대 28년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트',
+      ['장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트']);
+    assert.strictEqual(numberConflict.eligible, false);
+    assert.strictEqual(numberConflict.reason, 'numeric_conflict');
+    assert.strictEqual(svc.classifyProductNameForAuto('바디로션', ['바디워시']).eligible, false);
+    assert.strictEqual(svc.matchProductName('상품 상세페이지', ['[상품', '[합계] 최종모집인원 200명']).verdict, 'skip',
+      '작업오더 구조문구만 있으면 상품명 기준 없음으로 처리');
+    ok('B2: 96% 고신뢰 OCR만 자동통과하고 숫자 충돌·짧은 표기는 보류');
+  }
+
   // C. 목록 200건과 독립된 군집 집계
   {
     const rows = [productRow('F1'), productRow('F2'), productRow('F3', { observed: '모기키위 모기 기피제' })];
@@ -56,10 +75,29 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     const out = await svc.listProductClusters({ limit: 20 });
     assert.strictEqual(out.totalRows, 3);
     assert.strictEqual(out.totalClusters, 2);
+    assert.strictEqual(out.singletonClusters, 1);
+    assert.ok(out.triageReasons && out.triageReasons.too_short);
     assert.strictEqual(out.clusters[0].count, 2);
     assert.deepStrictEqual(out.clusters[0].sampleFileIds, ['F1', 'F2']);
     assert.ok(/LIMIT \$1/.test(String(pool.lastSql || '')) || out.clusters.length === 2);
     ok('C1: 동일 작업·기대값·OCR 2건을 한 군집으로 집계');
+  }
+
+  // C2. 자동처리는 dry-run 결과를 먼저 내고 명시 확인값 없이는 쓰지 않는다
+  {
+    const safe = productRow('F1', { observed: '낫세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개' });
+    safe.checks.product.expected = ['넛세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개'];
+    const blocked = productRow('F2', { observed: '장수돌침대 28년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트' });
+    blocked.checks.product.expected = ['장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트'];
+    let calls = 0;
+    svc.__setPoolForTest({ query: async () => { calls++; return { rows: [safe, blocked] }; } });
+    const preview = await svc.autoResolveProductClusters({ dryRun: true });
+    assert.strictEqual(preview.eligibleClusters, 1);
+    assert.strictEqual(preview.eligibleRows, 1);
+    const denied = await svc.autoResolveProductClusters({ dryRun: false });
+    assert.strictEqual(denied.ok, false);
+    assert.strictEqual(calls, 2, '두 실행 모두 목록 조회만 하고 판정 UPDATE는 하지 않음');
+    ok('C2: dry-run 선행 + 명시 확인값 없는 자동 쓰기 차단');
   }
 
   // D. 군집판정: 상품명만 종결, 다른 축은 그대로 open, 작업 exact 규칙 저장
@@ -174,7 +212,9 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
       '다른 사유 재검수 때 이미 끝난 상품명 판단을 기계 경고로 되돌리지 않는다');
     assert.ok(/'\/review-inspect\/product-clusters', authMiddleware, adminOrMasterMiddleware/.test(routes));
     assert.ok(/'\/review-inspect\/product-clusters\/decide', authMiddleware, adminOrMasterMiddleware/.test(routes));
+    assert.ok(/'\/review-inspect\/product-clusters\/auto-resolve', authMiddleware, adminOrMasterMiddleware/.test(routes));
     assert.ok(front.includes('riOpenProductClusters') && front.includes("riProductDecide('pass')") && front.includes("riProductDecide('baseline_error')"));
+    assert.ok(front.includes('단독 OCR 표기') && front.includes('riProductAutoResolve'));
     assert.ok(!/rules = \[rule,[^\n]*\.slice\(0, 500\)/.test(serviceSrc), 'exact 규칙 500개 조용한 축출 금지');
     ok('F1: 148 스키마 프리플라이트 + 관리자 전용 API + 4선택 UI');
   }
