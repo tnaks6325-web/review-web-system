@@ -673,6 +673,23 @@
   .gridbar .grid-export{order:100;margin-left:auto}
   .gridbar #emoBtnBox .btn{margin-top:0!important}
   @media(max-width:760px){.gridbar .grid-export{margin-left:0}}
+  /* 작업보드 열 너비 — 헤더 우측 경계를 직접 잡는 빠른 조절 + 정밀 설정창.
+     너비는 순수 화면 취향이라 로그인 사용자·작업표·브라우저별 localStorage에만 저장한다. */
+  table.sheetgrid thead th .gresize{position:absolute;top:0;right:-1px;width:8px;height:100%;z-index:6;cursor:col-resize;touch-action:none}
+  table.sheetgrid thead th .gresize::after{content:"";position:absolute;top:6px;bottom:6px;right:3px;width:2px;border-radius:2px;background:var(--accent);opacity:0;transition:opacity .12s}
+  table.sheetgrid thead th:hover .gresize::after,table.sheetgrid thead th.gwmanual .gresize::after,.gcolresizing table.sheetgrid thead th .gresize::after{opacity:.48}
+  table.sheetgrid thead th.gwmanual .lbl::after{content:"";display:inline-block;width:4px;height:4px;margin-left:4px;border-radius:50%;background:var(--accent);vertical-align:2px}
+  body.gcolresizing,body.gcolresizing *{cursor:col-resize!important;user-select:none!important}
+  #gwidthov .wbl-dlg{width:min(760px,100%);max-height:min(760px,90vh);display:flex;flex-direction:column}
+  #gwidthov .wbl-dh{display:flex;align-items:center;gap:8px}.gw-titlecopy{min-width:0;display:flex;flex-direction:column}.gw-titlecopy small{margin-top:2px;color:var(--faint);font-size:10.5px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gw-summary{margin-left:auto;flex:none;padding:3px 8px;border:1px solid var(--accent-line);border-radius:999px;background:var(--accent-soft);color:var(--accent-deep);font-size:10px;font-weight:800}
+  #gwidthov .wbl-db{flex:1;min-height:0;overflow:auto;padding:0 16px 12px}.gw-guide{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;margin:0 -16px 6px;padding:10px 16px;background:color-mix(in srgb,var(--card) 94%,transparent);border-bottom:1px solid var(--line);backdrop-filter:blur(5px)}
+  .gw-search{min-width:0;flex:1;height:30px;padding:0 10px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink);font:inherit;font-size:11.5px;outline:none}.gw-search:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .gw-head,.gw-row{display:grid;grid-template-columns:minmax(130px,1.1fr) 82px minmax(170px,1.5fr) 68px 58px;align-items:center;gap:10px}.gw-head{padding:7px 10px;color:var(--faint);font-size:9.5px;font-weight:800}.gw-row{min-height:46px;padding:7px 10px;border-top:1px solid var(--line)}.gw-row[hidden]{display:none}.gw-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;font-weight:750;color:var(--ink)}.gw-auto{font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}.gw-auto b{color:var(--muted)}
+  .gw-range{width:100%;accent-color:var(--accent);cursor:pointer}.gw-number{width:68px;height:28px;box-sizing:border-box;padding:0 5px;border:1px solid var(--line2);border-radius:6px;background:var(--card);color:var(--ink);font:inherit;font-size:11px;text-align:right;font-variant-numeric:tabular-nums;outline:none}.gw-number:focus{border-color:var(--accent)}
+  .gw-reset{height:27px;padding:0 7px;border:1px solid var(--line);border-radius:6px;background:var(--card2);color:var(--muted);font:inherit;font-size:10px;font-weight:750;cursor:pointer}.gw-reset:disabled{opacity:.38;cursor:default}.gw-empty{padding:26px;text-align:center;color:var(--faint);font-size:11.5px}
+  #gwidthov .wbl-df{align-items:center}.gw-footnote{margin-right:auto;color:var(--faint);font-size:10.5px}.gw-settings-card{display:flex;align-items:center;gap:12px;margin:0 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--card);box-shadow:var(--sh)}.gw-settings-card .copy{min-width:0;flex:1}.gw-settings-card b{display:block;font-size:13px}.gw-settings-card span{display:block;margin-top:3px;color:var(--muted);font-size:11px;line-height:1.45}.gw-settings-card .btn{flex:none}
+  @media(max-width:680px){#gwidthov{padding:10px}.gw-head{display:none}.gw-row{grid-template-columns:minmax(100px,1fr) 68px;gap:6px}.gw-row .gw-auto{grid-column:1;grid-row:2}.gw-row .gw-range{grid-column:1/-1;grid-row:3}.gw-row .gw-reset{grid-column:2;grid-row:1}.gw-number{grid-column:2;grid-row:2}.gw-settings-card{align-items:flex-start;flex-wrap:wrap}.gw-settings-card .btn{width:100%}}
 
   /* ══ 오늘 참여현황(툴바 맨 앞 = 표 왼쪽 위) — 시안 C+B 믹스 · docs/design-grid-today-progress.html ══
      `◔ 8/10 (월) 참여현황 12/20명` — 오늘 채워야 할 인원 대비 지금까지 구매(제출 확정)한 인원.
@@ -2634,6 +2651,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               ownSettle:{}, ownSettleFor:null,                // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
               // ── 작업보드 그리드 뷰 상태(클라이언트 전용, 탭 전환 시 초기화) ──
               gFilters:{}, gHidden:new Set(), gGroupBy:null, gCollapsed:new Set(), gSort:null, gSelCols:[],
+              gWidthScope:'', gWidthPrefs:Object.create(null), gWidthEditor:null,
               settleOpen:false, _gMenuCol:null, _gMenuInit:false, _gDragInit:false };
 
 async function boot(){
@@ -5789,7 +5807,7 @@ function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.c
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
 document.addEventListener('click', e=>{ if(!e.target.closest('#segwrap .seg,#taskmenu')){ if(STATE.wMenu!=null){ STATE.wMenu=null; _renderTaskMenu(); } } });
-async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t; _clearCellUndoHistory();
+async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; if(STATE.gWidthEditor) closeGridWidthSettings(false); STATE.cur=t; _clearCellUndoHistory();
   // opt.nav = 뒤로/앞으로 복원으로 열린 것 → 히스토리에 다시 쌓지 않는다(그 항목이 이미 이 상태다)
   if(!(opt&&opt.nav)) _navPush();
   // ★ 여는 탭이 현재 세그먼트에 없으면 그 탭의 업체 그룹으로 강제 이동.
@@ -7435,10 +7453,32 @@ async function refreshUnseen(){
 const _GRID_CELL_PAD=19; const _GRID_HEAD_PAD=29;
 const _GRID_BODY_FONT='12px Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif';
 const _GRID_HEAD_FONT='700 10.5px Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif';
+const _GRID_WIDTH_KEY='wd_grid_column_widths_v1',_GRID_WIDTH_MIN=52,_GRID_WIDTH_MAX=900;
 let _gridMeasureCtx=null; const _gridMeasureCache=new Map();
 // 컬럼 폭 = 헤더와 전체 작업보드에서 가장 긴 표시값. 필터/정렬은 폭을 바꾸지 않는다.
 function _gridTextPx(value,font){ const text=String(value==null?'':value).replace(/\s+/g,' '),key=font+'\\0'+text; if(_gridMeasureCache.has(key))return _gridMeasureCache.get(key); let width=0; try{if(!_gridMeasureCtx&&typeof document!=='undefined')_gridMeasureCtx=document.createElement('canvas').getContext('2d');if(_gridMeasureCtx){_gridMeasureCtx.font=font;width=_gridMeasureCtx.measureText(text).width;}}catch(_){} if(!width)width=[...text].reduce((sum,ch)=>sum+(ch.charCodeAt(0)>255?12:7.2),0);_gridMeasureCache.set(key,width);return width;}
 function _gridAutoColumnWidths(wd,cols){const widths=new Map(),rows=Array.isArray(wd&&wd.roster)?wd.roster:[];(cols||[]).forEach(c=>{const h=c.key;let widest=_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD;rows.forEach(r=>{widest=Math.max(widest,_gridTextPx(gCellDisp(r,h),_GRID_BODY_FONT)+_GRID_CELL_PAD);});widths.set(h,Math.ceil(widest));});return widths;}
+function _gridWidthClamp(value){const n=Math.round(Number(value));return Number.isFinite(n)?Math.max(_GRID_WIDTH_MIN,Math.min(_GRID_WIDTH_MAX,n)):null;}
+function _gridWidthScope(){const t=STATE.cur;if(!t)return '';return [STATE.role||'',STATE.name||'',t.sheetId||'',t.tabName||''].map(v=>encodeURIComponent(String(v))).join('|');}
+function _gridWidthStore(){try{const parsed=JSON.parse(localStorage.getItem(_GRID_WIDTH_KEY)||'{}');return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{};}catch(_){return {};}}
+function _gridWidthClean(raw){const out=Object.create(null);if(!raw||typeof raw!=='object'||Array.isArray(raw))return out;Object.keys(raw).slice(0,250).forEach(key=>{const width=_gridWidthClamp(raw[key]);if(width!=null)out[String(key)]=width;});return out;}
+function _gridLoadWidthPrefs(){const scope=_gridWidthScope();if(!scope)return Object.create(null);return _gridWidthClean(_gridWidthStore()[scope]);}
+function _gridSaveWidthPrefs(prefs){const scope=_gridWidthScope();if(!scope)return false;const store=_gridWidthStore(),clean=_gridWidthClean(prefs);delete store[scope];if(Object.keys(clean).length)store[scope]=clean;const scopes=Object.keys(store);scopes.slice(0,Math.max(0,scopes.length-80)).forEach(key=>delete store[key]);try{localStorage.setItem(_GRID_WIDTH_KEY,JSON.stringify(store));STATE.gWidthScope=scope;STATE.gWidthPrefs=clean;return true;}catch(_){return false;}}
+function _gridWidthPrefsForRender(){const scope=_gridWidthScope(),editor=STATE.gWidthEditor;if(editor&&editor.scope===scope)return editor.draft;if(STATE.gWidthScope!==scope){STATE.gWidthScope=scope;STATE.gWidthPrefs=_gridLoadWidthPrefs();}return STATE.gWidthPrefs||Object.create(null);}
+function _gridApplyWidthPrefs(widths,cols){const prefs=_gridWidthPrefsForRender();(cols||[]).forEach(c=>{if(Object.prototype.hasOwnProperty.call(prefs,c.key)){const width=_gridWidthClamp(prefs[c.key]);if(width!=null)widths.set(c.key,width);}});return widths;}
+function _gridHasManualWidth(key){return Object.prototype.hasOwnProperty.call(_gridWidthPrefsForRender(),key);}
+function _gridAllColumns(wd){const idCols=STATE.role==='advertiser'?[]:[{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];const custom=(wd&&wd.customColumns||[]).map(c=>({key:'ccol:'+c.id,kind:'custom',colId:c.id}));return [...idCols,...(wd&&wd.headers||[]).map(h=>({key:h,kind:'col'})),...custom];}
+function _gridApplyOneWidthToDom(col,width){const cols=STATE.gVCols||[],i=cols.findIndex(c=>c.key===col),tbl=document.querySelector('.gridscroll table.sheetgrid');if(i<0||!tbl)return;const w=_gridWidthClamp(width);if(w==null)return;STATE.gColWidths.set(col,w);tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${i+1})`).forEach(cell=>{cell.style.minWidth=w+'px';cell.style.width=w+'px';});const head=tbl.tHead&&tbl.tHead.rows[0];if(head){if(head.cells[i])head.cells[i].classList.toggle('gwmanual',_gridHasManualWidth(col));let left=0;cols.forEach((c,ci)=>{const frozen=!!(head.cells[ci]&&head.cells[ci].classList.contains('gfz'));if(frozen){tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${ci+1})`).forEach(cell=>{cell.style.left=left+'px';});left+=_colW(c.key);}});STATE.gFrozenW=left;}_fitGrid();}
+function _gridSetStoredWidth(col,width){const prefs=_gridLoadWidthPrefs(),w=_gridWidthClamp(width);if(w==null)return;prefs[col]=w;if(!_gridSaveWidthPrefs(prefs))toast('열 너비를 브라우저에 저장하지 못했습니다');}
+function _gridWidthEditorRows(query){const ed=STATE.gWidthEditor;if(!ed)return '';const q=String(query||'').trim().toLowerCase();let visible=0;const html=ed.cols.map(c=>{const label=_colLabel(c.key),show=!q||String(label).toLowerCase().includes(q);if(show)visible++;const auto=ed.auto.get(c.key)||_GRID_WIDTH_MIN,manual=Object.prototype.hasOwnProperty.call(ed.draft,c.key),width=manual?ed.draft[c.key]:_gridWidthClamp(auto),enc=encodeURIComponent(c.key);return `<div class="gw-row" data-gw-row data-search="${esc(String(label).toLowerCase())}" data-col="${esc(enc)}"${show?'':' hidden'}><div class="gw-name" title="${esc(label)}">${esc(label)}</div><div class="gw-auto">자동 <b>${auto}px</b></div><input class="gw-range" type="range" min="${_GRID_WIDTH_MIN}" max="${_GRID_WIDTH_MAX}" step="1" value="${width}" aria-label="${esc(label)} 너비" oninput="_gridWidthChange('${enc}',this)"><input class="gw-number" type="number" min="${_GRID_WIDTH_MIN}" max="${_GRID_WIDTH_MAX}" value="${width}" aria-label="${esc(label)} 너비 픽셀" onchange="_gridWidthChange('${enc}',this)"><button class="gw-reset" type="button" onclick="_gridWidthReset('${enc}')"${manual?'':' disabled'}>자동</button></div>`;}).join('');return html+(visible?'':'<div class="gw-empty">검색 결과가 없습니다.</div>');}
+function _gridWidthPaintRows(query){const box=document.getElementById('gwRows');if(box)box.innerHTML=_gridWidthEditorRows(query);const n=document.getElementById('gwManualCount'),ed=STATE.gWidthEditor;if(n&&ed)n.textContent=Object.keys(ed.draft).length+'개 직접 설정';}
+function _gridWidthSearch(value){_gridWidthPaintRows(value);}
+function _gridWidthChange(encoded,input){const ed=STATE.gWidthEditor;if(!ed)return;let col;try{col=decodeURIComponent(encoded);}catch(_){return;}const width=_gridWidthClamp(input&&input.value);if(width==null)return;ed.draft[col]=width;const row=input.closest('.gw-row');if(row){row.querySelectorAll('.gw-range,.gw-number').forEach(el=>{if(el!==input)el.value=width;});const reset=row.querySelector('.gw-reset');if(reset)reset.disabled=false;}const n=document.getElementById('gwManualCount');if(n)n.textContent=Object.keys(ed.draft).length+'개 직접 설정';_gridApplyOneWidthToDom(col,width);}
+function _gridWidthReset(encoded){const ed=STATE.gWidthEditor;if(!ed)return;let col;try{col=decodeURIComponent(encoded);}catch(_){return;}delete ed.draft[col];const width=ed.auto.get(col)||_GRID_WIDTH_MIN;_gridApplyOneWidthToDom(col,width);_gridWidthPaintRows((document.querySelector('#gwidthov .gw-search')||{}).value||'');}
+function _gridWidthResetAll(){const ed=STATE.gWidthEditor;if(!ed)return;ed.draft=Object.create(null);ed.cols.forEach(c=>_gridApplyOneWidthToDom(c.key,ed.auto.get(c.key)||_GRID_WIDTH_MIN));_gridWidthPaintRows((document.querySelector('#gwidthov .gw-search')||{}).value||'');}
+function openGridWidthSettings(){if(!STATE.cur||!STATE.wd){toast('작업보드를 먼저 열어 주세요');return;}const cols=_gridAllColumns(STATE.wd);if(!cols.length){toast('너비를 설정할 컬럼이 없습니다');return;}closeGColMenu();closeGHidMenu();const scope=_gridWidthScope(),live=!!document.querySelector('.gridscroll table.sheetgrid');STATE.gWidthEditor={scope,cols,auto:_gridAutoColumnWidths(STATE.wd,cols),draft:_gridLoadWidthPrefs()};let ov=document.getElementById('gwidthov');if(!ov){ov=document.createElement('div');ov.id='gwidthov';ov.className='wbl-ov';document.body.appendChild(ov);}const task=(STATE.wd.meta&&STATE.wd.meta.displayName)||STATE.cur.displayName||STATE.cur.tabName;ov.innerHTML=`<section class="wbl-dlg" role="dialog" aria-modal="true" aria-labelledby="gwTitle"><header class="wbl-dh"><div class="gw-titlecopy"><b id="gwTitle">작업보드 열 너비</b><small>${esc(task)} · 헤더 오른쪽 경계를 드래그해도 저장됩니다</small></div><span class="gw-summary" id="gwManualCount"></span></header><div class="wbl-db"><div class="gw-guide"><input class="gw-search" type="search" placeholder="컬럼 이름 찾기" aria-label="컬럼 이름 찾기" oninput="_gridWidthSearch(this.value)"><button class="btn xs" type="button" onclick="_gridWidthResetAll()">전체 자동맞춤</button></div><div class="gw-head"><span>컬럼</span><span>자동 기준</span><span>빠른 조절</span><span>픽셀</span><span></span></div><div id="gwRows"></div></div><footer class="wbl-df"><span class="gw-footnote">52–900px · ${live?'저장 전까지 표에서 바로 미리 볼 수 있습니다':'저장 후 작업보드에서 적용됩니다'}</span><button class="wbl-b" type="button" onclick="closeGridWidthSettings(false)">취소</button><button class="wbl-b pri" type="button" onclick="closeGridWidthSettings(true)">저장</button></footer></section>`;_gridWidthPaintRows('');const search=ov.querySelector('.gw-search');if(search)search.focus();}
+function closeGridWidthSettings(save){const ed=STATE.gWidthEditor,ov=document.getElementById('gwidthov');if(!ed){if(ov)ov.remove();return;}if(save){if(_gridSaveWidthPrefs(ed.draft))toast('이 작업표의 열 너비를 저장했습니다');else toast('열 너비를 저장하지 못했습니다');}STATE.gWidthEditor=null;if(ov)ov.remove();_syncGridColumnWidths();}
+function _renderGridWidthSettingsCard(){const host=document.getElementById('workdeskWidthSettingsMount');if(!host)return;const t=STATE.cur,wd=STATE.wd;if(!t||!wd){host.innerHTML=`<section class="gw-settings-card"><div class="copy"><b>작업보드 열 너비</b><span>작업보드에서 작업을 하나 연 뒤 돌아오면 컬럼별 너비를 조절할 수 있습니다.</span></div><button class="btn" type="button" onclick="switchView('workdesk')">작업보드 열기</button></section>`;return;}const task=(wd.meta&&wd.meta.displayName)||t.displayName||t.tabName,prefs=_gridLoadWidthPrefs();host.innerHTML=`<section class="gw-settings-card"><div class="copy"><b>작업보드 열 너비</b><span>${esc(task)} · ${Object.keys(prefs).length?Object.keys(prefs).length+'개 컬럼 직접 설정':'모든 컬럼 자동맞춤'} · 이 브라우저에 저장</span></div><button class="btn pri" type="button" onclick="openGridWidthSettings()">열 너비 조절</button></section>`;}
 // 광고주 그리드 전용 폭(한 줄 표시) — 내부 그리드(_COLW)와 분리. 각 값의 최대 표기와 셀 좌우 여백을 포함한다.
 //   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=680px로 긴 도로명 주소도 한 줄로 우선 표시한다.
 //   _fitGrid가 표폭을 이 합으로 고정하므로, 좁은 화면은 값이 줄바꿈되지 않고 가로 스크롤로 전체를 볼 수 있다.
@@ -7744,6 +7784,7 @@ function buildGrid(wd){
   const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
   const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
   STATE.gColWidths=_gridAutoColumnWidths(wd,vcols);                            // 내부·업체용 공통: 최장 표시값 폭
+  STATE.gColWidths=_gridApplyWidthPrefs(STATE.gColWidths,vcols);               // 직접 지정한 열만 자동 폭 위에 적용
   const defaultFreeze=_gridDefaultFreezeUpto(H);
   const freezeUpto=STATE.freezeUpto==null?defaultFreeze:STATE.freezeUpto;
   const fzIdx = freezeUpto ? H.indexOf(freezeUpto) : -1;
@@ -7757,8 +7798,8 @@ function buildGrid(wd){
     const hasF=STATE.gFilters[h]&&STATE.gFilters[h].size;
     const sorted=STATE.gSort&&STATE.gSort.col===h;
     const sel=(STATE.gSelCols&&STATE.gSelCols.includes(h))?' gsel':'';
-    const extra=(hasF?' filtered':'')+(sorted?' sortedc':'')+sel+(_isCtrCol(h)?' gctr':'');   // 날짜/연락처 헤더 가운데 정렬
-    return `<th ${cls(i,extra)} data-col="${esc(h)}" style="${cstyle(i)}" title="${esc(lbl)} — 클릭: 필터·정렬·숨기기"><div class="th-in"><span class="lbl">${esc(lbl)}</span>${sorted?`<span class="gsort">${STATE.gSort.dir==='desc'?'▼':'▲'}</span>`:''}<span class="gfnl">▼</span></div></th>`;
+    const extra=(hasF?' filtered':'')+(sorted?' sortedc':'')+sel+(_isCtrCol(h)?' gctr':'')+(_gridHasManualWidth(h)?' gwmanual':'');   // 날짜/연락처 헤더 가운데 정렬
+    return `<th ${cls(i,extra)} data-col="${esc(h)}" style="${cstyle(i)}" title="${esc(lbl)} — 클릭: 필터·정렬·숨기기 · 오른쪽 경계 드래그: 너비 조절"><div class="th-in"><span class="lbl">${esc(lbl)}</span>${sorted?`<span class="gsort">${STATE.gSort.dir==='desc'?'▼':'▲'}</span>`:''}<span class="gfnl">▼</span></div><span class="gresize" aria-hidden="true"></span></th>`;
   }).join('')}</tr>`;
   // 행 필터(스테일 컬럼은 무시 = 탭 전환 초기화 누락 시에도 그리드 블랭크 방지) → 정렬
   let rows=(wd.roster||[]).filter(r=>Object.entries(STATE.gFilters).every(([col,set])=>{
@@ -7883,6 +7924,7 @@ function buildGrid(wd){
       <label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
       <label>행 그룹</label><select id="grpsel" onchange="setGGroup(this.value)">${grpOpts}</select>
       ${groupOn?`<button class="btn xs" onclick="toggleAllGGroups()">${STATE.gCollapsed.size?'모두 펼치기':'모두 접기'}</button>`:''}
+      <button class="btn xs" type="button" onclick="openGridWidthSettings()" title="헤더 경계를 드래그하거나 컬럼별 픽셀 값을 지정합니다">↔ 열 너비</button>
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${(!STATE.canEdit&&_canEditCells())?`<span class="gsmsg" title="다른 칸은 열람 전용입니다">택배송장 칸은 입력할 수 있습니다 — 셀 우클릭 → ✏️ 이 셀 편집</span>`:''}
@@ -8097,11 +8139,11 @@ function _ensureGMenus(){
   }
 }
 function _placeMenu(m,btn,w,h){ const x=Math.max(8,Math.min(btn.left, window.innerWidth-w-10)); const y=Math.min(btn.bottom+5, window.innerHeight-h-10); m.style.left=x+'px'; m.style.top=Math.max(8,y)+'px'; }
-// 헤더 가로 드래그 = 여러 열 선택(하이라이트 유지) → 툴바 [숨기기]/[취소] 로 결정 (위임 · 1회 바인딩 · 재렌더에도 유지)
+// 헤더 본문 가로 드래그 = 여러 열 선택. 우측 8px 경계 드래그 = 해당 열 너비 즉시 저장.
 function _ensureHeaderDrag(){
   if(STATE._gDragInit) return; STATE._gDragInit=true;
   if(!$('#gdragbadge')){ const b=document.createElement('div'); b.className='gdragbadge'; b.id='gdragbadge'; document.body.appendChild(b); }
-  let drag=null;   // { ths:[th…], i0, i1, moved, painted }
+  let drag=null;   // 열 선택 또는 {resize:true,col,startX,startW,width,frame}
   const badge=()=>$('#gdragbadge');
   const clearVis=()=>document.querySelectorAll('.sheetgrid thead th.gsel').forEach(t=>t.classList.remove('gsel'));
   const paint=(clientX,clientY)=>{ if(!drag) return; drag.painted=true; const lo=Math.min(drag.i0,drag.i1), hi=Math.max(drag.i0,drag.i1);
@@ -8112,11 +8154,24 @@ function _ensureHeaderDrag(){
     const th=e.target.closest('.sheetgrid thead th'); if(!th) return;
     const head=th.closest('thead'); if(!head) return;
     const ths=[...head.querySelectorAll('th')]; const i=ths.indexOf(th); if(i<0) return;
+    if(e.target.closest('.gresize')){
+      const col=th.getAttribute('data-col'); if(!col) return;
+      drag={resize:true,col,startX:e.clientX,startW:_colW(col),width:_colW(col),frame:0};
+      document.body.classList.add('gcolresizing');
+      closeGColMenu(); closeGHidMenu(); e.preventDefault(); e.stopImmediatePropagation(); return;
+    }
     drag={ ths, i0:i, i1:i, moved:false, painted:false }; const tr=th.closest('tr'); if(tr) tr.classList.add('dragging');
     e.preventDefault();   // 텍스트 선택 방지
   });
   document.addEventListener('mousemove',e=>{
-    if(!drag) return; const th=e.target.closest('.sheetgrid thead th');
+    if(!drag) return;
+    if(drag.resize){
+      e.preventDefault(); drag.width=_gridWidthClamp(drag.startW+(e.clientX-drag.startX));
+      const d=drag,b=badge(); if(b){b.textContent=drag.width+'px';b.style.display='block';b.style.left=Math.min(e.clientX+14,window.innerWidth-92)+'px';b.style.top=(e.clientY+16)+'px';}
+      if(!d.frame)d.frame=requestAnimationFrame(()=>{d.frame=0;if(drag===d)_gridApplyOneWidthToDom(d.col,d.width);});
+      return;
+    }
+    const th=e.target.closest('.sheetgrid thead th');
     if(th && drag.ths.includes(th)){ const i=drag.ths.indexOf(th); if(i!==drag.i1){ drag.i1=i; drag.moved=true; } }
     paint(e.clientX, e.clientY);
   });
@@ -8124,6 +8179,13 @@ function _ensureHeaderDrag(){
     if(!drag) return; const d=drag; drag=null;
     const b=badge(); if(b) b.style.display='none';
     document.querySelectorAll('.sheetgrid tr.dragging').forEach(t=>t.classList.remove('dragging'));
+    if(d.resize){
+      if(d.frame)cancelAnimationFrame(d.frame);
+      _gridApplyOneWidthToDom(d.col,d.width); _gridSetStoredWidth(d.col,d.width);
+      document.body.classList.remove('gcolresizing');
+      const th=[...document.querySelectorAll('.sheetgrid thead th')].find(el=>el.getAttribute('data-col')===d.col);if(th)th.classList.add('gwmanual');
+      toast(`${_colLabel(d.col)} 너비 ${d.width}px 저장`); return;
+    }
     if(!d.moved){   // 이동 없음 = 클릭 → 컬럼명 클릭 필터(‘#’ 제외). 흔들림 하이라이트는 복원.
       const th=d.ths[d.i0]; const col=th&&th.getAttribute('data-col'); const rect=th&&th.getBoundingClientRect();
       if(d.painted) rerenderGrid();
@@ -8135,7 +8197,7 @@ function _ensureHeaderDrag(){
     STATE.gSelCols=cols;   // 선택만(즉시 숨김 아님) — 툴바 [숨기기]/[취소] 로 확정. 하이라이트는 rerenderGrid 가 gSelCols 로 재적용.
     rerenderGrid();
   });
-  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && STATE.gSelCols && STATE.gSelCols.length) clearColSel(); });
+  document.addEventListener('keydown',e=>{ if(e.key!=='Escape')return;if(document.getElementById('gwidthov')){closeGridWidthSettings(false);return;}if(STATE.gSelCols&&STATE.gSelCols.length)clearColSel(); });
 }
 // 선택된 열 일괄 숨김 / 선택 해제
 function hideSelectedCols(){
@@ -8257,8 +8319,9 @@ function _syncGridColumnWidths(){
   const wd=STATE.wd,cols=STATE.gVCols,tbl=document.querySelector('.gridscroll table.sheetgrid');
   if(!wd||!Array.isArray(cols)||!tbl)return;
   STATE.gColWidths=_gridAutoColumnWidths(wd,cols);
+  STATE.gColWidths=_gridApplyWidthPrefs(STATE.gColWidths,cols);
   const head=tbl.tHead&&tbl.tHead.rows[0];if(!head)return;let left=0;
-  cols.forEach((c,i)=>{const w=_colW(c.key),frozen=!!(head.cells[i]&&head.cells[i].classList.contains('gfz'));tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${i+1})`).forEach(cell=>{cell.style.minWidth=w+'px';cell.style.width=w+'px';if(frozen)cell.style.left=left+'px';});if(frozen)left+=w;});
+  cols.forEach((c,i)=>{const w=_colW(c.key),frozen=!!(head.cells[i]&&head.cells[i].classList.contains('gfz'));if(head.cells[i])head.cells[i].classList.toggle('gwmanual',_gridHasManualWidth(c.key));tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${i+1})`).forEach(cell=>{cell.style.minWidth=w+'px';cell.style.width=w+'px';if(frozen)cell.style.left=left+'px';});if(frozen)left+=w;});
   _fitGrid();
 }
 const _CELL_UNDO_MAX=100;
@@ -13535,10 +13598,11 @@ async function _coReconnect(i){
 
 async function renderSettingsView(){
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
-  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="sthead"></div><div id="adminSettingsMount"></div></div>`;
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="sthead"></div><div id="workdeskWidthSettingsMount"></div><div id="adminSettingsMount"></div></div>`;
   $('#sthead').innerHTML=`<div class="mh"><h1>설정</h1><span class="sp" style="flex:1"></span></div>
-    <div class="ovnote">관리자 대시보드의 설정과 <b>같은 화면·같은 저장소</b>입니다 — 어느 쪽에서 바꿔도 결과가 같습니다.
+    <div class="ovnote">작업보드 열 너비는 <b>현재 브라우저의 개인 표시 설정</b>으로 저장됩니다. 아래 운영 설정은 관리자 대시보드와 같은 저장소를 사용합니다.
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임과 블랙리스트 관리기준을 설정합니다)</b>'}</div>`;
+  _renderGridWidthSettingsCard();
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
   // ★ gatecriteria(블랙리스트 관리기준)는 공고별 [🚫 참여 리뷰어 관리]의 판정 기준이라 그 기능과 같은 범위(내부 담당자)로 연다.
   AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','reviewtype','managercleanup','deliverycleanup','gatecriteria','capturelink','homebanner','notice'] : ['nickname','gatecriteria'] });
