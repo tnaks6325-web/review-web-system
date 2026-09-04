@@ -1047,6 +1047,29 @@ function getSavedUser() {
   } catch(e) { return null; }
 }
 
+function _reviewerTokenFresh(token) {
+  try {
+    const part = String(token || "").split(".")[1];
+    if (!part) return false;
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(b64));
+    return Number(payload.exp || 0) * 1000 > Date.now() + 60000;
+  } catch (_) { return false; }
+}
+
+async function _refreshReviewerHomeSession(user) {
+  if (!user || !user.name || !user.phone8) return null;
+  const r = await fetch(API_BASE_URL + "/api/reviewer/verify?phone8=" + encodeURIComponent(user.phone8)
+    + "&name=" + encodeURIComponent(user.name));
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j?.ok || !j.reviewerToken) return null;
+  const next = { ...user, name:j.name || user.name, phone:j.phone || user.phone, reviewerToken:j.reviewerToken };
+  const store = next.adminPreview ? sessionStorage : localStorage;
+  store.setItem(next.adminPreview ? HOME_SESSION_KEY : USER_KEY, JSON.stringify(next));
+  syncSearchSession(next);
+  return next;
+}
+
 async function consumeAdminReviewerHomeLink() {
   const ticket = new URLSearchParams(location.search).get('admin_reviewer_ticket');
   if (!ticket) return false;
@@ -1077,16 +1100,9 @@ async function initPage() {
     return false;
   }
   let user = getSavedUser();
-  if (user && user.name && user.phone8 && !user.reviewerToken) {
+  if (user && user.name && user.phone8 && !_reviewerTokenFresh(user.reviewerToken)) {
     try {
-      const r = await fetch(API_BASE_URL + "/api/reviewer/verify?phone8=" + encodeURIComponent(user.phone8)
-        + "&name=" + encodeURIComponent(user.name));
-      const j = await r.json();
-      if (j?.ok && j.reviewerToken) {
-        user = { ...user, name:j.name || user.name, phone:j.phone || user.phone, reviewerToken:j.reviewerToken };
-        const store = user.adminPreview ? sessionStorage : localStorage;
-        store.setItem(user.adminPreview ? HOME_SESSION_KEY : USER_KEY, JSON.stringify(user));
-      }
+      user = await _refreshReviewerHomeSession(user) || user;
     } catch (_) { /* 프로필의 기존 읽기 기능은 유지하고 보안 API만 재로그인 후 사용 */ }
   }
   if (user && user.name) {
@@ -3287,9 +3303,15 @@ async function _rcLoadRepurchaseStatus(ids) {
     const key = phone8 + "|" + ids.slice().sort().join(",") + "|" + Math.floor(Date.now() / 60000);
     if (key === _rcRepurchaseFetchKey) return;
     _rcRepurchaseFetchKey = key;
-    const res = await fetch(API_BASE_URL + "/api/campaign/my-repurchase-status?ids=" + encodeURIComponent(ids.join(",")), {
-      headers: { "X-Reviewer-Token": reviewerToken }
-    });
+    const statusUrl = API_BASE_URL + "/api/campaign/my-repurchase-status?ids=" + encodeURIComponent(ids.join(","));
+    let res = await fetch(statusUrl, { headers: { "X-Reviewer-Token": reviewerToken } });
+    // 열린 채 12시간이 지난 화면도 잠금 안내를 잃지 않게 인증 만료 시 한 번 갱신 후 재시도한다.
+    if (res.status === 401) {
+      const refreshed = await _refreshReviewerHomeSession(user);
+      if (!refreshed) return;
+      reviewerToken = refreshed.reviewerToken;
+      res = await fetch(statusUrl, { headers: { "X-Reviewer-Token": reviewerToken } });
+    }
     const json = await res.json();
     if (!json || !json.ok) return;
     const status = json.status || {};

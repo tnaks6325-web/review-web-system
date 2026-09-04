@@ -926,7 +926,10 @@ async function _scopedCampaignEdit(req, res) {
 //   키 = phone8(있으면) — 공유 NAT/프록시에서도 개인별 버킷. 없으면 req.ip(app.js trust proxy 1홉 전제).
 //   ※ express-rate-limit 7.5.1엔 ipKeyGenerator export가 없다(심판 실측) — req.ip 직접 사용.
 function _p8Key(req) {
-  const src = (req.body && (req.body.phone8 || req.body.phone)) || (req.query && req.query.phone8) || '';
+  // 인증 미들웨어가 먼저 실행되는 조회 경로는 서명 세션의 명의로 버킷을 나눈다.
+  // phone8 쿼리를 제거한 뒤 IP로 폴백하면 공유망 이용자 12명이 서로를 막게 된다.
+  const src = (req.reviewer && req.reviewer.loginPhone8)
+    || (req.body && (req.body.phone8 || req.body.phone)) || (req.query && req.query.phone8) || '';
   const p8 = String(src).replace(/\D/g, '').slice(-8);
   return p8.length === 8 ? 'p8:' + p8 : 'ip:' + (req.ip || 'unknown');
 }
@@ -1183,7 +1186,7 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
 //   판정 단일 출처 = utils/repurchaseGuard(apply 게이트와 같은 기준 — 카드는 열려 있는데 참여는
 //   거부되는 불일치를 만들지 않는다). ★ 참여 이력이 아예 없는 공고는 응답 맵에 없다(=평소 카드).
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 이 경로를 id로 삼킨다.
-router.get('/my-repurchase-status', applyLimiter, reviewerSessionMiddleware, async (req, res, next) => {
+router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
   try {
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return res.json({ ok: true, status: {} });

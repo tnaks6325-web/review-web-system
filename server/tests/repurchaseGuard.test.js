@@ -184,6 +184,9 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     iMyStatusRoute > -1 && iIdRoute > -1 && iMyStatusRoute < iIdRoute);
   ok('★ 카드 상태 조회는 서명된 리뷰어 세션 필수',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('reviewerSessionMiddleware'));
+  ok('★ 인증 뒤 제한을 적용하고 서명 세션 명의로 rate-limit 버킷을 분리',
+    campFull.includes("router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter") &&
+    campFull.includes('req.reviewer && req.reviewer.loginPhone8'));
   ok('★ 요청 phone8을 신원으로 쓰지 않고 세션 소유자 ID로 계정을 조회',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('[req.reviewer.ownerReviewerId]') &&
     !campFull.slice(iMyStatusRoute, iIdRoute).includes('req.query.phone8'));
@@ -292,6 +295,9 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     idx.includes('headers: { "X-Reviewer-Token": reviewerToken }'));
   ok('★ 홈 표시 세션에 토큰이 없으면 동일 인물의 서명 세션에서 복원',
     idx.includes('store.getItem("rapp_reviewer_auth")') && idx.includes('samePhone && sameName'));
+  ok('★ 만료 토큰은 초기화 때 갱신하고 상태 조회 401도 한 번 갱신 후 재시도',
+    idx.includes('!_reviewerTokenFresh(user.reviewerToken)') &&
+    idx.includes('if (res.status === 401)') && idx.includes('_refreshReviewerHomeSession(user)'));
   ok('★ 공고 상세 상태 조회도 인증 헤더를 보내고 phone8 쿼리를 쓰지 않음',
     detailPage.includes("'/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }") &&
     !detailPage.includes("'/api/campaign/my-repurchase-status?phone8='"));
