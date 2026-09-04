@@ -750,8 +750,12 @@ router.get('/advertisers', authMiddleware, internalMiddleware, async (req, res, 
       if (ov && ov.ok) {
         for (const it of items) {
           const a = ov.byAdvertiser[it.id];
-          if (a) { it.works = a.works; it.noMatch = a.noMatch; it.finishCand = a.finishCand; }
-          else { it.works = 0; it.noMatch = 0; it.finishCand = 0; }   // 소유 탭이 0건인 업체(집계 대상 없음)
+          if (a) {
+            it.works = a.works; it.noMatch = a.noMatch; it.finishCand = a.finishCand;
+            it.latestRequestAt = a.latestRequestAt || null;
+          } else {
+            it.works = 0; it.noMatch = 0; it.finishCand = 0; it.latestRequestAt = null;
+          }   // 소유 탭이 0건인 업체(집계 대상 없음)
           // ★ 접속링크 상태(공개/폐기·마지막 접속)는 **내부인 전원**(AE 포함, 2026-08-19 사용자 확정) —
           //   링크 CRUD 라우트(/advertiser-link)가 이미 internalMiddleware 라, 목록만 admin 으로 좁히면
           //   서버는 허용하는데 화면만 '—' 인 비대칭이 된다(막다른 길). 게이트는 라우트 = 화면 1:1.
