@@ -20,6 +20,7 @@ const manualService = read(path.join(serverRoot, 'src', 'services', 'manualOrder
 const guard = read(path.join(serverRoot, 'src', 'utils', 'repurchaseGuard.js'));
 const modal = read(path.join(repoRoot, 'frontend', 'js', 'recruit-modal.js'));
 const recruit = read(path.join(repoRoot, 'frontend', 'js', 'index-recruit.js'));
+const home = read(path.join(repoRoot, 'frontend', 'index.html'));
 
 assert.ok(migration.includes('ADD COLUMN IF NOT EXISTS repurchase_days INTEGER NOT NULL DEFAULT 14'),
   '기존/신규 공고의 기본값은 종전과 같은 14일');
@@ -32,6 +33,11 @@ assert.ok(campaigns.includes('repurchase_days = COALESCE($50::integer, repurchas
   'update 미전송은 보존하고 명시값은 갱신');
 assert.ok(campaigns.includes('days: camp.repurchase_days'), '리뷰어 참여 최종 차단이 대상 공고 저장값을 사용');
 assert.ok(campaigns.includes('재참여 제한 기간은 제한 없음(0일) 또는 1~365일'), '서버 입력 범위 검증');
+const confirmStart = campaigns.indexOf("router.post('/admin/:id/confirm'");
+const confirmEnd = campaigns.indexOf("router.post('/admin/:id/dismiss'", confirmStart);
+const confirmRoute = campaigns.slice(confirmStart, confirmEnd);
+assert.ok(confirmStart > -1 && !confirmRoute.includes("status = 'submitted' LIMIT 1"),
+  '기간을 지킨 재참여의 지각 주문도 과거 submitted 행 때문에 영구 차단하지 않음');
 
 assert.ok(guard.includes('rc.repurchase_days'), '홈 카드 상태 조회도 공고별 값을 조회');
 assert.ok(guard.includes('const days = repurchaseDays(r.repurchase_days)'), '각 공고의 기간으로 상태를 계산');
@@ -57,5 +63,9 @@ assert.ok(recruit.includes('row.hidden = hidden') && recruit.includes('row.style
 assert.ok(recruit.includes('if (_repurchaseEl && !_rfIsReviewerScopedEditor())'),
   '제한 편집 세션에서는 재참여 값을 payload에 싣지 않음');
 assert.ok(recruit.includes('rfSetRepurchaseDays(14)'), '신규 공고 기본 14일 초기화');
+assert.ok(home.includes('ids.forEach(id => { delete nextStatus[id]; });'),
+  '0일 전환 시 응답 캐시에서 기존 잠금을 제거');
+assert.ok(home.includes('else delete c.repurchase;'),
+  '재렌더 때 캐시된 공고 객체의 기존 잠금도 제거');
 
 console.log('PASS campaign-specific repurchase days persistence and enforcement wiring');

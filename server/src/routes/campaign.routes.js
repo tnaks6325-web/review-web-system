@@ -3486,11 +3486,8 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: `'${a.status}' 상태는 확정 대상이 아닙니다(레거시 오확정 방지).` });
     }
-    // 레드 #7: 같은 (campaign, phone8)의 다른 활성행 정리 — submitted 존재 시 이중확정 거부, applied는 선-취소
-    const { rows: dup } = await client.query(
-      `SELECT id FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'submitted' LIMIT 1`,
-      [id, a.phone8, appId]);
-    if (dup.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, error: `이미 확정된 참여(#${dup[0].id})가 있습니다.` }); }
+    // 같은 (campaign, phone8)의 진행 중 홀드만 정리한다. 기간을 지킨 재참여는 과거 submitted 행과
+    // 함께 존재할 수 있으므로, 늦게 도착한 구매양식의 수동확정도 과거 확정을 이유로 영구 차단하지 않는다.
     await client.query(
       `UPDATE campaign_applications SET status = 'cancelled'
         WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'applied'`, [id, a.phone8, appId]);

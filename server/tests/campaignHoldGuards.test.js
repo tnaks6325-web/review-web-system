@@ -71,7 +71,7 @@ ok("state: '24:00' → 1440", /hh === 24 && mm === 0/.test(state));
 ok("state: stateReason 'window_invalid'", /window_invalid/.test(state));
 // 심판 J7: COALESCE 편집 활성화 우회 차단(양 라우트 게이트)
 ok('활성화 게이트: 2개 라우트 적용', (routes.match(/_participationActivationErrors\(/g) || []).length >= 3); // 정의 1 + 호출 2
-// 레드 #7: 수동확정 선-취소 + 이중확정 거부
+// 레드 #7: 수동확정 시 남아 있는 진행 중 홀드 선-취소
 ok('수동확정: applied 선-취소', /admin\/:id\/confirm[\s\S]*?SET status = 'cancelled'\s+WHERE campaign_id = \$1 AND phone8 = \$2 AND id <> \$3 AND status = 'applied'/.test(routes));
 // 코드리뷰 #1: provenance 링크는 소유권(campaign+phone8+holdToken) 검증 통과 신청에만 — 위조 applicationId 오염 차단
 // ★ 082: 참여 시점 리뷰비 스냅샷을 함께 전파하려고 EXISTS 서브쿼리 → FROM 조인으로 바꿨다.

@@ -3319,6 +3319,7 @@ function _renderRecruitPreview(json) {
     parts.forEach(c => {
       const rs = _rcRepurchaseStatus[c.id];
       if (rs) c.repurchase = rs;
+      else delete c.repurchase;   // 캐시된 목록 객체에 남은 이전 locked/ready 상태도 함께 제거
     });
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
