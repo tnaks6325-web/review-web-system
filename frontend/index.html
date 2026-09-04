@@ -3270,7 +3270,18 @@ async function _rcLoadRepurchaseStatus(ids) {
   try {
     const user = getSavedUser();
     const phone8 = user && user.phone8;
-    const reviewerToken = user && user.reviewerToken;
+    let reviewerToken = user && user.reviewerToken;
+    // campaign.html의 서명 세션과 홈 표시 세션은 키가 다르다. 표시 세션에 토큰이 없는
+    // 기존 로그인도 동일 인물(이름+phone8)일 때만 서명 세션의 토큰을 사용한다.
+    if (!reviewerToken && user) {
+      try {
+        const store = user.adminPreview ? sessionStorage : localStorage;
+        const auth = JSON.parse(store.getItem("rapp_reviewer_auth") || "null");
+        const samePhone = String(auth && auth.phone8 || "").replace(/\D/g, "") === String(phone8 || "").replace(/\D/g, "");
+        const sameName = String(auth && auth.name || "").trim() === String(user.name || "").trim();
+        if (samePhone && sameName && (!auth.expAt || Date.now() <= auth.expAt)) reviewerToken = auth.reviewerToken || "";
+      } catch (_) { reviewerToken = ""; }
+    }
     if (!phone8 || !reviewerToken || !ids.length) return;
     // 상태는 시간에 따라 바뀌므로 목록 재조회 때마다 영구 캐시하지 않는다(1분 단위 갱신).
     const key = phone8 + "|" + ids.slice().sort().join(",") + "|" + Math.floor(Date.now() / 60000);

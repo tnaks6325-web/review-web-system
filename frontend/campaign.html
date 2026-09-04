@@ -356,7 +356,7 @@ function saveSession(name, phone8, reviewerToken){
   const session = { name, verified:true, registeredMember:true,
     phone8:String(phone8).replace(/\D/g,'').slice(-8), reviewerToken:reviewerToken||'', expAt: Date.now()+12*60*60*1000 };
   localStorage.setItem('rapp_reviewer_auth', JSON.stringify(session));
-  try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8})); }catch(_){}
+  try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8, reviewerToken:session.reviewerToken})); }catch(_){}
   return session;
 }
 function needLogin(then){ _afterLogin = then || null; $('loginSheet').style.display='flex'; }
@@ -926,7 +926,7 @@ async function loadSubs(force){
       ? identities.filter(x => x && x.type === 'sub' && x.name && x.phone)
       : [];
     _subsLoadError = null;
-    try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?phone8=' + encodeURIComponent(s.phone8) + '&ids=' + encodeURIComponent(CAMP_ID)); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
+    try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
   }catch(e){ _subs = null; _subsLoadError = e; }
   return _subs;
 }

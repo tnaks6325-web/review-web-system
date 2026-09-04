@@ -286,9 +286,17 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     cc.includes(`if (c.state === 'open' && repurchaseLocked)`));
 
   const idx = readF('index.html');
+  const detailPage = readF('campaign.html');
   ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));
   ok('★ 카드 상태 조회에 리뷰어 세션 토큰을 전달',
     idx.includes('headers: { "X-Reviewer-Token": reviewerToken }'));
+  ok('★ 홈 표시 세션에 토큰이 없으면 동일 인물의 서명 세션에서 복원',
+    idx.includes('store.getItem("rapp_reviewer_auth")') && idx.includes('samePhone && sameName'));
+  ok('★ 공고 상세 상태 조회도 인증 헤더를 보내고 phone8 쿼리를 쓰지 않음',
+    detailPage.includes("'/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }") &&
+    !detailPage.includes("'/api/campaign/my-repurchase-status?phone8='"));
+  ok('★ 공고 상세 로그인이 홈 표시 세션에도 서명 토큰을 보존',
+    detailPage.includes('reviewerToken:session.reviewerToken'));
   ok('★ 같은 (번호+공고목록) 조합은 재조회하지 않는다(재렌더→재조회 순환 방지)',
     idx.includes('if (key === _rcRepurchaseFetchKey) return;'));
   ok('조회 실패해도 목록 렌더 자체는 살아있다(부가 정보 취급)',
