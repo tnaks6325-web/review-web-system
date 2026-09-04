@@ -166,18 +166,21 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
 
   const { checkRepurchaseStatusForAccounts } = require('../src/utils/repurchaseGuard');
   {
+    let statusSql = '';
     const rows = [
       { campaign_id: 'camp_locked', repurchase_days: 21, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
       { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
       { campaign_id: 'camp_unlimited', repurchase_days: 0, phone8: '86365441', last_submitted_at: new Date(Date.now() - 1 * 86400000) },
     ];
-    const r = await checkRepurchaseStatusForAccounts(stubDb(rows),
+    const r = await checkRepurchaseStatusForAccounts({ query: async (sql) => { statusSql = String(sql); return { rows }; } },
       { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8List: ['86365441'] });
     eq('10일 전 참여 + 공고별 21일 → locked', r.get('86365441').get('camp_locked').status, 'locked');
     ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('86365441').get('camp_locked').availableFrom instanceof Date);
     eq('10일 전 참여 + 공고별 7일 → ready', r.get('86365441').get('camp_ready').status, 'ready');
     ok('공고별 제한 없음(0일)은 상태 맵에서도 제외', !r.get('86365441').has('camp_unlimited'));
     ok('★ 참여 이력이 아예 없는 공고는 맵에 없음(=평소 카드, 0/false로 꾸미지 않는다)', !r.get('86365441').has('camp_never'));
+    ok('★ 주문 원장이 없는 같은 공고 submitted 이력도 상태 조회 폴백에 포함',
+      statusSql.includes('campaign_applications ca') && statusSql.includes("ca.status = 'submitted'"));
   }
   {
     const origDays = process.env.CAMPAIGN_REPARTICIPATE_DAYS;

@@ -19,13 +19,19 @@ const q = rows => ({ query: async () => ({ rows }) });
   const b = await checkRepurchaseWindow(q([]),
     { sheetId: 'virtual-sheet', tabName: 'same-product', phone8: '33334444' });
   assert.equal(b.blocked, false, 'B: 16일 전 참여는 허용');
-  const multi = await checkRepurchaseStatusForAccounts(q([
+  let statusSql = '';
+  const multi = await checkRepurchaseStatusForAccounts({ query: async (sql) => {
+    statusSql = String(sql);
+    return { rows: [
     { campaign_id: 'c1', p8: '11112222', last_at: new Date(now.getTime() - 4 * 86400000) },
     { campaign_id: 'c1', p8: '33334444', last_at: new Date(now.getTime() - 16 * 86400000) },
-  ]), { campaignIds: ['c1'], phone8List: ['11112222', '33334444', '55556666'] });
+    ] };
+  } }, { campaignIds: ['c1'], phone8List: ['11112222', '33334444', '55556666'] });
   assert.equal(multi.get('11112222').get('c1').status, 'locked');
   assert.equal(multi.get('33334444').get('c1').status, 'ready');
   assert.equal(multi.has('55556666'), false, '이력 없는 계정은 서버 맵에 없음(화면에서는 가능 계정)');
+  assert.ok(statusSql.includes('campaign_applications ca'), '상태 조회도 같은 공고 submitted 이력을 폴백으로 포함');
+  assert.ok(statusSql.includes("ca.status = 'submitted'"), '완료된 공고 신청만 상태 폴백에 포함');
   const camp = read('src/routes/campaign.routes.js');
   assert.ok(camp.includes("router.get('/my-repurchase-status'"), '계정별 상태 API');
   assert.ok(camp.includes('checkRepurchaseStatusForAccounts'), '본계정+타계정 일괄 판정');

@@ -216,28 +216,38 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
   const phones = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
   if (repurchaseDays() <= 0 || !ids.length || !phones.length) return out;
   const { rows } = await dbOrClient.query(
-    `SELECT rc.id AS campaign_id, rc.repurchase_days,
-            RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
-            MAX(os.submitted_at) AS last_submitted_at
-       FROM recruit_campaigns rc
-       LEFT JOIN tab_configs base_tab
-         ON base_tab.sheet_id = rc.linked_sheet_id
-        AND base_tab.tab_name = rc.linked_tab_name
-       JOIN order_submissions os ON os.sheet_id = rc.linked_sheet_id
-       LEFT JOIN tab_configs submitted_tab
-         ON submitted_tab.sheet_id = os.sheet_id
-        AND submitted_tab.tab_name = os.tab_name
-      WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
-        AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
-        AND (
-          (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (
-            os.repurchase_work_key = rc.linked_sheet_id || E'\\x1f' || BTRIM(base_tab.campaign_name)
-            OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = NULLIF(BTRIM(base_tab.campaign_name), '')
-          ))
-          OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
-        )
-      GROUP BY rc.id, rc.repurchase_days,
-               RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)`, [ids, phones]);
+    `WITH campaign_history AS (
+       SELECT rc.id AS campaign_id, rc.repurchase_days,
+              RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
+              os.submitted_at
+         FROM recruit_campaigns rc
+         LEFT JOIN tab_configs base_tab
+           ON base_tab.sheet_id = rc.linked_sheet_id
+          AND base_tab.tab_name = rc.linked_tab_name
+         JOIN order_submissions os ON os.sheet_id = rc.linked_sheet_id
+         LEFT JOIN tab_configs submitted_tab
+           ON submitted_tab.sheet_id = os.sheet_id
+          AND submitted_tab.tab_name = os.tab_name
+        WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
+          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
+          AND (
+            (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (
+              os.repurchase_work_key = rc.linked_sheet_id || E'\\x1f' || BTRIM(base_tab.campaign_name)
+              OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = NULLIF(BTRIM(base_tab.campaign_name), '')
+            ))
+            OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
+          )
+       UNION ALL
+       SELECT rc.id AS campaign_id, rc.repurchase_days, ca.phone8, ca.submitted_at
+         FROM recruit_campaigns rc
+         JOIN campaign_applications ca ON ca.campaign_id = rc.id
+        WHERE rc.id = ANY($1::text[])
+          AND ca.status = 'submitted'
+          AND ca.phone8 = ANY($2::text[])
+     )
+     SELECT campaign_id, repurchase_days, phone8, MAX(submitted_at) AS last_submitted_at
+       FROM campaign_history
+      GROUP BY campaign_id, repurchase_days, phone8`, [ids, phones]);
   const now = Date.now();
   for (const r of rows) {
     const days = repurchaseDays(r.repurchase_days);
