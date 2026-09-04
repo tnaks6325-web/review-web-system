@@ -235,6 +235,17 @@ test('work rows start and extend a pointer drag without double-toggling on click
   assert.match(sourceOf('_pmEndWorkDrag'), /pmWorkDragClickSuppressed/);
 });
 
+/* '전체' 로 볼 때도 각 작업이 누구 것인지 한눈에 구분되게 — 작업명 앞에 [만두]/[망고] 배지(사용자 확정).
+   판정은 화면이 이미 쓰는 _pmManagerName 을 그대로 태운다(사본 금지 — 담당자 칩·확인창과 결론이 갈리면 안 된다). */
+test('each work row shows a manager badge from the same normalizer as the filter chips', () => {
+  vm.runInContext(constSource('esc') + '\n' + sourceOf('_pmWorkBadgeHtml'), sandbox);
+  assert.strictEqual(sandbox._pmWorkBadgeHtml('박세희'), '<span class="pmwbadge mandu">[만두]</span>');
+  assert.strictEqual(sandbox._pmWorkBadgeHtml('망고'), '<span class="pmwbadge mango">[망고]</span>');
+  // 담당자가 없는 작업은 조용히 배지를 안 그린다(없는 값을 지어내지 않는다).
+  assert.strictEqual(sandbox._pmWorkBadgeHtml(''), '');
+  assert.match(sourceOf('_pmWorkRowsHtml'), /_pmWorkBadgeHtml\(it\.manager\)/);
+});
+
 test('toggling a work preserves the work-list scroll position and exposes the selected-work count', () => {
   assert.match(sourceOf('_pmToggleWork'), /pmworklist[\s\S]*scrollTop/);
   assert.match(sourceOf('_pmRender'), /pmworklist[\s\S]*scrollTop\s*=/);

@@ -11218,12 +11218,20 @@ function _pmVisibleWorkEntries(items, manager){
 }
 /* 작업 행 HTML — 전체 렌더와 검색 중 목록-only 렌더가 **같은 한 벌**을 쓴다(사본을 두면
    검색 결과 행만 모양·배선이 어긋난다). */
+/** 담당자 배지 — 목록을 '전체'로 볼 때도 각 작업이 누구 것인지 한눈에 구분되게(사용자 확정).
+   판정은 화면이 이미 쓰는 _pmManagerName 그대로(사본 금지) — 담당자 없음은 배지를 안 그린다. */
+function _pmWorkBadgeHtml(manager){
+  const mgr=_pmManagerName(manager);
+  if(!mgr) return '';
+  const cls=mgr==='만두'?'mandu':mgr==='망고'?'mango':'';
+  return `<span class="pmwbadge ${cls}">[${esc(mgr)}]</span>`;
+}
 function _pmWorkRowsHtml(allItems, works, selectedKeys){
   return works.map(([key,it])=>{
     const selected=selectedKeys.has(key);
     const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && _pmOn(row));
     const label=it.tabLabel||it.tabName||key;
-    return `<button type="button" class="pmworkpick ${selected?'on':''}" data-work-key="${esc(key)}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
+    return `<button type="button" class="pmworkpick ${selected?'on':''}" data-work-key="${esc(key)}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${_pmWorkBadgeHtml(it.manager)}<span class="pmwlabel">${esc(label)}</span></span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
   }).join('');
 }
 function _pmWorkHintHtml(matched, total){

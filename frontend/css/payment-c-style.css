@@ -14,7 +14,11 @@
 #pmbody .pmworkpick{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;border:1px solid #D9E1EC;border-radius:7px;background:#fff;color:#172033;padding:9px 10px;text-align:left;font:inherit;cursor:pointer;transition:background .16s,border-color .16s,box-shadow .16s}
 #pmbody .pmworkpick:hover{border-color:#AABFE0;background:#F7FAFF}
 #pmbody .pmworkpick.on{border-color:#8FB2EC;background:#EAF3FF;box-shadow:0 5px 13px rgba(46,102,186,.08)}
-#pmbody .pmworkname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;font-weight:800}
+#pmbody .pmworkname{min-width:0;display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:800}
+#pmbody .pmwlabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pmbody .pmwbadge{flex:none;display:inline-block;border-radius:4px;padding:1px 5px;font-size:9.5px;font-weight:800;letter-spacing:.01em}
+#pmbody .pmwbadge.mandu{background:#FEF3C7;color:#92400E}
+#pmbody .pmwbadge.mango{background:#D1FAE5;color:#065F46}
 #pmbody .pmworkmeta{font-size:10.5px;color:#60718D;font-variant-numeric:tabular-nums;white-space:nowrap}
 #pmbody .pmworkcheck{width:19px;height:19px;display:none;place-items:center;border-radius:50%;background:#2865D5;color:#fff}
 #pmbody .pmworkpick.on .pmworkcheck{display:grid}
