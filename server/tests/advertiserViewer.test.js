@@ -8,8 +8,8 @@
  *   2. 서비스 렌즈(advertiserWorkSummary, 스텁 pool + 스텁 fetch 실행): 내부 필드(비고 memo·담당 manager·
  *      salesId·amountMismatch) 미노출, 정산 노출 토글 OFF 면 settlement 미계산(settlementHidden).
  *   3. settlementForTab 확장: paidAmount/paidDate 동봉(광고주 정산 카드 금액 4칸 재료).
- *   4. 프론트 배선: body.advm 상한 규칙의 **선언 순서**(data-vw 뒤 · widemode 앞 — 같은 특이성이라 순서가 규칙),
- *      FHD/QHD 토글 광고주 미노출, 좌측 작업 목록(awside)·화면 A 표(남은 입금액 컬럼)·정산 카드 상시 펼침·
+ *   4. 프론트 배선: body.advm 상한 규칙의 **선언 순서**(QHD 기본값 뒤 · widemode 앞 — 같은 특이성이라 순서가 규칙),
+ *      좌측 작업 목록(awside)·화면 A 표(남은 입금액 컬럼)·정산 카드 상시 펼침·
  *      내부 용어(원본 배지·계약 연결 문구·담당·Parity) 광고주 미노출.
  *
  * 실행: node tests/advertiserViewer.test.js
@@ -146,12 +146,12 @@ async function run() {
   ok('업체용 시트 값은 줄바꿈·말줄임 없이 셀 너비 안에서 한 줄로 표시한다',
     /table\.sheetgrid\.advsnug td\{[^}]*white-space:nowrap[^}]*overflow:hidden[^}]*text-overflow:clip[^}]*overflow-wrap:normal[^}]*word-break:normal/.test(css));
 
-  const iQhd = css.indexOf('body[data-vw="qhd"]'), iAdv = css.indexOf('body.advm{--app-max:1680px}'), iWide = css.indexOf('body.widemode{--app-max:100vw}');
+  const iQhd = css.indexOf(':root{--tbh:92px;--toph:57px;--app-max:2560px}'), iAdv = css.indexOf('body.advm{--app-max:1680px}'), iWide = css.indexOf('body.widemode{--app-max:100vw}');
   ok('★ body.advm 상한(1680px)이 존재한다', iAdv > -1);
-  ok('★ 선언 순서: data-vw 뒤(광고주 고정이 이김) · widemode 앞(전체화면은 해제)', iQhd > -1 && iWide > -1 && iQhd < iAdv && iAdv < iWide);
+  ok('★ 선언 순서: QHD 기본값 뒤(광고주 고정이 이김) · widemode 앞(전체화면은 해제)', iQhd > -1 && iWide > -1 && iQhd < iAdv && iAdv < iWide);
   ok('renderShell 이 광고주일 때 body.advm 을 붙인다', /classList\.toggle\('advm',\s*isAdv\)/.test(src));
   ok('renderLogin 이 advm 잔재를 제거한다(로그아웃·만료 후 원복)', /renderLogin[\s\S]{0,300}classList\.remove\('advm'/.test(src));
-  ok('★ FHD/QHD 토글은 광고주에게 안 그린다', /\$\{isAdv\?'':`<div class="vwsw"/.test(src));
+  ok('★ 화면 크기 선택 UI·저장 코드가 없다', !/class="vwsw"|VW_KEY|toggleVwMode|setVwMode|_applyVwMode/.test(src));
 
   // ── 작업 선택 = 좌측 세로 목록(업체관리 차용) ──
   ok('광고주 작업보드 = awside 사이드바 + advwrap 그리드(가로 탭바 없음)',
