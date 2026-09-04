@@ -476,6 +476,24 @@ async function manualConfirm(body, reviewer) {
     }
     boundHash = submissionIdentityHash(body.formFields || {});
     reasonCodes = Array.isArray(review.reasonCodes) ? review.reasonCodes : [];
+  } else if (mode === 'form_edit') {
+    // 필드 수정은 기존 승인토큰을 제출에 그대로 재사용하지 않는다. 다만 그 토큰으로
+    // 같은 캡처·같은 참여 명의가 이미 서버 확인을 통과했음을 증명한 뒤 수정값을 재검사한다.
+    const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
+    const prior = verifyScoped(body.priorApprovalToken, PURPOSE_APPROVAL);
+    const invalidPrior = String(prior.ownerReviewerId) !== String(context.owner.id)
+      || Number(prior.applicationId) !== Number(context.application.id)
+      || String(prior.campaignId) !== String(context.application.campaign_id)
+      || prior.selectedIdentityHash !== stableHash(context.selected.identityKey)
+      || prior.profileHash !== profileHash(context.selected)
+      || prior.mode === 'no_capture'
+      || prior.imageHash !== extract.imageHash
+      || prior.extractedFieldsHash !== extract.fieldsHash;
+    if (invalidPrior) {
+      throw new ReviewerOrderIdentityError('IDENTITY_CONTEXT_CHANGED', '캡처 또는 선택 명의가 변경되었습니다. 다시 분석해주세요.', 409);
+    }
+    imageHash = extract.imageHash; extractedHash = extract.fieldsHash;
+    reasonCodes = ['identity_fields_edited_after_approval'];
   } else if (mode === 'ai_error') {
     const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
     if (extract.extractOk) throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', 'AI 분석 성공 건은 명의 매칭 결과를 먼저 확인해주세요.', 409);

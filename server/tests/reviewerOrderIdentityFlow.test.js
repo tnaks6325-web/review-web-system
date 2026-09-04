@@ -76,6 +76,64 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:manual.approvalToken }, reviewer);
   });
 
+  await test('자동 MATCH 뒤 입력값을 수정하면 기존 승인증명으로 재확인해 새 토큰을 발급한다', async () => {
+    const proof = identity.issueExtractionProof({ imageHash:'1'.repeat(64), extracted:selectedFields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:selectedFields }, reviewer);
+    const editedFields = { ...selectedFields, phone:'01012345678' };
+    const manual = await identity.manualConfirm({
+      ...base, mode:'form_edit', manualConfirmed:true,
+      priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken,
+      extracted:selectedFields, formFields:editedFields,
+    }, reviewer);
+    assert.strictEqual(manual.mode, 'form_edit');
+    await identity.verifyApprovalForSubmission({ ...base, ...editedFields, identityApprovalToken:manual.approvalToken }, reviewer);
+  });
+
+  await test('가림정보 보완 MATCH도 원본 추출증명과 수정값을 분리해 재확인한다', async () => {
+    const maskedFields = {
+      recipient:'김*수', phone:'010-****-5678', address:'서울 강남구 테헤란로 ** 101동 1203호',
+    };
+    const proof = identity.issueExtractionProof({ imageHash:'6'.repeat(64), extracted:maskedFields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:maskedFields }, reviewer);
+    assert.strictEqual(matched.status, 'MATCH');
+    assert.strictEqual(matched.resolved.address, selectedAddress);
+    const manual = await identity.manualConfirm({
+      ...base, mode:'form_edit', manualConfirmed:true,
+      priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken,
+      extracted:maskedFields, formFields:selectedFields,
+    }, reviewer);
+    await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:manual.approvalToken }, reviewer);
+  });
+
+  await test('수정 재확인은 같은 캡처의 기존 승인증명이 없으면 허용하지 않는다', async () => {
+    const proof = identity.issueExtractionProof({ imageHash:'2'.repeat(64), extracted:selectedFields, ok:true });
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'form_edit', manualConfirmed:true, priorApprovalToken:'',
+      extractToken:proof.extractToken, extracted:selectedFields, formFields:selectedFields,
+    }, reviewer), (err) => err.code === 'IDENTITY_TOKEN_INVALID');
+  });
+
+  await test('다른 캡처의 승인증명으로 수정 재확인을 우회할 수 없다', async () => {
+    const matchedProof = identity.issueExtractionProof({ imageHash:'3'.repeat(64), extracted:selectedFields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:matchedProof.extractToken, extracted:selectedFields }, reviewer);
+    const otherFields = { recipient:'박영희', phone:'010-9999-8888', address:'부산 해운대구 센텀로 20 202동 505호' };
+    const otherProof = identity.issueExtractionProof({ imageHash:'4'.repeat(64), extracted:otherFields, ok:true });
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'form_edit', manualConfirmed:true, priorApprovalToken:matched.approvalToken,
+      extractToken:otherProof.extractToken, extracted:otherFields, formFields:selectedFields,
+    }, reviewer), (err) => err.code === 'IDENTITY_CONTEXT_CHANGED');
+  });
+
+  await test('수정 재확인도 다른 명의로 바꾼 입력은 차단한다', async () => {
+    const proof = identity.issueExtractionProof({ imageHash:'5'.repeat(64), extracted:selectedFields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:selectedFields }, reviewer);
+    const otherFields = { recipient:'박영희', phone:'010-9999-8888', address:'부산 해운대구 센텀로 20 202동 505호' };
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'form_edit', manualConfirmed:true, priorApprovalToken:matched.approvalToken,
+      extractToken:proof.extractToken, extracted:selectedFields, formFields:otherFields,
+    }, reviewer), (err) => err.code === 'IDENTITY_MISMATCH');
+  });
+
   await test('AI 장애는 실패 추출증명과 사용자 확인이 모두 있어야 제출 가능하다', async () => {
     const failed = identity.issueExtractionProof({ imageHash:'d'.repeat(64), extracted:{}, ok:false, errorCode:'timeout' });
     const manual = await identity.manualConfirm({

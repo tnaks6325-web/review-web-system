@@ -72,7 +72,7 @@ ok('구매양식은 체크한 경우에만 제출 성공 뒤 명의 아이디 �
   /saveShoppingId:\s*!!document\.getElementById\(cid\+"_saveIdChk"\)/.test(appJs)
   && /if \(o\.saveShoppingId\)[\s\S]{0,180}?_saveOrderShoppingIdIfRequested/.test(appJs));
 ok('새 캡처 분석 시작 시 이전 캡처 승인·검토·추출 토큰을 모두 폐기한다',
-  /새 캡처를 분석하기 시작하는 순간[\s\S]{0,260}?st\.approvalToken = ""; st\.reviewToken = ""; st\.matchError = false/.test(appJs));
+  /새 캡처를 분석하기 시작하는 순간[\s\S]{0,420}?st\.approvalToken = ""; st\.priorApprovalToken = ""; st\.reviewToken = ""; st\.matchError = false/.test(appJs));
 ok('연속 캡처 분석의 늦은 응답은 request id로 폐기해 최신 캡처 증명을 덮지 못한다',
   /const requestId = \(Number\(st\.analysisRequestId\) \|\| 0\) \+ 1/.test(appJs)
   && (appJs.match(/st\.analysisRequestId !== requestId/g) || []).length >= 5
@@ -84,6 +84,15 @@ ok('AI 추출·명의매칭 장애와 무캡처 예외는 명시 수동확인 �
   /st\.matchError && st\.extracted \? "match_error" : "ai_error"/.test(appJs)
   && /mode === 'match_error'/.test(service)
   && /mode:"no_capture", manualConfirmed:true/.test(appJs));
+ok('자동 MATCH 뒤 필드 수정은 기존 승인증명을 보존해 수동 재확인할 수 있다',
+  /if \(st\.approvalToken\) st\.priorApprovalToken = st\.approvalToken/.test(appJs)
+  && /st\.priorApprovalToken \? "form_edit"/.test(appJs)
+  && /priorApprovalToken: st\.priorApprovalToken \|\| ""/.test(appJs)
+  && /st\.proofExtracted = \{ \.\.\.st\.extracted \}/.test(appJs)
+  && /mode === "form_edit" \? st\.proofExtracted : st\.extracted/.test(appJs)
+  && /mode === 'form_edit'/.test(service)
+  && /prior\.imageHash !== extract\.imageHash/.test(service)
+  && /st\.priorApprovalToken \|\| st\.reviewToken/.test(appJs));
 ok('NC 주문도 각 캡처의 수취인·전화·주소를 독립 적용한다',
   /const recipient = gv\(cid\+"_recipient"\)/.test(appJs)
   && /const phone\s+= gv\(cid\+"_phone"\)/.test(appJs)
