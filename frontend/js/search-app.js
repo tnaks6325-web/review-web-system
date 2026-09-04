@@ -83,10 +83,16 @@ async function _loadOrderIdentityContext() {
 
 function _invalidateIdentityApproval(cid) {
   const st = _cardAiState[cid]; if (!st) return;
+  // 자동/수동 확인이 끝난 뒤 사용자가 수취인·연락처·주소를 수정하면 기존 토큰은
+  // 제출에 쓸 수 없지만, 같은 캡처가 이미 서버 확인을 통과했다는 증명은 재확인에 필요하다.
+  // 이를 버리면 MATCH → 필드수정 상태에서 수동확인 버튼도 없는 교착상태가 된다.
+  if (st.approvalToken) st.priorApprovalToken = st.approvalToken;
   st.approvalToken = "";
   const box = document.getElementById(cid + "_identityStatus");
-  if (box && st.extracted) {
-    if (st.reviewToken) _renderIdentityMatchState(cid, "REVIEW", ["수정한 정보를 직접 확인해주세요."], true);
+  if (box && (st.extracted || st.priorApprovalToken)) {
+    if (st.priorApprovalToken) _renderIdentityMatchState(cid, "REVIEW", ["수정한 정보로 명의를 다시 확인해주세요."], true);
+    else if (st.reviewToken) _renderIdentityMatchState(cid, "REVIEW", ["수정한 정보를 직접 확인해주세요."], true);
+    else if (st.matchError && st.extractToken) _renderIdentityMatchState(cid, "ERROR", ["수정한 정보를 직접 확인해주세요."], true);
     else _renderIdentityMatchState(cid, "REVIEW", ["입력 정보가 변경되었습니다. 캡처를 다시 분석해주세요."], false);
   }
 }
@@ -7694,7 +7700,7 @@ function onCardImgDrop(e, cid) {
 
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
-  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.extractToken=""; st.approvalToken=""; st.reviewToken=""; st.matchError=false; }
+  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
@@ -7770,8 +7776,8 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   st.analysisRequestId = requestId;
   // 새 캡처를 분석하기 시작하는 순간 이전 캡처의 추출/검토/승인 증명은 모두 폐기한다.
   // 새 분석이 실패해도 과거 승인토큰으로 제출되는 stale-capture 우회를 막는다.
-  st.extracted = null; st.extractToken = ""; st.imageHash = "";
-  st.approvalToken = ""; st.reviewToken = ""; st.matchError = false;
+  st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
+  st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
   const gasUrl = APP_CONFIG.GAS_WEB_APP_URL;
   if (!gasUrl) { _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
   st.lastBase64 = base64; st.lastMime = mimeType;
@@ -7832,6 +7838,9 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
     st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
+    // extractToken은 AI 원본 추출값의 해시에 결속된다. 서버가 가림정보를 보완한
+    // st.extracted와 섞지 않고 재확인 때 동일 증명을 검증할 수 있도록 원본을 보존한다.
+    st.proofExtracted = { ...st.extracted };
     await _matchCardIdentity(cid, requestId);
     if (st.analysisRequestId !== requestId) return;
 
@@ -7895,6 +7904,7 @@ async function _matchCardIdentity(cid, requestId) {
     }
     st.matchError = false;
     st.approvalToken = data.approvalToken || "";
+    st.priorApprovalToken = "";
     st.reviewToken = data.reviewToken || "";
     if (data.resolved) st.extracted = { ...st.extracted, ...data.resolved };
     _showCardAiResult(cid, st.extracted);
@@ -7913,19 +7923,26 @@ async function _matchCardIdentity(cid, requestId) {
 
 async function _manualConfirmIdentity(cid) {
   const st = _cardAiState[cid]; if (!st) return;
-  const mode = st.reviewToken ? "review" : (st.matchError && st.extracted ? "match_error" : "ai_error");
+  const mode = st.priorApprovalToken ? "form_edit"
+    : (st.reviewToken ? "review" : (st.matchError && st.extracted ? "match_error" : "ai_error"));
   if (!confirm("주문 캡처와 입력 정보를 직접 확인했으며, 현재 선택한 명의의 주문이 맞습니까?")) return;
   try {
     const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
       method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify(_reviewerIdentityRequestBody({
         mode, manualConfirmed: true, reviewToken: st.reviewToken || "",
-        extractToken: st.extractToken || "", extracted: st.extracted || {}, formFields: _cardIdentityForm(cid),
+        priorApprovalToken: st.priorApprovalToken || "",
+        extractToken: st.extractToken || "",
+        extracted: (mode === "form_edit" ? st.proofExtracted : st.extracted) || {},
+        formFields: _cardIdentityForm(cid),
       })),
     });
     const data = await response.json();
     if (!response.ok || !data?.ok) throw new Error(data?.error || "수동 확인을 저장하지 못했습니다.");
     st.approvalToken = data.approvalToken || "";
+    st.priorApprovalToken = "";
+    st.reviewToken = "";
+    st.matchError = false;
     _renderIdentityMatchState(cid, "MATCH", ["사용자가 주문 정보를 직접 확인했습니다."], false);
   } catch (err) { showToast(err.message, "error"); }
 }
@@ -8432,7 +8449,7 @@ async function _prepareIdentityApprovals(orders) {
       if (!st.approvalToken) {
         _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
           [st.extractToken ? "명의 확인을 완료해주세요." : "캡처 AI 분석을 다시 시도해주세요."],
-          !!(st.reviewToken || (st.extractToken && (!st.extracted || st.matchError))));
+          !!(st.priorApprovalToken || st.reviewToken || (st.extractToken && (!st.extracted || st.matchError))));
         document.getElementById(order.cid + "_identityStatus")?.scrollIntoView({ behavior:"smooth", block:"center" });
         showToast("캡처의 참여 명의 확인을 완료해주세요.", "warning");
         return false;
