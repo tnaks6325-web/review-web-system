@@ -1,5 +1,5 @@
 /**
- * workdeskWidthCap.test.js — 리뷰웹시스템[3버전] 화면 폭 상한(FHD/QHD) + 열 너비 고정 회귀가드.
+ * workdeskWidthCap.test.js — 리뷰웹시스템[3버전] QHD 화면 폭 상한 + 열 너비 고정 회귀가드.
  *
  * 문제였던 것 2가지:
  *  ① 창을 넓힐수록 헤더·업체 칩바·탭바·본문이 **끝없이** 따라 늘어났다(QHD·울트라와이드에서 시선 이동 과다).
@@ -8,12 +8,12 @@
  *
  * 확정 규칙(완화 금지):
  *  - 표폭 = **보이는 열 고정폭의 합**. 창 너비와 무관. 열이 많은 작업일수록 표만 그만큼 넓어진다.
- *  - 화면 상한은 --app-max(FHD 1920 / QHD 2560), 우측 상단 좌우 토글로 전환·localStorage 영속.
+ *  - 화면 상한은 --app-max(QHD 2560)으로 고정한다. 화면 크기 선택·localStorage 설정은 없다.
  *
  * ★★ 이 파일이 CSS **주석/중괄호 균형**까지 세는 이유(실측 사고):
  *   `:root{--tbh:…}` 위 주석에 닫는 표시가 하나 더 있어 주석이 일찍 닫혔고, 뒤따르던 설명 텍스트가
  *   top-level 셀렉터로 파싱되며 **`:root` 규칙을 통째로 삼켰다**. 브라우저는 에러 없이 조용히 넘어가
- *   `--app-max` 기본값이 아예 적용되지 않았다(FHD 모드에서 상한 없음). grep 가드로는 못 잡는다 —
+ *   `--app-max` 기본값이 아예 적용되지 않았다(QHD 상한 없음). grep 가드로는 못 잡는다 —
  *   선언은 멀쩡히 '있기' 때문. 그래서 토큰을 센다.
  *
  * 실행: node server/tests/workdeskWidthCap.test.js
@@ -43,10 +43,9 @@ ok('★ 중괄호 균형 — { 수 == } 수',
 ok('★ :root 가 셀렉터 맨 앞에서 시작한다(앞 텍스트에 붙어 삼켜지지 않았다)',
   /(^|\})\s*:root\s*\{/.test(cssNoComment.replace(/\n/g, ' ')));
 
-/* ── B. 상한 토큰과 두 모드 ── */
-ok(':root 가 --app-max 기본값을 정의한다', /:root\{[^}]*--app-max:\s*1920px/.test(cssNoComment));
-ok('FHD 모드 = 1920px', /body\[data-vw="fhd"\]\{[^}]*--app-max:\s*1920px/.test(cssNoComment));
-ok('QHD 모드 = 2560px', /body\[data-vw="qhd"\]\{[^}]*--app-max:\s*2560px/.test(cssNoComment));
+/* ── B. QHD 고정 상한 ── */
+ok(':root 가 QHD --app-max 기본값(2560px)을 정의한다', /:root\{[^}]*--app-max:\s*2560px/.test(cssNoComment));
+ok('화면 크기 선택용 data-vw 분기가 없다', !/data-vw/.test(cssNoComment));
 ok('전체화면 모드는 상한을 푼다(표에 최대 폭)', /body\.widemode\{[^}]*--app-max:\s*100vw/.test(cssNoComment));
 ok('★ none 을 쓰지 않는다 — calc() 안에서 무효라 상한이 통째로 죽는다',
   !/--app-max:\s*none/.test(cssNoComment));
@@ -92,30 +91,10 @@ ok('★ _fitGrid 가 역할로 분기하지 않는다 — 광고주/내부가 �
   return (body.match(/STATE\.role==='advertiser'/g) || []).length === 1;
 })());
 
-/* ── E. 토글 UI·영속 ── */
-// 업체용 뷰어 도입 후 스위치는 광고주에게 미노출(isAdv 조건부) — "sp 뒤 우측 상단 위치"라는 검사 의미는 유지.
-ok('우측 상단(.top 의 .sp 뒤)에 좌우 2단 스위치가 있다(광고주는 조건부 미노출)',
-  /<span class="sp"><\/span>\s*(\$\{isAdv\?'':`)?\s*<div class="vwsw" id="vwToggle"/.test(src));
-ok('스위치가 FHD·QHD 두 라벨과 노브를 가진다',
-  /<span class="vwknob"><\/span><b>FHD<\/b><b>QHD<\/b>/.test(src));
-ok('노브 이동거리 = 라벨 폭(44px) — 어긋나면 노브가 라벨과 안 맞는다',
-  /\.vwsw b\{[^}]*width:44px/.test(cssNoComment)
-  && /\.vwsw \.vwknob\{[^}]*width:44px/.test(cssNoComment)
-  && /\.vwsw\[data-on="qhd"\] \.vwknob\{transform:translateX\(44px\)\}/.test(cssNoComment));
-ok('키보드로 조작 가능(role=switch + tabindex + Enter/Space)',
-  /role="switch"/.test(src) && /tabindex="0"/.test(src) && /event\.key===' '\|\|event\.key==='Enter'/.test(src));
-ok('선택이 localStorage 에 영속된다', /localStorage\.setItem\(VW_KEY/.test(src) && /localStorage\.getItem\(VW_KEY\)/.test(src));
-ok('★ 기본값은 FHD(좁은 쪽) — 저장값 없음·읽기 실패 모두',
-  /localStorage\.getItem\(VW_KEY\)==='qhd' \? 'qhd' : 'fhd'/.test(src)
-  && /catch\(_\)\{ return 'fhd'; \}/.test(src));
-ok('부팅과 셸 렌더 양쪽에서 모드를 반영한다(로그인 화면 포함)',
-  (src.match(/_applyVwMode\(\)/g) || []).length >= 3);
-ok('모드 변경 시 헤더 높이를 재실측한다(--toph 드리프트 방지)', (() => {
-  const i = src.indexOf('function setVwMode(');
-  return i > 0 && /_measureChrome\(\)/.test(src.slice(i, i + 400));
-})());
-ok('reduced-motion 이면 노브 애니메이션을 끈다',
-  /prefers-reduced-motion:reduce\)\{\.vwsw \.vwknob\{transition:none\}\}/.test(cssNoComment));
+/* ── E. QHD 고정(선택 UI·저장값 없음) ── */
+ok('화면 크기 선택 스위치가 없다',
+  !/class="vwsw"|vwToggle|VW_KEY|toggleVwMode|setVwMode|_applyVwMode/.test(src));
+ok('화면 크기 선택 state(data-vw)를 남기지 않는다', !/data-vw/.test(src));
 
 /* ── F. 모집공고 카드 컨테이너 상한 (카드 자체가 아니라 카드를 품는 공간) ── */
 ok('#recruitListWrap 가 max-width:1380px 를 받는다(5열 고정 — 6열 문턱 1608px 미만)',
@@ -135,7 +114,7 @@ ok('★ 상한이 카드 컨테이너에 걸린다(카드 자체 min-width 등�
 /* ── G. 작업오더·등록리뷰어DB·리뷰어 로그 — 뷰별 표 폭 상한 ── */
 ok('★ 셋 다 같은 클래스(.lgwrap)를 공유하지만 필요 폭이 달라 뷰 컨테이너 id 로 스코프했다',
   /#wobody \.lgwrap\{max-width:1120px\}/.test(cssNoComment)
-  && /#rvbody \.lgwrap\{max-width:1400px\}/.test(cssNoComment)
+  && /#rvbody \.lgwrap\{max-width:none\}/.test(cssNoComment)
   && /#lgbody \.lgwrap\{max-width:1300px\}/.test(cssNoComment));
 ok('★ 공유 클래스 .lgwrap 자체(단독 셀렉터)에는 max-width 를 걸지 않았다(걸면 세 값이 서로 충돌한다)',
   !/(^|\})\s*\.lgwrap\{[^}]*max-width/.test(cssNoComment.replace(/\n/g, ' ')));
@@ -144,12 +123,12 @@ ok('표 자체(table.lgtable)는 width:100% 그대로 — 감싸는 폭만 좁�
 
 /* ── H. 헤더 버튼바(.mh)를 그 아래 데이터 폭에 맞춰 정렬 ──
    .mh 는 h1 + <span class="sp" style="flex:1"> + 버튼들 구조라, .mh 자체가 캡되지 않으면
-   .sp 가 .ovwrap 전체 폭(1920/2560)을 먹어 버튼이 "페이지 오른쪽 끝"에 붙는다(실측 — 작업오더
+   .sp 가 .ovwrap 전체 폭을 먹어 버튼이 "페이지 오른쪽 끝"에 붙는다(실측 — 작업오더
    스크린샷에서 상태 필터·검색 버튼이 표보다 훨씬 오른쪽에 떠 있었다). 아래 넷은 위에서 정한
    데이터 폭과 정확히 같은 값이어야 버튼이 "그 데이터의 오른쪽 끝"에 붙는다. */
 ok('작업오더 헤더(#wohead .mh)가 표와 같은 1120px', /#wohead \.mh\{max-width:1120px\}/.test(cssNoComment));
 ok('모집공고 헤더(#rchead .mh)가 카드 컨테이너와 같은 1380px', /#rchead \.mh\{max-width:1380px\}/.test(cssNoComment));
-ok('등록리뷰어DB 헤더(#rvhead .mh)가 표와 같은 1400px', /#rvhead \.mh\{max-width:1400px\}/.test(cssNoComment));
+ok('등록리뷰어DB 헤더(#rvhead .mh)가 QHD 가용 폭을 함께 쓴다', /#rvhead \.mh\{max-width:none\}/.test(cssNoComment));
 ok('리뷰어 로그 헤더(#lghead .mh)가 표와 같은 1300px', /#lghead \.mh\{max-width:1300px\}/.test(cssNoComment));
 ok('★ 공유 클래스 .mh 자체(단독 셀렉터)에는 max-width 를 걸지 않았다(다른 뷰까지 캡되면 안 된다)',
   !/(^|\})\s*\.mh\{[^}]*max-width/.test(cssNoComment.replace(/\n/g, ' ')));
