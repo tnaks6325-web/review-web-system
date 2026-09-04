@@ -28,9 +28,10 @@ ok('prefill: 링크유입이면 landing_url = 유입링크 우선', /_woGuideUrl
 ok('modal: 프리필 소비 시 참여형 토글 자동 ON + 시간대 파서', /prefill\.participation && document\.getElementById\("rf_participation"\)/.test(recjs) && /rfApplyPurchaseTime\(\{ timeRange: prefill\.purchase_time/.test(recjs));
 // ⚠ 배선 형태 갱신(작업내용 첨부 이미지 도입) — 조립이 _igComposeInflow 한 곳으로 모였다.
 //   검사 의미는 불변: "글을 안 고쳤으면 원본 HTML 그대로 · 고치면 평문 전환".
-ok('modal: 원본 HTML은 미수정 시 그대로 전송(수정하면 평문 전환)',
-  /return window\._wdInflowRawHtml;/.test(recjs) && /dataset\.rawHtml = ""/.test(recjs)
-  && /inflowGuideHtml: _igComposeInflow\(\)/.test(recjs));
+ok('modal: 선택지 유입가이드 원본 HTML은 미수정 시 그대로 전송(수정하면 평문 전환)',
+  /function _ugCompose\(row, key\)/.test(recjs)
+  && /return \{ html: raw, images \}/.test(recjs)
+  && /inflowGuideHtml: guide\.html/.test(recjs));
 ok('modal: 미리보기 변환(_htmlToPlainPreview) 존재', /function _htmlToPlainPreview/.test(recjs));
 
 // ── 상품정보 기본값(작업오더) + 자동수집 성공 항목만 덮어쓰기 ──

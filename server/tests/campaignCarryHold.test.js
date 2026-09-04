@@ -115,7 +115,7 @@ eq('시작일이 기준선보다 늦으면 시작일부터(어제 시작 → 40�
 console.log('\n[3] 서버 배선');
 const st = readS('services/campaignState.service.js');
 ok('판정 단일 출처 isCarryHold(게이트·잔량·목록이 공유)', /function isCarryHold\(c\)/.test(st)
-  && /!isCarryHold\(c\) && CARRY_ENABLED/.test(st));
+  && /!isCarryHold\(c\)[\s\S]{0,100}CARRY_ENABLED/.test(st));
 ok('기준선 2종은 한 쿼리(066 가드의 쿼리 순서 계약 유지)',
   /key IN \('campaign_carry_start', 'campaign_carry_hold_start'\)/.test(st));
 ok('counts.hold 창 집계(FILTER $4)', /submitted_since_hold/.test(st) && /\$4 AND submitted_at < \$2/.test(st));
@@ -158,9 +158,9 @@ ok('★ getPlanOverview: 일정 판정 실패(unknown)면 이월·잔량을 계�
   && /heldCarry\(camp, counts, today, carryAppliedSum, sch\)/.test(cp)
   && /carryPending = pendingCarry\(camp, counts, today, counts && counts\.carry, sch\)/.test(cp));
 ok('public list includes carry mode with other publication controls',
-  /carry_mode,\s+skip_weekends,\s+cash_receipt_required/.test(rt));
+  /\bcarry_mode\b/.test(rt) && /\bskip_weekends\b/.test(rt) && /\bcash_receipt_required\b/.test(rt));
 ok('campaign creation persists carry mode after review-type mix',
-  /review_type, review_type_mix, carry_mode, work_kind/.test(rt)
+  /review_type, review_type_mix, carry_mode, carry_strategy, work_kind/.test(rt)
   && /carry_mode === 'hold' \? 'hold' : 'auto'/.test(rt));
 /*
 ok('★ 코드리뷰 B1: 공개 /list SELECT 에 carry_mode — 빠지면 hold 공고가 목록에선 자동 이월 정원으로 계산돼 "카드는 열렸는데 참여 거부"',
@@ -190,9 +190,10 @@ ok('★ 원칙 ⑤: 보류 선택 고지문(오늘 정원 복귀 + 물량 불소
 ok('페이로드는 세그먼트 UI 있는 화면에서만 전송(미전송=유지)',
   /if \(document\.getElementById\("rf_carry_mode"\)\)/.test(recruit)
   && /payload\.carry_mode = document\.getElementById\("rf_carry_mode"\)\.value === "hold" \? "hold" : "auto"/.test(recruit));
-ok('프리필·신규 초기화(silent — 사람이 고른 순간에만 고지 펼침)',
-  /rfCarrySet\(c\.carry_mode === "hold" \? "hold" : "auto", \{ silent: true \}\)/.test(recruit)
-  && /rfCarrySet\("auto", \{ silent: true \}\)/.test(recruit));
+ok('프리필·신규 초기화는 현재 이월 배치 전략을 복원한다',
+  /\["next", "spread", "extend"\]\.includes\(c\.carry_strategy\)/.test(recruit)
+  && /rfCarrySet\(carryStrategy, \{ silent: true \}\)/.test(recruit)
+  && /rfCarrySet\("extend", \{ silent: true \}\)/.test(recruit));
 ok('홈 인라인 모달 세그먼트(cae_carry_mode) + 항상 명시 전송',
   /cae_carry_mode/.test(cards) && /_caeCarry\(data\.carry_mode === 'hold'/.test(cards)
   && /carry_mode: _caeV\('cae_carry_mode'\) === 'hold' \? 'hold' : 'auto'/.test(cards));

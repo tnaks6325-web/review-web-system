@@ -312,8 +312,10 @@ const one = async (args) => { setDb(rules(args)); const r = await SVC.resolveRec
     const src = readSrv('src/routes/trackB.routes.js');
     ok('★ 실행부는 기존 C/S 업로드 핸들러 한 벌(Drive 폴더·8MB·프록시 URL 규칙 복제 0)',
       /notify-upload['"][\s\S]{0,220}_csHandlers\.upload\(req, res, next\)/.test(src));
-    ok("★ `/cs/upload`(관리자 대화창)의 종전 게이트는 그대로 둔다",
-      /router\.post\('\/cs\/upload', authMiddleware, adminOrMasterMiddleware/.test(src));
+    const csSrc = readSrv('src/routes/cs.routes.js');
+    ok("★ `/cs/upload`도 C/S 공통 게이트(내부인 전원)를 그대로 탄다",
+      /router\.use\(authMiddleware, internalMiddleware\)/.test(csSrc)
+      && /router\.post\('\/upload', async \(req, res, next\)/.test(csSrc));
   }
   {
     /* ★★ 첨부 URL 화이트리스트는 **단일 출처**(utils/csImageUrls) — 종전엔 같은 정규식이

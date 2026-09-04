@@ -191,7 +191,11 @@ ok('★ "옵션 없음·단일·해당없음" 은 옵션명이 아니라 서술 
   })());
 ok('깨진 옵션 JSON 은 옵션 없음으로 수렴(fail-soft)',
   P.optionKeysFromWorkOrder({ product_options_json: '{깨짐' }).length === 0);
-ok('행마다 옵션이 배정된다', plan.rows[0].optionKey === '골라담기' && plan.rows[99].optionKey === '어나더');
+ok('행마다 옵션이 배정되고 버킷 수량과 일치한다', (() => {
+  const counts = plan.rows.reduce((m, r) => (m[r.optionKey] = (m[r.optionKey] || 0) + 1, m), {});
+  return plan.rows.every(r => !!r.optionKey)
+    && plan.optionBuckets.every(b => counts[b.key] === b.count);
+})());
 ok('★★ 갭 A — 오더의 옵션별 수량(count)이 배분에 그대로 쓰인다(종전엔 라벨만 뽑아 균등으로 갈라졌다)',
   (() => {
     const p = P.buildWorktablePlan({

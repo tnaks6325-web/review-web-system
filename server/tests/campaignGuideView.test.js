@@ -112,7 +112,8 @@ ok('⑤ chatUrl은 제출확정(isSubmitted) 후에만 반환', /chatUrl: isSubm
 //  대기 건은 여전히 그룹 items 전체를, 완료 건은 그 행 1건만 시트에 전달한다.)
 ok('⑥-1 리뷰 내역 대기 카드 클릭 → 참여상품 정보 시트(즉시 제출 직행 아님)',
   /openPartInfoSheet\(isDone \? \[item\] : items, \{ done: isDone \}\)/.test(idx) && !/card\.addEventListener\("click", \(\) => goToSubmit\(items\)\)/.test(idx));
-ok('⑥-2 시트의 [리뷰제출하기]는 기존 goToSubmit 경유', /_partInfoSubmit[\s\S]{0,120}goToSubmit\(items\)/.test(idx));
+ok('⑥-2 시트의 [리뷰제출하기]는 선택한 한 행만 기존 goToSubmit 경유',
+  /function _partInfoSubmit\(index\)[\s\S]{0,420}goToSubmit\(\[items\[i\]\]\)/.test(idx));
 ok('⑥-3 카카오 입장 버튼(#FEE500) + 지정 라벨', /background:#FEE500[\s\S]{0,220}이 캠페인의 카톡 팀채팅방 입장/.test(idx));
 ok('⑥-4 상품 URL은 https만 링크화(scheme 가드)', /https\?:[\s\S]{0,12}test\(pu\)/.test(idx));
 ok('⑥-5 participation-brief 엔드포인트(행 소유권 게이트 재사용)',

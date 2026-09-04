@@ -183,7 +183,7 @@ t('★ 프리필은 공유 모듈 — 관리자 대시보드와 같은 공고가
   assert.ok(/const prefill = _woCampaignPrefill\(o\);/.test(APP), 'index-app 이 공유 프리필을 쓰지 않는다');
   const i = HTML.indexOf('async function _woCampaign(id){');
   const body = HTML.slice(i, i + 1200);
-  assert.ok(/o\.linked_campaign_id\) await openRecruitModal\(o\.linked_campaign_id\)/.test(body),
+  assert.ok(/o\.linked_campaign_id\) await openRecruitModal\(o\.linked_campaign_id, _woCampaignPrefill\(o\), id\)/.test(body),
     '연결된 공고는 그 공고를 열어야 한다(새 공고를 또 만들면 중복 발행)');
   assert.ok(/await loadRecruitTabOptions\(\)/.test(body),
     '연결 탭 목록을 기다리지 않으면 드롭다운이 빈 채로 열린다');

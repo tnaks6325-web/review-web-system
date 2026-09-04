@@ -50,7 +50,7 @@ function rest() {
   console.log('\n── B. 서버 응답(관리자 상세) ──');
   const routes = fs.readFileSync(path.join(root, 'server/src/routes/campaign.routes.js'), 'utf8');
   t('관리자 상세가 작업오더 조합을 프리필 재료로 함께 내려준다',
-    /feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock \}\);/.test(routes));
+    /feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock,/.test(routes));
   t('★ 공고에 조합이 있으면 조회하지 않는다(공고가 언제나 이긴다)',
     /!\(cur\.mix \|\| \[\]\)\.length/.test(routes));
   t('★ 혼합이 아닌 공고는 대상이 아니다', /normalizeReviewType\(rows\[0\]\.review_type\) === 'mixed'/.test(routes));

@@ -96,7 +96,8 @@ ok('홈 교환권 발급은 adminOrMaster이고 5분짜리 서명 토큰이다',
 const home = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
 const reviewerRoutes = fs.readFileSync(path.join(root, 'server', 'src', 'routes', 'reviewer.routes.js'), 'utf8');
 ok('홈 세션 교환도 status와 무관하게 현재 등록 레코드를 다시 확인한다',
-  /home-session[\s\S]{0,1400}?WHERE name = \$1 AND phone8 = \$2 LIMIT 1/.test(reviewerRoutes));
+  /home-session[\s\S]{0,1400}?WHERE name = \$1 AND phone8 = \$2 LIMIT 2/.test(reviewerRoutes)
+  && /rows\.length !== 1/.test(reviewerRoutes));
 ok('만료·실패한 관리자 홈 링크는 기존 localStorage 리뷰어로 폴백하지 않는다',
   /hasAdminReviewerTicket && !exchanged[\s\S]{0,400}?viewLogin/.test(home));
 ok('관리자 링크 교환이 끝난 뒤에만 해시 탭을 처리한다',
@@ -122,7 +123,7 @@ ok('FHD에서는 등록리뷰어DB가 전폭을 쓰고 17열을 화면 안에 �
 ok('FHD 압축 규칙은 바깥 등록리뷰어 표의 직접 셀에만 적용한다(타계정 상세표 보존)',
   /table\.lgtable>thead>tr>th,#rvbody table\.lgtable>tbody>tr:not\(\.rvsubrow\)>td/.test(css)
   && /table\.lgtable>thead>tr>th:nth-child\(1\)/.test(css));
-ok('연락처 변경 버튼 문구는 번호변경이다', />번호변경<\/button><\/td>/.test(jsNoComment));
+ok('연락처 변경 버튼은 이름과 번호를 함께 바꾸는 현재 명의 편집 문구다', />이름 및 번호변경<\/button><\/td>/.test(jsNoComment));
 
 /* ── ④ 타계정 펼침 ── */
 console.log('\n④ 타계정 클릭 → 행 바로 아래 펼침');

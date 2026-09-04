@@ -85,7 +85,7 @@ const ord = readS('routes/order.routes.js');
 ok('인트라넷·AE 양쪽에서 work_manager 를 받는다',
   /'goods_cost_type', 'work_manager'/.test(ord) && /'work_manager',\s+\/\/ 작업담당/.test(ord));
 ok('인트라넷 구매채널은 작업오더에 보존한다',
-  /'daily_count_text', 'purchase_channel', 'purchase_time'/.test(ord)
+  /'daily_count_text', 'product_distribution_mode', 'purchase_channel', 'purchase_time'/.test(ord)
   && /ADD COLUMN IF NOT EXISTS purchase_channel/.test(ord)
   && /String\(b\.purchase_channel \|\| ''\)\.trim\(\)/.test(ord));
 // ⚠ 088(계약건 컬럼)에서 컬럼 목록 중간에 sales_id/contract_number/quote_id 가 들어와 옛 패턴

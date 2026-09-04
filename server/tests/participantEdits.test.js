@@ -23,7 +23,7 @@ function makeQueryPool(scn) {
         return { rows: scn.tabGidRow ? [{ tab_gid: scn.tabGidRow }] : [] };
       }
       if (/FROM participant_edits/.test(s)) return { rows: scn.edits || [] };
-      if (/reviewer_name AS name.*FROM campaign_participants.*ORDER BY seq/.test(s)) return { rows: scn.roster || [] };
+      if (/cp\.reviewer_name AS name.*FROM campaign_participants cp.*ORDER BY cp\.seq/.test(s)) return { rows: scn.roster || [] };
       return { rows: [] };
     },
   };

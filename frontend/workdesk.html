@@ -5774,7 +5774,7 @@ function _renderTabList(){
   if(!STATE.tabs.length){ seghost.innerHTML=''; _renderTaskMenu(); _syncWbScrollMeter(seghost); return; }
   // ★ 탭은 있는데 전부 마감이면 그룹이 0개다 — 위 분기(STATE.tabs.length)를 못 타므로 여기서 따로 말한다.
   //   안 그러면 "이 그룹에 작업이 없습니다"가 뜨는데 그룹 자체가 없어서 문구가 어긋난다.
-  if(!gs.length){ seghost.innerHTML=''; _renderTaskMenu(); _syncWbScrollMeter(seghost); return; }
+  if(!gs.length){ seghost.innerHTML='<span class="wb-menu-empty">모든 작업이 마감되었습니다. 홈의 마감 보관함에 있습니다.</span>'; STATE.wMenu=null; _renderTaskMenu(); _syncWbScrollMeter(seghost); return; }
   const seg=_wActiveSeg(gs); STATE.wSeg=seg;
   // innerHTML 교체는 가로 스크롤 위치를 0으로 되감는다 → 업체가 많으면 방금 고른 칩이 화면 밖으로 사라짐.
   //   교체 전 위치를 저장했다가 복원하고, "선택이 실제로 바뀐 경우에만" 활성 항목을 시야로 끌어온다
@@ -10831,10 +10831,8 @@ async function _edRemove(id,name){
    화면은 **관리자 대시보드와 같은 모듈**(js/cs-inquiry.js) 하나뿐이다 — 여기서는
    마운트만 하고 목록 로드는 그 모듈의 loadCsRooms() 를 그대로 부른다(사본 금지).
    서버 경로는 window.CS_API_BASE 로 /api/trackb/cs/* 를 가리킨다(SSO 토큰 격리 때문).
-   ★★ 문의 **본문**은 여전히 master/admin 전용 — 리뷰어 실명·연락처·주소·주문정보가 그대로
-     실려 AE의 "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(등록리뷰어DB와 같은 판단).
-     달라진 것은 **메뉴가 AE에게도 보인다**는 것뿐이고, AE 화면에는 문의창구 모듈을
-     **마운트조차 하지 않는다**(그리지 않으면 요청도 안 나가고, 최종 방어는 여전히 서버 403).
+   ★★ 문의 **본문**은 내부 담당자(master/admin/staff)에게만 연다 — 서버 `internalMiddleware`와
+     같은 경계이며 광고주 세션에는 문의창구 모듈을 마운트하지 않는다.
    ★ 이미지 교체요청(시안 C)은 이 화면 **위의 대기 큐 띠**로 얹는다 — 문의 화면은 손대지 않고
      (목록·대화창·cs-inquiry.js 무변경) 위에 한 겹 더 놓는 방식이라 두 기능이 영역으로 구분된다. */
 async function renderCsView(){

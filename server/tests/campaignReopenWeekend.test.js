@@ -161,7 +161,7 @@ console.log('\n[6] 카드 렌더 실행');
   ok('★ 푸터도 "내일"을 박지 않고 실제 재오픈일을 말한다',
     /8\/24\(월\)/.test(daily) && !/내일/.test(daily));
   ok('★ 썸네일 문구에 "오픈"이 두 번 찍히지 않는다(_fmtOpenWhen 조각 사용)',
-    /8\/24\(월\) 다시 오픈/.test(daily) && !/오픈 다시 오픈/.test(daily));
+    /8\/24\(월\)(?: \d{2}:\d{2})? 다시 오픈/.test(daily) && !/오픈 다시 오픈/.test(daily));
 
   const wk = CC.cardHtml({ ...base, state: 'weekend_unpublished', stateReason: 'weekend_unpublished',
     stateMessage: '주말 미게시 · 월요일 재개', resumesOn: MON, resumesAt: '2026-08-24T00:00:00.000Z' });

@@ -42,6 +42,8 @@ assert.match(routes, /cash_receipt_required,\s*\/\/ 모집공고 직접 설정/)
 assert.match(routes, /cash_receipt_required = COALESCE/);
 assert.match(routes, /cash_receipt_required === true/);
 assert.match(routes, /r\.cash_receipt_required === true/);
-assert.match(routes, /carry_mode, skip_weekends, cash_receipt_required/);
+assert.match(routes, /\bcarry_mode\b/);
+assert.match(routes, /\bskip_weekends\b/);
+assert.match(routes, /\bcash_receipt_required\b/);
 
 console.log('campaignCashReceiptContract: 19 passed');

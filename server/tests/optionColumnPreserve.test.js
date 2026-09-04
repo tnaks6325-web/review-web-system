@@ -119,10 +119,10 @@ ok('옵션 컬럼 인덱스 판정은 매퍼와 같은 규칙',
 
   /* ═══ ★ 오분류 차단 — optionWriteColumns 는 매퍼에서 파생한다 ═══ */
   {
-    const H3 = ['번호', '리뷰옵션', '옵션금액', '상품옵션', '비고(옵션확인)', '수취인'];
+    const H3 = ['번호', '리뷰옵션', '옵션금액', '옵션', '비고(옵션확인)', '수취인'];
     const w = OL.optionWriteColumns(H3);
     ok('★★ 옵션금액(=결제금액 칸)·비고(옵션확인)은 옵션 칸이 아니다 — 오분류하면 금액 쓰기가 조용히 삭제된다',
-      JSON.stringify(w) === '[1]');
+      JSON.stringify(w) === '[3]');
     ok('optionColIndexes(헤더 문자열 규칙)와 다르다는 사실 자체를 고정',
       JSON.stringify(OL.optionColIndexes(H3)) !== JSON.stringify(w));
     // 매퍼가 그 칸에 실제로 무엇을 넣는지로 교차검증(규칙이 갈리면 실패)

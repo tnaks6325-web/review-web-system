@@ -92,7 +92,7 @@ async function main() {
 
   /* ═══ 3. 라우트 배선 ═══ */
   ok('관제 응답에 dismissed_by 동봉(화면이 자동/수동을 구분)',
-    /owner_phone8, dismissed_at,\s*\n\s*dismissed_by/.test(routes));
+    /ca\.owner_phone8, ca\.dismissed_at,\s*\n\s*ca\.dismissed_by/.test(routes));
   ok('수동 취소확정은 admin 으로 기록 — 자동 되살리기 대상에서 제외',
     /SET status = 'cancelled', dismissed_at = NOW\(\), dismissed_by = 'admin'/.test(routes));
   ok('수동 제출확정은 마커를 비운다(잔류 금지)', /dismissed_at = NULL, dismissed_by = NULL/.test(routes));

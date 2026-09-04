@@ -71,6 +71,7 @@ function ctx({ camp, preview = false, btn = { disabled: false, textContent: '참
   const calls = [];
   const sandbox = {
     _camp: camp, PREVIEW: preview,
+    _repurchaseAccounts: {},
     API_BASE_URL: 'http://x',
     getSession: () => ({ phone8: '99998888', name: '나' }),
     multiEnabled: () => !!(camp && camp.multi_account_mode === true),

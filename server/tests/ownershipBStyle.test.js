@@ -13,7 +13,7 @@ function test(name, fn) { tests.push({ name, fn }); }
 test('uses the B-style full-width ownership shell instead of a visible sidebar', () => {
   assert.match(source, /<div class="own-wrap ovm-bwrap">/);
   assert.match(source, /\.own-wrap\.ovm-bwrap \.ovm-side\{display:none\}/);
-  assert.match(source, /\.own-wrap\.ovm-bwrap \.own-panel\{max-width:1520px/);
+  assert.match(source, /\.own-wrap\.ovm-bwrap \.own-panel\{max-width:1608px/);
 });
 
 test('renders B-style command dashboard and searchable company ledger', () => {
@@ -132,7 +132,7 @@ test('every company row carries a viewer-link copy button that does not open the
   // 헤더 칸 수 ≡ 행 칸 수 (열을 끼워 넣을 때 가장 흔히 깨지는 자리)
   const head = source.match(/<div class="ovm-ovt h">([\s\S]*?)<\/div>/);
   assert.ok(head, 'overview header should be extractable');
-  assert.equal((head[1].match(/<span>/g) || []).length, 7);
+  assert.equal((head[1].match(/<span>/g) || []).length, 8);
 });
 
 test('copy button fetches the token on demand and refuses to hand out a revoked link', async () => {

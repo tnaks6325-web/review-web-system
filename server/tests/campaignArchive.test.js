@@ -73,7 +73,7 @@ console.log('\n[B] 목록에서 내린다');
   ok('★ 공개 /list 가 보관 공고를 제외 — 리뷰어 노출의 유일한 출처', /AND archived_at IS NULL/.test(list));
 }
 {
-  const admin = routeBody(routes, "router.get('/admin/list'");
+  const admin = routes.slice(routes.indexOf('async function _adminCampaignList'), routes.indexOf("router.post('/admin/:id/archive'"));
   ok('★ 관리자 목록도 기본은 보관 제외', /WHERE archived_at IS \$\{_archivedView \? 'NOT NULL' : 'NULL'\}/.test(admin));
   ok('★ 보관함 보기(?archived=1) — 서버가 통째로 거르면 보관함이 영원히 빈다',
     /req\.query\.archived/.test(admin));

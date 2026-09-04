@@ -230,7 +230,7 @@ async function run() {
     vm.createContext(box);
     box.$ = (sel) => (box.dom && box.dom[sel]) || null;
     for (const [nm, kd] of [['_brandOpen'], ['brandToggleRows'], ['_brandRowsHtml'], ['_brandsMerge'],
-      ['_awItems'], ['_bmList'], ['_bmCell'], ['_bmEditHtml'], ['bmEdit'], ['bmClose'], ['bmInput'],
+      ['_awTarget'], ['_awItems'], ['_bmList'], ['_bmCell'], ['_bmEditHtml'], ['bmEdit'], ['bmClose'], ['bmInput'],
       ['_brandsReload', 'async'], ['brandNewSubmit', 'async'], ['bmSave', 'async']]) vm.runInContext(grab(nm, kd), box);
     return box;
   };

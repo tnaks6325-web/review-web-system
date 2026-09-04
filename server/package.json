@@ -7,6 +7,8 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "test": "node scripts/run-tests.js",
+    "test:list": "node scripts/run-tests.js --list",
     "start": "node index.js",
     "dev": "nodemon index.js",
     "migrate": "node src/db/migrate.js",

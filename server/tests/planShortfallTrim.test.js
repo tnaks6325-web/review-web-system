@@ -100,8 +100,8 @@ const filled = (id, seq, date) => ({ id, seq, tab_gid: '1', reviewer_name: '참�
       /save\.disabled = killOff \|\| S\.saving \|\| diff > 0/.test(front) && !/diff !== 0/.test(front));
     ok('균형 바가 부족을 "저장가능"이라고 말한다(저장불가 문구 금지)',
       /건 적게 모집합니다\.[\s\S]{0,80}저장가능/.test(front));
-    ok('★ 확인창이 표도 함께 줄어든다는 사실을 말한다(조용한 축소 금지)',
-      /적게 모집합니다[\s\S]{0,60}빈 줄도 함께 정리/.test(front));
+    ok('★ 저장 안내가 표도 함께 줄어든다는 사실을 말한다(조용한 축소 금지)',
+      /적게 모집합니다[\s\S]{0,120}저장하면 작업표도 그 수로 줄어듭니다/.test(front));
     ok('총량 초과는 서버가 최종 방어(화면만 믿지 않는다)',
       /code = 'over_total'/.test(planSrc) && /over_total: 422/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8')));
   }

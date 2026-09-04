@@ -90,9 +90,10 @@ function stub() {
   console.log('\n[D] 그리드 — 표에서만 빼고 건수를 고지');
   {
     const i = TB.indexOf('// 명단(활성) — 앵커 도출에 필요한 컬럼 포함');
-    const seg = TB.slice(i, i + 1400);
-    ok('명단 조회가 분리된 줄을 거른다', /AND held_at IS NULL/.test(seg));
-    ok('★ 조용히 빼지 않는다 — 건수를 센다', /held_at IS NOT NULL/.test(seg) && /heldCount/.test(seg));
+    const end = TB.indexOf('// 활성 오버레이', i);
+    const seg = TB.slice(i, end > i ? end : i + 5000);
+    ok('명단 조회가 분리된 줄을 거른다', /AND (?:cp\.)?held_at IS NULL/.test(seg));
+    ok('★ 조용히 빼지 않는다 — 건수를 센다', /(?:cp\.)?held_at IS NOT NULL/.test(seg) && /heldCount/.test(seg));
     ok('★ 조회 실패는 fail-soft(표는 떠야 한다)', /heldUnavailable = e\.message/.test(TB));
     ok('응답 counts 에 실린다', /held: heldCount/.test(TB));
   }

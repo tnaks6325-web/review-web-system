@@ -155,7 +155,9 @@ function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', se
 
   console.log('\n[C] 배선 — 무시트에서만 켜진다(시트 경로 무회귀)');
   const submitSrc = fs.readFileSync(path.join(__dirname, '../src/routes/submit.routes.js'), 'utf8');
-  ok('crossDay 는 orderScope.sheetless 일 때만 true', /crossDay:\s*!!orderScope\.sheetless/.test(submitSrc));
+  ok('crossDay 는 시트 미러를 건너뛰는 무시트·통폐합 큐 경로에서만 true',
+    /const skipSheetMirrorForWrite = !!orderScope\.sheetless \|\| queuedWorkboardApply/.test(submitSrc)
+    && /crossDay:\s*skipSheetMirrorForWrite/.test(submitSrc));
   const ledgerSrc = fs.readFileSync(path.join(__dirname, '../src/services/orderLedger.service.js'), 'utf8');
   ok('crossDay 가 아니면 종전 판정에서 끝난다', /if \(!sameDayDuplicateGuard\.crossDay\) return null;/.test(ledgerSrc));
   ok('당일 판정이 먼저다(기존 동작 보존)',

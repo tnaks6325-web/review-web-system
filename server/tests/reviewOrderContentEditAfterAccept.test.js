@@ -68,6 +68,7 @@ function baseOrder(extra) {
     title: BODY.title, start_date: new Date(2026, 7, 19),
     manager_name: BODY.manager_name, work_manager: pickWorkManager(BODY),
     product_option: BODY.product_option, product_options_json: '',
+    product_distribution_mode: 'balanced',
     pay_amount: BODY.pay_amount, review_fee: 0, daily_count: BODY.daily_count,
     daily_count_text: BODY.daily_count_text, purchase_channel: BODY.purchase_channel,
     purchase_time: BODY.purchase_time, inflow_keyword: BODY.inflow_keyword,

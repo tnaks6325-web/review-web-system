@@ -22,7 +22,7 @@ function makePool(roster, edits) {
     query: async (sql) => {
       const q = String(sql).replace(/\s+/g, ' ');
       if (/COUNT\(\*\)::int AS n FROM campaign_participants/.test(q)) return { rows: [{ n: 0 }] };
-      if (/FROM campaign_participants/.test(q) && /ORDER BY seq/.test(q)) return { rows: roster };
+      if (/FROM campaign_participants/.test(q) && /ORDER BY (?:cp\.)?seq/.test(q)) return { rows: roster };
       if (/FROM participant_edits/.test(q)) return { rows: edits || [] };
       if (/FROM tab_configs/.test(q)) return { rows: [{ campaignName: 'c', displayName: 'd', gid: '' }] };
       return { rows: [] };
