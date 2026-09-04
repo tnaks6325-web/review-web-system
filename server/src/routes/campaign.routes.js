@@ -1187,22 +1187,18 @@ router.get('/my-repurchase-status', applyLimiter, reviewerSessionMiddleware, asy
   try {
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return res.json({ ok: true, status: {} });
-    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본·타계정을 읽는다.
+    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본계정을 읽는다.
     const { rows } = await pool.query(
-      'SELECT name, phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1',
+      'SELECT name, phone8 FROM reviewers WHERE id = $1 LIMIT 1',
       [req.reviewer.ownerReviewerId]
     );
     if (rows.length !== 1) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
+    // 자유 편집 가능한 sub_accounts는 전화번호 소유 증명이 아니다. 타계정 로그인/목록으로
+    // 다른 사람의 이력을 조회하지 않고, 직접 등록된 본계정 세션에 대해서만 상태를 돌려준다.
+    if (req.reviewer.loginKind !== 'self') return res.json({ ok: true, status: {} });
     const p8 = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
     if (p8.length !== 8) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 확인할 수 없습니다.' });
-    let subs = (rows[0] && rows[0].sub_accounts) || [];
-    if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
-    if (!Array.isArray(subs)) subs = [];
     const accounts = [{ phone8: p8, type: 'self', displayName: String(rows[0].name || '본계정') }];
-    for (const sub of subs) {
-      const subP8 = String((sub && sub.phone) || '').replace(/\D/g, '').slice(-8);
-      if (subP8.length === 8 && subP8 !== p8 && !accounts.some(a => a.phone8 === subP8)) accounts.push({ phone8: subP8, type: 'sub', displayName: String((sub && sub.name) || '타계정') });
-    }
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
     const map = await checkRepurchaseStatusForAccounts(pool, { campaignIds: ids, phone8List: accounts.map(a => a.phone8) });
     const status = {};
@@ -1363,7 +1359,11 @@ async function getCampaignDetail(req, res, next) {
       } catch (e) {
         logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일·안내값) 실패 camp=${id}: ${e.message}`);
       }
-      return res.json({ ok: true, data: { ...rows[0], workboard_display_name: workboardDisplayName }, options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock });
+      return res.json({
+        ok: true,
+        data: { ...rows[0], repurchase_days: repurchaseDays(rows[0].repurchase_days), workboard_display_name: workboardDisplayName },
+        options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock,
+      });
     }
     const now = new Date();
     const row = rows[0];

@@ -103,6 +103,10 @@ async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, campaignId,
         WHERE ca.campaign_id = $5
           AND ca.phone8 = $3
           AND ca.status = 'submitted'
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
+          ))
           AND ca.submitted_at >= NOW() - make_interval(days => $4)
      )
      SELECT MAX(submitted_at) AS submitted_at FROM history`,
@@ -156,6 +160,10 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, campai
          FROM campaign_applications ca
         WHERE ca.campaign_id = $5
           AND ca.status = 'submitted'
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
+          ))
           AND ca.submitted_at >= NOW() - make_interval(days => $3)
           AND ca.phone8 = ANY($4::text[])
      )
@@ -264,6 +272,10 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
          JOIN campaign_applications ca ON ca.campaign_id = rc.id
         WHERE rc.id = ANY($1::text[])
           AND ca.status = 'submitted'
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
+          ))
           AND ca.phone8 = ANY($2::text[])
      )
      SELECT campaign_id, repurchase_days, phone8, MAX(submitted_at) AS last_submitted_at

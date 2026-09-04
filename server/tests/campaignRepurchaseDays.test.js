@@ -38,6 +38,8 @@ assert.ok(campaigns.includes('repurchase_days = COALESCE($50::integer, repurchas
   'update 미전송은 보존하고 명시값은 갱신');
 assert.ok(campaigns.includes('repurchase_days: effectiveRepurchaseDays'),
   '기존 NULL 공고 편집 시 운영 중인 유효 기본값을 복원');
+assert.ok(campaigns.includes('repurchase_days: repurchaseDays(rows[0].repurchase_days)'),
+  '관리자 상세 편집 응답도 기존 NULL 공고의 운영 유효값을 복원');
 assert.ok(campaigns.includes('days: camp.repurchase_days'), '리뷰어 참여 최종 차단이 대상 공고 저장값을 사용');
 assert.ok(campaigns.includes('재참여 제한 기간은 제한 없음(0일) 또는 1~365일'), '서버 입력 범위 검증');
 const confirmStart = campaigns.indexOf("router.post('/admin/:id/confirm'");

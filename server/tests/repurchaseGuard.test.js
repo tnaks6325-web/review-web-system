@@ -183,7 +183,11 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 요청 phone8을 신원으로 쓰지 않고 세션 소유자 ID로 계정을 조회',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('[req.reviewer.ownerReviewerId]') &&
     !campFull.slice(iMyStatusRoute, iIdRoute).includes('req.query.phone8'));
-  ok('checkRepurchaseStatusForAccounts 사용(본계정·타계정 단일 출처)',
+  ok('★ 자유 편집 타계정은 이력 조회 신원으로 사용하지 않음',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind !== 'self'") &&
+    !campFull.slice(iMyStatusRoute, iIdRoute).includes('SELECT name, phone8, sub_accounts') &&
+    !campFull.slice(iMyStatusRoute, iIdRoute).includes('for (const sub of subs)'));
+  ok('계정별 상태 배치 계산 단일 출처 사용',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForAccounts'));
   ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
 
@@ -204,6 +208,11 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     ok('★ 참여 이력이 아예 없는 공고는 맵에 없음(=평소 카드, 0/false로 꾸미지 않는다)', !r.get('86365441').has('camp_never'));
     ok('★ 주문 원장이 없는 같은 공고 submitted 이력도 상태 조회 폴백에 포함',
       statusSql.includes('campaign_applications ca') && statusSql.includes("ca.status = 'submitted'"));
+    ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
+      statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
+      statusSql.includes('linked_os.deleted_at IS NULL'));
+    eq('★ 셀프·배치·카드의 신청 이력 폴백이 모두 취소 주문을 제외',
+      (readS('utils/repurchaseGuard.js').match(/ca\.order_submission_id IS NULL OR EXISTS/g) || []).length, 3);
   }
   {
     const origDays = process.env.CAMPAIGN_REPARTICIPATE_DAYS;
