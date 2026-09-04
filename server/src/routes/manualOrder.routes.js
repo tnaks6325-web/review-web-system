@@ -96,7 +96,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
     if (!allowRepurchase) {
       const p8List = items.map(it => phone8Of((it.fields || {}).phone));
       const blockedMap = await checkRepurchaseWindowBatch(pool, {
-        sheetId, tabName, phone8List: p8List, days: effectiveRepurchaseDays,
+        sheetId, tabName, campaignId, phone8List: p8List, days: effectiveRepurchaseDays,
       });
       if (blockedMap.size) {
         const blocked = items

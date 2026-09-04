@@ -86,6 +86,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 작업명 없는 레거시 탭만 tab_name 단위 폴백', lastSql.includes('scope.work_name IS NULL AND os.tab_name = $2'));
     ok('★ 취소된 주문 제외 조건 포함', lastSql.includes('deleted_at IS NULL'));
     ok('★ 기간 창은 make_interval(days=>) 파라미터화 — 하드코딩 아님', lastSql.includes('make_interval(days => $4)'));
+    ok('★ 같은 공고 submitted 폴백과 주문 원장 중 최신 시각을 사용',
+      lastSql.includes('campaign_applications ca') && lastSql.includes('MAX(submitted_at) AS submitted_at'));
   }
 
   {
@@ -105,6 +107,13 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     eq('공고별 7일 뒤가 재참여 가능일', r.availableFrom.toISOString(),
       new Date(submittedAt.getTime() + 7 * 86400000).toISOString());
   }
+  {
+    const submittedAt = new Date(Date.now() - 2 * 86400000);
+    const r = await checkRepurchaseWindow(stubDb([{ submitted_at: submittedAt }]),
+      { campaignId: 'legacy-campaign', phone8: '86365441', days: 14 });
+    eq('작업 탭 연결이 없어도 같은 공고 submitted 이력으로 차단', r.blocked, true);
+    eq('공고 id가 SQL 폴백 파라미터에 전달', lastParams[4], 'legacy-campaign');
+  }
 
   /* ═══ 3. 배치 판정 ═══ */
   console.log('\n[3] checkRepurchaseWindowBatch');
@@ -115,6 +124,14 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     eq('막힌 번호만 맵에 담김(1건)', r.size, 1);
     ok('막힌 번호가 정확히 매칭됨', r.get('86365441') && r.get('86365441').blocked === true);
     ok('막히지 않은 번호는 맵에 없음', !r.has('11112222'));
+    ok('배치도 같은 공고 submitted 폴백을 포함', lastSql.includes('campaign_applications ca'));
+  }
+  {
+    const rows = [{ p8: '86365441', last_at: new Date(Date.now() - 2 * 86400000) }];
+    const r = await checkRepurchaseWindowBatch(stubDb(rows),
+      { campaignId: 'legacy-campaign', phone8List: ['86365441'], days: 14 });
+    eq('작업 탭 연결 없는 수동제출 배치도 공고 이력으로 차단', r.get('86365441').blocked, true);
+    eq('배치 공고 id가 SQL 폴백 파라미터에 전달', lastParams[4], 'legacy-campaign');
   }
   {
     const r = await checkRepurchaseWindowBatch({ query: async () => { throw new Error('호출 금지'); } },
@@ -147,6 +164,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('reason: repurchase_window 반환', camp.includes(`reason: 'repurchase_window'`));
   ok('★ camp.linked_sheet_id/linked_tab_name를 시작점으로 같은 작업 전체를 판정',
     camp.includes('camp.linked_sheet_id') && camp.includes('camp.linked_tab_name'));
+  ok('★ 셀프 참여 가드는 campaignId도 전달해 원장·공고 이력 중 최신값을 사용',
+    camp.includes('campaignId: id, phone8: holdP8'));
   ok('★ holdP8(본계정/타계정 신원)로 판정 — 로그인 phone8만 보지 않는다', camp.includes('phone8: holdP8'));
   ok('★★ 셀프 참여는 예외(강제 통과) 없음 — allowRepurchase 미사용',
     !camp.slice(iGuard, iGuard + 1500).includes('allowRepurchase'));
@@ -210,11 +229,15 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('강제 통과 시 접수 결과에 경고를 남긴다(조용한 우회 금지)',
     svc.includes('재참여 기간 제한을 넘겨 접수했습니다(관리자 확인됨)'));
   ok('repurchaseBlocked 필드로 사유를 되돌린다', svc.includes('repurchaseBlocked: true'));
+  ok('★ 건별 최종 가드도 campaignId를 전달해 공고 submitted 폴백을 적용',
+    svc.includes('sheetId, tabName, campaignId, phone: f.phone'));
 
   /* ═══ 6. 배선 — 라우트(사전 배치 판정) ═══ */
   console.log('\n[6] 배선: 라우트 사전 판정');
   const rt = readS('routes/manualOrder.routes.js');
   ok('checkRepurchaseWindowBatch import', rt.includes('checkRepurchaseWindowBatch'));
+  ok('★ 배치 사전 가드도 campaignId를 전달해 공고 submitted 폴백을 적용',
+    rt.includes('sheetId, tabName, campaignId, phone8List: p8List'));
   ok(`needConfirm: 'repurchase_window' 를 쓰기 전에(배치 시작 전) 되돌린다`,
     rt.includes(`needConfirm: 'repurchase_window'`));
   ok('allowRepurchase 를 서비스 호출에 전달', /allowRepurchase,\s*\/\//.test(rt));
@@ -252,6 +275,9 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('조회 실패해도 목록 렌더 자체는 살아있다(부가 정보 취급)',
     /catch \(_\) \{ \/\* 재참여 안내는 부가 정보/.test(idx));
   ok('카드 데이터에 계정별 상태를 병합 후 CampCards.cardHtml 호출', idx.includes('if (rs) c.repurchase = rs'));
+  ok('★ 상태 응답 교체 전 요청 공고의 옛 캐시를 지워 0일 전환 즉시 잠금 해제',
+    idx.includes('ids.forEach(id => { delete nextStatus[id]; });') &&
+    !idx.includes('if (!Object.keys(status).length) return;'));
 
   console.log(`\n✅ repurchaseGuard: ${n}개 통과`);
   process.exit(0);

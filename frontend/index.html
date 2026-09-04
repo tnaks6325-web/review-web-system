@@ -3279,8 +3279,11 @@ async function _rcLoadRepurchaseStatus(ids) {
     const json = await res.json();
     if (!json || !json.ok) return;
     const status = json.status || {};
-    if (!Object.keys(status).length) return;   // 참여 이력이 하나도 없으면 화면이 달라지지 않는다
-    _rcRepurchaseStatus = Object.assign({}, _rcRepurchaseStatus, status);
+    // 요청한 공고의 예전 상태를 먼저 지운 뒤 현재 응답으로 교체한다. 관리자가 제한을 0일로
+    // 바꾸거나 이력이 취소되면 빈 응답도 기존 locked 캐시를 즉시 해제해야 한다.
+    const nextStatus = Object.assign({}, _rcRepurchaseStatus);
+    ids.forEach(id => { delete nextStatus[id]; });
+    _rcRepurchaseStatus = Object.assign(nextStatus, status);
     if (_rcLastJson) _renderRecruitPreview(_rcLastJson);   // 병합된 데이터로 다시 그린다(위 키 덕분에 재조회는 없음)
   } catch (_) { /* 재참여 안내는 부가 정보 — 실패해도 목록 자체는 그대로 뜬다 */ }
 }

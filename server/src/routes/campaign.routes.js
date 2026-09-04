@@ -1900,7 +1900,7 @@ async function _applyParticipation(req, res, next, campPre) {
       let rw = repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime());
       if (camp.linked_sheet_id && camp.linked_tab_name) {
         const workRw = await checkRepurchaseWindow(client, {
-          sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, phone8: holdP8,
+          sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, campaignId: id, phone8: holdP8,
           days: camp.repurchase_days,
         });
         if (workRw.blocked) rw = workRw;

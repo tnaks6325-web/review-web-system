@@ -320,7 +320,7 @@ async function submitExternalOrder({
         ? await resolveCampaignRepurchaseDays(pool, campaignId)
         : repurchaseDaysOverride;
       const rw = await checkRepurchaseWindow(pool, {
-        sheetId, tabName, phone: f.phone, days: effectiveRepurchaseDays,
+        sheetId, tabName, campaignId, phone: f.phone, days: effectiveRepurchaseDays,
       });
       if (rw.blocked) {
         const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
