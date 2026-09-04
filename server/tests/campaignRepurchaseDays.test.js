@@ -47,6 +47,9 @@ const confirmEnd = campaigns.indexOf("router.post('/admin/:id/dismiss'", confirm
 const confirmRoute = campaigns.slice(confirmStart, confirmEnd);
 assert.ok(confirmStart > -1 && !confirmRoute.includes("status = 'submitted' LIMIT 1"),
   '기간을 지킨 재참여의 지각 주문도 과거 submitted 행 때문에 영구 차단하지 않음');
+assert.ok(confirmRoute.includes('checkRepurchaseConflictAt(client') &&
+  confirmRoute.includes('excludeApplicationId: appId') && confirmRoute.includes('excludeOrderSubmissionId: targetOrderId'),
+  '지각 주문 확정은 대상 자체를 제외하고 같은 작업의 다른 제출과 기간 충돌을 검사');
 
 assert.ok(guard.includes('rc.repurchase_days'), '홈 카드 상태 조회도 공고별 값을 조회');
 assert.ok(guard.includes('const days = repurchaseDays(r.repurchase_days)'), '각 공고의 기간으로 상태를 계산');

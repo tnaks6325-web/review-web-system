@@ -198,7 +198,7 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForAccounts'));
   ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
 
-  const { checkRepurchaseStatusForAccounts } = require('../src/utils/repurchaseGuard');
+  const { checkRepurchaseStatusForAccounts, checkRepurchaseConflictAt } = require('../src/utils/repurchaseGuard');
   {
     let statusSql = '';
     const rows = [
@@ -218,8 +218,30 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
       statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
       statusSql.includes('linked_os.deleted_at IS NULL'));
-    eq('★ 셀프·배치·카드의 신청 이력 폴백이 모두 취소 주문을 제외',
-      (readS('utils/repurchaseGuard.js').match(/ca\.order_submission_id IS NULL OR EXISTS/g) || []).length, 3);
+    eq('★ 셀프·배치·카드·지각확정의 신청 이력 폴백이 모두 취소 주문을 제외',
+      (readS('utils/repurchaseGuard.js').match(/ca\.order_submission_id IS NULL OR EXISTS/g) || []).length, 4);
+  }
+  {
+    let conflictSql = '';
+    const r = await checkRepurchaseConflictAt({ query: async (sql, params) => {
+      conflictSql = String(sql);
+      eq('지각 확정 기준시각 파라미터', new Date(params[4]).toISOString(), '2026-09-04T00:00:00.000Z');
+      eq('대상 신청 제외 파라미터', params[6], 77);
+      eq('대상 주문 제외 파라미터', params[7], '11111111-1111-4111-8111-111111111111');
+      return { rows: [{ submitted_at: new Date('2026-09-10T00:00:00Z') }] };
+    } }, {
+      sheetId: 's', tabName: 't', campaignId: 'c', phone8: '86365441', days: 14,
+      targetSubmittedAt: '2026-09-04T00:00:00Z', excludeApplicationId: 77,
+      excludeOrderSubmissionId: '11111111-1111-4111-8111-111111111111',
+    });
+    ok('지각 확정은 기간 안의 다른 제출을 충돌로 반환', r.blocked && r.days === 14);
+    ok('지각 확정은 현재시각이 아니라 대상시각 전후를 비교',
+      conflictSql.includes("$5::timestamptz - make_interval(days => $4)") &&
+      conflictSql.includes("$5::timestamptz + make_interval(days => $4)"));
+    ok('지각 확정은 대상 신청·주문 자체와 취소 주문을 제외',
+      conflictSql.includes('ca.id IS DISTINCT FROM $7::integer') &&
+      conflictSql.includes('os.id IS DISTINCT FROM $8::uuid') &&
+      conflictSql.includes('linked_os.deleted_at IS NULL'));
   }
   {
     const origDays = process.env.CAMPAIGN_REPARTICIPATE_DAYS;

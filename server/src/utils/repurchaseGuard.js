@@ -182,6 +182,78 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, campai
 }
 
 /**
+ * 지각 주문 수동확정용: 대상 주문의 실제 제출시각 전후 N일 안에 다른 제출이 있는지 확인한다.
+ * 현재 시각 기준 판정과 달리 과거 사건을 뒤늦게 확정하므로 양방향 시간차를 본다.
+ */
+async function checkRepurchaseConflictAt(dbOrClient, {
+  sheetId, tabName, campaignId, phone8, days: campaignDays,
+  targetSubmittedAt, excludeApplicationId, excludeOrderSubmissionId,
+} = {}) {
+  const days = repurchaseDays(campaignDays);
+  const p8 = phone8Of(phone8);
+  const target = new Date(targetSubmittedAt);
+  if (days <= 0 || ((!sheetId || !tabName) && !campaignId) || p8.length !== 8 || !Number.isFinite(target.getTime())) {
+    return { blocked: false, days, conflictingSubmittedAt: null };
+  }
+  const { rows } = await dbOrClient.query(
+    `WITH scope AS (
+       SELECT (
+         SELECT NULLIF(BTRIM(campaign_name), '')
+           FROM tab_configs
+          WHERE sheet_id = $1 AND tab_name = $2
+          LIMIT 1
+       ) AS work_name
+     ), history AS (
+       SELECT os.submitted_at
+         FROM order_submissions os
+         LEFT JOIN tab_configs submitted_tab
+           ON submitted_tab.sheet_id = os.sheet_id
+          AND submitted_tab.tab_name = os.tab_name
+         CROSS JOIN scope
+        WHERE $1::text IS NOT NULL AND $2::text IS NOT NULL
+          AND os.sheet_id = $1
+          AND os.id IS DISTINCT FROM $8::uuid
+          AND os.deleted_at IS NULL
+          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
+          AND (
+            (scope.work_name IS NOT NULL AND (
+              os.repurchase_work_key = $1 || E'\\x1f' || scope.work_name
+              OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = scope.work_name
+            ))
+            OR (scope.work_name IS NULL AND os.tab_name = $2)
+          )
+          AND os.submitted_at > $5::timestamptz - make_interval(days => $4)
+          AND os.submitted_at < $5::timestamptz + make_interval(days => $4)
+       UNION ALL
+       SELECT ca.submitted_at
+         FROM campaign_applications ca
+        WHERE ca.campaign_id = $6
+          AND ca.phone8 = $3
+          AND ca.status = 'submitted'
+          AND ca.id IS DISTINCT FROM $7::integer
+          AND ca.order_submission_id IS DISTINCT FROM $8::uuid
+          AND (ca.order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
+          ))
+          AND ca.submitted_at > $5::timestamptz - make_interval(days => $4)
+          AND ca.submitted_at < $5::timestamptz + make_interval(days => $4)
+     )
+     SELECT submitted_at
+       FROM history
+      ORDER BY ABS(EXTRACT(EPOCH FROM (submitted_at - $5::timestamptz)))
+      LIMIT 1`,
+    [sheetId || null, tabName || null, p8, days, target, campaignId || null,
+      excludeApplicationId || null, excludeOrderSubmissionId || null]
+  );
+  return {
+    blocked: rows.length > 0,
+    days,
+    conflictingSubmittedAt: rows.length ? rows[0].submitted_at : null,
+  };
+}
+
+/**
  * 리뷰어 화면에 "N일 후 재참여 가능"/"지금 재참여 가능"을 표시하기 위한 배치 조회.
  *   화면(카드 목록)에 걸린 모집공고 여러 개를 한 왕복으로 확인한다 — 공고별로 각각
  *   물으면 카드 수만큼 왕복이 생긴다(N+1 금지).
@@ -296,6 +368,7 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
 }
 
 module.exports = {
-  checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseStatusForCampaigns, checkRepurchaseStatusForAccounts,
+  checkRepurchaseWindow, checkRepurchaseWindowBatch, checkRepurchaseConflictAt,
+  checkRepurchaseStatusForCampaigns, checkRepurchaseStatusForAccounts,
   phone8Of, repurchaseDays, repurchaseWindowFromSubmittedAt, resolveCampaignRepurchaseDays,
 };

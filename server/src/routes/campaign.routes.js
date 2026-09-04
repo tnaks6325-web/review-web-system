@@ -3505,6 +3505,31 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: `'${a.status}' 상태는 확정 대상이 아닙니다(레거시 오확정 방지).` });
     }
+    // 지각 주문은 과거 제출시각으로 소급 확정된다. 그 사이 같은 작업에 새 제출이 생겼다면
+    // 대상 주문 자체를 제외하고 양쪽 제출시각의 간격을 검사해 기간 제한 우회를 막는다.
+    const targetOrderId = a.late_order_id || a.order_submission_id || null;
+    const { rows: targetTimeRows } = await client.query(
+      `SELECT COALESCE(
+         (SELECT submitted_at FROM order_submissions WHERE id = $1::uuid),
+         $2::timestamptz, NOW()
+       ) AS submitted_at`,
+      [targetOrderId, a.applied_at]
+    );
+    const { checkRepurchaseConflictAt } = require('../utils/repurchaseGuard');
+    const conflict = await checkRepurchaseConflictAt(client, {
+      sheetId: cRows[0].linked_sheet_id, tabName: cRows[0].linked_tab_name,
+      campaignId: id, phone8: a.phone8, days: cRows[0].repurchase_days,
+      targetSubmittedAt: targetTimeRows[0].submitted_at,
+      excludeApplicationId: appId, excludeOrderSubmissionId: targetOrderId,
+    });
+    if (conflict.blocked) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false, reason: 'repurchase_window', days: conflict.days,
+        conflictingSubmittedAt: conflict.conflictingSubmittedAt,
+        error: `이 주문의 제출시각 전후 ${conflict.days}일 안에 같은 작업 참여가 있어 확정할 수 없습니다.`,
+      });
+    }
     // 같은 (campaign, phone8)의 진행 중 홀드만 정리한다. 기간을 지킨 재참여는 과거 submitted 행과
     // 함께 존재할 수 있으므로, 늦게 도착한 구매양식의 수동확정도 과거 확정을 이유로 영구 차단하지 않는다.
     await client.query(
