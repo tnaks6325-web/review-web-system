@@ -39,6 +39,7 @@ const { isPostUrl, BLOG_URL_HINT } = require('../utils/blogPostUrl');
 const { workKindForTab: tabWorkKind } = require('../services/workKindContext.service');
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
+const { repurchaseDays } = require('../utils/repurchaseGuard');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -2325,9 +2326,12 @@ async function _adminCampaignList(req, res, next) {
     const data = rows.map(r => {
       const displayTotal = displayTotals.get(r.id) || { total: Number(r.recruit_total) || 0, source: 'campaign' };
       const _sug = _archiveSuggest ? (_archiveSuggest.get(r.id) || null) : null;
+      // ★ 148: 마이그레이션 전 기존 공고(NULL)는 운영 중이던 env 기본값을 그대로 상속한다.
+      //   편집 화면에는 그 유효값을 내려 저장 시 운영 정책이 갑자기 14일로 바뀌지 않게 한다.
+      const effectiveRepurchaseDays = repurchaseDays(r.repurchase_days);
       // archiveSuggest: {total, filled, full} — full=true 일 때만 화면이 [📦 보관 제안] 배지를 그린다.
       const _oif = inflowFallback.get(r.id) || null;
-      if (!r.participation_mode) return { ...r, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source, archiveSuggest: _sug, orderInflowType: _oif };
+      if (!r.participation_mode) return { ...r, repurchase_days: effectiveRepurchaseDays, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source, archiveSuggest: _sug, orderInflowType: _oif };
       const cnt = countsMap.get(r.id) || {
         activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
       };
@@ -2341,6 +2345,7 @@ async function _adminCampaignList(req, res, next) {
       const _resume = _weekendResume(r, _weekend, stateCnt, now, _sch);
       return {
         ...r,
+        repurchase_days: effectiveRepurchaseDays,
         archiveSuggest: _sug,
         // 카드 유입방식 칩 폴백(표시 전용) — 저장값이 없을 때만 채워진다.
         orderInflowType: _oif,

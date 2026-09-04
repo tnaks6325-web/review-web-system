@@ -22,15 +22,22 @@ const modal = read(path.join(repoRoot, 'frontend', 'js', 'recruit-modal.js'));
 const recruit = read(path.join(repoRoot, 'frontend', 'js', 'index-recruit.js'));
 const home = read(path.join(repoRoot, 'frontend', 'index.html'));
 
-assert.ok(migration.includes('ADD COLUMN IF NOT EXISTS repurchase_days INTEGER NOT NULL DEFAULT 14'),
-  '기존/신규 공고의 기본값은 종전과 같은 14일');
-assert.ok(migration.includes('CHECK (repurchase_days BETWEEN 0 AND 365)'), 'DB가 0~365 범위를 최종 방어');
+assert.ok(migration.includes('ADD COLUMN IF NOT EXISTS repurchase_days INTEGER;'),
+  '기존 공고는 NULL로 두어 배포 전 운영 기본값을 상속');
+assert.ok(migration.includes('ALTER COLUMN repurchase_days SET DEFAULT 14'),
+  '직접 INSERT 등 신규 공고의 DB 안전망 기본값은 14일');
+assert.ok(!migration.includes('SET repurchase_days = 14') && !migration.includes('ALTER COLUMN repurchase_days SET NOT NULL'),
+  '기존 공고의 운영 기본값을 14일로 강제 덮어쓰지 않음');
+assert.ok(migration.includes('CHECK (repurchase_days IS NULL OR repurchase_days BETWEEN 0 AND 365)'),
+  'DB가 레거시 NULL 또는 0~365 범위만 허용');
 assert.ok(entry.includes("['recruit_campaigns', 'repurchase_days']"), '컬럼 누락 시 서버 기동을 차단');
 
 assert.ok(campaigns.includes('repurchase_days, // ★ 148'), 'create/update 요청에서 공고별 값을 받음');
 assert.ok(campaigns.includes('recall_product, repurchase_days)'), 'create INSERT에 값을 저장');
 assert.ok(campaigns.includes('repurchase_days = COALESCE($50::integer, repurchase_days)'),
   'update 미전송은 보존하고 명시값은 갱신');
+assert.ok(campaigns.includes('repurchase_days: effectiveRepurchaseDays'),
+  '기존 NULL 공고 편집 시 운영 중인 유효 기본값을 복원');
 assert.ok(campaigns.includes('days: camp.repurchase_days'), '리뷰어 참여 최종 차단이 대상 공고 저장값을 사용');
 assert.ok(campaigns.includes('재참여 제한 기간은 제한 없음(0일) 또는 1~365일'), '서버 입력 범위 검증');
 const confirmStart = campaigns.indexOf("router.post('/admin/:id/confirm'");
