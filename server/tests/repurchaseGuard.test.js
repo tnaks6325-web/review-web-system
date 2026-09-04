@@ -178,7 +178,11 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   const iIdRoute = campFull.indexOf(`router.get('/:id'`);
   ok('★ 라우트 등록 순서: /:id 보다 앞(뒤에 두면 /:id 가 이 경로를 id로 삼킨다)',
     iMyStatusRoute > -1 && iIdRoute > -1 && iMyStatusRoute < iIdRoute);
-  ok('phone8 형식 검증(자릿수) 있음', campFull.slice(iMyStatusRoute, iIdRoute).includes("p8.length !== 8"));
+  ok('★ 카드 상태 조회는 서명된 리뷰어 세션 필수',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('reviewerSessionMiddleware'));
+  ok('★ 요청 phone8을 신원으로 쓰지 않고 세션 소유자 ID로 계정을 조회',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('[req.reviewer.ownerReviewerId]') &&
+    !campFull.slice(iMyStatusRoute, iIdRoute).includes('req.query.phone8'));
   ok('checkRepurchaseStatusForAccounts 사용(본계정·타계정 단일 출처)',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForAccounts'));
   ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
@@ -270,6 +274,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
 
   const idx = readF('index.html');
   ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));
+  ok('★ 카드 상태 조회에 리뷰어 세션 토큰을 전달',
+    idx.includes('headers: { "X-Reviewer-Token": reviewerToken }'));
   ok('★ 같은 (번호+공고목록) 조합은 재조회하지 않는다(재렌더→재조회 순환 방지)',
     idx.includes('if (key === _rcRepurchaseFetchKey) return;'));
   ok('조회 실패해도 목록 렌더 자체는 살아있다(부가 정보 취급)',

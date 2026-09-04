@@ -40,6 +40,7 @@ const { workKindForTab: tabWorkKind } = require('../services/workKindContext.ser
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
 const { repurchaseDays } = require('../utils/repurchaseGuard');
+const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -1177,22 +1178,27 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
   }
 });
 
-// GET /api/campaign/my-repurchase-status?phone8=&ids=id1,id2,… — 재참여(재구매) 기간 안내(무인증 phone8 스코프)
+// GET /api/campaign/my-repurchase-status?ids=id1,id2,… — 재참여(재구매) 기간 안내(리뷰어 세션 스코프)
 //   화면(카드 목록)의 "N일 후 재참여 가능"/"지금 재참여 가능" 썸네일 안내가 이 응답으로 채워진다.
 //   판정 단일 출처 = utils/repurchaseGuard(apply 게이트와 같은 기준 — 카드는 열려 있는데 참여는
 //   거부되는 불일치를 만들지 않는다). ★ 참여 이력이 아예 없는 공고는 응답 맵에 없다(=평소 카드).
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 이 경로를 id로 삼킨다.
-router.get('/my-repurchase-status', applyLimiter, async (req, res, next) => {
+router.get('/my-repurchase-status', applyLimiter, reviewerSessionMiddleware, async (req, res, next) => {
   try {
-    const p8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
-    if (p8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return res.json({ ok: true, status: {} });
-    const { rows } = await pool.query('SELECT name, sub_accounts FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]);
+    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본·타계정을 읽는다.
+    const { rows } = await pool.query(
+      'SELECT name, phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1',
+      [req.reviewer.ownerReviewerId]
+    );
+    if (rows.length !== 1) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
+    const p8 = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
+    if (p8.length !== 8) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 확인할 수 없습니다.' });
     let subs = (rows[0] && rows[0].sub_accounts) || [];
     if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
     if (!Array.isArray(subs)) subs = [];
-    const accounts = [{ phone8: p8, type: 'self', displayName: String((rows[0] && rows[0].name) || '본계정') }];
+    const accounts = [{ phone8: p8, type: 'self', displayName: String(rows[0].name || '본계정') }];
     for (const sub of subs) {
       const subP8 = String((sub && sub.phone) || '').replace(/\D/g, '').slice(-8);
       if (subP8.length === 8 && subP8 !== p8 && !accounts.some(a => a.phone8 === subP8)) accounts.push({ phone8: subP8, type: 'sub', displayName: String((sub && sub.name) || '타계정') });

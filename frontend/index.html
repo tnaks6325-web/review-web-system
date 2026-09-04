@@ -3270,12 +3270,15 @@ async function _rcLoadRepurchaseStatus(ids) {
   try {
     const user = getSavedUser();
     const phone8 = user && user.phone8;
-    if (!phone8 || !ids.length) return;
+    const reviewerToken = user && user.reviewerToken;
+    if (!phone8 || !reviewerToken || !ids.length) return;
     // 상태는 시간에 따라 바뀌므로 목록 재조회 때마다 영구 캐시하지 않는다(1분 단위 갱신).
     const key = phone8 + "|" + ids.slice().sort().join(",") + "|" + Math.floor(Date.now() / 60000);
     if (key === _rcRepurchaseFetchKey) return;
     _rcRepurchaseFetchKey = key;
-    const res = await fetch(API_BASE_URL + "/api/campaign/my-repurchase-status?phone8=" + encodeURIComponent(phone8) + "&ids=" + encodeURIComponent(ids.join(",")));
+    const res = await fetch(API_BASE_URL + "/api/campaign/my-repurchase-status?ids=" + encodeURIComponent(ids.join(",")), {
+      headers: { "X-Reviewer-Token": reviewerToken }
+    });
     const json = await res.json();
     if (!json || !json.ok) return;
     const status = json.status || {};
