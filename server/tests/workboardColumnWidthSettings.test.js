@@ -36,12 +36,15 @@ const context = {
   },
   _colLabel: key => key,
   gCellDisp: (row, key) => row[key] || '',
+  toast: () => {},
 };
 vm.runInNewContext(`${src.slice(start, end)}
 globalThis.autoWidths=_gridAutoColumnWidths;
 globalThis.applyPrefs=_gridApplyWidthPrefs;
 globalThis.savePrefs=_gridSaveWidthPrefs;
-globalThis.loadPrefs=_gridLoadWidthPrefs;`, context);
+globalThis.loadPrefs=_gridLoadWidthPrefs;
+globalThis.keyToken=_gridWidthKeyToken;
+globalThis.setStoredWidth=_gridSetStoredWidth;`, context);
 
 const cols = [{ key: '주소' }];
 const auto = context.autoWidths(context.STATE.wd, cols);
@@ -50,6 +53,15 @@ assert.ok(context.savePrefs({ 주소: 320 }), '수동 너비가 저장되어야 
 assert.strictEqual(context.loadPrefs().주소, 320, '현재 작업표의 수동 너비를 다시 읽어야 합니다.');
 assert.strictEqual(context.applyPrefs(auto, cols).get('주소'), 320, '수동 너비는 자동 계산값보다 우선해야 합니다.');
 assert.notStrictEqual(autoWidth, 320, '테스트의 자동값과 수동값은 달라야 합니다.');
+assert.ok(context.setStoredWidth('주소', 340), '직접 드래그 저장은 성공 여부를 반환해야 합니다.');
+
+const hostileKey = "x'-alert(document.domain)-'y";
+const safeToken = context.keyToken(hostileKey);
+assert.ok(!safeToken.includes("'"), '시트 컬럼명은 작은따옴표 인라인 핸들러를 탈출할 수 없어야 합니다.');
+assert.strictEqual(decodeURIComponent(safeToken), hostileKey, '안전 토큰은 원래 컬럼명으로 복원되어야 합니다.');
+
+context.localStorage.setItem = () => { throw new Error('quota'); };
+assert.strictEqual(context.setStoredWidth('주소', 360), false, '저장소 실패를 성공으로 보고하면 안 됩니다.');
 
 context.STATE.cur = { sheetId: 'sheet-1', tabName: '작업-B' };
 assert.strictEqual(context.loadPrefs().주소, undefined, '다른 작업표에는 수동 너비가 번지면 안 됩니다.');
