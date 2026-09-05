@@ -232,7 +232,9 @@ ok('★ title 은 남는다 — 이미지 alt(접근성)·빈 상태 문구가 �
   /alt="\$\{esc\(title\)\}"/.test(WD) && /const left=col\('cap','구매 캡처'/.test(WD)
   && /const right=col\('rev','리뷰 캡처'/.test(WD));
 ok('★ 캡처 칸 여백은 사방 같다(좌우=상하)', /border-radius:9px;background:var\(--card2\);padding:8px\}/.test(WD));
-ok('★ 미리보기 패널 여백도 사방 같다', /\.rvpane \.rvfill\{position:absolute;inset:0;display:flex;flex-direction:column;padding:12px\}/.test(WD));
+ok('★ 미리보기 패널 여백은 제목행 돌출을 포함해 현재 규격을 유지한다',
+  /\.tp3grid\.c3 \.rvpane \.rvfill\{position:absolute;inset:0;display:flex;flex-direction:column;padding:11px 13px\}/.test(WD)
+  && /\.tp3grid\.c3 \.rvpane \.rvfill > \.topcardhd\{width:calc\(100% \+ 26px\);margin:-11px -13px 8px\}/.test(WD));
 /* ★ 넘김 줄이 흐름에 있으면 그 높이만큼 **아래 여백만** 넓어져 사방 같기가 깨진다. */
 ok('★ 넘김 줄은 캡처 위에 띄운다(흐름 밖) — 아래 여백이 늘지 않는다',
   /\.rv2 \.rvpg\{position:absolute;left:0;right:0;bottom:5px/.test(WD)

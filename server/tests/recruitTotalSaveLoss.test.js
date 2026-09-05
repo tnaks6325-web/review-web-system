@@ -26,7 +26,7 @@ const has = (src, re, msg) => { if (!re.test(src)) throw new Error(msg || `패�
 t('서버가 차수 잠금 상태를 상세 응답에 싣는다', () => {
   has(routes, /FROM campaign_rounds WHERE campaign_id = \$1`, \[id\]\)/, '차수 집계 조회가 없다');
   has(routes, /roundsLock = \{ locked: _n > 0, count: _n, total:/, 'locked/count/total 을 함께 주지 않는다');
-  has(routes, /orderStartDate, roundsLock \}\);/, '응답에 roundsLock 이 없다');
+  has(routes, /orderStartDate, orderCampaignContent, roundsLock,/, '응답에 roundsLock 이 없다');
 });
 
 t('★ 조회 실패·095 미적용은 null(모름) — "잠금 없음"으로 꾸미지 않는다', () => {

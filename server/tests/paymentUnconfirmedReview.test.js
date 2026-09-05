@@ -50,6 +50,7 @@ const client = {
     if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) return { rows: [{ reviewerName: '황민정', rowIndex: 45, alreadyPaid: false }] };
     if (/FROM payment_batch_items WHERE batch_id/.test(sql)) return { rows: [] };
     if (/INSERT INTO unconfirmed_transfer_reviews/.test(sql)) return { rows: [{ id: 'review-1', decision: 'APPROVED', result_seq: 8 }] };
+    if (/SELECT COALESCE\(tc\.workboard_schema_version, 1\) AS schema_version/.test(sql)) return { rows: [{ schema_version: 1, is_submitted: false }] };
     if (/UPDATE review_index SET is_submitted2 = 'PAID'/.test(sql)) return { rowCount: 1, rows: [] };
     if (/INSERT INTO payment_records/.test(sql)) return { rowCount: 1, rows: [] };
     throw new Error(`unexpected query: ${sql.slice(0, 80)}`);

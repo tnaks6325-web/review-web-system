@@ -136,12 +136,13 @@ const CNT = (id, o) => Object.assign({
   /* ══ 2) 배선 · 노출 범위 ══════════════════════════════════════════════════ */
   console.log('\n2) workdeskTab 배선 · 노출 범위');
   const wdBlock = SVC_SRC.slice(SVC_SRC.indexOf('async function workdeskTab('), SVC_SRC.indexOf('function tabTodayProgress') > 0 ? SVC_SRC.length : undefined);
-  const showEditsBlock = SVC_SRC.slice(SVC_SRC.indexOf('if (showEdits) {\n    res.orphanEdits'), SVC_SRC.indexOf('else if (role === \'advertiser\')'));
+  const showEditsStart = SVC_SRC.indexOf('if (showEdits) {\n    res.orphanEdits');
+  const showEditsBlock = SVC_SRC.slice(showEditsStart, SVC_SRC.indexOf("else if (role === 'advertiser')", showEditsStart));
   t('★ 내부인은 원본 그대로 받는다', /res\.todayProgress = await tabTodayProgress\(/.test(showEditsBlock));
   // ★★ 업체 뷰어에도 같은 표기를 넣되(사용자 확정 2026-08-10) **렌즈를 반드시 거친다** —
   //   원본을 그대로 실으면 공고 확정 수·결제 중 홀드·합산 공고 수가 외부로 샌다.
-  const advBlock = SVC_SRC.slice(SVC_SRC.indexOf("else if (role === 'advertiser') {"),
-    SVC_SRC.indexOf("else if (role === 'advertiser') {") + 700);
+  const advStart = SVC_SRC.indexOf("else if (role === 'advertiser') {", showEditsStart);
+  const advBlock = SVC_SRC.slice(advStart, advStart + 700);
   t('★★ 광고주는 렌즈를 거쳐서만 받는다(원본 직결 금지)',
     /res\.todayProgress = _tpAdvertiserLens\(await tabTodayProgress\(/.test(advBlock)
     && !/res\.todayProgress = await tabTodayProgress\(/.test(advBlock));

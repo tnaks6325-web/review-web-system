@@ -111,7 +111,8 @@ ok('삭제 모드 중엔 카운트다운 자동 새로고침 보류(선택 유�
 
 /* ── 서버 동기화 ── */
 ok('관리자 목록이 리뷰어와 같은 상태 계산을 쓴다(computeCampaignState)',
-  /admin\/list[\s\S]{0,2600}computeCampaignState\(r, cnt, now/.test(routes));
+  /router\.get\('\/admin\/list'[\s\S]{0,160}_adminCampaignList\)/.test(routes)
+  && /async function _adminCampaignList[\s\S]*?computeCampaignState\(r, stateCnt, now/.test(routes));
 ok('집계 실패해도 목록은 뜬다(관리 기능 마비 방지)',
   /admin\/list 집계 실패/.test(routes));
 

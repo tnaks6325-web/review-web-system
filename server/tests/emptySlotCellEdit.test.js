@@ -32,7 +32,7 @@ function readPool(scn) {
       const s = String(sql).replace(/\s+/g, ' ').trim();
       if (/FROM tab_configs/.test(s)) return { rows: [{ campaignName: 'C' }] };
       if (/FROM participant_edits/.test(s)) return { rows: scn.edits || [] };
-      if (/reviewer_name AS name.*FROM campaign_participants.*ORDER BY seq/.test(s)) return { rows: scn.roster || [] };
+      if (/cp\.reviewer_name AS name.*FROM campaign_participants cp.*ORDER BY cp\.seq/.test(s)) return { rows: scn.roster || [] };
       return { rows: [] };
     },
   };

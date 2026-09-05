@@ -8,6 +8,9 @@ async function run() {
   let records = 0;
   const client = {
     async query(sql) {
+      if (/SELECT COALESCE\(tc\.workboard_schema_version, 1\) AS schema_version/.test(sql)) {
+        return { rows: [{ schema_version: 1, is_submitted: false }], rowCount: 1 };
+      }
       if (/UPDATE review_index SET is_submitted2 = 'PAID'/.test(sql)) {
         const isConditional = /IS DISTINCT FROM 'PAID'/.test(sql);
         if (isPaid && isConditional) return { rowCount: 0, rows: [] };

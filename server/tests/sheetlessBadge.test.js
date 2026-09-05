@@ -53,8 +53,9 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
   /* A-2. 업체관리 연결탭 표 = ownedTabsForAdvertiser */
   {
     const src = read('src/services/trackB.service.js');
-    const body = src.slice(src.indexOf('async function ownedTabsForAdvertiser'),
-      src.indexOf('async function ownedTabsForAdvertiser') + 4000);
+    const start = src.indexOf('async function ownedTabsForAdvertiser');
+    const end = src.indexOf('\nasync function ', start + 10);
+    const body = src.slice(start, end > start ? end : src.length);
     ok('ownedTabsForAdvertiser 가 sheetless 를 싣는다', /COALESCE\(tc\.sheetless,\s*FALSE\)\s+AS\s+"sheetless"/i.test(body));
     // 이 함수는 이미 tab_configs 를 조인하고 있어야 한다 = 쿼리 순증 0(폴더 버튼 규율과 같다)
     ok('★ 쿼리 순증 0 — tab_configs 조인은 이미 있던 것을 쓴다', /JOIN tab_configs tc/i.test(body));

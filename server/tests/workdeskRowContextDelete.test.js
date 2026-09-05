@@ -13,8 +13,8 @@ assert.ok(menuFn, '_menuDeleteRow 본문을 찾지 못했습니다');
 assert.ok(!/deleteOrderRow\(/.test(menuFn),
   '우클릭 삭제가 총원을 줄이는 order-delete 경로로 가면 안 됩니다(총 모집인원 유지가 이 기능의 목적)');
 assert.match(menuFn, /hideRow\(rowId,\s*\{hasOrder:/, '우클릭 삭제는 hideRow 한 경로로 수렴해야 합니다');
-assert.match(menuFn, /STATE\.role==='master'\|\|STATE\.role==='admin'/,
-  '구매기록 취소는 서버가 master/admin만 허용하므로 화면도 같은 게이트를 걸어야 합니다');
+assert.match(menuFn, /!_isInternalRole\(\)/,
+  '구매기록 취소는 서버와 같이 내부 역할(master/admin/staff)만 허용해야 합니다');
 assert.match(menuFn, /alert\(/, '권한 없는 경우 조용히 아무 일도 안 하지 말고 사유를 말해야 합니다');
 
 // 메뉴 항목이 그 행에서 무엇을 하는지 라벨로 말하고, 못 누르는 경우는 잠근다(죽은 항목 금지).
@@ -85,6 +85,7 @@ function runMenuDelete({ role, roster, rowId }) {
     deleteOrderRow: (id) => calls.order.push(id),
     _closeCellMenu: () => {},
   };
+  sandbox._isInternalRole = () => ['master', 'admin', 'staff'].includes(sandbox.STATE.role);
   vm.createContext(sandbox);
   vm.runInContext(menuFn + '\n_menuDeleteRow();', sandbox);
   return calls;
@@ -99,8 +100,8 @@ assert.strictEqual(asAdmin.hide[0].opts && asAdmin.hide[0].opts.hasOrder, true,
   '구매기록이 붙은 행임을 알려 확인창이 사실대로 말하게 해야 합니다');
 
 const asStaff = runMenuDelete({ role: 'staff', roster: orderRoster, rowId: 'r1' });
-assert.strictEqual(asStaff.hide.length, 0, '권한 없는 담당자가 구매기록을 취소하면 안 됩니다');
-assert.strictEqual(asStaff.alert.length, 1, '권한 없는 경우 사유를 말해야 합니다');
+assert.strictEqual(asStaff.hide.length, 1, '서버가 허용하는 내부 담당자도 구매기록을 취소할 수 있어야 합니다');
+assert.strictEqual(asStaff.alert.length, 0, '허용된 내부 담당자에게 권한 오류를 띄우면 안 됩니다');
 
 const plain = runMenuDelete({ role: 'staff', roster: plainRoster, rowId: 'r2' });
 assert.strictEqual(plain.hide.length, 1, '주문 없는 행은 종전대로 담당자도 제거할 수 있어야 합니다');

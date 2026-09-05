@@ -66,6 +66,7 @@ const DELETE_TABLES = [
   'parity_snapshots',
   'reviewer_event_logs',
   'tab_column_mappings',
+  'tab_status_column_bindings',
   'unrecognized_tabs',
   'short_links',
   'trackb_thread_seen',
@@ -107,6 +108,10 @@ const MONEY_TABLES = [
 const KEEP_TABLES = [
   { table: 'orphan_capture_tombstones',
     why: '작업이 사라진 뒤 Drive 에 남은 캡처를 찾을 유일한 좌표 — 같이 지우면 영영 못 찾는다' },
+  { table: 'workboard_consolidation_link_events',
+    why: '통폐합 롤백이 이번 백업에서 만든 연결만 되돌리도록 증명하는 변경 저널이라 작업 삭제 뒤에도 보존한다' },
+  { table: 'workboard_consolidation_targets',
+    why: '승인된 기존 작업의 통폐합 상태와 새 workboard 연결을 보존하는 전환 원장이라 레거시 탭 삭제와 함께 지우지 않는다' },
 ];
 
 let _pool = null;

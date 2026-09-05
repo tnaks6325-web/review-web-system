@@ -108,8 +108,8 @@ function ok(name, cond, extra) {
   // ── D. 프론트 ──
   console.log('\n[D] 프론트(등록리뷰어DB) — 배선 · 팝업 규율');
   {
-    ok('연락처 칸에 [변경] 버튼 — onclick 은 인덱스만',
-      /_rvPhone\(\$\{i\}\)/.test(wdk) && !/_rvPhone\('\$\{/.test(wdk));
+    ok('연락처 칸에 [이름 및 번호변경] 버튼 — onclick 은 행·명의 인덱스만',
+      /_rvIdentityChange\(\$\{i\},0\)/.test(wdk) && !/_rvIdentityChange\('\$\{/.test(wdk));
     ok('팝업은 body 직속', /_rvPhone[\s\S]{0,2600}document\.body\.appendChild/.test(wdk));
     // ★ 변이시험이 뚫은 자리: "인라인 onclick 문자열이 없다"만 보면 setAttribute·addEventListener·d.onclick
     //   어느 쪽으로 붙여도 통과한다 → **_rvPhone 본문에 오버레이 클릭 핸들러 자체가 없음**을 고정한다.

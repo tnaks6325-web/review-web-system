@@ -171,10 +171,13 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
 
     /* ★ 되돌리기 스위치는 require 시점에 읽히므로 자식 프로세스로 확인한다. */
     const { execFileSync } = require('child_process');
-    const probe = "const S=require('" + require.resolve('../src/services/captureLinkBackfill.service.js') + "');"
+    const probe = "const S=require(process.argv[1]);"
       + "process.stdout.write(String(S.backfillEligibility({verdict:'attachedButUnlinked',confidence:'low',fileId:'F1',winCandidates:1,candidates:1,matchedBy:'recipient',hasRecipient:true}).reason||'ok'));";
     let off = '';
-    try { off = execFileSync(process.execPath, ['-e', probe], { env: { ...process.env, CAPTURE_LINK_NAME_ONLY: '0' } }).toString(); } catch (e) { off = 'ERR:' + e.message; }
+    try {
+      off = execFileSync(process.execPath, ['-e', probe, require.resolve('../src/services/captureLinkBackfill.service.js')],
+        { env: { ...process.env, CAPTURE_LINK_NAME_ONLY: '0' } }).toString();
+    } catch (e) { off = 'ERR:' + e.message; }
     ok('★ 킬스위치 CAPTURE_LINK_NAME_ONLY=0 이면 시각 창 게이트로 복귀', off === 'low_confidence', off);
   }
 

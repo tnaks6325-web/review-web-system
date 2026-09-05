@@ -25,7 +25,9 @@ const { optionWriteColumns } = require('../src/services/orderLedger.service');
 console.log('\n① 행 값 추출(rowOptionReviewType × optionWriteColumns 실제 실행)');
 const rowType = (rowJson) => {
   const headers = Object.keys(rowJson);
-  return RT.rowOptionReviewType(rowJson, optionWriteColumns(headers).map(i => headers[i]));
+  const optionHeaders = headers.filter(RT.isReviewOptionHeader)
+    .concat(optionWriteColumns(headers).map(i => headers[i]));
+  return RT.rowOptionReviewType(rowJson, [...new Set(optionHeaders)]);
 };
 ok('리뷰옵션 칸의 구매확정을 읽는다(작업표 생성이 적는 표기)',
   rowType({ '번호': '1', '구매일자': '8 / 19 (수)', '리뷰옵션': '구매확정', '수취인': '' }) === 'confirm');

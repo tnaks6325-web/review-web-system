@@ -110,7 +110,7 @@ pool.query = async (sql) => {
   //   ⚠ 이 분기는 `FROM review_index` 보다 **먼저** 와야 한다 — 그 쿼리의 이중집계 방지
   //     NOT EXISTS 안에 `FROM review_index ri` 가 들어 있어(2026-08-19 주문 id 매칭 추가)
   //     순서가 뒤면 명단 fixture 가 가로채 무시트 주문 5건으로 오인된다(스텁 매칭 함정).
-  if (/ca\.campaign_id IS NOT NULL/.test(sql)) return { rows: [] };
+  if (/FROM order_submissions os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [] };
   if (/FROM review_index/.test(sql)) return { rows: RI_ROWS };
   if (/FROM recruit_campaigns/.test(sql)) {
     return { rows: [{ sheetId: 'S1', tabName: 'T1', reviewFee: 1000, thumbnailUrl: 'https://x/y.png' }] };

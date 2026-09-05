@@ -110,7 +110,7 @@ const SITES = [
 SITES.forEach(([name, re]) => t(name + ' 이 _tabLabel 을 쓴다', re.test(WD)));
 
 const TIPS = [
-  ['작업바 칩', /onclick="selTab\(\$\{i\}\)" title="\$\{esc\(_tabTip\(t\)\)\}/],
+  ['작업바 칩', /data-i="\$\{i\}" title="\$\{esc\(_tabTip\(t\)\)\}/],
   ['홈 작업목록 행', /onclick="openTaskFromHome\(\$\{i\}\)" title="\$\{esc\(_tabTip\(t\)\)\}"/],
   ['광고주 사이드바', /onclick="selTab\(\$\{i\}\)" title="\$\{esc\(_tabTip\(it\)\)\}/],
   ['업체관리 행', /onclick="openOwnTab\(\$\{i\}\)" title="\$\{esc\(_tabTip\(t\)\)\}"/],

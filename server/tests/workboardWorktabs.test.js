@@ -206,8 +206,8 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
 
   /* ── 7) 프론트 배선 ────────────────────────────────────────── */
   console.log('\n7) 프론트 배선');
-  t('작업보드 상단 순서는 업체 → 업체 작업 → 열린 작업이다',
-    /class="tb1 wb-tier wb-company"[\s\S]{0,1200}class="tb2 wb-tier wb-task"[\s\S]{0,1200}class="tb0 wb-tier wb-open"/.test(WD));
+  t('작업보드 상단 순서는 업체 → 선택 업체 작업 드롭다운 → 열린 작업이다',
+    /class="tb1 wb-tier wb-company"[\s\S]{0,1200}class="wb-task-menu" id="taskmenu" hidden[\s\S]{0,1200}class="tb0 wb-tier wb-open"/.test(WD));
   t('★ 작업을 여는 모든 경로가 selTab 으로 수렴 → 거기서 줄에 추가(사본 금지)',
     /_renderTabList\(\);[\s\S]{0,200}_wtOpen\(t\);/.test(WD) && (WD.match(/_wtOpen\(/g) || []).length === 2);
   t('★★ 열린 줄 변경은 단일 커밋 지점(_wtCommit) — 사본을 두면 dirty 를 안 세워 부팅 경합이 되살아난다',
@@ -229,8 +229,8 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     /if\(r\.worktabsUnavailable\)\{ STATE\.worktabsUnavailable=true; _renderWorktabs\(\); return; \}/.test(WD)
     && /worktabsUnavailable[\s\S]{0,140}열린 작업 줄을 불러오지 못했습니다/.test(WD));
   t('★★ 계정 전환 시 열린 줄·즐겨찾기 메모리 상태를 비운다(키가 계정별이어도 메모리를 안 비우면 무의미 — 이전 계정 탭명 노출 + 그 목록이 새 계정 서버 행에 저장)',
-    /worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null/.test(WD)
-    && (WD.match(/worktabs:null,_wtLoaded:false,_wtDirty:false/g) || []).length === 2);
+    (WD.match(/worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false/g) || []).length === 2
+    && (WD.match(/favs:null,_favLoaded:false/g) || []).length === 2);
   t('★ 상한에서 **열기를 막는다**(서버가 뒤를 자르면 방금 연 탭만 사라져 이해 불가한 동작)',
     /if\(list\.length>=WT_CAP\)\{ toast\(/.test(WD));
   t('★ 드래그: 오른쪽으로 끌면 대상 뒤 — 끝자리로 옮길 수 있어야 한다(항상 앞이면 불가능)',

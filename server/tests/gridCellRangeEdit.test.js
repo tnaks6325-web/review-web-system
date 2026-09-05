@@ -32,8 +32,10 @@ ok('paste 이벤트로 선택 범위에 붙여넣기', /addEventListener\('paste
 ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.map\(j=>commitCellEdit\(/.test(HTML));
 ok('재렌더 시 선택 범위를 비운다(엉뚱한 칸 적용 차단)', /STATE\.gSelRange=null;/.test(HTML.slice(HTML.indexOf('function buildGrid'), HTML.indexOf('function buildGrid') + 1200)));
 ok('한 번에 붙여넣는 칸 수 상한', /_PASTE_MAX\s*=\s*\d+/.test(HTML));
-ok('입금 날짜 열은 내부·광고주 작업보드에서 지정 폭을 쓴다', /'입금':96/.test(HTML)
-  && /'입금':88,'입금일':88/.test(HTML));
+ok('입금 날짜 열도 내부·광고주 공통 자동맞춤과 사용자 너비 설정을 쓴다',
+  /STATE\.gColWidths=_gridAutoColumnWidths\(wd,vcols\)/.test(HTML)
+  && /STATE\.gColWidths=_gridApplyWidthPrefs\(STATE\.gColWidths,vcols\)/.test(HTML)
+  && /function _isDepositCol\(h\)/.test(HTML));
 ok('그리드 안내 문구는 렌더하지 않는다', !/<span class="gnote">/.test(HTML));
 ok('선택 요약 렌더 영역이 있다', /id="gselstat"/.test(HTML));
 ok('선택 요약은 그리드 툴바의 오른쪽 끝에 남아 있다', /\$\{_folBarHtml\(\)\}\s*\n\s*<output id="gselstat"/.test(HTML));

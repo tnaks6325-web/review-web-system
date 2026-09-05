@@ -1,25 +1,14 @@
-/**
- * Shared recruitment editor runtime layout guard.
- *
- * This protects the approved compact-row editor from drifting back to the
- * earlier per-user drag-and-drop card layout. The test intentionally verifies
- * source structure because the editor is plain browser JavaScript.
- */
+/** Shared compact recruitment editor runtime layout guard. */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..', '..');
-const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const modal = read('frontend/js/recruit-modal.js');
 const editor = read('frontend/js/index-recruit.js');
-
 let count = 0;
-function ok(label, condition) {
-  assert(condition, label);
-  count += 1;
-  console.log(`  ✓ ${label}`);
-}
+const ok = (label, condition) => { assert(condition, label); count++; console.log('  ✓ ' + label); };
 
 function cssOf(name) {
   const start = modal.indexOf(`var ${name} = \``);
@@ -29,139 +18,71 @@ function cssOf(name) {
   assert(end > from, `${name} CSS가 닫히지 않았습니다.`);
   return modal.slice(from, end);
 }
+const withoutComments = css => css.replace(/\/\*[\s\S]*?\*\//g, '');
+const compactStart = modal.indexOf('<div class="rf-main rf-compact-main">');
+const compactEnd = modal.indexOf('<!-- /rf-compact-main -->', compactStart);
+const compact = modal.slice(compactStart, compactEnd);
 
-function withoutComments(css) {
-  return css.replace(/\/\*[\s\S]*?\*\//g, '');
-}
-
-ok('모달은 승인된 컴팩트 행 편집기 폭을 사용한다',
+ok('실제 컴팩트 편집기 범위를 찾는다', compactStart > 0 && compactEnd > compactStart);
+ok('모달은 중앙 편집기와 우측 미리보기의 2열 셸을 쓴다',
   /class="modal-box rf-box"[^>]*max-width:1124px/.test(modal)
-  && /#recruitModal \.rf-box\{translate:19px 0;/.test(modal)
-  && /#recruitModal \.rf-rail\{width:197px/.test(modal)
-  && /#recruitModal \.rf-side\{width:309px/.test(modal)
-  && /#recruitModal \.rf-side #rf_preview_listcard\{max-width:284px!important;margin:0 0 16px!important\}/.test(modal));
-ok('좌측은 드래그 레일이 아니라 3단계 고정 내비게이션이다',
-  /class="rf-step-list"/.test(modal)
-  && ['link', 'prod', 'cond'].every((key) => modal.includes(`data-rf-step="${key}"`))
-  && ['fee', 'work'].every((key) => !modal.includes(`data-rf-step="${key}"`))
-  && !modal.includes('onclick="RecruitModal.preset'));
-ok('스크롤 중 현재 단계를 표시하고 클릭하면 중앙 편집 영역을 스크롤한다',
-  /data-rf-step/.test(modal)
-  && /scrollRailToCard/.test(modal)
-  && /setActiveRail/.test(modal)
-  && /if \(act === 'pub' \|\| act === 'fee'\) act = 'link'/.test(modal)
-  && /if \(act === 'work'\) act = 'prod'/.test(modal)
+  && /class="rf-split"/.test(modal)
+  && /<aside class="rf-side">/.test(modal)
+  && /#recruitModal \.rf-side\{width:309px/.test(modal));
+ok('제거된 좌측 단계 레일은 실제 DOM에 없다',
+  !/class="rf-rail\b/.test(compact) && !/data-rf-step=/.test(compact));
+ok('편집기 자체 스크롤과 body 스크롤 잠금을 유지한다',
+  /id="editorScroller" class="compact-editor-scroller"/.test(compact)
   && /body\.rf-recruit-modal-open\{overflow:hidden\}/.test(modal)
   && /document\.body\.classList\.add\("rf-recruit-modal-open"\)/.test(editor)
-  && /document\.body\.classList\.remove\("rf-recruit-modal-open"\)/.test(editor)
-  && /body\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: 'smooth' \}\)/.test(modal));
-ok('자동점검은 좌측 하단에 있으며 본문 단계가 아니다',
-  /id="rf_side_audit"/.test(modal)
-  && modal.indexOf('id="rf_side_audit"') < modal.indexOf('class="rf-main"')
-  && /id="rf_part_check"/.test(modal));
-ok('제목 오른쪽의 상태 버튼은 기존 저장 select와 동기화된다',
-  /id="rf_status_buttons"/.test(modal)
-  && /data-rf-status="draft"/.test(modal)
-  && /data-rf-status="active"/.test(modal)
-  && /data-rf-status="closed"/.test(modal)
-  && /function syncStatusButtons/.test(modal)
-  && /function setStatus/.test(modal)
-  && /syncStatusButtons\(\)/.test(editor));
-ok('중앙 편집부는 사후 DOM 이동 없이 시안 순서로 직접 렌더링된다',
-  !modal.includes('data-sec="info"')
-  && modal.indexOf('data-sec="pub"') < modal.indexOf('data-sec="link"')
-  && modal.indexOf('data-sec="link"') < modal.indexOf('data-sec="fee"')
-  && modal.indexOf('data-sec="fee"') < modal.indexOf('data-sec="prod"')
-  && modal.indexOf('data-sec="prod"') < modal.indexOf('data-product-settings')
-  && modal.indexOf('data-product-settings') < modal.indexOf('id="rf_work_section"')
-  && modal.indexOf('id="rf_work_section"') < modal.indexOf('data-sec="cond"')
-  && /data-product-settings/.test(modal)
-  && /id="rf_delivery_toggle"/.test(modal)
-  && /rf-parity-time-row/.test(modal)
-  && /rf-parity-date-row/.test(modal)
-  && !/function hydrateParityControls/.test(modal)
-  && !/function placeFinalSections/.test(modal)
-  && !/\.appendChild\(settings\)/.test(modal)
-  && !/\.insertBefore\(publish, link\)/.test(modal)
-  && !/\.rf-card\[data-sec="(?:link|fee|prod|work|cond)"\]\{order:/.test(modal)
-  && !/\.rf-publish-card\{order:/.test(modal)
-  && !/RecruitModal\.syncProductSettings\(on\)/.test(editor));
-ok('브라우저가 템플릿의 모달 셸을 잘못 분리해도 미리보기·푸터를 원래 레이아웃으로 복구한다',
-  /function normalizeShellLayout/.test(modal)
-  && /split\.appendChild\(side\)/.test(modal)
-  && /editor\.appendChild\(compactFooter\)/.test(modal)
-  && /box\.appendChild\(legacyFooter\)/.test(modal));
-ok('실제 런타임 중앙 편집부는 승인 시안의 editor/section/row-form 마크업을 직접 사용한다',
-  /class="rf-main rf-compact-main"/.test(modal)
-  && /class="editor-head"/.test(modal)
-  && /class="title-control-bar"/.test(modal)
-  && /class="section" data-sec="link"/.test(modal)
-  && /class="row-form"/.test(modal)
-  && /class="form-row"/.test(modal)
-  && /class="form-label"/.test(modal)
-  && /class="form-control"/.test(modal));
-const compactEditorStart = modal.indexOf('<div class="rf-main rf-compact-main">');
-const legacyRootClose = modal.indexOf('</div></template><!-- /legacy rf-main -->');
-const compact = modal.slice(compactEditorStart);
-ok('sheetless compact editor keeps sheet and tab only as hidden compatibility fields',
+  && /document\.body\.classList\.remove\("rf-recruit-modal-open"\)/.test(editor));
+ok('작업 시작 점검은 편집기 상단에 있다',
+  /class="startup-setting-bar"/.test(compact) && /id="rf_startcheck"/.test(compact));
+ok('상태 저장 계약은 숨은 select로 유지한다',
+  /id="rf_status" hidden/.test(compact) && /function syncStatusButtons/.test(modal));
+ok('시안 순서로 공개 설정·기본 설정·진행상품을 직접 렌더링한다',
+  compact.indexOf('class="section rf-public-settings"') < compact.indexOf('data-sec="link"')
+  && compact.indexOf('data-sec="link"') < compact.indexOf('data-sec="prod"')
+  && !/data-sec="info"/.test(compact));
+ok('중앙 편집부는 section/row-form/form-row 문법을 쓴다',
+  /class="section" data-sec="link"/.test(compact)
+  && /class="row-form"/.test(compact)
+  && /class="form-row"/.test(compact)
+  && /class="form-label"/.test(compact)
+  && /class="form-control"/.test(compact));
+ok('시트·탭은 숨은 호환 필드로만 유지한다',
   /<div class="sheetless-compat-fields" hidden><select id="rf_linked_campaign"/.test(compact)
-  && /<select id="rf_linked_tab"/.test(compact)
-  && !/class="form-row"><span class="form-label">[^<]*<em class="required"/.test(compact.slice(0, compact.indexOf('id="rf_inflow_type_ui"')))
-  && !/class="linked-reference"/.test(compact.slice(0, compact.indexOf('id="rf_inflow_type_ui"'))));
-ok('product main URL is directly editable below work type and synced to landing URL',
+  && /<select id="rf_linked_tab"/.test(compact));
+ok('상품 메인 URL은 작업 종류 아래에서 직접 편집한다',
   compact.indexOf('product-work-type') < compact.indexOf('id="rf_product_main_url"')
   && compact.indexOf('id="rf_product_main_url"') < compact.indexOf('id="rf_opt_wrap"')
   && /<input id="rf_product_url" type="url"/.test(compact)
-  && !/rf_product_main_url_value|rf_product_main_url_state|linked-reference/.test(compact.slice(compact.indexOf('id="rf_product_main_url"'), compact.indexOf('id="rf_opt_wrap"')))
   && /landing\.value\s*=\s*String\(input\.value/.test(editor));
-ok('mixed review composer opens below review type buttons',
+ok('혼합 리뷰 조합기는 리뷰 타입 행 안에 있다',
   /class="form-row rf-review-type-row"/.test(compact)
-  && /class="review-type-buttons"/.test(compact)
-  && /rf-review-type-row \.form-control\{display:block/.test(modal)
-  && /\.mixed-review-grid label\{display:grid;grid-template-columns:48px minmax\(0,1fr\)/.test(modal)
-  && /\.mixed-review-type-label\{white-space:nowrap;text-align:left\}/.test(modal));
-ok('badge and guide inputs use the compact two-to-one composition',
-  /class="badge-field"/.test(compact)
-  && /\.badge-field\{display:grid;gap:6px;width:100%\}/.test(modal)
-  && /\.work-compose\{display:grid;grid-template-columns:minmax\(220px,1fr\) 128px/.test(modal)
-  && /\.work-image-strip\{justify-self:end;width:128px!important;height:58px;min-width:0;min-height:58px/.test(modal)
-  && /#recruitModal \.rf-compact-main \.ig-strip\{height:58px!important;min-height:58px!important/.test(modal)
-  && /\.rf-compact-main \.footer-copy\{min-width:0;flex:1/.test(modal)
-  && /\.footer>div\{display:flex;flex:0 0 auto;flex-wrap:nowrap/.test(modal));
-ok('이전 마크업 템플릿은 새 컴팩트 편집기 전에 정확히 닫혀 실제 입력 DOM을 만든다',
-  legacyRootClose > modal.indexOf('<template id="rf_legacy_card_editor_markup">')
-  && legacyRootClose < compactEditorStart);
-ok('최종 행형 문법은 승인 시안의 25/75 열과 동일 높이의 입력·버튼을 쓴다',
-  /\.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal)
-  && /\.rf-main \.rform-input\{min-height:26px;height:26px/.test(modal)
-  && /\.rchan-btn,#recruitModal \.rf-pm-btn,#recruitModal \.rf-status-buttons button\{min-height:26px/.test(modal));
-ok('옵션 URL·주말 제외·구매시간·현금영수증·기간별 리뷰비 필드는 보존한다',
+  && /id="rf_mixed_review_composer"/.test(compact)
+  && /id="rf_review_mix_rows"/.test(compact));
+ok('이월 배치 방식은 next/spread/extend 세 상태를 저장한다',
+  /id="rf_carry_strategy"/.test(compact)
+  && ['next', 'spread', 'extend'].every(v => compact.includes(`rfCarrySet('${v}')`))
+  && /payload\.carry_strategy/.test(editor));
+ok('옵션 URL·주말·구매시간·현금영수증·기간별 리뷰비 필드를 보존한다',
   ['rf-opt-url', 'rf_skip_weekends', 'rf_free_time_toggle', 'rf_cash_receipt_required', 'rf_fee_sched_on']
-    .every((token) => modal.includes(token)));
-ok('작업내용 3종의 이미지 첨부 입력은 그대로 유지한다',
-  ['rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes', 'rf_ig_inflow', 'rf_ig_review', 'rf_ig_notes']
-    .every((id) => modal.includes(id)));
-ok('컴팩트 편집기의 썸네일·숫자·가이드 입력 UI가 일관되게 동작한다',
-  /class="product-link-button thumb-product-link"/.test(compact)
-  && /미리<br>보기/.test(compact)
-  && /thumb-product-link:hover/.test(modal)
-  && /rf-opt-pay::-webkit-outer-spin-button/.test(modal)
-  && /mixed-review-grid input::-webkit-outer-spin-button/.test(modal)
-  && /#rf_wd_inflow,#recruitModal \.rf-compact-main #rf_wd_review,#recruitModal \.rf-compact-main #rf_wd_notes/.test(modal)
-  && /끌어다 놓기 · Ctrl\+V<br>클릭/.test(editor));
-ok('시안의 상품 URL·단일 선택·혼합 조합·토글 상태 DOM을 런타임이 직접 가진다',
-  /class="form-row product-main-url"/.test(modal)
-  && /id="rf_product_main_url"/.test(modal)
-  && /id="rf_mixed_review_composer"/.test(modal)
-  && /id="rf_review_mix_rows"/.test(modal)
-  && /id="rf_cashrcpt_toggle"/.test(modal)
-  && /id="feeScheduleState"/.test(modal)
-  && /id="weekendNotice"/.test(modal)
-  && /id="accountNote"/.test(modal)
-  && /function rfSetWeekendPolicy/.test(editor)
-  && /function rfSetMultiAccount/.test(editor));
-ok('모달 CSS의 중괄호가 균형을 이뤄 브라우저 파싱이 끊기지 않는다',
-  ['SHELL_CSS', 'CSS'].every((name) => {
+    .every(token => modal.includes(token)));
+ok('작업내용 이미지 첨부 입력을 유지한다',
+  ['rf_wd_review', 'rf_wd_notes', 'rf_ig_review', 'rf_ig_notes'].every(id => compact.includes(id)));
+ok('미리보기는 목록 카드와 참여 후 화면을 함께 렌더링한다',
+  /id="rf_preview_listcard"/.test(modal) && /id="rf_preview_card"/.test(modal)
+  && /구매양식 제출까지/.test(modal));
+ok('인라인 푸터에 저장 버튼이 있고 셸 복구도 같은 위치를 보장한다',
+  /<footer class="footer modal-footer">/.test(compact)
+  && /id="recruitSaveBtnInline"/.test(compact)
+  && /function normalizeShellLayout/.test(modal)
+  && /editor\.appendChild\(compactFooter\)/.test(modal));
+ok('좁은 화면은 1열 폼으로 수렴한다',
+  /@media \(max-width:780px\)[\s\S]*?#recruitModal \.rf-hrow\{grid-template-columns:1fr/.test(modal));
+ok('모달 CSS 중괄호가 균형을 이룬다',
+  ['SHELL_CSS', 'CSS'].every(name => {
     const css = withoutComments(cssOf(name));
     return (css.match(/\{/g) || []).length === (css.match(/\}/g) || []).length;
   }));

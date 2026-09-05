@@ -71,7 +71,9 @@ ok('★ index-recruit: 옵션명이 상품명과 같거나 상품명으로 시�
 ok('index-app: prefill에 options 포함', /options:\s*\(typeof _woOptionRows === "function"\) \? _woOptionRows\(o\) : \[\]/.test(app));
 
 // ── 관제 옵션별 현황 ──
-ok('applications API: option_key 반환 + 옵션 뷰 집계', /order_submission_id, late_order_id, option_key/.test(routes) && /options = await _loadOptionViews\(pool, id, st, now\)/.test(routes));
+ok('applications API: option_key 반환 + 옵션 뷰 집계',
+  /order_submission_id, ca\.late_order_id, ca\.option_key/.test(routes)
+  && /options = await _loadOptionViews\(pool, id, st, now\)/.test(routes));
 ok('index-recruit: 관제 옵션 현황표(_campOptionTable)', /function _campOptionTable\(/.test(recruit) && /옵션별 현황/.test(recruit) && /누적 확정/.test(recruit));
 ok('index-recruit: 관제 표는 신청행 기반 오늘 집계(진행중/제출/누적)', /todayHold: 0, todaySub: 0, cumSub: 0/.test(recruit));
 

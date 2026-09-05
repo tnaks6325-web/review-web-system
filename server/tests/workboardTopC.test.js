@@ -74,8 +74,8 @@ t('② condition 은 두 갈래 모두 같은 호출 1회를 재사용한다(cap
   const before = svc.slice(svc.lastIndexOf('if (showEdits) {', i), i);
   // 광고주 분기(else if) 블록 안에 condition 이 들어가지 않는다 — 전역 [\s\S]* 로 보면
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
-  const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
-                             svc.indexOf("else if (role === 'advertiser') {") + 1400);
+  const advStart = svc.indexOf("else if (role === 'advertiser') {", i);
+  const advBlock = svc.slice(advStart, svc.indexOf('\n  return res;', advStart));
   /* ★★ 2026-08-23 사용자 확정: 업체 뷰어에도 같은 카드를 그린다 — 광고주 분기에도 `condition` 이
      실리되 **반드시 `_condAdvertiserLens` 를 거쳐야** 한다(리뷰비·입금명·내부 식별자 폐기).
      날것(`= _cond`)으로 실으면 그 순간 전부 샌다. */
@@ -85,7 +85,6 @@ t('② condition 은 두 갈래 모두 같은 호출 1회를 재사용한다(cap
   /* `res.condition` 이 몇 번 나오든(일정 등 파생 필드가 붙는다) **전부 showEdits 블록 안**이어야 한다.
      개수로 고정하면 필드가 늘 때마다 무관한 가드가 조용히 빨개진다. */
   const blockStart = svc.lastIndexOf('if (showEdits) {', i);
-  const advStart = svc.indexOf("else if (role === 'advertiser') {");
   return /if \(showEdits\) \{/.test(before) && blockStart > 0 && advStart > blockStart;
 })());
 t('★ 쓰기 쿼리 0 — 조건 요약은 읽기 전용', !/INSERT|UPDATE|DELETE/i.test(cond));
@@ -134,8 +133,8 @@ t('⑤ 상한은 묶음별로 센다(전체 개수로 자르면 나중 묶음이
 t('★ fail-soft — 캡처 조회가 실패해도 리뷰 캡처는 나간다', /\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(rv));
 
 console.log('\n── C. 화면: 상단 3분할 · 작업세부 폐지 · 정산 통합 ──');
-t('★ 내부 렌더는 3분할(.tp3grid.c3) + 미리보기 칸 (+저장된 접힘 상태 복원)',
-  /<div class="tp3grid c3\$\{_topFolded\(\)\?' fold':''\}">\$\{cond\}\$\{prog\}<aside class="rvpane" id="rvPane"><\/aside><\/div>/.test(wd));
+t('★ 내부 렌더는 조건·진행·미리보기와 C/S 미니창을 한 그리드에 배치하고 접힘 상태를 복원한다',
+  /const csMini=isAdv\?'':`<aside class="wdcsmini-pane"[\s\S]{0,220}<div class="tp3grid c3\$\{csMini\?' csmini':''\}\$\{_topFolded\(\)\?' fold':''\}">\$\{cond\}\$\{prog\}<aside class="rvpane" id="rvPane"><\/aside>\$\{csMini\}<\/div>/.test(wd));
 /* ★ 정의 부재만 보면 **호출만 되살린 변이**를 놓친다(변이시험 실측) — 호출 0 까지 함께 고정. */
 t('★ 작업세부 상시 펼침은 본문에서 사라졌다(정의·호출 모두)',
   !/function renderWorkOrderSection/.test(wd) && !/renderWorkOrderSection\(/.test(wd)
@@ -245,7 +244,7 @@ t('★ 일건수 = wd.todayProgress.quota(공고 기준 칩) — 재계산 사�
    ⚠ 점 뒤 공백을 요구하지 않으면 `1.5L 생수` 같은 상품명의 앞이 잘려 나간다. */
 {
   const vm = require('vm');
-  const m = cc.match(/const prod=String\([\s\S]*?;\n/);
+  const m = cc.match(/const workboardDisplayName=[^\n]+;\n\s*const prod=[\s\S]*?\n\s*\.trim\(\);\n/);
   t('★ 상품명 정리 코드가 있다', !!m);
   const sb = { out: null };
   vm.createContext(sb);
@@ -291,7 +290,7 @@ t('★ 머리줄 3곳(작업조건 정상·폴백 / 진행현황 / 미리보기)
 /* ★★ 업체 뷰어도 같은 3분할·같은 접기(사용자 확정 2026-08-23) — 종전의 "광고주는 접기 없음"
    규칙은 폐기됐다. 다른 것은 작업 조건 카드의 **내용**(업체 4줄)과 정산 자리뿐이다. */
 t('★ 진행 현황 머리줄은 내부·업체 한 벌(역할 분기 잔재 0)',
-  /<div class="tp3t tp3h" onclick="_topToggle\(\)"[^>]*>진행 현황<span class="tp3hint">/.test(wd)
+  /<div class="tp3t tp3h topcardhd" onclick="_topToggle\(\)"[^>]*>진행 현황<span class="tp3hint">/.test(wd)
   && !/isAdv\?'':' tp3h"/.test(wd));
 t('★ 업체 뷰어도 같은 3분할을 반환한다(전용 래퍼 advcondition/advprogress 폐기)',
   !/class="advcondition"/.test(wd) && !/class="advprogress"/.test(wd)
@@ -329,9 +328,10 @@ t('★ 모달에는 작업오더 **원본 행**을 넘긴다(작업보드 detail
   && /woAdminEditModal\(o,/.test(orderM));
 t('★ 이 화면에 새 저장 API 를 만들지 않았다(condition 전용 저장 경로 0)',
   !/condition\/save|\/api\/trackb\/condition/.test(wd));
-t('★ 권한 없으면 비활성 + 발주 없는 order 는 비활성(사유)',
+t('★ 권한 없으면 비활성 + order 는 공고 수정 또는 발행 창구를 연다',
   /if\(!STATE\.canEdit\) return \{can:false/.test(gate)
-  && /kind==='order'\) return cd\.workOrderId/.test(gate));
+  && /if\(kind==='order'\) return cd\.campaignId/.test(gate)
+  && /모집공고 설정을 엽니다/.test(gate));
 
 console.log('\n── D2b. 공고 없는 작업 — 막다른 길 제거(사용자 확정 2026-08-20) ──');
 /* ★★ "동기화"를 코드로 잇지 않는다 — 판정 순서가 전부 공고 → 탭이라(리뷰비 resolveReviewFee
@@ -361,12 +361,11 @@ t('★ 구매채널·다계정 — 공고 없으면 발행 모달(탭·작업오
     && /openRecruitModal\(null,\{linked_sheet_id:t\.sheetId,linked_tab_name:t\.tabName/.test(m)
     && /_loadCampPerm\(\)/.test(m);   // 발행 권한(편집 허용명단) 확인 — 눌러도 아무 일 없는 버튼 금지
 })());
-t('★ 정원 — 공고 없고 발주 있으면 작업오더 수정(발행 프리필의 원천), 둘 다 없으면 발행으로',
-  /if\(cd\.workOrderId\) return _cndOrderModal\(cd\);/.test(fix)
-  && /return _cndPublish\(cd\);\s*\/\/ 발주도 없으면/.test(fix.replace(/\u0020{2,}/g,' ')) || (() => {
-    const i=fix.indexOf("if(kind==='quota'){"); const blk=fix.slice(i, fix.indexOf('}', i)+1);
-    return /_cndOrderModal\(cd\)/.test(blk) && /_cndPublish\(cd\)/.test(blk);
-  })());
+t('★ 정원 — 공고가 있으면 모집인원 조절, 없으면 작업오더 프리필을 쓰는 공고 발행으로', (() => {
+  const i=fix.indexOf("if(kind==='quota'){"); const blk=fix.slice(i, fix.indexOf('}', i)+1);
+  return /if\(cd\.campaignId\) return openCurrentCampaignDailyPlan\(\);/.test(blk)
+    && /return _cndPublish\(cd\)/.test(blk);
+})());
 t('★ 미니 팝업은 body 직속 · Esc 리스너는 닫을 때 해제 · 저장 실패는 팝업 유지', (() => {
   const m = fnBody(wd, 'function _cndMini({title,body,onSave}){');
   return /document\.body\.appendChild\(ov\)/.test(m)
@@ -527,7 +526,8 @@ t('★ 3분할 폭 = 439 / 439 / 659 비율 — 앞 두 칸은 같은 너비(고
 t('★ 높이는 px 로 못박지 않는다 — min-height + stretch(내용이 넘치면 발주 줄이 겹친다)',
   /\.tp3grid\.c3 \.tp3col,\.tp3grid\.c3 \.rvpane\{min-height:330px\}/.test(wd)
   && !/\.tp3grid\.c3 \.tp3col\{height:330px\}/.test(wd));
-t('★ 좁은 화면에서 세로로 접힌다', /@media\(max-width:1100px\)\{\.tp3grid\.c3\{grid-template-columns:1fr\}/.test(wd));
+t('★ 좁은 화면에서 C/S 포함 상단 카드가 세로로 접힌다',
+  /@media\(max-width:1100px\)\{\.tp3grid\.c3,\.tp3grid\.c3\.csmini\{grid-template-columns:1fr\}/.test(wd));
 t('★ 미리보기 두 칸은 1fr 1fr', /\.rv2\{[^}]*grid-template-columns:1fr 1fr/.test(wd));
 /* ★★ 캡처가 칸 높이를 밀어 올리지 않는다(실사용 신고 2026-08-19 · 모바일 전체 스크린샷 390×3200).
    내용을 절대배치 레이어로 빼야 grid 행 높이를 왼쪽 두 카드가 정한다 — 이게 없으면

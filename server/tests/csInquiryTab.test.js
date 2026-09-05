@@ -4,8 +4,8 @@
  *
  * 위험 두 가지를 고정한다.
  *  ① **권한** — 문의 본문에는 리뷰어 실명·연락처·주소·주문정보가 그대로 실린다.
- *     기존 `/api/cs/*` 는 master/admin 전용(cs.routes.js 머리말: "staff·리뷰어는 접근 불가")이고
- *     Track B 프록시도 **같은 게이트**여야 한다. 한 칸만 어긋나면 AE 전원에게 열린다.
+ *     기존 `/api/cs/*` 는 내부 담당자(master/admin/staff) 전용이고
+ *     Track B 프록시도 **같은 게이트**여야 한다. 한 칸만 어긋나면 외부 역할에게 열린다.
  *     → 라우터 스택을 실제로 검사한다.
  *  ② **사본 드리프트** — 화면 코드를 리뷰웹시스템[3버전]용으로 베끼면 답장·메모·상태변경 중
  *     하나만 고쳐도 두 화면이 갈라진다. → 같은 모듈을 쓰는지 고정한다.
@@ -36,16 +36,16 @@ const CS = ['GET /cs/threads', 'GET /cs/unread-count', 'GET /cs/messages', 'GET 
 t('★ 7개 경로가 모두 존재하고 `/api/cs/*` 와 모양이 1:1', () => {
   CS.forEach(k => assert.ok(L[k], '없는 라우트: ' + k));
 });
-t('★★ 전부 authMiddleware + adminOrMasterMiddleware — AE(staff)·광고주 차단', () => {
+t('★★ 전부 authMiddleware + internalMiddleware — 내부 담당자 허용·외부 역할 차단', () => {
   CS.forEach(k => {
     assert.ok(L[k].includes('authMiddleware'), k + ': 인증 게이트 없음');
-    assert.ok(L[k].includes('adminOrMasterMiddleware'), k + ': 관리자 게이트 없음');
-    assert.ok(!L[k].includes('internalMiddleware'), k + ': internal 로 완화되면 AE 에게 열린다');
+    assert.ok(L[k].includes('internalMiddleware'), k + ': 내부 역할 게이트 없음');
+    assert.ok(!L[k].includes('adminOrMasterMiddleware'), k + ': 원본보다 좁아지면 AE 응대가 막힌다');
   });
 });
 t('원본 /api/cs/* 정책이 바뀌지 않았다(프록시만 추가)', () => {
   const cs = R('src/routes/cs.routes.js');
-  assert.ok(/router\.use\(authMiddleware, adminOrMasterMiddleware\)/.test(cs),
+  assert.ok(/router\.use\(authMiddleware, internalMiddleware\)/.test(cs),
     '원본 라우터의 전역 게이트가 사라졌다');
 });
 t('★ 로직 복제 0 — 기존 cs 핸들러에 위임한다', () => {
@@ -145,20 +145,20 @@ console.log('\n4) 리뷰웹시스템[3버전] 배선');
    AE 에게도 **메뉴는** 열렸다 — AE 가 그 화면에서 하는 일이 교체요청 처리다.
    보안 경계는 "메뉴가 보이나"가 아니라 **"AE 화면에 문의 본문을 그리나"** 로 옮겼고,
    그 실행 검증은 reviewEditCsBridge.test.js §8(역할별 renderCsView 실행)에 있다. */
-t('★ 상단탭 버튼 — 관리자·AE 양쪽 / AE 는 문의창구를 마운트하지 않는다', () => {
+t('★ 상단탭 버튼 — 관리자·AE 양쪽 / 내부 담당자는 같은 문의창구를 마운트한다', () => {
   const adminNav = WD.slice(WD.indexOf('${isAdmin?`<nav'), WD.indexOf(':isStaff?`<nav'));
   // ★ 끝 표지는 `</nav>`:''}` — 그냥 `:''}` 로 찾으면 파일 앞쪽의 다른 삼항이 먼저 걸려 빈 슬라이스가 된다
   const staffNav = WD.slice(WD.indexOf(':isStaff?`<nav'), WD.indexOf('</nav>`:\'\'}'));
   assert.ok(/data-v="cs"/.test(adminNav), '관리자 nav 에 버튼이 없다');
   assert.ok(/data-v="cs"/.test(staffNav), 'AE nav 에 버튼이 없다 — AE 가 이미지 교체요청을 처리할 문이 사라진다');
-  // 문의창구 마운트·목록조회는 **관리자 분기 안**에서만 일어난다(AE 는 그리려는 시도조차 안 함)
+  // 문의창구 마운트·목록조회는 **내부 담당자 분기 안**에서만 일어난다.
   const view = WD.slice(WD.indexOf('async function renderCsView()'));
   const body = view.slice(0, view.indexOf('\n}\n'));
-  const gate = body.indexOf('if(isAdmin){'), mount = body.indexOf('CsInquiry.mount('), other = body.indexOf('}else{');
+  const gate = body.indexOf('if(isInternal){'), mount = body.indexOf('CsInquiry.mount('), other = body.indexOf('}else{');
   assert.ok(gate > -1 && mount > gate && other > mount,
-    '★★ 문의창구 마운트가 isAdmin 분기 밖으로 나왔다 — AE 화면에 리뷰어 실명·연락처·주소가 그려진다');
+    '★★ 문의창구 마운트가 내부 역할 분기 밖으로 나왔다 — 외부 역할에 개인정보가 노출된다');
   assert.ok(body.indexOf('loadCsRooms()') > gate && body.indexOf('loadCsRooms()') < other,
-    '★★ AE 도 문의 목록을 조회한다');
+    '★★ 문의 목록 조회가 내부 역할 분기 밖에 있다');
 });
 t('switchView 가 CS 뷰를 그린다', () => {
   assert.ok(/else if\(v==='cs'\) renderCsView\(\)/.test(WD));
@@ -192,7 +192,7 @@ t('★ 부팅 1회로 끝내지 않는다 — 주기 갱신 + 화면 가려지�
   assert.ok(/CS_BADGE_POLL_MS/.test(WD) && /setInterval\(/.test(WD), '주기 갱신이 없다');
   assert.ok(/document\.visibilityState==='visible'/.test(WD), '백그라운드 탭에서도 계속 두드린다');
   assert.ok(/addEventListener\('visibilitychange'/.test(WD), '복귀 시 즉시 갱신이 없다');
-  assert.ok(/if\(isAdmin\) _csStartBadgePoll\(\)/.test(WD), '관리자에게만 돌아야 한다');
+  assert.ok(/if\(isAdmin \|\| isStaff\) _csStartBadgePoll\(\)/.test(WD), '내부 담당자 화면에서 돌아야 한다');
 });
 t('모듈 아이콘이 보이도록 폰트어썸을 admin 과 같은 CDN 으로 로드', () => {
   const fa = /fontawesome-free@6\.4\.0\/css\/all\.min\.css/;

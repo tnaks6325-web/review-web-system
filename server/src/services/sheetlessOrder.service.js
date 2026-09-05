@@ -502,7 +502,7 @@ async function writeOrderToWorktable({
   }
   try {
     const { recordParticipationLink } = require('./participation.service');
-    const { rows: identityRows } = await pool.query(
+    const { rows: identityRows } = await getPool().query(
       `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
          FROM order_submissions WHERE id = $1`, [orderSubmissionId]
     );

@@ -40,6 +40,9 @@ function makeHarness({ failRecord = false, alreadyPaid = false } = {}) {
     if (/SELECT \* FROM payment_batches WHERE id/.test(text)) return { rows: [{ id: BATCH_ID, status: 'applied' }], rowCount: 1 };
     if (/SELECT summary FROM payment_result_uploads/.test(text)) return { rows: [upload], rowCount: 1 };
     if (/SELECT \* FROM payment_batch_items WHERE batch_id/.test(text)) return { rows: [state.item], rowCount: 1 };
+    if (/SELECT COALESCE\(tc\.workboard_schema_version, 1\) AS schema_version/.test(text)) {
+      return { rows: [{ schema_version: 1, is_submitted: false }], rowCount: 1 };
+    }
     if (/SELECT ri\.is_submitted2 AS "isSubmitted2"/.test(text)) {
       return { rows: [{ isSubmitted2: alreadyPaid ? 'PAID' : 'NONE', hasPaymentRecord: false, hasPaidBatchItem: false }], rowCount: 1 };
     }

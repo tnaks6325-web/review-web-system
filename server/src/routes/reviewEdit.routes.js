@@ -256,8 +256,8 @@ router.get('/participation-brief', async (req, res) => {
 
     // ★ D: 이 행의 **작업 옵션(리뷰 형태)** — 관리자가 로스터에 미리 적어둔 '텍스트'·'포토리뷰' 같은
     //   작업지시다. 지금까지 관리자만 보고 리뷰어는 자기 행의 지시를 확인할 방법이 없었다.
-    //   ★ 판정은 `optionWriteColumns`(매퍼 파생, C′ 단일 출처) — '옵션금액'(=결제금액 칸)·
-    //     '비고(옵션확인)'을 옵션으로 오분류하면 금액·메모가 리뷰어 화면에 새어 나간다.
+    //   ★ 판정은 전용 `리뷰옵션` 헤더 + `optionWriteColumns`(상품 옵션 매퍼 파생) —
+    //     '옵션금액'(=결제금액 칸)·'비고(옵션확인)'을 오분류하면 금액·메모가 새어 나간다.
     //   ★ row_json 은 헤더명→값 맵(columnResolver)이라 키 순서 = 헤더 순서. 읽기 전용·fail-soft.
     let workOptions = [];
     try {
@@ -269,9 +269,12 @@ router.get('/participation-brief', async (req, res) => {
       const rj = ri[0] && ri[0].row_json;
       if (rj && typeof rj === 'object') {
         const { optionWriteColumns } = require('../services/orderLedger.service');
+        const { isReviewOptionHeader } = require('../utils/reviewType');
         const headers = Object.keys(rj);
-        workOptions = optionWriteColumns(headers)
-          .map(i => ({ label: headers[i], value: String(rj[headers[i]] == null ? '' : rj[headers[i]]).trim() }))
+        const optionHeaders = headers.filter(isReviewOptionHeader)
+          .concat(optionWriteColumns(headers).map(i => headers[i]));
+        workOptions = [...new Set(optionHeaders)]
+          .map(label => ({ label, value: String(rj[label] == null ? '' : rj[label]).trim() }))
           .filter(o => o.label && o.value);
       }
     } catch (_) { /* 표시용 — 실패해도 나머지 brief 는 그대로 나간다 */ }

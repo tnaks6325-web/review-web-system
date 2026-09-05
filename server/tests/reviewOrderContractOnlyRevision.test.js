@@ -95,6 +95,7 @@ function baseOrder(extra) {
     work_manager: pickWorkManager(BODY),
     product_option: BODY.product_option,
     product_options_json: '',
+    product_distribution_mode: 'balanced',
     pay_amount: BODY.pay_amount,
     review_fee: 0,
     daily_count: BODY.daily_count,

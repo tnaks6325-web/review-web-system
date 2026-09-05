@@ -33,10 +33,9 @@ test('v2 계획은 상품·1차·2차 옵션을 한 배정 단위로 보존한�
 
   const plan = buildWorktablePlan({ workOrder, template });
   assert.equal(plan.blockers.some(b => b.code === 'invalid_staged_options'), false);
-  assert.equal(plan.rows[0].selection.productName, '티셔츠');
-  assert.equal(plan.rows[0].selection.option1Value, '화이트');
-  assert.equal(plan.rows[1].selection.option2Value, '105');
-  assert.equal(plan.rows[2].selection.option1Value, '블랙');
+  assert.deepEqual(plan.rows.map(r => r.selection.productName), ['티셔츠', '티셔츠', '티셔츠']);
+  assert.deepEqual(plan.rows.map(r => r.selection.option1Value).sort(), ['블랙', '화이트', '화이트']);
+  assert.ok(plan.rows.every(r => r.selection.option2Value === '105'));
   assert.deepEqual(plan.columns.filter(c => ['product', 'option_1', 'option_2'].includes(c.role)).map(c => c.name), ['상품', '1차옵션', '2차옵션']);
   assert.match(createSource, /idxProduct[\s\S]{0,120}role === 'product'/, '생성기는 상품 열 인덱스를 별도로 찾아야 한다');
   assert.match(createSource, /row\[idxProduct\] = r\.selection\.productName/, '생성기는 상품값을 단계 원본에서 채워야 한다');

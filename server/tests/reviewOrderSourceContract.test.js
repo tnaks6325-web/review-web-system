@@ -70,7 +70,7 @@ test('v2 생성은 본섭 킬스위치를 명시적으로 켠 경우에만 연�
 });
 
 test('인트라넷 수신 INSERT는 광고주 사업자번호까지 모든 컬럼 값을 전달한다', () => {
-  assert.ok(orderRouteSource.includes('$37,$38,$39,$40,\'submitted\',$41,$42,$43,$44,$45,$46,$47'));
+  assert.ok(orderRouteSource.includes('$37,$38,$39,$40,$41,\'submitted\',$42,$43,$44,$45,$46,$47,$48'));
   assert.match(orderRouteSource, /err\.intakeHttp500 = true;\r?\n\s+next\(err\);/);
   const errorMiddleware = fs.readFileSync(path.join(__dirname, '../src/middleware/error.middleware.js'), 'utf8');
   assert.match(errorMiddleware, /if \(err\.intakeHttp500\) \{\r?\n\s+return res\.status\(500\)\.json\(\{\r?\n\s+ok: false,\r?\n\s+code: 'order_intake_failed'/);

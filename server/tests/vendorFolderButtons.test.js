@@ -408,9 +408,10 @@ async function run() {
   t('★ 도착 후에는 버튼 묶음만 갈아치운다(그리드 전체 재렌더 금지 — 편집 셀·검색 하이라이트 보존)',
     /const el=\$\('#folBar'\); if\(el&&STATE\.cur===t\)\{[\s\S]{0,220}el\.innerHTML=\(st\.known&&st\.cr!==true\)\?'':_folBtnsInner\(t,0,'cur',true,\['receipt'\]\)/.test(HTML));
   t('★ 다른 작업으로 옮긴 뒤 도착한 응답은 반영하지 않는다(STATE.cur===t 확인)', /STATE\.cur===t/.test(HTML));
-  // 폭 — 헤더·도구줄·표 섹션 세 곳이 같은 값(버튼이 데이터 오른쪽 끝에 붙는다는 레포 규칙)
+  // 폭 — 헤더·도구줄은 같은 상한, 표 섹션은 인라인 카드의 부모 폭을 그대로 쓴다.
   const caps = (HTML.match(/max-width:1560px/g) || []).length;
-  t('★ 폭 상한 1560px 을 헤더·도구줄·표 섹션 세 곳에 같이(자료 열이 늘어난 만큼 넓힘)', caps === 3, 'count=' + caps);
+  t('★ 폭 상한 1560px 을 헤더·도구줄에 같이 적용하고 표 섹션은 부모 폭을 쓴다',
+    caps === 2 && /\.ovm-inline-card>#owntabsSect\{max-width:none/.test(HTML), 'count=' + caps);
   t('종전 1400px 상한은 남아 있지 않다(한 곳만 넓히면 버튼이 데이터 끝에서 어긋난다)',
     !/\.ovm-hd\{max-width:1400px\}/.test(HTML) && !/id="owntabsSect" style="max-width:1400px"/.test(HTML));
   t('큰 버튼 변형 CSS(.wbl-fol.folbig)', /\.wbl-fol\.folbig\{display:inline-flex/.test(HTML));
