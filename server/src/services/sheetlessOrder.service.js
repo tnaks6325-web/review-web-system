@@ -713,7 +713,7 @@ async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 
                 AND (os.workboard_id IS NULL OR cp.workboard_id = os.workboard_id)) AS seq
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
-        AND os.sheet_id LIKE 'campaign:%'
+        AND (os.sheet_id LIKE 'campaign:%' OR os.workboard_id IS NOT NULL)
         AND os.mirror_status = ANY($1::text[])
         AND EXISTS (SELECT 1 FROM campaign_participants cp
                      WHERE cp.order_submission_id = os.id
