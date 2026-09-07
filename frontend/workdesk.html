@@ -1768,6 +1768,7 @@
   .tp3doc:hover,.tp3doc:focus-visible{border-color:var(--accent);background:var(--accent-soft);outline:none;box-shadow:0 2px 7px rgba(37,84,201,.12)}
   .tp3doc.ready{background:var(--accent-soft);border-color:var(--accent-line)}
   .tp3doc.ready::before{content:'✓';display:inline-block;margin-right:4px;color:var(--safe);font-size:10px}
+  .tp3doc:disabled{cursor:wait;color:var(--faint);background:var(--card2);border-color:var(--line);box-shadow:none;opacity:.65}
   /* ══ 작업보드 상단 3분할(내부) — 시안 C 확정 2026-08-19 ══════════════════════════
      시안 = frontend/docs/design-workboard-top-redesign.html (?v=C)
      폭 = 작업조건 439 / 진행현황 439 / 미리보기 659 — 앞 두 칸은 **같은 너비**(사용자 확정 2026-08-19,
@@ -5823,7 +5824,7 @@ function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.c
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
 document.addEventListener('click', e=>{ if(!e.target.closest('#segwrap .seg,#taskmenu')){ if(STATE.wMenu!=null){ STATE.wMenu=null; _renderTaskMenu(); } } });
-async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; if(STATE.gWidthEditor) closeGridWidthSettings(false); STATE.cur=t; _clearCellUndoHistory();
+async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; if(STATE.gWidthEditor) closeGridWidthSettings(false); STATE.cur=t; STATE.settle=null; _clearCellUndoHistory();
   // opt.nav = 뒤로/앞으로 복원으로 열린 것 → 히스토리에 다시 쌓지 않는다(그 항목이 이미 이 상태다)
   if(!(opt&&opt.nav)) _navPush();
   // ★ 여는 탭이 현재 세그먼트에 없으면 그 탭의 업체 그룹으로 강제 이동.
@@ -6965,7 +6966,7 @@ function setlSummaryHtml(d){
   const qReady=!unavailable&&!!(d.quote&&d.quote.quoteNumber);
   const iReady=!unavailable&&!!(d.invoice&&d.invoice.status==='issued');
   const pReady=!unavailable&&!!(d.payment&&d.payment.status==='paid');
-  const btn=(kind,label,ready)=>`<button type="button" class="tp3doc${ready?' ready':''}" onclick="openSettlementDocument(event,'${kind}')">${label}</button>`;
+  const btn=(kind,label,ready)=>`<button type="button" class="tp3doc${ready?' ready':''}"${d?'':' disabled'} onclick="openSettlementDocument(event,'${kind}')">${label}</button>`;
   return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady)}${btn('invoice','계산서',iReady)}${btn('payment','입금',pReady)}</span></span>`;
 }
 function openSettlementDocument(ev,kind){
@@ -7087,6 +7088,8 @@ function _wonFmt(n){ return (Number(n)||0).toLocaleString('ko-KR')+'원'; }
 async function loadSettlement(t){
   if(!t) return;
   const r=await api(`/api/trackb/workdesk/settlement?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+  // 탭을 빠르게 바꾼 뒤 이전 요청이 늦게 도착해도 현재 작업의 문서 버튼을 덮지 않는다.
+  if(!STATE.cur||STATE.cur.sheetId!==t.sheetId||STATE.cur.tabName!==t.tabName) return;
   STATE.settle={ data:r&&r.ok?r:null, tab:t };
   const cellS=$('#setlCell .setlsummary');
   if(cellS) cellS.outerHTML=setlSummaryHtml(STATE.settle.data);

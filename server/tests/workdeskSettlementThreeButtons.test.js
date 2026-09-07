@@ -16,6 +16,12 @@ assert.match(src, /btn\('invoice','계산서'/);
 assert.match(src, /btn\('payment','입금'/);
 assert.match(src, /function openSettlementPayment\(\)/,
   '입금 버튼도 실제 확인 팝업을 열어야 합니다.');
+assert.match(src, /STATE\.cur=t; STATE\.settle=null;/,
+  '작업 전환 즉시 이전 정산 상태를 비워야 합니다.');
+assert.match(src, /class="tp3doc\$\{ready\?' ready':''\}"\$\{d\?'':' disabled'\}/,
+  '현재 작업의 정산 정보가 로드되기 전에는 문서 버튼을 비활성화해야 합니다.');
+assert.match(src, /if\(!STATE\.cur\|\|STATE\.cur\.sheetId!==t\.sheetId\|\|STATE\.cur\.tabName!==t\.tabName\) return;/,
+  '이전 작업의 늦은 정산 응답이 현재 작업 상태를 덮지 않아야 합니다.');
 
 assert.doesNotMatch(src, /id="setldetail"|id="settlementsec"|toggleSettleDetail/,
   '진행 현황 클릭으로 여는 하단 정산 블록이 없어야 합니다.');
