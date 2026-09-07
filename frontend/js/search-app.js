@@ -5026,6 +5026,8 @@ function initOrderFormMode() {
 
   // ── 다건 카드 초기화: 기존 카드 제거 후 첫 번째 카드 생성 ──
   _orderCardIds = [];
+  const identityActionPanel = document.getElementById("orderIdentityAction");
+  if (identityActionPanel) { identityActionPanel.style.display = "none"; identityActionPanel.dataset.cid = ""; identityActionPanel.innerHTML = ""; }
   _cardAiState  = {};
   _cardSeq      = 0;
   const wrapEl = document.getElementById("ofOrderCardsWrap");
@@ -7723,7 +7725,9 @@ function removeCardImg(cid) {
   document.getElementById(cid+"_aiLoading").classList.remove("show");
   document.getElementById(cid+"_aiResult").classList.remove("show");
   document.getElementById(cid+"_aiError").style.display = "none";
-  const identityStatus = document.getElementById(cid+"_identityStatus"); if (identityStatus) identityStatus.style.display = "none";
+  const identityStatus = document.getElementById(cid+"_identityStatus"); if (identityStatus) { identityStatus.style.display = "none"; identityStatus.innerHTML = ""; }
+  const identityPanel = document.getElementById("orderIdentityAction");
+  if (identityPanel?.dataset.cid === cid) { identityPanel.style.display = "none"; identityPanel.dataset.cid = ""; }
   // ★ ai-locked 필드 잠금 해제 헬퍼
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
@@ -7794,6 +7798,9 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   // 새 분석이 실패해도 과거 승인토큰으로 제출되는 stale-capture 우회를 막는다.
   st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
   st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
+  const identityStatus = document.getElementById(cid + "_identityStatus");
+  if (identityStatus) identityStatus.innerHTML = '<strong>캡처를 분석하고 있습니다. 잠시 기다려주세요.</strong>';
+  _syncSubmissionIdentityAction(cid);
   const gasUrl = APP_CONFIG.GAS_WEB_APP_URL;
   if (!gasUrl) { _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
   st.lastBase64 = base64; st.lastMime = mimeType;
@@ -7893,6 +7900,26 @@ function _identityAddressDifference(cid) {
   return registered && entered && normalize(registered) !== normalize(entered) ? { registered, entered } : null;
 }
 
+function _syncSubmissionIdentityAction(cid) {
+  const panel = document.getElementById("orderIdentityAction");
+  const source = document.getElementById(cid + "_identityStatus");
+  if (!panel || panel.dataset.cid !== cid || !source) return;
+  const number = typeof _orderCardIds !== "undefined" ? _orderCardIds.indexOf(cid) + 1 : 1;
+  const approved = !!_cardAiState[cid]?.approvalToken;
+  panel.style.display = "block";
+  panel.innerHTML = `<strong>${number > 0 ? number + '번째 주문 · ' : ''}${approved ? '명의 확인 완료' : '여기서 명의를 확인해주세요'}</strong>`
+    + '<div style="margin-top:8px">' + source.innerHTML + '</div>'
+    + (approved ? '<p style="margin:8px 0 0">아래 [구매양식 제출] 버튼을 눌러 제출을 완료해주세요.</p>' : '');
+}
+
+function _retrySubmissionIdentity(cid) {
+  const panel = document.getElementById("orderIdentityAction");
+  if (_cardAiState[cid]?.lastBase64) {
+    if (panel) panel.innerHTML = '<strong>캡처를 다시 분석하고 있습니다. 잠시 기다려주세요.</strong>';
+    _retryCardAi(cid);
+  } else document.getElementById(cid + "_imgInput")?.click();
+}
+
 function _renderIdentityMatchState(cid, status, reasons, canManual) {
   const box = document.getElementById(cid + "_identityStatus"); if (!box) return;
   const palette = status === "MATCH"
@@ -7912,6 +7939,10 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
       + '</div><div style="margin-top:5px"><b>주문 배송지</b><br>' + _safeText(addressDifference.entered) + '</div></div>' : '')
     + (addressDifference && canManual ? '<div style="margin-top:6px">이름과 연락처가 선택 명의와 일치하면 다른 배송지로도 제출할 수 있습니다. 캡처의 실제 배송지를 확인해주세요.</div>' : '')
     + (canManual ? `<button type="button" onclick="_manualConfirmIdentity('${cid}')" style="margin-top:7px;width:100%;padding:7px;border:1px solid ${palette[1]};border-radius:7px;background:#fff;color:${palette[2]};font-weight:800;cursor:pointer">${addressDifference ? '이 배송지의 주문이 선택 명의의 주문임을 확인' : '이 주문이 선택 명의의 주문임을 직접 확인'}</button>` : '');
+  if (status !== "MATCH" && !canManual) {
+    box.innerHTML += `<button type="button" onclick="_retrySubmissionIdentity('${cid}')" style="margin-top:8px;width:100%;min-height:44px;border:1px solid #D97706;border-radius:8px;background:#fff;font-weight:800">${_cardAiState[cid]?.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 다시 선택하기'}</button>`;
+  }
+  _syncSubmissionIdentityAction(cid);
 }
 
 async function _matchCardIdentity(cid, requestId) {
@@ -7976,7 +8007,10 @@ async function _manualConfirmIdentity(cid) {
     st.reviewToken = "";
     st.matchError = false;
     _renderIdentityMatchState(cid, "MATCH", ["사용자가 주문 정보를 직접 확인했습니다."], false);
-  } catch (err) { showToast(err.message, "error"); }
+  } catch (err) {
+    _renderIdentityMatchState(cid, "ERROR", [err.message], true);
+    showToast(err.message, "error");
+  }
 }
 
 function _stopCardCountdown(cid) {
@@ -8023,6 +8057,11 @@ function _showCardAiResult(cid, data) {
 }
 
 function _showCardAiError(cid, msg, showRetry) {
+  const panel = document.getElementById("orderIdentityAction");
+  if (panel?.dataset.cid === cid) {
+    const st = _cardAiState[cid];
+    _renderIdentityMatchState(cid, "ERROR", [msg], !!(st?.extractToken && !st.extracted));
+  }
   const errEl = document.getElementById(cid+"_aiError"); if(!errEl) return;
   errEl.style.display = "block";
   const msgEl = document.getElementById(cid+"_aiErrorMsg"); if(msgEl) msgEl.textContent = msg;
@@ -8485,11 +8524,16 @@ async function _prepareIdentityApprovals(orders) {
     const hasCapture = String(order.imgThumbSrc || "").startsWith("data:");
     if (hasCapture) {
       if (!st.approvalToken) {
-        _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
+        const panel = document.getElementById("orderIdentityAction");
+        if (panel) panel.dataset.cid = order.cid;
+        const source = document.getElementById(order.cid + "_identityStatus");
+        if (!source?.innerHTML) _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
           [st.extractToken ? "명의 확인을 완료해주세요." : "캡처 AI 분석을 다시 시도해주세요."],
           !!(st.priorApprovalToken || st.reviewToken || (st.extractToken && (!st.extracted || st.matchError))));
-        document.getElementById(order.cid + "_identityStatus")?.scrollIntoView({ behavior:"smooth", block:"center" });
-        showToast("캡처의 참여 명의 확인을 완료해주세요.", "warning");
+        _syncSubmissionIdentityAction(order.cid);
+        panel?.focus({ preventScroll:true });
+        panel?.scrollIntoView({ behavior:"smooth", block:"nearest" });
+        showToast("제출 버튼 위의 명의 확인 영역에서 확인을 완료해주세요.", "warning");
         return false;
       }
       order.identityApprovalToken = st.approvalToken;
