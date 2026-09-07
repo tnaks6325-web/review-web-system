@@ -454,6 +454,10 @@ async function matchCapture(body, reviewer) {
   return {
     ok: true, status: verdict.status, reasonCodes: verdict.reasonCodes,
     reasons: Object.values(verdict.selectedScore.parts).map((p) => p.reason),
+    checks: Object.entries(verdict.selectedScore.parts).map(([key, part]) => ({
+      field: key === 'name' ? 'recipient' : key,
+      status: part.verdict, reason: part.reason,
+    })),
     selectedIdentity: publicIdentity(context.selected), resolved: verdict.resolved,
     approvalToken, reviewToken,
   };

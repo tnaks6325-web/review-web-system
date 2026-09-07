@@ -1657,6 +1657,13 @@ let _batchActive = false;
 window.addEventListener('message', (ev)=>{
   if(ev.origin !== location.origin) return;
   const d = ev.data || {};
+  if(d.type === 'purchase-field-focus'){
+    const frame = $('orderFrame');
+    if(frame && ev.source === frame.contentWindow && Number.isFinite(d.top) && d.top >= 0 && d.top <= 20000){
+      window.scrollTo({top:Math.max(0,frame.getBoundingClientRect().top+window.scrollY+d.top-180),behavior:'smooth'});
+    }
+    return;
+  }
   // ★ 일괄 제출 여부는 iframe 이 실제로 홀드 배열을 읽는 데 성공했을 때 보내는 ack 로만 인정한다.
   //   부모 HTML 만 새 버전이고 iframe JS 가 캐시된 구버전인 배포 스큐에서, 부모가 혼자
   //   "5건 제출됐겠지" 로 화면을 정하면 리뷰어가 1건만 낸 채 이탈한다(지금 사고의 재현).
