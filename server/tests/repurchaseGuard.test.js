@@ -68,6 +68,17 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     eq('같은 공고 제출도 제한 없음(0일)이면 즉시 허용',
       repurchaseWindowFromSubmittedAt(submittedAt, 0, submittedAt.getTime()).blocked, false);
   }
+  {
+    const submittedAt = new Date('2026-09-07T09:00:00+09:00');
+    eq('본계정 14일 — 9/21 같은 시각 직전까지 차단',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-21T08:59:59+09:00').getTime()).blocked, true);
+    eq('본계정 14일 — 9/21 같은 시각부터 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-21T09:00:00+09:00').getTime()).blocked, false);
+    eq('타계정 7일 — 9/14 같은 시각 직전까지 차단',
+      repurchaseWindowFromSubmittedAt(submittedAt, 7, new Date('2026-09-14T08:59:59+09:00').getTime()).blocked, true);
+    eq('타계정 7일 — 9/14 같은 시각부터 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 7, new Date('2026-09-14T09:00:00+09:00').getTime()).blocked, false);
+  }
 
   /* ═══ 2. 정상 판정 — 스텁 DB ═══ */
   console.log('\n[2] 정상 판정(스텁 pool)');
@@ -190,10 +201,14 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 요청 phone8을 신원으로 쓰지 않고 세션 소유자 ID로 계정을 조회',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('[req.reviewer.ownerReviewerId]') &&
     !campFull.slice(iMyStatusRoute, iIdRoute).includes('req.query.phone8'));
-  ok('★ 자유 편집 타계정은 이력 조회 신원으로 사용하지 않음',
-    campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind !== 'self'") &&
-    !campFull.slice(iMyStatusRoute, iIdRoute).includes('SELECT name, phone8, sub_accounts') &&
-    !campFull.slice(iMyStatusRoute, iIdRoute).includes('for (const sub of subs)'));
+  ok('★ 본계정 세션은 등록 타계정도 상태 표시 대상으로 구성',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('SELECT name, phone8, sub_accounts') &&
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('for (const sub of subs)'));
+  ok('★ 타계정 세션은 로그인한 그 명의만 상태 표시',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind === 'sub'") &&
+    campFull.slice(iMyStatusRoute, iIdRoute).includes("a.type === 'sub' && a.phone8 === loginP8"));
+  ok('★ 타계정 이력 조회는 서명 세션 소유자의 phone8로 다시 제한',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('ownerPhone8: p8'));
   ok('계정별 상태 배치 계산 단일 출처 사용',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForAccounts'));
   ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
@@ -206,8 +221,13 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
       { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
       { campaign_id: 'camp_unlimited', repurchase_days: 0, phone8: '86365441', last_submitted_at: new Date(Date.now() - 1 * 86400000) },
     ];
-    const r = await checkRepurchaseStatusForAccounts({ query: async (sql) => { statusSql = String(sql); return { rows }; } },
-      { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8List: ['86365441'] });
+    let statusParams = null;
+    const r = await checkRepurchaseStatusForAccounts({ query: async (sql, params) => {
+      statusSql = String(sql); statusParams = params; return { rows };
+    } }, {
+      campaignIds: ['camp_locked', 'camp_ready', 'camp_never'],
+      phone8List: ['86365441', '11112222'], ownerPhone8: '86365441',
+    });
     eq('10일 전 참여 + 공고별 21일 → locked', r.get('86365441').get('camp_locked').status, 'locked');
     ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('86365441').get('camp_locked').availableFrom instanceof Date);
     eq('10일 전 참여 + 공고별 7일 → ready', r.get('86365441').get('camp_ready').status, 'ready');
@@ -218,6 +238,12 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
       statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
       statusSql.includes('linked_os.deleted_at IS NULL'));
+    ok('★ 본계정 이력은 유지하고 타계정 주문은 같은 소유자의 신청 연결이 있을 때만 조회',
+      statusSql.includes("OR RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3") &&
+      statusSql.includes('owned_ca.owner_phone8 = $3'));
+    ok('★ 타계정 신청 이력도 같은 소유자 범위로 제한',
+      statusSql.includes('ca.phone8 = $3 OR ca.owner_phone8 = $3'));
+    eq('★ 소유자 phone8이 SQL 파라미터로 전달', statusParams[2], '86365441');
     eq('★ 셀프·배치·카드·지각확정의 신청 이력 폴백이 모두 취소 주문을 제외',
       (readS('utils/repurchaseGuard.js').match(/ca\.order_submission_id IS NULL OR EXISTS/g) || []).length, 4);
   }

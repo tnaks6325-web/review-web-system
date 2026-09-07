@@ -1190,20 +1190,38 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
   try {
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return res.json({ ok: true, status: {} });
-    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본계정을 읽는다.
+    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본·타계정을 읽는다.
     const { rows } = await pool.query(
-      'SELECT name, phone8 FROM reviewers WHERE id = $1 LIMIT 1',
+      'SELECT name, phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1',
       [req.reviewer.ownerReviewerId]
     );
     if (rows.length !== 1) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
-    // 자유 편집 가능한 sub_accounts는 전화번호 소유 증명이 아니다. 타계정 로그인/목록으로
-    // 다른 사람의 이력을 조회하지 않고, 직접 등록된 본계정 세션에 대해서만 상태를 돌려준다.
-    if (req.reviewer.loginKind !== 'self') return res.json({ ok: true, status: {} });
     const p8 = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
     if (p8.length !== 8) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 확인할 수 없습니다.' });
-    const accounts = [{ phone8: p8, type: 'self', displayName: String(rows[0].name || '본계정') }];
+    let subs = rows[0].sub_accounts;
+    if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
+    if (!Array.isArray(subs)) subs = [];
+    const seen = new Set([p8]);
+    const allAccounts = [{ phone8: p8, type: 'self', displayName: String(rows[0].name || '본계정') }];
+    for (const sub of subs) {
+      const subP8 = String((sub && sub.phone) || '').replace(/\D/g, '').slice(-8);
+      const displayName = String((sub && sub.name) || '').trim();
+      if (subP8.length !== 8 || !displayName || seen.has(subP8)) continue;
+      seen.add(subP8);
+      allAccounts.push({ phone8: subP8, type: 'sub', displayName });
+    }
+    // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 표시한다.
+    // 이력 쿼리는 owner_phone8으로 다시 제한하므로 sub_accounts에 임의 번호를 추가해도
+    // 다른 소유자의 주문/신청 이력은 응답되지 않는다.
+    const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    const accounts = req.reviewer.loginKind === 'sub'
+      ? allAccounts.filter(a => a.type === 'sub' && a.phone8 === loginP8)
+      : allAccounts;
+    if (!accounts.length) return res.json({ ok: true, status: {} });
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
-    const map = await checkRepurchaseStatusForAccounts(pool, { campaignIds: ids, phone8List: accounts.map(a => a.phone8) });
+    const map = await checkRepurchaseStatusForAccounts(pool, {
+      campaignIds: ids, phone8List: accounts.map(a => a.phone8), ownerPhone8: p8,
+    });
     const status = {};
     for (const cid of ids) {
       const states = accounts.map(a => ({ ...a, ...(map.get(a.phone8)?.get(cid) || { status: 'ready' }) }));

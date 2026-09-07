@@ -311,10 +311,14 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
 }
 
 // 여러 명의의 공고별 재참여 상태를 한 번에 계산한다.
-async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone8List } = {}) {
+// ownerPhone8을 주면 본계정은 기존 phone8 이력을 그대로 보고, 타계정 이력은 해당 소유자의
+// campaign_applications로 소유관계가 남은 주문만 본다. sub_accounts는 사용자가 편집할 수 있으므로
+// 목록에 번호가 있다는 사실만으로 타인의 주문 이력을 노출하지 않는다.
+async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone8List, ownerPhone8 } = {}) {
   const out = new Map();
   const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
   const phones = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
+  const owner = String(ownerPhone8 || '').replace(/\D/g, '').slice(-8) || null;
   if (repurchaseDays() <= 0 || !ids.length || !phones.length) return out;
   const { rows } = await dbOrClient.query(
     `WITH campaign_history AS (
@@ -329,9 +333,19 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
          LEFT JOIN tab_configs submitted_tab
            ON submitted_tab.sheet_id = os.sheet_id
           AND submitted_tab.tab_name = os.tab_name
-        WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
-          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
-          AND (
+         WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
+           AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
+           AND (
+             $3::text IS NULL
+             OR RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
+             OR EXISTS (
+               SELECT 1 FROM campaign_applications owned_ca
+                WHERE owned_ca.order_submission_id = os.id
+                  AND owned_ca.phone8 = RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)
+                  AND owned_ca.owner_phone8 = $3
+             )
+           )
+           AND (
             (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (
               os.repurchase_work_key = rc.linked_sheet_id || E'\\x1f' || BTRIM(base_tab.campaign_name)
               OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = NULLIF(BTRIM(base_tab.campaign_name), '')
@@ -347,12 +361,13 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
           AND (ca.order_submission_id IS NULL OR EXISTS (
             SELECT 1 FROM order_submissions linked_os
              WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
-          ))
-          AND ca.phone8 = ANY($2::text[])
-     )
+           ))
+           AND ca.phone8 = ANY($2::text[])
+           AND ($3::text IS NULL OR ca.phone8 = $3 OR ca.owner_phone8 = $3)
+      )
      SELECT campaign_id, repurchase_days, phone8, MAX(submitted_at) AS last_submitted_at
        FROM campaign_history
-      GROUP BY campaign_id, repurchase_days, phone8`, [ids, phones]);
+       GROUP BY campaign_id, repurchase_days, phone8`, [ids, phones, owner]);
   const now = Date.now();
   for (const r of rows) {
     const days = repurchaseDays(r.repurchase_days);
