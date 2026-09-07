@@ -241,11 +241,12 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
       statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
       statusSql.includes('linked_os.deleted_at IS NULL'));
-    ok('★ 타계정 주문 이력은 소유자 전화/UUID로 증명된 범위만 조회',
-      statusSql.includes('os.owner_reviewer_id = $4::uuid') &&
+    ok('★ 타계정 명의는 소유자 전화/UUID로 먼저 증명',
+      statusSql.includes('WITH verified_phones AS') &&
+      statusSql.includes('owned_os.owner_reviewer_id = $4::uuid') &&
       statusSql.includes('owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid'));
-    ok('★ 타계정 신청 이력도 소유자 전화/UUID로 증명된 범위만 조회',
-      statusSql.includes('ca.phone8 = $3 OR ca.owner_phone8 = $3 OR ca.owner_reviewer_id = $4::uuid'));
+    ok('★ 검증된 명의는 주문·신청 전체 이력을 포함해 더 최근 연결 누락 행도 MAX에 포함',
+      (statusSql.match(/IN \(SELECT phone8 FROM verified_phones\)/g) || []).length === 2);
     eq('★ 소유자 phone8이 SQL 파라미터로 전달', statusParams[2], '86365441');
     eq('★ 소유자 UUID가 SQL 파라미터로 전달', statusParams[3], '11111111-1111-4111-8111-111111111111');
     eq('★ 셀프·배치·카드·지각확정의 신청 이력 폴백이 모두 취소 주문을 제외',

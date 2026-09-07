@@ -33,8 +33,12 @@ const q = rows => ({ query: async () => ({ rows }) });
   assert.equal(multi.has('33334444'), false, '소유관계가 없는 타명의 이력은 SQL에서 반환하지 않음');
   assert.ok(statusSql.includes('campaign_applications ca'), '상태 조회도 같은 공고 submitted 이력을 폴백으로 포함');
   assert.ok(statusSql.includes("ca.status = 'submitted'"), '완료된 공고 신청만 상태 폴백에 포함');
-  assert.ok(statusSql.includes('os.owner_reviewer_id = $4::uuid'), '주문 원장의 소유자 UUID를 확인');
-  assert.ok(statusSql.includes('owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid'), '전화/UUID 소유관계를 모두 확인');
+  assert.ok(statusSql.includes('WITH verified_phones AS'), '행 필터 전에 서버 원장으로 소유 명의 범위를 확정');
+  assert.ok(statusSql.includes('owned_os.owner_reviewer_id = $4::uuid'), '주문 원장의 소유자 UUID를 확인');
+  assert.ok(statusSql.includes('owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid'), '참여 원장의 전화/UUID 소유관계를 모두 확인');
+  assert.ok(statusSql.includes("owned_ca.status = 'submitted'"), '단순 홀드가 아니라 구매양식 제출 완료만 명의 소유 근거로 인정');
+  assert.equal((statusSql.match(/IN \(SELECT phone8 FROM verified_phones\)/g) || []).length, 2,
+    '검증된 명의는 주문/신청의 전체 이력을 포함해 최신 누락 행도 놓치지 않음');
   const camp = read('src/routes/campaign.routes.js');
   assert.ok(camp.includes("router.get('/my-repurchase-status'"), '계정별 상태 API');
   assert.ok(camp.includes('checkRepurchaseStatusForAccounts'), '본계정+타계정 일괄 판정');
