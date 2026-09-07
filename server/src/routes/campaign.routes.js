@@ -1214,8 +1214,12 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     // 단, multi_account_mode=false 공고는 실제 신청 화면과 똑같이 로그인 명의 하나만 계산한다.
     // 소유자 UUID/phone8로 증명되지 않은 타명의 이력은 조회하지 않고 unknown으로 표시한다.
     const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    // 같은 전화번호·다른 이름인 레거시 타계정은 seen 중복제거 때문에 self 행 하나로 접힌다.
+    // sub 타입만 찾으면 이런 로그인은 상태가 통째로 비므로, 실제 로그인 phone8의 대표 행을 쓴다.
+    const loginAccount = allAccounts.find(a => a.phone8 === loginP8);
     const accounts = req.reviewer.loginKind === 'sub'
-      ? allAccounts.filter(a => a.type === 'sub' && a.phone8 === loginP8)
+      ? (loginAccount ? [{ ...loginAccount,
+          displayName: String(req.reviewer.loginName || loginAccount.displayName || '') }] : [])
       : allAccounts;
     if (!accounts.length) return res.json({ ok: true, status: {} });
     const { rows: campaignModes } = await pool.query(

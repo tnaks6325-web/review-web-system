@@ -206,7 +206,7 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     campFull.slice(iMyStatusRoute, iIdRoute).includes('for (const sub of subs)'));
   ok('★ 타계정 세션은 로그인한 그 명의만 상태 표시',
     campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind === 'sub'") &&
-    campFull.slice(iMyStatusRoute, iIdRoute).includes("a.type === 'sub' && a.phone8 === loginP8"));
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('const loginAccount = allAccounts.find(a => a.phone8 === loginP8)'));
   ok('★ 타계정 이력 조회는 서명 세션 소유자의 phone8로 다시 제한',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('ownerPhone8: p8'));
   ok('★ 타계정 이력 조회는 서명 세션 소유자의 UUID도 함께 사용',

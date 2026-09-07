@@ -45,6 +45,7 @@ const q = rows => ({ query: async () => ({ rows }) });
   assert.ok(camp.includes('SELECT name, phone8, sub_accounts'), '서명된 소유자의 등록 명의를 상태 대상으로 읽음');
   assert.ok(camp.includes('ownerPhone8: p8'), '타계정 이력은 소유자 범위와 함께 판정');
   assert.ok(camp.includes('ownerReviewerId: req.reviewer.ownerReviewerId'), '서명 세션의 소유자 UUID도 판정에 전달');
+  assert.ok(camp.includes('const loginAccount = allAccounts.find(a => a.phone8 === loginP8)'), '같은 번호 타계정 로그인도 실제 phone8 대표 상태를 사용');
   assert.ok(camp.includes("status: a.type === 'self' ? 'ready' : 'unknown'"), '미확인 타명의를 참여 가능으로 단정하지 않음');
   assert.ok(camp.includes("'SELECT id, multi_account_mode, repurchase_days FROM recruit_campaigns"), '공고별 다중명의 허용 여부와 제한일을 읽음');
   assert.ok(camp.includes("accounts.filter(a => a.phone8 === loginP8)"), '단일명의 공고는 실제 로그인 명의만 응답');
