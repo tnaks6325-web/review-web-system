@@ -1886,22 +1886,15 @@ async function _applyParticipation(req, res, next, campPre) {
       //   POST /api/reviewer/profile{action:'saveSubAccounts'} 가 phone8 만 알면 배열을 통째로 덮어쓴다
       //   (번호 소유 증명 없음). 그래서 다른 소유자의 본계정·타계정·코드 신원에 등록된 번호는
       //   현재 소유자의 타명의로 못 쓴다. 충돌한 정상 사용자는 고객센터에서 귀속을 정리해야 한다.
-      // 본계정뿐 아니라 다른 소유자의 타계정/코드 신원과 겹쳐도 막는다. 그렇지 않으면 공격자가
-      // 피해자 번호를 자기 sub_accounts에 넣고 제출 링크를 만든 뒤 그 번호의 재참여 이력을 읽을
-      // 수 있다. 현재 소유자 행은 제외하므로 자기 타계정의 정상 참여에는 영향이 없다. 개인정보
-      // 경계라 운영 스위치로 우회하지 않는다.
+      // 다른 소유자의 직접 등록 본계정/관리자 검증 코드 신원과 겹치면 막는다. 자유 편집 가능한
+      // 다른 소유자의 sub_accounts까지 권위로 인정하면 번호를 먼저 적어 넣는 것만으로 정상 사용자를
+      // 영구 차단할 수 있으므로 충돌 근거에 넣지 않는다. 개인정보 경계라 운영 스위치로 우회하지 않는다.
       const { rows: regHit } = await client.query(
         `SELECT 1
            FROM reviewers other
           WHERE other.id <> $2::uuid
             AND (
               other.phone8 = $1
-              OR EXISTS (
-                SELECT 1
-                  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(other.sub_accounts)='array'
-                                                 THEN other.sub_accounts ELSE '[]'::jsonb END) sub(value)
-                 WHERE RIGHT(regexp_replace(COALESCE(sub.value->>'phone',''), '[^0-9]', '', 'g'), 8) = $1
-              )
               OR EXISTS (
                 SELECT 1 FROM reviewer_identities ri
                  WHERE ri.owner_reviewer_id = other.id

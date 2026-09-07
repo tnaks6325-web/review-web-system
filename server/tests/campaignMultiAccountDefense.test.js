@@ -75,8 +75,12 @@ async function callHandler(method, routePath, req) {
   // D1 / D1b — 사칭 차단 · 차단 사유 귀속
   // ══════════════════════════════════════════════════════════════
   ok('D1: 등록번호 명의 차단 사유 코드', routes.includes("'sub_is_registered_reviewer'"));
-  ok('D1: 다른 소유자의 본계정·타계정·코드 신원 번호 충돌을 모두 차단',
-    /FROM reviewers other[\s\S]*?other\.id <> \$2::uuid[\s\S]*?other\.phone8 = \$1[\s\S]*?jsonb_array_elements[\s\S]*?reviewer_identities ri/.test(routes));
+  const conflictBlock = routes.slice(routes.indexOf('FROM reviewers other'), routes.indexOf('LIMIT 1`, [subP8'));
+  ok('D1: 다른 소유자의 본계정·코드 신원 번호 충돌만 차단',
+    conflictBlock.includes('other.id <> $2::uuid') && conflictBlock.includes('other.phone8 = $1')
+    && conflictBlock.includes('reviewer_identities ri'));
+  ok('D1: 자유 편집 타계정 목록은 타인의 정상 참여를 막는 권위로 쓰지 않음',
+    !conflictBlock.includes('jsonb_array_elements'));
   ok('D1: 개인정보 경계는 운영 스위치로 우회할 수 없음', !/CAMPAIGN_SUB_REGISTERED_POLICY/.test(routes));
   ok('D1: 차단은 타계정 참여 경로에서만(자기참여 무영향)',
     routes.indexOf("'sub_is_registered_reviewer'") > routes.indexOf('const holdP8 = isSubApply'));
