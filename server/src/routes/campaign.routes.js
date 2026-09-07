@@ -1211,8 +1211,8 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
       allAccounts.push({ phone8: subP8, type: 'sub', displayName });
     }
     // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 표시한다.
-    // 이력 쿼리는 owner_phone8으로 다시 제한하므로 sub_accounts에 임의 번호를 추가해도
-    // 다른 소유자의 주문/신청 이력은 응답되지 않는다.
+    // 소유자 UUID/phone8로 증명된 이력만 날짜를 표시한다. 레거시 외부모집처럼 소유자 링크가
+    // 없는 최근 이력은 날짜를 숨긴 generic locked로만 내려 화면과 최종 apply 차단을 맞춘다.
     const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     const accounts = req.reviewer.loginKind === 'sub'
       ? allAccounts.filter(a => a.type === 'sub' && a.phone8 === loginP8)
@@ -1221,6 +1221,7 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
     const map = await checkRepurchaseStatusForAccounts(pool, {
       campaignIds: ids, phone8List: accounts.map(a => a.phone8), ownerPhone8: p8,
+      ownerReviewerId: req.reviewer.ownerReviewerId,
     });
     const status = {};
     for (const cid of ids) {

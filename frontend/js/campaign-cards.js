@@ -745,7 +745,16 @@
     let repurchaseSash = '';
     const repurchaseLocked = !admin && repAccounts.length > 0 && !repReady.length && repLocked.length > 0;
     if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
-    else if (repurchaseLocked) { const d = repLocked[0].availableFrom; const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000)); repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`; }
+    else if (repurchaseLocked) {
+      const dated = repLocked.find(a => a && a.availableFrom);
+      if (dated) {
+        const d = dated.availableFrom;
+        const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000));
+        repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
+      } else {
+        repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">최근 참여 이력으로 재참여 제한 중</span></div>';
+      }
+    }
 
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));

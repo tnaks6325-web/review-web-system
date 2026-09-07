@@ -20,27 +20,31 @@ const q = rows => ({ query: async () => ({ rows }) });
     { sheetId: 'virtual-sheet', tabName: 'same-product', phone8: '33334444' });
   assert.equal(b.blocked, false, 'B: 16일 전 참여는 허용');
   let statusSql = '';
-  const multi = await checkRepurchaseStatusForAccounts({ query: async (sql) => {
+  const multi = await checkRepurchaseStatusForAccounts({ query: async (sql, params) => {
     statusSql = String(sql);
     return { rows: [
-    { campaign_id: 'c1', p8: '11112222', last_at: new Date(now.getTime() - 4 * 86400000) },
-    { campaign_id: 'c1', p8: '33334444', last_at: new Date(now.getTime() - 16 * 86400000) },
+    { campaign_id: 'c1', p8: '11112222', last_at: new Date(now.getTime() - 4 * 86400000), ownership_verified: true },
+    { campaign_id: 'c1', p8: '33334444', last_at: new Date(now.getTime() - 4 * 86400000), ownership_verified: false },
+    { campaign_id: 'c1', p8: '55556666', last_at: new Date(now.getTime() - 16 * 86400000), ownership_verified: false },
     ] };
   } }, {
-    campaignIds: ['c1'], phone8List: ['11112222', '33334444', '55556666'], ownerPhone8: '11112222',
+    campaignIds: ['c1'], phone8List: ['11112222', '33334444', '55556666'],
+    ownerPhone8: '11112222', ownerReviewerId: '11111111-1111-4111-8111-111111111111',
   });
   assert.equal(multi.get('11112222').get('c1').status, 'locked');
-  assert.equal(multi.get('33334444').get('c1').status, 'ready');
-  assert.equal(multi.has('55556666'), false, '이력 없는 계정은 서버 맵에 없음(화면에서는 가능 계정)');
+  assert.equal(multi.get('33334444').get('c1').status, 'locked', '소유자 링크 없는 최근 타명의도 화면에서 선차단');
+  assert.equal(multi.get('33334444').get('c1').availableFrom, null, '미확인 타명의 구매일/가능일은 노출하지 않음');
+  assert.equal(multi.has('55556666'), false, '기간이 지난 미확인 이력은 생략(실제 참여 가능)');
   assert.ok(statusSql.includes('campaign_applications ca'), '상태 조회도 같은 공고 submitted 이력을 폴백으로 포함');
   assert.ok(statusSql.includes("ca.status = 'submitted'"), '완료된 공고 신청만 상태 폴백에 포함');
-  assert.ok(statusSql.includes('owned_ca.owner_phone8 = $3'), '타계정 원장 이력은 같은 소유자의 신청 연결로 제한');
-  assert.ok(statusSql.includes('ca.phone8 = $3 OR ca.owner_phone8 = $3'), '타계정 신청 이력은 같은 소유자만 노출');
+  assert.ok(statusSql.includes('ownership_verified'), '이력마다 소유관계 증명 여부를 함께 계산');
+  assert.ok(statusSql.includes('owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid'), '전화/UUID 소유관계를 모두 확인');
   const camp = read('src/routes/campaign.routes.js');
   assert.ok(camp.includes("router.get('/my-repurchase-status'"), '계정별 상태 API');
   assert.ok(camp.includes('checkRepurchaseStatusForAccounts'), '본계정+타계정 일괄 판정');
   assert.ok(camp.includes('SELECT name, phone8, sub_accounts'), '서명된 소유자의 등록 명의를 상태 대상으로 읽음');
   assert.ok(camp.includes('ownerPhone8: p8'), '타계정 이력은 소유자 범위와 함께 판정');
+  assert.ok(camp.includes('ownerReviewerId: req.reviewer.ownerReviewerId'), '서명 세션의 소유자 UUID도 판정에 전달');
   assert.ok(camp.includes('phone8: holdP8'), '신청 최종 검사는 실제 선택 명의');
   const page = read('../frontend/campaign.html');
   assert.ok(page.includes("r.state === 'repurchase'"), '기간 중 계정은 선택 불가');

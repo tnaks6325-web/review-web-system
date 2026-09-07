@@ -963,7 +963,9 @@ function _acctStateText(r){
   return r.state === 'joined' ? '이 공고에 참여중'
     : r.state === 'same_phone' ? '본계정과 같은 번호 — 별도 참여 불가'
     : r.state === 'invalid' ? '전화번호를 확인해주세요'
-    : r.state === 'repurchase' ? ((r.repurchase && r.repurchase.availableFrom ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) : '재참여 가능일') + ' 이후 재참여 가능')
+    : r.state === 'repurchase' ? (r.repurchase && r.repurchase.availableFrom
+      ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) + ' 이후 재참여 가능'
+      : '최근 참여 이력으로 재참여 제한 중')
     : r.state === 'nocredit' ? base + '참여권 없음 — 일반 모집 제출완료 후 가능'
     : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }

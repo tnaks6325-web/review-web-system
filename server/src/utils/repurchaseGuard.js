@@ -311,20 +311,34 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
 }
 
 // 여러 명의의 공고별 재참여 상태를 한 번에 계산한다.
-// ownerPhone8을 주면 본계정은 기존 phone8 이력을 그대로 보고, 타계정 이력은 해당 소유자의
-// campaign_applications로 소유관계가 남은 주문만 본다. sub_accounts는 사용자가 편집할 수 있으므로
-// 목록에 번호가 있다는 사실만으로 타인의 주문 이력을 노출하지 않는다.
-async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone8List, ownerPhone8 } = {}) {
+// ownerPhone8/ownerReviewerId를 주면 소유관계가 증명된 이력은 정확한 가능일을 돌려준다.
+// 레거시 외부모집처럼 소유자 링크가 없는 이력도 실제 apply 가드는 phone8로 차단하므로, 현재
+// 제한 기간 안이면 generic locked로 포함한다. 이때 날짜/구매시각은 노출하지 않는다. 즉 화면이
+// "가능"이라 했다가 신청에서 거절되는 모순은 막되, 편집 가능한 sub_accounts만으로 타인의
+// 구매일자를 조회할 수는 없게 한다. 기간이 지난 미확인 이력은 실제로 참여 가능하므로 생략한다.
+async function checkRepurchaseStatusForAccounts(dbOrClient, {
+  campaignIds, phone8List, ownerPhone8, ownerReviewerId,
+} = {}) {
   const out = new Map();
   const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
   const phones = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
   const owner = String(ownerPhone8 || '').replace(/\D/g, '').slice(-8) || null;
+  const ownerId = /^[0-9a-f-]{36}$/i.test(String(ownerReviewerId || '')) ? String(ownerReviewerId) : null;
   if (repurchaseDays() <= 0 || !ids.length || !phones.length) return out;
   const { rows } = await dbOrClient.query(
     `WITH campaign_history AS (
        SELECT rc.id AS campaign_id, rc.repurchase_days,
               RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
-              os.submitted_at
+              os.submitted_at,
+              CASE WHEN $3::text IS NULL AND $4::uuid IS NULL THEN TRUE
+                   WHEN RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3 THEN TRUE
+                   WHEN os.owner_reviewer_id = $4::uuid THEN TRUE
+                   WHEN EXISTS (
+                     SELECT 1 FROM campaign_applications owned_ca
+                      WHERE owned_ca.order_submission_id = os.id
+                        AND owned_ca.phone8 = RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)
+                        AND (owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid)
+                   ) THEN TRUE ELSE FALSE END AS ownership_verified
          FROM recruit_campaigns rc
          LEFT JOIN tab_configs base_tab
            ON base_tab.sheet_id = rc.linked_sheet_id
@@ -336,16 +350,6 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
          WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
            AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
            AND (
-             $3::text IS NULL
-             OR RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
-             OR EXISTS (
-               SELECT 1 FROM campaign_applications owned_ca
-                WHERE owned_ca.order_submission_id = os.id
-                  AND owned_ca.phone8 = RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)
-                  AND owned_ca.owner_phone8 = $3
-             )
-           )
-           AND (
             (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (
               os.repurchase_work_key = rc.linked_sheet_id || E'\\x1f' || BTRIM(base_tab.campaign_name)
               OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = NULLIF(BTRIM(base_tab.campaign_name), '')
@@ -353,7 +357,10 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
             OR (NULLIF(BTRIM(base_tab.campaign_name), '') IS NULL AND os.tab_name = rc.linked_tab_name)
           )
        UNION ALL
-       SELECT rc.id AS campaign_id, rc.repurchase_days, ca.phone8, ca.submitted_at
+       SELECT rc.id AS campaign_id, rc.repurchase_days, ca.phone8, ca.submitted_at,
+              CASE WHEN $3::text IS NULL AND $4::uuid IS NULL THEN TRUE
+                   WHEN ca.phone8 = $3 OR ca.owner_phone8 = $3 OR ca.owner_reviewer_id = $4::uuid
+                   THEN TRUE ELSE FALSE END AS ownership_verified
          FROM recruit_campaigns rc
          JOIN campaign_applications ca ON ca.campaign_id = rc.id
         WHERE rc.id = ANY($1::text[])
@@ -363,11 +370,11 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
              WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
            ))
            AND ca.phone8 = ANY($2::text[])
-           AND ($3::text IS NULL OR ca.phone8 = $3 OR ca.owner_phone8 = $3)
       )
-     SELECT campaign_id, repurchase_days, phone8, MAX(submitted_at) AS last_submitted_at
+     SELECT campaign_id, repurchase_days, phone8, ownership_verified,
+            MAX(submitted_at) AS last_submitted_at
        FROM campaign_history
-       GROUP BY campaign_id, repurchase_days, phone8`, [ids, phones, owner]);
+       GROUP BY campaign_id, repurchase_days, phone8, ownership_verified`, [ids, phones, owner, ownerId]);
   const now = Date.now();
   for (const r of rows) {
     const days = repurchaseDays(r.repurchase_days);
@@ -375,9 +382,23 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
     const at = new Date(r.last_submitted_at || r.last_at);
     const availableFrom = new Date(at.getTime() + days * 86400000);
     const status = availableFrom.getTime() > now ? 'locked' : 'ready';
+    const ownershipVerified = r.ownership_verified !== false;
+    // 미확인 과거 이력은 현재 제한에 영향이 없고, 존재 여부도 응답하지 않는다.
+    if (!ownershipVerified && status !== 'locked') continue;
     const p8 = r.phone8 || r.p8;
     if (!out.has(p8)) out.set(p8, new Map());
-    out.get(p8).set(String(r.campaign_id), { status, days, lastSubmittedAt: at, availableFrom });
+    const campaignId = String(r.campaign_id);
+    const previous = out.get(p8).get(campaignId);
+    // 하드 가드와 마찬가지로 실제 참여시각이 가장 최근인 이력이 최종 상태를 결정한다.
+    if (previous && previous._lastSubmittedAtMs >= at.getTime()) continue;
+    out.get(p8).set(campaignId, ownershipVerified
+      ? { status, days, lastSubmittedAt: at, availableFrom, ownershipVerified: true, _lastSubmittedAtMs: at.getTime() }
+      : { status: 'locked', days, lastSubmittedAt: null, availableFrom: null,
+          ownershipVerified: false, verificationRequired: true, _lastSubmittedAtMs: at.getTime() });
+  }
+  // 내부 비교용 값은 API 결과로 내보내지 않는다.
+  for (const campaigns of out.values()) {
+    for (const state of campaigns.values()) delete state._lastSubmittedAtMs;
   }
   return out;
 }
