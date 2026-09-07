@@ -311,13 +311,36 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
 }
 
 // 여러 명의의 공고별 재참여 상태를 한 번에 계산한다.
-async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone8List } = {}) {
+// ownerPhone8/ownerReviewerId를 주면 먼저 명의 자체의 소유관계를 증명한 뒤 그 명의의 전체 이력을
+// 최신순으로 계산한다. 행마다 필터하면 "예전 연결 이력 + 더 최근 연결 누락 외부주문"에서 예전
+// 이력만 남아 ready로 잘못 보일 수 있기 때문이다.
+// sub_accounts는 사용자가 편집할 수 있으므로 목록에 번호가 있다는 사실만으로 타인의 주문 이력을
+// 조회하지 않는다. campaign_applications/order_submissions의 owner 링크도 편집 가능한 sub_accounts로
+// 신청한 뒤 만들 수 있으므로 소유 증명으로 승격하지 않는다. 관리자 충돌검사를 거쳐 발급된 코드
+// 신원(reviewer_identities)과 본계정 번호만 신뢰한다. 아직 코드가 없는 타명의는 호출자가
+// history-derived ready/locked가 아닌 중립적인 unknown으로 표시하고, 실제 신청 때 phone8 하드
+// 가드로 최종 판정한다.
+async function checkRepurchaseStatusForAccounts(dbOrClient, {
+  campaignIds, phone8List, ownerPhone8, ownerReviewerId,
+} = {}) {
   const out = new Map();
   const ids = Array.from(new Set((campaignIds || []).map(String).filter(Boolean)));
   const phones = Array.from(new Set((phone8List || []).map(String).filter(p => p.length === 8)));
+  const owner = String(ownerPhone8 || '').replace(/\D/g, '').slice(-8) || null;
+  const ownerId = /^[0-9a-f-]{36}$/i.test(String(ownerReviewerId || '')) ? String(ownerReviewerId) : null;
   if (repurchaseDays() <= 0 || !ids.length || !phones.length) return out;
   const { rows } = await dbOrClient.query(
-    `WITH campaign_history AS (
+    `WITH verified_phones AS (
+       SELECT requested.phone8
+         FROM unnest($2::text[]) AS requested(phone8)
+        WHERE requested.phone8 = $3
+           OR EXISTS (
+             SELECT 1 FROM reviewer_identities ri
+              WHERE ri.owner_reviewer_id = $4::uuid
+                AND ri.current_phone8 = requested.phone8
+                AND ri.status = 'active'
+           )
+     ), campaign_history AS (
        SELECT rc.id AS campaign_id, rc.repurchase_days,
               RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
               os.submitted_at
@@ -329,9 +352,11 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
          LEFT JOIN tab_configs submitted_tab
            ON submitted_tab.sheet_id = os.sheet_id
           AND submitted_tab.tab_name = os.tab_name
-        WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
-          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
-          AND (
+         WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
+           AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
+           AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)
+               IN (SELECT phone8 FROM verified_phones)
+           AND (
             (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (
               os.repurchase_work_key = rc.linked_sheet_id || E'\\x1f' || BTRIM(base_tab.campaign_name)
               OR NULLIF(BTRIM(submitted_tab.campaign_name), '') = NULLIF(BTRIM(base_tab.campaign_name), '')
@@ -347,12 +372,13 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
           AND (ca.order_submission_id IS NULL OR EXISTS (
             SELECT 1 FROM order_submissions linked_os
              WHERE linked_os.id = ca.order_submission_id AND linked_os.deleted_at IS NULL
-          ))
-          AND ca.phone8 = ANY($2::text[])
-     )
+           ))
+           AND ca.phone8 = ANY($2::text[])
+           AND ca.phone8 IN (SELECT phone8 FROM verified_phones)
+      )
      SELECT campaign_id, repurchase_days, phone8, MAX(submitted_at) AS last_submitted_at
        FROM campaign_history
-      GROUP BY campaign_id, repurchase_days, phone8`, [ids, phones]);
+       GROUP BY campaign_id, repurchase_days, phone8`, [ids, phones, owner, ownerId]);
   const now = Date.now();
   for (const r of rows) {
     const days = repurchaseDays(r.repurchase_days);
@@ -362,7 +388,9 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, { campaignIds, phone
     const status = availableFrom.getTime() > now ? 'locked' : 'ready';
     const p8 = r.phone8 || r.p8;
     if (!out.has(p8)) out.set(p8, new Map());
-    out.get(p8).set(String(r.campaign_id), { status, days, lastSubmittedAt: at, availableFrom });
+    out.get(p8).set(String(r.campaign_id), {
+      status, days, lastSubmittedAt: at, availableFrom, ownershipVerified: true,
+    });
   }
   return out;
 }

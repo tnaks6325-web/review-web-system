@@ -740,12 +740,23 @@
     //   utils/repurchaseGuard)와 어긋나지 않게, 값은 항상 서버(GET /my-repurchase-status)가 준다.
     //   ★ c.repurchaseStatus 가 없으면(조회 전·평소 카드·구버전 백엔드) 아무것도 안 그린다.
     const repAccounts = (c.repurchase && Array.isArray(c.repurchase.accounts)) ? c.repurchase.accounts : [];
-    const repReady = repAccounts.filter(a => a && a.status === 'ready');
-    const repLocked = repAccounts.filter(a => a && a.status === 'locked');
+    // 타계정 로그인에서 형제 명의는 서버가 login_only로 내린다. 카드 잠금/안내 계산에서도
+    // 선택 불가능한 형제 명의를 제외하고 실제 로그인 명의만 본다.
+    const repUsable = repAccounts.filter(a => a && a.status !== 'login_only');
+    const repReady = repUsable.filter(a => a.status === 'ready');
+    const repLocked = repUsable.filter(a => a.status === 'locked');
+    const repUnknown = repUsable.filter(a => a.status === 'unknown');
     let repurchaseSash = '';
-    const repurchaseLocked = !admin && repAccounts.length > 0 && !repReady.length && repLocked.length > 0;
+    const repurchaseLocked = !admin && repUsable.length > 0 && repUsable.every(a => a.status === 'locked');
     if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
-    else if (repurchaseLocked) { const d = repLocked[0].availableFrom; const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000)); repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`; }
+    else if (!admin && repUnknown.length) repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">타계정 참여 시 재참여 이력 확인</span></div>';
+    else if (repurchaseLocked) {
+      // 모든 명의가 잠겼다면 그중 가장 먼저 풀리는 명의의 시각을 안내한다.
+      const d = repLocked.map(a => a.availableFrom).filter(Boolean)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+      const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000));
+      repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
+    }
 
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));

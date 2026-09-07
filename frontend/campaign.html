@@ -937,20 +937,24 @@ const _p8 = v => String(v || '').replace(/\D/g,'').slice(-8);
 function _acctRows(){
   const s = getSession(); if(!s) return [];
   const held = _allHolds();
+  const repState = p8 => _repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'locked'
+    ? 'repurchase'
+    : (_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'unknown' ? 'verify'
+      : (_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'login_only' ? 'login_only' : 'ok'));
   const rows = [{ type:'self', name: s.name, phone8: s.phone8, phone: s.phone8,
-                  state: held[s.phone8] ? 'joined' : ((_repurchaseAccounts[s.phone8] && _repurchaseAccounts[s.phone8].status === 'locked') ? 'repurchase' : 'ok'), repurchase:_repurchaseAccounts[s.phone8] || null }];
+                  state: held[s.phone8] ? 'joined' : repState(s.phone8), repurchase:_repurchaseAccounts[s.phone8] || null }];
   (_subs || []).forEach((x, i) => {
     const p8 = _p8(x.phone);
     rows.push({ type:'sub', idx:i, name:String(x.name||'').trim(), phone8:p8, phone:String(x.phone||''),
-      state: held[p8] ? 'joined' : (p8 === s.phone8 ? 'same_phone' : (p8.length !== 8 ? 'invalid' : ((_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'locked') ? 'repurchase' : 'ok'))), repurchase:_repurchaseAccounts[p8] || null });
+      state: held[p8] ? 'joined' : (p8 === s.phone8 ? 'same_phone' : (p8.length !== 8 ? 'invalid' : repState(p8))), repurchase:_repurchaseAccounts[p8] || null });
   });
   // 서버가 거절한 명의는 잠금(자리는 점유되지 않았고, 사유를 그대로 보여준다)
-  rows.forEach(r => { if(_acctBlocked[r.phone8] && r.state === 'ok'){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
+  rows.forEach(r => { if(_acctBlocked[r.phone8] && (r.state === 'ok' || r.state === 'verify')){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
   // ★ 인기 공고: 참여권은 명의별이라 어느 명의로 참여할 수 있는지 여기서 말해준다.
   //   참여권 0이 확인된 명의는 고를 수 없게 한다(고르면 서버가 403 — 헛걸음을 만들지 않는다).
   //   **모르면(조회 전·실패·인기 공고 아님) 손대지 않는다** — 우리 오류로 정당한 참여를 막지 않는다.
   rows.forEach(r => {
-    if(r.state !== 'ok') return;
+    if(r.state !== 'ok' && r.state !== 'verify') return;
     const cr = _popCreditFor(r.phone8);
     if(!cr) return;
     r.credits = cr.credits;
@@ -963,7 +967,9 @@ function _acctStateText(r){
   return r.state === 'joined' ? '이 공고에 참여중'
     : r.state === 'same_phone' ? '본계정과 같은 번호 — 별도 참여 불가'
     : r.state === 'invalid' ? '전화번호를 확인해주세요'
-    : r.state === 'repurchase' ? ((r.repurchase && r.repurchase.availableFrom ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) : '재참여 가능일') + ' 이후 재참여 가능')
+    : r.state === 'repurchase' ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) + ' 이후 재참여 가능'
+    : r.state === 'verify' ? '신청 시 재참여 이력 확인'
+    : r.state === 'login_only' ? '현재 로그인한 명의만 선택 가능'
     : r.state === 'nocredit' ? base + '참여권 없음 — 일반 모집 제출완료 후 가능'
     : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }
@@ -971,7 +977,7 @@ function renderAcctList(){
   const box = $('acctSheetList'); box.innerHTML = ''; _acctSel = null;
   const rows = _acctRows();
   rows.forEach((r, i) => {
-    const pickable = r.state === 'ok';
+    const pickable = r.state === 'ok' || r.state === 'verify';
     const div = document.createElement('div');
     div.className = 'optrow' + (pickable ? '' : ' dis');
     div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(r.name) +
@@ -979,6 +985,7 @@ function renderAcctList(){
       '</div><div class="sub">' + _escAttr(_acctStateText(r)) + ' · ***' + _escAttr(r.phone8.slice(-4)) + '</div></div>' +
       (r.state === 'joined' ? '<span class="obadge cur">참여중</span>'
         : r.state === 'nocredit' ? '<span class="obadge soldout">참여권 0</span>'
+        : r.state === 'verify' ? '<span class="obadge">확인</span>'
         : (pickable ? '' : '<span class="obadge soldout">불가</span>'));
     if(pickable){
       div.onclick = () => {
@@ -991,7 +998,7 @@ function renderAcctList(){
     box.appendChild(div);
   });
   $('acctSheetGo').disabled = true;
-  const canAny = rows.some(r => r.state === 'ok');
+  const canAny = rows.some(r => r.state === 'ok' || r.state === 'verify');
   const onlyNoCredit = !canAny && rows.some(r => r.state === 'nocredit');
   $('acctSheetNote').textContent = canAny
     ? '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).'
