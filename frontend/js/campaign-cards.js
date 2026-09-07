@@ -748,7 +748,9 @@
     if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
     else if (!admin && repUnknown.length) repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">타계정 참여 시 재참여 이력 확인</span></div>';
     else if (repurchaseLocked) {
-      const d = repLocked[0].availableFrom;
+      // 모든 명의가 잠겼다면 그중 가장 먼저 풀리는 명의의 시각을 안내한다.
+      const d = repLocked.map(a => a.availableFrom).filter(Boolean)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
       const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000));
       repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
     }

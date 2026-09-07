@@ -347,6 +347,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ unknown 명의는 선택 가능하되 ready로 분류하지 않음',
     detailPage.includes("r.state === 'ok' || r.state === 'verify'") &&
     cc.includes("a.status === 'unknown'"));
+  ok('★ 모든 명의 잠금 시 배열 순서가 아니라 가장 이른 해제일을 안내',
+    cc.includes(".sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0]"));
   ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));
   ok('★ 카드 상태 조회에 리뷰어 세션 토큰을 전달',
     idx.includes('headers: { "X-Reviewer-Token": reviewerToken }'));

@@ -1219,9 +1219,12 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
       : allAccounts;
     if (!accounts.length) return res.json({ ok: true, status: {} });
     const { rows: campaignModes } = await pool.query(
-      'SELECT id, multi_account_mode FROM recruit_campaigns WHERE id = ANY($1::text[])', [ids]
+      'SELECT id, multi_account_mode, repurchase_days FROM recruit_campaigns WHERE id = ANY($1::text[])', [ids]
     );
-    const multiByCampaign = new Map(campaignModes.map(row => [String(row.id), row.multi_account_mode === true]));
+    const settingsByCampaign = new Map(campaignModes.map(row => [String(row.id), {
+      multiAccountMode: row.multi_account_mode === true,
+      repurchaseDays: repurchaseDays(row.repurchase_days),
+    }]));
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
     const map = await checkRepurchaseStatusForAccounts(pool, {
       campaignIds: ids, phone8List: accounts.map(a => a.phone8), ownerPhone8: p8,
@@ -1229,7 +1232,10 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     });
     const status = {};
     for (const cid of ids) {
-      const scopedAccounts = multiByCampaign.get(cid) === true
+      const setting = settingsByCampaign.get(cid);
+      // 전역 킬스위치 또는 공고별 0일이면 apply 가드와 똑같이 안내 기능도 완전히 끈다.
+      if (!setting || setting.repurchaseDays <= 0) continue;
+      const scopedAccounts = setting.multiAccountMode
         ? accounts
         : accounts.filter(a => a.phone8 === loginP8);
       const states = scopedAccounts.map(a => ({
