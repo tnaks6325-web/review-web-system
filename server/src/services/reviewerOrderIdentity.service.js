@@ -372,7 +372,8 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       // 선택 명의 자체도 독립 필드 2개 이상 명확히 맞으면 중복 저장정보 때문에 생긴
       // 애매 판정이다. 사용자가 허용한 수동확인 경로로 보낸다. 선택 명의가 부족하거나
       // 충돌하는데 다른 명의가 맞는 경우만 결정적 오명의로 차단한다.
-      if (!selectedScore.conflicts.length && selectedScore.matches >= 2) {
+      if ((!selectedScore.conflicts.length && selectedScore.matches >= 2)
+          || reasonCodes.includes('delivery_address_changed')) {
         status = 'REVIEW';
         reasonCodes.push('multiple_identity_candidates');
       } else {

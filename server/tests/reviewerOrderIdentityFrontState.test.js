@@ -67,6 +67,31 @@ elements.card_address.value = '서울 등록길 10 502호';
 assert.strictEqual(addressContext._identityAddressDifference('card'), null);
 console.log('  ✓ 다른 배송지 비교 표시 · HTML 이스케이프 · 다른 명의 차단');
 
+for (const mask of ['*', '＊', '●', '○', '◯', '◉', '•', '·', 'x', 'X']) {
+  const listeners = [];
+  const field = { value:'', readOnly:true, parentElement:null,
+    classList:{ add:() => {}, remove:() => {} },
+    removeAttribute:(name) => { assert.strictEqual(name, 'tabindex'); },
+    addEventListener:(_name, fn) => listeners.push(fn),
+  };
+  let invalidated = 0;
+  const maskContext = {
+    _BATCH: false,
+    _cardAiState:{ card:{ extracted:{ recipient:`김${mask}수` } } },
+    document:{ getElementById:(id) => id === 'card_recipient' ? field : null },
+    showToast:() => {}, _invalidateIdentityApproval:() => { invalidated++; },
+  };
+  vm.createContext(maskContext);
+  vm.runInContext(functionSource('_hasIdentityMask'), maskContext);
+  vm.runInContext(functionSource('applyCardAiResult'), maskContext);
+  maskContext.applyCardAiResult('card');
+  assert.strictEqual(field.readOnly, false, `${mask} 가림문자는 수정할 수 있어야 한다`);
+  field.value = '김민수';
+  listeners.forEach((fn) => fn());
+  assert.strictEqual(invalidated, 1, '가림문자 수정은 기존 승인을 무효화한다');
+}
+console.log('  ✓ 서버와 같은 가림문자 10종 편집 및 승인 무효화');
+
 (async () => {
   elements.card_address.value = '서울 새길 20 1508호';
   elements.card_recipient = { value:'김민수' };

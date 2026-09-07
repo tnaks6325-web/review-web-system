@@ -7988,6 +7988,10 @@ function _stopCardCountdown(cid) {
   if (barEl)   barEl.style.width = "100%";
 }
 
+function _hasIdentityMask(value) {
+  return /[*＊●○◯◉•·xX]/.test(String(value || ""));
+}
+
 function _showCardAiResult(cid, data) {
   const setV = (id, val) => { const el=document.getElementById(id); if(!el)return; el.textContent=val||"추출 실패"; val?el.classList.remove("empty"):el.classList.add("empty"); };
   setV(cid+"_aiOrder",     data.orderNumber);
@@ -8000,7 +8004,7 @@ function _showCardAiResult(cid, data) {
   document.getElementById(cid+"_aiError").style.display = "none";
 
   // ★ 별표(*) 탐지: 수취인/전화번호/주소에 * 포함 시 경고 표시 (적용은 허용)
-  const hasAsterisk = [data.recipient, data.phone, data.address].some(v => v && v.includes("*"));
+  const hasAsterisk = [data.recipient, data.phone, data.address].some(_hasIdentityMask);
   const asteriskWarnEl = document.getElementById(cid+"_asteriskWarn");
   if (asteriskWarnEl) asteriskWarnEl.style.display = hasAsterisk ? "block" : "none";
 
@@ -8037,7 +8041,7 @@ function applyCardAiResult(cid) {
   const d = st.extracted;
 
   // ★ 별표(*) 탐지: 포함된 필드는 핑크색 표시 (적용은 허용)
-  const hasAsterisk = [d.recipient, d.phone, d.address].some(v => v && v.includes("*"));
+  const hasAsterisk = [d.recipient, d.phone, d.address].some(_hasIdentityMask);
 
   // ★ 잠금 적용 헬퍼: 값 채우기 + readonly + ai-locked + 자물쇠 배지
   // 별표 포함 필드: 핑크색 + 수정 가능 (잠금 X)
@@ -8046,16 +8050,18 @@ function applyCardAiResult(cid) {
     const el = document.getElementById(id);
     if (!el) return;
     el.value = val;
-    const valHasAsterisk = val.includes("*");
+    const valHasAsterisk = _hasIdentityMask(val);
     if (valHasAsterisk) {
       // 별표 포함: 핑크색 표시 + 수정 가능
       el.classList.add("ai-filled-asterisk");
       el.classList.remove("ai-filled", "ai-locked");
       el.readOnly = false;
+      el.removeAttribute("tabindex");
       // ★ 실시간 별표 감지 핸들러: 별표 제거 시 녹색 전환
       el.addEventListener("input", function _asteriskWatch() {
+        _invalidateIdentityApproval(cid);
         const curVal = el.value;
-        const stillHas = curVal.includes("*");
+        const stillHas = _hasIdentityMask(curVal);
         const badge = el.parentElement?.querySelector(".ai-lock-badge");
         if (stillHas) {
           el.classList.add("ai-filled-asterisk");
@@ -8108,7 +8114,7 @@ function applyCardAiResult(cid) {
     const addrEl = document.getElementById(cid+"_address");
     if (addrEl) {
       addrEl.value = d.address;
-      const addrHasAsterisk = d.address.includes("*");
+      const addrHasAsterisk = _hasIdentityMask(d.address);
       if (addrHasAsterisk) {
         addrEl.classList.add("ai-filled-asterisk");
         addrEl.classList.remove("ai-filled", "ai-locked");
@@ -8119,7 +8125,7 @@ function applyCardAiResult(cid) {
       // ★ 실시간 별표 감지 핸들러 (주소)
       addrEl.addEventListener("input", function() {
         const curVal = addrEl.value;
-        const stillHas = curVal.includes("*");
+        const stillHas = _hasIdentityMask(curVal);
         const badge = addrEl.parentElement?.querySelector(".ai-lock-badge");
         if (stillHas) {
           addrEl.classList.add("ai-filled-asterisk");

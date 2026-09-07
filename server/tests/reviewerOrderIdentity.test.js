@@ -100,6 +100,17 @@ const other = {
     }
   });
 
+  await test('가족과 연락처를 공유하거나 중복 명의가 있어도 이름·연락처 일치의 배송지 확인을 유지한다', async () => {
+    const destination = '부산 해운대구 새길 20 202동 1508호';
+    for (const name of ['가족이름', selected.name]) {
+      const family = { ...selected, identityKey:'sub:family', name, address:destination };
+      const r = await evaluateSelectedIdentity({ recipient:selected.name, phone:selected.phone, address:destination },
+        selected, [selected, family], { useGemini:false });
+      assert.strictEqual(r.status, 'REVIEW');
+      assert.ok(r.reasonCodes.includes('delivery_address_changed'));
+    }
+  });
+
   await test('이름과 주소가 맞고 전화만 다르면 실질 일치의 수동확인 대상이다', async () => {
     const r = await evaluateSelectedIdentity(
       { recipient:'김민수', phone:'010-0000-9999', address:selected.address },
