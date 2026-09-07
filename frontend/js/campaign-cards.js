@@ -742,18 +742,15 @@
     const repAccounts = (c.repurchase && Array.isArray(c.repurchase.accounts)) ? c.repurchase.accounts : [];
     const repReady = repAccounts.filter(a => a && a.status === 'ready');
     const repLocked = repAccounts.filter(a => a && a.status === 'locked');
+    const repUnknown = repAccounts.filter(a => a && a.status === 'unknown');
     let repurchaseSash = '';
-    const repurchaseLocked = !admin && repAccounts.length > 0 && !repReady.length && repLocked.length > 0;
+    const repurchaseLocked = !admin && repAccounts.length > 0 && repAccounts.every(a => a && a.status === 'locked');
     if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
+    else if (!admin && repUnknown.length) repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">타계정 참여 시 재참여 이력 확인</span></div>';
     else if (repurchaseLocked) {
-      const dated = repLocked.find(a => a && a.availableFrom);
-      if (dated) {
-        const d = dated.availableFrom;
-        const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000));
-        repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
-      } else {
-        repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">최근 참여 이력으로 재참여 제한 중</span></div>';
-      }
+      const d = repLocked[0].availableFrom;
+      const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000));
+      repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
     }
 
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)

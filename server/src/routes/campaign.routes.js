@@ -1210,14 +1210,18 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
       seen.add(subP8);
       allAccounts.push({ phone8: subP8, type: 'sub', displayName });
     }
-    // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 표시한다.
-    // 소유자 UUID/phone8로 증명된 이력만 날짜를 표시한다. 레거시 외부모집처럼 소유자 링크가
-    // 없는 최근 이력은 날짜를 숨긴 generic locked로만 내려 화면과 최종 apply 차단을 맞춘다.
+    // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 후보로 구성한다.
+    // 단, multi_account_mode=false 공고는 실제 신청 화면과 똑같이 로그인 명의 하나만 계산한다.
+    // 소유자 UUID/phone8로 증명되지 않은 타명의 이력은 조회하지 않고 unknown으로 표시한다.
     const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     const accounts = req.reviewer.loginKind === 'sub'
       ? allAccounts.filter(a => a.type === 'sub' && a.phone8 === loginP8)
       : allAccounts;
     if (!accounts.length) return res.json({ ok: true, status: {} });
+    const { rows: campaignModes } = await pool.query(
+      'SELECT id, multi_account_mode FROM recruit_campaigns WHERE id = ANY($1::text[])', [ids]
+    );
+    const multiByCampaign = new Map(campaignModes.map(row => [String(row.id), row.multi_account_mode === true]));
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
     const map = await checkRepurchaseStatusForAccounts(pool, {
       campaignIds: ids, phone8List: accounts.map(a => a.phone8), ownerPhone8: p8,
@@ -1225,8 +1229,20 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     });
     const status = {};
     for (const cid of ids) {
-      const states = accounts.map(a => ({ ...a, ...(map.get(a.phone8)?.get(cid) || { status: 'ready' }) }));
-      if (states.some(a => map.get(a.phone8)?.has(cid))) status[cid] = { accounts: states, readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8) };
+      const scopedAccounts = multiByCampaign.get(cid) === true
+        ? accounts
+        : accounts.filter(a => a.phone8 === loginP8);
+      const states = scopedAccounts.map(a => ({
+        ...a,
+        ...(map.get(a.phone8)?.get(cid) || { status: a.type === 'self' ? 'ready' : 'unknown' }),
+      }));
+      // unknown은 참여 이력 유무와 무관한 동일 응답이라 타번호의 최근 참여 여부를 누설하지 않는다.
+      if (states.some(a => a.status === 'unknown' || map.get(a.phone8)?.has(cid))) {
+        status[cid] = {
+          accounts: states,
+          readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8),
+        };
+      }
     }
     res.json({ ok: true, status });
   } catch (err) {

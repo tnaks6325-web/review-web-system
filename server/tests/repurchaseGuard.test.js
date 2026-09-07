@@ -222,8 +222,6 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
       { campaign_id: 'camp_locked', repurchase_days: 21, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000), ownership_verified: true },
       { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000), ownership_verified: true },
       { campaign_id: 'camp_unlimited', repurchase_days: 0, phone8: '86365441', last_submitted_at: new Date(Date.now() - 1 * 86400000), ownership_verified: true },
-      { campaign_id: 'camp_locked', repurchase_days: 21, phone8: '11112222', last_submitted_at: new Date(Date.now() - 2 * 86400000), ownership_verified: false },
-      { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '11112222', last_submitted_at: new Date(Date.now() - 10 * 86400000), ownership_verified: false },
     ];
     let statusParams = null;
     const r = await checkRepurchaseStatusForAccounts({ query: async (sql, params) => {
@@ -243,16 +241,13 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
       statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
       statusSql.includes('linked_os.deleted_at IS NULL'));
-    ok('★ 이력을 버리지 않고 소유자 전화/UUID 증명 여부를 별도 계산',
-      statusSql.includes('AS ownership_verified') &&
+    ok('★ 타계정 주문 이력은 소유자 전화/UUID로 증명된 범위만 조회',
+      statusSql.includes('os.owner_reviewer_id = $4::uuid') &&
       statusSql.includes('owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid'));
-    ok('★ 타계정 신청 이력도 소유자 전화/UUID 증명 여부를 계산',
+    ok('★ 타계정 신청 이력도 소유자 전화/UUID로 증명된 범위만 조회',
       statusSql.includes('ca.phone8 = $3 OR ca.owner_phone8 = $3 OR ca.owner_reviewer_id = $4::uuid'));
     eq('★ 소유자 phone8이 SQL 파라미터로 전달', statusParams[2], '86365441');
     eq('★ 소유자 UUID가 SQL 파라미터로 전달', statusParams[3], '11111111-1111-4111-8111-111111111111');
-    eq('★ 소유자 링크 없는 최근 타명의도 generic locked', r.get('11112222').get('camp_locked').status, 'locked');
-    eq('★ 미확인 이력은 가능일을 노출하지 않음', r.get('11112222').get('camp_locked').availableFrom, null);
-    ok('★ 기간이 지난 미확인 타명의 이력은 응답에서 생략', !r.get('11112222').has('camp_ready'));
     eq('★ 셀프·배치·카드·지각확정의 신청 이력 폴백이 모두 취소 주문을 제외',
       (readS('utils/repurchaseGuard.js').match(/ca\.order_submission_id IS NULL OR EXISTS/g) || []).length, 4);
   }
@@ -346,9 +341,12 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     cc.includes(`if (c.state === 'open' && repurchaseLocked)`));
   const idx = readF('index.html');
   const detailPage = readF('campaign.html');
-  ok('★ 소유자 링크 없는 레거시 최근 이력은 날짜를 노출하지 않고 generic 잠금 표시',
-    cc.includes('최근 참여 이력으로 재참여 제한 중') &&
-    detailPage.includes('최근 참여 이력으로 재참여 제한 중'));
+  ok('★ 미확인 타명의는 참여 가능으로 단정하지 않고 신청 시 서버 확인을 안내',
+    cc.includes('타계정 참여 시 재참여 이력 확인') &&
+    detailPage.includes('신청 시 재참여 이력 확인'));
+  ok('★ unknown 명의는 선택 가능하되 ready로 분류하지 않음',
+    detailPage.includes("r.state === 'ok' || r.state === 'verify'") &&
+    cc.includes("a.status === 'unknown'"));
   ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));
   ok('★ 카드 상태 조회에 리뷰어 세션 토큰을 전달',
     idx.includes('headers: { "X-Reviewer-Token": reviewerToken }'));
