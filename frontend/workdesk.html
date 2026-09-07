@@ -216,9 +216,9 @@
   .fol .up{font-size:9px;opacity:.75}
   .fol.big{font-size:11px;padding:4px 10px;border-radius:8px}
   .folhead{display:inline-flex;gap:6px;align-items:center}
-  /* 화면 B(작업 상세) — 헤더·요약 스트립·정산 카드를 본문 데이터 폭과 같은 값으로 캡(광고주 화면만).
+  /* 화면 B(작업 상세) — 헤더·요약 스트립을 본문 데이터 폭과 같은 값으로 캡(광고주 화면만).
      시트 그리드는 열 고정폭 합이라 원래 안 늘어남(_fitGrid) — 캡 불필요. */
-  body.advm .main .mh,body.advm .tp3grid,body.advm .setldetail,body.advm .wobar,body.advm .wodetail{max-width:1380px}
+  body.advm .main .mh,body.advm .tp3grid,body.advm .wobar,body.advm .wodetail{max-width:1380px}
   /* ★ 광고주는 정산 열이 없어 2열(.n2)이라 1380 을 다 쓰면 두 카드가 지나치게 넓어진다.
      위 줄이 .tp3grid.n2(0,2,0)보다 특이성이 높아(0,2,1) 그냥 두면 920 상한이 죽는다 — 실측으로 잡았다. */
   body.advm .tp3grid.n2{max-width:920px}
@@ -303,13 +303,9 @@
      왼쪽은 작업 조건·진행 현황·정산 현황을 순서대로 두고, 기존 진행 현황 자리는 리뷰가 쓴다.
      리뷰 캡처는 고정 높이의 스크롤 영역에서만 움직여 상단 조합 높이를 밀어내지 않는다.
      행 클릭 또는 ↑↓ 로 선택이 이동하며 그 행의 리뷰 캡처를 즉시 보여준다. */
-  /* ★★ 업체 뷰어도 **내부와 같은 상단 3분할**(사용자 확정 2026-08-23) — 세로 스택 + 표 옆
-     세로 레일을 폐기했다. 배치·여백·접기는 `.tp3grid.c3` 한 벌이 정하고, 여기서는 업체 화면의
-     폭 상한과 정산 카드 자리만 둔다(정산은 3분할 아래 별도 줄 — 업체 정산은 상시 펼침 6칸이라
-     내부의 '진행 현황 하단 접이식'과 성질이 다르다). */
+  /* ★★ 업체 뷰어도 내부와 같은 상단 3분할·진행 현황 정산 버튼을 사용한다. */
   .advwork{display:block;max-width:1380px}
   .advwork .tp3grid.c3{margin-bottom:12px}
-  .advsettle.setldetail{margin-bottom:12px}.advsettle .sect{margin-top:0!important}
   .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px;display:flex;flex-direction:column;min-height:0}
   .rvpane .rvhd{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);
                 display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px}
@@ -1716,8 +1712,6 @@
   .lkproduct{display:inline-flex;align-items:center;gap:4px;max-width:100%;font-size:10.5px;font-weight:700;color:var(--ink);background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
   .lkproduct .cnt{color:var(--accent-deep);white-space:nowrap}
   .lkproduct .amt{color:var(--muted);font-weight:600;white-space:nowrap}
-  .setlmatchbtn{border:0;cursor:pointer;font:inherit}
-  .setlmatchbtn:hover{filter:brightness(.96);box-shadow:0 0 0 2px rgba(230,151,31,.16)}
   @media(max-width:640px){ .lkrail{width:62px} }
   .setvis{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;flex:none;align-self:center}
   /* ═══ 시안 A · 상단 요약 미니 셀 스트립(참여자·제출·입금·정산 통합) ═══ */
@@ -1766,20 +1760,14 @@
      초과 배정은 저장 경로에서 막으므로 이 자리는 "미설정"만 말한다. */
   .tp3schedulewarn{margin-top:7px;padding:6px 8px;border:1px solid #f3d49a;border-radius:7px;
                    background:var(--warn-soft);color:var(--warn);font-size:11px;font-weight:800;line-height:1.25}
-  /* 정산 — 카드 클릭 = 하단 상세(스텝퍼) 펼침/접기(종전 .mcell.setl 계약 그대로) */
-  .tp3col.setl{cursor:pointer}
-  .tp3col.setl:hover{border-color:var(--accent-line);background:var(--card2)}
-  .tp3col.setl .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s}
-  .tp3col.setl.open .caret{transform:rotate(180deg)}
-  .tp3setl{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12.5px;font-weight:650}
+  /* 정산 — 진행 현황 안의 세 문서 버튼만 운영한다(내부·업체 공통). */
   .setlsummary{display:block;min-width:0}
-  .tp3steps{display:flex;gap:4px;margin-top:10px}
-  .tp3steps i{flex:1;height:4px;border-radius:3px;background:var(--line)}
-  .tp3steps i.on{background:var(--accent)}
-  .tp3steplb{display:flex;justify-content:space-between;margin-top:5px;font-size:9.5px;color:var(--faint);font-weight:700}
-  .tp3mbtn{margin-top:9px}
-  .schip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
-  .schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)} .schip.warn{background:var(--warn-soft);color:var(--warn)}
+  .tp3docs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px}
+  .tp3doc{min-width:0;border:1px solid var(--line2);border-radius:7px;background:var(--card2);color:var(--accent-deep);
+          padding:7px 5px;font:inherit;font-size:11px;font-weight:800;text-align:center;cursor:pointer;transition:.14s ease}
+  .tp3doc:hover,.tp3doc:focus-visible{border-color:var(--accent);background:var(--accent-soft);outline:none;box-shadow:0 2px 7px rgba(37,84,201,.12)}
+  .tp3doc.ready{background:var(--accent-soft);border-color:var(--accent-line)}
+  .tp3doc.ready::before{content:'✓';display:inline-block;margin-right:4px;color:var(--safe);font-size:10px}
   /* ══ 작업보드 상단 3분할(내부) — 시안 C 확정 2026-08-19 ══════════════════════════
      시안 = frontend/docs/design-workboard-top-redesign.html (?v=C)
      폭 = 작업조건 439 / 진행현황 439 / 미리보기 659 — 앞 두 칸은 **같은 너비**(사용자 확정 2026-08-19,
@@ -1862,11 +1850,8 @@
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
   .tp3wo.lk .st{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:0 7px;font-weight:700;flex:none}
   .tp3wo.lk .ic{flex:none}
-  /* 정산 = 별도 박스가 아니라 진행 현황 카드 하단 구역(#setlCell 계약 유지) */
-  .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2);cursor:pointer}
-  .setlin:hover{opacity:.9}
-  .setlin .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s}
-  .setlin.open .caret{transform:rotate(180deg)}
+  /* 정산 = 별도 박스가 아니라 진행 현황 카드 하단의 독립 버튼 구역 */
+  .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2)}
   /* ③ 제출물 미리보기 — 좌 구매캡처 / 우 리뷰캡처, 칸마다 한 장 */
   .rv2{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:9px}
   /* ★ 미리보기 칸은 **높이를 요구하지 않는다** — 내용은 절대배치 레이어(.rvfill) 안에서만 흐르므로
@@ -1934,7 +1919,6 @@
   .rvstat .s.lk{cursor:pointer}
   .rvstat .s.lk:hover{background:var(--chip,#eef4ff);border-color:var(--p,#2456c9)}
   .rvstat .s .ext{opacity:.55;font-weight:700}
-  .setldetail{margin-bottom:8px} .setldetail[hidden]{display:none}
   /* ═══ 그리드 컬럼 ▾ 메뉴 · 행 그룹 헤더 ═══ */
   /* 헤더 클릭 필터: ▾ 아이콘 제거, 컬럼명 자체가 트리거. 호버=깔때기 힌트(절대배치=폭 무증가) · 필터중=밑줄+색 · 정렬중=화살표 */
   .th-in{display:flex;align-items:center;gap:4px;position:relative;padding-right:1px} .th-in .lbl{overflow:hidden;text-overflow:ellipsis}
@@ -2686,7 +2670,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               // ── 작업보드 그리드 뷰 상태(클라이언트 전용, 탭 전환 시 초기화) ──
               gFilters:{}, gHidden:new Set(), gGroupBy:null, gCollapsed:new Set(), gSort:null, gSelCols:[],
               gWidthScope:'', gWidthPrefs:Object.create(null), gWidthEditor:null,
-              settleOpen:false, _gMenuCol:null, _gMenuInit:false, _gDragInit:false };
+              _gMenuCol:null, _gMenuInit:false, _gDragInit:false };
 
 async function boot(){
   // 광고주 전용 접속 링크(#a=<token>, 구 #adv=) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
@@ -4100,7 +4084,7 @@ function toggleMhTools(ev){
 /* ── 마감 확인창 ────────────────────────────────────────────────────
    ★★ 리뷰폴더 마감자료 검수 확인 체크를 눌러야 [마감]이 활성(사용자 확정 ㉠).
       검수는 캡처 품질 판단이라 시스템 수치로 대신할 수 없다. 서버도 inspected 없으면 거부한다(이중 방어).
-   ★ 마감자료 미생성은 **경고만** — 마감자료를 쓰지 않는 작업 유형까지 막지 않는다(하드블록 금지). */
+   마감 여부와 무관하게 리뷰 캡처 검수 확인은 사람이 직접 체크한다. */
 let _FIN={sheetId:'',tabName:''};
 // ★★ onclick 에 시트에서 온 문자열(sheetId·tabName)을 절대 넣지 않는다 — **인덱스만** 넘긴다.
 //   HTML 속성은 엔티티가 디코드된 뒤 JS 로 파싱되므로 esc(따옴표 → &quot;)만으로는 문자열 탈출을 못 막는다:
@@ -4768,19 +4752,17 @@ async function _finOpen(tab){
   const t=_finTab(sheetId,tabName)||tab;   // 통계 병합은 객체 동일성을 보존하므로 tab 그대로도 안전
   const s=t.stats||null;
   const facts=s
-    ? `인원/제출 <b>${s.submitted==null?'—':s.submitted}/${s.total==null?'—':s.total}</b> · 입금 <b>${s.paid|0}</b>${isFinishCandidate(t)?' <span class="wbl-s cand">✓ 마감 후보</span>':''}<br>
-       마감자료: ${s.closeoutDate?`<b>생성됨 ${esc(_finDate(s.closeoutDate))} · ${s.closeoutRows==null?'—':s.closeoutRows}건</b>`:'<b>미생성</b>'}`
+    ? `인원/제출 <b>${s.submitted==null?'—':s.submitted}/${s.total==null?'—':s.total}</b> · 입금 <b>${s.paid|0}</b>${isFinishCandidate(t)?' <span class="wbl-s cand">✓ 마감 후보</span>':''}`
     : `<span style="color:var(--faint)">통계를 불러오지 못했습니다 — 수치 없이도 마감할 수 있습니다.</span>`;
   body.innerHTML=`<b>${esc(t.tabName)}</b>${t.advertiserName?` (${esc(t.advertiserName)}${(s&&s.manager)?' · 담당 '+esc(s.manager):''})`:''}
     <div class="wbl-facts">${facts}</div>
-    ${(s&&!s.closeoutDate)?`<div class="wbl-warn">⚠ 마감자료가 아직 생성되지 않았습니다 — 필요한 작업이라면 정산 카드에서 먼저 생성해 주세요(마감은 그대로 진행할 수 있습니다).</div>`:''}
     <ul class="wbl-ul">
       <li>전 직원의 작업보드에서 <b>마감 보관함</b>으로 이동합니다.</li>
       <li>${_finUntouched(t)}에는 <b>아무 영향이 없습니다.</b></li>
       <li>언제든 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</li>
     </ul>
     <label class="wbl-chk"><input type="checkbox" id="finChk" onchange="_finChk(this)">
-      <span>리뷰폴더의 마감자료(리뷰 캡처) 검수를 확인했습니다
+      <span>리뷰폴더의 리뷰 캡처 검수를 확인했습니다
         <span class="sub">체크해야 [마감] 버튼이 활성화됩니다</span></span></label>`;
 }
 function _finChk(el){ const b=document.getElementById('finGo'); if(b) b.disabled=!el.checked; }
@@ -5852,7 +5834,7 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; if(STATE.gW
   if(!_gs.some(g=>g.key===STATE.wSeg && g.idxs.includes(i))) STATE.wSeg=(t.advertiserName||'');
   STATE.wMenu=null;
   // 탭 전환 = 헤더 구성이 달라지므로 그리드 뷰 상태(필터/숨김/그룹/정렬/정산펼침) 초기화
-  STATE.gFilters={}; STATE.gHidden=new Set(); STATE.gGroupBy=null; STATE.gCollapsed=new Set(); STATE.gSort=null; STATE.gSelCols=[]; STATE.freezeUpto=null; STATE.settleOpen=false; closeGColMenu(); closeGHidMenu();
+  STATE.gFilters={}; STATE.gHidden=new Set(); STATE.gGroupBy=null; STATE.gCollapsed=new Set(); STATE.gSort=null; STATE.gSelCols=[]; STATE.freezeUpto=null; closeGColMenu(); closeGHidMenu();
   // ★ 표 검색도 초기화 — 다른 작업의 검색어가 남아 있으면 "왜 여기만 노랗지"가 된다
   STATE.gSearch=''; STATE.gsHits=[]; STATE.gsCur=-1; STATE.gsFiltered=0; STATE.gRows=[]; STATE.gVCols=[];
   _renderTabList();   // 상단 작업바 활성 표시 갱신(세그먼트가 바뀌었을 수 있어 재렌더)
@@ -6028,8 +6010,8 @@ function renderWorkdesk(wd){
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->
     <span class="sp" style="flex:1"></span></div>
     ${STATE.role==='advertiser'
-      ? `<section class="advwork">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
-      : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div><div id="gridhost">${tableSection}</div>`}`;
+      ? `<section class="advwork">${summaryStrip(wd,d,m,c)}<div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
+      : `${summaryStrip(wd,d,m,c)}<div id="gridhost">${tableSection}</div>`}`;
   /* 작업보드 C/S는 상단 메뉴 C/S와 같은 threadId·메시지 API를 사용한다.
      탭을 바꿔 렌더할 때마다 현재 시트/작업명으로 다시 마운트해 이전 작업 대화가 남지 않게 한다. */
   if (STATE.role!=='advertiser' && document.getElementById('workdeskCsMini') && window.WorkdeskCsMini) {
@@ -6380,11 +6362,9 @@ function summaryStrip(wd,d,m,c){
      막대가 26px 로 뭉개져 2줄 배치를 따로 뒀는데, 폭을 작업 조건과 같게 맞추면서(사용자 확정
      2026-08-19) 그 근거가 사라졌다. 사본을 남겨 두면 두 화면이 계속 다른 모양으로 갈린다. */
   const gg=g;
-  /* ★ 정산은 별도 칸(박스)이 아니라 **진행 현황 카드 하단 구역**이다(사용자 확정).
-     루트 id(#setlCell)·클래스(.setlsummary)·클릭(toggleSettleDetail) 계약은 그대로 —
-     갱신이 $('#setlCell .setlsummary').outerHTML 교체라 여기서 이름을 바꾸면 두 번째 갱신부터 죽는다. */
-  const setlIn=isAdv?'':`<div class="setlin${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
-    `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
+  /* 정산은 내부·업체 공통으로 진행 현황 카드 하단의 견적서·계산서·입금 세 버튼만 쓴다.
+     진행 현황 자체에는 클릭 동작을 두지 않아 하단 정산 블록이 열리는 경로를 없앤다. */
+  const setlIn=`<div class="setlin" id="setlCell"><div class="tp3t">정산</div>${setlSummaryHtml(null)}</div>`;
   const scheduleWarning=(!isAdv&&scheduleUnassigned>0)
     ? `<div class="tp3schedulewarn">! 모집일 미설정 ${scheduleUnassigned.toLocaleString()}건</div>` : '';
   const prog=`<div class="tp3col"><div class="tp3t tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
@@ -6979,42 +6959,19 @@ function _woUnlinkedRow(wd){
   return `<div class="tp3wo"><b>⚠ 작업발주 미연결</b>`+
     `<button class="btn pri" title="발주(작업오더)를 연결하면 이 카드의 작업 조건(결제금액·유입방식·정원 폴백)과 발주 원문이 표시됩니다." onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
 }
-// 정산 미니 셀 클릭 → 하단 상세(스텝퍼) 펼침/접기
-function toggleSettleDetail(){ STATE.settleOpen=!STATE.settleOpen; const dt=$('#setldetail'); if(dt) dt.hidden=!STATE.settleOpen; const c=$('#setlCell'); if(c) c.classList.toggle('open',STATE.settleOpen); }
-// 스트립 정산 셀 요약(로드 상태별) — 상세는 #settlementsec(펼침 시)
+// 진행 현황 정산 버튼 — 내부·업체 모두 견적서·계산서·입금 세 가지만 운영한다.
 function setlSummaryHtml(d){
-  // ★ 루트는 항상 <span class="setlsummary"> — 갱신이 $('#setlCell .setlsummary').outerHTML 교체라
-  //   루트 클래스가 바뀌면 두 번째 갱신부터 대상을 못 찾는다(계약 불변).
-  const wrap=(inner,steps)=>`<span class="setlsummary"><span class="tp3setl">${inner}</span>${steps||''}</span>`;
-  if(!d) return wrap(`<span style="color:var(--faint);font-weight:500">불러오는 중…</span>`);
-  if(d.hidden) return wrap(`<span class="schip">비공개</span>`);
-  // 미매칭 상태의 매칭 진입점은 하단 빈 정산 카드가 아니라, 기존 미매칭 배지 자리에서 바로 연다.
-  if(!d.linked) return wrap(`<button type="button" class="schip warn setlmatchbtn" title="이 작업에 인트라넷 계약을 매칭합니다" onclick="event.stopPropagation();openLinkModal()">계약 매칭</button>`,_setlStepsHtml(d));
-  const st=_setlStage(d);
-  return wrap(`${d.contractNumber?`<span class="schip ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span>${_wonFmt(d.amount)}</span>`:''}<span class="schip ${st.tone}">${esc(st.label)}</span>`,_setlStepsHtml(d));
+  const unavailable=!d||d.hidden||!d.linked;
+  const qReady=!unavailable&&!!(d.quote&&d.quote.quoteNumber);
+  const iReady=!unavailable&&!!(d.invoice&&d.invoice.status==='issued');
+  const pReady=!unavailable&&!!(d.payment&&d.payment.status==='paid');
+  const btn=(kind,label,ready)=>`<button type="button" class="tp3doc${ready?' ready':''}" onclick="openSettlementDocument(event,'${kind}')">${label}</button>`;
+  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady)}${btn('invoice','계산서',iReady)}${btn('payment','입금',pReady)}</span></span>`;
 }
-/* 정산 4단계 진행 표시(마감자료→견적서→계산서→입금) — 펼치지 않고도 어디까지 왔는지 보인다.
-   ★ 표시 보조일 뿐 판정을 새로 만들지 않는다: 재료는 _setlStage 와 같은 필드를 본다. */
-function _setlStepsHtml(d){
-  const lb=['마감자료','견적서','계산서','입금'];
-  let n=0;
-  if(d&&d.linked){
-    if(d.closeout&&d.closeout.date) n=1;
-    if(d.quote&&d.quote.quoteNumber) n=2;
-    if(d.invoice&&d.invoice.status==='issued') n=3;
-    if(d.payment&&d.payment.status==='paid') n=4;
-  }
-  return `<span class="tp3steps">${lb.map((_,i)=>`<i class="${i<n?'on':''}"></i>`).join('')}</span>`+
-    `<span class="tp3steplb">${lb.map(x=>`<span>${esc(x)}</span>`).join('')}</span>`;
-}
-function _setlStage(d){
-  const q=d.quote,inv=d.invoice,pay=d.payment,co=d.closeout;
-  if(pay&&pay.status==='paid') return {label:'입금완료',tone:'safe'};
-  if(inv&&inv.status==='issued') return {label:'계산서 발행',tone:'ok'};
-  if(q&&q.status==='accepted') return {label:'견적 수락',tone:'ok'};
-  if(q&&q.quoteNumber) return {label:'견적 진행',tone:'warn'};
-  if(co&&co.date) return {label:'견적 대기',tone:'warn'};
-  return {label:'준비중',tone:''};
+function openSettlementDocument(ev,kind){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  if(kind==='quote'||kind==='invoice'){ awDocOpen(ev,kind); return; }
+  openSettlementPayment();
 }
 // ══ P2 정산 파이프라인 스텝퍼 ══
 const _SETTLE_PAY={unpaid:['미입금','bad'],partial:['부분입금','warn'],paid:['입금완료','safe']};
@@ -7128,94 +7085,29 @@ const _SETTLE_INV={not_issued:['미발행','warn'],issued:['발행완료','safe'
 const _SETTLE_Q={draft:['작성중','warn'],sent:['발송','ok'],accepted:['수락','safe'],rejected:['반려','bad'],expired:['만료','bad']};
 function _wonFmt(n){ return (Number(n)||0).toLocaleString('ko-KR')+'원'; }
 async function loadSettlement(t){
-  if(!t) return; const box=$('#settlementsec'); if(!box) return;
+  if(!t) return;
   const r=await api(`/api/trackb/workdesk/settlement?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
-  if(!r||!r.ok){ box.innerHTML=''; const cs=$('#setlCell .setlsummary'); if(cs) cs.outerHTML='<span class="setlsummary" style="color:var(--faint)">정산 정보 없음</span>'; return; }
-  STATE.settle={ data:r, tab:t }; renderSettlement();
+  STATE.settle={ data:r&&r.ok?r:null, tab:t };
+  const cellS=$('#setlCell .setlsummary');
+  if(cellS) cellS.outerHTML=setlSummaryHtml(STATE.settle.data);
 }
-function _step(n,label,state,sub){ // state: 'done'|'wait'|'off'
-  const ic=state==='done'?'✓':(state==='wait'?'…':'—');
-  return `<div class="stpstep ${state}"><div class="stpic">${ic}</div><div class="stpmeta"><div class="stpk">${esc(label)}</div><div class="stpv">${sub||'<span class="stpoff">—</span>'}</div></div></div>`;
-}
-function renderSettlement(){
-  const st=STATE.settle; if(!st) return; const box=$('#settlementsec'); if(!box) return; const d=st.data;
-  const cellS=$('#setlCell .setlsummary'); if(cellS) cellS.outerHTML=setlSummaryHtml(d);   // 스트립 정산 셀 동기화
-  const canLink=STATE.role!=='advertiser';
-  // 광고주 렌즈: 비공개·미매칭 모두 같은 안내 한 줄(내부 용어 '계약 매칭'·노출 토글 존재를 드러내지 않는다).
-  if(!canLink && (d.hidden || !d.linked)){
-    box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 현황</div><div class="stpcard"><div class="empty" style="padding:14px">정산 정보가 아직 준비되지 않았습니다. 궁금하신 내용은 담당자에게 문의해 주세요.</div></div></div>`;
+function openSettlementPayment(){
+  const st=STATE.settle, d=st&&st.data, t=(st&&st.tab)||STATE.cur;
+  const title='💳 입금 — '+((t&&t.tabName)||'작업');
+  if(!d||d.hidden||!d.linked){
+    _modal(title,'<div class="empty" style="padding:24px">정산 정보가 아직 준비되지 않았습니다. 궁금하신 내용은 담당자에게 문의해 주세요.</div>');
     return;
   }
-  if(d.hidden){ box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div><div class="stpcard"><div class="empty" style="padding:16px">정산 정보는 비공개로 설정되어 있습니다.</div></div></div>`; return; }
-  if(!d.linked){
-    // 미매칭 안내/버튼은 상단 정산 배지 자리에만 둔다. 하단에는 계약이 매칭된 뒤 정산 단계만 보인다.
-    box.innerHTML='';
-    return;
-  }
-  const co=d.closeout, q=d.quote, inv=d.invoice, pay=d.payment;
-  const coAvail=d.closeoutAvailable!==false;   // 데이터 원천(P3) 있으면 생성/CSV 어포던스
-  const coState=!coAvail?'off':(co&&co.date?'done':'wait');
-  const coSub=!coAvail?'<span class="stpoff">준비중</span>'
-    :(co&&co.date
-      ?`${esc(String(co.date).slice(0,10))} · ${co.rowCount||0}건 · <a href="#" onclick="dlCloseoutCsv(event)">CSV</a>${canLink?` · <a href="#" onclick="genCloseout(event)">재생성</a>`:''}`
-      :(canLink?'<a href="#" onclick="genCloseout(event)">마감자료 생성</a>':'<span class="stpoff">미생성</span>'));
-  const qSub=q&&q.quoteNumber?`${esc(q.quoteNumber)}${q.status?` · <span class="bb ${(_SETTLE_Q[q.status]||['',''])[1]}">${(_SETTLE_Q[q.status]||[q.status])[0]}</span>`:''}`:'<span class="stpoff">견적 없음</span>';
-  const invSub=inv?`<span class="bb ${(_SETTLE_INV[inv.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_INV[inv.status]||[inv.status])[0]}</span>${inv.date?` · ${esc(String(inv.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
-  const paySub=pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>${pay.date?` · ${esc(String(pay.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
-  // ★ 광고주 정산 현황 = 6칸(견적서·계산서·총비용·입금액·입금일·남은 입금액) — 사용자 확정.
-  //   내부(master/admin/staff)는 종전 스텝퍼 그대로(무회귀). 스텝퍼는 견적/계산서/입금 상태를 6칸이 이미
-  //   담고 있어 광고주 화면에서는 중복이라 띄우지 않는다.
-  if(!canLink){
-    box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 현황 ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||''}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>`:''}${d.proxyDown?'<span class="bb warn" title="정산 시스템 조회 지연 — 잠시 후 다시 확인해 주세요">연동 지연</span>':''}</div>
-      <div class="stpcard">${_advSettleFields(d,q,inv,pay)}</div></div>`;
-    return;
-  }
-  box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span class="bb">${_wonFmt(d.amount)}</span>`:''}${d.proxyDown?'<span class="bb warn" title="인트라넷 조회 실패 — 라벨만 표시">연동 지연</span>':''}</div>
-    <div class="stpcard">
-      <div class="stprow">
-        ${_step(1,'마감자료',coState,coSub)}
-        <div class="stparrow">→</div>
-        ${_step(2,'견적서',q&&q.status==='accepted'?'done':(q&&q.quoteNumber?'wait':'off'),qSub)}
-        <div class="stparrow">→</div>
-        ${_step(3,'계산서',inv&&inv.status==='issued'?'done':(inv?'wait':'off'),invSub)}
-        <div class="stparrow">→</div>
-        ${_step(4,'입금',pay&&pay.status==='paid'?'done':(pay?'wait':'off'),paySub)}
-      </div>
-      <div class="stpfoot"><span class="stpby">매칭: ${esc(d.linkedBy||'')}</span><button class="btn xs" onclick="openLinkModal()">계약 다시 매칭</button><button class="btn xs" onclick="unlinkSettle()">매칭 해제</button></div>
-    </div></div>`;
+  const pay=d.payment||{}, status=(_SETTLE_PAY[pay.status]||[pay.status||'미입금','neutral'])[0];
+  const amount=d.paidAmount==null?'—':_wonFmt(d.paidAmount);
+  const date=d.paidDate||pay.date;
+  _modal(title,`<div class="idc"><div class="ih ${pay.status==='paid'?'ok':'wait'}">${esc(status)}</div><div class="ig">
+    <div class="cell"><span class="k">입금액</span><b>${amount}</b></div>
+    <div class="cell"><span class="k">입금일</span><b>${date?esc(String(date).slice(0,10)):'—'}</b></div>
+    <div class="cell"><span class="k">계약 금액</span><b>${d.amount==null?'—':_wonFmt(d.amount)}</b></div>
+  </div></div>${d.proxyDown?'<div class="empty" style="padding:10px">정산 시스템 연결이 원활하지 않아 일부 정보가 늦게 표시될 수 있습니다.</div>':''}`);
 }
-// 광고주 정산 6칸 — 견적서 / 계산서 / 총비용(견적서 금액 우선) / 입금액 / 입금일(최근) / 남은 입금액(파생).
-//   ★ 남은 입금액 = 총비용 − 입금액. 목록 표·대시보드와 **같은 파생식**(갈리면 화면끼리 숫자가 어긋난다).
-function _advSettleFields(d,q,inv,pay){
-  const quoteAmt=(q&&q.totalAmount>0)?+q.totalAmount:null;
-  const totalCost=quoteAmt!=null?quoteAmt:((d.amount!=null&&+d.amount>0)?+d.amount:null);
-  const paid=(d.paidAmount!=null&&!isNaN(+d.paidAmount))?+d.paidAmount:null;
-  const rest=totalCost!=null?Math.max(totalCost-(paid||0),0):null;
-  const won=n=>n==null?'—':(+n).toLocaleString('ko-KR');
-  const day=v=>v?esc(String(v).slice(0,10)):'—';
-  const qLbl=q&&q.status?(_SETTLE_Q[q.status]||[q.status,''])[0]:null, qTone=q&&q.status?(_SETTLE_Q[q.status]||['',''])[1]:'';
-  const iLbl=inv&&inv.status?(_SETTLE_INV[inv.status]||[inv.status,''])[0]:null, iTone=inv&&inv.status?(_SETTLE_INV[inv.status]||['','neutral'])[1]:'';
-  const qCell=(q&&(q.quoteNumber||qLbl))
-    ? `${q.quoteNumber?`<b class="asv">${esc(q.quoteNumber)}</b>`:''}${qLbl?`<span class="bb ${qTone}">${esc(qLbl)}</span>`:''}${q.quoteDate?`<span class="asd">${day(q.quoteDate)}</span>`:''}`
-    : '<span class="asoff">—</span>';
-  const iCell=(inv&&(iLbl||inv.date))
-    ? `${iLbl?`<span class="bb ${iTone||''}">${esc(iLbl)}</span>`:''}${inv.date?`<span class="asd">${day(inv.date)}</span>`:''}`
-    : '<span class="asoff">—</span>';
-  return `<div class="advmoney">
-    <div class="ambox st docv" onclick="awDocOpen(event,'quote')" title="견적서 열람"><div class="k">견적서 ⧉</div><div class="v">${qCell}</div></div>
-    <div class="ambox st docv" onclick="awDocOpen(event,'invoice')" title="세금계산서 열람"><div class="k">계산서 ⧉</div><div class="v">${iCell}</div></div>
-    <div class="ambox"><div class="k">총비용${quoteAmt!=null?' (견적서 기준)':''}</div><div class="v">${won(totalCost)}${totalCost!=null?'<small>원</small>':''}</div></div>
-    <div class="ambox paidamt"><div class="k">입금액</div><div class="v">${won(paid)}${paid!=null?'<small>원</small>':''}</div></div>
-    <div class="ambox"><div class="k">입금일 (최근)</div><div class="v">${d.paidDate?day(d.paidDate):'—'}</div></div>
-    <div class="ambox rest${rest===0?' zero':''}"><div class="k">남은 입금액</div><div class="v">${rest==null?'—':(rest===0?'완납 ✓':won(rest)+'<small>원</small>')}</div></div>
-  </div>`;
-}
-function openLinkModal(){
-  const st=STATE.settle; if(!st) return;
-  openContractMatchModal({ sheetId:st.tab.sheetId, tabName:st.tab.tabName, linked:!!(st.data&&st.data.linked) });
-}
-// ★★ 계약 매칭 팝업은 **한 벌**(작업보드 정산 카드 · 업체관리 연결탭 공용). 화면마다 사본을 두면
-//    후보 규칙·확인 문구·매칭 후 동기화가 갈라진다(작업내용 렌더러 공용화와 같은 규율).
+// 계약 매칭은 업체관리 연결탭에서만 연다. 작업보드 진행 현황은 세 문서 버튼만 유지한다.
 //    ctx = {sheetId, tabName, linked} — 어느 화면에서 열었든 이 문맥만으로 동작한다.
 function openContractMatchModal(ctx){
   if(!ctx||!ctx.sheetId||!ctx.tabName) return;
@@ -7385,25 +7277,6 @@ async function toggleSettleVis(advertiserId,visible){
     if(STATE.advCur&&STATE.advCur.id===advertiserId) STATE.advCur.settlementVisible=visible; }
   else toast((r&&r.error)||'실패');
 }
-// P3 마감자료 생성/CSV
-let _genBusy=false;
-async function genCloseout(e){ if(e)e.preventDefault();
-  if(_genBusy) return; _genBusy=true;   // N-3: 더블클릭 중복생성 방지
-  const st=STATE.settle; if(!st){ _genBusy=false; return; } const t=st.tab;
-  try{
-    const r=await api('/api/trackb/settlement/closeout',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
-    if(r&&r.ok){ toast(`마감자료 생성 (${r.closeout.rowCount}건)`); loadSettlement(t); } else toast((r&&r.error)||'생성 실패');
-  } finally { _genBusy=false; }
-}
-async function dlCloseoutCsv(e){ if(e)e.preventDefault();
-  const st=STATE.settle; if(!st) return; const t=st.tab;
-  const url=`/api/trackb/settlement/closeout.csv?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`;
-  const resp=await fetch(API_BASE+url,{headers:{Authorization:'Bearer '+token()}});
-  if(!resp.ok){ let msg='CSV 다운로드 실패'; try{ const j=await resp.json(); if(j&&j.error) msg=j.error; }catch(_){}  toast(msg); return; }   // N-5: 서버 사유 표시
-  const blob=await resp.blob(); const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob); a.download=`closeout_${t.tabName}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-}
-
 // ══ 우측 레일 탭 — [협업/댓글](기본) · [Parity]. 레일은 셸에 상주(탭 전환 시 재렌더 안 됨)라 1회 구성 ══
 function _ensureRailTabs(){
   const rail=$('#rail'); if(!rail) return;

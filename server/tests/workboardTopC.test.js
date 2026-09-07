@@ -140,10 +140,10 @@ t('★ 작업세부 상시 펼침은 본문에서 사라졌다(정의·호출 �
   !/function renderWorkOrderSection/.test(wd) && !/renderWorkOrderSection\(/.test(wd)
   && !/class="wodetail"[^`]*작업세부 펼치기/.test(wd));
 t('★ 발주 전폭 띠(.wobar)를 그리지 않는다', !/<div class="wobar">/.test(wd));
-t('★ 정산은 별도 칸이 아니라 진행 현황 하단 구역 — #setlCell·.setlsummary 계약 유지',
-  /class="setlin\$\{STATE\.settleOpen\?' open':''\}" id="setlCell" onclick="toggleSettleDetail\(\)"/.test(wd)
-  && !/tp3col setl/.test(wd)
-  && /\$\('#setlCell \.setlsummary'\)/.test(wd));
+t('★ 정산은 진행 현황의 견적서·계산서·입금 세 버튼만 사용하고 하단 상세를 만들지 않는다',
+  /const setlIn=`<div class="setlin" id="setlCell"><div class="tp3t">정산<\/div>\$\{setlSummaryHtml\(null\)\}<\/div>`/.test(wd)
+  && /btn\('quote','견적서'/.test(wd) && /btn\('invoice','계산서'/.test(wd) && /btn\('payment','입금'/.test(wd)
+  && !/toggleSettleDetail/.test(wd) && !/id="setldetail"/.test(wd) && !/id="settlementsec"/.test(wd));
 /* ★★ 작업 조건 카드는 **내부·업체 한 벌**(사용자 확정 2026-08-23) — 종전에는 광고주만 4줄 요약을
    따로 그려 두 화면이 계속 어긋났다. 무엇을 보여줄지는 **서버 렌즈**가 정하고, 화면이 광고주에게
    따로 하는 일은 셋뿐: 10행만 그린다 · [미설정] 대신 「—」 · 발주 줄을 안 그린다. */
