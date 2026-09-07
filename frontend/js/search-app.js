@@ -49,6 +49,40 @@ const _PREVIEW_MODE = !!(_EMBED_CTX && _EMBED_CTX.preview);
 let _activeIdentityContext = null;
 let _identityContextPromise = null;
 
+function _lockRegisteredSubPhone(cid, identity) {
+  if (!identity || identity.type !== "sub") return false;
+  const registeredPhone = String(identity.phone || "").trim();
+  const phone8 = registeredPhone.replace(/\D/g, "").slice(-8);
+  const input = document.getElementById(cid + "_phone");
+  if (!input || phone8.length !== 8) return false;
+
+  input.value = registeredPhone;
+  input.readOnly = true;
+  input.dataset.participantPhoneLocked = "1";
+  input.dataset.participantPhone = registeredPhone;
+  input.classList.remove("ai-filled-asterisk", "of-input--error");
+  input.classList.add("participant-phone-locked");
+  input.setAttribute("aria-readonly", "true");
+  input.title = "타계정 참여 시 등록된 전화번호로만 제출됩니다.";
+
+  const parent = input.parentElement;
+  if (parent && !parent.querySelector(".participant-phone-lock-badge")) {
+    const badge = document.createElement("span");
+    badge.className = "participant-phone-lock-badge";
+    badge.innerHTML = '<i class="fas fa-shield-alt"></i> 참여번호 고정';
+    parent.style.position = "relative";
+    parent.appendChild(badge);
+  }
+  return true;
+}
+
+function _registeredParticipantPhone(cid) {
+  const input = document.getElementById(cid + "_phone");
+  return input?.dataset.participantPhoneLocked === "1"
+    ? String(input.dataset.participantPhone || "").trim()
+    : "";
+}
+
 function _reviewerIdentityRequestBody(extra) {
   return Object.assign({
     campaignId: _EMBED_CTX?.campId || "",
@@ -70,6 +104,7 @@ async function _loadOrderIdentityContext() {
     _activeIdentityContext = data;
     const identity = data.selectedIdentity || {};
     (_orderCardIds || []).forEach((cid) => {
+      _lockRegisteredSubPhone(cid, identity);
       const idEl = document.getElementById(cid + "_userId");
       if (idEl && !idEl.value) idEl.value = identity.shoppingId || "";
       if (idEl) idEl.dataset.savedValue = identity.shoppingId || "";
@@ -79,11 +114,14 @@ async function _loadOrderIdentityContext() {
         const identityKind = identity.type === "sub" ? "타계정" : "본계정";
         const phoneDigits = String(identity.phone || "").replace(/[^0-9]/g, "");
         const maskedPhone = phoneDigits ? "***" + phoneDigits.slice(-4) : "";
+        const identityHelp = identity.type === "sub"
+          ? '등록된 타계정 번호로만 제출됩니다.'
+          : 'AI가 캡처와 이 명의를 확인합니다.';
         who.innerHTML = '<span class="of-identity-kicker">현재 참여 명의</span>'
           + '<strong class="of-identity-name">' + _safeText(identityName) + '</strong>'
           + '<span class="of-identity-kind">' + identityKind + '</span>'
           + '<span class="of-identity-help">' + (maskedPhone ? _safeText(maskedPhone) + ' · ' : '')
-          + 'AI가 캡처와 이 명의를 확인합니다.</span>';
+          + identityHelp + '</span>';
         who.setAttribute("aria-label", "현재 참여 명의 " + identityName + " " + identityKind);
       }
     });
@@ -7734,6 +7772,11 @@ function removeCardImg(cid) {
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
     if (!f) return;
+    if (f.dataset.participantPhoneLocked === "1") {
+      f.value = f.dataset.participantPhone || f.value;
+      f.readOnly = true;
+      return;
+    }
     f.classList.remove("ai-filled", "ai-locked");
     f.readOnly = false;
     f.removeAttribute("tabindex");
@@ -8172,6 +8215,11 @@ function applyCardAiResult(cid) {
     if (!val) return;
     const el = document.getElementById(id);
     if (!el) return;
+    // 타계정 참여 연락처는 신청 시 등록번호가 서버 권위다. AI 추출값으로도 덮지 않는다.
+    if (el.dataset.participantPhoneLocked === "1") {
+      el.value = el.dataset.participantPhone || el.value;
+      return;
+    }
     el.value = val;
     const valHasAsterisk = _hasIdentityMask(val);
     if (valHasAsterisk) {
@@ -8869,7 +8917,7 @@ async function submitOrderForm() {
     // 각 쇼핑몰 캡처에서 확인한 값을 그대로 기록한다. 같은 장소라도 도로명/지번 표기가 다를 수 있어
     // 네이버 값을 쿠팡 카드에 복사하면 캡처 원문 보존 및 승인토큰 결속이 깨진다.
     const recipient = gv(cid+"_recipient");
-    const phone     = gv(cid+"_phone");
+    const phone     = _registeredParticipantPhone(cid) || gv(cid+"_phone");
     const address   = gv(cid+"_address");
 
     // ★ v9.14: 카드별 소득신고 정보 수집

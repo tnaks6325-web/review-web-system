@@ -7,7 +7,9 @@
  *   수동제출(manualOrder.service) 둘 다 이 모듈을 쓴다. 사본을 두면 한쪽만 기간이 어긋난다.
  *
  * ★★ 기준 = order_submissions(모든 참여 경로가 최종적으로 여기 기록된다)의
- *   같은 sheet_id + 작업 기준 키(repurchase_work_key) + phone8. 구매일별 탭이 달라도
+ *   같은 sheet_id + 작업 기준 키(repurchase_work_key) + 참여 명의 phone8. 공고 신청과
+ *   연결된 주문은 구매양식 연락처가 아니라 campaign_applications.phone8을 우선하고,
+ *   연결 정보가 없는 레거시·관리자 주문만 order_submissions.phone으로 폴백한다. 구매일별 탭이 달라도
  *   같은 작업명으로 묶여 있으면 한 작업으로 판정한다. 기준 키는 주문을 기록할 때 함께 보존하므로
  *   과거 날짜 탭의 tab_configs 행이 정리된 뒤에도 제한이 풀리지 않는다. 현재 탭 설정의 작업명이
  *   정정된 경우에도 그 정정을 반영하도록, 보존 키와 현재 작업명 대조를 함께 쓴다. 작업명이 비어
@@ -42,6 +44,21 @@ async function resolveCampaignRepurchaseDays(dbOrClient, campaignId) {
 function phone8Of(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-8);
 }
+
+// 공고 참여 주문의 명의는 신청행이 권위다. 과거에 구매양식 연락처가 본계정 번호로
+// 저장된 타계정 주문도 재참여 판정에서는 신청 당시 phone8로 귀속한다.
+const ORDER_IDENTITY_PHONE8_SQL = `COALESCE(
+  NULLIF((SELECT identity_ca.phone8
+            FROM campaign_applications identity_ca
+           WHERE identity_ca.id = os.campaign_application_id
+           LIMIT 1), ''),
+  NULLIF((SELECT linked_ca.phone8
+            FROM campaign_applications linked_ca
+           WHERE linked_ca.order_submission_id = os.id
+           ORDER BY linked_ca.id DESC
+           LIMIT 1), ''),
+  RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)
+)`;
 
 /** 같은 공고 제출 이력처럼 이미 읽어 둔 시각에도 동일한 기간 계산을 적용한다. */
 function repurchaseWindowFromSubmittedAt(submittedAt, campaignDays, nowMs = Date.now()) {
@@ -95,7 +112,7 @@ async function checkRepurchaseWindow(dbOrClient, { sheetId, tabName, campaignId,
             OR (scope.work_name IS NULL AND os.tab_name = $2)
           )
           AND os.deleted_at IS NULL
-          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
+          AND ${ORDER_IDENTITY_PHONE8_SQL} = $3
           AND os.submitted_at >= NOW() - make_interval(days => $4)
        UNION ALL
        SELECT ca.submitted_at
@@ -136,7 +153,7 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, campai
        ) AS work_name
      )
      , history AS (
-       SELECT RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS p8,
+       SELECT ${ORDER_IDENTITY_PHONE8_SQL} AS p8,
               os.submitted_at
          FROM order_submissions os
          LEFT JOIN tab_configs submitted_tab
@@ -154,7 +171,7 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, campai
           )
           AND os.deleted_at IS NULL
           AND os.submitted_at >= NOW() - make_interval(days => $3)
-          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($4::text[])
+          AND ${ORDER_IDENTITY_PHONE8_SQL} = ANY($4::text[])
        UNION ALL
        SELECT ca.phone8 AS p8, ca.submitted_at
          FROM campaign_applications ca
@@ -214,7 +231,7 @@ async function checkRepurchaseConflictAt(dbOrClient, {
           AND os.sheet_id = $1
           AND os.id IS DISTINCT FROM $8::uuid
           AND os.deleted_at IS NULL
-          AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $3
+          AND ${ORDER_IDENTITY_PHONE8_SQL} = $3
           AND (
             (scope.work_name IS NOT NULL AND (
               os.repurchase_work_key = $1 || E'\\x1f' || scope.work_name
@@ -280,7 +297,7 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
        JOIN order_submissions os
          ON os.sheet_id = rc.linked_sheet_id
         AND os.deleted_at IS NULL
-        AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = $2
+        AND ${ORDER_IDENTITY_PHONE8_SQL} = $2
        LEFT JOIN tab_configs submitted_tab
          ON submitted_tab.sheet_id = os.sheet_id
         AND submitted_tab.tab_name = os.tab_name
@@ -357,7 +374,7 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, {
         WHERE id = ANY($1::text[])
      ), campaign_history AS (
        SELECT rc.id AS campaign_id, rc.repurchase_days,
-              RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) AS phone8,
+              ${ORDER_IDENTITY_PHONE8_SQL} AS phone8,
               os.submitted_at
          FROM recruit_campaigns rc
          LEFT JOIN tab_configs base_tab
@@ -368,8 +385,8 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, {
            ON submitted_tab.sheet_id = os.sheet_id
           AND submitted_tab.tab_name = os.tab_name
          WHERE rc.id = ANY($1::text[]) AND os.deleted_at IS NULL
-           AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8) = ANY($2::text[])
-           AND RIGHT(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'), 8)
+           AND ${ORDER_IDENTITY_PHONE8_SQL} = ANY($2::text[])
+           AND ${ORDER_IDENTITY_PHONE8_SQL}
                IN (SELECT phone8 FROM trusted_phones)
            AND (
             (NULLIF(BTRIM(base_tab.campaign_name), '') IS NOT NULL AND (

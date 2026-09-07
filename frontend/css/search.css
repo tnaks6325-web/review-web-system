@@ -376,6 +376,9 @@ input,textarea,button{font-family:inherit}
 .of-identity-context .of-identity-name{min-width:0;overflow:hidden;color:#4C1D95;font-size:.82rem;font-weight:800;text-overflow:ellipsis;white-space:nowrap}
 .of-identity-context .of-identity-kind{padding:2px 7px;color:#6D28D9;border-radius:999px;background:#EDE9FE;font-size:.62rem;font-weight:800;white-space:nowrap}
 .of-identity-context .of-identity-help{grid-column:2 / 4;color:#7C6A9E;font-size:.64rem}
+.of-input.participant-phone-locked{padding-right:112px;border-color:#8B5CF6!important;background:#F5F3FF!important;color:#4C1D95!important;font-weight:700;cursor:not-allowed;opacity:1}
+.participant-phone-lock-badge{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:4px;padding:2px 7px;color:#6D28D9;border:1px solid #C4B5FD;border-radius:6px;background:#EDE9FE;font-size:.62rem;font-weight:800;pointer-events:none;white-space:nowrap;z-index:2}
+.participant-phone-lock-badge i{font-size:.58rem}
 /* ── 주문 캡처 이미지 업로드 & AI 추출 ── */
 .of-img-zone{border:2px dashed #a6c8fb;border-radius:12px;background:#f7faff;padding:20px 16px;text-align:center;cursor:pointer;transition:all .18s;margin-bottom:14px;position:relative}
 .of-img-zone:hover,.of-img-zone.drag-over{border-color:var(--p);background:#e8f1fe}

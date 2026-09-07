@@ -23,6 +23,7 @@ const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
 const { verifyReviewerSession } = require('../services/reviewerSession.service');
+const { resolveParticipantOrderPhone } = require('../utils/participantOrderPhone');
 
 // ═══════════════════════════════════════════════════════════
 // 블로그체험단(099) — memo 가 들어갈 열은 종류에 따라 우선순위가 다르다.
@@ -840,12 +841,14 @@ function _campaignHoldCtx(b, loginPhone8) {
  *  홀드 확정(confirmHoldInTx)·provenance 링크는 전부 ca.phone8 일치를 요구하므로, 캐시된 구버전 프론트나
  *  2단계 회귀로 holdPhone8 이 어긋나면 확정도 링크도 실패 → 스윕의 late 백필(campaign_application_id 기반)도
  *  불가 → "결제했는데 관제에 흔적 0"인 고아 주문이 된다. hold_token(추측불가 24B)+id+campaign_id 일치가 인증이다.
- *  같은 왕복에서 option_key 도 가져와 아래 옵션 서버권위 쿼리를 대체(왕복 순증 0). fail-open. */
+ *  같은 왕복에서 option_key·등록 참여번호도 가져와 아래 서버권위 쿼리를 대체(왕복 순증 0).
+ *  조회 자체는 예외를 밖으로 던지지 않지만, 참여 제출 호출부는 미확정 문맥을 차단한다. */
 async function _authoritativeHold(ctx) {
   if (!ctx || !ctx.applicationId || !ctx.holdToken) return ctx;
   try {
     const { rows } = await pool.query(
-      `SELECT ca.phone8, ca.option_key, ca.blog_url, ca.status,
+      `SELECT ca.phone8, ca.owner_phone8, ca.applicant_phone AS participant_phone,
+              ca.option_key, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
@@ -869,6 +872,8 @@ async function _authoritativeHold(ctx) {
         `클라=${ctx.phone8 || '∅'} → 서버=***${srv.slice(-4)} (구버전 프론트/문맥 불일치 의심)`);
       ctx.phone8 = srv;
     }
+    ctx.ownerPhone8 = String(rows[0].owner_phone8 || '').replace(/\D/g, '').slice(-8);
+    ctx.participantPhone = String(rows[0].participant_phone || '').trim();
     ctx.optionKey = rows[0].option_key || null;
     // ★ 134 복합 작업: 이 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이지 옵션명이 아니다.
     //   같은 왕복에서 읽어 온다(순증 0). 모르면 'option'(종전 동작 — 추측 승격 금지).
@@ -891,8 +896,9 @@ async function _authoritativeHold(ctx) {
     }
     return ctx;
   } catch (e) {
-    logger.warn(`[submit/order] 홀드 서버확정 실패(클라값 유지): ${e.message}`);
-    return ctx;                                       // fail-open — 라이브 핫패스 보호
+    ctx.verificationError = true;
+    logger.warn(`[submit/order] 홀드 서버확정 실패(참여 제출 차단): ${e.message}`);
+    return ctx;
   }
 }
 
@@ -977,10 +983,43 @@ router.post('/order', async (req, res, next) => {
     // - ★ fail-open: 게이트 내부 오류는 주문 접수를 막지 않는다 (라이브 핫패스 보호)
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
     // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
-    const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+    const holdHint = _campaignHoldCtx(b, loginPhone8);
+    const holdCtx = await _authoritativeHold(holdHint);
+    // 참여 신청을 주장한 요청은 hold_token으로 신청행이 확정되어야만 진행한다.
+    // 여기서 레거시 경로로 폴백하면 타계정 등록번호 강제를 우회할 수 있다.
+    if (holdHint && !(holdCtx && holdCtx.verified)) {
+      const unavailable = !!(holdCtx && holdCtx.verificationError);
+      return res.status(unavailable ? 503 : 409).json({
+        ok: false,
+        code: unavailable ? 'PARTICIPATION_CONTEXT_UNAVAILABLE' : 'PARTICIPATION_CONTEXT_INVALID',
+        error: unavailable
+          ? '참여 정보를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.'
+          : '참여 정보가 만료되었거나 일치하지 않습니다. 공고 화면에서 다시 참여해주세요.',
+      });
+    }
     const orderScope = await _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx });
     if (!orderScope) {
       return res.status(400).json({ error: '유효한 참여 문맥이 없어 구매양식을 제출할 수 없습니다.' });
+    }
+
+    // ★ 타계정 연락처 서버권위: 신청행에 저장된 타계정 번호만 주문 원장·작업보드로 보낸다.
+    // 클라이언트의 수동입력/AI 자동입력/개발자도구 변조값은 여기서 모두 무시한다.
+    // 본계정은 배송용 연락처를 다르게 쓰는 기존 흐름을 그대로 유지한다.
+    const participantPhone = resolveParticipantOrderPhone({
+      requestedPhone: phone,
+      participantPhone: holdCtx && holdCtx.participantPhone,
+      participantPhone8: holdCtx && holdCtx.phone8,
+      ownerPhone8: holdCtx && holdCtx.ownerPhone8,
+      verified: !!(holdCtx && holdCtx.verified),
+    });
+    if (!participantPhone.ok) {
+      return res.status(409).json({ ok: false, code: participantPhone.code, error: participantPhone.error });
+    }
+    const effectivePhone = participantPhone.phone;
+    if (participantPhone.forced) {
+      logger.warn(`[submit/order] 타계정 연락처 서버보정 app=${holdCtx.applicationId} ` +
+        `요청=***${String(phone || '').replace(/\D/g, '').slice(-4) || '∅'} ` +
+        `등록=***${String(effectivePhone).replace(/\D/g, '').slice(-4)}`);
     }
 
     // ★★ 홀드 멱등 게이트(중복 원장·중복 시트행 차단) — 일괄 제출(batch) 도입의 선행 조건.
@@ -1015,7 +1054,7 @@ router.post('/order', async (req, res, next) => {
         }
         const reviewerSession = verifyReviewerSession(reviewerToken);
         const _reqFields = [
-          [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
+          [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [effectivePhone, '연락처'],
           [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
         ];
         const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, label]) => label);
@@ -1027,7 +1066,7 @@ router.post('/order', async (req, res, next) => {
           campaignApplicationId: holdCtx.applicationId,
           campaignId: holdCtx.campaignId,
           holdToken: holdCtx.holdToken,
-          recipient, phone, address,
+          recipient, phone: effectivePhone, address,
         }, reviewerSession);
       } catch (gateErr) {
         if (gateErr instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
@@ -1076,7 +1115,7 @@ router.post('/order', async (req, res, next) => {
 
           // ★ 서버측 필수필드 검증 (주문번호·비고 제외 전 필드 — 리뷰어 제출에만 적용, 프론트 우회 차단)
           const _reqFields = [
-            [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
+            [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [effectivePhone, '연락처'],
             [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
           ];
           const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, l]) => l);
@@ -1090,7 +1129,7 @@ router.post('/order', async (req, res, next) => {
           // ★ mode:'submit' = Gemini 미사용(핫패스 지연/비결정성 차단 — Gemini는 precheck 전용),
           //   uncertain은 통과·mismatch만 차단. identityConfirmed면 주소/계좌 상세대조 생략(분류만).
           const _verdict = await resolveOrderIdentity(_rv, {
-            recipient, phone, address, bank, account, depositor,
+            recipient, phone: effectivePhone, address, bank, account, depositor,
             extractedRecipient: b.extractedRecipient || '',
             extractedPhone: b.extractedPhone || '',
             extractedAddress: b.extractedAddress || '',
@@ -1158,7 +1197,7 @@ router.post('/order', async (req, res, next) => {
 
     // ★ 참여형 옵션 서버권위(061, PRD §05): 홀드에 저장된 option_key를 selectedOptKey로 강제.
     //   화면 값 조작·낡은 표시로 다른 옵션이 기록되는 것을 차단(행배정·시트기입·dedup 모두 이 값 기준).
-    //   fail-open: 조회 실패/미참여/옵션없는 홀드는 클라이언트 값 유지(라이브 핫패스 무영향).
+    //   미참여/옵션없는 홀드는 클라이언트 값을 유지한다. 참여 문맥 조회 실패는 위에서 제출을 차단한다.
     //   ※ 잔여 TOCTOU(레드 #1): 이 읽기는 확정 락 밖이라, 제출 처리 중 다른 탭이 change-option으로 옵션을
     //     바꾸면 시트=옛옵션·DB홀드=새옵션 불일치가 이론상 가능. 2단계 UI 계약으로 봉합 = 옵션변경은
     //     부모(campaign.html)에서만 가능하고 변경 시 구매양식 iframe을 재로드해 인플라이트 제출을 파기한다
@@ -1178,7 +1217,7 @@ router.post('/order', async (req, res, next) => {
 
     // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
     //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
-    const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
+    const orderData = { orderer: _orderer, recipient, userId, phone: effectivePhone, address, bank, account, depositor, price, dateStr, orderNum, memo,
                         selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
                         /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
@@ -1217,7 +1256,7 @@ router.post('/order', async (req, res, next) => {
       //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
       //   ★ 063: expectedOptKey = 시트에 실제 기입되는 옵션 → 확정 시점 홀드 옵션과 다르면 warn(관제 대조 신호).
       //   ★ 방어 D3: orderIdentity = 시트에 실제 기입되는 연락처(정산 귀속 기준) → 명의 드리프트 경고 입력.
-      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone }, skipTabBinding: orderScope.sheetless } : undefined,
+      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone: effectivePhone }, skipTabBinding: orderScope.sheetless } : undefined,
       // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
       // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
       // crossDay: 실제로 시트 claim을 건너뛴 모든 경로는 날짜를 넘는 같은 구매도 막는다.

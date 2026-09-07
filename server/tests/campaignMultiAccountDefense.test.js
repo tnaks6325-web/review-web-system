@@ -127,7 +127,8 @@ async function callHandler(method, routePath, req) {
     detectIdentityDrift({ phone8: '11112222', owner_phone8: '33334444' }, { phone: '123' }) === null);
   ok('D3: 주문 손실 0 계약 — 드리프트는 확정을 막지 않는다(경고만)',
     !/return 'identity_mismatch'/.test(read('src/services/campaignHold.service.js')));
-  ok('D3: submit 이 시트 기입 연락처를 확정 문맥에 전달', /orderIdentity: \{ phone \}/.test(submit));
+  ok('D3: submit 이 서버가 확정한 시트 기입 연락처를 확정 문맥에 전달',
+    /orderIdentity: \{ phone: effectivePhone \}/.test(submit));
 
   // ══════════════════════════════════════════════════════════════
   // D9 — holdPhone8 서버권위
@@ -137,7 +138,9 @@ async function callHandler(method, routePath, req) {
     submit.indexOf('await _authoritativeHold(') < submit.indexOf('let { rows: _rvRows }'));
   ok('D9: 옵션 서버권위 쿼리를 흡수(왕복 순증 0)',
     /option_key/.test(submit) && !/SELECT option_key FROM campaign_applications\n\s+WHERE id = \$1 AND campaign_id = \$2 AND phone8 = \$3/.test(submit));
-  ok('D9: 조회 실패는 클라값 유지(fail-open — 라이브 핫패스 보호)', /홀드 서버확정 실패\(클라값 유지\)/.test(submit));
+  ok('D9: 참여 문맥 조회 실패는 레거시 경로로 폴백하지 않고 제출 차단',
+    /홀드 서버확정 실패\(참여 제출 차단\)/.test(submit)
+    && /PARTICIPATION_CONTEXT_UNAVAILABLE/.test(submit));
 
   // ══════════════════════════════════════════════════════════════
   // D4-lite — 하루한도 기본값 footgun 제거(0=무제한은 PRD §09-5 유지 · 비차단 경고)

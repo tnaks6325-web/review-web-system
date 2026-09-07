@@ -94,7 +94,7 @@ ok('자동 MATCH 뒤 필드 수정은 기존 승인증명을 보존해 수동 �
   && /st\.priorApprovalToken \|\| st\.reviewToken/.test(appJs));
 ok('NC 주문도 각 캡처의 수취인·전화·주소를 독립 적용한다',
   /const recipient = gv\(cid\+"_recipient"\)/.test(appJs)
-  && /const phone\s+= gv\(cid\+"_phone"\)/.test(appJs)
+  && /const phone\s+= _registeredParticipantPhone\(cid\) \|\| gv\(cid\+"_phone"\)/.test(appJs)
   && /const address\s+= gv\(cid\+"_address"\)/.test(appJs));
 ok('하단 메뉴 명칭은 내정보이고 명의 카드 앞 이니셜 아바타를 렌더하지 않는다',
   /class="tab-my"[\s\S]{0,100}>내정보<\/button>/.test(index)
