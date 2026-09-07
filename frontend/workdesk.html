@@ -7217,7 +7217,7 @@ function openLinkModal(){
 function openContractMatchModal(ctx){
   if(!ctx||!ctx.sheetId||!ctx.tabName) return;
   closeLinkModal();
-  _LK={items:[],scope:'advertiser',ctx:ctx};
+  _LK={items:[],scope:'advertiser',ctx:ctx,composing:false};
   const wrap=document.createElement('div'); wrap.className='modalov'; wrap.id='linkmodal';
   wrap.innerHTML=`<div class="modalbox lkmodalbox" style="width:660px"><div class="modalhd"><b>계약 매칭</b>
       <span style="font-size:11.5px;color:var(--faint);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ctx.tabName||'')}</span>
@@ -7227,7 +7227,7 @@ function openContractMatchModal(ctx){
   document.body.appendChild(wrap); wrap.addEventListener('click',e=>{ if(e.target===wrap) closeLinkModal(); });
   _lkLoad('advertiser','');
 }
-function closeLinkModal(){ const m=$('#linkmodal'); if(m) m.remove(); _LK={items:[],scope:'advertiser',ctx:null}; }
+function closeLinkModal(){ const m=$('#linkmodal'); if(m) m.remove(); ++_lkRequestSeq; _LK={items:[],scope:'advertiser',ctx:null,composing:false}; }
 // 지금 매칭 대상 탭 — 팝업 문맥이 있으면 그것, 없으면 작업보드에서 열어 둔 탭(기존 호출부 계약 유지).
 function _lkTab(){ if(_LK.ctx&&_LK.ctx.sheetId) return _LK.ctx; const st=STATE.settle; return (st&&st.tab)||null; }
 
@@ -7235,16 +7235,22 @@ function _lkTab(){ if(_LK.ctx&&_LK.ctx.sheetId) return _LK.ctx; const st=STATE.s
 //   ★ 판정(유사도·추천)은 전부 서버(utils/contractMatch)가 한다. 화면은 서버가 준 순서·점수를 그대로 그린다
 //     — 화면에서 다시 매기면 "추천은 A인데 정렬은 B"로 갈린다.
 //   ★ 후보 클릭은 **배열 인덱스**로 넘긴다(onclick 문자열에 인트라넷에서 온 값을 넣지 않는다).
-let _LK={items:[],scope:'advertiser',ctx:null};
+let _LK={items:[],scope:'advertiser',ctx:null,composing:false};
 let _lkTimer=null;
+// 모달 상태와 분리된 전역 순번: 열기/닫기로 _LK를 교체해도 이전 응답은 현재 모달을 덮지 못한다.
+let _lkRequestSeq=0;
 async function _lkLoad(scope,q){
   const t=_lkTab(); if(!t) return; const box=$('#lkbody'); if(!box) return;
+  const requestSeq=++_lkRequestSeq;
   _LK.scope=scope;
-  box.innerHTML='<div class="empty" style="padding:20px">계약 후보를 불러오는 중…</div>';
+  // 검색 중에는 입력창을 다시 만들지 않는다. input 자체를 갈아 끼우면 포커스·한글 조합 상태가
+  // 끊겨서 "체크오"처럼 빠르게 이어 입력할 수 없게 된다.
+  const resultBox=(scope==='all'&&$('#lkresults')) ? $('#lkresults') : box;
+  resultBox.innerHTML='<div class="empty" style="padding:20px">계약 후보를 불러오는 중…</div>';
   const url=`/api/trackb/settlement/contract-candidates?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&scope=${encodeURIComponent(scope)}${q?'&q='+encodeURIComponent(q):''}`;
   let r=null; try{ r=await api(url); }catch(_){ }
-  if(!$('#lkbody')) return;                                   // 그 사이 닫힘
-  if(!r||!r.ok){ box.innerHTML=`<div class="empty" style="padding:20px">계약 목록을 불러오지 못했습니다.<br><span style="font-size:11px">${esc((r&&r.error)||'인트라넷 조회 실패')}</span><br><button class="btn xs" style="margin-top:10px" onclick="_lkLoad('${scope==='all'?'all':'advertiser'}','')">다시 시도</button></div>`; return; }
+  if(requestSeq!==_lkRequestSeq||!$('#lkbody')) return;        // 늦게 온 이전 검색/닫힌 모달 무시
+  if(!r||!r.ok){ resultBox.innerHTML=`<div class="empty" style="padding:20px">계약 목록을 불러오지 못했습니다.<br><span style="font-size:11px">${esc((r&&r.error)||'인트라넷 조회 실패')}</span><br><button class="btn xs" style="margin-top:10px" onclick="_lkLoad('${scope==='all'?'all':'advertiser'}','')">다시 시도</button></div>`; return; }
   _LK.items=r.items||[]; _LK.ownerName=(r.advertiser&&r.advertiser.name)||''; _lkRender(r,q||'');
 }
 function _lkRender(r,q){
@@ -7255,7 +7261,7 @@ function _lkRender(r,q){
   if(all){
     head=`<div class="lkscope"><b>전체 계약에서 찾기</b><span style="flex:1"></span>`
        + (adv?`<button class="btn xs" onclick="_lkLoad('advertiser','')">← ${esc(adv.name)} 계약만 보기</button>`:'')+`</div>`
-       + `<input id="lksearch" class="ovsearch" style="width:100%;margin-bottom:9px" placeholder="C-번호 / 업체명 / 작업명 검색…" value="${esc(q)}" oninput="searchSales(this.value)">`;
+       + `<input id="lksearch" class="ovsearch" style="width:100%;margin-bottom:9px" placeholder="C-번호 / 업체명 / 작업명 검색…" value="${esc(q)}" oncompositionstart="_lkCompositionStart()" oncompositionend="_lkCompositionEnd(this)" oninput="searchSales(this.value)">`;
   }else{
     head=`<div class="lkscope"><b>${esc(adv?adv.name:'')}</b> 업체로 등록된 계약 ${items.length}건 · 작업명과 비슷한 순<span style="flex:1"></span>`
        + `<button class="btn xs" onclick="_lkLoad('all','')">전체 계약에서 찾기</button></div>`;
@@ -7275,7 +7281,11 @@ function _lkRender(r,q){
     body=`<div class="lkitems">${items.map((s,i)=>_lkRowHtml(s,i,r.recommendedSalesId)).join('')}</div>`
       + `<div class="lkitems-note">${all?'검색 결과':'이 업체명으로 등록된 계약'} ${items.length}건 전체를 표시합니다. 목록을 스크롤해 계약 품목과 수량을 확인하세요.</div>`;
   }
-  box.innerHTML=head+note+body;
+  // 전체 검색에서는 input을 한 번만 만들고 결과만 교체한다. 따라서 API 응답·로딩 중에도
+  // 커서와 입력 중인 한글 조합이 유지된다.
+  const results=all&&$('#lkresults');
+  if(results) results.innerHTML=note+body;
+  else box.innerHTML=all ? head+`<div id="lkresults">${note+body}</div>` : head+note+body;
   if(all){ const el=$('#lksearch'); if(el&&!q) el.focus(); }
 }
 // 후보 한 줄(시안 C) — ★ 계약명이 맨 위, 계약고유번호는 배지 줄의 보조 표기.
@@ -7315,9 +7325,18 @@ function _lkRowHtml(s,i,recommendedSalesId){
     </div></div>`;
 }
 function searchSales(q){   // 전체 검색 모드 입력 디바운스
+  if(_LK.composing) return; // 한글 IME 조합 중인 자모로 서버 검색·렌더링하지 않는다.
   clearTimeout(_lkTimer);
   const v=String(q||'').trim();
   _lkTimer=setTimeout(()=>{ _lkLoad('all',v); },300);
+}
+function _lkCompositionStart(){
+  _LK.composing=true;
+  clearTimeout(_lkTimer);
+}
+function _lkCompositionEnd(el){
+  _LK.composing=false;
+  searchSales(el&&el.value);
 }
 async function pickSales(idx){
   const t=_lkTab(); if(!t) return;

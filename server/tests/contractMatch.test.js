@@ -323,6 +323,13 @@ async function run() {
   const lkSeg = HTML.slice(HTML.indexOf('async function _lkLoad'), HTML.indexOf('function _contractMatchApplied'));
   assert.ok(!/STATE\.settle/.test(lkSeg), '9c: 후보 조회·선택·해제는 STATE.settle(작업보드 전용 상태)에 의존하지 않는다');
   assert.ok(/const t=_lkTab\(\)/.test(lkSeg), '9c2: 대상 탭은 팝업 문맥에서 가져온다');
+  // 한글 IME 검색 — 결과 갱신이 input 자체를 교체하면 조합 중인 "ㅊ"에서 렌더가 끼어
+  // "체크오"처럼 이어 입력할 수 없다. 입력은 한 번만 만들고, 조합 완료 뒤 결과만 갱신한다.
+  assert.ok(/oncompositionstart="_lkCompositionStart\(\)"[\s\S]*oncompositionend="_lkCompositionEnd\(this\)"/.test(lkSeg), '9c3: 검색창은 한글 조합 시작·완료를 구분한다');
+  assert.ok(/if\(_LK\.composing\) return/.test(lkSeg), '9c4: 조합 중인 자모로 검색을 시작하지 않는다');
+  assert.ok(/const results=all&&\$\('#lkresults'\);[\s\S]*if\(results\) results\.innerHTML=note\+body/.test(lkSeg), '9c5: 재검색은 결과 영역만 바꾸고 input DOM은 보존한다');
+  assert.ok(/let _lkRequestSeq=0;/.test(HTML) && /const requestSeq=\+\+_lkRequestSeq;[\s\S]*requestSeq!==_lkRequestSeq/.test(lkSeg), '9c6: 모달 상태 교체와 무관하게 이전 검색 응답은 최신 결과를 덮지 않는다');
+  assert.ok(/function closeLinkModal\(\)\{[\s\S]{0,180}\+\+_lkRequestSeq/.test(HTML), '9c7: 닫힌 모달의 비동기 응답도 무효화한다');
 
   // 업체관리 연결탭 계약 칸 — 헤더·행·onclick 계약
   assert.ok(/h\.push\('<span>계약<\/span>'\)/.test(HTML), '9d: 연결탭 표 헤더 빌더에 [계약] 칸');
