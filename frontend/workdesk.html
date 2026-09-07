@@ -7078,7 +7078,10 @@ function _qdocHtml(q){
   const titleColor=isOnline?'#2563EB':'#EA580C', headerBg=isOnline?'#EFF6FF':'#FFF7ED', thBg=isOnline?'#DBEAFE':'#FFEDD5', thColor=isOnline?'#1E40AF':'#9A3412';
   const cell=(align,content)=>`<td style="border:.5px solid #cbd5e1;height:${rowH}px;vertical-align:middle;padding:${pad}px 8px;font-size:12px;line-height:1.3;text-align:${align}">${content}</td>`;
   const rows=Array.from({length:rowCount},(_,i)=>{const it=filled[i]||{}, price=it.unitPrice?Number(it.unitPrice).toLocaleString():'', amount=it.amount?Number(it.amount).toLocaleString():'', count=it.count||''; return `<tr>${cell('left',esc(it.name||''))}${cell('center',price)}${cell('center',count)}${cell('center',amount)}${isOnline?cell('center',it.tax?Number(it.tax).toLocaleString():''):''}${cell('center',esc(it.note||''))}</tr>`;}).join('');
-  const watermark=_qdocAsset('logoSquare')?`<img src="${_qdocAsset('logoSquare')}" alt="" aria-hidden="true" style="position:absolute;top:50%;left:50%;width:440px;height:440px;transform:translate(-50%,-50%);object-fit:contain;opacity:.06;pointer-events:none;z-index:0">`:'';
+  // 업체용 뷰어는 A4 원본을 모달 폭에 맞춰 축소하므로 인트라넷 미리보기와 같은 6% 농도는
+  // 화면에서 거의 사라진다. 품목표 중간부터 합계·입금계좌까지 걸치는 기준 캡처에 맞춰
+  // 중심을 위로 올리고 화면 축소 후에도 형태가 남는 농도로 보정한다. 인쇄/PDF에도 같은 DOM을 쓴다.
+  const watermark=_qdocAsset('logoSquare')?`<img class="qdoc-watermark" src="${_qdocAsset('logoSquare')}" alt="" aria-hidden="true" style="position:absolute;top:43%;left:50%;width:440px;height:440px;transform:translate(-50%,-50%);object-fit:contain;opacity:.085;pointer-events:none;z-index:0">`:'';
   const horizontal=_qdocAsset('logoHorizontal'), stamp=_qdocAsset('logoStamp'), seal=_qdocAsset('companySeal');
   const supplierName=`<span style="position:relative;display:inline-block;white-space:nowrap">㈜인애드컴퍼니${seal?`<img src="${seal}" alt="법인 인감" style="position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:54px;height:54px;object-fit:contain;mix-blend-mode:multiply;pointer-events:none">`:''}</span>`;
   const th=`background:${thBg};color:${thColor};border:.5px solid #cbd5e1;padding:8px;font-size:12px;font-weight:bold;text-align:center`;

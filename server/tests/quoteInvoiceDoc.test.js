@@ -149,6 +149,7 @@ async function run() {
   ok('계산서 원본(홈택스) 안내 문구', src.includes('국세청 홈택스'));
   ok('인트라넷 PDF와 같은 단일 실물 견적서 페이지(794×1123) 렌더', src.includes('qdoc-official-page') && src.includes('width:794px;height:1123px'));
   ok('인트라넷 활성 로고·직인·워터마크를 실물 문서에 적용', src.includes('_QDOC_ASSETS=r.brandAssets||{}') && src.includes("_qdocAsset('companySeal')") && src.includes("_qdocAsset('logoSquare')"));
+  ok('업체용 축소 화면에서도 기준 워터마크 위치·농도를 유지', src.includes('class="qdoc-watermark"') && src.includes('top:43%') && src.includes('opacity:.085'));
   ok('상품구입비용·3.3% 근거표도 공식 PDF 기준으로 분기', src.includes("quoteType==='online_marketing'") && src.includes('상품 구입 비용') && src.includes('_qdocTax33Rows(q.outsourcingItems)'));
 
   console.log(`\n✅ quoteInvoiceDoc: ${n} cases passed`);
