@@ -315,8 +315,11 @@ async function checkRepurchaseStatusForCampaigns(dbOrClient, { campaignIds, phon
 // 최신순으로 계산한다. 행마다 필터하면 "예전 연결 이력 + 더 최근 연결 누락 외부주문"에서 예전
 // 이력만 남아 ready로 잘못 보일 수 있기 때문이다.
 // sub_accounts는 사용자가 편집할 수 있으므로 목록에 번호가 있다는 사실만으로 타인의 주문 이력을
-// 조회하지 않는다. 소유관계가 아직 없는 타명의는 호출자가 history-derived ready/locked가 아닌
-// 중립적인 unknown으로 표시하고, 실제 신청 때 phone8 하드 가드로 최종 판정한다.
+// 조회하지 않는다. campaign_applications/order_submissions의 owner 링크도 편집 가능한 sub_accounts로
+// 신청한 뒤 만들 수 있으므로 소유 증명으로 승격하지 않는다. 관리자 충돌검사를 거쳐 발급된 코드
+// 신원(reviewer_identities)과 본계정 번호만 신뢰한다. 아직 코드가 없는 타명의는 호출자가
+// history-derived ready/locked가 아닌 중립적인 unknown으로 표시하고, 실제 신청 때 phone8 하드
+// 가드로 최종 판정한다.
 async function checkRepurchaseStatusForAccounts(dbOrClient, {
   campaignIds, phone8List, ownerPhone8, ownerReviewerId,
 } = {}) {
@@ -330,24 +333,12 @@ async function checkRepurchaseStatusForAccounts(dbOrClient, {
     `WITH verified_phones AS (
        SELECT requested.phone8
          FROM unnest($2::text[]) AS requested(phone8)
-        WHERE ($3::text IS NULL AND $4::uuid IS NULL)
-           OR requested.phone8 = $3
+        WHERE requested.phone8 = $3
            OR EXISTS (
              SELECT 1 FROM reviewer_identities ri
               WHERE ri.owner_reviewer_id = $4::uuid
                 AND ri.current_phone8 = requested.phone8
                 AND ri.status = 'active'
-           )
-           OR EXISTS (
-             SELECT 1 FROM campaign_applications owned_ca
-              WHERE owned_ca.phone8 = requested.phone8
-                AND owned_ca.status = 'submitted'
-                AND (owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid)
-           )
-           OR EXISTS (
-             SELECT 1 FROM order_submissions owned_os
-              WHERE owned_os.owner_reviewer_id = $4::uuid
-                AND RIGHT(regexp_replace(COALESCE(owned_os.phone,''), '[^0-9]', '', 'g'), 8) = requested.phone8
            )
      ), campaign_history AS (
        SELECT rc.id AS campaign_id, rc.repurchase_days,

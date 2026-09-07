@@ -207,6 +207,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 타계정 세션은 로그인한 그 명의만 상태 표시',
     campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind === 'sub'") &&
     campFull.slice(iMyStatusRoute, iIdRoute).includes('const loginAccount = allAccounts.find(a => a.phone8 === loginP8)'));
+  ok('★ 타계정 세션의 형제 명의는 누락=ready가 아니라 명시적 선택불가',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes("{ status: 'login_only' }"));
   ok('★ 타계정 이력 조회는 서명 세션 소유자의 phone8로 다시 제한',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('ownerPhone8: p8'));
   ok('★ 타계정 이력 조회는 서명 세션 소유자의 UUID도 함께 사용',
@@ -241,10 +243,10 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
       statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
       statusSql.includes('linked_os.deleted_at IS NULL'));
-    ok('★ 타계정 명의는 소유자 전화/UUID로 먼저 증명',
+    ok('★ 타계정 명의는 관리자 충돌검사를 거친 코드 신원으로만 먼저 증명',
       statusSql.includes('WITH verified_phones AS') &&
-      statusSql.includes('owned_os.owner_reviewer_id = $4::uuid') &&
-      statusSql.includes('owned_ca.owner_phone8 = $3 OR owned_ca.owner_reviewer_id = $4::uuid'));
+      statusSql.includes('reviewer_identities ri') &&
+      !statusSql.includes('owned_os.') && !statusSql.includes('owned_ca.'));
     ok('★ 검증된 명의는 주문·신청 전체 이력을 포함해 더 최근 연결 누락 행도 MAX에 포함',
       (statusSql.match(/IN \(SELECT phone8 FROM verified_phones\)/g) || []).length === 2);
     eq('★ 소유자 phone8이 SQL 파라미터로 전달', statusParams[2], '86365441');
@@ -348,6 +350,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ unknown 명의는 선택 가능하되 ready로 분류하지 않음',
     detailPage.includes("r.state === 'ok' || r.state === 'verify'") &&
     cc.includes("a.status === 'unknown'"));
+  ok('★ 타계정 로그인 형제 명의는 선택·카드 잠금 계산에서 제외',
+    detailPage.includes("status === 'login_only'") && cc.includes("a.status !== 'login_only'"));
   ok('★ 모든 명의 잠금 시 배열 순서가 아니라 가장 이른 해제일을 안내',
     cc.includes(".sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0]"));
   ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));

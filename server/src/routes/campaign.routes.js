@@ -1217,11 +1217,12 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     // 같은 전화번호·다른 이름인 레거시 타계정은 seen 중복제거 때문에 self 행 하나로 접힌다.
     // sub 타입만 찾으면 이런 로그인은 상태가 통째로 비므로, 실제 로그인 phone8의 대표 행을 쓴다.
     const loginAccount = allAccounts.find(a => a.phone8 === loginP8);
-    const accounts = req.reviewer.loginKind === 'sub'
+    const loginScoped = req.reviewer.loginKind === 'sub';
+    const historyAccounts = loginScoped
       ? (loginAccount ? [{ ...loginAccount,
           displayName: String(req.reviewer.loginName || loginAccount.displayName || '') }] : [])
       : allAccounts;
-    if (!accounts.length) return res.json({ ok: true, status: {} });
+    if (!historyAccounts.length) return res.json({ ok: true, status: {} });
     const { rows: campaignModes } = await pool.query(
       'SELECT id, multi_account_mode, repurchase_days FROM recruit_campaigns WHERE id = ANY($1::text[])', [ids]
     );
@@ -1231,7 +1232,7 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     }]));
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
     const map = await checkRepurchaseStatusForAccounts(pool, {
-      campaignIds: ids, phone8List: accounts.map(a => a.phone8), ownerPhone8: p8,
+      campaignIds: ids, phone8List: historyAccounts.map(a => a.phone8), ownerPhone8: p8,
       ownerReviewerId: req.reviewer.ownerReviewerId,
     });
     const status = {};
@@ -1239,15 +1240,22 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
       const setting = settingsByCampaign.get(cid);
       // 전역 킬스위치 또는 공고별 0일이면 apply 가드와 똑같이 안내 기능도 완전히 끈다.
       if (!setting || setting.repurchaseDays <= 0) continue;
-      const scopedAccounts = setting.multiAccountMode
-        ? accounts
-        : accounts.filter(a => a.phone8 === loginP8);
+      // 타계정으로 로그인한 세션에는 현재 로그인 명의만 사용 가능하다. profile/secure가 소유자의
+      // 전체 명의를 돌려주는 기존 계약 때문에 화면에 형제 명의가 남더라도, 응답에서 login_only로
+      // 명시해 누락 상태가 '참여 가능'으로 오인되지 않게 한다.
+      const scopedAccounts = loginScoped
+        ? allAccounts.map(a => a.phone8 === loginP8
+          ? { ...a, displayName: String(req.reviewer.loginName || a.displayName || '') }
+          : a)
+        : (setting.multiAccountMode ? historyAccounts : historyAccounts.filter(a => a.phone8 === loginP8));
       const states = scopedAccounts.map(a => ({
         ...a,
-        ...(map.get(a.phone8)?.get(cid) || { status: a.type === 'self' ? 'ready' : 'unknown' }),
+        ...(loginScoped && a.phone8 !== loginP8
+          ? { status: 'login_only' }
+          : (map.get(a.phone8)?.get(cid) || { status: a.type === 'self' ? 'ready' : 'unknown' })),
       }));
       // unknown은 참여 이력 유무와 무관한 동일 응답이라 타번호의 최근 참여 여부를 누설하지 않는다.
-      if (states.some(a => a.status === 'unknown' || map.get(a.phone8)?.has(cid))) {
+      if (loginScoped || states.some(a => a.status === 'unknown' || map.get(a.phone8)?.has(cid))) {
         status[cid] = {
           accounts: states,
           readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8),
@@ -1876,25 +1884,38 @@ async function _applyParticipation(req, res, next, campPre) {
 
       // ★★ 방어 D1(사칭 차단): sub_accounts 는 "소유 증명"이 아니다 — 무인증
       //   POST /api/reviewer/profile{action:'saveSubAccounts'} 가 phone8 만 알면 배열을 통째로 덮어쓴다
-      //   (번호 소유 증명 없음). 그래서 "이미 리뷰어로 직접 등록된 번호"는 타인의 명의로 못 쓰게 한다.
-      //   ─ 피해자 = 자기 계정으로 참여하는 실존 리뷰어이므로 이 한 줄이 강탈 대상 전체를 덮는다.
-      //   ─ 정당 사용자 손실 0: 그 번호의 본인이 자기 계정으로 직접 참여하면 된다.
-      //   ─ reviewers.phone8 은 phone 파생 GENERATED 컬럼이고 유니크는 UNIQUE(phone)(원문)뿐 →
-      //     같은 phone8 행이 복수 존재 가능하므로 행 동일성이 아니라 EXISTS 로 판정(idx_reviewers_phone8).
-      //   ─ 완화: CAMPAIGN_SUB_REGISTERED_POLICY = block(기본) | warn(로그만) | allow(검사 자체 생략)
-      const _subPolicy = String(process.env.CAMPAIGN_SUB_REGISTERED_POLICY || 'block').toLowerCase();
-      if (_subPolicy !== 'allow') {
-        const { rows: regHit } = await client.query(
-          'SELECT 1 FROM reviewers WHERE phone8 = $1 LIMIT 1', [subP8]);
-        if (regHit.length) {
-          logger.warn(`[campaign/apply] 등록번호 명의 시도 camp=${id} owner=***${p8.slice(-4)} ` +
-            `명의=***${subP8.slice(-4)} policy=${_subPolicy}`);
-          if (_subPolicy === 'block') {
-            await client.query('ROLLBACK');
-            return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
-              error: '이 번호는 이미 리뷰어로 직접 등록되어 있어요. 해당 번호의 본인 계정으로 로그인해서 참여해주세요.' });
-          }
-        }
+      //   (번호 소유 증명 없음). 그래서 다른 소유자의 본계정·타계정·코드 신원에 등록된 번호는
+      //   현재 소유자의 타명의로 못 쓴다. 충돌한 정상 사용자는 고객센터에서 귀속을 정리해야 한다.
+      // 본계정뿐 아니라 다른 소유자의 타계정/코드 신원과 겹쳐도 막는다. 그렇지 않으면 공격자가
+      // 피해자 번호를 자기 sub_accounts에 넣고 제출 링크를 만든 뒤 그 번호의 재참여 이력을 읽을
+      // 수 있다. 현재 소유자 행은 제외하므로 자기 타계정의 정상 참여에는 영향이 없다. 개인정보
+      // 경계라 운영 스위치로 우회하지 않는다.
+      const { rows: regHit } = await client.query(
+        `SELECT 1
+           FROM reviewers other
+          WHERE other.id <> $2::uuid
+            AND (
+              other.phone8 = $1
+              OR EXISTS (
+                SELECT 1
+                  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(other.sub_accounts)='array'
+                                                 THEN other.sub_accounts ELSE '[]'::jsonb END) sub(value)
+                 WHERE RIGHT(regexp_replace(COALESCE(sub.value->>'phone',''), '[^0-9]', '', 'g'), 8) = $1
+              )
+              OR EXISTS (
+                SELECT 1 FROM reviewer_identities ri
+                 WHERE ri.owner_reviewer_id = other.id
+                   AND ri.current_phone8 = $1
+                   AND ri.status = 'active'
+              )
+            )
+          LIMIT 1`, [subP8, reg.rows[0].id]);
+      if (regHit.length) {
+        logger.warn(`[campaign/apply] 타소유자 등록번호 명의 차단 camp=${id} owner=***${p8.slice(-4)} ` +
+          `명의=***${subP8.slice(-4)}`);
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
+          error: '이 번호는 다른 계정에 이미 등록되어 있어요. 본인 번호가 맞다면 고객센터로 알려주세요.' });
       }
     }
 

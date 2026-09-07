@@ -938,7 +938,9 @@ function _acctRows(){
   const s = getSession(); if(!s) return [];
   const held = _allHolds();
   const repState = p8 => _repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'locked'
-    ? 'repurchase' : (_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'unknown' ? 'verify' : 'ok');
+    ? 'repurchase'
+    : (_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'unknown' ? 'verify'
+      : (_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'login_only' ? 'login_only' : 'ok'));
   const rows = [{ type:'self', name: s.name, phone8: s.phone8, phone: s.phone8,
                   state: held[s.phone8] ? 'joined' : repState(s.phone8), repurchase:_repurchaseAccounts[s.phone8] || null }];
   (_subs || []).forEach((x, i) => {
@@ -967,6 +969,7 @@ function _acctStateText(r){
     : r.state === 'invalid' ? '전화번호를 확인해주세요'
     : r.state === 'repurchase' ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) + ' 이후 재참여 가능'
     : r.state === 'verify' ? '신청 시 재참여 이력 확인'
+    : r.state === 'login_only' ? '현재 로그인한 명의만 선택 가능'
     : r.state === 'nocredit' ? base + '참여권 없음 — 일반 모집 제출완료 후 가능'
     : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }
