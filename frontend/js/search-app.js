@@ -5026,6 +5026,8 @@ function initOrderFormMode() {
 
   // ── 다건 카드 초기화: 기존 카드 제거 후 첫 번째 카드 생성 ──
   _orderCardIds = [];
+  const identityActionPanel = document.getElementById("orderIdentityAction");
+  if (identityActionPanel) { identityActionPanel.style.display = "none"; identityActionPanel.dataset.cid = ""; identityActionPanel.innerHTML = ""; }
   _cardAiState  = {};
   _cardSeq      = 0;
   const wrapEl = document.getElementById("ofOrderCardsWrap");
@@ -7717,13 +7719,17 @@ function onCardImgDrop(e, cid) {
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
   if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
+  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; }
+  _syncSubmissionIdentityAction();
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
   document.getElementById(cid+"_aiLoading").classList.remove("show");
   document.getElementById(cid+"_aiResult").classList.remove("show");
   document.getElementById(cid+"_aiError").style.display = "none";
-  const identityStatus = document.getElementById(cid+"_identityStatus"); if (identityStatus) identityStatus.style.display = "none";
+  const identityStatus = document.getElementById(cid+"_identityStatus"); if (identityStatus) { identityStatus.style.display = "none"; identityStatus.innerHTML = ""; }
+  const identityPanel = document.getElementById("orderIdentityAction");
+  if (identityPanel?.dataset.cid === cid) { identityPanel.style.display = "none"; identityPanel.dataset.cid = ""; }
   // ★ ai-locked 필드 잠금 해제 헬퍼
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
@@ -7794,8 +7800,12 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   // 새 분석이 실패해도 과거 승인토큰으로 제출되는 stale-capture 우회를 막는다.
   st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
   st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
+  st.identityBusy = true; st.identityCanManual = false; st.identityChecks = [];
+  const identityStatus = document.getElementById(cid + "_identityStatus");
+  if (identityStatus) identityStatus.innerHTML = '<strong>캡처를 분석하고 있습니다. 잠시 기다려주세요.</strong>';
+  _syncSubmissionIdentityAction(cid);
   const gasUrl = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!gasUrl) { _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
+  if (!gasUrl) { st.identityBusy = false; _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
   st.lastBase64 = base64; st.lastMime = mimeType;
 
   // 로딩 UI 시작
@@ -7875,6 +7885,8 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     _stopCardCountdown(cid);
     document.getElementById(cid+"_aiLoading").classList.remove("show");
     _showCardAiError(cid, err.message, true);
+  } finally {
+    if (st.analysisRequestId === requestId) { st.identityBusy = false; _renderIdentityMatchState(cid, st.identityStatus || "ERROR", st.identityReasons || [], !!st.identityCanManual); }
   }
 }
 
@@ -7893,26 +7905,118 @@ function _identityAddressDifference(cid) {
   return registered && entered && normalize(registered) !== normalize(entered) ? { registered, entered } : null;
 }
 
-function _renderIdentityMatchState(cid, status, reasons, canManual) {
-  const box = document.getElementById(cid + "_identityStatus"); if (!box) return;
-  const palette = status === "MATCH"
-    ? ["#ECFDF5", "#6EE7B7", "#065F46"]
-    : status === "MISMATCH" ? ["#FEF2F2", "#FCA5A5", "#991B1B"]
-    : ["#FFFBEB", "#FCD34D", "#92400E"];
-  box.style.cssText = `display:block;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55;background:${palette[0]};border:1px solid ${palette[1]};color:${palette[2]}`;
-  const addressDifference = _identityAddressDifference(cid);
-  const title = status === "MATCH" ? "✅ 선택 명의의 주문으로 확인했습니다."
-    : status === "MISMATCH" ? "⛔ 선택 명의와 다른 주문으로 판단됩니다."
-    : addressDifference && canManual ? "📦 등록 주소와 주문 배송지가 다릅니다."
-    : status === "ERROR" ? "⚠️ AI 분석 장애 — 직접 확인이 필요합니다."
-    : "⚠️ 일부 정보가 애매해 직접 확인이 필요합니다.";
-  box.innerHTML = '<b>' + title + '</b>'
-    + ((reasons || []).length ? '<div style="margin-top:3px">' + (reasons || []).map(_safeText).join(' · ') + '</div>' : '')
-    + (addressDifference ? '<div style="margin-top:7px;overflow-wrap:anywhere"><div><b>등록 주소</b><br>' + _safeText(addressDifference.registered)
-      + '</div><div style="margin-top:5px"><b>주문 배송지</b><br>' + _safeText(addressDifference.entered) + '</div></div>' : '')
-    + (addressDifference && canManual ? '<div style="margin-top:6px">이름과 연락처가 선택 명의와 일치하면 다른 배송지로도 제출할 수 있습니다. 캡처의 실제 배송지를 확인해주세요.</div>' : '')
-    + (canManual ? `<button type="button" onclick="_manualConfirmIdentity('${cid}')" style="margin-top:7px;width:100%;padding:7px;border:1px solid ${palette[1]};border-radius:7px;background:#fff;color:${palette[2]};font-weight:800;cursor:pointer">${addressDifference ? '이 배송지의 주문이 선택 명의의 주문임을 확인' : '이 주문이 선택 명의의 주문임을 직접 확인'}</button>` : '');
+function _identityIssues(cid) {
+  const st = _cardAiState[cid] || {};
+  const labels = { recipient:"수취인", phone:"연락처", address:"배송주소", price:"결제금액" };
+  const issues = [];
+  for (const [field, label] of Object.entries(labels)) {
+    const el = document.getElementById(cid + "_" + field);
+    if (!el) continue;
+    const value = String(el.value || "").trim();
+    if (!value) {
+      const unread = st.proofExtracted && !String(st.proofExtracted[field] || "").trim();
+      issues.push({ field, label, edit:true, reason:unread ? "캡처에서 읽지 못했습니다. 직접 입력해주세요." : "입력해주세요." });
+    } else if (field !== "price" && _hasIdentityMask(value)) {
+      issues.push({ field, label, edit:true, reason:"가림문자를 실제 정보로 바꿔주세요." });
+    } else if (!st.approvalToken && field === "address" && _identityAddressDifference(cid)) {
+      issues.push({ field, label, edit:false, reason:"등록 주소와 다릅니다. 실제 배송지가 맞는지 확인해주세요." });
+    } else if (!st.approvalToken) {
+      const check = (st.identityChecks || []).find((item) => item.field === field && item.status !== "match");
+      if (check && value === String(st.extracted?.[field] || "").trim()) {
+        issues.push({ field, label, edit:check.status === "mismatch" && !st.identityCanManual, reason:check.reason });
+      }
+    }
+  }
+  return issues;
 }
+
+function _pointToIdentityField(cid, field) {
+  if (!["recipient", "phone", "address", "price"].includes(field)) return;
+  const el = document.getElementById(cid + "_" + field); if (!el) return;
+  el.scrollIntoView({ behavior:"smooth", block:"center" });
+  el.focus({ preventScroll:true });
+  // iframe 전체 높이가 커진 모바일 화면에서도 부모 스크롤을 해당 항목으로 옮긴다.
+  if (window.parent !== window) window.parent.postMessage({ type:"purchase-field-focus", top:el.getBoundingClientRect().top + window.scrollY }, location.origin);
+}
+
+function _purchaseIdentityTarget() {
+  for (const cid of _orderCardIds) {
+    const st = _cardAiState[cid];
+    if (!st || !(st.lastBase64 || st.extractToken || st.identityStatus)) continue;
+    const issues = _identityIssues(cid);
+    if (!st.approvalToken || issues.length) return { cid, st, issues };
+  }
+  return null;
+}
+
+function _purchasePrimaryAction() {
+  if (window._submitOrderFormInProgress) return;
+  const target = _purchaseIdentityTarget();
+  if (target) {
+    if (target.st.identityBusy) return;
+    const edit = target.issues.find((issue) => issue.edit);
+    if (edit) { _pointToIdentityField(target.cid, edit.field); return; }
+    if (!target.st.approvalToken) {
+      if (target.st.identityCanManual) return _manualConfirmIdentity(target.cid);
+      return _retrySubmissionIdentity(target.cid);
+    }
+  }
+  confirmOrderSubmit();
+}
+
+function _syncSubmissionIdentityAction() {
+  if (!_EMBED_CTX || _PREVIEW_MODE) return;
+  const panel = document.getElementById("orderIdentityAction");
+  const btn = document.getElementById("btnOrderFormSubmit");
+  const target = _purchaseIdentityTarget();
+  if (panel) {
+    panel.style.display = target ? "block" : "none";
+    panel.dataset.cid = target?.cid || "";
+    panel.innerHTML = target ? '<strong>' + (_orderCardIds.indexOf(target.cid) + 1) + '번째 주문</strong><div style="margin-top:8px">'
+      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML || "캡처 확인이 필요합니다.") + '</div>' : "";
+  }
+  if (!btn || window._submitOrderFormInProgress) return;
+  btn.onclick = _purchasePrimaryAction;
+  btn.disabled = !!target?.st.identityBusy;
+  btn.textContent = target?.st.identityBusy ? "확인 중…"
+    : target && !target.st.approvalToken && target.st.identityCanManual && !target.issues.some((item) => item.edit)
+      ? "내 주문이 맞습니다" : "제출";
+}
+
+function _retrySubmissionIdentity(cid) {
+  const st = _cardAiState[cid];
+  if (st?.identityBusy) return;
+  if (st?.lastBase64) _retryCardAi(cid);
+  else document.getElementById(cid + "_imgInput")?.click();
+}
+
+function _renderIdentityMatchState(cid, status, reasons, canManual) {
+  const st = _cardAiState[cid];
+  const box = document.getElementById(cid + "_identityStatus"); if (!box || !st) return;
+  st.identityStatus = status; st.identityReasons = reasons || []; st.identityCanManual = canManual;
+  const issues = _identityIssues(cid);
+  for (const field of ["recipient", "phone", "address", "price"]) {
+    const el = document.getElementById(cid + "_" + field); if (!el) continue;
+    el.classList.toggle("identity-field-attention", issues.some((item) => item.field === field));
+    if (!el.dataset.identityGuidanceBound) {
+      el.dataset.identityGuidanceBound = "1";
+      el.addEventListener("input", () => _renderIdentityMatchState(cid, st.identityStatus, st.identityReasons, st.identityCanManual));
+    }
+  }
+  box.style.cssText = "border-radius:9px;padding:10px;margin-bottom:8px;font-size:.8rem;line-height:1.6;background:#FFFBEB;color:#81450c;border:1px solid #FCD34D";
+  box.style.display = status === "MATCH" && !issues.length ? "none" : "block";
+  box.innerHTML = issues.map((item) => '<button type="button" class="identity-issue-link" onclick="_pointToIdentityField(\'' + cid + '\',\'' + item.field + '\')"><b>'
+    + item.label + '</b><div>' + _safeText(item.reason) + '</div><span>입력칸으로 이동 ↑</span></button>').join('');
+  if (issues.some((item) => item.field === "address" && !item.edit)) {
+    const diff = _identityAddressDifference(cid);
+    if (diff) box.innerHTML += '<div style="overflow-wrap:anywhere"><b>등록 주소</b><br>' + _safeText(diff.registered) + '<br><b>주문 배송지</b><br>' + _safeText(diff.entered) + '</div>';
+  }
+  if (!issues.length && status !== "MATCH") box.innerHTML = '<div>' + _safeText((reasons || []).filter(Boolean).join(' · ') || '선택 명의의 주문인지 확인해주세요.') + '</div>';
+  if (!st.approvalToken && !canManual && !st.identityBusy) box.innerHTML += '<button type="button" class="identity-issue-link" onclick="_retrySubmissionIdentity(\'' + cid + '\')">'
+    + (st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
+  _syncSubmissionIdentityAction();
+}
+
 
 async function _matchCardIdentity(cid, requestId) {
   const st = _cardAiState[cid]; if (!st?.extracted || !st.extractToken) return;
@@ -7934,6 +8038,7 @@ async function _matchCardIdentity(cid, requestId) {
     st.approvalToken = data.approvalToken || "";
     st.priorApprovalToken = "";
     st.reviewToken = data.reviewToken || "";
+    st.identityChecks = data.checks || [];
     if (data.resolved) st.extracted = { ...st.extracted, ...data.resolved };
     _showCardAiResult(cid, st.extracted);
     if (data.status === "MATCH" || data.status === "REVIEW") applyCardAiResult(cid);
@@ -7953,11 +8058,12 @@ async function _manualConfirmIdentity(cid) {
   const st = _cardAiState[cid]; if (!st) return;
   const mode = st.priorApprovalToken ? "form_edit"
     : (st.reviewToken ? "review" : (st.matchError && st.extracted ? "match_error" : "ai_error"));
-  const addressDifference = _identityAddressDifference(cid);
-  const confirmMessage = addressDifference
-    ? `등록 주소: ${addressDifference.registered}\n\n주문 배송지: ${addressDifference.entered}\n\n등록 주소와 다른 배송지입니다. 캡처의 배송지가 위 주문 배송지와 같고, 현재 선택한 명의의 주문이 맞습니까?`
-    : "주문 캡처와 입력 정보를 직접 확인했으며, 현재 선택한 명의의 주문이 맞습니까?";
-  if (!confirm(confirmMessage)) return;
+  if (st.identityBusy) return;
+  const edit = _identityIssues(cid).find((issue) => issue.edit);
+  if (edit) { _pointToIdentityField(cid, edit.field); return; }
+  const inputSnapshot = JSON.stringify(_cardIdentityForm(cid));
+  const requestId = st.analysisRequestId;
+  st.identityBusy = true; _syncSubmissionIdentityAction();
   try {
     const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
       method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
@@ -7970,13 +8076,25 @@ async function _manualConfirmIdentity(cid) {
       })),
     });
     const data = await response.json();
-    if (!response.ok || !data?.ok) throw new Error(data?.error || "수동 확인을 저장하지 못했습니다.");
+    if (!response.ok || !data?.ok || !data.approvalToken) {
+      const error = new Error(data?.error || "수동 확인을 저장하지 못했습니다.");
+      error.needsAnalysis = ['IDENTITY_TOKEN_INVALID','EXTRACT_FIELDS_TAMPERED','IDENTITY_CONTEXT_CHANGED'].includes(data?.code);
+      throw error;
+    }
+    if (st.analysisRequestId !== requestId || JSON.stringify(_cardIdentityForm(cid)) !== inputSnapshot) {
+      if (st.analysisRequestId === requestId) _renderIdentityMatchState(cid, "REVIEW", ["입력값이 변경되었습니다. 다시 확인해주세요."], true);
+      return;
+    }
     st.approvalToken = data.approvalToken || "";
     st.priorApprovalToken = "";
     st.reviewToken = "";
     st.matchError = false;
     _renderIdentityMatchState(cid, "MATCH", ["사용자가 주문 정보를 직접 확인했습니다."], false);
-  } catch (err) { showToast(err.message, "error"); }
+  } catch (err) {
+    if (st.analysisRequestId !== requestId) return;
+    _renderIdentityMatchState(cid, "ERROR", [err.message], !err.needsAnalysis);
+    showToast(err.message, "error");
+  } finally { if (st.analysisRequestId === requestId) { st.identityBusy = false; _renderIdentityMatchState(cid, st.identityStatus || "ERROR", st.identityReasons || [], !!st.identityCanManual); } }
 }
 
 function _stopCardCountdown(cid) {
@@ -8023,6 +8141,11 @@ function _showCardAiResult(cid, data) {
 }
 
 function _showCardAiError(cid, msg, showRetry) {
+  const panel = document.getElementById("orderIdentityAction");
+  if (panel?.dataset.cid === cid) {
+    const st = _cardAiState[cid];
+    _renderIdentityMatchState(cid, "ERROR", [msg], !!(st?.extractToken && !st.extracted));
+  }
   const errEl = document.getElementById(cid+"_aiError"); if(!errEl) return;
   errEl.style.display = "block";
   const msgEl = document.getElementById(cid+"_aiErrorMsg"); if(msgEl) msgEl.textContent = msg;
@@ -8465,6 +8588,7 @@ function confirmOrderSubmit() {
   }
   if (_PREVIEW_MODE) { _openOrderConfirm(); return; }
   window._captureSkipped = false;
+  if (_EMBED_CTX && !_PREVIEW_MODE) { submitOrderForm(); return; }
   _openOrderConfirm();
 }
 function _closeOrderConfirm() {
@@ -8485,11 +8609,16 @@ async function _prepareIdentityApprovals(orders) {
     const hasCapture = String(order.imgThumbSrc || "").startsWith("data:");
     if (hasCapture) {
       if (!st.approvalToken) {
-        _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
+        const panel = document.getElementById("orderIdentityAction");
+        if (panel) panel.dataset.cid = order.cid;
+        const source = document.getElementById(order.cid + "_identityStatus");
+        if (!source?.innerHTML) _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
           [st.extractToken ? "명의 확인을 완료해주세요." : "캡처 AI 분석을 다시 시도해주세요."],
           !!(st.priorApprovalToken || st.reviewToken || (st.extractToken && (!st.extracted || st.matchError))));
-        document.getElementById(order.cid + "_identityStatus")?.scrollIntoView({ behavior:"smooth", block:"center" });
-        showToast("캡처의 참여 명의 확인을 완료해주세요.", "warning");
+        _syncSubmissionIdentityAction(order.cid);
+        panel?.focus({ preventScroll:true });
+        panel?.scrollIntoView({ behavior:"smooth", block:"nearest" });
+        showToast("제출 버튼 위의 명의 확인 영역에서 확인을 완료해주세요.", "warning");
         return false;
       }
       order.identityApprovalToken = st.approvalToken;
@@ -8553,6 +8682,7 @@ async function submitOrderForm() {
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = label || '<i class="fas fa-paper-plane"></i> 제출';
+      if (!label) _syncSubmissionIdentityAction();
       // 재제출 모드가 아니면 스타일 초기화
       if (!label) {
         btn.style.background = "";

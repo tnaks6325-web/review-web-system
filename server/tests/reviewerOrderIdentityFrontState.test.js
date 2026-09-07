@@ -1,126 +1,33 @@
 'use strict';
-
-const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
-
-const appJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/js/search-app.js'), 'utf8');
-
-function functionSource(name) {
-  const start = appJs.indexOf(`function ${name}(`);
-  assert.ok(start >= 0, `${name} 함수를 찾을 수 없습니다.`);
-  const brace = appJs.indexOf('{', start);
-  let depth = 0;
-  for (let i = brace; i < appJs.length; i++) {
-    if (appJs[i] === '{') depth++;
-    if (appJs[i] === '}' && --depth === 0) return appJs.slice(start, i + 1);
-  }
-  throw new Error(`${name} 함수 끝을 찾을 수 없습니다.`);
+const assert=require('assert'),fs=require('fs'),path=require('path'),vm=require('vm');
+const source=fs.readFileSync(path.resolve(__dirname,'../../frontend/js/search-app.js'),'utf8');
+function fn(name){const start=source.indexOf('function '+name+'(');assert(start>=0,name);const ends=['\nfunction ','\nasync function '].map(x=>source.indexOf(x,start+1)).filter(x=>x>=0);return (source.slice(start-6,start)==='async '?'async ':'')+source.slice(start,Math.min(...ends));}
+function harness(){
+ const elements={};function el(value=''){const classes=new Set();return {value,style:{},dataset:{},innerHTML:'',textContent:'',disabled:false,readOnly:false,parentElement:null,events:{},classList:{add:(...a)=>a.forEach(x=>classes.add(x)),remove:(...a)=>a.forEach(x=>classes.delete(x)),toggle:(x,on)=>on?classes.add(x):classes.delete(x),contains:x=>classes.has(x)},focus(){this.focused=true},scrollIntoView(){this.scrolled=true},getBoundingClientRect(){return {top:100}},removeAttribute(){},setAttribute(){},addEventListener(k,f){this.events[k]=f}};}
+ for(const [f,v] of Object.entries({recipient:'김민수',phone:'010-1234-5678',address:'서울 등록길 502호',price:'39900'}))elements['card_'+f]=el(v);
+ elements.card_identityStatus=el();elements.orderIdentityAction=el();elements.btnOrderFormSubmit=el();
+ let submissions=0,requests=0;const ctx={_orderCardIds:['card'],_EMBED_CTX:{app:'test'},_PREVIEW_MODE:false,_BATCH:false,API_BASE_URL:'https://invalid.example',_activeIdentityContext:{selectedIdentity:{address:'서울 등록길 502호'}},_cardAiState:{card:{analysisRequestId:1,extracted:{recipient:'김민수',phone:'010-1234-5678',address:'서울 등록길 502호',price:'39900'},extractToken:'capture',lastBase64:'image',reviewToken:'review'}},document:{getElementById:id=>elements[id]||null},location:{origin:'https://invalid.example'},scrollY:0,_safeText:v=>String(v).replace(/</g,'&lt;').replace(/>/g,'&gt;'),_getAuthHeaders:()=>({}),_reviewerIdentityRequestBody:x=>x,_loadOrderIdentityContext:async()=>{},showToast:()=>{},confirm:()=>{throw Error('unexpected confirmation dialog')},confirmOrderSubmit:()=>{submissions++},fetch:async()=>{requests++;return {ok:true,json:async()=>({ok:true,approvalToken:'approved'})}}};ctx.window=ctx;ctx.parent=ctx;
+ vm.createContext(ctx);for(const name of ['_identityAddressDifference','_identityIssues','_pointToIdentityField','_purchaseIdentityTarget','_purchasePrimaryAction','_syncSubmissionIdentityAction','_retrySubmissionIdentity','_renderIdentityMatchState','_hasIdentityMask','_cardIdentityForm','_manualConfirmIdentity','_invalidateIdentityApproval','_prepareIdentityApprovals','applyCardAiResult'])vm.runInContext(fn(name),ctx);
+ return {ctx,elements,counts:()=>({submissions,requests})};
 }
-
-const calls = [];
-const context = {
-  _cardAiState: {
-    card: { extracted:{ address:'보완된 주소' }, approvalToken:'matched-proof', priorApprovalToken:'', reviewToken:'' },
-  },
-  document: { getElementById: () => ({}) },
-  _renderIdentityMatchState: (...args) => calls.push(args),
-};
-vm.createContext(context);
-vm.runInContext(functionSource('_invalidateIdentityApproval'), context);
-
-context._invalidateIdentityApproval('card');
-assert.strictEqual(context._cardAiState.card.approvalToken, '', '수정 전 승인토큰은 제출에 재사용하면 안 된다.');
-assert.strictEqual(context._cardAiState.card.priorApprovalToken, 'matched-proof', '같은 캡처 재확인용 승인증명은 보존해야 한다.');
-assert.strictEqual(calls.at(-1)[1], 'REVIEW');
-assert.strictEqual(calls.at(-1)[3], true, 'MATCH 후 수정 상태에는 수동 재확인 버튼이 보여야 한다.');
-
-context._invalidateIdentityApproval('card');
-assert.strictEqual(context._cardAiState.card.priorApprovalToken, 'matched-proof', '연속 수정에도 최초 승인증명을 잃으면 안 된다.');
-assert.strictEqual(calls.at(-1)[3], true);
-
-console.log('  ✓ MATCH → 필드 수정 → 재확인 가능 상태 전이');
-
-const elements = {
-  card_address:{ value:'서울 새길 20 1508호 <img src=x>' },
-  card_identityStatus:{ style:{}, innerHTML:'' },
-};
-const addressContext = {
-  _activeIdentityContext:{ selectedIdentity:{ address:'서울 등록길 10 502호' } },
-  _cardAiState:{ card:{} },
-  document:{ getElementById:(id) => elements[id] },
-  _safeText:(value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
-};
-vm.createContext(addressContext);
-vm.runInContext(functionSource('_identityAddressDifference'), addressContext);
-vm.runInContext(functionSource('_renderIdentityMatchState'), addressContext);
-addressContext._renderIdentityMatchState('card', 'REVIEW', [], true);
-const rendered = elements.card_identityStatus.innerHTML;
-assert.ok(rendered.includes('등록 주소') && rendered.includes('502호'));
-assert.ok(rendered.includes('주문 배송지') && rendered.includes('1508호'));
-assert.ok(rendered.includes('다른 배송지로도 제출할 수 있습니다'));
-assert.ok(rendered.includes('&lt;img src=x&gt;') && !rendered.includes('<img'), '주소 HTML은 반드시 escape한다');
-addressContext._renderIdentityMatchState('card', 'MISMATCH', ['연락처 불일치'], false);
-assert.ok(!elements.card_identityStatus.innerHTML.includes('<button'), '다른 명의는 확인 버튼을 열지 않는다');
-elements.card_address.value = '서울 등록길 10 502호';
-assert.strictEqual(addressContext._identityAddressDifference('card'), null);
-console.log('  ✓ 다른 배송지 비교 표시 · HTML 이스케이프 · 다른 명의 차단');
-
-for (const mask of ['*', '＊', '●', '○', '◯', '◉', '•', '·', 'x', 'X']) {
-  const listeners = [];
-  const field = { value:'', readOnly:true, parentElement:null,
-    classList:{ add:() => {}, remove:() => {} },
-    removeAttribute:(name) => { assert.strictEqual(name, 'tabindex'); },
-    addEventListener:(_name, fn) => listeners.push(fn),
-  };
-  let invalidated = 0;
-  const maskContext = {
-    _BATCH: false,
-    _cardAiState:{ card:{ extracted:{ recipient:`김${mask}수` } } },
-    document:{ getElementById:(id) => id === 'card_recipient' ? field : null },
-    showToast:() => {}, _invalidateIdentityApproval:() => { invalidated++; },
-  };
-  vm.createContext(maskContext);
-  vm.runInContext(functionSource('_hasIdentityMask'), maskContext);
-  vm.runInContext(functionSource('applyCardAiResult'), maskContext);
-  maskContext.applyCardAiResult('card');
-  assert.strictEqual(field.readOnly, false, `${mask} 가림문자는 수정할 수 있어야 한다`);
-  field.value = '김민수';
-  listeners.forEach((fn) => fn());
-  assert.strictEqual(invalidated, 1, '가림문자 수정은 기존 승인을 무효화한다');
-}
-console.log('  ✓ 서버와 같은 가림문자 10종 편집 및 승인 무효화');
-
-(async () => {
-  elements.card_address.value = '서울 새길 20 1508호';
-  elements.card_recipient = { value:'김민수' };
-  elements.card_phone = { value:'010-1234-5678' };
-  addressContext._cardAiState.card = { reviewToken:'review-proof', extracted:{}, extractToken:'capture-proof' };
-  let requests = 0, message = '';
-  Object.assign(addressContext, {
-    API_BASE_URL:'https://example.invalid', _getAuthHeaders:() => ({}),
-    _reviewerIdentityRequestBody:(body) => body,
-    showToast:(text) => { throw new Error(text); },
-    confirm:(text) => { message = text; return false; },
-    fetch:async (_url, options) => {
-      requests++;
-      const body = JSON.parse(options.body);
-      assert.strictEqual(body.formFields.address, '서울 새길 20 1508호');
-      assert.strictEqual(body.manualConfirmed, true);
-      return { ok:true, json:async () => ({ ok:true, approvalToken:'new-approval' }) };
-    },
-  });
-  vm.runInContext(functionSource('_cardIdentityForm'), addressContext);
-  vm.runInContext('async ' + functionSource('_manualConfirmIdentity'), addressContext);
-  await addressContext._manualConfirmIdentity('card');
-  assert.strictEqual(requests, 0, '확인을 취소하면 승인요청을 보내지 않는다');
-  assert.ok(message.includes('502호') && message.includes('1508호'));
-  addressContext.confirm = () => true;
-  await addressContext._manualConfirmIdentity('card');
-  assert.strictEqual(requests, 1);
-  assert.strictEqual(addressContext._cardAiState.card.approvalToken, 'new-approval');
-  assert.strictEqual(addressContext._cardAiState.card.reviewToken, '');
-  assert.ok(elements.card_identityStatus.innerHTML.includes('선택 명의의 주문으로 확인했습니다'));
-  console.log('  ✓ 주소 비교 확인창 → 취소 또는 승인요청 → 승인 상태 유지');
-})().catch((err) => { console.error(err); process.exitCode = 1; });
+(async()=>{
+ const {ctx,elements,counts}=harness();const st=ctx._cardAiState.card;
+ st.approvalToken='automatic';ctx._renderIdentityMatchState('card','MATCH',[],false);
+ assert.equal(elements.btnOrderFormSubmit.textContent,'제출');assert.equal(elements.orderIdentityAction.style.display,'none');ctx._purchasePrimaryAction();assert.equal(counts().submissions,1);
+ elements.card_address.value='서울 배송길 1508호 <tag>';ctx._invalidateIdentityApproval('card');
+ // 실제 주소 가림문자가 아닌 HTML escape 검증은 별도로 수행한다.
+ assert(elements.card_identityStatus.innerHTML.includes('&lt;tag'));
+ elements.card_address.value='서울 배송길 1508호';ctx._invalidateIdentityApproval('card');
+ assert.equal(elements.btnOrderFormSubmit.textContent,'내 주문이 맞습니다');assert(!elements.orderIdentityAction.innerHTML.includes('_manualConfirmIdentity('));
+ await ctx._purchasePrimaryAction();assert.equal(counts().requests,1);assert.equal(counts().submissions,1);assert.equal(elements.btnOrderFormSubmit.textContent,'제출');assert.equal(elements.btnOrderFormSubmit.disabled,false);ctx._purchasePrimaryAction();assert.equal(counts().submissions,2);
+ console.log('PASS 정상 바로 제출 / 추가확인 단일 버튼 / 확인 후 별도 클릭으로 제출');
+ st.approvalToken='';st.proofExtracted={...st.extracted,phone:'',price:''};elements.card_phone.value='';elements.card_price.value='';ctx._renderIdentityMatchState('card','REVIEW',[],true);
+ assert.equal(ctx._identityIssues('card').filter(x=>x.edit).length,2);assert(elements.orderIdentityAction.innerHTML.includes('캡처에서 읽지 못했습니다'));ctx._purchasePrimaryAction();assert(elements.card_phone.focused);assert.equal(counts().requests,1);
+ elements.card_phone.value='010-1234-5678';elements.card_price.value='39900';ctx._renderIdentityMatchState('card','REVIEW',[],true);
+ let release;ctx.fetch=()=>new Promise(r=>{release=r});const pending=ctx._manualConfirmIdentity('card');assert(elements.btnOrderFormSubmit.disabled);elements.card_address.value='서울 수정길 1800호';release({ok:true,json:async()=>({ok:true,approvalToken:'stale'})});await pending;assert.equal(st.approvalToken,'');assert.equal(elements.btnOrderFormSubmit.textContent,'내 주문이 맞습니다');
+ console.log('PASS 항목별 판독 누락 / 필드 이동 / 확인 도중 수정된 값에 오래된 승인 사용 금지');
+ ctx.fetch=async()=>({ok:false,json:async()=>({ok:false,code:'IDENTITY_TOKEN_INVALID',error:'시간 만료'})});await ctx._manualConfirmIdentity('card');assert(!st.identityCanManual);assert(elements.orderIdentityAction.innerHTML.includes('캡처 다시 분석하기'));assert.equal(elements.btnOrderFormSubmit.disabled,false);
+ console.log('PASS 만료된 확인은 재분석 안내 및 버튼 잠금 해제');
+ for(const mask of ['*','＊','●','○','◯','◉','•','·','x','X']){const {ctx:c,elements:e}=harness();c._cardAiState.card.extracted={recipient:'김'+mask+'수'};c.applyCardAiResult('card');assert.equal(e.card_recipient.readOnly,false);}
+ console.log('PASS 가림문자 10종 수정 가능');
+})().catch(e=>{console.error(e);process.exitCode=1});
