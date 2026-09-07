@@ -262,7 +262,7 @@ async function run() {
   assert.ok(/page=\$\{page\}/.test(SVC) && /exactFirstPage/.test(SVC) && /ignoredFilter/.test(SVC), '7r3: 업체 일치 계약은 필터 무시를 감지한 뒤 페이지 끝까지 조회');
   assert.ok(/if \(failed\) return \{ ok: false, error: 'intranet_unreachable'/.test(SVC), '7r3b: 페이지 조회 일부 실패를 완전 목록으로 캐시하지 않는다');
   assert.ok(/contractItems/.test(SVC), '7r4: 계약 품목을 후보 응답에 포함');
-  assert.ok(/setlmatchbtn/.test(HTML) && /매칭된 계약이 없습니다/.test(HTML) === false, '7r5: 미매칭 진입점은 상단 버튼만, 하단 빈 정산 블록 없음');
+  assert.ok(!/setlmatchbtn|id="setldetail"|id="settlementsec"/.test(HTML), '7r5: 작업보드에는 계약 매칭·하단 정산 블록이 없다');
   console.log('     시안 C 행 렌더러 실행 검증 ✓');
   // 로딩 자리표시자를 깐 함수는 어떤 경로로도 화면을 종결시킨다(무한 로딩 금지 — 레포 규율)
   assert.ok(/다시 시도/.test(HTML.split('async function _lkLoad')[1].split('function _lkRender')[0]), '7k: 실패 시 [다시 시도]로 종결');
@@ -304,20 +304,18 @@ async function run() {
   assert.ok(/INSERT INTO trackb_settlement_links/.test(acc) && !/UPDATE trackb_settlement_links/.test(acc),
     '8i: 쓰기 표면은 링크 INSERT 하나(기존 행 UPDATE 없음)');
   assert.ok(/_woKv\("계약건", o\.contract_number\)/.test(WOD), '8j: 작업오더 상세에 계약건 표기');
-  assert.ok(/setlmatchbtn[^]{0,400}openLinkModal\(\)/.test(HTML), '8k: 미연결 작업은 상단 정산 버튼에서 계약 매칭을 연다');
+  assert.ok(!/setlmatchbtn|openLinkModal\(\)/.test(HTML), '8k: 작업보드 진행 현황은 계약 매칭 대신 문서 3버튼만 둔다');
   console.log('  8. 작업오더 계약건(088) — 스키마·프리플라이트·INSERT 정합·자동 연결 ✓');
 
-  // ═══ 9. 어휘 통일 + 업체관리 진입점 + 두 화면 동기화 ═══
-  //   ★ 창구가 둘(작업보드 정산 카드 · 업체관리 연결탭)이 되었으므로 팝업·동기화는 **한 벌**이어야 한다.
-  //     사본을 두면 "업체관리에서 매칭했는데 작업보드는 미매칭"으로 갈린다.
+  // ═══ 9. 어휘 통일 + 업체관리 단일 진입점 + 작업보드 동기화 ═══
   assert.ok(!/계약 연결 필요|>미연결</.test(HTML), '9a: 작업 정산 요약 어휘가 "계약 매칭"으로 통일(계약 연결 잔존 0)');
-  assert.ok(/setlmatchbtn[^]{0,400}>계약 매칭<\/button>/.test(HTML), '9a2: 미매칭 안내는 상단 계약 매칭 버튼으로 표기');
+  assert.ok(!/setlmatchbtn/.test(HTML), '9a2: 작업보드 상단에는 계약 매칭 버튼을 두지 않는다');
   // ★ 어휘가 '탭' → '작업'으로 통일됐다(2026-08-23 — 업체관리에서 시트/탭 용어 제거). 검사 의미 불변.
   assert.ok(!/정산 링크된 탭만/.test(HTML) && /계약이 매칭된 작업만 표시/.test(HTML), '9a3: 업체관리 안내도 매칭 어휘');
 
-  // 팝업 단일 출처 — 정의 1개, 두 화면이 같은 함수를 부른다.
+  // 팝업 단일 출처 — 업체관리 연결탭만 연다.
   assert.equal((HTML.match(/function openContractMatchModal\(/g) || []).length, 1, '9b: 계약 매칭 팝업 정의는 하나(사본 금지)');
-  assert.ok(/function openLinkModal\(\)\{[\s\S]{0,300}openContractMatchModal\(/.test(HTML), '9b2: 작업보드 정산 카드도 공용 팝업을 연다');
+  assert.ok(!/function openLinkModal\(/.test(HTML), '9b2: 작업보드 계약 매칭 진입점은 제거한다');
   assert.ok(/function ownMatchContract\([\s\S]{0,300}openContractMatchModal\(/.test(HTML), '9b3: 업체관리도 같은 팝업을 연다');
   // 팝업 안쪽은 문맥(_lkTab)만 본다 — STATE.settle 직접 참조가 남아 있으면 업체관리에서 열었을 때 죽는다.
   const lkSeg = HTML.slice(HTML.indexOf('async function _lkLoad'), HTML.indexOf('function _contractMatchApplied'));

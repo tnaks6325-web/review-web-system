@@ -167,13 +167,14 @@ async function run() {
   ok('남은 입금액 = 총비용 − 입금액 파생(0원 = 완납 표시)', /Math\.max\(tc-\(pa\|\|0\),0\)/.test(src) && src.includes("'0 ✓'"));
   ok('화면 A 컨테이너 폭 상한(1380px)', /#advHome\{max-width:1380px\}/.test(css));
 
-  // ── 화면 B: 상세 캡 + 정산 카드 상시 펼침 + 내부 용어 미노출 ──
-  ok('★ 헤더·요약 스트립·정산 카드가 본문 폭과 같은 값으로 캡(광고주 화면만)',
+  // ── 화면 B: 상세 캡 + 진행 현황의 공통 정산 버튼 + 내부 용어 미노출 ──
+  ok('★ 헤더·요약 스트립이 본문 폭과 같은 값으로 캡(광고주 화면만)',
     // 상단 요약이 8칸 스트립(.stripA) → 3분할 카드(.tp3grid, 시안 B)로 바뀌며 캡 대상도 함께 옮겼다(검사 의미 불변)
-    /body\.advm \.main \.mh,body\.advm \.tp3grid,body\.advm \.setldetail,body\.advm \.wobar,body\.advm \.wodetail\{max-width:1380px\}/.test(css));
+    /body\.advm \.main \.mh,body\.advm \.tp3grid,body\.advm \.wobar,body\.advm \.wodetail\{max-width:1380px\}/.test(css));
   ok('★ 원본(sot) 배지는 광고주에게 안 나간다(내부 용어)', /STATE\.role==='advertiser'\?'':sotBadge/.test(src));
-  ok('정산 카드는 광고주 상단 조합 안에서 항상 펼침',
-    /<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div>/.test(src));
+  ok('광고주도 진행 현황 안의 공통 정산 버튼을 사용하고 하단 정산 카드는 없다',
+    /const setlIn=`<div class="setlin" id="setlCell">/.test(src)
+    && !/id="setldetail"/.test(src) && !/id="settlementsec"/.test(src));
   /* ⚠ 2026-08-23: 광고주 전용 4줄 요약(상품·시작일·구매시간·배송)은 폐기됐다 — 이제 내부와
      **같은 작업 조건 카드**를 쓴다(일정·구매시간이 그 카드의 행으로 들어갔다).
      ★ 담당자(내부 실명)를 안 붙인다는 규율은 그대로다 — 카드 폴백에서 고정한다. */
@@ -182,14 +183,11 @@ async function run() {
   ok('★ 담당자 실명은 광고주에게 안 붙는다(카드 폴백)', /\(!isAdv&&m\.manager\)/.test(src));
   ok('★ 정산 비공개·미연결은 광고주에게 같은 안내 한 줄(계약 연결·토글 용어 미노출)',
     src.includes('정산 정보가 아직 준비되지 않았습니다'));
-  ok('정산 카드 6칸(_advSettleFields): 견적서/계산서/총비용/입금액/입금일/남은 입금액',
-    /_advSettleFields\(d,q,inv,pay\)/.test(src)
-    && /<div class="k">견적서 ⧉<\/div>/.test(src) && /<div class="k">계산서 ⧉<\/div>/.test(src)
-    && /<div class="k">총비용/.test(src) && /<div class="k">입금액<\/div>/.test(src)
-    && /<div class="k">입금일 \(최근\)<\/div>/.test(src) && /<div class="k">남은 입금액<\/div>/.test(src)
-    && src.includes('완납 ✓'));
-  ok('★ 광고주 정산 카드에는 내부 스텝퍼·계약 변경/해제 버튼이 없다(6칸으로 대체)',
-    /if\(!canLink\)\{[\s\S]{0,700}_advSettleFields\(d,q,inv,pay\)[\s\S]{0,80}return;\s*\}/.test(src));
+  ok('정산은 견적서·계산서·입금 세 버튼이며 입금도 팝업으로 확인한다',
+    /btn\('quote','견적서'/.test(src) && /btn\('invoice','계산서'/.test(src) && /btn\('payment','입금'/.test(src)
+    && /function openSettlementPayment\(\)/.test(src));
+  ok('★ 광고주 화면에도 하단 스텝퍼·마감자료 생성·계약 변경 버튼을 만들지 않는다',
+    !/_advSettleFields/.test(src) && !/genCloseout/.test(src) && !/dlCloseoutCsv/.test(src));
   ok('발주 작업세부의 담당(내부 실명)은 광고주 미노출', /\.\.\.\(STATE\.role!=='advertiser'\?\[\['담당',d\.managerName\]\]:\[\]\)/.test(src));
   ok('Parity(내부 관측 도구) 레일탭은 광고주에게 안 그린다', /\$\{isAdv\?'':`<button class="railtab" data-rt="parity"/.test(src));
 
@@ -330,8 +328,8 @@ async function run() {
   ok('프론트: 그리드 행에 data-rid(선택 키)가 실린다', /<tr[^>]* data-rid="\$\{esc\(r\.id\)\}"/.test(src));
 /* ★★ 업체 뷰어 상단도 **내부와 같은 3분할**(사용자 확정 2026-08-23) — 종전 세로 스택 +
    표 옆 세로 레일은 폐기했다. 이제 작업 조건 카드까지 한 벌이라, 다른 것은 정산 자리뿐이다. */
-  ok('프론트: 광고주 상세도 같은 3분할 + 정산 카드 + 표(중복 rvPane 없음)',
-    /<section class="advwork">\$\{summaryStrip\(wd,d,m,c\)\}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div><div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><\/div><\/section>/.test(src)
+  ok('프론트: 광고주 상세도 같은 3분할 + 표(하단 정산 카드·중복 rvPane 없음)',
+    /<section class="advwork">\$\{summaryStrip\(wd,d,m,c\)\}<div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><\/div><\/section>/.test(src)
     && !/class="advtop"/.test(src)
     // id 중복은 치명적 — 미리보기 칸은 summaryStrip 이 만드는 하나뿐이다
     && (src.match(/id="rvPane"/g) || []).length === 1);
@@ -340,8 +338,8 @@ async function run() {
     && !/grid-template-areas:"top preview"/.test(css)
     && !/\.advtop\{/.test(css) && !/\.advcondition\{/.test(css) && !/\.advprogress\{/.test(css)
     && !/\.advwork \.rvpane\{grid-area:preview/.test(css));
-  ok('★ 정산은 3분할 아래 별도 줄(업체 정산은 상시 펼침 6칸 — 내부의 접이식과 성질이 다르다)',
-    /\.advsettle\.setldetail\{margin-bottom:12px\}/.test(css) && /\.advwork \.tp3grid\.c3\{margin-bottom:12px\}/.test(css));
+  ok('★ 정산은 3분할 아래 별도 줄을 만들지 않는다',
+    !/\.advsettle\.setldetail/.test(css) && /\.advwork \.tp3grid\.c3\{margin-bottom:12px\}/.test(css));
   ok('★ 미리보기 렌더러는 한 벌 — 업체 세로 레일(.rvmedia/.rvasset)은 폐기',
     /function _rvRender\(\)\{\s*const pane=\$\('#rvPane'\); if\(!pane\) return;\s*return _rvRender2\(pane\);\s*\}/.test(src)
     && !/rvmedia/.test(src) && !/rvasset/.test(src) && !/_RV_SLOT/.test(src)

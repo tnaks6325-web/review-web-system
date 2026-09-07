@@ -269,8 +269,8 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     /id="finGo" disabled/.test(WD) && /doFinish\(\)\{[\s\S]{0,200}if\(!chk\|\|!chk\.checked\) return;/.test(WD));
   t('★ 확인창은 body 직속(뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다 — 레포 실측 사고)',
     /document\.body\.appendChild\(ov\)/.test(WD));
-  t('마감자료 미생성은 경고만(하드블록 금지 — 안 쓰는 작업 유형까지 막지 않는다)',
-    /wbl-warn[\s\S]{0,200}마감자료가 아직/.test(WD) && !/closeoutDate[\s\S]{0,120}disabled=true/.test(WD));
+  t('마감 확인창은 제거된 마감자료 생성 기능을 안내하지 않고 리뷰 캡처 검수만 확인한다',
+    !/마감자료가 아직|정산 카드에서 먼저 생성/.test(WD) && /리뷰폴더의 리뷰 캡처 검수를 확인했습니다/.test(WD));
   t('★ 히어로 "진행 중 작업" writer 는 한 곳(두 곳에서 세면 마감 직후 3 과 2 로 갈린다)',
     (WD.match(/getElementById\('hmStTabs'\)/g) || []).length === 1);
   t('★ 그 한 곳이 목록 렌더 안 = 목록 [진행 중] 개수와 같은 재료',

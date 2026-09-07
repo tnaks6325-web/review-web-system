@@ -143,7 +143,9 @@ async function run() {
   ok('목록 표 견적서 칸 클릭 → awDocOpen(quote)', /onclick="awDocOpen\(event,'quote',\$\{i\}\)"/.test(src));
   ok('목록 표 계산서 칸 클릭 → awDocOpen(invoice)', /onclick="awDocOpen\(event,'invoice',\$\{i\}\)"/.test(src));
   ok('셀 클릭이 행 이동(selTab)과 분리(stopPropagation)', /function awDocOpen[\s\S]{0,200}stopPropagation/.test(src));
-  ok('정산 카드 6칸의 견적서·계산서도 클릭 열람', /class="ambox st docv" onclick="awDocOpen\(event,'quote'\)"/.test(src));
+  ok('진행 현황의 견적서·계산서 버튼도 클릭 열람',
+    /btn\('quote','견적서'/.test(src) && /btn\('invoice','계산서'/.test(src)
+    && /function openSettlementDocument\(ev,kind\)[\s\S]{0,180}awDocOpen\(ev,kind\)/.test(src));
   ok('버전 탭(초안/최종 자동 라벨) 렌더', src.includes("_QDOC_ST={draft:['초안'") && src.includes('qvtab'));
   ok('인쇄/PDF 저장 버튼', src.includes('_qdocPrint'));
   ok('계산서 원본(홈택스) 안내 문구', src.includes('국세청 홈택스'));
