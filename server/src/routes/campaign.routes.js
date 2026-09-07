@@ -1190,24 +1190,77 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
   try {
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return res.json({ ok: true, status: {} });
-    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본계정을 읽는다.
+    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본·타계정을 읽는다.
     const { rows } = await pool.query(
-      'SELECT name, phone8 FROM reviewers WHERE id = $1 LIMIT 1',
+      'SELECT name, phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1',
       [req.reviewer.ownerReviewerId]
     );
     if (rows.length !== 1) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
-    // 자유 편집 가능한 sub_accounts는 전화번호 소유 증명이 아니다. 타계정 로그인/목록으로
-    // 다른 사람의 이력을 조회하지 않고, 직접 등록된 본계정 세션에 대해서만 상태를 돌려준다.
-    if (req.reviewer.loginKind !== 'self') return res.json({ ok: true, status: {} });
     const p8 = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
     if (p8.length !== 8) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 확인할 수 없습니다.' });
-    const accounts = [{ phone8: p8, type: 'self', displayName: String(rows[0].name || '본계정') }];
+    let subs = rows[0].sub_accounts;
+    if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
+    if (!Array.isArray(subs)) subs = [];
+    const seen = new Set([p8]);
+    const allAccounts = [{ phone8: p8, type: 'self', displayName: String(rows[0].name || '본계정') }];
+    for (const sub of subs) {
+      const subP8 = String((sub && sub.phone) || '').replace(/\D/g, '').slice(-8);
+      const displayName = String((sub && sub.name) || '').trim();
+      if (subP8.length !== 8 || !displayName || seen.has(subP8)) continue;
+      seen.add(subP8);
+      allAccounts.push({ phone8: subP8, type: 'sub', displayName });
+    }
+    // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 후보로 구성한다.
+    // 단, multi_account_mode=false 공고는 실제 신청 화면과 똑같이 로그인 명의 하나만 계산한다.
+    // 소유자 UUID/phone8로 증명되지 않은 타명의 이력은 조회하지 않고 unknown으로 표시한다.
+    const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    // 같은 전화번호·다른 이름인 레거시 타계정은 seen 중복제거 때문에 self 행 하나로 접힌다.
+    // sub 타입만 찾으면 이런 로그인은 상태가 통째로 비므로, 실제 로그인 phone8의 대표 행을 쓴다.
+    const loginAccount = allAccounts.find(a => a.phone8 === loginP8);
+    const loginScoped = req.reviewer.loginKind === 'sub';
+    const historyAccounts = loginScoped
+      ? (loginAccount ? [{ ...loginAccount,
+          displayName: String(req.reviewer.loginName || loginAccount.displayName || '') }] : [])
+      : allAccounts;
+    if (!historyAccounts.length) return res.json({ ok: true, status: {} });
+    const { rows: campaignModes } = await pool.query(
+      'SELECT id, multi_account_mode, repurchase_days FROM recruit_campaigns WHERE id = ANY($1::text[])', [ids]
+    );
+    const settingsByCampaign = new Map(campaignModes.map(row => [String(row.id), {
+      multiAccountMode: row.multi_account_mode === true,
+      repurchaseDays: repurchaseDays(row.repurchase_days),
+    }]));
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
-    const map = await checkRepurchaseStatusForAccounts(pool, { campaignIds: ids, phone8List: accounts.map(a => a.phone8) });
+    const map = await checkRepurchaseStatusForAccounts(pool, {
+      campaignIds: ids, phone8List: historyAccounts.map(a => a.phone8), ownerPhone8: p8,
+      ownerReviewerId: req.reviewer.ownerReviewerId,
+    });
     const status = {};
     for (const cid of ids) {
-      const states = accounts.map(a => ({ ...a, ...(map.get(a.phone8)?.get(cid) || { status: 'ready' }) }));
-      if (states.some(a => map.get(a.phone8)?.has(cid))) status[cid] = { accounts: states, readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8) };
+      const setting = settingsByCampaign.get(cid);
+      // 전역 킬스위치 또는 공고별 0일이면 apply 가드와 똑같이 안내 기능도 완전히 끈다.
+      if (!setting || setting.repurchaseDays <= 0) continue;
+      // 타계정으로 로그인한 세션에는 현재 로그인 명의만 사용 가능하다. profile/secure가 소유자의
+      // 전체 명의를 돌려주는 기존 계약 때문에 화면에 형제 명의가 남더라도, 응답에서 login_only로
+      // 명시해 누락 상태가 '참여 가능'으로 오인되지 않게 한다.
+      const scopedAccounts = loginScoped
+        ? allAccounts.map(a => a.phone8 === loginP8
+          ? { ...a, displayName: String(req.reviewer.loginName || a.displayName || '') }
+          : a)
+        : (setting.multiAccountMode ? historyAccounts : historyAccounts.filter(a => a.phone8 === loginP8));
+      const states = scopedAccounts.map(a => ({
+        ...a,
+        ...(loginScoped && a.phone8 !== loginP8
+          ? { status: 'login_only' }
+          : (map.get(a.phone8)?.get(cid) || { status: a.type === 'self' ? 'ready' : 'unknown' })),
+      }));
+      // unknown은 참여 이력 유무와 무관한 동일 응답이라 타번호의 최근 참여 여부를 누설하지 않는다.
+      if (loginScoped || states.some(a => a.status === 'unknown' || map.get(a.phone8)?.has(cid))) {
+        status[cid] = {
+          accounts: states,
+          readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8),
+        };
+      }
     }
     res.json({ ok: true, status });
   } catch (err) {
@@ -1831,25 +1884,31 @@ async function _applyParticipation(req, res, next, campPre) {
 
       // ★★ 방어 D1(사칭 차단): sub_accounts 는 "소유 증명"이 아니다 — 무인증
       //   POST /api/reviewer/profile{action:'saveSubAccounts'} 가 phone8 만 알면 배열을 통째로 덮어쓴다
-      //   (번호 소유 증명 없음). 그래서 "이미 리뷰어로 직접 등록된 번호"는 타인의 명의로 못 쓰게 한다.
-      //   ─ 피해자 = 자기 계정으로 참여하는 실존 리뷰어이므로 이 한 줄이 강탈 대상 전체를 덮는다.
-      //   ─ 정당 사용자 손실 0: 그 번호의 본인이 자기 계정으로 직접 참여하면 된다.
-      //   ─ reviewers.phone8 은 phone 파생 GENERATED 컬럼이고 유니크는 UNIQUE(phone)(원문)뿐 →
-      //     같은 phone8 행이 복수 존재 가능하므로 행 동일성이 아니라 EXISTS 로 판정(idx_reviewers_phone8).
-      //   ─ 완화: CAMPAIGN_SUB_REGISTERED_POLICY = block(기본) | warn(로그만) | allow(검사 자체 생략)
-      const _subPolicy = String(process.env.CAMPAIGN_SUB_REGISTERED_POLICY || 'block').toLowerCase();
-      if (_subPolicy !== 'allow') {
-        const { rows: regHit } = await client.query(
-          'SELECT 1 FROM reviewers WHERE phone8 = $1 LIMIT 1', [subP8]);
-        if (regHit.length) {
-          logger.warn(`[campaign/apply] 등록번호 명의 시도 camp=${id} owner=***${p8.slice(-4)} ` +
-            `명의=***${subP8.slice(-4)} policy=${_subPolicy}`);
-          if (_subPolicy === 'block') {
-            await client.query('ROLLBACK');
-            return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
-              error: '이 번호는 이미 리뷰어로 직접 등록되어 있어요. 해당 번호의 본인 계정으로 로그인해서 참여해주세요.' });
-          }
-        }
+      //   (번호 소유 증명 없음). 그래서 다른 소유자의 본계정·타계정·코드 신원에 등록된 번호는
+      //   현재 소유자의 타명의로 못 쓴다. 충돌한 정상 사용자는 고객센터에서 귀속을 정리해야 한다.
+      // 다른 소유자의 직접 등록 본계정/관리자 검증 코드 신원과 겹치면 막는다. 자유 편집 가능한
+      // 다른 소유자의 sub_accounts까지 권위로 인정하면 번호를 먼저 적어 넣는 것만으로 정상 사용자를
+      // 영구 차단할 수 있으므로 충돌 근거에 넣지 않는다. 개인정보 경계라 운영 스위치로 우회하지 않는다.
+      const { rows: regHit } = await client.query(
+        `SELECT 1
+           FROM reviewers other
+          WHERE other.id <> $2::uuid
+            AND (
+              other.phone8 = $1
+              OR EXISTS (
+                SELECT 1 FROM reviewer_identities ri
+                 WHERE ri.owner_reviewer_id = other.id
+                   AND ri.current_phone8 = $1
+                   AND ri.status = 'active'
+              )
+            )
+          LIMIT 1`, [subP8, reg.rows[0].id]);
+      if (regHit.length) {
+        logger.warn(`[campaign/apply] 타소유자 등록번호 명의 차단 camp=${id} owner=***${p8.slice(-4)} ` +
+          `명의=***${subP8.slice(-4)}`);
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
+          error: '이 번호는 다른 계정에 이미 등록되어 있어요. 본인 번호가 맞다면 고객센터로 알려주세요.' });
       }
     }
 

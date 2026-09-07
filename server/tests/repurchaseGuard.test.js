@@ -68,6 +68,17 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     eq('같은 공고 제출도 제한 없음(0일)이면 즉시 허용',
       repurchaseWindowFromSubmittedAt(submittedAt, 0, submittedAt.getTime()).blocked, false);
   }
+  {
+    const submittedAt = new Date('2026-09-07T09:00:00+09:00');
+    eq('본계정 14일 — 9/21 같은 시각 직전까지 차단',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-21T08:59:59+09:00').getTime()).blocked, true);
+    eq('본계정 14일 — 9/21 같은 시각부터 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 14, new Date('2026-09-21T09:00:00+09:00').getTime()).blocked, false);
+    eq('타계정 7일 — 9/14 같은 시각 직전까지 차단',
+      repurchaseWindowFromSubmittedAt(submittedAt, 7, new Date('2026-09-14T08:59:59+09:00').getTime()).blocked, true);
+    eq('타계정 7일 — 9/14 같은 시각부터 허용',
+      repurchaseWindowFromSubmittedAt(submittedAt, 7, new Date('2026-09-14T09:00:00+09:00').getTime()).blocked, false);
+  }
 
   /* ═══ 2. 정상 판정 — 스텁 DB ═══ */
   console.log('\n[2] 정상 판정(스텁 pool)');
@@ -190,10 +201,18 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('★ 요청 phone8을 신원으로 쓰지 않고 세션 소유자 ID로 계정을 조회',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('[req.reviewer.ownerReviewerId]') &&
     !campFull.slice(iMyStatusRoute, iIdRoute).includes('req.query.phone8'));
-  ok('★ 자유 편집 타계정은 이력 조회 신원으로 사용하지 않음',
-    campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind !== 'self'") &&
-    !campFull.slice(iMyStatusRoute, iIdRoute).includes('SELECT name, phone8, sub_accounts') &&
-    !campFull.slice(iMyStatusRoute, iIdRoute).includes('for (const sub of subs)'));
+  ok('★ 본계정 세션은 등록 타계정도 상태 표시 대상으로 구성',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('SELECT name, phone8, sub_accounts') &&
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('for (const sub of subs)'));
+  ok('★ 타계정 세션은 로그인한 그 명의만 상태 표시',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes("req.reviewer.loginKind === 'sub'") &&
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('const loginAccount = allAccounts.find(a => a.phone8 === loginP8)'));
+  ok('★ 타계정 세션의 형제 명의는 누락=ready가 아니라 명시적 선택불가',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes("{ status: 'login_only' }"));
+  ok('★ 타계정 이력 조회는 서명 세션 소유자의 phone8로 다시 제한',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('ownerPhone8: p8'));
+  ok('★ 타계정 이력 조회는 서명 세션 소유자의 UUID도 함께 사용',
+    campFull.slice(iMyStatusRoute, iIdRoute).includes('ownerReviewerId: req.reviewer.ownerReviewerId'));
   ok('계정별 상태 배치 계산 단일 출처 사용',
     campFull.slice(iMyStatusRoute, iIdRoute).includes('checkRepurchaseStatusForAccounts'));
   ok('ids 파라미터에 상한(무제한 배치 방지)', /\.slice\(0,\s*100\)/.test(campFull.slice(iMyStatusRoute, iIdRoute)));
@@ -202,12 +221,18 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   {
     let statusSql = '';
     const rows = [
-      { campaign_id: 'camp_locked', repurchase_days: 21, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
-      { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000) },
-      { campaign_id: 'camp_unlimited', repurchase_days: 0, phone8: '86365441', last_submitted_at: new Date(Date.now() - 1 * 86400000) },
+      { campaign_id: 'camp_locked', repurchase_days: 21, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000), ownership_verified: true },
+      { campaign_id: 'camp_ready', repurchase_days: 7, phone8: '86365441', last_submitted_at: new Date(Date.now() - 10 * 86400000), ownership_verified: true },
+      { campaign_id: 'camp_unlimited', repurchase_days: 0, phone8: '86365441', last_submitted_at: new Date(Date.now() - 1 * 86400000), ownership_verified: true },
     ];
-    const r = await checkRepurchaseStatusForAccounts({ query: async (sql) => { statusSql = String(sql); return { rows }; } },
-      { campaignIds: ['camp_locked', 'camp_ready', 'camp_never'], phone8List: ['86365441'] });
+    let statusParams = null;
+    const r = await checkRepurchaseStatusForAccounts({ query: async (sql, params) => {
+      statusSql = String(sql); statusParams = params; return { rows };
+    } }, {
+      campaignIds: ['camp_locked', 'camp_ready', 'camp_never'],
+      phone8List: ['86365441', '11112222'], ownerPhone8: '86365441',
+      ownerReviewerId: '11111111-1111-4111-8111-111111111111',
+    });
     eq('10일 전 참여 + 공고별 21일 → locked', r.get('86365441').get('camp_locked').status, 'locked');
     ok('locked 건은 availableFrom 동봉(카드가 날짜를 그리는 재료)', r.get('86365441').get('camp_locked').availableFrom instanceof Date);
     eq('10일 전 참여 + 공고별 7일 → ready', r.get('86365441').get('camp_ready').status, 'ready');
@@ -218,6 +243,14 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
     ok('★ 연결 주문이 취소된 신청 이력은 제외하고 원장 없는 레거시만 유지',
       statusSql.includes('ca.order_submission_id IS NULL OR EXISTS') &&
       statusSql.includes('linked_os.deleted_at IS NULL'));
+    ok('★ 타계정 명의는 관리자 충돌검사를 거친 코드 신원으로만 먼저 증명',
+      statusSql.includes('WITH verified_phones AS') &&
+      statusSql.includes('reviewer_identities ri') &&
+      !statusSql.includes('owned_os.') && !statusSql.includes('owned_ca.'));
+    ok('★ 검증된 명의는 주문·신청 전체 이력을 포함해 더 최근 연결 누락 행도 MAX에 포함',
+      (statusSql.match(/IN \(SELECT phone8 FROM verified_phones\)/g) || []).length === 2);
+    eq('★ 소유자 phone8이 SQL 파라미터로 전달', statusParams[2], '86365441');
+    eq('★ 소유자 UUID가 SQL 파라미터로 전달', statusParams[3], '11111111-1111-4111-8111-111111111111');
     eq('★ 셀프·배치·카드·지각확정의 신청 이력 폴백이 모두 취소 주문을 제외',
       (readS('utils/repurchaseGuard.js').match(/ca\.order_submission_id IS NULL OR EXISTS/g) || []).length, 4);
   }
@@ -309,9 +342,18 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('썸네일 마크업에 삽입됨', cc.includes('${topleft}${repurchaseSash}${editChip}${moChip}'));
   ok('★ 잠긴 상태에서 [참여하기] 버튼도 함께 막는다(카드는 열려 보이는데 실제 참여만 막히는 상태 방지)',
     cc.includes(`if (c.state === 'open' && repurchaseLocked)`));
-
   const idx = readF('index.html');
   const detailPage = readF('campaign.html');
+  ok('★ 미확인 타명의는 참여 가능으로 단정하지 않고 신청 시 서버 확인을 안내',
+    cc.includes('타계정 참여 시 재참여 이력 확인') &&
+    detailPage.includes('신청 시 재참여 이력 확인'));
+  ok('★ unknown 명의는 선택 가능하되 ready로 분류하지 않음',
+    detailPage.includes("r.state === 'ok' || r.state === 'verify'") &&
+    cc.includes("a.status === 'unknown'"));
+  ok('★ 타계정 로그인 형제 명의는 선택·카드 잠금 계산에서 제외',
+    detailPage.includes("status === 'login_only'") && cc.includes("a.status !== 'login_only'"));
+  ok('★ 모든 명의 잠금 시 배열 순서가 아니라 가장 이른 해제일을 안내',
+    cc.includes(".sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0]"));
   ok('/api/campaign/my-repurchase-status 조회 함수 존재', idx.includes('_rcLoadRepurchaseStatus'));
   ok('★ 카드 상태 조회에 리뷰어 세션 토큰을 전달',
     idx.includes('headers: { "X-Reviewer-Token": reviewerToken }'));
