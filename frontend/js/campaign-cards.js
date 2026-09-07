@@ -346,6 +346,16 @@
         border-radius:99px;padding:1px 8px;flex-shrink:0}
       .pcard .pt-sash.ready{background:linear-gradient(0deg,rgba(11,122,91,.88),rgba(18,184,134,.72))}
       .pcard .pt-sash.ready .ps-t{color:#fff;font-size:.64rem;font-weight:900}
+      .pcard .rep-acct{border:1px solid #E8EDF5;background:#F8FAFD;border-radius:9px;padding:7px 8px;margin-top:7px}
+      .pcard .rep-acct-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+      .pcard .rep-acct-title{font-size:.61rem;font-weight:800;color:#667085}
+      .pcard .rep-acct-count{font-size:.59rem;font-weight:900;color:#0B7A5B;white-space:nowrap}
+      .pcard .rep-acct-dots{display:flex;align-items:center;gap:5px;margin-top:5px;overflow:hidden}
+      .pcard .rep-dot{display:inline-flex;align-items:center;gap:3px;min-width:0;font-size:.56rem;font-weight:800;color:#667085}
+      .pcard .rep-dot i{display:block;width:7px;height:7px;border-radius:50%;flex:0 0 7px;background:#CBD5E1}
+      .pcard .rep-dot.ready i{background:#12B886;box-shadow:0 0 0 2px #DDF8EE}
+      .pcard .rep-dot.locked i{background:#F59F00;box-shadow:0 0 0 2px #FFF3BF}
+      .pcard .rep-dot.unknown i{background:#94A3B8;box-shadow:0 0 0 2px #E2E8F0}
     `;
     document.head.appendChild(st);
   }
@@ -748,14 +758,32 @@
     const repUnknown = repUsable.filter(a => a.status === 'unknown');
     let repurchaseSash = '';
     const repurchaseLocked = !admin && repUsable.length > 0 && repUsable.every(a => a.status === 'locked');
-    if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
-    else if (!admin && repUnknown.length) repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">타계정 참여 시 재참여 이력 확인</span></div>';
+    if (!admin && repReady.length) {
+      const parts = [`참여 가능 ${repReady.length}개`];
+      if (repLocked.length) parts.push(`제한 중 ${repLocked.length}개`);
+      if (repUnknown.length) parts.push(`확인 필요 ${repUnknown.length}개`);
+      repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${parts.join(' · ')}</span></div>`;
+    } else if (!admin && repUnknown.length) {
+      const lockedPart = repLocked.length ? ` · 제한 중 ${repLocked.length}개` : '';
+      repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">명의 확인 필요 ${repUnknown.length}개${lockedPart}</span></div>`;
+    }
     else if (repurchaseLocked) {
       // 모든 명의가 잠겼다면 그중 가장 먼저 풀리는 명의의 시각을 안내한다.
       const d = repLocked.map(a => a.availableFrom).filter(Boolean)
         .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
       const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000));
       repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
+    }
+    let repurchaseAccounts = '';
+    if (!admin && repUsable.length > 1) {
+      let subNo = 0;
+      const dots = repUsable.map(a => {
+        const label = a.type === 'self' ? '본' : `타${++subNo}`;
+        const stateLabel = a.status === 'ready' ? '참여 가능' : (a.status === 'locked' ? '제한 중' : '확인 필요');
+        return `<span class="rep-dot ${_esc(a.status || 'unknown')}" title="${_esc((a.displayName || label) + ' · ' + stateLabel)}"><i></i>${_esc(label)}</span>`;
+      }).join('');
+      const countText = repReady.length ? `${repReady.length}개 가능` : (repurchaseLocked ? '모두 제한 중' : '명의 확인 필요');
+      repurchaseAccounts = `<div class="rep-acct"><div class="rep-acct-top"><span class="rep-acct-title">명의별 참여 상태</span><span class="rep-acct-count">${_esc(countText)}</span></div><div class="rep-acct-dots">${dots}</div></div>`;
     }
 
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
@@ -852,7 +880,7 @@
       footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">재참여 가능일 이후 다시 참여할 수 있어요</div>`;
     } else if (c.state === 'open') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
-      : `<button type="button" class="pbtn go">참여하기</button>`;
+      : `<button type="button" class="pbtn go">${repUsable.length > 1 ? (repReady.length ? `명의 선택 · ${repReady.length}개 가능` : '명의 선택') : '참여하기'}</button>`;
     else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
@@ -892,6 +920,7 @@
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          ${repurchaseAccounts}
           ${_optChip(c)}
           ${gauge}
           ${footer}

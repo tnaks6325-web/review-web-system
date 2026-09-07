@@ -1184,7 +1184,8 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
 // GET /api/campaign/my-repurchase-status?ids=id1,id2,… — 재참여(재구매) 기간 안내(리뷰어 세션 스코프)
 //   화면(카드 목록)의 "N일 후 재참여 가능"/"지금 재참여 가능" 썸네일 안내가 이 응답으로 채워진다.
 //   판정 단일 출처 = utils/repurchaseGuard(apply 게이트와 같은 기준 — 카드는 열려 있는데 참여는
-//   거부되는 불일치를 만들지 않는다). ★ 참여 이력이 아예 없는 공고는 응답 맵에 없다(=평소 카드).
+//   거부되는 불일치를 만들지 않는다). 이력 없는 등록 명의도 ready/history=none으로 내려 화면에서
+//   바로 고를 수 있게 한다. 다른 리뷰어의 본계정·활성 신원과 겹치는 타계정은 unknown으로 둔다.
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 이 경로를 id로 삼킨다.
 router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
   try {
@@ -1212,7 +1213,8 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     }
     // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 후보로 구성한다.
     // 단, multi_account_mode=false 공고는 실제 신청 화면과 똑같이 로그인 명의 하나만 계산한다.
-    // 소유자 UUID/phone8로 증명되지 않은 타명의 이력은 조회하지 않고 unknown으로 표시한다.
+    // 인증번호 없이 동작해야 하므로, 본계정 로그인에서는 이 소유자에 등록된 타계정도 조회한다.
+    // 다른 리뷰어의 본계정/활성 신원과 겹치는 번호는 유틸에서 제외해 unknown으로 남긴다.
     const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     // 같은 전화번호·다른 이름인 레거시 타계정은 seen 중복제거 때문에 self 행 하나로 접힌다.
     // sub 타입만 찾으면 이런 로그인은 상태가 통째로 비므로, 실제 로그인 phone8의 대표 행을 쓴다.
@@ -1233,7 +1235,7 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
     const map = await checkRepurchaseStatusForAccounts(pool, {
       campaignIds: ids, phone8List: historyAccounts.map(a => a.phone8), ownerPhone8: p8,
-      ownerReviewerId: req.reviewer.ownerReviewerId,
+      ownerReviewerId: req.reviewer.ownerReviewerId, allowDeclaredAccounts: true,
     });
     const status = {};
     for (const cid of ids) {
@@ -1248,19 +1250,23 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
           ? { ...a, displayName: String(req.reviewer.loginName || a.displayName || '') }
           : a)
         : (setting.multiAccountMode ? historyAccounts : historyAccounts.filter(a => a.phone8 === loginP8));
-      const states = scopedAccounts.map(a => ({
-        ...a,
-        ...(loginScoped && a.phone8 !== loginP8
+      const states = scopedAccounts.map(a => {
+        const raw = loginScoped && a.phone8 !== loginP8
           ? { status: 'login_only' }
-          : (map.get(a.phone8)?.get(cid) || { status: a.type === 'self' ? 'ready' : 'unknown' })),
-      }));
-      // unknown은 참여 이력 유무와 무관한 동일 응답이라 타번호의 최근 참여 여부를 누설하지 않는다.
-      if (loginScoped || states.some(a => a.status === 'unknown' || map.get(a.phone8)?.has(cid))) {
-        status[cid] = {
-          accounts: states,
-          readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8),
+          : (map.get(a.phone8)?.get(cid) || { status: a.type === 'self' ? 'ready' : 'unknown' });
+        // 최근 구매시각은 명의 상태 표시에는 필요하지 않다. 잠금 해제시각만 공개해 응답 범위를 줄인다.
+        const publicState = {
+          status: raw.status,
+          ...(raw.days > 0 ? { days: raw.days } : {}),
+          ...(raw.history ? { history: raw.history } : {}),
+          ...(raw.availableFrom ? { availableFrom: raw.availableFrom } : {}),
         };
-      }
+        return { ...a, ...publicState };
+      });
+      status[cid] = {
+        accounts: states,
+        readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8),
+      };
     }
     res.json({ ok: true, status });
   } catch (err) {
