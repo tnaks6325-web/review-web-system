@@ -83,9 +83,32 @@ const other = {
     assert.ok(r.reasonCodes.includes('multiple_identity_candidates'));
   });
 
-  await test('동·호수가 다르면 수동확인으로 우회할 수 없는 불일치다', async () => {
+  await test('이름과 연락처가 일치하고 동·호수만 다르면 직접 확인 대상으로 둔다', async () => {
     const r = await evaluateSelectedIdentity({ recipient:'김민수', phone:'010-1234-5678', address:'서울 강남구 테헤란로 10 미래아파트 102동 999호' }, selected, [selected, other], { useGemini:false });
-    assert.strictEqual(r.status, 'MISMATCH', JSON.stringify(r));
+    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('delivery_address_changed'));
+  });
+
+  await test('다른 배송지에 이름 또는 연락처까지 다르면 계속 차단한다', async () => {
+    for (const fields of [
+      { recipient:'다른이름', phone:selected.phone },
+      { recipient:selected.name, phone:'010-0000-0000' },
+      { recipient:selected.name, phone:'' },
+    ]) {
+      const r = await evaluateSelectedIdentity({ ...fields, address:'부산 해운대구 새길 20 202동 1508호' }, selected, [selected, other], { useGemini:false });
+      assert.strictEqual(r.status, 'MISMATCH');
+    }
+  });
+
+  await test('가족과 연락처를 공유하거나 중복 명의가 있어도 이름·연락처 일치의 배송지 확인을 유지한다', async () => {
+    const destination = '부산 해운대구 새길 20 202동 1508호';
+    for (const name of ['가족이름', selected.name]) {
+      const family = { ...selected, identityKey:'sub:family', name, address:destination };
+      const r = await evaluateSelectedIdentity({ recipient:selected.name, phone:selected.phone, address:destination },
+        selected, [selected, family], { useGemini:false });
+      assert.strictEqual(r.status, 'REVIEW');
+      assert.ok(r.reasonCodes.includes('delivery_address_changed'));
+    }
   });
 
   await test('이름과 주소가 맞고 전화만 다르면 실질 일치의 수동확인 대상이다', async () => {

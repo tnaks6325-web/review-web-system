@@ -349,11 +349,14 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   const reasonCodes = [];
   if (selectedScore.conflicts.length) {
     const addressConflict = selectedScore.parts.address.verdict === 'mismatch';
-    // 동·호수/장소가 다른 주소 또는 일치 독립신호가 2개 미만이면 결정적 불일치다.
-    // 반대로 이름+주소처럼 독립신호 2개가 맞고 전화 하나만 다른 경우는 가족 연락처,
-    // 저장번호 변경, OCR 오인식 가능성이 있어 사용자가 허용한 수동확인 대상으로 둔다.
-    status = addressConflict || selectedScore.matches < 2 ? 'MISMATCH' : 'REVIEW';
-    reasonCodes.push(status === 'MISMATCH' ? 'selected_identity_conflict' : 'selected_identity_partial_conflict');
+    // 배송지는 명의 자체가 아니다. 이름과 연락처가 모두 맞으면 다른 동·호수도
+    // 자동 승인 대신 주문 배송지를 직접 확인하게 한다. 다른 명의 경쟁검사는 유지한다.
+    const deliveryAddressChanged = addressConflict
+      && selectedScore.parts.name.verdict === 'match'
+      && selectedScore.parts.phone.verdict === 'match';
+    status = deliveryAddressChanged || (!addressConflict && selectedScore.matches >= 2) ? 'REVIEW' : 'MISMATCH';
+    reasonCodes.push(deliveryAddressChanged ? 'delivery_address_changed'
+      : status === 'MISMATCH' ? 'selected_identity_conflict' : 'selected_identity_partial_conflict');
   } else if (selectedScore.matches >= 2) {
     status = 'MATCH';
   } else {
@@ -369,7 +372,8 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       // 선택 명의 자체도 독립 필드 2개 이상 명확히 맞으면 중복 저장정보 때문에 생긴
       // 애매 판정이다. 사용자가 허용한 수동확인 경로로 보낸다. 선택 명의가 부족하거나
       // 충돌하는데 다른 명의가 맞는 경우만 결정적 오명의로 차단한다.
-      if (!selectedScore.conflicts.length && selectedScore.matches >= 2) {
+      if ((!selectedScore.conflicts.length && selectedScore.matches >= 2)
+          || reasonCodes.includes('delivery_address_changed')) {
         status = 'REVIEW';
         reasonCodes.push('multiple_identity_candidates');
       } else {
@@ -470,10 +474,6 @@ async function manualConfirm(body, reviewer) {
       throw new ReviewerOrderIdentityError('IDENTITY_CONTEXT_CHANGED', '선택 명의나 저장 정보가 변경되었습니다. 다시 분석해주세요.', 409);
     }
     imageHash = review.imageHash; extractedHash = review.extractedFieldsHash;
-    const check = await evaluateSelectedIdentity(body.formFields || {}, context.selected, context.identities, { useGemini: false });
-    if (check.status === 'MISMATCH') {
-      throw new ReviewerOrderIdentityError('IDENTITY_MISMATCH', '입력 정보가 선택 명의와 명확히 다르므로 수동 확인으로 제출할 수 없습니다.', 409);
-    }
     boundHash = submissionIdentityHash(body.formFields || {});
     reasonCodes = Array.isArray(review.reasonCodes) ? review.reasonCodes : [];
   } else if (mode === 'form_edit') {
@@ -511,13 +511,19 @@ async function manualConfirm(body, reviewer) {
     throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', '지원하지 않는 수동 확인 방식입니다.', 400);
   }
 
-  if (mode !== 'review') {
-    const check = await evaluateSelectedIdentity(body.formFields || {}, context.selected, context.identities, { useGemini: false });
-    if (check.status === 'MISMATCH') {
-      throw new ReviewerOrderIdentityError('IDENTITY_MISMATCH', '입력 정보가 선택 명의와 명확히 다르므로 수동 확인으로 제출할 수 없습니다.', 409);
-    }
-    boundHash = submissionIdentityHash(body.formFields || {});
+  const check = await evaluateSelectedIdentity(body.formFields || {}, context.selected, context.identities, { useGemini: false });
+  if (check.status === 'MISMATCH') {
+    const details = Object.values(check.selectedScore.parts).filter((p) => p.verdict === 'mismatch').map((p) => p.reason);
+    if (check.competingIdentity) details.push('다른 저장 명의와 일치');
+    throw new ReviewerOrderIdentityError('IDENTITY_MISMATCH',
+      `선택 명의의 주문인지 확인할 수 없습니다: ${details.join(' · ')}. 수취인과 연락처를 확인해주세요.`, 409);
   }
+  if (check.reasonCodes.includes('delivery_address_changed')
+      && [check.selectedScore.fields.recipient, check.selectedScore.fields.phone].some((v) => MASK_RE.test(v))) {
+    throw new ReviewerOrderIdentityError('IDENTITY_FIELDS_REQUIRED', '다른 배송지를 사용하려면 수취인과 연락처의 가림문자를 실제 정보로 수정해주세요.', 409);
+  }
+  reasonCodes = [...new Set(reasonCodes.concat(check.reasonCodes))];
+  boundHash = submissionIdentityHash(body.formFields || {});
   const approvalToken = signScoped({
     purpose: PURPOSE_APPROVAL, mode, ownerReviewerId: context.owner.id,
     applicationId: context.application.id, campaignId: context.application.campaign_id,

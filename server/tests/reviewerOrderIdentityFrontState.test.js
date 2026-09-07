@@ -41,3 +41,86 @@ assert.strictEqual(context._cardAiState.card.priorApprovalToken, 'matched-proof'
 assert.strictEqual(calls.at(-1)[3], true);
 
 console.log('  ✓ MATCH → 필드 수정 → 재확인 가능 상태 전이');
+
+const elements = {
+  card_address:{ value:'서울 새길 20 1508호 <img src=x>' },
+  card_identityStatus:{ style:{}, innerHTML:'' },
+};
+const addressContext = {
+  _activeIdentityContext:{ selectedIdentity:{ address:'서울 등록길 10 502호' } },
+  _cardAiState:{ card:{} },
+  document:{ getElementById:(id) => elements[id] },
+  _safeText:(value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+};
+vm.createContext(addressContext);
+vm.runInContext(functionSource('_identityAddressDifference'), addressContext);
+vm.runInContext(functionSource('_renderIdentityMatchState'), addressContext);
+addressContext._renderIdentityMatchState('card', 'REVIEW', [], true);
+const rendered = elements.card_identityStatus.innerHTML;
+assert.ok(rendered.includes('등록 주소') && rendered.includes('502호'));
+assert.ok(rendered.includes('주문 배송지') && rendered.includes('1508호'));
+assert.ok(rendered.includes('다른 배송지로도 제출할 수 있습니다'));
+assert.ok(rendered.includes('&lt;img src=x&gt;') && !rendered.includes('<img'), '주소 HTML은 반드시 escape한다');
+addressContext._renderIdentityMatchState('card', 'MISMATCH', ['연락처 불일치'], false);
+assert.ok(!elements.card_identityStatus.innerHTML.includes('<button'), '다른 명의는 확인 버튼을 열지 않는다');
+elements.card_address.value = '서울 등록길 10 502호';
+assert.strictEqual(addressContext._identityAddressDifference('card'), null);
+console.log('  ✓ 다른 배송지 비교 표시 · HTML 이스케이프 · 다른 명의 차단');
+
+for (const mask of ['*', '＊', '●', '○', '◯', '◉', '•', '·', 'x', 'X']) {
+  const listeners = [];
+  const field = { value:'', readOnly:true, parentElement:null,
+    classList:{ add:() => {}, remove:() => {} },
+    removeAttribute:(name) => { assert.strictEqual(name, 'tabindex'); },
+    addEventListener:(_name, fn) => listeners.push(fn),
+  };
+  let invalidated = 0;
+  const maskContext = {
+    _BATCH: false,
+    _cardAiState:{ card:{ extracted:{ recipient:`김${mask}수` } } },
+    document:{ getElementById:(id) => id === 'card_recipient' ? field : null },
+    showToast:() => {}, _invalidateIdentityApproval:() => { invalidated++; },
+  };
+  vm.createContext(maskContext);
+  vm.runInContext(functionSource('_hasIdentityMask'), maskContext);
+  vm.runInContext(functionSource('applyCardAiResult'), maskContext);
+  maskContext.applyCardAiResult('card');
+  assert.strictEqual(field.readOnly, false, `${mask} 가림문자는 수정할 수 있어야 한다`);
+  field.value = '김민수';
+  listeners.forEach((fn) => fn());
+  assert.strictEqual(invalidated, 1, '가림문자 수정은 기존 승인을 무효화한다');
+}
+console.log('  ✓ 서버와 같은 가림문자 10종 편집 및 승인 무효화');
+
+(async () => {
+  elements.card_address.value = '서울 새길 20 1508호';
+  elements.card_recipient = { value:'김민수' };
+  elements.card_phone = { value:'010-1234-5678' };
+  addressContext._cardAiState.card = { reviewToken:'review-proof', extracted:{}, extractToken:'capture-proof' };
+  let requests = 0, message = '';
+  Object.assign(addressContext, {
+    API_BASE_URL:'https://example.invalid', _getAuthHeaders:() => ({}),
+    _reviewerIdentityRequestBody:(body) => body,
+    showToast:(text) => { throw new Error(text); },
+    confirm:(text) => { message = text; return false; },
+    fetch:async (_url, options) => {
+      requests++;
+      const body = JSON.parse(options.body);
+      assert.strictEqual(body.formFields.address, '서울 새길 20 1508호');
+      assert.strictEqual(body.manualConfirmed, true);
+      return { ok:true, json:async () => ({ ok:true, approvalToken:'new-approval' }) };
+    },
+  });
+  vm.runInContext(functionSource('_cardIdentityForm'), addressContext);
+  vm.runInContext('async ' + functionSource('_manualConfirmIdentity'), addressContext);
+  await addressContext._manualConfirmIdentity('card');
+  assert.strictEqual(requests, 0, '확인을 취소하면 승인요청을 보내지 않는다');
+  assert.ok(message.includes('502호') && message.includes('1508호'));
+  addressContext.confirm = () => true;
+  await addressContext._manualConfirmIdentity('card');
+  assert.strictEqual(requests, 1);
+  assert.strictEqual(addressContext._cardAiState.card.approvalToken, 'new-approval');
+  assert.strictEqual(addressContext._cardAiState.card.reviewToken, '');
+  assert.ok(elements.card_identityStatus.innerHTML.includes('선택 명의의 주문으로 확인했습니다'));
+  console.log('  ✓ 주소 비교 확인창 → 취소 또는 승인요청 → 승인 상태 유지');
+})().catch((err) => { console.error(err); process.exitCode = 1; });

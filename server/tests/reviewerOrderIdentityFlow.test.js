@@ -12,9 +12,10 @@ const selfId = '22222222-2222-4222-8222-222222222222';
 const selectedId = '33333333-3333-4333-8333-333333333333';
 const otherId = '44444444-4444-4444-8444-444444444444';
 let selectedAddress = '서울 강남구 테헤란로 10 101동 1203호';
+const audits = [];
 
 const originalQuery = pool.query;
-pool.query = async (sql) => {
+pool.query = async (sql, params) => {
   if (/FROM reviewers WHERE id = \$1/.test(sql)) return { rows: [{
     id: ownerId, name:'본인', phone:'010-1010-1010', phone8:'10101010', address:'서울 본인주소',
     bank_name:'은행', bank_account:'123', account_holder:'본인', shopping_id:'self-id', reviewer_no:7,
@@ -33,7 +34,7 @@ pool.query = async (sql) => {
     owner_phone8:'10101010', owner_reviewer_id:ownerId, participant_identity_id:selectedId,
     status:'applied', expires_at:new Date(Date.now() + 600000).toISOString(), multi_account_mode:true,
   }] };
-  if (/INSERT INTO reviewer_identity_match_audits/.test(sql)) return { rows: [], rowCount: 1 };
+  if (/INSERT INTO reviewer_identity_match_audits/.test(sql)) { audits.push(params); return { rows: [], rowCount: 1 }; }
   throw new Error('unexpected query: ' + sql);
 };
 
@@ -54,6 +55,51 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
       identity.verifyApprovalForSubmission({ ...base, ...selectedFields, address:'다른 주소', identityApprovalToken:matched.approvalToken }, reviewer),
       (err) => err.code === 'IDENTITY_APPROVAL_STALE'
     );
+  });
+
+  await test('다른 배송지는 직접 확인 후 해당 배송지에 결속된 승인으로 제출된다', async () => {
+    const fields = { ...selectedFields, address:'서울 강남구 테헤란로 10 101동 1508호' };
+    const proof = identity.issueExtractionProof({ imageHash:'7'.repeat(64), extracted:fields, ok:true });
+    const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:fields }, reviewer);
+    assert.strictEqual(reviewed.status, 'REVIEW');
+    assert.strictEqual(reviewed.approvalToken, '');
+    assert.strictEqual(reviewed.resolved.address, fields.address);
+    await assert.rejects(identity.manualConfirm({ ...base, mode:'review', reviewToken:reviewed.reviewToken, formFields:fields }, reviewer),
+      (err) => err.code === 'MANUAL_CONFIRM_REQUIRED');
+    const manual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken, formFields:fields }, reviewer);
+    await identity.verifyApprovalForSubmission({ ...base, ...fields, identityApprovalToken:manual.approvalToken }, reviewer);
+    assert.ok(JSON.parse(audits.at(-1)[8]).includes('delivery_address_changed'));
+    await assert.rejects(identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:manual.approvalToken }, reviewer),
+      (err) => err.code === 'IDENTITY_APPROVAL_STALE');
+    assert.strictEqual(selectedAddress, selectedFields.address, '회원정보 주소는 주문 배송지로 덮어쓰지 않는다');
+  });
+
+  await test('MATCH 뒤 실제 배송지로 수정한 경우도 재확인 후 제출된다', async () => {
+    const proof = identity.issueExtractionProof({ imageHash:'0'.repeat(64), extracted:selectedFields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:selectedFields }, reviewer);
+    const fields = { ...selectedFields, address:'부산 해운대구 새길 30 301동 1508호' };
+    const manual = await identity.manualConfirm({ ...base, mode:'form_edit', manualConfirmed:true,
+      priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken, extracted:selectedFields, formFields:fields }, reviewer);
+    await identity.verifyApprovalForSubmission({ ...base, ...fields, identityApprovalToken:manual.approvalToken }, reviewer);
+    assert.ok(JSON.parse(audits.at(-1)[8]).includes('delivery_address_changed'));
+    for (const changed of [{ recipient:'박영희' }, { phone:'010-9999-8888' }]) {
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'form_edit', manualConfirmed:true,
+        priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken, extracted:selectedFields,
+        formFields:{ ...fields, ...changed } }, reviewer), (err) => err.code === 'IDENTITY_MISMATCH');
+    }
+  });
+
+  await test('가림 이름·연락처로 다른 배송지를 최종 승인할 수 없다', async () => {
+    const fields = { recipient:'김*수', phone:'010-****-5678', address:'서울 강남구 테헤란로 10 101동 1508호' };
+    const proof = identity.issueExtractionProof({ imageHash:'a1'.repeat(32), extracted:fields, ok:true });
+    const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:fields }, reviewer);
+    assert.strictEqual(reviewed.status, 'REVIEW');
+    await assert.rejects(identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true,
+      reviewToken:reviewed.reviewToken, formFields:fields }, reviewer), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    const complete = { ...fields, recipient:selectedFields.recipient, phone:selectedFields.phone };
+    const manual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true,
+      reviewToken:reviewed.reviewToken, formFields:complete }, reviewer);
+    await identity.verifyApprovalForSubmission({ ...base, ...complete, identityApprovalToken:manual.approvalToken }, reviewer);
   });
 
   await test('AI 추출필드 조작은 명의매칭 전에 차단된다', async () => {
