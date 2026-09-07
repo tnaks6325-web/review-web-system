@@ -7886,6 +7886,13 @@ function _cardIdentityForm(cid) {
   };
 }
 
+function _identityAddressDifference(cid) {
+  const registered = String(_activeIdentityContext?.selectedIdentity?.address || "").trim();
+  const entered = String(document.getElementById(cid + "_address")?.value || _cardAiState[cid]?.extracted?.address || "").trim();
+  const normalize = (value) => value.replace(/\s+/g, "");
+  return registered && entered && normalize(registered) !== normalize(entered) ? { registered, entered } : null;
+}
+
 function _renderIdentityMatchState(cid, status, reasons, canManual) {
   const box = document.getElementById(cid + "_identityStatus"); if (!box) return;
   const palette = status === "MATCH"
@@ -7893,13 +7900,18 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
     : status === "MISMATCH" ? ["#FEF2F2", "#FCA5A5", "#991B1B"]
     : ["#FFFBEB", "#FCD34D", "#92400E"];
   box.style.cssText = `display:block;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55;background:${palette[0]};border:1px solid ${palette[1]};color:${palette[2]}`;
-  const title = status === "MATCH" ? "✅ 선택 명의와 주문 정보가 일치합니다."
+  const addressDifference = _identityAddressDifference(cid);
+  const title = status === "MATCH" ? "✅ 선택 명의의 주문으로 확인했습니다."
     : status === "MISMATCH" ? "⛔ 선택 명의와 다른 주문으로 판단됩니다."
+    : addressDifference && canManual ? "📦 등록 주소와 주문 배송지가 다릅니다."
     : status === "ERROR" ? "⚠️ AI 분석 장애 — 직접 확인이 필요합니다."
     : "⚠️ 일부 정보가 애매해 직접 확인이 필요합니다.";
   box.innerHTML = '<b>' + title + '</b>'
     + ((reasons || []).length ? '<div style="margin-top:3px">' + (reasons || []).map(_safeText).join(' · ') + '</div>' : '')
-    + (canManual ? `<button type="button" onclick="_manualConfirmIdentity('${cid}')" style="margin-top:7px;width:100%;padding:7px;border:1px solid ${palette[1]};border-radius:7px;background:#fff;color:${palette[2]};font-weight:800;cursor:pointer">이 주문이 선택 명의의 주문임을 직접 확인</button>` : '');
+    + (addressDifference ? '<div style="margin-top:7px;overflow-wrap:anywhere"><div><b>등록 주소</b><br>' + _safeText(addressDifference.registered)
+      + '</div><div style="margin-top:5px"><b>주문 배송지</b><br>' + _safeText(addressDifference.entered) + '</div></div>' : '')
+    + (addressDifference && canManual ? '<div style="margin-top:6px">이름과 연락처가 선택 명의와 일치하면 다른 배송지로도 제출할 수 있습니다. 캡처의 실제 배송지를 확인해주세요.</div>' : '')
+    + (canManual ? `<button type="button" onclick="_manualConfirmIdentity('${cid}')" style="margin-top:7px;width:100%;padding:7px;border:1px solid ${palette[1]};border-radius:7px;background:#fff;color:${palette[2]};font-weight:800;cursor:pointer">${addressDifference ? '이 배송지의 주문이 선택 명의의 주문임을 확인' : '이 주문이 선택 명의의 주문임을 직접 확인'}</button>` : '');
 }
 
 async function _matchCardIdentity(cid, requestId) {
@@ -7941,7 +7953,11 @@ async function _manualConfirmIdentity(cid) {
   const st = _cardAiState[cid]; if (!st) return;
   const mode = st.priorApprovalToken ? "form_edit"
     : (st.reviewToken ? "review" : (st.matchError && st.extracted ? "match_error" : "ai_error"));
-  if (!confirm("주문 캡처와 입력 정보를 직접 확인했으며, 현재 선택한 명의의 주문이 맞습니까?")) return;
+  const addressDifference = _identityAddressDifference(cid);
+  const confirmMessage = addressDifference
+    ? `등록 주소: ${addressDifference.registered}\n\n주문 배송지: ${addressDifference.entered}\n\n등록 주소와 다른 배송지입니다. 캡처의 배송지가 위 주문 배송지와 같고, 현재 선택한 명의의 주문이 맞습니까?`
+    : "주문 캡처와 입력 정보를 직접 확인했으며, 현재 선택한 명의의 주문이 맞습니까?";
+  if (!confirm(confirmMessage)) return;
   try {
     const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
       method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },

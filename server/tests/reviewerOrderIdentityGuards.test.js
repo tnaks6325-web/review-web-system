@@ -55,9 +55,8 @@ ok('타계정은 허용 공고에서만 서버가 인정한다',
   && /SUB_ACCOUNT_NOT_ALLOWED/.test(service));
 ok('다른 명의만 맞으면 하드 차단하고 선택 명의도 충분히 맞으면 수동확인으로 보낸다',
   /other\.matches >= 2[\s\S]{0,500}?multiple_identity_candidates[\s\S]{0,220}?status = 'MISMATCH'/.test(service));
-ok('독립신호 2개가 맞는 비주소 단일 충돌은 수동확인, 주소 충돌은 하드 차단한다',
-  /addressConflict \|\| selectedScore\.matches < 2 \? 'MISMATCH' : 'REVIEW'/.test(service)
-  && /selected_identity_partial_conflict/.test(service));
+// 배송지 예외/명의 불일치 차단은 reviewerOrderIdentity.test.js와 Flow 테스트에서
+// 실제 판정 및 승인토큰 검증으로 확인한다.
 ok('가림 주소는 모든 연속 가림문자를 제거해 비교한다',
   /MASK_RUN_RE = \/\[\*＊●○◯◉•·xX\]\+\/g/.test(service)
   && /replace\(MASK_RUN_RE, ' '\)/.test(service));
