@@ -15,7 +15,9 @@ async function run() {
     async query(sql) {
       const text = String(sql).replace(/\s+/g, ' ').trim();
       calls.push(text);
-      if (/SELECT id, seq, row_json FROM campaign_participants/.test(text)) return { rows: [] };
+      // 빈 슬롯 쿼리는 공고 옵션을 보는 하위 쿼리를 포함할 수 있으므로 먼저 구분한다.
+      if (/FOR UPDATE SKIP LOCKED/.test(text)) return { rows: [] };
+      if (/SELECT (?:cp\.)?id, (?:cp\.)?seq, (?:cp\.)?option_text, (?:cp\.)?row_json FROM campaign_participants/.test(text)) return { rows: [] };
       if (/FROM order_submissions/.test(text)) {
         return { rows: [{ source: 'reviewer', recipient: '일반주문', phone_digits: '01012345678' }] };
       }

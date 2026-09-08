@@ -205,13 +205,13 @@ async function writeOrderToWorktable({
 
   const requestedSeq = sheetRow == null ? null : parseInt(sheetRow, 10);
   if (sheetRow != null && (!Number.isInteger(requestedSeq) || requestedSeq < 1)) return { ok: false, reason: 'bad_row' };
-  // 예정된 상품·옵션 행은 모집공고에서 선택한 조합만 채울 수 있다.
-  // 큐 작업표는 트랜잭션 안에서 최신 원장값으로 교체될 수 있으므로, 선택 키도 반드시
-  // 그 교체 뒤에 다시 계산한다. 옵션 없는 상품은 option_text에 상품명이 미리 채워져 있지만
-  // 선택 값은 selectedProduct로만 들어온다. 이때는 상품명을 **행 선택 키**로만 쓰고 옵션 칸에
-  // 쓰지는 않는다.
+  // 예정된 옵션 행은 모집공고에서 선택한 옵션만 채울 수 있다.
+  // 큐 작업표는 트랜잭션 안에서 최신 원장값으로 교체될 수 있으므로, 옵션 키도 반드시
+  // 그 교체 뒤에 다시 계산한다. 상품명은 작업표 표시 문구와 모집공고 문구가 다를 수 있으므로
+  // 빈 슬롯 선택 조건으로 절대 사용하지 않는다. 선택 상품은 아래 buildRowPatch가 `상품` 열에
+  // 별도로 기록한다.
   let selectedOptKey = '';
-  let scheduledUnitKey = '';
+  let scheduledOptionKey = '';
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -248,7 +248,7 @@ async function writeOrderToWorktable({
       orderData = ledgerSvc._osRowToOrderData(freshOrders[0]);
     }
     selectedOptKey = String(orderData.selectedOptKey || '').trim();
-    scheduledUnitKey = selectedOptKey || String(orderData.selectedProduct || '').trim();
+    scheduledOptionKey = selectedOptKey;
     let cur;
     if (seq != null) {
       ({ rows: cur } = await client.query(
@@ -326,17 +326,36 @@ async function writeOrderToWorktable({
       }
       if (!cur.length) {
         ({ rows: cur } = await client.query(
-          `SELECT id, seq, option_text, row_json FROM campaign_participants
-            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
-              AND ($3::uuid IS NULL OR workboard_id = $3)
-              AND order_submission_id IS NULL
-              AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
-              AND ($4 = '' OR NULLIF(btrim(COALESCE(option_text, '')), '') IS NULL OR option_text = $4)
-            ORDER BY CASE WHEN option_text = $4 THEN 0 ELSE 1 END, seq
+          `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
+            WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
+              AND ($3::uuid IS NULL OR cp.workboard_id = $3)
+              AND cp.order_submission_id IS NULL
+              AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
+              AND (
+                ($4 <> '' AND (NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL OR cp.option_text = $4))
+                OR
+                ($4 = '' AND (
+                  NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL
+                  OR NOT EXISTS (
+                    SELECT 1
+                      FROM order_submissions scope_os
+                      JOIN campaign_applications scope_ca ON scope_ca.id = scope_os.campaign_application_id
+                      JOIN campaign_options scope_co ON scope_co.campaign_id = scope_ca.campaign_id
+                     WHERE scope_os.id = $5::uuid
+                       AND COALESCE(scope_co.unit_kind, 'option') <> 'product'
+                       AND scope_co.opt_key = cp.option_text
+                  )
+                ))
+              )
+            ORDER BY CASE
+                       WHEN $4 <> '' AND cp.option_text = $4 THEN 0
+                       WHEN $4 = '' AND NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL THEN 0
+                       ELSE 1
+                     END, cp.seq
             FOR UPDATE SKIP LOCKED
-            LIMIT 1`, [sheetId, tabName, workboardId, scheduledUnitKey]));
+            LIMIT 1`, [sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId]));
       }
       if (!cur.length) {
         /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문과
@@ -369,7 +388,7 @@ async function writeOrderToWorktable({
       seq = Number(cur[0].seq);
     }
 
-    if (cur[0] && scheduledUnitKey && cur[0].option_text && String(cur[0].option_text) !== scheduledUnitKey) {
+    if (cur[0] && scheduledOptionKey && cur[0].option_text && String(cur[0].option_text) !== scheduledOptionKey) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'scheduled_option_mismatch' };
     }
