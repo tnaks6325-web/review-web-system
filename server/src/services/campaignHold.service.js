@@ -106,7 +106,10 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
   await client.query(
     `UPDATE order_submissions os
         SET campaign_application_id = ca.id,
-            campaign_was_late = os.campaign_was_late OR ca.status IN ('expired','cancelled'),
+            campaign_was_late = os.campaign_was_late
+              OR ca.status IN ('expired','cancelled')
+              OR (ca.expires_at IS NOT NULL
+                  AND ca.expires_at <= NOW() - make_interval(secs => $6)),
             review_fee_snapshot = COALESCE(os.review_fee_snapshot, ca.review_fee_snapshot),
             -- ★ 101: 블로그 주소도 같은 자리에서 전파(시트/작업표 '블로그URL' 칸의 출처).
             --   COALESCE = **이미 있는 값은 안 덮는다** — 관리자가 사전등록해 둔 주소가 있으면 그것이 이긴다.
@@ -115,7 +118,7 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
       WHERE os.id = $1 AND os.campaign_application_id IS NULL
         AND ca.id = $2 AND ca.campaign_id = $3 AND ca.phone8 = $4
         AND ca.hold_token = $5 AND ca.hold_token <> ''`,
-    [orderSubmissionId, appId, campaignId, phone8, holdToken]
+    [orderSubmissionId, appId, campaignId, phone8, holdToken, HOLD_GRACE_SEC]
   );
 
   // 탈시트 구매양식은 서버가 검증한 캠페인 홀드로만 진입한다.

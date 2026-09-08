@@ -111,9 +111,12 @@ ok('★★ 주문 원장의 출처와 참여 신청의 지각 링크를 같은 �
   && /ca\.late_order_id = x\.id/.test(LOGSVC) && /ca\.expires_at/.test(LOGSVC));
 ok('★★ 취소 뒤에도 지각 이력이 바뀌지 않도록 주문 원장에 당시 상태를 보존한다',
   /campaign_was_late/.test(LOGSVC)
-  && /campaign_was_late = os\.campaign_was_late OR ca\.status IN \('expired','cancelled'\)/.test(HOLDSVC)
+  && /campaign_was_late = os\.campaign_was_late[\s\S]*?ca\.status IN \('expired','cancelled'\)/.test(HOLDSVC)
+  && /ca\.expires_at <= NOW\(\) - make_interval\(secs => \$6\)/.test(HOLDSVC)
+  && /holdToken, HOLD_GRACE_SEC/.test(HOLDSVC)
   && /UPDATE order_submissions SET campaign_was_late = TRUE/.test(HOLDSVC)
-  && /ADD COLUMN IF NOT EXISTS campaign_was_late BOOLEAN NOT NULL DEFAULT FALSE/.test(MIG149));
+  && /ADD COLUMN IF NOT EXISTS campaign_was_late BOOLEAN NOT NULL DEFAULT FALSE/.test(MIG149)
+  && !/INTERVAL '30 seconds'/.test(MIG149));
 ok('★★ 레거시 신청 링크 조회는 주문을 먼저 제한하고 양쪽 링크 인덱스를 둔다',
   /SELECT ev\.\*[\s\S]*?ORDER BY ev\.at DESC[\s\S]*?LIMIT \$3[\s\S]*?LEFT JOIN campaign_applications direct_app/.test(LOGSVC)
   && /campaign_applications \(order_submission_id\)/.test(MIG149)

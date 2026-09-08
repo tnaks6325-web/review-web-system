@@ -12,14 +12,8 @@ UPDATE order_submissions os
  WHERE os.campaign_was_late = FALSE
    AND ca.late_order_id = os.id;
 
--- 링크가 이미 지워졌더라도 마감+grace 이후임이 명확한 주문은 신청 FK로 복구한다.
-UPDATE order_submissions os
-   SET campaign_was_late = TRUE
-  FROM campaign_applications ca
- WHERE os.campaign_was_late = FALSE
-   AND os.campaign_application_id = ca.id
-   AND ca.expires_at IS NOT NULL
-   AND os.submitted_at > ca.expires_at + INTERVAL '30 seconds';
+-- 이미 지워진 과거 링크는 당시 CAMPAIGN_HOLD_GRACE_SEC 값을 알 수 없어 추측 백필하지 않는다.
+-- 새 주문은 confirmHoldInTx가 동일한 런타임 grace 경계로 불변 플래그를 기록한다.
 
 CREATE INDEX IF NOT EXISTS idx_campaign_apps_order_submission
   ON campaign_applications (order_submission_id)
