@@ -2609,16 +2609,24 @@ async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMappi
 
 function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합키(정렬무관, 값에 탭 없음)
 
-// 광고주(외부) 노출 차단 목록 — 요청한 신원·정산정보 다섯 종류만 제외하고 원본 시트 컬럼을 모두 연다.
-//   ★ 데이터 최소화: 제외한 컬럼은 rowJson에서도 빼서 화면만이 아니라 네트워크 페이로드에도 싣지 않는다.
-//   신원열(참여자 이름·DB 연락처)은 프론트가 광고주 그리드에서 별도로 렌더하지 않으며, 동명 시트 열도 여기서 차단한다.
+// 광고주(외부) 노출 차단 목록 — 업체가 주문 확인에 쓰는 구매채널 아이디·전화번호는 제공하되,
+// 은행·계좌·예금주와 내부 참여자 식별자는 계속 응답 페이로드에서 제외한다.
 function _isAdvertiserRestrictedHeader(header) {
   const key = String(header == null ? '' : header).replace(/\s+/g, '').toLowerCase();
   return /참여자/.test(key)
-    || /연락처|전화|핸드폰|휴대폰|전번|phone/.test(key)
     || /은행|bank/.test(key)
     || /계좌|account/.test(key)
     || /예금주/.test(key);
+}
+
+function _isAdvertiserUserIdHeader(header) {
+  const key = String(header == null ? '' : header).replace(/\s+/g, '').toLowerCase();
+  return /아이디|userid|구매채널id|coupangid|naverid/.test(key);
+}
+
+function _isAdvertiserPhoneHeader(header) {
+  const key = String(header == null ? '' : header).replace(/\s+/g, '').toLowerCase();
+  return /연락처|전화|핸드폰|휴대폰|전번|phone/.test(key);
 }
 
 function _advertiserColumns(rawHeaders) {
@@ -2651,12 +2659,27 @@ function _advertiserHeaderCandidates(rawHeaders, roster, editedColumnHeaders = [
   return out;
 }
 
-function _advertiserColumnValue(rowJson, overlay, header) {
+function _advertiserColumnValue(rowJson, overlay, header, order = null) {
   const editKey = `col:${header}`;
   if (Object.prototype.hasOwnProperty.call(overlay || {}, editKey)) {
     return overlay[editKey] == null ? '' : overlay[editKey];
   }
-  return rowJson && rowJson[header] != null ? rowJson[header] : '';
+  const raw = rowJson && rowJson[header] != null ? rowJson[header] : '';
+  if (String(raw).trim()) return raw;
+  // 과거 작업표에 해당 원본 열이 없거나 비어 있어도, 연결된 구매양식의 주문 확인 정보를 제공한다.
+  if (_isAdvertiserUserIdHeader(header)) return order && order.userId != null ? order.userId : raw;
+  if (_isAdvertiserPhoneHeader(header)) return order && order.phone != null ? order.phone : raw;
+  return raw;
+}
+
+function _advertiserOrderInfoHeaders(headers, orderMap) {
+  const current = Array.isArray(headers) ? headers : [];
+  const orders = [...(orderMap || new Map()).values()];
+  const add = [];
+  // 이미 원본 시트에 같은 의미의 열이 있으면 그 열을 사용해 중복 열을 만들지 않는다.
+  if (!current.some(_isAdvertiserUserIdHeader) && orders.some(order => String(order && order.userId || '').trim())) add.push('아이디');
+  if (!current.some(_isAdvertiserPhoneHeader) && orders.some(order => String(order && order.phone || '').trim())) add.push('전화번호');
+  return add;
 }
 
 // ── 리뷰 이미지(행별) — 업체 뷰어 미리보기 패널용. 읽기 전용·Drive 무접촉(파일ID만 반환). ──
@@ -3252,8 +3275,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
   }
   // 제출한 구매양식 원본(order_submissions) — 링크된 주문의 실제 제출 내용. 내부(master/admin)만 PII 상세 노출.
-  // 업체 화면에는 주문별 원본 대신 집행 합계 계산에 필요한 결제금액만 읽는다. 이 합계는 작업 조건에
-  // 이미 노출된 총 결제금액과 같은 작업 단위 정보이며, 주문자·수령인 등 PII는 절대 조회하지 않는다.
+  // 업체 화면에는 결제금액과, 업체가 주문 확인에 필요한 구매채널 아이디·전화번호만 읽는다.
+  // 은행·계좌·예금주 및 주문자·수취인 원본은 계속 이 경로로 조회하지 않는다.
   let ordMap = new Map();
   if (showEdits) {
     const orderIds = [...new Set(roster.map(r => r.order_submission_id).filter(Boolean).map(String))];
@@ -3270,9 +3293,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     const orderIds = [...new Set(roster.map(r => r.order_submission_id).filter(Boolean).map(String))];
     if (orderIds.length) {
       const { rows: ords } = await db.query(
-        `SELECT id, price FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+        `SELECT id, price, user_id AS "userId", phone
+           FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
         [orderIds]).catch(() => ({ rows: [] }));
-      ordMap = new Map(ords.map(o => [String(o.id), { price: o.price }]));
+      ordMap = new Map(ords.map(o => [String(o.id), { price: o.price, userId: o.userId, phone: o.phone }]));
     }
   }
   // 시트형 그리드용: 시트 실제 헤더 순서(raw_sheet_tabs.detected_headers = 주문원장이 쓰는 열 순서 원본).
@@ -3293,7 +3317,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (showEdits) headers = raw;                                   // 내부: 시트 전체 헤더
     else {
       // 광고주: 차단 목록의 다섯 신원·정산 정보만 제외하고 원본 컬럼을 유지한다.
-      advHeaders = _advertiserColumns(_advertiserHeaderCandidates(raw, roster, advEditedHeaders));
+      const candidates = _advertiserHeaderCandidates(raw, roster, advEditedHeaders);
+      advHeaders = _advertiserColumns([...candidates, ..._advertiserOrderInfoHeaders(candidates, ordMap)]);
       headers = advHeaders;
     }
   }
@@ -3436,10 +3461,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       syn.customValues = (ak && customValMap.get(ak)) || {};
       syn.cellColors = (ak && cellColorMap.get(ak)) || {};
     } else if (role === 'advertiser' && advHeaders) {
-      // 광고주: 허용된 원본 컬럼 전체값. 차단 컬럼(참여자·연락처·은행·계좌번호·예금주)은 rowJson에 안 담음.
+      // 광고주: 허용된 원본 컬럼과 주문 확인용 아이디·전화번호만 담는다. 내부 참여자·은행·계좌·예금주는 제외한다.
       const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
       const cur = {};
-      for (const h of advHeaders) cur[h] = _advertiserColumnValue(rj, ov, h);
+      for (const h of advHeaders) cur[h] = _advertiserColumnValue(rj, ov, h, order);
       syn.rowJson = cur;
       syn.editable = false;   // 읽기전용(다른 열은 종전대로)
       // ★ 택배송장 열만 업체가 직접 입력한다(사용자 확정 2026-08-19). 편집은 오버레이라 **앵커가 있어야**
@@ -6112,6 +6137,7 @@ module.exports = {
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   __advertiserHeaderCandidatesForTest: _advertiserHeaderCandidates,
   __advertiserColumnValueForTest: _advertiserColumnValue,
+  __advertiserOrderInfoHeadersForTest: _advertiserOrderInfoHeaders,
   // 회귀가드 전용 — tabStatsMap 의 30초 프로세스 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
   //   운영 코드에서 부르지 말 것: 캐시는 "모든 내부 사용자의 홈 진입 경로"에 붙은 비용 절감 장치다.
   __resetTabStatsCacheForTest() { _tabStatsCache = { at: 0, map: null }; },
