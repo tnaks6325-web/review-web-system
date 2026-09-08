@@ -56,6 +56,7 @@ svc.__setPoolForTest({
         { reviewerName: '리뷰어B', rowIndex: 6, alreadyPaid: false, rowJson: { '결제금액': '17,800', '계좌번호': '3515516491623' } },
       ] };
     }
+    if (/WITH targets AS/.test(sql)) return { rows: [] };
     throw new Error(`unexpected query: ${sql.slice(0, 90)}`);
   },
 });
@@ -143,7 +144,11 @@ svc.__setPoolForTest({
     '7열 비교표는 모달 폭 안에서 모든 값을 보여주는 전용 폭 규칙을 가져야 한다');
   assert.match(workdesk, /\.pm-unconfirmed-two-row-table thead th:nth-child\(8\)\{width:16%\}/,
     '행별 조치 열은 밀리지 않도록 전용 폭을 가져야 한다');
-  assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
+  assert.match(workdesk, /function _pmReconcileMismatch\(rowIndex\)/);
+  assert.match(workdesk, /const c=_pmUnconfirmedContext\(rowIndex\), R=STATE\.pmResult, x=c\.accountCandidate/,
+    '계좌 불일치 승인은 현재 열린 그룹의 캐시 후보를 사용해야 한다');
+  assert.doesNotMatch(workdesk, /STATE\.pmReconciliationCandidates/,
+    '다른 그룹을 열었을 때 오래된 전역 계좌 후보를 사용하면 안 된다');
   assert.match(workdesk, /unconfirmed-reconcile/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
   assert.match(workdesk, /STATE\.pmUnconfirmedGroups=groups\.map/);
