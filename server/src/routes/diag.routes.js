@@ -2482,11 +2482,27 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
 // DB 작업보드의 준비 슬롯으로 일회성 복구한다. Google Sheet/GAS는 호출하지 않는다.
 router.post('/sheetless-worktable-recover', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
+    const b = req.body || {};
     const { withJobLock } = require('../utils/jobLock');
     const { recoverUnwrittenSheetlessOrders } = require('../services/sheetlessOrder.service');
-    const limit = Math.min(parseInt((req.body || {}).limit, 10) || 100, 1000);
+    const limit = Math.min(Math.max(parseInt(b.limit, 10) || 100, 1), 1000);
+    const dryRun = b.dryRun !== false;
+    if (b.orderSubmissionIds != null && !Array.isArray(b.orderSubmissionIds)) {
+      return res.status(400).json({ ok: false, error: 'orderSubmissionIds는 배열이어야 합니다.' });
+    }
+    if (Array.isArray(b.orderSubmissionIds) && b.orderSubmissionIds.length > 100) {
+      return res.status(400).json({ ok: false, error: '한 번에 최대 100건만 지정할 수 있습니다.' });
+    }
+    const orderSubmissionIds = Array.isArray(b.orderSubmissionIds)
+      ? b.orderSubmissionIds.map(id => String(id).trim())
+      : null;
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (orderSubmissionIds && orderSubmissionIds.some(id => !uuidPattern.test(id))) {
+      return res.status(400).json({ ok: false, error: '올바르지 않은 주문 식별값이 포함되어 있습니다.' });
+    }
     const by = (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
-    const out = await withJobLock('sheetless_worktable_recover', () => recoverUnwrittenSheetlessOrders({ limit, by }));
+    const run = () => recoverUnwrittenSheetlessOrders({ limit, by, orderSubmissionIds, dryRun });
+    const out = dryRun ? await run() : await withJobLock('sheetless_worktable_recover', run);
     if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 작업보드 복구가 진행 중입니다.' });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
