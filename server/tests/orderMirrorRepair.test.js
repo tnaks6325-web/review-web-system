@@ -200,6 +200,15 @@ function stubPool(answer) {
     ok('★ 미리보기는 링크 보정·주문 UPDATE를 포함해 쓰기가 전혀 없다',
       preview.dryRun === true && !s4.calls.some(x => /\b(?:UPDATE|INSERT|DELETE)\b/i.test(x.sql)));
 
+    const s4Actual = stubPool(() => ({ rows: [] }));
+    slOrder.__setPoolForTest(s4Actual.pool);
+    await slOrder.recoverUnwrittenSheetlessOrders({
+      orderSubmissionIds: [targetId],
+      dryRun: false,
+    });
+    ok('★ 지정 복구 실행은 연결 대상을 새로 넓히지 않아 미리보기 범위를 보존한다',
+      !s4Actual.calls.some(x => /WITH candidates AS[\s\S]*UPDATE recruit_campaigns/i.test(x.sql)));
+
     const s5 = stubPool(() => ({ rows: [] }));
     slOrder.__setPoolForTest(s5.pool);
     await slOrder.recoverUnwrittenSheetlessOrders({ orderSubmissionIds: [], dryRun: true });

@@ -671,7 +671,8 @@ async function recoverUnwrittenSheetlessOrders({
     ? orderSubmissionIds.map(id => String(id).trim()).slice(0, 100)
     : null;
   // 미리보기는 링크 보정 UPDATE까지 포함해 쓰기가 전혀 없어야 한다.
-  const links = dryRun ? { linked: 0 } : await reconcileCampaignWorktableLinks();
+  // 지정 복구도 실행 중 새 후보를 만들어 미리보기보다 범위가 넓어지면 안 된다.
+  const links = (dryRun || ids !== null) ? { linked: 0 } : await reconcileCampaignWorktableLinks();
   const { rows } = await db.query(
     `SELECT os.id, os.submitted_at, os.orderer, os.recipient, os.user_id, os.phone, os.address,
             os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
