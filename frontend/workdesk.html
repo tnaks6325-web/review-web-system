@@ -2562,6 +2562,10 @@ const TEST_AUTO_LOGIN_HOST = 'test-review-wdb-web-production.up.railway.app';
 const TEST_AUTO_LOGIN_PR_HOST = /^test-review-wdb-web-review-web-system-pr-\d+\.up\.railway\.app$/i;
 const TEST_AUTO_LOGIN_API = 'https://test-review-wdb-production.up.railway.app';
 if (location.hostname === TEST_AUTO_LOGIN_HOST) window.REVIEW_API_URL = TEST_AUTO_LOGIN_API;
+const TEST_AUTO_LOGIN_PR = location.hostname.match(/^test-review-wdb-web-review-web-system-pr-(\d+)\.up\.railway\.app$/i);
+if (TEST_AUTO_LOGIN_PR && new URLSearchParams(location.search).get('e2e') === '1') {
+  window.REVIEW_API_URL = `https://test-review-wdb-review-web-system-pr-${TEST_AUTO_LOGIN_PR[1]}.up.railway.app`;
+}
 const API_BASE = (function(){
   if (window.REVIEW_API_URL) return window.REVIEW_API_URL;
   const pr = location.hostname.match(/^test-review-wdb-web-review-web-system-pr-(\d+)\.up\.railway\.app$/i);
@@ -2612,7 +2616,9 @@ let _SHARE=null, _SHARE_ERR='';
 })();
 function token(){ return sessionStorage.getItem('admin_token') || ''; }
 async function tryTestAutoLogin(){
-  if ((location.hostname !== TEST_AUTO_LOGIN_HOST && !TEST_AUTO_LOGIN_PR_HOST.test(location.hostname)) || token()) return false;
+  const isIsolatedPrTest = TEST_AUTO_LOGIN_PR_HOST.test(location.hostname)
+    && new URLSearchParams(location.search).get('e2e') === '1';
+  if ((location.hostname !== TEST_AUTO_LOGIN_HOST && !isIsolatedPrTest) || token()) return false;
   try {
     const response = await fetch(API_BASE+'/api/admin/test-auto-login', { method:'POST' });
     const result = await response.json();
