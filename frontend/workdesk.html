@@ -926,6 +926,12 @@
   .tlstamp{font-size:11.4px;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
   .tlstamp b{color:var(--accent-deep);font-weight:750}
   .tlwho{font-size:11.4px;color:var(--muted);margin-top:2px}
+  /* 모집공고도 이 로그 틀을 쓴다. 기존 확정·취소 조치는 [참여 관리]에서 같은 팝업으로 전환한다. */
+  .cc-manage-body{flex:1;min-height:0;overflow:auto;padding:12px 18px}
+  .cc-empty{text-align:center;color:var(--faint);font-size:12.5px;line-height:1.7;padding:36px 12px}
+  .cc-empty span{font-size:11.5px}.cc-empty.cc-error{color:var(--bad)}
+  .cc-small-btn{margin-left:5px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--muted);padding:3px 8px;font:inherit;font-size:11px;font-weight:700;cursor:pointer}
+  @media(max-width:700px){#campControlOvl #ccMoBtn{display:none!important}}
   /* 작업 로그의 검수는 아직 손볼 것만 — 완료 항목은 10초 동안만 남겨 즉시 처리 결과를 확인시킨다. */
   .tlins{display:grid;gap:10px}.tlicard{display:grid;grid-template-columns:108px minmax(0,1fr);gap:11px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
   .tlicard.fail{border-left:4px solid var(--bad)} .tlicard.suspect{border-left:4px solid var(--warn)} .tlicard.done{opacity:.55;background:var(--card2)}
@@ -18010,7 +18016,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      → /api/trackb/manual-order/* 프록시, 권한은 편집 허용명단). -->
 <script>window.MANUAL_ORDER_API = '/api/trackb/manual-order';</script>
 <script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
-<script src="js/index-recruit.js?v=20260827-calendar-overlay"></script>
+<script src="js/index-recruit.js?v=20260908-worklog"></script>
 <script>
 /* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 리뷰웹시스템[3버전] 것으로 잇는다.
    ★ 함수를 베끼지 않고 **이름만 연결**한다 — 로직은 여전히 한 벌이다. */

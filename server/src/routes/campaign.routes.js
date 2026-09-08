@@ -3493,6 +3493,41 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
   }
 });
 
+/* GET /api/campaign/admin/:id/activity-log — 모집공고에서 연결 작업보드의 로그를 그대로 읽는다.
+   ★ 신규 로그 저장소·별도 집계 0: 작업보드가 쓰는 tabActivityLog 서비스가 단일 출처다.
+   공고 id로 연결 탭을 서버에서 다시 찾아 화면이 다른 sheet/tab을 끼워 넣지 못하게 한다. */
+router.get('/admin/:id/activity-log', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT linked_sheet_id, linked_tab_name, linked_tab_gid
+         FROM recruit_campaigns WHERE id = $1 LIMIT 1`, [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+    const camp = rows[0];
+    const { tabActivityLog, LOG_KINDS } = require('../services/tabActivityLog.service');
+    /* 연결 전 공고도 빈 기록으로 꾸미지 않고 화면이 이유를 말할 수 있게 명시한다. */
+    if (!camp.linked_sheet_id || !camp.linked_tab_name) {
+      return res.json({
+        ok: true, unlinked: true, items: [], failed: [],
+        kinds: LOG_KINDS.filter(k => k.key !== 'inspect'),
+        hasMore: false, nextBefore: null, truncated: false,
+      });
+    }
+    const out = await tabActivityLog({
+      sheetId: camp.linked_sheet_id,
+      tabName: camp.linked_tab_name,
+      gid: camp.linked_tab_gid || '',
+      kind: req.query.kind,
+      limit: req.query.limit,
+      before: req.query.before,
+      pool,
+    });
+    /* 검수는 과거 로그가 아니라 작업보드의 현재 조치 화면이다. 모집공고에서는 시간 이력만
+       공유하고, 기존 구매확인·취소확정 조치는 별도 [참여 관리]에 보존한다. */
+    res.json({ ...out, kinds: (out.kinds || []).filter(k => k.key !== 'inspect') });
+  } catch (err) { next(err); }
+});
+
 // GET /api/campaign/admin/:id/preview — 관리자: 리뷰어 참여 화면 미리보기 (읽기 전용)
 //   ★ 격리 원칙: 무인증 리뷰어 경로 `GET /:id/work-detail` 은 **일절 미변경**. 관리자 전용 별도 라우트로
 //     같은 shape을 합성해 돌려준다(리뷰어 게이트에 관리자 분기를 심지 않음 = 폭발반경 0).

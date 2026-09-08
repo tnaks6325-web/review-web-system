@@ -4473,25 +4473,32 @@ window._recruitCardTitles = window._recruitCardTitles || {};
 function openCampControlById(campId) {
   return openCampControl(campId, window._recruitCardTitles[campId] || campId);
 }
+let _ccCampId = null, _ccCampTitle = "", _ccMode = "log", _ccManageSeq = 0;
 async function openCampControl(campId, title) {
   let ovl = document.getElementById("campControlOvl");
   if (!ovl) {
     ovl = document.createElement("div");
     ovl.id = "campControlOvl";
     ovl.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px";
-    ovl.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:680px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden">
+    ovl.innerHTML = `<div class="tlbox cc-logbox" style="background:#fff;border-radius:16px;max-width:880px;width:100%;height:86vh;max-height:86vh;display:flex;flex-direction:column;overflow:hidden">
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB">
-        <b style="flex:1;font-size:.95rem" id="ccTitle"></b>
-        <span id="ccStats" style="font-size:.74rem;color:#4B5563;font-weight:700"></span>
+        <b style="font-size:.95rem" id="ccTitle"></b>
+        <span class="tlsub" id="ccSub"></span>
+        <span style="flex:1"></span>
+        <span id="ccStats" style="display:none;font-size:.74rem;color:#4B5563;font-weight:700"></span>
+        <button id="ccModeBtn" style="font-size:.72rem;font-weight:800;background:#fff;color:#4B5563;border:1px solid #D1D5DB;border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap"></button>
         <button id="ccMoBtn" title="카톡으로 모집한 외부 리뷰어의 구매양식을 대신 제출합니다" style="font-size:.72rem;font-weight:800;background:#E6FAF6;color:#0F766E;border:1px solid #9EE6D8;border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap">🧾 외부모집 수동제출</button>
         <button onclick="document.getElementById('campControlOvl').remove()" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#9CA3AF"><i class="fas fa-times"></i></button>
       </div>
-      <div id="ccBody" style="overflow-y:auto;padding:12px 18px"></div>
+      <div class="tltabs" id="ccLogTabs"></div>
+      <div class="tlbd" id="ccBody"></div>
     </div>`;
     ovl.addEventListener("click", e => { if (e.target === ovl) ovl.remove(); });
     document.body.appendChild(ovl);
   }
-  document.getElementById("ccTitle").textContent = "🧾 로그 — " + (title || campId);
+  _ccCampId = campId;
+  _ccCampTitle = title || campId;
+  _ccMode = "log";
   // 🧾 외부모집 수동제출 — 오버레이는 1회만 만들고 재사용하므로 공고가 바뀔 때마다 핸들러를 다시 건다
   // 연결 탭 문맥 해석은 campaign-cards.js 한 곳에만 둔다(사본을 두면 화면마다 다른 탭에 쓴다).
   // 그 모듈이 없는 화면(admin-siand)에서는 **버튼을 숨긴다** — 눌러도 안 되는 버튼보다 없는 게 낫다.
@@ -4501,8 +4508,198 @@ async function openCampControl(campId, title) {
     _moBtn.style.display = _moReady ? "" : "none";
     _moBtn.onclick = () => CampCards.openManualOrder(campId);
   }
-  document.getElementById("ccBody").innerHTML = `<div style="padding:30px;text-align:center;color:#9CA3AF"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
-  await _loadCampControl(campId);
+  const modeBtn = document.getElementById("ccModeBtn");
+  if (modeBtn) modeBtn.onclick = () => _ccSetMode(_ccMode === "log" ? "manage" : "log");
+  await _ccSetMode("log");
+}
+
+/* 모집공고 로그는 작업보드와 같은 tabActivityLog 응답·유형·커서 규약을 사용한다.
+   참여 확정/취소 같은 쓰기 기능은 없애지 않고 [참여 관리]로 분리한다. */
+let _ccLogKind = "all", _ccLogQuery = "", _ccLogBusy = false, _ccLogItems = [], _ccLogSeen = null,
+  _ccLogNext = null, _ccLogEnd = false, _ccLogPartial = false, _ccLogKinds = [], _ccLogFailed = [],
+  _ccLogErr = "", _ccLogSeq = 0, _ccLogLoaded = 0, _ccLogUnlinked = false;
+
+async function _ccSetMode(mode) {
+  _ccMode = mode === "manage" ? "manage" : "log";
+  ++_ccManageSeq; // 진행 중인 참여 관리 조회가 새 모드 화면을 뒤늦게 덮지 못하게 무효화
+  const title = document.getElementById("ccTitle");
+  const sub = document.getElementById("ccSub");
+  const stats = document.getElementById("ccStats");
+  const tabs = document.getElementById("ccLogTabs");
+  const body = document.getElementById("ccBody");
+  const btn = document.getElementById("ccModeBtn");
+  if (title) title.textContent = _ccMode === "log" ? "🗒 작업 로그" : "👥 참여 관리";
+  if (sub) { sub.textContent = _ccCampTitle; sub.title = _ccCampTitle; }
+  if (stats) { stats.style.display = _ccMode === "manage" ? "" : "none"; if (_ccMode === "log") stats.textContent = ""; }
+  if (tabs) tabs.style.display = _ccMode === "log" ? "flex" : "none";
+  if (body) { body.className = _ccMode === "log" ? "tlbd" : "cc-manage-body"; body.innerHTML = '<div class="cc-empty">불러오는 중…</div>'; }
+  if (btn) btn.textContent = _ccMode === "log" ? "참여 관리" : "작업 로그";
+  if (_ccMode === "log") { _ccLogKind = "all"; _ccLogQuery = ""; await _ccLogLoad(); }
+  else await _loadCampControl(_ccCampId);
+}
+
+function ccPickLogKind(kind) {
+  if (_ccLogKind === kind) return;
+  _ccLogKind = kind;
+  _ccLogLoad();
+}
+function ccSearchLogs(value) {
+  _ccLogQuery = String(value || "").trim().toLocaleLowerCase();
+  _ccLogUpdateSearchCount();
+  _ccLogPaintBody();
+  if (_ccLogQuery) setTimeout(_ccLogAfterGrow, 0);
+}
+function _ccLogEsc(value) {
+  return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function _ccLogShown() {
+  if (!_ccLogQuery) return _ccLogItems;
+  return _ccLogItems.filter(e => [e.message, e.who, e.at, e.kind].join(" ").toLocaleLowerCase().includes(_ccLogQuery));
+}
+function _ccLogUpdateSearchCount() {
+  const el = document.getElementById("ccLogSearchCount");
+  if (el) el.textContent = _ccLogQuery ? `검색 ${_ccLogShown().length}건` : "";
+}
+function _ccLogOverdue(value) {
+  let n = Math.max(0, Math.floor(Number(value) || 0));
+  const d = Math.floor(n / 86400); n %= 86400;
+  const h = Math.floor(n / 3600); n %= 3600;
+  const m = Math.floor(n / 60), s = n % 60, out = [];
+  if (d) out.push(`${d}일`); if (h) out.push(`${h}시간`); if (m) out.push(`${m}분`);
+  if (s || !out.length) out.push(`${s}초`);
+  return out.join(" ");
+}
+function _ccLogTs(value, seconds) {
+  if (!value) return "";
+  try {
+    return new Date(value).toLocaleString("ko-KR", {
+      timeZone: "Asia/Seoul", year: "numeric", month: "numeric", day: "numeric",
+      hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}),
+    });
+  } catch (_) { return String(value); }
+}
+function _ccLogStamp(event) {
+  if (!event || event.kind !== "order" || !event.submittedAt) return "";
+  const late = event.submissionType === "late";
+  const overdue = late ? (event.overdueSeconds == null ? "초과시간 확인 불가" : `${_ccLogOverdue(event.overdueSeconds)} 초과`) : "";
+  return `<div class="tlstamp"><b>${late ? "주문제출시각" : "제출시각"}</b> ${_ccLogEsc(_ccLogTs(event.submittedAt, true))}`
+    + (overdue ? ` · <b>${_ccLogEsc(overdue)}</b>` : "") + `</div>`;
+}
+function _ccLogEventHtml(event) {
+  return `<div class="tlev k-${_ccLogEsc(event.kind)}"><div class="tltop"><span class="tlwhen">${_ccLogEsc(_ccLogTs(event.at, true))}</span>`
+    + `<span class="tlmsg">${_ccLogEsc(event.message)}</span></div>${_ccLogStamp(event)}`
+    + (event.who ? `<div class="tlwho">${_ccLogEsc(event.who)}</div>` : "") + `</div>`;
+}
+async function _ccLogFetch(before) {
+  let path = `/${encodeURIComponent(_ccCampId)}/activity-log?kind=${encodeURIComponent(_ccLogKind)}`;
+  if (before) path += `&before=${encodeURIComponent(before)}`;
+  const res = await fetch(_campApi(path), { headers: _getAuthHeaders() });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+async function _ccLogLoad() {
+  if (!_ccCampId || _ccMode !== "log") return;
+  const seq = ++_ccLogSeq;
+  _ccLogBusy = true; _ccLogItems = []; _ccLogSeen = Object.create(null); _ccLogNext = null;
+  _ccLogEnd = false; _ccLogPartial = false; _ccLogKinds = []; _ccLogFailed = []; _ccLogErr = ""; _ccLogLoaded = 0; _ccLogUnlinked = false;
+  _ccLogPaintTabs();
+  const body = document.getElementById("ccBody");
+  if (body) body.innerHTML = '<div class="cc-empty">불러오는 중…</div>';
+  try {
+    const result = await _ccLogFetch(null);
+    if (seq !== _ccLogSeq || _ccMode !== "log") return;
+    _ccLogKinds = result.kinds || _ccLogKinds;
+    _ccLogFailed = result.failed || [];
+    _ccLogUnlinked = result.unlinked === true;
+    _ccLogTake(result);
+    _ccLogBusy = false;
+    _ccLogPaintTabs(); _ccLogPaintBody();
+    const current = document.getElementById("ccBody"); if (current) current.scrollTop = 0;
+    _ccLogAfterGrow();
+  } catch (error) {
+    if (seq !== _ccLogSeq || _ccMode !== "log") return;
+    _ccLogBusy = false;
+    if (body) body.innerHTML = `<div class="cc-empty cc-error">로그를 불러오지 못했습니다 — ${_ccLogEsc(error.message)}<br><button class="cc-small-btn" onclick="_ccLogLoad()">다시 시도</button></div>`;
+  }
+}
+async function _ccLogMore() {
+  if (_ccLogBusy || _ccLogEnd || !_ccLogNext || _ccMode !== "log") return;
+  const seq = _ccLogSeq;
+  _ccLogBusy = true; _ccLogErr = ""; _ccLogPaintFoot();
+  try {
+    const result = await _ccLogFetch(_ccLogNext);
+    if (seq !== _ccLogSeq || _ccMode !== "log") return;
+    if (result.failed && result.failed.length) _ccLogFailed = result.failed;
+    const added = _ccLogTake(result);
+    _ccLogBusy = false;
+    if (added.length) _ccLogAppend(added);
+    _ccLogUpdateSearchCount(); _ccLogPaintWarn(); _ccLogPaintFoot();
+    if (added.length) _ccLogAfterGrow();
+  } catch (error) {
+    if (seq !== _ccLogSeq || _ccMode !== "log") return;
+    _ccLogBusy = false; _ccLogErr = error.message || "조회 실패"; _ccLogPaintFoot();
+  }
+}
+function _ccLogTake(result) {
+  const added = [];
+  (result.items || []).forEach(event => {
+    const key = event.id ? String(event.id) : `${event.kind}|${event.at}|${event.message}|${event.who || ""}`;
+    if (_ccLogSeen[key]) return;
+    _ccLogSeen[key] = 1; added.push(event); _ccLogItems.push(event);
+  });
+  _ccLogLoaded++;
+  _ccLogNext = result.hasMore && result.nextBefore ? result.nextBefore : null;
+  if (!_ccLogNext) { _ccLogEnd = true; if (result.hasMore || result.truncated) _ccLogPartial = true; }
+  else if (!added.length && _ccLogLoaded > 1) { _ccLogEnd = true; _ccLogPartial = true; }
+  return added;
+}
+function _ccLogPaintTabs() {
+  const box = document.getElementById("ccLogTabs"); if (!box || _ccMode !== "log") return;
+  const shown = _ccLogShown().length;
+  box.innerHTML = `<div class="tltablist">` + [["all", "전체"]].concat((_ccLogKinds || []).map(k => [k.key, k.label]))
+    .map(([key, label]) => `<button class="tltab${_ccLogKind === key ? " on" : ""}" onclick="ccPickLogKind('${key}')">${_ccLogEsc(label)}</button>`).join("")
+    + `</div><label class="tlsearch"><input type="search" value="${_ccLogEsc(_ccLogQuery)}" oninput="ccSearchLogs(this.value)" placeholder="로그 검색" aria-label="모집공고 작업 로그 검색"></label>`
+    + `<span class="tlsearchcount" id="ccLogSearchCount">${_ccLogQuery ? `검색 ${shown}건` : ""}</span>`;
+}
+function _ccLogPaintBody() {
+  const body = document.getElementById("ccBody"); if (!body || _ccMode !== "log") return;
+  if (_ccLogUnlinked) {
+    body.innerHTML = '<div class="cc-empty">연결된 작업보드가 없어 작업 로그를 불러올 수 없습니다.<br><span>공고에 작업 탭을 연결하면 같은 로그가 표시됩니다.</span></div>';
+    return;
+  }
+  const shown = _ccLogShown();
+  body.innerHTML = `<div id="ccLogWarn"></div><div class="tl" id="ccLogList">${shown.map(_ccLogEventHtml).join("")}</div><div class="tlmore" id="ccLogFoot"></div>`;
+  if (!shown.length) {
+    const list = document.getElementById("ccLogList");
+    if (list) list.outerHTML = `<div class="cc-empty" id="ccLogList">${_ccLogQuery ? "검색 결과가 없습니다." : (_ccLogKind === "all" ? "아직 기록이 없습니다." : "이 유형의 기록이 없습니다.")}</div>`;
+  }
+  _ccLogPaintWarn(); _ccLogPaintFoot();
+  body.onscroll = () => { if (body.scrollTop + body.clientHeight >= body.scrollHeight - 240) _ccLogMore(); };
+}
+function _ccLogPaintWarn() {
+  const warn = document.getElementById("ccLogWarn"); if (!warn) return;
+  warn.innerHTML = _ccLogFailed.length ? `<div class="tlwarn">기록 ${_ccLogFailed.length}종을 불러오지 못했습니다 — 이 목록이 전부가 아닐 수 있어요.</div>` : "";
+}
+function _ccLogAppend(items) {
+  const list = document.getElementById("ccLogList"); if (!list || !list.classList.contains("tl")) return _ccLogPaintBody();
+  const shown = _ccLogQuery ? items.filter(e => [e.message, e.who, e.at, e.kind].join(" ").toLocaleLowerCase().includes(_ccLogQuery)) : items;
+  if (shown.length) list.insertAdjacentHTML("beforeend", shown.map(_ccLogEventHtml).join(""));
+}
+function _ccLogPaintFoot() {
+  const foot = document.getElementById("ccLogFoot"); if (!foot) return;
+  if (_ccLogErr) { foot.innerHTML = `더 불러오지 못했습니다 — ${_ccLogEsc(_ccLogErr)} <button class="cc-small-btn" onclick="_ccLogMore()">다시 시도</button>`; return; }
+  if (_ccLogBusy) { foot.textContent = "더 불러오는 중…"; return; }
+  if (!_ccLogItems.length) { foot.textContent = ""; return; }
+  const count = _ccLogQuery ? `검색 ${_ccLogShown().length}건 · ` : "";
+  foot.innerHTML = _ccLogEnd
+    ? (_ccLogPartial ? `${count}여기까지만 표시했습니다 · ${_ccLogItems.length}건 — 더 과거는 불러오지 못했습니다.` : `${count}이 작업의 처음까지 모두 불러왔습니다 · 총 ${_ccLogItems.length}건`)
+    : `${count}아래로 내리면 더 과거를 불러옵니다 · 지금까지 ${_ccLogItems.length}건 <button class="cc-small-btn" onclick="_ccLogMore()">더 보기</button>`;
+}
+function _ccLogAfterGrow() {
+  const body = document.getElementById("ccBody");
+  if (!body || _ccLogEnd || _ccLogBusy || !_ccLogNext || _ccMode !== "log") return;
+  if (body.scrollHeight <= body.clientHeight + 8) setTimeout(_ccLogMore, 0);
 }
 
 /* ═══ 📝 127 블로그 승인제 — 관제 승인 대기 큐 ═══
@@ -4774,12 +4971,15 @@ function _campSheetInfo(si) {
 }
 
 async function _loadCampControl(campId) {
+  if (_ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
+  const manageSeq = ++_ccManageSeq;
   const body = document.getElementById("ccBody");
   const stats = document.getElementById("ccStats");
   try {
     const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/applications`), { headers: _getAuthHeaders() });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    if (manageSeq !== _ccManageSeq || _ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
     const rows = j.data || [];
     // 오늘(KST) 집계 — 유효홀드는 시각 기준(만료시각 경과분은 만료로 분류)
     const now = Date.now();
@@ -4882,6 +5082,7 @@ async function _loadCampControl(campId) {
       </div>`;
     }).join("");
   } catch (e) {
+    if (manageSeq !== _ccManageSeq || _ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
     body.innerHTML = `<div style="padding:24px;text-align:center;color:#DC2626">불러오기 실패: ${String(e.message).replace(/</g, "&lt;")}</div>`;
   }
 }

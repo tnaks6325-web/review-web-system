@@ -64,7 +64,21 @@ ok('카드: D-일수 카운트다운 + 날짜 인지 오픈 라벨', /'D-' \+ da
 // ── 모집공고 로그 위젯 ──
 ok('로그: 참여형 카드에만 로그 버튼', /c\.participation_mode \? .*openCampControl/.test(recjs)
   && /fa-list-ul[\s\S]{0,80}로그/.test(recjs) && /🧾 로그/.test(cards) && !/📡 관제/.test(cards));
-ok('로그: 팝업 제목도 관제가 아니라 로그', /textContent = "🧾 로그 — "/.test(recjs));
+ok('로그: 기본 화면은 작업보드형 작업 로그', /await _ccSetMode\("log"\)/.test(recjs)
+  && /_ccMode === "log" \? "🗒 작업 로그"/.test(recjs)
+  && /activity-log\?kind=/.test(recjs) && /ccSearchLogs/.test(recjs));
+ok('로그: 작업보드와 같은 집계 서비스를 단일 출처로 사용', /tabActivityLog\(\{/.test(routes)
+  && /linked_sheet_id, linked_tab_name, linked_tab_gid/.test(routes)
+  && /LOG_KINDS\.filter\(k => k\.key !== 'inspect'\)/.test(routes));
+ok('로그: 유형 탭·커서형 과거 이력·부분 실패 안내를 지원', /result\.kinds/.test(recjs)
+  && /result\.nextBefore/.test(recjs) && /before=/.test(recjs) && /ccLogWarn/.test(recjs));
+ok('로그: 기존 구매확인·취소확정은 참여 관리로 보존', /"👥 참여 관리"/.test(recjs)
+  && /else await _loadCampControl\(_ccCampId\)/.test(recjs));
+ok('로그: 늦게 끝난 참여 관리 조회가 작업 로그 화면을 덮지 않는다', /_ccManageSeq/.test(recjs)
+  && /manageSeq !== _ccManageSeq \|\| _ccMode !== "manage"/.test(recjs)
+  && /String\(campId\) !== String\(_ccCampId\)/.test(recjs));
+ok('로그: 작업 로그 실패 응답도 참여 관리 전환 뒤 화면을 덮지 않는다',
+  (recjs.match(/seq !== _ccLogSeq \|\| _ccMode !== "log"/g) || []).length >= 4);
 ok('관제: 오늘 집계는 KST + 유효홀드 시각 기준', /kstDay/.test(recjs) && /Date\.parse\(r\.expires_at\) > now/.test(recjs));
 ok('관제: 수동확정 → POST admin/:id/confirm', /\/confirm`/.test(recjs) && /applicationId: appId/.test(recjs));
 ok('관제: 수동확정은 만료·취소 건만(진행중 확정 = 주문링크 결번 방지, 리뷰 #4)', /canConfirm = \(r\.status === "expired" \|\| r\.status === "cancelled"\)/.test(recjs));

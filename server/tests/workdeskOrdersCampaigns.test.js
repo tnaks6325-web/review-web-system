@@ -32,6 +32,7 @@ router.stack.filter(l => l.route).forEach(l => {
 });
 
 const READ = ['GET /work-orders/list', 'GET /campaigns/list', 'GET /campaigns/:id/applications',
+  'GET /campaigns/:id/activity-log',
   'GET /campaigns/:id/preview', 'GET /perm'];
 const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
   'POST /campaigns/create', 'PUT /campaigns/:id', 'POST /campaigns/:id/flags',
@@ -192,7 +193,7 @@ t('★ API 베이스만 갈아끼워 재사용(경로 하드코딩 제거)', () 
 t('Track B 네임스페이스가 admin 과 같은 모양(베이스 치환만으로 동작)', () => {
   const SRC = R('src/routes/trackB.routes.js');
   ['/campaigns/list', '/campaigns/create', '/campaigns/:id', '/campaigns/:id/flags',
-    '/campaigns/:id/status', '/campaigns/:id/applications', '/campaigns/:id/confirm',
+    '/campaigns/:id/status', '/campaigns/:id/applications', '/campaigns/:id/activity-log', '/campaigns/:id/confirm',
     '/campaigns/:id/dismiss'].forEach(p => {
     assert.ok(SRC.includes("'" + p + "'"), '경로 모양 불일치: ' + p);
   });
@@ -204,6 +205,11 @@ t('편집 계열은 기존 핸들러에 위임(로직 복제 0)', () => {
     '대상이 사라지면 부팅 때 터져야 한다(조용한 404 금지)');
   assert.ok(!/INSERT INTO recruit_campaigns/.test(SRC), 'Track B 가 공고를 직접 INSERT 하면 사본이다');
   assert.ok(!/INSERT INTO work_orders/.test(SRC), 'Track B 가 오더를 직접 INSERT 하면 사본이다');
+});
+t('★ 모집공고 작업 로그도 원본의 공유 집계 핸들러에 위임', () => {
+  const SRC = R('src/routes/trackB.routes.js');
+  assert.ok(/activityLog:\s*_delegate\(_campRoutes, 'get', '\/admin\/:id\/activity-log'\)/.test(SRC));
+  assert.ok(/_campHandlers\.activityLog\(req, res, next\)/.test(SRC));
 });
 
 /* ── 4) 프론트 배선 ────────────────────────────────────────── */
