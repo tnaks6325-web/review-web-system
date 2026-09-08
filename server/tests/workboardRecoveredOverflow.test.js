@@ -12,6 +12,7 @@ function valid(overrides = {}) {
   return {
     source: 'order_submit', recipient: '수취인', phone_digits: '01012345678', order_num: 'ORDER-1',
     mirror_status: 'queued', submitted_at: new Date(Date.now() - 60 * 60 * 1000), workboard_id: 'wb-1',
+    campaign_confirmed: true,
     ...overrides,
   };
 }
@@ -24,12 +25,19 @@ test('최근 48시간 큐 누락 복구 주문은 원장 조건을 모두 만족
   assert.equal(await canOverflow(db(valid()), 'os-1', { allowMissingQueueRecoveryOverflow: true, workboardId: 'wb-1' }), true);
 });
 
+test('서버가 확정한 최근 참여형 구매는 즉시 작업보드 행을 만들 수 있다', async () => {
+  assert.equal(await canOverflow(db(valid({ mirror_status: 'written' })), 'os-1', {
+    allowConfirmedCampaignOverflow: true, workboardId: 'wb-1',
+  }), true);
+});
+
 for (const [name, row, options] of [
   ['일반 큐', valid(), { workboardId: 'wb-1' }],
   ['48시간 초과', valid({ submitted_at: new Date(Date.now() - 49 * 60 * 60 * 1000) }), { allowMissingQueueRecoveryOverflow: true, workboardId: 'wb-1' }],
   ['주문번호 없음', valid({ order_num: null }), { allowMissingQueueRecoveryOverflow: true, workboardId: 'wb-1' }],
   ['다른 작업보드', valid(), { allowMissingQueueRecoveryOverflow: true, workboardId: 'wb-2' }],
   ['완료 상태 재시도', valid({ mirror_status: 'written' }), { allowMissingQueueRecoveryOverflow: true, workboardId: 'wb-1' }],
+  ['미확정 참여형 주문', valid({ campaign_confirmed: false }), { allowConfirmedCampaignOverflow: true, workboardId: 'wb-1' }],
 ]) {
   test(`${name}은 초과 슬롯을 만들지 않는다`, async () => {
     assert.equal(await canOverflow(db(row), 'os-1', options), false);

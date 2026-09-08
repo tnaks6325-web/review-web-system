@@ -850,7 +850,9 @@ async function _authoritativeHold(ctx) {
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
-              (lo.id IS NOT NULL) AS late_alive
+              (lo.id IS NOT NULL) AS late_alive,
+              so.mirror_status AS sub_mirror_status,
+              lo.mirror_status AS late_mirror_status
          FROM campaign_applications ca
          LEFT JOIN campaign_options co
                 ON co.campaign_id = ca.campaign_id AND co.opt_key = ca.option_key
@@ -886,8 +888,10 @@ async function _authoritativeHold(ctx) {
     //   링크조차 못 남기고 주문만 새로 생긴다(관제에 흔적 0인 고아 주문).
     if (rows[0].status === 'submitted' && rows[0].sub_alive) {
       ctx.doneOrderId = rows[0].order_submission_id; ctx.doneKind = 'confirmed';
+      ctx.doneMirrorStatus = rows[0].sub_mirror_status || '';
     } else if (rows[0].late_alive) {
       ctx.doneOrderId = rows[0].late_order_id;       ctx.doneKind = 'late';
+      ctx.doneMirrorStatus = rows[0].late_mirror_status || '';
     }
     return ctx;
   } catch (e) {
@@ -910,9 +914,12 @@ async function _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx }) {
   // linked_* 값은 Google Sheet 접근 정보가 아니라 기존 작업보드 행의 DB 내부 식별자다.
   // 이 조회는 DB만 읽으며, Google Sheet/GAS를 읽거나 쓰지 않는다.
   const { rows } = await pool.query(
-    `SELECT linked_sheet_id, linked_tab_name, linked_tab_gid
-       FROM recruit_campaigns
-      WHERE id = $1
+    `SELECT rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
+            COALESCE(rc.workboard_id, tc.workboard_id) AS workboard_id
+       FROM recruit_campaigns rc
+       LEFT JOIN tab_configs tc
+         ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
+      WHERE rc.id = $1
       LIMIT 1`,
     [holdCtx.campaignId]
   );
@@ -926,6 +933,7 @@ async function _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx }) {
       sheetId: campaign.linked_sheet_id,
       tabName: campaign.linked_tab_name,
       tabGid: campaign.linked_tab_gid || '',
+      workboardId: campaign.workboard_id || null,
     } : null,
   };
 }
@@ -1000,7 +1008,7 @@ router.post('/order', async (req, res, next) => {
       );
       return res.json({
         ok: true, alreadySubmitted: true, dbSaved: true, sheetsWritten: false, queued: false,
-        orderSubmissionId: holdCtx.doneOrderId, mirrorStatus: '',
+        orderSubmissionId: holdCtx.doneOrderId, mirrorStatus: holdCtx.doneMirrorStatus || '',
         captureSession,
         campaignHold: holdCtx.doneKind,     // 'confirmed' | 'late' — 부모 화면이 거짓말하지 않게
       });
@@ -1276,16 +1284,26 @@ router.post('/order', async (req, res, next) => {
           try {
             const ens = await require('../services/campaignWorktable.service')
               .ensureCampaignWorktable({ campaignId: holdCtx.campaignId, by: 'order-submit' });
-            if (ens && ens.ok) wt = { sheetId: ens.sheetId, tabName: ens.tabName, tabGid: ens.tabGid || '' };
+            if (ens && ens.ok) wt = { sheetId: ens.sheetId, tabName: ens.tabName, tabGid: ens.tabGid || '',
+              workboardId: ens.workboardId || null };
           } catch (ensErr) {
             logger.warn(`[submit/order] 공고 작업보드 확보 실패: ${ensErr.message}`);
           }
         }
+        if (wt && wt.workboardId) {
+          await pool.query(
+            `UPDATE order_submissions SET workboard_id=$2::uuid, updated_at=NOW()
+              WHERE id=$1::uuid AND workboard_id IS NULL`,
+            [ledger.orderSubmissionId, wt.workboardId]
+          );
+        }
         sheetlessDone = wt
           ? await require('../services/sheetlessOrder.service').writeOrderToWorktable({
               sheetId: wt.sheetId, tabName: wt.tabName, tabGid: wt.tabGid,
+              workboardId: wt.workboardId || null,
               orderData, orderSubmissionId: ledger.orderSubmissionId,
               loginPhone8: loginPhone8 || '', loginName: loginName || '',
+              allowConfirmedCampaignOverflow: true,
             })
           : { ok: false, reason: 'no_worktable_mapping' };
         if (wt) captureTarget = wt;

@@ -39,10 +39,14 @@ test('server uses a DB-only campaign scope and writes the verified order to the 
   assert.ok(/if \(!orderScope\) \{[\s\S]*?참여 문맥/.test(submit), 'anonymous sheetless submission must remain blocked');
   assert.ok(/if \(skipSheetMirror\) \{[\s\S]*?mirror_status = 'written'/.test(ledger),
     'DB-only submission must finish without row claim or sync queue');
-  assert.ok(/linked_sheet_id, linked_tab_name, linked_tab_gid/.test(submit),
+  assert.ok(/linked_sheet_id, rc\.linked_tab_name, rc\.linked_tab_gid/.test(submit),
     'verified campaign must resolve its DB worktable key');
+  assert.ok(/COALESCE\(rc\.workboard_id, tc\.workboard_id\) AS workboard_id/.test(submit),
+    'verified campaign must resolve the authoritative workboard id');
   assert.ok(/orderScope\.worktable/.test(submit) && /writeOrderToWorktable/.test(submit),
     'DB-only submission must be written to the worktable, not only the order ledger');
+  assert.ok(/workboardId: wt\.workboardId \|\| null/.test(submit) && /allowConfirmedCampaignOverflow: true/.test(submit),
+    'confirmed campaign purchase must be allowed to converge even when prepared slots drifted');
 });
 
 test('sheetless worktable write failure is persisted instead of leaving the ledger pending', () => {
@@ -54,6 +58,21 @@ test('sheetless worktable write failure is persisted instead of leaving the ledg
     'failed sheetless worktable writes must persist failed status and the reason');
   assert.ok(/무시트 실패상태 저장 실패\(원장 저장은 완료\)/.test(branch),
     'a secondary status-write failure must not turn a saved submission into a client-visible failure');
+});
+
+test('client completion screen does not hide a workboard mirror failure', () => {
+  const body = search.slice(search.indexOf('async function submitOrderForm'), search.indexOf('function _renderCaptureChecklist'));
+  assert.ok(/mirrorStatuses\.some\(s => s === 'failed' \|\| s === 'pending_no_row'\)/.test(body),
+    'completion screen must consume the mirror status returned by the server');
+  assert.ok(/작업보드 반영 확인이 필요합니다/.test(body),
+    'mirror failure must show a visible warning instead of normal submission copy');
+});
+
+test('idempotent retry returns the original order mirror status', () => {
+  assert.ok(/so\.mirror_status AS sub_mirror_status/.test(submit) && /lo\.mirror_status AS late_mirror_status/.test(submit),
+    'hold lookup must read the durable mirror status without another round trip');
+  assert.ok(/mirrorStatus: holdCtx\.doneMirrorStatus \|\| ''/.test(submit),
+    'already-submitted responses must preserve failed or pending mirror status');
 });
 
 test('approved workboard queue targets always enqueue outside the campaign-only branch', () => {
