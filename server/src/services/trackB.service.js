@@ -22,6 +22,7 @@ const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColum
 const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 const { formatDepositStamp } = require('../utils/depositStamp');   // 입금 칸 표기 단일 출처(자동 반영과 같은 'M/D')
 const { resolveWorkManager } = require('../utils/workManager');   // 담당자 판정 단일 출처(065 + 회차 #18 — payment.service 와 한 벌)
+const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
 
 // ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
 //   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
@@ -2620,8 +2621,9 @@ function _isAdvertiserRestrictedHeader(header) {
 }
 
 function _isAdvertiserUserIdHeader(header) {
-  const key = String(header == null ? '' : header).replace(/\s+/g, '').toLowerCase();
-  return /아이디|userid|구매채널id|coupangid|naverid/.test(key);
+  // 주문원장에 값을 쓰는 것과 같은 분류를 사용한다. 일반 '상품아이디'·'비고(아이디확인)'는
+  // 구매채널 ID 칸이 아니므로 주문값을 덧씌우거나 실제 아이디 열을 숨기면 안 된다.
+  return _idColIndices([header]).length === 1;
 }
 
 function _isAdvertiserPhoneHeader(header) {
@@ -2680,6 +2682,12 @@ function _advertiserOrderInfoHeaders(headers, orderMap) {
   if (!current.some(_isAdvertiserUserIdHeader) && orders.some(order => String(order && order.userId || '').trim())) add.push('아이디');
   if (!current.some(_isAdvertiserPhoneHeader) && orders.some(order => String(order && order.phone || '').trim())) add.push('전화번호');
   return add;
+}
+
+function _sameSheetRow(a, b) {
+  const left = String(a == null ? '' : a).trim();
+  const right = String(b == null ? '' : b).trim();
+  return !!left && left === right;
 }
 
 // ── 리뷰 이미지(행별) — 업체 뷰어 미리보기 패널용. 읽기 전용·Drive 무접촉(파일ID만 반환). ──
@@ -3293,10 +3301,16 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     const orderIds = [...new Set(roster.map(r => r.order_submission_id).filter(Boolean).map(String))];
     if (orderIds.length) {
       const { rows: ords } = await db.query(
-        `SELECT id, price, user_id AS "userId", phone
+        `SELECT id, price, user_id AS "userId", phone, sheet_row AS "sheetRow"
            FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
         [orderIds]).catch(() => ({ rows: [] }));
-      ordMap = new Map(ords.map(o => [String(o.id), { price: o.price, userId: o.userId, phone: o.phone }]));
+      // 과거 잘못 연결된 order_submission_id가 남아 있을 수 있다. 주문이 실제 기록된
+      // 물리행(sheet_row)까지 일치할 때만 업체에 주문 확인 정보를 제공한다.
+      const matched = ords.filter(o => roster.some(r =>
+        String(r.order_submission_id || '') === String(o.id) && _sameSheetRow(r.seq, o.sheetRow)));
+      ordMap = new Map(matched.map(o => [String(o.id), {
+        price: o.price, userId: o.userId, phone: o.phone, sheetRow: o.sheetRow,
+      }]));
     }
   }
   // 시트형 그리드용: 시트 실제 헤더 순서(raw_sheet_tabs.detected_headers = 주문원장이 쓰는 열 순서 원본).
@@ -6138,6 +6152,8 @@ module.exports = {
   __advertiserHeaderCandidatesForTest: _advertiserHeaderCandidates,
   __advertiserColumnValueForTest: _advertiserColumnValue,
   __advertiserOrderInfoHeadersForTest: _advertiserOrderInfoHeaders,
+  __isAdvertiserUserIdHeaderForTest: _isAdvertiserUserIdHeader,
+  __sameSheetRowForTest: _sameSheetRow,
   // 회귀가드 전용 — tabStatsMap 의 30초 프로세스 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
   //   운영 코드에서 부르지 말 것: 캐시는 "모든 내부 사용자의 홈 진입 경로"에 붙은 비용 절감 장치다.
   __resetTabStatsCacheForTest() { _tabStatsCache = { at: 0, map: null }; },

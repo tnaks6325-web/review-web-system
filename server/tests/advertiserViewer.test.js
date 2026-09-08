@@ -249,6 +249,8 @@ async function run() {
   const advHeaderCandidates = svc.__advertiserHeaderCandidatesForTest;
   const advColumnValue = svc.__advertiserColumnValueForTest;
   const advOrderInfoHeaders = svc.__advertiserOrderInfoHeadersForTest;
+  const isAdvertiserUserIdHeader = svc.__isAdvertiserUserIdHeaderForTest;
+  const sameSheetRow = svc.__sameSheetRowForTest;
   ok('_advertiserColumns 가 테스트로 노출돼 있다', typeof advCols === 'function');
   ok('광고주 헤더 후보 보완기가 테스트로 노출돼 있다', typeof advHeaderCandidates === 'function');
   {
@@ -298,6 +300,10 @@ async function run() {
     ok('원본 열에 없는 아이디·전화번호만 추가해 중복 열을 막는다',
       JSON.stringify(advOrderInfoHeaders(['연락처'], new Map([['o1', orderInfo]]))) === JSON.stringify(['아이디']) &&
       JSON.stringify(advOrderInfoHeaders(['구매채널ID'], new Map([['o1', orderInfo]]))) === JSON.stringify(['전화번호']));
+    ok('상품아이디·비고 아이디확인 같은 일반 열은 구매채널 아이디 열로 오인하지 않는다',
+      isAdvertiserUserIdHeader('쿠팡id') && !isAdvertiserUserIdHeader('상품아이디') && !isAdvertiserUserIdHeader('비고(아이디확인)'));
+    ok('연결 주문 정보는 주문의 실제 시트 행과 작업행이 일치할 때만 사용한다',
+      sameSheetRow(42, '42') && !sameSheetRow(42, '43') && !sameSheetRow(42, null));
     const fromCellEdit = advHeaderCandidates(
       ['\uBC88\uD638', '\uC218\uCDE8\uC778', '\uCFE0\uD321id', '\uC5F0\uB77D\uCC98', '\uC8FC\uC18C'],
       [],
