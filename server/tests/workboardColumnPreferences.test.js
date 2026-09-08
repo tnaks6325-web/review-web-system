@@ -30,9 +30,15 @@ ok('너비 키·최소값·상한을 서버에서 검증한다',
 ok('클라이언트는 서버값을 우선하고 오프라인에서는 기존 로컬값으로 폴백한다',
   /function _savedColWidths\(\)/.test(client) &&
   /_serverColWidths === null \? _readLocalColWidths\(\) : _serverColWidths/.test(client));
-ok('드래그 저장과 초기화 모두 서버에 반영한다',
-  /void _saveServerColWidths\(data\)/.test(client) &&
-  /void _saveServerColWidths\(\{\}\)/.test(client));
+ok('드래그 저장과 초기화 모두 순서 보장 서버 큐에 반영한다',
+  /void _queueServerColWidths\(data\)/.test(client) &&
+  /void _queueServerColWidths\(\{\}\)/.test(client) &&
+  /version !== _colWidthsSaveVersion/.test(client));
+ok('실패한 로컬 변경을 보존하고 재시도한다',
+  /COL_WIDTH_PENDING_LS_KEY/.test(client) && /const pending = _readPendingColWidths\(\)/.test(client) &&
+  /void _queueServerColWidths\(pending\)/.test(client));
+ok('환경설정 조회는 제한 시간 뒤 로컬 폴백으로 복귀한다',
+  /setTimeout\(\(\) => controller\.abort\(\), 4000\)/.test(client));
 ok('대시보드 첫 렌더링 전 서버 설정을 불러온다',
   /_loadServerColWidths\(\)\.finally\(\(\) => loadAdminDashboard\(\)\)/.test(client));
 
