@@ -326,17 +326,36 @@ async function writeOrderToWorktable({
       }
       if (!cur.length) {
         ({ rows: cur } = await client.query(
-          `SELECT id, seq, option_text, row_json FROM campaign_participants
-            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
-              AND ($3::uuid IS NULL OR workboard_id = $3)
-              AND order_submission_id IS NULL
-              AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
-              AND ($4 = '' OR NULLIF(btrim(COALESCE(option_text, '')), '') IS NULL OR option_text = $4)
-            ORDER BY CASE WHEN option_text = $4 THEN 0 ELSE 1 END, seq
+          `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
+            WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
+              AND ($3::uuid IS NULL OR cp.workboard_id = $3)
+              AND cp.order_submission_id IS NULL
+              AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
+              AND (
+                ($4 <> '' AND (NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL OR cp.option_text = $4))
+                OR
+                ($4 = '' AND (
+                  NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL
+                  OR NOT EXISTS (
+                    SELECT 1
+                      FROM order_submissions scope_os
+                      JOIN campaign_applications scope_ca ON scope_ca.id = scope_os.campaign_application_id
+                      JOIN campaign_options scope_co ON scope_co.campaign_id = scope_ca.campaign_id
+                     WHERE scope_os.id = $5::uuid
+                       AND COALESCE(scope_co.unit_kind, 'option') <> 'product'
+                       AND scope_co.opt_key = cp.option_text
+                  )
+                ))
+              )
+            ORDER BY CASE
+                       WHEN $4 <> '' AND cp.option_text = $4 THEN 0
+                       WHEN $4 = '' AND NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL THEN 0
+                       ELSE 1
+                     END, cp.seq
             FOR UPDATE SKIP LOCKED
-            LIMIT 1`, [sheetId, tabName, workboardId, scheduledOptionKey]));
+            LIMIT 1`, [sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId]));
       }
       if (!cur.length) {
         /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문과

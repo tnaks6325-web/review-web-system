@@ -164,7 +164,7 @@ function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', se
     ledgerSrc.indexOf('findSameDayDuplicateInTx(client, sameDayDuplicateGuard)') < ledgerSrc.indexOf('findEquivalentOrderInTx(client, sameDayDuplicateGuard)'));
   const slSrc = fs.readFileSync(path.join(__dirname, '../src/services/sheetlessOrder.service.js'), 'utf8');
   ok('중복 판정은 빈 슬롯 선점 **앞**에 있다',
-    slSrc.indexOf('JOIN order_submissions os2') < slSrc.indexOf('AND order_submission_id IS NULL'));
+    slSrc.indexOf('JOIN order_submissions os2') < slSrc.indexOf('AND cp.order_submission_id IS NULL'));
   ok('SQL 과 JS 의 숫자 정규화 규칙이 같다', /function _digits\(v\) \{ return String\(v == null \? '' : v\)\.replace\(\/\\D\/g, ''\); \}/.test(slSrc));
 
   console.log('\n[D] 중복 줄 정리 — 안전 규칙이 실제로 발동한다');

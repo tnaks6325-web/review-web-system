@@ -104,7 +104,9 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
   ok('큐 원장을 다시 읽은 뒤에 옵션 키를 계산한다',
     /orderData = ledgerSvc\._osRowToOrderData\(freshOrders\[0\]\);[\s\S]{0,180}scheduledOptionKey =/.test(sl));
   ok('슬롯 구분과 옵션 칸 기록은 옵션 키만 쓴다',
-    /const optText = selectedOptKey;/.test(sl) && /workboardId, scheduledOptionKey\]\)\);/.test(sl));
+    /const optText = selectedOptKey;/.test(sl) && /workboardId, scheduledOptionKey, orderSubmissionId\]\)\);/.test(sl));
+  ok('상품형은 실제 옵션 키로 예약된 슬롯만 제외한다',
+    /NOT EXISTS \([\s\S]{0,500}scope_co\.unit_kind[\s\S]{0,180}scope_co\.opt_key = cp\.option_text/.test(sl));
 
   const create = read('src/services/worktableCreate.service.js');
   const preview = read('src/routes/trackB.routes.js');

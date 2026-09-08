@@ -66,6 +66,9 @@ async function run() {
     const claim = seen.find(c => /FOR UPDATE SKIP LOCKED/.test(c.text));
     assert.ok(claim, '빈 슬롯 선점 쿼리가 실행돼야 한다');
     assert.equal(claim.params[3], '', '상품명은 슬롯 선택 파라미터로 전달하면 안 된다');
+    assert.equal(claim.params[4], '00000000-0000-0000-0000-000000000001', '실제 옵션 예약 여부는 주문의 공고 범위로 판정해야 한다');
+    assert.match(claim.text, /NOT EXISTS/, '상품형은 옵션 전용 슬롯을 제외해야 한다');
+    assert.match(claim.text, /scope_co\.opt_key = cp\.option_text/, '상품명이 아니라 실제 옵션 키만 비교해야 한다');
 
     const update = seen.find(c => /^UPDATE campaign_participants/.test(c.text));
     assert.ok(update, '선점한 슬롯을 갱신해야 한다');
