@@ -19,7 +19,7 @@ const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
-const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
+const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey, filledSql: _filledSql } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 const { formatDepositStamp } = require('../utils/depositStamp');   // 입금 칸 표기 단일 출처(자동 반영과 같은 'M/D')
 const { resolveWorkManager } = require('../utils/workManager');   // 담당자 판정 단일 출처(065 + 회차 #18 — payment.service 와 한 벌)
 const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
@@ -44,6 +44,13 @@ async function _rebuildWorkdeskLedgers(args) {
 
 function _phone8(v) { const d = String(v == null ? '' : v).replace(/[^0-9]/g, ''); return d.length >= 8 ? d.slice(-8) : ''; }
 function _norm(v) { return String(v == null ? '' : v).trim().replace(/\s+/g, ''); }
+// 작업보드 상태 셀의 "값 있음" 판정. Sheets 체크박스 미체크는 boolean false로 보존되며,
+// PostgreSQL JSONB ->> 에서는 문자열 'false'가 되므로 두 표현을 모두 빈 상태로 본다.
+function _hasWorkboardStatusValue(v) {
+  if (v == null || v === false) return false;
+  const s = String(v).trim();
+  return s !== '' && s.toLowerCase() !== 'false';
+}
 function _mask(p8) { const s = String(p8 || ''); return s.length >= 4 ? '••••' + s.slice(-4) : (s || ''); }
 // 이름/수취인 부분 마스킹(광고주 외부 뷰): 첫 글자만 노출 + 나머지 ○(식별성 유지 + PII 보호). 1글자·공란은 그대로.
 function _maskName(n) { const s = String(n == null ? '' : n).trim(); if (s.length <= 1) return s; return s[0] + '○'.repeat(Math.min(s.length - 1, 4)); }
@@ -665,7 +672,7 @@ async function listAdvertisersWithOwnership() {
 
 // ══ 마감자료 검수 대기 판정 — ★★ 판정 단일 출처 ══════════════════════════════════════
 //   "이제 마감해도 되는 작업" = 인원 충족 + 전건 제출 + 전건 입금(088 사용자 확정 ㉠의 마감 후보와 **같은 규칙**).
-//   ★★ 재료는 홈 작업목록과 같은 tabStatsMap(index_master + review_index PAID) 하나다 —
+//   ★★ 재료는 홈 작업목록과 같은 tabStatsMap(index_master + 작업보드 실제 입금 셀) 하나다 —
 //     업체관리가 campaign_participants(bTotal/bSub/bPaid)로 따로 세면 **같은 작업이 홈에서는 마감 후보,
 //     업체관리에서는 아님**으로 갈린다(레포가 반복해 밟은 화면 간 불일치).
 //   ★ 통계가 없으면 판정하지 않는다(false) — 모르면 제안하지 않는다. 제안 전용이라 자동 처리는 없다.
@@ -974,6 +981,11 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
        ) submit_header ON TRUE
        LEFT JOIN LATERAL (
+         SELECT NULLIF(MAX(NULLIF(BTRIM(ri.submit_col2), '')), '') AS paid_header
+           FROM review_index ri
+          WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
+       ) paid_header ON TRUE
+       LEFT JOIN LATERAL (
          /* workdeskTab과 같은 앵커 규율:
             - 현재 앵커의 셀 편집이 원본 셀보다 우선
             - 주문/identity 앵커가 중복이면 어떤 행에도 적용하지 않음
@@ -991,7 +1003,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                        ELSE NULL END AS anchor_value
              FROM campaign_participants cp
             WHERE cp.sheet_id = t.sheet_id AND (cp.tab_gid = t.tab_gid OR cp.tab_name = t.tab_name)
-              AND cp.deleted_at IS NULL AND cp.active = TRUE
+              AND cp.deleted_at IS NULL AND cp.active = TRUE AND cp.held_at IS NULL
          ), anchored_rows AS (
            SELECT ar.*, COUNT(*) OVER (PARTITION BY ar.anchor_type, ar.anchor_value) AS anchor_count
              FROM active_rows ar
@@ -1009,7 +1021,20 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                                    ELSE manual_edit.value_text END END,
                     cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
                   )), '') IS NOT NULL)::int AS submitted,
-                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.is_paid)::int AS paid
+                /* 화면용 입금완료 = 원장 플래그가 아니라 작업보드의 실제 입금 셀.
+                   원장·정산·이체 상태(cp.is_paid)는 이 표시 집계와 분리해 그대로 둔다. */
+                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.held_at IS NULL
+                  AND ${_filledSql('cp')}
+                  AND NULLIF(BTRIM(COALESCE(
+                    CASE WHEN cp.anchor_type IS NOT NULL
+                              AND (cp.anchor_type = 'manual' OR cp.anchor_count = 1)
+                         THEN CASE WHEN current_paid_edit.kind = 'bool' THEN CASE WHEN current_paid_edit.value_bool THEN 'O' ELSE '' END
+                                   ELSE current_paid_edit.value_text END END,
+                    CASE WHEN cp.anchor_type IS NOT NULL AND cp.anchor_type <> 'manual' AND cp.anchor_count = 1
+                         THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
+                                   ELSE manual_paid_edit.value_text END END,
+                    cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                  )), '') !~* '^false$')::int AS paid
            FROM anchored_rows cp
            LEFT JOIN LATERAL (
              SELECT e.kind, e.value_bool, e.value_text
@@ -1027,6 +1052,22 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                 AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
               LIMIT 1
            ) manual_edit ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT e.kind, e.value_bool, e.value_text
+               FROM participant_edits e
+              WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
+                AND e.anchor_type = cp.anchor_type AND e.anchor_value = cp.anchor_value
+                AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+              LIMIT 1
+           ) current_paid_edit ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT e.kind, e.value_bool, e.value_text
+               FROM participant_edits e
+              WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
+                AND e.anchor_type = 'manual' AND e.anchor_value = cp.id::text
+                AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+              LIMIT 1
+           ) manual_paid_edit ON TRUE
        ) cnt ON TRUE
        LEFT JOIN tab_configs tc ON tc.sheet_id = t.sheet_id AND tc.tab_name = t.tab_name
        LEFT JOIN LATERAL (
@@ -3378,6 +3419,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         .statusHeaderForTab(db, { sheetId, tabName, kind: 'submit' }) || '').trim();
     } catch (_) { /* 헤더를 모르면 값 없는 것으로 처리한다 — 플래그로 추측하지 않는다. */ }
   }
+  // 입금완료 표시도 작업보드가 실제로 쓰는 입금 열을 단일 출처로 삼는다.
+  // 행별 submit_col2를 우선하고, 수동/레거시 행만 탭 단위 감지 헤더로 폴백한다.
+  let tabPaidHeader = String((roster.find(r => String(r.submit_col2 || '').trim()) || {}).submit_col2 || '').trim();
+  if (!tabPaidHeader) {
+    try {
+      tabPaidHeader = String(await require('./sheetlessStatus.service')
+        .statusHeaderForTab(db, { sheetId, tabName, kind: 'paid' }) || '').trim();
+    } catch (_) { /* 헤더를 모르면 원장 플래그로 추측하지 않고 0건으로 처리한다. */ }
+  }
   /*
    * 진행 현황의 "제출완료"는 제출 상태 플래그가 아니라, 사용자가 작업표에서 실제로
    * 확인하는 리뷰제출 칸의 값으로 센다. 플래그/인덱스는 재투영 전에는 뒤처질 수 있어
@@ -3387,6 +3437,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
    * 리뷰제출 열은 같은 원본을 보며, 제출 상태 플래그는 기존 검수·정산 흐름에만 남긴다.
    */
   let reviewSubmitCellCount = 0;
+  let paymentCellCount = 0;
   // 진행 현황의 금액도 "제출완료"와 정확히 같은 작업표 리뷰제출 칸을 기준으로 한다.
   // is_submitted 플래그만 보면 재투영 전 카드 건수와 표의 제출 칸이 다시 갈릴 수 있다.
   let executionAmount = 0;
@@ -3435,6 +3486,12 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       ? pick('col:' + submitHeader, (r.row_json && r.row_json[submitHeader]))
       : '';
     const reviewSubmitted = !!String(submitCellValue == null ? '' : submitCellValue).trim();
+    const paidHeader = String(r.submit_col2 || tabPaidHeader || '').trim();
+    const paidCellValue = paidHeader
+      ? pick('col:' + paidHeader, (r.row_json && r.row_json[paidHeader]))
+      : '';
+    // 삭제·보관 행은 roster 쿼리에서 빠지고, 준비만 된 빈 슬롯은 filled 판정으로 제외한다.
+    if (syn.filled && _hasWorkboardStatusValue(paidCellValue)) paymentCellCount++;
     if (reviewSubmitted) {
       reviewSubmitCellCount++;
       /* 주문이 제출된 행만 집행으로 본다. 원장 금액이 비어 있는 레거시 행은 실제 작업표의
@@ -3578,7 +3635,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     filled: filledCount,
     /* 실제 작업표의 리뷰제출 칸에 값이 있는 행 수. `is_submitted`는 이 카드 기준이 아니다. */
     submitted: reviewSubmitCellCount,
-    paid: out.filter(r => r.paid).length,
+    /* 화면용 입금완료는 작업보드의 실제 입금 셀 수. syn.paid/is_paid는 정산·이체용으로 유지한다. */
+    paid: paymentCellCount,
     // 하위 호환: 주문 행 전체의 결제금액 합계(주문 삭제 미리보기 등 기존 소비처가 사용).
     paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
     // 누적집행 = 실제 작업표의 리뷰제출 칸이 채워진 주문의 결제금액 합계.
@@ -5430,7 +5488,7 @@ async function tabStatsMap({ force = false } = {}) {
                  시트 기반 탭의 index_master.row_count 는 이미 **이름 있는 행만** 세므로 그대로 채움 수다. */
               CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.filled_count, 0) ELSE im.row_count END AS "filledCount",
               CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.submitted_count, 0) ELSE im.submitted_count END AS "submittedCount",
-              COALESCE(paid.paid_count, 0)::int AS "paidCount",
+              COALESCE(cp.paid_count, 0)::int AS "paidCount",
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
          FROM tab_configs tc
          LEFT JOIN LATERAL (SELECT w.work_manager FROM work_orders w
@@ -5440,18 +5498,60 @@ async function tabStatsMap({ force = false } = {}) {
                               ORDER BY w.created_at DESC LIMIT 1) wo ON TRUE
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
          LEFT JOIN LATERAL (
-           SELECT COUNT(*) FILTER (WHERE active AND deleted_at IS NULL)::int AS total_count,
-                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND is_submitted)::int AS submitted_count,
-                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND ${require('../utils/rowNumbering').filledSql('cp')})::int AS filled_count
-             FROM campaign_participants cp
-            WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
+           SELECT NULLIF(MAX(NULLIF(BTRIM(ri.submit_col2), '')), '') AS paid_header
+             FROM review_index ri
+            WHERE ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+         ) paid_header ON TRUE
+         LEFT JOIN LATERAL (
+           WITH active_rows AS (
+             SELECT p.*,
+                    CASE WHEN p.order_submission_id IS NOT NULL THEN 'order'
+                         WHEN p.source = 'manual' THEN 'manual'
+                         WHEN NULLIF(BTRIM(p.identity_key), '') IS NOT NULL THEN 'identity'
+                         ELSE NULL END AS anchor_type,
+                    CASE WHEN p.order_submission_id IS NOT NULL THEN p.order_submission_id::text
+                         WHEN p.source = 'manual' THEN p.id::text
+                         WHEN NULLIF(BTRIM(p.identity_key), '') IS NOT NULL THEN p.identity_key
+                         ELSE NULL END AS anchor_value
+               FROM campaign_participants p
+              WHERE p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
+                AND p.active = TRUE AND p.deleted_at IS NULL AND p.held_at IS NULL
+           ), anchored_rows AS (
+             SELECT ar.*, COUNT(*) OVER (PARTITION BY ar.anchor_type, ar.anchor_value) AS anchor_count
+               FROM active_rows ar
+           )
+           SELECT COUNT(*)::int AS total_count,
+                  COUNT(*) FILTER (WHERE cp.is_submitted)::int AS submitted_count,
+                  COUNT(*) FILTER (WHERE ${_filledSql('cp')})::int AS filled_count,
+                  COUNT(*) FILTER (WHERE ${_filledSql('cp')}
+                    AND NULLIF(BTRIM(COALESCE(
+                      CASE WHEN cp.anchor_type IS NOT NULL
+                                AND (cp.anchor_type = 'manual' OR cp.anchor_count = 1)
+                           THEN CASE WHEN current_paid_edit.kind = 'bool' THEN CASE WHEN current_paid_edit.value_bool THEN 'O' ELSE '' END
+                                     ELSE current_paid_edit.value_text END END,
+                      CASE WHEN cp.anchor_type IS NOT NULL AND cp.anchor_type <> 'manual' AND cp.anchor_count = 1
+                           THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
+                                     ELSE manual_paid_edit.value_text END END,
+                      cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                    )), '') !~* '^false$')::int AS paid_count
+             FROM anchored_rows cp
+             LEFT JOIN LATERAL (
+               SELECT e.kind, e.value_bool, e.value_text
+                 FROM participant_edits e
+                WHERE e.sheet_id = tc.sheet_id AND e.tab_name = tc.tab_name AND e.reverted_at IS NULL
+                  AND e.anchor_type = cp.anchor_type AND e.anchor_value = cp.anchor_value
+                  AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                LIMIT 1
+             ) current_paid_edit ON TRUE
+             LEFT JOIN LATERAL (
+               SELECT e.kind, e.value_bool, e.value_text
+                 FROM participant_edits e
+                WHERE e.sheet_id = tc.sheet_id AND e.tab_name = tc.tab_name AND e.reverted_at IS NULL
+                  AND e.anchor_type = 'manual' AND e.anchor_value = cp.id::text
+                  AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                LIMIT 1
+             ) manual_paid_edit ON TRUE
          ) cp ON TRUE
-         -- ★ WHERE 로 걸러 집계 대상을 줄인다(FILTER 만 쓰면 review_index 전 행을 훑는다). 결과는 동일 —
-         --   입금 0건 탭은 조인이 안 붙고 아래 COALESCE 가 0 으로 받는다. 이 쿼리는 관리자 화면 하나가
-         --   아니라 **모든 내부 사용자의 홈 진입 경로**에 붙으므로 비용 차이가 그대로 체감된다.
-         LEFT JOIN (SELECT sheet_id, tab_name, COUNT(*) AS paid_count
-                      FROM review_index WHERE is_submitted2 = 'PAID' GROUP BY sheet_id, tab_name) paid
-           ON paid.sheet_id = tc.sheet_id AND paid.tab_name = tc.tab_name
          -- 마감 확인창의 "마감자료 생성됨/미생성" 표시 재료(기존 정산 원장 재사용 — 신규 엔드포인트 0).
          --   ★ LATERAL LIMIT 1 = 행 곱증식 없음(레포 관용구). 미생성이면 NULL → 화면이 경고만 띄운다(하드블록 아님).
          LEFT JOIN LATERAL (SELECT c.closed_date, c.row_count FROM trackb_tab_closeouts c

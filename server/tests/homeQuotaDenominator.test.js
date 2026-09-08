@@ -36,6 +36,10 @@ ok('filledSql 을 SQL 에 태운다(사본 금지)', /filledSql\('cp'\)/.test(tr
 ok('filled_count 를 무시트 분기에서 쓴다', /THEN COALESCE\(cp\.filled_count, 0\)[\s\S]{0,40}AS "filledCount"/.test(trackB));
 ok('맵에 filled 를 싣는다', /filled: Number\.isFinite\(\+r\.filledCount\)/.test(trackB));
 ok('total(준비된 줄)은 그대로 남긴다(정보 손실 0)', /total: Number\.isFinite\(\+r\.rowCount\)/.test(trackB));
+ok('입금완료도 review_index 상태값이 아니라 작업보드 submit_col2 실제 셀을 센다',
+  /cp\.row_json ->> COALESCE\(NULLIF\(BTRIM\(cp\.submit_col2\), ''\), paid_header\.paid_header\)/.test(trackB)
+  && /COALESCE\(cp\.paid_count, 0\)::int AS "paidCount"/.test(trackB)
+  && !/FROM review_index WHERE is_submitted2 = 'PAID' GROUP BY sheet_id, tab_name/.test(trackB));
 
 console.log('\n2. tabCampaignsMap — 총건수는 displayRecruitTotal 단일 출처');
 ok('displayRecruitTotal 을 태운다', /displayRecruitTotal\(r\.recruit_total, _wo && _wo\.recruit_count\)/.test(trackB));

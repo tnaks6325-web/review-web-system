@@ -248,8 +248,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('통계는 읽기 전용(SELECT 만)', /FROM tab_configs tc/.test(finBlock) && !/UPDATE tab_configs/.test(finBlock));
   t('마감자료 표시는 기존 정산 원장 재사용(신규 저장소 0)', /trackb_tab_closeouts/.test(finBlock));
   t('★ LATERAL LIMIT 1 — 마감자료가 여러 건이어도 행 곱증식 없음', /LATERAL[\s\S]{0,220}LIMIT 1/.test(finBlock));
-  t('★ 입금 집계는 WHERE 로 대상을 줄인다(홈 진입마다 review_index 전 행을 훑지 않는다)',
-    /FROM review_index WHERE is_submitted2 = 'PAID' GROUP BY/.test(finBlock));
+  t('★ 입금 집계는 탭별 LATERAL 범위로 제한한다(홈 진입마다 전체 원장을 훑지 않는다)',
+    /FROM campaign_participants p[\s\S]{0,180}p\.sheet_id = tc\.sheet_id AND p\.tab_name = tc\.tab_name/.test(finBlock)
+    && /p\.active = TRUE AND p\.deleted_at IS NULL AND p\.held_at IS NULL/.test(finBlock));
   t('마감/복귀는 감사 로그를 남긴다(같은 파일의 다른 전사 공통 쓰기와 같은 관례)',
     /logger\.info\(`\[trackB\] 작업 마감/.test(finBlock) && /logger\.info\(`\[trackB\] 작업 진행중 복귀/.test(finBlock));
   // ★★ 이 맵은 전 탭 무스코프 — 응답에 통째로 실으면 전 업체 담당자·캠페인명이 staff 에게 샌다.
