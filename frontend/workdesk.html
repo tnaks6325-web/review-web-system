@@ -923,6 +923,8 @@
   .tltop{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
   .tlwhen{font-size:11.3px;color:var(--muted);flex:none;font-variant-numeric:tabular-nums}
   .tlmsg{font-size:12.8px;font-weight:600}
+  .tlstamp{font-size:11.4px;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
+  .tlstamp b{color:var(--accent-deep);font-weight:750}
   .tlwho{font-size:11.4px;color:var(--muted);margin-top:2px}
   /* 작업 로그의 검수는 아직 손볼 것만 — 완료 항목은 10초 동안만 남겨 즉시 처리 결과를 확인시킨다. */
   .tlins{display:grid;gap:10px}.tlicard{display:grid;grid-template-columns:108px minmax(0,1fr);gap:11px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
@@ -9749,9 +9751,31 @@ function _riAfterAction(fileId,resolution){ if(STATE.riContext==='tablog') retur
 function _riAfterReinspect(){ if(STATE.riContext==='tablog') return _tlLoadInspect(); _loadInspect(); }
 
 /** 줄 마크업 단일 출처 — 첫 그리기·이어 붙이기 공용. */
+function _tlOverdueText(v){
+  let n=Math.max(0,Math.floor(Number(v)||0));
+  const d=Math.floor(n/86400); n%=86400;
+  const h=Math.floor(n/3600); n%=3600;
+  const m=Math.floor(n/60), s=n%60, a=[];
+  if(d)a.push(`${d}일`); if(h)a.push(`${h}시간`); if(m)a.push(`${m}분`);
+  if(s||!a.length)a.push(`${s}초`);
+  return a.join(' ');
+}
+function _tlSubmittedTs(v){
+  if(!v)return '';
+  try{return new Date(v).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});}
+  catch(_){return _fmtTs(v);}
+}
+function _tlSubmissionStamp(e){
+  if(!e||e.kind!=='order'||!e.submittedAt)return '';
+  const late=e.submissionType==='late';
+  const overdue=late ? (e.overdueSeconds==null ? '초과시간 확인 불가' : `${_tlOverdueText(e.overdueSeconds)} 초과`) : '';
+  return `<div class="tlstamp"><b>${late?'주문제출':'제출시각'}</b> ${esc(_tlSubmittedTs(e.submittedAt))}`
+    +(overdue?` · <b>${esc(overdue)}</b>`:'')+`</div>`;
+}
 function _tlEvHtml(e){
   return `<div class="tlev k-${esc(e.kind)}"><div class="tltop"><span class="tlwhen">${esc(_fmtTs(e.at))}</span>`
     +`<span class="tlmsg">${esc(e.message)}</span></div>`
+    +_tlSubmissionStamp(e)
     +(e.who?`<div class="tlwho">${esc(e.who)}</div>`:'')+`</div>`;
 }
 /** 한 묶음 받아오기 — `before` 가 있으면 그 시각 이전(더 과거). */

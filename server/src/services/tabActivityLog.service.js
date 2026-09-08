@@ -66,28 +66,58 @@ const SOURCES = [
     async run(db, { sheetId, tabName, limit, before, want }) {
       /* ★ 한 행이 접수·취소 두 항목을 내므로 **UNION ALL 로 항목 단위로 편다**(위 ① 규율). */
       const { rows } = await db.query(
-        `SELECT x.id, x.sheet_row, x.orderer, x.recipient, x.price, x.canceled_by, x.ev, x.at FROM (
-            SELECT id, sheet_row, orderer, recipient,
-                   price, canceled_by, 'order'::text AS ev, submitted_at AS at
+        `SELECT x.id, x.sheet_row, x.orderer, x.recipient, x.price, x.canceled_by,
+                x.source, x.ev, x.at,
+                COALESCE(direct_app.expires_at, legacy_app.expires_at) AS expires_at,
+                COALESCE(direct_app.late_order_id = x.id, legacy_app.is_late, FALSE) AS is_late
+           FROM (
+            SELECT id, sheet_row, orderer, recipient, campaign_application_id,
+                   price, canceled_by, source, 'order'::text AS ev, submitted_at AS at
               FROM order_submissions
              WHERE sheet_id=$1 AND tab_name=$2 AND submitted_at IS NOT NULL
             UNION ALL
-            SELECT id, sheet_row, orderer, recipient,
-                   price, canceled_by, 'cancel'::text AS ev, deleted_at AS at
+            SELECT id, sheet_row, orderer, recipient, campaign_application_id,
+                   price, canceled_by, source, 'cancel'::text AS ev, deleted_at AS at
               FROM order_submissions
              WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
           ) x
+          /* 정상 리뷰어 제출은 주문 원장의 FK→신청 PK로 즉시 찾는다(페이지마다 신청표 전수탐색 금지). */
+          LEFT JOIN campaign_applications direct_app ON direct_app.id = x.campaign_application_id
+          LEFT JOIN LATERAL (
+            /* 외부모집·과거 데이터는 주문 원장의 FK가 없을 수 있어 신청행의 정방향/지각 링크로 보완한다. */
+            SELECT ca.expires_at, (ca.late_order_id = x.id) AS is_late
+              FROM campaign_applications ca
+             WHERE direct_app.id IS NULL
+               AND (ca.late_order_id = x.id OR ca.order_submission_id = x.id)
+             ORDER BY (ca.late_order_id = x.id) DESC, ca.applied_at DESC, ca.id DESC
+             LIMIT 1
+          ) legacy_app ON TRUE
           WHERE ($4::text = 'all' OR x.ev = $4::text)
             AND ($5::timestamptz IS NULL OR x.at <= $5::timestamptz)
           ORDER BY x.at DESC
           LIMIT $3`, [sheetId, tabName, limit, want, before]);
       const items = rows.map(r => {
         const name = _reviewerLabel(r.orderer, r.recipient);
-        if (r.ev === 'order') return {
-          id: `o:${r.id}:n`, at: r.at, kind: 'order',
-          message: `구매양식 접수 — ${name}`,
-          who: `리뷰어${r.sheet_row ? ` · ${r.sheet_row}행` : ''}${r.price ? ` · 결제금액 ${_clip(r.price, 20)}` : ''}`,
-        };
+        if (r.ev === 'order') {
+          const submittedMs = new Date(r.at).getTime();
+          const expiresMs = r.expires_at ? new Date(r.expires_at).getTime() : NaN;
+          const isLate = r.is_late === true;
+          /* 초과시간은 주문이 실제로 제출된 시각 - 홀드 마감시각. 음수는 0, 불명은 null로 두되
+             late 링크 자체는 보존해 '기구매/지각 주문도착'이라는 사건을 숨기지 않는다. */
+          const overdueSeconds = isLate && Number.isFinite(submittedMs) && Number.isFinite(expiresMs)
+            ? Math.max(0, Math.floor((submittedMs - expiresMs) / 1000)) : null;
+          const submissionType = isLate ? 'late' : (r.source === 'admin_external' ? 'external' : 'standard');
+          const label = submissionType === 'late' ? '기구매/지각 주문도착'
+            : submissionType === 'external' ? '외부모집 수동제출' : '구매양식 제출';
+          return {
+            id: `o:${r.id}:n`, at: r.at, kind: 'order',
+            message: `${label} — ${name}`,
+            who: `리뷰어${r.sheet_row ? ` · ${r.sheet_row}행` : ''}${r.price ? ` · 결제금액 ${_clip(r.price, 20)}` : ''}`,
+            submittedAt: r.at,
+            submissionType,
+            overdueSeconds,
+          };
+        }
         /* ★ 누가 취소했는지 그대로 말한다 — `canceled_by` 는 `reviewer:1234`·`dedupe:…`·담당자명이다.
            "취소됨"만 적으면 리뷰어 자발 취소와 정리 도구를 구분할 수 없다. */
         const by = String(r.canceled_by || '');
@@ -344,7 +374,16 @@ async function tabActivityLog({ sheetId, tabName, gid = '', kind = 'all', limit 
   /* ★ 더 있는가 = 잘렸거나(병합 결과가 한 페이지보다 많다) 어느 소스든 자기 LIMIT 을 채웠다.
      모르면 "더 있다" 쪽으로 접는다 — 다음 요청이 0건이면 화면이 그때 끝을 말한다(끝을 지어내지 않는다). */
   const hasMore = items.length > cap || anyHitLimit;
-  items = items.slice(0, cap).map(x => ({ id: x.id || '', at: x.at, kind: x.kind, message: x.message, who: x.who || '' }));
+  items = items.slice(0, cap).map(x => ({
+    id: x.id || '', at: x.at, kind: x.kind, message: x.message, who: x.who || '',
+    /* 주문 항목만 실제 제출시각/출처/초과시간을 동봉한다. 화면이 `at`의 의미를 추측하거나
+       지각시간을 다시 계산하지 않게 서버 결과를 단일 출처로 둔다. */
+    ...(x.submittedAt ? {
+      submittedAt: x.submittedAt,
+      submissionType: x.submissionType || 'standard',
+      overdueSeconds: x.overdueSeconds == null ? null : Math.max(0, Number(x.overdueSeconds) || 0),
+    } : {}),
+  }));
   /* ★ 다음 커서는 **지금 페이지의 가장 오래된 항목 시각**이고 `<=` 로 다시 묻는다(경계 동시각 유실 방지).
      그래서 겹치는 항목이 다시 오며, 화면은 `id` 로 이미 받은 것을 걸러낸다. */
   const last = items.length ? items[items.length - 1] : null;

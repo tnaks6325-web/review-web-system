@@ -21,10 +21,13 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
   catch (e) { fail++; console.log('  ✗ ' + name + ' — ' + (e && e.message)); } };
 
 const DDL = `
-DROP TABLE IF EXISTS order_submissions, reviewer_event_logs, review_submissions, review_inspections,
+DROP TABLE IF EXISTS order_submissions, campaign_applications, reviewer_event_logs, review_submissions, review_inspections,
   participant_edits, campaign_plan_events, recruit_campaigns, payment_batch_items, trackb_tab_finished CASCADE;
 CREATE TABLE order_submissions (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT, sheet_row INT,
-  recipient TEXT, orderer TEXT, price TEXT, submitted_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, canceled_by TEXT);
+  recipient TEXT, orderer TEXT, price TEXT, source TEXT, campaign_application_id BIGINT,
+  submitted_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, canceled_by TEXT);
+CREATE TABLE campaign_applications (id BIGSERIAL, campaign_id TEXT, applied_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ, order_submission_id UUID, late_order_id UUID);
 CREATE TABLE reviewer_event_logs (id BIGSERIAL, occurred_at TIMESTAMPTZ, sheet_id TEXT, tab_name TEXT,
   event_type TEXT, severity TEXT, message TEXT, reviewer_name TEXT, context JSONB);
 CREATE TABLE review_submissions (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT,
@@ -69,6 +72,14 @@ async function drain(m, opts) {
     await pool.query(`INSERT INTO order_submissions (sheet_id,tab_name,sheet_row,recipient,price,submitted_at)
       VALUES ('s1','t1',$1,$2,'1000',$3)`, [10 + i, '리뷰어' + i, D(Date.UTC(2026, 7, 21, 0, i))]);
   }
+  const { rows: typedOrders } = await pool.query(`INSERT INTO order_submissions
+    (sheet_id,tab_name,sheet_row,recipient,price,source,submitted_at)
+    VALUES ('s1','t1',60,'외부','12290','admin_external',$1),
+           ('s1','t1',61,'지각','12290','order_submit',$2)
+    RETURNING id, recipient`, [D('2026-08-23T04:00:00Z'), D('2026-08-23T05:12:10Z')]);
+  const lateOrder = typedOrders.find(r => r.recipient === '지각');
+  await pool.query(`INSERT INTO campaign_applications (campaign_id,applied_at,expires_at,late_order_id)
+    VALUES ('c1',$1,$2,$3)`, [D('2026-08-23T04:40:00Z'), D('2026-08-23T05:00:00Z'), lateOrder.id]);
   await pool.query(`INSERT INTO reviewer_event_logs (occurred_at,sheet_id,tab_name,event_type,severity,message,reviewer_name,context)
     VALUES ($1,'s1','t1','order_canceled_by_reviewer','info','리뷰어가 취소했습니다','ㄱ','{"rowIndex":3}'),
            ($2,'s1','t1','order_lost','critical','시트에서 사라졌습니다','ㄴ',NULL)`,
@@ -99,7 +110,7 @@ async function drain(m, opts) {
     assert.ok(r.items.length > 0);
   });
 
-  const EXPECT = 1 + 1 + 40 + 2 + 1 + 1 + 2 + 1 + 1 + 2;  // 접수1+취소1+접수40+이벤트2+리뷰1+검수1+편집2+정원1+입금1+마감2
+  const EXPECT = 1 + 1 + 40 + 2 + 2 + 1 + 1 + 2 + 1 + 1 + 2;  // 접수1+취소1+접수40+표기검증2+이벤트2+리뷰1+검수1+편집2+정원1+입금1+마감2
   await t('★★ 잘게 끊어 받아도 총 건수가 한 번에 받은 것과 같다(과거 유실 0)', async () => {
     const small = await drain(m, { gid: '777', limit: 10 });
     assert.strictEqual(small.length, EXPECT, '끊어 받기 ' + small.length + ' ≠ ' + EXPECT);
@@ -123,12 +134,23 @@ async function drain(m, opts) {
     assert.ok(all.some(x => x.message === '마감 복귀'), '복귀');
   });
 
+  await t('★★ 외부모집·지각 주문은 실제 제출시각과 초과시간을 보존한다', async () => {
+    const all = await drain(m, { gid: '777', kind: 'order', limit: 7 });
+    const ext = all.find(x => /외부모집 수동제출 — 외부/.test(x.message));
+    const late = all.find(x => /기구매\/지각 주문도착 — 지각/.test(x.message));
+    assert.ok(ext, 'admin_external 구분');
+    assert.strictEqual(new Date(ext.submittedAt).toISOString(), '2026-08-23T04:00:00.000Z');
+    assert.ok(late, 'late_order_id 구분');
+    assert.strictEqual(new Date(late.submittedAt).toISOString(), '2026-08-23T05:12:10.000Z');
+    assert.strictEqual(late.overdueSeconds, 730);
+  });
+
   await t('★★ 유형을 골라도 그 유형의 과거까지 전부 나온다(SQL 유형 조건)', async () => {
     const cancels = await drain(m, { gid: '777', kind: 'cancel', limit: 2 });
     assert.strictEqual(cancels.length, 2, '취소 2건(주문취소 1 + 리뷰어 이벤트 1) — 받은 건수 ' + cancels.length);
     cancels.forEach(x => assert.strictEqual(x.kind, 'cancel'));
     const orders = await drain(m, { gid: '777', kind: 'order', limit: 7 });
-    assert.strictEqual(orders.length, 41, '접수 41건 — 받은 건수 ' + orders.length);
+    assert.strictEqual(orders.length, 43, '제출 43건 — 받은 건수 ' + orders.length);
   });
 
   await t('★ 시간 내림차순이 페이지를 넘어도 유지된다', async () => {
