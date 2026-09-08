@@ -74,6 +74,9 @@ ok('로그: 유형 탭·커서형 과거 이력·부분 실패 안내를 지원'
   && /result\.nextBefore/.test(recjs) && /before=/.test(recjs) && /ccLogWarn/.test(recjs));
 ok('로그: 기존 구매확인·취소확정은 참여 관리로 보존', /"👥 참여 관리"/.test(recjs)
   && /else await _loadCampControl\(_ccCampId\)/.test(recjs));
+ok('로그: 늦게 끝난 참여 관리 조회가 작업 로그 화면을 덮지 않는다', /_ccManageSeq/.test(recjs)
+  && /manageSeq !== _ccManageSeq \|\| _ccMode !== "manage"/.test(recjs)
+  && /String\(campId\) !== String\(_ccCampId\)/.test(recjs));
 ok('관제: 오늘 집계는 KST + 유효홀드 시각 기준', /kstDay/.test(recjs) && /Date\.parse\(r\.expires_at\) > now/.test(recjs));
 ok('관제: 수동확정 → POST admin/:id/confirm', /\/confirm`/.test(recjs) && /applicationId: appId/.test(recjs));
 ok('관제: 수동확정은 만료·취소 건만(진행중 확정 = 주문링크 결번 방지, 리뷰 #4)', /canConfirm = \(r\.status === "expired" \|\| r\.status === "cancelled"\)/.test(recjs));

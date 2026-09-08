@@ -4473,7 +4473,7 @@ window._recruitCardTitles = window._recruitCardTitles || {};
 function openCampControlById(campId) {
   return openCampControl(campId, window._recruitCardTitles[campId] || campId);
 }
-let _ccCampId = null, _ccCampTitle = "", _ccMode = "log";
+let _ccCampId = null, _ccCampTitle = "", _ccMode = "log", _ccManageSeq = 0;
 async function openCampControl(campId, title) {
   let ovl = document.getElementById("campControlOvl");
   if (!ovl) {
@@ -4521,6 +4521,7 @@ let _ccLogKind = "all", _ccLogQuery = "", _ccLogBusy = false, _ccLogItems = [], 
 
 async function _ccSetMode(mode) {
   _ccMode = mode === "manage" ? "manage" : "log";
+  ++_ccManageSeq; // 진행 중인 참여 관리 조회가 새 모드 화면을 뒤늦게 덮지 못하게 무효화
   const title = document.getElementById("ccTitle");
   const sub = document.getElementById("ccSub");
   const stats = document.getElementById("ccStats");
@@ -4970,12 +4971,15 @@ function _campSheetInfo(si) {
 }
 
 async function _loadCampControl(campId) {
+  if (_ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
+  const manageSeq = ++_ccManageSeq;
   const body = document.getElementById("ccBody");
   const stats = document.getElementById("ccStats");
   try {
     const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/applications`), { headers: _getAuthHeaders() });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    if (manageSeq !== _ccManageSeq || _ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
     const rows = j.data || [];
     // 오늘(KST) 집계 — 유효홀드는 시각 기준(만료시각 경과분은 만료로 분류)
     const now = Date.now();
@@ -5078,6 +5082,7 @@ async function _loadCampControl(campId) {
       </div>`;
     }).join("");
   } catch (e) {
+    if (manageSeq !== _ccManageSeq || _ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
     body.innerHTML = `<div style="padding:24px;text-align:center;color:#DC2626">불러오기 실패: ${String(e.message).replace(/</g, "&lt;")}</div>`;
   }
 }
