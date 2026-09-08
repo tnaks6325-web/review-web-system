@@ -283,7 +283,7 @@ async function run() {
   ok('workdeskTab 이 보완된 헤더 후보와 연결 주문 정보를 광고주 열 구성에 넘긴다',
     /const candidates = _advertiserHeaderCandidates\(raw, roster, advEditedHeaders\);/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')) &&
-    /_advertiserColumns\(\[\.\.\.candidates, \.\.\._advertiserOrderInfoHeaders\(candidates, ordMap\)\]\)/.test(
+    /_advertiserColumns\(\[\.\.\.candidates, \.\.\._advertiserOrderInfoHeaders\(candidates, advertiserOrderMap\)\]\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
 
   /* ═══ 7. 리뷰 캡처 미리보기(행별) ═══ */
