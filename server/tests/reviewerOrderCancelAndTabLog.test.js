@@ -313,16 +313,20 @@ t('★★ 작업 로그 표기 함수가 제출시각·12분 10초 초과 문구
     result = {
       duration: _tlOverdueText(730),
       longDuration: _tlOverdueText(90061),
-      normal: _tlSubmissionStamp({kind:'order', submittedAt:'2026-09-08T01:00:00Z', submissionType:'standard'}),
-      late: _tlSubmissionStamp({kind:'order', submittedAt:'2026-09-08T03:12:10Z', submissionType:'late', overdueSeconds:730})
+      normal: _tlSubmissionStamp({kind:'order', submittedAt:'2026-09-08T01:00:00Z', submissionType:'standard', who:'리뷰어 · 11행'}),
+      late: _tlSubmissionStamp({kind:'order', submittedAt:'2026-09-08T03:12:10Z', submissionType:'late', overdueSeconds:730, who:'리뷰어 · 12행'})
     };
   `, box);
   assert.strictEqual(box.result.duration, '12분 10초');
   assert.strictEqual(box.result.longDuration, '1일 1시간 1분 1초');
   assert.match(box.result.normal, /<b>제출시각<\/b>/);
-  assert.match(box.result.late, /<b>주문제출<\/b>/);
+  assert.match(box.result.late, /<b>주문제출시각<\/b>/);
   assert.match(box.result.late, /<b>12분 10초 초과<\/b>/);
+  assert.match(box.result.normal, /<span class="tlwho"> · 리뷰어 · 11행<\/span>/);
 });
+ok('★★ 작업 로그는 제출 정보와 담당자 정보를 한 줄에 합쳐 기록당 최대 2단',
+  /\+_tlSubmissionStamp\(e\)\+`<\/div>`/.test(WD)
+  && !/_tlSubmissionStamp\(e\)\s*\n\s*\+\(e\.who\?`<div class="tlwho">/.test(WD));
 ok('★★ 바닥 근처에 닿으면 더 과거를 불러온다',
   /bd\.onscroll=\(\)=>\{[\s\S]{0,160}_tlMore\(\)/.test(WD));
 ok('★★ 이어 붙일 때 목록을 다시 그리지 않는다(보던 자리 유지)',

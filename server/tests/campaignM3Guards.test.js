@@ -79,6 +79,9 @@ ok('로그: 늦게 끝난 참여 관리 조회가 작업 로그 화면을 덮지
   && /String\(campId\) !== String\(_ccCampId\)/.test(recjs));
 ok('로그: 작업 로그 실패 응답도 참여 관리 전환 뒤 화면을 덮지 않는다',
   (recjs.match(/seq !== _ccLogSeq \|\| _ccMode !== "log"/g) || []).length >= 4);
+ok('로그: 제출 정보와 리뷰어 정보를 한 줄에 합쳐 기록당 최대 2단',
+  /<span class="tlwho"> · \$\{who\}<\/span>/.test(recjs)
+  && !/event\.who \? `<div class="tlwho">/.test(recjs));
 ok('관제: 오늘 집계는 KST + 유효홀드 시각 기준', /kstDay/.test(recjs) && /Date\.parse\(r\.expires_at\) > now/.test(recjs));
 ok('관제: 수동확정 → POST admin/:id/confirm', /\/confirm`/.test(recjs) && /applicationId: appId/.test(recjs));
 ok('관제: 수동확정은 만료·취소 건만(진행중 확정 = 주문링크 결번 방지, 리뷰 #4)', /canConfirm = \(r\.status === "expired" \|\| r\.status === "cancelled"\)/.test(recjs));

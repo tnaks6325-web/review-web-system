@@ -4579,16 +4579,18 @@ function _ccLogTs(value, seconds) {
   } catch (_) { return String(value); }
 }
 function _ccLogStamp(event) {
-  if (!event || event.kind !== "order" || !event.submittedAt) return "";
+  const who = event && event.who ? _ccLogEsc(event.who) : "";
+  if (!event || event.kind !== "order" || !event.submittedAt) return who ? `<div class="tlwho">${who}</div>` : "";
   const late = event.submissionType === "late";
   const overdue = late ? (event.overdueSeconds == null ? "초과시간 확인 불가" : `${_ccLogOverdue(event.overdueSeconds)} 초과`) : "";
   return `<div class="tlstamp"><b>${late ? "주문제출시각" : "제출시각"}</b> ${_ccLogEsc(_ccLogTs(event.submittedAt, true))}`
-    + (overdue ? ` · <b>${_ccLogEsc(overdue)}</b>` : "") + `</div>`;
+    + (overdue ? ` · <b>${_ccLogEsc(overdue)}</b>` : "")
+    + (who ? `<span class="tlwho"> · ${who}</span>` : "") + `</div>`;
 }
 function _ccLogEventHtml(event) {
   return `<div class="tlev k-${_ccLogEsc(event.kind)}"><div class="tltop"><span class="tlwhen">${_ccLogEsc(_ccLogTs(event.at, true))}</span>`
     + `<span class="tlmsg">${_ccLogEsc(event.message)}</span></div>${_ccLogStamp(event)}`
-    + (event.who ? `<div class="tlwho">${_ccLogEsc(event.who)}</div>` : "") + `</div>`;
+    + `</div>`;
 }
 async function _ccLogFetch(before) {
   let path = `/${encodeURIComponent(_ccCampId)}/activity-log?kind=${encodeURIComponent(_ccLogKind)}`;

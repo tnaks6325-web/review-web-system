@@ -1720,6 +1720,7 @@ textarea.rform-input{line-height:1.5}
 #campControlOvl .tlstamp{font-size:11.4px;color:var(--t1);margin-top:3px;font-variant-numeric:tabular-nums}
 #campControlOvl .tlstamp b{color:var(--p-d);font-weight:750}
 #campControlOvl .tlwho{font-size:11.4px;color:var(--t2);margin-top:2px}
+#campControlOvl .tlstamp .tlwho{display:inline;margin:0 0 0 3px}
 @media(max-width:700px){
   #campControlOvl .cc-logbox{height:92vh!important;max-height:92vh!important}
   #campControlOvl .tltabs{flex-wrap:wrap}
