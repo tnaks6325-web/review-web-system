@@ -106,7 +106,7 @@ console.log('\n[A] skipWorktable — 슬롯 맞추기만 건너뛴다');
   ok('★ 채워진 줄이 정원을 넘으면 표시할 뿐 자르지 않는다(over 표시)',
     /r\.over = true/.test(trackB) && !/slice\(0, *_cap\)/.test(trackB));
   ok('★ 외부모집 수동제출은 총정원 초과를 허용하고 경고만 남긴다',
-    /모집 정원을 초과해 확정했습니다/.test(manual));
+    /if \(r\.overCapacity\) warnings\.push\(`총 모집 \$\{r\.capacityTotal\}건을 넘어 \$\{r\.capacityUsed \+ 1\}번째 주문으로 기록했습니다`\)/.test(manual));
 
   console.log(`\ncampaignQuotaSaveUnchanged: ${passed} passed`);
   process.exit(0);
