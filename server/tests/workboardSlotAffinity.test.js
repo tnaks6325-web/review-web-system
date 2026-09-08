@@ -193,3 +193,10 @@ test('구매제출 알림은 관리자와 직원 작업보드에만 전달한다
     reviewer.req.emit('close');
   }
 });
+
+test('참여형 구매 알림은 요청의 빈 좌표가 아니라 서버가 확정한 작업표를 사용한다', () => {
+  const submit = read('src/routes/submit.routes.js');
+  assert.match(submit, /const liveWorktable = captureTarget \|\| orderScope;/);
+  assert.match(submit, /emitOrderSubmit\(\{[\s\S]*?tabName: liveWorktable\.tabName, sheetId: liveWorktable\.sheetId,[\s\S]*?workboardId: liveWorktable\.workboardId \|\| null/);
+  assert.doesNotMatch(submit, /emitOrderSubmit\(\{\s*tabName, sheetId,/);
+});
