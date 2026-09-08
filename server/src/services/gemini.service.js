@@ -209,17 +209,46 @@ const EXTRACT_PROMPT = `당신은 한국 온라인 쇼핑몰 주문 캡쳐 이�
 - 이미지가 주문 캡쳐가 아닌 경우 모든 필드를 빈 문자열로 반환`;
 
 // 프롬프트·화면 규칙이 달라지면 접두를 올려 옛 오인식 캐시가 새 판독을 가로막지 않게 한다.
-const EXTRACT_CACHE_VERSION = 'extract2';
+const EXTRACT_CACHE_VERSION = 'extract3';
+// Gemini inline 요청 한도(20MB)에 JSON/프롬프트 여유를 남긴 실제 base64 문자 예산.
+const EXTRACT_INLINE_CHAR_BUDGET = 18 * 1024 * 1024;
 
-async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
+function _fitExtractionSamples(samples, targetBase64) {
+  let remaining = Math.max(0,
+    EXTRACT_INLINE_CHAR_BUDGET - Buffer.byteLength(String(targetBase64 || ''), 'utf8') - (64 * 1024));
+  const selected = [];
+  for (const s of samples) {
+    const data = String(s.data || '').replace(/^data:image\/[a-z]+;base64,/, '');
+    const size = Buffer.byteLength(data, 'utf8');
+    if (size > remaining) continue;
+    selected.push({ ...s, data });
+    remaining -= size;
+  }
+  if (selected.length < samples.length) {
+    logger.warn(`[Gemini] 주문추출 예시 ${samples.length}장 중 ${selected.length}장만 동봉(요청 크기 예산)`);
+  }
+  return selected;
+}
+
+async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts = {}) {
   if (!_initGemini()) {
     throw new Error('Gemini API가 설정되지 않았습니다. GEMINI_API_KEY 환경변수를 확인하세요.');
   }
 
   const startTime = Date.now();
 
+  /* 구매캡처 기준이미지(few-shot). 화면 배치와 글꼴을 참고시키되 예시 안의 개인정보를
+     결과로 복사하지 않도록 대상 이미지와 명확히 분리한다. key에는 URL 지문이 포함되어
+     예시를 추가·교체하면 기존 OCR 캐시가 자동으로 무효화된다. */
+  const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+  const requestedSamples = Array.isArray(opts.samples) ? opts.samples.filter(s => s && s.data) : [];
+  const samples = _fitExtractionSamples(requestedSamples, cleanBase64);
+  const sampleSig = samples.length
+    ? crypto.createHash('sha1').update(samples.map(s => s.key || s.label || '').join('|')).digest('hex').slice(0, 12)
+    : '';
+
   // ── 4번: 캐시 확인 ──
-  const cacheHash = _getCacheKey(EXTRACT_CACHE_VERSION + ':' + base64Data);
+  const cacheHash = _getCacheKey(EXTRACT_CACHE_VERSION + ':' + sampleSig + ':' + base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) {
     const elapsed = Date.now() - startTime;
@@ -228,9 +257,6 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
   }
 
   try {
-    // base64 데이터에서 data URL prefix 제거 (있는 경우)
-    const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
-
     const imagePart = {
       inlineData: {
         data: cleanBase64,
@@ -239,7 +265,24 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
     };
 
     // ── 라운드로빈 + 재시도 + 타임아웃 ──
-    const { text, key: usedKey } = await _runModel([EXTRACT_PROMPT, imagePart], 'extract');
+    const parts = [EXTRACT_PROMPT];
+    if (samples.length) {
+      parts.push(`아래 이미지들은 구매캡처 화면의 레이아웃·글꼴 참고 예시입니다.
+예시 속 이름·전화번호·주소·주문번호·금액은 절대 답에 복사하지 마세요.
+예시는 필드 위치와 화면 구조를 찾는 기준으로만 사용하고, 반환값은 마지막 [판독 대상 이미지]에서만 읽으세요.`);
+      for (const s of samples) {
+        parts.push(`[레이아웃 예시] ${s.label || s.key || '구매캡처'}`);
+        parts.push({ inlineData: {
+          data: s.data,
+          mimeType: s.mimeType || 'image/jpeg',
+        } });
+      }
+      parts.push('― 여기까지는 참고 예시이며 추출 대상이 아닙니다. ―');
+    }
+    parts.push(`[판독 대상 이미지]
+이 마지막 이미지의 글자를 확대해 한 글자씩 재확인하세요. 특히 수취인 이름은 비슷한 한글(남/낭, 혜/해 등)을 문맥으로 고치지 말고 실제 획 모양을 기준으로 두 번 확인하세요.`);
+    parts.push(imagePart);
+    const { text, key: usedKey } = await _runModel(parts, 'extract');
 
     // 빈 응답 가드: thinking 이 토큰을 다 먹거나 잘리면 text 가 빈 문자열로 온다.
     // 이 경우 ok:true 로 위장(전 필드 공란)하면 "분석 완료인데 추출 실패"가 되므로 명시적 에러.

@@ -411,6 +411,23 @@ async function loadRouteSamples() {
   }
 }
 
+/** 주문정보 OCR 전용 구매캡처 기준이미지.
+ * 구매확정 예시는 필드 추출 기준이 아니므로 제외하고, 비용·지연을 제한하면서 사용자가
+ * 등록한 쿠팡/네이버 모바일·PC가 모두 들어가도록 최근 4장만 동봉한다. */
+async function loadOrderExtractionSamples() {
+  if (!SAMPLES_ENABLED) return [];
+  try {
+    const { ROUTE_SAMPLE_KINDS } = require('../utils/routeSampleKinds');
+    const slots = ROUTE_SAMPLE_KINDS
+      .filter(s => s.kind === 'order_capture')
+      .map(s => ({ key: 'extract_' + s.key, label: s.label, settingKey: s.settingKey, kind: s.kind }));
+    return _trimSamples(await _loadSampleSlots(slots), 4);
+  } catch (e) {
+    logger.warn(`[reviewInspect] 주문추출 예시 준비 실패(미동봉): ${e.message}`);
+    return [];
+  }
+}
+
 /** 관리자 화면용 — 자동 분류 예시 슬롯별 등록 여부. */
 async function routeSampleSettings() {
   const { ROUTE_SAMPLE_KINDS, ROUTE_SAMPLE_SETTING_KEYS, routeSampleSettingKey } = require('../utils/routeSampleKinds');
@@ -2087,7 +2104,7 @@ module.exports = {
   productNamesFromWorkOrder, productNameSettings, saveProductNames, saveProductAliases,
   loadSamplesFor, sampleSettings, saveSample,
   loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
-  loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
+  loadRouteSamples, loadOrderExtractionSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
   listInspections, inspectionSummary, inspectionTypeCounts,
   listProductClusters, resolveProductCluster, autoResolveProductClusters,
