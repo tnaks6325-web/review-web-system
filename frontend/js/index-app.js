@@ -1069,7 +1069,8 @@ function enterAdminScreen() {
   // ★ 컨텍스트 툴바 초기화
   _updateContextToolbar('dashboard');
 
-  loadAdminDashboard();
+  // 서버 설정을 먼저 가져와야 다른 기기에서 맞춘 컬럼 폭으로 첫 렌더링된다.
+  _loadServerColWidths().finally(() => loadAdminDashboard());
 
   // ★ 공지사항 자동 표시 (배포 변경 이력)
   checkAndShowNotice();
@@ -3918,6 +3919,116 @@ const DASH_COL_DEFS = [
   { key: 'info',        varName: '--dc-info',        label: '⚙',         minPx: 82,  default: 90, noScale: true  },
 ];
 const COL_WIDTH_LS_KEY = 'dashColWidths_v11'; // ★ v11.1: 새 컬럼 레이아웃
+const COL_WIDTH_PENDING_LS_KEY = 'dashColWidthsPending_v1';
+let _serverColWidths = null; // null=서버 미저장/오프라인, {}=사용자가 서버에서 기본값으로 초기화함
+let _colWidthsSaveVersion = 0;
+let _colWidthsSaveChain = Promise.resolve();
+
+function _readLocalColWidths() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _savedColWidths() {
+  return _serverColWidths === null ? _readLocalColWidths() : _serverColWidths;
+}
+
+function _readPendingColWidths() {
+  try {
+    const pending = JSON.parse(localStorage.getItem(COL_WIDTH_PENDING_LS_KEY) || 'null');
+    return pending && typeof pending === 'object' && !Array.isArray(pending) ? pending : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function _setPendingColWidths(columnWidths) {
+  try { localStorage.setItem(COL_WIDTH_PENDING_LS_KEY, JSON.stringify(columnWidths)); } catch (_) {}
+}
+
+function _clearPendingColWidths() {
+  try { localStorage.removeItem(COL_WIDTH_PENDING_LS_KEY); } catch (_) {}
+}
+
+function _workboardPreferenceHeaders() {
+  const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
+  return token ? { 'Authorization': 'Bearer ' + token } : null;
+}
+
+async function _saveServerColWidths(columnWidths) {
+  const headers = _workboardPreferenceHeaders();
+  if (!headers) return false;
+  let timer;
+  try {
+    const controller = new AbortController();
+    timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(API_BASE_URL + '/api/admin/my-workboard-preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ columnWidths }),
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch (_) {
+    // 네트워크 실패는 로컬 폴백을 보존하며 다음 저장 때 다시 시도한다.
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// 모든 저장은 순서대로 처리한다. 각 요청 직전에 최신 버전인지 재확인하므로,
+// 빠르게 두 번 드래그해도 오래된 전체 스냅샷이 나중에 DB를 덮어쓰지 않는다.
+function _queueServerColWidths(columnWidths) {
+  const snapshot = { ...columnWidths };
+  const version = ++_colWidthsSaveVersion;
+  _setPendingColWidths(snapshot);
+  _colWidthsSaveChain = _colWidthsSaveChain.catch(() => false).then(async () => {
+    if (version !== _colWidthsSaveVersion) return false;
+    const saved = await _saveServerColWidths(snapshot);
+    if (saved && version === _colWidthsSaveVersion) _clearPendingColWidths();
+    return saved;
+  });
+  return _colWidthsSaveChain;
+}
+
+async function _loadServerColWidths() {
+  _serverColWidths = null;
+  const headers = _workboardPreferenceHeaders();
+  if (!headers) return false;
+  let timer;
+  try {
+    // 설정 API 지연이 작업보드 자체를 막지 않도록 짧게 제한한다.
+    const controller = new AbortController();
+    timer = setTimeout(() => controller.abort(), 4000);
+    const response = await fetch(API_BASE_URL + '/api/admin/my-workboard-preferences', { headers, signal: controller.signal });
+    if (!response.ok) return false;
+    const data = await response.json();
+    if (!data || !data.ok) return false;
+
+    const pending = _readPendingColWidths();
+    if (pending) {
+      // 실패했던 로컬 변경은 서버의 오래된 값보다 우선하며, 온라인이 되면 다시 저장한다.
+      _serverColWidths = pending;
+      void _queueServerColWidths(pending);
+    } else if (data.hasSaved) {
+      _serverColWidths = data.columnWidths && typeof data.columnWidths === 'object' ? data.columnWidths : {};
+    } else {
+      // 기존 브라우저 설정은 최초 한 번 서버로 이관해 사용자가 다시 조절하지 않게 한다.
+      _serverColWidths = _readLocalColWidths();
+      if (Object.keys(_serverColWidths).length) void _queueServerColWidths(_serverColWidths);
+    }
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** 컨테이너 content 너비 반환 (padding/border 제외, 실제 사용 가능한 너비) */
 function _getContainerWidth() {
@@ -3951,8 +4062,7 @@ function _getContainerWidth() {
 
 /** localStorage에서 저장된 너비 로드 후 CSS 변수 적용 (CB 컬럼 제외 - 모드 토글이 관리) */
 function loadColWidths() {
-  let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) {}
+  const saved = _savedColWidths();
   const root = document.documentElement;
   let applied = 0;
   DASH_COL_DEFS.forEach(col => {
@@ -3979,6 +4089,8 @@ function saveColWidths() {
     if (w && Number.isFinite(w) && w > 0) data[col.key] = w;
   });
   try { localStorage.setItem(COL_WIDTH_LS_KEY, JSON.stringify(data)); } catch(_) {}
+  _serverColWidths = data;
+  void _queueServerColWidths(data);
 }
 
 /** (호환성 stub) */
@@ -4012,9 +4124,7 @@ function _syncTabnameWidth(availW) {
   _lastAppliedW = availW;
 
   const root = document.documentElement;
-  const savedWidths = (() => {
-    try { return JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) { return {}; }
-  })();
+  const savedWidths = _savedColWidths();
   const pad = 28; // 좌우 padding 합계
 
   // 사용자가 수동으로 숨긴 열 (col-hidden 시스템)
@@ -4184,6 +4294,8 @@ function resetColWidths() {
     root.style.removeProperty(col.varName);
   });
   try { localStorage.removeItem(COL_WIDTH_LS_KEY); } catch(_) {}
+  _serverColWidths = {};
+  void _queueServerColWidths({});
   _closeColResizePopup();
   _lastAppliedW = 0; // 강제 재계산
   _syncTabnameWidth(); // 초기화 후 반응형 재계산
