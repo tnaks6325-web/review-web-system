@@ -36,8 +36,9 @@ async function schema() {
   // ★★ 스키마는 **서비스가 실제로 조회하는 테이블**을 전부 만든다 — 여기서 SQL 사본을 검증하면
   //   서비스 쿼리를 망가뜨려도 테스트가 통과한다(변이시험이 실제로 잡아 이렇게 바꿨다).
   await pool.query(`
-    DROP TABLE IF EXISTS advertiser_campaigns, advertisers, raw_sheet_tabs, campaign_participants, tab_configs,
-      trackb_work_order_links, work_orders, trackb_settlement_links, trackb_tab_closeouts, trackb_tab_memos,
+    DROP TABLE IF EXISTS advertiser_campaigns, advertisers, raw_sheet_tabs, campaign_participants, participant_edits,
+      review_index, recruit_campaigns, tab_configs,
+      trackb_work_order_links, work_orders, trackb_settlement_links, trackb_tab_closeouts, trackb_tab_finished, trackb_tab_memos,
       trackb_advertiser_links, index_master CASCADE;
     CREATE TABLE advertisers (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT DEFAULT 'active',
       inad_pm TEXT, contact TEXT, memo TEXT, sort_order INT DEFAULT 0);
@@ -48,20 +49,33 @@ async function schema() {
       row_count INT, mirrored_at TIMESTAMPTZ DEFAULT NOW(), is_system_tab BOOLEAN DEFAULT FALSE);
     CREATE TABLE campaign_participants (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, tab_gid TEXT,
       seq INT, active BOOLEAN DEFAULT TRUE, deleted_at TIMESTAMPTZ, is_submitted BOOLEAN DEFAULT FALSE,
-      is_paid BOOLEAN DEFAULT FALSE, first_seen_at TIMESTAMPTZ DEFAULT NOW());
-    CREATE TABLE tab_configs (sheet_id TEXT, tab_name TEXT, manager TEXT, folder_url TEXT, capture_folder_url TEXT,
-      capture_slots JSONB, income_type TEXT, sheetless BOOLEAN DEFAULT FALSE);
-    CREATE TABLE work_orders (id SERIAL PRIMARY KEY, recruit_count INT, start_date DATE);
+      is_paid BOOLEAN DEFAULT FALSE, held_at TIMESTAMPTZ, first_seen_at TIMESTAMPTZ DEFAULT NOW(),
+      reviewer_name TEXT, recipient_name TEXT, phone8 TEXT, round TEXT, option_text TEXT, product_name TEXT,
+      source TEXT, order_submission_id TEXT, identity_key TEXT, row_json JSONB DEFAULT '{}'::jsonb,
+      submit_col TEXT, submit_col2 TEXT);
+    CREATE TABLE participant_edits (sheet_id TEXT, tab_name TEXT, anchor_type TEXT, anchor_value TEXT,
+      field TEXT, kind TEXT, value_bool BOOLEAN, value_text TEXT, reverted_at TIMESTAMPTZ);
+    CREATE TABLE review_index (sheet_id TEXT, tab_name TEXT, submit_col TEXT, submit_col2 TEXT);
+    CREATE TABLE tab_configs (sheet_id TEXT, tab_name TEXT, manager TEXT, campaign_name TEXT, display_name TEXT,
+      folder_url TEXT, capture_folder_url TEXT, capture_slots JSONB, income_type TEXT, sheetless BOOLEAN DEFAULT FALSE);
+    CREATE TABLE work_orders (id SERIAL PRIMARY KEY, recruit_count INT, start_date DATE,
+      linked_tab_sheet_id TEXT, linked_tab_name TEXT, work_manager TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+    CREATE TABLE recruit_campaigns (linked_sheet_id TEXT, linked_tab_name TEXT, linked_tab_gid TEXT,
+      recruit_total INT, status TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE trackb_work_order_links (id SERIAL PRIMARY KEY, work_order_id INT, sheet_id TEXT, tab_name TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
     CREATE TABLE trackb_settlement_links (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, sales_id TEXT,
       contract_number TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
     CREATE TABLE trackb_tab_closeouts (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, closed_date DATE,
       row_count INT, sub_count INT, created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+    CREATE TABLE trackb_tab_finished (sheet_id TEXT, tab_name TEXT, tab_gid TEXT,
+      finished_at TIMESTAMPTZ, finished_by TEXT, deleted_at TIMESTAMPTZ);
     CREATE TABLE trackb_tab_memos (sheet_id TEXT, tab_name TEXT, memo TEXT);
     CREATE TABLE trackb_advertiser_links (advertiser_id TEXT, token TEXT, active BOOLEAN DEFAULT TRUE,
       login_required BOOLEAN DEFAULT FALSE, last_used_at TIMESTAMPTZ);
-    CREATE TABLE index_master (id SERIAL PRIMARY KEY, status TEXT DEFAULT 'active', sheet_id TEXT, tab_gid TEXT, tab_name TEXT);
+    CREATE TABLE index_master (id SERIAL PRIMARY KEY, status TEXT DEFAULT 'active', sheet_id TEXT, tab_gid TEXT,
+      tab_name TEXT, row_count INT, submitted_count INT);
   `);
 }
 async function seed() {
@@ -70,6 +84,18 @@ async function seed() {
   await pool.query(`INSERT INTO advertiser_campaigns (advertiser_id,sheet_id,tab_gid) VALUES ($1,$2,NULL)`, [WF, S]);
   await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id,spreadsheet_title,tab_gid,tab_name,row_count) VALUES
      ($1,'위드시트','100','위프 작업',31), ($1,'위드시트','200','다른 작업',10)`, [S]);
+  await pool.query(`INSERT INTO tab_configs (sheet_id,tab_name) VALUES ($1,'위프 작업')`, [S]);
+  await pool.query(`INSERT INTO index_master (sheet_id,tab_gid,tab_name,row_count,submitted_count)
+                    VALUES ($1,'100','위프 작업',5,0)`, [S]);
+  await pool.query(`INSERT INTO review_index (sheet_id,tab_name,submit_col2) VALUES ($1,'위프 작업','입금')`, [S]);
+  await pool.query(`INSERT INTO campaign_participants
+      (sheet_id,tab_name,tab_gid,seq,reviewer_name,active,is_paid,held_at,row_json,submit_col2)
+    VALUES
+      ($1,'위프 작업','100',1,'셀입금',TRUE,FALSE,NULL,jsonb_build_object('입금','8/12'),'입금'),
+      ($1,'위프 작업','100',2,'원장만',TRUE,TRUE,NULL,'{}'::jsonb,'입금'),
+      ($1,'위프 작업','100',3,'보관행',TRUE,FALSE,NOW(),jsonb_build_object('입금','8/12'),'입금'),
+      ($1,'위프 작업','100',4,NULL,TRUE,FALSE,NULL,jsonb_build_object('입금','8/12'),'입금'),
+      ($1,'위프 작업','100',5,'체크해제',TRUE,FALSE,NULL,jsonb_build_object('입금',FALSE),'입금')`, [S]);
 }
 /** 그 업체의 소유로 전개되는 탭 이름 — ★ **서비스를 그대로 호출**한다(쿼리 사본 금지: 사본을 검증하면
  *  서비스 SQL 을 망가뜨려도 통과한다 — 변이시험이 실제로 잡았다). */
@@ -93,6 +119,14 @@ async function run() {
   await ta('이관 전: 위드프렌즈가 시트 전체(2탭) 소유', async () => {
     assert.deepStrictEqual(await expand(WF), ['다른 작업', '위프 작업']);
     assert.deepStrictEqual(await expand(WC), []);
+  });
+  await ta('★ 업체 목록 입금 = 활성·채워진 작업보드 입금 셀만(원장/보관/빈슬롯/false 제외)', async () => {
+    const rows = (await svc.ownedTabsForAdvertiser({ advertiserId: WF })).rows;
+    assert.strictEqual(rows.find(x => x.tabName === '위프 작업').bPaid, 1);
+  });
+  await ta('★ 홈 목록 입금도 같은 작업보드 셀 기준', async () => {
+    const stats = await svc.tabStatsMap({ force: true });
+    assert.strictEqual(stats.map[S + '\t위프 작업'].paid, 1);
   });
   let r = await svc.transferOwnership({ sheetId: S, tabGid: '100', toAdvertiserId: WC, by: '홍길동' });
   await ta('이관 성공(scope=tab)', async () => { assert.strictEqual(r.ok, true); assert.strictEqual(r.scope, 'tab'); });

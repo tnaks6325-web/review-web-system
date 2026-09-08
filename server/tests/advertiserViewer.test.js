@@ -109,6 +109,11 @@ async function run() {
     && /FROM participant_edits e/.test(svcSrc)
     && /cp\.anchor_count = 1/.test(svcSrc)
     && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_submitted\)::int AS submitted/.test(svcSrc));
+  ok('업체 작업목록 입금 수도 원장 플래그가 아닌 실제 작업표 입금 셀을 집계한다',
+    /paid_header\.paid_header/.test(svcSrc)
+    && /cp\.row_json\s*->>\s*COALESCE\(NULLIF\(BTRIM\(cp\.submit_col2\), ''\), paid_header\.paid_header\)/.test(svcSrc)
+    && /current_paid_edit/.test(svcSrc)
+    && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_paid\)::int AS paid/.test(svcSrc));
   ok('★ 내부 필드(비고 memo·담당 manager·salesId) 는 항목에 아예 없다 — 화면에서만 감추는 건 보안연극',
     !('memo' in it) && !('manager' in it) && !('salesId' in it));
   ok('정산: 총비용=견적서 금액 우선(11,250,000) · 입금액=입금매칭 누계(8,000,000)',
