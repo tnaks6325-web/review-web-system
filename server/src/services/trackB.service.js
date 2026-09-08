@@ -44,12 +44,11 @@ async function _rebuildWorkdeskLedgers(args) {
 
 function _phone8(v) { const d = String(v == null ? '' : v).replace(/[^0-9]/g, ''); return d.length >= 8 ? d.slice(-8) : ''; }
 function _norm(v) { return String(v == null ? '' : v).trim().replace(/\s+/g, ''); }
-// 작업보드 상태 셀의 "값 있음" 판정. Sheets 체크박스 미체크는 boolean false로 보존되며,
-// PostgreSQL JSONB ->> 에서는 문자열 'false'가 되므로 두 표현을 모두 빈 상태로 본다.
+// 작업보드 상태 셀의 "값 있음" 판정. 이 화면 집계는 상태 의미를 재해석하지 않고
+// 작업보드 입금 컬럼에 실제 데이터가 저장돼 있는지만 본다. 따라서 Sheets 체크박스의
+// boolean false도 저장된 값이며 포함하고, null/빈 문자열만 제외한다.
 function _hasWorkboardStatusValue(v) {
-  if (v == null || v === false) return false;
-  const s = String(v).trim();
-  return s !== '' && s.toLowerCase() !== 'false';
+  return v != null && String(v).trim() !== '';
 }
 function _mask(p8) { const s = String(p8 || ''); return s.length >= 4 ? '••••' + s.slice(-4) : (s || ''); }
 // 이름/수취인 부분 마스킹(광고주 외부 뷰): 첫 글자만 노출 + 나머지 ○(식별성 유지 + PII 보호). 1글자·공란은 그대로.
@@ -1034,7 +1033,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                          THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
                                    ELSE manual_paid_edit.value_text END END,
                     cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
-                  )), '') !~* '^false$')::int AS paid
+                  )), '') IS NOT NULL)::int AS paid
            FROM anchored_rows cp
            LEFT JOIN LATERAL (
              SELECT e.kind, e.value_bool, e.value_text
@@ -5533,7 +5532,7 @@ async function tabStatsMap({ force = false } = {}) {
                            THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
                                      ELSE manual_paid_edit.value_text END END,
                       cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
-                    )), '') !~* '^false$')::int AS paid_count
+                    )), '') IS NOT NULL)::int AS paid_count
              FROM anchored_rows cp
              LEFT JOIN LATERAL (
                SELECT e.kind, e.value_bool, e.value_text

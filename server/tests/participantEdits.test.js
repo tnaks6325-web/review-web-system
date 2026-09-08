@@ -107,7 +107,7 @@ async function run() {
       { id: 'd3', seq: 199, name: '박', recipient: null, phone8: '11112222', round: '', option: '', product: '', submitted: false, paid: false, source: 'import', order_submission_id: 'os-dup', identity_key: 'num:20260818147149', row_json: {}, submit_col2: '입금' },
       // 반대 불일치: 원장 paid=true여도 실제 입금 셀이 비면 화면 집계에서는 제외한다.
       { id: 'd8', seq: 8, name: '이', recipient: null, phone8: '22223333', round: '', option: '', product: '', submitted: true, paid: true, source: 'import', order_submission_id: 'os-ledger-only', identity_key: 'num:8', row_json: {}, submit_col2: '입금' },
-      // Sheets 체크박스 미체크(false)는 셀이 존재해도 입금완료가 아니다.
+      // 사용자 확정 규칙: 입금 컬럼에 저장된 값 자체를 센다. boolean false도 저장된 값이다.
       { id: 'd7', seq: 7, name: '최', recipient: null, phone8: '44445555', round: '', option: '', product: '', submitted: true, paid: false, source: 'import', order_submission_id: 'os-checkbox-off', identity_key: 'num:7', row_json: { '입금': false }, submit_col2: '입금' },
       // 정상(유일 order 앵커) — 무회귀 확인용
       // 원장 paid=false여도 실제 작업보드 입금 셀 편집값이 있으면 화면 집계에는 포함된다.
@@ -129,7 +129,7 @@ async function run() {
   assert.equal(dById.d9.paid, true, '1B-e: 유일한 order 앵커는 종전대로 적용된다(무회귀)');
   assert.ok(dById.d9.ambiguous !== true, '1B-f: 정상 행은 ambiguous 아님');
   assert.equal(dById.d8.paid, true, '1B-f2: 원장 상태는 표시 집계 변경과 무관하게 보존된다');
-  assert.equal(wdDup.counts.paid, 1, '1B-g: 입금완료는 실제 작업보드 값 1건(false 체크박스 제외)');
+  assert.equal(wdDup.counts.paid, 2, '1B-g: 입금완료는 실제 작업보드 값 2건(false 포함)');
   assert.equal(wdDup.counts.ambiguous, 3, '1B-h: 중복 줄 수를 화면이 말한다');
   console.log('  1B. order 앵커 중복 게이트 — 번짐 차단·집계 정상·무회귀 ✓');
 
