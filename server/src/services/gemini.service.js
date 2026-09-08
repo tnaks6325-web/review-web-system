@@ -193,7 +193,23 @@ const EXTRACT_PROMPT = `당신은 한국 온라인 쇼핑몰 주문 캡쳐 이�
 - 전화번호는 하이픈(-) 포함 그대로 추출 (예: 010-1234-5678)
 - 금액은 숫자와 쉼표만 추출 (예: 15,900)
 - 주소는 전체 주소를 한 줄로 추출
+- 이름은 자연스러운 이름으로 추정하거나 교정하지 말고 화면에 보이는 글자를 그대로 옮길 것
+- 별표(*)로 가려진 이름·전화번호·주소는 별표를 그대로 보존할 것
+- 화면에 주문자 이름이 따로 없으면 수취인과 같다고 추정하지 말고 orderer를 빈 문자열로 둘 것
+- 결제금액은 상품가격·할인 전 가격이 아니라 실제 "총 결제금액" 또는 "주문금액"을 우선할 것
+
+화면 유형별 배송정보 읽기 규칙:
+- 쿠팡 모바일: 수취인/연락처/주소 라벨이 없을 수 있다. 배송정보 카드 안의 첫 번째 짧은 한글 이름,
+  그 뒤의 우편번호·주소, 010 전화번호를 한 묶음으로 읽는다. 주변의 "배송요청사항"은 배송메모이며 이름이 아니다.
+- 쿠팡 PC: "받는사람 정보" 아래의 "받는사람", "연락처", "받는주소", "배송요청사항" 라벨과 오른쪽 값을 대응한다.
+- 네이버 모바일·PC: "배송지" 아래 카드에서 이름(배송지 별칭), 전화번호, 주소가 순서대로 나온다.
+  예를 들어 "박윤정(집)"은 recipient="박윤정"이며 괄호 안 "집"은 배송지 별칭이므로 이름에 포함하지 않는다.
+  이 규칙은 "배송지" 카드 안에서 다음 줄이 전화번호일 때만 적용한다.
+- 네이버 결제금액은 "결제정보" 아래 "주문금액"의 총액을 사용한다.
 - 이미지가 주문 캡쳐가 아닌 경우 모든 필드를 빈 문자열로 반환`;
+
+// 프롬프트·화면 규칙이 달라지면 접두를 올려 옛 오인식 캐시가 새 판독을 가로막지 않게 한다.
+const EXTRACT_CACHE_VERSION = 'extract2';
 
 async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
   if (!_initGemini()) {
@@ -203,7 +219,7 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
   const startTime = Date.now();
 
   // ── 4번: 캐시 확인 ──
-  const cacheHash = _getCacheKey(base64Data);
+  const cacheHash = _getCacheKey(EXTRACT_CACHE_VERSION + ':' + base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) {
     const elapsed = Date.now() - startTime;
