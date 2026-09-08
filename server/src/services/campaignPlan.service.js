@@ -18,7 +18,7 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { kstTodayStr, dateOnlyStr, isCarryHold, carryStrategy, heldCarry, pendingCarry, fetchCampaignCounts,
-  computeCampaignState } = require('./campaignState.service');
+  computeCampaignState, totalQuotaUsage } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
@@ -105,6 +105,11 @@ async function getPlanOverview(campaignId) {
   const { rows: allQ } = await pool.query(
     `SELECT COUNT(*) AS n FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`,
     [campaignId]);
+  // 날짜계획 화면과 저장 게이트가 같은 총량 재료를 사용한다. 주문 원장 조회 실패는 null로
+  // 보존해 화면이 증원을 잠그고, 작업표 미연결 공고만 신청 원장으로 계속 동작한다.
+  let quotaCounts = null;
+  try { quotaCounts = (await fetchCampaignCounts(pool, [camp.id])).get(camp.id) || null; }
+  catch (e) { logger.warn(`[campaignPlan] 총량 소비량 조회 실패 camp=${camp.id}: ${e.message}`); }
 
   const byDateSubmitted = {};
   for (const r of byDateQ.rows) byDateSubmitted[r.d] = Number(r.n) || 0;
@@ -114,7 +119,7 @@ async function getPlanOverview(campaignId) {
   //   공고에는 보류가 적용되지 않으므로, 모르는 채 숫자를 띄우면 효과 없는 칩이 될 수 있다.
   if (schedule !== 'unknown') {
     try {
-      const counts = (await fetchCampaignCounts(pool, [camp.id])).get(camp.id);
+      const counts = quotaCounts || (await fetchCampaignCounts(pool, [camp.id])).get(camp.id);
       const sch = schedule || null;
       if (isCarryHold(camp)) {
         const sums = await fetchCarryAppliedSums(pool, [camp.id]);
@@ -197,6 +202,24 @@ async function getPlanOverview(campaignId) {
     plannerProgressSource = 'worktable_filled';
   }
 
+  const applicationSubmittedAll = Number(allQ[0] && allQ[0].n) || 0;
+  const quotaMaterial = quotaCounts || {
+    submittedAll: applicationSubmittedAll,
+    todaySubmitted: byDateSubmitted[today] || 0,
+    activeHolds: 0,
+    todayActiveHolds: 0,
+    linked: null,
+  };
+  const totalUsage = totalQuotaUsage(
+    camp,
+    quotaMaterial,
+    (schedule && schedule !== 'unknown') ? schedule : null
+  );
+  const planGateTodayUsed = Math.max(
+    byDateSubmitted[today] || 0,
+    Number(quotaMaterial.todaySubmitted) || 0
+  ) + (Number(quotaMaterial.todayActiveHolds) || 0);
+
   return {
     campaignId: camp.id,
     title: camp.title || '',
@@ -223,11 +246,13 @@ async function getPlanOverview(campaignId) {
     carryPending,
     // 오늘 확정분 — 화면의 "배분해야 할 인원" = recruit_total − (전체 확정 − 오늘 확정)
     todaySubmitted: plannerByDateSubmitted[today] || 0,
-    // ★ 날짜계획 저장 총량 게이트와 **동일한 제출 원장**. 무시트 작업표의 채움 수는 운영 진행
-    // 표시에는 더 정확할 수 있지만, savePlans 는 campaign_applications를 잠근 뒤 검사한다.
-    // 수동 게이지의 상한·저장 가능 여부는 이 두 값을 써야 서버와 한 건도 어긋나지 않는다.
-    planGateSubmittedAll: Number(allQ[0] && allQ[0].n) || 0,
-    planGateTodaySubmitted: byDateSubmitted[today] || 0,
+    // ★ 날짜계획 저장과 동일한 총량 소비량. 비공유 연결 탭은 주문 원장, 공유 탭은 공고 신청,
+    // 둘 다 유효 홀드를 포함한다. known=false 면 화면은 기존 계획 축소·해제 외 증원을 잠근다.
+    planGateSubmittedAll: totalUsage.used,
+    planGateTodaySubmitted: planGateTodayUsed,
+    planGateKnown: totalUsage.known,
+    planGateSource: totalUsage.source,
+    totalQuotaFull: totalUsage.full,
     // 손대지 않았을 때 **오늘 실제로 열리는 정원**(computeCampaignState 판정 그대로).
     //   null = 계산 불가 → 화면은 균형 모드를 켜지 않는다(잘못된 기준으로 저장 판정 금지).
     todayNaturalQuota,
@@ -375,14 +400,15 @@ async function savePlans(campaignId, body, actor) {
       }
     }
 
-    /* ★★ 총량 게이트(사용자 확정 2026-08-19) — 조절은 **총 모집 인원 안에서만** 한다.
+    /* ★★ 총량 게이트 — 조절은 **총 모집 인원 안에서만** 한다.
        총인원·일건수는 작업오더가 준 값으로 고정되고(모집공고 수정에서 잠금), 날짜별 조절은
        그 총량을 나눠 담는 일이다. 그래서 "이미 확정된 인원 + 앞으로의 계획"이 총량을 넘으면 거부한다.
+       ★ 비공유 연결 공고는 주문 원장까지 포함한 totalQuotaUsage 를 사용한다. 외부모집·수기 주문이
+         신청 원장에 아직 없더라도 이미 구매된 수량만큼 총량을 소비한다.
        ★ 계획이 없는 날의 자연 정원(기본 일건수·이월)은 세지 않는다 — 그쪽은 런타임 총량 clamp 가
          이미 막으므로, 여기서 세면 멀쩡한 조절이 과대 거부된다(거부는 확실한 초과에만).
        ★ 총량 0(무제한)·set 없음(해제만)은 검사 대상이 아니다.
-       ★ 조회 실패는 **통과**시키고 경고만 남긴다(fail-open) — 이 게이트가 죽었다고 조절 자체가
-         막히면 막다른 길이 되고, 실제로 총량을 넘겨 열리는 것은 런타임 clamp 가 막는다. */
+       ★ 연결 주문 원장을 모르면 새 날짜·증원은 fail-closed, 기존 계획 축소·해제는 허용한다. */
     const totalCap = _totalCapFor(camp, schedule, orderTotal);
     if (totalCap > 0 && set.length) {
       let sp = false;
@@ -404,31 +430,52 @@ async function savePlans(campaignId, body, actor) {
         for (const dt of remove) planned.delete(dt);
         const confirmedAll = Number(cfRows[0] && cfRows[0].all_n) || 0;
         const confirmedToday = Number(cfRows[0] && cfRows[0].today_n) || 0;
+        const onlyReductions = set.length > 0
+          && set.every(x => beforePlans.has(x.date) && Number(x.count) <= Number(beforePlans.get(x.date)))
+          && (remove.length > 0 || set.some(x => Number(x.count) < Number(beforePlans.get(x.date))));
+        let quotaCounts = null;
+        try { quotaCounts = (await fetchCampaignCounts(client, [campaignId])).get(campaignId) || null; }
+        catch (e) { logger.warn(`[campaignPlan] 주문 원장 총량 조회 예외 camp=${campaignId}: ${e.message}`); }
+        const totalUsage = totalQuotaUsage(camp, quotaCounts || {
+          submittedAll: confirmedAll,
+          todaySubmitted: confirmedToday,
+          activeHolds: 0,
+          todayActiveHolds: 0,
+          linked: null,
+        }, schedule);
+        if (!totalUsage.known && !onlyReductions) {
+          const e = new Error('주문 원장 총량을 확인하지 못해 모집인원을 늘릴 수 없습니다 — 잠시 후 다시 시도해주세요. 기존 계획 축소·해제는 가능합니다.');
+          e.code = 'quota_unknown';
+          throw e;
+        }
+        const usedAll = Math.max(confirmedAll, Number(totalUsage.used) || 0);
+        const usedToday = Math.max(
+          confirmedToday,
+          Number(quotaCounts && quotaCounts.todaySubmitted) || 0
+        ) + (Number(quotaCounts && quotaCounts.todayActiveHolds) || 0);
         let future = 0;
         planned.forEach((c, dt) => { if (dt > today) future += c; });
-        // 오늘은 "그날 정원" 개념이라 이미 확정된 오늘분과 겹친다 — 큰 쪽 하나만 센다(이중 계수 방지).
-        const todayPart = planned.has(today) ? Math.max(planned.get(today), confirmedToday) : confirmedToday;
-        const need = (confirmedAll - confirmedToday) + todayPart + future;
+        // 오늘은 "그날 정원" 개념이라 이미 소비된 오늘분과 겹친다 — 큰 쪽 하나만 센다.
+        // 주문 원장의 날짜별 귀속을 모르는 외부 주문은 과소차단보다 안전한 쪽으로 과거 소비량에 둔다.
+        const todayPart = planned.has(today) ? Math.max(planned.get(today), usedToday) : usedToday;
+        const need = Math.max(0, usedAll - usedToday) + todayPart + future;
         if (need > totalCap) {
           /* 이미 총량보다 큰 옛 계획은 줄여야 복구된다. 종전에는 30→20처럼 명백한 축소도
              결과가 아직 초과라는 이유로 거부돼 한 번에 전부 고치지 못하면 영구히 막혔다.
              기존 명시 계획을 낮추거나 해제하는 변경만 통과시키고, 새 날짜·증원은 계속 거부한다. */
-          const onlyReductions = set.length > 0
-            && set.every(x => beforePlans.has(x.date) && Number(x.count) <= Number(beforePlans.get(x.date)))
-            && (remove.length > 0 || set.some(x => Number(x.count) < Number(beforePlans.get(x.date))));
           if (onlyReductions) {
             logger.warn(`[campaignPlan] 총량 초과 계획 축소 저장 허용 camp=${campaignId} need=${need} cap=${totalCap}`);
           } else {
             const e = new Error(
               `총 모집 ${totalCap.toLocaleString()}명을 넘겨 조절할 수 없습니다 — `
-              + `확정 ${confirmedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
+              + `확정·주문·진행 ${usedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
               + `${(need - totalCap).toLocaleString()}명을 줄여주세요.`);
-            e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = confirmedAll;
+            e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = usedAll;
             throw e;
           }
         }
       } catch (e) {
-        if (e && e.code === 'over_total') throw e;
+        if (e && ['over_total', 'quota_unknown'].includes(e.code)) throw e;
         if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT plan_total'); } catch (_) {} }
         logger.warn(`[campaignPlan] 총량 게이트 확인 실패(통과) camp=${campaignId}: ${e.message}`);
       }

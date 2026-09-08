@@ -159,9 +159,8 @@ const CARRY_ENABLED = process.env.CAMPAIGN_DAILY_CARRY !== '0';
 const PLAN_ENABLED = process.env.CAMPAIGN_DAILY_PLAN !== '0';
 
 // ── 표(주문 원장) 기준 총량 게이트(2단계) ──
-// 'off' | 'observe'(기본) | 'on'. off = 집계 쿼리 0(완전 킬스위치 · 되돌리기 = env 만).
-// observe = counts.linked 만 싣고 게이트 무변경 — 관제·카드가 "표 기준이면 마감"을 먼저 관측한다
-// (AUTO_FILE_ROUTE dry 와 같은 규율: 관측 후 출시 결정은 사람이).
+// 'off' | 'observe' | 'on'(기본). off = 집계 쿼리 0(완전 킬스위치 · 되돌리기 = env 만).
+// observe = counts.linked 만 싣고 게이트 무변경 — 긴급 진단 때만 명시적으로 사용한다.
 // on = soft_full 게이트 반영(stateReason:'table_over_total' · 비영속 — maybePersistClosed 무접촉).
 // ★★ 게이트 재료는 campaign_participants(작업표 줄)가 아니라 order_submissions(주문 원장) —
 //   선기입 이름만 줄(참여 소각)·링크 오염·투영 지연이 정원 계산에 못 들어오게 하는 구조적 선택.
@@ -197,11 +196,55 @@ function effectiveQuota(c, counts) {
 }
 
 const TABLE_QUOTA_MODE = (() => {
-  const v = String(process.env.CAMPAIGN_TABLE_QUOTA || 'observe').toLowerCase();
+  const v = String(process.env.CAMPAIGN_TABLE_QUOTA || 'on').toLowerCase();
   if (['0', 'false', 'off'].includes(v)) return 'off';
-  if (['1', 'true', 'on'].includes(v)) return 'on';
-  return 'observe';
+  if (['observe', 'dry', 'shadow'].includes(v)) return 'observe';
+  return 'on';
 })();
+
+/**
+ * 총 모집 소비량의 단일 판정.
+ *
+ * - 기본 신청 원장: submitted + 유효 홀드
+ * - 주문 원장 게이트(on): max(submitted, 연결 주문) + 유효 홀드
+ * - 공유 탭: 탭 주문을 공고별로 귀속할 수 없으므로 신청 원장만 사용
+ * - 연결 탭이 있는데 주문 원장 조회가 실패하면 known=false. 읽기 화면은 계속 표시할 수 있지만
+ *   신규 참여·계획 증원 같은 정원 증가 쓰기는 호출부가 fail-closed 한다.
+ */
+function totalQuotaUsage(c, counts, schedule = null) {
+  const cnt = counts || {};
+  const sch = isUsableSchedule(schedule) ? schedule : null;
+  const cap = sch ? (Number(sch.totalSlots) || 0) : effectiveQuota(c, cnt).recruitTotal;
+  const submitted = Math.max(0, Number(cnt.submittedAll) || 0);
+  const activeHolds = Math.max(0, Number(cnt.activeHolds) || 0);
+  const applicationUsed = submitted + activeHolds;
+  const expectsLinked = !!(c && c.linked_sheet_id && c.linked_tab_name);
+  const linked = cnt.linked;
+  const linkedKnown = !!(linked && linked.ok && !linked.noTab);
+  const sharedTab = linkedKnown && !!linked.sharedTab;
+  const orders = linkedKnown ? Math.max(0, Number(linked.orders) || 0) : null;
+  const tableUsed = linkedKnown && !sharedTab
+    ? Math.max(submitted, orders) + activeHolds
+    : applicationUsed;
+  const enforced = TABLE_QUOTA_MODE === 'on';
+  const known = !enforced || !expectsLinked || linkedKnown;
+  const used = enforced ? tableUsed : applicationUsed;
+  return {
+    mode: TABLE_QUOTA_MODE,
+    cap,
+    submitted,
+    activeHolds,
+    applicationUsed,
+    orders,
+    sharedTab,
+    known,
+    used,
+    tableUsed,
+    source: enforced && linkedKnown && !sharedTab ? 'order_ledger' : 'applications',
+    full: cap > 0 && used >= cap,
+    wouldClose: cap > 0 && linkedKnown && !sharedTab && tableUsed >= cap,
+  };
+}
 
 /** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
  *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
@@ -429,20 +472,16 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   //   반환되는 카드에도 관측 칩이 떠야 observe 가 관측 구실을 한다. 게이트 판정(wouldClose)은
   //   아래 soft_full 지점에서만 상태를 바꾼다.
   // ★ rt 공식은 여기서 한 번만 계산해 아래 soft_full 판정과 공유한다(판정 사본 0).
-  const rtTotal = sch ? (Number(sch.totalSlots) || 0) : eff.recruitTotal;
+  const totalUsage = totalQuotaUsage(c, counts, sch);
+  const rtTotal = totalUsage.cap;
   {
     const L = counts.linked;
     if (L && L.ok && !L.noTab) {
-      // ★ max() = 이중계수 없음: 주문 행은 제출 완료 순간에만 생기고 그때 신청은 submitted(≠applied)라
-      //   activeHolds 와 교집합이 없다(승인제 blog 홀드도 구매 전 = 주문 없음).
-      //   잔여 엣지 = 홀드확정 SAVEPOINT 실패 직후 ≤TTL 동안 1건 이중계수(과차단 방향·자연 해소).
-      const usedTable = Math.max(Number(counts.submittedAll) || 0, Number(L.orders) || 0)
-                      + (Number(counts.activeHolds) || 0);
       payload.tableQuota = {
         mode: TABLE_QUOTA_MODE, orders: L.orders, ordersAll: L.ordersAll, sharedTab: !!L.sharedTab,
         // ★ sharedTab(한 탭에 살아있는 참여형 공고 2개↑)은 게이트 비활성 — 같은 주문을 두 공고
         //   rt 에 각각 얹으면 이중 차단(귀속 배분은 범위 밖, 관제가 사실을 말한다).
-        wouldClose: rtTotal > 0 && !L.sharedTab && usedTable >= rtTotal,
+        wouldClose: totalUsage.wouldClose,
       };
     }
   }
@@ -1021,6 +1060,7 @@ module.exports = {
   liveOptions,
   dailyQuota,
   effectiveQuota,
+  totalQuotaUsage,
   timeStrToMinutes,
   kstDayStartUtc,
   kstMinutesOfDay,

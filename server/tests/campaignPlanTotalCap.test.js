@@ -6,7 +6,7 @@
  *   총량을 넘으면 savePlans 가 거부한다(422 over_total).
  *
  * ★ 계획 없는 날의 자연 정원은 세지 않는다(런타임 총량 clamp 담당) — 거부는 확실한 초과에만.
- * ★ 조회 실패는 통과(fail-open) — 게이트가 죽었다고 조절 자체가 막히면 막다른 길이 된다.
+ * ★ 연결 주문 원장 조회 실패는 증원만 fail-closed, 기존 계획 축소·해제는 통과한다.
  *
  * 실행: node tests/campaignPlanTotalCap.test.js
  */
@@ -55,6 +55,15 @@ const base = (over = {}) => ({
   // 총량 게이트의 확정 집계(all_n/today_n) — 하한 검사용 today_submitted/today_holds 와 같은 스텁 행
   'FROM campaign_applications': over.apps || [{ all_n: 0, today_n: 0, today_submitted: 0, today_holds: 0, n: 0 }],
 });
+const appRows = ({ all = 0, todayN = 0, holds = 0, todayHolds = 0 } = {}) => (sql) => {
+  if (/GROUP BY campaign_id/.test(String(sql))) return { rows: [{
+    campaign_id: 'c1', submitted_all: all, today_submitted: todayN,
+    submitted_before_today: Math.max(0, all - todayN), active_holds: holds,
+    today_active_holds: todayHolds, submitted_since_carry: 0, submitted_since_hold: 0,
+  }] };
+  if (/AS all_n/.test(String(sql))) return { rows: [{ all_n: all, today_n: todayN }] };
+  return { rows: [{ today_submitted: todayN, today_holds: todayHolds, n: all }] };
+};
 
 (async () => {
   /* 1. 총량 안이면 저장된다 */
@@ -110,14 +119,52 @@ const base = (over = {}) => ({
   const rm = await P.savePlans('c1', { remove: [d(1)] }, 't');
   ok("해제만 하는 저장은 총량 게이트 대상이 아니다", rm.applied === 1);
 
-  /* 9. 조회 실패는 통과시킨다(fail-open) — 막다른 길 금지 */
+  /* 9. 작업표 미연결 공고의 기존 신청 집계 실패는 종전처럼 통과한다. */
   STUB = base();
   STUB['FROM campaign_applications'] = (sql) => {
     if (String(sql).includes('all_n')) { const e = new Error('boom'); throw e; }
     return { rows: [{ today_submitted: 0, today_holds: 0, n: 0 }] };
   };
   const failOpen = await P.savePlans('c1', { set: [{ date: d(1), count: 10 }] }, 't');
-  ok('★ 총량 조회 실패는 저장을 막지 않는다(fail-open + 경고)', failOpen.applied === 1);
+  ok('★ 작업표 미연결 공고의 신청 집계 실패는 저장을 막지 않는다', failOpen.applied === 1);
+
+  /* 9-1. 신청 3명이어도 비공유 주문 원장이 200건이면 새 계획을 열 수 없다. */
+  STUB = base({
+    camp: { linked_sheet_id: 'S', linked_tab_name: 'T' },
+    apps: appRows({ all: 3 }),
+  });
+  STUB.order_submissions = [{ id: 'c1', orders: 200, orders_all: 200, live_campaigns: 1 }];
+  await assert.rejects(P.savePlans('c1', { set: [{ date: d(1), count: 1 }] }, 't'),
+    (e) => e.code === 'over_total' && e.confirmed === 200);
+  ok('★★ 주문 200/200 · 신청 3명이어도 날짜계획 증원을 차단', true);
+
+  /* 9-2. 공유 탭 주문은 공고별 귀속이 아니므로 종전 신청 원장 기준을 유지한다. */
+  STUB = base({
+    camp: { linked_sheet_id: 'S', linked_tab_name: 'T' },
+    apps: appRows({ all: 3 }),
+  });
+  STUB.order_submissions = [{ id: 'c1', orders: 200, orders_all: 200, live_campaigns: 2 }];
+  const shared = await P.savePlans('c1', { set: [{ date: d(1), count: 1 }] }, 't');
+  ok('★ 공유 탭은 주문 200건을 한 공고 총량으로 오차단하지 않는다', shared.applied === 1);
+
+  /* 9-3. 연결 주문 원장을 모르면 증원은 막되 축소는 복구 경로로 남긴다. */
+  STUB = base({
+    camp: { linked_sheet_id: 'S', linked_tab_name: 'T' },
+    apps: appRows({ all: 3 }),
+  });
+  STUB.order_submissions = new Error('ledger down');
+  await assert.rejects(P.savePlans('c1', { set: [{ date: d(1), count: 1 }] }, 't'),
+    (e) => e.code === 'quota_unknown');
+  ok('★ 연결 주문 원장 조회 실패면 새 날짜·증원은 fail-closed', true);
+
+  STUB = base({
+    camp: { linked_sheet_id: 'S', linked_tab_name: 'T' },
+    plans: [{ date: d(1), count: 50 }],
+    apps: appRows({ all: 3 }),
+  });
+  STUB.order_submissions = new Error('ledger down');
+  const unknownReduction = await P.savePlans('c1', { set: [{ date: d(1), count: 40 }] }, 't');
+  ok('★ 주문 원장을 몰라도 기존 계획 축소는 저장 가능', unknownReduction.applied === 1);
 
   /* 10. 판정 기준·배선 */
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'campaignPlan.service.js'), 'utf8');
@@ -136,6 +183,7 @@ const base = (over = {}) => ({
     /const onlyReductions = set\.length > 0\s*&&\s*set\.every\(x =>[\s\S]{0,180}beforePlans\.has\(x\.date\)[\s\S]{0,140}x\.count\) <= Number\(beforePlans\.get\(x\.date\)\)/.test(src));
   const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
   ok('★ over_total 은 400대로 매핑된다(errorHandler 500 마스킹 방지)', /over_total: 4\d\d/.test(routes));
+  ok('★ quota_unknown 은 503으로 매핑된다', /quota_unknown: 503/.test(routes));
 
   console.log(`\ncampaignPlanTotalCap: ${passed} passed`);
   process.exit(0);

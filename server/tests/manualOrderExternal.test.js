@@ -219,6 +219,98 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
   ok('B19 확정 후 마감 영속 판정을 호출', persistCalls === 1);
 }
 {
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 3, todaySubmitted: 0, activeHolds: 0, todayActiveHolds: 0,
+    // 현재 주문이 원장에 먼저 생성된 뒤 이 함수가 호출되므로 10건 초과의 현재 원장값은 11이다.
+    linked: { ok: true, orders: 11, ordersAll: 11, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 3 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 92 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', allowOverCapacity: true,
+    orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18b ★ 신청 3명이어도 주문 원장 10/10이면 초과 사실을 알리고 기록',
+    r.ok === true && r.overCapacity === true && r.capacityUsed === 10 && r.capacitySource === 'order_ledger');
+}
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 9, todaySubmitted: 0, activeHolds: 0, todayActiveHolds: 0,
+    linked: { ok: true, orders: 10, ordersAll: 10, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 9 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 93 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', allowOverCapacity: true,
+    orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18c ★ 현재 주문을 제외한 9/10이면 마지막 정상 주문을 11번째로 오인하지 않는다',
+    r.ok === true && r.overCapacity === false && r.capacityUsed === 9);
+}
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 9, todaySubmitted: 0, activeHolds: 1, todayActiveHolds: 1,
+    linked: { ok: true, orders: 10, ordersAll: 10, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/id = \$1 AND campaign_id = \$2 AND phone8 = \$3 FOR UPDATE/i, [{ id: 42, status: 'applied', active_hold: true }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 9 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', targetApplicationId: 42, orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+    allowOverCapacity: false,
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18d ★ 현재 주문·마지막 유효 홀드를 함께 제외해 11번째 초과로 오인하지 않는다', r.ok === true && r.overCapacity === false);
+}
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  const realDerive = schedSvc.deriveSchedules;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 3, todaySubmitted: 0, activeHolds: 0, todayActiveHolds: 0,
+    linked: { ok: true, orders: 11, ordersAll: 11, sharedTab: false },
+  }]]);
+  schedSvc.deriveSchedules = async () => new Map([['S::7', {
+    ok: true,
+    dates: [{ date: '2026-09-08', slots: 5 }, { date: '2026-09-09', slots: 5 }],
+    byDate: { '2026-09-08': 5, '2026-09-09': 5 },
+    totalSlots: 10,
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{
+      id: 'x', participation_mode: true, recruit_total: 999,
+      linked_sheet_id: 'S', linked_tab_gid: '7', linked_tab_name: 'T',
+    }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 3 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 94 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', allowOverCapacity: true,
+    orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  schedSvc.deriveSchedules = realDerive;
+  ok('B18e ★ 일정형 공고는 저장 총량 999가 아니라 일정 총량 10으로 초과를 판정',
+    r.ok === true && r.overCapacity === true && r.capacityTotal === 10 && r.capacityUsed === 10);
+}
+{
   const c = stubClient([
     [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 0 }]],
     [/status IN \('applied', 'expired', 'cancelled'\)/i, [{ id: 42 }]],

@@ -190,9 +190,9 @@
   }
   /** 배분해야 할 인원 = 총량 − 어제까지 확정 (오늘 줄부터 종료일까지의 합계 목표) */
   function targetTotal() { return Math.max(0, totalFor() - doneBefore()); }
-  /** 수동 명시계획의 총량 상한은 savePlans 와 같은 제출 원장을 사용한다.
-   *  무시트 작업표의 filled 수는 운영 진행 표시에 쓰이지만, 저장 트랜잭션은
-   *  campaign_applications 를 다시 잠가 검사하므로 이를 섞으면 화면과 저장 결과가 갈린다. */
+  /** 수동 명시계획의 총량 상한은 savePlans 와 같은 소비량을 사용한다.
+   *  비공유 연결 공고는 주문 원장, 공유 탭은 공고 신청을 기준으로 하며 유효 홀드를 포함한다.
+   *  무시트 작업표의 filled 수는 운영 진행 표시에만 쓰므로 선기입 행이 정원을 닫지 않는다. */
   function planGateSubmittedAll() {
     return Math.max(0, Number(S.data.planGateSubmittedAll != null
       ? S.data.planGateSubmittedAll : S.data.submittedAll) || 0);
@@ -202,6 +202,8 @@
       ? S.data.planGateTodaySubmitted : (S.data.todaySubmitted != null
         ? S.data.todaySubmitted : (S.data.byDateSubmitted || {})[S.data.today])) || 0);
   }
+  function planGateKnown() { return S.data.planGateKnown !== false; }
+  function totalQuotaLocked() { return S.data.totalQuotaFull === true || !planGateKnown(); }
   function manualTargetTotal() {
     return Math.max(0, totalFor() - Math.max(0, planGateSubmittedAll() - planGateTodaySubmitted()));
   }
@@ -465,6 +467,11 @@
    *  ★ 수동 표도 명시 계획은 서버 총량 게이트를 통과해야 하므로 같은 상한을 적용한다.
    *  이미 화면에 보이는 기본 정원은 보존해, 초과 상태에서는 늘리기만 막고 줄이는 길은 남긴다. */
   function maxFor(d) {
+    // 총 모집 완료 또는 주문 원장 조회 실패 상태에서는 현재 값보다 늘리지 않는다.
+    // 기존 계획 축소·해제와 이미 사용된 수량까지의 정상화는 계속 가능하다.
+    if (totalQuotaLocked()) {
+      return Math.min(MAX_DAY, Math.max(minFor(d), planFor(d)));
+    }
     if (!balanceOn()) {
       if (totalFor() <= 0) return MAX_DAY;
       var manualRoom = manualTargetTotal() - manualPlanTotal();
@@ -1409,6 +1416,12 @@
         + '<div class="txt"><div class="l1">' + manualL1 + '</div></div></div>';
     }
 
+    var quotaBlk = !planGateKnown()
+      ? '<div class="cdp-note err"><b>주문 원장 총량을 확인하지 못했습니다.</b> 새 날짜 추가·인원 증원은 잠시 중단되며 기존 계획 축소·해제만 저장할 수 있습니다.</div>'
+      : (j.totalQuotaFull === true
+        ? '<div class="cdp-note warn"><b>총 모집 ' + totalFor() + '건이 완료되었습니다.</b> 현재 소비량 ' + planGateSubmittedAll() + '건 — 인원 증원은 불가하며 기존 계획 축소·해제 또는 차수 추가만 가능합니다.</div>'
+        : '');
+
     var roundsHtml = (j.rounds || []).map(function (r, i) {
       var prev = (j.rounds || []).slice(0, i).reduce(function (s, x) { return s + (x.count || 0); }, 0);
       var got = Math.max(0, Math.min(r.count || 0, (j.submittedAll || 0) - prev));
@@ -1462,6 +1475,7 @@
       + (j.status !== 'active'
         ? '<div class="cdp-publish">현재 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b> 상태입니다. 모집을 다시 열려면 공고 카드에서 게시를 켜세요.</div>'
         : '')
+      + quotaBlk
       + balBlk
       + '<div class="cdp-sub"><span>날짜별 모집 계획 — 게이지 드래그 또는 −/＋' + (bal ? ' · 숫자 직접 입력' : '') + '</span>'
       + '<span>' + (j.scheduleDriven === true ? '기본 <b>시트 구매일자 기준</b>' : '기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b>')
@@ -1517,9 +1531,12 @@
       //   + 서버 저장 상한(한 번에 120일)을 넘으면 통째로 거부되므로 미리 잠그고 **사유를 말한다**.
       var over = dirty > MAX_ROWS;
       // ★ 초과만 잠근다(총건수는 넘을 수 없다). 부족은 "그만큼만 모집"이라 저장 가능.
-      save.disabled = killOff || S.saving || diff > 0 || !dirty || over;
+      var quotaRecovery = totalQuotaLocked() && manualOnlyReductions();
+      save.disabled = killOff || S.saving || diff > 0 || !dirty || over || (totalQuotaLocked() && !quotaRecovery);
       hint.textContent = over
         ? '저장할 날짜가 ' + dirty + '일로 한 번에 저장 가능한 ' + MAX_ROWS + '일을 넘었습니다 — 구간을 나눠 저장해주세요'
+        : totalQuotaLocked() && !quotaRecovery
+          ? (planGateKnown() ? '총 모집이 완료되어 증원할 수 없습니다 — 기존 계획 축소·해제 또는 차수 추가만 가능합니다' : '주문 원장 총량 확인 전에는 증원할 수 없습니다 — 기존 계획 축소·해제만 가능합니다')
         : diff > 0 ? '초과 ' + diff + '건 — 저장불가'
         : diff < 0 ? '총량보다 ' + (-diff) + '명 적게 모집합니다 — 저장하면 작업표도 그 수로 줄어듭니다'
         : dirty ? '남은건수와 딱 맞습니다 — [확정 저장]을 누르면 반영됩니다'
@@ -1535,8 +1552,12 @@
     } else {
       var manualOver = totalFor() > 0 && manualDiffPlan() > 0;
       var manualRecovery = manualOver && manualOnlyReductions();
-      save.disabled = killOff || S.saving || !dirty || (manualOver && !manualRecovery);
-      hint.textContent = manualOver
+      var manualQuotaRecovery = totalQuotaLocked() && manualOnlyReductions();
+      save.disabled = killOff || S.saving || !dirty || (manualOver && !manualRecovery)
+        || (totalQuotaLocked() && !manualQuotaRecovery);
+      hint.textContent = totalQuotaLocked() && !manualQuotaRecovery
+        ? (planGateKnown() ? '총 모집이 완료되어 증원할 수 없습니다 — 기존 계획 축소·해제 또는 차수 추가만 가능합니다' : '주문 원장 총량 확인 전에는 증원할 수 없습니다 — 기존 계획 축소·해제만 가능합니다')
+        : manualOver
         ? (manualRecovery
           ? '아직 ' + manualDiffPlan() + '건 초과지만 이번 저장은 기존 계획을 줄이는 변경만 포함합니다 — 저장가능'
           : '명시 계획이 배정 가능 인원보다 ' + manualDiffPlan() + '건 많습니다 — 기존 계획을 줄인 뒤 저장해주세요')
