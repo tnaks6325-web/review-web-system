@@ -97,12 +97,14 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
   const sl = read('src/services/sheetlessOrder.service.js');
   ok('재기록 재료 ③(무시트 복구)에 선택 상품', /selectedProduct: row\.selected_product/.test(sl));
   ok('무시트 복구 SELECT 이 그 컬럼을 읽는다', /os\.selected_product/.test(sl));
-  ok('옵션 없는 상품도 상품명으로 예정 슬롯을 찾는다',
-    /scheduledUnitKey = selectedOptKey \|\| String\(orderData\.selectedProduct \|\| ''\)\.trim\(\)/.test(sl));
-  ok('큐 원장을 다시 읽은 뒤에 선택 키를 계산한다',
-    /orderData = ledgerSvc\._osRowToOrderData\(freshOrders\[0\]\);[\s\S]{0,180}scheduledUnitKey =/.test(sl));
-  ok('상품명은 행 선택에만 쓰고 옵션 칸 기록은 계속 옵션 키만 쓴다',
-    /const optText = selectedOptKey;/.test(sl) && /workboardId, scheduledUnitKey\]\)\);/.test(sl));
+  ok('상품명은 빈 슬롯 선택 키로 사용하지 않는다',
+    /scheduledOptionKey = selectedOptKey;/.test(sl) &&
+    !/scheduledOptionKey\s*=\s*[^;]*selectedProduct/.test(sl) &&
+    !/scheduledUnitKey/.test(sl));
+  ok('큐 원장을 다시 읽은 뒤에 옵션 키를 계산한다',
+    /orderData = ledgerSvc\._osRowToOrderData\(freshOrders\[0\]\);[\s\S]{0,180}scheduledOptionKey =/.test(sl));
+  ok('슬롯 구분과 옵션 칸 기록은 옵션 키만 쓴다',
+    /const optText = selectedOptKey;/.test(sl) && /workboardId, scheduledOptionKey\]\)\);/.test(sl));
 
   const create = read('src/services/worktableCreate.service.js');
   const preview = read('src/routes/trackB.routes.js');
