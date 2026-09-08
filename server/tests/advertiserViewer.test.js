@@ -111,7 +111,8 @@ async function run() {
     && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_submitted\)::int AS submitted/.test(svcSrc));
   ok('업체 작업목록 입금 수도 원장 플래그가 아닌 실제 작업표 입금 셀을 집계한다',
     /paid_header\.paid_header/.test(svcSrc)
-    && /cp\.row_json\s*->>\s*COALESCE\(NULLIF\(BTRIM\(cp\.submit_col2\), ''\), paid_header\.paid_header\)/.test(svcSrc)
+    && /cp\.row_json\s*->>\s*COALESCE\(paid_header\.paid_header, NULLIF\(BTRIM\(cp\.submit_col2\), ''\)\)/.test(svcSrc)
+    && /GROUP BY NULLIF\(BTRIM\(ri\.submit_col2\), ''\)[\s\S]{0,100}ORDER BY COUNT\(\*\) DESC/.test(svcSrc)
     && /current_paid_edit/.test(svcSrc)
     && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_paid\)::int AS paid/.test(svcSrc));
   ok('★ 내부 필드(비고 memo·담당 manager·salesId) 는 항목에 아예 없다 — 화면에서만 감추는 건 보안연극',
