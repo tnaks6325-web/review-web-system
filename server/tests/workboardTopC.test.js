@@ -140,9 +140,10 @@ t('★ 작업세부 상시 펼침은 본문에서 사라졌다(정의·호출 �
   !/function renderWorkOrderSection/.test(wd) && !/renderWorkOrderSection\(/.test(wd)
   && !/class="wodetail"[^`]*작업세부 펼치기/.test(wd));
 t('★ 발주 전폭 띠(.wobar)를 그리지 않는다', !/<div class="wobar">/.test(wd));
-t('★ 정산은 진행 현황의 견적서·계산서·입금 세 버튼만 사용하고 하단 상세를 만들지 않는다',
+t('★ 정산은 진행 현황의 견적서·계산서·입금 버튼과 내부 미매칭 액션만 사용하고 하단 상세를 만들지 않는다',
   /const setlIn=`<div class="setlin" id="setlCell"><div class="tp3t">정산<\/div>\$\{setlSummaryHtml\(null\)\}<\/div>`/.test(wd)
   && /btn\('quote','견적서'/.test(wd) && /btn\('invoice','계산서'/.test(wd) && /btn\('payment','입금'/.test(wd)
+  && /class="tp3doc tp3match" onclick="openProgressContractMatch\(event\)">계약 매칭<\/button>/.test(wd)
   && !/toggleSettleDetail/.test(wd) && !/id="setldetail"/.test(wd) && !/id="settlementsec"/.test(wd));
 /* ★★ 작업 조건 카드는 **내부·업체 한 벌**(사용자 확정 2026-08-23) — 종전에는 광고주만 4줄 요약을
    따로 그려 두 화면이 계속 어긋났다. 무엇을 보여줄지는 **서버 렌즈**가 정하고, 화면이 광고주에게

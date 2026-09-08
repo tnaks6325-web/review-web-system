@@ -1763,15 +1763,16 @@
      초과 배정은 저장 경로에서 막으므로 이 자리는 "미설정"만 말한다. */
   .tp3schedulewarn{margin-top:7px;padding:6px 8px;border:1px solid #f3d49a;border-radius:7px;
                    background:var(--warn-soft);color:var(--warn);font-size:11px;font-weight:800;line-height:1.25}
-  /* 정산 — 진행 현황 안의 세 문서 버튼만 운영한다(내부·업체 공통). */
+  /* 정산 — 진행 현황의 문서 버튼은 내부·업체 공통. 미매칭 계약 액션은 내부 권한에만 보인다. */
   .setlsummary{display:block;min-width:0}
   .tp3docs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px}
-  .tp3doc{min-width:0;border:1px solid var(--line2);border-radius:7px;background:var(--card2);color:var(--accent-deep);
+  .tp3doc{min-width:0;border:1px solid var(--line2);border-radius:7px;background:var(--card2);color:var(--accent);
           padding:7px 5px;font:inherit;font-size:11px;font-weight:800;text-align:center;cursor:pointer;transition:.14s ease}
   .tp3doc:hover,.tp3doc:focus-visible{border-color:var(--accent);background:var(--accent-soft);outline:none;box-shadow:0 2px 7px rgba(37,84,201,.12)}
   .tp3doc.ready{background:var(--accent-soft);border-color:var(--accent-line)}
   .tp3doc.ready::before{content:'✓';display:inline-block;margin-right:4px;color:var(--safe);font-size:10px}
-  .tp3doc:disabled{cursor:wait;color:var(--faint);background:var(--card2);border-color:var(--line);box-shadow:none;opacity:.65}
+  .tp3doc:disabled{cursor:not-allowed;color:#98a2b3;background:#eef1f5;border-color:#dfe4ea;box-shadow:none;opacity:1}
+  .tp3match{grid-column:1;border-style:dashed;background:var(--card);color:var(--accent)}
   /* ══ 작업보드 상단 3분할(내부) — 시안 C 확정 2026-08-19 ══════════════════════════
      시안 = frontend/docs/design-workboard-top-redesign.html (?v=C)
      폭 = 작업조건 439 / 진행현황 439 / 미리보기 659 — 앞 두 칸은 **같은 너비**(사용자 확정 2026-08-19,
@@ -6963,14 +6964,17 @@ function _woUnlinkedRow(wd){
   return `<div class="tp3wo"><b>⚠ 작업발주 미연결</b>`+
     `<button class="btn pri" title="발주(작업오더)를 연결하면 이 카드의 작업 조건(결제금액·유입방식·정원 폴백)과 발주 원문이 표시됩니다." onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
 }
-// 진행 현황 정산 버튼 — 내부·업체 모두 견적서·계산서·입금 세 가지만 운영한다.
+// 진행 현황 정산 버튼 — 문서 3개는 공통, 계약 미매칭 액션은 내부 편집 역할에만 제공한다.
 function setlSummaryHtml(d){
   const unavailable=!d||d.hidden||!d.linked;
   const qReady=!unavailable&&!!(d.quote&&d.quote.quoteNumber);
+  const qRetry=!unavailable&&!d.quote&&!!d.quoteLookupFailed;
   const iReady=!unavailable&&!!(d.invoice&&d.invoice.status==='issued');
   const pReady=!unavailable&&!!(d.payment&&d.payment.status==='paid');
-  const btn=(kind,label,ready)=>`<button type="button" class="tp3doc${ready?' ready':''}"${d?'':' disabled'} onclick="openSettlementDocument(event,'${kind}')">${label}</button>`;
-  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady)}${btn('invoice','계산서',iReady)}${btn('payment','입금',pReady)}</span></span>`;
+  const btn=(kind,label,ready,disabled=!d)=>`<button type="button" class="tp3doc${ready?' ready':''}"${disabled?' disabled':''} onclick="openSettlementDocument(event,'${kind}')">${label}</button>`;
+  const canMatch=!!d&&!d.hidden&&!d.linked&&(STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff');
+  const match=canMatch?'<button type="button" class="tp3doc tp3match" onclick="openProgressContractMatch(event)">계약 매칭</button>':'';
+  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,!qReady&&!qRetry)}${btn('invoice','계산서',iReady)}${btn('payment','입금',pReady)}${match}</span></span>`;
 }
 function openSettlementDocument(ev,kind){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }
@@ -7083,7 +7087,15 @@ function openSettlementPayment(){
     <div class="cell"><span class="k">계약 금액</span><b>${d.amount==null?'—':_wonFmt(d.amount)}</b></div>
   </div></div>${d.proxyDown?'<div class="empty" style="padding:10px">정산 시스템 연결이 원활하지 않아 일부 정보가 늦게 표시될 수 있습니다.</div>':''}`);
 }
-// 계약 매칭은 업체관리 연결탭에서만 연다. 작업보드 진행 현황은 세 문서 버튼만 유지한다.
+// 작업보드 진행 현황의 미매칭 액션 — 화면 노출과 별개로 직접 호출도 내부 역할만 허용한다.
+function openProgressContractMatch(ev){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  if(!(STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')) return;
+  const st=STATE.settle, d=st&&st.data, t=(st&&st.tab)||STATE.cur;
+  if(!t||!d||d.hidden||d.linked) return;
+  openContractMatchModal({sheetId:t.sheetId,tabName:t.tabName,linked:false});
+}
+// 업체관리와 작업보드가 같은 계약 매칭 모달을 공유한다.
 //    ctx = {sheetId, tabName, linked} — 어느 화면에서 열었든 이 문맥만으로 동작한다.
 function openContractMatchModal(ctx){
   if(!ctx||!ctx.sheetId||!ctx.tabName) return;
