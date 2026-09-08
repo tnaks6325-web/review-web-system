@@ -4618,7 +4618,7 @@ async function _ccLogLoad() {
     const current = document.getElementById("ccBody"); if (current) current.scrollTop = 0;
     _ccLogAfterGrow();
   } catch (error) {
-    if (seq !== _ccLogSeq) return;
+    if (seq !== _ccLogSeq || _ccMode !== "log") return;
     _ccLogBusy = false;
     if (body) body.innerHTML = `<div class="cc-empty cc-error">로그를 불러오지 못했습니다 — ${_ccLogEsc(error.message)}<br><button class="cc-small-btn" onclick="_ccLogLoad()">다시 시도</button></div>`;
   }
@@ -4637,7 +4637,7 @@ async function _ccLogMore() {
     _ccLogUpdateSearchCount(); _ccLogPaintWarn(); _ccLogPaintFoot();
     if (added.length) _ccLogAfterGrow();
   } catch (error) {
-    if (seq !== _ccLogSeq) return;
+    if (seq !== _ccLogSeq || _ccMode !== "log") return;
     _ccLogBusy = false; _ccLogErr = error.message || "조회 실패"; _ccLogPaintFoot();
   }
 }
