@@ -1292,7 +1292,9 @@ function _mapSales(r) {
   return {
     salesId: r.id, contractNumber: String(r.contract_number || '').trim(),
     advertiserName: String(r.advertiser_name || '').trim(), productName: String(r.product_name || '').trim(),
-    manager: String(r.manager || '').trim() || null, amount: Number(r.amount) || 0,
+    // 신형 인트라넷 계약은 contract_amount에 금액을 저장한다. 구형 amount가 0이면
+    // 계약 상세 조회는 성공해도 리뷰웹 정산이 0원으로 보이므로, 계약금액을 폴백으로 쓴다.
+    manager: String(r.manager || '').trim() || null, amount: Number(r.amount) || Number(r.contract_amount) || 0,
     paymentStatus: r.payment_status || 'unpaid', invoiceStatus: r.invoice_status || 'not_issued',
     paymentDate: r.payment_date || null, invoiceDate: r.invoice_date || null,
     // 입금매칭(인트라넷 계약관리 sales_bank_matches 의 집계 파생값): 누적 입금액 + 최근 입금일

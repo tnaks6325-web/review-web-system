@@ -76,6 +76,17 @@ async function run() {
   assert.equal(r.linkedBy, 'kim', '2a3: 내부는 linkedBy 노출'); assert.equal(r.salesInfo.manager, '김수만', '2a4: 내부 담당자 노출');
   assert.ok(!r.hidden, '2a: 내부 hidden 아님');
 
+  // 신형 인트라넷 계약은 amount 대신 contract_amount에 계약금액을 저장한다.
+  // 이 값을 읽지 않으면 상세 조회가 성공해도 리뷰웹 정산 카드가 0원으로 잘못 보인다.
+  const linkRowContractAmount = { rows: [{ salesId: 'S_CONTRACT_AMOUNT', quoteId: null, contractNumber: 'C-20260825-002', linkedBy: 'kim' }] };
+  stubFetch([
+    [/\/api\/tables\/sales\/S_CONTRACT_AMOUNT/, { data: { id: 'S_CONTRACT_AMOUNT', contract_number: 'C-20260825-002', contract_amount: 88011000 } }],
+    [/\/api\/tables\/quotes\?where=sales_id=S_CONTRACT_AMOUNT/, { data: [] }],
+  ]);
+  p = pool([[/FROM trackb_settlement_links WHERE/, () => linkRowContractAmount]]); svc.__setPoolForTest(p);
+  r = await svc.settlementForTab({ sheetId: 'S1', tabName: 'T_contract_amount', role: 'master' });
+  assert.equal(r.amount, 88011000, '2a5: 신형 계약의 contract_amount를 정산 금액으로 사용');
+
   // 2b: 광고주 + visible=TRUE(기본, prefs 행 없음) → 금액 포함, 단 내부정보(linkedBy·담당자) 미노출(Nit5)
   stubFetch(salesRoutes());
   p = pool([
