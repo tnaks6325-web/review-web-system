@@ -3339,7 +3339,11 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
        LEFT JOIN LATERAL (
          SELECT os.submitted_at, os.source, os.campaign_was_late
            FROM order_submissions os
-          WHERE linked_order.id IS NULL AND os.campaign_application_id = ca.id
+          WHERE linked_order.id IS NULL
+            /* submitted인데 현재 주문 링크가 없으면 새 주문 없는 구매확인 수동확정이다.
+               취소된 과거 주문을 현재 제출처럼 복구하지 않는다. */
+            AND ca.status IS DISTINCT FROM 'submitted'
+            AND os.campaign_application_id = ca.id
           ORDER BY os.submitted_at DESC, os.id DESC
           LIMIT 1
        ) history_order ON TRUE
