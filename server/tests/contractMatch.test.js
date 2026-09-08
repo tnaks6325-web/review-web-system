@@ -43,7 +43,7 @@ function pool(routes) {
 // 인트라넷 sales 원본 행(스네이크 케이스) — _mapSales 가 읽는 형태 그대로.
 function sale(o) {
   return Object.assign({ id: 'x', contract_number: '', business_name: '', advertiser_name: '', brand_product: '',
-    contract_detail: '', product_name: '', contract_month: null, amount: 0 }, o);
+    contract_detail: '', product_name: '', contract_month: null, registration_date: null, created_at: null, amount: 0 }, o);
 }
 
 async function run() {
@@ -123,7 +123,7 @@ async function run() {
   // ═══ 3. intranetSalesForAdvertiser — 서버 응답 재필터(where 무시 방어) ═══
   //   인트라넷 where 파서는 절을 무시하고 **전 계약**을 돌려줄 수 있다 → 이름으로 다시 걸러야 한다.
   let calls = stubFetch([[/\/api\/tables\/sales\?/, { data: [
-    sale({ id: 's1', contract_number: 'C-1', business_name: '재필터업체', brand_product: '올레샷' }),
+    sale({ id: 's1', contract_number: 'C-1', business_name: '재필터업체', brand_product: '올레샷', registration_date: '2026-08-07T03:12:45.000Z' }),
     sale({ id: 's2', contract_number: 'C-2', business_name: '남의업체', brand_product: '기타' }),   // where 무시로 섞여 온 남의 계약
   ] }]]);
   let r = await svc.intranetSalesForAdvertiser('재필터업체');
@@ -131,6 +131,7 @@ async function run() {
   assert.equal(r.items.length, 1, '3a: 이름이 다른 계약은 후보에서 제외(서버 필터를 믿지 않는다)');
   assert.equal(r.items[0].salesId, 's1', '3a2: 그 업체 계약만 남음');
   assert.equal(r.items[0].brandProduct, '올레샷', '3b: 매칭 재료(brand_product) 매핑');
+  assert.equal(r.items[0].registrationDate, '2026-08-07T03:12:45.000Z', '3b2: 계약 등록일 매핑');
   assert.ok(calls.every(u => /\/api\/tables\/sales/.test(u)), '3c: 인트라넷은 sales GET만(쓰기 없음)');
 
   stubFetch([[/\/api\/tables\/sales/, 'throw']]);
@@ -145,7 +146,7 @@ async function run() {
   db = pool([[/FROM advertiser_campaigns ac JOIN advertisers a/, () => ({ rows: ownerRows })]]); svc.__setPoolForTest(db);
   stubFetch([[/\/api\/tables\/sales\?/, { data: [
     sale({ id: 'm1', contract_number: 'C-MATCH', business_name: '파미고', brand_product: '올레샷', contract_detail: '블로그 바이럴', contract_month: '2026-07' }),
-    sale({ id: 'm2', contract_number: 'C-OTHER', business_name: '파미고', brand_product: '닥터케어', contract_detail: '배너', contract_month: '2026-02' }),
+    sale({ id: 'm2', contract_number: 'C-OTHER', business_name: '파미고', brand_product: '닥터케어', contract_detail: '배너', contract_month: '2026-02', created_at: '2026-02-03T10:20:30.000Z' }),
   ] }]]);
   let out = await svc.contractCandidatesForTab({ sheetId: 'S1', tabName: '7/21파미고_올레샷_블로그 바이럴' });
   assert.equal(out.ok, true);
@@ -155,6 +156,7 @@ async function run() {
   assert.equal(out.recommendedSalesId, 'm1', '4c: 작업명과 가장 닮은 계약 자동 추천');
   assert.equal(out.items[0].salesId, 'm1', '4c2: 추천이 목록 맨 위');
   assert.ok(out.items.every(i => i.advertiserMatch === true), '4d: 업체 일치 표기');
+  assert.equal(out.items.find(i => i.salesId === 'm2').registrationDate, '2026-02-03T10:20:30.000Z', '4d2: 구형 계약은 created_at 을 등록일로 사용');
 
   // 업체 미지정 → 폴백 사유를 말한다(조용히 전체를 보여주지 않는다)
   db = pool([]); svc.__setPoolForTest(db);
@@ -241,15 +243,18 @@ async function run() {
   vm.createContext(sb); vm.runInContext(rowSrc, sb);
   const row = sb._lkRowHtml({ salesId: 'a', contractNumber: 'C-20260702-010', businessName: '어니스트캄',
     brandProduct: '엘라비에', contractDetail: '4/8(메이커스)엘라비에 마스크팩 마케팅', contractMonth: '2026-04',
-    amount: 0, contractAmount: 4180000, matchScore: 45, matchReasons: ['브랜드·상품 일치'], advertiserMatch: true,
+    registrationDate: '2026-08-07T23:30:00.000Z', amount: 0, contractAmount: 4180000, matchScore: 45, matchReasons: ['브랜드·상품 일치'], advertiserMatch: true,
     contractItems: [{ name: '마케팅 리뷰', count: 800, amount: 4180000 }] }, 0, 'a');
   assert.ok(row.indexOf('4/8(메이커스)엘라비에 마스크팩 마케팅') > -1, '7l: 계약명(계약상품상세) 표기');
+  assert.ok(/lkregdate[^>]*>등록일 2026-08-08</.test(row), '7l1: 계약번호 옆에 한국시간 기준 등록일 표기');
   // ★ 계약명이 헤드라인 · 계약고유번호는 보조 — CSS 로 위계를 고정(되돌리면 종전처럼 번호가 제목이 된다).
   const nameCss = (HTML.match(/\.lkname\{([^}]*)\}/) || [, ''])[1];
   const cnoCss = (HTML.match(/\.lkcno\{([^}]*)\}/) || [, ''])[1];
+  const regCss = (HTML.match(/\.lkregdate\{([^}]*)\}/) || [, ''])[1];
   const px = css => parseFloat((css.match(/font-size:([\d.]+)px/) || [, '0'])[1]);
   assert.ok(px(nameCss) >= 13 && /font-weight:8/.test(nameCss), '7l2: 계약명이 헤드라인 크기·굵기');
   assert.ok(px(cnoCss) > 0 && px(cnoCss) < px(nameCss), '7l3: 계약고유번호는 계약명보다 작은 보조 표기');
+  assert.ok(px(regCss) > 0 && px(regCss) < px(nameCss) && /color:var\(--muted\)/.test(regCss), '7l4: 등록일은 작은 보조 정보로 표기');
   assert.ok(/4,180,000원/.test(row), '7m: 총비용 = amount 없으면 contract_amount 폴백');
   assert.ok(/lkrail[^]{0,120}>45</.test(row), '7n: 좌측 유사도 레일(시안 C)');
   assert.ok(/✓ 브랜드·상품 일치/.test(row), '7o: 일치근거를 체크 표기로 강조');
@@ -257,6 +262,9 @@ async function run() {
   const noWhy = sb._lkRowHtml({ salesId: 'b', contractNumber: 'C-2', matchScore: 10, matchReasons: [] }, 1, 'a');
   assert.ok(/lkwhy none[^]{0,120}일치하는 항목 없음/.test(noWhy), '7p: 근거 없으면 그 사실을 문장으로 말한다');
   assert.ok(/\(계약명 없음\)/.test(noWhy), '7q: 계약명 후보가 모두 비면 그 사실을 표기(빈칸 금지)');
+  assert.ok(!/등록일/.test(noWhy), '7q2: 등록일이 없는 구형 데이터에는 빈 라벨을 만들지 않음');
+  assert.equal(sb._lkRegistrationDate('20260807'), '2026-08-07', '7q3: 압축 날짜 형식도 표시');
+  assert.equal(sb._lkRegistrationDate('1788851495'), '2026-09-08', '7q4: Unix 초 시각을 날짜로 오인하지 않고 한국시간으로 표시');
   assert.ok(/_lkRowHtml\(s,i,r\.recommendedSalesId\)/.test(HTML), '7r: 행 빌더는 한 벌(사본 금지)');
   assert.ok(/lkmodalbox[^]{0,240}overflow-y:auto/.test(HTML), '7r2: 계약 목록은 팝업 본문에서 스크롤');
   assert.ok(/page=\$\{page\}/.test(SVC) && /exactFirstPage/.test(SVC) && /ignoredFilter/.test(SVC), '7r3: 업체 일치 계약은 필터 무시를 감지한 뒤 페이지 끝까지 조회');

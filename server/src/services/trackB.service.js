@@ -1280,7 +1280,8 @@ function _mapSales(r) {
     brandProduct: String(r.brand_product || '').trim(),
     contractDetail: String(r.contract_detail || '').trim(),
     contractMonth: r.contract_month || null,
-    registrationDate: r.registration_date || null,
+    // 신형 계약은 registration_date, 구형 계약은 created_at 에만 등록 시각이 남을 수 있다.
+    registrationDate: r.registration_date || r.created_at || null,
     attributionMonth: r.attribution_month || null,
     contractAmount: Number(r.contract_amount) || 0,
     contractItems,

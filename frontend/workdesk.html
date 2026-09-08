@@ -1703,6 +1703,7 @@
   .lkamt{font-size:12.5px;font-weight:900;color:var(--accent-deep);white-space:nowrap;font-variant-numeric:tabular-nums}
   .lksub{font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .lkcno{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.01em}
+  .lkregdate{font-size:10px;font-weight:650;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;padding-left:6px;border-left:1px solid var(--line2)}
   .lkrecb{font-size:10.5px;font-weight:800;padding:1px 6px;border-radius:999px;background:var(--accent-deep);color:#fff;white-space:nowrap}
   .lkwarnb{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:#fff3cd;color:#8a5a00;border:1px solid #f0d69a;white-space:nowrap}
   .lkwhy{margin-top:8px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:8px;padding:6px 9px;display:flex;gap:9px;flex-wrap:wrap}
@@ -7188,6 +7189,7 @@ function _lkRowHtml(s,i,recommendedSalesId){
   const lo=(sc==null||sc<45);                                   // 서버 추천 임계와 같은 값
   const name=s.contractDetail||s.productName||s.brandProduct||'(계약명 없음)';
   const cost=Number(s.amount)||Number(s.contractAmount)||0;
+  const registered=_lkRegistrationDate(s.registrationDate);
   const sub=[s.businessName||s.advertiserName,s.brandProduct,s.contractMonth]
     .filter(v=>v&&String(v).trim()&&String(v).trim()!==String(name).trim()).map(esc).join(' · ');
   const rail=`<div class="lkrail"><div class="n">${sc==null?'–':sc}</div><div class="k">유사도 %</div>
@@ -7207,12 +7209,30 @@ function _lkRowHtml(s,i,recommendedSalesId){
     : `<div class="lkproducts"><b>계약 품목</b><span class="lkproduct" style="color:var(--faint);font-weight:600">등록된 품목 없음</span></div>`;
   return `<div class="lkrow${rec?' rec':''}${lo?' lo':''}${off?' off':''}" onclick="pickSales(${i})">${rail}
     <div class="lkinfo">
-      <div class="lkbadges">${rec?'<span class="lkrecb">추천</span>':''}${off?'<span class="lkwarnb">다른 업체 계약</span>':''}<span class="lkcno">${esc(s.contractNumber||'(번호없음)')}</span></div>
+      <div class="lkbadges">${rec?'<span class="lkrecb">추천</span>':''}${off?'<span class="lkwarnb">다른 업체 계약</span>':''}<span class="lkcno">${esc(s.contractNumber||'(번호없음)')}</span>${registered?`<span class="lkregdate">등록일 ${esc(registered)}</span>`:''}</div>
       <div class="lknm"><span class="lkname" title="${esc(name)}">${esc(name)}</span>${cost?`<span class="lkamt" title="계약금액">${_wonFmt(cost)}</span>`:''}</div>
       ${sub?`<div class="lksub">${sub}</div>`:''}
       ${products}
       ${why}
     </div></div>`;
+}
+function _lkRegistrationDate(value){
+  const raw=String(value==null?'':value).trim();
+  if(!raw) return '';
+  // 날짜만 저장된 값은 그대로 쓰고, 시각이 포함된 값은 아래에서 한국시간으로 변환한다.
+  let m=raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m=raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const numeric=Number(raw);
+  const date=Number.isFinite(numeric)&&numeric>0
+    ? new Date(numeric<1e12?numeric*1000:numeric)
+    : new Date(raw);
+  if(Number.isNaN(date.getTime())) return '';
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+  const part=type=>((parts.find(p=>p.type===type)||{}).value||'');
+  const y=part('year'),mo=part('month'),d=part('day');
+  return y&&mo&&d?`${y}-${mo}-${d}`:'';
 }
 function searchSales(q){   // 전체 검색 모드 입력 디바운스
   if(_LK.composing) return; // 한글 IME 조합 중인 자모로 서버 검색·렌더링하지 않는다.
