@@ -104,8 +104,12 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
     for (let i = 0; i < delta.add; i++) {
       await client.query(
         `INSERT INTO campaign_participants
-           (sheet_id, tab_gid, tab_name, seq, row_json, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,'{}'::jsonb,'worktable',$5,NOW())`,
+           (sheet_id, tab_gid, tab_name, seq, row_json, workboard_id, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,'{}'::jsonb,
+           (SELECT tc.workboard_id FROM tab_configs tc
+             JOIN workboards w ON w.id=tc.workboard_id AND w.state='active'
+            WHERE tc.sheet_id=$1 AND tc.tab_name=$3 LIMIT 1),
+           'worktable',$5,NOW())`,
         [campaign.linked_sheet_id, tabGid, campaign.linked_tab_name, maxSeq + i + 1, String(by).slice(0, 100)]
       );
     }

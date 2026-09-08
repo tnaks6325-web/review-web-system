@@ -2624,6 +2624,7 @@ async function tryTestAutoLogin(){
 }
 // 만료/거부 토큰 정리 — "만료 배지 + 빈 목록" 유령 화면 대신 로그인으로. raw_sso 재주입 루프도 차단.
 function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
+  if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
@@ -2723,6 +2724,7 @@ async function boot(){
   if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
   renderShell();
+  _wbOrderLiveStart();
   // 공유 링크 실패는 조용히 홈으로 떨어지지 않는다 — 왜 못 열었는지(폐기·담당 밖) 말한다.
   if(_SHARE_ERR){ const msg=_SHARE_ERR; _SHARE_ERR=''; setTimeout(()=>alert(msg),50); }
 }
@@ -16372,6 +16374,50 @@ async function reloadWorkdesk(){ _clearCellUndoHistory(); const t=STATE.cur; if(
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
   renderWorkdesk(await api('/api/trackb/workdesk?'+q,{cache:'no-store'})); loadParity(t);
 }
+/* 리뷰어 구매제출 → 현재 열어 둔 작업보드 근실시간 갱신.
+   ★ 전역 알림에는 다른 작업 제출도 섞인다. sheetId+tabName이 현재 작업과 정확히 같을 때만 읽는다.
+   ★ 제출 이벤트는 큐 처리 직전에 오므로 2초 뒤 첫 조회, 큐 건만 20초 뒤 한 번 더 확인한다.
+   ★ 입력 중 DOM을 갈아치우면 한글 IME/수정값이 사라진다. 편집 포커스가 있으면 끝날 때까지 미룬다. */
+let _wbOrderLiveSource=null, _wbOrderLiveTimer=null, _wbOrderLiveBusy=false;
+function _wbOrderLiveStop(){
+  if(_wbOrderLiveSource){ try{_wbOrderLiveSource.close();}catch(_){ } _wbOrderLiveSource=null; }
+  if(_wbOrderLiveTimer){ clearTimeout(_wbOrderLiveTimer); _wbOrderLiveTimer=null; }
+  _wbOrderLiveBusy=false;
+}
+function _wbOrderEditing(){
+  const a=document.activeElement;
+  return !!(a&&a.matches&&a.matches('input,textarea,select,[contenteditable="true"]'));
+}
+function _wbOrderLiveSchedule(data, delay, backup){
+  const t=STATE.cur;
+  if(!t||!data||String(data.sheetId||'')!==String(t.sheetId||'')||String(data.tabName||'')!==String(t.tabName||'')) return;
+  const key=String(t.sheetId||'')+'\t'+String(t.tabName||'');
+  if(_wbOrderLiveTimer) clearTimeout(_wbOrderLiveTimer);
+  const run=async()=>{
+    const cur=STATE.cur, curKey=cur?(String(cur.sheetId||'')+'\t'+String(cur.tabName||'')):'';
+    if(curKey!==key) return;
+    if(document.visibilityState!=='visible'||_wbOrderEditing()||_wbOrderLiveBusy){
+      _wbOrderLiveTimer=setTimeout(run,1500); return;
+    }
+    _wbOrderLiveBusy=true;
+    try{ await reloadWorkdesk(); }catch(_){ }
+    finally{ _wbOrderLiveBusy=false; }
+    if(backup){ _wbOrderLiveTimer=setTimeout(()=>_wbOrderLiveSchedule(data,0,false),20000); }
+    else _wbOrderLiveTimer=null;
+  };
+  _wbOrderLiveTimer=setTimeout(run,Math.max(0,Number(delay)||0));
+}
+function _wbOrderLiveStart(){
+  _wbOrderLiveStop();
+  if(!window.EventSource||!token()||!['master','admin','staff'].includes(STATE.role)) return;
+  try{
+    _wbOrderLiveSource=new EventSource(API_BASE+'/api/diag/events?token='+encodeURIComponent(token()));
+    _wbOrderLiveSource.addEventListener('order_submit',ev=>{
+      try{ const data=JSON.parse(ev.data||'{}'); _wbOrderLiveSchedule(data,1800,!!data.queued); }catch(_){ }
+    });
+  }catch(_){ _wbOrderLiveSource=null; }
+}
+window.addEventListener('beforeunload',_wbOrderLiveStop);
 // ── 행 상세 펼치기: 제출한 구매양식 원본(DB) + 시트 행 전체 ──
 function _dpair(k,v){ const s=(v==null?'':String(v)); return `<div class="dpair"><span class="dk">${esc(k)}</span><span class="dv">${esc(s)||'—'}</span></div>`; }
 function _fmtTs(t){ if(!t)return ''; try{ return new Date(t).toLocaleString('ko-KR'); }catch(_){ return String(t); } }
