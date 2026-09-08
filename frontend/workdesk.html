@@ -2559,6 +2559,7 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 
 <script>
 const TEST_AUTO_LOGIN_HOST = 'test-review-wdb-web-production.up.railway.app';
+const TEST_AUTO_LOGIN_PR_HOST = /^test-review-wdb-web-review-web-system-pr-\d+\.up\.railway\.app$/i;
 const TEST_AUTO_LOGIN_API = 'https://test-review-wdb-production.up.railway.app';
 if (location.hostname === TEST_AUTO_LOGIN_HOST) window.REVIEW_API_URL = TEST_AUTO_LOGIN_API;
 const API_BASE = (function(){
@@ -2611,7 +2612,7 @@ let _SHARE=null, _SHARE_ERR='';
 })();
 function token(){ return sessionStorage.getItem('admin_token') || ''; }
 async function tryTestAutoLogin(){
-  if (location.hostname !== TEST_AUTO_LOGIN_HOST || token()) return false;
+  if ((location.hostname !== TEST_AUTO_LOGIN_HOST && !TEST_AUTO_LOGIN_PR_HOST.test(location.hostname)) || token()) return false;
   try {
     const response = await fetch(API_BASE+'/api/admin/test-auto-login', { method:'POST' });
     const result = await response.json();
