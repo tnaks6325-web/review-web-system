@@ -33,7 +33,7 @@ async function archiveBlockers(db, id) {
   const pend = Number(rows[0] && rows[0].blog_pending) || 0;
   const out = [];
   if (holds > 0) out.push({ code: 'active_holds', count: holds, message: `진행 중인 참여 ${holds}건이 있습니다 — 제출이 끝나거나 자리가 만료된 뒤에 보관하세요.` });
-  if (pend > 0) out.push({ code: 'blog_pending', count: pend, message: `승인 대기 중인 블로그 신청 ${pend}건이 있습니다 — 관제에서 승인/반려한 뒤에 보관하세요.` });
+  if (pend > 0) out.push({ code: 'blog_pending', count: pend, message: `승인 대기 중인 블로그 신청 ${pend}건이 있습니다 — 로그에서 승인/반려한 뒤에 보관하세요.` });
   return out;
 }
 

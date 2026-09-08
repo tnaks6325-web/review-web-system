@@ -263,6 +263,17 @@ async function confirmExternalApplication(client, {
     appId = ins.rows[0].id;
   }
 
+  /* 외부모집 수동제출도 일반 홀드 제출과 같은 불변 역링크를 남긴다. 신청 쪽
+     order_submission_id가 취소 때 비워져도 모집공고 로그가 원래 제출시각·출처를 복구할 수 있다. */
+  if (orderSubmissionId) {
+    await client.query(
+      `UPDATE order_submissions
+          SET campaign_application_id = COALESCE(campaign_application_id, $2)
+        WHERE id = $1::uuid`,
+      [orderSubmissionId, appId]
+    );
+  }
+
   const { maybePersistClosed } = require('./campaignHold.service');
   await maybePersistClosed(client, campaignId);
   return { ok: true, applicationId: appId, overCapacity };

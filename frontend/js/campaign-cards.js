@@ -550,7 +550,7 @@
     //   종전엔 6개를 한 줄에 욱여넣어 라벨이 잘리고 「게시」 토글과 겹쳤다(실측: 카드 244px 중
     //   토글 57px 고정 → 버튼 하나에 27px 인데 글자는 35~48px 필요 = 6개 전부 넘침).
     //   ★ 버튼이 더 늘어도 [⋯] 안으로 들어가므로 **같은 방식으로 다시 깨지지 않는다**.
-    //   ★ 관제의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
+    //   ★ 로그의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
     /* 📦 130 보관/보관 해제 — 카드 주 줄이 아니라 [⋯] 안에 둔다(주 줄은 3개 고정 규율).
        ★ 보관은 되돌릴 수 있지만 리뷰어 목록·참여를 닫으므로 **확인창을 거친다**(CampCards.toggleArchive). */
     const arcBtn = c.archived_at
@@ -560,7 +560,7 @@
     return `<div class="pact">
       <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')"><span class="lbl">✏️ 수정</span></button>
       ${viewBtn}
-      <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')"><span class="lbl">📡 관제</span>${bdg}</button>
+      <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')"><span class="lbl">🧾 로그</span>${bdg}</button>
       <button type="button" class="uic more" onclick="${stop}CampCards._more('${id}',this)"
         title="더보기 — 날짜별 인원 조절 · 참여 리뷰어 관리">⋯</button>
       ${pubToggle}
@@ -629,7 +629,7 @@
    */
   function cardHtml(c, o) {
     _injectStyles();   // ★ 카드 HTML만 쓰는 호출부(관리자 목록)도 CSS를 확실히 받게 — 폭 측정(칩 흐름)이 스타일 적용 후 이뤄져야 한다
-    _cacheMoCtx(c);    // 외부제출 문맥(연결 탭) 캐시 — 카드·관제 패널이 같은 값을 본다
+    _cacheMoCtx(c);    // 외부모집 수동제출 문맥(연결 탭) 캐시 — 카드·로그 팝업이 같은 값을 본다
     const admin = !!(o && o.admin);
     const channel = c.channel === '직접입력' ? (c.channel_custom || '') : (c.channel || '');
     const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '';
@@ -688,7 +688,7 @@
     //   리뷰어앱 공고수정 스코프 토큰(via:'reviewer_campaign')은 /api/manual-order/* 에 도달할 수
     //   없어(403) 버튼을 보여주면 막다른 길이 된다(별표 칩과 같은 규율).
     const moChip = (!admin && c.participation_mode && _realAdminTok())
-      ? `<button type="button" class="pmochip" onclick="event.stopPropagation();event.preventDefault();CampCards.openManualOrder('${_esc(c.id)}')">🧾 외부제출</button>`
+      ? `<button type="button" class="pmochip" onclick="event.stopPropagation();event.preventDefault();CampCards.openManualOrder('${_esc(c.id)}')">🧾 외부모집 수동제출</button>`
       : '';
     // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(일반 모집 1건 제출완료당 1건 참여 조건)
     const popBadge = c.is_popular === true ? `<span class="pt-pop">🔥 인기!</span>` : '';
@@ -1467,7 +1467,7 @@
     window.open(url, '_blank', 'noopener');   // 팝업이 막힌 경우의 폴백
   }
 
-  /** 공고 id로 외부제출 모달 열기(카드 칩·관제 패널 공용) */
+  /** 공고 id로 외부모집 수동제출 모달 열기(카드 칩·로그 팝업 공용) */
   async function openManualOrder(id) {
     if (!window.ManualOrder) { alert('수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.'); return; }
     const tok = _realAdminTok();

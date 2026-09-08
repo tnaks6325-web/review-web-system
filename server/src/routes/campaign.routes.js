@@ -3321,15 +3321,44 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
               ca.status, ca.sheet_row_added, ca.applied_at, ca.phone8, ca.expires_at, ca.submitted_at,
               ca.order_submission_id, ca.late_order_id, ca.option_key, ca.owner_phone8, ca.dismissed_at,
               ca.dismissed_by, ca.blog_url, ca.reject_reason, ca.decided_at, ca.decided_by,
+              COALESCE(linked_order.submitted_at, history_order.submitted_at) AS order_submitted_at,
+              COALESCE(linked_order.source, history_order.source) AS order_source,
+              (COALESCE(linked_order.campaign_was_late, history_order.campaign_was_late, FALSE)
+                OR ca.late_order_id IS NOT NULL) AS order_was_late,
               EXISTS (SELECT 1 FROM normal_submissions ns JOIN popular_uses pu
                         ON pu.phone8 = ns.phone8 AND pu.credit_no = ns.credit_no
                        AND ns.submitted_at <= pu.applied_at
-                       WHERE ns.id = ca.id) AS popular_purpose
+                        WHERE ns.id = ca.id) AS popular_purpose
        FROM campaign_applications ca
+       /* 현재 링크를 우선하고, 주문 취소로 신청 쪽 링크가 비워진 뒤에는 주문 원장의 불변 FK로
+          마지막 제출을 복구한다. 관제 화면이 신청 상태에서 제출시각·출처를 추측하지 않게 한다. */
+       LEFT JOIN order_submissions linked_order
+         ON linked_order.id = COALESCE(ca.late_order_id, ca.order_submission_id)
+       LEFT JOIN LATERAL (
+         SELECT os.submitted_at, os.source, os.campaign_was_late
+           FROM order_submissions os
+          WHERE linked_order.id IS NULL AND os.campaign_application_id = ca.id
+          ORDER BY os.submitted_at DESC, os.id DESC
+          LIMIT 1
+       ) history_order ON TRUE
        WHERE ca.campaign_id = $1
        ORDER BY ca.applied_at ASC`,
       [id]
     );
+    /* 주문 표시는 작업 로그와 같은 서버 판정값을 쓴다. 초과시간을 브라우저에서 다시 계산하면
+       시간대/반올림 차이로 두 화면이 갈릴 수 있어 초 단위 정수까지 여기서 확정한다. */
+    const controlRows = rows.map(r => {
+      const submittedMs = r.order_submitted_at ? new Date(r.order_submitted_at).getTime() : NaN;
+      const expiresMs = r.expires_at ? new Date(r.expires_at).getTime() : NaN;
+      const isLate = r.order_was_late === true;
+      const orderOverdueSeconds = isLate && Number.isFinite(submittedMs) && Number.isFinite(expiresMs)
+        ? Math.max(0, Math.floor((submittedMs - expiresMs) / 1000)) : null;
+      return {
+        ...r,
+        order_submission_type: isLate ? 'late' : (r.order_source === 'admin_external' ? 'external' : 'standard'),
+        order_overdue_seconds: orderOverdueSeconds,
+      };
+    });
     // 🧩 옵션별 현황(061 3단계 관제): 옵션 뷰(정원·잔여·상태) + 금액 포함(관리자 전용)
     let options = [];
     try {
@@ -3452,7 +3481,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       }
     } catch (siErr) { logger.warn('[campaign/admin/applications] 시트 대조 실패: ' + siErr.message); }
 
-    res.json({ ok: true, data: rows, count: rows.length, options, sheetInfo });
+    res.json({ ok: true, data: controlRows, count: controlRows.length, options, sheetInfo });
   } catch (err) {
     next(err);
   }

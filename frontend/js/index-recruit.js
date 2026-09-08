@@ -263,7 +263,7 @@ function _buildRecruitCard(c) {
       <div class="recruit-actions-left">
         <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
         <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
-        ${c.participation_mode ? `<button class="recruit-btn" style="background:#EDE9FE;color:#5B21B6" onclick="openCampControlById('${escHtml(c.id)}')"><i class="fas fa-satellite-dish"></i> 관제</button>` : ""}
+        ${c.participation_mode ? `<button class="recruit-btn" style="background:#EDE9FE;color:#5B21B6" onclick="openCampControlById('${escHtml(c.id)}')"><i class="fas fa-list-ul"></i> 로그</button>` : ""}
         ${c.participation_mode ? `<button class="recruit-btn" style="background:#E0F2FE;color:#075985" onclick="openReviewerPreview('${escHtml(c.id)}')" title="리뷰어가 실제 보는 참여 화면을 확인합니다 (마감된 공고도 가능 · 실제 참여로 기록되지 않음)"><i class="fas fa-eye"></i> 리뷰어 화면</button>` : ""}
       </div>
       ${_recruitToggleHtml(c)}
@@ -4466,7 +4466,7 @@ async function fetchCampThumbFromUrl() {
 }
 
 /* ═══════════════════════════════════════
-   ⚡ M3: 관제 패널 — 공고별 신청현황(오늘 홀드/제출/만료) + 수동확정
+   ⚡ M3: 모집공고 로그 — 공고별 신청현황(오늘 홀드/제출/만료) + 수동확정
 ═══════════════════════════════════════ */
 /* 리뷰 #5: 제목을 onclick 템플릿 리터럴로 넘기지 않는다(백틱·\${ 주입 벡터) — id로만 열고 제목은 캐시 조회 */
 window._recruitCardTitles = window._recruitCardTitles || {};
@@ -4483,7 +4483,7 @@ async function openCampControl(campId, title) {
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB">
         <b style="flex:1;font-size:.95rem" id="ccTitle"></b>
         <span id="ccStats" style="font-size:.74rem;color:#4B5563;font-weight:700"></span>
-        <button id="ccMoBtn" title="카톡으로 모집한 외부 리뷰어의 구매양식을 대신 제출합니다" style="font-size:.72rem;font-weight:800;background:#E6FAF6;color:#0F766E;border:1px solid #9EE6D8;border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap">🧾 외부제출</button>
+        <button id="ccMoBtn" title="카톡으로 모집한 외부 리뷰어의 구매양식을 대신 제출합니다" style="font-size:.72rem;font-weight:800;background:#E6FAF6;color:#0F766E;border:1px solid #9EE6D8;border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap">🧾 외부모집 수동제출</button>
         <button onclick="document.getElementById('campControlOvl').remove()" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#9CA3AF"><i class="fas fa-times"></i></button>
       </div>
       <div id="ccBody" style="overflow-y:auto;padding:12px 18px"></div>
@@ -4491,7 +4491,7 @@ async function openCampControl(campId, title) {
     ovl.addEventListener("click", e => { if (e.target === ovl) ovl.remove(); });
     document.body.appendChild(ovl);
   }
-  document.getElementById("ccTitle").textContent = "📡 관제 — " + (title || campId);
+  document.getElementById("ccTitle").textContent = "🧾 로그 — " + (title || campId);
   // 🧾 외부모집 수동제출 — 오버레이는 1회만 만들고 재사용하므로 공고가 바뀔 때마다 핸들러를 다시 건다
   // 연결 탭 문맥 해석은 campaign-cards.js 한 곳에만 둔다(사본을 두면 화면마다 다른 탭에 쓴다).
   // 그 모듈이 없는 화면(admin-siand)에서는 **버튼을 숨긴다** — 눌러도 안 되는 버튼보다 없는 게 낫다.
@@ -4814,9 +4814,16 @@ async function _loadCampControl(campId) {
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+    const overdueT = sec => {
+      let n = Math.max(0, Math.floor(Number(sec) || 0));
+      const d = Math.floor(n / 86400); n %= 86400;
+      const h = Math.floor(n / 3600); n %= 3600;
+      const m = Math.floor(n / 60); const s = n % 60;
+      return [d && `${d}일`, h && `${h}시간`, m && `${m}분`, (s || (!d && !h && !m)) && `${s}초`].filter(Boolean).join(" ");
+    };
     // 126: 자동 정리 고지 — 화면이 무슨 일이 일어났는지 말한다(조용한 자동 처리 금지).
     const autoNote = items.some(r => r.dismissed_by === "auto")
-      ? `<div style="margin:2px 0 8px;padding:7px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563">🚫 <b>미참여(자동)</b>·<b>취소 · 자동정리</b> = 구매시간이 만료됐거나 취소된 건 중 <b>연결된 구매 제출이 하나도 없어</b> 시스템이 정리한 건입니다. 나중에 구매 제출이 도착하면 자동으로 다시 목록에 올라옵니다. 실제 구매를 확인했다면 [✅ 제출확정]을 누르세요.</div>`
+      ? `<div style="margin:2px 0 8px;padding:7px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563">🚫 <b>미참여(자동)</b>·<b>취소 · 자동정리</b> = 구매시간이 만료됐거나 취소된 건 중 <b>연결된 구매 제출이 하나도 없어</b> 시스템이 정리한 건입니다. 나중에 구매 제출이 도착하면 자동으로 다시 목록에 올라옵니다. 실제 구매를 확인했다면 [✅ 구매확인]을 누르세요.</div>`
       : "";
     body.innerHTML = blogQueueHtml + sheetHtml + autoNote + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
@@ -4824,8 +4831,13 @@ async function _loadCampControl(campId) {
       // 126: 시스템이 정리한 건(주문 흔적 0인 만료)과 사람이 판단한 건을 **구분해서 표기**한다.
       //   같은 "취소확정"으로 뭉뚱그리면 누가 확정했는지 알 수 없다(조용한 자동 처리 금지).
       const autoDismissed = dismissed && r.dismissed_by === "auto";
+      const hasOrder = !!r.order_submitted_at;
+      const submissionType = hasOrder ? String(r.order_submission_type || "standard") : "";
       let st;
-      if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
+      if (r.status === "submitted" && submissionType === "late") st = chip("#EDE9FE", "#5B21B6", "🛍 기구매/지각 주문도착");
+      else if (r.status === "submitted" && submissionType === "external") st = chip("#CCFBF1", "#0F766E", "✓ 외부모집 수동제출");
+      else if (r.status === "submitted" && hasOrder) st = chip("#D1FAE5", "#065F46", "✓ 구매양식 제출");
+      else if (r.status === "submitted") st = chip("#FEF3C7", "#92400E", "✓ 구매확인 수동확정");
       else if (holdValid) st = chip("#FEF3C7", "#92400E", "⏳ 진행중");
       //   자동 정리는 원래 상태를 밝혀 말한다 — 만료와 자발 취소는 사유가 다른데 한 라벨로 뭉치면 대조가 안 된다.
       else if (dismissed) st = chip("#E5E7EB", "#4B5563",
@@ -4833,7 +4845,12 @@ async function _loadCampControl(campId) {
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
       else if (r.status === "blog_rejected") st = chip("#FEF3C7", "#92400E", "↩ 반려");
       else st = chip("#FEE2E2", "#B91C1C", "구매시간만료");
-      const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
+      const late = r.status !== "submitted" && submissionType === "late"
+        ? chip("#EDE9FE", "#5B21B6", "🛍 기구매/지각 주문도착") : "";
+      const orderStamp = !hasOrder ? "" : submissionType === "late"
+        ? `<div style="flex-basis:100%;padding-left:72px;color:#5B21B6;font-size:.7rem"><b>주문제출시각</b> ${fmtT(r.order_submitted_at)}`
+          + (r.order_overdue_seconds == null ? " · 초과시간 확인 불가" : ` · <b>${overdueT(r.order_overdue_seconds)} 초과</b>`) + `</div>`
+        : `<div style="flex-basis:100%;padding-left:72px;color:${submissionType === "external" ? "#0F766E" : "#065F46"};font-size:.7rem"><b>제출시각</b> ${fmtT(r.order_submitted_at)}</div>`;
       // 단순 일반 참여가 아니라, 서버의 FIFO 크레딧 매칭에서 실제 인기상품 사용건과
       // 짝지어진 일반상품 제출만 별도로 표시한다.
       const popularPurpose = r.popular_purpose === true
@@ -4843,17 +4860,17 @@ async function _loadCampControl(campId) {
       // ★ 리뷰 #4: 확정 버튼은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
       //   진행중(applied)은 확정 시 주문 링크가 영구 결번되므로 버튼 미노출(정상 제출 경로로 확정되게 둠).
       //   취소확정(dismissed)된 건은 종료 처리라 버튼을 다시 띄우지 않는다("다시 알림 안 뜸").
-      //   ★ 자동 취소확정(auto)된 건도 [제출확정]은 남긴다 — 시스템 주문 링크가 없는 실구매(외부 결제·수기 입력)를
+      //   ★ 자동 취소확정(auto)된 건도 [구매확인]은 남긴다 — 시스템 주문 링크가 없는 실구매(외부 결제·수기 입력)를
       //     확정할 길이 막히면 막다른 길이 된다. 서버 confirm 은 dismissed_at 을 되돌리므로 그대로 통과한다.
       const canConfirm = (r.status === "expired" || r.status === "cancelled") && (!dismissed || autoDismissed);
       const canDismiss = (r.status === "expired" || r.status === "cancelled") && !dismissed;
       const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const cid = String(campId).replace(/[^a-z0-9_]/gi, "");
       const aid = parseInt(r.id, 10);
-      // 제출확정(구매완) = 실제 구매 확인 → 자리 확정 / 취소확정(미참여) = 종료 처리(이후 숨김)
+      // 구매확인 = 실제 구매 확인 → 자리 확정 / 취소확정(미참여) = 종료 처리(이후 숨김)
       const actions = (canConfirm || canDismiss) ? `<span style="display:inline-flex;gap:6px;flex-shrink:0">
-          ${canConfirm ? `<button onclick="campManualConfirm('${cid}',${aid},${r.late_order_id ? 1 : 0})" title="구매 완료 확인 → 자리 확정(카운터·모집 잔여 즉시 반영)" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✅ 제출확정<span style="font-weight:600;opacity:.72"> ·구매완</span></button>` : ""}
-          ${canDismiss ? `<button onclick="campDismiss('${cid}',${aid})" title="미참여로 취소 확정 → 이후 관제·알림에서 숨김" style="font-size:.7rem;font-weight:800;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">🚫 취소확정<span style="font-weight:600;opacity:.72"> ·미참여</span></button>` : ""}
+          ${canConfirm ? `<button onclick="campManualConfirm('${cid}',${aid},${r.late_order_id ? 1 : 0})" title="구매 완료 확인 → 자리 확정(카운터·모집 잔여 즉시 반영)" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✅ 구매확인</button>` : ""}
+          ${canDismiss ? `<button onclick="campDismiss('${cid}',${aid})" title="미참여로 취소 확정 → 이후 로그·알림에서 숨김" style="font-size:.7rem;font-weight:800;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">🚫 취소확정<span style="font-weight:600;opacity:.72"> ·미참여</span></button>` : ""}
         </span>` : "";
       return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
         <b style="min-width:64px">${escT(r.applicant_name)}</b>
@@ -4861,6 +4878,7 @@ async function _loadCampControl(campId) {
         ${st}${late}${popularPurpose}${acct}
         <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
         ${actions}
+        ${orderStamp}
       </div>`;
     }).join("");
   } catch (e) {
@@ -4881,16 +4899,16 @@ async function campManualConfirm(campId, appId, hasLate) {
     });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
-    showToast(j.already ? "이미 확정된 신청입니다." : "제출확정되었습니다.", "success");
+    showToast(j.already ? "이미 구매확인된 신청입니다." : "구매확인되었습니다.", "success");
     await _loadCampControl(campId);
   } catch (e) {
-    showToast("제출확정 실패: " + e.message, "error");
+    showToast("구매확인 실패: " + e.message, "error");
   }
 }
 
-// 취소확정(미참여) — 만료·취소 건을 종료 처리. 이후 관제 버튼·지각 배지·만료 집계에서 숨겨진다.
+// 취소확정(미참여) — 만료·취소 건을 종료 처리. 이후 로그 버튼·지각 배지·만료 집계에서 숨겨진다.
 async function campDismiss(campId, appId) {
-  if (!confirm("이 참여를 '미참여'로 취소 확정할까요?\n확정하면 이후 관제·알림에서 숨겨집니다. (실제로 구매한 건이면 대신 [제출확정]을 누르세요.)")) return;
+  if (!confirm("이 참여를 '미참여'로 취소 확정할까요?\n확정하면 이후 로그·알림에서 숨겨집니다. (실제로 구매한 건이면 대신 [구매확인]을 누르세요.)")) return;
   try {
     const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/dismiss`), {
       method: "POST",
