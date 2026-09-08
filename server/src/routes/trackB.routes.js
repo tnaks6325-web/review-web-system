@@ -3958,6 +3958,19 @@ router.post('/payment/batch/:id/unconfirmed-reconcile', authMiddleware, adminOrM
   } catch (err) { _resultErr(err, res, next); }
 });
 
+// 회차 스냅샷과 실제 이체금액이 달라도, 현재 작업보드 표시금액(+리뷰비)·계좌·예금주가
+// 유일하게 일치하고 관리자가 사유를 남긴 경우에만 입금완료로 전환한다.
+router.post('/payment/batch/:id/amount-mismatch-reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '세 금액과 승인 사유를 확인한 뒤 반영해 주세요.' });
+    res.json(await paymentResultSvc.reconcileAmountMismatch({
+      batchId: req.params.id, uploadId: b.uploadId, itemId: b.itemId,
+      resultSeq: b.resultSeq, note: b.note, by: _by(req),
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};

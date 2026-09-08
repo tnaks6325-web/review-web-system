@@ -56,6 +56,7 @@ svc.__setPoolForTest({
         { reviewerName: '리뷰어B', rowIndex: 6, alreadyPaid: false, rowJson: { '결제금액': '17,800', '계좌번호': '3515516491623' } },
       ] };
     }
+    if (/WITH targets AS/.test(sql)) return { rows: [] };
     throw new Error(`unexpected query: ${sql.slice(0, 90)}`);
   },
 });

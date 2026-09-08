@@ -2026,6 +2026,7 @@
 .pmstat .v{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
 .pmstat.warn{border-color:#E7D2A3;background:#FBF2E1}
 .pmstat.warn .v{color:#9A6414}
+.pmpriceout{display:inline-flex;align-items:center;margin-left:5px;padding:1px 6px;border-radius:999px;background:#FFF0D8;color:#A45700;font-size:10px;font-weight:800;white-space:nowrap}
 .pmrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .pmnote{font-size:12.5px;color:#7a5a12;background:#FBF2E1;border-left:3px solid #E0B571;border-radius:0 8px 8px 0;padding:9px 13px;margin-bottom:10px}
 .pmh2{font-size:15px;font-weight:750;margin:22px 0 9px}
@@ -11194,6 +11195,7 @@ function _pmRender(){
   const kb = picked('kbank'), hn = picked('hana');
   const blocked = items.filter(it=>!it.payable);
   const noMemo  = items.filter(it=>_pmOn(it) && (it.warnings||[]).includes('no_memo'));
+  const priceOutliers = items.filter(it=>(it.warnings||[]).includes('price_outlier'));
   // 담당자를 고른 상태에서만 뜬다 — 그 필터가 이 작업들을 가리는 순간이 곧 알려야 할 순간이다.
   const unassignedWorks = _pmFilterState().manager ? _pmUnassignedWorks(allItems) : [];
   STATE.pmFix = _pmBuildFix(items);   // 보완 창구(작업·리뷰어) — 표의 [보완] 버튼도 이 묶음을 쓴다
@@ -11216,6 +11218,7 @@ function _pmRender(){
         ${stat('하나은행', hn.length+'건')}
         ${blocked.length?stat('⚠ 보류(계좌·은행)', blocked.length+'건','warn'):''}
         ${noMemo.length?stat('⚠ 통장표시 없음', noMemo.length+'건','warn'):''}
+        ${priceOutliers.length?stat('⚠ 단독 이상금액', priceOutliers.length+'건','warn'):''}
       </div>
       <section class="pmbatchpanel">
         <h2 class="pmh2">이체 회차</h2>
@@ -11223,6 +11226,7 @@ function _pmRender(){
       </section>
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다.</div>`:''}
+      ${priceOutliers.length?`<div class="pmnote">⚠ <b>같은 작업의 대부분 금액과 크게 다른 단독 금액 ${priceOutliers.length}건</b>이 있습니다. 자동으로 막지는 않지만 다운로드 전에 아래의 ‘금액 확인’ 행을 검토해 주세요.</div>`:''}
       ${unassignedWorks.length?_pmUnassignedNoteHtml(unassignedWorks):''}
       ${_pmFixBlock()}
       ${_pmTargetTable(items)}
@@ -11308,7 +11312,7 @@ function _pmTargetTable(items){
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
       <td class="num">${_pmNum(it.amount)}</td>
-      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${_pmNum(it.reviewFee||0)}</td>
+      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='workboard_edit'?`<span class="pmauto" title="관리자가 수정한 현재 작업보드 표시값을 우선 적용했습니다${it.priceMismatch?` · 주문 원장 ${_pmNum(it.orderPrice)}원`:''}">수정값</span>`:it.priceSource==='order'?'<span class="pmauto" title="작업보드에 결제금액이 없어 주문 원장 금액을 사용했습니다">원장</span>':''}${it.priceOutlier?`<span class="pmpriceout" title="이 작업 ${it.priceOutlier.workCount}건 중 ${it.priceOutlier.dominantCount}건은 ${_pmNum(it.priceOutlier.dominantAmount)}원입니다">금액 확인</span>`:''}+${_pmNum(it.reviewFee||0)}</td>
       <td>${memoSig!==null?'':memoCell(it, idx)}</td>
       <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>`;
     }).join('');
@@ -11892,7 +11896,7 @@ function _pmAccountNumber(transfer){
   return account || (transfer&&transfer.accountTail ? `끝 4자리 ${transfer.accountTail}` : '—');
 }
 function _pmUnconfirmedStateLabel(state){
-  return ({candidate_unpaid:'입금 이력 없음',duplicate_payment:'이미 입금',ambiguous_participant:'참여자 복수',participant_not_found:'참여자 미확인',transfer_not_confirmed:'이체 성공 확인 필요'})[state] || '작업보드 연결 필요';
+  return ({candidate_unpaid:'입금 이력 없음',amount_mismatch_candidate:'금액 조정 확인 필요',account_mismatch_candidate:'계좌 변경 확인 필요',duplicate_payment:'이미 입금',ambiguous_participant:'참여자 복수',participant_not_found:'참여자 미확인',transfer_not_confirmed:'이체 성공 확인 필요'})[state] || '작업보드 연결 필요';
 }
 function _pmRenderUnconfirmedDirect(match=null){
   const el=document.getElementById('pmUnconfirmedOv'), group=(STATE.pmUnconfirmedGroups||[])[Number(el?.dataset.groupIndex)];
@@ -11902,21 +11906,29 @@ function _pmRenderUnconfirmedDirect(match=null){
   if(match){ STATE.pmUnconfirmedMatches={...(STATE.pmUnconfirmedMatches||{}),[matchKey]:match}; }
   const activeMatch=match||savedMatch, matched=activeMatch&&activeMatch.candidate, results=(activeMatch&&activeMatch.results)||[];
   const resultBySeq=new Map(results.map(x=>[Number(x.seq),x]));
+  const amountBySeq=new Map(((activeMatch&&activeMatch.amountMismatchCandidates)||[]).map(x=>[Number(x.resultSeq),x]));
+  const accountBySeq=new Map(((activeMatch&&activeMatch.reconciliationCandidates)||[]).map((x,i)=>[Number(x.resultSeq),{candidate:x,index:i}]));
   const workRowForTransfer=(transfer,result)=>{
     const reviewer=result.holder||transfer.holder||'—';
-    const hasParticipant=Boolean(matched&&result.rowIndex);
+    const adjustment=amountBySeq.get(Number(transfer.seq));
+    const matchedRowIndex=result.rowIndex||(adjustment&&adjustment.rowIndex);
+    const hasParticipant=Boolean(matched&&matchedRowIndex);
     const boardName=matched?(matched.label||matched.tabName||'선택한 작업보드'):'연결된 작업보드 없음';
-    const rowLabel=hasParticipant?result.rowIndex:'—';
-    const workboardAmount=Number(result.workboardAmount)||0;
-    const workboardAccount=result.workboardAccount||'—';
+    const rowLabel=hasParticipant?matchedRowIndex:'—';
+    const workboardAmount=Number(adjustment&&adjustment.workboardAmount)||Number(result.workboardAmount)||0;
+    const workboardAccount=result.workboardAccount||(adjustment&&adjustment.accountTail?`끝 4자리 ${adjustment.accountTail}`:'—');
     const decision=hasParticipant?'대조 대상':(matched?'참여자 미확인':'작업보드 연결 필요');
     const action=hasParticipant?'—':`<span class="muted">${matched?'작업 재선택 필요':'그룹 작업 선택 필요'}</span>`;
     return `<tr class="pm-workboard-row"><th>작업보드값행</th><td><b>${esc(boardName)}</b><span class="pm-unconfirmed-work-reviewer">리뷰어 ${esc(reviewer)}</span></td><td>${esc(rowLabel)}</td><td class="num">${workboardAmount?_pmNum(workboardAmount):'—'}</td><td>${esc(reviewer)}</td><td class="pm-unconfirmed-account">${esc(workboardAccount)}</td><td>${esc(decision)}</td><td>${action}</td></tr>`;
   };
   const comparisonRows=transfers.map((transfer,rowIndex)=>{
     const result=resultBySeq.get(Number(transfer.seq))||{};
+    const amountAdjustment=amountBySeq.get(Number(transfer.seq));
+    const accountAdjustment=accountBySeq.get(Number(transfer.seq));
     const decision=_pmUnconfirmedStateLabel(result.state);
     const action=!matched ? '<span class="muted">그룹 작업 선택 필요</span>'
+      : amountAdjustment ? `<button class="btn pri xs" onclick="_pmOpenAmountMismatchForm(${rowIndex})">금액 조정 승인</button>`
+      : accountAdjustment ? `<button class="btn pri xs" onclick="_pmReconcileMismatch(${accountAdjustment.index})">계좌 확인 후 승인</button>`
       : result.state==='candidate_unpaid' ? `<button class="btn pri xs" onclick="_pmReviewUnconfirmedResult(${rowIndex},'APPROVE')">입금 성공 승인</button>`
       : result.state==='duplicate_payment' ? `<button class="btn xs" onclick="_pmOpenDuplicateCaseForm(${rowIndex})">중복 입금 처리</button>`
       : result.state==='participant_not_found' ? '<span class="muted">작업 재선택 필요</span>'
@@ -11931,7 +11943,28 @@ function _pmRenderUnconfirmedDirect(match=null){
 function _pmUnconfirmedContext(rowIndex){
   const el=document.getElementById('pmUnconfirmedOv'), group=(STATE.pmUnconfirmedGroups||[])[Number(el?.dataset.groupIndex)], active=(STATE.pmUnconfirmedMatches||{})[String(group?.memo||'')];
   const transfer=group?.items?.[Number(rowIndex)], result=(active?.results||[]).find(x=>Number(x.seq)===Number(transfer?.seq));
-  return {el,group,active,transfer,result,rowIndex:Number(rowIndex)};
+  const amountCandidate=(active?.amountMismatchCandidates||[]).find(x=>Number(x.resultSeq)===Number(transfer?.seq));
+  return {el,group,active,transfer,result,amountCandidate,rowIndex:Number(rowIndex)};
+}
+function _pmOpenAmountMismatchForm(rowIndex){
+  const c=_pmUnconfirmedContext(rowIndex), box=document.getElementById('pmUnconfirmedDecision'), x=c.amountCandidate;
+  if(!x||!box) return;
+  box.style.display='block';
+  box.innerHTML=`<p><b>금액 조정 승인</b> · 회차 예정금액과 실제 이체금액이 다릅니다. 현재 작업보드 금액과 실제 이체금액이 같은지 확인하고 사유를 남겨 주세요.</p><div class="pmstats" style="margin:8px 0"><div class="pmstat"><div class="k">회차 예정금액</div><div class="v">${_pmNum(x.expectedAmount)}원</div></div><div class="pmstat warn"><div class="k">현재 작업보드 기준</div><div class="v">${_pmNum(x.workboardAmount)}원</div></div><div class="pmstat"><div class="k">실제 이체금액</div><div class="v">${_pmNum(x.actualAmount)}원</div></div></div><div class="row"><input id="pmAmountMismatchNote" class="memo" maxlength="500" placeholder="필수: 금액이 조정된 사유 또는 확인 근거"><button class="btn pri xs" onclick="_pmReconcileAmountMismatch(${c.rowIndex})">확인 후 승인</button><button class="btn xs" onclick="_pmCloseUnconfirmedDecision()">취소</button></div>`;
+  document.getElementById('pmAmountMismatchNote')?.focus();
+}
+async function _pmReconcileAmountMismatch(rowIndex){
+  const c=_pmUnconfirmedContext(rowIndex), R=STATE.pmResult, x=c.amountCandidate;
+  if(!R||!x||!R.preview?.uploadId) return;
+  const note=String(document.getElementById('pmAmountMismatchNote')?.value||'').trim();
+  if(!note){ toast('금액 조정 승인 사유를 입력해 주세요.'); document.getElementById('pmAmountMismatchNote')?.focus(); return; }
+  if(!confirm(`${x.reviewerName||'참여자'}\n\n회차 예정 ${_pmNum(x.expectedAmount)}원 → 현재 작업보드 ${_pmNum(x.workboardAmount)}원\n실제 이체 ${_pmNum(x.actualAmount)}원\n\n이 금액으로 입금완료 처리할까요? 감사 이력에 승인자와 사유가 남습니다.`)) return;
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/amount-mismatch-reconcile',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,itemId:x.itemId,resultSeq:x.resultSeq,note,confirm:true})});
+  if(!r||!r.ok){ toast((r&&r.error)||'금액 조정 승인을 처리하지 못했습니다.'); return; }
+  _pmUnconfirmedClose();
+  if(Number(r.board&&r.board.failed)>0) toast('금액 조정 승인은 완료됐지만 작업보드 입금일 기록에 실패했습니다. 재확인이 필요합니다.');
+  else toast('실제 이체금액으로 입금완료 처리하고 감사 이력을 남겼습니다.');
+  await _pmLoad();
 }
 function _pmOpenDuplicateCaseForm(rowIndex){
   const c=_pmUnconfirmedContext(rowIndex), box=document.getElementById('pmUnconfirmedDecision');
@@ -12059,16 +12092,9 @@ async function _pmUnconfirmedInspect(i){
   if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'대조하지 못했습니다.')}</div>`; return; }
   out.innerHTML='';
   el.querySelector('.pm-unconfirmed-search')?.classList.remove('on');
-  _pmRenderUnconfirmedDirect({candidate:c,results:r.results||[]});
-  return;
-  const reconciliationCandidates=Array.isArray(r.reconciliationCandidates)?r.reconciliationCandidates:[];
-  STATE.pmReconciliationCandidates=reconciliationCandidates;
-  queueMicrotask(()=>{
-    if(!reconciliationCandidates.length || !document.getElementById('pmUnconfirmedCandidates')) return;
-    const note=`<div class="pmnote" style="margin-top:10px;background:#FFF7E8;border-left-color:#D99A34;color:#784C09"><b>계좌 불일치 이체완료 후보</b><br>등록 계좌와 실제 이체 계좌가 달라 자동 반영되지 않은 건입니다. 계좌 소유를 확인한 뒤에만 반영하세요.</div><div style="display:grid;gap:7px;margin-top:8px">${reconciliationCandidates.map((x,i)=>`<button class="btn sm" style="text-align:left" onclick="_pmReconcileMismatch(${i})">${esc(x.reviewerName)} · ${_pmNum(x.amount)}원 · 등록 …${esc(x.expectedAccountTail)} / 실제 …${esc(x.resultAccountTail)} · 확인 후 입금 반영</button>`).join('')}</div>`;
-    document.getElementById('pmUnconfirmedCandidates').insertAdjacentHTML('beforeend',note);
-  });
-  out.innerHTML=`<div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C"><b>${label}</b> 대조 결과입니다. 선택만으로 입금완료 기록은 생성되지 않습니다.</div><div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable"><thead><tr><th>작업보드값</th><th>이체결과값</th><th>판정</th></tr></thead><tbody>${(r.results||[]).map(x=>`<tr><td>${esc(x.holder||'—')} · ${_pmNum(x.amount)}</td><td>${esc(x.holder||'—')} · ${_pmNum(x.amount)}${x.accountTail?` · 계좌끝 ${esc(x.accountTail)}`:''}</td><td>${esc(state[x.state]||x.state)}</td></tr>`).join('')}</tbody></table></div>`;
+  STATE.pmReconciliationCandidates=Array.isArray(r.reconciliationCandidates)?r.reconciliationCandidates:[];
+  STATE.pmAmountMismatchCandidates=Array.isArray(r.amountMismatchCandidates)?r.amountMismatchCandidates:[];
+  _pmRenderUnconfirmedDirect({candidate:c,...r});
 }
 
 async function _pmReconcileMismatch(i){

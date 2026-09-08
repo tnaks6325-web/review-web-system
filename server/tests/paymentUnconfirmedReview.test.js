@@ -43,11 +43,12 @@ const client = {
     queries.push(sql);
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
     if (/SELECT id, status FROM payment_batches/.test(sql)) return { rows: [{ id: 'batch-1', status: 'created' }] };
-    if (/SELECT summary FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
+    if (/SELECT summary.*FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
       { seq: 8, memo: '테스트입금명', holder: '황민정', amount: 20300, success: true, transferredAt: '2026.08.19 10:00' },
     ] } } }] };
     if (/FROM unconfirmed_transfer_reviews WHERE upload_id/.test(sql)) return { rows: [] };
     if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) return { rows: [{ reviewerName: '황민정', rowIndex: 45, alreadyPaid: false }] };
+    if (/WITH targets AS/.test(sql)) return { rows: [] };
     if (/FROM payment_batch_items WHERE batch_id/.test(sql)) return { rows: [] };
     if (/INSERT INTO unconfirmed_transfer_reviews/.test(sql)) return { rows: [{ id: 'review-1', decision: 'APPROVED', result_seq: 8 }] };
     if (/SELECT COALESCE\(tc\.workboard_schema_version, 1\) AS schema_version/.test(sql)) return { rows: [{ schema_version: 1, is_submitted: false }] };
@@ -85,11 +86,12 @@ const client = {
       duplicateQueries.push(sql);
       if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
       if (/SELECT id, status FROM payment_batches/.test(sql)) return { rows: [{ id: 'batch-1', status: 'created' }] };
-      if (/SELECT summary FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
+      if (/SELECT summary.*FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
         { seq: 9, memo: '테스트입금명', holder: '김윤경', amount: 20300, success: true },
       ] } } }] };
       if (/FROM unconfirmed_transfer_reviews WHERE upload_id/.test(sql)) return { rows: [] };
       if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) return { rows: [{ reviewerName: '김윤경', rowIndex: 50, alreadyPaid: true }] };
+      if (/WITH targets AS/.test(sql)) return { rows: [] };
       if (/FROM payment_batch_items WHERE batch_id/.test(sql)) return { rows: [] };
       if (/INSERT INTO unconfirmed_transfer_reviews/.test(sql)) return { rows: [{ id: 'review-2', decision: 'DUPLICATE_CASE_OPENED', result_seq: 9 }] };
       if (/INSERT INTO duplicate_payment_cases/.test(sql)) return { rows: [{ id: '00000000-0000-4000-8000-000000000009', case_status: 'REFUND_REQUESTED' }] };
@@ -110,11 +112,12 @@ const client = {
 
   svc.__setPoolForTest({
     async query(sql) {
-      if (/SELECT summary FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
+      if (/SELECT summary.*FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
         { seq: 10, memo: '테스트입금명', holder: '이체실패', amount: 20300, success: false },
       ] } } }] };
       if (/FROM unconfirmed_transfer_reviews WHERE upload_id/.test(sql)) return { rows: [] };
       if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) return { rows: [{ reviewerName: '이체실패', rowIndex: 51, alreadyPaid: false }] };
+      if (/WITH targets AS/.test(sql)) return { rows: [] };
       if (/FROM payment_batch_items WHERE batch_id/.test(sql)) return { rows: [] };
       throw new Error(`unexpected failed-transfer query: ${sql.slice(0, 80)}`);
     },

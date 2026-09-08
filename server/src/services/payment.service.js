@@ -27,6 +27,7 @@ const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campai
 const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
+const { loadWorkboardAmounts, loadWorkboardAmountPopulation, workboardAmountKey } = require('./paymentWorkboardAmount.service');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
@@ -197,11 +198,15 @@ async function listPaymentTargets(opts = {}) {
   const tabNames = [...new Set(rows.map(r => r.tabName))];
   const phone8s = [...new Set(rows.map(r => r.phone8).filter(Boolean))];
 
-  const [campMap, orderMap, acctMap, tabMap] = await Promise.all([
+  const [campMap, orderMap, acctMap, tabMap, workboardAmountMap, workboardPopulation] = await Promise.all([
     _loadCampaigns(sheetIds, tabNames),
     _loadOrderPrices(sheetIds, tabNames),
     _loadAccounts(phone8s),
     _loadTabMeta(sheetIds, tabNames),
+    loadWorkboardAmounts(pool, rows.map(r => ({
+      sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex, rowJson: r.amountCells,
+    }))),
+    loadWorkboardAmountPopulation(pool, rows),
   ]);
 
   // ★ 연락처(뒤 8자리)로 계좌를 못 찾은 행만 **소유자 링크**로 한 번 더 찾는다.
@@ -219,14 +224,16 @@ async function listPaymentTargets(opts = {}) {
     //   어디서도 못 찾았을 때만 쓰는 마지막 근거이고, accountRef 가 없어 화면 보완 대상이 아니다.
     const acct = acctMap[r.phone8] || ownerAcctMap[key + '||' + r.rowIndex] || _orderAccount(ord, r) || null;
 
-    // 상품비 = 그 행의 실제 제출 결제금액(주문 원장).
-    // ★ 주문 원장에 없는 행(옛 작업·직원 수기 입력)은 **시트 결제금액 칸**으로 폴백한다 —
-    //   그 칸이 그 행의 실제 결제금액이고, 폴백이 없으면 그런 행은 영영 0원 보류로 남는다.
-    //   출처(priceSource)를 함께 실어 화면이 "시트에서 읽음"을 드러낸다(조용한 추정 금지).
+    // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
+    // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
+    //   합성하고, 값이 없을 때만 주문 원장으로 폴백한다. 셀에서 18,950 -> 7,650으로 고쳤는데
+    //   이체 파일은 옛 주문금액을 쓰는 두 진실원본 사고를 구조적으로 막는다.
     const orderPrice = ord ? _int(ord.price) : 0;
-    const sheetPrice = orderPrice ? 0 : extractAmountNumber(r.amountCells);
-    const productPrice = orderPrice || sheetPrice;
-    const priceSource = orderPrice ? 'order' : (sheetPrice ? 'sheet' : null);
+    const displayed = workboardAmountMap.get(workboardAmountKey(r)) || { amount: extractAmountNumber(r.amountCells), source: null };
+    const workboardPrice = Number(displayed.amount) || 0;
+    const productPrice = workboardPrice || orderPrice;
+    const priceSource = workboardPrice ? (displayed.source || 'workboard') : (orderPrice ? 'order' : null);
+    const priceMismatch = !!(workboardPrice && orderPrice && workboardPrice !== orderPrice);
 
     // 리뷰비 = 082 단일 출처(스냅샷 → 구간표 → 폴백). 판정 자체는 `resolveReviewFee` 가 한다.
     // ★ 폴백 순서만 이체은행·통장표시와 **같은 규율**로 넓혔다: 공고 값 → **탭 값**(128).
@@ -326,6 +333,7 @@ async function listPaymentTargets(opts = {}) {
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
       accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
       productPrice, reviewFee: fee, amount, priceSource, feeSource,
+      workboardPrice, orderPrice, priceMismatch,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
       transferMemo: memo, memoSource,
       issues, warnings,
@@ -333,16 +341,57 @@ async function listPaymentTargets(opts = {}) {
     };
   });
 
+  flagPriceOutliers(items, workboardPopulation);
   return { items, summary: _summarize(items) };
+}
+
+/**
+ * 같은 작업에서 압도적으로 많이 쓰이는 금액과 크게 다른 단독값만 경고한다.
+ * 옵션별 정상 금액을 자동으로 막지 않도록 경고 전용이며, 4건 이상/주금액 70% 이상/
+ * 단독 1건/차이 5천원 이상/1.5배 이상을 모두 만족할 때만 표시한다.
+ */
+function flagPriceOutliers(items, referenceItems = items) {
+  const groups = new Map();
+  for (const item of (referenceItems || [])) {
+    const key = String(item.sheetId || '') + '||' + String(item.tabName || '');
+    if (!groups.has(key)) groups.set(key, []);
+    if (Number(item.productPrice) > 0) groups.get(key).push(item);
+  }
+  const stats = new Map();
+  for (const [key, group] of groups) {
+    if (group.length < 4) continue;
+    const counts = new Map();
+    for (const item of group) counts.set(Number(item.productPrice), (counts.get(Number(item.productPrice)) || 0) + 1);
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    if (!ranked.length || (ranked[1] && ranked[0][1] === ranked[1][1])) continue;
+    const [dominantAmount, dominantCount] = ranked[0];
+    if (dominantCount < 3 || dominantCount / group.length < 0.7) continue;
+    stats.set(key, { counts, dominantAmount, dominantCount, workCount: group.length });
+  }
+  for (const item of (items || [])) {
+    const key = String(item.sheetId || '') + '||' + String(item.tabName || '');
+    const stat = stats.get(key); if (!stat) continue;
+    const candidate = Number(item.productPrice);
+    if (candidate === stat.dominantAmount || stat.counts.get(candidate) !== 1) continue;
+    const difference = Math.abs(candidate - stat.dominantAmount);
+    const ratio = Math.max(candidate, stat.dominantAmount) / Math.min(candidate, stat.dominantAmount);
+    if (difference < 5000 || ratio < 1.5) continue;
+    item.priceOutlier = { dominantAmount: stat.dominantAmount, dominantCount: stat.dominantCount,
+      workCount: stat.workCount, difference, ratio };
+    if (!Array.isArray(item.warnings)) item.warnings = [];
+    if (!item.warnings.includes('price_outlier')) item.warnings.push('price_outlier');
+  }
+  return items;
 }
 
 function _summarize(items) {
   const s = {
     total: items.length, totalAmount: 0,
     kbank: 0, kbankAmount: 0, hana: 0, hanaAmount: 0,
-    noBank: 0, noAccount: 0, blocked: 0, noMemo: 0,
+    noBank: 0, noAccount: 0, blocked: 0, noMemo: 0, priceOutliers: 0,
   };
   for (const it of items) {
+    if ((it.warnings || []).includes('price_outlier')) s.priceOutliers++;
     if (it.payable) {
       s.totalAmount += it.amount;
       if ((it.warnings || []).includes('no_memo')) s.noMemo++;
@@ -1233,5 +1282,5 @@ module.exports = {
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
-  compareAccountSnapshot, accountFingerprint, resolveWorkManager, PaymentFixError,
+  compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
 };

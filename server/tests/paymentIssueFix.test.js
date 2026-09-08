@@ -317,7 +317,7 @@ function withStubPool(handler, run) {
     });
   });
 
-  await ta('3d ★ 상품비 시트 폴백 — 주문 원장이 없어도 금액이 선다', async () => {
+  await ta('3d ★ 상품비 작업보드 우선 — 주문 원장이 없어도 금액이 선다', async () => {
     await withStubPool(targetsHandler({
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
       ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
@@ -325,14 +325,14 @@ function withStubPool(handler, run) {
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.productPrice, 22000);
-      assert.strictEqual(it.priceSource, 'sheet');
+      assert.strictEqual(it.priceSource, 'workboard');
       assert.ok(!it.issues.includes('no_price'));
       assert.ok(!it.issues.includes('zero_amount'));
       assert.strictEqual(it.payable, true);
     });
   });
 
-  await ta('3e 주문 원장이 있으면 그 값이 우선(폴백은 없을 때만)', async () => {
+  await ta('3e ★ 작업보드 표시값이 주문 원장과 다르면 작업보드가 우선', async () => {
     await withStubPool(targetsHandler({
       orderRows: [{ sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: 30000, feeSnapshot: null, orderedAt: null }],
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
@@ -340,8 +340,10 @@ function withStubPool(handler, run) {
       amountCells: { '결제금액': '22,000원' },
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.strictEqual(it.productPrice, 30000);
-      assert.strictEqual(it.priceSource, 'order');
+      assert.strictEqual(it.productPrice, 22000);
+      assert.strictEqual(it.priceSource, 'workboard');
+      assert.strictEqual(it.orderPrice, 30000);
+      assert.strictEqual(it.priceMismatch, true);
     });
   });
 
@@ -395,6 +397,27 @@ function withStubPool(handler, run) {
       assert.strictEqual(it.accountRef, null);
       assert.ok(it.issues.includes('no_reviewer'));
     });
+  });
+
+  t('3i2 ★ 대부분 7,650원인 작업의 단독 18,950원만 이상금액 경고', () => {
+    const items = [7650, 7650, 7650, 7650, 18950].map((productPrice, i) => ({
+      sheetId: 'S1', tabName: 'T1', rowIndex: i + 1, productPrice, warnings: [],
+    }));
+    svc0.flagPriceOutliers(items);
+    assert.ok(items[4].warnings.includes('price_outlier'));
+    assert.strictEqual(items[4].priceOutlier.dominantAmount, 7650);
+    assert.ok(items.slice(0, 4).every(item => !item.warnings.includes('price_outlier')));
+    const remainingTarget = [{ sheetId: 'S1', tabName: 'T1', rowIndex: 5, productPrice: 18950, warnings: [] }];
+    svc0.flagPriceOutliers(remainingTarget, items);
+    assert.ok(remainingTarget[0].warnings.includes('price_outlier'),
+      '대부분이 이미 입금돼 현재 대상이 1건뿐이어도 작업보드 제출행 전체를 기준으로 감지해야 한다');
+  });
+
+  t('3i3 ★ 소수 표본·복수 옵션 금액은 자동 경고하지 않는다', () => {
+    const few = [7650, 7650, 18950].map((productPrice, i) => ({ sheetId: 'S1', tabName: 'T1', rowIndex: i, productPrice, warnings: [] }));
+    const options = [7650, 7650, 7650, 18950, 18950].map((productPrice, i) => ({ sheetId: 'S2', tabName: 'T2', rowIndex: i, productPrice, warnings: [] }));
+    svc0.flagPriceOutliers([...few, ...options]);
+    assert.ok([...few, ...options].every(item => !item.warnings.includes('price_outlier')));
   });
 
   await ta('3j ★ 자리표시자 정합 — 금액 후보($2)와 선택 필터($3·$4)가 안 어긋난다', async () => {
