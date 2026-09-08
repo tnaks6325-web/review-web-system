@@ -1807,6 +1807,7 @@ const _campHandlers = {
   flags: _delegate(_campRoutes, 'post', '/admin/:id/flags'),
   del: _delegate(_campRoutes, 'delete', '/admin/:id'),
   apps: _delegate(_campRoutes, 'get', '/admin/:id/applications'),
+  activityLog: _delegate(_campRoutes, 'get', '/admin/:id/activity-log'),
   confirm: _delegate(_campRoutes, 'post', '/admin/:id/confirm'),
   status: _delegate(_campRoutes, 'put', '/admin/:id/status'),     // 게시/마감 토글
   preview: _delegate(_campRoutes, 'get', '/admin/:id/preview'),   // 리뷰어 화면 미리보기
@@ -1827,6 +1828,8 @@ router.get('/campaigns/list', authMiddleware, internalMiddleware, async (req, re
 });
 router.get('/campaigns/:id/applications', authMiddleware, internalMiddleware, (req, res, next) =>
   _campHandlers.apps(req, res, next));
+router.get('/campaigns/:id/activity-log', authMiddleware, internalMiddleware, (req, res, next) =>
+  _campHandlers.activityLog(req, res, next));
 /* 공고 상세(수정 모달 프리필) — 원본은 **무인증 공개** `GET /api/campaign/:id` 라 인트라넷 SSO 토큰으로
    불러도 401 이 아니라 **공개 화이트리스트 뷰**가 온다(토큰이 무시되므로). 그러면 수정 모달이 조용히
    빈 칸으로 열려 "저장했더니 값이 날아간" 것처럼 보인다. 여기서는 authMiddleware 를 태워 `req.admin` 을
