@@ -22,6 +22,8 @@ function t(name, fn) { try { fn(); console.log('  ✓ ' + name); pass++; } catch
 const R = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const SVC = R('src/services/reviewerOrderCancel.service.js');
 const LOGSVC = R('src/services/tabActivityLog.service.js');
+const HOLDSVC = R('src/services/campaignHold.service.js');
+const MIG149 = R('migrations/149_campaign_order_activity_provenance.sql');
 const ROUTE = R('src/routes/reviewEdit.routes.js');
 const TBROUTE = R('src/routes/trackB.routes.js');
 const IDX = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'index.html'), 'utf8');
@@ -107,6 +109,15 @@ ok('★★ 주문 원장의 출처와 참여 신청의 지각 링크를 같은 �
   /campaign_application_id/.test(LOGSVC) && /r\.source === 'admin_external'/.test(LOGSVC)
   && /direct_app\.id = x\.campaign_application_id/.test(LOGSVC)
   && /ca\.late_order_id = x\.id/.test(LOGSVC) && /ca\.expires_at/.test(LOGSVC));
+ok('★★ 취소 뒤에도 지각 이력이 바뀌지 않도록 주문 원장에 당시 상태를 보존한다',
+  /campaign_was_late/.test(LOGSVC)
+  && /campaign_was_late = os\.campaign_was_late OR ca\.status IN \('expired','cancelled'\)/.test(HOLDSVC)
+  && /UPDATE order_submissions SET campaign_was_late = TRUE/.test(HOLDSVC)
+  && /ADD COLUMN IF NOT EXISTS campaign_was_late BOOLEAN NOT NULL DEFAULT FALSE/.test(MIG149));
+ok('★★ 레거시 신청 링크 조회는 주문을 먼저 제한하고 양쪽 링크 인덱스를 둔다',
+  /SELECT ev\.\*[\s\S]*?ORDER BY ev\.at DESC[\s\S]*?LIMIT \$3[\s\S]*?LEFT JOIN campaign_applications direct_app/.test(LOGSVC)
+  && /campaign_applications \(order_submission_id\)/.test(MIG149)
+  && /campaign_applications \(late_order_id\)/.test(MIG149));
 t('★★ 유형 목록이 화면 탭의 단일 출처', () => {
   const m = require('../src/services/tabActivityLog.service');
   assert.deepStrictEqual(m.LOG_KIND_KEYS, ['order', 'cancel', 'review', 'inspect', 'edit', 'quota', 'money', 'sys']);
@@ -165,7 +176,7 @@ ok('★★ 모든 소스 쿼리에 커서 절이 있다(한 곳만 빠져도 그
 ok('★★ 한 행이 두 시각을 내는 소스는 UNION ALL 로 항목 단위로 편다(행 단위 커서면 한쪽이 사라진다)',
   (noComment(LOGSVC).match(/UNION ALL/g) || []).length === 3 && !/GREATEST\(/.test(noComment(LOGSVC)));
 ok('★★ 유형 조건은 SQL 로 내린다(JS 에서만 거르면 그 페이지가 통째로 빈다)',
-  /x\.ev = \$4::text/.test(LOGSVC) && /event_type = 'order_canceled_by_reviewer'/.test(LOGSVC));
+  /(?:x|ev)\.ev = \$4::text/.test(LOGSVC) && /event_type = 'order_canceled_by_reviewer'/.test(LOGSVC));
 t('★★ 더 있으면 가장 오래된 시각을 커서로 준다 · 없으면 끝을 말한다', async () => {
   const m = require('../src/services/tabActivityLog.service');
   const many = (n) => Array.from({ length: n }, (_, i) => ({

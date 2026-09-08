@@ -69,17 +69,25 @@ const SOURCES = [
         `SELECT x.id, x.sheet_row, x.orderer, x.recipient, x.price, x.canceled_by,
                 x.source, x.ev, x.at,
                 COALESCE(direct_app.expires_at, legacy_app.expires_at) AS expires_at,
-                COALESCE(direct_app.late_order_id = x.id, legacy_app.is_late, FALSE) AS is_late
+                (COALESCE(x.campaign_was_late, FALSE)
+                  OR COALESCE(direct_app.late_order_id = x.id, legacy_app.is_late, FALSE)) AS is_late
            FROM (
-            SELECT id, sheet_row, orderer, recipient, campaign_application_id,
-                   price, canceled_by, source, 'order'::text AS ev, submitted_at AS at
-              FROM order_submissions
-             WHERE sheet_id=$1 AND tab_name=$2 AND submitted_at IS NOT NULL
-            UNION ALL
-            SELECT id, sheet_row, orderer, recipient, campaign_application_id,
-                   price, canceled_by, source, 'cancel'::text AS ev, deleted_at AS at
-              FROM order_submissions
-             WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
+            /* 먼저 최신 사건만 자른 뒤 신청표를 찾는다. 레거시 주문 전체 × 신청표 전체 조회를 막는다. */
+            SELECT ev.* FROM (
+              SELECT id, sheet_row, orderer, recipient, campaign_application_id, campaign_was_late,
+                     price, canceled_by, source, 'order'::text AS ev, submitted_at AS at
+                FROM order_submissions
+               WHERE sheet_id=$1 AND tab_name=$2 AND submitted_at IS NOT NULL
+              UNION ALL
+              SELECT id, sheet_row, orderer, recipient, campaign_application_id, campaign_was_late,
+                     price, canceled_by, source, 'cancel'::text AS ev, deleted_at AS at
+                FROM order_submissions
+               WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
+            ) ev
+            WHERE ($4::text = 'all' OR ev.ev = $4::text)
+              AND ($5::timestamptz IS NULL OR ev.at <= $5::timestamptz)
+            ORDER BY ev.at DESC
+            LIMIT $3
           ) x
           /* 정상 리뷰어 제출은 주문 원장의 FK→신청 PK로 즉시 찾는다(페이지마다 신청표 전수탐색 금지). */
           LEFT JOIN campaign_applications direct_app ON direct_app.id = x.campaign_application_id
@@ -92,10 +100,8 @@ const SOURCES = [
              ORDER BY (ca.late_order_id = x.id) DESC, ca.applied_at DESC, ca.id DESC
              LIMIT 1
           ) legacy_app ON TRUE
-          WHERE ($4::text = 'all' OR x.ev = $4::text)
-            AND ($5::timestamptz IS NULL OR x.at <= $5::timestamptz)
           ORDER BY x.at DESC
-          LIMIT $3`, [sheetId, tabName, limit, want, before]);
+          `, [sheetId, tabName, limit, want, before]);
       const items = rows.map(r => {
         const name = _reviewerLabel(r.orderer, r.recipient);
         if (r.ev === 'order') {

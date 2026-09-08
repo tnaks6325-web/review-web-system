@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS order_submissions, campaign_applications, reviewer_event_lo
   participant_edits, campaign_plan_events, recruit_campaigns, payment_batch_items, trackb_tab_finished CASCADE;
 CREATE TABLE order_submissions (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT, sheet_row INT,
   recipient TEXT, orderer TEXT, price TEXT, source TEXT, campaign_application_id BIGINT,
+  campaign_was_late BOOLEAN NOT NULL DEFAULT FALSE,
   submitted_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, canceled_by TEXT);
 CREATE TABLE campaign_applications (id BIGSERIAL, campaign_id TEXT, applied_at TIMESTAMPTZ,
   expires_at TIMESTAMPTZ, order_submission_id UUID, late_order_id UUID);
@@ -72,14 +73,18 @@ async function drain(m, opts) {
     await pool.query(`INSERT INTO order_submissions (sheet_id,tab_name,sheet_row,recipient,price,submitted_at)
       VALUES ('s1','t1',$1,$2,'1000',$3)`, [10 + i, '리뷰어' + i, D(Date.UTC(2026, 7, 21, 0, i))]);
   }
+  const { rows: lateApps } = await pool.query(`INSERT INTO campaign_applications
+    (campaign_id,applied_at,expires_at) VALUES ('c1',$1,$2) RETURNING id`,
+    [D('2026-08-23T04:40:00Z'), D('2026-08-23T05:00:00Z')]);
   const { rows: typedOrders } = await pool.query(`INSERT INTO order_submissions
-    (sheet_id,tab_name,sheet_row,recipient,price,source,submitted_at)
-    VALUES ('s1','t1',60,'외부','12290','admin_external',$1),
-           ('s1','t1',61,'지각','12290','order_submit',$2)
-    RETURNING id, recipient`, [D('2026-08-23T04:00:00Z'), D('2026-08-23T05:12:10Z')]);
+    (sheet_id,tab_name,sheet_row,recipient,price,source,campaign_application_id,campaign_was_late,submitted_at)
+    VALUES ('s1','t1',60,'외부','12290','admin_external',NULL,FALSE,$1),
+           ('s1','t1',61,'지각','12290','order_submit',$2,TRUE,$3)
+    RETURNING id, recipient`, [D('2026-08-23T04:00:00Z'), lateApps[0].id, D('2026-08-23T05:12:10Z')]);
   const lateOrder = typedOrders.find(r => r.recipient === '지각');
-  await pool.query(`INSERT INTO campaign_applications (campaign_id,applied_at,expires_at,late_order_id)
-    VALUES ('c1',$1,$2,$3)`, [D('2026-08-23T04:40:00Z'), D('2026-08-23T05:00:00Z'), lateOrder.id]);
+  await pool.query(`UPDATE campaign_applications SET late_order_id=$2 WHERE id=$1`, [lateApps[0].id, lateOrder.id]);
+  /* 취소 실행부가 late_order_id를 비운 뒤에도 주문 원장의 불변 플래그와 신청 FK로 과거 표기가 유지돼야 한다. */
+  await pool.query(`UPDATE campaign_applications SET late_order_id=NULL WHERE id=$1`, [lateApps[0].id]);
   await pool.query(`INSERT INTO reviewer_event_logs (occurred_at,sheet_id,tab_name,event_type,severity,message,reviewer_name,context)
     VALUES ($1,'s1','t1','order_canceled_by_reviewer','info','리뷰어가 취소했습니다','ㄱ','{"rowIndex":3}'),
            ($2,'s1','t1','order_lost','critical','시트에서 사라졌습니다','ㄴ',NULL)`,
