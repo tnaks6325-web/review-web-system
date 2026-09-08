@@ -926,6 +926,7 @@
   .tlstamp{font-size:11.4px;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
   .tlstamp b{color:var(--accent-deep);font-weight:750}
   .tlwho{font-size:11.4px;color:var(--muted);margin-top:2px}
+  .tlstamp .tlwho{display:inline;margin:0 0 0 3px}
   /* 모집공고도 이 로그 틀을 쓴다. 기존 확정·취소 조치는 [참여 관리]에서 같은 팝업으로 전환한다. */
   .cc-manage-body{flex:1;min-height:0;overflow:auto;padding:12px 18px}
   .cc-empty{text-align:center;color:var(--faint);font-size:12.5px;line-height:1.7;padding:36px 12px}
@@ -9805,17 +9806,18 @@ function _tlSubmittedTs(v){
   catch(_){return _fmtTs(v);}
 }
 function _tlSubmissionStamp(e){
-  if(!e||e.kind!=='order'||!e.submittedAt)return '';
+  const who=e&&e.who?esc(e.who):'';
+  if(!e||e.kind!=='order'||!e.submittedAt)return who?`<div class="tlwho">${who}</div>`:'';
   const late=e.submissionType==='late';
   const overdue=late ? (e.overdueSeconds==null ? '초과시간 확인 불가' : `${_tlOverdueText(e.overdueSeconds)} 초과`) : '';
-  return `<div class="tlstamp"><b>${late?'주문제출':'제출시각'}</b> ${esc(_tlSubmittedTs(e.submittedAt))}`
-    +(overdue?` · <b>${esc(overdue)}</b>`:'')+`</div>`;
+  return `<div class="tlstamp"><b>${late?'주문제출시각':'제출시각'}</b> ${esc(_tlSubmittedTs(e.submittedAt))}`
+    +(overdue?` · <b>${esc(overdue)}</b>`:'')
+    +(who?`<span class="tlwho"> · ${who}</span>`:'')+`</div>`;
 }
 function _tlEvHtml(e){
   return `<div class="tlev k-${esc(e.kind)}"><div class="tltop"><span class="tlwhen">${esc(_fmtTs(e.at))}</span>`
     +`<span class="tlmsg">${esc(e.message)}</span></div>`
-    +_tlSubmissionStamp(e)
-    +(e.who?`<div class="tlwho">${esc(e.who)}</div>`:'')+`</div>`;
+    +_tlSubmissionStamp(e)+`</div>`;
 }
 /** 한 묶음 받아오기 — `before` 가 있으면 그 시각 이전(더 과거). */
 async function _tlFetch(before){
@@ -18036,7 +18038,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      → /api/trackb/manual-order/* 프록시, 권한은 편집 허용명단). -->
 <script>window.MANUAL_ORDER_API = '/api/trackb/manual-order';</script>
 <script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
-<script src="js/index-recruit.js?v=20260908-worklog"></script>
+<script src="js/index-recruit.js?v=20260908-two-line-log"></script>
 <script>
 /* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 리뷰웹시스템[3버전] 것으로 잇는다.
    ★ 함수를 베끼지 않고 **이름만 연결**한다 — 로직은 여전히 한 벌이다. */
