@@ -1415,8 +1415,12 @@ router.post('/order', async (req, res, next) => {
       campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내
     });
 
+    // 참여형 구매는 요청 주소에 작업 좌표가 없고 서버가 위에서 실제 작업표를 확정한다.
+    // 알림도 요청의 빈 값이 아니라 캡처/기록에 사용한 최종 작업표를 써야 열린 작업보드가 갱신된다.
+    const liveWorktable = captureTarget || orderScope;
     emitOrderSubmit({
-      tabName, sheetId,
+      tabName: liveWorktable.tabName, sheetId: liveWorktable.sheetId,
+      workboardId: liveWorktable.workboardId || null,
       orderer: _orderer || '', recipient: recipient || '',
       dbSaved: true, sheetsWritten: false, queued, usedSlot: !!slotRowNumber,
       sheetRow: ledger.sheetRow,

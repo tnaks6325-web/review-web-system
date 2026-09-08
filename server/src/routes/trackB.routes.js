@@ -17,6 +17,7 @@ const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
 const sheetlessStatus = require('../services/sheetlessStatus.service');
 const shareLinks = require('../services/shareLink.service');   // 작업보드·업체 공유 링크(131)
 const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
+const { addClient: addSseClient } = require('../utils/sse');
 // ★ 이 파일은 예전부터 `logger` 를 최상위 import 없이 써 왔다(review-inspect 목록 실패 경로) —
 //   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
 const { logger } = require('../utils/logger');
@@ -739,6 +740,14 @@ function internalMiddleware(req, res, next) {
   if (r === 'master' || r === 'admin' || r === 'staff') return next();
   return res.status(403).json({ ok: false, error: '권한 없음' });
 }
+
+// 작업보드 구매제출 알림 — 인트라넷 SSO도 접근 가능한 Track B 경로에 두고 내부 직원만 허용한다.
+// EventSource는 Authorization 헤더를 넣을 수 없어 authMiddleware의 ?token fallback을 그대로 쓴다.
+// 광고주·리뷰어는 구매자 이름/수취인 정보가 섞인 전역 이벤트를 구독할 수 없다.
+router.get('/events', authMiddleware, internalMiddleware, (req, res) => {
+  const exp = Number(req.admin && req.admin.exp);
+  addSseClient(req, res, { role: 'workdesk', expiresAt: Number.isFinite(exp) ? exp * 1000 : Date.now() });
+});
 
 router.get('/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {

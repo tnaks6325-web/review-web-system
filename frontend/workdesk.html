@@ -2559,8 +2559,13 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 
 <script>
 const TEST_AUTO_LOGIN_HOST = 'test-review-wdb-web-production.up.railway.app';
+const TEST_AUTO_LOGIN_PR_HOST = /^test-review-wdb-web-review-web-system-pr-\d+\.up\.railway\.app$/i;
 const TEST_AUTO_LOGIN_API = 'https://test-review-wdb-production.up.railway.app';
 if (location.hostname === TEST_AUTO_LOGIN_HOST) window.REVIEW_API_URL = TEST_AUTO_LOGIN_API;
+const TEST_AUTO_LOGIN_PR = location.hostname.match(/^test-review-wdb-web-review-web-system-pr-(\d+)\.up\.railway\.app$/i);
+if (TEST_AUTO_LOGIN_PR && new URLSearchParams(location.search).get('e2e') === '1') {
+  window.REVIEW_API_URL = `https://test-review-wdb-review-web-system-pr-${TEST_AUTO_LOGIN_PR[1]}.up.railway.app`;
+}
 const API_BASE = (function(){
   if (window.REVIEW_API_URL) return window.REVIEW_API_URL;
   const pr = location.hostname.match(/^test-review-wdb-web-review-web-system-pr-(\d+)\.up\.railway\.app$/i);
@@ -2611,7 +2616,9 @@ let _SHARE=null, _SHARE_ERR='';
 })();
 function token(){ return sessionStorage.getItem('admin_token') || ''; }
 async function tryTestAutoLogin(){
-  if (location.hostname !== TEST_AUTO_LOGIN_HOST || token()) return false;
+  const isIsolatedPrTest = TEST_AUTO_LOGIN_PR_HOST.test(location.hostname)
+    && new URLSearchParams(location.search).get('e2e') === '1';
+  if ((location.hostname !== TEST_AUTO_LOGIN_HOST && !isIsolatedPrTest) || token()) return false;
   try {
     const response = await fetch(API_BASE+'/api/admin/test-auto-login', { method:'POST' });
     const result = await response.json();
@@ -2624,6 +2631,7 @@ async function tryTestAutoLogin(){
 }
 // 만료/거부 토큰 정리 — "만료 배지 + 빈 목록" 유령 화면 대신 로그인으로. raw_sso 재주입 루프도 차단.
 function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
+  if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
@@ -2723,6 +2731,7 @@ async function boot(){
   if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
   renderShell();
+  _wbOrderLiveStart();
   // 공유 링크 실패는 조용히 홈으로 떨어지지 않는다 — 왜 못 열었는지(폐기·담당 밖) 말한다.
   if(_SHARE_ERR){ const msg=_SHARE_ERR; _SHARE_ERR=''; setTimeout(()=>alert(msg),50); }
 }
@@ -2834,7 +2843,9 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/advertiser-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 광고주(거래처) 폴백 — 소유 탭만·PII 마스킹
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
-function logout(){ sessionStorage.removeItem('admin_token');
+function logout(){
+  if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
+  sessionStorage.removeItem('admin_token');
   // ★★ 접속 링크 세션은 **주소에 남은 해시가 곧 열쇠**다(A안). 여기서 지우지 않으면 바로 이어지는
   //   boot() 이 그 토큰을 다시 교환해 **로그아웃이 되지 않는다**(공용 PC에서 다음 사람이 그대로 입장).
   try{ sessionStorage.removeItem('adv_link_tok'); }catch(_){ }
@@ -16372,6 +16383,81 @@ async function reloadWorkdesk(){ _clearCellUndoHistory(); const t=STATE.cur; if(
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
   renderWorkdesk(await api('/api/trackb/workdesk?'+q,{cache:'no-store'})); loadParity(t);
 }
+/* 리뷰어 구매제출 → 현재 열어 둔 작업보드 근실시간 갱신.
+   ★ 전역 알림에는 다른 작업 제출도 섞인다. sheetId+tabName이 현재 작업과 정확히 같을 때만 읽는다.
+   ★ 제출 이벤트는 큐 처리 직전에 오므로 2초 뒤 첫 조회, 큐 건은 30초 서버 예비처리 뒤 한 번 더 확인한다.
+   ★ 작업표 셀 입력·날짜 선택 중 DOM을 갈아치우면 수정값이 사라진다. 그 두 경우만 끝날 때까지 미룬다. */
+let _wbOrderLiveSource=null, _wbOrderLiveTimer=null, _wbOrderLiveFallbackTimer=null, _wbOrderLiveBusy=false, _wbOrderLiveBusyVersion=0, _wbOrderLiveVersion=0;
+function _wbOrderCurrentKey(t){
+  return t?(String(t.sheetId||'')+'\t'+String(t.tabName||'')):'';
+}
+function _wbOrderLiveStop(){
+  _wbOrderLiveVersion++;
+  if(_wbOrderLiveSource){ try{_wbOrderLiveSource.close();}catch(_){ } _wbOrderLiveSource=null; }
+  if(_wbOrderLiveTimer){ clearTimeout(_wbOrderLiveTimer); _wbOrderLiveTimer=null; }
+  if(_wbOrderLiveFallbackTimer){ clearTimeout(_wbOrderLiveFallbackTimer); _wbOrderLiveFallbackTimer=null; }
+  _wbOrderLiveBusy=false;
+  _wbOrderLiveBusyVersion=0;
+}
+function _wbOrderEditing(){
+  // 검색창·댓글창은 포커스가 남아 있어도 작업표를 갱신할 수 있다. 실제 표 셀 편집과
+  // 날짜 선택 팝업만 보호해, 검색 후 커서가 남았다는 이유로 갱신이 영원히 멈추지 않게 한다.
+  return !!document.querySelector('.sheetgrid td.gedit input.einp, #wdDatePick');
+}
+async function _wbOrderReloadIfCurrent(key, version, sessionToken){
+  const t=STATE.cur;
+  if(!t||_wbOrderCurrentKey(t)!==key||_wbOrderLiveVersion!==version||token()!==sessionToken) return false;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  const data=await api('/api/trackb/workdesk?'+q,{cache:'no-store'});
+  const cur=STATE.cur;
+  // 조회하는 동안 다른 작업으로 이동했으면 이전 작업 응답을 현재 화면에 절대 그리지 않는다.
+  if(!cur||_wbOrderCurrentKey(cur)!==key||_wbOrderLiveVersion!==version||token()!==sessionToken) return false;
+  _clearCellUndoHistory();
+  renderWorkdesk(data);
+  loadParity(cur);
+  return true;
+}
+function _wbOrderLiveSchedule(data, delay, backup){
+  const t=STATE.cur;
+  if(!t||!data||String(data.sheetId||'')!==String(t.sheetId||'')||String(data.tabName||'')!==String(t.tabName||'')) return;
+  const key=_wbOrderCurrentKey(t), version=++_wbOrderLiveVersion, sessionToken=token();
+  // 큐 대기 건의 최종 확인은 뒤이어 온 일반 제출이 취소하면 안 된다. 즉시 갱신 타이머와
+  // 별도로 이벤트를 받는 즉시 한 번만 잡아, 첫 조회 전에 다른 이벤트가 와도 보존한다.
+  if(backup&&!_wbOrderLiveFallbackTimer){
+    _wbOrderLiveFallbackTimer=setTimeout(()=>{
+      _wbOrderLiveFallbackTimer=null;
+      if(_wbOrderCurrentKey(STATE.cur)!==key||token()!==sessionToken) return;
+      _wbOrderLiveSchedule(data,0,false);
+    },35000);
+  }
+  if(_wbOrderLiveTimer) clearTimeout(_wbOrderLiveTimer);
+  const run=async()=>{
+    if(_wbOrderLiveVersion!==version||_wbOrderCurrentKey(STATE.cur)!==key) return;
+    if(document.visibilityState!=='visible'||_wbOrderEditing()||_wbOrderLiveBusy){
+      _wbOrderLiveTimer=setTimeout(run,1500); return;
+    }
+    _wbOrderLiveBusy=true;
+    _wbOrderLiveBusyVersion=version;
+    try{ await _wbOrderReloadIfCurrent(key,version,sessionToken); }catch(_){ }
+    finally{
+      if(_wbOrderLiveBusyVersion===version){ _wbOrderLiveBusy=false; _wbOrderLiveBusyVersion=0; }
+    }
+    if(_wbOrderLiveVersion!==version||_wbOrderCurrentKey(STATE.cur)!==key) return;
+    _wbOrderLiveTimer=null;
+  };
+  _wbOrderLiveTimer=setTimeout(run,Math.max(0,Number(delay)||0));
+}
+function _wbOrderLiveStart(){
+  _wbOrderLiveStop();
+  if(!window.EventSource||!token()||!['master','admin','staff'].includes(STATE.role)) return;
+  try{
+    _wbOrderLiveSource=new EventSource(API_BASE+'/api/trackb/events?token='+encodeURIComponent(token()));
+    _wbOrderLiveSource.addEventListener('order_submit',ev=>{
+      try{ const data=JSON.parse(ev.data||'{}'); _wbOrderLiveSchedule(data,1800,!!data.queued); }catch(_){ }
+    });
+  }catch(_){ _wbOrderLiveSource=null; }
+}
+window.addEventListener('beforeunload',_wbOrderLiveStop);
 // ── 행 상세 펼치기: 제출한 구매양식 원본(DB) + 시트 행 전체 ──
 function _dpair(k,v){ const s=(v==null?'':String(v)); return `<div class="dpair"><span class="dk">${esc(k)}</span><span class="dv">${esc(s)||'—'}</span></div>`; }
 function _fmtTs(t){ if(!t)return ''; try{ return new Date(t).toLocaleString('ko-KR'); }catch(_){ return String(t); } }

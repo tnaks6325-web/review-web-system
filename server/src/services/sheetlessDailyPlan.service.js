@@ -211,11 +211,15 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
         const value = _kstDateLabel(date);
         const rowJson = _newPlannedRowJson(headers, dateHeader, value, nextSeq);
         await client.query(
-          `INSERT INTO campaign_participants
-             (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'worktable', $7, NOW())`,
-          [sheetId, rows[0].tab_gid || null, tabName, nextSeq, value,
-            JSON.stringify(rowJson), String(by).slice(0, 100)]);
+           `INSERT INTO campaign_participants
+              (sheet_id, tab_gid, tab_name, seq, start_date, row_json, workboard_id, source, updated_by, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb,
+              (SELECT tc.workboard_id FROM tab_configs tc
+                JOIN workboards w ON w.id=tc.workboard_id AND w.state='active'
+               WHERE tc.sheet_id=$1 AND tc.tab_name=$3 LIMIT 1),
+              'worktable', $7, NOW())`,
+           [sheetId, rows[0].tab_gid || null, tabName, nextSeq, value,
+             JSON.stringify(rowJson), String(by).slice(0, 100)]);
         nextSeq++; created++; moved++;
       }
     }
@@ -333,8 +337,12 @@ async function rebuildAdjustedPlansToWorktable({ client, sheetId, tabName, plans
     const value = _kstDateLabel(inserts[i].date);
     await client.query(
       `INSERT INTO campaign_participants
-         (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,'worktable',$7,NOW())`,
+         (sheet_id, tab_gid, tab_name, seq, start_date, row_json, workboard_id, source, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,
+         (SELECT tc.workboard_id FROM tab_configs tc
+           JOIN workboards w ON w.id=tc.workboard_id AND w.state='active'
+          WHERE tc.sheet_id=$1 AND tc.tab_name=$3 LIMIT 1),
+         'worktable',$7,NOW())`,
       [sheetId, rows[0].tab_gid || null, tabName, seqStart + i, value,
         JSON.stringify(_newPlannedRowJson(headers, dateHeader, value, seqStart + i)), String(by).slice(0, 100)]);
   }

@@ -249,6 +249,19 @@ async function writeOrderToWorktable({
        별도 트랜잭션에서 잡히므로 중첩(=교착) 이 생기지 않는다. */
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
       [`sheetless_worktable:${sheetId}:${tabName}`]);
+    /* 모집정원/날짜계획의 과거 생성 경로가 작업보드 연결값 없이 만든 행을 먼저 보정한다.
+       ★ 활성 작업보드 + 정확한 탭 + 아직 미연결인 행만 대상이다. 다른 작업보드 행은
+         건드리지 않으며, 탭 잠금 안에서 실행돼 새 제출/복구가 같은 빈자리를 함께 먹지 않는다. */
+    if (workboardId) {
+      const affinity = await require('./workboardSlotAffinity.service')
+        .bindUnassignedRowsToActiveWorkboard(client, {
+          sheetId, tabName, expectedWorkboardId: workboardId,
+        });
+      if (!affinity.workboardId || String(affinity.workboardId) !== String(workboardId)) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'workboard_target_mismatch' };
+      }
+    }
     // 새 큐 경로에서는 직원 수정과 늦은 반영이 경합해도 최신 원장값이 이긴다. 기존 무시트
     // 즉시 반영은 호출 직전에 만든 orderData를 그대로 써서, 전환 전 동작과 쿼리 수를 보존한다.
     if (workboardId) {
