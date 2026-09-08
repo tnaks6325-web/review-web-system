@@ -23,6 +23,7 @@ const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey, filledSql:
 const { formatDepositStamp } = require('../utils/depositStamp');   // 입금 칸 표기 단일 출처(자동 반영과 같은 'M/D')
 const { resolveWorkManager } = require('../utils/workManager');   // 담당자 판정 단일 출처(065 + 회차 #18 — payment.service 와 한 벌)
 const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
+const { findPaymentColumnIndex } = require('./columnResolver');   // 작업보드에 실제 표시되는 입금 열 판정 단일 출처
 
 // ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
 //   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
@@ -980,9 +981,13 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
        ) submit_header ON TRUE
        LEFT JOIN LATERAL (
-         SELECT NULLIF(MAX(NULLIF(BTRIM(ri.submit_col2), '')), '') AS paid_header
+         SELECT NULLIF(BTRIM(ri.submit_col2), '') AS paid_header
            FROM review_index ri
           WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
+            AND NULLIF(BTRIM(ri.submit_col2), '') IS NOT NULL
+          GROUP BY NULLIF(BTRIM(ri.submit_col2), '')
+          ORDER BY COUNT(*) DESC, NULLIF(BTRIM(ri.submit_col2), '')
+          LIMIT 1
        ) paid_header ON TRUE
        LEFT JOIN LATERAL (
          /* workdeskTab과 같은 앵커 규율:
@@ -1032,7 +1037,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                     CASE WHEN cp.anchor_type IS NOT NULL AND cp.anchor_type <> 'manual' AND cp.anchor_count = 1
                          THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
                                    ELSE manual_paid_edit.value_text END END,
-                    cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                     cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
                   )), '') IS NOT NULL)::int AS paid
            FROM anchored_rows cp
            LEFT JOIN LATERAL (
@@ -1056,7 +1061,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                FROM participant_edits e
               WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
                 AND e.anchor_type = cp.anchor_type AND e.anchor_value = cp.anchor_value
-                AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                 AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
               LIMIT 1
            ) current_paid_edit ON TRUE
            LEFT JOIN LATERAL (
@@ -1064,7 +1069,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                FROM participant_edits e
               WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
                 AND e.anchor_type = 'manual' AND e.anchor_value = cp.id::text
-                AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                 AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
               LIMIT 1
            ) manual_paid_edit ON TRUE
        ) cnt ON TRUE
@@ -3418,9 +3423,19 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         .statusHeaderForTab(db, { sheetId, tabName, kind: 'submit' }) || '').trim();
     } catch (_) { /* 헤더를 모르면 값 없는 것으로 처리한다 — 플래그로 추측하지 않는다. */ }
   }
-  // 입금완료 표시도 작업보드가 실제로 쓰는 입금 열을 단일 출처로 삼는다.
-  // 행별 submit_col2를 우선하고, 수동/레거시 행만 탭 단위 감지 헤더로 폴백한다.
-  let tabPaidHeader = String((roster.find(r => String(r.submit_col2 || '').trim()) || {}).submit_col2 || '').trim();
+  // 입금완료 표시는 현재 작업보드에 실제 보이는 입금 열을 단일 출처로 삼는다.
+  // 과거 일부 행의 submit_col2가 예전 헤더를 계속 들고 있어도, 화면은 현재 헤더의 값을 보여준다.
+  // 집계만 행별 포인터를 우선하면 화면에 값이 보이는 행이 (빈값)으로 세어지므로 현재 헤더를 우선한다.
+  const paidHeaderIndex = findPaymentColumnIndex(headers || []);
+  let tabPaidHeader = paidHeaderIndex >= 0 ? String(headers[paidHeaderIndex] || '').trim() : '';
+  if (!tabPaidHeader) {
+    const frequencies = new Map();
+    for (const row of roster) {
+      const header = String(row.submit_col2 || '').trim();
+      if (header) frequencies.set(header, (frequencies.get(header) || 0) + 1);
+    }
+    tabPaidHeader = [...frequencies].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))[0]?.[0] || '';
+  }
   if (!tabPaidHeader) {
     try {
       tabPaidHeader = String(await require('./sheetlessStatus.service')
@@ -3485,7 +3500,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       ? pick('col:' + submitHeader, (r.row_json && r.row_json[submitHeader]))
       : '';
     const reviewSubmitted = !!String(submitCellValue == null ? '' : submitCellValue).trim();
-    const paidHeader = String(r.submit_col2 || tabPaidHeader || '').trim();
+    const paidHeader = String(tabPaidHeader || r.submit_col2 || '').trim();
     const paidCellValue = paidHeader
       ? pick('col:' + paidHeader, (r.row_json && r.row_json[paidHeader]))
       : '';
@@ -3667,9 +3682,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
        갈려 "직접 타이핑은 되는데 수동 제출 메뉴는 없는" 상태가 된다(2026-08-21 실측).
        ★ 값이 없으면(구버전 데이터·미감지) 싣지 않는다 — 화면은 종전 이름 목록으로 폴백한다. */
-    const _scS = roster.find(r => r.submit_col) || {}, _scP = roster.find(r => r.submit_col2) || {};
-    if (_scS.submit_col || _scP.submit_col2) {
-      res.statusCols = { submit: _scS.submit_col || null, paid: _scP.submit_col2 || null };
+    const _scS = roster.find(r => r.submit_col) || {};
+    if (_scS.submit_col || tabPaidHeader) {
+      res.statusCols = { submit: _scS.submit_col || null, paid: tabPaidHeader || null };
     }
     /* ★ 그 탭의 '주문자'·'수취인' 칸 헤더명 — [이 셀 편집]이 실제 반영(원장·리뷰내역까지)으로
        가는 판정의 단일 출처(2026-08-24). 판정은 관리자 주문 편집이 이미 쓰는
@@ -5497,9 +5512,13 @@ async function tabStatsMap({ force = false } = {}) {
                               ORDER BY w.created_at DESC LIMIT 1) wo ON TRUE
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
          LEFT JOIN LATERAL (
-           SELECT NULLIF(MAX(NULLIF(BTRIM(ri.submit_col2), '')), '') AS paid_header
-             FROM review_index ri
-            WHERE ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+            SELECT NULLIF(BTRIM(ri.submit_col2), '') AS paid_header
+              FROM review_index ri
+             WHERE ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+               AND NULLIF(BTRIM(ri.submit_col2), '') IS NOT NULL
+             GROUP BY NULLIF(BTRIM(ri.submit_col2), '')
+             ORDER BY COUNT(*) DESC, NULLIF(BTRIM(ri.submit_col2), '')
+             LIMIT 1
          ) paid_header ON TRUE
          LEFT JOIN LATERAL (
            WITH active_rows AS (
@@ -5531,7 +5550,7 @@ async function tabStatsMap({ force = false } = {}) {
                       CASE WHEN cp.anchor_type IS NOT NULL AND cp.anchor_type <> 'manual' AND cp.anchor_count = 1
                            THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
                                      ELSE manual_paid_edit.value_text END END,
-                      cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                       cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
                     )), '') IS NOT NULL)::int AS paid_count
              FROM anchored_rows cp
              LEFT JOIN LATERAL (
@@ -5539,7 +5558,7 @@ async function tabStatsMap({ force = false } = {}) {
                  FROM participant_edits e
                 WHERE e.sheet_id = tc.sheet_id AND e.tab_name = tc.tab_name AND e.reverted_at IS NULL
                   AND e.anchor_type = cp.anchor_type AND e.anchor_value = cp.anchor_value
-                  AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                   AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
                 LIMIT 1
              ) current_paid_edit ON TRUE
              LEFT JOIN LATERAL (
@@ -5547,7 +5566,7 @@ async function tabStatsMap({ force = false } = {}) {
                  FROM participant_edits e
                 WHERE e.sheet_id = tc.sheet_id AND e.tab_name = tc.tab_name AND e.reverted_at IS NULL
                   AND e.anchor_type = 'manual' AND e.anchor_value = cp.id::text
-                  AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col2), ''), paid_header.paid_header)
+                   AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
                 LIMIT 1
              ) manual_paid_edit ON TRUE
          ) cp ON TRUE

@@ -109,6 +109,8 @@ async function run() {
       { id: 'd8', seq: 8, name: '이', recipient: null, phone8: '22223333', round: '', option: '', product: '', submitted: true, paid: true, source: 'import', order_submission_id: 'os-ledger-only', identity_key: 'num:8', row_json: {}, submit_col2: '입금' },
       // 사용자 확정 규칙: 입금 컬럼에 저장된 값 자체를 센다. boolean false도 저장된 값이다.
       { id: 'd7', seq: 7, name: '최', recipient: null, phone8: '44445555', round: '', option: '', product: '', submitted: true, paid: false, source: 'import', order_submission_id: 'os-checkbox-off', identity_key: 'num:7', row_json: { '입금': false }, submit_col2: '입금' },
+      // 과거 행별 포인터가 옛 헤더를 가리켜도, 현재 작업보드 입금 열에 보이는 값은 집계해야 한다.
+      { id: 'd10', seq: 10, name: '윤', recipient: null, phone8: '55557777', round: '', option: '', product: '', submitted: true, paid: false, source: 'import', order_submission_id: 'os-stale-paid-header', identity_key: 'num:10', row_json: { '입금': '8/12', '옛입금': '' }, submit_col2: '옛입금' },
       // 정상(유일 order 앵커) — 무회귀 확인용
       // 원장 paid=false여도 실제 작업보드 입금 셀 편집값이 있으면 화면 집계에는 포함된다.
       { id: 'd9', seq: 9, name: '김', recipient: null, phone8: '33334444', round: '', option: '', product: '', submitted: true, paid: false, source: 'import', order_submission_id: 'os-one', identity_key: 'num:1', row_json: {}, submit_col2: '입금' },
@@ -129,7 +131,7 @@ async function run() {
   assert.equal(dById.d9.paid, true, '1B-e: 유일한 order 앵커는 종전대로 적용된다(무회귀)');
   assert.ok(dById.d9.ambiguous !== true, '1B-f: 정상 행은 ambiguous 아님');
   assert.equal(dById.d8.paid, true, '1B-f2: 원장 상태는 표시 집계 변경과 무관하게 보존된다');
-  assert.equal(wdDup.counts.paid, 2, '1B-g: 입금완료는 실제 작업보드 값 2건(false 포함)');
+  assert.equal(wdDup.counts.paid, 3, '1B-g: 입금완료는 현재 작업보드 열의 실제 값 3건(false·옛 행 포인터 포함)');
   assert.equal(wdDup.counts.ambiguous, 3, '1B-h: 중복 줄 수를 화면이 말한다');
   console.log('  1B. order 앵커 중복 게이트 — 번짐 차단·집계 정상·무회귀 ✓');
 
