@@ -32,7 +32,26 @@ ok('가림 별표를 보존한다', /별표\(\*\)[\s\S]{0,100}그대로 보존/.
 ok('보이지 않는 주문자를 수취인으로 복사하지 않는다', /주문자 이름이 따로 없으면[\s\S]{0,100}orderer를 빈 문자열/.test(src));
 ok('실제 결제 총액을 우선한다', /실제 "총 결제금액" 또는 "주문금액"을 우선/.test(src));
 ok('프롬프트 변경은 새 캐시 접두를 사용한다',
-  /const EXTRACT_CACHE_VERSION = 'extract2'/.test(src)
-  && /_getCacheKey\(EXTRACT_CACHE_VERSION \+ ':' \+ base64Data\)/.test(src));
+  /const EXTRACT_CACHE_VERSION = 'extract3'/.test(src)
+  && /EXTRACT_CACHE_VERSION \+ ':' \+ sampleSig \+ ':' \+ base64Data/.test(src));
+
+console.log('\n등록 예시의 실제 주문정보 추출 연결');
+const diag = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
+const inspect = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
+ok('image-extract가 구매캡처 기준이미지를 로드해 추출 함수에 전달한다',
+  /loadOrderExtractionSamples\(\)/.test(diag)
+  && /extractOrderFromImage\(imageBase64,[\s\S]{0,120}\{ samples: extractionSamples \}/.test(diag));
+ok('주문추출에는 구매확정 예시를 제외하고 최근 4장만 사용한다',
+  /async function loadOrderExtractionSamples\(\)[\s\S]{0,500}filter\(s => s\.kind === 'order_capture'\)[\s\S]{0,300}_trimSamples\([\s\S]{0,80}, 4\)/.test(inspect));
+ok('예시 개인정보 복사 금지와 마지막 대상만 판독하도록 구분한다',
+  /예시 속 이름·전화번호·주소·주문번호·금액은 절대 답에 복사하지 마세요/.test(src)
+  && /반환값은 마지막 \[판독 대상 이미지\]에서만 읽으세요/.test(src));
+ok('유사 한글을 실제 획 기준으로 재확인한다',
+  /비슷한 한글\(남\/낭, 혜\/해 등\)[\s\S]{0,100}실제 획 모양을 기준으로 두 번 확인/.test(src));
+ok('대상 이미지까지 포함한 총 요청량 예산 안에서만 예시를 동봉한다',
+  /const EXTRACT_INLINE_CHAR_BUDGET = 18 \* 1024 \* 1024/.test(src)
+  && /EXTRACT_INLINE_CHAR_BUDGET - Buffer\.byteLength\(String\(targetBase64/.test(src)
+  && /if \(size > remaining\) continue/.test(src)
+  && /const samples = _fitExtractionSamples\(requestedSamples, cleanBase64\)/.test(src));
 
 console.log(`\n${passed}개 규칙 통과`);
