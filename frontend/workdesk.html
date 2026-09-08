@@ -7219,10 +7219,10 @@ function _lkRowHtml(s,i,recommendedSalesId){
 function _lkRegistrationDate(value){
   const raw=String(value==null?'':value).trim();
   if(!raw) return '';
-  // 날짜형 문자열은 원본의 달력 날짜를 우선해 브라우저 시간대에 따른 하루 차이를 막는다.
-  let m=raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  // 날짜만 저장된 값은 그대로 쓰고, 시각이 포함된 값은 아래에서 한국시간으로 변환한다.
+  let m=raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if(m) return `${m[1]}-${m[2]}-${m[3]}`;
-  m=raw.match(/^(\d{4})(\d{2})(\d{2})/);
+  m=raw.match(/^(\d{4})(\d{2})(\d{2})$/);
   if(m) return `${m[1]}-${m[2]}-${m[3]}`;
   const numeric=Number(raw);
   const date=Number.isFinite(numeric)&&numeric>0

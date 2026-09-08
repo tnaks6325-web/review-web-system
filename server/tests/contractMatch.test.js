@@ -246,7 +246,7 @@ async function run() {
     registrationDate: '2026-08-07T23:30:00.000Z', amount: 0, contractAmount: 4180000, matchScore: 45, matchReasons: ['브랜드·상품 일치'], advertiserMatch: true,
     contractItems: [{ name: '마케팅 리뷰', count: 800, amount: 4180000 }] }, 0, 'a');
   assert.ok(row.indexOf('4/8(메이커스)엘라비에 마스크팩 마케팅') > -1, '7l: 계약명(계약상품상세) 표기');
-  assert.ok(/lkregdate[^>]*>등록일 2026-08-07</.test(row), '7l1: 계약번호 옆에 등록일 표기(날짜 하루 밀림 없음)');
+  assert.ok(/lkregdate[^>]*>등록일 2026-08-08</.test(row), '7l1: 계약번호 옆에 한국시간 기준 등록일 표기');
   // ★ 계약명이 헤드라인 · 계약고유번호는 보조 — CSS 로 위계를 고정(되돌리면 종전처럼 번호가 제목이 된다).
   const nameCss = (HTML.match(/\.lkname\{([^}]*)\}/) || [, ''])[1];
   const cnoCss = (HTML.match(/\.lkcno\{([^}]*)\}/) || [, ''])[1];
@@ -264,6 +264,7 @@ async function run() {
   assert.ok(/\(계약명 없음\)/.test(noWhy), '7q: 계약명 후보가 모두 비면 그 사실을 표기(빈칸 금지)');
   assert.ok(!/등록일/.test(noWhy), '7q2: 등록일이 없는 구형 데이터에는 빈 라벨을 만들지 않음');
   assert.equal(sb._lkRegistrationDate('20260807'), '2026-08-07', '7q3: 압축 날짜 형식도 표시');
+  assert.equal(sb._lkRegistrationDate('1788851495'), '2026-09-08', '7q4: Unix 초 시각을 날짜로 오인하지 않고 한국시간으로 표시');
   assert.ok(/_lkRowHtml\(s,i,r\.recommendedSalesId\)/.test(HTML), '7r: 행 빌더는 한 벌(사본 금지)');
   assert.ok(/lkmodalbox[^]{0,240}overflow-y:auto/.test(HTML), '7r2: 계약 목록은 팝업 본문에서 스크롤');
   assert.ok(/page=\$\{page\}/.test(SVC) && /exactFirstPage/.test(SVC) && /ignoredFilter/.test(SVC), '7r3: 업체 일치 계약은 필터 무시를 감지한 뒤 페이지 끝까지 조회');
