@@ -158,6 +158,14 @@ function stubPool(answer) {
     const scan = s.calls.find(x => /FROM order_submissions os/.test(x.sql));
     ok('창 절이 쿼리에 있다', /\(\$2::int IS NULL OR os\.submitted_at > NOW\(\) - \(\$2 \|\| ' hours'\)::interval\)/.test(scan.sql));
     ok('창 값이 파라미터로 실린다', scan.params[1] === 48);
+    ok('확정 주문 복구는 활성 작업보드 ID까지 조회한다', /tc\.workboard_id/.test(scan.sql) && /w\.state = 'active'/.test(scan.sql));
+    const source = srv('src/services/sheetlessOrder.service.js');
+    const recoverBlock = source.slice(source.indexOf('async function recoverUnwrittenSheetlessOrders'),
+      source.indexOf('/**\n * 작업보드 줄은 **이미 있는데**', source.indexOf('async function recoverUnwrittenSheetlessOrders')));
+    ok('복구 쓰기는 작업보드 ID와 확정 참여형 초과 권한을 함께 전달한다',
+      /workboardId: row\.workboard_id/.test(recoverBlock) && /allowConfirmedCampaignOverflow: true/.test(recoverBlock));
+    ok('기존 행 중복은 새 행 없이 원장 상태만 written으로 수렴한다',
+      /out\.reason === 'duplicate_row'[\s\S]*markOrderWritten\(row\.id, out\.seq/.test(recoverBlock));
     // ── 수동(창 미지정)은 전체 — null 이 실려야 그 절이 통째로 무효가 된다
     const s2 = stubPool(() => ({ rows: [] }));
     slOrder.__setPoolForTest(s2.pool);

@@ -50,19 +50,27 @@ function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
  *
  * 외부모집 수동제출은 이미 외부에서 구매가 확정된 건을 사후 기록하는 흐름이라, 준비된
  * 슬롯이 모두 찬 경우에도 실제 주문 행 하나를 남길 필요가 있다. 여기에 더해 최근 48시간 내
- * `workboard_apply` 큐 자체가 누락돼 복구기가 다시 넣은 일반 구매 주문도 이미 결제가 끝난
- * 원장이다. 이 경우에만 복구 표식 + 원장 상태·작업보드 연결·수취인·연락처·주문번호를 모두
- * 확인해 초과 행을 허용한다. 단순 재시도나 호출자 플래그 하나만으로는 열리지 않는다.
+ * `workboard_apply` 큐 자체가 누락돼 복구기가 다시 넣은 일반 구매 주문과, 서버가 홀드를
+ * `submitted`로 확정한 참여형 구매도 이미 결제가 끝난 원장이다. 이 경우에만 복구 표식 또는
+ * 캠페인 확정 상태 + 원장 상태·작업보드 연결·수취인·연락처·주문번호를 모두 확인해 초과 행을
+ * 허용한다. 단순 재시도나 호출자 플래그 하나만으로는 열리지 않는다.
  */
 async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-  allowMissingQueueRecoveryOverflow = false, workboardId = null,
+  allowMissingQueueRecoveryOverflow = false, allowConfirmedCampaignOverflow = false, workboardId = null,
 } = {}) {
   const { rows } = await client.query(
     `SELECT source,
             NULLIF(btrim(COALESCE(recipient, '')), '') AS recipient,
             regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS phone_digits,
             NULLIF(btrim(COALESCE(order_num, '')), '') AS order_num,
-            mirror_status, submitted_at, workboard_id
+            mirror_status, submitted_at, workboard_id,
+            EXISTS (
+              SELECT 1 FROM campaign_applications ca
+               WHERE ca.status = 'submitted'
+                 AND (ca.order_submission_id = order_submissions.id
+                   OR ca.late_order_id = order_submissions.id
+                   OR ca.id = order_submissions.campaign_application_id)
+            ) AS campaign_confirmed
        FROM order_submissions
       WHERE id = $1::uuid AND deleted_at IS NULL
       FOR KEY SHARE`, [orderSubmissionId]);
@@ -70,8 +78,14 @@ async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
   const identified = !!(order && order.recipient && String(order.phone_digits || '').length >= 8);
   if (!identified) return false;
   if (order.source === 'admin_external') return true; // 기존 외부모집 수동제출 규칙 보존
-  if (!allowMissingQueueRecoveryOverflow || order.source !== 'order_submit' || !order.order_num || !workboardId) return false;
-  if (!['pending', 'pending_no_row', 'failed', 'queued'].includes(String(order.mirror_status || ''))) return false;
+  const trustedRecovery = allowMissingQueueRecoveryOverflow === true;
+  const confirmedCampaign = allowConfirmedCampaignOverflow === true && order.campaign_confirmed === true;
+  if ((!trustedRecovery && !confirmedCampaign) || order.source !== 'order_submit' || !order.order_num || !workboardId) return false;
+  const mirrorStatus = String(order.mirror_status || '');
+  // 무시트 직접 제출은 원장을 먼저 안전 저장하면서 written으로 선표시한 뒤 작업보드에 쓴다.
+  // 서버가 확인한 참여형 확정 건에 한해서만 그 초기 상태를 허용하고, 일반 written 재시도는 막는다.
+  const initialConfirmedWrite = confirmedCampaign && mirrorStatus === 'written';
+  if (!initialConfirmedWrite && !['pending', 'pending_no_row', 'failed', 'queued'].includes(mirrorStatus)) return false;
   if (!order.workboard_id || String(order.workboard_id) !== String(workboardId)) return false;
   const submittedAt = new Date(order.submitted_at).getTime();
   return Number.isFinite(submittedAt)
@@ -149,12 +163,13 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
  * @param {string} [o.loginPhone8] · [o.loginName]
  * @param {boolean} [o.recovered]        복구 재기록(비고 표기용 — 시트 경로와 같은 의미)
  * @param {boolean} [o.allowMissingQueueRecoveryOverflow] 큐 자체가 누락된 복구 주문만 초과 행 허용
+ * @param {boolean} [o.allowConfirmedCampaignOverflow] 서버가 확정한 참여형 구매만 초과 행 허용
  * @returns {Promise<{ok:boolean, written?:boolean, reason?:string, ledger?:object}>}
  */
 async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
   orderSubmissionId, workboardId = null, loginPhone8 = '', loginName = '', recovered = false,
-  allowMissingQueueRecoveryOverflow = false,
+  allowMissingQueueRecoveryOverflow = false, allowConfirmedCampaignOverflow = false,
 } = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
@@ -358,10 +373,11 @@ async function writeOrderToWorktable({
             LIMIT 1`, [sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId]));
       }
       if (!cur.length) {
-        /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문과
-           최근 48시간 내 큐 누락 복구 주문뿐이며, 원장 필드를 같은 트랜잭션에서 다시 확인한다. */
+        /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문,
+           최근 48시간 내 큐 누락 복구 주문, 서버가 확정한 참여형 구매뿐이며 원장 필드와
+           캠페인 상태를 같은 트랜잭션에서 다시 확인한다. */
         const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-          allowMissingQueueRecoveryOverflow, workboardId,
+          allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
         });
         if (!confirmedOverflow) {
           await client.query('ROLLBACK');
@@ -433,7 +449,7 @@ async function writeOrderToWorktable({
         return { ok: false, reason: 'no_open_slot' };
       }
       const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-        allowMissingQueueRecoveryOverflow, workboardId,
+        allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
       });
       if (!confirmedOverflow) {
         await client.query('ROLLBACK');
@@ -636,17 +652,23 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
             os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
             os.memo, os.selected_opt_key, os.selected_product,
             ca.phone8 AS login_phone8, ca.owner_phone8, r.name AS login_name,
-            rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid
+            rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
+            tc.workboard_id
        FROM order_submissions os
        JOIN campaign_applications ca
          ON (os.campaign_application_id = ca.id
              OR ca.order_submission_id = os.id
              OR ca.late_order_id = os.id)
        JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+       LEFT JOIN tab_configs tc
+         ON tc.sheet_id = rc.linked_sheet_id AND tc.tab_name = rc.linked_tab_name
+        AND COALESCE(tc.sheetless, FALSE) = TRUE
+       LEFT JOIN workboards w ON w.id = tc.workboard_id AND w.state = 'active'
        LEFT JOIN reviewers r ON r.phone8 = COALESCE(ca.owner_phone8, ca.phone8)
       WHERE os.deleted_at IS NULL
         AND COALESCE(rc.linked_sheet_id, '') <> ''
         AND COALESCE(rc.linked_tab_name, '') <> ''
+        AND tc.workboard_id IS NOT NULL AND w.id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM campaign_participants cp
            WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
@@ -659,11 +681,16 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
   for (const row of rows) {
     let out;
     try {
+      await db.query(
+        `UPDATE order_submissions SET workboard_id=$2::uuid, sheet_error=NULL, updated_at=NOW()
+          WHERE id=$1::uuid AND workboard_id IS NULL`,
+        [row.id, row.workboard_id]
+      );
       out = await writeOrderToWorktable({
         sheetId: row.linked_sheet_id, tabName: row.linked_tab_name, tabGid: row.linked_tab_gid || '',
-        orderSubmissionId: row.id,
+        orderSubmissionId: row.id, workboardId: row.workboard_id,
         loginPhone8: row.login_phone8 || row.owner_phone8 || '', loginName: row.login_name || row.orderer || '',
-        recovered: true,
+        recovered: true, allowConfirmedCampaignOverflow: true,
         orderData: {
           orderer: row.orderer, recipient: row.recipient, userId: row.user_id, phone: row.phone,
           address: row.address, bank: row.bank, account: row.account, depositor: row.depositor,
@@ -672,7 +699,12 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
           selectedProduct: row.selected_product,   // ★ 138 — 복구 재기록도 같은 상품값
         },
       });
-      if (out.ok) result.written++;
+      if (out.ok) {
+        if (out.reason === 'duplicate_row') {
+          await require('./orderLedger.service').markOrderWritten(row.id, out.seq || null);
+        }
+        result.written++;
+      }
       else {
         result.failed++;
         if (out.reason === 'no_open_slot') result.noOpenSlot++;

@@ -9298,15 +9298,21 @@ async function submitOrderForm() {
   const doneMsgEl = document.getElementById("orderFormDoneMsg");
   if (doneMsgEl) {
     const total = orders.length;
-    const headline = total > 1
-      ? `총 <b>${total}건</b> 중 <b>${successCount}건</b>이 정상제출 되었습니다.`
-      : `구매양식이 정상제출 되었습니다.`;
+    const mirrorFailed = mirrorStatuses.some(s => s === 'failed' || s === 'pending_no_row');
+    const headline = mirrorFailed
+      ? `구매양식은 접수되었지만 <b>작업보드 반영 확인이 필요합니다.</b>`
+      : total > 1
+        ? `총 <b>${total}건</b> 중 <b>${successCount}건</b>이 정상제출 되었습니다.`
+        : `구매양식이 정상제출 되었습니다.`;
     // ★ 제출완료 안내: 서버 저장 성공 확인 + 내정보/현황 안내 + 중복제출 방지("다시 제출하지 마세요").
-    const reflectNote =
-      `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:#ECFDF5;border:1px solid #A7F3D0;text-align:left;line-height:1.6">`
-      + `<div style="display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#065F46;font-size:.72rem;background:#D1FAE5;border:1px solid #A7F3D0;padding:3px 9px;border-radius:999px;margin-bottom:8px"><i class="fas fa-hard-drive"></i> 서버 저장 성공!</div>`
-      + `<div style="font-size:.82rem;color:#334155"><b>내정보 / 현황</b>에서 참여한 내역을 확인하세요. 구글시트·리뷰 내역 반영은 <b>몇 분</b> 걸릴 수 있으며 "구매양식 반영중"으로 먼저 표시됩니다.<br><b style="color:#B91C1C">이미 제출됐으니 다시 제출하지 마세요.</b></div>`
-      + `</div>`;
+    const reflectNote = mirrorFailed
+      ? `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:#FFF7ED;border:1px solid #FDBA74;text-align:left;line-height:1.6">`
+        + `<div style="font-weight:800;color:#9A3412;margin-bottom:6px"><i class="fas fa-triangle-exclamation"></i> 주문은 저장됐지만 작업보드 반영을 확인하고 있습니다.</div>`
+        + `<div style="font-size:.82rem;color:#7C2D12">다시 제출하지 마세요. 자동 복구 후에도 반영되지 않으면 운영자에게 문의해 주세요.</div></div>`
+      : `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:#ECFDF5;border:1px solid #A7F3D0;text-align:left;line-height:1.6">`
+        + `<div style="display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#065F46;font-size:.72rem;background:#D1FAE5;border:1px solid #A7F3D0;padding:3px 9px;border-radius:999px;margin-bottom:8px"><i class="fas fa-hard-drive"></i> 서버 저장 성공!</div>`
+        + `<div style="font-size:.82rem;color:#334155"><b>내정보 / 현황</b>에서 참여한 내역을 확인하세요. 구글시트·리뷰 내역 반영은 <b>몇 분</b> 걸릴 수 있으며 "구매양식 반영중"으로 먼저 표시됩니다.<br><b style="color:#B91C1C">이미 제출됐으니 다시 제출하지 마세요.</b></div>`
+        + `</div>`;
     doneMsgEl.innerHTML = `${headline}${reflectNote}<div id="capChecklist" style="margin-top:12px"></div>`;
   }
   if (doneEl) doneEl.style.display = "";

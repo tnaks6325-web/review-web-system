@@ -33,7 +33,7 @@ function __setPoolForTest(p) { _pool = p; }
 /**
  * 공고에 연결된 작업보드를 보장한다.
  *
- * @returns {Promise<{ok:boolean, sheetId?:string, tabName?:string, tabGid?:string,
+ * @returns {Promise<{ok:boolean, sheetId?:string, tabName?:string, tabGid?:string, workboardId?:string,
  *                     created?:boolean, reason?:string, message?:string}>}
  *   ok:false 는 "만들지 못했다"는 뜻이고 호출부는 종전처럼 미반영으로 처리한다
  *   (조용히 성공으로 꾸미지 않는다).
@@ -55,7 +55,7 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
     await client.query('BEGIN');
     /* ★ 공고 행 잠금 — 같은 공고에 주문이 동시에 들어와도 작업표가 두 개 생기지 않는다. */
     const { rows } = await client.query(
-      `SELECT id, title, landing_url, linked_sheet_id, linked_tab_name, linked_tab_gid
+      `SELECT id, title, landing_url, linked_sheet_id, linked_tab_name, linked_tab_gid, workboard_id
          FROM recruit_campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
     if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, reason: 'campaign_not_found' }; }
     const c = rows[0];
@@ -65,6 +65,7 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
       return {
         ok: true, created: false,
         sheetId: c.linked_sheet_id, tabName: c.linked_tab_name, tabGid: String(c.linked_tab_gid || ''),
+        workboardId: c.workboard_id || null,
       };
     }
 
@@ -109,12 +110,12 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
         WHERE id = $1`, [campaignId, sheetId, title, gid]);
 
     // 탭 생성·공고 연결·작업보드 ID 부여는 한 번에 성공하거나 함께 취소한다.
-    await require('./workboardConsolidation.service').ensureNewWorkTarget({
+    const mapping = await require('./workboardConsolidation.service').ensureNewWorkTarget({
       sheetId, tabName: title, by: `campaign-worktable:${by}`, client,
     });
 
     await client.query('COMMIT');
-    made = { sheetId, tabName: title, tabGid: gid, columns };
+    made = { sheetId, tabName: title, tabGid: gid, workboardId: mapping.workboardId || null, columns };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     logger.error(`[campaignWorktable] 작업보드 생성 실패 camp=${campaignId}: ${err.message}`);
@@ -136,7 +137,8 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
   }
 
   logger.info(`[campaignWorktable] 공고 전용 작업보드 생성 camp=${campaignId} tab=${made.tabName} sheet=${made.sheetId}`);
-  return { ok: true, created: true, sheetId: made.sheetId, tabName: made.tabName, tabGid: made.tabGid };
+  return { ok: true, created: true, sheetId: made.sheetId, tabName: made.tabName, tabGid: made.tabGid,
+    workboardId: made.workboardId };
 }
 
 module.exports = { ensureCampaignWorktable, __setPoolForTest };
