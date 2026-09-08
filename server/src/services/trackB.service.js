@@ -990,7 +990,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           LIMIT 1
        ) paid_header ON TRUE
        LEFT JOIN LATERAL (
-         /* workdeskTab과 같은 앵커 규율:
+         /* workdeskTab과 같은 앵커 규율(리뷰제출 집계):
             - 현재 앵커의 셀 편집이 원본 셀보다 우선
             - 주문/identity 앵커가 중복이면 어떤 행에도 적용하지 않음
             - 앵커 승격 전 저장한 물리행(manual) 편집은 현재 앵커보다 낮은 우선순위
@@ -1025,20 +1025,13 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                                    ELSE manual_edit.value_text END END,
                     cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
                   )), '') IS NOT NULL)::int AS submitted,
-                /* 화면용 입금완료 = 원장 플래그가 아니라 작업보드의 실제 입금 셀.
-                   원장·정산·이체 상태(cp.is_paid)는 이 표시 집계와 분리해 그대로 둔다. */
+                /* 화면용 입금완료 = 원장 플래그나 과거 편집 이력이 아니라 작업보드
+                   row_json의 실제 입금 셀. 원장·정산·이체 상태(cp.is_paid)는 분리한다. */
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.held_at IS NULL
                   AND ${_filledSql('cp')}
-                  AND NULLIF(BTRIM(COALESCE(
-                    CASE WHEN cp.anchor_type IS NOT NULL
-                              AND (cp.anchor_type = 'manual' OR cp.anchor_count = 1)
-                         THEN CASE WHEN current_paid_edit.kind = 'bool' THEN CASE WHEN current_paid_edit.value_bool THEN 'O' ELSE '' END
-                                   ELSE current_paid_edit.value_text END END,
-                    CASE WHEN cp.anchor_type IS NOT NULL AND cp.anchor_type <> 'manual' AND cp.anchor_count = 1
-                         THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
-                                   ELSE manual_paid_edit.value_text END END,
-                     cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
-                  )), '') IS NOT NULL)::int AS paid
+                  AND NULLIF(BTRIM(
+                    cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
+                  ), '') IS NOT NULL)::int AS paid
            FROM anchored_rows cp
            LEFT JOIN LATERAL (
              SELECT e.kind, e.value_bool, e.value_text
@@ -1056,22 +1049,6 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                 AND e.field = 'col:' || COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
               LIMIT 1
            ) manual_edit ON TRUE
-           LEFT JOIN LATERAL (
-             SELECT e.kind, e.value_bool, e.value_text
-               FROM participant_edits e
-              WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
-                AND e.anchor_type = cp.anchor_type AND e.anchor_value = cp.anchor_value
-                 AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
-              LIMIT 1
-           ) current_paid_edit ON TRUE
-           LEFT JOIN LATERAL (
-             SELECT e.kind, e.value_bool, e.value_text
-               FROM participant_edits e
-              WHERE e.sheet_id = t.sheet_id AND e.tab_name = t.tab_name AND e.reverted_at IS NULL
-                AND e.anchor_type = 'manual' AND e.anchor_value = cp.id::text
-                 AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
-              LIMIT 1
-           ) manual_paid_edit ON TRUE
        ) cnt ON TRUE
        LEFT JOIN tab_configs tc ON tc.sheet_id = t.sheet_id AND tc.tab_name = t.tab_name
        LEFT JOIN LATERAL (
@@ -3501,8 +3478,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       : '';
     const reviewSubmitted = !!String(submitCellValue == null ? '' : submitCellValue).trim();
     const paidHeader = String(tabPaidHeader || r.submit_col2 || '').trim();
+    // 상태 셀의 화면 정본은 rowJson이다. participant_edits의 col:입금 값은 편집기록
+    // 마커용으로만 남으며, 오래된 빈 이력이 현재 작업보드 값을 덮어 집계를 줄이면 안 된다.
     const paidCellValue = paidHeader
-      ? pick('col:' + paidHeader, (r.row_json && r.row_json[paidHeader]))
+      ? (r.row_json && r.row_json[paidHeader])
       : '';
     // 삭제·보관 행은 roster 쿼리에서 빠지고, 준비만 된 빈 슬롯은 filled 판정으로 제외한다.
     if (syn.filled && _hasWorkboardStatusValue(paidCellValue)) paymentCellCount++;
@@ -3551,7 +3530,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 광고주: 허용된 원본 컬럼과 주문 확인용 아이디·전화번호만 담는다. 내부 참여자·은행·계좌·예금주는 제외한다.
       const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
       const cur = {};
-      for (const h of advHeaders) cur[h] = _advertiserColumnValue(rj, ov, h, advertiserOrder);
+      for (const h of advHeaders) {
+        // 내부 화면과 동일하게 입금 상태 칸은 현재 작업보드 스냅샷을 그대로 표시한다.
+        cur[h] = h === tabPaidHeader ? (rj[h] == null ? '' : rj[h]) : _advertiserColumnValue(rj, ov, h, advertiserOrder);
+      }
       syn.rowJson = cur;
       syn.editable = false;   // 읽기전용(다른 열은 종전대로)
       // ★ 택배송장 열만 업체가 직접 입력한다(사용자 확정 2026-08-19). 편집은 오버레이라 **앵커가 있어야**
@@ -5541,34 +5523,11 @@ async function tabStatsMap({ force = false } = {}) {
            SELECT COUNT(*)::int AS total_count,
                   COUNT(*) FILTER (WHERE cp.is_submitted)::int AS submitted_count,
                   COUNT(*) FILTER (WHERE ${_filledSql('cp')})::int AS filled_count,
-                  COUNT(*) FILTER (WHERE ${_filledSql('cp')}
-                    AND NULLIF(BTRIM(COALESCE(
-                      CASE WHEN cp.anchor_type IS NOT NULL
-                                AND (cp.anchor_type = 'manual' OR cp.anchor_count = 1)
-                           THEN CASE WHEN current_paid_edit.kind = 'bool' THEN CASE WHEN current_paid_edit.value_bool THEN 'O' ELSE '' END
-                                     ELSE current_paid_edit.value_text END END,
-                      CASE WHEN cp.anchor_type IS NOT NULL AND cp.anchor_type <> 'manual' AND cp.anchor_count = 1
-                           THEN CASE WHEN manual_paid_edit.kind = 'bool' THEN CASE WHEN manual_paid_edit.value_bool THEN 'O' ELSE '' END
-                                     ELSE manual_paid_edit.value_text END END,
+                   COUNT(*) FILTER (WHERE ${_filledSql('cp')}
+                     AND NULLIF(BTRIM(
                        cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
-                    )), '') IS NOT NULL)::int AS paid_count
+                     ), '') IS NOT NULL)::int AS paid_count
              FROM anchored_rows cp
-             LEFT JOIN LATERAL (
-               SELECT e.kind, e.value_bool, e.value_text
-                 FROM participant_edits e
-                WHERE e.sheet_id = tc.sheet_id AND e.tab_name = tc.tab_name AND e.reverted_at IS NULL
-                  AND e.anchor_type = cp.anchor_type AND e.anchor_value = cp.anchor_value
-                   AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
-                LIMIT 1
-             ) current_paid_edit ON TRUE
-             LEFT JOIN LATERAL (
-               SELECT e.kind, e.value_bool, e.value_text
-                 FROM participant_edits e
-                WHERE e.sheet_id = tc.sheet_id AND e.tab_name = tc.tab_name AND e.reverted_at IS NULL
-                  AND e.anchor_type = 'manual' AND e.anchor_value = cp.id::text
-                   AND e.field = 'col:' || COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
-                LIMIT 1
-             ) manual_paid_edit ON TRUE
          ) cp ON TRUE
          -- 마감 확인창의 "마감자료 생성됨/미생성" 표시 재료(기존 정산 원장 재사용 — 신규 엔드포인트 0).
          --   ★ LATERAL LIMIT 1 = 행 곱증식 없음(레포 관용구). 미생성이면 NULL → 화면이 경고만 띄운다(하드블록 아님).

@@ -7531,7 +7531,9 @@ function gCellDisp(r,h){
   if(displayName&&_isWorkboardProductHeader(h)) return displayName;
   const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
   const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
-  const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
+  // 상태 칸은 표 렌더러와 동일하게 현재 작업보드(rowJson)를 정본으로 쓴다.
+  // 과거 편집 이력은 기록 마커일 뿐 필터·그룹·내려받기 값을 덮지 않는다.
+  const ed=!_workdeskStatusKind(h)&&(h in ceMap); const raw= ed?ceMap[h]:rj[h];
   return ed?(raw==null?'':String(raw)):_gridVal(h, raw);
 }
 /* 작업보드 XLSX 내려받기 — 화면에 보이는 열과 현재 필터·정렬 순서를 그대로 내보낸다.
