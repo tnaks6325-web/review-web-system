@@ -249,15 +249,23 @@ async function confirmExternalApplication(client, {
     if (hasLinkedOrderLedger) {
       try {
         const { fetchCampaignCounts, totalQuotaUsage } = require('./campaignState.service');
+        const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('./campaignSchedule.service');
+        const now = new Date();
         const counts = (await fetchCampaignCounts(client, [campaignId])).get(campaignId) || null;
-        const usage = totalQuotaUsage(cRows[0], counts, null);
+        // 일반 참여 게이트와 같은 일정 총량을 사용한다. 일정이 적용되지 않는 공고는 null로
+        // 돌아와 공고/발주 총량으로 자연스럽게 폴백한다.
+        const schedules = await deriveSchedules(client, tabsOfCampaigns(cRows), now);
+        const usage = totalQuotaUsage(cRows[0], counts, scheduleFor(schedules, cRows[0]));
         capacityTotal = Number(usage.cap) || capacityTotal;
         capacityUnknown = !usage.known;
+        // 이 함수가 호출될 때 주문 원장은 이미 만들어져 있어 usage.orders에 현재 주문도 포함된다.
+        // 초과 여부는 "이 주문 직전" 소비량으로 판정해야 마지막 정상 주문을 초과로 오인하지 않는다.
+        const currentOrder = orderSubmissionId && usage.source === 'order_ledger' ? 1 : 0;
         // 선택한 유효 홀드는 이미 소비량에 포함된 자리다. submitted 전환을 새 1건으로 오인해
         // 10/10의 마지막 정상 구매를 11번째 초과로 경고하지 않도록 그 홀드 하나만 제외한다.
         const selectedHold = selectedApplication && selectedApplication.active_hold ? 1 : 0;
         const ledgerBase = usage.source === 'order_ledger'
-          ? Math.max(Number(usage.submitted) || 0, Number(usage.orders) || 0)
+          ? Math.max(Number(usage.submitted) || 0, Math.max(0, (Number(usage.orders) || 0) - currentOrder))
           : (Number(usage.submitted) || 0);
         const usedBeforeThisConfirmation = ledgerBase
           + Math.max(0, (Number(usage.activeHolds) || 0) - selectedHold);
