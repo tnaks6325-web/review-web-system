@@ -1,5 +1,7 @@
 'use strict';
 
+const { parseDateToken } = require('../utils/koreanDate');
+
 // v2 작업표의 상태 열은 이름 추측으로 찾지 않는다. 생성 시의 열 위치와 헤더를
 // 함께 저장/검증하여, 리뷰옵션 같은 비어있지 않은 작업지시 값이 제출로 읽히는
 // 사고를 차단한다.
@@ -35,7 +37,12 @@ function validateV2StatusBindings(headers, bindings) {
 
 function isV2ReviewSubmitted(value) {
   const text = String(value || '').trim();
-  return text === '제출' || text === 'O'; // 기존 v2 전환 중 생성분의 O만 읽기 호환
+  if (text === '제출' || text === 'O') return true; // 기존 v2 전환 중 생성분 호환
+  // 수동 제출·백필이 실제로 쓰는 M/D HH:mm(또는 날짜) 형식만 인정한다.
+  // 날짜 판정은 쓰기 경로와 같은 공통 파서를 써서 2/30·'완료' 같은 임의 텍스트는 제출으로 새지 않는다.
+  const time = /\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(text);
+  if (time && (Number(time[1]) > 23 || Number(time[2]) > 59 || (time[3] != null && Number(time[3]) > 59))) return false;
+  return parseDateToken(text) !== null;
 }
 
 function isV2PaymentSubmitted(value) {

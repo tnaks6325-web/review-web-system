@@ -150,6 +150,26 @@ async function listPaymentTargets(opts = {}) {
         SELECT 1 FROM payment_batch_items pi
          WHERE pi.sheet_id = ri.sheet_id AND pi.tab_name = ri.tab_name
            AND pi.row_index = ri.row_index AND pi.status IN ('pending','paid'))`,
+    // 실제 입금 원장은 성공했는데 작업보드 표시·장부 재생성만 누락된 경우도 재지급 대상으로 살려내지 않는다.
+    // 단, 관리자가 나중에 해당 행을 '미입금'으로 명시 정정(is_paid=false)한 경우에는 그 이전 원장만 풀어준다.
+    // 정정 후 새 입금 원장이 생기면 시각 비교로 다시 잠겨 중복 이체를 막는다.
+    `NOT EXISTS (
+        SELECT 1
+          FROM payment_records pr
+         WHERE pr.sheet_id = ri.sheet_id AND pr.tab_name = ri.tab_name
+           AND pr.row_index = ri.row_index
+           AND NOT EXISTS (
+             SELECT 1
+               FROM campaign_participants cp
+               JOIN participant_edits pe
+                 ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+                AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
+                  OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
+                  OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+              WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+                AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+                AND pe.field = 'is_paid' AND pe.kind = 'bool' AND pe.value_bool = FALSE
+                AND pe.reverted_at IS NULL AND pe.created_at > pr.paid_at))`,
   ];
   if (opts.sheetId) { params.push(opts.sheetId); where.push(`ri.sheet_id = $${params.length}`); }
   if (opts.tabName) { params.push(opts.tabName); where.push(`ri.tab_name = $${params.length}`); }

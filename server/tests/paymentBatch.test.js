@@ -24,6 +24,7 @@ const assert = require('assert');
 const ROOT = path.join(__dirname, '..');
 const R = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const RF = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8');
+const ledgerGuardMig = R('migrations/149_payment_target_ledger_guard.sql');
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -191,6 +192,21 @@ t('★ 시트 API 무접촉 (M1 은 DB 전용)', () => {
 t('★ 대상 추출에 다운로드 이력 잠금 조건이 있다', () => {
   assert.ok(/NOT EXISTS[\s\S]{0,220}payment_batch_items[\s\S]{0,220}status IN \('pending',\s*'paid'\)/.test(noComment),
     '살아있는 회차 항목 제외 조건이 없다 = 이중입금');
+});
+
+t('★ 입금 원장이 있는 행은 표시 누락에도 재지급 대상에서 제외한다', () => {
+  assert.ok(/NOT EXISTS[\s\S]{0,180}payment_records pr[\s\S]{0,180}pr\.sheet_id = ri\.sheet_id[\s\S]{0,120}pr\.row_index = ri\.row_index/.test(noComment),
+    '입금 원장을 동일 작업·탭·행으로 대조하는 중복 방지 조건이 없다');
+});
+
+t('★ 관리자의 나중 미입금 정정만 과거 원장 잠금을 풀고, 정정 후 새 입금은 다시 잠그다', () => {
+  assert.ok(/participant_edits pe[\s\S]{0,900}pe\.field = 'is_paid'[\s\S]{0,120}pe\.kind = 'bool'[\s\S]{0,120}pe\.value_bool = FALSE[\s\S]{0,160}pe\.reverted_at IS NULL[\s\S]{0,120}pe\.created_at > pr\.paid_at/.test(noComment),
+    '행 단위 미입금 정정시각과 입금시각의 선후 비교가 없다');
+});
+
+t('★ 입금 원장 중복 가드는 작업·탭·행·시각 복합 인덱스를 사용한다', () => {
+  assert.ok(/CREATE INDEX IF NOT EXISTS idx_payment_records_target_guard[\s\S]*\(sheet_id,\s*tab_name,\s*row_index,\s*paid_at DESC\)[\s\S]*WHERE row_index IS NOT NULL/.test(ledgerGuardMig),
+    '입금대상 조회가 탭 전체 원장을 반복 스캔할 수 있다');
 });
 
 t('★ 미입금 판정이 search.service 와 같은 출처(PAYMENT_COL_KEYWORDS)를 쓴다', () => {
