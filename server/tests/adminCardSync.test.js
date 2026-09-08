@@ -48,7 +48,7 @@ ok('관리자 그리드는 너비만큼 채운다(2열 고정 아님)',
 ok('리뷰어 그리드는 2열 고정 유지(앱 폭 고정)',
   /\.pcards-grid\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(cc));
 
-/* ── 관제 뱃지 = 지각만 (C안) ── */
+/* ── 로그 뱃지 = 지각만 (C안) ── */
 ok('빨간 원은 지각(late) 건수만 센다', /const late = \(c\.ops && Number\(c\.ops\.late\)\) \|\| 0/.test(cc));
 ok('지각 0건이면 원을 그리지 않는다', /late > 0 \? `<span class="bdg"/.test(cc));
 ok('서버가 지각 건수를 집계한다(수동확정되면 submitted라 자동 제외)',
@@ -95,7 +95,7 @@ ok('인기 토글은 목록 재요청 없이 현재 카드만 즉시 반영한�
   && !/await loadRecruitList\(\);/.test(rec.slice(rec.indexOf('async function toggleCampFlag'), rec.indexOf('async function toggleCampFlag') + 1200)));
 
 /* ── 삭제 모드 ── */
-ok('카드에는 삭제 버튼이 없다(액션 = 수정·보기·관제·게시)',
+ok('카드에는 삭제 버튼이 없다(액션 = 수정·보기·로그·게시)',
   !/deleteRecruitPost/.test(cc));
 // 무시트 운영 전환: 카드 메뉴에서 외부 구글시트를 여는 기능은 제거하고,
 // 리뷰어 화면 미리보기와 내부 운영 메뉴만 남긴다.

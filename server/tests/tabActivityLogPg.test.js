@@ -27,8 +27,12 @@ CREATE TABLE order_submissions (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT
   recipient TEXT, orderer TEXT, price TEXT, source TEXT, campaign_application_id BIGINT,
   campaign_was_late BOOLEAN NOT NULL DEFAULT FALSE,
   submitted_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, canceled_by TEXT);
-CREATE TABLE campaign_applications (id BIGSERIAL, campaign_id TEXT, applied_at TIMESTAMPTZ,
-  expires_at TIMESTAMPTZ, order_submission_id UUID, late_order_id UUID);
+CREATE TABLE campaign_applications (id BIGSERIAL, campaign_id TEXT, applicant_name TEXT,
+  applicant_phone TEXT, applicant_inad TEXT, status TEXT, sheet_row_added BOOLEAN,
+  applied_at TIMESTAMPTZ, phone8 TEXT, expires_at TIMESTAMPTZ, submitted_at TIMESTAMPTZ,
+  order_submission_id UUID, late_order_id UUID, option_key TEXT, owner_phone8 TEXT,
+  dismissed_at TIMESTAMPTZ, dismissed_by TEXT, blog_url TEXT, reject_reason TEXT,
+  decided_at TIMESTAMPTZ, decided_by TEXT, is_popular_snapshot BOOLEAN);
 CREATE TABLE reviewer_event_logs (id BIGSERIAL, occurred_at TIMESTAMPTZ, sheet_id TEXT, tab_name TEXT,
   event_type TEXT, severity TEXT, message TEXT, reviewer_name TEXT, context JSONB);
 CREATE TABLE review_submissions (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT,
@@ -38,7 +42,8 @@ CREATE TABLE review_inspections (id UUID DEFAULT gen_random_uuid(), sheet_id TEX
   resolved_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, created_at TIMESTAMPTZ);
 CREATE TABLE participant_edits (id BIGSERIAL, sheet_id TEXT, tab_name TEXT, field TEXT, kind TEXT,
   value_text TEXT, value_bool BOOLEAN, created_by TEXT, created_at TIMESTAMPTZ, reverted_at TIMESTAMPTZ, reverted_by TEXT);
-CREATE TABLE recruit_campaigns (id TEXT, linked_sheet_id TEXT, linked_tab_name TEXT, linked_tab_gid TEXT);
+CREATE TABLE recruit_campaigns (id TEXT, linked_sheet_id TEXT, linked_tab_name TEXT, linked_tab_gid TEXT,
+  participation_mode BOOLEAN, is_popular BOOLEAN);
 CREATE TABLE campaign_plan_events (id UUID DEFAULT gen_random_uuid(), campaign_id TEXT, actor TEXT,
   action TEXT, detail JSONB, created_at TIMESTAMPTZ);
 CREATE TABLE payment_batch_items (id UUID DEFAULT gen_random_uuid(), batch_id UUID, sheet_id TEXT, tab_name TEXT,
@@ -82,6 +87,11 @@ async function drain(m, opts) {
            ('s1','t1',61,'지각','12290','order_submit',$2,TRUE,$3)
     RETURNING id, recipient`, [D('2026-08-23T04:00:00Z'), lateApps[0].id, D('2026-08-23T05:12:10Z')]);
   const lateOrder = typedOrders.find(r => r.recipient === '지각');
+  const extOrder = typedOrders.find(r => r.recipient === '외부');
+  await pool.query(`INSERT INTO campaign_applications
+    (campaign_id,applicant_name,status,applied_at,submitted_at,phone8,order_submission_id)
+    VALUES ('c1','외부','submitted',$1,$2,'11112222',$3)`,
+    [D('2026-08-23T03:30:00Z'), D('2026-08-23T04:00:00Z'), extOrder.id]);
   await pool.query(`UPDATE campaign_applications SET late_order_id=$2 WHERE id=$1`, [lateApps[0].id, lateOrder.id]);
   /* 취소 실행부가 late_order_id를 비운 뒤에도 주문 원장의 불변 플래그와 신청 FK로 과거 표기가 유지돼야 한다. */
   await pool.query(`UPDATE campaign_applications SET late_order_id=NULL WHERE id=$1`, [lateApps[0].id]);
@@ -148,6 +158,52 @@ async function drain(m, opts) {
     assert.ok(late, 'late_order_id 구분');
     assert.strictEqual(new Date(late.submittedAt).toISOString(), '2026-08-23T05:12:10.000Z');
     assert.strictEqual(late.overdueSeconds, 730);
+  });
+
+  await t('★★ 모집공고 로그 SQL도 주문 원장의 제출시각·외부출처·취소 뒤 역링크를 읽는다', async () => {
+    const { rows: historyApps } = await pool.query(`INSERT INTO campaign_applications
+      (campaign_id,applicant_name,status,applied_at,phone8)
+      VALUES ('c1','취소외부','cancelled',$1,'33334444') RETURNING id`, [D('2026-08-23T06:00:00Z')]);
+    await pool.query(`INSERT INTO order_submissions
+      (sheet_id,tab_name,recipient,source,campaign_application_id,submitted_at,deleted_at)
+      VALUES ('s2','t2','취소외부','admin_external',$1,$2,$3)`,
+      [historyApps[0].id, D('2026-08-23T06:10:00Z'), D('2026-08-23T06:20:00Z')]);
+    const { rows: manualConfirmedApps } = await pool.query(`INSERT INTO campaign_applications
+      (campaign_id,applicant_name,status,applied_at,submitted_at,phone8)
+      VALUES ('c1','취소후구매확인','submitted',$1,$2,'44445555') RETURNING id`,
+      [D('2026-08-23T06:30:00Z'), D('2026-08-23T06:40:00Z')]);
+    await pool.query(`INSERT INTO order_submissions
+      (sheet_id,tab_name,recipient,source,campaign_application_id,submitted_at,deleted_at)
+      VALUES ('s2','t2','취소후구매확인','admin_external',$1,$2,$3)`,
+      [manualConfirmedApps[0].id, D('2026-08-23T06:35:00Z'), D('2026-08-23T06:36:00Z')]);
+    await pool.query(`INSERT INTO campaign_applications
+      (campaign_id,applicant_name,status,applied_at,submitted_at,expires_at,phone8,order_submission_id,late_order_id)
+      VALUES ('c1','지각후외부','submitted',$1,$2,$3,'55556666',$4,$5)`,
+      [D('2026-08-23T03:00:00Z'), D('2026-08-23T04:00:00Z'), D('2026-08-23T03:30:00Z'), extOrder.id, lateOrder.id]);
+
+    const routeSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'utf8');
+    const start = routeSrc.indexOf("router.get('/admin/:id/applications'");
+    const end = routeSrc.indexOf("// GET /api/campaign/admin/:id/preview", start);
+    const section = routeSrc.slice(start, end);
+    const found = /const \{ rows \} = await pool\.query\(\s*`([\s\S]*?)`,\s*\[id\]\s*\);/.exec(section);
+    assert.ok(found, '관리자 applications SQL 추출');
+    const q = await pool.query(found[1], ['c1']);
+    const ext = q.rows.find(r => r.applicant_name === '외부');
+    const late = q.rows.find(r => String(r.id) === String(lateApps[0].id));
+    const history = q.rows.find(r => r.applicant_name === '취소외부');
+    const manualConfirmed = q.rows.find(r => r.applicant_name === '취소후구매확인');
+    const replaced = q.rows.find(r => r.applicant_name === '지각후외부');
+    assert.strictEqual(ext.order_source, 'admin_external');
+    assert.strictEqual(new Date(ext.order_submitted_at).toISOString(), '2026-08-23T04:00:00.000Z');
+    assert.strictEqual(late.order_was_late, true);
+    assert.strictEqual(new Date(late.order_submitted_at).toISOString(), '2026-08-23T05:12:10.000Z');
+    assert.strictEqual(history.order_source, 'admin_external', '취소 뒤 신청 역링크 복구');
+    assert.strictEqual(new Date(history.order_submitted_at).toISOString(), '2026-08-23T06:10:00.000Z');
+    assert.strictEqual(manualConfirmed.order_source, null, '새 주문 없는 구매확인에 취소 이력 재사용 금지');
+    assert.strictEqual(manualConfirmed.order_submitted_at, null, '수동확정에는 과거 취소 주문시각 미표시');
+    assert.strictEqual(replaced.order_source, 'admin_external', '과거 지각 링크보다 현재 제출 우선');
+    assert.strictEqual(new Date(replaced.order_submitted_at).toISOString(), '2026-08-23T04:00:00.000Z');
+    assert.strictEqual(replaced.order_was_late, false, '현재 외부 제출을 과거 지각 주문으로 오분류하지 않음');
   });
 
   await t('★★ 유형을 골라도 그 유형의 과거까지 전부 나온다(SQL 유형 조건)', async () => {

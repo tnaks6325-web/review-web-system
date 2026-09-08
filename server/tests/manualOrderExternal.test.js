@@ -236,6 +236,9 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
   const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '1', targetApplicationId: 42, orderSubmissionId: 'os-1' });
   ok('B22 운영자가 선택한 신청만 확정한다(만료 건 포함)', r.ok === true && r.applicationId === 42);
   ok('B23 선택 확정은 새 신청 INSERT를 만들지 않는다', !c.log.some(q => /INSERT INTO campaign_applications/.test(q.sql)));
+  const provenance = c.log.find(q => /UPDATE order_submissions/.test(q.sql) && /campaign_application_id/.test(q.sql));
+  ok('B23b 외부모집 주문에도 신청 역링크를 남겨 취소 후 로그 출처를 보존',
+    !!provenance && provenance.params[0] === 'os-1' && provenance.params[1] === 42);
 }
 {
   const c = stubClient([
@@ -331,6 +334,10 @@ console.log('\nD. 프론트 배선');
   ok('D9 ★ 리뷰어 홈 칩은 진짜 admin_token + 참여형일 때만 — 스코프 토큰에겐 미노출(403 막다른 길 금지)',
     /const moChip = \(!admin && c\.participation_mode && _realAdminTok\(\)\)/.test(cc));
   ok('D10 칩이 실제로 카드에 삽입된다', cc.includes('${editChip}${moChip}'));
+  const irNames = F('js/index-recruit.js');
+  ok('D10b 카드와 모집공고 로그의 버튼 명칭은 외부모집 수동제출로 통일',
+    (cc.match(/외부모집 수동제출/g) || []).length >= 1 && irNames.includes('외부모집 수동제출')
+    && !/>🧾 외부제출</.test(cc) && !/>🧾 외부제출</.test(irNames));
   ok('D11 연결 탭 문맥은 단일 렌더러가 캐시한다', cc.includes('_cacheMoCtx(c);'));
   ok('D12 캐시가 비면 관리자 조회로 보충(공개 목록엔 연결 탭이 없다)',
     /'\/api\/campaign\/' \+ encodeURIComponent\(id\)/.test(cc));
@@ -342,7 +349,7 @@ console.log('\nD. 프론트 배선');
 }
 {
   const ir = F('js/index-recruit.js');
-  ok('D16 관제 패널에 외부제출 버튼', ir.includes('id="ccMoBtn"'));
+  ok('D16 모집공고 로그에 외부모집 수동제출 버튼', ir.includes('id="ccMoBtn"') && ir.includes('외부모집 수동제출'));
   ok('D17 관제 버튼은 열 때마다 현재 공고로 다시 배선(오버레이 재사용 함정)',
     /_moBtn\.onclick = \(\) =>/.test(ir) && ir.includes('CampCards.openManualOrder(campId)'));
   ok('D17b 모듈이 없는 화면(admin-siand)에서는 버튼을 숨긴다 — 눌러도 안 되는 버튼 금지',
