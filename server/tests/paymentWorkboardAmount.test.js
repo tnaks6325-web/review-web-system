@@ -16,6 +16,16 @@ const physical = svc.resolveDisplayedAmount({ participantRowJson: { 결제금액
 assert.equal(physical.amount, 7650);
 assert.equal(physical.source, 'workboard');
 
+const ambiguous = svc.resolveDisplayedAmount({
+  participantRowJson: { 결제금액: '18,950' },
+  manualEdits: { 'col:결제금액': '10,000' },
+  anchorEdits: { 'col:결제금액': '7,650' },
+  ambiguous: true,
+});
+assert.equal(ambiguous.amount, 18950,
+  '중복 order/identity 앵커에서는 작업보드처럼 물리행·현재앵커 편집을 모두 숨겨야 한다');
+assert.equal(ambiguous.source, 'workboard');
+
 (async () => {
   let sql = '';
   const db = { query: async text => {
@@ -34,6 +44,8 @@ assert.equal(physical.source, 'workboard');
   assert.match(sql, /participant_edits/);
   assert.match(sql, /COUNT\(\*\).*campaign_participants/s,
     '중복 order/identity 앵커에는 편집을 번지게 하지 않는 유일성 게이트가 필요하다');
+  assert.match(sql, /END AS "ambiguous"/,
+    '작업보드와 같은 모호성 판정을 로더 결과에 포함해야 한다');
 
   const source = fs.readFileSync(require.resolve('../src/services/payment.service'), 'utf8');
   assert.match(source, /const productPrice = workboardPrice \|\| orderPrice/,

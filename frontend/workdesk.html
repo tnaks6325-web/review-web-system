@@ -11907,7 +11907,7 @@ function _pmRenderUnconfirmedDirect(match=null){
   const activeMatch=match||savedMatch, matched=activeMatch&&activeMatch.candidate, results=(activeMatch&&activeMatch.results)||[];
   const resultBySeq=new Map(results.map(x=>[Number(x.seq),x]));
   const amountBySeq=new Map(((activeMatch&&activeMatch.amountMismatchCandidates)||[]).map(x=>[Number(x.resultSeq),x]));
-  const accountBySeq=new Map(((activeMatch&&activeMatch.reconciliationCandidates)||[]).map((x,i)=>[Number(x.resultSeq),{candidate:x,index:i}]));
+  const accountBySeq=new Map(((activeMatch&&activeMatch.reconciliationCandidates)||[]).map(x=>[Number(x.resultSeq),x]));
   const workRowForTransfer=(transfer,result)=>{
     const reviewer=result.holder||transfer.holder||'—';
     const adjustment=amountBySeq.get(Number(transfer.seq));
@@ -11928,7 +11928,7 @@ function _pmRenderUnconfirmedDirect(match=null){
     const decision=_pmUnconfirmedStateLabel(result.state);
     const action=!matched ? '<span class="muted">그룹 작업 선택 필요</span>'
       : amountAdjustment ? `<button class="btn pri xs" onclick="_pmOpenAmountMismatchForm(${rowIndex})">금액 조정 승인</button>`
-      : accountAdjustment ? `<button class="btn pri xs" onclick="_pmReconcileMismatch(${accountAdjustment.index})">계좌 확인 후 승인</button>`
+      : accountAdjustment ? `<button class="btn pri xs" onclick="_pmReconcileMismatch(${rowIndex})">계좌 확인 후 승인</button>`
       : result.state==='candidate_unpaid' ? `<button class="btn pri xs" onclick="_pmReviewUnconfirmedResult(${rowIndex},'APPROVE')">입금 성공 승인</button>`
       : result.state==='duplicate_payment' ? `<button class="btn xs" onclick="_pmOpenDuplicateCaseForm(${rowIndex})">중복 입금 처리</button>`
       : result.state==='participant_not_found' ? '<span class="muted">작업 재선택 필요</span>'
@@ -11944,7 +11944,8 @@ function _pmUnconfirmedContext(rowIndex){
   const el=document.getElementById('pmUnconfirmedOv'), group=(STATE.pmUnconfirmedGroups||[])[Number(el?.dataset.groupIndex)], active=(STATE.pmUnconfirmedMatches||{})[String(group?.memo||'')];
   const transfer=group?.items?.[Number(rowIndex)], result=(active?.results||[]).find(x=>Number(x.seq)===Number(transfer?.seq));
   const amountCandidate=(active?.amountMismatchCandidates||[]).find(x=>Number(x.resultSeq)===Number(transfer?.seq));
-  return {el,group,active,transfer,result,amountCandidate,rowIndex:Number(rowIndex)};
+  const accountCandidate=(active?.reconciliationCandidates||[]).find(x=>Number(x.resultSeq)===Number(transfer?.seq));
+  return {el,group,active,transfer,result,amountCandidate,accountCandidate,rowIndex:Number(rowIndex)};
 }
 function _pmOpenAmountMismatchForm(rowIndex){
   const c=_pmUnconfirmedContext(rowIndex), box=document.getElementById('pmUnconfirmedDecision'), x=c.amountCandidate;
@@ -12092,13 +12093,11 @@ async function _pmUnconfirmedInspect(i){
   if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'대조하지 못했습니다.')}</div>`; return; }
   out.innerHTML='';
   el.querySelector('.pm-unconfirmed-search')?.classList.remove('on');
-  STATE.pmReconciliationCandidates=Array.isArray(r.reconciliationCandidates)?r.reconciliationCandidates:[];
-  STATE.pmAmountMismatchCandidates=Array.isArray(r.amountMismatchCandidates)?r.amountMismatchCandidates:[];
   _pmRenderUnconfirmedDirect({candidate:c,...r});
 }
 
-async function _pmReconcileMismatch(i){
-  const R=STATE.pmResult, x=(STATE.pmReconciliationCandidates||[])[Number(i)];
+async function _pmReconcileMismatch(rowIndex){
+  const c=_pmUnconfirmedContext(rowIndex), R=STATE.pmResult, x=c.accountCandidate;
   if(!R||!x||!R.preview?.uploadId) return;
   if(!confirm(`${x.reviewerName} ${_pmNum(x.amount)}원\n\n등록 계좌 …${x.expectedAccountTail}와 실제 이체 계좌 …${x.resultAccountTail}가 다릅니다.\n계좌 소유를 확인했고 이 이체를 입금완료로 반영할까요?\n\n이 작업은 감사 이력에 기록되며 되돌릴 수 없습니다.`)) return;
   const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/unconfirmed-reconcile',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,itemId:x.itemId,resultSeq:x.resultSeq,confirm:true})});

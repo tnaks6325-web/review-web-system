@@ -24,12 +24,14 @@ function _columnEdits(value) {
   return out;
 }
 
-function resolveDisplayedAmount({ fallbackRowJson, participantRowJson, manualEdits, anchorEdits } = {}) {
+function resolveDisplayedAmount({ fallbackRowJson, participantRowJson, manualEdits, anchorEdits, ambiguous = false } = {}) {
   const physical = participantRowJson && typeof participantRowJson === 'object'
     ? participantRowJson
     : (fallbackRowJson && typeof fallbackRowJson === 'object' ? fallbackRowJson : {});
-  const manual = _columnEdits(manualEdits);
-  const current = _columnEdits(anchorEdits);
+  // 작업보드와 동일하게 현재 order/identity 앵커가 여러 활성 행을 가리키면
+  // 현재 앵커뿐 아니라 과거 물리행(manual) 편집도 전부 숨긴다.
+  const manual = ambiguous ? {} : _columnEdits(manualEdits);
+  const current = ambiguous ? {} : _columnEdits(anchorEdits);
   const merged = { ...physical, ...manual, ...current };
   const amount = extractAmountNumber(merged);
   const edited = Object.keys(manual).length > 0 || Object.keys(current).length > 0;
@@ -58,6 +60,19 @@ async function loadWorkboardAmounts(db, targetRows) {
      )
      SELECT t."sheetId", t."tabName", t."rowIndex",
             cp.row_json AS "participantRowJson",
+            CASE
+              WHEN cp.order_submission_id IS NOT NULL THEN
+                (SELECT COUNT(*) FROM campaign_participants same_cp
+                  WHERE same_cp.sheet_id = cp.sheet_id AND same_cp.tab_name = cp.tab_name
+                    AND same_cp.deleted_at IS NULL AND same_cp.active = TRUE
+                    AND same_cp.order_submission_id = cp.order_submission_id) > 1
+              WHEN cp.source IS DISTINCT FROM 'manual' AND NULLIF(cp.identity_key, '') IS NOT NULL THEN
+                (SELECT COUNT(*) FROM campaign_participants same_cp
+                  WHERE same_cp.sheet_id = cp.sheet_id AND same_cp.tab_name = cp.tab_name
+                    AND same_cp.deleted_at IS NULL AND same_cp.active = TRUE
+                    AND same_cp.identity_key = cp.identity_key) > 1
+              ELSE FALSE
+            END AS "ambiguous",
             COALESCE((
               SELECT jsonb_object_agg(pe.field,
                        CASE WHEN pe.kind = 'bool' THEN to_jsonb(pe.value_bool) ELSE to_jsonb(pe.value_text) END)
@@ -114,6 +129,7 @@ async function loadWorkboardAmounts(db, targetRows) {
       participantRowJson: row.participantRowJson,
       manualEdits: row.manualEdits,
       anchorEdits: row.anchorEdits,
+      ambiguous: row.ambiguous === true,
     }));
   }
   return out;
