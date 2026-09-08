@@ -1495,16 +1495,22 @@ async function _salesById(salesId) {
 // S2: 견적서는 sales_id 로 quotes 를 역파생(quotes.sales_id, 화이트리스트 테이블) — 별도 quote 링크 불필요.
 //   20초 캐시(salesId별) — 정산 요약 배치·스텝퍼 연속 렌더의 인트라넷 왕복 방지(_salesById 와 동일 시맨틱).
 const _quoteCache = new Map();   // salesId → { at, quote }
-async function _quoteForSales(salesId) {
+async function _quoteForSalesResult(salesId) {
   const now = Date.now(); const c = _quoteCache.get(salesId);
-  if (c && now - c.at < 20 * 1000) return c.quote;
+  if (c && now - c.at < 20 * 1000) return { quote: c.quote, lookupFailed: false };
   try {
     const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(salesId)}&limit=1`);
     const q = (j.data || [])[0];
     const quote = q ? { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 } : null;
     _quoteCache.set(salesId, { at: now, quote });
-    return quote;
-  } catch (_) { return c ? c.quote : null; }   // stale 있으면 유지, 없으면 null
+    return { quote, lookupFailed: false };
+  } catch (_) {
+    // 확정 미존재와 일시 조회 실패를 구분한다. 실패를 "견적서 없음"으로 표시하면 재시도 경로가 막힌다.
+    return { quote: c ? c.quote : null, lookupFailed: true };
+  }
+}
+async function _quoteForSales(salesId) {
+  return (await _quoteForSalesResult(salesId)).quote;
 }
 
 // 탭 정산 스텝퍼(마감자료→견적서→계산서→선금/잔금). 링크 조회 → 인트라넷 프록시 병합 → 역할 렌즈.
@@ -1527,7 +1533,8 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   if (!link) return { linked: false, closeout, closeoutAvailable };
   // 링크된 sales 단건만 프록시(그 탭에 링크된 계약만 — 타 업체 계약 도달 불가). 견적은 sales_id 로 역파생.
   const sales = link.salesId ? await _salesById(link.salesId) : null;
-  const quote = link.salesId ? await _quoteForSales(link.salesId) : null;
+  const quoteResult = link.salesId ? await _quoteForSalesResult(link.salesId) : { quote: null, lookupFailed: false };
+  const quote = quoteResult.quote;
   const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
   return {
     linked: true, contractNumber, salesId: link.salesId,
@@ -1536,6 +1543,7 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
     proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
     closeout, closeoutAvailable,
     quote: quote || null,
+    quoteLookupFailed: !!quoteResult.lookupFailed,
     invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
     payment: sales ? { status: sales.paymentStatus, date: sales.paymentDate } : null,
     amount: sales ? sales.amount : null,

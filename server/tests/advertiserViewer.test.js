@@ -183,9 +183,10 @@ async function run() {
   ok('★ 담당자 실명은 광고주에게 안 붙는다(카드 폴백)', /\(!isAdv&&m\.manager\)/.test(src));
   ok('★ 정산 비공개·미연결은 광고주에게 같은 안내 한 줄(계약 연결·토글 용어 미노출)',
     src.includes('정산 정보가 아직 준비되지 않았습니다'));
-  ok('정산은 견적서·계산서·입금 세 버튼이며 입금도 팝업으로 확인한다',
+  ok('광고주 정산은 견적서·계산서·입금 세 버튼이며 입금도 팝업으로 확인한다',
     /btn\('quote','견적서'/.test(src) && /btn\('invoice','계산서'/.test(src) && /btn\('payment','입금'/.test(src)
-    && /function openSettlementPayment\(\)/.test(src));
+    && /function openSettlementPayment\(\)/.test(src)
+    && /const canMatch=!!d&&!d\.hidden&&!d\.linked&&\(STATE\.role==='master'\|\|STATE\.role==='admin'\|\|STATE\.role==='staff'\)/.test(src));
   ok('★ 광고주 화면에도 하단 스텝퍼·마감자료 생성·계약 변경 버튼을 만들지 않는다',
     !/_advSettleFields/.test(src) && !/genCloseout/.test(src) && !/dlCloseoutCsv/.test(src));
   ok('발주 작업세부의 담당(내부 실명)은 광고주 미노출', /\.\.\.\(STATE\.role!=='advertiser'\?\[\['담당',d\.managerName\]\]:\[\]\)/.test(src));

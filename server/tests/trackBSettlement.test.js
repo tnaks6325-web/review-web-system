@@ -3,7 +3,8 @@
  *   1. link/unlink 는 trackb_settlement_links 만 write(인트라넷은 GET 프록시만).
  *   2. settlementForTab 역할 렌즈(Q4-c): 광고주 visible=FALSE → {hidden:true}(금액·상태 미포함),
  *      visible=TRUE(기본) → 금액 포함. 내부는 토글 무관.
- *   3. 프록시 fail-soft: 인트라넷 다운 시 링크 라벨(contract_number 캐시)만·proxyDown 신호.
+ *   3. 프록시 fail-soft: 인트라넷 다운 시 링크 라벨(contract_number 캐시)만·proxyDown 신호,
+ *      견적 확정 미존재와 조회 실패 구분(실패 시 문서 재시도 허용).
  *   4. 링크된 sales 단건만 프록시(그 탭 링크 계약만 — 타 업체 계약 URL은 링크에서 파생).
  * 실행: node tests/trackBSettlement.test.js
  */
@@ -104,6 +105,18 @@ async function run() {
   r = await svc.settlementForTab({ sheetId: 'S1', tabName: 'T2', role: 'master' });
   assert.equal(r.linked, true, '3a: 링크는 유지'); assert.equal(r.contractNumber, 'C-20260101-001', '3b: 캐시 라벨 유지');
   assert.equal(r.proxyDown, true, '3c: proxyDown 신호'); assert.equal(r.amount, null, '3d: 프록시 실패 시 금액 null');
+  assert.equal(r.quoteLookupFailed, true, '3e: 견적 조회 실패를 확정 미존재와 구분');
+
+  // sales 조회는 성공하고 quotes 조회도 정상 응답했지만 0건이면 실제 "견적서 없음"이다.
+  const linkRowNoQuote = { rows: [{ salesId: 'S_NOQUOTE', quoteId: null, contractNumber: 'C-NOQUOTE', linkedBy: 'kim' }] };
+  stubFetch([
+    [/\/api\/tables\/sales\/S_NOQUOTE/, { data: { id: 'S_NOQUOTE', contract_number: 'C-NOQUOTE' } }],
+    [/\/api\/tables\/quotes\?where=sales_id=S_NOQUOTE/, { data: [] }],
+  ]);
+  p = pool([[/FROM trackb_settlement_links WHERE/, () => linkRowNoQuote]]); svc.__setPoolForTest(p);
+  r = await svc.settlementForTab({ sheetId: 'S1', tabName: 'T3', role: 'master' });
+  assert.equal(r.quote, null, '3f: 정상 0건 응답은 견적서 없음');
+  assert.equal(r.quoteLookupFailed, false, '3g: 정상 0건을 조회 실패로 오인하지 않음');
   console.log('  3. 프록시 fail-soft — 링크 라벨 유지·proxyDown ✓');
 
   // ═══ 4. setSettlementVisible upsert ═══
