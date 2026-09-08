@@ -1287,7 +1287,13 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 
     imageHash = reviewerOrderIdentity.hashImageBase64(imageBase64);
 
-    const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg');
+    // 설정 › AI 판별 예시의 구매캡처 기준이미지를 실제 주문정보 OCR에도 동봉한다.
+    // 예시 조회/다운로드 장애는 기존 추출을 막지 않는다(fail-open).
+    let extractionSamples = [];
+    try {
+      extractionSamples = await require('../services/reviewInspect.service').loadOrderExtractionSamples();
+    } catch (_) { extractionSamples = []; }
+    const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg', { samples: extractionSamples });
     // result: { ok, orderNumber, recipient, phone, address, price, orderer, productName, orderDate, store, elapsed }
 
     // ── SSE 알림: AI 분석 완료 ──
