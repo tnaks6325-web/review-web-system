@@ -149,9 +149,9 @@ async function run() {
   ok('버전 탭(초안/최종 자동 라벨) 렌더', src.includes("_QDOC_ST={draft:['초안'") && src.includes('qvtab'));
   ok('인쇄/PDF 저장 버튼', src.includes('_qdocPrint'));
   ok('계산서 원본(홈택스) 안내 문구', src.includes('국세청 홈택스'));
-  ok('인트라넷 PDF의 단일 실물 견적서 렌더러 사용', src.includes('quote-document-renderer.js?v=20260907-1') && src.includes('InaddQuoteDocument.render(q,_QDOC_ASSETS)'));
+  ok('인트라넷 PDF의 단일 실물 견적서 렌더러 사용', src.includes('quote-document-renderer.js?v=20260908-1') && src.includes('InaddQuoteDocument.render(q,_QDOC_ASSETS)'));
   ok('인트라넷 활성 로고·직인·워터마크를 실물 문서에 적용', src.includes('InaddQuoteDocument.prepareAssets') && src.includes('InaddQuoteDocument.render(q,_QDOC_ASSETS)'));
-  ok('인트라넷 단일 공식 렌더러를 직접 로드', src.includes('https://inadd-system.pages.dev/static/js/quote-document-renderer.js?v=20260907-1'));
+  ok('인트라넷 단일 공식 렌더러를 직접 로드', src.includes('https://inadd-system.pages.dev/static/js/quote-document-renderer.js?v=20260908-1'));
   ok('리뷰웹은 별도 문서 DOM을 만들지 않고 공식 렌더러에 위임', /function _qdocHtml\(q\)\{[\s\S]{0,260}InaddQuoteDocument\.render\(q,_QDOC_ASSETS\)/.test(src));
   ok('리뷰웹 내부에 별도 견적서 HTML·세액 근거표 사본이 남지 않음', !src.includes('function _qdocHtmlLegacy') && !src.includes('function _qdocTax33Rows') && !src.includes('width:794px;height:1123px'));
   ok('브랜드 에셋도 공식 렌더러의 동일 전처리를 거침', src.includes('InaddQuoteDocument.prepareAssets') && src.includes("baseUrl:'https://inadd-system.pages.dev'"));
