@@ -16379,7 +16379,7 @@ async function reloadWorkdesk(){ _clearCellUndoHistory(); const t=STATE.cur; if(
 /* 리뷰어 구매제출 → 현재 열어 둔 작업보드 근실시간 갱신.
    ★ 전역 알림에는 다른 작업 제출도 섞인다. sheetId+tabName이 현재 작업과 정확히 같을 때만 읽는다.
    ★ 제출 이벤트는 큐 처리 직전에 오므로 2초 뒤 첫 조회, 큐 건은 30초 서버 예비처리 뒤 한 번 더 확인한다.
-   ★ 입력 중 DOM을 갈아치우면 한글 IME/수정값이 사라진다. 편집 포커스가 있으면 끝날 때까지 미룬다. */
+   ★ 작업표 셀 입력·날짜 선택 중 DOM을 갈아치우면 수정값이 사라진다. 그 두 경우만 끝날 때까지 미룬다. */
 let _wbOrderLiveSource=null, _wbOrderLiveTimer=null, _wbOrderLiveBusy=false, _wbOrderLiveBusyVersion=0, _wbOrderLiveVersion=0;
 function _wbOrderCurrentKey(t){
   return t?(String(t.sheetId||'')+'\t'+String(t.tabName||'')):'';
@@ -16392,8 +16392,9 @@ function _wbOrderLiveStop(){
   _wbOrderLiveBusyVersion=0;
 }
 function _wbOrderEditing(){
-  const a=document.activeElement;
-  return !!(a&&a.matches&&a.matches('input,textarea,select,[contenteditable="true"]'));
+  // 검색창·댓글창은 포커스가 남아 있어도 작업표를 갱신할 수 있다. 실제 표 셀 편집과
+  // 날짜 선택 팝업만 보호해, 검색 후 커서가 남았다는 이유로 갱신이 영원히 멈추지 않게 한다.
+  return !!document.querySelector('.sheetgrid td.gedit input.einp, #wdDatePick');
 }
 async function _wbOrderReloadIfCurrent(key, version, sessionToken){
   const t=STATE.cur;

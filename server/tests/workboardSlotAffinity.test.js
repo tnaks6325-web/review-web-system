@@ -158,6 +158,8 @@ test('열린 직원 작업보드는 같은 작업의 구매제출만 자동 갱�
   assert.match(workdesk, /String\(data\.sheetId\|\|''\).*String\(t\.sheetId\|\|''\)/);
   assert.match(workdesk, /String\(data\.tabName\|\|''\).*String\(t\.tabName\|\|''\)/);
   assert.match(workdesk, /_wbOrderEditing\(\)/);
+  assert.match(workdesk, /querySelector\('\.sheetgrid td\.gedit input\.einp, #wdDatePick'\)/);
+  assert.doesNotMatch(workdesk, /function _wbOrderEditing\(\)\{[\s\S]{0,160}document\.activeElement/);
   assert.match(workdesk, /document\.visibilityState!=='visible'/);
   assert.match(workdesk, /_wbOrderLiveSchedule\(data,1800,!!data\.queued\)/);
   assert.match(workdesk, /_wbOrderReloadIfCurrent\(key, version, sessionToken\)[\s\S]*?await api\('\/api\/trackb\/workdesk\?'\+q,[\s\S]*?_wbOrderLiveVersion!==version\|\|token\(\)!==sessionToken[\s\S]*?renderWorkdesk\(data\)/);
