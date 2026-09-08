@@ -40,6 +40,8 @@ function isV2ReviewSubmitted(value) {
   if (text === '제출' || text === 'O') return true; // 기존 v2 전환 중 생성분 호환
   // 수동 제출·백필이 실제로 쓰는 M/D HH:mm(또는 날짜) 형식만 인정한다.
   // 날짜 판정은 쓰기 경로와 같은 공통 파서를 써서 2/30·'완료' 같은 임의 텍스트는 제출으로 새지 않는다.
+  const time = /\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(text);
+  if (time && (Number(time[1]) > 23 || Number(time[2]) > 59 || (time[3] != null && Number(time[3]) > 59))) return false;
   return parseDateToken(text) !== null;
 }
 

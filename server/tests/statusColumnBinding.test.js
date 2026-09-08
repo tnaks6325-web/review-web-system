@@ -90,7 +90,7 @@ test('v2 리뷰는 시스템이 쓰는 유효한 제출 날짜·시각만 인정
   for (const value of ['8/31 10:08', '9/1 00:03', '8/1', '2026-08-31', '26.8.31(월)']) {
     assert.equal(isV2ReviewSubmitted(value), true, `${value}를 제출으로 인정해야 한다`);
   }
-  for (const value of ['', '포토', '완료', '1차', '2/30 09:10']) {
+  for (const value of ['', '포토', '완료', '1차', '2/30 09:10', '8/31 24:00', '8/31 12:60', '8/31 12:59:60']) {
     assert.equal(isV2ReviewSubmitted(value), false, `${value}는 제출으로 인정하면 안 된다`);
   }
 
