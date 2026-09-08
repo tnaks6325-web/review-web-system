@@ -86,6 +86,23 @@ test('v2는 리뷰옵션·임의 입금 텍스트를 상태로 인정하지 않�
   assert.equal(isV2PaymentSubmitted('입금완료'), false);
 });
 
+test('v2 리뷰는 시스템이 쓰는 유효한 제출 날짜·시각만 인정한다', () => {
+  for (const value of ['8/31 10:08', '9/1 00:03', '8/1', '2026-08-31', '26.8.31(월)']) {
+    assert.equal(isV2ReviewSubmitted(value), true, `${value}를 제출으로 인정해야 한다`);
+  }
+  for (const value of ['', '포토', '완료', '1차', '2/30 09:10']) {
+    assert.equal(isV2ReviewSubmitted(value), false, `${value}는 제출으로 인정하면 안 된다`);
+  }
+
+  const values = [
+    ['번호', '주문자', '리뷰옵션', '리뷰', '입금일'],
+    ['1', '홍길동', '포토', '8/31 10:08', ''],
+  ];
+  const rows = parseTabRows(values, 's', 't', '1', 'c', kw, null, null, buildV2StatusBindings(values[0]));
+  assert.equal(rows[0].isSubmitted, true);
+  assert.equal(rows[0].isSubmitted2, 'NONE');
+});
+
 test('v2는 리뷰 제출 전 입금 원장 기록도 막는다', async () => {
   const queries = [];
   const client = { query: async (sql) => {
