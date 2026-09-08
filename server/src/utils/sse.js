@@ -36,6 +36,7 @@ const heartbeatTimer = setInterval(() => {
       client.lastPing = now;
     } catch (err) {
       logger.warn(`[SSE] 클라이언트 ${id} ping 실패 — 제거`);
+      if (client.expiryTimer) clearTimeout(client.expiryTimer);
       clients.delete(id);
     }
   }
@@ -61,6 +62,7 @@ function addClient(req, res, meta = { role: 'admin' }) {
     const sorted = [...clients.entries()].sort((a, b) => a[1].connectedAt - b[1].connectedAt);
     const victim = sorted.find(([, c]) => c.meta && c.meta.role === 'reviewer') || sorted[0];
     if (victim) {
+      if (victim[1].expiryTimer) clearTimeout(victim[1].expiryTimer);
       try { victim[1].res.end(); } catch (_) {}
       clients.delete(victim[0]);
       logger.info(`[SSE] 최대 연결 초과 — 클라이언트 ${victim[0]} 해제`);
@@ -81,18 +83,35 @@ function addClient(req, res, meta = { role: 'admin' }) {
   // 초기 연결 메시지
   res.write(`data: ${JSON.stringify({ type: 'connected', clientId, ts: Date.now() })}\n\n`);
 
+  const normalizedMeta = meta || { role: 'admin' };
+  const expiresAt = Number(normalizedMeta.expiresAt);
+  let expiryTimer = null;
+  if (Number.isFinite(expiresAt)) {
+    expiryTimer = setTimeout(() => {
+      const client = clients.get(clientId);
+      if (!client) return;
+      try { client.res.end(); } catch (_) {}
+      clients.delete(clientId);
+      logger.info(`[SSE] 클라이언트 ${clientId} 인증 만료 — 연결 해제 (현재 ${clients.size}명)`);
+    }, Math.max(0, expiresAt - Date.now()));
+    if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
+  }
+
   clients.set(clientId, {
     res,
     connectedAt: Date.now(),
     lastPing: Date.now(),
     ip: req.ip,
-    meta: meta || { role: 'admin' },
+    meta: normalizedMeta,
+    expiryTimer,
   });
 
   logger.info(`[SSE] 클라이언트 ${clientId} 연결 (현재 ${clients.size}명)`);
 
   // 연결 종료 처리
   req.on('close', () => {
+    const client = clients.get(clientId);
+    if (client && client.expiryTimer) clearTimeout(client.expiryTimer);
     clients.delete(clientId);
     logger.info(`[SSE] 클라이언트 ${clientId} 연결 해제 (현재 ${clients.size}명)`);
   });

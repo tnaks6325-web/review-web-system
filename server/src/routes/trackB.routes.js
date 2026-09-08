@@ -745,7 +745,8 @@ function internalMiddleware(req, res, next) {
 // EventSource는 Authorization 헤더를 넣을 수 없어 authMiddleware의 ?token fallback을 그대로 쓴다.
 // 광고주·리뷰어는 구매자 이름/수취인 정보가 섞인 전역 이벤트를 구독할 수 없다.
 router.get('/events', authMiddleware, internalMiddleware, (req, res) => {
-  addSseClient(req, res, { role: 'workdesk' });
+  const exp = Number(req.admin && req.admin.exp);
+  addSseClient(req, res, { role: 'workdesk', expiresAt: Number.isFinite(exp) ? exp * 1000 : Date.now() });
 });
 
 router.get('/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {

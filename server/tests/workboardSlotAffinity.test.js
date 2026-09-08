@@ -150,7 +150,7 @@ test('열린 직원 작업보드는 같은 작업의 구매제출만 자동 갱�
   const trackb = read('src/routes/trackB.routes.js');
   const sse = read('src/utils/sse.js');
   assert.match(trackb, /router\.get\('\/events', authMiddleware, internalMiddleware/);
-  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk' \}\)/);
+  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk', expiresAt:/);
   assert.match(sse, /function emitOrderSubmit[\s\S]*?role === 'admin' \|\| role === 'workdesk'/);
   assert.match(workdesk, /\/api\/trackb\/events\?token=/);
   assert.doesNotMatch(workdesk, /\/api\/diag\/events\?token=/);
@@ -166,7 +166,9 @@ test('열린 직원 작업보드는 같은 작업의 구매제출만 자동 갱�
   assert.match(workdesk, /function logout\(\)\{[\s\S]*?_wbOrderLiveStop\(\)/);
   assert.match(workdesk, /_wbOrderLiveVersion!==version\|\|_wbOrderCurrentKey\(STATE\.cur\)!==key/);
   assert.match(workdesk, /_wbOrderLiveBusyVersion===version/);
-  assert.match(workdesk, /_wbOrderLiveSchedule\(data,0,false\),35000/);
+  assert.match(workdesk, /_wbOrderLiveFallbackTimer=setTimeout\(\(\)=>\{[\s\S]*?_wbOrderLiveSchedule\(data,0,false\);[\s\S]*?\},35000\)/);
+  assert.match(workdesk, /if\(_wbOrderLiveFallbackTimer\)\{ clearTimeout\(_wbOrderLiveFallbackTimer\)/);
+  assert.match(workdesk, /if\(backup&&!_wbOrderLiveFallbackTimer\)/);
   assert.match(workdesk, /\['master','admin','staff'\]\.includes\(STATE\.role\)/);
   assert.doesNotMatch(workdesk, /\['master','admin','staff','advertiser'\]/);
 });
@@ -194,6 +196,21 @@ test('구매제출 알림은 관리자와 직원 작업보드에만 전달한다
     workdesk.req.emit('close');
     reviewer.req.emit('close');
   }
+});
+
+test('직원 작업보드 실시간 연결은 로그인 만료 시 종료된다', async () => {
+  const sse = require('../src/utils/sse');
+  const req = new EventEmitter();
+  req.ip = '127.0.0.1';
+  let ended = 0;
+  const res = { writeHead() {}, write() {}, end() { ended++; } };
+  sse.addClient(req, res, { role: 'workdesk', expiresAt: Date.now() + 15 });
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(ended, 1);
+  req.emit('close');
+
+  const trackb = read('src/routes/trackB.routes.js');
+  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk', expiresAt: Number\.isFinite\(exp\) \? exp \* 1000 : Date\.now\(\) \}\)/);
 });
 
 test('참여형 구매 알림은 요청의 빈 좌표가 아니라 서버가 확정한 작업표를 사용한다', () => {
