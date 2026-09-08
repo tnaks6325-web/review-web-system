@@ -146,12 +146,20 @@ test('동시 제출과 다른 작업 보호 규칙을 유지한다', () => {
 
 test('열린 직원 작업보드는 같은 작업의 구매제출만 자동 갱신하고 입력 중에는 미룬다', () => {
   const workdesk = read('../frontend/workdesk.html');
+  const trackb = read('src/routes/trackB.routes.js');
+  assert.match(trackb, /router\.get\('\/events', authMiddleware, internalMiddleware/);
+  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk' \}\)/);
+  assert.match(workdesk, /\/api\/trackb\/events\?token=/);
+  assert.doesNotMatch(workdesk, /\/api\/diag\/events\?token=/);
   assert.match(workdesk, /addEventListener\('order_submit'/);
   assert.match(workdesk, /String\(data\.sheetId\|\|''\).*String\(t\.sheetId\|\|''\)/);
   assert.match(workdesk, /String\(data\.tabName\|\|''\).*String\(t\.tabName\|\|''\)/);
   assert.match(workdesk, /_wbOrderEditing\(\)/);
   assert.match(workdesk, /document\.visibilityState!=='visible'/);
   assert.match(workdesk, /_wbOrderLiveSchedule\(data,1800,!!data\.queued\)/);
+  assert.match(workdesk, /await api\('\/api\/trackb\/workdesk\?'\+q,[\s\S]*?_wbOrderCurrentKey\(cur\)!==key/);
+  assert.match(workdesk, /function logout\(\)\{[\s\S]*?_wbOrderLiveStop\(\)/);
+  assert.match(workdesk, /_wbOrderLiveVersion!==version\|\|_wbOrderCurrentKey\(STATE\.cur\)!==key/);
   assert.match(workdesk, /\['master','admin','staff'\]\.includes\(STATE\.role\)/);
   assert.doesNotMatch(workdesk, /\['master','admin','staff','advertiser'\]/);
 });

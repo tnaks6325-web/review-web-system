@@ -2836,7 +2836,9 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/advertiser-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 광고주(거래처) 폴백 — 소유 탭만·PII 마스킹
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
-function logout(){ sessionStorage.removeItem('admin_token');
+function logout(){
+  if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
+  sessionStorage.removeItem('admin_token');
   // ★★ 접속 링크 세션은 **주소에 남은 해시가 곧 열쇠**다(A안). 여기서 지우지 않으면 바로 이어지는
   //   boot() 이 그 토큰을 다시 교환해 **로그아웃이 되지 않는다**(공용 PC에서 다음 사람이 그대로 입장).
   try{ sessionStorage.removeItem('adv_link_tok'); }catch(_){ }
@@ -16378,8 +16380,12 @@ async function reloadWorkdesk(){ _clearCellUndoHistory(); const t=STATE.cur; if(
    ★ 전역 알림에는 다른 작업 제출도 섞인다. sheetId+tabName이 현재 작업과 정확히 같을 때만 읽는다.
    ★ 제출 이벤트는 큐 처리 직전에 오므로 2초 뒤 첫 조회, 큐 건만 20초 뒤 한 번 더 확인한다.
    ★ 입력 중 DOM을 갈아치우면 한글 IME/수정값이 사라진다. 편집 포커스가 있으면 끝날 때까지 미룬다. */
-let _wbOrderLiveSource=null, _wbOrderLiveTimer=null, _wbOrderLiveBusy=false;
+let _wbOrderLiveSource=null, _wbOrderLiveTimer=null, _wbOrderLiveBusy=false, _wbOrderLiveVersion=0;
+function _wbOrderCurrentKey(t){
+  return t?(String(t.sheetId||'')+'\t'+String(t.tabName||'')):'';
+}
 function _wbOrderLiveStop(){
+  _wbOrderLiveVersion++;
   if(_wbOrderLiveSource){ try{_wbOrderLiveSource.close();}catch(_){ } _wbOrderLiveSource=null; }
   if(_wbOrderLiveTimer){ clearTimeout(_wbOrderLiveTimer); _wbOrderLiveTimer=null; }
   _wbOrderLiveBusy=false;
@@ -16388,20 +16394,33 @@ function _wbOrderEditing(){
   const a=document.activeElement;
   return !!(a&&a.matches&&a.matches('input,textarea,select,[contenteditable="true"]'));
 }
+async function _wbOrderReloadIfCurrent(key){
+  const t=STATE.cur;
+  if(!t||_wbOrderCurrentKey(t)!==key) return false;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  const data=await api('/api/trackb/workdesk?'+q,{cache:'no-store'});
+  const cur=STATE.cur;
+  // 조회하는 동안 다른 작업으로 이동했으면 이전 작업 응답을 현재 화면에 절대 그리지 않는다.
+  if(!cur||_wbOrderCurrentKey(cur)!==key) return false;
+  _clearCellUndoHistory();
+  renderWorkdesk(data);
+  loadParity(cur);
+  return true;
+}
 function _wbOrderLiveSchedule(data, delay, backup){
   const t=STATE.cur;
   if(!t||!data||String(data.sheetId||'')!==String(t.sheetId||'')||String(data.tabName||'')!==String(t.tabName||'')) return;
-  const key=String(t.sheetId||'')+'\t'+String(t.tabName||'');
+  const key=_wbOrderCurrentKey(t), version=++_wbOrderLiveVersion;
   if(_wbOrderLiveTimer) clearTimeout(_wbOrderLiveTimer);
   const run=async()=>{
-    const cur=STATE.cur, curKey=cur?(String(cur.sheetId||'')+'\t'+String(cur.tabName||'')):'';
-    if(curKey!==key) return;
+    if(_wbOrderLiveVersion!==version||_wbOrderCurrentKey(STATE.cur)!==key) return;
     if(document.visibilityState!=='visible'||_wbOrderEditing()||_wbOrderLiveBusy){
       _wbOrderLiveTimer=setTimeout(run,1500); return;
     }
     _wbOrderLiveBusy=true;
-    try{ await reloadWorkdesk(); }catch(_){ }
+    try{ await _wbOrderReloadIfCurrent(key); }catch(_){ }
     finally{ _wbOrderLiveBusy=false; }
+    if(_wbOrderLiveVersion!==version||_wbOrderCurrentKey(STATE.cur)!==key) return;
     if(backup){ _wbOrderLiveTimer=setTimeout(()=>_wbOrderLiveSchedule(data,0,false),20000); }
     else _wbOrderLiveTimer=null;
   };
@@ -16411,7 +16430,7 @@ function _wbOrderLiveStart(){
   _wbOrderLiveStop();
   if(!window.EventSource||!token()||!['master','admin','staff'].includes(STATE.role)) return;
   try{
-    _wbOrderLiveSource=new EventSource(API_BASE+'/api/diag/events?token='+encodeURIComponent(token()));
+    _wbOrderLiveSource=new EventSource(API_BASE+'/api/trackb/events?token='+encodeURIComponent(token()));
     _wbOrderLiveSource.addEventListener('order_submit',ev=>{
       try{ const data=JSON.parse(ev.data||'{}'); _wbOrderLiveSchedule(data,1800,!!data.queued); }catch(_){ }
     });
