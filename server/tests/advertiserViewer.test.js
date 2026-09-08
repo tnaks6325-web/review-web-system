@@ -113,7 +113,7 @@ async function run() {
     /paid_header\.paid_header/.test(svcSrc)
     && /cp\.row_json\s*->>\s*COALESCE\(paid_header\.paid_header, NULLIF\(BTRIM\(cp\.submit_col2\), ''\)\)/.test(svcSrc)
     && /GROUP BY NULLIF\(BTRIM\(ri\.submit_col2\), ''\)[\s\S]{0,100}ORDER BY COUNT\(\*\) DESC/.test(svcSrc)
-    && /current_paid_edit/.test(svcSrc)
+    && !/current_paid_edit/.test(svcSrc)
     && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_paid\)::int AS paid/.test(svcSrc));
   ok('★ 내부 필드(비고 memo·담당 manager·salesId) 는 항목에 아예 없다 — 화면에서만 감추는 건 보안연극',
     !('memo' in it) && !('manager' in it) && !('salesId' in it));
@@ -144,6 +144,8 @@ async function run() {
 
   /* ═══ 4. 프론트 배선(workdesk.html) ═══ */
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+  ok('입금 상태의 필터·그룹·내려받기도 화면 셀과 같은 rowJson 값을 쓴다',
+    /const ed=!_workdeskStatusKind\(h\)&&\(h in ceMap\); const raw= ed\?ceMap\[h\]:rj\[h\];/.test(src));
   const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(src)[1];
   const css = style.replace(/\/\*[\s\S]*?\*\//g, '');
   ok('업체용 시트도 헤더와 전체 작업보드의 최장 표시값으로 열 폭을 자동 계산한다',
