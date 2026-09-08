@@ -166,6 +166,64 @@ router.post('/my-nickname', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 내 작업보드 컬럼 너비 — 사용자 단위 공통 설정 (migration 151)
+// 로컬 저장소는 구버전/오프라인 폴백만 맡고, 정상 로그인 환경에서는 DB가 단일 출처다.
+// ═══════════════════════════════════════════════════════════
+const WORKBOARD_COLUMN_MIN_WIDTHS = Object.freeze({
+  campaign: 60, tabname: 60, product: 60, capture: 35, folder: 35,
+  round: 28, date: 40, time: 50, review: 35, formlink: 28, manager: 28,
+  bar: 120, nums: 40, payment: 28, income: 60, depositname: 80,
+  bank: 60, taekhap: 28, memo: 40, enddate: 70,
+});
+
+function normalizeWorkboardColumnWidths(value) {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return null;
+  const normalized = {};
+  for (const [key, minWidth] of Object.entries(WORKBOARD_COLUMN_MIN_WIDTHS)) {
+    const width = value[key];
+    if (typeof width !== 'number' || !Number.isFinite(width)) continue;
+    const rounded = Math.round(width);
+    if (rounded >= minWidth && rounded <= 2000) normalized[key] = rounded;
+  }
+  return normalized;
+}
+
+router.get('/my-workboard-preferences', authMiddleware, async (req, res, next) => {
+  try {
+    const loginName = req.admin?.name || '';
+    if (!loginName) return res.status(400).json({ ok: false, error: '로그인 계정을 확인할 수 없습니다.' });
+    const { rows } = await pool.query(
+      `SELECT column_widths AS "columnWidths"
+         FROM admin_workboard_preferences
+        WHERE login_name = $1`,
+      [loginName]
+    );
+    return res.json({ ok: true, hasSaved: rows.length > 0, columnWidths: rows[0]?.columnWidths || {} });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/my-workboard-preferences', authMiddleware, async (req, res, next) => {
+  try {
+    const loginName = req.admin?.name || '';
+    if (!loginName) return res.status(400).json({ ok: false, error: '로그인 계정을 확인할 수 없습니다.' });
+    const columnWidths = normalizeWorkboardColumnWidths((req.body || {}).columnWidths);
+    if (!columnWidths) return res.status(400).json({ ok: false, error: '유효한 컬럼 너비가 필요합니다.' });
+    await pool.query(
+      `INSERT INTO admin_workboard_preferences (login_name, column_widths, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (login_name) DO UPDATE
+         SET column_widths = EXCLUDED.column_widths, updated_at = NOW()`,
+      [loginName, JSON.stringify(columnWidths)]
+    );
+    return res.json({ ok: true, columnWidths });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/admin/change-master-pw — 마스터 비밀번호 변경 (GAS: changeMasterPw)
 // ═══════════════════════════════════════════════════════════
 router.post('/change-master-pw', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
