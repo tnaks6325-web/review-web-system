@@ -40,6 +40,8 @@ const heartbeatTimer = setInterval(() => {
     }
   }
 }, HEARTBEAT_MS);
+// 하트비트만 남았을 때 테스트/정상 종료를 붙잡지 않는다. 실제 서버에서는 HTTP 리스너가 프로세스를 유지한다.
+if (typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();
 
 // 프로세스 종료 시 타이머 정리
 if (typeof process !== 'undefined') {
@@ -169,6 +171,9 @@ function emitOrderSubmit(data) {
   broadcast('order_submit', {
     message: `구매양식 제출: ${data.tabName || ''} — ${data.orderer || ''}`,
     ...data,
+  }, (client) => {
+    const role = client && client.meta && client.meta.role;
+    return role === 'admin' || role === 'workdesk';
   });
 }
 

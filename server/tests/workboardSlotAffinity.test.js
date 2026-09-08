@@ -4,6 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const test = require('node:test');
+const { EventEmitter } = require('events');
 
 const affinity = require('../src/services/workboardSlotAffinity.service');
 const sheetlessOrder = require('../src/services/sheetlessOrder.service');
@@ -147,8 +148,10 @@ test('동시 제출과 다른 작업 보호 규칙을 유지한다', () => {
 test('열린 직원 작업보드는 같은 작업의 구매제출만 자동 갱신하고 입력 중에는 미룬다', () => {
   const workdesk = read('../frontend/workdesk.html');
   const trackb = read('src/routes/trackB.routes.js');
+  const sse = read('src/utils/sse.js');
   assert.match(trackb, /router\.get\('\/events', authMiddleware, internalMiddleware/);
   assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk' \}\)/);
+  assert.match(sse, /function emitOrderSubmit[\s\S]*?role === 'admin' \|\| role === 'workdesk'/);
   assert.match(workdesk, /\/api\/trackb\/events\?token=/);
   assert.doesNotMatch(workdesk, /\/api\/diag\/events\?token=/);
   assert.match(workdesk, /addEventListener\('order_submit'/);
@@ -162,4 +165,29 @@ test('열린 직원 작업보드는 같은 작업의 구매제출만 자동 갱�
   assert.match(workdesk, /_wbOrderLiveVersion!==version\|\|_wbOrderCurrentKey\(STATE\.cur\)!==key/);
   assert.match(workdesk, /\['master','admin','staff'\]\.includes\(STATE\.role\)/);
   assert.doesNotMatch(workdesk, /\['master','admin','staff','advertiser'\]/);
+});
+
+test('구매제출 알림은 관리자와 직원 작업보드에만 전달한다', () => {
+  const sse = require('../src/utils/sse');
+  const makeClient = role => {
+    const req = new EventEmitter();
+    req.ip = '127.0.0.1';
+    const writes = [];
+    const res = { writeHead() {}, write(v) { writes.push(String(v)); }, end() {} };
+    sse.addClient(req, res, { role });
+    return { req, writes };
+  };
+  const admin = makeClient('admin');
+  const workdesk = makeClient('workdesk');
+  const reviewer = makeClient('reviewer');
+  try {
+    sse.emitOrderSubmit({ sheetId: 'S1', tabName: 'T1', orderer: '테스트' });
+    assert.ok(admin.writes.some(v => v.includes('event: order_submit')));
+    assert.ok(workdesk.writes.some(v => v.includes('event: order_submit')));
+    assert.ok(!reviewer.writes.some(v => v.includes('event: order_submit')));
+  } finally {
+    admin.req.emit('close');
+    workdesk.req.emit('close');
+    reviewer.req.emit('close');
+  }
 });
