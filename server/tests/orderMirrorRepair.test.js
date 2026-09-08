@@ -159,6 +159,8 @@ function stubPool(answer) {
     ok('창 절이 쿼리에 있다', /\(\$2::int IS NULL OR os\.submitted_at > NOW\(\) - \(\$2 \|\| ' hours'\)::interval\)/.test(scan.sql));
     ok('창 값이 파라미터로 실린다', scan.params[1] === 48);
     ok('확정 주문 복구는 활성 작업보드 ID까지 조회한다', /tc\.workboard_id/.test(scan.sql) && /w\.state = 'active'/.test(scan.sql));
+    ok('지정 주문 목록으로 복구 범위를 제한한다',
+      /os\.id = ANY\(\$3::uuid\[\]\)/.test(scan.sql) && scan.params[2] === null);
     const source = srv('src/services/sheetlessOrder.service.js');
     const recoverBlock = source.slice(source.indexOf('async function recoverUnwrittenSheetlessOrders'),
       source.indexOf('/**\n * 작업보드 줄은 **이미 있는데**', source.indexOf('async function recoverUnwrittenSheetlessOrders')));
@@ -178,6 +180,51 @@ function stubPool(answer) {
     await slOrder.recoverUnwrittenSheetlessOrders({ limit: 99999, sinceHours: 99999 });
     const scan3 = s3.calls.find(x => /FROM order_submissions os/.test(x.sql));
     ok('limit·창 모두 상한으로 클램프', scan3.params[0] === 1000 && scan3.params[1] === 24 * 30);
+
+    // ── 지정 복구 미리보기: 대상만 조회하며 링크 보정·주문 쓰기 모두 0
+    const targetId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    const s4 = stubPool((sql) => /FROM order_submissions os/.test(sql)
+      ? { rows: [{ id: targetId, orderer: '테스트대상', submitted_at: '2026-09-08T10:00:00.000Z' }] }
+      : { rows: [] });
+    slOrder.__setPoolForTest(s4.pool);
+    const preview = await slOrder.recoverUnwrittenSheetlessOrders({
+      limit: 3,
+      orderSubmissionIds: [targetId],
+      dryRun: true,
+    });
+    const previewScan = s4.calls.find(x => /FROM order_submissions os/.test(x.sql));
+    ok('미리보기는 지정한 주문만 조회한다',
+      previewScan.params[2].length === 1 && previewScan.params[2][0] === targetId);
+    ok('미리보기는 대상자와 제출시각을 보고한다',
+      preview.scanned === 1 && preview.items[0].name === '테스트대상' && preview.items[0].submittedAt);
+    ok('★ 미리보기는 링크 보정·주문 UPDATE를 포함해 쓰기가 전혀 없다',
+      preview.dryRun === true && !s4.calls.some(x => /\b(?:UPDATE|INSERT|DELETE)\b/i.test(x.sql)));
+
+    const s4Actual = stubPool(() => ({ rows: [] }));
+    slOrder.__setPoolForTest(s4Actual.pool);
+    await slOrder.recoverUnwrittenSheetlessOrders({
+      orderSubmissionIds: [targetId],
+      dryRun: false,
+    });
+    ok('★ 지정 복구 실행은 연결 대상을 새로 넓히지 않아 미리보기 범위를 보존한다',
+      !s4Actual.calls.some(x => /WITH candidates AS[\s\S]*UPDATE recruit_campaigns/i.test(x.sql)));
+
+    const s5 = stubPool(() => ({ rows: [] }));
+    slOrder.__setPoolForTest(s5.pool);
+    await slOrder.recoverUnwrittenSheetlessOrders({ orderSubmissionIds: [], dryRun: true });
+    const emptyScan = s5.calls.find(x => /FROM order_submissions os/.test(x.sql));
+    ok('명시적으로 빈 주문 목록은 전체 복구로 넓어지지 않는다',
+      Array.isArray(emptyScan.params[2]) && emptyScan.params[2].length === 0);
+
+    const d = noLineComments(srv('src/routes/diag.routes.js'));
+    const routeBlock = d.split("router.post('/sheetless-worktable-recover'")[1].split('router.')[0];
+    ok('수동 복구도 기본은 미리보기이며 명시적 false에서만 실제 반영한다',
+      /const dryRun = b\.dryRun !== false;/.test(routeBlock));
+    ok('수동 복구 라우트는 배열·100건·형식을 검사하고 지정 목록을 서비스에 전달한다',
+      /!Array\.isArray\(b\.orderSubmissionIds\)/.test(routeBlock) &&
+      /b\.orderSubmissionIds\.length > 100/.test(routeBlock) &&
+      /uuidPattern\.test\(id\)/.test(routeBlock) &&
+      /recoverUnwrittenSheetlessOrders\(\{ limit, by, orderSubmissionIds, dryRun \}\)/.test(routeBlock));
     slOrder.__setPoolForTest(null);
   }
 

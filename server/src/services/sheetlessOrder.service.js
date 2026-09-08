@@ -654,14 +654,27 @@ async function reconcileCampaignWorktableLinks() {
  * @param {number|null} [o.sinceHours=null]  최근 N시간 내 제출분만(주기 잡용 폭발반경 제한).
  *   ★ null = 전체(사람이 부르는 수동 복구). 주기 잡은 반드시 창을 준다 — 옛 고아 주문까지
  *     자동으로 줄을 이어붙이면 8/18 중복 사고와 같은 대량 append 가 무인으로 일어난다.
+ * @param {string[]|null} [o.orderSubmissionIds=null] 지정 주문만 복구. []는 0건이다.
+ * @param {boolean} [o.dryRun=false] 대상만 조회하고 쓰지 않는다.
  */
-async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null, by = 'sheetless-order-recovery' } = {}) {
+async function recoverUnwrittenSheetlessOrders({
+  limit = 100,
+  sinceHours = null,
+  by = 'sheetless-order-recovery',
+  orderSubmissionIds = null,
+  dryRun = false,
+} = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
   const win = (sinceHours == null) ? null : Math.min(Math.max(parseInt(sinceHours, 10) || 0, 1), 24 * 30);
-  const links = await reconcileCampaignWorktableLinks();
+  const ids = Array.isArray(orderSubmissionIds)
+    ? orderSubmissionIds.map(id => String(id).trim()).slice(0, 100)
+    : null;
+  // 미리보기는 링크 보정 UPDATE까지 포함해 쓰기가 전혀 없어야 한다.
+  // 지정 복구도 실행 중 새 후보를 만들어 미리보기보다 범위가 넓어지면 안 된다.
+  const links = (dryRun || ids !== null) ? { linked: 0 } : await reconcileCampaignWorktableLinks();
   const { rows } = await db.query(
-    `SELECT os.id, os.orderer, os.recipient, os.user_id, os.phone, os.address,
+    `SELECT os.id, os.submitted_at, os.orderer, os.recipient, os.user_id, os.phone, os.address,
             os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
             os.memo, os.selected_opt_key, os.selected_product,
             ca.phone8 AS login_phone8, ca.owner_phone8, r.name AS login_name,
@@ -687,10 +700,28 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
            WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
         )
         AND ($2::int IS NULL OR os.submitted_at > NOW() - ($2 || ' hours')::interval)
+        AND ($3::uuid[] IS NULL OR os.id = ANY($3::uuid[]))
       ORDER BY os.submitted_at ASC
-      LIMIT $1`, [lim, win]);
+      LIMIT $1`, [lim, win, ids]);
 
-  const result = { linked: links.linked, scanned: rows.length, sinceHours: win, written: 0, failed: 0, noOpenSlot: 0, items: [] };
+  const result = {
+    linked: links.linked,
+    scanned: rows.length,
+    sinceHours: win,
+    dryRun: !!dryRun,
+    written: 0,
+    failed: 0,
+    noOpenSlot: 0,
+    items: [],
+  };
+  if (dryRun) {
+    result.items = rows.map(row => ({
+      orderSubmissionId: row.id,
+      name: row.orderer || row.recipient || '',
+      submittedAt: row.submitted_at || null,
+    }));
+    return result;
+  }
   for (const row of rows) {
     let out;
     try {
@@ -728,7 +759,13 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null,
       result.failed++;
       await require('./orderLedger.service').markOrderMirrorFailed(row.id, err);
     }
-    result.items.push({ orderSubmissionId: row.id, ok: !!out.ok, reason: out.reason || null, seq: out.seq || null });
+    result.items.push({
+      orderSubmissionId: row.id,
+      name: row.orderer || row.recipient || '',
+      ok: !!out.ok,
+      reason: out.reason || null,
+      seq: out.seq || null,
+    });
   }
   logger.info(`[sheetlessOrder] 과거 작업보드 복구 by=${by} scanned=${result.scanned} written=${result.written} failed=${result.failed}`);
   return result;
