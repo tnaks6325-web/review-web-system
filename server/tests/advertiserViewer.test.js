@@ -248,6 +248,9 @@ async function run() {
   const advCols = svc.__advertiserColumnsForTest;
   const advHeaderCandidates = svc.__advertiserHeaderCandidatesForTest;
   const advColumnValue = svc.__advertiserColumnValueForTest;
+  const advOrderInfoHeaders = svc.__advertiserOrderInfoHeadersForTest;
+  const isAdvertiserUserIdHeader = svc.__isAdvertiserUserIdHeaderForTest;
+  const sameSheetRow = svc.__sameSheetRowForTest;
   ok('_advertiserColumns 가 테스트로 노출돼 있다', typeof advCols === 'function');
   ok('광고주 헤더 후보 보완기가 테스트로 노출돼 있다', typeof advHeaderCandidates === 'function');
   {
@@ -274,11 +277,13 @@ async function run() {
       !advCols(hs, { submitCol: '없는열' }).includes('없는열'));
     ok('opts 없이 호출한 결과는 종전과 동일(무회귀)',
       JSON.stringify(advCols(hs2)) === JSON.stringify(advCols(hs2, {})));
-    ok('★ 다섯 차단 컬럼(은행·계좌·예금주)은 나오지 않는다',
-      JSON.stringify(advCols(['수취인', '은행', '계좌번호', '예금주'])) === JSON.stringify(['수취인']));
+    ok('★ 전화번호·아이디는 제공하고 은행·계좌·예금주는 계속 차단한다',
+      JSON.stringify(advCols(['수취인', '아이디', '전화번호', '은행', '계좌번호', '예금주'])) === JSON.stringify(['수취인', '아이디', '전화번호']));
   }
-  ok('workdeskTab 이 보완된 헤더 후보를 광고주 차단 목록에 넘긴다',
-    /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster, advEditedHeaders\)\)/.test(
+  ok('workdeskTab 이 보완된 헤더 후보와 연결 주문 정보를 광고주 열 구성에 넘긴다',
+    /const candidates = _advertiserHeaderCandidates\(raw, roster, advEditedHeaders\);/.test(
+      fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')) &&
+    /_advertiserColumns\(\[\.\.\.candidates, \.\.\._advertiserOrderInfoHeaders\(candidates, advertiserOrderMap\)\]\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
 
   /* ═══ 7. 리뷰 캡처 미리보기(행별) ═══ */
@@ -288,6 +293,17 @@ async function run() {
       ? advColumnValue({}, { 'col:\uD0DD\uBC30\uC1A1\uC7A5': '2616771000000' }, '\uD0DD\uBC30\uC1A1\uC7A5')
       : null;
     ok('\uD5C8\uC6A9\uB41C \uD0DD\uBC30\uC1A1\uC7A5\uC740 \uD589\uC758 \uC140 \uD3B8\uC9D1 \uAC12\uC744 \uC6D0\uBCF8 \uD589 \uAC12\uBCF4\uB2E4 \uC6B0\uC120\uD574 \uBC18\uD658\uD55C\uB2E4', trackedValue === '2616771000000');
+    const orderInfo = { userId: 'shopper-77', phone: '010-1234-5678' };
+    ok('구매양식 아이디·전화번호는 원본 시트 열이 비어도 연결 주문값으로 제공한다',
+      advColumnValue({}, {}, '아이디', orderInfo) === 'shopper-77' &&
+      advColumnValue({}, {}, '전화번호', orderInfo) === '010-1234-5678');
+    ok('원본 열에 없는 아이디·전화번호만 추가해 중복 열을 막는다',
+      JSON.stringify(advOrderInfoHeaders(['연락처'], new Map([['o1', orderInfo]]))) === JSON.stringify(['아이디']) &&
+      JSON.stringify(advOrderInfoHeaders(['구매채널ID'], new Map([['o1', orderInfo]]))) === JSON.stringify(['전화번호']));
+    ok('상품아이디·비고 아이디확인 같은 일반 열은 구매채널 아이디 열로 오인하지 않는다',
+      isAdvertiserUserIdHeader('쿠팡id') && !isAdvertiserUserIdHeader('상품아이디') && !isAdvertiserUserIdHeader('비고(아이디확인)'));
+    ok('연결 주문 정보는 주문의 실제 시트 행과 작업행이 일치할 때만 사용한다',
+      sameSheetRow(42, '42') && !sameSheetRow(42, '43') && !sameSheetRow(42, null));
     const fromCellEdit = advHeaderCandidates(
       ['\uBC88\uD638', '\uC218\uCDE8\uC778', '\uCFE0\uD321id', '\uC5F0\uB77D\uCC98', '\uC8FC\uC18C'],
       [],
