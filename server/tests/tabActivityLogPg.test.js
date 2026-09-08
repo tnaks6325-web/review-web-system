@@ -168,6 +168,10 @@ async function drain(m, opts) {
       (sheet_id,tab_name,recipient,source,campaign_application_id,submitted_at,deleted_at)
       VALUES ('s2','t2','취소외부','admin_external',$1,$2,$3)`,
       [historyApps[0].id, D('2026-08-23T06:10:00Z'), D('2026-08-23T06:20:00Z')]);
+    await pool.query(`INSERT INTO campaign_applications
+      (campaign_id,applicant_name,status,applied_at,submitted_at,expires_at,phone8,order_submission_id,late_order_id)
+      VALUES ('c1','지각후외부','submitted',$1,$2,$3,'55556666',$4,$5)`,
+      [D('2026-08-23T03:00:00Z'), D('2026-08-23T04:00:00Z'), D('2026-08-23T03:30:00Z'), extOrder.id, lateOrder.id]);
 
     const routeSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'utf8');
     const start = routeSrc.indexOf("router.get('/admin/:id/applications'");
@@ -179,12 +183,16 @@ async function drain(m, opts) {
     const ext = q.rows.find(r => r.applicant_name === '외부');
     const late = q.rows.find(r => String(r.id) === String(lateApps[0].id));
     const history = q.rows.find(r => r.applicant_name === '취소외부');
+    const replaced = q.rows.find(r => r.applicant_name === '지각후외부');
     assert.strictEqual(ext.order_source, 'admin_external');
     assert.strictEqual(new Date(ext.order_submitted_at).toISOString(), '2026-08-23T04:00:00.000Z');
     assert.strictEqual(late.order_was_late, true);
     assert.strictEqual(new Date(late.order_submitted_at).toISOString(), '2026-08-23T05:12:10.000Z');
     assert.strictEqual(history.order_source, 'admin_external', '취소 뒤 신청 역링크 복구');
     assert.strictEqual(new Date(history.order_submitted_at).toISOString(), '2026-08-23T06:10:00.000Z');
+    assert.strictEqual(replaced.order_source, 'admin_external', '과거 지각 링크보다 현재 제출 우선');
+    assert.strictEqual(new Date(replaced.order_submitted_at).toISOString(), '2026-08-23T04:00:00.000Z');
+    assert.strictEqual(replaced.order_was_late, false, '현재 외부 제출을 과거 지각 주문으로 오분류하지 않음');
   });
 
   await t('★★ 유형을 골라도 그 유형의 과거까지 전부 나온다(SQL 유형 조건)', async () => {

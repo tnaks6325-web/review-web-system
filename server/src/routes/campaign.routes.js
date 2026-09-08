@@ -3324,16 +3324,18 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
               COALESCE(linked_order.submitted_at, history_order.submitted_at) AS order_submitted_at,
               COALESCE(linked_order.source, history_order.source) AS order_source,
               (COALESCE(linked_order.campaign_was_late, history_order.campaign_was_late, FALSE)
-                OR ca.late_order_id IS NOT NULL) AS order_was_late,
+                OR (ca.order_submission_id IS NULL AND ca.late_order_id IS NOT NULL)) AS order_was_late,
               EXISTS (SELECT 1 FROM normal_submissions ns JOIN popular_uses pu
                         ON pu.phone8 = ns.phone8 AND pu.credit_no = ns.credit_no
                        AND ns.submitted_at <= pu.applied_at
                         WHERE ns.id = ca.id) AS popular_purpose
        FROM campaign_applications ca
        /* 현재 링크를 우선하고, 주문 취소로 신청 쪽 링크가 비워진 뒤에는 주문 원장의 불변 FK로
-          마지막 제출을 복구한다. 관제 화면이 신청 상태에서 제출시각·출처를 추측하지 않게 한다. */
+          마지막 제출을 복구한다. 로그 화면이 신청 상태에서 제출시각·출처를 추측하지 않게 한다. */
        LEFT JOIN order_submissions linked_order
-         ON linked_order.id = COALESCE(ca.late_order_id, ca.order_submission_id)
+         /* 만료/취소 건을 외부모집으로 다시 제출하면 과거 late_order_id가 남을 수 있다.
+            이때도 현재 확정 주문(order_submission_id)이 화면의 출처·시각 기준이다. */
+         ON linked_order.id = COALESCE(ca.order_submission_id, ca.late_order_id)
        LEFT JOIN LATERAL (
          SELECT os.submitted_at, os.source, os.campaign_was_late
            FROM order_submissions os
