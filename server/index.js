@@ -32,6 +32,7 @@ const REQUIRED_SCHEMA = [
   ['campaign_applications', 'review_fee_snapshot'],// 082 — apply INSERT(없으면 참여 전면 42703)·리뷰어 참여내역
   ['order_submissions', 'review_fee_snapshot'],    // 082 — 홀드확정 전파·review-earnings(없으면 금액이 조용히 0원)
   ['order_submissions', 'repurchase_work_key'],    // 144 — 재참여 가드(없으면 fail-open으로 제한이 조용히 풀림)
+  ['order_submissions', 'campaign_was_late'],      // 149 — 취소 뒤에도 지각 주문 작업 로그 이력 보존
   ['recruit_campaigns', 'repurchase_days'],        // 148 — 공고별 재참여 기간 저장·apply/카드 판정
   ['trackb_advertiser_links', 'login_required'],   // 083 — 광고주 링크 로그인 게이트·업체관리 링크/계정 카드
   ['recruit_campaigns', 'reviewer_hidden'],        // 085 — 공개 /list WHERE 절(없으면 리뷰어 공고목록 전면 42703)

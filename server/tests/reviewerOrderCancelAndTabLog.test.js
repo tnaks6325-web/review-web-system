@@ -22,6 +22,8 @@ function t(name, fn) { try { fn(); console.log('  ✓ ' + name); pass++; } catch
 const R = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const SVC = R('src/services/reviewerOrderCancel.service.js');
 const LOGSVC = R('src/services/tabActivityLog.service.js');
+const HOLDSVC = R('src/services/campaignHold.service.js');
+const MIG149 = R('migrations/149_campaign_order_activity_provenance.sql');
 const ROUTE = R('src/routes/reviewEdit.routes.js');
 const TBROUTE = R('src/routes/trackB.routes.js');
 const IDX = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'index.html'), 'utf8');
@@ -103,6 +105,22 @@ ok('★ 소스 실패를 빈 배열로 접지 않고 failed 로 말한다',
 ok('★ 모든 소스 쿼리에 LIMIT 이 있다',
   (LOGSVC.match(/db\.query\(/g) || []).length === (LOGSVC.match(/LIMIT \$/g) || []).length);
 ok('★ 빈 gid 는 절을 켜지 않는다', /\$3 <> ''[\s\S]{0,40}linked_tab_gid=\$3/.test(LOGSVC));
+ok('★★ 주문 원장의 출처와 참여 신청의 지각 링크를 같은 조회에서 판정한다',
+  /campaign_application_id/.test(LOGSVC) && /r\.source === 'admin_external'/.test(LOGSVC)
+  && /direct_app\.id = x\.campaign_application_id/.test(LOGSVC)
+  && /ca\.late_order_id = x\.id/.test(LOGSVC) && /ca\.expires_at/.test(LOGSVC));
+ok('★★ 취소 뒤에도 지각 이력이 바뀌지 않도록 주문 원장에 당시 상태를 보존한다',
+  /campaign_was_late/.test(LOGSVC)
+  && /campaign_was_late = os\.campaign_was_late[\s\S]*?ca\.status IN \('expired','cancelled'\)/.test(HOLDSVC)
+  && /ca\.expires_at <= NOW\(\) - make_interval\(secs => \$6\)/.test(HOLDSVC)
+  && /holdToken, HOLD_GRACE_SEC/.test(HOLDSVC)
+  && /UPDATE order_submissions SET campaign_was_late = TRUE/.test(HOLDSVC)
+  && /ADD COLUMN IF NOT EXISTS campaign_was_late BOOLEAN NOT NULL DEFAULT FALSE/.test(MIG149)
+  && !/INTERVAL '30 seconds'/.test(MIG149));
+ok('★★ 레거시 신청 링크 조회는 주문을 먼저 제한하고 양쪽 링크 인덱스를 둔다',
+  /SELECT ev\.\*[\s\S]*?ORDER BY ev\.at DESC[\s\S]*?LIMIT \$3[\s\S]*?LEFT JOIN campaign_applications direct_app/.test(LOGSVC)
+  && /campaign_applications \(order_submission_id\)/.test(MIG149)
+  && /campaign_applications \(late_order_id\)/.test(MIG149));
 t('★★ 유형 목록이 화면 탭의 단일 출처', () => {
   const m = require('../src/services/tabActivityLog.service');
   assert.deepStrictEqual(m.LOG_KIND_KEYS, ['order', 'cancel', 'review', 'inspect', 'edit', 'quota', 'money', 'sys']);
@@ -127,6 +145,32 @@ t('★★ 병합·정렬·자르기를 실제로 실행한다', async () => {
     assert.ok(/리뷰어 본인/.test(r.items[0].who), '누가 취소했는지 말한다');
   });
 });
+t('★★ 일반제출·외부모집 수동제출·지각도착을 실제 제출시각 기준으로 구분한다', async () => {
+  const m = require('../src/services/tabActivityLog.service');
+  const db = { query: async (sql) => {
+    if (/FROM order_submissions/.test(sql)) return { rows: [
+      { id: 'n', orderer: '일반', recipient: '일반', source: 'order_submit', ev: 'order',
+        at: new Date('2026-09-08T01:00:00Z'), expires_at: null, is_late: false },
+      { id: 'e', orderer: '외부', recipient: '외부', source: 'admin_external', ev: 'order',
+        at: new Date('2026-09-08T02:00:00Z'), expires_at: null, is_late: false },
+      { id: 'l', orderer: '지각', recipient: '지각', source: 'order_submit', ev: 'order',
+        at: new Date('2026-09-08T03:12:10Z'), expires_at: new Date('2026-09-08T03:00:00Z'), is_late: true },
+    ] };
+    return { rows: [] };
+  } };
+  const r = await m.tabActivityLog({ sheetId: 's', tabName: 't', kind: 'order', pool: db });
+  const normal = r.items.find(x => x.id === 'o:n:n');
+  const external = r.items.find(x => x.id === 'o:e:n');
+  const late = r.items.find(x => x.id === 'o:l:n');
+  assert.match(normal.message, /^구매양식 제출 — 일반$/);
+  assert.strictEqual(normal.submissionType, 'standard');
+  assert.strictEqual(new Date(normal.submittedAt).toISOString(), '2026-09-08T01:00:00.000Z');
+  assert.match(external.message, /^외부모집 수동제출 — 외부$/);
+  assert.strictEqual(external.submissionType, 'external');
+  assert.match(late.message, /^기구매\/지각 주문도착 — 지각$/);
+  assert.strictEqual(late.submissionType, 'late');
+  assert.strictEqual(late.overdueSeconds, 730, '12분 10초 초과');
+});
 
 console.log('\n[4-B] 작업 로그 — 처음까지 이어 받기(커서, 2026-08-24 사용자 확정)');
 ok('★★ 모든 소스 쿼리에 커서 절이 있다(한 곳만 빠져도 그 종류는 과거가 안 나온다)',
@@ -135,7 +179,7 @@ ok('★★ 모든 소스 쿼리에 커서 절이 있다(한 곳만 빠져도 그
 ok('★★ 한 행이 두 시각을 내는 소스는 UNION ALL 로 항목 단위로 편다(행 단위 커서면 한쪽이 사라진다)',
   (noComment(LOGSVC).match(/UNION ALL/g) || []).length === 3 && !/GREATEST\(/.test(noComment(LOGSVC)));
 ok('★★ 유형 조건은 SQL 로 내린다(JS 에서만 거르면 그 페이지가 통째로 빈다)',
-  /x\.ev = \$4::text/.test(LOGSVC) && /event_type = 'order_canceled_by_reviewer'/.test(LOGSVC));
+  /(?:x|ev)\.ev = \$4::text/.test(LOGSVC) && /event_type = 'order_canceled_by_reviewer'/.test(LOGSVC));
 t('★★ 더 있으면 가장 오래된 시각을 커서로 준다 · 없으면 끝을 말한다', async () => {
   const m = require('../src/services/tabActivityLog.service');
   const many = (n) => Array.from({ length: n }, (_, i) => ({
@@ -252,6 +296,33 @@ ok('★★ 자리표시자를 깐 함수는 예외에도 화면을 종결시킨�
 ok('★ flex 스크롤 함정 방어(min-height:0)', /\.tlbd\{flex:1;min-height:0;overflow:auto/.test(WD));
 ok('★★ 줄 마크업은 _tlEvHtml 한 벌(첫 그리기·이어 붙이기 사본 0)',
   (noComment(WD).match(/class="tlev k-/g) || []).length === 1);
+ok('★★ 제출시각과 지각 초과시간은 서버가 준 값을 작업 로그 줄에서 표시한다',
+  /function _tlSubmissionStamp\(e\)/.test(WD)
+  && /e\.submissionType==='late'/.test(WD)
+  && /timeZone:'Asia\/Seoul'/.test(WD)
+  && /_tlOverdueText\(e\.overdueSeconds\)/.test(WD)
+  && /\+_tlSubmissionStamp\(e\)/.test(WD));
+t('★★ 작업 로그 표기 함수가 제출시각·12분 10초 초과 문구를 실제로 만든다', () => {
+  const functions = WD.match(/function _tlOverdueText\(v\)[\s\S]*?(?=\nfunction _tlEvHtml\(e\))/);
+  assert.ok(functions, '표기 함수 묶음 없음');
+  const box = {};
+  vm.runInNewContext(`
+    const esc = String;
+    const _fmtTs = String;
+    ${functions[0]}
+    result = {
+      duration: _tlOverdueText(730),
+      longDuration: _tlOverdueText(90061),
+      normal: _tlSubmissionStamp({kind:'order', submittedAt:'2026-09-08T01:00:00Z', submissionType:'standard'}),
+      late: _tlSubmissionStamp({kind:'order', submittedAt:'2026-09-08T03:12:10Z', submissionType:'late', overdueSeconds:730})
+    };
+  `, box);
+  assert.strictEqual(box.result.duration, '12분 10초');
+  assert.strictEqual(box.result.longDuration, '1일 1시간 1분 1초');
+  assert.match(box.result.normal, /<b>제출시각<\/b>/);
+  assert.match(box.result.late, /<b>주문제출<\/b>/);
+  assert.match(box.result.late, /<b>12분 10초 초과<\/b>/);
+});
 ok('★★ 바닥 근처에 닿으면 더 과거를 불러온다',
   /bd\.onscroll=\(\)=>\{[\s\S]{0,160}_tlMore\(\)/.test(WD));
 ok('★★ 이어 붙일 때 목록을 다시 그리지 않는다(보던 자리 유지)',
