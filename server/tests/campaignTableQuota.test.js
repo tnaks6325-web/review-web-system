@@ -3,7 +3,7 @@
  *
  * 1단계(표시): 관리자 카드 누적 = 작업보드 표 채워진 줄(archiveSuggest.filled — rowNumbering.filledSql
  *   단일 출처 합류). null/부재 = 종전(공고 확정) 폴백 + 툴팁이 그 사실을 말한다(0 위장 금지).
- * 2단계(게이트): CAMPAIGN_TABLE_QUOTA = off | observe(기본) | on.
+ * 2단계(게이트): CAMPAIGN_TABLE_QUOTA = off | observe | on(기본).
  *   재료 = order_submissions(주문 원장) — 작업표 줄이 아니다(선기입 이름만 줄의 참여 소각·
  *   링크 오염·투영 지연 면역). observe 는 payload.tableQuota 만 싣고 상태 무변경.
  *   on 은 wouldClose 시 soft_full(stateReason:'table_over_total') — **비영속**(maybePersistClosed 무접촉).
@@ -22,6 +22,8 @@
  */
 // ★ PGTEST_URL 은 **require 보다 먼저** DATABASE_URL 로 옮긴다(pool 은 require 시점에 읽는다 — 레포 규율)
 if (process.env.PGTEST_URL) process.env.DATABASE_URL = process.env.PGTEST_URL;
+// 이 프로세스는 관측 모드 순수함수도 고정한다. 기본 on 검증은 아래 자식 프로세스가 맡는다.
+process.env.CAMPAIGN_TABLE_QUOTA = 'observe';
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -111,8 +113,11 @@ const ok = (name, cond, extra) => {
     off.mode === 'off', off);
   ok('★ off = 로더 쿼리 0건(완전 킬스위치)', off.loaderQ === 0, off);
   ok('off 는 판정도 종전 그대로(open)', off.state === 'open' && off.wc === null, off);
-  const obs = run({ CAMPAIGN_TABLE_QUOTA: '' });
-  ok('미설정 = observe + 로더 쿼리가 나간다', obs.mode === 'observe' && obs.loaderQ === 1, obs);
+  const obs = run({ CAMPAIGN_TABLE_QUOTA: 'observe' });
+  ok('명시 observe = 상태는 바꾸지 않고 로더 쿼리는 실행', obs.mode === 'observe' && obs.loaderQ === 1 && obs.state === 'open', obs);
+  const def = run({ CAMPAIGN_TABLE_QUOTA: '' });
+  ok('★★ 미설정 = on(근본수정 기본값) + 주문 원장 총량 차단',
+    def.mode === 'on' && def.state === 'soft_full' && def.reason === 'table_over_total', def);
 
   // ── [3] 로더 — 스텁 pool 실제 실행 ──
   console.log('\n[3] 로더 실행(스텁 pool)');
@@ -183,7 +188,7 @@ const ok = (name, cond, extra) => {
   ok("★★ 주문 좌표 합집합 — 공고 경유(campaign:<id>) + 연결 탭 두 계열을 다 센다(탭만 보면 확정 67에 orders 0)",
     /os\.sheet_id = 'campaign:' \|\| rc\.id AND os\.tab_name = 'campaign:' \|\| rc\.id/.test(loaderBody));
   ok("★ 앵커는 탭 좌표에만(campaign: 좌표는 귀속 자명 — 자르면 공고 경유 확정 과소집계)",
-    /WHERE os\.sheet_id = 'campaign:' \|\| rc\.id\n\s+OR os\.submitted_at >= COALESCE/.test(loaderBody));
+    /WHERE os\.sheet_id = 'campaign:' \|\| rc\.id\r?\n\s+OR os\.submitted_at >= COALESCE/.test(loaderBody));
   ok('★★ 게이트 재료에 작업표 줄 없음(campaign_participants 참조 0 — 선기입·링크 오염 면역)',
     !/campaign_participants/.test(loaderBody));
   ok('★ 시트 API 호출 0', !/sheets|spreadsheet|googleapis/i.test(loaderBody));
@@ -260,7 +265,10 @@ const ok = (name, cond, extra) => {
   }
   ok('★ 게이트는 observe 에서 상태를 바꾸지 않는다(코드 형태 고정)',
     /TABLE_QUOTA_MODE === 'on' && payload\.tableQuota && payload\.tableQuota\.wouldClose/.test(stateSrc));
-  ok('★ exports(TABLE_QUOTA_MODE·리셋)', typeof S.TABLE_QUOTA_MODE === 'string' && typeof S.__resetTableQuotaCacheForTest === 'function');
+  ok('★★ apply 잠금 안에서 주문 원장 총량을 모르면 신규 참여를 fail-closed',
+    /const totalUsage = totalQuotaUsage\(camp, stateCounts, activeSchedule\)[\s\S]{0,300}!totalUsage\.known[\s\S]{0,300}quota_unknown/.test(routesSrc));
+  ok('★ exports(TABLE_QUOTA_MODE·totalQuotaUsage·리셋)', typeof S.TABLE_QUOTA_MODE === 'string'
+    && typeof S.totalQuotaUsage === 'function' && typeof S.__resetTableQuotaCacheForTest === 'function');
   ok('★ 소스에 리터럴 NUL 0(가드 무력화 방지)',
     !fs.readFileSync(path.join(__dirname, '..', 'src/services/campaignState.service.js')).includes(0x00));
 

@@ -219,6 +219,42 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
   ok('B19 확정 후 마감 영속 판정을 호출', persistCalls === 1);
 }
 {
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 3, todaySubmitted: 0, activeHolds: 0, todayActiveHolds: 0,
+    linked: { ok: true, orders: 10, ordersAll: 10, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 3 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 92 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '1', allowOverCapacity: true });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18b ★ 신청 3명이어도 주문 원장 10/10이면 초과 사실을 알리고 기록',
+    r.ok === true && r.overCapacity === true && r.capacityUsed === 10 && r.capacitySource === 'order_ledger');
+}
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 9, todaySubmitted: 0, activeHolds: 1, todayActiveHolds: 1,
+    linked: { ok: true, orders: 9, ordersAll: 9, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/id = \$1 AND campaign_id = \$2 AND phone8 = \$3 FOR UPDATE/i, [{ id: 42, status: 'applied', active_hold: true }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 9 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', targetApplicationId: 42, orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+    allowOverCapacity: false,
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18c ★ 마지막 유효 홀드 확정은 11번째 초과로 오인하지 않는다', r.ok === true && r.overCapacity === false);
+}
+{
   const c = stubClient([
     [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 0 }]],
     [/status IN \('applied', 'expired', 'cancelled'\)/i, [{ id: 42 }]],

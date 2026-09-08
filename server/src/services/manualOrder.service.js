@@ -216,30 +216,66 @@ async function confirmExternalApplication(client, {
     }
   }
 
-  // 정원 확인 — 외부모집은 이미 약속된 건이라 기본 허용하되, 초과 사실은 호출부에 알린다
-  const total = Number(cRows[0].recruit_total) || 0;
-  let overCapacity = false;
-  if (total > 0) {
-    const { rows: cnt } = await client.query(
-      `SELECT COUNT(*)::int AS n FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`, [campaignId]);
-    if (cnt[0].n >= total) {
-      if (!allowOverCapacity) return { ok: false, error: `모집 정원(${total}명)이 이미 찼습니다` };
-      overCapacity = true;
-    }
-  }
-
   let appId;
   const selectedId = parseInt(targetApplicationId, 10);
+  let selectedApplication = null;
   if (selectedId) {
     const { rows: selected } = await client.query(
-      `SELECT id, status FROM campaign_applications
+      `SELECT id, status,
+              (status = 'applied' AND expires_at > NOW()) AS active_hold
+         FROM campaign_applications
         WHERE id = $1 AND campaign_id = $2 AND phone8 = $3 FOR UPDATE`,
       [selectedId, campaignId, phone8]);
     if (!selected.length) return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청을 찾을 수 없거나 연락처가 일치하지 않습니다' };
     if (!['applied', 'expired', 'cancelled'].includes(selected[0].status)) {
       return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청은 확정할 수 있는 상태가 아닙니다' };
     }
-    appId = selected[0].id;
+    selectedApplication = selected[0];
+  }
+
+  // 정원 확인 — 외부모집은 이미 약속된 건이라 기본 허용하되, 초과 사실은 호출부에 알린다
+  let capacityTotal = Number(cRows[0].recruit_total) || 0;
+  let overCapacity = false;
+  let capacityUsed = 0;
+  let capacitySource = 'applications';
+  let capacityUnknown = false;
+  const hasLinkedOrderLedger = !!(cRows[0].linked_sheet_id && cRows[0].linked_tab_name);
+  if (capacityTotal > 0 || hasLinkedOrderLedger) {
+    const { rows: cnt } = await client.query(
+      `SELECT COUNT(*)::int AS n FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`, [campaignId]);
+    capacityUsed = Number(cnt[0] && cnt[0].n) || 0;
+    // 연결 공고는 신규 참여·날짜계획과 같은 주문 원장 총량을 본다. 이 경로는 이미 구매된 건의
+    // 사후 기록이므로 조회 실패나 초과여도 기록 자체는 버리지 않고 경고 재료만 반환한다.
+    if (hasLinkedOrderLedger) {
+      try {
+        const { fetchCampaignCounts, totalQuotaUsage } = require('./campaignState.service');
+        const counts = (await fetchCampaignCounts(client, [campaignId])).get(campaignId) || null;
+        const usage = totalQuotaUsage(cRows[0], counts, null);
+        capacityTotal = Number(usage.cap) || capacityTotal;
+        capacityUnknown = !usage.known;
+        // 선택한 유효 홀드는 이미 소비량에 포함된 자리다. submitted 전환을 새 1건으로 오인해
+        // 10/10의 마지막 정상 구매를 11번째 초과로 경고하지 않도록 그 홀드 하나만 제외한다.
+        const selectedHold = selectedApplication && selectedApplication.active_hold ? 1 : 0;
+        const ledgerBase = usage.source === 'order_ledger'
+          ? Math.max(Number(usage.submitted) || 0, Number(usage.orders) || 0)
+          : (Number(usage.submitted) || 0);
+        const usedBeforeThisConfirmation = ledgerBase
+          + Math.max(0, (Number(usage.activeHolds) || 0) - selectedHold);
+        capacityUsed = Math.max(capacityUsed, usedBeforeThisConfirmation);
+        capacitySource = usage.source;
+      } catch (e) {
+        capacityUnknown = true;
+        logger.warn(`[manual-order] 주문 원장 총량 확인 실패(외부구매 기록은 계속) camp=${campaignId}: ${e.message}`);
+      }
+    }
+    if (capacityTotal > 0 && capacityUsed >= capacityTotal) {
+      if (!allowOverCapacity) return { ok: false, error: `모집 정원(${capacityTotal}명)이 이미 찼습니다` };
+      overCapacity = true;
+    }
+  }
+
+  if (selectedId) {
+    appId = selectedApplication.id;
     await client.query(
       `UPDATE campaign_applications
           SET status = 'submitted', submitted_at = NOW(), order_submission_id = $2, option_key = COALESCE($3, option_key)
@@ -276,7 +312,7 @@ async function confirmExternalApplication(client, {
 
   const { maybePersistClosed } = require('./campaignHold.service');
   await maybePersistClosed(client, campaignId);
-  return { ok: true, applicationId: appId, overCapacity };
+  return { ok: true, applicationId: appId, overCapacity, capacityUsed, capacityTotal, capacitySource, capacityUnknown };
 }
 
 /**
@@ -484,7 +520,12 @@ async function submitExternalOrder({
         targetApplicationId,
         sheetId, gid: ledger.tabGid || gid || '', tabName,
       });
-      if (r.ok) { await client.query('COMMIT'); application = r; if (r.overCapacity) warnings.push('모집 정원을 초과해 확정했습니다'); }
+      if (r.ok) {
+        await client.query('COMMIT');
+        application = r;
+        if (r.overCapacity) warnings.push(`총 모집 ${r.capacityTotal}건을 넘어 ${r.capacityUsed + 1}번째 주문으로 기록했습니다`);
+        if (r.capacityUnknown) warnings.push('주문 원장 총량을 확인하지 못했지만 이미 구매된 건이라 기록했습니다');
+      }
       else { await client.query('ROLLBACK'); warnings.push(r.skipped ? '참여형 공고가 아니라 정원 차감은 건너뜁니다' : ('정원 반영 실패: ' + r.error)); }
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }

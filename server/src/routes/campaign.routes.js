@@ -10,6 +10,7 @@ const { logger } = require('../utils/logger');
 const {
   computeCampaignState, nextOpenAt,
   fetchCampaignCounts,
+  totalQuotaUsage,
   fetchOptionCounts,
   computeOptionView,
   liveOptions,
@@ -1782,7 +1783,19 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★ 카드 표시와 동일한 일정을 참여 게이트에도 적용(불일치 = 오픈처럼 보이는데 참여 거부 / 그 반대).
     //   1분 캐시라 보통 추가 쿼리 없음. 잠금 커넥션(client)으로 읽어 커넥션 고갈 교착을 피한다.
     const schedMap = await deriveSchedules(client, tabsOfCampaigns([camp]), now);
-    const st = computeCampaignState(camp, stateCounts, now, scheduleFor(schedMap, camp));
+    const activeSchedule = scheduleFor(schedMap, camp);
+    const totalUsage = totalQuotaUsage(camp, stateCounts, activeSchedule);
+    // 주문 원장 게이트가 켜진 연결 공고는 총량을 확인하지 못한 상태에서 새 자리를 내주지 않는다.
+    // 읽기·기존 주문 확정은 계속 가능하고, 신규 참여만 잠시 재시도를 요청한다.
+    if (!totalUsage.known) {
+      await client.query('ROLLBACK');
+      return res.status(503).json({
+        ok: false,
+        reason: 'quota_unknown',
+        error: '총 모집 완료 여부를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.',
+      });
+    }
+    const st = computeCampaignState(camp, stateCounts, now, activeSchedule);
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });

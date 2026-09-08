@@ -398,6 +398,8 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     const stubWithPlans = () => {
       const st = baseStub();
       st['FROM campaign_daily_plans'] = (sql) => ({ rows: /plan_date >=/.test(sql) ? planRows : [] });
+      // 주문 원장 총량 게이트 기본 on — 연결 작업표 테스트는 정상 조회(주문 0)를 명시한다.
+      st.order_submissions = [{ id: 'c1', orders: 0, orders_all: 0, live_campaigns: 1 }];
       return st;
     };
 
@@ -827,6 +829,11 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('7e-1 초과 상태에서도 기존 계획을 줄이는 저장은 복구 경로로 허용', A.manualOnlyReductions() === true);
   sandbox.S.plan['2026-10-02'] = 1;
   ok('7e-1 초과 상태에서 새 날짜 증원은 복구 저장으로 위장할 수 없다', A.manualOnlyReductions() === false);
+  mkS({ data: { recruitTotal: 300, submittedAll: 250, planGateSubmittedAll: 300,
+    planGateTodaySubmitted: 0, planGateKnown: true, totalQuotaFull: true } });
+  eq('7e-2 ★ 주문 원장 300/300이면 게이지는 자연 기준값보다 늘릴 수 없다', A.maxFor('2026-09-04'), 40);
+  mkS({ data: { recruitTotal: 300, planGateKnown: false } });
+  eq('7e-2 ★ 주문 원장 총량을 모를 때도 자연 기준값보다 증원할 수 없다', A.maxFor('2026-09-04'), 40);
 
   // 7f. ★★ 요구 ⑥ — 초과/부족을 만들고 [자동 맞춤]이 고른 방식대로 되돌린다
   for (const mode of ['next', 'spread', 'extend']) {
@@ -1224,7 +1231,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   /* ★ 2026-08-19 사용자 확정: **초과만 막고 부족은 저장한다**(부족하게 저장하면 그만큼만 모집하고
      작업표의 줄도 그 수로 줄어든다). 하드블록 금지 규율 자체는 그대로. */
   ok('7A-11 경고일 뿐 저장을 막지 않는다(초과만 잠그고 부족은 저장 가능)',
-    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(cdpSrc)
+    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over \|\| \(totalQuotaLocked\(\) && !quotaRecovery\);/.test(cdpSrc)
     && !/todayNaturalQuota[^\n]*save\.disabled/.test(cdpSrc));
 
   /* ── 배선(정적) — 사용자 확정 문구·규율이 코드에 그대로 있는가 ── */
@@ -1261,7 +1268,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /applyCarryMode\(DEFAULT_CARRY_MODE\);/.test(CDP)
     && /segBtn\('extend', '종료일 뒤에 붙이기'/.test(CDP));
   ok('7r ★ 저장 게이트 = 초과 아님 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
-    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(CDP)
+    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over \|\| \(totalQuotaLocked\(\) && !quotaRecovery\);/.test(CDP)
     && /balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)/.test(CDP)
     && /!balanceOn\(\) && totalFor\(\) > 0 && manualDiffPlan\(\) > 0/.test(CDP));
   ok('7s ★ 저장 상한은 서버 MAX_PLAN_ENTRIES 와 같은 값(넘으면 사유를 말하고 잠근다)',
@@ -1369,7 +1376,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /var manualOver = totalFor\(\) > 0 && manualDiffPlan\(\) > 0;/.test(CDP)
     && /function manualOnlyReductions\(\)/.test(CDP)
     && /추가 가능 <span class="num">/.test(CDP)
-    && /planGateSubmittedAll: Number\(allQ\[0\] && allQ\[0\]\.n\) \|\| 0/.test(readS('services/campaignPlan.service.js')));
+    && /planGateSubmittedAll: totalUsage\.used/.test(readS('services/campaignPlan.service.js'))
+    && /planGateKnown: totalUsage\.known/.test(readS('services/campaignPlan.service.js'))
+    && /totalQuotaFull: totalUsage\.full/.test(readS('services/campaignPlan.service.js')));
 
   console.log(`\n✅ campaignDailyPlan: ${n}개 통과`);
   process.exit(0);   // trackB.routes require 가 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)
