@@ -2824,9 +2824,12 @@ function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여
 function copyTaskLinkFromHome(i){ const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
   _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
                  '작업보드 링크 — '+(t.displayName||t.tabName||'')); }
-// 업체관리 [🔗 이 업체 링크 복사] — 그 업체의 작업 목록으로 직행하는 주소(광고주 접속 링크와 다르다).
+// 업체관리 빠른 복사는 **광고주 전용 URL**만 만든다. 종전 내부 공유 URL(#w)은 외부 수신자에게
+// 로그인 화면을 띄우는 별도 권한 링크라, 업체 화면에서 복사해 전달하면 안 된다.
 function copyAdvertiserLink(){ const a=STATE.advCur; if(!a){ toast('업체를 먼저 선택하세요'); return; }
-  _shareLinkCopy({ kind:'advertiser', advertiserId:a.id }, '업체 링크 — '+(a.name||'')); }
+  const i=(STATE.advs||[]).findIndex(x=>x&&x.id===a.id);
+  if(i<0){ toast('업체를 찾을 수 없습니다 — 새로고침 후 다시 시도하세요'); return; }
+  return _ovmCopyAdvLink(i); }
 function renderLogin(msg){
   document.body.classList.remove('advm','brandv','nostl','nofol');   // 광고주·브랜드 세션 잔재 정리(로그아웃/만료 후 상한·레이아웃·칸 원복)
   $('#app').innerHTML = `<div class="loginbox"><h2>리뷰웹시스템[3버전] 로그인</h2>
@@ -17415,7 +17418,7 @@ function renderOwnPanel(a, items){
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('acct')">👤 광고주 계정 ${accts?`<span class="ovm-fin">${accts}개</span>`:'<span class="ovm-fin cand">없음</span>'}</button>`:''}
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('own')">▦ 소유 작업 <span class="ovm-fin">${items.length}</span></button>
       <button class="btn ovm-setbtn" onclick="copyAdvertiserLink()"
-        title="이 업체의 작업 목록으로 바로 가는 내부 담당자용 주소를 복사합니다. 위의 [접속 링크](광고주가 로그인 없이 여는 링크)와는 다릅니다.">🔗 업체 링크 복사</button>
+        title="광고주가 로그인 없이 이 업체 뷰를 여는 전용 URL을 복사합니다.">🔗 광고주 URL 복사</button>
       <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
       <label class="setvis" title="이 거래처가 리뷰웹시스템[3버전]에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label>
       <button class="btn xs" onclick="_ovmCollapseInline()">접기</button>
