@@ -593,17 +593,7 @@ let _authState = null;
 
 /** 세션 복원 */
 function _loadAuthSession() {
-  try {
-    const raw = localStorage.getItem(REVIEWER_AUTH_KEY);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj || Date.now() > obj.expAt) {
-      localStorage.removeItem(REVIEWER_AUTH_KEY);
-      return null;
-    }
-    if (!obj.reviewerToken) return null;
-    return obj;
-  } catch(_) { return null; }
+  return _getReviewerSession();
 }
 
 /** 세션 저장 (phone8 포함 → 동명이인 구분) */
@@ -616,6 +606,8 @@ function _saveAuthSession(name, verified, registeredMember, phone8, reviewerToke
     reviewerToken: reviewerToken || "",
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
+  // 명시적인 일반 로그인은 이 탭에 남은 관리자 홈 세션을 끝낸다.
+  try { sessionStorage.removeItem(REVIEWER_AUTH_KEY); } catch(_) {}
   localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(obj));
   _authState = obj;
 }
@@ -752,7 +744,7 @@ async function _doAdminSearch() {
 
 /** 로그아웃 */
 function _logout() {
-  localStorage.removeItem(REVIEWER_AUTH_KEY);
+  _clearReviewerSession();
   _authState = null;
 
   // ── 결과 영역 숨기기 ──
@@ -5119,11 +5111,8 @@ async function _prefillBankFromProfile() {
 
   let profile = window._reviewerProfile;
   if (!profile || (!profile.bankAccount && !profile.bankName)) {
-    const authRaw = localStorage.getItem("rapp_reviewer_auth");
-    if (!authRaw) return;
-    let auth;
-    try { auth = JSON.parse(authRaw); } catch(_) { return; }
-    if (!auth || Date.now() > (auth.expAt || 0)) return;
+    const auth = _getReviewerSession();
+    if (!auth) return;
     const name = auth.name || "", phone8 = auth.phone8 || "";
     if (!name || !phone8) return;
     try {
@@ -6853,11 +6842,8 @@ async function _loadReviewerProfileForForm() {
   const incomeType = window._incomeType || "";
   if (incomeType !== "소득신고") return;
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  if (!authRaw) return;
-  let auth;
-  try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.expAt || 0)) return;
+  const auth = _getReviewerSession();
+  if (!auth) return;
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
@@ -6895,11 +6881,8 @@ async function _loadInlineProfile() {
   const section = document.getElementById("inlineProfileSection");
   if (!section) return;
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  if (!authRaw) return;
-  let auth;
-  try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.expAt || 0)) return;
+  const auth = _getReviewerSession();
+  if (!auth) return;
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
@@ -6999,11 +6982,8 @@ async function openReviewerProfileModal() {
   if (!modal) return;
 
   // 인증 세션 확인
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  if (!authRaw) { showToast("로그인 후 이용하세요.", "warning"); return; }
-  let auth;
-  try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.expAt || 0)) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
+  const auth = _getReviewerSession();
+  if (!auth) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
@@ -7128,9 +7108,7 @@ async function saveSubAccount() {
   if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
 
   // 인증 세션
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName   = auth.name   || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -7184,9 +7162,7 @@ async function saveSubAccount() {
 async function deleteSubAccount(idx) {
   if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName   = auth.name   || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -7280,9 +7256,7 @@ async function saveIncomeInfoInline() {
   if (!incomeName && !juminRaw) { showToast("소득명의 또는 주민번호를 입력해주세요.", "warning"); return; }
   if (juminRaw && juminRaw.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -7392,9 +7366,7 @@ function cancelInlineSubForm() {
 /** 인라인 타계정 삭제 */
 async function deleteInlineSubAccount(idx) {
   if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -7484,9 +7456,7 @@ async function confirmSaveInlineSubAccount() {
   const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
   const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -9207,9 +9177,7 @@ async function submitOrderForm() {
       const saveIncomeName = firstOrder?.incomeName || "";
       const saveJumin      = firstOrder?.residentNo  || "";
       if (saveIncomeName && saveJumin) {
-        const authRawInc = localStorage.getItem("rapp_reviewer_auth");
-        let authInc;
-        try { authInc = JSON.parse(authRawInc || "{}"); } catch(_) { authInc = {}; }
+        const authInc = _getReviewerSession() || {};
         const myPhone8Inc = authInc.phone8 || "";
         if (myPhone8Inc) {
           const incPayload = {
@@ -9233,9 +9201,7 @@ async function submitOrderForm() {
   //   이 호출이 닿는 시점엔 이미 등록돼 있어 사실상 덮어쓰기뿐이었다. 계좌 "변경"은 내정보 화면에서.
   if (successCount > 0 && (firstBank || firstAccount || firstDepositor)) {
     try {
-      const authRawBank = localStorage.getItem("rapp_reviewer_auth");
-      let authBank;
-      try { authBank = JSON.parse(authRawBank || "{}"); } catch(_) { authBank = {}; }
+      const authBank = _getReviewerSession() || {};
       const myPhone8Bank = authBank.phone8 || "";
       if (myPhone8Bank) {
         gasPost({

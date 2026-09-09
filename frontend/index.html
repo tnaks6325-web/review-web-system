@@ -1244,8 +1244,13 @@ function syncSearchSession(user) {
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
   // 관리자 바로가기 탭은 다른 탭의 검색/리뷰어 로그인까지 바꾸지 않는다.
-  const store = user && user.adminPreview ? sessionStorage : localStorage;
-  store.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
+  if (user && user.adminPreview) {
+    sessionStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
+  } else {
+    // 같은 탭의 만료된 관리자 홈 세션이 새 일반 로그인을 가리지 않게 한다.
+    sessionStorage.removeItem(REVIEWER_AUTH_KEY);
+    localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
+  }
 }
 
 async function doLogin() {

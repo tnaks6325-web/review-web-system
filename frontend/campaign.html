@@ -341,20 +341,15 @@ function showPre(){ if(_camp) renderPre(); else show('vPre'); } // renderPre가 
 
 /* ═══ 세션 (index.html·search-app.js와 동일 키·포맷) ═══ */
 function getSession(){
-  try{
-    const raw = localStorage.getItem('rapp_reviewer_auth');
-    if(!raw) return null;
-    const s = JSON.parse(raw);
-    if(!s || Date.now() > (s.expAt||0)) return null;
-    if(!s.phone8 || String(s.phone8).length !== 8) return null;
-    // 구버전 phone8 전용 세션은 소유자 UUID가 결속되지 않았다. 한 번만 다시 로그인해 서명 세션으로 승격한다.
-    if(!s.reviewerToken) return null;
-    return s;
-  }catch(_){ return null; }
+  const s = _getReviewerSession();
+  if(!s || !s.phone8 || String(s.phone8).length !== 8) return null;
+  return s;
 }
 function saveSession(name, phone8, reviewerToken){
   const session = { name, verified:true, registeredMember:true,
     phone8:String(phone8).replace(/\D/g,'').slice(-8), reviewerToken:reviewerToken||'', expAt: Date.now()+12*60*60*1000 };
+  // 같은 탭의 만료된 관리자 홈 세션이 새 일반 로그인을 가리지 않게 한다.
+  try{ sessionStorage.removeItem('rapp_reviewer_auth'); }catch(_){}
   localStorage.setItem('rapp_reviewer_auth', JSON.stringify(session));
   try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8, reviewerToken:session.reviewerToken})); }catch(_){}
   return session;
