@@ -122,54 +122,17 @@ test('search compares lowercase on both sides and reports an empty result', () =
   assert.equal(out.textContent, '2개 업체');
 });
 
-test('every company row carries a viewer-link copy button that does not open the company', () => {
-  assert.match(source, /class="ovm-lkcopy"[\s\S]{0,200}onclick="event\.stopPropagation\(\);_ovmCopyAdvLink\(\$\{i\},this\)"/);
+test('company rows show only link status; the expanded company has the single link manager', () => {
+  assert.doesNotMatch(source, /ovm-lkcopy|_ovmCopyAdvLink/);
   // 게이트 = 서버 라우트(internalMiddleware) 와 1:1 — AE 포함(2026-08-19 사용자 확정).
-  assert.match(source, /class="ovm-lkcell">\$\{_isInternalRole\(\)\?\(lkb\+lkcopy\)/);
-  assert.match(source, /const lkcopy = _isInternalRole\(\)/);
+  assert.match(source, /class="ovm-lkcell">\$\{_isInternalRole\(\)\?lkb/);
   // 업체 패널의 접속 링크 섹션도 같은 게이트여야 한다(복사 버튼이 안내하는 [다시 활성]에 갈 곳이 있어야 한다).
   assert.match(source, /function _advLinkHtml\(a\)\{[\s\S]{0,300}?if\(!_isInternalRole\(\)\) return '';/);
+  assert.match(source, /광고주 접속 링크/);
   // 헤더 칸 수 ≡ 행 칸 수 (열을 끼워 넣을 때 가장 흔히 깨지는 자리)
   const head = source.match(/<div class="ovm-ovt h">([\s\S]*?)<\/div>/);
   assert.ok(head, 'overview header should be extractable');
   assert.equal((head[1].match(/<span>/g) || []).length, 8);
-});
-
-test('copy button fetches the token on demand and refuses to hand out a revoked link', async () => {
-  const parts = ['_ovmClipWrite', '_ovmCopyAdvLink', '_advLinkUrl'].map(name => {
-    const re = name === '_ovmCopyAdvLink'
-      ? /async function _ovmCopyAdvLink\(i, btn\)\{[\s\S]*?\n\}/
-      : (name === '_ovmClipWrite' ? /function _ovmClipWrite\(text\)\{[\s\S]*?\n\}/ : /function _advLinkUrl\(token\)\{[^\n]*\}/);
-    const m = source.match(re);
-    assert.ok(m, name + ' should be extractable');
-    return m[0];
-  });
-  const toasts = []; let calls = [];
-  const sandbox = {
-    STATE: { role: 'admin', advs: [{ id: 'a1', name: '어니스트캄' }] },
-    toast: t => toasts.push(t),
-    location: { origin: 'https://x.test' },
-    navigator: { clipboard: { writeText: async () => {} } },
-    document: { createElement: () => ({ style: {}, setAttribute() {}, select() {}, remove() {} }), body: { appendChild() {} } },
-    api: async (url, opt) => { calls.push([url, JSON.parse(opt.body)]); return { ok: true, link: { token: 'T1', active: true } }; },
-  };
-  vm.createContext(sandbox);
-  vm.runInContext(parts.join('\n'), sandbox);
-
-  const btn = { disabled: false, textContent: '🔗 링크복사' };
-  await sandbox._ovmCopyAdvLink(0, btn);
-  assert.deepEqual(calls[0], ['/api/trackb/advertiser-link', { action: 'ensure', advertiserId: 'a1' }]);
-  assert.match(toasts.pop(), /복사됨/);
-  assert.equal(btn.disabled, false);   // 실패·성공 어느 쪽이든 버튼은 되살아난다
-
-  sandbox.api = async () => ({ ok: true, link: { token: 'T1', active: false } });
-  await sandbox._ovmCopyAdvLink(0, btn);
-  assert.match(toasts.pop(), /폐기 상태/);   // ★ 죽은 링크는 복사하지 않는다
-
-  sandbox.api = async () => { throw new Error('net'); };
-  await sandbox._ovmCopyAdvLink(0, btn);
-  assert.match(toasts.pop(), /불러오지 못했습니다/);
-  assert.equal(btn.disabled, false);
 });
 
 async function run() {

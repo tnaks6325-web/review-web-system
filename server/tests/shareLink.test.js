@@ -200,7 +200,9 @@ ok('★ Esc 리스너는 최상위 1회만', /_shlKeyBound/.test(workdesk));
 ok('작업보드 상단에 [🔗 링크 복사] — 광고주 제외',
   /const shareBtn=STATE\.role==='advertiser'\?''/.test(workdesk) && /onclick="copyBoardLink\(\)"/.test(workdesk));
 ok('헤더에 실제로 그려진다', /\$\{shareBtn\}/.test(workdesk));
-ok('업체관리 패널에 [🔗 업체 링크 복사]', /onclick="copyAdvertiserLink\(\)"/.test(workdesk));
+ok('업체관리에는 내부 공유 URL이 아닌 광고주 접속 링크 관리만 남긴다',
+  /onclick="_ovmOpenDrawer\('link'\)"[^\n]*광고주 접속 링크/.test(workdesk)
+  && !/onclick="copyAdvertiserLink\(\)"/.test(workdesk));
 ok('홈 작업목록 줄마다 [🔗 링크] — 인덱스만 넘긴다',
   /onclick="event\.stopPropagation\(\);copyTaskLinkFromHome\(\$\{i\}\)"/.test(workdesk));
 ok('★ 줄 클릭(작업 열기)과 겹치지 않게 stopPropagation',
