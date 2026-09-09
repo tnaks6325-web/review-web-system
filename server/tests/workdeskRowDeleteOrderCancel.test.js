@@ -11,7 +11,9 @@ const cancelPath = require.resolve('../src/services/orderCancellation.service');
 const ORDER_ID = '11111111-2222-3333-4444-555555555555';
 
 function makeStubPool({ liveOrder = true, sheetless = true, plans = [{ date: '2026-08-25', planned_count: 5 }],
-  campaigns = [{ campaign_id: 'camp-1', is_open: true, is_linked: true }] } = {}) {
+  campaigns = [{ campaign_id: 'camp-1', is_open: true, is_linked: true }],
+  tabRows = [{ seq: 7, tab_gid: '99', row_json: { '구매일자': '8/19 (수)' } },
+    { seq: 8, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } }] } = {}) {
   const log = [];
   const answer = (sql, params) => {
     log.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
@@ -25,7 +27,7 @@ function makeStubPool({ liveOrder = true, sheetless = true, plans = [{ date: '20
     if (q.includes('COALESCE(sheetless,FALSE) AS sheetless')) return { rows: [{ sheetless }] };
     if (q.includes('SELECT rc.id AS campaign_id')) return { rows: campaigns };
     if (q.includes('SELECT seq, tab_gid, row_json')) {
-      return { rows: [{ seq: 7, tab_gid: '99', row_json: { '구매일자': '8/19 (수)' } }, { seq: 8, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } }] };
+      return { rows: tabRows };
     }
     if (q.includes('FROM campaign_daily_plans') && q.includes('LIMIT 1')) return { rows: plans };
     if (q.includes('FROM campaign_daily_plans') && q.includes('plan_date=$2::date')) return { rows: [{ date: '2026-08-19', planned_count: 3 }] };
@@ -67,7 +69,8 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     const sqls = log.map(l => l.sql);
     assert.ok(sqls.some(s => s.includes('INSERT INTO campaign_participants')), '보충 슬롯을 만들어야 합니다');
     assert.ok(sqls.some(s => s.includes('planned_count=planned_count+1')), '마지막 진행일 계획을 1건 늘려야 합니다');
-    assert.ok(!sqls.some(s => s.includes('recruit_total')), '총 모집수 자체를 건드리면 안 됩니다');
+    assert.ok(!sqls.some(s => /^(UPDATE|INSERT)/.test(s) && s.includes('recruit_total')),
+      '총 모집수는 기준으로 읽기만 하고 값 자체를 건드리면 안 됩니다');
   }
 
   // ② 본문이 실패하면 주문 취소도 함께 롤백된다(한쪽만 반영 금지)
@@ -258,6 +261,55 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     //   자리표시자로 넘기지 않는다 — params 순서는 [sheetId, tabGid, tabName, start_date, row_json, by].
     assert.ok(ins && ins.params[3] === '8/25 (월)', '보충 슬롯의 구매일자가 그 값이어야 합니다');
     assert.ok(!log.some(l => /campaign_plan_events/.test(l.sql)), '공고가 없으면 공고 이력도 남기지 않는다');
+  }
+
+  // ⑬ 200건 작업이 이미 201줄인 상태에서 1줄을 삭제하면 200줄이므로 빈 201번을 다시 만들지 않는다.
+  {
+    const { pool, log } = makeStubPool({
+      liveOrder: false,
+      campaigns: [{ campaign_id: 'camp-over', is_open: true, is_linked: false,
+        recruitTotal: 2, workOrderRecruitTotal: 2 }],
+      tabRows: [
+        { seq: 7, tab_gid: '99', row_json: { '구매일자': '8/19 (수)' } },
+        { seq: 8, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } },
+        { seq: 9, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } },
+      ],
+    });
+    svc.__setPoolForTest(pool);
+    svc.__setLedgerRebuildForTest(async () => {});
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    assert.strictEqual(out.ok, true, `초과 상태의 삭제도 성공해야 합니다: ${JSON.stringify(out)}`);
+    assert.strictEqual(out.boardTarget, 2, '공고/작업오더의 총 모집수를 기준으로 써야 합니다');
+    assert.strictEqual(out.replenished, 0, '삭제 후 이미 목표 수이면 빈 줄을 다시 만들지 않아야 합니다');
+    assert.ok(!log.some(l => /INSERT INTO campaign_participants/.test(l.sql)), '초과분 삭제 후 보충 줄 추가 금지');
+    assert.ok(!log.some(l => /campaign_daily_plans/.test(l.sql) && /^(UPDATE|INSERT)/.test(l.sql)),
+      '보충하지 않으면 날짜별 계획도 옮기지 않아야 합니다');
+  }
+
+  // ⑭ 여러 공고가 한 작업표를 공유하면 개별 공고 목표와 표 전체 줄 수를 비교하지 않는다.
+  {
+    const { pool, log } = makeStubPool({
+      liveOrder: false,
+      campaigns: [
+        { campaign_id: 'camp-linked', is_open: true, is_linked: true,
+          recruitTotal: 2, workOrderRecruitTotal: 2 },
+        { campaign_id: 'camp-shared', is_open: true, is_linked: false,
+          recruitTotal: 2, workOrderRecruitTotal: 2 },
+      ],
+      tabRows: [
+        { seq: 7, tab_gid: '99', row_json: { '구매일자': '8/19 (수)' } },
+        { seq: 8, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } },
+        { seq: 9, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } },
+        { seq: 10, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } },
+      ],
+    });
+    svc.__setPoolForTest(pool);
+    svc.__setLedgerRebuildForTest(async () => {});
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    assert.strictEqual(out.ok, true, `공유 작업표 삭제도 성공해야 합니다: ${JSON.stringify(out)}`);
+    assert.strictEqual(out.boardTarget, null, '공유 작업표에 개별 공고 목표를 전체 상한으로 쓰면 안 됩니다');
+    assert.strictEqual(out.replenished, 1, '공유 작업표는 개별 공고 수로 보충을 억제하면 안 됩니다');
+    assert.ok(log.some(l => /INSERT INTO campaign_participants/.test(l.sql)), '공유 작업표의 빈 자리를 보충해야 합니다');
   }
 
   svc.__setPoolForTest(null);

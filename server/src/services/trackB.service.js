@@ -4059,6 +4059,16 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     const { rows: scopeRows } = await client.query(
       `SELECT rc.id AS campaign_id,
               (rc.status IN ('draft','active')) AS is_open,
+              rc.recruit_total AS "recruitTotal",
+              (
+                SELECT w.recruit_count
+                  FROM work_orders w
+                 WHERE w.deleted_at IS NULL
+                   AND (NULLIF(w.linked_campaign_id, '') = rc.id
+                     OR NULLIF(rc.source_work_order_id, '') = w.id)
+                 ORDER BY (NULLIF(w.linked_campaign_id, '') = rc.id) DESC, w.updated_at DESC
+                 LIMIT 1
+              ) AS "workOrderRecruitTotal",
               EXISTS (
                 SELECT 1 FROM campaign_applications ca
                  WHERE ca.campaign_id=rc.id AND ca.order_submission_id=$3::uuid
@@ -4073,8 +4083,18 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     const linked = scopeRows.filter(r => r.is_linked);
     const open = scopeRows.filter(r => r.is_open);
     const tier = linked.length ? linked : (open.length ? open : scopeRows);
-    const campaignId = tier.length === 1 ? tier[0].campaign_id : null;
+    const selectedCampaign = tier.length === 1 ? tier[0] : null;
+    const campaignId = selectedCampaign ? selectedCampaign.campaign_id : null;
     const campaignScope = tier.length === 1 ? 'linked' : (scopeRows.length ? 'ambiguous' : 'none');
+    // 공고와 작업오더가 함께 쓰는 총 모집수 판정을 그대로 사용한다. 삭제 전 이미 초과한 표라면
+    // 삭제 뒤 목표 수에 도달하는 순간에는 빈 자리를 다시 만들지 않는다.
+    // 한 표를 여러 공고가 공유하면 개별 공고의 목표 수와 표 전체 줄 수를 비교할 수 없다.
+    // 그 경우에는 종전처럼 보충하고, 단일 공고로 확정되는 표에만 상한을 적용한다.
+    const sharedWorktable = scopeRows.length > 1;
+    const boardTarget = selectedCampaign && !sharedWorktable
+      ? require('./linkedRecruitQuota.service')
+        .displayRecruitTotal(selectedCampaign.recruitTotal, selectedCampaign.workOrderRecruitTotal).total
+      : 0;
 
     const { rows: tabRows } = await client.query(
       `SELECT seq, tab_gid, row_json
@@ -4167,7 +4187,12 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
         [row.order_submission_id]);
     }
 
-    // ★ 보충 슬롯은 무조건 만든다 — 이것이 "총 모집인원은 줄지 않는다"의 실체다.
+    // 평상시에는 지운 자리를 보충해 총 모집인원을 유지한다. 다만 외부모집 수동제출 등으로
+    // 이미 목표보다 많은 줄이 있는 경우, 삭제 뒤에도 목표 수 이상이면 보충하지 않는다.
+    // 예: 200건 작업에 201줄이 있을 때 1줄 삭제 → 200줄이므로 새 201번을 만들면 안 된다.
+    const removedWasActive = tabRows.some(r => Number(r.seq) === Number(row.seq));
+    const boardAfterDelete = Math.max(0, tabRows.length - (removedWasActive ? 1 : 0));
+    const shouldReplenish = !(boardTarget > 0 && boardAfterDelete >= boardTarget);
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     if (dateHeader) blank[dateHeader] = finalDateLabel;
@@ -4182,21 +4207,23 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     //   동시경합) 조용히 넘어가지 않고 명시적으로 실패시켜 트랜잭션을 롤백한다 — 보충 없이 삭제만
     //   반영되는 상태(총 모집인원 축소)를 만들지 않는다.
     let replacement = null;
-    for (let attempt = 0; attempt < 5 && !replacement; attempt++) {
-      const tryInsert = await client.query(
-        `INSERT INTO campaign_participants
-           (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
-         SELECT $1, $2, $3,
-                COALESCE(MAX(seq) FILTER (WHERE seq < ${participants.MANUAL_SEQ_BASE}), 0) + 1,
-                $4, $5::jsonb, 'worktable', $6, NOW()
-           FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
-         ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
-         RETURNING id, seq`,
-        [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName,
-          finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
-      if (tryInsert.rows.length) replacement = tryInsert;
+    if (shouldReplenish) {
+      for (let attempt = 0; attempt < 5 && !replacement; attempt++) {
+        const tryInsert = await client.query(
+          `INSERT INTO campaign_participants
+             (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
+           SELECT $1, $2, $3,
+                  COALESCE(MAX(seq) FILTER (WHERE seq < ${participants.MANUAL_SEQ_BASE}), 0) + 1,
+                  $4, $5::jsonb, 'worktable', $6, NOW()
+             FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
+           ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
+           RETURNING id, seq`,
+          [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName,
+            finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
+        if (tryInsert.rows.length) replacement = tryInsert;
+      }
+      if (!replacement) throw new HideRowError('replacement_slot_failed');
     }
-    if (!replacement) throw new HideRowError('replacement_slot_failed');
 
     // ★★ 표시 번호를 그 자리에서 다시 매긴다 (2026-08-23 신고: "1번 행을 지웠는데 2번이 시작번호").
     //   위 주석대로 seq 는 그대로 두고 화면 `#` 만 순번으로 계산하는데, **row_json 의 `번호` 칸**은
@@ -4210,7 +4237,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     // 삭제된 날 -1 / 마지막 진행일 +1 = 날짜별 배치만 이동한다. 총 계획량은 바뀌지 않는다.
     // 공고를 못 고른 경우(none/ambiguous)와 날짜를 못 읽은 경우엔 계획을 건드리지 않는다.
     let planMoved = false;
-    if (campaignId && finalPlan && removedDate && removedDate !== finalPlan.date) {
+    if (shouldReplenish && campaignId && finalPlan && removedDate && removedDate !== finalPlan.date) {
       const dateCount = new Map();
       parsedDates.forEach(d => { if (d) dateCount.set(d, (dateCount.get(d) || 0) + 1); });
       const { rows: sourcePlans } = await client.query(
@@ -4239,25 +4266,27 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
         `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail)
          VALUES ($1,$2,'participant_delete_replenish',$3::jsonb)`,
         [campaignId, String(by).slice(0, 100),
-          JSON.stringify({ removedSeq: row.seq, removedDate, finalDate: finalPlan && finalPlan.date, added: 1, planMoved })]);
+          JSON.stringify({ removedSeq: row.seq, removedDate, finalDate: finalPlan && finalPlan.date,
+            added: shouldReplenish ? 1 : 0, boardTarget: boardTarget || null, planMoved })]);
     }
     return {
       removed: removed.rowCount,
       participationLinksRemoved: links.rowCount,
       applicationsCancelled: applications.rowCount,
-      replenished: 1,
+      replenished: shouldReplenish ? 1 : 0,
+      boardTarget: boardTarget || null,
       campaignScope,
       planMoved,
       finalPlanDate: finalPlan ? finalPlan.date : null,
-      replacementDate: finalDateLabel || null,
-      replacementSeq: replacement.rows[0] && replacement.rows[0].seq,
+      replacementDate: shouldReplenish ? (finalDateLabel || null) : null,
+      replacementSeq: replacement && replacement.rows[0] && replacement.rows[0].seq,
       renumbered: (renumbered && renumbered.changed) || 0,
     };
 }
 
 // 작업보드 행 삭제. 이 행이 "실제 리뷰어의 구매기록"이면 그 구매양식까지 함께 취소한다.
-// ★ 총 모집인원은 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로 보충되어
-//   다시 모집할 수 있는 상태로 남는다(그 보충은 본문이 같은 트랜잭션에서 한다).
+// ★ 목표 수 이내에서는 총 모집인원을 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로
+//   보충한다. 이미 목표를 초과한 표는 삭제 뒤 목표 수 이상이면 보충하지 않아 초과분을 되살리지 않는다.
 // ★ 주문 취소와 행 제거는 반드시 한 트랜잭션 — 한쪽만 반영되면 원장과 작업표가 갈린다.
 async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null } = {}) {
   const db = getPool();
