@@ -17,14 +17,16 @@ process.env.DATABASE_URL = URL;   // ★ pool 은 require 시점에 읽는다(�
 
 const { Pool } = require('pg');
 let pass = 0, fail = 0;
+let testPool = null;
 const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' + name); }
   catch (e) { fail++; console.log('  ✗ ' + name + ' — ' + (e && e.message)); } };
 
 const DDL = `
-DROP TABLE IF EXISTS order_submissions, campaign_applications, reviewer_event_logs, review_submissions, review_inspections,
+DROP TABLE IF EXISTS order_submissions, campaign_applications, campaign_participants, reviewer_event_logs, review_submissions, review_inspections, review_index,
   participant_edits, campaign_plan_events, recruit_campaigns, payment_batch_items, trackb_tab_finished CASCADE;
 CREATE TABLE order_submissions (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT, sheet_row INT,
   recipient TEXT, orderer TEXT, price TEXT, source TEXT, campaign_application_id BIGINT,
+  workboard_id UUID,
   campaign_was_late BOOLEAN NOT NULL DEFAULT FALSE,
   submitted_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, canceled_by TEXT);
 CREATE TABLE campaign_applications (id BIGSERIAL, campaign_id TEXT, applicant_name TEXT,
@@ -34,7 +36,10 @@ CREATE TABLE campaign_applications (id BIGSERIAL, campaign_id TEXT, applicant_na
   dismissed_at TIMESTAMPTZ, dismissed_by TEXT, blog_url TEXT, reject_reason TEXT,
   decided_at TIMESTAMPTZ, decided_by TEXT, is_popular_snapshot BOOLEAN);
 CREATE TABLE reviewer_event_logs (id BIGSERIAL, occurred_at TIMESTAMPTZ, sheet_id TEXT, tab_name TEXT,
-  event_type TEXT, severity TEXT, message TEXT, reviewer_name TEXT, context JSONB);
+  event_type TEXT, severity TEXT, message TEXT, reviewer_name TEXT, context JSONB, order_submission_id UUID);
+CREATE TABLE campaign_participants (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT,
+  order_submission_id UUID, deleted_at TIMESTAMPTZ);
+CREATE TABLE review_index (sheet_id TEXT, tab_name TEXT, row_index INT, reviewer_name TEXT, recipient_name TEXT);
 CREATE TABLE review_submissions (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT,
   row_index INT, reviewer_name TEXT, uploaded_at TIMESTAMPTZ);
 CREATE TABLE review_inspections (id UUID DEFAULT gen_random_uuid(), sheet_id TEXT, tab_name TEXT, row_index INT,
@@ -56,7 +61,7 @@ CREATE TABLE trackb_tab_finished (id BIGSERIAL, sheet_id TEXT, tab_name TEXT, fi
 async function drain(m, opts) {
   const seen = new Set(); const all = []; let before = null; let guard = 0;
   for (;;) {
-    const r = await m.tabActivityLog(Object.assign({ sheetId: 's1', tabName: 't1' }, opts, { before }));
+    const r = await m.tabActivityLog(Object.assign({ sheetId: 's1', tabName: 't1', pool: testPool }, opts, { before }));
     assert.strictEqual(r.ok, true);
     let added = 0;
     r.items.forEach(x => { if (!seen.has(x.id)) { seen.add(x.id); all.push(x); added++; } });
@@ -69,6 +74,7 @@ async function drain(m, opts) {
 
 (async () => {
   const pool = new Pool({ connectionString: URL });
+  testPool = pool;
   await pool.query(DDL);
   const D = (s) => new Date(s);
   // ★ 함정 그 자체: 접수는 8/20, 취소는 8/22 — 행 단위 커서면 접수가 사라진다.
@@ -119,7 +125,7 @@ async function drain(m, opts) {
   console.log('\n[PG] 작업 로그 — 커서로 처음까지');
 
   await t('★★ 한 묶음(60건 기본)으로도 SQL 8종이 전부 실행된다(문법·캐스트)', async () => {
-    const r = await m.tabActivityLog({ sheetId: 's1', tabName: 't1', gid: '777' });
+    const r = await m.tabActivityLog({ sheetId: 's1', tabName: 't1', gid: '777', pool });
     assert.strictEqual(r.ok, true);
     assert.deepStrictEqual(r.failed, [], '실패한 소스: ' + r.failed.join(','));
     assert.ok(r.items.length > 0);
@@ -129,7 +135,7 @@ async function drain(m, opts) {
   await t('★★ 잘게 끊어 받아도 총 건수가 한 번에 받은 것과 같다(과거 유실 0)', async () => {
     const small = await drain(m, { gid: '777', limit: 10 });
     assert.strictEqual(small.length, EXPECT, '끊어 받기 ' + small.length + ' ≠ ' + EXPECT);
-    const big = await m.tabActivityLog({ sheetId: 's1', tabName: 't1', gid: '777', limit: 300 });
+    const big = await m.tabActivityLog({ sheetId: 's1', tabName: 't1', gid: '777', limit: 300, pool });
     assert.strictEqual(big.items.length, EXPECT, '한 번에 ' + big.items.length);
     assert.deepStrictEqual(small.map(x => x.id), big.items.map(x => x.id), '순서·구성이 같아야 한다');
   });
@@ -226,8 +232,34 @@ async function drain(m, opts) {
       VALUES ('c2','s1','다른탭',NULL)`);
     await pool.query(`INSERT INTO campaign_plan_events (campaign_id,actor,action,detail,created_at)
       VALUES ('c2','X','round_add','{}',$1)`, [D('2026-08-13T01:00:00Z')]);
-    const r = await m.tabActivityLog({ sheetId: 's1', tabName: 't1', gid: '', kind: 'quota', limit: 50 });
+    const r = await m.tabActivityLog({ sheetId: 's1', tabName: 't1', gid: '', kind: 'quota', limit: 50, pool });
     assert.strictEqual(r.items.length, 1, '연결 안 된 공고의 이력까지 딸려왔다(' + r.items.length + ')');
+  });
+
+  await t('★★★ 캠페인 원장 범위 주문·주문 귀속 시스템 이벤트를 실제 작업표 기준으로 되찾고, 다른 작업은 제외한다', async () => {
+    const WORKBOARD = '11111111-1111-4111-8111-111111111111';
+    const OTHER_WORKBOARD = '22222222-2222-4222-8222-222222222222';
+    const { rows: orders } = await pool.query(`INSERT INTO order_submissions
+      (sheet_id,tab_name,recipient,source,workboard_id,submitted_at)
+      VALUES ('campaign:c1','campaign:c1','참여자연결','order_submit',NULL,$1),
+             ('campaign:c2','campaign:c2','작업보드폴백','order_submit',$2,$3),
+             ('campaign:c3','campaign:c3','다른작업','order_submit',$4,$5)
+      RETURNING id, recipient`, [
+        D('2026-08-26T01:00:00Z'), WORKBOARD, D('2026-08-26T02:00:00Z'), OTHER_WORKBOARD, D('2026-08-26T03:00:00Z'),
+      ]);
+    const linked = orders.find(r => r.recipient === '참여자연결');
+    await pool.query(`INSERT INTO campaign_participants (sheet_id,tab_name,order_submission_id)
+      VALUES ('s1','t1',$1)`, [linked.id]);
+    await pool.query(`INSERT INTO reviewer_event_logs
+      (occurred_at,sheet_id,tab_name,event_type,severity,message,reviewer_name,context,order_submission_id)
+      VALUES ($1,'campaign:c1','campaign:c1','order_unmirrored','warn','연결 주문 시스템 이벤트','시스템','{}',$2)`,
+      [D('2026-08-26T01:05:00Z'), linked.id]);
+
+    const r = await m.tabActivityLog({ sheetId: 's1', tabName: 't1', gid: '777', workboardId: WORKBOARD, limit: 300, pool });
+    assert.ok(r.items.some(x => /참여자연결/.test(x.message)), '실제 참여자 UUID 연결 주문');
+    assert.ok(r.items.some(x => /작업보드폴백/.test(x.message)), '참여자 미러 전 작업보드 UUID 폴백');
+    assert.ok(r.items.some(x => x.kind === 'sys' && /연결 주문 시스템 이벤트/.test(x.message)), '주문 귀속 시스템 이벤트');
+    assert.ok(!r.items.some(x => /다른작업/.test(x.message)), '다른 작업보드 주문이 섞이면 안 된다');
   });
 
   await pool.end();

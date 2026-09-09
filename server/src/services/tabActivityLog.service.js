@@ -63,7 +63,7 @@ const SOURCES = [
   {
     key: 'orders',
     kinds: ['order', 'cancel'],
-    async run(db, { sheetId, tabName, limit, before, want }) {
+    async run(db, { sheetId, tabName, workboardId, limit, before, want }) {
       /* ★ 한 행이 접수·취소 두 항목을 내므로 **UNION ALL 로 항목 단위로 편다**(위 ① 규율). */
       const { rows } = await db.query(
         `SELECT x.id, x.sheet_row, x.orderer, x.recipient, x.price, x.canceled_by,
@@ -74,15 +74,36 @@ const SOURCES = [
            FROM (
             /* 먼저 최신 사건만 자른 뒤 신청표를 찾는다. 레거시 주문 전체 × 신청표 전체 조회를 막는다. */
             SELECT ev.* FROM (
-              SELECT id, sheet_row, orderer, recipient, campaign_application_id, campaign_was_late,
+              SELECT os.id, os.sheet_row, os.orderer, os.recipient, os.campaign_application_id, os.campaign_was_late,
                      price, canceled_by, source, 'order'::text AS ev, submitted_at AS at
-                FROM order_submissions
-               WHERE sheet_id=$1 AND tab_name=$2 AND submitted_at IS NOT NULL
+                FROM order_submissions os
+               WHERE (
+                      (os.sheet_id=$1 AND os.tab_name=$2)
+                      /* 캠페인 주문은 원장 범위를 campaign:<id>로 보존한다. 실제 작업표에
+                         기록된 불변 주문 UUID를 통해서만 해당 작업 로그에 합류시킨다. */
+                      OR EXISTS (
+                        SELECT 1 FROM campaign_participants cp
+                         WHERE cp.order_submission_id=os.id
+                           AND cp.sheet_id=$1 AND cp.tab_name=$2
+                      )
+                      /* 참여자 미러 전의 과거 주문/수동 행은 서버가 확정한 작업보드 ID로만 보완한다. */
+                      OR ($6::uuid IS NOT NULL AND os.workboard_id=$6::uuid)
+                    )
+                 AND os.submitted_at IS NOT NULL
               UNION ALL
-              SELECT id, sheet_row, orderer, recipient, campaign_application_id, campaign_was_late,
+              SELECT os.id, os.sheet_row, os.orderer, os.recipient, os.campaign_application_id, os.campaign_was_late,
                      price, canceled_by, source, 'cancel'::text AS ev, deleted_at AS at
-                FROM order_submissions
-               WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
+                FROM order_submissions os
+               WHERE (
+                      (os.sheet_id=$1 AND os.tab_name=$2)
+                      OR EXISTS (
+                        SELECT 1 FROM campaign_participants cp
+                         WHERE cp.order_submission_id=os.id
+                           AND cp.sheet_id=$1 AND cp.tab_name=$2
+                      )
+                      OR ($6::uuid IS NOT NULL AND os.workboard_id=$6::uuid)
+                    )
+                 AND os.deleted_at IS NOT NULL
             ) ev
             WHERE ($4::text = 'all' OR ev.ev = $4::text)
               AND ($5::timestamptz IS NULL OR ev.at <= $5::timestamptz)
@@ -101,7 +122,7 @@ const SOURCES = [
              LIMIT 1
           ) legacy_app ON TRUE
           ORDER BY x.at DESC
-          `, [sheetId, tabName, limit, want, before]);
+          `, [sheetId, tabName, limit, want, before, workboardId || null]);
       const items = rows.map(r => {
         const name = _reviewerLabel(r.orderer, r.recipient);
         if (r.ev === 'order') {
@@ -142,17 +163,30 @@ const SOURCES = [
   {
     key: 'reviewer_events',
     kinds: ['cancel', 'sys'],
-    async run(db, { sheetId, tabName, limit, before, want }) {
+    async run(db, { sheetId, tabName, workboardId, limit, before, want }) {
       /* ★ 유형 조건을 SQL 로 내린다(위 ② 규율) — JS 에서만 거르면 그 페이지가 통째로 빌 수 있다. */
       const { rows } = await db.query(
-        `SELECT id, occurred_at, event_type, severity, message, reviewer_name, context
-           FROM reviewer_event_logs
-          WHERE sheet_id=$1 AND tab_name=$2
+        `SELECT rel.id, rel.occurred_at, rel.event_type, rel.severity, rel.message, rel.reviewer_name, rel.context
+           FROM reviewer_event_logs rel
+           LEFT JOIN order_submissions os ON os.id=rel.order_submission_id
+          WHERE (
+                  (rel.sheet_id=$1 AND rel.tab_name=$2)
+                  /* 주문 귀속 시스템 이벤트도 주문과 같은 실제 작업표 기준으로 되찾는다. */
+                  OR (rel.order_submission_id IS NOT NULL AND (
+                    (os.sheet_id=$1 AND os.tab_name=$2)
+                    OR EXISTS (
+                      SELECT 1 FROM campaign_participants cp
+                       WHERE cp.order_submission_id=os.id
+                         AND cp.sheet_id=$1 AND cp.tab_name=$2
+                    )
+                    OR ($6::uuid IS NOT NULL AND os.workboard_id=$6::uuid)
+                  ))
+                )
             AND ($4::text = 'all'
-                 OR ($4::text = 'cancel' AND event_type = 'order_canceled_by_reviewer')
-                 OR ($4::text = 'sys'    AND event_type <> 'order_canceled_by_reviewer'))
-            AND ($5::timestamptz IS NULL OR occurred_at <= $5::timestamptz)
-          ORDER BY occurred_at DESC LIMIT $3`, [sheetId, tabName, limit, want, before]);
+                 OR ($4::text = 'cancel' AND rel.event_type = 'order_canceled_by_reviewer')
+                 OR ($4::text = 'sys'    AND rel.event_type <> 'order_canceled_by_reviewer'))
+            AND ($5::timestamptz IS NULL OR rel.occurred_at <= $5::timestamptz)
+          ORDER BY rel.occurred_at DESC LIMIT $3`, [sheetId, tabName, limit, want, before, workboardId || null]);
       const items = rows.map(r => ({
         id: `rel:${r.id}`,
         at: r.occurred_at,
@@ -348,7 +382,7 @@ function _parseBefore(v) {
  * @param {string} [before] 이 시각 **이하**(`<=`)의 기록만 — 화면이 아래로 내려갈 때 더 과거를 이어 받는다.
  * @returns {{ok:true, items:[], failed:[], kinds:[], hasMore:boolean, nextBefore:string|null, truncated:boolean}}
  */
-async function tabActivityLog({ sheetId, tabName, gid = '', kind = 'all', limit = 60, before = null, pool } = {}) {
+async function tabActivityLog({ sheetId, tabName, gid = '', workboardId = null, kind = 'all', limit = 60, before = null, pool } = {}) {
   const db = pool || require('../db/pool');
   if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName 필수' };
   const want = LOG_KIND_KEYS.includes(String(kind)) ? String(kind) : 'all';
@@ -361,7 +395,7 @@ async function tabActivityLog({ sheetId, tabName, gid = '', kind = 'all', limit 
   let anyHitLimit = false;
   const settled = await Promise.all(targets.map(async (s) => {
     try {
-      const out = await s.run(db, { sheetId, tabName, gid, limit: perSource, before: cursor, want });
+      const out = await s.run(db, { sheetId, tabName, gid, workboardId, limit: perSource, before: cursor, want });
       const list = (out && out.items) || [];
       if (out && out.hitLimit) anyHitLimit = true;
       return list;
