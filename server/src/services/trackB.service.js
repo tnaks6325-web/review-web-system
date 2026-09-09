@@ -1013,7 +1013,10 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
              FROM active_rows ar
          )
          SELECT MIN(cp.first_seen_at) AS first_seen,
-                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL)::int AS total,
+                /* 참여 = 현재 작업보드에서 구매양식이 실제로 기록된 줄만.
+                   미리 생성한 빈 슬롯까지 세면 작업표의 참여 수와 업체관리 숫자가 갈린다. */
+                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
+                  AND ${_filledSql('cp')})::int AS total,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
                   AND NULLIF(BTRIM(COALESCE(
                     CASE WHEN cp.anchor_type IS NOT NULL
