@@ -2521,10 +2521,37 @@ router.post('/worktable-number-order-repair', authMiddleware, adminOrMasterMiddl
     const by = (req.admin && req.admin.name) ||
       (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
     const { renumberTab } = require('../services/rowNumbering.service');
-    const run = () => renumberTab({ sheetId, tabName, dryRun, by, rebuild: !dryRun });
-    if (dryRun) return res.json(await run());
+    if (dryRun) return res.json(await renumberTab({ sheetId, tabName, dryRun: true, by }));
     const { withJobLock } = require('../utils/jobLock');
-    // 자동 번호 정리와 같은 잠금으로 묶어 동시에 같은 작업을 다시 매기지 않는다.
+    const run = async () => {
+      const client = await pool.connect();
+      let out;
+      try {
+        await client.query('BEGIN');
+        // 주문 기록이 빈자리를 고르기 전에 잡는 것과 정확히 같은 작업 단위 잠금이다.
+        // 새 제출과 정정이 겹치면 한쪽이 끝난 뒤 최신 상태를 읽어 번호를 다시 매긴다.
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`sheetless_worktable:${sheetId}:${tabName}`]);
+        out = await renumberTab({ sheetId, tabName, dryRun: false, by, client });
+        await client.query('COMMIT');
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+        throw err;
+      } finally {
+        client.release();
+      }
+      // 번호를 바꾼 뒤 검색·내역에서 옛 번호가 되돌아오지 않게 같은 자료를 다시 만든다.
+      if (out && out.ok && out.changed) {
+        try {
+          await require('../services/sheetlessLedger.service')
+            .rebuildLedgers({ sheetId, tabName, by: `renumber:${by}`.slice(0, 100) });
+        } catch (err) {
+          out.ledgerError = (err && (err.code || err.message)) || 'rebuild_failed';
+        }
+      }
+      return out;
+    };
+    // 자동 번호 정리와도 같은 잠금으로 묶어 같은 정정을 두 번 동시에 실행하지 않는다.
     const out = await withJobLock('worktable_renumber_sweep', run);
     if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 번호 정리가 진행 중입니다.' });
     res.json(out);

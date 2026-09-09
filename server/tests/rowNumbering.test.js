@@ -507,8 +507,12 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
       /authMiddleware, adminOrMasterMiddleware/.test(block));
     ok('운영 정정은 기본 미리보기이고 실제 실행만 잠금·장부 재생성을 사용한다',
       /const dryRun = b\.dryRun !== false/.test(block) &&
-      /rebuild: !dryRun/.test(block) &&
-      /withJobLock\('worktable_renumber_sweep'/.test(block));
+      /withJobLock\('worktable_renumber_sweep'/.test(block) &&
+      /rebuildLedgers/.test(block));
+    ok('★★ 운영 정정과 새 구매양식 제출이 같은 작업 단위 잠금을 공유한다',
+      /BEGIN/.test(block) && /COMMIT/.test(block) && /ROLLBACK/.test(block) &&
+      /sheetless_worktable:\$\{sheetId\}:\$\{tabName\}/.test(block) &&
+      /sheetless_worktable:\$\{sheetId\}:\$\{tabName\}/.test(read('src/services/sheetlessOrder.service.js')));
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
