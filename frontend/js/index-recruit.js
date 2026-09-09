@@ -1369,7 +1369,7 @@ window.rfSetChatRoom = rfSetChatRoom;
  * 회수·혼합 부속정보 채움(135) — 발행 프리필·수정 프리필 공용(사본 0).
  * ★ 값이 없으면 **비운다** — 이전에 열어 둔 공고의 값이 남으면 그대로 저장된다.
  */
-function _rfFillDeliveryDetail(mix, courier, product) {
+function _rfFillDeliveryDetail(mix, courier, product, reviewFeeMix) {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v === 0 || v) ? String(v) : ""; };
   let list = mix;
   if (typeof list === "string") { try { list = JSON.parse(list); } catch (_) { list = []; } }
@@ -1380,6 +1380,15 @@ function _rfFillDeliveryDetail(mix, courier, product) {
   };
   set("rf_delivery_real_count", pick("real"));
   set("rf_delivery_empty_count", pick("empty"));
+  let feeList = reviewFeeMix;
+  if (typeof feeList === "string") { try { feeList = JSON.parse(feeList); } catch (_) { feeList = []; } }
+  const pickFee = (kind) => {
+    if (!Array.isArray(feeList)) return "";
+    const hit = feeList.find(m => m && m.type === kind);
+    return hit && (hit.reviewFee ?? hit.review_fee ?? hit.fee);
+  };
+  set("rf_delivery_real_review_fee", pickFee("real"));
+  set("rf_delivery_empty_review_fee", pickFee("empty"));
   set("rf_recall_courier", courier || "");
   set("rf_recall_product", product || "");
   if (window.rfSyncDeliveryDetail) window.rfSyncDeliveryDetail();
@@ -1393,16 +1402,28 @@ function _rfFillDeliveryDetail(mix, courier, product) {
  */
 function _rfDeliveryDetailPayload() {
   const mixRow = document.getElementById("rf_delivery_mix_row");
+  const feeRow = document.getElementById("rf_delivery_fee_row");
   const recallRow = document.getElementById("rf_recall_row");
   if (!mixRow && !recallRow) return {};          // 부속 칸 없는 화면 = 미전송
   const base = String(document.getElementById("rf_delivery_type")?.value || "").trim();
   const num = (id) => Math.max(0, Number(document.getElementById(id)?.value) || 0);
   const str = (id) => String(document.getElementById(id)?.value || "").trim();
+  const realReviewFee = str("rf_delivery_real_review_fee");
+  const emptyReviewFee = str("rf_delivery_empty_review_fee");
+  // 둘 다 비어 있으면 기존 단일 리뷰비를 유지한다. 한 칸만 적으면 빈 값을 그대로
+  // 보내 서버의 혼합 2종 검증이 저장을 막는다(빈 칸을 0원으로 바꾸지 않는다).
+  const hasDeliveryReviewFee = realReviewFee !== "" || emptyReviewFee !== "";
   return {
     delivery_type_mix: base === "혼합"
       ? [{ type: "real", quantity: num("rf_delivery_real_count") },
          { type: "empty", quantity: num("rf_delivery_empty_count") }]
       : [],
+    ...(feeRow && hasDeliveryReviewFee ? {
+      delivery_review_fee_mix: base === "혼합"
+        ? [{ type: "real", reviewFee: realReviewFee },
+           { type: "empty", reviewFee: emptyReviewFee }]
+        : [],
+    } : {}),
     recall_courier: base === "회수" ? str("rf_recall_courier") : "",
     recall_product: base === "회수" ? str("rf_recall_product") : "",
   };
@@ -3211,7 +3232,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   document.getElementById("rf_delivery_type").value = "";
   // ★ 135: 회수·혼합 부속정보 초기화 — 남으면 다음 공고에 이전 값이 딸려간다.
-  ["rf_delivery_real_count","rf_delivery_empty_count","rf_recall_courier","rf_recall_product"]
+  ["rf_delivery_real_count","rf_delivery_empty_count","rf_recall_courier","rf_recall_product",
+   "rf_delivery_real_review_fee","rf_delivery_empty_review_fee"]
     .forEach(i => { const el = document.getElementById(i); if (el) el.value = ""; });
   if (window.rfSyncDeliveryDetail) window.rfSyncDeliveryDetail();
   document.getElementById("rf_status").value = "draft";
@@ -3347,7 +3369,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (window.RecruitModal?.syncStatusButtons) window.RecruitModal.syncStatusButtons();
       document.getElementById("rf_delivery_type").value = c.delivery_type || "";
       /* ★ 135: 부속정보 프리필. 조합은 [{type,quantity}] 배열(서버 정규화값) 그대로 온다. */
-      _rfFillDeliveryDetail(c.delivery_type_mix, c.recall_courier, c.recall_product);
+      _rfFillDeliveryDetail(c.delivery_type_mix, c.recall_courier, c.recall_product, c.delivery_review_fee_mix);
       const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = c.cash_receipt_required === true;
 
       /* 담당자 */
@@ -3560,7 +3582,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       }
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
       /* ★ 135: 작업오더의 회수·혼합 부속정보를 그대로 채운다(사람이 확인 후 저장). */
-      _rfFillDeliveryDetail(prefill.delivery_type_mix, prefill.recall_courier, prefill.recall_product);
+      _rfFillDeliveryDetail(prefill.delivery_type_mix, prefill.recall_courier, prefill.recall_product, prefill.delivery_review_fee_mix);
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
       const prefillInflowType = document.getElementById("rf_inflow_type_value");
       if (prefillInflowType) prefillInflowType.value = prefill.inflowType === "guide" ? "guide" : "link";
@@ -5751,6 +5773,7 @@ function _buildCardPreviewData() {
     channel: v("rf_channel"),
     channel_custom: v("rf_channel_custom"),
     delivery_type: v("rf_delivery_type"),
+    delivery_review_fee_mix: _rfDeliveryDetailPayload().delivery_review_fee_mix || [],
     cashReceiptRequired: !!document.getElementById("rf_cash_receipt_required")?.checked,
     // ★ 082: 구간을 켰으면 카드 미리보기도 **오늘 적용 금액**을 보여준다(서버 목록 응답과 같은 규칙)
     review_fee: _feePreviewToday(Number(v("rf_review_fee")) || 0),

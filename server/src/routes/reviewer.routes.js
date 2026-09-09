@@ -19,6 +19,7 @@ const { _getReviewerPhoneList, PAYMENT_COL_KEYWORDS } = require('../services/sea
 const adminNickname = require('../services/adminNickname.service');
 // ★ 082: 기간별 리뷰비 — 판정은 utils/campaignFee 가 단일 출처(화면마다 규칙을 만들면 합계가 갈라진다)
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
+const { resolveDeliveryReviewFee } = require('../utils/deliveryReviewFee');
 const { extractAmountNumber } = require('../utils/paymentAmount');
 const { normalizeStoredBanner, validateBannerInput, toPublicBanner } = require('../utils/reviewerHomeBanner');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
@@ -557,7 +558,7 @@ router.get('/review-earnings', async (req, res, next) => {
       const { rows: camps } = await pool.query(
         `SELECT DISTINCT ON (linked_sheet_id, linked_tab_name)
                 id, linked_sheet_id AS "sheetId", linked_tab_name AS "tabName",
-                COALESCE(review_fee, 0) AS "reviewFee", thumbnail_url AS "thumbnailUrl",
+                COALESCE(review_fee, 0) AS "reviewFee", delivery_review_fee_mix AS "deliveryReviewFeeMix", thumbnail_url AS "thumbnailUrl",
                 to_char(start_date,'YYYY-MM-DD') AS "campStartDate"
            FROM recruit_campaigns
           WHERE linked_sheet_id = ANY($1) AND linked_tab_name = ANY($2)
@@ -565,7 +566,7 @@ router.get('/review-earnings', async (req, res, next) => {
         [sheetIds, tabNames]
       );
       for (const c of camps) campMap[c.sheetId + '||' + c.tabName] = {
-        id: c.id, reviewFee: c.reviewFee || 0, thumbnailUrl: c.thumbnailUrl || '',
+        id: c.id, reviewFee: c.reviewFee || 0, deliveryReviewFeeMix: c.deliveryReviewFeeMix || [], thumbnailUrl: c.thumbnailUrl || '',
         campStartDate: c.campStartDate || null, schedules: [],
       };
       // ★ 082: 기간별 리뷰비 구간(1쿼리). 구간이 없는 공고는 종전대로 review_fee 하나만 쓴다.
@@ -594,7 +595,7 @@ router.get('/review-earnings', async (req, res, next) => {
     if (sheetIds.length) {
       const { rows: orders } = await pool.query(
         `SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.sheet_row AS "sheetRow", os.price,
-                os.review_fee_snapshot AS "feeSnapshot", os.submitted_at AS "orderedAt"
+                os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", os.submitted_at AS "orderedAt"
                 , cp.row_json AS "rowJson"
            FROM order_submissions os
            LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
@@ -608,7 +609,7 @@ router.get('/review-earnings', async (req, res, next) => {
         const price = Number.isFinite(n) && n > 0 ? n : extractAmountNumber(o.rowJson);
         if (price > 0) priceMap[key] = price;
         // ★ 082: 그 행의 참여 근거(스냅샷·구매일) — 리뷰비 판정에 쓴다.
-        orderFeeMap[key] = { snapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt) };
+        orderFeeMap[key] = { snapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot, orderDate: toKstDate(o.orderedAt) };
       }
     }
 
@@ -618,9 +619,9 @@ router.get('/review-earnings', async (req, res, next) => {
     const { rows: sheetlessOrders } = await pool.query(
       `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
-              os.review_fee_snapshot AS "feeSnapshot",
+              os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
-              COALESCE(rc.review_fee, 0) AS "reviewFee",
+              COALESCE(rc.review_fee, 0) AS "reviewFee", rc.delivery_review_fee_mix AS "deliveryReviewFeeMix",
               rc.thumbnail_url AS "thumbnailUrl",
               to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
          FROM order_submissions os
@@ -675,13 +676,17 @@ router.get('/review-earnings', async (req, res, next) => {
       //   금액을 올리는 순간 과거 참여자의 카드·누적 합계까지 바뀐다(2026-08 사고).
       //   순서: 참여시점 스냅샷 → 주문 제출일 → 시트 구매일자 → 오늘 → 기존 review_fee 폴백.
       const of = orderFeeMap[pk] || {};
-      const reviewFee = resolveReviewFee({
+      const scalarFee = resolveReviewFee({
         schedules: camp.schedules,
         fallback: camp.reviewFee || 0,
         snapshot: of.snapshot,
         orderDate: of.orderDate,
         sheetDate: sheetDateToIso(r.startDate, camp.campStartDate),
       }).fee;
+      const mix = of.deliveryReviewFeeMixSnapshot != null
+        ? of.deliveryReviewFeeMixSnapshot
+        : (of.snapshot != null ? null : camp.deliveryReviewFeeMix);
+      const reviewFee = resolveDeliveryReviewFee(mix, r.rowJson && r.rowJson['배송구분'], scalarFee).fee;
       items[pk] = {
         reviewFee,
         productPrice: price,
@@ -704,13 +709,17 @@ router.get('/review-earnings', async (req, res, next) => {
     for (const o of sheetlessOrders) {
       const parsed = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
       const price = Number.isFinite(parsed) && parsed > 0 ? parsed : extractAmountNumber(o.rowJson);
-      const reviewFee = resolveReviewFee({
+      const scalarFee = resolveReviewFee({
         schedules: [],
         fallback: o.reviewFee || 0,
         snapshot: o.feeSnapshot,
         orderDate: toKstDate(o.orderedAt),
         sheetDate: o.campStartDate || null,
       }).fee;
+      const mix = o.deliveryReviewFeeMixSnapshot != null
+        ? o.deliveryReviewFeeMixSnapshot
+        : (o.feeSnapshot != null ? null : o.deliveryReviewFeeMix);
+      const reviewFee = resolveDeliveryReviewFee(mix, o.rowJson && o.rowJson['배송구분'], scalarFee).fee;
       items[`order||${o.id}`] = {
         reviewFee,
         productPrice: price > 0 ? price : null,

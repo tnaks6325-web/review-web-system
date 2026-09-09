@@ -111,6 +111,7 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
               OR (ca.expires_at IS NOT NULL
                   AND ca.expires_at <= NOW() - make_interval(secs => $6)),
             review_fee_snapshot = COALESCE(os.review_fee_snapshot, ca.review_fee_snapshot),
+            delivery_review_fee_mix_snapshot = COALESCE(os.delivery_review_fee_mix_snapshot, ca.delivery_review_fee_mix_snapshot),
             -- ★ 101: 블로그 주소도 같은 자리에서 전파(시트/작업표 '블로그URL' 칸의 출처).
             --   COALESCE = **이미 있는 값은 안 덮는다** — 관리자가 사전등록해 둔 주소가 있으면 그것이 이긴다.
             blog_url = COALESCE(NULLIF(os.blog_url, ''), ca.blog_url)

@@ -30,6 +30,7 @@ const { normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix, validateReviewTypeMix, validateOptionReviewTypeMix } = require('../utils/reviewTypeMix');
 const { normalizeDeliveryTypeMix, validateDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { deliveryBaseType } = require('../utils/deliveryType');
+const { normalizeDeliveryReviewFeeMix, validateDeliveryReviewFeeMix, DELIVERY_MIX_KEYS } = require('../utils/deliveryReviewFee');
 const { normalizeRecruitBadges } = require('../utils/recruitBadges');
 // ★ 099: 체험단 종류(리뷰/블로그) 저장 정규화 — 판정 단일 출처. 사본을 만들지 않는다.
 const { workKindForStore, resolveWorkKind, isBlogKind } = require('../utils/workKind');
@@ -652,7 +653,7 @@ const PUBLIC_FIELDS_LEGACY = [
 ];
 const PUBLIC_FIELDS_PARTICIPATION = [
   'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
-  'delivery_type', 'review_fee', 'badges', 'status', 'sort_order',
+  'delivery_type', 'review_fee', 'delivery_review_fee_mix', 'badges', 'status', 'sort_order',
   'thumbnail_url', 'created_at',
   'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
   'multi_account_mode', 'sub_hold_ttl_min', // ★ 063: 카드 "타계정 가능" 배지(§09-4)+타계정 10분 안내. multi_daily_limit는 비공개(409 사유로만 전달)
@@ -1091,7 +1092,7 @@ router.get('/list', async (req, res, next) => {
     if (!rows || now.getTime() - _listCache.at > LIST_CACHE_MS) {
       const q = await pool.query(`
         SELECT id, title, channel, channel_custom, manager, time_range,
-               delivery_type, review_fee, badges, notes, chat_url,
+               delivery_type, review_fee, delivery_review_fee_mix, badges, notes, chat_url,
                status, sort_order, max_slots, current_slots, deadline,
                description, linked_sheet_id, linked_tab_name, linked_tab_gid, created_at,
                participation_mode, thumbnail_url, daily_limit, recruit_total,
@@ -2089,6 +2090,14 @@ async function _applyParticipation(req, res, next, campPre) {
     //      (구간 테이블이 아직 없는 배포 창 등) → 스냅샷 조회 실패가 참여 INSERT 를 통째로
     //      죽이는 것을 격리한다. 주문원장의 홀드확정 SAVEPOINT 와 같은 규율.
     let feeSnapshot = null;
+    // 구간표는 단일 숫자지만 혼합 배송은 행별로 금액이 다르다. 신청 시점의 유형별
+    // 설정 자체를 함께 보관해 이후 공고를 수정해도 이미 신청한 건의 금액이 변하지 않게 한다.
+    const deliveryFeeSnapshotState = normalizeDeliveryReviewFeeMix(camp.delivery_review_fee_mix);
+    const deliveryFeeMixSnapshot = !deliveryFeeSnapshotState.error
+      && Array.isArray(deliveryFeeSnapshotState.mix)
+      && deliveryFeeSnapshotState.mix.length === DELIVERY_MIX_KEYS.size
+      ? JSON.stringify(deliveryFeeSnapshotState.mix)
+      : null;
     try {
       await client.query('SAVEPOINT fee_snap');
       const sched = await _loadFeeSchedules(client, id);
@@ -2112,6 +2121,14 @@ async function _applyParticipation(req, res, next, campPre) {
        VALUES ($1,$2,$3,$4,$5,$12,$6,$7,$8,$9,$10,$11)
        RETURNING id, status, expires_at, option_key`,
       [id, insName, insPhone, holdP8, p8, insExpires, holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true, insStatus]);
+    if (deliveryFeeMixSnapshot) {
+      await client.query(
+        `UPDATE campaign_applications
+            SET delivery_review_fee_mix_snapshot = $2::jsonb
+          WHERE id = $1`,
+        [ins.rows[0].id, deliveryFeeMixSnapshot]
+      );
+    }
     if (codeIdentity) {
       await client.query(
         `UPDATE campaign_applications
@@ -2582,7 +2599,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       // ★ 135: 회수·혼합 부속정보. 배송유형이 그 기본형일 때만 저장하고, 아니면 비운다
       //   (작업오더 접수의 _deliveryMixJson·_recallFields 와 같은 규율 — 유형을 바꾸면
       //    옛 조합이 남아 작업표가 유령 배분을 돈다).
-      delivery_type_mix, recall_courier, recall_product,
+      delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product,
     } = req.body;
 
     const requestedSkipWeekends = req.body.skip_weekends === true;
@@ -2606,6 +2623,14 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     // ★ 기본형이 아니면 비운다 — "혼합으로 저장했다가 실배송으로 바꾼" 공고에 옛 조합이 남으면
     //   작업표 열 보장이 있지도 않은 배분을 돌린다(order.routes 와 같은 규율).
     const storeDeliveryMix = deliveryBase === '혼합' ? (deliveryMixState.mix || []) : [];
+    const deliveryFeeMixState = normalizeDeliveryReviewFeeMix(delivery_review_fee_mix);
+    // 구 화면/기존 API는 단일 review_fee만 보낸다. 새 혼합 설정을 보냈을 때만 두 값을
+    // 완성형으로 요구해, 배포 직후 기존 공고 생성·수정 경로를 막지 않는다.
+    const deliveryFeeMixError = validateDeliveryReviewFeeMix(deliveryBase, deliveryFeeMixState, {
+      requireWhenMixed: delivery_review_fee_mix !== undefined,
+    });
+    if (deliveryFeeMixError) return res.status(400).json({ ok: false, error: deliveryFeeMixError });
+    const storeDeliveryReviewFeeMix = deliveryBase === '혼합' ? (deliveryFeeMixState.mix || []) : [];
     const storeRecallCourier = deliveryBase === '회수' ? String(recall_courier || '').trim() : '';
     const storeRecallProduct = deliveryBase === '회수' ? String(recall_product || '').trim() : '';
     const normOpts = _normalizeOptionsInput(options);
@@ -2674,10 +2699,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
         start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
         transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, carry_strategy, work_kind, skip_weekends, cash_receipt_required,
-        delivery_type_mix, recall_courier, recall_product, repurchase_days)
+        delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product, repurchase_days)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
                $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
-               $45,$46,$47,$48,$49)
+               $45,$46,$47,$48,$49,$50)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -2727,6 +2752,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         effectiveSkipWeekends,
         cash_receipt_required === true,
         JSON.stringify(storeDeliveryMix),                       // ★ 135: 혼합이 아니면 [] (유형 전환 시 옛 조합 잔류 차단)
+        JSON.stringify(storeDeliveryReviewFeeMix),              // ★ 152: 실배송·빈박스별 리뷰비(수량은 delivery_type_mix 단일 원장)
         storeRecallCourier,                                     // ★ 135: 회수가 아니면 '' — NOT NULL 컬럼이라 null 금지
         storeRecallProduct,
         repurchaseDaysState.value,
@@ -2814,7 +2840,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       workboard_display_name, // undefined=유지 / ''=표시명 해제(실제 상품명으로 폴백)
       skip_weekends, // undefined=유지 / true·false=주말 게시 직접 설정
       // ★ 135: 회수·혼합 부속정보 — undefined=유지(부속 칸 없는 화면이 저장해도 안 지워진다).
-      delivery_type_mix, recall_courier, recall_product,
+      delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product,
     } = req.body;
 
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
@@ -2864,12 +2890,13 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     /* ★ 135: 배송 부속정보 — 리뷰 혼합과 **같은 모양**(현재값 병합 → 검증 → 기본형 아니면 비움).
        null 을 넣으면 아래 CASE 센티널이 "유지"로 읽는다(미전송 = 변경 없음). */
     let deliveryMixForStore = null;
+    let deliveryReviewFeeMixForStore = null;
     let recallCourierForStore = null;
     let recallProductForStore = null;
-    if (delivery_type !== undefined || delivery_type_mix !== undefined
+    if (delivery_type !== undefined || delivery_type_mix !== undefined || delivery_review_fee_mix !== undefined
         || recall_courier !== undefined || recall_product !== undefined || recruit_total !== undefined) {
       const { rows: curDvRows } = await pool.query(
-        `SELECT delivery_type, delivery_type_mix, recall_courier, recall_product, recruit_total
+        `SELECT delivery_type, delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product, recruit_total
            FROM recruit_campaigns WHERE id = $1`, [id]
       );
       const curDv = curDvRows[0];
@@ -2890,6 +2917,15 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       // ★ 기본형을 벗어나면 남아 있던 부속정보를 함께 지운다(리뷰 혼합과 같은 규율).
       if (effDeliveryBase !== '혼합') deliveryMixForStore = [];
       else if (dvMixState.provided) deliveryMixForStore = dvMixState.mix;
+      const dvFeeMixState = normalizeDeliveryReviewFeeMix(
+        delivery_review_fee_mix === undefined ? curDv.delivery_review_fee_mix : delivery_review_fee_mix
+      );
+      const dvFeeMixError = validateDeliveryReviewFeeMix(effDeliveryBase, dvFeeMixState, {
+        requireWhenMixed: delivery_review_fee_mix !== undefined,
+      });
+      if (dvFeeMixError) return res.status(400).json({ ok: false, error: dvFeeMixError });
+      if (effDeliveryBase !== '혼합') deliveryReviewFeeMixForStore = [];
+      else if (dvFeeMixState.provided) deliveryReviewFeeMixForStore = dvFeeMixState.mix;
       if (effDeliveryBase !== '회수') { recallCourierForStore = ''; recallProductForStore = ''; }
       else {
         if (recall_courier !== undefined) recallCourierForStore = String(recall_courier || '').trim();
@@ -3139,6 +3175,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         recall_courier = CASE WHEN $47::text IS NULL THEN recall_courier ELSE $47::text END,
         recall_product = CASE WHEN $48::text IS NULL THEN recall_product ELSE $48::text END,
         repurchase_days = COALESCE($50::integer, repurchase_days),
+        delivery_review_fee_mix = CASE WHEN $51::jsonb IS NULL THEN delivery_review_fee_mix ELSE $51::jsonb END,
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -3192,6 +3229,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         // 잘못된 API 호출이 기존 공고 전략을 next로 되돌리지 않게 한다.
         ['next', 'spread', 'extend'].includes(carry_strategy) ? carry_strategy : null,
         repurchaseDaysState.value,                                // $50 ★ 148: null=유지, 0=제한 없음
+        deliveryReviewFeeMixForStore === null ? null : JSON.stringify(deliveryReviewFeeMixForStore), // $51 ★ 152
       ]
     );
 

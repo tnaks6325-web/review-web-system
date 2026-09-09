@@ -464,6 +464,7 @@
                 <div class="form-row"><span class="form-label">구매채널 <em class="required">*</em></span><div class="form-control"><div id="rf_channel_btns" class="square-toggle"><button class="rchan-btn" data-group="channel" data-val="쿠팡" onclick="selectRfBtn('channel',this)">쿠팡</button><button class="rchan-btn" data-group="channel" data-val="네이버" onclick="selectRfBtn('channel',this)">네이버</button><button class="rchan-btn" data-group="channel" data-val="올리브영" onclick="selectRfBtn('channel',this)">올리브영</button><button class="rchan-btn" data-group="channel" data-val="카카오메이커스" onclick="selectRfBtn('channel',this)">카카오메이커스</button><button class="rchan-btn" data-group="channel" data-val="직접입력" onclick="selectRfBtn('channel',this)">직접입력</button></div><div id="rf_channel_custom_wrap" class="channel-custom-field" hidden><span class="channel-custom-label">직접입력 채널명</span><input id="rf_channel_custom" placeholder="예) 무신사, 브랜드 자사몰" aria-label="직접입력 구매채널명"><span class="channel-custom-hint">작업오더 값이 자동 반영되며 수정할 수 있습니다.</span></div><input id="rf_channel" type="hidden"></div></div>
                 <div class="form-row"><span class="form-label">배송유형</span><div class="form-control"><select id="rf_delivery_type" hidden><option value="">선택 안 함</option><option value="실배송">실배송</option><option value="빈박스">빈박스</option><option value="택배발송대행">택배발송대행</option><option value="회수">회수</option><option value="혼합">혼합</option></select><div id="rf_delivery_toggle" class="square-toggle"><button type="button" data-rf-delivery="실배송">실배송</button><button type="button" data-rf-delivery="빈박스">빈박스</button><button type="button" data-rf-delivery="택배발송대행">택배발송대행</button><button type="button" data-rf-delivery="회수">회수</button><button type="button" data-rf-delivery="혼합">혼합</button></div></div></div>
                 <div class="form-row" id="rf_delivery_mix_row" hidden><span class="form-label">배송 조합 <em class="required">*</em></span><div class="form-control rf-dvmix"><label>실배송 <input id="rf_delivery_real_count" type="number" min="0" step="1" oninput="rfSyncDeliveryDetail()"></label><label>빈박스 <input id="rf_delivery_empty_count" type="number" min="0" step="1" oninput="rfSyncDeliveryDetail()"></label><strong id="rf_delivery_mix_state" class="rf-dvmix-state"></strong></div></div>
+                <div class="form-row" id="rf_delivery_fee_row" hidden><span class="form-label">유형별 리뷰비 <em class="required">*</em></span><div class="form-control rf-dvmix"><label>실배송 <input id="rf_delivery_real_review_fee" type="number" min="0" step="100" placeholder="0" oninput="rfSyncDeliveryDetail()"><small>원</small></label><label>빈박스 <input id="rf_delivery_empty_review_fee" type="number" min="0" step="100" placeholder="1000" oninput="rfSyncDeliveryDetail()"><small>원</small></label><strong id="rf_delivery_fee_state" class="rf-dvmix-state">입금관리에서 행의 배송구분에 따라 적용됩니다.</strong></div></div>
                 <div class="form-row" id="rf_recall_row" hidden><span class="form-label">회수 정보 <em class="required">*</em></span><div class="form-control rf-dvrecall"><input id="rf_recall_courier" placeholder="회수택배사 (예: CJ대한통운)" maxlength="60"><input id="rf_recall_product" placeholder="회수상품명칭 (예: OO선크림 30ml)" maxlength="120"></div></div>
                 <div class="form-row"><span class="form-label">구매 시간대</span><div class="form-control"><input id="rf_time_range" type="hidden" value=""><input id="rf_window_start" type="hidden" value=""><input id="rf_window_end" type="hidden" value=""><div class="rf-time-control"><div class="rf-time-mode-buttons" role="group" aria-label="구매시간대 방식"><button id="rf_scheduled_time_toggle" type="button" class="rchan-btn active" aria-pressed="true" onclick="rfSetFreeTime(false)">시간지정</button><button id="rf_free_time_toggle" type="button" class="rchan-btn" aria-pressed="false" onclick="rfSetFreeTime(true)">자유시간</button></div><div id="rf_time_range_control" class="rf-time-range"><button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button><span class="rf-time-divider" aria-hidden="true">~</span><button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button><div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden><div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div><div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div></div></div></div></div></div>
                 <div class="form-row"><span class="form-label">현금영수증</span><div class="form-control"><input type="checkbox" id="rf_cash_receipt_required" hidden><button type="button" id="rf_cashrcpt_toggle" class="switch-button" aria-pressed="false" onclick="rfToggleCashReceipt()"><span aria-hidden="true"></span></button><strong id="rf_cash_receipt_state">발행 안 함</strong><span class="tag" id="rf_cash_receipt_note">참여자에게 미노출</span></div></div>
@@ -1586,8 +1587,10 @@
     var delivery = document.getElementById('rf_delivery_type');
     var base = delivery ? String(delivery.value || '').trim() : '';
     var mixRow = document.getElementById('rf_delivery_mix_row');
+    var feeRow = document.getElementById('rf_delivery_fee_row');
     var recallRow = document.getElementById('rf_recall_row');
     if (mixRow) mixRow.hidden = base !== '혼합';
+    if (feeRow) feeRow.hidden = base !== '혼합';
     if (recallRow) recallRow.hidden = base !== '회수';
     var state = document.getElementById('rf_delivery_mix_state');
     if (!state) return;
@@ -1600,6 +1603,13 @@
     var ok = sum === total;
     state.textContent = '합계 ' + sum + '건 / 총 건수 ' + total + '건' + (ok ? '' : ' — 일치시켜 주세요.');
     state.className = 'rf-dvmix-state ' + (ok ? 'ok' : 'bad');
+    var feeState = document.getElementById('rf_delivery_fee_state');
+    if (feeState) {
+      var realFee = num('rf_delivery_real_review_fee');
+      var emptyFee = num('rf_delivery_empty_review_fee');
+      feeState.textContent = '실배송 ' + realFee.toLocaleString() + '원 · 빈박스 ' + emptyFee.toLocaleString() + '원 — 입금관리 행별 적용';
+      feeState.className = 'rf-dvmix-state ' + (ok ? 'ok' : 'bad');
+    }
   }
 
   function syncDeliveryButtons() {

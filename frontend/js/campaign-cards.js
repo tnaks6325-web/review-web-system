@@ -632,7 +632,19 @@
     _cacheMoCtx(c);    // 외부모집 수동제출 문맥(연결 탭) 캐시 — 카드·로그 팝업이 같은 값을 본다
     const admin = !!(o && o.admin);
     const channel = c.channel === '직접입력' ? (c.channel_custom || '') : (c.channel || '');
-    const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '';
+    let deliveryFeeMix = c.delivery_review_fee_mix;
+    if (typeof deliveryFeeMix === 'string') { try { deliveryFeeMix = JSON.parse(deliveryFeeMix); } catch (_) { deliveryFeeMix = []; } }
+    const feeByType = (Array.isArray(deliveryFeeMix) ? deliveryFeeMix : []).reduce((out, row) => {
+      const type = row && row.type;
+      const amount = Number(row && (row.reviewFee ?? row.review_fee ?? row.fee));
+      if ((type === 'real' || type === 'empty') && Number.isFinite(amount) && amount >= 0) out[type] = amount;
+      return out;
+    }, {});
+    // 혼합 배송은 하나의 금액으로 축약하지 않는다. 입금관리의 행별 산정과 같은 두 값을
+    // 카드·미리보기에도 보여, 실배송/빈박스 중 어느 설정이 적용되는지 숨기지 않는다.
+    const fee = Object.prototype.hasOwnProperty.call(feeByType, 'real') && Object.prototype.hasOwnProperty.call(feeByType, 'empty')
+      ? `실배송 ${feeByType.real.toLocaleString()}원 · 빈박스 ${feeByType.empty.toLocaleString()}원`
+      : (c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '');
     const isClosed = c.state === 'closed' || c.status === 'closed';
     const isPre = c.state === 'preopen';
     const isDaily = c.state === 'daily_done';
