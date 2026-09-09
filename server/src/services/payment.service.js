@@ -24,6 +24,7 @@ const pool = require('../db/pool');           // ★ 이 모듈은 pool 을 직�
 const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { logger } 구조분해다
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
+const { resolveDeliveryReviewFee } = require('../utils/deliveryReviewFee');
 const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
@@ -185,7 +186,10 @@ async function listPaymentTargets(opts = {}) {
             (SELECT jsonb_object_agg(kv.key, kv.value)
                FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
               WHERE replace(kv.key, ' ', '') LIKE '%금액%'
-                 OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells"
+                 OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells",
+            -- 혼합배송 리뷰비 판정은 배송구분 한 칸만 필요하다. 행 JSON 전체를 넘기지 않아
+            -- 기존 입금 후보/작업보드 금액 조회의 작은-행 계약을 보존한다.
+            COALESCE(ri.row_json->>'배송구분', '') AS "deliveryKind"
        FROM review_index ri
       WHERE ${where.join(' AND ')}
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
@@ -204,6 +208,8 @@ async function listPaymentTargets(opts = {}) {
     _loadAccounts(phone8s),
     _loadTabMeta(sheetIds, tabNames),
     loadWorkboardAmounts(pool, rows.map(r => ({
+      // 금액 판정에는 이미 추린 금액 칸만 넘긴다. 배송구분은 위 SELECT의 단일 칸으로
+      // 별도 사용하므로, 행 JSON 전체가 이 경로에 섞여 기존 금액 우선순위를 바꾸지 않는다.
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex, rowJson: r.amountCells,
     }))),
     loadWorkboardAmountPopulation(pool, rows),
@@ -248,9 +254,20 @@ async function listPaymentTargets(opts = {}) {
       sheetDate: camp ? sheetDateToIso(r.startDate, camp.campStartDate) : null,
       fallback: campFee != null ? campFee : (tabFee != null ? tabFee : 0),
     });
-    const fee = feeInfo.fee;
+    // 혼합 배송은 작업표의 `배송구분` 행값이 기준이다. 한 작업 안에서도 실배송/빈박스가
+    // 서로 다른 리뷰비를 받아야 하므로 공고 단일값으로 다시 접지 않는다. 과거에 이미
+    // 고정된 주문 스냅샷은 최우선으로 보존한다.
+    const deliveryKind = String(r.deliveryKind || '').trim();
+    // 신청 시점의 유형별 스냅샷이 있으면 구간표의 단일 숫자 스냅샷보다 행별 금액이 우선한다.
+    // 유형별 스냅샷이 없는 과거 주문은 기존 단일 스냅샷을 그대로 보존한다.
+    const deliveryFeeMix = ord && ord.deliveryReviewFeeMixSnapshot != null
+      ? ord.deliveryReviewFeeMixSnapshot
+      : (ord && ord.feeSnapshot != null ? null : (camp && camp.deliveryReviewFeeMix));
+    const deliveryFeeInfo = resolveDeliveryReviewFee(deliveryFeeMix, deliveryKind, feeInfo.fee);
+    const fee = deliveryFeeInfo.fee;
     // 이 금액이 **어디서 왔는지** — 화면이 "공고 값" / "탭 설정" 을 구분해 말한다(조용한 추정 금지).
-    const feeSource = feeInfo.source === 'snapshot' ? 'snapshot'
+    const feeSource = deliveryFeeInfo.source === 'delivery_mix' ? 'delivery_mix'
+      : feeInfo.source === 'snapshot' ? 'snapshot'
       : feeInfo.source === 'schedule' ? 'schedule'
       : campFee != null ? 'campaign'
       : tabFee != null ? 'tab' : null;
@@ -332,7 +349,7 @@ async function listPaymentTargets(opts = {}) {
         : null,
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
       accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
-      productPrice, reviewFee: fee, amount, priceSource, feeSource,
+      productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
       workboardPrice, orderPrice, priceMismatch,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
       transferMemo: memo, memoSource,
@@ -414,6 +431,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
     `SELECT DISTINCT ON (c.linked_sheet_id, c.linked_tab_name)
             c.id, c.title, c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
             c.review_fee AS "reviewFee",
+            c.delivery_review_fee_mix AS "deliveryReviewFeeMix",
             c.transfer_bank AS "transferBank", c.transfer_memo AS "transferMemo",
             to_char(c.start_date,'YYYY-MM-DD') AS "campStartDate",
             wo.goods_cost_type AS "goodsCostType"
@@ -434,6 +452,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
          종전 COALESCE(...,0) + || 0 이 둘을 같은 값으로 만들어, 무상 작업 전건이
          no_review_fee 경고를 달았다(실측 2026-08-19 위프 800건 24/24). */
       id: c.id, title: c.title || '', reviewFee: (c.reviewFee == null ? null : Number(c.reviewFee)),
+      deliveryReviewFeeMix: c.deliveryReviewFeeMix || [],
       transferBank: c.transferBank || null, transferMemo: c.transferMemo || '',
       campStartDate: c.campStartDate || null, goodsCostType: c.goodsCostType || '',
       schedules: [],
@@ -467,7 +486,8 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     // ★ order_submissions 의 제출 시각 컬럼은 **submitted_at** 이다(created_at 이 아니다 — 001:179).
     //   틀리면 42703 으로 이 쿼리가 통째로 죽어 입금대상 화면이 서버오류가 된다.
     `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
-            price, review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt",
+            price, review_fee_snapshot AS "feeSnapshot",
+            delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", submitted_at AS "orderedAt",
             -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
             --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
             bank AS "bank", account AS "account", depositor AS "depositor"
@@ -478,7 +498,8 @@ async function _loadOrderPrices(sheetIds, tabNames) {
   );
   for (const o of rows) {
     map[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = {
-      price: o.price, feeSnapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt),
+      price: o.price, feeSnapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
+      orderDate: toKstDate(o.orderedAt),
       bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
     };
   }

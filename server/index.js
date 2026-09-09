@@ -44,6 +44,9 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'source_review_order_id'],      // 102 — 원본 오더 식별자(중복 수신 방지)
   ['work_orders', 'delivery_type_mix'],           // 135 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['recruit_campaigns', 'delivery_type_mix'],     // 135 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
+  ['recruit_campaigns', 'delivery_review_fee_mix'], // 152 — 혼합 배송별 리뷰비(입금 대상 산정)
+  ['campaign_applications', 'delivery_review_fee_mix_snapshot'], // 153 — 신청 시점 유형별 리뷰비
+  ['order_submissions', 'delivery_review_fee_mix_snapshot'], // 153 — 입금·리뷰내역 행별 스냅샷
   ['work_orders', 'source_revision'],             // 102 — 원본 수정 버전
   ['work_orders', 'workboard_schema_version'],    // 135 — 작업표 열 규격(원본 생성 시점 고정)
   ['work_orders', 'work_series_id'],              // 136 — 같은 작업의 차수 계열(원본 수신·작업표 생성)
