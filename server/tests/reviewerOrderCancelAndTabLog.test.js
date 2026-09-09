@@ -109,6 +109,13 @@ ok('★★ 주문 원장의 출처와 참여 신청의 지각 링크를 같은 �
   /campaign_application_id/.test(LOGSVC) && /r\.source === 'admin_external'/.test(LOGSVC)
   && /direct_app\.id = x\.campaign_application_id/.test(LOGSVC)
   && /ca\.late_order_id = x\.id/.test(LOGSVC) && /ca\.expires_at/.test(LOGSVC));
+ok('★★ 캠페인 범위 주문은 실제 작업표의 불변 주문 링크 또는 서버 확정 작업보드 ID로만 합류한다',
+  /campaign_participants cp[\s\S]{0,180}cp\.order_submission_id=os\.id/.test(LOGSVC)
+  && /cp\.sheet_id=\$1 AND cp\.tab_name=\$2/.test(LOGSVC)
+  && /os\.workboard_id=\$6::uuid/.test(LOGSVC));
+ok('★★ 주문 귀속 시스템 이벤트도 같은 작업표 범위로 찾는다',
+  /LEFT JOIN order_submissions os ON os\.id=rel\.order_submission_id/.test(LOGSVC)
+  && /rel\.order_submission_id IS NOT NULL/.test(LOGSVC));
 ok('★★ 취소 뒤에도 지각 이력이 바뀌지 않도록 주문 원장에 당시 상태를 보존한다',
   /campaign_was_late/.test(LOGSVC)
   && /campaign_was_late = os\.campaign_was_late[\s\S]*?ca\.status IN \('expired','cancelled'\)/.test(HOLDSVC)
@@ -130,11 +137,11 @@ t('★★ 병합·정렬·자르기를 실제로 실행한다', async () => {
   const m = require('../src/services/tabActivityLog.service');
   /* ★ orders 는 UNION ALL 로 **한 행 = 한 항목**(2026-08-24 커서 페이지네이션) — 스텁도 그 모양이다. */
   const db = { query: async (sql) => {
-    if (/order_submissions/.test(sql)) return { rows: [
+    if (/FROM reviewer_event_logs/.test(sql)) throw new Error('boom');   // 한 소스 실패
+    if (/FROM order_submissions os/.test(sql)) return { rows: [
       { id: 1, sheet_row: 3, name: '홍길동', price: '13,900', canceled_by: 'reviewer:1234', ev: 'cancel', at: new Date('2026-08-22T01:00:00Z') },
       { id: 1, sheet_row: 3, name: '홍길동', price: '13,900', canceled_by: 'reviewer:1234', ev: 'order',  at: new Date('2026-08-20T01:00:00Z') },
     ] };
-    if (/reviewer_event_logs/.test(sql)) throw new Error('boom');   // 한 소스 실패
     return { rows: [] };
   } };
   return m.tabActivityLog({ sheetId: 's', tabName: 't', pool: db }).then(r => {
@@ -185,7 +192,7 @@ t('★★ 더 있으면 가장 오래된 시각을 커서로 준다 · 없으면
   const many = (n) => Array.from({ length: n }, (_, i) => ({
     id: i + 1, sheet_row: i + 1, name: 'ㄱ', price: '', canceled_by: '', ev: 'order',
     at: new Date(Date.UTC(2026, 7, 20) - i * 60000) }));
-  const mk = (n) => ({ query: async (sql) => (/order_submissions/.test(sql) ? { rows: many(n) } : { rows: [] }) });
+  const mk = (n) => ({ query: async (sql) => (/FROM order_submissions os/.test(sql) ? { rows: many(n) } : { rows: [] }) });
   const r1 = await m.tabActivityLog({ sheetId: 's', tabName: 't', limit: 60, pool: mk(80) });
   assert.strictEqual(r1.items.length, 60, '한 묶음은 요청한 만큼만');
   assert.strictEqual(r1.hasMore, true, '더 있다고 말해야 한다');
@@ -209,8 +216,8 @@ t('★★ 항목마다 id 를 발급한다(경계 겹침을 화면이 걸러낼 
   const m = require('../src/services/tabActivityLog.service');
   const at = new Date('2026-08-20T01:00:00Z');
   const db = { query: async (sql) => {
-    if (/order_submissions/.test(sql)) return { rows: [{ id: 1, sheet_row: 1, name: 'ㄱ', price: '', canceled_by: '', ev: 'order', at }] };
-    if (/reviewer_event_logs/.test(sql)) return { rows: [{ id: 2, occurred_at: at, event_type: 'x', severity: 'warn', message: 'm', reviewer_name: 'ㄴ', context: null }] };
+    if (/FROM reviewer_event_logs/.test(sql)) return { rows: [{ id: 2, occurred_at: at, event_type: 'x', severity: 'warn', message: 'm', reviewer_name: 'ㄴ', context: null }] };
+    if (/FROM order_submissions os/.test(sql)) return { rows: [{ id: 1, sheet_row: 1, name: 'ㄱ', price: '', canceled_by: '', ev: 'order', at }] };
     if (/review_submissions/.test(sql)) return { rows: [{ at, row_index: 5, reviewer_name: 'ㄷ', n: 2 }] };
     if (/review_inspections/.test(sql)) return { rows: [{ id: 'u1', at, status: 'fail', resolution: null, reviewer_name: 'ㄹ', row_index: 6, resolved_by: '' }] };
     if (/participant_edits/.test(sql)) return { rows: [{ id: 3, field: 'col:비고', kind: 'text', value_text: 'v', value_bool: null, actor: 'a', ev: 'new', at }] };
@@ -241,7 +248,10 @@ t('★★ /workdesk/activity-log 가 라우터 스택에 실제로 있다', () =
 ok('★ 게이트는 편집 이력과 같은 _ensureEditScope',
   /router\.get\('\/workdesk\/activity-log'[\s\S]{0,700}_ensureEditScope\(req, sheetId, tabName\)/.test(TBROUTE));
 ok('★★ gid 는 서버가 tab_configs 에서 다시 구한다',
-  /activity-log'[\s\S]{0,900}SELECT tab_gid FROM tab_configs/.test(TBROUTE));
+  /activity-log'[\s\S]{0,900}SELECT tab_gid, workboard_id FROM tab_configs/.test(TBROUTE));
+ok('★★ 작업보드 ID는 요청값이 아니라 tab_configs에서 다시 구해 서비스에 전달한다',
+  /workboardId = \(rows\[0\] && rows\[0\]\.workboard_id\) \|\| null/.test(TBROUTE)
+  && /tabActivityLog\(\{ sheetId, tabName, gid, workboardId, kind, limit, before \}\)/.test(TBROUTE));
 
 console.log('\n[6] 리뷰어 화면 — 판정 사본 0');
 ok('★★ 게이트는 서버가 준 brief.cancelable 만 쓴다',

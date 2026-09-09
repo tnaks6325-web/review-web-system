@@ -1599,14 +1599,15 @@ router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName, kind, limit, before } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    let gid = '';
+    let gid = '', workboardId = null;
     try {
       const { rows } = await pool.query(
-        'SELECT tab_gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1', [sheetId, tabName]);
+        'SELECT tab_gid, workboard_id FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1', [sheetId, tabName]);
       gid = (rows[0] && rows[0].tab_gid) || '';
+      workboardId = (rows[0] && rows[0].workboard_id) || null;
     } catch (_) { /* gid 미상 = 이름 매칭만(fail-soft) */ }
     const { tabActivityLog } = require('../services/tabActivityLog.service');
-    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit, before }));
+    res.json(await tabActivityLog({ sheetId, tabName, gid, workboardId, kind, limit, before }));
   } catch (err) { next(err); }
 });
 

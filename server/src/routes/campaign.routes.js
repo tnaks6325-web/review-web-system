@@ -3512,8 +3512,12 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
 router.get('/admin/:id/activity-log', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT linked_sheet_id, linked_tab_name, linked_tab_gid
-         FROM recruit_campaigns WHERE id = $1 LIMIT 1`, [req.params.id]
+      `SELECT rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
+              COALESCE(tc.workboard_id, rc.workboard_id) AS workboard_id
+         FROM recruit_campaigns rc
+         LEFT JOIN tab_configs tc
+           ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
+        WHERE rc.id = $1 LIMIT 1`, [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     const camp = rows[0];
@@ -3530,6 +3534,7 @@ router.get('/admin/:id/activity-log', authMiddleware, adminOrMasterMiddleware, a
       sheetId: camp.linked_sheet_id,
       tabName: camp.linked_tab_name,
       gid: camp.linked_tab_gid || '',
+      workboardId: camp.workboard_id || null,
       kind: req.query.kind,
       limit: req.query.limit,
       before: req.query.before,
