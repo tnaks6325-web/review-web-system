@@ -21,16 +21,18 @@ assert.doesNotMatch(loginByLinkToken, /login_required\s*===\s*true/,
 assert.doesNotMatch(loginByLinkToken, /requiresLogin\s*:\s*true/,
   '전용 링크 로그인 API는 로그인 요구 응답을 반환하면 안 됩니다.');
 
-const publicCopyStart = workdesk.indexOf('function copyAdvertiserLink()');
-const publicCopyEnd = workdesk.indexOf('function renderLogin(', publicCopyStart);
-const publicCopy = workdesk.slice(publicCopyStart, publicCopyEnd);
-assert.ok(publicCopyStart >= 0 && publicCopyEnd > publicCopyStart,
-  '업체 화면의 광고주 URL 복사 함수를 찾을 수 있어야 합니다.');
-assert.match(publicCopy, /_ovmCopyAdvLink\(i\)/,
-  '업체 화면의 빠른 복사는 무로그인 전용 URL 발급 경로를 재사용해야 합니다.');
-assert.doesNotMatch(publicCopy, /_shareLinkCopy/,
-  '업체 화면의 빠른 복사가 내부 전용 공유 URL을 만들면 광고주에게 로그인 화면이 뜬다.');
-assert.match(workdesk, /광고주 URL 복사/,
-  '로그인이 필요한 내부 업체 링크와 혼동되지 않도록 버튼을 광고주 URL로 표기해야 합니다.');
+const linkStart = workdesk.indexOf('function _advLinkHtml(a)');
+const linkEnd = workdesk.indexOf('async function _advLinkReload()', linkStart);
+const linkHtml = workdesk.slice(linkStart, linkEnd);
+assert.ok(linkStart >= 0 && linkEnd > linkStart,
+  '광고주 접속 링크 관리·복사 함수를 찾을 수 있어야 합니다.');
+assert.match(linkHtml, /onclick="advLinkCopy\(\)"/,
+  '광고주 URL 복사는 접속 링크 관리 화면의 단일 버튼으로 제공해야 합니다.');
+assert.equal((linkHtml.match(/advLinkCopy\(\)/g) || []).length, 1,
+  '접속 링크 관리 화면에는 URL 복사 버튼이 하나만 있어야 합니다.');
+assert.doesNotMatch(workdesk, /function copyAdvertiserLink\(|function _ovmCopyAdvLink\(|ovm-lkcopy/,
+  '목록·상세의 중복 복사 경로가 남으면 같은 광고주 URL을 여러 번 복사하게 된다.');
+assert.match(workdesk, /광고주 접속 링크/,
+  '유일한 진입점을 광고주 접속 링크로 명확히 표기해야 합니다.');
 
 console.log('✅ advertiserLinkNoLogin: 업체 전용 링크 무로그인 회귀 가드 통과');

@@ -1524,11 +1524,7 @@
   .ovm-ovt .an{display:flex;align-items:center;min-width:0}
   .ovm-ovt .an b{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ovm-ovt .c{font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ovm-lkcell{display:flex;align-items:center;gap:6px;min-width:0}
-  .ovm-lkcopy{flex:none;font:inherit;font-size:10.5px;font-weight:800;height:22px;padding:0 8px;border-radius:6px;cursor:pointer;
-    border:1px solid var(--accent-line,#c7d7f5);background:var(--accent-soft,#eef4ff);color:var(--accent-deep,#1c4fa8);white-space:nowrap}
-  .ovm-lkcopy:hover{background:#e2ecff}
-  .ovm-lkcopy[disabled]{opacity:.55;cursor:not-allowed}
+  .ovm-lkcell{display:flex;align-items:center;min-width:0}
   .ovm-num{font-size:12.5px;font-weight:750;font-variant-numeric:tabular-nums}
   .ovm-num.z{color:var(--faint);font-weight:600}
   .ovm-num.hot{color:var(--warn);font-weight:800}
@@ -2824,12 +2820,6 @@ function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여
 function copyTaskLinkFromHome(i){ const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
   _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
                  '작업보드 링크 — '+(t.displayName||t.tabName||'')); }
-// 업체관리 빠른 복사는 **광고주 전용 URL**만 만든다. 종전 내부 공유 URL(#w)은 외부 수신자에게
-// 로그인 화면을 띄우는 별도 권한 링크라, 업체 화면에서 복사해 전달하면 안 된다.
-function copyAdvertiserLink(){ const a=STATE.advCur; if(!a){ toast('업체를 먼저 선택하세요'); return; }
-  const i=(STATE.advs||[]).findIndex(x=>x&&x.id===a.id);
-  if(i<0){ toast('업체를 찾을 수 없습니다 — 새로고침 후 다시 시도하세요'); return; }
-  return _ovmCopyAdvLink(i); }
 function renderLogin(msg){
   document.body.classList.remove('advm','brandv','nostl','nofol');   // 광고주·브랜드 세션 잔재 정리(로그아웃/만료 후 상한·레이아웃·칸 원복)
   $('#app').innerHTML = `<div class="loginbox"><h2>리뷰웹시스템[3버전] 로그인</h2>
@@ -16882,11 +16872,6 @@ function _ovmRenderOverview(opt){
       : !lk ? '<span class="ovm-fin" title="접속 링크 미생성 — 업체를 열면 자동 생성됩니다">미생성</span>'
       : !lk.active ? '<span class="ovm-fin cand">폐기</span>'
       : '<span class="ovm-fin" style="background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 25%,transparent)">공개</span>';
-    // ★ 업체용 뷰어(광고주 접속) 링크 복사 — 토큰은 개요 응답에 실리지 않으므로(데이터 최소화)
-    //   누를 때 ensure 로 받아온다. 링크가 없던 업체도 그 자리에서 생성된다.
-    const lkcopy = _isInternalRole()
-      ? `<button class="ovm-lkcopy" type="button" title="업체용 뷰어 접속 링크를 복사합니다"
-          onclick="event.stopPropagation();_ovmCopyAdvLink(${i},this)">🔗 링크복사</button>` : '';
     const acct=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id).length;
     return `<div class="ovm-company" data-i="${i}" data-ovmb-search="${esc((String(a.name||'')+' '+String(a.inadPm||'')).toLowerCase())}">`
       +`<div class="ovm-ovt r" onclick="_ovmToggleAdv(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_ovmToggleAdv(${i});}" role="button" tabindex="0" aria-expanded="false" aria-controls="ovmbDetail-${i}">`
@@ -16895,7 +16880,7 @@ function _ovmRenderOverview(opt){
       +`<span class="ovm-num${(+a.works)?'':' z'}">${bad?'?':(+a.works||0)}</span>`
       +num(+a.noMatch||0,false,matchKnown,'계약 매칭 정보를 불러오지 못했습니다')
       +num(+a.finishCand||0,true,candKnown,_ovmCandWhy())
-      +`<span class="ovm-lkcell">${_isInternalRole()?(lkb+lkcopy):'<span class="ovm-fin">—</span>'}</span>`
+      +`<span class="ovm-lkcell">${_isInternalRole()?lkb:'<span class="ovm-fin">—</span>'}</span>`
       +`<span class="c${acct?'':' dim'}">${STATE.role==='master'||STATE.role==='admin'?(acct?acct+'개':'없음'):'—'}</span>`
       +`<span class="ovm-row-chevron" aria-hidden="true">⌄</span></div>`
       +`<div class="ovm-inline" id="ovmbDetail-${i}" hidden></div></div>`;
@@ -17256,45 +17241,6 @@ async function advLinkEnable(advertiserId){
   const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'enable',advertiserId})});
   if(r&&r.ok){ toast('링크 다시 활성'); await _advLinkReload(); } else toast('실패'+(r&&r.error?': '+r.error:''));
 }
-/* ── 개요 표의 업체별 [🔗 링크복사] — 업체를 열지 않고 그 자리에서 뷰어 링크를 복사한다. ──
-   ★ 토큰은 개요 응답(?overview=1)에 실리지 않는다(데이터 최소화 — hasToken 만 온다) → 누를 때
-     기존 `action:'ensure'` 로 받아온다(신규 엔드포인트 0, 없으면 그때 생성).
-   ★★ 폐기(active=false) 링크는 **복사하지 않는다** — 죽은 링크를 광고주에게 건네는 쪽이 빈 손보다
-     나쁘다(빈 링크 > 죽은 링크 규율). 사유와 조치를 말하고 멈춘다.
-   ★ 성공하면 그 행의 상태 배지도 실제 상태로 갱신한다(미생성 → 공개). */
-function _ovmClipWrite(text){
-  return new Promise(res=>{
-    const fb=()=>{ try{
-      const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly','');
-      ta.style.cssText='position:fixed;top:-1000px;left:-1000px;opacity:0';
-      document.body.appendChild(ta); ta.select();
-      let ok=false; try{ ok=document.execCommand('copy'); }catch(_){ ok=false; }
-      ta.remove(); res(!!ok);
-    }catch(_){ res(false); } };
-    try{
-      if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(()=>res(true)).catch(fb);
-      else fb();
-    }catch(_){ fb(); }
-  });
-}
-async function _ovmCopyAdvLink(i, btn){
-  const a=(STATE.advs||[])[i];
-  if(!a){ toast('업체를 찾을 수 없습니다 — 새로고침 후 다시 시도하세요'); return; }
-  if(btn){ if(btn.disabled) return; btn.disabled=true; btn.textContent='…'; }
-  const restore=()=>{ if(btn){ btn.disabled=false; btn.textContent='🔗 링크복사'; } };
-  let lk=null;
-  try{
-    const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'ensure',advertiserId:a.id})});
-    lk=(r&&r.ok&&r.link)||null;
-  }catch(_){ lk=null; }
-  restore();
-  if(!lk||!lk.token){ toast('접속 링크를 불러오지 못했습니다 — 업체를 열어 [접속 링크]에서 확인하세요'); return; }
-  a.link={ active:!!lk.active, loginRequired:!!lk.loginRequired, lastUsedAt:lk.lastUsedAt, hasToken:true };
-  if(!lk.active){ toast('이 업체의 접속 링크는 폐기 상태입니다 — 업체를 열어 [다시 활성] 후 전달하세요'); return; }
-  const ok=await _ovmClipWrite(_advLinkUrl(lk.token));
-  toast(ok ? (a.name+' 접속 링크 복사됨 — 광고주에게 전달하세요')
-           : '복사 실패 — 업체를 열어 [접속 링크]에서 직접 복사하세요');
-}
 function advLinkCopy(){ const el=$('#advLinkUrl'); if(!el) return; el.select();
   const done=()=>toast('링크 복사됨 — 광고주에게 전달하세요');
   try{ navigator.clipboard.writeText(el.value).then(done).catch(()=>{ document.execCommand('copy'); done(); }); }
@@ -17414,11 +17360,9 @@ function renderOwnPanel(a, items){
   detail.innerHTML = `<div class="ovm-inline-card">
     <div class="ovm-inline-actions">
       <span class="lbl">설정</span>
-      ${isAdmin?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('link')">🔗 접속 링크 ${lkb}</button>
+      ${isAdmin?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('link')">🔗 광고주 접속 링크 ${lkb}</button>
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('acct')">👤 광고주 계정 ${accts?`<span class="ovm-fin">${accts}개</span>`:'<span class="ovm-fin cand">없음</span>'}</button>`:''}
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('own')">▦ 소유 작업 <span class="ovm-fin">${items.length}</span></button>
-      <button class="btn ovm-setbtn" onclick="copyAdvertiserLink()"
-        title="광고주가 로그인 없이 이 업체 뷰를 여는 전용 URL을 복사합니다.">🔗 광고주 URL 복사</button>
       <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
       <label class="setvis" title="이 거래처가 리뷰웹시스템[3버전]에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label>
       <button class="btn xs" onclick="_ovmCollapseInline()">접기</button>
