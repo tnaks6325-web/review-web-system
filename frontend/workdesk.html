@@ -17507,8 +17507,7 @@ function _ovmGrid(){
   const X=(min,fr)=>{ cols.push(`minmax(${min}px,${fr}fr)`); flexMin+=min; };
   F(44);                       /* 진행 */
   X(200,1.7);                  /* 캠페인 탭 */
-  if(c.info){ F(80); X(88,1); F(68); F(100); F(48); }  /* 브랜드·상품·채널·목표차수·담당
-     ★ 목표·차수는 '100건·발주 · 2차'가 통째로 보여야 한다(84px 에선 잘렸다 — 실측). */
+  if(c.info){ F(80); X(88,1); F(68); F(68); F(48); }   /* 브랜드·상품·채널·건수·담당 */
   if(c.prog) F(104);           /* 참여·제출·입금 */
   if(c.mat)  F(136);           /* 자료(구매·리뷰·현영 폴더 바로가기)
      ★ .wbl-fol 은 3×40px + gap 3px×2 = 126px 고정 그리드다. 136px = 그 폭이 칸을 뚫고 나가지 않는
@@ -17524,7 +17523,7 @@ function _ovmGrid(){
 function _ovmHead(){
   const c=_ovmCols(), g=_ovmGrid(); const h=[];
   h.push('<span>진행</span>','<span>작업</span>');
-  if(c.info) h.push('<span>브랜드</span>','<span>상품</span>','<span>채널</span>','<span>목표·차수</span>','<span>담당</span>');
+  if(c.info) h.push('<span>브랜드</span>','<span>상품</span>','<span>채널</span>','<span>건수</span>','<span>담당</span>');
   if(c.prog) h.push('<span>참여·제출·입금</span>');
   if(c.mat)  h.push('<span>자료</span>');
   h.push('<span>계약</span>');
@@ -17556,10 +17555,13 @@ function _ownRowsHtml(){
   const list=vis.map(({t,i,pm,ob})=>{
     const target=(t.woRecruit&&+t.woRecruit)||pm.count||null;
     const total=t.bTotal||0, sub=t.bSub||0, paid=t.bPaid||0;
-    const pct=total?Math.round(sub/total*100):0;
-    const gauge=total?gaugeSvg(pct,pct+'%',pct>=100?'g-safe':''):gaugeSvg(0,'—','');
+    // 원형 진행률은 목표 건수 대비 현재 구매양식 기록 수다.
+    // 참여 수를 실제 기록 수로 바꿔도 "2건 기록 / 목표 100건"이 100%로 보이지 않게 분모를 분리한다.
+    const pct=target?Math.min(100,Math.round(total/target*100)):0;
+    const gauge=target?gaugeSvg(pct,pct+'%',pct>=100?'g-safe':''):gaugeSvg(0,'—','');
     const chan=[pm.channel?`<span class="bb ok">${esc(pm.channel)}</span>`:'', pm.viral?'<span class="bb warn">바이럴</span>':''].filter(Boolean).join(' ')||'<span class="ocol dim">—</span>';
-    const tgt=[target?`${target}건${t.woRecruit?'·발주':''}`:'', pm.round||''].filter(Boolean).join(' · ')||'—';
+    // 건수는 작업의 목표 수만 짧게 보인다. 발주 출처·차수는 이 목록의 집계 단위가 아니므로 섞지 않는다.
+    const tgt=target?`${target}건`:'—';
     // 정산 컬럼(관제실 대응): 링크된 탭만 인트라넷 요약 대상. 요약 도착 전 뼈대, 미링크 '—'.
     const st=(STATE.ownSettle||{})[t.sheetId+'\t'+t.tabName];
     const linked=!!t.salesId;

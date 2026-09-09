@@ -115,6 +115,8 @@ async function run() {
     && /GROUP BY NULLIF\(BTRIM\(ri\.submit_col2\), ''\)[\s\S]{0,100}ORDER BY COUNT\(\*\) DESC/.test(svcSrc)
     && !/current_paid_edit/.test(svcSrc)
     && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_paid\)::int AS paid/.test(svcSrc));
+  ok('내부 업체관리 참여 수는 빈 슬롯이 아닌 현재 작업보드의 구매양식 기록 줄만 센다',
+    /COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL\s+AND \$\{_filledSql\('cp'\)\}\)\:\:int AS total/.test(svcSrc));
   ok('★ 내부 필드(비고 memo·담당 manager·salesId) 는 항목에 아예 없다 — 화면에서만 감추는 건 보안연극',
     !('memo' in it) && !('manager' in it) && !('salesId' in it));
   ok('정산: 총비용=견적서 금액 우선(11,250,000) · 입금액=입금매칭 누계(8,000,000)',
@@ -144,6 +146,13 @@ async function run() {
 
   /* ═══ 4. 프론트 배선(workdesk.html) ═══ */
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+  const ownRowsSrc = src.slice(src.indexOf('function _ownRowsHtml()'), src.indexOf('// 건수·칩 표기'));
+  ok('내부 업체관리 작업목록은 건수만 표기하고 발주 출처·차수를 붙이지 않는다',
+    src.includes("'<span>건수</span>'")
+    && /const tgt=target\?`\$\{target\}건`:'—';/.test(ownRowsSrc)
+    && !ownRowsSrc.includes("t.woRecruit?'·발주'")
+    && !ownRowsSrc.includes("pm.round||''")
+    && /const pct=target\?Math\.min\(100,Math\.round\(total\/target\*100\)\):0;/.test(ownRowsSrc));
   ok('입금 상태의 필터·그룹·내려받기도 화면 셀과 같은 rowJson 값을 쓴다',
     /const ed=!_workdeskStatusKind\(h\)&&\(h in ceMap\); const raw= ed\?ceMap\[h\]:rj\[h\];/.test(src));
   const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(src)[1];
