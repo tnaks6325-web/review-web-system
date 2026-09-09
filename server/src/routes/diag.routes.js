@@ -2500,11 +2500,34 @@ router.post('/sheetless-worktable-recover', authMiddleware, adminOrMasterMiddlew
     if (orderSubmissionIds && orderSubmissionIds.some(id => !uuidPattern.test(id))) {
       return res.status(400).json({ ok: false, error: '올바르지 않은 주문 식별값이 포함되어 있습니다.' });
     }
-    const by = (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
+    const by = (req.admin && req.admin.name) ||
+      (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
     const run = () => recoverUnwrittenSheetlessOrders({ limit, by, orderSubmissionIds, dryRun });
     const out = dryRun ? await run() : await withJobLock('sheetless_worktable_recover', run);
     if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 작업보드 복구가 진행 중입니다.' });
     res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/worktable-number-order-repair — 표시 번호만 구매양식 제출시각 순으로 다시 맞춘다.
+// 기본은 미리보기이며 실제 실행도 내부 관리자만 가능하다. 행 자체의 연결값은 바꾸지 않는다.
+router.post('/worktable-number-order-repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || '').trim();
+    const tabName = String(b.tabName || '').trim();
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const dryRun = b.dryRun !== false;
+    const by = (req.admin && req.admin.name) ||
+      (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
+    const { renumberTab } = require('../services/rowNumbering.service');
+    const run = () => renumberTab({ sheetId, tabName, dryRun, by, rebuild: !dryRun });
+    if (dryRun) return res.json(await run());
+    const { withJobLock } = require('../utils/jobLock');
+    // 자동 번호 정리와 같은 잠금으로 묶어 동시에 같은 작업을 다시 매기지 않는다.
+    const out = await withJobLock('worktable_renumber_sweep', run);
+    if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 번호 정리가 진행 중입니다.' });
+    res.json(out);
   } catch (err) { next(err); }
 });
 

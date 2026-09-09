@@ -106,7 +106,7 @@ console.log('\n[A2] 지나간 날짜의 빈 줄은 표 맨 아래(사용자 확�
   ok('★ 지난 빈 줄의 번호가 마지막 직전으로 간다', byId.pb === 4 && byId.nd === 5, JSON.stringify(byId));
 }
 
-console.log('\n[A3] 외부모집 수동제출만 배정 행 순서 우선');
+console.log('\n[A3] 외부모집 수동제출도 실제 제출시각 순');
 {
   const rows = [
     { id: 'm3', seq: 26, iso: '2026-09-03', submittedAt: '2026-09-03T04:12:34Z', orderSource: 'admin_external' },
@@ -116,9 +116,12 @@ console.log('\n[A3] 외부모집 수동제출만 배정 행 순서 우선');
     { id: 'n1', seq: 41, iso: '2026-09-03', submittedAt: '2026-09-03T04:08:00Z', orderSource: 'reviewer' },
   ];
   const order = U.orderRowsForNumbering(rows).map(r => r.id).join(',');
-  ok('★ admin_external 은 제출시각과 무관하게 배정 행(seq) 순', order.indexOf('m1') < order.indexOf('m2') && order.indexOf('m2') < order.indexOf('m3'), order);
-  ok('★ 일반 구매양식 제출끼리는 기존 제출시각 순', order.indexOf('n1') < order.indexOf('n2'), order);
-  ok('★ 혼합 비교도 결정적이다(수동제출 그룹 → 일반 제출 그룹)', order === 'm1,m2,m3,n1,n2', order);
+  ok('★ 일반 구매양식과 외부모집 수동제출을 같은 제출시각 기준으로 섞는다',
+    order === 'n1,n2,m1,m2,m3', order);
+  ok('★ 수동제출끼리도 배정 자리와 무관하게 제출시각 순',
+    order.indexOf('m1') < order.indexOf('m2') && order.indexOf('m2') < order.indexOf('m3'), order);
+  ok('★ 제출 출처에 따른 별도 정렬 규칙이 남아 있지 않다',
+    !/admin_external/.test(read('src/utils/rowNumbering.js')));
 
   const dateLess = U.orderRowsForNumbering([
     { id: 'external', seq: 99, iso: null, submittedAt: null, orderSource: 'admin_external' },
@@ -497,6 +500,15 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 줄 삭제도 그 자리에서 매긴다',
       /renumberTabInTx/.test(read('src/services/trackB.service.js')));
     ok('★★ 5분 스윕이 백스톱', /sweepNumbering/.test(read('src/jobs/cron.js')));
+
+    const diag = noLineComments(read('src/routes/diag.routes.js'));
+    const block = diag.split("router.post('/worktable-number-order-repair'")[1].split('router.')[0];
+    ok('운영 정정 창구는 화면에 노출하지 않고 내부 관리자에게만 연다',
+      /authMiddleware, adminOrMasterMiddleware/.test(block));
+    ok('운영 정정은 기본 미리보기이고 실제 실행만 잠금·장부 재생성을 사용한다',
+      /const dryRun = b\.dryRun !== false/.test(block) &&
+      /rebuild: !dryRun/.test(block) &&
+      /withJobLock\('worktable_renumber_sweep'/.test(block));
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
