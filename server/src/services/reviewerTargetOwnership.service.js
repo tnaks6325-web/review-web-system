@@ -26,7 +26,8 @@ async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client 
         AND cp.deleted_at IS NULL
       WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
         AND (
-          pl.owner_reviewer_id = $4::uuid OR cp.owner_reviewer_id = $4::uuid
+          cp.owner_reviewer_id = $4::uuid
+          OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id = $4::uuid)
           OR (
             pl.owner_reviewer_id IS NULL AND cp.owner_reviewer_id IS NULL
             AND (ri.phone8 = ANY($5::text[]) OR pl.phone8 = ANY($5::text[]) OR cp.phone8 = ANY($5::text[]))

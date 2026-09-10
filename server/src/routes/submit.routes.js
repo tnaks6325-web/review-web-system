@@ -479,7 +479,8 @@ router.post('/review', async (req, res, next) => {
       const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
       let internal = null;
       try { internal = bearer && jwt.verify(bearer[1], process.env.JWT_SECRET); } catch (_) {}
-      if (!internal || !['master', 'admin', 'staff'].includes(internal.role) || internal.via === 'reviewer_campaign') {
+      if (!internal || !['master', 'admin', 'staff'].includes(internal.role)
+          || ['reviewer_campaign', 'intranet'].includes(internal.via)) {
         return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
       }
     }

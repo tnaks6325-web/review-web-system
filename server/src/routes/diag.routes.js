@@ -47,7 +47,7 @@ function verifiedInternalUploadIdentity(req) {
   try {
     const decoded = jwt.verify(match[1], process.env.JWT_SECRET);
     if (!decoded || !['master', 'admin', 'staff'].includes(decoded.role)) return null;
-    if (decoded.via === 'reviewer_campaign') return null;
+    if (['reviewer_campaign', 'intranet'].includes(decoded.via)) return null;
     return decoded;
   } catch (_) {
     return null;
