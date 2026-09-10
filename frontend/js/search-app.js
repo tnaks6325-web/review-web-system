@@ -128,20 +128,61 @@ const _SAVED_ORDER_INFO_FIELDS = Object.freeze({
 
 function _savedOrderInfoMarkup(cid, field) {
   const label = _SAVED_ORDER_INFO_FIELDS[field]?.label || "내 정보";
+  const menuId = cid + "_" + field + "SavedInfoMenu";
   return '<div class="of-saved-info" id="' + cid + '_' + field + 'SavedInfo" hidden>'
-    + '<select class="of-saved-info-select" data-cid="' + cid + '" data-field="' + field + '" '
-    + 'aria-label="' + label + ' 내 정보에서 선택" onchange="_applySavedOrderInfo(this)">'
-    + '<option value="">내 정보에서 선택</option></select>'
+    + '<button type="button" class="of-saved-info-trigger" data-cid="' + cid + '" data-field="' + field + '" '
+    + 'aria-label="' + label + ' 내 정보에서 선택" aria-expanded="false" aria-controls="' + menuId + '">'
+    + '<span class="of-saved-info-trigger-label">내 정보에서 선택</span><span class="of-saved-info-chevron" aria-hidden="true">⌄</span></button>'
+    + '<div class="of-saved-info-menu" id="' + menuId + '" aria-label="' + label + ' 저장 정보 목록" hidden></div>'
     + '<span class="of-saved-info-lock" hidden><i class="fas fa-lock"></i> 참여 신청 전화번호 · 변경 불가</span>'
     + '</div>';
 }
 
 function _savedBankAccountMarkup() {
   return '<div class="of-saved-info" id="of_bankSavedInfo" hidden>'
-    + '<select class="of-saved-info-select" aria-label="저장된 계좌 선택" onchange="_applySavedBankAccount(this)">'
-    + '<option value="">저장된 계좌에서 선택</option></select>'
+    + '<button type="button" class="of-saved-info-trigger" aria-label="저장된 계좌 선택" '
+    + 'aria-expanded="false" aria-controls="of_bankSavedInfoMenu">'
+    + '<span class="of-saved-info-trigger-label">저장된 계좌에서 선택</span><span class="of-saved-info-chevron" aria-hidden="true">⌄</span></button>'
+    + '<div class="of-saved-info-menu" id="of_bankSavedInfoMenu" aria-label="저장된 계좌 목록" hidden></div>'
     + '</div>';
 }
+
+function _closeSavedInfoDropdowns(exceptWrap) {
+  document.querySelectorAll(".of-saved-info.is-open").forEach((wrap) => {
+    if (wrap === exceptWrap) return;
+    wrap.classList.remove("is-open");
+    const trigger = wrap.querySelector(".of-saved-info-trigger");
+    const menu = wrap.querySelector(".of-saved-info-menu");
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+    if (menu) menu.hidden = true;
+  });
+}
+
+function _toggleSavedInfoDropdown(trigger) {
+  if (!trigger || trigger.disabled) return;
+  const wrap = trigger.closest(".of-saved-info");
+  const menu = wrap?.querySelector(".of-saved-info-menu");
+  if (!wrap || !menu) return;
+  const opening = !wrap.classList.contains("is-open");
+  _closeSavedInfoDropdowns(opening ? wrap : null);
+  wrap.classList.toggle("is-open", opening);
+  trigger.setAttribute("aria-expanded", String(opening));
+  menu.hidden = !opening;
+  if (opening) menu.querySelector(".of-saved-info-option")?.focus({ preventScroll: true });
+}
+
+document.addEventListener("click", (event) => {
+  const trigger = event.target.closest(".of-saved-info-trigger");
+  if (trigger) { _toggleSavedInfoDropdown(trigger); return; }
+  if (!event.target.closest(".of-saved-info")) _closeSavedInfoDropdowns();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const openWrap = document.querySelector(".of-saved-info.is-open");
+  const trigger = openWrap?.querySelector(".of-saved-info-trigger");
+  _closeSavedInfoDropdowns();
+  trigger?.focus({ preventScroll: true });
+});
 
 function _scopedSavedOrderIdentities() {
   const selected = _activeIdentityContext?.selectedIdentity || null;
@@ -175,22 +216,29 @@ function _renderSavedOrderInfoPickers() {
   (_orderCardIds || []).forEach((cid) => {
     Object.entries(_SAVED_ORDER_INFO_FIELDS).forEach(([field, spec]) => {
       const wrap = document.getElementById(cid + "_" + field + "SavedInfo");
-      const select = wrap?.querySelector(".of-saved-info-select");
-      if (!wrap || !select) return;
+      const trigger = wrap?.querySelector(".of-saved-info-trigger");
+      const triggerLabel = trigger?.querySelector(".of-saved-info-trigger-label");
+      const menu = wrap?.querySelector(".of-saved-info-menu");
+      if (!wrap || !trigger || !triggerLabel || !menu) return;
       const available = identities.filter((item) => String(item?.[spec.key] || "").trim());
-      select.replaceChildren();
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      placeholder.textContent = available.length ? "내 정보에서 선택" : spec.emptyLabel;
-      select.appendChild(placeholder);
+      menu.replaceChildren();
       available.forEach((item) => {
-        const option = document.createElement("option");
-        option.value = item.identityKey;
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "of-saved-info-option";
+        option.dataset.cid = cid;
+        option.dataset.field = field;
+        option.dataset.savedIdentityKey = item.identityKey;
         option.textContent = (item.name || "저장 정보") + " · "
           + (item.type === "sub" ? "타계정" : "본계정") + " — " + item[spec.key];
-        select.appendChild(option);
+        option.addEventListener("click", () => window._applySavedOrderInfo(option));
+        menu.appendChild(option);
       });
-      select.disabled = available.length === 0;
+      triggerLabel.textContent = available.length ? "내 정보에서 선택" : spec.emptyLabel;
+      trigger.disabled = available.length === 0;
+      wrap.classList.remove("is-open");
+      trigger.setAttribute("aria-expanded", "false");
+      menu.hidden = true;
       wrap.hidden = false;
       const lockNote = wrap.querySelector(".of-saved-info-lock");
       const isParticipantPhone = field === "phone" && selected?.type === "sub";
@@ -213,37 +261,48 @@ function _renderSavedOrderInfoPickers() {
 
 function _renderSavedBankAccountPicker() {
   const wrap = document.getElementById("of_bankSavedInfo");
-  const select = wrap?.querySelector(".of-saved-info-select");
-  if (!wrap || !select) return;
+  const trigger = wrap?.querySelector(".of-saved-info-trigger");
+  const triggerLabel = trigger?.querySelector(".of-saved-info-trigger-label");
+  const menu = wrap?.querySelector(".of-saved-info-menu");
+  if (!wrap || !trigger || !triggerLabel || !menu) return;
   const available = _scopedSavedOrderIdentities().filter((item) =>
     [item?.bankName, item?.bankAccount, item?.accountHolder]
       .every((value) => String(value || "").trim()));
-  select.replaceChildren();
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = available.length ? "저장된 계좌에서 선택" : "저장된 계좌 없음";
-  select.appendChild(placeholder);
+  menu.replaceChildren();
   available.forEach((item) => {
-    const option = document.createElement("option");
-    option.value = item.identityKey;
-    option.textContent = [item.accountHolder || item.name, item.bankName, item.bankAccount].join(" · ");
-    select.appendChild(option);
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "of-saved-info-option of-saved-bank-option";
+    option.dataset.savedIdentityKey = item.identityKey;
+    const title = document.createElement("span");
+    title.className = "of-saved-info-option-title";
+    title.textContent = [item.accountHolder || item.name, item.bankName, item.bankAccount].join(" · ");
+    const help = document.createElement("span");
+    help.className = "of-saved-info-option-help";
+    help.textContent = "은행·계좌·예금주를 한 번에 적용";
+    option.append(title, help);
+    option.addEventListener("click", () => window._applySavedBankAccount(option));
+    menu.appendChild(option);
   });
-  select.disabled = available.length === 0;
+  triggerLabel.textContent = available.length ? "저장된 계좌에서 선택" : "저장된 계좌 없음";
+  trigger.disabled = available.length === 0;
+  wrap.classList.remove("is-open");
+  trigger.setAttribute("aria-expanded", "false");
+  menu.hidden = true;
   wrap.hidden = false;
 }
 
-window._applySavedBankAccount = function (select) {
-  if (!select?.value) return;
-  const identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === select.value);
-  if (!identity) { select.value = ""; return; }
+window._applySavedBankAccount = function (option) {
+  const identityKey = option?.dataset?.savedIdentityKey;
+  if (!identityKey) return;
+  const identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === identityKey);
+  if (!identity) return;
   const fields = [
     ["of_bank", identity.bankName],
     ["of_account", identity.bankAccount],
     ["of_depositor", identity.accountHolder],
   ];
   if (fields.some(([id, value]) => !document.getElementById(id) || !String(value || "").trim())) {
-    select.value = "";
     return;
   }
   fields.forEach(([id, value]) => {
@@ -255,20 +314,27 @@ window._applySavedBankAccount = function (select) {
   (_orderCardIds || []).slice(1).forEach((cid) => {
     if (document.getElementById(cid + "_sameChk")?.checked) _syncSharedInfoToCard(cid);
   });
+  const wrap = option.closest(".of-saved-info");
+  const triggerLabel = wrap?.querySelector(".of-saved-info-trigger-label");
+  if (triggerLabel) triggerLabel.textContent = [identity.accountHolder || identity.name, identity.bankName, identity.bankAccount].join(" · ");
+  _closeSavedInfoDropdowns();
+  _embedSaveForm();
+  showToast((identity.accountHolder || identity.name || "선택한") + "님의 계좌 정보를 적용했습니다.", "success");
 };
 
-window._applySavedOrderInfo = function (select) {
-  const cid = select?.dataset?.cid;
-  const field = select?.dataset?.field;
+window._applySavedOrderInfo = function (option) {
+  const cid = option?.dataset?.cid;
+  const field = option?.dataset?.field;
+  const identityKey = option?.dataset?.savedIdentityKey;
   const spec = _SAVED_ORDER_INFO_FIELDS[field];
-  if (!cid || !spec || !select.value) return;
+  if (!cid || !spec || !identityKey) return;
   const selected = _activeIdentityContext?.selectedIdentity || null;
-  let identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === select.value);
+  let identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === identityKey);
   const locked = field === "phone" && selected?.type === "sub";
   if (locked) identity = selected;
   const input = document.getElementById(cid + "_" + field);
   const value = String(identity?.[spec.key] || "").trim();
-  if (!input || !value) { select.value = ""; return; }
+  if (!input || !value) return;
 
   input.value = value;
   if (field === "phone") formatPhoneInput(input);
@@ -292,7 +358,10 @@ window._applySavedOrderInfo = function (select) {
     const saveChk = document.getElementById(cid + "_saveIdChk");
     if (saveChk) saveChk.checked = false;
   }
-  select.value = "";
+  const wrap = option.closest(".of-saved-info");
+  const triggerLabel = wrap?.querySelector(".of-saved-info-trigger-label");
+  if (triggerLabel) triggerLabel.textContent = option.textContent;
+  _closeSavedInfoDropdowns();
   _embedSaveForm();
   _syncSubmissionIdentityAction();
   showToast((identity.name || "선택한") + "님의 " + spec.label + "를 적용했습니다.", "success");
@@ -312,7 +381,7 @@ function _embedSaveForm() {
     const scr = document.getElementById("screenOrderForm");
     if (!scr) return;
     const vals = [...scr.querySelectorAll("input, select, textarea")]
-      .filter(el => el.type !== "file" && !el.classList.contains("of-saved-info-select")) // transient picker는 위치 기반 복원에서 제외
+      .filter(el => el.type !== "file")
       .map(el => (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || ""));
     sessionStorage.setItem(_EMBED_FORM_KEY, JSON.stringify(vals));
   } catch (_) { /* noop */ }
@@ -327,7 +396,7 @@ function _embedRestoreForm() {
     const scr = document.getElementById("screenOrderForm");
     if (!scr || !Array.isArray(vals)) return;
     const els = [...scr.querySelectorAll("input, select, textarea")]
-      .filter(el => el.type !== "file" && !el.classList.contains("of-saved-info-select"));
+      .filter(el => el.type !== "file");
     els.forEach((el, i) => {
       try {
         if (i >= vals.length || vals[i] === "" || el.value) return; // 이미 값 있으면 미덮어씀

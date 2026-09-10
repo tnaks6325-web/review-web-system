@@ -85,18 +85,27 @@ ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입�
   && ['userId', 'recipient', 'phone', 'address'].every((field) => appJs.includes(`\${_savedOrderInfoMarkup(cid, "${field}")}`))
   && !/savedOrderInfoMarkup\(cid, "(?:orderNumber|orderer|price)"\)/.test(appJs)
   && /\.of-field-control>\.of-input(?:,|\{)/.test(searchCss));
-ok('드롭다운 선택값은 DOM option으로 만들고 기존 입력 임시저장 순서를 바꾸지 않는다',
-  /const option = document\.createElement\("option"\)/.test(appJs)
+ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순서를 바꾸지 않는다',
+  (appJs.match(/const option = document\.createElement\("button"\)/g) || []).length === 2
   && /option\.textContent =/.test(appJs)
-  && (appJs.match(/!el\.classList\.contains\("of-saved-info-select"\)/g) || []).length === 2);
+  && !/<select class="of-saved-info-select"/.test(appJs)
+  && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 2);
 ok('아이디와 배송주소 저장값이 없어도 빈 상태 선택창을 표시한다',
   /emptyLabel: "저장된 아이디 없음"/.test(appJs)
   && /emptyLabel: "저장된 주소 없음"/.test(appJs)
-  && /placeholder\.textContent = available\.length \? "내 정보에서 선택" : spec\.emptyLabel/.test(appJs)
-  && /select\.disabled = available\.length === 0/.test(appJs)
+  && /triggerLabel\.textContent = available\.length \? "내 정보에서 선택" : spec\.emptyLabel/.test(appJs)
+  && /trigger\.disabled = available\.length === 0/.test(appJs)
   && /wrap\.hidden = false/.test(appJs)
   && !/wrap\.hidden = available\.length === 0/.test(appJs)
-  && /\.of-saved-info-select:disabled\{/.test(searchCss));
+  && /\.of-saved-info-trigger:disabled\{/.test(searchCss));
+ok('모바일 내정보 목록은 시스템 선택창 없이 버튼 아래에 겹쳐 열린다',
+  /class="of-saved-info-trigger"/.test(appJs)
+  && /class="of-saved-info-menu"/.test(appJs)
+  && /aria-expanded="false"/.test(appJs)
+  && /event\.key !== "Escape"/.test(appJs)
+  && /\.of-saved-info\{position:relative/.test(searchCss)
+  && /\.of-saved-info-menu\{position:absolute;top:calc\(100% \+ 3px\)/.test(searchCss)
+  && /\.of-saved-info\.is-open\{z-index:40\}/.test(searchCss));
 ok('저장 계좌 선택은 예금주 아래 한 곳에서 은행·계좌·예금주를 함께 반영한다',
   (appJs.match(/\$\{_savedBankAccountMarkup\(\)\}/g) || []).length === 1
   && /저장된 계좌에서 선택/.test(appJs)
