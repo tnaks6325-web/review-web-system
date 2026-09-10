@@ -112,9 +112,9 @@ function stubPool(handler) {
       '다중 캡처 업로드 묶음과 완료 이력 저장');
     const submitRoute = read('src/routes/submit.routes.js');
     const manualSvc = read('src/services/trackB.service.js');
-    assert.ok(/upload_batch_id = \$4::uuid/.test(submitRoute)
-      && /if \(!completedBatch\.rowCount\) throw/.test(submitRoute),
-      '일반 리뷰 제출은 요청이 지정한 정확한 업로드 묶음만 완료 처리');
+    assert.ok(/s\.file_id = ri\.review_file_id/.test(submitRoute)
+      && /completed_count/.test(submitRoute) && /marked_count/.test(submitRoute),
+      '현재 대표 이미지의 정확한 업로드 묶음만 완료·제출 상태를 원자적으로 처리');
     assert.ok(/REVIEW_COMPLETION_HISTORY_FAILED/.test(submitRoute)
       && /review_completion_history_failed/.test(submitRoute),
       '완료 이력 기록 실패를 제출 성공으로 반환하지 않음');

@@ -102,6 +102,9 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
       if (/FROM review_submissions/.test(String(sql))) {
         return hasCapture ? { rows: [{ x: 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
+      if (/completed_count/.test(String(sql)) && /marked_count/.test(String(sql))) {
+        return { rows: [{ completed_count: 1, marked_count: 1 }], rowCount: 1 };
+      }
       if (/review_file_id/.test(String(sql))) return { rows: [], rowCount: 0 };
       if (/FROM review_index ri/.test(String(sql))) {
         return { rows: [{ capture_slots: captureSlots, income_type: incomeType, is_submitted: false }], rowCount: 1 };
@@ -165,7 +168,7 @@ await ta('★ blog 탭 + 유효 포스팅URL + 캡처 있음 = 통과 + 제출 �
   const { payload, queries } = await callReview({ workKind: 'blog', hasCapture: true }, { ...BASE, memo: 'https://blog.naver.com/a/1' });
   assert.strictEqual(payload.ok, true, JSON.stringify(payload));
   assert.strictEqual(payload.complete, true);
-  assert.ok(queries.some(q => /UPDATE review_index SET is_submitted = TRUE/.test(q.sql)), 'is_submitted 미기록');
+  assert.ok(queries.some(q => /UPDATE review_index(?:\s+ri)?\s+SET is_submitted = TRUE/.test(q.sql)), 'is_submitted 미기록');
 });
 await ta('★★ 127: blog + URL 인데 캡처 0장 = capture_required 거부 (사용자 확정 2026-08-19 — 캡처+URL 둘 다)', async () => {
   const { payload, queries } = await callReview({ workKind: 'blog', hasCapture: false }, { ...BASE, memo: 'https://blog.naver.com/a/1' });
@@ -180,7 +183,7 @@ await ta('★ 127: 리뷰체험단은 캡처 확인 쿼리 자체가 안 나간�
 await ta('★★ 리뷰체험단은 memo 없이도 제출된다 (무회귀 선 — 완화 아님)', async () => {
   const { payload, queries } = await callReview({ workKind: 'review' }, { ...BASE, memo: '' });
   assert.strictEqual(payload.ok, true, JSON.stringify(payload));
-  assert.ok(queries.some(q => /UPDATE review_index SET is_submitted = TRUE/.test(q.sql)));
+  assert.ok(queries.some(q => /UPDATE review_index(?:\s+ri)?\s+SET is_submitted = TRUE/.test(q.sql)));
 });
 await ta('★★ 판정 실패(null)도 리뷰 경로 — 모른다고 blog 로 단정하지 않는다', async () => {
   const { payload } = await callReview({ workKind: null }, { ...BASE, memo: '' });

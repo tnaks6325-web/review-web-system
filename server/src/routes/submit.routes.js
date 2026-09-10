@@ -550,6 +550,7 @@ router.post('/review', async (req, res, next) => {
       //   슬롯 UI가 뜨는 탭은 원장 대조를 거쳐 "필수 슬롯 ⊆ 제출 슬롯"을 확인해야 한다.
       const _effSlots = effectiveCaptureSlots(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
       const isMultiSlot = Array.isArray(_effSlots) && _effSlots.length > 1;
+      let reviewIndexMarkedWithHistory = false;
 
       /* ★★ 블로그체험단은 슬롯 대조를 하지 않는다 — 완료 조건이 위에서 검증한 포스팅URL 이다.
          현영을 겸한 blog 탭은 화면 슬롯이 2개가 되는데(리뷰+현금영수증), 그대로 두면
@@ -575,14 +576,39 @@ router.post('/review', async (req, res, next) => {
             // 구매확정·영수증 전용 작업은 리뷰 캡처 이력이 없으므로 완료 이력을 만들지 않는다.
           } else if (uploadBatchId) {
             const completedBatch = await pool.query(
-              `UPDATE review_submissions
-                  SET completed_at = COALESCE(completed_at, NOW())
-                WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                  AND COALESCE(slot_key, 'review') = 'review'
-                  AND upload_batch_id = $4::uuid`,
+              `WITH current_batch AS (
+                 SELECT 1
+                   FROM review_index ri
+                   JOIN review_submissions s
+                     ON s.sheet_id = ri.sheet_id AND s.tab_name = ri.tab_name
+                    AND s.row_index = ri.row_index AND s.file_id = ri.review_file_id
+                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+                    AND COALESCE(s.slot_key, 'review') = 'review'
+                    AND s.upload_batch_id = $4::uuid
+                  LIMIT 1
+               ), completed_batch AS (
+                 UPDATE review_submissions s
+                    SET completed_at = COALESCE(s.completed_at, NOW())
+                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
+                    AND COALESCE(s.slot_key, 'review') = 'review'
+                    AND s.upload_batch_id = $4::uuid
+                    AND EXISTS (SELECT 1 FROM current_batch)
+                  RETURNING 1
+               ), marked AS (
+                 UPDATE review_index ri
+                    SET is_submitted = TRUE, built_at = NOW()
+                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+                    AND EXISTS (SELECT 1 FROM completed_batch)
+                  RETURNING 1
+               )
+               SELECT (SELECT COUNT(*)::int FROM completed_batch) AS completed_count,
+                      (SELECT COUNT(*)::int FROM marked) AS marked_count`,
               [sheetId, tabName, rowIndex, uploadBatchId]
             );
-            if (!completedBatch.rowCount) throw new Error('제출할 리뷰 업로드 묶음을 찾을 수 없습니다.');
+            if (!completedBatch.rows[0]?.completed_count || !completedBatch.rows[0]?.marked_count) {
+              throw new Error('현재 리뷰 캡처와 일치하는 업로드 묶음을 찾을 수 없습니다.');
+            }
+            reviewIndexMarkedWithHistory = true;
           } else {
             // 보완 제출에서는 리뷰 파일을 이번 요청에 다시 올리지 않는다. 현재 대표 리뷰 파일이
             // 속한 미완료 묶음만 확정해, 이전에 교체된 낡은 묶음을 잘못 완료 처리하지 않는다.
@@ -614,11 +640,13 @@ router.post('/review', async (req, res, next) => {
         }
 
         // 완료 → is_submitted=TRUE (멱등). 이미 TRUE여도 안전.
-        const result = await pool.query(
-          `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
-           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
-          [sheetId, tabName, rowIndex]
-        );
+        const result = reviewIndexMarkedWithHistory
+          ? { rowCount: 1 }
+          : await pool.query(
+            `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
+             WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+            [sheetId, tabName, rowIndex]
+          );
         // 제출 상태의 진실원본은 작업보드 참여자 행이다. 시트 기반 탭도 같은 상태를
         // 함께 확정해야 리뷰어 화면이 인덱스 재생성 시점에 따라 되돌아가지 않는다.
         await pool.query(
