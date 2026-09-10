@@ -14,6 +14,7 @@ const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
 const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
+const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const sheetlessStatus = require('../services/sheetlessStatus.service');
 const shareLinks = require('../services/shareLink.service');   // 작업보드·업체 공유 링크(131)
 const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
@@ -1397,6 +1398,13 @@ router.get('/workdesk/manual-review-precheck', authMiddleware, internalMiddlewar
     }
     res.json({ ...out, existing });
   } catch (err) { next(err); }
+});
+// 작업보드 수동 캡처 전용 프록시. 인트라넷 토큰은 Track A 주소에 직접 접근할 수 없고,
+// 이 Track B 권한 게이트를 통과한 요청에만 서버 내부 표식을 붙여 기존 업로드 핸들러를 재사용한다.
+const _workdeskReviewUpload = _delegate(require('./diag.routes'), 'post', '/review-upload');
+router.post('/workdesk/review-upload', authMiddleware, internalMiddleware, imageApiLimiter, (req, res, next) => {
+  req.trackBUploadAuthorized = true;
+  return _workdeskReviewUpload(req, res, next);
 });
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {

@@ -9474,7 +9474,7 @@ function _rmOpenThread(){
      (1:1문의 첨부 3경로 수렴과 같은 규율).
    ★ 붙여넣기만으로 **자동 제출하지는 않는다** — 제출은 리뷰내역·누적금액까지 확정하는데 되돌릴 창구가
      없어, 오붙여넣기 한 번이 그대로 사고가 된다. 붙이면 즉시 미리보기가 뜨고 [제출 처리] 한 번으로 끝난다.
-   ★ 처리 실행부는 종전과 같다: `/api/image/review-upload`(원장 기록) → `/api/trackb/workdesk/manual-review-submit`
+   ★ 처리 실행부: `/api/trackb/workdesk/review-upload`(원장 기록) → `/api/trackb/workdesk/manual-review-submit`
      (그 행 소유 파일인지 대조 후 작업표·review_index 를 같은 트랜잭션에서 제출 완료로 확정). */
 const _MR_MAX_FILES=5, _MR_MAX_ONE=4*1024*1024, _MR_MAX_ALL=6*1024*1024;
 let _manualReviewState=null;
@@ -9648,7 +9648,7 @@ async function _manualReviewSubmit(){
   let files=[], fileIds=[];
   try{
     files=await Promise.all(state.files.map(async f=>({data:await _manualReviewB64(f),mimeType:f.type||'image/png',name:f.name||'review.png'})));
-    const up=await api('/api/image/review-upload',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,reviewerName:state.row.name||'',campaignName:state.t.tabName,rowIndex:state.row.seq,submitCol:String(state.field||'').slice(4),slotKey:'review',files})});
+    const up=await api('/api/trackb/workdesk/review-upload',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,reviewerName:state.row.name||'',campaignName:state.t.tabName,rowIndex:state.row.seq,submitCol:String(state.field||'').slice(4),slotKey:'review',files})});
     fileIds=(up&&up.files||[]).map(f=>f&&f.fileId).filter(Boolean);
     if(!up||!up.ok||fileIds.length!==files.length) throw new Error((up&&up.error)||'리뷰 캡처 업로드에 실패했습니다.');
   }catch(e){

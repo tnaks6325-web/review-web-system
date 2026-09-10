@@ -92,8 +92,10 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
   const routePath = require.resolve('../src/routes/submit.routes');
   const ssPath = require.resolve('../src/services/sheetlessStatus.service');
   const sheetsPath = require.resolve('../src/services/sheets.service');
+  const sessionPath = require.resolve('../src/services/reviewerSession.service');
+  const ownershipPath = require.resolve('../src/services/reviewerTargetOwnership.service');
   const saved = {};
-  for (const p of [poolPath, wkPath, rtPath, routePath, ssPath, sheetsPath]) saved[p] = require.cache[p];
+  for (const p of [poolPath, wkPath, rtPath, routePath, ssPath, sheetsPath, sessionPath, ownershipPath]) saved[p] = require.cache[p];
 
   const db = {
     async query(sql, params) {
@@ -101,6 +103,9 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
       // 127: blog 캡처 확인 2쿼리(원장 → 대표 이미지 폴백) — hasCapture 로 시나리오를 가른다
       if (/FROM review_submissions/.test(String(sql))) {
         return hasCapture ? { rows: [{ x: 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (/completed_count/.test(String(sql)) && /marked_count/.test(String(sql))) {
+        return { rows: [{ completed_count: 1, marked_count: 1 }], rowCount: 1 };
       }
       if (/review_file_id/.test(String(sql))) return { rows: [], rowCount: 0 };
       if (/FROM review_index ri/.test(String(sql))) {
@@ -122,6 +127,8 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
     writeSheet: async () => ({}), readSheet: async () => [], appendSheet: async () => ({}),
     getSpreadsheetMeta: async () => ({}), batchReadSheet: async () => [], batchUpdateSheet: async () => ({}),
   } };
+  require.cache[sessionPath] = { exports: { verifyReviewerSession: () => ({ ownerReviewerId: 'owner-1', loginPhone8: '12345678' }) } };
+  require.cache[ownershipPath] = { exports: { ownsReviewerTarget: async () => true } };
   delete require.cache[routePath];
   const router = require('../src/routes/submit.routes');
   const restore = () => {
@@ -139,13 +146,16 @@ async function callReview(opts, body) {
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
     let payload = null;
     const res = { json(o) { payload = o; return this; }, status() { return this; } };
-    await handler({ body }, res, e => { payload = { thrown: e && e.message }; });
+    await handler({ body, headers: { 'x-reviewer-token': 'test-reviewer-token' } }, res, e => { payload = { thrown: e && e.message }; });
     await new Promise(r => setImmediate(r));   // 배경 작업이 던져도 테스트가 죽지 않게 한 틱 양보
     return { payload, queries };
   } finally { restore(); }
 }
 
-const BASE = { sheetId: 'S', tabName: 'T', rowIndex: 7, submitCol: '리뷰제출', gid: '1' };
+const BASE = {
+  sheetId: 'S', tabName: 'T', rowIndex: 7, submitCol: '리뷰제출', gid: '1',
+  uploadBatchId: '11111111-1111-4111-8111-111111111111',
+};
 
 await ta('★★ blog 탭 + 포스팅URL 없음 = 거부', async () => {
   const { payload, queries } = await callReview({ workKind: 'blog' }, { ...BASE, memo: '' });
@@ -162,7 +172,7 @@ await ta('★ blog 탭 + 유효 포스팅URL + 캡처 있음 = 통과 + 제출 �
   const { payload, queries } = await callReview({ workKind: 'blog', hasCapture: true }, { ...BASE, memo: 'https://blog.naver.com/a/1' });
   assert.strictEqual(payload.ok, true, JSON.stringify(payload));
   assert.strictEqual(payload.complete, true);
-  assert.ok(queries.some(q => /UPDATE review_index SET is_submitted = TRUE/.test(q.sql)), 'is_submitted 미기록');
+  assert.ok(queries.some(q => /UPDATE review_index(?:\s+ri)?\s+SET is_submitted = TRUE/.test(q.sql)), 'is_submitted 미기록');
 });
 await ta('★★ 127: blog + URL 인데 캡처 0장 = capture_required 거부 (사용자 확정 2026-08-19 — 캡처+URL 둘 다)', async () => {
   const { payload, queries } = await callReview({ workKind: 'blog', hasCapture: false }, { ...BASE, memo: 'https://blog.naver.com/a/1' });
@@ -172,12 +182,12 @@ await ta('★★ 127: blog + URL 인데 캡처 0장 = capture_required 거부 (�
 });
 await ta('★ 127: 리뷰체험단은 캡처 확인 쿼리 자체가 안 나간다(무회귀 — blog 전용 게이트)', async () => {
   const { queries } = await callReview({ workKind: 'review', hasCapture: false }, { ...BASE, memo: '' });
-  assert.ok(!queries.some(q => /FROM review_submissions/.test(q.sql)), '리뷰 경로가 blog 캡처 게이트를 탄다');
+  assert.ok(!queries.some(q => /SELECT 1 FROM review_submissions/.test(q.sql)), '리뷰 경로가 blog 캡처 게이트를 탄다');
 });
 await ta('★★ 리뷰체험단은 memo 없이도 제출된다 (무회귀 선 — 완화 아님)', async () => {
   const { payload, queries } = await callReview({ workKind: 'review' }, { ...BASE, memo: '' });
   assert.strictEqual(payload.ok, true, JSON.stringify(payload));
-  assert.ok(queries.some(q => /UPDATE review_index SET is_submitted = TRUE/.test(q.sql)));
+  assert.ok(queries.some(q => /UPDATE review_index(?:\s+ri)?\s+SET is_submitted = TRUE/.test(q.sql)));
 });
 await ta('★★ 판정 실패(null)도 리뷰 경로 — 모른다고 blog 로 단정하지 않는다', async () => {
   const { payload } = await callReview({ workKind: null }, { ...BASE, memo: '' });

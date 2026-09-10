@@ -22,30 +22,51 @@ let driveUploadCalls = 0;
 
 const completedBytes = 'virtual-completed-review-image';
 const pendingBytes = 'virtual-uploaded-but-not-submitted-image';
+const historicalBytes = 'virtual-legacy-extra-completed-image';
+const siblingBytes = 'virtual-second-image-in-completed-batch';
 const uniqueBytes = 'virtual-new-review-image';
 const completedHash = reviewInspect.hashBase64(completedBytes);
 const pendingHash = reviewInspect.hashBase64(pendingBytes);
+const historicalHash = reviewInspect.hashBase64(historicalBytes);
+const siblingHash = reviewInspect.hashBase64(siblingBytes);
 
 const virtualRows = [
   {
     file_hash: completedHash, file_id: 'VIRTUAL_COMPLETED_FILE', sheet_id: 'SHEET-A',
     tab_name: '구매양식-완료', row_index: 101, slot_key: 'review', phone8: '12345678',
     ri_submitted: true, cp_submitted: false, submitted_at: '2026-09-10T03:00:00.000Z',
-    recipient_name: '김수만',
+    recipient_name: '김수만', representative: true, completed: true, legacy: true,
   },
   {
     file_hash: pendingHash, file_id: 'VIRTUAL_PENDING_FILE', sheet_id: 'SHEET-A',
     tab_name: '구매양식-미완료', row_index: 102, slot_key: 'review', phone8: '12345678',
-    ri_submitted: false, cp_submitted: false, submitted_at: null, recipient_name: '박대기',
+    ri_submitted: false, cp_submitted: false, submitted_at: null, recipient_name: '박대기', representative: true,
+  },
+  {
+    file_hash: historicalHash, file_id: 'VIRTUAL_LEGACY_EXTRA_FILE', sheet_id: 'SHEET-A',
+    tab_name: '구매양식-완료', row_index: 101, slot_key: 'review', phone8: '12345678',
+    ri_submitted: true, cp_submitted: true, submitted_at: '2026-09-10T03:00:00.000Z',
+    recipient_name: '김수만', representative: false, completed: false, legacy: true,
+  },
+  {
+    file_hash: siblingHash, file_id: 'VIRTUAL_COMPLETED_SIBLING', sheet_id: 'SHEET-A',
+    tab_name: '구매양식-완료', row_index: 101, slot_key: 'review', phone8: '12345678',
+    ri_submitted: true, cp_submitted: true, submitted_at: '2026-09-10T03:00:01.000Z',
+    recipient_name: '김수만', representative: false, completed: true,
   },
 ];
 
 function duplicateQuery(sql, params) {
+  if (/LEFT JOIN participation_links pl/.test(sql) && /LEFT JOIN campaign_participants cp/.test(sql)) {
+    const [sheetId, tabName, rowIndex] = params;
+    return { rows: sheetId === 'SHEET-B' && tabName === '현재구매양식' && Number(rowIndex) === 201 ? [{ owned: 1 }] : [] };
+  }
   if (!/FROM review_submissions s/.test(sql)) return { rows: [] };
   const [hash, fallbackName, sheetId, tabName, rowIndex, phone8] = params;
   const rows = virtualRows
     .filter((r) => r.file_hash === hash && r.slot_key === 'review')
     .filter((r) => r.phone8 === phone8)
+    .filter((r) => r.completed || r.legacy)
     .filter((r) => r.ri_submitted || r.cp_submitted)
     .filter((r) => !(r.sheet_id === sheetId && r.tab_name === tabName
       && Number(r.row_index) === Number(rowIndex)))
@@ -71,9 +92,11 @@ app.use('/api/image', router);
 app.use((err, req, res, next) => res.status(500).json({ ok: false, error: err.message }));
 
 function post(baseUrl, path, token, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['X-Reviewer-Token'] = token;
   return fetch(baseUrl + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Reviewer-Token': token },
+    headers,
     body: JSON.stringify(body),
   }).then(async (res) => ({ status: res.status, body: await res.json() }));
 }
@@ -115,6 +138,42 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(currentRow.body.duplicate, null);
     console.log('  통과 ③ 현재 구매양식의 같은 행 재첨부 → 중복 아님');
 
+    const historical = await post(baseUrl, '/api/image/review-precheck', token, {
+      base64: historicalBytes, mimeType: 'image/png', sheetId: 'SHEET-B',
+      tabName: '현재구매양식', rowIndex: 201, slotKey: 'review',
+    });
+    assert.strictEqual(historical.status, 200);
+    assert.strictEqual(historical.body.duplicate.fileId, 'VIRTUAL_LEGACY_EXTRA_FILE');
+    console.log('  통과 ④ 묶음 도입 전 완료 행의 추가 리뷰 사진 → 중복');
+
+    const sibling = await post(baseUrl, '/api/image/review-precheck', token, {
+      base64: siblingBytes, mimeType: 'image/png', sheetId: 'SHEET-B',
+      tabName: '현재구매양식', rowIndex: 201, slotKey: 'review',
+    });
+    assert.strictEqual(sibling.status, 200);
+    assert.strictEqual(sibling.body.duplicate.fileId, 'VIRTUAL_COMPLETED_SIBLING');
+    console.log('  통과 ⑤ 완료된 다중 이미지 묶음의 두 번째 사진 → 중복');
+
+    const unauthenticated = await post(baseUrl, '/api/image/review-upload', null, {
+      sheetId: 'SHEET-B', tabName: '현재구매양식', rowIndex: 201,
+      reviewerName: '가상리뷰어', slotKey: 'review',
+      files: [{ data: uniqueBytes, mimeType: 'image/png', name: '새사진.png' }],
+    });
+    assert.strictEqual(unauthenticated.status, 401);
+    assert.strictEqual(unauthenticated.body.code, 'REVIEW_UPLOAD_AUTH_REQUIRED');
+    assert.strictEqual(driveUploadCalls, 0);
+    console.log('  통과 ⑥ 인증 없는 리뷰 업로드 → 저장 전 401 거부');
+
+    const foreignTarget = await post(baseUrl, '/api/image/review-upload', token, {
+      sheetId: 'SHEET-X', tabName: '다른참여자구매양식', rowIndex: 999,
+      reviewerName: '가상리뷰어', slotKey: 'receipt',
+      files: [{ data: uniqueBytes, mimeType: 'image/png', name: '새사진.png' }],
+    });
+    assert.strictEqual(foreignTarget.status, 403);
+    assert.strictEqual(foreignTarget.body.code, 'REVIEW_UPLOAD_TARGET_FORBIDDEN');
+    assert.strictEqual(driveUploadCalls, 0);
+    console.log('  통과 ⑦ 타 참여자 행·비리뷰 슬롯 지정 → 저장 전 403 거부');
+
     const upload = await post(baseUrl, '/api/image/review-upload', token, {
       sheetId: 'SHEET-B', tabName: '현재구매양식', rowIndex: 201,
       reviewerName: '가상리뷰어', slotKey: 'review',
@@ -129,10 +188,10 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(upload.body.error, '이미 제출됬던 사진이에요');
     assert.strictEqual(upload.body.files[0].rejected, 'duplicate_submitted');
     assert.strictEqual(driveUploadCalls, 0);
-    console.log('  통과 ④ 두 장 중 한 장이 완료 중복 → 두 장 모두 저장 전 차단');
-    console.log('  통과 ⑤ Drive 업로드 호출 0회 → 차단 후 외부 저장 없음');
+    console.log('  통과 ⑧ 두 장 중 한 장이 완료 중복 → 두 장 모두 저장 전 차단');
+    console.log('  통과 ⑨ Drive 업로드 호출 0회 → 차단 후 외부 저장 없음');
 
-    console.log('\n결과: 5 통과 / 0 실패 (운영 DB·Drive 접촉 0)');
+    console.log('\n결과: 9 통과 / 0 실패 (운영 DB·Drive 접촉 0)');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     reviewInspect.__setPoolForTest(null);

@@ -1,4 +1,6 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
+const { randomUUID } = require('crypto');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
@@ -31,7 +33,23 @@ function verifiedReviewerIdentity(req) {
     const session = verifyReviewerSession(token);
     const phone8 = String(session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     if (phone8.length !== 8) return null;
-    return { reviewerName: String(session.loginName || '').trim(), phone8 };
+    return { reviewerName: String(session.loginName || '').trim(), phone8, session };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** 리뷰어 토큰이 없는 수동 업로드는 내부 담당자 JWT로만 허용한다. */
+function verifiedInternalUploadIdentity(req) {
+  const auth = String(req.headers.authorization || '');
+  const match = /^Bearer\s+(.+)$/i.exec(auth);
+  if (!match) return null;
+  try {
+    const decoded = jwt.verify(match[1], process.env.JWT_SECRET);
+    if (!decoded || !['master', 'admin', 'staff'].includes(decoded.role)) return null;
+    if (decoded.via === 'reviewer_campaign') return null;
+    if (decoded.via === 'intranet' && req.trackBUploadAuthorized !== true) return null;
+    return decoded;
   } catch (_) {
     return null;
   }
@@ -1635,12 +1653,30 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;
     const slot = (slotKey || 'review').toString().trim() || 'review';
     const reviewerIdentity = verifiedReviewerIdentity(req);
+    const internalIdentity = verifiedInternalUploadIdentity(req);
 
     if (!files || !Array.isArray(files) || files.length === 0) {
       return res.json({ ok: false, error: '업로드할 파일이 필요합니다.' });
     }
     if (!sheetId || !tabName) {
       return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
+    }
+    if (!reviewerIdentity && !internalIdentity) {
+      return res.status(401).json({
+        ok: false, code: 'REVIEW_UPLOAD_AUTH_REQUIRED',
+        error: '리뷰어 로그인을 다시 확인해주세요.',
+      });
+    }
+    if (reviewerIdentity) {
+      const ownsTarget = await require('../services/reviewerTargetOwnership.service').ownsReviewerTarget({
+        session: reviewerIdentity.session, sheetId, tabName, rowIndex,
+      });
+      if (!ownsTarget) {
+        return res.status(403).json({
+          ok: false, code: 'REVIEW_UPLOAD_TARGET_FORBIDDEN',
+          error: '이 구매양식의 리뷰를 제출할 권한이 없습니다.',
+        });
+      }
     }
 
     const _riSvc = require('../services/reviewInspect.service');
@@ -1665,6 +1701,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         }
       }
     }
+    // 한 업로드 요청의 여러 리뷰 이미지를 같은 제출 묶음으로 보존한다.
+    const uploadBatchId = randomUUID();
 
     const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
@@ -2004,18 +2042,21 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       //   ★ 자동 분류로 슬롯 구성이 바뀐 호출은 아래 recomputePrimary 가 원장 기준으로
       //     대표를 다시 계산한다(여기 레거시 경로는 라우팅 없을 때 종전 그대로).
       const _routedAny = uploadResults.some(r => r && (r.routed || r.rejected));
+      let primaryMappingError = null;
       if (slot === 'review' && !_routedAny) {
         try {
           const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
-          await pool.query(
+          const linked = await pool.query(
             `UPDATE review_index
                 SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
                     review_file_count = $4, review_file_at = NOW()
               WHERE sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
             [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, rowIdx]
           );
+          if (!linked.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
         } catch (linkErr) {
-          logger.warn(`[review-upload] 인덱스 파일링크 저장 실패 (무시): ${linkErr.message}`);
+          primaryMappingError = linkErr;
+          logger.error(`[review-upload] 인덱스 파일링크 저장 실패: ${linkErr.message}`);
         }
       }
 
@@ -2023,6 +2064,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       //   ★ file_hash 는 여기서 함께 넣는다 — base64 를 이미 쥔 시점이라 계산 비용이 0이고,
       //     나중에 UPDATE 로 채우면 그 사이 올라온 다른 파일이 중복 대조 대상을 놓친다.
       const _inspect = require('../services/reviewInspect.service');
+      let submissionLedgerError = null;
       for (const r of uploadResults) {
         if (!r.fileId) continue;
         const _b64 = (files[r.index - 1] && files[r.index - 1].data) || '';
@@ -2032,15 +2074,30 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           await pool.query(
             `INSERT INTO review_submissions
                (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
-                file_id, file_url, file_name, source, slot_key, file_hash, uploaded_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,NOW())
+                file_id, file_url, file_name, source, slot_key, file_hash, upload_batch_id,
+                completed_at, uploaded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,$12,
+               CASE WHEN
+                 EXISTS (
+                   SELECT 1 FROM review_index ri
+                    WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $4
+                      AND ri.is_submitted = TRUE
+                 ) OR EXISTS (
+                   SELECT 1 FROM campaign_participants cp
+                    WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $4
+                      AND cp.deleted_at IS NULL AND cp.is_submitted = TRUE
+                 )
+               THEN NOW() ELSE NULL END,
+               NOW())
              ON CONFLICT (file_id) DO UPDATE
                SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
                    row_index = EXCLUDED.row_index, review_index_id = EXCLUDED.review_index_id,
                    reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key,
-                   file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash)`,
+                   file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash),
+                   upload_batch_id = EXCLUDED.upload_batch_id,
+                   completed_at = COALESCE(review_submissions.completed_at, EXCLUDED.completed_at)`,
             [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
-             r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash]
+             r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash, uploadBatchId]
           );
           // 자동 분류로 이동된 파일은 이동 이력을 함께 남긴다(되돌리기의 유일한 재료)
           if (r.routed) {
@@ -2048,7 +2105,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
               .markRouted({ fileId: r.fileId, fromSlot: r.routed.from, by: 'auto:upload' });
           }
         } catch (subErr) {
-          logger.warn(`[review-upload] 제출원장 기록 실패 (무시): ${subErr.message}`);
+          submissionLedgerError = submissionLedgerError || subErr;
+          logger.error(`[review-upload] 제출원장 기록 실패: ${subErr.message}`);
         }
 
         // ── 2차 검수(M1): 상품명·같은 파일·본문 겹침 대조 후 review_inspections 에 기록 ──
@@ -2076,7 +2134,22 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       // 자동 분류로 review 슬롯 구성이 바뀌었으면 대표 이미지를 원장 기준으로 재계산
       //   (영수증이 대표로 남거나, 옮겨 들어온 리뷰가 대표에 안 잡히는 것 방지)
       if (_routedAny) {
-        await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
+        const recomputed = await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
+        if (!recomputed?.ok) primaryMappingError = new Error(recomputed?.error || '대표 이미지 재계산 실패');
+      }
+      if (submissionLedgerError) {
+        return res.status(503).json({
+          ok: false, code: 'REVIEW_SUBMISSION_LEDGER_FAILED', uploaded: successCount,
+          total: files.length, files: uploadResults,
+          error: '리뷰 파일 기록에 실패했습니다. 잠시 후 다시 제출해주세요.',
+        });
+      }
+      if (primaryMappingError) {
+        return res.status(503).json({
+          ok: false, code: 'REVIEW_PRIMARY_LINK_FAILED', uploaded: successCount,
+          total: files.length, files: uploadResults,
+          error: '리뷰 파일 연결에 실패했습니다. 잠시 후 다시 제출해주세요.',
+        });
       }
     }
 
@@ -2087,6 +2160,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       total: files.length,
       files: uploadResults,
       reviewFolderUrl: reviewFolderUrl || '',
+      uploadBatchId,
       replacedCurrent,
       // 전부 반려면 실패 사유를 최상위 error 로도 실어준다(단일 첨부 화면의 기존 오류 표시 경로)
       ...(successCount === 0 && _rejectedResults.length ? { error: _rejectedResults[0].message } : {}),

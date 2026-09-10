@@ -2762,7 +2762,10 @@ function _showDuplicateBlockModal(d, anchor) {
   </div>`;
   overlay.querySelector('button').addEventListener('click', () => {
     overlay.remove();
-    if (anchor && typeof anchor.click === 'function') anchor.click();
+    const fileInput = anchor && (anchor.matches?.('input[type="file"]')
+      ? anchor : anchor.querySelector?.('input[type="file"]'));
+    if (fileInput && typeof fileInput.click === 'function') fileInput.click();
+    else if (anchor && typeof anchor.click === 'function') anchor.click();
   });
   document.body.appendChild(overlay);
 }
@@ -3298,6 +3301,7 @@ async function _submitReviewSlots(item) {
   const uploadErrors = [];
   const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
   let replacedCurrent = false;
+  let reviewUploadBatchId = null;
   try {
     // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
     for (const slot of slotsToUpload) {
@@ -3347,6 +3351,9 @@ async function _submitReviewSlots(item) {
         const rejectedF = flist.filter(r => r && r.rejected);
         const routedF = flist.filter(r => r && r.routed);
         const stayed = flist.some(r => r && r.fileId && !r.routed);
+        const suppliedReview = (slot.key === 'review' && stayed)
+          || routedF.some(r => r.routed && r.routed.to === 'review');
+        if (suppliedReview && upRes.uploadBatchId) reviewUploadBatchId = upRes.uploadBatchId;
         slotOutcome[slot.key] = { stayed, movedTo: routedF.map(r => r.routed.to) };
         const bad = flist.find(r => r && r.verdict && r.verdict.status === "mismatch" && !r.routed && !r.rejected);
         if (rejectedF.length) {
@@ -3400,6 +3407,7 @@ async function _submitReviewSlots(item) {
       value:        submitTimeValue,
       campaignName: item.campaignName,
       memo,
+      uploadBatchId: reviewUploadBatchId,
     }, 30000);
     hideLoading();
 
@@ -3539,6 +3547,7 @@ async function submitReview() {
       }
 
       try {
+        let reviewUploadBatchId = null;
         // ★ 파일명에 사용할 이름: 수취인명 우선, 없으면 reviewer_name fallback
         //   (업로드를 건너뛰는 blog 건도 Step 2 제출 기록에 쓴다 → 블록 밖에 둔다)
         const reviewerName = item.recipientName || item.displayName || "이름없음";
@@ -3586,6 +3595,7 @@ async function submitReview() {
             }))
           }, 180000);
           replacedCurrent = replacedCurrent || !!(uploadResult && uploadResult.replacedCurrent);
+          if (uploadResult && uploadResult.uploadBatchId) reviewUploadBatchId = uploadResult.uploadBatchId;
 
           if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
             const _rj0 = uploadResult && Array.isArray(uploadResult.files)
@@ -3635,6 +3645,7 @@ async function submitReview() {
           value:            submitTimeValue,
           campaignName:     item.campaignName,
           memo,
+          uploadBatchId:    reviewUploadBatchId,
         }, 30000);
 
         hideLoading();

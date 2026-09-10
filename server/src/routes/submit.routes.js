@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
@@ -464,10 +465,32 @@ router.post('/find-slot', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/review', async (req, res, next) => {
   try {
-    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo } = req.body;
+    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo, uploadBatchId } = req.body;
 
     if (!sheetId || !tabName || !rowIndex) {
       return res.json({ error: '필수 파라미터 누락 (sheetId, tabName, rowIndex)' });
+    }
+    let reviewerSession = null;
+    const reviewerToken = req.headers['x-reviewer-token'];
+    if (reviewerToken) {
+      try { reviewerSession = verifyReviewerSession(reviewerToken); }
+      catch (_) { return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인을 다시 확인해주세요.' }); }
+    } else {
+      const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+      let internal = null;
+      try { internal = bearer && jwt.verify(bearer[1], process.env.JWT_SECRET); } catch (_) {}
+      if (!internal || !['master', 'admin', 'staff'].includes(internal.role)
+          || ['reviewer_campaign', 'intranet'].includes(internal.via)) {
+        return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
+      }
+    }
+    if (reviewerSession) {
+      const ownsTarget = await require('../services/reviewerTargetOwnership.service').ownsReviewerTarget({
+        session: reviewerSession, sheetId, tabName, rowIndex,
+      });
+      if (!ownsTarget) {
+        return res.status(403).json({ ok: false, code: 'REVIEW_SUBMIT_TARGET_FORBIDDEN', error: '이 구매양식의 리뷰를 제출할 권한이 없습니다.' });
+      }
     }
 
     const submitValue = value || '제출';
@@ -526,6 +549,7 @@ router.post('/review', async (req, res, next) => {
     let dbUpdated = false;     // is_submitted=TRUE 로 전이/유지되었는지
     let complete = true;       // 모든 필요 슬롯 충족 여부
     let missingSlots = [];
+    let completionHistoryError = null;
     try {
       // 탭의 필요 슬롯 + 현재 행의 is_submitted 조회
       const { rows: ctxRows } = await pool.query(
@@ -542,12 +566,14 @@ router.post('/review', async (req, res, next) => {
       //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
       const _rt = await reviewTypeForTab({ sheetId, tabName });
       const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
+      const requiresReviewHistory = required.includes('review');
       // ★★ 슬롯 모드 판정은 required 개수가 아니라 **화면 슬롯(effectiveCaptureSlots)** 기준.
       //   현금영수증 슬롯이 선택(required:false)이 되면서 현영 탭도 required=['review'] 하나가 됐는데,
       //   그걸 근거로 fast-path를 타면 **영수증만 올리고 제출해도 완료**가 된다(리뷰 캡처 0장).
       //   슬롯 UI가 뜨는 탭은 원장 대조를 거쳐 "필수 슬롯 ⊆ 제출 슬롯"을 확인해야 한다.
       const _effSlots = effectiveCaptureSlots(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
       const isMultiSlot = Array.isArray(_effSlots) && _effSlots.length > 1;
+      let reviewIndexMarkedWithHistory = false;
 
       /* ★★ 블로그체험단은 슬롯 대조를 하지 않는다 — 완료 조건이 위에서 검증한 포스팅URL 이다.
          현영을 겸한 blog 탭은 화면 슬롯이 2개가 되는데(리뷰+현금영수증), 그대로 두면
@@ -566,12 +592,107 @@ router.post('/review', async (req, res, next) => {
       }
 
       if (complete) {
+        // 이번 제출 요청이 실제로 업로드한 리뷰 묶음만 상태 확정보다 먼저 완료 이력으로 고정한다.
+        // 이 기록이 실패하면 중복 차단 근거가 사라지므로 제출 성공으로 응답하지 않는다.
+        try {
+          if (!requiresReviewHistory) {
+            // 구매확정·영수증 전용 작업은 리뷰 캡처 이력이 없으므로 완료 이력을 만들지 않는다.
+          } else if (uploadBatchId) {
+            const completedBatch = await pool.query(
+              `WITH locked_row AS (
+                 SELECT review_file_id
+                   FROM review_index
+                  WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                  FOR UPDATE
+               ), current_batch AS (
+                 SELECT 1
+                   FROM locked_row lr
+                   JOIN review_submissions s ON s.file_id = lr.review_file_id
+                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
+                    AND COALESCE(s.slot_key, 'review') = 'review'
+                    AND s.upload_batch_id = $4::uuid
+                  LIMIT 1
+               ), completed_batch AS (
+                 UPDATE review_submissions s
+                    SET completed_at = COALESCE(s.completed_at, NOW())
+                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
+                    AND COALESCE(s.slot_key, 'review') = 'review'
+                    AND s.upload_batch_id = $4::uuid
+                    AND EXISTS (SELECT 1 FROM current_batch)
+                  RETURNING 1
+               ), marked AS (
+                 UPDATE review_index ri
+                    SET is_submitted = TRUE, built_at = NOW()
+                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+                    AND EXISTS (SELECT 1 FROM completed_batch)
+                  RETURNING 1
+               )
+               SELECT (SELECT COUNT(*)::int FROM completed_batch) AS completed_count,
+                      (SELECT COUNT(*)::int FROM marked) AS marked_count`,
+              [sheetId, tabName, rowIndex, uploadBatchId]
+            );
+            if (!completedBatch.rows[0]?.completed_count || !completedBatch.rows[0]?.marked_count) {
+              throw new Error('현재 리뷰 캡처와 일치하는 업로드 묶음을 찾을 수 없습니다.');
+            }
+            reviewIndexMarkedWithHistory = true;
+          } else {
+            // 보완 제출에서는 리뷰 파일을 이번 요청에 다시 올리지 않는다. 현재 대표 리뷰 파일이
+            // 속한 묶음을 확정한다. 새 슬롯 추가로 재오픈된 행은 이 묶음이 이미 완료 상태일 수
+            // 있으므로 completed_at 여부와 무관하게 현재 대표를 인정한다. 배치 컬럼 도입 전에 올린
+            // 대표 파일은 그 파일 한 건만 처리해, 이전에 교체된 낡은 파일까지 편입하지 않는다.
+            const completedPendingBatch = await pool.query(
+              `WITH locked_row AS (
+                 SELECT review_file_id
+                   FROM review_index
+                  WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                  FOR UPDATE
+               ), current_review AS (
+                 SELECT s2.upload_batch_id, s2.file_id
+                   FROM review_submissions s2
+                   JOIN locked_row lr ON lr.review_file_id = s2.file_id
+                  WHERE s2.sheet_id = $1 AND s2.tab_name = $2 AND s2.row_index = $3
+                    AND COALESCE(s2.slot_key, 'review') = 'review'
+                  LIMIT 1
+               ), completed_batch AS (
+                 UPDATE review_submissions s
+                    SET completed_at = COALESCE(s.completed_at, NOW())
+                   FROM current_review cr
+                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
+                    AND COALESCE(s.slot_key, 'review') = 'review'
+                    AND (
+                      (cr.upload_batch_id IS NOT NULL AND s.upload_batch_id = cr.upload_batch_id)
+                      OR (cr.upload_batch_id IS NULL AND s.upload_batch_id IS NULL AND s.file_id = cr.file_id)
+                    )
+                  RETURNING 1
+               ), marked AS (
+                 UPDATE review_index ri
+                    SET is_submitted = TRUE, built_at = NOW()
+                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+                    AND EXISTS (SELECT 1 FROM completed_batch)
+                  RETURNING 1
+               )
+               SELECT (SELECT COUNT(*)::int FROM completed_batch) AS completed_count,
+                      (SELECT COUNT(*)::int FROM marked) AS marked_count`,
+              [sheetId, tabName, rowIndex]
+            );
+            if (!completedPendingBatch.rows[0]?.completed_count && !wasSubmitted) {
+              throw new Error('리뷰 업로드 묶음 정보가 없습니다. 화면을 새로고침한 뒤 다시 제출해주세요.');
+            }
+            reviewIndexMarkedWithHistory = !!completedPendingBatch.rows[0]?.marked_count;
+          }
+        } catch (batchErr) {
+          batchErr.code = 'REVIEW_COMPLETION_HISTORY_FAILED';
+          throw batchErr;
+        }
+
         // 완료 → is_submitted=TRUE (멱등). 이미 TRUE여도 안전.
-        const result = await pool.query(
-          `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
-           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
-          [sheetId, tabName, rowIndex]
-        );
+        const result = reviewIndexMarkedWithHistory
+          ? { rowCount: 1 }
+          : await pool.query(
+            `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
+             WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+            [sheetId, tabName, rowIndex]
+          );
         // 제출 상태의 진실원본은 작업보드 참여자 행이다. 시트 기반 탭도 같은 상태를
         // 함께 확정해야 리뷰어 화면이 인덱스 재생성 시점에 따라 되돌아가지 않는다.
         await pool.query(
@@ -643,7 +764,15 @@ router.post('/review', async (req, res, next) => {
         logger.info(`[submit/review] 부분 제출 — 미충족 슬롯: ${missingSlots.join(', ')} (row=${rowIndex})`);
       }
     } catch (dbErr) {
+      if (dbErr.code === 'REVIEW_COMPLETION_HISTORY_FAILED') completionHistoryError = dbErr;
       logger.warn(`[submit/review] DB 업데이트 실패: ${dbErr.message}`);
+    }
+
+    if (completionHistoryError) {
+      return res.status(503).json({
+        ok: false, code: 'review_completion_history_failed',
+        error: '리뷰 제출 완료 기록에 실패했습니다. 잠시 후 다시 제출해주세요.',
+      });
     }
 
     // ── ★ Step 2: 즉시 응답 반환 (DB 저장 완료 = 제출 성공) ──

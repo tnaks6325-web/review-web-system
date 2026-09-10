@@ -55,6 +55,9 @@ function stubPool(handler) {
     assert.ok(/LEFT JOIN review_index/.test(sql) && /LEFT JOIN campaign_participants/.test(sql), '두 완료 원장 결합');
     assert.ok(/COALESCE\(ri\.is_submitted, FALSE\) OR COALESCE\(cp\.is_submitted, FALSE\)/.test(sql),
       'review_index 또는 작업보드 참여자 제출완료만');
+    assert.ok(/s\.completed_at IS NOT NULL/.test(sql)
+      && /OR s\.upload_batch_id IS NULL/.test(sql),
+      '신규 완료 이력 또는 묶음 도입 전 완료 행의 모든 리뷰 캡처를 중복 처리');
     ok('A3: 구매양식 매핑 + 두 원장 중 하나의 is_submitted=TRUE 필수');
 
     // A4: 다른 작업이면 sameTab=false
@@ -96,10 +99,71 @@ function stubPool(handler) {
     const driveUploadAt = dg.indexOf('driveService.uploadFileBase64', uploadAt);
     assert.ok(hardBlockAt > uploadAt && hardBlockAt < driveUploadAt, '중복 차단이 Drive 업로드보다 먼저');
     assert.ok(/message: '이미 제출됬던 사진이에요'/.test(dg.slice(uploadAt, driveUploadAt)), '서버 차단 문구');
+    assert.ok(/REVIEW_UPLOAD_AUTH_REQUIRED/.test(dg.slice(uploadAt, driveUploadAt)),
+      '리뷰어 토큰이나 내부 담당자 인증이 없으면 업로드 자체를 거부');
     assert.ok(/replacedCurrent/.test(dg.slice(uploadAt)), '같은 행 재첨부는 교체 결과로 반환');
     const migration = read('migrations/154_review_duplicate_completed_lookup.sql');
     assert.ok(/\(sheet_id, tab_name, row_index\)/.test(migration) && /INCLUDE \(is_submitted, phone8, recipient_name\)/.test(migration),
       '완료 상태 결합은 행 복합 커버링 인덱스를 사용');
+    const batchMigration = read('migrations/155_review_submission_upload_batch.sql');
+    const legacyBackfill = read('migrations/156_review_submission_legacy_completion.sql');
+    const sa = front('js/search-app.js');
+    assert.ok(/ADD COLUMN IF NOT EXISTS upload_batch_id UUID/.test(batchMigration)
+      && /ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ/.test(batchMigration),
+      '다중 캡처 업로드 묶음과 완료 이력 저장');
+    assert.ok(/UPDATE review_submissions s[\s\S]*?s\.upload_batch_id IS NULL[\s\S]*?ri\.is_submitted = TRUE[\s\S]*?cp\.is_submitted = TRUE/.test(legacyBackfill),
+      '묶음 도입 전 완료 행의 여러 리뷰 파일을 모두 완료 이력으로 백필');
+    const submitRoute = read('src/routes/submit.routes.js');
+    const manualSvc = read('src/services/trackB.service.js');
+    assert.ok(/s\.file_id = lr\.review_file_id/.test(submitRoute)
+      && /completed_count/.test(submitRoute) && /marked_count/.test(submitRoute),
+      '현재 대표 이미지의 정확한 업로드 묶음만 완료·제출 상태를 원자적으로 처리');
+    assert.ok(/REVIEW_COMPLETION_HISTORY_FAILED/.test(submitRoute)
+      && /review_completion_history_failed/.test(submitRoute),
+      '완료 이력 기록 실패를 제출 성공으로 반환하지 않음');
+    assert.ok(/if \(!reviewerIdentity && !internalIdentity\)/.test(dg),
+      '요청 슬롯과 무관하게 리뷰어 또는 내부 신원을 검증');
+    assert.ok(/REVIEW_UPLOAD_TARGET_FORBIDDEN/.test(dg)
+      && /REVIEW_SUBMIT_TARGET_FORBIDDEN/.test(submitRoute),
+      '업로드와 제출 모두 세션 소유자의 구매양식 행만 허용');
+    const ownership = read('src/services/reviewerTargetOwnership.service.js');
+    assert.ok(/\$6::boolean = FALSE[\s\S]*?cp\.seq IS NOT NULL[\s\S]*?cp\.owner_reviewer_id = \$4::uuid[\s\S]*?cp\.phone8 = ANY\(\$5::text\[\]\)[\s\S]*?cp\.seq IS NULL[\s\S]*?pl\.owner_reviewer_id = \$4::uuid/.test(ownership),
+      '본계정도 현재 작업보드 참여자가 있으면 과거 참여 링크보다 현재 소유자·연락처를 우선');
+    assert.ok(/isSubAccount = session\.loginKind === 'sub'/.test(ownership)
+      && /\$6::boolean = TRUE[\s\S]*?cp\.seq IS NOT NULL[\s\S]*?cp\.phone8 = \$7/.test(ownership)
+      && /cp\.seq IS NULL[\s\S]*?pl\.phone8 = \$7 OR ri\.phone8 = \$7/.test(ownership)
+      && /if \(!isSubAccount\)[\s\S]*?getOwnerScopeByLoginPhone8/.test(ownership),
+      '서브계정은 현재 작업보드 참여자 연락처를 우선하고 현재 행이 없을 때만 과거 링크를 사용');
+    const trackB = read('src/routes/trackB.routes.js');
+    const workdesk = front('workdesk.html');
+    assert.ok(/trackBUploadAuthorized !== true/.test(dg)
+      && /'reviewer_campaign', 'intranet'/.test(submitRoute),
+      'Track B 인트라넷 토큰은 Track A 업로드·제출 경로에서 거부');
+    assert.ok(/router\.post\('\/workdesk\/review-upload'[\s\S]*?trackBUploadAuthorized = true/.test(trackB)
+      && /\/api\/trackb\/workdesk\/review-upload/.test(workdesk),
+      '작업보드 수동 캡처는 내부 권한을 거친 Track B 전용 프록시 사용');
+    assert.ok(/REVIEW_SUBMISSION_LEDGER_FAILED/.test(dg) && /uploadBatchId/.test(dg),
+      '업로드 원장 기록 실패를 성공으로 숨기지 않고 묶음 ID를 반환');
+    assert.ok(/completed_at, uploaded_at\)[\s\S]*?ri\.is_submitted = TRUE[\s\S]*?cp\.is_submitted = TRUE[\s\S]*?completed_at = COALESCE\(review_submissions\.completed_at, EXCLUDED\.completed_at\)/.test(dg),
+      '이미 제출된 행의 리뷰 교체 묶음은 업로드 즉시 완료 이력으로 보존');
+    assert.ok(/REVIEW_PRIMARY_LINK_FAILED/.test(dg) && /if \(!linked\.rowCount\) throw/.test(dg),
+      '대표 이미지 연결·재계산 실패를 업로드 성공으로 숨기지 않음');
+    assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)
+      && /lr\.review_file_id = s2\.file_id/.test(submitRoute),
+      '리뷰 슬롯 작업만 완료 이력을 요구하고 보완 제출은 현재 대표 묶음을 확정');
+    const complementHistory = /current_review AS \([\s\S]*?\), completed_batch AS/.exec(submitRoute)?.[0] || '';
+    assert.ok(!/s2\.completed_at IS NULL/.test(complementHistory)
+      && /SET completed_at = COALESCE\(s\.completed_at, NOW\(\)\)/.test(submitRoute),
+      '새 슬롯 추가로 재오픈된 행은 이미 완료된 현재 대표 리뷰를 재업로드 없이 인정');
+    assert.ok(/cr\.upload_batch_id IS NULL[\s\S]*?s\.file_id = cr\.file_id/.test(submitRoute),
+      '배치 도입 전 미완료 파일은 현재 대표 파일 한 건만 완료 처리');
+    assert.ok((submitRoute.match(/FOR UPDATE/g) || []).length >= 2,
+      '대표 파일 검증부터 제출 상태 전환까지 행 잠금으로 재첨부와 직렬화');
+    assert.ok(/r\.routed\.to === 'review'/.test(sa),
+      '자동 이동 후 최종 리뷰 슬롯에 들어간 업로드 묶음을 제출 요청에 전달');
+    assert.ok(/uploadBatchId: reviewUploadBatchId/.test(sa), '프런트가 업로드 응답의 정확한 묶음 ID를 제출 요청에 전달');
+    assert.ok(/SET completed_at = COALESCE\(completed_at, NOW\(\)\)[\s\S]*?file_id = ANY\(\$4::text\[\]\)/.test(manualSvc),
+      '작업보드 수동 제출은 선택 파일을 완료 처리');
     ok('B2: ★ 프런트 우회도 Drive 업로드 전에 차단 · 같은 행은 교체 허용');
   }
 
@@ -118,6 +182,7 @@ function stubPool(handler) {
       '★★ 중복 차단은 제출 및 AI 우회 체크로도 해제 불가');
     assert.ok(/사진 중복 여부를 확인하고 있어요/.test(sa), '비동기 확인 중 제출 경쟁 차단');
     assert.ok(/다른 사진 선택/.test(sa) && /_showDuplicateBlockModal/.test(sa), '차단 팝업과 재선택 버튼');
+    assert.ok(/querySelector\?\.\('input\[type="file"\]'\)/.test(sa), '다른 사진 선택은 슬롯 내부 파일 입력을 직접 연다');
     assert.ok(/현재 건의 리뷰 캡처를 교체하였습니다\./.test(sa), '같은 행 재첨부 완료 문구');
     ok('C1: ★★ 첨부 즉시 차단 팝업 · 제출이력 표시 · 우회 불가 · 같은 행 교체 허용');
 
