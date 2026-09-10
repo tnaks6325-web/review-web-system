@@ -23,10 +23,12 @@ let driveUploadCalls = 0;
 const completedBytes = 'virtual-completed-review-image';
 const pendingBytes = 'virtual-uploaded-but-not-submitted-image';
 const historicalBytes = 'virtual-old-upload-not-used-at-completion';
+const siblingBytes = 'virtual-second-image-in-completed-batch';
 const uniqueBytes = 'virtual-new-review-image';
 const completedHash = reviewInspect.hashBase64(completedBytes);
 const pendingHash = reviewInspect.hashBase64(pendingBytes);
 const historicalHash = reviewInspect.hashBase64(historicalBytes);
+const siblingHash = reviewInspect.hashBase64(siblingBytes);
 
 const virtualRows = [
   {
@@ -46,6 +48,12 @@ const virtualRows = [
     ri_submitted: true, cp_submitted: true, submitted_at: '2026-09-10T03:00:00.000Z',
     recipient_name: '김수만', representative: false,
   },
+  {
+    file_hash: siblingHash, file_id: 'VIRTUAL_COMPLETED_SIBLING', sheet_id: 'SHEET-A',
+    tab_name: '구매양식-완료', row_index: 101, slot_key: 'review', phone8: '12345678',
+    ri_submitted: true, cp_submitted: true, submitted_at: '2026-09-10T03:00:01.000Z',
+    recipient_name: '김수만', representative: false, same_batch: true,
+  },
 ];
 
 function duplicateQuery(sql, params) {
@@ -54,7 +62,7 @@ function duplicateQuery(sql, params) {
   const rows = virtualRows
     .filter((r) => r.file_hash === hash && r.slot_key === 'review')
     .filter((r) => r.phone8 === phone8)
-    .filter((r) => r.representative)
+    .filter((r) => r.representative || r.same_batch)
     .filter((r) => r.ri_submitted || r.cp_submitted)
     .filter((r) => !(r.sheet_id === sheetId && r.tab_name === tabName
       && Number(r.row_index) === Number(rowIndex)))
@@ -134,6 +142,14 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(historical.body.duplicate, null);
     console.log('  통과 ④ 완료 행에 남은 과거 미사용 업로드 → 중복 아님');
 
+    const sibling = await post(baseUrl, '/api/image/review-precheck', token, {
+      base64: siblingBytes, mimeType: 'image/png', sheetId: 'SHEET-B',
+      tabName: '현재구매양식', rowIndex: 201, slotKey: 'review',
+    });
+    assert.strictEqual(sibling.status, 200);
+    assert.strictEqual(sibling.body.duplicate.fileId, 'VIRTUAL_COMPLETED_SIBLING');
+    console.log('  통과 ⑤ 완료된 다중 이미지 묶음의 두 번째 사진 → 중복');
+
     const unauthenticated = await post(baseUrl, '/api/image/review-upload', null, {
       sheetId: 'SHEET-B', tabName: '현재구매양식', rowIndex: 201,
       reviewerName: '가상리뷰어', slotKey: 'review',
@@ -142,7 +158,7 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(unauthenticated.status, 401);
     assert.strictEqual(unauthenticated.body.code, 'REVIEW_UPLOAD_AUTH_REQUIRED');
     assert.strictEqual(driveUploadCalls, 0);
-    console.log('  통과 ⑤ 인증 없는 리뷰 업로드 → 저장 전 401 거부');
+    console.log('  통과 ⑥ 인증 없는 리뷰 업로드 → 저장 전 401 거부');
 
     const upload = await post(baseUrl, '/api/image/review-upload', token, {
       sheetId: 'SHEET-B', tabName: '현재구매양식', rowIndex: 201,
@@ -158,10 +174,10 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(upload.body.error, '이미 제출됬던 사진이에요');
     assert.strictEqual(upload.body.files[0].rejected, 'duplicate_submitted');
     assert.strictEqual(driveUploadCalls, 0);
-    console.log('  통과 ⑥ 두 장 중 한 장이 완료 중복 → 두 장 모두 저장 전 차단');
-    console.log('  통과 ⑦ Drive 업로드 호출 0회 → 차단 후 외부 저장 없음');
+    console.log('  통과 ⑦ 두 장 중 한 장이 완료 중복 → 두 장 모두 저장 전 차단');
+    console.log('  통과 ⑧ Drive 업로드 호출 0회 → 차단 후 외부 저장 없음');
 
-    console.log('\n결과: 7 통과 / 0 실패 (운영 DB·Drive 접촉 0)');
+    console.log('\n결과: 8 통과 / 0 실패 (운영 DB·Drive 접촉 0)');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     reviewInspect.__setPoolForTest(null);

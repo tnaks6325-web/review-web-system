@@ -1045,13 +1045,15 @@ async function findOwnDuplicate({ fileHash, sheetId, tabName, rowIndex, reviewer
          FROM review_submissions s
          LEFT JOIN review_index ri
            ON ri.sheet_id = s.sheet_id AND ri.tab_name = s.tab_name AND ri.row_index = s.row_index
+         LEFT JOIN review_submissions rep ON rep.file_id = ri.review_file_id
          LEFT JOIN campaign_participants cp
            ON cp.sheet_id = s.sheet_id AND cp.tab_name = s.tab_name AND cp.seq = s.row_index
           AND cp.deleted_at IS NULL
         WHERE s.file_hash = $1
           AND COALESCE(s.slot_key, 'review') = 'review'
           AND (NULLIF(ri.phone8, '') = $6 OR NULLIF(cp.phone8, '') = $6)
-          AND ri.review_file_id = s.file_id
+          AND (ri.review_file_id = s.file_id OR
+               (s.upload_batch_id IS NOT NULL AND rep.upload_batch_id = s.upload_batch_id))
           AND (COALESCE(ri.is_submitted, FALSE) OR COALESCE(cp.is_submitted, FALSE))
           AND NOT (s.sheet_id = $3 AND s.tab_name = $4
                    AND COALESCE(s.row_index, -1) = COALESCE($5::int, -1))

@@ -55,8 +55,9 @@ function stubPool(handler) {
     assert.ok(/LEFT JOIN review_index/.test(sql) && /LEFT JOIN campaign_participants/.test(sql), '두 완료 원장 결합');
     assert.ok(/COALESCE\(ri\.is_submitted, FALSE\) OR COALESCE\(cp\.is_submitted, FALSE\)/.test(sql),
       'review_index 또는 작업보드 참여자 제출완료만');
-    assert.ok(/ri\.review_file_id = s\.file_id/.test(sql),
-      '완료 행의 현재 대표 캡처로 매핑된 파일만 중복 처리');
+    assert.ok(/ri\.review_file_id = s\.file_id/.test(sql)
+      && /rep\.upload_batch_id = s\.upload_batch_id/.test(sql),
+      '완료 행의 대표 캡처와 같은 업로드 묶음 파일만 중복 처리');
     ok('A3: 구매양식 매핑 + 두 원장 중 하나의 is_submitted=TRUE 필수');
 
     // A4: 다른 작업이면 sameTab=false
@@ -104,6 +105,8 @@ function stubPool(handler) {
     const migration = read('migrations/154_review_duplicate_completed_lookup.sql');
     assert.ok(/\(sheet_id, tab_name, row_index\)/.test(migration) && /INCLUDE \(is_submitted, phone8, recipient_name\)/.test(migration),
       '완료 상태 결합은 행 복합 커버링 인덱스를 사용');
+    const batchMigration = read('migrations/155_review_submission_upload_batch.sql');
+    assert.ok(/ADD COLUMN IF NOT EXISTS upload_batch_id UUID/.test(batchMigration), '다중 캡처 업로드 묶음 저장');
     ok('B2: ★ 프런트 우회도 Drive 업로드 전에 차단 · 같은 행은 교체 허용');
   }
 

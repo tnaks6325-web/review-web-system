@@ -1,5 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { randomUUID } = require('crypto');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
@@ -1688,6 +1689,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         }
       }
     }
+    // 한 업로드 요청의 여러 리뷰 이미지를 같은 제출 묶음으로 보존한다.
+    const uploadBatchId = randomUUID();
 
     const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
@@ -2055,15 +2058,16 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           await pool.query(
             `INSERT INTO review_submissions
                (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
-                file_id, file_url, file_name, source, slot_key, file_hash, uploaded_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,NOW())
+                file_id, file_url, file_name, source, slot_key, file_hash, upload_batch_id, uploaded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,$12,NOW())
              ON CONFLICT (file_id) DO UPDATE
                SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
                    row_index = EXCLUDED.row_index, review_index_id = EXCLUDED.review_index_id,
                    reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key,
-                   file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash)`,
+                   file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash),
+                   upload_batch_id = EXCLUDED.upload_batch_id`,
             [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
-             r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash]
+             r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash, uploadBatchId]
           );
           // 자동 분류로 이동된 파일은 이동 이력을 함께 남긴다(되돌리기의 유일한 재료)
           if (r.routed) {
