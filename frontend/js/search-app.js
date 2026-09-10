@@ -2762,7 +2762,10 @@ function _showDuplicateBlockModal(d, anchor) {
   </div>`;
   overlay.querySelector('button').addEventListener('click', () => {
     overlay.remove();
-    if (anchor && typeof anchor.click === 'function') anchor.click();
+    const fileInput = anchor && (anchor.matches?.('input[type="file"]')
+      ? anchor : anchor.querySelector?.('input[type="file"]'));
+    if (fileInput && typeof fileInput.click === 'function') fileInput.click();
+    else if (anchor && typeof anchor.click === 'function') anchor.click();
   });
   document.body.appendChild(overlay);
 }

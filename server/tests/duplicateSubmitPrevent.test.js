@@ -55,6 +55,8 @@ function stubPool(handler) {
     assert.ok(/LEFT JOIN review_index/.test(sql) && /LEFT JOIN campaign_participants/.test(sql), '두 완료 원장 결합');
     assert.ok(/COALESCE\(ri\.is_submitted, FALSE\) OR COALESCE\(cp\.is_submitted, FALSE\)/.test(sql),
       'review_index 또는 작업보드 참여자 제출완료만');
+    assert.ok(/ri\.review_file_id = s\.file_id/.test(sql),
+      '완료 행의 현재 대표 캡처로 매핑된 파일만 중복 처리');
     ok('A3: 구매양식 매핑 + 두 원장 중 하나의 is_submitted=TRUE 필수');
 
     // A4: 다른 작업이면 sameTab=false
@@ -96,6 +98,8 @@ function stubPool(handler) {
     const driveUploadAt = dg.indexOf('driveService.uploadFileBase64', uploadAt);
     assert.ok(hardBlockAt > uploadAt && hardBlockAt < driveUploadAt, '중복 차단이 Drive 업로드보다 먼저');
     assert.ok(/message: '이미 제출됬던 사진이에요'/.test(dg.slice(uploadAt, driveUploadAt)), '서버 차단 문구');
+    assert.ok(/REVIEW_UPLOAD_AUTH_REQUIRED/.test(dg.slice(uploadAt, driveUploadAt)),
+      '리뷰어 토큰이나 내부 담당자 인증이 없으면 업로드 자체를 거부');
     assert.ok(/replacedCurrent/.test(dg.slice(uploadAt)), '같은 행 재첨부는 교체 결과로 반환');
     const migration = read('migrations/154_review_duplicate_completed_lookup.sql');
     assert.ok(/\(sheet_id, tab_name, row_index\)/.test(migration) && /INCLUDE \(is_submitted, phone8, recipient_name\)/.test(migration),
@@ -118,6 +122,7 @@ function stubPool(handler) {
       '★★ 중복 차단은 제출 및 AI 우회 체크로도 해제 불가');
     assert.ok(/사진 중복 여부를 확인하고 있어요/.test(sa), '비동기 확인 중 제출 경쟁 차단');
     assert.ok(/다른 사진 선택/.test(sa) && /_showDuplicateBlockModal/.test(sa), '차단 팝업과 재선택 버튼');
+    assert.ok(/querySelector\?\.\('input\[type="file"\]'\)/.test(sa), '다른 사진 선택은 슬롯 내부 파일 입력을 직접 연다');
     assert.ok(/현재 건의 리뷰 캡처를 교체하였습니다\./.test(sa), '같은 행 재첨부 완료 문구');
     ok('C1: ★★ 첨부 즉시 차단 팝업 · 제출이력 표시 · 우회 불가 · 같은 행 교체 허용');
 

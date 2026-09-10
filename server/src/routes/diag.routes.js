@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
@@ -32,6 +33,21 @@ function verifiedReviewerIdentity(req) {
     const phone8 = String(session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     if (phone8.length !== 8) return null;
     return { reviewerName: String(session.loginName || '').trim(), phone8 };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** 리뷰어 토큰이 없는 수동 업로드는 내부 담당자 JWT로만 허용한다. */
+function verifiedInternalUploadIdentity(req) {
+  const auth = String(req.headers.authorization || '');
+  const match = /^Bearer\s+(.+)$/i.exec(auth);
+  if (!match) return null;
+  try {
+    const decoded = jwt.verify(match[1], process.env.JWT_SECRET);
+    if (!decoded || !['master', 'admin', 'staff'].includes(decoded.role)) return null;
+    if (decoded.via === 'reviewer_campaign') return null;
+    return decoded;
   } catch (_) {
     return null;
   }
@@ -1635,12 +1651,19 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;
     const slot = (slotKey || 'review').toString().trim() || 'review';
     const reviewerIdentity = verifiedReviewerIdentity(req);
+    const internalIdentity = verifiedInternalUploadIdentity(req);
 
     if (!files || !Array.isArray(files) || files.length === 0) {
       return res.json({ ok: false, error: '업로드할 파일이 필요합니다.' });
     }
     if (!sheetId || !tabName) {
       return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
+    }
+    if (slot === 'review' && !reviewerIdentity && !internalIdentity) {
+      return res.status(401).json({
+        ok: false, code: 'REVIEW_UPLOAD_AUTH_REQUIRED',
+        error: '리뷰어 로그인을 다시 확인해주세요.',
+      });
     }
 
     const _riSvc = require('../services/reviewInspect.service');
