@@ -89,6 +89,14 @@ ok('드롭다운 선택값은 DOM option으로 만들고 기존 입력 임시저
   /const option = document\.createElement\("option"\)/.test(appJs)
   && /option\.textContent =/.test(appJs)
   && (appJs.match(/!el\.classList\.contains\("of-saved-info-select"\)/g) || []).length === 2);
+ok('아이디와 배송주소 저장값이 없어도 빈 상태 선택창을 표시한다',
+  /emptyLabel: "저장된 아이디 없음"/.test(appJs)
+  && /emptyLabel: "저장된 주소 없음"/.test(appJs)
+  && /placeholder\.textContent = available\.length \? "내 정보에서 선택" : spec\.emptyLabel/.test(appJs)
+  && /select\.disabled = available\.length === 0/.test(appJs)
+  && /wrap\.hidden = false/.test(appJs)
+  && !/wrap\.hidden = available\.length === 0/.test(appJs)
+  && /\.of-saved-info-select:disabled\{/.test(searchCss));
 ok('AI 상태 배지는 드롭다운 전체가 아니라 입력창 전용 래퍼에 고정한다',
   (appJs.match(/class="of-input-status-wrap"/g) || []).length === 3
   && /\.of-input-status-wrap\{position:relative;width:100%/.test(searchCss)

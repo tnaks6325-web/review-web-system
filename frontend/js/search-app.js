@@ -120,10 +120,10 @@ function _selectShoppingIdSave(cid) {
 }
 
 const _SAVED_ORDER_INFO_FIELDS = Object.freeze({
-  userId: { key: "shoppingId", label: "아이디" },
-  recipient: { key: "name", label: "수취인" },
-  phone: { key: "phone", label: "연락처" },
-  address: { key: "address", label: "배송주소" },
+  userId: { key: "shoppingId", label: "아이디", emptyLabel: "저장된 아이디 없음" },
+  recipient: { key: "name", label: "수취인", emptyLabel: "저장된 수취인 없음" },
+  phone: { key: "phone", label: "연락처", emptyLabel: "저장된 연락처 없음" },
+  address: { key: "address", label: "배송주소", emptyLabel: "저장된 주소 없음" },
 });
 
 function _savedOrderInfoMarkup(cid, field) {
@@ -174,7 +174,7 @@ function _renderSavedOrderInfoPickers() {
       select.replaceChildren();
       const placeholder = document.createElement("option");
       placeholder.value = "";
-      placeholder.textContent = "내 정보에서 선택";
+      placeholder.textContent = available.length ? "내 정보에서 선택" : spec.emptyLabel;
       select.appendChild(placeholder);
       available.forEach((item) => {
         const option = document.createElement("option");
@@ -183,7 +183,8 @@ function _renderSavedOrderInfoPickers() {
           + (item.type === "sub" ? "타계정" : "본계정") + " — " + item[spec.key];
         select.appendChild(option);
       });
-      wrap.hidden = available.length === 0;
+      select.disabled = available.length === 0;
+      wrap.hidden = false;
       const lockNote = wrap.querySelector(".of-saved-info-lock");
       const isParticipantPhone = field === "phone" && selected?.type === "sub";
       if (lockNote) lockNote.hidden = !isParticipantPhone;
