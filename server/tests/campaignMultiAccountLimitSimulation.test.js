@@ -97,7 +97,27 @@ function step(label, actual, expected) {
   const newDay = await attempt({ campaignId: 'camp-new-day', phone8: '60000002', limit: 1, dayStartIso: todayStart });
   step('전날 제출 건은 오늘 한도에 포함하지 않음', newDay, { allowed: true, used: 1, limit: 1 });
 
-  console.log('\n✅ campaignMultiAccountLimitSimulation: 10개 시나리오 통과');
+  // 사용자 지정 시나리오: 한도 3계정, 등록 타계정 5개.
+  const fiveSubs = ['70000001', '70000002', '70000003', '70000004', '70000005'];
+  const fiveAttempts = [];
+  for (const phone8 of fiveSubs) {
+    fiveAttempts.push(await attempt({ campaignId: 'camp-limit-3', phone8, limit: 3 }));
+  }
+  step('한도 3·타계정 5개: 앞의 3개만 허용되고 4·5번째는 차단',
+    fiveAttempts.map((result) => result.allowed), [true, true, true, false, false]);
+  const limitThreeUsage = await countCampaignSubDailyUsage(fakeDb, {
+    campaignId: 'camp-limit-3', ownerPhone8: '11112222', dayStartIso: todayStart,
+  });
+  step('한도 3·타계정 5개: 차단 뒤 실제 사용량은 3으로 유지', limitThreeUsage, 3);
+
+  rows.find((row) => row.campaignId === 'camp-limit-3' && row.phone8 === fiveSubs[0]).expiresAt = new Date(now - 1).toISOString();
+  const fourthAfterExpiry = await attempt({ campaignId: 'camp-limit-3', phone8: fiveSubs[3], limit: 3 });
+  const fifthStillBlocked = await attempt({ campaignId: 'camp-limit-3', phone8: fiveSubs[4], limit: 3 });
+  step('한도 3·타계정 5개: 1건 만료 후 4번째는 허용되고 5번째는 계속 차단',
+    [fourthAfterExpiry.allowed, fourthAfterExpiry.used, fifthStillBlocked.allowed, fifthStillBlocked.used],
+    [true, 3, false, 3]);
+
+  console.log('\n✅ campaignMultiAccountLimitSimulation: 13개 시나리오 통과');
 })().catch((error) => {
   console.error('❌ campaignMultiAccountLimitSimulation:', error.stack || error.message);
   process.exit(1);
