@@ -367,10 +367,19 @@ input,textarea,button{font-family:inherit}
 .of-field{display:flex;align-items:center;margin-bottom:10px;gap:8px}
 .of-label{width:58px;flex-shrink:0;font-size:.76rem;font-weight:700;color:var(--t2);text-align:right}
 .of-input{flex:1;border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.88rem;color:var(--t1);background:var(--card);outline:none;transition:border-color .15s}
+.of-field-control{flex:1;min-width:0}
+.of-field-control>.of-input,.of-input-status-wrap>.of-input{width:100%;box-sizing:border-box}
+.of-input-status-wrap{position:relative;width:100%;min-width:0}
 .of-input:focus{border-color:var(--p);box-shadow:0 0 0 3px rgba(49,130,246,.12)}
 .of-input::placeholder{color:var(--t3);font-size:.82rem}
 .of-textarea{min-height:54px;resize:vertical;line-height:1.45;font-family:inherit}
 .of-save-id{white-space:normal}
+.of-saved-info{margin-top:5px}
+.of-saved-info[hidden],.of-saved-info-lock[hidden]{display:none}
+.of-saved-info-select{display:block;width:100%;min-height:34px;padding:5px 30px 5px 9px;border:1px solid #cbd9ee;border-radius:8px;background:#f7faff;color:#344054;font:inherit;font-size:.72rem;outline:none;cursor:pointer}
+.of-saved-info-select:focus{border-color:var(--p);box-shadow:0 0 0 3px rgba(49,130,246,.1)}
+.of-saved-info-lock{display:flex;align-items:center;gap:5px;margin-top:5px;color:#6d28d9;font-size:.66rem;font-weight:700}
+.of-participant-phone{color:#4c1d95!important;background:#f5f3ff!important;border-color:#c4b5fd!important}
 .of-identity-context{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:7px;margin:0 0 9px;padding:9px 10px;color:#5B21B6;border:1px solid #DDD6FE;border-left:4px solid #6D28D9;border-radius:10px;background:#F5F3FF;font-size:.72rem;line-height:1.35}
 .of-identity-context .of-identity-kicker{font-size:.62rem;font-weight:800;color:#7C3AED;letter-spacing:.04em;white-space:nowrap}
 .of-identity-context .of-identity-name{min-width:0;overflow:hidden;color:#4C1D95;font-size:.82rem;font-weight:800;text-overflow:ellipsis;white-space:nowrap}
@@ -638,11 +647,13 @@ input,textarea,button{font-family:inherit}
   #screenOrderForm .of-field{display:grid;grid-template-columns:76px minmax(0,1fr);align-items:center;gap:8px;margin-bottom:8px}
   #screenOrderForm .of-label{width:auto;min-width:0;color:#344054;font-size:.75rem;line-height:1.25;text-align:left;word-break:keep-all}
   #screenOrderForm .of-input,#screenOrderForm .of-autocomplete-wrap{width:100%;min-width:0;max-width:100%}
+  #screenOrderForm .of-field-control{width:100%;min-width:0;max-width:100%}
   #screenOrderForm .of-input{min-height:42px;padding:7px 10px;border-width:1px;border-radius:11px;font-size:.9rem;box-sizing:border-box}
   #screenOrderForm .of-textarea{min-height:58px;padding:8px 10px;overflow-wrap:anywhere}
   #screenOrderForm .of-field--stack{grid-template-columns:minmax(0,1fr);gap:4px}
-  #screenOrderForm .of-field--stack>.of-label,#screenOrderForm .of-field--stack>.of-input{grid-column:1}
-  #screenOrderForm .of-save-id{grid-column:2;margin:-2px 0 1px!important;font-size:.67rem!important;line-height:1.35}
+  #screenOrderForm .of-field--stack>.of-label,#screenOrderForm .of-field--stack>.of-field-control{grid-column:1}
+  #screenOrderForm .of-saved-info-select{min-height:36px;border-radius:9px;font-size:.7rem}
+  #screenOrderForm .of-save-id{grid-column:2;margin:5px 0 1px!important;font-size:.67rem!important;line-height:1.35}
   #screenOrderForm .of-save-id input{flex:0 0 auto}
   #screenOrderForm .of-error-msg{margin-top:-3px;margin-bottom:6px;margin-left:84px}
   #screenOrderForm .of-option-picker{margin-bottom:10px;padding:10px 11px}

@@ -87,6 +87,7 @@ async function _loadOrderIdentityContext() {
         who.setAttribute("aria-label", "현재 참여 명의 " + identityName + " " + identityKind);
       }
     });
+    _renderSavedOrderInfoPickers();
     return data;
   })().catch((err) => { _identityContextPromise = null; throw err; });
   return _identityContextPromise;
@@ -117,6 +118,130 @@ function _selectShoppingIdSave(cid) {
     if (other) other.checked = false;
   });
 }
+
+const _SAVED_ORDER_INFO_FIELDS = Object.freeze({
+  userId: { key: "shoppingId", label: "아이디" },
+  recipient: { key: "name", label: "수취인" },
+  phone: { key: "phone", label: "연락처" },
+  address: { key: "address", label: "배송주소" },
+});
+
+function _savedOrderInfoMarkup(cid, field) {
+  const label = _SAVED_ORDER_INFO_FIELDS[field]?.label || "내 정보";
+  return '<div class="of-saved-info" id="' + cid + '_' + field + 'SavedInfo" hidden>'
+    + '<select class="of-saved-info-select" data-cid="' + cid + '" data-field="' + field + '" '
+    + 'aria-label="' + label + ' 내 정보에서 선택" onchange="_applySavedOrderInfo(this)">'
+    + '<option value="">내 정보에서 선택</option></select>'
+    + '<span class="of-saved-info-lock" hidden><i class="fas fa-lock"></i> 참여 신청 전화번호 · 변경 불가</span>'
+    + '</div>';
+}
+
+function _scopedSavedOrderIdentities() {
+  const selected = _activeIdentityContext?.selectedIdentity || null;
+  let identities = Array.isArray(_activeIdentityContext?.savedIdentities)
+    ? _activeIdentityContext.savedIdentities.filter(Boolean)
+    : (selected ? [selected] : []);
+  if (selected?.type === "sub") {
+    identities = identities.filter((item) => item.identityKey === selected.identityKey);
+    if (!identities.length) identities = [selected];
+  }
+  return identities;
+}
+
+function _restoreSavedInfoInputHandler(el, cid, field, locked) {
+  if (!el || locked) return;
+  if (field === "userId") el.oninput = () => _ofClearError(cid + "_userId");
+  else if (field === "recipient") el.oninput = () => {
+    _ofClearError(cid + "_recipient"); _invalidateIdentityApproval(cid);
+  };
+  else if (field === "phone") el.oninput = function () {
+    formatPhoneInput(this); _ofClearError(cid + "_phone"); _invalidateIdentityApproval(cid);
+  };
+  else if (field === "address") el.oninput = () => {
+    _ofClearError(cid + "_address"); _invalidateIdentityApproval(cid);
+  };
+}
+
+function _renderSavedOrderInfoPickers() {
+  const identities = _scopedSavedOrderIdentities();
+  const selected = _activeIdentityContext?.selectedIdentity || null;
+  (_orderCardIds || []).forEach((cid) => {
+    Object.entries(_SAVED_ORDER_INFO_FIELDS).forEach(([field, spec]) => {
+      const wrap = document.getElementById(cid + "_" + field + "SavedInfo");
+      const select = wrap?.querySelector(".of-saved-info-select");
+      if (!wrap || !select) return;
+      const available = identities.filter((item) => String(item?.[spec.key] || "").trim());
+      select.replaceChildren();
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "내 정보에서 선택";
+      select.appendChild(placeholder);
+      available.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.identityKey;
+        option.textContent = (item.name || "저장 정보") + " · "
+          + (item.type === "sub" ? "타계정" : "본계정") + " — " + item[spec.key];
+        select.appendChild(option);
+      });
+      wrap.hidden = available.length === 0;
+      const lockNote = wrap.querySelector(".of-saved-info-lock");
+      const isParticipantPhone = field === "phone" && selected?.type === "sub";
+      if (lockNote) lockNote.hidden = !isParticipantPhone;
+      if (isParticipantPhone) {
+        const phoneEl = document.getElementById(cid + "_phone");
+        if (phoneEl) {
+          phoneEl.value = selected.phone || "";
+          formatPhoneInput(phoneEl);
+          phoneEl.readOnly = true;
+          phoneEl.dataset.participantPhoneLocked = "1";
+          phoneEl.classList.add("of-participant-phone");
+          phoneEl.setAttribute("aria-readonly", "true");
+        }
+      }
+    });
+  });
+}
+
+window._applySavedOrderInfo = function (select) {
+  const cid = select?.dataset?.cid;
+  const field = select?.dataset?.field;
+  const spec = _SAVED_ORDER_INFO_FIELDS[field];
+  if (!cid || !spec || !select.value) return;
+  const selected = _activeIdentityContext?.selectedIdentity || null;
+  let identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === select.value);
+  const locked = field === "phone" && selected?.type === "sub";
+  if (locked) identity = selected;
+  const input = document.getElementById(cid + "_" + field);
+  const value = String(identity?.[spec.key] || "").trim();
+  if (!input || !value) { select.value = ""; return; }
+
+  input.value = value;
+  if (field === "phone") formatPhoneInput(input);
+  input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
+  input.classList.toggle("of-participant-phone", locked);
+  input.readOnly = locked;
+  input.removeAttribute("tabindex");
+  if (locked) {
+    input.dataset.participantPhoneLocked = "1";
+    input.setAttribute("aria-readonly", "true");
+  } else {
+    delete input.dataset.participantPhoneLocked;
+    input.removeAttribute("aria-readonly");
+  }
+  input.style.paddingRight = "";
+  input.parentElement?.querySelector(".ai-lock-badge")?.remove();
+  _restoreSavedInfoInputHandler(input, cid, field, locked);
+  _ofClearError(cid + "_" + field);
+  if (["recipient", "phone", "address"].includes(field)) _invalidateIdentityApproval(cid);
+  if (field === "userId" && selected && identity.identityKey !== selected.identityKey) {
+    const saveChk = document.getElementById(cid + "_saveIdChk");
+    if (saveChk) saveChk.checked = false;
+  }
+  select.value = "";
+  _embedSaveForm();
+  _syncSubmissionIdentityAction();
+  showToast((identity.name || "선택한") + "님의 " + spec.label + "를 적용했습니다.", "success");
+};
 function _embedPost(msg) {
   if (_EMBED_CTX && window.parent !== window) {
     try { window.parent.postMessage(msg, location.origin); } catch (_) { /* noop */ }
@@ -132,7 +257,7 @@ function _embedSaveForm() {
     const scr = document.getElementById("screenOrderForm");
     if (!scr) return;
     const vals = [...scr.querySelectorAll("input, select, textarea")]
-      .filter(el => el.type !== "file") // file input은 저장·복원 불가(복원 시 InvalidStateError) — 양쪽에서 동일하게 제외해 인덱스 정렬 유지
+      .filter(el => el.type !== "file" && !el.classList.contains("of-saved-info-select")) // transient picker는 위치 기반 복원에서 제외
       .map(el => (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || ""));
     sessionStorage.setItem(_EMBED_FORM_KEY, JSON.stringify(vals));
   } catch (_) { /* noop */ }
@@ -146,7 +271,8 @@ function _embedRestoreForm() {
     const vals = JSON.parse(raw);
     const scr = document.getElementById("screenOrderForm");
     if (!scr || !Array.isArray(vals)) return;
-    const els = [...scr.querySelectorAll("input, select, textarea")].filter(el => el.type !== "file");
+    const els = [...scr.querySelectorAll("input, select, textarea")]
+      .filter(el => el.type !== "file" && !el.classList.contains("of-saved-info-select"));
     els.forEach((el, i) => {
       try {
         if (i >= vals.length || vals[i] === "" || el.value) return; // 이미 값 있으면 미덮어씀
@@ -6396,25 +6522,43 @@ function _buildOrderCardHtml(cid, idx, type) {
     <!-- 아이디 (필수, 각 건마다 별도) -->
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_userId">아이디</label>
-      <input id="${cid}_userId" class="of-input" type="text" placeholder="쇼핑몰 아이디" oninput="_ofClearError('${cid}_userId')">
-      <label class="of-save-id" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
+      <div class="of-field-control">
+        <input id="${cid}_userId" class="of-input" type="text" placeholder="쇼핑몰 아이디" oninput="_ofClearError('${cid}_userId')">
+        ${_savedOrderInfoMarkup(cid, "userId")}
+        <label class="of-save-id" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
+      </div>
     </div>
     <div class="of-error-msg" id="${cid}_userId_err"><i class="fas fa-exclamation-circle"></i> 아이디는 필수 입력 항목입니다.</div>
 
     <!-- 수취인 -->
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_recipient">수취인</label>
-      <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
+      <div class="of-field-control">
+        <div class="of-input-status-wrap">
+          <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
+        </div>
+        ${_savedOrderInfoMarkup(cid, "recipient")}
+      </div>
     </div>
     <!-- 연락처 -->
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_phone">연락처</label>
-      <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
+      <div class="of-field-control">
+        <div class="of-input-status-wrap">
+          <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
+        </div>
+        ${_savedOrderInfoMarkup(cid, "phone")}
+      </div>
     </div>
     <!-- 배송주소 -->
     <div class="of-field of-field--stack">
       <label class="of-label of-label-required" for="${cid}_address">배송주소</label>
-      <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+      <div class="of-field-control">
+        <div class="of-input-status-wrap">
+          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+        </div>
+        ${_savedOrderInfoMarkup(cid, "address")}
+      </div>
     </div>
 
     <!-- 은행/계좌/예금주 (공유 가능) -->
@@ -7565,6 +7709,8 @@ function addOrderCard() {
   // ★ v9.14: 소득신고 모드면 카드 incomeBlock 표시
   _onCardAddedIncome(cid, idx);
 
+  if (_activeIdentityContext) _renderSavedOrderInfoPickers();
+
   _updateCardCountBadge();
   // 스크롤
   setTimeout(() => cardEl.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
@@ -7704,8 +7850,11 @@ function removeCardImg(cid) {
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
     if (!f) return;
+    const keepParticipantPhoneLocked = f.dataset.participantPhoneLocked === "1";
     f.classList.remove("ai-filled", "ai-locked");
-    f.readOnly = false;
+    f.readOnly = keepParticipantPhoneLocked;
+    if (keepParticipantPhoneLocked) f.setAttribute("aria-readonly", "true");
+    else f.removeAttribute("aria-readonly");
     f.removeAttribute("tabindex");
     f.style.paddingRight = "";
     // 자물쇠 배지 제거
@@ -8142,6 +8291,7 @@ function applyCardAiResult(cid) {
     if (!val) return;
     const el = document.getElementById(id);
     if (!el) return;
+    if (el.dataset.participantPhoneLocked === "1") return;
     el.value = val;
     const valHasAsterisk = _hasIdentityMask(val);
     if (valHasAsterisk) {

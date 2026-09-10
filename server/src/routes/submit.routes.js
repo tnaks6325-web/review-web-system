@@ -845,7 +845,7 @@ async function _authoritativeHold(ctx) {
   if (!ctx || !ctx.applicationId || !ctx.holdToken) return ctx;
   try {
     const { rows } = await pool.query(
-      `SELECT ca.phone8, ca.option_key, ca.blog_url, ca.status,
+      `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
@@ -866,6 +866,8 @@ async function _authoritativeHold(ctx) {
     if (!rows.length) return ctx;                     // 미확인 = 기존 late 경로(오확정 없음)
     ctx.verified = true;
     const srv = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
+    const ownerPhone8 = String(rows[0].owner_phone8 || '').replace(/\D/g, '').slice(-8);
+    ctx.isSub = ownerPhone8.length === 8 && srv.length === 8 && ownerPhone8 !== srv;
     if (srv.length === 8 && srv !== ctx.phone8) {
       logger.warn(`[submit/order] holdPhone8 보정 app=${ctx.applicationId} ` +
         `클라=${ctx.phone8 || '∅'} → 서버=***${srv.slice(-4)} (구버전 프론트/문맥 불일치 의심)`);
@@ -1012,6 +1014,18 @@ router.post('/order', async (req, res, next) => {
         captureSession,
         campaignHold: holdCtx.doneKind,     // 'confirmed' | 'late' — 부모 화면이 거짓말하지 않게
       });
+    }
+
+    // 타계정 참여의 연락처는 검증된 참여 신청값을 사용한다. 화면 readonly를 우회해도 접수하지 않는다.
+    if (holdCtx?.verified && holdCtx.isSub) {
+      const submittedPhone8 = String(phone || '').replace(/\D/g, '').slice(-8);
+      if (submittedPhone8 !== holdCtx.phone8) {
+        return res.status(409).json({
+          ok: false,
+          code: 'PARTICIPANT_PHONE_INVALID',
+          error: '타계정 참여 전화번호는 참여 신청 정보와 같아야 합니다.',
+        });
+      }
     }
 
     const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);

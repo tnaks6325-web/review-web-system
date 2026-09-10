@@ -264,13 +264,21 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
   if (candidates.length !== 1) {
     throw new ReviewerOrderIdentityError('SELECTED_IDENTITY_AMBIGUOUS', '참여 시 선택한 명의를 하나로 확정할 수 없습니다. 내정보를 확인해주세요.', 409);
   }
-  const selected = candidates[0];
+  let selected = candidates[0];
   if (selected.type === 'sub' && !app.multi_account_mode) {
     throw new ReviewerOrderIdentityError(
       'SUB_ACCOUNT_NOT_ALLOWED',
       '이 공고는 타계정 참여가 허용되지 않습니다.',
       403
     );
+  }
+  if (selected.type === 'sub') {
+    const applicationPhone = String(app.applicant_phone || '').trim();
+    selected = {
+      ...selected,
+      phone: applicationPhone || selected.phone,
+      phone8: phone8(app.phone8 || applicationPhone || selected.phone),
+    };
   }
   return { owner, identities, application: app, selected };
 }
@@ -418,9 +426,13 @@ function contextArgs(body, reviewer) {
 
 async function getParticipationIdentityContext(body, reviewer) {
   const context = await resolveApplicationIdentity(contextArgs(body, reviewer));
+  const savedIdentities = context.selected.type === 'sub'
+    ? [context.selected]
+    : context.identities;
   return {
     ok: true, enabled: isEnabled(), multiAccountMode: !!context.application.multi_account_mode,
     selectedIdentity: publicIdentity(context.selected),
+    savedIdentities: savedIdentities.map(publicIdentity),
   };
 }
 
@@ -540,6 +552,13 @@ async function manualConfirm(body, reviewer) {
 
 async function verifyApprovalForSubmission(body, reviewer) {
   const context = await resolveApplicationIdentity(contextArgs(body, reviewer));
+  if (context.selected.type === 'sub' && phone8(body.phone) !== phone8(context.selected.phone)) {
+    throw new ReviewerOrderIdentityError(
+      'PARTICIPANT_PHONE_INVALID',
+      '타계정 참여 전화번호는 참여 신청 정보와 같아야 합니다.',
+      409
+    );
+  }
   const approval = verifyScoped(body.identityApprovalToken, PURPOSE_APPROVAL);
   const mismatch = String(approval.ownerReviewerId) !== String(context.owner.id)
     || Number(approval.applicationId) !== Number(context.application.id)
