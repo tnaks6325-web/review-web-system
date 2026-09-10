@@ -141,6 +141,10 @@ function stubPool(handler) {
     assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)
       && /lr\.review_file_id = s2\.file_id/.test(submitRoute),
       '리뷰 슬롯 작업만 완료 이력을 요구하고 보완 제출은 현재 대표 묶음을 확정');
+    const complementHistory = /current_review AS \([\s\S]*?\), completed_batch AS/.exec(submitRoute)?.[0] || '';
+    assert.ok(!/s2\.completed_at IS NULL/.test(complementHistory)
+      && /SET completed_at = COALESCE\(s\.completed_at, NOW\(\)\)/.test(submitRoute),
+      '새 슬롯 추가로 재오픈된 행은 이미 완료된 현재 대표 리뷰를 재업로드 없이 인정');
     assert.ok(/cr\.upload_batch_id IS NULL[\s\S]*?s\.file_id = cr\.file_id/.test(submitRoute),
       '배치 도입 전 미완료 파일은 현재 대표 파일 한 건만 완료 처리');
     assert.ok((submitRoute.match(/FOR UPDATE/g) || []).length >= 2,

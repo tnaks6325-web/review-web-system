@@ -637,8 +637,9 @@ router.post('/review', async (req, res, next) => {
             reviewIndexMarkedWithHistory = true;
           } else {
             // 보완 제출에서는 리뷰 파일을 이번 요청에 다시 올리지 않는다. 현재 대표 리뷰 파일이
-            // 속한 미완료 묶음만 확정한다. 배치 컬럼 도입 전에 올린 대표 파일은 그 파일 한 건만
-            // 완료 처리해, 이전에 교체된 낡은 파일까지 제출 이력으로 잘못 편입하지 않는다.
+            // 속한 묶음을 확정한다. 새 슬롯 추가로 재오픈된 행은 이 묶음이 이미 완료 상태일 수
+            // 있으므로 completed_at 여부와 무관하게 현재 대표를 인정한다. 배치 컬럼 도입 전에 올린
+            // 대표 파일은 그 파일 한 건만 처리해, 이전에 교체된 낡은 파일까지 편입하지 않는다.
             const completedPendingBatch = await pool.query(
               `WITH locked_row AS (
                  SELECT review_file_id
@@ -651,7 +652,6 @@ router.post('/review', async (req, res, next) => {
                    JOIN locked_row lr ON lr.review_file_id = s2.file_id
                   WHERE s2.sheet_id = $1 AND s2.tab_name = $2 AND s2.row_index = $3
                     AND COALESCE(s2.slot_key, 'review') = 'review'
-                    AND s2.completed_at IS NULL
                   LIMIT 1
                ), completed_batch AS (
                  UPDATE review_submissions s
