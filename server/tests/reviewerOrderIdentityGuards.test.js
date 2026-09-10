@@ -13,6 +13,7 @@ const diagRoutes = read('src/routes/diag.routes.js');
 const gemini = read('src/services/gemini.service.js');
 const migration = read('migrations/147_reviewer_shopping_identity_match.sql');
 const appJs = read('../frontend/js/search-app.js');
+const searchCss = read('../frontend/css/search.css');
 const campaign = read('../frontend/campaign.html');
 const index = read('../frontend/index.html');
 const envExample = read('../.env.example');
@@ -79,6 +80,24 @@ ok('연속 캡처 분석의 늦은 응답은 request id로 폐기해 최신 캡�
 ok('공통 아이디 저장 체크는 카드 한 장만 선택 가능하다',
   /onchange="_selectShoppingIdSave\('\$\{cid\}'\)"/.test(appJs)
   && /other\.checked = false/.test(appJs));
+ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입력창 아래에만 둔다',
+  (appJs.match(/\$\{_savedOrderInfoMarkup\(cid, "/g) || []).length === 4
+  && ['userId', 'recipient', 'phone', 'address'].every((field) => appJs.includes(`\${_savedOrderInfoMarkup(cid, "${field}")}`))
+  && !/savedOrderInfoMarkup\(cid, "(?:orderNumber|orderer|price)"\)/.test(appJs)
+  && /\.of-field-control>\.of-input\{width:100%/.test(searchCss));
+ok('드롭다운 선택값은 DOM option으로 만들고 기존 입력 임시저장 순서를 바꾸지 않는다',
+  /const option = document\.createElement\("option"\)/.test(appJs)
+  && /option\.textContent =/.test(appJs)
+  && (appJs.match(/!el\.classList\.contains\("of-saved-info-select"\)/g) || []).length === 2);
+ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화면과 서버에서 잠근다',
+  /context\.selected\.type === 'sub'[\s\S]{0,100}?\[context\.selected\]/.test(service)
+  && /identities = identities\.filter\(\(item\) => item\.identityKey === selected\.identityKey\)/.test(appJs)
+  && /participantPhoneLocked = "1"/.test(appJs)
+  && /el\.dataset\.participantPhoneLocked === "1"/.test(appJs)
+  && /SELECT ca\.phone8, ca\.option_key, ca\.owner_phone8/.test(submitRoutes)
+  && /holdCtx\?\.verified && holdCtx\.isSub/.test(submitRoutes)
+  && /PARTICIPANT_PHONE_INVALID/.test(service)
+  && /PARTICIPANT_PHONE_INVALID/.test(submitRoutes));
 ok('AI 추출·명의매칭 장애와 무캡처 예외는 명시 수동확인 토큰을 거친다',
   /st\.matchError && st\.extracted \? "match_error" : "ai_error"/.test(appJs)
   && /mode === 'match_error'/.test(service)

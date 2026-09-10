@@ -12,6 +12,7 @@ const selfId = '22222222-2222-4222-8222-222222222222';
 const selectedId = '33333333-3333-4333-8333-333333333333';
 const otherId = '44444444-4444-4444-8444-444444444444';
 let selectedAddress = '서울 강남구 테헤란로 10 101동 1203호';
+let applicationIdentity = 'sub';
 const audits = [];
 
 const originalQuery = pool.query;
@@ -29,11 +30,15 @@ pool.query = async (sql, params) => {
     { id:selectedId, member_no:1, current_name:'김민수', current_phone:'010-1234-5678', current_phone8:'12345678', shopping_id:'selected-id' },
     { id:otherId, member_no:2, current_name:'박영희', current_phone:'010-9999-8888', current_phone8:'99998888', shopping_id:'other-id' },
   ] };
-  if (/FROM campaign_applications ca/.test(sql)) return { rows: [{
-    id:123, campaign_id:'camp-1', applicant_name:'김민수', applicant_phone:'010-1234-5678', phone8:'12345678',
-    owner_phone8:'10101010', owner_reviewer_id:ownerId, participant_identity_id:selectedId,
-    status:'applied', expires_at:new Date(Date.now() + 600000).toISOString(), multi_account_mode:true,
-  }] };
+  if (/FROM campaign_applications ca/.test(sql)) {
+    const isSub = applicationIdentity === 'sub';
+    return { rows: [{
+      id:123, campaign_id:'camp-1', applicant_name:isSub ? '김민수' : '본인',
+      applicant_phone:isSub ? '010-1234-5678' : '010-1010-1010', phone8:isSub ? '12345678' : '10101010',
+      owner_phone8:'10101010', owner_reviewer_id:ownerId, participant_identity_id:isSub ? selectedId : selfId,
+      status:'applied', expires_at:new Date(Date.now() + 600000).toISOString(), multi_account_mode:isSub,
+    }] };
+  }
   if (/INSERT INTO reviewer_identity_match_audits/.test(sql)) { audits.push(params); return { rows: [], rowCount: 1 }; }
   throw new Error('unexpected query: ' + sql);
 };
@@ -45,12 +50,29 @@ let passed = 0;
 async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + name); }
 
 (async () => {
+  await test('참여 명의에 따라 구매양식 내정보 목록 범위를 제한한다', async () => {
+    const sub = await identity.getParticipationIdentityContext(base, reviewer);
+    assert.strictEqual(sub.selectedIdentity.identityKey, `identity:${selectedId}`);
+    assert.deepStrictEqual(sub.savedIdentities.map((item) => item.identityKey), [`identity:${selectedId}`]);
+
+    applicationIdentity = 'self';
+    const self = await identity.getParticipationIdentityContext(base, reviewer);
+    assert.strictEqual(self.selectedIdentity.identityKey, `identity:${selfId}`);
+    assert.deepStrictEqual(self.savedIdentities.map((item) => item.identityKey),
+      [selfId, selectedId, otherId].map((id) => `identity:${id}`));
+    applicationIdentity = 'sub';
+  });
+
   await test('자동 MATCH 승인토큰은 선택 명의와 최종 제출필드에 결속된다', async () => {
     const proof = identity.issueExtractionProof({ imageHash:'a'.repeat(64), extracted:selectedFields, ok:true });
     const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:selectedFields }, reviewer);
     assert.strictEqual(matched.status, 'MATCH');
     assert.ok(matched.approvalToken);
     await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:matched.approvalToken }, reviewer);
+    await assert.rejects(
+      identity.verifyApprovalForSubmission({ ...base, ...selectedFields, phone:'010-7777-6666', identityApprovalToken:matched.approvalToken }, reviewer),
+      (err) => err.code === 'PARTICIPANT_PHONE_INVALID'
+    );
     await assert.rejects(
       identity.verifyApprovalForSubmission({ ...base, ...selectedFields, address:'다른 주소', identityApprovalToken:matched.approvalToken }, reviewer),
       (err) => err.code === 'IDENTITY_APPROVAL_STALE'

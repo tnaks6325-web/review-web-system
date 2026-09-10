@@ -418,9 +418,13 @@ function contextArgs(body, reviewer) {
 
 async function getParticipationIdentityContext(body, reviewer) {
   const context = await resolveApplicationIdentity(contextArgs(body, reviewer));
+  const savedIdentities = context.selected.type === 'sub'
+    ? [context.selected]
+    : context.identities;
   return {
     ok: true, enabled: isEnabled(), multiAccountMode: !!context.application.multi_account_mode,
     selectedIdentity: publicIdentity(context.selected),
+    savedIdentities: savedIdentities.map(publicIdentity),
   };
 }
 
@@ -540,6 +544,13 @@ async function manualConfirm(body, reviewer) {
 
 async function verifyApprovalForSubmission(body, reviewer) {
   const context = await resolveApplicationIdentity(contextArgs(body, reviewer));
+  if (context.selected.type === 'sub' && phone8(body.phone) !== phone8(context.selected.phone)) {
+    throw new ReviewerOrderIdentityError(
+      'PARTICIPANT_PHONE_INVALID',
+      '타계정 참여 전화번호는 참여 신청 정보와 같아야 합니다.',
+      409
+    );
+  }
   const approval = verifyScoped(body.identityApprovalToken, PURPOSE_APPROVAL);
   const mismatch = String(approval.ownerReviewerId) !== String(context.owner.id)
     || Number(approval.applicationId) !== Number(context.application.id)
