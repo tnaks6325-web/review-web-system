@@ -2074,14 +2074,28 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           await pool.query(
             `INSERT INTO review_submissions
                (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
-                file_id, file_url, file_name, source, slot_key, file_hash, upload_batch_id, uploaded_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,$12,NOW())
+                file_id, file_url, file_name, source, slot_key, file_hash, upload_batch_id,
+                completed_at, uploaded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,$12,
+               CASE WHEN
+                 EXISTS (
+                   SELECT 1 FROM review_index ri
+                    WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $4
+                      AND ri.is_submitted = TRUE
+                 ) OR EXISTS (
+                   SELECT 1 FROM campaign_participants cp
+                    WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $4
+                      AND cp.deleted_at IS NULL AND cp.is_submitted = TRUE
+                 )
+               THEN NOW() ELSE NULL END,
+               NOW())
              ON CONFLICT (file_id) DO UPDATE
                SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
                    row_index = EXCLUDED.row_index, review_index_id = EXCLUDED.review_index_id,
                    reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key,
                    file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash),
-                   upload_batch_id = EXCLUDED.upload_batch_id`,
+                   upload_batch_id = EXCLUDED.upload_batch_id,
+                   completed_at = COALESCE(review_submissions.completed_at, EXCLUDED.completed_at)`,
             [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
              r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash, uploadBatchId]
           );
