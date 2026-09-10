@@ -128,6 +128,10 @@ function stubPool(handler) {
     assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)
       && /ri\.review_file_id = s2\.file_id/.test(submitRoute),
       '리뷰 슬롯 작업만 완료 이력을 요구하고 보완 제출은 현재 대표 묶음을 확정');
+    assert.ok(/cr\.upload_batch_id IS NULL[\s\S]*?s\.file_id = cr\.file_id/.test(submitRoute),
+      '배치 도입 전 미완료 파일은 현재 대표 파일 한 건만 완료 처리');
+    assert.ok(/r\.routed\.to === 'review'/.test(sa),
+      '자동 이동 후 최종 리뷰 슬롯에 들어간 업로드 묶음을 제출 요청에 전달');
     assert.ok(/uploadBatchId: reviewUploadBatchId/.test(sa), '프런트가 업로드 응답의 정확한 묶음 ID를 제출 요청에 전달');
     assert.ok(/SET completed_at = COALESCE\(completed_at, NOW\(\)\)[\s\S]*?file_id = ANY\(\$4::text\[\]\)/.test(manualSvc),
       '작업보드 수동 제출은 선택 파일을 완료 처리');

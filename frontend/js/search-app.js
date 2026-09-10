@@ -3332,7 +3332,6 @@ async function _submitReviewSlots(item) {
           }))
         }, 180000);
         replacedCurrent = replacedCurrent || !!(upRes && upRes.replacedCurrent);
-        if (slot.key === 'review' && upRes && upRes.uploadBatchId) reviewUploadBatchId = upRes.uploadBatchId;
         if (!upRes || (!upRes.ok && !upRes.success)) {
           // 전부 중복 반려로 실패한 경우 — 그 슬롯에 빨간 안내를 남기고 실패로 처리
           const rj0 = upRes && Array.isArray(upRes.files) ? upRes.files.find(r => r && r.rejected) : null;
@@ -3352,6 +3351,9 @@ async function _submitReviewSlots(item) {
         const rejectedF = flist.filter(r => r && r.rejected);
         const routedF = flist.filter(r => r && r.routed);
         const stayed = flist.some(r => r && r.fileId && !r.routed);
+        const suppliedReview = (slot.key === 'review' && stayed)
+          || routedF.some(r => r.routed && r.routed.to === 'review');
+        if (suppliedReview && upRes.uploadBatchId) reviewUploadBatchId = upRes.uploadBatchId;
         slotOutcome[slot.key] = { stayed, movedTo: routedF.map(r => r.routed.to) };
         const bad = flist.find(r => r && r.verdict && r.verdict.status === "mismatch" && !r.routed && !r.rejected);
         if (rejectedF.length) {

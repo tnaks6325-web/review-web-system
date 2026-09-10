@@ -633,28 +633,45 @@ router.post('/review', async (req, res, next) => {
             reviewIndexMarkedWithHistory = true;
           } else {
             // 보완 제출에서는 리뷰 파일을 이번 요청에 다시 올리지 않는다. 현재 대표 리뷰 파일이
-            // 속한 미완료 묶음만 확정해, 이전에 교체된 낡은 묶음을 잘못 완료 처리하지 않는다.
+            // 속한 미완료 묶음만 확정한다. 배치 컬럼 도입 전에 올린 대표 파일은 그 파일 한 건만
+            // 완료 처리해, 이전에 교체된 낡은 파일까지 제출 이력으로 잘못 편입하지 않는다.
             const completedPendingBatch = await pool.query(
-              `UPDATE review_submissions s
-                  SET completed_at = COALESCE(s.completed_at, NOW())
-                WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
-                  AND COALESCE(s.slot_key, 'review') = 'review'
-                  AND s.upload_batch_id = (
-                    SELECT s2.upload_batch_id
-                      FROM review_submissions s2
-                      JOIN review_index ri
-                        ON ri.sheet_id = s2.sheet_id AND ri.tab_name = s2.tab_name
-                       AND ri.row_index = s2.row_index AND ri.review_file_id = s2.file_id
-                     WHERE s2.sheet_id = $1 AND s2.tab_name = $2 AND s2.row_index = $3
-                       AND COALESCE(s2.slot_key, 'review') = 'review'
-                       AND s2.upload_batch_id IS NOT NULL AND s2.completed_at IS NULL
-                     LIMIT 1
-                  )`,
+              `WITH current_review AS (
+                 SELECT s2.upload_batch_id, s2.file_id
+                   FROM review_submissions s2
+                   JOIN review_index ri
+                     ON ri.sheet_id = s2.sheet_id AND ri.tab_name = s2.tab_name
+                    AND ri.row_index = s2.row_index AND ri.review_file_id = s2.file_id
+                  WHERE s2.sheet_id = $1 AND s2.tab_name = $2 AND s2.row_index = $3
+                    AND COALESCE(s2.slot_key, 'review') = 'review'
+                    AND s2.completed_at IS NULL
+                  LIMIT 1
+               ), completed_batch AS (
+                 UPDATE review_submissions s
+                    SET completed_at = COALESCE(s.completed_at, NOW())
+                   FROM current_review cr
+                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
+                    AND COALESCE(s.slot_key, 'review') = 'review'
+                    AND (
+                      (cr.upload_batch_id IS NOT NULL AND s.upload_batch_id = cr.upload_batch_id)
+                      OR (cr.upload_batch_id IS NULL AND s.upload_batch_id IS NULL AND s.file_id = cr.file_id)
+                    )
+                  RETURNING 1
+               ), marked AS (
+                 UPDATE review_index ri
+                    SET is_submitted = TRUE, built_at = NOW()
+                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+                    AND EXISTS (SELECT 1 FROM completed_batch)
+                  RETURNING 1
+               )
+               SELECT (SELECT COUNT(*)::int FROM completed_batch) AS completed_count,
+                      (SELECT COUNT(*)::int FROM marked) AS marked_count`,
               [sheetId, tabName, rowIndex]
             );
-            if (!completedPendingBatch.rowCount && !wasSubmitted) {
+            if (!completedPendingBatch.rows[0]?.completed_count && !wasSubmitted) {
               throw new Error('리뷰 업로드 묶음 정보가 없습니다. 화면을 새로고침한 뒤 다시 제출해주세요.');
             }
+            reviewIndexMarkedWithHistory = !!completedPendingBatch.rows[0]?.marked_count;
           }
         } catch (batchErr) {
           batchErr.code = 'REVIEW_COMPLETION_HISTORY_FAILED';
