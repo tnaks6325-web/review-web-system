@@ -599,13 +599,16 @@ router.post('/review', async (req, res, next) => {
             // 구매확정·영수증 전용 작업은 리뷰 캡처 이력이 없으므로 완료 이력을 만들지 않는다.
           } else if (uploadBatchId) {
             const completedBatch = await pool.query(
-              `WITH current_batch AS (
+              `WITH locked_row AS (
+                 SELECT review_file_id
+                   FROM review_index
+                  WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                  FOR UPDATE
+               ), current_batch AS (
                  SELECT 1
-                   FROM review_index ri
-                   JOIN review_submissions s
-                     ON s.sheet_id = ri.sheet_id AND s.tab_name = ri.tab_name
-                    AND s.row_index = ri.row_index AND s.file_id = ri.review_file_id
-                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+                   FROM locked_row lr
+                   JOIN review_submissions s ON s.file_id = lr.review_file_id
+                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
                     AND COALESCE(s.slot_key, 'review') = 'review'
                     AND s.upload_batch_id = $4::uuid
                   LIMIT 1
@@ -637,12 +640,15 @@ router.post('/review', async (req, res, next) => {
             // 속한 미완료 묶음만 확정한다. 배치 컬럼 도입 전에 올린 대표 파일은 그 파일 한 건만
             // 완료 처리해, 이전에 교체된 낡은 파일까지 제출 이력으로 잘못 편입하지 않는다.
             const completedPendingBatch = await pool.query(
-              `WITH current_review AS (
+              `WITH locked_row AS (
+                 SELECT review_file_id
+                   FROM review_index
+                  WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                  FOR UPDATE
+               ), current_review AS (
                  SELECT s2.upload_batch_id, s2.file_id
                    FROM review_submissions s2
-                   JOIN review_index ri
-                     ON ri.sheet_id = s2.sheet_id AND ri.tab_name = s2.tab_name
-                    AND ri.row_index = s2.row_index AND ri.review_file_id = s2.file_id
+                   JOIN locked_row lr ON lr.review_file_id = s2.file_id
                   WHERE s2.sheet_id = $1 AND s2.tab_name = $2 AND s2.row_index = $3
                     AND COALESCE(s2.slot_key, 'review') = 'review'
                     AND s2.completed_at IS NULL

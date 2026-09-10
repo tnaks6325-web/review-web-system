@@ -112,7 +112,7 @@ function stubPool(handler) {
       '다중 캡처 업로드 묶음과 완료 이력 저장');
     const submitRoute = read('src/routes/submit.routes.js');
     const manualSvc = read('src/services/trackB.service.js');
-    assert.ok(/s\.file_id = ri\.review_file_id/.test(submitRoute)
+    assert.ok(/s\.file_id = lr\.review_file_id/.test(submitRoute)
       && /completed_count/.test(submitRoute) && /marked_count/.test(submitRoute),
       '현재 대표 이미지의 정확한 업로드 묶음만 완료·제출 상태를 원자적으로 처리');
     assert.ok(/REVIEW_COMPLETION_HISTORY_FAILED/.test(submitRoute)
@@ -132,10 +132,12 @@ function stubPool(handler) {
     assert.ok(/REVIEW_SUBMISSION_LEDGER_FAILED/.test(dg) && /uploadBatchId/.test(dg),
       '업로드 원장 기록 실패를 성공으로 숨기지 않고 묶음 ID를 반환');
     assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)
-      && /ri\.review_file_id = s2\.file_id/.test(submitRoute),
+      && /lr\.review_file_id = s2\.file_id/.test(submitRoute),
       '리뷰 슬롯 작업만 완료 이력을 요구하고 보완 제출은 현재 대표 묶음을 확정');
     assert.ok(/cr\.upload_batch_id IS NULL[\s\S]*?s\.file_id = cr\.file_id/.test(submitRoute),
       '배치 도입 전 미완료 파일은 현재 대표 파일 한 건만 완료 처리');
+    assert.ok((submitRoute.match(/FOR UPDATE/g) || []).length >= 2,
+      '대표 파일 검증부터 제출 상태 전환까지 행 잠금으로 재첨부와 직렬화');
     assert.ok(/r\.routed\.to === 'review'/.test(sa),
       '자동 이동 후 최종 리뷰 슬롯에 들어간 업로드 묶음을 제출 요청에 전달');
     assert.ok(/uploadBatchId: reviewUploadBatchId/.test(sa), '프런트가 업로드 응답의 정확한 묶음 ID를 제출 요청에 전달');
