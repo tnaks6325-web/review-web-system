@@ -149,6 +149,9 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
     phone8: selfCode && selfCode.current_phone8 || owner.phone8 || phone8(owner.phone),
     address: owner.address || '',
     shoppingId: selfCode && selfCode.shopping_id || owner.shopping_id || '',
+    bankName: owner.bank_name || '',
+    bankAccount: owner.bank_account || '',
+    accountHolder: owner.account_holder || '',
   });
   owner.sub_accounts.forEach((sub, index) => {
     const memberNo = index + 1;
@@ -164,13 +167,16 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
       phone8: code && code.current_phone8 || phone8(sub.phone),
       address: sub.address || '',
       shoppingId: code && code.shopping_id || sub.shoppingId || sub.shopping_id || '',
+      bankName: sub.bankName || sub.bank_name || '',
+      bankAccount: sub.bankAccount || sub.bank_account || '',
+      accountHolder: sub.accountHolder || sub.account_holder || '',
     });
   });
   return { owner, identities };
 }
 
-function publicIdentity(identity) {
-  return {
+function publicIdentity(identity, { includeBank = false } = {}) {
+  const result = {
     identityKey: identity.identityKey,
     type: identity.type,
     name: identity.name,
@@ -178,6 +184,12 @@ function publicIdentity(identity) {
     address: identity.address,
     shoppingId: identity.shoppingId || '',
   };
+  if (includeBank) {
+    result.bankName = identity.bankName || '';
+    result.bankAccount = identity.bankAccount || '';
+    result.accountHolder = identity.accountHolder || '';
+  }
+  return result;
 }
 
 async function getSecureProfile(ownerReviewerId) {
@@ -187,7 +199,7 @@ async function getSecureProfile(ownerReviewerId) {
     profile: {
       name: owner.name || '', phone: owner.phone || '', address: owner.address || '',
       bankName: owner.bank_name || '', bankAccount: owner.bank_account || '', accountHolder: owner.account_holder || '',
-      identities: identities.map(publicIdentity),
+      identities: identities.map((identity) => publicIdentity(identity, { includeBank: true })),
     },
   };
 }
@@ -431,8 +443,8 @@ async function getParticipationIdentityContext(body, reviewer) {
     : context.identities;
   return {
     ok: true, enabled: isEnabled(), multiAccountMode: !!context.application.multi_account_mode,
-    selectedIdentity: publicIdentity(context.selected),
-    savedIdentities: savedIdentities.map(publicIdentity),
+    selectedIdentity: publicIdentity(context.selected, { includeBank: true }),
+    savedIdentities: savedIdentities.map((identity) => publicIdentity(identity, { includeBank: true })),
   };
 }
 

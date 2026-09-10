@@ -12,7 +12,9 @@ const {
   issueExtractionProof,
   verifyExtractionProof,
   evaluateSelectedIdentity,
+  getSecureProfile,
 } = require('../src/services/reviewerOrderIdentity.service');
+const pool = require('../src/db/pool');
 
 let passed = 0;
 async function test(name, fn) {
@@ -34,6 +36,31 @@ const other = {
     const p = verifyReviewerSession(token);
     assert.strictEqual(p.ownerReviewerId, '11111111-1111-4111-8111-111111111111');
     assert.strictEqual(p.loginKind, 'sub');
+  });
+
+  await test('보안 프로필은 본계정과 타계정 계좌 3종 세트를 명의별로 반환한다', async () => {
+    const originalQuery = pool.query;
+    pool.query = async (sql) => {
+      if (/FROM reviewers WHERE id/.test(sql)) {
+        return { rows: [{
+          id:'11111111-1111-4111-8111-111111111111', name:'김수만', phone:'010-1111-2222', phone8:'11112222',
+          address:'서울', bank_name:'KEB하나', bank_account:'123456789', account_holder:'김수만', shopping_id:'self-id',
+          sub_accounts:[{ name:'김부계', phone:'010-3333-4444', address:'부산', shoppingId:'sub-id',
+            bankName:'국민은행', bankAccount:'987654321', accountHolder:'김부계' }],
+        }] };
+      }
+      if (/FROM reviewer_identities/.test(sql)) return { rows: [] };
+      throw new Error('unexpected query: ' + sql);
+    };
+    try {
+      const result = await getSecureProfile('11111111-1111-4111-8111-111111111111');
+      assert.deepStrictEqual(
+        result.profile.identities.map((item) => [item.bankName, item.bankAccount, item.accountHolder]),
+        [['KEB하나', '123456789', '김수만'], ['국민은행', '987654321', '김부계']]
+      );
+    } finally {
+      pool.query = originalQuery;
+    }
   });
 
   await test('추출 증명은 이미지 전체 SHA-256과 추출 필드를 결속한다', async () => {

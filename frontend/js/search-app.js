@@ -136,6 +136,13 @@ function _savedOrderInfoMarkup(cid, field) {
     + '</div>';
 }
 
+function _savedBankAccountMarkup() {
+  return '<div class="of-saved-info" id="of_bankSavedInfo" hidden>'
+    + '<select class="of-saved-info-select" aria-label="저장된 계좌 선택" onchange="_applySavedBankAccount(this)">'
+    + '<option value="">저장된 계좌에서 선택</option></select>'
+    + '</div>';
+}
+
 function _scopedSavedOrderIdentities() {
   const selected = _activeIdentityContext?.selectedIdentity || null;
   let identities = Array.isArray(_activeIdentityContext?.savedIdentities)
@@ -201,7 +208,54 @@ function _renderSavedOrderInfoPickers() {
       }
     });
   });
+  _renderSavedBankAccountPicker();
 }
+
+function _renderSavedBankAccountPicker() {
+  const wrap = document.getElementById("of_bankSavedInfo");
+  const select = wrap?.querySelector(".of-saved-info-select");
+  if (!wrap || !select) return;
+  const available = _scopedSavedOrderIdentities().filter((item) =>
+    [item?.bankName, item?.bankAccount, item?.accountHolder]
+      .every((value) => String(value || "").trim()));
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = available.length ? "저장된 계좌에서 선택" : "저장된 계좌 없음";
+  select.appendChild(placeholder);
+  available.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.identityKey;
+    option.textContent = [item.accountHolder || item.name, item.bankName, item.bankAccount].join(" · ");
+    select.appendChild(option);
+  });
+  select.disabled = available.length === 0;
+  wrap.hidden = false;
+}
+
+window._applySavedBankAccount = function (select) {
+  if (!select?.value) return;
+  const identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === select.value);
+  if (!identity) { select.value = ""; return; }
+  const fields = [
+    ["of_bank", identity.bankName],
+    ["of_account", identity.bankAccount],
+    ["of_depositor", identity.accountHolder],
+  ];
+  if (fields.some(([id, value]) => !document.getElementById(id) || !String(value || "").trim())) {
+    select.value = "";
+    return;
+  }
+  fields.forEach(([id, value]) => {
+    const input = document.getElementById(id);
+    input.value = String(value).trim();
+    input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
+    _ofClearError(id);
+  });
+  (_orderCardIds || []).slice(1).forEach((cid) => {
+    if (document.getElementById(cid + "_sameChk")?.checked) _syncSharedInfoToCard(cid);
+  });
+};
 
 window._applySavedOrderInfo = function (select) {
   const cid = select?.dataset?.cid;
@@ -6579,7 +6633,10 @@ function _buildOrderCardHtml(cid, idx, type) {
       </div>
       <div class="of-field">
         <label class="of-label of-label-required" for="of_depositor">예금주</label>
-        <input id="of_depositor" class="of-input" type="text" placeholder="예금주 이름" oninput="_ofClearError('of_depositor')">
+        <div class="of-field-control">
+          <input id="of_depositor" class="of-input" type="text" placeholder="예금주 이름" oninput="_ofClearError('of_depositor')">
+          ${_savedBankAccountMarkup()}
+        </div>
       </div>` : `
       <div class="of-field">
         <label class="of-label of-label-required" for="${cid}_bank">은행</label>
