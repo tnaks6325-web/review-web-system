@@ -84,11 +84,15 @@ ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입�
   (appJs.match(/\$\{_savedOrderInfoMarkup\(cid, "/g) || []).length === 4
   && ['userId', 'recipient', 'phone', 'address'].every((field) => appJs.includes(`\${_savedOrderInfoMarkup(cid, "${field}")}`))
   && !/savedOrderInfoMarkup\(cid, "(?:orderNumber|orderer|price)"\)/.test(appJs)
-  && /\.of-field-control>\.of-input\{width:100%/.test(searchCss));
+  && /\.of-field-control>\.of-input(?:,|\{)/.test(searchCss));
 ok('드롭다운 선택값은 DOM option으로 만들고 기존 입력 임시저장 순서를 바꾸지 않는다',
   /const option = document\.createElement\("option"\)/.test(appJs)
   && /option\.textContent =/.test(appJs)
   && (appJs.match(/!el\.classList\.contains\("of-saved-info-select"\)/g) || []).length === 2);
+ok('AI 상태 배지는 드롭다운 전체가 아니라 입력창 전용 래퍼에 고정한다',
+  (appJs.match(/class="of-input-status-wrap"/g) || []).length === 3
+  && /\.of-input-status-wrap\{position:relative;width:100%/.test(searchCss)
+  && /\.of-input-status-wrap>\.of-input\{width:100%/.test(searchCss));
 ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화면과 서버에서 잠근다',
   /context\.selected\.type === 'sub'[\s\S]{0,100}?\[context\.selected\]/.test(service)
   && /identities = identities\.filter\(\(item\) => item\.identityKey === selected\.identityKey\)/.test(appJs)

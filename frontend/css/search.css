@@ -368,7 +368,8 @@ input,textarea,button{font-family:inherit}
 .of-label{width:58px;flex-shrink:0;font-size:.76rem;font-weight:700;color:var(--t2);text-align:right}
 .of-input{flex:1;border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.88rem;color:var(--t1);background:var(--card);outline:none;transition:border-color .15s}
 .of-field-control{flex:1;min-width:0}
-.of-field-control>.of-input{width:100%;box-sizing:border-box}
+.of-field-control>.of-input,.of-input-status-wrap>.of-input{width:100%;box-sizing:border-box}
+.of-input-status-wrap{position:relative;width:100%;min-width:0}
 .of-input:focus{border-color:var(--p);box-shadow:0 0 0 3px rgba(49,130,246,.12)}
 .of-input::placeholder{color:var(--t3);font-size:.82rem}
 .of-textarea{min-height:54px;resize:vertical;line-height:1.45;font-family:inherit}

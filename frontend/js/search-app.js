@@ -6534,7 +6534,9 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_recipient">수취인</label>
       <div class="of-field-control">
-        <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
+        <div class="of-input-status-wrap">
+          <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
+        </div>
         ${_savedOrderInfoMarkup(cid, "recipient")}
       </div>
     </div>
@@ -6542,7 +6544,9 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_phone">연락처</label>
       <div class="of-field-control">
-        <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
+        <div class="of-input-status-wrap">
+          <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
+        </div>
         ${_savedOrderInfoMarkup(cid, "phone")}
       </div>
     </div>
@@ -6550,7 +6554,9 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-field of-field--stack">
       <label class="of-label of-label-required" for="${cid}_address">배송주소</label>
       <div class="of-field-control">
-        <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+        <div class="of-input-status-wrap">
+          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+        </div>
         ${_savedOrderInfoMarkup(cid, "address")}
       </div>
     </div>
