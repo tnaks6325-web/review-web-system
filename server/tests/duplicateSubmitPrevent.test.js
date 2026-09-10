@@ -126,9 +126,14 @@ function stubPool(handler) {
     const ownership = read('src/services/reviewerTargetOwnership.service.js');
     assert.ok(/cp\.owner_reviewer_id IS NULL AND pl\.owner_reviewer_id = \$4::uuid/.test(ownership),
       '현재 작업보드 소유자가 있으면 과거 참여 링크보다 우선');
-    assert.ok(/'reviewer_campaign', 'intranet'/.test(dg)
+    const trackB = read('src/routes/trackB.routes.js');
+    const workdesk = front('workdesk.html');
+    assert.ok(/trackBUploadAuthorized !== true/.test(dg)
       && /'reviewer_campaign', 'intranet'/.test(submitRoute),
       'Track B 인트라넷 토큰은 Track A 업로드·제출 경로에서 거부');
+    assert.ok(/router\.post\('\/workdesk\/review-upload'[\s\S]*?trackBUploadAuthorized = true/.test(trackB)
+      && /\/api\/trackb\/workdesk\/review-upload/.test(workdesk),
+      '작업보드 수동 캡처는 내부 권한을 거친 Track B 전용 프록시 사용');
     assert.ok(/REVIEW_SUBMISSION_LEDGER_FAILED/.test(dg) && /uploadBatchId/.test(dg),
       '업로드 원장 기록 실패를 성공으로 숨기지 않고 묶음 ID를 반환');
     assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)

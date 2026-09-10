@@ -40,7 +40,7 @@ assert.match(routeBlock, /manualWorkdeskReviewSubmit/, '라우트가 전용 서�
 assert.match(workdesk, /_workdeskStatusKind/, '프런트에서 상태 열을 판별한다');
 assert.match(workdesk, /gstatuslock/, '리뷰제출/입금 셀에 잠금 UI를 적용한다');
 assert.match(workdesk, /openManualReviewSubmission/, '리뷰제출 우클릭 명령이 수동 제출 모달을 연다');
-assert.match(workdesk, /\/api\/image\/review-upload/, '모달은 기존 리뷰 업로드 API를 사용한다');
+assert.match(workdesk, /\/api\/trackb\/workdesk\/review-upload/, '모달은 내부 권한을 거친 Track B 리뷰 업로드 API를 사용한다');
 assert.match(workdesk, /\/api\/trackb\/workdesk\/manual-review-submit/, '업로드 후 전용 제출 API를 호출한다');
 
 /* ── 2026-08-21 사용자 확정 ───────────────────────────────────────────────
