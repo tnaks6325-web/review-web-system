@@ -127,9 +127,10 @@ function stubPool(handler) {
     assert.ok(/cp\.owner_reviewer_id IS NULL AND pl\.owner_reviewer_id = \$4::uuid/.test(ownership),
       '현재 작업보드 소유자가 있으면 과거 참여 링크보다 우선');
     assert.ok(/isSubAccount = session\.loginKind === 'sub'/.test(ownership)
-      && /\$6::boolean = TRUE[\s\S]*?ri\.phone8 = \$7 OR pl\.phone8 = \$7 OR cp\.phone8 = \$7/.test(ownership)
+      && /\$6::boolean = TRUE[\s\S]*?cp\.seq IS NOT NULL[\s\S]*?cp\.phone8 = \$7/.test(ownership)
+      && /cp\.seq IS NULL[\s\S]*?pl\.phone8 = \$7 OR ri\.phone8 = \$7/.test(ownership)
       && /if \(!isSubAccount\)[\s\S]*?getOwnerScopeByLoginPhone8/.test(ownership),
-      '서브계정은 소유자 전체가 아닌 서명된 실제 참여자 연락처의 행만 허용');
+      '서브계정은 현재 작업보드 참여자 연락처를 우선하고 현재 행이 없을 때만 과거 링크를 사용');
     const trackB = read('src/routes/trackB.routes.js');
     const workdesk = front('workdesk.html');
     assert.ok(/trackBUploadAuthorized !== true/.test(dg)

@@ -43,11 +43,23 @@ async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client 
           )
           OR (
             $6::boolean = TRUE
-            AND (ri.phone8 = $7 OR pl.phone8 = $7 OR cp.phone8 = $7)
             AND (
-              cp.owner_reviewer_id = $4::uuid
-              OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id = $4::uuid)
-              OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id IS NULL)
+              (
+                cp.seq IS NOT NULL
+                AND cp.phone8 = $7
+                AND (
+                  cp.owner_reviewer_id = $4::uuid
+                  OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id = $4::uuid)
+                  OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id IS NULL)
+                )
+              )
+              OR (
+                cp.seq IS NULL
+                AND (
+                  (pl.owner_reviewer_id = $4::uuid AND pl.phone8 = $7)
+                  OR (pl.owner_reviewer_id IS NULL AND (pl.phone8 = $7 OR ri.phone8 = $7))
+                )
+              )
             )
           )
         )
