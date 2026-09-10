@@ -264,13 +264,21 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
   if (candidates.length !== 1) {
     throw new ReviewerOrderIdentityError('SELECTED_IDENTITY_AMBIGUOUS', '참여 시 선택한 명의를 하나로 확정할 수 없습니다. 내정보를 확인해주세요.', 409);
   }
-  const selected = candidates[0];
+  let selected = candidates[0];
   if (selected.type === 'sub' && !app.multi_account_mode) {
     throw new ReviewerOrderIdentityError(
       'SUB_ACCOUNT_NOT_ALLOWED',
       '이 공고는 타계정 참여가 허용되지 않습니다.',
       403
     );
+  }
+  if (selected.type === 'sub') {
+    const applicationPhone = String(app.applicant_phone || '').trim();
+    selected = {
+      ...selected,
+      phone: applicationPhone || selected.phone,
+      phone8: phone8(app.phone8 || applicationPhone || selected.phone),
+    };
   }
   return { owner, identities, application: app, selected };
 }

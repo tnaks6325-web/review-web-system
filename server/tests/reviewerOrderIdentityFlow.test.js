@@ -12,6 +12,7 @@ const selfId = '22222222-2222-4222-8222-222222222222';
 const selectedId = '33333333-3333-4333-8333-333333333333';
 const otherId = '44444444-4444-4444-8444-444444444444';
 let selectedAddress = '서울 강남구 테헤란로 10 101동 1203호';
+let selectedCurrentPhone = '010-1234-5678';
 let applicationIdentity = 'sub';
 const audits = [];
 
@@ -27,7 +28,7 @@ pool.query = async (sql, params) => {
   }] };
   if (/FROM reviewer_identities/.test(sql)) return { rows: [
     { id:selfId, member_no:0, current_name:'본인', current_phone:'010-1010-1010', current_phone8:'10101010', shopping_id:'self-id' },
-    { id:selectedId, member_no:1, current_name:'김민수', current_phone:'010-1234-5678', current_phone8:'12345678', shopping_id:'selected-id' },
+    { id:selectedId, member_no:1, current_name:'김민수', current_phone:selectedCurrentPhone, current_phone8:selectedCurrentPhone.replace(/\D/g, '').slice(-8), shopping_id:'selected-id' },
     { id:otherId, member_no:2, current_name:'박영희', current_phone:'010-9999-8888', current_phone8:'99998888', shopping_id:'other-id' },
   ] };
   if (/FROM campaign_applications ca/.test(sql)) {
@@ -61,6 +62,18 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     assert.deepStrictEqual(self.savedIdentities.map((item) => item.identityKey),
       [selfId, selectedId, otherId].map((id) => `identity:${id}`));
     applicationIdentity = 'sub';
+  });
+
+  await test('타계정 전화번호가 이후 수정돼도 참여 신청 당시 전화번호를 표시·검증한다', async () => {
+    selectedCurrentPhone = '010-5555-6666';
+    const context = await identity.getParticipationIdentityContext(base, reviewer);
+    assert.strictEqual(context.selectedIdentity.phone, selectedFields.phone);
+    assert.strictEqual(context.savedIdentities[0].phone, selectedFields.phone);
+    const proof = identity.issueExtractionProof({ imageHash:'0a'.repeat(32), extracted:selectedFields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:selectedFields }, reviewer);
+    assert.strictEqual(matched.status, 'MATCH');
+    await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:matched.approvalToken }, reviewer);
+    selectedCurrentPhone = selectedFields.phone;
   });
 
   await test('자동 MATCH 승인토큰은 선택 명의와 최종 제출필드에 결속된다', async () => {

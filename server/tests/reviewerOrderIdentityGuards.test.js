@@ -95,6 +95,7 @@ ok('AI 상태 배지는 드롭다운 전체가 아니라 입력창 전용 래퍼
   && /\.of-input-status-wrap>\.of-input\{width:100%/.test(searchCss));
 ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화면과 서버에서 잠근다',
   /context\.selected\.type === 'sub'[\s\S]{0,100}?\[context\.selected\]/.test(service)
+  && /phone: applicationPhone \|\| selected\.phone/.test(service)
   && /identities = identities\.filter\(\(item\) => item\.identityKey === selected\.identityKey\)/.test(appJs)
   && /participantPhoneLocked = "1"/.test(appJs)
   && /el\.dataset\.participantPhoneLocked === "1"/.test(appJs)
