@@ -2676,13 +2676,14 @@ function _csRenderPreview(slotKey) {
  *   첨부 직후에는 **아직 아무것도 저장되지 않아** 파일만 바꾸면 끝난다.
  *
  * ★★ 완화 금지
- *   ① 잠금은 "리뷰 화면이 아님"이 확실할 때 하나뿐. 채널 불일치는 경고만.
+ *   ① AI 잠금은 "리뷰 화면이 아님"이 확실할 때뿐이다. 서버가 반영 완료까지 확인한
+ *      동일 캡처는 별도 확정 규칙으로 잠그며 우회할 수 없다.
  *   ② 판정 실패·네트워크 오류·AI 미설정은 **아무것도 표시하지 않고 통과**.
  *   ③ 같은 자리에서 2번 잠기면 "제가 올린 게 맞습니다" 우회가 열린다 —
  *      오판으로 리뷰어가 제출 자체를 못 하는 상태(참여 소각)를 만들지 않는다.
  * ════════════════════════════════════════════════════════════════ */
 const _PRE_BLOCK_LIMIT = 2;          // 이 횟수만큼 잠기면 우회 체크 노출
-const _preState = {};                // scope → { blocked, count, overridden, message, verdict }
+const _preState = {};                // scope → { blocked, duplicateBlocked, checking, count, overridden, message, verdict }
 
 /** 판별에 필요한 행 컨텍스트(시트·탭). 세 첨부 경로가 같은 출처를 본다. */
 function _preCtx(idx) {
@@ -2699,20 +2700,24 @@ function _preCtx(idx) {
 }
 
 function _preGet(scope) {
-  if (!_preState[scope]) _preState[scope] = { blocked: false, count: 0, overridden: false, message: '', verdict: '' };
+  if (!_preState[scope]) _preState[scope] = { blocked: false, duplicateBlocked: false, checking: false, count: 0, overridden: false, message: '', verdict: '' };
   return _preState[scope];
 }
 function _preReset(scope) { delete _preState[scope]; }
-/** 잠긴 슬롯이 하나라도 있으면 제출을 막는다(우회 체크한 것은 제외). */
+/** 중복 확인 중이거나 잠긴 슬롯이 하나라도 있으면 제출을 막는다. 확정 중복은 우회할 수 없다. */
 function _preHasBlock() {
-  return Object.values(_preState).some(s => s.blocked && !s.overridden);
+  return Object.values(_preState).some(s => s.checking || s.duplicateBlocked || (s.blocked && !s.overridden));
 }
 function _preBlockedMessage() {
-  const s = Object.values(_preState).find(x => x.blocked && !x.overridden);
+  const states = Object.values(_preState);
+  if (states.some(s => s.checking)) return '사진 중복 여부를 확인하고 있어요. 잠시만 기다려주세요.';
+  if (states.some(s => s.duplicateBlocked)) return '이미 제출됬던 사진이에요';
+  const s = states.find(x => x.blocked && !x.overridden);
   return s ? s.message : '';
 }
 function _preOverride(scope) {
   const s = _preGet(scope);
+  if (s.duplicateBlocked) return;
   s.overridden = true;
   _preRender(scope);
 }
@@ -2729,15 +2734,37 @@ function _dupWhen(iso) {
   try {
     const d = new Date(iso);
     if (isNaN(d)) return '';
-    const h = d.getHours();
-    return `${d.getMonth() + 1}월 ${d.getDate()}일 ${h < 12 ? '오전' : '오후'} ${((h % 12) || 12)}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const kst = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+    const day = ['일','월','화','수','목','금','토'][kst.getDay()];
+    return `${kst.getMonth() + 1}/${kst.getDate()}(${day})`;
   } catch (_) { return ''; }
 }
-/** 같은 작업이면 그 줄이 화면의 몇 번째 건인지 — 없으면 0(=순번 미표기). */
-function _dupOrdinal(rowIndex) {
-  const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
-  const i = rows.findIndex(r => r && r.rowIndex === rowIndex);
-  return i >= 0 ? i + 1 : 0;
+function _duplicateHistoryLine(d) {
+  const when = _dupWhen(d && d.submittedAt);
+  const recipient = String((d && d.recipientName) || '이전 수취인').trim();
+  return `${when ? when + ' ' : ''}${recipient} 참여건에 제출된 리뷰캡처 입니다.`;
+}
+function _showDuplicateBlockModal(d, anchor) {
+  const old = document.getElementById('_reviewDuplicateBlockModal');
+  if (old) old.remove();
+  const overlay = document.createElement('div');
+  overlay.id = '_reviewDuplicateBlockModal';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', '_reviewDuplicateBlockTitle');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(17,25,39,.52);display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(2px)';
+  overlay.innerHTML = `<div style="width:min(390px,100%);background:#fff;border-radius:18px;padding:22px 20px;box-shadow:0 24px 70px rgba(0,0,0,.28)">
+    <div style="width:44px;height:44px;border-radius:14px;background:#FFF1F0;color:#C7372F;display:grid;place-items:center;font-size:23px;font-weight:900;margin-bottom:14px">!</div>
+    <h3 id="_reviewDuplicateBlockTitle" style="font-size:18px;letter-spacing:-.025em;margin:0 0 8px;color:#17202E">이미 제출됬던 사진이에요</h3>
+    <p style="font-size:13px;color:#596477;margin:0 0 16px">이 사진은 다른 구매양식에 제출되어 반영됐어요.</p>
+    <div style="padding:11px;border-radius:10px;background:#F7F8FA;font-size:11px;color:#657083;margin-bottom:15px">${escHtml(_duplicateHistoryLine(d))}</div>
+    <button type="button" style="width:100%;border:0;border-radius:11px;background:#246BFD;color:#fff;font-weight:800;padding:12px;cursor:pointer">다른 사진 선택</button>
+  </div>`;
+  overlay.querySelector('button').addEventListener('click', () => {
+    overlay.remove();
+    if (anchor && typeof anchor.click === 'function') anchor.click();
+  });
+  document.body.appendChild(overlay);
 }
 function _preRenderDup(scope, anchor) {
   const s = _preGet(scope);
@@ -2751,31 +2778,17 @@ function _preRenderDup(scope, anchor) {
     el.addEventListener('click', (e) => e.stopPropagation());   // 드롭존 파일창이 같이 열리지 않게
     anchor.appendChild(el);
   }
-  const ord = d.sameTab ? _dupOrdinal(d.rowIndex) : 0;
-  const where = d.sameTab
-    ? (ord ? `같은 작업 <b>${ord}번 건</b>으로` : '같은 작업의 <b>다른 건</b>으로')
-    : '<b>다른 작업</b>에';
-  const when = _dupWhen(d.uploadedAt);
   const _du = d.fileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}` : '';
   const thumb = d.fileId
-    ? `<img${window.DriveThumb ? DriveThumb.attrs(d.fileId, 400, _du) : ` src="${_du}"`} alt=""
-         style="width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #F3C8C4;flex:none">` : '';
+    ? `<img${window.DriveThumb ? DriveThumb.attrs(d.fileId, 400, _du) : ` src="${_du}"`} alt="앞서 제출한 리뷰 캡처"
+         style="width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #E1E6EE;flex:none">` : '';
   el.style.cssText = 'margin-top:8px;padding:10px 12px;border-radius:9px;background:#FEF3F2;'
     + 'border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5';
   el.innerHTML =
-    '이미 제출한 사진이에요'
-    + `<div style="font-weight:500;margin-top:4px;color:#7F1D1D">이 사진은 ${when ? `<b>${escHtml(when)}</b>에 ` : ''}${where} 제출하셨어요.`
-    + ' 이번 건은 <b>다른 리뷰 화면</b>을 캡처해 올려주세요.</div>'
-    + (thumb ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">${thumb}`
-        + '<div style="font-weight:500;font-size:.73rem;color:#7F1D1D">앞서 낸 사진<br>(같은 사진이에요)</div></div>' : '')
-    /* ★ 다른 작업 건은 **정상일 수 있다** — 두 작업에 함께 참여해 리뷰 목록에 두 리뷰가
-       한 화면에 보이면 캡처 한 장으로 두 건을 내는 것이 맞다(실사고 2026-08-06).
-       그 경우까지 "다른 화면을 캡처하세요"라고만 하면 맞게 한 리뷰어가 헤맨다. */
-    + (d.sameTab ? ''
-        : '<div style="font-weight:500;font-size:.73rem;margin-top:6px;color:#7F1D1D">'
-          + '두 작업에 함께 참여해 <b>한 화면에 두 리뷰가 같이 보이는 캡처</b>라면 그대로 제출하셔도 괜찮아요.</div>')
-    + '<div style="font-weight:500;font-size:.72rem;margin-top:6px;color:#8A93A3">'
-    + '그래도 이 사진이 맞다면 그대로 제출하셔도 됩니다 — 담당자가 확인합니다.</div>';
+    '이미 제출됬던 사진이에요'
+    + '<div style="font-weight:500;margin-top:4px;color:#7F1D1D">이 사진은 다른 구매양식에 제출되어 반영됐어요.</div>'
+    + `<div style="font-weight:500;font-size:.72rem;margin-top:7px;padding:8px 9px;border-radius:7px;background:#F7F8FA;color:#657083">${escHtml(_duplicateHistoryLine(d))}</div>`
+    + (thumb ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">${thumb}<span style="font-size:.72rem;font-weight:500;color:#7F1D1D">앞서 제출한 사진</span></div>` : '');
 }
 
 function _preRender(scope, anchorId) {
@@ -2832,7 +2845,7 @@ function _preRender(scope, anchorId) {
 async function _preCheckOne(fileObj, ctx) {
   try {
     const r = await fetch(API_BASE_URL + '/api/image/review-precheck', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
       body: JSON.stringify({
         base64: fileObj.b64, mimeType: fileObj.type || 'image/jpeg',
         sheetId: ctx.sheetId, tabName: ctx.tabName, slotKey: ctx.slotKey || 'review',
@@ -2855,19 +2868,31 @@ async function _preCheckFiles(scope, anchorId, fileObjs, ctx) {
   if (_PREVIEW_MODE || !Array.isArray(fileObjs) || fileObjs.length === 0) {
     _preReset(scope); _preRender(scope, anchorId); return;
   }
+  // 비동기 판정 중 제출 클릭과 오래된 응답 덮어쓰기를 막는다.
+  const requestId = (s.requestId || 0) + 1;
+  s.requestId = requestId;
+  s.checking = true;
   // 여러 장이면 가장 나쁜 판정을 그 슬롯의 상태로 삼는다(한 장이라도 이상하면 확인이 필요하다)
   const results = await Promise.all(fileObjs.slice(0, 5).map(fo => _preCheckOne(fo, ctx)));
+  if (!_preState[scope] || _preState[scope].requestId !== requestId) return;
   const rank = { block: 3, warn: 2, pass: 1, skip: 0 };
   let worst = null;
   for (const r of results) {
     if (!r || !r.verdict) continue;
     if (!worst || (rank[r.verdict] || 0) > (rank[worst.verdict] || 0)) worst = r;
   }
-  // ★ 중복 경고는 형식 판정과 **따로** 모은다 — AI 가 통과시킨 사진도 "이미 낸 사진"일 수 있다.
-  //   사용자 확정 ①: 알려주기만 하고 막지 않는다(잘못 알아본 경우에도 제출이 가능해야 한다).
+  // ★ 서버에서 실제 제출 완료까지 확인한 중복은 AI 형식 판정과 무관하게 즉시 차단한다.
   cur_dup: {
     const d = (results.find(r => r && r.duplicate) || {}).duplicate || null;
-    _preGet(scope).dup = d;
+    const cur = _preGet(scope);
+    cur.dup = d;
+    cur.duplicateBlocked = !!d;
+    cur.checking = false;
+    const modalKey = d ? `${d.fileId || ''}:${d.submittedAt || ''}` : '';
+    if (d && cur.duplicateModalKey !== modalKey) {
+      cur.duplicateModalKey = modalKey;
+      _showDuplicateBlockModal(d, document.getElementById(anchorId));
+    }
   }
   const cur = _preGet(scope);
   if (!worst) { cur.verdict = ''; cur.blocked = false; cur.message = ''; _preRender(scope, anchorId); return; }
@@ -3272,6 +3297,7 @@ async function _submitReviewSlots(item) {
 
   const uploadErrors = [];
   const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
+  let replacedCurrent = false;
   try {
     // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
     for (const slot of slotsToUpload) {
@@ -3301,12 +3327,14 @@ async function _submitReviewSlots(item) {
             data:     b64,
           }))
         }, 180000);
+        replacedCurrent = replacedCurrent || !!(upRes && upRes.replacedCurrent);
         if (!upRes || (!upRes.ok && !upRes.success)) {
           // 전부 중복 반려로 실패한 경우 — 그 슬롯에 빨간 안내를 남기고 실패로 처리
           const rj0 = upRes && Array.isArray(upRes.files) ? upRes.files.find(r => r && r.rejected) : null;
           if (rj0) {
             slotOutcome[slot.key] = { stayed: false, movedTo: [] };
             _csShowVerdict(slot.key, rj0.message || "이미 제출된 파일과 같아 등록되지 않았어요.", true);
+            if (rj0.duplicate) _showDuplicateBlockModal(rj0.duplicate, document.getElementById('csSlot_' + slot.key));
           }
           throw new Error(upRes?.error || "이미지 업로드 실패");
         }
@@ -3403,9 +3431,10 @@ async function _submitReviewSlots(item) {
     const slotLabel = k => (slots.find(s => s.key === k)?.label) || k;
     if (complete) {
       const doneList = slots.map(s => `${escHtml(s.label || s.key)} ✓`).join(" / ");
-      document.getElementById("successMessage").innerHTML =
-        `<strong>${escHtml(reviewerName)}</strong>님의 캡처가 모두 제출되었습니다 😊<br>`
-        + `<span style="font-size:.82rem;color:#16a34a">${doneList}</span>`;
+      document.getElementById("successMessage").innerHTML = replacedCurrent
+        ? '현재 건의 리뷰 캡처를 교체하였습니다.'
+        : `<strong>${escHtml(reviewerName)}</strong>님의 캡처가 모두 제출되었습니다 😊<br>`
+          + `<span style="font-size:.82rem;color:#16a34a">${doneList}</span>`;
       show("successModal", "flex");
     } else {
       const doneList = slots.map(s =>
@@ -3490,6 +3519,7 @@ async function submitReview() {
   const MAX_TOTAL_MB = 15;
   let successCount = 0;
   const errors = [];
+  let replacedCurrent = false;
 
   try {
     for (let idx = 0; idx < items.length; idx++) {
@@ -3555,8 +3585,15 @@ async function submitReview() {
               data:     b64,
             }))
           }, 180000);
+          replacedCurrent = replacedCurrent || !!(uploadResult && uploadResult.replacedCurrent);
 
           if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
+            const _rj0 = uploadResult && Array.isArray(uploadResult.files)
+              ? uploadResult.files.find(r => r && r.rejected && r.duplicate) : null;
+            if (_rj0) {
+              const _anchor = document.getElementById(isMulti ? 'mrSlot_' + idx : 'dropZone');
+              _showDuplicateBlockModal(_rj0.duplicate, _anchor);
+            }
             throw new Error(uploadResult?.error || "이미지 업로드 실패");
           }
 
@@ -3567,6 +3604,10 @@ async function submitReview() {
           if (!_rtStayed && _rtFiles.length) {
             const _rj = _rtFiles.find(r => r && r.rejected);
             const _mv = _rtFiles.find(r => r && r.routed);
+            if (_rj && _rj.duplicate) {
+              const _anchor = document.getElementById(isMulti ? 'mrSlot_' + idx : 'dropZone');
+              _showDuplicateBlockModal(_rj.duplicate, _anchor);
+            }
             throw new Error(_rj ? (_rj.message || "이미 제출된 파일과 같아 등록되지 않았어요.")
               : _mv ? ((_mv.routed && _mv.routed.message) || "첨부한 이미지가 리뷰 캡처가 아닌 것으로 확인되어 옮겨졌어요. 리뷰 캡처를 다시 첨부해주세요.")
               : "이미지 업로드 실패");
@@ -3630,7 +3671,9 @@ async function submitReview() {
       const successMsg = isMulti
         ? `<strong>${escHtml(reviewerName)}</strong>님의 리뷰 <b>${successCount}건</b>이 제출되었습니다 😊`
           + (errors.length > 0 ? `<br><span style="color:#DC2626;font-size:.82rem">${errors.length}건 실패 (콘솔 확인)</span>` : "")
-        : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊`;
+        : (replacedCurrent
+            ? '현재 건의 리뷰 캡처를 교체하였습니다.'
+            : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊`);
       document.getElementById("successMessage").innerHTML = successMsg;
       show("successModal", "flex");
     } else {

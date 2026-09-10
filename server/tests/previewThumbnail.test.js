@@ -138,7 +138,7 @@ console.log('\nD) 배선 — 스크립트 태그 · 모듈 부재 시 원본으�
 }
 ok('★ 모듈이 없으면 원본으로 접는다 — 소비처 6곳 모두 window.DriveThumb 를 확인한다',
   (SA.match(/window\.DriveThumb \?/g) || []).length === 2
-  && /window\.DriveThumb \?/.test(CS) && /window\.DriveThumb\s*$|window\.DriveThumb\n/.test(IA + '\n')
+  && /window\.DriveThumb \?/.test(CS) && /window\.DriveThumb\s*$|window\.DriveThumb\r?\n/.test(IA + '\n')
   && /window\.DriveThumb \?/.test(RP) && /window\.DriveThumb \? DriveThumb\.url\(fileId, 400\)/.test(IX)
   && /window\.DriveThumb \? DriveThumb\.attrs\(id, px, full\)/.test(WD));
 
