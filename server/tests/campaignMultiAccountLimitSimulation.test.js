@@ -3,7 +3,7 @@
  * 운영 DB 대신 메모리 상태를 만들고 실제 집계 헬퍼를 호출한다.
  */
 const assert = require('assert');
-const { countCampaignSubDailyUsage } = require('../src/services/campaignHold.service');
+const { countCampaignSubDailyUsage } = require('../src/services/campaignSubAccountLimit.service');
 
 const now = Date.parse('2026-09-10T03:00:00.000Z'); // 2026-09-10 12:00 KST
 const todayStart = '2026-09-09T15:00:00.000Z';

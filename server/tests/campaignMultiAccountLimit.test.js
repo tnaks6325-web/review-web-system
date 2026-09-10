@@ -3,7 +3,7 @@
  * 한도는 제출 뒤가 아니라 자리 신청 시점부터 예약되어야 한다.
  */
 const assert = require('assert');
-const { countCampaignSubDailyUsage } = require('../src/services/campaignHold.service');
+const { countCampaignSubDailyUsage } = require('../src/services/campaignSubAccountLimit.service');
 
 (async () => {
   let captured = null;

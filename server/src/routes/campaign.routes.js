@@ -2051,7 +2051,7 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★ 캠페인별 타계정 하루한도(063, §09-5): 유효홀드부터 수량을 예약한다.
     //   제출완료만 세면 한도 1이어도 여러 타계정 자리를 먼저 잡은 뒤 일괄 제출할 수 있다.
     if (isSubApply && Number(camp.multi_daily_limit) > 0) {
-      const { countCampaignSubDailyUsage } = require('../services/campaignHold.service');
+      const { countCampaignSubDailyUsage } = require('../services/campaignSubAccountLimit.service');
       const used = await countCampaignSubDailyUsage(client, {
         campaignId: id, ownerPhone8: p8, dayStartIso,
       });
