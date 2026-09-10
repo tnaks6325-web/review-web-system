@@ -8,13 +8,17 @@ function phone8(value) {
 async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client = pool }) {
   if (!session?.ownerReviewerId || !sheetId || !tabName || !rowIndex) return false;
   const loginPhone8 = phone8(session.loginPhone8);
+  const isSubAccount = session.loginKind === 'sub';
+  if (isSubAccount && loginPhone8.length !== 8) return false;
   let phone8s = loginPhone8 ? [loginPhone8] : [];
-  try {
-    const scope = await getOwnerScopeByLoginPhone8(loginPhone8);
-    if (String(scope.ownerReviewerId || '') === String(session.ownerReviewerId)) {
-      phone8s = scope.phone8s || phone8s;
-    }
-  } catch (_) { /* FK가 없는 과거 행은 로그인 번호로만 제한한다. */ }
+  if (!isSubAccount) {
+    try {
+      const scope = await getOwnerScopeByLoginPhone8(loginPhone8);
+      if (String(scope.ownerReviewerId || '') === String(session.ownerReviewerId)) {
+        phone8s = scope.phone8s || phone8s;
+      }
+    } catch (_) { /* FK가 없는 과거 행은 로그인 번호로만 제한한다. */ }
+  }
 
   const { rows } = await client.query(
     `SELECT 1
@@ -26,15 +30,29 @@ async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client 
         AND cp.deleted_at IS NULL
       WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
         AND (
-          cp.owner_reviewer_id = $4::uuid
-          OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id = $4::uuid)
+          (
+            $6::boolean = FALSE
+            AND (
+              cp.owner_reviewer_id = $4::uuid
+              OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id = $4::uuid)
+              OR (
+                pl.owner_reviewer_id IS NULL AND cp.owner_reviewer_id IS NULL
+                AND (ri.phone8 = ANY($5::text[]) OR pl.phone8 = ANY($5::text[]) OR cp.phone8 = ANY($5::text[]))
+              )
+            )
+          )
           OR (
-            pl.owner_reviewer_id IS NULL AND cp.owner_reviewer_id IS NULL
-            AND (ri.phone8 = ANY($5::text[]) OR pl.phone8 = ANY($5::text[]) OR cp.phone8 = ANY($5::text[]))
+            $6::boolean = TRUE
+            AND (ri.phone8 = $7 OR pl.phone8 = $7 OR cp.phone8 = $7)
+            AND (
+              cp.owner_reviewer_id = $4::uuid
+              OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id = $4::uuid)
+              OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id IS NULL)
+            )
           )
         )
       LIMIT 1`,
-    [sheetId, tabName, rowIndex, session.ownerReviewerId, phone8s]
+    [sheetId, tabName, rowIndex, session.ownerReviewerId, phone8s, isSubAccount, loginPhone8]
   );
   return rows.length === 1;
 }
