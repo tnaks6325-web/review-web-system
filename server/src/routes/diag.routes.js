@@ -21,6 +21,21 @@ const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistr
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
+const { verifyReviewerSession } = require('../services/reviewerSession.service');
+
+/** 리뷰어 화면이 보낸 세션에서 서버가 검증한 신원만 반환한다. */
+function verifiedReviewerIdentity(req) {
+  const token = req.headers['x-reviewer-token'];
+  if (!token) return null;
+  try {
+    const session = verifyReviewerSession(token);
+    const phone8 = String(session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    if (phone8.length !== 8) return null;
+    return { reviewerName: String(session.loginName || '').trim(), phone8 };
+  } catch (_) {
+    return null;
+  }
+}
 
 // ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
 // 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
@@ -1520,8 +1535,8 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 // ★ Drive 업로드 0 · DB 쓰기 0 — 순수 판정만 돌려준다. 리뷰어가 캡처를 **고른 직후**
 //   호출되므로, 잘못된 파일이 저장되거나 제출로 기록되기 **전에** 되돌릴 수 있다.
 //   (사후에 교체요청 → 리뷰어 재제출은 왕복 비용이 커서 실무에서 가장 번거롭다)
-// ★ 무인증 — 리뷰어 제출 화면이 무인증이라 같은 조건. 남용은 imageApiLimiter 로 막고,
-//   같은 이미지는 Gemini 해시 캐시로 상각된다.
+// ★ 현재 리뷰어 화면은 X-Reviewer-Token을 보내며, 중복 차단 신원은 검증된 세션에서만 읽는다.
+//   같은 이미지는 Gemini 해시 캐시로 상각되고 남용은 imageApiLimiter 로 막는다.
 // Body: { base64, mimeType, sheetId, tabName, slotKey }
 // ═══════════════════════════════════════════════════════════
 router.post('/review-precheck', imageApiLimiter, async (req, res) => {
@@ -1530,20 +1545,23 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
   try {
     const { base64, mimeType, sheetId, tabName, slotKey, rowIndex, reviewerName, phone8 } = req.body || {};
     const inspect = require('../services/reviewInspect.service');
+    const reviewerIdentity = verifiedReviewerIdentity(req);
 
     /* ── 중복 대조(첨부 즉시) ─────────────────────────────────────────
      * ★★ 리뷰어가 스스로 고칠 수 있는 **유일한 시점**이다 — 사진이 저장되기 전이라
      *   다른 사진으로 바꾸기만 하면 끝난다(제출 후 2차 검수는 관리자 사후처리가 된다).
-     * ★ 형식 판정(아래)과 **독립적으로** 계산해 응답에 얹는다 — AI 가 죽어도 중복 경고는 나가고,
-     *   중복 조회가 죽어도 형식 판정은 나간다. 둘 다 fail-open.
+     * ★ 형식 판정(아래)과 **독립적으로** 계산해 응답에 얹는다 — AI 가 죽어도 중복 차단은 나가고,
+     *   중복 조회가 죽으면 동명이인 오차단을 피하기 위해 그 판정만 생략한다.
      * ★ 기존 응답 계약(verdict/blocked)은 건드리지 않는다 — `duplicate` 필드만 **가산**이라
      *   구버전 프론트는 아무 영향이 없다. */
     const dupOf = async () => {
-      if (!base64) return null;
+      if (!base64 || !reviewerIdentity) return null;
       try {
         return await inspect.findOwnDuplicate({
           fileHash: inspect.hashBase64(base64),
-          sheetId, tabName, rowIndex, reviewerName, phone8,
+          sheetId, tabName, rowIndex,
+          reviewerName: reviewerIdentity.reviewerName || reviewerName,
+          phone8: reviewerIdentity.phone8,
         });
       } catch (_) { return null; }
     };
@@ -1616,12 +1634,36 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
   try {
     const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;
     const slot = (slotKey || 'review').toString().trim() || 'review';
+    const reviewerIdentity = verifiedReviewerIdentity(req);
 
     if (!files || !Array.isArray(files) || files.length === 0) {
       return res.json({ ok: false, error: '업로드할 파일이 필요합니다.' });
     }
     if (!sheetId || !tabName) {
       return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
+    }
+
+    const _riSvc = require('../services/reviewInspect.service');
+    // ★ 최종 서버 방어: 한 요청에 여러 장이 있어도 한 장이라도 반영 완료 중복이면
+    //   어떤 파일도 Drive에 올리지 않는다. 프런트 검사 우회·응답 경쟁에도 제출은 여기서 멈춘다.
+    if (slot === 'review' && reviewerIdentity) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file || !file.data) continue;
+        const duplicate = await _riSvc.findOwnDuplicate({
+          fileHash: _riSvc.hashBase64(file.data), sheetId, tabName, rowIndex,
+          reviewerName: reviewerIdentity.reviewerName || reviewerName,
+          phone8: reviewerIdentity.phone8,
+        });
+        if (duplicate) {
+          const rejected = {
+            index: i + 1, rejected: 'duplicate_submitted',
+            message: '이미 제출됬던 사진이에요', duplicate,
+          };
+          logger.warn(`[review-upload] 반영 완료된 중복 리뷰캡처 차단 (tab=${tabName}, row=${rowIndex}, match=${duplicate.fileId})`);
+          return res.json({ ok: false, uploaded: 0, total: files.length, files: [rejected], error: rejected.message });
+        }
+      }
     }
 
     const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
@@ -1745,7 +1787,6 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   등록된 예시가 없으면 빈 배열 = 오늘과 완전히 같은 동작.
     let _inspectSamples = [];
     let _expectedChannel = null;
-    const _riSvc = require('../services/reviewInspect.service');
     try {
       // ★ 슬롯에 맞는 예시를 고른다 — 리뷰 슬롯엔 리뷰 화면, 영수증 슬롯엔 그 채널의
       //   현금영수증 실물. 반대로 주면 "영수증 자리에 리뷰가 왔다"는 판정이 흔들린다.
@@ -1771,6 +1812,21 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         .some(sl => sl.key === 'receipt');
     } catch (_) {}
     const _receiptLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, 'receipt', _tabReviewType) || '현금영수증';
+
+    // 같은 구매양식·같은 행의 기존 캡처는 중복 차단 대상이 아니라 교체 제출이다.
+    let replacedCurrent = false;
+    if (slot === 'review' && rowIndex) {
+      try {
+        const { rows: currentRows } = await pool.query(
+          `SELECT 1 FROM review_submissions
+            WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+              AND COALESCE(slot_key, 'review') = 'review'
+            LIMIT 1`,
+          [sheetId, tabName, rowIndex]
+        );
+        replacedCurrent = currentRows.length > 0;
+      } catch (_) { /* 교체 안내용 보조값 — 실패해도 업로드는 계속 */ }
+    }
 
     // ── 3단계: 파일 업로드 (복수 파일 루프) ──
     const uploadResults = [];
@@ -2031,6 +2087,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       total: files.length,
       files: uploadResults,
       reviewFolderUrl: reviewFolderUrl || '',
+      replacedCurrent,
       // 전부 반려면 실패 사유를 최상위 error 로도 실어준다(단일 첨부 화면의 기존 오류 표시 경로)
       ...(successCount === 0 && _rejectedResults.length ? { error: _rejectedResults[0].message } : {}),
     });

@@ -1021,45 +1021,51 @@ function _productHit(text, names) {
 }
 
 /**
- * 첨부 즉시 중복 대조 — **그 리뷰어 본인이 앞서 낸 사진**과 같은 파일인지(사용자 확정 ②:
- * 작업 무관 본인 전체). 사진이 저장되기 **전**에 알려주는 것이 이 함수의 존재 이유다.
+ * 첨부 즉시 중복 대조 — **그 리뷰어 본인이 다른 구매양식에 제출 완료한 사진**과 같은 파일인지.
+ * 사진이 저장되기 **전**에 차단하는 것이 이 함수의 존재 이유다.
  *
  * ★★ 같은 자리(같은 작업·같은 줄) 재첨부는 **중복이 아니다** — 잘못 올려 다시 올리는 정상
  *    재제출이라, 이걸 잡으면 멀쩡한 리뷰어가 갇힌다(2차 검수 findDuplicate 와 같은 규율).
- * ★ 본인 확인은 **이름 + (가능하면) 연락처 뒤 8자리** — 지문이 맞는 행만 대조하므로 비용이 없다.
- *   동명이인 오탐이 나더라도 **경고일 뿐 차단이 아니라서**(사용자 확정 ①) 피해가 없다.
+ * ★ 본인 확인은 리뷰어 세션에서 검증한 **연락처 뒤 8자리**만 쓴다. 이름만 같은 동명이인은
+ *   차단하지 않는다. 호출부는 검증된 세션값이 없으면 이 함수를 호출하지 않는다.
+ * ★ review_submissions 에 업로드 흔적만 있는 파일은 중복이 아니다. 같은 행으로 매핑된
+ *   review_index 또는 campaign_participants 가 is_submitted=TRUE 여야 이미 제출된 파일이다.
  * ★ 반환하는 파일ID는 **본인 것뿐** — 남의 제출물은 어떤 경우에도 나가지 않는다.
  * ★ 판정 불가·조회 실패는 전부 null(경고 없음) = 오늘과 동작 동일(fail-open).
  */
 async function findOwnDuplicate({ fileHash, sheetId, tabName, rowIndex, reviewerName, phone8 } = {}) {
-  const name = String(reviewerName || '').trim();
-  if (!fileHash || !name) return null;
+  const p8 = String(phone8 || '').replace(/\D/g, '').slice(-8);
+  if (!fileHash || p8.length !== 8) return null;
   try {
     const { rows } = await _db().query(
-      `SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.uploaded_at,
-              (SELECT r.phone8 FROM review_index r
-                WHERE r.sheet_id = s.sheet_id AND r.tab_name = s.tab_name
-                  AND r.row_index = s.row_index LIMIT 1) AS phone8
+      `SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index,
+              COALESCE(cp.submitted_at, s.uploaded_at) AS submitted_at,
+              COALESCE(NULLIF(cp.recipient_name, ''), NULLIF(ri.recipient_name, ''),
+                       NULLIF(s.reviewer_name, ''), $2) AS recipient_name
          FROM review_submissions s
+         LEFT JOIN review_index ri
+           ON ri.sheet_id = s.sheet_id AND ri.tab_name = s.tab_name AND ri.row_index = s.row_index
+         LEFT JOIN campaign_participants cp
+           ON cp.sheet_id = s.sheet_id AND cp.tab_name = s.tab_name AND cp.seq = s.row_index
+          AND cp.deleted_at IS NULL
         WHERE s.file_hash = $1
-          AND COALESCE(s.slot_key, 'review') <> 'trashed'
-          AND REPLACE(COALESCE(s.reviewer_name, ''), ' ', '') = REPLACE($2, ' ', '')
+          AND COALESCE(s.slot_key, 'review') = 'review'
+          AND (NULLIF(ri.phone8, '') = $6 OR NULLIF(cp.phone8, '') = $6)
+          AND (COALESCE(ri.is_submitted, FALSE) OR COALESCE(cp.is_submitted, FALSE))
           AND NOT (s.sheet_id = $3 AND s.tab_name = $4
                    AND COALESCE(s.row_index, -1) = COALESCE($5::int, -1))
-        ORDER BY s.uploaded_at DESC NULLS LAST
+        ORDER BY COALESCE(cp.submitted_at, s.uploaded_at) DESC NULLS LAST
         LIMIT 5`,
-      [fileHash, name, sheetId || '', tabName || '', rowIndex ?? null]
+      [fileHash, String(reviewerName || '').trim(), sheetId || '', tabName || '', rowIndex ?? null, p8]
     );
     if (!rows.length) return null;
-    // ★ 연락처를 알 수 있으면 **본인 행만** 남긴다(동명이인 오탐 축소). 모르면 이름만으로 진행.
-    const p8 = String(phone8 || '').replace(/\D/g, '');
-    const pick = (p8.length === 8 ? rows.filter(r => !r.phone8 || r.phone8 === p8) : rows)[0] || null;
-    if (!pick) return null;
+    const pick = rows[0];
     return {
       fileId: pick.file_id,
       sameTab: !!(sheetId && tabName) && pick.sheet_id === sheetId && pick.tab_name === tabName,
       rowIndex: pick.row_index,
-      uploadedAt: pick.uploaded_at,
+      submittedAt: pick.submitted_at,
+      recipientName: pick.recipient_name || String(reviewerName || '').trim(),
     };
   } catch (e) {
     logger.warn(`[reviewInspect] 첨부 중복 대조 실패(경고 생략): ${e.message}`);
