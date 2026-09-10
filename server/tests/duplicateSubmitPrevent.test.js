@@ -127,8 +127,8 @@ function stubPool(handler) {
       && /REVIEW_SUBMIT_TARGET_FORBIDDEN/.test(submitRoute),
       '업로드와 제출 모두 세션 소유자의 구매양식 행만 허용');
     const ownership = read('src/services/reviewerTargetOwnership.service.js');
-    assert.ok(/cp\.owner_reviewer_id IS NULL AND pl\.owner_reviewer_id = \$4::uuid/.test(ownership),
-      '현재 작업보드 소유자가 있으면 과거 참여 링크보다 우선');
+    assert.ok(/\$6::boolean = FALSE[\s\S]*?cp\.seq IS NOT NULL[\s\S]*?cp\.owner_reviewer_id = \$4::uuid[\s\S]*?cp\.phone8 = ANY\(\$5::text\[\]\)[\s\S]*?cp\.seq IS NULL[\s\S]*?pl\.owner_reviewer_id = \$4::uuid/.test(ownership),
+      '본계정도 현재 작업보드 참여자가 있으면 과거 참여 링크보다 현재 소유자·연락처를 우선');
     assert.ok(/isSubAccount = session\.loginKind === 'sub'/.test(ownership)
       && /\$6::boolean = TRUE[\s\S]*?cp\.seq IS NOT NULL[\s\S]*?cp\.phone8 = \$7/.test(ownership)
       && /cp\.seq IS NULL[\s\S]*?pl\.phone8 = \$7 OR ri\.phone8 = \$7/.test(ownership)
