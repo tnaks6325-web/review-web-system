@@ -97,6 +97,19 @@ ok('아이디와 배송주소 저장값이 없어도 빈 상태 선택창을 표
   && /wrap\.hidden = false/.test(appJs)
   && !/wrap\.hidden = available\.length === 0/.test(appJs)
   && /\.of-saved-info-select:disabled\{/.test(searchCss));
+ok('저장 계좌 선택은 예금주 아래 한 곳에서 은행·계좌·예금주를 함께 반영한다',
+  (appJs.match(/\$\{_savedBankAccountMarkup\(\)\}/g) || []).length === 1
+  && /저장된 계좌에서 선택/.test(appJs)
+  && /저장된 계좌 없음/.test(appJs)
+  && /\[item\?\.bankName, item\?\.bankAccount, item\?\.accountHolder\][\s\S]{0,100}?\.every/.test(appJs)
+  && /\["of_bank", identity\.bankName\][\s\S]{0,120}?\["of_account", identity\.bankAccount\][\s\S]{0,120}?\["of_depositor", identity\.accountHolder\]/.test(appJs)
+  && /_scopedSavedOrderIdentities\(\)\.find/.test(appJs)
+  && /_syncSharedInfoToCard\(cid\)/.test(appJs));
+ok('서버는 본계정과 타계정의 계좌 3종 세트를 참여 명의 정보에 포함한다',
+  /bankName: owner\.bank_name \|\| ''[\s\S]{0,120}?bankAccount: owner\.bank_account \|\| ''[\s\S]{0,120}?accountHolder: owner\.account_holder \|\| ''/.test(service)
+  && /bankName: sub\.bankName \|\| sub\.bank_name \|\| ''[\s\S]{0,160}?bankAccount: sub\.bankAccount \|\| sub\.bank_account \|\| ''[\s\S]{0,160}?accountHolder: sub\.accountHolder \|\| sub\.account_holder \|\| ''/.test(service)
+  && /if \(includeBank\)[\s\S]{0,160}?result\.bankName = identity\.bankName \|\| ''[\s\S]{0,160}?result\.bankAccount = identity\.bankAccount \|\| ''[\s\S]{0,160}?result\.accountHolder = identity\.accountHolder \|\| ''/.test(service)
+  && (service.match(/publicIdentity\(identity, \{ includeBank: true \}\)/g) || []).length === 2);
 ok('AI 상태 배지는 드롭다운 전체가 아니라 입력창 전용 래퍼에 고정한다',
   (appJs.match(/class="of-input-status-wrap"/g) || []).length === 3
   && /\.of-input-status-wrap\{position:relative;width:100%/.test(searchCss)
