@@ -7844,8 +7844,11 @@ function removeCardImg(cid) {
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
     if (!f) return;
+    const keepParticipantPhoneLocked = f.dataset.participantPhoneLocked === "1";
     f.classList.remove("ai-filled", "ai-locked");
-    f.readOnly = false;
+    f.readOnly = keepParticipantPhoneLocked;
+    if (keepParticipantPhoneLocked) f.setAttribute("aria-readonly", "true");
+    else f.removeAttribute("aria-readonly");
     f.removeAttribute("tabindex");
     f.style.paddingRight = "";
     // 자물쇠 배지 제거

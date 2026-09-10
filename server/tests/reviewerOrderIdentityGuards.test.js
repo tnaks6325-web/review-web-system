@@ -98,6 +98,10 @@ ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화
   && /holdCtx\?\.verified && holdCtx\.isSub/.test(submitRoutes)
   && /PARTICIPANT_PHONE_INVALID/.test(service)
   && /PARTICIPANT_PHONE_INVALID/.test(submitRoutes));
+const unlockAiField = appJs.slice(appJs.indexOf('function _unlockAiField(fid)'), appJs.indexOf('/** ★ Promise 반환'));
+ok('캡처를 삭제해도 타계정 참여 전화번호 잠금은 풀리지 않는다',
+  /keepParticipantPhoneLocked = f\.dataset\.participantPhoneLocked === "1"/.test(unlockAiField)
+  && /f\.readOnly = keepParticipantPhoneLocked/.test(unlockAiField));
 ok('AI 추출·명의매칭 장애와 무캡처 예외는 명시 수동확인 토큰을 거친다',
   /st\.matchError && st\.extracted \? "match_error" : "ai_error"/.test(appJs)
   && /mode === 'match_error'/.test(service)
