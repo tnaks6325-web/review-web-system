@@ -2042,18 +2042,21 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       //   ★ 자동 분류로 슬롯 구성이 바뀐 호출은 아래 recomputePrimary 가 원장 기준으로
       //     대표를 다시 계산한다(여기 레거시 경로는 라우팅 없을 때 종전 그대로).
       const _routedAny = uploadResults.some(r => r && (r.routed || r.rejected));
+      let primaryMappingError = null;
       if (slot === 'review' && !_routedAny) {
         try {
           const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
-          await pool.query(
+          const linked = await pool.query(
             `UPDATE review_index
                 SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
                     review_file_count = $4, review_file_at = NOW()
               WHERE sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
             [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, rowIdx]
           );
+          if (!linked.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
         } catch (linkErr) {
-          logger.warn(`[review-upload] 인덱스 파일링크 저장 실패 (무시): ${linkErr.message}`);
+          primaryMappingError = linkErr;
+          logger.error(`[review-upload] 인덱스 파일링크 저장 실패: ${linkErr.message}`);
         }
       }
 
@@ -2117,13 +2120,21 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       // 자동 분류로 review 슬롯 구성이 바뀌었으면 대표 이미지를 원장 기준으로 재계산
       //   (영수증이 대표로 남거나, 옮겨 들어온 리뷰가 대표에 안 잡히는 것 방지)
       if (_routedAny) {
-        await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
+        const recomputed = await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
+        if (!recomputed?.ok) primaryMappingError = new Error(recomputed?.error || '대표 이미지 재계산 실패');
       }
       if (submissionLedgerError) {
         return res.status(503).json({
           ok: false, code: 'REVIEW_SUBMISSION_LEDGER_FAILED', uploaded: successCount,
           total: files.length, files: uploadResults,
           error: '리뷰 파일 기록에 실패했습니다. 잠시 후 다시 제출해주세요.',
+        });
+      }
+      if (primaryMappingError) {
+        return res.status(503).json({
+          ok: false, code: 'REVIEW_PRIMARY_LINK_FAILED', uploaded: successCount,
+          total: files.length, files: uploadResults,
+          error: '리뷰 파일 연결에 실패했습니다. 잠시 후 다시 제출해주세요.',
         });
       }
     }

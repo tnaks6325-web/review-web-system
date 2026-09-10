@@ -130,10 +130,10 @@ async function markRouted({ fileId, fromSlot, by = 'auto:upload' } = {}) {
 /**
  * 대표 리뷰 이미지(review_index.review_file_*, A-1) 재계산 — 라우팅으로 review 슬롯
  * 구성이 바뀐 행에서만 호출한다. 남은 review 슬롯 파일 중 최신을 대표로, 없으면 비움
- * (영수증이 대표 이미지로 남아 업체 뷰어에 나가는 것 방지). fail-soft.
+ * (영수증이 대표 이미지로 남아 업체 뷰어에 나가는 것 방지).
  */
 async function recomputePrimary({ sheetId, tabName, rowIndex } = {}) {
-  if (!sheetId || !tabName || rowIndex == null) return;
+  if (!sheetId || !tabName || rowIndex == null) return { ok: false, error: 'target_required' };
   try {
     const { rows } = await _db().query(
       `SELECT file_id, file_url, file_name, uploaded_at FROM review_submissions
@@ -142,22 +142,26 @@ async function recomputePrimary({ sheetId, tabName, rowIndex } = {}) {
       [sheetId, tabName, rowIndex]);
     if (rows.length) {
       const p = rows[0];
-      await _db().query(
+      const updated = await _db().query(
         `UPDATE review_index
             SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
                 review_file_count = $4, review_file_at = COALESCE($5, review_file_at)
           WHERE sheet_id = $6 AND tab_name = $7 AND row_index = $8`,
         [p.file_id, p.file_url, p.file_name, rows.length, p.uploaded_at, sheetId, tabName, rowIndex]);
+      if (!updated.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
     } else {
-      await _db().query(
+      const updated = await _db().query(
         `UPDATE review_index
             SET review_file_id = NULL, review_file_url = NULL, review_file_name = NULL,
                 review_file_count = 0
           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
         [sheetId, tabName, rowIndex]);
+      if (!updated.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
     }
+    return { ok: true };
   } catch (e) {
-    logger.warn(`[fileRoute] 대표 이미지 재계산 실패(무시): ${e.message}`);
+    logger.warn(`[fileRoute] 대표 이미지 재계산 실패: ${e.message}`);
+    return { ok: false, error: e.message };
   }
 }
 

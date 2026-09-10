@@ -136,6 +136,8 @@ function stubPool(handler) {
       '작업보드 수동 캡처는 내부 권한을 거친 Track B 전용 프록시 사용');
     assert.ok(/REVIEW_SUBMISSION_LEDGER_FAILED/.test(dg) && /uploadBatchId/.test(dg),
       '업로드 원장 기록 실패를 성공으로 숨기지 않고 묶음 ID를 반환');
+    assert.ok(/REVIEW_PRIMARY_LINK_FAILED/.test(dg) && /if \(!linked\.rowCount\) throw/.test(dg),
+      '대표 이미지 연결·재계산 실패를 업로드 성공으로 숨기지 않음');
     assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)
       && /lr\.review_file_id = s2\.file_id/.test(submitRoute),
       '리뷰 슬롯 작업만 완료 이력을 요구하고 보완 제출은 현재 대표 묶음을 확정');
