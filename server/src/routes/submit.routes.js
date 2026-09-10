@@ -526,6 +526,7 @@ router.post('/review', async (req, res, next) => {
     let dbUpdated = false;     // is_submitted=TRUE 로 전이/유지되었는지
     let complete = true;       // 모든 필요 슬롯 충족 여부
     let missingSlots = [];
+    let completionHistoryError = null;
     try {
       // 탭의 필요 슬롯 + 현재 행의 is_submitted 조회
       const { rows: ctxRows } = await pool.query(
@@ -566,6 +567,29 @@ router.post('/review', async (req, res, next) => {
       }
 
       if (complete) {
+        // 이번 제출에 실제 포함된 최신 리뷰 업로드 묶음을 상태 확정보다 먼저 완료 이력으로 고정한다.
+        // 이 기록이 실패하면 중복 차단 근거가 사라지므로 제출 성공으로 응답하지 않는다.
+        try {
+          await pool.query(
+            `UPDATE review_submissions
+                SET completed_at = COALESCE(completed_at, NOW())
+              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                AND COALESCE(slot_key, 'review') = 'review'
+                AND upload_batch_id = (
+                  SELECT upload_batch_id FROM review_submissions
+                   WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                     AND COALESCE(slot_key, 'review') = 'review'
+                     AND upload_batch_id IS NOT NULL
+                   ORDER BY uploaded_at DESC NULLS LAST, created_at DESC
+                   LIMIT 1
+                )`,
+            [sheetId, tabName, rowIndex]
+          );
+        } catch (batchErr) {
+          batchErr.code = 'REVIEW_COMPLETION_HISTORY_FAILED';
+          throw batchErr;
+        }
+
         // 완료 → is_submitted=TRUE (멱등). 이미 TRUE여도 안전.
         const result = await pool.query(
           `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
@@ -608,28 +632,6 @@ router.post('/review', async (req, res, next) => {
           logger.warn(`[submit] 무시트 memo 기록 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
         }
 
-        // 이번 제출에 실제 포함된 최신 리뷰 업로드 묶음을 완료 이력으로 고정한다.
-        // 이후 같은 행에서 캡처를 교체해도 앞서 완료된 묶음의 기록은 유지된다.
-        try {
-          await pool.query(
-            `UPDATE review_submissions
-                SET completed_at = COALESCE(completed_at, NOW())
-              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                AND COALESCE(slot_key, 'review') = 'review'
-                AND upload_batch_id = (
-                  SELECT upload_batch_id FROM review_submissions
-                   WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                     AND COALESCE(slot_key, 'review') = 'review'
-                     AND upload_batch_id IS NOT NULL
-                   ORDER BY uploaded_at DESC NULLS LAST, created_at DESC
-                   LIMIT 1
-                )`,
-            [sheetId, tabName, rowIndex]
-          );
-        } catch (batchErr) {
-          logger.warn(`[submit/review] 완료 업로드 묶음 기록 실패(fail-soft): ${batchErr.message}`);
-        }
-
         /* ★ 127: 포스팅제출일(blog) — 같은 규율로 작업표 칸에 자동 기록(재제출 = 최신 제출일 갱신). */
         if (_isBlog && _postDate) {
           try {
@@ -665,7 +667,15 @@ router.post('/review', async (req, res, next) => {
         logger.info(`[submit/review] 부분 제출 — 미충족 슬롯: ${missingSlots.join(', ')} (row=${rowIndex})`);
       }
     } catch (dbErr) {
+      if (dbErr.code === 'REVIEW_COMPLETION_HISTORY_FAILED') completionHistoryError = dbErr;
       logger.warn(`[submit/review] DB 업데이트 실패: ${dbErr.message}`);
+    }
+
+    if (completionHistoryError) {
+      return res.status(503).json({
+        ok: false, code: 'review_completion_history_failed',
+        error: '리뷰 제출 완료 기록에 실패했습니다. 잠시 후 다시 제출해주세요.',
+      });
     }
 
     // ── ★ Step 2: 즉시 응답 반환 (DB 저장 완료 = 제출 성공) ──

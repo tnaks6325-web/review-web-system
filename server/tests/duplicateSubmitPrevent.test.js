@@ -113,6 +113,9 @@ function stubPool(handler) {
     const manualSvc = read('src/services/trackB.service.js');
     assert.ok(/UPDATE review_submissions[\s\S]*?SET completed_at = COALESCE\(completed_at, NOW\(\)\)[\s\S]*?upload_batch_id = \(/.test(submitRoute),
       '일반 리뷰 제출 완료 시 최신 업로드 묶음을 완료 처리');
+    assert.ok(/REVIEW_COMPLETION_HISTORY_FAILED/.test(submitRoute)
+      && /review_completion_history_failed/.test(submitRoute),
+      '완료 이력 기록 실패를 제출 성공으로 반환하지 않음');
     assert.ok(/SET completed_at = COALESCE\(completed_at, NOW\(\)\)[\s\S]*?file_id = ANY\(\$4::text\[\]\)/.test(manualSvc),
       '작업보드 수동 제출은 선택 파일을 완료 처리');
     ok('B2: ★ 프런트 우회도 Drive 업로드 전에 차단 · 같은 행은 교체 허용');
