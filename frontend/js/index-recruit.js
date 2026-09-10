@@ -1220,7 +1220,10 @@ window.rfCarrySet = rfCarrySet;
 
 function onMultiAccountToggle(on) {
   const sec = document.getElementById("rf_multi_section");
-  if (sec) sec.style.display = on ? "" : "none";
+  if (sec) {
+    sec.hidden = !on;
+    sec.style.display = on ? "" : "none";
+  }
   renderPartCheck();
 }
 
@@ -2115,7 +2118,7 @@ function renderPartCheck() {
       items.push({
         label: _ma.checked
           ? (_md > 0
-              ? ("타계정 참여: 가능 (명의당 1건 · 하루 " + _md + "건)")
+              ? ("타계정 참여: 가능 (명의당 1건 · 하루 " + _md + "계정)")
               : "타계정 참여: 가능 — 하루한도 무제한(한 사람이 여러 자리를 가져갈 수 있어요)")
           : "타계정 참여: 불가 (로그인 계정 1건만)",
         fail: false,

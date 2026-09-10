@@ -11,6 +11,7 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8')
 
 const adminHtml = read('frontend/js/recruit-modal.js') + '\n' + read('frontend/admin.html');
 const recruit = read('frontend/js/index-recruit.js');
+const compactEditor = adminHtml.slice(adminHtml.indexOf('class="rf-main rf-compact-main"'));
 
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
@@ -18,11 +19,24 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 // ── 공고 모달 UI ──
 ok('admin.html: 타계정 참여 체크박스(rf_multi_account) + 토글 핸들러', /id="rf_multi_account"[^>]*onchange="onMultiAccountToggle/.test(adminHtml));
 ok('admin.html: 하루한도(rf_multi_daily)·타계정 제한시간(rf_sub_ttl) 입력', /id="rf_multi_daily"/.test(adminHtml) && /id="rf_sub_ttl"/.test(adminHtml));
-ok('admin.html: 하위 설정은 rf_multi_section에 숨김(기본 display:none)', /id="rf_multi_section" style="display:none/.test(adminHtml));
+ok('실사용 편집기: 타계정 허용 오른쪽에 하루 한도 [숫자] 계정 입력',
+  /id="rf_multi_account_toggle"[\s\S]{0,500}id="rf_multi_section" class="rf-multi-limit" hidden[\s\S]{0,200}>하루 한도<[\s\S]{0,300}id="rf_multi_daily"[\s\S]{0,200}<span>계정<\/span>/.test(compactEditor)
+  && /\.rf-multi-limit\{[^}]*margin-left:auto/.test(compactEditor));
 ok('admin.html: 참여형(rf_part_section) 안에 위치 — 레거시 공고엔 미노출', adminHtml.indexOf('id="rf_part_section"') < adminHtml.indexOf('id="rf_multi_account"'));
 
 // ── 토글·자동점검 ──
-ok('index-recruit: onMultiAccountToggle 정의(섹션 표시 + 점검 갱신)', /function onMultiAccountToggle\(on\)[\s\S]*?rf_multi_section[\s\S]*?renderPartCheck\(\)/.test(recruit));
+ok('index-recruit: 허용/미허용에 따라 실제 입력 영역 hidden 해제 + 점검 갱신',
+  /function onMultiAccountToggle\(on\)[\s\S]*?rf_multi_section[\s\S]*?sec\.hidden = !on[\s\S]*?renderPartCheck\(\)/.test(recruit));
+const toggleSource = (recruit.match(/function onMultiAccountToggle\(on\) \{[\s\S]*?\n\}/) || [''])[0];
+const toggleSection = { hidden: true, style: { display: 'none' } };
+let toggleChecks = 0;
+const toggle = new Function('document', 'renderPartCheck', `${toggleSource}; return onMultiAccountToggle;`)(
+  { getElementById: () => toggleSection }, () => { toggleChecks += 1; });
+toggle(true);
+ok('실행 검증: 허용을 누르면 하루 한도 입력이 보임', toggleSection.hidden === false && toggleSection.style.display === '');
+toggle(false);
+ok('실행 검증: 미허용으로 바꾸면 하루 한도 입력이 숨고 점검을 다시 계산',
+  toggleSection.hidden === true && toggleSection.style.display === 'none' && toggleChecks === 2);
 ok('index-recruit: 자동점검에 타계정 항목(가능/불가 + 하루한도) — 게이트 아님(fail:false)',
   /타계정 참여: 가능[\s\S]*?타계정 참여: 불가[\s\S]*?fail: false/.test(recruit));
 

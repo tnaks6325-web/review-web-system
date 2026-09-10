@@ -84,6 +84,26 @@ function detectIdentityDrift(row, orderIdentity) {
 }
 
 /**
+ * 공고별 타계정 하루 한도 사용량.
+ * 자리를 잡은 순간 한도를 예약해야 `하루 1계정`에서 여러 타계정 홀드를 먼저 만든 뒤
+ * 한꺼번에 제출하는 우회가 생기지 않는다. 만료·취소·반려는 다시 사용할 수 있고,
+ * 블로그 승인 대기는 당일 신청분만 예약한다.
+ */
+async function countCampaignSubDailyUsage(q, { campaignId, ownerPhone8, dayStartIso }) {
+  const { rows } = await q.query(
+    `SELECT COUNT(*) AS n FROM campaign_applications
+      WHERE campaign_id = $1 AND owner_phone8 = $2 AND phone8 <> owner_phone8
+        AND (
+          (status = 'applied' AND expires_at > NOW())
+          OR (status = 'blog_pending' AND applied_at >= $3)
+          OR (status = 'submitted' AND submitted_at >= $3)
+        )`,
+    [campaignId, ownerPhone8, dayStartIso]
+  );
+  return Number(rows[0] && rows[0].n) || 0;
+}
+
+/**
  * 주문 트랜잭션 안에서 홀드 확정. 반드시 orderLedger의 client 트랜잭션 내부에서 호출.
  * 반환: 'confirmed' | 'late' | 'tab_mismatch' | 'not_found' | 'invalid_params'
  *   — 어떤 반환값이든 주문 저장은 막지 않는다(호출측이 SAVEPOINT로 예외도 격리).
@@ -272,4 +292,4 @@ async function sweepExpiredHolds(pool) {
   return { expired: exp.rowCount, autoDismissed, revived, closedPersisted: closedCount };
 }
 
-module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds };
+module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, countCampaignSubDailyUsage, sweepExpiredHolds };
