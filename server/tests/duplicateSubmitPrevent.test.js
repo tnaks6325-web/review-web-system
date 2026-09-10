@@ -56,8 +56,8 @@ function stubPool(handler) {
     assert.ok(/COALESCE\(ri\.is_submitted, FALSE\) OR COALESCE\(cp\.is_submitted, FALSE\)/.test(sql),
       'review_index 또는 작업보드 참여자 제출완료만');
     assert.ok(/s\.completed_at IS NOT NULL/.test(sql)
-      && /s\.upload_batch_id IS NULL AND ri\.review_file_id = s\.file_id/.test(sql),
-      '신규 완료 이력 또는 레거시 대표 캡처만 중복 처리');
+      && /OR s\.upload_batch_id IS NULL/.test(sql),
+      '신규 완료 이력 또는 묶음 도입 전 완료 행의 모든 리뷰 캡처를 중복 처리');
     ok('A3: 구매양식 매핑 + 두 원장 중 하나의 is_submitted=TRUE 필수');
 
     // A4: 다른 작업이면 sameTab=false
@@ -106,10 +106,13 @@ function stubPool(handler) {
     assert.ok(/\(sheet_id, tab_name, row_index\)/.test(migration) && /INCLUDE \(is_submitted, phone8, recipient_name\)/.test(migration),
       '완료 상태 결합은 행 복합 커버링 인덱스를 사용');
     const batchMigration = read('migrations/155_review_submission_upload_batch.sql');
+    const legacyBackfill = read('migrations/156_review_submission_legacy_completion.sql');
     const sa = front('js/search-app.js');
     assert.ok(/ADD COLUMN IF NOT EXISTS upload_batch_id UUID/.test(batchMigration)
       && /ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ/.test(batchMigration),
       '다중 캡처 업로드 묶음과 완료 이력 저장');
+    assert.ok(/UPDATE review_submissions s[\s\S]*?s\.upload_batch_id IS NULL[\s\S]*?ri\.is_submitted = TRUE[\s\S]*?cp\.is_submitted = TRUE/.test(legacyBackfill),
+      '묶음 도입 전 완료 행의 여러 리뷰 파일을 모두 완료 이력으로 백필');
     const submitRoute = read('src/routes/submit.routes.js');
     const manualSvc = read('src/services/trackB.service.js');
     assert.ok(/s\.file_id = lr\.review_file_id/.test(submitRoute)
