@@ -33,7 +33,7 @@ function verifiedReviewerIdentity(req) {
     const session = verifyReviewerSession(token);
     const phone8 = String(session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     if (phone8.length !== 8) return null;
-    return { reviewerName: String(session.loginName || '').trim(), phone8 };
+    return { reviewerName: String(session.loginName || '').trim(), phone8, session };
   } catch (_) {
     return null;
   }
@@ -1665,6 +1665,17 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         ok: false, code: 'REVIEW_UPLOAD_AUTH_REQUIRED',
         error: '리뷰어 로그인을 다시 확인해주세요.',
       });
+    }
+    if (reviewerIdentity) {
+      const ownsTarget = await require('../services/reviewerTargetOwnership.service').ownsReviewerTarget({
+        session: reviewerIdentity.session, sheetId, tabName, rowIndex,
+      });
+      if (!ownsTarget) {
+        return res.status(403).json({
+          ok: false, code: 'REVIEW_UPLOAD_TARGET_FORBIDDEN',
+          error: '이 구매양식의 리뷰를 제출할 권한이 없습니다.',
+        });
+      }
     }
 
     const _riSvc = require('../services/reviewInspect.service');

@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
@@ -468,6 +469,27 @@ router.post('/review', async (req, res, next) => {
 
     if (!sheetId || !tabName || !rowIndex) {
       return res.json({ error: '필수 파라미터 누락 (sheetId, tabName, rowIndex)' });
+    }
+    let reviewerSession = null;
+    const reviewerToken = req.headers['x-reviewer-token'];
+    if (reviewerToken) {
+      try { reviewerSession = verifyReviewerSession(reviewerToken); }
+      catch (_) { return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인을 다시 확인해주세요.' }); }
+    } else {
+      const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+      let internal = null;
+      try { internal = bearer && jwt.verify(bearer[1], process.env.JWT_SECRET); } catch (_) {}
+      if (!internal || !['master', 'admin', 'staff'].includes(internal.role) || internal.via === 'reviewer_campaign') {
+        return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
+      }
+    }
+    if (reviewerSession) {
+      const ownsTarget = await require('../services/reviewerTargetOwnership.service').ownsReviewerTarget({
+        session: reviewerSession, sheetId, tabName, rowIndex,
+      });
+      if (!ownsTarget) {
+        return res.status(403).json({ ok: false, code: 'REVIEW_SUBMIT_TARGET_FORBIDDEN', error: '이 구매양식의 리뷰를 제출할 권한이 없습니다.' });
+      }
     }
 
     const submitValue = value || '제출';

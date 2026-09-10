@@ -57,6 +57,10 @@ const virtualRows = [
 ];
 
 function duplicateQuery(sql, params) {
+  if (/LEFT JOIN participation_links pl/.test(sql) && /LEFT JOIN campaign_participants cp/.test(sql)) {
+    const [sheetId, tabName, rowIndex] = params;
+    return { rows: sheetId === 'SHEET-B' && tabName === '현재구매양식' && Number(rowIndex) === 201 ? [{ owned: 1 }] : [] };
+  }
   if (!/FROM review_submissions s/.test(sql)) return { rows: [] };
   const [hash, fallbackName, sheetId, tabName, rowIndex, phone8] = params;
   const rows = virtualRows
@@ -160,6 +164,16 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(driveUploadCalls, 0);
     console.log('  통과 ⑥ 인증 없는 리뷰 업로드 → 저장 전 401 거부');
 
+    const foreignTarget = await post(baseUrl, '/api/image/review-upload', token, {
+      sheetId: 'SHEET-X', tabName: '다른참여자구매양식', rowIndex: 999,
+      reviewerName: '가상리뷰어', slotKey: 'receipt',
+      files: [{ data: uniqueBytes, mimeType: 'image/png', name: '새사진.png' }],
+    });
+    assert.strictEqual(foreignTarget.status, 403);
+    assert.strictEqual(foreignTarget.body.code, 'REVIEW_UPLOAD_TARGET_FORBIDDEN');
+    assert.strictEqual(driveUploadCalls, 0);
+    console.log('  통과 ⑦ 타 참여자 행·비리뷰 슬롯 지정 → 저장 전 403 거부');
+
     const upload = await post(baseUrl, '/api/image/review-upload', token, {
       sheetId: 'SHEET-B', tabName: '현재구매양식', rowIndex: 201,
       reviewerName: '가상리뷰어', slotKey: 'review',
@@ -174,10 +188,10 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(upload.body.error, '이미 제출됬던 사진이에요');
     assert.strictEqual(upload.body.files[0].rejected, 'duplicate_submitted');
     assert.strictEqual(driveUploadCalls, 0);
-    console.log('  통과 ⑦ 두 장 중 한 장이 완료 중복 → 두 장 모두 저장 전 차단');
-    console.log('  통과 ⑧ Drive 업로드 호출 0회 → 차단 후 외부 저장 없음');
+    console.log('  통과 ⑧ 두 장 중 한 장이 완료 중복 → 두 장 모두 저장 전 차단');
+    console.log('  통과 ⑨ Drive 업로드 호출 0회 → 차단 후 외부 저장 없음');
 
-    console.log('\n결과: 8 통과 / 0 실패 (운영 DB·Drive 접촉 0)');
+    console.log('\n결과: 9 통과 / 0 실패 (운영 DB·Drive 접촉 0)');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     reviewInspect.__setPoolForTest(null);

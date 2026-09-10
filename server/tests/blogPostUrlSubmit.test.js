@@ -92,8 +92,10 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
   const routePath = require.resolve('../src/routes/submit.routes');
   const ssPath = require.resolve('../src/services/sheetlessStatus.service');
   const sheetsPath = require.resolve('../src/services/sheets.service');
+  const sessionPath = require.resolve('../src/services/reviewerSession.service');
+  const ownershipPath = require.resolve('../src/services/reviewerTargetOwnership.service');
   const saved = {};
-  for (const p of [poolPath, wkPath, rtPath, routePath, ssPath, sheetsPath]) saved[p] = require.cache[p];
+  for (const p of [poolPath, wkPath, rtPath, routePath, ssPath, sheetsPath, sessionPath, ownershipPath]) saved[p] = require.cache[p];
 
   const db = {
     async query(sql, params) {
@@ -125,6 +127,8 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
     writeSheet: async () => ({}), readSheet: async () => [], appendSheet: async () => ({}),
     getSpreadsheetMeta: async () => ({}), batchReadSheet: async () => [], batchUpdateSheet: async () => ({}),
   } };
+  require.cache[sessionPath] = { exports: { verifyReviewerSession: () => ({ ownerReviewerId: 'owner-1', loginPhone8: '12345678' }) } };
+  require.cache[ownershipPath] = { exports: { ownsReviewerTarget: async () => true } };
   delete require.cache[routePath];
   const router = require('../src/routes/submit.routes');
   const restore = () => {
@@ -142,7 +146,7 @@ async function callReview(opts, body) {
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
     let payload = null;
     const res = { json(o) { payload = o; return this; }, status() { return this; } };
-    await handler({ body }, res, e => { payload = { thrown: e && e.message }; });
+    await handler({ body, headers: { 'x-reviewer-token': 'test-reviewer-token' } }, res, e => { payload = { thrown: e && e.message }; });
     await new Promise(r => setImmediate(r));   // 배경 작업이 던져도 테스트가 죽지 않게 한 틱 양보
     return { payload, queries };
   } finally { restore(); }

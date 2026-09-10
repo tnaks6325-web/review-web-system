@@ -120,6 +120,9 @@ function stubPool(handler) {
       '완료 이력 기록 실패를 제출 성공으로 반환하지 않음');
     assert.ok(/if \(!reviewerIdentity && !internalIdentity\)/.test(dg),
       '요청 슬롯과 무관하게 리뷰어 또는 내부 신원을 검증');
+    assert.ok(/REVIEW_UPLOAD_TARGET_FORBIDDEN/.test(dg)
+      && /REVIEW_SUBMIT_TARGET_FORBIDDEN/.test(submitRoute),
+      '업로드와 제출 모두 세션 소유자의 구매양식 행만 허용');
     assert.ok(/REVIEW_SUBMISSION_LEDGER_FAILED/.test(dg) && /uploadBatchId/.test(dg),
       '업로드 원장 기록 실패를 성공으로 숨기지 않고 묶음 ID를 반환');
     assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)
