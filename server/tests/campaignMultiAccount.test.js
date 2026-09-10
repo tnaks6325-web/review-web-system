@@ -2,7 +2,7 @@
  * campaignMultiAccount.test.js — 타계정 추가참여 1단계(서버 규칙) 회귀가드 (063, 소스 grep + 순수함수)
  * 실행: node tests/campaignMultiAccount.test.js
  * 고정하는 것(레드-블루-심판 최종안): 명의 phone8 키잉 유니크 불변 · 잠금 계층(owner→명의) · 레거시 상한 불변 ·
- *   소유자 합산 상한 · 캠페인별 타계정 하루한도(상태 무관) · submit 홀드문맥 단일화+owner 폴백 ·
+ *   소유자 합산 상한 · 캠페인별 타계정 하루한도 예약 · submit 홀드문맥 단일화+owner 폴백 ·
  *   옵션 드리프트 백스톱 · closed 재오픈 봉합 · 스코프 토큰 토글 불가 · 공개필드 정책 · my-status PII 미역유출
  */
 const assert = require('assert');
@@ -39,8 +39,8 @@ ok('apply 잠금 순서: 캠페인 행 → owner → 명의(camp_hold_owner가 c
 ok('apply: 레거시 상한 불변(CAMPAIGN_HOLD_CAP 기본 2) + 신설 CAMPAIGN_OWNER_HOLD_CAP 기본 10',
   /CAMPAIGN_HOLD_CAP \|\| '2'/.test(applyBody) && /CAMPAIGN_OWNER_HOLD_CAP \|\| '10'/.test(applyBody));
 ok('apply: owner cap은 COALESCE(owner_phone8, phone8) 시각 기준', /COALESCE\(owner_phone8, phone8\) = \$1 AND status = 'applied' AND expires_at > NOW\(\)/.test(applyBody));
-ok('apply: 타계정 하루한도는 구매양식 제출완료(submitted_at)만 집계',
-  /owner_phone8 = \$2 AND phone8 <> owner_phone8[\s\S]*?status = 'submitted' AND submitted_at >= \$3/.test(applyBody));
+ok('apply: 타계정 하루한도는 공고별 사용량 헬퍼로 신청 단계에서 예약',
+  /countCampaignSubDailyUsage\(client, \{[\s\S]*?campaignId: id, ownerPhone8: p8, dayStartIso/.test(applyBody));
 // ★ 082 에서 review_fee_snapshot(참여 시점 리뷰비)이 뒤에 추가됐다 — 검사 의미는 그대로
 //   (앞쪽 컬럼 순서·owner_phone8 존재·명의 phone8 위치). 뒤에 컬럼이 붙는 것은 허용한다.
 ok('apply INSERT: owner_phone8 포함 + 명의 phone8($4)', /\(campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key(, \w+)*\)/.test(applyBody));

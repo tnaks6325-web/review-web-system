@@ -2048,17 +2048,17 @@ async function _applyParticipation(req, res, next, campPre) {
         error: `본인+타계정 합산 동시 ${ownerCap}건까지만 자리를 잡을 수 있어요.` });
     }
 
-    // ★ 캠페인별 타계정 하루한도(063, §09-5): 구매양식 제출완료만 집계한다.
+    // ★ 캠페인별 타계정 하루한도(063, §09-5): 유효홀드부터 수량을 예약한다.
+    //   제출완료만 세면 한도 1이어도 여러 타계정 자리를 먼저 잡은 뒤 일괄 제출할 수 있다.
     if (isSubApply && Number(camp.multi_daily_limit) > 0) {
-      const md = await client.query(
-        `SELECT COUNT(*) AS n FROM campaign_applications
-          WHERE campaign_id = $1 AND owner_phone8 = $2 AND phone8 <> owner_phone8
-            AND status = 'submitted' AND submitted_at >= $3`,
-        [id, p8, dayStartIso]);
-      if (Number(md.rows[0].n) >= Number(camp.multi_daily_limit)) {
+      const { countCampaignSubDailyUsage } = require('../services/campaignSubAccountLimit.service');
+      const used = await countCampaignSubDailyUsage(client, {
+        campaignId: id, ownerPhone8: p8, dayStartIso,
+      });
+      if (used >= Number(camp.multi_daily_limit)) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'sub_daily_limit',
-          error: `타계정 참여는 이 공고에서 하루 ${camp.multi_daily_limit}건까지예요(내일 가능).` });
+          error: `이 공고의 타계정 참여 한도는 하루 ${camp.multi_daily_limit}계정입니다.` });
       }
     }
 
