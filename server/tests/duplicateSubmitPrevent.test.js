@@ -106,16 +106,21 @@ function stubPool(handler) {
     assert.ok(/\(sheet_id, tab_name, row_index\)/.test(migration) && /INCLUDE \(is_submitted, phone8, recipient_name\)/.test(migration),
       '완료 상태 결합은 행 복합 커버링 인덱스를 사용');
     const batchMigration = read('migrations/155_review_submission_upload_batch.sql');
+    const sa = front('js/search-app.js');
     assert.ok(/ADD COLUMN IF NOT EXISTS upload_batch_id UUID/.test(batchMigration)
       && /ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ/.test(batchMigration),
       '다중 캡처 업로드 묶음과 완료 이력 저장');
     const submitRoute = read('src/routes/submit.routes.js');
     const manualSvc = read('src/services/trackB.service.js');
-    assert.ok(/UPDATE review_submissions[\s\S]*?SET completed_at = COALESCE\(completed_at, NOW\(\)\)[\s\S]*?upload_batch_id = \(/.test(submitRoute),
-      '일반 리뷰 제출 완료 시 최신 업로드 묶음을 완료 처리');
+    assert.ok(/upload_batch_id = \$4::uuid/.test(submitRoute)
+      && /if \(!completedBatch\.rowCount\) throw/.test(submitRoute),
+      '일반 리뷰 제출은 요청이 지정한 정확한 업로드 묶음만 완료 처리');
     assert.ok(/REVIEW_COMPLETION_HISTORY_FAILED/.test(submitRoute)
       && /review_completion_history_failed/.test(submitRoute),
       '완료 이력 기록 실패를 제출 성공으로 반환하지 않음');
+    assert.ok(/REVIEW_SUBMISSION_LEDGER_FAILED/.test(dg) && /uploadBatchId/.test(dg),
+      '업로드 원장 기록 실패를 성공으로 숨기지 않고 묶음 ID를 반환');
+    assert.ok(/uploadBatchId: reviewUploadBatchId/.test(sa), '프런트가 업로드 응답의 정확한 묶음 ID를 제출 요청에 전달');
     assert.ok(/SET completed_at = COALESCE\(completed_at, NOW\(\)\)[\s\S]*?file_id = ANY\(\$4::text\[\]\)/.test(manualSvc),
       '작업보드 수동 제출은 선택 파일을 완료 처리');
     ok('B2: ★ 프런트 우회도 Drive 업로드 전에 차단 · 같은 행은 교체 허용');

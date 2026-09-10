@@ -464,7 +464,7 @@ router.post('/find-slot', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/review', async (req, res, next) => {
   try {
-    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo } = req.body;
+    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo, uploadBatchId } = req.body;
 
     if (!sheetId || !tabName || !rowIndex) {
       return res.json({ error: '필수 파라미터 누락 (sheetId, tabName, rowIndex)' });
@@ -567,24 +567,32 @@ router.post('/review', async (req, res, next) => {
       }
 
       if (complete) {
-        // 이번 제출에 실제 포함된 최신 리뷰 업로드 묶음을 상태 확정보다 먼저 완료 이력으로 고정한다.
+        // 이번 제출 요청이 실제로 업로드한 리뷰 묶음만 상태 확정보다 먼저 완료 이력으로 고정한다.
         // 이 기록이 실패하면 중복 차단 근거가 사라지므로 제출 성공으로 응답하지 않는다.
         try {
-          await pool.query(
-            `UPDATE review_submissions
-                SET completed_at = COALESCE(completed_at, NOW())
-              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                AND COALESCE(slot_key, 'review') = 'review'
-                AND upload_batch_id = (
-                  SELECT upload_batch_id FROM review_submissions
-                   WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                     AND COALESCE(slot_key, 'review') = 'review'
-                     AND upload_batch_id IS NOT NULL
-                   ORDER BY uploaded_at DESC NULLS LAST, created_at DESC
-                   LIMIT 1
-                )`,
-            [sheetId, tabName, rowIndex]
-          );
+          if (uploadBatchId) {
+            const completedBatch = await pool.query(
+              `UPDATE review_submissions
+                  SET completed_at = COALESCE(completed_at, NOW())
+                WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                  AND COALESCE(slot_key, 'review') = 'review'
+                  AND upload_batch_id = $4::uuid`,
+              [sheetId, tabName, rowIndex, uploadBatchId]
+            );
+            if (!completedBatch.rowCount) throw new Error('제출할 리뷰 업로드 묶음을 찾을 수 없습니다.');
+          } else {
+            const { rows: pendingBatches } = await pool.query(
+              `SELECT 1 FROM review_submissions
+                WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                  AND COALESCE(slot_key, 'review') = 'review'
+                  AND upload_batch_id IS NOT NULL AND completed_at IS NULL
+                LIMIT 1`,
+              [sheetId, tabName, rowIndex]
+            );
+            if (pendingBatches.length || !wasSubmitted) {
+              throw new Error('리뷰 업로드 묶음 정보가 없습니다. 화면을 새로고침한 뒤 다시 제출해주세요.');
+            }
+          }
         } catch (batchErr) {
           batchErr.code = 'REVIEW_COMPLETION_HISTORY_FAILED';
           throw batchErr;

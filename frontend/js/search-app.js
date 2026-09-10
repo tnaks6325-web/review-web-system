@@ -3301,6 +3301,7 @@ async function _submitReviewSlots(item) {
   const uploadErrors = [];
   const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
   let replacedCurrent = false;
+  let reviewUploadBatchId = null;
   try {
     // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
     for (const slot of slotsToUpload) {
@@ -3331,6 +3332,7 @@ async function _submitReviewSlots(item) {
           }))
         }, 180000);
         replacedCurrent = replacedCurrent || !!(upRes && upRes.replacedCurrent);
+        if (slot.key === 'review' && upRes && upRes.uploadBatchId) reviewUploadBatchId = upRes.uploadBatchId;
         if (!upRes || (!upRes.ok && !upRes.success)) {
           // 전부 중복 반려로 실패한 경우 — 그 슬롯에 빨간 안내를 남기고 실패로 처리
           const rj0 = upRes && Array.isArray(upRes.files) ? upRes.files.find(r => r && r.rejected) : null;
@@ -3403,6 +3405,7 @@ async function _submitReviewSlots(item) {
       value:        submitTimeValue,
       campaignName: item.campaignName,
       memo,
+      uploadBatchId: reviewUploadBatchId,
     }, 30000);
     hideLoading();
 
@@ -3542,6 +3545,7 @@ async function submitReview() {
       }
 
       try {
+        let reviewUploadBatchId = null;
         // ★ 파일명에 사용할 이름: 수취인명 우선, 없으면 reviewer_name fallback
         //   (업로드를 건너뛰는 blog 건도 Step 2 제출 기록에 쓴다 → 블록 밖에 둔다)
         const reviewerName = item.recipientName || item.displayName || "이름없음";
@@ -3589,6 +3593,7 @@ async function submitReview() {
             }))
           }, 180000);
           replacedCurrent = replacedCurrent || !!(uploadResult && uploadResult.replacedCurrent);
+          if (uploadResult && uploadResult.uploadBatchId) reviewUploadBatchId = uploadResult.uploadBatchId;
 
           if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
             const _rj0 = uploadResult && Array.isArray(uploadResult.files)
@@ -3638,6 +3643,7 @@ async function submitReview() {
           value:            submitTimeValue,
           campaignName:     item.campaignName,
           memo,
+          uploadBatchId:    reviewUploadBatchId,
         }, 30000);
 
         hideLoading();

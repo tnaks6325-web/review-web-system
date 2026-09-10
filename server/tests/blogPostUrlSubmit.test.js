@@ -145,7 +145,10 @@ async function callReview(opts, body) {
   } finally { restore(); }
 }
 
-const BASE = { sheetId: 'S', tabName: 'T', rowIndex: 7, submitCol: '리뷰제출', gid: '1' };
+const BASE = {
+  sheetId: 'S', tabName: 'T', rowIndex: 7, submitCol: '리뷰제출', gid: '1',
+  uploadBatchId: '11111111-1111-4111-8111-111111111111',
+};
 
 await ta('★★ blog 탭 + 포스팅URL 없음 = 거부', async () => {
   const { payload, queries } = await callReview({ workKind: 'blog' }, { ...BASE, memo: '' });

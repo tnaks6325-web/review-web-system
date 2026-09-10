@@ -2049,6 +2049,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       //   ★ file_hash 는 여기서 함께 넣는다 — base64 를 이미 쥔 시점이라 계산 비용이 0이고,
       //     나중에 UPDATE 로 채우면 그 사이 올라온 다른 파일이 중복 대조 대상을 놓친다.
       const _inspect = require('../services/reviewInspect.service');
+      let submissionLedgerError = null;
       for (const r of uploadResults) {
         if (!r.fileId) continue;
         const _b64 = (files[r.index - 1] && files[r.index - 1].data) || '';
@@ -2075,7 +2076,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
               .markRouted({ fileId: r.fileId, fromSlot: r.routed.from, by: 'auto:upload' });
           }
         } catch (subErr) {
-          logger.warn(`[review-upload] 제출원장 기록 실패 (무시): ${subErr.message}`);
+          submissionLedgerError = submissionLedgerError || subErr;
+          logger.error(`[review-upload] 제출원장 기록 실패: ${subErr.message}`);
         }
 
         // ── 2차 검수(M1): 상품명·같은 파일·본문 겹침 대조 후 review_inspections 에 기록 ──
@@ -2105,6 +2107,13 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       if (_routedAny) {
         await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
       }
+      if (submissionLedgerError) {
+        return res.status(503).json({
+          ok: false, code: 'REVIEW_SUBMISSION_LEDGER_FAILED', uploaded: successCount,
+          total: files.length, files: uploadResults,
+          error: '리뷰 파일 기록에 실패했습니다. 잠시 후 다시 제출해주세요.',
+        });
+      }
     }
 
     const _rejectedResults = uploadResults.filter(r => r && r.rejected);
@@ -2114,6 +2123,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       total: files.length,
       files: uploadResults,
       reviewFolderUrl: reviewFolderUrl || '',
+      uploadBatchId,
       replacedCurrent,
       // 전부 반려면 실패 사유를 최상위 error 로도 실어준다(단일 첨부 화면의 기존 오류 표시 경로)
       ...(successCount === 0 && _rejectedResults.length ? { error: _rejectedResults[0].message } : {}),
