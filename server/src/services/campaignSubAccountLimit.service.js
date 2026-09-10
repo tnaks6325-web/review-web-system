@@ -1,3 +1,5 @@
+const { HOLD_GRACE_SEC } = require('./campaignHold.service');
+
 /**
  * 공고별 타계정 하루 한도 사용량.
  * 자리를 잡은 순간 한도를 예약해야 `하루 1계정`에서 여러 타계정 홀드를 먼저 만든 뒤
@@ -9,11 +11,11 @@ async function countCampaignSubDailyUsage(q, { campaignId, ownerPhone8, dayStart
     `SELECT COUNT(*) AS n FROM campaign_applications
       WHERE campaign_id = $1 AND owner_phone8 = $2 AND phone8 <> owner_phone8
         AND (
-          (status = 'applied' AND expires_at > NOW())
+          (status = 'applied' AND expires_at > NOW() - make_interval(secs => $4))
           OR (status = 'blog_pending' AND applied_at >= $3)
           OR (status = 'submitted' AND submitted_at >= $3)
         )`,
-    [campaignId, ownerPhone8, dayStartIso]
+    [campaignId, ownerPhone8, dayStartIso, HOLD_GRACE_SEC]
   );
   return Number(rows[0] && rows[0].n) || 0;
 }

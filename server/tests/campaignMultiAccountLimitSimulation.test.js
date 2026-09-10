@@ -3,6 +3,7 @@
  * 운영 DB 대신 메모리 상태를 만들고 실제 집계 헬퍼를 호출한다.
  */
 const assert = require('assert');
+const { HOLD_GRACE_SEC } = require('../src/services/campaignHold.service');
 const { countCampaignSubDailyUsage } = require('../src/services/campaignSubAccountLimit.service');
 
 const now = Date.parse('2026-09-10T03:00:00.000Z'); // 2026-09-10 12:00 KST
@@ -16,7 +17,7 @@ const fakeDb = {
     const dayStartMs = isoMs(dayStartIso);
     const count = rows.filter((row) => {
       if (row.campaignId !== campaignId || row.ownerPhone8 !== ownerPhone8 || row.phone8 === ownerPhone8) return false;
-      if (row.status === 'applied') return isoMs(row.expiresAt) > now;
+      if (row.status === 'applied') return isoMs(row.expiresAt) > now - HOLD_GRACE_SEC * 1000;
       if (row.status === 'blog_pending') return isoMs(row.appliedAt) >= dayStartMs;
       if (row.status === 'submitted') return isoMs(row.submittedAt) >= dayStartMs;
       return false;
@@ -62,8 +63,12 @@ function step(label, actual, expected) {
 
   const aHold = rows.find((row) => row.campaignId === 'camp-a' && row.status === 'applied');
   aHold.expiresAt = new Date(now - 1).toISOString();
+  const duringGrace = await attempt({ campaignId: 'camp-a', phone8: '20000002', limit: 1 });
+  step('표시상 만료 직후에도 제출 유예 30초 동안은 새 타계정을 차단', duringGrace,
+    { allowed: false, used: 1, limit: 1 });
+  aHold.expiresAt = new Date(now - HOLD_GRACE_SEC * 1000 - 1).toISOString();
   const afterExpiry = await attempt({ campaignId: 'camp-a', phone8: '20000002', limit: 1 });
-  step('만료된 자리는 반환되어 다른 타계정이 참여', afterExpiry, { allowed: true, used: 1, limit: 1 });
+  step('제출 유예까지 끝난 자리는 반환되어 다른 타계정이 참여', afterExpiry, { allowed: true, used: 1, limit: 1 });
 
   const activeA = rows.find((row) => row.campaignId === 'camp-a' && row.phone8 === '20000002');
   activeA.status = 'submitted';
@@ -110,14 +115,14 @@ function step(label, actual, expected) {
   });
   step('한도 3·타계정 5개: 차단 뒤 실제 사용량은 3으로 유지', limitThreeUsage, 3);
 
-  rows.find((row) => row.campaignId === 'camp-limit-3' && row.phone8 === fiveSubs[0]).expiresAt = new Date(now - 1).toISOString();
+  rows.find((row) => row.campaignId === 'camp-limit-3' && row.phone8 === fiveSubs[0]).expiresAt = new Date(now - HOLD_GRACE_SEC * 1000 - 1).toISOString();
   const fourthAfterExpiry = await attempt({ campaignId: 'camp-limit-3', phone8: fiveSubs[3], limit: 3 });
   const fifthStillBlocked = await attempt({ campaignId: 'camp-limit-3', phone8: fiveSubs[4], limit: 3 });
   step('한도 3·타계정 5개: 1건 만료 후 4번째는 허용되고 5번째는 계속 차단',
     [fourthAfterExpiry.allowed, fourthAfterExpiry.used, fifthStillBlocked.allowed, fifthStillBlocked.used],
     [true, 3, false, 3]);
 
-  console.log('\n✅ campaignMultiAccountLimitSimulation: 13개 시나리오 통과');
+  console.log('\n✅ campaignMultiAccountLimitSimulation: 14개 시나리오 통과');
 })().catch((error) => {
   console.error('❌ campaignMultiAccountLimitSimulation:', error.stack || error.message);
   process.exit(1);
