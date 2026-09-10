@@ -349,7 +349,7 @@ function saveSession(name, phone8, reviewerToken){
   const session = { name, verified:true, registeredMember:true,
     phone8:String(phone8).replace(/\D/g,'').slice(-8), reviewerToken:reviewerToken||'', expAt: Date.now()+12*60*60*1000 };
   // 같은 탭의 만료된 관리자 홈 세션이 새 일반 로그인을 가리지 않게 한다.
-  try{ sessionStorage.removeItem('rapp_reviewer_auth'); }catch(_){}
+  _prepareReviewerLocalSession();
   localStorage.setItem('rapp_reviewer_auth', JSON.stringify(session));
   try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8, reviewerToken:session.reviewerToken})); }catch(_){}
   return session;

@@ -417,6 +417,14 @@ function _clearReviewerSession() {
   try { localStorage.removeItem(_REVIEWER_AUTH_STORAGE_KEY); } catch (_) {}
 }
 
+/** 명시적인 일반 로그인으로 전환하기 전에 탭 한정 관리자 홈 신원을 함께 끝낸다. */
+function _prepareReviewerLocalSession() {
+  try {
+    sessionStorage.removeItem(_REVIEWER_AUTH_STORAGE_KEY);
+    sessionStorage.removeItem('iad_reviewer_home_session');
+  } catch (_) { /* 일반 로그인 저장은 localStorage에서 계속 진행한다 */ }
+}
+
 function _getAuthHeaders() {
   const token = sessionStorage.getItem('admin_token');
   const headers = token ? { 'Authorization': 'Bearer ' + token } : {};

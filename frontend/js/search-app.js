@@ -607,7 +607,7 @@ function _saveAuthSession(name, verified, registeredMember, phone8, reviewerToke
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
   // 명시적인 일반 로그인은 이 탭에 남은 관리자 홈 세션을 끝낸다.
-  try { sessionStorage.removeItem(REVIEWER_AUTH_KEY); } catch(_) {}
+  _prepareReviewerLocalSession();
   localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(obj));
   _authState = obj;
 }

@@ -40,6 +40,7 @@ const sharedSource = [
   functionSource(api, '_getReviewerSessionStore'),
   functionSource(api, '_getReviewerSession'),
   functionSource(api, '_clearReviewerSession'),
+  functionSource(api, '_prepareReviewerLocalSession'),
   functionSource(api, '_getAuthHeaders'),
   functionSource(campaign, 'getSession'),
 ].join('\n');
@@ -91,36 +92,55 @@ t = makeContext({ local: subLogin });
 assert.strictEqual(vm.runInContext('getSession().name', t.sandbox), '양승호(회사)');
 console.log('  ✓ 타계정 직접 로그인 명의도 바꾸지 않음');
 
-const indexSessionStorage = memoryStorage();
+const indexSessionStorage = memoryStorage({ iad_reviewer_home_session: JSON.stringify({ name: '박은비' }) });
 const indexLocalStorage = memoryStorage({ rapp_reviewer_auth: JSON.stringify(kim) });
 const indexContext = { sessionStorage: indexSessionStorage, localStorage: indexLocalStorage, JSON, Date };
 vm.createContext(indexContext);
-vm.runInContext(functionSource(indexHtml, 'syncSearchSession'), indexContext);
+vm.runInContext(`const _REVIEWER_AUTH_STORAGE_KEY="rapp_reviewer_auth";\n${functionSource(api, '_prepareReviewerLocalSession')}\n${functionSource(indexHtml, 'syncSearchSession')}`, indexContext);
 vm.runInContext('syncSearchSession({name:"박은비",phone8:"22227191",reviewerToken:"park-token",adminPreview:true})', indexContext);
 assert.strictEqual(JSON.parse(indexSessionStorage.value('rapp_reviewer_auth')).name, '박은비');
 assert.strictEqual(JSON.parse(indexLocalStorage.value('rapp_reviewer_auth')).name, '김민혜');
 vm.runInContext('syncSearchSession({name:"새로그인",phone8:"44444444",reviewerToken:"new-token"})', indexContext);
 assert.strictEqual(indexSessionStorage.value('rapp_reviewer_auth'), null);
+assert.strictEqual(indexSessionStorage.value('iad_reviewer_home_session'), null);
 assert.strictEqual(JSON.parse(indexLocalStorage.value('rapp_reviewer_auth')).name, '새로그인');
 console.log('  ✓ 홈 진입은 탭 세션만 쓰고 명시적 일반 로그인은 오래된 탭 세션을 해제');
 
-const searchSessionStorage = memoryStorage({ rapp_reviewer_auth: JSON.stringify(park) });
+const searchSessionStorage = memoryStorage({
+  rapp_reviewer_auth: JSON.stringify(park),
+  iad_reviewer_home_session: JSON.stringify({ name: '박은비' }),
+});
 const searchLocalStorage = memoryStorage({ rapp_reviewer_auth: JSON.stringify(kim) });
 const searchContext = { sessionStorage: searchSessionStorage, localStorage: searchLocalStorage, JSON, Date };
 vm.createContext(searchContext);
-vm.runInContext(`const REVIEWER_AUTH_KEY="rapp_reviewer_auth"; const REVIEWER_AUTH_MS=${12 * 60 * 60 * 1000}; let _authState=null;\n${functionSource(searchApp, '_saveAuthSession')}`, searchContext);
+vm.runInContext(`const _REVIEWER_AUTH_STORAGE_KEY="rapp_reviewer_auth"; const REVIEWER_AUTH_KEY="rapp_reviewer_auth"; const REVIEWER_AUTH_MS=${12 * 60 * 60 * 1000}; let _authState=null;\n${functionSource(api, '_prepareReviewerLocalSession')}\n${functionSource(searchApp, '_saveAuthSession')}`, searchContext);
 vm.runInContext('_saveAuthSession("직접로그인",true,true,"55555555","direct-token")', searchContext);
 assert.strictEqual(searchSessionStorage.value('rapp_reviewer_auth'), null);
+assert.strictEqual(searchSessionStorage.value('iad_reviewer_home_session'), null);
 assert.strictEqual(JSON.parse(searchLocalStorage.value('rapp_reviewer_auth')).name, '직접로그인');
 console.log('  ✓ 구매양식의 명시적 로그인도 오래된 관리자 홈 세션을 해제');
+
+const campaignSessionStorage = memoryStorage({
+  rapp_reviewer_auth: JSON.stringify(park),
+  iad_reviewer_home_session: JSON.stringify({ name: '박은비' }),
+});
+const campaignLocalStorage = memoryStorage({ rapp_reviewer_auth: JSON.stringify(kim) });
+const campaignContext = { sessionStorage: campaignSessionStorage, localStorage: campaignLocalStorage, JSON, Date };
+vm.createContext(campaignContext);
+vm.runInContext(`const _REVIEWER_AUTH_STORAGE_KEY="rapp_reviewer_auth";\n${functionSource(api, '_prepareReviewerLocalSession')}\n${functionSource(campaign, 'saveSession')}`, campaignContext);
+vm.runInContext('saveSession("캠페인직접로그인","66666666","campaign-token")', campaignContext);
+assert.strictEqual(campaignSessionStorage.value('rapp_reviewer_auth'), null);
+assert.strictEqual(campaignSessionStorage.value('iad_reviewer_home_session'), null);
+assert.strictEqual(JSON.parse(campaignLocalStorage.value('rapp_reviewer_auth')).name, '캠페인직접로그인');
+console.log('  ✓ 캠페인의 명시적 로그인도 관리자 홈 원본 세션까지 해제');
 
 assert(!/function getSession\(\)[\s\S]{0,350}localStorage\.getItem\('rapp_reviewer_auth'\)/.test(campaign),
   'campaign getSession이 localStorage를 직접 읽으면 안 됨');
 assert(!/localStorage\.getItem\(["']rapp_reviewer_auth["']\)/.test(searchApp),
   'search-app의 프로필·정산 경로가 reviewer 세션을 직접 읽으면 안 됨');
 assert(/if \(user && user\.adminPreview\)[\s\S]{0,180}sessionStorage\.setItem\(REVIEWER_AUTH_KEY/.test(indexHtml)
-  && /else \{[\s\S]{0,180}sessionStorage\.removeItem\(REVIEWER_AUTH_KEY\)[\s\S]{0,100}localStorage\.setItem\(REVIEWER_AUTH_KEY/.test(indexHtml),
+  && /else \{[\s\S]{0,180}_prepareReviewerLocalSession\(\)[\s\S]{0,100}localStorage\.setItem\(REVIEWER_AUTH_KEY/.test(indexHtml),
   '관리자 홈과 일반 로그인 저장소 분리가 유지돼야 함');
 console.log('  ✓ 캠페인·구매양식·프로필·정산 경로가 공통 판독기를 사용');
 
-console.log('\n✅ reviewerSessionStorage: 9개 시나리오 통과');
+console.log('\n✅ reviewerSessionStorage: 10개 시나리오 통과');

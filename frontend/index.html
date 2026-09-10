@@ -1248,7 +1248,7 @@ function syncSearchSession(user) {
     sessionStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
   } else {
     // 같은 탭의 만료된 관리자 홈 세션이 새 일반 로그인을 가리지 않게 한다.
-    sessionStorage.removeItem(REVIEWER_AUTH_KEY);
+    _prepareReviewerLocalSession();
     localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
   }
 }
