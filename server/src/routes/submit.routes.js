@@ -543,6 +543,7 @@ router.post('/review', async (req, res, next) => {
       //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
       const _rt = await reviewTypeForTab({ sheetId, tabName });
       const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
+      const requiresReviewHistory = required.includes('review');
       // ★★ 슬롯 모드 판정은 required 개수가 아니라 **화면 슬롯(effectiveCaptureSlots)** 기준.
       //   현금영수증 슬롯이 선택(required:false)이 되면서 현영 탭도 required=['review'] 하나가 됐는데,
       //   그걸 근거로 fast-path를 타면 **영수증만 올리고 제출해도 완료**가 된다(리뷰 캡처 0장).
@@ -570,7 +571,9 @@ router.post('/review', async (req, res, next) => {
         // 이번 제출 요청이 실제로 업로드한 리뷰 묶음만 상태 확정보다 먼저 완료 이력으로 고정한다.
         // 이 기록이 실패하면 중복 차단 근거가 사라지므로 제출 성공으로 응답하지 않는다.
         try {
-          if (uploadBatchId) {
+          if (!requiresReviewHistory) {
+            // 구매확정·영수증 전용 작업은 리뷰 캡처 이력이 없으므로 완료 이력을 만들지 않는다.
+          } else if (uploadBatchId) {
             const completedBatch = await pool.query(
               `UPDATE review_submissions
                   SET completed_at = COALESCE(completed_at, NOW())
@@ -581,15 +584,27 @@ router.post('/review', async (req, res, next) => {
             );
             if (!completedBatch.rowCount) throw new Error('제출할 리뷰 업로드 묶음을 찾을 수 없습니다.');
           } else {
-            const { rows: pendingBatches } = await pool.query(
-              `SELECT 1 FROM review_submissions
-                WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                  AND COALESCE(slot_key, 'review') = 'review'
-                  AND upload_batch_id IS NOT NULL AND completed_at IS NULL
-                LIMIT 1`,
+            // 보완 제출에서는 리뷰 파일을 이번 요청에 다시 올리지 않는다. 현재 대표 리뷰 파일이
+            // 속한 미완료 묶음만 확정해, 이전에 교체된 낡은 묶음을 잘못 완료 처리하지 않는다.
+            const completedPendingBatch = await pool.query(
+              `UPDATE review_submissions s
+                  SET completed_at = COALESCE(s.completed_at, NOW())
+                WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
+                  AND COALESCE(s.slot_key, 'review') = 'review'
+                  AND s.upload_batch_id = (
+                    SELECT s2.upload_batch_id
+                      FROM review_submissions s2
+                      JOIN review_index ri
+                        ON ri.sheet_id = s2.sheet_id AND ri.tab_name = s2.tab_name
+                       AND ri.row_index = s2.row_index AND ri.review_file_id = s2.file_id
+                     WHERE s2.sheet_id = $1 AND s2.tab_name = $2 AND s2.row_index = $3
+                       AND COALESCE(s2.slot_key, 'review') = 'review'
+                       AND s2.upload_batch_id IS NOT NULL AND s2.completed_at IS NULL
+                     LIMIT 1
+                  )`,
               [sheetId, tabName, rowIndex]
             );
-            if (pendingBatches.length || !wasSubmitted) {
+            if (!completedPendingBatch.rowCount && !wasSubmitted) {
               throw new Error('리뷰 업로드 묶음 정보가 없습니다. 화면을 새로고침한 뒤 다시 제출해주세요.');
             }
           }

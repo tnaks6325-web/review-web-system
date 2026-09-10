@@ -118,8 +118,13 @@ function stubPool(handler) {
     assert.ok(/REVIEW_COMPLETION_HISTORY_FAILED/.test(submitRoute)
       && /review_completion_history_failed/.test(submitRoute),
       '완료 이력 기록 실패를 제출 성공으로 반환하지 않음');
+    assert.ok(/if \(!reviewerIdentity && !internalIdentity\)/.test(dg),
+      '요청 슬롯과 무관하게 리뷰어 또는 내부 신원을 검증');
     assert.ok(/REVIEW_SUBMISSION_LEDGER_FAILED/.test(dg) && /uploadBatchId/.test(dg),
       '업로드 원장 기록 실패를 성공으로 숨기지 않고 묶음 ID를 반환');
+    assert.ok(/requiresReviewHistory = required\.includes\('review'\)/.test(submitRoute)
+      && /ri\.review_file_id = s2\.file_id/.test(submitRoute),
+      '리뷰 슬롯 작업만 완료 이력을 요구하고 보완 제출은 현재 대표 묶음을 확정');
     assert.ok(/uploadBatchId: reviewUploadBatchId/.test(sa), '프런트가 업로드 응답의 정확한 묶음 ID를 제출 요청에 전달');
     assert.ok(/SET completed_at = COALESCE\(completed_at, NOW\(\)\)[\s\S]*?file_id = ANY\(\$4::text\[\]\)/.test(manualSvc),
       '작업보드 수동 제출은 선택 파일을 완료 처리');

@@ -1660,7 +1660,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     if (!sheetId || !tabName) {
       return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
     }
-    if (slot === 'review' && !reviewerIdentity && !internalIdentity) {
+    if (!reviewerIdentity && !internalIdentity) {
       return res.status(401).json({
         ok: false, code: 'REVIEW_UPLOAD_AUTH_REQUIRED',
         error: '리뷰어 로그인을 다시 확인해주세요.',
