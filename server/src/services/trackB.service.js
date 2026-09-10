@@ -3999,6 +3999,12 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
         WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`,
       [sheetId, tabName, participant.seq]);
     await client.query(
+      `UPDATE review_submissions
+          SET completed_at = COALESCE(completed_at, NOW())
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3
+          AND slot_key='review' AND file_id = ANY($4::text[])`,
+      [sheetId, tabName, participant.seq, ids]);
+    await client.query(
       `UPDATE index_master SET submitted_count = submitted_count + 1
         WHERE sheet_id=$1 AND tab_name=$2 AND submitted_count < row_count`,
       [sheetId, tabName]).catch(() => null);

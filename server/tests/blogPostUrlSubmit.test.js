@@ -172,7 +172,7 @@ await ta('★★ 127: blog + URL 인데 캡처 0장 = capture_required 거부 (�
 });
 await ta('★ 127: 리뷰체험단은 캡처 확인 쿼리 자체가 안 나간다(무회귀 — blog 전용 게이트)', async () => {
   const { queries } = await callReview({ workKind: 'review', hasCapture: false }, { ...BASE, memo: '' });
-  assert.ok(!queries.some(q => /FROM review_submissions/.test(q.sql)), '리뷰 경로가 blog 캡처 게이트를 탄다');
+  assert.ok(!queries.some(q => /SELECT 1 FROM review_submissions/.test(q.sql)), '리뷰 경로가 blog 캡처 게이트를 탄다');
 });
 await ta('★★ 리뷰체험단은 memo 없이도 제출된다 (무회귀 선 — 완화 아님)', async () => {
   const { payload, queries } = await callReview({ workKind: 'review' }, { ...BASE, memo: '' });

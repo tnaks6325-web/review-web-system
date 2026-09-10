@@ -35,7 +35,7 @@ const virtualRows = [
     file_hash: completedHash, file_id: 'VIRTUAL_COMPLETED_FILE', sheet_id: 'SHEET-A',
     tab_name: '구매양식-완료', row_index: 101, slot_key: 'review', phone8: '12345678',
     ri_submitted: true, cp_submitted: false, submitted_at: '2026-09-10T03:00:00.000Z',
-    recipient_name: '김수만', representative: true,
+    recipient_name: '김수만', representative: true, completed: true, legacy: true,
   },
   {
     file_hash: pendingHash, file_id: 'VIRTUAL_PENDING_FILE', sheet_id: 'SHEET-A',
@@ -46,13 +46,13 @@ const virtualRows = [
     file_hash: historicalHash, file_id: 'VIRTUAL_OLD_UNUSED_FILE', sheet_id: 'SHEET-A',
     tab_name: '구매양식-완료', row_index: 101, slot_key: 'review', phone8: '12345678',
     ri_submitted: true, cp_submitted: true, submitted_at: '2026-09-10T03:00:00.000Z',
-    recipient_name: '김수만', representative: false,
+    recipient_name: '김수만', representative: false, completed: false,
   },
   {
     file_hash: siblingHash, file_id: 'VIRTUAL_COMPLETED_SIBLING', sheet_id: 'SHEET-A',
     tab_name: '구매양식-완료', row_index: 101, slot_key: 'review', phone8: '12345678',
     ri_submitted: true, cp_submitted: true, submitted_at: '2026-09-10T03:00:01.000Z',
-    recipient_name: '김수만', representative: false, same_batch: true,
+    recipient_name: '김수만', representative: false, completed: true,
   },
 ];
 
@@ -62,7 +62,7 @@ function duplicateQuery(sql, params) {
   const rows = virtualRows
     .filter((r) => r.file_hash === hash && r.slot_key === 'review')
     .filter((r) => r.phone8 === phone8)
-    .filter((r) => r.representative || r.same_batch)
+    .filter((r) => r.completed || (r.legacy && r.representative))
     .filter((r) => r.ri_submitted || r.cp_submitted)
     .filter((r) => !(r.sheet_id === sheetId && r.tab_name === tabName
       && Number(r.row_index) === Number(rowIndex)))

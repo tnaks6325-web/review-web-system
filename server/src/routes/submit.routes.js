@@ -608,6 +608,28 @@ router.post('/review', async (req, res, next) => {
           logger.warn(`[submit] 무시트 memo 기록 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
         }
 
+        // 이번 제출에 실제 포함된 최신 리뷰 업로드 묶음을 완료 이력으로 고정한다.
+        // 이후 같은 행에서 캡처를 교체해도 앞서 완료된 묶음의 기록은 유지된다.
+        try {
+          await pool.query(
+            `UPDATE review_submissions
+                SET completed_at = COALESCE(completed_at, NOW())
+              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                AND COALESCE(slot_key, 'review') = 'review'
+                AND upload_batch_id = (
+                  SELECT upload_batch_id FROM review_submissions
+                   WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                     AND COALESCE(slot_key, 'review') = 'review'
+                     AND upload_batch_id IS NOT NULL
+                   ORDER BY uploaded_at DESC NULLS LAST, created_at DESC
+                   LIMIT 1
+                )`,
+            [sheetId, tabName, rowIndex]
+          );
+        } catch (batchErr) {
+          logger.warn(`[submit/review] 완료 업로드 묶음 기록 실패(fail-soft): ${batchErr.message}`);
+        }
+
         /* ★ 127: 포스팅제출일(blog) — 같은 규율로 작업표 칸에 자동 기록(재제출 = 최신 제출일 갱신). */
         if (_isBlog && _postDate) {
           try {
