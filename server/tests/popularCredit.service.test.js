@@ -1,21 +1,50 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { loadPopularCreditState, canUsePopularCredit } = require('../src/services/popularCredit.service');
+const {
+  POPULAR_CREDIT_VALIDITY_DAYS,
+  calculatePopularCreditState,
+  loadPopularCreditState,
+  canUsePopularCredit,
+} = require('../src/services/popularCredit.service');
 
-async function state(normalDone, popularUsed) {
-  const db = { query: async () => ({ rows: [{ normal_done: String(normalDone), popular_used: String(popularUsed) }] }) };
-  return loadPopularCreditState(db, '12345678');
-}
+const NOW = new Date('2026-09-11T08:00:00.000Z');
+const ago = (hours) => new Date(NOW.getTime() - hours * 60 * 60 * 1000).toISOString();
+const normal = (id, hoursAgo) => ({ id, event_type: 'normal', event_at: ago(hoursAgo) });
+const popular = (id, hoursAgo) => ({ id, event_type: 'popular', event_at: ago(hoursAgo) });
+const state = (events) => calculatePopularCreditState(events, NOW);
 
 (async () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'popularCredit.service.js'), 'utf8');
   assert.match(source, /COALESCE\(ca\.is_popular_snapshot, rc\.is_popular\)/, 'credit type is immutable after the application snapshot is recorded');
-  assert.equal(canUsePopularCredit(await state(0, 0)), false, 'general completion 0 blocks popular participation');
-  assert.equal(canUsePopularCredit(await state(1, 0)), true, 'one completed normal campaign grants one popular participation');
-  assert.equal(canUsePopularCredit(await state(2, 0)), true, 'two completed normal campaigns grant two popular participations');
-  assert.equal(canUsePopularCredit(await state(2, 1)), true, 'one remaining credit permits the second popular participation');
-  assert.equal(canUsePopularCredit(await state(2, 2)), false, 'all credits consumed blocks another popular participation');
-  assert.equal(canUsePopularCredit(await state(1, 0)), true, 'expired or cancelled popular holds are excluded before the query result is returned');
+  assert.equal(POPULAR_CREDIT_VALIDITY_DAYS, 3, 'normal participation credit lasts three days');
+  assert.equal(canUsePopularCredit(state([])), false, 'general completion 0 blocks popular participation');
+  assert.deepEqual(state([normal(1, 71)]), { normalDone: 1, popularUsed: 0, credits: 1, validityDays: 3 },
+    'a normal submission within 72 hours grants one credit');
+  assert.equal(state([normal(1, 72)]).credits, 1, 'the exact 72-hour boundary is included');
+  assert.equal(state([normal(1, 72.01)]).credits, 0, 'a normal submission older than 72 hours expires immediately');
+  assert.deepEqual(state([normal(1, 48), popular(2, 24)]),
+    { normalDone: 1, popularUsed: 1, credits: 0, validityDays: 3 },
+    'a later popular participation consumes the valid credit');
+  assert.equal(state([popular(1, 48), normal(2, 24)]).credits, 1,
+    'an older popular participation cannot consume a newly earned credit');
+  assert.deepEqual(state([normal(1, 80), normal(2, 60), popular(3, 50)]),
+    { normalDone: 1, popularUsed: 0, credits: 1, validityDays: 3 },
+    'FIFO consumption stays attached to the old credit after that credit expires');
+  const augustHistory = [
+    ...Array.from({ length: 21 }, (_, i) => ({ id: i + 1, event_type: 'normal', event_at: '2026-08-01T08:00:00.000Z' })),
+    ...Array.from({ length: 5 }, (_, i) => ({ id: i + 22, event_type: 'popular', event_at: '2026-08-02T08:00:00.000Z' })),
+  ];
+  assert.deepEqual(state(augustHistory), { normalDone: 0, popularUsed: 0, credits: 0, validityDays: 3 },
+    'the old 21 minus 5 history does not preserve 16 credits after the retroactive cutoff');
+
+  let params;
+  const db = { query: async (_sql, values) => { params = values; return { rows: [normal(10, 1)] }; } };
+  const loaded = await loadPopularCreditState(db, '12345678', { evaluatedAt: NOW });
+  assert.equal(loaded.credits, 1, 'database events use the same calculation');
+  assert.equal(params[0], '12345678', 'credit accounting is isolated by participating identity');
+  assert.equal(new Date(params[1]).toISOString(), NOW.toISOString(), 'database query does not include future events');
+  assert.match(source, /ca\.expires_at > \$2/, 'only currently active popular holds consume credit');
+  assert.match(source, /ca\.status = 'blog_pending'/, 'a pending popular application reserves its credit until rejection or cancellation');
   console.log('popularCredit.service: passed');
 })().catch((err) => { console.error(err); process.exitCode = 1; });

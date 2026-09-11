@@ -1170,8 +1170,8 @@ router.get('/list', async (req, res, next) => {
 });
 
 // GET /api/campaign/popular-status?phone8= — 인기상품 참여 가능 여부(무인증 phone8 스코프, 064)
-//   apply의 popular_locked 게이트와 **동일 계산**(명의 기준): 크레딧 = 일반(비인기) 참여형 제출완료 수
-//   − 인기 소비(제출확정 + 유효홀드). 만료·취소된 인기 건은 자동 환불(미계수).
+//   apply의 popular_locked 게이트와 **동일 계산**(명의 기준): 최근 3일(72시간) 안에 제출완료한
+//   일반 참여권을 인기 소비(제출확정 + 유효홀드)와 시간순 1:1 매칭한다.
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 'popular-status'를 id로 삼킨다.
 router.get('/popular-status', applyLimiter, async (req, res, next) => {
   try {
@@ -2062,14 +2062,16 @@ async function _applyParticipation(req, res, next, campPre) {
       }
     }
 
-    // ★ 인기상품 참여권: 동일 명의의 일반 모집 제출완료 1건당 인기상품 1건을 허용한다.
+    // ★ 인기상품 참여권: 동일 명의가 최근 3일(72시간) 안에 제출완료한 일반 모집 1건당
+    //   인기상품 1건을 허용한다. 기간을 벗어난 미사용 참여권은 별도 이관 없이 즉시 만료된다.
     //   기존 선행우선순위 데이터는 삭제하지 않고 무시해 롤백 가능성을 보존한다.
     if (camp.is_popular === true) {
       const creditState = await loadPopularCreditState(client, holdP8);
       if (!canUsePopularCredit(creditState)) {
         await client.query('ROLLBACK');
         return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone: creditState.normalDone, popularUsed: creditState.popularUsed,
-          error: '인기 상품은 일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
+          validityDays: creditState.validityDays,
+          error: '인기 상품은 최근 3일(72시간) 안에 일반 모집 구매양식을 제출완료한 참여권이 있어야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
       }
     }
 
