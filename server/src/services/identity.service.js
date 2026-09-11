@@ -276,8 +276,12 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
   const subs = Array.isArray(reviewer.sub_accounts) ? reviewer.sub_accounts : [];
   const mainAcct = normAccount(reviewer.bank_account);
   const mainHolder = normName(reviewer.account_holder);
+  let phoneOnlySubIndex = -1;
   for (let i = 0; i < subs.length; i++) {
     const sub = subs[i] || {};
+    if (phoneOnlySubIndex < 0 && idPhone && idPhone === normPhone8(sub.phone)) {
+      phoneOnlySubIndex = i;
+    }
     if (idName && idName === normName(sub.name) && idPhone && idPhone === normPhone8(sub.phone)) {
       if (skipDetail) return { status: 'SUB', subIndex: i, reasons: [], identity };
       // 타계정에 주소/계좌가 등록돼 있으면 대조, 없으면 통과(자동 보강 대상)
@@ -302,6 +306,38 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
       }
       return { status: 'SUB', subIndex: i, reasons: [], identity };
     }
+  }
+
+  // 연락처는 이미 이 리뷰어가 등록한 타계정인데 캡처 이름만 다른 경우, 새 타계정 등록을
+  // 유도하면 같은 연락처를 배열에 두 번 넣으려다 저장 단계에서 막힌다. 등록된 연락처의
+  // 소유 범위는 유지하되 이름 차이는 리뷰어가 명시적으로 확인하도록 분리한다.
+  if (phoneOnlySubIndex >= 0) {
+    const sub = subs[phoneOnlySubIndex] || {};
+    if (skipDetail) {
+      return { status: 'SUB', subIndex: phoneOnlySubIndex, reasons: [], identity };
+    }
+    const subReasons = [
+      `등록된 타계정 이름(${String(sub.name || '').trim() || '-'})과 입력 이름(${pickedName || '-'})이 다름`,
+    ];
+    if (String(sub.address || '').trim() && idAddr) {
+      const addrCheck = await addressSame(sub.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
+      if (addrBad(addrCheck.verdict)) subReasons.push(`타계정 등록 주소와 상이: ${addrCheck.reason}`);
+    }
+    const subAcct = normAccount(sub.bankAccount);
+    const acctOkSub =
+      (subAcct && idAcct && subAcct === idAcct)
+      || (idHolder && idHolder === normName(sub.accountHolder))
+      || (mainAcct && idAcct && mainAcct === idAcct)
+      || (idHolder && mainHolder && idHolder === mainHolder);
+    if (subAcct && idAcct && !acctOkSub) {
+      subReasons.push('타계정 등록 계좌·본인 계좌 어느 쪽과도 상이');
+    }
+    return {
+      status: 'NEED_CONFIRM',
+      subIndex: phoneOnlySubIndex,
+      reasons: subReasons,
+      identity,
+    };
   }
 
   // ── 3) 어느 쪽과도 불일치 → 타계정 등록 유도 ──

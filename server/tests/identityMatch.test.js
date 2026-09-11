@@ -155,6 +155,37 @@ function ok(name, fn) {
     assert.strictEqual(r.subIndex, 1);
   });
 
+  await ok('NEED_CONFIRM: 등록 타계정 연락처는 같고 이름만 다르면 중복 등록을 유도하지 않음', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '박영희님', phone: '010-1111-2222', address: '센텀파크 101동 505호',
+      bank: '케이뱅크', account: '999888777', depositor: '박영희',
+    });
+    assert.strictEqual(r.status, 'NEED_CONFIRM');
+    assert.strictEqual(r.subIndex, 1);
+    assert.ok(r.reasons.some(s => s.includes('등록된 타계정 이름')));
+  });
+
+  await ok('NEED_CONFIRM: 연락처만 같은 타계정은 이름·주소·계좌 불일치를 모두 안내', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '다른이름', phone: '010-1111-2222', address: '부산시 다른로 999호',
+      bank: '우리', account: '555666777', depositor: '다른예금주',
+    });
+    assert.strictEqual(r.status, 'NEED_CONFIRM');
+    assert.strictEqual(r.subIndex, 1);
+    assert.ok(r.reasons.some(s => s.includes('등록된 타계정 이름')));
+    assert.ok(r.reasons.some(s => s.includes('주소')));
+    assert.ok(r.reasons.some(s => s.includes('계좌')));
+  });
+
+  await ok('SUB: 같은 연락처의 이름 차이를 명시적으로 확인하면 기존 타계정으로 제출', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '박영희님', phone: '010-1111-2222', address: '센텀파크 101동 505호',
+      bank: '케이뱅크', account: '999888777', depositor: '박영희',
+    }, { skipDetailChecks: true });
+    assert.strictEqual(r.status, 'SUB');
+    assert.strictEqual(r.subIndex, 1);
+  });
+
   await ok('NEED_CONFIRM: 타계정·본인 어느 계좌와도 다른 제3의 계좌', async () => {
     const r = await resolveOrderIdentity(reviewer, {
       recipient: '박영희', phone: '010-1111-2222', address: '센텀파크 101동 505호',
