@@ -33,6 +33,7 @@ function functionSource(name) {
 function makeContext({ profile, prechecks = [], saveResponse = { ok: true } }) {
   const calls = [];
   const toasts = [];
+  const storedProfile = JSON.parse(JSON.stringify(profile));
   let confirmCount = 0;
   const context = {
     console,
@@ -42,12 +43,15 @@ function makeContext({ profile, prechecks = [], saveResponse = { ok: true } }) {
     confirm: () => { confirmCount++; return true; },
     gasGet: async body => {
       calls.push({ kind: 'get', body });
-      return { ok: true, profile: JSON.parse(JSON.stringify(profile)) };
+      return { ok: true, profile: JSON.parse(JSON.stringify(storedProfile)) };
     },
     gasPost: async body => {
       calls.push({ kind: 'post', body });
       if (body.action === 'identityPrecheck') return prechecks.shift() || { ok: true, results: [] };
-      if (body.action === 'saveSubAccounts') return saveResponse;
+      if (body.action === 'saveSubAccounts') {
+        if (saveResponse.ok) storedProfile.subAccounts = JSON.parse(body.subAccounts);
+        return saveResponse;
+      }
       throw new Error(`unexpected action ${body.action}`);
     },
   };
@@ -123,6 +127,26 @@ function order(name = '신규명의', phone = '010-2222-3333') {
   }
 
   {
+    const identities = Array.from({ length: 5 }, (_, index) =>
+      identity(`신규명의${index + 1}`, `010-2222-${String(3301 + index).padStart(4, '0')}`));
+    const initialResults = identities.map((item, idx) => ({ idx, status: 'NEED_SUB_REGISTER', identity: item }));
+    const finalResults = identities.map((item, idx) => ({ idx, status: 'SUB', identity: item }));
+    const h = makeContext({
+      profile: { subAccounts: [] },
+      prechecks: [{ ok: true, results: initialResults }, { ok: true, results: finalResults }],
+    });
+    const ready = await h.context._runIdentityPrecheck(
+      { name: '본인', phone8: '11112222' },
+      identities.map(item => order(item.name, item.phone))
+    );
+    assert.strictEqual(ready, true);
+    assert.strictEqual(h.confirmCount(), 5);
+    assert.strictEqual(h.calls.filter(call => call.body.action === 'saveSubAccounts').length, 5);
+    assert.strictEqual(h.calls.filter(call => call.body.action === 'identityPrecheck').length, 2);
+    console.log('  ✓ 5건 신규 타계정도 사전검증은 최초·최종 2회만 호출');
+  }
+
+  {
     const h = makeContext({
       profile: { subAccounts: [] },
       prechecks: [
@@ -159,7 +183,7 @@ function order(name = '신규명의', phone = '010-2222-3333') {
     console.log('  ✓ 타계정 10개 제한은 이유와 조치가 포함된 오류로 반환');
   }
 
-  console.log('\n✅ subAccountAutoRegistrationFlow: 7개 통과');
+  console.log('\n✅ subAccountAutoRegistrationFlow: 8개 통과');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

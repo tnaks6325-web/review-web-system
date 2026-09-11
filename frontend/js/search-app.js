@@ -8724,9 +8724,9 @@ async function _runIdentityPrecheck(auth, orders) {
     })),
   });
 
-  // 새 타계정을 저장한 뒤 같은 입력으로 다시 판정한다. 저장 응답만 믿고 바로 제출하면
-  // 프로필 스코프·정규화 차이 때문에 서버 최종 게이트에서 다시 막혀도 원인을 알 수 없다.
-  for (let pass = 0; pass <= orders.length; pass++) {
+  // 새 타계정들을 모두 저장한 뒤 같은 입력으로 전체를 한 번만 다시 판정한다. 카드마다
+  // identityPrecheck를 호출하면 이미지 분석과 공유하는 분당 제한을 소진하므로 왕복은 최대 2회다.
+  for (let pass = 0; pass < 2; pass++) {
     let pre;
     try {
       pre = await gasPost(_precheckPayload(), 30000);
@@ -8749,13 +8749,18 @@ async function _runIdentityPrecheck(auth, orders) {
       return false;
     }
 
-    // ② 주문별 신원 판정 처리. 등록이 생기면 최신 프로필로 전체 주문을 다시 판정한다.
-    let registered = false;
+    // ② 주문별 신원 판정 처리. 첫 판정에서 필요한 타계정을 모두 저장한 뒤 한 번만 재검증한다.
+    let registeredAny = false;
     for (const r of (pre.results || [])) {
       if (r.status === "NEED_SUB_REGISTER") {
         const idn = r.identity || {};
         const _idKey = (idn.name || "").replace(/\s+/g, "") + "|" + (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
         if (_handledIds.has(_idKey)) {
+          if (pass === 0) continue; // 같은 명의 주문이 여러 장이면 등록은 한 번만 한다.
+          showToast("타계정 등록 후에도 입력 정보가 일치하지 않습니다. 이름과 연락처를 확인해주세요.", "error");
+          return false;
+        }
+        if (pass > 0) {
           showToast("타계정 등록 후에도 입력 정보가 일치하지 않습니다. 이름과 연락처를 확인해주세요.", "error");
           return false;
         }
@@ -8776,8 +8781,8 @@ async function _runIdentityPrecheck(auth, orders) {
         showToast(reg.alreadyRegistered
           ? `타계정(${idn.name}) 등록 정보를 확인했습니다.`
           : `타계정(${idn.name}) 등록 완료 — 정보를 다시 확인합니다.`, "success");
-        registered = true;
-        break;
+        registeredAny = true;
+        continue;
       }
       if (r.status === "NEED_CONFIRM") {
         if (orders[r.idx]?.identityConfirmed) continue;
@@ -8791,7 +8796,8 @@ async function _runIdentityPrecheck(auth, orders) {
         if (orders[r.idx]) orders[r.idx].identityConfirmed = true;
       }
     }
-    if (!registered) return true;
+    if (pass === 0 && registeredAny) continue;
+    return true;
   }
 
   showToast("타계정 정보를 확인하지 못했습니다. 입력값을 확인한 뒤 다시 제출해주세요.", "error");
