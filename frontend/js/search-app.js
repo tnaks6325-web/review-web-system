@@ -8712,81 +8712,120 @@ function _ofClearError(inputId) {
    - 사전검증 API 오류 시 fail-open (서버 /api/submit/order가 최종 방어)
    ══════════════════════════════════════════════════════ */
 async function _runIdentityPrecheck(auth, orders) {
-  let pre;
-  try {
-    pre = await gasPost({
-      action: "identityPrecheck",
-      phone8: auth.phone8,
-      orders: orders.map(o => ({
-        recipient: o.recipient, phone: o.phone, address: o.address,
-        bank: o.bank, account: o.account, depositor: o.depositor,
-        extractedRecipient: o.extractedRecipient, extractedPhone: o.extractedPhone,
-        extractedAddress: o.extractedAddress,
-      })),
-    }, 30000);
-  } catch (e) {
-    console.warn("[identityPrecheck] 오류(서버 최종검증으로 진행):", e.message);
-    return true;
-  }
-  if (!pre || !pre.ok) return true; // fail-open — 서버 게이트가 최종 방어
+  const _handledIds = new Set();
+  const _precheckPayload = () => ({
+    action: "identityPrecheck",
+    phone8: auth.phone8,
+    orders: orders.map(o => ({
+      recipient: o.recipient, phone: o.phone, address: o.address,
+      bank: o.bank, account: o.account, depositor: o.depositor,
+      extractedRecipient: o.extractedRecipient, extractedPhone: o.extractedPhone,
+      extractedAddress: o.extractedAddress,
+    })),
+  });
 
-  // ① 내정보 미등록 → 차단 + 게이트 배너
-  if (Array.isArray(pre.profileMissing) && pre.profileMissing.length > 0) {
-    _showProfileGateBanner(pre.profileMissing);
-    showToast("내정보 미등록 항목: " + pre.profileMissing.join(", ") + " — 등록 후 제출할 수 있습니다.", "error");
-    return false;
-  }
-
-  // ② 주문별 신원 판정 처리
-  const _handledIds = new Set(); // 같은 신원 다건 → 다이얼로그/등록 1회만
-  for (const r of (pre.results || [])) {
-    if (r.status === "NEED_SUB_REGISTER") {
-      const idn = r.identity || {};
-      const _idKey = (idn.name || "").replace(/\s+/g, "") + "|" + (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
-      if (_handledIds.has(_idKey)) continue; // 이미 이번 제출에서 등록 처리됨
-      const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
-        + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
-        + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
-        + "현재 입력값을 나의 타계정으로 등록할까요?\n(등록해야 제출을 계속할 수 있습니다)";
-      if (!confirm(msg)) {
-        showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
-        return false;
-      }
-      const okReg = await _registerSubAccountFromOrder(auth, idn);
-      if (!okReg) {
-        showToast("타계정 등록에 실패했습니다. 리뷰어 홈 > 내정보에서 직접 등록해주세요.", "error");
-        return false;
-      }
-      showToast(`타계정(${idn.name}) 등록 완료 — 제출을 계속합니다.`, "success");
-      _handledIds.add(_idKey);
-    } else if (r.status === "NEED_CONFIRM") {
-      const msg = "⚠️ 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n"
-        + "- " + (r.reasons || []).join("\n- ")
-        + "\n\n입력 정보가 정확한지 확인했으며 그대로 제출할까요?";
-      if (!confirm(msg)) {
-        showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
-        return false;
-      }
-      if (orders[r.idx]) orders[r.idx].identityConfirmed = true;
+  // 새 타계정을 저장한 뒤 같은 입력으로 다시 판정한다. 저장 응답만 믿고 바로 제출하면
+  // 프로필 스코프·정규화 차이 때문에 서버 최종 게이트에서 다시 막혀도 원인을 알 수 없다.
+  for (let pass = 0; pass <= orders.length; pass++) {
+    let pre;
+    try {
+      pre = await gasPost(_precheckPayload(), 30000);
+    } catch (e) {
+      console.warn("[identityPrecheck] 오류:", e.message);
+      if (pass === 0) return true; // 첫 사전검증 장애는 기존처럼 서버 최종 게이트에 맡긴다.
+      showToast("타계정 등록은 완료됐지만 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", "error");
+      return false;
     }
+    if (!pre || !pre.ok) {
+      if (pass === 0) return true;
+      showToast(pre?.error || "타계정 등록 후 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", "error");
+      return false;
+    }
+
+    // ① 내정보 미등록 → 차단 + 게이트 배너
+    if (Array.isArray(pre.profileMissing) && pre.profileMissing.length > 0) {
+      _showProfileGateBanner(pre.profileMissing);
+      showToast("내정보 미등록 항목: " + pre.profileMissing.join(", ") + " — 등록 후 제출할 수 있습니다.", "error");
+      return false;
+    }
+
+    // ② 주문별 신원 판정 처리. 등록이 생기면 최신 프로필로 전체 주문을 다시 판정한다.
+    let registered = false;
+    for (const r of (pre.results || [])) {
+      if (r.status === "NEED_SUB_REGISTER") {
+        const idn = r.identity || {};
+        const _idKey = (idn.name || "").replace(/\s+/g, "") + "|" + (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
+        if (_handledIds.has(_idKey)) {
+          showToast("타계정 등록 후에도 입력 정보가 일치하지 않습니다. 이름과 연락처를 확인해주세요.", "error");
+          return false;
+        }
+        const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
+          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
+          + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
+          + "현재 입력값을 나의 타계정으로 등록할까요?\n(등록해야 제출을 계속할 수 있습니다)";
+        if (!confirm(msg)) {
+          showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
+          return false;
+        }
+        const reg = await _registerSubAccountFromOrder(auth, idn);
+        if (!reg.ok) {
+          showToast(reg.error || "타계정 등록에 실패했습니다. 리뷰어 홈 > 내정보에서 확인해주세요.", "error");
+          return false;
+        }
+        _handledIds.add(_idKey);
+        showToast(reg.alreadyRegistered
+          ? `타계정(${idn.name}) 등록 정보를 확인했습니다.`
+          : `타계정(${idn.name}) 등록 완료 — 정보를 다시 확인합니다.`, "success");
+        registered = true;
+        break;
+      }
+      if (r.status === "NEED_CONFIRM") {
+        if (orders[r.idx]?.identityConfirmed) continue;
+        const msg = "⚠️ 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n"
+          + "- " + (r.reasons || []).join("\n- ")
+          + "\n\n입력 정보가 정확한지 확인했으며 그대로 제출할까요?";
+        if (!confirm(msg)) {
+          showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
+          return false;
+        }
+        if (orders[r.idx]) orders[r.idx].identityConfirmed = true;
+      }
+    }
+    if (!registered) return true;
   }
-  return true;
+
+  showToast("타계정 정보를 확인하지 못했습니다. 입력값을 확인한 뒤 다시 제출해주세요.", "error");
+  return false;
 }
 
 /** 신원 불일치 감지 시 현재 주문 입력값을 타계정으로 자동 등록 */
 async function _registerSubAccountFromOrder(auth, idn) {
   try {
     const prof = await gasGet({ action: "getReviewerProfile", name: auth.name, phone8: auth.phone8 });
-    if (!prof?.ok || !prof.profile) return false;
+    if (!prof?.ok || !prof.profile) {
+      return { ok: false, code: prof?.code || "PROFILE_LOAD_FAILED", error: prof?.error || "내정보를 불러오지 못했습니다." };
+    }
     const subs = Array.isArray(prof.profile.subAccounts) ? prof.profile.subAccounts : [];
-    // ★ 중복 등록 방지: 같은 이름+전화(뒤8자리) 타계정이 이미 있으면 성공으로 간주
+    // 같은 전화번호가 이미 있으면 새 행을 추가하지 않는다. 이름까지 같으면 등록 완료로
+    // 간주하고, 이름이 다르면 어느 값을 고쳐야 하는지 알려준다.
     const _n = (idn.name || "").replace(/\s+/g, "");
     const _p8 = (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
-    if (subs.some(s => (s?.name || "").replace(/\s+/g, "") === _n
-        && (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8)) {
-      return true;
+    if (!_n || _p8.length !== 8) {
+      return { ok: false, code: "SUB_ACCOUNT_IDENTITY_REQUIRED", error: "타계정 이름과 연락처를 확인해주세요." };
     }
-    if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록할 수 있습니다.", "error"); return false; }
+    const samePhone = subs.find(s => (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8);
+    if (samePhone) {
+      const savedName = (samePhone?.name || "").trim();
+      if (savedName.replace(/\s+/g, "") === _n) return { ok: true, alreadyRegistered: true };
+      return {
+        ok: false,
+        code: "SUB_PHONE_NAME_MISMATCH",
+        error: `이 연락처는 이미 타계정 '${savedName || "이름 미등록"}'으로 등록되어 있습니다. 입력 이름과 등록 이름을 확인해주세요.`,
+      };
+    }
+    if (subs.length >= 10) {
+      return { ok: false, code: "SUB_ACCOUNT_LIMIT", error: "타계정은 최대 10개까지 등록할 수 있습니다. 기존 타계정을 정리한 뒤 다시 시도해주세요." };
+    }
     subs.push({
       name: (idn.name || "").trim(),
       phone: (idn.phone || "").trim(),
@@ -8800,12 +8839,12 @@ async function _registerSubAccountFromOrder(auth, idn) {
     const r = await gasPost({ action: "saveSubAccounts", name: auth.name, phone8: auth.phone8, subAccounts: JSON.stringify(subs) });
     if (r?.ok) {
       if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
-      return true;
+      return { ok: true, registered: true };
     }
-    return false;
+    return { ok: false, code: r?.code || "SUB_ACCOUNT_SAVE_FAILED", error: r?.error || "타계정 등록에 실패했습니다." };
   } catch (e) {
     console.warn("[subRegister] 실패:", e.message);
-    return false;
+    return { ok: false, code: "SUB_ACCOUNT_SAVE_FAILED", error: e.message || "타계정 등록 중 오류가 발생했습니다." };
   }
 }
 
@@ -9386,12 +9425,13 @@ async function submitOrderForm() {
         const msgR = `⚠️ ${i+1}번째 주문: 내 정보와 다른 정보가 감지되었습니다.\n\n`
           + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
         if (confirm(msgR)) {
-          const okReg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
-          if (okReg2) {
+          const reg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
+          if (reg2.ok) {
             try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (타계정 등록 후 재제출)"); }
           } else {
-            showToast("타계정 등록 실패 — 이 주문은 건너뜁니다. 내정보에서 등록 후 다시 제출해주세요.", "error");
-            results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "타계정 등록에 실패했어요" });
+            const regError = reg2.error || "타계정 등록에 실패했습니다. 내정보에서 확인해주세요.";
+            showToast(regError, "error");
+            results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: regError });
             continue;
           }
         } else {
