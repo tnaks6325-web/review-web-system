@@ -316,10 +316,26 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
     if (skipDetail) {
       return { status: 'SUB', subIndex: phoneOnlySubIndex, reasons: [], identity };
     }
+    const subReasons = [
+      `등록된 타계정 이름(${String(sub.name || '').trim() || '-'})과 입력 이름(${pickedName || '-'})이 다름`,
+    ];
+    if (String(sub.address || '').trim() && idAddr) {
+      const addrCheck = await addressSame(sub.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
+      if (addrBad(addrCheck.verdict)) subReasons.push(`타계정 등록 주소와 상이: ${addrCheck.reason}`);
+    }
+    const subAcct = normAccount(sub.bankAccount);
+    const acctOkSub =
+      (subAcct && idAcct && subAcct === idAcct)
+      || (idHolder && idHolder === normName(sub.accountHolder))
+      || (mainAcct && idAcct && mainAcct === idAcct)
+      || (idHolder && mainHolder && idHolder === mainHolder);
+    if (subAcct && idAcct && !acctOkSub) {
+      subReasons.push('타계정 등록 계좌·본인 계좌 어느 쪽과도 상이');
+    }
     return {
       status: 'NEED_CONFIRM',
       subIndex: phoneOnlySubIndex,
-      reasons: [`등록된 타계정 이름(${String(sub.name || '').trim() || '-'})과 입력 이름(${pickedName || '-'})이 다름`],
+      reasons: subReasons,
       identity,
     };
   }
