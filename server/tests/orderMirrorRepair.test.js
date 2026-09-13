@@ -43,7 +43,8 @@ function stubPool(answer) {
     slOrder.__setPoolForTest(s.pool);
     const out = await slOrder.repairWrittenMarkForBoardRows({ dryRun: true });
     const sql = s.calls[0].sql;
-    ok('무시트 참여형 좌표만 본다', /os\.sheet_id LIKE 'campaign:%'/.test(sql));
+    ok('무시트 참여형 좌표와 작업보드 연결 주문만 본다',
+      /os\.sheet_id LIKE 'campaign:%'/.test(sql) && /os\.workboard_id IS NOT NULL/.test(sql));
     ok('상태는 파라미터 배열로 제한한다', /os\.mirror_status = ANY\(\$1::text\[\]\)/.test(sql));
     ok('작업보드 링크가 있는 주문만(EXISTS)', /EXISTS \(SELECT 1 FROM campaign_participants cp/.test(sql));
     ok('★ 소프트삭제·비활성·다른 작업보드 줄은 근거가 아니다',
