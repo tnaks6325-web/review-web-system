@@ -244,11 +244,43 @@ async function revertRoute({ fileId, by = 'revert' } = {}) {
   const parent = (cur.parents || [])[0] || null;
   if (parent !== toFolderId) await driveService.moveFile(fileId, toFolderId, parent);
 
-  await _db().query(
-    `UPDATE review_submissions
-        SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
-      WHERE file_id = $1`, [fileId]);
+  if (backTarget === 'receipt') {
+    const pendingChecks = JSON.stringify({
+      receiptValidation: { verdict: 'warn', status: 'retry_pending', reason: 'receipt_route_revert' },
+    });
+    await _db().query(
+      `WITH restored AS (
+         UPDATE review_submissions
+            SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
+          WHERE file_id = $1
+          RETURNING file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key
+       )
+       INSERT INTO review_inspections
+         (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
+          inspected_at, updated_at)
+       SELECT file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key,
+              'pending', $2::jsonb, NOW(), NOW()
+         FROM restored
+       ON CONFLICT (file_id) DO UPDATE
+         SET sheet_id = EXCLUDED.sheet_id, tab_name = EXCLUDED.tab_name,
+             row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
+             slot_key = EXCLUDED.slot_key, status = 'pending', checks = EXCLUDED.checks,
+             resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+             attempts = 0, inspected_at = NOW(), updated_at = NOW()`,
+      [fileId, pendingChecks]
+    );
+  } else {
+    await _db().query(
+      `UPDATE review_submissions
+          SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
+        WHERE file_id = $1`, [fileId]);
+  }
   await recomputePrimary({ sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index });
+  let reinspection = null;
+  if (backTarget === 'receipt') {
+    try { reinspection = await require('./reviewInspect.service').reinspectReceiptFile({ fileId }); }
+    catch (_) { reinspection = { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' }; }
+  }
   // 이 파일로 열린 자동 이동 알림은 원인이 사라졌으니 함께 닫는다
   try {
     await _db().query(
@@ -262,7 +294,8 @@ async function revertRoute({ fileId, by = 'revert' } = {}) {
     message: `자동 이동을 되돌렸습니다 — ${routeSlotLabel(sub.slot_key)} → ${routeSlotLabel(sub.routed_from_slot)} (${by})`,
     context: { fileId, from: sub.slot_key, to: sub.routed_from_slot, row: String(sub.row_index ?? '') },
   });
-  return { ok: true, fileId, restoredSlot: sub.routed_from_slot };
+  return { ok: true, fileId, restoredSlot: sub.routed_from_slot,
+    ...(backTarget === 'receipt' ? { reinspection } : {}) };
 }
 
 /** 리뷰웹시스템[3버전] 로그의 capture_routed 알림 1건에서 되돌리기. */

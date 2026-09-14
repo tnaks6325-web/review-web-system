@@ -265,6 +265,8 @@ const fileRoute = require('../src/services/fileRoute.service');
       '소급 스윕이 현영 칸으로 옮긴 파일도 기존 검수를 무효화하고 receipt 재검수한다');
     assert.ok(/const backTarget = isCashReceiptSlot\([\s\S]{0,260}\) \? 'receipt' : 'review'/.test(fr),
       '수동 slot2 현금영수증의 이동 되돌리기도 현금영수증 폴더로 복귀');
+    assert.ok(/backTarget === 'receipt'[\s\S]*WITH restored AS[\s\S]*status = 'pending'[\s\S]*resolution = NULL[\s\S]*reinspectReceiptFile\(\{ fileId \}\)/.test(fr),
+      '현영 원위치 복구는 기존 리뷰 검수를 무효화하고 영수증 재검수를 실행');
     assert.ok(fr.includes('if (dryRun) return'), '스윕 dryRun = 무변경 반환');
     assert.ok(fr.includes('is_submitted 는 건드리지 않는다'), '스윕이 제출 상태를 뒤집지 않음(문서화된 한계)');
     ok('E13: fileRoute — 휴지통·핑퐁 방지·dryRun 무변경');
