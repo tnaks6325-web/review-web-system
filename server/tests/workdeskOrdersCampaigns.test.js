@@ -3,8 +3,8 @@
  * 실행: node tests/workdeskOrdersCampaigns.test.js
  *
  * 이 화면의 위험은 두 가지다.
- *  ① **권한** — 두 탭은 AE 에게도 열려 있는데, 작업오더 접수는 시트/탭 등록의 단일 관문이고
- *     공고 발행·수정은 정원·금액을 바꾼다. 게이트가 한 칸만 어긋나면 아무나 누른다.
+ *  ① **권한** — AE는 작업오더 접수와 모집공고 운영을 모두 수행한다. 광고주 차단이나
+ *     AE 허용이 한 칸만 어긋나도 화면과 API가 갈린다.
  *     → 라우터 스택을 **실제로 검사**한다.
  *  ② **사본 드리프트** — 카드·모달·저장 로직을 리뷰웹시스템[3버전]용으로 베끼면 관리자 대시보드와
  *     계속 어긋난다(레포가 반복해서 경고한 그것). → 같은 파일을 쓰는지 고정한다.
@@ -35,12 +35,23 @@ const READ = ['GET /work-orders/list', 'GET /campaigns/list', 'GET /campaigns/:i
   'GET /campaigns/:id/activity-log',
   'GET /campaigns/:id/preview', 'GET /perm'];
 const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
+  'PUT /work-orders/update', 'PUT /work-orders/edit', 'POST /work-orders/submit',
   'POST /campaigns/create', 'PUT /campaigns/:id', 'POST /campaigns/:id/flags',
   'DELETE /campaigns/:id', 'POST /campaigns/:id/confirm', 'PUT /campaigns/:id/status',
-  'POST /campaigns/:id/dismiss',
+  'POST /campaigns/:id/dismiss', 'POST /campaigns/:id/blog-approve',
+  'POST /campaigns/:id/blog-reject', 'POST /campaigns/:id/archive',
+  'GET /worktable/plan', 'POST /worktable/create', 'POST /worktable/delete',
+  'POST /worktable/delete-tab',
   // 외부모집 구매양식 수동제출 — 리뷰어 등록·주문 원장·정원 차감·시트 쓰기를 일으키는 창구라
-  // 접수·발행과 같은 2단 권한(내부인 열람 · 편집 허용명단만 실행).
+  // 접수·발행과 같은 공통 권한을 적용한다.
   'POST /manual-order/preview', 'POST /manual-order/submit'];
+const AE_CAMPAIGN_CONTROL = [
+  'GET /campaigns/:id/daily-plan', 'POST /campaigns/:id/daily-plan',
+  'PUT /campaigns/:id/carry-strategy', 'POST /campaigns/:id/worktable-rebuild',
+  'POST /campaigns/:id/rounds', 'DELETE /campaigns/:id/rounds',
+  'GET /campaigns/:id/reviewer-gate', 'GET /campaigns/:id/reviewer-gate/search',
+  'POST /campaigns/:id/reviewer-gate',
+];
 
 t('열람 라우트가 전부 등록돼 있다', () => {
   READ.forEach(k => assert.ok(L[k], '없음: ' + k));
@@ -52,16 +63,24 @@ t('★ 열람은 내부인만(광고주 차단) — internalMiddleware', () => {
   READ.forEach(k => assert.ok(L[k].includes('internalMiddleware'),
     k + ': internalMiddleware 없음 — 광고주에게 열릴 수 있다'));
 });
-t('★★ 편집은 전부 editorOnlyMiddleware 뒤 — 이름 명단만 통과', () => {
+t('★★ 편집은 전부 공통 게이트 뒤 — AE 허용과 광고주 차단이 한 곳에서 적용', () => {
   WRITE.forEach(k => {
     assert.ok(L[k].includes('authMiddleware'), k + ': authMiddleware 없음');
     assert.ok(L[k].includes('internalMiddleware'), k + ': internalMiddleware 없음');
     assert.ok(L[k].includes('editorOnlyMiddleware'),
-      k + ': editorOnlyMiddleware 없음 — 명단 밖 AE 가 접수·발행할 수 있다');
+      k + ': editorOnlyMiddleware 없음 — 기능마다 AE 권한이 갈릴 수 있다');
   });
 });
 t('★ 열람 라우트에는 편집 게이트를 걸지 않는다(읽기까지 막히면 탭이 무의미)', () => {
   READ.forEach(k => assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 열람에 편집 게이트'));
+});
+t('날짜별 인원·차수·작업표 재구성·참여 제한도 AE가 조절', () => {
+  AE_CAMPAIGN_CONTROL.forEach(k => {
+    assert.ok(L[k], '없음: ' + k);
+    assert.ok(L[k].includes('internalMiddleware'), k + ': AE 허용 internalMiddleware 없음');
+    assert.ok(!L[k].includes('adminOrMasterMiddleware') && !L[k].includes('masterOnlyMiddleware'),
+      k + ': AE를 막는 관리자 전용 게이트가 있음');
+  });
 });
 // ★ 2026-08 사용자 확정: 명단 관리도 내부 담당자(AE 포함)가 한다 — 광고주·리뷰어는 차단.
 //   ⚠ 명단이 자기 자신을 게이트하면(editorOnly) 명단에서 빠지는 순간 아무도 못 고치므로 그 금지는 유지.
@@ -107,8 +126,11 @@ t('★ 오류 메시지를 마스킹하지 않는다(관리자 도구는 실패 
 /* ── 2) 편집 판정 로직 ─────────────────────────────────────── */
 console.log('\n2) 편집 판정(workdeskEditors)');
 const WD = R('src/utils/workdeskEditors.js');
-t('★ master 는 명단 무관 허용(명단 오설정 잠금 방지)', () => {
-  assert.ok(/if \(role === 'master'\) return true;/.test(WD));
+t('★ master·AE는 명단 무관 허용', () => {
+  assert.ok(/role === 'master' \|\| role === 'staff'/.test(WD),
+    'AE가 이름 명단 없이 작업오더·모집공고를 편집해야 한다');
+  assert.ok(WD.indexOf("role === 'staff'") < WD.indexOf('await _loadSet()'),
+    'AE 허용은 명단 조회보다 먼저 끝나야 한다');
 });
 t('★ 조회 실패는 읽기 전용으로 수렴(fail-closed)', () => {
   assert.ok(/if \(!set\) return false;/.test(WD), '명단을 못 읽으면 열지 말아야 한다');

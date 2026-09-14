@@ -73,13 +73,13 @@ assert.strictEqual(actions.canOpenExternalManualOrder(), false, '명단 판정 �
 actions.openExternalManualOrder();
 assert.match(message, /작업을 먼저 선택/, '선택한 작업이 없으면 원인을 안내해야 합니다.');
 
-// ★ AE(staff)도 편집 허용명단에 있으면 실행할 수 있다(사용자 확정 2026-08-20) — 서버 게이트와 1:1.
+// ★ AE(staff)는 이름 명단 없이 실행할 수 있다 — 서버 게이트와 1:1.
 state.campEdit = null;
 actions._emoSyncBtn();
 assert.strictEqual(permCalls, 1, '명단 판정은 도착 시 한 번만 조회해야 합니다.');
-assert.strictEqual(actions.canOpenExternalManualOrder(), true, '편집 허용명단 AE 는 수동제출을 실행할 수 있어야 합니다.');
+assert.strictEqual(actions.canOpenExternalManualOrder(), true, 'AE는 수동제출을 실행할 수 있어야 합니다.');
 state.campEdit = false;
-assert.strictEqual(actions.canOpenExternalManualOrder(), false, '명단 밖 AE 에게는 노출하지 않아야 합니다.');
+assert.strictEqual(actions.canOpenExternalManualOrder(), false, '서버 편집 권한이 false면 노출하지 않아야 합니다.');
 
 state = { role: 'admin', cur: { sheetId: 'sheet-1', tabName: '8/12 외부모집', tabGid: 42, displayName: '탭 이름' }, wd: { meta: { displayName: '작업명' } } };
 actions = externalManualOrder(state, text => { message = text; }, { ManualOrder: { open: ctx => { opened = ctx; } } }, async () => { reloaded++; });

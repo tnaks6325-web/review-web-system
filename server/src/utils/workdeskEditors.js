@@ -1,12 +1,11 @@
 /**
- * 리뷰웹시스템[3버전] 편집 허용명단 — 작업오더·모집공고 탭.
+ * 리뷰웹시스템[3버전] 작업오더·모집공고 편집 권한.
  *
- * 배경: 두 탭은 **AE(staff)에게도 열려 있다**(사용자 확정). 그런데 작업오더 접수는
- *   시트/탭을 `tab_configs`·`campaigns` 에 등록하는 단일 관문이고, 모집공고 발행·수정은
- *   정원·금액을 바꾼다 — 보는 사람 전부에게 열 수는 없다.
- *   → **역할이 아니라 이름 명단**으로 편집 권한을 준다.
+ * 작업오더 접수와 모집공고 운영은 AE(staff)의 기본 업무다. AE는 이름 명단과 무관하게
+ * 편집할 수 있고, master도 잠금 방지 안전판으로 항상 허용한다. admin은 기존 운영 방식대로
+ * `workdesk_editors` 이름 명단을 따른다. advertiser와 알 수 없는 역할은 차단한다.
  *
- * 명단은 **master/admin 이 리뷰웹시스템[3버전]에서 직접 관리**하고(migration 079 `workdesk_editors`),
+ * 명단은 내부 담당자가 리뷰웹시스템[3버전]에서 관리하고(migration 079 `workdesk_editors`),
  * 후보는 **인트라넷 직원DB**에서 고른다(`GET /api/trackb/intranet/users` 자동완성).
  *
  * 대조 키 = JWT 의 `name`
@@ -14,8 +13,7 @@
  *   · 관리자 로그인 → username
  * 표기 흔들림(공백·전각)을 흡수하려고 공백 제거 후 비교한다.
  *
- * ★ master 는 명단과 무관하게 항상 허용 — 명단을 비우거나 잘못 넣어 **아무도 편집 못 하는
- *   잠금사고**를 막는 안전판.
+ * ★ master·staff 는 명단과 무관하게 항상 허용 — 명단 오류가 AE 업무를 막지 않는다.
  * ★ 명단에 없는 admin 은 이 화면에서 읽기 전용이 된다 — 기존 관리자 대시보드에서는
  *   종전대로 작업할 수 있다(권한을 뺏는 게 아니라 이 화면만 좁힌 것).
  * ★ 조회 실패(테이블 부재·DB 오류)는 **읽기 전용으로 수렴**한다(fail-closed).
@@ -82,7 +80,7 @@ async function removeEditor(id) {
  */
 async function canEdit(admin) {
   const role = (admin && admin.role) || '';
-  if (role === 'master') return true;                 // 안전판 — 명단 오설정 잠금 방지
+  if (role === 'master' || role === 'staff') return true; // AE 기본 업무 + master 잠금 방지
   if (role === 'advertiser' || !role) return false;   // 광고주는 이 탭 자체가 없음
   const me = _norm(admin && admin.name);
   if (!me) return false;
