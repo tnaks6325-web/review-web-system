@@ -1737,6 +1737,8 @@ async function _submitRegister(name, phone, p1, p2) {
       if (ni) ni.value = name;
 
       await doSearch();
+    } else if (data && data.reason === "phone_registered_as_sub_account") {
+      _showRegErr("다른 리뷰어의 타계정으로 이미 등록된 번호입니다.");
     } else if (data && data.isDuplicate) {
       // 중복 전화번호 → 로그인 탭으로 자동 전환 + 전화번호 pre-fill
       _showRegErr("이미 등록된 전화번호입니다. 로그인 탭에서 로그인해주세요.");
