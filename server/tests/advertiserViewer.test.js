@@ -517,6 +517,10 @@ async function run() {
       && /FROM review_index r/.test(block)
       && !/listFolderFilesRecursive/.test(block);
   })());
+  ok('★ 폴더 공유는 내부 역할과 서버에 연결된 정확한 리뷰 폴더로만 제한한다',
+    /router\.post\('\/share-review-folder', authMiddleware, internalOnlyMiddleware/.test(driveRouteSrc)
+    && /SELECT folder_url FROM tab_configs WHERE sheet_id = \$1 AND tab_name = \$2/.test(driveRouteSrc)
+    && !/const \{ sheetId, tabName, folderUrl \} = req\.body/.test(driveRouteSrc));
   ok('리뷰 캡처는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
     /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
     && /function _rvPopRender\(\)/.test(src)

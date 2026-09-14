@@ -79,11 +79,9 @@ async function resolveTargetFolder({ target, sheetId, tabName, reviewBaseFolderI
     if (target === 'review') return reviewBaseFolderId || null;
     if (target === 'receipt') {
       if (!receiptLabel) return null;
-      // 영수증은 공개 업체 리포트가 스캔하는 [리뷰] 폴더 밖에 보관한다.
-      // 연결된 구매캡처 폴더를 우선하고, 없으면 동일한 비공개 경로를 만든다.
-      const receiptBase = await resolveTargetFolder({ target: 'capture', sheetId, tabName });
-      if (!receiptBase) return null;
-      const f = await driveService.getOrCreateSubFolder(receiptBase, receiptLabel);
+      // 업체 화면에 URL이 내려가는 [리뷰]·[구매캡처] 아래에는 영수증을 두지 않는다.
+      const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+      const f = await driveService.ensureReceiptFolderPath(rootFolderId, sheetId, tabName, receiptLabel);
       return f && f.id ? f.id : null;
     }
     if (target === 'capture') {

@@ -572,6 +572,17 @@ async function ensureCaptureFolderPath(rootFolderId, sheetTitle, tabName) {
 }
 
 /**
+ * 현금영수증 전용 내부 폴더. 업체에 노출되는 [리뷰]·[구매캡처] 트리의 형제가 아니라
+ * 별도 내부 루트 아래에 둔다. CASH_RECEIPT_FOLDER_ID가 있으면 그 전용 루트를 우선한다.
+ */
+async function ensureReceiptFolderPath(rootFolderId, sheetId, tabName, receiptLabel = '현금영수증') {
+  const privateRootId = process.env.CASH_RECEIPT_FOLDER_ID || rootFolderId;
+  if (!privateRootId || !sheetId || !tabName) return null;
+  const prefix = process.env.CASH_RECEIPT_FOLDER_ID ? [] : ['[내부전용-현금영수증]'];
+  return ensureFolderPath(privateRootId, [...prefix, sheetId, tabName, receiptLabel]);
+}
+
+/**
  * 리뷰 폴더 경로 확보 (3~4단계: 시트제목 → 탭명 → [리뷰] → [옵션])
  * @param {string} rootFolderId - AI_REVIEW_FOLDER_ID
  * @param {string} sheetTitle - 구글 시트 제목 (캠페인/업체명)
@@ -1414,6 +1425,7 @@ module.exports = {
   // 새 통합 폴더 구조 함수
   ensureFolderPath,
   ensureCaptureFolderPath,
+  ensureReceiptFolderPath,
   ensureReviewFolderPath,
   trashDuplicateFile,
   generateReviewFileName,

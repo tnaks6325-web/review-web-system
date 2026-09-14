@@ -23,6 +23,7 @@ const { slotLabel: slotLabelOf, isCashReceiptSlot } = require('../utils/captureS
 const driveService = require('../services/drive.service');
 const fileRouteService = require('../services/fileRoute.service');
 const { _getReviewerPhoneList } = require('../services/search.service');
+const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const sse = require('../utils/sse');
@@ -38,6 +39,27 @@ function _p8(v) {
 /** 사유 정화: HTML 태그 제거 + 길이 제한(텍스트로만 취급) */
 function _sanitizeReason(v) {
   return String(v || '').replace(/<[^>]*>/g, '').trim().slice(0, 500);
+}
+
+/** 서명된 리뷰어 세션의 소유자·타계정 전화번호 범위. 요청 query의 phone8은 권한 근거로 쓰지 않는다. */
+async function _sessionPhoneList(session) {
+  const ownerId = String(session && session.ownerReviewerId || '');
+  if (!ownerId) return [];
+  const { rows } = await pool.query('SELECT phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1', [ownerId]);
+  if (rows.length !== 1) return [];
+  const out = new Set();
+  const add = value => { const p = _p8(value); if (p.length === 8) out.add(p); };
+  add(rows[0].phone8);
+  for (const sub of (Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [])) add(sub && sub.phone);
+  try {
+    const identities = await pool.query(
+      `SELECT current_phone8 FROM reviewer_identities
+        WHERE owner_reviewer_id = $1 AND status <> 'separated'`, [ownerId]);
+    for (const identity of identities.rows) add(identity.current_phone8);
+  } catch (e) {
+    if (!e || e.code !== '42P01') throw e;
+  }
+  return [...out];
 }
 
 /**
@@ -154,12 +176,12 @@ function _archiveName(r, origName) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 리뷰어 측 (무인증 · phone8 강한-키 게이트)
+// 리뷰어 측 (서명 세션 + 세션 소유 phone8 강한-키 게이트)
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/review-edit/my-files?phone8&sheetId&tabName&rowIndex
 //   그 행의 소유(강한-키)가 확인되면 제출 이미지 목록(썸네일용 fileId 포함) + 대기중 요청을 반환.
-router.get('/my-files', async (req, res) => {
+router.get('/my-files', reviewerSessionMiddleware, async (req, res) => {
   try {
     const p8 = _p8(req.query.phone8);
     const sheetId = req.query.sheetId;
@@ -169,7 +191,10 @@ router.get('/my-files', async (req, res) => {
       return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
     }
 
-    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneList = await _sessionPhoneList(req.reviewer);
+    if (!phoneList.includes(p8)) {
+      return res.status(403).json({ ok: false, error: '로그인한 리뷰어의 제출 내역만 조회할 수 있습니다.' });
+    }
     if (!(await _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex))) {
       return res.status(403).json({ ok: false, error: '본인 제출 내역만 조회할 수 있습니다.' });
     }

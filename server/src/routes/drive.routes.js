@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
@@ -1650,27 +1650,25 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
 //     생성·연결한 뒤 공유(미연결 탭이어도 유효한 링크 확보, 빈 폴더 가능).
 // 비파괴: 파일 이동/복제 없음. 폴더에 읽기 권한만 부여(드라이브에서 언제든 해제 가능).
 // ═══════════════════════════════════════════════════════════
-router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
+router.post('/share-review-folder', authMiddleware, internalOnlyMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, folderUrl } = req.body || {};
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) {
+      return res.status(400).json({ ok: false, error: 'sheetId와 tabName이 필요합니다.' });
+    }
 
     // ── 1) 대상 [리뷰] 폴더 확보 ──
-    let url = (folderUrl || '').trim();
-    if (!url && sheetId && tabName) {
-      const { rows } = await pool.query(
-        'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
-      );
-      url = rows[0]?.folder_url || '';
-    }
+    // caller의 folderUrl은 받지 않는다. 서버에 연결된 정확한 리뷰 폴더만 공유할 수 있다.
+    const { rows: configured } = await pool.query(
+      'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]
+    );
+    let url = configured[0]?.folder_url || '';
     let folderId = extractFolderId(url);
 
     // 미연결 탭이면 [리뷰] 폴더를 생성·연결 (빈 폴더라도 유효한 링크 확보)
     let created = false;
     if (!folderId) {
-      if (!sheetId || !tabName) {
-        return res.json({ ok: false, error: '폴더를 찾을 수 없습니다. folderUrl 또는 sheetId+tabName이 필요합니다.' });
-      }
       const rootFolderId = getRootFolderId();
       if (!rootFolderId) return res.json({ ok: false, error: 'AI_REVIEW_FOLDER_ID 미설정' });
       const sheetTitle = await getSheetTitle(sheetId, tabName);

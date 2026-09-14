@@ -26,6 +26,10 @@ require.cache[drivePath] = {
     moveFile: async (id, to, from) => { _driveCalls.push(['move', id, to, from]); },
     extractFolderIdFromUrl: (u) => (u ? (String(u).includes('CAPTURE_BASE') ? 'CAPTURE_BASE' : 'REVIEW_BASE') : null),
     getOrCreateSubFolder: async (base, label) => { _driveCalls.push(['sub', base, label]); return { id: 'RECEIPT_FOLDER' }; },
+    ensureReceiptFolderPath: async (root, sheetId, tabName, label) => {
+      _driveCalls.push(['receipt', root, sheetId, tabName, label]);
+      return { id: 'RECEIPT_FOLDER' };
+    },
     trashFiles: async () => { throw new Error('수동 경로에서 휴지통 호출 금지'); },
     downloadFile: async () => null,
     ensureCaptureFolderPath: async () => ({ id: 'CAP', url: 'https://drive.google.com/drive/folders/CAP' }),
@@ -179,7 +183,6 @@ function seqPool(handlers) {
         { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' },
       ], income_type: '현영' }] },
       { rows: [] },                        // 중복 없음
-      { rows: [{ capture_folder_url: 'https://drive.google.com/drive/folders/CAPTURE_BASE' }] },
       { rows: [], rowCount: 1 },           // 원장 UPDATE
       { rows: [] },                        // recomputePrimary SELECT(0장 → 비움 UPDATE)
       { rows: [], rowCount: 1 },
@@ -189,7 +192,7 @@ function seqPool(handlers) {
     assert.strictEqual(out.ok, true);
     assert.strictEqual(out.from, 'review');
     assert.strictEqual(out.to, 'slot2');
-    assert.ok(_driveCalls.some(c => c[0] === 'sub' && c[1] === 'CAPTURE_BASE'), '공개 리뷰 폴더 밖의 비공개 현영 서브폴더 사용');
+    assert.ok(_driveCalls.some(c => c[0] === 'receipt' && c[2] === 's' && c[3] === 't'), '업체 노출 폴더 밖의 내부 현영 경로 사용');
     assert.ok(_driveCalls.some(c => c[0] === 'move' && c[2] === 'RECEIPT_FOLDER'), '현영 서브폴더로 Drive 이동');
     const upd = p.calls.find(q => /SET routed_from_slot = COALESCE\(routed_from_slot, slot_key\)/.test(q.sql));
     assert.ok(upd, '★ 최초 출처 보존(COALESCE) — 되돌리기가 항상 원래 칸으로');

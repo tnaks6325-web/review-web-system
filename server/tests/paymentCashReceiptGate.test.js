@@ -158,8 +158,8 @@ const db = {
     '영수증을 리뷰·구매캡처로 옮기는 순간 지급 승인 증거를 원자적으로 제거해야 한다');
   assert.match(fileRouteService, /backTarget === 'receipt'[\s\S]*else \{[\s\S]*WITH restored AS \([\s\S]*checks = COALESCE\(i\.checks, '\{\}'::jsonb\) - 'receiptValidation'/,
     '자동 이동을 리뷰 칸으로 되돌릴 때도 영수증 승인 증거를 제거해야 한다');
-  assert.match(fileRouteService, /target === 'receipt'[\s\S]{0,700}resolveTargetFolder\(\{ target: 'capture', sheetId, tabName \}\)[\s\S]{0,300}getOrCreateSubFolder\(receiptBase, receiptLabel\)/,
-    '현금영수증은 공개 리뷰 폴더가 아닌 비공개 구매캡처 경로에 보관해야 한다');
+  assert.match(fileRouteService, /target === 'receipt'[\s\S]{0,700}ensureReceiptFolderPath\(rootFolderId, sheetId, tabName, receiptLabel\)/,
+    '현금영수증은 업체에 노출되는 리뷰·구매캡처 트리 밖의 내부 전용 경로에 보관해야 한다');
   assert.match(driveRoute.replace(/\r/g, ''), /router\.get\('\/report\/:code'[\s\S]*FROM review_index r[\s\S]*FROM review_submissions rs_role[\s\S]*COALESCE\(rs_role\.slot_key, 'review'\) <> 'review'/,
     '공개 리포트 대표파일 폴백도 비리뷰 슬롯에 연결된 파일을 제외해야 한다');
   assert.match(uploadRoute, /if \(_isReceiptUpload\)[\s\S]{0,700}target: 'receipt'[\s\S]{0,700}공개 리뷰 폴더 업로드 차단/,

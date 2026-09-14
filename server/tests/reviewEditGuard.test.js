@@ -1,6 +1,6 @@
 /**
  * 리뷰 수정요청 소유권 가드 회귀 테스트
- *   무인증 엔드포인트 GET /api/review-edit/my-files 가:
+ *   서명된 리뷰어 세션 전용 GET /api/review-edit/my-files 가:
  *   1) phone8 8자리가 아니면 400
  *   2) 강한-키(review_index.phone8 / participation_links.phone8) 소유가 없으면 403
  *      (이름만 아는 제3자가 타인 제출 이미지를 조회하는 것 차단)
@@ -19,7 +19,8 @@ let ownershipRows = [];   // _verifyRowOwnership 결과
 const fakePool = {
   query: async (sql, params) => {
     captured.queries.push({ sql, params });
-    if (/FROM reviewers/.test(sql)) return { rows: [] };                       // 타계정 없음
+    if (/FROM reviewers/.test(sql)) return { rows: [{ phone8: '12345678', sub_accounts: [] }] };
+    if (/FROM reviewer_identities/.test(sql)) return { rows: [] };
     if (/SELECT 1\s+FROM review_index/.test(sql)) return { rows: ownershipRows };
     if (/FROM review_submissions/.test(sql)) {
       return { rows: [{ file_id: 'F1', file_name: 'a.jpg', file_url: 'u', slot_key: 'review', uploaded_at: null }] };
@@ -51,22 +52,25 @@ function mockRes() {
 
 async function run() {
   const myFiles = findHandler('get', '/my-files');
+  const session = { ownerReviewerId: 'R1' };
+  const route = router.stack.find(l => l.route && l.route.path === '/my-files' && l.route.methods.get);
+  assert.ok(route.route.stack.length >= 2, 'my-files는 리뷰어 세션 미들웨어 뒤에 있어야 함');
 
   // 1) phone8 형식 불량 → 400
   let res = mockRes();
-  await myFiles({ query: { phone8: '123', sheetId: 'S', tabName: 'T', rowIndex: '5' } }, res);
+  await myFiles({ reviewer: session, query: { phone8: '123', sheetId: 'S', tabName: 'T', rowIndex: '5' } }, res);
   assert.strictEqual(res._status, 400, 'phone8 8자리 아니면 400이어야 함');
 
   // 2) 소유 없음 → 403 (타인 이미지 조회 차단)
   ownershipRows = [];
   res = mockRes();
-  await myFiles({ query: { phone8: '12345678', sheetId: 'S', tabName: 'T', rowIndex: '5' } }, res);
+  await myFiles({ reviewer: session, query: { phone8: '12345678', sheetId: 'S', tabName: 'T', rowIndex: '5' } }, res);
   assert.strictEqual(res._status, 403, '소유 검증 실패 시 403이어야 함');
 
   // 3) 소유 확인 → 200 + files
   ownershipRows = [{ ok: 1 }];
   res = mockRes();
-  await myFiles({ query: { phone8: '12345678', sheetId: 'S', tabName: 'T', rowIndex: '5' } }, res);
+  await myFiles({ reviewer: session, query: { phone8: '12345678', sheetId: 'S', tabName: 'T', rowIndex: '5' } }, res);
   assert.strictEqual(res._status, 200, '소유 확인 시 200이어야 함');
   assert.ok(res._json && res._json.ok === true, 'ok:true 를 반환해야 함');
   assert.ok(Array.isArray(res._json.files) && res._json.files.length === 1, '파일 목록을 반환해야 함');
@@ -81,7 +85,7 @@ async function run() {
   assert.ok(!/reviewer_name/.test(ownQ.sql) && !/recipient_name/.test(ownQ.sql),
     '이름 기반 매칭을 쓰면 안 됨(무인증 타인 스크래핑 차단)');
 
-  console.log('✓ reviewEditGuard: my-files 소유권 가드 통과 (400/403/200 + 강한-키 전용)');
+  console.log('✓ reviewEditGuard: my-files 세션·소유권 가드 통과 (400/403/200 + 강한-키 전용)');
 }
 
 // sse.js 등이 setInterval(하트비트)로 이벤트루프를 잡아 종료를 막으므로 명시적 종료
