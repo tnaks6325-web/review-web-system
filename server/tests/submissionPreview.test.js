@@ -47,7 +47,7 @@ ok('★ 갈래 판정은 _rvKindFiles 하나 — 팝업이 slot 을 직접 비�
 
 console.log('\nB) 제출현황 줄');
 {
-  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvStatHtml']);
+  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvReceiptApplies', '_rvStatHtml']);
   const roster = [{ seq: 1 }, { seq: 2 }, { seq: 3 }, { seq: 4 }];
   sb.STATE.wd = { counts: { filled: 500, total: 512 }, roster };
   sb.STATE.rvImgs = {
@@ -83,13 +83,22 @@ console.log('\nB) 제출현황 줄');
     /🧾<\/span><span class="lb">현금영수증<\/span><span class="nm">2<small> \/ 4</.test(hr), hr);
   ok('★ receipt 는 리뷰 캡처 개수에 섞이지 않는다',
     /📷<\/span><span class="lb">리뷰 캡처<\/span><span class="nm">1<small> \/ 4</.test(hr), hr);
+  sb.STATE.wd.roster = [
+    { seq: 1, filled: true, cashReceiptStatus: 'submitted' },
+    { seq: 2, filled: true, cashReceiptStatus: 'missing' },
+    { seq: 3, filled: true, cashReceiptStatus: 'not_applicable' },
+    { seq: 4, filled: true, cashReceiptStatus: 'not_applicable' }
+  ];
+  const mixed = sb._rvStatHtml();
+  ok('★ 현영 제출현황 분모·분자는 행별 비대상 작업을 제외한다',
+    /🧾<\/span><span class="lb">현금영수증<\/span><span class="nm">1<small> \/ 2</.test(mixed), mixed);
   sb.STATE.role = 'advertiser';
   ok('★ 업체 역할은 응답 표식이 true 여도 현금영수증 현황을 그리지 않는다', !/현금영수증/.test(sb._rvStatHtml()));
 }
 
 console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 제출(주문/리뷰) 4열');
 {
-  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   const rows = [
     { id: 'a', seq: 2, recipient: '심수현', boardNo: '1', filled: true },
     { id: 'b', seq: 3, recipient: '조성훈', boardNo: '2', filled: true },
@@ -126,7 +135,7 @@ console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 제출(주문/
 
 console.log('\nC-1) 제출 인라인 필터 — 네 수치만 실제 행으로 연결');
 {
-  const sb = grab(['_rvKindFiles', '_rvPopHas', '_rvPopFilterPeople', '_rvPopCounts', '_rvPopFilterSet', '_rvPopFilterHtml']);
+  const sb = grab(['_rvKindFiles', '_rvReceiptApplies', '_rvPopHas', '_rvPopEligible', '_rvPopFilterPeople', '_rvPopCounts', '_rvPopFilterSet', '_rvPopFilterHtml']);
   const people = [
     { r: { id: 'a' }, files: [{ slot: 'order_capture' }, { slot: 'review' }] },
     { r: { id: 'b' }, files: [{ slot: 'order_capture' }] },
@@ -150,11 +159,24 @@ console.log('\nC-1) 제출 인라인 필터 — 네 수치만 실제 행으로 �
   sb._rvPopFilterSet('rev', false);
   ok('같은 수치를 한 번 더 누르면 별도 전체 필터 없이 원래 목록으로 복귀',
     sb.STATE.rvPop.filter === null && sb.STATE.rvPop.people.length === 4);
+
+  const mixed = [
+    { r: { id: 'cash-yes', cashReceiptStatus: 'submitted' }, files: [{ slot: 'receipt' }] },
+    { r: { id: 'cash-no', cashReceiptStatus: 'missing' }, files: [] },
+    { r: { id: 'normal', cashReceiptStatus: 'not_applicable' }, files: [] }
+  ];
+  sb.STATE.rvPop = { people: mixed, allPeople: mixed, idx: 0, i2: {}, filter: null, filterOpen: true, showReceipt: true };
+  const mh = sb._rvPopFilterHtml(sb.STATE.rvPop);
+  ok('★ 현영 미제출 수치는 비대상 행을 세지 않는다',
+    /현금영수증 미제출 1건만 보기[^>]*>1<\/button>/.test(mh), mh);
+  sb._rvPopFilterSet('receipt', false);
+  ok('★ 현영 미제출 필터는 대상이면서 파일 없는 행만 남긴다',
+    sb.STATE.rvPop.people.map(x => x.r.id).join() === 'cash-no');
 }
 
 console.log('\nD) 팝업 무대 — 좌우 동시');
 {
-  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   sb.STATE.rvPop = { people: [], idx: 0, i2: { cap: 0, rev: 0 } };
   const files = [{ slot: 'order_capture', url: 'u1' }, { slot: 'order_capture', url: 'u2' }, { slot: 'review', url: 'u3' }];
   const cap = sb._rvPopCol('cap', files), rev = sb._rvPopCol('rev', files);
@@ -168,6 +190,9 @@ console.log('\nD) 팝업 무대 — 좌우 동시');
   const rev2 = sb._rvPopCol('rev', only);
   ok('★ 한쪽이 없으면 그 칸만 "미제출"이라고 말한다(양쪽을 뭉뚱그리지 않는다)',
     /rvpempty warn"><b>리뷰 미제출/.test(rev2) && !/<img/.test(rev2), rev2);
+  const receiptNA = sb._rvPopCol('receipt', [{ slot: 'receipt', url: 'old' }], { cashReceiptStatus: 'not_applicable' });
+  ok('★ 현영 비대상 행은 과거 파일 유무와 무관하게 해당없음으로 표시한다',
+    /<b>해당없음<\/b>/.test(receiptNA) && !/<img/.test(receiptNA), receiptNA);
 
   sb._rvPopStep2('cap', 1, 2);
   ok('넘기면 그 칸만 다음 장', /src="u2"/.test(sb._rvPopCol('cap', files)) && /src="u3"/.test(sb._rvPopCol('rev', files)));
@@ -181,9 +206,11 @@ console.log('\nD) 팝업 무대 — 좌우 동시');
 
 console.log('\nE) 배선·계약');
 ok('★ 팝업이 무대를 좌우로 나눈다(단일 img 렌더 부재)',
-  /<div class="rvpcols\$\{p\.showReceipt\?' hasreceipt':''\}">\$\{_rvPopCol\('cap',cur\.files\)\}\$\{_rvPopCol\('rev',cur\.files\)\}\$\{p\.showReceipt\?_rvPopCol\('receipt',cur\.files\):''\}<\/div>/.test(WD)
+  /<div class="rvpcols\$\{p\.showReceipt\?' hasreceipt':''\}">\$\{_rvPopCol\('cap',cur\.files,cur\.r\)\}\$\{_rvPopCol\('rev',cur\.files,cur\.r\)\}\$\{p\.showReceipt\?_rvPopCol\('receipt',cur\.files,cur\.r\):''\}<\/div>/.test(WD)
   && !/aria-label="리뷰 캡처 크게 보기"/.test(WD));
 ok('★ 패널 제목 아래에 제출현황이 붙는다', /tp3chev">∨<\/span><\/div>`\+_rvStatHtml\(\);/.test(WD));
+ok('★ 패널 현영 빈 상태는 선택 행의 대상 여부를 따른다',
+  /const receiptApplies=_rvReceiptApplies\(r\);[\s\S]{0,280}receiptApplies\?'미제출':'해당없음'/.test(WD));
 ok('★ 누른 장이 열린다 — 전역 인덱스를 갈래+순번으로 옮긴다', /i2\[k\]=Math\.max\(0,_rvKindFiles\(files,k\)\.findIndex/.test(WD));
 ok('★ 사람을 바꾸면 칸 위치를 초기화한다(_rvPopPick·_rvPopStep 둘 다)',
   /_rvPopPick\(idx\)\{[^}]*p\.i2=\{cap:0,rev:0,receipt:0\};/.test(WD) && /_rvPopStep\(delta\)\{[^}]*p\.i2=\{cap:0,rev:0,receipt:0\};/.test(WD));
@@ -233,7 +260,7 @@ console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
 /* 창구는 요약 줄 하나다. 현영 대상 내부 화면에서는 세 갈래 구분을 위해 제목을 그리지만,
    제목 자체는 탭 전체 폴더를 열지 않는다. */
 ok('★ 현영 제목 줄은 표시만 하고 폴더 창구를 만들지 않는다', (() => {
-  const i = WD.indexOf('const col=(kind,title,emptyB,emptyS,warn)=>{');
+  const i = WD.indexOf('const col=(kind,title,emptyB,emptyS,warn,applicable=true)=>{');
   const seg = WD.slice(i, WD.indexOf('\n  const left=col(', i));
   return i > 0 && /const label=showReceipt\?/.test(seg) && /class="rv2label"/.test(seg)
     && !/_rvOpenFolder/.test(seg) && !/_folState/.test(seg)

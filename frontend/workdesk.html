@@ -337,7 +337,7 @@
   .rvplfilter.hasreceipt .fhead,.rvplfilter.hasreceipt .frow{grid-template-columns:minmax(0,1fr) repeat(3,1fr)}
   .rvplitem .no{font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint);font-weight:700}.rvplitem.on .no{color:var(--accent-deep)}
   .rvplitem .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .rvplitem .mk{text-align:center;font-size:12px;line-height:1}.rvplitem .mk.y{color:var(--safe)}.rvplitem .mk.n{color:var(--line2)}
+  .rvplitem .mk{text-align:center;font-size:12px;line-height:1}.rvplitem .mk.y{color:var(--safe)}.rvplitem .mk.n{color:var(--line2)}.rvplitem .mk.na{color:var(--faint)}
   .rvplhd .cnt{margin-left:auto;font-weight:800;color:var(--muted)}
   /* 무대는 업체·비현영이면 2분할, 내부 현영 대상이면 현금영수증을 더한 3분할이다. */
   .rvpstage{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;padding:40px 16px 14px;background:var(--card)}
@@ -6104,32 +6104,37 @@ function _rvPeople(){
 /* ★ 분모 단일 출처 — 상단 참여자 게이지와 **같은 값**. 여기서 따로 세면
    "게이지는 500 인데 미리보기는 512" 로 갈린다. 구버전 백엔드(필드 부재)는 줄 수로 접는다. */
 function _rvFilledOf(c){ c=c||{}; return (c.filled==null)?(+c.total||0):(+c.filled||0); }
+/* 행별 공고 출처로 서버가 확정한 상태를 그대로 쓴다. 구버전 응답처럼 상태가 없으면
+   탭의 현영 칸을 갑자기 숨기지 않도록 대상 행으로 접되, 명시적 not_applicable 만 제외한다. */
+function _rvReceiptApplies(r){ return String(r&&r.cashReceiptStatus||'')!=='not_applicable'; }
 /* 제출현황 — 몇 줄이 구매·리뷰·(내부 현영) 현금영수증을 냈는가. 갈래 판정은 `_rvKindFiles` 한 곳.
    ★ 조회 실패(rvImgs===null)·분모 미상은 **`?`** 로 둔다(0 으로 꾸미지 않는다). */
 function _rvStatHtml(){
   const den=_rvFilledOf(STATE.wd&&STATE.wd.counts);
   const showReceipt=_rvReceiptActive();
+  const roster=(STATE.wd&&STATE.wd.roster)||[];
+  const receiptDen=showReceipt?roster.filter(r=>r.filled!==false&&_rvReceiptApplies(r)).length:0;
   let cap=null,rev=null,receipt=null;
   if(STATE.rvImgs){
     cap=0; rev=0; if(showReceipt) receipt=0;
-    for(const r of ((STATE.wd&&STATE.wd.roster)||[])){
+    for(const r of roster){
       const f=STATE.rvImgs[String(r.seq)]||[]; if(!f.length) continue;
       if(_rvKindFiles(f,'cap').length) cap++;
       if(_rvKindFiles(f,'rev').length) rev++;
-      if(showReceipt&&_rvKindFiles(f,'receipt').length) receipt++;
+      if(showReceipt&&_rvReceiptApplies(r)&&_rvKindFiles(f,'receipt').length) receipt++;
     }
   }
   /* ★★ 이 줄이 곧 **폴더 바로가기**다(사용자 확정 2026-08-21) — 표 윗줄에 있던
      [🛒 구매캡처 ↗][📸 리뷰캡처 ↗] 버튼을 여기로 옮겼다. 판정은 `_folState` 한 곳이라
      버튼 시절과 열리는 폴더·비활성 사유가 같다. 광고주는 그리지 않는다(/tab-folders 는 내부 전용). */
-  const one=(ic,lb,n,kind)=>{
+  const one=(ic,lb,n,kind,itemDen=den)=>{
     const st=(STATE.role!=='advertiser'&&STATE.cur)?_folState(STATE.cur,'cur',kind):null;
     const cls=`s${n==null?' unk':''}${st&&st.on?' lk':''}`;
     const at=st?` title="${esc(st.on?st.tip:('폴더를 열 수 없습니다 — '+st.tip))}"${st.on?` onclick="_rvOpenFolder('${kind}')"`:''}`:'';
     return `<div class="${cls}"${at}><span class="ic">${ic}</span><span class="lb">${lb}${st&&st.on?'<span class="ext"> ↗</span>':''}</span>`+
-      `<span class="nm">${n==null?'?':n}<small> / ${den||'?'}</small></span></div>`;
+      `<span class="nm">${n==null?'?':n}<small> / ${kind==='receipt'?itemDen:(itemDen||'?')}</small></span></div>`;
   };
-  return `<div class="rvstat">${one('🛒','구매 캡처',cap,'capture')}${one('📷','리뷰 캡처',rev,'review')}${showReceipt?one('🧾','현금영수증',receipt,'receipt'):''}</div>`;
+  return `<div class="rvstat">${one('🛒','구매 캡처',cap,'capture')}${one('📷','리뷰 캡처',rev,'review')}${showReceipt?one('🧾','현금영수증',receipt,'receipt',receiptDen):''}</div>`;
 }
 async function _rvBoot(t){
   _rvPopClose();
@@ -6236,8 +6241,8 @@ function _rvRender2(pane){
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   /* 기본 두 칸에서는 종전처럼 제목을 생략한다. 내부 현영 대상은 세 갈래를 구분해야 하므로
      제목과 장수를 함께 표시한다. `title` 은 이미지 alt와 빈 상태 문구에도 그대로 쓴다. */
-  const col=(kind,title,emptyB,emptyS,warn)=>{
-    const source=_rvKindFiles(files,kind);
+  const col=(kind,title,emptyB,emptyS,warn,applicable=true)=>{
+    const source=applicable?_rvKindFiles(files,kind):[];
     const list=source.map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url);
     const n=list.length;
     const i=Math.min((STATE.rvIdx&&STATE.rvIdx[kind])||0,Math.max(0,n-1));
@@ -6262,7 +6267,8 @@ function _rvRender2(pane){
   const right=col('rev','리뷰 캡처',
     r.submitted?'이미지 미등록':'리뷰 미제출',
     r.submitted?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.submitted);
-  const receipt=showReceipt?col('receipt','현금영수증','미제출','아직 현금영수증이 제출되지 않았습니다.',false):'';
+  const receiptApplies=_rvReceiptApplies(r);
+  const receipt=showReceipt?col('receipt','현금영수증',receiptApplies?'미제출':'해당없음',receiptApplies?'아직 현금영수증이 제출되지 않았습니다.':'현금영수증 제출 대상이 아닌 작업입니다.',false,receiptApplies):'';
   _rvFill(pane, hd+who2+`<div class="rv2${showReceipt?' hasreceipt':''}">${left}${right}${receipt}</div>`);
 }
 /* 미리보기 칸이 높이를 요구하지 않게 절대배치 레이어로 감싼다.
@@ -6291,14 +6297,16 @@ function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return
 /* 제출 필터의 분모는 팝업에 나열되는 "채워진 줄" 전부다. 행 자체의 submitted 값이 아니라
    이 팝업이 실제로 표시하는 파일 갈래를 써야 주문/리뷰 각각의 ✓·✗와 숫자가 어긋나지 않는다. */
 function _rvPopHas(x,kind){ return _rvKindFiles(x&&x.files,kind).length>0; }
+function _rvPopEligible(x,kind){ return kind!=='receipt'||_rvReceiptApplies(x&&x.r); }
 function _rvPopFilterPeople(p){
   const all=Array.isArray(p&&p.allPeople)?p.allPeople:(p&&p.people)||[];
   const f=p&&p.filter;
-  return f?all.filter(x=>_rvPopHas(x,f.kind)===f.submitted):all;
+  return f?all.filter(x=>_rvPopEligible(x,f.kind)&&_rvPopHas(x,f.kind)===f.submitted):all;
 }
 function _rvPopCounts(p){
   const all=Array.isArray(p&&p.allPeople)?p.allPeople:(p&&p.people)||[];
-  return {total:all.length,cap:all.filter(x=>_rvPopHas(x,'cap')).length,rev:all.filter(x=>_rvPopHas(x,'rev')).length,receipt:all.filter(x=>_rvPopHas(x,'receipt')).length};
+  const receiptRows=all.filter(x=>_rvPopEligible(x,'receipt'));
+  return {total:all.length,cap:all.filter(x=>_rvPopHas(x,'cap')).length,rev:all.filter(x=>_rvPopHas(x,'rev')).length,receiptTotal:receiptRows.length,receipt:receiptRows.filter(x=>_rvPopHas(x,'receipt')).length};
 }
 function _rvPopFilterToggle(){ const p=STATE.rvPop; if(!p) return; p.filterOpen=!p.filterOpen; _rvPopRender(); }
 function _rvPopFilterSet(kind,submitted){
@@ -6316,8 +6324,8 @@ function _rvPopClose(){ STATE.rvPop=null; const ov=document.getElementById('rvpo
 const _RV_POP_COL={cap:['🛒','구매 캡처','미제출','아직 구매 캡처가 제출되지 않았습니다.'],
                    rev:['📷','리뷰 캡처','리뷰 미제출','아직 리뷰 캡처가 제출되지 않았습니다.'],
                    receipt:['🧾','현금영수증','미제출','아직 현금영수증이 제출되지 않았습니다.']};
-function _rvPopCol(kind,files){
-  const m=_RV_POP_COL[kind], list=_rvKindFiles(files,kind), n=list.length, i2=_rvPopIdx();
+function _rvPopCol(kind,files,r){
+  const m=_RV_POP_COL[kind], applicable=kind!=='receipt'||_rvReceiptApplies(r), list=applicable?_rvKindFiles(files,kind):[], n=list.length, i2=_rvPopIdx();
   const i=Math.min(i2[kind]||0,Math.max(0,n-1)); i2[kind]=i;
   const body=n
     ? `<div class="rvpbody"><img src="${esc(list[i].url)}" alt="${esc(m[1])}"></div>`+
@@ -6325,7 +6333,7 @@ function _rvPopCol(kind,files){
         `<button type="button"${i===0?' disabled':''} onclick="_rvPopStep2('${kind}',-1,${n})">‹</button>`+
         `<span>${i+1} / ${n}</span>`+
         `<button type="button"${i===n-1?' disabled':''} onclick="_rvPopStep2('${kind}',1,${n})">›</button></div>`
-    : `<div class="rvpempty${kind==='receipt'?'':' warn'}"><b>${esc(m[2])}</b><span>${esc(m[3])}</span></div>`;
+    : `<div class="rvpempty${kind==='receipt'?'':' warn'}"><b>${esc(applicable?m[2]:'해당없음')}</b><span>${esc(applicable?m[3]:'현금영수증 제출 대상이 아닌 작업입니다.')}</span></div>`;
   return `<div class="rvpc"><div class="rvpch">${m[0]} ${esc(m[1])}<span class="cnt">${n}</span></div>${body}</div>`;
 }
 /* 목록 한 줄 — ★ 번호는 **작업보드 표의 「번호」**(서버 `boardNo`), `seq`(시트 행 번호)가 아니다.
@@ -6333,13 +6341,14 @@ function _rvPopCol(kind,files){
    ★ onclick 은 **인덱스만** — 수취인·번호는 시트발 문자열이라 보간하면 따옴표 하나로 탈출된다. */
 function _rvPopItem(x,i,on){
   const nc=_rvKindFiles(x.files,'cap').length, nr=_rvKindFiles(x.files,'rev').length, nh=_rvKindFiles(x.files,'receipt').length;
+  const receiptApplies=_rvPopEligible(x,'receipt');
   const no=_rvNo(x.r);
   return `<button type="button" class="rvplitem${on?' on':''}" onclick="_rvPopPick(${i})" title="시트 행 ${esc(x.r.seq)}">`+
     `<span class="no">${no?esc(no):'—'}</span>`+
     `<span class="nm">${esc(_rvWho(x.r)||'—')}</span>`+
     `<span class="mk ${nc?'y':'n'}">${nc?'✓':'✗'}</span>`+
     `<span class="mk ${nr?'y':'n'}">${nr?'✓':'✗'}</span>`+
-    `${STATE.rvPop&&STATE.rvPop.showReceipt?`<span class="mk ${nh?'y':'n'}">${nh?'✓':'✗'}</span>`:''}</button>`;
+    `${STATE.rvPop&&STATE.rvPop.showReceipt?`<span class="mk ${receiptApplies?(nh?'y':'n'):'na'}">${receiptApplies?(nh?'✓':'✗'):'—'}</span>`:''}</button>`;
 }
 function _rvPopFilterHtml(p){
   if(!p.filterOpen) return '';
@@ -6347,7 +6356,7 @@ function _rvPopFilterHtml(p){
   const btn=(kind,submitted,n,label)=>`<button type="button" class="${submitted?'':'n'}${f&&f.kind===kind&&f.submitted===submitted?' on':''}" onclick="_rvPopFilterSet('${kind}',${submitted})" title="${esc(label+' '+n+'건만 보기')}">${n}</button>`;
   const receiptHead=p.showReceipt?'<span>현영</span>':'';
   const receiptYes=p.showReceipt?btn('receipt',true,c.receipt,'현금영수증 제출'):'';
-  const receiptNo=p.showReceipt?btn('receipt',false,c.total-c.receipt,'현금영수증 미제출'):'';
+  const receiptNo=p.showReceipt?btn('receipt',false,c.receiptTotal-c.receipt,'현금영수증 미제출'):'';
   return `<div class="rvplfilter${p.showReceipt?' hasreceipt':''}" role="dialog" aria-label="제출물 필터">`+
     `<div class="fhead"><span>${c.total}건</span><span>주문</span><span>리뷰</span>${receiptHead}</div>`+
     `<div class="frow"><b>제출</b>${btn('cap',true,c.cap,'주문 제출')}${btn('rev',true,c.rev,'리뷰 제출')}${receiptYes}</div>`+
@@ -6370,7 +6379,7 @@ function _rvPopRender(){
       p.people.map((x,i)=>_rvPopItem(x,i,i===p.idx)).join('')+
     `</aside>`+
     `<div class="rvpstage"><button type="button" class="rvpclose" aria-label="닫기" onclick="_rvPopClose()">×</button>`+
-      (cur?`<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div><div class="rvpcols${p.showReceipt?' hasreceipt':''}">${_rvPopCol('cap',cur.files)}${_rvPopCol('rev',cur.files)}${p.showReceipt?_rvPopCol('receipt',cur.files):''}</div>`:`<div class="rvpempty warn"><b>조건에 맞는 참여자가 없습니다</b><span>제출 필터를 다시 눌러 전체 목록으로 돌아가세요.</span></div>`)+
+      (cur?`<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div><div class="rvpcols${p.showReceipt?' hasreceipt':''}">${_rvPopCol('cap',cur.files,cur.r)}${_rvPopCol('rev',cur.files,cur.r)}${p.showReceipt?_rvPopCol('receipt',cur.files,cur.r):''}</div>`:`<div class="rvpempty warn"><b>조건에 맞는 참여자가 없습니다</b><span>제출 필터를 다시 눌러 전체 목록으로 돌아가세요.</span></div>`)+
     `</div></section>`;
 }
 
