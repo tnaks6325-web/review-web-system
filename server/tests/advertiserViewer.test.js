@@ -513,7 +513,8 @@ async function run() {
     const block = driveRouteSrc.slice(i, driveRouteSrc.indexOf("router.get('/image/:id'", i));
     return i > 0
       && /COALESCE\(rs\.slot_key, 'review'\) = 'review'/.test(block)
-      && /receiptValidation/.test(block)
+      && /receiptValidation/.test(driveRouteSrc)
+      && (block.match(/\$\{PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL\}/g) || []).length === 2
       && /FROM review_index r/.test(block)
       && !/listFolderFilesRecursive/.test(block);
   })());

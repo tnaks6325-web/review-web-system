@@ -7,6 +7,17 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { linkReviewFilesToRows } = require('../services/reviewFileLink.service');
 
+// 공개 리포트에서 제외할 영수증 검수 증거. 리뷰 슬롯 파일을 AI가 영수증으로 오판했어도
+// 담당자가 정상(ok)으로 확정했다면 format 흔적만으로 숨기지 않는다. 영수증 전용
+// receiptValidation이 있으면 승인 상태와 무관하게 계속 제외한다.
+const PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL = `(
+  COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+  OR (
+    COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
+    AND NOT (COALESCE(ri.status, '') = 'resolved' AND COALESCE(ri.resolution, '') = 'ok')
+  )
+)`;
+
 /**
  * 헬퍼: Google Drive URL에서 폴더 ID 추출
  */
@@ -1799,10 +1810,7 @@ router.get('/report/:code', async (req, res, next) => {
             AND NOT EXISTS (
               SELECT 1 FROM review_inspections ri
                WHERE ri.file_id = rs.file_id
-                 AND (
-                   COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
-                   OR COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
-                 )
+                 AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
             )
           ORDER BY reviewer_name NULLS LAST, uploaded_at ASC NULLS LAST`,
         [sheetId, tabName]
@@ -1831,10 +1839,7 @@ router.get('/report/:code', async (req, res, next) => {
                AND NOT EXISTS (
                  SELECT 1 FROM review_inspections ri
                  WHERE ri.file_id = r.review_file_id
-                   AND (
-                     COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
-                     OR COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
-                   )
+                   AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
               )
             ORDER BY r.reviewer_name NULLS LAST, r.review_file_at ASC NULLS LAST`,
           [sheetId, tabName]
