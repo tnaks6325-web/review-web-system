@@ -334,6 +334,11 @@ t('★★ 127 슬롯 모드: blog 도 캡처 필수(재제출로 이미 제출�
   // 사용자 확정(2026-08-19): 캡처+URL 둘 다 — 무조건 0장 허용(!_blogSlot)으로 되돌리면 실패한다
   assert.ok(/if \(slotsToUpload\.length === 0 && !\(_blogSlot && submitted\.size > 0\)\)/.test(body),
     'blog 캡처 필수 게이트가 사라졌다(0장 무조건 허용으로 회귀)');
+  assert.ok(/if \(_blogSlot && !receiptOnlyAfterComplete[\s\S]{0,100}!_isPostUrl/.test(body),
+    '완료된 blog의 영수증 단독 제출에서 과거 포스팅 URL을 다시 요구한다');
+  assert.ok(/slotsToUpload\.every\(_csIsReceiptSlot\);/.test(body)
+    && !/slotsToUpload\.every\(_csIsReceiptSlot\)[\s\S]{0,80}&& !_blogSlot/.test(body),
+    '완료된 blog도 영수증 단독 제출로 처리해야 한다');
   assert.ok(/slotsToUpload\.length > 0 && uploadErrors\.length === slotsToUpload\.length/.test(body),
     '0건일 때 0===0 이 참이 되어 아무 오류 없이 "업로드 실패"로 돌아간다');
 });

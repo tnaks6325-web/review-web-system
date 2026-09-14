@@ -3534,10 +3534,21 @@ async function _submitReviewSlots(item) {
     && (slotSubmitTrigger === "reviewThenReceipt" ? !_csIsReceiptSlot(s) : true)
   );
 
+  const requiredReviewKeys = slots
+    .filter(s => !_csIsReceiptSlot(s) && s.required !== false)
+    .map(s => s.key);
+  const reviewWasComplete = !!item.isSubmitted || requiredReviewKeys.every(k => submitted.has(k));
+  // 완료된 작업의 재진입은 작업 종류와 무관하게 영수증 파일만 추가한다. 블로그도 여기서
+  // 포스팅 URL을 다시 요구하거나 submitReview를 재호출하면 기존 완료 시각·메모가 덮인다.
+  const receiptOnlyAfterComplete = reviewWasComplete
+    && slotsToUpload.length > 0
+    && slotsToUpload.every(_csIsReceiptSlot);
+
   /* ★ 127(사용자 확정 2026-08-19): 블로그도 **캡처 + 포스팅URL 둘 다** 필수 — M4-2 의
      "캡처 0장 허용"을 뒤집었다. 이미 제출한 슬롯이 있는 재제출(URL 만 고침)은 캡처 재첨부 불요. */
   const _blogSlot = _isBlogItem(item);
-  if (_blogSlot && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
+  if (_blogSlot && !receiptOnlyAfterComplete
+      && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
     showToast(_BLOG_POST_URL_HINT, "warning");
     return;
   }
@@ -3578,14 +3589,6 @@ async function _submitReviewSlots(item) {
   const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
   let replacedCurrent = false;
   let reviewUploadBatchId = null;
-  const requiredReviewKeys = slots
-    .filter(s => !_csIsReceiptSlot(s) && s.required !== false)
-    .map(s => s.key);
-  const reviewWasComplete = !!item.isSubmitted || requiredReviewKeys.every(k => submitted.has(k));
-  const receiptOnlyAfterComplete = reviewWasComplete
-    && slotsToUpload.length > 0
-    && slotsToUpload.every(_csIsReceiptSlot)
-    && !_blogSlot;
   try {
     // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
     for (const slot of slotsToUpload) {

@@ -139,6 +139,9 @@ ok('리뷰어 홈 완료 내역에도 현금영수증 제출 재진입 버튼이
   && /goToSubmit\(\[items\[i\]\]\)/.test(reviewerHome));
 ok('★★ 완료 리뷰의 영수증만 추가할 때 submitReview 기록을 생략해 기존 완료 시각을 보존',
   /const receiptOnlyAfterComplete = reviewWasComplete/.test(app)
+  && /slotsToUpload\.every\(_csIsReceiptSlot\);/.test(app)
+  && !/slotsToUpload\.every\(_csIsReceiptSlot\)[\s\S]{0,80}&& !_blogSlot/.test(app)
+  && /if \(_blogSlot && !receiptOnlyAfterComplete[\s\S]{0,100}!_isPostUrl/.test(app)
   && /if \(receiptOnlyAfterComplete\) \{\s*result = \{ success: true, ok: true, complete: true/.test(app)
   && /기존 리뷰 완료 시각은 변경하지 않았습니다/.test(app));
 ok('영수증 단독 제출 파일이 다른 슬롯으로 이동되면 성공으로 오안내하지 않는다',
