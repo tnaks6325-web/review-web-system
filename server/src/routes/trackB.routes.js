@@ -1698,27 +1698,33 @@ async function _logScopeTabs(req) {
      통신하고 인트라넷 SSO 토큰도 그 경로로만 격리되기 때문이다.
    ══════════════════════════════════════════════════════════════ */
 const wdEditors = require('../utils/workdeskEditors');
-const { canEdit, editorOnlyMiddleware } = wdEditors;
+const { canEdit, canManageEditors, editorOnlyMiddleware, editorManagerMiddleware } = wdEditors;
 
 // 이 계정이 편집 가능한지 — AE는 역할로 허용, admin은 기존 명단 판정(서버 게이트가 최종 방어)
 router.get('/perm', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
-    res.json({ ok: true, canEdit: await canEdit(req.admin), role: _role(req), name: (req.admin && req.admin.name) || '' });
+    res.json({
+      ok: true,
+      canEdit: await canEdit(req.admin),
+      canManageEditors: canManageEditors(req.admin),
+      role: _role(req),
+      name: (req.admin && req.admin.name) || '',
+    });
   } catch (err) { next(err); }
 });
 
-// ── 편집 허용명단 관리 — 내부 담당자(master/admin/staff)(후보는 인트라넷 직원DB에서 고른다) ──
-router.get('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
+// ── 편집 허용명단 관리 — master/admin/확인된 AE(후보는 인트라넷 직원DB에서 고른다) ──
+router.get('/workdesk-editors', authMiddleware, internalMiddleware, editorManagerMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await wdEditors.listEditors() }); } catch (err) { next(err); }
 });
-router.post('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
+router.post('/workdesk-editors', authMiddleware, internalMiddleware, editorManagerMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
     const out = await wdEditors.addEditor({ name: b.name, username: b.username, dept: b.dept, by: _by(req) });
     res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
-router.delete('/workdesk-editors/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
+router.delete('/workdesk-editors/:id', authMiddleware, internalMiddleware, editorManagerMiddleware, async (req, res, next) => {
   try {
     const out = await wdEditors.removeEditor(req.params.id);
     res.status(out.ok ? 200 : 404).json(out);

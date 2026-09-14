@@ -82,13 +82,12 @@ t('날짜별 인원·차수·작업표 재구성·참여 제한도 AE가 조절'
       k + ': AE를 막는 관리자 전용 게이트가 있음');
   });
 });
-// ★ 2026-08 사용자 확정: 명단 관리도 내부 담당자(AE 포함)가 한다 — 광고주·리뷰어는 차단.
-//   ⚠ 명단이 자기 자신을 게이트하면(editorOnly) 명단에서 빠지는 순간 아무도 못 고치므로 그 금지는 유지.
-t('명단 관리는 내부 담당자 전용(광고주 차단)', () => {
+// 명단 관리자는 master/admin/확인된 AE다. 일반 인트라넷 staff가 자신을 넣어 권한을 만들면 안 된다.
+t('명단 관리는 관리자·확인된 AE 전용(일반 직원의 자기승격 차단)', () => {
   ['GET /workdesk-editors', 'POST /workdesk-editors', 'DELETE /workdesk-editors/:id'].forEach(k => {
     assert.ok(L[k], '없음: ' + k);
     assert.ok(L[k].includes('internalMiddleware'), k + ': internal 게이트 없음');
-    assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 명단이 자기 자신을 게이트하면 안 됨');
+    assert.ok(L[k].includes('editorManagerMiddleware'), k + ': 명단 관리자 게이트 없음');
   });
 });
 
@@ -127,14 +126,26 @@ t('★ 오류 메시지를 마스킹하지 않는다(관리자 도구는 실패 
 console.log('\n2) 편집 판정(workdeskEditors)');
 const WD = R('src/utils/workdeskEditors.js');
 t('★ master·검증된 AE는 명단 무관 허용', () => {
-  assert.ok(/admin && admin\.ae === true/.test(WD),
-    '인트라넷 AE는 서명된 AE 클레임으로 허용해야 한다');
+  assert.ok(/role === 'staff' && admin && admin\.via === 'intranet' && admin\.ae === true/.test(WD),
+    '인트라넷 AE staff만 서명된 AE 클레임으로 허용해야 한다');
   assert.ok(/role === 'staff' && admin && admin\.via !== 'intranet'/.test(WD),
     '자체 staff_users AE 계정은 기존처럼 허용해야 한다');
   assert.ok(WD.indexOf('admin.ae === true') < WD.indexOf('await _loadSet()'),
     'AE 허용은 명단 조회보다 먼저 끝나야 한다');
   assert.ok(!/role === 'master' \|\| role === 'staff'/.test(WD),
     '일반 인트라넷 staff까지 무조건 여는 우회가 있으면 안 된다');
+});
+t('★ 일반 인트라넷 staff는 허용명단을 직접 관리할 수 없다', () => {
+  assert.ok(/function canManageEditors\(admin\)/.test(WD), '명단 관리자 판정 없음');
+  assert.ok(/if \(admin\.via === 'intranet'\) return admin\.ae === true;/.test(WD),
+    '일반 인트라넷 staff의 명단 자기승격을 막아야 한다');
+  assert.ok(/role === 'master' \|\| role === 'admin'/.test(WD), '기존 관리자 명단 관리가 사라졌다');
+  const { canManageEditors } = require('../src/utils/workdeskEditors');
+  assert.strictEqual(canManageEditors({ role: 'staff', via: 'intranet', ae: false }), false);
+  assert.strictEqual(canManageEditors({ role: 'staff', via: 'intranet', ae: true }), true);
+  assert.strictEqual(canManageEditors({ role: 'staff' }), true);
+  assert.strictEqual(canManageEditors({ role: 'admin', via: 'intranet', ae: false }), true);
+  assert.strictEqual(canManageEditors({ role: 'advertiser' }), false);
 });
 t('★ 조회 실패는 읽기 전용으로 수렴(fail-closed)', () => {
   assert.ok(/if \(!set\) return false;/.test(WD), '명단을 못 읽으면 열지 말아야 한다');
@@ -277,13 +288,13 @@ t('접수는 되돌리기 어려우니 확인을 받는다', () => {
   assert.ok(/이 작업오더를 접수할까요\?/.test(HTML) && /&& !confirm\(msg\)\) return false;/.test(HTML));
 });
 
-// ★ 2026-08-19 사용자 확정(AE 권한 확대): 명단 관리는 **내부 담당자(AE 포함)** 가 한다.
-//   위 1) 절이 서버 게이트를 `internalMiddleware` 로 이미 고정하고 있으므로, 화면 게이트도 같아야
-//   서버보다 좁거나 넓은 버튼이 생기지 않는다(같은 파일 안에서 두 기준이 갈리던 것을 맞춘다).
-t('명단 관리 UI — 내부 담당자에게만(광고주 차단), 인트라넷 자동완성 재사용', () => {
-  assert.ok(/_isInternalRole\(\)\?'<button class="btn" onclick="openEditorList\(\)/.test(HTML),
-    '명단 버튼이 내부 담당자 게이트(_isInternalRole)를 쓰지 않는다 — 서버 게이트와 어긋난다');
+// 명단 버튼과 직접 호출 모두 서버가 준 관리자 판정을 따른다. 숨김만으로 끝내면 콘솔 호출이 남는다.
+t('명단 관리 UI — 관리자·확인된 AE만 노출, 직접 호출도 차단', () => {
+  assert.ok(/STATE\.canManageEditors\?'<button class="btn" onclick="openEditorList\(\)/.test(HTML),
+    '명단 버튼이 서버 판정 canManageEditors를 쓰지 않는다');
   assert.ok(/async function openEditorList\(\)/.test(HTML));
+  assert.ok(/if\(!STATE\.canManageEditors\)[\s\S]{0,160}return;/.test(HTML),
+    '숨겨진 버튼을 직접 호출하는 경로도 막아야 한다');
   assert.ok(/api\('\/api\/trackb\/intranet\/users\?q='/.test(HTML),
     '후보는 인트라넷 직원DB에서 골라야 한다(기존 프록시 재사용)');
   assert.ok(/STATE\.canEdit=null;/.test(HTML), '명단 변경 후 내 권한 캐시를 비워야 즉시 반영된다');
