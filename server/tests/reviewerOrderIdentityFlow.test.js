@@ -14,6 +14,8 @@ const otherId = '44444444-4444-4444-8444-444444444444';
 let selectedAddress = '서울 강남구 테헤란로 10 101동 1203호';
 let selectedCurrentPhone = '010-1234-5678';
 let applicationIdentity = 'sub';
+let applicationPhoneOverride = '';
+let includeParticipantIdentityId = true;
 const audits = [];
 
 const originalQuery = pool.query;
@@ -40,10 +42,13 @@ pool.query = async (sql, params) => {
   }] };
   if (/FROM campaign_applications ca/.test(sql)) {
     const isSub = applicationIdentity === 'sub';
+    const registeredPhone = isSub ? '010-1234-5678' : '010-1010-1010';
+    const applicationPhone = applicationPhoneOverride || registeredPhone;
     return { rows: [{
       id:123, campaign_id:'camp-1', applicant_name:isSub ? '김민수' : '본인',
-      applicant_phone:isSub ? '010-1234-5678' : '010-1010-1010', phone8:isSub ? '12345678' : '10101010',
-      owner_phone8:'10101010', owner_reviewer_id:ownerId, participant_identity_id:isSub ? selectedId : selfId,
+      applicant_phone:applicationPhone, phone8:applicationPhone.replace(/\D/g, '').slice(-8),
+      owner_phone8:'10101010', owner_reviewer_id:ownerId,
+      participant_identity_id:includeParticipantIdentityId ? (isSub ? selectedId : selfId) : null,
       status:'applied', expires_at:new Date(Date.now() + 600000).toISOString(), multi_account_mode:isSub,
     }] };
   }
@@ -73,7 +78,25 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     applicationIdentity = 'sub';
   });
 
-  await test('타계정 전화번호가 이후 수정돼도 참여 신청 당시 전화번호를 표시·검증한다', async () => {
+  await test('본계정의 과거 참여 연락처와 등록 연락처가 달라도 구매양식을 제출한다', async () => {
+    applicationIdentity = 'self';
+    applicationPhoneOverride = '010-7777-6666';
+    includeParticipantIdentityId = false;
+    const context = await identity.getParticipationIdentityContext(base, reviewer);
+    assert.strictEqual(context.selectedIdentity.identityKey, `identity:${selfId}`);
+    const fields = { recipient:'본인', phone:applicationPhoneOverride, address:'서울 본인주소' };
+    const proof = identity.issueExtractionProof({ imageHash:'1a'.repeat(32), extracted:fields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:fields }, reviewer);
+    assert.strictEqual(matched.status, 'MATCH');
+    assert.ok(matched.reasonCodes.includes('delivery_contact_changed'));
+    assert.strictEqual(matched.checks.find((item) => item.field === 'phone').status, 'match');
+    await identity.verifyApprovalForSubmission({ ...base, ...fields, identityApprovalToken:matched.approvalToken }, reviewer);
+    applicationIdentity = 'sub';
+    applicationPhoneOverride = '';
+    includeParticipantIdentityId = true;
+  });
+
+  await test('타계정 전화번호가 이후 수정돼도 참여 신청 당시 연락처를 기본값으로 표시한다', async () => {
     selectedCurrentPhone = '010-5555-6666';
     const context = await identity.getParticipationIdentityContext(base, reviewer);
     assert.strictEqual(context.selectedIdentity.phone, selectedFields.phone);
@@ -85,15 +108,16 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     selectedCurrentPhone = selectedFields.phone;
   });
 
-  await test('자동 MATCH 승인토큰은 선택 명의와 최종 제출필드에 결속된다', async () => {
-    const proof = identity.issueExtractionProof({ imageHash:'a'.repeat(64), extracted:selectedFields, ok:true });
-    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:selectedFields }, reviewer);
+  await test('다른 구매양식 연락처도 허용하되 승인토큰은 최종 제출값에 결속된다', async () => {
+    const deliveryFields = { ...selectedFields, phone:'010-7777-6666' };
+    const proof = identity.issueExtractionProof({ imageHash:'a'.repeat(64), extracted:deliveryFields, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:deliveryFields }, reviewer);
     assert.strictEqual(matched.status, 'MATCH');
     assert.ok(matched.approvalToken);
-    await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:matched.approvalToken }, reviewer);
+    await identity.verifyApprovalForSubmission({ ...base, ...deliveryFields, identityApprovalToken:matched.approvalToken }, reviewer);
     await assert.rejects(
-      identity.verifyApprovalForSubmission({ ...base, ...selectedFields, phone:'010-7777-6666', identityApprovalToken:matched.approvalToken }, reviewer),
-      (err) => err.code === 'PARTICIPANT_PHONE_INVALID'
+      identity.verifyApprovalForSubmission({ ...base, ...deliveryFields, phone:'010-9999-0000', identityApprovalToken:matched.approvalToken }, reviewer),
+      (err) => err.code === 'IDENTITY_APPROVAL_STALE'
     );
     await assert.rejects(
       identity.verifyApprovalForSubmission({ ...base, ...selectedFields, address:'다른 주소', identityApprovalToken:matched.approvalToken }, reviewer),
@@ -126,11 +150,15 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
       priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken, extracted:selectedFields, formFields:fields }, reviewer);
     await identity.verifyApprovalForSubmission({ ...base, ...fields, identityApprovalToken:manual.approvalToken }, reviewer);
     assert.ok(JSON.parse(audits.at(-1)[8]).includes('delivery_address_changed'));
-    for (const changed of [{ recipient:'박영희' }, { phone:'010-9999-8888' }]) {
-      await assert.rejects(identity.manualConfirm({ ...base, mode:'form_edit', manualConfirmed:true,
-        priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken, extracted:selectedFields,
-        formFields:{ ...fields, ...changed } }, reviewer), (err) => err.code === 'IDENTITY_MISMATCH');
-    }
+    await assert.rejects(identity.manualConfirm({ ...base, mode:'form_edit', manualConfirmed:true,
+      priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken, extracted:selectedFields,
+      formFields:{ ...fields, recipient:'박영희' } }, reviewer), (err) => err.code === 'IDENTITY_MISMATCH');
+    const changedContact = { ...fields, phone:'010-9999-8888' };
+    const contactApproval = await identity.manualConfirm({ ...base, mode:'form_edit', manualConfirmed:true,
+      priorApprovalToken:matched.approvalToken, extractToken:proof.extractToken, extracted:selectedFields,
+      formFields:changedContact }, reviewer);
+    await identity.verifyApprovalForSubmission({ ...base, ...changedContact,
+      identityApprovalToken:contactApproval.approvalToken }, reviewer);
   });
 
   await test('가림 이름·연락처로 다른 배송지를 최종 승인할 수 없다', async () => {
@@ -154,16 +182,13 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     );
   });
 
-  await test('부분충돌 REVIEW는 사용자 수동확인 뒤 제출 가능하다', async () => {
+  await test('연락처만 다른 캡처는 명의 충돌로 보지 않고 바로 승인한다', async () => {
     const extracted = { ...selectedFields, phone:'010-0000-9999' };
     const proof = identity.issueExtractionProof({ imageHash:'c'.repeat(64), extracted, ok:true });
-    const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
-    assert.strictEqual(reviewed.status, 'REVIEW');
-    assert.ok(reviewed.reviewToken);
-    const manual = await identity.manualConfirm({
-      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken, formFields:selectedFields,
-    }, reviewer);
-    await identity.verifyApprovalForSubmission({ ...base, ...selectedFields, identityApprovalToken:manual.approvalToken }, reviewer);
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
+    assert.strictEqual(matched.status, 'MATCH');
+    assert.ok(matched.reasonCodes.includes('delivery_contact_changed'));
+    await identity.verifyApprovalForSubmission({ ...base, ...extracted, identityApprovalToken:matched.approvalToken }, reviewer);
   });
 
   await test('자동 MATCH 뒤 입력값을 수정하면 기존 승인증명으로 재확인해 새 토큰을 발급한다', async () => {

@@ -1145,18 +1145,6 @@ router.post('/order', async (req, res, next) => {
       });
     }
 
-    // 타계정 참여의 연락처는 검증된 참여 신청값을 사용한다. 화면 readonly를 우회해도 접수하지 않는다.
-    if (holdCtx?.verified && holdCtx.isSub) {
-      const submittedPhone8 = String(phone || '').replace(/\D/g, '').slice(-8);
-      if (submittedPhone8 !== holdCtx.phone8) {
-        return res.status(409).json({
-          ok: false,
-          code: 'PARTICIPANT_PHONE_INVALID',
-          error: '타계정 참여 전화번호는 참여 신청 정보와 같아야 합니다.',
-        });
-      }
-    }
-
     const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
     let verifiedIdentityBinding = null;
     if (_newIdentityGate) {

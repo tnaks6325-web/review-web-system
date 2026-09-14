@@ -116,14 +116,17 @@ const other = {
     assert.ok(r.reasonCodes.includes('delivery_address_changed'));
   });
 
-  await test('다른 배송지에 이름 또는 연락처까지 다르면 계속 차단한다', async () => {
-    for (const fields of [
-      { recipient:'다른이름', phone:selected.phone },
-      { recipient:selected.name, phone:'010-0000-0000' },
-      { recipient:selected.name, phone:'' },
-    ]) {
-      const r = await evaluateSelectedIdentity({ ...fields, address:'부산 해운대구 새길 20 202동 1508호' }, selected, [selected, other], { useGemini:false });
-      assert.strictEqual(r.status, 'MISMATCH');
+  await test('다른 배송지에서 이름이 다르면 차단하고 연락처만 다르면 확인 후 허용한다', async () => {
+    const wrongName = await evaluateSelectedIdentity(
+      { recipient:'다른이름', phone:selected.phone, address:'부산 해운대구 새길 20 202동 1508호' },
+      selected, [selected, other], { useGemini:false });
+    assert.strictEqual(wrongName.status, 'MISMATCH');
+    for (const phone of ['010-0000-0000', '']) {
+      const r = await evaluateSelectedIdentity(
+        { recipient:selected.name, phone, address:'부산 해운대구 새길 20 202동 1508호' },
+        selected, [selected, other], { useGemini:false });
+      assert.strictEqual(r.status, 'REVIEW');
+      assert.ok(r.reasonCodes.includes('delivery_address_changed'));
     }
   });
 
@@ -138,13 +141,13 @@ const other = {
     }
   });
 
-  await test('이름과 주소가 맞고 전화만 다르면 실질 일치의 수동확인 대상이다', async () => {
+  await test('이름과 주소가 맞고 연락처만 다르면 실질 일치로 승인한다', async () => {
     const r = await evaluateSelectedIdentity(
       { recipient:'김민수', phone:'010-0000-9999', address:selected.address },
       selected, [selected, other], { useGemini:false }
     );
-    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
-    assert.ok(r.reasonCodes.includes('selected_identity_partial_conflict'));
+    assert.strictEqual(r.status, 'MATCH', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('delivery_contact_changed'));
   });
 
   await test('100% 문자열 일치가 아니어도 이름과 연락처가 일치하면 실질 매칭한다', async () => {

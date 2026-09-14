@@ -119,6 +119,14 @@ function ok(name, fn) {
     assert.strictEqual(r.status, 'SELF');
   });
 
+  await ok('SELF: 본계정 이름은 같고 구매양식 연락처가 달라도 통과', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '김수만', phone: '010-7777-6666', address: '서면다인로얄팰리스 728호',
+      bank: 'KEB하나', account: '33891033003807', depositor: '김수만',
+    });
+    assert.strictEqual(r.status, 'SELF');
+  });
+
   await ok('NEED_CONFIRM: 본인인데 호수 다른 주소', async () => {
     const r = await resolveOrderIdentity(reviewer, {
       recipient: '김수만', phone: '010-8592-6325', address: '서면다인로얄팰리스 999호',
@@ -140,6 +148,15 @@ function ok(name, fn) {
   await ok('SUB: 등록 주소 일치 타계정', async () => {
     const r = await resolveOrderIdentity(reviewer, {
       recipient: '박영희', phone: '010-1111-2222', address: '센텀파크 101동 505호',
+      bank: '케이뱅크', account: '999888777', depositor: '박영희',
+    });
+    assert.strictEqual(r.status, 'SUB');
+    assert.strictEqual(r.subIndex, 1);
+  });
+
+  await ok('SUB: 타계정 이름은 같고 구매양식 연락처가 달라도 통과', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '박영희', phone: '010-7777-6666', address: '센텀파크 101동 505호',
       bank: '케이뱅크', account: '999888777', depositor: '박영희',
     });
     assert.strictEqual(r.status, 'SUB');
