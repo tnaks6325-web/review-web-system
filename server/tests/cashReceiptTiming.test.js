@@ -124,6 +124,8 @@ ok('2단계에서 리뷰를 실제 제출한 뒤에만 3단계 현금영수증�
 ok('2단계 업로드는 리뷰 슬롯만, 3단계 업로드는 현금영수증 슬롯만 처리',
   /slotSubmitTrigger === "reviewThenReceipt" \? !_csIsReceiptSlot\(s\) : true/.test(app)
   && /id="btnSubmitReceipt"[^>]*onclick="submitReview\(\)"/.test(searchHtml));
+ok('완료된 블로그 재진입은 포스팅 URL 검사 전에 현금영수증 단계로 이동',
+  /const hasReviewFiles =[\s\S]*if \(item\.isSubmitted && !hasReviewFiles\) \{\s*goStep\(3\);\s*return;\s*\}[\s\S]*if \(_isBlogItem\(item\) && !_isPostUrl/.test(app));
 ok('이미 리뷰 완료여도 미제출 현금영수증이 있으면 다시 진입할 수 있다',
   /const receiptPending =/.test(app)
   && /items\.every\(it => it\.isSubmitted\) && !receiptPending/.test(app)

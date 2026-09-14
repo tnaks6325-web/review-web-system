@@ -97,6 +97,7 @@ const db = {
 
   const inspectService = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
+  const reviewEditRoute = fs.readFileSync(path.join(__dirname, '../src/routes/reviewEdit.routes.js'), 'utf8');
   assert.match(inspectService, /const businessNoMatched =[\s\S]*receiptVerdict\?\.status === 'ok' && businessNoMatched[\s\S]*businessNoMatched: true[\s\S]*business_number_unverified/,
     '사업자번호를 읽어 회사 번호와 대조한 영수증만 지급 검수 통과여야 한다');
   assert.match(inspectService, /checks\.receiptValidation = receiptVerdict\?\.status === 'ok' && businessNoMatched[\s\S]*verdict: 'pass'[\s\S]*verdict: 'fail'[\s\S]*verdict: 'warn'/,
@@ -107,6 +108,8 @@ const db = {
     '수동 slot2 현금영수증도 재검수 때 receipt 역할을 유지해야 한다');
   assert.match(uploadRoute, /const captureVerdictsByFileId = new Map\(\)[\s\S]*captureVerdictsByFileId\.set\(uploaded\.id, verdict\)[\s\S]*captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
+  assert.match(reviewEditRoute, /INSERT INTO review_inspections[\s\S]*approved_file_replacement[\s\S]*isCashReceiptSlot\([\s\S]*inspect\.inspectSubmission\([\s\S]*slotRole: 'receipt'/,
+    '관리자가 승인한 영수증 교체본은 pending 원장을 만든 뒤 즉시 receipt 재검수해야 한다');
 
   process.env.REVIEW_INSPECT = '1';
   const inspect = require('../src/services/reviewInspect.service');

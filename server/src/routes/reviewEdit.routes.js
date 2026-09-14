@@ -19,7 +19,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { slotLabel: slotLabelOf } = require('../utils/captureSlots');
+const { slotLabel: slotLabelOf, isCashReceiptSlot } = require('../utils/captureSlots');
 const driveService = require('../services/drive.service');
 const { _getReviewerPhoneList } = require('../services/search.service');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
@@ -682,9 +682,19 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       // review_submissions: 구 파일 레코드를 새 파일로 (원 제출시각 uploaded_at 보존 = 제출일 유지)
       await client.query(
         `UPDATE review_submissions
-            SET file_id = $1, file_url = $2, file_name = $3
+            SET file_id = $1, file_url = $2, file_name = $3, file_hash = NULL
           WHERE file_id = $4 AND sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
         [r.new_file_id, finalUrl, finalName, r.old_file_id, r.sheet_id, r.tab_name, r.row_index]
+      );
+      // 새 파일 ID에는 기존 검수 판정을 승계하지 않는다. pending 원장을 먼저 만들어 두면
+      // 즉시 재검수가 실패해도 30일 업로드 시각 제한과 무관하게 다음 스윕이 다시 처리한다.
+      await client.query(
+        `INSERT INTO review_inspections
+           (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'pending',$7::jsonb,NOW())
+         ON CONFLICT (file_id) DO NOTHING`,
+        [r.new_file_id, r.sheet_id, r.tab_name, r.row_index, r.reviewer_name || null,
+         r.slot_key || 'review', JSON.stringify({ replacement: { verdict: 'skip', reason: 'approved_file_replacement' } })]
       );
       // review_index: 대표이미지가 구 파일과 일치할 때만 교체 (원 연결시각 review_file_at 보존)
       await client.query(
@@ -724,6 +734,37 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       }
     } catch (e) {
       logger.warn(`[review-edit] 구 파일 보관 이동 실패(무시): ${e.message}`);
+    }
+
+    // 현금영수증 교체본은 입금 조건에 직접 영향을 주므로 승인 요청 안에서 바로 재검수한다.
+    // 실패 시 위 pending 원장이 남아 다음 스윕 또는 내부 정상 승인으로 처리할 수 있다.
+    try {
+      const { rows: tc } = await pool.query(
+        'SELECT capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [committed.sheet_id, committed.tab_name]
+      );
+      const rt = await reviewTypeForTab({ sheetId: committed.sheet_id, tabName: committed.tab_name }).catch(() => null);
+      const cr = await require('../services/cashReceiptContext.service')
+        .cashReceiptRequiredForTab({ sheetId: committed.sheet_id, tabName: committed.tab_name }).catch(() => null);
+      if (isCashReceiptSlot(tc[0]?.capture_slots, tc[0]?.income_type,
+        committed.slot_key || 'review', rt, cr === true)) {
+        const f = await driveService.downloadFile(committed.new_file_id);
+        if (!f || !f.buffer) throw new Error('교체 영수증 파일을 받지 못했습니다');
+        const b64 = f.buffer.toString('base64');
+        const inspect = require('../services/reviewInspect.service');
+        await inspect.inspectSubmission({
+          base64: b64, mimeType: f.mimeType || 'image/jpeg', fileId: committed.new_file_id,
+          fileHash: crypto.createHash('sha256').update(f.buffer).digest('hex'),
+          sheetId: committed.sheet_id, tabName: committed.tab_name, rowIndex: committed.row_index,
+          reviewerName: committed.reviewer_name, slotKey: committed.slot_key || 'review', slotRole: 'receipt',
+        });
+        await inspect.saveFileHash({
+          fileId: committed.new_file_id,
+          fileHash: crypto.createHash('sha256').update(f.buffer).digest('hex'),
+        });
+      }
+    } catch (e) {
+      logger.warn(`[review-edit] 교체 영수증 즉시 재검수 실패(pending 유지): ${e.message}`);
     }
 
     // 5) 관리자 위젯 실시간 갱신

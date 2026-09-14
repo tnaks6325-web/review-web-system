@@ -3217,15 +3217,17 @@ function _submitReviewThenReceipt() {
     showToast(`${labels} 이미지를 먼저 선택해 주세요.`, "warning");
     return;
   }
-  if (_isBlogItem(item) && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
-    showToast(_BLOG_POST_URL_HINT, "warning");
-    return;
-  }
   const hasReviewFiles = (S.captureSlots || []).some(slot =>
     !_csIsReceiptSlot(slot) && (S.filesBySlot[slot.key] || []).length > 0
   );
+  // 이미 완료된 행의 재진입은 리뷰를 다시 제출하지 않고 영수증 단계만 연다.
+  // 블로그 포스팅 URL도 새 리뷰 제출이 아니므로 이 분기 뒤에서만 검사한다.
   if (item.isSubmitted && !hasReviewFiles) {
     goStep(3);
+    return;
+  }
+  if (_isBlogItem(item) && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
+    showToast(_BLOG_POST_URL_HINT, "warning");
     return;
   }
   S.slotSubmitTrigger = "reviewThenReceipt";
