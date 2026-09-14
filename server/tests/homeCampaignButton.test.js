@@ -226,7 +226,9 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   t('★ 편집 권한은 홈 전용 플래그(STATE.campEdit) — 그리드 편집 플래그와 섞지 않는다',
     /STATE\.campEdit=!!\(r&&r\.ok&&r\.canEdit\)/.test(WD) && /campEdit:null/.test(WD));
   t('계정 전환 시 편집 플래그를 비운다(logout·401 둘 다)',
-    (WD.match(/campEdit:null,campsUnavailable:false/g) || []).length >= 2);
+    (WD.match(/campEdit:null,[^}]{0,160}campsUnavailable:false/g) || []).length >= 2);
+  t('계정 전환 시 명단 관리 플래그도 비운다(logout·401 둘 다)',
+    (WD.match(/canManageEditors:null/g) || []).length >= 3); // 초기값 + 두 전환 경로
 
   /* ── 6) 공유 모듈 무회귀 ─────────────────────────────────────── */
   console.log('\n6) index-recruit.js (관리자 대시보드 무회귀)');
