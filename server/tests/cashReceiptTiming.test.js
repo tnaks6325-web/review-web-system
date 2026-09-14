@@ -91,6 +91,7 @@ ok('★ 발행확정 0~3일 + 캡처는 구매양식 제출 필수 아님 안내
 /* ═══ E. D안 ③ — 제출 화면: 선택 슬롯 표시 + 발행방법 다시 보기 ═══ */
 console.log('E. 제출 화면 재안내');
 const app = readF('js/search-app.js');
+const searchHtml = readF('search.html');
 ok('required:false 슬롯은 "(선택 · 발행 확정 후 제출)" 표기 + 상태칩 "선택"',
   /slot\.required === false/.test(app) && /선택 · 발행 확정 후 제출/.test(app));
 ok('발행방법 다시 보기(_csLoadCrGuides) — 영수증 슬롯이 있을 때만, fail-soft',
@@ -98,6 +99,35 @@ ok('발행방법 다시 보기(_csLoadCrGuides) — 영수증 슬롯이 있을 �
   && /slots\.find\(_csIsReceiptSlot\)/.test(app));
 ok('가이드 이미지는 https 절대 URL만 + 따옴표 포함 값 폐기(속성 breakout 방지)',
   /\^https:\\\/\\\/\[\^"'<>\\s\]\+\$/.test(app));
+ok('★★ 리뷰어 화면은 현금영수증 대상 작업만 3단계(정보 → 리뷰 → 현금영수증)',
+  /id="sl2"[^>]*>② 리뷰 제출</.test(searchHtml)
+  && /id="sl3"[^>]*>③ 현금영수증</.test(searchHtml)
+  && /id="step3"/.test(searchHtml)
+  && /const steps = S\.receiptStepMode \? \[1, 2, 3\] : \[1, 2\]/.test(app));
+ok('리뷰 슬롯과 현금영수증 슬롯은 서로 다른 단계의 DOM 호스트로 렌더',
+  /id="csReceiptHost"/.test(searchHtml)
+  && /if \(isReceipt && receiptHost\) receiptHost\.appendChild\(slotEl\)/.test(app)
+  && /else wrap\.appendChild\(slotEl\)/.test(app));
+ok('2단계에서 리뷰를 실제 제출한 뒤에만 3단계 현금영수증으로 이동',
+  /id="btnToReceipt"[^>]*onclick="_submitReviewThenReceipt\(\)"/.test(searchHtml)
+  && /id="btnSkipReceipt"[^>]*onclick="_skipReceiptStep\(\)"/.test(searchHtml)
+  && /S\.slotSubmitTrigger = "reviewThenReceipt"/.test(app)
+  && /slotSubmitTrigger === "reviewThenReceipt" && complete/.test(app)
+  && /showToast\("리뷰 제출이 완료되었습니다\."/.test(app));
+ok('2단계 업로드는 리뷰 슬롯만, 3단계 업로드는 현금영수증 슬롯만 처리',
+  /slotSubmitTrigger === "reviewThenReceipt" \? !_csIsReceiptSlot\(s\) : true/.test(app)
+  && /id="btnSubmitReceipt"[^>]*onclick="submitReview\(\)"/.test(searchHtml));
+ok('이미 리뷰 완료여도 미제출 현금영수증이 있으면 다시 진입할 수 있다',
+  /const receiptPending =/.test(app)
+  && /items\.every\(it => it\.isSubmitted\) && !receiptPending/.test(app)
+  && /현금영수증 제출로 이동/.test(app));
+ok('★★ 완료 리뷰의 영수증만 추가할 때 submitReview 기록을 생략해 기존 완료 시각을 보존',
+  /const receiptOnlyAfterComplete = reviewWasComplete/.test(app)
+  && /if \(receiptOnlyAfterComplete\) \{\s*result = \{ success: true, ok: true, complete: true/.test(app)
+  && /기존 리뷰 완료 시각은 변경하지 않았습니다/.test(app));
+ok('영수증 단독 제출 파일이 다른 슬롯으로 이동되면 성공으로 오안내하지 않는다',
+  /if \(receiptOnlyAfterComplete && !receiptStored\)/.test(app)
+  && /현금영수증 칸에 저장되지 않았습니다/.test(app));
 const tabcfg = readS('routes/tabconfig.routes.js');
 ok('provider-info 가 라벨 붙은 목록(cashReceiptGuideList)을 내려준다 — 채널 표(단일 출처)에서 파생',
   /cashReceiptGuideList = CASH_RECEIPT_CHANNELS/.test(tabcfg)

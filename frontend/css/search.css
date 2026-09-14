@@ -340,6 +340,11 @@ input,textarea,button{font-family:inherit}
 .pane-title{display:flex;align-items:flex-start;gap:12px;margin-bottom:18px}
 .pane-num{width:30px;height:30px;flex-shrink:0;background:var(--p);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:700;margin-top:1px}
 .pane-title h2{font-size:1.05rem;font-weight:700}.pane-title p{font-size:.82rem;color:var(--t3);margin-top:3px}
+.receipt-step-card{border-color:#FDE68A}.receipt-step-num{background:#B45309}
+.receipt-step-note{display:flex;align-items:flex-start;gap:10px;margin:4px 0 14px;padding:12px 14px;border:1px solid #FDE68A;border-radius:var(--rs);background:#FFFBEB;color:#92400E;font-size:.82rem;line-height:1.5}
+.receipt-step-note>i{margin-top:2px}.receipt-step-note strong{display:block}.receipt-step-note p{margin-top:2px;font-size:.77rem;color:#A16207}
+.receipt-step-actions{flex-wrap:wrap}.receipt-step-actions #btnSubmitReceipt{margin-left:auto}
+@media(max-width:480px){.receipt-step-actions{display:grid;grid-template-columns:1fr 1fr}.receipt-step-actions #btnSubmitReceipt{grid-column:1/-1;width:100%}}
 .info-grid{border:1.5px solid var(--border);border-radius:var(--rs);overflow:hidden;margin-bottom:14px}
 .ig-row{display:flex;align-items:stretch;border-bottom:1px solid var(--border)}.ig-row:last-child{border-bottom:none}
 .ig-label{width:82px;flex-shrink:0;padding:10px 12px;background:var(--bg);font-size:.76rem;font-weight:700;color:var(--t2);display:flex;align-items:center}
