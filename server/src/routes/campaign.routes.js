@@ -40,7 +40,7 @@ const { weekendPublicationState } = require('../services/campaignWeekend.service
 const { isPostUrl, BLOG_URL_HINT } = require('../utils/blogPostUrl');
 const { workKindForTab: tabWorkKind } = require('../services/workKindContext.service');
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
-const { loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
+const { loadPopularCreditMatches, loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
 const { repurchaseDays } = require('../utils/repurchaseGuard');
 const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
 
@@ -1277,33 +1277,19 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, _adminCampaig
 // GET /api/campaign/admin/popular-credit-audit — 인기상품 참여권 운영 집계(PII 미반환)
 router.get('/admin/popular-credit-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { rows } = await pool.query(`
-      WITH popular_uses AS (
-        SELECT ca.id, ca.phone8, ca.status, ca.applied_at
-          FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE rc.participation_mode IS TRUE
-           AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS TRUE
-           AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))
-      ), reconstructed AS (
-        SELECT pu.id, pu.status,
-          (SELECT COUNT(*) FROM campaign_applications normal_ca JOIN recruit_campaigns normal_rc ON normal_rc.id = normal_ca.campaign_id
-            WHERE normal_ca.phone8 = pu.phone8 AND normal_rc.participation_mode IS TRUE
-              AND COALESCE(normal_ca.is_popular_snapshot, normal_rc.is_popular) IS NOT TRUE
-              AND normal_ca.status = 'submitted' AND normal_ca.submitted_at <= pu.applied_at) AS normal_before,
-          (SELECT COUNT(*) FROM popular_uses prior_pu WHERE prior_pu.phone8 = pu.phone8
-             AND (prior_pu.applied_at < pu.applied_at OR (prior_pu.applied_at = pu.applied_at AND prior_pu.id < pu.id))) AS popular_before
-        FROM popular_uses pu
-      )
-      SELECT COUNT(*)::int AS total_popular_uses,
-             COUNT(*) FILTER (WHERE status = 'submitted')::int AS submitted_uses,
-             COUNT(*) FILTER (WHERE status = 'applied')::int AS active_holds,
-             COUNT(*) FILTER (WHERE normal_before > popular_before)::int AS reconstructed_compliant,
-             COUNT(*) FILTER (WHERE normal_before <= popular_before)::int AS needs_review
-        FROM reconstructed
-    `);
-    res.json({ ok: true, data: rows[0], scope: 'all_campaigns_snapshot_based_current_state',
-      note: '현재 유효 인기 사용건을 구매양식 제출 시점 기준으로 재구성한 집계입니다. 취소·만료된 과거 시점 상태는 판정하지 않습니다.',
-      calculatedAt: new Date().toISOString() });
+    const evaluatedAt = new Date();
+    const matches = await loadPopularCreditMatches(pool, null, { evaluatedAt });
+    const data = {
+      total_popular_uses: matches.popularEvents.length,
+      submitted_uses: matches.popularEvents.filter((event) => event.status === 'submitted').length,
+      active_holds: matches.popularEvents.filter((event) => event.status === 'applied').length,
+      pending_uses: matches.popularEvents.filter((event) => event.status === 'blog_pending').length,
+      reconstructed_compliant: matches.matchedPopularIds.size,
+      needs_review: matches.popularEvents.length - matches.matchedPopularIds.size,
+    };
+    res.json({ ok: true, data, scope: 'rolling_3_day_snapshot_based_current_state',
+      note: '최근 3일 안의 일반 제출완료와 현재 유효 인기 사용건을 같은 FIFO 규칙으로 재구성한 집계입니다.',
+      calculatedAt: evaluatedAt.toISOString() });
   } catch (err) { next(err); }
 });
 
@@ -3353,35 +3339,17 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
 router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
+    const evaluatedAt = new Date();
     // ★ M3 리뷰 #11: hold_token(열람·취소 열쇠)은 관제에 불필요 — 브라우저로 내리지 않음(컬럼 화이트리스트)
     const { rows } = await pool.query(
-      `WITH normal_submissions AS (
-          SELECT ca.id, ca.phone8, ca.submitted_at,
-                 ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.submitted_at, ca.id) AS credit_no
-            FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-           WHERE rc.participation_mode IS TRUE
-             AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS NOT TRUE
-             AND ca.status = 'submitted'
-        ), popular_uses AS (
-          SELECT ca.id, ca.phone8, ca.applied_at,
-                 ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.applied_at, ca.id) AS credit_no
-            FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-           WHERE rc.participation_mode IS TRUE
-             AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS TRUE
-             AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))
-        )
-       SELECT ca.id, ca.campaign_id, ca.applicant_name, ca.applicant_phone, ca.applicant_inad,
+      `SELECT ca.id, ca.campaign_id, ca.applicant_name, ca.applicant_phone, ca.applicant_inad,
               ca.status, ca.sheet_row_added, ca.applied_at, ca.phone8, ca.expires_at, ca.submitted_at,
               ca.order_submission_id, ca.late_order_id, ca.option_key, ca.owner_phone8, ca.dismissed_at,
               ca.dismissed_by, ca.blog_url, ca.reject_reason, ca.decided_at, ca.decided_by,
               COALESCE(linked_order.submitted_at, history_order.submitted_at) AS order_submitted_at,
               COALESCE(linked_order.source, history_order.source) AS order_source,
               (COALESCE(linked_order.campaign_was_late, history_order.campaign_was_late, FALSE)
-                OR (ca.order_submission_id IS NULL AND ca.late_order_id IS NOT NULL)) AS order_was_late,
-              EXISTS (SELECT 1 FROM normal_submissions ns JOIN popular_uses pu
-                        ON pu.phone8 = ns.phone8 AND pu.credit_no = ns.credit_no
-                       AND ns.submitted_at <= pu.applied_at
-                        WHERE ns.id = ca.id) AS popular_purpose
+                OR (ca.order_submission_id IS NULL AND ca.late_order_id IS NOT NULL)) AS order_was_late
        FROM campaign_applications ca
        /* 현재 링크를 우선하고, 주문 취소로 신청 쪽 링크가 비워진 뒤에는 주문 원장의 불변 FK로
           마지막 제출을 복구한다. 로그 화면이 신청 상태에서 제출시각·출처를 추측하지 않게 한다. */
@@ -3404,6 +3372,8 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
        ORDER BY ca.applied_at ASC`,
       [id]
     );
+    const purposeMatches = await loadPopularCreditMatches(pool,
+      [...new Set(rows.map((row) => String(row.phone8 || '')).filter(Boolean))], { evaluatedAt });
     /* 주문 표시는 작업 로그와 같은 서버 판정값을 쓴다. 초과시간을 브라우저에서 다시 계산하면
        시간대/반올림 차이로 두 화면이 갈릴 수 있어 초 단위 정수까지 여기서 확정한다. */
     const controlRows = rows.map(r => {
@@ -3414,6 +3384,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
         ? Math.max(0, Math.floor((submittedMs - expiresMs) / 1000)) : null;
       return {
         ...r,
+        popular_purpose: purposeMatches.matchedNormalIds.has(String(r.id)),
         order_submission_type: isLate ? 'late' : (r.order_source === 'admin_external' ? 'external' : 'standard'),
         order_overdue_seconds: orderOverdueSeconds,
       };

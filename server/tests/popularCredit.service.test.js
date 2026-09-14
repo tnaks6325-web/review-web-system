@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   POPULAR_CREDIT_VALIDITY_DAYS,
+  calculatePopularCreditMatches,
   calculatePopularCreditState,
   loadPopularCreditState,
   canUsePopularCredit,
@@ -29,8 +30,11 @@ const state = (events) => calculatePopularCreditState(events, NOW);
   assert.equal(state([popular(1, 48), normal(2, 24)]).credits, 1,
     'an older popular participation cannot consume a newly earned credit');
   assert.deepEqual(state([normal(1, 80), normal(2, 60), popular(3, 50)]),
-    { normalDone: 1, popularUsed: 0, credits: 1, validityDays: 3 },
-    'FIFO consumption stays attached to the old credit after that credit expires');
+    { normalDone: 1, popularUsed: 1, credits: 0, validityDays: 3 },
+    'retroactive matching excludes the expired old credit before consuming a recent credit');
+  const matched = calculatePopularCreditMatches([normal(10, 60), popular(11, 50), normal(12, 40)], NOW);
+  assert.deepEqual([...matched.matchedNormalIds], ['10'], 'FIFO matching exposes the exact normal application used by observability');
+  assert.deepEqual([...matched.matchedPopularIds], ['11'], 'FIFO matching exposes the exact popular application that consumed credit');
   const augustHistory = [
     ...Array.from({ length: 21 }, (_, i) => ({ id: i + 1, event_type: 'normal', event_at: '2026-08-01T08:00:00.000Z' })),
     ...Array.from({ length: 5 }, (_, i) => ({ id: i + 22, event_type: 'popular', event_at: '2026-08-02T08:00:00.000Z' })),
@@ -39,11 +43,12 @@ const state = (events) => calculatePopularCreditState(events, NOW);
     'the old 21 minus 5 history does not preserve 16 credits after the retroactive cutoff');
 
   let params;
-  const db = { query: async (_sql, values) => { params = values; return { rows: [normal(10, 1)] }; } };
+  const db = { query: async (_sql, values) => { params = values; return { rows: [{ ...normal(10, 1), phone8: '12345678' }] }; } };
   const loaded = await loadPopularCreditState(db, '12345678', { evaluatedAt: NOW });
   assert.equal(loaded.credits, 1, 'database events use the same calculation');
-  assert.equal(params[0], '12345678', 'credit accounting is isolated by participating identity');
+  assert.equal(new Date(params[0]).toISOString(), ago(72), 'database query starts at the rolling 72-hour cutoff');
   assert.equal(new Date(params[1]).toISOString(), NOW.toISOString(), 'database query does not include future events');
+  assert.deepEqual(params[2], ['12345678'], 'credit accounting is isolated by participating identity');
   assert.match(source, /ca\.expires_at > \$2/, 'only currently active popular holds consume credit');
   assert.match(source, /ca\.status = 'blog_pending'/, 'a pending popular application reserves its credit until rejection or cancellation');
   console.log('popularCredit.service: passed');

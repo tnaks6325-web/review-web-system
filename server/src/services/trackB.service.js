@@ -24,6 +24,7 @@ const { formatDepositStamp } = require('../utils/depositStamp');   // 입금 칸
 const { resolveWorkManager } = require('../utils/workManager');   // 담당자 판정 단일 출처(065 + 회차 #18 — payment.service 와 한 벌)
 const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
 const { findPaymentColumnIndex } = require('./columnResolver');   // 작업보드에 실제 표시되는 입금 열 판정 단일 출처
+const { loadPopularCreditMatches } = require('./popularCredit.service');   // 인기 참여권·운영 목적 라벨 단일 출처
 
 // ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
 //   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
@@ -3222,34 +3223,30 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
   // 명단(활성) — 앵커 도출에 필요한 컬럼 포함
   const { rows: roster } = await db.query(
-    `WITH normal_submissions AS (
-        SELECT ca.id, ca.phone8, ca.submitted_at,
-               ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.submitted_at, ca.id) AS credit_no
-          FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE rc.participation_mode IS TRUE
-           AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS NOT TRUE
-           AND ca.status = 'submitted'
-      ), popular_uses AS (
-        SELECT ca.id, ca.phone8, ca.applied_at,
-               ROW_NUMBER() OVER (PARTITION BY ca.phone8 ORDER BY ca.applied_at, ca.id) AS credit_no
-          FROM campaign_applications ca JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE rc.participation_mode IS TRUE
-           AND COALESCE(ca.is_popular_snapshot, rc.is_popular) IS TRUE
-           AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))
-      )
-     SELECT cp.id, cp.seq, cp.reviewer_name AS name, cp.recipient_name AS recipient, cp.phone8,
+    `SELECT cp.id, cp.seq, cp.reviewer_name AS name, cp.recipient_name AS recipient, cp.phone8,
             cp.round, cp.option_text AS option, cp.product_name AS product,
             cp.is_submitted AS submitted, cp.is_paid AS paid, cp.source,
             cp.order_submission_id, cp.identity_key, cp.row_json, cp.submit_col, cp.submit_col2,
-            EXISTS (SELECT 1 FROM order_submissions os
-                      JOIN normal_submissions ns ON ns.id = os.campaign_application_id
-                      JOIN popular_uses pu ON pu.phone8 = ns.phone8 AND pu.credit_no = ns.credit_no
-                                           AND ns.submitted_at <= pu.applied_at
-                     WHERE os.id = cp.order_submission_id AND os.deleted_at IS NULL) AS "popularPurpose"
+            purpose_app.id AS "popularPurposeApplicationId",
+            purpose_app.phone8 AS "popularPurposePhone8"
        FROM campaign_participants cp
+       LEFT JOIN order_submissions purpose_order
+         ON purpose_order.id = cp.order_submission_id AND purpose_order.deleted_at IS NULL
+       LEFT JOIN campaign_applications purpose_app
+         ON purpose_app.id = purpose_order.campaign_application_id
       WHERE cp.sheet_id=$1 AND cp.tab_name=$2 AND cp.deleted_at IS NULL AND cp.active = TRUE
         AND cp.held_at IS NULL
       ORDER BY cp.seq`, [sheetId, tabName]);
+  let popularPurposeIds = new Set();
+  if (showEdits) {
+    try {
+      const phones = [...new Set(roster.map((row) => String(row.popularPurposePhone8 || '')).filter(Boolean))];
+      const matches = await loadPopularCreditMatches(db, phones);
+      popularPurposeIds = matches.matchedNormalIds;
+    } catch (e) {
+      logger.warn(`[trackB] 인기상품 목적 라벨 판정 실패 sheet=${sheetId} tab=${tabName}: ${e.message}`);
+    }
+  }
   /* ★★ 표에서 분리(보관)한 줄 — **화면에서만** 뺀다(129, 사용자 확정 2026-08-19).
      장부 재생성·리뷰어 검색·입금대상 추출은 `deleted_at` 만 보므로 그대로다(무접촉).
      ★ 조용히 빼지 않는다 — 건수를 실어 보내 화면이 "분리 N건" 을 말하고 되돌릴 수 있게 한다.
@@ -3471,7 +3468,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       paid: !!pick('is_paid', r.paid),
       source: r.source, hasOrder: !!r.order_submission_id,
       // 운영 목적 분류는 내부 작업보드 로그에서만 보인다. 광고주 렌즈에는 노출하지 않는다.
-      popularPurpose: showEdits && r.popularPurpose === true,
+      popularPurpose: showEdits && popularPurposeIds.has(String(r.popularPurposeApplicationId || '')),
     };
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */

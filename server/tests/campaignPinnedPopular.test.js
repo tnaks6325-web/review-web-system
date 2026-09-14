@@ -19,10 +19,10 @@ const apply = routes.slice(routes.indexOf('async function _applyParticipation'),
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
 
 assert.match(creditService, /POPULAR_CREDIT_VALIDITY_DAYS = 3/, 'normal submission credits expire after three days');
-assert.match(creditService, /credit\.expiresAtMs >= evaluatedAtMs/, 'only normal submissions inside the rolling validity window are counted');
+assert.match(creditService, /ca\.submitted_at BETWEEN \$1 AND \$2/, 'only normal submissions inside the rolling validity window are counted');
 assert.match(creditService, /ca\.status = 'blog_pending'/, 'pending popular applications reserve credit');
 assert.match(creditService, /ca\.expires_at > \$2/, 'submitted and active popular holds are counted as consumed');
-assert.match(creditService, /ca\.phone8 = \$1/, 'credit accounting is isolated by participating identity');
+assert.match(creditService, /ca\.phone8 = ANY\(\$3::text\[\]\)/, 'credit accounting is isolated by participating identity');
 assert.match(routes, /is_popular_snapshot\)/, 'reviewer application stores immutable popularity');
 assert.match(manualOrder, /is_popular_snapshot\)/, 'manual application stores immutable popularity');
 assert.match(apply, /loadPopularCreditState\(client, holdP8\)/, 'apply evaluates credits after the identity lock');

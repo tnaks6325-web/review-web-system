@@ -13,8 +13,8 @@ const apply = routes.slice(routes.indexOf('async function _applyParticipation'),
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
 
 assert(creditService.includes('POPULAR_CREDIT_VALIDITY_DAYS = 3'), 'popular policy must expire normal credits after three days');
-assert(creditService.includes('credit.expiresAtMs >= evaluatedAtMs'), 'popular policy must only count recent normal completions');
-assert(creditService.includes('candidate.expiresAtMs >= event.eventAtMs'), 'popular policy must consume only a credit valid at participation time');
+assert(creditService.includes('ca.submitted_at BETWEEN $1 AND $2'), 'popular policy must only count recent normal completions');
+assert(creditService.includes('const credit = queue.credits[queue.next]'), 'popular policy must match credits with a linear FIFO queue');
 assert(apply.includes('loadPopularCreditState(client, holdP8)'), 'popular apply must use the shared credit calculation');
 assert(!apply.includes('campaign_popular_prerequisites'), 'legacy prerequisite queue must not gate popular participation');
 assert(!apply.includes('_currentPopularPrerequisite'), 'popular apply must not select a required normal campaign');
