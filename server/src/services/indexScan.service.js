@@ -652,6 +652,15 @@ async function syncTabListToDB({ dryRun = true, fromCache = false, allowNewTabs 
         'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
         [r.newTabName, r.sheetId, r.oldTabName]
       );
+      // 탭명은 제출·검수 증거의 좌표다. 예전 이름에 남기면 영수증이 미제출로 판정된다.
+      await client.query(
+        'UPDATE review_submissions SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+        [r.newTabName, r.sheetId, r.oldTabName]
+      );
+      await client.query(
+        'UPDATE review_inspections SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+        [r.newTabName, r.sheetId, r.oldTabName]
+      );
       // index_master: 탭명 UPDATE (행 보존)
       const imResult = await client.query(
         'UPDATE index_master SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',

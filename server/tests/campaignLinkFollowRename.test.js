@@ -75,6 +75,9 @@ console.log('── A. 실행부 ──');
     /UPDATE review_index SET tab_name/.test(ib) && /UPDATE index_master SET tab_name/.test(ib)
     && /UPDATE tab_configs SET tab_name/.test(ib)
     && /UPDATE review_index SET tab_name/.test(isc) && /UPDATE tab_configs SET tab_name/.test(isc));
+  t('★ 탭 이름 변경은 영수증 제출·검수 원장의 좌표도 두 경로에서 함께 바꾼다',
+    /UPDATE review_submissions SET tab_name/.test(ib) && /UPDATE review_inspections SET tab_name/.test(ib)
+    && /UPDATE review_submissions SET tab_name/.test(isc) && /UPDATE review_inspections SET tab_name/.test(isc));
   t('보정은 URL 교정 앞에 들어간다(같은 묶음 안)', seg(ib) && seg(isc));
 
   console.log('── C. 판정 함수는 건드리지 않았다 ──');
