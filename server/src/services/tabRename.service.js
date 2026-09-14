@@ -6,7 +6,13 @@
  */
 async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = '', sheetUrl = '' } = {}) {
   if (!db || !sheetId || !oldTabName || !newTabName) throw new Error('탭 이름 변경 좌표가 필요합니다.');
-  if (oldTabName === newTabName) return { reviewIndexUpdated: 0, indexMasterUpdated: 0, paymentItemsUpdated: 0 };
+  if (oldTabName === newTabName) return {
+    reviewIndexUpdated: 0,
+    indexMasterUpdated: 0,
+    orderSubmissionsUpdated: 0,
+    campaignParticipantsUpdated: 0,
+    paymentItemsUpdated: 0,
+  };
 
   const ownsTransaction = typeof db.connect === 'function';
   const client = ownsTransaction ? await db.connect() : db;
@@ -27,6 +33,22 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
       'UPDATE review_edit_requests SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3', common);
     await client.query(
       'UPDATE review_report_links SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3', common);
+
+    // 지급 게이트의 공고 provenance도 현재 탭 좌표를 기준으로 조인한다. 이름만 바뀐 뒤
+    // 이 두 원장을 옛 좌표에 남기면 exact campaign을 잃고, 같은 탭을 재사용한 공고들의
+    // 현금영수증 설정을 합친 보수적 폴백으로 잘못 차단될 수 있다.
+    const orders = await client.query(
+      `UPDATE order_submissions
+          SET tab_name = $1,
+              tab_gid = COALESCE(NULLIF($2, ''), tab_gid),
+              gid = COALESCE(NULLIF($2, ''), gid)
+        WHERE sheet_id = $3 AND tab_name = $4`, withGid);
+    const participants = await client.query(
+      `UPDATE campaign_participants
+          SET tab_name = $1,
+              tab_gid = COALESCE(NULLIF($2, ''), tab_gid),
+              updated_at = NOW()
+        WHERE sheet_id = $3 AND tab_name = $4`, withGid);
 
     // 아직 한 번도 내려받지 않은 회차만 현재 작업 좌표다. 이미 내려받은 회차는 당시 스냅샷을 보존한다.
     const payment = await client.query(
@@ -65,6 +87,8 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
     return {
       reviewIndexUpdated: ri.rowCount || 0,
       indexMasterUpdated: im.rowCount || 0,
+      orderSubmissionsUpdated: orders.rowCount || 0,
+      campaignParticipantsUpdated: participants.rowCount || 0,
       paymentItemsUpdated: payment.rowCount || 0,
       campaignLinksUpdated: campaignLinksUpdated || 0,
     };

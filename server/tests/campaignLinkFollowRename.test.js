@@ -22,6 +22,7 @@ const ib = S('src/services/indexBuilder.service.js');
 const isc = S('src/services/indexScan.service.js');
 const tc = S('src/routes/tabconfig.routes.js');
 const renameSvc = S('src/services/tabRename.service.js');
+const { renameTabState } = require('../src/services/tabRename.service');
 
 console.log('── A. 실행부 ──');
 (async () => {
@@ -51,6 +52,19 @@ console.log('── A. 실행부 ──');
     && (await renameCampaignLinkedTab(null, { sheetId: 'S', oldTabName: 'a', newTabName: 'b' })) === 0
     && calls.length === 0);
 
+  calls.length = 0;
+  const moved = await renameTabState(db, {
+    sheetId: 'S1', oldTabName: '체험단시트양식1', newTabName: '맛고', tabGid: '1405976532',
+  });
+  const orderMove = calls.find(c => /UPDATE order_submissions/.test(c.sql));
+  const participantMove = calls.find(c => /UPDATE campaign_participants/.test(c.sql));
+  t('★ 주문·참여 원장의 공고 provenance도 같은 탭 좌표로 이동',
+    !!orderMove && !!participantMove
+    && orderMove.params[0] === '맛고' && orderMove.params[1] === '1405976532'
+    && participantMove.params[2] === 'S1' && participantMove.params[3] === '체험단시트양식1');
+  t('이동 건수를 운영 로그용 결과에 돌려준다',
+    moved.orderSubmissionsUpdated === 2 && moved.campaignParticipantsUpdated === 2);
+
   const boom = { query: async () => { throw Object.assign(new Error('boom'), { code: '42703' }); } };
   let threw = false, r0 = null;
   try { r0 = await renameCampaignLinkedTab(boom, { sheetId: 'S', oldTabName: 'a', newTabName: 'b', tabGid: 'g' }); }
@@ -74,7 +88,9 @@ console.log('── A. 실행부 ──');
   t('★ 핵심·영수증 원장의 탭 좌표 변경은 공용 서비스 한 곳에만 있다',
     /UPDATE review_index/.test(renameSvc) && /UPDATE index_master/.test(renameSvc)
     && /UPDATE tab_configs/.test(renameSvc) && /UPDATE review_submissions/.test(renameSvc)
-    && /UPDATE review_inspections/.test(renameSvc));
+    && /UPDATE review_inspections/.test(renameSvc)
+    && /UPDATE order_submissions/.test(renameSvc)
+    && /UPDATE campaign_participants/.test(renameSvc));
   t('★ 미다운로드 pending 회차만 새 탭 좌표로 옮긴다',
     /UPDATE payment_batch_items i[\s\S]*i\.status = 'pending'[\s\S]*COALESCE\(b\.download_count, 0\) = 0/.test(renameSvc));
   t('보정은 URL 교정 앞에 들어간다(같은 묶음 안)', seg(ib) && seg(isc));
