@@ -2731,6 +2731,7 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
   if (!sheetId || !tabName) throw new Error('reviewImagesForTab: sheetId, tabName 필수');
   const db = getPool();
   const out = new Map();
+  const externallyExcludedFileIds = new Set();
   let tabCfg = {};
   let tabContextResolved = false;
   try {
@@ -2769,12 +2770,18 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
       || inspectedKind === 'receipt'
       || rawSlot === receiptSlotKey || rawSlot === 'receipt' || rawSlot === 'cash_receipt';
     if (!includeReceipt) {
-      if (isReceipt) return;
+      if (isReceipt) {
+        externallyExcludedFileIds.add(String(fileId));
+        return;
+      }
       // review 외 사용자 정의 슬롯은 현재 탭 설정과 파일 단위 비영수증 검수 증거가
       // 모두 있을 때만 업체용에 낸다. 설정/검수 문맥을 못 읽으면 노출보다 제외이 안전하다.
       if (roleEvidence.submission === true && rawSlot !== 'review') {
         const verifiedNonReceipt = ['review', 'purchase_confirm', 'order_capture'].includes(inspectedKind);
-        if (!tabContextResolved || !knownSlotKeys.has(rawSlot) || !verifiedNonReceipt) return;
+        if (!tabContextResolved || !knownSlotKeys.has(rawSlot) || !verifiedNonReceipt) {
+          externallyExcludedFileIds.add(String(fileId));
+          return;
+        }
       }
     }
     const k = String(rowIndex);
@@ -2806,7 +2813,11 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
        FROM review_index
       WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
     [sheetId, tabName]).catch(() => ({ rows: [] }));
-  for (const r of idx) push(r.row_index, r.review_file_id, 'review', r.review_file_at);
+  for (const r of idx) {
+    // 제출 원장에서 영수증/역할 미확정으로 제외한 파일을 과거 대표이미지가 다시 넣지 못한다.
+    if (!includeReceipt && externallyExcludedFileIds.has(String(r.review_file_id))) continue;
+    push(r.row_index, r.review_file_id, 'review', r.review_file_at);
+  }
   /* ── 구매 캡처(062 `order_submissions.capture_file_id`) ─────────────────────────
      ★★ 줄 짝짓기는 **`sheet_row`(그 주문이 실제로 기록된 줄)** 하나로 한다.
        `campaign_participants.order_submission_id` 링크는 오염 사례가 문서화돼 있어

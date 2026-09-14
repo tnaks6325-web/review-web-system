@@ -1577,14 +1577,15 @@ async function runInspectSweep({ limit } = {}) {
 
     const { downloadFile } = require('./drive.service');
     for (const t of targets) {
+      // 다운로드가 터져도 catch에서 영수증 pending 증거와 attempts를 남겨야 한다.
+      const slotRole = receiptOnly || isCashReceiptSlot(
+        t.capture_slots, t.income_type, t.slot_key || 'review') ? 'receipt' : (t.slot_key || 'review');
       try {
         const f = await downloadFile(t.file_id);
         if (!f || !f.buffer) throw new Error('파일을 받지 못했습니다');
         const b64 = f.buffer.toString('base64');
         // 수동 슬롯은 key가 slot2여도 라벨이 현금영수증일 수 있다. 재검수에서도 실제 역할을
         // 넘겨야 영수증 검증 원장을 일반 리뷰 판정으로 덮어쓰지 않는다.
-        const slotRole = receiptOnly || isCashReceiptSlot(
-          t.capture_slots, t.income_type, t.slot_key || 'review') ? 'receipt' : (t.slot_key || 'review');
         const r = await inspectSubmission({
           base64: b64, mimeType: f.mimeType || 'image/jpeg',
           fileId: t.file_id, fileHash: t.file_hash || hashBase64(b64),

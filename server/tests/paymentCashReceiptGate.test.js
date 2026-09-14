@@ -115,6 +115,8 @@ const db = {
     '일반 리뷰검수를 꺼도 현금영수증 지급 판정 원장은 기록해야 한다');
   assert.match(inspectService, /const receiptOnly = !ENABLED[\s\S]*_receiptSweepTargets\(cap\)[\s\S]*receiptOnly \|\| isCashReceiptSlot/,
     '일반 리뷰검수가 꺼져도 영수증 pending·미검수 건은 재시도해야 한다');
+  assert.match(inspectService, /for \(const t of targets\) \{[\s\S]{0,500}const slotRole =[\s\S]{0,500}try \{[\s\S]*slotRole === 'receipt'/,
+    '다운로드 전에 역할을 계산해 실패 catch도 영수증 pending 증거를 남겨야 한다');
   assert.match(inspectService, /_receiptSweepTargets[\s\S]*receiptValidation[\s\S]*slot_key IN \('receipt', 'cash_receipt'\)[\s\S]*현금영수증\|현영\|지출증빙/,
     '자동 receipt 키와 수동 slot2 라벨 영수증을 모두 재시도 대상으로 잡아야 한다');
   assert.match(inspectService, /const slotRole = receiptOnly \|\| isCashReceiptSlot\([\s\S]*t\.capture_slots, t\.income_type, t\.slot_key[\s\S]*slotRole,/,
