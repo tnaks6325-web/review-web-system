@@ -127,16 +127,15 @@ ok('AI 상태 배지는 드롭다운 전체가 아니라 입력창 전용 래퍼
   (appJs.match(/class="of-input-status-wrap"/g) || []).length === 3
   && /\.of-input-status-wrap\{position:relative;width:100%/.test(searchCss)
   && /\.of-input-status-wrap>\.of-input\{width:100%/.test(searchCss));
-ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화면과 서버에서 잠근다',
+ok('타계정 참여는 선택 명의만 노출하되 구매양식 연락처는 수정할 수 있다',
   /context\.selected\.type === 'sub'[\s\S]{0,100}?\[context\.selected\]/.test(service)
   && /phone: applicationPhone \|\| selected\.phone/.test(service)
   && /identities = identities\.filter\(\(item\) => item\.identityKey === selected\.identityKey\)/.test(appJs)
-  && /participantPhoneLocked = "1"/.test(appJs)
-  && /el\.dataset\.participantPhoneLocked === "1"/.test(appJs)
   && /SELECT ca\.phone8, ca\.option_key, ca\.owner_phone8/.test(submitRoutes)
-  && /holdCtx\?\.verified && holdCtx\.isSub/.test(submitRoutes)
-  && /PARTICIPANT_PHONE_INVALID/.test(service)
-  && /PARTICIPANT_PHONE_INVALID/.test(submitRoutes));
+  && !/participantPhoneLocked/.test(appJs)
+  && !/PARTICIPANT_PHONE_INVALID/.test(service)
+  && !/PARTICIPANT_PHONE_INVALID/.test(submitRoutes)
+  && /delivery_contact_changed/.test(service));
 ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가 모두 맞는 원장만 조회한다',
   /async function loadOrderInfoSuggestions\(context, db = pool\)/.test(service)
   && /os\.owner_reviewer_id = \$1::uuid/.test(service)
@@ -172,9 +171,9 @@ ok('조합 추천은 한 번에 세 필드를 적용하고 원장 삭제 없이 
   && /_dismissedOrderInfoIds = Object\.fromEntries\(entries\)/.test(appJs)
   && !/DELETE FROM order_submissions/.test(service));
 const unlockAiField = appJs.slice(appJs.indexOf('function _unlockAiField(fid)'), appJs.indexOf('/** ★ Promise 반환'));
-ok('캡처를 삭제해도 타계정 참여 전화번호 잠금은 풀리지 않는다',
-  /keepParticipantPhoneLocked = f\.dataset\.participantPhoneLocked === "1"/.test(unlockAiField)
-  && /f\.readOnly = keepParticipantPhoneLocked/.test(unlockAiField));
+ok('캡처를 삭제한 뒤에도 구매양식 연락처는 수정할 수 있다',
+  /f\.readOnly = false/.test(unlockAiField)
+  && !/participantPhoneLocked/.test(unlockAiField));
 ok('AI 추출·명의매칭 장애와 무캡처 예외는 명시 수동확인 토큰을 거친다',
   /st\.matchError && st\.extracted \? "match_error" : "ai_error"/.test(appJs)
   && /mode === 'match_error'/.test(service)

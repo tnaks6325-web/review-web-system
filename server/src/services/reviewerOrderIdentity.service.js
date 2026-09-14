@@ -351,6 +351,9 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
     const appName = cleanName(app.applicant_name);
     const appPhone = phone8(app.phone8 || app.applicant_phone);
     candidates = identities.filter((item) => cleanName(item.name) === appName && phone8(item.phone) === appPhone);
+    // 과거 신청 건은 현재 등록 연락처와 다를 수 있다. 이름이 한 명으로 확정되면
+    // 신청 연락처가 달라도 그 명의를 사용하고, 동명이인은 기존처럼 차단한다.
+    if (!candidates.length && appName) candidates = identities.filter((item) => cleanName(item.name) === appName);
     if (!candidates.length && appPhone) candidates = identities.filter((item) => phone8(item.phone) === appPhone);
   }
   if (candidates.length !== 1) {
@@ -401,10 +404,11 @@ function nameVerdict(raw, stored) {
 }
 function phoneVerdict(raw, stored) {
   const a = String(raw || '').trim(), b = String(stored || '').trim();
-  if (!a || !b) return { verdict: 'uncertain', reason: '연락처 정보 없음' };
+  if (!a) return { verdict: 'contact', reason: '구매양식 연락처 정보 없음' };
+  if (!b) return { verdict: 'contact', reason: '구매양식 연락처 사용' };
   if (digits(a) && phone8(a) === phone8(b)) return { verdict: 'match', reason: '연락처 일치' };
   if (maskedCompatible(a, b, 'phone')) return { verdict: 'match', reason: '가림 연락처 일치' };
-  return { verdict: 'mismatch', reason: '연락처 불일치' };
+  return { verdict: 'contact', reason: '구매양식 연락처 사용(등록 연락처와 달라도 허용)' };
 }
 function maskedAddressVerdict(raw, stored) {
   if (!raw || !stored) return { verdict: 'uncertain', score: 0, reason: '주소 정보 없음' };
@@ -430,8 +434,11 @@ async function scoreIdentity(extracted, identity, { useGemini = true } = {}) {
   if (MASK_RE.test(fields.address)) address = maskedAddressVerdict(fields.address, identity.address);
   else address = await addressSame(fields.address, identity.address, { name: identity.name, phone: identity.phone, useGemini });
   const parts = { name, phone, address };
+  // 연락처는 주문/배송 연락처이므로 같을 때만 보조 증거로 쓰고, 다르다는 이유로
+  // 참여 명의를 거절하지 않는다. 이름·주소의 결정적 충돌은 계속 차단한다.
   const matches = Object.values(parts).filter((p) => p.verdict === 'match').length;
-  const conflicts = Object.entries(parts).filter(([, p]) => p.verdict === 'mismatch').map(([key, p]) => `${key}:${p.reason}`);
+  const conflicts = Object.entries({ name, address })
+    .filter(([, p]) => p.verdict === 'mismatch').map(([key, p]) => `${key}:${p.reason}`);
   const score = matches * 10 - conflicts.length * 20 + (address.score || 0);
   return { fields, parts, matches, conflicts, score };
 }
@@ -449,11 +456,10 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   const reasonCodes = [];
   if (selectedScore.conflicts.length) {
     const addressConflict = selectedScore.parts.address.verdict === 'mismatch';
-    // 배송지는 명의 자체가 아니다. 이름과 연락처가 모두 맞으면 다른 동·호수도
+    // 배송지는 명의 자체가 아니다. 선택한 참여 명의의 이름이 맞으면 다른 동·호수도
     // 자동 승인 대신 주문 배송지를 직접 확인하게 한다. 다른 명의 경쟁검사는 유지한다.
     const deliveryAddressChanged = addressConflict
-      && selectedScore.parts.name.verdict === 'match'
-      && selectedScore.parts.phone.verdict === 'match';
+      && selectedScore.parts.name.verdict === 'match';
     status = deliveryAddressChanged || (!addressConflict && selectedScore.matches >= 2) ? 'REVIEW' : 'MISMATCH';
     reasonCodes.push(deliveryAddressChanged ? 'delivery_address_changed'
       : status === 'MISMATCH' ? 'selected_identity_conflict' : 'selected_identity_partial_conflict');
@@ -461,6 +467,9 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
     status = 'MATCH';
   } else {
     reasonCodes.push('insufficient_independent_matches');
+  }
+  if (selectedScore.parts.phone.verdict === 'contact') {
+    reasonCodes.push('delivery_contact_changed');
   }
 
   let competingIdentity = null;
@@ -568,7 +577,9 @@ async function matchCapture(body, reviewer) {
     reasons: Object.values(verdict.selectedScore.parts).map((p) => p.reason),
     checks: Object.entries(verdict.selectedScore.parts).map(([key, part]) => ({
       field: key === 'name' ? 'recipient' : key,
-      status: part.verdict, reason: part.reason,
+      // 연락처 차이는 안내/수정 요구 대상이 아니다. 제출값 자체는 승인토큰에 계속 결속한다.
+      status: key === 'phone' && part.verdict === 'contact' ? 'match' : part.verdict,
+      reason: part.reason,
     })),
     selectedIdentity: publicIdentity(context.selected), resolved: verdict.resolved,
     approvalToken, reviewToken,
@@ -652,13 +663,6 @@ async function manualConfirm(body, reviewer) {
 
 async function verifyApprovalForSubmission(body, reviewer) {
   const context = await resolveApplicationIdentity(contextArgs(body, reviewer));
-  if (context.selected.type === 'sub' && phone8(body.phone) !== phone8(context.selected.phone)) {
-    throw new ReviewerOrderIdentityError(
-      'PARTICIPANT_PHONE_INVALID',
-      '타계정 참여 전화번호는 참여 신청 정보와 같아야 합니다.',
-      409
-    );
-  }
   const approval = verifyScoped(body.identityApprovalToken, PURPOSE_APPROVAL);
   const mismatch = String(approval.ownerReviewerId) !== String(context.owner.id)
     || Number(approval.applicationId) !== Number(context.application.id)

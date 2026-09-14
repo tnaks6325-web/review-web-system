@@ -139,7 +139,6 @@ function _savedOrderInfoMarkup(cid, field) {
     + 'aria-label="' + label + ' 내 정보에서 선택" aria-expanded="false" aria-controls="' + menuId + '">'
     + '<span class="of-saved-info-trigger-label">내 정보에서 선택</span><span class="of-saved-info-chevron" aria-hidden="true">⌄</span></button>'
     + '<div class="of-saved-info-menu" id="' + menuId + '" aria-label="' + label + ' 저장 정보 목록" hidden></div>'
-    + '<span class="of-saved-info-lock" hidden><i class="fas fa-lock"></i> 참여 신청 전화번호 · 변경 불가</span>'
     + '</div>';
 }
 
@@ -230,7 +229,6 @@ function _restoreSavedInfoInputHandler(el, cid, field, locked) {
 
 function _renderSavedOrderInfoPickers() {
   const identities = _scopedSavedOrderIdentities();
-  const selected = _activeIdentityContext?.selectedIdentity || null;
   (_orderCardIds || []).forEach((cid) => {
     Object.entries(_SAVED_ORDER_INFO_FIELDS).forEach(([field, spec]) => {
       const wrap = document.getElementById(cid + "_" + field + "SavedInfo");
@@ -258,18 +256,13 @@ function _renderSavedOrderInfoPickers() {
       trigger.setAttribute("aria-expanded", "false");
       menu.hidden = true;
       wrap.hidden = false;
-      const lockNote = wrap.querySelector(".of-saved-info-lock");
-      const isParticipantPhone = field === "phone" && selected?.type === "sub";
-      if (lockNote) lockNote.hidden = !isParticipantPhone;
-      if (isParticipantPhone) {
+      if (field === "phone") {
         const phoneEl = document.getElementById(cid + "_phone");
         if (phoneEl) {
-          phoneEl.value = selected.phone || "";
-          formatPhoneInput(phoneEl);
-          phoneEl.readOnly = true;
-          phoneEl.dataset.participantPhoneLocked = "1";
-          phoneEl.classList.add("of-participant-phone");
-          phoneEl.setAttribute("aria-readonly", "true");
+          phoneEl.readOnly = false;
+          phoneEl.classList.remove("of-participant-phone");
+          phoneEl.removeAttribute("aria-readonly");
+          _restoreSavedInfoInputHandler(phoneEl, cid, field, false);
         }
       }
     });
@@ -348,8 +341,6 @@ window._applySavedOrderInfo = function (option) {
   if (!cid || !spec || !identityKey) return;
   const selected = _activeIdentityContext?.selectedIdentity || null;
   let identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === identityKey);
-  const locked = field === "phone" && selected?.type === "sub";
-  if (locked) identity = selected;
   const input = document.getElementById(cid + "_" + field);
   const value = String(identity?.[spec.key] || "").trim();
   if (!input || !value) return;
@@ -357,19 +348,13 @@ window._applySavedOrderInfo = function (option) {
   input.value = value;
   if (field === "phone") formatPhoneInput(input);
   input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
-  input.classList.toggle("of-participant-phone", locked);
-  input.readOnly = locked;
+  input.classList.remove("of-participant-phone");
+  input.readOnly = false;
   input.removeAttribute("tabindex");
-  if (locked) {
-    input.dataset.participantPhoneLocked = "1";
-    input.setAttribute("aria-readonly", "true");
-  } else {
-    delete input.dataset.participantPhoneLocked;
-    input.removeAttribute("aria-readonly");
-  }
+  input.removeAttribute("aria-readonly");
   input.style.paddingRight = "";
   input.parentElement?.querySelector(".ai-lock-badge")?.remove();
-  _restoreSavedInfoInputHandler(input, cid, field, locked);
+  _restoreSavedInfoInputHandler(input, cid, field, false);
   _ofClearError(cid + "_" + field);
   if (["recipient", "phone", "address"].includes(field)) _invalidateIdentityApproval(cid);
   if (field === "userId" && selected && identity.identityKey !== selected.identityKey) {
@@ -482,7 +467,6 @@ function _applyOrderInfoSuggestion(button) {
   const suggestionId = button?.dataset?.suggestionId;
   const item = (_orderInfoSuggestions || []).find((entry) => entry?.id === suggestionId);
   if (!cid || !item) return;
-  const selectedPhone = String(_activeIdentityContext?.selectedIdentity?.phone || "").trim();
   const fields = [
     ["recipient", item.recipient],
     ["phone", item.phone],
@@ -491,20 +475,19 @@ function _applyOrderInfoSuggestion(button) {
   const resolved = fields.map(([field, rawValue]) => {
     const input = document.getElementById(cid + "_" + field);
     if (!input) return null;
-    const locked = field === "phone" && input.dataset.participantPhoneLocked === "1";
-    const value = locked && selectedPhone ? selectedPhone : String(rawValue || "").trim();
-    return value ? { field, input, locked, value } : null;
+    const value = String(rawValue || "").trim();
+    return value ? { field, input, value } : null;
   });
   if (resolved.some((entry) => !entry)) return;
-  for (const { field, input, locked, value } of resolved) {
+  for (const { field, input, value } of resolved) {
     input.value = value;
     if (field === "phone") formatPhoneInput(input);
     input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
-    input.classList.toggle("of-participant-phone", locked);
-    input.readOnly = locked;
+    input.classList.remove("of-participant-phone");
+    input.readOnly = false;
     input.style.paddingRight = "";
     input.parentElement?.querySelector(".ai-lock-badge")?.remove();
-    _restoreSavedInfoInputHandler(input, cid, field, locked);
+    _restoreSavedInfoInputHandler(input, cid, field, false);
     _ofClearError(cid + "_" + field);
   }
   _invalidateIdentityApproval(cid);
@@ -8192,11 +8175,9 @@ function removeCardImg(cid) {
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
     if (!f) return;
-    const keepParticipantPhoneLocked = f.dataset.participantPhoneLocked === "1";
     f.classList.remove("ai-filled", "ai-locked");
-    f.readOnly = keepParticipantPhoneLocked;
-    if (keepParticipantPhoneLocked) f.setAttribute("aria-readonly", "true");
-    else f.removeAttribute("aria-readonly");
+    f.readOnly = false;
+    f.removeAttribute("aria-readonly");
     f.removeAttribute("tabindex");
     f.style.paddingRight = "";
     // 자물쇠 배지 제거
@@ -8633,7 +8614,6 @@ function applyCardAiResult(cid) {
     if (!val) return;
     const el = document.getElementById(id);
     if (!el) return;
-    if (el.dataset.participantPhoneLocked === "1") return;
     el.value = val;
     const valHasAsterisk = _hasIdentityMask(val);
     if (valHasAsterisk) {
