@@ -1621,7 +1621,9 @@ async function runInspectSweep({ limit } = {}) {
  * 관리자 검수 탭(M3) 조회
  * ════════════════════════════════════════════════════════════════ */
 
-const { ISSUE_KEYS, issueTypeCountSql, productMachineWarningSql } = require('../utils/inspectIssueTypes');
+const {
+  ISSUE_KEYS, issueTypeCountSql, productMachineWarningSql, receiptRoleEvidenceSql,
+} = require('../utils/inspectIssueTypes');
 
 const _LIST_STATUSES = ['pending', 'pass', 'suspect', 'fail', 'unverifiable', 'resolved'];
 
@@ -2179,12 +2181,19 @@ async function resolveInspectionsBulk({ sheetId, tabName, resolution = 'ok', by 
   if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
   const rkind = _RESOLUTIONS.includes(resolution) ? resolution : 'ok';
   const { rows } = await _db().query(
-    `UPDATE review_inspections
+    `UPDATE review_inspections i
         SET status = 'resolved', resolution = $4, resolved_at = NOW(), resolved_by = $3, updated_at = NOW()
-      WHERE sheet_id = $1 AND tab_name = $2 AND status IN ('suspect', 'fail')
-        -- 현금영수증 불일치·판정불가는 지급 보류 근거다. 탭 단위 일괄 정상으로
-        -- 덮지 않고, 파일을 확인한 관리자가 건별로만 승인할 수 있게 둔다.
-        AND COALESCE(checks->'receiptValidation'->>'verdict', '') NOT IN ('warn', 'fail')
+      WHERE i.sheet_id = $1 AND i.tab_name = $2 AND i.status IN ('suspect', 'fail')
+        -- 현금영수증은 검수 키가 생기기 전의 구형 원장도 있다. 전용 판정뿐 아니라
+        -- inspection/submission 슬롯과 구형 format 판정 중 하나라도 영수증 가능성을
+        -- 가리키면 일괄 정상에서 제외하고, 파일을 본 관리자의 건별 승인만 허용한다.
+        AND COALESCE(i.slot_key, 'review') = 'review'
+        AND NOT ${receiptRoleEvidenceSql('i.checks')}
+        AND NOT EXISTS (
+          SELECT 1 FROM review_submissions rs
+           WHERE rs.file_id = i.file_id
+             AND COALESCE(rs.slot_key, 'review') <> 'review'
+        )
       RETURNING sheet_id, tab_name, ocr_product, checks`,
     [sheetId, tabName, by || '', rkind]
   );

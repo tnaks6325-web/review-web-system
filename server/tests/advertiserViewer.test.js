@@ -385,6 +385,16 @@ async function run() {
     const renamedSlotRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T' });
     ok('★ 슬롯 설정이 바뀌어도 과거 영수증 증거 파일과 역할 미확정 파일은 업체 payload에서 제외한다',
       !renamedSlotRv['4']);
+
+    svc.__setPoolForTest(pool([
+      [/FROM tab_configs WHERE sheet_id=\$1/, () => ({ rows: [{ gid: '', capture_slots: null, income_type: '' }] })],
+      [/FROM review_submissions/, () => { throw new Error('inspection evidence unavailable'); }],
+      [/FROM review_index/, () => ({ rows: [
+        { row_index: 7, review_file_id: 'FILELEGACYROLEUNKNOWN01', review_file_at: null },
+      ] })],
+    ]));
+    const evidenceFailureRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T' });
+    ok('★ 제출·검수 역할 근거 조회 실패 시 업체용 과거 대표이미지 폴백은 닫힌다', !evidenceFailureRv['7']);
   }
   /* ⚠ 2026-08-24: 총건수 초과 줄에 `class="gover"` 가 조건부로 붙으며 `<tr ` 뒤가 달라졌다.
      검사 의미는 그대로 — **행(tr)에 data-rid 가 실린다**(셀에만 있으면 tr 단위 선택이 죽는다). */

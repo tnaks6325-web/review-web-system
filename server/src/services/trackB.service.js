@@ -2793,26 +2793,39 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     if (arr.filter(f => f.slot === sl).length >= _RV_MAX_PER_ROW || arr.some(f => f.fileId === fileId)) return;
     arr.push({ fileId, slot: sl, at: at || null });
   };
-  const { rows: subs } = await db.query(
-    `SELECT rs.row_index, rs.file_id, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) AS at,
-            (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
-              OR ri.checks->'format'->>'kind' = 'receipt') AS receipt_evidence,
-            COALESCE(ri.checks->'format'->>'kind', '') AS inspection_kind
-       FROM review_submissions rs
-       LEFT JOIN review_inspections ri ON ri.file_id = rs.file_id
-      WHERE rs.sheet_id=$1 AND rs.tab_name=$2 AND rs.row_index IS NOT NULL AND rs.file_id IS NOT NULL
-      ORDER BY rs.row_index, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) NULLS LAST`,
-    [sheetId, tabName]).catch(() => ({ rows: [] }));   // fail-soft: 이미지가 없어도 표는 떠야 한다
+  let subs = [];
+  let submissionEvidenceResolved = false;
+  try {
+    const result = await db.query(
+      `SELECT rs.row_index, rs.file_id, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) AS at,
+              (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+                OR ri.checks->'format'->>'kind' = 'receipt') AS receipt_evidence,
+              COALESCE(ri.checks->'format'->>'kind', '') AS inspection_kind
+         FROM review_submissions rs
+         LEFT JOIN review_inspections ri ON ri.file_id = rs.file_id
+        WHERE rs.sheet_id=$1 AND rs.tab_name=$2 AND rs.row_index IS NOT NULL AND rs.file_id IS NOT NULL
+        ORDER BY rs.row_index, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) NULLS LAST`,
+      [sheetId, tabName]);
+    subs = result.rows || [];
+    submissionEvidenceResolved = true;
+  } catch (_) {
+    // 내부 작업보드는 아래의 과거 대표이미지를 계속 볼 수 있다. 업체용은 영수증 역할
+    // 근거를 못 읽은 상태에서 review_index를 review라고 추측해 내보내지 않는다.
+  }
   for (const r of subs) push(r.row_index, r.file_id, r.slot_key, r.at, {
     submission: true,
     receiptEvidence: r.receipt_evidence === true,
     inspectionKind: r.inspection_kind,
   });
-  const { rows: idx } = await db.query(
-    `SELECT row_index, review_file_id, review_file_at
-       FROM review_index
-      WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
-    [sheetId, tabName]).catch(() => ({ rows: [] }));
+  let idx = [];
+  if (includeReceipt || submissionEvidenceResolved) {
+    const result = await db.query(
+      `SELECT row_index, review_file_id, review_file_at
+         FROM review_index
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
+      [sheetId, tabName]).catch(() => ({ rows: [] }));
+    idx = result.rows || [];
+  }
   for (const r of idx) {
     // 제출 원장에서 영수증/역할 미확정으로 제외한 파일을 과거 대표이미지가 다시 넣지 못한다.
     if (!includeReceipt && externallyExcludedFileIds.has(String(r.review_file_id))) continue;

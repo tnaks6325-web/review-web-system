@@ -114,6 +114,16 @@ function productMachineWarningSql(col = 'checks') {
   return `COALESCE(${col}->'product'->>'machineVerdict', ${col}->'product'->>'verdict') = 'warn'`;
 }
 
+/** 영수증 역할 증거 — 신규 전용 판정과 구형 format 판정을 함께 본다. */
+function receiptRoleEvidenceSql(col = 'checks') {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(String(col))) {
+    throw new Error('invalid checks column');
+  }
+  return `(COALESCE(${col}, '{}'::jsonb) ? 'receiptValidation'
+           OR COALESCE(${col}->'format'->>'got', ${col}->'format'->>'kind', '') = 'receipt')`;
+}
+
 module.exports = {
   ISSUE_RULES, ISSUE_KEYS, issueTypesOf, issueTypeCountSql, productMachineWarningSql,
+  receiptRoleEvidenceSql,
 };
