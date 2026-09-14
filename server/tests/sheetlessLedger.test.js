@@ -60,7 +60,7 @@ console.log('\n[A] 헤더 결정 · 2차원 배열 조립');
 /* ══════════════ B·C·E. 서비스 실행(스텁 pool) ══════════════ */
 console.log('\n[B·C·E] 게이트 · 파서 재사용 · 두 장부의 행 수');
 function makeStub({ sheetless = true, parts = [], storedHeaders = null, registered = true,
-  detectedHeaders = undefined }) {
+  detectedHeaders = undefined, closedRounds = '' }) {
   const log = { sql: [], client: [], released: 0 };
   const client = {
     query(sql, params) {
@@ -74,7 +74,10 @@ function makeStub({ sheetless = true, parts = [], storedHeaders = null, register
       const q = String(sql).replace(/\s+/g, ' ').trim();
       log.sql.push({ sql: q, params });
       if (/FROM tab_configs/.test(q)) {
-        return Promise.resolve({ rows: registered ? [{ tab_gid: '77', campaign_name: '테스트업체', sheetless }] : [] });
+        return Promise.resolve({ rows: registered ? [{
+          tab_gid: '77', campaign_name: '테스트업체', sheetless,
+          closed_rounds: closedRounds, archived_rounds: '',
+        }] : [] });
       }
       if (/FROM campaign_participants/.test(q)) return Promise.resolve({ rows: parts });
       if (/FROM raw_sheet_tabs/.test(q)) {
@@ -144,6 +147,34 @@ const PARTS = [
     ok('raw 미러 = 빈 슬롯 포함 전 행(3행)', r.mirrorRows === 3);
     ok('검색 명단 = 이름 있는 행만(2행) — 파서 규칙 그대로', r.indexRows === 2);
     ok('제출 판정도 파서가 한다(1건)', r.submittedCount === 1);
+  }
+  {
+    const maskedHeaders = [...HEADERS, '차수'];
+    const masked = [
+      {
+        seq: 3,
+        phone8: '55556666',
+        row_json: { 번호: '1', 구매일자: '9 / 1 (화)', 주문자: '김주현', 연락처: '6666', 결제금액: '39900', 리뷰제출: '9/1 22:01', 입금: '', 차수: '2차' },
+      },
+      {
+        seq: 4,
+        phone8: '77778888',
+        row_json: { 번호: '2', 구매일자: '9 / 1 (화)', 주문자: '보관대상', 연락처: '8888', 결제금액: '39900', 리뷰제출: '9/1 22:02', 입금: '', 차수: '1차' },
+      },
+    ];
+    const { db, log } = makeStub({ parts: masked, storedHeaders: maskedHeaders, closedRounds: '1차' });
+    ledger.__setPoolForTest(db);
+    const dry = await ledger.rebuildLedgers({ sheetId: 'S1', tabName: 'T1', dryRun: true });
+    ok('표시용 연락처가 8자리 미만이면 참여자 원장의 phone8을 장부에 보충',
+      dry.participantPhoneFallbackCount === 1);
+    ok('마감·보관 차수는 보충 건수에서 제외', dry.excludedRows === 1);
+    await ledger.rebuildLedgers({ sheetId: 'S1', tabName: 'T1', by: 'phone-fallback-test' });
+    const inserted = log.client.find(c => /INSERT INTO review_index \(/.test(c.sql));
+    ok('보충한 phone8이 review_index에 기록되어 입금대상 필수키가 남는다',
+      inserted && inserted.params[16] === '55556666');
+    const rawInsert = log.client.find(c => /INSERT INTO raw_sheet_rows/.test(c.sql));
+    ok('전체 phone8은 작업표 JSON/RAW 미러에 복원하지 않는다',
+      rawInsert && !JSON.stringify(rawInsert.params).includes('55556666'));
   }
   {
     /* ★★ 저장된 장부 헤더는 `detected_headers`(진짜 열 이름 줄)를 봐야 한다 — `headers` 는
