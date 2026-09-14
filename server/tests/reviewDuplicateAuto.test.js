@@ -19,9 +19,11 @@ const root = path.join(__dirname, '..');
 const candidate = (extra = {}) => ({
   file_id: 'NEW', file_name: 'new.png', sheet_id: 'S', tab_name: 'T', row_index: 8,
   reviewer_name: '새리뷰어', file_hash: 'HASH', uploaded_at: '2026-09-02T00:00:00Z',
+  completion_order_at: '2026-09-04T00:00:00Z',
   match_file_id: 'KEEP', match_file_name: 'keep.png', match_sheet_id: 'S',
   match_tab_name: 'T', match_row_index: 7, match_reviewer_name: '기존리뷰어',
   match_uploaded_at: '2026-09-01T00:00:00Z', total_count: '2',
+  match_completion_order_at: '2026-09-03T00:00:00Z',
   ...extra,
 });
 
@@ -54,7 +56,10 @@ function txPool(handler) {
     assert.strictEqual(out.truncated, true);
     assert.ok(/checks->'duplicate'->>'verdict' = 'fail'/.test(query.sql));
     assert.ok(/s\.file_hash IS NOT NULL AND s\.file_hash = k\.file_hash/.test(query.sql));
-    assert.ok(/s\.uploaded_at > k\.uploaded_at/.test(query.sql));
+    assert.ok(/CASE WHEN s\.upload_batch_id IS NULL THEN s\.uploaded_at ELSE s\.completed_at END/.test(query.sql));
+    assert.ok(/CASE WHEN k\.upload_batch_id IS NULL THEN k\.uploaded_at ELSE k\.completed_at END/.test(query.sql));
+    assert.ok(/ELSE s\.completed_at END\s*>\s*CASE WHEN k\.upload_batch_id/.test(query.sql),
+      '신규 파일은 업로드 순서가 아니라 실제 제출 완료 순서로 제거본 결정');
     assert.ok(/NOT \(s\.sheet_id = k\.sheet_id AND s\.tab_name = k\.tab_name/.test(query.sql));
     assert.ok(/s\.completed_at IS NOT NULL OR s\.upload_batch_id IS NULL/.test(query.sql));
     assert.ok(/k\.completed_at IS NOT NULL OR k\.upload_batch_id IS NULL/.test(query.sql));

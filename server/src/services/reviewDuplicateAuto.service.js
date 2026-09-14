@@ -67,14 +67,20 @@ const _completedSql = (a) => `
     )
   )`;
 
+// 신규 묶음은 실제 제출 완료 시각, 묶음 도입 전 레거시는 업로드 시각을 쓴다.
+// 레거시 completed_at은 마이그레이션 실행 시각으로 백필되어 선후 판정 근거로 쓸 수 없다.
+const _completionOrderSql = (a) =>
+  `CASE WHEN ${a}.upload_batch_id IS NULL THEN ${a}.uploaded_at ELSE ${a}.completed_at END`;
+
 function _candidateQuery({ exact = false, scoped = false, lock = false } = {}) {
   return `SELECT i.file_id,
                  s.file_name, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name,
-                 s.file_hash, s.uploaded_at,
+                 s.file_hash, s.uploaded_at, ${_completionOrderSql('s')} AS completion_order_at,
                  k.file_id AS match_file_id, k.file_name AS match_file_name,
                  k.sheet_id AS match_sheet_id, k.tab_name AS match_tab_name,
                  k.row_index AS match_row_index, k.reviewer_name AS match_reviewer_name,
-                 k.uploaded_at AS match_uploaded_at${lock ? '' : ', COUNT(*) OVER() AS total_count'}
+                 k.uploaded_at AS match_uploaded_at,
+                 ${_completionOrderSql('k')} AS match_completion_order_at${lock ? '' : ', COUNT(*) OVER() AS total_count'}
             FROM review_inspections i
             JOIN review_submissions s ON s.file_id = i.file_id
             JOIN review_submissions k
@@ -85,8 +91,9 @@ function _candidateQuery({ exact = false, scoped = false, lock = false } = {}) {
              AND COALESCE(s.slot_key, 'review') = 'review'
              AND COALESCE(k.slot_key, 'review') = 'review'
              AND s.file_hash IS NOT NULL AND s.file_hash = k.file_hash
-             AND s.uploaded_at IS NOT NULL AND k.uploaded_at IS NOT NULL
-             AND s.uploaded_at > k.uploaded_at
+             AND ${_completionOrderSql('s')} IS NOT NULL
+             AND ${_completionOrderSql('k')} IS NOT NULL
+             AND ${_completionOrderSql('s')} > ${_completionOrderSql('k')}
              AND NOT (s.sheet_id = k.sheet_id AND s.tab_name = k.tab_name
                       AND COALESCE(s.row_index, -1) = COALESCE(k.row_index, -1))
              AND (
@@ -101,7 +108,7 @@ function _candidateQuery({ exact = false, scoped = false, lock = false } = {}) {
              AND ${_completedSql('k')}
              ${exact ? 'AND s.file_id = $1 AND k.file_id = $2' : ''}
              ${scoped ? 'AND s.sheet_id = $1 AND s.tab_name = $2' : ''}
-           ORDER BY s.uploaded_at ASC, s.file_id ASC
+           ORDER BY ${_completionOrderSql('s')} ASC, s.file_id ASC
            ${lock ? 'LIMIT 1 FOR UPDATE OF s, k' : `LIMIT $${scoped ? 3 : 1}`}`;
 }
 
@@ -123,6 +130,8 @@ async function listConfirmedDuplicates({ sheetId, tabName, limit = PREVIEW_LIMIT
     matchReviewerName: r.match_reviewer_name || '',
     uploadedAt: r.uploaded_at,
     matchUploadedAt: r.match_uploaded_at,
+    completionOrderAt: r.completion_order_at,
+    matchCompletionOrderAt: r.match_completion_order_at,
   }));
   const total = rows[0] ? Number(rows[0].total_count) || candidates.length : 0;
   const pairs = candidates.map(c => ({ fileId: c.fileId, matchFileId: c.matchFileId }));
