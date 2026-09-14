@@ -275,9 +275,19 @@ async function revertRoute({ fileId, by = 'revert' } = {}) {
     );
   } else {
     await _db().query(
-      `UPDATE review_submissions
-          SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
-        WHERE file_id = $1`, [fileId]);
+      `WITH restored AS (
+         UPDATE review_submissions
+            SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
+          WHERE file_id = $1
+          RETURNING file_id, slot_key
+       )
+       UPDATE review_inspections i
+          SET slot_key = restored.slot_key,
+              checks = COALESCE(i.checks, '{}'::jsonb) - 'receiptValidation',
+              status = 'pending', resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+              attempts = 0, updated_at = NOW()
+         FROM restored
+        WHERE i.file_id = restored.file_id`, [fileId]);
   }
   await recomputePrimary({ sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index });
   let reinspection = null;
@@ -325,10 +335,20 @@ async function revertRouteFromEvent({ id, by = 'revert' } = {}) {
 async function _recordRouteMove({ fileId, targetSlot, routedBy, receipt = false, requireUnrouted = false } = {}) {
   if (!receipt) {
     return _db().query(
-      `UPDATE review_submissions
-          SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
-              routed_at = NOW(), routed_by = $3
-        WHERE file_id = $1${requireUnrouted ? ' AND routed_from_slot IS NULL' : ''}`,
+      `WITH moved AS (
+         UPDATE review_submissions
+            SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
+                routed_at = NOW(), routed_by = $3
+          WHERE file_id = $1${requireUnrouted ? ' AND routed_from_slot IS NULL' : ''}
+          RETURNING file_id, slot_key
+       )
+       UPDATE review_inspections i
+          SET slot_key = moved.slot_key,
+              checks = COALESCE(i.checks, '{}'::jsonb) - 'receiptValidation',
+              status = 'pending', resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+              attempts = 0, updated_at = NOW()
+         FROM moved
+        WHERE i.file_id = moved.file_id`,
       [fileId, targetSlot, routedBy]
     );
   }

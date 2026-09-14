@@ -53,8 +53,10 @@ const db = {
         '신규 영수증은 전용 판정 통과 기록이 있어야 한다');
       assert.match(sql, /ri\.status = 'resolved' AND ri\.resolution = 'ok'[\s\S]*ri\.checks[\s\S]*receiptValidation/,
         '내부 정상 승인은 영수증 전용 검증 키가 있는 건만 허용해야 한다');
-      assert.match(sql, /rs\.slot_key = r\.receipt_key OR EXISTS \([\s\S]*role_ri\.checks[\s\S]*receiptValidation/,
+      assert.match(sql, /rs\.slot_key = r\.receipt_key OR \([\s\S]*EXISTS \([\s\S]*role_ri\.checks[\s\S]*receiptValidation/,
         '슬롯 key가 바뀐 과거 제출도 영수증 전용 검증 증거로 역할을 보존해야 한다');
+      assert.match(sql, /COALESCE\(rs\.slot_key, 'review'\) NOT IN \('review', 'order_capture', 'confirm', 'trashed'\)/,
+        '리뷰·구매캡처로 명시 이동된 파일은 과거 영수증 증거가 남아도 지급 대상이 아니어야 한다');
       assert.doesNotMatch(sql, /ai_confidence|checks->'format'->>'kind' = 'receipt'/,
         '전용 검증 없는 과거 고신뢰 분류가 사업자번호 대조를 우회하면 안 된다');
       return { rows: [
@@ -143,6 +145,10 @@ const db = {
     '수동 현영 재검수는 기존 정상 승인을 먼저 무효화하고 실패 시 pending을 남겨야 한다');
   assert.match(fileRouteService, /WITH moved AS \([\s\S]*UPDATE review_submissions[\s\S]*INSERT INTO review_inspections[\s\S]*resolution = NULL/,
     '수동 현영 슬롯 이동과 기존 정상 승인 무효화 사이에 입금 요청이 끼어들 수 없어야 한다');
+  assert.match(fileRouteService, /if \(!receipt\)[\s\S]*WITH moved AS \([\s\S]*UPDATE review_submissions[\s\S]*checks = COALESCE\(i\.checks, '\{\}'::jsonb\) - 'receiptValidation'[\s\S]*resolution = NULL/,
+    '영수증을 리뷰·구매캡처로 옮기는 순간 지급 승인 증거를 원자적으로 제거해야 한다');
+  assert.match(fileRouteService, /backTarget === 'receipt'[\s\S]*else \{[\s\S]*WITH restored AS \([\s\S]*checks = COALESCE\(i\.checks, '\{\}'::jsonb\) - 'receiptValidation'/,
+    '자동 이동을 리뷰 칸으로 되돌릴 때도 영수증 승인 증거를 제거해야 한다');
   assert.match(fileRouteService, /target === 'receipt'[\s\S]{0,700}resolveTargetFolder\(\{ target: 'capture', sheetId, tabName \}\)[\s\S]{0,300}getOrCreateSubFolder\(receiptBase, receiptLabel\)/,
     '현금영수증은 공개 리뷰 폴더가 아닌 비공개 구매캡처 경로에 보관해야 한다');
   assert.match(uploadRoute, /if \(_isReceiptUpload\)[\s\S]{0,700}target: 'receipt'[\s\S]{0,700}공개 리뷰 폴더 업로드 차단/,
