@@ -972,7 +972,8 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       </div>
       <div class="stepbar-labels">
         <span id="sl1" class="sl active">① 정보 확인</span>
-        <span id="sl2" class="sl">② 이미지 제출</span>
+        <span id="sl2" class="sl">② 리뷰 제출</span>
+        <span id="sl3" class="sl hidden">③ 현금영수증</span>
       </div>
     </div>
 
@@ -1007,7 +1008,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
         </div>
       </div>
 
-      <!-- STEP 2: 이미지 제출 -->
+      <!-- STEP 2: 리뷰 제출 -->
       <div id="step2" class="step-pane">
         <div class="pane-card">
           <div class="pane-title">
@@ -1049,6 +1050,9 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <button id="btnSubmit" class="btn-submit" onclick="submitReview()">
               <i class="fas fa-paper-plane"></i> 제출하기
             </button>
+            <button id="btnToReceipt" class="btn-submit hidden" onclick="_submitReviewThenReceipt()">
+              <i class="fas fa-paper-plane"></i> 리뷰 제출 후 다음
+            </button>
           </div>
           <p class="submit-safe">
             <i class="fas fa-shield-alt"></i> 이미지는 캠페인 진행자만 확인합니다
@@ -1062,6 +1066,44 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <li><i class="fas fa-check"></i> 별점·내용·날짜가 모두 포함되어야 합니다</li>
             <li><i class="fas fa-check"></i> 화면 전체가 나오도록 캡처해주세요</li>
           </ul>
+        </div>
+      </div>
+
+      <!-- STEP 3: 현금영수증 제출 (현금영수증 슬롯이 있는 작업만 표시) -->
+      <div id="step3" class="step-pane">
+        <div class="pane-card receipt-step-card">
+          <div class="pane-title">
+            <div class="pane-num receipt-step-num">3</div>
+            <div>
+              <h2>현금영수증 제출</h2>
+              <p>발행이 확정된 경우에만 이미지를 선택하세요</p>
+            </div>
+          </div>
+
+          <div id="csReceiptHost"></div>
+
+          <div class="receipt-step-note">
+            <i class="fas fa-clock"></i>
+            <div>
+              <strong>아직 발행 전이면 나중에 제출해도 됩니다</strong>
+              <p>리뷰 제출은 먼저 완료되고, 현금영수증은 발행 확정 후 이 화면에서 따로 제출할 수 있어요.</p>
+            </div>
+          </div>
+
+          <div class="step-nav receipt-step-actions">
+            <button class="btn-ghost" onclick="goStep(2)">
+              <i class="fas fa-arrow-left"></i> 이전
+            </button>
+            <button id="btnSkipReceipt" class="btn-ghost" onclick="_skipReceiptStep()">
+              <i class="fas fa-clock"></i> 나중에 제출
+            </button>
+            <button id="btnSubmitReceipt" class="btn-submit" onclick="submitReview()" disabled>
+              <i class="fas fa-receipt"></i> 현금영수증 제출하기
+            </button>
+          </div>
+          <p class="submit-safe">
+            <i class="fas fa-shield-alt"></i> 현금영수증은 내부 담당자만 확인합니다
+          </p>
         </div>
       </div>
 

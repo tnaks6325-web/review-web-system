@@ -25,6 +25,7 @@ const { resolveWorkManager } = require('../utils/workManager');   // 담당자 �
 const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
 const { findPaymentColumnIndex } = require('./columnResolver');   // 작업보드에 실제 표시되는 입금 열 판정 단일 출처
 const { loadPopularCreditMatches } = require('./popularCredit.service');   // 인기 참여권·운영 목적 라벨 단일 출처
+const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
 
 // ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
 //   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
@@ -962,7 +963,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             wo.work_order_created_at AS "workOrderCreatedAt",
-            rc.recruit_total AS "recruitTotal",
+            rc.recruit_total AS "recruitTotal", rc.cash_receipt_required AS "cashReceiptRequired",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
             tm.memo,
@@ -1079,8 +1080,9 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
        /* 업체 화면의 총건수도 작업 조건 카드와 같은 적용 정원(공고 우선, 없으면 발주)을 쓴다.
           활성 작업행 수는 내부 투영·정리용 값일 뿐 업체에게 "총 건수"로 보이면 안 된다. */
        LEFT JOIN LATERAL (
-         SELECT recruit_total
-           FROM recruit_campaigns rc
+          SELECT recruit_total,
+                 BOOL_OR(cash_receipt_required) OVER () AS cash_receipt_required
+            FROM recruit_campaigns rc
           WHERE rc.linked_sheet_id = t.sheet_id
             AND (rc.linked_tab_name = t.tab_name OR (t.tab_gid IS NOT NULL AND rc.linked_tab_gid = t.tab_gid))
           ORDER BY (rc.status = 'active') DESC, rc.created_at DESC
@@ -1103,8 +1105,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
   //   ★ 판정 원재료(capture_slots JSONB·income_type)는 응답에서 **버린다** — 316행 × JSONB 는 그냥
   //     전송 낭비이고, 화면이 필요한 것은 불리언 하나다(프론트 재판정 금지 = 규칙이 갈라지지 않는다).
   for (const r of rows) {
-    r.cashReceipt = hasCashReceiptSlot(r.captureSlots, r.incomeType);
-    const note = cashReceiptNote(r.captureSlots, r.incomeType);
+    r.cashReceipt = hasCashReceiptSlot(r.captureSlots, r.incomeType, r.cashReceiptRequired === true);
+    const note = cashReceiptNote(r.captureSlots, r.incomeType, r.cashReceiptRequired === true);
     if (note) r.cashReceiptNote = note;
     delete r.captureSlots; delete r.incomeType;
   }
@@ -2642,7 +2644,9 @@ function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합�
 // 은행·계좌·예금주와 내부 참여자 식별자는 계속 응답 페이로드에서 제외한다.
 function _isAdvertiserRestrictedHeader(header) {
   const key = String(header == null ? '' : header).replace(/\s+/g, '').toLowerCase();
-  return /참여자/.test(key)
+  return key === '현영'
+    || /현금영수증/.test(key)
+    || /참여자/.test(key)
     || /은행|bank/.test(key)
     || /계좌|account/.test(key)
     || /예금주/.test(key);
@@ -2718,39 +2722,126 @@ function _sameSheetRow(a, b) {
   return !!left && left === right;
 }
 
-// ── 리뷰 이미지(행별) — 업체 뷰어 미리보기 패널용. 읽기 전용·Drive 무접촉(파일ID만 반환). ──
+// ── 제출 이미지(행별) — 읽기 전용·Drive 무접촉(파일ID만 반환). ──
 //   키 = review_index.row_index(= campaign_participants.seq/sheet_row). 원장(032 review_submissions)이 1순위,
 //   그 이전에 저장된 대표 이미지(031 review_index.review_file_id)는 폴백으로 합류시킨다.
+//   ★ 현금영수증은 includeReceipt=true 인 내부 작업보드에만 합류한다. 기본 false = 업체용 payload 제외.
 //   ★ 파일 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(추측 불가 fileId) — 신규 저장소 0.
 const _RV_MAX_PER_ROW = 12;
-async function reviewImagesForTab({ sheetId, tabName } = {}) {
+async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } = {}) {
   if (!sheetId || !tabName) throw new Error('reviewImagesForTab: sheetId, tabName 필수');
   const db = getPool();
   const out = new Map();
-  const push = (rowIndex, fileId, slot, at) => {
+  const externallyExcludedFileIds = new Set();
+  let tabCfg = {};
+  let tabContextResolved = false;
+  try {
+    const { rows } = await db.query(
+      `SELECT COALESCE(tab_gid, '') AS gid, capture_slots, income_type
+         FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+      [sheetId, tabName]);
+    tabCfg = rows[0] || {};
+    tabContextResolved = !!rows[0];
+  } catch (_) { tabCfg = {}; }
+  let campaignCashReceipt = false;
+  if (includeReceipt) {
+    try {
+      campaignCashReceipt = (await require('./cashReceiptContext.service')
+        .cashReceiptRequiredForTab({ sheetId, tabName, client: db })) === true;
+    } catch (_) {}
+  }
+  let receiptSlotKey = 'receipt';
+  const knownSlotKeys = new Set(['review']);
+  try {
+    const { cashReceiptSlotInfo, effectiveCaptureSlots } = require('../utils/captureSlots');
+    const effectiveSlots = effectiveCaptureSlots(
+      tabCfg.capture_slots, tabCfg.income_type, null, campaignCashReceipt) || [];
+    for (const slot of effectiveSlots) if (slot && slot.key) knownSlotKeys.add(String(slot.key));
+    const info = cashReceiptSlotInfo(
+      tabCfg.capture_slots, tabCfg.income_type, campaignCashReceipt);
+    if (info.slot && info.slot.key) receiptSlotKey = info.slot.key;
+  } catch (_) {}
+  const push = (rowIndex, fileId, slot, at, roleEvidence = {}) => {
     if (rowIndex == null || !fileId) return;
+    const rawSlot = String(slot || 'review');
+    const inspectedKind = String(roleEvidence.inspectionKind || '');
+    // 리뷰 슬롯의 AI 오판을 담당자가 정상으로 확정했다면 format.kind='receipt' 흔적만으로
+    // 영수증 취급하지 않는다. 영수증 전용 receiptValidation 증거와 실제 영수증 슬롯은 그대로 우선한다.
+    const approvedReview = rawSlot === 'review'
+      && roleEvidence.inspectionStatus === 'resolved' && roleEvidence.resolution === 'ok'
+      && roleEvidence.receiptValidation !== true;
+    // 현재 탭 설정은 나중에 바뀐 수 있다. 제출 파일에 남은 검수 증거를 같이 보지
+    // 않으면 과거 slot2 영수증이 일반 이미지로 외부 응답에 노출될 수 있다.
+    const isReceipt = roleEvidence.receiptValidation === true
+      || (!approvedReview && (roleEvidence.receiptEvidence === true || inspectedKind === 'receipt'))
+      || rawSlot === receiptSlotKey || rawSlot === 'receipt' || rawSlot === 'cash_receipt';
+    if (!includeReceipt) {
+      if (isReceipt) {
+        externallyExcludedFileIds.add(String(fileId));
+        return;
+      }
+      // review 외 사용자 정의 슬롯은 현재 탭 설정과 파일 단위 비영수증 검수 증거가
+      // 모두 있을 때만 업체용에 낸다. 설정/검수 문맥을 못 읽으면 노출보다 제외이 안전하다.
+      if (roleEvidence.submission === true && rawSlot !== 'review') {
+        const verifiedNonReceipt = ['review', 'purchase_confirm', 'order_capture'].includes(inspectedKind);
+        if (!tabContextResolved || !knownSlotKeys.has(rawSlot) || !verifiedNonReceipt) {
+          externallyExcludedFileIds.add(String(fileId));
+          return;
+        }
+      }
+    }
     const k = String(rowIndex);
     if (!out.has(k)) out.set(k, []);
     const arr = out.get(k);
-    const sl = slot || 'review';
+    const sl = isReceipt ? 'receipt' : rawSlot;
     /* ★ 상한은 **묶음별**로 센다 — 전체 개수로 자르면 리뷰가 12장인 줄에서
        나중에 붙는 구매 캡처가 통째로 잘려 "구매 캡처 없음"으로 거짓 표시된다. */
     if (arr.filter(f => f.slot === sl).length >= _RV_MAX_PER_ROW || arr.some(f => f.fileId === fileId)) return;
     arr.push({ fileId, slot: sl, at: at || null });
   };
-  const { rows: subs } = await db.query(
-    `SELECT row_index, file_id, slot_key, COALESCE(uploaded_at, created_at) AS at
-       FROM review_submissions
-      WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND file_id IS NOT NULL
-      ORDER BY row_index, slot_key, COALESCE(uploaded_at, created_at) NULLS LAST`,
-    [sheetId, tabName]).catch(() => ({ rows: [] }));   // fail-soft: 이미지가 없어도 표는 떠야 한다
-  for (const r of subs) push(r.row_index, r.file_id, r.slot_key, r.at);
-  const { rows: idx } = await db.query(
-    `SELECT row_index, review_file_id, review_file_at
-       FROM review_index
-      WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
-    [sheetId, tabName]).catch(() => ({ rows: [] }));
-  for (const r of idx) push(r.row_index, r.review_file_id, 'review', r.review_file_at);
+  let subs = [];
+  let submissionEvidenceResolved = false;
+  try {
+    const result = await db.query(
+      `SELECT rs.row_index, rs.file_id, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) AS at,
+               (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+                 OR ri.checks->'format'->>'kind' = 'receipt') AS receipt_evidence,
+               (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation') AS receipt_validation,
+               COALESCE(ri.checks->'format'->>'kind', '') AS inspection_kind,
+               COALESCE(ri.status, '') AS inspection_status, COALESCE(ri.resolution, '') AS resolution
+         FROM review_submissions rs
+         LEFT JOIN review_inspections ri ON ri.file_id = rs.file_id
+        WHERE rs.sheet_id=$1 AND rs.tab_name=$2 AND rs.row_index IS NOT NULL AND rs.file_id IS NOT NULL
+        ORDER BY rs.row_index, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) NULLS LAST`,
+      [sheetId, tabName]);
+    subs = result.rows || [];
+    submissionEvidenceResolved = true;
+  } catch (_) {
+    // 내부 작업보드는 아래의 과거 대표이미지를 계속 볼 수 있다. 업체용은 영수증 역할
+    // 근거를 못 읽은 상태에서 review_index를 review라고 추측해 내보내지 않는다.
+  }
+  for (const r of subs) push(r.row_index, r.file_id, r.slot_key, r.at, {
+    submission: true,
+    receiptEvidence: r.receipt_evidence === true,
+    receiptValidation: r.receipt_validation === true,
+    inspectionKind: r.inspection_kind,
+    inspectionStatus: r.inspection_status,
+    resolution: r.resolution,
+  });
+  let idx = [];
+  if (includeReceipt || submissionEvidenceResolved) {
+    const result = await db.query(
+      `SELECT row_index, review_file_id, review_file_at
+         FROM review_index
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
+      [sheetId, tabName]).catch(() => ({ rows: [] }));
+    idx = result.rows || [];
+  }
+  for (const r of idx) {
+    // 제출 원장에서 영수증/역할 미확정으로 제외한 파일을 과거 대표이미지가 다시 넣지 못한다.
+    if (!includeReceipt && externallyExcludedFileIds.has(String(r.review_file_id))) continue;
+    push(r.row_index, r.review_file_id, 'review', r.review_file_at);
+  }
   /* ── 구매 캡처(062 `order_submissions.capture_file_id`) ─────────────────────────
      ★★ 줄 짝짓기는 **`sheet_row`(그 주문이 실제로 기록된 줄)** 하나로 한다.
        `campaign_participants.order_submission_id` 링크는 오염 사례가 문서화돼 있어
@@ -2779,13 +2870,7 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
        tab_configs 에서 다시 구한다** — 화면이 보낸 값을 믿으면 낡은 화면이 남의 공고를 끌어온다.
      ★ 차수 재발행으로 공고가 여럿이면 전부 합류한다(같은 작업표 줄에 기록된 주문들이다).
      ★ fail-soft: 실패해도 위에서 모은 것은 그대로 나간다. */
-  let _gid = '';
-  try {
-    const { rows: tg } = await db.query(
-      `SELECT COALESCE(tab_gid, '') AS gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
-      [sheetId, tabName]);
-    _gid = (tg[0] && tg[0].gid) || '';
-  } catch (_) { _gid = ''; }
+  const _gid = tabCfg.gid || '';
   const { rows: campCaps } = await db.query(
     `SELECT os.sheet_row, os.capture_file_id, os.capture_uploaded_at
        FROM order_submissions os
@@ -2964,6 +3049,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
               transfer_bank AS "transferBank",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
+              cash_receipt_required AS "cashReceiptRequired",
               to_char(window_start,'HH24:MI') AS "windowStart",
               to_char(window_end,'HH24:MI')   AS "windowEnd",
               status, participation_mode AS "participationMode"
@@ -3060,7 +3146,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     }
 
     let cashReceipt = null;
-    try { cashReceipt = hasCashReceiptSlot(meta.captureSlots, meta.incomeType); } catch (_) { cashReceipt = null; }
+    try {
+      cashReceipt = hasCashReceiptSlot(
+        meta.captureSlots, meta.incomeType, !!(c && c.cashReceiptRequired), rtKey);
+    } catch (_) { cashReceipt = null; }
 
     /* 옵션별 결제금액(사용자 확정 2026-08-20 시안 v2) — "옵션이 있는 작업" 판정은
        worktableOptionColumn 규율과 같은 축: **살아있는(닫히지 않은) 공고 옵션**이 먼저고,
@@ -3199,6 +3288,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   }
   const maskPII = role === 'advertiser';       // 광고주(외부)만 마스킹 · AE(내부)는 전체
   const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin/staff)
+  const showCashReceiptStatus = ['master', 'admin', 'staff'].includes(role);
   const { rows: meta } = await db.query(
     `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.workboard_display_name AS "workboardDisplayName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
@@ -3237,6 +3327,19 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       WHERE cp.sheet_id=$1 AND cp.tab_name=$2 AND cp.deleted_at IS NULL AND cp.active = TRUE
         AND cp.held_at IS NULL
       ORDER BY cp.seq`, [sheetId, tabName]);
+  // 현금영수증 제출 상태는 내부 작업보드에서만 읽는다. 업체용 뷰어는 조회 자체를 건너뛰고
+  // 응답에도 컬럼·행 상태를 싣지 않는다. 지급 게이트와 같은 원장/슬롯 판정을 재사용한다.
+  let cashReceiptStates = null;
+  if (showCashReceiptStatus) {
+    try {
+      cashReceiptStates = await cashReceiptSubmissionStates(db, roster.map(row => ({
+        sheetId, tabName, rowIndex: row.seq,
+      })));
+    } catch (e) {
+      cashReceiptStates = new Map();
+      logger.warn(`[trackB] 현영 제출 상태 조회 실패 sheet=${sheetId} tab=${tabName}: ${e.message}`);
+    }
+  }
   let popularPurposeIds = new Set();
   if (showEdits) {
     try {
@@ -3352,7 +3455,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       const rj = roster.find(r => r.row_json && typeof r.row_json === 'object' && Object.keys(r.row_json).length);
       raw = rj ? Object.keys(rj.row_json).filter(k => k !== 'id') : [];
     }
-    if (showEdits) headers = raw;                                   // 내부: 시트 전체 헤더
+    // `현영`은 아래의 서버 파생 가상 컬럼 한 벌만 쓴다. 과거 시트에 동명 메모 열이 있어도
+    // 제출 원장 상태와 나란히 두 벌로 보이지 않게 원본 열은 교체한다.
+    if (showEdits) headers = raw.filter(h => String(h).replace(/\s+/g, '') !== '현영');
     else {
       // 광고주: 차단 목록의 다섯 신원·정산 정보만 제외하고 원본 컬럼을 유지한다.
       const candidates = _advertiserHeaderCandidates(raw, roster, advEditedHeaders);
@@ -3513,6 +3618,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
     if (maskPII) { syn.phone8 = _mask(syn.phone8); syn.name = _maskName(syn.name); syn.recipient = _maskName(syn.recipient); }
     if (showEdits) {
+      if (showCashReceiptStatus) {
+        const receiptState = cashReceiptStates.get(cashReceiptSubmissionRowKey(sheetId, tabName, r.seq));
+        syn.cashReceiptStatus = !receiptState ? 'unavailable'
+          : !receiptState.required ? 'not_applicable'
+            : !receiptState.configured ? 'configuration_error'
+              : receiptState.submitted ? 'submitted' : 'missing';
+      }
       syn.anchorType = anchor ? anchor.type : null;
       syn.editable = editable; syn.ambiguous = ambiguous;
       // 옛 '_hidden' 레코드(폐기된 필드)가 남아 있어도 편집 배지로 세지 않는다.
@@ -3662,6 +3774,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
+    // 가상 컬럼: 시트에 쓰지 않고 내부 응답에서만 선언한다. 업체용 응답에는 이 필드와
+    // 각 행의 cashReceiptStatus가 모두 없어 제출 여부를 역추정할 수 없다.
+    if (showCashReceiptStatus) res.cashReceiptColumn = { key: '__cashReceiptStatus', label: '현영' };
     /* ★ 그 탭의 상태 칸(리뷰제출·입금) 헤더명 — 화면 잠금·[📎 수동 리뷰제출] 판정의 **단일 출처**.
        화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
        갈려 "직접 타이핑은 되는데 수동 제출 메뉴는 없는" 상태가 된다(2026-08-21 실측).
@@ -5508,6 +5623,10 @@ async function tabStatsMap({ force = false } = {}) {
               tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
               tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl", tc.income_type AS "incomeType",
               tc.capture_slots AS "captureSlots",
+              (SELECT BOOL_OR(rc.cash_receipt_required) FROM recruit_campaigns rc
+                 WHERE rc.linked_sheet_id = tc.sheet_id
+                   AND (rc.linked_tab_name = tc.tab_name
+                        OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))) AS "cashReceiptRequired",
               -- ★ 담당자 판정 원천(회차 #18) — 작업담당(065) 이 tab_configs.manager 보다 우선한다.
               --   tc.manager 는 접수 시점에 한 번만 채워지는 blank-only 칸이라 오더에서 담당자가
               --   바뀌어도 안 따라온다(payment.service 와 같은 함정 — resolveWorkManager 로 통일).
@@ -5586,9 +5705,11 @@ async function tabStatsMap({ force = false } = {}) {
         //     쓰는 것과 **같은 함수**다(income_type '현영' + 관리자 명시 receipt 슬롯). 종전에는 여기만
         //     income_type 만 봐서, 수동 슬롯 탭은 "버튼은 비활성인데 서버는 허용"으로 갈라져 있었다.
         folderUrl: r.folderUrl || null, captureFolderUrl: r.captureFolderUrl || null,
-        cashReceipt: hasCashReceiptSlot(r.captureSlots, r.incomeType),
+        cashReceipt: hasCashReceiptSlot(r.captureSlots, r.incomeType, r.cashReceiptRequired === true),
         // 오설정(현영인데 슬롯에 현금영수증 칸 없음)일 때만 실린다 — '대상 아님'으로 뭉개지 않게.
-        ...(cashReceiptNote(r.captureSlots, r.incomeType) ? { cashReceiptNote: cashReceiptNote(r.captureSlots, r.incomeType) } : {}),
+        ...(cashReceiptNote(r.captureSlots, r.incomeType, r.cashReceiptRequired === true)
+          ? { cashReceiptNote: cashReceiptNote(r.captureSlots, r.incomeType, r.cashReceiptRequired === true) }
+          : {}),
         closeoutDate: r.closeoutDate || null, closeoutRows: r.closeoutRows == null ? null : +r.closeoutRows,
       };
     }

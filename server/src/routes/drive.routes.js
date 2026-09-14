@@ -1,11 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { linkReviewFilesToRows } = require('../services/reviewFileLink.service');
+
+// 공개 리포트에서 제외할 영수증 검수 증거. 리뷰 슬롯 파일을 AI가 영수증으로 오판했어도
+// 담당자가 정상(ok)으로 확정했다면 format 흔적만으로 숨기지 않는다. 영수증 전용
+// receiptValidation이 있으면 승인 상태와 무관하게 계속 제외한다.
+const PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL = `(
+  COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+  OR (
+    COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
+    AND NOT (COALESCE(ri.status, '') = 'resolved' AND COALESCE(ri.resolution, '') = 'ok')
+  )
+)`;
 
 /**
  * 헬퍼: Google Drive URL에서 폴더 ID 추출
@@ -1650,27 +1661,25 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
 //     생성·연결한 뒤 공유(미연결 탭이어도 유효한 링크 확보, 빈 폴더 가능).
 // 비파괴: 파일 이동/복제 없음. 폴더에 읽기 권한만 부여(드라이브에서 언제든 해제 가능).
 // ═══════════════════════════════════════════════════════════
-router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
+router.post('/share-review-folder', authMiddleware, internalOnlyMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, folderUrl } = req.body || {};
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) {
+      return res.status(400).json({ ok: false, error: 'sheetId와 tabName이 필요합니다.' });
+    }
 
     // ── 1) 대상 [리뷰] 폴더 확보 ──
-    let url = (folderUrl || '').trim();
-    if (!url && sheetId && tabName) {
-      const { rows } = await pool.query(
-        'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
-      );
-      url = rows[0]?.folder_url || '';
-    }
+    // caller의 folderUrl은 받지 않는다. 서버에 연결된 정확한 리뷰 폴더만 공유할 수 있다.
+    const { rows: configured } = await pool.query(
+      'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]
+    );
+    let url = configured[0]?.folder_url || '';
     let folderId = extractFolderId(url);
 
     // 미연결 탭이면 [리뷰] 폴더를 생성·연결 (빈 폴더라도 유효한 링크 확보)
     let created = false;
     if (!folderId) {
-      if (!sheetId || !tabName) {
-        return res.json({ ok: false, error: '폴더를 찾을 수 없습니다. folderUrl 또는 sheetId+tabName이 필요합니다.' });
-      }
       const rootFolderId = getRootFolderId();
       if (!rootFolderId) return res.json({ ok: false, error: 'AI_REVIEW_FOLDER_ID 미설정' });
       const sheetTitle = await getSheetTitle(sheetId, tabName);
@@ -1775,7 +1784,8 @@ router.post('/report-link', authMiddleware, async (req, res, next) => {
 });
 
 // GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 캡처 목록 (무인증)
-//   review_submissions 원장 우선 → 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백.
+//   명시적 review 원장 우선 → 비어 있으면 review_index 대표 리뷰만 사용.
+//   폴더 재귀 스캔은 역할을 판별할 수 없어 현금영수증을 노출하므로 공개 경로에서 사용하지 않는다.
 router.get('/report/:code', async (req, res, next) => {
   try {
     const code = String(req.params.code || '').trim();
@@ -1792,9 +1802,16 @@ router.get('/report/:code', async (req, res, next) => {
     let images = [];
     try {
       const sub = await pool.query(
-        `SELECT file_id, file_name, reviewer_name, uploaded_at
-           FROM review_submissions
-          WHERE sheet_id = $1 AND tab_name = $2 AND file_id IS NOT NULL AND file_id <> ''
+        `SELECT rs.file_id, rs.file_name, rs.reviewer_name, rs.uploaded_at
+           FROM review_submissions rs
+          WHERE rs.sheet_id = $1 AND rs.tab_name = $2
+            AND rs.file_id IS NOT NULL AND rs.file_id <> ''
+            AND COALESCE(rs.slot_key, 'review') = 'review'
+            AND NOT EXISTS (
+              SELECT 1 FROM review_inspections ri
+               WHERE ri.file_id = rs.file_id
+                 AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
+            )
           ORDER BY reviewer_name NULLS LAST, uploaded_at ASC NULLS LAST`,
         [sheetId, tabName]
       );
@@ -1805,22 +1822,35 @@ router.get('/report/:code', async (req, res, next) => {
       }));
     } catch (_) {}
 
-    // 2) 원장이 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백
+    // 2) 원장이 비어 있으면 명시적 대표 리뷰만 폴백
     if (images.length === 0) {
       try {
-        const { rows: tcfg } = await pool.query(
-          'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        const fallback = await pool.query(
+          `SELECT r.review_file_id AS file_id, r.review_file_name AS file_name,
+                  r.reviewer_name, r.review_file_at AS uploaded_at
+             FROM review_index r
+            WHERE r.sheet_id = $1 AND r.tab_name = $2
+               AND r.review_file_id IS NOT NULL AND r.review_file_id <> ''
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_submissions rs_role
+                  WHERE rs_role.file_id = r.review_file_id
+                    AND COALESCE(rs_role.slot_key, 'review') <> 'review'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_inspections ri
+                 WHERE ri.file_id = r.review_file_id
+                   AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
+              )
+            ORDER BY r.reviewer_name NULLS LAST, r.review_file_at ASC NULLS LAST`,
           [sheetId, tabName]
         );
-        const folderId = extractFolderId(tcfg[0]?.folder_url);
-        if (folderId) {
-          const files = await driveService.listFolderFilesRecursive(folderId);
-          images = files
-            .filter(f => (f.mimeType || '').indexOf('image/') === 0 || /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''))
-            .map(f => ({ id: f.id, name: f.name || '', reviewer: (driveService.extractReviewerNameFromFile(f.name) || '').trim() }));
-        }
+        images = fallback.rows.map(r => ({
+          id: r.file_id,
+          name: r.file_name || '',
+          reviewer: (r.reviewer_name || driveService.extractReviewerNameFromFile(r.file_name) || '').trim(),
+        }));
       } catch (e) {
-        logger.warn(`[report] 폴더 스캔 폴백 실패 (${code}): ${e.message}`);
+        logger.warn(`[report] 대표 리뷰 폴백 실패 (${code}): ${e.message}`);
       }
     }
 

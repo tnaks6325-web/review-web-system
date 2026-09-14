@@ -21,7 +21,7 @@ function show(idOrEl, displayType) {
 // selectedRows: item 배열 (1건이면 길이 1)
 // filesByIdx:   { [idx]: File[] }  — 슬롯별 파일 목록
 // memoByIdx:    { [idx]: string }  — 슬롯별 메모 (기존 단건 memoTxt와 별도)
-const S = { selectedRow: null, selectedRows: [], filesByIdx: {}, memoByIdx: {}, files: [], step: 1 };
+const S = { selectedRow: null, selectedRows: [], filesByIdx: {}, memoByIdx: {}, files: [], step: 1, receiptStepMode: false };
 const ADMIN_SESSION_KEY  = "rapp_admin_exp";
 const ADMIN_SESSION_MS   = 8 * 60 * 60 * 1000;
 const REVIEWER_AUTH_KEY  = "rapp_reviewer_auth";  // ★ 리뷰어 로그인 세션 키
@@ -2137,7 +2137,8 @@ function extractProductOption(row) {
 function renderResults(results) {
   const section = document.getElementById("resultsSection");
   const list    = document.getElementById("resultsList");
-  const pending = results.filter(item => !item.isSubmitted);
+  // 리뷰를 먼저 끝내고 영수증을 나중에 내는 정상 흐름도 검색 결과에서 다시 열려야 한다.
+  const pending = results.filter(item => !item.isSubmitted || _isReceiptPendingItem(item));
 
   document.getElementById("resultsCount").textContent = `${pending.length}건`;
   list.innerHTML = "";
@@ -2172,7 +2173,10 @@ function renderResults(results) {
     const name    = (item.displayName || "이름 없음").trim();
     const sid     = (item.sheetId     || "").trim();
     const tab     = (item.tabName     || "").trim();
-    const key     = name + "\x00" + sid + "\x00" + tab; // null구분자로 key 구성
+    // 영수증만 남은 완료 행은 단건으로 연다. 미제출 다건 묶음과 합치면 슬롯×행 화면이 없어
+    // 어느 참여 건의 영수증인지 고를 수 없다.
+    const receiptSuffix = _isReceiptPendingItem(item) ? "\x00receipt\x00" + String(item.rowIndex) : "";
+    const key     = name + "\x00" + sid + "\x00" + tab + receiptSuffix; // null구분자로 key 구성
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -2204,12 +2208,13 @@ function renderResults(results) {
         : `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
            <div class="result-product-label result-product-empty">참여 작업 정보 없음</div>`;
       const card = document.createElement("div");
+      const receiptPending = _isReceiptPendingItem(item);
       card.className = "result-card";
       card.innerHTML = `
         <div class="result-avatar"></div>
         <div class="result-body">${productHtml}</div>
         <div class="result-right">
-          <span class="status-badge status-pending">미제출</span>
+          <span class="status-badge status-pending">${receiptPending ? '현금영수증 미제출' : '미제출'}</span>
           <i class="fas fa-chevron-right result-chevron"></i>
         </div>`;
       card.addEventListener("click", () => openSubmitMulti(items));
@@ -2279,6 +2284,9 @@ function openSubmitMulti(items) {
   //   (다중 행 선택 시에는 기존 행별 슬롯 UI를 유지 — MVP는 슬롯×행 매트릭스 미지원)
   const cs0 = items[0] && Array.isArray(items[0].captureSlots) ? items[0].captureSlots : null;
   S.captureSlots = (items.length === 1 && cs0 && cs0.length > 1) ? cs0 : null;
+  const receiptSlot = S.captureSlots && S.captureSlots.find(_csIsReceiptSlot);
+  S.receiptStepMode = !!receiptSlot;
+  _setReceiptStepMode(S.receiptStepMode);
 
   // 헤더 타이틀 — [날짜] [표시명/탭명] 옵션:옵션명
   const firstForTitle = items[0];
@@ -2326,12 +2334,17 @@ function openSubmitMulti(items) {
   const anyDone = items.some(it => it.isSubmitted);
   const doneBox  = document.getElementById("alreadyDoneBox");
   const btnStep2 = document.getElementById("btnToStep2");
+  const submitted0 = new Set(Array.isArray(firstItem.submittedSlots) ? firstItem.submittedSlots : []);
+  const receiptPending = !!(receiptSlot && !submitted0.has(receiptSlot.key));
   doneBox.classList.toggle("hidden", !anyDone);
   doneBox.style.display = anyDone ? "" : "none";
-  btnStep2.disabled = items.every(it => it.isSubmitted);
+  // 리뷰가 끝난 뒤에도 미제출 현금영수증만 추가할 수 있어야 한다.
+  btnStep2.disabled = items.every(it => it.isSubmitted) && !receiptPending;
 
   // STEP1 버튼 텍스트: 다건이면 "N건 모두 맞습니다"
-  btnStep2.innerHTML = items.length > 1
+  btnStep2.innerHTML = receiptPending && firstItem.isSubmitted
+    ? `<i class="fas fa-receipt"></i> 현금영수증 제출로 이동`
+    : items.length > 1
     ? `<i class="fas fa-check"></i> ${items.length}건 모두 맞습니다`
     : `<i class="fas fa-check"></i> 맞습니다`;
 
@@ -2537,6 +2550,8 @@ function _renderMultiImageSlots(items) {
   if (slotsWrap) slotsWrap.remove();
   let csWrap = document.getElementById("csSlotsWrap");
   if (csWrap) csWrap.remove();
+  const receiptHost = document.getElementById("csReceiptHost");
+  if (receiptHost) receiptHost.innerHTML = "";
   // 기존 단건 dropZone / memoWrap 가시성 제어
   const singleDrop  = document.getElementById("dropZone");
   const singleMemo  = document.querySelector(".memo-wrap");
@@ -2619,8 +2634,11 @@ function _renderCaptureSlots(item, slots, paneCard) {
   wrap.id = "csSlotsWrap";
   wrap.style.marginBottom = "14px";
 
-  slots.forEach((slot, i) => {
+  let reviewIndex = 0;
+  let receiptIndex = 0;
+  slots.forEach((slot) => {
     const isDone = submitted.has(slot.key);
+    const isReceipt = _csIsReceiptSlot(slot);
     // ★ D안(사용자 확정 2026-08-05): required:false 슬롯(현금영수증)은 **선택** —
     //   발행확정(배송완료·구매확정 후 0~3일) 전에는 캡처가 존재할 수 없어 완료 판정에서 빠진다.
     //   서버(requiredSlotKeys)가 같은 플래그로 판정하므로 여기는 표시만 맞춘다.
@@ -2636,7 +2654,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
     slotEl.id = `csSlot_${slot.key}`;
     slotEl.innerHTML = `
       <div class="mr-slot-header">
-        <div class="mr-slot-num">${i + 1}</div>
+        <div class="mr-slot-num">${isReceipt ? ++receiptIndex : ++reviewIndex}</div>
         <div class="mr-slot-title">${escHtml(slot.label || slot.key)}${optional ? ' <span style="font-size:.72rem;color:#B45309;font-weight:700">(선택 · 발행 확정 후 제출)</span>' : ''}${isDone ? ' <span style="font-size:.72rem;color:#16a34a;font-weight:600">(이미 제출 — 다시 올리면 교체)</span>' : ''}</div>
         ${statusHtml}
       </div>
@@ -2654,12 +2672,15 @@ function _renderCaptureSlots(item, slots, paneCard) {
       </div>
       ${optionalHint}
       <div id="csGuide_${slot.key}"></div>`;
-    wrap.appendChild(slotEl);
+    const receiptHost = document.getElementById("csReceiptHost");
+    if (isReceipt && receiptHost) receiptHost.appendChild(slotEl);
+    else wrap.appendChild(slotEl);
   });
 
   // ★ D안 ③: 현금영수증 슬롯이 있으면 발행방법 이미지를 "다시 보기"로 재안내(결제 후 재확인 시점).
   //   fail-soft — 조회 실패·미등록이면 아무것도 안 그린다(제출 흐름 무영향).
-  if (slots.some(s => s.key === 'receipt')) _csLoadCrGuides(item);
+  const receiptSlot = slots.find(_csIsReceiptSlot);
+  if (receiptSlot) _csLoadCrGuides(item, receiptSlot.key);
 
   // 공통 비고 입력 (행 1개이므로 단일 메모)
   const memoEl = document.createElement("textarea");
@@ -2673,18 +2694,32 @@ function _renderCaptureSlots(item, slots, paneCard) {
 
   const stepNav = paneCard.querySelector(".step-nav");
   paneCard.insertBefore(wrap, stepNav);
+  _updateReceiptStepActions();
 }
 
 /* ★ D안 ③ — 현금영수증 슬롯 아래 "발행방법 다시 보기" (접이식).
  *   이미지·라벨은 서버 provider-info의 cashReceiptGuideList(채널 표 단일 출처) 그대로 —
  *   프론트에 채널 사본을 두지 않는다. 등록된 이미지가 없거나 조회 실패 = 아무것도 안 그림. */
-async function _csLoadCrGuides(item) {
+function _csIsReceiptSlot(slot) {
+  return !!(slot && (slot.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(slot.label || ''))));
+}
+
+function _isReceiptPendingItem(item) {
+  if (!item || !item.isSubmitted) return false;
+  if (item.cashReceiptPending === true) return true;
+  const receiptSlot = Array.isArray(item.captureSlots) ? item.captureSlots.find(_csIsReceiptSlot) : null;
+  if (!receiptSlot) return false;
+  const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+  return !submitted.has(receiptSlot.key);
+}
+
+async function _csLoadCrGuides(item, receiptSlotKey = 'receipt') {
   try {
     const data = await gasGet({ action: 'getProviderInfo', sheetId: item.sheetId, tabName: item.tabName });
     // https 절대 URL만 <img src>로(저장 라우트도 같은 제약) + 따옴표 포함 값은 버림(속성 breakout 방지)
     const list = ((data && data.ok && Array.isArray(data.cashReceiptGuideList)) ? data.cashReceiptGuideList : [])
       .filter(g => g && /^https:\/\/[^"'<>\s]+$/.test(String(g.imageUrl || '')));
-    const box = document.getElementById('csGuide_receipt');
+    const box = document.getElementById('csGuide_' + receiptSlotKey);
     if (!box || !list.length) return;
     const bizNo = String((data && data.companyBusinessNo) || '').trim();
     box.innerHTML = `
@@ -2715,6 +2750,7 @@ async function _csAddFiles(slotKey, newFiles) {
     }
   }
   _csRenderPreview(slotKey);
+  _updateReceiptStepActions();
   // 1차 필터 — 미리보기는 먼저 그리고(사용자가 기다리지 않게) 판별은 뒤따라 붙인다
   _preCheckFiles('slot:' + slotKey, 'csSlot_' + slotKey, S.filesBySlot[slotKey],
     { ..._preCtx(0), slotKey });
@@ -2779,6 +2815,7 @@ function _csOnDrop(e, slotKey) {
 function _csRemoveFile(slotKey, fileIdx) {
   if (S.filesBySlot[slotKey]) S.filesBySlot[slotKey].splice(fileIdx, 1);
   _csRenderPreview(slotKey);
+  _updateReceiptStepActions();
   _preCheckFiles('slot:' + slotKey, 'csSlot_' + slotKey, S.filesBySlot[slotKey],
     { ..._preCtx(0), slotKey });
 }
@@ -2792,7 +2829,8 @@ function _csRenderPreview(slotKey) {
     preview.innerHTML = "";
     preview.classList.add("hidden");
     if (hint) hint.style.display = "";
-    if (status) { status.textContent = "대기"; status.className = "mr-slot-status wait"; }
+    const slot = (S.captureSlots || []).find(s => s.key === slotKey);
+    if (status) { status.textContent = slot?.required === false ? "선택" : "대기"; status.className = "mr-slot-status wait"; }
     return;
   }
   if (hint) hint.style.display = "none";
@@ -3125,16 +3163,105 @@ function openSubmit(item) {
 
 /* _openSubmitLegacy 제거됨 — openSubmit은 openSubmitMulti([item]) 래퍼로 대체 */
 
+/* ── 현금영수증 대상 작업만 리뷰/영수증 제출을 3단계로 분리 ── */
+function _setReceiptStepMode(on) {
+  const enabled = !!on;
+  const sl3 = document.getElementById("sl3");
+  const step3 = document.getElementById("step3");
+  const btnSubmit = document.getElementById("btnSubmit");
+  const btnToReceipt = document.getElementById("btnToReceipt");
+  if (sl3) sl3.classList.toggle("hidden", !enabled);
+  if (!enabled && step3) step3.classList.remove("active");
+  if (btnSubmit) btnSubmit.classList.toggle("hidden", enabled);
+  if (btnToReceipt) btnToReceipt.classList.toggle("hidden", !enabled);
+}
+
+function _csRequiredReviewSlots(item) {
+  if (!S.captureSlots) return [];
+  if (item?.isSubmitted) return [];
+  const submitted = new Set(Array.isArray(item?.submittedSlots) ? item.submittedSlots : []);
+  return S.captureSlots.filter(slot =>
+    !_csIsReceiptSlot(slot)
+    && slot.required !== false
+    && !submitted.has(slot.key)
+    && !(S.filesBySlot[slot.key] || []).length
+  );
+}
+
+function _updateReceiptStepActions() {
+  if (!S.receiptStepMode || !S.captureSlots) return;
+  const item = (S.selectedRows && S.selectedRows[0]) || S.selectedRow || {};
+  const receiptSlot = S.captureSlots.find(_csIsReceiptSlot);
+  const hasReceiptFile = !!(receiptSlot && (S.filesBySlot[receiptSlot.key] || []).length);
+  const btnSubmitReceipt = document.getElementById("btnSubmitReceipt");
+  const btnSkipReceipt = document.getElementById("btnSkipReceipt");
+  if (btnSubmitReceipt) btnSubmitReceipt.disabled = !hasReceiptFile;
+  if (btnSkipReceipt) {
+    btnSkipReceipt.classList.toggle("hidden", hasReceiptFile);
+    btnSkipReceipt.innerHTML = '<i class="fas fa-clock"></i> 나중에 제출';
+  }
+  const btnToReceipt = document.getElementById("btnToReceipt");
+  const hasReviewFiles = (S.captureSlots || []).some(slot =>
+    !_csIsReceiptSlot(slot) && (S.filesBySlot[slot.key] || []).length > 0
+  );
+  if (btnToReceipt) btnToReceipt.innerHTML = item.isSubmitted && !hasReviewFiles
+    ? '다음: 현금영수증 <i class="fas fa-arrow-right"></i>'
+    : '<i class="fas fa-paper-plane"></i> 리뷰 제출 후 다음';
+}
+
+function _submitReviewThenReceipt() {
+  const item = (S.selectedRows && S.selectedRows[0]) || S.selectedRow || {};
+  const missing = _csRequiredReviewSlots(item);
+  if (missing.length) {
+    const labels = missing.map(s => s.label || s.key).join(", ");
+    showToast(`${labels} 이미지를 먼저 선택해 주세요.`, "warning");
+    return;
+  }
+  const hasReviewFiles = (S.captureSlots || []).some(slot =>
+    !_csIsReceiptSlot(slot) && (S.filesBySlot[slot.key] || []).length > 0
+  );
+  // 이미 완료된 행의 재진입은 리뷰를 다시 제출하지 않고 영수증 단계만 연다.
+  // 블로그 포스팅 URL도 새 리뷰 제출이 아니므로 이 분기 뒤에서만 검사한다.
+  if (item.isSubmitted && !hasReviewFiles) {
+    goStep(3);
+    return;
+  }
+  if (_isBlogItem(item) && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
+    showToast(_BLOG_POST_URL_HINT, "warning");
+    return;
+  }
+  S.slotSubmitTrigger = "reviewThenReceipt";
+  submitReview();
+}
+
+function _skipReceiptStep() {
+  const item = (S.selectedRows && S.selectedRows[0]) || S.selectedRow || {};
+  if (item.isSubmitted) {
+    showToast("현금영수증은 발행 확정 후 따로 제출할 수 있어요.", "success");
+    resetApp();
+    return;
+  }
+  showToast("리뷰 제출을 먼저 완료해 주세요.", "warning");
+  goStep(2);
+}
+
 /* ── STEP 이동 ── */
 function goStep(n) {
-  [1, 2].forEach(i => {
+  const steps = S.receiptStepMode ? [1, 2, 3] : [1, 2];
+  if (!steps.includes(n)) n = 1;
+  steps.forEach(i => {
     document.getElementById(`step${i}`).classList.toggle("active", i === n);
     const sl = document.getElementById(`sl${i}`);
     sl.classList.remove("active", "done");
     if (i < n)        sl.classList.add("done");
     else if (i === n) sl.classList.add("active");
   });
-  document.getElementById("stepFill").style.width = n === 1 ? "25%" : "100%";
+  if (!S.receiptStepMode) {
+    document.getElementById("step3")?.classList.remove("active");
+    document.getElementById("stepFill").style.width = n === 1 ? "25%" : "100%";
+  } else {
+    document.getElementById("stepFill").style.width = n === 1 ? "33%" : n === 2 ? "66%" : "100%";
+  }
   S.step = n;
   // STEP2 진입 시 제출 버튼 텍스트 업데이트
   if (n === 2) {
@@ -3144,6 +3271,7 @@ function goStep(n) {
       ? `<i class="fas fa-paper-plane"></i> ${cnt}건 모두 제출하기`
       : '<i class="fas fa-paper-plane"></i> 제출하기';
   }
+  if (n === 3) _updateReceiptStepActions();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -3399,14 +3527,30 @@ function renderPreviews() {
 async function _submitReviewSlots(item) {
   const slots = S.captureSlots || [];
   const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+  const slotSubmitTrigger = S.slotSubmitTrigger;
+  S.slotSubmitTrigger = null;
 
-  // 이번에 업로드할 슬롯 = 파일이 첨부된 슬롯
-  const slotsToUpload = slots.filter(s => (S.filesBySlot[s.key] || []).length > 0);
+  // 2단계에서는 리뷰만, 3단계에서는 현금영수증만 업로드한다.
+  const slotsToUpload = slots.filter(s =>
+    (S.filesBySlot[s.key] || []).length > 0
+    && (slotSubmitTrigger === "reviewThenReceipt" ? !_csIsReceiptSlot(s) : true)
+  );
+
+  const requiredReviewKeys = slots
+    .filter(s => !_csIsReceiptSlot(s) && s.required !== false)
+    .map(s => s.key);
+  const reviewWasComplete = !!item.isSubmitted || requiredReviewKeys.every(k => submitted.has(k));
+  // 완료된 작업의 재진입은 작업 종류와 무관하게 영수증 파일만 추가한다. 블로그도 여기서
+  // 포스팅 URL을 다시 요구하거나 submitReview를 재호출하면 기존 완료 시각·메모가 덮인다.
+  const receiptOnlyAfterComplete = reviewWasComplete
+    && slotsToUpload.length > 0
+    && slotsToUpload.every(_csIsReceiptSlot);
 
   /* ★ 127(사용자 확정 2026-08-19): 블로그도 **캡처 + 포스팅URL 둘 다** 필수 — M4-2 의
      "캡처 0장 허용"을 뒤집었다. 이미 제출한 슬롯이 있는 재제출(URL 만 고침)은 캡처 재첨부 불요. */
   const _blogSlot = _isBlogItem(item);
-  if (_blogSlot && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
+  if (_blogSlot && !receiptOnlyAfterComplete
+      && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
     showToast(_BLOG_POST_URL_HINT, "warning");
     return;
   }
@@ -3430,7 +3574,12 @@ async function _submitReviewSlots(item) {
     return;
   }
 
-  const btn = document.getElementById("btnSubmit");
+  const btn = slotSubmitTrigger === "reviewThenReceipt"
+    ? document.getElementById("btnToReceipt")
+    : (S.receiptStepMode && S.step === 3)
+    ? document.getElementById("btnSubmitReceipt")
+    : document.getElementById("btnSubmit");
+  if (!btn) return;
   btn.disabled = true;
 
   const reviewerName = item.recipientName || item.displayName || "이름없음";
@@ -3533,22 +3682,27 @@ async function _submitReviewSlots(item) {
       return;
     }
 
-    // ── 제출 기록 + 완료 판정 (서버가 필요 슬롯 충족 여부 계산) ──
-    const now = new Date();
-    const submitTimeValue = `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const result = await gasPost({
-      action:       "submitReview",
-      sheetId:      item.sheetId,
-      tabName:      item.tabName,
-      gid:          item.gid,
-      rowIndex:     item.rowIndex,
-      reviewerName,
-      submitCol:    item.submitCol,
-      value:        submitTimeValue,
-      campaignName: item.campaignName,
-      memo,
-      uploadBatchId: reviewUploadBatchId,
-    }, 30000);
+    // 이미 리뷰가 끝난 건에 현금영수증만 추가하면 원래 리뷰 완료 시각을 다시 쓰지 않는다.
+    let result;
+    if (receiptOnlyAfterComplete) {
+      result = { success: true, ok: true, complete: true, missingSlots: [] };
+    } else {
+      const now = new Date();
+      const submitTimeValue = `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      result = await gasPost({
+        action:       "submitReview",
+        sheetId:      item.sheetId,
+        tabName:      item.tabName,
+        gid:          item.gid,
+        rowIndex:     item.rowIndex,
+        reviewerName,
+        submitCol:    item.submitCol,
+        value:        submitTimeValue,
+        campaignName: item.campaignName,
+        memo,
+        uploadBatchId: reviewUploadBatchId,
+      }, 30000);
+    }
     hideLoading();
 
     if (!result || (!result.success && !result.ok)) {
@@ -3569,19 +3723,44 @@ async function _submitReviewSlots(item) {
       if (slots.some(s => s.key === mk)) justUploaded.add(mk);
     }));
     const coveredKeys = new Set([...submitted, ...justUploaded]);
+    const receiptStored = slots
+      .filter(_csIsReceiptSlot)
+      .some(s => justUploaded.has(s.key));
+    if (receiptOnlyAfterComplete && !receiptStored) {
+      showToast("현금영수증 칸에 저장되지 않았습니다. 화면 안내를 확인하고 다시 첨부해 주세요.", "warning", 5000);
+      return;
+    }
     const complete = (typeof result.complete === 'boolean')
       ? result.complete
-      : slots.every(s => coveredKeys.has(s.key));
+      : slots.filter(s => s.required !== false).every(s => coveredKeys.has(s.key));
     const missing = Array.isArray(result.missingSlots) && result.missingSlots.length
       ? result.missingSlots
-      : slots.filter(s => !coveredKeys.has(s.key)).map(s => s.key);
+      : slots.filter(s => s.required !== false && !coveredKeys.has(s.key)).map(s => s.key);
 
     const slotLabel = k => (slots.find(s => s.key === k)?.label) || k;
+    if (slotSubmitTrigger === "reviewThenReceipt" && complete) {
+      item.isSubmitted = true;
+      item.submittedSlots = Array.from(coveredKeys);
+      slotsToUpload.forEach(slot => {
+        S.filesBySlot[slot.key] = [];
+        const status = document.getElementById("csStatus_" + slot.key);
+        if (status) { status.textContent = "✓ 제출됨"; status.className = "mr-slot-status ok"; }
+      });
+      showToast("리뷰 제출이 완료되었습니다.", "success");
+      goStep(3);
+      return;
+    }
     if (complete) {
-      const doneList = slots.map(s => `${escHtml(s.label || s.key)} ✓`).join(" / ");
-      document.getElementById("successMessage").innerHTML = replacedCurrent
-        ? '현재 건의 리뷰 캡처를 교체하였습니다.'
-        : `<strong>${escHtml(reviewerName)}</strong>님의 캡처가 모두 제출되었습니다 😊<br>`
+      const doneList = slots.map(s => coveredKeys.has(s.key)
+        ? `${escHtml(s.label || s.key)} ✓`
+        : `${escHtml(s.label || s.key)} <span style="color:#B45309">나중에 제출</span>`
+      ).join(" / ");
+      document.getElementById("successMessage").innerHTML = receiptOnlyAfterComplete
+        ? `<strong>${escHtml(reviewerName)}</strong>님의 현금영수증이 제출되었습니다.<br>`
+          + '<span style="font-size:.82rem;color:#16a34a">기존 리뷰 완료 시각은 변경하지 않았습니다.</span>'
+        : replacedCurrent
+        ? '현재 건의 제출물을 교체했습니다.'
+        : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊<br>`
           + `<span style="font-size:.82rem;color:#16a34a">${doneList}</span>`;
       show("successModal", "flex");
     } else {
@@ -3605,7 +3784,12 @@ async function _submitReviewSlots(item) {
     console.error("[submitReviewSlots] 오류:", err);
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-paper-plane"></i> 제출하기';
+    btn.innerHTML = btn.id === "btnSubmitReceipt"
+      ? '<i class="fas fa-receipt"></i> 현금영수증 제출하기'
+      : btn.id === "btnToReceipt"
+      ? '<i class="fas fa-paper-plane"></i> 리뷰 제출 후 다음'
+      : '<i class="fas fa-paper-plane"></i> 제출하기';
+    _updateReceiptStepActions();
   }
 }
 
@@ -3850,7 +4034,8 @@ async function submitReview() {
 function resetApp() {
   hide("successModal");
   S.files = []; S.selectedRow = null; S.selectedRows = []; S.filesByIdx = {}; S.memoByIdx = {};
-  S.filesBySlot = {}; S.captureSlots = null;
+  S.filesBySlot = {}; S.captureSlots = null; S.receiptStepMode = false; S.slotSubmitTrigger = null;
+  _setReceiptStepMode(false);
   // ★ 1차 필터 상태도 함께 비운다 — 남겨두면 다음 제출이 지난 판정 때문에 잠긴다.
   Object.keys(_preState).forEach(k => delete _preState[k]);
   const nameEl = document.getElementById("nameInput");
@@ -3865,6 +4050,8 @@ function resetApp() {
   if (slotsWrap) slotsWrap.remove();
   const csWrap = document.getElementById("csSlotsWrap");
   if (csWrap) csWrap.remove();
+  const receiptHost = document.getElementById("csReceiptHost");
+  if (receiptHost) receiptHost.innerHTML = "";
   const singleDrop = document.getElementById("dropZone");
   const singleMemo = document.querySelector(".memo-wrap");
   if (singleDrop) singleDrop.style.display = "";

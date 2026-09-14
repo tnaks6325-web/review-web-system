@@ -11,7 +11,7 @@
  *  - onclick 에는 **인덱스만**(파일ID는 외부발 문자열 — 보간 금지)
  *  - 주문취소는 **별도 축**이고 화면 주 이슈에서 **맨 앞**(취소가 먼저 읽혀야 한다)
  *  - 취소 카드의 주 조치는 **이동이 아니라 종결**(옮길 건이 아니다)
- *  - 화면 유형 키 ≡ 서버 유형 키(순서까지) · 반려 문구 유형도 1:1
+ *  - 화면 유형 키 ≡ 서버 유형 키(순서까지) · 반려 가능한 유형만 반려 문구를 보유
  *  - 캐시 접두 상향(새 kind 를 옛 캐시가 모른 채 히트하지 않게)
  */
 const assert = require('assert');
@@ -93,7 +93,7 @@ const frontKeys = [...riTypes[1].matchAll(/\['([a-z_]+)'/g)].map(x => x[1]);
 ok('★★ 화면 칩 키 ≡ 서버 유형 키(순서까지)',
   JSON.stringify(frontKeys) === JSON.stringify(IIT.ISSUE_KEYS));
 ok('★ 주 이슈 판정에서 취소가 맨 앞(담당자에게 먼저 읽혀야 한다)',
-  /for\(const k of \['cancel','duplicate','format_fail'/.test(wd));
+  /for\(const k of \['cancel',/.test(wd));
 ok('판별 종류 라벨에 취소 화면', /order_cancel:'주문 취소 화면'/.test(wd));
 /* ★★ 문자열 존재만 보면 **어느 함수 안에 있는지**를 못 본다 — 실제로 이 블록이
      `_riTypeLabel`(라벨 문자열을 돌려주는 함수) 안에 잘못 들어가 그 화면이 통째로
@@ -126,7 +126,7 @@ const def = MSG.INSPECT_MSG_KINDS.find(k => k.key === 'cancel').def;
 ok('★★ "다시 제출하라"고 하지 않는다 — 이미 취소한 사람에게 틀린 안내가 된다',
   /참여를 취소하신 것이라면 그대로 두셔도 됩니다/.test(def));
 ok('★ 다른 문구와 같은 평문(태그를 넣으면 글자로 보인다)', !/<[a-z]/i.test(def));
-ok('★ 화면 유형 키 ⊆ 반려 문구 유형(문구 없는 유형이 없다)',
-  IIT.ISSUE_KEYS.every(k => kinds.includes(k)));
+ok('★ 반려 가능한 화면 유형은 모두 반려 문구를 갖는다(현금영수증은 이동 대상이라 제외)',
+  IIT.ISSUE_KEYS.filter(k => k !== 'receipt').every(k => kinds.includes(k)));
 
 console.log(`\n✅ ${n} 케이스 통과`);

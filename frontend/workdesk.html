@@ -324,7 +324,7 @@
      항상 스크롤바 폭을 예약한다. 조건부 스크롤바로 헤더·행·버튼이 좌우로 흔들리면 안 된다. */
   .ui-stable-vscroll{overflow-y:scroll;scrollbar-gutter:stable}
   .rvplist{border-right:1px solid var(--line);background:var(--card2);padding:12px}.rvplhd{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin:3px 4px 9px}
-  /* 목록 = 번호 / 수취인 / 제출(주문·리뷰). 제출은 한 묶음으로 헤더·필터를 공유한다. */
+  /* 목록 = 번호 / 수취인 / 제출(주문·리뷰, 내부 현영 대상은 현영까지). */
   .rvplcols{display:grid;grid-template-columns:38px minmax(0,1fr) 42px 42px;gap:6px;align-items:center;padding:4px 9px;font-size:9.5px;font-weight:800;color:var(--faint)}
   .rvplcols .c{text-align:center}.rvplsubmit{grid-column:3 / 5;width:100%;border:0;border-radius:5px;background:transparent;color:var(--faint);font:inherit;font-weight:800;letter-spacing:.03em;cursor:pointer;padding:3px}.rvplsubmit:hover,.rvplsubmit.on{background:var(--accent-soft);color:var(--accent-deep)}
   .rvplcolfilter{border:0;border-radius:5px;background:transparent;color:var(--faint);font:inherit;font-weight:800;cursor:pointer;padding:3px}.rvplcolfilter:hover,.rvplcolfilter.on{background:var(--accent-soft);color:var(--accent-deep)}
@@ -332,13 +332,17 @@
   .rvplfilter .fhead,.rvplfilter .frow{display:grid;grid-template-columns:minmax(0,1fr) 1fr 1fr;gap:4px;align-items:center;text-align:center;font-size:10px}.rvplfilter .fhead{margin-bottom:3px;color:var(--faint);font-weight:800}.rvplfilter .fhead span:first-child{text-align:left}
   .rvplfilter .frow{margin-top:4px}.rvplfilter .frow b{text-align:left;color:var(--muted);font-size:10px}.rvplfilter button{min-height:27px;border:1px solid var(--line);border-radius:6px;background:var(--card2);color:var(--ink);font:inherit;font-size:11px;font-weight:800;cursor:pointer}.rvplfilter button:hover,.rvplfilter button.on{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent-deep)}.rvplfilter button.n{color:var(--warn)}
   .rvplitem{width:100%;display:grid;grid-template-columns:38px minmax(0,1fr) 42px 42px;gap:6px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}.rvplitem:hover{background:var(--card);border-color:var(--line)}.rvplitem.on{background:var(--card);border-color:var(--accent-line);color:var(--accent-deep);font-weight:750}
+  .rvplist.hasreceipt .rvplcols,.rvplist.hasreceipt .rvplitem{grid-template-columns:38px minmax(0,1fr) 42px 42px 42px}
+  .rvplist.hasreceipt .rvplsubmit{grid-column:3 / 6}
+  .rvplfilter.hasreceipt .fhead,.rvplfilter.hasreceipt .frow{grid-template-columns:minmax(0,1fr) repeat(3,1fr)}
   .rvplitem .no{font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint);font-weight:700}.rvplitem.on .no{color:var(--accent-deep)}
   .rvplitem .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .rvplitem .mk{text-align:center;font-size:12px;line-height:1}.rvplitem .mk.y{color:var(--safe)}.rvplitem .mk.n{color:var(--line2)}
+  .rvplitem .mk{text-align:center;font-size:12px;line-height:1}.rvplitem .mk.y{color:var(--safe)}.rvplitem .mk.n{color:var(--line2)}.rvplitem .mk.na{color:var(--faint)}
   .rvplhd .cnt{margin-left:auto;font-weight:800;color:var(--muted)}
-  /* ★★ 무대는 좌우 2분할 — 구매 캡처와 리뷰 캡처를 **동시에** 본다(대조가 이 팝업의 목적) */
+  /* 무대는 업체·비현영이면 2분할, 내부 현영 대상이면 현금영수증을 더한 3분할이다. */
   .rvpstage{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;padding:40px 16px 14px;background:var(--card)}
   .rvpcols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .rvpcols.hasreceipt{grid-template-columns:repeat(3,minmax(0,1fr))}
   .rvpc{min-width:0;min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--card2);padding:9px}
   .rvpch{flex:none;font-size:10.5px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:7px}
   .rvpch .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
@@ -350,7 +354,7 @@
   .rvppg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;font-size:10.5px;color:var(--muted);font-weight:700}
   .rvppg button{font:inherit;font-size:12px;line-height:1;padding:3px 9px;border-radius:6px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer}
   .rvppg button:disabled{opacity:.35;cursor:default}.rvpmeta{position:absolute;left:22px;top:15px;font-size:12px;font-weight:750;color:var(--muted)}.rvpmeta span{font-weight:600;color:var(--faint);margin-left:5px}.rvpclose{position:absolute;right:14px;top:12px;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer;z-index:1}.rvpclose:hover{border-color:var(--accent-line);color:var(--accent-deep);background:var(--card2)}
-  @media(max-width:760px){.rvpopov{padding:14px}.rvpop{width:calc(100vw - 28px);height:calc(100vh - 28px);grid-template-columns:1fr;grid-template-rows:150px minmax(0,1fr)}.rvplist{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow:auto;padding:10px}.rvplhd,.rvplcols,.rvplfilter{display:none}.rvplitem{width:auto;min-width:max-content;padding:7px 9px;display:flex;gap:7px}.rvpstage{padding:42px 12px 12px}.rvpcols{grid-template-columns:1fr;grid-template-rows:1fr 1fr}.rvpmeta{left:12px}.rvpclose{right:10px;top:8px}}
+  @media(max-width:760px){.rvpopov{padding:14px}.rvpop{width:calc(100vw - 28px);height:calc(100vh - 28px);grid-template-columns:1fr;grid-template-rows:150px minmax(0,1fr)}.rvplist{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow:auto;padding:10px}.rvplhd,.rvplcols,.rvplfilter{display:none}.rvplitem{width:auto;min-width:max-content;padding:7px 9px;display:flex;gap:7px}.rvpstage{padding:42px 12px 12px}.rvpcols{grid-template-columns:1fr;grid-template-rows:1fr 1fr}.rvpcols.hasreceipt{grid-template-columns:1fr;grid-template-rows:repeat(3,minmax(0,1fr))}.rvpmeta{left:12px}.rvpclose{right:10px;top:8px}}
   .sheetgrid tbody tr.rvon>td{background:var(--accent-soft)}
   .sheetgrid tbody tr.rvon>td.gfz{background:var(--accent-soft)}
   /* 사이드바 그룹(진행 중 / 완료) 구분 */
@@ -660,6 +664,10 @@
   table.sheetgrid td.gedit.edited{background:var(--accent-soft)} table.sheetgrid td.gedit.edited:hover{background:color-mix(in srgb,var(--accent-soft) 82%,var(--card2))}
   table.sheetgrid td.gstatuslock{cursor:default;background:color-mix(in srgb,var(--card2) 76%,var(--card));color:var(--t1)}
   table.sheetgrid td.gstatuslock .glockmark{margin-left:4px;color:var(--faint);font-size:10px}
+  table.sheetgrid td.gcashreceipt{text-align:center;font-weight:700;cursor:default}
+  table.sheetgrid td.gcashreceipt.submitted{color:var(--ok)}
+  table.sheetgrid td.gcashreceipt.missing,table.sheetgrid td.gcashreceipt.configuration_error{color:var(--warn)}
+  table.sheetgrid td.gcashreceipt.not_applicable,table.sheetgrid td.gcashreceipt.unavailable{color:var(--muted)}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
   td.gidlock{cursor:default}   /* 참여자·연락처 = 실제 제출 신원(수정 불가) */
   .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;max-width:1380px;flex-wrap:wrap}
@@ -1861,8 +1869,9 @@
   .tp3wo.lk .ic{flex:none}
   /* 정산 = 별도 박스가 아니라 진행 현황 카드 하단의 독립 버튼 구역 */
   .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2)}
-  /* ③ 제출물 미리보기 — 좌 구매캡처 / 우 리뷰캡처, 칸마다 한 장 */
+  /* ③ 제출물 미리보기 — 업체는 구매·리뷰, 내부 현영 대상은 현금영수증까지 칸마다 한 장 */
   .rv2{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .rv2.hasreceipt{grid-template-columns:repeat(3,minmax(0,1fr))}
   /* ★ 미리보기 칸은 **높이를 요구하지 않는다** — 내용은 절대배치 레이어(.rvfill) 안에서만 흐르므로
      행 높이는 왼쪽 두 카드가 정한다(min-height 330 이 바닥). padding 은 레이어가 갖는다. */
   .tp3grid.c3 .rvpane{position:relative;overflow:hidden;padding:0}
@@ -1892,6 +1901,8 @@
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
              border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px}
   .rv2 .rv2b{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+  .rv2 .rv2label{display:flex;align-items:center;gap:5px;margin:0 1px 6px;font-size:10.5px;font-weight:800;color:var(--muted)}
+  .rv2 .rv2label .cnt{margin-left:auto;border:1px solid var(--line);border-radius:999px;background:var(--card);padding:0 6px;font-size:9.5px;color:var(--faint)}
   /* ★★ 캡처는 세로로 매우 긴 경우가 흔하다(모바일 리뷰 전체 스크린샷) — 이미지를 그대로 두면
      그 원본 높이가 grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고).
      래퍼를 기준 삼아 이미지를 절대배치해 **레이아웃 높이 기여를 0** 으로 만든다:
@@ -5465,6 +5476,9 @@ async function _folEnsureCur(){
       const st=_folState(t,'cur','receipt');
       el.innerHTML=(st.known&&st.cr!==true)?'':_folBtnsInner(t,0,'cur',true,['receipt']);
     }
+    /* 현영 대상 여부가 늦게 도착하면 제출물 미리보기의 세 번째 칸도 즉시 맞춘다.
+       전체 그리드는 건드리지 않아 편집 중인 표 셀·검색 포커스는 보존한다. */
+    if(STATE.cur===t&&document.getElementById('rvPane')) _rvRender();
   }
 }
 // 폴더 URL 은 Drive 호스트일 때만 연다(시트/DB 를 거쳐 온 문자열을 그대로 새창에 넣지 않는다).
@@ -6090,38 +6104,48 @@ function _rvPeople(){
 /* ★ 분모 단일 출처 — 상단 참여자 게이지와 **같은 값**. 여기서 따로 세면
    "게이지는 500 인데 미리보기는 512" 로 갈린다. 구버전 백엔드(필드 부재)는 줄 수로 접는다. */
 function _rvFilledOf(c){ c=c||{}; return (c.filled==null)?(+c.total||0):(+c.filled||0); }
-/* ★ 제출현황 — 몇 줄이 구매 캡처를/리뷰 캡처를 냈는가. 갈래 판정은 `_rvKindFiles` 한 곳.
+/* 행별 공고 출처로 서버가 확정한 상태를 그대로 쓴다. 구버전 응답처럼 상태가 없으면
+   탭의 현영 칸을 갑자기 숨기지 않도록 대상 행으로 접되, 명시적 not_applicable 만 제외한다. */
+function _rvReceiptApplies(r){ return String(r&&r.cashReceiptStatus||'')!=='not_applicable'; }
+function _rvReceiptSubmitted(r){ return String(r&&r.cashReceiptStatus||'')==='submitted'; }
+/* 제출현황 — 몇 줄이 구매·리뷰·(내부 현영) 현금영수증을 냈는가. 갈래 판정은 `_rvKindFiles` 한 곳.
    ★ 조회 실패(rvImgs===null)·분모 미상은 **`?`** 로 둔다(0 으로 꾸미지 않는다). */
 function _rvStatHtml(){
   const den=_rvFilledOf(STATE.wd&&STATE.wd.counts);
-  let cap=null,rev=null;
+  const showReceipt=_rvReceiptActive();
+  const roster=(STATE.wd&&STATE.wd.roster)||[];
+  const receiptDen=showReceipt?roster.filter(r=>r.filled!==false&&_rvReceiptApplies(r)).length:0;
+  let cap=null,rev=null,receipt=null;
   if(STATE.rvImgs){
-    cap=0; rev=0;
-    for(const r of ((STATE.wd&&STATE.wd.roster)||[])){
+    cap=0; rev=0; if(showReceipt) receipt=0;
+    for(const r of roster){
       const f=STATE.rvImgs[String(r.seq)]||[]; if(!f.length) continue;
       if(_rvKindFiles(f,'cap').length) cap++;
       if(_rvKindFiles(f,'rev').length) rev++;
+      if(showReceipt&&_rvReceiptApplies(r)&&_rvReceiptSubmitted(r)) receipt++;
     }
   }
   /* ★★ 이 줄이 곧 **폴더 바로가기**다(사용자 확정 2026-08-21) — 표 윗줄에 있던
      [🛒 구매캡처 ↗][📸 리뷰캡처 ↗] 버튼을 여기로 옮겼다. 판정은 `_folState` 한 곳이라
      버튼 시절과 열리는 폴더·비활성 사유가 같다. 광고주는 그리지 않는다(/tab-folders 는 내부 전용). */
-  const one=(ic,lb,n,kind)=>{
+  const one=(ic,lb,n,kind,itemDen=den)=>{
     const st=(STATE.role!=='advertiser'&&STATE.cur)?_folState(STATE.cur,'cur',kind):null;
     const cls=`s${n==null?' unk':''}${st&&st.on?' lk':''}`;
     const at=st?` title="${esc(st.on?st.tip:('폴더를 열 수 없습니다 — '+st.tip))}"${st.on?` onclick="_rvOpenFolder('${kind}')"`:''}`:'';
     return `<div class="${cls}"${at}><span class="ic">${ic}</span><span class="lb">${lb}${st&&st.on?'<span class="ext"> ↗</span>':''}</span>`+
-      `<span class="nm">${n==null?'?':n}<small> / ${den||'?'}</small></span></div>`;
+      `<span class="nm">${n==null?'?':n}<small> / ${kind==='receipt'?itemDen:(itemDen||'?')}</small></span></div>`;
   };
-  return `<div class="rvstat">${one('🛒','구매 캡처',cap,'capture')}${one('📷','리뷰 캡처',rev,'review')}</div>`;
+  return `<div class="rvstat">${one('🛒','구매 캡처',cap,'capture')}${one('📷','리뷰 캡처',rev,'review')}${showReceipt?one('🧾','현금영수증',receipt,'receipt',receiptDen):''}</div>`;
 }
 async function _rvBoot(t){
   _rvPopClose();
-  STATE.rvImgs=null; STATE.rvSel=null;
+  STATE.rvImgs=null; STATE.rvSel=null; STATE.rvReceiptIncluded=false;
   _rvRender();   // 선택 전 안내
   if(!t) return;
   const r=await api(`/api/trackb/workdesk/review-images?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
   // 조회 실패해도 표는 그대로 — 패널만 "불러오지 못했습니다"(fail-soft)
+  // 구버전 백엔드처럼 receiptIncluded 표식이 없으면 외부 유출 방지를 위해 현영 칸을 열지 않는다.
+  STATE.rvReceiptIncluded=!!(r&&r.ok&&r.receiptIncluded===true);
   STATE.rvImgs=(r&&r.ok&&r.rows)?r.rows:(r?{}:null);
   _rvBind();
   const first=document.querySelector('#gbody tr[data-rid]');   // 첫 행을 기본 선택(바로 보이게)
@@ -6173,25 +6197,33 @@ function _rvReapply(){
   const keep=rows.some(tr=>tr.dataset.rid===STATE.rvSel);
   _rvSelect(keep?STATE.rvSel:rows[0].dataset.rid,{scroll:false});
 }
-/* ★★ 미리보기 렌더러는 **한 벌**(사용자 확정 2026-08-23) — 업체 뷰어의 세로 레일(여러 장을
-   쌓아 보여 주던 `리뷰 미리보기`)은 폐지하고 내부와 같은 두 칸(좌 구매 캡처 / 우 리뷰 캡처,
-   칸마다 한 장 + 넘김 줄)을 쓴다. 사본을 남기면 두 화면이 계속 다른 모양으로 갈린다.
-   ★ 업체에게 새로 열리는 정보는 없다 — 구매 캡처는 이미 서버가 같은 응답으로 내려주고 있었고
-     상단 [🛒 구매캡쳐 폴더] 로 폴더도 연다. 폴더 바로가기는 여전히 업체에게 그리지 않는다
-     (`_rvStatHtml` 의 role 게이트). */
+/* 미리보기 렌더러는 한 벌이다. 기본은 구매·리뷰 두 칸이고, 내부 현영 대상만 현금영수증 칸을
+   더한다. 업체 화면은 서버 응답에서 영수증 파일ID가 빠져 세 번째 칸이 만들어질 수 없다.
+   폴더 바로가기도 내부 역할에만 그린다(`_rvStatHtml` 의 role 게이트). */
 function _rvRender(){
   const pane=$('#rvPane'); if(!pane) return;
   return _rvRender2(pane);
 }
-/* ══ 내부 화면 제출물 미리보기 — 좌 🛒 구매 캡처 / 우 📷 리뷰 캡처, 칸마다 **한 장씩** ══
+/* ══ 제출물 미리보기 — 구매 / 리뷰 / (내부 현영만) 현금영수증, 칸마다 한 장씩 ══
    ★ 여러 장을 세로로 쌓으면 한 장이 작아지고 스크롤이 생겨 "나란히 대조"라는 목적이 무너진다
      → 칸을 꽉 채워 한 장만 보이고, 2장 이상이면 아래 넘김 줄(‹ 1/2 ›)로 바꿔 본다.
-   ★ 넘김 줄은 1장일 때도 **자리를 비워 둔다**(visibility) — 없애면 두 칸의 이미지 높이가 어긋난다.
+   ★ 넘김 줄은 1장일 때도 **자리를 비워 둔다**(visibility) — 없애면 칸마다 이미지 높이가 어긋난다.
    ★ 장수는 칸 머리 배지에 그대로 남긴다(조용한 누락 금지).
    ★ "없다"(미제출)와 "모른다·미등록"(제출 표시는 있는데 이미지 없음)을 칸마다 따로 말한다. */
-const _RV_KIND={cap:'order_capture',rev:'review'};
+const _RV_KIND={cap:'order_capture',rev:'review',receipt:'receipt'};
 function _rvKindFiles(files,kind){
-  return (files||[]).filter(f=>kind==='cap' ? (f.slot==='order_capture') : (f.slot!=='order_capture'));
+  return (files||[]).filter(f=>{
+    if(kind==='cap') return f.slot==='order_capture';
+    if(kind==='receipt') return f.slot==='receipt';
+    return f.slot!=='order_capture'&&f.slot!=='receipt';
+  });
+}
+function _rvCanSeeReceipt(){ return ['master','admin','staff'].includes(STATE.role)&&STATE.rvReceiptIncluded===true; }
+function _rvReceiptActive(){
+  if(!_rvCanSeeReceipt()) return false;
+  const st=STATE.cur?_folState(STATE.cur,'cur','receipt'):null;
+  if(st&&st.known&&st.cr===true) return true;
+  return !!(STATE.rvImgs&&Object.values(STATE.rvImgs).some(files=>_rvKindFiles(files,'receipt').length));
 }
 function _rvStep(kind,delta,n){
   if(!STATE.rvIdx) STATE.rvIdx={};
@@ -6199,6 +6231,7 @@ function _rvStep(kind,delta,n){
   _rvRender();
 }
 function _rvRender2(pane){
+  const showReceipt=_rvReceiptActive();
   const hd=`<div class="rvhd tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+_rvStatHtml();
   if(STATE.rvImgs===null&&!STATE.rvSel){ _rvFill(pane, hd+`<div class="rvnone"><b>불러오는 중…</b></div>`); return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
@@ -6207,14 +6240,14 @@ function _rvRender2(pane){
   const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`;
   if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
-  /* ★ 칸 제목(🛒 구매 캡처 / 📷 리뷰 캡처)은 그리지 않는다(사용자 확정 2026-08-23) —
-     왼쪽=구매·오른쪽=리뷰가 위 제출현황 줄에서 이미 같은 순서로 보이고, 제목 한 줄을
-     비운 만큼 캡처가 커진다. `title` 은 이미지 `alt`(접근성)과 빈 상태 문구에 그대로 쓴다. */
-  const col=(kind,title,emptyB,emptyS,warn)=>{
-    const list=_rvKindFiles(files,kind).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url);
+  /* 기본 두 칸에서는 종전처럼 제목을 생략한다. 내부 현영 대상은 세 갈래를 구분해야 하므로
+     제목과 장수를 함께 표시한다. `title` 은 이미지 alt와 빈 상태 문구에도 그대로 쓴다. */
+  const col=(kind,title,emptyB,emptyS,warn,applicable=true)=>{
+    const source=applicable?_rvKindFiles(files,kind):[];
+    const list=source.map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url);
     const n=list.length;
     const i=Math.min((STATE.rvIdx&&STATE.rvIdx[kind])||0,Math.max(0,n-1));
-    const gi=n?files.indexOf(_rvKindFiles(files,kind)[i]):-1;   // 크게 보기 팝업은 그 행의 전체 목록 기준
+    const gi=n?files.indexOf(source[i]):-1;   // 크게 보기 팝업은 그 행의 전체 목록 기준
     const body=n
       ? `<div class="rvhold"><img class="rvone"${_thumbAttrs(list[i].fileId,600,list[i].url)} alt="${esc(title)}" loading="lazy" title="크게 보기"`+
         ` data-rid="${esc(r.id)}" data-fidx="${gi}" onclick="_rvOpenByImage(this)"></div>`+
@@ -6226,7 +6259,8 @@ function _rvRender2(pane){
     /* ★ 칸 제목에는 폴더 바로가기를 두지 않는다(사용자 확정 2026-08-21) — 창구는 위의
        제출현황 요약 줄 하나다. 이 자리는 지금 보고 있는 **그 리뷰어의 제출물**을 말하는
        칸이라, 같은 자리에서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
-    return `<div class="rv2c"><div class="rv2b">${body}</div></div>`;
+    const label=showReceipt?`<div class="rv2label">${kind==='cap'?'🛒':kind==='rev'?'📷':'🧾'} ${esc(title)}<span class="cnt">${n}</span></div>`:'';
+    return `<div class="rv2c">${label}<div class="rv2b">${body}</div></div>`;
   };
   const left=col('cap','구매 캡처',
     r.submitted?'캡처 없음':'미제출',
@@ -6234,42 +6268,48 @@ function _rvRender2(pane){
   const right=col('rev','리뷰 캡처',
     r.submitted?'이미지 미등록':'리뷰 미제출',
     r.submitted?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.submitted);
-  _rvFill(pane, hd+who2+`<div class="rv2">${left}${right}</div>`);
+  const receiptApplies=_rvReceiptApplies(r);
+  const receipt=showReceipt?col('receipt','현금영수증',receiptApplies?'미제출':'해당없음',receiptApplies?'아직 현금영수증이 제출되지 않았습니다.':'현금영수증 제출 대상이 아닌 작업입니다.',false,receiptApplies):'';
+  _rvFill(pane, hd+who2+`<div class="rv2${showReceipt?' hasreceipt':''}">${left}${right}${receipt}</div>`);
 }
-/* ★★ 미리보기 칸이 **높이를 요구하지 않게** 절대배치 레이어로 감싼다.
+/* 미리보기 칸이 높이를 요구하지 않게 절대배치 레이어로 감싼다.
    캡처는 세로가 매우 긴 경우가 흔하고(모바일 전체 스크린샷), 정상 흐름에 두면 그 높이가
    grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고). 레이어를 두면
    행 높이는 왼쪽 두 카드가 정하고, 그 안에서 캡처가 폭에 맞춰 축소되며 세로로 스크롤된다.
-   ★ 광고주 뷰어(_rvRender)는 세로 레일이라 종전 그대로 — 이 래퍼는 내부 화면 전용이다. */
+   내부·업체 모두 같은 래퍼를 쓰되, 영수증 칸은 내부 권한과 서버 표식이 함께 있어야 추가된다. */
 /* 제출물 미리보기 → 폴더 열기. 실행부는 기존 `openTabFolder` 하나(새 경로·사본 0).
    ★ 지금 열려 있는 작업 한 건이라 인덱스는 항상 0/'cur'. */
 function _rvOpenFolder(kind){ if(STATE.role==='advertiser'||!STATE.cur) return; openTabFolder(0,kind,'cur'); }
 function _rvFill(pane, html){ pane.innerHTML=`<div class="rvfill">${html}</div>`; }
 function _rvOpenByImage(el){ _rvOpen(el&&el.dataset.rid, +(el&&el.dataset.fidx||0)); }
 /* 팝업의 칸별 넘김 위치. 사람을 바꾸면 초기화한다(다른 사람의 2번째 장으로 튀지 않게). */
-function _rvPopIdx(){ const p=STATE.rvPop; if(!p) return {cap:0,rev:0}; if(!p.i2) p.i2={cap:0,rev:0}; return p.i2; }
+function _rvPopIdx(){ const p=STATE.rvPop; if(!p) return {cap:0,rev:0,receipt:0}; if(!p.i2) p.i2={cap:0,rev:0,receipt:0}; return p.i2; }
 function _rvOpen(rid,fileIndex){
   const people=_rvPeople(), idx=people.findIndex(p=>String(p.r.id)===String(rid)); if(idx<0) return;
-  /* ★ 누른 그 장이 열려야 한다 — 전역 인덱스를 갈래(구매/리뷰)와 그 안의 순번으로 옮긴다. */
+  /* 누른 그 장이 열려야 한다 — 전역 인덱스를 갈래(구매/리뷰/현영)와 그 안의 순번으로 옮긴다. */
   const files=people[idx].files, f=files[Math.max(0,Math.min(fileIndex||0,files.length-1))];
-  const i2={cap:0,rev:0};
-  if(f){ const k=(f.slot==='order_capture')?'cap':'rev';
+  const i2={cap:0,rev:0,receipt:0};
+  if(f){ const k=(f.slot==='order_capture')?'cap':(f.slot==='receipt'?'receipt':'rev');
          i2[k]=Math.max(0,_rvKindFiles(files,k).findIndex(x=>x.fileId===f.fileId)); }
-  STATE.rvPop={people,allPeople:people,idx,i2,filter:null,filterOpen:false}; _rvPopRender();
+  STATE.rvPop={people,allPeople:people,idx,i2,filter:null,filterOpen:false,showReceipt:_rvReceiptActive()}; _rvPopRender();
 }
-function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.idx=idx; p.i2={cap:0,rev:0}; _rvPopRender(); }
-function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.i2={cap:0,rev:0}; _rvPopRender(); }
+function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.idx=idx; p.i2={cap:0,rev:0,receipt:0}; _rvPopRender(); }
+function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.i2={cap:0,rev:0,receipt:0}; _rvPopRender(); }
 /* 제출 필터의 분모는 팝업에 나열되는 "채워진 줄" 전부다. 행 자체의 submitted 값이 아니라
    이 팝업이 실제로 표시하는 파일 갈래를 써야 주문/리뷰 각각의 ✓·✗와 숫자가 어긋나지 않는다. */
-function _rvPopHas(x,kind){ return _rvKindFiles(x&&x.files,kind).length>0; }
+function _rvPopHas(x,kind){
+  return kind==='receipt' ? _rvReceiptSubmitted(x&&x.r) : _rvKindFiles(x&&x.files,kind).length>0;
+}
+function _rvPopEligible(x,kind){ return kind!=='receipt'||_rvReceiptApplies(x&&x.r); }
 function _rvPopFilterPeople(p){
   const all=Array.isArray(p&&p.allPeople)?p.allPeople:(p&&p.people)||[];
   const f=p&&p.filter;
-  return f?all.filter(x=>_rvPopHas(x,f.kind)===f.submitted):all;
+  return f?all.filter(x=>_rvPopEligible(x,f.kind)&&_rvPopHas(x,f.kind)===f.submitted):all;
 }
 function _rvPopCounts(p){
   const all=Array.isArray(p&&p.allPeople)?p.allPeople:(p&&p.people)||[];
-  return {total:all.length,cap:all.filter(x=>_rvPopHas(x,'cap')).length,rev:all.filter(x=>_rvPopHas(x,'rev')).length};
+  const receiptRows=all.filter(x=>_rvPopEligible(x,'receipt'));
+  return {total:all.length,cap:all.filter(x=>_rvPopHas(x,'cap')).length,rev:all.filter(x=>_rvPopHas(x,'rev')).length,receiptTotal:receiptRows.length,receipt:receiptRows.filter(x=>_rvPopHas(x,'receipt')).length};
 }
 function _rvPopFilterToggle(){ const p=STATE.rvPop; if(!p) return; p.filterOpen=!p.filterOpen; _rvPopRender(); }
 function _rvPopFilterSet(kind,submitted){
@@ -6277,7 +6317,7 @@ function _rvPopFilterSet(kind,submitted){
   /* 같은 수치를 다시 누르면 전체 목록으로 돌아간다. 별도 다섯 번째 "전체" 필터를 만들지 않는다. */
   if(p.filter&&p.filter.kind===kind&&p.filter.submitted===submitted) p.filter=null;
   else p.filter={kind,submitted};
-  p.people=_rvPopFilterPeople(p); p.idx=0; p.i2={cap:0,rev:0}; p.filterOpen=false; _rvPopRender();
+  p.people=_rvPopFilterPeople(p); p.idx=0; p.i2={cap:0,rev:0,receipt:0}; p.filterOpen=false; _rvPopRender();
 }
 /* 칸 안에서 장 넘김 — ★ 끝에서 순환하지 않는다(어디까지 봤는지 잃는다). */
 function _rvPopStep2(kind,delta,n){ const i2=_rvPopIdx(); i2[kind]=Math.max(0,Math.min(n-1,(i2[kind]||0)+delta)); _rvPopRender(); }
@@ -6285,9 +6325,10 @@ function _rvPopClose(){ STATE.rvPop=null; const ov=document.getElementById('rvpo
 /* ★★ 무대 한 칸 — 갈래 판정은 `_rvKindFiles` 단일 출처(패널 `_rvRender2` 와 같은 함수).
    사본을 두면 "패널은 1장인데 팝업은 0장" 으로 갈린다. */
 const _RV_POP_COL={cap:['🛒','구매 캡처','미제출','아직 구매 캡처가 제출되지 않았습니다.'],
-                   rev:['📷','리뷰 캡처','리뷰 미제출','아직 리뷰 캡처가 제출되지 않았습니다.']};
-function _rvPopCol(kind,files){
-  const m=_RV_POP_COL[kind], list=_rvKindFiles(files,kind), n=list.length, i2=_rvPopIdx();
+                   rev:['📷','리뷰 캡처','리뷰 미제출','아직 리뷰 캡처가 제출되지 않았습니다.'],
+                   receipt:['🧾','현금영수증','미제출','아직 현금영수증이 제출되지 않았습니다.']};
+function _rvPopCol(kind,files,r){
+  const m=_RV_POP_COL[kind], applicable=kind!=='receipt'||_rvReceiptApplies(r), list=applicable?_rvKindFiles(files,kind):[], n=list.length, i2=_rvPopIdx();
   const i=Math.min(i2[kind]||0,Math.max(0,n-1)); i2[kind]=i;
   const body=n
     ? `<div class="rvpbody"><img src="${esc(list[i].url)}" alt="${esc(m[1])}"></div>`+
@@ -6295,29 +6336,34 @@ function _rvPopCol(kind,files){
         `<button type="button"${i===0?' disabled':''} onclick="_rvPopStep2('${kind}',-1,${n})">‹</button>`+
         `<span>${i+1} / ${n}</span>`+
         `<button type="button"${i===n-1?' disabled':''} onclick="_rvPopStep2('${kind}',1,${n})">›</button></div>`
-    : `<div class="rvpempty warn"><b>${esc(m[2])}</b><span>${esc(m[3])}</span></div>`;
+    : `<div class="rvpempty${kind==='receipt'?'':' warn'}"><b>${esc(applicable?m[2]:'해당없음')}</b><span>${esc(applicable?m[3]:'현금영수증 제출 대상이 아닌 작업입니다.')}</span></div>`;
   return `<div class="rvpc"><div class="rvpch">${m[0]} ${esc(m[1])}<span class="cnt">${n}</span></div>${body}</div>`;
 }
 /* 목록 한 줄 — ★ 번호는 **작업보드 표의 「번호」**(서버 `boardNo`), `seq`(시트 행 번호)가 아니다.
    ★ 번호 칸이 비면 추측하지 않고 `—`, 시트 행 번호는 툴팁으로만 남긴다("모른다"와 "없다"를 구분).
    ★ onclick 은 **인덱스만** — 수취인·번호는 시트발 문자열이라 보간하면 따옴표 하나로 탈출된다. */
 function _rvPopItem(x,i,on){
-  const nc=_rvKindFiles(x.files,'cap').length, nr=_rvKindFiles(x.files,'rev').length;
+  const nc=_rvKindFiles(x.files,'cap').length, nr=_rvKindFiles(x.files,'rev').length, nh=_rvReceiptSubmitted(x.r);
+  const receiptApplies=_rvPopEligible(x,'receipt');
   const no=_rvNo(x.r);
   return `<button type="button" class="rvplitem${on?' on':''}" onclick="_rvPopPick(${i})" title="시트 행 ${esc(x.r.seq)}">`+
     `<span class="no">${no?esc(no):'—'}</span>`+
     `<span class="nm">${esc(_rvWho(x.r)||'—')}</span>`+
     `<span class="mk ${nc?'y':'n'}">${nc?'✓':'✗'}</span>`+
-    `<span class="mk ${nr?'y':'n'}">${nr?'✓':'✗'}</span></button>`;
+    `<span class="mk ${nr?'y':'n'}">${nr?'✓':'✗'}</span>`+
+    `${STATE.rvPop&&STATE.rvPop.showReceipt?`<span class="mk ${receiptApplies?(nh?'y':'n'):'na'}">${receiptApplies?(nh?'✓':'✗'):'—'}</span>`:''}</button>`;
 }
 function _rvPopFilterHtml(p){
   if(!p.filterOpen) return '';
   const c=_rvPopCounts(p), f=p.filter;
   const btn=(kind,submitted,n,label)=>`<button type="button" class="${submitted?'':'n'}${f&&f.kind===kind&&f.submitted===submitted?' on':''}" onclick="_rvPopFilterSet('${kind}',${submitted})" title="${esc(label+' '+n+'건만 보기')}">${n}</button>`;
-  return `<div class="rvplfilter" role="dialog" aria-label="제출물 필터">`+
-    `<div class="fhead"><span>${c.total}건</span><span>주문</span><span>리뷰</span></div>`+
-    `<div class="frow"><b>제출</b>${btn('cap',true,c.cap,'주문 제출')}${btn('rev',true,c.rev,'리뷰 제출')}</div>`+
-    `<div class="frow"><b>미제출</b>${btn('cap',false,c.total-c.cap,'주문 미제출')}${btn('rev',false,c.total-c.rev,'리뷰 미제출')}</div>`+
+  const receiptHead=p.showReceipt?'<span>현영</span>':'';
+  const receiptYes=p.showReceipt?btn('receipt',true,c.receipt,'현금영수증 제출'):'';
+  const receiptNo=p.showReceipt?btn('receipt',false,c.receiptTotal-c.receipt,'현금영수증 미제출'):'';
+  return `<div class="rvplfilter${p.showReceipt?' hasreceipt':''}" role="dialog" aria-label="제출물 필터">`+
+    `<div class="fhead"><span>${c.total}건</span><span>주문</span><span>리뷰</span>${receiptHead}</div>`+
+    `<div class="frow"><b>제출</b>${btn('cap',true,c.cap,'주문 제출')}${btn('rev',true,c.rev,'리뷰 제출')}${receiptYes}</div>`+
+    `<div class="frow"><b>미제출</b>${btn('cap',false,c.total-c.cap,'주문 미제출')}${btn('rev',false,c.total-c.rev,'리뷰 미제출')}${receiptNo}</div>`+
   `</div>`;
 }
 function _rvPopRender(){
@@ -6330,13 +6376,13 @@ function _rvPopRender(){
   const no=cur?_rvNo(cur.r):'';
   let ov=document.getElementById('rvpop'); if(!ov){ ov=document.createElement('div'); ov.id='rvpop'; ov.className='rvpopov'; document.body.appendChild(ov); }
   ov.innerHTML=`<section class="rvpop" role="dialog" aria-modal="true" aria-label="제출물 크게 보기">`+
-    `<aside class="rvplist ui-stable-vscroll"><div class="rvplhd">참여자<span class="cnt">${p.people.length}${p.filter?' / '+p.allPeople.length:''}명</span></div>`+
-      `<div class="rvplcols"><span>번호</span><span>수취인</span><button type="button" class="rvplsubmit${p.filterOpen?' on':''}" onclick="_rvPopFilterToggle()">제출 ${p.filterOpen?'⌃':'⌄'}</button><span></span><span></span><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='cap'?' on':''}" onclick="_rvPopFilterToggle()">주문</button><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='rev'?' on':''}" onclick="_rvPopFilterToggle()">리뷰</button></div>`+
+    `<aside class="rvplist ui-stable-vscroll${p.showReceipt?' hasreceipt':''}"><div class="rvplhd">참여자<span class="cnt">${p.people.length}${p.filter?' / '+p.allPeople.length:''}명</span></div>`+
+      `<div class="rvplcols"><span>번호</span><span>수취인</span><button type="button" class="rvplsubmit${p.filterOpen?' on':''}" onclick="_rvPopFilterToggle()">제출 ${p.filterOpen?'⌃':'⌄'}</button><span></span><span></span><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='cap'?' on':''}" onclick="_rvPopFilterToggle()">주문</button><button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='rev'?' on':''}" onclick="_rvPopFilterToggle()">리뷰</button>${p.showReceipt?`<button type="button" class="rvplcolfilter${p.filter&&p.filter.kind==='receipt'?' on':''}" onclick="_rvPopFilterToggle()">현영</button>`:''}</div>`+
       _rvPopFilterHtml(p)+
       p.people.map((x,i)=>_rvPopItem(x,i,i===p.idx)).join('')+
     `</aside>`+
     `<div class="rvpstage"><button type="button" class="rvpclose" aria-label="닫기" onclick="_rvPopClose()">×</button>`+
-      (cur?`<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div><div class="rvpcols">${_rvPopCol('cap',cur.files)}${_rvPopCol('rev',cur.files)}</div>`:`<div class="rvpempty warn"><b>조건에 맞는 참여자가 없습니다</b><span>제출 필터를 다시 눌러 전체 목록으로 돌아가세요.</span></div>`)+
+      (cur?`<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div><div class="rvpcols${p.showReceipt?' hasreceipt':''}">${_rvPopCol('cap',cur.files,cur.r)}${_rvPopCol('rev',cur.files,cur.r)}${p.showReceipt?_rvPopCol('receipt',cur.files,cur.r):''}</div>`:`<div class="rvpempty warn"><b>조건에 맞는 참여자가 없습니다</b><span>제출 필터를 다시 눌러 전체 목록으로 돌아가세요.</span></div>`)+
     `</div></section>`;
 }
 
@@ -7418,7 +7464,11 @@ function _gridWidthPrefsForRender(){const scope=_gridWidthScope(),editor=STATE.g
 function _gridApplyWidthPrefs(widths,cols){const prefs=_gridWidthPrefsForRender();(cols||[]).forEach(c=>{if(Object.prototype.hasOwnProperty.call(prefs,c.key)){const width=_gridWidthClamp(prefs[c.key]);if(width!=null)widths.set(c.key,width);}});return widths;}
 function _gridHasManualWidth(key){return Object.prototype.hasOwnProperty.call(_gridWidthPrefsForRender(),key);}
 function _gridWidthKeyToken(value){return encodeURIComponent(String(value)).replace(/'/g,'%27');}
-function _gridAllColumns(wd){const idCols=STATE.role==='advertiser'?[]:[{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];const custom=(wd&&wd.customColumns||[]).map(c=>({key:'ccol:'+c.id,kind:'custom',colId:c.id}));return [...idCols,...(wd&&wd.headers||[]).map(h=>({key:h,kind:'col'})),...custom];}
+const _CASH_RECEIPT_COL='__cashReceiptStatus';
+function _cashReceiptColumn(wd){return STATE.role!=='advertiser'&&wd&&wd.cashReceiptColumn?[{key:_CASH_RECEIPT_COL,kind:'cashReceipt'}]:[];}
+function _cashReceiptDisplay(status){return ({submitted:'제출완료',missing:'미제출',not_applicable:'해당없음',configuration_error:'설정확인',unavailable:'확인불가'})[status]||'확인불가';}
+function _cashReceiptTitle(status){return ({submitted:'현금영수증 제출 완료',missing:'현금영수증 제출 전',not_applicable:'현금영수증 제출 대상이 아닌 작업',configuration_error:'현금영수증 대상이지만 제출 슬롯 설정을 확인해야 합니다',unavailable:'현금영수증 제출 상태를 불러오지 못했습니다'})[status]||'현금영수증 제출 상태를 확인할 수 없습니다';}
+function _gridAllColumns(wd){const idCols=STATE.role==='advertiser'?[]:[{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];const custom=(wd&&wd.customColumns||[]).map(c=>({key:'ccol:'+c.id,kind:'custom',colId:c.id}));return [...idCols,..._cashReceiptColumn(wd),...(wd&&wd.headers||[]).map(h=>({key:h,kind:'col'})),...custom];}
 function _gridApplyOneWidthToDom(col,width){const cols=STATE.gVCols||[],i=cols.findIndex(c=>c.key===col),tbl=document.querySelector('.gridscroll table.sheetgrid');if(i<0||!tbl)return;const w=_gridWidthClamp(width);if(w==null)return;STATE.gColWidths.set(col,w);tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${i+1})`).forEach(cell=>{cell.style.minWidth=w+'px';cell.style.width=w+'px';});const head=tbl.tHead&&tbl.tHead.rows[0];if(head){if(head.cells[i])head.cells[i].classList.toggle('gwmanual',_gridHasManualWidth(col));let left=0;cols.forEach((c,ci)=>{const frozen=!!(head.cells[ci]&&head.cells[ci].classList.contains('gfz'));if(frozen){tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${ci+1})`).forEach(cell=>{cell.style.left=left+'px';});left+=_colW(c.key);}});STATE.gFrozenW=left;}_fitGrid();}
 function _gridSetStoredWidth(col,width){const prefs=_gridLoadWidthPrefs(),w=_gridWidthClamp(width);if(w==null)return false;prefs[col]=w;if(!_gridSaveWidthPrefs(prefs)){toast('열 너비를 브라우저에 저장하지 못했습니다');return false;}return true;}
 function _gridWidthEditorRows(query){const ed=STATE.gWidthEditor;if(!ed)return '';const q=String(query||'').trim().toLowerCase();let visible=0;const html=ed.cols.map(c=>{const label=_colLabel(c.key),show=!q||String(label).toLowerCase().includes(q);if(show)visible++;const auto=ed.auto.get(c.key)||_GRID_WIDTH_MIN,manual=Object.prototype.hasOwnProperty.call(ed.draft,c.key),width=manual?ed.draft[c.key]:_gridWidthClamp(auto),enc=_gridWidthKeyToken(c.key);return `<div class="gw-row" data-gw-row data-search="${esc(String(label).toLowerCase())}" data-col="${esc(enc)}"${show?'':' hidden'}><div class="gw-name" title="${esc(label)}">${esc(label)}</div><div class="gw-auto">자동 <b>${auto}px</b></div><input class="gw-range" type="range" min="${_GRID_WIDTH_MIN}" max="${_GRID_WIDTH_MAX}" step="1" value="${width}" aria-label="${esc(label)} 너비" oninput="_gridWidthChange('${enc}',this)"><input class="gw-number" type="number" min="${_GRID_WIDTH_MIN}" max="${_GRID_WIDTH_MAX}" value="${width}" aria-label="${esc(label)} 너비 픽셀" onchange="_gridWidthChange('${enc}',this)"><button class="gw-reset" type="button" onclick="_gridWidthReset('${enc}')"${manual?'':' disabled'}>자동</button></div>`;}).join('');return html+(visible?'':'<div class="gw-empty">검색 결과가 없습니다.</div>');}
@@ -7436,6 +7486,7 @@ function _renderGridWidthSettingsCard(){const host=document.getElementById('work
 function _colW(h){ const widths=STATE.gColWidths; return widths instanceof Map&&widths.has(h)?widths.get(h):Math.ceil(_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD); }
 // 커스텀 열 표시명(원본 시트 헤더는 그대로 key=label, 커스텀 열은 id 대신 사용자가 지은 이름을 보여준다).
 function _colLabel(key){
+  if(key===_CASH_RECEIPT_COL) return '현영';
   if(typeof key==='string' && key.indexOf('ccol:')===0){
     const id=key.slice(5); const c=((STATE.wd&&STATE.wd.customColumns)||[]).find(x=>String(x.id)===id);
     return c?c.colName:'(삭제된 열)';
@@ -7443,7 +7494,7 @@ function _colLabel(key){
   return key;
 }
 // 가운데 정렬 대상 = 날짜형(구매일자 등)·연락처(전화) → 값 길이가 달라도 앞여백=뒷여백(좌우 대칭). (_isPhoneHeader는 아래 정의, 함수선언 호이스팅)
-function _isCtrCol(h){ return /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
+function _isCtrCol(h){ return h===_CASH_RECEIPT_COL || /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
 function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
 // 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
@@ -7527,6 +7578,7 @@ function _workboardDisplayName(){
 
 function gCellDisp(r,h){
   if(h==='#') return String(r.seq==null?'':r.seq);
+  if(h===_CASH_RECEIPT_COL) return _cashReceiptDisplay(r&&r.cashReceiptStatus);
   if(typeof h==='string' && h.indexOf('ccol:')===0) return (r.customValues&&r.customValues[h.slice(5)])||'';
   if(STATE.role!=='advertiser'){   // 광고주 그리드는 신원열(참여자·phone8)이 없음 → 동명 시트열은 rowJson에서 읽음(col 분기로 폴백)
     if(h==='참여자') return r.name||'';
@@ -7733,7 +7785,7 @@ function buildGrid(wd){
   const idCols = STATE.role==='advertiser' ? [] : [{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];
   // 커스텀 열(행별 자유메모, migration 080) — 시트 헤더 뒤에 이어붙임. 광고주 그리드는 서버가 애초에 내려주지 않음.
   const customCols=(wd.customColumns||[]).map(c=>({key:'ccol:'+c.id, kind:'custom', colId:c.id}));
-  const cols0=[...idCols, ...H.map(h=>({key:h,kind:'col'})), ...customCols];
+  const cols0=[...idCols, ..._cashReceiptColumn(wd), ...H.map(h=>({key:h,kind:'col'})), ...customCols];
   const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
   const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
   STATE.gColWidths=_gridAutoColumnWidths(wd,vcols);                            // 내부·업체용 공통: 최장 표시값 폭
@@ -7741,7 +7793,7 @@ function buildGrid(wd){
   const defaultFreeze=_gridDefaultFreezeUpto(H);
   const freezeUpto=STATE.freezeUpto==null?defaultFreeze:STATE.freezeUpto;
   const fzIdx = freezeUpto ? H.indexOf(freezeUpto) : -1;
-  const fset=new Set(['참여자','연락처', ...H.slice(0, fzIdx+1)]);             // 고정 대상 집합(key)
+  const fset=new Set(['참여자','연락처',_CASH_RECEIPT_COL, ...H.slice(0, fzIdx+1)]);             // 고정 대상 집합(key)
   let frozenN=0; for(const c of vcols){ if(fset.has(c.key)) frozenN++; else break; } // 표시 컬럼 기준 연속 고정 접두수
   const lefts=[]; let acc=0; for(let i=0;i<vcols.length;i++){ lefts[i]=acc; acc+=_colW(vcols[i].key); }
   const cstyle=(i)=>{ const w=_colW(vcols[i].key); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
@@ -7813,6 +7865,9 @@ function buildGrid(wd){
       else if(c.kind==='phone'){ const _ph=_fmtPhone(r.phone8);
         // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 가운데 정렬(앞여백=뒷여백).
         tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}${bgStyle('idphone')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idphone">${esc(_ph||'')}</td>`; }
+      else if(c.kind==='cashReceipt'){
+        const status=String(r.cashReceiptStatus||'unavailable'),disp=_cashReceiptDisplay(status);
+        tds+=`<td ${cls(i,'gcell gstatuslock gcashreceipt '+status+' gctr')} style="${cstyle(i)}" title="${esc(_cashReceiptTitle(status))}" data-rid="${esc(r.id)}" data-cfield="${_CASH_RECEIPT_COL}">${esc(disp)}</td>`; }
       else if(c.kind==='custom'){
         // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, 편집기록 없음(원본·오버레이 개념이 없다).
         const cv=(r.customValues&&r.customValues[c.colId])||'';
@@ -14129,13 +14184,15 @@ function _riRenderHead(sum){
      SQL 로 파생해 센다). 여기 있는 것은 화면 필터·재검수 대상 선정용 최소 사본이고,
      회귀가드(`tests/inspectTypeCounts.test.js`)가 같은 픽스처로 두 구현을 실행해 **결과 동일**을
      고정한다 — 한쪽만 고치면 그 자리에서 빨개진다. */
-const RI_TYPES=[['cancel','🚫 주문취소'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
+const RI_TYPES=[['cancel','🚫 주문취소'],['receipt_validation','🧾 현금영수증 검수 필요'],['receipt','🧾 현금영수증으로 보임'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
 function _riIssueTypes(r){
   const c=(r&&r.checks)||{}, out=[];
   /* ★ 주문취소 — 리뷰어가 그 작업을 취소한 신호. verdict 를 보지 않는다(취소 화면은
        어느 작업에서도 정상 제출이 아니다). format_fail 과 겹쳐 세어지는 것은 의도. */
   if(c.format&&(c.format.got||c.format.kind)==='order_cancel') out.push('cancel');
-  if(c.format&&c.format.verdict==='fail') out.push('format_fail');
+  if(c.receiptValidation&&(c.receiptValidation.verdict==='warn'||c.receiptValidation.verdict==='fail')) out.push('receipt_validation');
+  if(c.format&&c.format.verdict==='fail'&&(c.format.got||c.format.kind)==='receipt') out.push('receipt');
+  if(c.format&&c.format.verdict==='fail'&&(c.format.got||c.format.kind)!=='receipt') out.push('format_fail');
   if(c.format&&c.format.verdict==='warn'&&c.format.expectedChannel) out.push('channel');
   if(c.product&&(c.product.verdict==='warn'||c.product.verdict==='fail')) out.push('product');
   if(c.duplicate&&(c.duplicate.verdict==='fail'||c.duplicate.verdict==='warn')) out.push('duplicate');
@@ -14271,9 +14328,11 @@ function _riRenderBody(){
     const c = r.checks || {};
     const reasons = _riReasons(c, {skipRel:true});   // 같은 파일·본문 겹침은 아래 관계 줄이 말한다
     const relHtml = _riRelHtml(r);
-    const cls = r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
     const thumb = _riImg(r.file_id);
     const p = _riPrimaryIssue(r);
+    const receiptPending = (p==='receipt'||p==='receipt_validation') && r.status!=='resolved';
+    const cls = receiptPending?'ri-s':r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
+    const statusLabel = receiptPending?'분류 필요':(_RI_LABEL[r.status]||r.status);
     const meta = p ? RI_TYPE_META[p] : null;
     const others = p ? _riIssueTypes(r).filter(k=>k!==p).length : 0;
     const act = (r.status==='resolved') ? null : _riCardActions(r, i);
@@ -14284,7 +14343,7 @@ function _riRenderBody(){
     const subs = act ? (flat ? [{h:`riResolve('${esc(r.file_id)}','ok')`,t:'✓ 정상',cls:'ok'},{h:act.main.h,t:'✕ 불량',cls:'bad'}] : act.subs) : [];
     return `<div class="ricard${r.status==='resolved'?' ri-r':''}">
       <div class="nc-type ${meta?meta.cls:'t-none'}">${esc(_riTypeLabel(p,c))}${others?` <span style="font-weight:600;opacity:.7">＋${others}</span>`:''}<span class="tag">${meta?meta.tag:''}</span></div>
-      <div class="nc-th" onclick="riOpenDetail(${i})">${thumb?`<img${_thumbAttrs(r.file_id,400,thumb)} alt="" loading="lazy">`:'<span class="rimeta">이미지 없음</span>'}<span class="ribdg ${cls}">${_RI_LABEL[r.status]||r.status}</span>${thumb?`<button class="rizoom" title="이미지 크게 보기" onclick="event.stopPropagation();riZoom(${i})">🔍</button>`:''}</div>
+      <div class="nc-th" onclick="riOpenDetail(${i})">${thumb?`<img${_thumbAttrs(r.file_id,400,thumb)} alt="" loading="lazy">`:'<span class="rimeta">이미지 없음</span>'}<span class="ribdg ${cls}">${statusLabel}</span>${thumb?`<button class="rizoom" title="이미지 크게 보기" onclick="event.stopPropagation();riZoom(${i})">🔍</button>`:''}</div>
       <div class="nc-body" onclick="riOpenDetail(${i})">
         <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b></div>
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
@@ -14313,6 +14372,8 @@ function _riRenderBody(){
 const RI_TYPE_META={
   cancel:{cls:'t-cancel',tag:'CANCEL',label:'🚫 주문취소 (리뷰어 작업취소)'},
   duplicate:{cls:'t-dup',tag:'DUP',label:'📄 같은 파일 (중복 제출)'},
+  receipt_validation:{cls:'t-fmt',tag:'RECEIPT HOLD',label:'🧾 현금영수증 검수 필요'},
+  receipt:{cls:'t-fmt',tag:'RECEIPT',label:'🧾 현금영수증으로 보임'},
   format_fail:{cls:'t-fmt',tag:'FMT',label:'📵 리뷰화면 아님'},
   product:{cls:'t-prod',tag:'PROD',label:'🏷 상품명 다름'},
   similarity:{cls:'t-sim',tag:'SIM',label:'✍ 본문 겹침'},
@@ -14322,7 +14383,7 @@ const RI_TYPE_META={
 function _riPrimaryIssue(r){
   const t=_riIssueTypes(r);
   // ★ 주문취소가 맨 앞 — 담당자에게 "리뷰 화면이 아님"보다 "취소됨"이 먼저 읽혀야 한다
-  for(const k of ['cancel','duplicate','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
+  for(const k of ['cancel','duplicate','receipt_validation','receipt','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
   return null;
 }
 /* ★★ AI 가 판별한 화면 종류의 **단일 출처** — 원장(2차 검수)은 `kind`, 자동분류 판정값은 `got`
@@ -14334,6 +14395,9 @@ function _riKindLabel(fm){ return _RI_KIND[_riFmtKind(fm)]||''; }
 function _riTypeLabel(p,c){
   if(!p) return '이상 없음';
   if(p==='cancel') return '🚫 주문취소';
+  if(p==='receipt_validation') return c&&c.receiptValidation&&c.receiptValidation.verdict==='fail'
+    ? '🧾 현금영수증 확인 실패' : '🧾 현금영수증 확인 필요';
+  if(p==='receipt') return '🧾 현금영수증으로 보임';
   if(p==='format_fail'){
     const gl=_riKindLabel(c&&c.format);
     return '📵 리뷰화면 아님'+(gl?' — '+gl+'으로 보임':'');
@@ -14377,6 +14441,13 @@ function _riCardActions(r,i){
       return {main:{...A.ok,t:'✓ 정상 — 한 캡처에 여러 리뷰',m:'m-green'}, subs:[A.dedup,A.bad], more:moves};
     return {main:{...A.dedup,m:'m-red'}, subs:[A.ok,A.bad], more:moves};
   }
+  if(p==='receipt_validation'){
+    const rv=c.receiptValidation||{};
+    if(rv.verdict==='fail'&&rv.got==='review')
+      return {main:{...A.mvV,m:'m-blue'}, subs:[A.bad,{...A.ok,t:'✓ 정상 — 영수증 확인'}], more:[A.detail]};
+    return {main:{...A.detail,t:'👁 영수증 확인',m:'m-amber'}, subs:[{...A.ok,t:'✓ 정상 — 영수증 확인'},A.bad], more:[]};
+  }
+  if(p==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.ok,A.detail], more:[A.mvC]};
   if(p==='format_fail'){
     const got=_riFmtKind(c.format);
     if(!isReceiptSlot&&got==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.bad,A.ok], more:[A.mvC]};
@@ -14590,15 +14661,24 @@ function _riChanReason(fm){
 function _riReasons(c, opt){
   const skipRel = !!(opt&&opt.skipRel);
   const out=[];
+  if(c.receiptValidation && c.receiptValidation.verdict==='fail'){
+    const got=_RI_KIND[c.receiptValidation.got]||c.receiptValidation.got||'다른 이미지';
+    out.push(`현금영수증 확인 실패 — ${got}로 판별되었습니다. 정상 영수증인지 확인해 주세요`);
+  } else if(c.receiptValidation && c.receiptValidation.verdict==='warn'){
+    out.push('현금영수증 자동 판정 불가 — 이미지를 확인한 뒤 정상 처리해야 입금대상에 포함됩니다');
+  }
   // ★ 종류를 알면 종류를 말한다 — "리뷰 화면이 아님"만으로는 무엇으로 보이는지 몰라
   //   담당자가 어디로 옮길지 판단할 수 없다(반려 사유 프리필로도 그대로 나간다).
   if(c.format && c.format.verdict==='fail'){
     const gl=_riKindLabel(c.format);
     /* ★ 주문취소는 "리뷰 화면이 아니다"로 말하면 안 된다 — 담당자가 다른 칸으로 옮기려 든다.
          무엇으로 보이는지가 아니라 **무슨 일이 일어났는지**를 말한다. */
-    out.push(_riFmtKind(c.format)==='order_cancel'
+    const kind=_riFmtKind(c.format);
+    out.push(kind==='order_cancel'
       ? '주문이 취소된 화면입니다 — 리뷰어가 이 작업을 취소한 것으로 보입니다'
-      : (gl?`${gl} 화면으로 판별되었습니다 — 리뷰 화면이 아닙니다`:'리뷰 화면이 아닌 것으로 판정됨'));
+      : kind==='receipt'
+        ? '현금영수증 이미지로 확인됨 — 현금영수증 칸으로 이동해 주세요'
+        : (gl?`${gl} 화면으로 판별되었습니다 — 리뷰 화면이 아닙니다`:'리뷰 화면이 아닌 것으로 판정됨'));
   }
   if(c.format && c.format.verdict==='warn' && c.format.expectedChannel)
     out.push(_riChanReason(c.format));
@@ -14766,7 +14846,7 @@ function riOpenDetail(i){
   // ★ 역할은 자기 스코프에서 다시 구한다(다른 함수의 const 에 기대면 ReferenceError — 무한로딩 실측 사고)
   const _riDetailAdmin = STATE.role==='master' || STATE.role==='admin';
   const c=r.checks||{};
-  const line=(v,label,extra)=>`<tr><td><span class="ribdg ${v==='fail'?'ri-f':v==='warn'?'ri-s':v==='skip'?'ri-p':'ri-ok'}">${v==='fail'?'불량':v==='warn'?'의심':v==='skip'?'안 함':'통과'}</span></td><td><b>${label}</b>${extra?'<br><span class="rimeta">'+extra+'</span>':''}</td></tr>`;
+  const line=(v,label,extra)=>`<tr><td><span class="ribdg ${v==='fail'?'ri-f':v==='warn'||v==='route'?'ri-s':v==='skip'?'ri-p':'ri-ok'}">${v==='fail'?'불량':v==='warn'?'의심':v==='route'?'분류 필요':v==='skip'?'안 함':'통과'}</span></td><td><b>${label}</b>${extra?'<br><span class="rimeta">'+extra+'</span>':''}</td></tr>`;
   const dup=c.duplicate||{}, sim=c.similarity||{}, pr=c.product||{}, fm=c.format||{};
   const html=`<div class="rimodal-in">
     <div class="rimh"><b>${esc(r.reviewer_name||'')}${r.row_index?' · '+r.row_index+'행':''}</b>
@@ -14785,10 +14865,12 @@ function riOpenDetail(i){
       <div class="rimright">
         ${_riRelHtml(r)}
         <table class="ritbl">
-          ${line(fm.verdict||'skip','리뷰 화면·채널', (fm.verdict==='fail'
+          ${line(_riFmtKind(fm)==='receipt'&&fm.verdict==='fail'?'route':(fm.verdict||'skip'),'화면 종류·채널', (fm.verdict==='fail'
             ? (_riFmtKind(fm)==='order_cancel'
                 ? '주문이 취소된 화면입니다 — 리뷰어가 이 작업을 취소한 것으로 보입니다'
-                : (_riKindLabel(fm)?esc(_riKindLabel(fm))+' 화면으로 판별 — 리뷰 화면이 아닙니다':'리뷰 화면이 아닌 것으로 판정됨'))
+                : (_riFmtKind(fm)==='receipt'
+                  ? '현금영수증 이미지로 확인됨 — 현금영수증 칸으로 이동해 주세요'
+                  : (_riKindLabel(fm)?esc(_riKindLabel(fm))+' 화면으로 판별 — 리뷰 화면이 아닙니다':'리뷰 화면이 아닌 것으로 판정됨')))
             : (fm.expectedChannel&&fm.verdict==='warn'
               ? esc(_riChanReason(fm))
               : (fm.channel?esc(_RI_CHAN[fm.channel]||fm.channel)+' 캡처로 확인':'')))

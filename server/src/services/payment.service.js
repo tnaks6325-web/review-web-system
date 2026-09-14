@@ -11,7 +11,7 @@ const crypto = require('crypto');
  *
  * ★★ 확정 규칙(완화 금지)
  *   ① 이체 단위 = **건별(A안)**. 시트 행 1개 = 이체 1줄. 합산하지 않는다.
- *   ② 대상 = 리뷰 제출완료 ∧ 미입금 ∧ **다운로드 이력 없음**.
+ *   ② 대상 = 리뷰 제출완료 ∧ (현금영수증 대상이면 영수증 제출완료) ∧ 미입금 ∧ **다운로드 이력 없음**.
  *      "다운로드 이력 있으면 무조건 제외"가 이중입금 방지의 핵심이고,
  *      DB 부분유니크(uq_payment_items_active)가 코드 실수까지 막는 최종 방어선이다.
  *   ③ 금액·통장표시·계좌는 **회차 생성 시점 값을 박제**한다(스냅샷). 나중에 규칙이
@@ -29,6 +29,7 @@ const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require(
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 const { loadWorkboardAmounts, loadWorkboardAmountPopulation, workboardAmountKey } = require('./paymentWorkboardAmount.service');
+const { filterReceiptEligiblePaymentRows } = require('./paymentReceiptGate.service');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
@@ -176,7 +177,11 @@ async function listPaymentTargets(opts = {}) {
   if (opts.sheetId) { params.push(opts.sheetId); where.push(`ri.sheet_id = $${params.length}`); }
   if (opts.tabName) { params.push(opts.tabName); where.push(`ri.tab_name = $${params.length}`); }
 
-  const { rows } = await pool.query(
+  const pageSize = 2000;
+  const resultLimit = 2000;
+  const limitParam = params.length + 1;
+  const offsetParam = params.length + 2;
+  const candidateSql =
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
             ri.reviewer_name AS "reviewerName", ri.phone8 AS "phone8",
             ri.start_date AS "startDate", ri.product_name AS "productName",
@@ -190,12 +195,23 @@ async function listPaymentTargets(opts = {}) {
             -- 혼합배송 리뷰비 판정은 배송구분 한 칸만 필요하다. 행 JSON 전체를 넘기지 않아
             -- 기존 입금 후보/작업보드 금액 조회의 작은-행 계약을 보존한다.
             COALESCE(ri.row_json->>'배송구분', '') AS "deliveryKind"
-       FROM review_index ri
+      FROM review_index ri
       WHERE ${where.join(' AND ')}
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
-      LIMIT 2000`,
-    params
-  );
+      LIMIT $${limitParam} OFFSET $${offsetParam}`;
+
+  // 현금영수증 미제출 행을 제외한 뒤 2,000건을 채운다. LIMIT을 먼저 적용하면 앞쪽의
+  // 미제출 행이 자리를 계속 차지해 뒤쪽 정상 지급 대상이 영구적으로 조회되지 않는다.
+  const rows = [];
+  let offset = 0;
+  while (rows.length < resultLimit) {
+    const { rows: pageRows } = await pool.query(candidateSql, [...params, pageSize, offset]);
+    if (!pageRows.length) break;
+    const eligibleRows = await filterReceiptEligiblePaymentRows(pool, pageRows);
+    rows.push(...eligibleRows.slice(0, resultLimit - rows.length));
+    if (pageRows.length < pageSize) break;
+    offset += pageRows.length;
+  }
   if (!rows.length) return { items: [], summary: _summarize([]) };
 
   const sheetIds = [...new Set(rows.map(r => r.sheetId))];
@@ -902,31 +918,49 @@ async function listBatches(limit = 50) {
 }
 
 /** 회차 상세(항목 포함) */
-async function getBatch(batchId) {
-  const { rows: [b] } = await pool.query(`SELECT * FROM payment_batches WHERE id = $1`, [batchId]);
+async function getBatch(batchId, { db = pool, lock = false } = {}) {
+  const { rows: [b] } = await db.query(
+    `SELECT * FROM payment_batches WHERE id = $1${lock ? ' FOR UPDATE' : ''}`,
+    [batchId]
+  );
   if (!b) return null;
-  const { rows: items } = await pool.query(
+  const { rows: items } = await db.query(
     `SELECT * FROM payment_batch_items WHERE batch_id = $1 ORDER BY created_at, id`, [batchId]);
   return { batch: _batchView(b), items };
 }
 
 /** 재다운로드 이력 기록(사용자 확정: 재다운로드도 이력에 남는다) */
-async function markDownloaded(batchId, by) {
-  await pool.query(
+async function markDownloaded(batchId, by, { db = pool } = {}) {
+  await db.query(
     `UPDATE payment_batches
         SET download_count = download_count + 1, last_downloaded_at = NOW(), last_downloaded_by = $2
       WHERE id = $1`, [batchId, by || '']);
 }
 
-async function checkBatchAccountSnapshots({ batch, items }) {
+async function checkBatchAccountSnapshots({ batch, items }, { db = pool } = {}) {
   const guarded = (items || []).filter(i => i.account_reviewer_id && i.account_source);
   if (!guarded.length) return { ok: true, mismatches: [], unverifiable: (items || []).length };
   const ids = [...new Set(guarded.map(i => String(i.account_reviewer_id)))];
-  const { rows } = await pool.query(
+  const { rows } = await db.query(
     `SELECT id AS "reviewerId", bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder", sub_accounts AS "subAccounts"
        FROM reviewers WHERE id::text = ANY($1::text[])`, [ids]);
   const byId = new Map(rows.map(r => [String(r.reviewerId), r]));
   return reconcileAccountSnapshots(guarded, byId);
+}
+
+/** 최초 이체파일 생성 직전, 회차 생성 후 바뀐 영수증 검수 상태를 현재 원장으로 다시 확인한다. */
+async function checkBatchReceiptEligibility({ items } = {}, { db = pool, lock = false } = {}) {
+  const live = (items || []).filter(item => item.status !== 'cancelled');
+  const coords = live.map(item => ({
+    sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index,
+  }));
+  const eligible = await filterReceiptEligiblePaymentRows(db, coords, { lock });
+  const allowed = new Set(eligible.map(item => `${item.sheetId}\u0000${item.tabName}\u0000${item.rowIndex}`));
+  const blocked = live.filter(item => !allowed.has(`${item.sheet_id}\u0000${item.tab_name}\u0000${item.row_index}`));
+  return {
+    ok: blocked.length === 0,
+    blocked: blocked.map(item => ({ itemId: item.id, reviewerName: item.reviewer_name || '' })),
+  };
 }
 
 function reconcileAccountSnapshots(items, ownersById) {
@@ -1301,6 +1335,7 @@ module.exports = {
 
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
+  checkBatchReceiptEligibility,
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
   compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,

@@ -1839,6 +1839,17 @@ function _pendingBadgeText(item) {
   return "구매양식반영완료";
 }
 
+/** 리뷰 완료 뒤 현금영수증만 남은 참여 건 — search.html과 같은 슬롯/제출 원장을 사용한다. */
+function _hasPendingCashReceipt(item) {
+  if (!item || !item.isSubmitted) return false;
+  if (item.cashReceiptPending === true) return true;
+  const slots = Array.isArray(item.captureSlots) ? item.captureSlots : [];
+  const receipt = slots.find(slot => slot && (slot.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(slot.label || ''))));
+  if (!receipt) return false;
+  const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+  return !submitted.has(receipt.key);
+}
+
 /** 작업보드에 구매양식의 필수 주문정보가 기록된 경우만 리뷰 제출 상태와 별도로 표시한다. */
 function _hasPurchaseFormReflected(item) {
   if (!item || item.isOrderPending || !item.row || typeof item.row !== 'object') return false;
@@ -1922,6 +1933,8 @@ function renderReviewSubTab() {
           ? `<span class="status-badge-order ${_orderStageClass(item.orderStage)}">${_orderStageLabel(item.orderStage)}</span>`
           : '<span class="status-badge-order reflected">구매양식반영완료</span>';
       const subBadgeHtml = (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '';
+      const receiptBadgeHtml = isDone && _hasPendingCashReceipt(item)
+        ? '<span style="font-size:.62rem;font-weight:800;color:#B45309">현금영수증 미제출</span>' : '';
       const roundBadge = item.round
         ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
         : "";
@@ -1975,7 +1988,7 @@ function renderReviewSubTab() {
             ${badgeHtml}
             ${item.isOrderPending ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
           </div>
-          ${subBadgeHtml}
+          ${receiptBadgeHtml || subBadgeHtml}
         </div>`;
       if (item.isOrderPending) {
         card.classList.add("is-order-pending");   // 시트반영 전 주문 = 제출 대상 아님(클릭 비활성)
@@ -2001,7 +2014,7 @@ function renderReviewSubTab() {
         return `<div class="result-group-item">
           <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
           <span class="result-group-item-label">${escHtml(rowLabel)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
-          ${isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
+          ${isDone && _hasPendingCashReceipt(item) ? '<span class="result-group-item-badge" style="background:#FEF3C7;color:#B45309">현금영수증 미제출</span>' : isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
           <span class="result-group-item-badge${isDone ? ' done' : ''}${item.isOrderPending ? ' order ' + _orderStageClass(item.orderStage) : ''}">${isDone ? '제출완료' : item.isOrderPending ? _orderStageLabel(item.orderStage, true) : escHtml(_pendingBadgeText(item))}</span>
           ${isDone ? _reEditBtnHtml(item) : ''}
         </div>`;
@@ -2313,7 +2326,8 @@ function openPartInfoSheet(items, opts){
   const done = !!opts.done;
   const list = (items || []).filter(Boolean);
   if (!list.length) return;
-  _partInfoSubmitItems = done ? null : list;     // 리뷰제출하기는 대기 항목에만
+  // 완료 건도 현금영수증이 남았으면 같은 제출 화면으로 다시 들어간다.
+  _partInfoSubmitItems = done ? list.filter(_hasPendingCashReceipt) : list;
   _partInfoChatUrl = '';
   _partInfoProductUrl = '';
   _partInfoCancelable = null;
@@ -2460,21 +2474,21 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
   } else {
     html += '<div style="text-align:center;font-size:.7rem;color:#9CA3AF;border:1.5px dashed #D1D5DB;border-radius:11px;padding:10px">연결된 팀 채팅방이 없어요</div>';
   }
-  if (!done){
-    const submitItems = _partInfoSubmitItems || [];
+  const submitItems = _partInfoSubmitItems || [];
+  if (submitItems.length){
     if (submitItems.length <= 1) {
-      html += '<button onclick="_partInfoSubmit(0)" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">📤 리뷰제출하기</button>';
+      html += '<button onclick="_partInfoSubmit(0)" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">' + (done ? '🧾 현금영수증 제출하기' : '📤 리뷰제출하기') + '</button>';
     } else {
       // 같은 캠페인에 여러 명의/주문이 있어도 제출은 반드시 행(application)별로 분리한다.
       // 한 번에 넘기면 이미 제출한 건을 포함해 전부 작성해야 하는 것처럼 보여 오제출을 유발한다.
       html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF1F7">'
-        + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">제출할 참여 건을 선택하세요</div>'
+        + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">' + (done ? '현금영수증을 제출할 참여 건을 선택하세요' : '제출할 참여 건을 선택하세요') + '</div>'
         + submitItems.map((x, i) => {
           const recipient = _partInfoParticipantName(x);
           const label = recipient || ((i + 1) + '번째 참여 건');
           return '<button onclick="_partInfoSubmit(' + i + ')" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;border:1.5px solid #BFDBFE;cursor:pointer;background:#fff;color:#1D4ED8;font-size:.82rem;font-weight:800;border-radius:12px;padding:11px 12px;margin-top:' + (i ? '8' : '0') + ';box-shadow:0 2px 7px rgba(37,99,235,.08)">'
             + '<span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;flex:none;border-radius:50%;background:#DBEAFE;color:#2563EB;font-size:.72rem">' + (i + 1) + '</span>'
-            + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">이 참여 건만 리뷰 제출</span></span>'
+            + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">' + (done ? '이 참여 건의 현금영수증 제출' : '이 참여 건만 리뷰 제출') + '</span></span>'
             + '<i class="fas fa-chevron-right" style="color:#60A5FA;font-size:.72rem"></i></button>';
         }).join('')
         + '</div>';

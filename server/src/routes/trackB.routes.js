@@ -184,13 +184,15 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
       }
     }
     const { cashReceiptSlotInfo, CR_MISCONFIG_NOTE } = require('../utils/captureSlots');
+    const campaignCashReceipt = (await require('../services/cashReceiptContext.service')
+      .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null)) === true;
     if (wantInfo) {
       const r = await pool.query(
         `SELECT folder_url, capture_folder_url, capture_slots, income_type
            FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
       const t = r.rows[0];
       if (!t) return res.json({ ok: false, kind: 'info', error: '등록되지 않은 탭입니다.' });
-      const cri = cashReceiptSlotInfo(t.capture_slots, t.income_type);
+      const cri = cashReceiptSlotInfo(t.capture_slots, t.income_type, campaignCashReceipt);
       const val = {
         folderUrl: t.folder_url || null,
         captureFolderUrl: t.capture_folder_url || null,
@@ -211,21 +213,19 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
     if (!tc) return res.json({ ok: false, error: '등록되지 않은 탭입니다.' });
     // ★ 현영 대상 판정은 captureSlots.cashReceiptSlotInfo 단일 규칙 — 버튼 활성(홈·업체관리·작업보드)과
     //   이 허용 판정이 **같은 함수**여야 "눌리는데 거부"/"대상인데 안 눌림"이 생기지 않는다.
-    const cr = cashReceiptSlotInfo(tc.capture_slots, tc.income_type);
+    const cr = cashReceiptSlotInfo(tc.capture_slots, tc.income_type, campaignCashReceipt);
     if (!cr.slot) {
       // ★ 사유를 구분한다 — 진행방식이 현영인데 슬롯에서 못 찾은 것과, 애초에 대상이 아닌 것은 다른 일이다
       //   ("대상 아님"으로 뭉개면 관리자가 무엇을 고쳐야 할지 알 수 없다).
       return res.json({ ok: false, error: cr.incomeSaysCashReceipt ? CR_MISCONFIG_NOTE : '현금영수증 발행 대상 작업이 아닙니다.' });
     }
     const driveService = require('../services/drive.service');   // 지연 require — 테스트가 이 라우터를 스텁 pool 로 실행할 때 Drive 스택 무부하
-    const reviewFolderId = tc.folder_url ? driveService.extractFolderIdFromUrl(tc.folder_url) : null;
-    if (!reviewFolderId) {
-      return res.json({ ok: false, error: '리뷰 폴더가 아직 없습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다.' });
-    }
     // ★ 폴더 이름 = 그 슬롯의 **실제 라벨**(업로드가 그 라벨로 서브폴더를 만든다).
     //   종전 `slotLabel(...,'receipt')` 은 수동 슬롯 탭(key=slot2)에서 문자열 'receipt' 를 뒤졌다.
     const label = (cr.slot && cr.slot.label) || '현금영수증';
-    const found = await driveService.findFolderByName(label, reviewFolderId);   // ★ find-only
+    const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+    // 업로드와 같은 비공개 전용 경로를 생성 없이 찾는다. [리뷰] 하위는 업체 공유 대상이라 보지 않는다.
+    const found = await driveService.findReceiptFolderPath(rootFolderId, sheetId, tabName, label);
     if (!found) {
       const msg = '현영 캡처가 아직 없어 폴더가 만들어지지 않았습니다.';
       _tabFolderCache.set(key, { at: Date.now(), url: null, msg });
@@ -1181,14 +1181,20 @@ router.get('/workdesk/invoice-doc', authMiddleware, async (req, res, next) => {
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
-// ── 행별 리뷰 이미지(파일ID) — 업체 뷰어 미리보기 패널. 내부인 + 소유 광고주(_ensureThreadScope). ──
-//   ★ 파일ID만 반환하고 이미지는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(신규 저장소·신규 프록시 0).
+// ── 행별 제출 이미지(파일ID) — 내부인 + 소유 광고주(_ensureThreadScope). ──
+//   ★ 현금영수증은 master/admin/staff 에게만 반환한다. 업체 뷰어는 화면에서 숨기는 데 그치지 않고
+//     응답 파일ID에서도 제외한다(외부 payload 경계).
 router.get('/workdesk/review-images', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json({ ok: true, rows: await svc.reviewImagesForTab({ sheetId, tabName }) });
+    const includeReceipt = ['master', 'admin', 'staff'].includes(_role(req));
+    res.json({
+      ok: true,
+      receiptIncluded: includeReceipt,
+      rows: await svc.reviewImagesForTab({ sheetId, tabName, includeReceipt }),
+    });
   } catch (err) { next(err); }
 });
 
@@ -1770,7 +1776,8 @@ function _delegate(routerRef, method, path) {
    ★ 게이트는 **내부인**(원본은 authMiddleware 만 — 광고주만 좁힌다. 탭 설정은 담당자 업무다). */
 const _tabConfigRoutes = require('./tabconfig.routes');
 const _tabConfigHandler = _delegate(_tabConfigRoutes, 'post', '/config');
-router.post('/tab/config', authMiddleware, internalMiddleware, (req, res, next) =>
+const { tabConfigWriteScopeMiddleware } = require('../middleware/tabConfigScope.middleware');
+router.post('/tab/config', authMiddleware, internalMiddleware, tabConfigWriteScopeMiddleware, (req, res, next) =>
   _tabConfigHandler(req, res, next));
 
 const _orderRoutes = require('./order.routes');
@@ -2225,9 +2232,8 @@ router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, 
 });
 
 /* 수동 분류(이동) — "리뷰가 아니다 → 현금영수증/구매캡처로". 실행은 fileRoute.service
-   재사용(사본 0 — 자동 이동과 같은 상태·같은 되돌리기). 이동 성공 시 그 검수 건은
-   정상(오제출 = resolution 'ok')으로 자동 종결하고, 학습 결합으로 그 실물을 대상 판별
-   예시로 승격할 수 있는 슬롯이면 promote 제안을 동봉한다(등록은 사람이 확인 후). */
+   재사용(사본 0 — 자동 이동과 같은 상태·같은 되돌리기). 현금영수증 이동은 기존 일반 검수의
+   정상 결과를 폐기하고 영수증 전용 재검수를 즉시 실행한다. 다른 이동만 오제출 정상으로 종결한다. */
 router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (req, res) => {
   try {
     const fileId = String((req.body || {}).fileId || '');
@@ -2237,7 +2243,13 @@ router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (
     const by = (req.admin && req.admin.name) || '';
     const out = await require('../services/fileRoute.service').manualRoute({ fileId, target, by });
     if (!out.ok) return res.status(400).json(out);
-    try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'ok' }); } catch (_) {}
+    let reinspection = null;
+    if (target === 'receipt') {
+      try { reinspection = await _inspectSvc.reinspectReceiptFile({ fileId }); }
+      catch (_) { reinspection = { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' }; }
+    } else {
+      try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'ok' }); } catch (_) {}
+    }
     // 이동 안내 — "옮겼다 + 리뷰 캡처가 아직 비어 있다"를 리뷰어가 알아야 다음 행동을 한다.
     let notify = null;
     const moveMessage = String((req.body || {}).rejectMessage || '').trim();
@@ -2249,7 +2261,7 @@ router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (
     }
     let promote = null;
     try { promote = await _routePromoteSuggestion(out); } catch (_) {}
-    res.json({ ...out, promote, notify });
+    res.json({ ...out, promote, notify, ...(target === 'receipt' ? { reinspection } : {}) });
   } catch (err) {
     res.status(500).json({ ok: false, error: '이동에 실패했습니다.' });
   }
@@ -3798,15 +3810,34 @@ router.get('/payment/batch/:id', authMiddleware, adminOrMasterMiddleware, async 
 
 // 은행 서식 파일 — 재다운로드도 이력에 남는다(사용자 확정 규칙)
 router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  let client;
   try {
-    const out = await paymentSvc.getBatch(req.params.id);
-    if (!out) return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
+    client = await pool.connect();
+    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+    // 같은 회차의 동시 최초 다운로드도 직렬화한다. 첫 요청이 검증·기록을 마칠 때까지
+    // 다른 요청은 이 행 잠금 뒤에서 기다린다.
+    const out = await paymentSvc.getBatch(req.params.id, { db: client, lock: true });
+    if (!out) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
+    }
     if (out.batch.status === 'cancelled') {
+      await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: '취소된 회차는 내려받을 수 없습니다.' });
     }
     if (Number(out.batch.downloadCount || 0) === 0) {
-      const accountCheck = await paymentSvc.checkBatchAccountSnapshots(out);
+      // 검증 대상 제출·검수 행을 잠근 채 파일 생성과 다운로드 기록까지 끝낸다.
+      // 그 사이 영수증 반려·교체·재배정이 끼어 지급 근거가 바뀌지 않는다.
+      const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out, { db: client, lock: true });
+      if (!receiptCheck.ok) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, code: 'cash_receipt_not_verified',
+          error: '회차 생성 후 현금영수증 상태가 변경되었습니다. 이 회차를 취소하고 검수 완료 후 새 회차를 만들어 주세요.',
+          blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });
+      }
+      const accountCheck = await paymentSvc.checkBatchAccountSnapshots(out, { db: client });
       if (!accountCheck.ok) {
+        await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, code: 'account_snapshot_changed',
           error: '회차 생성 후 등록 계좌가 변경되었습니다. 이 회차를 취소하고 최신 계좌로 새 회차를 만들어 주세요.',
           mismatches: accountCheck.mismatches.map(x => ({ reviewerName: x.reviewerName, accountTail: x.accountTail })) });
@@ -3814,7 +3845,8 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     }
     const live = out.items.filter(i => i.status !== 'cancelled');
     const buf = await paymentSvc.buildWorkbook(out.batch.bank, live);
-    await paymentSvc.markDownloaded(out.batch.id, _by(req));
+    await paymentSvc.markDownloaded(out.batch.id, _by(req), { db: client });
+    await client.query('COMMIT');
     const name = paymentSvc.batchFileName(out.batch);
     // ★ 형식은 은행마다 다르다(하나 = .xls BIFF8) — MIME·확장자는 서비스 단일 출처를 그대로 쓴다.
     //   내용은 .xls 인데 이름만 .xlsx 로 나가면 은행 화면이 확장자만 보고 거부한다.
@@ -3824,7 +3856,12 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     res.setHeader('Content-Disposition',
       `attachment; filename="payment_${out.batch.seq}.${fmt.ext}"; filename*=UTF-8''${encodeURIComponent(name)}`);
     res.send(buf);
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (client) try { await client.query('ROLLBACK'); } catch {}
+    next(err);
+  } finally {
+    if (client) client.release();
+  }
 });
 
 // 회차 취소 — 잠금 해제(항목이 다시 입금대상으로 돌아온다)

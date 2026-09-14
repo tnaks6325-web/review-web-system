@@ -30,10 +30,27 @@ const ISSUE_RULES = [
     sql: (a) => `COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind') = 'order_cancel'`,
   },
   {
+    key: 'receipt_validation',
+    // 영수증 슬롯의 지급 증빙 판정 실패·판정불가. 내부 정상 확인 전까지 입금이 보류된다.
+    js: (c) => !!(c.receiptValidation
+      && (c.receiptValidation.verdict === 'warn' || c.receiptValidation.verdict === 'fail')),
+    sql: (a) => `${a}->'receiptValidation'->>'verdict' IN ('warn','fail')`,
+  },
+  {
+    key: 'receipt',
+    // 영수증으로 확정된 파일은 "리뷰화면 아님" 오류가 아니라 별도 취합 대상으로 센다.
+    js: (c) => !!(c.format && c.format.verdict === 'fail'
+      && (c.format.got || c.format.kind) === 'receipt'),
+    sql: (a) => `${a}->'format'->>'verdict' = 'fail'
+                 AND COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind') = 'receipt'`,
+  },
+  {
     key: 'format_fail',
-    // 리뷰 화면이 아님(확신 판정) — 유일한 fail 축
-    js: (c) => !!(c.format && c.format.verdict === 'fail'),
-    sql: (a) => `${a}->'format'->>'verdict' = 'fail'`,
+    // 현금영수증은 별도 취합 유형으로 분리한다.
+    js: (c) => !!(c.format && c.format.verdict === 'fail'
+      && (c.format.got || c.format.kind) !== 'receipt'),
+    sql: (a) => `${a}->'format'->>'verdict' = 'fail'
+                 AND COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind', '') <> 'receipt'`,
   },
   {
     key: 'channel',
@@ -97,6 +114,16 @@ function productMachineWarningSql(col = 'checks') {
   return `COALESCE(${col}->'product'->>'machineVerdict', ${col}->'product'->>'verdict') = 'warn'`;
 }
 
+/** 영수증 역할 증거 — 신규 전용 판정과 구형 format 판정을 함께 본다. */
+function receiptRoleEvidenceSql(col = 'checks') {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(String(col))) {
+    throw new Error('invalid checks column');
+  }
+  return `(COALESCE(${col}, '{}'::jsonb) ? 'receiptValidation'
+           OR COALESCE(${col}->'format'->>'got', ${col}->'format'->>'kind', '') = 'receipt')`;
+}
+
 module.exports = {
   ISSUE_RULES, ISSUE_KEYS, issueTypesOf, issueTypeCountSql, productMachineWarningSql,
+  receiptRoleEvidenceSql,
 };

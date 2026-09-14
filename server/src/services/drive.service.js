@@ -571,6 +571,42 @@ async function ensureCaptureFolderPath(rootFolderId, sheetTitle, tabName) {
   return ensureFolderPath(rootFolderId, [sheetTitle, tabName, '[구매캡처]']);
 }
 
+/** 폴더 경로를 생성하지 않고 탐색한다. 중간 경로 하나라도 없으면 null. */
+async function findFolderPath(rootFolderId, folderNames) {
+  if (!rootFolderId) return null;
+  let currentParentId = rootFolderId;
+  let folder = null;
+  for (const name of folderNames) {
+    if (!name) continue;
+    folder = await findFolderByName(name, currentParentId);
+    if (!folder) return null;
+    currentParentId = folder.id;
+  }
+  return folder ? {
+    ...folder,
+    url: folder.webViewLink || `https://drive.google.com/drive/folders/${folder.id}`,
+  } : null;
+}
+
+/**
+ * 현금영수증 전용 내부 폴더. 업체에 노출되는 [리뷰]·[구매캡처] 트리의 형제가 아니라
+ * 별도 내부 루트 아래에 둔다. CASH_RECEIPT_FOLDER_ID가 있으면 그 전용 루트를 우선한다.
+ */
+async function ensureReceiptFolderPath(rootFolderId, sheetId, tabName, receiptLabel = '현금영수증') {
+  const privateRootId = process.env.CASH_RECEIPT_FOLDER_ID || rootFolderId;
+  if (!privateRootId || !sheetId || !tabName) return null;
+  const prefix = process.env.CASH_RECEIPT_FOLDER_ID ? [] : ['[내부전용-현금영수증]'];
+  return ensureFolderPath(privateRootId, [...prefix, sheetId, tabName, receiptLabel]);
+}
+
+/** 현금영수증 전용 내부 폴더를 생성 없이 찾는다. */
+async function findReceiptFolderPath(rootFolderId, sheetId, tabName, receiptLabel = '현금영수증') {
+  const privateRootId = process.env.CASH_RECEIPT_FOLDER_ID || rootFolderId;
+  if (!privateRootId || !sheetId || !tabName) return null;
+  const prefix = process.env.CASH_RECEIPT_FOLDER_ID ? [] : ['[내부전용-현금영수증]'];
+  return findFolderPath(privateRootId, [...prefix, sheetId, tabName, receiptLabel]);
+}
+
 /**
  * 리뷰 폴더 경로 확보 (3~4단계: 시트제목 → 탭명 → [리뷰] → [옵션])
  * @param {string} rootFolderId - AI_REVIEW_FOLDER_ID
@@ -1414,6 +1450,8 @@ module.exports = {
   // 새 통합 폴더 구조 함수
   ensureFolderPath,
   ensureCaptureFolderPath,
+  ensureReceiptFolderPath,
+  findReceiptFolderPath,
   ensureReviewFolderPath,
   trashDuplicateFile,
   generateReviewFileName,

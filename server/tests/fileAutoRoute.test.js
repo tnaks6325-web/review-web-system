@@ -45,8 +45,9 @@ const cr = require('../src/utils/captureRoute');
   ok('A5: ★ 구매캡처 이동은 예시 2장(구매캡처+구매확정) 등록 필수(사용자 확정)');
 
   const rv = cr.routeDecision({ slotKey: 'receipt', verdict: sure('review'), ...base });
-  assert.strictEqual(rv.action, 'route'); assert.strictEqual(rv.toSlot, 'review');
-  ok('A6: 영수증 칸 + 리뷰 판정 → [리뷰] 이동');
+  assert.strictEqual(rv.action, 'none'); assert.strictEqual(rv.reason, 'private_receipt_requires_manual');
+  assert.strictEqual(cr.routeDecision({ slotKey: 'receipt', verdict: sure('order_capture'), ...base }).action, 'none');
+  ok('A6: 비공개 영수증 출발 파일은 AI만으로 공개 가능 폴더에 자동 이동하지 않음');
 
   assert.strictEqual(cr.routeDecision({ slotKey: 'review', verdict: sure('purchase_confirm'), ...base }).reason, 'no_transition');
   assert.strictEqual(cr.routeDecision({ slotKey: 'review', verdict: sure('other'), ...base }).reason, 'no_transition');
@@ -164,10 +165,22 @@ const fileRoute = require('../src/services/fileRoute.service');
     ok('E2: 이동·반려 시 기존 불일치 알림 대체(도배 방지)');
 
     assert.ok(diag.includes('reviewBaseFolderId = targetFolderId'), '[리뷰] 기준 폴더를 서브폴더 진입 전에 보관');
+    assert.ok(/cashReceiptRequirementsForRows\(\[[\s\S]{0,180}rowIndex: _rowNo/.test(diag)
+      && /_byRow\.get\(`\$\{sheetId\}\\u0000\$\{tabName\}\\u0000\$\{_rowNo\}`\)/.test(diag),
+      '혼합 재사용 탭의 영수증 자동 이동 여부는 업로드 행의 공고 원본으로 판정');
     assert.ok(diag.includes('recomputePrimary({ sheetId, tabName, rowIndex: rowIdx })'), '라우팅 후 대표 이미지 재계산');
     assert.ok(diag.includes("r.slotKey || slot"), 'A-2 원장은 라우팅 반영 최종 슬롯으로 기록');
+    assert.ok(diag.includes("const toSlotKey = rd.toSlot === 'receipt' && _receiptInfo.slot?.key")
+      && diag.includes('toSlot: toSlotKey') && diag.includes('finalSlot = toSlotKey'),
+      '수동 slot2 현금영수증은 설정된 원장 key로 이동');
     assert.ok(diag.includes('markRouted({'), '이동 이력 기록(되돌리기 재료)');
     ok('E3: 원장 정합(최종 슬롯·이동 이력·대표 재계산) 배선');
+
+    const fr = read('src/services/fileRoute.service.js');
+    assert.ok(/cashReceiptRequirementsForRows\([\s\S]*subs\.map\(s => \(\{ sheetId, tabName, rowIndex/.test(fr)
+      && /hasReceiptSlot: rowHasReceiptSlot/.test(fr)
+      && /receiptSlotKey: rowReceiptSlotKey/.test(fr),
+      '소급 자동정리도 제출 행의 공고 원본으로 영수증 이동 가능 여부를 판정');
 
     // 샘플 조립 단일화 — diag 에서 loadSamplesFor/loadReceiptSamplesFor 직접 호출 금지
     assert.ok(!/loadSamplesFor\(/.test(diag) && !/loadReceiptSamplesFor\(/.test(diag),
@@ -202,7 +215,7 @@ const fileRoute = require('../src/services/fileRoute.service');
   {
     const ri = read('src/services/reviewInspect.service.js');
     assert.ok(ri.includes('async function submissionSamples') && ri.includes('loadRouteSamples'), '조립 헬퍼·route 로더 존재');
-    assert.ok(ri.includes("opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey })"),
+    assert.ok(ri.includes("opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: slotRole })"),
       '2차 검수 폴백도 같은 조립 사용');
     assert.ok(ri.includes("key: 'route_' + s.key"), 'route 예시 key 접두(캐시 지문 충돌 방지)');
     const rk = read('src/utils/routeSampleKinds.js');
@@ -254,7 +267,16 @@ const fileRoute = require('../src/services/fileRoute.service');
     const fr = read('src/services/fileRoute.service.js');
     assert.ok(fr.includes('trashFiles') && !/permanentlyDelete|files\.delete\(/.test(fr), '삭제는 휴지통만');
     assert.ok(fr.includes('routed_from_slot IS NULL'), '이미 라우팅된 파일 재라우팅 금지(핑퐁 방지)');
-    assert.ok(fr.includes("slot_key IN ('review', 'receipt')"), '스윕 대상은 review/receipt 슬롯만');
+    assert.ok(fr.includes("slot_key = ANY($3::text[])") && fr.includes("['review', 'receipt', receiptSlotKey]"),
+      '스윕 대상은 review/receipt와 수동 현금영수증 슬롯만');
+    assert.ok(/const toSlot = rd\.toSlot === 'receipt' \? rowReceiptSlotKey : rd\.toSlot/.test(fr),
+      '소급 스윕도 현금영수증 역할을 수동 slot2 원장 key로 바꾼다');
+    assert.ok(/const movedToReceipt = p\.toSlot === p\.receiptSlotKey[\s\S]*receipt: movedToReceipt[\s\S]*reinspectReceiptFile\(\{ fileId: p\.fileId \}\)/.test(fr),
+      '소급 스윕이 현영 칸으로 옮긴 파일도 기존 검수를 무효화하고 receipt 재검수한다');
+    assert.ok(/const backTarget = isCashReceiptSlot\([\s\S]{0,260}\) \? 'receipt' : 'review'/.test(fr),
+      '수동 slot2 현금영수증의 이동 되돌리기도 현금영수증 폴더로 복귀');
+    assert.ok(/backTarget === 'receipt'[\s\S]*WITH restored AS[\s\S]*status = 'pending'[\s\S]*resolution = NULL[\s\S]*reinspectReceiptFile\(\{ fileId \}\)/.test(fr),
+      '현영 원위치 복구는 기존 리뷰 검수를 무효화하고 영수증 재검수를 실행');
     assert.ok(fr.includes('if (dryRun) return'), '스윕 dryRun = 무변경 반환');
     assert.ok(fr.includes('is_submitted 는 건드리지 않는다'), '스윕이 제출 상태를 뒤집지 않음(문서화된 한계)');
     ok('E13: fileRoute — 휴지통·핑퐁 방지·dryRun 무변경');

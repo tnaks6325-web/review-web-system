@@ -1,9 +1,39 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { effectiveCaptureSlots } = require('../utils/captureSlots');
+const { effectiveCaptureSlots, cashReceiptSlotInfo } = require('../utils/captureSlots');
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
 const { workKindsForTabs } = require('./workKindContext.service');
 const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
+const { cashReceiptRequirementsForRows } = require('./cashReceiptContext.service');
+const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
+
+/** 검수에서 거절·보류된 영수증은 파일이 남아 있어도 리뷰어에게는 다시 제출할 슬롯이다. */
+async function _removeUnpayableReceiptSlots(items) {
+  const source = Array.isArray(items) ? items : [];
+  if (!source.length) return;
+  let states = null;
+  try {
+    states = await cashReceiptSubmissionStates(pool, source);
+  } catch (e) {
+    // 판정 조회 실패 때 raw 파일 존재만으로 제출완료를 꾸미면 재제출 입구가 사라진다.
+    logger.warn('[Search] 현금영수증 지급상태 조회 실패(재제출 가능으로 표시): ' + e.message);
+  }
+  for (const item of source) {
+    const receipt = cashReceiptSlotInfo(item.captureSlots, item.incomeType).slot;
+    if (!receipt) continue;
+    const state = states && states.get(cashReceiptSubmissionRowKey(
+      item.sheetId, item.tabName, item.rowIndex));
+    if (state && state.submitted) {
+      // 예전 슬롯 key로 올린 파일이라도 영수증 전용 검증을 통과했다면
+      // 현재 설정 key를 제출 완료로 내려 재제출을 요구하지 않는다.
+      if (!(item.submittedSlots || []).includes(receipt.key)) {
+        item.submittedSlots = [...(item.submittedSlots || []), receipt.key];
+      }
+    } else {
+      item.submittedSlots = (item.submittedSlots || []).filter(key => key !== receipt.key);
+    }
+  }
+}
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -473,6 +503,13 @@ async function searchByName(query, phone8, opts = {}) {
         filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
     } catch (_) { _ctMap = new Map(); }
 
+    /* 모집공고의 현금영수증 직접 설정 — 안내 카드에만 쓰던 값을 제출 슬롯에도 연결한다. */
+    let _crMap = new Map();
+    try {
+      _crMap = await cashReceiptRequirementsForRows(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
+    } catch (_) { _crMap = new Map(); }
+
     // GAS 호환 결과 변환
     const results = filteredRows.map(row => {
       const rowObj = _parseRowJson(row.rowJson);
@@ -507,7 +544,11 @@ async function searchByName(query, phone8, opts = {}) {
       captureFolderUrl: row.captureFolderUrl,
       // 현영 탭은 capture_slots 설정이 없어도 리뷰+현금영수증 2슬롯이 자동 적용된다(공용 유틸)
       // ★ 087 2차: 구매확정 + 현영이면 리뷰 자리가 구매확정으로 치환된다(단독은 종전 단일 화면).
-      captureSlots: effectiveCaptureSlots(row.captureSlots, row.incomeType, _rtMap.get(`${row.sheetId} ${row.tabName}`) || null),
+      captureSlots: effectiveCaptureSlots(
+        row.captureSlots,
+        row.incomeType,
+        _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
+        _crMap.get(cashReceiptSubmissionRowKey(row.sheetId, row.tabName, row.rowIndex)) === true),
       reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 리뷰어 안내문용
       workKind:    _wkMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 'blog' = 포스팅URL 제출
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
@@ -551,6 +592,7 @@ async function searchByName(query, phone8, opts = {}) {
       } catch (slotErr) {
         logger.warn('[Search] submittedSlots 조회 실패 (무시): ' + slotErr.message);
       }
+      await _removeUnpayableReceiptSlots(multiSlotItems);
     }
 
     // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
@@ -677,6 +719,19 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
   } catch (_) { _ctMap = new Map(); }
 
+  // pg_trgm 대체 검색도 본검색과 같은 서버 기준으로 슬롯을 파생한다. 이 값이 빠지면
+  // 공고에서만 현금영수증을 켠 작업은 첨부 칸이 보이지 않는데 지급 게이트는 닫히는 교착이 난다.
+  let _rtMap = new Map();
+  try {
+    _rtMap = await reviewTypesForTabs(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+  } catch (_) { _rtMap = new Map(); }
+  let _crMap = new Map();
+  try {
+    _crMap = await cashReceiptRequirementsForRows(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
+  } catch (_) { _crMap = new Map(); }
+
   const results = filteredRows.map(row => {
     const rowObj = _parseRowJson(row.rowJson);
     return {
@@ -697,7 +752,13 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     displayNameTC: _ctMap.get(`${row.sheetId} ${row.tabName}`) || row.displayName,
     folderUrl:   row.folderUrl,
     captureFolderUrl: row.captureFolderUrl,
-    captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
+    incomeType:  row.incomeType,
+    captureSlots: effectiveCaptureSlots(
+      row.captureSlots,
+      row.incomeType,
+      _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
+      _crMap.get(cashReceiptSubmissionRowKey(row.sheetId, row.tabName, row.rowIndex)) === true),
+    reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
     submittedSlots: [],
     // ★ 제출완료 행은 행 전체 JSON 미반환 (본검색과 동일한 데이터 최소화)
     row:         row.isSubmitted ? {} : rowObj,
@@ -707,6 +768,37 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     isPaid:      _isPaid(row.isSubmitted2, rowObj),
     };
   });
+
+  // 대체 검색으로 재진입해도 이미 낸 리뷰와 현금영수증을 다시 요구하지 않는다.
+  const multiSlotItems = results.filter(r => r.captureSlots);
+  if (multiSlotItems.length > 0) {
+    try {
+      const keyOf = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
+      const { rows: subRows } = await pool.query(
+        `SELECT sheet_id, tab_name, row_index, slot_key
+           FROM review_submissions
+          WHERE sheet_id = ANY($1) AND tab_name = ANY($2) AND row_index = ANY($3)`,
+        [
+          [...new Set(multiSlotItems.map(r => r.sheetId))],
+          [...new Set(multiSlotItems.map(r => r.tabName))],
+          [...new Set(multiSlotItems.map(r => r.rowIndex))],
+        ]
+      );
+      const coverMap = new Map();
+      for (const sr of subRows) {
+        const key = keyOf(sr.sheet_id, sr.tab_name, sr.row_index);
+        if (!coverMap.has(key)) coverMap.set(key, new Set());
+        coverMap.get(key).add(sr.slot_key);
+      }
+      for (const item of multiSlotItems) {
+        const covered = coverMap.get(keyOf(item.sheetId, item.tabName, item.rowIndex));
+        item.submittedSlots = covered ? [...covered] : [];
+      }
+    } catch (slotErr) {
+      logger.warn('[Search] fallback submittedSlots 조회 실패 (무시): ' + slotErr.message);
+    }
+    await _removeUnpayableReceiptSlots(multiSlotItems);
+  }
 
   // ── order_submissions 병합(폴백 경로도 누락 없이) — 폴백은 phoneList 미계산이므로 [p8] ──
   if (includeSubmitted && p8 && p8.length === 8) {

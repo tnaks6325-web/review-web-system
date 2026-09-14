@@ -413,13 +413,13 @@ const SRCH = S('src/services/search.service.js');
 const SUB = S('src/routes/submit.routes.js');
 const RE = S('src/routes/reviewEdit.routes.js');
 t('① 리뷰어 화면 슬롯 (search.service)',
-  /effectiveCaptureSlots\(row\.captureSlots, row\.incomeType, _rtMap\.get/.test(SRCH));
+  /effectiveCaptureSlots\([\s\S]{0,180}row\.captureSlots,[\s\S]{0,180}row\.incomeType,[\s\S]{0,180}_rtMap\.get[\s\S]{0,180}_crMap\.get/.test(SRCH));
 t('② 제출 완료 판정 (submit.routes)',
-  /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(SUB));
+  /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt, _crRequired === true\)/.test(SUB));
 t('③ 업로드 폴더 라벨 + 검수 기대값 (diag review-upload)',
   // ★ 폴더 라벨은 **탭 값 그대로**(행마다 폴더가 갈리면 안 된다), AI 기대 종류는 **행 우선**
   //   (`_effReviewType = _rowReviewType || _tabReviewType`) — 혼합 탭의 구매확정 행 인정(2026-08-19).
-  /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot, _tabReviewType\)/.test(DIAG)
+  /slotLabelOf\([\s\S]{0,180}slot, _tabReviewType, _campaignCashReceipt\)/.test(DIAG)
   && /reviewType: _effReviewType/.test(DIAG)
   && /const _effReviewType = _rowReviewType \|\| _tabReviewType/.test(DIAG)
   && /reviewTypeForRow\(\{ sheetId, tabName, rowIndex \}\)/.test(DIAG));

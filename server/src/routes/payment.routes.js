@@ -12,10 +12,12 @@ const { recordDeposits } = require('../services/paymentApply.service');
 // ★ 규칙 본체는 utils/paymentAmount.js 단일 출처(입금관리 M1 의 상품비 폴백과 공용).
 //   여기 사본을 되살리면 "레거시 화면과 입금관리의 금액이 갈리는" 드리프트가 난다.
 const { extractAmountText: _extractAmount } = require('../utils/paymentAmount');
+const { filterReceiptEligiblePaymentRows } = require('../services/paymentReceiptGate.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/payment/targets — 입금 대상 목록 (GAS: getPaymentTargets)
-//   리뷰 완료(is_submitted) + 입금 미처리(is_submitted2 != PAID) + 미마감 탭
+//   리뷰 완료(is_submitted) + 현금영수증 대상이면 영수증 제출 완료
+//   + 입금 미처리(is_submitted2 != PAID) + 미마감 탭
 //   리뷰어 마스터(reviewers)에서 계좌/소득명의/주민번호를 결합한다.
 // ═══════════════════════════════════════════════════════════
 router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -51,7 +53,8 @@ router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res,
     `);
 
     // row_json → 결제금액 추출 후 응답 슬림화 (row_json 자체는 제외)
-    const targets = rows.map(r => {
+    const receiptEligibleRows = await filterReceiptEligiblePaymentRows(pool, rows);
+    const targets = receiptEligibleRows.map(r => {
       const { rowJson, ...rest } = r;
       return { ...rest, amount: _extractAmount(rowJson) };
     });
@@ -80,8 +83,19 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      updated = await recordDeposits(client, items, { by: req.admin?.name || '' });
+      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+      // 화면을 연 뒤 영수증이 무효화·이동될 수 있고 API를 직접 호출할 수도 있으므로,
+      // 실제 입금 원장을 쓰는 같은 transaction 안에서 좌표 전부를 다시 검증한다.
+      const receiptEligibleItems = await filterReceiptEligiblePaymentRows(client, items, { lock: true });
+      if (receiptEligibleItems.length !== items.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          ok: false,
+          code: 'CASH_RECEIPT_NOT_VERIFIED',
+          error: '현금영수증 제출·검수가 완료되지 않은 항목이 있어 입금 처리하지 않았습니다. 목록을 새로고침해 주세요.',
+        });
+      }
+      updated = await recordDeposits(client, receiptEligibleItems, { by: req.admin?.name || '' });
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');

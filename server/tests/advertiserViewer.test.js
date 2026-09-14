@@ -89,6 +89,7 @@ async function run() {
   ok('정상 광고주는 ok:true + items 반환', okRes.code === 200 && okRes.body && okRes.body.ok === true && Array.isArray(okRes.body.items));
 
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+  const driveRouteSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'drive.routes.js'), 'utf8');
   const seg = routeSrc.slice(routeSrc.indexOf("'/my-work-summary'"), routeSrc.indexOf("'/my-work-summary'") + 700);
   ok('★ advertiserId 는 토큰(req.admin.advertiser_id)에서만 — 쿼리/바디 미수신(IDOR 차단)',
     seg.includes('req.admin.advertiser_id') && !/req\.(query|body)\.advertiserId/.test(seg));
@@ -337,25 +338,68 @@ async function run() {
     rvLayer && rvLayer.methods.includes('get') && rvLayer.mw.includes('authMiddleware'));
   ok('★ 스코프 게이트(_ensureThreadScope) — 소유/담당 탭만(교차 열람 차단)',
     /'\/workdesk\/review-images'[\s\S]{0,420}_ensureThreadScope\(req, sheetId, tabName\)/.test(routeSrc));
+  const rvRouteSrc = routeSrc.slice(routeSrc.indexOf("'/workdesk/review-images'"), routeSrc.indexOf("'/workdesk/review-images'") + 900);
+  ok('★ 현금영수증 포함 권한은 서버 내부 역할(master/admin/staff) 세 가지로 닫혀 있다',
+    /\['master', 'admin', 'staff'\]\.includes\(_role\(req\)\)/.test(rvRouteSrc));
+  ok('★ 서비스 호출과 응답 표식이 같은 includeReceipt 값을 쓴다',
+    /receiptIncluded: includeReceipt/.test(rvRouteSrc) && /reviewImagesForTab\(\{ sheetId, tabName, includeReceipt \}\)/.test(rvRouteSrc));
   {
     svc.__setPoolForTest(pool([
+      [/FROM tab_configs WHERE sheet_id=\$1/, () => ({ rows: [{ gid: '', capture_slots: [
+        { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }
+      ], income_type: '' }] })],
       [/FROM review_submissions/, () => ({ rows: [
-        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', at: '2026-07-01T00:00:00Z' },
-        { row_index: 3, file_id: 'FILEBBBBBBBBBBBBBBBBBBBB', slot_key: 'cash_receipt', at: '2026-07-01T00:01:00Z' },
-        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', at: '2026-07-02T00:00:00Z' },   // 중복 파일
+        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', inspection_kind: 'review', at: '2026-07-01T00:00:00Z' },
+        { row_index: 3, file_id: 'FILEBBBBBBBBBBBBBBBBBBBB', slot_key: 'slot2', receipt_evidence: true, inspection_kind: 'receipt', at: '2026-07-01T00:01:00Z' },
+        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', inspection_kind: 'review', at: '2026-07-02T00:00:00Z' },   // 중복 파일
+        { row_index: 4, file_id: 'FILEHISTORICALRECEIPT02', slot_key: 'slot2', receipt_evidence: true, inspection_kind: 'receipt', at: null },
+        { row_index: 6, file_id: 'FILEAPPROVEDREVIEW000001', slot_key: 'review', receipt_evidence: true, receipt_validation: false,
+          inspection_kind: 'receipt', inspection_status: 'resolved', resolution: 'ok', at: null },
         { row_index: 5, file_id: null, slot_key: 'review', at: null },                                            // 빈 파일ID
       ] })],
       [/FROM review_index/, () => ({ rows: [
         { row_index: 3, review_file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', review_file_at: null },   // 이미 있는 건 중복 안 됨
+        { row_index: 4, review_file_id: 'FILEHISTORICALRECEIPT02', review_file_at: null },     // 제출 원장에서 제외한 영수증 폴백 재진입 금지
         { row_index: 9, review_file_id: 'FILECCCCCCCCCCCCCCCCCCCC', review_file_at: '2026-06-01T00:00:00Z' },
       ] })],
     ]));
     const rv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T' });
-    ok('행별 파일 목록을 row_index 키로 반환(= 참여자 seq)', Array.isArray(rv['3']) && rv['3'].length === 2);
+    ok('행별 파일 목록을 row_index 키로 반환(= 참여자 seq)', Array.isArray(rv['3']) && rv['3'].length === 1);
     ok('같은 파일ID 중복 제거', rv['3'].filter(f => f.fileId === 'FILEAAAAAAAAAAAAAAAAAAAA').length === 1);
     ok('빈 file_id 행은 키 자체가 안 생긴다', !('5' in rv));
     ok('원장(032)에 없고 대표 이미지(031)만 있는 과거 행도 폴백으로 합류', rv['9'] && rv['9'][0].fileId === 'FILECCCCCCCCCCCCCCCCCCCC');
-    ok('슬롯 라벨(현금영수증 등) 동봉', rv['3'].some(f => f.slot === 'cash_receipt'));
+    ok('★ 기본 호출(업체 payload)은 수동 slot2 현금영수증 파일ID도 제외한다', !rv['3'].some(f => f.fileId === 'FILEBBBBBBBBBBBBBBBBBBBB'));
+    ok('★ 제외된 영수증 파일ID는 review_index 과거 대표이미지 폴백으로도 재진입하지 않는다', !rv['4']);
+    ok('★ 영수증 AI 오판을 정상 확정한 리뷰 슬롯 파일은 업체 리뷰 미리보기에 복원한다',
+      rv['6'] && rv['6'][0].slot === 'review' && rv['6'][0].fileId === 'FILEAPPROVEDREVIEW000001');
+    const internalRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T', includeReceipt: true });
+    ok('내부 호출만 현금영수증을 표준 receipt 슬롯으로 동봉한다', internalRv['3'].some(f => f.slot === 'receipt' && f.fileId === 'FILEBBBBBBBBBBBBBBBBBBBB'));
+
+    svc.__setPoolForTest(pool([
+      [/FROM tab_configs WHERE sheet_id=\$1/, () => ({ rows: [{ gid: '', capture_slots: [
+        { key: 'review', label: '리뷰' }, { key: 'slot2', label: '추가 리뷰' }
+      ], income_type: '' }] })],
+      [/FROM review_submissions/, () => ({ rows: [
+        // 현재 설정에서 slot2가 일반 칸으로 바뀌어도 파일에 남은 영수증 증거가 우선한다.
+        { row_index: 4, file_id: 'FILEHISTORICALRECEIPT01', slot_key: 'slot2', receipt_evidence: true, inspection_kind: 'receipt', at: null },
+        // 역할 검수 증거가 없는 과거 사용자 정의 슬롯도 외부에는 안 낸다.
+        { row_index: 4, file_id: 'FILEUNRESOLVEDROLE0001', slot_key: 'slot2', receipt_evidence: false, inspection_kind: '', at: null },
+      ] })],
+      [/FROM review_index/, () => ({ rows: [] })],
+    ]));
+    const renamedSlotRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T' });
+    ok('★ 슬롯 설정이 바뀌어도 과거 영수증 증거 파일과 역할 미확정 파일은 업체 payload에서 제외한다',
+      !renamedSlotRv['4']);
+
+    svc.__setPoolForTest(pool([
+      [/FROM tab_configs WHERE sheet_id=\$1/, () => ({ rows: [{ gid: '', capture_slots: null, income_type: '' }] })],
+      [/FROM review_submissions/, () => { throw new Error('inspection evidence unavailable'); }],
+      [/FROM review_index/, () => ({ rows: [
+        { row_index: 7, review_file_id: 'FILELEGACYROLEUNKNOWN01', review_file_at: null },
+      ] })],
+    ]));
+    const evidenceFailureRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T' });
+    ok('★ 제출·검수 역할 근거 조회 실패 시 업체용 과거 대표이미지 폴백은 닫힌다', !evidenceFailureRv['7']);
   }
   /* ⚠ 2026-08-24: 총건수 초과 줄에 `class="gover"` 가 조건부로 붙으며 `<tr ` 뒤가 달라졌다.
      검사 의미는 그대로 — **행(tr)에 data-rid 가 실린다**(셀에만 있으면 tr 단위 선택이 죽는다). */
@@ -461,15 +505,32 @@ async function run() {
     /\.tp3grid\.c3 \.rvpane\{position:relative;overflow:hidden;padding:0\}/.test(css)
     && /\.rv2\{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr/.test(css)
     && /\.rvnone\{/.test(css) && /\.sheetgrid tbody tr\.rvon>td\{/.test(css));
+  ok('★ 업체는 응답 표식이 없거나 false면 현금영수증 UI를 열지 않는다',
+    /function _rvCanSeeReceipt\(\)\{ return \['master','admin','staff'\]\.includes\(STATE\.role\)&&STATE\.rvReceiptIncluded===true; \}/.test(src)
+    && /STATE\.rvReceiptIncluded=!!\(r&&r\.ok&&r\.receiptIncluded===true\)/.test(src));
+  ok('★ 공개 업체 리포트는 review 원장만 허용하고 영수증 검수 증거와 폴더 재귀 폴백을 차단한다', (() => {
+    const i = driveRouteSrc.indexOf("router.get('/report/:code'");
+    const block = driveRouteSrc.slice(i, driveRouteSrc.indexOf("router.get('/image/:id'", i));
+    return i > 0
+      && /COALESCE\(rs\.slot_key, 'review'\) = 'review'/.test(block)
+      && /receiptValidation/.test(driveRouteSrc)
+      && (block.match(/\$\{PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL\}/g) || []).length === 2
+      && /FROM review_index r/.test(block)
+      && !/listFolderFilesRecursive/.test(block);
+  })());
+  ok('★ 폴더 공유는 내부 역할과 서버에 연결된 정확한 리뷰 폴더로만 제한한다',
+    /router\.post\('\/share-review-folder', authMiddleware, internalOnlyMiddleware/.test(driveRouteSrc)
+    && /SELECT folder_url FROM tab_configs WHERE sheet_id = \$1 AND tab_name = \$2/.test(driveRouteSrc)
+    && !/const \{ sheetId, tabName, folderUrl \} = req\.body/.test(driveRouteSrc));
   ok('리뷰 캡처는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
     /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
     && /function _rvPopRender\(\)/.test(src)
-    && /<aside class="rvplist ui-stable-vscroll">/.test(src)
+    && /<aside class="rvplist ui-stable-vscroll\$\{p\.showReceipt\?' hasreceipt':''\}">/.test(src)
     && /class="rvpclose"[^>]*onclick="_rvPopClose\(\)"/.test(src)
     // ⚠ 제출물 미리보기(2026-08-21) — 목록이 4열(번호/수취인/🛒/📷)이 되며 폭이 늘었고
     //    무대가 좌우 2분할이 됐다. 검사 의미는 불변 — 팝업은 [작성자 목록 | 무대] 2단이다.
     && /\.rvpop\{width:min\(\d+px,calc\(100vw - 56px\)\);height:min\(720px,calc\(100vh - 56px\)\);[\s\S]{0,140}grid-template-columns:\d+px minmax\(0,1fr\)/.test(css)
-    && /<div class="rvpcols">/.test(src));
+    && /<div class="rvpcols\$\{p\.showReceipt\?' hasreceipt':''\}">/.test(src));
 
   console.log(`\n✅ advertiserViewer: ${n} cases passed`);
 }
