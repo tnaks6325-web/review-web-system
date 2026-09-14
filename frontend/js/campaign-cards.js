@@ -702,7 +702,7 @@
     const moChip = (!admin && c.participation_mode && _realAdminTok())
       ? `<button type="button" class="pmochip" onclick="event.stopPropagation();event.preventDefault();CampCards.openManualOrder('${_esc(c.id)}')">🧾 외부모집 수동제출</button>`
       : '';
-    // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(일반 모집 1건 제출완료당 1건 참여 조건)
+    // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(최근 3일 일반 제출완료 1건당 1건 참여 조건)
     const popBadge = c.is_popular === true ? `<span class="pt-pop">🔥 인기!</span>` : '';
     // ★ 085: 리뷰어 미노출(내부 테스트) 배지 — 관리자 화면에서만. 리뷰어 응답엔 이 필드가 없어
     //   렌더될 일이 없지만, admin 분기로 한 번 더 못 박는다(공개 뷰에 관리 레이어 유출 금지 규율).
