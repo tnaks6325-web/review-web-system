@@ -45,13 +45,13 @@ const db = {
     if (/FROM review_submissions rs/.test(sql)) {
       assert.deepStrictEqual(params[2], [2, 3, 4, 5, 6], '영수증 대상 행만 원장 대조해야 한다');
       assert.deepStrictEqual(params[3], ['receipt', 'receipt', 'slot2', 'slot2', 'receipt'], '수동 슬롯 key도 보존해야 한다');
-      assert.strictEqual(params[4], 0.7, '과거 검수 원장은 영수증 최소 확신도 이상만 인정해야 한다');
+      assert.strictEqual(params.length, 4, '입금 게이트는 과거 영수증 분류 확신도를 호환 증거로 받지 않아야 한다');
       assert.match(sql, /ri\.checks->'receiptValidation'->>'verdict' = 'pass'/,
         '신규 영수증은 전용 판정 통과 기록이 있어야 한다');
       assert.match(sql, /ri\.status = 'resolved' AND ri\.resolution = 'ok'/,
         'AI 판정 불가 건은 내부 정상 승인 경로가 있어야 한다');
-      assert.match(sql, /NOT EXISTS \([\s\S]*reviewer_event_logs rel[\s\S]*capture_mismatch/,
-        '과거 영수증 분류 건도 불일치 경고 파일은 지급하면 안 된다');
+      assert.doesNotMatch(sql, /ai_confidence|checks->'format'->>'kind' = 'receipt'/,
+        '전용 검증 없는 과거 고신뢰 분류가 사업자번호 대조를 우회하면 안 된다');
       return { rows: [
         { sheetId: 'S', tabName: 'cash', rowIndex: 3 },
         { sheetId: 'S', tabName: 'manual', rowIndex: 4 },
