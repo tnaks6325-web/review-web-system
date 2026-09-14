@@ -4,6 +4,9 @@ const assert = require('assert');
 
 const recruitJs = fs.readFileSync(path.join(__dirname, '../../frontend/js/index-recruit.js'), 'utf8');
 const modalJs = fs.readFileSync(path.join(__dirname, '../../frontend/js/recruit-modal.js'), 'utf8');
+const adminHtml = fs.readFileSync(path.join(__dirname, '../../frontend/admin.html'), 'utf8');
+const siandHtml = fs.readFileSync(path.join(__dirname, '../../frontend/admin-siand.html'), 'utf8');
+const workdeskHtml = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
 
 assert.match(recruitJs, /thumbUrl\.addEventListener\("paste", _pasteCampThumbImage\)/,
   '썸네일 URL 입력창에 이미지 붙여넣기 핸들러를 연결해야 합니다.');
@@ -19,5 +22,13 @@ assert.match(recruitJs, /5 \* 1024 \* 1024/,
   '붙여넣기 업로드에도 5MB 제한을 유지해야 합니다.');
 assert.match(modalJs, /복사한 이미지를 입력창에 Ctrl\+V 하세요/,
   '모집공고 설정에 이미지 붙여넣기 안내를 표시해야 합니다.');
+for (const [name, html] of [['admin', adminHtml], ['admin-siand', siandHtml], ['workdesk', workdeskHtml]]) {
+  assert.match(html, /index-recruit\.js\?v=20260914-recruit-thumb-paste/,
+    `${name} 화면은 새 썸네일 동작이 든 index-recruit.js 버전을 불러야 합니다.`);
+}
+for (const [name, html] of [['admin', adminHtml], ['workdesk', workdeskHtml]]) {
+  assert.match(html, /recruit-modal\.js\?v=20260914-recruit-thumb-paste/,
+    `${name} 화면은 새 붙여넣기 안내가 든 recruit-modal.js 버전을 불러야 합니다.`);
+}
 
-console.log('\n✅ recruitThumbnailPaste: 7개 통과');
+console.log('\n✅ recruitThumbnailPaste: 12개 통과');
