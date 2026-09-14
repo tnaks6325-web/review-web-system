@@ -83,6 +83,10 @@ function makePool() {
     '화면에서도 업체 역할은 현영 컬럼 생성 조건에서 제외해야 한다');
   assert.match(html, /submitted:'제출완료',missing:'미제출',not_applicable:'해당없음'/,
     '현영 상태의 사용자 표기가 고정돼야 한다');
+  assert.match(html, /function _rvReceiptSubmitted\(r\)[\s\S]*cashReceiptStatus\|\|''\)==='submitted'/,
+    '현영 집계·필터·체크는 파일 유무가 아니라 지급 게이트 상태를 써야 한다');
+  assert.match(html, /function _rvPopHas\(x,kind\)\{[\s\S]{0,160}kind==='receipt' \? _rvReceiptSubmitted\(x&&x\.r\)/,
+    '현영 팝업 집계·필터·체크도 같은 상태 함수를 써야 한다');
 
-  console.log('workdesk cash receipt column virtual test: 10 passed');
+  console.log('workdesk cash receipt column virtual test: 12 passed');
 })().catch(err => { console.error(err); process.exit(1); });

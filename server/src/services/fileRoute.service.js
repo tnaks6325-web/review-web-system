@@ -69,7 +69,7 @@ async function _sheetTitleFor(sheetId, tabName) {
 /**
  * 이동 대상 폴더 ID.
  * @param {object} p { target: 'review'|'receipt'|'capture', sheetId, tabName,
- *                    reviewBaseFolderId(그 탭 [리뷰] 폴더 — review/receipt 대상에 필수),
+ *                    reviewBaseFolderId(그 탭 [리뷰] 폴더 — review 대상에 필수),
  *                    receiptLabel(현금영수증 서브폴더명) }
  * @returns {string|null} 확보 실패 = null(이동하지 않음 — fail-closed)
  */
@@ -78,8 +78,12 @@ async function resolveTargetFolder({ target, sheetId, tabName, reviewBaseFolderI
   try {
     if (target === 'review') return reviewBaseFolderId || null;
     if (target === 'receipt') {
-      if (!reviewBaseFolderId || !receiptLabel) return null;
-      const f = await driveService.getOrCreateSubFolder(reviewBaseFolderId, receiptLabel);
+      if (!receiptLabel) return null;
+      // 영수증은 공개 업체 리포트가 스캔하는 [리뷰] 폴더 밖에 보관한다.
+      // 연결된 구매캡처 폴더를 우선하고, 없으면 동일한 비공개 경로를 만든다.
+      const receiptBase = await resolveTargetFolder({ target: 'capture', sheetId, tabName });
+      if (!receiptBase) return null;
+      const f = await driveService.getOrCreateSubFolder(receiptBase, receiptLabel);
       return f && f.id ? f.id : null;
     }
     if (target === 'capture') {

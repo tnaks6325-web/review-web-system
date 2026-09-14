@@ -1467,9 +1467,11 @@ const SWEEP_MAX_ATTEMPTS = Number(process.env.REVIEW_INSPECT_MAX_ATTEMPTS || 3);
 /** 스윕 대상 — ① 재시도(pending, 상한 미만) ② 검수 이력 없는 과거 제출분(최근분 우선). */
 async function _sweepTargets(limit) {
   const { rows } = await _db().query(
-    `(SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
+     `(SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
              s.file_hash, tc.capture_slots, tc.income_type,
-             COALESCE(i.attempts, 0) AS attempts, 0 AS pri
+             COALESCE(i.attempts, 0) AS attempts,
+             (COALESCE(i.checks, '{}'::jsonb) ? 'receiptValidation') AS receipt_evidence,
+             0 AS pri
         FROM review_inspections i
         JOIN review_submissions s ON s.file_id = i.file_id
         LEFT JOIN tab_configs tc ON tc.sheet_id = s.sheet_id AND tc.tab_name = s.tab_name
@@ -1477,8 +1479,9 @@ async function _sweepTargets(limit) {
        ORDER BY i.updated_at ASC
        LIMIT $1)
      UNION ALL
-     (SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
-             s.file_hash, tc.capture_slots, tc.income_type, 0 AS attempts, 1 AS pri
+      (SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
+             s.file_hash, tc.capture_slots, tc.income_type, 0 AS attempts,
+             FALSE AS receipt_evidence, 1 AS pri
         FROM review_submissions s
         LEFT JOIN tab_configs tc ON tc.sheet_id = s.sheet_id AND tc.tab_name = s.tab_name
         LEFT JOIN review_inspections i ON i.file_id = s.file_id
@@ -1630,7 +1633,7 @@ async function runInspectSweep({ limit } = {}) {
     const { downloadFile } = require('./drive.service');
     for (const t of targets) {
       // 다운로드가 터져도 catch에서 영수증 pending 증거와 attempts를 남겨야 한다.
-      const slotRole = receiptOnly || isCashReceiptSlot(
+      const slotRole = receiptOnly || t.receipt_evidence === true || isCashReceiptSlot(
         t.capture_slots, t.income_type, t.slot_key || 'review') ? 'receipt' : (t.slot_key || 'review');
       try {
         const f = await downloadFile(t.file_id);

@@ -6107,6 +6107,7 @@ function _rvFilledOf(c){ c=c||{}; return (c.filled==null)?(+c.total||0):(+c.fill
 /* 행별 공고 출처로 서버가 확정한 상태를 그대로 쓴다. 구버전 응답처럼 상태가 없으면
    탭의 현영 칸을 갑자기 숨기지 않도록 대상 행으로 접되, 명시적 not_applicable 만 제외한다. */
 function _rvReceiptApplies(r){ return String(r&&r.cashReceiptStatus||'')!=='not_applicable'; }
+function _rvReceiptSubmitted(r){ return String(r&&r.cashReceiptStatus||'')==='submitted'; }
 /* 제출현황 — 몇 줄이 구매·리뷰·(내부 현영) 현금영수증을 냈는가. 갈래 판정은 `_rvKindFiles` 한 곳.
    ★ 조회 실패(rvImgs===null)·분모 미상은 **`?`** 로 둔다(0 으로 꾸미지 않는다). */
 function _rvStatHtml(){
@@ -6121,7 +6122,7 @@ function _rvStatHtml(){
       const f=STATE.rvImgs[String(r.seq)]||[]; if(!f.length) continue;
       if(_rvKindFiles(f,'cap').length) cap++;
       if(_rvKindFiles(f,'rev').length) rev++;
-      if(showReceipt&&_rvReceiptApplies(r)&&_rvKindFiles(f,'receipt').length) receipt++;
+      if(showReceipt&&_rvReceiptApplies(r)&&_rvReceiptSubmitted(r)) receipt++;
     }
   }
   /* ★★ 이 줄이 곧 **폴더 바로가기**다(사용자 확정 2026-08-21) — 표 윗줄에 있던
@@ -6296,7 +6297,9 @@ function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.
 function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.i2={cap:0,rev:0,receipt:0}; _rvPopRender(); }
 /* 제출 필터의 분모는 팝업에 나열되는 "채워진 줄" 전부다. 행 자체의 submitted 값이 아니라
    이 팝업이 실제로 표시하는 파일 갈래를 써야 주문/리뷰 각각의 ✓·✗와 숫자가 어긋나지 않는다. */
-function _rvPopHas(x,kind){ return _rvKindFiles(x&&x.files,kind).length>0; }
+function _rvPopHas(x,kind){
+  return kind==='receipt' ? _rvReceiptSubmitted(x&&x.r) : _rvKindFiles(x&&x.files,kind).length>0;
+}
 function _rvPopEligible(x,kind){ return kind!=='receipt'||_rvReceiptApplies(x&&x.r); }
 function _rvPopFilterPeople(p){
   const all=Array.isArray(p&&p.allPeople)?p.allPeople:(p&&p.people)||[];
@@ -6340,7 +6343,7 @@ function _rvPopCol(kind,files,r){
    ★ 번호 칸이 비면 추측하지 않고 `—`, 시트 행 번호는 툴팁으로만 남긴다("모른다"와 "없다"를 구분).
    ★ onclick 은 **인덱스만** — 수취인·번호는 시트발 문자열이라 보간하면 따옴표 하나로 탈출된다. */
 function _rvPopItem(x,i,on){
-  const nc=_rvKindFiles(x.files,'cap').length, nr=_rvKindFiles(x.files,'rev').length, nh=_rvKindFiles(x.files,'receipt').length;
+  const nc=_rvKindFiles(x.files,'cap').length, nr=_rvKindFiles(x.files,'rev').length, nh=_rvReceiptSubmitted(x.r);
   const receiptApplies=_rvPopEligible(x,'receipt');
   const no=_rvNo(x.r);
   return `<button type="button" class="rvplitem${on?' on':''}" onclick="_rvPopPick(${i})" title="시트 행 ${esc(x.r.seq)}">`+

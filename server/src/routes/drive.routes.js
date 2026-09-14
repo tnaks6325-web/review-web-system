@@ -1775,7 +1775,8 @@ router.post('/report-link', authMiddleware, async (req, res, next) => {
 });
 
 // GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 캡처 목록 (무인증)
-//   review_submissions 원장 우선 → 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백.
+//   명시적 review 원장 우선 → 비어 있으면 review_index 대표 리뷰만 사용.
+//   폴더 재귀 스캔은 역할을 판별할 수 없어 현금영수증을 노출하므로 공개 경로에서 사용하지 않는다.
 router.get('/report/:code', async (req, res, next) => {
   try {
     const code = String(req.params.code || '').trim();
@@ -1792,9 +1793,19 @@ router.get('/report/:code', async (req, res, next) => {
     let images = [];
     try {
       const sub = await pool.query(
-        `SELECT file_id, file_name, reviewer_name, uploaded_at
-           FROM review_submissions
-          WHERE sheet_id = $1 AND tab_name = $2 AND file_id IS NOT NULL AND file_id <> ''
+        `SELECT rs.file_id, rs.file_name, rs.reviewer_name, rs.uploaded_at
+           FROM review_submissions rs
+          WHERE rs.sheet_id = $1 AND rs.tab_name = $2
+            AND rs.file_id IS NOT NULL AND rs.file_id <> ''
+            AND COALESCE(rs.slot_key, 'review') = 'review'
+            AND NOT EXISTS (
+              SELECT 1 FROM review_inspections ri
+               WHERE ri.file_id = rs.file_id
+                 AND (
+                   COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+                   OR COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
+                 )
+            )
           ORDER BY reviewer_name NULLS LAST, uploaded_at ASC NULLS LAST`,
         [sheetId, tabName]
       );
@@ -1805,22 +1816,33 @@ router.get('/report/:code', async (req, res, next) => {
       }));
     } catch (_) {}
 
-    // 2) 원장이 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백
+    // 2) 원장이 비어 있으면 명시적 대표 리뷰만 폴백
     if (images.length === 0) {
       try {
-        const { rows: tcfg } = await pool.query(
-          'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        const fallback = await pool.query(
+          `SELECT r.review_file_id AS file_id, r.review_file_name AS file_name,
+                  r.reviewer_name, r.review_file_at AS uploaded_at
+             FROM review_index r
+            WHERE r.sheet_id = $1 AND r.tab_name = $2
+              AND r.review_file_id IS NOT NULL AND r.review_file_id <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM review_inspections ri
+                 WHERE ri.file_id = r.review_file_id
+                   AND (
+                     COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+                     OR COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
+                   )
+              )
+            ORDER BY r.reviewer_name NULLS LAST, r.review_file_at ASC NULLS LAST`,
           [sheetId, tabName]
         );
-        const folderId = extractFolderId(tcfg[0]?.folder_url);
-        if (folderId) {
-          const files = await driveService.listFolderFilesRecursive(folderId);
-          images = files
-            .filter(f => (f.mimeType || '').indexOf('image/') === 0 || /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''))
-            .map(f => ({ id: f.id, name: f.name || '', reviewer: (driveService.extractReviewerNameFromFile(f.name) || '').trim() }));
-        }
+        images = fallback.rows.map(r => ({
+          id: r.file_id,
+          name: r.file_name || '',
+          reviewer: (r.reviewer_name || driveService.extractReviewerNameFromFile(r.file_name) || '').trim(),
+        }));
       } catch (e) {
-        logger.warn(`[report] 폴더 스캔 폴백 실패 (${code}): ${e.message}`);
+        logger.warn(`[report] 대표 리뷰 폴백 실패 (${code}): ${e.message}`);
       }
     }
 

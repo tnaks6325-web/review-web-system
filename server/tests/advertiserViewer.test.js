@@ -89,6 +89,7 @@ async function run() {
   ok('정상 광고주는 ok:true + items 반환', okRes.code === 200 && okRes.body && okRes.body.ok === true && Array.isArray(okRes.body.items));
 
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+  const driveRouteSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'drive.routes.js'), 'utf8');
   const seg = routeSrc.slice(routeSrc.indexOf("'/my-work-summary'"), routeSrc.indexOf("'/my-work-summary'") + 700);
   ok('★ advertiserId 는 토큰(req.admin.advertiser_id)에서만 — 쿼리/바디 미수신(IDOR 차단)',
     seg.includes('req.admin.advertiser_id') && !/req\.(query|body)\.advertiserId/.test(seg));
@@ -507,6 +508,15 @@ async function run() {
   ok('★ 업체는 응답 표식이 없거나 false면 현금영수증 UI를 열지 않는다',
     /function _rvCanSeeReceipt\(\)\{ return \['master','admin','staff'\]\.includes\(STATE\.role\)&&STATE\.rvReceiptIncluded===true; \}/.test(src)
     && /STATE\.rvReceiptIncluded=!!\(r&&r\.ok&&r\.receiptIncluded===true\)/.test(src));
+  ok('★ 공개 업체 리포트는 review 원장만 허용하고 영수증 검수 증거와 폴더 재귀 폴백을 차단한다', (() => {
+    const i = driveRouteSrc.indexOf("router.get('/report/:code'");
+    const block = driveRouteSrc.slice(i, driveRouteSrc.indexOf("router.get('/image/:id'", i));
+    return i > 0
+      && /COALESCE\(rs\.slot_key, 'review'\) = 'review'/.test(block)
+      && /receiptValidation/.test(block)
+      && /FROM review_index r/.test(block)
+      && !/listFolderFilesRecursive/.test(block);
+  })());
   ok('리뷰 캡처는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
     /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
     && /function _rvPopRender\(\)/.test(src)

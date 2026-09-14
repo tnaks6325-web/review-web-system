@@ -1800,10 +1800,24 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   그 탭 [리뷰] 폴더를 기억해 둔다(targetFolderId 는 아래에서 계속 변이된다).
     const reviewBaseFolderId = targetFolderId;
 
+    const _fileRoute = require('../services/fileRoute.service');
+    const _isReceiptUpload = isCashReceiptSlot(
+      tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType, _campaignCashReceipt);
+    const _slotRole = _isReceiptUpload ? 'receipt' : slot;
+
     // ── 1.5단계: 슬롯 서브폴더 ([리뷰] → {슬롯라벨}) ──
     // 'review'(기본) 슬롯은 하위폴더 없이 [리뷰] 바로 아래 — 기존 동작/정리로직 보존.
-    // 그 외 슬롯(예: 현금영수증)은 라벨 서브폴더로 분리한다.
-    if (slotLabel) {
+    // 현금영수증은 공개 업체 리포트와 분리된 구매캡처 폴더 아래에 보관한다.
+    if (_isReceiptUpload) {
+      targetFolderId = await _fileRoute.resolveTargetFolder({
+        target: 'receipt', sheetId, tabName, reviewBaseFolderId, receiptLabel: slotLabel || '현금영수증',
+      });
+      if (!targetFolderId) {
+        logger.error('[review-upload] 비공개 현금영수증 폴더 확보 실패 — 공개 리뷰 폴더 업로드 차단');
+        return res.json({ ok: false, error: '현금영수증 보관 폴더를 확보하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+      logger.info(`[review-upload] 비공개 현금영수증 폴더: ${targetFolderId}`);
+    } else if (slotLabel) {
       const slotFolder = await driveService.getOrCreateSubFolder(targetFolderId, slotLabel);
       targetFolderId = slotFolder.id;
       logger.info(`[review-upload] 슬롯 서브폴더: ${slotLabel} → ${slotFolder.id}`);
@@ -1811,9 +1825,6 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     // 영수증 슬롯 대조용 회사 사업자번호(없어도 검수는 형식 판별만 수행)
     let _companyBizNo = '';
-    const _isReceiptUpload = isCashReceiptSlot(
-      tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType, _campaignCashReceipt);
-    const _slotRole = _isReceiptUpload ? 'receipt' : slot;
     if (_isReceiptUpload) {
       try {
         const { rows: bz } = await pool.query("SELECT value FROM app_settings WHERE key = 'company_business_no'");
@@ -1847,7 +1858,6 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     } catch (_) { _inspectSamples = []; }   // 준비 실패 = 예시 없이 진행(동작 불변)
 
     // ── 자동 분류(파일 라우팅) 판정 재료 — 규칙은 utils/captureRoute 전이표 단일 출처 ──
-    const _fileRoute = require('../services/fileRoute.service');
     const { routeDecision: _routeDecision, routeMode: _routeMode,
             rejectEnabled: _routeRejectEnabled, routeSlotLabel: _routeSlotLabel } = require('../utils/captureRoute');
     const _sampleKindSet = new Set(_inspectSamples.map(s => s.kind));
@@ -2139,6 +2149,14 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           const _finalSlotRole = isCashReceiptSlot(
             tabRows[0]?.capture_slots, tabRows[0]?.income_type, _finalSlotKey,
             _tabReviewType, _campaignCashReceipt) ? 'receipt' : _finalSlotKey;
+          let _finalInspectSamples = _inspectSamples;
+          if (_finalSlotRole !== _slotRole) {
+            try {
+              _finalInspectSamples = await _riSvc.submissionSamples({
+                expectedChannel: _expectedChannel, slotKey: _finalSlotRole,
+              });
+            } catch (_) { _finalInspectSamples = []; }
+          }
           const _ins = await _inspect.inspectSubmission({
             base64: _b64, mimeType: (files[r.index - 1] && files[r.index - 1].mimeType) || 'image/jpeg',
             fileId: r.fileId, fileHash: _hash,
@@ -2146,7 +2164,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
             slotRole: _finalSlotRole,
             // 자동 이동으로 슬롯 역할이 바뀌었으면 옛 슬롯 기준 판정을 재사용하지 않는다.
             captureVerdict: _finalSlotRole === _slotRole ? (captureVerdictsByFileId.get(r.fileId) || null) : null,
-            samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
+            samples: _finalInspectSamples,
           });
           // ★ 첨부 즉시 경고(1차)를 지나쳐 제출된 중복은 **리뷰어에게 그 자리에서** 한 번 더 알린다.
           //   관리자 쪽은 위 검수 기록이 리뷰검수 탭에 바로 뜨므로 별도 알림을 새로 쌓지 않는다

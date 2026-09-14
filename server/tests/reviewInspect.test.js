@@ -300,9 +300,11 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   ok('★★ 캐시 키에 예시 지문이 섞인다 — 안 그러면 예시를 등록·교체해도 옛 판정이 히트한다',
     /_getCacheKey\('classify[2-9]\d*:' \+ sampleSig \+ ':' \+ base64Data\)/.test(gem)
     && /sampleSig = samples\.length/.test(gem));
-  ok('★★ 두 호출부가 같은 samples 를 넘긴다 — 다르면 같은 이미지에 AI 콜이 두 번',
+  ok('★★ 자동 이동 없으면 같은 samples, 역할이 바뀌면 최종 슬롯 samples를 넘긴다',
     /samples: _inspectSamples,/.test(diag)
-    && (diag.match(/samples: _inspectSamples/g) || []).length >= 2
+    && /let _finalInspectSamples = _inspectSamples/.test(diag)
+    && /_finalSlotRole !== _slotRole[\s\S]*slotKey: _finalSlotRole/.test(diag)
+    && /samples: _finalInspectSamples/.test(diag)
     && /classifySubmissionImage\(base64, mimeType, \{ samples \}\)/.test(readS('services/captureVerify.service.js')));
   // ★ 창(window)은 "루프 앞에서 준비한다"를 고정하기 위한 것 — 주석이 늘면 함께 넓힌다
   //   (검사 의미는 불변: 준비 블록과 파일 루프 사이에 다른 준비가 끼어들지 않는다).

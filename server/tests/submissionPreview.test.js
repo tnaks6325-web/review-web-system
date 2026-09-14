@@ -47,8 +47,11 @@ ok('★ 갈래 판정은 _rvKindFiles 하나 — 팝업이 slot 을 직접 비�
 
 console.log('\nB) 제출현황 줄');
 {
-  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvReceiptApplies', '_rvStatHtml']);
-  const roster = [{ seq: 1 }, { seq: 2 }, { seq: 3 }, { seq: 4 }];
+  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvStatHtml']);
+  const roster = [
+    { seq: 1, cashReceiptStatus: 'submitted' }, { seq: 2, cashReceiptStatus: 'missing' },
+    { seq: 3, cashReceiptStatus: 'submitted' }, { seq: 4, cashReceiptStatus: 'missing' },
+  ];
   sb.STATE.wd = { counts: { filled: 500, total: 512 }, roster };
   sb.STATE.rvImgs = {
     '1': [{ slot: 'order_capture' }, { slot: 'review' }],
@@ -98,7 +101,7 @@ console.log('\nB) 제출현황 줄');
 
 console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 제출(주문/리뷰) 4열');
 {
-  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   const rows = [
     { id: 'a', seq: 2, recipient: '심수현', boardNo: '1', filled: true },
     { id: 'b', seq: 3, recipient: '조성훈', boardNo: '2', filled: true },
@@ -135,7 +138,7 @@ console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 제출(주문/
 
 console.log('\nC-1) 제출 인라인 필터 — 네 수치만 실제 행으로 연결');
 {
-  const sb = grab(['_rvKindFiles', '_rvReceiptApplies', '_rvPopHas', '_rvPopEligible', '_rvPopFilterPeople', '_rvPopCounts', '_rvPopFilterSet', '_rvPopFilterHtml']);
+  const sb = grab(['_rvKindFiles', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvPopHas', '_rvPopEligible', '_rvPopFilterPeople', '_rvPopCounts', '_rvPopFilterSet', '_rvPopFilterHtml']);
   const people = [
     { r: { id: 'a' }, files: [{ slot: 'order_capture' }, { slot: 'review' }] },
     { r: { id: 'b' }, files: [{ slot: 'order_capture' }] },
@@ -176,7 +179,7 @@ console.log('\nC-1) 제출 인라인 필터 — 네 수치만 실제 행으로 �
 
 console.log('\nD) 팝업 무대 — 좌우 동시');
 {
-  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   sb.STATE.rvPop = { people: [], idx: 0, i2: { cap: 0, rev: 0 } };
   const files = [{ slot: 'order_capture', url: 'u1' }, { slot: 'order_capture', url: 'u2' }, { slot: 'review', url: 'u3' }];
   const cap = sb._rvPopCol('cap', files), rev = sb._rvPopCol('rev', files);
@@ -234,7 +237,7 @@ ok('isFilledRow — 전부 비면 빈 줄', RN.isFilledRow({ name: '', recipient
 /* ══ G) 폴더 바로가기 — 표 윗줄 버튼을 제출물 미리보기로 옮겼다(사용자 확정 2026-08-21) ══ */
 console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
 {
-  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvStatHtml']);
+  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvStatHtml']);
   sb.STATE.wd = { counts: { filled: 10 }, roster: [{ seq: 1 }] };
   sb.STATE.rvImgs = { '1': [{ slot: 'order_capture' }, { slot: 'review' }] };
   sb.STATE.role = 'admin';
@@ -250,7 +253,7 @@ console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
     calls.length === 2 && calls.every(c => c[0] === 'cur') && calls.map(c => c[1]).join('/') === 'capture/review',
     JSON.stringify(calls));
   // 광고주 격리 — /tab-folders 는 내부인 전용이라 창구를 만들면 막다른 길
-  const sb2 = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvStatHtml']);
+  const sb2 = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvStatHtml']);
   sb2.STATE.wd = { counts: { filled: 10 }, roster: [{ seq: 1 }] };
   sb2.STATE.rvImgs = {}; sb2.STATE.role = 'advertiser'; sb2.STATE.cur = { sheetId: 'S', tabName: 'T' };
   let asked = 0; sb2._folState = () => { asked++; return { on: true, tip: 'x' }; };

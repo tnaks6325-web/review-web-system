@@ -125,13 +125,13 @@ const db = {
     '영수증 판정 통과/불일치/판정불가가 검수 원장에 분리 기록돼야 한다');
   assert.match(inspectService, /\(!ENABLED && requestedSlotRole !== 'receipt'\)/,
     '일반 리뷰검수를 꺼도 현금영수증 지급 판정 원장은 기록해야 한다');
-  assert.match(inspectService, /const receiptOnly = !ENABLED[\s\S]*_receiptSweepTargets\(cap\)[\s\S]*receiptOnly \|\| isCashReceiptSlot/,
+  assert.match(inspectService, /const receiptOnly = !ENABLED[\s\S]*_receiptSweepTargets\(cap\)[\s\S]*receiptOnly \|\| t\.receipt_evidence === true \|\| isCashReceiptSlot/,
     '일반 리뷰검수가 꺼져도 영수증 pending·미검수 건은 재시도해야 한다');
   assert.match(inspectService, /for \(const t of targets\) \{[\s\S]{0,500}const slotRole =[\s\S]{0,500}try \{[\s\S]*slotRole === 'receipt'/,
     '다운로드 전에 역할을 계산해 실패 catch도 영수증 pending 증거를 남겨야 한다');
   assert.match(inspectService, /_receiptSweepTargets[\s\S]*receiptValidation[\s\S]*slot_key IN \('receipt', 'cash_receipt'\)[\s\S]*현금영수증\|현영\|지출증빙/,
     '자동 receipt 키와 수동 slot2 라벨 영수증을 모두 재시도 대상으로 잡아야 한다');
-  assert.match(inspectService, /const slotRole = receiptOnly \|\| isCashReceiptSlot\([\s\S]*t\.capture_slots, t\.income_type, t\.slot_key[\s\S]*slotRole,/,
+  assert.match(inspectService, /const slotRole = receiptOnly \|\| t\.receipt_evidence === true \|\| isCashReceiptSlot\([\s\S]*t\.capture_slots, t\.income_type, t\.slot_key[\s\S]*slotRole,/,
     '수동 slot2 현금영수증도 재검수 때 receipt 역할을 유지해야 한다');
   assert.match(uploadRoute, /const captureVerdictsByFileId = new Map\(\)[\s\S]*captureVerdictsByFileId\.set\(uploaded\.id, verdict\)[\s\S]*captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
@@ -143,6 +143,12 @@ const db = {
     '수동 현영 재검수는 기존 정상 승인을 먼저 무효화하고 실패 시 pending을 남겨야 한다');
   assert.match(fileRouteService, /WITH moved AS \([\s\S]*UPDATE review_submissions[\s\S]*INSERT INTO review_inspections[\s\S]*resolution = NULL/,
     '수동 현영 슬롯 이동과 기존 정상 승인 무효화 사이에 입금 요청이 끼어들 수 없어야 한다');
+  assert.match(fileRouteService, /target === 'receipt'[\s\S]{0,700}resolveTargetFolder\(\{ target: 'capture', sheetId, tabName \}\)[\s\S]{0,300}getOrCreateSubFolder\(receiptBase, receiptLabel\)/,
+    '현금영수증은 공개 리뷰 폴더가 아닌 비공개 구매캡처 경로에 보관해야 한다');
+  assert.match(uploadRoute, /if \(_isReceiptUpload\)[\s\S]{0,700}target: 'receipt'[\s\S]{0,700}공개 리뷰 폴더 업로드 차단/,
+    '비공개 영수증 폴더를 확보하지 못하면 업로드를 차단해야 한다');
+  assert.match(inspectService, /receipt_evidence[\s\S]*t\.receipt_evidence === true \|\| isCashReceiptSlot/,
+    '재검수는 예전 슬롯 key가 사라져도 receiptValidation 역할 증거를 보존해야 한다');
 
   process.env.REVIEW_INSPECT = '1';
   const drivePath = require.resolve('../src/services/drive.service');
