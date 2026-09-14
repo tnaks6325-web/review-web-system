@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware } = require('../middleware/auth.middleware');
+const { tabConfigWriteScopeMiddleware } = require('../middleware/tabConfigScope.middleware');
 const { getSpreadsheetMeta, readSheet } = require('../services/sheets.service');
 // [DEPRECATED — v11.8.0] masterSheet.service.js 함수들은 2탭 통합으로 deprecated
 // import는 유지하되 라우트에서 deprecated 응답 반환
@@ -147,7 +148,7 @@ function _isSystemHeader(header) {
 }
 
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
-router.post('/config', authMiddleware, async (req, res, next) => {
+router.post('/config', authMiddleware, internalOnlyMiddleware, tabConfigWriteScopeMiddleware, async (req, res, next) => {
   try {
     const b = req.body;
     const tabName = (b.tabName || '').trim();

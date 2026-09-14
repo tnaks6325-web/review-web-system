@@ -1778,7 +1778,8 @@ function _delegate(routerRef, method, path) {
    ★ 게이트는 **내부인**(원본은 authMiddleware 만 — 광고주만 좁힌다. 탭 설정은 담당자 업무다). */
 const _tabConfigRoutes = require('./tabconfig.routes');
 const _tabConfigHandler = _delegate(_tabConfigRoutes, 'post', '/config');
-router.post('/tab/config', authMiddleware, internalMiddleware, (req, res, next) =>
+const { tabConfigWriteScopeMiddleware } = require('../middleware/tabConfigScope.middleware');
+router.post('/tab/config', authMiddleware, internalMiddleware, tabConfigWriteScopeMiddleware, (req, res, next) =>
   _tabConfigHandler(req, res, next));
 
 const _orderRoutes = require('./order.routes');
