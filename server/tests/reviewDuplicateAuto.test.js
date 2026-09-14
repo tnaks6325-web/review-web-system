@@ -6,12 +6,11 @@
  * - 실행 직전 DB 행 잠금 + 보존본/제거본 Drive 상태 재검증
  * - 나중 제출본만 휴지통, 대표 재계산과 불량 종결을 같은 DB 트랜잭션에서 처리
  * - DB 실패 시 Drive 휴지통 이동 보상 복구
- * - 자동처리 뒤 열린 상세 팝업은 파일 ID로 최신 목록과 동기화
+ * - 자동처리 뒤 실제 처리된 파일의 상세 팝업만 닫음
  */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 const svc = require('../src/services/reviewDuplicateAuto.service');
 
 let n = 0;
@@ -118,6 +117,7 @@ function txPool(handler) {
       dryRun: false, confirm: svc.CONFIRM, snapshotToken: token, pairs: [pair], by: '관리자',
     });
     assert.strictEqual(out.processed, 1);
+    assert.deepStrictEqual(out.processedFileIds, ['NEW']);
     assert.strictEqual(out.skipped, 0);
     assert.deepStrictEqual(driveCalls.slice(0, 2), [['get', 'KEEP'], ['get', 'NEW']]);
     assert.strictEqual(driveCalls[2][0], 'trash');
@@ -153,6 +153,7 @@ function txPool(handler) {
       dryRun: false, confirm: svc.CONFIRM, snapshotToken: token, pairs: [pair],
     });
     assert.strictEqual(out.processed, 0);
+    assert.deepStrictEqual(out.processedFileIds, []);
     assert.strictEqual(out.reasons.state_changed, 1);
     assert.strictEqual(trashCount, 0);
     ok('미리보기 뒤 완료·매핑 상태가 달라지면 Drive 호출 없이 제외');
@@ -215,28 +216,11 @@ function txPool(handler) {
     assert.ok(/function riDuplicateAutoResolve\(\)/.test(front));
     assert.ok(/양쪽 제출 완료와 보존 파일/.test(front));
     assert.ok(/리뷰어에게 1:1 메시지는 자동 전송하지 않습니다/.test(front));
-    assert.ok(/function _riOpenDetailFileId\(\)/.test(front));
-    assert.ok(/function _riSyncDetailAfterReload\(fileId\)/.test(front));
-    assert.ok(/const openDetailFileId = _riOpenDetailFileId\(\);[\s\S]*?_riSyncDetailAfterReload\(openDetailFileId\);/.test(front),
-      '목록 갱신 전 열린 파일 ID를 보존하고 갱신 뒤 상세 팝업 동기화');
-    assert.ok(/if\(i<0\) riCloseDetail\(\);\s*else riOpenDetail\(i\);/.test(front),
-      '처리되어 사라진 건은 닫고 남은 건은 최신 응답으로 다시 렌더');
-    const openFn = front.match(/function _riOpenDetailFileId\(\)\{[\s\S]*?\n\}/)[0];
-    const syncFn = front.match(/function _riSyncDetailAfterReload\(fileId\)\{[\s\S]*?\n\}/)[0];
-    const modal = { style: { display: 'flex' }, dataset: { riKind: 'detail' } };
-    const ui = {
-      STATE: { ri: [{ file_id: 'OPEN' }], riDetailIdx: 0 },
-      $: () => modal,
-      closed: 0, reopened: null,
-    };
-    ui.riCloseDetail = () => { ui.closed++; };
-    ui.riOpenDetail = i => { ui.reopened = i; };
-    vm.runInNewContext(`${openFn}\n${syncFn}\nthis.openId=_riOpenDetailFileId;this.sync=_riSyncDetailAfterReload;`, ui);
-    assert.strictEqual(ui.openId(), 'OPEN');
-    ui.sync('OPEN');
-    assert.strictEqual(ui.reopened, 0, '남아 있는 파일은 최신 행 인덱스로 다시 렌더');
-    ui.sync('REMOVED');
-    assert.strictEqual(ui.closed, 1, '처리되어 목록에서 사라진 파일은 상세 팝업 닫기');
+    assert.ok(/const doneIds=new Set\(\(Array\.isArray\(r\.processedFileIds\)\?r\.processedFileIds:\[\]\)\.map\(String\)\)/.test(front));
+    assert.ok(/doneIds\.has\(String\(dm\.dataset\.riFileId\|\|''\)\)\) riCloseDetail\(\)/.test(front),
+      '서버가 실제 처리한 ID와 현재 열린 상세 ID가 같을 때만 닫기');
+    assert.ok(/m\.dataset\.riFileId=String\(r\.file_id\|\|''\)/.test(front));
+    assert.ok(/m\.dataset\.riFileId=''/.test(front));
     assert.ok(/async function restoreFiles/.test(drive) && /restoreFiles,/.test(drive));
     ok('관리자 전용 API·미리보기 확인 UI·상세 동기화·Drive 보상 복구 배선');
   }
