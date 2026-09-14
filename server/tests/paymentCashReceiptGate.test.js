@@ -103,6 +103,8 @@ const db = {
     '영수증 판정 통과/불일치/판정불가가 검수 원장에 분리 기록돼야 한다');
   assert.match(inspectService, /\(!ENABLED && requestedSlotRole !== 'receipt'\)/,
     '일반 리뷰검수를 꺼도 현금영수증 지급 판정 원장은 기록해야 한다');
+  assert.match(inspectService, /const slotRole = isCashReceiptSlot\([\s\S]*t\.capture_slots, t\.income_type, t\.slot_key[\s\S]*slotRole,/,
+    '수동 slot2 현금영수증도 재검수 때 receipt 역할을 유지해야 한다');
   assert.match(uploadRoute, /const captureVerdictsByFileId = new Map\(\)[\s\S]*captureVerdictsByFileId\.set\(uploaded\.id, verdict\)[\s\S]*captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
 

@@ -22,6 +22,13 @@ const fakePool = {
     if (/FROM reviewers/.test(sql)) return { rows: [] };            // 프로필(타계정) 없음
     if (/set_limit/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ count: '0', built_at: null }] };
+    if (/FROM recruit_campaigns/.test(sql) && Array.isArray(params?.[1])) {
+      return { rows: params[0].map((sheetId, i) => ({
+        sheet_id: sheetId,
+        tab_name: params[1][i],
+        cash_receipt_required: params[1][i] === '현영탭',
+      })) };
+    }
     if (/FROM review_submissions/.test(sql)) return { rows: [] };
     // 본검색(= ANY)만 강제실패 → searchByName catch → searchByNameFallback(= $) 재실행
     if (forceTrgm && /FROM review_index/.test(sql) && /= ANY\(\$/.test(sql)) {
@@ -141,8 +148,8 @@ async function run() {
   console.log('  4. phone8 단독 — 필터 해제(강한 키 매칭) + isPaid 폴백 ✓');
 
   // ── 5) pg_trgm 미설치 fallback 경로(searchByNameFallback)도 동일 pl 게이트 ──
-  captured.queries = []; forceTrgm = true; reviewRows = [makeRow()];
-  await searchByName('홍길동', '12345678', { includeSubmitted: true });
+  captured.queries = []; forceTrgm = true; reviewRows = [makeRow({ tabName: '현영탭' })];
+  const fallbackResult = await searchByName('홍길동', '12345678', { includeSubmitted: true });
   forceTrgm = false;
   const fbSql = captured.queries
     .filter(x => /FROM review_index/.test(x.sql))
@@ -150,7 +157,9 @@ async function run() {
     .find(s => /pl\.phone8 = \$/.test(s));   // fallback은 '= $'(본검색 '= ANY(' 와 구분)
   assert.ok(fbSql, '5: pg_trgm fallback review_index 쿼리가 실행되어야 함');
   assertPlGatedFallback(fbSql, '5 fallback');
-  console.log('  5. pg_trgm fallback 경로 pl 게이트 ✓');
+  assert.deepStrictEqual(fallbackResult.results[0].captureSlots.map(s => s.key), ['review', 'receipt'],
+    '5: fallback도 공고 현금영수증 설정으로 첨부 슬롯을 파생해야 함');
+  console.log('  5. pg_trgm fallback 경로 pl 게이트 + 현금영수증 슬롯 ✓');
 
   // ── 6) 게이트 시맨틱 고정: stale pl(재배정 전 주인)은 미개방 / 현재주인(ri.phone8)은 개방 ──
   //   ri.phone8(현재 시트 소유자)이 채워진 행에서는 stale pl 이 그 행을 절대 못 연다

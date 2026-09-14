@@ -19,6 +19,7 @@ const { workOrderForTabSql } = require('../utils/workOrderLink');
 const { logger } = require('../utils/logger');
 // ★ 087: 리뷰타입 판정은 utils/reviewType 단일 출처(여기서 규칙을 다시 만들면 화면과 갈라진다)
 const { resolveReviewType } = require('../utils/reviewType');
+const { isCashReceiptSlot } = require('../utils/captureSlots');
 
 /* ── 스위치·임계값 (전부 env 로 끌 수 있다) ───────────────────────────── */
 const ENABLED = process.env.REVIEW_INSPECT !== '0';            // 2차 검수 전체
@@ -1415,16 +1416,19 @@ const SWEEP_MAX_ATTEMPTS = Number(process.env.REVIEW_INSPECT_MAX_ATTEMPTS || 3);
 async function _sweepTargets(limit) {
   const { rows } = await _db().query(
     `(SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
-             s.file_hash, COALESCE(i.attempts, 0) AS attempts, 0 AS pri
+             s.file_hash, tc.capture_slots, tc.income_type,
+             COALESCE(i.attempts, 0) AS attempts, 0 AS pri
         FROM review_inspections i
         JOIN review_submissions s ON s.file_id = i.file_id
+        LEFT JOIN tab_configs tc ON tc.sheet_id = s.sheet_id AND tc.tab_name = s.tab_name
        WHERE i.status = 'pending' AND COALESCE(i.attempts, 0) < $2
        ORDER BY i.updated_at ASC
        LIMIT $1)
      UNION ALL
      (SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
-             s.file_hash, 0 AS attempts, 1 AS pri
+             s.file_hash, tc.capture_slots, tc.income_type, 0 AS attempts, 1 AS pri
         FROM review_submissions s
+        LEFT JOIN tab_configs tc ON tc.sheet_id = s.sheet_id AND tc.tab_name = s.tab_name
         LEFT JOIN review_inspections i ON i.file_id = s.file_id
        WHERE i.file_id IS NULL
          AND s.uploaded_at > NOW() - ($3 || ' days')::interval
@@ -1510,11 +1514,15 @@ async function runInspectSweep({ limit } = {}) {
         const f = await downloadFile(t.file_id);
         if (!f || !f.buffer) throw new Error('파일을 받지 못했습니다');
         const b64 = f.buffer.toString('base64');
+        // 수동 슬롯은 key가 slot2여도 라벨이 현금영수증일 수 있다. 재검수에서도 실제 역할을
+        // 넘겨야 영수증 검증 원장을 일반 리뷰 판정으로 덮어쓰지 않는다.
+        const slotRole = isCashReceiptSlot(
+          t.capture_slots, t.income_type, t.slot_key || 'review') ? 'receipt' : (t.slot_key || 'review');
         const r = await inspectSubmission({
           base64: b64, mimeType: f.mimeType || 'image/jpeg',
           fileId: t.file_id, fileHash: t.file_hash || hashBase64(b64),
           sheetId: t.sheet_id, tabName: t.tab_name, rowIndex: t.row_index,
-          reviewerName: t.reviewer_name, slotKey: t.slot_key || 'review',
+          reviewerName: t.reviewer_name, slotKey: t.slot_key || 'review', slotRole,
         });
         // 과거분은 원장에 지문이 없다 — 이번에 계산한 값을 채워 이후 중복 대조의 재료로 만든다
         if (!t.file_hash) await saveFileHash({ fileId: t.file_id, fileHash: hashBase64(b64) });

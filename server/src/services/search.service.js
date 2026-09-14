@@ -689,6 +689,19 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
   } catch (_) { _ctMap = new Map(); }
 
+  // pg_trgm 대체 검색도 본검색과 같은 서버 기준으로 슬롯을 파생한다. 이 값이 빠지면
+  // 공고에서만 현금영수증을 켠 작업은 첨부 칸이 보이지 않는데 지급 게이트는 닫히는 교착이 난다.
+  let _rtMap = new Map();
+  try {
+    _rtMap = await reviewTypesForTabs(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+  } catch (_) { _rtMap = new Map(); }
+  let _crMap = new Map();
+  try {
+    _crMap = await cashReceiptRequirementsForTabs(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+  } catch (_) { _crMap = new Map(); }
+
   const results = filteredRows.map(row => {
     const rowObj = _parseRowJson(row.rowJson);
     return {
@@ -709,7 +722,13 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     displayNameTC: _ctMap.get(`${row.sheetId} ${row.tabName}`) || row.displayName,
     folderUrl:   row.folderUrl,
     captureFolderUrl: row.captureFolderUrl,
-    captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
+    incomeType:  row.incomeType,
+    captureSlots: effectiveCaptureSlots(
+      row.captureSlots,
+      row.incomeType,
+      _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
+      _crMap.get(`${row.sheetId}\u0000${row.tabName}`) === true),
+    reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
     submittedSlots: [],
     // ★ 제출완료 행은 행 전체 JSON 미반환 (본검색과 동일한 데이터 최소화)
     row:         row.isSubmitted ? {} : rowObj,
@@ -719,6 +738,36 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     isPaid:      _isPaid(row.isSubmitted2, rowObj),
     };
   });
+
+  // 대체 검색으로 재진입해도 이미 낸 리뷰와 현금영수증을 다시 요구하지 않는다.
+  const multiSlotItems = results.filter(r => r.captureSlots);
+  if (multiSlotItems.length > 0) {
+    try {
+      const keyOf = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
+      const { rows: subRows } = await pool.query(
+        `SELECT sheet_id, tab_name, row_index, slot_key
+           FROM review_submissions
+          WHERE sheet_id = ANY($1) AND tab_name = ANY($2) AND row_index = ANY($3)`,
+        [
+          [...new Set(multiSlotItems.map(r => r.sheetId))],
+          [...new Set(multiSlotItems.map(r => r.tabName))],
+          [...new Set(multiSlotItems.map(r => r.rowIndex))],
+        ]
+      );
+      const coverMap = new Map();
+      for (const sr of subRows) {
+        const key = keyOf(sr.sheet_id, sr.tab_name, sr.row_index);
+        if (!coverMap.has(key)) coverMap.set(key, new Set());
+        coverMap.get(key).add(sr.slot_key);
+      }
+      for (const item of multiSlotItems) {
+        const covered = coverMap.get(keyOf(item.sheetId, item.tabName, item.rowIndex));
+        item.submittedSlots = covered ? [...covered] : [];
+      }
+    } catch (slotErr) {
+      logger.warn('[Search] fallback submittedSlots 조회 실패 (무시): ' + slotErr.message);
+    }
+  }
 
   // ── order_submissions 병합(폴백 경로도 누락 없이) — 폴백은 phoneList 미계산이므로 [p8] ──
   if (includeSubmitted && p8 && p8.length === 8) {
