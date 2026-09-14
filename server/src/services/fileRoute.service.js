@@ -132,17 +132,18 @@ async function markRouted({ fileId, fromSlot, by = 'auto:upload' } = {}) {
  * 구성이 바뀐 행에서만 호출한다. 남은 review 슬롯 파일 중 최신을 대표로, 없으면 비움
  * (영수증이 대표 이미지로 남아 업체 뷰어에 나가는 것 방지).
  */
-async function recomputePrimary({ sheetId, tabName, rowIndex } = {}) {
+async function recomputePrimary({ sheetId, tabName, rowIndex, db } = {}) {
   if (!sheetId || !tabName || rowIndex == null) return { ok: false, error: 'target_required' };
+  const q = db || _db();
   try {
-    const { rows } = await _db().query(
+    const { rows } = await q.query(
       `SELECT file_id, file_url, file_name, uploaded_at FROM review_submissions
         WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND slot_key = 'review'
         ORDER BY uploaded_at DESC NULLS LAST`,
       [sheetId, tabName, rowIndex]);
     if (rows.length) {
       const p = rows[0];
-      const updated = await _db().query(
+      const updated = await q.query(
         `UPDATE review_index
             SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
                 review_file_count = $4, review_file_at = COALESCE($5, review_file_at)
@@ -150,7 +151,7 @@ async function recomputePrimary({ sheetId, tabName, rowIndex } = {}) {
         [p.file_id, p.file_url, p.file_name, rows.length, p.uploaded_at, sheetId, tabName, rowIndex]);
       if (!updated.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
     } else {
-      const updated = await _db().query(
+      const updated = await q.query(
         `UPDATE review_index
             SET review_file_id = NULL, review_file_url = NULL, review_file_name = NULL,
                 review_file_count = 0
