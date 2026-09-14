@@ -49,6 +49,7 @@ const _PREVIEW_MODE = !!(_EMBED_CTX && _EMBED_CTX.preview);
 let _activeIdentityContext = null;
 let _identityContextPromise = null;
 let _orderInfoSuggestions = [];
+let _dismissedOrderInfoIds = {};
 const _ORDER_INFO_DISMISS_KEY = "rapp_order_info_dismissed_v1";
 
 function _reviewerIdentityRequestBody(extra) {
@@ -387,8 +388,11 @@ window._applySavedOrderInfo = function (option) {
 function _loadDismissedOrderInfoIds() {
   try {
     const saved = JSON.parse(localStorage.getItem(_ORDER_INFO_DISMISS_KEY) || "{}");
-    return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
-  } catch (_) { return {}; }
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      _dismissedOrderInfoIds = Object.assign({}, saved, _dismissedOrderInfoIds);
+    }
+  } catch (_) { /* 메모리 숨김값은 유지 */ }
+  return _dismissedOrderInfoIds;
 }
 
 function _saveDismissedOrderInfoIds(saved) {
@@ -397,7 +401,8 @@ function _saveDismissedOrderInfoIds(saved) {
       .filter(([id, at]) => /^[0-9a-f]{64}$/i.test(id) && Number.isFinite(Number(at)))
       .sort((a, b) => Number(b[1]) - Number(a[1]))
       .slice(0, 60);
-    localStorage.setItem(_ORDER_INFO_DISMISS_KEY, JSON.stringify(Object.fromEntries(entries)));
+    _dismissedOrderInfoIds = Object.fromEntries(entries);
+    localStorage.setItem(_ORDER_INFO_DISMISS_KEY, JSON.stringify(_dismissedOrderInfoIds));
   } catch (_) { /* 저장 실패 시 현재 화면에서만 숨김 */ }
 }
 

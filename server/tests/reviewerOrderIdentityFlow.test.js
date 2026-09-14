@@ -31,7 +31,7 @@ pool.query = async (sql, params) => {
     { id:selectedId, member_no:1, current_name:'김민수', current_phone:selectedCurrentPhone, current_phone8:selectedCurrentPhone.replace(/\D/g, '').slice(-8), shopping_id:'selected-id' },
     { id:otherId, member_no:2, current_name:'박영희', current_phone:'010-9999-8888', current_phone8:'99998888', shopping_id:'other-id' },
   ] };
-  if (/WITH scoped AS[\s\S]+FROM order_submissions os/.test(sql)) return { rows: [{
+  if (/WITH eligible_applications AS[\s\S]+JOIN order_submissions os/.test(sql)) return { rows: [{
     recipient: applicationIdentity === 'sub' ? '김민수' : '본인',
     phone: applicationIdentity === 'sub' ? '010-1234-5678' : '010-1010-1010',
     address: applicationIdentity === 'sub' ? '서울 강남구 테헤란로 10 101동 1203호' : '서울 본인주소',

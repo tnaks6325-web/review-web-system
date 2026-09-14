@@ -12,6 +12,7 @@ const corsMiddleware = read('src/middleware/cors.middleware.js');
 const diagRoutes = read('src/routes/diag.routes.js');
 const gemini = read('src/services/gemini.service.js');
 const migration = read('migrations/147_reviewer_shopping_identity_match.sql');
+const suggestionMigration = read('migrations/157_order_info_suggestions.sql');
 const appJs = read('../frontend/js/search-app.js');
 const searchCss = read('../frontend/css/search.css');
 const campaign = read('../frontend/campaign.html');
@@ -142,6 +143,10 @@ ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가
   && /ca\.applicant_name[\s\S]{0,220}?= \$5/.test(service)
   && /os\.deleted_at IS NULL/.test(service)
   && /os\.source = 'order_submit'/.test(service));
+ok('추천 조합은 ID와 같은 주소 정규화를 쓰고 UUID 조회는 인덱스 경로로 분리한다',
+  /WITH eligible_applications AS/.test(service)
+  && /TRANSLATE\(BTRIM\(os\.address\), '\(\)\[\],\.\/·', ' {8}'\)/.test(service)
+  && /idx_campaign_apps_order_info_identity/.test(suggestionMigration));
 ok('추천 조회 장애는 구매양식을 막지 않고 빈 추천으로 접힌다',
   /let orderInfoSuggestions = \[\]/.test(service)
   && /orderInfoSuggestions = await loadOrderInfoSuggestions\(context\)/.test(service)
@@ -152,6 +157,7 @@ ok('조합 추천은 한 번에 세 필드를 적용하고 원장 삭제 없이 
   && /\["recipient", item\.recipient\][\s\S]{0,100}?\["phone", item\.phone\][\s\S]{0,100}?\["address", item\.address\]/.test(appJs)
   && /_invalidateIdentityApproval\(cid\)/.test(appJs)
   && /rapp_order_info_dismissed_v1/.test(appJs)
+  && /_dismissedOrderInfoIds = Object\.fromEntries\(entries\)/.test(appJs)
   && !/DELETE FROM order_submissions/.test(service));
 const unlockAiField = appJs.slice(appJs.indexOf('function _unlockAiField(fid)'), appJs.indexOf('/** ★ Promise 반환'));
 ok('캡처를 삭제해도 타계정 참여 전화번호 잠금은 풀리지 않는다',

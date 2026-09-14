@@ -194,7 +194,7 @@ function publicIdentity(identity, { includeBank = false } = {}) {
 
 function orderInfoSuggestionId({ recipient, phone, address }) {
   return stableHash(JSON.stringify({
-    recipient: cleanName(recipient),
+    recipient: cleanName(recipient).toLowerCase(),
     phone: digits(phone),
     address: normAddress(address),
   }));
@@ -218,13 +218,45 @@ async function loadOrderInfoSuggestions(context, db = pool) {
       || participantPhone8.length !== 8 || !participantName) return [];
 
   const { rows } = await db.query(
-    `WITH scoped AS (
+    `WITH eligible_applications AS (
+       SELECT ca.id
+         FROM campaign_applications ca
+        WHERE $3::uuid IS NOT NULL
+          AND ca.owner_reviewer_id = $1::uuid
+          AND ca.participant_identity_id = $3::uuid
+       UNION ALL
+       SELECT ca.id
+         FROM campaign_applications ca
+        WHERE ca.owner_reviewer_id = $1::uuid
+          AND ca.participant_identity_id IS NULL
+          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.phone8, ca.applicant_phone, ''), '\\D', '', 'g'), 8) = $4
+          AND REGEXP_REPLACE(BTRIM(COALESCE(ca.applicant_name, '')), '\\s+', '', 'g') = $5
+       UNION ALL
+       SELECT ca.id
+         FROM campaign_applications ca
+        WHERE $3::uuid IS NOT NULL
+          AND ca.owner_reviewer_id IS NULL
+          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.owner_phone8, ca.phone8, ''), '\\D', '', 'g'), 8) = $2
+          AND (SELECT COUNT(*) FROM reviewers r WHERE r.phone8 = $2) = 1
+          AND ca.participant_identity_id = $3::uuid
+       UNION ALL
+       SELECT ca.id
+         FROM campaign_applications ca
+        WHERE ca.owner_reviewer_id IS NULL
+          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.owner_phone8, ca.phone8, ''), '\\D', '', 'g'), 8) = $2
+          AND (SELECT COUNT(*) FROM reviewers r WHERE r.phone8 = $2) = 1
+          AND ca.participant_identity_id IS NULL
+          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.phone8, ca.applicant_phone, ''), '\\D', '', 'g'), 8) = $4
+          AND REGEXP_REPLACE(BTRIM(COALESCE(ca.applicant_name, '')), '\\s+', '', 'g') = $5
+     ), scoped AS (
        SELECT os.recipient, os.phone, os.address, os.submitted_at,
               LOWER(REGEXP_REPLACE(BTRIM(os.recipient), '\\s+', '', 'g')) AS recipient_key,
               REGEXP_REPLACE(os.phone, '\\D', '', 'g') AS phone_key,
-              LOWER(REGEXP_REPLACE(BTRIM(os.address), '\\s+', '', 'g')) AS address_key
-         FROM order_submissions os
-         JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+              LOWER(BTRIM(REGEXP_REPLACE(
+                TRANSLATE(BTRIM(os.address), '()[],./·', '        '), '\\s+', ' ', 'g'
+              ))) AS address_key
+         FROM eligible_applications ea
+         JOIN order_submissions os ON os.campaign_application_id = ea.id
         WHERE os.deleted_at IS NULL
           AND os.source = 'order_submit'
           AND os.submitted_at >= NOW() - INTERVAL '365 days'
@@ -233,22 +265,6 @@ async function loadOrderInfoSuggestions(context, db = pool) {
           AND NULLIF(BTRIM(os.address), '') IS NOT NULL
           AND os.recipient !~ '[*＊●○◯◉•·xX]'
           AND os.address !~ '[*＊●○◯◉•·xX]'
-          AND (
-            ca.owner_reviewer_id = $1::uuid
-            OR (
-              ca.owner_reviewer_id IS NULL
-              AND RIGHT(REGEXP_REPLACE(COALESCE(ca.owner_phone8, ca.phone8, ''), '\\D', '', 'g'), 8) = $2
-              AND (SELECT COUNT(*) FROM reviewers r WHERE r.phone8 = $2) = 1
-            )
-          )
-          AND (
-            ($3::uuid IS NOT NULL AND ca.participant_identity_id = $3::uuid)
-            OR (
-              ca.participant_identity_id IS NULL
-              AND RIGHT(REGEXP_REPLACE(COALESCE(ca.phone8, ca.applicant_phone, ''), '\\D', '', 'g'), 8) = $4
-              AND REGEXP_REPLACE(BTRIM(COALESCE(ca.applicant_name, '')), '\\s+', '', 'g') = $5
-            )
-          )
      ), grouped AS (
        SELECT recipient_key, phone_key, address_key,
               COUNT(*)::int AS use_count,
