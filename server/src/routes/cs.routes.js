@@ -26,11 +26,12 @@ router.use(authMiddleware, internalMiddleware);
 /** C/S 첨부 URL 화이트리스트 — 규칙은 `utils/csImageUrls` 단일 출처(사본 금지). */
 const { sanitizeCsImageUrls: _sanitizeCsImageUrls } = require('../utils/csImageUrls');
 
-// GET /api/cs/threads?status=open|closed|all&q=검색어 — 문의방 목록(리뷰어별 그룹은 프론트에서)
+// GET /api/cs/threads?status=open|closed|all&q=검색어&campaignKey=시트ID||작업명 — 문의방 목록
 router.get('/threads', async (req, res, next) => {
   try {
     const status = (req.query.status || 'all').toString();
     const q = (req.query.q || '').toString().trim();
+    const campaignKey = (req.query.campaignKey || '').toString();
     const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
     const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
 
@@ -43,6 +44,13 @@ router.get('/threads', async (req, res, next) => {
     if (q) {
       params.push('%' + q + '%');
       where.push(`(t.reviewer_name ILIKE $${params.length} OR t.reviewer_phone8 LIKE $${params.length} OR t.campaign_label ILIKE $${params.length})`);
+    }
+    // 작업보드 안의 미니 C/S는 현재 작업 방만 필요하다. 전체 문의방을 먼저 페이지로
+    // 자른 뒤 프론트에서 거르면, 미확인 방이 많은 날에는 관리자가 방금 연 방도 뒤쪽
+    // 페이지로 밀려 목록이 0건처럼 보인다. 정확한 campaign_key를 서버에서 먼저 좁힌다.
+    if (campaignKey) {
+      params.push(campaignKey);
+      where.push(`t.campaign_key = $${params.length}`);
     }
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
