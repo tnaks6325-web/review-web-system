@@ -2732,12 +2732,14 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
   const db = getPool();
   const out = new Map();
   let tabCfg = {};
+  let tabContextResolved = false;
   try {
     const { rows } = await db.query(
       `SELECT COALESCE(tab_gid, '') AS gid, capture_slots, income_type
          FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
       [sheetId, tabName]);
     tabCfg = rows[0] || {};
+    tabContextResolved = !!rows[0];
   } catch (_) { tabCfg = {}; }
   let campaignCashReceipt = false;
   if (includeReceipt) {
@@ -2747,16 +2749,34 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     } catch (_) {}
   }
   let receiptSlotKey = 'receipt';
+  const knownSlotKeys = new Set(['review']);
   try {
-    const info = require('../utils/captureSlots').cashReceiptSlotInfo(
+    const { cashReceiptSlotInfo, effectiveCaptureSlots } = require('../utils/captureSlots');
+    const effectiveSlots = effectiveCaptureSlots(
+      tabCfg.capture_slots, tabCfg.income_type, null, campaignCashReceipt) || [];
+    for (const slot of effectiveSlots) if (slot && slot.key) knownSlotKeys.add(String(slot.key));
+    const info = cashReceiptSlotInfo(
       tabCfg.capture_slots, tabCfg.income_type, campaignCashReceipt);
     if (info.slot && info.slot.key) receiptSlotKey = info.slot.key;
   } catch (_) {}
-  const push = (rowIndex, fileId, slot, at) => {
+  const push = (rowIndex, fileId, slot, at, roleEvidence = {}) => {
     if (rowIndex == null || !fileId) return;
     const rawSlot = String(slot || 'review');
-    const isReceipt = rawSlot === receiptSlotKey || rawSlot === 'receipt' || rawSlot === 'cash_receipt';
-    if (isReceipt && !includeReceipt) return;
+    const inspectedKind = String(roleEvidence.inspectionKind || '');
+    // 현재 탭 설정은 나중에 바뀐 수 있다. 제출 파일에 남은 검수 증거를 같이 보지
+    // 않으면 과거 slot2 영수증이 일반 이미지로 외부 응답에 노출될 수 있다.
+    const isReceipt = roleEvidence.receiptEvidence === true
+      || inspectedKind === 'receipt'
+      || rawSlot === receiptSlotKey || rawSlot === 'receipt' || rawSlot === 'cash_receipt';
+    if (!includeReceipt) {
+      if (isReceipt) return;
+      // review 외 사용자 정의 슬롯은 현재 탭 설정과 파일 단위 비영수증 검수 증거가
+      // 모두 있을 때만 업체용에 낸다. 설정/검수 문맥을 못 읽으면 노출보다 제외이 안전하다.
+      if (roleEvidence.submission === true && rawSlot !== 'review') {
+        const verifiedNonReceipt = ['review', 'purchase_confirm', 'order_capture'].includes(inspectedKind);
+        if (!tabContextResolved || !knownSlotKeys.has(rawSlot) || !verifiedNonReceipt) return;
+      }
+    }
     const k = String(rowIndex);
     if (!out.has(k)) out.set(k, []);
     const arr = out.get(k);
@@ -2767,12 +2787,20 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     arr.push({ fileId, slot: sl, at: at || null });
   };
   const { rows: subs } = await db.query(
-    `SELECT row_index, file_id, slot_key, COALESCE(uploaded_at, created_at) AS at
-       FROM review_submissions
-      WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND file_id IS NOT NULL
-      ORDER BY row_index, slot_key, COALESCE(uploaded_at, created_at) NULLS LAST`,
+    `SELECT rs.row_index, rs.file_id, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) AS at,
+            (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+              OR ri.checks->'format'->>'kind' = 'receipt') AS receipt_evidence,
+            COALESCE(ri.checks->'format'->>'kind', '') AS inspection_kind
+       FROM review_submissions rs
+       LEFT JOIN review_inspections ri ON ri.file_id = rs.file_id
+      WHERE rs.sheet_id=$1 AND rs.tab_name=$2 AND rs.row_index IS NOT NULL AND rs.file_id IS NOT NULL
+      ORDER BY rs.row_index, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) NULLS LAST`,
     [sheetId, tabName]).catch(() => ({ rows: [] }));   // fail-soft: 이미지가 없어도 표는 떠야 한다
-  for (const r of subs) push(r.row_index, r.file_id, r.slot_key, r.at);
+  for (const r of subs) push(r.row_index, r.file_id, r.slot_key, r.at, {
+    submission: true,
+    receiptEvidence: r.receipt_evidence === true,
+    inspectionKind: r.inspection_kind,
+  });
   const { rows: idx } = await db.query(
     `SELECT row_index, review_file_id, review_file_at
        FROM review_index

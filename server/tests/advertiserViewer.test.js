@@ -348,9 +348,9 @@ async function run() {
         { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }
       ], income_type: '' }] })],
       [/FROM review_submissions/, () => ({ rows: [
-        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', at: '2026-07-01T00:00:00Z' },
-        { row_index: 3, file_id: 'FILEBBBBBBBBBBBBBBBBBBBB', slot_key: 'slot2', at: '2026-07-01T00:01:00Z' },
-        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', at: '2026-07-02T00:00:00Z' },   // 중복 파일
+        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', inspection_kind: 'review', at: '2026-07-01T00:00:00Z' },
+        { row_index: 3, file_id: 'FILEBBBBBBBBBBBBBBBBBBBB', slot_key: 'slot2', receipt_evidence: true, inspection_kind: 'receipt', at: '2026-07-01T00:01:00Z' },
+        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', inspection_kind: 'review', at: '2026-07-02T00:00:00Z' },   // 중복 파일
         { row_index: 5, file_id: null, slot_key: 'review', at: null },                                            // 빈 파일ID
       ] })],
       [/FROM review_index/, () => ({ rows: [
@@ -366,6 +366,22 @@ async function run() {
     ok('★ 기본 호출(업체 payload)은 수동 slot2 현금영수증 파일ID도 제외한다', !rv['3'].some(f => f.fileId === 'FILEBBBBBBBBBBBBBBBBBBBB'));
     const internalRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T', includeReceipt: true });
     ok('내부 호출만 현금영수증을 표준 receipt 슬롯으로 동봉한다', internalRv['3'].some(f => f.slot === 'receipt' && f.fileId === 'FILEBBBBBBBBBBBBBBBBBBBB'));
+
+    svc.__setPoolForTest(pool([
+      [/FROM tab_configs WHERE sheet_id=\$1/, () => ({ rows: [{ gid: '', capture_slots: [
+        { key: 'review', label: '리뷰' }, { key: 'slot2', label: '추가 리뷰' }
+      ], income_type: '' }] })],
+      [/FROM review_submissions/, () => ({ rows: [
+        // 현재 설정에서 slot2가 일반 칸으로 바뀌어도 파일에 남은 영수증 증거가 우선한다.
+        { row_index: 4, file_id: 'FILEHISTORICALRECEIPT01', slot_key: 'slot2', receipt_evidence: true, inspection_kind: 'receipt', at: null },
+        // 역할 검수 증거가 없는 과거 사용자 정의 슬롯도 외부에는 안 낸다.
+        { row_index: 4, file_id: 'FILEUNRESOLVEDROLE0001', slot_key: 'slot2', receipt_evidence: false, inspection_kind: '', at: null },
+      ] })],
+      [/FROM review_index/, () => ({ rows: [] })],
+    ]));
+    const renamedSlotRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T' });
+    ok('★ 슬롯 설정이 바뀌어도 과거 영수증 증거 파일과 역할 미확정 파일은 업체 payload에서 제외한다',
+      !renamedSlotRv['4']);
   }
   /* ⚠ 2026-08-24: 총건수 초과 줄에 `class="gover"` 가 조건부로 붙으며 `<tr ` 뒤가 달라졌다.
      검사 의미는 그대로 — **행(tr)에 data-rid 가 실린다**(셀에만 있으면 tr 단위 선택이 죽는다). */
