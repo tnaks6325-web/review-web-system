@@ -138,6 +138,11 @@ function buildValues({ headers, rows }) {
            manualBandSkipped: band.length, manualBandWithData };
 }
 
+function participantPhone8(value) {
+  const digits = String(value || '').replace(/[^0-9]/g, '');
+  return digits.length >= 8 ? digits.slice(-8) : null;
+}
+
 /**
  * 장부 3권 생성/갱신 — 무시트 탭 전용.
  *
@@ -187,7 +192,7 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
 
   // ── 작업표(진실원본) ──
   const { rows: parts } = await db.query(
-    `SELECT seq, row_json FROM campaign_participants
+    `SELECT seq, row_json, phone8 FROM campaign_participants
       WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
       ORDER BY seq`, [sheetId, tabName]);
 
@@ -238,6 +243,18 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
      집계도 **같은 목록**에서 센다 — `parsed.length` 를 그대로 보고하면 화면이
      "명단 216명"이라 말하고 실제로는 50명만 들어가는 조용한 불일치가 된다. */
   const indexed = _closedRounds.filterRows(parsed, excludeRounds);
+  // 작업표의 연락처 칸은 화면용 끝자리만 남을 수 있다. 이 값을 다시 파싱하면 phone8이 NULL이 되고,
+  // 제출된 리뷰가 입금 대상의 필수 연락처 조건에서 조용히 빠진다. 작업표 JSON/RAW에는 전체 번호를
+  // 되살리지 않고, 실제 장부에 남는 같은 seq 참여자 원장의 phone8만 review_index에 보충한다.
+  const participantPhones = new Map(parts.map(p => [Number(p.seq), participantPhone8(p.phone8)]));
+  let participantPhoneFallbackCount = 0;
+  for (const row of indexed) {
+    if (row.phone8) continue;
+    const fallback = participantPhones.get(Number(row.rowIndex));
+    if (!fallback) continue;
+    row.phone8 = fallback;
+    participantPhoneFallbackCount++;
+  }
   const excludedCount = parsed.length - indexed.length;
   const submittedCount = indexed.filter(r => r.isSubmitted).length;
   const checksum = computeChecksum(JSON.stringify({ headers, n: parts.length, s: submittedCount }));
@@ -246,6 +263,7 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
     return {
       dryRun: true, sheetId, tabName, tabGid, headerSource,
       headers, headerRow, mirrorRows: parts.length, indexRows: indexed.length, submittedCount,
+      participantPhoneFallbackCount,
       excludedRounds: excludeRounds, excludedRows: excludedCount,
       note: 'raw 미러는 빈 슬롯 포함 전 행 · 검색 명단은 이름 있는 행만(파서 규칙 그대로)'
         + (excludedCount ? ` · 마감 차수 ${excludeRounds.join(',')} ${excludedCount}행 제외` : ''),
@@ -360,10 +378,12 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
 
   logger.info(`[sheetlessLedger] 장부 생성 tab=${tabName} 미러 ${mirrorRows}행 · 명단 ${indexed.length}행`
     + (excludedCount ? ` (마감 차수 ${excludeRounds.join(',')} ${excludedCount}행 제외)` : '')
+    + (participantPhoneFallbackCount ? ` · 연락처키 보충 ${participantPhoneFallbackCount}행` : '')
     + ` · 헤더출처=${headerSource} by=${by}`);
   return {
     ok: true, sheetId, tabName, tabGid, headerSource,
     headers, headerRow, mirrorRows, indexRows: indexed.length, submittedCount,
+    participantPhoneFallbackCount,
     excludedRounds: excludeRounds, excludedRows: excludedCount,
     filesKept, filesSeen,
   };
