@@ -1214,12 +1214,12 @@ async function inspectSubmission({
     // 계속 허용하되, 성공 판정 또는 내부 확인 전까지 입금 게이트가 닫히도록 검수 원장에 남긴다.
     if (isReceipt) {
       let receiptVerdict = captureVerdict;
+      let companyBusinessNo = '';
+      try {
+        const { rows } = await _db().query("SELECT value FROM app_settings WHERE key = 'company_business_no'");
+        companyBusinessNo = rows[0]?.value || '';
+      } catch (_) {}
       if (!receiptVerdict && base64) {
-        let companyBusinessNo = '';
-        try {
-          const { rows } = await _db().query("SELECT value FROM app_settings WHERE key = 'company_business_no'");
-          companyBusinessNo = rows[0]?.value || '';
-        } catch (_) {}
         try {
           receiptVerdict = await require('./captureVerify.service').verifyCapture({
             base64, mimeType: mimeType || 'image/jpeg', slotKey: 'receipt',
@@ -1227,11 +1227,20 @@ async function inspectSubmission({
           });
         } catch (_) { receiptVerdict = null; }
       }
-      checks.receiptValidation = receiptVerdict?.status === 'ok'
-        ? { verdict: 'pass', status: 'ok', kind: receiptVerdict.got || 'receipt', confidence: receiptVerdict.confidence || 0 }
+      const normBusinessNo = value => String(value || '').replace(/[^0-9]/g, '');
+      const configuredBusinessNo = normBusinessNo(companyBusinessNo);
+      const capturedBusinessNo = normBusinessNo(receiptVerdict?.businessNo);
+      // 이미지가 영수증처럼 보여도 사업자번호를 읽지 못했거나 회사 번호와 대조하지 못하면
+      // 지급 증빙으로 확정하지 않는다. 제출은 유지하고 내부 정상 승인 전까지 입금만 보류한다.
+      const businessNoMatched = !!configuredBusinessNo
+        && !!capturedBusinessNo
+        && configuredBusinessNo === capturedBusinessNo;
+      checks.receiptValidation = receiptVerdict?.status === 'ok' && businessNoMatched
+        ? { verdict: 'pass', status: 'ok', kind: receiptVerdict.got || 'receipt', confidence: receiptVerdict.confidence || 0, businessNoMatched: true }
         : receiptVerdict?.status === 'mismatch'
           ? { verdict: 'fail', status: 'mismatch', expected: receiptVerdict.expected || 'receipt', got: receiptVerdict.got || '', confidence: receiptVerdict.confidence || 0 }
-          : { verdict: 'warn', status: 'unverified', reason: 'receipt_validation_unavailable' };
+          : { verdict: 'warn', status: 'unverified', reason: receiptVerdict?.status === 'ok'
+              ? 'business_number_unverified' : 'receipt_validation_unavailable' };
     }
 
     // ① 형식·채널

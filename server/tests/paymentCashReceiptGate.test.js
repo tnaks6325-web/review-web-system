@@ -97,7 +97,9 @@ const db = {
 
   const inspectService = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
-  assert.match(inspectService, /checks\.receiptValidation = receiptVerdict\?\.status === 'ok'[\s\S]*verdict: 'pass'[\s\S]*verdict: 'fail'[\s\S]*verdict: 'warn'/,
+  assert.match(inspectService, /const businessNoMatched =[\s\S]*receiptVerdict\?\.status === 'ok' && businessNoMatched[\s\S]*businessNoMatched: true[\s\S]*business_number_unverified/,
+    '사업자번호를 읽어 회사 번호와 대조한 영수증만 지급 검수 통과여야 한다');
+  assert.match(inspectService, /checks\.receiptValidation = receiptVerdict\?\.status === 'ok' && businessNoMatched[\s\S]*verdict: 'pass'[\s\S]*verdict: 'fail'[\s\S]*verdict: 'warn'/,
     '영수증 판정 통과/불일치/판정불가가 검수 원장에 분리 기록돼야 한다');
   assert.match(inspectService, /\(!ENABLED && requestedSlotRole !== 'receipt'\)/,
     '일반 리뷰검수를 꺼도 현금영수증 지급 판정 원장은 기록해야 한다');
@@ -108,19 +110,22 @@ const db = {
   const inspect = require('../src/services/reviewInspect.service');
   inspect.__setPoolForTest({
     query: async sql => {
+      if (/company_business_no/.test(sql)) return { rows: [{ value: '123-45-67890' }] };
       if (/INSERT INTO review_inspections/.test(sql)) return { rows: [], rowCount: 1 };
       throw new Error('unexpected inspection query: ' + sql);
     },
   });
-  const inspectReceipt = status => inspect.inspectSubmission({
-    fileId: `receipt-${status}`, sheetId: 'S', tabName: 'cash', rowIndex: 9,
+  const inspectReceipt = (status, businessNo = '1234567890') => inspect.inspectSubmission({
+    fileId: `receipt-${status}-${businessNo || 'empty'}`, sheetId: 'S', tabName: 'cash', rowIndex: 9,
     slotKey: 'receipt', slotRole: 'receipt',
-    captureVerdict: { status, expected: 'receipt', got: status === 'ok' ? 'receipt' : 'review', confidence: 0.96 },
+    captureVerdict: { status, expected: 'receipt', got: status === 'ok' ? 'receipt' : 'review', confidence: 0.96, businessNo },
   });
   assert.strictEqual((await inspectReceipt('ok')).status, 'pass', '영수증 판정 통과는 지급 검수 통과');
+  assert.strictEqual((await inspectReceipt('ok', '')).status, 'suspect', '사업자번호를 못 읽은 영수증은 내부 확인 전 지급 보류');
+  assert.strictEqual((await inspectReceipt('ok', '999-88-77777')).status, 'suspect', '회사 번호와 다른 영수증은 내부 확인 전 지급 보류');
   assert.strictEqual((await inspectReceipt('mismatch')).status, 'fail', '영수증 판정 불일치는 지급 검수 실패');
   assert.strictEqual((await inspectReceipt('skipped')).status, 'suspect', '판정 불가는 내부 확인 전 지급 보류');
   inspect.__setPoolForTest(null);
 
-  console.log('payment cash receipt gate: 23 passed');
+  console.log('payment cash receipt gate: 26 passed');
 })().catch(err => { console.error(err); process.exit(1); });
