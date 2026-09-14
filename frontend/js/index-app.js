@@ -7838,17 +7838,18 @@ async function _renderCaptureSlotsEditor(tcData) {
 
   list.innerHTML = "";
   if (!slots || slots.length === 0) {
-    _csAddSlotRow("리뷰");   // 첫 슬롯 시드 (기존 리뷰 제출과 호환)
+    _csAddSlotRow("리뷰", "review");   // 첫 슬롯 시드 (기존 리뷰 제출과 호환)
   } else {
-    slots.forEach(s => _csAddSlotRow((s && s.label) || ""));
+    slots.forEach(s => _csAddSlotRow((s && s.label) || "", (s && s.key) || ""));
   }
 }
 
-function _csAddSlotRow(label) {
+function _csAddSlotRow(label, key) {
   const list = document.getElementById("tcCaptureSlotsList");
   if (!list) return;
   const row = document.createElement("div");
   row.className = "tc-cs-row";
+  row.dataset.slotKey = key || "";
   row.style.cssText = "display:flex;gap:6px;margin-bottom:5px;align-items:center";
   row.innerHTML =
     '<span class="tc-cs-num" style="font-size:.66rem;color:#92400E;width:14px;text-align:center;flex-shrink:0"></span>' +
@@ -7874,15 +7875,17 @@ async function saveCaptureSlots() {
   const tabName = _tcCurrent.tabName || "";
   if (!sheetId || !tabName) { showToast("sheetId/tabName을 특정할 수 없습니다.", true); return; }
 
-  const labels = Array.from(document.querySelectorAll("#tcCaptureSlotsList .tc-cs-label"))
-    .map(i => i.value.trim()).filter(Boolean);
+  const slots = Array.from(document.querySelectorAll("#tcCaptureSlotsList .tc-cs-row"))
+    .map(row => ({ key: row.dataset.slotKey || "", label: row.querySelector(".tc-cs-label")?.value.trim() || "" }))
+    .filter(slot => slot.label);
+  const labels = slots.map(slot => slot.label);
 
   // 라벨 중복 방지
   const dup = labels.find((l, i) => labels.indexOf(l) !== i);
   if (dup) { showToast(`슬롯 라벨이 중복됩니다: "${dup}"`, "error"); return; }
 
   try {
-    const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: labels });
+    const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: slots });
     if (json && json.ok) {
       const n = (json.captureSlots || []).length;
       if (n > 1) {

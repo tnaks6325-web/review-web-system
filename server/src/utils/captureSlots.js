@@ -139,6 +139,12 @@ function assignStableCaptureSlotKeys(rawSlots, previousSlots) {
       used.add(hit.key);
     }
   });
+  // 구형 편집기가 라벨 문자열만 보내더라도 첫 기본 리뷰 슬롯의 이름 변경은 역할 변경이 아니다.
+  // 정확한 라벨 매칭으로 다른 위치가 review를 가져간 경우에는 그 배치를 존중한다.
+  if (incoming[0] && !assigned[0] && previousKeys.has('review') && !used.has('review')) {
+    assigned[0] = 'review';
+    used.add('review');
+  }
 
   const reserved = new Set([...previousKeys, ...used]);
   const nextKey = (preferReview) => {
@@ -173,6 +179,9 @@ function hasCashReceiptSlot(captureSlots, incomeType, campaignCashReceiptRequire
 
 /** 저장 key가 slot2여도 라벨이 현금영수증이면 영수증 역할로 판정한다. */
 function isCashReceiptSlot(captureSlots, incomeType, key, reviewType = null, campaignCashReceiptRequired = false) {
+  // 예약 키는 공고 컨텍스트 조회가 실패해도 receipt 역할이다. 이 조건이 없으면 장애 순간
+  // 업로드가 공개 가능성이 있는 일반 리뷰 경로로 떨어진다.
+  if (String(key || '') === RECEIPT_SLOT.key) return true;
   const info = cashReceiptSlotInfo(captureSlots, incomeType, campaignCashReceiptRequired, reviewType);
   return !!(info.slot && info.slot.key === key);
 }
@@ -190,6 +199,7 @@ function cashReceiptNote(captureSlots, incomeType, campaignCashReceiptRequired =
 
 /** 슬롯 key → 표시 라벨(업로드 서브폴더명·안내문 공용). 모르는 key는 key 그대로. */
 function slotLabel(captureSlots, incomeType, key, reviewType, campaignCashReceiptRequired = false) {
+  if (String(key || '') === RECEIPT_SLOT.key) return RECEIPT_SLOT.label;
   const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired) || [REVIEW_SLOT];
   const hit = eff.find(s => s.key === key);
   return (hit && hit.label) || key;
