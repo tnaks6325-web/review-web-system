@@ -2137,7 +2137,8 @@ function extractProductOption(row) {
 function renderResults(results) {
   const section = document.getElementById("resultsSection");
   const list    = document.getElementById("resultsList");
-  const pending = results.filter(item => !item.isSubmitted);
+  // 리뷰를 먼저 끝내고 영수증을 나중에 내는 정상 흐름도 검색 결과에서 다시 열려야 한다.
+  const pending = results.filter(item => !item.isSubmitted || _isReceiptPendingItem(item));
 
   document.getElementById("resultsCount").textContent = `${pending.length}건`;
   list.innerHTML = "";
@@ -2172,7 +2173,10 @@ function renderResults(results) {
     const name    = (item.displayName || "이름 없음").trim();
     const sid     = (item.sheetId     || "").trim();
     const tab     = (item.tabName     || "").trim();
-    const key     = name + "\x00" + sid + "\x00" + tab; // null구분자로 key 구성
+    // 영수증만 남은 완료 행은 단건으로 연다. 미제출 다건 묶음과 합치면 슬롯×행 화면이 없어
+    // 어느 참여 건의 영수증인지 고를 수 없다.
+    const receiptSuffix = _isReceiptPendingItem(item) ? "\x00receipt\x00" + String(item.rowIndex) : "";
+    const key     = name + "\x00" + sid + "\x00" + tab + receiptSuffix; // null구분자로 key 구성
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -2204,12 +2208,13 @@ function renderResults(results) {
         : `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
            <div class="result-product-label result-product-empty">참여 작업 정보 없음</div>`;
       const card = document.createElement("div");
+      const receiptPending = _isReceiptPendingItem(item);
       card.className = "result-card";
       card.innerHTML = `
         <div class="result-avatar"></div>
         <div class="result-body">${productHtml}</div>
         <div class="result-right">
-          <span class="status-badge status-pending">미제출</span>
+          <span class="status-badge status-pending">${receiptPending ? '현금영수증 미제출' : '미제출'}</span>
           <i class="fas fa-chevron-right result-chevron"></i>
         </div>`;
       card.addEventListener("click", () => openSubmitMulti(items));
@@ -2697,6 +2702,15 @@ function _renderCaptureSlots(item, slots, paneCard) {
  *   프론트에 채널 사본을 두지 않는다. 등록된 이미지가 없거나 조회 실패 = 아무것도 안 그림. */
 function _csIsReceiptSlot(slot) {
   return !!(slot && (slot.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(slot.label || ''))));
+}
+
+function _isReceiptPendingItem(item) {
+  if (!item || !item.isSubmitted) return false;
+  if (item.cashReceiptPending === true) return true;
+  const receiptSlot = Array.isArray(item.captureSlots) ? item.captureSlots.find(_csIsReceiptSlot) : null;
+  if (!receiptSlot) return false;
+  const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+  return !submitted.has(receiptSlot.key);
 }
 
 async function _csLoadCrGuides(item, receiptSlotKey = 'receipt') {

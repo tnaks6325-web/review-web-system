@@ -121,6 +121,15 @@ ok('이미 리뷰 완료여도 미제출 현금영수증이 있으면 다시 진
   /const receiptPending =/.test(app)
   && /items\.every\(it => it\.isSubmitted\) && !receiptPending/.test(app)
   && /현금영수증 제출로 이동/.test(app));
+ok('검색 결과가 리뷰 완료+현금영수증 미제출 행을 숨기지 않고 단건 제출로 다시 연다',
+  /results\.filter\(item => !item\.isSubmitted \|\| _isReceiptPendingItem\(item\)\)/.test(app)
+  && /receiptSuffix = _isReceiptPendingItem\(item\)/.test(app)
+  && /현금영수증 미제출/.test(app));
+const reviewerHome = readF('index.html');
+ok('리뷰어 홈 완료 내역에도 현금영수증 제출 재진입 버튼이 있다',
+  /_partInfoSubmitItems = done \? list\.filter\(_hasPendingCashReceipt\) : list/.test(reviewerHome)
+  && /현금영수증 제출하기/.test(reviewerHome)
+  && /goToSubmit\(\[items\[i\]\]\)/.test(reviewerHome));
 ok('★★ 완료 리뷰의 영수증만 추가할 때 submitReview 기록을 생략해 기존 완료 시각을 보존',
   /const receiptOnlyAfterComplete = reviewWasComplete/.test(app)
   && /if \(receiptOnlyAfterComplete\) \{\s*result = \{ success: true, ok: true, complete: true/.test(app)

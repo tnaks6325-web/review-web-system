@@ -177,7 +177,11 @@ async function listPaymentTargets(opts = {}) {
   if (opts.sheetId) { params.push(opts.sheetId); where.push(`ri.sheet_id = $${params.length}`); }
   if (opts.tabName) { params.push(opts.tabName); where.push(`ri.tab_name = $${params.length}`); }
 
-  const { rows: candidateRows } = await pool.query(
+  const pageSize = 2000;
+  const resultLimit = 2000;
+  const limitParam = params.length + 1;
+  const offsetParam = params.length + 2;
+  const candidateSql =
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
             ri.reviewer_name AS "reviewerName", ri.phone8 AS "phone8",
             ri.start_date AS "startDate", ri.product_name AS "productName",
@@ -191,17 +195,23 @@ async function listPaymentTargets(opts = {}) {
             -- 혼합배송 리뷰비 판정은 배송구분 한 칸만 필요하다. 행 JSON 전체를 넘기지 않아
             -- 기존 입금 후보/작업보드 금액 조회의 작은-행 계약을 보존한다.
             COALESCE(ri.row_json->>'배송구분', '') AS "deliveryKind"
-       FROM review_index ri
+      FROM review_index ri
       WHERE ${where.join(' AND ')}
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
-      LIMIT 2000`,
-    params
-  );
-  if (!candidateRows.length) return { items: [], summary: _summarize([]) };
+      LIMIT $${limitParam} OFFSET $${offsetParam}`;
 
-  // 현금영수증 대상 작업은 리뷰 완료만으로 지급하지 않는다. 공용 게이트가 실제 영수증 슬롯
-  // 원장을 확인하며, 회차 생성도 listPaymentTargets를 다시 호출하므로 같은 조건으로 재검증된다.
-  const rows = await filterReceiptEligiblePaymentRows(pool, candidateRows);
+  // 현금영수증 미제출 행을 제외한 뒤 2,000건을 채운다. LIMIT을 먼저 적용하면 앞쪽의
+  // 미제출 행이 자리를 계속 차지해 뒤쪽 정상 지급 대상이 영구적으로 조회되지 않는다.
+  const rows = [];
+  let offset = 0;
+  while (rows.length < resultLimit) {
+    const { rows: pageRows } = await pool.query(candidateSql, [...params, pageSize, offset]);
+    if (!pageRows.length) break;
+    const eligibleRows = await filterReceiptEligiblePaymentRows(pool, pageRows);
+    rows.push(...eligibleRows.slice(0, resultLimit - rows.length));
+    if (pageRows.length < pageSize) break;
+    offset += pageRows.length;
+  }
   if (!rows.length) return { items: [], summary: _summarize([]) };
 
   const sheetIds = [...new Set(rows.map(r => r.sheetId))];

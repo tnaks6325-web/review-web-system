@@ -425,11 +425,13 @@ function withStubPool(handler, run) {
       await svc.listPaymentTargets({ sheetId: 'S1', tabName: 'T1' });
       const q = calls.find(c => /FROM review_index ri/.test(c.sql));
       const used = new Set((q.sql.match(/\$\d+/g) || []).map(s => parseInt(s.slice(1), 10)));
-      assert.strictEqual(q.params.length, 4, '파라미터 4개');
+      assert.strictEqual(q.params.length, 6, '기본 4개 + 페이지 limit/offset 2개');
       for (const n of used) assert.ok(n <= q.params.length, `$${n} 자리표시자에 파라미터가 없다`);
       assert.deepStrictEqual(q.params[1], PA.EXACT_KEYS, '$2 = 결제금액 정확일치 후보');
       assert.strictEqual(q.params[2], 'S1');
       assert.strictEqual(q.params[3], 'T1');
+      assert.strictEqual(q.params[4], 2000, '$5 = 페이지 크기');
+      assert.strictEqual(q.params[5], 0, '$6 = 첫 페이지 offset');
     });
   });
 

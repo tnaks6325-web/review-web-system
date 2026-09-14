@@ -72,13 +72,18 @@ const db = {
 
   const paymentService = fs.readFileSync(path.join(__dirname, '../src/services/payment.service.js'), 'utf8');
   const paymentRoute = fs.readFileSync(path.join(__dirname, '../src/routes/payment.routes.js'), 'utf8');
-  assert.match(paymentService, /filterReceiptEligiblePaymentRows\(pool, candidateRows\)/,
+  assert.match(paymentService, /filterReceiptEligiblePaymentRows\(pool, pageRows\)/,
     '입금관리 목록이 현금영수증 공용 게이트를 거치지 않는다');
+  const paymentList = paymentService.match(/async function listPaymentTargets[\s\S]*?\n}/)?.[0] || '';
+  assert.match(paymentList, /while \(rows\.length < resultLimit\)[\s\S]*filterReceiptEligiblePaymentRows\(pool, pageRows\)[\s\S]*rows\.push/,
+    '현금영수증 게이트를 페이지 LIMIT 뒤 한 번만 적용하면 뒤쪽 정상 지급 대상이 막힌다');
+  assert.match(paymentList, /LIMIT \$\$\{limitParam\} OFFSET \$\$\{offsetParam\}/,
+    '입금 후보는 지급 가능 2,000건을 채울 때까지 페이지 이동해야 한다');
   assert.match(paymentRoute, /filterReceiptEligiblePaymentRows\(pool, rows\)/,
     '기존 입금목록 API가 현금영수증 공용 게이트를 거치지 않는다');
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
 
-  console.log('payment cash receipt gate: 10 passed');
+  console.log('payment cash receipt gate: 12 passed');
 })().catch(err => { console.error(err); process.exit(1); });
