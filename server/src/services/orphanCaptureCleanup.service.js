@@ -122,7 +122,7 @@ function candidateSql({ oneFile = false } = {}) {
                         AND ria.row_index = rs.row_index)
      AND NOT EXISTS (SELECT 1 FROM campaign_participants cp
                       WHERE cp.sheet_id = rs.sheet_id AND cp.tab_name = rs.tab_name
-                        AND cp.row_index = rs.row_index
+                        AND cp.seq = rs.row_index
                         AND cp.deleted_at IS NULL AND cp.active = TRUE)
      ${oneFile ? 'AND rs.file_id = $3' : ''}
    ORDER BY COALESCE(rs.uploaded_at, rs.created_at) ASC
@@ -419,6 +419,8 @@ async function trashFolderOrphans({ sheetId, tabName, fileIds = null, dryRun = t
 }
 
 module.exports = {
+  /* 가드가 완성된 SQL 을 읽어 표·칸 실재를 대조한다(스텁 pool 은 SQL 을 해석하지 않는다). */
+  __candidateSqlForTest: () => candidateSql(),
   findOrphanCaptures,
   trashOrphanCaptures,
   findTombstonedCaptures,
