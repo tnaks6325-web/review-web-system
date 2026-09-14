@@ -4428,7 +4428,38 @@ function _syncCampThumbUrlPreview() {
 async function uploadCampThumb(input) {
   const file = input.files && input.files[0];
   if (!file) return;
-  if (file.size > 5 * 1024 * 1024) { showToast("이미지는 5MB 이하로 올려주세요.", "error"); input.value = ""; return; }
+  try {
+    await _uploadCampThumbFile(file);
+  } finally {
+    input.value = "";
+  }
+}
+
+function _applyCampThumbUpload(url) {
+  const saved = document.getElementById("rf_thumbnail");
+  const input = document.getElementById("rf_thumb_url");
+  const preview = document.getElementById("rf_thumb_preview");
+  const wrap = document.getElementById("rf_thumb_preview_wrap");
+  const state = document.getElementById("rf_thumb_preview_state");
+  if (saved) saved.value = url;
+  // 클립보드 이미지·파일 업로드 모두 서버에 저장된 실제 URL을 입력창에 남겨
+  // 저장될 값을 관리자가 바로 확인할 수 있게 한다.
+  if (input) input.value = url;
+  if (preview) preview.src = url;
+  if (wrap) { wrap.hidden = false; wrap.classList.remove("is-error"); }
+  if (state) state.innerHTML = "미리<br>보기";
+  _onPreviewInput();
+}
+
+async function _uploadCampThumbFile(file) {
+  if (!file || !/^image\//i.test(file.type || "")) {
+    showToast("이미지 파일만 썸네일로 등록할 수 있습니다.", "error");
+    return false;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    showToast("이미지는 5MB 이하로 올려주세요.", "error");
+    return false;
+  }
   showToast("썸네일 업로드 중...");
   try {
     const b64 = await new Promise((res, rej) => {
@@ -4445,18 +4476,25 @@ async function uploadCampThumb(input) {
     const j = await resp.json();
     if (!resp.ok || !j.ok || !j.url) throw new Error(j.error || "업로드 실패");
     // 절대 프록시 URL — 프론트(pages.dev)와 API(railway) 오리진이 달라 절대 URL이어야 카드에 뜬다
-    document.getElementById("rf_thumbnail").value = j.url;
-    const pv = document.getElementById("rf_thumb_preview");
-    const pvWrap = document.getElementById("rf_thumb_preview_wrap");
-    if (pv) { pv.src = j.url; }
-    if (pvWrap) { pvWrap.hidden = false; pvWrap.classList.remove("is-error"); }
+    _applyCampThumbUpload(j.url);
     showToast("썸네일이 업로드되었습니다.", "success");
-    _onPreviewInput();
+    return true;
   } catch (e) {
     showToast("썸네일 업로드 실패: " + e.message, "error");
-  } finally {
-    input.value = "";
+    return false;
   }
+}
+
+// 공고 썸네일 URL 입력창에서 Ctrl+V. 클립보드에 이미지가 있을 때만 가로채고,
+// URL·텍스트는 브라우저의 기본 붙여넣기 뒤 input 이벤트가 처리하도록 둔다.
+function _pasteCampThumbImage(e) {
+  const item = Array.from((e.clipboardData && e.clipboardData.items) || [])
+    .find(entry => entry.kind === "file" && /^image\//i.test(entry.type || ""));
+  if (!item) return;
+  const file = item.getAsFile();
+  if (!file) return;
+  e.preventDefault();
+  _uploadCampThumbFile(file);
 }
 
 /* 쿠팡 봇차단 우회: 쿠팡 상품 HTML은 서버 fetch가 403이지만 이미지 CDN(coupangcdn.com)은 미차단.
@@ -5904,7 +5942,10 @@ function _attachPreviewListeners() {
     if (el) el.addEventListener("change", _onPreviewInput);
   });
   const thumbUrl = document.getElementById("rf_thumb_url");
-  if (thumbUrl) thumbUrl.addEventListener("input", _syncCampThumbUrlPreview);
+  if (thumbUrl) {
+    thumbUrl.addEventListener("input", _syncCampThumbUrlPreview);
+    thumbUrl.addEventListener("paste", _pasteCampThumbImage);
+  }
 }
 
 function _detachPreviewListeners() {
@@ -5921,7 +5962,10 @@ function _detachPreviewListeners() {
     if (el) el.removeEventListener("change", _onPreviewInput);
   });
   const thumbUrl = document.getElementById("rf_thumb_url");
-  if (thumbUrl) thumbUrl.removeEventListener("input", _syncCampThumbUrlPreview);
+  if (thumbUrl) {
+    thumbUrl.removeEventListener("input", _syncCampThumbUrlPreview);
+    thumbUrl.removeEventListener("paste", _pasteCampThumbImage);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
