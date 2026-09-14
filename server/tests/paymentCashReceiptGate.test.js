@@ -99,8 +99,8 @@ const db = {
   const receiptGate = fs.readFileSync(path.join(__dirname, '../src/services/paymentReceiptGate.service.js'), 'utf8');
   assert.match(receiptGate, /if \(lock\)[\s\S]*FOR UPDATE OF rs[\s\S]*FROM review_inspections[\s\S]*FOR UPDATE/,
     '영수증 제출·검수 행 잠금 없이 검증 후 반려·교체가 끼어들 수 있다');
-  assert.match(receiptGate, /if \(lock\)[\s\S]*FROM requested r[\s\S]*JOIN tab_configs tc[\s\S]*FOR UPDATE OF tc[\s\S]*JOIN recruit_campaigns rc[\s\S]*FOR UPDATE OF rc/,
-    '지급 검증 중 탭·공고 현영 설정도 같은 transaction에서 잠가야 한다');
+  assert.match(receiptGate, /if \(lock\)[\s\S]*JOIN tab_configs tc[\s\S]*FOR UPDATE OF tc[\s\S]*JOIN order_submissions os[\s\S]*FOR UPDATE OF os[\s\S]*JOIN campaign_participants cp[\s\S]*FOR UPDATE OF cp[\s\S]*FROM campaign_applications ca[\s\S]*FOR UPDATE OF ca[\s\S]*FROM recruit_campaigns rc[\s\S]*exact_campaigns[\s\S]*FOR UPDATE OF rc/,
+    '지급 검증 중 탭 설정과 행 출처 원장·현재/과거 공고 설정을 같은 transaction에서 잠가야 한다');
   assert.match(paymentRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*filterReceiptEligiblePaymentRows\(client, items, \{ lock: true \}\)/,
     '직접 입금 처리는 설정 신규 삽입·연결 변경 phantom도 충돌로 중단해야 한다');
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';

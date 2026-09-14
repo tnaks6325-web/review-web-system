@@ -29,6 +29,15 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
 
   if (lock) {
     const lockParams = [pairs.map(p => p.sheetId), pairs.map(p => p.tabName)];
+    const lockRows = source.map(row => ({
+      sheetId: row.sheetId, tabName: row.tabName, rowIndex: Number(row.rowIndex),
+    }));
+    if (lockRows.some(row => !Number.isInteger(row.rowIndex))) {
+      throw new Error('cash receipt lock requires integer rowIndex');
+    }
+    const rowParams = [
+      lockRows.map(r => r.sheetId), lockRows.map(r => r.tabName), lockRows.map(r => r.rowIndex),
+    ];
     // 설정 변경도 지급 판정의 일부다. 기존 행을 직접 잠그고, 신규 삽입·연결 변경 같은
     // phantom은 호출 transaction의 SERIALIZABLE 격리가 충돌로 중단시킨다.
     await db.query(
@@ -43,17 +52,95 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
     );
     await db.query(
       `WITH requested AS (
-         SELECT * FROM UNNEST($1::text[], $2::text[]) AS r(sheet_id, tab_name)
+         SELECT * FROM UNNEST($1::text[], $2::text[], $3::int[])
+           AS r(sheet_id, tab_name, row_index)
+       )
+       SELECT os.id
+         FROM requested r
+         JOIN order_submissions os
+           ON os.sheet_id = r.sheet_id AND os.tab_name = r.tab_name
+          AND os.sheet_row = r.row_index AND os.deleted_at IS NULL
+        ORDER BY os.id
+        FOR UPDATE OF os`,
+      rowParams
+    );
+    await db.query(
+      `WITH requested AS (
+         SELECT * FROM UNNEST($1::text[], $2::text[], $3::int[])
+           AS r(sheet_id, tab_name, row_index)
+       )
+       SELECT cp.id
+         FROM requested r
+         JOIN campaign_participants cp
+           ON cp.sheet_id = r.sheet_id AND cp.tab_name = r.tab_name AND cp.seq = r.row_index
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+        ORDER BY cp.id
+        FOR UPDATE OF cp`,
+      rowParams
+    );
+    await db.query(
+      `WITH requested AS (
+         SELECT * FROM UNNEST($1::text[], $2::text[], $3::int[])
+           AS r(sheet_id, tab_name, row_index)
+       ), source_orders AS (
+         SELECT os.id, os.campaign_application_id
+           FROM requested r
+           JOIN order_submissions os
+             ON os.sheet_id = r.sheet_id AND os.tab_name = r.tab_name
+            AND os.sheet_row = r.row_index AND os.deleted_at IS NULL
+         UNION
+         SELECT os.id, os.campaign_application_id
+           FROM requested r
+           JOIN campaign_participants cp
+             ON cp.sheet_id = r.sheet_id AND cp.tab_name = r.tab_name AND cp.seq = r.row_index
+            AND cp.deleted_at IS NULL AND cp.active = TRUE
+           JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+       )
+       SELECT ca.id
+         FROM campaign_applications ca
+        WHERE EXISTS (
+          SELECT 1 FROM source_orders so
+           WHERE ca.id = so.campaign_application_id OR ca.order_submission_id = so.id
+        )
+        ORDER BY ca.id
+        FOR UPDATE OF ca`,
+      rowParams
+    );
+    await db.query(
+      `WITH requested AS (
+         SELECT * FROM UNNEST($1::text[], $2::text[], $3::int[])
+           AS r(sheet_id, tab_name, row_index)
+       ), exact_campaigns AS (
+         SELECT ca.campaign_id
+           FROM requested r
+           JOIN order_submissions os
+             ON os.sheet_id = r.sheet_id AND os.tab_name = r.tab_name
+            AND os.sheet_row = r.row_index AND os.deleted_at IS NULL
+           JOIN campaign_applications ca
+             ON ca.id = os.campaign_application_id OR ca.order_submission_id = os.id
+         UNION
+         SELECT ca.campaign_id
+           FROM requested r
+           JOIN campaign_participants cp
+             ON cp.sheet_id = r.sheet_id AND cp.tab_name = r.tab_name AND cp.seq = r.row_index
+            AND cp.deleted_at IS NULL AND cp.active = TRUE
+           JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+           JOIN campaign_applications ca
+             ON ca.id = os.campaign_application_id OR ca.order_submission_id = os.id
        )
        SELECT rc.id
-         FROM requested r
-         LEFT JOIN tab_configs tc ON tc.sheet_id = r.sheet_id AND tc.tab_name = r.tab_name
-         JOIN recruit_campaigns rc
-           ON rc.linked_sheet_id = r.sheet_id
-          AND (rc.linked_tab_name = r.tab_name
-               OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+         FROM recruit_campaigns rc
+        WHERE rc.id IN (SELECT campaign_id FROM exact_campaigns)
+           OR EXISTS (
+             SELECT 1 FROM requested r
+             LEFT JOIN tab_configs tc ON tc.sheet_id = r.sheet_id AND tc.tab_name = r.tab_name
+              WHERE rc.linked_sheet_id = r.sheet_id
+                AND (rc.linked_tab_name = r.tab_name
+                     OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+           )
+        ORDER BY rc.id
         FOR UPDATE OF rc`,
-      lockParams
+      rowParams
     );
   }
 
