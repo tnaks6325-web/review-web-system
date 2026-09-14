@@ -14030,8 +14030,26 @@ async function renderInspectView(){
    ★ api() 의 401 경로는 여전히 영구 보류다 — 그건 화면이 로그인으로 교체된 뒤라 의도된 것. */
 /** 천단위 구분 — 3,334 처럼 큰 수가 나오는 화면이라 그냥 붙여 쓰면 읽히지 않는다. */
 function _riN(n){ const v=Number(n); return Number.isFinite(v)?v.toLocaleString('ko-KR'):String(n); }
+/* 목록을 다시 받는 동안 상세 팝업이 열려 있으면 배열 인덱스가 아니라 파일 ID로 이어 붙인다.
+   자동처리·다른 관리자 처리로 열린 건이 목록에서 빠졌으면 즉시 닫고, 남아 있으면 최신 판정으로
+   다시 그린다. 이전 STATE.ri 인덱스를 그대로 두면 처리 전 버튼이 남거나 다른 건으로 이동한다. */
+function _riOpenDetailFileId(){
+  const m=$('#riModal');
+  if(!m||m.style.display!=='flex'||m.dataset.riKind!=='detail') return '';
+  const i=Number(STATE.riDetailIdx), r=Number.isFinite(i)&&(STATE.ri||[])[i];
+  return String(r&&r.file_id||'');
+}
+function _riSyncDetailAfterReload(fileId){
+  if(!fileId) return;
+  const m=$('#riModal');
+  if(!m||m.style.display!=='flex'||m.dataset.riKind!=='detail') return;
+  const i=(STATE.ri||[]).findIndex(r=>String(r&&r.file_id||'')===fileId);
+  if(i<0) riCloseDetail();
+  else riOpenDetail(i);
+}
 async function _loadInspect(){
   const b = $('#ribody');
+  const openDetailFileId = _riOpenDetailFileId();
   try{
     const st = STATE.riStatus || 'open';
     const t  = STATE.riTab || null;   // {sheetId,tabName} — 미지정이면 전체(담당 범위)
@@ -14054,6 +14072,7 @@ async function _loadInspect(){
     STATE.riRT = new Map((r.reviewTypes||[]).map(x=>[x.sheetId+'\u0000'+x.tabName, x]));
     _riRenderHead(r.summary);
     _riRenderBody();
+    _riSyncDetailAfterReload(openDetailFileId);
     _riSyncNavBadge(Number.isFinite(r.openCount) ? r.openCount : null);
   }catch(e){
     if(b) b.innerHTML=`<div class="empty">검수 목록을 표시하지 못했습니다. (${esc((e&&e.message)||e)})<br>
