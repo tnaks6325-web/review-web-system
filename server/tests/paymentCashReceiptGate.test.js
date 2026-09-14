@@ -139,6 +139,10 @@ const db = {
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
   assert.match(reviewEditRoute, /INSERT INTO review_inspections[\s\S]*approved_file_replacement[\s\S]*isCashReceiptSlot\([\s\S]*inspect\.inspectSubmission\([\s\S]*slotRole: 'receipt'/,
     '관리자가 승인한 영수증 교체본은 pending 원장을 만든 뒤 즉시 receipt 재검수해야 한다');
+  assert.match(reviewEditRoute, /isCashReceiptSlot\(cfg\.capture_slots, cfg\.income_type, slot, rt, cr === true\)[\s\S]{0,500}resolveTargetFolder\(\{[\s\S]{0,200}target: 'receipt'[\s\S]{0,300}if \(!targetFolderId\) throw new Error/,
+    '영수증 교체본은 공개 리뷰 폴더로 폴백하지 않고 비공개 영수증 경로만 사용해야 한다');
+  assert.match(reviewEditRoute, /const targetFolderId = \(await _resolveFolders\([\s\S]{0,180}r0\.slot_key \|\| 'review'[\s\S]{0,100}\)\.targetFolderId/,
+    '승인 시 요청에 저장된 과거 폴더가 아니라 현재 슬롯 역할로 대상 폴더를 다시 계산해야 한다');
   assert.match(trackBRoute, /target === 'receipt'[\s\S]*reinspectReceiptFile\(\{ fileId \}\)[\s\S]*else \{[\s\S]*resolveInspection/,
     '수동 현영 이동은 일반 정상 종결 대신 영수증 전용 재검수를 거쳐야 한다');
   assert.match(inspectService, /async function reinspectReceiptFile[\s\S]*status = 'pending'[\s\S]*resolution = NULL[\s\S]*slotRole: 'receipt'/,

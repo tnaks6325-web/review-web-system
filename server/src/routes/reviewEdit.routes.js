@@ -21,6 +21,7 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { slotLabel: slotLabelOf, isCashReceiptSlot } = require('../utils/captureSlots');
 const driveService = require('../services/drive.service');
+const fileRouteService = require('../services/fileRoute.service');
 const { _getReviewerPhoneList } = require('../services/search.service');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
@@ -96,7 +97,8 @@ async function _resolveFolders(sheetId, tabName, slot) {
   }
   if (!reviewFolderId) throw new Error('리뷰 폴더를 확보하지 못했습니다.');
 
-  // 대상 폴더(구 파일이 사는 곳): 기본 슬롯은 [리뷰], 그 외는 슬롯 라벨 서브폴더
+  // 대상 폴더(구 파일이 사는 곳): 기본 슬롯은 [리뷰], 현금영수증은 비공개 구매캡처 경로,
+  // 그 외는 [리뷰] 아래 슬롯 라벨 서브폴더.
   let targetFolderId = reviewFolderId;
   if (slot && slot !== 'review') {
     // 라벨 판정은 공용 유틸 — 현영 자동 슬롯도 같은 폴더명을 쓰게(업로드 경로와 일치해야 파일이 흩어지지 않음)
@@ -104,8 +106,16 @@ async function _resolveFolders(sheetId, tabName, slot) {
     const cr = await require('../services/cashReceiptContext.service')
       .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null);
     const label = slotLabelOf(cfg.capture_slots, cfg.income_type, slot, rt, cr === true);
-    const sf = await driveService.getOrCreateSubFolder(reviewFolderId, label);
-    targetFolderId = sf.id;
+    if (isCashReceiptSlot(cfg.capture_slots, cfg.income_type, slot, rt, cr === true)) {
+      targetFolderId = await fileRouteService.resolveTargetFolder({
+        target: 'receipt', sheetId, tabName, reviewBaseFolderId: reviewFolderId, receiptLabel: label,
+      });
+      // 현금영수증은 업체 공개 가능성이 있는 [리뷰] 폴더로 절대 폴백하지 않는다.
+      if (!targetFolderId) throw new Error('비공개 현금영수증 폴더를 확보하지 못했습니다.');
+    } else {
+      const sf = await driveService.getOrCreateSubFolder(reviewFolderId, label);
+      targetFolderId = sf.id;
+    }
   }
 
   // 스테이징: 최상위 [리뷰수정대기] — 모든 탭 [리뷰] 폴더 "밖"에 격리한다.
@@ -650,10 +660,11 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     if (!r0.new_file_id) return res.json({ ok: false, error: '스테이징된 새 파일이 없습니다.' });
 
     // 1) 대상 폴더 확보(트랜잭션 밖) — 요청 이후 폴더가 이동/재생성됐어도 현재 [리뷰]로 배치
-    let targetFolderId = r0.target_folder_id;
-    if (!targetFolderId) {
-      targetFolderId = (await _resolveFolders(r0.sheet_id, r0.tab_name, r0.slot_key || 'review')).targetFolderId;
-    }
+    // 요청 당시 저장된 폴더를 신뢰하지 않고 현재 슬롯 역할로 다시 계산한다.
+    // 배포 전에 생성된 영수증 교체요청의 공개 [리뷰] 하위 target_folder_id도 여기서 교정된다.
+    const targetFolderId = (await _resolveFolders(
+      r0.sheet_id, r0.tab_name, r0.slot_key || 'review'
+    )).targetFolderId;
 
     // 2) 새 파일을 대상 폴더로 이동(멱등: 이미 대상이면 skip) + 정식 리뷰 파일명으로 rename
     //    (스테이징 중엔 비리뷰형식 이름이었으므로 승인 시점에 정식명으로 되돌린다)
