@@ -269,6 +269,7 @@ async function autoResolveConfirmedDuplicates({ sheetId, tabName, by, dryRun = t
   if (confirm !== CONFIRM) return { ok: false, error: '확정 중복 자동처리 확인값이 필요합니다.' };
 
   let processed = 0;
+  const processedFileIds = [];
   let skipped = 0;
   const reasons = {};
   const errors = [];
@@ -276,7 +277,10 @@ async function autoResolveConfirmedDuplicates({ sheetId, tabName, by, dryRun = t
   for (const pair of batch) {
     try {
       const out = await _removeOne({ ...pair, sheetId, tabName, by });
-      if (out && out.ok) processed++;
+      if (out && out.ok) {
+        processed++;
+        processedFileIds.push(pair.fileId);
+      }
       else {
         skipped++;
         const reason = out && out.reason || 'state_changed';
@@ -292,7 +296,7 @@ async function autoResolveConfirmedDuplicates({ sheetId, tabName, by, dryRun = t
   }
   return {
     ok: true, dryRun: false, version: VERSION,
-    requested: confirmedPairs.length, attempted: batch.length, processed, skipped,
+    requested: confirmedPairs.length, attempted: batch.length, processed, processedFileIds, skipped,
     reasons, errors: errors.slice(0, 20), hasMore: confirmedPairs.length > batch.length,
   };
 }

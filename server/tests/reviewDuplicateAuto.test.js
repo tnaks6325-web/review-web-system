@@ -6,6 +6,7 @@
  * - 실행 직전 DB 행 잠금 + 보존본/제거본 Drive 상태 재검증
  * - 나중 제출본만 휴지통, 대표 재계산과 불량 종결을 같은 DB 트랜잭션에서 처리
  * - DB 실패 시 Drive 휴지통 이동 보상 복구
+ * - 자동처리 뒤 실제 처리된 파일의 상세 팝업만 닫음
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -116,6 +117,7 @@ function txPool(handler) {
       dryRun: false, confirm: svc.CONFIRM, snapshotToken: token, pairs: [pair], by: '관리자',
     });
     assert.strictEqual(out.processed, 1);
+    assert.deepStrictEqual(out.processedFileIds, ['NEW']);
     assert.strictEqual(out.skipped, 0);
     assert.deepStrictEqual(driveCalls.slice(0, 2), [['get', 'KEEP'], ['get', 'NEW']]);
     assert.strictEqual(driveCalls[2][0], 'trash');
@@ -151,6 +153,7 @@ function txPool(handler) {
       dryRun: false, confirm: svc.CONFIRM, snapshotToken: token, pairs: [pair],
     });
     assert.strictEqual(out.processed, 0);
+    assert.deepStrictEqual(out.processedFileIds, []);
     assert.strictEqual(out.reasons.state_changed, 1);
     assert.strictEqual(trashCount, 0);
     ok('미리보기 뒤 완료·매핑 상태가 달라지면 Drive 호출 없이 제외');
@@ -213,8 +216,13 @@ function txPool(handler) {
     assert.ok(/function riDuplicateAutoResolve\(\)/.test(front));
     assert.ok(/양쪽 제출 완료와 보존 파일/.test(front));
     assert.ok(/리뷰어에게 1:1 메시지는 자동 전송하지 않습니다/.test(front));
+    assert.ok(/const doneIds=new Set\(\(Array\.isArray\(r\.processedFileIds\)\?r\.processedFileIds:\[\]\)\.map\(String\)\)/.test(front));
+    assert.ok(/doneIds\.has\(String\(dm\.dataset\.riFileId\|\|''\)\)\) riCloseDetail\(\)/.test(front),
+      '서버가 실제 처리한 ID와 현재 열린 상세 ID가 같을 때만 닫기');
+    assert.ok(/m\.dataset\.riFileId=String\(r\.file_id\|\|''\)/.test(front));
+    assert.ok(/m\.dataset\.riFileId=''/.test(front));
     assert.ok(/async function restoreFiles/.test(drive) && /restoreFiles,/.test(drive));
-    ok('관리자 전용 API와 미리보기 확인 UI, Drive 보상 복구 배선');
+    ok('관리자 전용 API·미리보기 확인 UI·상세 동기화·Drive 보상 복구 배선');
   }
 
   svc.__setDepsForTest({});

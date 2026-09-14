@@ -14706,6 +14706,12 @@ async function riDuplicateAutoResolve(){
     if(!r||!r.ok)throw new Error((r&&r.error)||'자동처리 실패');
     const skipped=Number(r.skipped)||0;
     _toast(`확정 중복 ${_riN(r.processed||0)}건 제거${skipped?` · 재검증 제외 ${_riN(skipped)}건`:''}${r.hasMore?' · 남은 후보 있음':''}`);
+    /* 목록은 최근 200건만 오므로 "새 목록에 없음"으로 처리 완료를 추정하지 않는다.
+       서버가 이번 실행에서 실제 처리했다고 돌려준 ID와 현재 열린 상세 ID가 같을 때만 닫는다.
+       응답 대기 중 다른 건으로 이동해도 그 새 팝업은 건드리지 않는다. */
+    const doneIds=new Set((Array.isArray(r.processedFileIds)?r.processedFileIds:[]).map(String));
+    const dm=$('#riModal');
+    if(dm&&dm.style.display==='flex'&&dm.dataset.riKind==='detail'&&doneIds.has(String(dm.dataset.riFileId||''))) riCloseDetail();
     await _loadInspect();
   }catch(e){alert('확정 중복 자동처리 실패: '+((e&&e.message)||e));}
 }
@@ -14800,6 +14806,7 @@ function riOpenDetail(i){
   // ★ #riModal 은 [판별 예시] 모달과 **같은 요소를 재사용**한다 — 방향키를 어느 쪽에서 가로챌지
   //   구분하려면 표식이 필요하다(없으면 예시 모달에서도 화살표가 먹어 엉뚱한 건으로 넘어간다).
   m.dataset.riKind='detail';
+  m.dataset.riFileId=String(r.file_id||'');
   m.innerHTML=html; m.style.display='flex';
 }
 /** 옆 건으로 이동. ★ 끝에서 순환하지 않는다 — 처음으로 튀면 "어디까지 봤는지"를 잃는다. */
@@ -14810,7 +14817,7 @@ function riStepDetail(d){
   if(nx<0 || nx>=rows.length) return;
   riOpenDetail(nx);
 }
-function riCloseDetail(){ const m=$('#riModal'); if(m){ m.style.display='none'; m.dataset.riKind=''; } STATE.riDetailIdx=null; }
+function riCloseDetail(){ const m=$('#riModal'); if(m){ m.style.display='none'; m.dataset.riKind=''; m.dataset.riFileId=''; } STATE.riDetailIdx=null; }
 /* ★ 리스너는 **한 번만** 건다 — 팝업을 열 때마다 걸면 겹쳐 쌓여 한 번 눌러 여러 칸 건너뛴다.
    ★ 상세 팝업이 실제로 떠 있을 때만 가로챈다(riKind) — 판별 예시 모달의 입력칸 커서 이동을 막지 않는다.
    ★ 입력 중(input/textarea/select/contenteditable)에는 손대지 않는다(작업보드 그리드 방향키 규율과 동일). */
