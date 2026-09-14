@@ -3806,21 +3806,34 @@ router.get('/payment/batch/:id', authMiddleware, adminOrMasterMiddleware, async 
 
 // 은행 서식 파일 — 재다운로드도 이력에 남는다(사용자 확정 규칙)
 router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  let client;
   try {
-    const out = await paymentSvc.getBatch(req.params.id);
-    if (!out) return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // 같은 회차의 동시 최초 다운로드도 직렬화한다. 첫 요청이 검증·기록을 마칠 때까지
+    // 다른 요청은 이 행 잠금 뒤에서 기다린다.
+    const out = await paymentSvc.getBatch(req.params.id, { db: client, lock: true });
+    if (!out) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
+    }
     if (out.batch.status === 'cancelled') {
+      await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: '취소된 회차는 내려받을 수 없습니다.' });
     }
     if (Number(out.batch.downloadCount || 0) === 0) {
-      const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out);
+      // 검증 대상 제출·검수 행을 잠근 채 파일 생성과 다운로드 기록까지 끝낸다.
+      // 그 사이 영수증 반려·교체·재배정이 끼어 지급 근거가 바뀌지 않는다.
+      const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out, { db: client, lock: true });
       if (!receiptCheck.ok) {
+        await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, code: 'cash_receipt_not_verified',
           error: '회차 생성 후 현금영수증 상태가 변경되었습니다. 이 회차를 취소하고 검수 완료 후 새 회차를 만들어 주세요.',
           blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });
       }
-      const accountCheck = await paymentSvc.checkBatchAccountSnapshots(out);
+      const accountCheck = await paymentSvc.checkBatchAccountSnapshots(out, { db: client });
       if (!accountCheck.ok) {
+        await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, code: 'account_snapshot_changed',
           error: '회차 생성 후 등록 계좌가 변경되었습니다. 이 회차를 취소하고 최신 계좌로 새 회차를 만들어 주세요.',
           mismatches: accountCheck.mismatches.map(x => ({ reviewerName: x.reviewerName, accountTail: x.accountTail })) });
@@ -3828,7 +3841,8 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     }
     const live = out.items.filter(i => i.status !== 'cancelled');
     const buf = await paymentSvc.buildWorkbook(out.batch.bank, live);
-    await paymentSvc.markDownloaded(out.batch.id, _by(req));
+    await paymentSvc.markDownloaded(out.batch.id, _by(req), { db: client });
+    await client.query('COMMIT');
     const name = paymentSvc.batchFileName(out.batch);
     // ★ 형식은 은행마다 다르다(하나 = .xls BIFF8) — MIME·확장자는 서비스 단일 출처를 그대로 쓴다.
     //   내용은 .xls 인데 이름만 .xlsx 로 나가면 은행 화면이 확장자만 보고 거부한다.
@@ -3838,7 +3852,12 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     res.setHeader('Content-Disposition',
       `attachment; filename="payment_${out.batch.seq}.${fmt.ext}"; filename*=UTF-8''${encodeURIComponent(name)}`);
     res.send(buf);
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (client) try { await client.query('ROLLBACK'); } catch {}
+    next(err);
+  } finally {
+    if (client) client.release();
+  }
 });
 
 // 회차 취소 — 잠금 해제(항목이 다시 입금대상으로 돌아온다)

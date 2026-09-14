@@ -155,6 +155,8 @@ function stubPool(handlers) {
     assert.strictEqual(r.resolved, 3);
     assert.strictEqual(r.aliasAdded, 1, '같은 표기 2건 = 별칭 1건(중복 접힘)');
     assert.ok(/status IN \('suspect', 'fail'\)/.test(p.calls[0].sql), '일괄 대상 = 미확인 의심·불량만(resolved·pass·pending 무접촉)');
+    assert.ok(/receiptValidation'[\s\S]*NOT IN \('warn', 'fail'\)/.test(p.calls[0].sql),
+      '영수증 불일치·판정불가는 일괄 정상 처리로 지급 승인되면 안 된다');
     ok('C1: 일괄 정상 처리 — suspect/fail 만 종결 + 별칭 일괄 학습(중복 접힘)');
     assert.deepStrictEqual(await svc.resolveInspectionsBulk({}), { ok: false, error: 'sheetId, tabName이 필요합니다.' });
     ok('C2: 탭 미지정 일괄 거부(전 시스템 일괄 종결 사고 방지)');

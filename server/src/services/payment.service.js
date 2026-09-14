@@ -918,27 +918,30 @@ async function listBatches(limit = 50) {
 }
 
 /** 회차 상세(항목 포함) */
-async function getBatch(batchId) {
-  const { rows: [b] } = await pool.query(`SELECT * FROM payment_batches WHERE id = $1`, [batchId]);
+async function getBatch(batchId, { db = pool, lock = false } = {}) {
+  const { rows: [b] } = await db.query(
+    `SELECT * FROM payment_batches WHERE id = $1${lock ? ' FOR UPDATE' : ''}`,
+    [batchId]
+  );
   if (!b) return null;
-  const { rows: items } = await pool.query(
+  const { rows: items } = await db.query(
     `SELECT * FROM payment_batch_items WHERE batch_id = $1 ORDER BY created_at, id`, [batchId]);
   return { batch: _batchView(b), items };
 }
 
 /** 재다운로드 이력 기록(사용자 확정: 재다운로드도 이력에 남는다) */
-async function markDownloaded(batchId, by) {
-  await pool.query(
+async function markDownloaded(batchId, by, { db = pool } = {}) {
+  await db.query(
     `UPDATE payment_batches
         SET download_count = download_count + 1, last_downloaded_at = NOW(), last_downloaded_by = $2
       WHERE id = $1`, [batchId, by || '']);
 }
 
-async function checkBatchAccountSnapshots({ batch, items }) {
+async function checkBatchAccountSnapshots({ batch, items }, { db = pool } = {}) {
   const guarded = (items || []).filter(i => i.account_reviewer_id && i.account_source);
   if (!guarded.length) return { ok: true, mismatches: [], unverifiable: (items || []).length };
   const ids = [...new Set(guarded.map(i => String(i.account_reviewer_id)))];
-  const { rows } = await pool.query(
+  const { rows } = await db.query(
     `SELECT id AS "reviewerId", bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder", sub_accounts AS "subAccounts"
        FROM reviewers WHERE id::text = ANY($1::text[])`, [ids]);
   const byId = new Map(rows.map(r => [String(r.reviewerId), r]));
@@ -946,12 +949,12 @@ async function checkBatchAccountSnapshots({ batch, items }) {
 }
 
 /** 최초 이체파일 생성 직전, 회차 생성 후 바뀐 영수증 검수 상태를 현재 원장으로 다시 확인한다. */
-async function checkBatchReceiptEligibility({ items } = {}) {
+async function checkBatchReceiptEligibility({ items } = {}, { db = pool, lock = false } = {}) {
   const live = (items || []).filter(item => item.status !== 'cancelled');
   const coords = live.map(item => ({
     sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index,
   }));
-  const eligible = await filterReceiptEligiblePaymentRows(pool, coords);
+  const eligible = await filterReceiptEligiblePaymentRows(db, coords, { lock });
   const allowed = new Set(eligible.map(item => `${item.sheetId}\u0000${item.tabName}\u0000${item.rowIndex}`));
   const blocked = live.filter(item => !allowed.has(`${item.sheet_id}\u0000${item.tab_name}\u0000${item.row_index}`));
   return {

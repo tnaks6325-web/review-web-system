@@ -99,7 +99,7 @@ const db = {
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
-  assert.match(trackBRoute, /downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out\)[\s\S]*cash_receipt_not_verified[\s\S]*checkBatchAccountSnapshots/,
+  assert.match(trackBRoute, /BEGIN[\s\S]*getBatch\(req\.params\.id, \{ db: client, lock: true \}\)[\s\S]*downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out, \{ db: client, lock: true \}\)[\s\S]*cash_receipt_not_verified[\s\S]*buildWorkbook[\s\S]*markDownloaded\(out\.batch\.id, _by\(req\), \{ db: client \}\)[\s\S]*COMMIT/,
     '최초 이체파일 다운로드 직전에 현금영수증 현재 상태를 다시 검증해야 한다');
   assert.match(searchService, /cashReceiptSubmissionStates\(pool, source\)[\s\S]*item\.submittedSlots = \(item\.submittedSlots \|\| \[\]\)\.filter/,
     '거절·보류된 영수증은 파일이 남아 있어도 리뷰어 재제출 슬롯을 다시 열어야 한다');

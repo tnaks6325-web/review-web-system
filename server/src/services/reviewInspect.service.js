@@ -2182,6 +2182,9 @@ async function resolveInspectionsBulk({ sheetId, tabName, resolution = 'ok', by 
     `UPDATE review_inspections
         SET status = 'resolved', resolution = $4, resolved_at = NOW(), resolved_by = $3, updated_at = NOW()
       WHERE sheet_id = $1 AND tab_name = $2 AND status IN ('suspect', 'fail')
+        -- 현금영수증 불일치·판정불가는 지급 보류 근거다. 탭 단위 일괄 정상으로
+        -- 덮지 않고, 파일을 확인한 관리자가 건별로만 승인할 수 있게 둔다.
+        AND COALESCE(checks->'receiptValidation'->>'verdict', '') NOT IN ('warn', 'fail')
       RETURNING sheet_id, tab_name, ocr_product, checks`,
     [sheetId, tabName, by || '', rkind]
   );
