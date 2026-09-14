@@ -3809,7 +3809,7 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
   let client;
   try {
     client = await pool.connect();
-    await client.query('BEGIN');
+    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
     // 같은 회차의 동시 최초 다운로드도 직렬화한다. 첫 요청이 검증·기록을 마칠 때까지
     // 다른 요청은 이 행 잠금 뒤에서 기다린다.
     const out = await paymentSvc.getBatch(req.params.id, { db: client, lock: true });

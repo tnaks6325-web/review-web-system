@@ -33,13 +33,16 @@ const db = {
         ], incomeType: '현영' },
       ] };
     }
-    if (/picked\.cash_receipt_required/.test(sql)) {
+    if (/provenance AS/.test(sql)) {
+      assert.deepStrictEqual(params[2], [1, 2, 3, 4, 5, 6, 7], '공고 현영 설정은 탭이 아니라 지급 행 좌표로 조회해야 한다');
       return { rows: [
-        { sheet_id: 'S', tab_name: 'regular', cash_receipt_required: null },
-        { sheet_id: 'S', tab_name: 'cash', cash_receipt_required: null },
-        { sheet_id: 'S', tab_name: 'manual', cash_receipt_required: null },
-        { sheet_id: 'S', tab_name: 'campaign', cash_receipt_required: true },
-        { sheet_id: 'S', tab_name: 'misconfigured', cash_receipt_required: false },
+        { sheet_id: 'S', tab_name: 'regular', row_index: 1, cash_receipt_required: null },
+        { sheet_id: 'S', tab_name: 'cash', row_index: 2, cash_receipt_required: null },
+        { sheet_id: 'S', tab_name: 'cash', row_index: 3, cash_receipt_required: null },
+        { sheet_id: 'S', tab_name: 'manual', row_index: 4, cash_receipt_required: null },
+        { sheet_id: 'S', tab_name: 'manual', row_index: 5, cash_receipt_required: null },
+        { sheet_id: 'S', tab_name: 'campaign', row_index: 6, cash_receipt_required: true },
+        { sheet_id: 'S', tab_name: 'misconfigured', row_index: 7, cash_receipt_required: false },
       ] };
     }
     if (/FROM review_submissions rs/.test(sql)) {
@@ -96,10 +99,14 @@ const db = {
   const receiptGate = fs.readFileSync(path.join(__dirname, '../src/services/paymentReceiptGate.service.js'), 'utf8');
   assert.match(receiptGate, /if \(lock\)[\s\S]*FOR UPDATE OF rs[\s\S]*FROM review_inspections[\s\S]*FOR UPDATE/,
     '영수증 제출·검수 행 잠금 없이 검증 후 반려·교체가 끼어들 수 있다');
+  assert.match(receiptGate, /if \(lock\)[\s\S]*FROM requested r[\s\S]*JOIN tab_configs tc[\s\S]*FOR UPDATE OF tc[\s\S]*JOIN recruit_campaigns rc[\s\S]*FOR UPDATE OF rc/,
+    '지급 검증 중 탭·공고 현영 설정도 같은 transaction에서 잠가야 한다');
+  assert.match(paymentRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*filterReceiptEligiblePaymentRows\(client, items, \{ lock: true \}\)/,
+    '직접 입금 처리는 설정 신규 삽입·연결 변경 phantom도 충돌로 중단해야 한다');
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
-  assert.match(trackBRoute, /BEGIN[\s\S]*getBatch\(req\.params\.id, \{ db: client, lock: true \}\)[\s\S]*downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out, \{ db: client, lock: true \}\)[\s\S]*cash_receipt_not_verified[\s\S]*buildWorkbook[\s\S]*markDownloaded\(out\.batch\.id, _by\(req\), \{ db: client \}\)[\s\S]*COMMIT/,
+  assert.match(trackBRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*getBatch\(req\.params\.id, \{ db: client, lock: true \}\)[\s\S]*downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out, \{ db: client, lock: true \}\)[\s\S]*cash_receipt_not_verified[\s\S]*buildWorkbook[\s\S]*markDownloaded\(out\.batch\.id, _by\(req\), \{ db: client \}\)[\s\S]*COMMIT/,
     '최초 이체파일 다운로드 직전에 현금영수증 현재 상태를 다시 검증해야 한다');
   assert.match(searchService, /cashReceiptSubmissionStates\(pool, source\)[\s\S]*item\.submittedSlots = \(item\.submittedSlots \|\| \[\]\)\.filter/,
     '거절·보류된 영수증은 파일이 남아 있어도 리뷰어 재제출 슬롯을 다시 열어야 한다');

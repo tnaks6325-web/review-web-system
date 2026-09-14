@@ -8,7 +8,7 @@
  * 확인한다. 조회 실패 시 대상을 추측해 지급하지 않도록 예외를 그대로 올린다.
  */
 const { cashReceiptSlotInfo } = require('../utils/captureSlots');
-const { cashReceiptRequirementsForTabs } = require('./cashReceiptContext.service');
+const { cashReceiptRequirementsForRows } = require('./cashReceiptContext.service');
 
 const pairKey = (sheetId, tabName) => `${sheetId}\u0000${tabName}`;
 const rowKey = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
@@ -27,6 +27,36 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
     pairs.push({ sheetId: row.sheetId, tabName: row.tabName });
   }
 
+  if (lock) {
+    const lockParams = [pairs.map(p => p.sheetId), pairs.map(p => p.tabName)];
+    // 설정 변경도 지급 판정의 일부다. 기존 행을 직접 잠그고, 신규 삽입·연결 변경 같은
+    // phantom은 호출 transaction의 SERIALIZABLE 격리가 충돌로 중단시킨다.
+    await db.query(
+      `WITH requested AS (
+         SELECT * FROM UNNEST($1::text[], $2::text[]) AS r(sheet_id, tab_name)
+       )
+       SELECT tc.sheet_id
+         FROM requested r
+         JOIN tab_configs tc ON tc.sheet_id = r.sheet_id AND tc.tab_name = r.tab_name
+        FOR UPDATE OF tc`,
+      lockParams
+    );
+    await db.query(
+      `WITH requested AS (
+         SELECT * FROM UNNEST($1::text[], $2::text[]) AS r(sheet_id, tab_name)
+       )
+       SELECT rc.id
+         FROM requested r
+         LEFT JOIN tab_configs tc ON tc.sheet_id = r.sheet_id AND tc.tab_name = r.tab_name
+         JOIN recruit_campaigns rc
+           ON rc.linked_sheet_id = r.sheet_id
+          AND (rc.linked_tab_name = r.tab_name
+               OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+        FOR UPDATE OF rc`,
+      lockParams
+    );
+  }
+
   const { rows: configs } = await db.query(
     `WITH requested AS (
        SELECT * FROM UNNEST($1::text[], $2::text[]) AS r(sheet_id, tab_name)
@@ -39,7 +69,7 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
     [pairs.map(p => p.sheetId), pairs.map(p => p.tabName)]
   );
   const configMap = new Map((configs || []).map(row => [pairKey(row.sheetId, row.tabName), row]));
-  const campaignMap = await cashReceiptRequirementsForTabs(pairs, {
+  const campaignMap = await cashReceiptRequirementsForRows(source, {
     client: db,
     strict: true,
     fresh: true,
@@ -48,15 +78,15 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
   const required = [];
   for (const row of source) {
     const pKey = pairKey(row.sheetId, row.tabName);
+    const rKey = rowKey(row.sheetId, row.tabName, row.rowIndex);
     const cfg = configMap.get(pKey) || {};
-    const campaignRequired = campaignMap.get(pKey) === true;
+    const campaignRequired = campaignMap.get(rKey) === true;
     const info = cashReceiptSlotInfo(
       cfg.captureSlots,
       cfg.incomeType,
       campaignRequired
     );
     const isReceiptTarget = campaignRequired || info.incomeSaysCashReceipt || !!info.slot;
-    const rKey = rowKey(row.sheetId, row.tabName, row.rowIndex);
     states.set(rKey, {
       required: isReceiptTarget,
       configured: !isReceiptTarget || !!(info.slot && info.slot.key),

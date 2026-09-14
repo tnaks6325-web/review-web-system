@@ -20,15 +20,14 @@ async function cashReceiptRequiredForTab({ sheetId, tabName, client } = {}) {
   try {
     const db = client || _db();
     const { rows } = await db.query(
-      `SELECT rc.cash_receipt_required
+      `SELECT BOOL_OR(rc.cash_receipt_required) AS cash_receipt_required
          FROM recruit_campaigns rc
          LEFT JOIN tab_configs tc
            ON tc.sheet_id = $1 AND tc.tab_name = $2
         WHERE rc.linked_sheet_id = $1
           AND (rc.linked_tab_name = $2
                OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
-        ORDER BY (rc.status = 'active') DESC, (rc.linked_tab_name = $2) DESC, rc.created_at DESC
-        LIMIT 1`,
+       `,
       [sheetId, tabName]
     );
     const v = rows.length ? rows[0].cash_receipt_required === true : null;
@@ -68,17 +67,13 @@ async function cashReceiptRequirementsForTabs(pairs, opts = {}) {
        SELECT r.sheet_id, r.tab_name, picked.cash_receipt_required
          FROM requested r
          LEFT JOIN LATERAL (
-           SELECT rc.cash_receipt_required
+           SELECT BOOL_OR(rc.cash_receipt_required) AS cash_receipt_required
              FROM recruit_campaigns rc
              LEFT JOIN tab_configs tc
                ON tc.sheet_id = r.sheet_id AND tc.tab_name = r.tab_name
             WHERE rc.linked_sheet_id = r.sheet_id
               AND (rc.linked_tab_name = r.tab_name
                    OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
-            ORDER BY (rc.status = 'active') DESC,
-                     (rc.linked_tab_name = r.tab_name) DESC,
-                     rc.created_at DESC
-            LIMIT 1
          ) picked ON TRUE`,
       [sheetIds, tabNames]
     );
@@ -100,7 +95,93 @@ async function cashReceiptRequirementsForTabs(pairs, opts = {}) {
   return out;
 }
 
+/**
+ * 지급 행별 공고 현영 설정. 주문/신청 원장으로 공고가 하나로 정해지면 그 값을 쓰고,
+ * 출처가 없거나 여러 공고로 갈리면 연결 공고 중 하나라도 현영인 경우 true로 닫는다.
+ */
+async function cashReceiptRequirementsForRows(rows, opts = {}) {
+  const strict = opts.strict === true;
+  const out = new Map();
+  const unique = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    if (!row || !row.sheetId || !row.tabName || !Number.isInteger(Number(row.rowIndex))) continue;
+    const key = `${row.sheetId}\u0000${row.tabName}\u0000${Number(row.rowIndex)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push({ sheetId: row.sheetId, tabName: row.tabName, rowIndex: Number(row.rowIndex), key });
+  }
+  if (!unique.length) return out;
+
+  try {
+    const db = opts.client || _db();
+    const { rows: found } = await db.query(
+      `WITH requested AS (
+         SELECT * FROM UNNEST($1::text[], $2::text[], $3::int[])
+           AS r(sheet_id, tab_name, row_index)
+       ), provenance AS (
+         SELECT DISTINCT r.sheet_id, r.tab_name, r.row_index, ca.campaign_id
+           FROM requested r
+           JOIN order_submissions os
+             ON os.sheet_id = r.sheet_id AND os.tab_name = r.tab_name
+            AND os.sheet_row = r.row_index AND os.deleted_at IS NULL
+           JOIN campaign_applications ca
+             ON (ca.id = os.campaign_application_id OR ca.order_submission_id = os.id)
+         UNION
+         SELECT DISTINCT r.sheet_id, r.tab_name, r.row_index, ca.campaign_id
+           FROM requested r
+           JOIN campaign_participants cp
+             ON cp.sheet_id = r.sheet_id AND cp.tab_name = r.tab_name AND cp.seq = r.row_index
+            AND cp.deleted_at IS NULL AND cp.active = TRUE
+           JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+           JOIN campaign_applications ca
+             ON (ca.id = os.campaign_application_id OR ca.order_submission_id = os.id)
+       ), exact AS (
+         SELECT p.sheet_id, p.tab_name, p.row_index,
+                COUNT(DISTINCT rc.id)::int AS campaign_count,
+                BOOL_OR(rc.cash_receipt_required) AS cash_receipt_required
+           FROM provenance p
+           JOIN recruit_campaigns rc ON rc.id = p.campaign_id
+          GROUP BY p.sheet_id, p.tab_name, p.row_index
+       ), linked AS (
+         SELECT r.sheet_id, r.tab_name, r.row_index,
+                COUNT(DISTINCT rc.id)::int AS campaign_count,
+                BOOL_OR(rc.cash_receipt_required) AS cash_receipt_required
+           FROM requested r
+           LEFT JOIN tab_configs tc
+             ON tc.sheet_id = r.sheet_id AND tc.tab_name = r.tab_name
+           LEFT JOIN recruit_campaigns rc
+             ON rc.linked_sheet_id = r.sheet_id
+            AND (rc.linked_tab_name = r.tab_name
+                 OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+          GROUP BY r.sheet_id, r.tab_name, r.row_index
+       )
+       SELECT r.sheet_id, r.tab_name, r.row_index,
+              CASE WHEN COALESCE(e.campaign_count, 0) > 0
+                   THEN e.cash_receipt_required ELSE l.cash_receipt_required END AS cash_receipt_required,
+              CASE WHEN COALESCE(e.campaign_count, 0) = 1 THEN 'exact'
+                   WHEN COALESCE(e.campaign_count, 0) > 1 THEN 'ambiguous_exact'
+                   WHEN COALESCE(l.campaign_count, 0) > 1 THEN 'ambiguous_tab'
+                   ELSE 'tab' END AS resolution
+         FROM requested r
+         LEFT JOIN exact e USING (sheet_id, tab_name, row_index)
+         LEFT JOIN linked l USING (sheet_id, tab_name, row_index)`,
+      [unique.map(r => r.sheetId), unique.map(r => r.tabName), unique.map(r => r.rowIndex)]
+    );
+    for (const row of found || []) {
+      out.set(`${row.sheet_id}\u0000${row.tab_name}\u0000${Number(row.row_index)}`,
+        row.cash_receipt_required == null ? null : row.cash_receipt_required === true);
+    }
+    for (const row of unique) if (!out.has(row.key)) out.set(row.key, null);
+  } catch (e) {
+    if (strict) throw e;
+    logger.warn(`[cashReceiptContext] 행별 공고 현금영수증 설정 조회 실패: ${e.message}`);
+    for (const row of unique) out.set(row.key, null);
+  }
+  return out;
+}
+
 module.exports = {
-  cashReceiptRequiredForTab, cashReceiptRequirementsForTabs,
+  cashReceiptRequiredForTab, cashReceiptRequirementsForTabs, cashReceiptRequirementsForRows,
   invalidateCashReceiptContext, __setPoolForTest,
 };

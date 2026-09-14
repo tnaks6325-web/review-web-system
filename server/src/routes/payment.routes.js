@@ -83,7 +83,7 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
       // 화면을 연 뒤 영수증이 무효화·이동될 수 있고 API를 직접 호출할 수도 있으므로,
       // 실제 입금 원장을 쓰는 같은 transaction 안에서 좌표 전부를 다시 검증한다.
       const receiptEligibleItems = await filterReceiptEligiblePaymentRows(client, items, { lock: true });
