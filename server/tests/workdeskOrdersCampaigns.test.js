@@ -126,11 +126,15 @@ t('★ 오류 메시지를 마스킹하지 않는다(관리자 도구는 실패 
 /* ── 2) 편집 판정 로직 ─────────────────────────────────────── */
 console.log('\n2) 편집 판정(workdeskEditors)');
 const WD = R('src/utils/workdeskEditors.js');
-t('★ master·AE는 명단 무관 허용', () => {
-  assert.ok(/role === 'master' \|\| role === 'staff'/.test(WD),
-    'AE가 이름 명단 없이 작업오더·모집공고를 편집해야 한다');
-  assert.ok(WD.indexOf("role === 'staff'") < WD.indexOf('await _loadSet()'),
+t('★ master·검증된 AE는 명단 무관 허용', () => {
+  assert.ok(/admin && admin\.ae === true/.test(WD),
+    '인트라넷 AE는 서명된 AE 클레임으로 허용해야 한다');
+  assert.ok(/role === 'staff' && admin && admin\.via !== 'intranet'/.test(WD),
+    '자체 staff_users AE 계정은 기존처럼 허용해야 한다');
+  assert.ok(WD.indexOf('admin.ae === true') < WD.indexOf('await _loadSet()'),
     'AE 허용은 명단 조회보다 먼저 끝나야 한다');
+  assert.ok(!/role === 'master' \|\| role === 'staff'/.test(WD),
+    '일반 인트라넷 staff까지 무조건 여는 우회가 있으면 안 된다');
 });
 t('★ 조회 실패는 읽기 전용으로 수렴(fail-closed)', () => {
   assert.ok(/if \(!set\) return false;/.test(WD), '명단을 못 읽으면 열지 말아야 한다');
