@@ -149,7 +149,10 @@ function seqPool(handlers) {
     let p = seqPool([{ rows: [] }]);
     FR.__setPoolForTest(p);
     assert.ok(/원장에 없는/.test((await FR.manualRoute({ fileId: 'F', target: 'receipt' })).error));
-    p = seqPool([{ rows: [{ file_id: 'F', slot_key: 'receipt', sheet_id: 's', tab_name: 't' }] }]);
+    p = seqPool([
+      { rows: [{ file_id: 'F', slot_key: 'receipt', sheet_id: 's', tab_name: 't' }] },
+      { rows: [{ folder_url: 'https://drive.google.com/drive/folders/REVIEW_BASE', capture_slots: null, income_type: '현영' }] },
+    ]);
     FR.__setPoolForTest(p);
     assert.ok(/이미 그 칸/.test((await FR.manualRoute({ fileId: 'F', target: 'receipt' })).error));
     ok('C1: 대상 화이트리스트·원장 부재·같은 칸 = 거부(이동 0)');
@@ -157,7 +160,9 @@ function seqPool(handlers) {
     // C2: 대상 칸 중복 = 거부(휴지통 금지 — 수동 경로에 파일 삭제 없음)
     p = seqPool([
       { rows: [{ file_id: 'F', file_name: 'f.png', sheet_id: 's', tab_name: 't', row_index: 3, reviewer_name: '김', slot_key: 'review', file_hash: 'H' }] },
-      { rows: [{ folder_url: 'https://drive.google.com/drive/folders/REVIEW_BASE', capture_slots: null, income_type: '현영' }] },
+      { rows: [{ folder_url: 'https://drive.google.com/drive/folders/REVIEW_BASE', capture_slots: [
+        { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' },
+      ], income_type: '현영' }] },
       { rows: [{ file_id: 'OTHER' }] },   // findSlotDuplicate 히트
     ]);
     FR.__setPoolForTest(p);
@@ -170,7 +175,9 @@ function seqPool(handlers) {
     _driveCalls.length = 0;
     p = seqPool([
       { rows: [{ file_id: 'F', file_name: 'f.png', sheet_id: 's', tab_name: 't', row_index: 3, reviewer_name: '김', slot_key: 'review', file_hash: 'H' }] },
-      { rows: [{ folder_url: 'https://drive.google.com/drive/folders/REVIEW_BASE', capture_slots: null, income_type: '현영' }] },
+      { rows: [{ folder_url: 'https://drive.google.com/drive/folders/REVIEW_BASE', capture_slots: [
+        { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' },
+      ], income_type: '현영' }] },
       { rows: [] },                        // 중복 없음
       { rows: [], rowCount: 1 },           // 원장 UPDATE
       { rows: [] },                        // recomputePrimary SELECT(0장 → 비움 UPDATE)
@@ -180,10 +187,11 @@ function seqPool(handlers) {
     const out = await FR.manualRoute({ fileId: 'F', target: 'receipt', by: '만두' });
     assert.strictEqual(out.ok, true);
     assert.strictEqual(out.from, 'review');
-    assert.strictEqual(out.to, 'receipt');
+    assert.strictEqual(out.to, 'slot2');
     assert.ok(_driveCalls.some(c => c[0] === 'move' && c[2] === 'RECEIPT_FOLDER'), '현영 서브폴더로 Drive 이동');
     const upd = p.calls.find(q => /SET routed_from_slot = COALESCE\(routed_from_slot, slot_key\)/.test(q.sql));
     assert.ok(upd, '★ 최초 출처 보존(COALESCE) — 되돌리기가 항상 원래 칸으로');
+    assert.strictEqual(upd.params[1], 'slot2', '수동 영수증 이동도 설정된 실제 슬롯 키로 저장');
     assert.strictEqual(upd.params[2], 'manual:만두', '분류 원장 표기 = manual:<이름>(정확도 통계의 재료)');
     ok('C3: 이동 시퀀스 — 자동분류와 같은 실행부(폴더·원장·대표·로그) + manual 표기');
     FR.__setPoolForTest(null);

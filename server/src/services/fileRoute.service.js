@@ -179,7 +179,7 @@ async function logRouteEvent({ eventType, severity = 'warn', resolved = false,
 
 /* ── 되돌리기 ─────────────────────────────────────────────────────── */
 
-/** 탭 설정 + 리뷰타입 + [리뷰] 폴더 ID + 현금영수증 서브폴더 라벨. */
+/** 탭 설정 + 리뷰타입 + [리뷰] 폴더 ID + 현금영수증 슬롯 키/라벨. */
 async function _tabRouteCtx(sheetId, tabName) {
   const driveService = require('./drive.service');
   const { rows } = await _db().query(
@@ -195,12 +195,18 @@ async function _tabRouteCtx(sheetId, tabName) {
   } catch (_) {}
   const reviewBaseFolderId = cfg.folder_url ? driveService.extractFolderIdFromUrl(cfg.folder_url) : null;
   let receiptLabel = null;
+  let receiptKey = null;
   try {
     const info = require('../utils/captureSlots')
       .cashReceiptSlotInfo(cfg.capture_slots, cfg.income_type, campaignCashReceipt, reviewType);
     receiptLabel = info.slot && info.slot.label;
+    receiptKey = info.slot && info.slot.key;
   } catch (_) {}
-  return { cfg, reviewType, campaignCashReceipt, reviewBaseFolderId, receiptLabel: receiptLabel || '현금영수증' };
+  return {
+    cfg, reviewType, campaignCashReceipt, reviewBaseFolderId,
+    receiptLabel: receiptLabel || '현금영수증',
+    receiptKey: receiptKey || 'receipt',
+  };
 }
 
 /**
@@ -445,15 +451,18 @@ async function manualRoute({ fileId, target, by = '' } = {}) {
     sub = rows[0];
   } catch (e) { return { ok: false, error: `원장 조회 실패: ${e.message}` }; }
   if (!sub) return { ok: false, error: '원장에 없는 파일이라 이동할 수 없습니다.' };
-  if (sub.slot_key === t) return { ok: false, error: '이미 그 칸에 있는 파일입니다.' };
-
   const ctx = await _tabRouteCtx(sub.sheet_id, sub.tab_name);
+  // UI/API target='receipt'는 폴더 종류이다. 원장에는 캠페인에 설정된 실제 슬롯 키
+  // (e.g. slot2)를 써야 중복 판정과 입금 자격 검사가 같은 제출물을 본다.
+  const targetSlot = t === 'receipt' ? ctx.receiptKey : t;
+  const targetLabel = t === 'receipt' ? ctx.receiptLabel : routeSlotLabel(targetSlot);
+  if (sub.slot_key === targetSlot) return { ok: false, error: '이미 그 칸에 있는 파일입니다.' };
   if ((t === 'review' || t === 'receipt') && !ctx.reviewBaseFolderId) {
     return { ok: false, error: '이 탭에 [리뷰] 폴더가 연결돼 있지 않아 이동할 수 없습니다.' };
   }
   const dup = await findSlotDuplicate({
     sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index,
-    reviewerName: sub.reviewer_name, toSlot: t, fileHash: sub.file_hash, fileId,
+    reviewerName: sub.reviewer_name, toSlot: targetSlot, fileHash: sub.file_hash, fileId,
   });
   if (dup) return { ok: false, error: '대상 칸에 같은 파일이 이미 있습니다 — 이동 대신 기존 파일을 확인해 주세요.' };
 
@@ -475,16 +484,16 @@ async function manualRoute({ fileId, target, by = '' } = {}) {
     `UPDATE review_submissions
         SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
             routed_at = NOW(), routed_by = $3
-      WHERE file_id = $1`, [fileId, t, 'manual:' + (by || 'admin')]);
+      WHERE file_id = $1`, [fileId, targetSlot, 'manual:' + (by || 'admin')]);
   await recomputePrimary({ sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index });
   await logRouteEvent({
     eventType: 'capture_routed', severity: 'warn', resolved: true,   // 사람이 한 행동 — 알림으로 쌓지 않는다
     sheetId: sub.sheet_id, tabName: sub.tab_name, reviewerName: sub.reviewer_name,
     message: `${sub.reviewer_name || '리뷰어'}님의 ${sub.row_index != null ? sub.row_index + '행 ' : ''}` +
-      `${routeSlotLabel(sub.slot_key)} 캡처를 ${by || '관리자'}님이 ${routeSlotLabel(t)} 폴더로 수동 분류했습니다.`,
-    context: { fileId, from: sub.slot_key, to: t, row: String(sub.row_index ?? ''), manual: true },
+      `${routeSlotLabel(sub.slot_key)} 캡처를 ${by || '관리자'}님이 ${targetLabel} 폴더로 수동 분류했습니다.`,
+    context: { fileId, from: sub.slot_key, to: targetSlot, row: String(sub.row_index ?? ''), manual: true },
   });
-  return { ok: true, from: sub.slot_key, to: t, sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index };
+  return { ok: true, from: sub.slot_key, to: targetSlot, sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index };
 }
 
 /**
