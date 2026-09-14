@@ -166,6 +166,9 @@ const fileRoute = require('../src/services/fileRoute.service');
     assert.ok(diag.includes('reviewBaseFolderId = targetFolderId'), '[리뷰] 기준 폴더를 서브폴더 진입 전에 보관');
     assert.ok(diag.includes('recomputePrimary({ sheetId, tabName, rowIndex: rowIdx })'), '라우팅 후 대표 이미지 재계산');
     assert.ok(diag.includes("r.slotKey || slot"), 'A-2 원장은 라우팅 반영 최종 슬롯으로 기록');
+    assert.ok(diag.includes("const toSlotKey = rd.toSlot === 'receipt' && _receiptInfo.slot?.key")
+      && diag.includes('toSlot: toSlotKey') && diag.includes('finalSlot = toSlotKey'),
+      '수동 slot2 현금영수증은 설정된 원장 key로 이동');
     assert.ok(diag.includes('markRouted({'), '이동 이력 기록(되돌리기 재료)');
     ok('E3: 원장 정합(최종 슬롯·이동 이력·대표 재계산) 배선');
 
@@ -256,6 +259,8 @@ const fileRoute = require('../src/services/fileRoute.service');
     assert.ok(fr.includes('routed_from_slot IS NULL'), '이미 라우팅된 파일 재라우팅 금지(핑퐁 방지)');
     assert.ok(fr.includes("slot_key = ANY($3::text[])") && fr.includes("['review', 'receipt', receiptSlotKey]"),
       '스윕 대상은 review/receipt와 수동 현금영수증 슬롯만');
+    assert.ok(/const toSlot = rd\.toSlot === 'receipt' \? receiptSlotKey : rd\.toSlot/.test(fr),
+      '소급 스윕도 현금영수증 역할을 수동 slot2 원장 key로 바꾼다');
     assert.ok(/const backTarget = isCashReceiptSlot\([\s\S]{0,260}\) \? 'receipt' : 'review'/.test(fr),
       '수동 slot2 현금영수증의 이동 되돌리기도 현금영수증 폴더로 복귀');
     assert.ok(fr.includes('if (dryRun) return'), '스윕 dryRun = 무변경 반환');

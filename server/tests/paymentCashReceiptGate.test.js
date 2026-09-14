@@ -88,6 +88,9 @@ const db = {
     '입금 후보는 지급 가능 2,000건을 채울 때까지 페이지 이동해야 한다');
   assert.match(paymentRoute, /filterReceiptEligiblePaymentRows\(pool, rows\)/,
     '기존 입금목록 API가 현금영수증 공용 게이트를 거치지 않는다');
+  const markDone = paymentRoute.match(/router\.post\('\/mark-done'[\s\S]*?\n}\);/)?.[0] || '';
+  assert.match(markDone, /BEGIN[\s\S]*filterReceiptEligiblePaymentRows\(client, items\)[\s\S]*CASH_RECEIPT_NOT_VERIFIED[\s\S]*recordDeposits\(client, receiptEligibleItems/,
+    '입금 완료 API는 같은 transaction 안에서 현금영수증을 다시 검증해야 한다');
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
@@ -96,6 +99,8 @@ const db = {
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
   assert.match(inspectService, /checks\.receiptValidation = receiptVerdict\?\.status === 'ok'[\s\S]*verdict: 'pass'[\s\S]*verdict: 'fail'[\s\S]*verdict: 'warn'/,
     '영수증 판정 통과/불일치/판정불가가 검수 원장에 분리 기록돼야 한다');
+  assert.match(inspectService, /\(!ENABLED && requestedSlotRole !== 'receipt'\)/,
+    '일반 리뷰검수를 꺼도 현금영수증 지급 판정 원장은 기록해야 한다');
   assert.match(uploadRoute, /const captureVerdictsByFileId = new Map\(\)[\s\S]*captureVerdictsByFileId\.set\(uploaded\.id, verdict\)[\s\S]*captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
 
@@ -117,5 +122,5 @@ const db = {
   assert.strictEqual((await inspectReceipt('skipped')).status, 'suspect', '판정 불가는 내부 확인 전 지급 보류');
   inspect.__setPoolForTest(null);
 
-  console.log('payment cash receipt gate: 21 passed');
+  console.log('payment cash receipt gate: 23 passed');
 })().catch(err => { console.error(err); process.exit(1); });

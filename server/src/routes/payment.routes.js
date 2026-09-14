@@ -84,7 +84,18 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      updated = await recordDeposits(client, items, { by: req.admin?.name || '' });
+      // 화면을 연 뒤 영수증이 무효화·이동될 수 있고 API를 직접 호출할 수도 있으므로,
+      // 실제 입금 원장을 쓰는 같은 transaction 안에서 좌표 전부를 다시 검증한다.
+      const receiptEligibleItems = await filterReceiptEligiblePaymentRows(client, items);
+      if (receiptEligibleItems.length !== items.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          ok: false,
+          code: 'CASH_RECEIPT_NOT_VERIFIED',
+          error: '현금영수증 제출·검수가 완료되지 않은 항목이 있어 입금 처리하지 않았습니다. 목록을 새로고침해 주세요.',
+        });
+      }
+      updated = await recordDeposits(client, receiptEligibleItems, { by: req.admin?.name || '' });
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');

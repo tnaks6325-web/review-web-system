@@ -352,13 +352,14 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
       });
       const rd = routeDecision({ slotKey: slotRole, verdict, hasReceiptSlot, hasRouteSamples, expectedChannel });
       if (rd.action !== 'route') continue;
+      const toSlot = rd.toSlot === 'receipt' ? receiptSlotKey : rd.toSlot;
       const dup = await findSlotDuplicate({
         sheetId, tabName, rowIndex: s.row_index, reviewerName: s.reviewer_name,
-        toSlot: rd.toSlot, fileHash: s.file_hash || inspect.hashBase64(b64), fileId: s.file_id,
+        toSlot, fileHash: s.file_hash || inspect.hashBase64(b64), fileId: s.file_id,
       });
       plans.push({
         fileId: s.file_id, fileName: s.file_name, rowIndex: s.row_index,
-        reviewerName: s.reviewer_name, fromSlot: s.slot_key, toSlot: rd.toSlot, target: rd.target,
+        reviewerName: s.reviewer_name, fromSlot: s.slot_key, toSlot, target: rd.target,
         got: verdict.got, confidence: verdict.confidence,
         duplicate: dup ? { matchFileId: dup.file_id } : null,
       });

@@ -1171,12 +1171,15 @@ async function inspectSubmission({
   slotRole = slotKey, captureVerdict = null,
   ...opts
 } = {}) {
-  if (!ENABLED || !fileId || !sheetId || !tabName) return null;
+  const requestedSlotRole = String(slotRole || slotKey || 'review');
+  // 일반 리뷰검수를 꺼도 현금영수증 지급 증빙은 반드시 기록한다. 업로드는 허용하되
+  // 판정 결과가 없으면 내부 확인 전까지 지급만 보류하는 독립 안전장치다.
+  if (!fileId || !sheetId || !tabName || (!ENABLED && requestedSlotRole !== 'receipt')) return null;
   try {
     const hash = fileHash || hashBase64(base64);
 
     // 리뷰 슬롯이 아니면 형식 판정만 남기고 끝낸다(영수증엔 상품명·본문 대조가 무의미).
-    const effectiveSlotRole = String(slotRole || slotKey || 'review');
+    const effectiveSlotRole = requestedSlotRole;
     const isReview = effectiveSlotRole === 'review';
     const isReceipt = effectiveSlotRole === 'receipt';
 

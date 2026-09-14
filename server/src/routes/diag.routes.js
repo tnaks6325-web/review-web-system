@@ -1928,6 +1928,10 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
               hasRouteSamples: _hasRouteSamples, expectedChannel: _expectedChannel,
             });
             if (rd.action === 'route') {
+              // 자동 분류 규칙은 receipt라는 역할명을 돌려주지만, 수동 슬롯의 실제 원장 key는
+              // slot2일 수 있다. 폴더·중복·제출 원장은 설정된 key 한 벌로 맞춘다.
+              const toSlotKey = rd.toSlot === 'receipt' && _receiptInfo.slot?.key
+                ? String(_receiptInfo.slot.key) : rd.toSlot;
               const toLabel = _routeSlotLabel(rd.toSlot);
               const gotLabel = _routeSlotLabel(verdict.got) || verdict.got;
               const pct = Math.round((verdict.confidence || 0) * 100);
@@ -1944,7 +1948,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                 const _fh = _riSvc.hashBase64(file.data);
                 const dup = await _fileRoute.findSlotDuplicate({
                   sheetId, tabName, rowIndex, reviewerName,
-                  toSlot: rd.toSlot, fileHash: _fh, fileId: uploaded.id,
+                  toSlot: toSlotKey, fileHash: _fh, fileId: uploaded.id,
                 });
                 if (dup && _routeRejectEnabled()) {
                   // 중복 반려 — 방금 파일을 휴지통으로(영구삭제 아님, 30일 복구창)
@@ -1957,7 +1961,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                     eventType: 'capture_dup_rejected', severity: 'warn',
                     sheetId, tabName, reviewerName,
                     message: `${reviewerName || '리뷰어'}님이 ${rowIndex ? rowIndex + '행 ' : ''}${_routeSlotLabel(slot)} 칸에 올린 파일이 ${toLabel} 칸의 기존 제출과 동일 파일(SHA-256 일치)이라 휴지통으로 옮기고 반려했습니다.`,
-                    context: { fileId: uploaded.id, matchFileId: dup.file_id, from: slot, to: rd.toSlot, row: String(rowIndex ?? '') },
+                    context: { fileId: uploaded.id, matchFileId: dup.file_id, from: slot, to: toSlotKey, row: String(rowIndex ?? '') },
                   });
                 } else if (!dup) {
                   const toFolderId = await _fileRoute.resolveTargetFolder({
@@ -1965,9 +1969,9 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                   });
                   if (toFolderId) {
                     await driveService.moveFile(uploaded.id, toFolderId, targetFolderId);
-                    finalSlot = rd.toSlot;
+                    finalSlot = toSlotKey;
                     routed = {
-                      from: slot, to: rd.toSlot, toLabel,
+                      from: slot, to: toSlotKey, toLabel,
                       message: `첨부하신 이미지가 ${gotLabel}(으)로 확인되어 ${toLabel} ${rd.target === 'capture' ? '폴더' : '칸'}으로 옮겨 드렸어요.`
                         + (slot === 'review' ? ' 리뷰 캡처를 여기에 다시 올려주세요.' : ''),
                     };
@@ -1975,7 +1979,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                       eventType: 'capture_routed', severity: 'warn',
                       sheetId, tabName, reviewerName,
                       message: `${reviewerName || '리뷰어'}님이 ${rowIndex ? rowIndex + '행 ' : ''}${_routeSlotLabel(slot)} 칸에 올린 이미지가 ${gotLabel}(AI 확신 ${pct}%)으로 판정되어 ${toLabel} 폴더로 자동 이동했습니다. 리뷰어 화면에는 안내가 표시됐습니다.`,
-                      context: { fileId: uploaded.id, from: slot, to: rd.toSlot, row: String(rowIndex ?? '') },
+                      context: { fileId: uploaded.id, from: slot, to: toSlotKey, row: String(rowIndex ?? '') },
                     });
                   }
                 }
