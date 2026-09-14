@@ -175,6 +175,12 @@ const fileRoute = require('../src/services/fileRoute.service');
     assert.ok(diag.includes('markRouted({'), '이동 이력 기록(되돌리기 재료)');
     ok('E3: 원장 정합(최종 슬롯·이동 이력·대표 재계산) 배선');
 
+    const fr = read('src/services/fileRoute.service.js');
+    assert.ok(/cashReceiptRequirementsForRows\([\s\S]*subs\.map\(s => \(\{ sheetId, tabName, rowIndex/.test(fr)
+      && /hasReceiptSlot: rowHasReceiptSlot/.test(fr)
+      && /receiptSlotKey: rowReceiptSlotKey/.test(fr),
+      '소급 자동정리도 제출 행의 공고 원본으로 영수증 이동 가능 여부를 판정');
+
     // 샘플 조립 단일화 — diag 에서 loadSamplesFor/loadReceiptSamplesFor 직접 호출 금지
     assert.ok(!/loadSamplesFor\(/.test(diag) && !/loadReceiptSamplesFor\(/.test(diag),
       'diag.routes 의 예시 조립은 submissionSamples 한 곳이어야 함(캐시 지문 분열 = AI 콜 2배)');
@@ -262,9 +268,9 @@ const fileRoute = require('../src/services/fileRoute.service');
     assert.ok(fr.includes('routed_from_slot IS NULL'), '이미 라우팅된 파일 재라우팅 금지(핑퐁 방지)');
     assert.ok(fr.includes("slot_key = ANY($3::text[])") && fr.includes("['review', 'receipt', receiptSlotKey]"),
       '스윕 대상은 review/receipt와 수동 현금영수증 슬롯만');
-    assert.ok(/const toSlot = rd\.toSlot === 'receipt' \? receiptSlotKey : rd\.toSlot/.test(fr),
+    assert.ok(/const toSlot = rd\.toSlot === 'receipt' \? rowReceiptSlotKey : rd\.toSlot/.test(fr),
       '소급 스윕도 현금영수증 역할을 수동 slot2 원장 key로 바꾼다');
-    assert.ok(/const movedToReceipt = p\.toSlot === receiptSlotKey[\s\S]*receipt: movedToReceipt[\s\S]*reinspectReceiptFile\(\{ fileId: p\.fileId \}\)/.test(fr),
+    assert.ok(/const movedToReceipt = p\.toSlot === p\.receiptSlotKey[\s\S]*receipt: movedToReceipt[\s\S]*reinspectReceiptFile\(\{ fileId: p\.fileId \}\)/.test(fr),
       '소급 스윕이 현영 칸으로 옮긴 파일도 기존 검수를 무효화하고 receipt 재검수한다');
     assert.ok(/const backTarget = isCashReceiptSlot\([\s\S]{0,260}\) \? 'receipt' : 'review'/.test(fr),
       '수동 slot2 현금영수증의 이동 되돌리기도 현금영수증 폴더로 복귀');

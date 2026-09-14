@@ -565,8 +565,15 @@ router.post('/review', async (req, res, next) => {
       // ★ 087 2차: 슬롯 파생은 리뷰타입까지 봐야 한다 — 넷 중 하나만 빠지면
       //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
       const _rt = await reviewTypeForTab({ sheetId, tabName });
-      const _crRequired = await require('../services/cashReceiptContext.service')
-        .cashReceiptRequiredForTab({ sheetId, tabName });
+      const _cashContext = require('../services/cashReceiptContext.service');
+      const _crByRow = await _cashContext.cashReceiptRequirementsForRows([
+        { sheetId, tabName, rowIndex: Number(rowIndex) },
+      ]);
+      let _crRequired = _crByRow.values().next().value;
+      // 주문/신청 provenance가 없는 구형 행만 기존 탭 단위 판정으로 닫는다.
+      if (_crRequired == null) {
+        _crRequired = await _cashContext.cashReceiptRequiredForTab({ sheetId, tabName });
+      }
       const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt, _crRequired === true);
       const requiresReviewHistory = required.includes('review');
       // ★★ 슬롯 모드 판정은 required 개수가 아니라 **화면 슬롯(effectiveCaptureSlots)** 기준.

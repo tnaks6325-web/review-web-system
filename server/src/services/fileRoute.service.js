@@ -406,13 +406,6 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
   };
   const routeKinds = new Set((await inspect.loadRouteSamples().catch(() => [])).map(s => s.kind));
   const hasRouteSamples = routeKinds.has('order_capture') && routeKinds.has('purchase_confirm');
-  let hasReceiptSlot = false;
-  try {
-    const { hasCashReceiptSlot } = require('../utils/captureSlots');
-    hasReceiptSlot = hasCashReceiptSlot(
-      ctx.cfg.capture_slots, ctx.cfg.income_type, ctx.campaignCashReceipt, ctx.reviewType);
-  } catch (_) {}
-
   const receiptSlotKey = (() => {
     try {
       const info = require('../utils/captureSlots').cashReceiptSlotInfo(
@@ -436,6 +429,15 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
     return { ok: false, error: `원장 조회 실패(migration 091 적용 확인): ${e.message}`, code: 'not_ready' };
   }
 
+  // 재사용 탭은 공고별 현영 설정이 섞일 수 있으므로 각 제출 행의 주문/신청 provenance를 먼저 본다.
+  let receiptRequirementsByRow = new Map();
+  try {
+    receiptRequirementsByRow = await require('./cashReceiptContext.service').cashReceiptRequirementsForRows(
+      subs.map(s => ({ sheetId, tabName, rowIndex: Number(s.row_index) }))
+    );
+  } catch (_) {}
+  let hasReceiptSlot = false; // 응답 요약: 이번 스윕 후보 중 하나라도 영수증 슬롯이 있는가
+
   const plans = [];
   const errors = [];
   let scanned = 0;
@@ -445,14 +447,28 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
       const f = await driveService.downloadFile(s.file_id);
       if (!f || !f.buffer) { continue; }
       const b64 = f.buffer.toString('base64');
-      const slotRole = s.slot_key === receiptSlotKey ? 'receipt' : s.slot_key;
+      const rowKey = `${sheetId}\u0000${tabName}\u0000${Number(s.row_index)}`;
+      const rowRequirement = receiptRequirementsByRow.get(rowKey);
+      const rowCampaignCashReceipt = rowRequirement == null
+        ? ctx.campaignCashReceipt
+        : rowRequirement === true;
+      const { hasCashReceiptSlot, cashReceiptSlotInfo } = require('../utils/captureSlots');
+      const rowReceiptInfo = cashReceiptSlotInfo(
+        ctx.cfg.capture_slots, ctx.cfg.income_type, rowCampaignCashReceipt, ctx.reviewType);
+      const rowReceiptSlotKey = (rowReceiptInfo.slot && rowReceiptInfo.slot.key) || receiptSlotKey;
+      const rowHasReceiptSlot = hasCashReceiptSlot(
+        ctx.cfg.capture_slots, ctx.cfg.income_type, rowCampaignCashReceipt, ctx.reviewType);
+      hasReceiptSlot = hasReceiptSlot || rowHasReceiptSlot;
+      const slotRole = s.slot_key === rowReceiptSlotKey ? 'receipt' : s.slot_key;
       const verdict = await verifyCapture({
         base64: b64, mimeType: f.mimeType || 'image/jpeg', slotKey: slotRole,
         reviewType: ctx.reviewType, samples: samplesBySlot[slotRole] || [],
       });
-      const rd = routeDecision({ slotKey: slotRole, verdict, hasReceiptSlot, hasRouteSamples, expectedChannel });
+      const rd = routeDecision({
+        slotKey: slotRole, verdict, hasReceiptSlot: rowHasReceiptSlot, hasRouteSamples, expectedChannel,
+      });
       if (rd.action !== 'route') continue;
-      const toSlot = rd.toSlot === 'receipt' ? receiptSlotKey : rd.toSlot;
+      const toSlot = rd.toSlot === 'receipt' ? rowReceiptSlotKey : rd.toSlot;
       const dup = await findSlotDuplicate({
         sheetId, tabName, rowIndex: s.row_index, reviewerName: s.reviewer_name,
         toSlot, fileHash: s.file_hash || inspect.hashBase64(b64), fileId: s.file_id,
@@ -460,6 +476,7 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
       plans.push({
         fileId: s.file_id, fileName: s.file_name, rowIndex: s.row_index,
         reviewerName: s.reviewer_name, fromSlot: s.slot_key, toSlot, target: rd.target,
+        receiptSlotKey: rowReceiptSlotKey,
         got: verdict.got, confidence: verdict.confidence,
         duplicate: dup ? { matchFileId: dup.file_id } : null,
       });
@@ -498,7 +515,7 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
         const cur = await driveService.getFileParents(p.fileId);
         const parent = (cur.parents || [])[0] || null;
         if (parent !== toFolderId) await driveService.moveFile(p.fileId, toFolderId, parent);
-        const movedToReceipt = p.toSlot === receiptSlotKey;
+        const movedToReceipt = p.toSlot === p.receiptSlotKey;
         await _recordRouteMove({
           fileId: p.fileId, targetSlot: p.toSlot, routedBy: 'sweep:' + by,
           receipt: movedToReceipt, requireUnrouted: true,

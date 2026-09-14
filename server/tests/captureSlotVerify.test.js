@@ -85,7 +85,7 @@ ok('완료 판정(submit)이 공용 유틸 사용 — 자체 구현 없음',
 ok('완료 판정이 income_type·리뷰타입을 함께 읽는다(안 읽으면 현영/구매확정 슬롯을 못 봄)',
   /tc\.income_type AS income_type/.test(submit)
   && /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt, _crRequired === true\)/.test(submit)
-  && /cashReceiptRequiredForTab/.test(submit));
+  && /cashReceiptRequirementsForRows/.test(submit));
 ok('검색 응답이 파생 슬롯을 내려준다',
   /cashReceiptRequirementsForRows/.test(search)
   && /effectiveCaptureSlots\([\s\S]{0,220}_crMap\.get\(cashReceiptSubmissionRowKey/.test(search)
