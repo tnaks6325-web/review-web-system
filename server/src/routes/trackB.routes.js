@@ -1689,8 +1689,8 @@ async function _logScopeTabs(req) {
 /* ══════════════════════════════════════════════════════════════
    작업오더 · 모집공고 — 리뷰웹시스템[3버전] 상단탭
 
-   ★ **열람은 내부인 전원**(master/admin/staff — 광고주 차단), **편집은 이름 명단**
-     (`utils/workdeskEditors.js`, env `WORKDESK_EDITORS`)만. 사용자 확정 정책이다.
+   ★ **열람은 내부인 전원**(master/admin/staff — 광고주 차단). AE(staff)는 작업오더 접수와
+     모집공고 운영을 모두 편집할 수 있다. admin은 기존 이름 명단(`utils/workdeskEditors.js`)을 따른다.
      작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
      공고 발행·수정은 정원·금액을 바꾸므로, 보는 사람 전부에게 열 수 없다.
    ★ 라우트는 **기존 서비스·핸들러를 그대로 호출**한다(로직 복제 금지) — 여기서는
@@ -1698,27 +1698,33 @@ async function _logScopeTabs(req) {
      통신하고 인트라넷 SSO 토큰도 그 경로로만 격리되기 때문이다.
    ══════════════════════════════════════════════════════════════ */
 const wdEditors = require('../utils/workdeskEditors');
-const { canEdit, editorOnlyMiddleware } = wdEditors;
+const { canEdit, canManageEditors, editorOnlyMiddleware, editorManagerMiddleware } = wdEditors;
 
-// 이 계정이 편집 가능한지 — 프론트가 버튼 노출을 정하는 데 쓴다(서버 게이트가 최종 방어)
+// 이 계정이 편집 가능한지 — AE는 역할로 허용, admin은 기존 명단 판정(서버 게이트가 최종 방어)
 router.get('/perm', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
-    res.json({ ok: true, canEdit: await canEdit(req.admin), role: _role(req), name: (req.admin && req.admin.name) || '' });
+    res.json({
+      ok: true,
+      canEdit: await canEdit(req.admin),
+      canManageEditors: canManageEditors(req.admin),
+      role: _role(req),
+      name: (req.admin && req.admin.name) || '',
+    });
   } catch (err) { next(err); }
 });
 
-// ── 편집 허용명단 관리 — 내부 담당자(master/admin/staff)(후보는 인트라넷 직원DB에서 고른다) ──
-router.get('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
+// ── 편집 허용명단 관리 — master/admin/확인된 AE(후보는 인트라넷 직원DB에서 고른다) ──
+router.get('/workdesk-editors', authMiddleware, internalMiddleware, editorManagerMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await wdEditors.listEditors() }); } catch (err) { next(err); }
 });
-router.post('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
+router.post('/workdesk-editors', authMiddleware, internalMiddleware, editorManagerMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
     const out = await wdEditors.addEditor({ name: b.name, username: b.username, dept: b.dept, by: _by(req) });
     res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
-router.delete('/workdesk-editors/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
+router.delete('/workdesk-editors/:id', authMiddleware, internalMiddleware, editorManagerMiddleware, async (req, res, next) => {
   try {
     const out = await wdEditors.removeEditor(req.params.id);
     res.status(out.ok ? 200 : 404).json(out);
@@ -1776,7 +1782,7 @@ const _adminEditHandler = _delegate(_orderRoutes, 'put', '/admin/edit');
    ★ 실행부는 AE 제출과 **같은 핸들러**(`POST /api/order/submit`) — 오더를 만드는 코드를 새로
      쓰지 않는다(사본 0). 값은 화면이 채운다.
    ★ 인트라넷 SSO 토큰(via:'intranet')은 `/api/order/*` 에 도달 불가라 여기로 위임한다.
-   ★ 게이트는 접수·발행과 같은 2단(내부인 열람 · **편집 허용명단만 생성**) — 원본(`authMiddleware`)
+   ★ 게이트는 접수·발행과 같은 2단(내부인 열람 · **AE 또는 편집 허용 admin**) — 원본(`authMiddleware`)
      보다 **좁다**(프록시가 원본보다 넓어지면 안 된다). */
 const _woSubmitHandler = _delegate(_orderRoutes, 'post', '/submit');
 
@@ -1790,7 +1796,7 @@ router.put('/work-orders/status', authMiddleware, internalMiddleware, editorOnly
 router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _updateHandler(req, res, next));
 // 관리자 수동 수정 — 인트라넷 SSO 토큰(via:'intranet')은 /api/order/* 에 도달 불가라 여기로 위임.
-// 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · 편집 허용명단만 수정).
+// 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · AE 또는 편집 허용 admin).
 router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _adminEditHandler(req, res, next));
 router.post('/work-orders/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
@@ -1801,7 +1807,7 @@ router.post('/work-orders/submit', authMiddleware, internalMiddleware, editorOnl
 //   authMiddleware 에서 `/api/trackb/*` 밖으로 나갈 수 없어 **작업보드에서 누르면 403**이었다
 //   ("인트라넷 연동 계정은 리뷰웹시스템[3버전](Track B)에서만 사용할 수 있습니다" — 붙여넣은 양식이
 //   서버에 닿지도 못하고 화면엔 '분해 실패'로 보인다). ⭐ 별표·설정 탭과 같은 재기준 누락 계열.
-//   ★ 권한 = 접수·발행과 같은 2단(내부인 열람 · 편집 허용명단만 실행) — 이 창구는 리뷰어 등록·
+//   ★ 권한 = 접수·발행과 같은 2단(내부인 열람 · AE 또는 편집 허용 admin) — 이 창구는 리뷰어 등록·
 //     주문 원장 기록·정원 차감·시트 쓰기를 일으키므로 보는 사람 전부에게 열지 않는다.
 //   ★ 로직 복제 0 — 기존 핸들러를 그대로 태운다(원본 라우트·게이트는 무변경).
 const _moRoutes = require('./manualOrder.routes');
@@ -1853,9 +1859,9 @@ router.get('/campaigns/:id/activity-log', authMiddleware, internalMiddleware, (r
    빈 칸으로 열려 "저장했더니 값이 날아간" 것처럼 보인다. 여기서는 authMiddleware 를 태워 `req.admin` 을
    세운 뒤 같은 핸들러에 위임하므로 내부인은 **전체 행**을 받는다. */
 /* ★★ 편집 권한자에게는 **전체 편집 페이로드**(전체 행 + 원본 옵션 + 리뷰비 구간)를 준다.
-   원본 핸들러는 JWT role 이 admin/master 일 때만 전체 행을 주는데, 편집 허용명단에는
-   `staff`(AE)도 들어갈 수 있다 — 그 사람은 **수정은 되면서** 공개 화이트리스트 뷰를 받아
-   폼이 work_detail·연결탭·정원·옵션을 빈 기본값으로 채우고, 저장하면 기존 설정이 조용히
+   원본 핸들러는 JWT role 이 admin/master 일 때만 전체 행을 주는데, `staff`(AE)도 편집한다.
+   AE가 공개 화이트리스트 뷰를 받으면 **수정은 되면서** 폼이
+   work_detail·연결탭·정원·옵션을 빈 기본값으로 채우고, 저장하면 기존 설정이 조용히
    지워진다(0·빈값·options:[]). 그래서 canEdit 이면 신뢰 플래그를 세워 위임한다.
    ★ 판정 실패는 공개 뷰(fail-closed) — 모르면 더 주지 않는다. 편집은 서버 게이트가 막는다. */
 router.get('/campaigns/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -1878,14 +1884,14 @@ router.get('/campaigns/:id/preview', authMiddleware, internalMiddleware, (req, r
   _campHandlers.preview(req, res, next));
 router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.dismiss(req, res, next));
-// 127 블로그 승인제 — 승인/반려는 수동확정(confirm)과 같은 2단 게이트(내부인 + 편집 허용명단).
+// 127 블로그 승인제 — 승인/반려는 수동확정(confirm)과 같은 2단 게이트(AE 또는 편집 허용 admin).
 router.post('/campaigns/:id/blog-approve', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.blogApprove(req, res, next));
 router.post('/campaigns/:id/blog-reject', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.blogReject(req, res, next));
-/* 130 보관/보관 해제 — **게시 토글·삭제·발행과 같은 2단 게이트**(내부인 + 편집 허용명단).
+/* 130 보관/보관 해제 — **게시 토글·삭제·발행과 같은 2단 게이트**(AE 또는 편집 허용 admin).
    ★ 원본(`/api/campaign/admin/:id/archive`)은 adminOrMaster 이므로 이 경로가 더 넓다 —
-     같은 파일의 status·delete·create 프록시가 이미 그 계약이고(공고 관리는 편집 허용명단이
+     같은 파일의 status·delete·create 프록시가 이미 그 계약이고(공고 관리는 AE와 편집 허용 admin이
      담당), 보관은 **되돌릴 수 있고** 살아 있는 참여가 있으면 서비스가 거부한다(fail-closed).
    ★ 명단에 없는 계정은 여기서 막히고, 관리자 대시보드는 종전 adminOrMaster 경로를 쓴다. */
 router.post('/campaigns/:id/archive', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>

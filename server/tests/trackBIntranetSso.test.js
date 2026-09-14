@@ -36,6 +36,20 @@ async function run() {
   assert.equal(payload.name, '김수만', '1a: JWT name=display_name');
   assert.equal(payload.via, 'intranet', '1a: 출처 표기');
   assert.equal(payload.ir, 'admin', '1a: ir(인트라넷 원천 role) 감사 클레임');
+  assert.equal(payload.ae, false, '1a: 부서 정보가 없으면 AE 권한을 추측하지 않는다');
+
+  // 1a0: 일반 staff 역할과 실제 AE 권한을 분리한다. department/part는 인사DB 응답이라
+  // 서버가 판정해 JWT에 boolean으로 서명하고, 이후 편집 게이트는 이 값만 신뢰한다.
+  r = await auth.loginIntranet('kim.ae', 'pw123',
+    mockFetch(200, { username: 'kim.ae', display_name: '김수만', role: 'user', department: 'AE' }));
+  let aePayload = jwt.verify(r.token, process.env.JWT_SECRET);
+  assert.equal(r.ae, true, '1a0: AE 부서 계정은 AE 권한 응답');
+  assert.equal(aePayload.ae, true, '1a0: AE 여부를 JWT에 서명');
+  r = await auth.loginIntranet('employee', 'pw123',
+    mockFetch(200, { username: 'employee', display_name: '일반직원', role: 'user', department: '경영지원' }));
+  aePayload = jwt.verify(r.token, process.env.JWT_SECRET);
+  assert.equal(aePayload.role, 'staff', '1a0: 일반 직원도 기존 role=staff 계약 유지');
+  assert.equal(aePayload.ae, false, '1a0: 일반 직원은 AE 권한 없음');
 
   // 1a1: 현재 인트라넷 API는 사용자 레코드를 { data: {...} }로 감싼다.
   // 이 응답을 최상위 레코드로만 읽으면 실제 계정도 "비밀번호 오류"로 오인된다.

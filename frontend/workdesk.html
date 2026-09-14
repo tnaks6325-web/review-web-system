@@ -2633,7 +2633,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
                         advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
-                        favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,campsUnavailable:false,finFilter:'' });
+                        favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'' });
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
   const r=await fetch(API_BASE+path,o);
@@ -2675,6 +2675,7 @@ function parseTabMeta(name){ const s=String(name||''); const m={};
   return m; }
 
 let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:null,   // view '' = 첫 진입 기본(홈/광고주 workdesk)은 renderShell 이 결정
+              canManageEditors:null,             // 서버가 판정한 편집 허용명단 관리 권한
               favs:null, _favLoaded:false,   // 작업목록 즐겨찾기(localStorage 영속)
               railTab:'thread',              // 우측 레일 탭(기본=협업/댓글)
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
@@ -2857,7 +2858,7 @@ function logout(){
                         advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,
                         finUnavailable:false,statsUnavailable:false,dailyUnavailable:false,finTruncated:false,worktabsUnavailable:false,
-                        campEdit:null,campsUnavailable:false,finFilter:'' });
+                        campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'' });
   _NAVCS.cs=null; _NAVCS.re=null;   // 합산 뱃지도 초기화 — 안 하면 이전 계정의 건수가 다음 로그인에 남는다
   _NAVRI.n=null;                    // 리뷰검수 값도 같은 이유(홈 타일·브리핑이 이 값을 본다)
   boot(); }
@@ -2866,7 +2867,7 @@ function logout(){
    ★ 사용자 확정(2026-08): 아래 기능은 AE(staff)도 쓴다 —
      날짜별 인원 조절/차수 · 참여 리뷰어 게이트 · 관측(parity·cutover 판정) ·
      업체 이관/접속링크/광고주 계정/담당AE 지정/거래처 삭제 ·
-     주문 삭제·번호 배정·수동 리뷰제출·줄 정리 · 편집 허용명단 관리.
+     주문 삭제·번호 배정·수동 리뷰제출·줄 정리. 편집 허용명단 관리는 관리자·확인된 AE만 허용한다.
    ★ 서버 게이트를 함께 바꾸지 않으면 "버튼은 보이는데 403" 인 막다른 길이 된다 —
      이 판정과 라우트의 미들웨어는 반드시 같이 움직인다. */
 function _isInternalRole(){ const r = STATE.role; return r==='master' || r==='admin' || r==='staff'; }
@@ -4878,7 +4879,7 @@ function _campBtnHtml(t,i){
   if(!cs.length){
     return STATE.campEdit
       ? `<button class="wbl-b cmp none" onclick="${stop}openTabCampaign(${i})" title="연결된 모집공고가 없습니다 — 이 작업의 탭이 채워진 발행 화면을 엽니다">＋공고발행</button>`
-      : `<button class="wbl-b cmp none" disabled title="연결된 모집공고가 없습니다(발행은 편집 허용명단 담당자만)">공고 없음</button>`;
+      : `<button class="wbl-b cmp none" disabled title="연결된 모집공고가 없습니다">공고 없음</button>`;
   }
   const best=cs.reduce((a,c)=>Math.min(a,_campRank(c)),2);
   const dot=best===0?'open':(best===1?'pre':'');
@@ -4887,7 +4888,7 @@ function _campBtnHtml(t,i){
     : `${cs[0].title||'(제목 없음)'}${_campLabel(cs[0])?' · '+_campLabel(cs[0]):''}`;
   return `<button class="wbl-b cmp" onclick="${stop}openTabCampaign(${i})" title="${esc(tip)}"><i class="wbl-cdot ${dot}"></i>공고${cs.length>1?' '+cs.length:''}</button>`;
 }
-/** 편집 허용명단(workdesk_editors) — 홈 전용 플래그.
+/** 작업오더·모집공고 편집 권한 — 홈 전용 플래그.
  *  ★ `STATE.canEdit` 를 쓰지 않는다: 그 값은 작업보드 그리드 편집(role!=='advertiser')에도 쓰여
  *    작업 탭을 한 번 열면 덮어써진다 → 홈에서 발행 버튼이 잘못 보인다. 서버가 최종 방어지만
  *    "눌러도 아무 일 없는 버튼"은 두지 않는다. */
@@ -4903,7 +4904,7 @@ async function openTabCampaign(i){
   const cs=Array.isArray(t.campaigns)?t.campaigns:[];
   if(cs.length>1) return _campPickerOpen(i);
   if(cs.length===1) return _campOpenModal(cs[0].id);
-  if(!(await _loadCampPerm())){ toast('공고 발행 권한이 없습니다(편집 허용명단).'); return; }
+  if(!(await _loadCampPerm())){ toast('공고 발행 권한이 없습니다.'); return; }
   /* 홈 작업목록은 탭 요약만 갖고 있어, 그것만 넘기면 제목·모집인원·일건수·가이드 등
      작업오더 프리필이 전부 비었다. 연결된 작업오더 원본을 한 번 찾아 공용 프리필 함수로
      조립한다. 목록을 이미 열었으면 재요청하지 않는다. */
@@ -6042,7 +6043,7 @@ function renderWorkdesk(wd){
   if(gridMode) _fitGrid();   // 표폭 = 고정폭 합
   if(!STATE._fitResizeBound){ STATE._fitResizeBound=true; let t=null;
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
-  _emoSyncBtn();   // 외부모집 수동제출 버튼 — 편집 허용명단이 도착하면 그 자리에 채운다(AE 포함)
+  _emoSyncBtn();   // 외부모집 수동제출 버튼 — 서버 편집 권한이 도착하면 그 자리에 채운다
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
   // 상단 폴더 3버튼 재료(그 탭 한 줄만 — 홈 stats 가 있으면 요청 0).
@@ -6846,10 +6847,10 @@ function _cndBankModal(cd){
 function _cndBkPick(el){ document.querySelectorAll('#cndBkChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 function _cndRtPick(el){ document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 /* 공고 발행 — 이 작업(탭)·작업오더 프리필로 발행 모달을 연다. 발행하면 CAMP_ON_SAVED 훅이
-   작업 조건을 다시 읽어 그 값이 카드에 반영된다. 발행 권한(편집 허용명단)은 서버가 최종 방어. */
+   작업 조건을 다시 읽어 그 값이 카드에 반영된다. 발행 권한은 서버가 최종 방어. */
 async function _cndPublish(cd){
   if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
-  if(!(await _loadCampPerm())){ _toast('공고 발행은 편집 허용명단 담당자만 할 수 있습니다.'); return; }
+  if(!(await _loadCampPerm())){ _toast('공고 발행 권한이 없습니다.'); return; }
   const t=STATE.cur; if(!t) return;
   if(cd.workOrderId){
     const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
@@ -9980,7 +9981,8 @@ function _modal(title, bodyHtml){
 /* ══════════════════════════════════════════════════════════════
    작업오더 · 모집공고 (상단탭)
 
-   ★ 열람은 내부인 전원(관리자·AE), **편집은 이름 명단**(서버 `workdesk_editors`)만.
+   ★ 열람은 내부인 전원(관리자·AE). AE는 작업오더·모집공고를 모두 편집하고,
+     admin은 서버 `workdesk_editors` 명단을 따른다.
      작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
      공고 발행·수정은 정원·금액을 바꾸므로 보는 사람 전부에게 열 수 없다.
      프론트는 버튼만 감추고 **최종 판정은 서버**(editorOnlyMiddleware)가 한다.
@@ -9993,9 +9995,10 @@ function _modal(title, bodyHtml){
 function _woLabel(st){ return (window.WO_LABELS && window.WO_LABELS[st]) || st || ''; }
 
 async function _loadPerm(){
-  if(STATE.canEdit!=null) return STATE.canEdit;
+  if(STATE.canEdit!=null && STATE.canManageEditors!=null) return STATE.canEdit;
   const r=await api('/api/trackb/perm');
   STATE.canEdit = !!(r && r.ok && r.canEdit);
+  STATE.canManageEditors = !!(r && r.ok && r.canManageEditors);
   return STATE.canEdit;
 }
 
@@ -10034,10 +10037,10 @@ function _renderWoHead(){
       onkeydown="if(event.key==='Enter'){STATE.woq=this.value.trim();_loadOrders();}">
     <button class="btn" onclick="_loadOrders()">새로고침</button>
     ${STATE.canEdit?'<button class="btn" onclick="makeTestWorkOrder()" title="접수 → 모집공고 흐름을 눌러 보려고 만드는 연습용 오더입니다">🧪 테스트 작업오더</button>':''}
-    ${_isInternalRole()?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
+    ${STATE.canManageEditors?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
     <div class="ovnote">AE가 제출한 작업오더입니다. <b>접수</b>하면 작업이 시스템에 등록되고 인덱스가 만들어집니다
       (구글시트탭URL이 없는 오더는 <b>시스템 작업표</b>가 자동 생성됩니다) —
-      신규 탭이 등록되는 유일한 경로라 <b>편집 허용명단</b>에 있는 담당자만 누를 수 있습니다.
+      신규 탭이 등록되는 유일한 경로이며 <b>AE는 바로 처리</b>할 수 있습니다.
       ${STATE.canEdit?'':'<b style="color:var(--muted)">(현재 계정은 열람 전용)</b>'}</div>`;
 }
 /* ══════════════════════════════════════════════════════════════
@@ -10143,7 +10146,7 @@ function _renderWoBody(){
       <tr class="woldetail" id="woldetail-${i}" style="display:none"><td colspan="8">
         <div class="wolexpand" id="wolbox-${i}"></div></td></tr>`).join('')}</tbody></table></div>`;
 }
-/** 접수·작업표·모집공고·보완&반려 — 편집 허용명단만. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지).
+/** 접수·작업표·모집공고·보완&반려 — AE 또는 편집 허용 admin. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지).
  *  ★ '상세' 버튼은 두지 않는다 — 행을 누르면 상세가 아래로 펼쳐지므로 하는 일이 겹친다.
  *  ★ 접수는 **하기/완료를 눈으로 가른다**: 접수 가능 상태면 파란 [접수하기],
  *    이미 접수된 오더는 초록 [✓ 접수완료](비활성 + 등록된 탭 이름을 툴팁으로).
@@ -10182,7 +10185,7 @@ function _woEditActions(o){
     +` <button class="btn xs" onclick="event.stopPropagation();_woAdminEdit('${id}')" title="작업오더 내용을 직접 수정합니다 (인트라넷 보낸오더 카드에도 반영)">✏ 관리자 수정</button>`;
 }
 /* ✏ 관리자 수정 — 공유 모달(js/work-order-detail.js woAdminEditModal) 한 벌.
-   저장 경로만 이 호스트 것(/api/trackb/work-orders/edit — 편집 허용명단 게이트)을 주입한다. */
+   저장 경로만 이 호스트 것(/api/trackb/work-orders/edit — AE 또는 편집 허용 admin)을 주입한다. */
 function _woAdminEdit(id){
   const o=(STATE.wo||[]).find(x=>x.id===id);
   if(!o){ _toast('오더를 찾을 수 없습니다.'); return; }
@@ -10610,7 +10613,7 @@ function _rcRenderHead(total){
     ${_taskDelAllowed()?'<button class="btn" onclick="openOrphanCampaigns()" title="작업이 삭제됐는데 남아 있는 공고를 찾아 정리합니다(무엇이 지워질지 먼저 보여줍니다)">🧹 지워진 작업의 공고</button>':''}
     <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
     <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
-      ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용 — 발행·수정은 편집 허용명단에 있는 담당자만 가능합니다.</b>'}</div>`;
+      ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용입니다.</b>'}</div>`;
 }
 
 
@@ -10692,10 +10695,11 @@ async function _ocGo(){
   if(typeof loadRecruitList==='function') loadRecruitList();
 }
 
-/* ── 편집 허용명단 관리(master/admin 전용) ─────────────────────
+/* ── 편집 허용명단 관리(관리자·확인된 AE 전용) ────────────────
    후보는 **인트라넷 직원DB**에서 고른다(담당AE 자동완성과 같은 프록시 재사용).
    자유 입력도 허용 — 인트라넷에 없는 계정(관리자 로그인 등)도 넣을 수 있어야 한다. */
 async function openEditorList(){
+  if(!STATE.canManageEditors){ _toast('편집 허용명단은 관리자 또는 확인된 AE만 관리할 수 있습니다.'); return; }
   _modal('👥 편집 허용명단',
     `<div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:11px">
        여기 있는 담당자만 <b>작업오더 접수</b>·<b>모집공고 발행/수정</b>을 할 수 있습니다.
@@ -13685,7 +13689,7 @@ async function _homeLoad(){
       STATE.tabs=[]; _finAbsorb(r); STATE._finStatsAt=Date.now();   // 흡수 = 실패 플래그·잘림 고지까지 함께 반영
       _finRenderList();   // 목록 렌더가 히어로 "진행 중 작업" 숫자까지 함께 쓴다(단일 writer)
     }),
-    // 편집 허용명단(공고 발행 가능 여부) — 도착하면 [＋공고발행] 노출이 확정된다(그 전엔 비활성 표기).
+    // 서버 편집 권한 — 도착하면 [＋공고발행] 노출이 확정된다(그 전엔 비활성 표기).
     //   ★ typeof 가드는 레포 관용구(_homeSyncBadges 와 같은 이유): 런타임엔 항상 있지만 **블록 단위
     //     vm 추출 회귀가드**(workdeskHome)의 sandbox 에는 이 함수가 없어 가드 없이는 그 테스트가 죽는다.
     (typeof _loadCampPerm==='function'?_loadCampPerm():Promise.resolve()).then(()=>{
@@ -16366,8 +16370,8 @@ async function cleanupAutoTestRecord(rowId){
   toast('자동 테스트 기록을 모두 제거했습니다.');
   await reloadWorkdesk();
 }
-/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = 내부인 + 편집 허용명단)와 1:1.
- *  ★ AE(staff)도 명단에 있으면 실행할 수 있다(사용자 확정 2026-08-20). 명단 판정이 아직 안 왔으면
+/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = AE 또는 편집 허용 admin)와 1:1.
+ *  ★ AE(staff)는 실행할 수 있다. 서버 권한 판정이 아직 안 왔으면
  *    버튼을 그리지 않는다 — "눌러도 403 나는 버튼"을 만들지 않는다(도착하면 `_emoSyncBtn` 이 채운다). */
 function canOpenExternalManualOrder(){
   if(STATE.role==='master'||STATE.role==='admin') return true;
@@ -16375,7 +16379,7 @@ function canOpenExternalManualOrder(){
 }
 function _emoBtnHtml(){ return canOpenExternalManualOrder()
   ? `<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>` : ''; }
-/** 편집 허용명단 도착 후 버튼 자리를 채운다(홈의 [＋공고발행]과 같은 재료·같은 1회 조회). */
+/** 서버 편집 권한 도착 후 버튼 자리를 채운다(홈의 [＋공고발행]과 같은 재료·같은 1회 조회). */
 function _emoSyncBtn(){
   if(!_isInternalRole()) return;
   const fill=()=>{ const b=document.getElementById('emoBtnBox'); if(b) b.innerHTML=_emoBtnHtml(); };
@@ -18099,7 +18103,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
 <script src="js/recruit-modal.js?v=20260914-recruit-thumb-paste"></script>
 <!-- 외부모집 구매양식 수동제출 — 관리자 대시보드와 같은 공용 모달. 서버 경로만 Track B
      네임스페이스로 돌린다(인트라넷 SSO 토큰은 /api/manual-order/* 에 도달 자체가 불가능
-     → /api/trackb/manual-order/* 프록시, 권한은 편집 허용명단). -->
+     → /api/trackb/manual-order/* 프록시, 권한은 AE 또는 편집 허용 admin). -->
 <script>window.MANUAL_ORDER_API = '/api/trackb/manual-order';</script>
 <script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
 <script src="js/index-recruit.js?v=20260914-recruit-thumb-paste"></script>

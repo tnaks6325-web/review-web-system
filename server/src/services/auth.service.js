@@ -148,6 +148,10 @@ async function loginIntranet(name, pw, _fetch = fetch) {
   const isAdminUser = _csv(process.env.INTRANET_SSO_ADMIN_USERS).includes(iUser);
   const isAdminGroup = _matchGroups(process.env.INTRANET_SSO_ADMIN_GROUPS);
   const isAdmin = isAdminUser || isAdminGroup;
+  // AE 권한은 인사DB의 부서/파트로 따로 서명한다. 모든 일반 직원을 `staff`로 묶는 JWT role만으로
+  // 작업오더 접수·공고 삭제 같은 권한을 열면 비AE 직원도 통과한다. 기본은 정확한 `AE` 부서이며,
+  // 조직명이 다르면 INTRANET_SSO_AE_GROUPS(부서 또는 부서|파트 CSV)로 지정한다.
+  const isAe = _matchGroups(process.env.INTRANET_SSO_AE_GROUPS || 'AE');
   // 진입 게이트 — 우선순위: 승격(admin) 은 항상 통과 → ① 그룹(부서|파트) 규칙(설정 시) → ② role 규칙(① 미설정 시) → 둘 다 미설정 = 전 직원.
   //   INTRANET_SSO_ALLOWED_GROUPS: 로그인 시점 인트라넷 직원DB의 department/part 로 판정(개인 수동등록 불필요·인사이동 자동 반영).
   if (!isAdmin) {
@@ -164,14 +168,15 @@ async function loginIntranet(name, pw, _fetch = fetch) {
     }
   }
   const role = isAdmin ? 'admin' : 'staff';
-  // iu = 인트라넷 username(감사 추적용 원천 식별자), ir = 인트라넷 원천 role(감사).
+  // iu = 인트라넷 username(감사 추적용 원천 식별자), ir = 인트라넷 원천 role(감사),
+  // ae = 인사DB department/part로 판정한 AE 여부(권한 판정용 서명 클레임).
   //   스코프 키는 display_name(=inad_pm 매칭) — 인트라넷 직원DB의 실명은 관리자 관할(HR 데이터) 가정(부품4/CLAUDE.md).
   const token = jwt.sign(
-    { name: display, role, via: 'intranet', iu: String(body.username), ir: iRole },
+    { name: display, role, via: 'intranet', iu: String(body.username), ir: iRole, ae: isAe },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
   );
-  return { success: true, name: display, role, via: 'intranet', token };
+  return { success: true, name: display, role, via: 'intranet', ae: isAe, token };
 }
 
 // ═══════════════════════════════════════════════════════════
