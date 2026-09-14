@@ -9,6 +9,7 @@
  */
 const { cashReceiptSlotInfo } = require('../utils/captureSlots');
 const { cashReceiptRequirementsForTabs } = require('./cashReceiptContext.service');
+const { MIN_CONFIDENCE: RECEIPT_MIN_CONFIDENCE } = require('./captureVerify.service');
 
 const pairKey = (sheetId, tabName) => `${sheetId}\u0000${tabName}`;
 const rowKey = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
@@ -95,12 +96,35 @@ async function cashReceiptSubmissionStates(db, rows) {
            AND rs.row_index = r.row_index
            AND rs.slot_key = r.receipt_key
            AND btrim(COALESCE(rs.file_id, '')) <> ''
+           AND EXISTS (
+             SELECT 1
+               FROM review_inspections ri
+              WHERE ri.file_id = rs.file_id
+                AND (
+                  -- 신규 제출: 업로드 시 수행한 영수증 전용 판정이 성공했고 다른 검수도 통과.
+                  (ri.status = 'pass'
+                   AND ri.checks->'receiptValidation'->>'verdict' = 'pass')
+                  -- AI가 판정하지 못한 건은 내부 담당자가 실제 파일을 확인해 정상 종결해야 한다.
+                  OR (ri.status = 'resolved' AND ri.resolution = 'ok')
+                  -- 배포 전 검수 원장 호환: 영수증으로 분류된 고신뢰 통과 건만 인정한다.
+                  OR (NOT (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation')
+                      AND ri.status = 'pass'
+                      AND ri.checks->'format'->>'kind' = 'receipt'
+                      AND COALESCE(ri.ai_confidence, 0) >= $5
+                      AND NOT EXISTS (
+                        SELECT 1 FROM reviewer_event_logs rel
+                         WHERE rel.event_type = 'capture_mismatch'
+                           AND rel.context->>'fileId' = rs.file_id
+                      ))
+                )
+           )
       )`,
     [
       required.map(r => r.sheetId),
       required.map(r => r.tabName),
       required.map(r => r.rowIndex),
       required.map(r => r.receiptKey),
+      RECEIPT_MIN_CONFIDENCE,
     ]
   );
   const submitted = new Set((submittedRows || []).map(row => rowKey(row.sheetId, row.tabName, row.rowIndex)));

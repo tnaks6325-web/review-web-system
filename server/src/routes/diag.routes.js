@@ -2136,6 +2136,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
             fileId: r.fileId, fileHash: _hash,
             sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: _finalSlotKey,
             slotRole: _finalSlotRole,
+            // 자동 이동으로 슬롯 역할이 바뀌었으면 옛 슬롯 기준 판정을 재사용하지 않는다.
+            captureVerdict: _finalSlotRole === _slotRole ? verdict : null,
             samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
           });
           // ★ 첨부 즉시 경고(1차)를 지나쳐 제출된 중복은 **리뷰어에게 그 자리에서** 한 번 더 알린다.

@@ -1168,7 +1168,7 @@ async function findAuthorReuse({ authorMask, fileId, sheetId, tabName, reviewerN
  */
 async function inspectSubmission({
   base64, mimeType, fileId, fileHash, sheetId, tabName, rowIndex, reviewerName, slotKey = 'review',
-  slotRole = slotKey,
+  slotRole = slotKey, captureVerdict = null,
   ...opts
 } = {}) {
   if (!ENABLED || !fileId || !sheetId || !tabName) return null;
@@ -1176,7 +1176,9 @@ async function inspectSubmission({
     const hash = fileHash || hashBase64(base64);
 
     // 리뷰 슬롯이 아니면 형식 판정만 남기고 끝낸다(영수증엔 상품명·본문 대조가 무의미).
-    const isReview = String(slotRole || slotKey || 'review') === 'review';
+    const effectiveSlotRole = String(slotRole || slotKey || 'review');
+    const isReview = effectiveSlotRole === 'review';
+    const isReceipt = effectiveSlotRole === 'receipt';
 
     // ★ 기대값을 **먼저** 읽는다 — 예시이미지 선택에 기대 채널이 필요하고,
     //   같은 samples 를 써야 review-upload 의 verifyCapture 와 캐시가 공유된다.
@@ -1193,16 +1195,41 @@ async function inspectSubmission({
     const effReviewType = resolveReviewType({ rowOption: _rowType, campaignType: exp.reviewType });
 
     let cls = null;
+    let inspectionSamples = opts.samples || [];
     if (base64) {
       try {
         // ★ 첨부 시점 1차 필터가 이미 같은 이미지를 판정했다면 캐시 히트 = AI 콜 0
         const { classifySubmissionImage } = require('./gemini.service');
-        const samples = opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: slotRole });
-        cls = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples });
+        inspectionSamples = opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: slotRole });
+        cls = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples: inspectionSamples });
       } catch (_) { cls = null; }   // fail-open
     }
 
     const checks = {};
+
+    // 현금영수증은 입금 증빙이므로 일반 리뷰의 fail-open 판정과 분리한다. 업로드 자체는
+    // 계속 허용하되, 성공 판정 또는 내부 확인 전까지 입금 게이트가 닫히도록 검수 원장에 남긴다.
+    if (isReceipt) {
+      let receiptVerdict = captureVerdict;
+      if (!receiptVerdict && base64) {
+        let companyBusinessNo = '';
+        try {
+          const { rows } = await _db().query("SELECT value FROM app_settings WHERE key = 'company_business_no'");
+          companyBusinessNo = rows[0]?.value || '';
+        } catch (_) {}
+        try {
+          receiptVerdict = await require('./captureVerify.service').verifyCapture({
+            base64, mimeType: mimeType || 'image/jpeg', slotKey: 'receipt',
+            companyBusinessNo, samples: inspectionSamples,
+          });
+        } catch (_) { receiptVerdict = null; }
+      }
+      checks.receiptValidation = receiptVerdict?.status === 'ok'
+        ? { verdict: 'pass', status: 'ok', kind: receiptVerdict.got || 'receipt', confidence: receiptVerdict.confidence || 0 }
+        : receiptVerdict?.status === 'mismatch'
+          ? { verdict: 'fail', status: 'mismatch', expected: receiptVerdict.expected || 'receipt', got: receiptVerdict.got || '', confidence: receiptVerdict.confidence || 0 }
+          : { verdict: 'warn', status: 'unverified', reason: 'receipt_validation_unavailable' };
+    }
 
     // ① 형식·채널
     // ★★ 구매확정 작업(reviewType 'confirm')의 리뷰 자리는 **구매확정 완료 화면이 정상 제출**이다 —

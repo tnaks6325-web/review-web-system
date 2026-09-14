@@ -45,6 +45,13 @@ const db = {
     if (/FROM review_submissions rs/.test(sql)) {
       assert.deepStrictEqual(params[2], [2, 3, 4, 5, 6], '영수증 대상 행만 원장 대조해야 한다');
       assert.deepStrictEqual(params[3], ['receipt', 'receipt', 'slot2', 'slot2', 'receipt'], '수동 슬롯 key도 보존해야 한다');
+      assert.strictEqual(params[4], 0.7, '과거 검수 원장은 영수증 최소 확신도 이상만 인정해야 한다');
+      assert.match(sql, /ri\.checks->'receiptValidation'->>'verdict' = 'pass'/,
+        '신규 영수증은 전용 판정 통과 기록이 있어야 한다');
+      assert.match(sql, /ri\.status = 'resolved' AND ri\.resolution = 'ok'/,
+        'AI 판정 불가 건은 내부 정상 승인 경로가 있어야 한다');
+      assert.match(sql, /NOT EXISTS \([\s\S]*reviewer_event_logs rel[\s\S]*capture_mismatch/,
+        '과거 영수증 분류 건도 불일치 경고 파일은 지급하면 안 된다');
       return { rows: [
         { sheetId: 'S', tabName: 'cash', rowIndex: 3 },
         { sheetId: 'S', tabName: 'manual', rowIndex: 4 },
@@ -85,5 +92,30 @@ const db = {
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
 
-  console.log('payment cash receipt gate: 12 passed');
+  const inspectService = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
+  const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
+  assert.match(inspectService, /checks\.receiptValidation = receiptVerdict\?\.status === 'ok'[\s\S]*verdict: 'pass'[\s\S]*verdict: 'fail'[\s\S]*verdict: 'warn'/,
+    '영수증 판정 통과/불일치/판정불가가 검수 원장에 분리 기록돼야 한다');
+  assert.match(uploadRoute, /captureVerdict: _finalSlotRole === _slotRole \? verdict : null/,
+    '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
+
+  process.env.REVIEW_INSPECT = '1';
+  const inspect = require('../src/services/reviewInspect.service');
+  inspect.__setPoolForTest({
+    query: async sql => {
+      if (/INSERT INTO review_inspections/.test(sql)) return { rows: [], rowCount: 1 };
+      throw new Error('unexpected inspection query: ' + sql);
+    },
+  });
+  const inspectReceipt = status => inspect.inspectSubmission({
+    fileId: `receipt-${status}`, sheetId: 'S', tabName: 'cash', rowIndex: 9,
+    slotKey: 'receipt', slotRole: 'receipt',
+    captureVerdict: { status, expected: 'receipt', got: status === 'ok' ? 'receipt' : 'review', confidence: 0.96 },
+  });
+  assert.strictEqual((await inspectReceipt('ok')).status, 'pass', '영수증 판정 통과는 지급 검수 통과');
+  assert.strictEqual((await inspectReceipt('mismatch')).status, 'fail', '영수증 판정 불일치는 지급 검수 실패');
+  assert.strictEqual((await inspectReceipt('skipped')).status, 'suspect', '판정 불가는 내부 확인 전 지급 보류');
+  inspect.__setPoolForTest(null);
+
+  console.log('payment cash receipt gate: 21 passed');
 })().catch(err => { console.error(err); process.exit(1); });
