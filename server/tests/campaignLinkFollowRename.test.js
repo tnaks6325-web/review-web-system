@@ -91,8 +91,9 @@ console.log('── A. 실행부 ──');
     && /UPDATE review_inspections/.test(renameSvc)
     && /UPDATE order_submissions/.test(renameSvc)
     && /UPDATE campaign_participants/.test(renameSvc));
-  t('★ 미다운로드 pending 회차만 새 탭 좌표로 옮긴다',
-    /UPDATE payment_batch_items i[\s\S]*i\.status = 'pending'[\s\S]*COALESCE\(b\.download_count, 0\) = 0/.test(renameSvc));
+  t('★ 다운로드 여부와 무관하게 모든 pending 회차를 새 탭 좌표로 옮긴다(중복 회차 차단)',
+    /UPDATE payment_batch_items[\s\S]*status = 'pending'/.test(renameSvc)
+    && !/UPDATE payment_batch_items[\s\S]{0,300}download_count/.test(renameSvc));
   t('보정은 URL 교정 앞에 들어간다(같은 묶음 안)', seg(ib) && seg(isc));
 
   console.log('── C. 판정 함수는 건드리지 않았다 ──');

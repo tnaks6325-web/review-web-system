@@ -164,6 +164,9 @@ const fileRoute = require('../src/services/fileRoute.service');
     ok('E2: 이동·반려 시 기존 불일치 알림 대체(도배 방지)');
 
     assert.ok(diag.includes('reviewBaseFolderId = targetFolderId'), '[리뷰] 기준 폴더를 서브폴더 진입 전에 보관');
+    assert.ok(/cashReceiptRequirementsForRows\(\[[\s\S]{0,180}rowIndex: _rowNo/.test(diag)
+      && /_byRow\.get\(`\$\{sheetId\}\\u0000\$\{tabName\}\\u0000\$\{_rowNo\}`\)/.test(diag),
+      '혼합 재사용 탭의 영수증 자동 이동 여부는 업로드 행의 공고 원본으로 판정');
     assert.ok(diag.includes('recomputePrimary({ sheetId, tabName, rowIndex: rowIdx })'), '라우팅 후 대표 이미지 재계산');
     assert.ok(diag.includes("r.slotKey || slot"), 'A-2 원장은 라우팅 반영 최종 슬롯으로 기록');
     assert.ok(diag.includes("const toSlotKey = rd.toSlot === 'receipt' && _receiptInfo.slot?.key")

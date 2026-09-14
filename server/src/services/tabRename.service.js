@@ -50,15 +50,14 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
               updated_at = NOW()
         WHERE sheet_id = $3 AND tab_name = $4`, withGid);
 
-    // 아직 한 번도 내려받지 않은 회차만 현재 작업 좌표다. 이미 내려받은 회차는 당시 스냅샷을 보존한다.
+    // 입금 전 pending 항목은 다운로드 여부와 무관하게 현재 행의 동일성 좌표를 따라간다.
+    // 이미 만든 이체 파일의 표시명은 그 파일 자체가 스냅샷으로 보존한다. DB 좌표를 옛 이름에
+    // 남기면 활성 회차 제외 조인이 끊겨 같은 행을 두 번째 회차에 넣을 수 있다.
     const payment = await client.query(
-      `UPDATE payment_batch_items i
+      `UPDATE payment_batch_items
           SET tab_name = $1
-         FROM payment_batches b
-        WHERE i.batch_id = b.id
-          AND i.sheet_id = $2 AND i.tab_name = $3
-          AND i.status = 'pending'
-          AND COALESCE(b.download_count, 0) = 0`, common);
+        WHERE sheet_id = $2 AND tab_name = $3
+          AND status = 'pending'`, common);
 
     const im = await client.query(
       `UPDATE index_master

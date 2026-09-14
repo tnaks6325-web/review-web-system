@@ -1725,11 +1725,22 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   fail-soft(null = 종전 동작).
     let _tabReviewType = null;
     try { _tabReviewType = await reviewTypeForTab({ sheetId, tabName }); } catch (_) {}
-    let _campaignCashReceipt = false;
+    let _campaignCashReceipt = null;
     try {
-      _campaignCashReceipt = (await require('../services/cashReceiptContext.service')
-        .cashReceiptRequiredForTab({ sheetId, tabName })) === true;
+      const _cashContext = require('../services/cashReceiptContext.service');
+      const _rowNo = Number(rowIndex);
+      if (Number.isInteger(_rowNo)) {
+        const _byRow = await _cashContext.cashReceiptRequirementsForRows([
+          { sheetId, tabName, rowIndex: _rowNo },
+        ]);
+        _campaignCashReceipt = _byRow.get(`${sheetId}\u0000${tabName}\u0000${_rowNo}`);
+      }
+      // 원본 행이 없거나 행별 판정이 실패한 구형 제출만 기존 탭 단위 보수 판정으로 폴백한다.
+      if (_campaignCashReceipt == null) {
+        _campaignCashReceipt = await _cashContext.cashReceiptRequiredForTab({ sheetId, tabName });
+      }
     } catch (_) {}
+    _campaignCashReceipt = _campaignCashReceipt === true;
     /* ★ 행 단위 리뷰타입(리뷰옵션 칸) — AI 기대 화면 종류(verifyCapture)에만 쓴다.
        혼합 탭에서 구매확정 행의 캡처가 "리뷰 화면 아님"으로 몰리지 않게 한다.
        ★ 폴더 라벨(slotLabelOf)은 **탭 값 그대로** — 폴더 이름이 행마다 갈리면 안 된다. */
