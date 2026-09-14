@@ -1047,17 +1047,32 @@ async function createOrderLedgerEntry(input) {
       orderSubmissionId = ins.rows[0].id;
       dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
       await client.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
-      // 신청 행에서 이미 확정한 (소유자, 실제참여자) 쌍을 같은 트랜잭션으로 주문원장에 복사한다.
-      // phone8 재해석이나 이름 재매칭을 하지 않아, 이후 이름/번호가 바뀌어도 제출 당시 신원이 흔들리지 않는다.
-      await client.query(
-        `UPDATE order_submissions os
-            SET owner_reviewer_id = ca.owner_reviewer_id,
-                participant_identity_id = ca.participant_identity_id
-           FROM campaign_applications ca
-          WHERE os.id = $1 AND ca.id = $2
-            AND ca.owner_reviewer_id IS NOT NULL AND ca.participant_identity_id IS NOT NULL`,
-        [orderSubmissionId, campaignHold.applicationId]
-      );
+      // 명의 게이트가 검증한 소유자 UUID+참여 명의 해시를 같은 트랜잭션으로 고정한다.
+      // 구버전 호출은 신청행의 코드 UUID가 모두 있을 때만 종전처럼 복사한다.
+      if (campaignHold.identityBinding?.ownerReviewerId && campaignHold.identityBinding?.participantIdentityKeyHash) {
+        await client.query(
+          `UPDATE order_submissions
+              SET owner_reviewer_id = $3::uuid,
+                  participant_identity_id = $4::uuid,
+                  participant_identity_key_hash = $5
+            WHERE id = $1
+              AND EXISTS (SELECT 1 FROM campaign_applications ca WHERE ca.id = $2)`,
+          [orderSubmissionId, campaignHold.applicationId,
+           campaignHold.identityBinding.ownerReviewerId,
+           campaignHold.identityBinding.participantIdentityId || null,
+           campaignHold.identityBinding.participantIdentityKeyHash]
+        );
+      } else {
+        await client.query(
+          `UPDATE order_submissions os
+              SET owner_reviewer_id = ca.owner_reviewer_id,
+                  participant_identity_id = ca.participant_identity_id
+             FROM campaign_applications ca
+            WHERE os.id = $1 AND ca.id = $2
+              AND ca.owner_reviewer_id IS NOT NULL AND ca.participant_identity_id IS NOT NULL`,
+          [orderSubmissionId, campaignHold.applicationId]
+        );
+      }
       await client.query('SAVEPOINT hold_confirm');
       try {
         const { confirmHoldInTx } = require('./campaignHold.service'); // 지연 require(순환 방지 — 기존 패턴)

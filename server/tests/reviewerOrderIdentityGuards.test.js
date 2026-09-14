@@ -12,6 +12,9 @@ const corsMiddleware = read('src/middleware/cors.middleware.js');
 const diagRoutes = read('src/routes/diag.routes.js');
 const gemini = read('src/services/gemini.service.js');
 const migration = read('migrations/147_reviewer_shopping_identity_match.sql');
+const suggestionMigration = read('migrations/157_order_info_suggestions.sql');
+const suggestionBindingMigration = read('migrations/158_order_info_identity_binding.sql');
+const serverIndex = read('index.js');
 const appJs = read('../frontend/js/search-app.js');
 const searchCss = read('../frontend/css/search.css');
 const campaign = read('../frontend/campaign.html');
@@ -87,6 +90,7 @@ ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입�
   && /\.of-field-control>\.of-input(?:,|\{)/.test(searchCss));
 ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순서를 바꾸지 않는다',
   (appJs.match(/const option = document\.createElement\("button"\)/g) || []).length === 2
+  && (appJs.match(/document\.createElement\("button"\)/g) || []).length >= 4
   && /option\.textContent =/.test(appJs)
   && !/<select class="of-saved-info-select"/.test(appJs)
   && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 2);
@@ -133,6 +137,40 @@ ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화
   && /holdCtx\?\.verified && holdCtx\.isSub/.test(submitRoutes)
   && /PARTICIPANT_PHONE_INVALID/.test(service)
   && /PARTICIPANT_PHONE_INVALID/.test(submitRoutes));
+ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가 모두 맞는 원장만 조회한다',
+  /async function loadOrderInfoSuggestions\(context, db = pool\)/.test(service)
+  && /os\.owner_reviewer_id = \$1::uuid/.test(service)
+  && /os\.participant_identity_key_hash = \$2/.test(service)
+  && /ca\.owner_reviewer_id = \$1::uuid/.test(service)
+  && /ca\.participant_identity_id = \$3::uuid/.test(service)
+  && !/SELECT COUNT\(\*\) FROM reviewers r WHERE r\.phone8/.test(service)
+  && /os\.deleted_at IS NULL/.test(service)
+  && /os\.source = 'order_submit'/.test(service));
+ok('추천 조합은 ID와 같은 주소 정규화를 쓰고 UUID 조회는 인덱스 경로로 분리한다',
+  /WITH eligible_orders AS/.test(service)
+  && /TRANSLATE\(BTRIM\(os\.address\), '\(\)\[\],\.\/·', ' {8}'\)/.test(service)
+  && /idx_campaign_apps_order_info_identity/.test(suggestionMigration)
+  && /participant_identity_key_hash TEXT/.test(suggestionBindingMigration)
+  && /idx_order_submissions_owner_identity_suggestions/.test(suggestionBindingMigration));
+ok('제출 시 검증된 불변 소유자와 참여 명의 해시를 주문 원장에 함께 고정한다',
+  /verifiedIdentity\.context\.owner\.id/.test(submitRoutes)
+  && /participantIdentityKeyHash: verifiedIdentity\.approval\.selectedIdentityHash/.test(submitRoutes)
+  && /identityBinding: verifiedIdentityBinding/.test(submitRoutes)
+  && /participant_identity_key_hash = \$5/.test(read('src/services/orderLedger.service.js')));
+ok('참여 명의 해시 열이 없으면 서버 시작을 거부한다',
+  /\['order_submissions',\s*'participant_identity_key_hash'\]/.test(serverIndex));
+ok('추천 조회 장애는 구매양식을 막지 않고 빈 추천으로 접힌다',
+  /let orderInfoSuggestions = \[\]/.test(service)
+  && /orderInfoSuggestions = await loadOrderInfoSuggestions\(context\)/.test(service)
+  && /주문정보 추천 조회 실패\(숨김\)/.test(service));
+ok('조합 추천은 한 번에 세 필드를 적용하고 원장 삭제 없이 브라우저에서만 숨긴다',
+  /자주 쓰는 주문정보/.test(appJs)
+  && /누르면 수취인·연락처·주소가 함께 입력돼요/.test(appJs)
+  && /\["recipient", item\.recipient\][\s\S]{0,100}?\["phone", item\.phone\][\s\S]{0,100}?\["address", item\.address\]/.test(appJs)
+  && /_invalidateIdentityApproval\(cid\)/.test(appJs)
+  && /rapp_order_info_dismissed_v1/.test(appJs)
+  && /_dismissedOrderInfoIds = Object\.fromEntries\(entries\)/.test(appJs)
+  && !/DELETE FROM order_submissions/.test(service));
 const unlockAiField = appJs.slice(appJs.indexOf('function _unlockAiField(fid)'), appJs.indexOf('/** ★ Promise 반환'));
 ok('캡처를 삭제해도 타계정 참여 전화번호 잠금은 풀리지 않는다',
   /keepParticipantPhoneLocked = f\.dataset\.participantPhoneLocked === "1"/.test(unlockAiField)

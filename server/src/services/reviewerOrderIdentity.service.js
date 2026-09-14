@@ -192,6 +192,86 @@ function publicIdentity(identity, { includeBank = false } = {}) {
   return result;
 }
 
+function orderInfoSuggestionId({ recipient, phone, address }) {
+  return stableHash(JSON.stringify({
+    recipient: cleanName(recipient).toLowerCase(),
+    phone: digits(phone),
+    address: normAddress(address),
+  }));
+}
+
+/**
+ * 현재 참여 명의가 과거에 실제 제출한 수취인·연락처·주소 조합을 최대 3개 반환한다.
+ *
+ * 명의 검증을 통과하며 원장에 고정된 소유자 UUID+참여 명의 해시를 우선 사용한다.
+ * 그 값이 없는 과거 주문은 소유자/참여자 UUID가 신청행에 모두 고정된 경우만 허용한다.
+ * 전화번호만 남은 레거시 주문은 번호 재할당 시 타인의 주소가 노출될 수 있어 제외한다.
+ */
+async function loadOrderInfoSuggestions(context, db = pool) {
+  const selectedIdentityHash = context?.selected?.identityKey
+    ? stableHash(context.selected.identityKey)
+    : '';
+  const participantIdentityId = UUID_RE.test(String(context?.selected?.participantIdentityId || ''))
+    ? context.selected.participantIdentityId
+    : null;
+  if (!UUID_RE.test(String(context?.owner?.id || '')) || !selectedIdentityHash) return [];
+
+  const { rows } = await db.query(
+    `WITH eligible_orders AS (
+       SELECT os.id
+         FROM order_submissions os
+        WHERE os.owner_reviewer_id = $1::uuid
+          AND os.participant_identity_key_hash = $2
+       UNION
+       SELECT os.id
+         FROM campaign_applications ca
+         JOIN order_submissions os ON os.campaign_application_id = ca.id
+        WHERE $3::uuid IS NOT NULL
+          AND ca.owner_reviewer_id = $1::uuid
+          AND ca.participant_identity_id = $3::uuid
+     ), scoped AS (
+       SELECT os.recipient, os.phone, os.address, os.submitted_at,
+              LOWER(REGEXP_REPLACE(BTRIM(os.recipient), '\\s+', '', 'g')) AS recipient_key,
+              REGEXP_REPLACE(os.phone, '\\D', '', 'g') AS phone_key,
+              LOWER(BTRIM(REGEXP_REPLACE(
+                TRANSLATE(BTRIM(os.address), '()[],./·', '        '), '\\s+', ' ', 'g'
+              ))) AS address_key
+         FROM eligible_orders eo
+         JOIN order_submissions os ON os.id = eo.id
+        WHERE os.deleted_at IS NULL
+          AND os.source = 'order_submit'
+          AND os.submitted_at >= NOW() - INTERVAL '365 days'
+          AND NULLIF(BTRIM(os.recipient), '') IS NOT NULL
+          AND LENGTH(REGEXP_REPLACE(COALESCE(os.phone, ''), '\\D', '', 'g')) BETWEEN 10 AND 11
+          AND NULLIF(BTRIM(os.address), '') IS NOT NULL
+          AND os.recipient !~ '[*＊●○◯◉•·xX]'
+          AND os.address !~ '[*＊●○◯◉•·xX]'
+     ), grouped AS (
+       SELECT recipient_key, phone_key, address_key,
+              COUNT(*)::int AS use_count,
+              MAX(submitted_at) AS last_used_at,
+              (ARRAY_AGG(recipient ORDER BY submitted_at DESC))[1] AS recipient,
+              (ARRAY_AGG(phone ORDER BY submitted_at DESC))[1] AS phone,
+              (ARRAY_AGG(address ORDER BY submitted_at DESC))[1] AS address
+         FROM scoped
+        GROUP BY recipient_key, phone_key, address_key
+     )
+     SELECT recipient, phone, address, use_count, last_used_at
+       FROM grouped
+      ORDER BY use_count DESC, last_used_at DESC
+      LIMIT 3`,
+    [context.owner.id, selectedIdentityHash, participantIdentityId]
+  );
+  return rows.map((row) => ({
+    id: orderInfoSuggestionId(row),
+    recipient: String(row.recipient || '').trim(),
+    phone: String(row.phone || '').trim(),
+    address: String(row.address || '').trim(),
+    useCount: Number(row.use_count) || 1,
+    lastUsedAt: row.last_used_at || null,
+  }));
+}
+
 async function getSecureProfile(ownerReviewerId) {
   const { owner, identities } = await loadOwnerProfile(ownerReviewerId);
   return {
@@ -441,10 +521,18 @@ async function getParticipationIdentityContext(body, reviewer) {
   const savedIdentities = context.selected.type === 'sub'
     ? [context.selected]
     : context.identities;
+  let orderInfoSuggestions = [];
+  try {
+    orderInfoSuggestions = await loadOrderInfoSuggestions(context);
+  } catch (err) {
+    // 추천은 입력 편의 기능이다. 조회 장애로 구매양식 자체를 막지 않는다.
+    logger.warn(`[reviewer-order-identity] 주문정보 추천 조회 실패(숨김): ${err.message}`);
+  }
   return {
     ok: true, enabled: isEnabled(), multiAccountMode: !!context.application.multi_account_mode,
     selectedIdentity: publicIdentity(context.selected, { includeBank: true }),
     savedIdentities: savedIdentities.map((identity) => publicIdentity(identity, { includeBank: true })),
+    orderInfoSuggestions,
   };
 }
 
@@ -597,6 +685,7 @@ module.exports = {
   resolveApplicationIdentity,
   maskedCompatible,
   evaluateSelectedIdentity,
+  loadOrderInfoSuggestions,
   getParticipationIdentityContext,
   matchCapture,
   manualConfirm,

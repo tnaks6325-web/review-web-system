@@ -48,6 +48,9 @@ const _EMBED_CTX = (() => {
 const _PREVIEW_MODE = !!(_EMBED_CTX && _EMBED_CTX.preview);
 let _activeIdentityContext = null;
 let _identityContextPromise = null;
+let _orderInfoSuggestions = [];
+let _dismissedOrderInfoIds = {};
+const _ORDER_INFO_DISMISS_KEY = "rapp_order_info_dismissed_v1";
 
 function _reviewerIdentityRequestBody(extra) {
   return Object.assign({
@@ -68,6 +71,7 @@ async function _loadOrderIdentityContext() {
     const data = await response.json();
     if (!response.ok || !data?.ok) throw new Error(data?.error || "참여 명의를 확인하지 못했습니다.");
     _activeIdentityContext = data;
+    _orderInfoSuggestions = Array.isArray(data.orderInfoSuggestions) ? data.orderInfoSuggestions : [];
     const identity = data.selectedIdentity || {};
     (_orderCardIds || []).forEach((cid) => {
       const idEl = document.getElementById(cid + "_userId");
@@ -88,6 +92,7 @@ async function _loadOrderIdentityContext() {
       }
     });
     _renderSavedOrderInfoPickers();
+    _renderOrderInfoSuggestions();
     return data;
   })().catch((err) => { _identityContextPromise = null; throw err; });
   return _identityContextPromise;
@@ -136,6 +141,19 @@ function _savedOrderInfoMarkup(cid, field) {
     + '<div class="of-saved-info-menu" id="' + menuId + '" aria-label="' + label + ' 저장 정보 목록" hidden></div>'
     + '<span class="of-saved-info-lock" hidden><i class="fas fa-lock"></i> 참여 신청 전화번호 · 변경 불가</span>'
     + '</div>';
+}
+
+function _orderInfoSuggestionsMarkup(cid) {
+  const listId = cid + "_orderInfoSuggestionList";
+  return '<section class="of-order-info-suggestions" id="' + cid + '_orderInfoSuggestions" hidden>'
+    + '<button type="button" class="of-order-info-heading" onclick="_toggleOrderInfoSuggestions(\'' + cid + '\')" '
+    + 'aria-expanded="true" aria-controls="' + listId + '">'
+    + '<span class="of-order-info-heading-main"><i class="fas fa-thumbtack" aria-hidden="true"></i>'
+    + '<strong>자주 쓰는 주문정보</strong><span class="of-order-info-count"></span></span>'
+    + '<span class="of-order-info-heading-help">누르면 수취인·연락처·주소가 함께 입력돼요</span>'
+    + '<i class="fas fa-chevron-up of-order-info-chevron" aria-hidden="true"></i></button>'
+    + '<div class="of-order-info-list" id="' + listId + '"></div>'
+    + '</section>';
 }
 
 function _savedBankAccountMarkup() {
@@ -366,6 +384,143 @@ window._applySavedOrderInfo = function (option) {
   _syncSubmissionIdentityAction();
   showToast((identity.name || "선택한") + "님의 " + spec.label + "를 적용했습니다.", "success");
 };
+
+function _loadDismissedOrderInfoIds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(_ORDER_INFO_DISMISS_KEY) || "{}");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      _dismissedOrderInfoIds = Object.assign({}, saved, _dismissedOrderInfoIds);
+    }
+  } catch (_) { /* 메모리 숨김값은 유지 */ }
+  return _dismissedOrderInfoIds;
+}
+
+function _saveDismissedOrderInfoIds(saved) {
+  try {
+    const entries = Object.entries(saved || {})
+      .filter(([id, at]) => /^[0-9a-f]{64}$/i.test(id) && Number.isFinite(Number(at)))
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 60);
+    _dismissedOrderInfoIds = Object.fromEntries(entries);
+    localStorage.setItem(_ORDER_INFO_DISMISS_KEY, JSON.stringify(_dismissedOrderInfoIds));
+  } catch (_) { /* 저장 실패 시 현재 화면에서만 숨김 */ }
+}
+
+function _visibleOrderInfoSuggestions() {
+  const dismissed = _loadDismissedOrderInfoIds();
+  return (_orderInfoSuggestions || []).filter((item) => item && item.id && !dismissed[item.id]);
+}
+
+function _toggleOrderInfoSuggestions(cid) {
+  const wrap = document.getElementById(cid + "_orderInfoSuggestions");
+  const heading = wrap?.querySelector(".of-order-info-heading");
+  const list = wrap?.querySelector(".of-order-info-list");
+  if (!wrap || !heading || !list) return;
+  const willOpen = list.hidden;
+  list.hidden = !willOpen;
+  wrap.classList.toggle("is-collapsed", !willOpen);
+  heading.setAttribute("aria-expanded", String(willOpen));
+}
+
+function _renderOrderInfoSuggestions() {
+  const suggestions = _visibleOrderInfoSuggestions();
+  (_orderCardIds || []).forEach((cid) => {
+    const wrap = document.getElementById(cid + "_orderInfoSuggestions");
+    const list = wrap?.querySelector(".of-order-info-list");
+    const count = wrap?.querySelector(".of-order-info-count");
+    if (!wrap || !list || !count) return;
+    list.replaceChildren();
+    count.textContent = suggestions.length ? suggestions.length + "개" : "";
+    wrap.hidden = suggestions.length === 0;
+    if (!suggestions.length) return;
+
+    suggestions.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "of-order-info-row";
+
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.className = "of-order-info-apply";
+      apply.dataset.cid = cid;
+      apply.dataset.suggestionId = item.id;
+      apply.setAttribute("aria-label", item.recipient + " 주문정보 적용");
+
+      const top = document.createElement("span");
+      top.className = "of-order-info-top";
+      const recipient = document.createElement("strong");
+      recipient.textContent = item.recipient || "수취인 없음";
+      const phone = document.createElement("span");
+      phone.textContent = item.phone || "";
+      top.append(recipient, phone);
+      if (Number(item.useCount) > 1) {
+        const used = document.createElement("span");
+        used.className = "of-order-info-used";
+        used.textContent = Number(item.useCount) + "회";
+        top.appendChild(used);
+      }
+      const address = document.createElement("span");
+      address.className = "of-order-info-address";
+      address.textContent = item.address || "";
+      apply.append(top, address);
+      apply.addEventListener("click", () => _applyOrderInfoSuggestion(apply));
+
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "of-order-info-dismiss";
+      dismiss.dataset.suggestionId = item.id;
+      dismiss.setAttribute("aria-label", item.recipient + " 주문정보 추천 숨기기");
+      dismiss.textContent = "×";
+      dismiss.addEventListener("click", () => _dismissOrderInfoSuggestion(dismiss));
+      row.append(apply, dismiss);
+      list.appendChild(row);
+    });
+  });
+}
+
+function _applyOrderInfoSuggestion(button) {
+  const cid = button?.dataset?.cid;
+  const suggestionId = button?.dataset?.suggestionId;
+  const item = (_orderInfoSuggestions || []).find((entry) => entry?.id === suggestionId);
+  if (!cid || !item) return;
+  const selectedPhone = String(_activeIdentityContext?.selectedIdentity?.phone || "").trim();
+  const fields = [
+    ["recipient", item.recipient],
+    ["phone", item.phone],
+    ["address", item.address],
+  ];
+  const resolved = fields.map(([field, rawValue]) => {
+    const input = document.getElementById(cid + "_" + field);
+    if (!input) return null;
+    const locked = field === "phone" && input.dataset.participantPhoneLocked === "1";
+    const value = locked && selectedPhone ? selectedPhone : String(rawValue || "").trim();
+    return value ? { field, input, locked, value } : null;
+  });
+  if (resolved.some((entry) => !entry)) return;
+  for (const { field, input, locked, value } of resolved) {
+    input.value = value;
+    if (field === "phone") formatPhoneInput(input);
+    input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
+    input.classList.toggle("of-participant-phone", locked);
+    input.readOnly = locked;
+    input.style.paddingRight = "";
+    input.parentElement?.querySelector(".ai-lock-badge")?.remove();
+    _restoreSavedInfoInputHandler(input, cid, field, locked);
+    _ofClearError(cid + "_" + field);
+  }
+  _invalidateIdentityApproval(cid);
+  _embedSaveForm();
+  _syncSubmissionIdentityAction();
+  showToast("수취인·연락처·주소를 함께 입력했습니다.", "success");
+}
+
+function _dismissOrderInfoSuggestion(button) {
+  const suggestionId = button?.dataset?.suggestionId;
+  if (!suggestionId) return;
+  const dismissed = _loadDismissedOrderInfoIds();
+  dismissed[suggestionId] = Date.now();
+  _saveDismissedOrderInfoIds(dismissed);
+  _renderOrderInfoSuggestions();
+}
 function _embedPost(msg) {
   if (_EMBED_CTX && window.parent !== window) {
     try { window.parent.postMessage(msg, location.origin); } catch (_) { /* noop */ }
@@ -6709,6 +6864,7 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-error-msg" id="${cid}_userId_err"><i class="fas fa-exclamation-circle"></i> 아이디는 필수 입력 항목입니다.</div>
 
     <!-- 수취인 -->
+    ${_orderInfoSuggestionsMarkup(cid)}
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_recipient">수취인</label>
       <div class="of-field-control">
@@ -7890,7 +8046,10 @@ function addOrderCard() {
   // ★ v9.14: 소득신고 모드면 카드 incomeBlock 표시
   _onCardAddedIncome(cid, idx);
 
-  if (_activeIdentityContext) _renderSavedOrderInfoPickers();
+  if (_activeIdentityContext) {
+    _renderSavedOrderInfoPickers();
+    _renderOrderInfoSuggestions();
+  }
 
   _updateCardCountBadge();
   // 스크롤
