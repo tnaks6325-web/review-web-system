@@ -14,6 +14,8 @@ const path = require('path');
 const poolPath = require.resolve('../src/db/pool');
 const captured = { queries: [] };
 let reviewRows = [];
+let rawSubmissionRows = [];
+let eligibleReceiptRows = [];
 let forceTrgm = false;   // true면 본검색(= ANY) 강제실패 → pg_trgm fallback(searchByNameFallback) 경로 진입
 
 const fakePool = {
@@ -29,7 +31,9 @@ const fakePool = {
         cash_receipt_required: params[1][i] === '현영탭',
       })) };
     }
-    if (/FROM review_submissions/.test(sql)) return { rows: [] };
+    if (/FROM review_submissions/.test(sql)) {
+      return { rows: /review_inspections/.test(sql) ? eligibleReceiptRows : rawSubmissionRows };
+    }
     // 본검색(= ANY)만 강제실패 → searchByName catch → searchByNameFallback(= $) 재실행
     if (forceTrgm && /FROM review_index/.test(sql) && /= ANY\(\$/.test(sql)) {
       throw new Error('operator does not exist: % boolean');
@@ -160,6 +164,17 @@ async function run() {
   assert.deepStrictEqual(fallbackResult.results[0].captureSlots.map(s => s.key), ['review', 'receipt'],
     '5: fallback도 공고 현금영수증 설정으로 첨부 슬롯을 파생해야 함');
   console.log('  5. pg_trgm fallback 경로 pl 게이트 + 현금영수증 슬롯 ✓');
+
+  // 검수에서 불량/보류된 영수증은 원본 파일이 남아 있어도 다시 제출할 수 있어야 한다.
+  captured.queries = [];
+  rawSubmissionRows = [{ sheet_id: 'S', tab_name: '현영탭2', row_index: 8, slot_key: 'receipt' }];
+  eligibleReceiptRows = [];
+  reviewRows = [makeRow({ tabName: '현영탭2', rowIndex: 8, isSubmitted: true, incomeType: '현영' })];
+  const rejectedReceipt = await searchByName('', '12345678', { includeSubmitted: true });
+  assert.ok(!rejectedReceipt.results[0].submittedSlots.includes('receipt'),
+    '5b: 불량·보류 영수증 파일이 제출완료로 남아 재제출 입구를 숨기면 안 됨');
+  rawSubmissionRows = []; eligibleReceiptRows = [];
+  console.log('  5b. 불량·보류 영수증 재제출 슬롯 복원 ✓');
 
   // ── 6) 게이트 시맨틱 고정: stale pl(재배정 전 주인)은 미개방 / 현재주인(ri.phone8)은 개방 ──
   //   ri.phone8(현재 시트 소유자)이 채워진 행에서는 stale pl 이 그 행을 절대 못 연다

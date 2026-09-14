@@ -945,6 +945,21 @@ async function checkBatchAccountSnapshots({ batch, items }) {
   return reconcileAccountSnapshots(guarded, byId);
 }
 
+/** 최초 이체파일 생성 직전, 회차 생성 후 바뀐 영수증 검수 상태를 현재 원장으로 다시 확인한다. */
+async function checkBatchReceiptEligibility({ items } = {}) {
+  const live = (items || []).filter(item => item.status !== 'cancelled');
+  const coords = live.map(item => ({
+    sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index,
+  }));
+  const eligible = await filterReceiptEligiblePaymentRows(pool, coords);
+  const allowed = new Set(eligible.map(item => `${item.sheetId}\u0000${item.tabName}\u0000${item.rowIndex}`));
+  const blocked = live.filter(item => !allowed.has(`${item.sheet_id}\u0000${item.tab_name}\u0000${item.row_index}`));
+  return {
+    ok: blocked.length === 0,
+    blocked: blocked.map(item => ({ itemId: item.id, reviewerName: item.reviewer_name || '' })),
+  };
+}
+
 function reconcileAccountSnapshots(items, ownersById) {
   const mismatches = [];
   let unverifiable = 0;
@@ -1317,6 +1332,7 @@ module.exports = {
 
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
+  checkBatchReceiptEligibility,
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
   compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,

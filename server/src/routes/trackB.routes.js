@@ -3813,6 +3813,12 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
       return res.status(400).json({ ok: false, error: '취소된 회차는 내려받을 수 없습니다.' });
     }
     if (Number(out.batch.downloadCount || 0) === 0) {
+      const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out);
+      if (!receiptCheck.ok) {
+        return res.status(409).json({ ok: false, code: 'cash_receipt_not_verified',
+          error: '회차 생성 후 현금영수증 상태가 변경되었습니다. 이 회차를 취소하고 검수 완료 후 새 회차를 만들어 주세요.',
+          blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });
+      }
       const accountCheck = await paymentSvc.checkBatchAccountSnapshots(out);
       if (!accountCheck.ok) {
         return res.status(409).json({ ok: false, code: 'account_snapshot_changed',

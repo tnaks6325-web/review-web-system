@@ -79,6 +79,8 @@ const db = {
 
   const paymentService = fs.readFileSync(path.join(__dirname, '../src/services/payment.service.js'), 'utf8');
   const paymentRoute = fs.readFileSync(path.join(__dirname, '../src/routes/payment.routes.js'), 'utf8');
+  const trackBRoute = fs.readFileSync(path.join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
+  const searchService = fs.readFileSync(path.join(__dirname, '../src/services/search.service.js'), 'utf8');
   assert.match(paymentService, /filterReceiptEligiblePaymentRows\(pool, pageRows\)/,
     '입금관리 목록이 현금영수증 공용 게이트를 거치지 않는다');
   const paymentList = paymentService.match(/async function listPaymentTargets[\s\S]*?\n}/)?.[0] || '';
@@ -94,6 +96,10 @@ const db = {
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
+  assert.match(trackBRoute, /downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out\)[\s\S]*cash_receipt_not_verified[\s\S]*checkBatchAccountSnapshots/,
+    '최초 이체파일 다운로드 직전에 현금영수증 현재 상태를 다시 검증해야 한다');
+  assert.match(searchService, /cashReceiptSubmissionStates\(pool, source\)[\s\S]*item\.submittedSlots = \(item\.submittedSlots \|\| \[\]\)\.filter/,
+    '거절·보류된 영수증은 파일이 남아 있어도 리뷰어 재제출 슬롯을 다시 열어야 한다');
 
   const inspectService = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');

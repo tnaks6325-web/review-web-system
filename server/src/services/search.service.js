@@ -1,10 +1,33 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { effectiveCaptureSlots } = require('../utils/captureSlots');
+const { effectiveCaptureSlots, cashReceiptSlotInfo } = require('../utils/captureSlots');
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
 const { workKindsForTabs } = require('./workKindContext.service');
 const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
 const { cashReceiptRequirementsForTabs } = require('./cashReceiptContext.service');
+const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
+
+/** 검수에서 거절·보류된 영수증은 파일이 남아 있어도 리뷰어에게는 다시 제출할 슬롯이다. */
+async function _removeUnpayableReceiptSlots(items) {
+  const source = Array.isArray(items) ? items : [];
+  if (!source.length) return;
+  let states = null;
+  try {
+    states = await cashReceiptSubmissionStates(pool, source);
+  } catch (e) {
+    // 판정 조회 실패 때 raw 파일 존재만으로 제출완료를 꾸미면 재제출 입구가 사라진다.
+    logger.warn('[Search] 현금영수증 지급상태 조회 실패(재제출 가능으로 표시): ' + e.message);
+  }
+  for (const item of source) {
+    const receipt = cashReceiptSlotInfo(item.captureSlots, item.incomeType).slot;
+    if (!receipt) continue;
+    const state = states && states.get(cashReceiptSubmissionRowKey(
+      item.sheetId, item.tabName, item.rowIndex));
+    if (!state || !state.submitted) {
+      item.submittedSlots = (item.submittedSlots || []).filter(key => key !== receipt.key);
+    }
+  }
+}
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -563,6 +586,7 @@ async function searchByName(query, phone8, opts = {}) {
       } catch (slotErr) {
         logger.warn('[Search] submittedSlots 조회 실패 (무시): ' + slotErr.message);
       }
+      await _removeUnpayableReceiptSlots(multiSlotItems);
     }
 
     // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
@@ -767,6 +791,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     } catch (slotErr) {
       logger.warn('[Search] fallback submittedSlots 조회 실패 (무시): ' + slotErr.message);
     }
+    await _removeUnpayableReceiptSlots(multiSlotItems);
   }
 
   // ── order_submissions 병합(폴백 경로도 누락 없이) — 폴백은 phoneList 미계산이므로 [p8] ──
