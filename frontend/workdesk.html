@@ -14104,6 +14104,7 @@ function _riRenderHead(sum){
     ${t?`<button class="btn" onclick="riOpenProductNames()">⚙ 기대 상품명</button>`:''}
     ${isAdmin?`<button class="btn"${reOn?'':' style="opacity:.5"'} onclick="riReinspectTab()" title="${reOn?'공고 리뷰타입을 뒤늦게 바꿨을 때(예: 구매확정) 지금 걸러 놓은 건들의 판정을 새 기준으로 다시 매깁니다':'유형 칩이나 작업을 먼저 고르세요 — 그 대상만 다시 검수합니다'}">${reLbl}</button>`:''}
     ${t&&isAdmin?`<button class="btn" onclick="riResolveAllTab()" title="이 작업의 미확인 의심·불량 전부를 정상(오탐)으로 종결 — 상품명 의심 건은 인정 표기로 학습됩니다">✔ 일괄 정상</button>`:''}
+    ${isAdmin&&st==='open'&&_tcnt.duplicate?`<button class="btn" onclick="riDuplicateAutoResolve()" title="양쪽 제출 완료와 보존 파일을 다시 확인한 확정 중복만 처리합니다">🗑 확정 중복 자동처리</button>`:''}
     ${isAdmin?`<button class="btn" onclick="riOpenProductClusters()" title="같은 작업·같은 기대 상품명·같은 OCR 표기를 묶어 한 번만 판단합니다">🏷 상품명 군집판단</button>`:''}
     ${isAdmin?`<button class="btn" onclick="riOpenSamples()">🖼 판별 예시</button>`:''}
     <button class="btn" onclick="_loadInspect()">새로고침</button></div>
@@ -14688,6 +14689,25 @@ async function riProductAutoResolve(){
     await riOpenProductClusters();
     _riProductLab.changed=true;
   }catch(e){_riProductLab.busy=false;alert('상품명 자동처리 실패: '+((e&&e.message)||e));}
+}
+
+async function riDuplicateAutoResolve(){
+  const t=STATE.riTab||{};
+  const scope={sheetId:t.sheetId||'',tabName:t.tabName||''};
+  try{
+    const p=await api('/api/trackb/review-inspect/duplicates/auto-resolve',{method:'POST',body:JSON.stringify({...scope,dryRun:true})});
+    if(!p||!p.ok)throw new Error((p&&p.error)||'자동처리 계산 실패');
+    if(!p.total){_toast('현재 자동 제거할 확정 중복이 없습니다.');return;}
+    const runN=Math.min(Number(p.pairs&&p.pairs.length)||0,Number(p.executeLimit)||50);
+    const more=p.total>runN?`\n· 남은 후보는 이번 실행 후 다시 미리보기합니다.`:'';
+    const msg=`확정 중복 ${_riN(p.total)}건 중 ${_riN(runN)}건을 자동 제거할까요?\n\n· 제거본과 보존본 모두 제출 완료된 건만 대상입니다.\n· 실행 직전에 같은 파일 지문·행 매핑·Drive 보존본을 다시 확인합니다.\n· 같은 리뷰어의 다른 작업과 같은 행 재첨부는 제외합니다.\n· 나중 제출본만 Drive 휴지통으로 보내며 30일간 복구할 수 있습니다.\n· 리뷰어에게 1:1 메시지는 자동 전송하지 않습니다.${more}`;
+    if(!confirm(msg))return;
+    const r=await api('/api/trackb/review-inspect/duplicates/auto-resolve',{method:'POST',body:JSON.stringify({...scope,dryRun:false,confirm:'AUTO_DEDUP_V1',snapshotToken:p.snapshotToken,pairs:p.pairs||[]})});
+    if(!r||!r.ok)throw new Error((r&&r.error)||'자동처리 실패');
+    const skipped=Number(r.skipped)||0;
+    _toast(`확정 중복 ${_riN(r.processed||0)}건 제거${skipped?` · 재검증 제외 ${_riN(skipped)}건`:''}${r.hasMore?' · 남은 후보 있음':''}`);
+    await _loadInspect();
+  }catch(e){alert('확정 중복 자동처리 실패: '+((e&&e.message)||e));}
 }
 
 async function riProductDecide(verdict){

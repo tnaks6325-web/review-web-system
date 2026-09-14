@@ -808,6 +808,32 @@ async function trashFiles(filesToTrash) {
   return { success, failed, errors };
 }
 
+/** 자동 정리 도중 DB 반영이 실패했을 때 휴지통 이동을 되돌리는 보상 작업. */
+async function restoreFiles(filesToRestore) {
+  const d = _getUploadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  let success = 0;
+  let failed = 0;
+  const errors = [];
+  for (const file of filesToRestore) {
+    try {
+      await d.files.update({
+        fileId: file.id,
+        requestBody: { trashed: false },
+        supportsAllDrives: true,
+      });
+      success++;
+      logger.info(`[Drive-Dedupe] 휴지통 복구: "${file.name}" (${file.id})`);
+    } catch (err) {
+      failed++;
+      errors.push({ fileId: file.id, name: file.name, error: err.message });
+      logger.error(`[Drive-Dedupe] 휴지통 복구 실패: "${file.name}" (${file.id}) - ${err.message}`);
+    }
+  }
+  return { success, failed, errors };
+}
+
 /**
  * 재귀적 폴더 파일 목록 조회 (서브폴더 포함)
  * - 루트 폴더 + 모든 하위 폴더의 파일을 평탄화하여 반환
@@ -1403,5 +1429,6 @@ module.exports = {
   listFolderFilesRecursive,
   detectDuplicates,
   trashFiles,
+  restoreFiles,
   extractReviewerNameFromFile,
 };

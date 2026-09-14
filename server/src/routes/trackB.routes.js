@@ -2400,6 +2400,28 @@ router.post('/review-inspect/product-clusters/auto-resolve', authMiddleware, adm
   }
 });
 
+/* 확정 중복 자동처리 — 해시만 같은 건은 대상이 아니다.
+   미리보기에서 양쪽 제출 완료·행 매핑을 확인하고, 실행 때 같은 쌍을 다시 잠근 뒤
+   보존본/제거본의 Drive 상태까지 재검증한다. 실행 중 달라진 건은 삭제하지 않고 건너뛴다. */
+router.post('/review-inspect/duplicates/auto-resolve', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../services/reviewDuplicateAuto.service').autoResolveConfirmedDuplicates({
+      sheetId: String(b.sheetId || '') || null,
+      tabName: String(b.tabName || '') || null,
+      dryRun: b.dryRun !== false,
+      confirm: String(b.confirm || ''),
+      snapshotToken: String(b.snapshotToken || ''),
+      pairs: Array.isArray(b.pairs) ? b.pairs : [],
+      by: (req.admin && req.admin.name) || '',
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) {
+    logger.warn(`[review-inspect] 확정 중복 자동처리 실패: ${err.message}`);
+    res.status(500).json({ ok: false, error: '확정 중복 자동처리에 실패했습니다.' });
+  }
+});
+
 /* 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결(대량 백로그용).
    ★ adminOrMaster — 대량 종결은 되돌리기 어렵다(건별 확인은 종전대로 staff 담당 탭 허용).
    ★ resolution 'ok' 면 상품명 의심 건의 캡처 표기를 그 탭 인정 별칭으로 함께 학습한다. */
