@@ -87,6 +87,7 @@ ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입�
   && /\.of-field-control>\.of-input(?:,|\{)/.test(searchCss));
 ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순서를 바꾸지 않는다',
   (appJs.match(/const option = document\.createElement\("button"\)/g) || []).length === 2
+  && (appJs.match(/document\.createElement\("button"\)/g) || []).length >= 4
   && /option\.textContent =/.test(appJs)
   && !/<select class="of-saved-info-select"/.test(appJs)
   && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 2);
@@ -133,6 +134,25 @@ ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화
   && /holdCtx\?\.verified && holdCtx\.isSub/.test(submitRoutes)
   && /PARTICIPANT_PHONE_INVALID/.test(service)
   && /PARTICIPANT_PHONE_INVALID/.test(submitRoutes));
+ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가 모두 맞는 원장만 조회한다',
+  /async function loadOrderInfoSuggestions\(context, db = pool\)/.test(service)
+  && /ca\.owner_reviewer_id = \$1::uuid/.test(service)
+  && /SELECT COUNT\(\*\) FROM reviewers r WHERE r\.phone8 = \$2/.test(service)
+  && /ca\.participant_identity_id = \$3::uuid/.test(service)
+  && /ca\.applicant_name[\s\S]{0,220}?= \$5/.test(service)
+  && /os\.deleted_at IS NULL/.test(service)
+  && /os\.source = 'order_submit'/.test(service));
+ok('추천 조회 장애는 구매양식을 막지 않고 빈 추천으로 접힌다',
+  /let orderInfoSuggestions = \[\]/.test(service)
+  && /orderInfoSuggestions = await loadOrderInfoSuggestions\(context\)/.test(service)
+  && /주문정보 추천 조회 실패\(숨김\)/.test(service));
+ok('조합 추천은 한 번에 세 필드를 적용하고 원장 삭제 없이 브라우저에서만 숨긴다',
+  /자주 쓰는 주문정보/.test(appJs)
+  && /누르면 수취인·연락처·주소가 함께 입력돼요/.test(appJs)
+  && /\["recipient", item\.recipient\][\s\S]{0,100}?\["phone", item\.phone\][\s\S]{0,100}?\["address", item\.address\]/.test(appJs)
+  && /_invalidateIdentityApproval\(cid\)/.test(appJs)
+  && /rapp_order_info_dismissed_v1/.test(appJs)
+  && !/DELETE FROM order_submissions/.test(service));
 const unlockAiField = appJs.slice(appJs.indexOf('function _unlockAiField(fid)'), appJs.indexOf('/** ★ Promise 반환'));
 ok('캡처를 삭제해도 타계정 참여 전화번호 잠금은 풀리지 않는다',
   /keepParticipantPhoneLocked = f\.dataset\.participantPhoneLocked === "1"/.test(unlockAiField)

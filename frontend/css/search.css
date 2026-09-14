@@ -390,6 +390,27 @@ input,textarea,button{font-family:inherit}
 .of-saved-info-option-title,.of-saved-info-option-help{display:block}
 .of-saved-info-option-help{margin-top:3px;color:#667085;font-size:.64rem;font-weight:600}
 .of-saved-info-lock{display:flex;align-items:center;gap:5px;margin-top:5px;color:#6d28d9;font-size:.66rem;font-weight:700}
+.of-order-info-suggestions{margin:3px 0 12px 66px;overflow:hidden;border:1px solid #bfdbfe;border-radius:11px;background:#f8fbff;box-shadow:0 4px 12px rgba(37,99,235,.07)}
+.of-order-info-suggestions[hidden],.of-order-info-list[hidden]{display:none}
+.of-order-info-heading{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:7px;width:100%;min-height:42px;padding:8px 10px;border:0;background:#eff6ff;color:#1d4ed8;font:inherit;text-align:left;cursor:pointer}
+.of-order-info-heading:focus-visible{outline:3px solid rgba(49,130,246,.2);outline-offset:-3px}
+.of-order-info-heading-main{display:flex;align-items:center;gap:6px;min-width:0;font-size:.75rem}
+.of-order-info-heading-main i{font-size:.7rem;transform:rotate(-18deg)}
+.of-order-info-count{padding:1px 6px;border-radius:999px;background:#dbeafe;color:#2563eb;font-size:.62rem;font-weight:800;white-space:nowrap}
+.of-order-info-heading-help{color:#64748b;font-size:.64rem;font-weight:650;white-space:nowrap}
+.of-order-info-chevron{font-size:.65rem;transition:transform .16s ease}
+.of-order-info-suggestions.is-collapsed .of-order-info-chevron{transform:rotate(180deg)}
+.of-order-info-list{display:grid;gap:1px;padding:4px;background:#dbeafe}
+.of-order-info-row{display:grid;grid-template-columns:minmax(0,1fr) 38px;background:#fff}
+.of-order-info-apply{display:grid;gap:3px;min-width:0;min-height:54px;padding:8px 10px;border:0;background:#fff;color:#334155;font:inherit;text-align:left;cursor:pointer}
+.of-order-info-apply:hover,.of-order-info-apply:focus-visible{position:relative;z-index:1;background:#f0f7ff;color:#1d4ed8;outline:2px solid #93c5fd;outline-offset:-2px}
+.of-order-info-top{display:flex;align-items:center;gap:5px;min-width:0;font-size:.74rem}
+.of-order-info-top strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.of-order-info-top>span:not(.of-order-info-used){min-width:0;overflow:hidden;color:#475569;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.of-order-info-used{margin-left:auto;padding:1px 5px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:.58rem;font-weight:800;white-space:nowrap}
+.of-order-info-address{display:-webkit-box;overflow:hidden;color:#64748b;font-size:.68rem;font-weight:550;line-height:1.35;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.of-order-info-dismiss{display:flex;align-items:center;justify-content:center;min-width:38px;border:0;border-left:1px solid #dbeafe;background:#fff;color:#94a3b8;font:inherit;font-size:1rem;font-weight:500;cursor:pointer}
+.of-order-info-dismiss:hover,.of-order-info-dismiss:focus-visible{background:#fff7ed;color:#c2410c;outline:2px solid #fdba74;outline-offset:-2px}
 .of-participant-phone{color:#4c1d95!important;background:#f5f3ff!important;border-color:#c4b5fd!important}
 .of-identity-context{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:7px;margin:0 0 9px;padding:9px 10px;color:#5B21B6;border:1px solid #DDD6FE;border-left:4px solid #6D28D9;border-radius:10px;background:#F5F3FF;font-size:.72rem;line-height:1.35}
 .of-identity-context .of-identity-kicker{font-size:.62rem;font-weight:800;color:#7C3AED;letter-spacing:.04em;white-space:nowrap}
@@ -665,6 +686,12 @@ input,textarea,button{font-family:inherit}
   #screenOrderForm .of-field--stack>.of-label,#screenOrderForm .of-field--stack>.of-field-control{grid-column:1}
   #screenOrderForm .of-saved-info-trigger{min-height:40px;border-radius:9px;font-size:.7rem}
   #screenOrderForm .of-saved-info-option{min-height:44px;font-size:.7rem}
+  #screenOrderForm .of-order-info-suggestions{margin:2px 0 10px;border-radius:12px}
+  #screenOrderForm .of-order-info-heading{grid-template-columns:minmax(0,1fr) auto;min-height:45px;padding:8px 9px}
+  #screenOrderForm .of-order-info-heading-help{grid-column:1 / -1;grid-row:2;white-space:normal}
+  #screenOrderForm .of-order-info-chevron{grid-column:2;grid-row:1}
+  #screenOrderForm .of-order-info-apply{min-height:58px;padding:9px}
+  #screenOrderForm .of-order-info-dismiss{min-width:42px}
   #screenOrderForm .of-save-id{grid-column:2;margin:5px 0 1px!important;font-size:.67rem!important;line-height:1.35}
   #screenOrderForm .of-save-id input{flex:0 0 auto}
   #screenOrderForm .of-error-msg{margin-top:-3px;margin-bottom:6px;margin-left:84px}

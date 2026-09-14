@@ -192,6 +192,89 @@ function publicIdentity(identity, { includeBank = false } = {}) {
   return result;
 }
 
+function orderInfoSuggestionId({ recipient, phone, address }) {
+  return stableHash(JSON.stringify({
+    recipient: cleanName(recipient),
+    phone: digits(phone),
+    address: normAddress(address),
+  }));
+}
+
+/**
+ * 현재 참여 명의가 과거에 실제 제출한 수취인·연락처·주소 조합을 최대 3개 반환한다.
+ *
+ * 운영의 코드 신원 UUID가 아직 비어 있는 동안에는 owner_phone8 폴백을 쓰되,
+ * 같은 phone8을 가진 리뷰어가 정확히 한 명일 때만 허용한다. 참여 명의도 신청 당시
+ * 이름+전화가 모두 같은 행만 사용해 다른 소유자/타계정 주문이 섞이지 않게 한다.
+ */
+async function loadOrderInfoSuggestions(context, db = pool) {
+  const ownerPhone8 = phone8(context?.owner?.phone8 || context?.owner?.phone);
+  const participantPhone8 = phone8(context?.selected?.phone8 || context?.selected?.phone);
+  const participantName = cleanName(context?.selected?.name);
+  const participantIdentityId = UUID_RE.test(String(context?.selected?.participantIdentityId || ''))
+    ? context.selected.participantIdentityId
+    : null;
+  if (!UUID_RE.test(String(context?.owner?.id || '')) || ownerPhone8.length !== 8
+      || participantPhone8.length !== 8 || !participantName) return [];
+
+  const { rows } = await db.query(
+    `WITH scoped AS (
+       SELECT os.recipient, os.phone, os.address, os.submitted_at,
+              LOWER(REGEXP_REPLACE(BTRIM(os.recipient), '\\s+', '', 'g')) AS recipient_key,
+              REGEXP_REPLACE(os.phone, '\\D', '', 'g') AS phone_key,
+              LOWER(REGEXP_REPLACE(BTRIM(os.address), '\\s+', '', 'g')) AS address_key
+         FROM order_submissions os
+         JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+        WHERE os.deleted_at IS NULL
+          AND os.source = 'order_submit'
+          AND os.submitted_at >= NOW() - INTERVAL '365 days'
+          AND NULLIF(BTRIM(os.recipient), '') IS NOT NULL
+          AND LENGTH(REGEXP_REPLACE(COALESCE(os.phone, ''), '\\D', '', 'g')) BETWEEN 10 AND 11
+          AND NULLIF(BTRIM(os.address), '') IS NOT NULL
+          AND os.recipient !~ '[*＊●○◯◉•·xX]'
+          AND os.address !~ '[*＊●○◯◉•·xX]'
+          AND (
+            ca.owner_reviewer_id = $1::uuid
+            OR (
+              ca.owner_reviewer_id IS NULL
+              AND RIGHT(REGEXP_REPLACE(COALESCE(ca.owner_phone8, ca.phone8, ''), '\\D', '', 'g'), 8) = $2
+              AND (SELECT COUNT(*) FROM reviewers r WHERE r.phone8 = $2) = 1
+            )
+          )
+          AND (
+            ($3::uuid IS NOT NULL AND ca.participant_identity_id = $3::uuid)
+            OR (
+              ca.participant_identity_id IS NULL
+              AND RIGHT(REGEXP_REPLACE(COALESCE(ca.phone8, ca.applicant_phone, ''), '\\D', '', 'g'), 8) = $4
+              AND REGEXP_REPLACE(BTRIM(COALESCE(ca.applicant_name, '')), '\\s+', '', 'g') = $5
+            )
+          )
+     ), grouped AS (
+       SELECT recipient_key, phone_key, address_key,
+              COUNT(*)::int AS use_count,
+              MAX(submitted_at) AS last_used_at,
+              (ARRAY_AGG(recipient ORDER BY submitted_at DESC))[1] AS recipient,
+              (ARRAY_AGG(phone ORDER BY submitted_at DESC))[1] AS phone,
+              (ARRAY_AGG(address ORDER BY submitted_at DESC))[1] AS address
+         FROM scoped
+        GROUP BY recipient_key, phone_key, address_key
+     )
+     SELECT recipient, phone, address, use_count, last_used_at
+       FROM grouped
+      ORDER BY use_count DESC, last_used_at DESC
+      LIMIT 3`,
+    [context.owner.id, ownerPhone8, participantIdentityId, participantPhone8, participantName]
+  );
+  return rows.map((row) => ({
+    id: orderInfoSuggestionId(row),
+    recipient: String(row.recipient || '').trim(),
+    phone: String(row.phone || '').trim(),
+    address: String(row.address || '').trim(),
+    useCount: Number(row.use_count) || 1,
+    lastUsedAt: row.last_used_at || null,
+  }));
+}
+
 async function getSecureProfile(ownerReviewerId) {
   const { owner, identities } = await loadOwnerProfile(ownerReviewerId);
   return {
@@ -441,10 +524,18 @@ async function getParticipationIdentityContext(body, reviewer) {
   const savedIdentities = context.selected.type === 'sub'
     ? [context.selected]
     : context.identities;
+  let orderInfoSuggestions = [];
+  try {
+    orderInfoSuggestions = await loadOrderInfoSuggestions(context);
+  } catch (err) {
+    // 추천은 입력 편의 기능이다. 조회 장애로 구매양식 자체를 막지 않는다.
+    logger.warn(`[reviewer-order-identity] 주문정보 추천 조회 실패(숨김): ${err.message}`);
+  }
   return {
     ok: true, enabled: isEnabled(), multiAccountMode: !!context.application.multi_account_mode,
     selectedIdentity: publicIdentity(context.selected, { includeBank: true }),
     savedIdentities: savedIdentities.map((identity) => publicIdentity(identity, { includeBank: true })),
+    orderInfoSuggestions,
   };
 }
 
@@ -597,6 +688,7 @@ module.exports = {
   resolveApplicationIdentity,
   maskedCompatible,
   evaluateSelectedIdentity,
+  loadOrderInfoSuggestions,
   getParticipationIdentityContext,
   matchCapture,
   manualConfirm,
