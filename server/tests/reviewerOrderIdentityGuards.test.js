@@ -137,16 +137,23 @@ ok('타계정 참여는 선택 명의만 노출하고 신청 전화번호를 화
   && /PARTICIPANT_PHONE_INVALID/.test(submitRoutes));
 ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가 모두 맞는 원장만 조회한다',
   /async function loadOrderInfoSuggestions\(context, db = pool\)/.test(service)
+  && /os\.owner_reviewer_id = \$1::uuid/.test(service)
+  && /os\.participant_identity_key_hash = \$2/.test(service)
   && /ca\.owner_reviewer_id = \$1::uuid/.test(service)
-  && /SELECT COUNT\(\*\) FROM reviewers r WHERE r\.phone8 = \$2/.test(service)
   && /ca\.participant_identity_id = \$3::uuid/.test(service)
-  && /ca\.applicant_name[\s\S]{0,220}?= \$5/.test(service)
+  && !/SELECT COUNT\(\*\) FROM reviewers r WHERE r\.phone8/.test(service)
   && /os\.deleted_at IS NULL/.test(service)
   && /os\.source = 'order_submit'/.test(service));
 ok('추천 조합은 ID와 같은 주소 정규화를 쓰고 UUID 조회는 인덱스 경로로 분리한다',
-  /WITH eligible_applications AS/.test(service)
+  /WITH eligible_orders AS/.test(service)
   && /TRANSLATE\(BTRIM\(os\.address\), '\(\)\[\],\.\/·', ' {8}'\)/.test(service)
-  && /idx_campaign_apps_order_info_identity/.test(suggestionMigration));
+  && /participant_identity_key_hash TEXT/.test(suggestionMigration)
+  && /idx_order_submissions_order_info_active/.test(suggestionMigration));
+ok('제출 시 검증된 불변 소유자와 참여 명의 해시를 주문 원장에 함께 고정한다',
+  /verifiedIdentity\.context\.owner\.id/.test(submitRoutes)
+  && /participantIdentityKeyHash: verifiedIdentity\.approval\.selectedIdentityHash/.test(submitRoutes)
+  && /identityBinding: verifiedIdentityBinding/.test(submitRoutes)
+  && /participant_identity_key_hash = \$5/.test(read('src/services/orderLedger.service.js')));
 ok('추천 조회 장애는 구매양식을 막지 않고 빈 추천으로 접힌다',
   /let orderInfoSuggestions = \[\]/.test(service)
   && /orderInfoSuggestions = await loadOrderInfoSuggestions\(context\)/.test(service)

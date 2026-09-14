@@ -203,51 +203,32 @@ function orderInfoSuggestionId({ recipient, phone, address }) {
 /**
  * 현재 참여 명의가 과거에 실제 제출한 수취인·연락처·주소 조합을 최대 3개 반환한다.
  *
- * 운영의 코드 신원 UUID가 아직 비어 있는 동안에는 owner_phone8 폴백을 쓰되,
- * 같은 phone8을 가진 리뷰어가 정확히 한 명일 때만 허용한다. 참여 명의도 신청 당시
- * 이름+전화가 모두 같은 행만 사용해 다른 소유자/타계정 주문이 섞이지 않게 한다.
+ * 명의 검증을 통과하며 원장에 고정된 소유자 UUID+참여 명의 해시를 우선 사용한다.
+ * 그 값이 없는 과거 주문은 소유자/참여자 UUID가 신청행에 모두 고정된 경우만 허용한다.
+ * 전화번호만 남은 레거시 주문은 번호 재할당 시 타인의 주소가 노출될 수 있어 제외한다.
  */
 async function loadOrderInfoSuggestions(context, db = pool) {
-  const ownerPhone8 = phone8(context?.owner?.phone8 || context?.owner?.phone);
-  const participantPhone8 = phone8(context?.selected?.phone8 || context?.selected?.phone);
-  const participantName = cleanName(context?.selected?.name);
+  const selectedIdentityHash = context?.selected?.identityKey
+    ? stableHash(context.selected.identityKey)
+    : '';
   const participantIdentityId = UUID_RE.test(String(context?.selected?.participantIdentityId || ''))
     ? context.selected.participantIdentityId
     : null;
-  if (!UUID_RE.test(String(context?.owner?.id || '')) || ownerPhone8.length !== 8
-      || participantPhone8.length !== 8 || !participantName) return [];
+  if (!UUID_RE.test(String(context?.owner?.id || '')) || !selectedIdentityHash) return [];
 
   const { rows } = await db.query(
-    `WITH eligible_applications AS (
-       SELECT ca.id
+    `WITH eligible_orders AS (
+       SELECT os.id
+         FROM order_submissions os
+        WHERE os.owner_reviewer_id = $1::uuid
+          AND os.participant_identity_key_hash = $2
+       UNION
+       SELECT os.id
          FROM campaign_applications ca
+         JOIN order_submissions os ON os.campaign_application_id = ca.id
         WHERE $3::uuid IS NOT NULL
           AND ca.owner_reviewer_id = $1::uuid
           AND ca.participant_identity_id = $3::uuid
-       UNION ALL
-       SELECT ca.id
-         FROM campaign_applications ca
-        WHERE ca.owner_reviewer_id = $1::uuid
-          AND ca.participant_identity_id IS NULL
-          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.phone8, ca.applicant_phone, ''), '\\D', '', 'g'), 8) = $4
-          AND REGEXP_REPLACE(BTRIM(COALESCE(ca.applicant_name, '')), '\\s+', '', 'g') = $5
-       UNION ALL
-       SELECT ca.id
-         FROM campaign_applications ca
-        WHERE $3::uuid IS NOT NULL
-          AND ca.owner_reviewer_id IS NULL
-          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.owner_phone8, ca.phone8, ''), '\\D', '', 'g'), 8) = $2
-          AND (SELECT COUNT(*) FROM reviewers r WHERE r.phone8 = $2) = 1
-          AND ca.participant_identity_id = $3::uuid
-       UNION ALL
-       SELECT ca.id
-         FROM campaign_applications ca
-        WHERE ca.owner_reviewer_id IS NULL
-          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.owner_phone8, ca.phone8, ''), '\\D', '', 'g'), 8) = $2
-          AND (SELECT COUNT(*) FROM reviewers r WHERE r.phone8 = $2) = 1
-          AND ca.participant_identity_id IS NULL
-          AND RIGHT(REGEXP_REPLACE(COALESCE(ca.phone8, ca.applicant_phone, ''), '\\D', '', 'g'), 8) = $4
-          AND REGEXP_REPLACE(BTRIM(COALESCE(ca.applicant_name, '')), '\\s+', '', 'g') = $5
      ), scoped AS (
        SELECT os.recipient, os.phone, os.address, os.submitted_at,
               LOWER(REGEXP_REPLACE(BTRIM(os.recipient), '\\s+', '', 'g')) AS recipient_key,
@@ -255,8 +236,8 @@ async function loadOrderInfoSuggestions(context, db = pool) {
               LOWER(BTRIM(REGEXP_REPLACE(
                 TRANSLATE(BTRIM(os.address), '()[],./·', '        '), '\\s+', ' ', 'g'
               ))) AS address_key
-         FROM eligible_applications ea
-         JOIN order_submissions os ON os.campaign_application_id = ea.id
+         FROM eligible_orders eo
+         JOIN order_submissions os ON os.id = eo.id
         WHERE os.deleted_at IS NULL
           AND os.source = 'order_submit'
           AND os.submitted_at >= NOW() - INTERVAL '365 days'
@@ -279,7 +260,7 @@ async function loadOrderInfoSuggestions(context, db = pool) {
        FROM grouped
       ORDER BY use_count DESC, last_used_at DESC
       LIMIT 3`,
-    [context.owner.id, ownerPhone8, participantIdentityId, participantPhone8, participantName]
+    [context.owner.id, selectedIdentityHash, participantIdentityId]
   );
   return rows.map((row) => ({
     id: orderInfoSuggestionId(row),

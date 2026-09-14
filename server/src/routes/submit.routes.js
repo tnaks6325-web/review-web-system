@@ -1158,6 +1158,7 @@ router.post('/order', async (req, res, next) => {
     }
 
     const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
+    let verifiedIdentityBinding = null;
     if (_newIdentityGate) {
       try {
         const reviewerToken = req.headers['x-reviewer-token'];
@@ -1173,13 +1174,18 @@ router.post('/order', async (req, res, next) => {
         if (_emptyFields.length) {
           return res.status(400).json({ ok: false, code: 'FIELDS_REQUIRED', error: `필수 항목이 비어 있습니다: ${_emptyFields.join(', ')}` });
         }
-        await reviewerOrderIdentity.verifyApprovalForSubmission({
+        const verifiedIdentity = await reviewerOrderIdentity.verifyApprovalForSubmission({
           ...b,
           campaignApplicationId: holdCtx.applicationId,
           campaignId: holdCtx.campaignId,
           holdToken: holdCtx.holdToken,
           recipient, phone, address,
         }, reviewerSession);
+        verifiedIdentityBinding = {
+          ownerReviewerId: verifiedIdentity.context.owner.id,
+          participantIdentityId: verifiedIdentity.context.selected.participantIdentityId || null,
+          participantIdentityKeyHash: verifiedIdentity.approval.selectedIdentityHash,
+        };
       } catch (gateErr) {
         if (gateErr instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
           return res.status(gateErr.status || 400).json({ ok: false, code: gateErr.code, error: gateErr.message });
@@ -1368,7 +1374,8 @@ router.post('/order', async (req, res, next) => {
       //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
       //   ★ 063: expectedOptKey = 시트에 실제 기입되는 옵션 → 확정 시점 홀드 옵션과 다르면 warn(관제 대조 신호).
       //   ★ 방어 D3: orderIdentity = 시트에 실제 기입되는 연락처(정산 귀속 기준) → 명의 드리프트 경고 입력.
-      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone }, skipTabBinding: orderScope.sheetless } : undefined,
+      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone },
+        identityBinding: verifiedIdentityBinding, skipTabBinding: orderScope.sheetless } : undefined,
       // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
       // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
       // crossDay: 실제로 시트 claim을 건너뛴 모든 경로는 날짜를 넘는 같은 구매도 막는다.
