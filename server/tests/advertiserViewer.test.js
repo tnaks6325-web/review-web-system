@@ -352,6 +352,8 @@ async function run() {
         { row_index: 3, file_id: 'FILEBBBBBBBBBBBBBBBBBBBB', slot_key: 'slot2', receipt_evidence: true, inspection_kind: 'receipt', at: '2026-07-01T00:01:00Z' },
         { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', inspection_kind: 'review', at: '2026-07-02T00:00:00Z' },   // 중복 파일
         { row_index: 4, file_id: 'FILEHISTORICALRECEIPT02', slot_key: 'slot2', receipt_evidence: true, inspection_kind: 'receipt', at: null },
+        { row_index: 6, file_id: 'FILEAPPROVEDREVIEW000001', slot_key: 'review', receipt_evidence: true, receipt_validation: false,
+          inspection_kind: 'receipt', inspection_status: 'resolved', resolution: 'ok', at: null },
         { row_index: 5, file_id: null, slot_key: 'review', at: null },                                            // 빈 파일ID
       ] })],
       [/FROM review_index/, () => ({ rows: [
@@ -367,6 +369,8 @@ async function run() {
     ok('원장(032)에 없고 대표 이미지(031)만 있는 과거 행도 폴백으로 합류', rv['9'] && rv['9'][0].fileId === 'FILECCCCCCCCCCCCCCCCCCCC');
     ok('★ 기본 호출(업체 payload)은 수동 slot2 현금영수증 파일ID도 제외한다', !rv['3'].some(f => f.fileId === 'FILEBBBBBBBBBBBBBBBBBBBB'));
     ok('★ 제외된 영수증 파일ID는 review_index 과거 대표이미지 폴백으로도 재진입하지 않는다', !rv['4']);
+    ok('★ 영수증 AI 오판을 정상 확정한 리뷰 슬롯 파일은 업체 리뷰 미리보기에 복원한다',
+      rv['6'] && rv['6'][0].slot === 'review' && rv['6'][0].fileId === 'FILEAPPROVEDREVIEW000001');
     const internalRv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T', includeReceipt: true });
     ok('내부 호출만 현금영수증을 표준 receipt 슬롯으로 동봉한다', internalRv['3'].some(f => f.slot === 'receipt' && f.fileId === 'FILEBBBBBBBBBBBBBBBBBBBB'));
 

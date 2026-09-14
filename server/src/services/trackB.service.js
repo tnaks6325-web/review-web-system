@@ -2765,10 +2765,15 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     if (rowIndex == null || !fileId) return;
     const rawSlot = String(slot || 'review');
     const inspectedKind = String(roleEvidence.inspectionKind || '');
+    // 리뷰 슬롯의 AI 오판을 담당자가 정상으로 확정했다면 format.kind='receipt' 흔적만으로
+    // 영수증 취급하지 않는다. 영수증 전용 receiptValidation 증거와 실제 영수증 슬롯은 그대로 우선한다.
+    const approvedReview = rawSlot === 'review'
+      && roleEvidence.inspectionStatus === 'resolved' && roleEvidence.resolution === 'ok'
+      && roleEvidence.receiptValidation !== true;
     // 현재 탭 설정은 나중에 바뀐 수 있다. 제출 파일에 남은 검수 증거를 같이 보지
     // 않으면 과거 slot2 영수증이 일반 이미지로 외부 응답에 노출될 수 있다.
-    const isReceipt = roleEvidence.receiptEvidence === true
-      || inspectedKind === 'receipt'
+    const isReceipt = roleEvidence.receiptValidation === true
+      || (!approvedReview && (roleEvidence.receiptEvidence === true || inspectedKind === 'receipt'))
       || rawSlot === receiptSlotKey || rawSlot === 'receipt' || rawSlot === 'cash_receipt';
     if (!includeReceipt) {
       if (isReceipt) {
@@ -2799,9 +2804,11 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
   try {
     const result = await db.query(
       `SELECT rs.row_index, rs.file_id, rs.slot_key, COALESCE(rs.uploaded_at, rs.created_at) AS at,
-              (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
-                OR ri.checks->'format'->>'kind' = 'receipt') AS receipt_evidence,
-              COALESCE(ri.checks->'format'->>'kind', '') AS inspection_kind
+               (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+                 OR ri.checks->'format'->>'kind' = 'receipt') AS receipt_evidence,
+               (COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation') AS receipt_validation,
+               COALESCE(ri.checks->'format'->>'kind', '') AS inspection_kind,
+               COALESCE(ri.status, '') AS inspection_status, COALESCE(ri.resolution, '') AS resolution
          FROM review_submissions rs
          LEFT JOIN review_inspections ri ON ri.file_id = rs.file_id
         WHERE rs.sheet_id=$1 AND rs.tab_name=$2 AND rs.row_index IS NOT NULL AND rs.file_id IS NOT NULL
@@ -2816,7 +2823,10 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
   for (const r of subs) push(r.row_index, r.file_id, r.slot_key, r.at, {
     submission: true,
     receiptEvidence: r.receipt_evidence === true,
+    receiptValidation: r.receipt_validation === true,
     inspectionKind: r.inspection_kind,
+    inspectionStatus: r.inspection_status,
+    resolution: r.resolution,
   });
   let idx = [];
   if (includeReceipt || submissionEvidenceResolved) {

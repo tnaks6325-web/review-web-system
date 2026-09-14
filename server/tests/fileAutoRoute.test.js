@@ -261,6 +261,8 @@ const fileRoute = require('../src/services/fileRoute.service');
       '스윕 대상은 review/receipt와 수동 현금영수증 슬롯만');
     assert.ok(/const toSlot = rd\.toSlot === 'receipt' \? receiptSlotKey : rd\.toSlot/.test(fr),
       '소급 스윕도 현금영수증 역할을 수동 slot2 원장 key로 바꾼다');
+    assert.ok(/const movedToReceipt = p\.toSlot === receiptSlotKey[\s\S]*receipt: movedToReceipt[\s\S]*reinspectReceiptFile\(\{ fileId: p\.fileId \}\)/.test(fr),
+      '소급 스윕이 현영 칸으로 옮긴 파일도 기존 검수를 무효화하고 receipt 재검수한다');
     assert.ok(/const backTarget = isCashReceiptSlot\([\s\S]{0,260}\) \? 'receipt' : 'review'/.test(fr),
       '수동 slot2 현금영수증의 이동 되돌리기도 현금영수증 폴더로 복귀');
     assert.ok(fr.includes('if (dryRun) return'), '스윕 dryRun = 무변경 반환');

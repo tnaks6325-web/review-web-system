@@ -285,6 +285,45 @@ async function revertRouteFromEvent({ id, by = 'revert' } = {}) {
   return out;
 }
 
+async function _recordRouteMove({ fileId, targetSlot, routedBy, receipt = false, requireUnrouted = false } = {}) {
+  if (!receipt) {
+    return _db().query(
+      `UPDATE review_submissions
+          SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
+              routed_at = NOW(), routed_by = $3
+        WHERE file_id = $1${requireUnrouted ? ' AND routed_from_slot IS NULL' : ''}`,
+      [fileId, targetSlot, routedBy]
+    );
+  }
+  // 영수증 칸 이동과 기존 일반 검수 무효화는 한 SQL 문으로 묶는다. 둘 사이에 입금 요청이
+  // 끼어도 예전 resolution='ok'가 새 영수증 제출의 승인으로 재사용될 수 없다.
+  const pendingChecks = JSON.stringify({
+    receiptValidation: { verdict: 'warn', status: 'retry_pending', reason: 'receipt_route' },
+  });
+  return _db().query(
+    `WITH moved AS (
+       UPDATE review_submissions
+          SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
+              routed_at = NOW(), routed_by = $3
+        WHERE file_id = $1${requireUnrouted ? ' AND routed_from_slot IS NULL' : ''}
+        RETURNING file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key
+     )
+     INSERT INTO review_inspections
+       (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
+        inspected_at, updated_at)
+     SELECT file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key,
+            'pending', $4::jsonb, NOW(), NOW()
+       FROM moved
+     ON CONFLICT (file_id) DO UPDATE
+       SET sheet_id = EXCLUDED.sheet_id, tab_name = EXCLUDED.tab_name,
+           row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
+           slot_key = EXCLUDED.slot_key, status = 'pending', checks = EXCLUDED.checks,
+           resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+           attempts = 0, inspected_at = NOW(), updated_at = NOW()`,
+    [fileId, targetSlot, routedBy, pendingChecks]
+  );
+}
+
 /* ── 소급 정리 스윕 (과거 오제출 — 사용자 확정 "소급정리 필요") ──────────
  * 그 탭의 기존 제출 원장을 훑어 오제출을 찾아 [미리보기 → 실행] 2단계로 정리한다.
  * 건당 Drive 다운로드 1회 + AI 1콜(캐시 미스 가정)이라 limit 으로 상한(기본 20).
@@ -404,12 +443,19 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
         const cur = await driveService.getFileParents(p.fileId);
         const parent = (cur.parents || [])[0] || null;
         if (parent !== toFolderId) await driveService.moveFile(p.fileId, toFolderId, parent);
-        await _db().query(
-          `UPDATE review_submissions
-              SET routed_from_slot = slot_key, slot_key = $2, routed_at = NOW(), routed_by = $3
-            WHERE file_id = $1 AND routed_from_slot IS NULL`, [p.fileId, p.toSlot, 'sweep:' + by]);
+        const movedToReceipt = p.toSlot === receiptSlotKey;
+        await _recordRouteMove({
+          fileId: p.fileId, targetSlot: p.toSlot, routedBy: 'sweep:' + by,
+          receipt: movedToReceipt, requireUnrouted: true,
+        });
         moved++;
         await recomputePrimary({ sheetId, tabName, rowIndex: p.rowIndex });
+        if (movedToReceipt) {
+          const reinspection = await inspect.reinspectReceiptFile({ fileId: p.fileId });
+          if (!reinspection || !reinspection.ok) {
+            errors.push({ fileId: p.fileId, pending: true, error: reinspection?.error || '영수증 재검수 대기' });
+          }
+        }
         await logRouteEvent({
           eventType: 'capture_routed', severity: 'warn',
           sheetId, tabName, reviewerName: p.reviewerName,
@@ -480,41 +526,9 @@ async function manualRoute({ fileId, target, by = '' } = {}) {
 
   // ★ routed_from_slot 은 COALESCE — 자동 이동 뒤 사람이 다시 옮겨도 **최초 출처**를 보존해
   //   되돌리기가 항상 원래 칸으로 간다.
-  if (t === 'receipt') {
-    // 제출 슬롯 변경과 기존 일반 검수 무효화는 한 SQL 문으로 묶는다. 둘 사이에 입금 요청이
-    // 끼어도 예전 resolution='ok'가 새 영수증 제출의 승인으로 재사용될 수 없다.
-    const pendingChecks = JSON.stringify({
-      receiptValidation: { verdict: 'warn', status: 'retry_pending', reason: 'manual_receipt_route' },
-    });
-    await _db().query(
-      `WITH moved AS (
-         UPDATE review_submissions
-            SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
-                routed_at = NOW(), routed_by = $3
-          WHERE file_id = $1
-          RETURNING file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key
-       )
-       INSERT INTO review_inspections
-         (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
-          inspected_at, updated_at)
-       SELECT file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key,
-              'pending', $4::jsonb, NOW(), NOW()
-         FROM moved
-       ON CONFLICT (file_id) DO UPDATE
-         SET sheet_id = EXCLUDED.sheet_id, tab_name = EXCLUDED.tab_name,
-             row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
-             slot_key = EXCLUDED.slot_key, status = 'pending', checks = EXCLUDED.checks,
-             resolution = NULL, resolved_at = NULL, resolved_by = NULL,
-             attempts = 0, inspected_at = NOW(), updated_at = NOW()`,
-      [fileId, targetSlot, 'manual:' + (by || 'admin'), pendingChecks]
-    );
-  } else {
-    await _db().query(
-      `UPDATE review_submissions
-          SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
-              routed_at = NOW(), routed_by = $3
-        WHERE file_id = $1`, [fileId, targetSlot, 'manual:' + (by || 'admin')]);
-  }
+  await _recordRouteMove({
+    fileId, targetSlot, routedBy: 'manual:' + (by || 'admin'), receipt: t === 'receipt',
+  });
   await recomputePrimary({ sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index });
   await logRouteEvent({
     eventType: 'capture_routed', severity: 'warn', resolved: true,   // 사람이 한 행동 — 알림으로 쌓지 않는다
