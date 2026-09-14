@@ -103,6 +103,9 @@ async function run() {
     /tc\.capture_slots AS "captureSlots", tc\.income_type AS "incomeType"/.test(SVC));
   t('folder_url·capture_folder_url 은 종전대로 함께 온다',
     /tc\.folder_url AS "folderUrl", tc\.capture_folder_url AS "captureFolderUrl"/.test(SVC));
+  const ownedBlock = SVC.slice(SVC.indexOf('async function ownedTabsForAdvertiser'), SVC.indexOf('async function ownedTabsForAdvertiser') + 14000);
+  t('★ 재사용 탭 현영 여부는 최신 공고 1건이 아니라 연결 공고 전체를 합산한다',
+    /BOOL_OR\(cash_receipt_required\) OVER \(\) AS cash_receipt_required[\s\S]{0,300}ORDER BY \(rc\.status = 'active'\) DESC[\s\S]{0,100}LIMIT 1/.test(ownedBlock));
   const svc = require('../src/services/trackB.service');
   {
     svc.__resetTabStatsCacheForTest && svc.__resetTabStatsCacheForTest();

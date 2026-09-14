@@ -1080,8 +1080,9 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
        /* 업체 화면의 총건수도 작업 조건 카드와 같은 적용 정원(공고 우선, 없으면 발주)을 쓴다.
           활성 작업행 수는 내부 투영·정리용 값일 뿐 업체에게 "총 건수"로 보이면 안 된다. */
        LEFT JOIN LATERAL (
-         SELECT recruit_total, cash_receipt_required
-           FROM recruit_campaigns rc
+          SELECT recruit_total,
+                 BOOL_OR(cash_receipt_required) OVER () AS cash_receipt_required
+            FROM recruit_campaigns rc
           WHERE rc.linked_sheet_id = t.sheet_id
             AND (rc.linked_tab_name = t.tab_name OR (t.tab_gid IS NOT NULL AND rc.linked_tab_gid = t.tab_gid))
           ORDER BY (rc.status = 'active') DESC, rc.created_at DESC
