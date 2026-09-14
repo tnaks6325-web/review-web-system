@@ -86,7 +86,7 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
       await client.query('BEGIN');
       // 화면을 연 뒤 영수증이 무효화·이동될 수 있고 API를 직접 호출할 수도 있으므로,
       // 실제 입금 원장을 쓰는 같은 transaction 안에서 좌표 전부를 다시 검증한다.
-      const receiptEligibleItems = await filterReceiptEligiblePaymentRows(client, items);
+      const receiptEligibleItems = await filterReceiptEligiblePaymentRows(client, items, { lock: true });
       if (receiptEligibleItems.length !== items.length) {
         await client.query('ROLLBACK');
         return res.status(409).json({

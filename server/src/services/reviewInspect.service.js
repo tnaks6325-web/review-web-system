@@ -1441,6 +1441,40 @@ async function _sweepTargets(limit) {
   return rows;
 }
 
+/** REVIEW_INSPECT=0 일 때도 지급 근거인 영수증만은 pending/미검수 재시도를 계속한다. */
+async function _receiptSweepTargets(limit) {
+  const { rows } = await _db().query(
+    `SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
+            s.file_hash, tc.capture_slots, tc.income_type,
+            COALESCE(i.attempts, 0) AS attempts,
+            CASE WHEN i.file_id IS NULL THEN 1 ELSE 0 END AS pri
+       FROM review_submissions s
+       LEFT JOIN review_inspections i ON i.file_id = s.file_id
+       LEFT JOIN tab_configs tc ON tc.sheet_id = s.sheet_id AND tc.tab_name = s.tab_name
+      WHERE (
+              (i.status = 'pending' AND COALESCE(i.attempts, 0) < $2)
+              OR (i.file_id IS NULL AND s.uploaded_at > NOW() - ($3 || ' days')::interval)
+            )
+        AND (
+              COALESCE(i.checks, '{}'::jsonb) ? 'receiptValidation'
+              OR s.slot_key IN ('receipt', 'cash_receipt')
+              OR EXISTS (
+                   SELECT 1
+                     FROM jsonb_array_elements(
+                       CASE WHEN jsonb_typeof(tc.capture_slots) = 'array'
+                            THEN tc.capture_slots ELSE '[]'::jsonb END
+                     ) AS slot
+                    WHERE slot->>'key' = s.slot_key
+                      AND COALESCE(slot->>'label', '') ~ '현금영수증|현영|지출증빙'
+                 )
+            )
+      ORDER BY pri, attempts, COALESCE(i.updated_at, s.uploaded_at) ASC NULLS LAST
+      LIMIT $1`,
+    [limit, SWEEP_MAX_ATTEMPTS, String(SWEEP_DAYS)]
+  );
+  return rows;
+}
+
 /** 재시도 상한을 넘긴 pending 을 종결한다(관리자 화면이 옛 건으로 차는 것 방지). */
 async function _giveUpStale() {
   try {
@@ -1448,6 +1482,38 @@ async function _giveUpStale() {
       `UPDATE review_inspections
           SET status = 'unverifiable', updated_at = NOW()
         WHERE status = 'pending' AND COALESCE(attempts, 0) >= $1`,
+      [SWEEP_MAX_ATTEMPTS]
+    );
+    return rowCount || 0;
+  } catch (_) { return 0; }
+}
+
+/** 일반 검수가 꺼져 있을 때는 영수증 pending만 재시도 상한으로 종결한다. */
+async function _giveUpStaleReceipts() {
+  try {
+    const { rowCount } = await _db().query(
+      `UPDATE review_inspections i
+          SET status = 'unverifiable', updated_at = NOW()
+        WHERE i.status = 'pending' AND COALESCE(i.attempts, 0) >= $1
+          AND EXISTS (
+            SELECT 1
+              FROM review_submissions s
+              LEFT JOIN tab_configs tc ON tc.sheet_id = s.sheet_id AND tc.tab_name = s.tab_name
+             WHERE s.file_id = i.file_id
+               AND (
+                 COALESCE(i.checks, '{}'::jsonb) ? 'receiptValidation'
+                 OR s.slot_key IN ('receipt', 'cash_receipt')
+                 OR EXISTS (
+                      SELECT 1
+                        FROM jsonb_array_elements(
+                          CASE WHEN jsonb_typeof(tc.capture_slots) = 'array'
+                               THEN tc.capture_slots ELSE '[]'::jsonb END
+                        ) AS slot
+                       WHERE slot->>'key' = s.slot_key
+                         AND COALESCE(slot->>'label', '') ~ '현금영수증|현영|지출증빙'
+                    )
+               )
+          )`,
       [SWEEP_MAX_ATTEMPTS]
     );
     return rowCount || 0;
@@ -1501,10 +1567,11 @@ async function reinspectTab({ sheetId, tabName, fileIds, limit = 100 } = {}) {
 
 async function runInspectSweep({ limit } = {}) {
   const out = { scanned: 0, done: 0, failed: 0, gaveUp: 0 };
-  if (!ENABLED) return out;
+  const receiptOnly = !ENABLED;
   try {
-    out.gaveUp = await _giveUpStale();
-    const targets = await _sweepTargets(Math.min(Number(limit) || SWEEP_BATCH, 100));
+    out.gaveUp = receiptOnly ? await _giveUpStaleReceipts() : await _giveUpStale();
+    const cap = Math.min(Number(limit) || SWEEP_BATCH, 100);
+    const targets = receiptOnly ? await _receiptSweepTargets(cap) : await _sweepTargets(cap);
     out.scanned = targets.length;
     if (!targets.length) return out;
 
@@ -1516,7 +1583,7 @@ async function runInspectSweep({ limit } = {}) {
         const b64 = f.buffer.toString('base64');
         // 수동 슬롯은 key가 slot2여도 라벨이 현금영수증일 수 있다. 재검수에서도 실제 역할을
         // 넘겨야 영수증 검증 원장을 일반 리뷰 판정으로 덮어쓰지 않는다.
-        const slotRole = isCashReceiptSlot(
+        const slotRole = receiptOnly || isCashReceiptSlot(
           t.capture_slots, t.income_type, t.slot_key || 'review') ? 'receipt' : (t.slot_key || 'review');
         const r = await inspectSubmission({
           base64: b64, mimeType: f.mimeType || 'image/jpeg',
@@ -1533,7 +1600,11 @@ async function runInspectSweep({ limit } = {}) {
         await _upsertInspection({
           fileId: t.file_id, sheetId: t.sheet_id, tabName: t.tab_name, rowIndex: t.row_index,
           reviewerName: t.reviewer_name, slotKey: t.slot_key || 'review',
-          status: 'pending', checks: { sweep: { verdict: 'skip', error: String(e.message || '').slice(0, 120) } },
+          status: 'pending', checks: {
+            ...(slotRole === 'receipt'
+              ? { receiptValidation: { verdict: 'warn', status: 'retry_pending' } } : {}),
+            sweep: { verdict: 'skip', error: String(e.message || '').slice(0, 120) },
+          },
           channel: null, device: null, ocrProduct: null, ocrText: null, ocrAuthor: null,
           fileHash: t.file_hash || null, confidence: null,
         });

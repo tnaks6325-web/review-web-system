@@ -91,8 +91,11 @@ const db = {
   assert.match(paymentRoute, /filterReceiptEligiblePaymentRows\(pool, rows\)/,
     '기존 입금목록 API가 현금영수증 공용 게이트를 거치지 않는다');
   const markDone = paymentRoute.match(/router\.post\('\/mark-done'[\s\S]*?\n}\);/)?.[0] || '';
-  assert.match(markDone, /BEGIN[\s\S]*filterReceiptEligiblePaymentRows\(client, items\)[\s\S]*CASH_RECEIPT_NOT_VERIFIED[\s\S]*recordDeposits\(client, receiptEligibleItems/,
-    '입금 완료 API는 같은 transaction 안에서 현금영수증을 다시 검증해야 한다');
+  assert.match(markDone, /BEGIN[\s\S]*filterReceiptEligiblePaymentRows\(client, items, \{ lock: true \}\)[\s\S]*CASH_RECEIPT_NOT_VERIFIED[\s\S]*recordDeposits\(client, receiptEligibleItems/,
+    '입금 완료 API는 같은 transaction 안에서 현금영수증 근거를 잠그고 다시 검증해야 한다');
+  const receiptGate = fs.readFileSync(path.join(__dirname, '../src/services/paymentReceiptGate.service.js'), 'utf8');
+  assert.match(receiptGate, /if \(lock\)[\s\S]*FOR UPDATE OF rs[\s\S]*FROM review_inspections[\s\S]*FOR UPDATE/,
+    '영수증 제출·검수 행 잠금 없이 검증 후 반려·교체가 끼어들 수 있다');
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
@@ -110,7 +113,11 @@ const db = {
     '영수증 판정 통과/불일치/판정불가가 검수 원장에 분리 기록돼야 한다');
   assert.match(inspectService, /\(!ENABLED && requestedSlotRole !== 'receipt'\)/,
     '일반 리뷰검수를 꺼도 현금영수증 지급 판정 원장은 기록해야 한다');
-  assert.match(inspectService, /const slotRole = isCashReceiptSlot\([\s\S]*t\.capture_slots, t\.income_type, t\.slot_key[\s\S]*slotRole,/,
+  assert.match(inspectService, /const receiptOnly = !ENABLED[\s\S]*_receiptSweepTargets\(cap\)[\s\S]*receiptOnly \|\| isCashReceiptSlot/,
+    '일반 리뷰검수가 꺼져도 영수증 pending·미검수 건은 재시도해야 한다');
+  assert.match(inspectService, /_receiptSweepTargets[\s\S]*receiptValidation[\s\S]*slot_key IN \('receipt', 'cash_receipt'\)[\s\S]*현금영수증\|현영\|지출증빙/,
+    '자동 receipt 키와 수동 slot2 라벨 영수증을 모두 재시도 대상으로 잡아야 한다');
+  assert.match(inspectService, /const slotRole = receiptOnly \|\| isCashReceiptSlot\([\s\S]*t\.capture_slots, t\.income_type, t\.slot_key[\s\S]*slotRole,/,
     '수동 slot2 현금영수증도 재검수 때 receipt 역할을 유지해야 한다');
   assert.match(uploadRoute, /const captureVerdictsByFileId = new Map\(\)[\s\S]*captureVerdictsByFileId\.set\(uploaded\.id, verdict\)[\s\S]*captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');

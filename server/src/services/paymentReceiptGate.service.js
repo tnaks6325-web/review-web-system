@@ -13,7 +13,7 @@ const { cashReceiptRequirementsForTabs } = require('./cashReceiptContext.service
 const pairKey = (sheetId, tabName) => `${sheetId}\u0000${tabName}`;
 const rowKey = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
 
-async function cashReceiptSubmissionStates(db, rows) {
+async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
   const source = Array.isArray(rows) ? rows : [];
   const states = new Map();
   if (!source.length) return states;
@@ -80,6 +80,43 @@ async function cashReceiptSubmissionStates(db, rows) {
 
   if (!required.length) return states;
 
+  // 입금 완료 처리는 검증 후 원장을 쓰기까지 영수증 제출/검수 상태가 바뀌면 안 된다.
+  // 좌표에 맞는 제출 행과 그 파일의 검수 행을 같은 transaction에서 잠그면 반려·교체·수동 이동이
+  // 입금 기록 전에 끌어들어오는 READ COMMITTED 경쟁을 막는다.
+  if (lock) {
+    const lockParams = [
+      required.map(r => r.sheetId),
+      required.map(r => r.tabName),
+      required.map(r => r.rowIndex),
+      required.map(r => r.receiptKey),
+    ];
+    const { rows: lockedSubmissions } = await db.query(
+      `WITH requested AS (
+         SELECT * FROM UNNEST($1::text[], $2::text[], $3::int[], $4::text[])
+           AS r(sheet_id, tab_name, row_index, receipt_key)
+       )
+       SELECT rs.file_id
+         FROM requested r
+         JOIN review_submissions rs
+           ON rs.sheet_id = r.sheet_id
+          AND rs.tab_name = r.tab_name
+          AND rs.row_index = r.row_index
+          AND rs.slot_key = r.receipt_key
+          AND btrim(COALESCE(rs.file_id, '')) <> ''
+        FOR UPDATE OF rs`,
+      lockParams
+    );
+    const fileIds = [...new Set((lockedSubmissions || []).map(r => String(r.file_id || '')).filter(Boolean))];
+    if (fileIds.length) {
+      await db.query(
+        `SELECT file_id FROM review_inspections
+          WHERE file_id = ANY($1::text[])
+          FOR UPDATE`,
+        [fileIds]
+      );
+    }
+  }
+
   const { rows: submittedRows } = await db.query(
     `WITH requested AS (
        SELECT * FROM UNNEST($1::text[], $2::text[], $3::int[], $4::text[])
@@ -124,10 +161,10 @@ async function cashReceiptSubmissionStates(db, rows) {
   return states;
 }
 
-async function filterReceiptEligiblePaymentRows(db, rows) {
+async function filterReceiptEligiblePaymentRows(db, rows, options = {}) {
   const source = Array.isArray(rows) ? rows : [];
   if (!source.length) return [];
-  const states = await cashReceiptSubmissionStates(db, source);
+  const states = await cashReceiptSubmissionStates(db, source, options);
 
   return source.filter(row => {
     const key = rowKey(row.sheetId, row.tabName, row.rowIndex);
