@@ -13,6 +13,7 @@ const diagRoutes = read('src/routes/diag.routes.js');
 const gemini = read('src/services/gemini.service.js');
 const migration = read('migrations/147_reviewer_shopping_identity_match.sql');
 const suggestionMigration = read('migrations/157_order_info_suggestions.sql');
+const suggestionBindingMigration = read('migrations/158_order_info_identity_binding.sql');
 const appJs = read('../frontend/js/search-app.js');
 const searchCss = read('../frontend/css/search.css');
 const campaign = read('../frontend/campaign.html');
@@ -147,8 +148,9 @@ ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가
 ok('추천 조합은 ID와 같은 주소 정규화를 쓰고 UUID 조회는 인덱스 경로로 분리한다',
   /WITH eligible_orders AS/.test(service)
   && /TRANSLATE\(BTRIM\(os\.address\), '\(\)\[\],\.\/·', ' {8}'\)/.test(service)
-  && /participant_identity_key_hash TEXT/.test(suggestionMigration)
-  && /idx_order_submissions_order_info_active/.test(suggestionMigration));
+  && /idx_campaign_apps_order_info_identity/.test(suggestionMigration)
+  && /participant_identity_key_hash TEXT/.test(suggestionBindingMigration)
+  && /idx_order_submissions_owner_identity_suggestions/.test(suggestionBindingMigration));
 ok('제출 시 검증된 불변 소유자와 참여 명의 해시를 주문 원장에 함께 고정한다',
   /verifiedIdentity\.context\.owner\.id/.test(submitRoutes)
   && /participantIdentityKeyHash: verifiedIdentity\.approval\.selectedIdentityHash/.test(submitRoutes)
