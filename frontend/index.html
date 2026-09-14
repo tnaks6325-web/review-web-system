@@ -666,6 +666,27 @@
   .obx .ostart{ width:100%; margin-top:18px; padding:16px; border:none; border-radius:14px; background:#3182f6; color:#fff; font-weight:700; font-size:1rem; cursor:pointer; }
   .obx .oskip{ width:100%; text-align:center; margin-top:12px; color:var(--t3); font-size:.82rem; font-weight:600; background:none; border:none; cursor:pointer; }
 
+  /* 로그인 시 오래된 리뷰 1건 경고 — 카드의 기존 기한 표시는 되살리지 않는다. */
+  .orw-layer{ position:fixed; inset:0; z-index:520; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(19,25,34,.56); backdrop-filter:blur(2px); }
+  .orw-layer.on{ display:flex; animation:orwFade .18s ease both; }
+  .orw-modal{ position:relative; width:100%; max-width:384px; overflow:hidden; border-radius:22px; background:#fff; box-shadow:0 18px 52px rgba(25,31,40,.24); animation:orwIn .28s cubic-bezier(.2,.85,.2,1) both; }
+  .orw-strip{ display:flex; align-items:center; gap:7px; min-height:39px; padding:10px 48px 10px 17px; color:#815000; background:#FFF4D6; font-size:.72rem; font-weight:800; }
+  .orw-x{ position:absolute; top:6px; right:7px; width:30px; height:30px; display:grid; place-items:center; border:0; border-radius:9px; color:#73664B; background:transparent; cursor:pointer; font-size:1.35rem; line-height:1; }
+  .orw-x:hover{ background:rgba(121,90,20,.09); }
+  .orw-body{ padding:22px 19px 19px; }
+  .orw-title{ margin:0; color:#191F28; font-size:1.22rem; line-height:1.4; letter-spacing:-.035em; font-weight:800; }
+  .orw-task{ margin:16px 0 14px; padding:13px; border:1px solid #E6E9ED; border-radius:13px; background:#F8F9FA; }
+  .orw-task-label{ display:block; color:#8B95A1; font-size:.64rem; font-weight:700; }
+  .orw-task-name{ display:block; margin-top:5px; color:#191F28; font-size:.88rem; line-height:1.5; word-break:keep-all; }
+  .orw-task-date{ display:flex; align-items:center; gap:5px; margin-top:7px; color:#C9343A; font-size:.66rem; font-weight:700; }
+  .orw-task-date::before{ content:""; width:5px; height:5px; flex:none; border-radius:50%; background:#E5484D; }
+  .orw-go{ width:100%; min-height:49px; padding:11px 15px; border:0; border-radius:13px; color:#fff; background:#3182F6; box-shadow:0 7px 16px rgba(49,130,246,.25); cursor:pointer; font-size:.88rem; font-weight:800; }
+  .orw-go:hover{ background:#1B64DA; }
+  .orw-note{ margin:10px 2px 0; color:#7B8490; font-size:.66rem; line-height:1.55; text-align:center; }
+  @keyframes orwFade{ from{opacity:0} to{opacity:1} }
+  @keyframes orwIn{ from{opacity:0;transform:translateY(14px) scale(.97)} to{opacity:1;transform:none} }
+  @media(prefers-reduced-motion:reduce){ .orw-layer.on,.orw-modal{ animation:none; } }
+
   </style>
 <link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
@@ -731,6 +752,23 @@
       </div>
     </div>
   </header>
+
+  <div id="overdueReviewWarning" class="orw-layer" role="dialog" aria-modal="true" aria-labelledby="orwTitle" aria-hidden="true">
+    <section class="orw-modal">
+      <div class="orw-strip"><i class="fas fa-clock" aria-hidden="true"></i><span id="orwElapsed">리뷰 미제출 · 10일 경과</span></div>
+      <button type="button" class="orw-x" onclick="closeOverdueReviewWarning()" aria-label="리뷰 제출 알림 닫기">×</button>
+      <div class="orw-body">
+        <h2 class="orw-title" id="orwTitle">리뷰를 제출해 주세요</h2>
+        <div class="orw-task">
+          <span class="orw-task-label">제출할 작업</span>
+          <strong class="orw-task-name" id="orwTaskName">참여 작업</strong>
+          <span class="orw-task-date" id="orwSubmittedAt"></span>
+        </div>
+        <button type="button" class="orw-go" onclick="goToOverdueReview()">리뷰 제출하기</button>
+        <p class="orw-note">닫아도 다른 캠페인에 참여할 수 있어요.</p>
+      </div>
+    </section>
+  </div>
 
   <div class="content-area">
     <!-- 관리자 권한모드 배너 (공고수정 허용 명단에 든 리뷰어에게만 표시) -->
@@ -1132,13 +1170,19 @@ function showHome(user) {
   // 프로필 + 리뷰 내역 + 소식·공지 로드
   loadInlineProfile(user);
   loadReviewList(user);
+  const overdueLoad = loadOverdueReviewWarning(user);
   loadReviewerNoticesHome();
   loadReviewerHomeBanner();
 
   // 기본 탭 = 홈(소식·공지 + 모집공고)
   switchTab('home');
   // 첫 이용 온보딩 (1회)
-  if (!localStorage.getItem('inad_onboarded')) setTimeout(openOnboard, 500);
+  if (!localStorage.getItem('inad_onboarded')) {
+    Promise.resolve(overdueLoad).finally(() => setTimeout(() => {
+      const warning = document.getElementById('overdueReviewWarning');
+      if (!warning || !warning.classList.contains('on')) openOnboard();
+    }, 500));
+  }
 }
 
 /** 공고수정 스코프 토큰 발급 시도 (마스터 허용명단에 있는 리뷰어만 성공) */
@@ -1570,6 +1614,91 @@ function _taskLabel(item, fallback) {
     if (v && !_INTERNAL_KEY_RE.test(v)) return v;
   }
   return fallback === undefined ? '참여 작업' : fallback;
+}
+
+// ── 로그인 시 오래된 리뷰 경고 ───────────────────────────────────
+// 장기 숨김 상태는 저장하지 않는다. X는 현재 화면에서만 닫고, 다음 로그인에는 다시 조회한다.
+let _orwItem = null;
+let _orwRequested = false;
+
+function _orwFormatSubmittedAt(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hour12:false,
+  }).formatToParts(date).reduce((acc, part) => { acc[part.type] = part.value; return acc; }, {});
+  return `구매양식 제출 ${parts.year}.${parts.month}.${parts.day} ${parts.hour}:${parts.minute}`;
+}
+
+function _orwPaint(item) {
+  const layer = document.getElementById('overdueReviewWarning');
+  if (!layer || !item) return;
+  const days = Math.max(10, Number(item.elapsedDays) || 10);
+  document.getElementById('orwElapsed').textContent = `리뷰 미제출 · ${days}일 경과`;
+  document.getElementById('orwTaskName').textContent = _taskLabel({ displayName:item.displayName }, '참여 작업');
+  document.getElementById('orwSubmittedAt').textContent = _orwFormatSubmittedAt(item.submittedAt);
+  layer.classList.add('on');
+  layer.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => layer.querySelector('.orw-x')?.focus({ preventScroll:true }));
+}
+
+async function loadOverdueReviewWarning(user) {
+  if (_orwRequested) return;
+  _orwRequested = true;
+  try {
+    let current = user || getSavedUser();
+    let token = current && current.reviewerToken;
+    if (!token) return;
+    const url = API_BASE_URL + '/api/reviewer/overdue-review-warning';
+    let response = await fetch(url, { headers:{ 'X-Reviewer-Token':token } });
+    if (response.status === 401) {
+      current = await _refreshReviewerHomeSession(current);
+      token = current && current.reviewerToken;
+      if (!token) return;
+      response = await fetch(url, { headers:{ 'X-Reviewer-Token':token } });
+    }
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json.ok || !json.item) return;
+    _orwItem = json.item;
+    _orwPaint(_orwItem);
+  } catch (_) { /* 경고 조회 실패가 홈 사용을 막지 않는다. */ }
+}
+
+function closeOverdueReviewWarning() {
+  const layer = document.getElementById('overdueReviewWarning');
+  if (!layer) return;
+  layer.classList.remove('on');
+  layer.setAttribute('aria-hidden', 'true');
+}
+
+function _orwSameTarget(item, target) {
+  if (!item || !target) return false;
+  if (target.orderSubmissionId && item.orderSubmissionId
+      && String(target.orderSubmissionId) === String(item.orderSubmissionId)) return true;
+  return String(item.sheetId || '') === String(target.sheetId || '')
+    && String(item.tabName || '') === String(target.tabName || '')
+    && Number(item.rowIndex) === Number(target.rowIndex);
+}
+
+async function goToOverdueReview() {
+  const target = _orwItem;
+  closeOverdueReviewWarning();
+  _reviewSubTab = 'pending';
+  switchTab('review');
+  if (!target) return;
+  let item = (_reviewListData.pending || []).find(candidate => _orwSameTarget(candidate, target));
+  if (!item) {
+    const user = getSavedUser();
+    if (user) await loadReviewList(user);
+    item = (_reviewListData.pending || []).find(candidate => _orwSameTarget(candidate, target));
+  }
+  if (item && !item.isOrderPending) {
+    openPartInfoSheet([item], { done:false });
+  } else {
+    showToast('리뷰 내역에서 해당 작업을 선택해 주세요.');
+  }
 }
 
 let _mcItems = [], _mcTargetId = '';
