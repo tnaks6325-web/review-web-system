@@ -13,9 +13,10 @@ const { cashReceiptRequirementsForTabs } = require('./cashReceiptContext.service
 const pairKey = (sheetId, tabName) => `${sheetId}\u0000${tabName}`;
 const rowKey = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
 
-async function filterReceiptEligiblePaymentRows(db, rows) {
+async function cashReceiptSubmissionStates(db, rows) {
   const source = Array.isArray(rows) ? rows : [];
-  if (!source.length) return [];
+  const states = new Map();
+  if (!source.length) return states;
 
   const pairs = [];
   const seenPairs = new Set();
@@ -45,7 +46,6 @@ async function filterReceiptEligiblePaymentRows(db, rows) {
   });
 
   const required = [];
-  const requiredKeys = new Set();
   for (const row of source) {
     const pKey = pairKey(row.sheetId, row.tabName);
     const cfg = configMap.get(pKey) || {};
@@ -56,22 +56,29 @@ async function filterReceiptEligiblePaymentRows(db, rows) {
       campaignRequired
     );
     const isReceiptTarget = campaignRequired || info.incomeSaysCashReceipt || !!info.slot;
-    if (!isReceiptTarget) continue;
-
     const rKey = rowKey(row.sheetId, row.tabName, row.rowIndex);
-    requiredKeys.add(rKey);
+    states.set(rKey, {
+      required: isReceiptTarget,
+      configured: !isReceiptTarget || !!(info.slot && info.slot.key),
+      submitted: false,
+    });
+    if (!isReceiptTarget) continue;
     // 현영으로 표시됐는데 슬롯이 잘못 설정된 경우도 지급을 보류한다.
     if (!info.slot || !info.slot.key) continue;
+    const index = Number(row.rowIndex);
+    if (!Number.isInteger(index)) {
+      states.set(rKey, { required: true, configured: false, submitted: false });
+      continue;
+    }
     required.push({
       sheetId: row.sheetId,
       tabName: row.tabName,
-      rowIndex: Number(row.rowIndex),
+      rowIndex: index,
       receiptKey: String(info.slot.key),
     });
   }
 
-  if (!requiredKeys.size) return source;
-  if (!required.length) return source.filter(row => !requiredKeys.has(rowKey(row.sheetId, row.tabName, row.rowIndex)));
+  if (!required.length) return states;
 
   const { rows: submittedRows } = await db.query(
     `WITH requested AS (
@@ -97,11 +104,24 @@ async function filterReceiptEligiblePaymentRows(db, rows) {
     ]
   );
   const submitted = new Set((submittedRows || []).map(row => rowKey(row.sheetId, row.tabName, row.rowIndex)));
+  for (const key of submitted) {
+    const state = states.get(key);
+    if (state) state.submitted = true;
+  }
+
+  return states;
+}
+
+async function filterReceiptEligiblePaymentRows(db, rows) {
+  const source = Array.isArray(rows) ? rows : [];
+  if (!source.length) return [];
+  const states = await cashReceiptSubmissionStates(db, source);
 
   return source.filter(row => {
     const key = rowKey(row.sheetId, row.tabName, row.rowIndex);
-    return !requiredKeys.has(key) || submitted.has(key);
+    const state = states.get(key);
+    return !state || !state.required || (state.configured && state.submitted);
   });
 }
 
-module.exports = { filterReceiptEligiblePaymentRows };
+module.exports = { filterReceiptEligiblePaymentRows, cashReceiptSubmissionStates, cashReceiptSubmissionRowKey: rowKey };

@@ -25,6 +25,7 @@ const { resolveWorkManager } = require('../utils/workManager');   // 담당자 �
 const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
 const { findPaymentColumnIndex } = require('./columnResolver');   // 작업보드에 실제 표시되는 입금 열 판정 단일 출처
 const { loadPopularCreditMatches } = require('./popularCredit.service');   // 인기 참여권·운영 목적 라벨 단일 출처
+const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
 
 // ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
 //   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
@@ -2642,7 +2643,9 @@ function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합�
 // 은행·계좌·예금주와 내부 참여자 식별자는 계속 응답 페이로드에서 제외한다.
 function _isAdvertiserRestrictedHeader(header) {
   const key = String(header == null ? '' : header).replace(/\s+/g, '').toLowerCase();
-  return /참여자/.test(key)
+  return key === '현영'
+    || /현금영수증/.test(key)
+    || /참여자/.test(key)
     || /은행|bank/.test(key)
     || /계좌|account/.test(key)
     || /예금주/.test(key);
@@ -3222,6 +3225,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   }
   const maskPII = role === 'advertiser';       // 광고주(외부)만 마스킹 · AE(내부)는 전체
   const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin/staff)
+  const showCashReceiptStatus = ['master', 'admin', 'staff'].includes(role);
   const { rows: meta } = await db.query(
     `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.workboard_display_name AS "workboardDisplayName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
@@ -3260,6 +3264,19 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       WHERE cp.sheet_id=$1 AND cp.tab_name=$2 AND cp.deleted_at IS NULL AND cp.active = TRUE
         AND cp.held_at IS NULL
       ORDER BY cp.seq`, [sheetId, tabName]);
+  // 현금영수증 제출 상태는 내부 작업보드에서만 읽는다. 업체용 뷰어는 조회 자체를 건너뛰고
+  // 응답에도 컬럼·행 상태를 싣지 않는다. 지급 게이트와 같은 원장/슬롯 판정을 재사용한다.
+  let cashReceiptStates = null;
+  if (showCashReceiptStatus) {
+    try {
+      cashReceiptStates = await cashReceiptSubmissionStates(db, roster.map(row => ({
+        sheetId, tabName, rowIndex: row.seq,
+      })));
+    } catch (e) {
+      cashReceiptStates = new Map();
+      logger.warn(`[trackB] 현영 제출 상태 조회 실패 sheet=${sheetId} tab=${tabName}: ${e.message}`);
+    }
+  }
   let popularPurposeIds = new Set();
   if (showEdits) {
     try {
@@ -3375,7 +3392,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       const rj = roster.find(r => r.row_json && typeof r.row_json === 'object' && Object.keys(r.row_json).length);
       raw = rj ? Object.keys(rj.row_json).filter(k => k !== 'id') : [];
     }
-    if (showEdits) headers = raw;                                   // 내부: 시트 전체 헤더
+    // `현영`은 아래의 서버 파생 가상 컬럼 한 벌만 쓴다. 과거 시트에 동명 메모 열이 있어도
+    // 제출 원장 상태와 나란히 두 벌로 보이지 않게 원본 열은 교체한다.
+    if (showEdits) headers = raw.filter(h => String(h).replace(/\s+/g, '') !== '현영');
     else {
       // 광고주: 차단 목록의 다섯 신원·정산 정보만 제외하고 원본 컬럼을 유지한다.
       const candidates = _advertiserHeaderCandidates(raw, roster, advEditedHeaders);
@@ -3536,6 +3555,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
     if (maskPII) { syn.phone8 = _mask(syn.phone8); syn.name = _maskName(syn.name); syn.recipient = _maskName(syn.recipient); }
     if (showEdits) {
+      if (showCashReceiptStatus) {
+        const receiptState = cashReceiptStates.get(cashReceiptSubmissionRowKey(sheetId, tabName, r.seq));
+        syn.cashReceiptStatus = !receiptState ? 'unavailable'
+          : !receiptState.required ? 'not_applicable'
+            : !receiptState.configured ? 'configuration_error'
+              : receiptState.submitted ? 'submitted' : 'missing';
+      }
       syn.anchorType = anchor ? anchor.type : null;
       syn.editable = editable; syn.ambiguous = ambiguous;
       // 옛 '_hidden' 레코드(폐기된 필드)가 남아 있어도 편집 배지로 세지 않는다.
@@ -3685,6 +3711,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
+    // 가상 컬럼: 시트에 쓰지 않고 내부 응답에서만 선언한다. 업체용 응답에는 이 필드와
+    // 각 행의 cashReceiptStatus가 모두 없어 제출 여부를 역추정할 수 없다.
+    if (showCashReceiptStatus) res.cashReceiptColumn = { key: '__cashReceiptStatus', label: '현영' };
     /* ★ 그 탭의 상태 칸(리뷰제출·입금) 헤더명 — 화면 잠금·[📎 수동 리뷰제출] 판정의 **단일 출처**.
        화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
        갈려 "직접 타이핑은 되는데 수동 제출 메뉴는 없는" 상태가 된다(2026-08-21 실측).
