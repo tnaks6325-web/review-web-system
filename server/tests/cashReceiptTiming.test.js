@@ -42,6 +42,13 @@ ok('모집공고 직접 현금영수증 설정도 선택 슬롯을 만든다',
   cs.effectiveCaptureSlots(null, '', null, true).some(s => s.key === 'receipt' && s.required === false));
 ok('모집공고 설정으로 슬롯을 보탠 현영 작업은 오설정 경고를 내지 않는다',
   cs.cashReceiptNote([{ key: 'review', label: '리뷰' }], '사업자현영', true) === null);
+ok('수동 slot2 현금영수증도 리뷰 완료를 막지 않아 3단계로 진행한다',
+  JSON.stringify(cs.requiredSlotKeys([
+    { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' },
+  ], '사업자현영')) === JSON.stringify(['review'])
+  && cs.effectiveCaptureSlots([
+    { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' },
+  ], '사업자현영')[1].required === false);
 
 /* ═══ B. 완료 판정 배선 — 슬롯 모드 판정은 화면 슬롯 기준(영수증만 올리고 완료 차단) ═══ */
 console.log('B. submit.routes 완료 판정');

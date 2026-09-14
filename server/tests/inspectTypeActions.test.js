@@ -92,6 +92,15 @@ function seqPool(handlers) {
     assert.ok(/riRouteManual\(1,'review'\)/.test(rcp.main.h), '영수증 칸의 리뷰 화면 → 주 = 리뷰로 이동');
     ok('A3: 리뷰화면 아님 — AI got 이 주 이동 버튼을 정한다(불명 = 불량)');
 
+    const receiptHold = R({ receiptValidation: { verdict: 'warn', status: 'unverified' } }, { slot_key: 'receipt' });
+    assert.strictEqual(F.prim(receiptHold), 'receipt_validation');
+    const holdAct = F.act(receiptHold, 1);
+    assert.ok(/riOpenDetail\(1\)/.test(holdAct.main.h) && /영수증 확인/.test(holdAct.main.t));
+    assert.ok(holdAct.subs.some(a => /riResolve\('F','ok'\)/.test(a.h)), '내부 정상 승인으로 지급 보류를 풀 수 있다');
+    const wrongReceipt = F.act(R({ receiptValidation: { verdict: 'fail', got: 'review' } }, { slot_key: 'receipt' }), 1);
+    assert.ok(/riRouteManual\(1,'review'\)/.test(wrongReceipt.main.h), '영수증 칸의 리뷰 이미지는 리뷰로 이동할 수 있다');
+    ok('A3a: 영수증 지급 보류는 실제 사유와 내부 승인·이동 조치를 표시한다');
+
     // A3b: ★★ 원장은 `kind`, 자동분류 판정값은 `got` — 이름이 갈려 현금영수증으로 판별된 건이
     //   "종류 불명"으로 떨어져 이동 버튼이 안 뜨던 실측 사고. 두 이름이 **같은 결과**여야 한다.
     const byKind = F.act(R({ format: { verdict: 'fail', kind: 'receipt' } }), 1);
@@ -150,6 +159,7 @@ function seqPool(handlers) {
     // A5: ★ 어느 유형이든 [✓ 정상]·[✕ 불량] 모두 도달 가능(주+보조 안에)
     for (const checks of [
       { duplicate: { verdict: 'fail', matchFileId: 'M' } },
+      { receiptValidation: { verdict: 'warn', status: 'unverified' } },
       { format: { verdict: 'fail' } }, { product: { verdict: 'warn' } },
       { format: { verdict: 'warn', expectedChannel: 'coupang' } },
       { similarity: { verdict: 'warn' } }, { author: { verdict: 'warn' } },
@@ -171,6 +181,7 @@ function seqPool(handlers) {
     assert.strictEqual(F.label(null), '이상 없음');
     ok('A6: 유형 띠가 AI 추정 종류·유사도를 말한다');
     assert.ok(/receiptPending\?'분류 필요'/.test(wd)
+      && /p==='receipt'\|\|p==='receipt_validation'/.test(wd)
       && /v==='route'\?'분류 필요'/.test(wd), '현금영수증 카드·상세에 불량 배지가 남지 않는다');
     ok('A7: 현금영수증은 불량 대신 분류 필요로 표시한다');
   }

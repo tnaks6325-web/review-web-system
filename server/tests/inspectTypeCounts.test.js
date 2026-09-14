@@ -30,6 +30,8 @@ const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdes
 /* 판정 갈래를 전부 밟는 픽스처 — 유형이 겹치는 건(한 건 = 여러 칩)을 반드시 포함한다. */
 const V = (v, extra) => Object.assign({ verdict: v }, extra || {});
 const FIX = [
+  { name: '현금영수증 검수 실패', checks: { receiptValidation: V('fail', { got: 'review' }) },             want: ['receipt_validation'] },
+  { name: '현금영수증 판정 불가', checks: { receiptValidation: V('warn', { status: 'unverified' }) },       want: ['receipt_validation'] },
   { name: '현금영수증으로 보임', checks: { format: V('fail', { kind: 'receipt' }) },                       want: ['receipt'] },
   { name: '리뷰화면 아님',      checks: { format: V('fail', { kind: 'order_capture' }) },                 want: ['format_fail'] },
   { name: '채널 다름',          checks: { format: V('warn', { expectedChannel: 'coupang' }) },            want: ['channel'] },
@@ -177,6 +179,7 @@ ok('★ 한 절이 실패해도 나머지 진단은 남는다(fail-soft)', /조�
     await c.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');   // 081 의 본문 유사도 GIN 인덱스
     await c.query(mig('081_review_inspections.sql'));
     await c.query(mig('092_review_inspect_learning.sql'));   // resolution 컬럼(목록 SELECT 가 읽는다)
+    await c.query(mig('148_review_product_cluster_learning.sql')); // 현재 목록 SELECT의 상품명 판정 컬럼
 
     let fid = 0;
     const put = (sheetId, tabName, status, checks) => c.query(

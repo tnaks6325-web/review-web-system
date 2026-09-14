@@ -1880,6 +1880,9 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     // ── 3단계: 파일 업로드 (복수 파일 루프) ──
     const uploadResults = [];
+    // 파일 루프의 판정값은 루프 밖 원장 기록 단계에서도 필요하다. 응답 객체에 붙이면
+    // 사업자번호 같은 판정 세부값이 리뷰어에게 노출될 수 있어 서버 내부 Map으로만 보존한다.
+    const captureVerdictsByFileId = new Map();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file.data) continue;
@@ -2005,6 +2008,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           uploadResults.push({ index: i + 1, rejected: rejected.reason, message: rejected.message });
           logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 중복 반려(휴지통): ${uploaded.name}`);
         } else {
+          if (verdict) captureVerdictsByFileId.set(uploaded.id, verdict);
           uploadResults.push({
             index: i + 1,
             fileId: uploaded.id,
@@ -2137,7 +2141,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
             sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: _finalSlotKey,
             slotRole: _finalSlotRole,
             // 자동 이동으로 슬롯 역할이 바뀌었으면 옛 슬롯 기준 판정을 재사용하지 않는다.
-            captureVerdict: _finalSlotRole === _slotRole ? verdict : null,
+            captureVerdict: _finalSlotRole === _slotRole ? (captureVerdictsByFileId.get(r.fileId) || null) : null,
             samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
           });
           // ★ 첨부 즉시 경고(1차)를 지나쳐 제출된 중복은 **리뷰어에게 그 자리에서** 한 번 더 알린다.

@@ -30,6 +30,13 @@ const ISSUE_RULES = [
     sql: (a) => `COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind') = 'order_cancel'`,
   },
   {
+    key: 'receipt_validation',
+    // 영수증 슬롯의 지급 증빙 판정 실패·판정불가. 내부 정상 확인 전까지 입금이 보류된다.
+    js: (c) => !!(c.receiptValidation
+      && (c.receiptValidation.verdict === 'warn' || c.receiptValidation.verdict === 'fail')),
+    sql: (a) => `${a}->'receiptValidation'->>'verdict' IN ('warn','fail')`,
+  },
+  {
     key: 'receipt',
     // 영수증으로 확정된 파일은 "리뷰화면 아님" 오류가 아니라 별도 취합 대상으로 센다.
     js: (c) => !!(c.format && c.format.verdict === 'fail'

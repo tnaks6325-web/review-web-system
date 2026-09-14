@@ -14172,12 +14172,13 @@ function _riRenderHead(sum){
      SQL 로 파생해 센다). 여기 있는 것은 화면 필터·재검수 대상 선정용 최소 사본이고,
      회귀가드(`tests/inspectTypeCounts.test.js`)가 같은 픽스처로 두 구현을 실행해 **결과 동일**을
      고정한다 — 한쪽만 고치면 그 자리에서 빨개진다. */
-const RI_TYPES=[['cancel','🚫 주문취소'],['receipt','🧾 현금영수증으로 보임'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
+const RI_TYPES=[['cancel','🚫 주문취소'],['receipt_validation','🧾 현금영수증 검수 필요'],['receipt','🧾 현금영수증으로 보임'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
 function _riIssueTypes(r){
   const c=(r&&r.checks)||{}, out=[];
   /* ★ 주문취소 — 리뷰어가 그 작업을 취소한 신호. verdict 를 보지 않는다(취소 화면은
        어느 작업에서도 정상 제출이 아니다). format_fail 과 겹쳐 세어지는 것은 의도. */
   if(c.format&&(c.format.got||c.format.kind)==='order_cancel') out.push('cancel');
+  if(c.receiptValidation&&(c.receiptValidation.verdict==='warn'||c.receiptValidation.verdict==='fail')) out.push('receipt_validation');
   if(c.format&&c.format.verdict==='fail'&&(c.format.got||c.format.kind)==='receipt') out.push('receipt');
   if(c.format&&c.format.verdict==='fail'&&(c.format.got||c.format.kind)!=='receipt') out.push('format_fail');
   if(c.format&&c.format.verdict==='warn'&&c.format.expectedChannel) out.push('channel');
@@ -14317,7 +14318,7 @@ function _riRenderBody(){
     const relHtml = _riRelHtml(r);
     const thumb = _riImg(r.file_id);
     const p = _riPrimaryIssue(r);
-    const receiptPending = p==='receipt' && r.status!=='resolved';
+    const receiptPending = (p==='receipt'||p==='receipt_validation') && r.status!=='resolved';
     const cls = receiptPending?'ri-s':r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
     const statusLabel = receiptPending?'분류 필요':(_RI_LABEL[r.status]||r.status);
     const meta = p ? RI_TYPE_META[p] : null;
@@ -14359,6 +14360,7 @@ function _riRenderBody(){
 const RI_TYPE_META={
   cancel:{cls:'t-cancel',tag:'CANCEL',label:'🚫 주문취소 (리뷰어 작업취소)'},
   duplicate:{cls:'t-dup',tag:'DUP',label:'📄 같은 파일 (중복 제출)'},
+  receipt_validation:{cls:'t-fmt',tag:'RECEIPT HOLD',label:'🧾 현금영수증 검수 필요'},
   receipt:{cls:'t-fmt',tag:'RECEIPT',label:'🧾 현금영수증으로 보임'},
   format_fail:{cls:'t-fmt',tag:'FMT',label:'📵 리뷰화면 아님'},
   product:{cls:'t-prod',tag:'PROD',label:'🏷 상품명 다름'},
@@ -14369,7 +14371,7 @@ const RI_TYPE_META={
 function _riPrimaryIssue(r){
   const t=_riIssueTypes(r);
   // ★ 주문취소가 맨 앞 — 담당자에게 "리뷰 화면이 아님"보다 "취소됨"이 먼저 읽혀야 한다
-  for(const k of ['cancel','duplicate','receipt','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
+  for(const k of ['cancel','duplicate','receipt_validation','receipt','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
   return null;
 }
 /* ★★ AI 가 판별한 화면 종류의 **단일 출처** — 원장(2차 검수)은 `kind`, 자동분류 판정값은 `got`
@@ -14381,6 +14383,8 @@ function _riKindLabel(fm){ return _RI_KIND[_riFmtKind(fm)]||''; }
 function _riTypeLabel(p,c){
   if(!p) return '이상 없음';
   if(p==='cancel') return '🚫 주문취소';
+  if(p==='receipt_validation') return c&&c.receiptValidation&&c.receiptValidation.verdict==='fail'
+    ? '🧾 현금영수증 확인 실패' : '🧾 현금영수증 확인 필요';
   if(p==='receipt') return '🧾 현금영수증으로 보임';
   if(p==='format_fail'){
     const gl=_riKindLabel(c&&c.format);
@@ -14424,6 +14428,12 @@ function _riCardActions(r,i){
     if(c.duplicate&&c.duplicate.sameReviewerOtherTab)
       return {main:{...A.ok,t:'✓ 정상 — 한 캡처에 여러 리뷰',m:'m-green'}, subs:[A.dedup,A.bad], more:moves};
     return {main:{...A.dedup,m:'m-red'}, subs:[A.ok,A.bad], more:moves};
+  }
+  if(p==='receipt_validation'){
+    const rv=c.receiptValidation||{};
+    if(rv.verdict==='fail'&&rv.got==='review')
+      return {main:{...A.mvV,m:'m-blue'}, subs:[A.bad,{...A.ok,t:'✓ 정상 — 영수증 확인'}], more:[A.detail]};
+    return {main:{...A.detail,t:'👁 영수증 확인',m:'m-amber'}, subs:[{...A.ok,t:'✓ 정상 — 영수증 확인'},A.bad], more:[]};
   }
   if(p==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.ok,A.detail], more:[A.mvC]};
   if(p==='format_fail'){
@@ -14639,6 +14649,12 @@ function _riChanReason(fm){
 function _riReasons(c, opt){
   const skipRel = !!(opt&&opt.skipRel);
   const out=[];
+  if(c.receiptValidation && c.receiptValidation.verdict==='fail'){
+    const got=_RI_KIND[c.receiptValidation.got]||c.receiptValidation.got||'다른 이미지';
+    out.push(`현금영수증 확인 실패 — ${got}로 판별되었습니다. 정상 영수증인지 확인해 주세요`);
+  } else if(c.receiptValidation && c.receiptValidation.verdict==='warn'){
+    out.push('현금영수증 자동 판정 불가 — 이미지를 확인한 뒤 정상 처리해야 입금대상에 포함됩니다');
+  }
   // ★ 종류를 알면 종류를 말한다 — "리뷰 화면이 아님"만으로는 무엇으로 보이는지 몰라
   //   담당자가 어디로 옮길지 판단할 수 없다(반려 사유 프리필로도 그대로 나간다).
   if(c.format && c.format.verdict==='fail'){

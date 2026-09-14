@@ -52,13 +52,17 @@ function effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCas
   if (Array.isArray(captureSlots) && captureSlots.length > 0) {
     const valid = captureSlots.filter(s => s && s.key);
     if (valid.length) {
+      // 탭 설정 writer는 두 번째 칸을 slot2로 저장하고 required를 생략한다. 라벨이
+      // 현금영수증인 슬롯까지 필수로 두면 리뷰 제출 후 3단계로 갈 수 없으므로 역할 기준으로 선택화한다.
+      const normalized = valid.map(s => (s.key === 'receipt' || _CR_LABEL_RE.test(String(s.label || '')))
+        ? { ...s, required: false } : s);
       /* 모집공고의 직접 설정은 신규 공고의 진실원본이다. 탭에 옛 명시 슬롯이 남아 있어도
          공고가 현금영수증을 요구하면 선택 슬롯을 보탠다. 라벨로 이미 있는 수동 slot2는 보존한다. */
       if (campaignCashReceiptRequired === true
-          && !valid.some(s => s.key === 'receipt' || _CR_LABEL_RE.test(String(s.label || '')))) {
-        return [...valid, RECEIPT_SLOT];
+          && !normalized.some(s => s.key === 'receipt' || _CR_LABEL_RE.test(String(s.label || '')))) {
+        return [...normalized, RECEIPT_SLOT];
       }
-      return valid;                                      // 탭의 명시 설정은 종전대로 보존
+      return normalized;
     }
   }
   const confirm = reviewType === 'confirm';

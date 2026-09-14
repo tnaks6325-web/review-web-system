@@ -96,7 +96,7 @@ const db = {
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
   assert.match(inspectService, /checks\.receiptValidation = receiptVerdict\?\.status === 'ok'[\s\S]*verdict: 'pass'[\s\S]*verdict: 'fail'[\s\S]*verdict: 'warn'/,
     '영수증 판정 통과/불일치/판정불가가 검수 원장에 분리 기록돼야 한다');
-  assert.match(uploadRoute, /captureVerdict: _finalSlotRole === _slotRole \? verdict : null/,
+  assert.match(uploadRoute, /const captureVerdictsByFileId = new Map\(\)[\s\S]*captureVerdictsByFileId\.set\(uploaded\.id, verdict\)[\s\S]*captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
 
   process.env.REVIEW_INSPECT = '1';
