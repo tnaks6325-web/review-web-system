@@ -14,7 +14,12 @@ const pairKey = (sheetId, tabName) => `${sheetId}\u0000${tabName}`;
 const rowKey = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
 
 async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
-  const source = Array.isArray(rows) ? rows : [];
+  // 구형 입금 API는 rowIndex 대신 rowNum을 보낼 수 있다. 모든 조회·Map 키·잠금 전에
+  // 한 번 숫자로 정규화해 "010"/10과 rowNum 경로가 서로 다른 지급 행이 되지 않게 한다.
+  const source = (Array.isArray(rows) ? rows : []).map(row => ({
+    ...row,
+    rowIndex: Number(row?.rowIndex ?? row?.rowNum),
+  }));
   const states = new Map();
   if (!source.length) return states;
 
@@ -299,7 +304,7 @@ async function filterReceiptEligiblePaymentRows(db, rows, options = {}) {
   const states = await cashReceiptSubmissionStates(db, source, options);
 
   return source.filter(row => {
-    const key = rowKey(row.sheetId, row.tabName, row.rowIndex);
+    const key = rowKey(row.sheetId, row.tabName, Number(row?.rowIndex ?? row?.rowNum));
     const state = states.get(key);
     return !state || !state.required || (state.configured && state.submitted);
   });

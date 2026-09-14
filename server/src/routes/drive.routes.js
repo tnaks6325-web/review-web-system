@@ -1824,9 +1824,14 @@ router.get('/report/:code', async (req, res, next) => {
                   r.reviewer_name, r.review_file_at AS uploaded_at
              FROM review_index r
             WHERE r.sheet_id = $1 AND r.tab_name = $2
-              AND r.review_file_id IS NOT NULL AND r.review_file_id <> ''
-              AND NOT EXISTS (
-                SELECT 1 FROM review_inspections ri
+               AND r.review_file_id IS NOT NULL AND r.review_file_id <> ''
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_submissions rs_role
+                  WHERE rs_role.file_id = r.review_file_id
+                    AND COALESCE(rs_role.slot_key, 'review') <> 'review'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_inspections ri
                  WHERE ri.file_id = r.review_file_id
                    AND (
                      COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'

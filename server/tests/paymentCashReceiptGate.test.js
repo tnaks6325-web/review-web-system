@@ -15,6 +15,7 @@ const rows = [
   { sheetId: 'S', tabName: 'manual', rowIndex: 5 },
   { sheetId: 'S', tabName: 'campaign', rowIndex: 6 },
   { sheetId: 'S', tabName: 'misconfigured', rowIndex: 7 },
+  { sheetId: 'S', tabName: 'campaign', rowNum: '008' },
 ];
 
 const db = {
@@ -34,7 +35,7 @@ const db = {
       ] };
     }
     if (/provenance AS/.test(sql)) {
-      assert.deepStrictEqual(params[2], [1, 2, 3, 4, 5, 6, 7], '공고 현영 설정은 탭이 아니라 지급 행 좌표로 조회해야 한다');
+      assert.deepStrictEqual(params[2], [1, 2, 3, 4, 5, 6, 7, 8], '공고 현영 설정은 rowNum을 포함한 지급 행 좌표로 조회해야 한다');
       return { rows: [
         { sheet_id: 'S', tab_name: 'regular', row_index: 1, cash_receipt_required: null },
         { sheet_id: 'S', tab_name: 'cash', row_index: 2, cash_receipt_required: null },
@@ -43,11 +44,12 @@ const db = {
         { sheet_id: 'S', tab_name: 'manual', row_index: 5, cash_receipt_required: null },
         { sheet_id: 'S', tab_name: 'campaign', row_index: 6, cash_receipt_required: true },
         { sheet_id: 'S', tab_name: 'misconfigured', row_index: 7, cash_receipt_required: false },
+        { sheet_id: 'S', tab_name: 'campaign', row_index: 8, cash_receipt_required: true },
       ] };
     }
     if (/FROM review_submissions rs/.test(sql)) {
-      assert.deepStrictEqual(params[2], [2, 3, 4, 5, 6], '영수증 대상 행만 원장 대조해야 한다');
-      assert.deepStrictEqual(params[3], ['receipt', 'receipt', 'slot2', 'slot2', 'receipt'], '수동 슬롯 key도 보존해야 한다');
+      assert.deepStrictEqual(params[2], [2, 3, 4, 5, 6, 8], 'rowNum을 정규화한 영수증 대상 행만 원장 대조해야 한다');
+      assert.deepStrictEqual(params[3], ['receipt', 'receipt', 'slot2', 'slot2', 'receipt', 'receipt'], '수동 슬롯 key도 보존해야 한다');
       assert.strictEqual(params.length, 4, '입금 게이트는 과거 영수증 분류 확신도를 호환 증거로 받지 않아야 한다');
       assert.match(sql, /ri\.checks->'receiptValidation'->>'verdict' = 'pass'/,
         '신규 영수증은 전용 판정 통과 기록이 있어야 한다');
@@ -72,7 +74,7 @@ const db = {
 (async () => {
   const eligible = await filterReceiptEligiblePaymentRows(db, rows);
   assert.deepStrictEqual(eligible.map(r => r.rowIndex), [1, 3, 4, 6],
-    '일반 작업 또는 실제 영수증 제출 행만 입금대상이어야 한다');
+    '일반 작업 또는 실제 영수증 제출 행만 입금대상이어야 하고 미제출 legacy rowNum은 제외해야 한다');
 
   const broken = { query: async sql => {
     if (/tc\.capture_slots/.test(sql)) return { rows: [] };
@@ -101,6 +103,8 @@ const db = {
   assert.match(markDone, /BEGIN[\s\S]*filterReceiptEligiblePaymentRows\(client, items, \{ lock: true \}\)[\s\S]*CASH_RECEIPT_NOT_VERIFIED[\s\S]*recordDeposits\(client, receiptEligibleItems/,
     '입금 완료 API는 같은 transaction 안에서 현금영수증 근거를 잠그고 다시 검증해야 한다');
   const receiptGate = fs.readFileSync(path.join(__dirname, '../src/services/paymentReceiptGate.service.js'), 'utf8');
+  assert.match(receiptGate, /rowIndex: Number\(row\?\.rowIndex \?\? row\?\.rowNum\)[\s\S]*rowKey\(row\.sheetId, row\.tabName, Number\(row\?\.rowIndex \?\? row\?\.rowNum\)\)/,
+    '구형 rowNum과 숫자 문자열은 입금 검증 전 같은 rowIndex로 정규화해야 한다');
   assert.match(receiptGate, /if \(lock\)[\s\S]*FOR UPDATE OF rs[\s\S]*FROM review_inspections[\s\S]*FOR UPDATE/,
     '영수증 제출·검수 행 잠금 없이 검증 후 반려·교체가 끼어들 수 있다');
   assert.match(receiptGate, /if \(lock\)[\s\S]*JOIN tab_configs tc[\s\S]*FOR UPDATE OF tc[\s\S]*JOIN order_submissions os[\s\S]*FOR UPDATE OF os[\s\S]*JOIN campaign_participants cp[\s\S]*FOR UPDATE OF cp[\s\S]*FROM campaign_applications ca[\s\S]*FOR UPDATE OF ca[\s\S]*FROM recruit_campaigns rc[\s\S]*exact_campaigns[\s\S]*FOR UPDATE OF rc/,
@@ -120,6 +124,7 @@ const db = {
   const inspectService = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
   const fileRouteService = fs.readFileSync(path.join(__dirname, '../src/services/fileRoute.service.js'), 'utf8');
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
+  const driveRoute = fs.readFileSync(path.join(__dirname, '../src/routes/drive.routes.js'), 'utf8');
   const reviewEditRoute = fs.readFileSync(path.join(__dirname, '../src/routes/reviewEdit.routes.js'), 'utf8');
   assert.match(inspectService, /const businessNoMatched =[\s\S]*receiptVerdict\?\.status === 'ok' && businessNoMatched[\s\S]*businessNoMatched: true[\s\S]*business_number_unverified/,
     '사업자번호를 읽어 회사 번호와 대조한 영수증만 지급 검수 통과여야 한다');
@@ -155,6 +160,8 @@ const db = {
     '자동 이동을 리뷰 칸으로 되돌릴 때도 영수증 승인 증거를 제거해야 한다');
   assert.match(fileRouteService, /target === 'receipt'[\s\S]{0,700}resolveTargetFolder\(\{ target: 'capture', sheetId, tabName \}\)[\s\S]{0,300}getOrCreateSubFolder\(receiptBase, receiptLabel\)/,
     '현금영수증은 공개 리뷰 폴더가 아닌 비공개 구매캡처 경로에 보관해야 한다');
+  assert.match(driveRoute.replace(/\r/g, ''), /router\.get\('\/report\/:code'[\s\S]*FROM review_index r[\s\S]*FROM review_submissions rs_role[\s\S]*COALESCE\(rs_role\.slot_key, 'review'\) <> 'review'/,
+    '공개 리포트 대표파일 폴백도 비리뷰 슬롯에 연결된 파일을 제외해야 한다');
   assert.match(uploadRoute, /if \(_isReceiptUpload\)[\s\S]{0,700}target: 'receipt'[\s\S]{0,700}공개 리뷰 폴더 업로드 차단/,
     '비공개 영수증 폴더를 확보하지 못하면 업로드를 차단해야 한다');
   assert.match(inspectService, /receipt_evidence[\s\S]*t\.receipt_evidence === true \|\| isCashReceiptSlot/,

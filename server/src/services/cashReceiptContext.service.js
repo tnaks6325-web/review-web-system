@@ -157,8 +157,10 @@ async function cashReceiptRequirementsForRows(rows, opts = {}) {
           GROUP BY r.sheet_id, r.tab_name, r.row_index
        )
        SELECT r.sheet_id, r.tab_name, r.row_index,
-              CASE WHEN COALESCE(e.campaign_count, 0) > 0
-                   THEN e.cash_receipt_required ELSE l.cash_receipt_required END AS cash_receipt_required,
+               CASE WHEN COALESCE(e.campaign_count, 0) = 1 THEN e.cash_receipt_required
+                    WHEN COALESCE(e.campaign_count, 0) > 1 THEN
+                      (COALESCE(e.cash_receipt_required, FALSE) OR COALESCE(l.cash_receipt_required, FALSE))
+                    ELSE l.cash_receipt_required END AS cash_receipt_required,
               CASE WHEN COALESCE(e.campaign_count, 0) = 1 THEN 'exact'
                    WHEN COALESCE(e.campaign_count, 0) > 1 THEN 'ambiguous_exact'
                    WHEN COALESCE(l.campaign_count, 0) > 1 THEN 'ambiguous_tab'

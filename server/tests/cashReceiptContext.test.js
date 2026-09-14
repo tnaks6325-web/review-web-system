@@ -41,6 +41,8 @@ const svc = require('../src/services/cashReceiptContext.service');
   svc.__setPoolForTest({ query: async (sql, params) => {
     assert.match(sql, /provenance AS[\s\S]*campaign_application_id[\s\S]*BOOL_OR\(rc\.cash_receipt_required\)/,
       '지급 행은 주문·신청 출처의 공고를 먼저 판정해야 한다');
+    assert.match(sql, /WHEN COALESCE\(e\.campaign_count, 0\) = 1 THEN e\.cash_receipt_required[\s\S]*WHEN COALESCE\(e\.campaign_count, 0\) > 1 THEN[\s\S]*e\.cash_receipt_required[\s\S]*l\.cash_receipt_required/,
+      '행 출처 공고가 여러 개면 연결 공고까지 포함해 보수적으로 현영 대상을 판정해야 한다');
     assert.deepStrictEqual(params, [['S1', 'S1'], ['T1', 'T1'], [10, 11]]);
     return { rows: [
       // 같은 탭의 다른 공고가 true여도 이 행의 단일 출처 공고가 false면 비대상이다.
