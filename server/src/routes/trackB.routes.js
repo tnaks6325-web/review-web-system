@@ -220,14 +220,12 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
       return res.json({ ok: false, error: cr.incomeSaysCashReceipt ? CR_MISCONFIG_NOTE : '현금영수증 발행 대상 작업이 아닙니다.' });
     }
     const driveService = require('../services/drive.service');   // 지연 require — 테스트가 이 라우터를 스텁 pool 로 실행할 때 Drive 스택 무부하
-    const reviewFolderId = tc.folder_url ? driveService.extractFolderIdFromUrl(tc.folder_url) : null;
-    if (!reviewFolderId) {
-      return res.json({ ok: false, error: '리뷰 폴더가 아직 없습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다.' });
-    }
     // ★ 폴더 이름 = 그 슬롯의 **실제 라벨**(업로드가 그 라벨로 서브폴더를 만든다).
     //   종전 `slotLabel(...,'receipt')` 은 수동 슬롯 탭(key=slot2)에서 문자열 'receipt' 를 뒤졌다.
     const label = (cr.slot && cr.slot.label) || '현금영수증';
-    const found = await driveService.findFolderByName(label, reviewFolderId);   // ★ find-only
+    const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+    // 업로드와 같은 비공개 전용 경로를 생성 없이 찾는다. [리뷰] 하위는 업체 공유 대상이라 보지 않는다.
+    const found = await driveService.findReceiptFolderPath(rootFolderId, sheetId, tabName, label);
     if (!found) {
       const msg = '현영 캡처가 아직 없어 폴더가 만들어지지 않았습니다.';
       _tabFolderCache.set(key, { at: Date.now(), url: null, msg });

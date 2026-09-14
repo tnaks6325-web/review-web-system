@@ -34,12 +34,16 @@ const SVC_SRC = S('src/services/trackB.service.js');
 
 /* ── 0) 가짜 Drive 를 **라우터 require 전에** 심는다(라우트가 지연 require 로 집는다) ── */
 const drivePath = require.resolve('../src/services/drive.service');
-const driveCalls = { find: [], create: 0 };
+const driveCalls = { find: [], receiptFind: [], create: 0 };
 let driveFound = null;   // 케이스별로 바꿔 끼우는 findFolderByName 결과
 require.cache[drivePath] = {
   id: drivePath, filename: drivePath, loaded: true, exports: {
     extractFolderIdFromUrl: u => { const m = String(u || '').match(/folders\/([-\w]+)/); return m ? m[1] : null; },
     findFolderByName: async (name, parent) => { driveCalls.find.push([name, parent]); return driveFound; },
+    findReceiptFolderPath: async (root, sheetId, tabName, label) => {
+      driveCalls.receiptFind.push([root, sheetId, tabName, label]);
+      return driveFound;
+    },
     // find-only 계약 — 아래 중 무엇이든 불리면 그 자리에서 실패
     createFolder: async () => { driveCalls.create++; throw new Error('create 호출됨'); },
     getOrCreateSubFolder: async () => { driveCalls.create++; throw new Error('create 호출됨'); },
@@ -279,24 +283,27 @@ const svc = require('../src/services/trackB.service');
   tabRow = { folder_url: 'https://drive.google.com/drive/folders/rv2', capture_slots: null, income_type: '사업자현영' };
   driveFound = { id: 'sub1', webViewLink: 'https://drive.google.com/drive/folders/sub1' };
   r4 = await call({ sheetId: 'S1', tabName: 'B' });
-  t('현영 탭 = [리뷰] 하위 현금영수증 서브폴더 URL 반환',
+  t('현영 탭 = 비공개 현금영수증 폴더 URL 반환',
     r4.out.ok === true && r4.out.url === 'https://drive.google.com/drive/folders/sub1');
-  t('★ find 는 리뷰 폴더 ID 를 부모로, 라벨은 현금영수증(업로드 서브폴더와 같은 규칙)',
-    driveCalls.find.length === 1 && driveCalls.find[0][0] === '현금영수증' && driveCalls.find[0][1] === 'rv2');
+  t('★ find 는 업로드와 같은 비공개 경로 helper + 실제 슬롯 라벨을 사용',
+    driveCalls.receiptFind.length === 1
+    && driveCalls.receiptFind[0][1] === 'S1' && driveCalls.receiptFind[0][2] === 'B'
+    && driveCalls.receiptFind[0][3] === '현금영수증');
   t('★ find-only — create 류 호출 0(여기서 만들면 생성 경로가 두 벌)', driveCalls.create === 0);
   // ③-b 캐시 — 같은 탭 재요청은 Drive 재조회 없음
   r4 = await call({ sheetId: 'S1', tabName: 'B' });
-  t('발견 URL 은 캐시(재클릭에 Drive 콜 0)', r4.out.ok === true && driveCalls.find.length === 1);
+  t('발견 URL 은 캐시(재클릭에 Drive 콜 0)', r4.out.ok === true && driveCalls.receiptFind.length === 1);
   // ④ 미발견 = 안내(생성하지 않음 — Q2 확정)
   tabRow = { folder_url: 'https://drive.google.com/drive/folders/rv3', capture_slots: null, income_type: '현영' };
   driveFound = null;
   r4 = await call({ sheetId: 'S1', tabName: 'C' });
   t('미발견 = "현영 캡처가 아직 없어…" 안내(만들지 않는다)',
     r4.out.ok === false && /현영 캡처가 아직 없어/.test(r4.out.error) && driveCalls.create === 0);
-  // ⑤ 리뷰 폴더 자체가 없으면 그 사유를 말한다
+  // ⑤ 리뷰 폴더가 없어도 영수증은 별도 비공개 경로에서 찾는다
   tabRow = { folder_url: null, capture_slots: null, income_type: '현영' };
+  driveFound = { id: 'private1', webViewLink: 'https://drive.google.com/drive/folders/private1' };
   r4 = await call({ sheetId: 'S1', tabName: 'D' });
-  t('리뷰 폴더 없음 = 자동 생성 시점 안내', r4.out.ok === false && /리뷰 폴더가 아직 없습니다/.test(r4.out.error));
+  t('리뷰 폴더가 없어도 비공개 현영 폴더 바로가기는 동작', r4.out.ok === true && /private1/.test(r4.out.url));
   // ⑥ AE(staff) 범위 — ★★ **사용자 확정 2026-08-19: AE 는 담당이 아니어도 전부 연다.**
   //   종전 이 자리는 "담당 밖 = 403" 을 고정했지만, 그때 이미 `/workdesk`(작업보드 본문)·`/tabs`
   //   (작업 목록)가 `allowAllStaff` 로 전체를 열어 주고 있어 **폴더 버튼만 막는 반쪽 규칙**이었다.

@@ -45,8 +45,9 @@ const cr = require('../src/utils/captureRoute');
   ok('A5: ★ 구매캡처 이동은 예시 2장(구매캡처+구매확정) 등록 필수(사용자 확정)');
 
   const rv = cr.routeDecision({ slotKey: 'receipt', verdict: sure('review'), ...base });
-  assert.strictEqual(rv.action, 'route'); assert.strictEqual(rv.toSlot, 'review');
-  ok('A6: 영수증 칸 + 리뷰 판정 → [리뷰] 이동');
+  assert.strictEqual(rv.action, 'none'); assert.strictEqual(rv.reason, 'private_receipt_requires_manual');
+  assert.strictEqual(cr.routeDecision({ slotKey: 'receipt', verdict: sure('order_capture'), ...base }).action, 'none');
+  ok('A6: 비공개 영수증 출발 파일은 AI만으로 공개 가능 폴더에 자동 이동하지 않음');
 
   assert.strictEqual(cr.routeDecision({ slotKey: 'review', verdict: sure('purchase_confirm'), ...base }).reason, 'no_transition');
   assert.strictEqual(cr.routeDecision({ slotKey: 'review', verdict: sure('other'), ...base }).reason, 'no_transition');
