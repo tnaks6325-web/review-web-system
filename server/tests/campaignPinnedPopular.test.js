@@ -18,7 +18,7 @@ const manualOrder = readServer('src/services/manualOrder.service.js');
 const apply = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
 
-assert.match(creditService, /POPULAR_CREDIT_VALIDITY_DAYS = 3/, 'normal submission credits expire after three days');
+assert.match(creditService, /POPULAR_CREDIT_VALIDITY_DAYS = 1/, 'normal submission credits expire after one day');
 assert.match(creditService, /ca\.submitted_at BETWEEN \$1 AND \$2/, 'only normal submissions inside the rolling validity window are counted');
 assert.match(creditService, /ca\.status = 'blog_pending'/, 'pending popular applications reserve credit');
 assert.match(creditService, /ca\.expires_at > \$2/, 'submitted and active popular holds are counted as consumed');

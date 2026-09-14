@@ -236,7 +236,7 @@ function _buildRecruitCard(c) {
   const popOn = c.is_popular === true;
   const flagBtns = `
     <div style="position:absolute;top:10px;left:12px;display:flex;z-index:2">
-      ${c.participation_mode ? `<button type="button" title="${popOn ? "인기 해제" : "인기 설정 — 리뷰어에게 [인기!] 배지가 붙고, 최근 3일 일반 모집 제출완료 1건당 인기 1건 참여 조건이 걸립니다"}"
+      ${c.participation_mode ? `<button type="button" title="${popOn ? "인기 해제" : "인기 설정 — 리뷰어에게 [인기!] 배지가 붙고, 최근 1일 일반 모집 제출완료 1건당 인기 1건 참여 조건이 걸립니다"}"
         onclick="event.stopPropagation();toggleCampFlag('${escHtml(c.id)}','popular',${popOn ? "false" : "true"})"
         style="border:1px solid ${popOn ? "#FCA5A5" : "#E5E7EB"};cursor:pointer;background:${popOn ? "#FEE2E2" : "#F9FAFB"};color:${popOn ? "#B91C1C" : "#9CA3AF"};border-radius:8px;padding:4px 9px;font-size:.72rem;font-weight:800">🔥 ${popOn ? "ON" : "OFF"}</button>` : ""}
     </div>`;
@@ -284,7 +284,7 @@ async function toggleCampFlag(campId, kind, on) {
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
     updateRecruitPopularity(campId, on);
-    showToast(on ? "🔥 인기 설정 — 최근 3일 일반 모집 제출완료 1건당 인기 1건 참여 조건이 적용됩니다" : "인기 설정을 해제했습니다",
+    showToast(on ? "🔥 인기 설정 — 최근 1일 일반 모집 제출완료 1건당 인기 1건 참여 조건이 적용됩니다" : "인기 설정을 해제했습니다",
       "success");
   } catch (e) {
     showToast("설정 실패: " + e.message, "error");

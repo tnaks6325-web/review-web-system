@@ -287,7 +287,7 @@
 <div class="sheet-ovl" id="popGate">
   <div class="sheet" style="max-height:82vh;overflow-y:auto">
     <h3>🔥 인기 상품 참여 조건</h3>
-    <p><b>최근 3일(72시간) 안에 일반 모집 구매양식을 제출완료한 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>
+    <p><b>최근 1일(24시간) 안에 일반 모집 구매양식을 제출완료한 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>
       어떤 일반 모집을 제출할지는 직접 선택할 수 있습니다.</p>
     <div class="muted" id="popGateCount" style="margin-bottom:8px"></div>
     <div id="popGateSubs" style="display:none;margin:-4px 0 8px;font-size:.8rem;color:#047857"></div>
@@ -550,7 +550,7 @@ function renderCrNotice(){
 }
 
 /* ═══ 🔥 인기상품 참여 조건 (064) ═══
-   명의별 최근 3일(72시간) 안의 일반 "구매양식 제출완료" 1건을 인기 참여권 1건으로 쓴다.
+   명의별 최근 1일(24시간) 안의 일반 "구매양식 제출완료" 1건을 인기 참여권 1건으로 쓴다.
    서버 게이트(apply 403 popular_locked)가 최종 권위 — 여기 안내·목록은 UX 보조. */
 /* ★ 참여권 상태(popular-status). null = 모름(구버전 백엔드·조회 실패·비로그인·미리보기)
    — **모르면 잠그지 않는다**(fail-open). 서버 apply 403 이 최종 권위이고 여기는 "누르기 전 고지"일 뿐. */
@@ -565,7 +565,7 @@ let _popUnknown = false;       // 한 명의라도 조회에 실패하면 true �
 
 function _popCalc(o){
   const nd = Number(o && o.normalDone) || 0, pu = Number(o && o.popularUsed) || 0;
-  return { normalDone: nd, popularUsed: pu, credits: Math.max(0, nd - pu), validityDays: Number(o && o.validityDays) || 3 };
+  return { normalDone: nd, popularUsed: pu, credits: Math.max(0, nd - pu), validityDays: Number(o && o.validityDays) || 1 };
 }
 function _setPopCredit(o){ if(o) _popCredit = _popCalc(o); }
 /** 한 명의의 참여권 조회. 실패는 null(= 모름) — 0건으로 꾸미지 않는다. */
@@ -629,7 +629,7 @@ function _applyPopLock(){
   if(!jb || !_popLockable()) return;
   if(jb.disabled) return;                              // 마감·옵션 마감 등 다른 사유가 이미 잠갔으면 그 문구를 유지
   jb.disabled = true;
-  jb.textContent = '🔒 최근 3일 일반 모집 제출 후 참여 가능';
+  jb.textContent = '🔒 최근 1일 일반 모집 제출 후 참여 가능';
 }
 /** 그 명의의 참여권. null = 모름(인기 공고가 아니거나 아직 조회 전·실패) — 모르면 막지 않는다. */
 function _popCreditFor(phone8){
@@ -666,8 +666,8 @@ function renderPopNotice(){
   const c = _popCredit;
   let line = !c ? ''
     : (c.credits > 0
-        ? '<div style="margin-top:8px;font-size:.8rem;color:#047857"><b>남은 참여권 ' + c.credits + '건</b> · 최근 3일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>'
-        : '<div style="margin-top:8px;font-size:.8rem;color:#DC2626"><b>남은 참여권 0건</b> — 아직 참여할 수 없어요 · 최근 3일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>');
+        ? '<div style="margin-top:8px;font-size:.8rem;color:#047857"><b>남은 참여권 ' + c.credits + '건</b> · 최근 1일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>'
+        : '<div style="margin-top:8px;font-size:.8rem;color:#DC2626"><b>남은 참여권 0건</b> — 아직 참여할 수 없어요 · 최근 1일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>');
   // ★ 타계정 참여가 열린 공고: 참여권은 명의별이라 "어느 명의로 참여할 수 있는지"를 말해준다.
   if(c && multiEnabled() && _popSubCredits){
     const ok = _popSubsWithCredit();
@@ -687,7 +687,7 @@ function renderPopNotice(){
   }
   box.innerHTML =
     '<div class="wd-tt" style="color:#DC2626">🔥 인기 상품 — 참여 조건이 있어요</div>' +
-    '<div style="font-size:.82rem;line-height:1.65"><b>최근 3일(72시간) 안에 일반 모집 구매양식을 제출완료한 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>' +
+    '<div style="font-size:.82rem;line-height:1.65"><b>최근 1일(24시간) 안에 일반 모집 구매양식을 제출완료한 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>' +
     '<span class="muted">참여 신청만 하고 취소하면 인정되지 않아요 — 구매양식 제출까지 완료해야 해요.</span></div>' +
     line +
     '<button class="btn ghost" style="margin-top:10px;padding:10px" onclick="openPopGate()">📋 지금 참여 가능한 일반 모집 보기</button>';
@@ -706,7 +706,7 @@ async function openPopGate(gateInfo){
   const normalDone = Number(info && info.normalDone) || 0;
   const popularUsed = Number(info && info.popularUsed) || 0;
   cnt.textContent = info
-    ? `최근 3일 일반 ${normalDone}건 · 사용한 인기 ${popularUsed}건 · 남은 참여권 ${Math.max(0, normalDone - popularUsed)}건`
+    ? `최근 1일 일반 ${normalDone}건 · 사용한 인기 ${popularUsed}건 · 남은 참여권 ${Math.max(0, normalDone - popularUsed)}건`
     : '';
   // ★ 타계정 참여가 열린 공고: 참여권은 명의별이라 위 한 줄(그 명의 기준)만으로는 오해가 생긴다
   //   — 참여할 수 있는 다른 명의가 있으면 여기서도 말해준다(안내 카드와 같은 출처·같은 문장).
@@ -964,7 +964,7 @@ function _acctStateText(r){
     : r.state === 'repurchase' ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) + ' 이후 재참여 가능'
     : r.state === 'verify' ? '신청 시 재참여 이력 확인'
     : r.state === 'login_only' ? '현재 로그인한 명의만 선택 가능'
-    : r.state === 'nocredit' ? base + '참여권 없음 — 최근 3일 일반 모집 제출 후 가능'
+    : r.state === 'nocredit' ? base + '참여권 없음 — 최근 1일 일반 모집 제출 후 가능'
     : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }
 function renderAcctList(){
@@ -1307,7 +1307,7 @@ async function _doApply(optionKey, sub){
         _popSubCredits[_subP8] = Object.assign({ name: (sub && sub.name) || '' }, _popCalc(j));
       }else{ _setPopCredit(j); }
       _popCreditPromise = _popCreditPromise || Promise.resolve(); renderPopNotice(); _applyPopLock();
-      toast('최근 3일 안에 일반 모집 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
+      toast('최근 1일 안에 일반 모집 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
     }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈

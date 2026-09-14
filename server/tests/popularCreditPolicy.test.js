@@ -12,7 +12,7 @@ const creditService = read('server/src/services/popularCredit.service.js');
 const apply = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
 
-assert(creditService.includes('POPULAR_CREDIT_VALIDITY_DAYS = 3'), 'popular policy must expire normal credits after three days');
+assert(creditService.includes('POPULAR_CREDIT_VALIDITY_DAYS = 1'), 'popular policy must expire normal credits after one day');
 assert(creditService.includes('ca.submitted_at BETWEEN $1 AND $2'), 'popular policy must only count recent normal completions');
 assert(creditService.includes('const credit = queue.credits[queue.next]'), 'popular policy must match credits with a linear FIFO queue');
 assert(apply.includes('loadPopularCreditState(client, holdP8)'), 'popular apply must use the shared credit calculation');
