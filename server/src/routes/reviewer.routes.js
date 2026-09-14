@@ -37,6 +37,52 @@ function sendReviewerIdentityError(res, err, next) {
   return next(err);
 }
 
+function _phone8(value) {
+  return String(value || '').replace(/\D/g, '').slice(-8);
+}
+
+function _reviewerTaskName(row) {
+  const internal = /^(campaign:|wt_)/i;
+  const candidates = [
+    row && row.campaignTitle,
+    row && row.targetDisplayName,
+    row && row.targetCampaignName,
+    row && row.indexCampaignName,
+    row && row.targetTabName,
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value && !internal.test(value)) return value;
+  }
+  return '참여 작업';
+}
+
+async function _reviewerPhoneScopeFromSession(session) {
+  const ownerReviewerId = String(session && session.ownerReviewerId || '');
+  if (!ownerReviewerId) return { ownerReviewerId: '', phone8s: [] };
+  const { rows } = await pool.query(
+    `SELECT phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1`,
+    [ownerReviewerId]
+  );
+  if (rows.length !== 1) return { ownerReviewerId: '', phone8s: [] };
+  const phone8s = new Set();
+  const add = value => { const p = _phone8(value); if (p.length === 8) phone8s.add(p); };
+  add(rows[0].phone8);
+  const subs = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
+  for (const sub of subs) add(sub && sub.phone);
+  try {
+    const identities = await pool.query(
+      `SELECT current_phone8 FROM reviewer_identities
+        WHERE owner_reviewer_id = $1 AND status <> 'separated'`,
+      [ownerReviewerId]
+    );
+    for (const identity of identities.rows) add(identity.current_phone8);
+  } catch (err) {
+    if (!err || err.code !== '42P01') throw err;
+  }
+  return { ownerReviewerId, phone8s: [...phone8s] };
+}
+
 async function bindProfileOwnerWhenEnabled(req, res, next) {
   if (!reviewerOrderIdentity.isEnabled()) return next();
   try {
@@ -514,6 +560,78 @@ router.get('/my-status', async (req, res, next) => {
     };
 
     res.json({ ok: true, items, stats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/reviewer/overdue-review-warning — 로그인 시 보여줄 가장 오래된 리뷰 미제출 1건.
+// 구매양식 제출 뒤 10일이 지난 주문 중 현재 리뷰내역의 참여행과 연결된 건만 고른다.
+// 경고 표시 여부는 캠페인 참여 제한과 무관하며 이 API는 읽기만 수행한다.
+router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    const scope = await _reviewerPhoneScopeFromSession(req.reviewer);
+    if (!scope.ownerReviewerId || !scope.phone8s.length) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
+    }
+
+    const { rows } = await pool.query(`
+      SELECT os.id AS "orderSubmissionId", os.submitted_at AS "submittedAt",
+             FLOOR(EXTRACT(EPOCH FROM (NOW() - os.submitted_at)) / 86400)::int AS "elapsedDays",
+             ri.sheet_id AS "targetSheetId", ri.tab_name AS "targetTabName", ri.row_index AS "targetRowIndex",
+             rc.title AS "campaignTitle", rt.display_name AS "targetDisplayName",
+             rt.campaign_name AS "targetCampaignName", ri.campaign_name AS "indexCampaignName"
+        FROM order_submissions os
+        LEFT JOIN LATERAL (
+          SELECT p.sheet_id, p.tab_name, p.seq, p.is_submitted
+            FROM campaign_participants p
+           WHERE p.order_submission_id = os.id
+             AND p.deleted_at IS NULL
+           ORDER BY p.updated_at DESC, p.id DESC
+           LIMIT 1
+        ) cp ON TRUE
+        JOIN review_index ri
+          ON ri.sheet_id = COALESCE(cp.sheet_id, os.sheet_id)
+         AND ri.tab_name = COALESCE(cp.tab_name, os.tab_name)
+         AND ri.row_index = COALESCE(cp.seq, os.sheet_row)
+         -- 주문 UUID 연결이 없는 레거시 행은 위치와 연락처가 모두 맞을 때만 보조 매칭한다.
+         AND (cp.sheet_id IS NOT NULL
+              OR ri.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8))
+        LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+        LEFT JOIN recruit_campaigns rc
+          ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
+        LEFT JOIN tab_configs rt ON rt.sheet_id = ri.sheet_id AND rt.tab_name = ri.tab_name
+       WHERE (os.owner_reviewer_id = $1
+              OR RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2))
+         AND os.deleted_at IS NULL
+         AND os.mirror_status = 'written'
+         AND os.submitted_at <= NOW() - INTERVAL '10 days'
+         AND NOT COALESCE(cp.is_submitted, FALSE)
+         AND NOT COALESCE(ri.is_submitted, FALSE)
+         AND NOT EXISTS (
+           SELECT 1 FROM workdesk_participant_deletions wd
+            WHERE wd.order_submission_id = os.id
+               OR (wd.sheet_id = ri.sheet_id AND wd.tab_name = ri.tab_name AND wd.seq = ri.row_index)
+         )
+       ORDER BY os.submitted_at ASC, os.id ASC
+       LIMIT 1`,
+      [scope.ownerReviewerId, scope.phone8s]
+    );
+
+    if (!rows.length) return res.json({ ok: true, item: null });
+    const row = rows[0];
+    res.json({
+      ok: true,
+      item: {
+        orderSubmissionId: row.orderSubmissionId,
+        submittedAt: row.submittedAt,
+        elapsedDays: Number(row.elapsedDays) || 10,
+        displayName: _reviewerTaskName(row),
+        sheetId: row.targetSheetId,
+        tabName: row.targetTabName,
+        rowIndex: row.targetRowIndex,
+      },
+    });
   } catch (err) {
     next(err);
   }
