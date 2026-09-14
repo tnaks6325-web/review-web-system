@@ -59,6 +59,9 @@ async function callRoute(router, ownerReviewerId) {
     CREATE TABLE review_index (
       sheet_id TEXT, tab_name TEXT, row_index INT, is_submitted BOOLEAN DEFAULT FALSE, campaign_name TEXT, phone8 TEXT
     );
+    CREATE TABLE participation_links (
+      sheet_id TEXT, tab_name TEXT, row_index INT, phone8 TEXT, owner_reviewer_id UUID
+    );
     CREATE TABLE campaign_applications (id UUID PRIMARY KEY, campaign_id TEXT);
     CREATE TABLE recruit_campaigns (id TEXT PRIMARY KEY, title TEXT);
     CREATE TABLE tab_configs (sheet_id TEXT, tab_name TEXT, display_name TEXT, campaign_name TEXT);
@@ -72,6 +75,9 @@ async function callRoute(router, ownerReviewerId) {
   const old11 = '22222222-2222-4222-8222-222222222222';
   const done15 = '33333333-3333-4333-8333-333333333333';
   const recent9 = '44444444-4444-4444-8444-444444444444';
+  const foreign20 = '55555555-5555-4555-8555-555555555555';
+  const legacy13 = '66666666-6666-4666-8666-666666666666';
+  const foreignOwner = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   await pool.query(`INSERT INTO reviewers(id,phone8,sub_accounts) VALUES ($1,'11112222','[]')`, [owner]);
   await pool.query(`
     INSERT INTO order_submissions(id,submitted_at,sheet_id,tab_name,sheet_row,owner_reviewer_id,phone,mirror_status)
@@ -79,8 +85,10 @@ async function callRoute(router, ownerReviewerId) {
       ($1,NOW()-INTERVAL '12 days','s1','t1',1,$5,'01011112222','written'),
       ($2,NOW()-INTERVAL '11 days','s2','t2',2,$5,'01011112222','written'),
       ($3,NOW()-INTERVAL '15 days','s3','t3',3,$5,'01011112222','written'),
-      ($4,NOW()-INTERVAL '9 days','s4','t4',4,$5,'01011112222','written')`,
-    [old12, old11, done15, recent9, owner]
+      ($4,NOW()-INTERVAL '9 days','s4','t4',4,$5,'01011112222','written'),
+      ($6,NOW()-INTERVAL '20 days','s5','t5',5,$8,'01011112222','written'),
+      ($7,NOW()-INTERVAL '13 days','s6','t6',6,NULL,'01011112222','written')`,
+    [old12, old11, done15, recent9, owner, foreign20, legacy13, foreignOwner]
   );
   await pool.query(`
     INSERT INTO campaign_participants(id,order_submission_id,sheet_id,tab_name,seq,is_submitted)
@@ -88,32 +96,44 @@ async function callRoute(router, ownerReviewerId) {
       ('51111111-1111-4111-8111-111111111111',$1,'s1','t1',1,FALSE),
       ('52222222-2222-4222-8222-222222222222',$2,'s2','t2',2,FALSE),
       ('53333333-3333-4333-8333-333333333333',$3,'s3','t3',3,TRUE),
-      ('54444444-4444-4444-8444-444444444444',$4,'s4','t4',4,FALSE)`,
-    [old12, old11, done15, recent9]
+      ('54444444-4444-4444-8444-444444444444',$4,'s4','t4',4,FALSE),
+      ('55555555-5555-4555-8555-555555555551',$5,'s5','t5',5,FALSE)`,
+    [old12, old11, done15, recent9, foreign20]
   );
   await pool.query(`
     INSERT INTO review_index(sheet_id,tab_name,row_index,is_submitted,campaign_name,phone8)
     VALUES ('s1','t1',1,FALSE,'12일 작업','11112222'),('s2','t2',2,FALSE,'11일 작업','11112222'),
-           ('s3','t3',3,TRUE,'완료 작업','11112222'),('s4','t4',4,FALSE,'9일 작업','11112222')
+           ('s3','t3',3,TRUE,'완료 작업','11112222'),('s4','t4',4,FALSE,'9일 작업','11112222'),
+           ('s5','t5',5,FALSE,'다른 소유자 작업','11112222'),('s6','t6',6,FALSE,'레거시 참여링크 작업',NULL)
   `);
+  await pool.query(`
+    INSERT INTO participation_links(sheet_id,tab_name,row_index,phone8,owner_reviewer_id)
+    VALUES ('s6','t6',6,'11112222',$1)
+  `, [owner]);
 
   const router = require('../src/routes/reviewer.routes');
   const first = await callRoute(router, owner);
   assert.ifError(first.err);
-  assert.equal(first.body.item.orderSubmissionId, old12, '가장 오래된 12일 작업');
-  assert.equal(first.body.item.displayName, '12일 작업');
+  assert.notEqual(first.body.item.orderSubmissionId, foreign20, '재사용 전화번호의 다른 소유자 주문 제외');
+  assert.equal(first.body.item.orderSubmissionId, legacy13, '연락처가 빈 레거시 행은 참여링크로 연결');
+  assert.equal(first.body.item.displayName, '레거시 참여링크 작업');
 
-  await pool.query(`UPDATE campaign_participants SET is_submitted=TRUE WHERE order_submission_id=$1`, [old12]);
+  await pool.query(`UPDATE review_index SET is_submitted=TRUE WHERE sheet_id='s6' AND tab_name='t6'`);
   const second = await callRoute(router, owner);
   assert.ifError(second.err);
-  assert.equal(second.body.item.orderSubmissionId, old11, '12일 완료 뒤 11일 작업');
+  assert.equal(second.body.item.orderSubmissionId, old12, '레거시 완료 뒤 12일 작업');
+
+  await pool.query(`UPDATE campaign_participants SET is_submitted=TRUE WHERE order_submission_id=$1`, [old12]);
+  const third = await callRoute(router, owner);
+  assert.ifError(third.err);
+  assert.equal(third.body.item.orderSubmissionId, old11, '12일 완료 뒤 11일 작업');
 
   await pool.query(`UPDATE review_index SET is_submitted=TRUE WHERE sheet_id='s2' AND tab_name='t2'`);
   const none = await callRoute(router, owner);
   assert.ifError(none.err);
   assert.equal(none.body.item, null, '완료 건과 10일 미만 건만 남으면 알림 없음');
 
-  console.log('✅ reviewerOverdueReviewWarningPg — 실제 PostgreSQL 3시나리오 통과');
+  console.log('✅ reviewerOverdueReviewWarningPg — 실제 PostgreSQL 5시나리오 통과');
   await pool.end();
 })().catch(err => {
   console.error('❌ ' + err.stack);

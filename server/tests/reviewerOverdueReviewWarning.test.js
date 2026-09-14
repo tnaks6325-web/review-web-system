@@ -23,6 +23,10 @@ ok('리뷰색인 또는 작업표가 제출완료면 제외', /NOT COALESCE\(cp\
   && /NOT COALESCE\(ri\.is_submitted, FALSE\)/.test(routeBlock));
 ok('삭제된 참여건 제외', /workdesk_participant_deletions/.test(routeBlock) && /os\.deleted_at IS NULL/.test(routeBlock));
 ok('주문 UUID 없는 레거시는 위치와 phone8이 모두 맞아야 함', /cp\.sheet_id IS NOT NULL[\s\S]*ri\.phone8 = RIGHT\(regexp_replace/.test(routeBlock));
+ok('소유자가 기록된 주문은 전화번호 재사용으로 다른 계정에 귀속되지 않음',
+  /os\.owner_reviewer_id = \$1[\s\S]*OR \(os\.owner_reviewer_id IS NULL[\s\S]*= ANY\(\$2\)/.test(routeBlock));
+ok('레거시 행의 연락처가 비었으면 확정 참여링크로 보조 매칭',
+  /ri\.phone8 IS NULL AND EXISTS[\s\S]*FROM participation_links pl[\s\S]*pl\.phone8 = RIGHT\(regexp_replace/.test(routeBlock));
 ok('경고 API는 읽기 전용', !/\b(INSERT|UPDATE|DELETE)\b/.test(routeBlock.replace(/deleted_at/g, '')));
 
 ok('팝업 문구와 작은 X 닫기 버튼', /id="overdueReviewWarning"/.test(frontend)

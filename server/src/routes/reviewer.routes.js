@@ -596,13 +596,22 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
          AND ri.row_index = COALESCE(cp.seq, os.sheet_row)
          -- 주문 UUID 연결이 없는 레거시 행은 위치와 연락처가 모두 맞을 때만 보조 매칭한다.
          AND (cp.sheet_id IS NOT NULL
-              OR ri.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8))
+              OR ri.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
+              OR (ri.phone8 IS NULL AND EXISTS (
+                SELECT 1
+                  FROM participation_links pl
+                 WHERE pl.sheet_id = ri.sheet_id
+                   AND pl.tab_name = ri.tab_name
+                   AND pl.row_index = ri.row_index
+                   AND pl.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
+              )))
         LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
         LEFT JOIN recruit_campaigns rc
           ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
         LEFT JOIN tab_configs rt ON rt.sheet_id = ri.sheet_id AND rt.tab_name = ri.tab_name
        WHERE (os.owner_reviewer_id = $1
-              OR RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2))
+              OR (os.owner_reviewer_id IS NULL
+                  AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2)))
          AND os.deleted_at IS NULL
          AND os.mirror_status = 'written'
          AND os.submitted_at <= NOW() - INTERVAL '10 days'
