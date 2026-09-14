@@ -23,7 +23,13 @@ async function _removeUnpayableReceiptSlots(items) {
     if (!receipt) continue;
     const state = states && states.get(cashReceiptSubmissionRowKey(
       item.sheetId, item.tabName, item.rowIndex));
-    if (!state || !state.submitted) {
+    if (state && state.submitted) {
+      // 예전 슬롯 key로 올린 파일이라도 영수증 전용 검증을 통과했다면
+      // 현재 설정 key를 제출 완료로 내려 재제출을 요구하지 않는다.
+      if (!(item.submittedSlots || []).includes(receipt.key)) {
+        item.submittedSlots = [...(item.submittedSlots || []), receipt.key];
+      }
+    } else {
       item.submittedSlots = (item.submittedSlots || []).filter(key => key !== receipt.key);
     }
   }

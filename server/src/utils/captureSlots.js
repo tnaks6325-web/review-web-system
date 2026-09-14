@@ -95,9 +95,9 @@ function requiredSlotKeys(captureSlots, incomeType, reviewType, campaignCashRece
  *   **같은 함수**를 써야 "눌리는데 서버가 거부" / "대상인데 버튼이 안 눌림" 두 방향 오류가 안 생긴다.
  *
  * ★★ **key 로 찾지 말 것 — 라벨로도 찾는다**(코드리뷰가 잡은 실측 회귀):
- *   `capture_slots` 의 유일한 writer(`tabconfig.routes` 캡처 슬롯 저장)는 key 를 **위치로** 부여한다
- *   (`0번=review`, 그 외 `slot2`,`slot3`…) — 즉 **`receipt` 라는 key 는 영영 저장되지 않는다**.
- *   그래서 key 만 보면 관리자가 `[리뷰, 현금영수증]` 으로 직접 설정한 현영 탭이 "대상 아님"이 되어
+ *   관리자가 직접 만든 슬롯은 기존 데이터에 `slot2`,`slot3`… 같은 key로 남아 있다.
+ *   현재 writer는 이 key를 보존하지만 `receipt`로 자동 바꾸지는 않는다. 그래서 key만 보면
+ *   관리자가 `[리뷰, 현금영수증]`으로 직접 설정한 현영 탭이 "대상 아님"이 되어
  *   버튼이 죽는다(업로드는 그 슬롯 라벨로 `[리뷰]/현금영수증` 폴더를 실제로 만들어 둔 상태).
  *   자동 파생 슬롯은 key `receipt`, 수동 설정은 라벨로 — 둘 다 인정한다.
  *
@@ -105,6 +105,60 @@ function requiredSlotKeys(captureSlots, incomeType, reviewType, campaignCashRece
  *   로 찾으면 수동 슬롯 탭에서 문자열 `receipt` 라는 폴더를 뒤지게 된다(찾을 수 없는 이름).
  */
 const _CR_LABEL_RE = /현금영수증|현영|지출증빙/;
+
+/**
+ * 관리자가 슬롯을 재정렬·삽입해도 기존 제출 원장이 가리키는 key를 보존한다.
+ * 라벨 일치를 먼저 전체 할당한 뒤 신규 슬롯에만 사용하지 않은 key를 부여한다.
+ * 요청에 기존 key가 포함된 경우에는 라벨 변경에도 그 key를 유지한다.
+ */
+function assignStableCaptureSlotKeys(rawSlots, previousSlots) {
+  const incoming = (Array.isArray(rawSlots) ? rawSlots : [])
+    .map(s => ({
+      requestedKey: typeof s === 'object' && s ? String(s.key || '').trim() : '',
+      label: String((typeof s === 'string' ? s : (s && s.label)) || '').trim(),
+    }))
+    .filter(s => s.label);
+  const previous = (Array.isArray(previousSlots) ? previousSlots : [])
+    .filter(s => s && String(s.key || '').trim() && String(s.label || '').trim())
+    .map(s => ({ key: String(s.key).trim(), label: String(s.label).trim() }));
+  const previousKeys = new Set(previous.map(s => s.key));
+  const used = new Set();
+  const assigned = new Array(incoming.length).fill('');
+
+  incoming.forEach((slot, index) => {
+    if (slot.requestedKey && previousKeys.has(slot.requestedKey) && !used.has(slot.requestedKey)) {
+      assigned[index] = slot.requestedKey;
+      used.add(slot.requestedKey);
+    }
+  });
+  incoming.forEach((slot, index) => {
+    if (assigned[index]) return;
+    const hit = previous.find(old => old.label === slot.label && !used.has(old.key));
+    if (hit) {
+      assigned[index] = hit.key;
+      used.add(hit.key);
+    }
+  });
+
+  const reserved = new Set([...previousKeys, ...used]);
+  const nextKey = (preferReview) => {
+    if (preferReview && !reserved.has('review')) {
+      reserved.add('review');
+      return 'review';
+    }
+    let n = 2;
+    while (reserved.has(`slot${n}`)) n += 1;
+    const key = `slot${n}`;
+    reserved.add(key);
+    return key;
+  };
+  incoming.forEach((slot, index) => {
+    if (!assigned[index]) assigned[index] = nextKey(previous.length === 0 && index === 0);
+  });
+
+  return incoming.map((slot, index) => ({ key: assigned[index], label: slot.label }));
+}
+
 function cashReceiptSlotInfo(captureSlots, incomeType, campaignCashReceiptRequired = false, reviewType = null) {
   const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired);
   const slot = Array.isArray(eff)
@@ -145,4 +199,5 @@ module.exports = {
   REVIEW_SLOT, RECEIPT_SLOT, CONFIRM_SLOT,
   isCashReceiptIncome, effectiveCaptureSlots, requiredSlotKeys, slotLabel,
   hasCashReceiptSlot, cashReceiptSlotInfo, isCashReceiptSlot, cashReceiptNote, CR_MISCONFIG_NOTE,
+  assignStableCaptureSlotKeys,
 };

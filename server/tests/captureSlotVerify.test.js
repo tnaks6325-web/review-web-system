@@ -34,6 +34,15 @@ ok('모집공고가 현영인데 옛 명시 슬롯에 영수증이 없으면 선
     === JSON.stringify(['review', 'receipt']));
 ok('수동 slot2 현금영수증은 중복 추가 없이 영수증 역할로 판정',
   cs.isCashReceiptSlot([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }], '', 'slot2'));
+const previousSlots = [{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }];
+ok('슬롯 삽입 후에도 기존 현금영수증 key를 보존',
+  JSON.stringify(cs.assignStableCaptureSlotKeys(['주문내역', '리뷰', '현금영수증'], previousSlots))
+    === JSON.stringify([{ key: 'slot3', label: '주문내역' }, { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }]));
+ok('슬롯 재정렬 후에도 기존 제출 key를 보존',
+  JSON.stringify(cs.assignStableCaptureSlotKeys(['현금영수증', '리뷰'], previousSlots))
+    === JSON.stringify([{ key: 'slot2', label: '현금영수증' }, { key: 'review', label: '리뷰' }]));
+ok('기존 key를 보낸 라벨 변경은 같은 key를 유지',
+  cs.assignStableCaptureSlotKeys([{ key: 'slot2', label: '현영 증빙' }, { key: 'review', label: '리뷰' }], previousSlots)[0].key === 'slot2');
 /* ★ 사용자 확정(2026-08-05): 현금영수증은 발행확정(배송완료·구매확정 후 0~3일) 전에는 캡처가
  *   존재할 수 없어 **완료 판정에서 제외**(required:false) — 화면 슬롯은 2개 그대로, 필수는 리뷰만. */
 ok('★ 현영 탭 완료 판정 = 리뷰만(현금영수증 슬롯은 선택 — 화면엔 뜨되 완료를 막지 않음)',
@@ -60,6 +69,7 @@ const submit = readS('routes/submit.routes.js');
 const search = readS('services/search.service.js');
 const diag = readS('routes/diag.routes.js');
 const revEdit = readS('routes/reviewEdit.routes.js');
+const tabConfig = readS('routes/tabconfig.routes.js');
 
 ok('완료 판정(submit)이 공용 유틸 사용 — 자체 구현 없음',
   /require\('\.\.\/utils\/captureSlots'\)/.test(submit)
@@ -80,6 +90,8 @@ ok('업로드 폴더 라벨이 공용 유틸 사용(리뷰타입 포함 — 087 
 ok('리뷰 교체요청도 같은 라벨 규칙(파일이 다른 폴더로 흩어지지 않게)',
   /slotLabelOf\(cfg\.capture_slots, cfg\.income_type, slot, rt, cr === true\)/.test(revEdit)
   && /slotLabelOf\(tc\[0\]\?\.capture_slots, tc\[0\]\?\.income_type, k, _rt, _cr === true\)/.test(revEdit));
+ok('캡처 슬롯 저장은 기존 설정을 잠그고 stable key 부여를 적용',
+  /SELECT capture_slots FROM tab_configs[\s\S]*FOR UPDATE[\s\S]*assignStableCaptureSlotKeys\(raw, existing\[0\]\?\.capture_slots\)/.test(tabConfig));
 
 /* ═══ 3단계: 검수 정책(실제 핸들러 · Gemini 스텁) ═══ */
 const orig = Module.prototype.require;

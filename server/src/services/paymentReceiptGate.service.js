@@ -218,7 +218,11 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
            ON rs.sheet_id = r.sheet_id
           AND rs.tab_name = r.tab_name
           AND rs.row_index = r.row_index
-          AND rs.slot_key = r.receipt_key
+          AND (rs.slot_key = r.receipt_key OR EXISTS (
+            SELECT 1 FROM review_inspections role_ri
+             WHERE role_ri.file_id = rs.file_id
+               AND COALESCE(role_ri.checks, '{}'::jsonb) ? 'receiptValidation'
+          ))
           AND btrim(COALESCE(rs.file_id, '')) <> ''
         FOR UPDATE OF rs`,
       lockParams
@@ -247,7 +251,11 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
          WHERE rs.sheet_id = r.sheet_id
            AND rs.tab_name = r.tab_name
            AND rs.row_index = r.row_index
-           AND rs.slot_key = r.receipt_key
+           AND (rs.slot_key = r.receipt_key OR EXISTS (
+             SELECT 1 FROM review_inspections role_ri
+              WHERE role_ri.file_id = rs.file_id
+                AND COALESCE(role_ri.checks, '{}'::jsonb) ? 'receiptValidation'
+           ))
            AND btrim(COALESCE(rs.file_id, '')) <> ''
            AND EXISTS (
              SELECT 1

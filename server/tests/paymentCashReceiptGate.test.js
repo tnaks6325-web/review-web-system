@@ -53,6 +53,8 @@ const db = {
         '신규 영수증은 전용 판정 통과 기록이 있어야 한다');
       assert.match(sql, /ri\.status = 'resolved' AND ri\.resolution = 'ok'[\s\S]*ri\.checks[\s\S]*receiptValidation/,
         '내부 정상 승인은 영수증 전용 검증 키가 있는 건만 허용해야 한다');
+      assert.match(sql, /rs\.slot_key = r\.receipt_key OR EXISTS \([\s\S]*role_ri\.checks[\s\S]*receiptValidation/,
+        '슬롯 key가 바뀐 과거 제출도 영수증 전용 검증 증거로 역할을 보존해야 한다');
       assert.doesNotMatch(sql, /ai_confidence|checks->'format'->>'kind' = 'receipt'/,
         '전용 검증 없는 과거 고신뢰 분류가 사업자번호 대조를 우회하면 안 된다');
       return { rows: [
@@ -108,8 +110,8 @@ const db = {
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
   assert.match(trackBRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*getBatch\(req\.params\.id, \{ db: client, lock: true \}\)[\s\S]*downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out, \{ db: client, lock: true \}\)[\s\S]*cash_receipt_not_verified[\s\S]*buildWorkbook[\s\S]*markDownloaded\(out\.batch\.id, _by\(req\), \{ db: client \}\)[\s\S]*COMMIT/,
     '최초 이체파일 다운로드 직전에 현금영수증 현재 상태를 다시 검증해야 한다');
-  assert.match(searchService, /cashReceiptSubmissionStates\(pool, source\)[\s\S]*item\.submittedSlots = \(item\.submittedSlots \|\| \[\]\)\.filter/,
-    '거절·보류된 영수증은 파일이 남아 있어도 리뷰어 재제출 슬롯을 다시 열어야 한다');
+  assert.match(searchService, /cashReceiptSubmissionStates\(pool, source\)[\s\S]*state && state\.submitted[\s\S]*submittedSlots = \[\.\.\.\(item\.submittedSlots \|\| \[\]\), receipt\.key\][\s\S]*item\.submittedSlots = \(item\.submittedSlots \|\| \[\]\)\.filter/,
+    '검증된 과거 key는 현재 영수증 슬롯으로 복원하고, 거절·보류된 파일은 재제출 슬롯을 다시 열어야 한다');
   assert.match(searchService, /cashReceiptRequirementsForRows\([\s\S]*rowIndex: r\.rowIndex[\s\S]*cashReceiptSubmissionRowKey\(row\.sheetId, row\.tabName, row\.rowIndex\)/,
     '재공고 탭의 리뷰어 슬롯도 행 출처 공고의 현영 설정을 따라야 한다');
 

@@ -17,6 +17,7 @@ const {
 } = require('../utils/cashReceiptChannels');
 const { logger } = require('../utils/logger');
 const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
+const { assignStableCaptureSlotKeys } = require('../utils/captureSlots');
 
 // ── Auto-migration: display_name_map JSONB 컬럼 추가 (차수별 표시명) ──
 (async () => {
@@ -231,30 +232,38 @@ router.post('/config', authMiddleware, async (req, res, next) => {
       }
     }
 
-    // ★ 캡처 슬롯(capture_slots) 처리 — 전용 분기 (JSONB 타입 안전, 키는 위치 기준 자동 부여)
-    //   요청은 라벨 목록만 보내면 됨(문자열 배열 또는 {label} 배열).
-    //   key는 서버가 위치로 부여: 0번=review(기존 단일 슬롯/원장과 호환), 그 외=slot2,slot3...
+    // ★ 캡처 슬롯(capture_slots) 처리 — 전용 분기 (JSONB 타입 안전)
+    //   순서가 바뀌어도 기존 key를 보존해 review_submissions 원장이 끊기지 않게 한다.
+    //   기존 화면의 라벨 목록과 신규 화면의 {key,label} 모두 받는다.
     //   슬롯이 1개 이하이면 NULL 저장(= 단일 기본 'review' 슬롯, 기존 동작 그대로).
     if (b.captureSlots !== undefined) {
+      const client = await pool.connect();
       try {
         const raw = Array.isArray(b.captureSlots) ? b.captureSlots : [];
-        const labels = raw
-          .map(s => (typeof s === 'string' ? s : (s && s.label)) || '')
-          .map(l => String(l).trim())
-          .filter(Boolean);
-        const slotsArr = labels.map((label, i) => ({ key: i === 0 ? 'review' : `slot${i + 1}`, label }));
+        await client.query('BEGIN');
+        const { rows: existing } = await client.query(
+          `SELECT capture_slots FROM tab_configs
+            WHERE sheet_id = $1 AND tab_name = $2
+            FOR UPDATE`,
+          [sheetId, tabName]
+        );
+        const slotsArr = assignStableCaptureSlotKeys(raw, existing[0]?.capture_slots);
         const slotsJson = slotsArr.length > 1 ? JSON.stringify(slotsArr) : null;
-        await pool.query(
+        await client.query(
           `INSERT INTO tab_configs (sheet_id, tab_name, capture_slots, updated_at)
            VALUES ($1, $2, $3::jsonb, NOW())
            ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
              capture_slots = $3::jsonb, updated_at = NOW()`,
           [sheetId, tabName, slotsJson]
         );
+        await client.query('COMMIT');
         return res.json({ ok: true, tabName, sheetId, captureSlots: slotsArr });
       } catch (csErr) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
         logger.error('[tab/config] capture_slots 저장 오류:', csErr.message);
         return res.json({ error: '캡처 슬롯 저장 오류: ' + csErr.message });
+      } finally {
+        client.release();
       }
     }
 
