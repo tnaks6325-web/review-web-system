@@ -2233,9 +2233,8 @@ router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, 
 });
 
 /* 수동 분류(이동) — "리뷰가 아니다 → 현금영수증/구매캡처로". 실행은 fileRoute.service
-   재사용(사본 0 — 자동 이동과 같은 상태·같은 되돌리기). 이동 성공 시 그 검수 건은
-   정상(오제출 = resolution 'ok')으로 자동 종결하고, 학습 결합으로 그 실물을 대상 판별
-   예시로 승격할 수 있는 슬롯이면 promote 제안을 동봉한다(등록은 사람이 확인 후). */
+   재사용(사본 0 — 자동 이동과 같은 상태·같은 되돌리기). 현금영수증 이동은 기존 일반 검수의
+   정상 결과를 폐기하고 영수증 전용 재검수를 즉시 실행한다. 다른 이동만 오제출 정상으로 종결한다. */
 router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (req, res) => {
   try {
     const fileId = String((req.body || {}).fileId || '');
@@ -2245,7 +2244,13 @@ router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (
     const by = (req.admin && req.admin.name) || '';
     const out = await require('../services/fileRoute.service').manualRoute({ fileId, target, by });
     if (!out.ok) return res.status(400).json(out);
-    try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'ok' }); } catch (_) {}
+    let reinspection = null;
+    if (target === 'receipt') {
+      try { reinspection = await _inspectSvc.reinspectReceiptFile({ fileId }); }
+      catch (_) { reinspection = { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' }; }
+    } else {
+      try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'ok' }); } catch (_) {}
+    }
     // 이동 안내 — "옮겼다 + 리뷰 캡처가 아직 비어 있다"를 리뷰어가 알아야 다음 행동을 한다.
     let notify = null;
     const moveMessage = String((req.body || {}).rejectMessage || '').trim();
@@ -2257,7 +2262,7 @@ router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (
     }
     let promote = null;
     try { promote = await _routePromoteSuggestion(out); } catch (_) {}
-    res.json({ ...out, promote, notify });
+    res.json({ ...out, promote, notify, ...(target === 'receipt' ? { reinspection } : {}) });
   } catch (err) {
     res.status(500).json({ ok: false, error: '이동에 실패했습니다.' });
   }

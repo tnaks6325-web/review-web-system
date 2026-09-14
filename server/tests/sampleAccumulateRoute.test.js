@@ -193,6 +193,9 @@ function seqPool(handlers) {
     assert.ok(upd, '★ 최초 출처 보존(COALESCE) — 되돌리기가 항상 원래 칸으로');
     assert.strictEqual(upd.params[1], 'slot2', '수동 영수증 이동도 설정된 실제 슬롯 키로 저장');
     assert.strictEqual(upd.params[2], 'manual:만두', '분류 원장 표기 = manual:<이름>(정확도 통계의 재료)');
+    assert.ok(/INSERT INTO review_inspections/.test(upd.sql) && /status = 'pending'/.test(upd.sql)
+      && /resolution = NULL/.test(upd.sql),
+    '★ 슬롯 이동과 기존 정상 승인 무효화는 한 SQL 문으로 처리돼야 한다');
     ok('C3: 이동 시퀀스 — 자동분류와 같은 실행부(폴더·원장·대표·로그) + manual 표기');
     FR.__setPoolForTest(null);
   }

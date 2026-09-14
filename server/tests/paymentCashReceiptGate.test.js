@@ -51,8 +51,8 @@ const db = {
       assert.strictEqual(params.length, 4, '입금 게이트는 과거 영수증 분류 확신도를 호환 증거로 받지 않아야 한다');
       assert.match(sql, /ri\.checks->'receiptValidation'->>'verdict' = 'pass'/,
         '신규 영수증은 전용 판정 통과 기록이 있어야 한다');
-      assert.match(sql, /ri\.status = 'resolved' AND ri\.resolution = 'ok'/,
-        'AI 판정 불가 건은 내부 정상 승인 경로가 있어야 한다');
+      assert.match(sql, /ri\.status = 'resolved' AND ri\.resolution = 'ok'[\s\S]*ri\.checks[\s\S]*receiptValidation/,
+        '내부 정상 승인은 영수증 전용 검증 키가 있는 건만 허용해야 한다');
       assert.doesNotMatch(sql, /ai_confidence|checks->'format'->>'kind' = 'receipt'/,
         '전용 검증 없는 과거 고신뢰 분류가 사업자번호 대조를 우회하면 안 된다');
       return { rows: [
@@ -114,6 +114,7 @@ const db = {
     '재공고 탭의 리뷰어 슬롯도 행 출처 공고의 현영 설정을 따라야 한다');
 
   const inspectService = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
+  const fileRouteService = fs.readFileSync(path.join(__dirname, '../src/services/fileRoute.service.js'), 'utf8');
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
   const reviewEditRoute = fs.readFileSync(path.join(__dirname, '../src/routes/reviewEdit.routes.js'), 'utf8');
   assert.match(inspectService, /const businessNoMatched =[\s\S]*receiptVerdict\?\.status === 'ok' && businessNoMatched[\s\S]*businessNoMatched: true[\s\S]*business_number_unverified/,
@@ -134,13 +135,32 @@ const db = {
     '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
   assert.match(reviewEditRoute, /INSERT INTO review_inspections[\s\S]*approved_file_replacement[\s\S]*isCashReceiptSlot\([\s\S]*inspect\.inspectSubmission\([\s\S]*slotRole: 'receipt'/,
     '관리자가 승인한 영수증 교체본은 pending 원장을 만든 뒤 즉시 receipt 재검수해야 한다');
+  assert.match(trackBRoute, /target === 'receipt'[\s\S]*reinspectReceiptFile\(\{ fileId \}\)[\s\S]*else \{[\s\S]*resolveInspection/,
+    '수동 현영 이동은 일반 정상 종결 대신 영수증 전용 재검수를 거쳐야 한다');
+  assert.match(inspectService, /async function reinspectReceiptFile[\s\S]*status = 'pending'[\s\S]*resolution = NULL[\s\S]*slotRole: 'receipt'/,
+    '수동 현영 재검수는 기존 정상 승인을 먼저 무효화하고 실패 시 pending을 남겨야 한다');
+  assert.match(fileRouteService, /WITH moved AS \([\s\S]*UPDATE review_submissions[\s\S]*INSERT INTO review_inspections[\s\S]*resolution = NULL/,
+    '수동 현영 슬롯 이동과 기존 정상 승인 무효화 사이에 입금 요청이 끼어들 수 없어야 한다');
 
   process.env.REVIEW_INSPECT = '1';
+  const drivePath = require.resolve('../src/services/drive.service');
+  require.cache[drivePath] = {
+    id: drivePath, filename: drivePath, loaded: true,
+    exports: { downloadFile: async () => { throw new Error('virtual drive outage'); } },
+  };
   const inspect = require('../src/services/reviewInspect.service');
+  let pendingWrite = null;
   inspect.__setPoolForTest({
-    query: async sql => {
+    query: async (sql, params) => {
       if (/company_business_no/.test(sql)) return { rows: [{ value: '123-45-67890' }] };
-      if (/INSERT INTO review_inspections/.test(sql)) return { rows: [], rowCount: 1 };
+      if (/FROM review_submissions WHERE file_id/.test(sql)) return { rows: [{
+        file_id: params[0], file_hash: null, sheet_id: 'S', tab_name: 'cash', row_index: 9,
+        reviewer_name: '가상리뷰어', slot_key: 'receipt',
+      }] };
+      if (/INSERT INTO review_inspections/.test(sql)) {
+        if (/resolution = NULL/.test(sql)) pendingWrite = { sql, params };
+        return { rows: [], rowCount: 1 };
+      }
       throw new Error('unexpected inspection query: ' + sql);
     },
   });
@@ -154,7 +174,11 @@ const db = {
   assert.strictEqual((await inspectReceipt('ok', '999-88-77777')).status, 'suspect', '회사 번호와 다른 영수증은 내부 확인 전 지급 보류');
   assert.strictEqual((await inspectReceipt('mismatch')).status, 'fail', '영수증 판정 불일치는 지급 검수 실패');
   assert.strictEqual((await inspectReceipt('skipped')).status, 'suspect', '판정 불가는 내부 확인 전 지급 보류');
+  const pending = await inspect.reinspectReceiptFile({ fileId: 'manual-route-receipt' });
+  assert.strictEqual(pending.pending, true, 'Drive 재검수 실패는 입금 가능 상태가 아니라 재시도 대기여야 한다');
+  assert.ok(pendingWrite && /status = 'pending'/.test(pendingWrite.sql) && /resolution = NULL/.test(pendingWrite.sql),
+    '파일 다운로드보다 먼저 기존 정상 승인을 지우고 pending 원장을 저장해야 한다');
   inspect.__setPoolForTest(null);
 
-  console.log('payment cash receipt gate: 26 passed');
+  console.log('payment cash receipt gate: 28 passed');
 })().catch(err => { console.error(err); process.exit(1); });

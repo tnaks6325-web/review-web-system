@@ -258,7 +258,8 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
                   (ri.status = 'pass'
                    AND ri.checks->'receiptValidation'->>'verdict' = 'pass')
                   -- AI가 판정하지 못한 건은 내부 담당자가 실제 파일을 확인해 정상 종결해야 한다.
-                  OR (ri.status = 'resolved' AND ri.resolution = 'ok')
+                  OR (ri.status = 'resolved' AND ri.resolution = 'ok'
+                      AND COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation')
                 )
            )
       )`,

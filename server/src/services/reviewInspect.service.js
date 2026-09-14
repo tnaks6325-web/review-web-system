@@ -1399,6 +1399,58 @@ async function saveFileHash({ fileId, fileHash } = {}) {
   }
 }
 
+/**
+ * 일반 리뷰로 검수된 파일을 사람이 현금영수증 칸으로 옮긴 직후 다시 판정한다.
+ * 먼저 기존 정상 종결을 무효화해 다운로드·AI 실패 중에도 지급 게이트가 열리지 않게 하고,
+ * 실패하면 pending 상태를 남겨 정기 스윕이 이어받는다.
+ */
+async function reinspectReceiptFile({ fileId } = {}) {
+  if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
+  const { rows } = await _db().query(
+    `SELECT file_id, file_hash, sheet_id, tab_name, row_index, reviewer_name, slot_key
+       FROM review_submissions WHERE file_id = $1 LIMIT 1`,
+    [fileId]
+  );
+  const sub = rows[0];
+  if (!sub) return { ok: false, error: '제출 원장을 찾을 수 없습니다.' };
+
+  const pendingChecks = {
+    receiptValidation: { verdict: 'warn', status: 'retry_pending', reason: 'manual_receipt_route' },
+  };
+  await _db().query(
+    `INSERT INTO review_inspections
+       (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
+        inspected_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending',$7::jsonb,NOW(),NOW())
+     ON CONFLICT (file_id) DO UPDATE
+       SET sheet_id = EXCLUDED.sheet_id, tab_name = EXCLUDED.tab_name,
+           row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
+           slot_key = EXCLUDED.slot_key, status = 'pending', checks = EXCLUDED.checks,
+           resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+           attempts = 0, inspected_at = NOW(), updated_at = NOW()`,
+    [sub.file_id, sub.sheet_id, sub.tab_name, sub.row_index ?? null,
+      sub.reviewer_name || null, sub.slot_key || 'receipt', JSON.stringify(pendingChecks)]
+  );
+
+  try {
+    const f = await require('./drive.service').downloadFile(fileId);
+    if (!f || !f.buffer) throw new Error('파일을 받지 못했습니다');
+    const base64 = f.buffer.toString('base64');
+    const result = await inspectSubmission({
+      base64, mimeType: f.mimeType || 'image/jpeg', fileId,
+      fileHash: sub.file_hash || hashBase64(base64),
+      sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index,
+      reviewerName: sub.reviewer_name, slotKey: sub.slot_key || 'receipt', slotRole: 'receipt',
+    });
+    if (!result) return { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' };
+    if (!sub.file_hash) await saveFileHash({ fileId, fileHash: hashBase64(base64) });
+    return { ok: true, ...result };
+  } catch (e) {
+    logger.warn(`[reviewInspect] 수동 현영 이동 재검수 대기: ${e.message}`);
+    return { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' };
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * M2 배치 스윕 — 미검수 재시도 + 과거 제출분 따라잡기
  *
@@ -2257,7 +2309,7 @@ module.exports = {
   hashBase64, matchProductName, computeStatus, productClusterKey, applyProductRule,
   classifyProductNameForAuto,
   loadTabExpectations, findDuplicate, findOwnDuplicate, findSimilarText,
-  inspectSubmission, saveFileHash,
+  inspectSubmission, saveFileHash, reinspectReceiptFile,
   ENABLED, PRECHECK_ENABLED, PRECHECK_BLOCK,
   BLOCK_CONFIDENCE, SIM_THRESHOLD, MIN_TEXT, SIM_LEN_RATIO, BLOCK_EXEMPT_CHANNELS,
   parseSampleUrls, SAMPLE_SLOT_CAP, SAMPLE_ATTACH_CAP, _trimSamples,
