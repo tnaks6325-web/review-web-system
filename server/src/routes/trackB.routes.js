@@ -1183,14 +1183,20 @@ router.get('/workdesk/invoice-doc', authMiddleware, async (req, res, next) => {
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
-// ── 행별 리뷰 이미지(파일ID) — 업체 뷰어 미리보기 패널. 내부인 + 소유 광고주(_ensureThreadScope). ──
-//   ★ 파일ID만 반환하고 이미지는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(신규 저장소·신규 프록시 0).
+// ── 행별 제출 이미지(파일ID) — 내부인 + 소유 광고주(_ensureThreadScope). ──
+//   ★ 현금영수증은 master/admin/staff 에게만 반환한다. 업체 뷰어는 화면에서 숨기는 데 그치지 않고
+//     응답 파일ID에서도 제외한다(외부 payload 경계).
 router.get('/workdesk/review-images', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json({ ok: true, rows: await svc.reviewImagesForTab({ sheetId, tabName }) });
+    const includeReceipt = ['master', 'admin', 'staff'].includes(_role(req));
+    res.json({
+      ok: true,
+      receiptIncluded: includeReceipt,
+      rows: await svc.reviewImagesForTab({ sheetId, tabName, includeReceipt }),
+    });
   } catch (err) { next(err); }
 });
 

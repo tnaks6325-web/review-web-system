@@ -47,7 +47,7 @@ ok('★ 갈래 판정은 _rvKindFiles 하나 — 팝업이 slot 을 직접 비�
 
 console.log('\nB) 제출현황 줄');
 {
-  const sb = grab(['_rvKindFiles', '_rvFilledOf', '_rvStatHtml']);
+  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvStatHtml']);
   const roster = [{ seq: 1 }, { seq: 2 }, { seq: 3 }, { seq: 4 }];
   sb.STATE.wd = { counts: { filled: 500, total: 512 }, roster };
   sb.STATE.rvImgs = {
@@ -70,6 +70,21 @@ console.log('\nB) 제출현황 줄');
 
   sb.STATE.wd.counts = { total: 200 };
   ok('★ filled 미동봉(구버전)이면 줄 수로 접는다 — 게이지와 같은 폴백', / \/ 200</.test(sb._rvStatHtml()));
+
+  sb.STATE.role = 'admin'; sb.STATE.rvReceiptIncluded = true; sb.STATE.cur = { sheetId: 'S', tabName: 'T' };
+  sb.STATE.wd = { counts: { filled: 4 }, roster };
+  sb.STATE.rvImgs = {
+    '1': [{ slot: 'review' }, { slot: 'receipt' }],
+    '3': [{ slot: 'receipt' }]
+  };
+  sb._folState = (_t, _src, kind) => ({ known: true, cr: kind === 'receipt', on: false, tip: '' });
+  const hr = sb._rvStatHtml();
+  ok('★ 내부 현영 대상은 현금영수증 제출 줄 수를 별도 집계한다',
+    /🧾<\/span><span class="lb">현금영수증<\/span><span class="nm">2<small> \/ 4</.test(hr), hr);
+  ok('★ receipt 는 리뷰 캡처 개수에 섞이지 않는다',
+    /📷<\/span><span class="lb">리뷰 캡처<\/span><span class="nm">1<small> \/ 4</.test(hr), hr);
+  sb.STATE.role = 'advertiser';
+  ok('★ 업체 역할은 응답 표식이 true 여도 현금영수증 현황을 그리지 않는다', !/현금영수증/.test(sb._rvStatHtml()));
 }
 
 console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 제출(주문/리뷰) 4열');
@@ -166,19 +181,19 @@ console.log('\nD) 팝업 무대 — 좌우 동시');
 
 console.log('\nE) 배선·계약');
 ok('★ 팝업이 무대를 좌우로 나눈다(단일 img 렌더 부재)',
-  /<div class="rvpcols">\$\{_rvPopCol\('cap',cur\.files\)\}\$\{_rvPopCol\('rev',cur\.files\)\}<\/div>/.test(WD)
+  /<div class="rvpcols\$\{p\.showReceipt\?' hasreceipt':''\}">\$\{_rvPopCol\('cap',cur\.files\)\}\$\{_rvPopCol\('rev',cur\.files\)\}\$\{p\.showReceipt\?_rvPopCol\('receipt',cur\.files\):''\}<\/div>/.test(WD)
   && !/aria-label="리뷰 캡처 크게 보기"/.test(WD));
 ok('★ 패널 제목 아래에 제출현황이 붙는다', /tp3chev">∨<\/span><\/div>`\+_rvStatHtml\(\);/.test(WD));
 ok('★ 누른 장이 열린다 — 전역 인덱스를 갈래+순번으로 옮긴다', /i2\[k\]=Math\.max\(0,_rvKindFiles\(files,k\)\.findIndex/.test(WD));
 ok('★ 사람을 바꾸면 칸 위치를 초기화한다(_rvPopPick·_rvPopStep 둘 다)',
-  /_rvPopPick\(idx\)\{[^}]*p\.i2=\{cap:0,rev:0\};/.test(WD) && /_rvPopStep\(delta\)\{[^}]*p\.i2=\{cap:0,rev:0\};/.test(WD));
+  /_rvPopPick\(idx\)\{[^}]*p\.i2=\{cap:0,rev:0,receipt:0\};/.test(WD) && /_rvPopStep\(delta\)\{[^}]*p\.i2=\{cap:0,rev:0,receipt:0\};/.test(WD));
 ok('CSS 는 제출(주문·리뷰) 4열 목록·2분할 무대를 갖는다',
   /\.rvplitem\{width:100%;display:grid;grid-template-columns:38px minmax\(0,1fr\) 42px 42px/.test(WD)
   && /\.rvplsubmit\{grid-column:3 \/ 5/.test(WD)
   && /\.rvpcols\{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr/.test(WD));
 ok('UI-LAYOUT-01 — 인라인 필터가 목록 높이를 바꿔도 사이드바 가로폭은 고정',
   /\.ui-stable-vscroll\{overflow-y:scroll;scrollbar-gutter:stable\}/.test(WD)
-  && /<aside class="rvplist ui-stable-vscroll">/.test(WD));
+  && /<aside class="rvplist ui-stable-vscroll\$\{p\.showReceipt\?' hasreceipt':''\}">/.test(WD));
 ok('★ 세로로 긴 캡처가 칸을 뚫지 않는다(min-height:0)', /\.rvpbody\{flex:1;min-height:0;/.test(WD));
 ok('좁은 화면은 필터 포함 목록 머리를 접고 무대를 위아래로', /\.rvplhd,\.rvplcols,\.rvplfilter\{display:none\}/.test(WD) && /\.rvpcols\{grid-template-columns:1fr;grid-template-rows:1fr 1fr\}/.test(WD));
 ok('시안 문서가 있다', fs.existsSync(path.join(__dirname, '..', '..', 'frontend/docs/design-submission-preview.html')));
@@ -192,7 +207,7 @@ ok('isFilledRow — 전부 비면 빈 줄', RN.isFilledRow({ name: '', recipient
 /* ══ G) 폴더 바로가기 — 표 윗줄 버튼을 제출물 미리보기로 옮겼다(사용자 확정 2026-08-21) ══ */
 console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
 {
-  const sb = grab(['_rvKindFiles', '_rvFilledOf', '_rvStatHtml']);
+  const sb = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvStatHtml']);
   sb.STATE.wd = { counts: { filled: 10 }, roster: [{ seq: 1 }] };
   sb.STATE.rvImgs = { '1': [{ slot: 'order_capture' }, { slot: 'review' }] };
   sb.STATE.role = 'admin';
@@ -208,26 +223,24 @@ console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
     calls.length === 2 && calls.every(c => c[0] === 'cur') && calls.map(c => c[1]).join('/') === 'capture/review',
     JSON.stringify(calls));
   // 광고주 격리 — /tab-folders 는 내부인 전용이라 창구를 만들면 막다른 길
-  const sb2 = grab(['_rvKindFiles', '_rvFilledOf', '_rvStatHtml']);
+  const sb2 = grab(['_rvKindFiles', '_rvCanSeeReceipt', '_rvReceiptActive', '_rvFilledOf', '_rvStatHtml']);
   sb2.STATE.wd = { counts: { filled: 10 }, roster: [{ seq: 1 }] };
   sb2.STATE.rvImgs = {}; sb2.STATE.role = 'advertiser'; sb2.STATE.cur = { sheetId: 'S', tabName: 'T' };
   let asked = 0; sb2._folState = () => { asked++; return { on: true, tip: 'x' }; };
   const ha = sb2._rvStatHtml();
   ok('★ 광고주에게는 폴더 창구를 그리지 않는다', asked === 0 && !/_rvOpenFolder/.test(ha));
 }
-/* ★★ 창구는 **요약 줄 하나**(사용자 확정 2026-08-21) — 칸 제목은 "지금 보고 있는 그 리뷰어의
-   제출물"을 말하는 자리라, 거기서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
-/* ★★ 칸 제목(🛒 구매 캡처 / 📷 리뷰 캡처)은 아예 그리지 않는다(사용자 확정 2026-08-23) —
-   좌=구매·우=리뷰는 위 제출현황 줄이 같은 순서로 말하고, 제목 한 줄을 비운 만큼 캡처가 커진다.
-   폴더 창구도 여기 없다(요약 줄 하나). */
-ok('★ 칸 제목 줄을 그리지 않는다 — 마크업·CSS 잔재 0', (() => {
+/* 창구는 요약 줄 하나다. 현영 대상 내부 화면에서는 세 갈래 구분을 위해 제목을 그리지만,
+   제목 자체는 탭 전체 폴더를 열지 않는다. */
+ok('★ 현영 제목 줄은 표시만 하고 폴더 창구를 만들지 않는다', (() => {
   const i = WD.indexOf('const col=(kind,title,emptyB,emptyS,warn)=>{');
   const seg = WD.slice(i, WD.indexOf('\n  const left=col(', i));
-  return i > 0 && !/rv2h/.test(seg) && !/_rvOpenFolder/.test(seg) && !/_folState/.test(seg)
+  return i > 0 && /const label=showReceipt\?/.test(seg) && /class="rv2label"/.test(seg)
+    && !/_rvOpenFolder/.test(seg) && !/_folState/.test(seg)
     && !/rv2h/.test(WD);
 })());
-ok('★ 칸은 본문만 — .rv2c > .rv2b 한 겹',
-  /<div class="rv2c"><div class="rv2b">\$\{body\}<\/div><\/div>/.test(WD));
+ok('★ 현영 비대상·업체에서는 label 이 빈 문자열이라 종전 본문 높이를 유지한다',
+  /const label=showReceipt\?[^;]+:'';[\s\S]{0,100}<div class="rv2c">\$\{label\}<div class="rv2b">\$\{body\}<\/div><\/div>/.test(WD));
 ok('★ title 은 남는다 — 이미지 alt(접근성)·빈 상태 문구가 어느 칸인지 말한다',
   /alt="\$\{esc\(title\)\}"/.test(WD) && /const left=col\('cap','구매 캡처'/.test(WD)
   && /const right=col\('rev','리뷰 캡처'/.test(WD));

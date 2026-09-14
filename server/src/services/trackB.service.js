@@ -2718,21 +2718,46 @@ function _sameSheetRow(a, b) {
   return !!left && left === right;
 }
 
-// ── 리뷰 이미지(행별) — 업체 뷰어 미리보기 패널용. 읽기 전용·Drive 무접촉(파일ID만 반환). ──
+// ── 제출 이미지(행별) — 읽기 전용·Drive 무접촉(파일ID만 반환). ──
 //   키 = review_index.row_index(= campaign_participants.seq/sheet_row). 원장(032 review_submissions)이 1순위,
 //   그 이전에 저장된 대표 이미지(031 review_index.review_file_id)는 폴백으로 합류시킨다.
+//   ★ 현금영수증은 includeReceipt=true 인 내부 작업보드에만 합류한다. 기본 false = 업체용 payload 제외.
 //   ★ 파일 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(추측 불가 fileId) — 신규 저장소 0.
 const _RV_MAX_PER_ROW = 12;
-async function reviewImagesForTab({ sheetId, tabName } = {}) {
+async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } = {}) {
   if (!sheetId || !tabName) throw new Error('reviewImagesForTab: sheetId, tabName 필수');
   const db = getPool();
   const out = new Map();
+  let tabCfg = {};
+  try {
+    const { rows } = await db.query(
+      `SELECT COALESCE(tab_gid, '') AS gid, capture_slots, income_type
+         FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+      [sheetId, tabName]);
+    tabCfg = rows[0] || {};
+  } catch (_) { tabCfg = {}; }
+  let campaignCashReceipt = false;
+  if (includeReceipt) {
+    try {
+      campaignCashReceipt = (await require('./cashReceiptContext.service')
+        .cashReceiptRequiredForTab({ sheetId, tabName, client: db })) === true;
+    } catch (_) {}
+  }
+  let receiptSlotKey = 'receipt';
+  try {
+    const info = require('../utils/captureSlots').cashReceiptSlotInfo(
+      tabCfg.capture_slots, tabCfg.income_type, campaignCashReceipt);
+    if (info.slot && info.slot.key) receiptSlotKey = info.slot.key;
+  } catch (_) {}
   const push = (rowIndex, fileId, slot, at) => {
     if (rowIndex == null || !fileId) return;
+    const rawSlot = String(slot || 'review');
+    const isReceipt = rawSlot === receiptSlotKey || rawSlot === 'receipt' || rawSlot === 'cash_receipt';
+    if (isReceipt && !includeReceipt) return;
     const k = String(rowIndex);
     if (!out.has(k)) out.set(k, []);
     const arr = out.get(k);
-    const sl = slot || 'review';
+    const sl = isReceipt ? 'receipt' : rawSlot;
     /* ★ 상한은 **묶음별**로 센다 — 전체 개수로 자르면 리뷰가 12장인 줄에서
        나중에 붙는 구매 캡처가 통째로 잘려 "구매 캡처 없음"으로 거짓 표시된다. */
     if (arr.filter(f => f.slot === sl).length >= _RV_MAX_PER_ROW || arr.some(f => f.fileId === fileId)) return;
@@ -2779,13 +2804,7 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
        tab_configs 에서 다시 구한다** — 화면이 보낸 값을 믿으면 낡은 화면이 남의 공고를 끌어온다.
      ★ 차수 재발행으로 공고가 여럿이면 전부 합류한다(같은 작업표 줄에 기록된 주문들이다).
      ★ fail-soft: 실패해도 위에서 모은 것은 그대로 나간다. */
-  let _gid = '';
-  try {
-    const { rows: tg } = await db.query(
-      `SELECT COALESCE(tab_gid, '') AS gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
-      [sheetId, tabName]);
-    _gid = (tg[0] && tg[0].gid) || '';
-  } catch (_) { _gid = ''; }
+  const _gid = tabCfg.gid || '';
   const { rows: campCaps } = await db.query(
     `SELECT os.sheet_row, os.capture_file_id, os.capture_uploaded_at
        FROM order_submissions os

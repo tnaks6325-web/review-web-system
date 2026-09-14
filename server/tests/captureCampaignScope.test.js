@@ -71,7 +71,7 @@ const svc = require('../src/services/trackB.service');
     /* ⚠ 스텁은 SQL 을 해석하지 않는다 — SELECT 를 `'' AS gid` 로 바꿔도 canned row 가 그대로
        돌아와 파라미터 검사만으로는 못 잡는다(변이시험 실측). 조회 문장 자체를 고정한다. */
     t('③ gid 는 서버가 tab_configs 에서 다시 구해 넘긴다(화면 값 불신)',
-      /SELECT COALESCE\(tab_gid, ''\) AS gid FROM tab_configs WHERE sheet_id=\$1 AND tab_name=\$2/.test(FN)
+      /SELECT COALESCE\(tab_gid, ''\) AS gid, capture_slots, income_type\s+FROM tab_configs WHERE sheet_id=\$1 AND tab_name=\$2/.test(FN)
       && seen.some(q => /FROM tab_configs WHERE sheet_id/.test(q.sql)) && campQ && campQ.params[2] === '1443853889');
     t('③ 공고 매칭 = 이름 → gid 폴백 · 빈 gid 는 절을 켜지 않는다',
       /rc\.linked_tab_name = \$2 OR \(\$3 <> '' AND rc\.linked_tab_gid = \$3\)/.test(campQ.sql));
