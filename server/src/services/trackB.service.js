@@ -962,7 +962,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             wo.work_order_created_at AS "workOrderCreatedAt",
-            rc.recruit_total AS "recruitTotal",
+            rc.recruit_total AS "recruitTotal", rc.cash_receipt_required AS "cashReceiptRequired",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
             tm.memo,
@@ -1079,7 +1079,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
        /* 업체 화면의 총건수도 작업 조건 카드와 같은 적용 정원(공고 우선, 없으면 발주)을 쓴다.
           활성 작업행 수는 내부 투영·정리용 값일 뿐 업체에게 "총 건수"로 보이면 안 된다. */
        LEFT JOIN LATERAL (
-         SELECT recruit_total
+         SELECT recruit_total, cash_receipt_required
            FROM recruit_campaigns rc
           WHERE rc.linked_sheet_id = t.sheet_id
             AND (rc.linked_tab_name = t.tab_name OR (t.tab_gid IS NOT NULL AND rc.linked_tab_gid = t.tab_gid))
@@ -1103,8 +1103,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
   //   ★ 판정 원재료(capture_slots JSONB·income_type)는 응답에서 **버린다** — 316행 × JSONB 는 그냥
   //     전송 낭비이고, 화면이 필요한 것은 불리언 하나다(프론트 재판정 금지 = 규칙이 갈라지지 않는다).
   for (const r of rows) {
-    r.cashReceipt = hasCashReceiptSlot(r.captureSlots, r.incomeType);
-    const note = cashReceiptNote(r.captureSlots, r.incomeType);
+    r.cashReceipt = hasCashReceiptSlot(r.captureSlots, r.incomeType, r.cashReceiptRequired === true);
+    const note = cashReceiptNote(r.captureSlots, r.incomeType, r.cashReceiptRequired === true);
     if (note) r.cashReceiptNote = note;
     delete r.captureSlots; delete r.incomeType;
   }
@@ -2964,6 +2964,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
               transfer_bank AS "transferBank",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
+              cash_receipt_required AS "cashReceiptRequired",
               to_char(window_start,'HH24:MI') AS "windowStart",
               to_char(window_end,'HH24:MI')   AS "windowEnd",
               status, participation_mode AS "participationMode"
@@ -3060,7 +3061,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     }
 
     let cashReceipt = null;
-    try { cashReceipt = hasCashReceiptSlot(meta.captureSlots, meta.incomeType); } catch (_) { cashReceipt = null; }
+    try {
+      cashReceipt = hasCashReceiptSlot(
+        meta.captureSlots, meta.incomeType, !!(c && c.cashReceiptRequired), rtKey);
+    } catch (_) { cashReceipt = null; }
 
     /* 옵션별 결제금액(사용자 확정 2026-08-20 시안 v2) — "옵션이 있는 작업" 판정은
        worktableOptionColumn 규율과 같은 축: **살아있는(닫히지 않은) 공고 옵션**이 먼저고,
@@ -5508,6 +5512,11 @@ async function tabStatsMap({ force = false } = {}) {
               tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
               tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl", tc.income_type AS "incomeType",
               tc.capture_slots AS "captureSlots",
+              (SELECT rc.cash_receipt_required FROM recruit_campaigns rc
+                WHERE rc.linked_sheet_id = tc.sheet_id
+                  AND (rc.linked_tab_name = tc.tab_name
+                       OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+                ORDER BY (rc.status = 'active') DESC, rc.created_at DESC LIMIT 1) AS "cashReceiptRequired",
               -- ★ 담당자 판정 원천(회차 #18) — 작업담당(065) 이 tab_configs.manager 보다 우선한다.
               --   tc.manager 는 접수 시점에 한 번만 채워지는 blank-only 칸이라 오더에서 담당자가
               --   바뀌어도 안 따라온다(payment.service 와 같은 함정 — resolveWorkManager 로 통일).
@@ -5586,9 +5595,11 @@ async function tabStatsMap({ force = false } = {}) {
         //     쓰는 것과 **같은 함수**다(income_type '현영' + 관리자 명시 receipt 슬롯). 종전에는 여기만
         //     income_type 만 봐서, 수동 슬롯 탭은 "버튼은 비활성인데 서버는 허용"으로 갈라져 있었다.
         folderUrl: r.folderUrl || null, captureFolderUrl: r.captureFolderUrl || null,
-        cashReceipt: hasCashReceiptSlot(r.captureSlots, r.incomeType),
+        cashReceipt: hasCashReceiptSlot(r.captureSlots, r.incomeType, r.cashReceiptRequired === true),
         // 오설정(현영인데 슬롯에 현금영수증 칸 없음)일 때만 실린다 — '대상 아님'으로 뭉개지 않게.
-        ...(cashReceiptNote(r.captureSlots, r.incomeType) ? { cashReceiptNote: cashReceiptNote(r.captureSlots, r.incomeType) } : {}),
+        ...(cashReceiptNote(r.captureSlots, r.incomeType, r.cashReceiptRequired === true)
+          ? { cashReceiptNote: cashReceiptNote(r.captureSlots, r.incomeType, r.cashReceiptRequired === true) }
+          : {}),
         closeoutDate: r.closeoutDate || null, closeoutRows: r.closeoutRows == null ? null : +r.closeoutRows,
       };
     }

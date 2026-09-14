@@ -30,10 +30,20 @@ const ISSUE_RULES = [
     sql: (a) => `COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind') = 'order_cancel'`,
   },
   {
+    key: 'receipt',
+    // 영수증으로 확정된 파일은 "리뷰화면 아님" 오류가 아니라 별도 취합 대상으로 센다.
+    js: (c) => !!(c.format && c.format.verdict === 'fail'
+      && (c.format.got || c.format.kind) === 'receipt'),
+    sql: (a) => `${a}->'format'->>'verdict' = 'fail'
+                 AND COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind') = 'receipt'`,
+  },
+  {
     key: 'format_fail',
-    // 리뷰 화면이 아님(확신 판정) — 유일한 fail 축
-    js: (c) => !!(c.format && c.format.verdict === 'fail'),
-    sql: (a) => `${a}->'format'->>'verdict' = 'fail'`,
+    // 현금영수증은 별도 취합 유형으로 분리한다.
+    js: (c) => !!(c.format && c.format.verdict === 'fail'
+      && (c.format.got || c.format.kind) !== 'receipt'),
+    sql: (a) => `${a}->'format'->>'verdict' = 'fail'
+                 AND COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind', '') <> 'receipt'`,
   },
   {
     key: 'channel',

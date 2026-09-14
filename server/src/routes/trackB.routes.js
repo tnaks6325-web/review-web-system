@@ -184,13 +184,15 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
       }
     }
     const { cashReceiptSlotInfo, CR_MISCONFIG_NOTE } = require('../utils/captureSlots');
+    const campaignCashReceipt = (await require('../services/cashReceiptContext.service')
+      .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null)) === true;
     if (wantInfo) {
       const r = await pool.query(
         `SELECT folder_url, capture_folder_url, capture_slots, income_type
            FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
       const t = r.rows[0];
       if (!t) return res.json({ ok: false, kind: 'info', error: '등록되지 않은 탭입니다.' });
-      const cri = cashReceiptSlotInfo(t.capture_slots, t.income_type);
+      const cri = cashReceiptSlotInfo(t.capture_slots, t.income_type, campaignCashReceipt);
       const val = {
         folderUrl: t.folder_url || null,
         captureFolderUrl: t.capture_folder_url || null,
@@ -211,7 +213,7 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
     if (!tc) return res.json({ ok: false, error: '등록되지 않은 탭입니다.' });
     // ★ 현영 대상 판정은 captureSlots.cashReceiptSlotInfo 단일 규칙 — 버튼 활성(홈·업체관리·작업보드)과
     //   이 허용 판정이 **같은 함수**여야 "눌리는데 거부"/"대상인데 안 눌림"이 생기지 않는다.
-    const cr = cashReceiptSlotInfo(tc.capture_slots, tc.income_type);
+    const cr = cashReceiptSlotInfo(tc.capture_slots, tc.income_type, campaignCashReceipt);
     if (!cr.slot) {
       // ★ 사유를 구분한다 — 진행방식이 현영인데 슬롯에서 못 찾은 것과, 애초에 대상이 아닌 것은 다른 일이다
       //   ("대상 아님"으로 뭉개면 관리자가 무엇을 고쳐야 할지 알 수 없다).

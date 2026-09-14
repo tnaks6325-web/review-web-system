@@ -128,8 +128,8 @@ console.log('\n2) 서비스 실행');
   console.log('\n5) 소비처 배선');
   // 조립이 submissionSamples 한 곳으로 수렴 — 영수증 슬롯 분기는 서비스 안(검사 의미 불변)
   ok('★★ 영수증 슬롯 업로드에 현금영수증 예시가 동봉된다',
-    /slot === 'review' \|\| slot === 'receipt'/.test(diag)
-    && /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: slot \}\)/.test(diag)
+    /slot === 'review' \|\| _isReceiptUpload/.test(diag)
+    && /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: _slotRole \}\)/.test(diag)
     && /slotKey === 'receipt'\s*\?\s*await loadReceiptSamplesFor\(expectedChannel\)/.test(svc));
   ok('★★ 슬롯 검수와 2차 검수가 같은 samples 를 쓴다(같은 이미지에 AI 콜 2번 금지)',
     (diag.match(/samples: _inspectSamples/g) || []).length >= 2);

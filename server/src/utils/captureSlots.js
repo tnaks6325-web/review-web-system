@@ -8,7 +8,8 @@
  * 그래서 파생 규칙을 여기 하나로 모으고 전 소비처가 이 함수만 쓴다.
  *
  * 규칙:
- *   - tab_configs.capture_slots 가 설정돼 있으면 **그대로**(관리자 명시 설정이 최우선).
+ *   - 모집공고가 현금영수증을 요구하면 탭 설정과 무관하게 선택 영수증 슬롯을 보탠다.
+ *   - 그 외에는 tab_configs.capture_slots 명시 설정을 그대로 쓴다.
  *   - 설정이 없고 진행방식(income_type)에 '현영'이 있으면 → 리뷰 + 현금영수증 2슬롯 자동.
  *     현영건은 지출증빙 발행 내역이 정산 근거라 캡처가 반드시 따로 필요하다.
  *   - 그 외 → 단일 암묵 'review' 슬롯(기존 동작 그대로).
@@ -47,13 +48,21 @@ function isCashReceiptIncome(incomeType) {
  *     (`captureVerify._expectedKind(slotKey, reviewType)`).
  *   현영과 겹칠 때만 슬롯이 2개가 되므로 그때는 리뷰 자리를 구매확정으로 치환한다.
  */
-function effectiveCaptureSlots(captureSlots, incomeType, reviewType) {
+function effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired = false) {
   if (Array.isArray(captureSlots) && captureSlots.length > 0) {
     const valid = captureSlots.filter(s => s && s.key);
-    if (valid.length) return valid;                       // 관리자 명시 설정이 최우선(종전 그대로)
+    if (valid.length) {
+      /* 모집공고의 직접 설정은 신규 공고의 진실원본이다. 탭에 옛 명시 슬롯이 남아 있어도
+         공고가 현금영수증을 요구하면 선택 슬롯을 보탠다. 라벨로 이미 있는 수동 slot2는 보존한다. */
+      if (campaignCashReceiptRequired === true
+          && !valid.some(s => s.key === 'receipt' || _CR_LABEL_RE.test(String(s.label || '')))) {
+        return [...valid, RECEIPT_SLOT];
+      }
+      return valid;                                      // 탭의 명시 설정은 종전대로 보존
+    }
   }
   const confirm = reviewType === 'confirm';
-  if (isCashReceiptIncome(incomeType)) {
+  if (campaignCashReceiptRequired === true || isCashReceiptIncome(incomeType)) {
     // 구매확정 + 현영 = 2슬롯. 리뷰를 안 쓰는 작업이라 리뷰 자리를 구매확정으로 **치환**한다.
     return [confirm ? CONFIRM_SLOT : REVIEW_SLOT, RECEIPT_SLOT];
   }
@@ -69,8 +78,8 @@ function effectiveCaptureSlots(captureSlots, incomeType, reviewType) {
  *   JSONB에 `"required": false`를 적으면 그 슬롯만 선택이 된다.
  * ★ 전부 선택으로 설정된 병적 케이스는 전체 필수로 폴백 — "아무 슬롯 없이 완료"를 막는다.
  */
-function requiredSlotKeys(captureSlots, incomeType, reviewType) {
-  const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType);
+function requiredSlotKeys(captureSlots, incomeType, reviewType, campaignCashReceiptRequired = false) {
+  const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired);
   if (!eff) return ['review'];
   const req = eff.filter(s => s.required !== false).map(s => s.key);
   return req.length ? req : eff.map(s => s.key);
@@ -92,16 +101,22 @@ function requiredSlotKeys(captureSlots, incomeType, reviewType) {
  *   로 찾으면 수동 슬롯 탭에서 문자열 `receipt` 라는 폴더를 뒤지게 된다(찾을 수 없는 이름).
  */
 const _CR_LABEL_RE = /현금영수증|현영|지출증빙/;
-function cashReceiptSlotInfo(captureSlots, incomeType) {
-  const eff = effectiveCaptureSlots(captureSlots, incomeType, null);
+function cashReceiptSlotInfo(captureSlots, incomeType, campaignCashReceiptRequired = false, reviewType = null) {
+  const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired);
   const slot = Array.isArray(eff)
     ? (eff.find(s => s && (s.key === 'receipt' || _CR_LABEL_RE.test(String(s.label || '')))) || null)
     : null;
   return { slot, incomeSaysCashReceipt: isCashReceiptIncome(incomeType) };
 }
 /** 현금영수증 슬롯 보유 여부(버튼 활성 판정) — 규칙은 cashReceiptSlotInfo 한 곳. */
-function hasCashReceiptSlot(captureSlots, incomeType) {
-  return !!cashReceiptSlotInfo(captureSlots, incomeType).slot;
+function hasCashReceiptSlot(captureSlots, incomeType, campaignCashReceiptRequired = false, reviewType = null) {
+  return !!cashReceiptSlotInfo(captureSlots, incomeType, campaignCashReceiptRequired, reviewType).slot;
+}
+
+/** 저장 key가 slot2여도 라벨이 현금영수증이면 영수증 역할로 판정한다. */
+function isCashReceiptSlot(captureSlots, incomeType, key, reviewType = null, campaignCashReceiptRequired = false) {
+  const info = cashReceiptSlotInfo(captureSlots, incomeType, campaignCashReceiptRequired, reviewType);
+  return !!(info.slot && info.slot.key === key);
 }
 /**
  * 진행방식은 현영인데 슬롯에서 현금영수증 칸을 못 찾은 경우의 안내 문구(오설정 신호).
@@ -110,14 +125,14 @@ function hasCashReceiptSlot(captureSlots, incomeType) {
  */
 const CR_MISCONFIG_NOTE = '진행방식은 현영인데 캡처 슬롯 설정에 현금영수증 칸이 없습니다 — 탭 설정을 확인해 주세요.';
 /** 오설정 안내가 필요한가(현영인데 슬롯 없음) — 없으면 null(정상: 대상이거나 애초에 비대상). */
-function cashReceiptNote(captureSlots, incomeType) {
-  const r = cashReceiptSlotInfo(captureSlots, incomeType);
+function cashReceiptNote(captureSlots, incomeType, campaignCashReceiptRequired = false, reviewType = null) {
+  const r = cashReceiptSlotInfo(captureSlots, incomeType, campaignCashReceiptRequired, reviewType);
   return (!r.slot && r.incomeSaysCashReceipt) ? CR_MISCONFIG_NOTE : null;
 }
 
 /** 슬롯 key → 표시 라벨(업로드 서브폴더명·안내문 공용). 모르는 key는 key 그대로. */
-function slotLabel(captureSlots, incomeType, key, reviewType) {
-  const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType) || [REVIEW_SLOT];
+function slotLabel(captureSlots, incomeType, key, reviewType, campaignCashReceiptRequired = false) {
+  const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired) || [REVIEW_SLOT];
   const hit = eff.find(s => s.key === key);
   return (hit && hit.label) || key;
 }
@@ -125,5 +140,5 @@ function slotLabel(captureSlots, incomeType, key, reviewType) {
 module.exports = {
   REVIEW_SLOT, RECEIPT_SLOT, CONFIRM_SLOT,
   isCashReceiptIncome, effectiveCaptureSlots, requiredSlotKeys, slotLabel,
-  hasCashReceiptSlot, cashReceiptSlotInfo, cashReceiptNote, CR_MISCONFIG_NOTE,
+  hasCashReceiptSlot, cashReceiptSlotInfo, isCashReceiptSlot, cashReceiptNote, CR_MISCONFIG_NOTE,
 };

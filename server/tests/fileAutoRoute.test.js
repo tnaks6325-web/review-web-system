@@ -202,7 +202,7 @@ const fileRoute = require('../src/services/fileRoute.service');
   {
     const ri = read('src/services/reviewInspect.service.js');
     assert.ok(ri.includes('async function submissionSamples') && ri.includes('loadRouteSamples'), '조립 헬퍼·route 로더 존재');
-    assert.ok(ri.includes("opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey })"),
+    assert.ok(ri.includes("opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: slotRole })"),
       '2차 검수 폴백도 같은 조립 사용');
     assert.ok(ri.includes("key: 'route_' + s.key"), 'route 예시 key 접두(캐시 지문 충돌 방지)');
     const rk = read('src/utils/routeSampleKinds.js');
@@ -254,7 +254,10 @@ const fileRoute = require('../src/services/fileRoute.service');
     const fr = read('src/services/fileRoute.service.js');
     assert.ok(fr.includes('trashFiles') && !/permanentlyDelete|files\.delete\(/.test(fr), '삭제는 휴지통만');
     assert.ok(fr.includes('routed_from_slot IS NULL'), '이미 라우팅된 파일 재라우팅 금지(핑퐁 방지)');
-    assert.ok(fr.includes("slot_key IN ('review', 'receipt')"), '스윕 대상은 review/receipt 슬롯만');
+    assert.ok(fr.includes("slot_key = ANY($3::text[])") && fr.includes("['review', 'receipt', receiptSlotKey]"),
+      '스윕 대상은 review/receipt와 수동 현금영수증 슬롯만');
+    assert.ok(/const backTarget = isCashReceiptSlot\([\s\S]{0,260}\) \? 'receipt' : 'review'/.test(fr),
+      '수동 slot2 현금영수증의 이동 되돌리기도 현금영수증 폴더로 복귀');
     assert.ok(fr.includes('if (dryRun) return'), '스윕 dryRun = 무변경 반환');
     assert.ok(fr.includes('is_submitted 는 건드리지 않는다'), '스윕이 제출 상태를 뒤집지 않음(문서화된 한계)');
     ok('E13: fileRoute — 휴지통·핑퐁 방지·dryRun 무변경');

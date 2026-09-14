@@ -4,6 +4,7 @@ const { effectiveCaptureSlots } = require('../utils/captureSlots');
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
 const { workKindsForTabs } = require('./workKindContext.service');
 const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
+const { cashReceiptRequirementsForTabs } = require('./cashReceiptContext.service');
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -473,6 +474,13 @@ async function searchByName(query, phone8, opts = {}) {
         filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
     } catch (_) { _ctMap = new Map(); }
 
+    /* 모집공고의 현금영수증 직접 설정 — 안내 카드에만 쓰던 값을 제출 슬롯에도 연결한다. */
+    let _crMap = new Map();
+    try {
+      _crMap = await cashReceiptRequirementsForTabs(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+    } catch (_) { _crMap = new Map(); }
+
     // GAS 호환 결과 변환
     const results = filteredRows.map(row => {
       const rowObj = _parseRowJson(row.rowJson);
@@ -507,7 +515,11 @@ async function searchByName(query, phone8, opts = {}) {
       captureFolderUrl: row.captureFolderUrl,
       // 현영 탭은 capture_slots 설정이 없어도 리뷰+현금영수증 2슬롯이 자동 적용된다(공용 유틸)
       // ★ 087 2차: 구매확정 + 현영이면 리뷰 자리가 구매확정으로 치환된다(단독은 종전 단일 화면).
-      captureSlots: effectiveCaptureSlots(row.captureSlots, row.incomeType, _rtMap.get(`${row.sheetId} ${row.tabName}`) || null),
+      captureSlots: effectiveCaptureSlots(
+        row.captureSlots,
+        row.incomeType,
+        _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
+        _crMap.get(`${row.sheetId}\u0000${row.tabName}`) === true),
       reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 리뷰어 안내문용
       workKind:    _wkMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 'blog' = 포스팅URL 제출
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움

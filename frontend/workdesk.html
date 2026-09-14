@@ -14129,13 +14129,14 @@ function _riRenderHead(sum){
      SQL 로 파생해 센다). 여기 있는 것은 화면 필터·재검수 대상 선정용 최소 사본이고,
      회귀가드(`tests/inspectTypeCounts.test.js`)가 같은 픽스처로 두 구현을 실행해 **결과 동일**을
      고정한다 — 한쪽만 고치면 그 자리에서 빨개진다. */
-const RI_TYPES=[['cancel','🚫 주문취소'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
+const RI_TYPES=[['cancel','🚫 주문취소'],['receipt','🧾 현금영수증으로 보임'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
 function _riIssueTypes(r){
   const c=(r&&r.checks)||{}, out=[];
   /* ★ 주문취소 — 리뷰어가 그 작업을 취소한 신호. verdict 를 보지 않는다(취소 화면은
        어느 작업에서도 정상 제출이 아니다). format_fail 과 겹쳐 세어지는 것은 의도. */
   if(c.format&&(c.format.got||c.format.kind)==='order_cancel') out.push('cancel');
-  if(c.format&&c.format.verdict==='fail') out.push('format_fail');
+  if(c.format&&c.format.verdict==='fail'&&(c.format.got||c.format.kind)==='receipt') out.push('receipt');
+  if(c.format&&c.format.verdict==='fail'&&(c.format.got||c.format.kind)!=='receipt') out.push('format_fail');
   if(c.format&&c.format.verdict==='warn'&&c.format.expectedChannel) out.push('channel');
   if(c.product&&(c.product.verdict==='warn'||c.product.verdict==='fail')) out.push('product');
   if(c.duplicate&&(c.duplicate.verdict==='fail'||c.duplicate.verdict==='warn')) out.push('duplicate');
@@ -14271,9 +14272,11 @@ function _riRenderBody(){
     const c = r.checks || {};
     const reasons = _riReasons(c, {skipRel:true});   // 같은 파일·본문 겹침은 아래 관계 줄이 말한다
     const relHtml = _riRelHtml(r);
-    const cls = r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
     const thumb = _riImg(r.file_id);
     const p = _riPrimaryIssue(r);
+    const receiptPending = p==='receipt' && r.status!=='resolved';
+    const cls = receiptPending?'ri-s':r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
+    const statusLabel = receiptPending?'분류 필요':(_RI_LABEL[r.status]||r.status);
     const meta = p ? RI_TYPE_META[p] : null;
     const others = p ? _riIssueTypes(r).filter(k=>k!==p).length : 0;
     const act = (r.status==='resolved') ? null : _riCardActions(r, i);
@@ -14284,7 +14287,7 @@ function _riRenderBody(){
     const subs = act ? (flat ? [{h:`riResolve('${esc(r.file_id)}','ok')`,t:'✓ 정상',cls:'ok'},{h:act.main.h,t:'✕ 불량',cls:'bad'}] : act.subs) : [];
     return `<div class="ricard${r.status==='resolved'?' ri-r':''}">
       <div class="nc-type ${meta?meta.cls:'t-none'}">${esc(_riTypeLabel(p,c))}${others?` <span style="font-weight:600;opacity:.7">＋${others}</span>`:''}<span class="tag">${meta?meta.tag:''}</span></div>
-      <div class="nc-th" onclick="riOpenDetail(${i})">${thumb?`<img${_thumbAttrs(r.file_id,400,thumb)} alt="" loading="lazy">`:'<span class="rimeta">이미지 없음</span>'}<span class="ribdg ${cls}">${_RI_LABEL[r.status]||r.status}</span>${thumb?`<button class="rizoom" title="이미지 크게 보기" onclick="event.stopPropagation();riZoom(${i})">🔍</button>`:''}</div>
+      <div class="nc-th" onclick="riOpenDetail(${i})">${thumb?`<img${_thumbAttrs(r.file_id,400,thumb)} alt="" loading="lazy">`:'<span class="rimeta">이미지 없음</span>'}<span class="ribdg ${cls}">${statusLabel}</span>${thumb?`<button class="rizoom" title="이미지 크게 보기" onclick="event.stopPropagation();riZoom(${i})">🔍</button>`:''}</div>
       <div class="nc-body" onclick="riOpenDetail(${i})">
         <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b></div>
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
@@ -14313,6 +14316,7 @@ function _riRenderBody(){
 const RI_TYPE_META={
   cancel:{cls:'t-cancel',tag:'CANCEL',label:'🚫 주문취소 (리뷰어 작업취소)'},
   duplicate:{cls:'t-dup',tag:'DUP',label:'📄 같은 파일 (중복 제출)'},
+  receipt:{cls:'t-fmt',tag:'RECEIPT',label:'🧾 현금영수증으로 보임'},
   format_fail:{cls:'t-fmt',tag:'FMT',label:'📵 리뷰화면 아님'},
   product:{cls:'t-prod',tag:'PROD',label:'🏷 상품명 다름'},
   similarity:{cls:'t-sim',tag:'SIM',label:'✍ 본문 겹침'},
@@ -14322,7 +14326,7 @@ const RI_TYPE_META={
 function _riPrimaryIssue(r){
   const t=_riIssueTypes(r);
   // ★ 주문취소가 맨 앞 — 담당자에게 "리뷰 화면이 아님"보다 "취소됨"이 먼저 읽혀야 한다
-  for(const k of ['cancel','duplicate','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
+  for(const k of ['cancel','duplicate','receipt','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
   return null;
 }
 /* ★★ AI 가 판별한 화면 종류의 **단일 출처** — 원장(2차 검수)은 `kind`, 자동분류 판정값은 `got`
@@ -14334,6 +14338,7 @@ function _riKindLabel(fm){ return _RI_KIND[_riFmtKind(fm)]||''; }
 function _riTypeLabel(p,c){
   if(!p) return '이상 없음';
   if(p==='cancel') return '🚫 주문취소';
+  if(p==='receipt') return '🧾 현금영수증으로 보임';
   if(p==='format_fail'){
     const gl=_riKindLabel(c&&c.format);
     return '📵 리뷰화면 아님'+(gl?' — '+gl+'으로 보임':'');
@@ -14377,6 +14382,7 @@ function _riCardActions(r,i){
       return {main:{...A.ok,t:'✓ 정상 — 한 캡처에 여러 리뷰',m:'m-green'}, subs:[A.dedup,A.bad], more:moves};
     return {main:{...A.dedup,m:'m-red'}, subs:[A.ok,A.bad], more:moves};
   }
+  if(p==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.ok,A.detail], more:[A.mvC]};
   if(p==='format_fail'){
     const got=_riFmtKind(c.format);
     if(!isReceiptSlot&&got==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.bad,A.ok], more:[A.mvC]};
@@ -14596,9 +14602,12 @@ function _riReasons(c, opt){
     const gl=_riKindLabel(c.format);
     /* ★ 주문취소는 "리뷰 화면이 아니다"로 말하면 안 된다 — 담당자가 다른 칸으로 옮기려 든다.
          무엇으로 보이는지가 아니라 **무슨 일이 일어났는지**를 말한다. */
-    out.push(_riFmtKind(c.format)==='order_cancel'
+    const kind=_riFmtKind(c.format);
+    out.push(kind==='order_cancel'
       ? '주문이 취소된 화면입니다 — 리뷰어가 이 작업을 취소한 것으로 보입니다'
-      : (gl?`${gl} 화면으로 판별되었습니다 — 리뷰 화면이 아닙니다`:'리뷰 화면이 아닌 것으로 판정됨'));
+      : kind==='receipt'
+        ? '현금영수증 이미지로 확인됨 — 현금영수증 칸으로 이동해 주세요'
+        : (gl?`${gl} 화면으로 판별되었습니다 — 리뷰 화면이 아닙니다`:'리뷰 화면이 아닌 것으로 판정됨'));
   }
   if(c.format && c.format.verdict==='warn' && c.format.expectedChannel)
     out.push(_riChanReason(c.format));
@@ -14766,7 +14775,7 @@ function riOpenDetail(i){
   // ★ 역할은 자기 스코프에서 다시 구한다(다른 함수의 const 에 기대면 ReferenceError — 무한로딩 실측 사고)
   const _riDetailAdmin = STATE.role==='master' || STATE.role==='admin';
   const c=r.checks||{};
-  const line=(v,label,extra)=>`<tr><td><span class="ribdg ${v==='fail'?'ri-f':v==='warn'?'ri-s':v==='skip'?'ri-p':'ri-ok'}">${v==='fail'?'불량':v==='warn'?'의심':v==='skip'?'안 함':'통과'}</span></td><td><b>${label}</b>${extra?'<br><span class="rimeta">'+extra+'</span>':''}</td></tr>`;
+  const line=(v,label,extra)=>`<tr><td><span class="ribdg ${v==='fail'?'ri-f':v==='warn'||v==='route'?'ri-s':v==='skip'?'ri-p':'ri-ok'}">${v==='fail'?'불량':v==='warn'?'의심':v==='route'?'분류 필요':v==='skip'?'안 함':'통과'}</span></td><td><b>${label}</b>${extra?'<br><span class="rimeta">'+extra+'</span>':''}</td></tr>`;
   const dup=c.duplicate||{}, sim=c.similarity||{}, pr=c.product||{}, fm=c.format||{};
   const html=`<div class="rimodal-in">
     <div class="rimh"><b>${esc(r.reviewer_name||'')}${r.row_index?' · '+r.row_index+'행':''}</b>
@@ -14785,10 +14794,12 @@ function riOpenDetail(i){
       <div class="rimright">
         ${_riRelHtml(r)}
         <table class="ritbl">
-          ${line(fm.verdict||'skip','리뷰 화면·채널', (fm.verdict==='fail'
+          ${line(_riFmtKind(fm)==='receipt'&&fm.verdict==='fail'?'route':(fm.verdict||'skip'),'화면 종류·채널', (fm.verdict==='fail'
             ? (_riFmtKind(fm)==='order_cancel'
                 ? '주문이 취소된 화면입니다 — 리뷰어가 이 작업을 취소한 것으로 보입니다'
-                : (_riKindLabel(fm)?esc(_riKindLabel(fm))+' 화면으로 판별 — 리뷰 화면이 아닙니다':'리뷰 화면이 아닌 것으로 판정됨'))
+                : (_riFmtKind(fm)==='receipt'
+                  ? '현금영수증 이미지로 확인됨 — 현금영수증 칸으로 이동해 주세요'
+                  : (_riKindLabel(fm)?esc(_riKindLabel(fm))+' 화면으로 판별 — 리뷰 화면이 아닙니다':'리뷰 화면이 아닌 것으로 판정됨')))
             : (fm.expectedChannel&&fm.verdict==='warn'
               ? esc(_riChanReason(fm))
               : (fm.channel?esc(_RI_CHAN[fm.channel]||fm.channel)+' 캡처로 확인':'')))

@@ -100,7 +100,10 @@ async function _resolveFolders(sheetId, tabName, slot) {
   let targetFolderId = reviewFolderId;
   if (slot && slot !== 'review') {
     // 라벨 판정은 공용 유틸 — 현영 자동 슬롯도 같은 폴더명을 쓰게(업로드 경로와 일치해야 파일이 흩어지지 않음)
-    const label = slotLabelOf(cfg.capture_slots, cfg.income_type, slot, await reviewTypeForTab({ sheetId, tabName }).catch(() => null));
+    const rt = await reviewTypeForTab({ sheetId, tabName }).catch(() => null);
+    const cr = await require('../services/cashReceiptContext.service')
+      .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null);
+    const label = slotLabelOf(cfg.capture_slots, cfg.income_type, slot, rt, cr === true);
     const sf = await driveService.getOrCreateSubFolder(reviewFolderId, label);
     targetFolderId = sf.id;
   }
@@ -177,7 +180,9 @@ router.get('/my-files', async (req, res) => {
     );
     // ★ 087 2차: 라벨도 리뷰타입을 봐야 '구매확정' 자리가 '리뷰'로 표시되지 않는다
     const _rt = await reviewTypeForTab({ sheetId, tabName }).catch(() => null);
-    const slotLabel = (k) => slotLabelOf(tc[0]?.capture_slots, tc[0]?.income_type, k, _rt);
+    const _cr = await require('../services/cashReceiptContext.service')
+      .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null);
+    const slotLabel = (k) => slotLabelOf(tc[0]?.capture_slots, tc[0]?.income_type, k, _rt, _cr === true);
 
     // 이 행의 대기중 요청(슬롯/파일별 UI 잠금용)
     const { rows: pending } = await pool.query(

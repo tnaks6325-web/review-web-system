@@ -84,13 +84,13 @@ async function run() {
   t('★ 규칙은 effectiveCaptureSlots 파생(사본 금지)',
     /function cashReceiptSlotInfo[\s\S]{0,260}effectiveCaptureSlots\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
   t('★ hasCashReceiptSlot 은 cashReceiptSlotInfo 위임(판정 사본 0)',
-    /function hasCashReceiptSlot\(captureSlots, incomeType\) \{\s*return !!cashReceiptSlotInfo\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
+    /function hasCashReceiptSlot\(captureSlots, incomeType,[^)]*\) \{\s*return !!cashReceiptSlotInfo\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
 
   const CSSRC = fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8');
   t('export 되어 세 소비처가 같은 함수를 쓴다', /module\.exports = \{[\s\S]{0,400}hasCashReceiptSlot/.test(CSSRC));
-  t('★ tabStatsMap(홈) 도 같은 함수', /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType\)/.test(SVC));
+  t('★ tabStatsMap(홈) 도 같은 함수', /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType, r\.cashReceiptRequired === true\)/.test(SVC));
   t('★ /tab-folders 허용 판정도 같은 함수(눌리는데 거부 금지)',
-    /const cr = cashReceiptSlotInfo\(tc\.capture_slots, tc\.income_type\);/.test(ROUTES) && /if \(!cr\.slot\)/.test(ROUTES));
+    /const cr = cashReceiptSlotInfo\(tc\.capture_slots, tc\.income_type, campaignCashReceipt\);/.test(ROUTES) && /if \(!cr\.slot\)/.test(ROUTES));
   t('★★ Drive 폴더 이름은 슬롯 실제 label(슬롯 key 가 receipt 가 아닐 수 있다)',
     /const label = \(cr\.slot && cr\.slot\.label\) \|\| '현금영수증';/.test(ROUTES) && !/slotLabel\([^)]*'receipt'/.test(ROUTES_CODE));
   t("★ 오설정은 '대상 아님' 이 아니라 고칠 곳을 말한다", /cr\.incomeSaysCashReceipt \? CR_MISCONFIG_NOTE/.test(ROUTES));
@@ -210,12 +210,12 @@ async function run() {
     t('kind=info = 세 재료를 한 번에(folderUrl·captureFolderUrl·cashReceipt)',
       info.b.ok === true && info.b.folderUrl && info.b.captureFolderUrl && info.b.cashReceipt === true, JSON.stringify(info.b));
     t("★★ 신규 응답에 kind:'info' 표식(배포 스큐 판별의 유일한 근거)", info.b.kind === 'info', JSON.stringify(info.b));
-    t('★ Drive 무접촉 — tab_configs 한 줄 조회뿐',
-      calls.length === 1 && /FROM tab_configs/.test(calls[0]), calls.join(' | '));
+    t('★ Drive 무접촉 — 공고 현금영수증 설정 + tab_configs만 조회',
+      calls.length === 2 && calls.some(c => /FROM recruit_campaigns/.test(c)) && calls.some(c => /FROM tab_configs/.test(c)), calls.join(' | '));
     t('★ 무거운 stats=1(review_index 전체 GROUP BY) 경로를 타지 않는다',
       !calls.some(c => /review_index/.test(c)));
     const cached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'admin');
-    t('재조회는 캐시(같은 탭을 다시 열어도 쿼리 순증 0)', cached.b.ok === true && calls.length === 1, 'queries=' + calls.length);
+    t('재조회는 캐시(같은 탭을 다시 열어도 쿼리 순증 0)', cached.b.ok === true && calls.length === 2, 'queries=' + calls.length);
     t("★★ **캐시 응답에도** kind 표식(한 경로만 붙이면 스큐 판별이 샌다)", cached.b.kind === 'info', JSON.stringify(cached.b));
     // ★★ AE(staff) 범위 — **사용자 확정 2026-08-19: 담당이 아니어도 전부 연다.**
     //   이 자리는 원래 "담당 밖 staff = 403(캐시가 스코프를 우회하지 않는다)" 를 고정했다. 그러나

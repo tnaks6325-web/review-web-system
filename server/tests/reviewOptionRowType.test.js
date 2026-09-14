@@ -102,7 +102,7 @@ console.log('\n② reviewTypeForRow(스텁 pool 실행)');
   ok('업로드 검수: verifyCapture 는 행 우선(_effReviewType) · 폴더 라벨(slotLabelOf)은 탭 값 그대로',
     /const _effReviewType = _rowReviewType \|\| _tabReviewType/.test(upBody)
     && /reviewType: _effReviewType/.test(upBody)
-    && /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot, _tabReviewType\)/.test(upBody));
+    && /slotLabelOf\([\s\S]{0,180}slot, _tabReviewType, _campaignCashReceipt\)/.test(upBody));
 
   console.log(`\n✅ reviewOptionRowType: ${n}개 통과`);
   process.exit(0);

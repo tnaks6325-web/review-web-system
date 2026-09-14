@@ -38,17 +38,21 @@ ok('일반 탭·구매확정 단독은 종전과 완전 동일(무회귀)',
   cs.effectiveCaptureSlots(null, '일반') === null
   && JSON.stringify(cs.requiredSlotKeys(null, '')) === JSON.stringify(['review'])
   && cs.effectiveCaptureSlots(null, '', 'confirm') === null);
+ok('모집공고 직접 현금영수증 설정도 선택 슬롯을 만든다',
+  cs.effectiveCaptureSlots(null, '', null, true).some(s => s.key === 'receipt' && s.required === false));
+ok('모집공고 설정으로 슬롯을 보탠 현영 작업은 오설정 경고를 내지 않는다',
+  cs.cashReceiptNote([{ key: 'review', label: '리뷰' }], '사업자현영', true) === null);
 
 /* ═══ B. 완료 판정 배선 — 슬롯 모드 판정은 화면 슬롯 기준(영수증만 올리고 완료 차단) ═══ */
 console.log('B. submit.routes 완료 판정');
 const submit = readS('routes/submit.routes.js');
 ok('★★ isMultiSlot 은 effectiveCaptureSlots(화면 슬롯) 기준 — required 개수로 판정하면 '
    + '현영 탭이 fast-path 를 타서 영수증만 올려도 완료가 된다',
-  /effectiveCaptureSlots\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(submit)
+  /effectiveCaptureSlots\([\s\S]{0,180}_crRequired === true\)/.test(submit)
   && /Array\.isArray\(_effSlots\) && _effSlots\.length > 1/.test(submit)
   && !/required\.length === 1 && required\[0\] === 'review'/.test(submit));
 ok('완료 판정(필수 슬롯 ⊆ 제출 슬롯)은 여전히 requiredSlotKeys 단일 출처',
-  /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(submit));
+  /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt, _crRequired === true\)/.test(submit));
 
 /* ═══ C. D안 ① — 참여 전 인지(공개 목록·상세 배지) ═══ */
 console.log('C. 참여 전 배지(cashReceiptRequired)');
@@ -91,7 +95,7 @@ ok('required:false 슬롯은 "(선택 · 발행 확정 후 제출)" 표기 + 상
   /slot\.required === false/.test(app) && /선택 · 발행 확정 후 제출/.test(app));
 ok('발행방법 다시 보기(_csLoadCrGuides) — 영수증 슬롯이 있을 때만, fail-soft',
   /_csLoadCrGuides/.test(app)
-  && /slots\.some\(s => s\.key === 'receipt'\)/.test(app));
+  && /slots\.find\(_csIsReceiptSlot\)/.test(app));
 ok('가이드 이미지는 https 절대 URL만 + 따옴표 포함 값 폐기(속성 breakout 방지)',
   /\^https:\\\/\\\/\[\^"'<>\\s\]\+\$/.test(app));
 const tabcfg = readS('routes/tabconfig.routes.js');

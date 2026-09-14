@@ -14,7 +14,7 @@ const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middl
 const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
-const { slotLabel: slotLabelOf, effectiveCaptureSlots } = require('../utils/captureSlots');
+const { slotLabel: slotLabelOf, effectiveCaptureSlots, isCashReceiptSlot } = require('../utils/captureSlots');
 const { verifyCapture, logCaptureMismatch, resolveCaptureMismatch } = require('../services/captureVerify.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
@@ -1725,6 +1725,11 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   fail-soft(null = 종전 동작).
     let _tabReviewType = null;
     try { _tabReviewType = await reviewTypeForTab({ sheetId, tabName }); } catch (_) {}
+    let _campaignCashReceipt = false;
+    try {
+      _campaignCashReceipt = (await require('../services/cashReceiptContext.service')
+        .cashReceiptRequiredForTab({ sheetId, tabName })) === true;
+    } catch (_) {}
     /* ★ 행 단위 리뷰타입(리뷰옵션 칸) — AI 기대 화면 종류(verifyCapture)에만 쓴다.
        혼합 탭에서 구매확정 행의 캡처가 "리뷰 화면 아님"으로 몰리지 않게 한다.
        ★ 폴더 라벨(slotLabelOf)은 **탭 값 그대로** — 폴더 이름이 행마다 갈리면 안 된다. */
@@ -1738,7 +1743,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     if (slot !== 'review') {
       // 라벨 판정은 공용 유틸(utils/captureSlots) — 검색·완료판정과 같은 규칙이라
       // 현영 자동 슬롯(receipt)도 '현금영수증' 서브폴더로 일관되게 들어간다.
-      slotLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType);
+      slotLabel = slotLabelOf(
+        tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType, _campaignCashReceipt);
     }
     if (tabRows[0]?.folder_url) {
       targetFolderId = driveService.extractFolderIdFromUrl(tabRows[0].folder_url);
@@ -1805,7 +1811,10 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     // 영수증 슬롯 대조용 회사 사업자번호(없어도 검수는 형식 판별만 수행)
     let _companyBizNo = '';
-    if (slot === 'receipt') {
+    const _isReceiptUpload = isCashReceiptSlot(
+      tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType, _campaignCashReceipt);
+    const _slotRole = _isReceiptUpload ? 'receipt' : slot;
+    if (_isReceiptUpload) {
       try {
         const { rows: bz } = await pool.query("SELECT value FROM app_settings WHERE key = 'company_business_no'");
         _companyBizNo = bz[0]?.value || '';
@@ -1831,9 +1840,9 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       // ★★ 조립은 submissionSamples 한 곳 — 1차 필터·2차 검수와 같은 배열이어야
       //   캐시 지문(sampleSig)이 일치한다(AI 콜 순증 0). 자동 분류 예시(구매캡처·구매확정)도
       //   여기서 함께 실린다.
-      if (slot === 'review' || slot === 'receipt') {
+      if (slot === 'review' || _isReceiptUpload) {
         try { _expectedChannel = (await _riSvc.loadTabExpectations({ sheetId, tabName })).expectedChannel; } catch (_) {}
-        _inspectSamples = await _riSvc.submissionSamples({ expectedChannel: _expectedChannel, slotKey: slot });
+        _inspectSamples = await _riSvc.submissionSamples({ expectedChannel: _expectedChannel, slotKey: _slotRole });
       }
     } catch (_) { _inspectSamples = []; }   // 준비 실패 = 예시 없이 진행(동작 불변)
 
@@ -1846,10 +1855,13 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     const _hasRouteSamples = _sampleKindSet.has('order_capture') && _sampleKindSet.has('purchase_confirm');
     let _hasReceiptSlot = false;
     try {
-      _hasReceiptSlot = (effectiveCaptureSlots(tabRows[0]?.capture_slots, tabRows[0]?.income_type, _tabReviewType) || [])
-        .some(sl => sl.key === 'receipt');
+      _hasReceiptSlot = (effectiveCaptureSlots(
+        tabRows[0]?.capture_slots, tabRows[0]?.income_type, _tabReviewType, _campaignCashReceipt) || [])
+        .some(sl => sl.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(sl.label || '')));
     } catch (_) {}
-    const _receiptLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, 'receipt', _tabReviewType) || '현금영수증';
+    const _receiptInfo = require('../utils/captureSlots').cashReceiptSlotInfo(
+      tabRows[0]?.capture_slots, tabRows[0]?.income_type, _campaignCashReceipt, _tabReviewType);
+    const _receiptLabel = (_receiptInfo.slot && _receiptInfo.slot.label) || '현금영수증';
 
     // 같은 구매양식·같은 행의 기존 캡처는 중복 차단 대상이 아니라 교체 제출이다.
     let replacedCurrent = false;
@@ -1893,7 +1905,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
             // ★ 행 우선 유효 리뷰타입 — 혼합 탭의 구매확정 행은 구매확정 화면이 정상 제출이다.
-            slotKey: slot, companyBusinessNo: _companyBizNo, reviewType: _effReviewType,
+            slotKey: _slotRole, companyBusinessNo: _companyBizNo, reviewType: _effReviewType,
             // ★★ 아래 2차 검수와 **같은 예시이미지**를 넘긴다 — 다르면 캐시 키가 갈려
             //   같은 이미지에 AI 콜이 두 번 나간다(순증 0 이라는 전제가 깨진다).
             samples: _inspectSamples,
@@ -1909,7 +1921,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           const _mode = _routeMode();
           if (_mode !== 'off' && verdict && verdict.status === 'mismatch') {
             const rd = _routeDecision({
-              slotKey: slot, verdict, hasReceiptSlot: _hasReceiptSlot,
+              slotKey: _slotRole, verdict, hasReceiptSlot: _hasReceiptSlot,
               hasRouteSamples: _hasRouteSamples, expectedChannel: _expectedChannel,
             });
             if (rd.action === 'route') {
@@ -2115,10 +2127,15 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         //   ★ 절대 throw 하지 않는다(서비스가 내부에서 삼킨다) — 업로드는 이미 끝났고,
         //     검수 실패가 "파일은 올라갔는데 제출 실패"로 보이면 안 된다.
         try {
+          const _finalSlotKey = r.slotKey || slot;
+          const _finalSlotRole = isCashReceiptSlot(
+            tabRows[0]?.capture_slots, tabRows[0]?.income_type, _finalSlotKey,
+            _tabReviewType, _campaignCashReceipt) ? 'receipt' : _finalSlotKey;
           const _ins = await _inspect.inspectSubmission({
             base64: _b64, mimeType: (files[r.index - 1] && files[r.index - 1].mimeType) || 'image/jpeg',
             fileId: r.fileId, fileHash: _hash,
-            sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: r.slotKey || slot,
+            sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: _finalSlotKey,
+            slotRole: _finalSlotRole,
             samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
           });
           // ★ 첨부 즉시 경고(1차)를 지나쳐 제출된 중복은 **리뷰어에게 그 자리에서** 한 번 더 알린다.

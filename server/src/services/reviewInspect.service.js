@@ -1168,6 +1168,7 @@ async function findAuthorReuse({ authorMask, fileId, sheetId, tabName, reviewerN
  */
 async function inspectSubmission({
   base64, mimeType, fileId, fileHash, sheetId, tabName, rowIndex, reviewerName, slotKey = 'review',
+  slotRole = slotKey,
   ...opts
 } = {}) {
   if (!ENABLED || !fileId || !sheetId || !tabName) return null;
@@ -1175,7 +1176,7 @@ async function inspectSubmission({
     const hash = fileHash || hashBase64(base64);
 
     // 리뷰 슬롯이 아니면 형식 판정만 남기고 끝낸다(영수증엔 상품명·본문 대조가 무의미).
-    const isReview = String(slotKey || 'review') === 'review';
+    const isReview = String(slotRole || slotKey || 'review') === 'review';
 
     // ★ 기대값을 **먼저** 읽는다 — 예시이미지 선택에 기대 채널이 필요하고,
     //   같은 samples 를 써야 review-upload 의 verifyCapture 와 캐시가 공유된다.
@@ -1196,7 +1197,7 @@ async function inspectSubmission({
       try {
         // ★ 첨부 시점 1차 필터가 이미 같은 이미지를 판정했다면 캐시 히트 = AI 콜 0
         const { classifySubmissionImage } = require('./gemini.service');
-        const samples = opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey });
+        const samples = opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: slotRole });
         cls = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples });
       } catch (_) { cls = null; }   // fail-open
     }
@@ -2090,7 +2091,10 @@ function inspectionsCsv(rows) {
   };
   const reason = (c) => {
     const o = [];
-    if (c?.format?.verdict === 'fail') o.push('리뷰 화면 아님');
+    if (c?.format?.verdict === 'fail') {
+      const kind = c.format.got || c.format.kind;
+      o.push(kind === 'receipt' ? '현금영수증으로 보임' : '리뷰 화면 아님');
+    }
     if (c?.format?.verdict === 'warn') o.push('채널 다름');
     if (c?.product?.verdict === 'warn' || c?.product?.verdict === 'fail') o.push('상품명 다름');
     if (c?.duplicate?.verdict === 'fail') o.push(`같은 파일(${c.duplicate.matchTab || ''} ${c.duplicate.matchReviewer || ''})`.trim());

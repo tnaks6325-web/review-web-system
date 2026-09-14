@@ -30,6 +30,7 @@ const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdes
 /* 판정 갈래를 전부 밟는 픽스처 — 유형이 겹치는 건(한 건 = 여러 칩)을 반드시 포함한다. */
 const V = (v, extra) => Object.assign({ verdict: v }, extra || {});
 const FIX = [
+  { name: '현금영수증으로 보임', checks: { format: V('fail', { kind: 'receipt' }) },                       want: ['receipt'] },
   { name: '리뷰화면 아님',      checks: { format: V('fail', { kind: 'order_capture' }) },                 want: ['format_fail'] },
   { name: '채널 다름',          checks: { format: V('warn', { expectedChannel: 'coupang' }) },            want: ['channel'] },
   { name: 'format warn 인데 기대채널 없음 → 유형 아님', checks: { format: V('warn', { expectedChannel: '' }) }, want: [] },
@@ -198,7 +199,7 @@ ok('★ 한 절이 실패해도 나머지 진단은 남는다(fail-soft)', /조�
     ok('전체 의심+불량 5건', all.total === 5);
     ok('상품명 2 · 본문겹침 1 · 리뷰화면아님 1 · 작성자 1 · 같은파일 1',
       all.product === 2 && all.similarity === 1 && all.format_fail === 1
-      && all.author === 1 && all.duplicate === 1);
+      && all.receipt === 0 && all.author === 1 && all.duplicate === 1);
     ok('★ 확인됨(resolved) 건은 open 집계에 안 든다(상품명이 3 이 아니라 2)', all.product === 2);
 
     const scoped = await RIsvc.inspectionTypeCounts({ status: 'open', tabs: [{ sheetId: 'S1', tabName: 'A' }] });

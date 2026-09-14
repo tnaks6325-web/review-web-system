@@ -188,12 +188,19 @@ async function _tabRouteCtx(sheetId, tabName) {
   const cfg = rows[0] || {};
   let reviewType = null;
   try { reviewType = await require('./reviewTypeContext.service').reviewTypeForTab({ sheetId, tabName }); } catch (_) {}
+  let campaignCashReceipt = false;
+  try {
+    campaignCashReceipt = (await require('./cashReceiptContext.service')
+      .cashReceiptRequiredForTab({ sheetId, tabName })) === true;
+  } catch (_) {}
   const reviewBaseFolderId = cfg.folder_url ? driveService.extractFolderIdFromUrl(cfg.folder_url) : null;
   let receiptLabel = null;
   try {
-    receiptLabel = require('../utils/captureSlots').slotLabel(cfg.capture_slots, cfg.income_type, 'receipt', reviewType);
+    const info = require('../utils/captureSlots')
+      .cashReceiptSlotInfo(cfg.capture_slots, cfg.income_type, campaignCashReceipt, reviewType);
+    receiptLabel = info.slot && info.slot.label;
   } catch (_) {}
-  return { cfg, reviewType, reviewBaseFolderId, receiptLabel: receiptLabel || '현금영수증' };
+  return { cfg, reviewType, campaignCashReceipt, reviewBaseFolderId, receiptLabel: receiptLabel || '현금영수증' };
 }
 
 /**
@@ -211,7 +218,14 @@ async function revertRoute({ fileId, by = 'revert' } = {}) {
   if (!sub.routed_from_slot) return { ok: false, error: '자동 이동 이력이 없는 파일입니다.' };
 
   const ctx = await _tabRouteCtx(sub.sheet_id, sub.tab_name);
-  const backTarget = sub.routed_from_slot === 'receipt' ? 'receipt' : 'review';
+  const { isCashReceiptSlot } = require('../utils/captureSlots');
+  const backTarget = isCashReceiptSlot(
+    ctx.cfg.capture_slots,
+    ctx.cfg.income_type,
+    sub.routed_from_slot,
+    ctx.reviewType,
+    ctx.campaignCashReceipt,
+  ) ? 'receipt' : 'review';
   const toFolderId = await resolveTargetFolder({
     target: backTarget, sheetId: sub.sheet_id, tabName: sub.tab_name,
     reviewBaseFolderId: ctx.reviewBaseFolderId, receiptLabel: ctx.receiptLabel,
@@ -294,10 +308,18 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
   const hasRouteSamples = routeKinds.has('order_capture') && routeKinds.has('purchase_confirm');
   let hasReceiptSlot = false;
   try {
-    const { effectiveCaptureSlots } = require('../utils/captureSlots');
-    hasReceiptSlot = (effectiveCaptureSlots(ctx.cfg.capture_slots, ctx.cfg.income_type, ctx.reviewType) || [])
-      .some(s => s.key === 'receipt');
+    const { hasCashReceiptSlot } = require('../utils/captureSlots');
+    hasReceiptSlot = hasCashReceiptSlot(
+      ctx.cfg.capture_slots, ctx.cfg.income_type, ctx.campaignCashReceipt, ctx.reviewType);
   } catch (_) {}
+
+  const receiptSlotKey = (() => {
+    try {
+      const info = require('../utils/captureSlots').cashReceiptSlotInfo(
+        ctx.cfg.capture_slots, ctx.cfg.income_type, ctx.campaignCashReceipt, ctx.reviewType);
+      return (info.slot && info.slot.key) || 'receipt';
+    } catch (_) { return 'receipt'; }
+  })();
 
   let subs;
   try {
@@ -305,10 +327,10 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
       `SELECT file_id, file_name, row_index, reviewer_name, slot_key, file_hash
          FROM review_submissions
         WHERE sheet_id = $1 AND tab_name = $2
-          AND slot_key IN ('review', 'receipt')
+          AND slot_key = ANY($3::text[])
           AND routed_from_slot IS NULL
         ORDER BY uploaded_at DESC
-        LIMIT $3`, [sheetId, tabName, cap]);
+        LIMIT $4`, [sheetId, tabName, [...new Set(['review', 'receipt', receiptSlotKey])], cap]);
     subs = r.rows;
   } catch (e) {
     return { ok: false, error: `원장 조회 실패(migration 091 적용 확인): ${e.message}`, code: 'not_ready' };
@@ -323,11 +345,12 @@ async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'swe
       const f = await driveService.downloadFile(s.file_id);
       if (!f || !f.buffer) { continue; }
       const b64 = f.buffer.toString('base64');
+      const slotRole = s.slot_key === receiptSlotKey ? 'receipt' : s.slot_key;
       const verdict = await verifyCapture({
-        base64: b64, mimeType: f.mimeType || 'image/jpeg', slotKey: s.slot_key,
-        reviewType: ctx.reviewType, samples: samplesBySlot[s.slot_key] || [],
+        base64: b64, mimeType: f.mimeType || 'image/jpeg', slotKey: slotRole,
+        reviewType: ctx.reviewType, samples: samplesBySlot[slotRole] || [],
       });
-      const rd = routeDecision({ slotKey: s.slot_key, verdict, hasReceiptSlot, hasRouteSamples, expectedChannel });
+      const rd = routeDecision({ slotKey: slotRole, verdict, hasReceiptSlot, hasRouteSamples, expectedChannel });
       if (rd.action !== 'route') continue;
       const dup = await findSlotDuplicate({
         sheetId, tabName, rowIndex: s.row_index, reviewerName: s.reviewer_name,

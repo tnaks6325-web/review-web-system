@@ -2659,7 +2659,8 @@ function _renderCaptureSlots(item, slots, paneCard) {
 
   // ★ D안 ③: 현금영수증 슬롯이 있으면 발행방법 이미지를 "다시 보기"로 재안내(결제 후 재확인 시점).
   //   fail-soft — 조회 실패·미등록이면 아무것도 안 그린다(제출 흐름 무영향).
-  if (slots.some(s => s.key === 'receipt')) _csLoadCrGuides(item);
+  const receiptSlot = slots.find(_csIsReceiptSlot);
+  if (receiptSlot) _csLoadCrGuides(item, receiptSlot.key);
 
   // 공통 비고 입력 (행 1개이므로 단일 메모)
   const memoEl = document.createElement("textarea");
@@ -2678,13 +2679,17 @@ function _renderCaptureSlots(item, slots, paneCard) {
 /* ★ D안 ③ — 현금영수증 슬롯 아래 "발행방법 다시 보기" (접이식).
  *   이미지·라벨은 서버 provider-info의 cashReceiptGuideList(채널 표 단일 출처) 그대로 —
  *   프론트에 채널 사본을 두지 않는다. 등록된 이미지가 없거나 조회 실패 = 아무것도 안 그림. */
-async function _csLoadCrGuides(item) {
+function _csIsReceiptSlot(slot) {
+  return !!(slot && (slot.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(slot.label || ''))));
+}
+
+async function _csLoadCrGuides(item, receiptSlotKey = 'receipt') {
   try {
     const data = await gasGet({ action: 'getProviderInfo', sheetId: item.sheetId, tabName: item.tabName });
     // https 절대 URL만 <img src>로(저장 라우트도 같은 제약) + 따옴표 포함 값은 버림(속성 breakout 방지)
     const list = ((data && data.ok && Array.isArray(data.cashReceiptGuideList)) ? data.cashReceiptGuideList : [])
       .filter(g => g && /^https:\/\/[^"'<>\s]+$/.test(String(g.imageUrl || '')));
-    const box = document.getElementById('csGuide_receipt');
+    const box = document.getElementById('csGuide_' + receiptSlotKey);
     if (!box || !list.length) return;
     const bizNo = String((data && data.companyBusinessNo) || '').trim();
     box.innerHTML = `

@@ -230,7 +230,8 @@ t('SELECT 에 folder_url·capture_folder_url·income_type(tab_configs 를 이미
 // ★ 현영 판정은 captureSlots 유틸 재사용(사본 금지). 규칙은 hasCashReceiptSlot 하나로 통일됐다 —
 //   /tab-folders 가 폴더를 해석할 때 쓰는 것과 **같은 함수**여야 "눌리는데 거부"가 안 생긴다.
 t('★ 현영 판정은 captureSlots.hasCashReceiptSlot 재사용(사본 금지)',
-  /require\('\.\.\/utils\/captureSlots'\)/.test(SVC_SRC) && /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType\)/.test(SVC_SRC));
+  /require\('\.\.\/utils\/captureSlots'\)/.test(SVC_SRC)
+  && /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType, r\.cashReceiptRequired === true\)/.test(SVC_SRC));
 const svc = require('../src/services/trackB.service');
 (async () => {
   svc.__setPoolForTest({

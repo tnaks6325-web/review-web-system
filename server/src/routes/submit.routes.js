@@ -565,13 +565,16 @@ router.post('/review', async (req, res, next) => {
       // ★ 087 2차: 슬롯 파생은 리뷰타입까지 봐야 한다 — 넷 중 하나만 빠지면
       //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
       const _rt = await reviewTypeForTab({ sheetId, tabName });
-      const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
+      const _crRequired = await require('../services/cashReceiptContext.service')
+        .cashReceiptRequiredForTab({ sheetId, tabName });
+      const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt, _crRequired === true);
       const requiresReviewHistory = required.includes('review');
       // ★★ 슬롯 모드 판정은 required 개수가 아니라 **화면 슬롯(effectiveCaptureSlots)** 기준.
       //   현금영수증 슬롯이 선택(required:false)이 되면서 현영 탭도 required=['review'] 하나가 됐는데,
       //   그걸 근거로 fast-path를 타면 **영수증만 올리고 제출해도 완료**가 된다(리뷰 캡처 0장).
       //   슬롯 UI가 뜨는 탭은 원장 대조를 거쳐 "필수 슬롯 ⊆ 제출 슬롯"을 확인해야 한다.
-      const _effSlots = effectiveCaptureSlots(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
+      const _effSlots = effectiveCaptureSlots(
+        ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt, _crRequired === true);
       const isMultiSlot = Array.isArray(_effSlots) && _effSlots.length > 1;
       let reviewIndexMarkedWithHistory = false;
 

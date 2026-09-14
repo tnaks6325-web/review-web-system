@@ -2746,6 +2746,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         repurchaseDaysState.value,
       ]
     );
+    require('../services/cashReceiptContext.service')
+      .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
@@ -3224,6 +3226,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     }
+    require('../services/cashReceiptContext.service')
+      .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
