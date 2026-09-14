@@ -631,38 +631,12 @@ async function _processOneSheet(sheetId, opts) {
     if (oldTabName && oldTabName !== tabName) {
       logger.info(`[buildIndex] 탭 이름 변경 감지: "${oldTabName}" → "${tabName}" (gid=${tabGid}, sheet=${sheetId.substring(0, 15)})`);
       try {
-        // ── review_index: 리뷰어 데이터 보존하면서 탭명만 UPDATE ──
-        const riResult = await pool.query(
-          'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-          [tabName, sheetId, oldTabName]
-        );
-        // 제출·검수 원장도 새 탭명을 써야 입금 게이트가 기존 영수증 증거를 계속 찾는다.
-        await pool.query(
-          'UPDATE review_submissions SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-          [tabName, sheetId, oldTabName]
-        );
-        await pool.query(
-          'UPDATE review_inspections SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-          [tabName, sheetId, oldTabName]
-        );
-        // ── index_master: 탭명 + tab_gid UPDATE (행 보존) ──
-        const imResult = await pool.query(
-          'UPDATE index_master SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
-          [tabName, tabGid, sheetId, oldTabName]
-        );
-        // ── tab_configs: 탭명 UPDATE ──
-        await pool.query(
-          'UPDATE tab_configs SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-          [tabName, sheetId, oldTabName]
-        );
-        // ── 모집공고 연결 탭 이름도 따라간다(2026-08-24) ──
-        //   ★ 안 고치면 공고↔작업표 연결을 이름으로 찾는 경로가 통째로 죽는다([📅 인원]·정원·날짜 정렬).
-        //   ★ 규칙 사본 0 — indexScan 의 같은 자리와 **같은 함수**를 쓴다. 실패해도 리네임 보정은 계속.
-        {
-          const { renameCampaignLinkedTab } = require('../utils/campaignTabLateral');
-          const n = await renameCampaignLinkedTab(pool, { sheetId, oldTabName, newTabName: tabName, tabGid });
-          if (n) logger.info(`[smartBuild] 공고 연결 탭 이름 보정 ${n}건: "${oldTabName}" → "${tabName}"`);
-        }
+        const renamed = await require('./tabRename.service').renameTabState(pool, {
+          sheetId, oldTabName, newTabName: tabName, tabGid,
+        });
+        const riResult = { rowCount: renamed.reviewIndexUpdated };
+        const imResult = { rowCount: renamed.indexMasterUpdated };
+        if (renamed.campaignLinksUpdated) logger.info(`[smartBuild] 공고 연결 탭 이름 보정 ${renamed.campaignLinksUpdated}건: "${oldTabName}" → "${tabName}"`);
         // ── URL 교정: 정규화된 시트 URL로 업데이트 ──
         const correctUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
         await pool.query(

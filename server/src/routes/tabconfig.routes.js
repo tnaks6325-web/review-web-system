@@ -18,6 +18,7 @@ const {
 const { logger } = require('../utils/logger');
 const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
 const { assignStableCaptureSlotKeys } = require('../utils/captureSlots');
+const { renameTabState } = require('../services/tabRename.service');
 
 // ── Auto-migration: display_name_map JSONB 컬럼 추가 (차수별 표시명) ──
 (async () => {
@@ -889,20 +890,12 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
             try {
               // ── 탭명 변경 (GID 기반으로 확인된 rename) ──
               if (newName) {
-                await pool.query(
-                  `UPDATE tab_configs SET tab_name = $1, sheet_url = $2, updated_at = NOW()
-                   WHERE sheet_id = $3 AND tab_name = $4`,
-                  [newName, correctSheetUrl, sheetId, oldName]
-                );
-                await pool.query(
-                  'UPDATE index_master SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-                  [newName, sheetId, oldName]
-                );
-                const riResult = await pool.query(
-                  'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-                  [newName, sheetId, oldName]
-                );
-                entry.reviewIndexUpdated = riResult.rowCount;
+                const changed = await renameTabState(pool, {
+                  sheetId, oldTabName: oldName, newTabName: newName,
+                  tabGid: effectiveGid, sheetUrl: correctSheetUrl,
+                });
+                entry.reviewIndexUpdated = changed.reviewIndexUpdated;
+                entry.paymentItemsUpdated = changed.paymentItemsUpdated;
                 renamed++;
                 logger.info(`[sync-tab-names] 탭명 변경: "${oldName}" → "${newName}" (sheet=${sheetId.substring(0, 15)})`);
               }
@@ -1134,6 +1127,10 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
 
           if (!dryRun) {
             try {
+              const changed = await renameTabState(pool, {
+                sheetId: sid, oldTabName: dbTabName, newTabName, tabGid: newGid,
+                sheetUrl: correctSheetUrl,
+              });
               await pool.query(
                 'DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
                 [sid, dbTabName]
@@ -1156,10 +1153,8 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
                    tab_gid = $3, campaign_name = $4, status = 'active', built_at = NOW()`,
                 [sid, newTabName, newGid, newCampaignName]
               );
-              await pool.query(
-                'UPDATE review_index SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
-                [newTabName, newGid, sid, dbTabName]
-              );
+              fix.reviewIndexUpdated = changed.reviewIndexUpdated;
+              fix.paymentItemsUpdated = changed.paymentItemsUpdated;
               fix.status = 'fixed';
               fixed++;
               logger.info(`[fix-swap] 교정: "${dbTabName}" → tab="${newTabName}", campaign="${newCampaignName}", gid=${newGid}`);

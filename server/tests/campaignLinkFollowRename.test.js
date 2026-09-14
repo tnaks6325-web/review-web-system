@@ -20,6 +20,8 @@ const { renameCampaignLinkedTab } = require('../src/utils/campaignTabLateral');
 const lat = S('src/utils/campaignTabLateral.js');
 const ib = S('src/services/indexBuilder.service.js');
 const isc = S('src/services/indexScan.service.js');
+const tc = S('src/routes/tabconfig.routes.js');
+const renameSvc = S('src/services/tabRename.service.js');
 
 console.log('── A. 실행부 ──');
 (async () => {
@@ -55,29 +57,26 @@ console.log('── A. 실행부 ──');
   catch (_) { threw = true; }
   t('★★ 절대 throw 하지 않는다 — 실패해도 탭 이름 자가치유는 계속돼야 한다', !threw && r0 === 0);
 
-  console.log('── B. 두 보정 지점에 배선 ──');
-  /* ⚠ 존재만 보면 `const n = 0 && await …` 같은 무력화를 통과시킨다(변이시험 실측).
-     **대입 형태 그대로** 고정한다 — 결과를 실제로 쓰는지까지 본다. */
-  t('indexBuilder(전체 빌드 자가치유)가 부른다 — 결과를 받아 쓴다',
-    /const n = await renameCampaignLinkedTab\(pool, \{/.test(ib) && /if \(n\) logger\.info/.test(ib));
-  t('indexScan(탭 목록 동기화)이 부른다 — 같은 트랜잭션 client 로',
-    /const n = await renameCampaignLinkedTab\(client, \{/.test(isc) && /if \(n\) logger\.info/.test(isc));
+  console.log('── B. 모든 보정 지점에 공용 탭 리네임 배선 ──');
+  t('indexBuilder·indexScan이 공용 renameTabState를 호출한다',
+    /renameTabState\(pool, \{/.test(ib) && /renameTabState\(client, \{/.test(isc));
+  t('수동 sync-tab-names·fix-campaign-tab-swap도 같은 공용 함수를 호출한다',
+    (tc.match(/renameTabState\(pool, \{/g) || []).length === 2);
   t('★ 규칙 사본 0 — UPDATE recruit_campaigns 는 공유 헬퍼에만 있다',
     !/UPDATE recruit_campaigns[\s\S]{0,120}linked_tab_name/.test(ib)
     && !/UPDATE recruit_campaigns[\s\S]{0,120}linked_tab_name/.test(isc));
 
   const seg = src => {
-    const i = src.indexOf('renameCampaignLinkedTab(');
+    const i = src.indexOf('renameTabState(');
     const j = src.indexOf('correctUrl', i);
     return i >= 0 && j > i;
   };
-  t('★ 기존 세 표(review_index·index_master·tab_configs) 보정을 건드리지 않았다',
-    /UPDATE review_index SET tab_name/.test(ib) && /UPDATE index_master SET tab_name/.test(ib)
-    && /UPDATE tab_configs SET tab_name/.test(ib)
-    && /UPDATE review_index SET tab_name/.test(isc) && /UPDATE tab_configs SET tab_name/.test(isc));
-  t('★ 탭 이름 변경은 영수증 제출·검수 원장의 좌표도 두 경로에서 함께 바꾼다',
-    /UPDATE review_submissions SET tab_name/.test(ib) && /UPDATE review_inspections SET tab_name/.test(ib)
-    && /UPDATE review_submissions SET tab_name/.test(isc) && /UPDATE review_inspections SET tab_name/.test(isc));
+  t('★ 핵심·영수증 원장의 탭 좌표 변경은 공용 서비스 한 곳에만 있다',
+    /UPDATE review_index/.test(renameSvc) && /UPDATE index_master/.test(renameSvc)
+    && /UPDATE tab_configs/.test(renameSvc) && /UPDATE review_submissions/.test(renameSvc)
+    && /UPDATE review_inspections/.test(renameSvc));
+  t('★ 미다운로드 pending 회차만 새 탭 좌표로 옮긴다',
+    /UPDATE payment_batch_items i[\s\S]*i\.status = 'pending'[\s\S]*COALESCE\(b\.download_count, 0\) = 0/.test(renameSvc));
   t('보정은 URL 교정 앞에 들어간다(같은 묶음 안)', seg(ib) && seg(isc));
 
   console.log('── C. 판정 함수는 건드리지 않았다 ──');
