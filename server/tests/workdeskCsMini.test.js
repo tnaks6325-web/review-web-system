@@ -26,6 +26,7 @@ assert.match(workdesk, /\.tp3grid\.c3\.fold \.wdcsmini-body\{display:none\}/, '�
 assert.match(mini, /event\.stopPropagation\(\).*switchView\('cs'\)/, 'C/S 전체보기 버튼은 접기 대신 전체 C/S로 이동한다');
 assert.match(mini, /campaignKey: sheetId \+ '\|\|' \+ tabName/, '작업별 C/S 범위는 기존 campaignKey 규칙을 사용한다');
 assert.match(mini, /csAdminThreads/, 'C/S 메뉴와 같은 방 목록 API를 사용한다');
+assert.match(mini, /csAdminThreads[\s\S]{0,120}campaignKey: state\.campaignKey/, '현재 작업의 방을 서버에서 먼저 좁혀 전체 목록 페이지에 밀리지 않는다');
 assert.match(mini, /csAdminMessages/, 'C/S 메뉴와 같은 메시지 API를 사용한다');
 assert.match(mini, /csAdminReply/, '작업보드 답장도 C/S 메뉴와 같은 쓰기 API를 사용한다');
 assert.match(mini, /csAdminUpload/, '작업보드 미니도 기존 C/S 이미지 업로드 API를 사용한다');
@@ -42,5 +43,9 @@ assert.match(mini, /isMountedAndVisible\(\).*state = null/s, '사라진 작업�
 assert.match(mini, /data\.ok === false \|\| data\.error/, '전송·조회는 transport error 응답도 실패로 처리한다');
 assert.match(mini, /data\.hasMore && previousActive/, '후속 페이지를 읽는 동안 선택 대화방을 유지한다');
 assert.match(shared, /window\.dispatchEvent\(new CustomEvent\('cs:sse'/, '공유 C/S SSE 훅이 미니 C/S에 이벤트를 전달한다');
+assert.match(workdesk, /notify-participants[\s\S]{0,1600}WorkdeskCsMini\.refresh\(preferred\)/, '작업보드 선발송 성공 직후 새 문의방을 미니 C/S 목록에 반영한다');
+
+const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'cs.routes.js'), 'utf8');
+assert.match(route, /const campaignKey = \(req\.query\.campaignKey[\s\S]{0,1400}t\.campaign_key = \$\$\{params\.length\}/, '문의방 목록 API가 campaignKey 정확 일치 필터를 지원한다');
 
 console.log('workdesk C/S mini contract passed');

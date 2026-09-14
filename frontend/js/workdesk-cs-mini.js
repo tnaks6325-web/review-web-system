@@ -1,6 +1,7 @@
 /* 작업보드 미니 C/S
    C/S 메뉴와 같은 csAdminThreads / csAdminMessages / csAdminReply API를 사용한다.
-   작업별 campaignKey(시트ID||작업명)만 클라이언트에서 좁혀, 별도 대화방/메시지 저장소가 생기지 않게 한다. */
+   목록 요청부터 작업별 campaignKey(시트ID||작업명)로 좁혀, 다른 작업의 많은 문의방 때문에
+   현재 작업 방이 뒤쪽 페이지로 밀리지 않게 한다. 별도 대화방/메시지 저장소는 만들지 않는다. */
 (function () {
   'use strict';
 
@@ -20,6 +21,10 @@
     if (!data || data.ok === false || data.error) return (data && data.error) || fallback;
     return '';
   };
+  const roomListRequest = (offset) => gasGet({
+    action: 'csAdminThreads', status: 'all', q: '', campaignKey: state.campaignKey,
+    limit: 100, offset: Number(offset) || 0,
+  });
   const time = (iso) => {
     const date = new Date(iso || '');
     return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -128,7 +133,7 @@
 
   async function loadMore(revision, generation, offset) {
     while (state && state.revision === revision && state.generation === generation) {
-      const data = await gasGet({ action: 'csAdminThreads', status: 'all', q: '', limit: 100, offset });
+      const data = await roomListRequest(offset);
       if (requestError(data, '불러오기 실패') || !state || state.revision !== revision || state.generation !== generation) return;
       const seen = new Set(state.rooms.map(room => String(room.id)));
       const more = (data.threads || []).filter(room => roomForWork(room));
@@ -139,20 +144,26 @@
           else if (!seen.has(String(room.id))) state.rooms.push(room);
         });
         render();
+        if (state.preferredThreadId && byId(state.preferredThreadId)) {
+          const preferredThreadId = state.preferredThreadId;
+          state.preferredThreadId = null;
+          void openRoom(preferredThreadId);
+        }
       }
       offset += (data.threads || []).length;
       if (!data.hasMore || !(data.threads || []).length) return;
     }
   }
 
-  async function loadRooms() {
+  async function loadRooms(preferredThreadId) {
     if (!state) return;
+    if (preferredThreadId) state.preferredThreadId = String(preferredThreadId);
     const revision = state.revision;
     const generation = ++state.generation;
     state.loading = true;
     render();
     try {
-      const data = await gasGet({ action: 'csAdminThreads', status: 'all', q: '', limit: 100, offset: 0 });
+      const data = await roomListRequest(0);
       const error = requestError(data, '불러오기 실패');
       if (error) throw new Error(error);
       if (!state || state.revision !== revision || state.generation !== generation) return;
@@ -166,7 +177,11 @@
       }
       state.loading = false;
       render();
-      if (!state.activeThreadId && state.rooms.length) void openRoom(state.rooms[0].id);
+      if (state.preferredThreadId && byId(state.preferredThreadId)) {
+        const nextThreadId = state.preferredThreadId;
+        state.preferredThreadId = null;
+        void openRoom(nextThreadId);
+      } else if (!state.activeThreadId && state.rooms.length) void openRoom(state.rooms[0].id);
       if (data.hasMore) void loadMore(revision, generation, 100);
     } catch (error) {
       if (!state || state.revision !== revision || state.generation !== generation) return;
@@ -327,7 +342,7 @@
     const sheetId = String(context && context.sheetId || '');
     const tabName = String(context && context.tabName || '');
     if (!root || !sheetId || !tabName) return false;
-    state = { hostId: root.id, campaignKey: sheetId + '||' + tabName, label: String(context && context.label || tabName), rooms: [], activeThreadId: null, thread: null, messages: [], draft: '', pendingImages: [], sending: false, loading: true, loadingThread: false, generation: 0, revision: ++mountRevision };
+    state = { hostId: root.id, campaignKey: sheetId + '||' + tabName, label: String(context && context.label || tabName), rooms: [], activeThreadId: null, preferredThreadId: null, thread: null, messages: [], draft: '', pendingImages: [], sending: false, loading: true, loadingThread: false, generation: 0, revision: ++mountRevision };
     void loadRooms();
     return true;
   }

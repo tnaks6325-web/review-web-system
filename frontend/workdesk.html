@@ -9435,6 +9435,13 @@ async function _rmSend(){
     return;   // ★ 입력한 내용은 그대로 둔다(다시 누르면 재시도)
   }
   _RM.sent=d; _rmRenderResult();
+  // 작업보드에서 관리자가 처음 보낸 메시지는 서버에서 새 문의방을 만든다.
+  // SSE 연결 상태와 무관하게 현재 작업의 미니 목록을 즉시 다시 읽어 새 방을 보여준다.
+  try{
+    const sent=(d&&d.sent)||[];
+    const preferred=sent.length===1&&sent[0]&&sent[0].threadId||'';
+    if(window.WorkdeskCsMini&&typeof WorkdeskCsMini.refresh==='function') void WorkdeskCsMini.refresh(preferred);
+  }catch(_){ }
 }
 function _rmRenderResult(){
   const b=document.getElementById('rmBody'), f=document.getElementById('rmFoot'); if(!b||!f) return;
