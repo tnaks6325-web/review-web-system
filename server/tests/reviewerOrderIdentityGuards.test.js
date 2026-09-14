@@ -14,6 +14,7 @@ const gemini = read('src/services/gemini.service.js');
 const migration = read('migrations/147_reviewer_shopping_identity_match.sql');
 const suggestionMigration = read('migrations/157_order_info_suggestions.sql');
 const suggestionBindingMigration = read('migrations/158_order_info_identity_binding.sql');
+const serverIndex = read('index.js');
 const appJs = read('../frontend/js/search-app.js');
 const searchCss = read('../frontend/css/search.css');
 const campaign = read('../frontend/campaign.html');
@@ -156,6 +157,8 @@ ok('제출 시 검증된 불변 소유자와 참여 명의 해시를 주문 원�
   && /participantIdentityKeyHash: verifiedIdentity\.approval\.selectedIdentityHash/.test(submitRoutes)
   && /identityBinding: verifiedIdentityBinding/.test(submitRoutes)
   && /participant_identity_key_hash = \$5/.test(read('src/services/orderLedger.service.js')));
+ok('참여 명의 해시 열이 없으면 서버 시작을 거부한다',
+  /\['order_submissions',\s*'participant_identity_key_hash'\]/.test(serverIndex));
 ok('추천 조회 장애는 구매양식을 막지 않고 빈 추천으로 접힌다',
   /let orderInfoSuggestions = \[\]/.test(service)
   && /orderInfoSuggestions = await loadOrderInfoSuggestions\(context\)/.test(service)
