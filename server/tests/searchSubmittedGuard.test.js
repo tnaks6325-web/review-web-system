@@ -24,6 +24,15 @@ const fakePool = {
     if (/FROM reviewers/.test(sql)) return { rows: [] };            // 프로필(타계정) 없음
     if (/set_limit/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ count: '0', built_at: null }] };
+    if (/provenance AS/.test(sql) && Array.isArray(params?.[2])) {
+      return { rows: params[0].map((sheetId, i) => ({
+        sheet_id: sheetId,
+        tab_name: params[1][i],
+        row_index: params[2][i],
+        cash_receipt_required: params[1][i] === '현영탭',
+        resolution: 'exact',
+      })) };
+    }
     if (/FROM recruit_campaigns/.test(sql) && Array.isArray(params?.[1])) {
       return { rows: params[0].map((sheetId, i) => ({
         sheet_id: sheetId,

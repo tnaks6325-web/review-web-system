@@ -5612,11 +5612,10 @@ async function tabStatsMap({ force = false } = {}) {
               tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
               tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl", tc.income_type AS "incomeType",
               tc.capture_slots AS "captureSlots",
-              (SELECT rc.cash_receipt_required FROM recruit_campaigns rc
-                WHERE rc.linked_sheet_id = tc.sheet_id
-                  AND (rc.linked_tab_name = tc.tab_name
-                       OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
-                ORDER BY (rc.status = 'active') DESC, rc.created_at DESC LIMIT 1) AS "cashReceiptRequired",
+              (SELECT BOOL_OR(rc.cash_receipt_required) FROM recruit_campaigns rc
+                 WHERE rc.linked_sheet_id = tc.sheet_id
+                   AND (rc.linked_tab_name = tc.tab_name
+                        OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))) AS "cashReceiptRequired",
               -- ★ 담당자 판정 원천(회차 #18) — 작업담당(065) 이 tab_configs.manager 보다 우선한다.
               --   tc.manager 는 접수 시점에 한 번만 채워지는 blank-only 칸이라 오더에서 담당자가
               --   바뀌어도 안 따라온다(payment.service 와 같은 함정 — resolveWorkManager 로 통일).

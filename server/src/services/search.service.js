@@ -4,7 +4,7 @@ const { effectiveCaptureSlots, cashReceiptSlotInfo } = require('../utils/capture
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
 const { workKindsForTabs } = require('./workKindContext.service');
 const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
-const { cashReceiptRequirementsForTabs } = require('./cashReceiptContext.service');
+const { cashReceiptRequirementsForRows } = require('./cashReceiptContext.service');
 const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
 
 /** 검수에서 거절·보류된 영수증은 파일이 남아 있어도 리뷰어에게는 다시 제출할 슬롯이다. */
@@ -500,8 +500,8 @@ async function searchByName(query, phone8, opts = {}) {
     /* 모집공고의 현금영수증 직접 설정 — 안내 카드에만 쓰던 값을 제출 슬롯에도 연결한다. */
     let _crMap = new Map();
     try {
-      _crMap = await cashReceiptRequirementsForTabs(
-        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+      _crMap = await cashReceiptRequirementsForRows(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
     } catch (_) { _crMap = new Map(); }
 
     // GAS 호환 결과 변환
@@ -542,7 +542,7 @@ async function searchByName(query, phone8, opts = {}) {
         row.captureSlots,
         row.incomeType,
         _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
-        _crMap.get(`${row.sheetId}\u0000${row.tabName}`) === true),
+        _crMap.get(cashReceiptSubmissionRowKey(row.sheetId, row.tabName, row.rowIndex)) === true),
       reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 리뷰어 안내문용
       workKind:    _wkMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 'blog' = 포스팅URL 제출
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
@@ -722,8 +722,8 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
   } catch (_) { _rtMap = new Map(); }
   let _crMap = new Map();
   try {
-    _crMap = await cashReceiptRequirementsForTabs(
-      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+    _crMap = await cashReceiptRequirementsForRows(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
   } catch (_) { _crMap = new Map(); }
 
   const results = filteredRows.map(row => {
@@ -751,7 +751,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       row.captureSlots,
       row.incomeType,
       _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
-      _crMap.get(`${row.sheetId}\u0000${row.tabName}`) === true),
+      _crMap.get(cashReceiptSubmissionRowKey(row.sheetId, row.tabName, row.rowIndex)) === true),
     reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
     submittedSlots: [],
     // ★ 제출완료 행은 행 전체 JSON 미반환 (본검색과 동일한 데이터 최소화)

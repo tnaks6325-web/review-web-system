@@ -71,8 +71,8 @@ ok('완료 판정이 income_type·리뷰타입을 함께 읽는다(안 읽으면
   && /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt, _crRequired === true\)/.test(submit)
   && /cashReceiptRequiredForTab/.test(submit));
 ok('검색 응답이 파생 슬롯을 내려준다',
-  /cashReceiptRequirementsForTabs/.test(search)
-  && /effectiveCaptureSlots\([\s\S]{0,180}_crMap\.get/.test(search)
+  /cashReceiptRequirementsForRows/.test(search)
+  && /effectiveCaptureSlots\([\s\S]{0,220}_crMap\.get\(cashReceiptSubmissionRowKey/.test(search)
   && /tc\.income_type\s+AS "incomeType"/.test(search));
 ok('업로드 폴더 라벨이 공용 유틸 사용(리뷰타입 포함 — 087 2차)',
   /slotLabelOf\([\s\S]{0,180}_campaignCashReceipt\)/.test(diag)

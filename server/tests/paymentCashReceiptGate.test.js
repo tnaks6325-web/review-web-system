@@ -110,6 +110,8 @@ const db = {
     '최초 이체파일 다운로드 직전에 현금영수증 현재 상태를 다시 검증해야 한다');
   assert.match(searchService, /cashReceiptSubmissionStates\(pool, source\)[\s\S]*item\.submittedSlots = \(item\.submittedSlots \|\| \[\]\)\.filter/,
     '거절·보류된 영수증은 파일이 남아 있어도 리뷰어 재제출 슬롯을 다시 열어야 한다');
+  assert.match(searchService, /cashReceiptRequirementsForRows\([\s\S]*rowIndex: r\.rowIndex[\s\S]*cashReceiptSubmissionRowKey\(row\.sheetId, row\.tabName, row\.rowIndex\)/,
+    '재공고 탭의 리뷰어 슬롯도 행 출처 공고의 현영 설정을 따라야 한다');
 
   const inspectService = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
   const uploadRoute = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
