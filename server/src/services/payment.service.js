@@ -11,7 +11,7 @@ const crypto = require('crypto');
  *
  * ★★ 확정 규칙(완화 금지)
  *   ① 이체 단위 = **건별(A안)**. 시트 행 1개 = 이체 1줄. 합산하지 않는다.
- *   ② 대상 = 리뷰 제출완료 ∧ 미입금 ∧ **다운로드 이력 없음**.
+ *   ② 대상 = 리뷰 제출완료 ∧ (현금영수증 대상이면 영수증 제출완료) ∧ 미입금 ∧ **다운로드 이력 없음**.
  *      "다운로드 이력 있으면 무조건 제외"가 이중입금 방지의 핵심이고,
  *      DB 부분유니크(uq_payment_items_active)가 코드 실수까지 막는 최종 방어선이다.
  *   ③ 금액·통장표시·계좌는 **회차 생성 시점 값을 박제**한다(스냅샷). 나중에 규칙이
@@ -29,6 +29,7 @@ const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require(
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 const { loadWorkboardAmounts, loadWorkboardAmountPopulation, workboardAmountKey } = require('./paymentWorkboardAmount.service');
+const { filterReceiptEligiblePaymentRows } = require('./paymentReceiptGate.service');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
@@ -176,7 +177,7 @@ async function listPaymentTargets(opts = {}) {
   if (opts.sheetId) { params.push(opts.sheetId); where.push(`ri.sheet_id = $${params.length}`); }
   if (opts.tabName) { params.push(opts.tabName); where.push(`ri.tab_name = $${params.length}`); }
 
-  const { rows } = await pool.query(
+  const { rows: candidateRows } = await pool.query(
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
             ri.reviewer_name AS "reviewerName", ri.phone8 AS "phone8",
             ri.start_date AS "startDate", ri.product_name AS "productName",
@@ -196,6 +197,11 @@ async function listPaymentTargets(opts = {}) {
       LIMIT 2000`,
     params
   );
+  if (!candidateRows.length) return { items: [], summary: _summarize([]) };
+
+  // 현금영수증 대상 작업은 리뷰 완료만으로 지급하지 않는다. 공용 게이트가 실제 영수증 슬롯
+  // 원장을 확인하며, 회차 생성도 listPaymentTargets를 다시 호출하므로 같은 조건으로 재검증된다.
+  const rows = await filterReceiptEligiblePaymentRows(pool, candidateRows);
   if (!rows.length) return { items: [], summary: _summarize([]) };
 
   const sheetIds = [...new Set(rows.map(r => r.sheetId))];

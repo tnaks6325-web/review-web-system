@@ -40,7 +40,9 @@ async function cashReceiptRequiredForTab({ sheetId, tabName, client } = {}) {
   }
 }
 
-async function cashReceiptRequirementsForTabs(pairs) {
+async function cashReceiptRequirementsForTabs(pairs, opts = {}) {
+  const strict = opts.strict === true;
+  const fresh = opts.fresh === true;
   const out = new Map();
   const missing = [];
   const seen = new Set();
@@ -49,16 +51,17 @@ async function cashReceiptRequirementsForTabs(pairs) {
     const key = `${p.sheetId}\u0000${p.tabName}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const hit = _cache.get(key);
+    const hit = fresh ? null : _cache.get(key);
     if (hit && Date.now() - hit.ts < TTL) out.set(key, hit.v);
     else missing.push({ ...p, key });
   }
   if (!missing.length) return out;
 
   try {
+    const db = opts.client || _db();
     const sheetIds = missing.map(p => p.sheetId);
     const tabNames = missing.map(p => p.tabName);
-    const { rows } = await _db().query(
+    const { rows } = await db.query(
       `WITH requested AS (
          SELECT * FROM UNNEST($1::text[], $2::text[]) AS r(sheet_id, tab_name)
        )
@@ -90,6 +93,7 @@ async function cashReceiptRequirementsForTabs(pairs) {
       out.set(p.key, v);
     }
   } catch (e) {
+    if (strict) throw e;
     logger.warn(`[cashReceiptContext] 공고 현금영수증 설정 일괄 조회 실패(탭 설정으로 폴백): ${e.message}`);
     for (const p of missing) out.set(p.key, null);
   }
