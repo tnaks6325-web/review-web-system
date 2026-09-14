@@ -1,4 +1,4 @@
-const POPULAR_CREDIT_VALIDITY_DAYS = 3;
+const POPULAR_CREDIT_VALIDITY_DAYS = 1;
 const POPULAR_CREDIT_VALIDITY_MS = POPULAR_CREDIT_VALIDITY_DAYS * 24 * 60 * 60 * 1000;
 
 function _time(value) {
@@ -11,7 +11,7 @@ function _emptyState() {
 }
 
 /**
- * 판정 시점의 최근 72시간 이력만 시간순으로 매칭한다. 기간 밖 일반 참여권은 소급해서
+ * 판정 시점의 최근 24시간 이력만 시간순으로 매칭한다. 기간 밖 일반 참여권은 소급해서
  * 제외하고, 기간 안의 인기 참여는 그보다 먼저 생긴 현재 유효 참여권부터 소진한다.
  * 명의별 큐 포인터를 한 번만 전진시키므로 계산량은 조회 행 수에 비례한다.
  */

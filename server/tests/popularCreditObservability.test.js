@@ -16,7 +16,8 @@ const audit = routes.indexOf("router.get('/admin/popular-credit-audit', authMidd
 assert(adminList >= 0 && adminList < generic, 'admin list must precede generic /:id route');
 assert(audit >= 0 && audit < generic, 'audit must precede generic /:id route');
 assert(creditService.includes('COALESCE(ca.is_popular_snapshot, rc.is_popular)'), 'shared matcher must use immutable application popularity snapshot');
-assert(creditService.includes('ca.submitted_at BETWEEN $1 AND $2'), 'shared matcher must use the rolling three-day window');
+assert(creditService.includes('ca.submitted_at BETWEEN $1 AND $2'), 'shared matcher must use the rolling one-day window');
+assert(routes.includes("scope: 'rolling_1_day_snapshot_based_current_state'"), 'audit must describe the same rolling one-day window');
 assert(creditService.includes('const credit = queue.credits[queue.next]'), 'shared matcher must consume FIFO credits in linear time');
 assert(routes.includes('loadPopularCreditMatches(pool, null, { evaluatedAt })'), 'audit must use the shared matcher');
 assert(routes.includes('popular_purpose: purposeMatches.matchedNormalIds.has(String(r.id))'), 'control API must use the shared purpose marker');
