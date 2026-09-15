@@ -2477,6 +2477,7 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-pick .pm{font-size:10.5px;color:var(--faint);margin-top:2px;display:block}
 .wbl-empty{padding:26px;text-align:center;color:var(--faint);font-size:12px}
 .wbl-note{font-size:9.5px;color:var(--faint);padding:8px 14px;border-top:1px solid var(--line)}
+.wbl-mobile-toggle{display:none}
 @media(max-width:720px){
   .wbl-box{margin-top:12px;border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
   .wbl-h{padding:12px 0 10px;gap:8px;background:transparent;border:0}
@@ -2494,31 +2495,39 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   .wbl-tw{max-height:none;overflow:visible}
   table.wbl-t{display:block;font-size:12px}
   table.wbl-t thead{display:none}
-  table.wbl-t tbody{display:grid;gap:10px}
-  table.wbl-t tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 3px rgba(16,24,40,.05)}
+  table.wbl-t tbody{display:grid;gap:6px}
+  table.wbl-t tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:3px 8px;padding:9px 11px;background:var(--card);border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
   table.wbl-t tbody tr:hover{background:var(--card);border-color:var(--accent-line)}
   table.wbl-t tr.tdone td{background:transparent}
-  table.wbl-t td{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;min-width:0;padding:0;border:0;white-space:normal}
-  table.wbl-t td::before{content:attr(data-label);display:block;margin-bottom:2px;color:var(--faint);font-size:9.5px;font-weight:700}
-  table.wbl-t td:nth-child(1){grid-column:1/-1;padding:0 0 10px;border-bottom:1px solid var(--line)}
+  table.wbl-t td{display:flex;flex-direction:row;align-items:center;gap:3px;min-width:0;padding:0;border:0;white-space:nowrap;font-size:10.5px}
+  table.wbl-t td::before{content:attr(data-label);display:inline-block;margin:0;color:var(--faint);font-size:9px;font-weight:700}
+  table.wbl-t td:nth-child(1){display:block;position:relative;grid-column:1/-1;grid-row:1;padding:0 34px 2px 0;border:0}
   table.wbl-t td:nth-child(1)::before{display:none}
-  table.wbl-t td:nth-child(2){grid-column:1/2;grid-row:4}
-  table.wbl-t td:nth-child(3){grid-column:2/3;grid-row:4}
-  table.wbl-t td:nth-child(4){grid-column:1/2;grid-row:2}
-  table.wbl-t td:nth-child(5){grid-column:2/3;grid-row:2}
-  table.wbl-t td:nth-child(6){grid-column:1/2;grid-row:3}
-  table.wbl-t td:nth-child(7){grid-column:2/3;grid-row:3}
-  table.wbl-t td:nth-child(8){grid-column:1/-1;grid-row:5}
-  table.wbl-t td:nth-child(9){grid-column:1/2;grid-row:6}
-  table.wbl-t td:nth-child(10){grid-column:2/3;grid-row:6}
-  table.wbl-t td:nth-child(11){grid-column:1/2;grid-row:7}
-  table.wbl-t td:nth-child(12){grid-column:2/3;grid-row:7}
+  table.wbl-t td:nth-child(2),table.wbl-t td:nth-child(3),table.wbl-t td:nth-child(n+8){display:none}
+  table.wbl-t td:nth-child(4){grid-column:1;grid-row:2}
+  table.wbl-t td:nth-child(5){grid-column:2;grid-row:2}
+  table.wbl-t td:nth-child(5)::before{content:'인원'}
+  table.wbl-t td:nth-child(5) .wbl-g,table.wbl-t td:nth-child(5) .wbl-sub{display:none}
+  table.wbl-t td:nth-child(6){grid-column:3;grid-row:2}
+  table.wbl-t td:nth-child(7){grid-column:4;grid-row:2}
+  table.wbl-t td:nth-child(7)::before{display:none}
+  table.wbl-t tr.mob-open{gap:8px;padding:11px}
+  table.wbl-t tr.mob-open td:nth-child(1){padding-bottom:8px;border-bottom:1px solid var(--line)}
+  table.wbl-t tr.mob-open td:nth-child(2),table.wbl-t tr.mob-open td:nth-child(3),table.wbl-t tr.mob-open td:nth-child(n+8){display:flex;flex-direction:column;align-items:stretch}
+  table.wbl-t tr.mob-open td:nth-child(2){grid-column:1/3;grid-row:3}
+  table.wbl-t tr.mob-open td:nth-child(3){grid-column:3/5;grid-row:3}
+  table.wbl-t tr.mob-open td:nth-child(8){grid-column:1/-1;grid-row:4}
+  table.wbl-t tr.mob-open td:nth-child(9){grid-column:1/3;grid-row:5}
+  table.wbl-t tr.mob-open td:nth-child(10){grid-column:3/5;grid-row:5}
+  table.wbl-t tr.mob-open td:nth-child(11){grid-column:1/3;grid-row:6}
+  table.wbl-t tr.mob-open td:nth-child(12){grid-column:3/5;grid-row:6}
   table.wbl-t td.wbl-btncol{width:auto}
   table.wbl-t td.wbl-c{text-align:left;align-items:stretch}
   table.wbl-t td .wbl-b{width:100%;min-height:38px;font-size:11px}
-  .wbl-nm{max-width:none;font-size:14px;line-height:1.4;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .wbl-sub{font-size:10.5px}
-  .wbl-g{width:58px}
+  .wbl-nm{max-width:none;font-size:13px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+  .wbl-sub{font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wbl-mobile-toggle{display:grid;place-items:center;position:absolute;right:0;top:50%;width:30px;height:30px;transform:translateY(-50%);padding:0;border:1px solid var(--line);border-radius:9px;background:var(--card2);color:var(--muted);font:700 16px/1 var(--sans);cursor:pointer}
+  .wbl-mobile-toggle[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
   .wbl-fol{display:grid;width:100%;grid-template-columns:repeat(3,1fr);gap:6px}
   .wbl-note{padding:9px 2px;border-top:0;line-height:1.5}
 }
@@ -5138,6 +5147,14 @@ function _isNoSheet(t){ return !!(t && t.sheetless===true); }
    ★ onclick 에는 **인덱스만** 넘긴다 — 시트에서 온 탭명을 문자열로 넣으면 따옴표 하나로 탈출된다.
    ══════════════════════════════════════════════════════════════════════════ */
 function _taskDelAllowed(){ return STATE.role==='master'||STATE.role==='admin'; }
+function _mobileToggleTaskRow(btn,event){
+  if(event){ event.preventDefault(); event.stopPropagation(); }
+  const row=btn&&btn.closest?btn.closest('tr'):null; if(!row) return;
+  const open=row.classList.toggle('mob-open');
+  btn.setAttribute('aria-expanded',String(open));
+  btn.setAttribute('aria-label',open?'작업 도구 접기':'작업 도구 펼치기');
+  btn.textContent=open?'⌃':'⌄';
+}
 function _taskMoreCell(i){
   return `<td class="wbl-c wbl-btncol" data-label="더보기">${_taskDelAllowed()
     ? `<button class="wbl-b" onclick="event.stopPropagation();openTaskMenu(${i},this)" title="이 작업의 추가 도구">⋯</button>` : ''}</td>`;
@@ -5384,7 +5401,7 @@ function _finBodyHtml(){
       :(fin?`<button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
     return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(_tabTip(t))}">
-      <td data-label="작업명"><div class="wbl-nm">${esc(_tabLabel(t))}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
+      <td data-label="작업명"><div class="wbl-nm">${esc(_tabLabel(t))}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div><button type="button" class="wbl-mobile-toggle" aria-expanded="false" aria-label="작업 도구 펼치기" onclick="_mobileToggleTaskRow(this,event)">⌄</button></td>
       ${tdOpen}${tdLink}
       <td data-label="담당">${esc((s.manager)||'—')}</td>
       <td data-label="인원 / 제출">${prog}</td>${last}
