@@ -67,8 +67,10 @@ function handler(opts) {
     // ── 계좌 1차 매칭(연락처) — 둘 다 빈 결과 = 타계정 미등록 상황
     if (/jsonb_array_elements/.test(sql)) return { rows: opts.subRows || [] };
     if (/FROM reviewers WHERE phone8/.test(sql) && !/AS "subAccounts"/.test(sql)) return { rows: opts.ownRows || [] };
+    // ── 현재 참여행 owner UUID
+    if (/FROM unnest[\s\S]*JOIN campaign_participants cp/.test(sql)) return { rows: opts.viaParticipant || [] };
     // ── 폴백 ① 참여 원장
-    if (/campaign_applications ca ON ca\.order_submission_id/.test(sql)) {
+    if (/FROM unnest[\s\S]*JOIN order_submissions os/.test(sql)) {
       if (opts.throwOnFallback) throw new Error('boom');
       return { rows: opts.viaOrder || [] };
     }
@@ -98,7 +100,7 @@ const owner = (over = {}) => Object.assign({
       assert.strictEqual(it.bankAccount, '123456789');
       assert.strictEqual(it.accountHolder, '김수만');
       assert.strictEqual(it.accountSource, 'owner_order');
-      assert.strictEqual(it.isSub, true);
+      assert.strictEqual(it.isSub, false, '등록된 타계정이 아니면 소유자 본계좌로 지급한다');
       assert.strictEqual(it.accountOwner, '김수만');
     });
   });
@@ -138,6 +140,33 @@ const owner = (over = {}) => Object.assign({
       const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.accountSource, 'owner_order');
       assert.strictEqual(it.bankAccount, '123456789');
+    });
+  });
+
+  await ta('1e ★ 행 연락처가 다른 등록 리뷰어와 겹쳐도 참여행 owner UUID 계좌가 이긴다', async () => {
+    await withStubPool(handler({
+      ownRows: [{ reviewerId: '99999999-9999-9999-9999-999999999999', phone8: '87654321', name: '다른사람', bankName: '신한은행', bankAccount: '000', accountHolder: '다른사람' }],
+      viaParticipant: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID, participantIdentityId: null, subPhone8: '87654321' }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'owner_participant');
+      assert.strictEqual(it.bankAccount, '123456789');
+      assert.strictEqual(it.ownerReviewerId, OWNER_ID);
+    });
+  });
+
+  await ta('1f ★ 윤주희형: 행 번호가 달라도 제출 로그인 번호+등록 본인 이름이면 본계좌로 잡힌다', async () => {
+    await withStubPool(handler({
+      rowName: '윤주희',
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '77045262' }],
+      owners: [owner({ phone8: '77045262', name: '윤주희', accountHolder: '윤주희' })],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.ownerReviewerId, OWNER_ID);
+      assert.strictEqual(it.accountHolder, '윤주희');
+      assert.strictEqual(it.accountRef.subPhone8, null);
     });
   });
 
@@ -239,16 +268,16 @@ const owner = (over = {}) => Object.assign({
       "subPhone8 없는 폴백 건을 'sub' 로 박제하면 다음 대조가 없는 명의를 찾아 mismatch 로 잡는다");
   });
 
-  console.log('\n§3 폴백은 필요할 때만 · 실패해도 목록을 죽이지 않는다');
+  console.log('\n§3 소유자 우선 조회 · 실패해도 목록을 죽이지 않는다');
 
-  await ta('3a 연락처로 이미 찾은 건에는 폴백 쿼리가 아예 안 나간다', async () => {
+  await ta('3a 연락처 계좌가 있어도 소유자 링크를 조회한다(우연히 겹친 타인 계좌 방지)', async () => {
     await withStubPool(handler({
       ownRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명지수', ...OWNER_ACCT }],
     }), async (svc, calls) => {
       const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.accountSource, 'self');
-      assert.strictEqual(calls.filter(c => /FROM participation_links pl/.test(c.sql)).length, 0);
-      assert.strictEqual(calls.filter(c => /campaign_applications ca ON ca\.order_submission_id/.test(c.sql)).length, 0);
+      assert.strictEqual(calls.filter(c => /FROM participation_links pl/.test(c.sql)).length, 1);
+      assert.strictEqual(calls.filter(c => /FROM unnest[\s\S]*JOIN order_submissions os/.test(c.sql)).length, 1);
     });
   });
 

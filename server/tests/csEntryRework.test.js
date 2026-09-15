@@ -85,7 +85,7 @@ ok('search.service: 입금 키워드 목록을 내보냄(판정 드리프트 차
 ok('routes: 그 목록에서 SQL 패턴을 파생(하드코딩 금지)',
   /PAYMENT_COL_KEYWORDS\.map\(k => '%' \+ k \+ '%'\)/.test(routes));
 ok('routes: row_json 은 서버로 끌어오지 않고 SQL에서 판정(메모리 안전)',
-  /jsonb_each_text\(COALESCE\(row_json, '\{\}'::jsonb\)\) kv/.test(routes) &&
+  /jsonb_each_text\(COALESCE\((?:ri\.)?row_json, '\{\}'::jsonb\)\) kv/.test(routes) &&
   /kv\.key ILIKE ANY\(\$2\) AND btrim\(kv\.value\) <> ''/.test(routes));
 ok('index: 완료 탭에서 같은 자리를 누적 금액으로 전환(블록 소실 금지)',
   /const t = isDone \? _reviewEarnings\.doneTotals : _reviewEarnings\.totals/.test(indexHtml) &&

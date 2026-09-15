@@ -231,20 +231,17 @@ async function listPaymentTargets(opts = {}) {
     loadWorkboardAmountPopulation(pool, rows),
   ]);
 
-  // ★ 연락처(뒤 8자리)로 계좌를 못 찾은 행만 **소유자 링크**로 한 번 더 찾는다.
-  //   (타계정을 이름만 등록했거나 번호가 다르게 적힌 경우 — 실사고 2026-08-19)
-  const unresolved = rows.filter(r => !acctMap[r.phone8]);
-  const ownerAcctMap = unresolved.length ? await _loadOwnerAccountsByRow(unresolved) : {};
+  // 참여행에 소유자 링크가 있으면 행 연락처보다 먼저 쓴다. 연락처가 다른 등록 리뷰어와
+  // 우연히 겹쳐도 실제 로그인 소유자가 아닌 계좌로 보내지 않는다.
+  const ownerAcctMap = await _loadOwnerAccountsByRow(rows);
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
-    // 계좌 해석 순서 = ① 등록 계좌(연락처 매칭) → ② 소유자 링크 → ③ **그 건의 제출 계좌**
-    // ★ 등록 계좌가 언제나 이긴다(관리 원장이 진실원본 — 기존 동작 보존). ③ 은 등록된 계좌를
-    //   어디서도 못 찾았을 때만 쓰는 마지막 근거이고, accountRef 가 없어 화면 보완 대상이 아니다.
-    const acct = acctMap[r.phone8] || ownerAcctMap[key + '||' + r.rowIndex] || _orderAccount(ord, r) || null;
+    // 계좌 해석 순서 = ① 참여행 소유자 UUID/신청 링크 → ② 행 연락처 → ③ 구매양식 계좌.
+    const acct = ownerAcctMap[key + '||' + r.rowIndex] || acctMap[r.phone8] || _orderAccount(ord, r) || null;
 
     // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
     // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
@@ -340,6 +337,8 @@ async function listPaymentTargets(opts = {}) {
       // 담당자를 어디서 읽었는지 — 'order' = 작업 화면과 같은 값 / 'tab' = 탭 설정 폴백
       managerSource: tab ? (tab.managerSource || null) : null,
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
+      ownerReviewerId: acct && acct.ownerReviewerId ? acct.ownerReviewerId : null,
+      participantIdentityId: acct && acct.participantIdentityId ? acct.participantIdentityId : null,
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
       campaignTitle: camp ? camp.title : '',
@@ -571,6 +570,7 @@ async function _loadAccounts(phone8s) {
       // ★ 명의 이름(sub_accounts[].name)과 소유자 이름을 함께 싣는다 —
       //   같은 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 화면이 "누구 계좌인지" 말할 수 없다(실사고).
       map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
+                        ownerReviewerId: s.reviewerId, participantIdentityId: null,
                         isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
     }
   }
@@ -582,6 +582,7 @@ async function _loadAccounts(phone8s) {
   );
   for (const r of own) {
     map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '',
+                      ownerReviewerId: r.reviewerId, participantIdentityId: null,
                       isSub: false, name: r.name || '', ownerName: r.name || '' };
   }
   return map;
@@ -615,53 +616,83 @@ async function _loadOwnerAccountsByRow(rows) {
   const nameByRow = new Map(rows.map(r => [key(r), String(r.reviewerName || '')]));
 
   try {
-    // ① 참여 원장 — 주문 id 로 그 행에 결속된 타계정 홀드의 소유자
+    // 현재 작업표 참여행의 불변 소유자 UUID. 이 값이 있으면 행의 이름·연락처가 달라도
+    // 등록리뷰어DB의 해당 소유자 계좌를 사용한다.
+    const { rows: viaParticipant } = await pool.query(
+      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
+              cp.owner_reviewer_id AS "ownerReviewerId",
+              cp.participant_identity_id AS "participantIdentityId", cp.phone8 AS "subPhone8"
+         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+         JOIN campaign_participants cp
+           ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+        WHERE cp.owner_reviewer_id IS NOT NULL`,
+      [sheetIds, tabNames, rowIdx]);
+
+    // 주문/신청 링크. 현재 참여행에 UUID가 아직 없는 과거 자료도 신청 시 기록한
+    // owner_phone8로 유일한 등록 리뷰어를 찾을 수 있다.
     const { rows: viaOrder } = await pool.query(
       `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
+              COALESCE(os.owner_reviewer_id, ca.owner_reviewer_id) AS "ownerReviewerId",
+              COALESCE(os.participant_identity_id, ca.participant_identity_id) AS "participantIdentityId",
               ca.owner_phone8 AS "ownerPhone8", ca.phone8 AS "subPhone8"
          FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
          JOIN order_submissions os
            ON os.sheet_id = t.sheet_id AND os.tab_name = t.tab_name
           AND os.sheet_row = t.row_index AND os.deleted_at IS NULL
-         JOIN campaign_applications ca ON ca.order_submission_id = os.id
-        WHERE COALESCE(ca.owner_phone8, '') <> ''`,
+         LEFT JOIN LATERAL (
+           SELECT app.owner_reviewer_id, app.participant_identity_id, app.owner_phone8, app.phone8
+             FROM campaign_applications app
+            WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
+            ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
+            LIMIT 1
+         ) ca ON TRUE
+        WHERE COALESCE(os.owner_reviewer_id, ca.owner_reviewer_id) IS NOT NULL
+           OR COALESCE(ca.owner_phone8, '') <> ''`,
       [sheetIds, tabNames, rowIdx]);
 
-    // ② 제출 신원 링크 — 그 행을 제출한 로그인 리뷰어(= 소유자)
+    // 제출 시점에 확정한 로그인 소유자. 현재 참여행·주문 링크가 없는 레거시 행의 마지막 근거다.
     const { rows: viaLink } = await pool.query(
       `SELECT pl.sheet_id AS "sheetId", pl.tab_name AS "tabName", pl.row_index AS "rowIndex",
-              pl.phone8 AS "ownerPhone8"
+              pl.owner_reviewer_id AS "ownerReviewerId",
+              pl.participant_identity_id AS "participantIdentityId", pl.phone8 AS "ownerPhone8"
          FROM participation_links pl
          JOIN unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
            ON pl.sheet_id = t.sheet_id AND pl.tab_name = t.tab_name AND pl.row_index = t.row_index
-        WHERE COALESCE(pl.phone8, '') <> ''`,
+        WHERE pl.owner_reviewer_id IS NOT NULL OR COALESCE(pl.phone8, '') <> ''`,
       [sheetIds, tabNames, rowIdx]);
 
-    const owners = [...new Set([...viaOrder, ...viaLink].map(x => x.ownerPhone8).filter(Boolean))];
-    if (!owners.length) return out;
+    const links = [...viaParticipant, ...viaOrder, ...viaLink];
+    const ownerIds = [...new Set(links.map(x => x.ownerReviewerId).filter(Boolean).map(String))];
+    const ownerPhones = [...new Set(links.filter(x => !x.ownerReviewerId).map(x => x.ownerPhone8).filter(Boolean))];
+    if (!ownerIds.length && !ownerPhones.length) return out;
 
     const { rows: revs } = await pool.query(
       `SELECT id AS "reviewerId", phone8, COALESCE(name,'') AS "name",
               bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder",
               CASE WHEN jsonb_typeof(sub_accounts) = 'array' THEN sub_accounts ELSE '[]'::jsonb END AS "subAccounts"
-         FROM reviewers WHERE phone8 = ANY($1)`, [owners]);
-    const byOwner = new Map();
+         FROM reviewers
+        WHERE id = ANY($1::uuid[]) OR phone8 = ANY($2::text[])`, [ownerIds, ownerPhones]);
+    const byId = new Map(revs.map(r => [String(r.reviewerId), r]));
+    const byPhone = new Map();
     for (const r of revs) {
-      if (!byOwner.has(r.phone8)) byOwner.set(r.phone8, []);
-      byOwner.get(r.phone8).push(r);
+      if (!byPhone.has(r.phone8)) byPhone.set(r.phone8, []);
+      byPhone.get(r.phone8).push(r);
     }
-    // ★ 소유자 후보가 둘 이상인 번호는 통째로 버린다(누구 계좌인지 정할 수 없다).
-    const uniqueOwner = p8 => {
-      const list = byOwner.get(p8) || [];
+    const resolveOwner = link => {
+      if (link.ownerReviewerId) return byId.get(String(link.ownerReviewerId)) || null;
+      const list = byPhone.get(link.ownerPhone8) || [];
       return list.length === 1 ? list[0] : null;
     };
-    const pack = (owner, sub, source) => ({
+    const pack = (owner, sub, source, link) => ({
       reviewerId: owner.reviewerId,
+      ownerReviewerId: owner.reviewerId,
+      participantIdentityId: link.participantIdentityId || null,
       bankName:      (sub && String(sub.bankName || '').trim())      || owner.bankName || '',
       bankAccount:   (sub && String(sub.bankAccount || '').trim())   || owner.bankAccount || '',
       accountHolder: (sub && String(sub.accountHolder || '').trim()) || owner.accountHolder || '',
-      isSub: true, source,
-      name: (sub && String(sub.name || '').trim()) || '',
+      isSub: !!sub, source,
+      name: (sub && String(sub.name || '').trim()) || owner.name || '',
       ownerName: owner.name || '',
       // ★ 지목 대상 = 그 명의 항목이 실제로 등록돼 있을 때만 타계정, 아니면 소유자 본계좌.
       //   (등록돼 있지 않은 명의를 subPhone8 로 지목하면 보완 저장이 `sub_not_found` 로 죽는다)
@@ -684,22 +715,30 @@ async function _loadOwnerAccountsByRow(rows) {
       return { ...hits[0], __phone8: sp8 || null };
     };
 
-    // ② 먼저 깔고 ① 로 덮는다(원장이 이긴다)
+    // 제출 링크 → 주문/신청 → 현재 참여행 순서로 덮어쓴다. 현재 참여행이 최종 권위다.
     for (const x of viaLink) {
       const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
       if (out[k]) continue;
-      const owner = uniqueOwner(x.ownerPhone8);
+      const owner = resolveOwner(x);
       if (!owner) continue;
-      // ★ 명의 대조 필수 — 소유자의 타계정 목록에 그 행 이름이 있어야 한다
       const sub = findSub(owner, { name: nameByRow.get(k) });
-      if (!sub) continue;
-      out[k] = pack(owner, sub, 'owner_link');
+      // UUID 없는 phone8 제출 링크는 재배정된 stale 링크일 수 있어 등록된 본인/타계정 이름과
+      // 정확히 맞을 때만 쓴다. 본인 이름도 인정해야 행 연락처 오기입 건이 영구 보류되지 않는다.
+      const matchesOwnerName = normName(owner.name) === normName(nameByRow.get(k));
+      if (!x.ownerReviewerId && !sub && !matchesOwnerName) continue;
+      out[k] = pack(owner, sub, 'owner_link', x);
     }
     for (const x of viaOrder) {
       const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
-      const owner = uniqueOwner(x.ownerPhone8);
+      const owner = resolveOwner(x);
       if (!owner) continue;
-      out[k] = pack(owner, findSub(owner, { subPhone8: x.subPhone8, name: nameByRow.get(k) }), 'owner_order');
+      out[k] = pack(owner, findSub(owner, { subPhone8: x.subPhone8, name: nameByRow.get(k) }), 'owner_order', x);
+    }
+    for (const x of viaParticipant) {
+      const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
+      const owner = resolveOwner(x);
+      if (!owner) continue;
+      out[k] = pack(owner, findSub(owner, { subPhone8: x.subPhone8, name: nameByRow.get(k) }), 'owner_participant', x);
     }
   } catch (e) {
     logger.warn('[payment] 소유자 링크 계좌 폴백 실패(종전대로 보류): ' + e.message);
@@ -825,11 +864,13 @@ async function createBatch({ bank, rows, by }) {
         const { rows: [row] } = await client.query(
           `INSERT INTO payment_batch_items
              (batch_id, sheet_id, tab_name, row_index, campaign_id, reviewer_name, phone8,
+              owner_reviewer_id, participant_identity_id,
               bank_name, bank_code, bank_account, account_holder,
               account_reviewer_id, account_source, account_sub_phone8, account_fingerprint, account_snapshot_fingerprint,
               product_price, review_fee, amount, transfer_memo)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
           [batch.id, it.sheetId, it.tabName, it.rowIndex, it.campaignId, it.reviewerName, it.phone8,
+           it.ownerReviewerId || null, it.participantIdentityId || null,
            it.bankName, it.bankCode, it.bankAccount, it.accountHolder,
            it.accountRef && it.accountRef.reviewerId || null,
            // ★ 'sub' 은 **등록된 명의**(subPhone8)를 가리킬 때만 — 없으면 값은 소유자 본계좌이므로
