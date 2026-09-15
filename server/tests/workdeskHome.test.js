@@ -46,15 +46,22 @@ ok('모바일 상단 메뉴는 720px 이하에서 한 줄 가로 탐색으로 �
   /@media\(max-width:720px\)\{[\s\S]{0,1200}\.nav\{[^}]*overflow-x:auto/.test(src));
 ok('모바일 홈은 바깥 여백을 회수해 화면 폭을 사용',
   /#hmwrap\{margin:-18px -22px;padding:12px 12px 28px;max-width:none\}/.test(src));
-ok('모바일 작업 목록은 표 머리글을 숨기고 같은 행을 카드로 전환',
+ok('모바일 작업 목록은 표 머리글을 숨기고 같은 행을 압축 행으로 전환',
   /table\.wbl-t thead\{display:none\}/.test(src)
-    && /table\.wbl-t tbody tr\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(src));
+    && /table\.wbl-t tbody tr\{display:grid;grid-template-columns:minmax\(0,1fr\) auto auto auto/.test(src));
 ok('모바일 카드 필드에 읽을 수 있는 라벨을 제공',
   ['작업명','작업표','공유','담당','인원 / 제출','입금','상태','저장폴더','모집공고','오늘완료','마감','더보기']
     .every(label => src.includes(`data-label="${label}"`) || label === '마감'));
 ok('모바일 카드 버튼은 1px 데스크톱 열 폭을 해제하고 최소 38px 높이',
   /table\.wbl-t td\.wbl-btncol\{width:auto\}/.test(src)
     && /table\.wbl-t td \.wbl-b\{width:100%;min-height:38px/.test(src));
+ok('모바일 압축 행은 도구를 기본으로 숨기고 펼친 행에서만 표시',
+  /td:nth-child\(2\),table\.wbl-t td:nth-child\(3\),table\.wbl-t td:nth-child\(n\+8\)\{display:none\}/.test(src)
+    && /tr\.mob-open td:nth-child\(2\)[\s\S]{0,160}display:flex/.test(src));
+ok('모바일 펼침 버튼은 행 열기를 막고 aria 상태를 함께 갱신',
+  /function _mobileToggleTaskRow\(btn,event\)\{[\s\S]{0,180}preventDefault\(\)[\s\S]{0,80}stopPropagation\(\)/.test(src)
+    && /aria-expanded="false" aria-label="작업 도구 펼치기"/.test(src)
+    && /setAttribute\('aria-expanded',String\(open\)\)/.test(src));
 
 ok('★ _loadOrders 는 _woSyncNavBadge() 를 부른다(인라인 표기 사본 제거)',
   /_renderWoHead\(\); _renderWoBody\(\);\s*\n\s*_woSyncNavBadge\(\);/.test(src));
