@@ -100,7 +100,7 @@ t('★ 검색 재료에 작업명과 탭 이름이 모두 들어간다',
 console.log('\n3) 화면 배선 — 이름을 그리는 자리');
 const SITES = [
   ['작업바 2단 작업 칩', /<span class="tn">\$\{esc\(_tabLabel\(t\)\)\}<\/span>/],
-  ['통합검색 결과 줄', /<span class="sn">\$\{isFav\(t\)\?'★ ':''\}\$\{hl\(_tabLabel\(t\)\)\}<\/span>/],
+  ['통합검색 결과 줄', /const label=hit\.archived\?`\*마감 : \$\{_tabLabel\(t\)\}`:_tabLabel\(t\)/],
   ['홈 작업목록 표', /<div class="wbl-nm">\$\{esc\(_tabLabel\(t\)\)\}<\/div>/],
   ['광고주 사이드바', /<span class="nm">\$\{_awHi\(_tabLabel\(it\)\)\}/],
   ['광고주 전체 작업 표', /<span class="anm"><b>\$\{_awHi\(_tabLabel\(it\)\)\}<\/b>/],

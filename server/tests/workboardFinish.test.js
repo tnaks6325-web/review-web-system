@@ -281,7 +281,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('목록 → 작업 열기는 기존 pendingTab 계약 재사용(히스토리 규칙과 자동 정합)',
     /openTaskFromHome\(i\)\{[\s\S]{0,320}STATE\.pendingTab=[\s\S]{0,200}switchView\('workdesk'\)/.test(WD));
   t('★ 검색은 마감 작업도 찾아주되 마감이라고 말한다(작업바에서 빠진 작업을 되찾는 유일한 길)',
-    /isFinished\(t\)\?'🏁 마감 · ':''/.test(WD));
+    /`\*마감 : \$\{_tabLabel\(t\)\}`/.test(WD));
   // ★★ 실측 취약점(이 작업에서 브라우저로 재현): onclick 에 시트에서 온 이름을 넣으면 esc() 로도 못 막는다.
   //   HTML 속성은 엔티티 디코드 후 JS 로 파싱되므로 탭명 `x'),alert(1),String('` 하나로 임의 JS 가 실행되고
   //   서버엔 잘린 탭명이 전송됐다. 레포 관용구 = **인덱스만 넘긴다**(worktable 후보 클릭·_idAttr 전례).

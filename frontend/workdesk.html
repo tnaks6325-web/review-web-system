@@ -3259,7 +3259,8 @@ function renderWorkdeskView(){
       <div class="tb1 wb-tier wb-company">
         <div class="wsearch"><span class="ic">🔍</span>
           <input id="wq" type="text" placeholder="작업·업체·시트 통합검색…" autocomplete="off"
-                 oninput="wSearch(this.value)" onfocus="wSearch(this.value)" onkeydown="wSearchKey(event)">
+                 oninput="wSearch(this.value)" onfocus="wSearch(this.value)" onkeydown="wSearchKey(event)"
+                 oncompositionstart="_wSearchComposing=true" oncompositionend="_wSearchComposing=false;wSearch(this.value)">
           <div class="sres" id="sres"></div></div>
         <span class="wb-tier-label">&#50629;&#52404;&#47785;&#47197;</span>
         <div class="segdiv"></div>
@@ -5670,7 +5671,7 @@ function _wtCommit(list){ STATE.worktabs=list; STATE._wtLoaded=true; STATE._wtDi
 function _wtIdxOf(t){ return _wtList().indexOf(_favKey(t)); }
 // 작업을 "연다" = 줄에 추가된다(브라우저에서 링크를 열면 탭이 생기는 것과 같다). 이미 있으면 이동만.
 function _wtOpen(t){
-  if(!t||STATE.role==='advertiser') return;
+  if(!t||t.archived||STATE.role==='advertiser') return;
   const k=_favKey(t), list=_wtList();
   if(list.indexOf(k)>=0) return _renderWorktabs();
   // ★ 상한에서 **열기를 막는다**(자동으로 닫지 않는다는 정책 유지). 안 막으면 화면엔 13개가 보이는데
@@ -5922,27 +5923,54 @@ function _renderTabList(){
 function wPickSeg(k){ STATE.wSeg=k; STATE.wMenu=(STATE.wMenu===k?null:k); _renderTabList(); }
 function wPickTask(i){ STATE.wMenu=null; selTab(i); }
 
-// ── 통합검색: 모든 업체의 탭명·업체명·시트제목을 가로질러 검색 → 선택 시 그 업체 세그먼트로 이동 + 탭 열기 ──
-function wSearch(q){
-  q=(q||'').trim(); const box=$('#sres'); if(!box) return; STATE.wKb=-1;
-  if(!q){ box.classList.remove('show'); box.innerHTML=''; STATE.wRes=[]; return; }
-  const ql=q.toLowerCase();
-  const hits=[]; STATE.tabs.forEach((t,i)=>{ if(`${_tabSearchText(t)} ${t.advertiserName||''} ${t.spreadsheetTitle||''}`.toLowerCase().includes(ql)) hits.push(i); });
-  STATE.wRes=hits;
-  // 하이라이트: 세 조각을 각각 esc → <mark>만 리터럴로 삽입(주입 통로 없음).
-  //   길이는 소문자화한 쪽(ql) 기준 — q.length를 쓰면 대소문자 변환이 길이를 바꾸는 문자에서 구간이 어긋난다.
+// ── 통합검색: 활성 작업은 즉시 로컬 검색, 아카이브는 검색 전용 API에서 받아 항상 아래에 붙인다. ──
+let _wSearchTimer=null, _wSearchSeq=0, _wSearchComposing=false;
+const _wArchiveCache=new Map();
+function _wRenderSearch(q, archived){
+  const box=$('#sres'); if(!box) return;
+  const ql=q.toLowerCase(), active=[];
+  (STATE.tabs||[]).forEach((t,i)=>{
+    if(t.archived) return;
+    if(`${_tabSearchText(t)} ${t.advertiserName||''} ${t.spreadsheetTitle||''}`.toLowerCase().includes(ql)) active.push({archived:false,index:i,tab:t});
+  });
+  const activeKeys=new Set(active.map(x=>_favKey(x.tab)));
+  const closed=(archived||[]).filter(t=>!activeKeys.has(_favKey(t))).map(t=>({archived:true,index:-1,tab:t}));
+  const hits=[...active,...closed]; STATE.wRes=hits;
   const hl=txt=>{ const s=String(txt==null?'':txt); const i=s.toLowerCase().indexOf(ql); if(i<0) return esc(s);
     return esc(s.slice(0,i))+'<mark>'+esc(s.slice(i,i+ql.length))+'</mark>'+esc(s.slice(i+ql.length)); };
   box.innerHTML = hits.length
-    ? `<div class="shd">작업 ${hits.length}건</div>`+hits.map((i,ord)=>{ const t=STATE.tabs[i], n=_wUnseen(i);
-        // ★ 검색은 마감 작업도 찾아준다(작업바에선 빠졌지만 "그 작업 어디 갔지"를 여기서 해결) — 대신 마감이라고 말해준다.
-        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(_tabLabel(t))}</span><span class="ss">${isFinished(t)?'🏁 마감 · ':''}${esc(t.advertiserName||'미지정')}${_isNoSheet(t)?'':' · '+esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+    ? `<div class="shd">작업 ${hits.length}건</div>`+hits.map((hit,ord)=>{ const t=hit.tab, n=hit.archived?0:_wUnseen(hit.index);
+        const label=hit.archived?`*마감 : ${_tabLabel(t)}`:_tabLabel(t);
+        const sub=hit.archived
+          ? `${esc(t.campaignName||'마감 작업')}${t.archivedAt?' · '+esc(String(t.archivedAt).slice(0,10)):''}`
+          : `${esc(t.advertiserName||'미지정')}${_isNoSheet(t)?'':' · '+esc(t.spreadsheetTitle||'')}`;
+        return `<div class="sitem${hit.archived?' archived':''}" data-ord="${ord}" onclick="wPickSearch(${ord})"><span class="txt"><span class="sn">${hit.archived?'':(isFav(t)?'★ ':'')}${hl(label)}</span><span class="ss">${sub}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
       }).join('')
     : `<div class="sempty">"${esc(q)}" 검색 결과 없음</div>`;
   box.classList.add('show');
 }
-function wPickSearch(i){
-  const t=STATE.tabs[i]; if(!t) return;
+function wSearch(q){
+  q=(q||'').trim(); const box=$('#sres'); if(!box) return; STATE.wKb=-1;
+  if(_wSearchTimer){ clearTimeout(_wSearchTimer); _wSearchTimer=null; }
+  if(!q){ _wSearchSeq++; box.classList.remove('show'); box.innerHTML=''; STATE.wRes=[]; return; }
+  const key=q.toLowerCase();
+  _wRenderSearch(q,_wArchiveCache.get(key)||[]);
+  if(_wSearchComposing) return;
+  const seq=++_wSearchSeq;
+  _wSearchTimer=setTimeout(async()=>{
+    const r=await api('/api/trackb/workdesk/archived-search?q='+encodeURIComponent(q)+'&limit=100').catch(()=>null);
+    if(seq!==_wSearchSeq || String(($('#wq')&&$('#wq').value)||'').trim().toLowerCase()!==key) return;
+    const rows=(r&&r.ok&&Array.isArray(r.tabs))?r.tabs:[]; _wArchiveCache.set(key,rows); _wRenderSearch(q,rows);
+  },180);
+}
+function wPickSearch(ord){
+  const hit=(STATE.wRes||[])[ord]; if(!hit||!hit.tab) return;
+  let t=hit.tab, i=hit.index;
+  if(hit.archived){
+    i=STATE.tabs.findIndex(x=>x.archived&&_favKey(x)===_favKey(t));
+    if(i<0){ t=Object.assign({},t,{archived:true,finished:true}); STATE.tabs.push(t); i=STATE.tabs.length-1; }
+    else t=STATE.tabs[i];
+  }
   STATE.wSeg = isFav(t) && STATE.wSeg===W_FAV ? W_FAV : (t.advertiserName||'');   // 즐겨찾기 보던 중이면 그대로, 아니면 그 업체 그룹으로 (최종 보정은 selTab)
   const box=$('#sres'); if(box) box.classList.remove('show');
   const q=$('#wq'); if(q) q.value='';
@@ -5953,7 +5981,7 @@ function wSearchKey(e){
   const res=STATE.wRes||[];
   if(e.key==='ArrowDown'){ e.preventDefault(); STATE.wKb=Math.min((STATE.wKb==null?-1:STATE.wKb)+1, res.length-1); _wKbPaint(); }
   else if(e.key==='ArrowUp'){ e.preventDefault(); STATE.wKb=Math.max((STATE.wKb==null?0:STATE.wKb)-1, 0); _wKbPaint(); }
-  else if(e.key==='Enter'){ const k=STATE.wKb; if(k>=0&&res[k]!=null){ e.preventDefault(); wPickSearch(res[k]); } else if(res.length){ e.preventDefault(); wPickSearch(res[0]); } }
+  else if(e.key==='Enter'){ const k=STATE.wKb; if(k>=0&&res[k]!=null){ e.preventDefault(); wPickSearch(k); } else if(res.length){ e.preventDefault(); wPickSearch(0); } }
   else if(e.key==='Escape'){ box.classList.remove('show'); }
 }
 function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.classList.toggle('kb',+el.dataset.ord===STATE.wKb));
@@ -5977,9 +6005,9 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; if(STATE.gW
   _renderTabList();   // 상단 작업바 활성 표시 갱신(세그먼트가 바뀌었을 수 있어 재렌더)
   _wtOpen(t);         // ★ 작업을 여는 모든 경로(그룹 탭·검색·홈 목록·딥링크)가 여기로 수렴 → 열린 줄에 추가
   $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
-  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}${t.archived?'&archived=1':''}`;
   // 주문 반영 직후에도 같은 URL을 다시 읽으므로, 이전 응답을 재사용하지 않고 최신 작업표를 받는다.
-  renderWorkdesk(await api('/api/trackb/workdesk?'+q,{cache:'no-store'})); loadParity(t); }
+  renderWorkdesk(await api('/api/trackb/workdesk?'+q,{cache:'no-store'})); if(!t.archived) loadParity(t); }
 // 선택된 작업이 소속한 시트제목 — 상단 2단 탭에서 뺀 정보를 여기서 한 번만 보여준다.
 //   탭 객체의 값이 없으면 sheetMap 폴백(관측·업체관리에서 넘어온 탭도 표기되게).
 /* ★★ 무시트 작업에는 시트 제목을 그리지 않는다(사용자 확정 2026-08-23).
@@ -6069,14 +6097,14 @@ function _visitBadge(r){
 }
 function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
-  STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
+  STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser'&&!wd.archived);   // 아카이브·광고주는 열람 전용
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
   const canDeleteOrder=_isInternalRole();
   /* 무시트 판정은 여기서 한 번 — 헤더의 시트 표기 3종(시트 제목·원본·그리드 배지)이 같은 값을 본다.
      meta 가 이 탭의 권위값이고, 없으면(구버전) 목록 항목으로 접는다. */
   const noSheet=_isNoSheet(m)||_isNoSheet(STATE.cur);
   // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 차단 목록을 제외한 컬럼을 열람 전용.
-  const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
+  const gridMode = (canEdit || STATE.role==='advertiser' || wd.archived) && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
   /* ★ 표에서 분리(보관)한 줄 — **삭제가 아니다**. 숫자를 안 보여주면 "사라진 줄"이 된다.
      클릭 가능은 서버 게이트(adminOrMaster)와 1:1 — AE 에겐 숫자만(눌러도 403 나는 버튼 금지). */
@@ -6136,12 +6164,12 @@ function renderWorkdesk(wd){
      ★ 옛 [편집 이력] 버튼은 이 안으로 흡수했다(같은 일을 하는 창구를 둘로 두지 않는다). */
   const logBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openTabLog()" title="이 작업의 주문·취소·리뷰·편집·정원·정산 기록을 시간순으로 봅니다.">🗒 로그</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 class="${canEdit?'ttl-ed':''}" title="${esc(workdeskTitle)}${canEdit?' — 눌러서 작업명 수정':''}"${canEdit?' onclick="editWorkdeskTitle()"':''}>${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
-    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${warn.join('')}
-    ${shareBtn}
-    ${planBtn}
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${wd.archived?'<span class="bd">*마감 · 열람 전용</span>':(STATE.role==='advertiser'?'':sotBadge)}${warn.join('')}
+    ${wd.archived?'':shareBtn}
+    ${wd.archived?'':planBtn}
     ${logBtn}
-    ${_finBarHtml()}
-    ${_mhToolsVisible()?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu" id="mhMenuBox">${_mhMenuHtml()}</span></span>`:''}
+    ${wd.archived?'':_finBarHtml()}
+    ${(!wd.archived&&_mhToolsVisible())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu" id="mhMenuBox">${_mhMenuHtml()}</span></span>`:''}
     <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
          [링크 복사]·[모집인원 조절]·마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다.
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->

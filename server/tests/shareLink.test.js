@@ -199,7 +199,7 @@ ok('★ 팝업은 body 직속(스크롤 컨테이너 밖)', /_shareLinkPopup[\s\
 ok('★ Esc 리스너는 최상위 1회만', /_shlKeyBound/.test(workdesk));
 ok('작업보드 상단에 [🔗 링크 복사] — 광고주 제외',
   /const shareBtn=STATE\.role==='advertiser'\?''/.test(workdesk) && /onclick="copyBoardLink\(\)"/.test(workdesk));
-ok('헤더에 실제로 그려진다', /\$\{shareBtn\}/.test(workdesk));
+ok('헤더에 실제로 그려지되 아카이브 열람에서는 숨긴다', /\$\{wd\.archived\?'':shareBtn\}/.test(workdesk));
 ok('업체관리에는 내부 공유 URL이 아닌 광고주 접속 링크 관리만 남긴다',
   /onclick="_ovmOpenDrawer\('link'\)"[^\n]*광고주 접속 링크/.test(workdesk)
   && !/onclick="copyAdvertiserLink\(\)"/.test(workdesk));

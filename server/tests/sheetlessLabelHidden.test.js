@@ -155,7 +155,8 @@ console.log('\n[D] 업체(광고주) 응답에 sheetless 가 실린다');
 console.log('\n[E] 검색 필터는 좁히지 않는다(시트 제목으로 찾던 길 보존)');
 {
   ok('내부 통합검색 필터에 spreadsheetTitle 유지',
-    /hits\.push\(i\)/.test(WD) && /\$\{t\.spreadsheetTitle\|\|''\}`\.toLowerCase\(\)\.includes\(ql\)/.test(WD));
+    /active\.push\(\{archived:false,index:i,tab:t\}\)/.test(WD)
+    && /\$\{t\.spreadsheetTitle\|\|''\}`\.toLowerCase\(\)\.includes\(ql\)/.test(WD));
   ok('업체 검색 필터에 spreadsheetTitle 유지', /_awNorm\(it\.spreadsheetTitle\)\.includes\(qn\)/.test(WD));
   ok('홈 작업목록 검색 필터에 spreadsheetTitle 유지', /\$\{t\.spreadsheetTitle\|\|''\}[^\n]*toLowerCase\(\)\.includes\(q\)/.test(WD));
 }

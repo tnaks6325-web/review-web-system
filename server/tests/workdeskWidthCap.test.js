@@ -162,7 +162,7 @@ ok('★ 마감 안내 문구도 축소 가능(.tp3fin .ft min-width:0)',
 ok('★ 공유 클래스 .mh 자체에는 nowrap 을 걸지 않았다(다른 뷰 헤더까지 바뀌면 안 된다)',
   !/(^|\})\s*\.mh\{[^}]*flex-wrap:nowrap/.test(cssNoComment.replace(/\n/g, ' ')));
 ok('마감 조각이 제목 행 안에서 렌더된다(전폭 띠 .wbl-finbar 폐기)',
-  /class="mh mh-wb"[\s\S]{0,900}?\$\{_finBarHtml\(\)\}/.test(src) && !/class="wbl-finbar"/.test(src));
+  /class="mh mh-wb"[\s\S]{0,900}?\$\{wd\.archived\?'':_finBarHtml\(\)\}/.test(src) && !/class="wbl-finbar"/.test(src));
 ok('★ _finBarHtml 루트가 id="finBar" 를 유지한다(_finRefresh 의 outerHTML 교체 계약)', (() => {
   const m = src.match(/function _finBarHtml\(\)\{[\s\S]*?\n\}/);
   if (!m) return false;
@@ -180,7 +180,7 @@ ok('★ master 도구 3종이 [⋯] 메뉴 안에 있다(주 행동 [마감]이 
     && /<span class="mhmenu" id="mhMenuBox">\$\{_mhMenuHtml\(\)\}<\/span>/.test(src);
 })());
 ok('★ 도구 버튼이 제목 행에 낱개로 남아 있지 않다(메뉴 밖 노출 0)', (() => {
-  const mh = src.match(/<div class="mh mh-wb">[\s\S]*?<\/div>\n/);
+  const mh = src.match(/<div class="mh mh-wb">[\s\S]*?<\/div>\r?\n/);
   if (!mh) return false;
   const outside = mh[0].replace(/<span class="mhtools"[\s\S]*?<\/span><\/span>/, '');
   return !/showWritebackSim|projBtn|flipBtn/.test(outside);
