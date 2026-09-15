@@ -3476,6 +3476,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       const rj = roster.find(r => r.row_json && typeof r.row_json === 'object' && Object.keys(r.row_json).length);
       raw = rj ? Object.keys(rj.row_json).filter(k => k !== 'id') : [];
     }
+    // 마감 스냅샷은 raw_sheet_tabs보다 오래되거나, 뒤쪽 행에만 존재하는 열을 가질 수 있다.
+    // 감지 헤더 뒤에 모든 보관 행의 키를 합쳐 값이 있는데도 열 자체가 빠지는 일을 막는다.
+    if (archived) {
+      for (const key of _collectRowJsonKeys(roster)) {
+        if (key !== 'id' && raw.indexOf(key) < 0) raw.push(key);
+      }
+    }
     // `현영`은 아래의 서버 파생 가상 컬럼 한 벌만 쓴다. 과거 시트에 동명 메모 열이 있어도
     // 제출 원장 상태와 나란히 두 벌로 보이지 않게 원본 열은 교체한다.
     if (role !== 'advertiser') headers = raw.filter(h => String(h).replace(/\s+/g, '') !== '현영');
@@ -3661,6 +3668,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       const ak = (anchor && !ambiguous) ? _akey(anchor.type, anchor.value) : null;
       syn.customValues = (ak && customValMap.get(ak)) || {};
       syn.cellColors = (ak && cellColorMap.get(ak)) || {};
+    } else if (archived) {
+      // 마감 작업도 보관 당시 작업표 스냅샷은 전부 보여 준다. review_index_archive.row_json은
+      // 아카이브할 때 원본을 그대로 복사한 값이며, 편집 이력·주문 원장·커스텀 열은 섞지 않는다.
+      // editable=false와 빈 cellEdits를 명시해 화면은 계속 열람 전용으로 유지한다.
+      syn.rowJson = (r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
+      syn.editable = false;
+      syn.cellEdits = {};
     } else if (role === 'advertiser' && advHeaders) {
       // 광고주: 허용된 원본 컬럼과 주문 확인용 아이디·전화번호만 담는다. 내부 참여자·은행·계좌·예금주는 제외한다.
       const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
