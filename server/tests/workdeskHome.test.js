@@ -42,6 +42,20 @@ ok('★ 기본 뷰 = 홈(내부인) / 광고주는 workdesk(전용 대시보드)
   /switchView\(STATE\.view\|\|\(isAdv\?'workdesk':'home'\)\)/.test(src));
 ok('switchView 가 home → renderHomeView 분기', /v==='home'\)\s*renderHomeView\(\)/.test(src));
 
+ok('모바일 상단 메뉴는 720px 이하에서 한 줄 가로 탐색으로 전환',
+  /@media\(max-width:720px\)\{[\s\S]{0,1200}\.nav\{[^}]*overflow-x:auto/.test(src));
+ok('모바일 홈은 바깥 여백을 회수해 화면 폭을 사용',
+  /#hmwrap\{margin:-18px -22px;padding:12px 12px 28px;max-width:none\}/.test(src));
+ok('모바일 작업 목록은 표 머리글을 숨기고 같은 행을 카드로 전환',
+  /table\.wbl-t thead\{display:none\}/.test(src)
+    && /table\.wbl-t tbody tr\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(src));
+ok('모바일 카드 필드에 읽을 수 있는 라벨을 제공',
+  ['작업명','작업표','공유','담당','인원 / 제출','입금','상태','저장폴더','모집공고','오늘완료','마감','더보기']
+    .every(label => src.includes(`data-label="${label}"`) || label === '마감'));
+ok('모바일 카드 버튼은 1px 데스크톱 열 폭을 해제하고 최소 38px 높이',
+  /table\.wbl-t td\.wbl-btncol\{width:auto\}/.test(src)
+    && /table\.wbl-t td \.wbl-b\{width:100%;min-height:38px/.test(src));
+
 ok('★ _loadOrders 는 _woSyncNavBadge() 를 부른다(인라인 표기 사본 제거)',
   /_renderWoHead\(\); _renderWoBody\(\);\s*\n\s*_woSyncNavBadge\(\);/.test(src));
 ok('★ #woNavBadge 표기는 _woSyncNavBadge 안 한 곳뿐(값 단일 출처)',

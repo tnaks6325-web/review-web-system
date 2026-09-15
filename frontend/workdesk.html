@@ -37,6 +37,21 @@
   .btn:hover{border-color:var(--accent-line);background:var(--card2)} .btn:active{transform:scale(.97)}
   .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 2px rgba(37,99,235,.32)} .btn.pri:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
   .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
+  /* 모바일 상단은 메뉴를 줄바꿈하지 않고 한 줄 탐색대로 만든다.
+     전체 메뉴는 그대로 남겨 기능을 숨기지 않고, 현재 메뉴가 가로 스크롤 안에서도 구분되게 한다. */
+  @media(max-width:720px){
+    body{overflow-x:hidden}
+    .top{padding:9px 12px 0;gap:8px;align-items:center;box-shadow:0 1px 10px rgba(16,24,40,.06)}
+    .top .logo{font-size:14px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .top .logo .tag{display:none}
+    .top .sp{display:none}
+    .rolebadge{max-width:118px;padding:3px 9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .top>.btn{height:30px;padding:0 10px}
+    .nav{order:10;width:calc(100% + 24px);margin:0 -12px;padding:6px 12px 8px;border-radius:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;background:var(--card);border-top:1px solid var(--line)}
+    .nav::-webkit-scrollbar{display:none}
+    .navb{flex:0 0 auto;height:36px;padding:0 12px;font-size:12px;border:1px solid transparent}
+    .navb.on{color:var(--accent-deep);border-color:var(--accent-line);box-shadow:none;background:var(--accent-soft)}
+  }
   /* ── 작업목록 = 상단 가로바(사이드바 대체). 본문은 1열(+선택적 우측 레일) → 표가 화면 전체폭을 씀 ──
      --tbh = 상단 작업바 실제 높이(tb1 ~49 + tb2 42 + 경계 1). 높이 의존 계산(.wrap/.gridscroll)을 이 한 값에 묶어
      전체화면(작업바 숨김)일 때 body.widemode가 0으로 덮어쓰면 아래 계산들이 함께 따라온다(매직넘버 드리프트 방지).
@@ -2344,6 +2359,33 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
 .hm-row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650}
 .hm-row .cnt{font-variant-numeric:tabular-nums;color:var(--accent-deep);white-space:nowrap}
 .hm-bn{font-size:9.5px;color:var(--faint);padding:8px 6px 4px;border-top:1px solid var(--line)}
+.hm-section-title{display:none}
+/* 모바일 홈은 요약 → 작업 카드 → 브리핑 → 메뉴 순서로 읽는다.
+   데스크톱 표는 그대로 두고 720px 이하에서만 같은 행을 카드로 재배치한다. */
+@media(max-width:720px){
+  #hmwrap{margin:-18px -22px;padding:12px 12px 28px;max-width:none}
+  .hm-hero{border-radius:16px;padding:20px 18px 18px;box-shadow:0 10px 26px rgba(37,99,235,.18)}
+  .hm-hero::after{right:-96px;top:-110px;width:250px;height:250px}
+  .hm-hero::before{right:32px;bottom:-150px;width:230px;height:230px}
+  .hm-hi{font-size:20px;line-height:1.35;padding-right:18px}
+  .hm-sub{font-size:11px;line-height:1.55;margin-top:7px;max-width:280px}
+  .hm-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 0;margin-top:18px}
+  .hm-st{padding:2px 12px;border-left:1px solid rgba(255,255,255,.2)}
+  .hm-st:nth-child(odd){padding-left:0;border-left:0}
+  .hm-st .n{font-size:24px;line-height:1.15}
+  .hm-st .l{font-size:10.5px;margin-top:2px}
+  .hm-wrap{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+  .hm-brief{order:1;border-radius:13px;padding:12px 13px 8px}
+  .hm-grid{order:2;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .hm-section-title{display:block;grid-column:1/-1;margin:5px 2px 0;font-size:13px;font-weight:800;color:var(--ink)}
+  .hm-tile{min-height:74px;padding:12px;display:grid;grid-template-columns:30px minmax(0,1fr);grid-template-rows:auto auto;column-gap:9px;row-gap:1px;border-radius:12px}
+  .hm-ic{grid-row:1/3;width:30px;height:30px;border-radius:9px;align-self:center}
+  .hm-nm{font-size:12px;align-self:end}
+  .hm-ds{font-size:9.5px;align-self:start;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hm-bd{top:7px;right:7px}
+  .hm-row{min-height:42px;padding:9px 5px;font-size:12px}
+  .hm-bn{line-height:1.45}
+}
 /* ══ 홈 "작업 목록" 블록(히어로 바로 아래 · 전체폭) — PRD prd-workboard-worktabs.html §4 ══
    ★ 클래스는 전부 wbl- 접두 신설 — 기존 hm- 계열·lgtable·worow 류와 이름 충돌 금지(레포 실측 사고 전례:
      worow 재사용이 작업세부 패널의 grid 규칙에 걸려 표가 통째로 접혔다).
@@ -2435,6 +2477,51 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-pick .pm{font-size:10.5px;color:var(--faint);margin-top:2px;display:block}
 .wbl-empty{padding:26px;text-align:center;color:var(--faint);font-size:12px}
 .wbl-note{font-size:9.5px;color:var(--faint);padding:8px 14px;border-top:1px solid var(--line)}
+@media(max-width:720px){
+  .wbl-box{margin-top:12px;border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
+  .wbl-h{padding:12px 0 10px;gap:8px;background:transparent;border:0}
+  .wbl-ttl{width:100%;font-size:14px}
+  .wbl-seg{flex:1;display:grid;grid-template-columns:1fr 1fr;border-radius:10px;background:var(--card)}
+  .wbl-seg button{min-height:40px;padding:5px 9px;font-size:11.5px}
+  .wbl-today{order:3;padding:4px 9px}
+  .wbl-sw{order:4;width:100%;grid-template-columns:repeat(3,1fr);border-radius:10px}
+  .wbl-sw i{display:none}
+  .wbl-sw button{min-height:38px;padding:5px 2px;background:var(--card);border-right:1px solid var(--line)}
+  .wbl-sw button:last-child{border-right:0}
+  .wbl-sw button.on{background:var(--accent);color:#fff}
+  .wbl-chip{order:5;min-height:34px;padding:4px 13px}
+  .wbl-q{order:6;width:100%;min-width:0;height:42px;margin-left:0;padding:7px 12px;font-size:13px}
+  .wbl-tw{max-height:none;overflow:visible}
+  table.wbl-t{display:block;font-size:12px}
+  table.wbl-t thead{display:none}
+  table.wbl-t tbody{display:grid;gap:10px}
+  table.wbl-t tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 3px rgba(16,24,40,.05)}
+  table.wbl-t tbody tr:hover{background:var(--card);border-color:var(--accent-line)}
+  table.wbl-t tr.tdone td{background:transparent}
+  table.wbl-t td{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;min-width:0;padding:0;border:0;white-space:normal}
+  table.wbl-t td::before{content:attr(data-label);display:block;margin-bottom:2px;color:var(--faint);font-size:9.5px;font-weight:700}
+  table.wbl-t td:nth-child(1){grid-column:1/-1;padding:0 0 10px;border-bottom:1px solid var(--line)}
+  table.wbl-t td:nth-child(1)::before{display:none}
+  table.wbl-t td:nth-child(2){grid-column:1/2;grid-row:4}
+  table.wbl-t td:nth-child(3){grid-column:2/3;grid-row:4}
+  table.wbl-t td:nth-child(4){grid-column:1/2;grid-row:2}
+  table.wbl-t td:nth-child(5){grid-column:2/3;grid-row:2}
+  table.wbl-t td:nth-child(6){grid-column:1/2;grid-row:3}
+  table.wbl-t td:nth-child(7){grid-column:2/3;grid-row:3}
+  table.wbl-t td:nth-child(8){grid-column:1/-1;grid-row:5}
+  table.wbl-t td:nth-child(9){grid-column:1/2;grid-row:6}
+  table.wbl-t td:nth-child(10){grid-column:2/3;grid-row:6}
+  table.wbl-t td:nth-child(11){grid-column:1/2;grid-row:7}
+  table.wbl-t td:nth-child(12){grid-column:2/3;grid-row:7}
+  table.wbl-t td.wbl-btncol{width:auto}
+  table.wbl-t td.wbl-c{text-align:left;align-items:stretch}
+  table.wbl-t td .wbl-b{width:100%;min-height:38px;font-size:11px}
+  .wbl-nm{max-width:none;font-size:14px;line-height:1.4;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .wbl-sub{font-size:10.5px}
+  .wbl-g{width:58px}
+  .wbl-fol{display:grid;width:100%;grid-template-columns:repeat(3,1fr);gap:6px}
+  .wbl-note{padding:9px 2px;border-top:0;line-height:1.5}
+}
 /* 마감 확인창 — body 직속 오버레이(뷰 스크롤 컨테이너 안에 두면 화면 흐름에 섞인다: 레포 실측 사고) */
 .wbl-ov{position:fixed;inset:0;background:rgba(16,24,40,.45);display:grid;place-items:center;z-index:9000;padding:20px}
 .wbl-dlg{width:min(460px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 50px rgba(16,24,40,.25);overflow:hidden}
@@ -5052,7 +5139,7 @@ function _isNoSheet(t){ return !!(t && t.sheetless===true); }
    ══════════════════════════════════════════════════════════════════════════ */
 function _taskDelAllowed(){ return STATE.role==='master'||STATE.role==='admin'; }
 function _taskMoreCell(i){
-  return `<td class="wbl-c wbl-btncol">${_taskDelAllowed()
+  return `<td class="wbl-c wbl-btncol" data-label="더보기">${_taskDelAllowed()
     ? `<button class="wbl-b" onclick="event.stopPropagation();openTaskMenu(${i},this)" title="이 작업의 추가 도구">⋯</button>` : ''}</td>`;
 }
 let _tmBound=false;
@@ -5282,28 +5369,28 @@ function _finBodyHtml(){
          :(isFinishCandidate(t)?`<span class="wbl-s cand">✓ 마감 후보</span>`:`<span class="wbl-s run">진행 중</span>`));
     const unpaid=_finUnpaid(t);
     const last=fin
-      ? `<td class="wbl-num">${esc(_finDate(t.finishedAt)||'—')}${t.finishedBy?' · '+esc(t.finishedBy):''}</td>`
-      : `<td class="wbl-num">${s.paid==null?'—':s.paid}${(filt==='pay'&&unpaid>0)?` <span style="color:var(--danger,#c22f2f);font-weight:750">(미입금 ${unpaid})</span>`:''}</td>`;
+      ? `<td class="wbl-num" data-label="마감일 · 마감자">${esc(_finDate(t.finishedAt)||'—')}${t.finishedBy?' · '+esc(t.finishedBy):''}</td>`
+      : `<td class="wbl-num" data-label="입금">${s.paid==null?'—':s.paid}${(filt==='pay'&&unpaid>0)?` <span style="color:var(--danger,#c22f2f);font-weight:750">(미입금 ${unpaid})</span>`:''}</td>`;
     // v3(사용자 확정): 통합 "폴더/처리" 칸 폐지 → 작업표·저장폴더·모집공고·오늘완료·마감 **독립 열**.
     //   열 정렬은 표 구조가 보장한다. 열람전용·보관함도 열 수는 같다(빈 칸 유지 — 사람마다 열이 달라지면 눈이 헤맨다).
     // ★ 인덱스만 넘긴다(위 _FIN 주석) — 시트에서 온 이름을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다.
-    const tdOpen=`<td class="wbl-c wbl-btncol"><button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">${fin?'열람':'열기'}</button></td>`;
+    const tdOpen=`<td class="wbl-c wbl-btncol" data-label="작업표"><button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">${fin?'열람':'열기'}</button></td>`;
     // [🔗] — 그 줄 작업의 공유 주소를 복사한다(작업보드를 열지 않고 목록에서 바로).
     //   ★ 마감 보관함에도 같은 칸을 둔다 — 열 수가 모드마다 달라지면 눈이 열을 다시 찾는다(v3 규율).
-    const tdLink=`<td class="wbl-c wbl-btncol"><button class="wbl-b" onclick="event.stopPropagation();copyTaskLinkFromHome(${i})" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 작업보드로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크</button></td>`;
-    const tdToday=`<td class="wbl-c wbl-btncol">${(fin||!canEdit)?''
+    const tdLink=`<td class="wbl-c wbl-btncol" data-label="공유"><button class="wbl-b" onclick="event.stopPropagation();copyTaskLinkFromHome(${i})" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 작업보드로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크</button></td>`;
+    const tdToday=`<td class="wbl-c wbl-btncol" data-label="오늘완료">${(fin||!canEdit)?''
       :`<button class="wbl-b today${td?' on':''}" onclick="toggleTodayDone(${i},event)" title="${td?'오늘 완료됨 — 다시 누르면 해제됩니다':'오늘 할 일을 끝냈다면 클릭 — 다음날 자동으로 풀립니다'}">☑ 오늘 완료</button>`}</td>`;
-    const tdFinish=`<td class="wbl-c wbl-btncol">${!canEdit?''
+    const tdFinish=`<td class="wbl-c wbl-btncol" data-label="${fin?'복귀':'마감'}">${!canEdit?''
       :(fin?`<button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
     return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(_tabTip(t))}">
-      <td><div class="wbl-nm">${esc(_tabLabel(t))}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
+      <td data-label="작업명"><div class="wbl-nm">${esc(_tabLabel(t))}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
       ${tdOpen}${tdLink}
-      <td>${esc((s.manager)||'—')}</td>
-      <td>${prog}</td>${last}
-      <td>${st}</td>
-      <td class="wbl-c wbl-btncol">${_folBtnsHtml(t,i)}</td>
-      <td class="wbl-c wbl-btncol">${_campBtnHtml(t,i)}</td>
+      <td data-label="담당">${esc((s.manager)||'—')}</td>
+      <td data-label="인원 / 제출">${prog}</td>${last}
+      <td data-label="상태">${st}</td>
+      <td class="wbl-c wbl-btncol" data-label="저장폴더">${_folBtnsHtml(t,i)}</td>
+      <td class="wbl-c wbl-btncol" data-label="모집공고">${_campBtnHtml(t,i)}</td>
       ${tdToday}${tdFinish}${_taskMoreCell(i)}</tr>`;
   }).join(''):'';
   return rows.length?`<div class="wbl-tw"><table class="wbl-t"><thead><tr>
@@ -13725,7 +13812,7 @@ function renderHomeView(){
     </div>
     <div id="wblMount"></div>
     <div class="hm-wrap">
-      <div class="hm-grid">${tiles}</div>
+      <div class="hm-grid"><div class="hm-section-title">빠른 메뉴</div>${tiles}</div>
       <div class="hm-brief">
         <div class="hm-bh">📌 오늘의 브리핑</div>
         ${brow('orders','📦','접수 대기 오더','hmBrWo')}
