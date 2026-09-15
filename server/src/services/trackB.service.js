@@ -3274,7 +3274,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
   }
 }
 
-async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, brandId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false } = {}) {
+async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, brandId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false, archived = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
   // 스코프 강제: 일반 호출은 advertiser=소유업체, staff=담당업체다. 작업보드 표 열람만
@@ -3287,10 +3287,23 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (!okc) return { scoped: true, denied: true };
   }
   const maskPII = role === 'advertiser';       // 광고주(외부)만 마스킹 · AE(내부)는 전체
-  const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin/staff)
-  const showCashReceiptStatus = ['master', 'admin', 'staff'].includes(role);
-  const { rows: meta } = await db.query(
-    `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.workboard_display_name AS "workboardDisplayName", tc.manager, tc.review_type AS "reviewType",
+  // 아카이브 작업은 검색에서 다시 열어 볼 수 있지만 수정하면 안 된다. 내부 PII 열람은 유지하되
+  // 모든 편집 어포던스와 편집용 부가 조회는 닫는다.
+  const showEdits = role !== 'advertiser' && !archived;     // 편집 어포던스·orphan·hidden은 활성 내부 작업만
+  const showCashReceiptStatus = !archived && ['master', 'admin', 'staff'].includes(role);
+  const { rows: meta } = await db.query(archived
+    ? `SELECT ima.campaign_name AS "campaignName", COALESCE(tc.display_name, '') AS "displayName",
+            COALESCE(tc.workboard_display_name, '') AS "workboardDisplayName", tc.manager, tc.review_type AS "reviewType",
+            tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
+            tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
+            COALESCE(tc.tab_gid, ima.tab_gid) AS "tabGid", tc.capture_slots AS "captureSlots",
+            tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee",
+            tc.transfer_bank AS "tabTransferBank", TRUE AS archived,
+            ima.archived_at AS "archivedAt", ima.archived_by AS "archivedBy"
+       FROM index_master_archive ima
+       LEFT JOIN tab_configs tc ON tc.sheet_id=ima.sheet_id AND tc.tab_name=ima.tab_name
+      WHERE ima.sheet_id=$1 AND ima.tab_name=$2 LIMIT 1`
+    : `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.workboard_display_name AS "workboardDisplayName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
             tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
             tc.tab_gid AS "tabGid", tc.capture_slots AS "captureSlots",
@@ -3312,8 +3325,16 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     [sheetId, tabName, await _effectiveLinkedWorkOrderId(db, sheetId, tabName)]).catch(() => ({ rows: [] }));
   if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
   // 명단(활성) — 앵커 도출에 필요한 컬럼 포함
-  const { rows: roster } = await db.query(
-    `SELECT cp.id, cp.seq, cp.reviewer_name AS name, cp.recipient_name AS recipient, cp.phone8,
+  const { rows: roster } = await db.query(archived
+    ? `SELECT ria.id, ria.row_index AS seq, ria.reviewer_name AS name, NULL::text AS recipient, ria.phone8,
+            ria.round, NULL::text AS option, ria.product_name AS product,
+            ria.is_submitted AS submitted, FALSE AS paid, 'archive'::text AS source,
+            NULL::uuid AS order_submission_id, NULL::text AS identity_key, ria.row_json, ria.submit_col, ria.submit_col2,
+            NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8"
+       FROM review_index_archive ria
+      WHERE ria.sheet_id=$1 AND ria.tab_name=$2
+      ORDER BY ria.row_index`
+    : `SELECT cp.id, cp.seq, cp.reviewer_name AS name, cp.recipient_name AS recipient, cp.phone8,
             cp.round, cp.option_text AS option, cp.product_name AS product,
             cp.is_submitted AS submitted, cp.is_paid AS paid, cp.source,
             cp.order_submission_id, cp.identity_key, cp.row_json, cp.submit_col, cp.submit_col2,
@@ -3365,7 +3386,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     } catch (e) { heldUnavailable = e.message; }
   }
   // 활성 오버레이(합성 + orphan 판정 공용 — 추가 쿼리 없음)
-  const { rows: edits } = await db.query(
+  const { rows: edits } = archived ? { rows: [] } : await db.query(
     `SELECT anchor_type, anchor_value, field, kind, value_bool, value_text
        FROM participant_edits
       WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`, [sheetId, tabName]).catch(() => ({ rows: [] }));
@@ -3443,7 +3464,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   // 시트형 그리드용: 시트 실제 헤더 순서(raw_sheet_tabs.detected_headers = 주문원장이 쓰는 열 순서 원본).
   //   내부(master/admin)만. 없으면 폴백(row_json 키 — 길이순이라 시트순 아님, 최후수단).
   let headers = null, advHeaders = null;
-  if (showEdits || role === 'advertiser') {
+  if (showEdits || archived || role === 'advertiser') {
     const { rows: hh } = await db.query(
       `SELECT detected_headers FROM raw_sheet_tabs
         WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
@@ -3457,7 +3478,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
     // `현영`은 아래의 서버 파생 가상 컬럼 한 벌만 쓴다. 과거 시트에 동명 메모 열이 있어도
     // 제출 원장 상태와 나란히 두 벌로 보이지 않게 원본 열은 교체한다.
-    if (showEdits) headers = raw.filter(h => String(h).replace(/\s+/g, '') !== '현영');
+    if (role !== 'advertiser') headers = raw.filter(h => String(h).replace(/\s+/g, '') !== '현영');
     else {
       // 광고주: 차단 목록의 다섯 신원·정산 정보만 제외하고 원본 컬럼을 유지한다.
       const candidates = _advertiserHeaderCandidates(raw, roster, advEditedHeaders);
@@ -3769,7 +3790,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
     over: _cap ? overCount : undefined,
   };
-  const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
+  const res = { role, maskPII, archived: !!archived, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
   if (showEdits) {
     res.orphanEdits = { count: orphanCount, byType: orphanByType };
@@ -3811,6 +3832,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
     //   화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
     res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });
+  }
+  else if (archived && role !== 'advertiser') {
+    // 보관본은 원본 행을 읽을 수 있게 헤더만 제공한다. custom/edit/status 계약은 싣지 않아
+    // 화면과 직접 API 호출 모두 읽기 전용으로 남는다.
+    res.headers = headers || [];
   }
   else if (role === 'advertiser') {
     res.headers = headers || [];   // 광고주: 화이트리스트 헤더(그리드 렌더용)

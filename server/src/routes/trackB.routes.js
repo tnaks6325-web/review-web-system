@@ -154,6 +154,30 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// 작업검색 전용 아카이브 목록. 활성 탭 목록과 섞지 않아 작업바/홈에는 되살리지 않고,
+// 검색할 때만 내려준다. 아카이브에는 내부 운영 정보가 있으므로 외부 광고주·리뷰어는 차단한다.
+router.get('/workdesk/archived-search', authMiddleware, async (req, res, next) => {
+  try {
+    const role = _role(req);
+    if (!['master', 'admin', 'staff'].includes(role)) return res.status(403).json({ ok: false, error: '권한 없음' });
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ ok: true, tabs: [] });
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
+    const { rows } = await pool.query(
+      `SELECT ima.sheet_id AS "sheetId", ima.tab_name AS "tabName", ima.tab_gid AS "tabGid",
+              COALESCE(NULLIF(tc.display_name, ''), ima.tab_name) AS "displayName",
+              COALESCE(ima.campaign_name, '') AS "campaignName",
+              ima.archived_at AS "archivedAt", ima.archived_by AS "archivedBy"
+         FROM index_master_archive ima
+         LEFT JOIN tab_configs tc ON tc.sheet_id=ima.sheet_id AND tc.tab_name=ima.tab_name
+        WHERE ima.tab_name ILIKE $1 OR ima.campaign_name ILIKE $1 OR tc.display_name ILIKE $1
+        ORDER BY ima.archived_at DESC
+        LIMIT $2`, [`%${q}%`, limit]);
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ ok: true, tabs: rows.map(t => ({ ...t, archived: true })) });
+  } catch (err) { next(err); }
+});
+
 // ── 홈 [저장폴더] 현영 버튼 — [리뷰]/{현금영수증} 서브폴더 해석 ──────────────────────
 //   현영 서브폴더는 업로드 시 즉석 생성되고 URL 이 어디에도 저장돼 있지 않다(리뷰·구매캡처와 다른 점).
 //   ★ find-only — 여기서 폴더를 만들지 않는다(사용자 확정 Q2). 폴더 생성 경로는 업로드(review-upload)·
@@ -1091,12 +1115,14 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
     const role = _role(req);
     if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '작업보드 열람 권한이 없습니다.' });
     const { sheetId, tabName, tabGid } = req.query;
+    const archived = req.query.archived === '1';
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (archived && role === 'advertiser') return res.status(403).json({ ok: false, error: '마감 작업 열람 권한이 없습니다.' });
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
     // `/tabs`와 동일하게, 작업보드 표는 모든 비리뷰어 역할이 열람할 수 있다. PII 마스킹과
     // 쓰기 권한은 역할별 service 렌즈/각 write route에서 계속 분리한다.
     // ★ brandId 는 **토큰에서만**(IDOR 차단) — 작업 조건 카드의 담당 행이 세션 종류로 갈린다(136).
-    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, brandId: (req.admin && req.admin.brand_id) || null, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true });
+    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, brandId: (req.admin && req.admin.brand_id) || null, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true, archived });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
     // 인증된 작업표는 주문·셀 편집 직후에도 URL이 같으므로 어떤 캐시도 이전 합성 결과를 재사용하지 않는다.
     res.set('Cache-Control', 'private, no-store');
