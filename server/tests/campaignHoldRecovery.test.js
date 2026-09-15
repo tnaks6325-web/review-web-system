@@ -105,8 +105,8 @@ function db(apps, queryCheck) {
   assert.match(routes, /router\.get\('\/:id\/my-active-holds', reviewerSessionMiddleware, detailLimiter/);
   assert.match(routes, /Cache-Control', 'no-store'/);
   assert.match(campaign, /await recoverActiveHolds\(\);\s*\n\s*const h = getHold\(\)/);
-  assert.match(campaign, /j\.reason === 'duplicate_hold' && await recoverActiveHolds\(\)/);
+  assert.match(campaign, /j\.reason === 'duplicate_hold' && await recoverActiveHolds\(\(sub && sub\.phone\) \|\| s\.phone8\)/);
   assert.match(campaign, /headers:\{'Content-Type':'application\/json', \.\.\._getAuthHeaders\(\)\}/);
-  assert.match(campaign, /recovered\.includes\(prior\) \? prior/);
+  assert.match(campaign, /recovered\.includes\(preferredP8\) \? preferredP8/);
   console.log('✓ campaign hold recovery: owner, sub-account, auth, expiry SQL, duplicate fallback, client restore');
 })().catch(err => { console.error(err); process.exitCode = 1; });

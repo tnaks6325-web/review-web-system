@@ -443,7 +443,7 @@ let _holdRecoveryPromise = null;
  * 모바일 앱 내 브라우저가 새 컨텍스트로 열려 localStorage 홀드만 잃은 경우,
  * 서명된 리뷰어 세션으로 본인 활성 홀드를 다시 받아 구매양식을 이어 연다.
  */
-function recoverActiveHolds(){
+function recoverActiveHolds(preferredPhone){
   if(PREVIEW) return Promise.resolve(false);
   if(_holdRecoveryPromise) return _holdRecoveryPromise;
   const s = getSession();
@@ -471,7 +471,9 @@ function recoverActiveHolds(){
       _saveHolds(m);
       const prior = activeP8();
       const loginP8 = _p8(s.phone8);
-      setActiveP8(recovered.includes(prior) ? prior : (recovered.includes(loginP8) ? loginP8 : recovered[0]));
+      const preferredP8 = _p8(preferredPhone);
+      setActiveP8(recovered.includes(preferredP8) ? preferredP8
+        : (recovered.includes(prior) ? prior : (recovered.includes(loginP8) ? loginP8 : recovered[0])));
       return true;
     }catch(_){ return false; }
   })().finally(()=>{ _holdRecoveryPromise = null; });
@@ -1358,7 +1360,7 @@ async function _doApply(optionKey, sub){
       if(pickable.length) openOptSheet();
       return;
     }
-    if(j.reason === 'duplicate_hold' && await recoverActiveHolds()){
+    if(j.reason === 'duplicate_hold' && await recoverActiveHolds((sub && sub.phone) || s.phone8)){
       toast('참여 중인 구매양식을 이어서 열었어요');
       await enterJoined();
       return;
