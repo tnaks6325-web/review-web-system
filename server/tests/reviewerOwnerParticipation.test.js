@@ -32,9 +32,16 @@ const checks = [
     /HAVING COUNT\(\*\) = 1/.test(migration)
       && /ca\.owner_phone8 = u\.phone8/.test(migration)
       && !/reviewer_name|applicant_name\s*=|current_name\s*=/.test(migration)],
-  ['주문 연결 없는 과거 제출은 참여행보다 최신인 로그인 링크만 소유권으로 복구한다',
-    /pl\.updated_at >= cp\.updated_at/.test(migration)
-      && /pl\.updated_at >= cp\.updated_at/.test(targetOwnership)],
+  ['등록DB에서 확정된 소유자는 오래된 링크·이름 불일치여도 본계정 범위에 포함한다',
+    !/pl\.updated_at >= cp\.updated_at/.test(migration)
+      && !/pl\.updated_at >= cp\.updated_at/.test(targetOwnership)
+      && !/LEFT JOIN reviewers ro ON ro\.id = \$1/.test(search)
+      && !/LEFT JOIN reviewers ro ON ro\.id = \$3/.test(reviewerRoutes)],
+  ['현재 참여행 owner UUID는 충돌하는 과거 링크보다 우선한다',
+    /cp\.owner_reviewer_id = \$1[\s\S]*cp\.owner_reviewer_id IS NULL/.test(search)
+      && /cp\.owner_reviewer_id = \$3[\s\S]*cp\.owner_reviewer_id IS NULL/.test(reviewerRoutes)],
+  ['링크 단독 입금은 타계정 이름을 추측하지 않고 소유자 본계좌를 쓴다',
+    /for \(const x of viaLink\)[\s\S]{0,350}pack\(owner, null, 'owner_link', x\)/.test(payment)],
 ];
 
 let failed = 0;

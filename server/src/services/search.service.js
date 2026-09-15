@@ -288,8 +288,7 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
        ) ca ON TRUE
        LEFT JOIN participation_links pl
          ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-       LEFT JOIN reviewers ro ON ro.id = $1
-      WHERE tc.sheet_id IS NOT NULL
+       WHERE tc.sheet_id IS NOT NULL
         AND ($3::boolean OR ${submittedState} = FALSE)
         AND (
           (cp.id IS NOT NULL AND (
@@ -301,19 +300,6 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
                 AND COALESCE(ca.owner_phone8, '') = ''
                 AND (pl.owner_reviewer_id = $1
                      OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($2)))
-                AND (
-                  regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                  OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(
-                      CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
-                    ) sub
-                    WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
-                      regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
-                      regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
-                    )
-                  )
-                )
               )
               OR (os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
                   AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($2))

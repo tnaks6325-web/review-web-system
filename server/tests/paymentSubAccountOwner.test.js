@@ -8,7 +8,7 @@
  *
  * 검사 방식 — 스텁 pool 로 `listPaymentTargets` **실제 실행**
  *  §1 폴백이 실제로 보류를 푸는가(참여 원장 · 제출 신원 링크 두 경로)
- *  §2 ★ 이름 추측 금지 — 근거 없는 건은 계속 보류(fail-closed)
+ *  §2 등록DB 소유자가 한 명으로 확정되면 이름·시각 불일치도 본계정으로 귀속
  *  §3 폴백은 필요할 때만 돈다 · 실패해도 목록을 죽이지 않는다
  *  §4 배선(정규화 사본 부재 · 화면 근거 표기)
  *
@@ -170,16 +170,18 @@ const owner = (over = {}) => Object.assign({
     });
   });
 
-  console.log('\n§2 ★ 이름으로 소유자를 추측하지 않는다 — 근거 없으면 계속 보류(fail-closed)');
+  console.log('\n§2 ★ 확정 소유자는 이름·시각 불일치여도 본계정으로 귀속한다');
 
-  await ta('2a 신원 링크만 있고 그 이름이 소유자 타계정 목록에 없으면 미채택(stale 링크 보호)', async () => {
+  await ta('2a 신원 링크의 이름이 타계정 목록과 달라도 소유자 본계정으로 채택', async () => {
     await withStubPool(handler({
       viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
       owners: [owner({ subAccounts: [{ name: '다른사람' }] })],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.ok(it.issues.includes('no_reviewer'), '근거 없이 통과하면 안 된다');
-      assert.strictEqual(it.accountSource, null);
+      assert.ok(!it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.accountRef.subPhone8, null);
+      assert.strictEqual(it.bankAccount, '123456789');
     });
   });
 
@@ -193,24 +195,28 @@ const owner = (over = {}) => Object.assign({
     });
   });
 
-  await ta('2c 같은 이름이 타계정 목록에 둘이면 명의를 정할 수 없어 미채택(링크 경로)', async () => {
+  await ta('2c 같은 이름의 타계정이 둘이면 어느 타계정도 고르지 않고 본계정으로 귀속', async () => {
     await withStubPool(handler({
       viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
       owners: [owner({ subAccounts: [{ name: '명지수' }, { name: '명지수', phone: '010-1111-1111' }] })],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.ok(it.issues.includes('no_reviewer'));
+      assert.ok(!it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.accountRef.subPhone8, null);
     });
   });
 
-  await ta('2d 행 이름이 비어 있으면 링크 경로는 대조 근거가 없어 미채택', async () => {
+  await ta('2d 행 이름이 비어 있어도 확정된 링크 소유자 본계정으로 귀속', async () => {
     await withStubPool(handler({
       rowName: '',
       viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
       owners: [owner({ subAccounts: [{ name: '명지수' }] })],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.ok(it.issues.includes('no_reviewer'));
+      assert.ok(!it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.accountRef.subPhone8, null);
     });
   });
 

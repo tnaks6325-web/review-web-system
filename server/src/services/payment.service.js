@@ -716,17 +716,13 @@ async function _loadOwnerAccountsByRow(rows) {
     };
 
     // 제출 링크 → 주문/신청 → 현재 참여행 순서로 덮어쓴다. 현재 참여행이 최종 권위다.
+    // 링크만 남은 과거 행은 참여자 이름·번호가 달라도 확정된 등록 소유자의 본계좌로 귀속한다.
     for (const x of viaLink) {
       const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
       if (out[k]) continue;
       const owner = resolveOwner(x);
       if (!owner) continue;
-      const sub = findSub(owner, { name: nameByRow.get(k) });
-      // UUID 없는 phone8 제출 링크는 재배정된 stale 링크일 수 있어 등록된 본인/타계정 이름과
-      // 정확히 맞을 때만 쓴다. 본인 이름도 인정해야 행 연락처 오기입 건이 영구 보류되지 않는다.
-      const matchesOwnerName = normName(owner.name) === normName(nameByRow.get(k));
-      if (!x.ownerReviewerId && !sub && !matchesOwnerName) continue;
-      out[k] = pack(owner, sub, 'owner_link', x);
+      out[k] = pack(owner, null, 'owner_link', x);
     }
     for (const x of viaOrder) {
       const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;

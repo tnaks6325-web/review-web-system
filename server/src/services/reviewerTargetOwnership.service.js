@@ -28,7 +28,6 @@ async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client 
        LEFT JOIN campaign_participants cp
          ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name AND cp.seq = ri.row_index
         AND cp.deleted_at IS NULL
-       LEFT JOIN reviewers ro ON ro.id = $4::uuid
       WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
         AND (
           (
@@ -40,26 +39,8 @@ async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client 
                   cp.owner_reviewer_id = $4::uuid
                   OR (cp.owner_reviewer_id IS NULL AND cp.phone8 = ANY($5::text[]))
                   OR (cp.owner_reviewer_id IS NULL
-                      AND pl.owner_reviewer_id = $4::uuid
-                      AND pl.updated_at >= cp.updated_at)
-                  OR (
-                    cp.owner_reviewer_id IS NULL
-                    AND (pl.owner_reviewer_id = $4::uuid
-                         OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($5::text[])))
-                    AND (
-                      regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                      OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                      OR EXISTS (
-                        SELECT 1 FROM jsonb_array_elements(
-                          CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
-                        ) sub
-                        WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
-                          regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
-                          regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
-                        )
-                      )
-                    )
-                  )
+                      AND (pl.owner_reviewer_id = $4::uuid
+                           OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($5::text[]))))
                 )
               )
               OR (

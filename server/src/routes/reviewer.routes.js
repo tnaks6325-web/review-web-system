@@ -726,8 +726,7 @@ router.get('/review-earnings', async (req, res, next) => {
          ) ca ON TRUE
          LEFT JOIN participation_links pl
            ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-         LEFT JOIN reviewers ro ON ro.id = $3
-        WHERE ri.row_index IS NOT NULL AND (
+         WHERE ri.row_index IS NOT NULL AND (
           (cp.id IS NOT NULL AND (
             ($3::uuid IS NULL AND cp.phone8 = ANY($1))
             OR cp.owner_reviewer_id = $3
@@ -735,22 +734,9 @@ router.get('/review-earnings', async (req, res, next) => {
               os.owner_reviewer_id = $3 OR ca.owner_reviewer_id = $3 OR ca.owner_phone8 = ANY($1)
               OR (
                 os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-                AND COALESCE(ca.owner_phone8, '') = ''
-                AND (pl.owner_reviewer_id = $3 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)))
-                AND (
-                  regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                  OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(
-                      CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
-                    ) sub
-                    WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
-                      regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
-                      regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
-                    )
-                  )
-                )
-              )
+                 AND COALESCE(ca.owner_phone8, '') = ''
+                 AND (pl.owner_reviewer_id = $3 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)))
+               )
               OR (os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
                   AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($1))
             ))
