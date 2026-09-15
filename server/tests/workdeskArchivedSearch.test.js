@@ -37,10 +37,12 @@ t('마감 결과 클릭은 아카이브 좌표로 열고 열린 탭에는 추가
   assert.match(html, /if\(!t\|\|t\.archived\|\|STATE\.role==='advertiser'\) return;/);
 });
 
-t('마감 작업표 응답은 편집 재료를 싣지 않고 화면도 읽기 전용으로 연다', () => {
+t('마감 작업표 응답은 보관된 전체 행을 싣되 편집 재료 없이 읽기 전용으로 연다', () => {
   assert.match(service, /const showEdits = role !== 'advertiser' && !archived/);
   assert.match(service, /FROM review_index_archive ria/);
   assert.match(service, /const \{ rows: edits \} = archived \? \{ rows: \[\] \}/);
+  assert.match(service, /else if \(archived\) \{[\s\S]*?syn\.rowJson = \(r\.row_json[\s\S]*?syn\.editable = false;[\s\S]*?syn\.cellEdits = \{\};/);
+  assert.match(service, /if \(archived\) \{[\s\S]*?_collectRowJsonKeys\(roster\)[\s\S]*?raw\.push\(key\)/);
   assert.match(service, /archived: !!archived/);
   assert.match(html, /STATE\.canEdit=\(STATE\.role!=='advertiser'&&!wd\.archived\)/);
   assert.match(html, /\*마감 · 열람 전용/);
