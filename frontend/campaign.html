@@ -455,6 +455,9 @@ function recoverActiveHolds(preferredPhone){
       });
       const j = await r.json().catch(()=>({}));
       if(!r.ok || !j.ok || !Array.isArray(j.holds) || !j.holds.length) return false;
+      // 서버 홀드를 저장하기 전에 기존 활성 명의를 잡아야 한다. 저장 후 읽으면
+      // 빈 저장소에서도 첫 복구 명의가 "기존 선택"처럼 보여 로그인 명의보다 앞선다.
+      const prior = activeP8();
       const m = _allHolds();
       const recovered = [];
       for(const h of j.holds){
@@ -469,7 +472,6 @@ function recoverActiveHolds(preferredPhone){
       }
       if(!recovered.length) return false;
       _saveHolds(m);
-      const prior = activeP8();
       const loginP8 = _p8(s.phone8);
       const preferredP8 = _p8(preferredPhone);
       setActiveP8(recovered.includes(preferredP8) ? preferredP8

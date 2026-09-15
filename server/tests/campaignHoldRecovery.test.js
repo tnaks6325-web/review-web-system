@@ -108,5 +108,8 @@ function db(apps, queryCheck) {
   assert.match(campaign, /j\.reason === 'duplicate_hold' && await recoverActiveHolds\(\(sub && sub\.phone\) \|\| s\.phone8\)/);
   assert.match(campaign, /headers:\{'Content-Type':'application\/json', \.\.\._getAuthHeaders\(\)\}/);
   assert.match(campaign, /recovered\.includes\(preferredP8\) \? preferredP8/);
+  const recoverySource = campaign.slice(campaign.indexOf('function recoverActiveHolds'), campaign.indexOf('/* ═══ 작업내용'));
+  assert.ok(recoverySource.indexOf('const prior = activeP8();') < recoverySource.indexOf('_saveHolds(m);'),
+    '기존 활성 명의는 복구 홀드를 저장하기 전에 읽어야 한다');
   console.log('✓ campaign hold recovery: owner, sub-account, auth, expiry SQL, duplicate fallback, client restore');
 })().catch(err => { console.error(err); process.exitCode = 1; });
