@@ -717,7 +717,8 @@ async function _loadOwnerAccountsByRow(rows) {
          FROM reviewers
         WHERE id = ANY($1::uuid[]) OR phone8 = ANY($2::text[])`, [ownerIds, ownerPhones]);
     const { rows: identityRows } = participantIds.length ? await pool.query(
-      `SELECT id, owner_reviewer_id AS "ownerReviewerId", member_no AS "memberNo", status
+      `SELECT id, owner_reviewer_id AS "ownerReviewerId", member_no AS "memberNo",
+              current_name AS "currentName", current_phone8 AS "currentPhone8", status
          FROM reviewer_identities
         WHERE id = ANY($1::uuid[])`, [participantIds]) : { rows: [] };
     const { rows: movedPhoneRows } = await pool.query(
@@ -779,6 +780,7 @@ async function _loadOwnerAccountsByRow(rows) {
       }
       const identity = identityById.get(String(link.participantIdentityId));
       if (!identity || String(identity.ownerReviewerId) !== String(owner.reviewerId)) return { ok: false, sub: null };
+      if (identity.status !== 'active') return { ok: false, sub: null };
       const memberNo = Number(identity.memberNo);
       if (!Number.isSafeInteger(memberNo) || memberNo < 0) return { ok: false, sub: null };
       if (memberNo === 0) return { ok: true, sub: null };
@@ -786,6 +788,12 @@ async function _loadOwnerAccountsByRow(rows) {
       const sub = arr[memberNo - 1];
       if (!sub) return { ok: false, sub: null };
       const sp8 = String(sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
+      // member_no는 부여 당시의 배열 위치다. 앞 타계정이 삭제되면 같은 위치가 다른 사람을
+      // 가리킬 수 있으므로, 현재 코드 신원의 이름·번호와 둘 다 맞을 때만 그 계좌를 쓴다.
+      if (String(sub.name || '').trim() !== String(identity.currentName || '').trim()
+          || sp8 !== String(identity.currentPhone8 || '').replace(/[^0-9]/g, '').slice(-8)) {
+        return { ok: false, sub: null };
+      }
       return { ok: true, sub: { ...sub, __phone8: sp8 || null } };
     };
 

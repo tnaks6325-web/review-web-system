@@ -57,7 +57,7 @@ const checks = [
       && /movedPhoneOwners[\s\S]*historicalOwners/.test(payment)],
   ['과거 신청 owner_phone8도 번호 변경 이력이 있으면 현재 번호 보유자에게 노출하지 않는다',
     occurrences(search, 'rpc.old_phone8 = ca.owner_phone8') === 2
-      && occurrences(reviewerRoutes, 'rpc.old_phone8 = ca.owner_phone8') === 5
+      && occurrences(reviewerRoutes, 'rpc.old_phone8 = ca.owner_phone8') === 7
       && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$1/.test(search)
       && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$3/.test(search)
       && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$2::uuid IS NULL OR rpc\.reviewer_id <> \$2/.test(reviewerRoutes)
@@ -73,10 +73,15 @@ const checks = [
     /ambiguousPhone8s\.has\(r\.phone8\)[\s\S]*\? null : ownerAcct/.test(payment)
       && /ownerIds\.size > 1[\s\S]*ambiguousPhone8s\.add/.test(payment)],
   ['입금은 코드 참여자 UUID로 현재 타계정 배열 위치를 찾아 이름·번호 변경을 견딘다',
-    /member_no AS "memberNo"[\s\S]*FROM reviewer_identities/.test(payment)
+    /member_no AS "memberNo"[\s\S]*current_name AS "currentName"[\s\S]*current_phone8 AS "currentPhone8"[\s\S]*FROM reviewer_identities/.test(payment)
       && /identityById\.get\(String\(link\.participantIdentityId\)\)/.test(payment)
       && /const sub = arr\[memberNo - 1\]/.test(payment)
+      && /sub\.name[\s\S]*identity\.currentName[\s\S]*sp8 !==[\s\S]*identity\.currentPhone8/.test(payment)
       && /!participant\.ok\) \{ delete out\[k\]; continue; \}/.test(payment)],
+  ['예상금액의 주문 가격도 참여행·주문·신청 소유자 순서로 보강한다',
+    /FROM order_submissions os[\s\S]*LEFT JOIN LATERAL \([\s\S]*FROM campaign_applications app[\s\S]*cp\.owner_reviewer_id = \$3[\s\S]*os\.owner_reviewer_id = \$3[\s\S]*ca\.owner_reviewer_id = \$3/.test(reviewerRoutes)],
+  ['리뷰목록은 세션 만료 시 홈 세션을 한 번 갱신하고 재조회한다',
+    /res\.code === "REVIEWER_SESSION_EXPIRED"[\s\S]*_refreshReviewerHomeSession\(user\)[\s\S]*loadReviewList\(refreshed, \{ \.\.\.opts, sessionRetried: true \}\)/.test(home)],
   ['주문·신청 소유자가 충돌하면 신청 participant identity와 phone을 주문 소유자에 섞지 않는다',
     /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*COALESCE\(os\.participant_identity_id, ca\.participant_identity_id\)[\s\S]*ELSE os\.participant_identity_id END/.test(payment)
       && /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*THEN ca\.phone8 ELSE NULL END/.test(payment)],

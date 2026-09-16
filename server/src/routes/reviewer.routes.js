@@ -871,10 +871,48 @@ router.get('/review-earnings', async (req, res, next) => {
                 os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", os.submitted_at AS "orderedAt"
                 , cp.row_json AS "rowJson"
            FROM order_submissions os
-           LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
-           WHERE (($3::uuid IS NULL AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-                  OR os.owner_reviewer_id = $3
-                  OR (os.owner_reviewer_id IS NULL AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)))
+           LEFT JOIN campaign_participants cp
+             ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL AND cp.active = TRUE
+           LEFT JOIN LATERAL (
+             SELECT app.owner_reviewer_id, app.owner_phone8
+               FROM campaign_applications app
+              WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
+              ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
+              LIMIT 1
+           ) ca ON TRUE
+           WHERE (
+             (cp.id IS NOT NULL AND (
+               ($3::uuid IS NULL AND cp.phone8 = ANY($1))
+               OR cp.owner_reviewer_id = $3
+               OR (cp.owner_reviewer_id IS NULL AND (
+                 os.owner_reviewer_id = $3
+                 OR (os.owner_reviewer_id IS NULL AND (
+                   ca.owner_reviewer_id = $3
+                   OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                     SELECT 1 FROM reviewer_phone_changes rpc
+                      WHERE rpc.old_phone8 = ca.owner_phone8
+                        AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+                   ))
+                   OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                       AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
+                 ))
+               ))
+             ))
+             OR (cp.id IS NULL AND (
+               ($3::uuid IS NULL AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
+               OR os.owner_reviewer_id = $3
+               OR (os.owner_reviewer_id IS NULL AND (
+                 ca.owner_reviewer_id = $3
+                 OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                   SELECT 1 FROM reviewer_phone_changes rpc
+                    WHERE rpc.old_phone8 = ca.owner_phone8
+                      AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+                 ))
+                 OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                     AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
+               ))
+             ))
+           )
              AND os.deleted_at IS NULL AND os.sheet_row IS NOT NULL AND os.sheet_id = ANY($2)`,
         [phoneList, sheetIds, ownerReviewerId]
       );

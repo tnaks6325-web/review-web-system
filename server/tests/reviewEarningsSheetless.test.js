@@ -28,7 +28,7 @@ assert.match(
 );
 assert.match(
   body,
-  /LEFT JOIN campaign_participants cp ON cp\.order_submission_id = os\.id/,
+  /LEFT JOIN campaign_participants cp\s+ON cp\.order_submission_id = os\.id/,
   'the workboard participant row must be available as the payment amount fallback'
 );
 assert.match(

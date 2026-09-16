@@ -190,7 +190,8 @@ const owner = (over = {}) => Object.assign({
     await withStubPool(handler({
       viaParticipant: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID,
         participantIdentityId: identityId, subPhone8: '00000000' }],
-      identityRows: [{ id: identityId, ownerReviewerId: OWNER_ID, memberNo: 1, status: 'active' }],
+      identityRows: [{ id: identityId, ownerReviewerId: OWNER_ID, memberNo: 1,
+        currentName: '현재명의', currentPhone8: '99998888', status: 'active' }],
       owners: [owner({ subAccounts: [{ name: '현재명의', phone: '010-9999-8888', bankName: '신한은행', bankAccount: '555', accountHolder: '현재명의' }] })],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
@@ -199,6 +200,22 @@ const owner = (over = {}) => Object.assign({
       assert.strictEqual(it.accountHolder, '현재명의');
       assert.strictEqual(it.accountRef.subPhone8, '99998888');
       assert.strictEqual(it.participantIdentityId, identityId);
+    });
+  });
+
+  await ta('1g-2 앞 타계정 삭제로 member_no 위치가 다른 사람을 가리키면 입금을 보류한다', async () => {
+    const identityId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+    await withStubPool(handler({
+      viaParticipant: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID,
+        participantIdentityId: identityId, subPhone8: '99998888' }],
+      identityRows: [{ id: identityId, ownerReviewerId: OWNER_ID, memberNo: 1,
+        currentName: '원래명의', currentPhone8: '99998888', status: 'active' }],
+      owners: [owner({ subAccounts: [{ name: '다른명의', phone: '010-2222-3333', bankName: '신한은행', bankAccount: '999', accountHolder: '다른명의' }] })],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+      assert.notStrictEqual(it.bankAccount, '999');
     });
   });
 

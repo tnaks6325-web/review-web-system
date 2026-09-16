@@ -1509,7 +1509,13 @@ async function loadReviewList(user, opts = {}) {
   if (!silent) { _reviewListLoading = true; renderReviewSubTab(); }
   try {
     // includeSubmitted=1 → 제출완료 건 포함 응답 (isSubmitted로 대기/완료 분리)
-    const res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1", ownerScope: "1" });
+    let res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1", ownerScope: "1" });
+    if (res && res.code === "REVIEWER_SESSION_EXPIRED" && !opts.sessionRetried) {
+      const refreshed = await _refreshReviewerHomeSession(user);
+      if (refreshed && refreshed.reviewerToken) {
+        return loadReviewList(refreshed, { ...opts, sessionRetried: true });
+      }
+    }
     if (res.error && !Array.isArray(res.results) && !Array.isArray(res.data)) throw new Error(res.error);
     const resultsRaw = res.data || res.results || [];
     // ★ '확인필요'(orderStage='attention') 카드는 리뷰어에게 그리지 않는다 — 서버(search.service)가 이미 걸러내지만,
