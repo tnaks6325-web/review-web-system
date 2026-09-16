@@ -438,6 +438,50 @@ function clearHold(p8){
   }catch(_){}
 }
 
+let _holdRecoveryPromise = null;
+/**
+ * 모바일 앱 내 브라우저가 새 컨텍스트로 열려 localStorage 홀드만 잃은 경우,
+ * 서명된 리뷰어 세션으로 본인 활성 홀드를 다시 받아 구매양식을 이어 연다.
+ */
+function recoverActiveHolds(preferredPhone){
+  if(PREVIEW) return Promise.resolve(false);
+  if(_holdRecoveryPromise) return _holdRecoveryPromise;
+  const s = getSession();
+  if(!s) return Promise.resolve(false);
+  _holdRecoveryPromise = (async ()=>{
+    try{
+      const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/my-active-holds', {
+        headers:_getAuthHeaders(), cache:'no-store'
+      });
+      const j = await r.json().catch(()=>({}));
+      if(!r.ok || !j.ok || !Array.isArray(j.holds) || !j.holds.length) return false;
+      // 서버 홀드를 저장하기 전에 기존 활성 명의를 잡아야 한다. 저장 후 읽으면
+      // 빈 저장소에서도 첫 복구 명의가 "기존 선택"처럼 보여 로그인 명의보다 앞선다.
+      const prior = activeP8();
+      const m = _allHolds();
+      const recovered = [];
+      for(const h of j.holds){
+        const p8 = _p8(h && h.phone8);
+        if(p8.length !== 8 || !h.holdToken || !h.applicationId) continue;
+        m[p8] = {
+          applicationId:h.applicationId, holdToken:String(h.holdToken), phone8:p8,
+          expiresAt:h.expiresAt || null, optionKey:h.optionKey || '', name:h.name || '',
+          isSub:!!h.isSub, ownerPhone8:_p8(h.ownerPhone8 || s.phone8)
+        };
+        if(!recovered.includes(p8)) recovered.push(p8);
+      }
+      if(!recovered.length) return false;
+      _saveHolds(m);
+      const loginP8 = _p8(s.phone8);
+      const preferredP8 = _p8(preferredPhone);
+      setActiveP8(recovered.includes(preferredP8) ? preferredP8
+        : (recovered.includes(prior) ? prior : (recovered.includes(loginP8) ? loginP8 : recovered[0])));
+      return true;
+    }catch(_){ return false; }
+  })().finally(()=>{ _holdRecoveryPromise = null; });
+  return _holdRecoveryPromise;
+}
+
 /* ═══ 작업내용 표시 정규화 (표시 직전 · 스냅샷 불변 · 문제 패턴일 때만 개입) ═══ */
 // 상품·옵션·결제금액: 중복 "결제금액 N원" 제거 + 상품명↵금액 줄바꿈. 금액 1종류일 때만 병합(다옵션 상이금액은 원문 보존).
 // 상품/리뷰가이드/첨부이미지 정규화는 js/campaign-workdetail.js(공용 렌더러)로 이관 — 관리자 미리보기와 동일 코드 보장.
@@ -1273,7 +1317,7 @@ async function _doApply(optionKey, sub){
     if(isBlogCampaign() && _blogUrl) body.blogUrl = _blogUrl;
     if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+      method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
     });
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
@@ -1316,6 +1360,11 @@ async function _doApply(optionKey, sub){
       await loadCampaign();
       const pickable = ((_camp && _camp.options) || []).filter(o => o.selectable);
       if(pickable.length) openOptSheet();
+      return;
+    }
+    if(j.reason === 'duplicate_hold' && await recoverActiveHolds((sub && sub.phone) || s.phone8)){
+      toast('참여 중인 구매양식을 이어서 열었어요');
+      await enterJoined();
       return;
     }
     const msg = {
@@ -1957,6 +2006,7 @@ function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0
         }catch(_){}
       }
     }
+    await recoverActiveHolds();
     const h = getHold();
     if(h) await enterJoined();      // 재방문: 홀드 있으면 참여 후 화면 복원(만료면 만료 화면)
     // 참여 전 화면 카운터 갱신(15초)
