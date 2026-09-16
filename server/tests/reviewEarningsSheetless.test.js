@@ -46,5 +46,8 @@ assert.match(
   /NOT EXISTS \([\s\S]*FROM review_index ri[\s\S]*ri\.row_index = os\.sheet_row/,
   'a sheet-indexed order must not be counted again as a sheetless order'
 );
+const dedup = (body.match(/AND NOT EXISTS \(\s*SELECT 1 FROM review_index ri[\s\S]*?\n\s*\)`,/) || [''])[0];
+assert.ok(dedup && !/ri\.phone8 = ANY/.test(dedup),
+  'owner-UUID rows must deduplicate by the order/participant coordinate even after their phone changes');
 
 console.log('sheetless review earnings contract passed');

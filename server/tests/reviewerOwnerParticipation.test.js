@@ -75,6 +75,14 @@ const checks = [
   ['주문·신청 소유자가 충돌하면 신청 participant identity와 phone을 주문 소유자에 섞지 않는다',
     /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*COALESCE\(os\.participant_identity_id, ca\.participant_identity_id\)[\s\S]*ELSE os\.participant_identity_id END/.test(payment)
       && /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*THEN ca\.phone8 ELSE NULL END/.test(payment)],
+  ['무시트 예상금액은 변경된 번호가 아니라 주문·참여행 좌표로 기존 카드와 중복 제거한다',
+    /AND NOT EXISTS \([\s\S]*FROM review_index ri\s+WHERE \(\(ri\.sheet_id = os\.sheet_id[\s\S]*ri\.row_index = cp\.seq/.test(reviewerRoutes)
+      && !/FROM review_index ri\s+WHERE ri\.phone8 = ANY\(\$1\)\s+AND \(\(ri\.sheet_id = os\.sheet_id/.test(reviewerRoutes)],
+  ['레거시 링크 owner UUID는 이름 변경 뒤에도 이름 대조 없이 참여현황에 포함한다',
+    /pl\.owner_reviewer_id = \$2\s+OR \(pl\.owner_reviewer_id IS NULL AND pl\.phone8 = ANY\(\$1\)[\s\S]*regexp_replace/.test(reviewerRoutes)],
+  ['만료·위조 리뷰어 토큰은 참여현황과 예상금액 모두 401 코드로 응답한다',
+    /function sendReviewerSessionError[\s\S]*REVIEWER_SESSION_EXPIRED[\s\S]*REVIEWER_AUTH_INVALID/.test(reviewerRoutes)
+      && occurrences(reviewerRoutes, 'if (sendReviewerSessionError(res, err)) return;') === 2],
   ['현재 참여행 owner UUID는 충돌하는 과거 링크보다 우선한다',
     /cp\.owner_reviewer_id = \$1[\s\S]*cp\.owner_reviewer_id IS NULL/.test(search)
       && /cp\.owner_reviewer_id = \$3[\s\S]*cp\.owner_reviewer_id IS NULL/.test(reviewerRoutes)],

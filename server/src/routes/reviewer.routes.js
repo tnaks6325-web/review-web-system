@@ -37,6 +37,17 @@ function sendReviewerIdentityError(res, err, next) {
   return next(err);
 }
 
+function sendReviewerSessionError(res, err) {
+  if (!err || !['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err.name)) return false;
+  const expired = err.name === 'TokenExpiredError';
+  res.status(401).json({
+    ok: false,
+    code: expired ? 'REVIEWER_SESSION_EXPIRED' : 'REVIEWER_AUTH_INVALID',
+    error: expired ? '로그인 시간이 만료되었습니다. 다시 로그인해주세요.' : '유효하지 않은 리뷰어 로그인입니다.',
+  });
+  return true;
+}
+
 function _phone8(value) {
   return String(value || '').replace(/\D/g, '').slice(-8);
 }
@@ -445,17 +456,21 @@ router.get('/my-status', async (req, res, next) => {
               ))
               OR (
                 ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                AND (pl.owner_reviewer_id = $2 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)))
                 AND (
-                  regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                  OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(
-                      CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
-                    ) sub
-                    WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
-                      regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
-                      regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
+                  pl.owner_reviewer_id = $2
+                  OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)
+                    AND (
+                      regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
+                      OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
+                      OR EXISTS (
+                        SELECT 1 FROM jsonb_array_elements(
+                          CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
+                        ) sub
+                        WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
+                          regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
+                          regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
+                        )
+                      )
                     )
                   )
                 )
@@ -622,6 +637,7 @@ router.get('/my-status', async (req, res, next) => {
 
     res.json({ ok: true, items, stats });
   } catch (err) {
+    if (sendReviewerSessionError(res, err)) return;
     next(err);
   }
 });
@@ -905,8 +921,7 @@ router.get('/review-earnings', async (req, res, next) => {
              → 리뷰 내역 카드 dedup 과 **같은 키**(작업표 줄 = 주문 id 링크)로도 짝짓는다. */
           AND NOT EXISTS (
             SELECT 1 FROM review_index ri
-             WHERE ri.phone8 = ANY($1)
-               AND ((ri.sheet_id = os.sheet_id
+             WHERE ((ri.sheet_id = os.sheet_id
                      AND ri.tab_name = os.tab_name
                      AND ri.row_index = os.sheet_row)
                  -- 같은 작업표 자리라도 기존 이력이 이미 제출완료면 새 주문을 가리지 않는다.
@@ -1028,6 +1043,7 @@ router.get('/review-earnings', async (req, res, next) => {
       items,
     });
   } catch (err) {
+    if (sendReviewerSessionError(res, err)) return;
     logger.warn('[review-earnings] 실패: ' + err.message);
     res.json({
       ok: true,
