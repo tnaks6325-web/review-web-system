@@ -67,6 +67,7 @@ function handler(opts) {
     // ── 계좌 1차 매칭(연락처) — 둘 다 빈 결과 = 타계정 미등록 상황
     if (/jsonb_array_elements/.test(sql)) return { rows: opts.subRows || [] };
     if (/FROM reviewers WHERE phone8/.test(sql) && !/AS "subAccounts"/.test(sql)) return { rows: opts.ownRows || [] };
+    if (/FROM reviewer_phone_changes/.test(sql)) return { rows: opts.movedPhoneRows || [] };
     // ── 현재 참여행 owner UUID
     if (/FROM unnest[\s\S]*JOIN campaign_participants cp/.test(sql)) return { rows: opts.viaParticipant || [] };
     // ── 폴백 ① 참여 원장
@@ -156,6 +157,19 @@ const owner = (over = {}) => Object.assign({
     });
   });
 
+  await ta('1e-2 현재 owner UUID가 없으면 행 연락처의 등록계좌가 오래된 링크보다 우선한다', async () => {
+    await withStubPool(handler({
+      ownRows: [{ reviewerId: '99999999-9999-9999-9999-999999999999', phone8: '87654321', name: '현재참여자', bankName: '신한은행', bankAccount: '777', accountHolder: '현재참여자' }],
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'self');
+      assert.strictEqual(it.bankAccount, '777');
+      assert.strictEqual(it.ownerReviewerId, '99999999-9999-9999-9999-999999999999');
+    });
+  });
+
   await ta('1f ★ 윤주희형: 행 번호가 달라도 제출 로그인 번호+등록 본인 이름이면 본계좌로 잡힌다', async () => {
     await withStubPool(handler({
       rowName: '윤주희',
@@ -192,6 +206,31 @@ const owner = (over = {}) => Object.assign({
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
       assert.ok(it.issues.includes('no_reviewer'), '모호하면 통과시키지 않는다');
+    });
+  });
+
+  await ta('2b-2 행 번호에 등록 본계정이 둘이면 어느 계좌도 선택하지 않는다', async () => {
+    await withStubPool(handler({
+      ownRows: [
+        { reviewerId: OWNER_ID, phone8: '87654321', name: '동일번호1', ...OWNER_ACCT },
+        { reviewerId: '22222222-2222-2222-2222-222222222222', phone8: '87654321', name: '동일번호2', bankName: '신한은행', bankAccount: '000', accountHolder: '동일번호2' },
+      ],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+    });
+  });
+
+  await ta('2b-3 과거 다른 소유자가 썼던 번호의 링크는 현재 번호 소유자에게 넘기지 않는다', async () => {
+    await withStubPool(handler({
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
+      owners: [owner()],
+      movedPhoneRows: [{ phone8: '11112222', reviewerId: '22222222-2222-2222-2222-222222222222' }],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
     });
   });
 

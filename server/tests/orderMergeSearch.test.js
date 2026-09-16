@@ -22,12 +22,12 @@ let ownerReviewRows = null; // 로그인 ownerScope 전용 조회 결과
 const fakePool = {
   query: async (sql, params) => {
     captured.queries.push({ sql, params });
+    if (/FROM review_index ri[\s\S]*cp\.owner_reviewer_id = \$1/.test(sql) && ownerReviewRows) return { rows: ownerReviewRows };
     if (/FROM reviewers/.test(sql)) return { rows: [] };            // 타계정 없음 → phoneList=[p8]
     if (/set_limit/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ count: '0', built_at: null }] };
     if (/FROM review_submissions/.test(sql)) return { rows: [] };
     if (/FROM order_submissions/.test(sql)) return { rows: orderRows };
-    if (/FROM review_index ri[\s\S]*cp\.owner_reviewer_id = \$1/.test(sql) && ownerReviewRows) return { rows: ownerReviewRows };
     // seen-set 쿼리(dedup): 병합 헬퍼의 review_index 조회는 'row_index IS NOT NULL' 로 구분
     if (/FROM review_index/.test(sql) && /row_index IS NOT NULL/.test(sql)) return { rows: seenRows };
     if (/FROM review_index/.test(sql)) return { rows: reviewRows };

@@ -40,7 +40,25 @@ async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client 
                   OR (cp.owner_reviewer_id IS NULL AND cp.phone8 = ANY($5::text[]))
                   OR (cp.owner_reviewer_id IS NULL
                       AND (pl.owner_reviewer_id = $4::uuid
-                           OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($5::text[]))))
+                           OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($5::text[])
+                               AND NOT EXISTS (
+                                 SELECT 1 FROM reviewer_phone_changes rpc
+                                  WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $4::uuid
+                               )))
+                      AND NOT EXISTS (
+                        SELECT 1 FROM reviewers current_owner
+                         WHERE current_owner.id <> $4::uuid
+                           AND (
+                             current_owner.phone8 = cp.phone8
+                             OR EXISTS (
+                               SELECT 1 FROM jsonb_array_elements(
+                                 CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
+                                      THEN current_owner.sub_accounts ELSE '[]'::jsonb END
+                               ) sub
+                                WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+                             )
+                           )
+                      ))
                 )
               )
               OR (

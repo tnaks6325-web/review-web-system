@@ -3,10 +3,14 @@
 -- 이미 연결된 신청/주문 UUID만 따라가며, 모호하거나 근거 없는 행은 기존 레거시 상태로 남긴다.
 
 WITH unique_registered_owner AS (
-  SELECT phone8, MIN(id::text)::uuid AS reviewer_id
-    FROM reviewers
-   WHERE COALESCE(phone8, '') <> ''
-   GROUP BY phone8
+  SELECT r.phone8, MIN(r.id::text)::uuid AS reviewer_id
+    FROM reviewers r
+   WHERE COALESCE(r.phone8, '') <> ''
+     AND NOT EXISTS (
+       SELECT 1 FROM reviewer_phone_changes rpc
+        WHERE rpc.old_phone8 = r.phone8 AND rpc.reviewer_id <> r.id
+     )
+   GROUP BY r.phone8
   HAVING COUNT(*) = 1
 )
 UPDATE campaign_applications ca
@@ -19,10 +23,14 @@ UPDATE campaign_applications ca
 -- participation_links.phone8은 리뷰 제출 당시 로그인 번호다. 등록DB에서 소유자가 유일할 때만
 -- UUID로 승격한다. 행 이름·연락처·갱신시각은 소유권을 바꾸지 않으며 타계정 미확정 건은 본계정에 귀속한다.
 WITH unique_registered_owner AS (
-  SELECT phone8, MIN(id::text)::uuid AS reviewer_id
-    FROM reviewers
-   WHERE COALESCE(phone8, '') <> ''
-   GROUP BY phone8
+  SELECT r.phone8, MIN(r.id::text)::uuid AS reviewer_id
+    FROM reviewers r
+   WHERE COALESCE(r.phone8, '') <> ''
+     AND NOT EXISTS (
+       SELECT 1 FROM reviewer_phone_changes rpc
+        WHERE rpc.old_phone8 = r.phone8 AND rpc.reviewer_id <> r.id
+     )
+   GROUP BY r.phone8
   HAVING COUNT(*) = 1
 )
 UPDATE participation_links pl
@@ -32,19 +40,28 @@ UPDATE participation_links pl
    AND COALESCE(pl.phone8, '') <> ''
    AND pl.phone8 = u.phone8;
 
-WITH unique_participant_identity AS (
-  SELECT owner_reviewer_id, current_phone8, MIN(id::text)::uuid AS identity_id
-    FROM reviewer_identities
-   WHERE status = 'active' AND COALESCE(current_phone8, '') <> ''
-   GROUP BY owner_reviewer_id, current_phone8
+WITH historical_identity_candidates AS (
+  SELECT ca.id AS application_id, a.identity_id
+    FROM campaign_applications ca
+    JOIN reviewer_identity_aliases a
+      ON a.phone8 = ca.phone8
+     AND a.valid_from <= ca.applied_at
+     AND (a.valid_to IS NULL OR ca.applied_at < a.valid_to)
+    JOIN reviewer_identities i
+      ON i.id = a.identity_id AND i.owner_reviewer_id = ca.owner_reviewer_id
+   WHERE ca.participant_identity_id IS NULL
+     AND ca.owner_reviewer_id IS NOT NULL
+), unique_participant_identity AS (
+  SELECT application_id, MIN(identity_id::text)::uuid AS identity_id
+    FROM historical_identity_candidates
+   GROUP BY application_id
   HAVING COUNT(*) = 1
 )
 UPDATE campaign_applications ca
    SET participant_identity_id = i.identity_id
   FROM unique_participant_identity i
  WHERE ca.participant_identity_id IS NULL
-   AND ca.owner_reviewer_id = i.owner_reviewer_id
-   AND ca.phone8 = i.current_phone8;
+   AND ca.id = i.application_id;
 
 UPDATE order_submissions os
    SET owner_reviewer_id = COALESCE(os.owner_reviewer_id, ca.owner_reviewer_id),
@@ -85,6 +102,22 @@ UPDATE campaign_participants cp
    AND pl.tab_name = cp.tab_name
    AND pl.row_index = cp.seq
    AND cp.is_submitted = TRUE
+   AND NOT EXISTS (
+     SELECT 1
+       FROM reviewers current_owner
+      WHERE current_owner.id <> pl.owner_reviewer_id
+        AND (
+          current_owner.phone8 = cp.phone8
+          OR EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
+                     THEN current_owner.sub_accounts ELSE '[]'::jsonb END
+              ) sub
+             WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+          )
+        )
+   )
    AND cp.deleted_at IS NULL;
 
 UPDATE participation_links pl

@@ -231,8 +231,8 @@ async function listPaymentTargets(opts = {}) {
     loadWorkboardAmountPopulation(pool, rows),
   ]);
 
-  // 참여행에 소유자 링크가 있으면 행 연락처보다 먼저 쓴다. 연락처가 다른 등록 리뷰어와
-  // 우연히 겹쳐도 실제 로그인 소유자가 아닌 계좌로 보내지 않는다.
+  // 참여행/주문의 현재 소유자 링크는 행 연락처보다 먼저 쓴다. 레거시 제출 링크만 있는 행은
+  // 현재 연락처가 등록 리뷰어 한 명에게 정확히 연결되면 현재 계좌를 우선한다.
   const ownerAcctMap = await _loadOwnerAccountsByRow(rows);
 
   const items = rows.map(r => {
@@ -240,8 +240,12 @@ async function listPaymentTargets(opts = {}) {
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
-    // 계좌 해석 순서 = ① 참여행 소유자 UUID/신청 링크 → ② 행 연락처 → ③ 구매양식 계좌.
-    const acct = ownerAcctMap[key + '||' + r.rowIndex] || acctMap[r.phone8] || _orderAccount(ord, r) || null;
+    // 계좌 해석 순서 = ① 현재 참여행/주문 소유자 → ② 현재 행 연락처 → ③ 레거시 제출 링크 → ④ 구매양식.
+    const ownerAcct = ownerAcctMap[key + '||' + r.rowIndex] || null;
+    const directAcct = acctMap[r.phone8] || null;
+    const acct = ownerAcct && ownerAcct.source !== 'owner_link'
+      ? ownerAcct
+      : directAcct || ownerAcct || _orderAccount(ord, r) || null;
 
     // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
     // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
@@ -565,13 +569,20 @@ async function _loadAccounts(phone8s) {
       WHERE RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) = ANY($1)`,
     [phone8s]
   );
+  const subsByPhone = new Map();
   for (const s of subs) {
-    if (s.phone8 && !map[s.phone8]) {
+    if (!s.phone8) continue;
+    if (!subsByPhone.has(s.phone8)) subsByPhone.set(s.phone8, []);
+    subsByPhone.get(s.phone8).push(s);
+  }
+  for (const [p8, matches] of subsByPhone) {
+    if (matches.length === 1) {
+      const s = matches[0];
       // ★ 명의 이름(sub_accounts[].name)과 소유자 이름을 함께 싣는다 —
       //   같은 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 화면이 "누구 계좌인지" 말할 수 없다(실사고).
-      map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
-                        ownerReviewerId: s.reviewerId, participantIdentityId: null,
-                        isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
+      map[p8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
+                  ownerReviewerId: s.reviewerId, participantIdentityId: null,
+                  isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
     }
   }
   const { rows: own } = await pool.query(
@@ -580,10 +591,20 @@ async function _loadAccounts(phone8s) {
        FROM reviewers WHERE phone8 = ANY($1)`,
     [phone8s]
   );
+  const ownByPhone = new Map();
   for (const r of own) {
-    map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '',
-                      ownerReviewerId: r.reviewerId, participantIdentityId: null,
-                      isSub: false, name: r.name || '', ownerName: r.name || '' };
+    if (!ownByPhone.has(r.phone8)) ownByPhone.set(r.phone8, []);
+    ownByPhone.get(r.phone8).push(r);
+  }
+  for (const [p8, matches] of ownByPhone) {
+    if (matches.length !== 1) {
+      delete map[p8];
+      continue;
+    }
+    const r = matches[0];
+    map[p8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '',
+                ownerReviewerId: r.reviewerId, participantIdentityId: null,
+                isSub: false, name: r.name || '', ownerName: r.name || '' };
   }
   return map;
 }
@@ -599,9 +620,9 @@ async function _loadAccounts(phone8s) {
  *    근거는 그 행에 이미 박제된 **하드 링크 두 개**뿐:
  *      ① 참여 원장 `campaign_applications.owner_phone8`(주문 id 로 그 행에 결속 — 홀드 생성 시
  *         서버가 명의 검증을 거쳐 기록한 값이라 "이 명의는 이 소유자의 것"이 확정돼 있다)
- *      ② 제출 신원 링크 `participation_links.phone8`(= 로그인 phone8). ★ 이쪽은 명의 대조가
- *         없으므로 **소유자의 타계정 목록에 그 행 이름이 정확히 등록돼 있을 때만** 인정한다
- *         (재배정된 행의 stale 링크가 엉뚱한 사람 계좌를 열지 못하게 — 검색 게이트와 같은 규율).
+ *      ② 제출 신원 링크 `participation_links.phone8`(= 로그인 phone8). 현재 행 연락처가 다른
+ *         등록 리뷰어에게 정확히 연결되면 그 현재 계좌를 우선하고, 그렇지 않을 때만 링크 소유자의
+ *         본계좌를 사용한다.
  * ★ ① 이 ② 를 이긴다(원장이 더 강한 근거).
  * ★ `reviewers.phone8` 은 GENERATED·비유니크 → **후보가 유일할 때만** 채택(모호 = 미채택).
  * ★ 조회 실패는 throw 하지 않는다 — 폴백이 죽어도 입금대상 목록은 종전대로 나온다.
@@ -673,6 +694,15 @@ async function _loadOwnerAccountsByRow(rows) {
               CASE WHEN jsonb_typeof(sub_accounts) = 'array' THEN sub_accounts ELSE '[]'::jsonb END AS "subAccounts"
          FROM reviewers
         WHERE id = ANY($1::uuid[]) OR phone8 = ANY($2::text[])`, [ownerIds, ownerPhones]);
+    const { rows: movedPhoneRows } = await pool.query(
+      `SELECT old_phone8 AS "phone8", reviewer_id AS "reviewerId"
+         FROM reviewer_phone_changes
+        WHERE old_phone8 = ANY($1::text[])`, [ownerPhones]);
+    const movedPhoneOwners = new Map();
+    for (const row of movedPhoneRows) {
+      if (!movedPhoneOwners.has(row.phone8)) movedPhoneOwners.set(row.phone8, new Set());
+      movedPhoneOwners.get(row.phone8).add(String(row.reviewerId));
+    }
     const byId = new Map(revs.map(r => [String(r.reviewerId), r]));
     const byPhone = new Map();
     for (const r of revs) {
@@ -682,6 +712,8 @@ async function _loadOwnerAccountsByRow(rows) {
     const resolveOwner = link => {
       if (link.ownerReviewerId) return byId.get(String(link.ownerReviewerId)) || null;
       const list = byPhone.get(link.ownerPhone8) || [];
+      const historicalOwners = movedPhoneOwners.get(link.ownerPhone8) || new Set();
+      if (list.length === 1 && [...historicalOwners].some(id => id !== String(list[0].reviewerId))) return null;
       return list.length === 1 ? list[0] : null;
     };
     const pack = (owner, sub, source, link) => ({
