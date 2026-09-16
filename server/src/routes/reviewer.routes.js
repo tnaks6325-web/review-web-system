@@ -30,6 +30,16 @@ const {
 } = require('../services/reviewerSession.service');
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
 
+// 참여행 → 주문 → 신청 → 과거 링크의 소유자 우선순위를 participant identity에도 적용한다.
+// 충돌하는 하위 레코드의 identity를 채택하면 타계정 자신의 행이 화면에서 사라질 수 있다.
+function _participantIdentityByOwnerSql({ cp = null, os = null, ca = null, pl = null } = {}) {
+  const aliases = [cp, os, ca, pl].filter(Boolean);
+  const owner = `COALESCE(${aliases.map(a => `${a}.owner_reviewer_id`).join(', ')})`;
+  return `COALESCE(${aliases.map(a =>
+    `CASE WHEN ${a}.owner_reviewer_id IS NULL OR ${a}.owner_reviewer_id = ${owner} ` +
+    `THEN ${a}.participant_identity_id END`).join(', ')})`;
+}
+
 function sendReviewerIdentityError(res, err, next) {
   if (err instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
     return res.status(err.status || 400).json({ ok: false, code: err.code, error: err.message });
@@ -492,6 +502,18 @@ router.get('/my-status', async (req, res, next) => {
                 AND (
                   pl.owner_reviewer_id = $2
                   OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)
+                    AND NOT EXISTS (
+                      SELECT 1 FROM reviewer_phone_changes rpc
+                       WHERE rpc.old_phone8 = pl.phone8
+                         AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                    )
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM reviewer_identity_aliases ria
+                        JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                       WHERE ria.phone8 = pl.phone8
+                         AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
+                    )
                     AND (
                       regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
                       OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
@@ -514,18 +536,41 @@ router.get('/my-status', async (req, res, next) => {
           ))
         ))
         OR (cp.id IS NULL AND (
-          ri.phone8 = ANY($1) OR pl.owner_reviewer_id = $2
-          OR (pl.owner_reviewer_id IS NULL AND ri.phone8 IS NULL AND pl.phone8 = ANY($1))
+          pl.owner_reviewer_id = $2
+          OR (pl.owner_reviewer_id IS NULL AND (
+            (ri.phone8 = ANY($1)
+             AND NOT EXISTS (
+               SELECT 1 FROM reviewer_phone_changes rpc
+                WHERE rpc.old_phone8 = ri.phone8
+                  AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+             )
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM reviewer_identity_aliases ria
+                 JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                WHERE ria.phone8 = ri.phone8
+                  AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
+             ))
+            OR (ri.phone8 IS NULL AND pl.phone8 = ANY($1)
+                AND NOT EXISTS (
+                  SELECT 1 FROM reviewer_phone_changes rpc
+                   WHERE rpc.old_phone8 = pl.phone8
+                     AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM reviewer_identity_aliases ria
+                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                   WHERE ria.phone8 = pl.phone8
+                     AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
+                ))
+          ))
         ))
       )
         AND (NOT $3::boolean OR (
-          COALESCE(cp.participant_identity_id, os.participant_identity_id,
-                   ca.participant_identity_id, pl.participant_identity_id) = $4
+          ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} = $4
           OR (
-            cp.participant_identity_id IS NULL
-            AND os.participant_identity_id IS NULL
-            AND ca.participant_identity_id IS NULL
-            AND pl.participant_identity_id IS NULL
+            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
             AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($1)
           )
         ))
@@ -599,8 +644,8 @@ router.get('/my-status', async (req, res, next) => {
                    AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
              )))
         AND (NOT $3::boolean OR (
-          COALESCE(os.participant_identity_id, ca.participant_identity_id) = $4
-          OR (os.participant_identity_id IS NULL AND ca.participant_identity_id IS NULL
+          ${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} = $4
+          OR (${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} IS NULL
               AND COALESCE(ca.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
         ))
         AND os.deleted_at IS NULL
@@ -790,10 +835,8 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
                 ))
               )))
          AND (NOT $3::boolean OR (
-           COALESCE(cp.participant_identity_id, os.participant_identity_id, ca.participant_identity_id) = $4
-           OR (cp.participant_identity_id IS NULL
-               AND os.participant_identity_id IS NULL
-               AND ca.participant_identity_id IS NULL
+           ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} = $4
+           OR (${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} IS NULL
                AND COALESCE(cp.phone8, ca.phone8,
                    RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($2))
          ))
@@ -900,6 +943,12 @@ router.get('/review-earnings', async (req, res, next) => {
                       AND NOT EXISTS (
                         SELECT 1 FROM reviewer_phone_changes rpc
                          WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $3
+                      )
+                      AND NOT EXISTS (
+                        SELECT 1
+                          FROM reviewer_identity_aliases ria
+                          JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                         WHERE ria.phone8 = pl.phone8 AND rii.owner_reviewer_id <> $3
                       )))
                   AND NOT EXISTS (
                     SELECT 1 FROM reviewers current_owner
@@ -922,18 +971,41 @@ router.get('/review-earnings', async (req, res, next) => {
             ))
           ))
           OR (cp.id IS NULL AND (
-            ri.phone8 = ANY($1) OR pl.owner_reviewer_id = $3
-            OR (pl.owner_reviewer_id IS NULL AND ri.phone8 IS NULL AND pl.phone8 = ANY($1))
+            pl.owner_reviewer_id = $3
+            OR (pl.owner_reviewer_id IS NULL AND (
+              (ri.phone8 = ANY($1)
+               AND NOT EXISTS (
+                 SELECT 1 FROM reviewer_phone_changes rpc
+                  WHERE rpc.old_phone8 = ri.phone8
+                    AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+               )
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM reviewer_identity_aliases ria
+                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                  WHERE ria.phone8 = ri.phone8
+                    AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
+               ))
+              OR (ri.phone8 IS NULL AND pl.phone8 = ANY($1)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewer_phone_changes rpc
+                     WHERE rpc.old_phone8 = pl.phone8
+                       AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM reviewer_identity_aliases ria
+                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                     WHERE ria.phone8 = pl.phone8
+                       AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
+                  ))
+            ))
           ))
         )
         AND (NOT $4::boolean OR (
-          COALESCE(cp.participant_identity_id, os.participant_identity_id,
-                   ca.participant_identity_id, pl.participant_identity_id) = $5
+          ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} = $5
           OR (
-            cp.participant_identity_id IS NULL
-            AND os.participant_identity_id IS NULL
-            AND ca.participant_identity_id IS NULL
-            AND pl.participant_identity_id IS NULL
+            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
             AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($1)
           )
         ))`,
@@ -1043,10 +1115,8 @@ router.get('/review-earnings', async (req, res, next) => {
              ))
            )
              AND (NOT $4::boolean OR (
-               COALESCE(cp.participant_identity_id, os.participant_identity_id, ca.participant_identity_id) = $5
-               OR (cp.participant_identity_id IS NULL
-                   AND os.participant_identity_id IS NULL
-                   AND ca.participant_identity_id IS NULL
+               ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} = $5
+               OR (${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} IS NULL
                    AND COALESCE(cp.phone8, ca.owner_phone8,
                        RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
              ))
@@ -1128,10 +1198,8 @@ router.get('/review-earnings', async (req, res, next) => {
           ))
         )
           AND (NOT $3::boolean OR (
-            COALESCE(cp.participant_identity_id, os.participant_identity_id, ca.participant_identity_id) = $4
-            OR (cp.participant_identity_id IS NULL
-                AND os.participant_identity_id IS NULL
-                AND ca.participant_identity_id IS NULL
+            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} = $4
+            OR (${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} IS NULL
                 AND COALESCE(cp.phone8, ca.phone8,
                     RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
           ))
@@ -1215,12 +1283,8 @@ router.get('/review-earnings', async (req, res, next) => {
                  ))
                )
                AND (NOT $3::boolean OR (
-                 COALESCE(dri_cp.participant_identity_id, dri_os.participant_identity_id,
-                          dri_ca.participant_identity_id, dri_pl.participant_identity_id) = $4
-                 OR (dri_cp.participant_identity_id IS NULL
-                     AND dri_os.participant_identity_id IS NULL
-                     AND dri_ca.participant_identity_id IS NULL
-                     AND dri_pl.participant_identity_id IS NULL
+                 ${_participantIdentityByOwnerSql({ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' })} = $4
+                 OR (${_participantIdentityByOwnerSql({ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' })} IS NULL
                      AND COALESCE(dri_cp.phone8, dri_ca.phone8, dri_pl.phone8, ri.phone8) = ANY($1))
                ))
           )`,

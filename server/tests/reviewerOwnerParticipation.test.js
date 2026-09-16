@@ -21,7 +21,7 @@ const checks = [
   ['타계정 로그인은 소유자 UUID를 보존하되 토큰의 참여자 신원·번호로 제한한다',
     /session\.loginKind === 'sub'[\s\S]*resolveParticipantIdentity[\s\S]*ownerReviewerId = scope\.ownerReviewerId[\s\S]*ownerPhone8s = \[loginPhone8\][\s\S]*restrictParticipant = true/.test(indexRoutes)
       && /session && session\.loginKind === 'sub'[\s\S]*resolveParticipantIdentity[\s\S]*ownerReviewerId,[\s\S]*participantIdentityId:[\s\S]*restrictParticipant: true/.test(reviewerRoutes)
-      && /COALESCE\(cp\.participant_identity_id, os\.participant_identity_id[\s\S]*= \$4/.test(search)],
+      && /_participantIdentityByOwnerSql\(\{ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' \}\)\} = \$4/.test(search)],
   ['홈 검색과 예상금액 요청에 리뷰어 토큰을 보낸다',
     /includeSubmitted: "1", ownerScope: "1"/.test(home)
       && /review-earnings[\s\S]{0,180}headers: \{ \.\.\._getAuthHeaders\(\) \}/.test(home)],
@@ -76,6 +76,14 @@ const checks = [
       && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,100}rii\.owner_reviewer_id <> \$1/.test(search)
       && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,120}\$2::uuid IS NULL OR rii\.owner_reviewer_id <> \$2/.test(reviewerRoutes)
       && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,120}\$3::uuid IS NULL OR rii\.owner_reviewer_id <> \$3/.test(reviewerRoutes)],
+  ['UUID 없는 과거 participation link도 타 소유자 identity alias가 있으면 홈·상태·예상금액에서 차단한다',
+    /ria\.phone8 = pl\.phone8[\s\S]*rii\.owner_reviewer_id <> \$1/.test(search)
+      && /ria\.phone8 = pl\.phone8[\s\S]*rii\.owner_reviewer_id <> \$2/.test(reviewerRoutes)
+      && /ria\.phone8 = pl\.phone8[\s\S]*rii\.owner_reviewer_id <> \$3/.test(reviewerRoutes)],
+  ['타계정 participant identity는 참여행·주문·신청·링크의 소유자 우선순위와 함께 고른다',
+    /function _participantIdentityByOwnerSql[\s\S]*COALESCE\([\s\S]*owner_reviewer_id IS NULL OR[\s\S]*participant_identity_id/.test(search)
+      && /function _participantIdentityByOwnerSql[\s\S]*owner_reviewer_id IS NULL OR[\s\S]*participant_identity_id/.test(reviewerRoutes)
+      && occurrences(reviewerRoutes, "_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca'") >= 5],
   ['주문 owner UUID가 있으면 충돌하는 신청 owner와 owner_phone8을 조회하지 않는다',
     /os\.owner_reviewer_id = \$1\s+OR \(os\.owner_reviewer_id IS NULL AND \(\s+ca\.owner_reviewer_id = \$1/.test(search)
       && /os\.owner_reviewer_id = \$3\s+OR \(os\.owner_reviewer_id IS NULL AND \(\s+ca\.owner_reviewer_id = \$3/.test(reviewerRoutes)
@@ -107,7 +115,7 @@ const checks = [
     /AND NOT EXISTS \([\s\S]*FROM review_index ri[\s\S]*ri\.row_index = os\.sheet_row[\s\S]*ri\.row_index = cp\.seq/.test(reviewerRoutes)
       && !/FROM review_index ri\s+WHERE ri\.phone8 = ANY\(\$1\)\s+AND \(\(ri\.sheet_id = os\.sheet_id/.test(reviewerRoutes)],
   ['무시트 예상금액의 좌표 중복 제거는 미제출 상태와 같은 소유자·타계정 신원만 인정한다',
-    /FROM review_index ri[\s\S]*WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2[\s\S]*NOT \$3::boolean[\s\S]*dri_pl\.participant_identity_id/.test(reviewerRoutes)],
+    /FROM review_index ri[\s\S]*WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2[\s\S]*NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' \}\)/.test(reviewerRoutes)],
   ['레거시 링크 owner UUID는 이름 변경 뒤에도 이름 대조 없이 참여현황에 포함한다',
     /pl\.owner_reviewer_id = \$2\s+OR \(pl\.owner_reviewer_id IS NULL AND pl\.phone8 = ANY\(\$1\)[\s\S]*regexp_replace/.test(reviewerRoutes)],
   ['만료·위조 리뷰어 토큰은 참여현황과 예상금액 모두 401 코드로 응답한다',

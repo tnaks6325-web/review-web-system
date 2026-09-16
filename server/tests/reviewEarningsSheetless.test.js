@@ -56,7 +56,7 @@ assert.match(
 );
 assert.match(
   dedup,
-  /NOT \$3::boolean[\s\S]*dri_cp\.participant_identity_id[\s\S]*dri_pl\.participant_identity_id[\s\S]*= \$4[\s\S]*dri_pl\.participant_identity_id IS NULL/,
+  /NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' \}\)[\s\S]*= \$4/,
   'sub-account deduplication must stay within the authenticated participant identity'
 );
 assert.match(
@@ -66,7 +66,7 @@ assert.match(
 );
 assert.match(
   body,
-  /NOT \$3::boolean[\s\S]*COALESCE\(cp\.participant_identity_id, os\.participant_identity_id, ca\.participant_identity_id\) = \$4/,
+  /NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'cp', os: 'os', ca: 'ca' \}\)[\s\S]*= \$4/,
   'sub-account earnings must stay within the authenticated participant identity'
 );
 

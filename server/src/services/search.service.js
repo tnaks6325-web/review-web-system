@@ -7,6 +7,16 @@ const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
 const { cashReceiptRequirementsForRows } = require('./cashReceiptContext.service');
 const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
 
+// 참여자 신원도 소유자와 같은 우선순위로 고른다. 상위 행의 소유자 UUID와 충돌하는
+// 주문·신청·과거 링크의 identity는 데이터 보강에 사용하지 않는다.
+function _participantIdentityByOwnerSql({ cp = null, os = null, ca = null, pl = null } = {}) {
+  const aliases = [cp, os, ca, pl].filter(Boolean);
+  const owner = `COALESCE(${aliases.map(a => `${a}.owner_reviewer_id`).join(', ')})`;
+  return `COALESCE(${aliases.map(a =>
+    `CASE WHEN ${a}.owner_reviewer_id IS NULL OR ${a}.owner_reviewer_id = ${owner} ` +
+    `THEN ${a}.participant_identity_id END`).join(', ')})`;
+}
+
 /** 검수에서 거절·보류된 영수증은 파일이 남아 있어도 리뷰어에게는 다시 제출할 슬롯이다. */
 async function _removeUnpayableReceiptSlots(items) {
   const source = Array.isArray(items) ? items : [];
@@ -152,8 +162,8 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
                 AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
           )))
           AND (NOT $5::boolean OR (
-            COALESCE(os.participant_identity_id, ca.participant_identity_id) = $4
-            OR (os.participant_identity_id IS NULL AND ca.participant_identity_id IS NULL
+            ${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} = $4
+            OR (${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} IS NULL
                 AND COALESCE(ca.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
           ))`
       : `RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)`;
@@ -333,6 +343,13 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
                            AND NOT EXISTS (
                              SELECT 1 FROM reviewer_phone_changes rpc
                               WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
+                           )
+                           AND NOT EXISTS (
+                             SELECT 1
+                               FROM reviewer_identity_aliases ria
+                               JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                              WHERE ria.phone8 = pl.phone8
+                                AND rii.owner_reviewer_id <> $1
                            )))
                   AND NOT EXISTS (
                     SELECT 1 FROM reviewers current_owner
@@ -357,18 +374,35 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
           OR (cp.id IS NULL AND (
             pl.owner_reviewer_id = $1
             OR (pl.owner_reviewer_id IS NULL AND (
-              ri.phone8 = ANY($2) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($2))
+              (ri.phone8 = ANY($2)
+               AND NOT EXISTS (
+                 SELECT 1 FROM reviewer_phone_changes rpc
+                  WHERE rpc.old_phone8 = ri.phone8 AND rpc.reviewer_id <> $1
+               )
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM reviewer_identity_aliases ria
+                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                  WHERE ria.phone8 = ri.phone8 AND rii.owner_reviewer_id <> $1
+               ))
+              OR (ri.phone8 IS NULL AND pl.phone8 = ANY($2)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewer_phone_changes rpc
+                     WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM reviewer_identity_aliases ria
+                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                     WHERE ria.phone8 = pl.phone8 AND rii.owner_reviewer_id <> $1
+                  ))
             ))
           ))
         )
         AND (NOT $5::boolean OR (
-          COALESCE(cp.participant_identity_id, os.participant_identity_id,
-                   ca.participant_identity_id, pl.participant_identity_id) = $4
+          ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} = $4
           OR (
-            cp.participant_identity_id IS NULL
-            AND os.participant_identity_id IS NULL
-            AND ca.participant_identity_id IS NULL
-            AND pl.participant_identity_id IS NULL
+            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
             AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($2)
           )
         ))

@@ -174,7 +174,7 @@ async function run() {
     restrictParticipant: true,
     strictPhoneScope: true,
   });
-  const scopedOwnerQuery = captured.queries.find(x => /COALESCE\(cp\.participant_identity_id, os\.participant_identity_id/.test(x.sql));
+  const scopedOwnerQuery = captured.queries.find(x => /CASE WHEN cp\.owner_reviewer_id IS NULL[\s\S]*THEN cp\.participant_identity_id END[\s\S]*= \$4/.test(x.sql));
   assert.ok(scopedOwnerQuery, '10: 참여자 신원 제한 SQL 실행');
   assert.deepEqual(scopedOwnerQuery.params.slice(1), [['87654321'], true, participantId, true], '10: owner 범위에 참여자 UUID·제한 플래그 전달');
   ownerReviewRows = null;
