@@ -68,6 +68,7 @@ function handler(opts) {
     if (/jsonb_array_elements/.test(sql)) return { rows: opts.subRows || [] };
     if (/FROM reviewers WHERE phone8/.test(sql) && !/AS "subAccounts"/.test(sql)) return { rows: opts.ownRows || [] };
     if (/FROM reviewer_phone_changes/.test(sql)) return { rows: opts.movedPhoneRows || [] };
+    if (/FROM reviewer_identities/.test(sql)) return { rows: opts.identityRows || [] };
     // ── 현재 참여행 owner UUID
     if (/FROM unnest[\s\S]*JOIN campaign_participants cp/.test(sql)) return { rows: opts.viaParticipant || [] };
     // ── 폴백 ① 참여 원장
@@ -181,6 +182,37 @@ const owner = (over = {}) => Object.assign({
       assert.strictEqual(it.ownerReviewerId, OWNER_ID);
       assert.strictEqual(it.accountHolder, '윤주희');
       assert.strictEqual(it.accountRef.subPhone8, null);
+    });
+  });
+
+  await ta('1g 코드 타계정은 참여 뒤 이름·번호가 바뀌어도 participant identity로 현재 전용계좌를 쓴다', async () => {
+    const identityId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    await withStubPool(handler({
+      viaParticipant: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID,
+        participantIdentityId: identityId, subPhone8: '00000000' }],
+      identityRows: [{ id: identityId, ownerReviewerId: OWNER_ID, memberNo: 1, status: 'active' }],
+      owners: [owner({ subAccounts: [{ name: '현재명의', phone: '010-9999-8888', bankName: '신한은행', bankAccount: '555', accountHolder: '현재명의' }] })],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'owner_participant');
+      assert.strictEqual(it.bankAccount, '555');
+      assert.strictEqual(it.accountHolder, '현재명의');
+      assert.strictEqual(it.accountRef.subPhone8, '99998888');
+      assert.strictEqual(it.participantIdentityId, identityId);
+    });
+  });
+
+  await ta('1h participant identity가 주문 소유자와 다르면 본계좌로 낮추지 않고 보류한다', async () => {
+    const identityId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    await withStubPool(handler({
+      viaOrder: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID,
+        participantIdentityId: identityId, subPhone8: '87654321' }],
+      identityRows: [{ id: identityId, ownerReviewerId: '22222222-2222-2222-2222-222222222222', memberNo: 1, status: 'active' }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
     });
   });
 

@@ -64,11 +64,19 @@ const checks = [
   ['동일 번호 등록 소유자가 여러 명이면 오래된 제출 링크 계좌도 사용하지 않는다',
     /ambiguousPhone8s\.has\(r\.phone8\)[\s\S]*\? null : ownerAcct/.test(payment)
       && /ownerIds\.size > 1[\s\S]*ambiguousPhone8s\.add/.test(payment)],
+  ['입금은 코드 참여자 UUID로 현재 타계정 배열 위치를 찾아 이름·번호 변경을 견딘다',
+    /member_no AS "memberNo"[\s\S]*FROM reviewer_identities/.test(payment)
+      && /identityById\.get\(String\(link\.participantIdentityId\)\)/.test(payment)
+      && /const sub = arr\[memberNo - 1\]/.test(payment)
+      && /!participant\.ok\) \{ delete out\[k\]; continue; \}/.test(payment)],
+  ['주문·신청 소유자가 충돌하면 신청 participant identity와 phone을 주문 소유자에 섞지 않는다',
+    /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*COALESCE\(os\.participant_identity_id, ca\.participant_identity_id\)[\s\S]*ELSE os\.participant_identity_id END/.test(payment)
+      && /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*THEN ca\.phone8 ELSE NULL END/.test(payment)],
   ['현재 참여행 owner UUID는 충돌하는 과거 링크보다 우선한다',
     /cp\.owner_reviewer_id = \$1[\s\S]*cp\.owner_reviewer_id IS NULL/.test(search)
       && /cp\.owner_reviewer_id = \$3[\s\S]*cp\.owner_reviewer_id IS NULL/.test(reviewerRoutes)],
   ['링크 단독 입금은 타계정 이름을 추측하지 않고 소유자 본계좌를 쓴다',
-    /for \(const x of viaLink\)[\s\S]{0,350}pack\(owner, null, 'owner_link', x\)/.test(payment)],
+    /for \(const x of viaLink\)[\s\S]{0,500}resolveParticipant\(owner, x, nameByRow\.get\(k\), false\)[\s\S]{0,180}pack\(owner, participant\.sub, 'owner_link', x\)/.test(payment)],
 ];
 
 let failed = 0;

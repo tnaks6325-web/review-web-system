@@ -671,8 +671,12 @@ async function _loadOwnerAccountsByRow(rows) {
     const { rows: viaOrder } = await pool.query(
       `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
               COALESCE(os.owner_reviewer_id, ca.owner_reviewer_id) AS "ownerReviewerId",
-              COALESCE(os.participant_identity_id, ca.participant_identity_id) AS "participantIdentityId",
-              ca.owner_phone8 AS "ownerPhone8", ca.phone8 AS "subPhone8"
+              CASE WHEN os.owner_reviewer_id IS NULL OR os.owner_reviewer_id = ca.owner_reviewer_id
+                   THEN COALESCE(os.participant_identity_id, ca.participant_identity_id)
+                   ELSE os.participant_identity_id END AS "participantIdentityId",
+              CASE WHEN os.owner_reviewer_id IS NULL THEN ca.owner_phone8 ELSE NULL END AS "ownerPhone8",
+              CASE WHEN os.owner_reviewer_id IS NULL OR os.owner_reviewer_id = ca.owner_reviewer_id
+                   THEN ca.phone8 ELSE NULL END AS "subPhone8"
          FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
          JOIN order_submissions os
            ON os.sheet_id = t.sheet_id AND os.tab_name = t.tab_name
@@ -685,7 +689,8 @@ async function _loadOwnerAccountsByRow(rows) {
             LIMIT 1
          ) ca ON TRUE
         WHERE COALESCE(os.owner_reviewer_id, ca.owner_reviewer_id) IS NOT NULL
-           OR COALESCE(ca.owner_phone8, '') <> ''`,
+           OR (os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
+               AND COALESCE(ca.owner_phone8, '') <> '')`,
       [sheetIds, tabNames, rowIdx]);
 
     // 제출 시점에 확정한 로그인 소유자. 현재 참여행·주문 링크가 없는 레거시 행의 마지막 근거다.
@@ -702,6 +707,7 @@ async function _loadOwnerAccountsByRow(rows) {
     const links = [...viaParticipant, ...viaOrder, ...viaLink];
     const ownerIds = [...new Set(links.map(x => x.ownerReviewerId).filter(Boolean).map(String))];
     const ownerPhones = [...new Set(links.filter(x => !x.ownerReviewerId).map(x => x.ownerPhone8).filter(Boolean))];
+    const participantIds = [...new Set(links.map(x => x.participantIdentityId).filter(Boolean).map(String))];
     if (!ownerIds.length && !ownerPhones.length) return out;
 
     const { rows: revs } = await pool.query(
@@ -710,6 +716,10 @@ async function _loadOwnerAccountsByRow(rows) {
               CASE WHEN jsonb_typeof(sub_accounts) = 'array' THEN sub_accounts ELSE '[]'::jsonb END AS "subAccounts"
          FROM reviewers
         WHERE id = ANY($1::uuid[]) OR phone8 = ANY($2::text[])`, [ownerIds, ownerPhones]);
+    const { rows: identityRows } = participantIds.length ? await pool.query(
+      `SELECT id, owner_reviewer_id AS "ownerReviewerId", member_no AS "memberNo", status
+         FROM reviewer_identities
+        WHERE id = ANY($1::uuid[])`, [participantIds]) : { rows: [] };
     const { rows: movedPhoneRows } = await pool.query(
       `SELECT old_phone8 AS "phone8", reviewer_id AS "reviewerId"
          FROM reviewer_phone_changes
@@ -720,6 +730,7 @@ async function _loadOwnerAccountsByRow(rows) {
       movedPhoneOwners.get(row.phone8).add(String(row.reviewerId));
     }
     const byId = new Map(revs.map(r => [String(r.reviewerId), r]));
+    const identityById = new Map(identityRows.map(r => [String(r.id), r]));
     const byPhone = new Map();
     for (const r of revs) {
       if (!byPhone.has(r.phone8)) byPhone.set(r.phone8, []);
@@ -762,6 +773,21 @@ async function _loadOwnerAccountsByRow(rows) {
       const sp8 = String(hits[0].phone || '').replace(/[^0-9]/g, '').slice(-8);
       return { ...hits[0], __phone8: sp8 || null };
     };
+    const resolveParticipant = (owner, link, name, allowLegacy = true) => {
+      if (!link.participantIdentityId) {
+        return { ok: true, sub: allowLegacy ? findSub(owner, { subPhone8: link.subPhone8, name }) : null };
+      }
+      const identity = identityById.get(String(link.participantIdentityId));
+      if (!identity || String(identity.ownerReviewerId) !== String(owner.reviewerId)) return { ok: false, sub: null };
+      const memberNo = Number(identity.memberNo);
+      if (!Number.isSafeInteger(memberNo) || memberNo < 0) return { ok: false, sub: null };
+      if (memberNo === 0) return { ok: true, sub: null };
+      const arr = Array.isArray(owner.subAccounts) ? owner.subAccounts : [];
+      const sub = arr[memberNo - 1];
+      if (!sub) return { ok: false, sub: null };
+      const sp8 = String(sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
+      return { ok: true, sub: { ...sub, __phone8: sp8 || null } };
+    };
 
     // 제출 링크 → 주문/신청 → 현재 참여행 순서로 덮어쓴다. 현재 참여행이 최종 권위다.
     // 링크만 남은 과거 행은 참여자 이름·번호가 달라도 확정된 등록 소유자의 본계좌로 귀속한다.
@@ -770,19 +796,25 @@ async function _loadOwnerAccountsByRow(rows) {
       if (out[k]) continue;
       const owner = resolveOwner(x);
       if (!owner) continue;
-      out[k] = pack(owner, null, 'owner_link', x);
+      const participant = resolveParticipant(owner, x, nameByRow.get(k), false);
+      if (!participant.ok) { delete out[k]; continue; }
+      out[k] = pack(owner, participant.sub, 'owner_link', x);
     }
     for (const x of viaOrder) {
       const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
       const owner = resolveOwner(x);
       if (!owner) continue;
-      out[k] = pack(owner, findSub(owner, { subPhone8: x.subPhone8, name: nameByRow.get(k) }), 'owner_order', x);
+      const participant = resolveParticipant(owner, x, nameByRow.get(k));
+      if (!participant.ok) { delete out[k]; continue; }
+      out[k] = pack(owner, participant.sub, 'owner_order', x);
     }
     for (const x of viaParticipant) {
       const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
       const owner = resolveOwner(x);
       if (!owner) continue;
-      out[k] = pack(owner, findSub(owner, { subPhone8: x.subPhone8, name: nameByRow.get(k) }), 'owner_participant', x);
+      const participant = resolveParticipant(owner, x, nameByRow.get(k));
+      if (!participant.ok) { delete out[k]; continue; }
+      out[k] = pack(owner, participant.sub, 'owner_participant', x);
     }
   } catch (e) {
     logger.warn('[payment] 소유자 링크 계좌 폴백 실패(종전대로 보류): ' + e.message);
