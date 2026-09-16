@@ -3175,8 +3175,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   await initPage();
   loadRecruitPreview();
   applyRecruitView();
-  // ★ #my / #info 해시 진입 시 내정보/현황 탭 자동 오픈 (구매양식 내정보 게이트 배너 링크용)
-  if (location.hash === "#my" || location.hash === "#info") {
+  // ★ 해시 진입 시 요청한 하단 탭을 자동 오픈.
+  //   #review = 리뷰 제출 완료 후 복귀 / #my·#info = 구매양식 내정보 게이트.
+  if (location.hash === "#review") {
+    try { switchTab("review"); } catch (_) {}
+  } else if (location.hash === "#my" || location.hash === "#info") {
     try { switchTab("my"); } catch (_) {}
   }
   // ★ 063 2단계: 공고에서 "타계정 정보 먼저 등록하기"로 넘어온 경우 —

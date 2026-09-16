@@ -10059,12 +10059,13 @@ function resetOrderFormForReentry() {
 /** ★ 리뷰어 메인화면으로 이동 = 신규 포털(index.html)
  *  구 search.html 의 screenSearch(아이에이리뷰 리뷰내역 화면)는 더 이상 메인으로 쓰지 않는다.
  *  리뷰어 로그인 세션(localStorage)은 동일 오리진이라 index.html 에서 그대로 유지된다. */
-function goToReviewerMain() {
+function goToReviewerMain(tab) {
   // 구매양식 입력 상태 정리 (혹시 모를 잔여 상태 초기화)
   try { resetOrderFormForReentry(); } catch (_) {}
   window._pendingOrderForm = false;
-  // 신규 리뷰어 홈(index.html = 루트)으로 전체 페이지 이동
-  window.location.href = "index.html";
+  // 신규 리뷰어 홈(index.html = 루트)으로 전체 페이지 이동.
+  // 리뷰 제출 완료 버튼은 방금 제출한 건을 확인할 수 있게 리뷰내역 탭을 지정한다.
+  window.location.href = tab === "review" ? "index.html#review" : "index.html";
 }
 
 async function quickEditCell(e, cell) {
