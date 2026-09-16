@@ -5,6 +5,11 @@ const crypto = require('crypto');
 const API_BASE = 'https://api.solapi.com';
 const SEND_PATH = '/messages/v4/send-many/detail';
 const LIST_PATH = '/messages/v4/list';
+const BALANCE_PATH = '/cash/v1/balance';
+const PRICING_PATH = '/pricing/v1/messaging?countryId=82&serviceMethod=MT';
+const BILLING_CACHE_TTL_MS = 60_000;
+
+let billingCache = null;
 
 function _config(env = process.env) {
   return {
@@ -155,11 +160,51 @@ async function getMessageStatus(messageId, opts = {}) {
   };
 }
 
+function _finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function getAccountBilling(opts = {}) {
+  const now = Date.now();
+  const canUseCache = !opts.fetchImpl;
+  if (canUseCache && billingCache && now - billingCache.cachedAt < BILLING_CACHE_TTL_MS) {
+    return billingCache.value;
+  }
+
+  const [cash, pricing] = await Promise.all([
+    _request(BALANCE_PATH, { fetchImpl: opts.fetchImpl }),
+    _request(PRICING_PATH, { fetchImpl: opts.fetchImpl }),
+  ]);
+  const balance = _finiteNumber(cash.balance);
+  const point = _finiteNumber(cash.point);
+  const unitPrice = _finiteNumber(pricing.ata);
+  if (balance == null || point == null || unitPrice == null) {
+    const err = new Error('SOLAPI_BILLING_RESPONSE_INVALID');
+    err.code = 'SOLAPI_BILLING_RESPONSE_INVALID';
+    throw err;
+  }
+
+  const value = {
+    available: true,
+    balance,
+    point,
+    spendable: balance + point,
+    unitPrice,
+    unitPriceVatIncluded: Math.round(unitPrice * 1.1 * 100) / 100,
+    autoRecharge: Number(cash.autoRecharge) > 0,
+    checkedAt: new Date(now).toISOString(),
+  };
+  if (canUseCache) billingCache = { cachedAt: now, value };
+  return value;
+}
+
 module.exports = {
   getSolapiStatus,
   createAuthorization,
   sendReviewAlimTalk,
   getMessageStatus,
+  getAccountBilling,
   _config,
   _firstResult,
 };
