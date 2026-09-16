@@ -362,13 +362,15 @@ router.get('/my-applications', async (req, res, next) => {
         rc.status AS "campaignStatus"
       FROM campaign_applications ca
       LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
-      WHERE (ca.phone8 = ANY($1)
-             OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-               SELECT 1 FROM reviewer_phone_changes rpc
-                WHERE rpc.old_phone8 = ca.owner_phone8
-                  AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-             ))
-             OR ca.owner_reviewer_id = $2)
+      WHERE (ca.owner_reviewer_id = $2
+             OR (ca.owner_reviewer_id IS NULL AND (
+               ca.phone8 = ANY($1)
+               OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                 SELECT 1 FROM reviewer_phone_changes rpc
+                  WHERE rpc.old_phone8 = ca.owner_phone8
+                    AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+               ))
+             )))
         -- 작업보드에서 참여행을 삭제하며 취소된 건은 리뷰어의 참여이력에서 제외한다.
         AND ca.status <> 'cancelled'
       ORDER BY ca.applied_at DESC
@@ -433,32 +435,34 @@ router.get('/my-status', async (req, res, next) => {
           ($2::uuid IS NULL AND cp.phone8 = ANY($1))
           OR cp.owner_reviewer_id = $2
           OR (cp.owner_reviewer_id IS NULL AND (
-            os.owner_reviewer_id = $2 OR ca.owner_reviewer_id = $2
-            OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-              SELECT 1 FROM reviewer_phone_changes rpc
-               WHERE rpc.old_phone8 = ca.owner_phone8
-                 AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-            ))
-            OR (
-              os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-              AND COALESCE(ca.owner_phone8, '') = ''
-              AND (pl.owner_reviewer_id = $2 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)))
-              AND (
-                regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                OR EXISTS (
-                  SELECT 1 FROM jsonb_array_elements(
-                    CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
-                  ) sub
-                  WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
-                    regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
-                    regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
+            os.owner_reviewer_id = $2
+            OR (os.owner_reviewer_id IS NULL AND (
+              ca.owner_reviewer_id = $2
+              OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                SELECT 1 FROM reviewer_phone_changes rpc
+                 WHERE rpc.old_phone8 = ca.owner_phone8
+                   AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+              ))
+              OR (
+                ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                AND (pl.owner_reviewer_id = $2 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)))
+                AND (
+                  regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
+                  OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
+                  OR EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(
+                      CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
+                    ) sub
+                    WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
+                      regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
+                      regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
+                    )
                   )
                 )
               )
-            )
-            OR (os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-                AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($1))
+              OR (ca.owner_reviewer_id IS NULL
+                  AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($1))
+            ))
           ))
         ))
         OR (cp.id IS NULL AND (
@@ -566,13 +570,15 @@ router.get('/my-status', async (req, res, next) => {
                rc.title, rc.thumbnail_url AS "thumbnailUrl"
           FROM campaign_applications ca
           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE (ca.phone8 = ANY($1)
-                OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                  SELECT 1 FROM reviewer_phone_changes rpc
-                   WHERE rpc.old_phone8 = ca.owner_phone8
-                     AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-                ))
-                OR ca.owner_reviewer_id = $2)
+         WHERE (ca.owner_reviewer_id = $2
+                OR (ca.owner_reviewer_id IS NULL AND (
+                  ca.phone8 = ANY($1)
+                  OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                    SELECT 1 FROM reviewer_phone_changes rpc
+                     WHERE rpc.old_phone8 = ca.owner_phone8
+                       AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                  ))
+                )))
            AND ((ca.status = 'applied' AND ca.expires_at > NOW())
                 OR ca.status = 'blog_pending')
          ORDER BY ca.applied_at DESC
@@ -748,37 +754,39 @@ router.get('/review-earnings', async (req, res, next) => {
             ($3::uuid IS NULL AND cp.phone8 = ANY($1))
             OR cp.owner_reviewer_id = $3
             OR (cp.owner_reviewer_id IS NULL AND (
-              os.owner_reviewer_id = $3 OR ca.owner_reviewer_id = $3
-              OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                SELECT 1 FROM reviewer_phone_changes rpc
-                 WHERE rpc.old_phone8 = ca.owner_phone8
-                   AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+              os.owner_reviewer_id = $3
+              OR (os.owner_reviewer_id IS NULL AND (
+                ca.owner_reviewer_id = $3
+                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                  SELECT 1 FROM reviewer_phone_changes rpc
+                   WHERE rpc.old_phone8 = ca.owner_phone8
+                     AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+                ))
+                OR (
+                  ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                  AND (pl.owner_reviewer_id = $3 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM reviewer_phone_changes rpc
+                         WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $3
+                      )))
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewers current_owner
+                     WHERE current_owner.id <> $3
+                       AND (
+                         current_owner.phone8 = cp.phone8
+                         OR EXISTS (
+                           SELECT 1 FROM jsonb_array_elements(
+                             CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
+                                  THEN current_owner.sub_accounts ELSE '[]'::jsonb END
+                           ) sub
+                            WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+                         )
+                       )
+                  )
+                )
+                OR (ca.owner_reviewer_id IS NULL
+                    AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($1))
               ))
-              OR (
-                os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-                 AND COALESCE(ca.owner_phone8, '') = ''
-                 AND (pl.owner_reviewer_id = $3 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)
-                     AND NOT EXISTS (
-                       SELECT 1 FROM reviewer_phone_changes rpc
-                        WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $3
-                     )))
-                 AND NOT EXISTS (
-                   SELECT 1 FROM reviewers current_owner
-                    WHERE current_owner.id <> $3
-                      AND (
-                        current_owner.phone8 = cp.phone8
-                        OR EXISTS (
-                          SELECT 1 FROM jsonb_array_elements(
-                            CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
-                                 THEN current_owner.sub_accounts ELSE '[]'::jsonb END
-                          ) sub
-                           WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
-                        )
-                      )
-                 )
-               )
-              OR (os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-                  AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($1))
             ))
           ))
           OR (cp.id IS NULL AND (
@@ -877,7 +885,7 @@ router.get('/review-earnings', async (req, res, next) => {
                OR os.owner_reviewer_id = $2
                OR (os.owner_reviewer_id IS NULL AND (
                  ca.owner_reviewer_id = $2
-                 OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                 OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
                    SELECT 1 FROM reviewer_phone_changes rpc
                     WHERE rpc.old_phone8 = ca.owner_phone8
                       AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)

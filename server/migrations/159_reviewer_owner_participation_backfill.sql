@@ -2,16 +2,28 @@
 -- 이름은 사용하지 않는다. 신청 시 서버가 기록한 owner_phone8이 등록리뷰어DB에서 유일한 경우와
 -- 이미 연결된 신청/주문 UUID만 따라가며, 모호하거나 근거 없는 행은 기존 레거시 상태로 남긴다.
 
-WITH unique_registered_owner AS (
-  SELECT r.phone8, MIN(r.id::text)::uuid AS reviewer_id
+WITH registered_owner_candidates AS (
+  SELECT r.phone8, r.id AS reviewer_id
     FROM reviewers r
    WHERE COALESCE(r.phone8, '') <> ''
-     AND NOT EXISTS (
-       SELECT 1 FROM reviewer_phone_changes rpc
-        WHERE rpc.old_phone8 = r.phone8 AND rpc.reviewer_id <> r.id
-     )
-   GROUP BY r.phone8
-  HAVING COUNT(*) = 1
+  UNION ALL
+  SELECT RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) AS phone8,
+         r.id AS reviewer_id
+    FROM reviewers r
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE WHEN jsonb_typeof(r.sub_accounts) = 'array'
+           THEN r.sub_accounts ELSE '[]'::jsonb END
+    ) sub
+   WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) <> ''
+), unique_registered_owner AS (
+  SELECT c.phone8, MIN(c.reviewer_id::text)::uuid AS reviewer_id
+    FROM registered_owner_candidates c
+   WHERE NOT EXISTS (
+     SELECT 1 FROM reviewer_phone_changes rpc
+      WHERE rpc.old_phone8 = c.phone8 AND rpc.reviewer_id <> c.reviewer_id
+   )
+   GROUP BY c.phone8
+  HAVING COUNT(DISTINCT c.reviewer_id) = 1
 )
 UPDATE campaign_applications ca
    SET owner_reviewer_id = u.reviewer_id
@@ -22,16 +34,28 @@ UPDATE campaign_applications ca
 
 -- participation_links.phone8은 리뷰 제출 당시 로그인 번호다. 등록DB에서 소유자가 유일할 때만
 -- UUID로 승격한다. 행 이름·연락처·갱신시각은 소유권을 바꾸지 않으며 타계정 미확정 건은 본계정에 귀속한다.
-WITH unique_registered_owner AS (
-  SELECT r.phone8, MIN(r.id::text)::uuid AS reviewer_id
+WITH registered_owner_candidates AS (
+  SELECT r.phone8, r.id AS reviewer_id
     FROM reviewers r
    WHERE COALESCE(r.phone8, '') <> ''
-     AND NOT EXISTS (
-       SELECT 1 FROM reviewer_phone_changes rpc
-        WHERE rpc.old_phone8 = r.phone8 AND rpc.reviewer_id <> r.id
-     )
-   GROUP BY r.phone8
-  HAVING COUNT(*) = 1
+  UNION ALL
+  SELECT RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) AS phone8,
+         r.id AS reviewer_id
+    FROM reviewers r
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE WHEN jsonb_typeof(r.sub_accounts) = 'array'
+           THEN r.sub_accounts ELSE '[]'::jsonb END
+    ) sub
+   WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) <> ''
+), unique_registered_owner AS (
+  SELECT c.phone8, MIN(c.reviewer_id::text)::uuid AS reviewer_id
+    FROM registered_owner_candidates c
+   WHERE NOT EXISTS (
+     SELECT 1 FROM reviewer_phone_changes rpc
+      WHERE rpc.old_phone8 = c.phone8 AND rpc.reviewer_id <> c.reviewer_id
+   )
+   GROUP BY c.phone8
+  HAVING COUNT(DISTINCT c.reviewer_id) = 1
 )
 UPDATE participation_links pl
    SET owner_reviewer_id = u.reviewer_id

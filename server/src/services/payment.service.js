@@ -243,9 +243,13 @@ async function listPaymentTargets(opts = {}) {
     // 계좌 해석 순서 = ① 현재 참여행/주문 소유자 → ② 현재 행 연락처 → ③ 레거시 제출 링크 → ④ 구매양식.
     const ownerAcct = ownerAcctMap[key + '||' + r.rowIndex] || null;
     const directAcct = acctMap[r.phone8] || null;
-    const acct = ownerAcct && ownerAcct.source !== 'owner_link'
-      ? ownerAcct
-      : directAcct || ownerAcct || _orderAccount(ord, r) || null;
+    // 같은 번호가 여러 등록 리뷰어에게 연결되면 현재 행 소유자를 확정할 수 없다.
+    // 이때 오래된 제출 링크로 빠지면 과거 소유자에게 송금되므로 owner_link는 사용하지 않는다.
+    const safeOwnerAcct = ownerAcct && ownerAcct.source === 'owner_link'
+      && acctMap.ambiguousPhone8s.has(r.phone8) ? null : ownerAcct;
+    const acct = safeOwnerAcct && safeOwnerAcct.source !== 'owner_link'
+      ? safeOwnerAcct
+      : directAcct || safeOwnerAcct || _orderAccount(ord, r) || null;
 
     // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
     // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
@@ -555,6 +559,7 @@ function _orderAccount(ord, row) {
  */
 async function _loadAccounts(phone8s) {
   const map = {};
+  Object.defineProperty(map, 'ambiguousPhone8s', { value: new Set(), enumerable: false });
   if (!phone8s.length) return map;
   const { rows: subs } = await pool.query(
     `SELECT RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) AS "phone8",
@@ -583,6 +588,8 @@ async function _loadAccounts(phone8s) {
       map[p8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
                   ownerReviewerId: s.reviewerId, participantIdentityId: null,
                   isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
+    } else {
+      map.ambiguousPhone8s.add(p8);
     }
   }
   const { rows: own } = await pool.query(
@@ -596,8 +603,16 @@ async function _loadAccounts(phone8s) {
     if (!ownByPhone.has(r.phone8)) ownByPhone.set(r.phone8, []);
     ownByPhone.get(r.phone8).push(r);
   }
+  for (const p8 of new Set([...subsByPhone.keys(), ...ownByPhone.keys()])) {
+    const ownerIds = new Set([
+      ...(subsByPhone.get(p8) || []).map(x => String(x.reviewerId)),
+      ...(ownByPhone.get(p8) || []).map(x => String(x.reviewerId)),
+    ]);
+    if (ownerIds.size > 1) map.ambiguousPhone8s.add(p8);
+  }
   for (const [p8, matches] of ownByPhone) {
-    if (matches.length !== 1) {
+    if (matches.length !== 1 || map.ambiguousPhone8s.has(p8)) {
+      if (matches.length !== 1) map.ambiguousPhone8s.add(p8);
       delete map[p8];
       continue;
     }
@@ -606,6 +621,7 @@ async function _loadAccounts(phone8s) {
                 ownerReviewerId: r.reviewerId, participantIdentityId: null,
                 isSub: false, name: r.name || '', ownerName: r.name || '' };
   }
+  for (const p8 of map.ambiguousPhone8s) delete map[p8];
   return map;
 }
 

@@ -25,12 +25,13 @@ const checks = [
     /cp\.owner_reviewer_id = \$1[\s\S]*cp\.owner_reviewer_id IS NULL/.test(search)
       && /cp\.owner_reviewer_id = \$3[\s\S]*cp\.owner_reviewer_id IS NULL/.test(reviewerRoutes)],
   ['현재 소유자 링크는 행 번호보다 우선하고 레거시 링크는 정확한 현재 계좌 뒤로 둔다',
-    /ownerAcct && ownerAcct\.source !== 'owner_link'[\s\S]*directAcct \|\| ownerAcct/.test(payment)],
+    /safeOwnerAcct && safeOwnerAcct\.source !== 'owner_link'[\s\S]*directAcct \|\| safeOwnerAcct/.test(payment)],
   ['입금 회차에 owner UUID와 participant identity를 박제한다',
     /owner_reviewer_id, participant_identity_id/.test(payment)
       && /it\.ownerReviewerId \|\| null, it\.participantIdentityId \|\| null/.test(payment)],
   ['백필은 이름을 쓰지 않고 유일한 owner_phone8과 기존 UUID 링크만 따른다',
-    /HAVING COUNT\(\*\) = 1/.test(migration)
+    /HAVING COUNT\(DISTINCT c\.reviewer_id\) = 1/.test(migration)
+      && /jsonb_array_elements[\s\S]*sub->>'phone'/.test(migration)
       && /ca\.owner_phone8 = u\.phone8/.test(migration)
       && !/reviewer_name|applicant_name\s*=|current_name\s*=/.test(migration)],
   ['등록DB에서 확정된 소유자는 오래된 링크·이름 불일치여도 본계정 범위에 포함한다',
@@ -46,7 +47,7 @@ const checks = [
     /reviewer_identity_aliases[\s\S]*a\.valid_from <= ca\.applied_at[\s\S]*ca\.applied_at < a\.valid_to/.test(migration)
       && !/current_phone8, MIN\(id::text\)::uuid AS identity_id/.test(migration)],
   ['다른 소유자가 과거에 쓴 번호는 현재 번호 소유자로 자동 승격하지 않는다',
-    /reviewer_phone_changes rpc[\s\S]*rpc\.old_phone8 = r\.phone8[\s\S]*rpc\.reviewer_id <> r\.id/.test(migration)
+    /reviewer_phone_changes rpc[\s\S]*rpc\.old_phone8 = c\.phone8[\s\S]*rpc\.reviewer_id <> c\.reviewer_id/.test(migration)
       && /movedPhoneOwners[\s\S]*historicalOwners/.test(payment)],
   ['과거 신청 owner_phone8도 번호 변경 이력이 있으면 현재 번호 보유자에게 노출하지 않는다',
     occurrences(search, 'rpc.old_phone8 = ca.owner_phone8') === 2
@@ -55,6 +56,14 @@ const checks = [
       && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$3/.test(search)
       && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$2::uuid IS NULL OR rpc\.reviewer_id <> \$2/.test(reviewerRoutes)
       && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$3::uuid IS NULL OR rpc\.reviewer_id <> \$3/.test(reviewerRoutes)],
+  ['주문 owner UUID가 있으면 충돌하는 신청 owner와 owner_phone8을 조회하지 않는다',
+    /os\.owner_reviewer_id = \$1\s+OR \(os\.owner_reviewer_id IS NULL AND \(\s+ca\.owner_reviewer_id = \$1/.test(search)
+      && /os\.owner_reviewer_id = \$3\s+OR \(os\.owner_reviewer_id IS NULL AND \(\s+ca\.owner_reviewer_id = \$3/.test(reviewerRoutes)
+      && /ca\.owner_reviewer_id IS NULL AND ca\.owner_phone8 = ANY/.test(search)
+      && /ca\.owner_reviewer_id IS NULL AND ca\.owner_phone8 = ANY/.test(reviewerRoutes)],
+  ['동일 번호 등록 소유자가 여러 명이면 오래된 제출 링크 계좌도 사용하지 않는다',
+    /ambiguousPhone8s\.has\(r\.phone8\)[\s\S]*\? null : ownerAcct/.test(payment)
+      && /ownerIds\.size > 1[\s\S]*ambiguousPhone8s\.add/.test(payment)],
   ['현재 참여행 owner UUID는 충돌하는 과거 링크보다 우선한다',
     /cp\.owner_reviewer_id = \$1[\s\S]*cp\.owner_reviewer_id IS NULL/.test(search)
       && /cp\.owner_reviewer_id = \$3[\s\S]*cp\.owner_reviewer_id IS NULL/.test(reviewerRoutes)],

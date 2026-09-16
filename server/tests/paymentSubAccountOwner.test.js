@@ -215,6 +215,21 @@ const owner = (over = {}) => Object.assign({
         { reviewerId: OWNER_ID, phone8: '87654321', name: '동일번호1', ...OWNER_ACCT },
         { reviewerId: '22222222-2222-2222-2222-222222222222', phone8: '87654321', name: '동일번호2', bankName: '신한은행', bankAccount: '000', accountHolder: '동일번호2' },
       ],
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+    });
+  });
+
+  await ta('2b-2-2 행 번호가 다른 리뷰어의 본계정·타계정에 함께 있으면 오래된 링크도 쓰지 않는다', async () => {
+    await withStubPool(handler({
+      subRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명의A', ownerName: '김수만', ...OWNER_ACCT }],
+      ownRows: [{ reviewerId: '22222222-2222-2222-2222-222222222222', phone8: '87654321', name: '본계정B', bankName: '신한은행', bankAccount: '000', accountHolder: '본계정B' }],
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID }],
+      owners: [owner()],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
       assert.ok(it.issues.includes('no_reviewer'));

@@ -134,7 +134,7 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
       ? `(os.owner_reviewer_id = $3
           OR (os.owner_reviewer_id IS NULL AND (
             ca.owner_reviewer_id = $3
-            OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+            OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
               SELECT 1 FROM reviewer_phone_changes rpc
                WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $3
             ))
@@ -298,37 +298,39 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
           (cp.id IS NOT NULL AND (
             cp.owner_reviewer_id = $1
             OR (cp.owner_reviewer_id IS NULL AND (
-              os.owner_reviewer_id = $1 OR ca.owner_reviewer_id = $1
-              OR (ca.owner_phone8 = ANY($2) AND NOT EXISTS (
-                SELECT 1 FROM reviewer_phone_changes rpc
-                 WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $1
-              ))
-              OR (
-                os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-                AND COALESCE(ca.owner_phone8, '') = ''
-                AND (pl.owner_reviewer_id = $1
-                     OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($2)
-                         AND NOT EXISTS (
-                           SELECT 1 FROM reviewer_phone_changes rpc
-                            WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
-                         )))
-                AND NOT EXISTS (
-                  SELECT 1 FROM reviewers current_owner
-                   WHERE current_owner.id <> $1
-                     AND (
-                       current_owner.phone8 = cp.phone8
-                       OR EXISTS (
-                         SELECT 1 FROM jsonb_array_elements(
-                           CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
-                                THEN current_owner.sub_accounts ELSE '[]'::jsonb END
-                         ) sub
-                          WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+              os.owner_reviewer_id = $1
+              OR (os.owner_reviewer_id IS NULL AND (
+                ca.owner_reviewer_id = $1
+                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($2) AND NOT EXISTS (
+                  SELECT 1 FROM reviewer_phone_changes rpc
+                   WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $1
+                ))
+                OR (
+                  ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                  AND (pl.owner_reviewer_id = $1
+                       OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($2)
+                           AND NOT EXISTS (
+                             SELECT 1 FROM reviewer_phone_changes rpc
+                              WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
+                           )))
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewers current_owner
+                     WHERE current_owner.id <> $1
+                       AND (
+                         current_owner.phone8 = cp.phone8
+                         OR EXISTS (
+                           SELECT 1 FROM jsonb_array_elements(
+                             CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
+                                  THEN current_owner.sub_accounts ELSE '[]'::jsonb END
+                           ) sub
+                            WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+                         )
                        )
-                     )
+                  )
                 )
-              )
-              OR (os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-                  AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($2))
+                OR (ca.owner_reviewer_id IS NULL
+                    AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($2))
+              ))
             ))
           ))
           OR (cp.id IS NULL AND (
