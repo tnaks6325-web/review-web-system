@@ -17,10 +17,12 @@ const captured = { queries: [] };
 let reviewRows = [];   // 본검색(FROM review_index, 메인) 결과
 let seenRows = [];     // dedup seen-set(FROM review_index, row_index IS NOT NULL) 결과
 let orderRows = [];    // 병합(FROM order_submissions) 결과
+let ownerReviewRows = null; // 로그인 ownerScope 전용 조회 결과
 
 const fakePool = {
   query: async (sql, params) => {
     captured.queries.push({ sql, params });
+    if (/FROM review_index ri[\s\S]*cp\.owner_reviewer_id = \$1/.test(sql) && ownerReviewRows) return { rows: ownerReviewRows };
     if (/FROM reviewers/.test(sql)) return { rows: [] };            // 타계정 없음 → phoneList=[p8]
     if (/set_limit/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ count: '0', built_at: null }] };
@@ -131,6 +133,21 @@ async function run() {
   assert.ok(m7, '7: written 주문 병합됨');
   assert.equal(m7.orderStage, 'reflected', "7: written → orderStage='reflected'(반영완료)");
   console.log('  7. written → 반영완료(reflected) ✓');
+
+  // ── 8) 로그인 홈 ownerScope는 이름/행 phone8 검색을 버리고 owner UUID 행만 사용 ──
+  captured.queries = []; reviewRows = [reviewRow({ idxName: '동명이인' })]; seenRows = []; orderRows = [];
+  ownerReviewRows = [reviewRow({ idxName: '제출정보명', rowIndex: 75, isSubmitted: true })];
+  const r8 = await searchByName('윤주희', '77045262', {
+    includeSubmitted: true,
+    ownerReviewerId: '11111111-1111-1111-1111-111111111111',
+    ownerPhone8s: ['77045262'],
+  });
+  assert.equal(r8.results.length, 1, '8: owner UUID 행 1건만 반환');
+  assert.equal(r8.results[0].idxName, '제출정보명', '8: 참여행 이름이 로그인 이름과 달라도 노출');
+  assert.ok(captured.queries.some(x => /cp\.owner_reviewer_id = \$1/.test(x.sql)), '8: owner UUID 조건 실행');
+  assert.ok(!captured.queries.some(x => /set_limit/.test(x.sql)), '8: 공개 이름 유사도 검색 미실행');
+  ownerReviewRows = null;
+  console.log('  8. 로그인 ownerScope — 참여행 이름·번호 불일치 허용 ✓');
 
   console.log('✅ orderMergeSearch 테스트 전체 통과');
 }

@@ -1509,7 +1509,7 @@ async function loadReviewList(user, opts = {}) {
   if (!silent) { _reviewListLoading = true; renderReviewSubTab(); }
   try {
     // includeSubmitted=1 → 제출완료 건 포함 응답 (isSubmitted로 대기/완료 분리)
-    const res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1" });
+    const res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1", ownerScope: "1" });
     if (res.error && !Array.isArray(res.results) && !Array.isArray(res.data)) throw new Error(res.error);
     const resultsRaw = res.data || res.results || [];
     // ★ '확인필요'(orderStage='attention') 카드는 리뷰어에게 그리지 않는다 — 서버(search.service)가 이미 걸러내지만,
@@ -1557,7 +1557,9 @@ async function _loadReviewEarnings(phone8) {
   if (!phone8 || phone8.length !== 8) { _reviewEarnings = { totals: null, doneTotals: null, items: {} }; renderReviewSummary(); return; }
   try {
     const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
-    const r = await fetch(base + '/api/reviewer/review-earnings?phone8=' + encodeURIComponent(phone8)).then(x => x.json());
+    const r = await fetch(base + '/api/reviewer/review-earnings?phone8=' + encodeURIComponent(phone8), {
+      headers: { ..._getAuthHeaders() },
+    }).then(x => x.json());
     if (r && r.ok) _reviewEarnings = { totals: r.totals || null, doneTotals: r.doneTotals || null, items: r.items || {} };
   } catch (_) { /* 조용히 무시 — 요약/배지 없이 목록은 유지 */ }
   renderReviewSummary();
