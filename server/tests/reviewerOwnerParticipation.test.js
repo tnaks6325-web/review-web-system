@@ -66,6 +66,12 @@ const checks = [
       && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$3/.test(search)
       && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$2::uuid IS NULL OR rpc\.reviewer_id <> \$2/.test(reviewerRoutes)
       && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$3::uuid IS NULL OR rpc\.reviewer_id <> \$3/.test(reviewerRoutes)],
+  ['과거 identity alias가 다른 소유자를 가리키는 owner_phone8도 홈·상태·예상금액에서 차단한다',
+    occurrences(search, 'ria.phone8 = ca.owner_phone8') === 2
+      && occurrences(reviewerRoutes, 'ria.phone8 = ca.owner_phone8') === 10
+      && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,100}rii\.owner_reviewer_id <> \$1/.test(search)
+      && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,120}\$2::uuid IS NULL OR rii\.owner_reviewer_id <> \$2/.test(reviewerRoutes)
+      && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,120}\$3::uuid IS NULL OR rii\.owner_reviewer_id <> \$3/.test(reviewerRoutes)],
   ['주문 owner UUID가 있으면 충돌하는 신청 owner와 owner_phone8을 조회하지 않는다',
     /os\.owner_reviewer_id = \$1\s+OR \(os\.owner_reviewer_id IS NULL AND \(\s+ca\.owner_reviewer_id = \$1/.test(search)
       && /os\.owner_reviewer_id = \$3\s+OR \(os\.owner_reviewer_id IS NULL AND \(\s+ca\.owner_reviewer_id = \$3/.test(reviewerRoutes)
@@ -90,8 +96,10 @@ const checks = [
     /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*COALESCE\(os\.participant_identity_id, ca\.participant_identity_id\)[\s\S]*ELSE os\.participant_identity_id END/.test(payment)
       && /CASE WHEN os\.owner_reviewer_id IS NULL OR os\.owner_reviewer_id = ca\.owner_reviewer_id[\s\S]*THEN ca\.phone8 ELSE NULL END/.test(payment)],
   ['무시트 예상금액은 변경된 번호가 아니라 주문·참여행 좌표로 기존 카드와 중복 제거한다',
-    /AND NOT EXISTS \([\s\S]*FROM review_index ri\s+WHERE \(\(ri\.sheet_id = os\.sheet_id[\s\S]*ri\.row_index = cp\.seq/.test(reviewerRoutes)
+    /AND NOT EXISTS \([\s\S]*FROM review_index ri[\s\S]*ri\.row_index = os\.sheet_row[\s\S]*ri\.row_index = cp\.seq/.test(reviewerRoutes)
       && !/FROM review_index ri\s+WHERE ri\.phone8 = ANY\(\$1\)\s+AND \(\(ri\.sheet_id = os\.sheet_id/.test(reviewerRoutes)],
+  ['무시트 예상금액의 좌표 중복 제거는 미제출 상태와 같은 소유자·타계정 신원만 인정한다',
+    /FROM review_index ri[\s\S]*WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2[\s\S]*NOT \$3::boolean[\s\S]*dri_cp\.participant_identity_id/.test(reviewerRoutes)],
   ['레거시 링크 owner UUID는 이름 변경 뒤에도 이름 대조 없이 참여현황에 포함한다',
     /pl\.owner_reviewer_id = \$2\s+OR \(pl\.owner_reviewer_id IS NULL AND pl\.phone8 = ANY\(\$1\)[\s\S]*regexp_replace/.test(reviewerRoutes)],
   ['만료·위조 리뷰어 토큰은 참여현황과 예상금액 모두 401 코드로 응답한다',

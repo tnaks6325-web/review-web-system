@@ -399,6 +399,12 @@ router.get('/my-applications', async (req, res, next) => {
                  SELECT 1 FROM reviewer_phone_changes rpc
                   WHERE rpc.old_phone8 = ca.owner_phone8
                     AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+               ) AND NOT EXISTS (
+                 SELECT 1
+                   FROM reviewer_identity_aliases ria
+                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                  WHERE ria.phone8 = ca.owner_phone8
+                    AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
                ))
              )))
         -- 작업보드에서 참여행을 삭제하며 취소된 건은 리뷰어의 참여이력에서 제외한다.
@@ -474,6 +480,12 @@ router.get('/my-status', async (req, res, next) => {
                 SELECT 1 FROM reviewer_phone_changes rpc
                  WHERE rpc.old_phone8 = ca.owner_phone8
                    AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+              ) AND NOT EXISTS (
+                SELECT 1
+                  FROM reviewer_identity_aliases ria
+                  JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                 WHERE ria.phone8 = ca.owner_phone8
+                   AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
               ))
               OR (
                 ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
@@ -576,6 +588,12 @@ router.get('/my-status', async (req, res, next) => {
                  SELECT 1 FROM reviewer_phone_changes rpc
                   WHERE rpc.old_phone8 = ca.owner_phone8
                     AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+               ) AND NOT EXISTS (
+                 SELECT 1
+                   FROM reviewer_identity_aliases ria
+                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                  WHERE ria.phone8 = ca.owner_phone8
+                    AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
                ))
                OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                    AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
@@ -646,6 +664,12 @@ router.get('/my-status', async (req, res, next) => {
                     SELECT 1 FROM reviewer_phone_changes rpc
                      WHERE rpc.old_phone8 = ca.owner_phone8
                        AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                  ) AND NOT EXISTS (
+                    SELECT 1
+                      FROM reviewer_identity_aliases ria
+                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                     WHERE ria.phone8 = ca.owner_phone8
+                       AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
                   ))
                 )))
            AND (NOT $3::boolean OR (
@@ -754,6 +778,12 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
                     SELECT 1 FROM reviewer_phone_changes rpc
                      WHERE rpc.old_phone8 = ca.owner_phone8
                        AND rpc.reviewer_id <> $1
+                  ) AND NOT EXISTS (
+                    SELECT 1
+                      FROM reviewer_identity_aliases ria
+                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                     WHERE ria.phone8 = ca.owner_phone8
+                       AND rii.owner_reviewer_id <> $1
                   ))
                   OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                       AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2))
@@ -857,6 +887,12 @@ router.get('/review-earnings', async (req, res, next) => {
                   SELECT 1 FROM reviewer_phone_changes rpc
                    WHERE rpc.old_phone8 = ca.owner_phone8
                      AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+                ) AND NOT EXISTS (
+                  SELECT 1
+                    FROM reviewer_identity_aliases ria
+                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                   WHERE ria.phone8 = ca.owner_phone8
+                     AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
                 ))
                 OR (
                   ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
@@ -973,6 +1009,12 @@ router.get('/review-earnings', async (req, res, next) => {
                      SELECT 1 FROM reviewer_phone_changes rpc
                       WHERE rpc.old_phone8 = ca.owner_phone8
                         AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+                   ) AND NOT EXISTS (
+                     SELECT 1
+                       FROM reviewer_identity_aliases ria
+                       JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                      WHERE ria.phone8 = ca.owner_phone8
+                        AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
                    ))
                    OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                        AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
@@ -988,6 +1030,12 @@ router.get('/review-earnings', async (req, res, next) => {
                    SELECT 1 FROM reviewer_phone_changes rpc
                     WHERE rpc.old_phone8 = ca.owner_phone8
                       AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+                 ) AND NOT EXISTS (
+                   SELECT 1
+                     FROM reviewer_identity_aliases ria
+                     JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                    WHERE ria.phone8 = ca.owner_phone8
+                      AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
                  ))
                  OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                      AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
@@ -1046,6 +1094,12 @@ router.get('/review-earnings', async (req, res, next) => {
                   SELECT 1 FROM reviewer_phone_changes rpc
                    WHERE rpc.old_phone8 = ca.owner_phone8
                      AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                ) AND NOT EXISTS (
+                  SELECT 1
+                    FROM reviewer_identity_aliases ria
+                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                   WHERE ria.phone8 = ca.owner_phone8
+                     AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
                 ))
                 OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                     AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
@@ -1061,6 +1115,12 @@ router.get('/review-earnings', async (req, res, next) => {
                 SELECT 1 FROM reviewer_phone_changes rpc
                  WHERE rpc.old_phone8 = ca.owner_phone8
                    AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+              ) AND NOT EXISTS (
+                SELECT 1
+                  FROM reviewer_identity_aliases ria
+                  JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                 WHERE ria.phone8 = ca.owner_phone8
+                   AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
               ))
               OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                   AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
@@ -1086,17 +1146,82 @@ router.get('/review-earnings', async (req, res, next) => {
              "참여중 3건 / 49,800원"처럼 **건수와 금액이 함께 부풀었다**(2026-08-19 실측).
              → 리뷰 내역 카드 dedup 과 **같은 키**(작업표 줄 = 주문 id 링크)로도 짝짓는다. */
           AND NOT EXISTS (
-            SELECT 1 FROM review_index ri
-             WHERE ((ri.sheet_id = os.sheet_id
+            SELECT 1
+              FROM review_index ri
+              LEFT JOIN campaign_participants dri_cp
+                ON dri_cp.sheet_id = ri.sheet_id AND dri_cp.tab_name = ri.tab_name
+               AND dri_cp.seq = ri.row_index AND dri_cp.deleted_at IS NULL AND dri_cp.active = TRUE
+              LEFT JOIN order_submissions dri_os
+                ON dri_os.id = dri_cp.order_submission_id AND dri_os.deleted_at IS NULL
+              LEFT JOIN LATERAL (
+                SELECT app.owner_reviewer_id, app.owner_phone8, app.phone8, app.participant_identity_id
+                  FROM campaign_applications app
+                 WHERE app.id = dri_os.campaign_application_id OR app.order_submission_id = dri_os.id
+                 ORDER BY (app.id = dri_os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
+                 LIMIT 1
+              ) dri_ca ON TRUE
+              LEFT JOIN participation_links dri_pl
+                ON dri_pl.sheet_id = ri.sheet_id AND dri_pl.tab_name = ri.tab_name
+               AND dri_pl.row_index = ri.row_index
+             WHERE NOT COALESCE(ri.is_submitted, FALSE)
+               AND ((ri.sheet_id = os.sheet_id
                      AND ri.tab_name = os.tab_name
                      AND ri.row_index = os.sheet_row)
-                 -- 같은 작업표 자리라도 기존 이력이 이미 제출완료면 새 주문을 가리지 않는다.
-                 -- 미제출 행만 같은 참여의 중복 후보가 될 수 있다.
                  OR (cp.id IS NOT NULL
-                     AND NOT COALESCE(ri.is_submitted, FALSE)
                      AND ri.sheet_id = cp.sheet_id
                      AND ri.tab_name = cp.tab_name
                      AND ri.row_index = cp.seq))
+               -- 좌표가 같아도 다른 소유자의 과거 행이면 현재 주문을 숨기지 않는다.
+               AND (
+                 (dri_cp.id IS NOT NULL AND (
+                   ($2::uuid IS NULL AND dri_cp.phone8 = ANY($1))
+                   OR dri_cp.owner_reviewer_id = $2
+                   OR (dri_cp.owner_reviewer_id IS NULL AND (
+                     dri_os.owner_reviewer_id = $2
+                     OR (dri_os.owner_reviewer_id IS NULL AND (
+                       dri_ca.owner_reviewer_id = $2
+                       OR (dri_ca.owner_reviewer_id IS NULL AND dri_ca.owner_phone8 = ANY($1)
+                           AND NOT EXISTS (
+                             SELECT 1 FROM reviewer_phone_changes rpc
+                              WHERE rpc.old_phone8 = dri_ca.owner_phone8
+                                AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                           )
+                           AND NOT EXISTS (
+                             SELECT 1
+                               FROM reviewer_identity_aliases ria
+                               JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                              WHERE ria.phone8 = dri_ca.owner_phone8
+                                AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
+                           ))
+                     ))
+                   ))
+                 ))
+                 OR (dri_cp.id IS NULL AND (
+                   dri_pl.owner_reviewer_id = $2
+                   OR (dri_pl.owner_reviewer_id IS NULL
+                       AND COALESCE(dri_pl.phone8, ri.phone8) = ANY($1)
+                       AND NOT EXISTS (
+                         SELECT 1 FROM reviewer_phone_changes rpc
+                          WHERE rpc.old_phone8 = COALESCE(dri_pl.phone8, ri.phone8)
+                            AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                       )
+                       AND NOT EXISTS (
+                         SELECT 1
+                           FROM reviewer_identity_aliases ria
+                           JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                          WHERE ria.phone8 = COALESCE(dri_pl.phone8, ri.phone8)
+                            AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
+                       ))
+                 ))
+               )
+               AND (NOT $3::boolean OR (
+                 COALESCE(dri_cp.participant_identity_id, dri_os.participant_identity_id,
+                          dri_ca.participant_identity_id) = $4
+                 OR (dri_cp.participant_identity_id IS NULL
+                     AND dri_os.participant_identity_id IS NULL
+                     AND dri_ca.participant_identity_id IS NULL
+                     AND COALESCE(dri_cp.phone8, dri_ca.phone8, dri_pl.phone8, ri.phone8) = ANY($1))
+               ))
           )`,
       [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]
     );

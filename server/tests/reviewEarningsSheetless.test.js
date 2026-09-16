@@ -46,9 +46,19 @@ assert.match(
   /NOT EXISTS \([\s\S]*FROM review_index ri[\s\S]*ri\.row_index = os\.sheet_row/,
   'a sheet-indexed order must not be counted again as a sheetless order'
 );
-const dedup = (body.match(/AND NOT EXISTS \(\s*SELECT 1 FROM review_index ri[\s\S]*?\n\s*\)`,/) || [''])[0];
+const dedup = (body.match(/AND NOT EXISTS \(\s*SELECT 1\s+FROM review_index ri[\s\S]*?\n\s*\)`,/) || [''])[0];
 assert.ok(dedup && !/ri\.phone8 = ANY/.test(dedup),
   'owner-UUID rows must deduplicate by the order/participant coordinate even after their phone changes');
+assert.match(
+  dedup,
+  /WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2/,
+  'a stale or submitted row owned by someone else must not hide the selected order'
+);
+assert.match(
+  dedup,
+  /NOT \$3::boolean[\s\S]*dri_cp\.participant_identity_id[\s\S]*= \$4/,
+  'sub-account deduplication must stay within the authenticated participant identity'
+);
 assert.match(
   body,
   /cp\.owner_reviewer_id = \$2[\s\S]*cp\.owner_reviewer_id IS NULL[\s\S]*os\.owner_reviewer_id = \$2/,
