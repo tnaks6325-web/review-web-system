@@ -62,6 +62,14 @@ function _parseRowJson(rowJson) {
 // 입금 컬럼 키워드 (admin.routes.js 대시보드 집계와 동일 판정)
 const PAYMENT_COL_KEYWORDS = ['입금', '페이백', '입금완료', '입금확인', '입금여부'];
 
+// 3회 알림 후 최종기한까지 미작성으로 종결된 행은 리뷰 제출대기에서 다시 열지 않는다.
+// is_submitted를 거짓 완료값으로 바꾸지 않고 별도 종결 원장을 확인한다.
+const OPEN_REVIEW_COND = `NOT EXISTS (
+  SELECT 1 FROM review_reminder_states rrs
+   WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
+     AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
+)`;
+
 /**
  * 입금 완료 여부 — is_submitted2='PAID'(입금칸 감지+값 존재) 우선,
  * 미감지 탭은 row_json의 입금 키워드 컬럼에 값이 있으면 완료로 간주(대시보드 폴백과 동일)
@@ -545,6 +553,7 @@ async function searchByName(query, phone8, opts = {}) {
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (
           ri.phone8 = ANY($${phoneListParam})                              -- P0: 연락처 phone8 단독 통과
@@ -581,6 +590,7 @@ async function searchByName(query, phone8, opts = {}) {
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))
       ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
@@ -604,6 +614,7 @@ async function searchByName(query, phone8, opts = {}) {
       LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
         AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       WHERE ${submittedState} = FALSE
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
@@ -840,6 +851,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (
           ri.phone8 = $${phoneParam}
@@ -863,6 +875,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))
       ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
@@ -879,6 +892,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
         AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       WHERE ${submittedState} = FALSE
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (ri.reviewer_name ILIKE $${nameParam}
              OR ri.recipient_name ILIKE $${nameParam})

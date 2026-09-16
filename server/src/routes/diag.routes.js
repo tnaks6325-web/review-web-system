@@ -1679,6 +1679,18 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       }
     }
 
+    if (slot === 'review') {
+      const closedReminder = await require('../services/reviewReminder.service')
+        .closedStateForTarget({ sheetId, tabName, rowIndex });
+      if (closedReminder) {
+        return res.status(409).json({
+          ok: false,
+          code: 'REVIEW_CLOSED_NO_REVIEW',
+          error: '최종 제출기한이 지나 미작성으로 종결된 작업입니다.',
+        });
+      }
+    }
+
     const _riSvc = require('../services/reviewInspect.service');
     // ★ 최종 서버 방어: 한 요청에 여러 장이 있어도 한 장이라도 반영 완료 중복이면
     //   어떤 파일도 Drive에 올리지 않는다. 프런트 검사 우회·응답 경쟁에도 제출은 여기서 멈춘다.

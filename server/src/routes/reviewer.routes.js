@@ -462,7 +462,11 @@ router.get('/my-status', async (req, res, next) => {
         tc.manager,
         tc.review_type AS "reviewType",
         tc.delivery_type AS "deliveryType",
-        tc.is_closed AS "isClosed"
+        tc.is_closed AS "isClosed",
+        (SELECT s.review_status FROM review_reminder_states s
+          WHERE s.sheet_id = ri.sheet_id AND s.tab_name = ri.tab_name
+            AND s.row_index = ri.row_index AND s.review_status = 'closed_no_review'
+          LIMIT 1) AS "reviewReminderStatus"
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       LEFT JOIN campaign_participants cp
@@ -591,6 +595,7 @@ router.get('/my-status', async (req, res, next) => {
       if (r.isSubmitted) stage = 'submitted'; // 리뷰 제출완료
       if (r.paymentStatus === 'PAID') stage = 'paid'; // 입금완료
       if (r.isClosed && !r.isSubmitted) stage = 'closed'; // 마감(미제출)
+      if (r.reviewReminderStatus === 'closed_no_review') stage = 'closed_no_review';
 
       return { ...r, stage, source: 'review_index' };
     });
@@ -846,6 +851,11 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
          AND NOT COALESCE(cp.is_submitted, FALSE)
          AND NOT COALESCE(ri.is_submitted, FALSE)
          AND NOT EXISTS (
+           SELECT 1 FROM review_reminder_states rrs
+            WHERE rrs.order_submission_id = os.id
+              AND rrs.review_status = 'closed_no_review'
+         )
+         AND NOT EXISTS (
            SELECT 1 FROM workdesk_participant_deletions wd
             WHERE wd.order_submission_id = os.id
                OR (wd.sheet_id = ri.sheet_id AND wd.tab_name = ri.tab_name AND wd.seq = ri.row_index)
@@ -897,7 +907,7 @@ router.get('/review-earnings', async (req, res, next) => {
     //     키워드 배열을 그대로 패턴화해 판정이 갈라지지 않게 한다(row_json은 서버로 안 끌어옴 = 메모리 안전).
     const payPatterns = PAYMENT_COL_KEYWORDS.map(k => '%' + k + '%');
     const { rows: riRows } = await pool.query(
-       `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
+      `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
                ri.is_submitted AS "isSubmitted", ri.start_date AS "startDate",
                ri.row_json AS "rowJson",
                (ri.is_submitted2 = 'PAID' OR EXISTS (
@@ -1008,7 +1018,12 @@ router.get('/review-earnings', async (req, res, next) => {
             ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
             AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($1)
           )
-        ))`,
+        ))
+        AND NOT EXISTS (
+          SELECT 1 FROM review_reminder_states rrs
+           WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
+             AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
+        )`,
       [phoneList, payPatterns, ownerReviewerId, restrictParticipant, participantIdentityId]
     );
     const sheetIds = [...new Set(riRows.map(r => r.sheetId))];
@@ -1204,6 +1219,10 @@ router.get('/review-earnings', async (req, res, next) => {
                     RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
           ))
           AND os.deleted_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM review_reminder_states rrs
+             WHERE rrs.order_submission_id = os.id AND rrs.review_status = 'closed_no_review'
+          )
           -- 신청 FK·공고 메타가 누락됐어도 campaign:<공고ID> 작업표 주문은 리뷰어에게 숨기지 않는다.
           -- 공고 메타는 리뷰비·썸네일 보강용일 뿐, 참여 이력 노출의 전제는 아니다.
           AND (rc.id IS NOT NULL OR os.sheet_id LIKE 'campaign:%')

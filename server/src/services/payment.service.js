@@ -130,6 +130,12 @@ async function listPaymentTargets(opts = {}) {
     'ri.is_submitted = TRUE',
     'ri.row_index IS NOT NULL',
     "COALESCE(ri.phone8,'') <> ''",
+    // 알림톡 3회 성공 뒤 최종기한까지 미작성으로 종결된 작업은, 나중에 리뷰칸이 바뀌어도
+    // 자동 입금대상으로 되살리지 않는다. 실제 제출 여부(is_submitted)와 종결 원장은 별개다.
+    `NOT EXISTS (
+        SELECT 1 FROM review_reminder_states rrs
+         WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
+           AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review')`,
     // 미입금 — search.service._isPaid 와 동일 규칙(SQL 판)
     `NOT (ri.is_submitted2 = 'PAID' OR EXISTS (
         SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv

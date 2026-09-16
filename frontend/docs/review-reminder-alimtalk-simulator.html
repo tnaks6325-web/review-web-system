@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>리뷰 미작성 알림톡 · 관리자 시뮬레이터</title>
+  <style>
+    :root {
+      --paper: #f4f6f9;
+      --card: #ffffff;
+      --card-2: #f1f4f8;
+      --ink: #101828;
+      --muted: #667085;
+      --faint: #98a2b3;
+      --line: #e6eaf0;
+      --line-2: #d0d9e4;
+      --blue: #2563eb;
+      --blue-deep: #1d4ed8;
+      --blue-soft: #eff4ff;
+      --blue-line: #d7e3fd;
+      --green: #0f9f6e;
+      --green-soft: #ecfdf5;
+      --orange: #d97706;
+      --orange-soft: #fff7ed;
+      --red: #d92d20;
+      --red-soft: #fff1f0;
+      --kakao: #fee500;
+      --kakao-ink: #191919;
+      --shadow: 0 12px 28px rgba(16, 24, 40, .08);
+      --sans: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: light; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      font-variant-numeric: tabular-nums;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .sim-ribbon {
+      position: fixed;
+      inset: 0 0 auto 0;
+      height: 28px;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #111827;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .sim-ribbon i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--kakao);
+      box-shadow: 0 0 0 4px rgba(254, 229, 0, .14);
+    }
+
+    .app-shell {
+      min-height: 100vh;
+      padding-top: 28px;
+      display: grid;
+      grid-template-columns: 228px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 28px;
+      height: calc(100vh - 28px);
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 18px 14px 14px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 2px 8px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 900;
+      letter-spacing: -.05em;
+      box-shadow: 0 8px 18px rgba(37, 99, 235, .22);
+    }
+    .brand-copy b { display: block; font-size: 14px; letter-spacing: -.02em; }
+    .brand-copy span { color: var(--faint); font-size: 10px; font-weight: 700; }
+
+    .nav-label {
+      padding: 18px 10px 7px;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .11em;
+    }
+    .nav-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 11px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+      text-align: left;
+      cursor: default;
+    }
+    .nav-item .icon {
+      width: 22px;
+      color: var(--faint);
+      text-align: center;
+    }
+    .nav-item.on {
+      background: var(--blue-soft);
+      border-color: var(--blue-line);
+      color: var(--blue-deep);
+    }
+    .nav-item.on .icon { color: var(--blue); }
+    .nav-count {
+      margin-left: auto;
+      min-width: 22px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--blue-line);
+      font-size: 10px;
+      text-align: center;
+    }
+    .sidebar-foot {
+      margin-top: auto;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--card-2);
+    }
+    .sidebar-foot .live {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--green);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .sidebar-foot .live::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 3px rgba(15, 159, 110, .13);
+    }
+    .sidebar-foot p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+
+    .main { min-width: 0; }
+    .topbar {
+      position: sticky;
+      top: 28px;
+      z-index: 20;
+      min-height: 58px;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(255,255,255,.94);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+    .crumb { color: var(--faint); font-size: 12px; }
+    .crumb b { color: var(--ink); }
+    .top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .btn {
+      height: 34px;
+      padding: 0 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid var(--line-2);
+      border-radius: 9px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: transform .12s, border-color .14s, background .14s, box-shadow .14s;
+    }
+    .btn:hover { border-color: var(--blue-line); background: var(--blue-soft); }
+    .btn:active { transform: scale(.98); }
+    .btn:focus-visible, .stage-tab:focus-visible, .row:focus-visible, input:focus-visible {
+      outline: 3px solid rgba(37,99,235,.22);
+      outline-offset: 2px;
+    }
+    .btn.primary {
+      color: #fff;
+      background: var(--blue);
+      border-color: var(--blue);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, .22);
+    }
+    .btn.primary:hover { background: var(--blue-deep); }
+    .btn.dark { background: #111827; color: #fff; border-color: #111827; }
+    .btn.danger { color: var(--red); border-color: #f3c7c4; background: var(--red-soft); }
+    .btn.small { height: 29px; padding: 0 10px; font-size: 11px; }
+
+    .content { max-width: 1540px; margin: 0 auto; padding: 24px; }
+    .page-head {
+      display: flex;
+      align-items: flex-end;
+      gap: 24px;
+      padding: 4px 2px 19px;
+    }
+    .eyebrow {
+      color: var(--blue);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 4px 0 5px; font-size: clamp(25px, 2.5vw, 34px); line-height: 1.2; letter-spacing: -.045em; }
+    .page-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .policy-badge {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .policy-badge b { color: var(--ink); }
+    .policy-badge .lock { color: var(--green); }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .kpi {
+      position: relative;
+      min-height: 92px;
+      padding: 14px 15px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+    .kpi::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 3px;
+      background: var(--line);
+    }
+    .kpi.accent::after { background: var(--blue); }
+    .kpi.warn::after { background: var(--orange); }
+    .kpi.safe::after { background: var(--green); }
+    .kpi .label { color: var(--muted); font-size: 11px; font-weight: 750; }
+    .kpi .value { margin-top: 6px; font-size: 24px; font-weight: 850; letter-spacing: -.04em; }
+    .kpi .hint { margin-top: 1px; color: var(--faint); font-size: 10px; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(620px, 1fr) 382px;
+      gap: 12px;
+      align-items: start;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(16,24,40,.02);
+    }
+    .panel-head {
+      min-height: 56px;
+      padding: 11px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-head h2 { margin: 0; font-size: 14px; letter-spacing: -.02em; }
+    .panel-head .sub { color: var(--faint); font-size: 10px; }
+    .panel-head .head-actions { margin-left: auto; display: flex; gap: 7px; }
+    .search {
+      width: 220px;
+      height: 32px;
+      padding: 0 10px 0 30px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--card-2);
+      color: var(--ink);
+      outline: none;
+      font-size: 11px;
+      background-image: radial-gradient(circle at 12px 13px, transparent 4px, #98a2b3 4px, #98a2b3 5px, transparent 5px), linear-gradient(45deg, transparent 48%, #98a2b3 49%, #98a2b3 55%, transparent 56%);
+      background-size: 22px 22px, 8px 8px;
+      background-position: 0 0, 16px 17px;
+      background-repeat: no-repeat;
+    }
+    .search:focus { border-color: var(--blue); background-color: #fff; }
+
+    .queue { overflow: hidden; }
+    .table-head, .row {
+      display: grid;
+      grid-template-columns: minmax(160px, 1.2fr) minmax(180px, 1.25fr) 105px 118px 126px 92px;
+      align-items: center;
+      gap: 10px;
+    }
+    .table-head {
+      padding: 8px 14px;
+      background: var(--card-2);
+      border-bottom: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .rows { min-height: 148px; }
+    .row {
+      position: relative;
+      width: 100%;
+      padding: 12px 14px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      text-align: left;
+      cursor: pointer;
+    }
+    .row:hover { background: #fbfcfe; }
+    .row.selected { background: var(--blue-soft); }
+    .row.selected::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: var(--blue);
+    }
+    .person { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .avatar {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      flex: none;
+      border-radius: 9px;
+      background: #fff;
+      border: 1px solid var(--blue-line);
+      color: var(--blue-deep);
+      font-size: 11px;
+      font-weight: 850;
+    }
+    .person b, .product b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .person small, .product small, .cell small { display: block; color: var(--faint); font-size: 10px; }
+    .cell { color: var(--muted); font-size: 11px; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      width: fit-content;
+      padding: 3px 7px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .status.warn { color: var(--orange); background: var(--orange-soft); border: 1px solid #fed7aa; }
+    .status.safe { color: var(--green); background: var(--green-soft); border: 1px solid #b7ead6; }
+    .status.danger { color: var(--red); background: var(--red-soft); border: 1px solid #f5c2bd; }
+    .empty {
+      display: none;
+      min-height: 148px;
+      place-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .flow-wrap { padding: 16px 16px 17px; }
+    .flow-title { display: flex; align-items: center; gap: 8px; margin-bottom: 13px; }
+    .flow-title b { font-size: 12px; }
+    .flow-title span { color: var(--faint); font-size: 10px; }
+    .flow-title .sim-chip { margin-left: auto; }
+    .flow {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      padding-top: 3px;
+    }
+    .flow::before {
+      content: "";
+      position: absolute;
+      top: 20px;
+      left: 12%;
+      right: 12%;
+      height: 2px;
+      background: var(--line-2);
+    }
+    .flow-step { position: relative; z-index: 1; text-align: center; }
+    .flow-dot {
+      width: 36px;
+      height: 36px;
+      margin: 0 auto 7px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      border: 2px solid var(--line-2);
+      background: #fff;
+      color: var(--faint);
+      font: 800 11px/1 var(--mono);
+    }
+    .flow-step.done .flow-dot { color: #fff; border-color: var(--green); background: var(--green); }
+    .flow-step.current .flow-dot {
+      color: var(--kakao-ink);
+      border-color: #d5bd00;
+      background: var(--kakao);
+      box-shadow: 0 0 0 5px rgba(254,229,0,.2);
+    }
+    .flow-step.closed .flow-dot { color: #fff; border-color: #111827; background: #111827; }
+    .flow-step b { display: block; font-size: 11px; }
+    .flow-step small { color: var(--faint); font-size: 9px; }
+
+    .policy {
+      margin: 0 16px 16px;
+      padding: 11px 12px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--card-2);
+    }
+    .policy b { display: block; font-size: 11px; }
+    .policy p { margin: 2px 0 0; color: var(--muted); font-size: 10px; }
+    .guard {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--green);
+      font-size: 10px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .guard::before { content: "✓"; width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; background: var(--green-soft); border: 1px solid #b7ead6; }
+
+    .preview-panel { position: sticky; top: 98px; overflow: hidden; }
+    .preview-head {
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    .preview-head b { font-size: 13px; }
+    .preview-head span { color: var(--faint); font-size: 10px; }
+    .sim-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #111827;
+      color: #fff;
+      font: 800 9px/1.4 var(--mono);
+      letter-spacing: .03em;
+    }
+    .sim-chip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--kakao); }
+    .stage-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 10px 12px 0; }
+    .stage-tab {
+      padding: 7px 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--card-2);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .stage-tab.on { color: var(--blue-deep); background: var(--blue-soft); border-color: var(--blue-line); }
+
+    .phone-stage { padding: 12px; }
+    .phone {
+      width: min(100%, 330px);
+      margin: 0 auto;
+      overflow: hidden;
+      border: 7px solid #20242d;
+      border-radius: 27px;
+      background: #b7c8d4;
+      box-shadow: 0 18px 32px rgba(16,24,40,.18);
+    }
+    .phone-bar {
+      height: 27px;
+      padding: 0 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #20242d;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+    }
+    .chat-head {
+      height: 47px;
+      padding: 0 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .channel-icon { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; background: var(--kakao); color: #2d2300; font-size: 10px; font-weight: 900; }
+    .chat-head b { font-size: 11px; }
+    .chat-head small { display: block; color: var(--faint); font-size: 8px; }
+    .chat-body { min-height: 360px; padding: 13px 10px 18px; background: #b7c8d4; }
+    .timestamp { margin-bottom: 9px; color: rgba(17,24,39,.56); font-size: 8px; text-align: center; }
+    .message-row { display: flex; gap: 7px; align-items: flex-start; }
+    .message-avatar { width: 27px; height: 27px; display: grid; place-items: center; flex: none; border-radius: 50%; background: var(--kakao); font-size: 9px; font-weight: 900; }
+    .bubble-wrap { min-width: 0; }
+    .sender { margin: 0 0 4px 2px; color: #3a4650; font-size: 8px; font-weight: 700; }
+    .bubble {
+      overflow: hidden;
+      border-radius: 4px 12px 12px 12px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(16,24,40,.08);
+    }
+    .bubble-signal { height: 5px; background: var(--kakao); }
+    .message-copy { padding: 12px 12px 10px; color: #202124; font-size: 10px; line-height: 1.62; white-space: pre-line; }
+    .message-copy b { font-weight: 850; }
+    .kakao-button {
+      width: calc(100% - 20px);
+      height: 34px;
+      margin: 0 10px 10px;
+      border: 0;
+      border-radius: 6px;
+      background: #f0f1f3;
+      color: #29323a;
+      font-size: 9px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .kakao-button:hover { background: #e7e9ed; }
+
+    .preview-meta { padding: 0 12px 12px; }
+    .meta-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 1px; border-bottom: 1px solid var(--line); font-size: 10px; }
+    .meta-row:last-child { border-bottom: 0; }
+    .meta-row span { color: var(--faint); }
+    .meta-row b { font-weight: 750; }
+    .preview-actions { display: grid; grid-template-columns: 1fr auto; gap: 7px; padding: 0 12px 12px; }
+    .preview-actions .btn { width: 100%; }
+
+    .activity { margin-top: 12px; }
+    .activity-body { padding: 0 14px 4px; }
+    .event {
+      display: grid;
+      grid-template-columns: 74px 22px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 48px;
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+    }
+    .event:last-child { border-bottom: 0; }
+    .event time { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+    .event-icon { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--green-soft); color: var(--green); font-size: 10px; font-weight: 900; }
+    .event p { margin: 0; color: var(--muted); }
+    .event p b { color: var(--ink); }
+    .event .provider { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      z-index: 120;
+      min-width: 280px;
+      max-width: calc(100vw - 30px);
+      padding: 11px 14px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border-radius: 10px;
+      background: #111827;
+      color: #fff;
+      box-shadow: 0 16px 38px rgba(0,0,0,.24);
+      opacity: 0;
+      transform: translate(-50%, 14px);
+      pointer-events: none;
+      transition: .2s ease;
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .toast::before { content: "✓"; width: 21px; height: 21px; display: grid; place-items: center; border-radius: 50%; background: var(--green); }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 110;
+      display: none;
+      place-items: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, .52);
+      backdrop-filter: blur(5px);
+    }
+    .modal-backdrop.open { display: grid; }
+    .modal {
+      width: min(440px, 100%);
+      overflow: hidden;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 24px 64px rgba(15,23,42,.28);
+      animation: modalIn .18s ease-out;
+    }
+    .modal-head { padding: 17px 18px 12px; border-bottom: 1px solid var(--line); }
+    .modal-head .sim-chip { margin-bottom: 8px; }
+    .modal-head h3 { margin: 0; font-size: 18px; letter-spacing: -.03em; }
+    .modal-head p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .modal-body { padding: 15px 18px; }
+    .confirm-grid { display: grid; grid-template-columns: 100px 1fr; gap: 8px; font-size: 11px; }
+    .confirm-grid span { color: var(--faint); }
+    .confirm-grid b { font-weight: 750; }
+    .no-send {
+      margin-top: 13px;
+      padding: 9px 10px;
+      border: 1px solid #fed7aa;
+      border-radius: 8px;
+      background: var(--orange-soft);
+      color: #9a4d04;
+      font-size: 10px;
+      font-weight: 750;
+    }
+    .modal-foot { padding: 12px 18px 17px; display: flex; justify-content: flex-end; gap: 7px; }
+
+    @keyframes modalIn { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+    @media (max-width: 1120px) {
+      .app-shell { grid-template-columns: 78px minmax(0, 1fr); }
+      .brand-copy, .nav-item > span:not(.icon):not(.nav-count), .nav-label, .sidebar-foot p { display: none; }
+      .brand { justify-content: center; padding-inline: 0; }
+      .nav-item { justify-content: center; }
+      .nav-count { position: absolute; transform: translate(13px,-12px); padding: 0 5px; }
+      .sidebar-foot { padding: 10px 7px; }
+      .sidebar-foot .live { justify-content: center; font-size: 0; }
+      .workspace { grid-template-columns: minmax(560px, 1fr) 350px; }
+    }
+    @media (max-width: 920px) {
+      .workspace { grid-template-columns: 1fr; }
+      .preview-panel { position: static; }
+      .phone { width: 330px; }
+      .table-head, .row { grid-template-columns: minmax(150px,1fr) minmax(170px,1.2fr) 100px 110px; }
+      .table-head > :nth-child(5), .table-head > :nth-child(6), .row > :nth-child(5), .row > :nth-child(6) { display: none; }
+      .preview-panel { display: grid; grid-template-columns: 1fr 350px; }
+      .preview-head, .stage-tabs, .preview-meta, .preview-actions { grid-column: 1; }
+      .phone-stage { grid-column: 2; grid-row: 1 / span 4; }
+    }
+    @media (max-width: 720px) {
+      .app-shell { display: block; }
+      .sidebar { display: none; }
+      .topbar { top: 28px; padding: 9px 13px; }
+      .crumb { display: none; }
+      .top-actions { margin-left: 0; width: 100%; }
+      .top-actions .btn { flex: 1; }
+      .content { padding: 15px 12px 24px; }
+      .page-head { align-items: flex-start; }
+      .policy-badge { display: none; }
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .table-head { display: none; }
+      .row { grid-template-columns: 1fr auto; gap: 8px; }
+      .row > :not(.person):not(.cell:last-child) { display: none; }
+      .row .cell:last-child { display: block; }
+      .search { width: min(190px, 48vw); }
+      .panel-head .sub { display: none; }
+      .flow { gap: 4px; }
+      .flow-step small { display: none; }
+      .preview-panel { display: block; }
+      .phone { width: min(330px, 100%); }
+    }
+  </style>
+</head>
+<body>
+  <div class="sim-ribbon"><i></i>시뮬레이터 · 실제 카카오톡은 발송되지 않습니다</div>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="관리자 메뉴">
+      <div class="brand">
+        <div class="brand-mark">IA</div>
+        <div class="brand-copy"><b>리뷰 운영센터</b><span>ADMIN WORKDESK</span></div>
+      </div>
+      <div class="nav-label">리뷰 관리</div>
+      <button class="nav-item"><span class="icon">⌂</span><span>운영 현황</span></button>
+      <button class="nav-item"><span class="icon">▦</span><span>작업표</span></button>
+      <button class="nav-item"><span class="icon">◎</span><span>등록리뷰어 DB</span></button>
+      <button class="nav-item on"><span class="icon">✉</span><span>미작성 알림톡</span><span class="nav-count">1</span></button>
+      <button class="nav-item"><span class="icon">₩</span><span>입금 처리</span></button>
+      <div class="nav-label">설정</div>
+      <button class="nav-item"><span class="icon">⚙</span><span>발송 정책</span></button>
+      <button class="nav-item"><span class="icon">↺</span><span>발송 이력</span></button>
+      <div class="sidebar-foot">
+        <div class="live">SOLAPI 연결 정상</div>
+        <p>@inad · 승인 템플릿 3개<br>SMS 대체발송 안 함</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb">리뷰 관리 &nbsp;›&nbsp; <b>미작성 알림톡</b></div>
+        <div class="top-actions">
+          <button class="btn" id="dryRunBtn">대상 미리보기</button>
+          <button class="btn primary" id="simulateTopBtn">선택 1건 시뮬레이션</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="page-head">
+          <div>
+            <div class="eyebrow">Review reminder control</div>
+            <h1>리뷰 미작성 알림톡</h1>
+            <p>리뷰 제출 여부를 다시 확인한 뒤 최대 3회 안내하고, 최종기한이 지나면 미작성으로 종결합니다.</p>
+          </div>
+          <div class="policy-badge"><span class="lock">●</span><span><b>안전장치 적용</b><br>중복 발송 차단 · 일일 상한 40건</span></div>
+        </section>
+
+        <section class="kpis" aria-label="발송 현황">
+          <article class="kpi accent"><div class="label">오늘 발송 대상</div><div class="value" id="kpiTarget">1</div><div class="hint">드라이런 기준</div></article>
+          <article class="kpi warn"><div class="label">최종기한 대기</div><div class="value" id="kpiWaiting">0</div><div class="hint">3차 발송 후 유예기간</div></article>
+          <article class="kpi safe"><div class="label">오늘 성공</div><div class="value" id="kpiSuccess">0</div><div class="hint">SOLAPI 처리완료 기준</div></article>
+          <article class="kpi"><div class="label">오늘 사용 한도</div><div class="value"><span id="kpiUsed">0</span><small style="font-size:12px;color:var(--faint)"> / 40</small></div><div class="hint">초과 건은 다음 주기로 이월</div></article>
+        </section>
+
+        <section class="workspace">
+          <div class="panel queue">
+            <div class="panel-head">
+              <div><h2>발송 대기 목록</h2><div class="sub">리뷰 미제출과 실제 연락처를 확인한 건만 표시</div></div>
+              <div class="head-actions"><input class="search" id="queueSearch" aria-label="리뷰어 또는 상품 검색" placeholder="리뷰어·상품 검색"></div>
+            </div>
+            <div class="table-head"><div>리뷰어</div><div>상품</div><div>제출기한</div><div>발송 단계</div><div>최근 결과</div><div>상태</div></div>
+            <div class="rows" id="rows">
+              <button class="row selected" id="reviewerRow" data-search="김수만 01085926325 모기위키 모기기피제 쿠팡">
+                <div class="person"><span class="avatar">김수만</span><span><b>김수만</b><small>010-8592-6325 · 본계정</small></span></div>
+                <div class="product"><b>모기위키 모기기피제</b><small>쿠팡 · 상품비 13,900원</small></div>
+                <div class="cell"><b>배송완료 +14일</b><small>기한 경과</small></div>
+                <div class="cell"><b id="rowStage">1차 예정</b><small id="rowTemplate">리뷰미작성_1차</small></div>
+                <div class="cell"><b id="rowResult">발송 전</b><small id="rowResultSub">이력 없음</small></div>
+                <div class="cell"><span class="status warn" id="rowStatus">● 미작성</span></div>
+              </button>
+              <div class="empty" id="emptyState">검색 결과가 없습니다.</div>
+            </div>
+
+            <div class="flow-wrap">
+              <div class="flow-title"><b>김수만 · 발송 단계</b><span>성공 처리된 알림만 회차에 반영</span><span class="sim-chip">SIMULATION</span></div>
+              <div class="flow" id="flowRail">
+                <div class="flow-step current" data-flow="1"><div class="flow-dot">01</div><b>1차 안내</b><small>현재 단계</small></div>
+                <div class="flow-step" data-flow="2"><div class="flow-dot">02</div><b>2차 안내</b><small>24시간 후</small></div>
+                <div class="flow-step" data-flow="3"><div class="flow-dot">03</div><b>최종 안내</b><small>24시간 후</small></div>
+                <div class="flow-step closed" data-flow="4"><div class="flow-dot">END</div><b>미작성 종결</b><small>최종기한 경과</small></div>
+              </div>
+            </div>
+
+            <div class="policy">
+              <div><b>입금 제외는 3차 발송 직후가 아닙니다.</b><p>3차 알림이 성공하고 최종기한까지 리뷰가 없을 때만 작업을 종결합니다.</p></div>
+              <div class="guard">리뷰 제출 시 즉시 중단</div>
+            </div>
+          </div>
+
+          <aside class="panel preview-panel" aria-label="카카오톡 미리보기">
+            <div class="preview-head"><div><b>발송 메시지</b><br><span>승인 템플릿 그대로 표시</span></div><span class="sim-chip" style="margin-left:auto">NO SEND</span></div>
+            <div class="stage-tabs" role="tablist" aria-label="알림 차수">
+              <button class="stage-tab on" data-stage="1" role="tab">1차 안내</button>
+              <button class="stage-tab" data-stage="2" role="tab">2차 안내</button>
+              <button class="stage-tab" data-stage="3" role="tab">3차 최종</button>
+            </div>
+
+            <div class="phone-stage">
+              <div class="phone">
+                <div class="phone-bar"><span>16:41</span><span>▮▮▮ 5G 87%</span></div>
+                <div class="chat-head"><span class="channel-icon">in</span><span><b>인애드</b><small>알림톡</small></span></div>
+                <div class="chat-body">
+                  <div class="timestamp">2026년 9월 16일</div>
+                  <div class="message-row">
+                    <span class="message-avatar">in</span>
+                    <div class="bubble-wrap">
+                      <div class="sender">인애드</div>
+                      <div class="bubble">
+                        <div class="bubble-signal"></div>
+                        <div class="message-copy" id="messageCopy"></div>
+                        <button class="kakao-button" id="reviewLinkBtn">리뷰 제출하기</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="preview-meta">
+              <div class="meta-row"><span>템플릿</span><b id="metaTemplate">리뷰미작성_1차</b></div>
+              <div class="meta-row"><span>카카오 채널</span><b>@inad</b></div>
+              <div class="meta-row"><span>수신자</span><b>김수만 · 010-****-6325</b></div>
+              <div class="meta-row"><span>대체발송</span><b style="color:var(--green)">사용 안 함</b></div>
+              <div class="meta-row"><span>예상 비용</span><b>14.3원</b></div>
+            </div>
+            <div class="preview-actions">
+              <button class="btn primary" id="simulateBtn">이 내용으로 시뮬레이션</button>
+              <button class="btn" id="resetBtn" title="시뮬레이션 초기화">초기화</button>
+            </div>
+          </aside>
+        </section>
+
+        <section class="panel activity">
+          <div class="panel-head"><div><h2>처리 이력</h2><div class="sub">발송 접수와 공급자 결과를 분리해 기록합니다.</div></div><span class="status safe" style="margin-left:auto">● 실시간 갱신</span></div>
+          <div class="activity-body" id="activityBody">
+            <div class="event" id="initialEvent"><time>16:40:33</time><span class="event-icon">✓</span><p><b>실제 테스트 발송 성공</b> · 김수만 · 리뷰미작성_1차</p><span class="provider">SOLAPI 4000</span></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal">
+      <div class="modal-head"><span class="sim-chip">SIMULATION ONLY</span><h3 id="confirmTitle">알림톡 발송을 재현합니다</h3><p>화면 상태만 바뀌며 SOLAPI에는 요청하지 않습니다.</p></div>
+      <div class="modal-body">
+        <div class="confirm-grid">
+          <span>수신자</span><b>김수만 · 010-****-6325</b>
+          <span>상품</span><b>모기위키 모기기피제</b>
+          <span>템플릿</span><b id="confirmTemplate">리뷰미작성_1차</b>
+          <span>발송 비용</span><b>0원 · 시뮬레이션</b>
+        </div>
+        <div class="no-send">실제 카카오톡, 문자메시지, 입금 상태에는 영향을 주지 않습니다.</div>
+      </div>
+      <div class="modal-foot"><button class="btn" id="cancelSim">취소</button><button class="btn dark" id="confirmSim">가상 발송 실행</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite">시뮬레이션 처리완료 · 성공 1건 / 실패 0건</div>
+
+  <script>
+    const stageData = {
+      1: {
+        template: "리뷰미작성_1차",
+        body: "[리뷰 미작성 안내]\n김수만님의 모기위키 모기기피제 리뷰가 아직 등록되지 않았습니다.\n제출기한: 배송완료일로부터 2주 이내\n아래 버튼에서 리뷰를 제출해 주세요."
+      },
+      2: {
+        template: "리뷰미작성_2차",
+        body: "[리뷰 미작성 2차 안내]\n모기위키 모기기피제 리뷰가 현재 미작성 상태입니다.\n제출기한: 2026.09.18(금)\n기한까지 제출되지 않으면 입금대상에서 제외됩니다."
+      },
+      3: {
+        template: "리뷰미작성_3차",
+        body: "[최종 리뷰 미작성 안내]\n모기위키 모기기피제 리뷰의 최종 제출기한은 2026.09.20(일)입니다.\n최종기한까지 리뷰가 확인되지 않으면 해당 작업은 미작성 종결되며 입금되지 않습니다."
+      }
+    };
+
+    let selectedStage = 1;
+    let completedStages = 0;
+    const $ = (selector) => document.querySelector(selector);
+    const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+    function renderMessage() {
+      const data = stageData[selectedStage];
+      $("#messageCopy").textContent = data.body;
+      $("#metaTemplate").textContent = data.template;
+      $("#confirmTemplate").textContent = data.template;
+      $$(".stage-tab").forEach((tab) => {
+        const active = Number(tab.dataset.stage) === selectedStage;
+        tab.classList.toggle("on", active);
+        tab.setAttribute("aria-selected", String(active));
+      });
+    }
+
+    function renderFlow() {
+      $$("[data-flow]").forEach((step) => {
+        const n = Number(step.dataset.flow);
+        step.classList.remove("done", "current");
+        if (n <= completedStages) step.classList.add("done");
+        if (n === Math.min(completedStages + 1, 3)) step.classList.add("current");
+        if (n === 4) step.classList.add("closed");
+      });
+      const next = Math.min(completedStages + 1, 3);
+      $("#rowStage").textContent = completedStages >= 3 ? "최종기한 대기" : `${next}차 예정`;
+      $("#rowTemplate").textContent = completedStages >= 3 ? "3차 발송 완료" : stageData[next].template;
+      if (completedStages > 0) {
+        $("#rowResult").textContent = `성공 ${completedStages}회`;
+        $("#rowResultSub").textContent = "SOLAPI 처리완료";
+      } else {
+        $("#rowResult").textContent = "발송 전";
+        $("#rowResultSub").textContent = "이력 없음";
+      }
+      $("#kpiSuccess").textContent = String(completedStages);
+      $("#kpiUsed").textContent = String(completedStages);
+      $("#kpiWaiting").textContent = completedStages >= 3 ? "1" : "0";
+    }
+
+    function addEvent(stage) {
+      const now = new Date();
+      const time = now.toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const event = document.createElement("div");
+      event.className = "event";
+      event.innerHTML = `<time>${time}</time><span class="event-icon">✓</span><p><b>시뮬레이션 성공</b> · 김수만 · ${stageData[stage].template}</p><span class="provider">MOCK 4000</span>`;
+      $("#activityBody").prepend(event);
+    }
+
+    function openSimulation() {
+      $("#confirmTemplate").textContent = stageData[selectedStage].template;
+      $("#confirmModal").classList.add("open");
+      $("#confirmSim").focus();
+    }
+
+    function closeSimulation() {
+      $("#confirmModal").classList.remove("open");
+    }
+
+    function showToast(message) {
+      const toast = $("#toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 2400);
+    }
+
+    $$(".stage-tab").forEach((tab) => tab.addEventListener("click", () => {
+      selectedStage = Number(tab.dataset.stage);
+      renderMessage();
+    }));
+
+    $("#simulateBtn").addEventListener("click", openSimulation);
+    $("#simulateTopBtn").addEventListener("click", openSimulation);
+    $("#cancelSim").addEventListener("click", closeSimulation);
+    $("#confirmModal").addEventListener("click", (event) => {
+      if (event.target === $("#confirmModal")) closeSimulation();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSimulation();
+    });
+
+    $("#confirmSim").addEventListener("click", () => {
+      const stage = selectedStage;
+      completedStages = Math.max(completedStages, stage);
+      addEvent(stage);
+      renderFlow();
+      closeSimulation();
+      showToast(`${stage}차 시뮬레이션 처리완료 · 성공 1건 / 실패 0건`);
+      if (stage < 3) {
+        selectedStage = stage + 1;
+        renderMessage();
+      }
+    });
+
+    $("#dryRunBtn").addEventListener("click", () => {
+      $("#reviewerRow").classList.add("selected");
+      showToast("대상 미리보기 완료 · 발송 가능 1건 / 제외 0건");
+    });
+
+    $("#resetBtn").addEventListener("click", () => {
+      completedStages = 0;
+      selectedStage = 1;
+      $$("#activityBody .event").forEach((event) => {
+        if (event.id !== "initialEvent") event.remove();
+      });
+      $("#rowStatus").className = "status warn";
+      $("#rowStatus").textContent = "● 미작성";
+      renderMessage();
+      renderFlow();
+      showToast("시뮬레이터를 초기 상태로 되돌렸습니다.");
+    });
+
+    $("#reviewLinkBtn").addEventListener("click", () => showToast("리뷰웹 제출 화면으로 이동하는 버튼입니다."));
+
+    $("#queueSearch").addEventListener("input", (event) => {
+      const query = event.target.value.trim().toLowerCase();
+      const haystack = $("#reviewerRow").dataset.search.toLowerCase();
+      const visible = !query || haystack.includes(query);
+      $("#reviewerRow").style.display = visible ? "grid" : "none";
+      $("#emptyState").style.display = visible ? "none" : "grid";
+      $("#kpiTarget").textContent = visible ? "1" : "0";
+    });
+
+    renderMessage();
+    renderFlow();
+  </script>
+</body>
+</html>

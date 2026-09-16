@@ -493,6 +493,16 @@ router.post('/review', async (req, res, next) => {
       }
     }
 
+    const closedReminder = await require('../services/reviewReminder.service')
+      .closedStateForTarget({ sheetId, tabName, rowIndex });
+    if (closedReminder) {
+      return res.status(409).json({
+        ok: false,
+        code: 'REVIEW_CLOSED_NO_REVIEW',
+        error: '최종 제출기한이 지나 미작성으로 종결된 작업입니다.',
+      });
+    }
+
     const submitValue = value || '제출';
     const sheetOpts = gid ? { gid } : {};
 
