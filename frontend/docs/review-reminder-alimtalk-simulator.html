@@ -326,6 +326,18 @@
     }
     .activation-copy h2 { margin: 0 0 3px; font-size: 13px; letter-spacing: -.02em; }
     .activation-copy p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .activation-checklist {
+      display: grid;
+      gap: 3px;
+      margin: 7px 0 0;
+      padding: 0;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.5;
+      list-style: none;
+    }
+    .activation-checklist b { color: var(--ink); }
+    .activation-checklist code { margin: 0 2px; }
     .activation-copy code {
       display: inline-flex;
       margin: 4px 4px 0 0;
@@ -813,10 +825,15 @@
         </section>
 
         <section class="activation-note" aria-labelledby="activationNoteTitle">
-          <div class="activation-status" aria-label="자동 발송 현재 꺼짐">자동 발송 OFF</div>
+          <div class="activation-status" aria-label="자동 발송 기본 설정 꺼짐">기본값 OFF</div>
           <div class="activation-copy">
             <h2 id="activationNoteTitle">나중에 자동 발송을 켤 때</h2>
-            <p>Railway 운영 변수에서 아래 값을 <b>0 → 1</b>로 바꾼 뒤 배포하세요. 이 화면에서는 자동으로 켜지지 않습니다.</p>
+            <p>현재 운영 상태는 Railway 변수에서 확인하세요. 이 화면의 대상·발송 기능은 샘플 시뮬레이션이며 운영 API를 호출하지 않습니다.</p>
+            <ol class="activation-checklist" aria-label="자동 발송 활성화 전 점검">
+              <li><b>1.</b> 관리자 인증으로 <code>GET /api/review-reminders/status</code>를 조회해 <code>providerConfigured: true</code>인지 확인</li>
+              <li><b>2.</b> <code>POST /api/review-reminders/run</code>에 <code>{&quot;dryRun&quot;:true}</code>를 보내 실제 대상과 건수 확인</li>
+              <li><b>3.</b> 확인을 마친 뒤 Railway 운영 변수에서 아래 값을 적용하고 배포</li>
+            </ol>
             <code id="enableVariable">REVIEW_REMINDER_ENABLED=1</code>
           </div>
           <div class="activation-actions">

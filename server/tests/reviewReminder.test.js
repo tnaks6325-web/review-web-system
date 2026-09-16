@@ -205,7 +205,12 @@ function withSolapiEnv(fn) {
       path.resolve(__dirname, '../../frontend/docs/review-reminder-alimtalk-simulator.html'),
       'utf8'
     );
-    assert.ok(/자동 발송 OFF/.test(simulator));
+    assert.ok(/기본값 OFF/.test(simulator));
+    assert.ok(/현재 운영 상태는 Railway 변수에서 확인/.test(simulator));
+    assert.ok(/GET \/api\/review-reminders\/status/.test(simulator));
+    assert.ok(/POST \/api\/review-reminders\/run/.test(simulator));
+    assert.ok(/dryRun/.test(simulator));
+    assert.ok(/샘플 시뮬레이션/.test(simulator));
     assert.ok(/REVIEW_REMINDER_ENABLED=1/.test(simulator));
     assert.ok(/railway\.com\/project\/a413cce6-5d9b-4e9a-9bc1-fa2af0088235\/service\/f9445b01-c5d0-4495-a2ea-db11d5f18cbd\/variables/.test(simulator));
     assert.ok(/target="_blank" rel="noopener noreferrer"/.test(simulator));
