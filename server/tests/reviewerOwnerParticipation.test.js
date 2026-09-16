@@ -18,6 +18,9 @@ const occurrences = (text, needle) => text.split(needle).length - 1;
 const checks = [
   ['홈 검색은 명시한 ownerScope에만 로그인 토큰을 요구한다',
     /ownerScope === '1'[\s\S]*verifyReviewerSession\(token\)/.test(indexRoutes)],
+  ['타계정 로그인은 본계정 UUID·형제번호로 확장하지 않고 토큰 번호만 사용한다',
+    /session\.loginKind === 'sub'[\s\S]*ownerPhone8s = \[loginPhone8\][\s\S]*scopedQuery = ''[\s\S]*strictPhoneScope = true/.test(indexRoutes)
+      && /session && session\.loginKind === 'sub'[\s\S]*ownerReviewerId: null[\s\S]*phone8s: loginPhone8\.length === 8 \? \[loginPhone8\] : \[\]/.test(reviewerRoutes)],
   ['홈 검색과 예상금액 요청에 리뷰어 토큰을 보낸다',
     /includeSubmitted: "1", ownerScope: "1"/.test(home)
       && /review-earnings[\s\S]{0,180}headers: \{ \.\.\._getAuthHeaders\(\) \}/.test(home)],

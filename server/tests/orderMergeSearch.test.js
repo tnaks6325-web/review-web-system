@@ -149,6 +149,19 @@ async function run() {
   ownerReviewRows = null;
   console.log('  8. 로그인 ownerScope — 참여행 이름·번호 불일치 허용 ✓');
 
+  // ── 9) 타계정 세션용 strictPhoneScope는 리뷰어 DB의 본계정·형제번호로 확장하지 않음 ──
+  captured.queries = []; reviewRows = []; seenRows = []; orderRows = [];
+  await searchByName('', '87654321', {
+    includeSubmitted: true,
+    ownerPhone8s: ['87654321'],
+    strictPhoneScope: true,
+  });
+  const strictSearch = captured.queries.find(x => /FROM review_index ri/.test(x.sql) && /ri\.phone8 = ANY/.test(x.sql));
+  assert.ok(strictSearch, '9: 타계정 번호 검색 쿼리 실행');
+  assert.deepEqual(strictSearch.params[0], ['87654321'], '9: 토큰 로그인 번호 하나만 SQL 범위로 사용');
+  assert.ok(!captured.queries.some(x => /FROM reviewers/.test(x.sql)), '9: 본계정·형제 타계정 번호 조회 미실행');
+  console.log('  9. 타계정 strictPhoneScope — 로그인 번호만 사용 ✓');
+
   console.log('✅ orderMergeSearch 테스트 전체 통과');
 }
 

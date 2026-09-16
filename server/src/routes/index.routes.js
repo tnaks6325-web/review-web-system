@@ -17,6 +17,9 @@ router.get('/', async (req, res, next) => {
     const { query, phone8, includeSubmitted, ownerScope } = req.query;
     let ownerReviewerId = null;
     let ownerPhone8s = null;
+    let scopedQuery = query;
+    let scopedPhone8 = phone8;
+    let strictPhoneScope = false;
     if (ownerScope === '1' || ownerScope === 'true') {
       const token = req.headers['x-reviewer-token'];
       if (!token) {
@@ -28,8 +31,21 @@ router.get('/', async (req, res, next) => {
         if (!scope.ownerReviewerId) {
           return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
         }
-        ownerReviewerId = scope.ownerReviewerId;
-        ownerPhone8s = scope.phone8s;
+        const loginPhone8 = String(session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+        if (session.loginKind === 'sub') {
+          if (loginPhone8.length !== 8) {
+            return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
+          }
+          // 타계정 로그인은 본계정 UUID나 형제 타계정 번호로 확장하지 않는다.
+          // 요청 query/phone8도 신뢰하지 않고 토큰의 로그인 번호 하나로만 검색한다.
+          ownerPhone8s = [loginPhone8];
+          scopedQuery = '';
+          scopedPhone8 = loginPhone8;
+          strictPhoneScope = true;
+        } else {
+          ownerReviewerId = scope.ownerReviewerId;
+          ownerPhone8s = scope.phone8s;
+        }
       } catch (err) {
         const expired = err && err.name === 'TokenExpiredError';
         return res.status(401).json({
@@ -39,11 +55,12 @@ router.get('/', async (req, res, next) => {
         });
       }
     }
-    const result = await searchByName(query, phone8, {
+    const result = await searchByName(scopedQuery, scopedPhone8, {
       // 리뷰어 홈 제출대기/제출완료 탭용 — 제출 완료 행도 포함해 반환
       includeSubmitted: includeSubmitted === '1' || includeSubmitted === 'true',
       ownerReviewerId,
       ownerPhone8s,
+      strictPhoneScope,
     });
     res.json(result);
   } catch (err) {

@@ -71,6 +71,13 @@ function _reviewerTaskName(row) {
 async function _reviewerPhoneScopeFromSession(session) {
   const ownerReviewerId = String(session && session.ownerReviewerId || '');
   if (!ownerReviewerId) return { ownerReviewerId: '', phone8s: [] };
+  if (session && session.loginKind === 'sub') {
+    const loginPhone8 = _phone8(session.loginPhone8);
+    return {
+      ownerReviewerId: null,
+      phone8s: loginPhone8.length === 8 ? [loginPhone8] : [],
+    };
+  }
   return require('../services/reviewerIdentity.service').getOwnerScopeByReviewerId(ownerReviewerId);
 }
 

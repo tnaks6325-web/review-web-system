@@ -395,6 +395,9 @@ async function searchByName(query, phone8, opts = {}) {
   const params = [];
   let paramIdx = 1;
   let mergePhoneList = null;   // includeSubmitted 강한키(phone8) 분기에서만 order 병합용
+  const strictPhoneList = opts && opts.strictPhoneScope && Array.isArray(opts.ownerPhone8s)
+    ? [...new Set(opts.ownerPhone8s.map(v => String(v || '').replace(/[^0-9]/g, '').slice(-8)).filter(v => v.length === 8))]
+    : null;
 
   const SELECT_FIELDS = `
     ri.reviewer_name     AS "idxName",
@@ -442,7 +445,7 @@ async function searchByName(query, phone8, opts = {}) {
     //    전화번호가 맞으면 본인 건이므로 누락하지 않음. 이름은 점수 가산용으로만 사용)
     // ★ P5: participation_links(제출 시점 확정 신원)도 단독 통과 키로 사용.
     //   기존 동작(이름 일치 + 전화 근접/NULL)도 그대로 유지(하위 호환).
-    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneList = strictPhoneList && strictPhoneList.length ? strictPhoneList : await _getReviewerPhoneList(p8);
     mergePhoneList = phoneList;
 
     const nameParam = paramIdx++;
@@ -498,7 +501,7 @@ async function searchByName(query, phone8, opts = {}) {
   } else if (p8.length === 8) {
     // ── phone8 단독 검색 (이름 미입력) ──
     // ★ P0/P5: 본인+타계정 phone8 또는 확정 신원(participation_links)으로 매칭
-    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneList = strictPhoneList && strictPhoneList.length ? strictPhoneList : await _getReviewerPhoneList(p8);
     mergePhoneList = phoneList;
     const phoneListParam = paramIdx++;
     // 이 분기는 매칭 자체가 강한 신원키(phone8/확정신원)뿐 → 제출완료 포함 시 필터만 해제
