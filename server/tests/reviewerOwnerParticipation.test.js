@@ -46,6 +46,9 @@ const checks = [
   ['과거 신청의 참여자 명의는 신청시각에 유효했던 alias로만 백필한다',
     /reviewer_identity_aliases[\s\S]*a\.valid_from <= ca\.applied_at[\s\S]*ca\.applied_at < a\.valid_to/.test(migration)
       && !/current_phone8, MIN\(id::text\)::uuid AS identity_id/.test(migration)],
+  ['코드 도입 전 신청은 소유자 안에서 유일한 최초 initial alias만 과거로 확장한다',
+    /ca\.applied_at < a\.valid_from[\s\S]*a\.reason = 'initial'[\s\S]*earlier\.identity_id = a\.identity_id/.test(migration)
+      && /HAVING COUNT\(DISTINCT identity_id\) = 1/.test(migration)],
   ['다른 소유자가 과거에 쓴 번호는 현재 번호 소유자로 자동 승격하지 않는다',
     /reviewer_phone_changes rpc[\s\S]*rpc\.old_phone8 = c\.phone8[\s\S]*rpc\.reviewer_id <> c\.reviewer_id/.test(migration)
       && /movedPhoneOwners[\s\S]*historicalOwners/.test(payment)],

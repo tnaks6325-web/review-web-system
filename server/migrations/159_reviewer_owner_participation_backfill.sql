@@ -69,8 +69,22 @@ WITH historical_identity_candidates AS (
     FROM campaign_applications ca
     JOIN reviewer_identity_aliases a
       ON a.phone8 = ca.phone8
-     AND a.valid_from <= ca.applied_at
-     AND (a.valid_to IS NULL OR ca.applied_at < a.valid_to)
+     AND (
+       (a.valid_from <= ca.applied_at
+        AND (a.valid_to IS NULL OR ca.applied_at < a.valid_to))
+       OR (
+         -- 코드 도입 전에 만든 신청은 bootstrap 시 생성된 최초 alias보다 오래됐다.
+         -- 최초 initial alias만 과거 방향으로 열고, 아래 DISTINCT identity 검증으로
+         -- 같은 소유자 안에서 번호를 공유한 다른 참여자가 있으면 백필하지 않는다.
+         ca.applied_at < a.valid_from
+         AND a.reason = 'initial'
+         AND NOT EXISTS (
+           SELECT 1 FROM reviewer_identity_aliases earlier
+            WHERE earlier.identity_id = a.identity_id
+              AND earlier.valid_from < a.valid_from
+         )
+       )
+     )
     JOIN reviewer_identities i
       ON i.id = a.identity_id AND i.owner_reviewer_id = ca.owner_reviewer_id
    WHERE ca.participant_identity_id IS NULL
@@ -79,7 +93,7 @@ WITH historical_identity_candidates AS (
   SELECT application_id, MIN(identity_id::text)::uuid AS identity_id
     FROM historical_identity_candidates
    GROUP BY application_id
-  HAVING COUNT(*) = 1
+  HAVING COUNT(DISTINCT identity_id) = 1
 )
 UPDATE campaign_applications ca
    SET participant_identity_id = i.identity_id
