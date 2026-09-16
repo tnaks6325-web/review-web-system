@@ -273,6 +273,16 @@ async function run() {
   assert.ok(e.ok, '3m-5: 실제 상태 열이 입금이면 별도 입금일 정보 열은 편집 가능');
   assert.equal(cp.q.filter(x => /INSERT INTO participant_edits/.test(x.s)).length, 1,
     '3m-6: 일반 정보 열은 종전 오버레이 1건만 저장');
+  // 행 포인터가 옛 열을 가리켜도 현재 작업표 헤더에서 감지한 입금 열을 우선해 잠근다.
+  cp = makeConnectPool({
+    row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1',
+      recipient_name: null, option_text: null, row_json: { 옛입금: '', 입금일: '' }, tab_gid: '9', submit_col2: '옛입금' },
+    detectedHeaders: ['번호', '입금일'],
+  });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:입금일', value: '9/16', by: 'm' });
+  assert.ok(!e.ok && e.error === 'status_column_locked', '3m-7: 옛 행 포인터보다 현재 입금 헤더를 우선해 편집 거부');
+  assert.ok(!cp.q.some(x => /INSERT INTO participant_edits/.test(x.s)), '3m-8: 현재 입금 헤더 오버레이를 남기지 않는다');
   // 3n: col:입금자명(정보열)은 링크 토글 안 함 — is_paid 오탐 차단(리뷰 지적 #1)
   cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['입금자명', '입금'] });
   svc.__setPoolForTest(cp);
@@ -300,6 +310,15 @@ async function run() {
   assert.ok(!rr.ok && rr.error === 'status_column_locked', '5a3: 탭 단위 입금일 편집기록도 일반 되돌리기 거부');
   assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 0,
     '5a4: 탭 단위 입금일 되돌리기 거부 시 쓰기 0');
+  cp = makeConnectPool({
+    row: { ...rrow, row_json: { 옛입금: '', 입금일: '9/16' }, tab_gid: '9', submit_col2: '옛입금' },
+    detectedHeaders: ['번호', '입금일'], revertN: 1,
+  });
+  svc.__setPoolForTest(cp);
+  rr = await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:입금일', by: 'm' });
+  assert.ok(!rr.ok && rr.error === 'status_column_locked', '5a5: 옛 행 포인터보다 현재 입금 헤더를 우선해 되돌리기 거부');
+  assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 0,
+    '5a6: 현재 입금 헤더 되돌리기 거부 시 쓰기 0');
   // 5b: 일반 열은 종전대로 1회 되돌림(무회귀)
   cp = makeConnectPool({ row: rrow, revertN: 1 }); svc.__setPoolForTest(cp);
   rr = await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:비고', by: 'm' });

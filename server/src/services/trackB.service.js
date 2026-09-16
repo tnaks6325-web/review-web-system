@@ -130,15 +130,30 @@ function _statusToggleForRow(header, row) {
 /* 행별 submit_col/submit_col2가 비어 있는 무시트 행도 탭의 실제 상태 열은 존재할 수 있다.
    화면은 탭 단위 statusCols로 그 칸을 잠그므로, 쓰기 API도 같은 탭 단위 판정을 해야 한다.
    이름만 보고 `입금일`을 전부 잠그지 않고 statusHeaderForTab이 고른 정확한 헤더만 막는다. */
-async function _statusToggleForTab(db, { sheetId, tabName, header } = {}) {
+async function _statusToggleForTab(db, { sheetId, tabName, tabGid, header } = {}) {
   const h = String(header || '').trim();
   if (!h) return null;
   try {
+    // 화면과 같은 현재 작업표 헤더를 먼저 본다. review_index.submit_col2 는 열 이름이 바뀐 뒤에도
+    // 예전 값을 들고 있을 수 있어, 그것을 먼저 믿으면 새 입금 열이 일반 편집으로 다시 열린다.
+    const { rows } = await db.query(
+      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+        WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
+        ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC, mirrored_at DESC NULLS LAST LIMIT 1`,
+      [sheetId, tabGid || null, tabName]);
+    const headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
+    const paidIndex = findPaymentColumnIndex(headers);
+    const currentPaidHeader = paidIndex >= 0 ? String(headers[paidIndex] || '').trim() : '';
+    if (currentPaidHeader === h) return 'is_paid';
+
     const status = require('./sheetlessStatus.service');
     const submitHeader = String(await status.statusHeaderForTab(db, {
       sheetId, tabName, kind: 'submit',
     }) || '').trim();
     if (submitHeader === h) return 'is_submitted';
+    // 현재 헤더에서 입금 열을 찾았다면 그 열만 탭의 입금 상태 열이다. 저장된 옛 포인터로
+    // 별도 정보 열까지 잠그지 않는다.
+    if (currentPaidHeader) return null;
     const paidHeader = String(await status.statusHeaderForTab(db, {
       sheetId, tabName, kind: 'paid',
     }) || '').trim();
@@ -3933,7 +3948,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       // 상태값은 시스템 전용이다. 행 포인터가 비어 있어도 탭의 실제 상태 열이면 일반 편집을 차단한다.
       let statusToggle = _statusToggleForRow(field.slice(4), row);
       if (!statusToggle) statusToggle = await _statusToggleForTab(client, {
-        sheetId, tabName, header: field.slice(4),
+        sheetId, tabName, tabGid: row.tab_gid, header: field.slice(4),
       });
       if (statusToggle === 'lookup_failed') {
         await client.query('ROLLBACK');
@@ -4036,7 +4051,7 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
-      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json,
+      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid,
               submit_col, submit_col2
          FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 FOR UPDATE`,
       [rowId, sheetId, tabName]);
@@ -4045,7 +4060,7 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
     if (typeof field === 'string' && field.startsWith('col:')) {
       let statusToggle = _statusToggleForRow(field.slice(4), row);
       if (!statusToggle) statusToggle = await _statusToggleForTab(client, {
-        sheetId, tabName, header: field.slice(4),
+        sheetId, tabName, tabGid: row.tab_gid, header: field.slice(4),
       });
       if (statusToggle === 'lookup_failed') {
         await client.query('ROLLBACK');
