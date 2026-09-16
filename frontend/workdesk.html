@@ -2979,6 +2979,14 @@ function logout(){
      이 판정과 라우트의 미들웨어는 반드시 같이 움직인다. */
 function _isInternalRole(){ const r = STATE.role; return r==='master' || r==='admin' || r==='staff'; }
 
+function _alimtalkConsolePath(){
+  const last = String(location.pathname||'').split('/').pop();
+  return 'docs/review-reminder-alimtalk-simulator'+(/\.html?$/i.test(last)?'.html':'');
+}
+function openAlimtalkConsole(){
+  location.assign(_alimtalkConsolePath());
+}
+
 function renderShell(){
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
   const isStaff = STATE.role==='staff';   // AE — 작업보드(담당 탭) + 소유 지정(초기매핑, 자기 담당 업체만)
@@ -3003,6 +3011,7 @@ function renderShell(){
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="cutover" onclick="switchView('cutover')">탈시트 전환</button>
+        <button class="navb" onclick="openAlimtalkConsole()">알림톡</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
