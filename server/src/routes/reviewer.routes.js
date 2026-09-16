@@ -1216,10 +1216,11 @@ router.get('/review-earnings', async (req, res, next) => {
                )
                AND (NOT $3::boolean OR (
                  COALESCE(dri_cp.participant_identity_id, dri_os.participant_identity_id,
-                          dri_ca.participant_identity_id) = $4
+                          dri_ca.participant_identity_id, dri_pl.participant_identity_id) = $4
                  OR (dri_cp.participant_identity_id IS NULL
                      AND dri_os.participant_identity_id IS NULL
                      AND dri_ca.participant_identity_id IS NULL
+                     AND dri_pl.participant_identity_id IS NULL
                      AND COALESCE(dri_cp.phone8, dri_ca.phone8, dri_pl.phone8, ri.phone8) = ANY($1))
                ))
           )`,

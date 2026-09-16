@@ -131,7 +131,8 @@ function stubPool(handler) {
       '본계정도 현재 작업보드 참여자가 있으면 과거 참여 링크보다 현재 소유자·연락처를 우선');
     assert.ok(/isSubAccount = session\.loginKind === 'sub'/.test(ownership)
       && /\$6::boolean = TRUE[\s\S]*?cp\.seq IS NOT NULL[\s\S]*?cp\.phone8 = \$7/.test(ownership)
-      && /cp\.seq IS NULL[\s\S]*?pl\.phone8 = \$7 OR ri\.phone8 = \$7/.test(ownership)
+      && /cp\.seq IS NULL[\s\S]*?pl\.phone8 = \$7[\s\S]*?OR \(ri\.phone8 = \$7/.test(ownership)
+      && /ria\.phone8 = pl\.phone8[\s\S]*?ria\.phone8 = ri\.phone8/.test(ownership)
       && /if \(!isSubAccount\)[\s\S]*?getOwnerScopeByLoginPhone8/.test(ownership),
       '서브계정은 현재 작업보드 참여자 연락처를 우선하고 현재 행이 없을 때만 과거 링크를 사용');
     const trackB = read('src/routes/trackB.routes.js');

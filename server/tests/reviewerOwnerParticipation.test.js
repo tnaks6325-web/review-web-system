@@ -50,6 +50,10 @@ const checks = [
     /NOT EXISTS \([\s\S]*current_owner\.id <> \$1[\s\S]*current_owner\.phone8 = cp\.phone8/.test(search)
       && /NOT EXISTS \([\s\S]*current_owner\.id <> \$3[\s\S]*current_owner\.phone8 = cp\.phone8/.test(reviewerRoutes)
       && /current_owner\.id <> \$4::uuid[\s\S]*current_owner\.phone8 = cp\.phone8/.test(targetOwnership)],
+  ['리뷰 제출 권한은 UUID 없는 과거 링크·행 번호의 타 소유자 alias 이력을 차단한다',
+    /ria\.phone8 = pl\.phone8[\s\S]*rii\.owner_reviewer_id <> \$4::uuid/.test(targetOwnership)
+      && /ria\.phone8 = ri\.phone8[\s\S]*rii\.owner_reviewer_id <> \$4::uuid/.test(targetOwnership)
+      && /ria\.phone8 = cp\.phone8[\s\S]*rii\.owner_reviewer_id <> \$4::uuid/.test(targetOwnership)],
   ['과거 신청의 참여자 명의는 신청시각에 유효했던 alias로만 백필한다',
     /reviewer_identity_aliases[\s\S]*a\.valid_from <= ca\.applied_at[\s\S]*ca\.applied_at < a\.valid_to/.test(migration)
       && !/current_phone8, MIN\(id::text\)::uuid AS identity_id/.test(migration)],
@@ -58,7 +62,7 @@ const checks = [
       && /HAVING COUNT\(DISTINCT identity_id\) = 1/.test(migration)],
   ['다른 소유자가 과거에 쓴 번호는 현재 번호 소유자로 자동 승격하지 않는다',
     /reviewer_phone_changes rpc[\s\S]*rpc\.old_phone8 = c\.phone8[\s\S]*rpc\.reviewer_id <> c\.reviewer_id/.test(migration)
-      && /movedPhoneOwners[\s\S]*historicalOwners/.test(payment)],
+      && /historicalPhoneOwners[\s\S]*historicalOwners/.test(payment)],
   ['과거 신청 owner_phone8도 번호 변경 이력이 있으면 현재 번호 보유자에게 노출하지 않는다',
     occurrences(search, 'rpc.old_phone8 = ca.owner_phone8') === 2
       && occurrences(reviewerRoutes, 'rpc.old_phone8 = ca.owner_phone8') === 10
@@ -82,6 +86,10 @@ const checks = [
   ['동일 번호 등록 소유자가 여러 명이면 오래된 제출 링크 계좌도 사용하지 않는다',
     /ambiguousPhone8s\.has\(r\.phone8\)[\s\S]*\? null : ownerAcct/.test(payment)
       && /ownerIds\.size > 1[\s\S]*ambiguousPhone8s\.add/.test(payment)],
+  ['입금 번호 후보는 phone change와 identity alias의 타 소유자 이력을 모두 모호 처리한다',
+    occurrences(payment, 'FROM reviewer_identity_aliases ria') >= 2
+      && /historicalByPhone[\s\S]*ownerIds[\s\S]*ambiguousPhone8s\.add/.test(payment)
+      && /historicalPhoneOwners[\s\S]*historicalOwners[\s\S]*return null/.test(payment)],
   ['입금은 코드 참여자 UUID로 현재 타계정 배열 위치를 찾아 이름·번호 변경을 견딘다',
     /member_no AS "memberNo"[\s\S]*current_name AS "currentName"[\s\S]*current_phone8 AS "currentPhone8"[\s\S]*FROM reviewer_identities/.test(payment)
       && /identityById\.get\(String\(link\.participantIdentityId\)\)/.test(payment)
@@ -99,7 +107,7 @@ const checks = [
     /AND NOT EXISTS \([\s\S]*FROM review_index ri[\s\S]*ri\.row_index = os\.sheet_row[\s\S]*ri\.row_index = cp\.seq/.test(reviewerRoutes)
       && !/FROM review_index ri\s+WHERE ri\.phone8 = ANY\(\$1\)\s+AND \(\(ri\.sheet_id = os\.sheet_id/.test(reviewerRoutes)],
   ['무시트 예상금액의 좌표 중복 제거는 미제출 상태와 같은 소유자·타계정 신원만 인정한다',
-    /FROM review_index ri[\s\S]*WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2[\s\S]*NOT \$3::boolean[\s\S]*dri_cp\.participant_identity_id/.test(reviewerRoutes)],
+    /FROM review_index ri[\s\S]*WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2[\s\S]*NOT \$3::boolean[\s\S]*dri_pl\.participant_identity_id/.test(reviewerRoutes)],
   ['레거시 링크 owner UUID는 이름 변경 뒤에도 이름 대조 없이 참여현황에 포함한다',
     /pl\.owner_reviewer_id = \$2\s+OR \(pl\.owner_reviewer_id IS NULL AND pl\.phone8 = ANY\(\$1\)[\s\S]*regexp_replace/.test(reviewerRoutes)],
   ['만료·위조 리뷰어 토큰은 참여현황과 예상금액 모두 401 코드로 응답한다',

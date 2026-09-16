@@ -603,10 +603,29 @@ async function _loadAccounts(phone8s) {
     if (!ownByPhone.has(r.phone8)) ownByPhone.set(r.phone8, []);
     ownByPhone.get(r.phone8).push(r);
   }
+  // 현재 등록 번호가 유일해도 과거에 다른 소유자의 본/타계정 번호였다면 자동 선택하지 않는다.
+  // 전화번호 변경 서비스는 세대에 따라 reviewer_phone_changes 또는 identity alias에 이력을 남긴다.
+  const { rows: historicalPhoneRows } = await pool.query(
+    `SELECT old_phone8 AS "phone8", reviewer_id AS "reviewerId"
+       FROM reviewer_phone_changes
+      WHERE old_phone8 = ANY($1::text[])
+     UNION
+     SELECT ria.phone8, ri.owner_reviewer_id AS "reviewerId"
+       FROM reviewer_identity_aliases ria
+       JOIN reviewer_identities ri ON ri.id = ria.identity_id
+      WHERE ria.phone8 = ANY($1::text[])`,
+    [phone8s]
+  );
+  const historicalByPhone = new Map();
+  for (const row of historicalPhoneRows) {
+    if (!historicalByPhone.has(row.phone8)) historicalByPhone.set(row.phone8, []);
+    historicalByPhone.get(row.phone8).push(row);
+  }
   for (const p8 of new Set([...subsByPhone.keys(), ...ownByPhone.keys()])) {
     const ownerIds = new Set([
       ...(subsByPhone.get(p8) || []).map(x => String(x.reviewerId)),
       ...(ownByPhone.get(p8) || []).map(x => String(x.reviewerId)),
+      ...(historicalByPhone.get(p8) || []).map(x => String(x.reviewerId)),
     ]);
     if (ownerIds.size > 1) map.ambiguousPhone8s.add(p8);
   }
@@ -721,14 +740,19 @@ async function _loadOwnerAccountsByRow(rows) {
               current_name AS "currentName", current_phone8 AS "currentPhone8", status
          FROM reviewer_identities
         WHERE id = ANY($1::uuid[])`, [participantIds]) : { rows: [] };
-    const { rows: movedPhoneRows } = await pool.query(
+    const { rows: historicalPhoneRows } = await pool.query(
       `SELECT old_phone8 AS "phone8", reviewer_id AS "reviewerId"
          FROM reviewer_phone_changes
-        WHERE old_phone8 = ANY($1::text[])`, [ownerPhones]);
-    const movedPhoneOwners = new Map();
-    for (const row of movedPhoneRows) {
-      if (!movedPhoneOwners.has(row.phone8)) movedPhoneOwners.set(row.phone8, new Set());
-      movedPhoneOwners.get(row.phone8).add(String(row.reviewerId));
+        WHERE old_phone8 = ANY($1::text[])
+       UNION
+       SELECT ria.phone8, ri.owner_reviewer_id AS "reviewerId"
+         FROM reviewer_identity_aliases ria
+         JOIN reviewer_identities ri ON ri.id = ria.identity_id
+        WHERE ria.phone8 = ANY($1::text[])`, [ownerPhones]);
+    const historicalPhoneOwners = new Map();
+    for (const row of historicalPhoneRows) {
+      if (!historicalPhoneOwners.has(row.phone8)) historicalPhoneOwners.set(row.phone8, new Set());
+      historicalPhoneOwners.get(row.phone8).add(String(row.reviewerId));
     }
     const byId = new Map(revs.map(r => [String(r.reviewerId), r]));
     const identityById = new Map(identityRows.map(r => [String(r.id), r]));
@@ -740,7 +764,7 @@ async function _loadOwnerAccountsByRow(rows) {
     const resolveOwner = link => {
       if (link.ownerReviewerId) return byId.get(String(link.ownerReviewerId)) || null;
       const list = byPhone.get(link.ownerPhone8) || [];
-      const historicalOwners = movedPhoneOwners.get(link.ownerPhone8) || new Set();
+      const historicalOwners = historicalPhoneOwners.get(link.ownerPhone8) || new Set();
       if (list.length === 1 && [...historicalOwners].some(id => id !== String(list[0].reviewerId))) return null;
       return list.length === 1 ? list[0] : null;
     };

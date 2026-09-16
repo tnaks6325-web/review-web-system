@@ -56,7 +56,7 @@ assert.match(
 );
 assert.match(
   dedup,
-  /NOT \$3::boolean[\s\S]*dri_cp\.participant_identity_id[\s\S]*= \$4/,
+  /NOT \$3::boolean[\s\S]*dri_cp\.participant_identity_id[\s\S]*dri_pl\.participant_identity_id[\s\S]*= \$4[\s\S]*dri_pl\.participant_identity_id IS NULL/,
   'sub-account deduplication must stay within the authenticated participant identity'
 );
 assert.match(
