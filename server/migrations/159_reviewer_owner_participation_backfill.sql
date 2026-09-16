@@ -15,9 +15,14 @@ WITH registered_owner_candidates AS (
            THEN r.sub_accounts ELSE '[]'::jsonb END
     ) sub
    WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) <> ''
-), unique_registered_owner AS (
+), single_registered_owner AS (
   SELECT c.phone8, MIN(c.reviewer_id::text)::uuid AS reviewer_id
     FROM registered_owner_candidates c
+   GROUP BY c.phone8
+  HAVING COUNT(DISTINCT c.reviewer_id) = 1
+), unique_registered_owner AS (
+  SELECT c.phone8, c.reviewer_id
+    FROM single_registered_owner c
    WHERE NOT EXISTS (
      SELECT 1 FROM reviewer_phone_changes rpc
       WHERE rpc.old_phone8 = c.phone8 AND rpc.reviewer_id <> c.reviewer_id
@@ -29,8 +34,6 @@ WITH registered_owner_candidates AS (
         WHERE ria.phone8 = c.phone8
           AND ri.owner_reviewer_id <> c.reviewer_id
      )
-   GROUP BY c.phone8
-  HAVING COUNT(DISTINCT c.reviewer_id) = 1
 )
 UPDATE campaign_applications ca
    SET owner_reviewer_id = u.reviewer_id
@@ -54,9 +57,14 @@ WITH registered_owner_candidates AS (
            THEN r.sub_accounts ELSE '[]'::jsonb END
     ) sub
    WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) <> ''
-), unique_registered_owner AS (
+), single_registered_owner AS (
   SELECT c.phone8, MIN(c.reviewer_id::text)::uuid AS reviewer_id
     FROM registered_owner_candidates c
+   GROUP BY c.phone8
+  HAVING COUNT(DISTINCT c.reviewer_id) = 1
+), unique_registered_owner AS (
+  SELECT c.phone8, c.reviewer_id
+    FROM single_registered_owner c
    WHERE NOT EXISTS (
      SELECT 1 FROM reviewer_phone_changes rpc
       WHERE rpc.old_phone8 = c.phone8 AND rpc.reviewer_id <> c.reviewer_id
@@ -68,8 +76,6 @@ WITH registered_owner_candidates AS (
         WHERE ria.phone8 = c.phone8
           AND ri.owner_reviewer_id <> c.reviewer_id
      )
-   GROUP BY c.phone8
-  HAVING COUNT(DISTINCT c.reviewer_id) = 1
 )
 UPDATE participation_links pl
    SET owner_reviewer_id = u.reviewer_id

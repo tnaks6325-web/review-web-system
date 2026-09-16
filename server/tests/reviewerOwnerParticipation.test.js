@@ -38,6 +38,10 @@ const checks = [
       && /jsonb_array_elements[\s\S]*sub->>'phone'/.test(migration)
       && /ca\.owner_phone8 = u\.phone8/.test(migration)
       && !/reviewer_name|applicant_name\s*=|current_name\s*=/.test(migration)],
+  ['백필은 현재 등록 소유자 유일성을 먼저 확정한 뒤 번호 변경·alias 이력을 검사한다',
+    occurrences(migration, 'single_registered_owner AS') === 2
+      && occurrences(migration, 'FROM single_registered_owner c') === 2
+      && /single_registered_owner AS \([\s\S]*HAVING COUNT\(DISTINCT c\.reviewer_id\) = 1[\s\S]*unique_registered_owner AS \([\s\S]*reviewer_identity_aliases/.test(migration)],
   ['과거 identity alias가 다른 소유자를 가리키는 번호는 owner UUID로 백필하지 않는다',
     occurrences(migration, 'FROM reviewer_identity_aliases ria') === 2
       && occurrences(migration, 'ri.owner_reviewer_id <> c.reviewer_id') === 2],
