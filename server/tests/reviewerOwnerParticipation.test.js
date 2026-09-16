@@ -64,6 +64,8 @@ const checks = [
       && /os\.owner_reviewer_id = \$3\s+OR \(os\.owner_reviewer_id IS NULL AND \(\s+ca\.owner_reviewer_id = \$3/.test(reviewerRoutes)
       && /ca\.owner_reviewer_id IS NULL AND ca\.owner_phone8 = ANY/.test(search)
       && /ca\.owner_reviewer_id IS NULL AND ca\.owner_phone8 = ANY/.test(reviewerRoutes)],
+  ['참여현황 주문 보강도 owner UUID가 있으면 충돌하는 현재 번호로 가져오지 않는다',
+    /\$2::uuid IS NULL AND RIGHT\(regexp_replace\(COALESCE\(os\.phone[\s\S]*OR os\.owner_reviewer_id = \$2[\s\S]*OR \(os\.owner_reviewer_id IS NULL[\s\S]*os\.phone/.test(reviewerRoutes)],
   ['동일 번호 등록 소유자가 여러 명이면 오래된 제출 링크 계좌도 사용하지 않는다',
     /ambiguousPhone8s\.has\(r\.phone8\)[\s\S]*\? null : ownerAcct/.test(payment)
       && /ownerIds\.size > 1[\s\S]*ambiguousPhone8s\.add/.test(payment)],

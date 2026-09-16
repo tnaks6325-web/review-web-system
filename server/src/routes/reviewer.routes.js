@@ -530,7 +530,10 @@ router.get('/my-status', async (req, res, next) => {
         tc.is_closed AS "isClosed"
       FROM order_submissions os
       LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
-      WHERE (RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1) OR os.owner_reviewer_id = $2)
+      WHERE (($2::uuid IS NULL AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
+             OR os.owner_reviewer_id = $2
+             OR (os.owner_reviewer_id IS NULL
+                 AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)))
         AND os.deleted_at IS NULL
         -- 주문 원장은 감사용으로 남겨도, 실제 삭제된 작업보드 참여행의 주문은 리뷰어
         -- 참여현황에 다시 나타나면 안 된다.
