@@ -28,7 +28,7 @@ assert.match(
 );
 assert.match(
   body,
-  /LEFT JOIN campaign_participants cp ON cp\.order_submission_id = os\.id/,
+  /LEFT JOIN campaign_participants cp\s+ON cp\.order_submission_id = os\.id/,
   'the workboard participant row must be available as the payment amount fallback'
 );
 assert.match(
@@ -45,6 +45,29 @@ assert.match(
   body,
   /NOT EXISTS \([\s\S]*FROM review_index ri[\s\S]*ri\.row_index = os\.sheet_row/,
   'a sheet-indexed order must not be counted again as a sheetless order'
+);
+const dedup = (body.match(/AND NOT EXISTS \(\s*SELECT 1\s+FROM review_index ri[\s\S]*?\n\s*\)`,/) || [''])[0];
+assert.ok(dedup && !/ri\.phone8 = ANY/.test(dedup),
+  'owner-UUID rows must deduplicate by the order/participant coordinate even after their phone changes');
+assert.match(
+  dedup,
+  /WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2/,
+  'a stale or submitted row owned by someone else must not hide the selected order'
+);
+assert.match(
+  dedup,
+  /NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' \}\)[\s\S]*= \$4/,
+  'sub-account deduplication must stay within the authenticated participant identity'
+);
+assert.match(
+  body,
+  /cp\.owner_reviewer_id = \$2[\s\S]*cp\.owner_reviewer_id IS NULL[\s\S]*os\.owner_reviewer_id = \$2/,
+  'sheetless earnings must treat the current participant owner as authoritative before order ownership'
+);
+assert.match(
+  body,
+  /NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'cp', os: 'os', ca: 'ca' \}\)[\s\S]*= \$4/,
+  'sub-account earnings must stay within the authenticated participant identity'
 );
 
 console.log('sheetless review earnings contract passed');

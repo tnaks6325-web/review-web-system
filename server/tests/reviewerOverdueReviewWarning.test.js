@@ -85,7 +85,7 @@ async function call(req) {
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.item.displayName, '9/10(쿠팡) 아누아 어성초 클렌징폼');
   assert.equal(result.body.item.elapsedDays, 12);
-  assert.deepEqual(mainParams, ['owner-1', ['11112222', '33334444', '55556666']]);
+  assert.deepEqual(mainParams, ['owner-1', ['11112222', '33334444', '55556666'], false, null]);
   passed++;
   console.log('  ✓ 세션 소유자의 본계정·타계정 범위로 1건 반환');
 

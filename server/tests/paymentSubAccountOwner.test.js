@@ -8,7 +8,7 @@
  *
  * 검사 방식 — 스텁 pool 로 `listPaymentTargets` **실제 실행**
  *  §1 폴백이 실제로 보류를 푸는가(참여 원장 · 제출 신원 링크 두 경로)
- *  §2 ★ 이름 추측 금지 — 근거 없는 건은 계속 보류(fail-closed)
+ *  §2 등록DB 소유자가 한 명으로 확정되면 이름·시각 불일치도 본계정으로 귀속
  *  §3 폴백은 필요할 때만 돈다 · 실패해도 목록을 죽이지 않는다
  *  §4 배선(정규화 사본 부재 · 화면 근거 표기)
  *
@@ -67,8 +67,12 @@ function handler(opts) {
     // ── 계좌 1차 매칭(연락처) — 둘 다 빈 결과 = 타계정 미등록 상황
     if (/jsonb_array_elements/.test(sql)) return { rows: opts.subRows || [] };
     if (/FROM reviewers WHERE phone8/.test(sql) && !/AS "subAccounts"/.test(sql)) return { rows: opts.ownRows || [] };
+    if (/FROM reviewer_phone_changes/.test(sql)) return { rows: opts.movedPhoneRows || [] };
+    if (/FROM reviewer_identities/.test(sql)) return { rows: opts.identityRows || [] };
+    // ── 현재 참여행 owner UUID
+    if (/FROM unnest[\s\S]*JOIN campaign_participants cp/.test(sql)) return { rows: opts.viaParticipant || [] };
     // ── 폴백 ① 참여 원장
-    if (/campaign_applications ca ON ca\.order_submission_id/.test(sql)) {
+    if (/FROM unnest[\s\S]*JOIN order_submissions os/.test(sql)) {
       if (opts.throwOnFallback) throw new Error('boom');
       return { rows: opts.viaOrder || [] };
     }
@@ -98,7 +102,7 @@ const owner = (over = {}) => Object.assign({
       assert.strictEqual(it.bankAccount, '123456789');
       assert.strictEqual(it.accountHolder, '김수만');
       assert.strictEqual(it.accountSource, 'owner_order');
-      assert.strictEqual(it.isSub, true);
+      assert.strictEqual(it.isSub, false, '등록된 타계정이 아니면 소유자 본계좌로 지급한다');
       assert.strictEqual(it.accountOwner, '김수만');
     });
   });
@@ -141,16 +145,106 @@ const owner = (over = {}) => Object.assign({
     });
   });
 
-  console.log('\n§2 ★ 이름으로 소유자를 추측하지 않는다 — 근거 없으면 계속 보류(fail-closed)');
+  await ta('1e ★ 행 연락처가 다른 등록 리뷰어와 겹쳐도 참여행 owner UUID 계좌가 이긴다', async () => {
+    await withStubPool(handler({
+      ownRows: [{ reviewerId: '99999999-9999-9999-9999-999999999999', phone8: '87654321', name: '다른사람', bankName: '신한은행', bankAccount: '000', accountHolder: '다른사람' }],
+      viaParticipant: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID, participantIdentityId: null, subPhone8: '87654321' }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'owner_participant');
+      assert.strictEqual(it.bankAccount, '123456789');
+      assert.strictEqual(it.ownerReviewerId, OWNER_ID);
+    });
+  });
 
-  await ta('2a 신원 링크만 있고 그 이름이 소유자 타계정 목록에 없으면 미채택(stale 링크 보호)', async () => {
+  await ta('1e-2 현재 owner UUID가 없으면 행 연락처의 등록계좌가 오래된 링크보다 우선한다', async () => {
+    await withStubPool(handler({
+      ownRows: [{ reviewerId: '99999999-9999-9999-9999-999999999999', phone8: '87654321', name: '현재참여자', bankName: '신한은행', bankAccount: '777', accountHolder: '현재참여자' }],
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'self');
+      assert.strictEqual(it.bankAccount, '777');
+      assert.strictEqual(it.ownerReviewerId, '99999999-9999-9999-9999-999999999999');
+    });
+  });
+
+  await ta('1f ★ 윤주희형: 행 번호가 달라도 제출 로그인 번호+등록 본인 이름이면 본계좌로 잡힌다', async () => {
+    await withStubPool(handler({
+      rowName: '윤주희',
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '77045262' }],
+      owners: [owner({ phone8: '77045262', name: '윤주희', accountHolder: '윤주희' })],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.ownerReviewerId, OWNER_ID);
+      assert.strictEqual(it.accountHolder, '윤주희');
+      assert.strictEqual(it.accountRef.subPhone8, null);
+    });
+  });
+
+  await ta('1g 코드 타계정은 참여 뒤 이름·번호가 바뀌어도 participant identity로 현재 전용계좌를 쓴다', async () => {
+    const identityId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    await withStubPool(handler({
+      viaParticipant: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID,
+        participantIdentityId: identityId, subPhone8: '00000000' }],
+      identityRows: [{ id: identityId, ownerReviewerId: OWNER_ID, memberNo: 1,
+        currentName: '현재명의', currentPhone8: '99998888', status: 'active' }],
+      owners: [owner({ subAccounts: [{ name: '현재명의', phone: '010-9999-8888', bankName: '신한은행', bankAccount: '555', accountHolder: '현재명의' }] })],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'owner_participant');
+      assert.strictEqual(it.bankAccount, '555');
+      assert.strictEqual(it.accountHolder, '현재명의');
+      assert.strictEqual(it.accountRef.subPhone8, '99998888');
+      assert.strictEqual(it.participantIdentityId, identityId);
+    });
+  });
+
+  await ta('1g-2 앞 타계정 삭제로 member_no 위치가 다른 사람을 가리키면 입금을 보류한다', async () => {
+    const identityId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+    await withStubPool(handler({
+      viaParticipant: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID,
+        participantIdentityId: identityId, subPhone8: '99998888' }],
+      identityRows: [{ id: identityId, ownerReviewerId: OWNER_ID, memberNo: 1,
+        currentName: '원래명의', currentPhone8: '99998888', status: 'active' }],
+      owners: [owner({ subAccounts: [{ name: '다른명의', phone: '010-2222-3333', bankName: '신한은행', bankAccount: '999', accountHolder: '다른명의' }] })],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+      assert.notStrictEqual(it.bankAccount, '999');
+    });
+  });
+
+  await ta('1h participant identity가 주문 소유자와 다르면 본계좌로 낮추지 않고 보류한다', async () => {
+    const identityId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    await withStubPool(handler({
+      viaOrder: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID,
+        participantIdentityId: identityId, subPhone8: '87654321' }],
+      identityRows: [{ id: identityId, ownerReviewerId: '22222222-2222-2222-2222-222222222222', memberNo: 1, status: 'active' }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+    });
+  });
+
+  console.log('\n§2 ★ 확정 소유자는 이름·시각 불일치여도 본계정으로 귀속한다');
+
+  await ta('2a 신원 링크의 이름이 타계정 목록과 달라도 소유자 본계정으로 채택', async () => {
     await withStubPool(handler({
       viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
       owners: [owner({ subAccounts: [{ name: '다른사람' }] })],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.ok(it.issues.includes('no_reviewer'), '근거 없이 통과하면 안 된다');
-      assert.strictEqual(it.accountSource, null);
+      assert.ok(!it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.accountRef.subPhone8, null);
+      assert.strictEqual(it.bankAccount, '123456789');
     });
   });
 
@@ -164,24 +258,68 @@ const owner = (over = {}) => Object.assign({
     });
   });
 
-  await ta('2c 같은 이름이 타계정 목록에 둘이면 명의를 정할 수 없어 미채택(링크 경로)', async () => {
+  await ta('2b-2 행 번호에 등록 본계정이 둘이면 어느 계좌도 선택하지 않는다', async () => {
+    await withStubPool(handler({
+      ownRows: [
+        { reviewerId: OWNER_ID, phone8: '87654321', name: '동일번호1', ...OWNER_ACCT },
+        { reviewerId: '22222222-2222-2222-2222-222222222222', phone8: '87654321', name: '동일번호2', bankName: '신한은행', bankAccount: '000', accountHolder: '동일번호2' },
+      ],
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+    });
+  });
+
+  await ta('2b-2-2 행 번호가 다른 리뷰어의 본계정·타계정에 함께 있으면 오래된 링크도 쓰지 않는다', async () => {
+    await withStubPool(handler({
+      subRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명의A', ownerName: '김수만', ...OWNER_ACCT }],
+      ownRows: [{ reviewerId: '22222222-2222-2222-2222-222222222222', phone8: '87654321', name: '본계정B', bankName: '신한은행', bankAccount: '000', accountHolder: '본계정B' }],
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerReviewerId: OWNER_ID }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+    });
+  });
+
+  await ta('2b-3 과거 다른 소유자가 썼던 번호의 링크는 현재 번호 소유자에게 넘기지 않는다', async () => {
+    await withStubPool(handler({
+      viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
+      owners: [owner()],
+      movedPhoneRows: [{ phone8: '11112222', reviewerId: '22222222-2222-2222-2222-222222222222' }],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, null);
+    });
+  });
+
+  await ta('2c 같은 이름의 타계정이 둘이면 어느 타계정도 고르지 않고 본계정으로 귀속', async () => {
     await withStubPool(handler({
       viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
       owners: [owner({ subAccounts: [{ name: '명지수' }, { name: '명지수', phone: '010-1111-1111' }] })],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.ok(it.issues.includes('no_reviewer'));
+      assert.ok(!it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.accountRef.subPhone8, null);
     });
   });
 
-  await ta('2d 행 이름이 비어 있으면 링크 경로는 대조 근거가 없어 미채택', async () => {
+  await ta('2d 행 이름이 비어 있어도 확정된 링크 소유자 본계정으로 귀속', async () => {
     await withStubPool(handler({
       rowName: '',
       viaLink: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222' }],
       owners: [owner({ subAccounts: [{ name: '명지수' }] })],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.ok(it.issues.includes('no_reviewer'));
+      assert.ok(!it.issues.includes('no_reviewer'));
+      assert.strictEqual(it.accountSource, 'owner_link');
+      assert.strictEqual(it.accountRef.subPhone8, null);
     });
   });
 
@@ -239,16 +377,16 @@ const owner = (over = {}) => Object.assign({
       "subPhone8 없는 폴백 건을 'sub' 로 박제하면 다음 대조가 없는 명의를 찾아 mismatch 로 잡는다");
   });
 
-  console.log('\n§3 폴백은 필요할 때만 · 실패해도 목록을 죽이지 않는다');
+  console.log('\n§3 소유자 우선 조회 · 실패해도 목록을 죽이지 않는다');
 
-  await ta('3a 연락처로 이미 찾은 건에는 폴백 쿼리가 아예 안 나간다', async () => {
+  await ta('3a 연락처 계좌가 있어도 소유자 링크를 조회한다(우연히 겹친 타인 계좌 방지)', async () => {
     await withStubPool(handler({
       ownRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명지수', ...OWNER_ACCT }],
     }), async (svc, calls) => {
       const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.accountSource, 'self');
-      assert.strictEqual(calls.filter(c => /FROM participation_links pl/.test(c.sql)).length, 0);
-      assert.strictEqual(calls.filter(c => /campaign_applications ca ON ca\.order_submission_id/.test(c.sql)).length, 0);
+      assert.strictEqual(calls.filter(c => /FROM participation_links pl/.test(c.sql)).length, 1);
+      assert.strictEqual(calls.filter(c => /FROM unnest[\s\S]*JOIN order_submissions os/.test(c.sql)).length, 1);
     });
   });
 

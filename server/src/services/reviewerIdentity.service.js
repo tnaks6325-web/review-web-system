@@ -423,9 +423,42 @@ async function getOwnerScopeByLoginPhone8(loginPhone8) {
   return { ownerReviewerId: owner.id, reviewerNo: owner.reviewer_no, phone8s: [...phones], legacy: owner.reviewer_no == null };
 }
 
+// 로그인 토큰에는 불변 reviewers.id가 들어 있다. 조회 화면은 토큰이 있을 때 phone8을 다시
+// 역추적하지 않고 이 ID에서 본인+타계정 범위를 만든다. 같은 phone8을 가진 리뷰어가 있어도
+// 다른 소유자의 참여내역이 섞이지 않는다.
+async function getOwnerScopeByReviewerId(ownerReviewerId) {
+  if (!String(ownerReviewerId || '')) return { phone8s: [] };
+  const { rows } = await pool.query(
+    `SELECT id, reviewer_no, phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1`,
+    [ownerReviewerId]
+  );
+  if (rows.length !== 1) return { phone8s: [] };
+  const owner = rows[0];
+  const phones = new Set();
+  const add = value => { const phone8 = toPhone8(value); if (phone8) phones.add(phone8); };
+  add(owner.phone8);
+  for (const sub of asSubAccounts(owner.sub_accounts)) add(sub && sub.phone);
+  try {
+    const identityRows = await pool.query(
+      `SELECT current_phone8 FROM reviewer_identities
+        WHERE owner_reviewer_id = $1 AND status <> 'separated'`,
+      [ownerReviewerId]
+    );
+    for (const row of identityRows.rows) add(row.current_phone8);
+  } catch (err) {
+    if (err && err.code !== '42P01') throw err;
+  }
+  return {
+    ownerReviewerId: String(ownerReviewerId),
+    reviewerNo: owner.reviewer_no,
+    phone8s: [...phones],
+    legacy: owner.reviewer_no == null,
+  };
+}
+
 module.exports = {
   ReviewerIdentityError, normalizePhone, toPhone8, formatOwnerCode, formatIdentityCode,
   buildIdentitySeeds, isBootstrapEnabled, isWriteEnabled, isChangeEnabled, previewBootstrap, bootstrapOne, listForOwner,
   previewIdentityChange, applyIdentityChange,
-  resolveParticipantIdentity, getOwnerScopeByLoginPhone8,
+  resolveParticipantIdentity, getOwnerScopeByLoginPhone8, getOwnerScopeByReviewerId,
 };

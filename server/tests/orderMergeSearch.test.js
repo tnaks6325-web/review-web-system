@@ -17,10 +17,12 @@ const captured = { queries: [] };
 let reviewRows = [];   // 본검색(FROM review_index, 메인) 결과
 let seenRows = [];     // dedup seen-set(FROM review_index, row_index IS NOT NULL) 결과
 let orderRows = [];    // 병합(FROM order_submissions) 결과
+let ownerReviewRows = null; // 로그인 ownerScope 전용 조회 결과
 
 const fakePool = {
   query: async (sql, params) => {
     captured.queries.push({ sql, params });
+    if (/FROM review_index ri[\s\S]*cp\.owner_reviewer_id = \$1/.test(sql) && ownerReviewRows) return { rows: ownerReviewRows };
     if (/FROM reviewers/.test(sql)) return { rows: [] };            // 타계정 없음 → phoneList=[p8]
     if (/set_limit/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ count: '0', built_at: null }] };
@@ -131,6 +133,52 @@ async function run() {
   assert.ok(m7, '7: written 주문 병합됨');
   assert.equal(m7.orderStage, 'reflected', "7: written → orderStage='reflected'(반영완료)");
   console.log('  7. written → 반영완료(reflected) ✓');
+
+  // ── 8) 로그인 홈 ownerScope는 이름/행 phone8 검색을 버리고 owner UUID 행만 사용 ──
+  captured.queries = []; reviewRows = [reviewRow({ idxName: '동명이인' })]; seenRows = []; orderRows = [];
+  ownerReviewRows = [reviewRow({ idxName: '제출정보명', rowIndex: 75, isSubmitted: true })];
+  const r8 = await searchByName('윤주희', '77045262', {
+    includeSubmitted: true,
+    ownerReviewerId: '11111111-1111-1111-1111-111111111111',
+    ownerPhone8s: ['77045262'],
+  });
+  assert.equal(r8.results.length, 1, '8: owner UUID 행 1건만 반환');
+  assert.equal(r8.results[0].idxName, '제출정보명', '8: 참여행 이름이 로그인 이름과 달라도 노출');
+  assert.ok(captured.queries.some(x => /cp\.owner_reviewer_id = \$1/.test(x.sql)), '8: owner UUID 조건 실행');
+  assert.ok(!captured.queries.some(x => /set_limit/.test(x.sql)), '8: 공개 이름 유사도 검색 미실행');
+  ownerReviewRows = null;
+  console.log('  8. 로그인 ownerScope — 참여행 이름·번호 불일치 허용 ✓');
+
+  // ── 9) 타계정 세션용 strictPhoneScope는 리뷰어 DB의 본계정·형제번호로 확장하지 않음 ──
+  captured.queries = []; reviewRows = []; seenRows = []; orderRows = [];
+  await searchByName('', '87654321', {
+    includeSubmitted: true,
+    ownerPhone8s: ['87654321'],
+    strictPhoneScope: true,
+  });
+  const strictSearch = captured.queries.find(x => /FROM review_index ri/.test(x.sql) && /ri\.phone8 = ANY/.test(x.sql));
+  assert.ok(strictSearch, '9: 타계정 번호 검색 쿼리 실행');
+  assert.deepEqual(strictSearch.params[0], ['87654321'], '9: 토큰 로그인 번호 하나만 SQL 범위로 사용');
+  assert.ok(!captured.queries.some(x => /FROM reviewers/.test(x.sql)), '9: 본계정·형제 타계정 번호 조회 미실행');
+  console.log('  9. 타계정 strictPhoneScope — 로그인 번호만 사용 ✓');
+
+  // ── 10) 코드 타계정은 owner UUID를 유지하되 participant identity로 형제 행을 차단 ──
+  captured.queries = []; reviewRows = []; seenRows = []; orderRows = [];
+  ownerReviewRows = [reviewRow({ idxName: '코드타계정', rowIndex: 76 })];
+  const participantId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  await searchByName('', '87654321', {
+    includeSubmitted: true,
+    ownerReviewerId: '11111111-1111-1111-1111-111111111111',
+    ownerPhone8s: ['87654321'],
+    participantIdentityId: participantId,
+    restrictParticipant: true,
+    strictPhoneScope: true,
+  });
+  const scopedOwnerQuery = captured.queries.find(x => /CASE WHEN cp\.owner_reviewer_id IS NULL[\s\S]*THEN cp\.participant_identity_id END[\s\S]*= \$4/.test(x.sql));
+  assert.ok(scopedOwnerQuery, '10: 참여자 신원 제한 SQL 실행');
+  assert.deepEqual(scopedOwnerQuery.params.slice(1), [['87654321'], true, participantId, true], '10: owner 범위에 참여자 UUID·제한 플래그 전달');
+  ownerReviewRows = null;
+  console.log('  10. 코드 타계정 — owner UUID + participant identity 범위 ✓');
 
   console.log('✅ orderMergeSearch 테스트 전체 통과');
 }

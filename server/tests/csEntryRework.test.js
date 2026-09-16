@@ -85,7 +85,7 @@ ok('search.service: 입금 키워드 목록을 내보냄(판정 드리프트 차
 ok('routes: 그 목록에서 SQL 패턴을 파생(하드코딩 금지)',
   /PAYMENT_COL_KEYWORDS\.map\(k => '%' \+ k \+ '%'\)/.test(routes));
 ok('routes: row_json 은 서버로 끌어오지 않고 SQL에서 판정(메모리 안전)',
-  /jsonb_each_text\(COALESCE\(row_json, '\{\}'::jsonb\)\) kv/.test(routes) &&
+  /jsonb_each_text\(COALESCE\((?:ri\.)?row_json, '\{\}'::jsonb\)\) kv/.test(routes) &&
   /kv\.key ILIKE ANY\(\$2\) AND btrim\(kv\.value\) <> ''/.test(routes));
 ok('index: 완료 탭에서 같은 자리를 누적 금액으로 전환(블록 소실 금지)',
   /const t = isDone \? _reviewEarnings\.doneTotals : _reviewEarnings\.totals/.test(indexHtml) &&
@@ -110,7 +110,7 @@ pool.query = async (sql) => {
   //   ⚠ 이 분기는 `FROM review_index` 보다 **먼저** 와야 한다 — 그 쿼리의 이중집계 방지
   //     NOT EXISTS 안에 `FROM review_index ri` 가 들어 있어(2026-08-19 주문 id 매칭 추가)
   //     순서가 뒤면 명단 fixture 가 가로채 무시트 주문 5건으로 오인된다(스텁 매칭 함정).
-  if (/FROM order_submissions os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [] };
+  if (/SELECT os\.id,[\s\S]*FROM order_submissions os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [] };
   if (/FROM review_index/.test(sql)) return { rows: RI_ROWS };
   if (/FROM recruit_campaigns/.test(sql)) {
     return { rows: [{ sheetId: 'S1', tabName: 'T1', reviewFee: 1000, thumbnailUrl: 'https://x/y.png' }] };

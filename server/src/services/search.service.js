@@ -7,6 +7,16 @@ const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
 const { cashReceiptRequirementsForRows } = require('./cashReceiptContext.service');
 const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
 
+// 참여자 신원도 소유자와 같은 우선순위로 고른다. 상위 행의 소유자 UUID와 충돌하는
+// 주문·신청·과거 링크의 identity는 데이터 보강에 사용하지 않는다.
+function _participantIdentityByOwnerSql({ cp = null, os = null, ca = null, pl = null } = {}) {
+  const aliases = [cp, os, ca, pl].filter(Boolean);
+  const owner = `COALESCE(${aliases.map(a => `${a}.owner_reviewer_id`).join(', ')})`;
+  return `COALESCE(${aliases.map(a =>
+    `CASE WHEN ${a}.owner_reviewer_id IS NULL OR ${a}.owner_reviewer_id = ${owner} ` +
+    `THEN ${a}.participant_identity_id END`).join(', ')})`;
+}
+
 /** 검수에서 거절·보류된 영수증은 파일이 남아 있어도 리뷰어에게는 다시 제출할 슬롯이다. */
 async function _removeUnpayableReceiptSlots(items) {
   const source = Array.isArray(items) ? items : [];
@@ -124,9 +134,39 @@ const _ORDER_ATTENTION_STATUSES = new Set(['failed', 'stuck_manual']);
 // 확인필요 상태를 리뷰어 화면에 노출할지(기본 미노출). 킬스위치: REVIEW_ORDER_ATTENTION_VISIBLE=1
 const _ORDER_ATTENTION_VISIBLE = process.env.REVIEW_ORDER_ATTENTION_VISIBLE === '1';
 
-async function _mergeOrderSubmissions(results, phoneList) {
+async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null, participantIdentityId = null, restrictParticipant = false) {
   if (!Array.isArray(results) || !Array.isArray(phoneList) || phoneList.length === 0) return results;
   try {
+    const seenOwnerCondition = ownerReviewerId
+      ? `((cp.owner_reviewer_id = $2 OR (cp.owner_reviewer_id IS NULL AND ri.phone8 = ANY($1)))
+          AND (NOT $4::boolean OR (
+            cp.participant_identity_id = $3
+            OR (cp.participant_identity_id IS NULL AND cp.phone8 = ANY($1))
+          )))`
+      : `ri.phone8 = ANY($1)`;
+    const orderOwnerCondition = ownerReviewerId
+      ? `(os.owner_reviewer_id = $3
+          OR (os.owner_reviewer_id IS NULL AND (
+            ca.owner_reviewer_id = $3
+            OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+              SELECT 1 FROM reviewer_phone_changes rpc
+               WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $3
+            ) AND NOT EXISTS (
+              SELECT 1
+                FROM reviewer_identity_aliases ria
+                JOIN reviewer_identities rii ON rii.id = ria.identity_id
+               WHERE ria.phone8 = ca.owner_phone8
+                 AND rii.owner_reviewer_id <> $3
+            ))
+            OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
+          )))
+          AND (NOT $5::boolean OR (
+            ${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} = $4
+            OR (${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} IS NULL
+                AND COALESCE(ca.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
+          ))`
+      : `RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)`;
     // dedup 기준 = phoneList 전체의 written 색인행(결과 필터/아카이브로 빠진 행까지 포함).
     // idx_review_phone8(migration 001)로 인덱스 스캔 — 신규 seq scan 아님.
     const { rows: seenRows } = await pool.query(
@@ -136,6 +176,9 @@ async function _mergeOrderSubmissions(results, phoneList) {
       [phoneList]
     );
     const seen = new Set(seenRows.map(r => `${r.sheetId}||${r.tabName}||${r.rowIndex}`));
+    for (const item of results) {
+      if (item && item.rowIndex != null) seen.add(`${item.sheetId}||${item.tabName}||${item.rowIndex}`);
+    }
 
     /* ★★ 참여형(무시트) 주문은 위치키로 짝지을 수 없다 — 원장 좌표가 `campaign:<공고ID>`라
        작업표(review_index) 좌표와 **영원히** 일치하지 않는다(submit.routes `_resolveCampaignOrderScope`).
@@ -153,8 +196,8 @@ async function _mergeOrderSubmissions(results, phoneList) {
              ON ri.sheet_id = cp.sheet_id AND ri.tab_name = cp.tab_name AND ri.row_index = cp.seq
           WHERE cp.order_submission_id IS NOT NULL
             AND cp.deleted_at IS NULL
-            AND ri.phone8 = ANY($1)`,
-        [phoneList]
+             AND ${seenOwnerCondition}`,
+         ownerReviewerId ? [phoneList, ownerReviewerId, participantIdentityId, restrictParticipant === true] : [phoneList]
       );
       seenOsid = new Set(osidRows.map(r => String(r.osid)));
     } catch (e) {
@@ -185,7 +228,7 @@ async function _mergeOrderSubmissions(results, phoneList) {
             (중복 자체는 주문 id dedup 이 막는다 — 이름이 달라도 카드가 늘지 않는다.) */
          LEFT JOIN tab_configs wt
            ON wt.sheet_id = rc.linked_sheet_id AND wt.tab_name = rc.linked_tab_name
-        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+        WHERE ${orderOwnerCondition}
           AND os.deleted_at IS NULL
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
           AND os.submitted_at > now() - ($2 || ' days')::interval
@@ -208,7 +251,9 @@ async function _mergeOrderSubmissions(results, phoneList) {
           )
         ORDER BY os.submitted_at DESC
         LIMIT ${_ORDER_MERGE_LIMIT}`,
-      [phoneList, String(_ORDER_MERGE_DAYS)]
+      ownerReviewerId
+        ? [phoneList, String(_ORDER_MERGE_DAYS), ownerReviewerId, participantIdentityId, restrictParticipant === true]
+        : [phoneList, String(_ORDER_MERGE_DAYS)]
     );
 
     for (const o of orderRows) {
@@ -248,6 +293,124 @@ async function _mergeOrderSubmissions(results, phoneList) {
     logger.warn('[Search] order_submissions 병합 실패(무시): ' + e.message);
   }
   return results;
+}
+
+// 로그인 홈 전용 보강. 현재 참여행이 있으면 그 행의 owner UUID가 최우선이고, UUID가 없는
+// 과거 행만 주문/신청의 소유자 링크와 기존 phone8 범위를 차례로 사용한다.
+async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, includeSubmitted, participantIdentityId = null, restrictParticipant = false) {
+  if (!ownerReviewerId || !Array.isArray(phoneList) || !phoneList.length) return [];
+  const submittedState = 'COALESCE(cp.is_submitted, ri.is_submitted)';
+  const { rows } = await pool.query(
+    `SELECT ${selectFields}, 1.0::float AS score
+       FROM review_index ri
+       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+       LEFT JOIN campaign_participants cp
+         ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+       LEFT JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+       LEFT JOIN LATERAL (
+         SELECT app.owner_reviewer_id, app.owner_phone8, app.participant_identity_id
+           FROM campaign_applications app
+          WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
+          ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
+          LIMIT 1
+       ) ca ON TRUE
+       LEFT JOIN participation_links pl
+         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
+       WHERE tc.sheet_id IS NOT NULL
+        AND ($3::boolean OR ${submittedState} = FALSE)
+        AND (
+          (cp.id IS NOT NULL AND (
+            cp.owner_reviewer_id = $1
+            OR (cp.owner_reviewer_id IS NULL AND (
+              os.owner_reviewer_id = $1
+              OR (os.owner_reviewer_id IS NULL AND (
+                ca.owner_reviewer_id = $1
+                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($2) AND NOT EXISTS (
+                  SELECT 1 FROM reviewer_phone_changes rpc
+                   WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $1
+                ) AND NOT EXISTS (
+                  SELECT 1
+                    FROM reviewer_identity_aliases ria
+                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                   WHERE ria.phone8 = ca.owner_phone8
+                     AND rii.owner_reviewer_id <> $1
+                ))
+                OR (
+                  ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                  AND (pl.owner_reviewer_id = $1
+                       OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($2)
+                           AND NOT EXISTS (
+                             SELECT 1 FROM reviewer_phone_changes rpc
+                              WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
+                           )
+                           AND NOT EXISTS (
+                             SELECT 1
+                               FROM reviewer_identity_aliases ria
+                               JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                              WHERE ria.phone8 = pl.phone8
+                                AND rii.owner_reviewer_id <> $1
+                           )))
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewers current_owner
+                     WHERE current_owner.id <> $1
+                       AND (
+                         current_owner.phone8 = cp.phone8
+                         OR EXISTS (
+                           SELECT 1 FROM jsonb_array_elements(
+                             CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
+                                  THEN current_owner.sub_accounts ELSE '[]'::jsonb END
+                           ) sub
+                            WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+                         )
+                       )
+                  )
+                )
+                OR (ca.owner_reviewer_id IS NULL
+                    AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($2))
+              ))
+            ))
+          ))
+          OR (cp.id IS NULL AND (
+            pl.owner_reviewer_id = $1
+            OR (pl.owner_reviewer_id IS NULL AND (
+              (ri.phone8 = ANY($2)
+               AND NOT EXISTS (
+                 SELECT 1 FROM reviewer_phone_changes rpc
+                  WHERE rpc.old_phone8 = ri.phone8 AND rpc.reviewer_id <> $1
+               )
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM reviewer_identity_aliases ria
+                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                  WHERE ria.phone8 = ri.phone8 AND rii.owner_reviewer_id <> $1
+               ))
+              OR (ri.phone8 IS NULL AND pl.phone8 = ANY($2)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewer_phone_changes rpc
+                     WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM reviewer_identity_aliases ria
+                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                     WHERE ria.phone8 = pl.phone8 AND rii.owner_reviewer_id <> $1
+                  ))
+            ))
+          ))
+        )
+        AND (NOT $5::boolean OR (
+          ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} = $4
+          OR (
+            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
+            AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($2)
+          )
+        ))
+      ORDER BY ${submittedState} ASC, ri.start_date DESC NULLS LAST
+      LIMIT 400`,
+    [ownerReviewerId, phoneList, includeSubmitted === true, participantIdentityId, restrictParticipant === true]
+  );
+  return rows;
 }
 
 /**
@@ -298,6 +461,9 @@ async function searchByName(query, phone8, opts = {}) {
   const params = [];
   let paramIdx = 1;
   let mergePhoneList = null;   // includeSubmitted 강한키(phone8) 분기에서만 order 병합용
+  const strictPhoneList = opts && opts.strictPhoneScope && Array.isArray(opts.ownerPhone8s)
+    ? [...new Set(opts.ownerPhone8s.map(v => String(v || '').replace(/[^0-9]/g, '').slice(-8)).filter(v => v.length === 8))]
+    : null;
 
   const SELECT_FIELDS = `
     ri.reviewer_name     AS "idxName",
@@ -345,7 +511,7 @@ async function searchByName(query, phone8, opts = {}) {
     //    전화번호가 맞으면 본인 건이므로 누락하지 않음. 이름은 점수 가산용으로만 사용)
     // ★ P5: participation_links(제출 시점 확정 신원)도 단독 통과 키로 사용.
     //   기존 동작(이름 일치 + 전화 근접/NULL)도 그대로 유지(하위 호환).
-    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneList = strictPhoneList && strictPhoneList.length ? strictPhoneList : await _getReviewerPhoneList(p8);
     mergePhoneList = phoneList;
 
     const nameParam = paramIdx++;
@@ -401,7 +567,7 @@ async function searchByName(query, phone8, opts = {}) {
   } else if (p8.length === 8) {
     // ── phone8 단독 검색 (이름 미입력) ──
     // ★ P0/P5: 본인+타계정 phone8 또는 확정 신원(participation_links)으로 매칭
-    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneList = strictPhoneList && strictPhoneList.length ? strictPhoneList : await _getReviewerPhoneList(p8);
     mergePhoneList = phoneList;
     const phoneListParam = paramIdx++;
     // 이 분기는 매칭 자체가 강한 신원키(phone8/확정신원)뿐 → 제출완료 포함 시 필터만 해제
@@ -450,12 +616,32 @@ async function searchByName(query, phone8, opts = {}) {
   const startMs = Date.now();
 
   try {
-    // 유사도 임계값 설정 (세션 단위)
-    if (q) {
-      await pool.query(`SELECT set_limit(${SIMILARITY_THRESHOLD})`);
+    let rows;
+    if (opts.ownerReviewerId) {
+      const ownerRows = await _loadOwnerReviewRows(
+        SELECT_FIELDS,
+        opts.ownerReviewerId,
+        Array.isArray(opts.ownerPhone8s) && opts.ownerPhone8s.length ? opts.ownerPhone8s : [p8],
+        includeSubmitted,
+        opts.participantIdentityId || null,
+        opts.restrictParticipant === true
+      );
+      const byCoordinate = new Map();
+      // ownerScope는 로그인 홈 전용이다. 이름/근접번호 공개검색 결과를 섞지 않고 소유권이
+      // 확인된 행만 반환해 동명이인·재사용 번호의 참여내역이 넘어오지 않게 한다.
+      for (const row of ownerRows) {
+        const key = `${row.sheetId}||${row.tabName}||${row.rowIndex}`;
+        if (!byCoordinate.has(key)) byCoordinate.set(key, row);
+      }
+      rows = [...byCoordinate.values()];
+    } else {
+      // 유사도 임계값 설정 (세션 단위). 로그인 ownerScope는 이름 유사도 검색을 실행하지 않는다.
+      if (q) {
+        await pool.query(`SELECT set_limit(${SIMILARITY_THRESHOLD})`);
+      }
+      const searched = await pool.query(sql, params);
+      rows = searched.rows;
     }
-
-    const { rows } = await pool.query(sql, params);
     const queryMs = Date.now() - startMs;
 
     // 느린 쿼리 경고 (500ms 초과)
@@ -597,7 +783,13 @@ async function searchByName(query, phone8, opts = {}) {
 
     // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
     if (includeSubmitted && mergePhoneList) {
-      await _mergeOrderSubmissions(results, mergePhoneList);
+      await _mergeOrderSubmissions(
+        results,
+        Array.isArray(opts.ownerPhone8s) && opts.ownerPhone8s.length ? opts.ownerPhone8s : mergePhoneList,
+        opts.ownerReviewerId || null,
+        opts.participantIdentityId || null,
+        opts.restrictParticipant === true
+      );
     }
 
     return {
