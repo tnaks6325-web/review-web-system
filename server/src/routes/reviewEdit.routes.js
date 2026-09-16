@@ -265,7 +265,8 @@ function _pickReviewGuide(raw) {
 
 // GET /api/review-edit/participation-brief?phone8&sheetId&tabName&gid&rowIndex
 //   리뷰 내역 카드 → "참여상품 정보" 시트용. 행 소유권(강한-키) 통과 시에만 그 행의 연결 공고
-//   brief(제목·카톡URL·상품URL·상품정보·리뷰가이드)를 반환. 카톡 URL은 이름 단독 약한-키론 절대 안 나간다
+//   brief(제목·카톡URL·상품URL·상품정보·리뷰가이드·본인 구매캡처)를 반환. 카톡 URL과 구매캡처는
+//   이름 단독 약한-키론 절대 안 나간다
 //   (참여형 chat_url 게이트와 동일 사상 — my-files 소유권 술어 재사용).
 router.get('/participation-brief', async (req, res) => {
   try {
@@ -377,6 +378,31 @@ router.get('/participation-brief', async (req, res) => {
       } catch (_) { /* 표시용 — fail-soft */ }
     }
 
+    /* ★ 본인이 제출한 구매 캡처 — 위의 강한 행 소유권 검증을 통과한 뒤, 현재 작업표 줄이
+       직접 가리키는 주문 원장만 읽는다. 좌표가 같다는 이유로 과거 주문을 추측해 붙이면
+       재사용된 줄에서 다른 리뷰어의 캡처가 노출될 수 있으므로 `order_submission_id` 없는
+       레거시 줄은 fail-closed(버튼 비활성)한다. 파일 ID는 기존 이미지 프록시에서만 사용한다. */
+    let purchaseCapture = null;
+    try {
+      const { rows: caps } = await pool.query(
+        `SELECT os.capture_file_id, os.capture_uploaded_at, os.submitted_at
+           FROM campaign_participants cp
+           JOIN order_submissions os
+             ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+          WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3
+            AND cp.deleted_at IS NULL
+            AND COALESCE(os.capture_file_id, '') <> ''
+          LIMIT 1`,
+        [sheetId, tabName, rowIndex]
+      );
+      if (caps.length) {
+        purchaseCapture = {
+          fileId: String(caps[0].capture_file_id || ''),
+          uploadedAt: caps[0].capture_uploaded_at || caps[0].submitted_at || null,
+        };
+      }
+    } catch (_) { /* 표시용 — fail-closed */ }
+
     /* ★ 주문취소 가능 여부 — **판정 단일 출처**(`assessReviewerCancel`)를 화면 게이트와
        실제 실행이 함께 쓴다. 버튼을 그릴지 말지를 화면이 스스로 정하면 "보이는데 거부"가 된다.
        ★ 읽기 전용·fail-soft — 실패하면 필드를 싣지 않고(=화면은 버튼 미표시) 나머지 brief 는 그대로. */
@@ -394,6 +420,7 @@ router.get('/participation-brief', async (req, res) => {
       const only = {};
       if (workOptions.length) only.workOptions = workOptions;
       if (payment) only.payment = payment;
+      if (purchaseCapture) only.purchaseCapture = purchaseCapture;
       if (cancelable) only.cancelable = cancelable;
       return res.json({ ok: true, brief: Object.keys(only).length ? only : null });
     }
@@ -430,6 +457,7 @@ router.get('/participation-brief', async (req, res) => {
         reviewGuide,
         workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
         payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'paid', paidDate} (관리자 수동 확정) | {status:'failed'} | null
+        purchaseCapture,      // ★ 강한 행 소유권 + 현재 order_submission_id 로 확인된 {fileId, uploadedAt} | null
         cancelable,           // ★ 주문취소 게이트 {ok, reason, message, reasons[]} — 실패 시 null
       },
     });
