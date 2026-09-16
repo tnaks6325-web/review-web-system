@@ -238,8 +238,10 @@ function withSolapiEnv(fn) {
     assert.ok(adminNavStart >= 0 && staffNavStart > adminNavStart && staffNavEnd > staffNavStart);
     assert.ok(/openAlimtalkConsole\(\)[^]*알림톡/.test(workdesk.slice(adminNavStart, staffNavStart)));
     assert.ok(!/openAlimtalkConsole/.test(workdesk.slice(staffNavStart, staffNavEnd)));
-    assert.ok(/location\.assign\('\/docs\/review-reminder-alimtalk-simulator'\)/.test(workdesk));
-    assert.ok(/href="\/workdesk">운영 홈<\/a>/.test(simulator));
+    assert.ok(workdesk.includes("return 'docs/review-reminder-alimtalk-simulator'+(/\\.html?$/i.test(last)?'.html':'');"));
+    assert.ok(/location\.assign\(_alimtalkConsolePath\(\)\)/.test(workdesk));
+    assert.ok(/href="\.\.\/workdesk" onclick="openWorkdeskHome\(event\)">운영 홈<\/a>/.test(simulator));
+    assert.ok(simulator.includes('location.assign("../workdesk" + (/\\.html?$/i.test(last) ? ".html" : ""));'));
     assert.ok(/기본값 OFF/.test(simulator));
     assert.ok(/현재 운영 상태는 Railway 변수에서 확인/.test(simulator));
     assert.ok(/GET \/api\/review-reminders\/status/.test(simulator));

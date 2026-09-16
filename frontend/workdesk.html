@@ -2979,8 +2979,12 @@ function logout(){
      이 판정과 라우트의 미들웨어는 반드시 같이 움직인다. */
 function _isInternalRole(){ const r = STATE.role; return r==='master' || r==='admin' || r==='staff'; }
 
+function _alimtalkConsolePath(){
+  const last = String(location.pathname||'').split('/').pop();
+  return 'docs/review-reminder-alimtalk-simulator'+(/\.html?$/i.test(last)?'.html':'');
+}
 function openAlimtalkConsole(){
-  location.assign('/docs/review-reminder-alimtalk-simulator');
+  location.assign(_alimtalkConsolePath());
 }
 
 function renderShell(){
