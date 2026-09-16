@@ -288,6 +288,49 @@
     .kpi .value { margin-top: 6px; font-size: 24px; font-weight: 850; letter-spacing: -.04em; }
     .kpi .hint { margin-top: 1px; color: var(--faint); font-size: 10px; }
 
+    .billing-strip {
+      display: grid;
+      grid-template-columns: minmax(230px, 1.2fr) minmax(170px, .8fr) minmax(210px, 1fr) auto;
+      align-items: stretch;
+      gap: 0;
+      margin-bottom: 12px;
+      overflow: hidden;
+      border: 1px solid #273244;
+      border-radius: 12px;
+      background: #111827;
+      color: #fff;
+      box-shadow: 0 7px 18px rgba(17,24,39,.09);
+    }
+    .billing-heading, .billing-metric { padding: 12px 14px; }
+    .billing-heading { display: flex; flex-direction: column; justify-content: center; }
+    .billing-heading-top { display: flex; align-items: center; gap: 7px; }
+    .billing-heading h2 { margin: 0; font-size: 13px; letter-spacing: -.02em; }
+    .billing-live {
+      padding: 2px 5px;
+      border: 1px solid rgba(134,239,172,.25);
+      border-radius: 5px;
+      background: rgba(34,197,94,.11);
+      color: #86efac;
+      font-family: var(--mono);
+      font-size: 8px;
+      font-weight: 850;
+      letter-spacing: .08em;
+    }
+    .billing-status { margin: 3px 0 0; color: #98a2b3; font-size: 9px; line-height: 1.4; }
+    .billing-metric { border-left: 1px solid rgba(255,255,255,.09); }
+    .billing-label { color: #98a2b3; font-size: 9px; font-weight: 750; }
+    .billing-value { margin-top: 2px; font-family: var(--mono); font-size: 18px; font-weight: 850; letter-spacing: -.04em; }
+    .billing-hint { margin-top: 2px; color: #98a2b3; font-size: 9px; }
+    .billing-refresh {
+      align-self: center;
+      margin: 0 12px;
+      border-color: rgba(255,255,255,.18);
+      background: #fff;
+      color: #111827;
+      white-space: nowrap;
+    }
+    .billing-refresh:hover { border-color: #fff; background: #eef2f6; }
+
     .activation-note {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
@@ -757,6 +800,10 @@
       .page-head { align-items: flex-start; }
       .policy-badge { display: none; }
       .kpis { grid-template-columns: repeat(2, 1fr); }
+      .billing-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .billing-heading { grid-column: 1 / -1; border-bottom: 1px solid rgba(255,255,255,.09); }
+      .billing-metric:first-of-type { border-left: 0; }
+      .billing-refresh { grid-column: 1 / -1; margin: 0 12px 12px; }
       .activation-note { grid-template-columns: 1fr; gap: 9px; }
       .activation-status { justify-self: start; min-width: 0; }
       .activation-actions { width: 100%; }
@@ -822,6 +869,24 @@
           <article class="kpi warn"><div class="label">최종기한 대기</div><div class="value" id="kpiWaiting">0</div><div class="hint">3차 발송 후 유예기간</div></article>
           <article class="kpi safe"><div class="label">오늘 성공</div><div class="value" id="kpiSuccess">0</div><div class="hint">SOLAPI 처리완료 기준</div></article>
           <article class="kpi"><div class="label">오늘 사용 한도</div><div class="value"><span id="kpiUsed">0</span><small style="font-size:12px;color:var(--faint)"> / 40</small></div><div class="hint">초과 건은 다음 주기로 이월</div></article>
+        </section>
+
+        <section class="billing-strip" aria-labelledby="billingTitle">
+          <div class="billing-heading">
+            <div class="billing-heading-top"><h2 id="billingTitle">SOLAPI 비용 · 잔액</h2><span class="billing-live">LIVE API</span></div>
+            <p class="billing-status" id="billingStatus" aria-live="polite">관리자 로그인 후 실제 계정 정보를 조회합니다.</p>
+          </div>
+          <div class="billing-metric">
+            <div class="billing-label">알림톡 건당</div>
+            <div class="billing-value" id="solapiUnitPrice">조회 대기</div>
+            <div class="billing-hint" id="solapiUnitPriceHint">계정별 실제 단가를 조회합니다.</div>
+          </div>
+          <div class="billing-metric">
+            <div class="billing-label">사용 가능액</div>
+            <div class="billing-value" id="solapiSpendable">로그인 필요</div>
+            <div class="billing-hint" id="solapiBalanceHint">잔액과 포인트를 합산합니다.</div>
+          </div>
+          <button class="btn small billing-refresh" id="refreshBillingBtn" type="button">비용·잔액 새로고침</button>
         </section>
 
         <section class="activation-note" aria-labelledby="activationNoteTitle">
@@ -911,7 +976,7 @@
               <div class="meta-row"><span>카카오 채널</span><b>@inad</b></div>
               <div class="meta-row"><span>수신자</span><b>김수만 · 010-****-6325</b></div>
               <div class="meta-row"><span>대체발송</span><b style="color:var(--green)">사용 안 함</b></div>
-              <div class="meta-row"><span>예상 비용</span><b>14.3원</b></div>
+              <div class="meta-row"><span>예상 비용</span><b id="previewCost">조회 대기</b></div>
             </div>
             <div class="preview-actions">
               <button class="btn primary" id="simulateBtn">이 내용으로 시뮬레이션</button>
@@ -947,6 +1012,7 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite">시뮬레이션 처리완료 · 성공 1건 / 실패 0건</div>
 
+  <script src="../api.js"></script>
   <script>
     const stageData = {
       1: {
@@ -1030,6 +1096,55 @@
       showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 2400);
     }
 
+    function formatWon(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toLocaleString("ko-KR")}원` : "조회 불가";
+    }
+
+    function adminToken() {
+      return sessionStorage.getItem("admin_token") || localStorage.getItem("admin_token") || "";
+    }
+
+    async function loadBilling() {
+      const token = adminToken();
+      if (!token) {
+        $("#billingStatus").textContent = "리뷰웹 관리자 로그인 후 새로고침하세요.";
+        $("#solapiUnitPrice").textContent = "로그인 필요";
+        $("#solapiUnitPriceHint").textContent = "계정별 실제 단가를 조회합니다.";
+        $("#solapiSpendable").textContent = "로그인 필요";
+        $("#previewCost").textContent = "로그인 후 조회";
+        return;
+      }
+      $("#refreshBillingBtn").disabled = true;
+      $("#billingStatus").textContent = "SOLAPI 계정 정보를 조회하는 중입니다.";
+      try {
+        const response = await fetch(API_BASE_URL + "/api/review-reminders/status", {
+          headers: { Authorization: "Bearer " + token },
+          cache: "no-store",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.billing || !payload.billing.available) throw new Error("billing_unavailable");
+        const billing = payload.billing;
+        $("#solapiUnitPrice").textContent = formatWon(billing.unitPrice);
+        $("#solapiUnitPriceHint").textContent = `VAT 포함 환산 ${formatWon(billing.unitPriceVatIncluded)}`;
+        $("#solapiSpendable").textContent = formatWon(billing.spendable);
+        $("#solapiBalanceHint").textContent = `잔액 ${formatWon(billing.balance)} + 포인트 ${formatWon(billing.point)}`;
+        $("#previewCost").textContent = `${formatWon(billing.unitPrice)} · VAT 별도`;
+        const checked = new Date(billing.checkedAt);
+        const time = Number.isNaN(checked.getTime()) ? "방금" : checked.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+        $("#billingStatus").textContent = `${time} 조회 · 자동충전 ${billing.autoRecharge ? "사용" : "미사용"}`;
+      } catch (_) {
+        $("#billingStatus").textContent = "비용·잔액을 불러오지 못했습니다. 잠시 후 다시 조회하세요.";
+        $("#solapiUnitPrice").textContent = "조회 불가";
+        $("#solapiUnitPriceHint").textContent = "기존 단가를 추정해 표시하지 않습니다.";
+        $("#solapiSpendable").textContent = "조회 불가";
+        $("#solapiBalanceHint").textContent = "기존 숫자를 추정해 표시하지 않습니다.";
+        $("#previewCost").textContent = "조회 불가";
+      } finally {
+        $("#refreshBillingBtn").disabled = false;
+      }
+    }
+
     $$(".stage-tab").forEach((tab) => tab.addEventListener("click", () => {
       selectedStage = Number(tab.dataset.stage);
       renderMessage();
@@ -1077,6 +1192,7 @@
     });
 
     $("#reviewLinkBtn").addEventListener("click", () => showToast("리뷰웹 제출 화면으로 이동하는 버튼입니다."));
+    $("#refreshBillingBtn").addEventListener("click", loadBilling);
 
     $("#copyEnableVarBtn").addEventListener("click", async () => {
       const value = $("#enableVariable").textContent;
@@ -1107,6 +1223,7 @@
 
     renderMessage();
     renderFlow();
+    loadBilling();
   </script>
 </body>
 </html>

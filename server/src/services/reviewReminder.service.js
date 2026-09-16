@@ -497,6 +497,14 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
 
   async function status() {
     const config = getReviewReminderConfig();
+    let billing = { available: false };
+    if (typeof provider.getAccountBilling === 'function') {
+      try {
+        billing = await provider.getAccountBilling();
+      } catch (err) {
+        logger.warn(`[review-reminder] SOLAPI 비용·잔액 조회 실패: ${err.message}`);
+      }
+    }
     const { rows } = await db.query(`
       SELECT COUNT(*) FILTER (WHERE review_status='pending')::int AS pending,
              COUNT(*) FILTER (WHERE review_status='submitted')::int AS submitted,
@@ -509,7 +517,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
              COUNT(*) FILTER (WHERE provider_status='failed')::int AS failed,
              COUNT(*) FILTER (WHERE provider_status='accepted' AND provider_message_id IS NULL)::int AS uncertain
         FROM review_reminder_deliveries`);
-    return { ok: true, config, states: rows[0] || {}, deliveries: deliveries[0] || {} };
+    return { ok: true, config, billing, states: rows[0] || {}, deliveries: deliveries[0] || {} };
   }
 
   return { run, status, reconcileAccepted, closeDueStates, refreshSubmittedStates, loadCandidates, closedStateForTarget };

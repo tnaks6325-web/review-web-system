@@ -115,6 +115,29 @@ function withSolapiEnv(fn) {
       { complete: true, success: true, statusCode: '4000' });
   }));
 
+  await test('SOLAPI 실제 단가·잔액·포인트를 민감정보 없이 합산한다', () => withSolapiEnv(async () => {
+    const urls = [];
+    const fetchImpl = async (url, options) => {
+      urls.push(url);
+      assert.ok(/^HMAC-SHA256 apiKey=test-key,/.test(options.headers.Authorization));
+      const payload = url.includes('/cash/v1/balance')
+        ? { balance: 45000, point: 287, autoRecharge: 0, accountId: 'do-not-expose' }
+        : { ata: 13, sms: 18, countryId: '82' };
+      return { ok: true, status: 200, text: async () => JSON.stringify(payload) };
+    };
+    const billing = await solapi.getAccountBilling({ fetchImpl });
+    assert.deepStrictEqual(
+      { balance: billing.balance, point: billing.point, spendable: billing.spendable,
+        unitPrice: billing.unitPrice, unitPriceVatIncluded: billing.unitPriceVatIncluded,
+        autoRecharge: billing.autoRecharge },
+      { balance: 45000, point: 287, spendable: 45287, unitPrice: 13,
+        unitPriceVatIncluded: 14.3, autoRecharge: false }
+    );
+    assert.ok(urls.some(url => url.endsWith('/cash/v1/balance')));
+    assert.ok(urls.some(url => url.includes('/pricing/v1/messaging?countryId=82&serviceMethod=MT')));
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(billing, 'accountId'), false);
+  }));
+
   await test('마감 후 대상만 추리고 대기 접수·재시도 유예·3회 완료를 제외한다', () => {
     const now = new Date('2026-09-17T01:00:00Z');
     const config = {
@@ -211,6 +234,12 @@ function withSolapiEnv(fn) {
     assert.ok(/POST \/api\/review-reminders\/run/.test(simulator));
     assert.ok(/dryRun/.test(simulator));
     assert.ok(/샘플 시뮬레이션/.test(simulator));
+    assert.ok(/id="solapiUnitPrice"/.test(simulator));
+    assert.ok(/id="solapiSpendable"/.test(simulator));
+    assert.ok(/id="solapiUnitPrice">조회 대기/.test(simulator));
+    assert.ok(/id="previewCost">조회 대기/.test(simulator));
+    assert.ok(/solapiUnitPrice"\)\.textContent = "조회 불가"/.test(simulator));
+    assert.ok(/\/api\/review-reminders\/status/.test(simulator));
     assert.ok(/REVIEW_REMINDER_ENABLED=1/.test(simulator));
     assert.ok(/railway\.com\/project\/a413cce6-5d9b-4e9a-9bc1-fa2af0088235\/service\/f9445b01-c5d0-4495-a2ea-db11d5f18cbd\/variables/.test(simulator));
     assert.ok(/target="_blank" rel="noopener noreferrer"/.test(simulator));
