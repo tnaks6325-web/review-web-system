@@ -129,6 +129,8 @@ const REQUIRED_SCHEMA = [
 // 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
+  'review_reminder_states',
+  'review_reminder_deliveries',
   'reviewer_identity_match_audits',                // 147 — 캡처/수동 명의확인 비식별 감사기록
   'tab_status_column_bindings',                   // 137 — 리뷰/입금일 상태열 위치 바인딩
   'purchase_submission_sessions',                // 146 — 구매양식 제출 세션·주문ID 기반 캡처 연결

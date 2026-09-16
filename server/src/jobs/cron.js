@@ -661,7 +661,28 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분`);
+  // ── 리뷰 미작성 알림톡: 기본 OFF, KST 10~18시 매시 ──
+  // 공급자 최종 성공(4000)만 회차로 세며, 3회 성공 뒤 final_due_at이 지나야 별도 상태로 종결한다.
+  // 일일 상한은 서비스에서 다시 적용된다. 롤링배포 중복 실행은 advisory lock으로 막는다.
+  if (process.env.REVIEW_REMINDER_ENABLED === '1') {
+    const reminderSchedule = process.env.REVIEW_REMINDER_CRON_SCHEDULE || '0 10-18 * * *';
+    cron.schedule(reminderSchedule, async () => {
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        const { run } = require('../services/reviewReminder.service');
+        const r = await withJobLock('review_reminder_alimtalk', () => run({ dryRun: false }));
+        if (r && !r.skipped && ((r.sent || 0) > 0 || (r.closed || 0) > 0
+            || (r.reconciled && ((r.reconciled.delivered || 0) > 0 || (r.reconciled.failed || 0) > 0)))) {
+          logger.info(`[CRON-ReviewReminder] sent=${r.sent || 0} accepted=${r.accepted || 0} `
+            + `delivered=${(r.reconciled && r.reconciled.delivered) || 0} failed=${r.failed || 0} closed=${r.closed || 0}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-ReviewReminder] ${err.message}`);
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
+  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분, 리뷰알림=${process.env.REVIEW_REMINDER_ENABLED === '1' ? 'ON' : 'OFF'}`);
 }
 
 module.exports = { startCronJobs };

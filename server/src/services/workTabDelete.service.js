@@ -52,6 +52,7 @@ const DELETE_TABLES = [
   'review_inspections',
   'review_edit_requests',
   'review_report_links',
+  'review_reminder_states',       // 발송이력은 FK CASCADE로 함께 삭제(160)
   'review_index',
   'review_index_archive',
   'index_master',
