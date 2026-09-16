@@ -878,8 +878,8 @@
           </div>
           <div class="billing-metric">
             <div class="billing-label">알림톡 건당</div>
-            <div class="billing-value" id="solapiUnitPrice">13원</div>
-            <div class="billing-hint" id="solapiUnitPriceHint">표준 단가 · VAT 별도</div>
+            <div class="billing-value" id="solapiUnitPrice">조회 대기</div>
+            <div class="billing-hint" id="solapiUnitPriceHint">계정별 실제 단가를 조회합니다.</div>
           </div>
           <div class="billing-metric">
             <div class="billing-label">사용 가능액</div>
@@ -976,7 +976,7 @@
               <div class="meta-row"><span>카카오 채널</span><b>@inad</b></div>
               <div class="meta-row"><span>수신자</span><b>김수만 · 010-****-6325</b></div>
               <div class="meta-row"><span>대체발송</span><b style="color:var(--green)">사용 안 함</b></div>
-              <div class="meta-row"><span>예상 비용</span><b id="previewCost">13원 · VAT 별도</b></div>
+              <div class="meta-row"><span>예상 비용</span><b id="previewCost">조회 대기</b></div>
             </div>
             <div class="preview-actions">
               <button class="btn primary" id="simulateBtn">이 내용으로 시뮬레이션</button>
@@ -1109,7 +1109,10 @@
       const token = adminToken();
       if (!token) {
         $("#billingStatus").textContent = "리뷰웹 관리자 로그인 후 새로고침하세요.";
+        $("#solapiUnitPrice").textContent = "로그인 필요";
+        $("#solapiUnitPriceHint").textContent = "계정별 실제 단가를 조회합니다.";
         $("#solapiSpendable").textContent = "로그인 필요";
+        $("#previewCost").textContent = "로그인 후 조회";
         return;
       }
       $("#refreshBillingBtn").disabled = true;
@@ -1132,8 +1135,11 @@
         $("#billingStatus").textContent = `${time} 조회 · 자동충전 ${billing.autoRecharge ? "사용" : "미사용"}`;
       } catch (_) {
         $("#billingStatus").textContent = "비용·잔액을 불러오지 못했습니다. 잠시 후 다시 조회하세요.";
+        $("#solapiUnitPrice").textContent = "조회 불가";
+        $("#solapiUnitPriceHint").textContent = "기존 단가를 추정해 표시하지 않습니다.";
         $("#solapiSpendable").textContent = "조회 불가";
         $("#solapiBalanceHint").textContent = "기존 숫자를 추정해 표시하지 않습니다.";
+        $("#previewCost").textContent = "조회 불가";
       } finally {
         $("#refreshBillingBtn").disabled = false;
       }

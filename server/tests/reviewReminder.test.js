@@ -236,6 +236,9 @@ function withSolapiEnv(fn) {
     assert.ok(/샘플 시뮬레이션/.test(simulator));
     assert.ok(/id="solapiUnitPrice"/.test(simulator));
     assert.ok(/id="solapiSpendable"/.test(simulator));
+    assert.ok(/id="solapiUnitPrice">조회 대기/.test(simulator));
+    assert.ok(/id="previewCost">조회 대기/.test(simulator));
+    assert.ok(/solapiUnitPrice"\)\.textContent = "조회 불가"/.test(simulator));
     assert.ok(/\/api\/review-reminders\/status/.test(simulator));
     assert.ok(/REVIEW_REMINDER_ENABLED=1/.test(simulator));
     assert.ok(/railway\.com\/project\/a413cce6-5d9b-4e9a-9bc1-fa2af0088235\/service\/f9445b01-c5d0-4495-a2ea-db11d5f18cbd\/variables/.test(simulator));
