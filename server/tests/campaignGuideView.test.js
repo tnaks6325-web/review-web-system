@@ -114,7 +114,8 @@ ok('⑥-1 리뷰 내역 대기 카드 클릭 → 참여상품 정보 시트(즉�
   /openPartInfoSheet\(isDone \? \[item\] : items, \{ done: isDone \}\)/.test(idx) && !/card\.addEventListener\("click", \(\) => goToSubmit\(items\)\)/.test(idx));
 ok('⑥-2 시트의 [리뷰제출하기]는 선택한 한 행만 기존 goToSubmit 경유',
   /function _partInfoSubmit\(index\)[\s\S]{0,420}goToSubmit\(\[items\[i\]\]\)/.test(idx));
-ok('⑥-3 카카오 입장 버튼(#FEE500) + 지정 라벨', /background:#FEE500[\s\S]{0,220}이 캠페인의 카톡 팀채팅방 입장/.test(idx));
+ok('⑥-3 카카오 입장 버튼(#FEE500) + 6버튼 그리드 라벨',
+  /\.part-info-btn\.chat\s*\{[^}]*background:#FEE500/.test(idx) && /💬 팀채팅방/.test(idx));
 ok('⑥-4 상품 URL은 https만 링크화(scheme 가드)', /https\?:[\s\S]{0,12}test\(pu\)/.test(idx));
 ok('⑥-5 participation-brief 엔드포인트(행 소유권 게이트 재사용)',
   /router\.get\('\/participation-brief'/.test(reviewEdit) && /_verifyRowOwnership\(phoneList, sheetId, tabName, rowIndex\)/.test(reviewEdit));

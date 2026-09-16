@@ -343,6 +343,37 @@
     .result-group-item-badge.order.attention { background:#FEE2E2; color:#991B1B; }
     .result-group-item-badge.order.reflected { background:#DCFCE7; color:#166534; }
 
+    /* 참여상품 정보: 좁은 휴대폰에서도 2열×3행을 유지한다. 각 열은 정확히 1fr. */
+    .part-info-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
+    .part-info-grid > .part-info-btn,
+    .part-info-grid > button {
+      width:100% !important; min-width:0; height:50px; margin:0 !important; padding:0 6px !important;
+      display:flex !important; align-items:center; justify-content:center; gap:5px;
+      border-radius:11px !important; font-size:.76rem !important; font-weight:800 !important;
+      line-height:1.15; white-space:nowrap; box-sizing:border-box;
+    }
+    .part-info-btn { width:100%; height:50px; display:flex; align-items:center; justify-content:center; gap:5px; border:1.5px solid #D7DEE9; border-radius:11px; cursor:pointer; font-family:inherit; font-size:.76rem; font-weight:800; }
+    .part-info-btn.product { border-color:#111827; background:#111827; color:#fff; }
+    .part-info-btn.chat { border-color:#F5D900; background:#FEE500; color:#191919; }
+    .part-info-btn.submit { border-color:#2875E8; background:#2875E8; color:#fff; }
+    .part-info-btn.cs { border-color:#CFE0FD; background:#EEF3FB; color:#1B4F9C; }
+    .part-info-btn.capture { border-color:#BDE5CA; background:#EFFBF3; color:#17643A; }
+    .part-info-btn.cancel { border-color:#FECACA; background:#fff; color:#B91C1C; }
+    .part-info-btn:disabled { border-color:#E5E7EB; background:#F8FAFC; color:#9CA3AF; cursor:not-allowed; box-shadow:none; }
+    .part-info-cancel-reason { grid-column:1/-1; margin-top:-2px; color:#9CA3AF; font-size:.68rem; line-height:1.45; text-align:center; }
+    .part-info-picker { display:none; grid-column:1/-1; margin-top:2px; padding:9px; border:1px solid #DBEAFE; border-radius:11px; background:#F8FBFF; }
+    .part-info-picker.on { display:block; }
+    .part-info-capture-ovl { z-index:430; }
+    .part-info-capture-wrap { padding:10px 0 4px; }
+    .part-info-capture-meta { margin-bottom:9px; color:#6B7280; font-size:.7rem; line-height:1.45; }
+    .part-info-capture-img { display:block; width:100%; max-height:66vh; object-fit:contain; border-radius:12px; background:#111827; }
+    .part-info-capture-choice { width:100%; display:flex; align-items:center; gap:9px; margin-top:8px; padding:11px 12px; border:1px solid #BDE5CA; border-radius:11px; background:#EFFBF3; color:#17643A; font-family:inherit; font-size:.76rem; font-weight:800; text-align:left; cursor:pointer; }
+    @media (max-width:360px) {
+      .part-info-grid { gap:7px; }
+      .part-info-grid > .part-info-btn,
+      .part-info-grid > button { height:48px; padding:0 4px !important; font-size:.7rem !important; gap:4px; }
+    }
+
     /* ─── 내 문의함 (1:1문의 탭 인라인) ─── */
     .cs-general-btn {
       margin-left:auto; font-size:.68rem; font-weight:700; color:var(--p-dark);
@@ -2295,6 +2326,10 @@ function goToSubmit(items) {
 let _partInfoSubmitItems = null;   // [리뷰제출하기]가 넘길 대기 항목(완료 시 null)
 let _partInfoChatUrl = '';
 let _partInfoProductUrl = '';      // [상품 바로가기] 버튼용 상품 URL
+let _partInfoCaptureFileId = '';   // 강한 소유권 검증 뒤 받은 본인 구매캡처 파일 ID
+let _partInfoCaptureUploadedAt = '';
+let _partInfoCaptureItems = [];    // 묶음 카드의 행별 구매캡처 [{fileId, uploadedAt, label}]
+let _partInfoBriefSeq = 0;         // 먼저 연 카드의 늦은 응답이 현재 카드를 덮지 못하게 하는 요청 세대
 /* 🚫 주문취소 — 게이트 판정은 **서버(brief.cancelable)** 가 준 것만 쓴다.
    화면이 스스로 정하면 "보이는데 거부"가 된다(판정 사본 0). */
 let _partInfoCancelable = null;    // {ok, reason, message, reasons[]} | null(=미상 → 버튼 미표시)
@@ -2315,7 +2350,12 @@ function _partInfoEnsure(){
   ovl.addEventListener('click', (e)=>{ if (e.target === ovl) closePartInfo(); });
   document.body.appendChild(ovl);
 }
-function closePartInfo(){ const o = document.getElementById('partInfoOvl'); if (o) o.classList.remove('on'); document.body.style.overflow=''; }
+function closePartInfo(){
+  _partInfoBriefSeq++;
+  const o = document.getElementById('partInfoOvl'); if (o) o.classList.remove('on');
+  const cap = document.getElementById('partInfoCaptureOvl'); if (cap) cap.classList.remove('on');
+  document.body.style.overflow='';
+}
 
 function _partInfoLabel(it){
   const d = it.startDate || '';
@@ -2341,7 +2381,11 @@ function openPartInfoSheet(items, opts){
   _partInfoSubmitItems = done ? list.filter(_hasPendingCashReceipt) : list;
   _partInfoChatUrl = '';
   _partInfoProductUrl = '';
+  _partInfoCaptureFileId = '';
+  _partInfoCaptureUploadedAt = '';
+  _partInfoCaptureItems = [];
   _partInfoCancelable = null;
+  const briefSeq = ++_partInfoBriefSeq;
   _partInfoEnsure();
   const it = list[0];
   /* ★ 제출완료 건에는 취소 좌표를 만들지 않는다 — 버튼 자체가 뜨지 않아야 한다(사용자 확정 2026-08-23).
@@ -2377,21 +2421,50 @@ function openPartInfoSheet(items, opts){
   _partInfoRenderBtns(done, '');
   document.getElementById('partInfoOvl').classList.add('on');
   document.body.style.overflow = 'hidden';
-  _partInfoLoadBrief(it, done);
+  _partInfoLoadBrief(list, done, briefSeq);
 }
 
-async function _partInfoLoadBrief(it, done){
-  const user = getSavedUser();
+async function _partInfoLoadBrief(list, done, requestSeq){
+  const items = (list || []).filter(Boolean);
+  const it = items[0];
+  let user = getSavedUser();
   const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
   const detailEl = document.getElementById('partInfoDetail');
   const hide = () => { if (detailEl) detailEl.style.display = 'none'; };
   if (phone8.length !== 8 || !it.sheetId || !it.tabName || it.rowIndex == null){ hide(); _partInfoRenderBtns(done, ''); return; }
   try{
-    const qs = new URLSearchParams({ phone8, sheetId: it.sheetId, tabName: it.tabName, gid: it.gid || '', rowIndex: String(it.rowIndex) });
-    const r = await fetch(API_BASE_URL + '/api/review-edit/participation-brief?' + qs.toString());
-    const j = await r.json().catch(()=>({}));
-    const brief = (r.ok && j.ok) ? j.brief : null;
-    if (!brief){ hide(); _partInfoRenderBtns(done, ''); return; }
+    if (!_reviewerTokenFresh(user && user.reviewerToken)) user = await _refreshReviewerHomeSession(user);
+    let token = user && user.reviewerToken;
+    if (!token) { hide(); _partInfoRenderBtns(done, ''); return; }
+    const loadOne = async (row, reviewerToken) => {
+      if (!row || !row.sheetId || !row.tabName || row.rowIndex == null) return { status:0, brief:null };
+      try {
+        const qs = new URLSearchParams({ phone8, sheetId: row.sheetId, tabName: row.tabName, gid: row.gid || '', rowIndex: String(row.rowIndex) });
+        const r = await fetch(API_BASE_URL + '/api/review-edit/participation-brief?' + qs.toString(), {
+          headers: { 'X-Reviewer-Token': reviewerToken }
+        });
+        const j = await r.json().catch(()=>({}));
+        return { status:r.status, brief:(r.ok && j.ok) ? j.brief : null };
+      } catch (_) { return { status:0, brief:null }; }
+    };
+    let results = await Promise.all(items.map(row => loadOne(row, token)));
+    if (results.some(result => result.status === 401)) {
+      user = await _refreshReviewerHomeSession(user);
+      token = user && user.reviewerToken;
+      if (token) results = await Promise.all(items.map(row => loadOne(row, token)));
+    }
+    const ovl = document.getElementById('partInfoOvl');
+    if (requestSeq !== _partInfoBriefSeq || !ovl || !ovl.classList.contains('on')) return;
+    const brief = (results[0] && results[0].brief) || {};
+    _partInfoCaptureItems = results.map((result, index) => {
+      const pc = result && result.brief && result.brief.purchaseCapture;
+      if (!pc || !pc.fileId) return null;
+      return { fileId:String(pc.fileId), uploadedAt:pc.uploadedAt ? String(pc.uploadedAt) : '', label:_partInfoGroupRowLabel(items[index]) };
+    }).filter(Boolean);
+    const firstCapture = _partInfoCaptureItems[0] || null;
+    _partInfoCaptureFileId = firstCapture ? firstCapture.fileId : '';
+    _partInfoCaptureUploadedAt = firstCapture ? firstCapture.uploadedAt : '';
+    if (!results[0] || !results[0].brief) hide();
     _partInfoCancelable = brief.cancelable || null;
     const rows = [];
     // ★ D: 이 행의 작업 옵션(리뷰 형태 — '텍스트'/'포토리뷰' 등). 관리자가 로스터에 미리 적어둔
@@ -2440,7 +2513,10 @@ async function _partInfoLoadBrief(it, done){
     else hide();
     _partInfoCancelable = (brief && brief.cancelable) || null;
     _partInfoRenderBtns(done, brief.chatUrl || '', _partInfoProductUrl);
-  }catch(_){ hide(); _partInfoRenderBtns(done, ''); }
+  }catch(_){
+    if (requestSeq !== _partInfoBriefSeq) return;
+    hide(); _partInfoRenderBtns(done, '');
+  }
 }
 /* 입금 시각 표기 — 서버가 준 ISO 를 사람이 읽는 형태로. ★ 값이 이상하면 그리지 않는다(빈 문자열). */
 function _partInfoPaidAt(v){
@@ -2476,39 +2552,73 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
   const reEditHtml = (done && _partInfoReEditId)
     ? '<button onclick="_partInfoOpenReEdit()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;cursor:pointer;background:#fff;color:#1b64da;font-size:.85rem;font-weight:800;border-radius:12px;padding:12px;margin-top:8px">🖼 제출 이미지 확인 · 수정요청</button>'
     : '';
-  // 🛒 상품 바로가기 (상품 페이지 열기)
-  if (_partInfoProductUrl){
-    html += '<button onclick="_partInfoOpenProduct()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#111827;color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-bottom:8px">🛒 상품 바로가기</button>';
-  }
-  if (chatUrl){
-    html += '<button onclick="_partInfoOpenChat()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#FEE500;color:#191919;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;box-shadow:0 3px 10px rgba(250,225,0,.42)">💬 이 캠페인의 카톡 팀채팅방 입장</button>';
-  } else {
-    html += '<div style="text-align:center;font-size:.7rem;color:#9CA3AF;border:1.5px dashed #D1D5DB;border-radius:11px;padding:10px">연결된 팀 채팅방이 없어요</div>';
-  }
   const submitItems = _partInfoSubmitItems || [];
-  if (submitItems.length){
-    if (submitItems.length <= 1) {
-      html += '<button onclick="_partInfoSubmit(0)" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">' + (done ? '🧾 현금영수증 제출하기' : '📤 리뷰제출하기') + '</button>';
-    } else {
-      // 같은 캠페인에 여러 명의/주문이 있어도 제출은 반드시 행(application)별로 분리한다.
-      // 한 번에 넘기면 이미 제출한 건을 포함해 전부 작성해야 하는 것처럼 보여 오제출을 유발한다.
+  const captureBtn = _partInfoCaptureItems.length || _partInfoCaptureFileId
+    ? '<button class="part-info-btn capture" onclick="_partInfoOpenCapture()">📷 구매캡처보기</button>'
+    : '<button class="part-info-btn capture" disabled title="연결된 구매 캡처가 없습니다">📷 구매캡처보기</button>';
+
+  /* 제출완료는 최신 main의 현금영수증 제출 흐름과 주문취소 숨김 규칙을 그대로 둔다. */
+  if (done) {
+    if (_partInfoProductUrl) html += '<button onclick="_partInfoOpenProduct()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#111827;color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-bottom:8px">🛒 상품바로가기</button>';
+    if (chatUrl) html += '<button onclick="_partInfoOpenChat()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#FEE500;color:#191919;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px">💬 팀채팅방</button>';
+    if (submitItems.length === 1) {
+      html += '<button onclick="_partInfoSubmit(0)" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">🧾 현금영수증 제출하기</button>';
+    } else if (submitItems.length > 1) {
       html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF1F7">'
-        + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">' + (done ? '현금영수증을 제출할 참여 건을 선택하세요' : '제출할 참여 건을 선택하세요') + '</div>'
+        + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">현금영수증을 제출할 참여 건을 선택하세요</div>'
         + submitItems.map((x, i) => {
           const recipient = _partInfoParticipantName(x);
           const label = recipient || ((i + 1) + '번째 참여 건');
           return '<button onclick="_partInfoSubmit(' + i + ')" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;border:1.5px solid #BFDBFE;cursor:pointer;background:#fff;color:#1D4ED8;font-size:.82rem;font-weight:800;border-radius:12px;padding:11px 12px;margin-top:' + (i ? '8' : '0') + ';box-shadow:0 2px 7px rgba(37,99,235,.08)">'
             + '<span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;flex:none;border-radius:50%;background:#DBEAFE;color:#2563EB;font-size:.72rem">' + (i + 1) + '</span>'
-            + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">' + (done ? '이 참여 건의 현금영수증 제출' : '이 참여 건만 리뷰 제출') + '</span></span>'
+            + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">이 참여 건의 현금영수증 제출</span></span>'
             + '<i class="fas fa-chevron-right" style="color:#60A5FA;font-size:.72rem"></i></button>';
-        }).join('')
-        + '</div>';
+        }).join('') + '</div>';
     }
+    html += captureBtn + reEditHtml + csBtnHtml;
+    box.innerHTML = html;
+    return;
   }
-  html += reEditHtml;
-  html += csBtnHtml;
-  html += _partInfoCancelBtnHtml(done);
+
+  const productBtn = _partInfoProductUrl
+    ? '<button class="part-info-btn product" onclick="_partInfoOpenProduct()">🛒 상품바로가기</button>'
+    : '<button class="part-info-btn product" disabled title="연결된 상품 페이지가 없습니다">🛒 상품바로가기</button>';
+  const chatBtn = chatUrl
+    ? '<button class="part-info-btn chat" onclick="_partInfoOpenChat()">💬 팀채팅방</button>'
+    : '<button class="part-info-btn chat" disabled title="연결된 팀 채팅방이 없습니다">💬 팀채팅방</button>';
+  const submitBtn = submitItems.length > 1
+    ? '<button class="part-info-btn submit" onclick="_partInfoToggleSubmitPicker()" aria-expanded="false">📤 리뷰제출하기</button>'
+    : '<button class="part-info-btn submit" onclick="_partInfoSubmit(0)">📤 리뷰제출하기</button>';
+  const csGridBtn = csBtnHtml || '<button class="part-info-btn cs" disabled>🎧 1:1문의하기</button>';
+  const cancelGridBtn = _partInfoCancelBtnHtml(false)
+    || '<button class="part-info-btn cancel" disabled title="이 참여 건은 주문취소할 수 없습니다">🚫 주문취소</button>';
+
+  html = '<div class="part-info-grid" id="partInfoActionGrid">'
+    + productBtn + chatBtn + submitBtn + csGridBtn + captureBtn + cancelGridBtn;
+  if (submitItems.length > 1) {
+    /* 다건 그룹은 메인 그리드를 유지한 채 선택 목록만 펼친다. */
+    html += '<div class="part-info-picker" id="partInfoSubmitPicker">'
+      + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">제출할 참여 건을 선택하세요</div>'
+      + submitItems.map((x, i) => {
+        const recipient = _partInfoParticipantName(x);
+        const label = recipient || ((i + 1) + '번째 참여 건');
+        return '<button onclick="_partInfoSubmit(' + i + ')" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;border:1.5px solid #BFDBFE;cursor:pointer;background:#fff;color:#1D4ED8;font-size:.82rem;font-weight:800;border-radius:12px;padding:11px 12px;margin-top:' + (i ? '8' : '0') + ';box-shadow:0 2px 7px rgba(37,99,235,.08)">'
+          + '<span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;flex:none;border-radius:50%;background:#DBEAFE;color:#2563EB;font-size:.72rem">' + (i + 1) + '</span>'
+          + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">이 참여 건만 리뷰 제출</span></span>'
+          + '<i class="fas fa-chevron-right" style="color:#60A5FA;font-size:.72rem"></i></button>';
+      }).join('') + '</div>';
+  }
+  html += '</div>';
   box.innerHTML = html;
+}
+
+function _partInfoToggleSubmitPicker(){
+  const picker = document.getElementById('partInfoSubmitPicker');
+  const btn = document.querySelector('#partInfoActionGrid .part-info-btn.submit');
+  if (!picker || !btn) return;
+  const on = !picker.classList.contains('on');
+  picker.classList.toggle('on', on);
+  btn.setAttribute('aria-expanded', on ? 'true' : 'false');
 }
 
 /* ═══ 🚫 주문취소 (사용자 확정 2026-08-23) ═══
@@ -2520,16 +2630,11 @@ function _partInfoCancelBtnHtml(done){
   const g = _partInfoCancelable;
   if (!g) return '';
   if (g.ok) {
-    return '<button onclick="_partInfoOpenCancel()" style="display:block;width:100%;text-align:center;'
-      + 'border:1.5px solid #FECACA;cursor:pointer;background:#fff;color:#B91C1C;font-size:.85rem;'
-      + 'font-weight:800;border-radius:11px;padding:12px;margin-top:8px">🚫 주문취소</button>';
+    return '<button class="part-info-btn cancel" onclick="_partInfoOpenCancel()">🚫 주문취소</button>';
   }
-  /* 리뷰 제출 완료는 위에서 이미 걸러진다. 나머지 사유는 흐린 버튼 + 문장으로 말한다. */
-  return '<button disabled style="display:block;width:100%;text-align:center;border:1.5px solid #E5E7EB;'
-    + 'background:#fff;color:#9CA3AF;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;'
-    + 'margin-top:8px;cursor:not-allowed">🚫 주문취소</button>'
-    + '<div style="font-size:.7rem;color:#9CA3AF;text-align:center;margin-top:6px;line-height:1.5">'
-    + escHtml(g.message || '') + '</div>';
+  /* 버튼은 여섯 번째 칸을 지키고, 서버 사유만 그 아래 2열 전체 폭으로 보여준다. */
+  return '<button class="part-info-btn cancel" disabled style="cursor:not-allowed">🚫 주문취소</button>'
+    + '<div class="part-info-cancel-reason">' + escHtml(g.message || '') + '</div>';
 }
 
 let _pcReason = '', _pcBusy = false;
@@ -2655,7 +2760,7 @@ function _partInfoCsBtnHtml(){
   const badge = n > 0
     ? '<span style="display:inline-block;min-width:17px;height:17px;padding:0 5px;background:#EF4444;color:#fff;font-size:.62rem;font-weight:800;line-height:17px;text-align:center;border-radius:9px;margin-left:6px;vertical-align:middle;box-sizing:border-box">' + (n > 99 ? '99+' : n) + '</span>'
     : '';
-  return '<button onclick="_partInfoOpenCs()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;cursor:pointer;background:#EEF3FB;color:#1B4F9C;font-size:.85rem;font-weight:800;border-radius:12px;padding:12px;margin-top:8px">🎧 1:1 문의하기' + badge + '</button>';
+  return '<button class="part-info-btn cs" aria-label="1:1 문의하기" onclick="_partInfoOpenCs()">🎧 1:1문의하기' + badge + '</button>';
 }
 function _partInfoOpenCs(){
   const ctx = _partInfoCsCtx;
@@ -2671,6 +2776,66 @@ function _partInfoOpenReEdit(){
 }
 function _partInfoOpenChat(){ if (_partInfoChatUrl) window.open(_partInfoChatUrl, '_blank', 'noopener'); }
 function _partInfoOpenProduct(){ if (_partInfoProductUrl) window.open(_partInfoProductUrl, '_blank', 'noopener'); }
+function _partInfoCaptureTime(v){
+  if (!v) return '';
+  const d = new Date(v); if (isNaN(d)) return '';
+  try { return new Intl.DateTimeFormat('ko-KR', { timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(d); }
+  catch (_) { return ''; }
+}
+function _partInfoBindCaptureEsc(){
+  if (window._partInfoCaptureEscBound) return;
+  window._partInfoCaptureEscBound = true;
+  document.addEventListener('keydown', function(e){
+    const o = document.getElementById('partInfoCaptureOvl');
+    if (e.key === 'Escape' && o && o.classList.contains('on')) _partInfoCloseCapture();
+  });
+}
+function _partInfoOpenCapture(index){
+  const captures = _partInfoCaptureItems.length ? _partInfoCaptureItems : (_partInfoCaptureFileId ? [{ fileId:_partInfoCaptureFileId, uploadedAt:_partInfoCaptureUploadedAt, label:_partInfoCoordLabel || '참여상품' }] : []);
+  if (!captures.length) { try { showToast('연결된 구매 캡처가 없습니다.'); } catch (_){} return; }
+  let ovl = document.getElementById('partInfoCaptureOvl');
+  if (!ovl) {
+    ovl = document.createElement('div');
+    ovl.id = 'partInfoCaptureOvl';
+    ovl.className = 'ovl part-info-capture-ovl';
+    ovl.addEventListener('click', function(e){ if (e.target === ovl) _partInfoCloseCapture(); });
+    document.body.appendChild(ovl);
+  }
+  _partInfoBindCaptureEsc();
+  const selectedIndex = Number(index);
+  if (captures.length > 1 && !Number.isInteger(selectedIndex)) {
+    ovl.innerHTML = '<div class="re-edit-sheet" style="max-width:440px">'
+      + '<div class="re-edit-head"><div><i class="fas fa-camera" style="color:#17643A"></i> 구매캡처 선택</div>'
+      + '<button class="re-edit-x" onclick="_partInfoCloseCapture()" aria-label="닫기">&times;</button></div>'
+      + '<div class="part-info-capture-wrap"><div class="part-info-capture-meta">확인할 참여 건을 선택하세요.</div>'
+      + captures.map(function(capture, i){
+        return '<button class="part-info-capture-choice" onclick="_partInfoOpenCapture(' + i + ')"><span>📷</span><span>' + escHtml(capture.label || ((i + 1) + '번째 참여 건')) + '</span></button>';
+      }).join('') + '</div></div>';
+    ovl.classList.add('on');
+    document.body.style.overflow = 'hidden';
+    return;
+  }
+  const capture = captures[Number.isInteger(selectedIndex) ? selectedIndex : 0];
+  if (!capture) { try { showToast('구매 캡처를 찾지 못했습니다.'); } catch (_){} return; }
+  const at = _partInfoCaptureTime(capture.uploadedAt);
+  ovl.innerHTML = '<div class="re-edit-sheet" style="max-width:440px">'
+    + '<div class="re-edit-head"><div><i class="fas fa-camera" style="color:#17643A"></i> 내가 제출한 구매캡처</div>'
+    + '<button class="re-edit-x" onclick="_partInfoCloseCapture()" aria-label="닫기">&times;</button></div>'
+    + '<div class="part-info-capture-wrap">'
+    + '<div class="part-info-capture-meta">' + escHtml(capture.label || _partInfoCoordLabel || '참여상품')
+    + (at ? '<br>' + escHtml(at) + ' 제출' : '') + '</div>'
+    + '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId)) + '" alt="내가 제출한 구매 캡처">'
+    + '<div style="font-size:.68rem;color:#9CA3AF;line-height:1.5;margin-top:9px">주문번호와 주소 등 개인정보가 포함될 수 있어 본인 참여 내역에서만 확인할 수 있습니다.</div>'
+    + '</div></div>';
+  ovl.classList.add('on');
+  document.body.style.overflow = 'hidden';
+}
+function _partInfoCloseCapture(){
+  const ovl = document.getElementById('partInfoCaptureOvl');
+  if (ovl) ovl.classList.remove('on');
+  const part = document.getElementById('partInfoOvl');
+  document.body.style.overflow = part && part.classList.contains('on') ? 'hidden' : '';
+}
 /**
  * 리뷰내역의 묶음 카드는 표시만 함께 한다. 실제 제출 화면에는 선택한 한 행만 전달한다.
  * index 인자가 없거나 잘못된 다건 요청은 막아, 새 호출부가 다시 전체 배열을 제출하는 회귀를 차단한다.
