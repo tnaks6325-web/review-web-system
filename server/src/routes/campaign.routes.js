@@ -43,6 +43,7 @@ const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaign
 const { loadPopularCreditMatches, loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
 const { repurchaseDays } = require('../utils/repurchaseGuard');
 const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
+const { recoverActiveHolds } = require('../services/campaignHoldRecovery.service');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -1455,6 +1456,22 @@ router.get('/:id/applications', async (req, res, next) => {
     const r = rows[0] || {};
     const count = (Number(r.legacy_count) || 0) + (Number(r.participation_count) || 0);
     res.json({ ok: true, data: [], count });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/campaign/:id/my-active-holds — 모바일 웹뷰/새 브라우저 컨텍스트의 홀드 복구.
+// 로컬 저장값을 신원으로 믿지 않고 서명된 리뷰어 세션의 소유자·로그인 명의로만 반환한다.
+router.get('/:id/my-active-holds', reviewerSessionMiddleware, detailLimiter, async (req, res, next) => {
+  try {
+    const result = await recoverActiveHolds(pool, { campaignId: req.params.id, session: req.reviewer });
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+    if (!result.authorized) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 다시 확인해주세요.' });
+    }
+    return res.json({ ok: true, holds: result.holds });
   } catch (err) {
     next(err);
   }
