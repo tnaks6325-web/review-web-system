@@ -232,6 +232,10 @@ function withSolapiEnv(fn) {
       path.resolve(__dirname, '../../frontend/workdesk.html'),
       'utf8'
     );
+    const appSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/app.js'),
+      'utf8'
+    );
     const adminNavStart = workdesk.indexOf("${isAdmin?`<nav class=\"nav\">");
     const staffNavStart = workdesk.indexOf(":isStaff?`<nav class=\"nav\">");
     const staffNavEnd = workdesk.indexOf("</nav>`:''}", staffNavStart);
@@ -244,8 +248,8 @@ function withSolapiEnv(fn) {
     assert.ok(simulator.includes('location.assign("../workdesk" + (/\\.html?$/i.test(last) ? ".html" : ""));'));
     assert.ok(/기본값 OFF/.test(simulator));
     assert.ok(/현재 운영 상태는 Railway 변수에서 확인/.test(simulator));
-    assert.ok(/GET \/api\/review-reminders\/status/.test(simulator));
-    assert.ok(/POST \/api\/review-reminders\/run/.test(simulator));
+    assert.ok(/GET \/api\/trackb\/review-reminders\/status/.test(simulator));
+    assert.ok(/POST \/api\/trackb\/review-reminders\/run/.test(simulator));
     assert.ok(/dryRun/.test(simulator));
     assert.ok(/샘플 시뮬레이션/.test(simulator));
     assert.ok(/id="solapiUnitPrice"/.test(simulator));
@@ -253,7 +257,9 @@ function withSolapiEnv(fn) {
     assert.ok(/id="solapiUnitPrice">조회 대기/.test(simulator));
     assert.ok(/id="previewCost">조회 대기/.test(simulator));
     assert.ok(/solapiUnitPrice"\)\.textContent = "조회 불가"/.test(simulator));
-    assert.ok(/\/api\/review-reminders\/status/.test(simulator));
+    assert.ok(/\/api\/trackb\/review-reminders\/status/.test(simulator));
+    assert.ok(/app\.use\('\/api\/trackb\/review-reminders', reviewReminderRoutes\)/.test(appSource));
+    assert.ok(/app\.use\('\/api\/review-reminders', reviewReminderRoutes\)/.test(appSource));
     assert.ok(/REVIEW_REMINDER_ENABLED=1/.test(simulator));
     assert.ok(/railway\.com\/project\/a413cce6-5d9b-4e9a-9bc1-fa2af0088235\/service\/f9445b01-c5d0-4495-a2ea-db11d5f18cbd\/variables/.test(simulator));
     assert.ok(/target="_blank" rel="noopener noreferrer"/.test(simulator));
