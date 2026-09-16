@@ -248,8 +248,8 @@ async function runMigrations() {
           await pool.query('INSERT INTO _migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
           logger.info(`[migrate] ⏭ ${file} (이미 적용됨, code=${err.code})`);
           applied = true;
-        } else if (err.code === '55P03' || err.code === '57014') { // lock_not_available / statement_timeout
-          logger.warn(`[migrate] ⏳ ${file} 락 대기 초과(${attempt}/${MIG_LOCK_RETRIES}) — 미기록, 재시도`);
+        } else if (['55P03', '57014', '40P01'].includes(err.code)) { // lock_not_available / statement_timeout / deadlock_detected
+          logger.warn(`[migrate] ⏳ ${file} DB 락 충돌(${err.code}, ${attempt}/${MIG_LOCK_RETRIES}) — 미기록, 재시도`);
           await new Promise(r => setTimeout(r, 2000 * attempt));
         } else {
           // ★ 미기록 = 다음 부팅 재시도. 부팅 가부는 assertSchemaReady 가 결정한다.

@@ -107,7 +107,7 @@ async function callHandler(method, routePath, req) {
   ok('D2: 조회 실패는 부팅 계속(DB 일시장애 크래시루프 방지)', /프리플라이트 조회 실패/.test(index));
   ok('D2: 긴급 탈출구 ALLOW_SCHEMA_DRIFT', /ALLOW_SCHEMA_DRIFT/.test(index));
   ok('D7: set_config 파라미터 바인딩(SET 문자열 보간 금지)', /set_config\('lock_timeout', \$1, false\)/.test(index));
-  ok('D7: 락 대기 초과(55P03)는 미기록 후 재시도', /55P03/.test(index));
+  ok('D7: 락 대기 초과·교착상태는 미기록 후 재시도', /\['55P03', '57014', '40P01'\]\.includes\(err\.code\)/.test(index));
 
   // ══════════════════════════════════════════════════════════════
   // D3 — 명의 ↔ 주문 신원 드리프트(순수함수)
