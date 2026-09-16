@@ -1115,17 +1115,29 @@ router.get('/cs/threads', async (req, res, next) => {
   }
 });
 
-// GET /api/reviewer/cs/messages?phone8=&campaignKey= — 특정 캠페인 대화 메시지(열람 시 미확인 리셋)
+// GET /api/reviewer/cs/messages?phone8=&threadId= (campaignKey 폴백) — 특정 대화 메시지
+// 목록에서 받은 threadId를 phone8과 함께 검증해, 캐시된 campaignKey가 어긋나도
+// 다른 방이나 빈 방을 열지 않는다. 새 문의 진입은 campaignKey 조회를 계속 지원한다.
 router.get('/cs/messages', async (req, res, next) => {
   try {
     const phone8 = _normPhone8(req.query.phone8);
     if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     const campaignKey = (req.query.campaignKey || '').toString();
+    const rawThreadId = (req.query.threadId || '').toString().trim();
+    const threadId = rawThreadId || null;
+    if (threadId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(threadId)) {
+      return res.status(400).json({ ok: false, error: '올바른 문의방 ID가 필요합니다.' });
+    }
 
-    const { rows: tRows } = await pool.query(
-      `SELECT id, campaign_label AS "campaignLabel", status FROM cs_threads
-       WHERE reviewer_phone8 = $1 AND campaign_key = $2 LIMIT 1`, [phone8, campaignKey]
-    );
+    const { rows: tRows } = threadId
+      ? await pool.query(
+        `SELECT id, campaign_label AS "campaignLabel", status FROM cs_threads
+         WHERE reviewer_phone8 = $1 AND id = $2 LIMIT 1`, [phone8, threadId]
+      )
+      : await pool.query(
+        `SELECT id, campaign_label AS "campaignLabel", status FROM cs_threads
+         WHERE reviewer_phone8 = $1 AND campaign_key = $2 LIMIT 1`, [phone8, campaignKey]
+      );
     if (tRows.length === 0) return res.json({ ok: true, threadId: null, messages: [] });
     const thread = tRows[0];
 
