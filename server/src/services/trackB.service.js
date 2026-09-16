@@ -127,6 +127,27 @@ function _statusToggleForRow(header, row) {
   return _linkedToggle(h);
 }
 
+/* 행별 submit_col/submit_col2가 비어 있는 무시트 행도 탭의 실제 상태 열은 존재할 수 있다.
+   화면은 탭 단위 statusCols로 그 칸을 잠그므로, 쓰기 API도 같은 탭 단위 판정을 해야 한다.
+   이름만 보고 `입금일`을 전부 잠그지 않고 statusHeaderForTab이 고른 정확한 헤더만 막는다. */
+async function _statusToggleForTab(db, { sheetId, tabName, header } = {}) {
+  const h = String(header || '').trim();
+  if (!h) return null;
+  try {
+    const status = require('./sheetlessStatus.service');
+    const submitHeader = String(await status.statusHeaderForTab(db, {
+      sheetId, tabName, kind: 'submit',
+    }) || '').trim();
+    if (submitHeader === h) return 'is_submitted';
+    const paidHeader = String(await status.statusHeaderForTab(db, {
+      sheetId, tabName, kind: 'paid',
+    }) || '').trim();
+    return paidHeader === h ? 'is_paid' : null;
+  } catch (_) {
+    return 'lookup_failed';
+  }
+}
+
 // ── 그림자 투영: 임포트(participants) + 신원키/주문링크 강화 + seen-set 재투영 ──
 async function projectTab({ sheetId, tabName, by = 'trackB' } = {}) {
   if (!sheetId || !tabName) throw new Error('projectTab: sheetId, tabName 필수');
@@ -3909,8 +3930,16 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     const row = pr[0];
     // col:<헤더> 는 잠근 행 문맥으로 실재 컬럼 검증(그리드 표시와 동일 소스). 미실재면 거부(표시=수락 정합).
     if (isCol) {
-      // 상태값은 시스템 전용이다. 화면 잠금과 별개로 일반 셀 편집 API도 차단한다.
-      if (_statusToggleForRow(field.slice(4), row)) {
+      // 상태값은 시스템 전용이다. 행 포인터가 비어 있어도 탭의 실제 상태 열이면 일반 편집을 차단한다.
+      let statusToggle = _statusToggleForRow(field.slice(4), row);
+      if (!statusToggle) statusToggle = await _statusToggleForTab(client, {
+        sheetId, tabName, header: field.slice(4),
+      });
+      if (statusToggle === 'lookup_failed') {
+        await client.query('ROLLBACK');
+        return { ok: false, error: 'status_column_lookup_failed', field };
+      }
+      if (statusToggle) {
         await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
       }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
@@ -4007,11 +4036,27 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
-      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json,
+              submit_col, submit_col2
          FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 FOR UPDATE`,
       [rowId, sheetId, tabName]);
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
-    const a = _deriveAnchor(pr[0]);
+    const row = pr[0];
+    if (typeof field === 'string' && field.startsWith('col:')) {
+      let statusToggle = _statusToggleForRow(field.slice(4), row);
+      if (!statusToggle) statusToggle = await _statusToggleForTab(client, {
+        sheetId, tabName, header: field.slice(4),
+      });
+      if (statusToggle === 'lookup_failed') {
+        await client.query('ROLLBACK');
+        return { ok: false, error: 'status_column_lookup_failed', field };
+      }
+      if (statusToggle) {
+        await client.query('ROLLBACK');
+        return { ok: false, error: 'status_column_locked', field };
+      }
+    }
+    const a = _deriveAnchor(row);
     if (!a) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
     let n = 0;
     const doRevert = async (f) => {

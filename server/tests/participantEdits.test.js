@@ -40,6 +40,9 @@ function makeConnectPool(scn) {
       if (/FROM campaign_participants WHERE id=\$1 .* FOR UPDATE/.test(s)) return { rows: scn.row ? [scn.row] : [] };
       if (/UPDATE campaign_participants SET identity_key/.test(s)) return { rows: [] };
       if (/COUNT\(\*\)::int AS n FROM campaign_participants/.test(s)) return { rows: [{ n: scn.dupCount || 1 }] };
+      if (/COALESCE\(detected_headers, headers\) AS h FROM raw_sheet_tabs/.test(s)) {
+        return { rows: scn.detectedHeaders ? [{ h: scn.detectedHeaders }] : [] };
+      }
       if (/FROM raw_sheet_tabs/.test(s)) return { rows: scn.detectedHeaders ? [{ detected_headers: scn.detectedHeaders }] : [] };
       if (/UPDATE participant_edits SET reverted_at/.test(s)) return { rows: [], rowCount: (scn.revertN == null ? 1 : scn.revertN) };
       if (/INSERT INTO participant_edits/.test(s)) {
@@ -248,6 +251,28 @@ async function run() {
     assert.ok(!e.ok && e.error === 'status_column_locked', `3m: ${f} 편집은 거부해야 한다`);
     assert.ok(!cp.q.some(x => /INSERT INTO participant_edits/.test(x.s)), `3m2: ${f} 는 오버레이를 만들지 않는다`);
   }
+  // 3m-2: 행 submit_col2가 비어 있어도 탭이 실제로 쓰는 입금 헤더는 일반 편집으로 우회할 수 없다.
+  // 이번 운영 사고의 정확한 형태: `입금일` 오버레이만 남고 row_json/is_paid는 갱신되지 않았다.
+  cp = makeConnectPool({
+    row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1',
+      recipient_name: null, option_text: null, row_json: { 입금일: '' }, tab_gid: '9', submit_col2: null },
+    detectedHeaders: ['번호', '입금일'],
+  });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:입금일', value: '9/16', by: 'm' });
+  assert.ok(!e.ok && e.error === 'status_column_locked', '3m-3: 탭 단위 입금일은 행 포인터가 없어도 편집 거부');
+  assert.ok(!cp.q.some(x => /INSERT INTO participant_edits/.test(x.s)), '3m-4: 입금일 오버레이를 남기지 않는다');
+  // 같은 이름 후보가 여러 개여도 탭 판정이 고른 열만 잠근다. 문자열을 전역 금지하면 일반 정보 열을 막는다.
+  cp = makeConnectPool({
+    row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1',
+      recipient_name: null, option_text: null, row_json: { 입금: '', 입금일: '예정일 메모' }, tab_gid: '9', submit_col2: null },
+    detectedHeaders: ['번호', '입금', '입금일'],
+  });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:입금일', value: '확인 예정', by: 'm' });
+  assert.ok(e.ok, '3m-5: 실제 상태 열이 입금이면 별도 입금일 정보 열은 편집 가능');
+  assert.equal(cp.q.filter(x => /INSERT INTO participant_edits/.test(x.s)).length, 1,
+    '3m-6: 일반 정보 열은 종전 오버레이 1건만 저장');
   // 3n: col:입금자명(정보열)은 링크 토글 안 함 — is_paid 오탐 차단(리뷰 지적 #1)
   cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['입금자명', '입금'] });
   svc.__setPoolForTest(cp);
@@ -266,9 +291,18 @@ async function run() {
     assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 0,
       `5a2: ${f} 거부 시 쓰기 0`);
   }
+  cp = makeConnectPool({
+    row: { ...rrow, row_json: { 입금일: '9/16' }, submit_col2: null },
+    detectedHeaders: ['번호', '입금일'], revertN: 1,
+  });
+  svc.__setPoolForTest(cp);
+  let rr = await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:입금일', by: 'm' });
+  assert.ok(!rr.ok && rr.error === 'status_column_locked', '5a3: 탭 단위 입금일 편집기록도 일반 되돌리기 거부');
+  assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 0,
+    '5a4: 탭 단위 입금일 되돌리기 거부 시 쓰기 0');
   // 5b: 일반 열은 종전대로 1회 되돌림(무회귀)
   cp = makeConnectPool({ row: rrow, revertN: 1 }); svc.__setPoolForTest(cp);
-  await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:비고', by: 'm' });
+  rr = await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:비고', by: 'm' });
   assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 1, '5b: 일반 열 되돌리기는 종전대로');
   console.log('  5. revertWorkdeskEdit — 상태칸 잠금 + 일반 열 무회귀 ✓');
 
