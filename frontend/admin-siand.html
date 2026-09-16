@@ -1625,6 +1625,7 @@ body::after{ content:"시안 D"; position:fixed; left:8px; bottom:8px; z-index:9
             <option value="실배송">실배송</option>
             <option value="빈박스">빈박스</option>
             <option value="택배발송대행">택배발송대행</option>
+            <option value="직접배송(가구 등)">직접배송(가구 등)</option>
             <option value="회수">회수</option>
             <option value="혼합">혼합</option>
           </select>
@@ -2361,7 +2362,7 @@ body::after{ content:"시안 D"; position:fixed; left:8px; bottom:8px; z-index:9
 
 <!-- 작업오더 상세 렌더러 — 리뷰웹시스템[3버전]과 한 벌로 쓰는 공유 모듈. index-app.js 앞에 둔다
      (호출부·onclick 문자열이 전역 이름으로 참조하므로 먼저 정의돼 있어야 한다). -->
-<script src="js/work-order-detail.js"></script>
+<script src="js/work-order-detail.js?v=20260916-direct-delivery"></script>
 <!-- C/S 문의창구 — 같은 이유로 공유 모듈. 마크업(#csInquiryMount)도 여기서 마운트한다. -->
 <!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>

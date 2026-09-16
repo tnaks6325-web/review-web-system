@@ -49,9 +49,9 @@ ok('자유시간대 전환 뒤 시간 지정으로 돌아오면 기존 시간창
 ok('시작일 프리필', /setV\("rf_start_date", prefill\.start_date\)/.test(rec) && /시작일<\/span>/.test(doc));
 ok('하루 진행 건수 — 텍스트형 숫자 폴백까지',
   /daily_count_text[\s\S]{0,60}match\(\/\\d\+\//.test(app) && /숫자만 추출/.test(doc));
-ok('배송유형 매핑(실배송·빈박스·택배발송대행)',
-  /const WO_DELIVERY_TYPES = \['실배송', '빈박스', '택배발송대행', '회수', '혼합'\]/.test(app)
-  && /실배송 · 빈박스 · 택배발송대행 · 회수 · 혼합/.test(doc));
+ok('배송유형 매핑(직접배송 포함 6종)',
+  /const WO_DELIVERY_TYPES = \['실배송', '빈박스', '택배발송대행', '직접배송\(가구 등\)', '회수', '혼합'\]/.test(app)
+  && /실배송 · 빈박스 · 택배발송대행 · 직접배송\(가구 등\) · 회수 · 혼합/.test(doc));
 ok('팀채팅방 URL', /chat_url:\s+o\.chat_room_url/.test(app) && /팀채팅방 URL/.test(doc));
 ok('상품 URL + 자동수집 1회',
   /if \(prefill\.product_url\) setTimeout\(\(\) => \{ try \{ fetchProductInfo\(\{ auto: true \}\)/.test(rec)

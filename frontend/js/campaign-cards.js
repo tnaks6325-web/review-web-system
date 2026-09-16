@@ -26,9 +26,10 @@
      ★★ **아는 어휘일 때만** 접는다 — 모르는 값('기타배송(박스)')을 괄호 앞에서 잘라내면
        그건 다듬기가 아니라 **정보 삭제**다. 판정 불가는 원문 그대로 통과시킨다.
      ★ 부속정보는 참여 후 작업내용에서 안내한다(참여 전 카드에 업체 물류 정보를 싣지 않는다). */
-  const _DL_BASES = ['실배송', '빈박스', '택배발송대행', '회수', '혼합'];
+  const _DL_BASES = ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)', '회수', '혼합'];
   const _dlBadge = (v) => {
     const raw = String(v == null ? '' : v).trim();
+    if (_DL_BASES.indexOf(raw) >= 0) return raw;
     const cut = raw.indexOf('(');
     if (cut <= 0) return raw;
     const head = raw.slice(0, cut).trim();
@@ -1103,6 +1104,7 @@
               <option value="실배송">실배송</option>
               <option value="빈박스">빈박스</option>
               <option value="택배발송대행">택배발송대행</option>
+              <option value="직접배송(가구 등)">직접배송(가구 등)</option>
               <option value="회수">회수</option>
               <option value="혼합">혼합</option>
             </select></div>
