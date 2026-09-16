@@ -362,7 +362,13 @@ router.get('/my-applications', async (req, res, next) => {
         rc.status AS "campaignStatus"
       FROM campaign_applications ca
       LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
-      WHERE (ca.phone8 = ANY($1) OR ca.owner_phone8 = ANY($1) OR ca.owner_reviewer_id = $2)
+      WHERE (ca.phone8 = ANY($1)
+             OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+               SELECT 1 FROM reviewer_phone_changes rpc
+                WHERE rpc.old_phone8 = ca.owner_phone8
+                  AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+             ))
+             OR ca.owner_reviewer_id = $2)
         -- 작업보드에서 참여행을 삭제하며 취소된 건은 리뷰어의 참여이력에서 제외한다.
         AND ca.status <> 'cancelled'
       ORDER BY ca.applied_at DESC
@@ -427,7 +433,12 @@ router.get('/my-status', async (req, res, next) => {
           ($2::uuid IS NULL AND cp.phone8 = ANY($1))
           OR cp.owner_reviewer_id = $2
           OR (cp.owner_reviewer_id IS NULL AND (
-            os.owner_reviewer_id = $2 OR ca.owner_reviewer_id = $2 OR ca.owner_phone8 = ANY($1)
+            os.owner_reviewer_id = $2 OR ca.owner_reviewer_id = $2
+            OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+              SELECT 1 FROM reviewer_phone_changes rpc
+               WHERE rpc.old_phone8 = ca.owner_phone8
+                 AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+            ))
             OR (
               os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
               AND COALESCE(ca.owner_phone8, '') = ''
@@ -555,7 +566,13 @@ router.get('/my-status', async (req, res, next) => {
                rc.title, rc.thumbnail_url AS "thumbnailUrl"
           FROM campaign_applications ca
           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE (ca.phone8 = ANY($1) OR ca.owner_phone8 = ANY($1) OR ca.owner_reviewer_id = $2)
+         WHERE (ca.phone8 = ANY($1)
+                OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                  SELECT 1 FROM reviewer_phone_changes rpc
+                   WHERE rpc.old_phone8 = ca.owner_phone8
+                     AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                ))
+                OR ca.owner_reviewer_id = $2)
            AND ((ca.status = 'applied' AND ca.expires_at > NOW())
                 OR ca.status = 'blog_pending')
          ORDER BY ca.applied_at DESC
@@ -731,7 +748,12 @@ router.get('/review-earnings', async (req, res, next) => {
             ($3::uuid IS NULL AND cp.phone8 = ANY($1))
             OR cp.owner_reviewer_id = $3
             OR (cp.owner_reviewer_id IS NULL AND (
-              os.owner_reviewer_id = $3 OR ca.owner_reviewer_id = $3 OR ca.owner_phone8 = ANY($1)
+              os.owner_reviewer_id = $3 OR ca.owner_reviewer_id = $3
+              OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                SELECT 1 FROM reviewer_phone_changes rpc
+                 WHERE rpc.old_phone8 = ca.owner_phone8
+                   AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
+              ))
               OR (
                 os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
                  AND COALESCE(ca.owner_phone8, '') = ''
@@ -854,7 +876,12 @@ router.get('/review-earnings', async (req, res, next) => {
         WHERE (($2::uuid IS NULL AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
                OR os.owner_reviewer_id = $2
                OR (os.owner_reviewer_id IS NULL AND (
-                 ca.owner_reviewer_id = $2 OR ca.owner_phone8 = ANY($1)
+                 ca.owner_reviewer_id = $2
+                 OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+                   SELECT 1 FROM reviewer_phone_changes rpc
+                    WHERE rpc.old_phone8 = ca.owner_phone8
+                      AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
+                 ))
                  OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                      AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
                )))

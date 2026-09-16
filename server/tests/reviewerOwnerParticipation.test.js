@@ -13,6 +13,7 @@ const indexRoutes = read('src/routes/index.routes.js');
 const targetOwnership = read('src/services/reviewerTargetOwnership.service.js');
 const home = read('../frontend/index.html');
 const migration = read('migrations/159_reviewer_owner_participation_backfill.sql');
+const occurrences = (text, needle) => text.split(needle).length - 1;
 
 const checks = [
   ['홈 검색은 명시한 ownerScope에만 로그인 토큰을 요구한다',
@@ -47,6 +48,13 @@ const checks = [
   ['다른 소유자가 과거에 쓴 번호는 현재 번호 소유자로 자동 승격하지 않는다',
     /reviewer_phone_changes rpc[\s\S]*rpc\.old_phone8 = r\.phone8[\s\S]*rpc\.reviewer_id <> r\.id/.test(migration)
       && /movedPhoneOwners[\s\S]*historicalOwners/.test(payment)],
+  ['과거 신청 owner_phone8도 번호 변경 이력이 있으면 현재 번호 보유자에게 노출하지 않는다',
+    occurrences(search, 'rpc.old_phone8 = ca.owner_phone8') === 2
+      && occurrences(reviewerRoutes, 'rpc.old_phone8 = ca.owner_phone8') === 5
+      && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$1/.test(search)
+      && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$3/.test(search)
+      && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$2::uuid IS NULL OR rpc\.reviewer_id <> \$2/.test(reviewerRoutes)
+      && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$3::uuid IS NULL OR rpc\.reviewer_id <> \$3/.test(reviewerRoutes)],
   ['현재 참여행 owner UUID는 충돌하는 과거 링크보다 우선한다',
     /cp\.owner_reviewer_id = \$1[\s\S]*cp\.owner_reviewer_id IS NULL/.test(search)
       && /cp\.owner_reviewer_id = \$3[\s\S]*cp\.owner_reviewer_id IS NULL/.test(reviewerRoutes)],

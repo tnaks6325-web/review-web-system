@@ -133,7 +133,11 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
     const orderOwnerCondition = ownerReviewerId
       ? `(os.owner_reviewer_id = $3
           OR (os.owner_reviewer_id IS NULL AND (
-            ca.owner_reviewer_id = $3 OR ca.owner_phone8 = ANY($1)
+            ca.owner_reviewer_id = $3
+            OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+              SELECT 1 FROM reviewer_phone_changes rpc
+               WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $3
+            ))
             OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                 AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
           )))`
@@ -294,7 +298,11 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
           (cp.id IS NOT NULL AND (
             cp.owner_reviewer_id = $1
             OR (cp.owner_reviewer_id IS NULL AND (
-              os.owner_reviewer_id = $1 OR ca.owner_reviewer_id = $1 OR ca.owner_phone8 = ANY($2)
+              os.owner_reviewer_id = $1 OR ca.owner_reviewer_id = $1
+              OR (ca.owner_phone8 = ANY($2) AND NOT EXISTS (
+                SELECT 1 FROM reviewer_phone_changes rpc
+                 WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $1
+              ))
               OR (
                 os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
                 AND COALESCE(ca.owner_phone8, '') = ''
