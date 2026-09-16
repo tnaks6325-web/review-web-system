@@ -1163,6 +1163,9 @@ function showHome(user) {
   // ★ /search 페이지 세션 동기화 (rapp_reviewer_auth 키)
   syncSearchSession(user);
 
+  // C/S 모듈은 이 탭에서 선택된 리뷰어 세션으로 SSE·미확인 배지를 즉시 맞춘다.
+  if (window.ReviewerCS && typeof window.ReviewerCS.syncSession === 'function') window.ReviewerCS.syncSession();
+
   // ★ 공고수정 권한 — 마스터 허용명단(phone8)에 있는 리뷰어만 스코프 토큰 발급받아
   //   홈 공고카드에서 인라인 수정 가능(비허용자는 401 → 조용히 일반 동작).
   maybeFetchCampEditToken(user);
@@ -3347,7 +3350,7 @@ function renderCsInbox() {
 function csInboxOpen(idx) {
   const t = (_csInbox.threads || [])[idx];
   if (!t || !window.ReviewerCS) return;
-  ReviewerCS.openChat(t.campaignKey || '', t.campaignLabel || '문의', t.campaignSource || 'general');
+  ReviewerCS.openChat(t.campaignKey || '', t.campaignLabel || '문의', t.campaignSource || 'general', t.threadId);
 }
 /** 작업과 무관한 일반 문의 */
 function csInboxGeneral() {
