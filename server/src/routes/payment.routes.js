@@ -51,7 +51,8 @@ router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res,
         AND (ri.is_submitted2 IS NULL OR ri.is_submitted2 = 'NONE')
         AND NOT EXISTS (
           SELECT 1 FROM review_reminder_states rrs
-           WHERE rrs.review_index_id = ri.id AND rrs.review_status = 'closed_no_review'
+           WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
+             AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
         )
       ORDER BY ri.tab_name, ri.reviewer_name
     `);

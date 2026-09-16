@@ -464,7 +464,8 @@ router.get('/my-status', async (req, res, next) => {
         tc.delivery_type AS "deliveryType",
         tc.is_closed AS "isClosed",
         (SELECT s.review_status FROM review_reminder_states s
-          WHERE s.review_index_id = ri.id AND s.review_status = 'closed_no_review'
+          WHERE s.sheet_id = ri.sheet_id AND s.tab_name = ri.tab_name
+            AND s.row_index = ri.row_index AND s.review_status = 'closed_no_review'
           LIMIT 1) AS "reviewReminderStatus"
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
@@ -1020,7 +1021,8 @@ router.get('/review-earnings', async (req, res, next) => {
         ))
         AND NOT EXISTS (
           SELECT 1 FROM review_reminder_states rrs
-           WHERE rrs.review_index_id = ri.id AND rrs.review_status = 'closed_no_review'
+           WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
+             AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
         )`,
       [phoneList, payPatterns, ownerReviewerId, restrictParticipant, participantIdentityId]
     );

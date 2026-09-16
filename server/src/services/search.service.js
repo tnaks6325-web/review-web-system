@@ -66,7 +66,8 @@ const PAYMENT_COL_KEYWORDS = ['입금', '페이백', '입금완료', '입금확�
 // is_submitted를 거짓 완료값으로 바꾸지 않고 별도 종결 원장을 확인한다.
 const OPEN_REVIEW_COND = `NOT EXISTS (
   SELECT 1 FROM review_reminder_states rrs
-   WHERE rrs.review_index_id = ri.id AND rrs.review_status = 'closed_no_review'
+   WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
+     AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
 )`;
 
 /**

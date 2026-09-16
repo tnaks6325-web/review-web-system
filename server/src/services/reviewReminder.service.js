@@ -168,9 +168,8 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     const { rows } = await db.query(`
       SELECT s.order_submission_id AS "orderSubmissionId", s.closed_at AS "closedAt",
              s.close_reason AS "closeReason"
-        FROM review_index ri
-        JOIN review_reminder_states s ON s.review_index_id = ri.id
-       WHERE ri.sheet_id=$1 AND ri.tab_name=$2 AND ri.row_index=$3
+        FROM review_reminder_states s
+       WHERE s.sheet_id=$1 AND s.tab_name=$2 AND s.row_index=$3
          AND s.review_status='closed_no_review'
        ORDER BY s.closed_at DESC NULLS LAST LIMIT 1`,
     [sheetId, tabName, Number(rowIndex)]);
@@ -220,6 +219,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
        WHERE ri.is_submitted = FALSE
          AND ri.row_index IS NOT NULL
          AND COALESCE(ri.end_date, '') <> ''
+         AND COALESCE(s.review_status, 'pending') = 'pending'
          AND NOT EXISTS (
            SELECT 1 FROM workdesk_participant_deletions wd
             WHERE wd.order_submission_id = ord.id
@@ -233,9 +233,10 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
   async function refreshSubmittedStates() {
     const { rowCount } = await db.query(`
       UPDATE review_reminder_states s
-         SET review_status = 'submitted', updated_at = NOW()
+         SET review_status = 'submitted', review_index_id = ri.id, updated_at = NOW()
         FROM review_index ri
-       WHERE ri.id = s.review_index_id AND ri.is_submitted = TRUE
+       WHERE ri.sheet_id = s.sheet_id AND ri.tab_name = s.tab_name AND ri.row_index = s.row_index
+         AND ri.is_submitted = TRUE
          AND s.review_status = 'pending'`);
     return rowCount;
   }
@@ -244,9 +245,11 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     const { rows } = await db.query(`
       UPDATE review_reminder_states s
          SET review_status = 'closed_no_review', closed_at = $1,
-             close_reason = 'three_delivered_reminders_final_due_passed', updated_at = $1
+             close_reason = 'three_delivered_reminders_final_due_passed',
+             review_index_id = ri.id, updated_at = $1
         FROM review_index ri
-       WHERE ri.id = s.review_index_id AND ri.is_submitted = FALSE
+       WHERE ri.sheet_id = s.sheet_id AND ri.tab_name = s.tab_name AND ri.row_index = s.row_index
+         AND ri.is_submitted = FALSE
          AND s.review_status = 'pending' AND s.reminder_count = 3
          AND s.final_due_at IS NOT NULL AND s.final_due_at <= $1
          AND NOT EXISTS (
@@ -290,9 +293,11 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
                        last_reminded_at = $3,
                        final_due_at = CASE WHEN $2 = 3 THEN $4 ELSE s.final_due_at END,
                        review_status = CASE WHEN ri.is_submitted THEN 'submitted' ELSE s.review_status END,
+                       review_index_id = ri.id,
                        updated_at = $3
                   FROM review_index ri
-                 WHERE s.order_submission_id=$1 AND ri.id=s.review_index_id
+                 WHERE s.order_submission_id=$1
+                   AND ri.sheet_id=s.sheet_id AND ri.tab_name=s.tab_name AND ri.row_index=s.row_index
                    AND s.reminder_count=$2 - 1`,
                 [delivery.orderSubmissionId, delivery.reminderNo, resolvedAt, delivery.finalDueAt]);
               result.delivered++;

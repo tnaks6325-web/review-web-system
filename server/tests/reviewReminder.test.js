@@ -169,6 +169,15 @@ function withSolapiEnv(fn) {
     assert.strictEqual(result.delivered, 1);
     assert.ok(queries.some(q => /provider_status='delivered'/.test(q.sql)));
     assert.ok(queries.some(q => /reminder_count = \$2/.test(q.sql)));
+    const stateUpdate = queries.find(q => /reminder_count = \$2/.test(q.sql));
+    assert.ok(/ri\.sheet_id=s\.sheet_id[\s\S]*ri\.tab_name=s\.tab_name[\s\S]*ri\.row_index=s\.row_index/.test(stateUpdate.sql),
+      '재생성 가능한 review_index UUID 대신 작업 좌표로 현재 행을 찾아야 한다');
+    assert.ok(/review_index_id = ri\.id/.test(stateUpdate.sql), '현재 review_index UUID를 상태 원장에 다시 연결해야 한다');
+  });
+
+  await test('종결·제출 상태는 LIMIT 전에 후보에서 제외한다', () => {
+    const source = fs.readFileSync(path.join(__dirname, '../src/services/reviewReminder.service.js'), 'utf8');
+    assert.ok(/COALESCE\(s\.review_status, 'pending'\) = 'pending'[\s\S]*ORDER BY ri\.end_date[\s\S]*LIMIT \$1/.test(source));
   });
 
   await test('입금대상 양쪽 경로와 마이그레이션에 미작성 종결 방어가 있다', () => {
