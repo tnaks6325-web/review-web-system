@@ -200,6 +200,22 @@ function withSolapiEnv(fn) {
     assert.ok(/provider_status = 'accepted'/.test(migration));
   });
 
+  await test('알림톡 화면에 나중에 자동 발송을 켤 운영 경로가 남아 있다', () => {
+    const simulator = fs.readFileSync(
+      path.resolve(__dirname, '../../frontend/docs/review-reminder-alimtalk-simulator.html'),
+      'utf8'
+    );
+    assert.ok(/기본값 OFF/.test(simulator));
+    assert.ok(/현재 운영 상태는 Railway 변수에서 확인/.test(simulator));
+    assert.ok(/GET \/api\/review-reminders\/status/.test(simulator));
+    assert.ok(/POST \/api\/review-reminders\/run/.test(simulator));
+    assert.ok(/dryRun/.test(simulator));
+    assert.ok(/샘플 시뮬레이션/.test(simulator));
+    assert.ok(/REVIEW_REMINDER_ENABLED=1/.test(simulator));
+    assert.ok(/railway\.com\/project\/a413cce6-5d9b-4e9a-9bc1-fa2af0088235\/service\/f9445b01-c5d0-4495-a2ea-db11d5f18cbd\/variables/.test(simulator));
+    assert.ok(/target="_blank" rel="noopener noreferrer"/.test(simulator));
+  });
+
   console.log(`\n${passed} review reminder tests passed`);
 })().catch(err => {
   console.error(err && err.stack ? err.stack : err);
