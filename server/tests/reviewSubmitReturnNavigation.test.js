@@ -28,8 +28,13 @@ ok('버튼 문구와 아이콘이 이동 목적을 정확히 알림',
   /fa-clipboard-list"><\/i>\s*리뷰 내역으로/.test(searchHtml));
 ok('리뷰 복귀는 index.html#review로 이동',
   /tab === "review" \? "index\.html#review" : "index\.html"/.test(searchApp));
-ok('리뷰어 홈이 #review를 하단 리뷰내역 탭으로 염',
-  /location\.hash === "#review"[\s\S]{0,100}switchTab\("review"\)/.test(indexHtml));
+ok('독립 검색 로그인의 인증을 리뷰어 홈 저장소로 승계',
+  /function _syncReviewerHomeSessionForReturn\(\)[\s\S]*iad_reviewer_home_session[\s\S]*iad_reviewer_user/.test(searchApp) &&
+  /_syncReviewerHomeSessionForReturn\(\);[\s\S]{0,200}window\.location\.href/.test(searchApp));
+ok('관리자 홈 탭 인증은 sessionStorage 격리를 유지',
+  /reviewerStore === sessionStorage[\s\S]{0,200}adminPreview: true/.test(searchApp));
+ok('리뷰어 홈이 #review를 제출완료 서브탭으로 염',
+  /location\.hash === "#review"[\s\S]{0,150}switchReviewSubTab\("done"\)[\s\S]{0,100}switchTab\("review"\)/.test(indexHtml));
 ok('복귀 목적지에 하단 탭바와 리뷰내역 버튼이 존재',
   /<div class="tabbar">/.test(indexHtml) && /class="tab-review"[^>]*switchTab\('review'\)/.test(indexHtml));
 

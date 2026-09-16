@@ -3176,8 +3176,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadRecruitPreview();
   applyRecruitView();
   // ★ 해시 진입 시 요청한 하단 탭을 자동 오픈.
-  //   #review = 리뷰 제출 완료 후 복귀 / #my·#info = 구매양식 내정보 게이트.
+  //   #review = 리뷰 제출 완료 후 완료내역으로 복귀 / #my·#info = 구매양식 내정보 게이트.
   if (location.hash === "#review") {
+    try { switchReviewSubTab("done"); } catch (_) {}
     try { switchTab("review"); } catch (_) {}
   } else if (location.hash === "#my" || location.hash === "#info") {
     try { switchTab("my"); } catch (_) {}

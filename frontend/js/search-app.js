@@ -10056,13 +10056,34 @@ function resetOrderFormForReentry() {
   window._submitOrderFormInProgress = false;
 }
 
+/** search.html 인증을 신규 리뷰어 홈 세션으로 승계한다.
+ *  일반 로그인은 localStorage, 관리자 홈 탭은 sessionStorage 격리를 그대로 유지한다. */
+function _syncReviewerHomeSessionForReturn() {
+  try {
+    const auth = _getReviewerSession();
+    if (!auth || !auth.name || !auth.phone8 || !auth.reviewerToken) return;
+    const homeUser = {
+      name: auth.name,
+      phone8: auth.phone8,
+      reviewerToken: auth.reviewerToken,
+      loginAt: Date.now()
+    };
+    const reviewerStore = _getReviewerSessionStore();
+    if (reviewerStore === sessionStorage) {
+      sessionStorage.setItem("iad_reviewer_home_session", JSON.stringify({ ...homeUser, adminPreview: true }));
+    } else {
+      localStorage.setItem("iad_reviewer_user", JSON.stringify(homeUser));
+    }
+  } catch (_) { /* 이동은 유지하고 홈에서 재로그인을 안내한다 */ }
+}
+
 /** ★ 리뷰어 메인화면으로 이동 = 신규 포털(index.html)
- *  구 search.html 의 screenSearch(아이에이리뷰 리뷰내역 화면)는 더 이상 메인으로 쓰지 않는다.
- *  리뷰어 로그인 세션(localStorage)은 동일 오리진이라 index.html 에서 그대로 유지된다. */
+ *  구 search.html 의 screenSearch(아이에이리뷰 리뷰내역 화면)는 더 이상 메인으로 쓰지 않는다. */
 function goToReviewerMain(tab) {
   // 구매양식 입력 상태 정리 (혹시 모를 잔여 상태 초기화)
   try { resetOrderFormForReentry(); } catch (_) {}
   window._pendingOrderForm = false;
+  _syncReviewerHomeSessionForReturn();
   // 신규 리뷰어 홈(index.html = 루트)으로 전체 페이지 이동.
   // 리뷰 제출 완료 버튼은 방금 제출한 건을 확인할 수 있게 리뷰내역 탭을 지정한다.
   window.location.href = tab === "review" ? "index.html#review" : "index.html";
