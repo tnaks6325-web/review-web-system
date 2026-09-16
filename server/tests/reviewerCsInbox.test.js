@@ -12,6 +12,7 @@ const indexHtml = readFrontend('index.html');
 const reviewerRoutes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'reviewer.routes.js'), 'utf8');
 
 let passed = 0;
+const THREAD_ID = '8c6fe67b-1d40-4a78-b506-65d1a53fc282';
 function ok(name, condition) {
   assert.ok(condition, name);
   passed++;
@@ -44,8 +45,8 @@ const queries = [];
 pool.query = async (sql, params) => {
   queries.push({ sql, params });
   if (/FROM cs_threads[\s\S]*id = \$2/.test(sql)) {
-    return { rows: params[0] === '85926325' && params[1] === 42
-      ? [{ id: 42, campaignLabel: '테스트 문의', status: 'open' }]
+    return { rows: params[0] === '85926325' && params[1] === THREAD_ID
+      ? [{ id: THREAD_ID, campaignLabel: '테스트 문의', status: 'open' }]
       : [] };
   }
   if (/FROM cs_messages/.test(sql)) {
@@ -72,13 +73,13 @@ function call(query) {
 }
 
 (async () => {
-  const found = await call({ phone8: '85926325', threadId: '42', campaignKey: 'stale-key' });
+  const found = await call({ phone8: '85926325', threadId: THREAD_ID, campaignKey: 'stale-key' });
   ok('런타임: campaignKey가 오래됐어도 목록의 threadId로 실제 메시지를 불러온다',
-    found.statusCode === 200 && found.body && found.body.threadId === 42 && found.body.messages.length === 1);
+    found.statusCode === 200 && found.body && found.body.threadId === THREAD_ID && found.body.messages.length === 1);
   ok('런타임: threadId 조회에 리뷰어 phone8 소유권이 같이 들어간다',
-    queries.some((q) => /reviewer_phone8 = \$1 AND id = \$2/.test(q.sql) && q.params[0] === '85926325' && q.params[1] === 42));
+    queries.some((q) => /reviewer_phone8 = \$1 AND id = \$2/.test(q.sql) && q.params[0] === '85926325' && q.params[1] === THREAD_ID));
 
-  const foreign = await call({ phone8: '87654321', threadId: '42' });
+  const foreign = await call({ phone8: '87654321', threadId: THREAD_ID });
   ok('런타임: 다른 리뷰어의 threadId로는 메시지를 내주지 않는다',
     foreign.statusCode === 200 && foreign.body && foreign.body.threadId === null && foreign.body.messages.length === 0);
 

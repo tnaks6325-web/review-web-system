@@ -1124,8 +1124,8 @@ router.get('/cs/messages', async (req, res, next) => {
     if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     const campaignKey = (req.query.campaignKey || '').toString();
     const rawThreadId = (req.query.threadId || '').toString().trim();
-    const threadId = rawThreadId ? Number(rawThreadId) : null;
-    if (rawThreadId && (!Number.isSafeInteger(threadId) || threadId <= 0)) {
+    const threadId = rawThreadId || null;
+    if (threadId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(threadId)) {
       return res.status(400).json({ ok: false, error: '올바른 문의방 ID가 필요합니다.' });
     }
 
