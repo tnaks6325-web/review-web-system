@@ -162,6 +162,24 @@ async function run() {
   assert.ok(!captured.queries.some(x => /FROM reviewers/.test(x.sql)), '9: 본계정·형제 타계정 번호 조회 미실행');
   console.log('  9. 타계정 strictPhoneScope — 로그인 번호만 사용 ✓');
 
+  // ── 10) 코드 타계정은 owner UUID를 유지하되 participant identity로 형제 행을 차단 ──
+  captured.queries = []; reviewRows = []; seenRows = []; orderRows = [];
+  ownerReviewRows = [reviewRow({ idxName: '코드타계정', rowIndex: 76 })];
+  const participantId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  await searchByName('', '87654321', {
+    includeSubmitted: true,
+    ownerReviewerId: '11111111-1111-1111-1111-111111111111',
+    ownerPhone8s: ['87654321'],
+    participantIdentityId: participantId,
+    restrictParticipant: true,
+    strictPhoneScope: true,
+  });
+  const scopedOwnerQuery = captured.queries.find(x => /COALESCE\(cp\.participant_identity_id, os\.participant_identity_id/.test(x.sql));
+  assert.ok(scopedOwnerQuery, '10: 참여자 신원 제한 SQL 실행');
+  assert.deepEqual(scopedOwnerQuery.params.slice(1), [['87654321'], true, participantId, true], '10: owner 범위에 참여자 UUID·제한 플래그 전달');
+  ownerReviewRows = null;
+  console.log('  10. 코드 타계정 — owner UUID + participant identity 범위 ✓');
+
   console.log('✅ orderMergeSearch 테스트 전체 통과');
 }
 

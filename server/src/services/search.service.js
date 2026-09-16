@@ -124,11 +124,15 @@ const _ORDER_ATTENTION_STATUSES = new Set(['failed', 'stuck_manual']);
 // 확인필요 상태를 리뷰어 화면에 노출할지(기본 미노출). 킬스위치: REVIEW_ORDER_ATTENTION_VISIBLE=1
 const _ORDER_ATTENTION_VISIBLE = process.env.REVIEW_ORDER_ATTENTION_VISIBLE === '1';
 
-async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null) {
+async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null, participantIdentityId = null, restrictParticipant = false) {
   if (!Array.isArray(results) || !Array.isArray(phoneList) || phoneList.length === 0) return results;
   try {
     const seenOwnerCondition = ownerReviewerId
-      ? `(cp.owner_reviewer_id = $2 OR (cp.owner_reviewer_id IS NULL AND ri.phone8 = ANY($1)))`
+      ? `((cp.owner_reviewer_id = $2 OR (cp.owner_reviewer_id IS NULL AND ri.phone8 = ANY($1)))
+          AND (NOT $4::boolean OR (
+            cp.participant_identity_id = $3
+            OR (cp.participant_identity_id IS NULL AND cp.phone8 = ANY($1))
+          )))`
       : `ri.phone8 = ANY($1)`;
     const orderOwnerCondition = ownerReviewerId
       ? `(os.owner_reviewer_id = $3
@@ -140,7 +144,12 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
             ))
             OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
                 AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-          )))`
+          )))
+          AND (NOT $5::boolean OR (
+            COALESCE(os.participant_identity_id, ca.participant_identity_id) = $4
+            OR (os.participant_identity_id IS NULL AND ca.participant_identity_id IS NULL
+                AND COALESCE(ca.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
+          ))`
       : `RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)`;
     // dedup 기준 = phoneList 전체의 written 색인행(결과 필터/아카이브로 빠진 행까지 포함).
     // idx_review_phone8(migration 001)로 인덱스 스캔 — 신규 seq scan 아님.
@@ -172,7 +181,7 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
           WHERE cp.order_submission_id IS NOT NULL
             AND cp.deleted_at IS NULL
              AND ${seenOwnerCondition}`,
-         ownerReviewerId ? [phoneList, ownerReviewerId] : [phoneList]
+         ownerReviewerId ? [phoneList, ownerReviewerId, participantIdentityId, restrictParticipant === true] : [phoneList]
       );
       seenOsid = new Set(osidRows.map(r => String(r.osid)));
     } catch (e) {
@@ -227,7 +236,7 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
         ORDER BY os.submitted_at DESC
         LIMIT ${_ORDER_MERGE_LIMIT}`,
       ownerReviewerId
-        ? [phoneList, String(_ORDER_MERGE_DAYS), ownerReviewerId]
+        ? [phoneList, String(_ORDER_MERGE_DAYS), ownerReviewerId, participantIdentityId, restrictParticipant === true]
         : [phoneList, String(_ORDER_MERGE_DAYS)]
     );
 
@@ -272,7 +281,7 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
 
 // 로그인 홈 전용 보강. 현재 참여행이 있으면 그 행의 owner UUID가 최우선이고, UUID가 없는
 // 과거 행만 주문/신청의 소유자 링크와 기존 phone8 범위를 차례로 사용한다.
-async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, includeSubmitted) {
+async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, includeSubmitted, participantIdentityId = null, restrictParticipant = false) {
   if (!ownerReviewerId || !Array.isArray(phoneList) || !phoneList.length) return [];
   const submittedState = 'COALESCE(cp.is_submitted, ri.is_submitted)';
   const { rows } = await pool.query(
@@ -284,7 +293,7 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
         AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
        LEFT JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
        LEFT JOIN LATERAL (
-         SELECT app.owner_reviewer_id, app.owner_phone8
+         SELECT app.owner_reviewer_id, app.owner_phone8, app.participant_identity_id
            FROM campaign_applications app
           WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
           ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
@@ -340,9 +349,20 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
             ))
           ))
         )
+        AND (NOT $5::boolean OR (
+          COALESCE(cp.participant_identity_id, os.participant_identity_id,
+                   ca.participant_identity_id, pl.participant_identity_id) = $4
+          OR (
+            cp.participant_identity_id IS NULL
+            AND os.participant_identity_id IS NULL
+            AND ca.participant_identity_id IS NULL
+            AND pl.participant_identity_id IS NULL
+            AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($2)
+          )
+        ))
       ORDER BY ${submittedState} ASC, ri.start_date DESC NULLS LAST
       LIMIT 400`,
-    [ownerReviewerId, phoneList, includeSubmitted === true]
+    [ownerReviewerId, phoneList, includeSubmitted === true, participantIdentityId, restrictParticipant === true]
   );
   return rows;
 }
@@ -556,7 +576,9 @@ async function searchByName(query, phone8, opts = {}) {
         SELECT_FIELDS,
         opts.ownerReviewerId,
         Array.isArray(opts.ownerPhone8s) && opts.ownerPhone8s.length ? opts.ownerPhone8s : [p8],
-        includeSubmitted
+        includeSubmitted,
+        opts.participantIdentityId || null,
+        opts.restrictParticipant === true
       );
       const byCoordinate = new Map();
       // ownerScope는 로그인 홈 전용이다. 이름/근접번호 공개검색 결과를 섞지 않고 소유권이
@@ -718,7 +740,9 @@ async function searchByName(query, phone8, opts = {}) {
       await _mergeOrderSubmissions(
         results,
         Array.isArray(opts.ownerPhone8s) && opts.ownerPhone8s.length ? opts.ownerPhone8s : mergePhoneList,
-        opts.ownerReviewerId || null
+        opts.ownerReviewerId || null,
+        opts.participantIdentityId || null,
+        opts.restrictParticipant === true
       );
     }
 

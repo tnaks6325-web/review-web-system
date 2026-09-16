@@ -20,6 +20,8 @@ router.get('/', async (req, res, next) => {
     let scopedQuery = query;
     let scopedPhone8 = phone8;
     let strictPhoneScope = false;
+    let participantIdentityId = null;
+    let restrictParticipant = false;
     if (ownerScope === '1' || ownerScope === 'true') {
       const token = req.headers['x-reviewer-token'];
       if (!token) {
@@ -38,7 +40,14 @@ router.get('/', async (req, res, next) => {
           }
           // 타계정 로그인은 본계정 UUID나 형제 타계정 번호로 확장하지 않는다.
           // 요청 query/phone8도 신뢰하지 않고 토큰의 로그인 번호 하나로만 검색한다.
+          const identity = await reviewerIdentity.resolveParticipantIdentity({
+            ownerReviewerId: scope.ownerReviewerId,
+            participantPhone8: loginPhone8,
+          });
+          ownerReviewerId = scope.ownerReviewerId;
           ownerPhone8s = [loginPhone8];
+          participantIdentityId = identity && identity.id || null;
+          restrictParticipant = true;
           scopedQuery = '';
           scopedPhone8 = loginPhone8;
           strictPhoneScope = true;
@@ -61,6 +70,8 @@ router.get('/', async (req, res, next) => {
       ownerReviewerId,
       ownerPhone8s,
       strictPhoneScope,
+      participantIdentityId,
+      restrictParticipant,
     });
     res.json(result);
   } catch (err) {

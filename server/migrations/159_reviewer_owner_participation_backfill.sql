@@ -22,6 +22,13 @@ WITH registered_owner_candidates AS (
      SELECT 1 FROM reviewer_phone_changes rpc
       WHERE rpc.old_phone8 = c.phone8 AND rpc.reviewer_id <> c.reviewer_id
    )
+     AND NOT EXISTS (
+       SELECT 1
+         FROM reviewer_identity_aliases ria
+         JOIN reviewer_identities ri ON ri.id = ria.identity_id
+        WHERE ria.phone8 = c.phone8
+          AND ri.owner_reviewer_id <> c.reviewer_id
+     )
    GROUP BY c.phone8
   HAVING COUNT(DISTINCT c.reviewer_id) = 1
 )
@@ -54,6 +61,13 @@ WITH registered_owner_candidates AS (
      SELECT 1 FROM reviewer_phone_changes rpc
       WHERE rpc.old_phone8 = c.phone8 AND rpc.reviewer_id <> c.reviewer_id
    )
+     AND NOT EXISTS (
+       SELECT 1
+         FROM reviewer_identity_aliases ria
+         JOIN reviewer_identities ri ON ri.id = ria.identity_id
+        WHERE ria.phone8 = c.phone8
+          AND ri.owner_reviewer_id <> c.reviewer_id
+     )
    GROUP BY c.phone8
   HAVING COUNT(DISTINCT c.reviewer_id) = 1
 )

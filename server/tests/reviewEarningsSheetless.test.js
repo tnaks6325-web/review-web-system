@@ -49,5 +49,15 @@ assert.match(
 const dedup = (body.match(/AND NOT EXISTS \(\s*SELECT 1 FROM review_index ri[\s\S]*?\n\s*\)`,/) || [''])[0];
 assert.ok(dedup && !/ri\.phone8 = ANY/.test(dedup),
   'owner-UUID rows must deduplicate by the order/participant coordinate even after their phone changes');
+assert.match(
+  body,
+  /cp\.owner_reviewer_id = \$2[\s\S]*cp\.owner_reviewer_id IS NULL[\s\S]*os\.owner_reviewer_id = \$2/,
+  'sheetless earnings must treat the current participant owner as authoritative before order ownership'
+);
+assert.match(
+  body,
+  /NOT \$3::boolean[\s\S]*COALESCE\(cp\.participant_identity_id, os\.participant_identity_id, ca\.participant_identity_id\) = \$4/,
+  'sub-account earnings must stay within the authenticated participant identity'
+);
 
 console.log('sheetless review earnings contract passed');
