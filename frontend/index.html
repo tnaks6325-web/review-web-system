@@ -367,6 +367,7 @@
     .part-info-capture-wrap { padding:10px 0 4px; }
     .part-info-capture-meta { margin-bottom:9px; color:#6B7280; font-size:.7rem; line-height:1.45; }
     .part-info-capture-img { display:block; width:100%; max-height:66vh; object-fit:contain; border-radius:12px; background:#111827; }
+    .part-info-capture-choice { width:100%; display:flex; align-items:center; gap:9px; margin-top:8px; padding:11px 12px; border:1px solid #BDE5CA; border-radius:11px; background:#EFFBF3; color:#17643A; font-family:inherit; font-size:.76rem; font-weight:800; text-align:left; cursor:pointer; }
     @media (max-width:360px) {
       .part-info-grid { gap:7px; }
       .part-info-grid > .part-info-btn,
@@ -2327,6 +2328,8 @@ let _partInfoChatUrl = '';
 let _partInfoProductUrl = '';      // [상품 바로가기] 버튼용 상품 URL
 let _partInfoCaptureFileId = '';   // 강한 소유권 검증 뒤 받은 본인 구매캡처 파일 ID
 let _partInfoCaptureUploadedAt = '';
+let _partInfoCaptureItems = [];    // 묶음 카드의 행별 구매캡처 [{fileId, uploadedAt, label}]
+let _partInfoBriefSeq = 0;         // 먼저 연 카드의 늦은 응답이 현재 카드를 덮지 못하게 하는 요청 세대
 /* 🚫 주문취소 — 게이트 판정은 **서버(brief.cancelable)** 가 준 것만 쓴다.
    화면이 스스로 정하면 "보이는데 거부"가 된다(판정 사본 0). */
 let _partInfoCancelable = null;    // {ok, reason, message, reasons[]} | null(=미상 → 버튼 미표시)
@@ -2348,6 +2351,7 @@ function _partInfoEnsure(){
   document.body.appendChild(ovl);
 }
 function closePartInfo(){
+  _partInfoBriefSeq++;
   const o = document.getElementById('partInfoOvl'); if (o) o.classList.remove('on');
   const cap = document.getElementById('partInfoCaptureOvl'); if (cap) cap.classList.remove('on');
   document.body.style.overflow='';
@@ -2379,7 +2383,9 @@ function openPartInfoSheet(items, opts){
   _partInfoProductUrl = '';
   _partInfoCaptureFileId = '';
   _partInfoCaptureUploadedAt = '';
+  _partInfoCaptureItems = [];
   _partInfoCancelable = null;
+  const briefSeq = ++_partInfoBriefSeq;
   _partInfoEnsure();
   const it = list[0];
   /* ★ 제출완료 건에는 취소 좌표를 만들지 않는다 — 버튼 자체가 뜨지 않아야 한다(사용자 확정 2026-08-23).
@@ -2415,25 +2421,51 @@ function openPartInfoSheet(items, opts){
   _partInfoRenderBtns(done, '');
   document.getElementById('partInfoOvl').classList.add('on');
   document.body.style.overflow = 'hidden';
-  _partInfoLoadBrief(it, done);
+  _partInfoLoadBrief(list, done, briefSeq);
 }
 
-async function _partInfoLoadBrief(it, done){
-  const user = getSavedUser();
+async function _partInfoLoadBrief(list, done, requestSeq){
+  const items = (list || []).filter(Boolean);
+  const it = items[0];
+  let user = getSavedUser();
   const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
   const detailEl = document.getElementById('partInfoDetail');
   const hide = () => { if (detailEl) detailEl.style.display = 'none'; };
   if (phone8.length !== 8 || !it.sheetId || !it.tabName || it.rowIndex == null){ hide(); _partInfoRenderBtns(done, ''); return; }
   try{
-    const qs = new URLSearchParams({ phone8, sheetId: it.sheetId, tabName: it.tabName, gid: it.gid || '', rowIndex: String(it.rowIndex) });
-    const r = await fetch(API_BASE_URL + '/api/review-edit/participation-brief?' + qs.toString());
-    const j = await r.json().catch(()=>({}));
-    const brief = (r.ok && j.ok) ? j.brief : null;
-    if (!brief){ hide(); _partInfoRenderBtns(done, ''); return; }
+    if (!_reviewerTokenFresh(user && user.reviewerToken)) user = await _refreshReviewerHomeSession(user);
+    let token = user && user.reviewerToken;
+    if (!token) { hide(); _partInfoRenderBtns(done, ''); return; }
+    const loadOne = async (row, reviewerToken) => {
+      if (!row || !row.sheetId || !row.tabName || row.rowIndex == null) return { status:0, brief:null };
+      try {
+        const qs = new URLSearchParams({ phone8, sheetId: row.sheetId, tabName: row.tabName, gid: row.gid || '', rowIndex: String(row.rowIndex) });
+        const r = await fetch(API_BASE_URL + '/api/review-edit/participation-brief?' + qs.toString(), {
+          headers: { 'X-Reviewer-Token': reviewerToken }
+        });
+        const j = await r.json().catch(()=>({}));
+        return { status:r.status, brief:(r.ok && j.ok) ? j.brief : null };
+      } catch (_) { return { status:0, brief:null }; }
+    };
+    let results = await Promise.all(items.map(row => loadOne(row, token)));
+    if (results.some(result => result.status === 401)) {
+      user = await _refreshReviewerHomeSession(user);
+      token = user && user.reviewerToken;
+      if (token) results = await Promise.all(items.map(row => loadOne(row, token)));
+    }
+    const ovl = document.getElementById('partInfoOvl');
+    if (requestSeq !== _partInfoBriefSeq || !ovl || !ovl.classList.contains('on')) return;
+    const brief = (results[0] && results[0].brief) || {};
+    _partInfoCaptureItems = results.map((result, index) => {
+      const pc = result && result.brief && result.brief.purchaseCapture;
+      if (!pc || !pc.fileId) return null;
+      return { fileId:String(pc.fileId), uploadedAt:pc.uploadedAt ? String(pc.uploadedAt) : '', label:_partInfoGroupRowLabel(items[index]) };
+    }).filter(Boolean);
+    const firstCapture = _partInfoCaptureItems[0] || null;
+    _partInfoCaptureFileId = firstCapture ? firstCapture.fileId : '';
+    _partInfoCaptureUploadedAt = firstCapture ? firstCapture.uploadedAt : '';
+    if (!results[0] || !results[0].brief) hide();
     _partInfoCancelable = brief.cancelable || null;
-    const pc = brief.purchaseCapture && typeof brief.purchaseCapture === 'object' ? brief.purchaseCapture : null;
-    _partInfoCaptureFileId = pc && pc.fileId ? String(pc.fileId) : '';
-    _partInfoCaptureUploadedAt = pc && pc.uploadedAt ? String(pc.uploadedAt) : '';
     const rows = [];
     // ★ D: 이 행의 작업 옵션(리뷰 형태 — '텍스트'/'포토리뷰' 등). 관리자가 로스터에 미리 적어둔
     //   작업지시이고 "어떻게 써야 하는가"라 **상품정보보다 위**에, 눈에 띄게 둔다.
@@ -2481,7 +2513,10 @@ async function _partInfoLoadBrief(it, done){
     else hide();
     _partInfoCancelable = (brief && brief.cancelable) || null;
     _partInfoRenderBtns(done, brief.chatUrl || '', _partInfoProductUrl);
-  }catch(_){ hide(); _partInfoRenderBtns(done, ''); }
+  }catch(_){
+    if (requestSeq !== _partInfoBriefSeq) return;
+    hide(); _partInfoRenderBtns(done, '');
+  }
 }
 /* 입금 시각 표기 — 서버가 준 ISO 를 사람이 읽는 형태로. ★ 값이 이상하면 그리지 않는다(빈 문자열). */
 function _partInfoPaidAt(v){
@@ -2518,7 +2553,7 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
     ? '<button onclick="_partInfoOpenReEdit()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;cursor:pointer;background:#fff;color:#1b64da;font-size:.85rem;font-weight:800;border-radius:12px;padding:12px;margin-top:8px">🖼 제출 이미지 확인 · 수정요청</button>'
     : '';
   const submitItems = _partInfoSubmitItems || [];
-  const captureBtn = _partInfoCaptureFileId
+  const captureBtn = _partInfoCaptureItems.length || _partInfoCaptureFileId
     ? '<button class="part-info-btn capture" onclick="_partInfoOpenCapture()">📷 구매캡처보기</button>'
     : '<button class="part-info-btn capture" disabled title="연결된 구매 캡처가 없습니다">📷 구매캡처보기</button>';
 
@@ -2528,7 +2563,7 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
     if (chatUrl) html += '<button onclick="_partInfoOpenChat()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#FEE500;color:#191919;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px">💬 팀채팅방</button>';
     if (submitItems.length === 1) {
       html += '<button onclick="_partInfoSubmit(0)" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">🧾 현금영수증 제출하기</button>';
-    } else {
+    } else if (submitItems.length > 1) {
       html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF1F7">'
         + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">현금영수증을 제출할 참여 건을 선택하세요</div>'
         + submitItems.map((x, i) => {
@@ -2747,8 +2782,17 @@ function _partInfoCaptureTime(v){
   try { return new Intl.DateTimeFormat('ko-KR', { timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(d); }
   catch (_) { return ''; }
 }
-function _partInfoOpenCapture(){
-  if (!_partInfoCaptureFileId) { try { showToast('연결된 구매 캡처가 없습니다.'); } catch (_){} return; }
+function _partInfoBindCaptureEsc(){
+  if (window._partInfoCaptureEscBound) return;
+  window._partInfoCaptureEscBound = true;
+  document.addEventListener('keydown', function(e){
+    const o = document.getElementById('partInfoCaptureOvl');
+    if (e.key === 'Escape' && o && o.classList.contains('on')) _partInfoCloseCapture();
+  });
+}
+function _partInfoOpenCapture(index){
+  const captures = _partInfoCaptureItems.length ? _partInfoCaptureItems : (_partInfoCaptureFileId ? [{ fileId:_partInfoCaptureFileId, uploadedAt:_partInfoCaptureUploadedAt, label:_partInfoCoordLabel || '참여상품' }] : []);
+  if (!captures.length) { try { showToast('연결된 구매 캡처가 없습니다.'); } catch (_){} return; }
   let ovl = document.getElementById('partInfoCaptureOvl');
   if (!ovl) {
     ovl = document.createElement('div');
@@ -2757,25 +2801,34 @@ function _partInfoOpenCapture(){
     ovl.addEventListener('click', function(e){ if (e.target === ovl) _partInfoCloseCapture(); });
     document.body.appendChild(ovl);
   }
-  const at = _partInfoCaptureTime(_partInfoCaptureUploadedAt);
+  _partInfoBindCaptureEsc();
+  const selectedIndex = Number(index);
+  if (captures.length > 1 && !Number.isInteger(selectedIndex)) {
+    ovl.innerHTML = '<div class="re-edit-sheet" style="max-width:440px">'
+      + '<div class="re-edit-head"><div><i class="fas fa-camera" style="color:#17643A"></i> 구매캡처 선택</div>'
+      + '<button class="re-edit-x" onclick="_partInfoCloseCapture()" aria-label="닫기">&times;</button></div>'
+      + '<div class="part-info-capture-wrap"><div class="part-info-capture-meta">확인할 참여 건을 선택하세요.</div>'
+      + captures.map(function(capture, i){
+        return '<button class="part-info-capture-choice" onclick="_partInfoOpenCapture(' + i + ')"><span>📷</span><span>' + escHtml(capture.label || ((i + 1) + '번째 참여 건')) + '</span></button>';
+      }).join('') + '</div></div>';
+    ovl.classList.add('on');
+    document.body.style.overflow = 'hidden';
+    return;
+  }
+  const capture = captures[Number.isInteger(selectedIndex) ? selectedIndex : 0];
+  if (!capture) { try { showToast('구매 캡처를 찾지 못했습니다.'); } catch (_){} return; }
+  const at = _partInfoCaptureTime(capture.uploadedAt);
   ovl.innerHTML = '<div class="re-edit-sheet" style="max-width:440px">'
     + '<div class="re-edit-head"><div><i class="fas fa-camera" style="color:#17643A"></i> 내가 제출한 구매캡처</div>'
     + '<button class="re-edit-x" onclick="_partInfoCloseCapture()" aria-label="닫기">&times;</button></div>'
     + '<div class="part-info-capture-wrap">'
-    + '<div class="part-info-capture-meta">' + escHtml(_partInfoCoordLabel || '참여상품')
+    + '<div class="part-info-capture-meta">' + escHtml(capture.label || _partInfoCoordLabel || '참여상품')
     + (at ? '<br>' + escHtml(at) + ' 제출' : '') + '</div>'
-    + '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(_partInfoCaptureFileId)) + '" alt="내가 제출한 구매 캡처">'
+    + '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId)) + '" alt="내가 제출한 구매 캡처">'
     + '<div style="font-size:.68rem;color:#9CA3AF;line-height:1.5;margin-top:9px">주문번호와 주소 등 개인정보가 포함될 수 있어 본인 참여 내역에서만 확인할 수 있습니다.</div>'
     + '</div></div>';
   ovl.classList.add('on');
   document.body.style.overflow = 'hidden';
-  if (!window._partInfoCaptureEscBound) {
-    window._partInfoCaptureEscBound = true;
-    document.addEventListener('keydown', function(e){
-      const o = document.getElementById('partInfoCaptureOvl');
-      if (e.key === 'Escape' && o && o.classList.contains('on')) _partInfoCloseCapture();
-    });
-  }
 }
 function _partInfoCloseCapture(){
   const ovl = document.getElementById('partInfoCaptureOvl');

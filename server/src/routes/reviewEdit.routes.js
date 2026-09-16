@@ -268,7 +268,7 @@ function _pickReviewGuide(raw) {
 //   brief(제목·카톡URL·상품URL·상품정보·리뷰가이드·본인 구매캡처)를 반환. 카톡 URL과 구매캡처는
 //   이름 단독 약한-키론 절대 안 나간다
 //   (참여형 chat_url 게이트와 동일 사상 — my-files 소유권 술어 재사용).
-router.get('/participation-brief', async (req, res) => {
+router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) => {
   try {
     const p8 = _p8(req.query.phone8);
     const sheetId = req.query.sheetId;
@@ -278,7 +278,14 @@ router.get('/participation-brief', async (req, res) => {
       return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
     }
 
-    const phoneList = await _getReviewerPhoneList(p8);
+    let phoneList = await _sessionPhoneList(req.reviewer);
+    if (req.reviewer && req.reviewer.loginKind === 'sub') {
+      const loginPhone8 = _p8(req.reviewer.loginPhone8);
+      phoneList = phoneList.filter(phone => phone === loginPhone8);
+    }
+    if (!phoneList.includes(p8)) {
+      return res.status(403).json({ ok: false, error: '로그인한 리뷰어의 참여 내역만 조회할 수 있습니다.' });
+    }
     if (!(await _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex))) {
       return res.status(403).json({ ok: false, error: '본인 참여 내역만 조회할 수 있습니다.' });
     }
@@ -388,12 +395,28 @@ router.get('/participation-brief', async (req, res) => {
         `SELECT os.capture_file_id, os.capture_uploaded_at, os.submitted_at
            FROM campaign_participants cp
            JOIN order_submissions os
-             ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+             ON os.id = cp.order_submission_id
+            AND os.deleted_at IS NULL
+            AND os.sheet_row = cp.seq
           WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3
             AND cp.deleted_at IS NULL
             AND COALESCE(os.capture_file_id, '') <> ''
+            AND (
+              (COALESCE(cp.owner_reviewer_id, os.owner_reviewer_id) = $4
+               AND (cp.owner_reviewer_id IS NULL OR cp.owner_reviewer_id = $4)
+               AND (os.owner_reviewer_id IS NULL OR os.owner_reviewer_id = $4))
+              OR (
+                cp.owner_reviewer_id IS NULL AND os.owner_reviewer_id IS NULL
+                AND COALESCE(cp.phone8, '') = ANY($5)
+                AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($5)
+              )
+            )
+            AND (NOT $6::boolean OR (
+              COALESCE(cp.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($5)
+              AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($5)
+            ))
           LIMIT 1`,
-        [sheetId, tabName, rowIndex]
+        [sheetId, tabName, rowIndex, String(req.reviewer.ownerReviewerId), phoneList, req.reviewer.loginKind === 'sub']
       );
       if (caps.length) {
         purchaseCapture = {
