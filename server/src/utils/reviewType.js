@@ -94,7 +94,7 @@ function isFreeChoiceReviewType(raw) {
  *   판정에서는 무시(null)하되, 화면 표시와 이관 대상 판별에는 이 목록을 쓴다.
  *   (자동 이관은 `delivery_type` 이 비어 있을 때만 — 접수가 채운 값을 덮으면 안 된다)
  */
-const LEGACY_DELIVERY_VALUES = ['실배송', '빈박스', '택배발송대행'];
+const LEGACY_DELIVERY_VALUES = ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)'];
 
 /** key → label. 모르는 key 는 빈 문자열. */
 function reviewTypeLabel(key) {

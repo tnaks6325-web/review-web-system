@@ -1,5 +1,5 @@
 /**
- * 배송유형 5종 계약 — 실배송 · 빈박스 · 택배발송대행 · 회수 · 혼합 (사용자 확정 2026-08-24).
+ * 배송유형 6종 계약 — 실배송 · 빈박스 · 택배발송대행 · 직접배송(가구 등) · 회수 · 혼합.
  *
  * 지키는 것:
  *   A. 어휘·판정 단일 출처(`utils/deliveryType`) — 회수·혼합은 **부속정보가 붙은 문장**으로 온다
@@ -28,8 +28,14 @@ const { LEGACY_DELIVERY_VALUES } = require('../src/utils/reviewType');
 /* ══ A. 어휘·판정 ═══════════════════════════════════════════════════ */
 console.log('A) 어휘·판정 단일 출처');
 
-t('어휘는 5종', () => {
-  assert.deepStrictEqual(DT.DELIVERY_TYPES, ['실배송', '빈박스', '택배발송대행', '회수', '혼합']);
+t('어휘는 6종', () => {
+  assert.deepStrictEqual(DT.DELIVERY_TYPES, ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)', '회수', '혼합']);
+});
+
+t('직접배송(가구 등)은 괄호 설명을 잃지 않고 표준 기본형으로 판정한다', () => {
+  assert.strictEqual(DT.deliveryBaseType('직접배송(가구 등)'), '직접배송(가구 등)');
+  assert.strictEqual(DT.canonicalDeliveryValue('직접배송(가구 등)'), '직접배송(가구 등)');
+  assert.strictEqual(DT.deliveryLabel('직접배송(가구 등)'), '직접배송(가구 등)');
 });
 
 t('회수 문장 → 기본형 + 부속정보', () => {
@@ -88,13 +94,13 @@ console.log('B) 리뷰타입 오염 판별 목록과의 분리');
 
 t('★★★ 혼합은 LEGACY_DELIVERY_VALUES 에 없다 — 있으면 접수가 혼합 리뷰 탭의 리뷰타입을 갈아치운다', () => {
   assert.ok(!LEGACY_DELIVERY_VALUES.includes('혼합'));
-  assert.deepStrictEqual(LEGACY_DELIVERY_VALUES, ['실배송', '빈박스', '택배발송대행']);
+  assert.deepStrictEqual(LEGACY_DELIVERY_VALUES, ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)']);
 });
 
 t('두 목록은 서로 다른 개념 — 어휘 목록이 오염 판별 목록을 대체하지 않는다', () => {
   assert.notDeepStrictEqual(DT.DELIVERY_TYPES, LEGACY_DELIVERY_VALUES);
   const ord = read('src/routes/order.routes.js');
-  assert.ok(/LEGACY_DELIVERY_VALUES,\s*\/\/ \$12/.test(ord), '접수 업서트는 여전히 3종 목록을 쓴다');
+  assert.ok(/LEGACY_DELIVERY_VALUES,\s*\/\/ \$12/.test(ord), '접수 업서트는 배송유형 오염 판별 목록을 쓴다');
 });
 
 /* ══ C. 작업표 ═════════════════════════════════════════════════════ */
@@ -297,7 +303,7 @@ t('프론트 어휘 ≡ 서버 DELIVERY_TYPES', () => {
   assert.deepStrictEqual(m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean), DT.DELIVERY_TYPES);
 });
 
-t('모집공고 모달 선택지·토글 5종', () => {
+t('모집공고 모달 선택지·토글 6종', () => {
   const rm = read('../frontend/js/recruit-modal.js');
   DT.DELIVERY_TYPES.forEach((v) => {
     assert.ok(rm.includes('<option value="' + v + '">' + v + '</option>'), 'option ' + v);
@@ -315,7 +321,9 @@ t('★ 옛 어휘(회수건·빈택배)는 어느 저장 경로에도 없다', (
 
 t('★ 리뷰어 배지는 아는 어휘일 때만 접는다(모르는 값 삭제 금지)', () => {
   const cc = read('../frontend/js/campaign-cards.js');
-  assert.match(cc, /const _DL_BASES = \['실배송', '빈박스', '택배발송대행', '회수', '혼합'\]/);
+  assert.match(cc, /const _DL_BASES = \['실배송', '빈박스', '택배발송대행', '직접배송\(가구 등\)', '회수', '혼합'\]/);
+  assert.match(cc, /if \(_DL_BASES\.indexOf\(raw\) >= 0\) return raw;/,
+    '괄호가 정식 라벨인 직접배송 배지는 전체 문구를 먼저 보존한다');
   assert.match(cc, /_DL_BASES\.indexOf\(head\) >= 0 \? head : raw/);
   assert.match(cc, /_esc\(_dlBadge\(c\.delivery_type\)\)/);
 });

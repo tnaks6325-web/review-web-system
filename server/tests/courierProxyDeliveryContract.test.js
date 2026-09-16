@@ -1,5 +1,5 @@
 /**
- * 배송유형은 **5종**으로 관리한다 — 실배송·빈박스·택배발송대행·회수·혼합(사용자 확정 2026-08-24).
+ * 배송유형은 **6종**으로 관리한다 — 실배송·빈박스·택배발송대행·직접배송(가구 등)·회수·혼합.
  *
  * ★★ 어휘 목록(`DELIVERY_TYPES`)과 `LEGACY_DELIVERY_VALUES` 를 **합치지 않는다**:
  *   후자는 어휘가 아니라 '리뷰타입 칸에 잘못 들어간 배송유형 판별 목록'이고,
@@ -18,13 +18,13 @@ const { DELIVERY_TYPES, deliveryBaseType, canonicalDeliveryValue } = require('..
 
 assert.deepStrictEqual(
   DELIVERY_TYPES,
-  ['실배송', '빈박스', '택배발송대행', '회수', '혼합'],
-  '배송유형 어휘는 5종 단일 출처'
+  ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)', '회수', '혼합'],
+  '배송유형 어휘는 6종 단일 출처'
 );
 assert.deepStrictEqual(
   LEGACY_DELIVERY_VALUES,
-  ['실배송', '빈박스', '택배발송대행'],
-  '리뷰타입 칸 오염 판별 목록은 3종 그대로 — 어휘 목록과 합치지 않는다'
+  ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)'],
+  '리뷰타입 칸 오염 판별 목록은 리뷰타입과 충돌하지 않는 배송유형만 둔다'
 );
 assert.ok(
   !LEGACY_DELIVERY_VALUES.includes('혼합'),
@@ -39,6 +39,7 @@ assert.strictEqual(canonicalDeliveryValue('회수(회수택배사: CJ대한통�
 assert.strictEqual(canonicalDeliveryValue('회수건'), '회수', '옛 표기는 맨 토큰일 때만 접는다');
 assert.strictEqual(canonicalDeliveryValue('빈택배'), '빈박스');
 assert.strictEqual(canonicalDeliveryValue('기타배송(박스)'), '기타배송(박스)', '판정 불가값은 원문 통과');
+assert.strictEqual(deliveryBaseType('직접배송(가구 등)'), '직접배송(가구 등)', '정식 괄호 라벨을 잘라내지 않는다');
 
 const orderRoutes = read('src/routes/order.routes.js');
 assert.match(orderRoutes, /function _canonicalDeliveryType/);
@@ -95,4 +96,4 @@ DELIVERY_TYPES.forEach((v) => {
   assert.doesNotMatch(src, /<option value="빈택배">/, name + ' 에 옛 어휘 빈택배가 남으면 안 된다');
 });
 
-console.log('courierProxyDeliveryContract: 배송유형 5종 계약 통과');
+console.log('courierProxyDeliveryContract: 배송유형 6종 계약 통과');

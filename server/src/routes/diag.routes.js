@@ -4043,7 +4043,7 @@ router.post('/manager-cleanup', authMiddleware, adminOrMasterMiddleware, async (
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/diag/delivery-type-cleanup — 배송유형 칸의 **옛 어휘**를 표준 5종으로 정리
+// POST /api/diag/delivery-type-cleanup — 배송유형 칸의 **옛 어휘**를 표준 6종으로 정리
 //
 //   배경(2026-08-24 사용자 확정): 배송유형 어휘가 화면마다 갈려 있었다 —
 //     현행 모집공고 모달은 실배송·빈박스·택배발송대행인데, 인라인 공고수정 모달과

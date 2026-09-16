@@ -27,7 +27,7 @@ for (const [name, html] of [['admin', adminHtml], ['admin-siand', siandHtml], ['
     `${name} 화면은 새 썸네일 동작이 든 index-recruit.js 버전을 불러야 합니다.`);
 }
 for (const [name, html] of [['admin', adminHtml], ['workdesk', workdeskHtml]]) {
-  assert.match(html, /recruit-modal\.js\?v=20260914-recruit-thumb-paste/,
+  assert.match(html, /recruit-modal\.js\?v=20260916-direct-delivery/,
     `${name} 화면은 새 붙여넣기 안내가 든 recruit-modal.js 버전을 불러야 합니다.`);
 }
 
