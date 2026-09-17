@@ -51,9 +51,13 @@ assert.ok(dedup && !/ri\.phone8 = ANY/.test(dedup),
   'owner-UUID rows must deduplicate by the order/participant coordinate even after their phone changes');
 assert.match(
   dedup,
-  /WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2/,
+  /WHERE \(\(ri\.sheet_id = os\.sheet_id[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2/,
   'a stale or submitted row owned by someone else must not hide the selected order'
 );
+assert.ok(!dedup.includes('WHERE NOT COALESCE(ri.is_submitted, FALSE)'),
+  'completed index rows also suppress the duplicate sheetless order');
+assert.match(body,/if \(o\.isSubmitted\) continue;[\s\S]*count\+\+;/,
+  'completed sheetless orders must not increase expected earnings');
 assert.match(
   dedup,
   /NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' \}\)[\s\S]*= \$4/,

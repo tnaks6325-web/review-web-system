@@ -106,12 +106,13 @@ const RI_ROWS = [
 const PRICES = { 11: '20300', 12: '12400', 21: '18900', 22: '12400', 23: '9800' };
 pool.query = async (sql) => {
   if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql)) return { rows: [] };
-  // ★ 무시트 주문원장 집계는 이 기존 시트행 전용 fixture에 포함하지 않는다.
-  //   같은 주문을 review_index와 양쪽에서 돌려 이중 집계하는 것을 막는 경로다.
+  // 완료된 무시트 주문은 카드 금액에만 남고 참여중/입금완료 합계에는 추가되지 않는다.
   //   ⚠ 이 분기는 `FROM review_index` 보다 **먼저** 와야 한다 — 그 쿼리의 이중집계 방지
   //     NOT EXISTS 안에 `FROM review_index ri` 가 들어 있어(2026-08-19 주문 id 매칭 추가)
   //     순서가 뒤면 명단 fixture 가 가로채 무시트 주문 5건으로 오인된다(스텁 매칭 함정).
-  if (/SELECT os\.id,[\s\S]*FROM earnings_orders os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [] };
+  if (/SELECT os\.id,[\s\S]*FROM earnings_orders os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [
+    { id:'completed-without-index',sheetId:'S2',tabName:'T2',isSubmitted:true,price:'22000',reviewFee:1000 },
+  ] };
   if (/SELECT ri\.sheet_id AS "sheetId"/.test(sql)) return { rows: RI_ROWS };
   if (/FROM recruit_campaigns/.test(sql)) {
     return { rows: [{ sheetId: 'S1', tabName: 'T1', reviewFee: 1000, thumbnailUrl: 'https://x/y.png' }] };
@@ -162,6 +163,9 @@ async function call(method, routePath, req) {
     b.items['S1||T1||21'].reviewFee === 1000 && !!b.items['S1||T1||21'].thumbnailUrl);
   ok('items: 참여중 건도 종전대로 유지(회귀 없음)',
     !!b.items['S1||T1||11'] && b.items['S1||T1||11'].productPrice === 20300);
+  ok('완료된 무시트 주문은 카드 금액만 유지하고 예정액·입금완료 누적액에 더하지 않음',
+    b.items['order||completed-without-index'].productPrice === 22000 &&
+    b.totals.count === 2 && b.doneTotals.count === 2 && !b.items['S2||T2||order']);
 
   // 실패를 0원 성공으로 위장하지 않는다. 기존 프론트는 ok=false를 무시한다.
   pool.query = async () => { throw new Error('boom'); };
