@@ -311,8 +311,31 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
   if (!ownerReviewerId || !Array.isArray(phoneList) || !phoneList.length) return [];
   const submittedState = reviewObligation.submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)');
   const { rows } = await pool.query(
-    `SELECT ${selectFields}, 1.0::float AS score
+    `WITH owner_candidate_coordinates AS MATERIALIZED (
+       -- A superset only: the complete ownership/alias checks below still decide
+       -- visibility. Do not run those checks against every unrelated index row.
+       SELECT p.sheet_id,p.tab_name,p.seq AS row_index
+         FROM campaign_participants p
+        WHERE p.owner_reviewer_id=$1 OR p.phone8=ANY($2)
+       UNION
+       SELECT p.sheet_id,p.tab_name,p.seq
+         FROM campaign_participants p JOIN order_submissions o ON o.id=p.order_submission_id
+        WHERE o.owner_reviewer_id=$1
+           OR o.campaign_application_id IN (
+             SELECT a.id FROM campaign_applications a WHERE a.owner_reviewer_id=$1 OR a.owner_phone8=ANY($2))
+           OR o.id IN (
+             SELECT a.order_submission_id FROM campaign_applications a
+              WHERE a.owner_reviewer_id=$1 OR a.owner_phone8=ANY($2))
+       UNION
+       SELECT l.sheet_id,l.tab_name,l.row_index FROM participation_links l
+        WHERE l.owner_reviewer_id=$1 OR l.phone8=ANY($2)
+       UNION
+       SELECT i.sheet_id,i.tab_name,i.row_index FROM review_index i WHERE i.phone8=ANY($2)
+     )
+     SELECT ${selectFields}, 1.0::float AS score
        FROM review_index ri
+       JOIN owner_candidate_coordinates candidate
+         ON candidate.sheet_id=ri.sheet_id AND candidate.tab_name=ri.tab_name AND candidate.row_index=ri.row_index
        LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
        LEFT JOIN campaign_participants cp
          ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
