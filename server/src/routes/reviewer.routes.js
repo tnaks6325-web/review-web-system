@@ -1270,6 +1270,7 @@ router.get('/review-earnings', async (req, res, next) => {
     const { rows: sheetlessOrders } = await boundedReviewRead(client => client.query(
       `WITH ${earningsCandidates('$2', '$1')}
        SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              cp.sheet_id AS "participantSheetId", cp.tab_name AS "participantTabName", cp.seq AS "participantRowIndex",
               ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, FALSE)', 'cp', 'seq')} AS "isSubmitted",
               COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
@@ -1337,6 +1338,16 @@ router.get('/review-earnings', async (req, res, next) => {
                     RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
           ))
           AND os.deleted_at IS NULL
+          -- A board can be archived while tab_configs.is_closed still says false.
+          -- Prefer the live participant coordinate; otherwise resolve the order's board.
+          AND NOT EXISTS (
+            SELECT 1 FROM index_master_archive archived
+             WHERE (cp.id IS NOT NULL AND archived.sheet_id = cp.sheet_id AND archived.tab_name = cp.tab_name)
+                OR (cp.id IS NULL AND os.sheet_id NOT LIKE 'campaign:%'
+                    AND archived.sheet_id = os.sheet_id AND archived.tab_name = os.tab_name)
+                OR (cp.id IS NULL AND os.sheet_id LIKE 'campaign:%'
+                    AND archived.sheet_id = rc.linked_sheet_id AND archived.tab_name = rc.linked_tab_name)
+          )
           AND NOT EXISTS (
             SELECT 1 FROM review_closed_targets rrs
              WHERE rrs.order_submission_id = os.id AND rrs.review_status = 'closed_no_review'
@@ -1432,6 +1443,9 @@ router.get('/review-earnings', async (req, res, next) => {
     // review_index의 행 번호가 작업보드 순번과 달라 정확 행 매칭이 실패한 과거 건 보완용.
     // 같은 작업에 주문이 하나일 때만 카드에 대체 연결해 다건 작업의 오매칭을 막는다.
     const sheetlessFallbackCounts = new Map();
+    // These rows already passed the full owner/sub-account scope above. Reuse
+    // that result for legacy participants whose owner UUIDs are still empty.
+    const indexedParticipationKeys = new Set(riRows.map(r => JSON.stringify([r.sheetId, r.tabName, r.rowIndex])));
     let productTotal = 0, reviewTotal = 0, count = 0, productUnknown = 0;
     let dProductTotal = 0, dReviewTotal = 0, dCount = 0, dProductUnknown = 0, dUnpaidCount = 0;
     for (const r of riRows) {
@@ -1474,6 +1488,9 @@ router.get('/review-earnings', async (req, res, next) => {
     }
 
     for (const o of sheetlessOrders) {
+      if (o.participantSheetId && indexedParticipationKeys.has(
+        JSON.stringify([o.participantSheetId, o.participantTabName, o.participantRowIndex])
+      )) continue;
       const parsed = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
       const price = Number.isFinite(parsed) && parsed > 0 ? parsed : extractAmountNumber(o.rowJson);
       const scalarFee = resolveReviewFee({

@@ -30,6 +30,7 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
  CREATE TABLE participation_links(sheet_id text,tab_name text,row_index int,phone8 text,owner_reviewer_id uuid,participant_identity_id uuid);
  CREATE TABLE review_closed_targets(sheet_id text,tab_name text,row_index int,order_submission_id uuid,review_status text);
  CREATE TABLE recruit_campaigns(id text,review_fee int,delivery_review_fee_mix jsonb,thumbnail_url text,start_date date);
+ CREATE TABLE index_master_archive(sheet_id text,tab_name text);
  `);
  await db.query("INSERT INTO reviewers VALUES ($1,'11112222','[]'),($2,'99998888','[]')",[owner,foreign]);
  await db.query("INSERT INTO reviewer_identities VALUES ($1,$2)",[ident,owner]);
@@ -48,6 +49,7 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
   if(n%17===0)await db.query(`INSERT INTO review_closed_targets VALUES($1,$2,$3,$4,'closed_no_review')`,[sheet,tab,n,id]);
  }
  await db.exec('ALTER TABLE campaign_participants ADD COLUMN is_submitted boolean DEFAULT false');
+ await db.exec('ALTER TABLE recruit_campaigns ADD COLUMN linked_sheet_id text, ADD COLUMN linked_tab_name text');
  const sheetIds=(await db.query('SELECT DISTINCT sheet_id FROM order_submissions')).rows.map(r=>r.sheet_id);
  let comparisons=0,nonempty=0;
  for(const recycled of [false,true]){
@@ -80,7 +82,20 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
  assert.ok(!(await sheetless()).rows.some(r=>r.id===uid(1)),'completed index suppresses the duplicate sheetless order');
  await db.query('UPDATE campaign_participants SET owner_reviewer_id=$1 WHERE order_submission_id=$2',[foreign,uid(11)]);
  assert.ok(!(await sheetless()).rows.some(r=>r.id===uid(11)),'completion cannot expose another owner order');
+ // Archived participant, detached legacy order and virtual campaign fallback.
+ await db.query('UPDATE campaign_participants SET owner_reviewer_id=$1 WHERE order_submission_id=$2',[owner,uid(11)]);
+ await db.query("INSERT INTO index_master_archive VALUES('campaign:case11','작업11')");
+ assert.ok(!(await sheetless()).rows.some(r=>r.id===uid(11)),'archived participant must not become expected earnings');
+ await db.query('UPDATE order_submissions SET sheet_id=$1,tab_name=$2,owner_reviewer_id=$3 WHERE id=$4',['legacy-sheet','legacy-tab',owner,uid(7)]);
+ assert.ok((await sheetless()).rows.some(r=>r.id===uid(7)),'open detached legacy order is preserved');
+ await db.query("INSERT INTO index_master_archive VALUES('legacy-sheet','legacy-tab')");
+ assert.ok(!(await sheetless()).rows.some(r=>r.id===uid(7)),'archived detached order is excluded without touching the current occupant');
+ await db.query("UPDATE order_submissions SET sheet_id='campaign:case7',tab_name='campaign:case7' WHERE id=$1",[uid(7)]);
+ await db.query("UPDATE recruit_campaigns SET linked_sheet_id='legacy-sheet',linked_tab_name='legacy-tab' WHERE id='case7'");
+ assert.ok(!(await sheetless()).rows.some(r=>r.id===uid(7)),'virtual order resolves archived linked board');
+ await db.query("UPDATE campaign_participants SET sheet_id='new-board',tab_name='new-tab' WHERE order_submission_id=$1",[uid(11)]);
+ assert.ok((await sheetless()).rows.some(r=>r.id===uid(11)),'current participant board takes precedence over old order board');
  assert.match(route,/status\(503\)\.json\(\{ ok: false, code: 'REVIEW_EARNINGS_DEFERRED'/);
  assert.doesNotMatch(route,/catch \(err\)[\s\S]*grandTotal: 0/,'failed query must not claim zero earnings');
- console.log(`PASS earnings SQL parity: ${comparisons} comparisons on 162 ownership/legacy fixtures; ${nonempty} nonempty results; 7 completion regressions`);
+ console.log(`PASS earnings SQL parity: ${comparisons} comparisons on 162 ownership/legacy fixtures; ${nonempty} nonempty results; 7 completion and 5 archive regressions`);
 }finally{await db.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

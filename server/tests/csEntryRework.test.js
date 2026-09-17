@@ -112,6 +112,8 @@ pool.query = async (sql) => {
   //     순서가 뒤면 명단 fixture 가 가로채 무시트 주문 5건으로 오인된다(스텁 매칭 함정).
   if (/SELECT os\.id,[\s\S]*FROM earnings_orders os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [
     { id:'completed-without-index',sheetId:'S2',tabName:'T2',isSubmitted:true,price:'22000',reviewFee:1000 },
+    { id:'legacy-duplicate',sheetId:'campaign:legacy',tabName:'campaign:legacy',participantSheetId:'S1',participantTabName:'T1',participantRowIndex:11,isSubmitted:false,price:'20300',reviewFee:1000 },
+    { id:'paid-duplicate',sheetId:'campaign:legacy',tabName:'campaign:legacy',participantSheetId:'S1',participantTabName:'T1',participantRowIndex:21,isSubmitted:true,price:'18900',reviewFee:1000 },
   ] };
   if (/SELECT ri\.sheet_id AS "sheetId"/.test(sql)) return { rows: RI_ROWS };
   if (/FROM recruit_campaigns/.test(sql)) {
@@ -163,6 +165,8 @@ async function call(method, routePath, req) {
     b.items['S1||T1||21'].reviewFee === 1000 && !!b.items['S1||T1||21'].thumbnailUrl);
   ok('items: 참여중 건도 종전대로 유지(회귀 없음)',
     !!b.items['S1||T1||11'] && b.items['S1||T1||11'].productPrice === 20300);
+  ok('권한 확인된 기존 행과 같은 무시트 주문은 완료 여부에 관계없이 중복 집계하지 않음',
+    !b.items['order||legacy-duplicate'] && !b.items['order||paid-duplicate']);
   ok('완료된 무시트 주문은 카드 금액만 유지하고 예정액·입금완료 누적액에 더하지 않음',
     b.items['order||completed-without-index'].productPrice === 22000 &&
     b.totals.count === 2 && b.doneTotals.count === 2 && !b.items['S2||T2||order']);
