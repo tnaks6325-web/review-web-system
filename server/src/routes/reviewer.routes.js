@@ -29,6 +29,8 @@ const {
   reviewerSessionMiddleware,
 } = require('../services/reviewerSession.service');
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
+const { earningsCandidates } = require('../services/reviewEarningsCandidates.service');
+const { boundedReviewRead } = require('../services/boundedReviewRead.service');
 
 router.get('/participations', reviewerSessionMiddleware, async (req, res, next) => {
   res.set('Cache-Control','no-store');
@@ -1012,15 +1014,16 @@ router.get('/review-earnings', async (req, res, next) => {
     //     is_submitted2='PAID' 또는 row_json의 입금 키워드 컬럼에 값이 있으면 완료.
     //     키워드 배열을 그대로 패턴화해 판정이 갈라지지 않게 한다(row_json은 서버로 안 끌어옴 = 메모리 안전).
     const payPatterns = PAYMENT_COL_KEYWORDS.map(k => '%' + k + '%');
-    const { rows: riRows } = await pool.query(
-      `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
+    const { rows: riRows } = await boundedReviewRead(client => client.query(
+      `WITH ${earningsCandidates('$3', '$1')}
+       SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
                ri.is_submitted AS "isSubmitted", ri.start_date AS "startDate",
                ri.row_json AS "rowJson",
                (ri.is_submitted2 = 'PAID' OR EXISTS (
                   SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
                   WHERE kv.key ILIKE ANY($2) AND btrim(kv.value) <> ''
                )) AS "isPaid"
-         FROM review_index ri
+         FROM earnings_rows ri
          LEFT JOIN campaign_participants cp
            ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
           AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
@@ -1131,7 +1134,7 @@ router.get('/review-earnings', async (req, res, next) => {
              AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
         )`,
       [phoneList, payPatterns, ownerReviewerId, restrictParticipant, participantIdentityId]
-    );
+    ));
     const sheetIds = [...new Set(riRows.map(r => r.sheetId))];
     const tabNames = [...new Set(riRows.map(r => r.tabName))];
 
@@ -1176,11 +1179,12 @@ router.get('/review-earnings', async (req, res, next) => {
     const priceMap = {};
     const orderFeeMap = {};   // ★ 082: 행별 리뷰비 근거(참여시점 스냅샷 · 주문 제출일)
     if (sheetIds.length) {
-      const { rows: orders } = await pool.query(
-        `SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.sheet_row AS "sheetRow", os.price,
+      const { rows: orders } = await boundedReviewRead(client => client.query(
+        `WITH ${earningsCandidates('$3', '$1')}
+         SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.sheet_row AS "sheetRow", os.price,
                 os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", os.submitted_at AS "orderedAt"
                 , cp.row_json AS "rowJson"
-           FROM order_submissions os
+           FROM earnings_orders os
            LEFT JOIN campaign_participants cp
              ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL AND cp.active = TRUE
            LEFT JOIN LATERAL (
@@ -1243,7 +1247,7 @@ router.get('/review-earnings', async (req, res, next) => {
              ))
              AND os.deleted_at IS NULL AND os.sheet_row IS NOT NULL AND os.sheet_id = ANY($2)`,
         [phoneList, sheetIds, ownerReviewerId, restrictParticipant, participantIdentityId]
-      );
+      ));
       for (const o of orders) {
         const key = o.sheetId + '||' + o.tabName + '||' + o.sheetRow;
         const n = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
@@ -1257,15 +1261,16 @@ router.get('/review-earnings', async (req, res, next) => {
     // 무시트 전환 후 주문은 review_index 행이 아직 없을 수 있다. 이 경우에도
     // 작업보드(campaign_participants)의 결제금액을 리뷰어 예상 금액에 바로 반영한다.
     // 시트 색인으로 이미 보이는 주문은 NOT EXISTS로 제외해 이중 집계를 막는다.
-    const { rows: sheetlessOrders } = await pool.query(
-      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+    const { rows: sheetlessOrders } = await boundedReviewRead(client => client.query(
+      `WITH ${earningsCandidates('$2', '$1')}
+       SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
               COALESCE(rc.review_fee, 0) AS "reviewFee", rc.delivery_review_fee_mix AS "deliveryReviewFeeMix",
               rc.thumbnail_url AS "thumbnailUrl",
               to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
-         FROM order_submissions os
+         FROM earnings_orders os
          LEFT JOIN campaign_participants cp
            ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL AND cp.active = TRUE
          LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
@@ -1414,7 +1419,7 @@ router.get('/review-earnings', async (req, res, next) => {
                ))
           )`,
       [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]
-    );
+    ));
 
     // 아이템별 맵 + 합계 (참여중=받을 예정 / 제출완료 중 입금완료=누적)
     const items = {};
@@ -1526,12 +1531,8 @@ router.get('/review-earnings', async (req, res, next) => {
   } catch (err) {
     if (sendReviewerSessionError(res, err)) return;
     logger.warn('[review-earnings] 실패: ' + err.message);
-    res.json({
-      ok: true,
-      totals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0 },
-      doneTotals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0, unpaidCount: 0 },
-      items: {},
-    });
+    res.set('Retry-After', '10');
+    res.status(503).json({ ok: false, code: 'REVIEW_EARNINGS_DEFERRED', error: '금액 조회가 지연되고 있습니다.' });
   }
 });
 
