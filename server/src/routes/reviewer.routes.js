@@ -824,7 +824,20 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
                       WHERE owner_identity.id = p.participant_identity_id
                         AND owner_identity.owner_reviewer_id = $1
                    ))
-                   OR (p.participant_identity_id IS NULL AND p.phone8 = ANY($2))
+                   OR (p.participant_identity_id IS NULL
+                       AND p.phone8 = ANY($2)
+                       /* 전화번호는 재사용될 수 있다. 주문 또는 신청서에 다른 소유자가
+                          명시된 경우에는 소유자 없는 과거 참여행을 현재 계정에 붙이지 않는다. */
+                       AND (
+                         os.owner_reviewer_id = $1
+                         OR (os.owner_reviewer_id IS NULL AND NOT EXISTS (
+                           SELECT 1
+                             FROM campaign_applications legacy_owner_ca
+                            WHERE legacy_owner_ca.id = os.campaign_application_id
+                              AND legacy_owner_ca.owner_reviewer_id IS NOT NULL
+                              AND legacy_owner_ca.owner_reviewer_id <> $1
+                         ))
+                       ))
                  ))
                )
                AND (NOT $3::boolean OR (

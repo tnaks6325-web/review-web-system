@@ -28,6 +28,8 @@ ok('활성·보관 리뷰색인을 함께 완료 근거로 사용', /EXISTS \([\
 ok('같은 주문의 타소유자 행을 최신순으로 임의 선택하지 않음', /p\.owner_reviewer_id = \$1/.test(routeBlock)
   && /owner_identity\.owner_reviewer_id = \$1/.test(routeBlock)
   && /p\.phone8 = ANY\(\$2\)/.test(routeBlock));
+ok('소유자 없는 과거 참여행은 주문·신청서에 명시된 타소유권을 넘지 않음',
+  /os\.owner_reviewer_id = \$1[\s\S]*legacy_owner_ca\.owner_reviewer_id <> \$1/.test(routeBlock));
 ok('소유자 범위에 서로 다른 작업행이 여러 개면 팝업 미노출', /COUNT\(DISTINCT \(sheet_id, tab_name, seq\)\)/.test(routeBlock)
   && /COALESCE\(cp\.owner_link_count, 1\) = 1/.test(routeBlock));
 ok('삭제된 참여건 제외', /workdesk_participant_deletions/.test(routeBlock) && /os\.deleted_at IS NULL/.test(routeBlock));

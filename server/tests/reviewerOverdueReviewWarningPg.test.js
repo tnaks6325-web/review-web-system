@@ -121,9 +121,25 @@ async function callRoute(router, ownerReviewerId) {
     VALUES ('s6','t6',6,'11112222',$1)
   `, [owner]);
 
+  const foreignOwnedLegacyParticipant = '99999999-9999-4999-8999-999999999999';
+  await pool.query(`
+    INSERT INTO order_submissions(id,submitted_at,sheet_id,tab_name,sheet_row,owner_reviewer_id,phone,mirror_status)
+    VALUES ($1,NOW()-INTERVAL '25 days','s9','t9',9,$2,'01011112222','written')`,
+    [foreignOwnedLegacyParticipant, foreignOwner]);
+  await pool.query(`
+    INSERT INTO campaign_participants
+      (id,order_submission_id,sheet_id,tab_name,seq,phone8,owner_reviewer_id,participant_identity_id,is_submitted)
+    VALUES ('91111111-1111-4111-8111-111111111111',$1,'s9','t9',9,'11112222',NULL,NULL,FALSE)`,
+    [foreignOwnedLegacyParticipant]);
+  await pool.query(`
+    INSERT INTO review_index(sheet_id,tab_name,row_index,is_submitted,campaign_name,phone8)
+    VALUES ('s9','t9',9,FALSE,'타소유자 주문의 소유자 없는 과거 참여행','11112222')`);
+
   const router = require('../src/routes/reviewer.routes');
   const first = await callRoute(router, owner);
   assert.ifError(first.err);
+  assert.notEqual(first.body.item.orderSubmissionId, foreignOwnedLegacyParticipant,
+    '명시된 타소유자 주문을 전화번호만으로 현재 계정에 귀속하지 않음');
   assert.notEqual(first.body.item.orderSubmissionId, foreign20, '재사용 전화번호의 다른 소유자 주문 제외');
   assert.equal(first.body.item.orderSubmissionId, legacy13, '연락처가 빈 레거시 행은 참여링크로 연결');
   assert.equal(first.body.item.displayName, '레거시 참여링크 작업');
@@ -188,7 +204,7 @@ async function callRoute(router, ownerReviewerId) {
   assert.ifError(mixedDone.err);
   assert.equal(mixedDone.body.item, null, '같은 소유자 범위에서 어느 명의로든 완료되면 재알림 없음');
 
-  console.log('✅ reviewerOverdueReviewWarningPg — 실제 PostgreSQL 8시나리오 통과');
+  console.log('✅ reviewerOverdueReviewWarningPg — 실제 PostgreSQL 9시나리오 통과');
   await pool.end();
 })().catch(err => {
   console.error('❌ ' + err.stack);
