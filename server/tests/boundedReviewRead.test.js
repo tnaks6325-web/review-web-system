@@ -13,7 +13,7 @@ pool.connect = async () => {
 };
 (async () => {
   assert.equal(await boundedReviewRead(async () => 42), 42);
-  assert.deepEqual(commands, ['BEGIN READ ONLY', "SET LOCAL statement_timeout = '1500ms'", "SET LOCAL lock_timeout = '500ms'", "SET LOCAL temp_file_limit = '64MB'", 'SET LOCAL max_parallel_workers_per_gather = 0', 'COMMIT']);
+  assert.deepEqual(commands, ["BEGIN READ ONLY; SET LOCAL statement_timeout = '1500ms'; SET LOCAL lock_timeout = '500ms'; SET LOCAL temp_file_limit = '64MB'; SET LOCAL max_parallel_workers_per_gather = 0", 'COMMIT']);
   assert.equal(releases.length, 1);
   commands=[];
   await assert.rejects(boundedReviewRead(async () => { throw Object.assign(Error('timeout'), { code:'57014' }); }), { code:'57014' });

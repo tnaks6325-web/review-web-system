@@ -4,7 +4,8 @@
  */
 const assert = require('assert');
 const { Pool } = require('pg');
-const embedded = !process.env.PGTEST_URL;
+// A globally inherited PGTEST_URL must never silently select a live database.
+const embedded = !(process.env.PGTEST_URL && process.env.PGTEST_ALLOW_EXTERNAL === '1');
 const pg = embedded ? new (require(process.env.PGLITE_MODULE || '@electric-sql/pglite').PGlite)() : null;
 let comparisons = 0;
 const embeddedQuery = async (sql, params) => {

@@ -13,7 +13,7 @@ const body = source.slice(start, end);
 assert.ok(start >= 0, 'review earnings route is missing');
 assert.match(
   body,
-  /FROM order_submissions os[\s\S]*LEFT JOIN campaign_applications ca[\s\S]*LEFT JOIN recruit_campaigns rc/,
+  /FROM earnings_orders os[\s\S]*LEFT JOIN campaign_applications ca[\s\S]*LEFT JOIN recruit_campaigns rc/,
   'sheetless order ledger must resolve its linked campaign'
 );
 assert.match(

@@ -105,21 +105,23 @@ const RI_ROWS = [
 ];
 const PRICES = { 11: '20300', 12: '12400', 21: '18900', 22: '12400', 23: '9800' };
 pool.query = async (sql) => {
+  if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql)) return { rows: [] };
   // ★ 무시트 주문원장 집계는 이 기존 시트행 전용 fixture에 포함하지 않는다.
   //   같은 주문을 review_index와 양쪽에서 돌려 이중 집계하는 것을 막는 경로다.
   //   ⚠ 이 분기는 `FROM review_index` 보다 **먼저** 와야 한다 — 그 쿼리의 이중집계 방지
   //     NOT EXISTS 안에 `FROM review_index ri` 가 들어 있어(2026-08-19 주문 id 매칭 추가)
   //     순서가 뒤면 명단 fixture 가 가로채 무시트 주문 5건으로 오인된다(스텁 매칭 함정).
-  if (/SELECT os\.id,[\s\S]*FROM order_submissions os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [] };
-  if (/FROM review_index/.test(sql)) return { rows: RI_ROWS };
+  if (/SELECT os\.id,[\s\S]*FROM earnings_orders os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [] };
+  if (/SELECT ri\.sheet_id AS "sheetId"/.test(sql)) return { rows: RI_ROWS };
   if (/FROM recruit_campaigns/.test(sql)) {
     return { rows: [{ sheetId: 'S1', tabName: 'T1', reviewFee: 1000, thumbnailUrl: 'https://x/y.png' }] };
   }
-  if (/FROM order_submissions/.test(sql)) {
+  if (/SELECT os\.sheet_id AS "sheetId"/.test(sql)) {
     return { rows: RI_ROWS.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, sheetRow: r.rowIndex, price: PRICES[r.rowIndex] })) };
   }
   return { rows: [] };
 };
+pool.connect = async () => ({ query: (...args) => pool.query(...args), release() {} });
 
 const reviewerRouter = require('../src/routes/reviewer.routes');
 function handlerFor(method, routePath) {
@@ -134,6 +136,7 @@ async function call(method, routePath, req) {
     const res = {
       statusCode: 200,
       status(c) { this.statusCode = c; return this; },
+      set() { return this; },
       json(body) { resolve({ statusCode: this.statusCode, body }); return this; },
     };
     Promise.resolve(handler(req, res, (err) => resolve({ err }))).catch((err) => resolve({ err }));
@@ -160,11 +163,12 @@ async function call(method, routePath, req) {
   ok('items: 참여중 건도 종전대로 유지(회귀 없음)',
     !!b.items['S1||T1||11'] && b.items['S1||T1||11'].productPrice === 20300);
 
-  // 실패 폴백도 계약을 지켜야 프론트가 undefined를 만지지 않는다
+  // 실패를 0원 성공으로 위장하지 않는다. 기존 프론트는 ok=false를 무시한다.
   pool.query = async () => { throw new Error('boom'); };
   const f = await call('get', '/review-earnings', { query: { phone8: '85926325' } });
-  ok('실패 폴백도 doneTotals 형태 유지(프론트 undefined 접근 방지)',
-    f.body && f.body.ok === true && f.body.doneTotals && f.body.doneTotals.count === 0);
+  ok('실패 시 503을 반환하고 0원 합계를 보내지 않음',
+    f.statusCode === 503 && f.body && f.body.ok === false &&
+    f.body.code === 'REVIEW_EARNINGS_DEFERRED' && !f.body.totals && !f.body.doneTotals);
 
   console.log(`\n✅ csEntryRework: ${passed}개 통과\n`);
   process.exit(0);
