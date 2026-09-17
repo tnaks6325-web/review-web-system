@@ -751,6 +751,19 @@ router.post('/review', async (req, res, next) => {
         );
         dbUpdated = result.rowCount > 0;
         if (!dbUpdated) throw Object.assign(new Error('제출 대상이 변경되었습니다.'),{code:'REVIEW_TARGET_CHANGED'});
+        // Sheet-backed cells can lag behind this transaction. Bind web completion
+        // to the current participation token; never infer it from old boolean flags.
+        await completionClient.query(
+          `UPDATE reviewer_participations p SET review_obligation_status='fulfilled',
+             review_evidence=p.review_evidence||jsonb_build_object('web_submission',cp.review_participation_id),
+             record_version=p.record_version+1,updated_at=now()
+           FROM campaign_participants cp
+           WHERE cp.sheet_id=$1 AND cp.tab_name=$2 AND cp.seq=$3 AND cp.active=TRUE AND cp.deleted_at IS NULL
+             AND cp.is_submitted=TRUE AND p.campaign_participant_id=cp.id AND p.lifecycle_status='active'
+             AND p.index_snapshot->>'_review_participation_id'=cp.review_participation_id::text
+             AND p.review_obligation_status<>'closed_no_review'`,
+          [sheetId,tabName,rowIndex]
+        );
         await completionClient.query('COMMIT');
         completionClient.release(); completionClient=null;
 

@@ -276,6 +276,40 @@ async function seedOrder(who=owner,extra={}){return q(`INSERT INTO order_submiss
   }
   return {committed:r.payload.ok,attachmentRetained:true};
  });
+ for(const point of ['success','projection_failure','rollback','reassign'])await check('TX-SHEET-'+point,'transaction','시트 반영 전 웹 제출 완료 귀속 '+point,async()=>{
+  await reset();const cp=await row('');await index(cp);
+  await q('UPDATE tab_configs SET sheetless=FALSE');
+  const batch='11111111-1111-4111-8111-111111111111';
+  await q("INSERT INTO review_submissions(sheet_id,tab_name,row_index,slot_key,file_id,upload_batch_id) VALUES('s','t',$1,'review','test-file',$2)",[cp.seq,batch]);
+  await q("UPDATE review_index SET review_file_id='test-file'");
+  let tx=false;
+  const hook=async(sql,params)=>{
+   if(sql==='BEGIN')tx=true;if(!tx)return undefined;
+   if((point==='projection_failure'&&sql.includes('UPDATE reviewer_participations p SET'))||(point==='rollback'&&sql==='COMMIT'))throw Error('injected completion failure');
+   const result=await q(sql,params);if(sql==='COMMIT'||sql==='ROLLBACK')tx=false;return result;
+  };
+  const result=await submitRoute({handled:false},hook,{sheetId:'s',tabName:'t',rowIndex:cp.seq},{handled:false});
+  const success=['success','reassign'].includes(point);
+  assert.equal(result.payload.ok,success,JSON.stringify(result.payload));
+  assert.equal((await q('SELECT row_json FROM campaign_participants WHERE id=$1',[cp.id])).rows[0].row_json['리뷰제출'],'');
+  let current=await ledger(cp.id);assert.equal(current.review_obligation_status,success?'fulfilled':'pending');
+  if(success){
+   assert.equal(current.review_evidence.web_submission,cp.review_participation_id);
+   await q('UPDATE review_index SET is_submitted=TRUE,built_at=now()');
+   await q('UPDATE campaign_participants SET updated_at=now() WHERE id=$1',[cp.id]);
+   current=await ledger(cp.id);assert.equal(current.review_obligation_status,'fulfilled');assert.equal(current.review_evidence.web_submission,cp.review_participation_id);
+   const paymentGate=Function('return '+read('src/services/payment.service.js').match(/`NOT EXISTS \(SELECT 1 FROM reviewer_participations p WHERE p\.sheet_id=ri\.sheet_id[\s\S]*?\)`/)[0])();
+   assert.equal((await q(`SELECT 1 FROM review_index ri WHERE ri.is_submitted=TRUE AND ${paymentGate}`)).rows.length,1);
+  }else{
+   assert.equal((await q('SELECT completed_at FROM review_submissions')).rows[0].completed_at,null);
+   assert.equal((await q('SELECT is_submitted FROM campaign_participants WHERE id=$1',[cp.id])).rows[0].is_submitted,false);
+  }
+  if(point==='reassign'){
+   await q("UPDATE campaign_participants SET reviewer_name='교체 참여자',phone8='87654321',owner_reviewer_id=$2 WHERE id=$1",[cp.id,other]);
+   current=await ledger(cp.id);assert.equal(current.review_obligation_status,'pending');assert.equal(current.review_evidence.web_submission,undefined);
+  }
+  await q('UPDATE tab_configs SET sheetless=TRUE');
+ });
  for(const point of ['return','throw','unhandled','scope','headers','missing_column','write','flag','commit','success','retry','resubmit'])await check('TX-URL-'+point,'transaction','필수 URL과 완료를 함께 저장 '+point,async()=>{
   await reset();const cp=await row('');await index(cp);
   const batch='11111111-1111-4111-8111-111111111111',oldUrl='https://example.com/previous',newUrl='https://example.com/current';

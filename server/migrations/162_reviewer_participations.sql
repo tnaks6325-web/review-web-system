@@ -129,7 +129,10 @@ BEGIN
  INSERT INTO reviewer_participations(campaign_participant_id,assignment_key,owner_reviewer_id,participant_identity_id,participant_phone8,
    ownership_status,ownership_source,sheet_id,tab_name,row_index,order_submission_id,review_obligation_status,review_evidence,index_snapshot,lifecycle_status,created_at)
  VALUES(p.id,assignment,owner_id,p.participant_identity_id,p.phone8,ownership,'participant',p.sheet_id,p.tab_name,p.seq,p.order_submission_id,
-   obligation,jsonb_build_object('header',header,'value',val,'ambiguous',dup),snap,life,COALESCE(participated_at,p.first_seen_at,now()))
+   obligation,jsonb_build_object('header',header,'value',val,'ambiguous',dup)
+     || CASE WHEN same_participation AND old_row.review_evidence->>'web_submission'=p.review_participation_id::text
+       THEN jsonb_build_object('web_submission',p.review_participation_id) ELSE '{}'::jsonb END,
+   snap,life,COALESCE(participated_at,p.first_seen_at,now()))
  ON CONFLICT(campaign_participant_id,assignment_key) DO UPDATE SET
    owner_reviewer_id=EXCLUDED.owner_reviewer_id,participant_identity_id=EXCLUDED.participant_identity_id,participant_phone8=EXCLUDED.participant_phone8,
    ownership_status=EXCLUDED.ownership_status,sheet_id=EXCLUDED.sheet_id,tab_name=EXCLUDED.tab_name,row_index=EXCLUDED.row_index,
