@@ -9,7 +9,8 @@ const identity=Function(identitySource+';return _participantIdentityByOwnerSql;'
 const route=source.slice(source.indexOf("router.get('/review-earnings'"),source.indexOf("router.get('/my-payments'"));
 const templates=[...route.matchAll(/boundedReviewRead\(client => client\.query\(\s*`([\s\S]*?)`,/g)].map(m=>m[1]);
 assert.equal(templates.length,3);
-const sqls=templates.map(t=>Function('earningsCandidates','_participantIdentityByOwnerSql','return `'+t+'`;')(earningsCandidates,identity));
+const routeRequire=require('module').createRequire(require.resolve('../src/routes/reviewer.routes'));
+const sqls=templates.map(t=>Function('earningsCandidates','_participantIdentityByOwnerSql','require','return `'+t+'`;')(earningsCandidates,identity,routeRequire));
 const owner='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',foreign='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ident='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const uid=n=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
@@ -23,6 +24,7 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
  CREATE TABLE reviewer_identity_aliases(identity_id uuid,phone8 text);
  CREATE TABLE review_index(sheet_id text,tab_name text,row_index int,is_submitted boolean,is_submitted2 text,start_date text,row_json jsonb,phone8 text);
  CREATE TABLE campaign_participants(id uuid,order_submission_id uuid,sheet_id text,tab_name text,seq int,owner_reviewer_id uuid,phone8 text,active boolean,deleted_at timestamptz,participant_identity_id uuid,row_json jsonb);
+ CREATE TABLE reviewer_participations(sheet_id text,tab_name text,row_index int,lifecycle_status text,review_obligation_status text);
  CREATE TABLE order_submissions(id uuid,sheet_id text,tab_name text,sheet_row int,phone text,owner_reviewer_id uuid,deleted_at timestamptz,campaign_application_id uuid,participant_identity_id uuid,price text,review_fee_snapshot int,delivery_review_fee_mix_snapshot jsonb,submitted_at timestamptz);
  CREATE TABLE campaign_applications(id uuid,order_submission_id uuid,campaign_id text,owner_reviewer_id uuid,owner_phone8 text,phone8 text,participant_identity_id uuid,applied_at timestamptz);
  CREATE TABLE participation_links(sheet_id text,tab_name text,row_index int,phone8 text,owner_reviewer_id uuid,participant_identity_id uuid);
@@ -45,6 +47,7 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
   await db.query(`INSERT INTO recruit_campaigns VALUES($1,1000,'[]','','2026-08-01')`,['case'+n]);
   if(n%17===0)await db.query(`INSERT INTO review_closed_targets VALUES($1,$2,$3,$4,'closed_no_review')`,[sheet,tab,n,id]);
  }
+ await db.exec('ALTER TABLE campaign_participants ADD COLUMN is_submitted boolean DEFAULT false');
  const sheetIds=(await db.query('SELECT DISTINCT sheet_id FROM order_submissions')).rows.map(r=>r.sheet_id);
  let comparisons=0,nonempty=0;
  for(const recycled of [false,true]){
@@ -59,7 +62,25 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
   }
  }
  assert.ok(nonempty>15,'fixture must exercise actual returned amounts');
+ // Isolate completion cases from the recycled-phone fixtures above.
+ await db.exec('DELETE FROM reviewer_phone_changes; DELETE FROM reviewer_identity_aliases');
+ const sheetless=()=>db.query(sqls[2],[['11112222'],owner,false,ident]);
+ const indexed=()=>db.query(sqls[0],[['11112222'],['%입금%'],owner,false,ident]);
+ assert.equal((await sheetless()).rows.find(r=>r.id===uid(11)).isSubmitted,false,'unsubmitted sheetless order remains pending');
+ await db.query('UPDATE campaign_participants SET is_submitted=true WHERE order_submission_id=$1',[uid(11)]);
+ assert.equal((await sheetless()).rows.find(r=>r.id===uid(11)).isSubmitted,true,'completed workboard without index supplies completion');
+ await db.query('UPDATE campaign_participants SET is_submitted=false WHERE order_submission_id=$1',[uid(11)]);
+ await db.query("INSERT INTO reviewer_participations VALUES('campaign:case11','작업11',11,'active','fulfilled')");
+ assert.equal((await sheetless()).rows.find(r=>r.id===uid(11)).isSubmitted,true,'fulfilled participation ledger is respected');
+ await db.query("UPDATE reviewer_participations SET lifecycle_status='cancelled'");
+ assert.equal((await sheetless()).rows.find(r=>r.id===uid(11)).isSubmitted,false,'a replaced participant does not inherit cancelled completion');
+ await db.query('UPDATE campaign_participants SET is_submitted=true WHERE order_submission_id=$1',[uid(1)]);
+ assert.equal((await indexed()).rows.find(r=>r.rowIndex===1).isSubmitted,true,'workboard completion wins over lagging index false');
+ await db.query('UPDATE review_index SET is_submitted=true WHERE row_index=1');
+ assert.ok(!(await sheetless()).rows.some(r=>r.id===uid(1)),'completed index suppresses the duplicate sheetless order');
+ await db.query('UPDATE campaign_participants SET owner_reviewer_id=$1 WHERE order_submission_id=$2',[foreign,uid(11)]);
+ assert.ok(!(await sheetless()).rows.some(r=>r.id===uid(11)),'completion cannot expose another owner order');
  assert.match(route,/status\(503\)\.json\(\{ ok: false, code: 'REVIEW_EARNINGS_DEFERRED'/);
  assert.doesNotMatch(route,/catch \(err\)[\s\S]*grandTotal: 0/,'failed query must not claim zero earnings');
- console.log(`PASS earnings SQL parity: ${comparisons} comparisons on 162 ownership/legacy fixtures; ${nonempty} nonempty results`);
+ console.log(`PASS earnings SQL parity: ${comparisons} comparisons on 162 ownership/legacy fixtures; ${nonempty} nonempty results; 7 completion regressions`);
 }finally{await db.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

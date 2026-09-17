@@ -832,12 +832,10 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
           JOIN warning_candidate_ids candidate ON candidate.id = os.id
          WHERE os.deleted_at IS NULL AND os.mirror_status = 'written'
            AND os.submitted_at <= NOW() - INTERVAL '10 days'
-      )
-      SELECT os.id AS "orderSubmissionId", os.submitted_at AS "submittedAt",
-             FLOOR(EXTRACT(EPOCH FROM (NOW() - os.submitted_at)) / 86400)::int AS "elapsedDays",
-             ri.sheet_id AS "targetSheetId", ri.tab_name AS "targetTabName", ri.row_index AS "targetRowIndex",
-             rc.title AS "campaignTitle", rt.display_name AS "targetDisplayName",
-             rt.campaign_name AS "targetCampaignName", ri.campaign_name AS "indexCampaignName"
+      ), warning_participants AS MATERIALIZED (
+      -- Resolve an order's participant once, before the index/obligation joins.
+      -- Otherwise the planner can repeat this lateral scan for every index row.
+      SELECT os.id AS warning_order_id, cp.*
         FROM warning_orders os
         LEFT JOIN LATERAL (
           /* 한 주문 UUID에 과거 다른 리뷰어 행이 섞인 사례가 있으므로 최신 행을 임의로
@@ -904,6 +902,14 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
            ORDER BY p.work_submitted DESC, p.updated_at DESC, p.id DESC
            LIMIT 1
         ) cp ON TRUE
+      )
+      SELECT os.id AS "orderSubmissionId", os.submitted_at AS "submittedAt",
+             FLOOR(EXTRACT(EPOCH FROM (NOW() - os.submitted_at)) / 86400)::int AS "elapsedDays",
+             ri.sheet_id AS "targetSheetId", ri.tab_name AS "targetTabName", ri.row_index AS "targetRowIndex",
+             rc.title AS "campaignTitle", rt.display_name AS "targetDisplayName",
+             rt.campaign_name AS "targetCampaignName", ri.campaign_name AS "indexCampaignName"
+        FROM warning_orders os
+        LEFT JOIN warning_participants cp ON cp.warning_order_id = os.id
         JOIN review_index ri
           ON ri.sheet_id = COALESCE(cp.sheet_id, os.sheet_id)
          AND ri.tab_name = COALESCE(cp.tab_name, os.tab_name)
@@ -1017,7 +1023,7 @@ router.get('/review-earnings', async (req, res, next) => {
     const { rows: riRows } = await boundedReviewRead(client => client.query(
       `WITH ${earningsCandidates('$3', '$1')}
        SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
-               ri.is_submitted AS "isSubmitted", ri.start_date AS "startDate",
+               ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)')} AS "isSubmitted", ri.start_date AS "startDate",
                ri.row_json AS "rowJson",
                (ri.is_submitted2 = 'PAID' OR EXISTS (
                   SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
@@ -1264,6 +1270,7 @@ router.get('/review-earnings', async (req, res, next) => {
     const { rows: sheetlessOrders } = await boundedReviewRead(client => client.query(
       `WITH ${earningsCandidates('$2', '$1')}
        SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, FALSE)', 'cp', 'seq')} AS "isSubmitted",
               COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
@@ -1361,8 +1368,7 @@ router.get('/review-earnings', async (req, res, next) => {
               LEFT JOIN participation_links dri_pl
                 ON dri_pl.sheet_id = ri.sheet_id AND dri_pl.tab_name = ri.tab_name
                AND dri_pl.row_index = ri.row_index
-             WHERE NOT COALESCE(ri.is_submitted, FALSE)
-               AND ((ri.sheet_id = os.sheet_id
+             WHERE ((ri.sheet_id = os.sheet_id
                      AND ri.tab_name = os.tab_name
                      AND ri.row_index = os.sheet_row)
                  OR (cp.id IS NOT NULL
@@ -1487,6 +1493,13 @@ router.get('/review-earnings', async (req, res, next) => {
         thumbnailUrl: o.thumbnailUrl || '',
         purchaseDate: toKstDate(o.orderedAt) || o.campStartDate || null,
       };
+      // Completed sheetless orders still supply their own card amount, but must
+      // not become expected earnings or a pending card's fallback amount.
+      // Completion alone is not proof of payment, so do not add to doneTotals.
+      if (o.isSubmitted) {
+        dUnpaidCount++;
+        continue;
+      }
       const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
       const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
       if (existingFallback) {

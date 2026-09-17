@@ -10,8 +10,12 @@ const pg = embedded ? new (require(process.env.PGLITE_MODULE || '@electric-sql/p
 let comparisons = 0;
 const embeddedQuery = async (sql, params) => {
   if (sql.includes('WITH warning_candidate_ids AS MATERIALIZED')) {
-    const baseline = sql.slice(sql.indexOf('\n      SELECT os.id AS'))
-      .replace('FROM warning_orders os', 'FROM order_submissions os');
+    assert.match(sql, /warning_participants AS MATERIALIZED/, 'participant lookup must run once per candidate order');
+    const lateralStart = sql.indexOf('LEFT JOIN LATERAL (');
+    const lateralEnd = sql.indexOf(') cp ON TRUE', lateralStart) + ') cp ON TRUE'.length;
+    const baseline = sql.slice(sql.indexOf('\n      SELECT os.id AS "orderSubmissionId"'))
+      .replace('FROM warning_orders os', 'FROM order_submissions os')
+      .replace('LEFT JOIN warning_participants cp ON cp.warning_order_id = os.id', sql.slice(lateralStart, lateralEnd));
     const before = await pg.query(baseline, params);
     const after = await pg.query(sql, params);
     assert.deepStrictEqual(after.rows, before.rows, '후보 축소 전후 결과 일치');
