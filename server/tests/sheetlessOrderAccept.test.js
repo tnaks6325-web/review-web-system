@@ -299,7 +299,7 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('⑤ 그 게이트는 헤더 읽기·writeSheet **앞**(구글 호출 0)',
       gateAt >= 0 && gateAt < bg.indexOf('getCachedHeaders(') && gateAt < bg.indexOf('writeSheet('));
     ok('⑤ 판정 실패는 fail-open(시트 기반 탭이 절대 다수)',
-      /isSheetless\(pool, sheetId, tabName\)[\s\S]{0,400}catch \(_\) \{ \/\* fail-open \*\/ \}/.test(sub));
+      /isSheetless\(pool, sheetId, tabName\)[\s\S]*?catch \(_\) \{ \/\* fail-open \*\/ \}/.test(bg.slice(0,bg.indexOf('getCachedHeaders('))));
   }
 
   /* ══════════════ E. 시트 대조 경로 제외 ══════════════ */

@@ -225,9 +225,9 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
       if (!name) return null;
 
       const submitVal = submitColIdx >= 0 ? String(row[submitColIdx] || '').trim() : '';
-      const isSubmitted = isV2
+      const isSubmitted = submitVal !== '미작성 종결' && (isV2
         ? require('./statusColumnBinding.service').isV2ReviewSubmitted(submitVal)
-        : _isSubmittedValue(submitVal, SUBMITTED_VALUES);
+        : _isSubmittedValue(submitVal, SUBMITTED_VALUES));
 
       const paymentVal = paymentColIdx >= 0 ? String(row[paymentColIdx] || '').trim() : '';
       let isSubmitted2 = null;

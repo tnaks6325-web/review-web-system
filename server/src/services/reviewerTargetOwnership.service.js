@@ -7,6 +7,8 @@ function phone8(value) {
 
 async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client = pool }) {
   if (!session?.ownerReviewerId || !sheetId || !tabName || !rowIndex) return false;
+  const projected=await require('./reviewerHistory.service').ownsProjectedTarget({session,sheetId,tabName,rowIndex,client});
+  if(projected !== null) return projected;
   const loginPhone8 = phone8(session.loginPhone8);
   const isSubAccount = session.loginKind === 'sub';
   if (isSubAccount && loginPhone8.length !== 8) return false;

@@ -166,16 +166,16 @@ function _summarizePreview(rows, now, config) {
 function createReviewReminderService({ db = pool, provider = solapi } = {}) {
   async function closedStateForTarget({ sheetId, tabName, rowIndex }) {
     const { rows } = await db.query(`
-      SELECT s.order_submission_id AS "orderSubmissionId", s.closed_at AS "closedAt",
+      SELECT s.resolution_id AS "resolutionId", s.order_submission_id AS "orderSubmissionId", s.closed_at AS "closedAt",
              s.close_reason AS "closeReason"
-        FROM review_reminder_states s
+        FROM review_closed_targets s
        WHERE s.sheet_id=$1 AND s.tab_name=$2 AND s.row_index=$3
          AND s.review_status='closed_no_review'
        ORDER BY s.closed_at DESC NULLS LAST LIMIT 1`,
     [sheetId, tabName, Number(rowIndex)]);
     const row = rows[0] || null;
     // 테스트 스텁이나 예기치 않은 빈 shape를 종결로 오인하지 않는다.
-    return row && row.orderSubmissionId ? row : null;
+    return row && (row.resolutionId || row.orderSubmissionId) ? row : null;
   }
 
   async function loadCandidates(limit) {
@@ -217,9 +217,12 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
         ) ord ON TRUE
         LEFT JOIN review_reminder_states s ON s.order_submission_id = ord.id
        WHERE ri.is_submitted = FALSE
+         AND ${require('./reviewObligation.service').unfulfilledSql('ri')}
          AND ri.row_index IS NOT NULL
          AND COALESCE(ri.end_date, '') <> ''
          AND COALESCE(s.review_status, 'pending') = 'pending'
+         AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
+           WHERE closed.sheet_id=ri.sheet_id AND closed.tab_name=ri.tab_name AND closed.row_index=ri.row_index)
          AND NOT EXISTS (
            SELECT 1 FROM workdesk_participant_deletions wd
             WHERE wd.order_submission_id = ord.id
@@ -236,7 +239,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
          SET review_status = 'submitted', review_index_id = ri.id, updated_at = NOW()
         FROM review_index ri
        WHERE ri.sheet_id = s.sheet_id AND ri.tab_name = s.tab_name AND ri.row_index = s.row_index
-         AND ri.is_submitted = TRUE
+         AND ${require('./reviewObligation.service').submittedSql('ri.is_submitted','ri')} = TRUE
          AND s.review_status = 'pending'`);
     return rowCount;
   }
@@ -250,6 +253,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
         FROM review_index ri
        WHERE ri.sheet_id = s.sheet_id AND ri.tab_name = s.tab_name AND ri.row_index = s.row_index
          AND ri.is_submitted = FALSE
+         AND ${require('./reviewObligation.service').unfulfilledSql('ri')}
          AND s.review_status = 'pending' AND s.reminder_count = 3
          AND s.final_due_at IS NOT NULL AND s.final_due_at <= $1
          AND NOT EXISTS (
@@ -365,6 +369,11 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
       return { sent: false, reason: fresh.length ? 'submitted_before_send' : 'review_row_missing' };
     }
 
+    if (await closedStateForTarget(row)) return { sent: false, reason: 'closed_before_send' };
+    if (await require('./reviewObligation.service').isFulfilled(row,db)) return {sent:false,reason:'fulfilled_before_send'};
+    if (!await require('./reviewObligation.service').canRemind(row,db)) return {sent:false,reason:'review_not_pending_before_send'};
+    const cancelled = await db.query(`SELECT 1 FROM order_submissions WHERE id=$1 AND deleted_at IS NOT NULL`, [row.orderSubmissionId]);
+    if (cancelled.rows.length) return { sent: false, reason: 'cancelled_before_send' };
     const finalDue = reminderNo === 3 ? _addKstDaysEnd(now, config.finalGraceDays) : null;
     const variables = buildTemplateVariables(reminderNo, row, deadline, finalDue, config.reviewLink);
     await ensureState(row, deadline, now);

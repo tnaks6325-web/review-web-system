@@ -166,7 +166,7 @@ const BODY = (field) => ({ sheetId: 's1', tabName: 't1', rowId: 'r1', field, val
   t('★ 배경색·행 삭제는 여전히 STATE.canEdit(서버가 광고주를 막는 기능 = 막다른 길 금지)', () => {
     assert.match(workdesk, /const canPaint = STATE\.canEdit;/);
     assert.match(workdesk, /\(canPaint\?`<div class="gcmdiv"><\/div><div class="gcmsw">/);
-    assert.match(workdesk, /\(canPaint&&STATE\._gMenuRowId\?/);
+    assert.match(workdesk, /\(canPaint&&STATE\._gMenuRowId&&!isReviewCell\?/);
   });
   t('업체 화면이 "송장 칸은 입력할 수 있다"를 말한다(조용한 개방 금지)', () => {
     assert.match(workdesk, /택배송장 칸은 입력할 수 있습니다/);

@@ -127,7 +127,7 @@ t('14. 홈: 첨부는 기존 업로드 경로 + orderSubmissionId 재사용(신�
 
 t('15. 홈: 조회 실패는 조용히 넘어가고 목록 값은 이스케이프된다', () => {
   const load = IX.slice(IX.indexOf('async function _loadMissingCaptures'), IX.indexOf('function _renderMissingCaptures'));
-  assert.ok(/catch \(_\) \{ _mcItems = \[\]/.test(load), '조회 실패가 홈 렌더를 깨뜨리면 안 됨');
+  assert.ok(/catch \(_\) \{ if\(sessionKey!==_historySessionKey\) return; _mcItems = \[\]/.test(load), '다른 계정의 늦은 오류는 버리고 현재 계정 조회 실패는 홈 렌더를 깨뜨리지 않아야 함');
   const rend = IX.slice(IX.indexOf('function _renderMissingCaptures'), IX.indexOf('function _mcPick'));
   assert.ok(/esc2\(/.test(rend), '탭명·업체명 이스케이프 없음');
 });

@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
+  <script src="js/reviewer-history-loader.js"></script>
   <script src="js/drive-thumb.js"></script>
   <!-- 업로드 직전 이미지 축소(단일 출처) — 구매 캡처 보완 첨부가 413 되는 것 방지 -->
   <script src="js/image-shrink.js"></script>
@@ -1397,6 +1398,8 @@ function doLogout() {
   // ★ 홈에서 받은 관리자 토큰도 함께 정리 — 공용 PC에서 리뷰어만 로그아웃하고
   //   관리자 권한이 남아 있는 상태를 만들지 않는다.
   sessionStorage.removeItem("admin_token");
+  _historyCoordinator.reset(); _historySessionKey='';
+  _reviewListData={pending:[],done:[]}; _reviewEarnings={totals:null,doneTotals:null,items:{}};
   window._reviewerProfile = null;
   location.reload();
 }
@@ -1534,37 +1537,96 @@ let _reviewListTruncated = false;                    // 서버 LIMIT(400)에 걸
 
 let _orderPollTimer = null;   // '구매양식 반영중' 주문 자동 재조회 타이머
 let _orderPollCount = 0;      // 폴링 상한(무한폴링 방지)
+const _historyCoordinator=ReviewerHistoryLoader.createCoordinator();
+let _historySessionKey='',_historyMode='legacy',_historyCounts=null;
+let _historyAppliedResponse=null;
+let _historyGeneration=0;
+let _historyCursors={pending:null,done:null},_historyMoreBusy=false;
+
+function _historyKey(user){return String(user&&user.reviewerToken||'')+'|'+String(user&&user.phone8||'');}
+async function _fetchReviewHistory(user){
+  const token=user.reviewerToken;
+  if(token){
+    const pending=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'pending');
+    if(pending.mode==='owner_id'){
+      const done=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'fulfilled');
+      if(done.mode!=='owner_id') throw new Error('조회 전환 상태가 바뀌었습니다. 다시 불러와 주세요.');
+      if(done.scopeVersion!==pending.scopeVersion) throw new Error('참여 상태가 변경되었습니다. 다시 불러와 주세요.');
+      return {mode:'owner_id',results:[...(pending.results||[]),...(done.results||[])],counts:pending.counts,
+        cursors:{pending:pending.nextCursor,done:done.nextCursor}};
+    }
+  }
+  return gasGet({action:'searchAll',query:user.name||'',phone8:user.phone8||'',includeSubmitted: "1", ownerScope: "1"});
+}
+async function loadMoreReviewHistory(){
+  const user=getSavedUser(),key=_historyKey(user),tab=_reviewSubTab,cursor=_historyCursors[tab];
+  const generation=_historyGeneration;
+  if(!user||!cursor||_historyMoreBusy||key!==_historySessionKey) return;
+  _historyMoreBusy=true;
+  try {
+    const res=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,user.reviewerToken,tab==='done'?'fulfilled':'pending',cursor);
+    if(key!==_historySessionKey||cursor!==_historyCursors[tab]||generation!==_historyGeneration) return;
+    if(res.mode!=='owner_id') {await loadReviewList(user,{force:true});return;}
+    const merged=new Map(_reviewListData[tab].map(r=>[r.participationId,r]));
+    for(const item of res.results||[]) merged.set(item.participationId,item);
+    _reviewListData[tab]=[...merged.values()];_historyCursors[tab]=res.nextCursor;_historyCounts=res.counts;_reviewListError='';
+  }catch(e){if(key===_historySessionKey&&generation===_historyGeneration){
+    if(e.code==='HISTORY_CURSOR_INVALID') await loadReviewList(user,{force:true});
+    else _reviewListError=e.message||'추가 내역을 불러오지 못했습니다.';
+  }}
+  finally{if(key===_historySessionKey&&generation===_historyGeneration) _historyMoreBusy=false;renderReviewSubTab();}
+}
 
 async function loadReviewList(user, opts = {}) {
+  if(!user) return;
+  const sessionKey=_historyKey(user);
+  if(opts.force||sessionKey!==_historySessionKey){_historyGeneration++;_historyMoreBusy=false;}
+  if(sessionKey!==_historySessionKey){
+    _historySessionKey=sessionKey;_reviewListData={pending:[],done:[]};_historyCounts=null;
+    _historyCursors={pending:null,done:null};_reviewListError='';_reviewEarnings={totals:null,doneTotals:null,items:{}};
+    if(_orderPollTimer) clearTimeout(_orderPollTimer);
+  }
   const name = user.name || "";
   const phone8 = user.phone8 || "";
   const silent = !!opts.silent;   // 폴링 재조회는 스피너 깜빡임/에러표시 없이
 
-  if (!silent) { _reviewListLoading = true; renderReviewSubTab(); }
+  if (!silent) { _reviewListLoading = !_reviewListData.pending.length&&!_reviewListData.done.length; renderReviewSubTab(); }
   try {
     // includeSubmitted=1 → 제출완료 건 포함 응답 (isSubmitted로 대기/완료 분리)
-    let res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1", ownerScope: "1" });
+    const loaded=await _historyCoordinator.load(sessionKey,()=>_fetchReviewHistory(user),{force:!!opts.force});
+    if(loaded.stale||sessionKey!==_historySessionKey) return;
+    if(_historyAppliedResponse===loaded) return;
+    _historyAppliedResponse=loaded;
+    let res=loaded.value;
     if (res && res.code === "REVIEWER_SESSION_EXPIRED" && !opts.sessionRetried) {
       const refreshed = await _refreshReviewerHomeSession(user);
       if (refreshed && refreshed.reviewerToken) {
         return loadReviewList(refreshed, { ...opts, sessionRetried: true });
       }
     }
-    if (res.error && !Array.isArray(res.results) && !Array.isArray(res.data)) throw new Error(res.error);
+    if (!res || res.error || res.ok===false) throw new Error(res&&res.error||'리뷰 내역을 불러오지 못했습니다.');
     const resultsRaw = res.data || res.results || [];
     // ★ '확인필요'(orderStage='attention') 카드는 리뷰어에게 그리지 않는다 — 서버(search.service)가 이미 걸러내지만,
     //   프론트/백엔드 배포 시점이 갈릴 수 있어 화면에서도 한 번 더 막는다(사용자 확정 2026-08-19, C/S 문의 급증).
     const results = resultsRaw.filter(item => !(item && item.isOrderPending && item.orderStage === 'attention'));
+    _historyGeneration++;_historyMoreBusy=false;
+    _historyMode=res.mode||'legacy';_historyCounts=res.counts||null;
+    _historyCursors=res.cursors||{pending:null,done:null};
     _reviewListData = {
       pending: results.filter(item => !item.isSubmitted),
       done:    results.filter(item => item.isSubmitted),
     };
     // 병합된 주문(isOrderPending)은 서버 LIMIT(400) 밖 append분 → 절단 판정에서 제외
-    _reviewListTruncated = results.filter(item => !item.isOrderPending).length >= 400;
+    _reviewListTruncated = _historyMode==='legacy'&&results.filter(item => !item.isOrderPending).length >= 400;
     _reviewListError = '';
   } catch(e) {
     // silent 재조회 실패는 기존 화면 유지(조용히 무시) — 방금 보던 목록이 사라지지 않게
-    if (!silent) { _reviewListData = { pending: [], done: [] }; _reviewListError = e.message || '알 수 없는 오류'; }
+    if(sessionKey!==_historySessionKey) return;
+    if(e.code==='REVIEWER_SESSION_EXPIRED'&&!opts.sessionRetried){
+      const refreshed=await _refreshReviewerHomeSession(user);
+      if(refreshed&&refreshed.reviewerToken) return loadReviewList(refreshed,{...opts,sessionRetried:true});
+    }
+    _reviewListError = e.name==='AbortError'?'응답이 늦어지고 있습니다. 다시 불러와 주세요.':e.message||'조회하지 못했습니다.';
   }
   _reviewListLoading = false;
   renderReviewSubTab();
@@ -1594,12 +1656,14 @@ function _feeForItem(item) {
   return fallback || exact;
 }
 async function _loadReviewEarnings(phone8) {
+  const sessionKey=_historySessionKey;
   if (!phone8 || phone8.length !== 8) { _reviewEarnings = { totals: null, doneTotals: null, items: {} }; renderReviewSummary(); return; }
   try {
     const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
     const r = await fetch(base + '/api/reviewer/review-earnings?phone8=' + encodeURIComponent(phone8), {
       headers: { ..._getAuthHeaders() },
     }).then(x => x.json());
+    if(sessionKey!==_historySessionKey) return;
     if (r && r.ok) _reviewEarnings = { totals: r.totals || null, doneTotals: r.doneTotals || null, items: r.items || {} };
   } catch (_) { /* 조용히 무시 — 요약/배지 없이 목록은 유지 */ }
   renderReviewSummary();
@@ -1745,13 +1809,15 @@ async function goToOverdueReview() {
 
 let _mcItems = [], _mcTargetId = '';
 async function _loadMissingCaptures(phone8) {
+  const sessionKey=_historySessionKey;
   const sec = document.getElementById('sectionMissingCapture');
   if (!sec || !phone8) return;
   try {
     const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
     const r = await fetch(base + '/api/reviewer/my-missing-captures?phone8=' + encodeURIComponent(phone8)).then(x => x.json());
+    if(sessionKey!==_historySessionKey) return;
     _mcItems = (r && r.ok && Array.isArray(r.items)) ? r.items : [];
-  } catch (_) { _mcItems = []; }   // 실패는 조용히(평상시 화면을 방해하지 않음)
+  } catch (_) { if(sessionKey!==_historySessionKey) return; _mcItems = []; }
   _renderMissingCaptures();
 }
 function _renderMissingCaptures() {
@@ -1844,7 +1910,7 @@ function _scheduleOrderPendingRefresh(user) {
 window.addEventListener('pageshow', (e) => {
   if (!e.persisted) return;
   const u = getSavedUser();
-  if (u && u.name) loadReviewList(u);
+  if (u && u.name) loadReviewList(u,{force:true});
 });
 
 /** 서브탭 전환 (제출대기 ↔ 제출완료) */
@@ -1875,6 +1941,7 @@ function _fmtReviewDateMeta(v) {
 
 /** 대기 건 배지 텍스트 — 다중 캡처 슬롯 부분 제출이면 "n/m 제출"로 진행 표시 */
 function _pendingBadgeText(item) {
+  if(item.reviewObligationStatus==='unknown') return '관리자 확인 중';
   const total = Array.isArray(item.captureSlots) ? item.captureSlots.length : 0;
   const done = Array.isArray(item.submittedSlots) ? Math.min(item.submittedSlots.length, total) : 0;
   if (total > 1 && done > 0) return "리뷰 " + done + "/" + total + " 제출";
@@ -1924,8 +1991,8 @@ function renderReviewSubTab() {
   if (btnDone) btnDone.classList.toggle('active', isDone);
   const cntPending = document.getElementById("subtabPendingCount");
   const cntDone = document.getElementById("subtabDoneCount");
-  if (cntPending) cntPending.textContent = _reviewListData.pending.length;
-  if (cntDone) cntDone.textContent = _reviewListData.done.length;
+  if (cntPending) cntPending.textContent = _historyCounts?_historyCounts.pending:_reviewListData.pending.length;
+  if (cntDone) cntDone.textContent = _historyCounts?_historyCounts.done:_reviewListData.done.length;
 
   // 로딩 중에는 스피너 유지 (빈 상태 문구로 착각하지 않게)
   if (_reviewListLoading) {
@@ -1934,16 +2001,22 @@ function renderReviewSubTab() {
     return;
   }
 
-  if (_reviewListError) {
-    if (countEl) countEl.textContent = "0건";
-    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(_reviewListError)}</span></div>`;
+  if (_reviewListError && !_reviewListData.pending.length && !_reviewListData.done.length) {
+    if (countEl) countEl.textContent = "조회 실패";
+    if (cntPending) cntPending.textContent = "—";
+    if (cntDone) cntDone.textContent = "—";
+    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(_reviewListError)}</span><br><button onclick="loadReviewList(getSavedUser(),{force:true})">다시 불러오기</button></div>`;
     return;
   }
 
   const list = isDone ? _reviewListData.done : _reviewListData.pending;
-  if (countEl) countEl.textContent = list.length + "건";
+  if (countEl) countEl.textContent = (_historyCounts?(_historyCounts.pending+_historyCounts.done):list.length) + "건";
 
   if (list.length === 0) {
+    if(_reviewListError){
+      listEl.innerHTML=`<div class="empty-state">${escHtml(_reviewListError)}<br><button onclick="loadReviewList(getSavedUser(),{force:true})">다시 불러오기</button></div>`;
+      return;
+    }
     listEl.innerHTML = isDone
       ? `<div class="empty-state"><i class="fas fa-clipboard-check"></i>제출 완료한 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">리뷰를 제출하면 이곳에 표시됩니다</span></div>`
       : `<div class="empty-state"><i class="fas fa-clipboard-list"></i>아직 참여 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">신규 캠페인이 배정되면 이곳에 표시됩니다</span></div>`;
@@ -1962,6 +2035,12 @@ function renderReviewSubTab() {
   });
 
   listEl.innerHTML = "";
+  if(_reviewListError){
+    const notice=document.createElement('div');notice.className='empty-state';
+    notice.textContent='새로고침에 실패해 이전 내역을 표시합니다. '+_reviewListError;
+    const retry=document.createElement('button');retry.textContent='다시 불러오기';retry.onclick=()=>loadReviewList(getSavedUser(),{force:true});
+    notice.appendChild(retry);listEl.appendChild(notice);
+  }
   groups.forEach((items, groupKey) => {
     const itemName = groupKey.split("\x00")[0];
     const isSingle = items.length === 1;
@@ -1973,7 +2052,9 @@ function renderReviewSubTab() {
         ? '<span class="status-badge-submitted">제출완료</span>'
         : item.isOrderPending
           ? `<span class="status-badge-order ${_orderStageClass(item.orderStage)}">${_orderStageLabel(item.orderStage)}</span>`
-          : '<span class="status-badge-order reflected">구매양식반영완료</span>';
+          : item.reviewObligationStatus==='unknown'
+            ? '<span class="status-badge-order">관리자 확인 중</span>'
+            : '<span class="status-badge-order reflected">구매양식반영완료</span>';
       const subBadgeHtml = (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '';
       const receiptBadgeHtml = isDone && _hasPendingCashReceipt(item)
         ? '<span style="font-size:.62rem;font-weight:800;color:#B45309">현금영수증 미제출</span>' : '';
@@ -2028,11 +2109,11 @@ function renderReviewSubTab() {
         <div class="result-right rr-col">
           <div class="rr-row">
             ${badgeHtml}
-            ${item.isOrderPending ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
+            ${item.isOrderPending||item.reviewObligationStatus==='unknown' ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
           </div>
           ${receiptBadgeHtml || subBadgeHtml}
         </div>`;
-      if (item.isOrderPending) {
+      if (item.isOrderPending||item.reviewObligationStatus==='unknown') {
         card.classList.add("is-order-pending");   // 시트반영 전 주문 = 제출 대상 아님(클릭 비활성)
       } else {
         card.addEventListener("click", () => openPartInfoSheet(isDone ? [item] : items, { done: isDone }));
@@ -2043,7 +2124,7 @@ function renderReviewSubTab() {
       const groupCard = document.createElement("div");
       groupCard.className = "result-group-card" + (isDone ? " done" : "");
       const campLabel = _taskLabel(items[0], "");
-      const groupSubmitItems = items.filter(i => !i.isOrderPending);   // 주문(반영중) 항목은 제출 대상 아님
+      const groupSubmitItems = items.filter(i => !i.isOrderPending&&i.reviewObligationStatus!=='unknown');
       const groupClickable = !isDone && groupSubmitItems.length > 0;
 
       const itemLines = items.map(item => {
@@ -2080,6 +2161,10 @@ function renderReviewSubTab() {
   });
 
   // 서버 LIMIT 도달 시(장기 활동 리뷰어) 오래된 완료 내역이 잘릴 수 있음을 고지
+  if(_historyMode==='owner_id'&&_historyCursors[_reviewSubTab]){
+    const more=document.createElement('button');more.textContent='내역 더 보기';more.onclick=loadMoreReviewHistory;
+    more.disabled=_historyMoreBusy;listEl.appendChild(more);
+  }
   if (isDone && _reviewListTruncated) {
     const note = document.createElement("div");
     note.style.cssText = "text-align:center;padding:8px 4px 2px;font-size:.7rem;color:var(--t4)";
@@ -2745,7 +2830,7 @@ function _pcAfter(){
   /* 목록에서 사라지는 것이 정상 동작이라(사용자 확정 ③) 그 자리에서 다시 불러온다. */
   try {
     const u = getSavedUser();
-    if (u && typeof loadReviewList === 'function') loadReviewList(u, { silent: true });
+    if (u && typeof loadReviewList === 'function') loadReviewList(u, { silent: true, force: true });
   } catch(_){}
 }
 

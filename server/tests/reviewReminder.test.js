@@ -216,7 +216,7 @@ function withSolapiEnv(fn) {
     assert.ok(/review_status = 'closed_no_review'/.test(payRoutes));
     assert.ok(/OPEN_REVIEW_COND[\s\S]*closed_no_review/.test(searchService));
     assert.ok(/reviewReminderStatus[\s\S]*closed_no_review/.test(reviewerRoutes));
-    assert.ok(/review-earnings[\s\S]*review_reminder_states/.test(reviewerRoutes));
+    assert.ok(/review-earnings[\s\S]*review_closed_targets/.test(reviewerRoutes));
     assert.ok(/REVIEW_CLOSED_NO_REVIEW/.test(submitRoutes));
     assert.ok(/REVIEW_CLOSED_NO_REVIEW/.test(diagRoutes));
     assert.ok(/CHECK \(reminder_count BETWEEN 0 AND 3\)/.test(migration));

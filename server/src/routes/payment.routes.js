@@ -47,10 +47,13 @@ router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res,
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       LEFT JOIN reviewers   rev ON rev.phone8 = ri.phone8
       WHERE ri.is_submitted = TRUE
+        AND NOT EXISTS (SELECT 1 FROM reviewer_participations rp
+          WHERE rp.sheet_id=ri.sheet_id AND rp.tab_name=ri.tab_name AND rp.row_index=ri.row_index
+            AND rp.lifecycle_status='active' AND rp.review_obligation_status IN ('pending','unknown'))
         AND (tc.is_closed IS NULL OR tc.is_closed = FALSE)
         AND (ri.is_submitted2 IS NULL OR ri.is_submitted2 = 'NONE')
         AND NOT EXISTS (
-          SELECT 1 FROM review_reminder_states rrs
+          SELECT 1 FROM review_closed_targets rrs
            WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
              AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
         )

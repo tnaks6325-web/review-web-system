@@ -1,4 +1,5 @@
 const pool = require('../db/pool');
+const reviewObligation = require('./reviewObligation.service');
 const { logger } = require('../utils/logger');
 const { effectiveCaptureSlots, cashReceiptSlotInfo } = require('../utils/captureSlots');
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
@@ -65,7 +66,7 @@ const PAYMENT_COL_KEYWORDS = ['입금', '페이백', '입금완료', '입금확�
 // 3회 알림 후 최종기한까지 미작성으로 종결된 행은 리뷰 제출대기에서 다시 열지 않는다.
 // is_submitted를 거짓 완료값으로 바꾸지 않고 별도 종결 원장을 확인한다.
 const OPEN_REVIEW_COND = `NOT EXISTS (
-  SELECT 1 FROM review_reminder_states rrs
+  SELECT 1 FROM review_closed_targets rrs
    WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
      AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
 )`;
@@ -238,6 +239,7 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
            ON wt.sheet_id = rc.linked_sheet_id AND wt.tab_name = rc.linked_tab_name
         WHERE ${orderOwnerCondition}
           AND os.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed WHERE closed.order_submission_id=os.id)
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
           AND os.submitted_at > now() - ($2 || ' days')::interval
           AND (os.mirror_status <> 'written' OR os.sheet_written_at > now() - interval '2 hours')
@@ -307,7 +309,7 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
 // 과거 행만 주문/신청의 소유자 링크와 기존 phone8 범위를 차례로 사용한다.
 async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, includeSubmitted, participantIdentityId = null, restrictParticipant = false) {
   if (!ownerReviewerId || !Array.isArray(phoneList) || !phoneList.length) return [];
-  const submittedState = 'COALESCE(cp.is_submitted, ri.is_submitted)';
+  const submittedState = reviewObligation.submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)');
   const { rows } = await pool.query(
     `SELECT ${selectFields}, 1.0::float AS score
        FROM review_index ri
@@ -327,6 +329,7 @@ async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, in
          ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
        WHERE tc.sheet_id IS NOT NULL
         AND ($3::boolean OR ${submittedState} = FALSE)
+        AND ${OPEN_REVIEW_COND}
         AND (
           (cp.id IS NOT NULL AND (
             cp.owner_reviewer_id = $1
@@ -457,7 +460,7 @@ async function searchByName(query, phone8, opts = {}) {
   const includeSubmitted = !!(opts && opts.includeSubmitted) && p8.length === 8;
   // 작업보드 참여자 행이 제출 상태의 진실원본이다. 참여자 원본이 없는 과거 이력만
   // review_index 값을 보조로 사용해 기존 완료 내역을 보존한다.
-  const submittedState = 'COALESCE(cp.is_submitted, ri.is_submitted)';
+  const submittedState = opts.ownerHistory ? "(p.review_obligation_status='fulfilled')" : reviewObligation.submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)');
   const orderPrefix = includeSubmitted ? `${submittedState} ASC, ` : '';
   // 완료 이력이 합산되므로 LIMIT 상향(대기 건은 정렬 프리픽스로 보호됨)
   const limit = includeSubmitted ? 400 : 200;
@@ -628,7 +631,11 @@ async function searchByName(query, phone8, opts = {}) {
 
   try {
     let rows;
-    if (opts.ownerReviewerId) {
+    let historyPage = null;
+    if (opts.ownerHistory) {
+      historyPage = await require('./reviewerHistory.service').loadPage(SELECT_FIELDS, opts);
+      rows = historyPage.rows;
+    } else if (opts.ownerReviewerId) {
       const ownerRows = await _loadOwnerReviewRows(
         SELECT_FIELDS,
         opts.ownerReviewerId,
@@ -661,7 +668,7 @@ async function searchByName(query, phone8, opts = {}) {
     }
 
     // 인덱스 메타 정보 가져오기
-    const metaResult = await pool.query(
+    const metaResult = opts.ownerReviewerId ? { rows: [{}] } : await pool.query(
       'SELECT COUNT(*) AS count, MAX(built_at) AS built_at FROM review_index'
     );
     const meta = metaResult.rows[0] || {};
@@ -712,6 +719,9 @@ async function searchByName(query, phone8, opts = {}) {
       const rowObj = _parseRowJson(row.rowJson);
       return {
       displayName: (row.idxName || '').split('/')[0],
+      participationId: row.participationId || null,
+      reviewObligationStatus: row.reviewObligationStatus || null,
+      recordVersion: row.recordVersion || null,
       idxName:     row.idxName,
       recipientName: row.recipientName || '',
       campaignName: row.tcCampaignName || row.campaignName || '',
@@ -793,7 +803,7 @@ async function searchByName(query, phone8, opts = {}) {
     }
 
     // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
-    if (includeSubmitted && mergePhoneList) {
+    if (includeSubmitted && mergePhoneList && !opts.ownerHistory) {
       await _mergeOrderSubmissions(
         results,
         Array.isArray(opts.ownerPhone8s) && opts.ownerPhone8s.length ? opts.ownerPhone8s : mergePhoneList,
@@ -811,8 +821,10 @@ async function searchByName(query, phone8, opts = {}) {
       indexBuiltAt: meta.built_at || null,
       indexCount: parseInt(meta.count) || 0,
       searchMs: queryMs,  // Phase 7: 검색 소요시간 반환
+      ...(historyPage ? { counts: historyPage.counts, nextCursor: historyPage.nextCursor, hasMore: historyPage.hasMore, scopeVersion:historyPage.scopeVersion, mode: 'owner_id' } : {}),
     };
   } catch (err) {
+    if (opts.ownerHistory) throw err;
     // pg_trgm 미설치 시 fallback: 기존 ILIKE 검색
     if (err.message.includes('function similarity') || err.message.includes('operator does not exist: %')) {
       logger.warn('[Search] pg_trgm 미설치 — ILIKE fallback 사용');

@@ -560,6 +560,8 @@ router.post('/review', async (req, res, next) => {
     let complete = true;       // 모든 필요 슬롯 충족 여부
     let missingSlots = [];
     let completionHistoryError = null;
+    let completionClient = null;
+    let sheetlessSubmission = false;
     try {
       // 탭의 필요 슬롯 + 현재 행의 is_submitted 조회
       const { rows: ctxRows } = await pool.query(
@@ -571,7 +573,7 @@ router.post('/review', async (req, res, next) => {
           LIMIT 1`,
         [sheetId, tabName, rowIndex]
       );
-      const wasSubmitted = ctxRows[0]?.is_submitted === true;
+      let wasSubmitted = ctxRows[0]?.is_submitted === true;
       // ★ 087 2차: 슬롯 파생은 리뷰타입까지 봐야 한다 — 넷 중 하나만 빠지면
       //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
       const _rt = await reviewTypeForTab({ sheetId, tabName });
@@ -612,13 +614,40 @@ router.post('/review', async (req, res, next) => {
       }
 
       if (complete) {
+        completionClient = await pool.connect();
+        await completionClient.query('BEGIN');
+        const lockedIndex=await require('../services/reviewCompletionTransaction.service').lockTarget(completionClient,{sheetId,tabName,rowIndex,reviewerSession});
+        wasSubmitted=lockedIndex.is_submitted===true;
+        if(isMultiSlot && !_isBlog) {
+          const slots=await completionClient.query('SELECT DISTINCT slot_key FROM review_submissions WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3',[sheetId,tabName,rowIndex]);
+          if(required.some(k=>!slots.rows.some(r=>r.slot_key===k))) throw Object.assign(new Error('첨부 구성이 변경되었습니다.'),{code:'REVIEW_TARGET_CHANGED'});
+        }
+        // Cell, attachment completion and both flags commit together. Uploads remain
+        // staged on failure so the reviewer can retry without uploading again.
+        try {
+          const st = await require('../services/sheetlessStatus.service')
+            .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue, by: 'review-submit', client: completionClient });
+          if(st.handled && !st.ok) throw new Error(st.reason||'write_failed');
+          sheetlessSubmission = st.handled === true;
+        } catch(e) { e.code='REVIEW_BOARD_WRITE_FAILED'; throw e; }
+        // Required blog URL and completion must commit together on sheetless boards.
+        // Ordinary review memos remain optional; sheet-backed tabs keep their sync path.
+        if (_isBlog) {
+          try {
+            const mm = await require('../services/sheetlessStatus.service')
+              .markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog: _isBlog, by: 'review-submit', client: completionClient });
+            if ((mm.handled && !mm.ok) || (sheetlessSubmission && !mm.handled)) {
+              throw new Error(mm.reason || 'required_post_url_not_saved');
+            }
+          } catch (e) { e.code='REVIEW_POST_URL_WRITE_FAILED'; throw e; }
+        }
         // 이번 제출 요청이 실제로 업로드한 리뷰 묶음만 상태 확정보다 먼저 완료 이력으로 고정한다.
         // 이 기록이 실패하면 중복 차단 근거가 사라지므로 제출 성공으로 응답하지 않는다.
         try {
           if (!requiresReviewHistory) {
             // 구매확정·영수증 전용 작업은 리뷰 캡처 이력이 없으므로 완료 이력을 만들지 않는다.
           } else if (uploadBatchId) {
-            const completedBatch = await pool.query(
+            const completedBatch = await completionClient.query(
               `WITH locked_row AS (
                  SELECT review_file_id
                    FROM review_index
@@ -660,7 +689,7 @@ router.post('/review', async (req, res, next) => {
             // 속한 묶음을 확정한다. 새 슬롯 추가로 재오픈된 행은 이 묶음이 이미 완료 상태일 수
             // 있으므로 completed_at 여부와 무관하게 현재 대표를 인정한다. 배치 컬럼 도입 전에 올린
             // 대표 파일은 그 파일 한 건만 처리해, 이전에 교체된 낡은 파일까지 편입하지 않는다.
-            const completedPendingBatch = await pool.query(
+            const completedPendingBatch = await completionClient.query(
               `WITH locked_row AS (
                  SELECT review_file_id
                    FROM review_index
@@ -708,38 +737,26 @@ router.post('/review', async (req, res, next) => {
         // 완료 → is_submitted=TRUE (멱등). 이미 TRUE여도 안전.
         const result = reviewIndexMarkedWithHistory
           ? { rowCount: 1 }
-          : await pool.query(
+          : await completionClient.query(
             `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
             [sheetId, tabName, rowIndex]
           );
         // 제출 상태의 진실원본은 작업보드 참여자 행이다. 시트 기반 탭도 같은 상태를
         // 함께 확정해야 리뷰어 화면이 인덱스 재생성 시점에 따라 되돌아가지 않는다.
-        await pool.query(
+        await completionClient.query(
           `UPDATE campaign_participants SET is_submitted = TRUE, updated_at = NOW()
            WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
           [sheetId, tabName, rowIndex]
         );
         dbUpdated = result.rowCount > 0;
+        if (!dbUpdated) throw Object.assign(new Error('제출 대상이 변경되었습니다.'),{code:'REVIEW_TARGET_CHANGED'});
+        await completionClient.query('COMMIT');
+        completionClient.release(); completionClient=null;
 
-        /* ★★ 무시트 탭은 위 UPDATE 가 **다음 장부 재생성에 지워진다**(주문 한 건만 들어와도).
-           시트 기반 탭은 같은 값이 시트 칸에도 써져 살아남지만 무시트는 시트 쓰기가 막혀 있다.
-           → 작업표의 리뷰제출 칸에 기록해 **재생성이 그것을 다시 읽게** 한다(진실원본 일원화).
-           ★ 시트 기반 탭이면 handled:false = 종전 동작 그대로. 실패해도 제출은 성공(fail-soft). */
-        try {
-          const st = await require('../services/sheetlessStatus.service')
-            .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue, by: 'review-submit' });
-          if (st.handled && !st.ok) {
-            logger.warn(`[submit] 무시트 리뷰제출 표시 기록 실패 tab=${tabName} row=${rowIndex} reason=${st.reason}`);
-          }
-        } catch (e) {
-          logger.warn(`[submit] 무시트 리뷰제출 표시 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
-        }
-
-        /* ★ memo(비고 / 블로그는 포스팅URL)도 무시트 탭에서는 시트 쓰기가 막혀 있어 사라진다.
-           같은 이유·같은 방식으로 작업표 칸에 남긴다(열 고르기는 memoColumn 단일 출처).
-           ★ 시트 기반 탭이면 handled:false = 아래 Step 3 배경 시트 쓰기가 종전대로 처리. */
-        try {
+        // Optional review memo failure does not undo completion. Required blog URL
+        // was already saved inside the transaction; never write it a second time here.
+        if (!_isBlog) try {
           const mm = await require('../services/sheetlessStatus.service')
             .markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog: _isBlog, by: 'review-submit' });
           if (mm.handled && !mm.ok) {
@@ -784,14 +801,25 @@ router.post('/review', async (req, res, next) => {
         logger.info(`[submit/review] 부분 제출 — 미충족 슬롯: ${missingSlots.join(', ')} (row=${rowIndex})`);
       }
     } catch (dbErr) {
-      if (dbErr.code === 'REVIEW_COMPLETION_HISTORY_FAILED') completionHistoryError = dbErr;
+      if(completionClient) {
+        try { await completionClient.query('ROLLBACK'); } catch(_) {}
+        completionClient.release(); completionClient=null;
+      }
+      dbUpdated=false;
+      completionHistoryError = dbErr;
       logger.warn(`[submit/review] DB 업데이트 실패: ${dbErr.message}`);
     }
 
     if (completionHistoryError) {
+      const terminal=['REVIEW_CLOSED_NO_REVIEW','REVIEW_TARGET_ARCHIVED','REVIEW_TARGET_CHANGED','REVIEW_SUBMIT_TARGET_FORBIDDEN','REVIEW_LEGACY_RESOLUTION_PENDING'].includes(completionHistoryError.code);
+      if(terminal) return res.status(completionHistoryError.code==='REVIEW_SUBMIT_TARGET_FORBIDDEN'?403:409).json({
+        ok:false,retryable:false,code:completionHistoryError.code,error:completionHistoryError.message});
       return res.status(503).json({
-        ok: false, code: 'review_completion_history_failed',
-        error: '리뷰 제출 완료 기록에 실패했습니다. 잠시 후 다시 제출해주세요.',
+        ok: false, retryable: true,
+        code: completionHistoryError.code==='REVIEW_COMPLETION_HISTORY_FAILED' ? 'review_completion_history_failed' : (completionHistoryError.code||'REVIEW_COMPLETION_WRITE_FAILED'),
+        error: completionHistoryError.code==='REVIEW_POST_URL_WRITE_FAILED'
+          ? '포스팅 URL을 저장하지 못해 제출을 완료하지 않았습니다. URL을 확인한 뒤 다시 제출해 주세요. 첨부 파일은 다시 올리지 않아도 됩니다.'
+          : '제출 완료를 저장하지 못했습니다. 첨부 파일을 다시 올리지 말고 제출을 다시 시도해 주세요.',
       });
     }
 
@@ -828,7 +856,11 @@ router.post('/review', async (req, res, next) => {
          ★ 판정 실패는 종전 경로(fail-open) — 시트 기반 탭이 절대 다수다. */
       try {
         const { isSheetless } = require('../utils/sheetlessScope');
-        if (await isSheetless(pool, sheetId, tabName)) {
+        if (sheetlessSubmission || await isSheetless(pool, sheetId, tabName)) {
+          if (complete && sheetlessSubmission) {
+            try { await require('../services/sheetlessLedger.service').rebuildLedgers({sheetId,tabName,by:'review-submit'}); }
+            catch(e) { logger.warn(`[submit/review:bg] 작업보드 저장 완료, 장부 재생성 지연: ${e.message}`); }
+          }
           logger.info(`[submit/review:bg] 무시트 탭 — 시트 쓰기 생략 (tab=${tabName}, row=${rowIndex})`);
           return;
         }

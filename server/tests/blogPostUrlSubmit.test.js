@@ -84,7 +84,7 @@ t('normalizePostUrl 은 앞뒤 공백만 턴다(주소 자체 미변형)', () =>
 console.log('\n2) 제출 게이트 (라우트 실제 호출)');
 
 /** submit.routes 를 스텁 pool 로 로드 — DB·시트·큐를 전부 갈아끼운다 */
-function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, hasCapture = true }) {
+function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, hasCapture = true, queryHook = null }) {
   const queries = [];
   const poolPath = require.resolve('../src/db/pool');
   const wkPath = require.resolve('../src/services/workKindContext.service');
@@ -94,12 +94,17 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
   const sheetsPath = require.resolve('../src/services/sheets.service');
   const sessionPath = require.resolve('../src/services/reviewerSession.service');
   const ownershipPath = require.resolve('../src/services/reviewerTargetOwnership.service');
+  const ledgerPath = require.resolve('../src/services/sheetlessLedger.service');
   const saved = {};
-  for (const p of [poolPath, wkPath, rtPath, routePath, ssPath, sheetsPath, sessionPath, ownershipPath]) saved[p] = require.cache[p];
+  for (const p of [poolPath, wkPath, rtPath, routePath, ssPath, sheetsPath, sessionPath, ownershipPath,ledgerPath]) saved[p] = require.cache[p];
 
   const db = {
+    async connect() { return { query: db.query.bind(db), release() {} }; },
     async query(sql, params) {
       queries.push({ sql: String(sql), params });
+      if (queryHook) { const result=await queryHook(String(sql),params); if(result!==undefined) return result; }
+      if (/SELECT is_closed,archived_rounds,sheetless FROM tab_configs/.test(sql)) return {rows:[{is_closed:false,archived_rounds:''}],rowCount:1};
+      if (/SELECT id,is_submitted,round FROM review_index/.test(sql)) return {rows:[{id:'test-index',is_submitted:false,round:null}],rowCount:1};
       // 127: blog 캡처 확인 2쿼리(원장 → 대표 이미지 폴백) — hasCapture 로 시나리오를 가른다
       if (/FROM review_submissions/.test(String(sql))) {
         return hasCapture ? { rows: [{ x: 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
@@ -120,7 +125,7 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
   require.cache[rtPath] = { exports: { reviewTypeForTab: async () => null, CAMPAIGN_REVIEW_TYPE_LATERAL: '' } };
   require.cache[ssPath] = { exports: {
     markStatusCell: async () => ({ handled: false }),
-    markSheetlessMemo: async () => ({ handled: false }),
+    markSheetlessMemo: async () => ({ handled: true, ok: true }),
     markSheetlessPostDate: async () => ({ handled: false }),   // 127
   } };
   require.cache[sheetsPath] = { exports: {
@@ -129,6 +134,7 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
   } };
   require.cache[sessionPath] = { exports: { verifyReviewerSession: () => ({ ownerReviewerId: 'owner-1', loginPhone8: '12345678' }) } };
   require.cache[ownershipPath] = { exports: { ownsReviewerTarget: async () => true } };
+  require.cache[ledgerPath] = {exports:{rebuildLedgers:async()=>{queries.push({sql:'REBUILD_AFTER_COMMIT'});return {ok:true};}}};
   delete require.cache[routePath];
   const router = require('../src/routes/submit.routes');
   const restore = () => {
