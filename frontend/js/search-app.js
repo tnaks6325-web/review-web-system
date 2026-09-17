@@ -114,6 +114,20 @@ function _invalidateIdentityApproval(cid) {
   }
 }
 
+function _clearSavedIdentitySelection(cid, field) {
+  const st = _cardAiState[cid];
+  if (st?.savedIdentitySelections && field) delete st.savedIdentitySelections[field];
+}
+
+function _savedIdentitySelections(cid) {
+  const selected = _cardAiState[cid]?.savedIdentitySelections || {};
+  return {
+    recipient: String(selected.recipient || ""),
+    phone: String(selected.phone || ""),
+    address: String(selected.address || ""),
+  };
+}
+
 function _selectShoppingIdSave(cid) {
   const selected = document.getElementById(cid + "_saveIdChk");
   if (!selected || !selected.checked) return;
@@ -217,12 +231,15 @@ function _restoreSavedInfoInputHandler(el, cid, field, locked) {
   if (!el || locked) return;
   if (field === "userId") el.oninput = () => _ofClearError(cid + "_userId");
   else if (field === "recipient") el.oninput = () => {
+    _clearSavedIdentitySelection(cid, "recipient");
     _ofClearError(cid + "_recipient"); _invalidateIdentityApproval(cid);
   };
   else if (field === "phone") el.oninput = function () {
+    _clearSavedIdentitySelection(cid, "phone");
     formatPhoneInput(this); _ofClearError(cid + "_phone"); _invalidateIdentityApproval(cid);
   };
   else if (field === "address") el.oninput = () => {
+    _clearSavedIdentitySelection(cid, "address");
     _ofClearError(cid + "_address"); _invalidateIdentityApproval(cid);
   };
 }
@@ -345,18 +362,42 @@ window._applySavedOrderInfo = function (option) {
   const value = String(identity?.[spec.key] || "").trim();
   if (!input || !value) return;
 
-  input.value = value;
-  if (field === "phone") formatPhoneInput(input);
-  input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
-  input.classList.remove("of-participant-phone");
-  input.readOnly = false;
-  input.removeAttribute("tabindex");
-  input.removeAttribute("aria-readonly");
-  input.style.paddingRight = "";
-  input.parentElement?.querySelector(".ai-lock-badge")?.remove();
-  _restoreSavedInfoInputHandler(input, cid, field, false);
-  _ofClearError(cid + "_" + field);
-  if (["recipient", "phone", "address"].includes(field)) _invalidateIdentityApproval(cid);
+  const appliedFields = [];
+  const applyIdentityField = (targetField, targetValue) => {
+    const target = document.getElementById(cid + "_" + targetField);
+    const cleanValue = String(targetValue || "").trim();
+    if (!target || !cleanValue) return;
+    target.value = cleanValue;
+    if (targetField === "phone") formatPhoneInput(target);
+    target.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked", "of-participant-phone");
+    target.readOnly = false;
+    target.removeAttribute("tabindex");
+    target.removeAttribute("aria-readonly");
+    target.style.paddingRight = "";
+    target.parentElement?.querySelector(".ai-lock-badge")?.remove();
+    _restoreSavedInfoInputHandler(target, cid, targetField, false);
+    _ofClearError(cid + "_" + targetField);
+    appliedFields.push(targetField);
+  };
+  applyIdentityField(field, value);
+  // 쿠팡은 연락처·주소도 가려서 보여준다. 수취인 저장정보를 선택하면 같은 명의의
+  // 가림/빈 연락처와 주소만 함께 보완하고, 사용자가 이미 적은 완전한 배송정보는 건드리지 않는다.
+  if (field === "recipient") {
+    for (const [relatedField, key] of [["phone", "phone"], ["address", "address"]]) {
+      const related = document.getElementById(cid + "_" + relatedField);
+      if (related && (!String(related.value || "").trim() || _hasIdentityMask(related.value))) {
+        applyIdentityField(relatedField, identity?.[key]);
+      }
+    }
+  }
+  if (["recipient", "phone", "address"].includes(field)) {
+    _invalidateIdentityApproval(cid);
+    const st = _cardAiState[cid];
+    if (st) {
+      st.savedIdentitySelections = st.savedIdentitySelections || {};
+      appliedFields.forEach((appliedField) => { st.savedIdentitySelections[appliedField] = identity.identityKey; });
+    }
+  }
   if (field === "userId" && selected && identity.identityKey !== selected.identityKey) {
     const saveChk = document.getElementById(cid + "_saveIdChk");
     if (saveChk) saveChk.checked = false;
@@ -367,7 +408,9 @@ window._applySavedOrderInfo = function (option) {
   _closeSavedInfoDropdowns();
   _embedSaveForm();
   _syncSubmissionIdentityAction();
-  showToast((identity.name || "선택한") + "님의 " + spec.label + "를 적용했습니다.", "success");
+  showToast((identity.name || "선택한") + "님의 " + (appliedFields.length > 1
+    ? "수취인과 가림 처리된 연락처·배송주소를 적용했습니다."
+    : spec.label + "를 적용했습니다."), "success");
 };
 
 function _loadDismissedOrderInfoIds() {
@@ -7041,7 +7084,7 @@ function _buildOrderCardHtml(cid, idx, type) {
       <label class="of-label of-label-required" for="${cid}_recipient">수취인</label>
       <div class="of-field-control">
         <div class="of-input-status-wrap">
-          <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
+          <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_clearSavedIdentitySelection('${cid}','recipient');_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
         </div>
         ${_savedOrderInfoMarkup(cid, "recipient")}
       </div>
@@ -7051,7 +7094,7 @@ function _buildOrderCardHtml(cid, idx, type) {
       <label class="of-label of-label-required" for="${cid}_phone">연락처</label>
       <div class="of-field-control">
         <div class="of-input-status-wrap">
-          <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
+          <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="_clearSavedIdentitySelection('${cid}','phone');formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
         </div>
         ${_savedOrderInfoMarkup(cid, "phone")}
       </div>
@@ -7061,7 +7104,7 @@ function _buildOrderCardHtml(cid, idx, type) {
       <label class="of-label of-label-required" for="${cid}_address">배송주소</label>
       <div class="of-field-control">
         <div class="of-input-status-wrap">
-          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
         </div>
         ${_savedOrderInfoMarkup(cid, "address")}
       </div>
@@ -8347,7 +8390,7 @@ function onCardImgDrop(e, cid) {
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
   if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
-  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; }
+  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.savedIdentitySelections = {}; }
   _syncSubmissionIdentityAction();
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
@@ -8429,6 +8472,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   // 새 분석이 실패해도 과거 승인토큰으로 제출되는 stale-capture 우회를 막는다.
   st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
   st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
+  st.savedIdentitySelections = {};
   st.identityBusy = true; st.identityCanManual = false; st.identityChecks = [];
   const identityStatus = document.getElementById(cid + "_identityStatus");
   if (identityStatus) identityStatus.innerHTML = '<strong>캡처를 분석하고 있습니다. 잠시 기다려주세요.</strong>';
@@ -8690,7 +8734,9 @@ async function _manualConfirmIdentity(cid) {
   if (st.identityBusy) return;
   const edit = _identityIssues(cid).find((issue) => issue.edit);
   if (edit) { _pointToIdentityField(cid, edit.field); return; }
-  const inputSnapshot = JSON.stringify(_cardIdentityForm(cid));
+  const inputSnapshot = JSON.stringify({
+    formFields: _cardIdentityForm(cid), savedIdentitySelections: _savedIdentitySelections(cid),
+  });
   const requestId = st.analysisRequestId;
   st.identityBusy = true; _syncSubmissionIdentityAction();
   try {
@@ -8702,6 +8748,7 @@ async function _manualConfirmIdentity(cid) {
         extractToken: st.extractToken || "",
         extracted: (mode === "form_edit" ? st.proofExtracted : st.extracted) || {},
         formFields: _cardIdentityForm(cid),
+        savedIdentitySelections: _savedIdentitySelections(cid),
       })),
     });
     const data = await response.json();
@@ -8710,7 +8757,9 @@ async function _manualConfirmIdentity(cid) {
       error.needsAnalysis = ['IDENTITY_TOKEN_INVALID','EXTRACT_FIELDS_TAMPERED','IDENTITY_CONTEXT_CHANGED'].includes(data?.code);
       throw error;
     }
-    if (st.analysisRequestId !== requestId || JSON.stringify(_cardIdentityForm(cid)) !== inputSnapshot) {
+    if (st.analysisRequestId !== requestId || JSON.stringify({
+      formFields: _cardIdentityForm(cid), savedIdentitySelections: _savedIdentitySelections(cid),
+    }) !== inputSnapshot) {
       if (st.analysisRequestId === requestId) _renderIdentityMatchState(cid, "REVIEW", ["입력값이 변경되었습니다. 다시 확인해주세요."], true);
       return;
     }

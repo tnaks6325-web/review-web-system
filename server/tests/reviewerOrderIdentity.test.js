@@ -8,6 +8,7 @@ const {
 } = require('../src/services/reviewerSession.service');
 const {
   maskedCompatible,
+  maskedNameOcrNearMiss,
   hashImageBase64,
   issueExtractionProof,
   verifyExtractionProof,
@@ -79,11 +80,81 @@ const other = {
     assert.ok(!maskedCompatible('박*희', '김민수', 'name'));
   });
 
+  await test('가림 이름의 노출 글자 1개 OCR 오류만 근접오류로 제한한다', async () => {
+    assert.ok(maskedNameOcrNearMiss('최*회', '최영희'));
+    assert.ok(maskedNameOcrNearMiss('김*순', '김민수'));
+    assert.ok(!maskedNameOcrNearMiss('박*희', '김민수'));
+    assert.ok(!maskedNameOcrNearMiss('김*수', '김민수'));
+    assert.ok(!maskedNameOcrNearMiss('김**순', '김민수'));
+  });
+
+  await test('가림 이름 OCR 1글자 오류는 주소에 실제 동·호수 충돌이 없으면 재확인한다', async () => {
+    const choi = {
+      identityKey:'sub:choi', type:'sub', name:'최영희', phone:'010-8330-9894',
+      address:'서울특별시 도봉구 방학로 10 101동 202호', shoppingId:'choi-id',
+    };
+    const r = await evaluateSelectedIdentity({
+      recipient:'최*회', phone:'01083309894', address:'***',
+    }, choi, [choi], { useGemini:false });
+    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('masked_name_ocr_correction'));
+  });
+
+  await test('쿠팡 연락처가 가려졌거나 배송 연락처가 달라도 저장정보 재확인 대상으로 둔다', async () => {
+    const choi = {
+      identityKey:'sub:choi', type:'sub', name:'최영희', phone:'010-8330-9894',
+      address:'서울특별시 도봉구 방학로 10 101동 202호', shoppingId:'choi-id',
+    };
+    const r = await evaluateSelectedIdentity({
+      recipient:'최*회', phone:'010-9999-0000', address:'***',
+    }, choi, [choi], { useGemini:false });
+    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('masked_name_ocr_correction'));
+  });
+
+  await test('가림 이름 OCR 근접오류라도 실제 동이 다르면 계속 차단한다', async () => {
+    const choi = {
+      identityKey:'sub:choi', type:'sub', name:'최영희', phone:'010-8330-9894',
+      address:'서울특별시 도봉구 방학로 10 101동 202호', shoppingId:'choi-id',
+    };
+    const r = await evaluateSelectedIdentity({
+      recipient:'최*회', phone:'010-****-9894', address:'서울특별시 도봉구 방학로 ** 102동 ***호',
+    }, choi, [choi], { useGemini:false });
+    assert.strictEqual(r.status, 'MISMATCH', JSON.stringify(r));
+    assert.ok(!r.reasonCodes.includes('masked_name_ocr_correction'));
+  });
+
+  await test('가림 이름 OCR 근접오류가 다른 저장 명의와 맞으면 계속 차단한다', async () => {
+    const choi = {
+      identityKey:'sub:choi', type:'sub', name:'최영희', phone:'010-8330-9894',
+      address:'서울특별시 도봉구 방학로 10 101동 202호', shoppingId:'choi-id',
+    };
+    const competing = {
+      identityKey:'sub:competing', type:'sub', name:'최영회', phone:'010-8330-9894',
+      address:choi.address, shoppingId:'competing-id',
+    };
+    const r = await evaluateSelectedIdentity({
+      recipient:'최*회', phone:'01083309894', address:choi.address,
+    }, choi, [choi, competing], { useGemini:false });
+    assert.strictEqual(r.status, 'MISMATCH', JSON.stringify(r));
+    assert.strictEqual(r.competingIdentity.identityKey, competing.identityKey);
+    assert.ok(!r.reasonCodes.includes('masked_name_ocr_correction'));
+  });
+
   await test('완전 추출 주소는 프로필 주소 대신 주문 적용값으로 보존한다', async () => {
     const captureAddress = '서울 강남구 테헤란로 10 미래아파트 101동 1203호 공동현관 앞';
     const r = await evaluateSelectedIdentity({ recipient:'김민수', phone:'010-1234-5678', address:captureAddress }, selected, [selected, other], { useGemini:false });
     assert.strictEqual(r.status, 'MATCH');
     assert.strictEqual(r.resolved.address, captureAddress);
+  });
+
+  await test('같은 동·호수면 아파트명과 우편번호 표기 차이가 있어도 같은 주소로 본다', async () => {
+    const r = await evaluateSelectedIdentity({
+      recipient:selected.name, phone:'010-0000-9999',
+      address:'(06236) 서울 강남구 테헤란로 10 101동 1203호',
+    }, selected, [selected, other], { useGemini:false });
+    assert.strictEqual(r.selectedScore.parts.address.verdict, 'match', JSON.stringify(r));
+    assert.strictEqual(r.status, 'MATCH', JSON.stringify(r));
   });
 
   await test('가림 처리된 이름·전화·주소는 선택 명의 저장정보로 완성한다', async () => {
