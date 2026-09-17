@@ -37,6 +37,10 @@
   .btn:hover{border-color:var(--accent-line);background:var(--card2)} .btn:active{transform:scale(.97)}
   .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 2px rgba(37,99,235,.32)} .btn.pri:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
   .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
+  /* 알림톡 운영 화면 — 리뷰웹 셸과 로그인 세션을 유지한 채 본문만 전환한다. */
+  .alimtalk-inline{height:calc(100vh - var(--toph));min-height:640px;background:var(--paper);overflow:hidden}
+  .alimtalk-inline iframe{display:block;width:100%;height:100%;border:0;background:var(--paper)}
+  @media(max-width:720px){.alimtalk-inline{min-height:560px}}
   /* 모바일 상단은 메뉴를 줄바꿈하지 않고 한 줄 탐색대로 만든다.
      전체 메뉴는 그대로 남겨 기능을 숨기지 않고, 현재 메뉴가 가로 스크롤 안에서도 구분되게 한다. */
   @media(max-width:720px){
@@ -2984,7 +2988,12 @@ function _alimtalkConsolePath(){
   return 'docs/review-reminder-alimtalk-simulator'+(/\.html?$/i.test(last)?'.html':'');
 }
 function openAlimtalkConsole(){
-  location.assign(_alimtalkConsolePath());
+  switchView('alimtalk');
+}
+function renderAlimtalkView(){
+  $('#viewroot').innerHTML = `<section class="alimtalk-inline" aria-label="리뷰 미작성 알림톡 운영 화면">
+    <iframe id="alimtalkInlineFrame" title="리뷰 미작성 알림톡" src="${_alimtalkConsolePath()}?embed=1" loading="eager"></iframe>
+  </section>`;
 }
 
 function renderShell(){
@@ -3011,7 +3020,7 @@ function renderShell(){
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="cutover" onclick="switchView('cutover')">탈시트 전환</button>
-        <button class="navb" onclick="openAlimtalkConsole()">알림톡</button>
+        <button class="navb" data-v="alimtalk" onclick="openAlimtalkConsole()">알림톡</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
@@ -3072,7 +3081,7 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업보드 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업보드 뷰에만
-  if(v==='home') renderHomeView(); else if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='cutover') renderCutoverView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='home') renderHomeView(); else if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='cutover') renderCutoverView(); else if(v==='alimtalk') renderAlimtalkView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업보드를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.

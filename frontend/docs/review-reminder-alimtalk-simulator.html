@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="review-reminder-release" content="trackb-auth-20260917">
+  <meta name="review-reminder-release" content="trackb-inline-20260917">
   <title>리뷰 미작성 알림톡 · 관리자 시뮬레이터</title>
+  <script>if (new URLSearchParams(location.search).get("embed") === "1") document.documentElement.classList.add("embedded");</script>
   <style>
     :root {
       --paper: #f4f6f9;
@@ -820,6 +821,23 @@
       .flow-step small { display: none; }
       .preview-panel { display: block; }
       .phone { width: min(330px, 100%); }
+    }
+
+    /* 리뷰웹시스템 본문에 삽입될 때는 바깥 셸과 겹치는 탐색 요소를 제거한다. */
+    html.embedded body { background: var(--paper); }
+    html.embedded .sim-ribbon,
+    html.embedded .sidebar { display: none; }
+    html.embedded .app-shell {
+      min-height: 100vh;
+      padding-top: 0;
+      display: block;
+    }
+    html.embedded .topbar { top: 0; min-height: 52px; padding: 8px 18px; }
+    html.embedded .top-actions > a { display: none; }
+    html.embedded .content { padding: 18px; }
+    @media (max-width: 720px) {
+      html.embedded .topbar { top: 0; padding: 8px 12px; }
+      html.embedded .content { padding: 14px 12px 22px; }
     }
   </style>
 </head>

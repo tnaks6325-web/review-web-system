@@ -243,7 +243,13 @@ function withSolapiEnv(fn) {
     assert.ok(/openAlimtalkConsole\(\)[^]*알림톡/.test(workdesk.slice(adminNavStart, staffNavStart)));
     assert.ok(!/openAlimtalkConsole/.test(workdesk.slice(staffNavStart, staffNavEnd)));
     assert.ok(workdesk.includes("return 'docs/review-reminder-alimtalk-simulator'+(/\\.html?$/i.test(last)?'.html':'');"));
-    assert.ok(/location\.assign\(_alimtalkConsolePath\(\)\)/.test(workdesk));
+    assert.ok(/function openAlimtalkConsole\(\)\{\s*switchView\('alimtalk'\)/.test(workdesk));
+    assert.ok(/data-v="alimtalk" onclick="openAlimtalkConsole\(\)"/.test(workdesk));
+    assert.ok(/function renderAlimtalkView\(\)[\s\S]*alimtalk-inline[\s\S]*\?embed=1/.test(workdesk));
+    assert.ok(/v==='alimtalk'\) renderAlimtalkView\(\)/.test(workdesk));
+    assert.ok(!/location\.assign\(_alimtalkConsolePath\(\)\)/.test(workdesk));
+    assert.ok(/html\.embedded \.sidebar \{ display: none; \}/.test(simulator));
+    assert.ok(/html\.embedded \.app-shell/.test(simulator));
     assert.ok(/href="\.\.\/workdesk" onclick="openWorkdeskHome\(event\)">운영 홈<\/a>/.test(simulator));
     assert.ok(simulator.includes('location.assign("../workdesk" + (/\\.html?$/i.test(last) ? ".html" : ""));'));
     assert.ok(/기본값 OFF/.test(simulator));
