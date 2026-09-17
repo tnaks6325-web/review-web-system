@@ -133,9 +133,11 @@ async function listPaymentTargets(opts = {}) {
     // 알림톡 3회 성공 뒤 최종기한까지 미작성으로 종결된 작업은, 나중에 리뷰칸이 바뀌어도
     // 자동 입금대상으로 되살리지 않는다. 실제 제출 여부(is_submitted)와 종결 원장은 별개다.
     `NOT EXISTS (
-        SELECT 1 FROM review_reminder_states rrs
+        SELECT 1 FROM review_closed_targets rrs
          WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
            AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review')`,
+    `NOT EXISTS (SELECT 1 FROM reviewer_participations p WHERE p.sheet_id=ri.sheet_id AND p.tab_name=ri.tab_name
+      AND p.row_index=ri.row_index AND p.lifecycle_status='active' AND p.review_obligation_status IN ('pending','unknown'))`,
     // 미입금 — search.service._isPaid 와 동일 규칙(SQL 판)
     `NOT (ri.is_submitted2 = 'PAID' OR EXISTS (
         SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
@@ -975,6 +977,17 @@ async function createBatch({ bank, rows, by }) {
       // 건별 SAVEPOINT — 23505(다른 담당자가 먼저 담음)는 그 건만 건너뛴다.
       await client.query('SAVEPOINT sp_item');
       try {
+        // Serialize with manual closure; a stale payment list cannot enqueue a closed row.
+        await client.query(`SELECT id FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3 AND active=TRUE AND deleted_at IS NULL FOR UPDATE`,
+        [it.sheetId, it.tabName, it.rowIndex]);
+        const closed = await client.query(`SELECT 1 FROM review_closed_targets
+          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [it.sheetId, it.tabName, it.rowIndex]);
+        if (closed.rows.length) {
+          await client.query('RELEASE SAVEPOINT sp_item');
+          skipped.push({ key: it.sheetId + '||' + it.tabName + '||' + it.rowIndex, reason: 'closed_no_review' });
+          continue;
+        }
         const { rows: [row] } = await client.query(
           `INSERT INTO payment_batch_items
              (batch_id, sheet_id, tab_name, row_index, campaign_id, reviewer_name, phone8,

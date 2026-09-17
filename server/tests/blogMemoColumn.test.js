@@ -143,7 +143,7 @@ function stubDb({ sheetless = true, headers = HDR, rowCount = 1 } = {}) {
     async query(sql, params) {
       q.push({ sql: String(sql), params });
       const s = String(sql);
-      if (/FROM tab_configs/.test(s)) return { rows: [{ sheetless }], rowCount: 1 };
+      if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(s)) return { rows: [{ sheetless }], rowCount: 1 };
       if (/detected_headers/.test(s)) return { rows: [{ h: headers }], rowCount: 1 };
       if (/UPDATE campaign_participants/.test(s)) return { rows: [], rowCount };
       return { rows: [], rowCount: 0 };
@@ -251,20 +251,22 @@ t('★★ 판정 실패·리뷰체험단은 false(종전 동작) — isBlogKind 
   assert.ok(/_isBlog = isBlogKind\(await workKindForTab\(\{ sheetId, tabName \}\)\)/.test(submitSrc));
   assert.ok(/catch \(_\) \{ _isBlog = false; \}/.test(submitSrc), '조회 실패 폴백 없음');
 });
-t('★ 무시트 memo 기록을 제출 완료 분기에서 호출', () => {
-  const i1 = submitSrc.indexOf("kind: 'submit'");
+t('필수 블로그 URL은 완료 COMMIT 전에 같은 client로 기록', () => {
+  const i1 = submitSrc.indexOf("completionClient.query('COMMIT')");
   const i2 = submitSrc.indexOf('markSheetlessMemo');
-  assert.ok(i1 > 0 && i2 > i1 && (i2 - i1) < 1200, '완료 분기 밖이거나 미호출');
+  assert.ok(i2 > 0 && i2 < i1, 'URL 저장보다 먼저 완료를 확정함');
+  assert.ok(/client: completionClient/.test(submitSrc.slice(i2,i2+260)));
 });
 t('★★ 무시트 기록에도 같은 blog 판정을 넘긴다(시트 경로와 칸이 갈리면 안 된다)', () => {
   const i = submitSrc.indexOf('markSheetlessMemo');
   const block = submitSrc.slice(i, i + 300);
   assert.ok(/blog: _isBlog/.test(block), '무시트 기록에 고정값을 넘겼다 — 시트 경로와 다른 칸에 쓴다');
 });
-t('★ memo 기록 실패가 제출을 죽이지 않는다(fail-soft)', () => {
+t('필수 URL 저장 실패는 재시도 오류, 선택 비고만 완료 뒤 기록', () => {
   const i = submitSrc.indexOf('markSheetlessMemo');
   const block = submitSrc.slice(i - 200, i + 600);
-  assert.ok(/catch \(e\)/.test(block), 'try/catch 없음');
+  assert.ok(/REVIEW_POST_URL_WRITE_FAILED/.test(block));
+  assert.ok(submitSrc.indexOf('if (!_isBlog) try')>submitSrc.indexOf("completionClient.query('COMMIT')"));
 });
 
 // ── 6. 검색 응답 workKind ─────────────────────────────────────────────────

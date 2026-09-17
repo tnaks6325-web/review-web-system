@@ -9336,8 +9336,10 @@ function _openCellMenu(x,y,td){
   const payBlockReason = !isPayCell ? '' : _depositMenuBlockReason(td, selectedRow);
   const reviewBlockReason = !isReviewCell ? ''
     : (!_isInternalRole() ? '리뷰제출 처리는 내부 담당자만 할 수 있습니다'
+      : (selectedRow&&selectedRow.reviewResolution==='closed_no_review' ? '미작성 종결된 줄입니다'
       : ((selectedRow&&selectedRow.submitted) ? '이미 리뷰제출이 완료된 줄입니다'
-        : (selectedRow ? '' : '이 줄의 참여자 정보를 찾지 못했습니다')));
+        : (selectedRow ? '' : '이 줄의 참여자 정보를 찾지 못했습니다'))));
+  const resolutionBlocked = !canPaint || !_isInternalRole() || !selectedRow || !(STATE.cur&&STATE.cur.sheetless===true);
   const canPaste=canE && g.some(l=>l.some(c=>c.classList.contains('gedit')));
   const row=(icon,label,fn,dim,danger,title)=>`<button class="gcmrow${dim?' dim':''}${danger?' danger':''}"${dim?' disabled':''}${title?` title="${esc(title)}"`:''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
   // 주문(구매양식)이 연결된 행은 "명단에서 빼기"가 아니라 "구매기록 취소"다. 라벨이 그 사실을 말하고,
@@ -9358,6 +9360,10 @@ function _openCellMenu(x,y,td){
           ? row('💰','입금수정',"openDepositEdit()",!!payBlockReason,false,
                 payBlockReason||'달력에서 입금일을 고르거나 비웁니다 — 리뷰어 페이백 표시·입금관리 대상이 함께 바뀝니다')
           : (one?row(isDateCol?'📅':'✏️', isDateCol?'날짜 선택':'이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):'')))
+    + (isReviewCell ? row('⏹','미작성 종결','_menuCloseReview()',resolutionBlocked||!!(selectedRow&&selectedRow.reviewResolution),false,
+        '미작성으로 종결합니다. 제출완료로 세지 않으며 추가 제출·독촉·지급대상에서 제외합니다')
+      + row('🗑','주문 취소','_menuCancelReviewOrder()',resolutionBlocked,true,
+        '참여행을 제거합니다. 연결된 구매기록도 취소하며 처리 기록은 남깁니다') : '')
     + (msgN?row('💬', msgN>1?`리뷰어 ${msgN}명에게 메시지`:'리뷰어에게 메시지', "openReviewerMsg()", false, false,
         msgN>1?'선택한 줄의 리뷰어들에게 같은 내용을 보냅니다(같은 리뷰어는 한 번만)':'이 줄 리뷰어의 1:1 문의방으로 보냅니다'):'')
     + (one&&(field||'')?row('🕘','편집기록','_menuCellHistory()',false,false,'이 셀을 언제 누가 어떻게 고쳤는지 봅니다(되돌리지는 않습니다)'):'')
@@ -9370,7 +9376,7 @@ function _openCellMenu(x,y,td){
         _selRanges().length>1 ? `떨어진 <b>${_selRanges().length}개 범위</b>를 화면 열 순서대로 이어 복사합니다`
         : (one ? 'Ctrl(⌘)+드래그로 떨어진 범위를 더할 수 있습니다'
                : '끌어 잡은 <b>직사각형 범위</b>만 복사됩니다 · Ctrl(⌘)+드래그=범위 추가')}</div>`
-    + (canPaint&&STATE._gMenuRowId?`<div class="gcmdiv"></div>${row(
+    + (canPaint&&STATE._gMenuRowId&&!isReviewCell?`<div class="gcmdiv"></div>${row(
         '🗑',
         menuRowHasOrder?'행 삭제 · 구매기록 취소':'행 삭제',
         '_menuDeleteRow()',
@@ -9726,6 +9732,7 @@ function _manualReviewDrop(i){
 /* 서버 오류 코드는 그대로 보여 주면 담당자가 손쓸 수 없다 — **무엇이 문제이고 다음에 무엇을 하는지**로 옮긴다.
    ★ 모르는 코드는 지어내지 않고 원문을 남긴다(조용히 "실패했습니다"로 뭉뚱그리면 원인이 사라진다). */
 const _MR_ERR={
+  closed_no_review:'미작성 종결된 참여행입니다. 리뷰를 추가 제출할 수 없습니다.',
   already_submitted:'이미 리뷰제출 처리된 참여자입니다.',
   row_not_found:'이 줄을 찾지 못했습니다 — 표를 새로고침한 뒤 다시 시도해 주세요.',
   submit_column_missing:'이 작업표에 리뷰제출 열이 없습니다 — [설정 › 작업표 표준 열]에서 리뷰제출 칸을 만든 뒤 다시 시도해 주세요.',
@@ -9889,6 +9896,28 @@ async function _manualReviewDateOnly(){
 // 함께 취소한다(서버가 한 트랜잭션으로 처리). ★ 총 모집인원은 줄지 않는다 — 지운 자리는
 // 마지막 진행일의 빈 자리로 보충되어 다시 모집할 수 있는 상태로 남는다.
 // 경로는 hideRow 하나뿐이다(성격별로 나누면 두 경로가 곧 갈린다).
+function _menuCancelReviewOrder(){
+  if (!_isInternalRole() || !STATE.canEdit || !(STATE.cur&&STATE.cur.sheetless===true)) return;
+  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE._gMenuRowId));
+  if (!r || !r.revision) { alert('행 정보를 새로 불러온 뒤 다시 선택해 주세요.'); return; }
+  return _menuDeleteRow();
+}
+async function _menuCloseReview(){
+  const t=STATE.cur;
+  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE._gMenuRowId));
+  _closeCellMenu();
+  if(STATE._reviewCloseBusy || !_isInternalRole() || !STATE.canEdit || !t || t.sheetless!==true || !r) return;
+  if(!r.revision){ alert('행 정보를 새로 불러온 뒤 다시 선택해 주세요.'); return; }
+  if(!confirm(`${r.name||r.recipient||'선택한 참여자'} · ${r.seq}행을 미작성 종결할까요?\n\n리뷰 미작성 기록은 남습니다. 제출완료로 세지 않으며 추가 제출·독촉·지급대상에서 제외합니다.\n이미 제출되거나 입금 처리 중인 건은 서버에서 거부합니다.`)) return;
+  STATE._reviewCloseBusy=true;
+  try {
+    const out=await api('/api/trackb/workdesk/review-close',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:r.id,expectedRevision:r.revision,confirm:true})});
+    if(!out||!out.ok){ alert((out&&out.message)||'종결하지 못했습니다. 새로고침 후 상태를 확인해 주세요.'); return; }
+    toast(out.alreadyClosed?'이미 미작성 종결된 행입니다.':'미작성 종결로 기록했습니다.');
+    if(STATE.cur&&STATE.cur.sheetId===t.sheetId&&STATE.cur.tabName===t.tabName) await reloadWorkdesk();
+  } catch (_) { alert('처리 결과를 확인하지 못했습니다. 새로고침 후 상태를 확인해 주세요.'); }
+  finally { STATE._reviewCloseBusy=false; }
+}
 function _menuDeleteRow(){
   const rowId=STATE._gMenuRowId; _closeCellMenu(); if(!rowId) return;
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(rowId));
@@ -9896,7 +9925,7 @@ function _menuDeleteRow(){
     alert('구매기록이 연결된 행 삭제는 내부 담당자만 할 수 있습니다.');
     return;
   }
-  hideRow(rowId,{hasOrder:!!(r&&r.hasOrder)});
+  hideRow(rowId,{hasOrder:!!(r&&r.hasOrder),expectedRevision:r&&r.revision});
 }
 async function _reloadWorkdeskAfterColorSaveFailure(t){
   if(!t || !STATE.cur || STATE.cur.sheetId!==t.sheetId || STATE.cur.tabName!==t.tabName) return;
@@ -16541,7 +16570,7 @@ async function hideRow(rowId, opts){
     : '이 참여자를 작업표와 리뷰어 참여내역에서 실제로 제거할까요? 총 모집인원은 유지되며 마지막 진행일에 미진행 1건이 보충됩니다.';
   if(!confirm(msg))return; const t=STATE.cur;
   let r=null;
-  try{ r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})}); }
+  try{ r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,expectedRevision:opts&&opts.expectedRevision})}); }
   catch(_){ r=null; }
   if(r&&r.ok){
     // 무엇이 일어났는지 사실대로 — 공고를 못 고른 경우 계획 이동은 건너뛴다(빈 자리 보충은 항상 한다).

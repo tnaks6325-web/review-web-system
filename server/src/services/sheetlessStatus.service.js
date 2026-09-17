@@ -105,17 +105,18 @@ async function _resolveStatusHeader(db, { sheetId, tabName, col, kind }) {
  * @returns {Promise<{handled:boolean, ok?:boolean, reason?:string, column?:string}>}
  *   handled=false → 무시트 탭이 아님(호출부는 종전 경로 유지)
  */
-async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by = 'system', deferRebuild = false } = {}) {
+async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by = 'system', deferRebuild = false, client = null } = {}) {
   if (!sheetId || !tabName || !rowIndex) return { handled: false };
   if (kind !== 'submit' && kind !== 'paid') return { handled: false };
 
-  const db = getPool();
+  const db = client || getPool();
 
   // ── 무시트 판정은 단일 출처 ──
   let sheetless = false;
   try {
     sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
   } catch (_) {
+    if (client) return { handled: true, ok: false, reason: 'scope_lookup_failed' };
     // 판정 실패 = 모른다 → 종전 경로(시트 쓰기)로 보낸다.
     // ★ 여기서 handled:true 로 접으면 시트 기반 탭의 입금 기록이 조용히 사라진다.
     return { handled: false };
@@ -141,7 +142,7 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
   return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by, kind,
-    mergeDeposit: kind === 'paid', deferRebuild });
+    mergeDeposit: kind === 'paid', deferRebuild: deferRebuild || !!client });
 }
 
 /**
@@ -200,18 +201,22 @@ async function verifyStatusCell({ sheetId, tabName, rowIndex, kind, value = '' }
  * ★★ 열 고르기는 `utils/memoColumn` 단일 출처(시트 경로·큐 재시도와 같은 규칙) — 사본을 두면
  *   "시트 탭은 포스팅 칸, 무시트 탭은 비고 칸"으로 갈린다.
  * ★ 헤더 출처는 `detected_headers || headers` — `rebuildLedgers` 가 읽는 그 값(A1 행이 아니다).
- * ★ 시트 기반 탭이면 `{handled:false}` = 호출부 종전 경로. 판정 실패도 같다(fail-open).
+ * ★ 시트 기반 탭이면 `{handled:false}` = 호출부 종전 경로.
+ * 완료 트랜잭션에서는 범위 확인 실패도 실패로 반환하고 장부 재생성은 COMMIT 뒤로 미룬다.
  */
-async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = false, by = 'system' } = {}) {
+async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = false, by = 'system', client = null, deferRebuild = false } = {}) {
   if (!sheetId || !tabName || !rowIndex) return { handled: false };
   const text = String(memo == null ? '' : memo).trim();
   if (!text) return { handled: false };                       // 쓸 값이 없으면 관여하지 않는다
 
-  const db = getPool();
+  const db = client || getPool();
   let sheetless = false;
   try {
     sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
-  } catch (_) { return { handled: false }; }
+  } catch (e) {
+    if (client) return { handled: true, ok: false, reason: 'scope_lookup_failed', message: e.message };
+    return { handled: false };
+  }
   if (!sheetless) return { handled: false };
 
   let headers = [];
@@ -228,7 +233,8 @@ async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = fals
   // ★ 조용히 성공으로 접지 않는다 — 그 작업표에 비고/포스팅 열이 없다는 뜻이다.
   if (!header) return { handled: true, ok: false, reason: 'no_memo_column' };
 
-  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by,
+    deferRebuild: deferRebuild || !!client });
 }
 
 /** 127: 포스팅제출일 자동 기록(blog 제출 완료 시) — memo 기록과 같은 규율·같은 실행부.
@@ -367,7 +373,17 @@ async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, va
           SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
               is_submitted = CASE WHEN $6::text = 'submit' THEN TRUE ELSE is_submitted END,
               updated_at = NOW()
-        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
+        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
+          AND ($6::text IS DISTINCT FROM 'submit' OR (
+            active=TRUE
+            AND NOT EXISTS (SELECT 1 FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2
+              AND (tc.is_closed OR (NULLIF(btrim(campaign_participants.round),'') IS NOT NULL
+                AND btrim(campaign_participants.round)=ANY(regexp_split_to_array(btrim(COALESCE(tc.archived_rounds,'')),'[[:space:]]*,[[:space:]]*')))))
+            AND NOT EXISTS (SELECT 1 FROM index_master_archive a WHERE a.sheet_id=$1 AND a.tab_name=$2)
+            AND
+            review_cell_text(row_json ->> $4) NOT IN ('미작성 종결','미제출','취소건')
+            AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
+              WHERE closed.sheet_id=$1 AND closed.tab_name=$2 AND closed.row_index=$3)))`,
       [sheetId, tabName, rowIndex, header, nextValue, kind]);
     if (!r.rowCount) return { handled: true, ok: false, reason: 'row_not_found', column: header };
   } catch (e) {

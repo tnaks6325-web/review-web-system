@@ -1069,7 +1069,8 @@ async function createOrderLedgerEntry(input) {
                   participant_identity_id = ca.participant_identity_id
              FROM campaign_applications ca
             WHERE os.id = $1 AND ca.id = $2
-              AND ca.owner_reviewer_id IS NOT NULL AND ca.participant_identity_id IS NOT NULL`,
+              AND ca.owner_reviewer_id IS NOT NULL
+              AND (os.owner_reviewer_id IS NULL OR os.owner_reviewer_id=ca.owner_reviewer_id)`,
           [orderSubmissionId, campaignHold.applicationId]
         );
       }

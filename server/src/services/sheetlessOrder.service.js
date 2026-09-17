@@ -506,11 +506,13 @@ async function writeOrderToWorktable({
     await client.query(
       `UPDATE campaign_participants cp
           SET owner_reviewer_id = os.owner_reviewer_id,
-              participant_identity_id = os.participant_identity_id
+              participant_identity_id = COALESCE(cp.participant_identity_id,os.participant_identity_id), updated_at=NOW()
          FROM order_submissions os
         WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3
           AND os.id = $4::uuid
-          AND os.owner_reviewer_id IS NOT NULL AND os.participant_identity_id IS NOT NULL`,
+          AND cp.order_submission_id=os.id AND cp.active=TRUE AND cp.deleted_at IS NULL
+          AND os.owner_reviewer_id IS NOT NULL
+          AND (cp.owner_reviewer_id IS NULL OR cp.owner_reviewer_id=os.owner_reviewer_id)`,
       [sheetId, tabName, seq, orderSubmissionId]
     );
     /* ── 번호·담당자 자동 채움 + 구매일자 기준 재번호 ────────────────────────────

@@ -30,6 +30,31 @@ const {
 } = require('../services/reviewerSession.service');
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
 
+router.get('/participations', reviewerSessionMiddleware, async (req, res, next) => {
+  res.set('Cache-Control','no-store');
+  try {
+    const session=req.reviewer;
+    const history=require('../services/reviewerHistory.service');
+    if (!await history.availability(session.ownerReviewerId)) {
+      return res.json({ok:true,mode:'legacy',reason:'ownership_not_certified'});
+    }
+    const phone=String(session.loginPhone8||'').replace(/\D/g,'').slice(-8);
+    if(phone.length!==8) return res.status(401).json({ok:false,code:'REVIEWER_AUTH_INVALID',error:'다시 로그인해 주세요.'});
+    const sub=session.loginKind==='sub';
+    const identity=sub ? await require('../services/reviewerIdentity.service').resolveParticipantIdentity({
+      ownerReviewerId:session.ownerReviewerId,participantPhone8:phone}) : null;
+    const result=await require('../services/search.service').searchByName('',phone,{
+      ownerHistory:true,ownerReviewerId:session.ownerReviewerId,ownerPhone8s:[phone],strictPhoneScope:true,
+      restrictParticipant:sub,participantIdentityId:identity&&identity.id||null,includeSubmitted:true,
+      historyStatus:req.query.status||'all',historyLimit:req.query.limit,historyCursor:req.query.cursor,
+    });
+    res.json({ok:true,...result});
+  } catch(err) {
+    if(err.code==='HISTORY_CURSOR_INVALID') return res.status(409).json({ok:false,code:err.code,error:err.message});
+    next(err);
+  }
+});
+
 // 참여행 → 주문 → 신청 → 과거 링크의 소유자 우선순위를 participant identity에도 적용한다.
 // 충돌하는 하위 레코드의 identity를 채택하면 타계정 자신의 행이 화면에서 사라질 수 있다.
 function _participantIdentityByOwnerSql({ cp = null, os = null, ca = null, pl = null } = {}) {
@@ -463,7 +488,7 @@ router.get('/my-status', async (req, res, next) => {
         tc.review_type AS "reviewType",
         tc.delivery_type AS "deliveryType",
         tc.is_closed AS "isClosed",
-        (SELECT s.review_status FROM review_reminder_states s
+        (SELECT s.review_status FROM review_closed_targets s
           WHERE s.sheet_id = ri.sheet_id AND s.tab_name = ri.tab_name
             AND s.row_index = ri.row_index AND s.review_status = 'closed_no_review'
           LIMIT 1) AS "reviewReminderStatus"
@@ -904,9 +929,10 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
          AND os.submitted_at <= NOW() - INTERVAL '10 days'
          AND NOT COALESCE(cp.owner_work_submitted, FALSE)
          AND NOT COALESCE(ri.is_submitted, FALSE)
+         AND ${require('../services/reviewObligation.service').unfulfilledSql('ri')}
          AND COALESCE(cp.owner_link_count, 1) = 1
          AND NOT EXISTS (
-           SELECT 1 FROM review_reminder_states rrs
+           SELECT 1 FROM review_closed_targets rrs
             WHERE rrs.order_submission_id = os.id
               AND rrs.review_status = 'closed_no_review'
          )
@@ -1075,7 +1101,7 @@ router.get('/review-earnings', async (req, res, next) => {
           )
         ))
         AND NOT EXISTS (
-          SELECT 1 FROM review_reminder_states rrs
+          SELECT 1 FROM review_closed_targets rrs
            WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
              AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
         )`,
@@ -1275,7 +1301,7 @@ router.get('/review-earnings', async (req, res, next) => {
           ))
           AND os.deleted_at IS NULL
           AND NOT EXISTS (
-            SELECT 1 FROM review_reminder_states rrs
+            SELECT 1 FROM review_closed_targets rrs
              WHERE rrs.order_submission_id = os.id AND rrs.review_status = 'closed_no_review'
           )
           -- 신청 FK·공고 메타가 누락됐어도 campaign:<공고ID> 작업표 주문은 리뷰어에게 숨기지 않는다.

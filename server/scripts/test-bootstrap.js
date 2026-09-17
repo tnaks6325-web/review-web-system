@@ -1,5 +1,8 @@
 'use strict';
 
+// npm ci installs the embedded database; CI must run SQL regressions, not skip them.
+if (!process.env.PGLITE_MODULE) process.env.PGLITE_MODULE = require.resolve('@electric-sql/pglite');
+
 // Source-inspection tests compare JavaScript/HTML snippets with multiline regular
 // expressions. Git may materialize those files as CRLF on Windows and LF in CI,
 // so normalize text reads at the test-process boundary. Buffer reads remain exact.

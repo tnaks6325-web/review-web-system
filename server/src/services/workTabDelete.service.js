@@ -107,6 +107,10 @@ const MONEY_TABLES = [
      새 표를 여기 넣으려면 "작업이 사라진 뒤에도 이 줄이 왜 필요한가"를 한 줄로 적는다.
    ★ 이 목록의 표는 삭제 경로가 **건드리지 않는다**(DELETE 문을 만들지 않는다). */
 const KEEP_TABLES = [
+  { table: 'reviewer_participations',
+    why: '검색 원장과 작업이 삭제돼도 확정 소유권과 참여별 종결 상태를 보존하는 이력 원장이다' },
+  { table: 'workdesk_review_resolutions',
+    why: '참여행과 작업 삭제 뒤에도 미작성 종결·주문 취소의 처리자와 사유를 확인할 감사 기록으로 보존한다' },
   { table: 'orphan_capture_tombstones',
     why: '작업이 사라진 뒤 Drive 에 남은 캡처를 찾을 유일한 좌표 — 같이 지우면 영영 못 찾는다' },
   { table: 'workboard_consolidation_link_events',

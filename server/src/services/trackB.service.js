@@ -1056,7 +1056,9 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
                   AND ${_filledSql('cp')})::int AS total,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
-                  AND NULLIF(BTRIM(COALESCE(
+                  AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
+                    WHERE closed.sheet_id=cp.sheet_id AND closed.tab_name=cp.tab_name AND closed.row_index=cp.seq)
+                  AND COALESCE(obligation.review_obligation_status='fulfilled', LOWER(BTRIM(COALESCE(
                     CASE WHEN cp.anchor_type IS NOT NULL
                               AND (cp.anchor_type = 'manual' OR cp.anchor_count = 1)
                          THEN CASE WHEN current_edit.kind = 'bool' THEN CASE WHEN current_edit.value_bool THEN 'O' ELSE '' END
@@ -1065,7 +1067,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                          THEN CASE WHEN manual_edit.kind = 'bool' THEN CASE WHEN manual_edit.value_bool THEN 'O' ELSE '' END
                                    ELSE manual_edit.value_text END END,
                     cp.row_json ->> COALESCE(NULLIF(BTRIM(cp.submit_col), ''), submit_header.submit_header)
-                  )), '') IS NOT NULL)::int AS submitted,
+                  ))) NOT IN ('','false','미제출','취소건','미작성 종결')))::int AS submitted,
                 /* 화면용 입금완료 = 원장 플래그나 과거 편집 이력이 아니라 작업보드
                    row_json의 실제 입금 셀. 원장·정산·이체 상태(cp.is_paid)는 분리한다. */
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.held_at IS NULL
@@ -1074,6 +1076,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                     cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
                   ), '') IS NOT NULL)::int AS paid
            FROM anchored_rows cp
+           LEFT JOIN LATERAL (SELECT rp.review_obligation_status FROM reviewer_participations rp
+             WHERE rp.campaign_participant_id=cp.id AND rp.lifecycle_status='active' LIMIT 1) obligation ON TRUE
            LEFT JOIN LATERAL (
              SELECT e.kind, e.value_bool, e.value_text
                FROM participant_edits e
@@ -3374,6 +3378,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             cp.round, cp.option_text AS option, cp.product_name AS product,
             cp.is_submitted AS submitted, cp.is_paid AS paid, cp.source,
             cp.order_submission_id, cp.identity_key, cp.row_json, cp.submit_col, cp.submit_col2,
+            cp.updated_at::text AS revision,
             purpose_app.id AS "popularPurposeApplicationId",
             purpose_app.phone8 AS "popularPurposePhone8"
        FROM campaign_participants cp
@@ -3598,6 +3603,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
    * `pick`을 통해 셀 편집 오버레이도 함께 반영한다. 따라서 카드와 현재 표의 보이는
    * 리뷰제출 열은 같은 원본을 보며, 제출 상태 플래그는 기존 검수·정산 흐름에만 남긴다.
    */
+  const closedRows = archived ? [] : (await db.query(
+    `SELECT row_index FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2`,
+    [sheetId, tabName])).rows;
+  const closedSeqs = new Set(closedRows.map(r => Number(r.row_index)));
+  const obligations=archived?[]:(await db.query(`SELECT campaign_participant_id,review_obligation_status,review_evidence FROM reviewer_participations
+    WHERE sheet_id=$1 AND tab_name=$2 AND lifecycle_status='active'`,[sheetId,tabName])).rows;
+  const obligationMap=new Map(obligations.map(r=>[String(r.campaign_participant_id),r]));
   let reviewSubmitCellCount = 0;
   let paymentCellCount = 0;
   // 진행 현황의 금액도 "제출완료"와 정확히 같은 작업표 리뷰제출 칸을 기준으로 한다.
@@ -3626,7 +3638,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     const advertiserOrder = role === 'advertiser' && r.order_submission_id
       ? (advertiserOrderMap.get(String(r.order_submission_id)) || null) : null;
     const syn = {
-      id: r.id, seq: r.seq,
+      id: r.id, seq: r.seq, revision: r.revision || null,
+      reviewResolution: closedSeqs.has(Number(r.seq)) ? 'closed_no_review' : null,
       name: pick('reviewer_name', r.name),
       recipient: pick('recipient_name', r.recipient),
       phone8: pick('phone8', r.phone8),
@@ -3647,7 +3660,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     const submitCellValue = submitHeader
       ? pick('col:' + submitHeader, (r.row_json && r.row_json[submitHeader]))
       : '';
-    const reviewSubmitted = !!String(submitCellValue == null ? '' : submitCellValue).trim();
+    const projectedObligation=obligationMap.get(String(r.id));
+    syn.reviewObligationStatus=projectedObligation ? projectedObligation.review_obligation_status
+      : require('./reviewObligation.service').classifyCell(submitCellValue,!!submitHeader);
+    const reviewSubmitted = !syn.reviewResolution && syn.reviewObligationStatus==='fulfilled';
+    if (syn.reviewResolution) syn.submitted = false;
     const paidHeader = String(tabPaidHeader || r.submit_col2 || '').trim();
     // 상태 셀의 화면 정본은 rowJson이다. participant_edits의 col:입금 값은 편집기록
     // 마커용으로만 남으며, 오래된 빈 이력이 현재 작업보드 값을 덮어 집계를 줄이면 안 된다.
@@ -3729,6 +3746,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       const tce = {};
       for (const k in ov) { if (k.indexOf('col:') === 0 && isTrackingHeader(k.slice(4))) tce[k.slice(4)] = ov[k]; }
       syn.cellEdits = tce;
+    }
+    if (syn.reviewResolution && submitHeader && syn.rowJson && Object.prototype.hasOwnProperty.call(syn.rowJson, submitHeader)) {
+      syn.rowJson = { ...syn.rowJson, [submitHeader]: '미작성 종결' };
+      if (syn.cellEdits) delete syn.cellEdits[submitHeader];
+    }
+    if (reviewSubmitted && projectedObligation && submitHeader && syn.rowJson && !String(submitCellValue??'').trim()) {
+      syn.rowJson={...syn.rowJson,[submitHeader]:projectedObligation.review_evidence.value||'제출 기록 보존'};
     }
     out.push(syn);
   }
@@ -4119,6 +4143,14 @@ function _manualReviewFileIds(fileIds) {
  *   물어보고, 통과했을 때만 업로드한다. 게이트는 실제 제출과 **같은 코드**를 지난다(사본 0) —
  *   따로 만들면 "확인은 통과인데 제출은 거부"가 된다.
  */
+async function closeWorkdeskReview(args) {
+  const out = await require('./workdeskReviewResolution.service').closeWithoutReview({
+    ...args, db: getPool(), deriveAnchor: _deriveAnchor,
+  });
+  _tabStatsCache = { at: 0, map: null };
+  return out;
+}
+
 async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin', preflight = false } = {}) {
   if (!sheetId || !tabName || !rowId) throw new Error('manualWorkdeskReviewSubmit: 필수 인자 누락');
   const ids = preflight ? [] : _manualReviewFileIds(fileIds);
@@ -4135,6 +4167,8 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
       [rowId, sheetId, tabName]);
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const participant = pr[0];
+    const closed = await client.query(`SELECT 1 FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [sheetId, tabName, participant.seq]);
+    if (closed.rows.length) { await client.query('ROLLBACK'); return { ok: false, error: 'closed_no_review' }; }
     /* ★★ 수동·작업표로 추가한 줄은 `submit_col` 이 비어 있다 (2026-08-21 실측 `submit_column_missing`).
        그 칸은 **`review_index` 복제 경로(importTabFromIndex)에서만** 채워지고, `addParticipant`·
        `prepareRosterSlots`·`appendSlot` 등 사람이 만든 줄은 NULL 로 남는다 — 그런데 상태 칸은
@@ -4244,18 +4278,20 @@ class HideRowError extends Error {
 // 주문(구매양식) 취소와 같은 트랜잭션 안에서 돌 수 있도록 client 를 주입받는다.
 // 실패는 반환이 아니라 throw 로 알린다 — 반환으로 접으면 바깥의 주문 취소가 그대로 커밋되어
 // "주문은 취소됐는데 작업표 행은 그대로"인 단절이 생긴다.
-async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
+async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision }) {
     // 작업표 행과 리뷰어 참여내역은 같은 참여 단위다. 기존처럼 화면 오버레이만
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
     const { rows } = await client.query(
-      `SELECT id, seq, phone8, row_json, order_submission_id
+      `SELECT id, seq, phone8, row_json, order_submission_id, sheet_id, tab_name, identity_key, source, first_seen_at, updated_at::text AS revision
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL
         FOR UPDATE`,
       [rowId, sheetId, tabName]);
     if (!rows.length) throw new HideRowError('row_not_found');
     const row = rows[0];
+
+    if (expectedRevision && row.revision !== expectedRevision) throw new HideRowError('row_changed');
 
     // ★ 무시트(sheetless) 작업만 지울 수 있다 — 시트 기반 작업은 다음 시트 반영이
     //   같은 행을 되살려 "지웠는데 돌아오는" 상태가 된다. 종전에는 이 게이트가 공고
@@ -4381,6 +4417,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
        VALUES ($1,$2,$3,$4::uuid,$5)
        ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
       [sheetId, tabName, row.seq, row.order_submission_id || null, String(by).slice(0, 100)]);
+    await require('./workdeskReviewResolution.service').recordResolution(client, row, 'order_cancelled', by, 'workdesk_participant_removed');
     const removed = await client.query(
       `DELETE FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3`,
@@ -4509,7 +4546,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
 // ★ 목표 수 이내에서는 총 모집인원을 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로
 //   보충한다. 이미 목표를 초과한 표는 삭제 뒤 목표 수 이상이면 보충하지 않아 초과분을 되살리지 않는다.
 // ★ 주문 취소와 행 제거는 반드시 한 트랜잭션 — 한쪽만 반영되면 원장과 작업표가 갈린다.
-async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null } = {}) {
+async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null, expectedRevision } = {}) {
   const db = getPool();
   // 살아 있는 구매양식이 붙은 행인지 먼저 본다(짧은 조회 — 잠금 없음).
   let liveOrderId = null;
@@ -4537,7 +4574,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     const client = await db.connect();
     try {
       await client.query('BEGIN');
-      const out = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by });
+      const out = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision });
       await client.query('COMMIT');
       return out;
     } catch (e) {
@@ -4556,7 +4593,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
         orderSubmissionId: liveOrderId,
         canceledBy: by,
         // 행 제거·총원 보충을 주문 취소와 같은 트랜잭션에 둔다. 여기서 throw 하면 취소도 롤백된다.
-        beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by }); },
+        beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision }); },
       });
       if (!canceled || !canceled.ok) return { ok: false, error: (canceled && canceled.code) || 'order_cancel_failed' };
       // 그 사이 다른 경로가 먼저 취소했다면 본문이 돌지 않았다 — 행 제거만 이어서 한다.
@@ -4742,6 +4779,9 @@ async function backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value
     [rowId, sheetId, tabName]);
   if (!pr.length) return { ok: false, error: 'row_not_found' };
   const seq = pr[0].seq;
+
+  const closed = await db.query(`SELECT 1 FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [sheetId, tabName, seq]);
+  if (closed.rows.length) return { ok: false, error: 'closed_no_review' };
 
   const r = await require('./sheetlessStatus.service').markStatusCell({
     sheetId, tabName, rowIndex: seq, kind: 'submit', value: text, by });
@@ -5777,7 +5817,9 @@ async function tabStatsMap({ force = false } = {}) {
                FROM active_rows ar
            )
            SELECT COUNT(*)::int AS total_count,
-                  COUNT(*) FILTER (WHERE cp.is_submitted)::int AS submitted_count,
+                  COUNT(*) FILTER (WHERE ${require('./reviewObligation.service').submittedSql('cp.is_submitted','cp','seq')}
+                    AND NOT EXISTS(SELECT 1 FROM review_closed_targets closed WHERE closed.sheet_id=cp.sheet_id
+                      AND closed.tab_name=cp.tab_name AND closed.row_index=cp.seq))::int AS submitted_count,
                   COUNT(*) FILTER (WHERE ${_filledSql('cp')})::int AS filled_count,
                    COUNT(*) FILTER (WHERE ${_filledSql('cp')}
                      AND NULLIF(BTRIM(
@@ -6542,6 +6584,7 @@ module.exports = {
   editWorkdeskRow,
   revertWorkdeskEdit,
   manualWorkdeskReviewSubmit,
+  closeWorkdeskReview,
   previewWorkdeskOrderDelete,
   deleteWorkdeskOrderRow,
   assignUnslottedOrderToOpenSlot,

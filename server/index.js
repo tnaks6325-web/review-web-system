@@ -23,6 +23,13 @@ const MIG_LOCK_RETRIES = 3;
 // 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
 // /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
 const REQUIRED_SCHEMA = [
+  ['campaign_participants', 'review_participation_id'],
+  ['workdesk_review_resolutions', 'review_participation_id'],
+  ['reviewer_participations', 'review_obligation_status'],
+  ['reviewer_history_rollouts', 'coverage_epoch'],
+  ['reviewer_history_control', 'coverage_epoch'],
+  ['workdesk_review_resolutions', 'resolution'],
+  ['review_closed_targets', 'resolution_id'],
   ['reviewers', 'shopping_id'],                    // 147 — 명의별 공통 쇼핑 아이디(본인)
   ['reviewer_identities', 'shopping_id'],          // 147 — 코드 명의별 공통 쇼핑 아이디
   ['campaign_applications', 'owner_phone8'],       // 063 — apply INSERT·my-status·관제

@@ -1439,6 +1439,16 @@ router.post('/workdesk/review-upload', authMiddleware, internalMiddleware, image
   return _workdeskReviewUpload(req, res, next);
 });
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
+router.post('/workdesk/review-close', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, expectedRevision, confirm } = req.body || {};
+    const out = await svc.closeWorkdeskReview({ sheetId, tabName, rowId, expectedRevision, confirm, by: _by(req) });
+    res.json(out);
+  } catch (err) {
+    if (err.status === 409) return res.status(409).json({ ok: false, error: err.code, message: err.message });
+    next(err);
+  }
+});
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, fileIds } = req.body || {};
@@ -1518,12 +1528,12 @@ router.get('/workdesk/cell-edits', authMiddleware, async (req, res, next) => {
 });
 router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, rowId } = req.body || {};
+    const { sheetId, tabName, rowId, expectedRevision } = req.body || {};
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
     const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     // 구매기록이 붙은 행 삭제 = 주문 취소이므로 order-delete 와 같은 권한을 서버가 판정한다.
     const actorRole = _role(req) || 'staff';
-    res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req), actorRole }));
+    res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req), actorRole, expectedRevision }));
   } catch (err) { next(err); }
 });
 // 주문 행 삭제는 금액·정원·시트 주문값을 함께 바꾸므로 내부 담당자(master/admin/staff)만 실행한다(광고주 차단).
