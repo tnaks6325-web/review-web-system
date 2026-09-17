@@ -94,6 +94,18 @@ ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순
   && /option\.textContent =/.test(appJs)
   && !/<select class="of-saved-info-select"/.test(appJs)
   && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 2);
+ok('가림 이름 OCR 보정은 현재 참여 명의의 저장정보 선택을 서버에서 다시 검증한다',
+  /st\.savedIdentitySelections\[appliedField\] = identity\.identityKey/.test(appJs)
+  && /savedIdentitySelections: _savedIdentitySelections\(cid\)/.test(appJs)
+  && /masked_name_ocr_correction/.test(service)
+  && /requiredSavedFields/.test(service)
+  && /SAVED_IDENTITY_SELECTION_REQUIRED/.test(service)
+  && /body\.savedIdentitySelections\?\.\[field\]/.test(service));
+ok('수취인 저장정보 선택은 쿠팡의 가림 연락처와 주소만 같은 명의 값으로 함께 보완한다',
+  /if \(field === "recipient"\)/.test(appJs)
+  && /\[\["phone", "phone"\], \["address", "address"\]\]/.test(appJs)
+  && /_hasIdentityMask\(related\.value\)/.test(appJs)
+  && /appliedFields\.push\(targetField\)/.test(appJs));
 ok('아이디와 배송주소 저장값이 없어도 빈 상태 선택창을 표시한다',
   /emptyLabel: "저장된 아이디 없음"/.test(appJs)
   && /emptyLabel: "저장된 주소 없음"/.test(appJs)

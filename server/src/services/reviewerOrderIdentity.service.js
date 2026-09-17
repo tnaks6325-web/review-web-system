@@ -402,6 +402,35 @@ function nameVerdict(raw, stored) {
   if (a === b || maskedCompatible(a, b, 'name')) return { verdict: 'match', reason: MASK_RE.test(a) ? '가림 이름 일치' : '이름 일치' };
   return { verdict: 'mismatch', reason: '이름 불일치' };
 }
+
+// 쿠팡처럼 가운데 글자를 가린 이름은 OCR이 노출된 한 글자만 잘못 읽을 수 있다.
+// 이름 전체가 다른 경우와 구분하기 위해 길이와 위치를 유지한 채, 노출 글자 하나만
+// 다르고 하나 이상은 실제 저장 명의와 같은 경우만 "가림 이름 OCR 근접오류"로 본다.
+function maskedNameOcrNearMiss(raw, stored) {
+  const a = cleanName(raw), b = cleanName(stored);
+  if (!a || !b || a.length !== b.length || !MASK_RE.test(a)) return false;
+  let visible = 0, matches = 0, mismatches = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (MASK_RE.test(a[i])) continue;
+    visible += 1;
+    if (a[i] === b[i]) matches += 1;
+    else mismatches += 1;
+  }
+  return visible >= 2 && matches >= 1 && mismatches === 1;
+}
+
+function canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIdentity) {
+  if (competingIdentity || !selectedScore || !selected) return false;
+  const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
+  const rawAddress = String(selectedScore.fields.address || '').trim();
+  const hardUnitConflict = selectedScore.parts.address.verdict === 'mismatch'
+    && /호수|동 불일치/.test(String(selectedScore.parts.address.reason || ''));
+  return selectedScore.parts.name.verdict === 'mismatch'
+    && maskedNameOcrNearMiss(rawName, selected.name)
+    // 쿠팡 연락처·주소는 가림이 정상이다. 주소 문자열 유사도는 건물명 생략 때문에
+    // 낮을 수 있으므로 실제 동·호수 충돌만 하드 차단하고 저장정보 선택으로 재확인한다.
+    && !!rawAddress && !hardUnitConflict;
+}
 function phoneVerdict(raw, stored) {
   const a = String(raw || '').trim(), b = String(stored || '').trim();
   if (!a) return { verdict: 'contact', reason: '구매양식 연락처 정보 없음' };
@@ -492,6 +521,18 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       break;
     }
   }
+  if (canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIdentity)) {
+    status = 'REVIEW';
+    for (const code of ['selected_identity_conflict', 'selected_identity_partial_conflict']) {
+      const conflictIndex = reasonCodes.indexOf(code);
+      if (conflictIndex >= 0) reasonCodes.splice(conflictIndex, 1);
+    }
+    reasonCodes.push('masked_name_ocr_correction');
+    selectedScore.parts.name = {
+      ...selectedScore.parts.name,
+      reason: '가림 이름의 노출 글자 1개가 다르게 인식됨',
+    };
+  }
   const resolved = {
     recipient: resolvedValue(selectedScore.fields.recipient || selectedScore.fields.orderer, selected.name, 'name', selectedScore.parts.name.verdict),
     phone: resolvedValue(selectedScore.fields.phone, selected.phone, 'phone', selectedScore.parts.phone.verdict),
@@ -561,6 +602,10 @@ async function matchCapture(body, reviewer) {
       submissionIdentityHash: submissionIdentityHash(verdict.resolved),
     }, '20m');
   } else if (verdict.status === 'REVIEW') {
+    const requiredSavedFields = verdict.reasonCodes.includes('masked_name_ocr_correction')
+      ? ['recipient', 'phone', 'address'].filter((field) =>
+        field === 'recipient' || MASK_RE.test(String(verdict.selectedScore.fields[field] || '')))
+      : [];
     reviewToken = signScoped({
       purpose: PURPOSE_MATCH_REVIEW, ownerReviewerId: context.owner.id,
       applicationId: context.application.id, campaignId: context.application.campaign_id,
@@ -568,6 +613,7 @@ async function matchCapture(body, reviewer) {
       imageHash: extract.imageHash, extractedFieldsHash: extract.fieldsHash,
       submissionIdentityHash: submissionIdentityHash(verdict.resolved),
       reasonCodes: verdict.reasonCodes,
+      requiredSavedFields,
     }, '15m');
   }
   await audit({ context, status: verdict.status, approvalMode: verdict.status === 'MATCH' ? 'matched' : 'pending',
@@ -603,6 +649,28 @@ async function manualConfirm(body, reviewer) {
     imageHash = review.imageHash; extractedHash = review.extractedFieldsHash;
     boundHash = submissionIdentityHash(body.formFields || {});
     reasonCodes = Array.isArray(review.reasonCodes) ? review.reasonCodes : [];
+    if (reasonCodes.includes('masked_name_ocr_correction')) {
+      const fieldRules = {
+        recipient: { selected: context.selected.name, normalize: cleanName },
+        phone: { selected: context.selected.phone, normalize: phone8 },
+        address: { selected: context.selected.address, normalize: normAddress },
+      };
+      const requiredSavedFields = Array.isArray(review.requiredSavedFields)
+        ? review.requiredSavedFields.filter((field) => fieldRules[field]) : ['recipient'];
+      const invalidSavedField = requiredSavedFields.find((field) => {
+        const rule = fieldRules[field];
+        return String(body.savedIdentitySelections?.[field] || '') !== String(context.selected.identityKey)
+          || rule.normalize(body.formFields?.[field]) !== rule.normalize(rule.selected);
+      });
+      if (invalidSavedField) {
+        throw new ReviewerOrderIdentityError(
+          'SAVED_IDENTITY_SELECTION_REQUIRED',
+          '수취인 아래 내 저장정보에서 현재 참여 명의를 선택해 가림 정보를 보완해주세요.',
+          409
+        );
+      }
+      reasonCodes.push('saved_identity_selected');
+    }
   } else if (mode === 'form_edit') {
     // 필드 수정은 기존 승인토큰을 제출에 그대로 재사용하지 않는다. 다만 그 토큰으로
     // 같은 캡처·같은 참여 명의가 이미 서버 확인을 통과했음을 증명한 뒤 수정값을 재검사한다.
@@ -688,6 +756,8 @@ module.exports = {
   saveShoppingId,
   resolveApplicationIdentity,
   maskedCompatible,
+  maskedNameOcrNearMiss,
+  canReviewMaskedNameOcrCorrection,
   evaluateSelectedIdentity,
   loadOrderInfoSuggestions,
   getParticipationIdentityContext,

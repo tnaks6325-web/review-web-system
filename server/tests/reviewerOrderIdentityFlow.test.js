@@ -191,6 +191,73 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     await identity.verifyApprovalForSubmission({ ...base, ...extracted, identityApprovalToken:matched.approvalToken }, reviewer);
   });
 
+  await test('쿠팡 가림 이름·연락처·주소는 저장 명의 선택으로 함께 보완해 재확인한다', async () => {
+    const extracted = {
+      recipient:'김*순', phone:'010-****-5678',
+      address:'***',
+    };
+    const proof = identity.issueExtractionProof({ imageHash:'6a'.repeat(32), extracted, ok:true });
+    const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
+    assert.strictEqual(reviewed.status, 'REVIEW', JSON.stringify(reviewed));
+    assert.ok(reviewed.reviewToken);
+    assert.ok(reviewed.reasonCodes.includes('masked_name_ocr_correction'));
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+      formFields:selectedFields,
+    }, reviewer), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+    const manual = await identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+      formFields:selectedFields,
+      savedIdentitySelections:{
+        recipient:`identity:${selectedId}`,
+        phone:`identity:${selectedId}`,
+        address:`identity:${selectedId}`,
+      },
+    }, reviewer);
+    await identity.verifyApprovalForSubmission({
+      ...base, ...selectedFields, identityApprovalToken:manual.approvalToken,
+    }, reviewer);
+  });
+
+  await test('전화·주소가 모두 맞아 일반 REVIEW였던 OCR 이름 오류도 저장 명의 선택을 강제한다', async () => {
+    const extracted = {
+      recipient:'김*순', phone:'010-****-5678',
+      address:'서울 강남구 테헤란로 ** 101동 1203호',
+    };
+    const proof = identity.issueExtractionProof({ imageHash:'6d'.repeat(32), extracted, ok:true });
+    const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
+    assert.strictEqual(reviewed.status, 'REVIEW', JSON.stringify(reviewed));
+    assert.ok(reviewed.reasonCodes.includes('masked_name_ocr_correction'));
+    assert.ok(!reviewed.reasonCodes.includes('selected_identity_partial_conflict'));
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+      formFields:extracted,
+    }, reviewer), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+  });
+
+  await test('정상 추출된 가림 수취인명은 저장 명의로 보완해 자동 승인한다', async () => {
+    const extracted = {
+      recipient:'김*수', phone:selectedFields.phone,
+      address:'***',
+    };
+    const proof = identity.issueExtractionProof({ imageHash:'6c'.repeat(32), extracted, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
+    assert.strictEqual(matched.status, 'MATCH', JSON.stringify(matched));
+    assert.strictEqual(matched.resolved.recipient, selectedFields.recipient);
+    assert.ok(matched.approvalToken);
+  });
+
+  await test('가림 이름 OCR 근접오류라도 실제 동이 다르면 재확인 토큰을 주지 않는다', async () => {
+    const extracted = {
+      recipient:'김*순', phone:'010-****-5678',
+      address:'서울 강남구 테헤란로 ** 102동 ***호',
+    };
+    const proof = identity.issueExtractionProof({ imageHash:'6b'.repeat(32), extracted, ok:true });
+    const mismatch = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
+    assert.strictEqual(mismatch.status, 'MISMATCH', JSON.stringify(mismatch));
+    assert.strictEqual(mismatch.reviewToken, '');
+  });
+
   await test('자동 MATCH 뒤 입력값을 수정하면 기존 승인증명으로 재확인해 새 토큰을 발급한다', async () => {
     const proof = identity.issueExtractionProof({ imageHash:'1'.repeat(64), extracted:selectedFields, ok:true });
     const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:selectedFields }, reviewer);
