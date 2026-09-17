@@ -104,6 +104,7 @@ const RI_ROWS = [
   { sheetId: 'S1', tabName: 'T1', rowIndex: 23, isSubmitted: true, isPaid: false },
 ];
 const PRICES = { 11: '20300', 12: '12400', 21: '18900', 22: '12400', 23: '9800' };
+let virtualOnly = false;
 pool.query = async (sql) => {
   if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql)) return { rows: [] };
   // 완료된 무시트 주문은 카드 금액에만 남고 참여중/입금완료 합계에는 추가되지 않는다.
@@ -112,7 +113,7 @@ pool.query = async (sql) => {
   //     순서가 뒤면 명단 fixture 가 가로채 무시트 주문 5건으로 오인된다(스텁 매칭 함정).
   if (/SELECT os\.id,[\s\S]*FROM earnings_orders os[\s\S]*LEFT JOIN campaign_participants cp[\s\S]*NOT EXISTS/.test(sql)) return { rows: [
     { id:'completed-without-index',sheetId:'S2',tabName:'T2',isSubmitted:true,price:'22000',reviewFee:1000 },
-    { id:'legacy-duplicate',sheetId:'campaign:legacy',tabName:'campaign:legacy',participantSheetId:'S1',participantTabName:'T1',participantRowIndex:11,isSubmitted:false,price:'20300',reviewFee:1000 },
+    { id:'legacy-duplicate',sheetId:'campaign:legacy',tabName:'campaign:legacy',participantSheetId:'S1',participantTabName:'T1',participantRowIndex:11,isSubmitted:false,price:'20300',reviewFee:1000,feeSnapshot:1500,orderedAt:'2026-08-01T01:00:00Z' },
     { id:'paid-duplicate',sheetId:'campaign:legacy',tabName:'campaign:legacy',participantSheetId:'S1',participantTabName:'T1',participantRowIndex:21,isSubmitted:true,price:'18900',reviewFee:1000 },
   ] };
   if (/SELECT ri\.sheet_id AS "sheetId"/.test(sql)) return { rows: RI_ROWS };
@@ -120,7 +121,7 @@ pool.query = async (sql) => {
     return { rows: [{ sheetId: 'S1', tabName: 'T1', reviewFee: 1000, thumbnailUrl: 'https://x/y.png' }] };
   }
   if (/SELECT os\.sheet_id AS "sheetId"/.test(sql)) {
-    return { rows: RI_ROWS.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, sheetRow: r.rowIndex, price: PRICES[r.rowIndex] })) };
+    return { rows: RI_ROWS.filter(r=>!virtualOnly || r.rowIndex!==11).map(r => ({ sheetId: r.sheetId, tabName: r.tabName, sheetRow: r.rowIndex, price: PRICES[r.rowIndex] })) };
   }
   return { rows: [] };
 };
@@ -170,6 +171,13 @@ async function call(method, routePath, req) {
   ok('완료된 무시트 주문은 카드 금액만 유지하고 예정액·입금완료 누적액에 더하지 않음',
     b.items['order||completed-without-index'].productPrice === 22000 &&
     b.totals.count === 2 && b.doneTotals.count === 2 && !b.items['S2||T2||order']);
+
+  virtualOnly = true;
+  const virtual = (await call('get', '/review-earnings', { query: { phone8: '85926325' } })).body;
+  ok('가상 주문 좌표의 원장 금액·참여 당시 리뷰비를 기존 카드에 보존하고 한 번만 합산',
+    virtual.items['S1||T1||11'].productPrice === 20300 && virtual.items['S1||T1||11'].reviewFee === 1500 &&
+    virtual.totals.count === 2 && virtual.totals.productUnknown === 0 && virtual.totals.grandTotal === 35200 &&
+    virtual.doneTotals.grandTotal === 33300 && !virtual.items['order||legacy-duplicate']);
 
   // 실패를 0원 성공으로 위장하지 않는다. 기존 프론트는 ok=false를 무시한다.
   pool.query = async () => { throw new Error('boom'); };

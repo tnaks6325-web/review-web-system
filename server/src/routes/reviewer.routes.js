@@ -1342,11 +1342,14 @@ router.get('/review-earnings', async (req, res, next) => {
           -- Prefer the live participant coordinate; otherwise resolve the order's board.
           AND NOT EXISTS (
             SELECT 1 FROM index_master_archive archived
-             WHERE (cp.id IS NOT NULL AND archived.sheet_id = cp.sheet_id AND archived.tab_name = cp.tab_name)
+             WHERE (cp.id IS NOT NULL AND archived.sheet_id = cp.sheet_id
+                    AND (archived.tab_name = cp.tab_name OR archived.tab_gid = NULLIF(cp.tab_gid, '')))
                 OR (cp.id IS NULL AND os.sheet_id NOT LIKE 'campaign:%'
-                    AND archived.sheet_id = os.sheet_id AND archived.tab_name = os.tab_name)
+                    AND archived.sheet_id = os.sheet_id
+                    AND (archived.tab_name = os.tab_name OR archived.tab_gid = NULLIF(os.tab_gid, '')))
                 OR (cp.id IS NULL AND os.sheet_id LIKE 'campaign:%'
-                    AND archived.sheet_id = rc.linked_sheet_id AND archived.tab_name = rc.linked_tab_name)
+                    AND archived.sheet_id = rc.linked_sheet_id
+                    AND (archived.tab_name = rc.linked_tab_name OR archived.tab_gid = NULLIF(rc.linked_tab_gid, '')))
           )
           AND NOT EXISTS (
             SELECT 1 FROM review_closed_targets rrs
@@ -1446,6 +1449,21 @@ router.get('/review-earnings', async (req, res, next) => {
     // These rows already passed the full owner/sub-account scope above. Reuse
     // that result for legacy participants whose owner UUIDs are still empty.
     const indexedParticipationKeys = new Set(riRows.map(r => JSON.stringify([r.sheetId, r.tabName, r.rowIndex])));
+    for (const o of sheetlessOrders) {
+      if (!o.participantSheetId || !indexedParticipationKeys.has(
+        JSON.stringify([o.participantSheetId, o.participantTabName, o.participantRowIndex])
+      )) continue;
+      // A virtual campaign coordinate cannot populate the real row's maps in
+      // the earlier order query. Retain its monetary evidence before deduping.
+      const pk = `${o.participantSheetId}||${o.participantTabName}||${o.participantRowIndex}`;
+      const parsed = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
+      const price = Number.isFinite(parsed) && parsed > 0 ? parsed : extractAmountNumber(o.rowJson);
+      if (!Object.prototype.hasOwnProperty.call(priceMap, pk) && price > 0) priceMap[pk] = price;
+      if (!orderFeeMap[pk]) orderFeeMap[pk] = {
+        snapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
+        orderDate: toKstDate(o.orderedAt),
+      };
+    }
     let productTotal = 0, reviewTotal = 0, count = 0, productUnknown = 0;
     let dProductTotal = 0, dReviewTotal = 0, dCount = 0, dProductUnknown = 0, dUnpaidCount = 0;
     for (const r of riRows) {
