@@ -792,12 +792,68 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
              rt.campaign_name AS "targetCampaignName", ri.campaign_name AS "indexCampaignName"
         FROM order_submissions os
         LEFT JOIN LATERAL (
+          /* 한 주문 UUID에 과거 다른 리뷰어 행이 섞인 사례가 있으므로 최신 행을 임의로
+             고르지 않는다. 로그인 소유자의 본계정·타계정 범위만 먼저 모으고, 그 안의
+             어느 명의로든 같은 작업이 완료됐다면 주문 전체를 완료로 본다. 소유자 범위에
+             서로 다른 작업행이 여러 개 남으면 잘못된 독촉보다 미노출이 안전하므로 제외한다. */
+          WITH owner_rows AS (
+            SELECT p.*,
+                   (COALESCE(p.is_submitted, FALSE)
+                    OR EXISTS (
+                      SELECT 1 FROM review_index dri
+                       WHERE dri.sheet_id = p.sheet_id
+                         AND dri.tab_name = p.tab_name
+                         AND dri.row_index = p.seq
+                         AND dri.is_submitted = TRUE
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM review_index_archive dra
+                       WHERE dra.sheet_id = p.sheet_id
+                         AND dra.tab_name = p.tab_name
+                         AND dra.row_index = p.seq
+                         AND dra.is_submitted = TRUE
+                    )) AS work_submitted
+              FROM campaign_participants p
+             WHERE p.order_submission_id = os.id
+               AND p.deleted_at IS NULL
+               AND (
+                 p.owner_reviewer_id = $1
+                 OR (p.owner_reviewer_id IS NULL AND (
+                   (p.participant_identity_id IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM reviewer_identities owner_identity
+                      WHERE owner_identity.id = p.participant_identity_id
+                        AND owner_identity.owner_reviewer_id = $1
+                   ))
+                   OR (p.participant_identity_id IS NULL
+                       AND p.phone8 = ANY($2)
+                       /* 전화번호는 재사용될 수 있다. 주문 또는 신청서에 다른 소유자가
+                          명시된 경우에는 소유자 없는 과거 참여행을 현재 계정에 붙이지 않는다. */
+                       AND (
+                         os.owner_reviewer_id = $1
+                         OR (os.owner_reviewer_id IS NULL AND NOT EXISTS (
+                           SELECT 1
+                             FROM campaign_applications legacy_owner_ca
+                            WHERE legacy_owner_ca.id = os.campaign_application_id
+                              AND legacy_owner_ca.owner_reviewer_id IS NOT NULL
+                              AND legacy_owner_ca.owner_reviewer_id <> $1
+                         ))
+                       ))
+                 ))
+               )
+               AND (NOT $3::boolean OR (
+                 p.participant_identity_id = $4
+                 OR (p.participant_identity_id IS NULL AND p.phone8 = ANY($2))
+               ))
+          ), owner_summary AS (
+            SELECT COUNT(DISTINCT (sheet_id, tab_name, seq))::int AS owner_link_count,
+                   COALESCE(BOOL_OR(work_submitted), FALSE) AS owner_work_submitted
+              FROM owner_rows
+          )
           SELECT p.sheet_id, p.tab_name, p.seq, p.is_submitted, p.phone8,
-                 p.owner_reviewer_id, p.participant_identity_id
-            FROM campaign_participants p
-           WHERE p.order_submission_id = os.id
-             AND p.deleted_at IS NULL
-           ORDER BY p.updated_at DESC, p.id DESC
+                 p.owner_reviewer_id, p.participant_identity_id,
+                 s.owner_link_count, s.owner_work_submitted
+            FROM owner_rows p CROSS JOIN owner_summary s
+           ORDER BY p.work_submitted DESC, p.updated_at DESC, p.id DESC
            LIMIT 1
         ) cp ON TRUE
         JOIN review_index ri
@@ -819,25 +875,23 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
         LEFT JOIN recruit_campaigns rc
           ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
         LEFT JOIN tab_configs rt ON rt.sheet_id = ri.sheet_id AND rt.tab_name = ri.tab_name
-       WHERE (cp.owner_reviewer_id = $1
-              OR (cp.owner_reviewer_id IS NULL AND (
-                os.owner_reviewer_id = $1
-                OR (os.owner_reviewer_id IS NULL AND (
-                  ca.owner_reviewer_id = $1
-                  OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($2) AND NOT EXISTS (
-                    SELECT 1 FROM reviewer_phone_changes rpc
-                     WHERE rpc.old_phone8 = ca.owner_phone8
-                       AND rpc.reviewer_id <> $1
-                  ) AND NOT EXISTS (
-                    SELECT 1
-                      FROM reviewer_identity_aliases ria
-                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                     WHERE ria.phone8 = ca.owner_phone8
-                       AND rii.owner_reviewer_id <> $1
-                  ))
-                  OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                      AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2))
+       WHERE (cp.sheet_id IS NOT NULL
+              OR os.owner_reviewer_id = $1
+              OR (os.owner_reviewer_id IS NULL AND (
+                ca.owner_reviewer_id = $1
+                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($2) AND NOT EXISTS (
+                  SELECT 1 FROM reviewer_phone_changes rpc
+                   WHERE rpc.old_phone8 = ca.owner_phone8
+                     AND rpc.reviewer_id <> $1
+                ) AND NOT EXISTS (
+                  SELECT 1
+                    FROM reviewer_identity_aliases ria
+                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                   WHERE ria.phone8 = ca.owner_phone8
+                     AND rii.owner_reviewer_id <> $1
                 ))
+                OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                    AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2))
               )))
          AND (NOT $3::boolean OR (
            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} = $4
@@ -848,8 +902,9 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
          AND os.deleted_at IS NULL
          AND os.mirror_status = 'written'
          AND os.submitted_at <= NOW() - INTERVAL '10 days'
-         AND NOT COALESCE(cp.is_submitted, FALSE)
+         AND NOT COALESCE(cp.owner_work_submitted, FALSE)
          AND NOT COALESCE(ri.is_submitted, FALSE)
+         AND COALESCE(cp.owner_link_count, 1) = 1
          AND NOT EXISTS (
            SELECT 1 FROM review_reminder_states rrs
             WHERE rrs.order_submission_id = os.id
