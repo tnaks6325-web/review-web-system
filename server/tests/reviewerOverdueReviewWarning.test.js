@@ -19,8 +19,17 @@ ok('로그인 세션 전용 API', routeStart >= 0 && /overdue-review-warning', r
 ok('구매양식 제출 후 10일 경과 기준', /os\.submitted_at <= NOW\(\) - INTERVAL '10 days'/.test(routeBlock));
 ok('구매양식 제출시간이 가장 오래된 1건', /ORDER BY os\.submitted_at ASC, os\.id ASC[\s\S]*LIMIT 1/.test(routeBlock));
 ok('작업표에 반영된 주문만 대상', /os\.mirror_status = 'written'/.test(routeBlock));
-ok('리뷰색인 또는 작업표가 제출완료면 제외', /NOT COALESCE\(cp\.is_submitted, FALSE\)/.test(routeBlock)
+ok('소유자 범위의 어느 명의로든 제출완료면 제외', /WITH owner_rows AS/.test(routeBlock)
+  && /BOOL_OR\(work_submitted\)/.test(routeBlock)
+  && /NOT COALESCE\(cp\.owner_work_submitted, FALSE\)/.test(routeBlock)
   && /NOT COALESCE\(ri\.is_submitted, FALSE\)/.test(routeBlock));
+ok('활성·보관 리뷰색인을 함께 완료 근거로 사용', /EXISTS \([\s\S]*FROM review_index dri/.test(routeBlock)
+  && /EXISTS \([\s\S]*FROM review_index_archive dra/.test(routeBlock));
+ok('같은 주문의 타소유자 행을 최신순으로 임의 선택하지 않음', /p\.owner_reviewer_id = \$1/.test(routeBlock)
+  && /owner_identity\.owner_reviewer_id = \$1/.test(routeBlock)
+  && /p\.phone8 = ANY\(\$2\)/.test(routeBlock));
+ok('소유자 범위에 서로 다른 작업행이 여러 개면 팝업 미노출', /COUNT\(DISTINCT \(sheet_id, tab_name, seq\)\)/.test(routeBlock)
+  && /COALESCE\(cp\.owner_link_count, 1\) = 1/.test(routeBlock));
 ok('삭제된 참여건 제외', /workdesk_participant_deletions/.test(routeBlock) && /os\.deleted_at IS NULL/.test(routeBlock));
 ok('주문 UUID 없는 레거시는 위치와 phone8이 모두 맞아야 함', /cp\.sheet_id IS NOT NULL[\s\S]*ri\.phone8 = RIGHT\(regexp_replace/.test(routeBlock));
 ok('소유자가 기록된 주문은 전화번호 재사용으로 다른 계정에 귀속되지 않음',
@@ -65,9 +74,6 @@ async function call(req) {
     if (/FROM reviewers WHERE id/.test(sql)) {
       return { rows:[{ phone8:'11112222', sub_accounts:[{ phone:'010-3333-4444' }] }] };
     }
-    if (/FROM reviewer_identities/.test(sql)) {
-      return { rows:[{ current_phone8:'55556666' }] };
-    }
     if (/FROM order_submissions os/.test(sql)) {
       mainParams = params;
       return { rows:[{
@@ -76,6 +82,9 @@ async function call(req) {
         targetSheetId:'sheet-a', targetTabName:'작업표A', targetRowIndex:7,
         campaignTitle:'9/10(쿠팡) 아누아 어성초 클렌징폼',
       }] };
+    }
+    if (/FROM reviewer_identities/.test(sql)) {
+      return { rows:[{ current_phone8:'55556666' }] };
     }
     throw new Error('예상하지 못한 쿼리: ' + String(sql).slice(0, 80));
   };

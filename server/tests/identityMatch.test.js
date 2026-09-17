@@ -163,6 +163,15 @@ function ok(name, fn) {
     assert.strictEqual(r.subIndex, 1);
   });
 
+  await ok('SUB: 이름은 한 타계정이고 연락처는 같은 소유자의 다른 타계정이어도 이름 명의로 반영', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '박영희', phone: '010-9186-9944', address: '센텀파크 101동 505호',
+      bank: '케이뱅크', account: '999888777', depositor: '박영희',
+    });
+    assert.strictEqual(r.status, 'SUB');
+    assert.strictEqual(r.subIndex, 1);
+  });
+
   await ok('SUB: 타계정 주문의 리뷰비를 본인 공통계좌로 수령 = 통과', async () => {
     const r = await resolveOrderIdentity(reviewer, {
       recipient: '박영희', phone: '010-1111-2222', address: '센텀파크 101동 505호',
