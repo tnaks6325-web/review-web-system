@@ -56,7 +56,7 @@ assert.match(
 );
 assert.ok(!dedup.includes('WHERE NOT COALESCE(ri.is_submitted, FALSE)'),
   'completed index rows also suppress the duplicate sheetless order');
-assert.match(body,/if \(o\.isSubmitted\) continue;[\s\S]*count\+\+;/,
+assert.match(body,/if \(o\.isSubmitted\) \{\s*dUnpaidCount\+\+;\s*continue;\s*\}[\s\S]*count\+\+;/,
   'completed sheetless orders must not increase expected earnings');
 assert.match(
   dedup,

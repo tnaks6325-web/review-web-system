@@ -157,7 +157,7 @@ async function call(method, routePath, req) {
   ok('★ 누적 = 입금완료 2건만(18900+12400=31300, 리뷰비 2000) — 미입금 9800 미포함',
     b.doneTotals.count === 2 && b.doneTotals.productTotal === 31300 &&
     b.doneTotals.reviewTotal === 2000 && b.doneTotals.grandTotal === 33300);
-  ok('누적: 제외된 미입금 건수를 함께 반환(화면 고지용)', b.doneTotals.unpaidCount === 1);
+  ok('누적: 시트·무시트 미입금 건수를 함께 반환(화면 고지용)', b.doneTotals.unpaidCount === 2);
   ok('items: 완료 건도 상품비/리뷰비/썸네일을 받음(완료 카드 배지용)',
     !!b.items['S1||T1||21'] && b.items['S1||T1||21'].productPrice === 18900 &&
     b.items['S1||T1||21'].reviewFee === 1000 && !!b.items['S1||T1||21'].thumbnailUrl);

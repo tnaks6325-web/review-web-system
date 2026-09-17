@@ -1496,7 +1496,10 @@ router.get('/review-earnings', async (req, res, next) => {
       // Completed sheetless orders still supply their own card amount, but must
       // not become expected earnings or a pending card's fallback amount.
       // Completion alone is not proof of payment, so do not add to doneTotals.
-      if (o.isSubmitted) continue;
+      if (o.isSubmitted) {
+        dUnpaidCount++;
+        continue;
+      }
       const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
       const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
       if (existingFallback) {
