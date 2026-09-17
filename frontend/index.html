@@ -1664,8 +1664,13 @@ async function _loadReviewEarnings(phone8) {
       headers: { ..._getAuthHeaders() },
     }).then(x => x.json());
     if(sessionKey!==_historySessionKey) return;
-    if (r && r.ok) _reviewEarnings = { totals: r.totals || null, doneTotals: r.doneTotals || null, items: r.items || {} };
-  } catch (_) { /* 조용히 무시 — 요약/배지 없이 목록은 유지 */ }
+    _reviewEarnings = r && r.ok
+      ? { totals: r.totals || null, doneTotals: r.doneTotals || null, items: r.items || {} }
+      : { totals: null, doneTotals: null, items: {} };
+  } catch (_) {
+    if(sessionKey!==_historySessionKey) return;
+    _reviewEarnings = { totals: null, doneTotals: null, items: {} };
+  }
   renderReviewSummary();
   renderReviewSubTab();   // 카드별 상품비/리뷰비 배지 채우기(도착 후 재렌더)
 }
