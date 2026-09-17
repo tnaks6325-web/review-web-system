@@ -118,8 +118,8 @@ const checks = [
   ['무시트 예상금액은 변경된 번호가 아니라 주문·참여행 좌표로 기존 카드와 중복 제거한다',
     /AND NOT EXISTS \([\s\S]*FROM review_index ri[\s\S]*ri\.row_index = os\.sheet_row[\s\S]*ri\.row_index = cp\.seq/.test(reviewerRoutes)
       && !/FROM review_index ri\s+WHERE ri\.phone8 = ANY\(\$1\)\s+AND \(\(ri\.sheet_id = os\.sheet_id/.test(reviewerRoutes)],
-  ['무시트 예상금액의 좌표 중복 제거는 미제출 상태와 같은 소유자·타계정 신원만 인정한다',
-    /FROM review_index ri[\s\S]*WHERE NOT COALESCE\(ri\.is_submitted, FALSE\)[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2[\s\S]*NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' \}\)/.test(reviewerRoutes)],
+  ['무시트 예상금액의 좌표 중복 제거는 완료 여부와 무관하게 같은 소유자·타계정 신원만 인정한다',
+    /FROM review_index ri[\s\S]*WHERE \(\(ri\.sheet_id = os\.sheet_id[\s\S]*dri_cp\.owner_reviewer_id = \$2[\s\S]*dri_pl\.owner_reviewer_id = \$2[\s\S]*NOT \$3::boolean[\s\S]*_participantIdentityByOwnerSql\(\{ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' \}\)/.test(reviewerRoutes)],
   ['레거시 링크 owner UUID는 이름 변경 뒤에도 이름 대조 없이 참여현황에 포함한다',
     /pl\.owner_reviewer_id = \$2\s+OR \(pl\.owner_reviewer_id IS NULL AND pl\.phone8 = ANY\(\$1\)[\s\S]*regexp_replace/.test(reviewerRoutes)],
   ['만료·위조 리뷰어 토큰은 참여현황과 예상금액 모두 401 코드로 응답한다',
