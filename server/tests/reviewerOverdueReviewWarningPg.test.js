@@ -2,16 +2,28 @@
  * 격리 PostgreSQL 스키마에서 오래된 리뷰 경고의 실제 SQL을 검증한다.
  * 실행: PGTEST_URL=postgres://... node tests/reviewerOverdueReviewWarningPg.test.js
  */
-if (!process.env.PGTEST_URL) {
-  console.log('⏭  PGTEST_URL 미설정 — PostgreSQL 검증 건너뜀');
-  process.exit(0);
-}
-
 const assert = require('assert');
 const { Pool } = require('pg');
+const embedded = !process.env.PGTEST_URL;
+const pg = embedded ? new (require(process.env.PGLITE_MODULE || '@electric-sql/pglite').PGlite)() : null;
+let comparisons = 0;
+const embeddedQuery = async (sql, params) => {
+  if (sql.includes('WITH warning_candidate_ids AS MATERIALIZED')) {
+    const baseline = sql.slice(sql.indexOf('\n      SELECT os.id AS'))
+      .replace('FROM warning_orders os', 'FROM order_submissions os');
+    const before = await pg.query(baseline, params);
+    const after = await pg.query(sql, params);
+    assert.deepStrictEqual(after.rows, before.rows, '후보 축소 전후 결과 일치');
+    comparisons++;
+    return after;
+  }
+  if (params) return pg.query(sql, params);
+  const results = await pg.exec(sql);
+  return results.at(-1) || { rows:[] };
+};
 
 const schemaName = 'reviewer_overdue_warning_test';
-const adminPool = new Pool({ connectionString:process.env.PGTEST_URL });
+const adminPool = embedded ? { query:embeddedQuery, end:()=>pg.close() } : new Pool({ connectionString:process.env.PGTEST_URL });
 
 function scopedConnectionString(base, schema) {
   const url = new URL(base);
@@ -36,10 +48,15 @@ async function callRoute(router, ownerReviewerId) {
 (async () => {
   await adminPool.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE`);
   await adminPool.query(`CREATE SCHEMA ${schemaName}`);
-  process.env.DATABASE_URL = scopedConnectionString(process.env.PGTEST_URL, schemaName);
+  if (!embedded) process.env.DATABASE_URL = scopedConnectionString(process.env.PGTEST_URL, schemaName);
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'reviewer-overdue-test-secret';
 
-  const pool = require('../src/db/pool');
+  let pool;
+  if (embedded) {
+    await pg.exec(`SET search_path=${schemaName}`);
+    pool = { query:embeddedQuery, end:async()=>{}, connect:async()=>({ query:embeddedQuery, release(){} }) };
+    require.cache[require.resolve('../src/db/pool')] = { exports:pool };
+  } else pool = require('../src/db/pool');
   await pool.query(`
     CREATE TABLE reviewers (
       id UUID PRIMARY KEY, reviewer_no BIGINT, phone8 TEXT, sub_accounts JSONB DEFAULT '[]'::jsonb
@@ -80,6 +97,15 @@ async function callRoute(router, ownerReviewerId) {
     );
   `);
 
+  await pool.query(`
+    ALTER TABLE campaign_participants ADD COLUMN active boolean DEFAULT true, ADD COLUMN round text DEFAULT '';
+    ALTER TABLE review_index ADD COLUMN row_json jsonb DEFAULT '{}', ADD COLUMN submit_col text DEFAULT 'review', ADD COLUMN round text DEFAULT '';
+    ALTER TABLE tab_configs ADD COLUMN is_closed boolean DEFAULT false, ADD COLUMN archived_rounds text DEFAULT '';
+    CREATE TABLE reviewer_participations(sheet_id text,tab_name text,row_index int,lifecycle_status text,review_obligation_status text,review_evidence jsonb);
+    CREATE TABLE review_closed_targets(order_submission_id uuid,review_status text);
+    CREATE TABLE index_master_archive(sheet_id text,tab_name text);
+    CREATE FUNCTION review_cell_text(text) RETURNS text LANGUAGE sql IMMUTABLE AS 'SELECT COALESCE($1,'''')';
+  `);
   const owner = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const old12 = '11111111-1111-4111-8111-111111111111';
   const old11 = '22222222-2222-4222-8222-222222222222';
@@ -204,7 +230,7 @@ async function callRoute(router, ownerReviewerId) {
   assert.ifError(mixedDone.err);
   assert.equal(mixedDone.body.item, null, '같은 소유자 범위에서 어느 명의로든 완료되면 재알림 없음');
 
-  console.log('✅ reviewerOverdueReviewWarningPg — 실제 PostgreSQL 9시나리오 통과');
+  console.log('✅ reviewerOverdueReviewWarningPg — SQL 시나리오 및 기존/개선 비교 ' + comparisons + '회 통과');
   await pool.end();
 })().catch(err => {
   console.error('❌ ' + err.stack);

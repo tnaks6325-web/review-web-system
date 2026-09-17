@@ -209,8 +209,8 @@ app.get('/health', async (req, res) => {
     ai = { gemini: `error: ${err.message}` };   // 헬스체크가 죽지 않게(fail-soft)
   }
 
-  res.json({
-    ok: true,
+  res.status(dbStatus === 'connected' ? 200 : 503).json({
+    ok: dbStatus === 'connected',
     ts: Date.now(),
     env: process.env.NODE_ENV || 'development',
     db: dbStatus,

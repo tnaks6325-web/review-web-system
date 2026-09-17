@@ -50,6 +50,11 @@ ok('카드별 제출기한 카운트다운을 되살리지 않음', !/_reviewDea
 
 const pool = require('../src/db/pool');
 const originalQuery = pool.query;
+const originalConnect = pool.connect;
+pool.connect = async () => ({
+  query: async (sql, params) => /^(BEGIN|SET LOCAL|COMMIT|ROLLBACK)/.test(sql) ? { rows:[] } : pool.query(sql, params),
+  release() {},
+});
 const router = require('../src/routes/reviewer.routes');
 
 function handlerFor(routePath) {
@@ -116,4 +121,5 @@ async function call(req) {
   process.exitCode = 1;
 }).finally(() => {
   pool.query = originalQuery;
+  pool.connect = originalConnect;
 });

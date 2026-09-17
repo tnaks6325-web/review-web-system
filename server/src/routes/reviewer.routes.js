@@ -804,18 +804,39 @@ router.get('/my-status', async (req, res, next) => {
 // 경고 표시 여부는 캠페인 참여 제한과 무관하며 이 API는 읽기만 수행한다.
 router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res, next) => {
   try {
+    if (process.env.REVIEW_OVERDUE_WARNING_ENABLED === '0') {
+      return res.status(503).json({ ok: false, code: 'REVIEW_WARNING_DEFERRED' });
+    }
     const scope = await _reviewerPhoneScopeFromSession(req.reviewer);
     if (!scope.ownerReviewerId || !scope.phone8s.length) {
       return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
     }
 
-    const { rows } = await pool.query(`
+    const { rows } = await require('../services/boundedReviewRead.service').boundedReviewRead(client => client.query(`
+      WITH warning_candidate_ids AS MATERIALIZED (
+        SELECT id FROM order_submissions
+         WHERE owner_reviewer_id = $1
+            OR RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2)
+        UNION
+        SELECT order_submission_id FROM campaign_participants
+         WHERE owner_reviewer_id = $1 OR phone8 = ANY($2)
+            OR participant_identity_id IN (SELECT id FROM reviewer_identities WHERE owner_reviewer_id = $1)
+        UNION
+        SELECT os.id FROM order_submissions os
+          JOIN campaign_applications app ON app.id = os.campaign_application_id
+         WHERE app.owner_reviewer_id = $1 OR app.owner_phone8 = ANY($2)
+      ), warning_orders AS MATERIALIZED (
+        SELECT os.* FROM order_submissions os
+          JOIN warning_candidate_ids candidate ON candidate.id = os.id
+         WHERE os.deleted_at IS NULL AND os.mirror_status = 'written'
+           AND os.submitted_at <= NOW() - INTERVAL '10 days'
+      )
       SELECT os.id AS "orderSubmissionId", os.submitted_at AS "submittedAt",
              FLOOR(EXTRACT(EPOCH FROM (NOW() - os.submitted_at)) / 86400)::int AS "elapsedDays",
              ri.sheet_id AS "targetSheetId", ri.tab_name AS "targetTabName", ri.row_index AS "targetRowIndex",
              rc.title AS "campaignTitle", rt.display_name AS "targetDisplayName",
              rt.campaign_name AS "targetCampaignName", ri.campaign_name AS "indexCampaignName"
-        FROM order_submissions os
+        FROM warning_orders os
         LEFT JOIN LATERAL (
           /* 한 주문 UUID에 과거 다른 리뷰어 행이 섞인 사례가 있으므로 최신 행을 임의로
              고르지 않는다. 로그인 소유자의 본계정·타계정 범위만 먼저 모으고, 그 안의
@@ -944,7 +965,7 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
        ORDER BY os.submitted_at ASC, os.id ASC
        LIMIT 1`,
       [scope.ownerReviewerId, scope.phone8s, scope.restrictParticipant === true, scope.participantIdentityId || null]
-    );
+    ));
 
     if (!rows.length) return res.json({ ok: true, item: null });
     const row = rows[0];
@@ -961,6 +982,10 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
       },
     });
   } catch (err) {
+    if (['REVIEW_WARNING_BUSY', '57014', '53400', '55P03'].includes(err.code)) {
+      res.set('Retry-After', '10');
+      return res.status(503).json({ ok: false, code: 'REVIEW_WARNING_DEFERRED' });
+    }
     next(err);
   }
 });
