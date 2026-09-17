@@ -897,8 +897,8 @@
             <h2 id="activationNoteTitle">나중에 자동 발송을 켤 때</h2>
             <p>현재 운영 상태는 Railway 변수에서 확인하세요. 이 화면의 대상·발송 기능은 샘플 시뮬레이션이며 운영 API를 호출하지 않습니다.</p>
             <ol class="activation-checklist" aria-label="자동 발송 활성화 전 점검">
-              <li><b>1.</b> 관리자 인증으로 <code>GET /api/review-reminders/status</code>를 조회해 <code>providerConfigured: true</code>인지 확인</li>
-              <li><b>2.</b> <code>POST /api/review-reminders/run</code>에 <code>{&quot;dryRun&quot;:true}</code>를 보내 실제 대상과 건수 확인</li>
+              <li><b>1.</b> 관리자 인증으로 <code>GET /api/trackb/review-reminders/status</code>를 조회해 <code>providerConfigured: true</code>인지 확인</li>
+              <li><b>2.</b> <code>POST /api/trackb/review-reminders/run</code>에 <code>{&quot;dryRun&quot;:true}</code>를 보내 실제 대상과 건수 확인</li>
               <li><b>3.</b> 확인을 마친 뒤 Railway 운영 변수에서 아래 값을 적용하고 배포</li>
             </ol>
             <code id="enableVariable">REVIEW_REMINDER_ENABLED=1</code>
@@ -1120,7 +1120,7 @@
       $("#refreshBillingBtn").disabled = true;
       $("#billingStatus").textContent = "SOLAPI 계정 정보를 조회하는 중입니다.";
       try {
-        const response = await fetch(API_BASE_URL + "/api/review-reminders/status", {
+        const response = await fetch(API_BASE_URL + "/api/trackb/review-reminders/status", {
           headers: { Authorization: "Bearer " + token },
           cache: "no-store",
         });

@@ -124,6 +124,9 @@ app.use('/api/raw',       rawRoutes);
 // 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
 app.use('/api/mapping',   mappingRoutes);
 app.use('/api/participants', participantsRoutes);  // Phase 1 shadow — master 전용, 신규 테이블만
+// 인트라넷 SSO 토큰은 /api/trackb/* 밖으로 나갈 수 없다. 알림톡 운영 화면도 Track B 셸에서
+// 열리므로 같은 관리자 전용 라우터를 이 경로에도 먼저 마운트한다(기존 직접 관리자 경로 유지).
+app.use('/api/trackb/review-reminders', reviewReminderRoutes);
 app.use('/api/trackb', trackBRoutes);              // Track B(평행 트랙) — master/광고주 스코프, 라이브 무영향
 
 // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체)
