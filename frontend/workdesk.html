@@ -11241,7 +11241,11 @@ async function _pmLoad(force){
   }finally{ if(timer) clearTimeout(timer); }
   // 쓰기 후 강제조회·로그아웃이 이 요청보다 늦게 시작됐다면 이전 응답은 화면에 반영하지 않는다.
   if(generation!==_pmLoadGeneration) return;
-  if(!t || !t.ok){ $('#pmbody').innerHTML=`<div class="empty">입금대상을 불러오지 못했습니다.${t&&t.error?' ('+esc(t.error)+')':''}</div>`; return; }
+  if(!t || !t.ok){
+    const el=$('#pmbody');
+    if(el) el.innerHTML=`<div class="empty">입금대상을 불러오지 못했습니다.${t&&t.error?' ('+esc(t.error)+')':''}<br><button class="btn" onclick="_pmLoad()">다시 시도</button></div>`;
+    return;
+  }
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
   // 새 결과 파일은 result-apply 경로에서 즉시 기록하므로, 이 경로는 기존 실패 이력에만 해당한다.

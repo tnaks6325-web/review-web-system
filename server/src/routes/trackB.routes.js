@@ -1346,6 +1346,7 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
         throughWrite = { attempted: true, ok: false, reason: 'exception', message: e.message };
       }
     }
+    if (out.ok) _invalidatePaymentTargetFlights();
     res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite });
   } catch (err) { next(err); }
 });
@@ -1354,7 +1355,9 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName, rowId, field } = req.body || {};
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
     const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
+    const out = await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) });
+    if (out && out.ok) _invalidatePaymentTargetFlights();
+    res.json(out);
   } catch (err) { next(err); }
 });
 /* 읽는 범위 진단 — "지금 어느 시트를 왜 읽는가"(2026-08-19).
