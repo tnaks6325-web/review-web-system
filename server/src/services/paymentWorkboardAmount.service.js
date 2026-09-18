@@ -57,27 +57,53 @@ async function loadWorkboardAmounts(db, targetRows) {
     `WITH targets AS (
        SELECT * FROM jsonb_to_recordset($1::jsonb)
          AS x("sheetId" text, "tabName" text, "rowIndex" integer)
+     ), selected AS (
+       SELECT t."sheetId", t."tabName", t."rowIndex",
+              cp.id, cp.row_json, cp.order_submission_id, cp.source, cp.identity_key
+         FROM targets t
+         LEFT JOIN LATERAL (
+           SELECT cp.id, cp.row_json, cp.order_submission_id, cp.source, cp.identity_key
+             FROM campaign_participants cp
+            WHERE cp.sheet_id = t."sheetId" AND cp.tab_name = t."tabName" AND cp.seq = t."rowIndex"
+              AND cp.deleted_at IS NULL AND cp.active = TRUE
+            ORDER BY cp.updated_at DESC, cp.id DESC LIMIT 1
+         ) cp ON TRUE
+     ), order_counts AS (
+       SELECT same_cp.sheet_id, same_cp.tab_name, same_cp.order_submission_id, COUNT(*) AS n
+         FROM campaign_participants same_cp
+         JOIN (SELECT DISTINCT "sheetId", "tabName", order_submission_id
+                 FROM selected WHERE order_submission_id IS NOT NULL) wanted
+           ON wanted."sheetId" = same_cp.sheet_id
+          AND wanted."tabName" = same_cp.tab_name
+          AND wanted.order_submission_id = same_cp.order_submission_id
+        WHERE same_cp.deleted_at IS NULL AND same_cp.active = TRUE
+        GROUP BY same_cp.sheet_id, same_cp.tab_name, same_cp.order_submission_id
+     ), identity_counts AS (
+       SELECT same_cp.sheet_id, same_cp.tab_name, same_cp.identity_key, COUNT(*) AS n
+         FROM campaign_participants same_cp
+         JOIN (SELECT DISTINCT "sheetId", "tabName", identity_key
+                 FROM selected
+                WHERE source IS DISTINCT FROM 'manual' AND NULLIF(identity_key, '') IS NOT NULL) wanted
+           ON wanted."sheetId" = same_cp.sheet_id
+          AND wanted."tabName" = same_cp.tab_name
+          AND wanted.identity_key = same_cp.identity_key
+        WHERE same_cp.deleted_at IS NULL AND same_cp.active = TRUE
+        GROUP BY same_cp.sheet_id, same_cp.tab_name, same_cp.identity_key
      )
-     SELECT t."sheetId", t."tabName", t."rowIndex",
+     SELECT cp."sheetId", cp."tabName", cp."rowIndex",
             cp.row_json AS "participantRowJson",
             CASE
               WHEN cp.order_submission_id IS NOT NULL THEN
-                (SELECT COUNT(*) FROM campaign_participants same_cp
-                  WHERE same_cp.sheet_id = cp.sheet_id AND same_cp.tab_name = cp.tab_name
-                    AND same_cp.deleted_at IS NULL AND same_cp.active = TRUE
-                    AND same_cp.order_submission_id = cp.order_submission_id) > 1
+                COALESCE(oc.n, 0) > 1
               WHEN cp.source IS DISTINCT FROM 'manual' AND NULLIF(cp.identity_key, '') IS NOT NULL THEN
-                (SELECT COUNT(*) FROM campaign_participants same_cp
-                  WHERE same_cp.sheet_id = cp.sheet_id AND same_cp.tab_name = cp.tab_name
-                    AND same_cp.deleted_at IS NULL AND same_cp.active = TRUE
-                    AND same_cp.identity_key = cp.identity_key) > 1
+                COALESCE(ic.n, 0) > 1
               ELSE FALSE
             END AS "ambiguous",
             COALESCE((
               SELECT jsonb_object_agg(pe.field,
                        CASE WHEN pe.kind = 'bool' THEN to_jsonb(pe.value_bool) ELSE to_jsonb(pe.value_text) END)
                 FROM participant_edits pe
-               WHERE pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+               WHERE pe.sheet_id = cp."sheetId" AND pe.tab_name = cp."tabName"
                  AND pe.anchor_type = 'manual' AND pe.anchor_value = cp.id::text
                  AND pe.reverted_at IS NULL AND pe.field LIKE 'col:%'
             ), '{}'::jsonb) AS "manualEdits",
@@ -85,7 +111,7 @@ async function loadWorkboardAmounts(db, targetRows) {
               SELECT jsonb_object_agg(pe.field,
                        CASE WHEN pe.kind = 'bool' THEN to_jsonb(pe.value_bool) ELSE to_jsonb(pe.value_text) END)
                 FROM participant_edits pe
-               WHERE pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+               WHERE pe.sheet_id = cp."sheetId" AND pe.tab_name = cp."tabName"
                  AND pe.reverted_at IS NULL AND pe.field LIKE 'col:%'
                  AND pe.anchor_type = CASE
                        WHEN cp.order_submission_id IS NOT NULL THEN 'order'
@@ -99,26 +125,20 @@ async function loadWorkboardAmounts(db, targetRows) {
                        ELSE cp.id::text END
                  AND (
                    cp.order_submission_id IS NULL
-                   OR (SELECT COUNT(*) FROM campaign_participants same_cp
-                        WHERE same_cp.sheet_id = cp.sheet_id AND same_cp.tab_name = cp.tab_name
-                          AND same_cp.deleted_at IS NULL AND same_cp.active = TRUE
-                          AND same_cp.order_submission_id = cp.order_submission_id) = 1
+                   OR COALESCE(oc.n, 0) = 1
                  )
                  AND (
                    cp.order_submission_id IS NOT NULL OR cp.source = 'manual' OR NULLIF(cp.identity_key, '') IS NULL
-                   OR (SELECT COUNT(*) FROM campaign_participants same_cp
-                        WHERE same_cp.sheet_id = cp.sheet_id AND same_cp.tab_name = cp.tab_name
-                          AND same_cp.deleted_at IS NULL AND same_cp.active = TRUE
-                          AND same_cp.identity_key = cp.identity_key) = 1
+                   OR COALESCE(ic.n, 0) = 1
                  )
             ), '{}'::jsonb) AS "anchorEdits"
-       FROM targets t
-       LEFT JOIN LATERAL (
-         SELECT cp.* FROM campaign_participants cp
-          WHERE cp.sheet_id = t."sheetId" AND cp.tab_name = t."tabName" AND cp.seq = t."rowIndex"
-            AND cp.deleted_at IS NULL AND cp.active = TRUE
-          ORDER BY cp.updated_at DESC, cp.id DESC LIMIT 1
-       ) cp ON TRUE`,
+       FROM selected cp
+       LEFT JOIN order_counts oc
+         ON oc.sheet_id = cp."sheetId" AND oc.tab_name = cp."tabName"
+        AND oc.order_submission_id = cp.order_submission_id
+       LEFT JOIN identity_counts ic
+         ON ic.sheet_id = cp."sheetId" AND ic.tab_name = cp."tabName"
+        AND ic.identity_key = cp.identity_key`,
     [JSON.stringify(targets.map(({ sheetId, tabName, rowIndex }) => ({ sheetId, tabName, rowIndex })))]
   );
 
