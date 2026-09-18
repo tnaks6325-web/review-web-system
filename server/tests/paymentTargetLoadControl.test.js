@@ -28,10 +28,17 @@ assert.match(load, /60000/,
   '무한 로딩 대신 60초 뒤 재시도 화면을 보여야 한다');
 assert.match(load, /_pmLoad\(true\)/,
   '레거시 입금일 보완 뒤에는 최신 결과를 강제 재조회해야 한다');
-assert.match(load, /if\(force\) _pmLoadInFlight=null;/,
+assert.match(load, /if\(force\)\{[^}]*_pmLoadGeneration\+=1;[^}]*_pmLoadInFlight=null;/,
   '쓰기 전 조회를 버리고 쓰기 후 강제 조회를 새 대표 요청으로 삼아야 한다');
+assert.match(load, /_pmLoadGeneration/);
+assert.match(load, /generation!==_pmLoadGeneration/,
+  '쓰기 후 조회보다 늦게 끝난 예전 응답은 화면을 다시 덮으면 안 된다');
 assert.match(workdesk, /function _dropSession[\s\S]*?_pmLoadInFlight=null;/,
   '세션 만료 뒤 로그인하면 이전 계정의 미완료 요청을 재사용하면 안 된다');
+const logout = workdesk.slice(workdesk.indexOf('function logout()'), workdesk.indexOf('function logout()') + 500);
+assert.match(logout, /_pmLoadGeneration\+=1/);
+assert.match(logout, /_pmLoadInFlight=null/,
+  '수동 로그아웃도 이전 계정의 입금 조회를 폐기해야 한다');
 
 const paymentArea = workdesk.slice(workdesk.indexOf('async function _pmLoad('));
 const unforcedAwaitLoads = paymentArea.match(/await _pmLoad\(\);/g) || [];

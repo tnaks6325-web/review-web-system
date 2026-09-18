@@ -2737,8 +2737,9 @@ async function tryTestAutoLogin(){
   }
 }
 // 만료/거부 토큰 정리 — "만료 배지 + 빈 목록" 유령 화면 대신 로그인으로. raw_sso 재주입 루프도 차단.
-let _pmLoadInFlight=null;
+let _pmLoadInFlight=null,_pmLoadGeneration=0;
 function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
+  _pmLoadGeneration+=1;
   _pmLoadInFlight=null;
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
@@ -2952,6 +2953,8 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
+  _pmLoadGeneration+=1;
+  _pmLoadInFlight=null;
   sessionStorage.removeItem('admin_token');
   // ★★ 접속 링크 세션은 **주소에 남은 해시가 곧 열쇠**다(A안). 여기서 지우지 않으면 바로 이어지는
   //   boot() 이 그 토큰을 다시 교환해 **로그아웃이 되지 않는다**(공용 PC에서 다음 사람이 그대로 입장).
@@ -11218,8 +11221,9 @@ async function _rsDismiss(i){
 async function _pmLoad(force){
   // 한 브라우저에서도 메뉴 재클릭·새로고침이 같은 대형 집계를 중복 호출하지 않게 한다.
   // 쓰기 성공 뒤 force=true이면 쓰기 전에 시작된 조회를 버리고 새 요청을 대표값으로 바꾼다.
-  if(force) _pmLoadInFlight=null;
+  if(force){ _pmLoadGeneration+=1; _pmLoadInFlight=null; }
   else if(_pmLoadInFlight) return _pmLoadInFlight;
+  const generation=_pmLoadGeneration;
   const run=(async()=>{
   const controller=typeof AbortController==='function' ? new AbortController() : null;
   const timer=controller ? setTimeout(()=>controller.abort(),60000) : null;
@@ -11230,10 +11234,13 @@ async function _pmLoad(force){
       api('/api/trackb/payment/batches?limit=30')
     ]);
   }catch(e){
+    if(generation!==_pmLoadGeneration) return;
     const el=$('#pmbody');
     if(el) el.innerHTML=`<div class="empty">${e&&e.name==='AbortError'?'입금대상 집계가 60초를 넘었습니다. 잠시 후 다시 시도해 주세요.':'입금대상을 불러오지 못했습니다.'}<br><button class="btn" onclick="_pmLoad()">다시 시도</button></div>`;
     return;
   }finally{ if(timer) clearTimeout(timer); }
+  // 쓰기 후 강제조회·로그아웃이 이 요청보다 늦게 시작됐다면 이전 응답은 화면에 반영하지 않는다.
+  if(generation!==_pmLoadGeneration) return;
   if(!t || !t.ok){ $('#pmbody').innerHTML=`<div class="empty">입금대상을 불러오지 못했습니다.${t&&t.error?' ('+esc(t.error)+')':''}</div>`; return; }
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
@@ -11249,6 +11256,7 @@ async function _pmLoad(force){
       await api('/api/trackb/payment/batch/' + batch.id + '/deposit-date-backfill',
         { method:'POST', body: JSON.stringify({}) });
     }
+    if(generation!==_pmLoadGeneration) return;
     return _pmLoad(true);
   }
   _pmPaint();
