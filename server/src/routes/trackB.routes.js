@@ -3810,15 +3810,25 @@ const _bankNames = require('../services/bankNameOverride.service');
 // 실행 중이면 그 Promise를 공유해 재클릭/새로고침이 동일 집계를 겹쳐 돌리지 않게 한다.
 // 결과 캐시는 두지 않는다. 회차 생성·입금 반영 직후에는 반드시 최신 원장을 다시 읽어야 한다.
 const _paymentTargetFlights = new Map();
+const PAYMENT_TARGET_FLIGHT_MAX_MS = 55 * 1000;
 let _paymentTargetGeneration = 0;
 function _invalidatePaymentTargetFlights() { _paymentTargetGeneration += 1; }
 function _sharedPaymentTargets(opts) {
   const key = JSON.stringify([_paymentTargetGeneration, opts.sheetId || '', opts.tabName || '']);
   const active = _paymentTargetFlights.get(key);
   if (active) return active;
-  const flight = paymentSvc.listPaymentTargets(opts);
+  let timer;
+  const work = paymentSvc.listPaymentTargets(opts);
+  const flight = Promise.race([work, new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error('입금대상 집계 제한시간을 초과했습니다.');
+      error.code = 'payment_target_timeout';
+      reject(error);
+    }, PAYMENT_TARGET_FLIGHT_MAX_MS);
+  })]);
   _paymentTargetFlights.set(key, flight);
   flight.finally(() => {
+    clearTimeout(timer);
     if (_paymentTargetFlights.get(key) === flight) _paymentTargetFlights.delete(key);
   }).catch(() => {});
   return flight;
@@ -3843,7 +3853,12 @@ router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (r
       tabName: String(req.query.tabName || '').trim() || undefined,
     });
     res.json({ ok: true, items: out.items, summary: out.summary });
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (err && err.code === 'payment_target_timeout') {
+      return res.status(504).json({ ok: false, code: err.code, error: err.message });
+    }
+    next(err);
+  }
 });
 
 // 회차 생성(= 다운로드 잠금). 파일은 아래 /file 로 따로 받는다 —

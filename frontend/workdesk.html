@@ -11231,7 +11231,7 @@ async function _pmLoad(force){
   try{
     [t,b]=await Promise.all([
       api('/api/trackb/payment/targets',controller?{signal:controller.signal}:undefined),
-      api('/api/trackb/payment/batches?limit=30')
+      api('/api/trackb/payment/batches?limit=30',controller?{signal:controller.signal}:undefined)
     ]);
   }catch(e){
     if(generation!==_pmLoadGeneration) return;

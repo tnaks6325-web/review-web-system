@@ -15,6 +15,9 @@ assert.match(routes, /_paymentTargetGeneration/);
 assert.match(routes, /router\.use\('\/payment'/,
   '결제 쓰기 성공 뒤에는 이전 세대 집계를 재사용하면 안 된다');
 assert.match(routes, /res\.statusCode >= 200 && res\.statusCode < 300/);
+assert.match(routes, /PAYMENT_TARGET_FLIGHT_MAX_MS = 55 \* 1000/);
+assert.match(routes, /payment_target_timeout/,
+  '멈춘 서버 집계를 공유 슬롯에 영구 보관하면 안 된다');
 assert.doesNotMatch(routes, /paymentTargetCache|paymentTargetsCache/,
   '금전 판정 결과를 캐시해 회차 생성 뒤 오래된 목록을 돌려주면 안 된다');
 
@@ -26,6 +29,8 @@ assert.match(load, /_pmLoadInFlight/,
 assert.match(load, /AbortController/);
 assert.match(load, /60000/,
   '무한 로딩 대신 60초 뒤 재시도 화면을 보여야 한다');
+assert.match(load, /payment\/batches\?limit=30',controller\?\{signal:controller\.signal\}/,
+  '회차 목록이 멈춰도 같은 제한시간에 중단돼야 한다');
 assert.match(load, /_pmLoad\(true\)/,
   '레거시 입금일 보완 뒤에는 최신 결과를 강제 재조회해야 한다');
 assert.match(load, /if\(force\)\{[^}]*_pmLoadGeneration\+=1;[^}]*_pmLoadInFlight=null;/,
