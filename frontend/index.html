@@ -1109,6 +1109,55 @@
 ═══════════════════════════════════════ */
 const USER_KEY = "iad_reviewer_user";
 const HOME_SESSION_KEY = "iad_reviewer_home_session";
+const HOME_VIEW_KEY = "iad_reviewer_home_view_v1";
+
+function _reviewerHomeViewKey(user) {
+  const phone8 = String(user && user.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
+  return phone8 ? HOME_VIEW_KEY + ':' + phone8 : '';
+}
+
+function _reviewerHomeViewStore(user) {
+  return user && user.adminPreview ? sessionStorage : localStorage;
+}
+
+function _readReviewerHomeView(user) {
+  const key = _reviewerHomeViewKey(user);
+  if (!key) return null;
+  try {
+    const saved = JSON.parse(_reviewerHomeViewStore(user).getItem(key) || 'null');
+    const tabs = ['home', 'review', 'cs', 'my'];
+    if (!saved || tabs.indexOf(saved.tab) < 0) return null;
+    return {
+      tab: saved.tab,
+      reviewSubTab: saved.reviewSubTab === 'done' ? 'done' : 'pending',
+    };
+  } catch (_) { return null; }
+}
+
+function _saveReviewerHomeView() {
+  const user = getSavedUser();
+  const key = _reviewerHomeViewKey(user);
+  if (!key) return;
+  try {
+    _reviewerHomeViewStore(user).setItem(key, JSON.stringify({
+      tab: ['home', 'review', 'cs', 'my'].indexOf(_currentTab) >= 0 ? _currentTab : 'home',
+      reviewSubTab: _reviewSubTab === 'done' ? 'done' : 'pending',
+    }));
+  } catch (_) { /* 저장소 제한 환경에서는 종전처럼 홈에서 시작 */ }
+}
+
+function _clearReviewerHomeView(user) {
+  const key = _reviewerHomeViewKey(user);
+  if (!key) return;
+  try { _reviewerHomeViewStore(user).removeItem(key); } catch (_) {}
+}
+
+function _restoreReviewerHomeView(user) {
+  const saved = _readReviewerHomeView(user);
+  if (saved && saved.reviewSubTab === 'done') _reviewSubTab = 'done';
+  else _reviewSubTab = 'pending';
+  switchTab(saved ? saved.tab : 'home');
+}
 
 function getSavedUser() {
   try {
@@ -1209,8 +1258,8 @@ function showHome(user) {
   loadReviewerNoticesHome();
   loadReviewerHomeBanner();
 
-  // 기본 탭 = 홈(소식·공지 + 모집공고)
-  switchTab('home');
+  // 마지막으로 보던 탭을 복원한다. 저장값이 없거나 손상되면 종전처럼 홈에서 시작한다.
+  _restoreReviewerHomeView(user);
   // 첫 이용 온보딩 (1회)
   if (!localStorage.getItem('inad_onboarded')) {
     Promise.resolve(overdueLoad).finally(() => setTimeout(() => {
@@ -1390,6 +1439,7 @@ function _highlightLoginField(field) {
 }
 
 function doLogout() {
+  _clearReviewerHomeView(getSavedUser());
   sessionStorage.removeItem(HOME_SESSION_KEY);
   sessionStorage.removeItem("rapp_reviewer_auth");
   localStorage.removeItem(USER_KEY);
@@ -1921,6 +1971,7 @@ window.addEventListener('pageshow', (e) => {
 /** 서브탭 전환 (제출대기 ↔ 제출완료) */
 function switchReviewSubTab(key) {
   _reviewSubTab = key === 'done' ? 'done' : 'pending';
+  _saveReviewerHomeView();
   renderReviewSubTab();
   renderReviewSummary();   // 참여중=요약 노출 / 제출완료=숨김
 }
@@ -3493,6 +3544,7 @@ function switchTab(tab) {
   // 리뷰 내역 탭 진입 시 최신 데이터 재조회(로그인 상태일 때만)
   if (key === 'review') { try { const u = getSavedUser(); if (u && u.phone8) loadReviewList(u); } catch (_) {} }
   if (key === 'cs') { try { loadCsInbox(); } catch (_) {} }
+  _saveReviewerHomeView();
   window.scrollTo(0, 0);
 }
 
