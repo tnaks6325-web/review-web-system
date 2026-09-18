@@ -150,6 +150,80 @@ async function rebuildWorktableProjection(worktable, by, force = false) {
   return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
 }
 
+/**
+ * 중복 줄 정리처럼 정원을 직접 바꾸지 않는 행 정리 뒤, 단일 연결 공고의 목표보다
+ * 활성 작업표가 작아졌을 때 빈 슬롯만 보충한다. 여러 공고가 한 작업표를 공유하면
+ * 어느 공고의 정원을 쓸지 추측하지 않고 건너뛴다.
+ *
+ * 이 함수는 초과 행을 줄이지 않는다. 삭제 작업의 후속 보충 전용이라 현재 행이 목표
+ * 이상이면 그대로 둔다. 실제 campaign_participants 쓰기는 기존 정원 동기화 한 벌을 쓴다.
+ */
+async function replenishWorktableSlotsToLinkedQuota({ sheetId, tabName, by = 'quota-replenish' } = {}) {
+  if (!sheetId || !tabName) return { synced: false, reason: 'bad_target', add: 0 };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+      [`sheetless_worktable:${sheetId}:${tabName}`]);
+    const { rows } = await client.query(
+      `SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
+              rc.recruit_total, rc.status, rc.source_work_order_id,
+              (
+                SELECT w.recruit_count
+                  FROM work_orders w
+                 WHERE w.deleted_at IS NULL
+                   AND (NULLIF(w.linked_campaign_id, '') = rc.id
+                     OR NULLIF(rc.source_work_order_id, '') = w.id)
+                 ORDER BY (NULLIF(w.linked_campaign_id, '') = rc.id) DESC, w.updated_at DESC
+                 LIMIT 1
+              ) AS work_order_recruit_total
+         FROM recruit_campaigns rc
+        WHERE rc.linked_sheet_id=$1 AND rc.linked_tab_name=$2
+          AND rc.archived_at IS NULL
+        ORDER BY rc.updated_at DESC
+        FOR UPDATE OF rc`, [sheetId, tabName]
+    );
+    const open = rows.filter(r => r.status === 'draft' || r.status === 'active');
+    const tier = open.length ? open : rows;
+    if (tier.length !== 1) {
+      await client.query('ROLLBACK');
+      return { synced: false, reason: tier.length ? 'shared_worktable' : 'no_campaign', add: 0 };
+    }
+    const campaign = tier[0];
+    const target = displayRecruitTotal(campaign.recruit_total, campaign.work_order_recruit_total).total;
+    if (target <= 0) {
+      await client.query('ROLLBACK');
+      return { synced: false, reason: 'no_positive_quota', add: 0 };
+    }
+    const { rows: liveRows } = await client.query(
+      `SELECT COUNT(*)::int AS live
+         FROM campaign_participants
+        WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE`,
+      [sheetId, tabName]
+    );
+    const live = Number(liveRows[0] && liveRows[0].live) || 0;
+    // 초과 표는 이 보충 경로의 대상이 아니다. 보호 행이 목표보다 많아도 축소 판정에
+    // 넣지 않으므로, 이미 존재하는 행을 건드리거나 오류로 보고하지 않는다.
+    if (live >= target) {
+      await client.query('ROLLBACK');
+      return { synced: false, reason: 'already_at_or_above_target', target, current: live, add: 0 };
+    }
+    const checked = await assertWorktableSlotsInTx(client, campaign, target);
+    if (!checked.checked || checked.add <= 0) {
+      await client.query('ROLLBACK');
+      return { ...checked, synced: false, reason: checked.reason || 'already_at_or_above_target', add: 0 };
+    }
+    const synced = await syncWorktableSlotsInTx(client, campaign, target, by);
+    await client.query('COMMIT');
+    return synced;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // 과거의 빈 초과 슬롯만 정리한다. 수동 진단 API와 자동 복구 크론이 같은 경로를 사용한다.
 // 잠금 뒤 기존 정원 동기화의 보호 규칙을 재사용하므로 참여·주문 행은 절대 은퇴하지 않는다.
 async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, by = 'overflow-cleanup' } = {}) {
@@ -551,4 +625,5 @@ module.exports = {
   syncCampaignRecruitTotal,
   syncWorkOrderRecruitTotal,
   cleanupOverflowEmptyWorktableSlots,
+  replenishWorktableSlotsToLinkedQuota,
 };
