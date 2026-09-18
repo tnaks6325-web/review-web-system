@@ -3810,8 +3810,10 @@ const _bankNames = require('../services/bankNameOverride.service');
 // 실행 중이면 그 Promise를 공유해 재클릭/새로고침이 동일 집계를 겹쳐 돌리지 않게 한다.
 // 결과 캐시는 두지 않는다. 회차 생성·입금 반영 직후에는 반드시 최신 원장을 다시 읽어야 한다.
 const _paymentTargetFlights = new Map();
+let _paymentTargetGeneration = 0;
+function _invalidatePaymentTargetFlights() { _paymentTargetGeneration += 1; }
 function _sharedPaymentTargets(opts) {
-  const key = JSON.stringify([opts.sheetId || '', opts.tabName || '']);
+  const key = JSON.stringify([_paymentTargetGeneration, opts.sheetId || '', opts.tabName || '']);
   const active = _paymentTargetFlights.get(key);
   if (active) return active;
   const flight = paymentSvc.listPaymentTargets(opts);
@@ -3821,6 +3823,17 @@ function _sharedPaymentTargets(opts) {
   }).catch(() => {});
   return flight;
 }
+
+// 결제 관련 쓰기가 성공하면, 그 전에 시작된 조회는 완료되더라도 후속 새로고침에 재사용하지 않는다.
+// 진행 중 Promise를 취소해 DB 작업을 고아로 만들지 않고 세대만 분리한다.
+router.use('/payment', (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) _invalidatePaymentTargetFlights();
+    });
+  }
+  next();
+});
 
 // 오늘 입금해야 할 건 + 은행별 집계
 router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

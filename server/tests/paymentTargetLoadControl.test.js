@@ -11,6 +11,10 @@ assert.match(routes, /const _paymentTargetFlights = new Map\(\)/,
   '서버가 동일 입금대상 집계를 한 번만 실행해야 한다');
 assert.match(routes, /if \(active\) return active/,
   '진행 중인 동일 집계 Promise를 재사용해야 한다');
+assert.match(routes, /_paymentTargetGeneration/);
+assert.match(routes, /router\.use\('\/payment'/,
+  '결제 쓰기 성공 뒤에는 이전 세대 집계를 재사용하면 안 된다');
+assert.match(routes, /res\.statusCode >= 200 && res\.statusCode < 300/);
 assert.doesNotMatch(routes, /paymentTargetCache|paymentTargetsCache/,
   '금전 판정 결과를 캐시해 회차 생성 뒤 오래된 목록을 돌려주면 안 된다');
 
@@ -24,5 +28,14 @@ assert.match(load, /60000/,
   '무한 로딩 대신 60초 뒤 재시도 화면을 보여야 한다');
 assert.match(load, /_pmLoad\(true\)/,
   '레거시 입금일 보완 뒤에는 최신 결과를 강제 재조회해야 한다');
+assert.match(load, /if\(force\) _pmLoadInFlight=null;/,
+  '쓰기 전 조회를 버리고 쓰기 후 강제 조회를 새 대표 요청으로 삼아야 한다');
+assert.match(workdesk, /function _dropSession[\s\S]*?_pmLoadInFlight=null;/,
+  '세션 만료 뒤 로그인하면 이전 계정의 미완료 요청을 재사용하면 안 된다');
+
+const paymentArea = workdesk.slice(workdesk.indexOf('async function _pmLoad('));
+const unforcedAwaitLoads = paymentArea.match(/await _pmLoad\(\);/g) || [];
+assert.equal(unforcedAwaitLoads.length, 0,
+  '입금 관련 쓰기 성공 뒤의 조회는 진행 중인 쓰기 전 요청을 재사용하면 안 된다');
 
 console.log('payment target load control tests passed');

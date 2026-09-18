@@ -2737,7 +2737,9 @@ async function tryTestAutoLogin(){
   }
 }
 // 만료/거부 토큰 정리 — "만료 배지 + 빈 목록" 유령 화면 대신 로그인으로. raw_sso 재주입 루프도 차단.
+let _pmLoadInFlight=null;
 function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
+  _pmLoadInFlight=null;
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
@@ -11213,11 +11215,11 @@ async function _rsDismiss(i){
   toast('기각됨'); _rsOpen();
 }
 
-let _pmLoadInFlight=null;
 async function _pmLoad(force){
   // 한 브라우저에서도 메뉴 재클릭·새로고침이 같은 대형 집계를 중복 호출하지 않게 한다.
-  // legacy 보완 뒤의 내부 재조회만 force=true로 새 요청을 시작한다.
-  if(!force && _pmLoadInFlight) return _pmLoadInFlight;
+  // 쓰기 성공 뒤 force=true이면 쓰기 전에 시작된 조회를 버리고 새 요청을 대표값으로 바꾼다.
+  if(force) _pmLoadInFlight=null;
+  else if(_pmLoadInFlight) return _pmLoadInFlight;
   const run=(async()=>{
   const controller=typeof AbortController==='function' ? new AbortController() : null;
   const timer=controller ? setTimeout(()=>controller.abort(),60000) : null;
@@ -11251,9 +11253,9 @@ async function _pmLoad(force){
   }
   _pmPaint();
   })();
-  if(!force) _pmLoadInFlight=run;
+  _pmLoadInFlight=run;
   try{ return await run; }
-  finally{ if(!force && _pmLoadInFlight===run) _pmLoadInFlight=null; }
+  finally{ if(_pmLoadInFlight===run) _pmLoadInFlight=null; }
 }
 
 const _pmKey = it => it.sheetId+'||'+it.tabName+'||'+it.rowIndex;
@@ -11678,7 +11680,7 @@ async function _pmDepositBackfill(i){
   if(r.failed) msg.push(`실패 ${r.failed}건`);
   if(r.skipped) msg.push(`제외 ${r.skipped}건`);
   toast(msg.join(' · '));
-  await _pmLoad();
+  await _pmLoad(true);
 }
 function _pmBoardApplyText(board){
   const b=board||{};
@@ -11984,7 +11986,7 @@ function _pmFixAcct(i){
 function _pmAfterFix(msg){
   _pmCloseDialog();
   try{ toast(msg); }catch(_){}
-  _pmLoad();   // 목록 갱신 실패는 [새로고침]으로 회복 가능 — 저장 결과를 붙잡지 않는다
+  _pmLoad(true);   // 목록 갱신 실패는 [새로고침]으로 회복 가능 — 저장 결과를 붙잡지 않는다
 }
 
 /* ── 공용 팝업 골격 ──────────────────────────────────────────
@@ -12069,7 +12071,7 @@ async function _pmDownload(bank){
   if((r.skipped||[]).length) toast(`${r.batch.itemCount}건 생성 · ${r.skipped.length}건은 제외됐습니다`);
   await _pmRefile(r.batch.id);
   STATE.pmExcluded = {};
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 async function _pmRefile(id){
@@ -12119,7 +12121,7 @@ async function _pmUploadResultFile(b, f){
   if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다.'); return; }
   STATE.pmResult = { batch:b, file:{ name:f.name }, preview:r, persisted:true, autoApplied:r.autoApplied===true };
   _pmResultModal();
-  await _pmLoad();
+  await _pmLoad(true);
 }
 function _pmPickResult(i){
   const b = (STATE.pmBatches||[])[i];
@@ -12140,7 +12142,7 @@ function _pmPickResult(i){
     if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다'); return; }
     STATE.pmResult = { batch:b, file:{ name:f.name }, preview:r, persisted:true, autoApplied:r.autoApplied===true };
     _pmResultModal();
-    await _pmLoad();
+    await _pmLoad(true);
   };
   inp.click();
 }
@@ -12265,7 +12267,7 @@ async function _pmReconcileAmountMismatch(rowIndex){
   _pmUnconfirmedClose();
   if(Number(r.board&&r.board.failed)>0) toast('금액 조정 승인은 완료됐지만 작업보드 입금일 기록에 실패했습니다. 재확인이 필요합니다.');
   else toast('실제 이체금액으로 입금완료 처리하고 감사 이력을 남겼습니다.');
-  await _pmLoad();
+  await _pmLoad(true);
 }
 function _pmOpenDuplicateCaseForm(rowIndex){
   const c=_pmUnconfirmedContext(rowIndex), box=document.getElementById('pmUnconfirmedDecision');
@@ -12402,7 +12404,7 @@ async function _pmReconcileMismatch(rowIndex){
   if(!confirm(`${x.reviewerName} ${_pmNum(x.amount)}원\n\n등록 계좌 …${x.expectedAccountTail}와 실제 이체 계좌 …${x.resultAccountTail}가 다릅니다.\n계좌 소유를 확인했고 이 이체를 입금완료로 반영할까요?\n\n이 작업은 감사 이력에 기록되며 되돌릴 수 없습니다.`)) return;
   const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/unconfirmed-reconcile',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,itemId:x.itemId,resultSeq:x.resultSeq,confirm:true})});
   if(!r||!r.ok){ toast((r&&r.error)||'계좌 불일치 이체를 반영하지 못했습니다.'); return; }
-  _pmUnconfirmedClose(); toast('계좌 불일치 이체를 입금완료로 반영했습니다.'); await _pmLoad();
+  _pmUnconfirmedClose(); toast('계좌 불일치 이체를 입금완료로 반영했습니다.'); await _pmLoad(true);
 }
 
 function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
@@ -12519,7 +12521,7 @@ async function _pmResultApply(){
     : '';
   const boardText = r.applied ? ` · ${_pmBoardApplyText(r.board)}` : '';
   toast(`반영 완료 — 입금 ${r.applied}건 · 실패 ${r.failed}건${r.notInFile?` · 결과없음 ${r.notInFile}건(대기 유지)`:''}${boardText}${notice}`);
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 async function _pmApplySavedResult(i){
@@ -12530,7 +12532,7 @@ async function _pmApplySavedResult(i){
     { method:'POST', body: JSON.stringify({ confirm:true, uploadId:b.resultUploadId, notifyFailed:true }) });
   if(!r || !r.ok){ toast((r&&r.error)||'반영 실패'); return; }
   toast(`반영 완료 · 입금 ${r.applied}건 · 실패 ${r.failed}건${r.applied?` · ${_pmBoardApplyText(r.board)}`:''}`);
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 async function _pmMarkApplied(i){
@@ -12541,7 +12543,7 @@ async function _pmMarkApplied(i){
     { method:'POST', body: JSON.stringify({ confirm:true }) });
   if(!r || !r.ok){ toast((r&&r.error)||'적용완료 처리 실패'); return; }
   toast(`적용완료로 처리했습니다${r.remainingPending ? ` · 결과 확인 대기 ${r.remainingPending}건` : ''}`);
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 async function _pmRestoreManual811(){
@@ -12554,7 +12556,7 @@ async function _pmRestoreManual811(){
   if(r.skipped) parts.push(`${r.skipped}건 제외`);
   if(r.failed) parts.push(`${r.failed}건 실패`);
   toast(`#0 수동 이체 복구 완료 · 대상 ${r.candidates||0}건 · ${parts.join(' · ')}`);
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 /* 입금일 오염 점검 — 읽기 전용. 세 가지를 세어 보여주고 아무것도 고치지 않는다.
@@ -12708,7 +12710,7 @@ async function _pmApplyOverlayFix(){
   if(!r||!r.ok){ toast((r&&r.error)||'복원에 실패했습니다.'); return; }
   document.getElementById('pmovfixov')?.remove();
   toast(`복원 완료 · 원래 줄 ${r.keptRows||0}개 새김 · 번짐 제거 ${r.clearedRows||0}줄 · 표기 정리 ${r.revertedEdits||0}건${r.pickedByHuman?` · 직접 고른 ${r.pickedByHuman}건 포함`:''}`);
-  await _pmLoad();
+  await _pmLoad(true);
   _pmOpenDepositAnomalies();
 }
 
@@ -12768,7 +12770,7 @@ async function _pmApplyFanoutCleanup(){
   if(!r||!r.ok){ toast((r&&r.error)||'정리에 실패했습니다.'); return; }
   document.getElementById('pmfanoutov')?.remove();
   toast(`정리 완료 · 입금일 회수 ${r.removedCells||0}줄 · 회차 항목 회수 ${r.cancelledItems||0}건 · 마커 재고정 ${r.reanchored||0}건`);
-  await _pmLoad();
+  await _pmLoad(true);
   _pmOpenDepositAnomalies();
 }
 
@@ -12798,7 +12800,7 @@ async function _pmApplyDepositDateCorrection(){
   if(!r||!r.ok){ toast((r&&r.error)||'입금일 이동에 실패했습니다.'); return; }
   document.getElementById('pmdepositmoveov')?.remove();
   toast(`${r.date} 입금일 ${r.moved}건 이동 완료 · 기존 ${r.sourceRemoved}건 / 대상 ${r.targetRecorded}건 확인`);
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 async function _pmConfirmFailures(i){
@@ -12810,7 +12812,7 @@ async function _pmConfirmFailures(i){
     { method:'POST', body: JSON.stringify({ confirm:true }) });
   if(!r || !r.ok){ toast((r&&r.error)||'이체실패 처리 실패'); return; }
   toast(`${r.failed||0}건을 이체실패로 처리했습니다`);
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 async function _pmCancel(id, seq){
@@ -12818,7 +12820,7 @@ async function _pmCancel(id, seq){
   const r = await api('/api/trackb/payment/batch/'+id+'/cancel', { method:'POST', body: JSON.stringify({}) });
   if(!r || !r.ok){ toast((r&&r.error)||'취소 실패'); return; }
   toast('회차를 취소했습니다');
-  await _pmLoad();
+  await _pmLoad(true);
 }
 
 async function _pmCancelByIndex(i){

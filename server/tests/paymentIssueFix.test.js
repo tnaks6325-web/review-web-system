@@ -735,7 +735,7 @@ function withStubPool(handler, run) {
 
   t('6h ★ 저장 성공 뒤 순서 = 닫기 → 안내 → 재조회(후처리 실패가 성공을 실패처럼 보이게 하면 안 된다)', () => {
     const fn = HTML.slice(HTML.indexOf('function _pmAfterFix'), HTML.indexOf('/* ── 공용 팝업 골격'));
-    const close = fn.indexOf('_pmCloseDialog()'), t2 = fn.indexOf('toast('), load = fn.indexOf('_pmLoad()');
+    const close = fn.indexOf('_pmCloseDialog()'), t2 = fn.indexOf('toast('), load = fn.indexOf('_pmLoad(');
     assert.ok(close >= 0 && t2 > close && load > close, '닫기가 먼저여야 한다: ' + fn);
     assert.ok(/try\{\s*toast\(/.test(fn), '안내 실패가 재조회를 막으면 안 된다');
     // 남은 팝업(리뷰어 계좌)이 이 마무리를 쓴다 — 작업 단위 팝업은 작업 조건 카드로 옮겨 없앴다
