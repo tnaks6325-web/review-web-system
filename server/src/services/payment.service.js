@@ -143,19 +143,12 @@ async function listPaymentTargets(opts = {}) {
         SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
          WHERE kv.key ILIKE ANY($1) AND btrim(kv.value) <> ''))`,
     // 작업보드에서 수동으로 `8/11`을 입력한 행은 실제 입금완료로 간주한다.
-    // 취소·공란·오류 문구는 제외하지 않으며, participant seq로 같은 행만 연결한다.
+    // 대상 좌표는 아래 manual_paid CTE에서 한 번만 계산한다. 행별 상관 서브쿼리로
+    // participant_edits 전체를 반복 조회하면 운영 데이터에서 같은 인덱스를 35만 회 이상 탄다.
     `NOT EXISTS (
-        SELECT 1
-          FROM campaign_participants cp
-          JOIN participant_edits pe
-            ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
-           AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
-             OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
-             OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
-         WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
-           AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
-           AND pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
-           AND btrim(pe.value_text) = '8/11')`,
+        SELECT 1 FROM manual_paid mp
+         WHERE mp.sheet_id = ri.sheet_id AND mp.tab_name = ri.tab_name
+           AND mp.row_index = ri.row_index)`,
     // ★ 다운로드 이력 잠금 — 살아있는 회차 항목이 있으면 제외
     `NOT EXISTS (
         SELECT 1 FROM payment_batch_items pi
@@ -190,7 +183,19 @@ async function listPaymentTargets(opts = {}) {
   const limitParam = params.length + 1;
   const offsetParam = params.length + 2;
   const candidateSql =
-    `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
+    `WITH manual_paid AS MATERIALIZED (
+       SELECT DISTINCT cp.sheet_id, cp.tab_name, cp.seq AS row_index
+         FROM participant_edits pe
+         JOIN campaign_participants cp
+           ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
+          AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
+            OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
+            OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+        WHERE cp.deleted_at IS NULL AND cp.active = TRUE
+          AND pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
+          AND btrim(pe.value_text) = '8/11'
+     )
+     SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
             ri.reviewer_name AS "reviewerName", ri.phone8 AS "phone8",
             ri.start_date AS "startDate", ri.product_name AS "productName",
             -- 상품비 폴백 재료(주문 원장에 없는 행용). ★ row_json 을 통째로 끌어오지 않는다 —

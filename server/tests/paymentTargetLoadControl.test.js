@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+const paymentService = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'payment.service.js'), 'utf8');
 const workdesk = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
 
 assert.match(routes, /const _paymentTargetFlights = new Map\(\)/,
@@ -22,6 +23,11 @@ assert.match(routes, /router\.use\('\/workdesk'[\s\S]*?res\.statusCode >= 200 &&
   '입금일·리뷰제출·셀 편집 등 모든 성공한 작업보드 쓰기 후에 진행 중 집계를 폐기해야 한다');
 assert.doesNotMatch(routes, /paymentTargetCache|paymentTargetsCache/,
   '금전 판정 결과를 캐시해 회차 생성 뒤 오래된 목록을 돌려주면 안 된다');
+assert.match(paymentService, /WITH manual_paid AS MATERIALIZED/,
+  '수동 입금완료 편집은 행별 상관 조회 대신 한 번만 집계해야 한다');
+assert.match(paymentService, /SELECT 1 FROM manual_paid mp/);
+assert.doesNotMatch(paymentService, /FROM campaign_participants cp\s+JOIN participant_edits pe[\s\S]{0,700}?cp\.seq = ri\.row_index[\s\S]{0,200}?pe\.field = 'col:입금'/,
+  '입금대상 후보마다 수동 편집 전체를 다시 조회하면 안 된다');
 
 const start = workdesk.indexOf('async function _pmLoad(');
 const end = workdesk.indexOf('\nconst _pmKey', start);
