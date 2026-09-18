@@ -419,6 +419,13 @@ function maskedNameOcrNearMiss(raw, stored) {
   return visible >= 2 && matches >= 1 && mismatches === 1;
 }
 
+// 가림 없이 노출된 이름은 OCR 오탐 폭을 미리 제한하지 않고 재확인 후보로 둔다.
+// 실제 승인은 아래 수동확인에서 현재 참여 명의 직접 선택과 완전한 최종 입력을 요구한다.
+function plainNameOcrCorrectionCandidate(raw, stored) {
+  const a = cleanName(raw), b = cleanName(stored);
+  return !!a && !!b && !MASK_RE.test(a) && a !== b;
+}
+
 function canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIdentity) {
   if (competingIdentity || !selectedScore || !selected) return false;
   const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
@@ -430,6 +437,15 @@ function canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIden
     // 쿠팡 연락처·주소는 가림이 정상이다. 주소 문자열 유사도는 건물명 생략 때문에
     // 낮을 수 있으므로 실제 동·호수 충돌만 하드 차단하고 저장정보 선택으로 재확인한다.
     && !!rawAddress && !hardUnitConflict;
+}
+
+function canReviewPlainNameOcrCorrection(selectedScore, selected, competingIdentity) {
+  if (!selectedScore || !selected) return false;
+  const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
+  return selectedScore.parts.name.verdict === 'mismatch'
+    // 전체 이름 OCR 불일치는 주소나 다른 저장 명의와의 유사도만으로 즉시 막지 않는다.
+    // 자동 승인은 금지하고, 아래 수동확인에서 현재 참여 명의 선택을 다시 검증한다.
+    && plainNameOcrCorrectionCandidate(rawName, selected.name);
 }
 function phoneVerdict(raw, stored) {
   const a = String(raw || '').trim(), b = String(stored || '').trim();
@@ -521,16 +537,23 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       break;
     }
   }
-  if (canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIdentity)) {
+  const nameOcrCorrectionCode = canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIdentity)
+    ? 'masked_name_ocr_correction'
+    : (options.allowPlainNameCorrection
+      && canReviewPlainNameOcrCorrection(selectedScore, selected, competingIdentity)
+      ? 'plain_name_ocr_correction' : '');
+  if (nameOcrCorrectionCode) {
     status = 'REVIEW';
     for (const code of ['selected_identity_conflict', 'selected_identity_partial_conflict']) {
       const conflictIndex = reasonCodes.indexOf(code);
       if (conflictIndex >= 0) reasonCodes.splice(conflictIndex, 1);
     }
-    reasonCodes.push('masked_name_ocr_correction');
+    reasonCodes.push(nameOcrCorrectionCode);
     selectedScore.parts.name = {
       ...selectedScore.parts.name,
-      reason: '가림 이름의 노출 글자 1개가 다르게 인식됨',
+      reason: nameOcrCorrectionCode === 'masked_name_ocr_correction'
+        ? '가림 이름의 노출 글자 1개가 다르게 인식됨'
+        : '이름 1글자가 다르게 인식됨',
     };
   }
   const resolved = {
@@ -590,7 +613,9 @@ async function matchCapture(body, reviewer) {
   const context = await resolveApplicationIdentity(contextArgs(body, reviewer));
   const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
   if (!extract.extractOk) throw new ReviewerOrderIdentityError('AI_EXTRACT_FAILED', 'AI 분석에 실패했습니다. 수동 확인을 선택할 수 있습니다.', 409);
-  const verdict = await evaluateSelectedIdentity(body.extracted || {}, context.selected, context.identities, { useGemini: true });
+  const verdict = await evaluateSelectedIdentity(body.extracted || {}, context.selected, context.identities, {
+    useGemini: true, allowPlainNameCorrection: true,
+  });
   let approvalToken = '';
   let reviewToken = '';
   if (verdict.status === 'MATCH') {
@@ -602,7 +627,8 @@ async function matchCapture(body, reviewer) {
       submissionIdentityHash: submissionIdentityHash(verdict.resolved),
     }, '20m');
   } else if (verdict.status === 'REVIEW') {
-    const requiredSavedFields = verdict.reasonCodes.includes('masked_name_ocr_correction')
+    const requiredSavedFields = verdict.reasonCodes.some((code) =>
+      ['masked_name_ocr_correction', 'plain_name_ocr_correction'].includes(code))
       ? ['recipient', 'phone', 'address'].filter((field) =>
         field === 'recipient' || MASK_RE.test(String(verdict.selectedScore.fields[field] || '')))
       : [];
@@ -649,7 +675,8 @@ async function manualConfirm(body, reviewer) {
     imageHash = review.imageHash; extractedHash = review.extractedFieldsHash;
     boundHash = submissionIdentityHash(body.formFields || {});
     reasonCodes = Array.isArray(review.reasonCodes) ? review.reasonCodes : [];
-    if (reasonCodes.includes('masked_name_ocr_correction')) {
+    if (reasonCodes.some((code) =>
+      ['masked_name_ocr_correction', 'plain_name_ocr_correction'].includes(code))) {
       const fieldRules = {
         recipient: { selected: context.selected.name, normalize: cleanName },
         phone: { selected: context.selected.phone, normalize: phone8 },
@@ -707,7 +734,19 @@ async function manualConfirm(body, reviewer) {
   }
 
   const check = await evaluateSelectedIdentity(body.formFields || {}, context.selected, context.identities, { useGemini: false });
-  if (check.status === 'MISMATCH') {
+  const explicitlyConfirmedPlainName = reasonCodes.includes('plain_name_ocr_correction')
+    && String(body.savedIdentitySelections?.recipient || '') === String(context.selected.identityKey)
+    && cleanName(body.formFields?.recipient) === cleanName(context.selected.name);
+  if (explicitlyConfirmedPlainName) {
+    const missingOrMasked = ['recipient', 'phone', 'address'].find((field) => {
+      const value = String(body.formFields?.[field] || '').trim();
+      return !value || MASK_RE.test(value);
+    });
+    if (missingOrMasked) {
+      throw new ReviewerOrderIdentityError('IDENTITY_FIELDS_REQUIRED', '수취인·연락처·배송주소를 실제 정보로 입력해주세요.', 409);
+    }
+  }
+  if (check.status === 'MISMATCH' && !explicitlyConfirmedPlainName) {
     const details = Object.values(check.selectedScore.parts).filter((p) => p.verdict === 'mismatch').map((p) => p.reason);
     if (check.competingIdentity) details.push('다른 저장 명의와 일치');
     throw new ReviewerOrderIdentityError('IDENTITY_MISMATCH',
@@ -757,7 +796,9 @@ module.exports = {
   resolveApplicationIdentity,
   maskedCompatible,
   maskedNameOcrNearMiss,
+  plainNameOcrCorrectionCandidate,
   canReviewMaskedNameOcrCorrection,
+  canReviewPlainNameOcrCorrection,
   evaluateSelectedIdentity,
   loadOrderInfoSuggestions,
   getParticipationIdentityContext,

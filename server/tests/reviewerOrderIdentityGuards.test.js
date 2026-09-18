@@ -101,6 +101,12 @@ ok('가림 이름 OCR 보정은 현재 참여 명의의 저장정보 선택을 �
   && /requiredSavedFields/.test(service)
   && /SAVED_IDENTITY_SELECTION_REQUIRED/.test(service)
   && /body\.savedIdentitySelections\?\.\[field\]/.test(service));
+ok('전체 이름 OCR 보정은 주소·다른 명의 유사도 대신 현재 참여 명의 직접 선택을 요구한다',
+  /function plainNameOcrCorrectionCandidate/.test(service)
+  && /explicitlyConfirmedPlainName/.test(service)
+  && /plain_name_ocr_correction/.test(service)
+  && /missingOrMasked/.test(service)
+  && /SAVED_IDENTITY_SELECTION_REQUIRED/.test(service));
 ok('수취인 저장정보 선택은 쿠팡의 가림 연락처와 주소만 같은 명의 값으로 함께 보완한다',
   /if \(field === "recipient"\)/.test(appJs)
   && /\[\["phone", "phone"\], \["address", "address"\]\]/.test(appJs)
