@@ -264,6 +264,18 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
   }
 });
 
+// 작업보드 쓰기는 입금대상의 자격·금액·입금상태를 바꿀 수 있다.
+// 각 라우트를 별도로 열거하면 신규 편집 경로가 추가될 때 빠지므로, 성공한 쓰기 전체가
+// 실행 중이던 입금대상 집계 세대를 폐기한다. 데이터를 바꾸지 않고 후속 조회만 새로 시작한다.
+router.use('/workdesk', (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) _invalidatePaymentTargetFlights();
+    });
+  }
+  next();
+});
+
 // ── 열린 작업 줄(개인별·순서 보존) — 작업보드 로그인 사용자 누구나(자기 것만) ──
 //   ★ 즐겨찾기와 같은 골격이되 **별도 원장**: 즐겨찾기는 Set 으로 접혀 순서가 사라진다(migration 089 주석).
 router.get('/workdesk/worktabs', authMiddleware, async (req, res, next) => {
@@ -1346,7 +1358,6 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
         throughWrite = { attempted: true, ok: false, reason: 'exception', message: e.message };
       }
     }
-    if (out.ok) _invalidatePaymentTargetFlights();
     res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite });
   } catch (err) { next(err); }
 });
@@ -1356,7 +1367,6 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
     const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     const out = await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) });
-    if (out && out.ok) _invalidatePaymentTargetFlights();
     res.json(out);
   } catch (err) { next(err); }
 });

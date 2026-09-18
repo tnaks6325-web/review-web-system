@@ -18,10 +18,8 @@ assert.match(routes, /res\.statusCode >= 200 && res\.statusCode < 300/);
 assert.match(routes, /PAYMENT_TARGET_FLIGHT_MAX_MS = 55 \* 1000/);
 assert.match(routes, /payment_target_timeout/,
   '멈춘 서버 집계를 공유 슬롯에 영구 보관하면 안 된다');
-assert.match(routes, /if \(out\.ok\) _invalidatePaymentTargetFlights\(\)/,
-  '작업보드 셀 편집도 입금 금액과 상태를 바꾸므로 진행 중 집계를 폐기해야 한다');
-assert.match(routes, /if \(out && out\.ok\) _invalidatePaymentTargetFlights\(\)/,
-  '작업보드 셀 되돌리기도 진행 중 집계를 폐기해야 한다');
+assert.match(routes, /router\.use\('\/workdesk'[\s\S]*?res\.statusCode >= 200 && res\.statusCode < 300[\s\S]*?_invalidatePaymentTargetFlights\(\)/,
+  '입금일·리뷰제출·셀 편집 등 모든 성공한 작업보드 쓰기 후에 진행 중 집계를 폐기해야 한다');
 assert.doesNotMatch(routes, /paymentTargetCache|paymentTargetsCache/,
   '금전 판정 결과를 캐시해 회차 생성 뒤 오래된 목록을 돌려주면 안 된다');
 
