@@ -693,6 +693,18 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   const canceled = await require('./orderLedger.service')
     .softDeleteDuplicateOrders(cancelOsIds, `dedupe:${by}`);
 
+  // 중복 줄을 내린 뒤 활성 행이 연결 공고의 총 모집수보다 작아지면, 지운 수만큼을
+  // 빈 슬롯으로 되돌린다. 그렇지 않으면 `100건` 작업이 93개 행으로 굳고 다음 정상
+  // 구매양식이 `no_open_slot` 으로 막힌다. 공유 작업표는 목표를 추측하지 않고 건너뛴다.
+  let quotaReplenish = null, quotaReplenishError = null;
+  try {
+    quotaReplenish = await require('./linkedRecruitQuota.service')
+      .replenishWorktableSlotsToLinkedQuota({ sheetId, tabName, by: `dedupe-replenish:${by}` });
+  } catch (e) {
+    quotaReplenishError = (e && (e.code || e.message)) || 'replenish_failed';
+    logger.warn(`[sheetlessLedger] 중복 정리 후 빈 슬롯 보충 실패 tab=${tabName} — ${quotaReplenishError}`);
+  }
+
   /* ★★ 중복 줄을 내렸으면 번호가 비므로 곧바로 다시 매긴다(장부 재생성보다 먼저). */
   const renumbered = await _renumberAfterRetire(sheetId, tabName, `dedupe:${by}`);
 
@@ -706,7 +718,8 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   logger.info(`[sheetlessLedger] 중복 줄 정리 tab=${tabName} ${r.retired}줄 · 주문 ${canceled}건 취소 by=${by}`);
   return { ...stat, removed: r.retired, canceledOrders: canceled,
            indexRows: ledger ? ledger.indexRows : null, ledgerError,
-           renumbered: (renumbered && renumbered.changed) || 0 };
+           renumbered: (renumbered && renumbered.changed) || 0,
+           quotaReplenish, quotaReplenishError };
 }
 
 /**
