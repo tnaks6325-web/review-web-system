@@ -191,6 +191,28 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     await identity.verifyApprovalForSubmission({ ...base, ...extracted, identityApprovalToken:matched.approvalToken }, reviewer);
   });
 
+  await test('전체 이름 1글자 OCR 오탐은 현재 참여 명의를 선택한 뒤 제출한다', async () => {
+    const extracted = { recipient:'깁민수', phone:'010-0000-9999', address:selectedAddress };
+    const proof = identity.issueExtractionProof({ imageHash:'6e'.repeat(32), extracted, ok:true });
+    const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
+    assert.strictEqual(reviewed.status, 'REVIEW', JSON.stringify(reviewed));
+    assert.ok(reviewed.reviewToken);
+    assert.ok(reviewed.reasonCodes.includes('plain_name_ocr_correction'));
+    const corrected = { ...selectedFields, phone:extracted.phone };
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+      formFields:corrected,
+    }, reviewer), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+    const manual = await identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+      formFields:corrected,
+      savedIdentitySelections:{ recipient:`identity:${selectedId}` },
+    }, reviewer);
+    await identity.verifyApprovalForSubmission({
+      ...base, ...corrected, identityApprovalToken:manual.approvalToken,
+    }, reviewer);
+  });
+
   await test('쿠팡 가림 이름·연락처·주소는 저장 명의 선택으로 함께 보완해 재확인한다', async () => {
     const extracted = {
       recipient:'김*순', phone:'010-****-5678',
@@ -363,13 +385,26 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     selectedAddress = selectedFields.address;
   });
 
-  await test('실제 다른 저장 명의의 캡처는 승인·수동확인 토큰을 주지 않는다', async () => {
+  await test('다른 저장 명의와 일치하는 캡처도 현재 참여 명의를 직접 선택하면 제출한다', async () => {
     const otherFields = { recipient:'박영희', phone:'010-9999-8888', address:'부산 해운대구 센텀로 20 202동 505호' };
     const proof = identity.issueExtractionProof({ imageHash:'f'.repeat(64), extracted:otherFields, ok:true });
-    const mismatch = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:otherFields }, reviewer);
-    assert.strictEqual(mismatch.status, 'MISMATCH');
-    assert.strictEqual(mismatch.approvalToken, '');
-    assert.strictEqual(mismatch.reviewToken, '');
+    const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:otherFields }, reviewer);
+    assert.strictEqual(reviewed.status, 'REVIEW');
+    assert.strictEqual(reviewed.approvalToken, '');
+    assert.ok(reviewed.reviewToken);
+    const corrected = { ...otherFields, recipient:selectedFields.recipient };
+    await assert.rejects(identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+      formFields:corrected,
+    }, reviewer), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+    const manual = await identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+      formFields:corrected,
+      savedIdentitySelections:{ recipient:`identity:${selectedId}` },
+    }, reviewer);
+    await identity.verifyApprovalForSubmission({
+      ...base, ...corrected, identityApprovalToken:manual.approvalToken,
+    }, reviewer);
   });
 
   console.log(`\n✅ reviewerOrderIdentityFlow: ${passed}개 통과`);

@@ -9,6 +9,7 @@ const {
 const {
   maskedCompatible,
   maskedNameOcrNearMiss,
+  plainNameOcrCorrectionCandidate,
   hashImageBase64,
   issueExtractionProof,
   verifyExtractionProof,
@@ -88,6 +89,38 @@ const other = {
     assert.ok(!maskedNameOcrNearMiss('김**순', '김민수'));
   });
 
+  await test('전체 이름 OCR 불일치는 글자 수와 차이 개수에 관계없이 재확인 후보로 둔다', async () => {
+    assert.ok(plainNameOcrCorrectionCandidate('업혜연', '임혜연'));
+    assert.ok(plainNameOcrCorrectionCandidate('박다른이름', '임혜연'));
+    assert.ok(plainNameOcrCorrectionCandidate('임혜', '임혜연'));
+    assert.ok(!plainNameOcrCorrectionCandidate('임혜연', '임혜연'));
+    assert.ok(!plainNameOcrCorrectionCandidate('임*연', '임혜연'));
+  });
+
+  await test('임혜연을 업혜연으로 읽어도 주소가 맞으면 저장 명의 재확인 대상이다', async () => {
+    const lim = {
+      identityKey:'self:lim', type:'self', name:'임혜연', phone:'010-3220-5501',
+      address:'경기도 의왕시 안양판교로 100 101동 1301호', shoppingId:'lim-id',
+    };
+    const r = await evaluateSelectedIdentity({
+      recipient:'업혜연', phone:'010-2220-5501', address:lim.address,
+    }, lim, [lim], { useGemini:false, allowPlainNameCorrection:true });
+    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('plain_name_ocr_correction'));
+  });
+
+  await test('전체 이름 OCR 오탐은 주소 동·호수가 달라도 저장 명의 재확인 대상으로 둔다', async () => {
+    const lim = {
+      identityKey:'self:lim', type:'self', name:'임혜연', phone:'010-3220-5501',
+      address:'경기도 의왕시 안양판교로 100 101동 1301호', shoppingId:'lim-id',
+    };
+    const r = await evaluateSelectedIdentity({
+      recipient:'업혜연', phone:'010-2220-5501', address:'경기도 의왕시 안양판교로 100 102동 1301호',
+    }, lim, [lim], { useGemini:false, allowPlainNameCorrection:true });
+    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('plain_name_ocr_correction'));
+  });
+
   await test('가림 이름 OCR 1글자 오류는 주소에 실제 동·호수 충돌이 없으면 재확인한다', async () => {
     const choi = {
       identityKey:'sub:choi', type:'sub', name:'최영희', phone:'010-8330-9894',
@@ -165,10 +198,13 @@ const other = {
     assert.strictEqual(r.resolved.address, selected.address);
   });
 
-  await test('선택 명의가 아닌 같은 소유자의 다른 명의 캡처는 하드 불일치다', async () => {
-    const r = await evaluateSelectedIdentity({ recipient:other.name, phone:other.phone, address:other.address }, selected, [selected, other], { useGemini:false });
-    assert.strictEqual(r.status, 'MISMATCH', JSON.stringify(r));
+  await test('다른 저장 명의와 일치하는 전체 이름 캡처도 자동승인 없이 재확인 대상으로 둔다', async () => {
+    const r = await evaluateSelectedIdentity({ recipient:other.name, phone:other.phone, address:other.address }, selected, [selected, other], {
+      useGemini:false, allowPlainNameCorrection:true,
+    });
+    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
     assert.strictEqual(r.competingIdentity.identityKey, other.identityKey);
+    assert.ok(r.reasonCodes.includes('plain_name_ocr_correction'));
   });
 
   await test('선택 명의도 충분히 맞고 중복 저장 명의도 맞으면 수동확인 대상으로 둔다', async () => {
