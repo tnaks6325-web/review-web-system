@@ -3806,10 +3806,26 @@ router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, asyn
 const paymentSvc = require('../services/payment.service');
 const _bankNames = require('../services/bankNameOverride.service');
 
+// 입금대상 집계는 읽기 전용이지만 여러 큰 원장을 함께 읽는다. 같은 조건의 요청이 이미
+// 실행 중이면 그 Promise를 공유해 재클릭/새로고침이 동일 집계를 겹쳐 돌리지 않게 한다.
+// 결과 캐시는 두지 않는다. 회차 생성·입금 반영 직후에는 반드시 최신 원장을 다시 읽어야 한다.
+const _paymentTargetFlights = new Map();
+function _sharedPaymentTargets(opts) {
+  const key = JSON.stringify([opts.sheetId || '', opts.tabName || '']);
+  const active = _paymentTargetFlights.get(key);
+  if (active) return active;
+  const flight = paymentSvc.listPaymentTargets(opts);
+  _paymentTargetFlights.set(key, flight);
+  flight.finally(() => {
+    if (_paymentTargetFlights.get(key) === flight) _paymentTargetFlights.delete(key);
+  }).catch(() => {});
+  return flight;
+}
+
 // 오늘 입금해야 할 건 + 은행별 집계
 router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const out = await paymentSvc.listPaymentTargets({
+    const out = await _sharedPaymentTargets({
       sheetId: String(req.query.sheetId || '').trim() || undefined,
       tabName: String(req.query.tabName || '').trim() || undefined,
     });

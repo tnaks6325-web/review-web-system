@@ -11213,8 +11213,25 @@ async function _rsDismiss(i){
   toast('기각됨'); _rsOpen();
 }
 
-async function _pmLoad(){
-  const [t, b] = await Promise.all([ api('/api/trackb/payment/targets'), api('/api/trackb/payment/batches?limit=30') ]);
+let _pmLoadInFlight=null;
+async function _pmLoad(force){
+  // 한 브라우저에서도 메뉴 재클릭·새로고침이 같은 대형 집계를 중복 호출하지 않게 한다.
+  // legacy 보완 뒤의 내부 재조회만 force=true로 새 요청을 시작한다.
+  if(!force && _pmLoadInFlight) return _pmLoadInFlight;
+  const run=(async()=>{
+  const controller=typeof AbortController==='function' ? new AbortController() : null;
+  const timer=controller ? setTimeout(()=>controller.abort(),60000) : null;
+  let t,b;
+  try{
+    [t,b]=await Promise.all([
+      api('/api/trackb/payment/targets',controller?{signal:controller.signal}:undefined),
+      api('/api/trackb/payment/batches?limit=30')
+    ]);
+  }catch(e){
+    const el=$('#pmbody');
+    if(el) el.innerHTML=`<div class="empty">${e&&e.name==='AbortError'?'입금대상 집계가 60초를 넘었습니다. 잠시 후 다시 시도해 주세요.':'입금대상을 불러오지 못했습니다.'}<br><button class="btn" onclick="_pmLoad()">다시 시도</button></div>`;
+    return;
+  }finally{ if(timer) clearTimeout(timer); }
   if(!t || !t.ok){ $('#pmbody').innerHTML=`<div class="empty">입금대상을 불러오지 못했습니다.${t&&t.error?' ('+esc(t.error)+')':''}</div>`; return; }
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
@@ -11230,9 +11247,13 @@ async function _pmLoad(){
       await api('/api/trackb/payment/batch/' + batch.id + '/deposit-date-backfill',
         { method:'POST', body: JSON.stringify({}) });
     }
-    return _pmLoad();
+    return _pmLoad(true);
   }
   _pmPaint();
+  })();
+  if(!force) _pmLoadInFlight=run;
+  try{ return await run; }
+  finally{ if(!force && _pmLoadInFlight===run) _pmLoadInFlight=null; }
 }
 
 const _pmKey = it => it.sheetId+'||'+it.tabName+'||'+it.rowIndex;

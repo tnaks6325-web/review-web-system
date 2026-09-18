@@ -42,8 +42,11 @@ assert.equal(ambiguous.source, 'workboard');
   assert.equal(result.get('S1\tT1\t11').amount, 7650,
     '입금관리 공용 로더가 관리자 셀 편집 7,650원을 반환해야 한다');
   assert.match(sql, /participant_edits/);
-  assert.match(sql, /COUNT\(\*\).*campaign_participants/s,
+  assert.match(sql, /order_counts AS/);
+  assert.match(sql, /identity_counts AS/,
     '중복 order/identity 앵커에는 편집을 번지게 하지 않는 유일성 게이트가 필요하다');
+  assert.doesNotMatch(sql, /SELECT COUNT\(\*\) FROM campaign_participants same_cp/,
+    '각 행마다 같은 참여 원장을 다시 세는 상관 집계가 되살아나면 안 된다');
   assert.match(sql, /END AS "ambiguous"/,
     '작업보드와 같은 모호성 판정을 로더 결과에 포함해야 한다');
 
