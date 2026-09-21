@@ -612,6 +612,9 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
 
 module.exports = {
   quota,
+  /* ★ 작업오더 → 연결 공고 짝짓기 단일 출처 — 금액 전파(160-2)도 같은 규칙을 써야
+     "정원은 A 공고, 금액은 B 공고" 가 안 생긴다. */
+  linkedCampaign,
   displayRecruitTotal,
   displayRecruitTotalForCampaign,
   linkedWorkOrderForCampaign,
