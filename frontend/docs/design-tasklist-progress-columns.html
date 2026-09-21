@@ -58,7 +58,8 @@
      ★ 초록은 쓰지 않는다 — 상태는 **글자가 말하고**, 배경은 있는 듯 없는 듯한 바탕으로만 둔다. */
   .wbl-s{display:inline-block;font-size:12px;font-weight:400;border-radius:999px;padding:1px 8px;white-space:nowrap;color:var(--muted);background:var(--card2)}
   .wbl-s.run{background:var(--card2);color:var(--muted)}
-  .wbl-s.cand{background:var(--card2);color:var(--ink)}
+  /* 마감 후보 = 파랑 채움(사용자 지시) · 체크 글리프는 쓰지 않는다 — 글자가 이미 말한다. */
+  .wbl-s.cand{background:var(--accent);color:#fff}
   .wbl-num{font-variant-numeric:tabular-nums;white-space:nowrap}
 
   /* ── 현재(as-is) 표기 ── */
@@ -108,10 +109,10 @@
      고정이라 줄이 바뀌어도 상자가 같은 자리에 서고, 여백을 줄여도 숫자가 잘리지 않는다. */
   td.nc .box{display:inline-block;width:42px;text-align:center;border-radius:6px;padding:2px 2px;background:var(--card2);border:1px solid var(--line)}
   td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted);font-weight:800}
-  /* ★★ 초록을 쓰지 않는다(사용자 지시 2026-09-21) — 완료는 **숫자가 같다는 사실**이 말한다
-     (총건수 = 참여 = 제출 = 입금). 상태 열도 같은 말을 한 번 더 한다.
-     색을 하나 더 얹는 것은 같은 정보를 세 번 말하면서 표만 알록달록하게 만드는 일이었다. */
-  td.nc .box.full{background:var(--card2);border-color:var(--line);color:var(--ink)}
+  /* ★ 총건수에 도달하면 **파랑으로 채운다**(사용자 지시 2026-09-22). 초록은 쓰지 않는다.
+     색은 이 표에서 **파랑 하나**만 쓴다 — 완료와 마감 후보가 같은 색이라 "다 찼다"가 한 가지 뜻으로 읽힌다
+     (Refactoring UI: 강조는 색과 굵기로, 색 종류는 최소로). */
+  td.nc .box.full{background:var(--accent);border-color:var(--accent);color:#fff}
   /* ★ 모자란 쪽은 빨강이 아니라 중립 — 「입금 체크 38」이 말하듯 흔한 상태라
      전부 빨갛게 칠하면 진짜 신호(정원 초과)가 묻힌다. */
   td.nc .box.short{color:var(--ink)}
@@ -119,7 +120,7 @@
   td.nc .lack{display:block;font-size:9.5px;font-weight:800;color:var(--muted);line-height:1.15;margin-top:1px}
   /* 변형 대조용 — 상자 없이 숫자만 */
   td.nc.bare .box{background:transparent;border-color:transparent;padding:2px 2px}
-  td.nc.bare .box.full{color:var(--ink)}
+  td.nc.bare .box.full{color:var(--accent-deep);font-weight:600}
 
   /* ── C안: 남은 일 중심 ── */
   .pgC{display:flex;align-items:center;gap:7px;white-space:nowrap}
@@ -383,7 +384,7 @@ function rowB(r,opt){
        + numCell(r.f,r,{lack:opt.lack,bare:opt.bare})
        + numCell(r.s,r,{lack:opt.lack,bare:opt.bare})
        + numCell(r.p,r,{lack:opt.lack,bare:opt.bare})
-       + '<td><span class="wbl-s '+(done(r)?'cand':'run')+'">'+(done(r)?'✓ 마감 후보':'진행 중')+'</span></td></tr>';
+       + '<td><span class="wbl-s '+(done(r)?'cand':'run')+'">'+(done(r)?'마감 후보':'진행 중')+'</span></td></tr>';
 }
 function fillB(id,opt){
   var el=document.getElementById(id); if(!el) return;
@@ -414,7 +415,7 @@ function row(r,cellFn,withPay){
        + '<td>'+esc(r.m)+'</td>'
        + '<td>'+cellFn(r)+'</td>'
        + (withPay?'<td class="wbl-num">'+r.p+'</td>':'')
-       + '<td><span class="wbl-s '+(done(r)?'cand':'run')+'">'+(done(r)?'✓ 마감 후보':'진행 중')+'</span></td></tr>';
+       + '<td><span class="wbl-s '+(done(r)?'cand':'run')+'">'+(done(r)?'마감 후보':'진행 중')+'</span></td></tr>';
 }
 function fill(id,fn,withPay){
   var el=document.getElementById(id); if(!el) return;
