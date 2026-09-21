@@ -2074,6 +2074,16 @@
 .pmtable td.num,.pmtable th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pmtable td.dim{color:var(--t3,#8B94A1);font-size:11.5px}
 .pmtable tr.off{opacity:.45}
+/* ── 계좌 안내줄 — 양식 계좌로 보내는데 등록DB 계좌와 다를 때만(서버가 `accountMismatch` 를 줄 때만) ──
+   ★ 체크를 풀면 위 행과 함께 흐려진다(`tr.off`) = 보류 상태가 눈으로 보인다. */
+.pmtable tr.pmmm>td{padding:0 9px 7px!important;border-top:0}
+.pmmmbox{background:#FFF8E6;border:1px solid #F0D69A;border-left:3px solid #E0A106;border-radius:6px;padding:7px 10px;font-size:11.5px;line-height:1.6}
+.pmmmhead{color:#8A5A00;font-weight:600;margin-bottom:2px}
+.pmmmline{color:var(--t2,#5B6472)}
+.pmmmfoot{margin-top:3px;padding-top:3px;border-top:1px dashed #EAD9AC;color:#8A5A00}
+.pmmmtag{margin-left:6px;font-size:10px;padding:1px 5px;border-radius:999px;background:#FDEFC7;color:#8A5A00}
+.pmmmtag.bad{background:#FDE7E7;color:#B42318}
+.pmmmchip{display:inline-block;margin-left:4px;font-size:10px;padding:1px 5px;border-radius:999px;background:#FDEFC7;color:#8A5A00}
 /* ── 작업 그룹 머리줄 — 같은 작업의 반복 값을 한 줄로 올린다(줄마다 되풀이 금지) ── */
 .pmtable tr.pmhide{display:none}
 .pmtable tr.pmgrp>td{background:#F3F6FB;border-top:2px solid #D9E1EC;padding:6px 9px!important}
@@ -11079,9 +11089,35 @@ const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
 function _pmAcctSrcTip(it){
   const m = { owner_order:'참여 원장에서 소유자(본계정) 계좌를 찾았습니다',
               owner_link:'제출 신원 링크 + 소유자의 타계정 목록에서 계좌를 찾았습니다',
-              order:'등록된 계좌가 없어 이 건의 구매양식으로 제출된 계좌를 씁니다' };
+              order:'이 건의 구매양식(작업보드)에 적힌 계좌로 보냅니다' };
   const t = m[it && it.accountSource];
   return t ? ` title="${esc(t)}"` : '';
+}
+
+/* 계좌 안내줄 — **서버가 준 값만 그린다**(판정 사본 금지).
+   ★ 두 경우뿐: `registered`가 없으면 "등록된 계좌가 없다" · 있으면 "등록 계좌와 다르다".
+     두 계좌가 같으면 서버가 아예 안 보내므로 이 함수는 호출되지 않는다.
+   ★ 마지막 줄은 사용자 확정 문구 — 체크를 풀면 그 건이 회차에서 빠진다는 사실을 말한다. */
+function _pmAcctMismatchHtml(mm){
+  if(!mm) return '';
+  const f = mm.form || {}, r = mm.registered || null;
+  const acct = a => `${esc(a.bankName||'')} …${esc(a.accountTail||'')}`.trim();
+  const head = r
+    ? `⚠ 작업보드(구매양식)에 적힌 계좌로 보냅니다 — <b>등록된 계좌와 다릅니다</b>`
+    : `⚠ 작업보드(구매양식)에 적힌 계좌로 보냅니다 — 이 리뷰어는 <b>등록된 계좌가 없습니다</b>`;
+  const tag = r
+    ? (mm.holderDiffers
+        ? `<span class="pmmmtag bad">예금주가 다른 사람입니다</span>`
+        : `<span class="pmmmtag">계좌번호가 다릅니다</span>`)
+    : '';
+  const regLine = r
+    ? `<div class="pmmmline">등록 계좌${r.isSub&&r.name?` (${esc(r.name)} 명의)`:''} — `
+      + `<b>${esc(r.accountHolder||'-')}</b> · ${acct(r)}${tag}</div>`
+    : '';
+  return `<div class="pmmmbox"><div class="pmmmhead">${head}</div>`
+    + `<div class="pmmmline">보낼 곳 — <b>${esc(f.accountHolder||'-')}</b> · ${acct(f)}</div>`
+    + regLine
+    + `<div class="pmmmfoot">체크박스를 풀면 해당 건 입금은 <b>보류</b>됩니다.</div></div>`;
 }
 const PAY_FIX_KIND = {
   no_bank:'work', bank_unknown:'account', no_account:'account', no_holder:'account',
@@ -11619,19 +11655,25 @@ function _pmTargetTable(items){
       const on=_pmOn(it);
       const why = whyText(it);
       const fixBtn = isFixable(it) ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
+      /* ★ 계좌 안내줄 — **서버가 말할 때만**(`accountMismatch`) 그린다. 양식 계좌가 기본 경로라
+           `accountSource==='order'` 로 배지를 띄우면 거의 모든 행에 붙어 신호가 묻힌다. */
+      const mm = it.accountMismatch || null;
+      const mmRow = mm
+        ? `<tr class="${on?'':'off'}${hidden?' pmhide':''} pmmm" data-pg="${i}"><td></td><td colspan="10">${_pmAcctMismatchHtml(mm)}</td></tr>`
+        : '';
       return `<tr class="${on?'':'off'}${hidden?' pmhide':''}" data-pg="${i}">
       <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`:'—'}</td>
       <td class="pmdim"></td>
       <td>${bankSig!==null?'':bankBadge(it)}</td>
       <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
-        it.accountSource==='order'?`<span class="pmauto"${_pmAcctSrcTip(it)}>양식계좌</span>`:''}</td>
+        mm?`<span class="pmmmchip" title="아래 줄에서 보낼 계좌를 확인하세요">계좌 확인</span>`:''}</td>
       <td>${esc(it.startDate)}</td>
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
       <td class="num">${_pmNum(it.amount)}</td>
       <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='workboard_edit'?`<span class="pmauto" title="관리자가 수정한 현재 작업보드 표시값을 우선 적용했습니다${it.priceMismatch?` · 주문 원장 ${_pmNum(it.orderPrice)}원`:''}">수정값</span>`:it.priceSource==='order'?'<span class="pmauto" title="작업보드에 결제금액이 없어 주문 원장 금액을 사용했습니다">원장</span>':''}${it.priceOutlier?`<span class="pmpriceout" title="이 작업 ${it.priceOutlier.workCount}건 중 ${it.priceOutlier.dominantCount}건은 ${_pmNum(it.priceOutlier.dominantAmount)}원입니다">금액 확인</span>`:''}+${_pmNum(it.reviewFee||0)}</td>
       <td>${memoSig!==null?'':memoCell(it, idx)}</td>
-      <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>`;
+      <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>${mmRow}`;
     }).join('');
     return head+rows;
   }).join('');
