@@ -402,7 +402,11 @@ async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'sou
     }
 
     const { rowCount } = await client.query(
-      `UPDATE recruit_campaigns SET window_start = $2, window_end = $3, updated_at = NOW()
+      /* ★★★ `::time` 캐스팅을 빼지 말 것 — 파라미터는 text 로 오고 컬럼은 TIME 이라
+         PostgreSQL 이 `column "window_start" is of type time but expression is of type text`
+         로 **거부한다**(진짜 PG 로 돌려 보고서야 잡았다 — 스텁은 SQL 을 해석하지 않아 통과시킨다).
+         비교 쪽은 `window_start::text` 로 이미 문자열이라 그대로 둔다. */
+      `UPDATE recruit_campaigns SET window_start = $2::time, window_end = $3::time, updated_at = NOW()
         WHERE id = $1 AND (COALESCE(window_start::text,'') <> $2 OR COALESCE(window_end::text,'') <> $3)`,
       [camp.id, win.start + ':00', win.end === '24:00' ? '24:00:00' : win.end + ':00']);
     await client.query('COMMIT');

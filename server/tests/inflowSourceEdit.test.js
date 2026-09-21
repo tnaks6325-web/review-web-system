@@ -214,7 +214,10 @@ async function run() {
     assert.deepStrictEqual(out.window, { start: '14:00', end: '17:00' });
     const w = writes(q);
     assert.strictEqual(w.length, 1, '쓰기 횟수: ' + w.length);
-    assert.ok(/SET window_start = \$2, window_end = \$3/.test(w[0].sql), w[0].sql);
+    /* ★ `::time` 캐스팅은 필수다 — 파라미터를 SET 과 문자열 WHERE 에 재사용하면 PG 가 text 로
+       확정해 TIME 칸에 못 넣는다(진짜 PG 가드 `inflowSyncPg` 가 잡은 실제 버그). 캐스팅이
+       사라지면 여기서도 빨개지도록 **포함해서** 고정한다. */
+    assert.ok(/SET window_start = \$2::time, window_end = \$3::time/.test(w[0].sql), w[0].sql);
     assert.deepStrictEqual(w[0].params.slice(1), ['14:00:00', '17:00:00']);
   });
 
@@ -227,7 +230,7 @@ async function run() {
       assert.ok(
         /^campaign_options: inflow_guide_html = \$3, inflow_guide_images = \$4::jsonb, updated_at = NOW\(\)$/.test(x)
         || /^recruit_campaigns: work_detail = \$2::jsonb, updated_at = NOW\(\)$/.test(x)
-        || /^recruit_campaigns: window_start = \$2, window_end = \$3, updated_at = NOW\(\)$/.test(x),
+        || /^recruit_campaigns: window_start = \$2::time, window_end = \$3::time, updated_at = NOW\(\)$/.test(x),
         '허용되지 않은 쓰기가 늘었다: ' + x);
     });
     assert.ok(tables.length >= 3, '쓰기 문장을 못 읽었다(정규식 드리프트): ' + tables.length);
