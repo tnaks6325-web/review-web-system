@@ -5537,6 +5537,12 @@ function _finPendOpenable(t,kind){
   const rest=_finPendRest(t,kind);
   return rest!=null && rest>0 && (rest/rt.total)<=_FIN_PEND_THRESHOLD;
 }
+/* `*` 는 "총건수를 몰라 **작업표 줄 수**로 대신 표시했다"는 표식이다 — 왜 모르는지를 말풍선이 말한다
+   (종전에는 툴팁에만 있어 마우스를 오래 올려야 알 수 있었다). */
+function _finTotalUnknownWhy(t){
+  const cs=Array.isArray(t&&t.campaigns)?t.campaigns.filter(c=>c&&c.id):[];
+  return cs.length?'공고에 총인원 없음 · 줄 수':'연결된 공고 없음 · 줄 수';
+}
 function _finNumCells(t,i,filt){
   const s=(t&&t.stats)||{};
   const rows=s.total==null?null:Number(s.total);
@@ -5551,13 +5557,17 @@ function _finNumCells(t,i,filt){
   const cell=(html,label)=>`<td class="nc" data-label="${label}" title="${tip}">${html}</td>`;
   const box=(v,cls)=>`<span class="box${cls?' '+cls:''}">${v==null?'—':v}</span>`;
   // ① 총건수 — 기준값이라 상자를 비운다. 못 구하면 줄 수 + `*`.
-  const c1=cell(box(den==null?null:(den+(total==null?'*':'')),'tot'),'총건수');
+  const c1=cell(box(den==null?null:(den+(total==null?'*':'')),'tot')
+    +((den!=null&&total==null)?`<span class="rest">${esc(_finTotalUnknownWhy(t))}</span>`:''),'총건수');
   // ② 참여 — 총건수에 도달하면 파랑, 넘기면 빨강(056: 색으로만 말한다).
-  const c2=cell(box(filled,filled==null?'':(over?'isover':(total!=null&&filled>=total?'full':''))),'참여');
+  /* ★★ 다 찬 칸을 파랗게 하는 기준 = **화면에 실제로 그린 값**(`den`)이다(신고 2026-09-22).
+     종전에는 총건수를 아는 작업에서만 파래져서, 공고가 연결되지 않아 줄 수로 표시(`*`)되는 작업은
+     `50` 옆에 참여 `50` 이 떠도 **영영 회색**이었다 — 화면이 같은 숫자를 보여주면서 "안 찼다"고 말하는 셈. */
+  const c2=cell(box(filled,filled==null?'':(over?'isover':(den!=null&&filled>=den?'full':''))),'참여');
   // ③④ 제출·입금 — 거의 끝났으면 눌러서 "아직 안 낸 사람"을 본다.
   const numBox=(v,kind,label)=>{
     if(v==null) return box(null);
-    const full=(total!=null&&v>=total);
+    const full=(den!=null&&v>=den);
     if(full) return box(v,'full');
     const rest=_finPendRest(t,kind);
     const restHtml=(rest!=null&&rest>0)?`<span class="rest">${rest}명 남음</span>`:'';
