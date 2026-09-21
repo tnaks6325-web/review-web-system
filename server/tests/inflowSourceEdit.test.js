@@ -11,7 +11,7 @@
  *      (유입가이드 조립 · 구매시간 해석 둘 다)
  *   ③ **가이드가 빈 채로 가이드유입이 되지 않는다** — 전파 뒤 상태로 검사하고 걸리면 되돌린다
  *   ④ 구매시간은 **해석 못 하면 아무것도 바꾸지 않는다** · 참여형 공고만
- *   ⑤ 쓰기 표면 = 공고 선택지 가이드 칸 · 공고 work_detail · 시간창 두 칸뿐
+ *   ⑤ 쓰기 표면 = 공고 선택지 가이드 칸 · 공고 work_detail · 시간창 두 칸 + 리뷰어가 읽는 글자뿐
  *   ⑥ 실패해도 throw 하지 않는다(원본 수정 저장을 되돌리면 안 된다)
  *   ⑦ 용어 — 보이는 말은 "가이드유입", **저장값과 약속 문구는 그대로**
  */
@@ -207,7 +207,7 @@ async function run() {
     assert.strictEqual(writes(q).length, 0);
   });
 
-  await t('④ 참여형이면 시간창 두 칸만 바꾼다', async () => {
+  await t('④ 참여형이면 시간창 두 칸 + 리뷰어가 읽는 글자만 바꾼다', async () => {
     const q = stub({});
     const out = await svc.syncCampaignPurchaseWindow({ workOrderId: 'wo_1', purchaseTime: '오후 2시~5시' });
     assert.strictEqual(out.applied, true, JSON.stringify(out));
@@ -218,7 +218,19 @@ async function run() {
        확정해 TIME 칸에 못 넣는다(진짜 PG 가드 `inflowSyncPg` 가 잡은 실제 버그). 캐스팅이
        사라지면 여기서도 빨개지도록 **포함해서** 고정한다. */
     assert.ok(/SET window_start = \$2::time, window_end = \$3::time/.test(w[0].sql), w[0].sql);
-    assert.deepStrictEqual(w[0].params.slice(1), ['14:00:00', '17:00:00']);
+    /* ★★★ 글자(`time_range`)가 함께 안 바뀌면 화면은 "자유시간대" 인데 실제로는 2~5시에만
+       열린다(2026-09-22 운영 공고에서 실제로 그 상태였다) — 같은 쓰기에 묶어 고정한다. */
+    assert.ok(/time_range = \$4/.test(w[0].sql), '리뷰어가 읽는 글자가 같이 안 바뀐다: ' + w[0].sql);
+    assert.deepStrictEqual(w[0].params.slice(1), ['14:00:00', '17:00:00', '오후 2시~5시']);
+  });
+
+  await t('④ 자유시간대는 두 시각을 비운다 — 글자만 바꾸고 제한을 남기지 않는다', async () => {
+    const q = stub({});
+    const out = await svc.syncCampaignPurchaseWindow({ workOrderId: 'wo_1', purchaseTime: '자유시간대' });
+    assert.strictEqual(out.applied, true, JSON.stringify(out));
+    const w = writes(q);
+    assert.deepStrictEqual(w[0].params.slice(1), [null, null, '자유시간대'],
+      '자유시간대인데 시각이 남는다 — 리뷰어가 아무 때나 되는 줄 알고 들어와 막힌다');
   });
 
   /* ── ⑤ 쓰기 표면 ─────────────────────────────────────────────────────────── */
@@ -230,7 +242,7 @@ async function run() {
       assert.ok(
         /^campaign_options: inflow_guide_html = \$3, inflow_guide_images = \$4::jsonb, updated_at = NOW\(\)$/.test(x)
         || /^recruit_campaigns: work_detail = \$2::jsonb, updated_at = NOW\(\)$/.test(x)
-        || /^recruit_campaigns: window_start = \$2::time, window_end = \$3::time, updated_at = NOW\(\)$/.test(x),
+        || /^recruit_campaigns: window_start = \$2::time, window_end = \$3::time, time_range = \$4, updated_at = NOW\(\)$/.test(x),
         '허용되지 않은 쓰기가 늘었다: ' + x);
     });
     assert.ok(tables.length >= 3, '쓰기 문장을 못 읽었다(정규식 드리프트): ' + tables.length);

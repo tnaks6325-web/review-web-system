@@ -373,10 +373,23 @@ async function syncCampaignInflow({ workOrderId, inflowType, commonGuide, produc
  * ★ 이미 구매를 진행 중인 리뷰어는 영향 없다(제출은 시간창을 보지 않는다 — 실측 확인).
  * ★ **절대 throw 하지 않는다** · 쓰기 표면 = `recruit_campaigns.window_start/window_end` 두 칸.
  */
+/** 구매시간대 문장이 **시간 제한 없음**을 뜻하나 — 판정은 모집공고 화면(`index-recruit.js` `rfIsFreeTime`)과 **같은 규칙**이다(사본 0). */
+function _isFreeTimeText(text) { return /자유|자율/.test(String(text || '')); }
+
 async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'source' } = {}) {
   const { parsePurchaseTime } = require('../utils/purchaseTimeWindow');
-  const win = parsePurchaseTime(purchaseTime);
-  if (!win) return { applied: false, reason: 'unparsed' };
+  /* ★★★ **글자와 시간창은 반드시 같이 움직인다(완화 금지 · 실측 2026-09-22)**
+     공고에는 ㉮ 리뷰어가 읽는 글자(`time_range`) 와 ㉯ 실제로 주문이 열리는 시각(`window_start`/`window_end`)이
+     **따로** 있다. 종전에는 ㉯만 고쳐서 운영 공고가 이렇게 됐다:
+       글자 = "자유시간대"  /  실제로는 14:00~17:00 에만 열림
+     → 리뷰어는 아무 때나 되는 줄 알고 들어와 막힌다(막다른 길).
+     그리고 "자유시간대" 로 되돌리면 문장을 못 읽어 `unparsed` 로 빠져 **시간 제한이 영영 안 풀렸다**.
+     ⇒ 자유시간 표현이면 시간창을 **비우고**(= 종일), 아니면 시각으로 굳히되 **글자도 함께** 저장한다. */
+  const text = String(purchaseTime == null ? '' : purchaseTime).trim();
+  if (!text) return { applied: false, reason: 'empty' };
+  const free = _isFreeTimeText(text);
+  const win = free ? null : parsePurchaseTime(text);
+  if (!free && !win) return { applied: false, reason: 'unparsed' };
 
   let client;
   try {
@@ -401,18 +414,24 @@ async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'sou
       return { applied: false, reason: 'not_participation', campaignId: camp.id };
     }
 
+    const startAt = free ? null : win.start + ':00';
+    const endAt = free ? null : (win.end === '24:00' ? '24:00:00' : win.end + ':00');
     const { rowCount } = await client.query(
       /* ★★★ `::time` 캐스팅을 빼지 말 것 — 파라미터는 text 로 오고 컬럼은 TIME 이라
          PostgreSQL 이 `column "window_start" is of type time but expression is of type text`
          로 **거부한다**(진짜 PG 로 돌려 보고서야 잡았다 — 스텁은 SQL 을 해석하지 않아 통과시킨다).
-         비교 쪽은 `window_start::text` 로 이미 문자열이라 그대로 둔다. */
-      `UPDATE recruit_campaigns SET window_start = $2::time, window_end = $3::time, updated_at = NOW()
-        WHERE id = $1 AND (COALESCE(window_start::text,'') <> $2 OR COALESCE(window_end::text,'') <> $3)`,
-      [camp.id, win.start + ':00', win.end === '24:00' ? '24:00:00' : win.end + ':00']);
+         비교 쪽은 `window_start::text` 로 이미 문자열이라 그대로 둔다.
+         ★ 자유시간은 두 시각이 **NULL** 이다 — 비교는 `COALESCE(...,'')` 로 양쪽 모두 빈 문자열에 맞춘다. */
+      `UPDATE recruit_campaigns SET window_start = $2::time, window_end = $3::time,
+              time_range = $4, updated_at = NOW()
+        WHERE id = $1 AND (COALESCE(window_start::text,'') <> COALESCE($2,'')
+                        OR COALESCE(window_end::text,'')   <> COALESCE($3,'')
+                        OR COALESCE(time_range,'')         <> $4)`,
+      [camp.id, startAt, endAt, text]);
     await client.query('COMMIT');
-    if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id, window: win };
-    logger.info(`[campaign/time-sync] ${camp.id} 시간창 ${win.start}~${win.end} by ${by}`);
-    return { applied: true, campaignId: camp.id, window: win };
+    if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id, window: win, timeRange: text };
+    logger.info(`[campaign/time-sync] ${camp.id} 시간창 ${free ? '자유(제한 없음)' : win.start + '~' + win.end} · 글자 "${text}" by ${by}`);
+    return { applied: true, campaignId: camp.id, window: win, timeRange: text, freeTime: free };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     logger.warn(`[campaign/time-sync] 전파 실패(원본 수정은 유지): ${(e && e.message) || e}`);
