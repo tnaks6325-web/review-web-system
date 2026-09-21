@@ -601,7 +601,11 @@ function _sourceContentNextValues(b, derived) {
 const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflow_keyword',
   'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount',
   //   ★ 163 썸네일 — 작업표 열·줄·정원·금액 어디에도 쓰이지 않는다(공고 카드 그림 하나).
-  'thumbnail_url'];
+  'thumbnail_url',
+  /* ★★ 유입방식·구매시간대(사용자 확정 2026-09-22) — 둘 다 **작업표와 무관**하다(작업표를 만드는
+     `utils/worktablePlan` 에 유입·구매시간 참조가 한 건도 없다). 열·줄·날짜 배치를 바꾸지 않으므로
+     접수 뒤에도 고칠 수 있다. 대신 **공고까지 전파**해야 리뷰어 화면이 따라온다(아래 전파 호출). */
+  'inflow_type', 'purchase_time'];
 
 // ★★ 상품 구성(product_options_json) 안에서 접수 뒤에도 고칠 수 있는 키 (2026-09-21 실측).
 //   ★ 왜 칸 전체가 아니라 키 단위인가: 인트라넷은 **상품 주소와 선택지별 유입가이드**를 이 한
@@ -940,6 +944,46 @@ async function _intakeSourceRevisionHandler(req, res, next) {
           campaignThumbSync = { applied: false, reason: 'error', error: thumbErr.message };
         }
       }
+      /* ★★ 유입방식·유입가이드가 바뀌었으면 공고까지 반영한다(사용자 확정 2026-09-22).
+         리뷰어 화면은 **공고에 저장된 유입방식을 작업오더 폴백보다 먼저** 보므로 여기서 멈추면
+         "인트라넷은 가이드유입인데 리뷰어에게는 상품 페이지 버튼" 이 된다.
+         ★ 가이드가 빈 채로 가이드유입이 되면 되돌린다(서비스가 전파 뒤 상태로 검사) — 사유는 응답에. */
+      let campaignInflowSync;
+      const _inflowTouched = ['inflow_type', 'inflow_guide', 'guide_images', SOURCE_PARTIAL_JSON_COLUMN]
+        .some(c => contentChanges.includes(c));
+      if (_inflowTouched) {
+        try {
+          const { syncCampaignInflow } = require('../services/campaignPayAmountSync.service');
+          const _guideTouched = contentChanges.includes('inflow_guide') || contentChanges.includes('guide_images');
+          campaignInflowSync = await syncCampaignInflow({
+            workOrderId: current.id,
+            inflowType: contentChanges.includes('inflow_type') ? nextValues.inflow_type : undefined,
+            commonGuide: _guideTouched
+              ? { text: nextValues.inflow_guide != null ? nextValues.inflow_guide : current.inflow_guide,
+                  images: nextValues.guide_images != null ? nextValues.guide_images : current.guide_images }
+              : undefined,
+            productOptionsJson: contentChanges.includes(SOURCE_PARTIAL_JSON_COLUMN) ? optionsJson : undefined,
+            by: 'intake-source',
+          });
+        } catch (inflowErr) {
+          logger.warn(`[order/source] 공고 유입 전파 실패(원본 수정은 유지): ${inflowErr.message}`);
+          campaignInflowSync = { applied: false, reason: 'error', error: inflowErr.message };
+        }
+      }
+      /* ★ 구매시간대가 바뀌었으면 이미 발행된 공고의 참여 가능 시간창도 함께 바꾼다.
+         ★ 해석 못 하는 문장이면 아무것도 바꾸지 않는다(추측해서 멀쩡한 공고를 닫지 않는다). */
+      let campaignTimeSync;
+      if (contentChanges.includes('purchase_time')) {
+        try {
+          const { syncCampaignPurchaseWindow } = require('../services/campaignPayAmountSync.service');
+          campaignTimeSync = await syncCampaignPurchaseWindow({
+            workOrderId: current.id, purchaseTime: nextValues.purchase_time, by: 'intake-source',
+          });
+        } catch (timeErr) {
+          logger.warn(`[order/source] 공고 시간창 전파 실패(원본 수정은 유지): ${timeErr.message}`);
+          campaignTimeSync = { applied: false, reason: 'error', error: timeErr.message };
+        }
+      }
       const contractOnly = contentChanges.length === 0;
       _emitWorkOrderNew(linked, {
         event: contractOnly ? 'source_contract_match' : 'source_partial_edit',
@@ -951,6 +995,8 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         edited_fields: contentChanges,
         ...(campaignPaySync ? { campaign_pay_sync: campaignPaySync } : {}),
         ...(campaignThumbSync ? { campaign_thumb_sync: campaignThumbSync } : {}),
+        ...(campaignInflowSync ? { campaign_inflow_sync: campaignInflowSync } : {}),
+        ...(campaignTimeSync ? { campaign_time_sync: campaignTimeSync } : {}),
       });
     }
 

@@ -169,7 +169,10 @@ function _woGuideHtml(raw) {
   return tmp.innerHTML;
 }
 
-const _INFLOW_LABEL = { guide: "유입가이드", link: "링크유입" };
+/* ★ 용어 통일(사용자 확정 2026-09-22): 유입**방식** 이름은 "가이드유입"(모집공고 모달과 같은 말).
+   ★ 가이드 **글 칸**의 이름은 여전히 "유입가이드" 다 — 그 칸에 "가이드유입"이라고 적으면 더 헷갈린다.
+   ★ 저장값(`inflow_type`)은 종전 그대로 `guide`/`link` — 보이는 말만 바뀐다. */
+const _INFLOW_LABEL = { guide: "가이드유입", link: "링크유입" };
 
 // 인트라넷이 review_guide/special_notes에 [헤더] 섹션으로 모든 항목을 중복 포함시켜 보내므로,
 // 개별 필드로 이미 표시되는 섹션은 버리고 지정한 라벨의 섹션 내용만 추출한다.

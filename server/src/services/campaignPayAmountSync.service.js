@@ -214,9 +214,216 @@ async function syncCampaignThumbnail({ workOrderId, thumbnailUrl, by = 'source' 
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   유입방식·유입가이드 전파 (사용자 확정 2026-09-22)
+   ─────────────────────────────────────────────────────────────────────────────
+   ★★ **왜 필요한가** — 리뷰어 화면은 공고에 저장된 유입방식을 **작업오더 폴백보다 먼저** 본다
+      (`campaign.routes` work-detail: `workDetail.inflowType || _lookupInflowType(...)`).
+      게다가 공고를 한 번이라도 저장하면 그 값이 항상 채워진다(발행 폼이 늘 guide|link 를 싣는다).
+      그래서 작업오더만 고치면 "인트라넷은 가이드유입인데 리뷰어는 링크유입" 이 된다.
+
+   ★★★ **가이드가 빈 채로 가이드유입이 되면 안 된다(완화 금지)** — 공고 저장 화면에는 이미
+      "가이드유입이면 활성 상품·옵션 전부에 가이드가 있어야 한다" 는 규칙이 있는데(`_validateActiveUnitInflowGuides`),
+      전파가 그 검사를 건너뛰면 **"가이드 보고 들어가세요" 라면서 가이드가 없는 공고**가 만들어진다.
+      → 전파를 **다 쓴 뒤 그 상태로 검사**하고, 걸리면 **통째로 되돌리고 사유를 보고**한다.
+      ★ 옵션이 없는 공고는 화면 규칙이 검사하지 않지만 여기서는 **공통 가이드도 비면 거부**한다
+        (화면보다 좁은 = 안전한 쪽. 넓히지 말 것).
+
+   ★ 쓰기 표면 = `campaign_options.inflow_guide_html/inflow_guide_images` ·
+                 `recruit_campaigns.work_detail` 둘뿐(정원·옵션 구성·작업표·주문·시트 무접촉).
+   ★ **절대 throw 하지 않는다** — 전파 실패가 원본 수정 저장을 되돌리면 안 된다.
+   ★ 선택 단위(optKey) 짝짓기는 **금액 전파와 같은 함수**(`payAmountsFromWorkOrder`)를 쓴다 —
+     따로 세면 "금액은 A 옵션에, 가이드는 B 옵션에" 로 갈린다.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/** 유입방식으로 인정하는 값 — 그 외(빈 값·오타)는 "안 바뀜" 으로 읽는다. */
+function normalizeInflowType(v) {
+  const s = String(v == null ? '' : v).trim();
+  return (s === 'guide' || s === 'link') ? s : '';
+}
+
+async function syncCampaignInflow({ workOrderId, inflowType, commonGuide, productOptionsJson, by = 'source' } = {}) {
+  const nextType = normalizeInflowType(inflowType);
+  const hasGuideEdit = commonGuide !== undefined;
+  const hasUnitEdit = productOptionsJson !== undefined;
+  if (!nextType && !hasGuideEdit && !hasUnitEdit) return { applied: false, reason: 'nothing_to_apply' };
+
+  let client;
+  try {
+    client = await getPool().connect();
+  } catch (e) {
+    logger.warn(`[campaign/inflow-sync] 커넥션 실패(전파 생략): ${(e && e.message) || e}`);
+    return { applied: false, reason: 'db_unavailable' };
+  }
+  try {
+    await client.query('BEGIN');
+    const { rows: woRows } = await client.query(
+      'SELECT id, linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
+    if (!woRows.length) { await client.query('ROLLBACK'); return { applied: false, reason: 'order_not_found' }; }
+    const { linkedCampaign } = require('./linkedRecruitQuota.service');
+    const camp = await linkedCampaign(client, woRows[0]);
+    if (!camp) { await client.query('ROLLBACK'); return { applied: false, reason: 'no_campaign' }; }
+
+    const { rows: wdRows } = await client.query(
+      'SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+    let wd = wdRows[0] && wdRows[0].work_detail;
+    if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
+    if (!wd || typeof wd !== 'object' || Array.isArray(wd)) wd = {};
+
+    const compose = require('../utils/inflowGuideCompose');
+    let optionsChanged = 0;
+
+    // ── 선택지별 유입가이드 ────────────────────────────────────────────────────
+    if (hasUnitEdit) {
+      const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
+      const parsed = payAmountsFromWorkOrder(productOptionsJson);
+      const wanted = new Map();
+      for (const u of parsed.units) {
+        /* ★★ 공고의 선택지 키는 **옵션명, 옵션이 없는 상품이면 상품명**이다(137 `unit_kind='product'`).
+           금액 전파는 옵션 없는 공고를 다른 경로로 처리해 `optKey` 만 보지만, 가이드는 상품 단위
+           선택지에도 붙어야 한다 — 상품명까지 키로 잡지 않으면 복합유형 작업에서 그 선택지의
+           가이드가 통째로 안 따라가고, 곧바로 아래 "가이드유입인데 빈 선택지" 검사에 걸린다. */
+        const key = u.optKey || u.productName;
+        if (!key) continue;
+        const src = u.optKey ? u.src : compose.productUnitSrc(u.src);
+        wanted.set(key, compose.composeUnitGuide(src));
+      }
+      if (wanted.size) {
+        const { rows: liveOpts } = await client.query(
+          `SELECT opt_key, inflow_guide_html, inflow_guide_images
+             FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
+        for (const o of liveOpts) {
+          const next = wanted.get(o.opt_key);
+          if (!next) continue;
+          const curImgs = JSON.stringify(Array.isArray(o.inflow_guide_images) ? o.inflow_guide_images : []);
+          const nextImgs = JSON.stringify(next.images);
+          if (String(o.inflow_guide_html || '') === next.html && curImgs === nextImgs) continue;
+          await client.query(
+            `UPDATE campaign_options
+                SET inflow_guide_html = $3, inflow_guide_images = $4::jsonb, updated_at = NOW()
+              WHERE campaign_id = $1 AND opt_key = $2`,
+            [camp.id, o.opt_key, next.html, nextImgs]);
+          optionsChanged += 1;
+        }
+      }
+    }
+
+    // ── 공통 유입가이드 · 유입방식 ─────────────────────────────────────────────
+    const nextWd = Object.assign({}, wd);
+    let wdChanged = false;
+    if (hasGuideEdit) {
+      const html = compose.composeCommonGuide(
+        commonGuide && commonGuide.text, commonGuide && commonGuide.images);
+      if (String(wd.inflowGuideHtml || '') !== html) { nextWd.inflowGuideHtml = html; wdChanged = true; }
+    }
+    if (nextType && String(wd.inflowType || '') !== nextType) { nextWd.inflowType = nextType; wdChanged = true; }
+    if (wdChanged) {
+      await client.query(
+        'UPDATE recruit_campaigns SET work_detail = $2::jsonb, updated_at = NOW() WHERE id = $1',
+        [camp.id, JSON.stringify(nextWd)]);
+    }
+
+    if (!wdChanged && !optionsChanged) {
+      await client.query('ROLLBACK');
+      return { applied: false, reason: 'already_same', campaignId: camp.id };
+    }
+
+    // ── 가이드유입 검사(전파가 끝난 상태로) ───────────────────────────────────
+    const effectiveType = nextType || normalizeInflowType(wd.inflowType);
+    if (effectiveType === 'guide') {
+      const { rows: liveOpts } = await client.query(
+        `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images
+           FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
+      if (liveOpts.length) {
+        const missing = liveOpts
+          .filter(o => !String(o.inflow_guide_html || '').trim()
+            && !(Array.isArray(o.inflow_guide_images) && o.inflow_guide_images.length))
+          .map(o => o.opt_key || o.product_name || '이름 없는 선택지');
+        if (missing.length) {
+          await client.query('ROLLBACK');
+          return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing } };
+        }
+      } else if (!String(nextWd.inflowGuideHtml || '').trim()) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing: ['공통 유입가이드'] } };
+      }
+    }
+
+    await client.query('COMMIT');
+    logger.info(`[campaign/inflow-sync] ${camp.id} 유입 반영(방식 ${nextType || '유지'} · 선택지 ${optionsChanged}) by ${by}`);
+    return { applied: true, campaignId: camp.id, inflowType: effectiveType, options: optionsChanged, workDetail: wdChanged };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    logger.warn(`[campaign/inflow-sync] 전파 실패(원본 수정은 유지): ${(e && e.message) || e}`);
+    return { applied: false, reason: 'error', error: (e && e.message) || String(e) };
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 구매시간대 → 연결 공고의 참여 가능 시간창(사용자 확정 2026-09-22).
+ *
+ * ★★ 이미 발행된 공고의 시간창은 **발행 때 한 번 계산해 굳힌 값**이라 작업오더를 고쳐도 따라오지
+ *    않았다. 광고주 사정으로 구매시간이 바뀌면 리뷰어가 실제로 그 시간에 참여할 수 있어야 한다.
+ * ★★ 문장 → 시각 계산은 `utils/purchaseTimeWindow` 단일 출처(발행 화면 사본과 가드가 대조).
+ * ★ **해석하지 못하면 아무것도 바꾸지 않는다** — 해석 못 하는 문장은 지금도 "하루 종일 열림"으로
+ *   운영된다. 여기서 추측해 시간창을 만들면 멀쩡히 열려 있던 공고가 갑자기 닫힌다.
+ * ★ **참여형 공고만** — 시간창은 참여형 개념이다(레거시 공고엔 쓰이지 않는다).
+ * ★ 이미 구매를 진행 중인 리뷰어는 영향 없다(제출은 시간창을 보지 않는다 — 실측 확인).
+ * ★ **절대 throw 하지 않는다** · 쓰기 표면 = `recruit_campaigns.window_start/window_end` 두 칸.
+ */
+async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'source' } = {}) {
+  const { parsePurchaseTime } = require('../utils/purchaseTimeWindow');
+  const win = parsePurchaseTime(purchaseTime);
+  if (!win) return { applied: false, reason: 'unparsed' };
+
+  let client;
+  try {
+    client = await getPool().connect();
+  } catch (e) {
+    logger.warn(`[campaign/time-sync] 커넥션 실패(전파 생략): ${(e && e.message) || e}`);
+    return { applied: false, reason: 'db_unavailable' };
+  }
+  try {
+    await client.query('BEGIN');
+    const { rows: woRows } = await client.query(
+      'SELECT id, linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
+    if (!woRows.length) { await client.query('ROLLBACK'); return { applied: false, reason: 'order_not_found' }; }
+    const { linkedCampaign } = require('./linkedRecruitQuota.service');
+    const camp = await linkedCampaign(client, woRows[0]);
+    if (!camp) { await client.query('ROLLBACK'); return { applied: false, reason: 'no_campaign' }; }
+
+    const { rows } = await client.query(
+      'SELECT participation_mode FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+    if (!rows.length || rows[0].participation_mode !== true) {
+      await client.query('ROLLBACK');
+      return { applied: false, reason: 'not_participation', campaignId: camp.id };
+    }
+
+    const { rowCount } = await client.query(
+      `UPDATE recruit_campaigns SET window_start = $2, window_end = $3, updated_at = NOW()
+        WHERE id = $1 AND (COALESCE(window_start::text,'') <> $2 OR COALESCE(window_end::text,'') <> $3)`,
+      [camp.id, win.start + ':00', win.end === '24:00' ? '24:00:00' : win.end + ':00']);
+    await client.query('COMMIT');
+    if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id, window: win };
+    logger.info(`[campaign/time-sync] ${camp.id} 시간창 ${win.start}~${win.end} by ${by}`);
+    return { applied: true, campaignId: camp.id, window: win };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    logger.warn(`[campaign/time-sync] 전파 실패(원본 수정은 유지): ${(e && e.message) || e}`);
+    return { applied: false, reason: 'error', error: (e && e.message) || String(e) };
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   syncCampaignPayAmount,
   syncCampaignThumbnail,
+  syncCampaignInflow,
+  syncCampaignPurchaseWindow,
+  normalizeInflowType,
   distinctAmountsInText,
   replaceAmountInProductLines,
   __setPoolForTest,
