@@ -17,8 +17,12 @@ assert.match(src, /btn\('invoice','계산서'/);
 assert.match(src, /btn\('payment','입금'/);
 assert.match(src, /function openSettlementPayment\(\)/,
   '입금 버튼도 실제 확인 팝업을 열어야 합니다.');
-assert.match(src, /btn\('quote','견적서',qReady,qSub,!qReady&&!qRetry,qRetry\)/,
-  '견적서가 확정적으로 없을 때만 견적서 버튼이 disabled 상태여야 합니다.');
+assert.match(src, /btn\('quote','견적서',qReady,qSub,dead\(qReady,qRetry\),qRetry\)/,
+  '세 칸이 같은 비활성 판정(dead)을 써야 합니다 - 견적서만 따로 계산하면 표기가 갈립니다.');
+assert.match(src, /btn\('invoice','계산서',iReady,iSub,dead\(iReady,iRetry\),iRetry\)/);
+assert.match(src, /btn\('payment','입금',pReady,pSub,dead\(pReady,pRetry\),pRetry\)/);
+assert.match(src, /const dead=\(ready,retry\)=>!ready&&!retry&&!\(d&&d\.hidden\);/,
+  '비활성 판정은 한 곳에서만 만든다 - 뒤에 볼 것이 있는 조회 실패·비공개는 열어 둔다.');
 assert.match(src, /\.tp3doc:disabled\{cursor:not-allowed;color:#aeb6c2;background:#f5f7fa[^}]*opacity:1\}/,
   '없는 견적서 버튼은 불투명한 회색 상태로 명확히 보여야 합니다.');
 assert.ok(src.indexOf('.tp3doc:disabled{') > src.indexOf('.tp3doc:hover,'),
@@ -82,11 +86,15 @@ const sub = (html, label) => ((button(html, label).match(/<span class="tp3sub">(
 let html = box.setlSummaryHtml({ linked: false });
 assert.match(button(html, '견적서'), / disabled/,
   '미매칭 탭의 없는 견적서는 클릭할 수 없는 회색 버튼이어야 합니다.');
-assert.doesNotMatch(button(html, '계산서'), / disabled/,
-  '견적서 없음 상태가 다른 확인 버튼까지 비활성화하면 안 됩니다.');
+// 사용자 확정 2026-09-21: 자료가 없으면 세 칸 모두 같은 비활성 회색이다.
+['견적서', '계산서', '입금'].forEach(label =>
+  assert.match(button(html, label), / disabled/,
+    `자료가 없는 ${label} 칸은 견적서와 똑같이 클릭 불가 회색이어야 합니다.`));
 assert.ok(html.indexOf('계약 매칭</button>') > html.indexOf('>입금<'),
   '계약 매칭은 첫 줄 문서 버튼 뒤에 렌더되어 CSS 그리드의 견적서 아래 칸에 놓여야 합니다.');
-assert.equal(sub(html, '견적서'), '없음', '계약 미매칭 탭의 견적서 칸은 비어 있다고 적어야 합니다.');
+assert.equal(sub(html, '견적서'), '미작성', '견적서가 없으면 미작성이라고 적어야 합니다.');
+assert.doesNotMatch(html, /tp3sub">없음</,
+  '견적서 빈 칸 문구는 없음이 아니라 미작성입니다(사용자 확정 2026-09-21).');
 assert.equal(sub(html, '입금'), '미입금', '아직 입금되지 않은 칸은 미입금이라고 적어야 합니다.');
 
 html = box.setlSummaryHtml({ linked: true, quote: null });
@@ -108,6 +116,8 @@ assert.doesNotMatch(button(html, '견적서'), / disabled/,
   '실제 견적번호가 있으면 견적서 버튼은 블루 활성 상태여야 합니다.');
 assert.equal(sub(html, '견적서'), '등록됨',
   '견적일을 모르면 날짜를 지어내지 말고 등록됐다고만 적어야 합니다.');
+assert.match(button(html, '계산서'), / disabled/,
+  '견적서만 있는 작업의 계산서·입금은 비활성 회색이어야 합니다.');
 
 // 인트라넷 날짜는 ISO 와 붙여 쓴 8자리 두 모양으로 온다 - 둘 다 날짜로 읽어야 한다.
 html = box.setlSummaryHtml({ linked: true, quote: { quoteNumber: 'Q-1', quoteDate: '2026-09-12' },
@@ -122,9 +132,23 @@ assert.equal(sub(html, '입금'), '9/20');
 html = box.setlSummaryHtml({ linked: true, quote: { quoteNumber: 'Q-1', quoteDate: '기재없음' } });
 assert.equal(sub(html, '견적서'), '등록됨', '날짜로 못 읽은 원본 값을 버튼에 그대로 찍으면 안 됩니다.');
 
+// 인트라넷 프록시가 죽으면 계산서·입금도 '모름'이다 - 미발행/미입금이라 단정하고 막으면
+// 사유를 볼 길이 없는 죽은 회색 버튼이 된다.
+html = box.setlSummaryHtml({ linked: true, quote: { quoteNumber: 'Q-1' }, proxyDown: true });
+['계산서', '입금'].forEach(label => {
+  assert.match(button(html, label), /class="tp3doc unknown"/,
+    `프록시 장애 시 ${label}는 회색이 아니라 주황(모름)이어야 합니다.`);
+  assert.doesNotMatch(button(html, label), / disabled/,
+    `모르는 상태를 막아 버리면 재조회할 길이 없어집니다(${label}).`);
+  assert.equal(sub(html, label), '확인 필요');
+});
+
 // 광고주 정산 비공개는 '아직'이 아니라 '모름' - 미발행이라고 단정하지 않는다.
 html = box.setlSummaryHtml({ hidden: true, linked: true });
 assert.equal(sub(html, '계산서'), '—', '정산이 비공개면 발행 여부를 단정해 적으면 안 됩니다.');
+['견적서', '계산서', '입금'].forEach(label =>
+  assert.doesNotMatch(button(html, label), / disabled/,
+    `비공개 사유를 알려 주는 팝업까지 막으면 막다른 길이 됩니다(${label}).`));
 
 // 정산 정보가 도착하기 전에는 값 자리를 비워 둔다.
 html = box.setlSummaryHtml(null);
