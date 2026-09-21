@@ -89,11 +89,18 @@ t('초과면 참여자 게이지 숫자가 붉어지고 +N 초과 배지가 붙�
   /nm\$\{ov\?' isover':''\}/.test(strip) && /class="ovb">\+\$\{ov\} 초과/.test(strip));
 
 const home = body(wd, 'function _finNumCells(');
-t('홈도 총건수 기준으로 초과를 말한다', /const over=\(rt&&filled!=null&&_isNoSheet\(t\)&&filled>rt\.total\)/.test(home));
+/* ★★ 판정은 `_finQuotaFill` 한 곳 — 참여 칸 파랑과 모집공고 칸 `✓ 모집완료` 가 같은 값을 본다
+   (2026-09-22 ②). 여기서 다시 세면 한 줄 안에서 두 칸이 갈린다. */
+const qfill = body(wd, 'function _finQuotaFill(');
+t('홈도 총건수 기준으로 초과를 말한다',
+  /const over=!!\(rt&&filled!=null&&_isNoSheet\(t\)&&filled>rt\.total\)/.test(qfill));
 /* ★★ 서버는 `meta.sheetless` 일 때만 행에 `over` 를 붙인다 — 홈에서 게이트를 빼면 시트 기반 탭에서
    홈만 붉어지고 "표에서 붉은 줄로 표시합니다" 가 거짓말이 된다(코덱스 리뷰 P2, 2026-08-24). */
 t('★ 홈 초과 판정도 무시트 작업만(시트 기반 탭에 거짓 경고 금지)',
-  /_isNoSheet\(t\)&&filled>rt\.total/.test(home));
+  /_isNoSheet\(t\)&&filled>rt\.total/.test(qfill));
+t('★ 판정 사본 0 — 숫자 칸은 그 함수를 받아 쓰기만 한다',
+  /const q=_finQuotaFill\(t\);/.test(home)
+  && !/filled>rt\.total/.test(home) && !/filled>=den/.test(home));
 t('홈 초과 표기는 색으로만(숫자는 이미 501/500 로 보인다)',
   // 시안 확정(2026-09-22): 숫자는 총건수·참여가 **각자 칸**이라 참여 상자를 붉게 채우는 것으로 말한다.
   /over\?'isover'/.test(home) && !/\+\$\{over\} 초과/.test(home));

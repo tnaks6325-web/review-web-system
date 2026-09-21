@@ -2572,6 +2572,14 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-b.cmp{border-color:var(--accent-line);color:var(--accent-deep)}
 .wbl-b.cmp:hover{background:var(--accent-soft)}
 .wbl-b.cmp.none{border-color:var(--line2);color:var(--muted)}
+/* 모집이 다 찬 작업 = `✓ 모집완료` — 참여 칸 파랑(.box.full)과 **같은 언어**를 쓴다.
+   공고가 있으면 그 공고를 여는 정상 버튼(파란 틴트), 없으면 "여기서 더 할 일 없음"이라 흐리게
+   둔다(★ 발행 길은 막지 않는다 — 차수 추가가 정상 흐름이라 눌리는 버튼으로 남긴다). */
+.wbl-b.cmp.done{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-soft)}
+.wbl-b.cmp.done:hover:not([disabled]){background:#dce7ff}
+.wbl-b.cmp.done.dim{border-color:var(--line2);color:var(--muted);background:transparent}
+.wbl-b.cmp.done.dim:hover:not([disabled]){background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.wbl-b.cmp.done[disabled]{background:var(--card2);border-color:#edf0f5;color:#c3cad6}
 .wbl-cdot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;vertical-align:1px;background:var(--faint)}
 .wbl-cdot.open{background:var(--safe)}
 .wbl-cdot.pre{background:#f59e0b}
@@ -5137,12 +5145,34 @@ function _campRank(c){
   if(st==='legacy'||!st) return (c&&c.status==='active')?0:2;
   return 2;
 }
+/* 모집이 끝난 작업의 꼬리말 — 「참여 N명 / M건」. 기준값을 줄 수로 접었으면 그 사실을 말한다
+   (총건수 칸의 `*` 와 같은 정직성 — 접은 채로 "완료"라고만 하면 더 큰 총건수를 가릴 수 있다). */
+function _campDoneWhy(q){
+  return `참여 ${q.filled}명 / ${q.den}건`
+    + (q.total==null?'(총건수를 몰라 작업표 줄 수 기준)':'')
+    + (q.over?` — 총건수를 ${q.filled-q.total}명 넘겨 들어왔습니다`:'');
+}
 function _campBtnHtml(t,i){
   const stop='event.stopPropagation();';
   // ★ 조회 실패를 "공고 없음"으로 보여주면 **이미 있는 공고를 또 발행**한다 — 비활성 + 사유(목록 상단에도 고지).
   if(STATE.campsUnavailable) return `<button class="wbl-b cmp" disabled title="공고 연결 정보를 불러오지 못했습니다 — 새로고침해 주세요"><i class="wbl-cdot"></i>공고 ?</button>`;
   const cs=Array.isArray(t.campaigns)?t.campaigns:[];
+  /* ── 모집이 다 찬 작업 = `✓ 모집완료`(사용자 확정 2026-09-22) ─────────────────────
+     ★★ 판정은 **참여 칸 파랑과 같은 `_finQuotaFill`**(사본 0) — 한 줄 안에서 두 칸이 갈리면
+       "참여는 200/200 인데 옆 칸은 ＋공고발행" 이 된다.
+     ★★ **발행 길을 막지 않는다**(사용자 확정 ③) — 다 찬 뒤 물량을 더 받는 차수 추가가 정상
+       흐름이라, 버튼을 없애지 않고 **흐리게 + 사유**로 남긴다(눌러도 아무 일 없는 버튼은 금지지만
+       이건 눌리는 버튼이다). 공고가 있으면 종전처럼 그 공고를 연다.
+     ★ 채움 수·기준값을 모르면 `full` 이 서지 않아 **종전 표기 그대로**다(모르면 완료라고 말하지 않는다). */
+  const q=_finQuotaFill(t);
+  const done=!!(q.full||q.over);
   if(!cs.length){
+    if(done){
+      const why=_campDoneWhy(q);
+      return STATE.campEdit
+        ? `<button class="wbl-b cmp done dim" onclick="${stop}openTabCampaign(${i})" title="${esc(`모집이 끝났습니다 — ${why}\n물량을 더 받으려면 눌러서 공고를 발행하세요.`)}">✓ 모집완료</button>`
+        : `<button class="wbl-b cmp done dim" disabled title="${esc(`모집이 끝났습니다 — ${why}`)}">✓ 모집완료</button>`;
+    }
     return STATE.campEdit
       ? `<button class="wbl-b cmp none" onclick="${stop}openTabCampaign(${i})" title="연결된 모집공고가 없습니다 — 이 작업의 탭이 채워진 발행 화면을 엽니다">＋공고발행</button>`
       : `<button class="wbl-b cmp none" disabled title="연결된 모집공고가 없습니다">공고 없음</button>`;
@@ -5152,7 +5182,11 @@ function _campBtnHtml(t,i){
   const tip=cs.length>1
     ? `연결된 공고 ${cs.length}건 — 눌러서 고르기`
     : `${cs[0].title||'(제목 없음)'}${_campLabel(cs[0])?' · '+_campLabel(cs[0]):''}`;
-  return `<button class="wbl-b cmp" onclick="${stop}openTabCampaign(${i})" title="${esc(tip)}"><i class="wbl-cdot ${dot}"></i>공고${cs.length>1?' '+cs.length:''}</button>`;
+  const n=cs.length>1?' '+cs.length:'';
+  if(done){
+    return `<button class="wbl-b cmp done" onclick="${stop}openTabCampaign(${i})" title="${esc(`모집이 끝났습니다 — ${_campDoneWhy(q)}\n${tip}`)}">✓ 모집완료${n}</button>`;
+  }
+  return `<button class="wbl-b cmp" onclick="${stop}openTabCampaign(${i})" title="${esc(tip)}"><i class="wbl-cdot ${dot}"></i>공고${n}</button>`;
 }
 /** 작업오더·모집공고 편집 권한 — 홈 전용 플래그.
  *  ★ `STATE.canEdit` 를 쓰지 않는다: 그 값은 작업보드 그리드 편집(role!=='advertiser')에도 쓰여
@@ -5488,6 +5522,25 @@ function _finRecruitTotal(t){
   const n=Number(c&&c.recruitTotal);
   return Number.isFinite(n)&&n>0 ? {total:n, source:String(c.recruitTotalSource||'')} : null;
 }
+/* ── 「모집이 다 찼는가」 판정 — ★★ 단일 출처 ────────────────────────────────────
+   참여 칸의 파랑(`full`)과 모집공고 칸의 `✓ 모집완료` 가 **이 함수 하나**를 본다.
+   따로 세면 "참여 칸은 파랗게 찼는데 옆 칸은 여전히 ＋공고발행" 으로 한 줄 안에서 화면이 갈린다.
+   ★★ 기준 = **화면에 실제로 그린 값**(사용자 확정 2026-09-22 ②) — 총건수를 못 구하면 참여 칸과
+     **같은 폴백**(작업표 줄 수)으로 접는다. 접었다는 사실은 총건수 칸의 `*` 와 툴팁이 이미 말한다.
+   ★ **모르는 것은 지어내지 않는다** — 채움 수·기준값이 없으면 `full` 은 false 로 남고(0 으로 접지
+     않는다) 모집공고 칸은 종전 표기를 그대로 쓴다.
+   ★ 초과(`over`)는 057 규율 그대로 **무시트 작업 + 총건수를 아는 경우**에만 본다. */
+function _finQuotaFill(t){
+  const s=(t&&t.stats)||{};
+  const rows=s.total==null?null:Number(s.total);
+  const filled=s.filled==null?null:Number(s.filled);
+  const rt=_finRecruitTotal(t);
+  const total=rt?rt.total:null;
+  const den=total!=null?total:rows;                       // 총건수를 못 구하면 줄 수로 접는다
+  const over=!!(rt&&filled!=null&&_isNoSheet(t)&&filled>rt.total);
+  const full=(filled!=null&&den!=null&&filled>=den);
+  return { rows, filled, rt, total, den, over, full };
+}
 /* ★★ 시안 확정(2026-09-22) — 한 칸에 겹쳐 그리던 진행 상황을 **네 칸**으로 나눈다.
    종전: 게이지 + `48/50` + 회색 `제출 48` 이 한 칸에 있어 **50/50 으로 다 찬 것처럼 보이는데
    실제 제출은 48** 인 상태가 눈에 안 띄었다(사용자 신고). 지금은 총건수·참여·제출·입금이
@@ -5499,12 +5552,11 @@ function _finRecruitTotal(t){
    ★ 준비된 줄·빈 슬롯·초과·경고는 **툴팁**으로 남긴다(정보 손실 0 — 057 규율). */
 function _finNumTip(t){
   const s=(t&&t.stats)||{};
-  const rows=s.total==null?null:Number(s.total);
-  const filled=s.filled==null?null:Number(s.filled);
-  const rt=_finRecruitTotal(t);
+  const q=_finQuotaFill(t);                                // ★ 판정 사본 0 — 참여 칸·모집공고 칸과 같은 값
+  const rows=q.rows, filled=q.filled, rt=q.rt;
   const blank=(rows!=null&&filled!=null)?Math.max(0,rows-filled):null;
   const gap=(rt&&rows!=null&&_isNoSheet(t)&&rows!==rt.total);
-  const over=(rt&&filled!=null&&_isNoSheet(t)&&filled>rt.total)?(filled-rt.total):0;
+  const over=q.over?(filled-rt.total):0;
   return [
     rt?`총건수 ${rt.total}건${rt.source==='work_order'?'(발주 기준)':''}`:'총건수 미상 — 준비된 줄 수로 표시합니다',
     filled==null?'참여 — (이 서버는 채워진 줄 수를 아직 내려주지 않습니다)':`참여 ${filled}명`,
@@ -5545,15 +5597,11 @@ function _finTotalUnknownWhy(t){
 }
 function _finNumCells(t,i,filt){
   const s=(t&&t.stats)||{};
-  const rows=s.total==null?null:Number(s.total);
-  const filled=s.filled==null?null:Number(s.filled);
+  const q=_finQuotaFill(t);                               // ★ 판정 사본 0(위 _finQuotaFill 주석)
+  const rows=q.rows, filled=q.filled, total=q.total, den=q.den, over=q.over;
   const sub=s.submitted==null?null:Number(s.submitted);
   const paid=s.paid==null?null:Number(s.paid);
-  const rt=_finRecruitTotal(t);
-  const total=rt?rt.total:null;
   const tip=esc(_finNumTip(t));
-  const den=total!=null?total:rows;                       // 총건수를 못 구하면 줄 수로 접는다
-  const over=(rt&&filled!=null&&_isNoSheet(t)&&filled>rt.total);
   const cell=(html,label)=>`<td class="nc" data-label="${label}" title="${tip}">${html}</td>`;
   const box=(v,cls)=>`<span class="box${cls?' '+cls:''}">${v==null?'—':v}</span>`;
   // ① 총건수 — 기준값이라 상자를 비운다. 못 구하면 줄 수 + `*`.
@@ -5563,7 +5611,7 @@ function _finNumCells(t,i,filt){
   /* ★★ 다 찬 칸을 파랗게 하는 기준 = **화면에 실제로 그린 값**(`den`)이다(신고 2026-09-22).
      종전에는 총건수를 아는 작업에서만 파래져서, 공고가 연결되지 않아 줄 수로 표시(`*`)되는 작업은
      `50` 옆에 참여 `50` 이 떠도 **영영 회색**이었다 — 화면이 같은 숫자를 보여주면서 "안 찼다"고 말하는 셈. */
-  const c2=cell(box(filled,filled==null?'':(over?'isover':(den!=null&&filled>=den?'full':''))),'참여');
+  const c2=cell(box(filled,filled==null?'':(over?'isover':(q.full?'full':''))),'참여');
   // ③④ 제출·입금 — 거의 끝났으면 눌러서 "아직 안 낸 사람"을 본다.
   const numBox=(v,kind,label)=>{
     if(v==null) return box(null);
