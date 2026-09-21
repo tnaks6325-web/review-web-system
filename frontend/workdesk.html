@@ -4095,7 +4095,11 @@ const W_FAV='\u0000fav';
 //   ★ 서버는 목록에서 마감 탭을 **거르지 않고 주석만** 준다(보관함이 같은 응답을 쓰므로). 거르는 건 여기.
 function isFinished(t){ return !!(t && t.finished); }
 // 마감 후보 = 인원 충족 + 전건 제출 + 전건 입금(사용자 확정 ㉠). 통계가 없으면 판정하지 않는다(false).
-//   ★ 제안 전용 — 후보가 아니어도 마감할 수 있고(조기 종료 작업), 후보여도 자동 처리하지 않는다.
+//   ★ 후보가 아니어도 마감할 수 있다(조기 종료 작업) — 이 판정은 대상을 **좁히지 않는다**.
+//   ★★ **후보가 되면 서버가 10분 안에 자동으로 마감한다**(2026-09-21 사용자 확정 — autoFinishEligibleTabs).
+//     그래서 이 배지는 "곧 보관함으로 넘어갈 작업"이라는 뜻이기도 하다. 서버 판정(finishCandidate)과
+//     **글자 그대로 같은 식**이어야 "배지는 떴는데 안 넘어간다"가 안 생긴다(회귀가드가 등가를 고정).
+//   ★ 사람이 [↩ 진행중으로 복귀]로 되돌린 작업은 서버가 자동 대상에서 영구히 뺀다(되돌릴 길 보존).
 function isFinishCandidate(t){
   const s=t&&t.stats; if(!s||!s.total) return false;
   return (s.submitted|0)>=s.total && (s.paid|0)>=s.total;
@@ -5462,7 +5466,7 @@ function _finBodyHtml(){
     const td=isTodayDone(t);
     const st=fin?`<span class="wbl-s fin">🏁 마감</span>`
       :(td?`<span class="wbl-s today">☑ 오늘 완료</span>`
-         :(isFinishCandidate(t)?`<span class="wbl-s cand">✓ 마감 후보</span>`:`<span class="wbl-s run">진행 중</span>`));
+         :(isFinishCandidate(t)?`<span class="wbl-s cand" title="인원·제출·입금이 모두 채워졌습니다 — 잠시 후 마감 보관함으로 자동 이동합니다.">✓ 마감 후보</span>`:`<span class="wbl-s run">진행 중</span>`));
     const unpaid=_finUnpaid(t);
     const last=fin
       ? `<td class="wbl-num" data-label="마감일 · 마감자">${esc(_finDate(t.finishedAt)||'—')}${t.finishedBy?' · '+esc(t.finishedBy):''}</td>`
@@ -5489,10 +5493,15 @@ function _finBodyHtml(){
       <td class="wbl-c wbl-btncol" data-label="모집공고">${_campBtnHtml(t,i)}</td>
       ${tdToday}${tdFinish}${_taskMoreCell(i)}</tr>`;
   }).join(''):'';
-  return rows.length?`<div class="wbl-tw"><table class="wbl-t"><thead><tr>
+  // ★ 보관함에는 사람이 안 눌러도 들어온 작업이 섞인다 — 조용히 옮기지 않고 **왜 여기 있는지** 말한다.
+  //   되돌리는 길([↩ 진행중으로 복귀])과 "되돌리면 다시 안 넘어온다"는 사실을 함께 적는다.
+  const autoNote=fin
+    ? `<div class="wbl-facts" style="margin:0 0 8px">인원·제출·입금이 모두 채워진 작업은 <b>자동으로 이곳으로 옮겨집니다</b>(마감자 칸에 <b>자동 마감</b>으로 표시). 아직 끝난 게 아니면 <b>[↩ 진행중으로 복귀]</b>를 누르세요 — 되돌린 작업은 다시 자동으로 넘어오지 않습니다.</div>`
+    : '';
+  return rows.length?`${autoNote}<div class="wbl-tw"><table class="wbl-t"><thead><tr>
       <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
-    : `<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
+    : `${autoNote}<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }
 
 function _finRenderList(){

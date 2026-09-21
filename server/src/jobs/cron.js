@@ -444,6 +444,34 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 작업 자동 마감: 기본 ON · 10분마다 ─────────────────────────────────────────
+  //   "인원·제출·입금이 모두 채워진 작업"을 홈 작업목록에서 **마감 보관함**으로 자동 이동한다
+  //   (2026-09-21 사용자 확정). 대상 판정은 화면의 `✓ 마감 후보` 배지와 **같은 함수**이고,
+  //   사람이 [↩ 진행중으로 복귀]로 되돌린 작업은 다시 마감하지 않는다(서비스 주석 참조).
+  //   ★ 마감은 화면 분류일 뿐이라 시트·리뷰어 화면·주문·정산 무접촉 — 되돌리기는 클릭 한 번.
+  //   ★ 조회가 하나라도 실패하면 **한 건도 건드리지 않는다**(fail-closed — 서비스가 판정).
+  //   되돌리기 = Railway `TAB_AUTO_FINISH=0`.
+  if (process.env.TAB_AUTO_FINISH !== '0') {
+    const afSchedule = process.env.TAB_AUTO_FINISH_SCHEDULE || '*/10 * * * *';
+    let afRunning = false;
+    cron.schedule(afSchedule, async () => {
+      if (afRunning) return;
+      afRunning = true;
+      try {
+        const { autoFinishEligibleTabs } = require('../services/trackB.service');
+        const { withJobLock } = require('../utils/jobLock');
+        // ★ 멀티 인스턴스가 같은 탭을 동시에 마감하지 않게(활성 1건 부분유니크가 최종 방어지만
+        //   무의미한 경합 쓰기를 미리 막는다). 기존 락 이름들과 비충돌.
+        const r = await withJobLock('tab_auto_finish', () => autoFinishEligibleTabs({ dryRun: false, by: '자동 마감' }));
+        if (r && r.skipped) logger.debug('[CRON-AutoFinish] lock busy — 양보');
+        else if (r && r.ok === false) logger.warn(`[CRON-AutoFinish] 건너뜀(${r.code}): ${r.error}`);
+      } catch (err) {
+        // ★ 자동 마감이 크론을 죽이지 않는다.
+        logger.error(`[CRON-AutoFinish] error: ${err.message}`);
+      } finally { afRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── Track B(평행 트랙) 그림자 투영: 플래그 OFF 기본. 라이브 읽어 B 원장 최신화(추가·읽기·격리, 라이브 무영향). ──
   //   등록 자체를 TRACK_B_PROJECTION=1 게이트 뒤에 둔다(off면 스케줄 미등록). projectActive도 내부 재확인.
   if (process.env.TRACK_B_PROJECTION === '1') {
