@@ -247,6 +247,7 @@ t('★ 서버 options = 살아있는 공고 옵션 우선(status <> \'closed\') 
    → 리뷰비·입금명·이체은행·총건수·일건수·구매시간과 같은 규율로 통일한다(공고 > 발주).
    ★ 총액은 **공고 1건당 금액 × 총건수**로 계산하고 그 사실을 툴팁으로 밝힌다(사용자 확정). */
 console.log('\n── D4-b. 결제금액 = 모집공고 우선(2026-09-21) ──');
+let _runD4bServerGuards = async () => {};   // 아래에서 실제 검사로 교체된다(파일 끝 체인이 부른다)
 
 /* 서버 재료 ─────────────────────────────────────────────────────── */
 t('★ 공고 1건당 금액 = 살아있는 옵션 1종이면 그 금액 · 아니면 공고 상품 원문에서', (() => {
@@ -373,6 +374,67 @@ t('★ 계산값이라는 사실을 툴팁이 말한다(작업오더 결제합�
   })());
   t('★ 실행: 단가·총액 둘 다 없으면 [미설정]',
     /미설정/.test(draw({}, { productOption: '', productOptionsJson: '' })));
+}
+
+/* 서버 실제 실행 ─────────────────────────────────────────────────
+   ⚠ 정적 패턴(`options = campOpts;` 존재)만으로는 **그 뒤에서 비워 버리는** 변이를 놓친다
+     (변이시험 실측). 두 경로와 우선순위를 실제로 돌려서 고정한다. */
+{
+  const vmc = require('vm');
+  const st = svc.indexOf('async function tabConditionSummary(');
+  const na = svc.indexOf('\nasync function ', st + 10);
+  const nf = svc.indexOf('\nfunction ', st + 10);
+  const en = na >= 0 ? (nf >= 0 ? Math.min(na, nf) : na) : nf;
+  const sb2 = {
+    require: m => require(m.startsWith('.') ? path.join(__dirname, '..', 'src', 'services', m) : m),
+    _condWoOptions: () => [],
+    logger: { warn() {}, info() {} },
+    module: {}, exports: {},
+  };
+  vmc.createContext(sb2);
+  vmc.runInContext(svc.slice(st, en) + '\nmodule.exports = tabConditionSummary;', sb2);
+  const runCond = sb2.module.exports;
+  const CAMP = { id: 'c1', title: 'T', recruitTotal: 5, dailyLimit: 5, status: 'active', participationMode: true };
+  const mkDb = (camp, opts) => ({ async query(sql) {
+    if (/FROM recruit_campaigns/.test(sql)) return { rows: camp ? [camp] : [] };
+    if (/FROM campaign_options/.test(sql)) return { rows: opts || [] };
+    return { rows: [] };
+  } });
+  const ARG = { sheetId: 's1', tabName: 't1', meta: {}, wo: null };
+  const LINES = '티피링크 Tapo C113 홈캠 옵션 : 단품 - 결제금액 52,200원';
+
+  /* ⚠ 파일 끝의 `process.exit` 는 이 블록보다 먼저 돈다 — 즉시 실행하면 **단언이 통째로
+       실행되지 않는다**(이 레포의 알려진 함정). 끝의 `_runP1Guards()` 체인에 합류시킨다. */
+  _runD4bServerGuards = async () => {
+    {
+      const out = await runCond(mkDb({ ...CAMP, workDetail: { productLines: LINES } }), ARG);
+      t('★ 실행(서버): 옵션 없는 작업은 공고 상품 원문에서 1건당 금액을 읽는다', out.campaignPayAmount === 52200);
+    }
+    {
+      // ★★ 옵션 1종 + 상품 원문 없음 — 여기서만 `campOpts` 보관이 드러난다
+      const out = await runCond(mkDb({ ...CAMP, workDetail: null }, [{ label: '단품', pay: 52200, count: 5 }]), ARG);
+      t('★★ 실행(서버): 살아있는 옵션 1종이면 그 금액(작업오더 폴백이 원본을 덮지 않는다)',
+        out.campaignPayAmount === 52200);
+    }
+    {
+      const out = await runCond(mkDb({ ...CAMP, workDetail: { productLines: LINES } },
+        [{ label: '단품', pay: 47000, count: 5 }]), ARG);
+      t('★ 실행(서버): 옵션 금액이 상품 원문보다 우선', out.campaignPayAmount === 47000);
+    }
+    {
+      // JSONB 를 문자열로 돌려주는 드라이버·경로에서도 읽힌다
+      const out = await runCond(mkDb({ ...CAMP, workDetail: JSON.stringify({ productLines: LINES }) }), ARG);
+      t('★ 실행(서버): 상품 원문이 문자열로 와도 읽는다', out.campaignPayAmount === 52200);
+    }
+    {
+      const out = await runCond(mkDb({ ...CAMP, workDetail: { productLines: '상품명만 있음' } }), ARG);
+      t('★ 실행(서버): 금액이 없으면 null — 지어내지 않는다', out.campaignPayAmount === null);
+    }
+    {
+      const out = await runCond(mkDb(null), ARG);
+      t('★ 실행(서버): 공고가 없으면 null(화면은 작업오더 값을 쓴다)', out.campaignPayAmount === null);
+    }
+  };
 }
 t('★ _condWoOptions 는 구조화 옵션만(라벨 필수 · 0 보존) — 이름뿐인 레거시는 제외', (() => {
   const b = fnBody(svc, 'function _condWoOptions(json) {');
@@ -1018,7 +1080,7 @@ console.log('\n── M. 코드리뷰 P1 — 은행은 이체 계산과 같은 �
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));
 
-_runP1Guards().then(() => {
+_runP1Guards().then(_runD4bServerGuards).then(() => {
   console.log(`\n✅ workboardTopC: ${pass} cases passed`);
   process.exit(0);
 }).catch(e => { console.error(e); process.exit(1); });
