@@ -254,6 +254,109 @@ async function run() {
       assert.ok(m[1].includes("'" + f + "'"), f + ' 가 전파 조건에서 빠졌다'));
   });
 
+
+  await t('③ 옵션 없는 상품(상품 자체가 선택지)의 가이드도 따라간다', async () => {
+    /* ★★ 공고의 선택지 키는 옵션명, **옵션이 없는 상품이면 상품명**이다(137).
+       상품명을 키로 안 잡으면 복합유형 작업에서 그 선택지의 가이드가 통째로 안 따라가고
+       곧바로 "가이드유입인데 빈 선택지" 로 막힌다 — 이 케이스가 없으면 그 회귀를 놓친다. */
+    const mixed = JSON.stringify([
+      { name: '핫팩', product_mode: 'opt', base: { pay: 0 },
+        options: [{ label: '레드', pay: 9190, guide: { text: '레드 안내', images: [] } }] },
+      { name: '단품 세트', product_mode: 'none', base: { pay: 9190 },
+        guide: { text: '단품 안내', images: [] }, options: [] },
+    ]);
+    const q = [];
+    const client = {
+      query: async (sql, params) => {
+        const x = String(sql); q.push({ sql: x, params });
+        if (/FROM work_orders WHERE id = \$1 FOR UPDATE/.test(x)) return { rows: [{ id: 'wo_1', linked_campaign_id: 'camp_1' }] };
+        if (/FROM recruit_campaigns\s+WHERE \(id = \$1/.test(x)) return { rows: [{ id: 'camp_1' }] };
+        if (/SELECT work_detail FROM recruit_campaigns/.test(x)) return { rows: [{ work_detail: { inflowType: 'link' } }] };
+        if (/FROM campaign_options/.test(x)) {
+          return { rows: [
+            { opt_key: '레드', product_name: '핫팩', inflow_guide_html: '', inflow_guide_images: [] },
+            { opt_key: '단품 세트', product_name: '단품 세트', inflow_guide_html: '', inflow_guide_images: [] },
+          ] };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release: () => {},
+    };
+    svc.__setPoolForTest({ connect: async () => client });
+    await svc.syncCampaignInflow({ workOrderId: 'wo_1', productOptionsJson: mixed });
+    const keys = writes(q).filter(x => /UPDATE campaign_options/.test(x.sql)).map(x => x.params[1]).sort();
+    assert.deepStrictEqual(keys, ['단품 세트', '레드'],
+      '옵션 없는 상품의 가이드가 안 따라갔다 — 선택지 키를 옵션명만으로 잡았다: ' + JSON.stringify(keys));
+  });
+
+  await t('⑦ 유입방식을 고치면 라우트가 전파를 **실제로** 부른다(문자열 검사로는 못 잡는다)', async () => {
+    process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+    process.env.ORDER_INTAKE_KEY = 'test-intake-key';
+    const pool2 = require(path.join(ROOT, 'src/db/pool.js'));
+    const q2 = require(path.join(ROOT, 'src/services/linkedRecruitQuota.service.js'));
+    q2.assertWorkOrderQuota = async () => null;
+    q2.syncWorkOrderRecruitTotal = async () => null;
+    const realInflow = svc.syncCampaignInflow;
+    const realTime = svc.syncCampaignPurchaseWindow;
+    let inflowArg = null; let timeArg = null;
+    svc.syncCampaignInflow = async a => { inflowArg = a; return { applied: true, campaignId: 'camp_1' }; };
+    svc.syncCampaignPurchaseWindow = async a => { timeArg = a; return { applied: true, campaignId: 'camp_1' }; };
+    try {
+      const router = require(path.join(ROOT, 'src/routes/order.routes.js'));
+      const L = (router.stack || []).find(l => l.route
+        && l.route.path === '/intake/source/:sourceReviewOrderId' && l.route.methods.put);
+      assert.ok(L, '원본 수정 라우트가 없다');
+      const handler = L.route.stack[L.route.stack.length - 1].handle;
+      const ORDER = { id: 'wo_1', source_review_order_id: 'ro_y', source_revision: 1,
+        intake_idempotency_key: 'ro_y:1', status: 'reviewing', deleted_at: null,
+        linked_campaign_id: 'camp_1', advertiser_id: 'a1', title: 'T', start_date: new Date(2026, 8, 9),
+        manager_name: 'M', work_manager: '박세희', product_option: '', product_options_json: '',
+        product_distribution_mode: 'balanced', pay_amount: 100, review_fee: 0, daily_count: 30,
+        daily_count_text: '30', purchase_channel: '쿠팡', purchase_time: '13:00 ~ 18:00',
+        inflow_keyword: '', inflow_type: 'link', inflow_guide: '', guide_images: '',
+        delivery_type: '실배송', courier_proxy: false, review_type: '포토', review_type_mix: [],
+        recruit_count: 470, review_guide: 'G', special_notes: '', product_url: 'https://x/y',
+        work_sheet_url: '', goods_cost_type: '계산서', skip_weekends: null, holidays: null,
+        work_kind: 'review', sales_id: 's', contract_number: 'c', quote_id: 'q' };
+      const BODY = { intakeKey: 'test-intake-key', source_review_order_id: 'ro_y', source_revision: 2,
+        idempotency_key: 'ro_y:2', title: 'T', start_date: '2026-09-09', manager_name: 'M',
+        work_manager: '박세희', product_option: '', product_options_json: '',
+        pay_amount: 100, review_fee: 0, daily_count: 30, daily_count_text: '30',
+        product_distribution_mode: 'balanced', purchase_channel: '쿠팡',
+        purchase_time: '오후 2시 ~ 5시',           // ← 바뀐 칸 ①
+        inflow_keyword: '', inflow_type: 'guide',  // ← 바뀐 칸 ②
+        inflow_guide: '새 유입 안내',               // ← 바뀐 칸 ③
+        delivery_type: '실배송', review_type: '포토', recruit_count: 470, review_guide: 'G',
+        special_notes: '', product_url: 'https://x/y', work_sheet_url: '', goods_cost_type: '계산서',
+        work_kind: 'review', sales_id: 's', contract_number: 'c', quote_id: 'q',
+        intranet_advertiser_id: 'adv', intranet_advertiser_name: 'N',
+        intranet_advertiser_contact: '010', intranet_advertiser_business_number: '000' };
+      pool2.query = async (sql) => {
+        const x = String(sql);
+        if (/SELECT \* FROM work_orders WHERE source_review_order_id/.test(x)) return { rows: [Object.assign({}, ORDER)] };
+        if (/UPDATE work_orders SET/.test(x)) return { rows: [Object.assign({}, ORDER, { source_revision: 2 })] };
+        return { rows: [] };
+      };
+      const res = { statusCode: 200, body: null };
+      res.status = c => { res.statusCode = c; return res; };
+      res.json = b => { res.body = b; return res; };
+      await handler({ body: BODY, params: { sourceReviewOrderId: 'ro_y' }, headers: {} }, res, e => { throw e; });
+
+      assert.strictEqual(res.statusCode, 200, '수정이 막혔다: ' + JSON.stringify(res.body));
+      assert.ok(inflowArg, '유입방식을 고쳤는데 공고 전파가 불리지 않았다 — 리뷰어 화면이 옛 방식으로 남는다');
+      assert.strictEqual(inflowArg.inflowType, 'guide', '바뀐 유입방식이 안 실렸다');
+      assert.ok(inflowArg.commonGuide && /새 유입 안내/.test(String(inflowArg.commonGuide.text)),
+        '가이드 글이 안 실렸다 — 글만 고치면 공고에 안 간다');
+      assert.ok(timeArg, '구매시간대를 고쳤는데 시간창 전파가 불리지 않았다');
+      assert.ok(/오후 2시/.test(String(timeArg.purchaseTime)), '바뀐 구매시간대가 안 실렸다');
+      assert.ok(res.body.campaign_inflow_sync, '유입 전파 결과를 응답에 안 싣는다');
+      assert.ok(res.body.campaign_time_sync, '시간창 전파 결과를 응답에 안 싣는다');
+    } finally {
+      svc.syncCampaignInflow = realInflow;
+      svc.syncCampaignPurchaseWindow = realTime;
+    }
+  });
+
   /* ── ⑧ 용어 ──────────────────────────────────────────────────────────────── */
   await t('⑧ 보이는 말은 "가이드유입" — 저장값·약속 문구는 그대로', () => {
     assert.ok(/_INFLOW_LABEL = \{ guide: "가이드유입"/.test(WOD), '유입방식 라벨이 옛 말이다');
