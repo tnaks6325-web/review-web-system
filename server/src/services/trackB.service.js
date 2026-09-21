@@ -713,7 +713,10 @@ async function listAdvertisersWithOwnership() {
 //   ★★ 재료는 홈 작업목록과 같은 tabStatsMap(index_master + 작업보드 실제 입금 셀) 하나다 —
 //     업체관리가 campaign_participants(bTotal/bSub/bPaid)로 따로 세면 **같은 작업이 홈에서는 마감 후보,
 //     업체관리에서는 아님**으로 갈린다(레포가 반복해 밟은 화면 간 불일치).
-//   ★ 통계가 없으면 판정하지 않는다(false) — 모르면 제안하지 않는다. 제안 전용이라 자동 처리는 없다.
+//   ★ 통계가 없으면 판정하지 않는다(false) — 모르면 제안하지 않는다.
+//   ★★ **자동 마감(autoFinishEligibleTabs)도 이 함수를 그대로 쓴다**(2026-09-21 사용자 확정) — 화면의
+//     `✓ 마감 후보` 배지와 자동 마감 대상이 **같은 판정**이어야 "배지는 떴는데 안 넘어간다"가 안 생긴다.
+//     판정을 여기서 복사해 가지 말 것(사본 금지 — 레포가 반복해 밟은 화면 간 불일치).
 //   ★ 프론트는 이 불리언을 **그대로 소비**한다(화면 재계산 금지 — 홈 [공고] 버튼과 같은 규율).
 function finishCandidate(stats) {
   if (!stats) return false;
@@ -5741,8 +5744,16 @@ async function finishedTabsMap() {
 }
 
 /** 마감/복귀. finish=true 는 **검수 확인(inspected)** 없이는 거부한다(사용자 확정 ㉠ — 서버가 최종 방어).
- *  멱등: 이미 마감된 탭 재마감·마감 아닌 탭 복귀 모두 no-op 성공. 활성 1건은 부분 유니크가 보장. */
-async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, inspected = false, by = '' } = {}) {
+ *  멱등: 이미 마감된 탭 재마감·마감 아닌 탭 복귀 모두 no-op 성공. 활성 1건은 부분 유니크가 보장.
+ *
+ *  ★★ `auto:true` = **자동 마감 경로 전용**(2026-09-21 사용자 확정 "확인 없이 자동 마감"):
+ *    검수 확인 게이트를 통과시키되 **`inspect_confirmed_at` 은 NULL 로 남긴다** — 사람이 확인하지
+ *    않았는데 확인 시각을 박으면 그 칸이 거짓을 말한다(책임추적 원장이라 더 나쁘다).
+ *  ★★★ **`auto` 를 요청 본문에서 받지 말 것(완화 금지)** — 라우트가 body 로 받는 순간 확인창을
+ *    우회한 요청이 그대로 통과해 게이트가 무의미해진다. 세우는 곳은 **서버 코드 한 곳**
+ *    (autoFinishEligibleTabs)뿐이고 회귀가드가 라우트에 그 키가 없음을 고정한다
+ *    (`req._trustedAdminView` 와 같은 규율). */
+async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, inspected = false, by = '', auto = false } = {}) {
   const s = String(sheetId || '').trim(), t = String(tabName || '').trim();
   if (!s || !t) return { ok: false, error: 'sheetId, tabName 필수' };
   const who = String(by || '').slice(0, 100);
@@ -5750,13 +5761,14 @@ async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, 
   try {
     if (finish) {
       // ★ 프론트 체크만 믿지 않는다 — 확인창을 우회한 요청은 여기서 막힌다(필수열람 게이트와 같은 규율).
-      if (!inspected) return { ok: false, error: '리뷰폴더 마감자료 검수 확인이 필요합니다.', code: 'inspect_required' };
+      //   ★ 자동 마감(auto)만 이 게이트를 지나간다 — 그 경로는 사람이 확인할 창구 자체가 없다.
+      if (!inspected && auto !== true) return { ok: false, error: '리뷰폴더 마감자료 검수 확인이 필요합니다.', code: 'inspect_required' };
       const { rows } = await db.query(
         `INSERT INTO trackb_tab_finished (sheet_id, tab_name, tab_gid, finished_by, inspect_confirmed_at)
-         VALUES ($1,$2,$3,$4,NOW())
+         VALUES ($1,$2,$3,$4, CASE WHEN $5::bool THEN NULL ELSE NOW() END)
          ON CONFLICT (sheet_id, tab_name) WHERE deleted_at IS NULL DO NOTHING
          RETURNING id, finished_at AS "finishedAt"`,
-        [s, t, tabGid == null ? null : String(tabGid), who]);
+        [s, t, tabGid == null ? null : String(tabGid), who, auto === true]);
       logger.info(`[trackB] 작업 마감: ${s}/${t} by ${who}${rows.length ? '' : ' (이미 마감 — no-op)'}`);
       return { ok: true, finished: true, created: rows.length > 0, finishedAt: rows[0] ? rows[0].finishedAt : null };
     }
@@ -5776,6 +5788,98 @@ async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, 
     }
     throw err;
   }
+}
+
+// ══ 작업 자동 마감 — "인원·제출·입금이 모두 채워지면 보관함으로" (2026-09-21 사용자 확정) ══════
+//   발단: 홈 작업목록에서 `✓ 마감 후보` 배지가 뜬 뒤에도 사람이 [🏁 마감]을 눌러야만 보관함으로
+//     갔다. 조건이 이미 숫자로 확정된 상태라 그 클릭이 순수한 잡일이었다.
+//
+//   ★★ **판정 사본 0** — 대상은 `finishCandidate(stats)` 그대로이고 재료도 홈·업체관리와 **같은
+//     `tabStatsMap`** 이다. 여기서 조건을 다시 세우면 "배지는 떴는데 안 넘어간다"(또는 그 반대)가
+//     생긴다. 이 함수가 하는 일은 **판정이 아니라 실행**뿐이다.
+//
+//   ★★ **되돌린 작업은 다시 마감하지 않는다(사용자 확정)** — 사람이 [↩ 진행중으로 복귀]를 누른 것은
+//     "아직 아니다"라는 판단이다. 그 탭에 복귀 이력(`deleted_at IS NOT NULL`)이 한 줄이라도 있으면
+//     자동 대상에서 **영구히** 뺀다. 이게 없으면 되돌려도 다음 주기에 또 마감돼 **되돌릴 방법이
+//     사라진다**(막다른 길). 마감이 정말 필요하면 담당자가 직접 [🏁 마감]을 누른다.
+//
+//   ★★ **모르면 마감하지 않는다(fail-closed 3종)** — 통계·마감목록·탭메타 중 하나라도 조회에
+//     실패하면 **한 건도 건드리지 않고** 사유를 돌려준다. 마감은 되돌릴 수 있지만 되돌리는 순간
+//     그 작업이 자동 경로에서 영구 제외되므로(위 규율), 잘못된 마감의 값이 싸지 않다.
+//   ★ 통계는 **force 로 다시 읽는다** — 30초 캐시의 낡은 값으로 마감하지 않는다.
+//
+//   ★ 쓰기 표면 = `setTabFinished` 를 통한 `trackb_tab_finished` 하나(시트·리뷰어 화면·주문·정산 무접촉).
+//   ★ 마감자는 `자동 마감` 으로 남긴다 — 보관함의 "마감일 · 마감자" 칸과 작업 로그가 **그대로** 그 값을
+//     보여주므로 화면 변경 없이 "누가 넘겼는지"가 드러난다(조용한 이동 금지).
+//   ★ 건별 독립 — 한 건이 실패해도 나머지는 계속한다(실패는 `failed` 로 보고).
+const AUTO_FINISH_BY = '자동 마감';
+const AUTO_FINISH_CAP = Math.max(1, Number(process.env.TAB_AUTO_FINISH_CAP) || 200);
+
+/** 자동 마감 대상(= 마감 후보 ∧ 미마감 ∧ 복귀 이력 없음)을 골라 마감한다.
+ *  @param {boolean} dryRun true 면 **쓰기 0건** — 대상 목록만 돌려준다(미리보기·진단).
+ *  @returns {{ok:boolean, code?:string, dryRun:boolean, scanned:number, candidates:Array,
+ *             finished:number, failed:Array, skippedReopened:number, capped:boolean}} */
+async function autoFinishEligibleTabs({ dryRun = false, cap = AUTO_FINISH_CAP, by = AUTO_FINISH_BY } = {}) {
+  const limit = Math.max(1, Number(cap) || AUTO_FINISH_CAP);
+  const out = { ok: true, dryRun: !!dryRun, scanned: 0, candidates: [], finished: 0, failed: [], skippedReopened: 0, capped: false };
+
+  // ① 통계 — ★ force: 낡은 캐시로 마감하지 않는다.
+  const st = await tabStatsMap({ force: true });
+  if (!st.ok) return { ...out, ok: false, code: 'stats_unavailable', error: '인원·제출·입금 수치를 불러오지 못해 자동 마감을 건너뜁니다.' };
+
+  // ② 이미 마감된 탭(재마감은 no-op 이지만, 모르는 채로 돌면 매 주기 무의미한 쓰기가 나간다).
+  const fin = await finishedTabsMap();
+  if (!fin.ok) return { ...out, ok: false, code: 'finished_unavailable', error: '마감 목록을 불러오지 못해 자동 마감을 건너뜁니다.' };
+
+  // ③ 탭 메타(gid) + 복귀 이력 — 한 쿼리. ★ gid 는 리네임 대비로 마감 행에 함께 박는다(088 규율).
+  let metaRows;
+  try {
+    const { rows } = await getPool().query(
+      `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName", tc.tab_gid AS "tabGid",
+              EXISTS (SELECT 1 FROM trackb_tab_finished f
+                       WHERE f.sheet_id = tc.sheet_id AND f.tab_name = tc.tab_name
+                         AND f.deleted_at IS NOT NULL) AS "everReopened"
+         FROM tab_configs tc`);
+    metaRows = rows;
+  } catch (err) {
+    logger.warn(`[trackB] 자동 마감 중단(탭 메타 조회 실패 — 모르면 마감하지 않는다): ${err.message}`);
+    return { ...out, ok: false, code: 'meta_unavailable', error: '작업 목록을 불러오지 못해 자동 마감을 건너뜁니다.' };
+  }
+
+  // ④ 대상 선별 — 판정은 finishCandidate 하나(사본 금지).
+  for (const r of metaRows) {
+    const key = _FIN_KEY(r.sheetId, r.tabName);
+    const gid = String(r.tabGid == null ? '' : r.tabGid).trim();
+    if (fin.map[key] || (gid && fin.map[_FIN_GKEY(r.sheetId, gid)])) continue;   // 이미 마감
+    if (!finishCandidate(st.map[key])) continue;                                 // ★ 판정 단일 출처
+    out.scanned += 1;
+    if (r.everReopened) { out.skippedReopened += 1; continue; }                   // ★ 사람이 되돌린 작업
+    const s = st.map[key] || {};
+    out.candidates.push({ sheetId: r.sheetId, tabName: r.tabName, tabGid: gid,
+      displayName: s.displayName || s.campaignName || r.tabName,
+      total: s.total, submitted: s.submitted, paid: s.paid });
+  }
+  if (out.candidates.length > limit) { out.candidates = out.candidates.slice(0, limit); out.capped = true; }
+  if (dryRun) return out;   // ★ 미리보기는 쓰기 0건
+
+  // ⑤ 실행 — 건별 독립(한 건 실패가 나머지를 죽이지 않는다).
+  for (const c of out.candidates) {
+    try {
+      const r = await setTabFinished({ sheetId: c.sheetId, tabName: c.tabName, tabGid: c.tabGid || null,
+        finish: true, auto: true, by });
+      if (r && r.ok) out.finished += 1;
+      else out.failed.push({ sheetId: c.sheetId, tabName: c.tabName, error: (r && r.error) || '마감 실패' });
+    } catch (err) {
+      out.failed.push({ sheetId: c.sheetId, tabName: c.tabName, error: err.message });
+    }
+  }
+  if (out.finished || out.failed.length) {
+    logger.info(`[trackB] 자동 마감: ${out.finished}건 보관함 이동`
+      + (out.failed.length ? ` · 실패 ${out.failed.length}건` : '')
+      + (out.skippedReopened ? ` · 복귀 이력으로 제외 ${out.skippedReopened}건` : '')
+      + (out.capped ? ` · 상한(${limit}) 초과분은 다음 주기` : ''));
+  }
+  return out;
 }
 
 /** 작업목록 표의 재료(담당자·캠페인명·인원/제출/입금) 맵 — 홈 작업 목록 전용(`?stats=1`).
@@ -6519,6 +6623,7 @@ module.exports = {
   setTabDailyDone,
   finishedTabsMap,
   setTabFinished,
+  autoFinishEligibleTabs,
   tabStatsMap,
   tabCampaignsMap,
   tabTodayProgress,

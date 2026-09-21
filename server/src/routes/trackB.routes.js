@@ -326,6 +326,23 @@ router.post('/workdesk/tab-finish', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── 작업 자동 마감(수동 실행·미리보기) — adminOrMaster ──────────────────────────────
+//   평상시엔 크론이 돈다(10분). 이 라우트는 **진단·수동 실행** 창구다("왜 아직 안 넘어갔지?").
+//   ★★ **`auto` 를 body 에서 받지 않는다** — 검수 확인 게이트를 우회하는 값은 서버 코드만
+//     세운다(서비스가 내부에서 `auto:true`). 여기서 body 로 열면 그 게이트가 무의미해진다.
+//   ★ 기본은 **미리보기(쓰기 0건)** — 실행은 `confirm:true` 를 명시해야 한다.
+//   ★ 전사 상태라 스코프 없음(마감은 전 직원 공통) — 그래서 adminOrMaster 로 좁힌다.
+router.post('/workdesk/auto-finish', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await svc.autoFinishEligibleTabs({
+      dryRun: b.confirm !== true,
+      by: `자동 마감(${_by(req) || '수동 실행'})`,
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — 작업보드 로그인 사용자 누구나(자기 것만) ──
 router.get('/workdesk/favorites', authMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, favorites: await svc.getWorkdeskFavorites(_by(req)) }); }
