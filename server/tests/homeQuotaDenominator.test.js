@@ -141,6 +141,19 @@ const h10 = R(T({ total: 100, filled: 100, submitted: 40, paid: 10 },
   [{ id: 'c1', status: 'active', recruitTotal: 100 }], true));
 ok('아직 한참 남은 작업은 누를 수 없다(큰 숫자를 목록으로 열지 않는다)', !/clickable/.test(h10));
 
+/* ★★ 신고 2026-09-22 — `*`(총건수 미상) 작업이 **영영 파래지지 않던 것**.
+   파랑은 "총건수를 아는가"가 아니라 **화면에 실제로 그린 기준값과 같은가**로 판정한다.
+   그러지 않으면 화면이 `50` 과 `50` 을 나란히 보여주면서 "안 찼다"고 말하는 셈이 된다. */
+const u1 = R(T({ total: 50, filled: 50, submitted: 50, paid: 50 }, [], true));
+ok('★★ 총건수를 몰라도(줄 수 기준) 다 차면 파랗게 찬다', (u1.match(/class="box full"/g) || []).length === 3);
+ok('★ 기준값이 줄 수임을 표식으로 남긴다', /class="box tot">50\*</.test(u1));
+ok('★★ `*` 가 왜 붙는지 말풍선이 말한다(연결된 공고 없음)', /class="rest">연결된 공고 없음 · 줄 수</.test(u1));
+const u2 = R(T({ total: 50, filled: 50, submitted: 40, paid: 0 },
+  [{ id: 'c1', status: 'active', recruitTotal: 0 }], true));
+ok('★ 공고는 있는데 총인원이 없으면 그 사유로 말한다', /class="rest">공고에 총인원 없음 · 줄 수</.test(u2));
+ok('★ 덜 찬 칸은 여전히 회색(기준이 줄 수여도 아무거나 파래지지 않는다)',
+  (u2.match(/class="box full"/g) || []).length === 1);
+
 const h11 = R(T({ total: 100, filled: 100, submitted: 95, paid: 90 },
   [{ id: 'c1', status: 'active', recruitTotal: 100 }], true), 'pay');
 ok('미입금 필터 중에는 입금 칸을 주황으로 + 남은 수를 상시 표시',
