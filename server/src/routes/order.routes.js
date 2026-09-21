@@ -984,6 +984,15 @@ async function _intakeSourceRevisionHandler(req, res, next) {
           campaignTimeSync = { applied: false, reason: 'error', error: timeErr.message };
         }
       }
+      /* ★★ 전파 결과를 **사람이 읽는 한 줄**로 함께 보낸다 — 인트라넷이 그걸 그대로 보여준다.
+         종전에는 결과 객체만 실어 보냈고 인트라넷이 버려서, 공고에 못 넣었는데도 화면은
+         "저장됐습니다" 만 말했다(막다른 길). 문구는 리뷰웹이 정한다(사유 사본 금지). */
+      {
+        const { campaignSyncNotice } = require('../services/campaignPayAmountSync.service');
+        const _n = (kind, out) => { if (out) { const m = campaignSyncNotice(kind, out); if (m) out.notice = m; } };
+        _n('pay', campaignPaySync); _n('thumb', campaignThumbSync);
+        _n('inflow', campaignInflowSync); _n('time', campaignTimeSync);
+      }
       const contractOnly = contentChanges.length === 0;
       _emitWorkOrderNew(linked, {
         event: contractOnly ? 'source_contract_match' : 'source_partial_edit',

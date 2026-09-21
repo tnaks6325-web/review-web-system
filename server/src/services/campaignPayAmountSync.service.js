@@ -418,12 +418,75 @@ async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'sou
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   전파 결과 → 사람이 읽는 한 줄 (사용자 지적 2026-09-22)
+   ─────────────────────────────────────────────────────────────────────────────
+   ★★★ **인트라넷이 이 결과를 버리고 있었다** — 리뷰웹은 "공고에 못 넣었다"고 응답에 실어
+      보내는데 인트라넷은 성공 여부와 작업오더 번호만 읽었다. 그래서 담당자는
+      **"저장됐습니다" 만 보고 리뷰어 화면은 옛 값으로 남는** 막다른 길이었다
+      (161 결제금액·163 썸네일 때부터 있던 구멍이고 164 로 넓어졌다).
+   ★★ **문구는 여기서 만든다 — 인트라넷은 그리기만 한다**(163 의 "판정은 리뷰웹이" 규율).
+      사유 목록을 양쪽에 두면 리뷰웹이 사유를 추가할 때 인트라넷만 옛 목록으로 남는다.
+   ★ **정상 무동작은 아무 말도 하지 않는다**(`''`) — 값이 같거나, 공고가 아직 없거나,
+      레거시 공고이거나, 바꿀 것이 없는 경우. 매번 뜨는 안내는 곧 아무도 안 읽는다.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/** 한글 받침에 맞는 조사 — "유입가이드은" 처럼 읽히지 않게 한다. */
+function _topic(word) {
+  const ch = String(word || '').trim().slice(-1);
+  const code = ch.charCodeAt(0);
+  if (!(code >= 0xac00 && code <= 0xd7a3)) return '은(는)';
+  return (code - 0xac00) % 28 ? '은' : '는';
+}
+
+/** 조용히 넘어가는 사유 — "할 일이 없었다" 는 알릴 것이 아니다. */
+const SYNC_QUIET_REASONS = new Set([
+  'already_same',      // 값이 이미 같다
+  'nothing_to_apply',  // 바꿀 것이 없다
+  'no_campaign',       // 아직 공고를 만들지 않은 오더
+  'not_participation', // 시간창 개념이 없는 레거시 공고
+  'empty',             // 썸네일을 비운 저장(blank-only)
+  'order_not_found',   // 이 경로에서는 도달 불가(방어)
+]);
+
+/**
+ * @param {'pay'|'thumb'|'inflow'|'time'} kind
+ * @param {{applied?:boolean, reason?:string, detail?:object}} out 전파 결과
+ * @returns {string} 사람이 읽는 한 줄(알릴 것이 없으면 '')
+ */
+function campaignSyncNotice(kind, out) {
+  if (!out || out.applied) return '';
+  const reason = String(out.reason || '');
+  if (SYNC_QUIET_REASONS.has(reason)) return '';
+  const what = { pay: '결제금액', thumb: '공고 썸네일', inflow: '유입방식·유입가이드', time: '구매시간대' }[kind] || '값';
+  const head = `${what}${_topic(what)} 모집공고에 반영되지 않았습니다`;
+  const missing = (out.detail && Array.isArray(out.detail.missing)) ? out.detail.missing.join(', ') : '';
+  switch (reason) {
+    case 'guide_missing':
+      return `${head} — 가이드유입으로 바꾸려면 모든 상품·선택지에 유입가이드가 있어야 합니다(비어 있음: ${missing}). 그 안내를 채우고 다시 저장해주세요.`;
+    case 'option_key_mismatch':
+      return `${head} — 작업오더의 옵션명과 모집공고의 옵션명이 달라 짝을 지을 수 없습니다. 모집공고에서 직접 고쳐주세요.`;
+    case 'multiple_amounts':
+      return `${head} — 작업오더에 금액이 여러 종류라 어느 금액인지 정할 수 없습니다. 모집공고에서 직접 고쳐주세요.`;
+    case 'campaign_multiple_amounts':
+      return `${head} — 모집공고의 상품 안내에 금액이 여러 개 적혀 있어 어느 것을 바꿀지 정할 수 없습니다. 모집공고에서 직접 고쳐주세요.`;
+    case 'no_work_detail':
+      return `${head} — 모집공고에 작업내용이 아직 없습니다. 모집공고를 먼저 저장해주세요.`;
+    case 'unparsed':
+      return `${head} — 구매시간대 문장을 시각으로 읽지 못했습니다(예: "오후 2시~5시"). 모집공고에서 직접 고쳐주세요.`;
+    default:
+      return `${head} — 모집공고에서 직접 확인해주세요.`;
+  }
+}
+
 module.exports = {
   syncCampaignPayAmount,
   syncCampaignThumbnail,
   syncCampaignInflow,
   syncCampaignPurchaseWindow,
   normalizeInflowType,
+  campaignSyncNotice,
+  SYNC_QUIET_REASONS,
   distinctAmountsInText,
   replaceAmountInProductLines,
   __setPoolForTest,
