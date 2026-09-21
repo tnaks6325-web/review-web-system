@@ -2141,7 +2141,12 @@ function renderReviewSubTab() {
         ? `<img src="${_escAttrX(thumbUrl)}" alt="" onerror="_thumbErr(this)">`
         : '<i class="fas fa-box"></i>';
       const metaTail = doneDate ? ` <span class="c-tail">· 제출 ${escHtml(doneDate)}</span>` : '';
-      const metaHtml = `<div class="c-meta">${taskDate ? escHtml(taskDate) + ' ' : ''}<span class="c-who">${escHtml(itemName)}</span>${metaTail}</div>`;
+      /* ★★ 카드에 적는 이름 = **그 참여의 명의(수취인)** — 다건 그룹 줄과 **같은 판정 한 벌**
+         (`_partInfoParticipantName`)을 쓴다. 그전에는 단건 카드만 작업표의 이름 칸(= 주문자열,
+         파서가 '주문자'를 최우선으로 잡는다)을 그려 **같은 화면에서 두 규칙이 갈렸다**.
+         ★ 수취인을 모르는 작업(그 칸이 없는 표)은 종전대로 이름 칸 값으로 접는다 — 빈칸이 되면 안 된다. */
+      const whoName = _partInfoParticipantName(item) || itemName;
+      const metaHtml = `<div class="c-meta">${taskDate ? escHtml(taskDate) + ' ' : ''}<span class="c-who">${escHtml(whoName)}</span>${metaTail}</div>`;
       const nameText = taskName || itemName || '참여 작업 정보 없음';
       const optSuffix = optionName ? ` <span style="color:var(--t3);font-weight:600">· 옵션:${escHtml(optionName)}</span>` : '';
       const nameHtml = `<div class="c-name">${escHtml(nameText)}${roundBadge}${optSuffix}</div>`;
@@ -2554,7 +2559,8 @@ function openPartInfoSheet(items, opts){
     : '';
   document.getElementById('partInfoBody').innerHTML =
     '<div style="font-size:.9rem;font-weight:800;color:#111827;line-height:1.4">' + escHtml(_partInfoLabel(it)) + statusChip + '</div>' +
-    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + (many ? ('총 ' + list.length + '건') : escHtml(it.displayName || '')) + '</div>' +
+    /* 카드 첫 줄과 **같은 이름**을 말한다 — 누른 카드와 열린 팝업이 서로 다른 명의를 말하면 안 된다. */
+    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + (many ? ('총 ' + list.length + '건') : escHtml(_partInfoParticipantName(it) || it.displayName || '')) + '</div>' +
     listRows +
     '<div id="partInfoDetail" style="border:1px solid #EEF1F7;border-radius:11px;margin-top:11px;padding:9px 11px;font-size:.74rem;color:#9CA3AF">' +
       '<i class="fas fa-circle-notch fa-spin"></i> 상품 정보 불러오는 중…</div>' +
