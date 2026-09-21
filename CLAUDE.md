@@ -144,6 +144,30 @@ gh api repos/tnaks6325-web/review-web-system/commits/$SHA/check-runs --jq '.chec
 - ★ **테섭 URL 분기는 코드에 있다**(`frontend/api.js`): `test-review-wdb-web-*` 프론트는 `test-review-wdb-*` API로만 연결되고, Railway PR 테섭은 PR 번호를 보존해 짝을 맞춘다. **테섭 전용 설정(테스트 API 주소·자동로그인 `TEST_AUTO_LOGIN`·테스트 Origin CORS)은 본섭에 반영하지 않는다**(2026-08-15 패치노트).
 - ★ 운영 반영 후에는 `docs/patch-notes/YYYY-MM-DD-*.md` 에 **적용 대상·변경·검증·롤백**을 남긴다(기존 관행).
 
+## 자동화 계정 (Claude · Codex)
+
+- **인트라넷(inadd) 자동화 계정**: 사용자명 `admin`(2026-09-22 제공). **전용 계정 `claude-bot` 을 만들기로 했으나 아직 미생성** — 자동 모드가 계정 생성을 막는다(아래).
+- ★★★ **비밀번호를 이 파일이나 저장소 어디에도 적지 않는다** — `CLAUDE.md` 는 그대로 커밋돼 git 기록에 **영구히** 남는다. 자격은 **저장소 바깥** `~/.claude/secrets/inadd.env`(권한 600)에 두고 `set -a; . ~/.claude/secrets/inadd.env; set +a` 로 읽는다.
+- ★★ **전용 계정 규격**(만들 때): 사용자명 `claude-bot` · 표시명 `Claude/Codex 자동화` · **`role='admin'` · 부서는 비운다**.
+  - `role='admin'` 인 이유 = 남의 리뷰오더를 대행 수정하려면 `admin` 또는 `department='AE'` 여야 한다(`reviewOrderCanDelegateEdit`).
+  - ★ **부서를 `AE` 로 만들지 말 것** — 담당AE 자동완성(`/intranet/users?dept=AE`)에 **사람처럼 끼어든다**.
+- ★★ **운영 데이터를 건드리는 확인은 반드시 되돌린다** — 바꾼 값을 먼저 기록하고, 확인 직후 원래대로 되돌린 뒤 보고한다. 대상은 **마감된 작업**을 고른다(진행 중 작업은 리뷰어 화면이 실제로 바뀐다).
+- ★★★ **리뷰웹에 `PUT /api/order/intake/source/:id` 를 직접 보내지 말 것(완화 금지)** — 리뷰웹은 `source_revision` 이 **정확히 +1** 일 때만 받는다. 인트라넷을 건너뛰면 두 시스템의 번호가 어긋나 **그 오더는 앞으로 인트라넷에서 영영 수정되지 않는다**(409). 확인은 반드시 인트라넷 정식 경로로.
+- ⚠ **자동 모드(auto mode)는 로그인 세션으로 운영 시스템을 조작하는 것을 막는다** — 계정 생성·인증된 목록 조회 모두 거부된다("Unauthorized Persistence"). 우회하지 않는다. 필요하면 사용자가 Bash 권한 규칙을 추가하거나, 사용자가 화면에서 직접 수행하고 Claude 는 **공개 API 로 결과만 확인**한다.
+
+
+## 자동화 계정 (Claude · Codex)
+
+- **인트라넷(inadd) 자동화 계정**: 사용자명 `admin`(2026-09-22 제공). **전용 계정 `claude-bot` 은 아직 미생성** — 자동 모드가 계정 생성을 막는다(아래).
+- ★★★ **비밀번호를 이 파일이나 저장소 어디에도 적지 않는다** — `CLAUDE.md` 는 그대로 커밋돼 git 기록에 **영구히** 남는다. 자격은 **저장소 바깥** `~/.claude/secrets/inadd.env`(권한 600)에 두고 `set -a; . ~/.claude/secrets/inadd.env; set +a` 로 읽는다.
+- ★★ **전용 계정 규격**(만들 때): 사용자명 `claude-bot` · 표시명 `Claude/Codex 자동화` · **`role='admin'` · 부서는 비운다**.
+  - `role='admin'` 인 이유 = 남의 리뷰오더를 대행 수정하려면 `admin` 또는 `department='AE'` 여야 한다(인트라넷 `reviewOrderCanDelegateEdit`).
+  - ★ **부서를 `AE` 로 만들지 말 것** — 담당AE 자동완성(`/intranet/users?dept=AE`)에 **사람처럼 끼어든다**.
+- ★★ **운영 데이터를 건드리는 확인은 반드시 되돌린다** — 바꾼 값을 먼저 기록하고, 확인 직후 원래대로 되돌린 뒤 보고한다. 대상은 **마감된 작업**을 고른다(진행 중 작업은 리뷰어 화면이 실제로 바뀐다).
+- ★★★ **리뷰웹에 `PUT /api/order/intake/source/:id` 를 직접 보내지 말 것(완화 금지)** — 리뷰웹은 `source_revision` 이 **정확히 +1** 일 때만 받는다(`order.routes`). 인트라넷을 건너뛰면 두 시스템의 번호가 어긋나 **그 오더는 앞으로 인트라넷에서 영영 수정되지 않는다**(409 "이미 처리된 원본 버전"). 확인은 반드시 인트라넷 정식 경로로.
+- ⚠ **자동 모드(auto mode)는 로그인 세션으로 운영 시스템을 조작하는 것을 막는다** — 계정 생성·인증된 목록 조회 모두 거부된다("Unauthorized Persistence"). 우회하지 않는다. 필요하면 사용자가 Bash 권한 규칙을 추가하거나, 사용자가 화면에서 직접 수행하고 Claude 는 **공개 API 로 결과만 확인**한다.
+
+
 ## 요구사항 확인 (질문 우선)
 - **사용자의 입력 메시지에서 의미가 모호하거나 불확실한 부분이 있으면, 추측해서 진행하지 말고 반드시 먼저 질문해서 답을 받은 뒤 구현한다.**
 - 한 번에 명확히 하기 위해 필요한 질문은 모아서 묻되, 답이 없으면 해당 부분의 구현을 시작하지 않는다.
