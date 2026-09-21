@@ -174,8 +174,13 @@ t('★ 값이 있는 항목은 배지가 아니라 단순 텍스트(.yn 잔재 0
 t('★ [미설정]은 버튼이고 열 수 없으면 비활성 + 사유(눌러도 아무 일 없는 버튼 금지)',
   /class="cndset"[^`]*onclick="_cndFix\('\$\{kind\}'\)"/.test(cc)
   && /class="cndset off" disabled title="\$\{esc\(g\.tip\)\}"/.test(cc));
-t('★ 결제금액은 1건당 금액(진행 현황의 합계와 다른 값) — 서버가 작업오더에서 싣는다',
-  /payAmount: num\(wo && wo\.payAmount\)/.test(cond) && /<dt>결제금액<\/dt>/.test(cc));
+/* ★★ 2026-09-21 사용자 확정 — 결제금액도 **공고 우선 · 없으면 작업오더**(리뷰비·입금명·정원과
+   같은 규율). 서버가 두 재료를 **성질을 구분해** 싣는다. 이름을 섞으면 그대로 사고다:
+     · `payAmount`         = 작업오더 **결제합계**(총액)  → 곱셈 금지
+     · `campaignPayAmount` = 공고에 적은 **1건당** 금액   → 화면이 먼저 쓰고 총건수를 곱한다 */
+t('★ 결제금액 재료 둘을 성질대로 싣는다(결제합계 ≠ 1건당 금액)',
+  /payAmount: num\(wo && wo\.payAmount\)/.test(cond)
+  && /^ {6}campaignPayAmount,$/m.test(cond) && /<dt>결제금액<\/dt>/.test(cc));
 
 /* ══ D4. 결제금액 v2 표기(사용자 확정 2026-08-20 시안 v2) ══════════════════════
    옵션 없음 = "상품결제금액 X원 / 총 Y원" 한 줄(총액 = 상품결제금액 × 총건수, 자동·비편집).
@@ -188,9 +193,18 @@ t('★ 옵션 없음 = 한 줄 "상품결제금액 … / 총 …"',
    prd-order-field-mapping: "일건수/모집건수/결제합계 → daily_count · recruit_count · pay_amount").
    그걸 1건당으로 읽고 총건수를 곱해 60건 작업에 93,240,000원을 찍은 사고(2026-08-21)가 있었다.
    **총액에 어떤 곱셈도 붙이지 않는다** — 되살리면 여기서 잡힌다. */
+/* ★★ 2026-09-21: 공고에 적은 **1건당** 금액(`campPay`)에 총건수를 곱하는 것은 **허용**한다 —
+     그건 총액이 아니라 단가이고, 옵션 있는 작업이 이미 하는 Σ(단가 × 건수)와 같은 계산이다.
+     금지 대상은 여전히 **결제합계(`payTotal`·`cd.payAmount`)** 하나 — 종전 패턴은 곱셈의
+     '모양'을 막아 그 둘을 구분하지 못했다(우회하지 말고 대상을 정확히 적는다). */
 t('★★ 결제합계에 곱셈을 붙이지 않는다(payAmount × 건수 부활 금지)',
-  !/payAmount\)?\s*\*/.test(cc) && !/\*\s*Number\(cd\.recruitTotal\)/.test(cc)
-  && !/payTotal\s*\*/.test(cc));
+  !/payTotal\s*\*/.test(cc) && !/cd\.payAmount\s*\*/.test(cc)
+  && !/n\(cd\.payAmount\)\s*\*/.test(cc) && !/\*\s*n\(cd\.payAmount\)/.test(cc));
+t('★★ 곱셈이 붙는 곳은 단가 둘뿐(공고 1건당 금액 · 옵션 단가)', (() => {
+  const muls = (cc.match(/[A-Za-z_$][\w$]*\s*\*\s*[A-Za-z_$][\w$]*/g) || [])
+    .filter(x => !/^s\*https$/.test(x));          // 정규식 리터럴 `\s*https?` 오탐 제외
+  return muls.length > 0 && muls.every(x => x === 'campPay*rtForPay' || x === 'pay*o');
+})());
 t('★ 총액 = 작업오더 결제합계 그대로(계산값이 아니라고 툴팁이 말한다)',
   /const payTotal=n\(cd\.payAmount\);/.test(cc)
   && /작업오더의 결제합계입니다/.test(cc));
@@ -223,6 +237,143 @@ t('★ 서버 options = 살아있는 공고 옵션 우선(status <> \'closed\') 
   /FROM campaign_options WHERE campaign_id = \$1 AND status <> 'closed'/.test(cond)
   && /if \(options\.length < 2 && wo\) options = _condWoOptions\(wo\.productOptionsJson\);/.test(cond)
   && /if \(options\.length < 2\) options = \[\];/.test(cond));
+
+/* ══ D4-b. 결제금액 = 모집공고 우선(사용자 확정 2026-09-21) ═══════════════════════
+   신고: 모집공고 진행상품 표에서 상품 결제금액을 52,200 으로 고쳐 저장했는데 작업 조건
+   카드는 계속 55,200 이었다. 원인은 버그가 아니라 **기준**이었다 — 이 카드의 금액만
+   작업오더 전용이라 공고 값을 아예 보지 않았다. 게다가 그 금액을 누르면 열리는 창구가
+   **모집공고 모달**이고 툴팁이 "저장하면 이 작업 조건에 반영됩니다" 라고 말해, 시키는 대로
+   고쳐도 아무 일이 없는 **막다른 길**이었다.
+   → 리뷰비·입금명·이체은행·총건수·일건수·구매시간과 같은 규율로 통일한다(공고 > 발주).
+   ★ 총액은 **공고 1건당 금액 × 총건수**로 계산하고 그 사실을 툴팁으로 밝힌다(사용자 확정). */
+console.log('\n── D4-b. 결제금액 = 모집공고 우선(2026-09-21) ──');
+
+/* 서버 재료 ─────────────────────────────────────────────────────── */
+t('★ 공고 1건당 금액 = 살아있는 옵션 1종이면 그 금액 · 아니면 공고 상품 원문에서', (() => {
+  const i = cond.indexOf('const campaignPayAmount = (() => {');
+  if (i < 0) return false;
+  const blk = cond.slice(i, cond.indexOf('})();', i));
+  return /campOpts\.length === 1/.test(blk) && /wd && wd\.productLines/.test(blk);
+})());
+/* ★★ 옵션 배열은 작업오더 폴백이 덮어쓰므로(위 규칙), 1건당 금액은 **덮이기 전의 공고 옵션**을
+   봐야 한다 — `options` 를 보면 작업오더 옵션 금액을 "공고 금액"이라 부르게 된다. */
+t('★★ 공고 옵션 원본을 따로 보관해 작업오더 폴백과 섞지 않는다',
+  /let campOpts = \[\];/.test(cond) && /campOpts = opts\.map\(/.test(cond)
+  && /options = campOpts;/.test(cond));
+t('★ 파싱 규칙은 `utils/campaignProductLines` 단일 출처(서비스에 정규식 사본 0)',
+  /require\('\.\.\/utils\/campaignProductLines'\)/.test(cond)
+  && !/결제금액\\s\*/.test(cond));
+/* ★ 리뷰비·리뷰타입은 `pick()` 으로 **값이 있는 최신 공고**를 훑지만 금액은 그러면 안 된다 —
+     차수 재발행에서 **지난 차수의 금액**이 이번 작업 카드에 뜬다(정원을 `c` 로만 보는 규율). */
+t('★ 기준 공고 하나만 본다(pick 으로 다른 차수 금액을 주워 오지 않는다)', (() => {
+  const i = cond.indexOf('const campaignPayAmount = (() => {');
+  const blk = cond.slice(i, cond.indexOf('})();', i));
+  return /if \(!c\) return null;/.test(blk) && !/pick\(/.test(blk);
+})());
+t('★ 공고 상품 원문은 기존 조회에 칸 하나로 더한다(추가 왕복 0)',
+  /work_detail AS "workDetail",/.test(cond)
+  && (cond.match(/await db\.query\(/g) || []).length === 3);   // 공고·리뷰비 구간·옵션 — 순증 0
+t('★ 못 읽으면 null — 화면이 종전대로 작업오더 값을 쓴다(무회귀)', (() => {
+  const i = cond.indexOf('const campaignPayAmount = (() => {');
+  const blk = cond.slice(i, cond.indexOf('})();', i));
+  return /catch \(_\) \{ return null; \}/.test(blk);
+})());
+/* ★★ 업체(광고주) 렌즈 — 숫자는 나가되 **상품 원문은 안 나간다**(관리자가 손으로 적을 수 있는
+     자유 텍스트라 내부 메모가 섞일 수 있다). 숫자를 빼면 "내부는 공고 금액인데 업체는 옛
+     작업오더 금액"으로 한 작업이 두 값으로 갈린다. */
+t('★★ 업체에는 공고 1건당 금액만 나가고 상품 원문은 나가지 않는다', (() => {
+  const lens = fnBody(svc, 'function _condAdvertiserLens(');
+  return /campaignPayAmount: cd\.campaignPayAmount,/.test(lens)
+    && !/campaignProductLines:/.test(lens) && !/workDetail/.test(lens);
+})());
+/* ⚠ 여기서 `campaignProductLines` 를 **이름만으로** 찾으면 안 된다 — 파싱 규칙 모듈 이름이
+     같아서 require 줄이 대신 걸린다(검사가 항상 빨갛다). **응답 필드 형태**로 본다. */
+t('★ 상품 원문 자체는 응답에 실리지 않는다(재료 최소화)',
+  !/campaignProductLines:/.test(cond) && !/productLines:/.test(cond)
+  && !/workDetail:/.test(cond));
+
+/* 읽는 규칙 — 쓰는 쪽 형식과 대조 + 실제 실행 ──────────────────── */
+/* ★★ 이 텍스트를 **만드는 쪽**은 발행·수정 폼 하나다(`_syncPreviewFromOptRows`). 그 형식이
+     바뀌면 읽는 정규식이 조용히 0건이 되므로, 두 쪽을 여기서 맞대어 고정한다. */
+t('★★ 쓰는 쪽 형식 ≡ 읽는 쪽 정규식', (() => {
+  const rec = F('js/index-recruit.js');
+  const writes = /" - 결제금액 " \+ r\.payAmount\.toLocaleString\(\) \+ "원"/.test(rec)
+              && /"결제금액 " \+ r\.payAmount\.toLocaleString\(\) \+ "원"/.test(rec);
+  const { PRODUCT_LINE_PAY_RE } = require('../src/utils/campaignProductLines');
+  return writes && PRODUCT_LINE_PAY_RE.test('상품명 - 단품 - 결제금액 52,200원');
+})());
+{
+  const { firstPayAmountFromProductLines: read } = require('../src/utils/campaignProductLines');
+  t('★ 실행: 상품명 - 옵션명 - 결제금액', read('티피링크 Tapo C113 홈캠 옵션 : 단품 - 결제금액 52,200원') === 52200);
+  t('★ 실행: 상품명 - 결제금액', read('티피링크 홈캠 - 결제금액 52,200원') === 52200);
+  t('★ 실행: 결제금액만', read('결제금액 52,200원') === 52200);
+  t('★ 실행: 여러 줄이면 첫 줄(작업오더에서 읽을 때와 같은 규칙)',
+    read('상품A - 결제금액 10,000원\n상품B - 결제금액 99,000원') === 10000);
+  t('★ 실행: 못 읽으면 null — 지어내지 않는다',
+    read('') === null && read(null) === null && read('상품명만 있음') === null
+    && read('결제금액 0원') === null);
+}
+
+/* 화면 ─────────────────────────────────────────────────────────── */
+t('★ 1건당 금액 = 공고 우선 · 없으면 작업오더(판정 사본 0 — 서버 값을 그대로 쓴다)',
+  /const campPay=\(\(\)=>\{ const v=n\(cd\.campaignPayAmount\); return \(v!=null&&v>0\)\?v:null; \}\)\(\);/.test(cc)
+  && /const unitPay=campPay!=null\?campPay:orderPay;/.test(cc));
+t('★★ 총액 계산은 **공고 1건당 금액일 때만** — 폴백(작업오더 결제합계) 경로엔 곱셈이 없다',
+  /const campTotal=\(campPay!=null&&rtForPay!=null&&rtForPay>0\)\?campPay\*rtForPay:null;/.test(cc));
+t('★ 총건수를 모르면 총액을 계산하지 않는다(지어내지 않는다)',
+  /rtForPay!=null&&rtForPay>0/.test(cc) && /const rtForPay=n\(cd\.recruitTotal\);/.test(cc));
+t('★ 계산값이라는 사실을 툴팁이 말한다(작업오더 결제합계와 구분)',
+  /모집공고 결제금액 × 총건수로 계산한 값입니다/.test(cc) && /작업오더의 결제합계입니다/.test(cc));
+{ // vm 실행 — 네 갈래를 실제로 그려 본다(정적 패턴으로는 우선순위가 안 잡힌다)
+  const vm = require('vm');
+  const i = cc.indexOf('const orderPay=(()=>{');
+  const j = cc.indexOf('payRows=`<dt>결제금액</dt><dd>${per}${tot}</dd>`;');
+  const seg = cc.slice(i, cc.indexOf('\n  }', j) + 4);
+  // ★ 1건당 금액을 읽는 공유 함수는 **스텁이 아니라 구현**을 넣는다(사본을 두면 회귀를 못 본다)
+  const woSrc = F('js/work-order-detail.js');
+  const sb = {
+    esc: v => String(v == null ? '' : v),
+    n: v => (v == null ? null : Number(v)),
+    won: v => `${Number(v).toLocaleString()}원`,
+    unset: () => '<dd>미설정</dd>',
+    val: html => `<dd>${html}</dd>`,
+    _cndFixGate: () => ({ can: false, tip: '' }),
+  };
+  vm.createContext(sb);
+  vm.runInContext(fnBody(woSrc, 'function _woCleanProductOption('), sb);
+  vm.runInContext(fnBody(woSrc, 'function _woFirstProductInfo('), sb);
+  vm.runInContext('this.f=function(cd,d){' + seg + ' return payRows;};', sb);
+  const draw = (cd, d) => sb.f(cd, d || {});
+  const ORDER = { productOption: '1. 티피링크 홈캠\n- 결제금액 55,200원', productOptionsJson: '' };
+
+  t('★ 실행: 공고 금액이 있으면 공고 금액 · 총액은 공고 금액 × 총건수',
+    /상품결제금액 52,200원/.test(draw({ campaignPayAmount: 52200, payAmount: 276000, recruitTotal: 5 }, ORDER))
+    && /총 <b[^>]*>261,000원/.test(draw({ campaignPayAmount: 52200, payAmount: 276000, recruitTotal: 5 }, ORDER))
+    && !/55,200/.test(draw({ campaignPayAmount: 52200, payAmount: 276000, recruitTotal: 5 }, ORDER)));
+  t('★ 실행: 공고 금액이 없으면 종전 동작 100%(작업오더 단가 + 결제합계)', (() => {
+    const h = draw({ payAmount: 276000, recruitTotal: 5 }, ORDER);
+    return /상품결제금액 55,200원/.test(h) && /총 <b[^>]*>276,000원/.test(h)
+      && /작업오더의 결제합계입니다/.test(h) && !/261,000/.test(h);
+  })());
+  t('★ 실행: 구버전 백엔드(필드 부재)도 종전 동작', (() => {
+    const h = draw({ payAmount: 276000, recruitTotal: 5 }, ORDER);
+    const old = draw({ campaignPayAmount: undefined, payAmount: 276000, recruitTotal: 5 }, ORDER);
+    return h === old;
+  })());
+  t('★★ 실행: 총건수를 모르면 총액을 지어내지 않는다(단가만)', (() => {
+    const h = draw({ campaignPayAmount: 52200, payAmount: 276000 }, ORDER);
+    return /상품결제금액 52,200원/.test(h) && /276,000원/.test(h) && !/261,000/.test(h);
+  })());
+  t('★★ 실행: 공고 금액 0 은 값이 아니다(미설정) — 작업오더로 떨어진다',
+    /상품결제금액 55,200원/.test(draw({ campaignPayAmount: 0, payAmount: 276000, recruitTotal: 5 }, ORDER)));
+  t('★ 실행: 옵션 2종 이상이면 종전 옵션 표기 그대로(공고 1건당 금액이 끼어들지 않는다)', (() => {
+    const h = draw({ campaignPayAmount: 52200, payAmount: 276000, recruitTotal: 800,
+                     options: [{ label: '블랙', pay: 22000, count: 500 }, { label: '그린', pay: 24000, count: 300 }] }, ORDER);
+    return /블랙 22,000원/.test(h) && /총결제금액/.test(h) && !/상품결제금액/.test(h) && !/41,760,000/.test(h);
+  })());
+  t('★ 실행: 단가·총액 둘 다 없으면 [미설정]',
+    /미설정/.test(draw({}, { productOption: '', productOptionsJson: '' })));
+}
 t('★ _condWoOptions 는 구조화 옵션만(라벨 필수 · 0 보존) — 이름뿐인 레거시는 제외', (() => {
   const b = fnBody(svc, 'function _condWoOptions(json) {');
   return !!b && /Array\.isArray\(p\.options\)/.test(b) && /if \(!label\) continue;/.test(b)
