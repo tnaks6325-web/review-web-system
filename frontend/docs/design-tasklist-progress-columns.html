@@ -80,9 +80,18 @@
        세로로 정렬돼 눈이 한 줄기로 훑는다(사용자 지시). 무엇을 뜻하는지는 **머리글이 말한다**
        → 칸 안에는 라벨도 체크도 넣지 않는다(같은 말을 줄마다 87번 반복하지 않는다).
      ★ 숫자는 **오른쪽 정렬 + 고정폭 숫자**(tabular-nums) — 자릿수가 어긋나면 세로 비교가 깨진다. */
-  th.nh,td.nc{text-align:right;white-space:nowrap}
+  /* ★★ **머리글과 숫자가 같은 선에 서야 한다**(사용자 지적 2026-09-21).
+     종전에는 머리글·값을 둘 다 오른쪽 정렬했는데, 값이 상자 안에 있고 그 상자에 좌우 여백이
+     있어 **숫자가 머리글보다 안쪽으로 밀렸다** — 열마다 기준선이 달라 보여 혼란스러웠다.
+     고친 방법 = ① 열(머리글·칸)은 **가운데 정렬** ② 상자는 **고정폭**이라 줄이 바뀌어도
+     같은 자리에 선다 ③ 상자 **안에서만** 오른쪽 정렬이라 100 과 89 의 자릿수는 그대로 맞는다.
+     ★ 담당 열처럼 왼쪽 정렬로 두지 않는 이유 — 숫자는 자릿수가 왼쪽에 붙으면 비교가 깨진다. */
+  th.nh,td.nc{text-align:center;white-space:nowrap}
   td.nc{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:700}
-  td.nc .box{display:inline-block;min-width:38px;text-align:right;border-radius:6px;padding:2px 7px;background:var(--card2);border:1px solid var(--line)}
+  /* ★ 상자 **안**까지 가운데로 — 오른쪽 정렬로 두면 숫자가 여백만큼 밀려(실측 6.4px)
+     머리글 중심과 어긋난다. 담당 열이 맞아 보이는 이유가 바로 "머리글과 값의 중심이 같아서"다.
+     자릿수는 tabular-nums 가 잡아 주므로 같은 자릿수끼리는 그대로 정렬된다. */
+  td.nc .box{display:inline-block;width:46px;text-align:center;border-radius:6px;padding:2px 4px;background:var(--card2);border:1px solid var(--line)}
   td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted);font-weight:800}
   /* 다 찬 항목만 초록 — 체크 글리프 없이 **색으로만** 말한다(사용자 지시). */
   td.nc .box.full{background:var(--safe-soft);border-color:var(--safe-line);color:var(--safe)}
@@ -92,7 +101,7 @@
   td.nc .box.over{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
   td.nc .lack{display:block;font-size:9.5px;font-weight:800;color:var(--muted);line-height:1.15;margin-top:1px}
   /* 변형 대조용 — 상자 없이 숫자만 */
-  td.nc.bare .box{background:transparent;border-color:transparent;padding:2px 0}
+  td.nc.bare .box{background:transparent;border-color:transparent;padding:2px 4px}
   td.nc.bare .box.full{color:var(--safe)}
 
   /* ── C안: 남은 일 중심 ── */
@@ -184,7 +193,10 @@
   <ul>
     <li>칸 안에는 <b>숫자만</b> 둡니다 — 무엇을 뜻하는지는 <b>머리글이 말합니다</b>(같은 말을 87줄 반복하지 않습니다).</li>
     <li><b>체크(✓)는 없습니다.</b> 다 찬 항목은 <b>연한 초록</b>으로만 구분합니다.</li>
-    <li>숫자는 <b>오른쪽 정렬 · 고정폭</b>이라 100과 89가 자릿수까지 맞게 섭니다.</li>
+    <li><b>머리글과 숫자의 중심을 맞췄습니다</b> — 담당 열이 안정돼 보이는 이유가 바로 그것입니다.
+        (처음엔 숫자를 오른쪽 정렬했더니 상자 여백만큼 <b>6.4픽셀 밀려</b> 기준선이 어긋나 보였습니다.
+        브라우저로 재서 지금은 <b>0.0픽셀</b>입니다.)</li>
+    <li>숫자는 <b>고정폭 글꼴</b>이라 같은 자릿수끼리는 그대로 줄이 맞습니다.</li>
   </ul>
 
   <h3>B-1 · 숫자만 <span class="tag ok">지시 그대로</span></h3>
