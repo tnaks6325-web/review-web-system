@@ -254,9 +254,68 @@ sandbox._finRenderList();
 t('★ 전체 렌더는 고정을 해제한다(화면을 새로 그리는 시점 — 다음 입력이 새로 잡는다)',
   !(sandbox.STATE._finBodyH > 0));
 t('★ 헤더는 여전히 재생성되지 않는다(2.5 의 IME 계약 유지)', /<div id="wblBody">/.test(host.innerHTML));
-t('★★ 모바일(≤720px)은 고정을 무력화 — 목록이 문서에 펼쳐져 빈 공간이 수천 px 이 된다',
-  /@media\(max-width:720px\)/.test(WD) && /#wblBody\{[^}]*min-height:0!important/.test(WD));
 t('★ 고정값 판정은 STATE 한 곳(사본 금지)', (WD.match(/_finBodyH/g) || []).length >= 3);
+
+/* ── 2.7) 모바일(≤720px) — "스크롤이 튀지 않을 만큼만" 고정 ─────────────────────
+   사용자 확정 2026-09-21(2차): 휴대폰도 흔들리지 않게. 그쪽은 `.wbl-tw{max-height:none}` 라
+   목록이 문서에 통째로 펼쳐져(실측 3257px) **전체를 고정하면 빈 공간이 수천 px** 이 된다.
+   → 지금 보고 있는 스크롤 위치가 살아남을 만큼만 고정한다(필요 없으면 0 = 빈 공간 0).
+   ★ 모드는 CSS(`--wblfix`)가 정한다 — 브레이크포인트 사본을 JS 에 만들지 않는다.
+   실측(390×844·작업 40개): 검색창을 보며 타이핑=0px(고정 불필요) · 중간까지 내린 상태 1260px→1px
+   · 맨 아래 3187px→1px. */
+console.log('\n2.7) 모바일 fit 모드 (스크롤이 튀지 않을 만큼만)');
+const SC = { scrollTop: 0, clientHeight: 794, scrollHeight: 4649 };   // 실측값(844 화면 − 상단 50)
+let bodyH = 3257;                                                     // 펼쳐진 목록 높이(실측)
+bodyEl = { innerHTML: '', style: {}, get offsetHeight(){ return bodyH; }, closest: () => SC };
+sandbox.getComputedStyle = () => ({ getPropertyValue: () => 'fit' });
+sandbox.STATE.finQ = ''; sandbox.STATE._finBodyH = 0; sandbox.STATE._finBodyGap = null;
+
+// ① 검색창을 보며 타이핑하는 정상 사용 = 여유가 충분 → 고정하지 않는다(빈 공간 0)
+SC.scrollTop = 479;
+sandbox._finSearch('모집');
+t('★★ 여유가 충분하면 고정하지 않는다(빈 공간 0 — 정상 사용에서 화면 불변)',
+  bodyEl.style.minHeight === '' && !(sandbox.STATE._finBodyH > 0));
+
+// ② 많이 내려본 상태 = 필요한 만큼만(전체 3257 이 아니라 1330)
+sandbox._finSearch(''); SC.scrollTop = 1928;
+sandbox._finSearch('모집');
+t('★★ 여유가 모자라면 "스크롤이 살아남을 만큼만" 고정한다(전체가 아니다)',
+  bodyEl.style.minHeight === '1330px', '실제: ' + bodyEl.style.minHeight);
+t('★ 전체 고정(펼쳐진 목록 높이)이 아니다 — 그랬다면 빈 공간이 수천 px', sandbox.STATE._finBodyH < bodyH);
+
+// ③ 결과가 0건이 되어 본문이 줄어도 고정값을 다시 재지 않는다(재측정하면 그 순간 튄다)
+bodyH = 90;
+sandbox._finSearch('ㅁ');
+t('★ 조합 중간값(0건)에도 고정값이 줄지 않는다', sandbox.STATE._finBodyH === 1330);
+
+// ④ 스크롤을 더 내린 뒤 검색어를 고치는 경우 → 키운다(줄이면 그 순간 튄다)
+SC.scrollTop = 2600;
+sandbox._finSearch('모집2');
+t('★★ 더 내려간 뒤 고치면 필요한 만큼 키운다(줄이지 않는다)', sandbox.STATE._finBodyH === 2002);
+SC.scrollTop = 100;
+sandbox._finSearch('모집3');
+t('★ 다시 올라가도 줄이지 않는다(줄이는 순간 그 자리에서 튄다)', sandbox.STATE._finBodyH === 2002);
+
+// ⑤ 검색어를 비우면 전부 해제
+sandbox._finSearch('');
+t('★ 검색어를 비우면 고정·기준값 모두 해제', bodyEl.style.minHeight === '' &&
+  !(sandbox.STATE._finBodyH > 0) && sandbox.STATE._finBodyGap === null);
+
+// ⑥ 모드를 못 읽으면 데스크톱(full)로 접는다
+sandbox.getComputedStyle = () => { throw new Error('no css'); };
+bodyH = 640;
+sandbox._finSearch('모집');
+t('★ 모드를 못 읽으면 full — 종전(데스크톱) 동작이 기본',
+  bodyEl.style.minHeight === '640px');
+sandbox._finSearch('');
+delete sandbox.getComputedStyle;
+
+t('★★ CSS 가 모드를 정한다 — 기본 full · 모바일 미디어쿼리에서 fit(브레이크포인트 사본 금지)',
+  /#wblBody\{[^}]*--wblfix:full/.test(WD) && /@media\(max-width:720px\)/.test(WD) && /#wblBody\{--wblfix:fit/.test(WD));
+t('★★ 모바일에서 min-height 를 !important 로 막지 않는다(막으면 fit 고정이 무시돼 흔들림이 부활)',
+  !/#wblBody\{[^}]*min-height:0!important/.test(WD));
+t('★ 스크롤 컨테이너를 못 찾아도 죽지 않는다(문서 스크롤 폴백)',
+  /document\.scrollingElement/.test(WD));
 
 bodyEl = null;   // 이후 절은 전체 렌더 경로를 그대로 검사한다
 sandbox.STATE.finQ = ''; sandbox.STATE._finBodyH = 0;
