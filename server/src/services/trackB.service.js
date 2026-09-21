@@ -3090,6 +3090,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               transfer_bank AS "transferBank",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
               cash_receipt_required AS "cashReceiptRequired",
+              work_detail AS "workDetail",
               to_char(window_start,'HH24:MI') AS "windowStart",
               to_char(window_end,'HH24:MI')   AS "windowEnd",
               status, participation_mode AS "participationMode"
@@ -3196,16 +3197,41 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
        공고 옵션이 2종 미만이면 작업오더의 구조화 옵션으로 폴백한다. 2종 미만이면 빈 배열
        = 옵션 없는 작업(1건당 결제금액 한 줄 표기). 표시 전용 — 정원·홀드 판정 무접촉. */
     let options = [];
+    let campOpts = [];   // ★ 공고 옵션 원본 — 아래 '1건당 금액'이 쓴다(작업오더 폴백이 덮기 전 값)
     if (c) {
       const { rows: opts } = await db.query(
         `SELECT opt_key AS label, pay_amount AS pay, recruit_total AS count
            FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed' ORDER BY id`,
         [c.id]).catch(() => ({ rows: [] }));
-      options = opts.map(o => ({ label: String(o.label || '').trim(), pay: num(o.pay), count: num(o.count) }))
-                    .filter(o => o.label);
+      campOpts = opts.map(o => ({ label: String(o.label || '').trim(), pay: num(o.pay), count: num(o.count) }))
+                     .filter(o => o.label);
+      options = campOpts;
     }
     if (options.length < 2 && wo) options = _condWoOptions(wo.productOptionsJson);
     if (options.length < 2) options = [];
+
+    /* ── 공고에 적은 **1건당 상품 결제금액**(사용자 확정 2026-09-21) ────────────────────
+       종전엔 작업 조건 카드의 결제금액만 **작업오더 전용**이라, 모집공고 진행상품 표에서
+       금액을 고쳐도 카드가 영영 안 바뀌었다(신고: 공고 52,200 ↔ 카드 55,200). 게다가 그
+       금액을 누르면 열리는 창구가 **모집공고 모달**이고 툴팁이 "저장하면 반영됩니다"라고
+       말해, 시키는 대로 고쳐도 아무 일이 없는 막다른 길이었다.
+       → 리뷰비·입금명·이체은행·총건수·일건수·구매시간과 **같은 규율**(공고 우선 · 없으면 발주).
+       ★ 읽는 자리 둘:
+         ① 살아있는 공고 옵션이 **정확히 1종**이면 그 금액(2종 이상은 위 `options` 가 담당한다)
+         ② 옵션을 안 쓰는 작업은 진행상품 표가 **작업내용 상품 원문**으로만 저장되므로 거기서 읽는다
+       ★ 파싱 규칙은 `utils/campaignProductLines` **단일 출처**(여기에 정규식을 적지 않는다).
+       ★ 기준 공고(`c`) 하나만 본다 — 리뷰비처럼 `pick()` 으로 다른 차수의 값을 주워 오면
+         **지난 차수의 금액**이 이번 작업 카드에 뜬다(정원을 `c` 로만 보는 것과 같은 이유).
+       ★ 못 읽으면 null = 화면이 종전대로 작업오더 값을 쓴다(무회귀). */
+    const campaignPayAmount = (() => {
+      if (!c) return null;
+      if (campOpts.length === 1) { const p = num(campOpts[0].pay); if (p != null && p > 0) return p; }
+      try {
+        const { firstPayAmountFromProductLines } = require('../utils/campaignProductLines');
+        const wd = (typeof c.workDetail === 'string') ? JSON.parse(c.workDetail) : c.workDetail;
+        return firstPayAmountFromProductLines(wd && wd.productLines);
+      } catch (_) { return null; }
+    })();
 
     /* 적용 정원(공고 우선 · 0이면 발주) — 상태엔진과 **같은 함수**를 태운다(사본 0). */
     const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
@@ -3283,6 +3309,12 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       /* 1건당 상품 결제금액(사용자 확정 2026-08-20) — 진행 현황의 '결제금액'은 활성 주문 행의
          **합계**라 성질이 다르다(중복 표기가 아니다). 출처는 작업오더 한 곳. */
       payAmount: num(wo && wo.payAmount),
+      /* ★★ 공고에 적은 **1건당** 상품 결제금액(사용자 확정 2026-09-21) — 화면이 이 값을 작업오더
+         값보다 **먼저** 쓰고, 총액도 이 값 × 총건수로 계산한다.
+         ★★★ `payAmount`(= 작업오더 **결제합계**)와 성질이 다르다 — 절대 섞지 말 것. 합계를
+           1건당으로 읽고 건수를 곱해 60건 작업에 9,324만원을 찍은 사고(2026-08-21)가 있다.
+         ★ null = 공고에 금액이 없거나 못 읽음 → 화면은 종전대로 작업오더 값을 쓴다. */
+      campaignPayAmount,
       /* 옵션 2종 이상일 때만 채워진다 — 총결제금액은 싣지 않는다(자동계산은 화면 표시일 뿐
          저장값이 아니고, 여기 실으면 "편집할 수 있는 값"처럼 보인다). */
       options,
@@ -6015,6 +6047,10 @@ function _condAdvertiserLens(cd, { brandSession = false } = {}) {
     dailyLimit: cd.dailyLimit, dailyLimitSource: cd.dailyLimitSource,
     orderDailyCount: cd.orderDailyCount,
     payAmount: cd.payAmount, options: Array.isArray(cd.options) ? cd.options : [],
+    /* ★ 공고 1건당 금액도 업체 화면에 나간다 — 업체는 이미 결제금액을 보고 있어 **새로 새는
+       정보가 없고**, 안 실으면 "내부는 공고 금액인데 업체는 옛 작업오더 금액"으로 갈린다.
+       ★ 공고 **상품 원문**은 싣지 않는다(관리자가 손으로 적을 수 있는 자유 텍스트) — 숫자만. */
+    campaignPayAmount: cd.campaignPayAmount,
     channel: cd.channel || null,
     inflowType: cd.inflowType || null,
     /* 담당 2인 — ★ **실명(`adminRaw`)은 폐기**하고 여기서 fail-closed 를 완결한다:
