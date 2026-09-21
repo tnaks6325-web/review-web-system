@@ -339,14 +339,49 @@ const owner = (over = {}) => Object.assign({
     });
   });
 
-  await ta('2f 등록 계좌가 언제나 이긴다(기존 동작 보존 — 제출 계좌가 덮지 않는다)', async () => {
+  /* ★★★ 2026-09-21 사용자 확정으로 **뒤집힌 규율** — 종전 2f 는 "등록 계좌가 언제나 이긴다" 였다.
+       실사고(모기위키 439/440): 타계정 건이 양식에 김솔지 계좌를 적었는데 등록DB 주인 계좌로 나가
+       김솔지가 2건 중 1건만 받았다. 전수 40건(예금주까지 다른 건 23건 · 746,800원).
+       ⇒ **그 건의 구매양식 계좌가 이긴다.** 되돌리려면 env 스위치(2l)를 쓴다. */
+  await ta('2f ★ 그 건의 구매양식 계좌가 등록 계좌를 이긴다(사용자 확정 2026-09-21)', async () => {
     await withStubPool(handler({
       orderRows: [ORDER_ROW],
       ownRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명지수', ...OWNER_ACCT }],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.strictEqual(it.accountSource, 'self');
+      assert.strictEqual(it.accountSource, 'order');
+      assert.strictEqual(it.bankAccount, '100234102639', '양식에 적힌 계좌로 보낸다');
+      assert.strictEqual(it.accountHolder, '최영순');
+      assert.strictEqual(it.accountRef, null, '양식 계좌는 지목할 리뷰어가 없다(회차 스냅샷 가드 밖)');
+      // ★ 조용히 보내지 않는다 — 화면이 두 계좌를 나란히 말할 재료를 싣는다.
+      assert.ok(it.accountMismatch, 'accountMismatch 가 실려야 한다');
+      assert.strictEqual(it.accountMismatch.form.accountTail, '2639');
+      assert.strictEqual(it.accountMismatch.registered.accountTail, '6789');
+      assert.strictEqual(it.accountMismatch.registered.accountHolder, '김수만');
+      assert.strictEqual(it.accountMismatch.holderDiffers, true, '예금주까지 다른 경우');
+      assert.ok(it.warnings.includes('account_form_override'));
+      assert.strictEqual(it.payable, true, '경고일 뿐 보류가 아니다(체크는 화면에서 푼다)');
+    });
+  });
+
+  await ta('2f-2 두 계좌가 같으면 아무 말도 하지 않는다(늑대소년 방지)', async () => {
+    await withStubPool(handler({
+      orderRows: [{ ...ORDER_ROW, bank: '국민은행', account: '123-456-789', depositor: '김수만' }],
+      ownRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명지수', ...OWNER_ACCT }],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.bankAccount, '123456789');
+      assert.strictEqual(it.accountMismatch, null, '같은 계좌인데 경고를 만들면 진짜 신호가 묻힌다');
+      assert.ok(!it.warnings.includes('account_form_override'));
+    });
+  });
+
+  await ta('2f-3 등록 계좌가 아예 없으면 registered 는 null(경우를 구분해 말한다)', async () => {
+    await withStubPool(handler({ orderRows: [ORDER_ROW] }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.accountMismatch, '양식 계좌가 유일한 근거라는 사실도 화면이 말한다');
+      assert.strictEqual(it.accountMismatch.registered, null);
+      assert.strictEqual(it.accountMismatch.holderDiffers, false);
     });
   });
 
@@ -359,16 +394,40 @@ const owner = (over = {}) => Object.assign({
     }
   });
 
-  await ta('2h 소유자 링크가 제출 계좌보다 우선(등록된 계좌가 관리 원장)', async () => {
+  /* ★★ 뒤집힌 규율(2026-09-21) — 소유자 링크로 찾은 등록 계좌보다 양식 계좌가 이긴다.
+       ★ 다만 **신원 추적 필드(누가 참여했나)는 등록DB 기준을 유지**한다 — 계좌(어디로 보내나)와
+         별개라, 여기까지 비우면 회차 항목의 소유자 추적이 끊긴다. */
+  await ta('2h ★ 소유자 링크가 있어도 양식 계좌가 이기고, 신원 추적은 등록 기준을 유지한다', async () => {
     await withStubPool(handler({
       orderRows: [ORDER_ROW],
       viaOrder: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222', subPhone8: '87654321' }],
       owners: [owner()],
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.strictEqual(it.accountSource, 'owner_order');
-      assert.strictEqual(it.bankAccount, '123456789');
+      assert.strictEqual(it.accountSource, 'order');
+      assert.strictEqual(it.bankAccount, '100234102639');
+      assert.strictEqual(it.ownerReviewerId, OWNER_ID, '소유자 추적은 등록DB 기준 그대로');
+      assert.ok(it.accountMismatch && it.accountMismatch.registered, '가려진 등록 계좌를 화면에 알린다');
     });
+  });
+
+  await ta('2l ★ 되돌리기 — PAYMENT_FORM_ACCOUNT_FIRST=0 이면 종전(등록 계좌 우선) 동작', async () => {
+    const prev = process.env.PAYMENT_FORM_ACCOUNT_FIRST;
+    process.env.PAYMENT_FORM_ACCOUNT_FIRST = '0';
+    try {
+      await withStubPool(handler({
+        orderRows: [ORDER_ROW],
+        ownRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명지수', ...OWNER_ACCT }],
+      }), async (svc) => {
+        const it = (await svc.listPaymentTargets()).items[0];
+        assert.strictEqual(it.accountSource, 'self', '스위치를 끄면 등록 계좌가 다시 이긴다');
+        assert.strictEqual(it.bankAccount, '123456789');
+        assert.strictEqual(it.accountMismatch, null, '종전 동작에는 이 경고가 없다');
+      });
+    } finally {
+      if (prev === undefined) delete process.env.PAYMENT_FORM_ACCOUNT_FIRST;
+      else process.env.PAYMENT_FORM_ACCOUNT_FIRST = prev;
+    }
   });
 
   t('2i 회차 스냅샷 출처는 등록된 명의(subPhone8)가 있을 때만 sub — 없으면 소유자 본계좌(self)', () => {
@@ -421,6 +480,67 @@ const owner = (over = {}) => Object.assign({
     assert.ok(html.includes('function _pmAcctSrcTip('), '근거 표기 헬퍼');
     assert.ok(/_pmAcctSrcTip\(it\)[\s\S]{0,40}타계정/.test(html), '타계정 배지에 근거 툴팁이 붙는다');
     assert.ok(html.includes('owner_order') && html.includes('owner_link'));
+  });
+
+  console.log('\n§5 화면 — 양식 계좌로 보낼 때 두 계좌를 나란히 말한다(사용자 확정 2026-09-21)');
+
+  const WD = () => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+
+  t('5a ★ 안내줄 렌더 3갈래 — 예금주 다름 / 계좌만 다름 / 등록 계좌 없음', () => {
+    const vm = require('vm');
+    const fn = WD().match(/function _pmAcctMismatchHtml\(mm\)\{[\s\S]*?\n\}/);
+    assert.ok(fn, '_pmAcctMismatchHtml 이 있어야 한다');
+    const ctx = { esc: s => String(s == null ? '' : s).replace(/[&<>"]/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) };
+    vm.createContext(ctx); vm.runInContext(fn[0] + ';', ctx);
+
+    const diffHolder = ctx._pmAcctMismatchHtml({
+      form: { bankName: '국민', accountTail: '9824', accountHolder: '김솔지' },
+      registered: { bankName: '신한', accountTail: '9898', accountHolder: '정재석', name: '정재석', isSub: false },
+      holderDiffers: true });
+    assert.ok(diffHolder.includes('9824') && diffHolder.includes('9898'), '두 계좌를 모두 보여준다');
+    assert.ok(diffHolder.includes('예금주가 다른 사람입니다'), '예금주가 다르면 그 사실을 콕 집는다');
+
+    const diffAcct = ctx._pmAcctMismatchHtml({
+      form: { bankName: '국민', accountTail: '1234', accountHolder: '배미정' },
+      registered: { bankName: '국민', accountTail: '6216', accountHolder: '배미정', name: '배미정', isSub: false },
+      holderDiffers: false });
+    assert.ok(diffAcct.includes('계좌번호가 다릅니다') && !diffAcct.includes('예금주가 다른'),
+      '같은 사람의 다른 계좌는 다르게 말한다');
+
+    const noReg = ctx._pmAcctMismatchHtml({
+      form: { bankName: '케이뱅크', accountTail: '2639', accountHolder: '최영순' }, registered: null });
+    assert.ok(noReg.includes('등록된 계좌가 없습니다'), '등록 계좌 부재와 불일치를 구분해 말한다');
+    assert.ok(!noReg.includes('등록 계좌 —'), '없는 계좌를 지어내지 않는다');
+
+    // ★ 사용자 확정 문구 — 체크를 풀면 그 건이 회차에서 빠진다는 사실
+    for (const h of [diffHolder, diffAcct, noReg]) {
+      assert.ok(h.includes('체크박스를 풀면 해당 건 입금은') && h.includes('보류'), '보류 안내 문구');
+    }
+    assert.strictEqual(ctx._pmAcctMismatchHtml(null), '', '값이 없으면 아무것도 그리지 않는다');
+
+    const xss = ctx._pmAcctMismatchHtml({
+      form: { bankName: '<img src=x onerror=alert(1)>', accountTail: '1', accountHolder: 'a' }, registered: null });
+    assert.ok(!xss.includes('<img'), '외부발 문자열은 escape 한다');
+  });
+
+  t('5b ★ 배지·안내줄은 accountMismatch 기준(accountSource 로 띄우면 거의 모든 행에 붙어 신호가 묻힌다)', () => {
+    const html = WD();
+    assert.ok(/const mm = it\.accountMismatch/.test(html), '화면은 서버가 준 값만 본다(판정 사본 금지)');
+    assert.ok(!/it\.accountSource===['"]order['"]\?`<span class="pmauto"/.test(html),
+      "종전 '양식계좌' 배지 조건(accountSource==='order')이 되살아나면 안 된다");
+    assert.ok(/pmmmchip/.test(html) && /pmmm"/.test(html), '안내줄·배지 클래스가 배선돼 있다');
+  });
+
+  t('5c ★ 표 칸 수 — 헤더 ≡ 데이터 행 ≡ 안내줄(빈 칸 1 + colspan)', () => {
+    const html = WD();
+    const head = html.slice(html.indexOf('<thead><tr><th>☑</th>'));
+    // ★ `/<th/` 로 세면 `<thead>` 가 함께 잡혀 한 칸이 늘어난다(실측) — 여는 태그만 센다.
+    const headCells = (head.slice(0, head.indexOf('</thead>')).match(/<th[\s>]/g) || []).length;
+    assert.strictEqual(headCells, 11, '입금대상 표는 11칸이다');
+    const mmRow = html.match(/pmmm" data-pg="\$\{i\}"><td><\/td><td colspan="(\d+)">/);
+    assert.ok(mmRow, '안내줄이 행 바로 아래에 붙는다');
+    assert.strictEqual(1 + Number(mmRow[1]), headCells, '빈 칸 1 + colspan 이 헤더 칸 수와 같아야 한다');
   });
 
   console.log(`\n결과: ${pass} pass / ${fail} fail`);

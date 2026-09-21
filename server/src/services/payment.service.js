@@ -108,6 +108,11 @@ function _int(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 그 건의 구매양식 계좌를 등록DB 계좌보다 먼저 쓰는가(사용자 확정 2026-09-21 · 기본 켬).
+ *  ★ **호출 시점에 읽는다** — Railway 에서 `PAYMENT_FORM_ACCOUNT_FIRST=0` 만 넣으면
+ *    재배포 없이 종전 동작(등록 계좌 우선)으로 즉시 되돌아간다. */
+function _formAccountFirst() { return process.env.PAYMENT_FORM_ACCOUNT_FIRST !== '0'; }
+
 /* ══════════════════════════════════════════════════════════
    1) 입금대상 추출
    ══════════════════════════════════════════════════════════ */
@@ -253,16 +258,60 @@ async function listPaymentTargets(opts = {}) {
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
-    // 계좌 해석 순서 = ① 현재 참여행/주문 소유자 → ② 현재 행 연락처 → ③ 레거시 제출 링크 → ④ 구매양식.
+    // 등록DB 계좌 해석 순서 = ① 현재 참여행/주문 소유자 → ② 현재 행 연락처 → ③ 레거시 제출 링크.
     const ownerAcct = ownerAcctMap[key + '||' + r.rowIndex] || null;
     const directAcct = acctMap[r.phone8] || null;
     // 같은 번호가 여러 등록 리뷰어에게 연결되면 현재 행 소유자를 확정할 수 없다.
     // 이때 오래된 제출 링크로 빠지면 과거 소유자에게 송금되므로 owner_link는 사용하지 않는다.
     const safeOwnerAcct = ownerAcct && ownerAcct.source === 'owner_link'
       && acctMap.ambiguousPhone8s.has(r.phone8) ? null : ownerAcct;
-    const acct = safeOwnerAcct && safeOwnerAcct.source !== 'owner_link'
+    const registeredAcct = safeOwnerAcct && safeOwnerAcct.source !== 'owner_link'
       ? safeOwnerAcct
-      : directAcct || safeOwnerAcct || _orderAccount(ord, r) || null;
+      : directAcct || safeOwnerAcct || null;
+    /* ★★★ 그 건의 구매양식 계좌가 이긴다 (사용자 확정 2026-09-21 — 종전 규율을 뒤집었다)
+         왜: 종전에는 **등록DB 계좌가 언제나 이겨** 리뷰어가 양식에 적어 낸 계좌를 보지도 않았다.
+         실사고(모기위키 439/440) — 타계정 "백운"(정재석의 타계정, 전용계좌 미등록) 건이 양식에
+         김솔지 계좌를 적었는데 등록DB의 주인 계좌(정재석)로 나가, 김솔지는 2건 중 1건만 받았다.
+         전수 점검 결과 같은 불일치가 **40건**(예금주까지 다른 건 23건 · 746,800원)이었고, 그중
+         31건은 리뷰어가 **직접** 제출한 건이었다 = 양식에서 계좌를 바꿔 적어도 반영되지 않았다.
+       ★ **다를 때 조용히 보내지 않는다** — 아래 `accountMismatch` 로 두 계좌를 화면에 함께 실어
+         보내고, 담당자가 체크를 풀면 그 건만 보류된다(회차에 안 담긴다).
+       ★ **반쪽 값은 인정하지 않는다** — `_orderAccount` 가 은행·계좌·예금주 셋이 다 있을 때만
+         객체를 돌려준다(반쪽으로 이체 파일을 만들면 은행이 통째로 거부한다).
+       ★ **`reviewerId` 는 만들지 않는다**(112 규율 유지) — 양식 계좌는 지목할 등록 리뷰어가 없어
+         회차 스냅샷 대조에서 `unverifiable` 로 빠져야 다운로드가 막히지 않는다.
+       ★ 되돌리기 = env `PAYMENT_FORM_ACCOUNT_FIRST=0` (코드 변경 0). */
+    const formAcct = _orderAccount(ord, r);
+    const useForm = _formAccountFirst() && !!formAcct;
+    const acct = useForm
+      // 신원 추적 필드(누가 참여했나)는 **등록DB 기준을 유지**한다 — 계좌(어디로 보내나)와 별개다.
+      ? { ...formAcct,
+          ownerReviewerId: (registeredAcct && registeredAcct.ownerReviewerId) || null,
+          participantIdentityId: (registeredAcct && registeredAcct.participantIdentityId) || null }
+      : (registeredAcct || formAcct || null);
+    /* 화면에 **말해야 하는 경우만** 재료를 싣는다(경고 전용 — 판정·보류는 하지 않는다).
+       ★★ **두 계좌가 같으면 `null`** — 양식 계좌가 기본 경로가 되면서 `accountSource==='order'`
+          가 대부분의 행에 붙는데, 그때마다 배지를 띄우면 **진짜 신호(불일치)가 묻힌다**(늑대소년).
+       ★ 비교는 숫자만(`normalizeAccount`) — `725602-00-129824` ↔ `72560200129824` 를 다름으로 오판 금지.
+       ★ `registered: null` = 등록된 계좌가 아예 없어 양식 계좌가 유일한 근거인 경우(112 의 2e). */
+    const _mmForm = formAcct ? {
+      bankName: formAcct.bankName || '',
+      accountTail: normalizeAccount(formAcct.bankAccount).slice(-4),
+      accountHolder: formAcct.accountHolder || '',
+    } : null;
+    const acctMismatch = !useForm ? null
+      : !registeredAcct
+        ? { form: _mmForm, registered: null, holderDiffers: false }
+        : normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
+          ? {
+              form: _mmForm,
+              registered: { bankName: registeredAcct.bankName || '',
+                            accountTail: normalizeAccount(registeredAcct.bankAccount).slice(-4),
+                            accountHolder: registeredAcct.accountHolder || '',
+                            name: registeredAcct.name || '', isSub: !!registeredAcct.isSub },
+              holderDiffers: String(formAcct.accountHolder || '').trim() !== String(registeredAcct.accountHolder || '').trim(),
+            }
+          : null;   // ← 같으면 아무 말도 하지 않는다
 
     // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
     // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
@@ -338,6 +387,9 @@ async function listPaymentTargets(opts = {}) {
     if (amount <= 0) issues.push('zero_amount');
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
+    /* ★ 양식 계좌 ≠ 등록DB 계좌 — **경고만**(사용자 확정 2026-09-21: 보류시키지 않는다).
+       화면이 두 계좌를 나란히 보여주고, 담당자가 체크를 풀면 그 건만 회차에서 빠진다. */
+    if (acctMismatch) warnings.push('account_form_override');
     /* ★★ 리뷰비 0 = **리뷰비 없는 작업**이다 — 경고하지 않는다(사용자 확정 2026-08-24).
        종전에는 "근거(feeSource)를 못 찾으면" 경고했는데, 공고가 없는 옛 작업은 근거가 구조적으로
        없어 상시 경고로 뒤덮였다(실측: 보완 목록 37개 작업 대부분). 이 계정은 **상품비만 주는
@@ -384,7 +436,11 @@ async function listPaymentTargets(opts = {}) {
             subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null }
         : null,
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
+      //   · order(그 건의 구매양식 계좌 — 2026-09-21 확정으로 **기본 경로**가 됐다)
       accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
+      /* 양식 계좌로 보내는데 등록DB 계좌가 **다를 때만** 실린다(같거나 등록 계좌가 없으면 null).
+         화면은 이 값을 **그리기만** 한다 — 판정 사본을 만들지 않는다. */
+      accountMismatch: acctMismatch,
       productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
       workboardPrice, orderPrice, priceMismatch,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
