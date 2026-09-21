@@ -206,7 +206,11 @@ sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = ''; sandbox.STATE.finQ =
 sandbox.STATE.tabs = [tOpen, tNone];
 sandbox._finRenderList();
 t('전체 렌더는 본문을 #wblBody 로 감싼다(검색이 갈아 끼울 지점)', /<div id="wblBody">/.test(host.innerHTML));
-bodyEl = { innerHTML: '' };
+// ★ 높이 고정(아래 2.6)을 **실제로 실행해 보려면** stub 이 style·offsetHeight 를 갖고 있어야 한다.
+//   offsetHeight 는 호출 순서를 기록하는 getter — "교체 전에 읽는가"·"한 번만 읽는가"를 본다.
+const hRead = [];
+bodyEl = { innerHTML: '', style: {},
+  get offsetHeight(){ hRead.push(this.innerHTML); return hRead.length === 1 ? 640 : 100; } };
 const shellBefore = host.innerHTML;
 const heroBefore = hero.textContent;
 sandbox._finSearch('모집');
@@ -224,8 +228,38 @@ t('★ 재생성 후 focus/커서 복구 코드는 제거됐다(조합을 되살
   !/setSelectionRange/.test(WD.slice(WD.indexOf('function _finSearch'), WD.indexOf('function _finSearch') + 600)));
 t('★ 본문 조각은 한 벌 — 전체 렌더와 검색이 같은 _finBodyHtml 을 쓴다(사본 금지)',
   (WD.match(/function _finBodyHtml\(/g) || []).length === 1 && (WD.match(/_finBodyHtml\(\)/g) || []).length >= 2);
+
+/* ── 2.6) 검색 중 화면 흔들림 — 본문 바깥 높이를 붙잡는다 ───────────────────────
+   사용자 신고(2026-09-21): "검색하는 과정에서 화면이 위아래로 흔들린다". 실측 원인 = 한글 조합
+   중간값(`ㅁ`·`모ㅈ`)에서 결과가 0건이 되어 **한 글자를 치는 동안에도** 목록 상자 높이가
+   "0건 ↔ N건" 을 왕복 → 아래 빠른메뉴가 밀리고 스크롤이 위로 클램프돼 화면이 튄다(530px).
+   ★ 그래서 "줄어들고 늘어나는 것은 목록(행)뿐" 이어야 한다 — 바깥 높이는 검색 내내 불변. */
+console.log('\n2.6) 검색 중 높이 고정 (화면 흔들림)');
+sandbox.STATE.finQ = ''; sandbox.STATE._finBodyH = 0;
+bodyEl.style = {}; hRead.length = 0; bodyEl.innerHTML = '검색전본문';
+sandbox._finSearch('모집');
+t('★ 검색을 시작하면 그 시점 본문 높이를 min-height 로 고정한다', bodyEl.style.minHeight === '640px');
+t('★ 높이는 innerHTML 교체 **전에** 읽는다(교체 후엔 이미 줄어든 높이라 의미가 없다)',
+  hRead.length === 1 && hRead[0] === '검색전본문', '교체 후에 읽었거나 여러 번 읽었다');
+sandbox._finSearch('ㅁ');
+t('★★ 조합 중간값(0건)에도 고정값을 다시 재지 않는다 — 재측정하면 작은 높이로 굳어 흔들림이 부활',
+  bodyEl.style.minHeight === '640px' && hRead.length === 1);
+t('그래도 목록(행)은 정상적으로 줄어든다(고정은 바깥 높이만)', /조건에 맞는 작업이 없습니다/.test(bodyEl.innerHTML));
+sandbox._finSearch('');
+t('★ 검색어를 비우면 고정 해제(빈 공간을 남기지 않는다)',
+  bodyEl.style.minHeight === '' && !(sandbox.STATE._finBodyH > 0));
+sandbox._finSearch('모집');
+t('다시 검색하면 그때 높이로 새로 고정한다', bodyEl.style.minHeight === '100px');
+sandbox._finRenderList();
+t('★ 전체 렌더는 고정을 해제한다(화면을 새로 그리는 시점 — 다음 입력이 새로 잡는다)',
+  !(sandbox.STATE._finBodyH > 0));
+t('★ 헤더는 여전히 재생성되지 않는다(2.5 의 IME 계약 유지)', /<div id="wblBody">/.test(host.innerHTML));
+t('★★ 모바일(≤720px)은 고정을 무력화 — 목록이 문서에 펼쳐져 빈 공간이 수천 px 이 된다',
+  /@media\(max-width:720px\)/.test(WD) && /#wblBody\{[^}]*min-height:0!important/.test(WD));
+t('★ 고정값 판정은 STATE 한 곳(사본 금지)', (WD.match(/_finBodyH/g) || []).length >= 3);
+
 bodyEl = null;   // 이후 절은 전체 렌더 경로를 그대로 검사한다
-sandbox.STATE.finQ = '';
+sandbox.STATE.finQ = ''; sandbox.STATE._finBodyH = 0;
 
 /* ── 3) 서버 stats 배선 — tabStatsMap 실제 실행(스텁 pool) ────────── */
 console.log('\n3) tabStatsMap 폴더 필드 (서비스 실행)');

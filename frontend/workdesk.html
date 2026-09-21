@@ -2520,6 +2520,11 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-pick .pt{font-weight:750;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wbl-pick .pm{font-size:10.5px;color:var(--faint);margin-top:2px;display:block}
 .wbl-empty{padding:26px;text-align:center;color:var(--faint);font-size:12px}
+/* 검색 중에는 #wblBody 가 높이를 붙잡고 있으므로(_finSearch) 결과 0건일 때 안내문이 위에 붙고
+   아래가 통째로 빈다 → 남는 공간의 가운데에 놓아 '자리를 지키고 있다'로 읽히게 한다.
+   ★ 표(.wbl-tw)는 margin auto 를 받지 않아 평소처럼 위에서부터 그려진다. */
+#wblBody{display:flex;flex-direction:column}
+#wblBody .wbl-empty{margin:auto}
 .wbl-note{font-size:9.5px;color:var(--faint);padding:8px 14px;border-top:1px solid var(--line)}
 .wbl-mobile-toggle{display:none}
 @media(max-width:720px){
@@ -2537,6 +2542,9 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   .wbl-chip{order:5;min-height:34px;padding:4px 13px}
   .wbl-q{order:6;width:100%;min-width:0;height:42px;margin-left:0;padding:7px 12px;font-size:13px}
   .wbl-tw{max-height:none;overflow:visible}
+  /* 검색 중 높이 고정(_finSearch)은 데스크톱 전용 — 여기선 목록이 문서에 펼쳐져
+     고정하면 빈 공간이 수천 px 이 된다. 인라인 스타일을 이기려면 !important 가 필요하다. */
+  #wblBody{min-height:0!important;display:block}
   table.wbl-t{display:block;font-size:12px}
   table.wbl-t thead{display:none}
   table.wbl-t tbody{display:grid;gap:6px}
@@ -5496,6 +5504,8 @@ function _finRenderList(){
   const hero=document.getElementById('hmStTabs'); if(hero) hero.textContent=String(nRun);
   const mgrs=[...new Set(all.filter(t=>isFinished(t)===fin).map(t=>(t.stats&&t.stats.manager)||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
   const filt=fin?'':(STATE.finFilter||'');
+  // 전체 렌더 = 화면을 새로 그리는 시점이라 검색 높이 고정을 푼다(다음 검색 입력이 그때 높이로 다시 잡는다).
+  STATE._finBodyH=0;
   host.innerHTML=`<div class="wbl-box">
     <div class="wbl-h">
       <span class="wbl-ttl">📋 작업 목록</span>
@@ -5696,10 +5706,25 @@ function _finPickMgr(m){ STATE.finMgr=m; _finRenderList(); }
    (재생성 뒤의 focus/setSelectionRange 복구도 조합을 되살리지 못한다 — 그래서 함께 제거했다.)
    ★ 헤더 숫자(진행 중·오늘 완료·스위치 건수·담당자 칩)는 전부 `all` 기준이라 검색으로 바뀌지 않는다
      → 본문만 갈아 끼워도 화면이 어긋나지 않는다. 본문이 아직 없으면(마운트 직후) 전체 렌더로 폴백. */
+/* ★★ 검색 중에는 본문 **바깥 높이**를 붙잡아 둔다(사용자 신고 실측 2026-09-21 —
+     "검색하는 과정에서 화면이 위아래로 흔들린다"). 한글은 조합 중간값(`ㅁ`·`모ㅈ`)에서 결과가
+     0건이 되므로 **한 글자를 치는 동안에도** 목록이 "0건 ↔ N건" 을 왕복한다 → 목록 상자 높이가
+     매번 변해 ① 아래 빠른메뉴·브리핑이 통째로 밀리고 ② 스크롤 컨테이너(.ovwrap)의 scrollHeight 가
+     줄며 scrollTop 이 위로 클램프돼 **화면이 튄다**(실측: 검색창이 530px 위로 점프, 글자마다 왕복).
+     검색을 시작한 순간의 높이를 min-height 로 고정하면 **줄어들고 늘어나는 것은 목록(행)뿐**이다.
+   ★ 값은 STATE 에 둔다 — 전체 렌더(_finRenderList)가 #wblBody 를 새로 만들어도 판정이 한 곳이다.
+   ★ 검색어를 비우면 해제 · 전체 렌더도 해제한다(그때의 높이를 다음 입력이 새로 잡는다).
+   ★ offsetHeight 를 **innerHTML 교체 전에** 읽는다(교체 후엔 이미 줄어든 높이라 의미가 없다).
+   ★★ 모바일(≤720px)은 목록이 문서에 펼쳐져(.wbl-tw max-height 없음) 고정하면 빈 공간이 수천 px 이
+     된다 → **CSS 미디어쿼리에서 무력화**한다(브레이크포인트 사본을 JS 에 만들지 않는다). */
 function _finSearch(v){
   STATE.finQ=v;
   const b=document.getElementById('wblBody');
-  if(b) b.innerHTML=_finBodyHtml(); else _finRenderList();
+  if(!b){ _finRenderList(); return; }
+  if(v){ if(!(STATE._finBodyH>0)) STATE._finBodyH=b.offsetHeight||0; }
+  else STATE._finBodyH=0;
+  if(b.style) b.style.minHeight=(STATE._finBodyH>0)?STATE._finBodyH+'px':'';
+  b.innerHTML=_finBodyHtml();
 }
 /* ══ M2: "열린 작업" 줄(0단) — 브라우저 탭처럼 열어둔 작업만 · 개인별 ═══════════════════
    ★ 저장은 **계정 귀속 서버 원장**(migration 089) — 다른 PC 에서 로그인해도 그대로다(브라우저보다 나은 점).

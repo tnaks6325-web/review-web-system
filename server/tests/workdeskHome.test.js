@@ -112,7 +112,10 @@ ok('★ renderHomeView 도 역할을 자기 스코프에서 구한다',
   //   덧붙은 **오버레이 전용 스타일**(`#abOv …`·`#rnOv …`·`#ddOv …`·`#hbOv …`)까지 함께 들어온다.
   //   그것들도 "전용 스코프를 쓴다"는 이 검사의 의미를 지키고 있으므로(오버레이 id 로 스코프), 허용한다.
   //   ★ 여전히 금지되는 것은 **스코프 없는 일반 선택자**(`.card`·`table`·`th` 같은 것)다.
-  const SCOPED = /^(#hmwrap|\.hm-|\.wbl-|table\.wbl-|#[A-Za-z][\w-]*Ov[\s.:[#>]|#[A-Za-z][\w-]*Ov$)/;
+  // holdover ③: 작업 목록 블록의 **전용 id**(`#wblMount`·`#wblBody`·`#wblQ`)도 같은 wbl 네임스페이스다
+  //   — 검색 중 높이 고정(_finSearch)을 모바일에서 무력화하는 `#wblBody{min-height:0!important}` 가 여기 해당.
+  //   접두를 늘리는 것은 의미 불변이고, 스코프 없는 일반 선택자는 여전히 걸린다.
+  const SCOPED = /^(#hmwrap|\.hm-|\.wbl-|#wbl[A-Za-z]|table\.wbl-|#[A-Za-z][\w-]*Ov[\s.:[#>]|#[A-Za-z][\w-]*Ov$)/;
   ok('★ 홈 CSS 선택자는 전부 전용 스코프(#hmwrap/.hm-/.wbl- 또는 오버레이 #…Ov): ' + sels.length + '개',
     sels.length > 5 && sels.every(s => s.split(',').every(p => SCOPED.test(p.trim()))),
     sels.filter(s => s.split(',').some(p => !SCOPED.test(p.trim()))).join(' | '));
