@@ -48,6 +48,7 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'transfer_memo'],         // 086 — 위와 같은 문장에 들어가므로 함께 막아야 한다
   ['recruit_campaigns', 'review_type'],           // 087 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['work_orders', 'sales_id'],                    // 088 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
+  ['work_orders', 'thumbnail_url'],               // 163 — _insertWorkOrder INSERT 목록(같은 문장이라 없으면 접수가 통째로 죽는다)
   ['work_orders', 'guide_images'],                // 090 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'source_review_order_id'],      // 102 — 원본 오더 식별자(중복 수신 방지)
   ['work_orders', 'delivery_type_mix'],           // 135 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)

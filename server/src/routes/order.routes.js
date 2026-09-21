@@ -84,6 +84,7 @@ const INTAKE_EDITABLE_FIELDS = [
   'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
   'sales_id', 'contract_number', 'quote_id',   // 인트라넷 계약건 — 088
   'guide_images',   // 첨부 이미지 URL 배열(JSON) — 090 · 칸=칸 매핑 2단계
+  'thumbnail_url',  // 모집공고 썸네일 — 163(표·정원과 무관해 접수 뒤에도 고칠 수 있다)
   // ★ 097(탈 구글시트 W2-b): 진행 일정 신호 — 시트 구매일자를 손으로 적던 규칙을 오더가 말해준다.
   //   미전송(구버전 인트라넷) = NULL = 종전 동작(계획 계산 기본값 + 미리보기에서 지정).
   'skip_weekends', 'holidays',
@@ -319,8 +320,8 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        source_review_order_id, source_revision, workboard_schema_version, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
        status, created_by, work_kind, delivery_type_mix, recall_courier, recall_product,
-       work_series_id, work_round)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,'submitted',$42,$43,$44,$45,$46,$47,$48)
+       work_series_id, work_round, thumbnail_url)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,'submitted',$42,$43,$44,$45,$46,$47,$48,$49)
      RETURNING *`,
     [
       _genOrderId(),
@@ -381,6 +382,8 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       _recallFields(b, deliveryType).product,
       source.workSeriesId,
       source.workRound,
+      // ★ 163: 모집공고 썸네일. 우리 프록시 절대 URL만 통과 — 형식 밖·미전송은 빈 값(종전 동작).
+      _thumbnailUrl(b.thumbnail_url),
     ]
   );
   return rows[0];
@@ -551,6 +554,10 @@ function _sourceContentNextValues(b, derived) {
     inflow_type: b.inflow_type || '',
     inflow_guide: b.inflow_guide || '',
     guide_images: _guideImagesJson(b.guide_images),
+    /* ★ 163 썸네일 — **보냈을 때만** 비교에 넣는다(135 부속정보와 같은 규율):
+       이 칸을 모르는 구버전 인트라넷 payload 가 "빈 값으로 바뀌었다" 로 읽히면
+       계약 후속 매칭이 새로 막힌다. */
+    ...(b.thumbnail_url === undefined ? {} : { thumbnail_url: _thumbnailUrl(b.thumbnail_url) }),
     delivery_type: derived.deliveryType,
     courier_proxy: derived.courierProxy,
     review_type: b.review_type || '',
@@ -592,7 +599,9 @@ function _sourceContentNextValues(b, derived) {
 //     (인트라넷이 1건당을 고치면 합계를 다시 계산해 보낸다). 작업표·정원·주문에는 쓰이지 않고
 //     작업보드·업체 화면의 **잔여집행** 표시가 이 값을 쓴다.
 const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflow_keyword',
-  'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount'];
+  'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount',
+  //   ★ 163 썸네일 — 작업표 열·줄·정원·금액 어디에도 쓰이지 않는다(공고 카드 그림 하나).
+  'thumbnail_url'];
 
 // ★★ 상품 구성(product_options_json) 안에서 접수 뒤에도 고칠 수 있는 키 (2026-09-21 실측).
 //   ★ 왜 칸 전체가 아니라 키 단위인가: 인트라넷은 **상품 주소와 선택지별 유입가이드**를 이 한
@@ -602,6 +611,20 @@ const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflo
 //     실제로는 한 번도 못 고친다** — 안내가 지킬 수 없는 약속이 된다(핸들러를 그대로 돌려 재현).
 //   ★★ 넓히지 말 것 — 상품명·옵션값·금액(pay)·인원(count)·일건수(daily)·리뷰 조합은
 //     **작업표의 칸과 줄에 그대로 박히는 값**이라 이미 깔린 표와 어긋난다(사용자 확정 2026-09-21).
+/**
+ * ★★ 모집공고 썸네일 URL 정규화(163) — **우리 프록시 절대 URL만** 통과시킨다.
+ *   리뷰어 화면의 `<img src>` 로 그대로 나가므로 임의 주소를 저장하면 남의 서버를 부르게 되고,
+ *   Drive 원본 주소는 교차 오리진에서 깨진다(관리자 썸네일이 "절대 프록시 URL" 을 쓰는 것과 같은 규율).
+ *   ★ 형식 밖이면 **빈 값**(틀린 값보다 빈 값) — 빈 값이면 공고 전파도 하지 않는다.
+ */
+function _thumbnailUrl(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) return '';
+  if (!/\/api\/order\/guide-image\/[-\w]{10,}$/.test(s)) return '';
+  return s.slice(0, 500);
+}
+
 //   ★★ `pay`(1건당 결제금액)는 **모집공고까지 전파되는 조건으로** 열렸다(사용자 확정 2026-09-21):
 //     리뷰어가 보는 금액은 공고에 있어, 오더만 고치면 "통과했는데 화면은 옛 금액" 이 된다.
 //     전파는 `campaignPayAmountSync.service` 가 하고 **근거가 없으면 안 고치고 사유를 보고**한다.
@@ -621,7 +644,7 @@ const SOURCE_FIELD_LABELS = {
   product_url: '상품 주소', work_sheet_url: '작업시트', goods_cost_type: '물건비',
   manager_name: '담당AE', work_manager: '작업담당', skip_weekends: '주말 제외',
   delivery_type_mix: '실배송·빈박스 건수', recall_courier: '회수 택배사', recall_product: '회수 상품명칭',
-  holidays: '휴무일', work_kind: '체험단 종류',
+  holidays: '휴무일', work_kind: '체험단 종류', thumbnail_url: '공고 썸네일',
 };
 const _sourceFieldLabel = column => SOURCE_FIELD_LABELS[column] || column;
 
@@ -689,6 +712,33 @@ function _productOptionsLockedChanged(currentValue, nextValue) {
   const next = _productOptionsLockedShape(nextValue);
   if (current === null || next === null) return true;
   return current !== next;
+}
+
+/**
+ * ★★ 이 작업오더가 "원본에서 내용을 못 고치는" 상태인가 — **판정 단일 출처**.
+ *   접수(광고주 확정)·공고 연결·게시·완료·삭제 중 하나라도 걸리면 잠긴다.
+ *   ★ 인트라넷 화면이 이 판정을 **따라 만들지 않는다** — 목록·상세 응답이 결과를 그대로 싣고
+ *     화면은 그리기만 한다(규칙이 두 벌이면 "회색인데 저장되는" / "멀쩡한데 막히는" 이 생긴다).
+ *   ★ 재료 중 `advertiser_id`·`deleted_at` 은 종전 목록 SELECT 에 없었다 — 그래서 인트라넷은
+ *     저장해 보고 409 를 받아야 알 수 있었다(2026-09-21 신고).
+ */
+function isSourceEditLocked(order) {
+  const o = order || {};
+  return Boolean(o.deleted_at || o.status === 'done' || o.status === 'published'
+    || o.linked_campaign_id || o.advertiser_id);
+}
+
+/**
+ * 접수된 오더에서 **지금 고칠 수 있는 칸 목록**(화면이 나머지를 잠그는 재료).
+ * ★ 잠기지 않았으면 `null` — "전부 가능" 과 "목록에 있는 것만 가능" 을 화면이 구분한다.
+ * ★ 상품 구성(`product_options_json`)은 **키 단위로 일부만** 열려 있어 별도로 실어 보낸다.
+ */
+function sourceEditableFields(order) {
+  if (!isSourceEditLocked(order)) return null;
+  return {
+    fields: SOURCE_EDIT_AFTER_ACCEPT.slice(),
+    productOptionKeys: [...PRODUCT_OPTION_EDITABLE_KEYS],
+  };
 }
 
 /** 접수된 오더에서 이 칸을 고칠 수 있나.
@@ -777,8 +827,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     // 접수·게시 기준이 확정된 오더는 원본에서 내용을 바꾸지 못한다.
     // 단 계약 후속 매칭(작업 내용은 그대로 · 계약/광고주 칸만 채움)은 예외다 —
     // 그 매칭은 접수가 끝난 뒤에 오는 것이 정상이라, 여기서 막으면 계약을 붙일 길이 없다.
-    const sourceEditLocked = Boolean(current.deleted_at || current.status === 'done' || current.status === 'published'
-      || current.linked_campaign_id || current.advertiser_id);
+    const sourceEditLocked = isSourceEditLocked(current);
     // 삭제된 작업오더에는 예외를 두지 않는다 — 없는 오더에 계약을 붙일 이유가 없다.
     const contractMatchAllowed = sourceEditLocked && !current.deleted_at;
     const contentChanges = contractMatchAllowed
@@ -877,6 +926,20 @@ async function _intakeSourceRevisionHandler(req, res, next) {
           campaignPaySync = { applied: false, reason: 'error', error: syncErr.message };
         }
       }
+      /* ★ 썸네일이 바뀌었으면 공고 그림도 함께 바꾼다(163) — 금액 전파와 같은 규율
+         (절대 throw 없음 · 빈 값이면 아무것도 안 한다 · 결과를 응답에 싣는다). */
+      let campaignThumbSync;
+      if (contentChanges.includes('thumbnail_url')) {
+        try {
+          const { syncCampaignThumbnail } = require('../services/campaignPayAmountSync.service');
+          campaignThumbSync = await syncCampaignThumbnail({
+            workOrderId: current.id, thumbnailUrl: nextValues.thumbnail_url, by: 'intake-source',
+          });
+        } catch (thumbErr) {
+          logger.warn(`[order/source] 공고 썸네일 전파 실패(원본 수정은 유지): ${thumbErr.message}`);
+          campaignThumbSync = { applied: false, reason: 'error', error: thumbErr.message };
+        }
+      }
       const contractOnly = contentChanges.length === 0;
       _emitWorkOrderNew(linked, {
         event: contractOnly ? 'source_contract_match' : 'source_partial_edit',
@@ -887,6 +950,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         contract_only: contractOnly,
         edited_fields: contentChanges,
         ...(campaignPaySync ? { campaign_pay_sync: campaignPaySync } : {}),
+        ...(campaignThumbSync ? { campaign_thumb_sync: campaignThumbSync } : {}),
       });
     }
 
@@ -906,6 +970,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          intranet_advertiser_id = $35, intranet_advertiser_name = $36,
          intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
          delivery_type_mix = $41, recall_courier = $42, recall_product = $43, product_distribution_mode = $44,
+         thumbnail_url = $45,
          updated_at = NOW()
        WHERE id = $1 AND source_review_order_id = $40
        RETURNING *`,
@@ -924,6 +989,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         source.intranetAdvertiserBusinessNumber, _intOrZero(b.review_fee), sourceReviewOrderId,
         _deliveryMixJson(b, deliveryType), _recallFields(b, deliveryType).courier, _recallFields(b, deliveryType).product,
         _productDistributionMode(b.product_distribution_mode),
+        _thumbnailUrl(b.thumbnail_url),
       ]
     );
     const updated = rows[0];
@@ -969,13 +1035,21 @@ router.get('/intake/list', async (req, res, next) => {
               work_sheet_url, linked_campaign_id, chat_room_url, admin_memo,
               source_review_order_id, source_revision, intranet_advertiser_id, created_at, updated_at,
               -- 134: 연결 작업(작업표)이 삭제된 시각 — 인트라넷 "보낸 오더" 카드가 그대로 표시한다.
-              tab_deleted_at, tab_deleted_tab
+              tab_deleted_at, tab_deleted_tab,
+              -- ★ 원본 수정 잠금 판정 재료(2026-09-21) — 이 둘이 없어서 인트라넷은 저장해 보고
+              --   409 를 받아야 잠김을 알 수 있었다. 판정은 서버가 하고 아래에서 결과를 싣는다.
+              advertiser_id, deleted_at
          FROM work_orders ${where}
         ORDER BY created_at DESC
         LIMIT 200`,
       params
     );
-    res.json({ ok: true, data: rows });
+    /* ★ 화면이 "무엇을 잠글지" 를 스스로 판정하지 않게 결과를 그대로 싣는다(사본 0).
+       ★ 잠기지 않은 오더는 `source_editable` 이 null — "전부 가능" 과 구분된다. */
+    res.json({ ok: true, data: rows.map(row => Object.assign({}, row, {
+      source_edit_locked: isSourceEditLocked(row),
+      source_editable: sourceEditableFields(row),
+    })) });
   } catch (err) {
     next(err);
   }
@@ -1007,7 +1081,11 @@ router.get('/intake/:id', async (req, res, next) => {
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
     }
-    res.json({ ok: true, data: rows[0] });
+    /* 상세도 같은 판정을 싣는다 — 목록과 갈리면 화면이 창을 열 때와 목록에서 다른 잠금을 본다. */
+    res.json({ ok: true, data: Object.assign({}, rows[0], {
+      source_edit_locked: isSourceEditLocked(rows[0]),
+      source_editable: sourceEditableFields(rows[0]),
+    }) });
   } catch (err) {
     next(err);
   }
