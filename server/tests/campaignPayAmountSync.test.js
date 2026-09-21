@@ -177,7 +177,13 @@ async function run() {
   });
 
   await t('⑤ 쓰기 표면은 두 곳뿐 — 정원·옵션 구성·작업표·주문 무접촉', () => {
-    const targets = [...SRC.matchAll(/UPDATE\s+(\w+)\s+SET\s+([a-z_]+)/g)].map(m => m[1] + '.' + m[2]);
+    /* ★ 구역을 **금액 전파 함수 본문**으로 좁힌다 — 같은 파일에 유입·시간창 전파가 합류했고
+       그쪽 쓰기 표면은 `inflowSourceEdit` 가드가 따로 고정한다(두 가드가 겹쳐 세지 않게). */
+    const PAY = SRC.slice(SRC.indexOf('async function syncCampaignPayAmount'),
+      SRC.indexOf('async function syncCampaignThumbnail'));
+    const THUMB = SRC.slice(SRC.indexOf('async function syncCampaignThumbnail'),
+      SRC.indexOf('async function syncCampaignInflow'));
+    const targets = [...(PAY + THUMB).matchAll(/UPDATE\s+(\w+)\s+SET\s+([a-z_]+)/g)].map(m => m[1] + '.' + m[2]);
     assert.deepStrictEqual([...new Set(targets)].sort(),
       // ★ 163 썸네일이 합류했다 — 셋 다 "공고에 보이는 값" 이고 표·정원·주문과는 무관하다.
       ['campaign_options.pay_amount', 'recruit_campaigns.thumbnail_url', 'recruit_campaigns.work_detail'],

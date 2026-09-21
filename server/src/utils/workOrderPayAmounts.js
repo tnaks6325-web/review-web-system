@@ -58,10 +58,13 @@ function payAmountsFromWorkOrder(productOptionsJson) {
           optKey: isNone ? '' : label,
           productName,
           payAmount: _pay(op.pay) || basePay,
+          // ★ 가산 필드 — 유입가이드 전파가 **같은 선택 단위**(같은 optKey)를 보게 한다.
+          //   금액 판정은 이 값을 읽지 않는다(추출 규칙 무변경).
+          src: op,
         });
       }
     } else if (productName) {
-      units.push({ optKey: '', productName, payAmount: basePay });
+      units.push({ optKey: '', productName, payAmount: basePay, src: prod });
     }
   }
 

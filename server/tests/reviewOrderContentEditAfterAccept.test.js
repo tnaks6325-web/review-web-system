@@ -114,12 +114,15 @@ async function t(name, fn) {
 // ★ pay_amount 는 2026-09-21 사용자 확정으로 합류했다(상품 구성의 1건당 금액과 함께 바뀌는 짝).
 const ALLOWED = ['title', 'manager_name', 'product_url', 'inflow_keyword',
   'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount',
-  'thumbnail_url'];   // ★ 163 — 공고 카드 그림 하나라 표·정원·금액 어디에도 안 쓰인다
+  'thumbnail_url',   // ★ 163 — 공고 카드 그림 하나라 표·정원·금액 어디에도 안 쓰인다
+  // ★ 사용자 확정 2026-09-22 — 둘 다 작업표를 만드는 계산이 한 번도 보지 않는 값이다
+  //   (회귀가드 `inflowSourceEdit` 가 작업표 코드에 참조 0건을 고정한다).
+  'inflow_type', 'purchase_time'];
 const BLOCKED_SAMPLES = {
   recruit_count: 500, daily_count: 99, start_date: '2026-12-25',
   review_fee: 1, purchase_channel: '쿠팡', review_type: '텍스트', delivery_type: '빈박스',
   work_sheet_url: 'https://docs.google.com/x', work_kind: '블로그체험단',
-  product_option: '20포', purchase_time: '10:00 ~ 11:00',
+  product_option: '20포',
 };
 
 async function run() {
@@ -140,6 +143,7 @@ async function run() {
       guide_images: ['https://a/b.jpg'], review_guide: '새 리뷰 가이드', special_notes: '새 특이사항',
       pay_amount: 31000,   // ★ 결제합계 — 상품 구성의 1건당 금액과 함께 바뀌는 짝(2026-09-21 확정)
       thumbnail_url: 'https://api.example.com/api/order/guide-image/1AbCdEfGhIjKlMnOp',   // ★ 163
+      inflow_type: 'guide', purchase_time: '오후 2시 ~ 5시',   // ★ 사용자 확정 2026-09-22 — 작업표 무관
     });
     const { res } = await call(baseOrder(), body);
     assert.strictEqual(res.statusCode, 200, 'body=' + JSON.stringify(res.body));
