@@ -2058,6 +2058,7 @@ async function _closeoutRoster(sheetId, tabName) {
   const { rows } = await db.query(
     `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8, round, option_text AS option,
             product_name AS product, is_submitted AS submitted, is_paid AS paid, submitted_at AS "submittedAt",
+            start_date AS "startDate",
             source, order_submission_id, identity_key
        FROM campaign_participants
       WHERE sheet_id=$1 AND tab_name=$2 AND active=TRUE AND deleted_at IS NULL
@@ -2094,9 +2095,46 @@ async function _closeoutRoster(sheetId, tabName) {
       phone8: pick('phone8', r.phone8), round: pick('round', r.round), option: pick('option_text', r.option),
       product: pick('product_name', r.product), submitted: !!pick('is_submitted', r.submitted),
       paid: !!pick('is_paid', r.paid), submittedAt: r.submittedAt,
+      /* ★ 가산 필드 2종(마감자료 CSV·건수는 **명시 열 목록**을 쓰므로 무영향).
+         `hasOrder` = 채움 판정(`rowNumbering.isFilledRow`)이 보는 네 칸 중 하나 — 이게 없으면
+         "주문만 붙고 이름이 아직 빈 줄"이 사람 수에서 빠져 홈 게이지와 목록이 갈린다.
+         `startDate` = 구매일자(표시 문자열) — 미제출 목록에서 "언제 산 사람인지"가 유일한 단서다. */
+      hasOrder: !!r.order_submission_id, startDate: r.startDate,
     });
   }
   return out;
+}
+
+/* ── 홈 작업목록 "아직 안 낸 사람" 목록 ────────────────────────────────────────
+   홈 표의 제출·입금 숫자를 누르면 **그 작업에서 아직 내지 않은 사람**을 보여준다.
+   ★★ **명단·판정 사본 0** — 마감자료와 **같은 `_closeoutRoster`**(활성 명단 + 편집 오버레이 합성,
+     작업보드 그리드와 같은 규칙)를 그대로 태운다. 여기서 따로 조회하면 "표에는 11명 남았는데
+     목록에는 12명"으로 갈린다.
+   ★★ **채워진 줄만 센다**(`rowNumbering.isFilledRow` 단일 출처) — 작업표 생성 때 미리 깔아 둔
+     **빈 슬롯은 사람이 아니다**(홈 게이지 분자와 같은 기준, 054/057 규율).
+   ★ 응답은 **최소 필드**(줄번호·이름·연락처 뒤4·구매일) — 홈 목록은 명단 화면이 아니다.
+     연락처는 **뒤 4자리만** 내보낸다(그 이상은 작업보드에서 본다).
+   ★ 상한을 넘으면 **자른 사실을 말한다**(`truncated`) — 조용히 일부만 보여주지 않는다. */
+async function pendingParticipants({ sheetId, tabName, kind = 'submit', limit = 200 } = {}) {
+  const k = kind === 'paid' ? 'paid' : 'submit';
+  const roster = await _closeoutRoster(sheetId, tabName);
+  const people = roster.filter(r => _isFilledRow(r));            // 빈 슬롯 제외 = 실제 참여자
+  /* ★★ 입금 미완료 = **제출까지 한 사람 중 아직 입금 안 된 사람**(참여만 하고 리뷰를 안 낸 사람은
+     아직 입금 대상이 아니다). 홈 화면의 미입금 필터·정렬(`_finUnpaid` = 제출 − 입금)과 **같은 기준**이라야
+     "11명 남음"과 이 목록의 건수가 갈리지 않는다. 제출 미완료는 참여자 중 안 낸 사람. */
+  const rest = people.filter(r => (k === 'paid' ? (r.submitted && !r.paid) : !r.submitted));
+  const cap = Math.max(1, Math.min(500, Number(limit) || 200));
+  return {
+    ok: true, kind: k,
+    filled: people.length, done: people.length - rest.length, pending: rest.length,
+    truncated: rest.length > cap,
+    items: rest.slice(0, cap).map(r => ({
+      seq: r.seq,
+      name: String(r.name || r.recipient || '').slice(0, 40),
+      tail: r.phone8 ? String(r.phone8).slice(-4) : '',
+      day: String(r.startDate || '').slice(0, 20),
+    })),
+  };
 }
 // 마감자료 생성(이력 보존 — 재생성 시 새 행). 마감일=오늘 KST. 건수=활성/제출.
 async function generateCloseout({ sheetId, tabName, by = '' } = {}) {
@@ -6682,6 +6720,7 @@ module.exports = {
   settlementVisibleFor,
   generateCloseout,
   latestCloseout,
+  pendingParticipants,
   closeoutCsv,
   listThread,
   addThread,

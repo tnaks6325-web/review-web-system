@@ -146,7 +146,7 @@ const thCount = (thead.match(/<th[>\s]/g) || []).length;   // <thead 오계수 �
 const tb = html.indexOf('<tbody>');
 const firstRow = html.slice(tb, html.indexOf('</tr>', tb));   // 헤더의 </tr> 을 집지 않게 tbody 뒤에서 탐색
 const tdCount = (firstRow.match(/<td/g) || []).length;
-t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 12, `th=${thCount} td=${tdCount}`);
+t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 14, `th=${thCount} td=${tdCount}`);
 // 2026-08-19 사용자 확정: 목록에서 바로 공유 주소를 복사하는 [🔗 링크] 열이 작업표 옆에 붙었다.
 t('공유 열이 작업표 바로 뒤(작업표=내가 연다 / 공유=남에게 보낸다)',
   /작업표<\/th>\s*<th[^>]*>공유<\/th>/.test(thead));
@@ -172,7 +172,8 @@ t('해제 상태 = 썸 없음(off)', /wbl-sw off/.test(html));
 sandbox.STATE.finFilter = 'pay';
 sandbox._finRenderList();
 t('필터 켜짐 = 썸 위치(중앙 104px)', /<i style="left:104px">/.test(host.innerHTML));
-t('입금 체크 중엔 미입금 건수를 빨간 병기', /\(미입금 3\)/.test(host.innerHTML));
+t('입금 체크 중엔 미입금 건수를 눈에 보이게 병기(시안 확정 2026-09-22: 상자 주황 + 남은 수 상시 표시)',
+  /class="rest on">3명 남음/.test(host.innerHTML) && /class="box short/.test(host.innerHTML));
 // today 필터의 정의상 한계 고지(조용한 누락 금지)
 sandbox.STATE.finFilter = 'today';
 sandbox._finRenderList();
@@ -192,7 +193,7 @@ sandbox._finRenderList();
 t('보관함에는 스위치 없음 + 필터 무시', !/wbl-sw/.test(host.innerHTML) && /끝난탭/.test(host.innerHTML));
 const finTb = host.innerHTML.indexOf('<tbody>');
 t('보관함 행도 칸 수 동일(빈 칸 유지 — 열 수가 사람·모드마다 달라지지 않는다)',
-  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 12);
+  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 14);
 sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = '';
 t('탭 전환이 필터를 초기화한다', (sandbox._finPickTab('fin'), sandbox.STATE.finFilter === ''));
 

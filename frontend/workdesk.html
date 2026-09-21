@@ -2464,11 +2464,73 @@ table.wbl-t tr.fin td{color:var(--faint)}
 .wbl-g i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--accent)}
 .wbl-num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .wbl-num.isover{color:#b91c1c;font-weight:800}
-.wbl-s{display:inline-block;border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:750;white-space:nowrap}
-.wbl-s.run{background:var(--safe-soft);color:var(--safe)}
-.wbl-s.cand{background:var(--warn-soft);color:var(--warn)}
+/* ── 상태 배지 — 시안 확정(2026-09-22): 담당 칸 값과 **같은 글자 크기·굵기**, 모서리는 숫자 상자와 같은 6px.
+   ★ 종전 알약(999px)·초록(safe)·굵은 글씨(750)는 쓰지 않는다 — 표에서 이 칸만 튀어 보였다
+     (사용자 지시 "녹색 사용하지마 / 배지 폰트를 담당값과 똑같게 / 굵기 풀어 / 모서리 곡률 줄여"). */
+.wbl-s{display:inline-block;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:400;white-space:nowrap;
+  background:var(--card2);color:var(--muted)}
+.wbl-s.run{background:var(--card2);color:var(--muted)}
+.wbl-s.cand{background:var(--accent);color:#fff}
 .wbl-s.fin{background:var(--card2);color:var(--muted)}
 .wbl-s.today{background:#e0e7ff;color:#3730a3}
+.wbl-s-sub{display:block;font-size:10.5px;color:var(--faint);margin-top:2px;white-space:nowrap}
+
+/* ══ 홈 작업목록 진행 숫자 4칸 — 총건수 / 참여 / 제출 / 입금 ══════════════════
+   ★★ 종전에는 「인원/제출」 한 칸에 게이지 + `48/50` + 회색 `제출 48` 을 겹쳐 그려서,
+     **50/50 으로 다 찬 것처럼 보이는데 실제 제출은 48** 인 상태가 눈에 띄지 않았다(사용자 신고).
+     지금은 네 값을 각자 칸으로 세워 세로로 줄이 맞는다.
+   ★★ 셀렉터를 `table.wbl-t` 로 시작할 것 — `table.wbl-t th{text-align:left}`(0,1,2)가
+     맨몸 `th.nh`(0,1,1)를 이겨 **머리글만 왼쪽에 남는다**(162 규율 ⑤, 실제로 두 번 밟았다). */
+table.wbl-t th.nh,table.wbl-t td.nc{text-align:center;white-space:nowrap;padding-left:4px;padding-right:4px}
+table.wbl-t th.nh{width:48px}
+table.wbl-t td.nc{position:relative;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600}
+/* 상자 — 네 칸이 같은 크기(inline-flex 라 버튼이든 그냥 칸이든 높이가 같다) */
+table.wbl-t td.nc .box{display:inline-flex;align-items:center;justify-content:center;
+  width:44px;min-height:32px;padding:0 4px;text-align:center;border-radius:6px;
+  background:var(--card2);border:1px solid var(--line);color:var(--ink)}
+table.wbl-t td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted)}   /* 총건수 = 기준값이라 상자를 비운다 */
+table.wbl-t td.nc .box.full{background:var(--accent);border-color:var(--accent);color:#fff}       /* 총건수에 도달 */
+table.wbl-t td.nc .box.isover{background:#b91c1c;border-color:#b91c1c;color:#fff}
+table.wbl-t td.nc .box.short{border-color:var(--warn);color:var(--warn)}                          /* 미입금 필터 중 */                 /* 정원 초과(056) */
+/* 누를 수 있다는 신호 = 연파랑 상자 + 손가락 커서 + 호버 진해짐 + 포커스 테두리 + 말풍선
+   (밑줄은 쓰지 않는다 — 사용자 결정 2026-09-22) */
+table.wbl-t td.nc .box.clickable{cursor:pointer;border-color:var(--accent-line);
+  background:var(--accent-soft);color:var(--accent-deep);font-weight:600;font-family:inherit;font-size:inherit;
+  transition:background-color .15s,border-color .15s,box-shadow .15s}
+table.wbl-t td.nc .box.clickable:hover{background:#dce7ff;border-color:var(--accent);box-shadow:0 1px 3px rgba(16,24,40,.2)}
+table.wbl-t td.nc .box.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* 「N명 남음」 — 마우스를 올렸을 때만. ★★ 흐름에서 빼서 띄운다(자리를 비워 두면 표가 헐렁해지고,
+   흐름에 둔 채 숨기면 뜰 때마다 행 높이가 흔들린다). 키보드로 닿아도 뜬다. */
+table.wbl-t td.nc .rest{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:4px;
+  font-size:11px;font-weight:400;color:var(--muted);line-height:1.3;white-space:nowrap;
+  background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 8px;
+  box-shadow:0 1px 3px rgba(16,24,40,.2);opacity:0;pointer-events:none;z-index:12;transition:opacity .15s}
+table.wbl-t td.nc:hover .rest,table.wbl-t td.nc:focus-within .rest{opacity:1}
+/* 미입금 필터 중 — 흐름 안(inline)으로 되돌려 상자 옆에 붙인다(행 높이 불변) */
+table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0 4px;padding:0;border:0;background:transparent;
+  box-shadow:none;color:var(--warn);font-weight:700}
+@media (prefers-reduced-motion:reduce){table.wbl-t td.nc .rest,table.wbl-t td.nc .box.clickable{transition:none}}
+@media (prefers-reduced-motion:no-preference){table.wbl-t td.nc .box.clickable:active{transform:scale(.97)}}
+
+/* ══ 아직 안 낸 사람 팝오버 — animate-ui(Prototyper) 수치 (사용자 확정 2026-09-22) ══
+   열기 150ms ease-out-fluid · 닫기 100ms ease-in-quart · fade + 살짝 축소에서 제자리로.
+   ★ body 직속으로 띄운다 — 표는 가로 스크롤 컨테이너라 안에 그리면 잘린다. */
+#wblPend{position:absolute;z-index:140;width:264px;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;box-shadow:0 5px 15px rgba(16,24,40,.2);display:none;transform-origin:top center}
+#wblPend.open{display:block;animation:wpIn 150ms cubic-bezier(.16,1,.3,1)}
+#wblPend.closing{display:block;animation:wpOut 100ms cubic-bezier(.5,0,.75,0) forwards}
+@keyframes wpIn{from{opacity:0;transform:scale(.95) translateY(-8px)}to{opacity:1;transform:none}}
+@keyframes wpOut{from{opacity:1;transform:none}to{opacity:0;transform:scale(.95) translateY(-8px)}}
+#wblPend .hd{padding:12px 12px 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+#wblPend .hd .n{margin-left:auto;font-size:12px;font-weight:400;color:var(--muted);flex:none}
+#wblPend .hd .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#wblPend .list{max-height:240px;overflow:auto;border-top:1px solid var(--line)}
+#wblPend .row{display:flex;gap:8px;padding:8px 12px;font-size:13px;border-bottom:1px solid var(--line);transition:background-color .15s}
+#wblPend .row:last-child{border-bottom:0}
+#wblPend .row:hover{background:var(--card2)}
+#wblPend .row .det{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;flex:none}
+#wblPend .ft{padding:8px 12px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);background:var(--card2);border-radius:0 0 12px 12px}
+@media (prefers-reduced-motion:reduce){#wblPend.open,#wblPend.closing{animation:none} #wblPend .row{transition:none}}
 .wbl-b.today{border-color:var(--accent-line);color:var(--accent-deep)}
 /* ★★ 오늘 완료는 **글자를 바꾸지 않고 색으로** 말한다(시안 design-home-campaign-popup.html ⑥).
    종전엔 라벨을 '☑ 오늘 완료' ↔ '해제' 로 갈아끼웠는데 ① 폭이 달라져 아래 줄과 어긋나고
@@ -2551,31 +2613,45 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   table.wbl-t{display:block;font-size:12px}
   table.wbl-t thead{display:none}
   table.wbl-t tbody{display:grid;gap:6px}
-  table.wbl-t tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:3px 8px;padding:9px 11px;background:var(--card);border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  /* ★★ 좁은 화면 배치는 **칸 번호에 묶여 있다** — 숫자 4칸(총건수·참여·제출·입금)으로 나누면서
+     번호가 2씩 밀렸다. 새 순서: 1작업명 2작업표 3공유 4담당 5총건수 6참여 7제출 8입금
+     9상태 10저장폴더 11모집공고 12오늘완료 13마감 14더보기.
+     ★ 상태 배지는 **작업명과 같은 줄 오른쪽**에 얹는다(숫자 5칸이 둘째 줄을 다 쓴다).
+     ★ 숫자 칸 라벨은 **한 글자**로 줄인다(`총건수 50`이면 네 칸이 화면을 넘는다). */
+  table.wbl-t tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:3px 8px;padding:9px 11px;background:var(--card);border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
   table.wbl-t tbody tr:hover{background:var(--card);border-color:var(--accent-line)}
   table.wbl-t tr.tdone td{background:transparent}
   table.wbl-t td{display:flex;flex-direction:row;align-items:center;gap:3px;min-width:0;padding:0;border:0;white-space:nowrap;font-size:10.5px}
   table.wbl-t td::before{content:attr(data-label);display:inline-block;margin:0;color:var(--faint);font-size:9px;font-weight:700}
-  table.wbl-t td:nth-child(1){display:block;position:relative;grid-column:1/-1;grid-row:1;padding:0 34px 2px 0;border:0}
+  table.wbl-t td:nth-child(1){display:block;position:relative;grid-column:1/-1;grid-row:1;padding:0 104px 2px 0;border:0}
   table.wbl-t td:nth-child(1)::before{display:none}
-  table.wbl-t td:nth-child(2),table.wbl-t td:nth-child(3),table.wbl-t td:nth-child(n+8){display:none}
-  table.wbl-t td:nth-child(4){grid-column:1;grid-row:2}
-  table.wbl-t td:nth-child(5){grid-column:2;grid-row:2}
-  table.wbl-t td:nth-child(5)::before{content:'인원'}
-  table.wbl-t td:nth-child(5) .wbl-g,table.wbl-t td:nth-child(5) .wbl-sub{display:none}
-  table.wbl-t td:nth-child(6){grid-column:3;grid-row:2}
-  table.wbl-t td:nth-child(7){grid-column:4;grid-row:2}
-  table.wbl-t td:nth-child(7)::before{display:none}
+  table.wbl-t td:nth-child(2),table.wbl-t td:nth-child(3),table.wbl-t td:nth-child(n+10){display:none}
+  table.wbl-t td:nth-child(4){grid-column:1;grid-row:2;overflow:hidden}
+  table.wbl-t td.nc{grid-row:2;position:static;font-size:10.5px}
+  table.wbl-t td:nth-child(5){grid-column:2}
+  table.wbl-t td:nth-child(6){grid-column:3}
+  table.wbl-t td:nth-child(7){grid-column:4}
+  table.wbl-t td:nth-child(8){grid-column:5}
+  table.wbl-t td:nth-child(5)::before{content:'총'}
+  table.wbl-t td:nth-child(6)::before{content:'참'}
+  table.wbl-t td:nth-child(7)::before{content:'제'}
+  table.wbl-t td:nth-child(8)::before{content:'입'}
+  table.wbl-t td.nc .box{width:34px;min-height:22px;border-radius:5px;font-size:11px}
+  table.wbl-t td.nc .rest{display:none}                      /* 말풍선은 마우스 전용 — 터치에선 안 띄운다 */
+  table.wbl-t td:nth-child(9){grid-column:1/-1;grid-row:1;justify-self:end;align-self:start;padding-right:34px}
+  table.wbl-t td:nth-child(9)::before{display:none}
+  table.wbl-t td:nth-child(9) .wbl-s-sub{display:none}       /* 마감일·마감자는 펼침에서 본다 */
   table.wbl-t tr.mob-open{gap:8px;padding:11px}
   table.wbl-t tr.mob-open td:nth-child(1){padding-bottom:8px;border-bottom:1px solid var(--line)}
-  table.wbl-t tr.mob-open td:nth-child(2),table.wbl-t tr.mob-open td:nth-child(3),table.wbl-t tr.mob-open td:nth-child(n+8){display:flex;flex-direction:column;align-items:stretch}
+  table.wbl-t tr.mob-open td:nth-child(2),table.wbl-t tr.mob-open td:nth-child(3),table.wbl-t tr.mob-open td:nth-child(n+10){display:flex;flex-direction:column;align-items:stretch}
+  table.wbl-t tr.mob-open td:nth-child(9) .wbl-s-sub{display:block}
   table.wbl-t tr.mob-open td:nth-child(2){grid-column:1/3;grid-row:3}
-  table.wbl-t tr.mob-open td:nth-child(3){grid-column:3/5;grid-row:3}
-  table.wbl-t tr.mob-open td:nth-child(8){grid-column:1/-1;grid-row:4}
-  table.wbl-t tr.mob-open td:nth-child(9){grid-column:1/3;grid-row:5}
-  table.wbl-t tr.mob-open td:nth-child(10){grid-column:3/5;grid-row:5}
-  table.wbl-t tr.mob-open td:nth-child(11){grid-column:1/3;grid-row:6}
-  table.wbl-t tr.mob-open td:nth-child(12){grid-column:3/5;grid-row:6}
+  table.wbl-t tr.mob-open td:nth-child(3){grid-column:3/6;grid-row:3}
+  table.wbl-t tr.mob-open td:nth-child(10){grid-column:1/-1;grid-row:4}
+  table.wbl-t tr.mob-open td:nth-child(11){grid-column:1/3;grid-row:5}
+  table.wbl-t tr.mob-open td:nth-child(12){grid-column:3/6;grid-row:5}
+  table.wbl-t tr.mob-open td:nth-child(13){grid-column:1/3;grid-row:6}
+  table.wbl-t tr.mob-open td:nth-child(14){grid-column:3/6;grid-row:6}
   table.wbl-t td.wbl-btncol{width:auto}
   table.wbl-t td.wbl-c{text-align:left;align-items:stretch}
   table.wbl-t td .wbl-b{width:100%;min-height:38px;font-size:11px}
@@ -5412,46 +5488,176 @@ function _finRecruitTotal(t){
   const n=Number(c&&c.recruitTotal);
   return Number.isFinite(n)&&n>0 ? {total:n, source:String(c.recruitTotalSource||'')} : null;
 }
-function _finProgHtml(t){
+/* ★★ 시안 확정(2026-09-22) — 한 칸에 겹쳐 그리던 진행 상황을 **네 칸**으로 나눈다.
+   종전: 게이지 + `48/50` + 회색 `제출 48` 이 한 칸에 있어 **50/50 으로 다 찬 것처럼 보이는데
+   실제 제출은 48** 인 상태가 눈에 안 띄었다(사용자 신고). 지금은 총건수·참여·제출·입금이
+   각자 칸이라 세로로 줄이 맞고, 총건수에 도달한 칸만 파랗게 찬다.
+   ★★ **값은 서버가 준 것을 그대로 그린다**(판정 사본 0) — 총건수 `campaigns[].recruitTotal`
+     (=displayRecruitTotal), 참여 `stats.filled`(=filledSql), 제출·입금 `stats.submitted/paid`.
+   ★ **모르는 것은 지어내지 않는다** — 총건수를 못 구하면 준비된 줄 수로 접고 `*` 를 붙여 말하고,
+     구버전 백엔드(채움 수 미동봉)는 참여 칸을 `—` 로 둔다(0 으로 위장 금지).
+   ★ 준비된 줄·빈 슬롯·초과·경고는 **툴팁**으로 남긴다(정보 손실 0 — 057 규율). */
+function _finNumTip(t){
   const s=(t&&t.stats)||{};
   const rows=s.total==null?null:Number(s.total);
-  const sub=s.submitted==null?null:Number(s.submitted);
   const filled=s.filled==null?null:Number(s.filled);
-  if(rows==null) return '<span class="wbl-sub">—</span>';
-  // 구버전 백엔드 = 채움 수를 모른다 → 종전 표기 그대로(조용히 다른 숫자로 바꾸지 않는다).
-  if(filled==null){
-    const p=(rows&&sub!=null)?Math.min(100,Math.round(sub/rows*100)):0;
-    return `<span class="wbl-g"><i style="width:${p}%"></i></span><span class="wbl-num">${sub==null?'—':sub}/${rows}</span>`
-      +`<span class="wbl-sub" title="이 서버는 채워진 줄 수를 아직 내려주지 않습니다 — 제출/준비된 줄로 표시합니다.">제출 기준</span>`;
-  }
   const rt=_finRecruitTotal(t);
-  const den=rt?rt.total:rows;                       // 총건수를 못 구하면 줄 수로 접는다
-  const pct=den?Math.min(100,Math.round(filled/den*100)):0;
-  const blank=Math.max(0,rows-filled);
-  /* ★ "준비된 줄 ≠ 총건수" 경고는 **무시트 작업에만** — 시트 기반 탭의 `준비된 줄`은 미리 깔아 둔
-     슬롯이 아니라 **이미 이름이 적힌 행 수**라, 모집 중에는 총건수보다 적은 것이 정상이다. */
-  const gap=(rt&&_isNoSheet(t)&&rows!==rt.total);
-  /* ★ 정원을 넘겨 채워진 경우 — `501/500`과 보조문구의 초과 건수로 함께 알린다.
-     기준(총건수)은 작업보드 게이지·표 초과 판정과 같은 값(공고>0 이면 공고, 아니면 발주). */
-  /* ★★ **무시트 작업만** — 서버(`workdeskTab`)가 `meta.sheetless` 일 때만 행에 `over` 를 붙이므로,
-     여기서 게이트를 빼면 시트 기반 탭에서 홈만 붉어지고 "표에서 붉은 줄로 표시합니다"가 **거짓말**이 된다
-     (시트 탭의 준비된 줄은 이미 이름이 적힌 행 수라 총건수와 다른 것이 정상 — 바로 아래 `gap` 과 같은 규율). */
-  const over=(rt&&_isNoSheet(t)&&filled>rt.total)?(filled-rt.total):0;
-  const tip=[`채워진 줄 ${filled}명`,
+  const blank=(rows!=null&&filled!=null)?Math.max(0,rows-filled):null;
+  const gap=(rt&&rows!=null&&_isNoSheet(t)&&rows!==rt.total);
+  const over=(rt&&filled!=null&&_isNoSheet(t)&&filled>rt.total)?(filled-rt.total):0;
+  return [
     rt?`총건수 ${rt.total}건${rt.source==='work_order'?'(발주 기준)':''}`:'총건수 미상 — 준비된 줄 수로 표시합니다',
-    `준비된 줄 ${rows}줄${blank?` (빈 슬롯 ${blank}줄)`:''}`,
-    sub==null?null:`제출 ${sub}명`,
+    filled==null?'참여 — (이 서버는 채워진 줄 수를 아직 내려주지 않습니다)':`참여 ${filled}명`,
+    s.submitted==null?null:`제출 ${s.submitted}명`,
     s.paid==null?null:`입금 ${s.paid}명`,
+    rows==null?null:`준비된 줄 ${rows}줄${blank?` (빈 슬롯 ${blank}줄)`:''}`,
     over?`⚠ 총건수(${rt.total})를 ${over}명 넘겨 들어왔습니다 — 작업보드 표에서 붉은 줄로 표시합니다`:null,
     gap?`⚠ 준비된 줄(${rows})이 총건수(${rt.total})와 다릅니다 — [📅 인원]에서 날짜별 인원을 확인하세요`:null,
   ].filter(Boolean).join(' · ');
-  // 총건수를 넘긴 경우에는 "줄 102"처럼 원인을 다시 적지 않고, 초과분만 바로 읽히게 한다.
-  const aux=over
-    ? ` · <b style="color:var(--danger,#c22f2f)">${over}건초과</b>`
-    : (gap?` · <b style="color:var(--warn,#b26a00)">줄 ${rows}</b>`:'');
-  return `<span class="wbl-g" title="${esc(tip)}"><i style="width:${pct}%"></i></span>`
-    +`<span class="wbl-num${over?' isover':''}" title="${esc(tip)}">${filled}/${den}${rt?'':'*'}</span>`
-    +`<span class="wbl-sub" title="${esc(tip)}">제출 ${sub==null?'—':sub}${aux}</span>`;
+}
+/* 제출·입금 칸을 누를 수 있는가 — **거의 끝난 작업**에서만 연다.
+   ★ 잔여는 **참여자 기준**(참여한 사람 중 아직 안 낸 사람) — 서버 목록(`pendingParticipants`)이
+     채워진 줄만 세므로 같은 기준이라야 "11명 남음"과 목록 건수가 갈리지 않는다.
+   ★ 문턱은 **총건수 대비 10%** — 이제 막 시작한 작업의 큰 숫자를 목록으로 열지 않는다.
+   ★ 총건수·참여·해당 값 중 하나라도 모르면 열지 않는다(모르면 안 연다). */
+var _FIN_PEND_THRESHOLD=0.10;
+function _finPendRest(t,kind){
+  const s=(t&&t.stats)||{};
+  /* ★★ 입금 잔여는 **미입금 필터·정렬과 같은 함수**(`_finUnpaid` = 제출 − 입금)를 그대로 쓴다 —
+     참여만 하고 리뷰를 안 낸 사람은 아직 입금 대상이 아니다. 여기서 따로 세면 필터로 잡힌 수와
+     말풍선의 "N명 남음"이 갈린다(서버 목록도 같은 기준으로 고쳐 두었다). */
+  if(kind==='paid') return (s.submitted==null||s.paid==null)?null:_finUnpaid(t);
+  const filled=s.filled==null?null:Number(s.filled);
+  const sub=s.submitted==null?null:Number(s.submitted);
+  if(filled==null||sub==null) return null;
+  return Math.max(0,filled-sub);
+}
+function _finPendOpenable(t,kind){
+  const rt=_finRecruitTotal(t); if(!rt||!rt.total) return false;
+  const rest=_finPendRest(t,kind);
+  return rest!=null && rest>0 && (rest/rt.total)<=_FIN_PEND_THRESHOLD;
+}
+function _finNumCells(t,i,filt){
+  const s=(t&&t.stats)||{};
+  const rows=s.total==null?null:Number(s.total);
+  const filled=s.filled==null?null:Number(s.filled);
+  const sub=s.submitted==null?null:Number(s.submitted);
+  const paid=s.paid==null?null:Number(s.paid);
+  const rt=_finRecruitTotal(t);
+  const total=rt?rt.total:null;
+  const tip=esc(_finNumTip(t));
+  const den=total!=null?total:rows;                       // 총건수를 못 구하면 줄 수로 접는다
+  const over=(rt&&filled!=null&&_isNoSheet(t)&&filled>rt.total);
+  const cell=(html,label)=>`<td class="nc" data-label="${label}" title="${tip}">${html}</td>`;
+  const box=(v,cls)=>`<span class="box${cls?' '+cls:''}">${v==null?'—':v}</span>`;
+  // ① 총건수 — 기준값이라 상자를 비운다. 못 구하면 줄 수 + `*`.
+  const c1=cell(box(den==null?null:(den+(total==null?'*':'')),'tot'),'총건수');
+  // ② 참여 — 총건수에 도달하면 파랑, 넘기면 빨강(056: 색으로만 말한다).
+  const c2=cell(box(filled,filled==null?'':(over?'isover':(total!=null&&filled>=total?'full':''))),'참여');
+  // ③④ 제출·입금 — 거의 끝났으면 눌러서 "아직 안 낸 사람"을 본다.
+  const numBox=(v,kind,label)=>{
+    if(v==null) return box(null);
+    const full=(total!=null&&v>=total);
+    if(full) return box(v,'full');
+    const rest=_finPendRest(t,kind);
+    const restHtml=(rest!=null&&rest>0)?`<span class="rest">${rest}명 남음</span>`:'';
+    if(!_finPendOpenable(t,kind)) return box(v)+restHtml;
+    const aria=esc(`${label} 안 한 ${rest}명 보기`);
+    return `<button type="button" class="box clickable" data-i="${i}" data-k="${kind}" aria-label="${aria}"`
+         + ` onclick="event.stopPropagation();openPendingFromHome(${i},'${kind}',this)">${v}</button>`+restHtml;
+  };
+  const c3=cell(numBox(sub,'submit','제출'),'제출');
+  /* 미입금 필터를 켠 동안에는 입금 칸을 주황으로 — 종전 `(미입금 N)` 빨간 글씨를 대신한다
+     (남은 수는 말풍선·툴팁이 말한다). */
+  /* 미입금 필터를 켠 동안에는 입금 칸을 주황으로 하고 **남은 수를 상자 옆에 상시 표시**한다 —
+     종전 `(미입금 N)` 빨간 병기를 대신한다(필터를 켰는데 몇 명인지 안 보이면 후퇴다).
+     ★ 평소에는 마우스를 올렸을 때만 뜨는 말풍선 그대로. */
+  const payOn=(filt==='pay'&&_finUnpaid(t)>0);
+  const c4=cell(numBox(paid,'paid','입금')
+      .replace('class="box','class="box'+(payOn?' short':''))
+      .replace('class="rest"','class="rest'+(payOn?' on':'')+'"'),'입금');
+  return c1+c2+c3+c4;
+}
+
+/* ══ 「아직 안 낸 사람」 팝오버 — animate-ui(Prototyper) 수치, 사용자 확정 2026-09-22 ══
+   홈 작업목록에서 **거의 끝난 작업**의 제출·입금 숫자를 누르면 그 자리 옆에 뜬다.
+   ★★ **body 직속으로 띄운다** — 표는 가로 스크롤 컨테이너라 안에 그리면 잘린다(레포 관용구).
+   ★★ **스크롤·리사이즈에는 닫는다** — 앵커를 따라다니지 않는 팝오버를 남겨 두면 엉뚱한 자리를
+     가리킨다(달력 `_wdDpPlace` 와 같은 규율). 입력칸이 없어 닫아도 잃는 것이 없다.
+   ★ 한 번에 **하나만** · 바깥 클릭·Esc 로 닫힘 · 전역 리스너는 **최상위 1회**.
+   ★ onclick 에는 **인덱스만** 넘긴다(작업명은 시트에서 온 문자열). */
+var _WPEND={el:null,bound:false,seq:0,anchor:null};
+function _wpEl(){
+  if(_WPEND.el&&document.body.contains(_WPEND.el)) return _WPEND.el;
+  var d=document.createElement('div');
+  d.id='wblPend'; d.setAttribute('role','dialog'); d.setAttribute('aria-label','아직 안 낸 사람');
+  d.innerHTML='<div class="hd"><span class="t"></span><span class="n"></span></div><div class="list"></div>';
+  document.body.appendChild(d); _WPEND.el=d;
+  d.addEventListener('click',function(e){ e.stopPropagation(); });
+  if(!_WPEND.bound){
+    _WPEND.bound=true;
+    document.addEventListener('click',function(){ closePendingPop(); });
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape') closePendingPop(); });
+    window.addEventListener('scroll',function(){ closePendingPop(); },true);
+    window.addEventListener('resize',function(){ closePendingPop(); });
+  }
+  return d;
+}
+function closePendingPop(){
+  var d=_WPEND.el; if(!d||!d.classList.contains('open')) return;
+  _WPEND.seq++; _WPEND.anchor=null;
+  d.classList.remove('open'); d.classList.add('closing');
+  var done=function(){ d.classList.remove('closing'); d.style.display=''; };
+  d.addEventListener('animationend',done,{once:true});
+  setTimeout(done,240);                               // 애니메이션 이벤트가 안 와도 반드시 닫는다
+}
+/* 앵커(누른 상자) 아래에 붙이고, 아래가 좁으면 위로 뒤집는다. */
+function _wpPlace(btn){
+  var d=_wpEl(), r=btn.getBoundingClientRect();
+  var sx=window.pageXOffset||document.documentElement.scrollLeft;
+  var sy=window.pageYOffset||document.documentElement.scrollTop;
+  d.style.visibility='hidden'; d.style.display='block';
+  var w=d.offsetWidth||264, h=d.offsetHeight||160;
+  var left=r.left+sx+(r.width/2)-(w/2);
+  left=Math.max(sx+8,Math.min(left,sx+document.documentElement.clientWidth-w-8));
+  var below=(window.innerHeight-r.bottom), top;
+  if(below<h+16&&r.top>h+16) top=r.top+sy-h-8; else top=r.bottom+sy+6;
+  d.style.left=left+'px'; d.style.top=top+'px';
+  d.style.display=''; d.style.visibility='';
+}
+function openPendingFromHome(i,kind,btn){
+  var t=(STATE.tabs||[])[i]; if(!t||!btn) return;
+  var d=_wpEl(), my=++_WPEND.seq, k=(kind==='paid'?'paid':'submit');
+  var label=(k==='paid'?'입금':'제출');
+  // 같은 칸을 다시 누르면 닫는다(토글)
+  if(_WPEND.anchor===btn&&d.classList.contains('open')){ closePendingPop(); return; }
+  _WPEND.anchor=btn;
+  d.querySelector('.t').textContent=_tabLabel(t);
+  d.querySelector('.n').textContent=label+' 안 한 사람';
+  d.querySelector('.list').innerHTML='<div class="row"><span>불러오는 중…</span></div>';
+  d.classList.remove('closing'); d.classList.add('open');
+  _wpPlace(btn);
+  api('/api/trackb/workdesk/pending?sheetId='+encodeURIComponent(t.sheetId)
+      +'&tabName='+encodeURIComponent(t.tabName)+'&kind='+k)
+    .then(function(j){
+      if(my!==_WPEND.seq) return;                     // 그 사이 닫혔거나 다른 칸을 눌렀다
+      var items=(j&&j.items)||[];
+      d.querySelector('.n').textContent=label+' 안 한 '+((j&&j.pending!=null)?j.pending:items.length)+'명';
+      d.querySelector('.list').innerHTML=items.length
+        ? items.map(function(x){
+            var who=esc(x.name||'—')+(x.tail?' <span class="det">···'+esc(x.tail)+'</span>':'');
+            return '<div class="row"><span>'+(x.seq!=null?('<b>'+esc(x.seq)+'</b> '):'')+who+'</span>'
+                 + (x.day?'<span class="det">'+esc(x.day)+'</span>':'')+'</div>';
+          }).join('')
+        : '<div class="row"><span>모두 '+label+'했습니다.</span></div>';
+      if(j&&j.truncated) d.insertAdjacentHTML('beforeend','<div class="ft">많아서 앞부분만 보여줍니다 — 전체는 작업보드에서 확인하세요.</div>');
+      _wpPlace(btn);
+    })
+    .catch(function(e){
+      if(my!==_WPEND.seq) return;
+      d.querySelector('.list').innerHTML='<div class="row"><span>목록을 불러오지 못했습니다 — '+esc((e&&e.message)||'')+'</span></div>';
+      _wpPlace(btn);
+    });
 }
 
 function _finBodyHtml(){
@@ -5462,15 +5668,12 @@ function _finBodyHtml(){
   const filt=fin?'':(STATE.finFilter||'');
   const body=rows.length?rows.map(t=>{
     const s=t.stats||{}, i=all.indexOf(t);
-    const prog=_finProgHtml(t);
     const td=isTodayDone(t);
-    const st=fin?`<span class="wbl-s fin">🏁 마감</span>`
+    /* ★ 보관함에서는 「마감일 · 마감자」를 **상태 칸 안**으로 넣는다 — 숫자 4칸을 세우면서
+       열 수를 그대로 두기 위해서다(v3 규율: 사람·모드마다 열 수가 달라지지 않는다). */
+    const st=fin?`<span class="wbl-s fin">🏁 마감</span><span class="wbl-s-sub">${esc(_finDate(t.finishedAt)||'—')}${t.finishedBy?' · '+esc(t.finishedBy):''}</span>`
       :(td?`<span class="wbl-s today">☑ 오늘 완료</span>`
          :(isFinishCandidate(t)?`<span class="wbl-s cand" title="인원·제출·입금이 모두 채워졌습니다 — 잠시 후 마감 보관함으로 자동 이동합니다.">✓ 마감 후보</span>`:`<span class="wbl-s run">진행 중</span>`));
-    const unpaid=_finUnpaid(t);
-    const last=fin
-      ? `<td class="wbl-num" data-label="마감일 · 마감자">${esc(_finDate(t.finishedAt)||'—')}${t.finishedBy?' · '+esc(t.finishedBy):''}</td>`
-      : `<td class="wbl-num" data-label="입금">${s.paid==null?'—':s.paid}${(filt==='pay'&&unpaid>0)?` <span style="color:var(--danger,#c22f2f);font-weight:750">(미입금 ${unpaid})</span>`:''}</td>`;
     // v3(사용자 확정): 통합 "폴더/처리" 칸 폐지 → 작업표·저장폴더·모집공고·오늘완료·마감 **독립 열**.
     //   열 정렬은 표 구조가 보장한다. 열람전용·보관함도 열 수는 같다(빈 칸 유지 — 사람마다 열이 달라지면 눈이 헤맨다).
     // ★ 인덱스만 넘긴다(위 _FIN 주석) — 시트에서 온 이름을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다.
@@ -5487,7 +5690,7 @@ function _finBodyHtml(){
       <td data-label="작업명"><div class="wbl-nm">${esc(_tabLabel(t))}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div><button type="button" class="wbl-mobile-toggle" aria-expanded="false" aria-label="작업 도구 펼치기" onclick="_mobileToggleTaskRow(this,event)">⌄</button></td>
       ${tdOpen}${tdLink}
       <td data-label="담당">${esc((s.manager)||'—')}</td>
-      <td data-label="인원 / 제출">${prog}</td>${last}
+      ${_finNumCells(t,i,filt)}
       <td data-label="상태">${st}</td>
       <td class="wbl-c wbl-btncol" data-label="저장폴더">${_folBtnsHtml(t,i)}</td>
       <td class="wbl-c wbl-btncol" data-label="모집공고">${_campBtnHtml(t,i)}</td>
@@ -5501,7 +5704,7 @@ function _finBodyHtml(){
     ? `<div class="wbl-facts" style="margin:0;border-radius:0;border-left:0;border-right:0;border-top:0">인원·제출·입금이 모두 채워진 작업은 <b>자동으로 이곳으로 옮겨집니다</b>(마감자 칸에 <b>자동 마감</b>으로 표시). 아직 끝난 게 아니면 <b>[↩ 진행중으로 복귀]</b>를 누르세요 — 되돌린 작업은 다시 자동으로 넘어오지 않습니다.</div>`
     : '';
   return rows.length?`${autoNote}<div class="wbl-tw"><table class="wbl-t"><thead><tr>
-      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
+      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
     : `${autoNote}<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }

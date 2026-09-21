@@ -277,7 +277,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
       STATE: { finTab: opts.fin ? 'fin' : '', tabs: opts.tabs || [], finFilter: '', finQ: '', finMgr: '', role: 'master' },
       _finVisible: () => opts.rows || [],
       _finCanEdit: () => true,
-      _finProgHtml: () => '<span>prog</span>',
+      // 시안 확정(2026-09-22): 인원/제출+입금 2칸 → 총건수·참여·제출·입금 4칸(`_finNumCells`).
+      //   이 가드가 보는 것은 **안내 추가로 표 구조가 밀리지 않는가** 이므로 칸 수만 맞으면 된다.
+      _finNumCells: () => '<td class="nc"></td><td class="nc"></td><td class="nc"></td><td class="nc"></td>',
       _finUnpaid: () => 0,
       _finDate: v => v || '',
       _folBtnsHtml: () => '', _campBtnHtml: () => '', _taskMoreCell: () => '<td></td>',
@@ -304,7 +306,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   // ⚠ `<th` 로 세면 `<thead>` 까지 잡혀 항상 +1 이 된다(이 가드를 쓰다 실제로 밟았다) — 경계 문자를 붙인다.
   const nTh = (htmlRun.match(/<th[\s>]/g) || []).length, nTd = (htmlRun.match(/<td[\s>]/g) || []).length;
   t('진행 중 탭의 열 수는 그대로(헤더 칸 수 ≡ 행 칸 수 — 안내 추가로 표 구조가 밀리지 않았다)',
-    nTh === nTd && nTh === 12, `th=${nTh} td=${nTd}`);
+    nTh === nTd && nTh === 14, `th=${nTh} td=${nTd}`);   // 시안 확정(2026-09-22): 숫자 4칸 분리로 12 → 14
 
   console.log(`\n✅ ${pass} 케이스 통과\n`);
   process.exit(0);
