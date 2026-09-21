@@ -2523,7 +2523,7 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 /* 검색 중에는 #wblBody 가 높이를 붙잡고 있으므로(_finSearch) 결과 0건일 때 안내문이 위에 붙고
    아래가 통째로 빈다 → 남는 공간의 가운데에 놓아 '자리를 지키고 있다'로 읽히게 한다.
    ★ 표(.wbl-tw)는 margin auto 를 받지 않아 평소처럼 위에서부터 그려진다. */
-#wblBody{display:flex;flex-direction:column}
+#wblBody{display:flex;flex-direction:column;--wblfix:full}
 #wblBody .wbl-empty{margin:auto}
 .wbl-note{font-size:9.5px;color:var(--faint);padding:8px 14px;border-top:1px solid var(--line)}
 .wbl-mobile-toggle{display:none}
@@ -2544,7 +2544,10 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   .wbl-tw{max-height:none;overflow:visible}
   /* 검색 중 높이 고정(_finSearch)은 데스크톱 전용 — 여기선 목록이 문서에 펼쳐져
      고정하면 빈 공간이 수천 px 이 된다. 인라인 스타일을 이기려면 !important 가 필요하다. */
-  #wblBody{min-height:0!important;display:block}
+  /* 여기선 목록이 스크롤 상자 없이 문서에 통째로 펼쳐진다(.wbl-tw max-height 없음) → 전체를 고정하면
+     빈 공간이 수천 px. 그래서 **스크롤이 튀지 않을 만큼만** 고정한다(_finSearch 의 fit 모드).
+     ★ 화면 크기 판정은 이 미디어쿼리 한 곳 — JS 는 이 값을 읽기만 한다(브레이크포인트 사본 금지). */
+  #wblBody{--wblfix:fit;display:block}
   table.wbl-t{display:block;font-size:12px}
   table.wbl-t thead{display:none}
   table.wbl-t tbody{display:grid;gap:6px}
@@ -5505,7 +5508,7 @@ function _finRenderList(){
   const mgrs=[...new Set(all.filter(t=>isFinished(t)===fin).map(t=>(t.stats&&t.stats.manager)||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
   const filt=fin?'':(STATE.finFilter||'');
   // 전체 렌더 = 화면을 새로 그리는 시점이라 검색 높이 고정을 푼다(다음 검색 입력이 그때 높이로 다시 잡는다).
-  STATE._finBodyH=0;
+  STATE._finBodyH=0; STATE._finBodyGap=null;
   host.innerHTML=`<div class="wbl-box">
     <div class="wbl-h">
       <span class="wbl-ttl">📋 작업 목록</span>
@@ -5717,13 +5720,34 @@ function _finPickMgr(m){ STATE.finMgr=m; _finRenderList(); }
    ★ offsetHeight 를 **innerHTML 교체 전에** 읽는다(교체 후엔 이미 줄어든 높이라 의미가 없다).
    ★★ 모바일(≤720px)은 목록이 문서에 펼쳐져(.wbl-tw max-height 없음) 고정하면 빈 공간이 수천 px 이
      된다 → **CSS 미디어쿼리에서 무력화**한다(브레이크포인트 사본을 JS 에 만들지 않는다). */
+/* 고정할 높이를 정하는 한 곳 — 모드는 **CSS 가 알려준다**(`--wblfix`).
+   · full(데스크톱) = 검색 시작 시점의 본문 높이를 통째로 유지 → 아래 빠른메뉴·브리핑도 안 밀린다.
+   · fit(≤720px)    = 목록이 문서에 펼쳐지는 화면. 전체를 잡으면 빈 공간이 수천 px 이므로
+     **지금 보고 있는 스크롤 위치가 살아남을 만큼만** 잡는다 — 필요 없으면 0(빈 공간 0).
+     필요 높이 = 지금 스크롤 + 화면 한 장 − (목록 말고 나머지가 차지하는 높이).
+     ★ '나머지 높이'는 검색을 시작할 때 한 번만 재 둔다(결과가 바뀌어도 그 부분은 그대로다).
+     ★ 스크롤을 더 내린 뒤 다시 고치는 경우가 있어 **키우기만** 한다(줄이면 그 순간 튄다).
+   ★ 모드를 못 읽으면 full — 종전(데스크톱) 동작이 기본이다. */
+function _finHoldHeight(b,v){
+  if(!b||!b.style) return;
+  if(!v){ STATE._finBodyH=0; STATE._finBodyGap=null; b.style.minHeight=''; return; }
+  let mode='full';
+  try{ mode=(getComputedStyle(b).getPropertyValue('--wblfix')||'').trim()||'full'; }catch(_){ }
+  if(mode==='fit'){
+    const sc=(b.closest&&b.closest('.ovwrap'))||document.scrollingElement||document.documentElement||null;
+    if(sc){
+      if(STATE._finBodyGap==null) STATE._finBodyGap=(sc.scrollHeight||0)-(b.offsetHeight||0);
+      const need=(sc.scrollTop||0)+(sc.clientHeight||0)-STATE._finBodyGap;
+      STATE._finBodyH=Math.max(STATE._finBodyH||0, Math.max(0,Math.round(need)));
+    }
+  } else if(!(STATE._finBodyH>0)) STATE._finBodyH=b.offsetHeight||0;
+  b.style.minHeight=(STATE._finBodyH>0)?STATE._finBodyH+'px':'';
+}
 function _finSearch(v){
   STATE.finQ=v;
   const b=document.getElementById('wblBody');
   if(!b){ _finRenderList(); return; }
-  if(v){ if(!(STATE._finBodyH>0)) STATE._finBodyH=b.offsetHeight||0; }
-  else STATE._finBodyH=0;
-  if(b.style) b.style.minHeight=(STATE._finBodyH>0)?STATE._finBodyH+'px':'';
+  _finHoldHeight(b,v);
   b.innerHTML=_finBodyHtml();
 }
 /* ══ M2: "열린 작업" 줄(0단) — 브라우저 탭처럼 열어둔 작업만 · 개인별 ═══════════════════
