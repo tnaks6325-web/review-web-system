@@ -75,19 +75,25 @@
   .pgA .lack{font-size:10px;font-weight:800;color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-line);border-radius:999px;padding:0 6px;white-space:nowrap}
   .pgA .done{font-size:10px;font-weight:800;color:var(--safe);background:var(--safe-soft);border:1px solid var(--safe-line);border-radius:999px;padding:0 6px;white-space:nowrap}
 
-  /* ── B안: 칸 안 3분할 ── */
-  .pgB{display:grid;grid-template-columns:repeat(3,minmax(50px,1fr)) auto;gap:3px;max-width:236px;align-items:stretch}
-  .pgB .cell{text-align:center;border-radius:6px;padding:2px 3px;background:var(--card2);border:1px solid var(--line)}
-  .pgB .cell .k{display:block;font-size:9px;color:var(--faint);font-weight:700;letter-spacing:-.2px}
-  .pgB .cell .v{display:block;font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.25}
-  .pgB .cell.full{background:var(--safe-soft);border-color:var(--safe-line)}
-  .pgB .cell.full .v{color:var(--safe)}
-  /* ★ 미완료는 빨강이 아니라 **중립**이다 — 제출·입금이 덜 된 건 '문제'가 아니라 '아직'이고,
-     화면의 「입금 체크 38」이 말하듯 그 상태가 흔하다. 빨강을 남발하면 목록이 온통 빨개져
-     진짜 신호(정원 초과 등)가 묻힌다. 부족분은 색이 아니라 **작은 숫자**로 말한다. */
-  .pgB .cell.short .v{color:var(--ink)}
-  .pgB .cell .d{display:block;font-size:9px;font-weight:800;color:var(--muted);line-height:1.1}
-  .pgB .tot{align-self:center;font-size:11px;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums}
+  /* ── B안: **표 열 4개** (총건수 · 참여 · 제출 · 입금) — 숫자만 ──────────────────
+     ★ 한 칸 안에 우겨넣지 않고 **진짜 열**로 나눈다 — 그래야 위아래 줄의 같은 항목이
+       세로로 정렬돼 눈이 한 줄기로 훑는다(사용자 지시). 무엇을 뜻하는지는 **머리글이 말한다**
+       → 칸 안에는 라벨도 체크도 넣지 않는다(같은 말을 줄마다 87번 반복하지 않는다).
+     ★ 숫자는 **오른쪽 정렬 + 고정폭 숫자**(tabular-nums) — 자릿수가 어긋나면 세로 비교가 깨진다. */
+  th.nh,td.nc{text-align:right;white-space:nowrap}
+  td.nc{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:700}
+  td.nc .box{display:inline-block;min-width:38px;text-align:right;border-radius:6px;padding:2px 7px;background:var(--card2);border:1px solid var(--line)}
+  td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted);font-weight:800}
+  /* 다 찬 항목만 초록 — 체크 글리프 없이 **색으로만** 말한다(사용자 지시). */
+  td.nc .box.full{background:var(--safe-soft);border-color:var(--safe-line);color:var(--safe)}
+  /* ★ 모자란 쪽은 빨강이 아니라 중립 — 「입금 체크 38」이 말하듯 흔한 상태라
+     전부 빨갛게 칠하면 진짜 신호(정원 초과)가 묻힌다. */
+  td.nc .box.short{color:var(--ink)}
+  td.nc .box.over{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
+  td.nc .lack{display:block;font-size:9.5px;font-weight:800;color:var(--muted);line-height:1.15;margin-top:1px}
+  /* 변형 대조용 — 상자 없이 숫자만 */
+  td.nc.bare .box{background:transparent;border-color:transparent;padding:2px 0}
+  td.nc.bare .box.full{color:var(--safe)}
 
   /* ── C안: 남은 일 중심 ── */
   .pgC{display:flex;align-items:center;gap:7px;white-space:nowrap}
@@ -112,10 +118,11 @@
 </p>
 
 <div class="card" style="border-color:var(--safe-line);background:var(--safe-soft)">
-  <p style="margin:0"><b>제 권장은 B안입니다.</b> 요청하신 네 값(참여·제출·입금·총건수)이 전부 같은 크기로 보이고,
-  <b>막대가 없어 “꽉 찬 것처럼 보이는” 착시가 원천적으로 사라지기</b> 때문입니다.
-  100건 중 89명 같은 차이는 막대로는 11픽셀이라 A안에서도 잘 안 보입니다.
-  “남은 일만 빠르게 보고 싶다”면 C안이 더 맞습니다.</p>
+  <p style="margin:0"><b>B안(수정본)</b> — 표의 <b>열을 네 개</b>로 나눕니다: <b>총건수 · 참여 · 제출 · 입금</b>.
+  칸 안에는 <b>숫자만</b> 두고(무엇인지는 머리글이 말합니다) <b>체크는 쓰지 않습니다</b> — 다 찬 항목은 연한 초록으로만 구분합니다.
+  같은 항목이 <b>세로로 나란히</b> 서서 줄끼리 비교가 되고, 막대가 없어 “꽉 찬 것처럼 보이는” 착시도 사라집니다.
+  <br>아래 <b>세 변형</b>(B-1 숫자만 · B-2 모자란 수 덧붙임 · B-3 상자 없이) 중에서 골라 주세요.
+  참고로 A·C안은 처음 검토했던 안이며 아래에 그대로 남겨 두었습니다.</p>
 </div>
 
 <div class="navbar" id="nav"></div>
@@ -170,23 +177,56 @@
 
 <!-- ══════════ B ══════════ -->
 <section data-v="B">
-<h2>B안 — 칸을 셋으로 나눠 숫자를 나란히 <span class="tag rec">권장</span></h2>
+<h2>B안 — 열 네 개로 나눈다 <span class="tag rec">권장 · 수정본</span></h2>
 <div class="card">
-  <p>한 칸 안을 <b>참여 | 제출 | 입금</b> 세 상자로 나누고, 오른쪽에 <b>총건수</b>를 한 번만 둡니다.
-     <b>다 찬 상자만 초록 ✓</b> 로 칠하고 나머지는 평범하게 두되, <b>몇 명 모자란지를 작은 숫자</b>(<code>−11</code>)로 덧붙입니다.</p>
-  <p class="note">★ 모자란 쪽을 빨갛게 칠하지 않는 이유 — 화면의 <b>「입금 체크 38」</b> 이 말하듯 입금이 덜 된 상태는 흔합니다.
-     그걸 전부 빨강으로 칠하면 목록이 온통 빨개져 <b>진짜 신호</b>(정원 초과 같은)가 묻힙니다. 색은 <b>다 끝난 것</b>에만 씁니다.</p>
-  <div class="wbl-box" style="margin-top:10px">
+  <p>한 칸에 우겨넣지 않고 <b>표의 열을 네 개로</b> 나눕니다 — <b>총건수 · 참여 · 제출 · 입금</b> 순서입니다.
+     그래야 위아래 줄의 같은 항목이 <b>세로로 나란히</b> 서서, 눈이 한 줄기로 훑어 내려가며 비교할 수 있습니다.</p>
+  <ul>
+    <li>칸 안에는 <b>숫자만</b> 둡니다 — 무엇을 뜻하는지는 <b>머리글이 말합니다</b>(같은 말을 87줄 반복하지 않습니다).</li>
+    <li><b>체크(✓)는 없습니다.</b> 다 찬 항목은 <b>연한 초록</b>으로만 구분합니다.</li>
+    <li>숫자는 <b>오른쪽 정렬 · 고정폭</b>이라 100과 89가 자릿수까지 맞게 섭니다.</li>
+  </ul>
+
+  <h3>B-1 · 숫자만 <span class="tag ok">지시 그대로</span></h3>
+  <div class="wbl-box">
     <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
       <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
     <table class="wbl-t"><thead><tr>
-      <th>작업명</th><th>담당</th><th>참여 · 제출 · 입금 (총건수 기준)</th><th>상태</th>
-    </tr></thead><tbody id="tbB"></tbody></table>
+      <th>작업명</th><th>담당</th>
+      <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
+      <th>상태</th>
+    </tr></thead><tbody id="tbB1"></tbody></table>
   </div>
+
+  <h3>B-2 · 모자란 수를 작게 덧붙인 변형</h3>
+  <p class="note">“몇 명 남았나”를 자주 보신다면 이쪽입니다. 숫자 아래 <code>−11</code> 한 줄만 더 붙고 나머지는 같습니다.</p>
+  <div class="wbl-box">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th>
+      <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
+      <th>상태</th>
+    </tr></thead><tbody id="tbB2"></tbody></table>
+  </div>
+
+  <h3>B-3 · 상자 없이 숫자만(가장 담백)</h3>
+  <p class="note">상자 테두리도 빼면 표가 더 조용해집니다. 다 찬 항목은 <b>초록 글자</b>로만 구분합니다.</p>
+  <div class="wbl-box">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th>
+      <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
+      <th>상태</th>
+    </tr></thead><tbody id="tbB3"></tbody></table>
+  </div>
+
   <table class="doc">
-    <tr><th style="width:92px">무엇이 바뀌나</th><td>요청하신 네 값(<b>참여 · 제출 · 입금 · 총건수</b>)이 <b>모두 같은 크기</b>로 한 칸에 놓입니다. 회색 보조 글씨가 사라지고, 입금 열은 이 칸에 흡수됩니다.</td></tr>
-    <tr><th>무엇을 해결하나</th><td>막대 착시가 <b>원천적으로 없습니다</b>(막대를 안 씁니다). 1명 차이도 숫자로 그대로 보이고, <b>세 칸이 전부 초록 ✓ 면 그게 완료</b>라는 규칙이 단순합니다.</td></tr>
-    <tr><th>위험은</th><td>한 줄에 숫자가 많아 <b>훑을 때 피로</b>할 수 있습니다(작업 87개 × 3숫자). 진행도(몇 % 왔는지)는 막대가 없어 덜 직관적입니다.</td></tr>
+    <tr><th style="width:96px">무엇이 바뀌나</th><td>「인원/제출」 + 「입금」 <b>두 열이 네 열로</b> 바뀝니다(총건수·참여·제출·입금). 게이지 막대와 회색 보조 글씨는 사라집니다.</td></tr>
+    <tr><th>무엇을 해결하나</th><td>막대 착시가 <b>원천적으로</b> 없고, 같은 항목이 세로로 정렬돼 <b>줄끼리 비교</b>가 됩니다. 「총건수 = 참여 = 제출 = 입금」이면 그게 완료입니다.</td></tr>
+    <tr><th>가로 폭은</th><td><b>오히려 줄어듭니다.</b> 지금 「인원/제출」은 막대(76px)+숫자+보조글씨로 <b>약 175px</b>, 입금 40px 를 합쳐 <b>≈215px</b> 인데, 네 열은 각 45px 로 <b>≈180px</b> 입니다. 열 개수는 12 → 13 이지만 실제 폭은 더 여유롭습니다.</td></tr>
+    <tr><th>위험은</th><td>완료 표시가 <b>색 하나뿐</b>이라(체크를 뺐으므로) 색을 못 가리는 환경에서는 숫자를 직접 비교해야 합니다 — 총건수를 맨 왼쪽에 둔 이유입니다.</td></tr>
   </table>
 </div>
 </section>
@@ -284,17 +324,35 @@ function cellA(r){
        +   badge
        + '</span>';
 }
-/* B — 칸 안 3분할 */
+/* B — 표 열 4개(총건수·참여·제출·입금) · 숫자만
+   ★ 완료는 체크가 아니라 **색**으로만(사용자 지시) · 라벨은 머리글이 말한다. */
+function numCell(v,r,opt){
+  opt=opt||{};
+  var cls = opt.tot ? 'tot' : (v>=r.t ? 'full' : (v>r.t ? 'over' : 'short'));
+  if(!opt.tot && v>r.t) cls='over';
+  var lack = (!opt.tot && opt.lack && v<r.t) ? '<span class="lack">−'+(r.t-v)+'</span>' : '';
+  return '<td class="nc'+(opt.bare?' bare':'')+'" title="'+esc(tip(r))+'"><span class="box '+cls+'">'+v+'</span>'+lack+'</td>';
+}
+function rowB(r,opt){
+  return '<tr><td><div class="wbl-nm">'+esc(r.n)+'</div><div class="wbl-sub">'+esc(r.a)+'</div></td>'
+       + '<td>'+esc(r.m)+'</td>'
+       + numCell(r.t,r,{tot:true,bare:opt.bare})
+       + numCell(r.f,r,{lack:opt.lack,bare:opt.bare})
+       + numCell(r.s,r,{lack:opt.lack,bare:opt.bare})
+       + numCell(r.p,r,{lack:opt.lack,bare:opt.bare})
+       + '<td><span class="wbl-s '+(done(r)?'cand':'run')+'">'+(done(r)?'✓ 마감 후보':'진행 중')+'</span></td></tr>';
+}
+function fillB(id,opt){
+  var el=document.getElementById(id); if(!el) return;
+  el.innerHTML=ROWS.map(function(r){return rowB(r,opt||{});}).join('');
+}
+/* 비교표에서 쓰는 한 칸짜리 요약(4열을 한 칸에 눌러 담은 형태 — 비교용) */
 function cellB(r){
-  /* ★ 완료된 단계만 초록 — 나머지는 중립 + 모자란 수를 작게 덧붙인다(빨강 남발 금지). */
-  function c(k,v){
-    var full=v>=r.t;
-    return '<span class="cell '+(full?'full':'short')+'"><span class="k">'+k+'</span>'
-         + '<span class="v">'+(full?'✓ '+v:v)+'</span>'
-         + (full?'':'<span class="d">−'+(r.t-v)+'</span>')+'</span>';
-  }
-  return '<span class="pgB" title="'+esc(tip(r))+'">'+c('참여',r.f)+c('제출',r.s)+c('입금',r.p)
-       + '<span class="tot">/ '+r.t+'</span></span>';
+  function b(v){var c=v>=r.t?'full':'short';return '<span class="box '+c+'" style="min-width:34px;display:inline-block;text-align:right;border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:700;'
+    +(v>=r.t?'background:var(--safe-soft);border:1px solid var(--safe-line);color:var(--safe)':'background:var(--card2);border:1px solid var(--line)')+'">'+v+'</span>';}
+  return '<span title="'+esc(tip(r))+'" style="display:inline-flex;gap:3px;align-items:center;font-variant-numeric:tabular-nums">'
+       + '<span style="color:var(--muted);font-weight:800;margin-right:2px">'+r.t+'</span>'
+       + b(r.f)+b(r.s)+b(r.p)+'</span>';
 }
 /* C — 남은 일 중심 */
 function cellC(r){
@@ -319,7 +377,10 @@ function fill(id,fn,withPay){
   var el=document.getElementById(id); if(!el) return;
   el.innerHTML=ROWS.map(function(r){return row(r,fn,withPay);}).join('');
 }
-fill('tbNow',cellNow,true); fill('tbA',cellA,false); fill('tbB',cellB,false); fill('tbC',cellC,false);
+fill('tbNow',cellNow,true); fill('tbA',cellA,false); fill('tbC',cellC,false);
+fillB('tbB1',{});                 // 지시 그대로 — 숫자만
+fillB('tbB2',{lack:true});        // 모자란 수 덧붙임
+fillB('tbB3',{bare:true});        // 상자 없이
 
 var cmp=document.getElementById('cmp');
 if(cmp) cmp.innerHTML=ROWS.map(function(r){
