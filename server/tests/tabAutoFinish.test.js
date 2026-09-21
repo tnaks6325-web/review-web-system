@@ -163,9 +163,17 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   });
   const prevQ = pool.query;
   let inserts = 0;
-  pool.query = async (q, p) => { if (/INSERT INTO trackb_tab_finished/.test(String(q))) { inserts++; return { rows: [{ id: inserts, finishedAt: 'z' }], rowCount: 1 }; } return prevQ(q, p); };
-  const r3 = await svc.autoFinishEligibleTabs({ dryRun: false });
+  const insBy = [];
+  pool.query = async (q, p) => {
+    if (/INSERT INTO trackb_tab_finished/.test(String(q))) { inserts++; insBy.push(p && p[3]); return { rows: [{ id: inserts, finishedAt: 'z' }], rowCount: 1 }; }
+    return prevQ(q, p);
+  };
+  const r3 = await svc.autoFinishEligibleTabs({ dryRun: false });   // ★ by 를 넘기지 않는다 = 기본값 경로
   t('실행하면 후보 수만큼 마감된다', r3.ok === true && r3.finished === 2 && inserts === 2, `finished=${r3.finished} inserts=${inserts}`);
+  // ★★ 마감자가 비면 보관함 "마감자" 칸이 `—` 로 보여 **누가 넘겼는지 알 수 없다**(조용한 이동).
+  //   크론이 by 를 명시로 넘기더라도 기본값 경로가 비어 있으면 안 된다(수동 실행·후속 호출부 보호).
+  t('★★ 마감자를 반드시 남긴다(기본값 경로에서도 빈 값 금지 — 조용한 이동 차단)',
+    insBy.length === 2 && insBy.every(v => typeof v === 'string' && v.trim() !== ''), JSON.stringify(insBy));
 
   // 4-d 상한
   mkStub({
