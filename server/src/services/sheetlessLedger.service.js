@@ -331,15 +331,21 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
     /* ★ 제외 차수 행은 다시 넣지 않는다 — 이걸 빼면 위에서 옮겨 둔 행이 곧바로 되살아난다. */
     for (const r of indexed) {
       await client.query(
+        /* ★★ `recipient_name` 은 파서(`columnResolver`)가 이미 확정해 주는 값이다 — 여기서 버리면
+           무시트 탭만 `review_index.recipient_name` 이 영영 NULL 로 남아 ① 리뷰어 참여내역의
+           제출완료 카드가 수취인을 못 보여주고(그 응답은 row_json 을 비운다) ② 수취인 이름으로는
+           검색이 안 되며 ③ 파일명 ↔ 행 소급 매칭(`reviewFileLink`)도 그 키를 잃는다.
+           시트 경로(`indexBuilder`)는 이미 같은 값을 저장하므로 **두 경로를 같게 맞춘다**(판정 사본 0). */
         `INSERT INTO review_index
            (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name, row_index,
             is_submitted, is_submitted2, product_url, product_name, submit_col, submit_col2,
-            row_json, start_date, end_date, round, phone8, built_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,NOW())`,
+            row_json, start_date, end_date, round, phone8, recipient_name, built_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,NOW())`,
         [r.name, sheetId, tabGid || null, tabName, campaignName, r.rowIndex,
          !!r.isSubmitted, r.isSubmitted2 || 'NONE', r.productUrl || null, r.productName || null,
          r.submitCol || null, r.submitCol2 || null, JSON.stringify(r.rowJson || {}),
-         r.startDate || null, r.endDate || null, r.round || null, r.phone8 || null]);
+         r.startDate || null, r.endDate || null, r.round || null, r.phone8 || null,
+         r.recipientName || null]);
     }
 
     /* ②-1 스냅샷 복원 — 파서가 만들지 않는 컬럼이라 덮어쓸 값이 없다(충돌 없는 순수 복원).
