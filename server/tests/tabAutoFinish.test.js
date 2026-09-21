@@ -265,6 +265,47 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★ 화면은 여전히 서버 판정을 그대로 소비한다(마감 여부를 화면에서 다시 세지 않는다)',
     /function isFinished\(t\)\{ return !!\(t && t\.finished\); \}/.test(WD));
 
+  /* ═══ 9) 목록 렌더 실제 실행 — 문자열 검사로는 TDZ·구조를 못 본다 ═══════════
+     ★ `autoNote` 는 두 반환 경로(표 있음/빈 목록)에서 쓰인다. 선언 위치가 밀려 TDZ 가 되면
+       **보관함 탭 전체가 빈 화면**이 되는데 정규식은 그대로 통과한다 → vm 으로 꺼내 돌린다. */
+  console.log('\n9) 목록 렌더 실행(vm)');
+  const vm = require('vm');
+  const bodyFn = WD.match(/function _finBodyHtml\(\)\{[\s\S]*?\n\}/);
+  assert(bodyFn, '_finBodyHtml 을 찾지 못했습니다');
+  const runList = (opts) => {
+    const sandbox = {
+      STATE: { finTab: opts.fin ? 'fin' : '', tabs: opts.tabs || [], finFilter: '', finQ: '', finMgr: '', role: 'master' },
+      _finVisible: () => opts.rows || [],
+      _finCanEdit: () => true,
+      _finProgHtml: () => '<span>prog</span>',
+      _finUnpaid: () => 0,
+      _finDate: v => v || '',
+      _folBtnsHtml: () => '', _campBtnHtml: () => '', _taskMoreCell: () => '<td></td>',
+      _tabLabel: t => t.tabName, _tabTip: () => '', _mobileToggleTaskRow: () => {},
+      isTodayDone: () => false, isFinishCandidate: () => false,
+      esc: v => String(v == null ? '' : v),
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(bodyFn[0] + '\n_finBodyHtml();', sandbox);
+    return vm.runInContext('_finBodyHtml()', sandbox);
+  };
+  const tab = { sheetId: 'S', tabName: 'A', advertiserName: '업체', stats: { manager: '만두', paid: 3 }, finishedAt: '2026-09-21', finishedBy: '자동 마감' };
+  const htmlFinRows = runList({ fin: true, rows: [tab], tabs: [tab] });
+  t('★ 보관함(표 있음)에서 안내가 표 **앞**에 온다(표 안에 들어가면 브라우저가 끌어낸다)',
+    htmlFinRows.indexOf('자동으로 이곳으로 옮겨집니다') >= 0
+    && htmlFinRows.indexOf('자동으로 이곳으로 옮겨집니다') < htmlFinRows.indexOf('<table'), htmlFinRows.slice(0, 80));
+  t('★ 마감자 값을 그대로 보여준다(자동 마감이 누구인지 드러난다)', /자동 마감/.test(htmlFinRows));
+  const htmlFinEmpty = runList({ fin: true, rows: [], tabs: [] });
+  t('★ 보관함이 비어도 안내가 보인다(TDZ·누락 시 여기서 깨진다)',
+    /자동으로 이곳으로 옮겨집니다/.test(htmlFinEmpty) && /wbl-empty/.test(htmlFinEmpty));
+  const htmlRun = runList({ fin: false, rows: [tab], tabs: [tab] });
+  t('★★ 진행 중 탭에는 보관함 안내를 그리지 않는다(엉뚱한 자리에 문구가 뜨지 않는다)',
+    !/자동으로 이곳으로 옮겨집니다/.test(htmlRun));
+  // ⚠ `<th` 로 세면 `<thead>` 까지 잡혀 항상 +1 이 된다(이 가드를 쓰다 실제로 밟았다) — 경계 문자를 붙인다.
+  const nTh = (htmlRun.match(/<th[\s>]/g) || []).length, nTd = (htmlRun.match(/<td[\s>]/g) || []).length;
+  t('진행 중 탭의 열 수는 그대로(헤더 칸 수 ≡ 행 칸 수 — 안내 추가로 표 구조가 밀리지 않았다)',
+    nTh === nTd && nTh === 12, `th=${nTh} td=${nTd}`);
+
   console.log(`\n✅ ${pass} 케이스 통과\n`);
   process.exit(0);
 })().catch(e => { console.error('\n❌ ' + e.message); process.exit(1); });
