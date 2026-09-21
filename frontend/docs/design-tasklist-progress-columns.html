@@ -53,9 +53,12 @@
   .wbl-sub{font-size:10px;color:var(--faint)}
   .wbl-c{text-align:center}
   .wbl-b{font-size:10.5px;font-weight:700;border:1px solid var(--line2);background:#fff;color:var(--ink);border-radius:6px;padding:3px 8px;cursor:pointer;white-space:nowrap}
-  .wbl-s{display:inline-block;font-size:10px;font-weight:800;border-radius:999px;padding:1px 8px;white-space:nowrap}
-  .wbl-s.run{background:var(--accent-soft);color:var(--accent-deep)}
-  .wbl-s.cand{background:var(--safe-soft);color:var(--safe)}
+  /* ★ 상태 배지 글자 = **담당 열 값과 동일**(12px / 400) — 실측으로 맞췄다(사용자 지시 2026-09-21).
+     종전 10px/800 은 표에서 혼자 작고 굵어 눈에 먼저 꽂혔다(같은 줄의 어느 값보다 강했다).
+     ★ 초록은 쓰지 않는다 — 상태는 **글자가 말하고**, 배경은 있는 듯 없는 듯한 바탕으로만 둔다. */
+  .wbl-s{display:inline-block;font-size:12px;font-weight:400;border-radius:999px;padding:1px 8px;white-space:nowrap;color:var(--muted);background:var(--card2)}
+  .wbl-s.run{background:var(--card2);color:var(--muted)}
+  .wbl-s.cand{background:var(--card2);color:var(--ink)}
   .wbl-num{font-variant-numeric:tabular-nums;white-space:nowrap}
 
   /* ── 현재(as-is) 표기 ── */
@@ -105,8 +108,10 @@
      고정이라 줄이 바뀌어도 상자가 같은 자리에 서고, 여백을 줄여도 숫자가 잘리지 않는다. */
   td.nc .box{display:inline-block;width:42px;text-align:center;border-radius:6px;padding:2px 2px;background:var(--card2);border:1px solid var(--line)}
   td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted);font-weight:800}
-  /* 다 찬 항목만 초록 — 체크 글리프 없이 **색으로만** 말한다(사용자 지시). */
-  td.nc .box.full{background:var(--safe-soft);border-color:var(--safe-line);color:var(--safe)}
+  /* ★★ 초록을 쓰지 않는다(사용자 지시 2026-09-21) — 완료는 **숫자가 같다는 사실**이 말한다
+     (총건수 = 참여 = 제출 = 입금). 상태 열도 같은 말을 한 번 더 한다.
+     색을 하나 더 얹는 것은 같은 정보를 세 번 말하면서 표만 알록달록하게 만드는 일이었다. */
+  td.nc .box.full{background:var(--card2);border-color:var(--line);color:var(--ink)}
   /* ★ 모자란 쪽은 빨강이 아니라 중립 — 「입금 체크 38」이 말하듯 흔한 상태라
      전부 빨갛게 칠하면 진짜 신호(정원 초과)가 묻힌다. */
   td.nc .box.short{color:var(--ink)}
@@ -114,7 +119,7 @@
   td.nc .lack{display:block;font-size:9.5px;font-weight:800;color:var(--muted);line-height:1.15;margin-top:1px}
   /* 변형 대조용 — 상자 없이 숫자만 */
   td.nc.bare .box{background:transparent;border-color:transparent;padding:2px 2px}
-  td.nc.bare .box.full{color:var(--safe)}
+  td.nc.bare .box.full{color:var(--ink)}
 
   /* ── C안: 남은 일 중심 ── */
   .pgC{display:flex;align-items:center;gap:7px;white-space:nowrap}
@@ -204,7 +209,12 @@
      그래야 위아래 줄의 같은 항목이 <b>세로로 나란히</b> 서서, 눈이 한 줄기로 훑어 내려가며 비교할 수 있습니다.</p>
   <ul>
     <li>칸 안에는 <b>숫자만</b> 둡니다 — 무엇을 뜻하는지는 <b>머리글이 말합니다</b>(같은 말을 87줄 반복하지 않습니다).</li>
-    <li><b>체크(✓)는 없습니다.</b> 다 찬 항목은 <b>연한 초록</b>으로만 구분합니다.</li>
+    <li><b>체크(✓)도 초록도 쓰지 않습니다.</b> 완료는 <b>숫자가 같다는 사실</b>이 말합니다
+        (총건수 = 참여 = 제출 = 입금). 상태 열이 같은 말을 한 번 더 하므로, 색을 더 얹으면
+        <b>같은 정보를 세 번</b> 말하면서 표만 알록달록해집니다.</li>
+    <li><b>상태 배지의 글자를 담당 열 값과 똑같이</b> 맞췄습니다(12px · 보통 굵기 — 실측으로 확인).
+        <br><span class="note">종전 배지는 10px에 굵기 800이라 표에서 혼자 작고 굵어,
+        정작 봐야 할 숫자보다 눈에 먼저 꽂혔습니다.</span></li>
     <li><b>머리글과 숫자의 중심을 맞췄습니다</b> — 담당 열이 안정돼 보이는 이유가 바로 그것입니다.
         <br><span class="note">고치기 전에는 머리글이 <b>15.7~20.3픽셀</b> 왼쪽으로 밀려 있었습니다(브라우저로 직접 측정).
         기존 표 규칙이 머리글을 왼쪽에 붙이고 있었는데 그게 새 규칙보다 우선순위가 높았던 탓입니다.
@@ -256,7 +266,8 @@
     <tr><th>무엇을 해결하나</th><td>막대 착시가 <b>원천적으로</b> 없고, 같은 항목이 세로로 정렬돼 <b>줄끼리 비교</b>가 됩니다. 「총건수 = 참여 = 제출 = 입금」이면 그게 완료입니다.</td></tr>
     <tr><th>가로 폭은</th><td><b>오히려 줄어듭니다.</b> 지금 「인원/제출」은 막대(76px)+숫자+보조글씨로 <b>약 175px</b>, 입금 40px 를 합쳐 <b>≈215px</b> 인데,
       네 열은 붙여서 <b>192px</b>(실측)입니다. 열 개수는 12 → 13 이지만 실제 폭은 더 줄어듭니다.</td></tr>
-    <tr><th>위험은</th><td>완료 표시가 <b>색 하나뿐</b>이라(체크를 뺐으므로) 색을 못 가리는 환경에서는 숫자를 직접 비교해야 합니다 — 총건수를 맨 왼쪽에 둔 이유입니다.</td></tr>
+    <tr><th>위험은</th><td>완료를 알려주는 <b>색·기호가 전혀 없습니다</b> — 숫자 넷을 눈으로 견줘야 합니다.
+      그래서 <b>총건수를 맨 왼쪽</b>에 두고 네 값을 붙여, 한 번에 훑도록 했습니다. 상태 열의 「마감 후보」가 보조로 말합니다.</td></tr>
   </table>
 </div>
 </section>
@@ -381,7 +392,7 @@ function fillB(id,opt){
 /* 비교표에서 쓰는 한 칸짜리 요약(4열을 한 칸에 눌러 담은 형태 — 비교용) */
 function cellB(r){
   function b(v){var c=v>=r.t?'full':'short';return '<span class="box '+c+'" style="min-width:34px;display:inline-block;text-align:right;border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:700;'
-    +(v>=r.t?'background:var(--safe-soft);border:1px solid var(--safe-line);color:var(--safe)':'background:var(--card2);border:1px solid var(--line)')+'">'+v+'</span>';}
+    +'background:var(--card2);border:1px solid var(--line)'+'">'+v+'</span>';}
   return '<span title="'+esc(tip(r))+'" style="display:inline-flex;gap:3px;align-items:center;font-variant-numeric:tabular-nums">'
        + '<span style="color:var(--muted);font-weight:800;margin-right:2px">'+r.t+'</span>'
        + b(r.f)+b(r.s)+b(r.p)+'</span>';
