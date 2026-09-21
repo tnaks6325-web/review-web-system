@@ -297,17 +297,29 @@ function _holidaysJson(v) {
   } catch (_) { return null; }
 }
 
+/**
+ * 요청 본문에서 **상품 구성 원문**을 읽는 단일 출처.
+ *
+ * ★★ 전체 저장(`_insertWorkOrder`)과 부분 수정(`_intakeSourceRevisionHandler`)이 **이 함수 하나**를 쓴다 —
+ *    한쪽만 폴백을 가지면 "같은 본문인데 경로마다 다른 값으로 비교되는" 자리가 생긴다.
+ *    `_normalized_product_options_json` 은 두 경로 모두 핸들러 앞단에서 미리 채워 넣는 **정규화 결과**이고,
+ *    나머지 두 갈래는 리뷰웹 내부 호출부(정규화를 거치지 않는 자리)를 위한 폴백이다.
+ * ★ 값이 없으면 `''`(빈 원문) — `undefined`(모름)와 구분된다. 빈 원문끼리는 정상적으로 "같다"로 비교된다.
+ */
+function _requestOptionsJson(b) {
+  const o = b || {};
+  if (o._normalized_product_options_json !== undefined) return o._normalized_product_options_json;
+  if (typeof o.product_options_json === 'string') return o.product_options_json;
+  return o.product_options_json ? JSON.stringify(o.product_options_json) : '';
+}
+
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy, sourceContract) {
   const source = sourceContract || {
     sourceReviewOrderId: '', sourceRevision: 0, workboardSchemaVersion: LEGACY_WORKBOARD_SCHEMA_VERSION, idempotencyKey: '', intranetAdvertiserId: '',
     intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '', workSeriesId: '', workRound: 1,
   };
-  const optionsJson = b._normalized_product_options_json !== undefined
-    ? b._normalized_product_options_json
-    : ((typeof b.product_options_json === 'string')
-      ? b.product_options_json
-      : (b.product_options_json ? JSON.stringify(b.product_options_json) : ''));
+  const optionsJson = _requestOptionsJson(b);
   const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
   const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
   const { rows } = await pool.query(
@@ -636,6 +648,28 @@ const PRODUCT_OPTION_EDITABLE_KEYS = new Set(['url', 'guide', 'pay']);
 // 조건부 허용 칸 — "잠긴 부분이 그대로일 때만" 통과한다(전부 허용도, 전부 잠금도 아니다).
 const SOURCE_PARTIAL_JSON_COLUMN = 'product_options_json';
 
+/**
+ * ★★★ **파생 요약 칸** — 사람이 읽는 한 줄 요약이라 잠그지 않고 **따라오게** 둔다(실사고 2026-09-22).
+ *
+ * `product_option` 은 인트라넷이 상품 구성에서 **자동으로 만들어 보내는 문장**이다:
+ *   `[상품/옵션/금액] 1. <상품명> (<주소>) - 결제금액 55,200원 / 5명 …`
+ * 여기에는 **접수 뒤에도 고칠 수 있는 값**(상품 주소 `url`·1건당 금액 `pay`·`pay_amount`)이 그대로 박힌다.
+ *
+ * ★★★ 그래서 이 칸을 잠가 두면 두 가지가 동시에 터진다(실제로 터졌다 — 티피링크 Tapo C113 오더):
+ *   ① 161(결제금액 수정)로 금액을 고치면 숫자 칸만 갱신되고 **이 문장은 옛 금액으로 남는다**
+ *      → 작업보드 카드·리뷰검수 상품명 대조·광고주 화면이 전부 **옛 금액**을 보여준다.
+ *   ② 그 다음부터 인트라넷이 보내는 문장(새 금액)과 저장된 문장(옛 금액)이 달라
+ *      **무엇을 고치든 항상 409** 가 된다 — 그 오더는 원본에서 영영 수정 불가가 된다.
+ *
+ * ★★ 이것이 "칸을 하나 더 여는 것"이 **아닌** 이유: 요약의 재료는 전부 **따로따로 잠겨 있다**.
+ *    상품명·옵션값·인원(`count`)·일건수(`daily`)는 `product_options_json` 의 잠긴 키로,
+ *    모집인원은 `recruit_count` 로 각각 막힌다. 그 중 하나라도 바뀌면 **요약과 무관하게** 409다.
+ *    요약만 따로 바꿔 넣어 잠긴 값을 우회할 길은 없다.
+ * ★★ 그래서 `SOURCE_EDIT_AFTER_ACCEPT`(= 인트라넷 화면이 "여기는 고칠 수 있다"고 표시하는 목록)에는
+ *    **넣지 않는다** — 사람이 직접 고치는 칸이 아니라 따라오는 값이다.
+ */
+const SOURCE_DERIVED_SUMMARY_COLUMNS = new Set(['product_option']);
+
 // 사람이 읽는 칸 이름 — 409 문구가 "무엇을 못 고쳤는지"를 말한다(코드명 노출 금지).
 const SOURCE_FIELD_LABELS = {
   title: '작업명', start_date: '시작일', product_option: '상품·옵션',
@@ -750,6 +784,7 @@ function sourceEditableFields(order) {
  *    갈리면 "막히지도 않는데 저장도 안 되는" 조용한 무동작이 된다(저장했다고 답하면서 값을 버림). */
 function _sourceEditAllowedAfterAccept(column, current, nextOptionsJson) {
   if (SOURCE_EDIT_AFTER_ACCEPT.includes(column)) return true;
+  if (SOURCE_DERIVED_SUMMARY_COLUMNS.has(column)) return true;
   if (column === SOURCE_PARTIAL_JSON_COLUMN) {
     return !_productOptionsLockedChanged(current[SOURCE_PARTIAL_JSON_COLUMN], nextOptionsJson);
   }
@@ -816,7 +851,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!current) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
     }
-    const optionsJson = b._normalized_product_options_json;
+    const optionsJson = _requestOptionsJson(b);
     const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
     const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
 
@@ -849,7 +884,10 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         error: names.length
           ? `이미 접수된 작업오더라 이 칸은 원본에서 바꿀 수 없습니다: ${names.join(', ')}`
             + ' — 리뷰웹시스템 작업보드에서 고쳐주세요.'
-            + ' (작업명·담당AE·상품 주소·유입 검색어·가이드·첨부 이미지·특이사항은 여기서 바꿀 수 있습니다)'
+            /* ★ 고칠 수 있는 칸을 **손으로 적지 않는다** — 허용 목록에서 파생한다.
+               손으로 적어 두면 칸을 더 열어도 안내만 옛 목록으로 남아 "바꿀 수 있는데
+               못 바꾼다고 적힌" 문장이 된다(164 에서 실제로 어긋났다). */
+            + ` (${SOURCE_EDIT_AFTER_ACCEPT.map(_sourceFieldLabel).join('·')}은 여기서 바꿀 수 있습니다)`
           : '이미 접수·게시 기준이 확정된 작업오더는 원본 리뷰오더에서 변경할 수 없습니다.',
         work_order_id: current.id,
         changed_fields: contentChanges,
