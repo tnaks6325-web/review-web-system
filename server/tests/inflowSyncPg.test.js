@@ -45,7 +45,7 @@ async function t(name, fn) {
   await pg.query(`CREATE TABLE recruit_campaigns(
     id TEXT PRIMARY KEY, source_work_order_id TEXT, linked_sheet_id TEXT, linked_tab_name TEXT,
     participation_mode BOOLEAN DEFAULT TRUE, work_detail JSONB,
-    window_start TIME, window_end TIME, updated_at TIMESTAMPTZ DEFAULT NOW())`);
+    window_start TIME, window_end TIME, time_range TEXT DEFAULT '', updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pg.query(`CREATE TABLE campaign_options(
     id SERIAL PRIMARY KEY, campaign_id TEXT, opt_key TEXT, product_name TEXT, status TEXT DEFAULT 'open',
     sort_order INT DEFAULT 0,
@@ -60,8 +60,8 @@ async function t(name, fn) {
     await pg.query('DELETE FROM campaign_options'); await pg.query('DELETE FROM recruit_campaigns');
     await pg.query('DELETE FROM work_orders');
     await pg.query(`INSERT INTO work_orders(id, linked_campaign_id) VALUES('wo_1','camp_1')`);
-    await pg.query(`INSERT INTO recruit_campaigns(id, source_work_order_id, work_detail, window_start, window_end)
-      VALUES('camp_1','wo_1',$1::jsonb,'10:00','12:00')`, [JSON.stringify({ inflowType: 'link' })]);
+    await pg.query(`INSERT INTO recruit_campaigns(id, source_work_order_id, work_detail, window_start, window_end, time_range)
+      VALUES('camp_1','wo_1',$1::jsonb,'10:00','12:00','오전 10시 ~ 12시')`, [JSON.stringify({ inflowType: 'link' })]);
     for (const o of (opts || [])) {
       await pg.query(`INSERT INTO campaign_options(campaign_id, opt_key, product_name, status, inflow_guide_html, inflow_guide_images)
         VALUES('camp_1',$1,$2,$3,$4,$5::jsonb)`, [o.k, o.p || '상품', o.s || 'open', o.h || '', JSON.stringify(o.i || [])]);
@@ -105,13 +105,39 @@ async function t(name, fn) {
     assert.strictEqual((await opts())[0].inflow_guide_html, '', '거부했는데 선택지가 바뀌었다');
   });
 
-  await t('④ 시간창이 TIME 칸에 실제로 저장된다', async () => {
+  await t('④ 시간창이 TIME 칸에 실제로 저장된다 — 리뷰어가 읽는 글자도 **같이** 바뀐다', async () => {
     await reset();
     const out = await svc.syncCampaignPurchaseWindow({ workOrderId: 'wo_1', purchaseTime: '오후 2시 ~ 5시' });
     assert.strictEqual(out.applied, true, JSON.stringify(out));
     const c = await camp();
     assert.strictEqual(String(c.window_start).slice(0, 5), '14:00');
     assert.strictEqual(String(c.window_end).slice(0, 5), '17:00');
+    /* ★★★ 실측 2026-09-22 — 종전에는 시각만 바뀌고 글자가 "자유시간대" 로 남아,
+       리뷰어는 아무 때나 되는 줄 알고 들어와 막혔다(막다른 길). 글자와 시각은 같이 움직인다. */
+    assert.strictEqual(c.time_range, '오후 2시 ~ 5시',
+      '리뷰어가 읽는 글자가 안 바뀌었다 — 화면과 실제 열리는 시각이 어긋난다: ' + JSON.stringify(c.time_range));
+  });
+
+  await t('★ 자유시간대로 되돌리면 시간 제한이 **실제로 풀린다**(글자만 바뀌지 않는다)', async () => {
+    await reset();
+    await svc.syncCampaignPurchaseWindow({ workOrderId: 'wo_1', purchaseTime: '오후 2시 ~ 5시' });
+    const out = await svc.syncCampaignPurchaseWindow({ workOrderId: 'wo_1', purchaseTime: '자유시간대' });
+    assert.strictEqual(out.applied, true, '자유시간대로 되돌리지 못했다: ' + JSON.stringify(out));
+    const c = await camp();
+    assert.strictEqual(c.window_start, null, '시간 제한이 안 풀렸다(시작 시각이 남아 있다)');
+    assert.strictEqual(c.window_end, null, '시간 제한이 안 풀렸다(끝 시각이 남아 있다)');
+    assert.strictEqual(c.time_range, '자유시간대');
+  });
+
+  await t('★ 읽을 수 없는 문장은 **아무것도 바꾸지 않는다**(추측하지 않는다)', async () => {
+    await reset();
+    const before = await camp();
+    const out = await svc.syncCampaignPurchaseWindow({ workOrderId: 'wo_1', purchaseTime: '사장님 편하신 때' });
+    assert.strictEqual(out.applied, false); assert.strictEqual(out.reason, 'unparsed');
+    const after = await camp();
+    assert.strictEqual(String(after.window_start), String(before.window_start));
+    assert.strictEqual(after.time_range, before.time_range, '못 읽은 문장을 글자에만 써 넣었다');
+    assert.ok(/직접 고쳐/.test(svc.campaignSyncNotice('time', out)), '사람에게 알리지 않는다');
   });
 
   await t('⑤ 자정까지(24:00)도 TIME 이 받는다 — 범위 밖이면 저장이 통째로 죽는다', async () => {
