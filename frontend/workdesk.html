@@ -2572,7 +2572,7 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-b.cmp{border-color:var(--accent-line);color:var(--accent-deep)}
 .wbl-b.cmp:hover{background:var(--accent-soft)}
 .wbl-b.cmp.none{border-color:var(--line2);color:var(--muted)}
-/* 모집이 다 찬 작업 = `✓ 모집완료` — 참여 칸 파랑(.box.full)과 **같은 언어**를 쓴다.
+/* 모집이 다 찬 작업 = `모집완료` — 참여 칸 파랑(.box.full)과 **같은 언어**를 쓴다.
    공고가 있으면 그 공고를 여는 정상 버튼(파란 틴트), 없으면 "여기서 더 할 일 없음"이라 흐리게
    둔다(★ 발행 길은 막지 않는다 — 차수 추가가 정상 흐름이라 눌리는 버튼으로 남긴다). */
 .wbl-b.cmp.done{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-soft)}
@@ -5157,9 +5157,9 @@ function _campBtnHtml(t,i){
   // ★ 조회 실패를 "공고 없음"으로 보여주면 **이미 있는 공고를 또 발행**한다 — 비활성 + 사유(목록 상단에도 고지).
   if(STATE.campsUnavailable) return `<button class="wbl-b cmp" disabled title="공고 연결 정보를 불러오지 못했습니다 — 새로고침해 주세요"><i class="wbl-cdot"></i>공고 ?</button>`;
   const cs=Array.isArray(t.campaigns)?t.campaigns:[];
-  /* ── 모집이 다 찬 작업 = `✓ 모집완료`(사용자 확정 2026-09-22) ─────────────────────
+  /* ── 모집이 다 찬 작업 = `모집완료`(사용자 확정 2026-09-22) ─────────────────────
      ★★ 판정은 **참여 칸 파랑과 같은 `_finQuotaFill`**(사본 0) — 한 줄 안에서 두 칸이 갈리면
-       "참여는 200/200 인데 옆 칸은 ＋공고발행" 이 된다.
+       "참여는 200/200 인데 옆 칸은 공고발행" 이 된다.
      ★★ **발행 길을 막지 않는다**(사용자 확정 ③) — 다 찬 뒤 물량을 더 받는 차수 추가가 정상
        흐름이라, 버튼을 없애지 않고 **흐리게 + 사유**로 남긴다(눌러도 아무 일 없는 버튼은 금지지만
        이건 눌리는 버튼이다). 공고가 있으면 종전처럼 그 공고를 연다.
@@ -5173,11 +5173,11 @@ function _campBtnHtml(t,i){
     if(done){
       const why=_campDoneWhy(q);
       return STATE.campEdit
-        ? `<button class="wbl-b cmp done dim" onclick="${stop}openTabCampaign(${i})" title="${esc(`모집이 끝났습니다 — ${why}\n물량을 더 받으려면 눌러서 공고를 발행하세요.`)}">✓ 모집완료</button>`
-        : `<button class="wbl-b cmp done dim" disabled title="${esc(`모집이 끝났습니다 — ${why}`)}">✓ 모집완료</button>`;
+        ? `<button class="wbl-b cmp done dim" onclick="${stop}openTabCampaign(${i})" title="${esc(`모집이 끝났습니다 — ${why}\n물량을 더 받으려면 눌러서 공고를 발행하세요.`)}">모집완료</button>`
+        : `<button class="wbl-b cmp done dim" disabled title="${esc(`모집이 끝났습니다 — ${why}`)}">모집완료</button>`;
     }
     return STATE.campEdit
-      ? `<button class="wbl-b cmp none" onclick="${stop}openTabCampaign(${i})" title="연결된 모집공고가 없습니다 — 이 작업의 탭이 채워진 발행 화면을 엽니다">＋공고발행</button>`
+      ? `<button class="wbl-b cmp none" onclick="${stop}openTabCampaign(${i})" title="연결된 모집공고가 없습니다 — 이 작업의 탭이 채워진 발행 화면을 엽니다">공고발행</button>`
       : `<button class="wbl-b cmp none" disabled title="연결된 모집공고가 없습니다">공고 없음</button>`;
   }
   const best=cs.reduce((a,c)=>Math.min(a,_campRank(c)),2);
@@ -5187,7 +5187,7 @@ function _campBtnHtml(t,i){
     : `${cs[0].title||'(제목 없음)'}${_campLabel(cs[0])?' · '+_campLabel(cs[0]):''}`;
   const n=cs.length>1?' '+cs.length:'';
   if(done){
-    return `<button class="wbl-b cmp done" onclick="${stop}openTabCampaign(${i})" title="${esc(`모집이 끝났습니다 — ${_campDoneWhy(q)}\n${tip}`)}">✓ 모집완료${n}</button>`;
+    return `<button class="wbl-b cmp done" onclick="${stop}openTabCampaign(${i})" title="${esc(`모집이 끝났습니다 — ${_campDoneWhy(q)}\n${tip}`)}">모집완료${n}</button>`;
   }
   return `<button class="wbl-b cmp" onclick="${stop}openTabCampaign(${i})" title="${esc(tip)}"><i class="wbl-cdot ${dot}"></i>공고${n}</button>`;
 }
@@ -5302,7 +5302,7 @@ window.CAMPAIGN_DAILY_PLAN_SAVED=function(ev){
 };
 /* 공고 저장/삭제 후 — 홈 목록이 떠 있으면 주석을 **강제로 새로 받아** 다시 그린다.
    ★ 서버 30초 캐시 때문에 그냥 새로고침하면 방금 발행한 공고가 한동안 안 잡혀
-     [＋공고발행]이 그대로 남는다(사용자에겐 "저장이 안 된 것"으로 보인다). */
+     [공고발행]이 그대로 남는다(사용자에겐 "저장이 안 된 것"으로 보인다). */
 window.CAMP_ON_SAVED=function(){
   /* ★ 작업보드가 열려 있으면 **작업 조건도 다시 읽는다** — 공고 수정 모달에서 고친 값이
      그 자리에서 반영되지 않으면 "저장했는데 미설정 그대로"로 보인다(저장은 됐는데). */
@@ -5526,8 +5526,8 @@ function _finRecruitTotal(t){
   return Number.isFinite(n)&&n>0 ? {total:n, source:String(c.recruitTotalSource||'')} : null;
 }
 /* ── 「모집이 다 찼는가」 판정 — ★★ 단일 출처 ────────────────────────────────────
-   참여 칸의 파랑(`full`)과 모집공고 칸의 `✓ 모집완료` 가 **이 함수 하나**를 본다.
-   따로 세면 "참여 칸은 파랗게 찼는데 옆 칸은 여전히 ＋공고발행" 으로 한 줄 안에서 화면이 갈린다.
+   참여 칸의 파랑(`full`)과 모집공고 칸의 `모집완료` 가 **이 함수 하나**를 본다.
+   따로 세면 "참여 칸은 파랗게 찼는데 옆 칸은 여전히 공고발행" 으로 한 줄 안에서 화면이 갈린다.
    ★★ 기준 = **화면에 실제로 그린 값**(사용자 확정 2026-09-22 ②) — 총건수를 못 구하면 참여 칸과
      **같은 폴백**(작업표 줄 수)으로 접는다. 접었다는 사실은 총건수 칸의 `*` 와 툴팁이 이미 말한다.
    ★ **모르는 것은 지어내지 않는다** — 채움 수·기준값이 없으면 `full` 은 false 로 남고(0 으로 접지
@@ -14404,7 +14404,7 @@ async function _homeLoad(){
       STATE.tabs=[]; _finAbsorb(r); STATE._finStatsAt=Date.now();   // 흡수 = 실패 플래그·잘림 고지까지 함께 반영
       _finRenderList();   // 목록 렌더가 히어로 "진행 중 작업" 숫자까지 함께 쓴다(단일 writer)
     }),
-    // 서버 편집 권한 — 도착하면 [＋공고발행] 노출이 확정된다(그 전엔 비활성 표기).
+    // 서버 편집 권한 — 도착하면 [공고발행] 노출이 확정된다(그 전엔 비활성 표기).
     //   ★ typeof 가드는 레포 관용구(_homeSyncBadges 와 같은 이유): 런타임엔 항상 있지만 **블록 단위
     //     vm 추출 회귀가드**(workdeskHome)의 sandbox 에는 이 함수가 없어 가드 없이는 그 테스트가 죽는다.
     (typeof _loadCampPerm==='function'?_loadCampPerm():Promise.resolve()).then(()=>{
@@ -17121,7 +17121,7 @@ function canOpenExternalManualOrder(){
 }
 function _emoBtnHtml(){ return canOpenExternalManualOrder()
   ? `<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>` : ''; }
-/** 서버 편집 권한 도착 후 버튼 자리를 채운다(홈의 [＋공고발행]과 같은 재료·같은 1회 조회). */
+/** 서버 편집 권한 도착 후 버튼 자리를 채운다(홈의 [공고발행]과 같은 재료·같은 1회 조회). */
 function _emoSyncBtn(){
   if(!_isInternalRole()) return;
   const fill=()=>{ const b=document.getElementById('emoBtnBox'); if(b) b.innerHTML=_emoBtnHtml(); };
