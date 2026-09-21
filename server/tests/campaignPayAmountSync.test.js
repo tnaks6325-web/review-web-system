@@ -207,6 +207,73 @@ async function run() {
     assert.ok(!/source_work_order_id\s*=/.test(SRC), '짝짓기 SQL 사본이 생겼다');
   });
 
+  /* ── ⑦ 배선 — 라우트가 실제로 전파를 부르는가 ────────────────────────────────
+     ⚠ 문자열 검사만으로는 `if (false)` 로 죽인 변이를 놓친다(변이시험 실측) → **핸들러를 돌린다**. */
+  await t('⑦ 금액을 고치면 라우트가 전파를 실제로 부른다', async () => {
+    process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+    process.env.ORDER_INTAKE_KEY = 'test-intake-key';
+    const pool2 = require(path.join(ROOT, 'src/db/pool.js'));
+    const q2 = require(path.join(ROOT, 'src/services/linkedRecruitQuota.service.js'));
+    q2.assertWorkOrderQuota = async () => null;
+    q2.syncWorkOrderRecruitTotal = async () => null;
+    let called = null;
+    const realSync = svc.syncCampaignPayAmount;
+    svc.syncCampaignPayAmount = async (a) => { called = a; return { applied: true, campaignId: 'camp_1' }; };
+    try {
+      const router = require(path.join(ROOT, 'src/routes/order.routes.js'));
+      const L = (router.stack || []).find(l => l.route
+        && l.route.path === '/intake/source/:sourceReviewOrderId' && l.route.methods.put);
+      assert.ok(L, '원본 수정 라우트가 없다');
+      const handler = L.route.stack[L.route.stack.length - 1].handle;
+
+      const optsOf = p => JSON.stringify([{ name: '핫팩', url: 'https://x/y', option_schema_version: 2,
+        product_mode: 'none', base: { pay: p, count: 470, daily: 30, review_type_mix: [] }, options: [] }]);
+      const ORDER = { id: 'wo_1', source_review_order_id: 'ro_x', source_revision: 1,
+        intake_idempotency_key: 'ro_x:1', status: 'reviewing', deleted_at: null,
+        linked_campaign_id: 'camp_1', advertiser_id: 'a1', title: 'T', start_date: new Date(2026, 8, 9),
+        manager_name: 'M', work_manager: '박세희', product_option: '', product_options_json: optsOf(9190),
+        product_distribution_mode: 'balanced', pay_amount: 4319300, review_fee: 0, daily_count: 30,
+        daily_count_text: '30', purchase_channel: '쿠팡', purchase_time: '13:00 ~ 18:00',
+        inflow_keyword: '', inflow_type: 'guide', inflow_guide: '', guide_images: '',
+        delivery_type: '실배송', courier_proxy: false, review_type: '포토', review_type_mix: [],
+        recruit_count: 470, review_guide: 'G', special_notes: '', product_url: 'https://x/y',
+        work_sheet_url: '', goods_cost_type: '계산서', skip_weekends: null, holidays: null,
+        work_kind: 'review', sales_id: 's', contract_number: 'c', quote_id: 'q' };
+      const BODY = { intakeKey: 'test-intake-key', source_review_order_id: 'ro_x', source_revision: 2,
+        idempotency_key: 'ro_x:2', title: 'T', start_date: '2026-09-09', manager_name: 'M',
+        work_manager: '박세희', product_option: '', product_options_json: optsOf(12000),
+        pay_amount: 5640000, review_fee: 0, daily_count: 30, daily_count_text: '30',
+        product_distribution_mode: 'balanced', purchase_channel: '쿠팡', purchase_time: '13:00 ~ 18:00',
+        inflow_keyword: '', inflow_type: 'guide', inflow_guide: '', delivery_type: '실배송',
+        review_type: '포토', recruit_count: 470, review_guide: 'G', special_notes: '',
+        product_url: 'https://x/y', work_sheet_url: '', goods_cost_type: '계산서', work_kind: 'review',
+        sales_id: 's', contract_number: 'c', quote_id: 'q', intranet_advertiser_id: 'adv',
+        intranet_advertiser_name: 'N', intranet_advertiser_contact: '010',
+        intranet_advertiser_business_number: '000' };
+      pool2.query = async (sql) => {
+        const t2 = String(sql);
+        if (/SELECT \* FROM work_orders WHERE source_review_order_id/.test(t2)) return { rows: [Object.assign({}, ORDER)] };
+        if (/UPDATE work_orders SET/.test(t2)) return { rows: [Object.assign({}, ORDER, { source_revision: 2 })] };
+        return { rows: [] };
+      };
+      const res = { statusCode: 200, body: null };
+      res.status = c => { res.statusCode = c; return res; };
+      res.json = b => { res.body = b; return res; };
+      await handler({ body: BODY, params: { sourceReviewOrderId: 'ro_x' }, headers: {} }, res, e => { throw e; });
+
+      assert.strictEqual(res.statusCode, 200, '금액 수정이 막혔다: ' + JSON.stringify(res.body));
+      assert.ok(called, '금액을 고쳤는데 공고 전파가 불리지 않았다 — 리뷰어 화면이 옛 금액으로 남는다');
+      assert.ok(res.body.campaign_pay_sync, '전파 결과를 응답에 안 싣는다 — 화면이 사실을 말할 수 없다');
+      /* ★★★ 넘어간 재료가 **상품 구성**이어야 한다 — 합계(pay_amount)가 넘어가면
+         1건당 자리에 합계가 들어가 9,324만원 사고가 재현된다. */
+      const single = payAmountsFromWorkOrder(called.productOptionsJson).single;
+      assert.strictEqual(single, 12000, '전파에 1건당 금액이 안 실렸다(합계가 섞였을 수 있다): ' + single);
+      assert.ok(!Object.values(called).includes(5640000), '합계가 전파 인자에 섞였다');
+    } finally {
+      svc.syncCampaignPayAmount = realSync;
+    }
+  });
+
   console.log(`\ncampaignPayAmountSync: ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 }
