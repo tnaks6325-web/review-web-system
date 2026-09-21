@@ -7230,19 +7230,31 @@ function setlSummaryHtml(d){
   const qRetry=!unavailable&&!d.quote&&!!d.quoteLookupFailed;
   const iReady=!unavailable&&!!(d.invoice&&d.invoice.status==='issued');
   const pReady=!unavailable&&!!(d.payment&&d.payment.status==='paid');
+  /* ★★ 인트라넷 프록시가 죽으면 `sales` 가 통째로 null 이라 `invoice`·`payment` 도 null 이 된다 —
+     그 상태를 '미발행'·'미입금' 으로 적으면 **모르는 것을 단정하는 거짓말**이고, 아래 비활성 규칙과
+     겹치면 손쓸 수 없는 죽은 회색 버튼이 된다. 견적서 `quoteLookupFailed` 와 같은 자리 — 주황으로
+     구분하고 **누를 수 있게 남겨** 재조회 경로를 지킨다. */
+  const iRetry=!unavailable&&!iReady&&!!d.proxyDown;
+  const pRetry=!unavailable&&!pReady&&!!d.proxyDown;
   /* 아랫줄 값 — **날짜로 읽히는 값만** 날짜로 적고, 아니면 상태 낱말로 접는다.
      견적일·발행일은 서버가 다듬지 않고 원본 그대로 보내므로(입금일만 `_normIntraDate` 경유)
      못 읽은 값을 그대로 찍으면 `20260912` 가 버튼에 박힌다 — 지어내지도, 흘리지도 않는다. */
   const dt=v=>{ const t=_awMD(v); return /^\d{1,2}\/\d{1,2}$/.test(t)?t:''; };
   /* `hidden`(광고주 정산 비공개)은 "아직 안 됐다"가 아니라 **모르는** 상태라 — 로 둔다. */
   const wait=w=>d&&d.hidden?'—':w;
-  const qSub=!d?'…':(qReady?(dt(d.quote.quoteDate)||'등록됨'):(qRetry?'확인 필요':wait('없음')));
-  const iSub=!d?'…':(iReady?(dt(d.invoice.date)||'발행됨'):wait('미발행'));
-  const pSub=!d?'…':(pReady?(dt(d.paidDate||(d.payment&&d.payment.date))||'입금완료'):wait('미입금'));
+  const qSub=!d?'…':(qReady?(dt(d.quote.quoteDate)||'등록됨'):(qRetry?'확인 필요':wait('미작성')));
+  const iSub=!d?'…':(iReady?(dt(d.invoice.date)||'발행됨'):(iRetry?'확인 필요':wait('미발행')));
+  const pSub=!d?'…':(pReady?(dt(d.paidDate||(d.payment&&d.payment.date))||'입금완료'):(pRetry?'확인 필요':wait('미입금')));
+  /* ★★ 자료가 없으면 **세 칸 모두** 비활성 회색이다(사용자 확정 2026-09-21) — 종전에는 견적서만
+     막히고 계산서·입금은 눌리는 채로 남아 "같은 없음인데 왜 하나만 다르지"로 읽혔다.
+     ★ 열어 둘 자리는 **뒤에 볼 것이 있을 때뿐**: 조회 실패(주황 — 재조회) 와
+       `hidden`(팝업이 "정산 정보 표시가 꺼져 있습니다"를 말해 준다). 그 둘까지 막으면
+       사유를 볼 길이 없는 막다른 길이 된다. */
+  const dead=(ready,retry)=>!ready&&!retry&&!(d&&d.hidden);
   const btn=(kind,label,ready,sub,disabled=!d,unknown=false)=>`<button type="button" class="tp3doc${ready?' ready':''}${unknown?' unknown':''}"${disabled?' disabled':''} onclick="openSettlementDocument(event,'${kind}')"><span class="tp3dot"></span>${label}<span class="tp3sub">${esc(sub)}</span></button>`;
   const canMatch=!!d&&!d.hidden&&!d.linked&&(STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff');
   const match=canMatch?'<button type="button" class="tp3doc tp3match" onclick="openProgressContractMatch(event)">계약 매칭</button>':'';
-  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,qSub,!qReady&&!qRetry,qRetry)}${btn('invoice','계산서',iReady,iSub)}${btn('payment','입금',pReady,pSub)}${match}</span></span>`;
+  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,qSub,dead(qReady,qRetry),qRetry)}${btn('invoice','계산서',iReady,iSub,dead(iReady,iRetry),iRetry)}${btn('payment','입금',pReady,pSub,dead(pReady,pRetry),pRetry)}${match}</span></span>`;
 }
 function openSettlementDocument(ev,kind){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }
