@@ -182,7 +182,6 @@ async function run() {
   });
 
   const LOCKED = {
-    '결제금액': optsNone({ base: { pay: 12000, count: 470, daily: 30, review_type_mix: [] } }),
     '모집인원': optsNone({ base: { pay: 9190, count: 500, daily: 30, review_type_mix: [] } }),
     '일건수': optsNone({ base: { pay: 9190, count: 470, daily: 50, review_type_mix: [] } }),
     '상품명': optsNone({ name: '다른 상품명' }),
@@ -214,14 +213,14 @@ async function run() {
   });
 
   await t('② 허용 키와 잠긴 키가 섞이면 요청 전체를 거부한다(절반 저장 금지)', async () => {
-    const next = optsNone({ guide: '가이드도 고치고', base: { pay: 12000, count: 470, daily: 30, review_type_mix: [] } });
+    const next = optsNone({ guide: '가이드도 고치고', name: '상품명도 고치면' });
     const { res, updates } = await call(baseOrder(), Object.assign({}, BODY, { product_options_json: next }));
     assert.strictEqual(res.statusCode, 409);
     assert.strictEqual(updates.length, 0, '절반만 저장됐다');
   });
 
   await t('② 409 문구는 무엇을 되돌려야 하는지 말한다(코드명 노출 0)', async () => {
-    const { res } = await call(baseOrder(), Object.assign({}, BODY, { product_options_json: LOCKED['결제금액'] }));
+    const { res } = await call(baseOrder(), Object.assign({}, BODY, { product_options_json: LOCKED['상품명'] }));
     assert.match(res.body.error, /상품 구성/);
     assert.match(res.body.error, /금액|인원|옵션/, '무엇이 잠긴 부분인지 말해야 한다: ' + res.body.error);
     assert.ok(!/product_options_json/.test(res.body.error), '코드명이 샜다: ' + res.body.error);
@@ -231,8 +230,9 @@ async function run() {
     const line = SRC.match(/const PRODUCT_OPTION_EDITABLE_KEYS = new Set\(\[([\s\S]*?)\]\)/);
     assert.ok(line, 'PRODUCT_OPTION_EDITABLE_KEYS 선언 없음');
     const listed = (line[1].match(/'([a-z_0-9]+)'/g) || []).map(v => v.replace(/'/g, ''));
-    assert.deepStrictEqual(listed.slice().sort(), ['guide', 'url'],
-      '고칠 수 있는 키가 달라졌다 — 상품명·금액·인원·옵션값은 표에 박히는 값이라 잠긴 채로 둔다');
+    assert.deepStrictEqual(listed.slice().sort(), ['guide', 'pay', 'url'],
+      '고칠 수 있는 키가 달라졌다 — 상품명·인원·옵션값은 표에 박히는 값이라 잠긴 채로 둔다'
+      + '(금액 pay 는 2026-09-21 사용자 확정으로 열렸다 — 공고 전파가 따라붙는다)');
   });
 
   await t('④ 막을지 판정과 저장할지 판정이 같은 함수를 본다', async () => {
@@ -276,7 +276,7 @@ async function run() {
 
   await t('⑥ 잠기지 않은 오더는 종전 전체 수정 경로 그대로', async () => {
     const { res, updates } = await call(baseOrder({ advertiser_id: null, linked_campaign_id: null }),
-      Object.assign({}, BODY, { product_options_json: LOCKED['결제금액'] }));
+      Object.assign({}, BODY, { product_options_json: LOCKED['상품명'] }));
     assert.strictEqual(res.statusCode, 200, JSON.stringify(res.body));
     assert.ok(/recruit_count = \$/.test(updates[0].sql), '전체 수정 경로가 아니다');
     assert.strictEqual(calls.quota, 1, '전체 경로는 정원 검증을 한다');

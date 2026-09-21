@@ -588,8 +588,11 @@ function _sourceContentNextValues(b, derived) {
 //     그쪽은 리뷰웹시스템 작업보드에서 고친다.
 //   ★ 값 계산은 _sourceContentNextValues 하나에서 나온다(사본 0) — 여기서 따로 계산하면
 //     "부분 수정으로 저장한 값 ≠ 전체 수정으로 저장한 값" 이 된다.
+//   ★ `pay_amount`(= **결제합계**)는 상품 구성의 1건당 금액과 **함께 바뀌는 짝**이라 같이 연다
+//     (인트라넷이 1건당을 고치면 합계를 다시 계산해 보낸다). 작업표·정원·주문에는 쓰이지 않고
+//     작업보드·업체 화면의 **잔여집행** 표시가 이 값을 쓴다.
 const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflow_keyword',
-  'inflow_guide', 'guide_images', 'review_guide', 'special_notes'];
+  'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount'];
 
 // ★★ 상품 구성(product_options_json) 안에서 접수 뒤에도 고칠 수 있는 키 (2026-09-21 실측).
 //   ★ 왜 칸 전체가 아니라 키 단위인가: 인트라넷은 **상품 주소와 선택지별 유입가이드**를 이 한
@@ -599,7 +602,10 @@ const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflo
 //     실제로는 한 번도 못 고친다** — 안내가 지킬 수 없는 약속이 된다(핸들러를 그대로 돌려 재현).
 //   ★★ 넓히지 말 것 — 상품명·옵션값·금액(pay)·인원(count)·일건수(daily)·리뷰 조합은
 //     **작업표의 칸과 줄에 그대로 박히는 값**이라 이미 깔린 표와 어긋난다(사용자 확정 2026-09-21).
-const PRODUCT_OPTION_EDITABLE_KEYS = new Set(['url', 'guide']);
+//   ★★ `pay`(1건당 결제금액)는 **모집공고까지 전파되는 조건으로** 열렸다(사용자 확정 2026-09-21):
+//     리뷰어가 보는 금액은 공고에 있어, 오더만 고치면 "통과했는데 화면은 옛 금액" 이 된다.
+//     전파는 `campaignPayAmountSync.service` 가 하고 **근거가 없으면 안 고치고 사유를 보고**한다.
+const PRODUCT_OPTION_EDITABLE_KEYS = new Set(['url', 'guide', 'pay']);
 // 조건부 허용 칸 — "잠긴 부분이 그대로일 때만" 통과한다(전부 허용도, 전부 잠금도 아니다).
 const SOURCE_PARTIAL_JSON_COLUMN = 'product_options_json';
 
@@ -854,6 +860,23 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          RETURNING *`;
       const { rows: matched } = await pool.query(sql, params);
       const linked = matched[0];
+      /* ★★ 결제금액이 바뀌었으면 연결 모집공고까지 반영한다(사용자 확정 2026-09-21).
+         리뷰어가 보는 금액은 공고에 있어, 여기서 멈추면 "저장됐는데 화면은 옛 금액" 이 된다.
+         ★ **절대 throw 하지 않는다** — 전파 실패가 이미 끝난 원본 저장을 되돌리면 안 된다.
+         ★ 근거가 없으면(옵션 짝 못 지음·금액 여러 종) 안 고치고 사유만 싣는다(fail-closed) —
+           틀린 금액이 리뷰어 화면에 뜨는 것은 안 바뀌는 것보다 나쁘다. */
+      let campaignPaySync;
+      if (contentChanges.includes(SOURCE_PARTIAL_JSON_COLUMN) || contentChanges.includes('pay_amount')) {
+        try {
+          const { syncCampaignPayAmount } = require('../services/campaignPayAmountSync.service');
+          campaignPaySync = await syncCampaignPayAmount({
+            workOrderId: current.id, productOptionsJson: optionsJson, by: 'intake-source',
+          });
+        } catch (syncErr) {
+          logger.warn(`[order/source] 공고 금액 전파 실패(원본 수정은 유지): ${syncErr.message}`);
+          campaignPaySync = { applied: false, reason: 'error', error: syncErr.message };
+        }
+      }
       const contractOnly = contentChanges.length === 0;
       _emitWorkOrderNew(linked, {
         event: contractOnly ? 'source_contract_match' : 'source_partial_edit',
@@ -863,6 +886,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         ok: true, data: linked,
         contract_only: contractOnly,
         edited_fields: contentChanges,
+        ...(campaignPaySync ? { campaign_pay_sync: campaignPaySync } : {}),
       });
     }
 
