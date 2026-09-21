@@ -64,7 +64,12 @@ table.wbl-t th.nh{width:48px}
 .nm{font-weight:600;font-size:13px}
 .sub{font-size:12px;color:var(--faint)}
 td.nc{font-variant-numeric:tabular-nums;font-size:12px;font-weight:600}
-td.nc .box{display:inline-block;width:44px;text-align:center;border-radius:6px;padding:4px;background:var(--card2);border:1px solid var(--line);color:var(--ink)}
+/* ★ 상자 높이를 키워 **네 칸을 같은 크기로 통일**한다(사용자 결정 2026-09-22).
+   「N명 남음」이 말풍선으로 빠지면서 줄이 납작해졌던 것을 상자가 대신 채운다.
+   ★ inline-flex 로 세로 가운데 — 버튼(<button>)이든 그냥 칸(<span>)이든 같은 높이가 나온다. */
+td.nc .box{display:inline-flex;align-items:center;justify-content:center;
+  width:44px;min-height:32px;padding:0 4px;text-align:center;border-radius:6px;
+  background:var(--card2);border:1px solid var(--line);color:var(--ink)}
 td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted)}
 td.nc .box.full{background:var(--accent);border-color:var(--accent);color:#fff}
 .badge{display:inline-block;font-size:12px;font-weight:400;border-radius:999px;padding:2px 8px;background:var(--card2);color:var(--muted)}
@@ -73,9 +78,11 @@ td.nc .box.full{background:var(--accent);border-color:var(--accent);color:#fff}
 /* ★★ 클릭할 수 있다는 신호 — 세 가지를 겹쳐 쓴다(하나만으로는 못 알아챈다):
    ① 점선 밑줄 ② 커서 변경 ③ 호버 시 테두리·배경 변화. 또 남은 수를 옆에 적어
    "여기에 볼 것이 있다"를 글자로도 말한다(색·모양만으로 알리지 않는다). */
-td.nc .box.clickable{cursor:pointer;border-style:solid;border-color:var(--accent-line);
-  background:var(--accent-soft);color:var(--accent-deep);
-  text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;
+/* ★ 밑줄은 쓰지 않는다(사용자 결정) — 남은 신호는 **연파랑 상자 + 손가락 커서 + 호버 진해짐
+   + 키보드 포커스 테두리 + 올리면 뜨는 말풍선** 다섯이다. 표에서 이 칸만 색이 다르므로
+   밑줄 없이도 "여기는 누를 수 있다"가 구분된다(밑줄은 글자를 지저분하게 만들었다). */
+td.nc .box.clickable{cursor:pointer;border-color:var(--accent-line);
+  background:var(--accent-soft);color:var(--accent-deep);font-weight:600;
   transition:background-color .15s,border-color .15s,box-shadow .15s}
 td.nc .box.clickable:hover{background:#dce7ff;border-color:var(--accent);box-shadow:var(--e1)}
 td.nc .box.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -174,7 +181,7 @@ td.nc:hover .rest,td.nc:focus-within .rest{opacity:1}
 
 <h2>눌러보기</h2>
 <div class="wbl-box">
-  <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span><span class="note" style="margin-left:auto">숫자에 점선이 있는 칸을 눌러보세요</span></div>
+  <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span><span class="note" style="margin-left:auto">파란 칸을 눌러보세요</span></div>
   <table class="wbl-t"><thead><tr>
     <th>작업명</th><th>담당</th>
     <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
@@ -199,7 +206,7 @@ td.nc:hover .rest,td.nc:focus-within .rest{opacity:1}
 <div class="card">
   <p>하나만으로는 놓칩니다. <b>세 가지를 겹쳐</b> 씁니다 — 그리고 <b>색·모양에만 기대지 않습니다</b>.</p>
   <ul>
-    <li><b>점선 밑줄 + 연한 파랑 바탕</b> — 가만히 있어도 "여기는 다르다"가 보입니다</li>
+    <li><b>연한 파랑 상자</b> — 가만히 있어도 이 칸만 색이 달라 "여기는 다르다"가 보입니다</li>
     <li><b>손가락 커서 + 호버 시 진해짐</b> — 마우스를 올리면 확실해집니다</li>
     <li><b>마우스를 올리면 「11명 남음」</b> — 몇 명인지 글자로 말합니다(평소에는 숨겨 표를 조용하게 둡니다).
         키보드로 닿아도 같이 뜨고, 화면낭독기에는 버튼 이름이 그 수를 그대로 읽어 줍니다</li>
