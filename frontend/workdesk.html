@@ -5495,8 +5495,10 @@ function _finBodyHtml(){
   }).join(''):'';
   // ★ 보관함에는 사람이 안 눌러도 들어온 작업이 섞인다 — 조용히 옮기지 않고 **왜 여기 있는지** 말한다.
   //   되돌리는 길([↩ 진행중으로 복귀])과 "되돌리면 다시 안 넘어온다"는 사실을 함께 적는다.
+  //   ★ 생김새는 같은 상자 안의 다른 안내 줄(_finNoticeHtml)과 맞춘다 — 전폭 띠(좌우·위 테두리 0)라야
+  //     상자 모서리와 겹치지 않는다(실제 렌더로 확인).
   const autoNote=fin
-    ? `<div class="wbl-facts" style="margin:0 0 8px">인원·제출·입금이 모두 채워진 작업은 <b>자동으로 이곳으로 옮겨집니다</b>(마감자 칸에 <b>자동 마감</b>으로 표시). 아직 끝난 게 아니면 <b>[↩ 진행중으로 복귀]</b>를 누르세요 — 되돌린 작업은 다시 자동으로 넘어오지 않습니다.</div>`
+    ? `<div class="wbl-facts" style="margin:0;border-radius:0;border-left:0;border-right:0;border-top:0">인원·제출·입금이 모두 채워진 작업은 <b>자동으로 이곳으로 옮겨집니다</b>(마감자 칸에 <b>자동 마감</b>으로 표시). 아직 끝난 게 아니면 <b>[↩ 진행중으로 복귀]</b>를 누르세요 — 되돌린 작업은 다시 자동으로 넘어오지 않습니다.</div>`
     : '';
   return rows.length?`${autoNote}<div class="wbl-tw"><table class="wbl-t"><thead><tr>
       <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
