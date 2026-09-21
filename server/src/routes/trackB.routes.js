@@ -1138,6 +1138,21 @@ router.post('/ownership/transfer', authMiddleware, internalMiddleware, async (re
 });
 
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부+명단+상태. 역할 렌즈(광고주는 소유 스코프+PII 마스킹) ──
+/* 홈 작업목록에서 제출·입금 숫자를 눌렀을 때 뜨는 **아직 안 낸 사람** 목록.
+   ★ **내부인 전용**(`internalMiddleware`) — 홈 작업목록 자체가 내부 화면이다(광고주는 전용 대시보드).
+     그 위에 작업보드·스레드와 **같은 스코프 게이트**를 한 번 더 태운다(정책이 좁아지면 자동 반영).
+   ★ 판정·명단은 서비스(`pendingParticipants` → `_closeoutRoster`)가 단독으로 갖는다 — 라우트는 배선만. */
+router.get('/workdesk/pending', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const sheetId = String(req.query.sheetId || ''), tabName = String(req.query.tabName || '');
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const scope = await _ensureThreadScope(req, sheetId, tabName);
+    if (!scope.ok) return res.status(scope.code || 403).json({ ok: false, error: scope.error });
+    const out = await svc.pendingParticipants({ sheetId, tabName, kind: String(req.query.kind || 'submit') });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
 router.get('/workdesk', authMiddleware, async (req, res, next) => {
   try {
     // 역할 렌즈: 내부 직원 전체 작업표 · advertiser(소유 탭+마스킹). reviewer 차단.

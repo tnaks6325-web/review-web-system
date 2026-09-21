@@ -88,14 +88,15 @@ t('★ 초과 수는 서버 counts.over 만 — 화면에서 세지 않는다',
 t('초과면 참여자 게이지 숫자가 붉어지고 +N 초과 배지가 붙는다',
   /nm\$\{ov\?' isover':''\}/.test(strip) && /class="ovb">\+\$\{ov\} 초과/.test(strip));
 
-const home = body(wd, 'function _finProgHtml(');
-t('홈도 총건수 기준으로 초과를 말한다', /const over=\(rt&&_isNoSheet\(t\)&&filled>rt\.total\)/.test(home));
+const home = body(wd, 'function _finNumCells(');
+t('홈도 총건수 기준으로 초과를 말한다', /const over=\(rt&&filled!=null&&_isNoSheet\(t\)&&filled>rt\.total\)/.test(home));
 /* ★★ 서버는 `meta.sheetless` 일 때만 행에 `over` 를 붙인다 — 홈에서 게이트를 빼면 시트 기반 탭에서
    홈만 붉어지고 "표에서 붉은 줄로 표시합니다" 가 거짓말이 된다(코덱스 리뷰 P2, 2026-08-24). */
 t('★ 홈 초과 판정도 무시트 작업만(시트 기반 탭에 거짓 경고 금지)',
   /_isNoSheet\(t\)&&filled>rt\.total/.test(home));
 t('홈 초과 표기는 색으로만(숫자는 이미 501/500 로 보인다)',
-  /wbl-num\$\{over\?' isover':''\}/.test(home) && !/\+\$\{over\} 초과/.test(home));
+  // 시안 확정(2026-09-22): 숫자는 총건수·참여가 **각자 칸**이라 참여 상자를 붉게 채우는 것으로 말한다.
+  /over\?'isover'/.test(home) && !/\+\$\{over\} 초과/.test(home));
 
 console.log('── D. 균형 모드: 여분 준비 줄을 닫을 수 있다 ──');
 t('★ 구간 뒤 빈 준비 줄을 0 명으로 표에 올린다(닫을 창구가 생긴다)',

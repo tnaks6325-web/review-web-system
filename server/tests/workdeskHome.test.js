@@ -50,13 +50,15 @@ ok('모바일 작업 목록은 표 머리글을 숨기고 같은 행을 압축 �
   /table\.wbl-t thead\{display:none\}/.test(src)
     && /table\.wbl-t tbody tr\{display:grid;grid-template-columns:minmax\(0,1fr\) auto auto auto/.test(src));
 ok('모바일 카드 필드에 읽을 수 있는 라벨을 제공',
-  ['작업명','작업표','공유','담당','인원 / 제출','입금','상태','저장폴더','모집공고','오늘완료','마감','더보기']
-    .every(label => src.includes(`data-label="${label}"`) || label === '마감'));
+  ['작업명','작업표','공유','담당','상태','저장폴더','모집공고','오늘완료','마감','더보기']
+    .every(label => src.includes(`data-label="${label}"`) || label === '마감')
+  // 숫자 4칸은 한 함수가 `data-label="${label}"` 로 찍으므로 라벨 리터럴로 확인한다(시안 확정 2026-09-22).
+  && ['총건수','참여','제출','입금'].every(label => src.includes(`,'${label}')`)));
 ok('모바일 카드 버튼은 1px 데스크톱 열 폭을 해제하고 최소 38px 높이',
   /table\.wbl-t td\.wbl-btncol\{width:auto\}/.test(src)
     && /table\.wbl-t td \.wbl-b\{width:100%;min-height:38px/.test(src));
 ok('모바일 압축 행은 도구를 기본으로 숨기고 펼친 행에서만 표시',
-  /td:nth-child\(2\),table\.wbl-t td:nth-child\(3\),table\.wbl-t td:nth-child\(n\+8\)\{display:none\}/.test(src)
+  /td:nth-child\(2\),table\.wbl-t td:nth-child\(3\),table\.wbl-t td:nth-child\(n\+10\)\{display:none\}/.test(src)
     && /tr\.mob-open td:nth-child\(2\)[\s\S]{0,160}display:flex/.test(src));
 ok('모바일 펼침 버튼은 행 열기를 막고 aria 상태를 함께 갱신',
   /function _mobileToggleTaskRow\(btn,event\)\{[\s\S]{0,180}preventDefault\(\)[\s\S]{0,80}stopPropagation\(\)/.test(src)
@@ -104,7 +106,10 @@ ok('★ renderHomeView 도 역할을 자기 스코프에서 구한다',
   const cssBlock = /\/\* ══ 홈\(첫 진입\)[\s\S]*?(?=<\/style>|$)/.exec(style);
   ok('홈 CSS 블록을 찾았다', !!cssBlock);
   const rules = cssBlock[0].replace(/\/\*[\s\S]*?\*\//g, '');
-  const sels = [...rules.matchAll(/(^|\})\s*([^{}@]+)\{/g)].map(m => m[2].trim()).filter(Boolean);
+  const sels = [...rules.matchAll(/(^|\})\s*([^{}@]+)\{/g)].map(m => m[2].trim()).filter(Boolean)
+    // @keyframes 의 구간 키워드(`from`·`to`·`50%`)는 선택자가 아니다 — 이 검사의 대상은 "남의 화면을
+    // 오염시킬 수 있는 선택자"이고, 키프레임은 이름(`@keyframes wpIn`)으로 이미 스코프돼 있다.
+    .filter(x => !/^(from|to|[\d.]+%)$/.test(x));
   // ★ 이 검사의 의미 = "새 선택자는 전용 접두를 써서 남의 화면을 오염시키지 않는다".
   //   holdover: 홈 아래 작업 목록 블록(migration 088)은 wbl- 접두를 쓴다 — 접두를 늘리는 것은 의미 불변,
   //   대신 **접두 없는 일반 선택자**(.card, table 같은 것)는 여전히 금지된다.

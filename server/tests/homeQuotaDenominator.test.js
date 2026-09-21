@@ -78,49 +78,73 @@ ok('"저장 완료" 로 뭉뚱그리지 않는다(warning)', /rowAudit[\s\S]{0,4
 
 console.log('\n6. 홈 「인원/제출」 렌더 — 실제 실행');
 const src = wd.slice(wd.indexOf('function _finRecruitTotal('), wd.indexOf('function _finBodyHtml('));
-ok('렌더러가 한 벌로 추출된다', /_finProgHtml/.test(src));
+ok('렌더러가 한 벌로 추출된다', /_finNumCells/.test(src));
+/* ★ `_finUnpaid`(미입금 = 제출 − 입금)는 이 범위 밖에 있지만 **스텁을 두지 않고 구현을 꺼내 넣는다** —
+   스텁이면 "입금 잔여가 필터·정렬과 같은 기준인가"를 여기서 못 본다(레포 규율). */
+const unpaidFn = wd.match(/function _finUnpaid\(t\)\{[\s\S]*?\n\}/) || wd.match(/function _finUnpaid\(t\)\{.*?\}/);
+ok('_finUnpaid 구현을 함께 태운다(스텁 금지)', !!unpaidFn);
 const sb = { esc: s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
              _isNoSheet: t => !!(t && t.sheetless === true) };
-vm.createContext(sb); vm.runInContext(src, sb);
+vm.createContext(sb); vm.runInContext(unpaidFn[0] + '\n' + src, sb);
 
 const T = (stats, camps, sheetless) => ({ stats, campaigns: camps, sheetless });
-const h1 = sb._finProgHtml(T({ total: 581, filled: 208, submitted: 159, paid: 106 },
+const R = (t, filt) => sb._finNumCells(t, 0, filt || '');
+const h1 = R(T({ total: 581, filled: 208, submitted: 159, paid: 106 },
   [{ id: 'c1', status: 'active', recruitTotal: 500, recruitTotalSource: 'campaign' }], true));
-ok('분모 = 총건수(500), 분자 = 채워진 줄(208)', /208\/500/.test(h1) && !/159\/581/.test(h1));
-ok('제출 수는 남긴다(정보 손실 0)', /제출 159/.test(h1));
-// ★ 게이지 폭도 **채워진 줄** 기준이어야 한다 — 숫자만 검사하면 막대만 제출 기준으로 되돌린
-//   변이를 통과시킨다(변이시험 M2 실측). 208/500 = 42%.
-ok('게이지 폭 = 채워진 줄/총건수(42%)', /width:42%/.test(h1));
+/* ★★ 시안 확정(2026-09-22) — 한 칸의 분수(`208/500`)를 **네 칸**으로 나눴다: 총건수·참여·제출·입금.
+   검사 의미는 그대로다 — "총건수는 공고값(500), 참여는 채워진 줄(208), 제출은 제출 수(159)". */
+ok('총건수 칸 = 공고 총건수(500)', /class="box tot">500</.test(h1));
+ok('참여 칸 = 채워진 줄(208) — 줄 수(581)가 아니다', /class="box">208</.test(h1) && !/>581</.test(h1));
+ok('제출·입금도 각자 칸(159 · 106)', />159</.test(h1) && />106</.test(h1));
 ok('준비된 줄·빈 슬롯을 툴팁으로 말한다', /준비된 줄 581줄 \(빈 슬롯 373줄\)/.test(h1));
 ok('무시트에서 줄≠총건수면 경고를 붙인다', /⚠ 준비된 줄\(581\)이 총건수\(500\)/.test(h1));
 
-const h2 = sb._finProgHtml(T({ total: 300, filled: 120, submitted: 90, paid: 10 },
+const h2 = R(T({ total: 300, filled: 120, submitted: 90, paid: 10 },
   [{ id: 'c1', status: 'active', recruitTotal: 300, recruitTotalSource: 'campaign' }], true));
-ok('줄 = 총건수면 경고가 없다', !/⚠/.test(h2) && /120\/300/.test(h2));
+ok('줄 = 총건수면 경고가 없다', !/⚠/.test(h2) && /class="box tot">300</.test(h2) && /class="box">120</.test(h2));
 
-const h3 = sb._finProgHtml(T({ total: 140, filled: 140, submitted: 90 },
+const h3 = R(T({ total: 140, filled: 140, submitted: 90 },
   [{ id: 'c1', status: 'active', recruitTotal: 500, recruitTotalSource: 'campaign' }], false));
-ok('시트 기반 탭에는 경고를 붙이지 않는다(이름 있는 행 수라 적은 게 정상)', !/⚠/.test(h3) && /140\/500/.test(h3));
+ok('시트 기반 탭에는 경고를 붙이지 않는다(이름 있는 행 수라 적은 게 정상)', !/⚠/.test(h3) && /class="box tot">500</.test(h3));
 
-const h4 = sb._finProgHtml(T({ total: 581, filled: 208, submitted: 159 }, [], true));
-ok('총건수를 모르면 분모를 줄 수로 접고 표시로 알린다(0 위장 금지)', /208\/581\*/.test(h4));
+const h4 = R(T({ total: 581, filled: 208, submitted: 159 }, [], true));
+ok('총건수를 모르면 줄 수로 접고 표시로 알린다(0 위장 금지)', /class="box tot">581\*</.test(h4));
 ok('총건수 미상 사유를 툴팁으로 말한다', /총건수 미상/.test(h4));
 
-const h5 = sb._finProgHtml(T({ total: 581, submitted: 159 },
-  [{ id: 'c1', status: 'active', recruitTotal: 500 }], true));
-ok('구버전 백엔드(filled 미동봉) = 종전 표기로 접는다', /159\/581/.test(h5) && /제출 기준/.test(h5));
+const h5 = R(T({ total: 581, submitted: 159 }, [{ id: 'c1', status: 'active', recruitTotal: 500 }], true));
+ok('구버전 백엔드(filled 미동봉) = 참여 칸을 — 로 두고 사유를 말한다(0 위장 금지)',
+  /class="box">—</.test(h5) && /이 서버는 채워진 줄 수를 아직 내려주지 않습니다/.test(h5));
 
-const h6 = sb._finProgHtml(T({}, [], true));
-eq('통계 자체가 없으면 —', h6, '<span class="wbl-sub">—</span>');
+const h6 = R(T({}, [], true));
+ok('통계 자체가 없으면 네 칸 모두 —', (h6.match(/>—</g) || []).length === 4);
 
-const h7 = sb._finProgHtml(T({ total: 100, filled: 40, submitted: 10 },
+const h7 = R(T({ total: 100, filled: 40, submitted: 10 },
   [{ id: 'c1', status: 'active', recruitTotal: 0, recruitTotalSource: 'none' },
    { id: 'c2', status: 'draft', recruitTotal: 999 }], true));
-ok('기준 공고 = 게시중 우선(총건수 0이면 줄 수로 접는다)', /40\/100\*/.test(h7));
+ok('기준 공고 = 게시중 우선(총건수 0이면 줄 수로 접는다)', /class="box tot">100\*</.test(h7));
 
-const h8 = sb._finProgHtml(T({ total: 500, filled: 500, submitted: 500 },
+const h8 = R(T({ total: 500, filled: 500, submitted: 500, paid: 500 },
   [{ id: 'c1', status: 'active', recruitTotal: 500 }], true));
-ok('100% 를 넘기지 않는다', /width:100%/.test(h8));
+ok('총건수에 도달한 칸은 파랑으로 찬다', (h8.match(/class="box full"/g) || []).length === 3);
+
+/* ★★ 시안 확정(2026-09-22) — 거의 끝난 작업에서만 숫자를 눌러 "아직 안 낸 사람"을 본다.
+   잔여는 **참여자 기준**(제출) · **제출자 기준**(입금) — 서버 목록과 같은 기준이라야 건수가 갈리지 않는다. */
+const h9 = R(T({ total: 100, filled: 100, submitted: 95, paid: 90 },
+  [{ id: 'c1', status: 'active', recruitTotal: 100 }], true));
+ok('잔여가 총건수의 10% 이하면 제출·입금 칸을 누를 수 있다',
+  /class="box clickable"[^>]*data-k="submit"/.test(h9) && /data-k="paid"/.test(h9));
+ok('남은 수를 말풍선으로 말한다(제출 5명 · 입금 5명)', (h9.match(/class="rest">5명 남음</g) || []).length === 2);
+ok('onclick 에는 인덱스만 넘긴다(작업명은 시트에서 온 문자열)',
+  /openPendingFromHome\(0,'submit',this\)/.test(h9) && !/openPendingFromHome\([^)]*tabName/.test(h9));
+
+const h10 = R(T({ total: 100, filled: 100, submitted: 40, paid: 10 },
+  [{ id: 'c1', status: 'active', recruitTotal: 100 }], true));
+ok('아직 한참 남은 작업은 누를 수 없다(큰 숫자를 목록으로 열지 않는다)', !/clickable/.test(h10));
+
+const h11 = R(T({ total: 100, filled: 100, submitted: 95, paid: 90 },
+  [{ id: 'c1', status: 'active', recruitTotal: 100 }], true), 'pay');
+ok('미입금 필터 중에는 입금 칸을 주황으로 + 남은 수를 상시 표시',
+  /class="box short clickable"/.test(h11) && /class="rest on">5명 남음</.test(h11));
 
 console.log(`\n✅ ${n} 케이스 통과`);
 process.exit(0);
