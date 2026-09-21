@@ -591,10 +591,22 @@ function _sourceContentNextValues(b, derived) {
 const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflow_keyword',
   'inflow_guide', 'guide_images', 'review_guide', 'special_notes'];
 
+// ★★ 상품 구성(product_options_json) 안에서 접수 뒤에도 고칠 수 있는 키 (2026-09-21 실측).
+//   ★ 왜 칸 전체가 아니라 키 단위인가: 인트라넷은 **상품 주소와 선택지별 유입가이드**를 이 한
+//     덩어리에 담아 보낸다(유입방식이 '유입가이드'면 유입 안내가 다른 칸으로는 아예 안 온다 —
+//     inadd-webapp `reviewOrderBuildInflowGuide` 가 그때 undefined 를 돌려준다).
+//     그래서 칸을 통째로 잠그면 위 허용 목록이 약속한 **'상품 주소·유입 가이드·첨부 사진'을
+//     실제로는 한 번도 못 고친다** — 안내가 지킬 수 없는 약속이 된다(핸들러를 그대로 돌려 재현).
+//   ★★ 넓히지 말 것 — 상품명·옵션값·금액(pay)·인원(count)·일건수(daily)·리뷰 조합은
+//     **작업표의 칸과 줄에 그대로 박히는 값**이라 이미 깔린 표와 어긋난다(사용자 확정 2026-09-21).
+const PRODUCT_OPTION_EDITABLE_KEYS = new Set(['url', 'guide']);
+// 조건부 허용 칸 — "잠긴 부분이 그대로일 때만" 통과한다(전부 허용도, 전부 잠금도 아니다).
+const SOURCE_PARTIAL_JSON_COLUMN = 'product_options_json';
+
 // 사람이 읽는 칸 이름 — 409 문구가 "무엇을 못 고쳤는지"를 말한다(코드명 노출 금지).
 const SOURCE_FIELD_LABELS = {
   title: '작업명', start_date: '시작일', product_option: '상품·옵션',
-  product_options_json: '상품 구성', pay_amount: '결제금액', review_fee: '리뷰비',
+  product_options_json: '상품 구성(상품명·금액·인원·옵션)', pay_amount: '결제금액', review_fee: '리뷰비',
   daily_count: '일 모집인원', daily_count_text: '일 모집인원 표기', product_distribution_mode: '투입방식', purchase_channel: '구매채널',
   purchase_time: '구매시간대', inflow_keyword: '유입 검색어', inflow_type: '유입방식',
   inflow_guide: '유입 가이드', guide_images: '첨부 이미지', delivery_type: '배송유형',
@@ -638,6 +650,50 @@ function _sourceContentChanges(current, b, derived) {
   const next = _sourceContentNextValues(b, derived);
   return Object.keys(next).filter(column =>
     _sourceCompareValue(column, next[column]) !== _sourceCompareValue(column, current[column]));
+}
+
+// ── 상품 구성의 "잠긴 부분만" 비교 ──────────────────────────────────────────
+/** 허용 키(url·guide)를 걷어낸 모양 — 이것이 같으면 상품 구성은 **안 바뀐 것**이다.
+ *  ★ 비교 규칙은 `_sourceCanonicalJson`(키 순서·표기 차이 흡수) 그대로 쓴다(사본 0).
+ *  ★ 못 읽는 값(빈 값·JSON 아님)은 **null** — 호출부가 잠금 쪽으로 접는다(fail-closed). */
+function _productOptionsLockedShape(value) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    try { parsed = JSON.parse(text); } catch (_) { return null; }
+  }
+  if (!Array.isArray(parsed)) return null;
+  const strip = node => {
+    if (Array.isArray(node)) return node.map(strip);
+    if (node && typeof node === 'object') {
+      return Object.fromEntries(Object.entries(node)
+        .filter(([key]) => !PRODUCT_OPTION_EDITABLE_KEYS.has(key))
+        .map(([key, v]) => [key, strip(v)]));
+    }
+    return node;
+  };
+  return _sourceCanonicalJson(strip(parsed));
+}
+
+/** 상품 구성에서 **잠긴 부분이 실제로 달라졌나**(= 막아야 하나).
+ *  ★ 한쪽이라도 못 읽으면 true = 잠금. 모르는 채로 표에 박히는 값을 통과시키지 않는다. */
+function _productOptionsLockedChanged(currentValue, nextValue) {
+  const current = _productOptionsLockedShape(currentValue);
+  const next = _productOptionsLockedShape(nextValue);
+  if (current === null || next === null) return true;
+  return current !== next;
+}
+
+/** 접수된 오더에서 이 칸을 고칠 수 있나.
+ *  ★★ **차단 판정(blockedChanges)과 저장 대상 선정(editable)이 같은 이 함수를 쓴다** —
+ *    갈리면 "막히지도 않는데 저장도 안 되는" 조용한 무동작이 된다(저장했다고 답하면서 값을 버림). */
+function _sourceEditAllowedAfterAccept(column, current, nextOptionsJson) {
+  if (SOURCE_EDIT_AFTER_ACCEPT.includes(column)) return true;
+  if (column === SOURCE_PARTIAL_JSON_COLUMN) {
+    return !_productOptionsLockedChanged(current[SOURCE_PARTIAL_JSON_COLUMN], nextOptionsJson);
+  }
+  return false;
 }
 
 // Intranet review-order revisions use a source identity rather than the
@@ -724,7 +780,8 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       : [];
     // 접수 뒤에도 고칠 수 있는 칸(안내 문구·사진·이름)만 바뀐 요청이면 그 칸만 갱신한다.
     // 계약 후속 매칭(바뀐 내용 0)도 같은 경로다 — 잠긴 칸에는 어느 쪽도 손대지 못한다.
-    const blockedChanges = contentChanges.filter(column => !SOURCE_EDIT_AFTER_ACCEPT.includes(column));
+    const blockedChanges = contentChanges.filter(column =>
+      !_sourceEditAllowedAfterAccept(column, current, optionsJson));
     const partialEdit = contractMatchAllowed && blockedChanges.length === 0;
     if (sourceEditLocked && !partialEdit) {
       const names = blockedChanges.map(_sourceFieldLabel);
@@ -774,7 +831,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       //   아예 안 들어가 종전 동작과 한 글자도 다르지 않다.
       //   칸 이름은 우리 화이트리스트를 거친 리터럴뿐이라 문자열 조립이 안전하다(주입 없음).
       const editable = contentChanges
-        .filter(column => SOURCE_EDIT_AFTER_ACCEPT.includes(column) && /^[a-z_]+$/.test(column));
+        .filter(column => _sourceEditAllowedAfterAccept(column, current, optionsJson) && /^[a-z_]+$/.test(column));
       const params = [current.id];
       const sets = editable.map(column => {
         params.push(nextValues[column]);

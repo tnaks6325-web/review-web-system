@@ -244,8 +244,23 @@ async function run() {
     const from = SRC.indexOf('if (partialEdit) {');
     const block = SRC.slice(from, SRC.indexOf('RETURNING *', from));
     assert.ok(block.length > 200, '검사할 조각을 못 잘랐다');
-    assert.ok(/\.filter\(column =>[^\n]*SOURCE_EDIT_AFTER_ACCEPT\.includes\(column\)/.test(block),
-      '쓰기 칸 목록을 만들 때 허용목록 검사가 사라졌다');
+    // ★ 허용목록 검사는 **공용 판정 함수 안**으로 옮겨졌다(2026-09-21) — 검사 의미는 그대로이고
+    //   "차단 판정과 저장 대상 선정이 같은 함수를 본다"는 축이 하나 더 붙어 종전보다 강하다.
+    assert.ok(/\.filter\(column =>[^\n]*_sourceEditAllowedAfterAccept\(column/.test(block),
+      '쓰기 칸 목록을 만들 때 허용 판정이 사라졌다');
+    const judgeStart = SRC.indexOf('function _sourceEditAllowedAfterAccept(');
+    assert.ok(judgeStart > 0, '허용 판정 함수가 없다');
+    const judge = SRC.slice(judgeStart, SRC.indexOf('\n}', judgeStart));
+    assert.ok(/SOURCE_EDIT_AFTER_ACCEPT\.includes\(column\)/.test(judge),
+      '허용 판정 안에서 허용목록 검사가 사라졌다');
+  });
+
+  await t('⑦ 막을지 판정과 저장할지 판정이 같은 함수를 본다(갈리면 조용한 무동작)', async () => {
+    // ⚠ 둘이 갈리면 "409 도 안 뜨는데 저장도 안 되는" 상태가 된다 — 저장했다고 답하면서 값을 버린다.
+    const from = SRC.indexOf('const blockedChanges = contentChanges.filter');
+    const blockedBlock = SRC.slice(from, from + 220);
+    assert.ok(/_sourceEditAllowedAfterAccept\(column/.test(blockedBlock),
+      '차단 판정이 공용 허용 판정을 안 쓴다');
   });
 
   await t('⑦ 칸 이름은 형식 검사를 통과한 것만 SQL 에 넣는다(주입 차단 — 지우지 말 것)', async () => {
