@@ -169,8 +169,54 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
   }
 }
 
+/**
+ * 작업오더 썸네일을 연결 공고에 반영한다(163 · 사용자 확정 2026-09-21).
+ * ★ 금액 전파와 달리 **짝지을 것이 없다** — 공고당 그림 한 장이라 값만 덮으면 된다.
+ * ★ **빈 값이면 아무것도 하지 않는다** — "안 정했다" 를 "지워라" 로 읽으면 리뷰웹에서 올려 둔
+ *   썸네일이 구버전 인트라넷 저장 한 번에 사라진다(blank-only 규율).
+ * ★ 값 검증은 `order.routes._thumbnailUrl` 이 저장 전에 이미 했다(우리 프록시 절대 URL만) —
+ *   여기서 규칙을 또 만들지 않는다. 다만 **빈 값만** 거른다.
+ * ★ **절대 throw 하지 않는다** · 쓰기 표면 = `recruit_campaigns.thumbnail_url` 한 칸.
+ */
+async function syncCampaignThumbnail({ workOrderId, thumbnailUrl, by = 'source' } = {}) {
+  const url = String(thumbnailUrl == null ? '' : thumbnailUrl).trim();
+  if (!url) return { applied: false, reason: 'empty' };
+
+  let client;
+  try {
+    client = await getPool().connect();
+  } catch (e) {
+    logger.warn(`[campaign/thumb-sync] 커넥션 실패(전파 생략): ${(e && e.message) || e}`);
+    return { applied: false, reason: 'db_unavailable' };
+  }
+  try {
+    await client.query('BEGIN');
+    const { rows: woRows } = await client.query(
+      'SELECT id, linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
+    if (!woRows.length) { await client.query('ROLLBACK'); return { applied: false, reason: 'order_not_found' }; }
+    const { linkedCampaign } = require('./linkedRecruitQuota.service');
+    const camp = await linkedCampaign(client, woRows[0]);
+    if (!camp) { await client.query('ROLLBACK'); return { applied: false, reason: 'no_campaign' }; }
+
+    const { rowCount } = await client.query(
+      `UPDATE recruit_campaigns SET thumbnail_url = $2, updated_at = NOW()
+        WHERE id = $1 AND COALESCE(thumbnail_url,'') <> $2`, [camp.id, url]);
+    await client.query('COMMIT');
+    if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id };
+    logger.info(`[campaign/thumb-sync] ${camp.id} 썸네일 갱신 by ${by}`);
+    return { applied: true, campaignId: camp.id };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    logger.warn(`[campaign/thumb-sync] 전파 실패(원본 수정은 유지): ${(e && e.message) || e}`);
+    return { applied: false, reason: 'error', error: (e && e.message) || String(e) };
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   syncCampaignPayAmount,
+  syncCampaignThumbnail,
   distinctAmountsInText,
   replaceAmountInProductLines,
   __setPoolForTest,

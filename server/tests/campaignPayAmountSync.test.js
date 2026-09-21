@@ -179,7 +179,8 @@ async function run() {
   await t('⑤ 쓰기 표면은 두 곳뿐 — 정원·옵션 구성·작업표·주문 무접촉', () => {
     const targets = [...SRC.matchAll(/UPDATE\s+(\w+)\s+SET\s+([a-z_]+)/g)].map(m => m[1] + '.' + m[2]);
     assert.deepStrictEqual([...new Set(targets)].sort(),
-      ['campaign_options.pay_amount', 'recruit_campaigns.work_detail'],
+      // ★ 163 썸네일이 합류했다 — 셋 다 "공고에 보이는 값" 이고 표·정원·주문과는 무관하다.
+      ['campaign_options.pay_amount', 'recruit_campaigns.thumbnail_url', 'recruit_campaigns.work_detail'],
       '쓰기 표면이 넓어졌다: ' + targets.join(', '));
     ['campaign_participants', 'order_submissions', 'campaign_rounds', 'recruit_total', 'INSERT INTO', 'DELETE FROM']
       .forEach(w => assert.ok(!SRC.includes(w), '건드리면 안 되는 곳을 쓴다: ' + w));

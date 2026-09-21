@@ -35,6 +35,9 @@ ok('미적용 스키마는 부팅 전 차단한다',
 ok('source revisions use their own route and protect accepted work-order state',
   /router\.put\('\/intake\/source\/:sourceReviewOrderId'/.test(orderRoute)
   && /source\.sourceRevision !== currentRevision \+ 1/.test(orderRoute)
-  && /current\.linked_campaign_id \|\| current\.advertiser_id/.test(orderRoute));
+  // 잠금 판정은 단일 출처 함수가 갖는다 — 인트라넷 화면이 따라 만들지 않게 결과를 내려주기 때문.
+  && /function isSourceEditLocked/.test(orderRoute)
+  && /o\.linked_campaign_id \|\| o\.advertiser_id/.test(orderRoute)
+  && /const sourceEditLocked = isSourceEditLocked\(current\)/.test(orderRoute));
 
 console.log('reviewOrderAdvertiserProjection: passed');

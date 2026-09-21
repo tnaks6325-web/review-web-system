@@ -113,7 +113,8 @@ async function t(name, fn) {
 
 // ★ pay_amount 는 2026-09-21 사용자 확정으로 합류했다(상품 구성의 1건당 금액과 함께 바뀌는 짝).
 const ALLOWED = ['title', 'manager_name', 'product_url', 'inflow_keyword',
-  'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount'];
+  'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount',
+  'thumbnail_url'];   // ★ 163 — 공고 카드 그림 하나라 표·정원·금액 어디에도 안 쓰인다
 const BLOCKED_SAMPLES = {
   recruit_count: 500, daily_count: 99, start_date: '2026-12-25',
   review_fee: 1, purchase_channel: '쿠팡', review_type: '텍스트', delivery_type: '빈박스',
@@ -138,6 +139,7 @@ async function run() {
       inflow_keyword: '새 검색어', inflow_guide: '새 유입 가이드',
       guide_images: ['https://a/b.jpg'], review_guide: '새 리뷰 가이드', special_notes: '새 특이사항',
       pay_amount: 31000,   // ★ 결제합계 — 상품 구성의 1건당 금액과 함께 바뀌는 짝(2026-09-21 확정)
+      thumbnail_url: 'https://api.example.com/api/order/guide-image/1AbCdEfGhIjKlMnOp',   // ★ 163
     });
     const { res } = await call(baseOrder(), body);
     assert.strictEqual(res.statusCode, 200, 'body=' + JSON.stringify(res.body));
