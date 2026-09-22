@@ -6,6 +6,7 @@ const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { linkReviewFilesToRows } = require('../services/reviewFileLink.service');
+const captureRename = require('../services/captureFileRename.service');
 
 // 공개 리포트에서 제외할 영수증 검수 증거. 리뷰 슬롯 파일을 AI가 영수증으로 오판했어도
 // 담당자가 정상(ok)으로 확정했다면 format 흔적만으로 숨기지 않는다. 영수증 전용
@@ -1404,6 +1405,38 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
 });
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/capture-rename-recipient — 과거 리뷰 캡처 파일명 소급 정정(주문자 → 수취인)
+//
+// 배경: 타계정 참여 캡처가 Drive 에 전부 주문자(로그인 본계정) 이름으로 쌓여 어떤 타계정의
+//   리뷰인지 구분할 수 없다(2026-09-22 신고 · 결정 009 후속). 앞으로의 저장은 서버 판정으로
+//   고쳤고, 이미 올라간 파일은 이 창구가 **이름만** 바꾼다(꼬리 = 순번·제출시각·확장자 보존).
+//
+// ★★ 되돌리기 어려운 외부 저장 쓰기라 **미리보기 기본** — `dryRun:false` **와** `confirm:true`
+//    가 둘 다 있어야 실행한다. 바꾸기 전 이름은 `review_submissions.renamed_from`(164)에 남고
+//    `revert:true` 로 되돌린다.
+// ★ adminOrMaster — 리뷰 캡처 정리(relocate)와 같은 급의 Drive 쓰기 도구다.
+// ═══════════════════════════════════════════════════════════
+router.post('/capture-rename-recipient', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, limit, dryRun, confirm, revert } = req.body || {};
+    const by = (req.admin && req.admin.name) || 'admin';
+    const args = { db: pool, sheetId: sheetId || null, tabName: tabName || null,
+                   limit, dryRun: dryRun !== false, confirm: confirm === true, by };
+    const out = revert === true
+      ? await captureRename.revertRecipientRenames(args)
+      : await captureRename.applyRecipientRenames(args);
+    res.json({ ok: true, revert: revert === true, ...out });
+  } catch (err) {
+    // 마이그레이션 164 미적용은 원인을 말해 준다(조용한 500 금지).
+    if (err && err.code === '42703') {
+      return res.status(400).json({ ok: false, code: 'not_ready',
+        error: '이 기능은 migration 164(review_submissions.renamed_from) 적용 후 사용할 수 있습니다.' });
+    }
+    next(err);
+  }
+});
+
 // POST /api/drive/review-folder-backfill — 탭 [리뷰] 폴더 스캔 → 파일↔행 링크 백필
 //
 // 배경: 업체 뷰어 리뷰 미리보기는 원장(review_submissions)·대표 이미지(review_index.review_file_*)를
