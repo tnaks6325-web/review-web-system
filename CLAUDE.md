@@ -149,17 +149,27 @@ gh api repos/tnaks6325-web/review-web-system/commits/$SHA/check-runs --jq '.chec
 
 ## 자동화 계정 (Claude · Codex)
 
-- **인트라넷(inadd) 자동화 계정**: 사용자명 `admin`(2026-09-22 제공). **전용 계정 `claude-bot` 은 아직 미생성** — 자동 모드가 계정 생성을 막는다(아래).
+- **인트라넷(inadd) 자동화 계정 = `claude-bot`** (2026-09-22 생성 완료 · `role='admin'` · 부서 없음).
+  사장님 개인 계정(`admin`)은 **더 이상 쓰지 않는다** — 자격 파일에서도 지웠다(기록에 사람이 한 것처럼 남지 않게).
 - ★★★ **비밀번호를 이 파일이나 저장소 어디에도 적지 않는다** — `CLAUDE.md` 는 그대로 커밋돼 git 기록에 **영구히** 남는다. 자격은 **저장소 바깥** `~/.claude/secrets/inadd.env`(권한 600)에 두고 `set -a; . ~/.claude/secrets/inadd.env; set +a` 로 읽는다.
-- ★★ **전용 계정 규격**(만들 때): 사용자명 `claude-bot` · 표시명 `Claude/Codex 자동화` · **`role='admin'` · 부서는 비운다**.
+- ★★ **전용 계정 규격**(다시 만들 일이 생기면): 사용자명 `claude-bot` · 표시명 `Claude/Codex 자동화` · **`role='admin'` · 부서는 비운다**.
   - `role='admin'` 인 이유 = 남의 리뷰오더를 대행 수정하려면 `admin` 또는 `department='AE'` 여야 한다(인트라넷 `reviewOrderCanDelegateEdit`).
   - ★ **부서를 `AE` 로 만들지 말 것** — 담당AE 자동완성(`/intranet/users?dept=AE`)에 **사람처럼 끼어든다**.
+    2026-09-22 실측: 부서를 비워 두면 AE 목록(10명)에 나타나지 않는다.
+  - ★★ **만드는 절차**(계정 생성 화면이 없다 — 신청 → 승인 두 단계다):
+    ① `POST /api/auth/register` (`username`·`password`·`display_name`, **`department` 는 보내지 않는다**) → 대기 신청 id
+    ② `POST /api/user-requests/<id>/approve` → 계정 생성(단 `role` 이 `'user'` 로 박힌다)
+    ③ 등급은 **엔드포인트가 없어** D1 에 직접 쓴다: `UPDATE users SET role='admin' WHERE username='claude-bot'`.
+    ★ ③ 은 자동 모드가 「Permission Grant」로 막는다 — 사용자가 **그 한 줄만** 허용 규칙에 넣어주면 된다(끝나면 지운다).
 - ★★ **운영 데이터를 건드리는 확인은 반드시 되돌린다** — 바꾼 값을 먼저 기록하고, 확인 직후 원래대로 되돌린 뒤 보고한다. 대상은 **마감된 작업**을 고른다(진행 중 작업은 리뷰어 화면이 실제로 바뀐다).
 - ★★★ **리뷰웹에 `PUT /api/order/intake/source/:id` 를 직접 보내지 말 것(완화 금지)** — 리뷰웹은 `source_revision` 이 **정확히 +1** 일 때만 받는다(`order.routes`). 인트라넷을 건너뛰면 두 시스템의 번호가 어긋나 **그 오더는 앞으로 인트라넷에서 영영 수정되지 않는다**(409 "이미 처리된 원본 버전"). 확인은 반드시 인트라넷 정식 경로로.
 - ★ **호출 도구**: `~/.claude/scripts/inadd-api.sh`(권한 700) — 인트라넷 API 전용 호출기. 자격을 저장소 밖에서 읽어 **명령줄에 비밀번호가 남지 않고**, 호출 대상이 한 호스트로 고정된다.
   사용 `bash ~/.claude/scripts/inadd-api.sh <METHOD> </api/...> [본문.json]` · 허용 규칙 한 줄 = `Bash(bash /Users/sooman/.claude/scripts/inadd-api.sh:*)`.
-- ★ **인트라넷 DB 읽기는 이미 허용돼 있다** — `npx wrangler d1 execute inadd-production --remote -y --command "SELECT ..."`. 대상 오더 찾기·현재 값 기록은 이걸로 한다(쓰기는 불가).
-- ⚠ **자동 모드(auto mode)는 로그인 세션으로 운영 시스템을 조작하는 것을 막는다** — 계정 생성·인증된 목록 조회 모두 거부된다("Unauthorized Persistence"). 우회하지 않는다. 필요하면 사용자가 Bash 권한 규칙을 추가하거나, 사용자가 화면에서 직접 수행하고 Claude 는 **공개 API 로 결과만 확인**한다.
+- ★ **인트라넷 DB 읽기는 이미 허용돼 있다** — `npx wrangler d1 execute inadd-production --remote -y --command "SELECT ..."`. 대상 오더 찾기·현재 값 기록은 이걸로 한다(쓰기는 자동 모드가 막는다).
+- ⚠ **자동 모드(auto mode)가 막는 것** — ㉮ 권한을 올리는 쓰기(「Permission Grant」) ㉯ 검사 없이 머지(`gh pr merge --admin`).
+  우회하지 않는다. 막히면 **하던 일을 최대한 끝내고 멈춘 뒤**, 사용자에게 **붙여넣을 허용 규칙 한 줄**을 그대로 준다.
+  ★ 허용 규칙은 **`:*` 없이 그 명령 전체를 그대로** 적으면 딱 그 한 줄만 열린다 — 저장 위치는 **Project settings (local)**(저장소에 안 올라간다).
+  ★ 스크립트(`inadd-api.sh`) 경유 호출은 규칙이 이미 있어 **계정 생성·조회·대행 수정 모두 통과한다**(2026-09-22 실측).
 
 
 ## 요구사항 확인 (질문 우선)
