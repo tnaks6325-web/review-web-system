@@ -25,6 +25,32 @@
 
 const { logger } = require('../utils/logger');
 
+/* ★★ 해석 규칙은 **여기 한 곳**이다 — 단건(아래 `recipientNameForRow`)과 배치(파일명 소급 정정
+   `captureFileRename.service`)가 같은 조각을 쓴다. SQL 을 복사해 두면 "제출은 수취인인데
+   소급 정정은 주문자"처럼 두 경로가 조용히 갈린다(레포의 `rowNumbering.filledSql` 관용구).
+   ★ 별칭 고정: `ri`(검색 명단) · `cp`(작업표) · `os`(주문 원장). */
+const RECIPIENT_PICK_SQL = `COALESCE(
+                NULLIF(BTRIM(ri.recipient_name), ''),
+                NULLIF(BTRIM(cp.recipient_name), ''),
+                NULLIF(BTRIM(os.recipient), '')
+              )`;
+
+/**
+ * 위 판정에 필요한 조인 — `k` 는 (sheet_id, tab_name, row_index) 를 내놓는 별칭이어야 한다.
+ * ★ 지워진 작업표 줄·취소된 주문은 근거가 아니다(두 소비처가 같은 조건을 쓴다).
+ */
+function recipientJoinSql(k) {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(String(k || ''))) throw new Error('bad alias');
+  return `LEFT JOIN review_index ri
+                ON ri.sheet_id = ${k}.sheet_id AND ri.tab_name = ${k}.tab_name
+               AND ri.row_index = ${k}.row_index
+         LEFT JOIN campaign_participants cp
+                ON cp.sheet_id = ${k}.sheet_id AND cp.tab_name = ${k}.tab_name
+               AND cp.seq = ${k}.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+         LEFT JOIN order_submissions os
+                ON os.id = cp.order_submission_id AND os.deleted_at IS NULL`;
+}
+
 /**
  * @param {{ db:object, sheetId:string, tabName:string, rowIndex:number|string }} p
  * @returns {Promise<string|null>} 수취인 이름(공백 제거 후 빈 값이면 null)
@@ -42,20 +68,9 @@ async function recipientNameForRow({ db, sheetId, tabName, rowIndex } = {}) {
 
   try {
     const { rows } = await db.query(
-      `SELECT COALESCE(
-                NULLIF(BTRIM(ri.recipient_name), ''),
-                NULLIF(BTRIM(cp.recipient_name), ''),
-                NULLIF(BTRIM(os.recipient), '')
-              ) AS name
+      `SELECT ${RECIPIENT_PICK_SQL} AS name
          FROM (SELECT $1::text AS sheet_id, $2::text AS tab_name, $3::int AS row_index) k
-         LEFT JOIN review_index ri
-                ON ri.sheet_id = k.sheet_id AND ri.tab_name = k.tab_name
-               AND ri.row_index = k.row_index
-         LEFT JOIN campaign_participants cp
-                ON cp.sheet_id = k.sheet_id AND cp.tab_name = k.tab_name
-               AND cp.seq = k.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
-         LEFT JOIN order_submissions os
-                ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+         ${recipientJoinSql('k')}
         LIMIT 1`,
       [sid, tab, row]
     );
@@ -68,4 +83,4 @@ async function recipientNameForRow({ db, sheetId, tabName, rowIndex } = {}) {
   }
 }
 
-module.exports = { recipientNameForRow };
+module.exports = { recipientNameForRow, RECIPIENT_PICK_SQL, recipientJoinSql };
