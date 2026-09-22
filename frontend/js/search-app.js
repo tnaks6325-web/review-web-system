@@ -2910,13 +2910,25 @@ const _preState = {};                // scope → { blocked, duplicateBlocked, c
 function _preCtx(idx) {
   const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
   const it = rows[idx || 0] || rows[0] || {};
+  /* ★★★ 로그인 세션은 **이 자리에서 다시 읽는다**(`_loadAuthSession` 단일 출처).
+     — 종전엔 `authSession` 을 맨몸으로 참조했는데 그 이름은 구매양식 모드 함수의
+       **지역 변수**(`let authSession`)라 여기서는 존재하지 않는다 → 호출할 때마다
+       ReferenceError. 첨부 경로 3곳(`addFiles`·`_mrAddFiles`·`_csAddFiles`)이
+       `_preCheckFiles(..., { ..._preCtx(idx) })` 로 부르므로 **인자 평가 단계에서** 터졌고,
+       그 셋은 전부 async 인데 호출부가 await·catch 를 하지 않아 rejected promise 가
+       조용히 사라졌다 ⇒ 파일 첨부·미리보기는 그 앞에서 이미 끝나 **화면은 정상으로 보이는데
+       1차 필터만 배포 이래 한 번도 실행되지 않았다**(2026-08-06 ~ 2026-09-22, 서버 요청 0건).
+     ★ 다른 함수의 지역 변수에 기대지 않는다 — 리뷰검수 화면의 프리변수 무한로딩과 같은 계열.
+     ★ 세션 조회가 실패해도 판정은 계속한다(fail-open) — 이름·연락처는 중복 대조용 보조값이다. */
+  let au = {};
+  try { au = _loadAuthSession() || {}; } catch (_) { au = {}; }
   // ★ 줄 번호·이름·연락처를 함께 보낸다 — 서버가 "이 리뷰어가 **다른 건에** 이미 낸 사진인지"를
   //   첨부 즉시 대조하기 위한 최소 정보다(같은 건 재첨부는 중복으로 치지 않으므로 줄 번호가 필요).
   return {
     sheetId: it.sheetId || '', tabName: it.tabName || '',
     rowIndex: (it.rowIndex != null ? it.rowIndex : null),
-    reviewerName: it.name || (authSession && authSession.name) || '',
-    phone8: (authSession && authSession.phone8) || '',
+    reviewerName: it.name || au.name || '',
+    phone8: au.phone8 || '',
   };
 }
 
@@ -3086,7 +3098,28 @@ async function _preCheckOne(fileObj, ctx) {
  * 첨부된 파일들을 판별해 상태를 갱신한다. 세 첨부 경로(단일·다건·슬롯)가 모두 이걸 부른다.
  * ★ 미리보기 모드(관리자)에서는 돌리지 않는다 — 제출 자체가 막혀 있어 의미가 없다.
  */
+/**
+ * ★★★ 1차 필터는 **어떤 예외에도 조용히 사라지지 않는다**.
+ *   호출부 6곳이 `await` 도 `.catch()` 도 하지 않으므로(첨부 직후 비차단 실행),
+ *   안에서 던진 예외는 아무도 받지 않는 rejected promise 가 되어 **화면은 정상인데
+ *   판정만 영영 안 도는** 상태를 만든다(2026-08-06 `_preCtx` 프리변수 사고가 정확히 이것).
+ * ★★ 특히 `checking:true` 가 남으면 `_preHasBlock()` 이 **제출을 영구 차단**한다 —
+ *   그래서 실패 시 반드시 그 플래그를 내리고 화면을 종결한다(fail-open: 판정만 생략).
+ */
 async function _preCheckFiles(scope, anchorId, fileObjs, ctx) {
+  try {
+    return await _preCheckFilesInner(scope, anchorId, fileObjs, ctx);
+  } catch (e) {
+    console.warn('[precheck] 판정 실패(통과 처리):', (e && e.message) || e);
+    try {
+      const s = _preGet(scope);
+      s.checking = false;
+      _preRender(scope, anchorId);
+    } catch (_) { /* 화면 정리까지 실패해도 첨부·제출은 막지 않는다 */ }
+  }
+}
+
+async function _preCheckFilesInner(scope, anchorId, fileObjs, ctx) {
   const s = _preGet(scope);
   s._anchorId = anchorId;
   if (_PREVIEW_MODE || !Array.isArray(fileObjs) || fileObjs.length === 0) {
