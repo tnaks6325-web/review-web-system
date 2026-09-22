@@ -72,12 +72,18 @@ eq('★ 불변식 ②: hold 여도 총량 clamp(남은 자리 10 → 10)',
 eq('모르는 carry_mode 값 = auto 취급(45)', S.dailyQuota({ ...AUTO, carry_mode: 'weird' }, 75, carry(75)), 45);
 
 // 킬스위치 — require 시점 상수라 자식 프로세스로 검증(전건 자동 = 현행 복귀)
+  /* ★★ 자식 프로세스의 출력은 **문자열로** 찍고 색을 끈다(2026-09-22 실측).
+     `console.log(<숫자>)` 는 Node 가 `util.inspect` 로 찍어 색 기호(ANSI)를 덧붙인다.
+     터미널이 색을 켜 두면(`FORCE_COLOR`) 그 설정이 자식에게 그대로 상속돼 출력이
+     `\x1b[33m40\x1b[39m` 이 되고, `=== '40'` 이 **영문 모를 실패**로 뜬다.
+     CI 는 색이 꺼져 있어 초록이라 더 위험하다 — 사람 화면에서만 빨간 가드는
+     곧 아무도 안 보게 되고, 빨간 가드는 새 변경도 못 지킨다. */
 {
   const out = execFileSync(process.execPath, ['-e', `
     const S = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'services', 'campaignState.service.js'))});
     const HOLD = { daily_limit: 40, recruit_total: 200, carry_mode: 'hold' };
-    console.log(S.dailyQuota(HOLD, 75, { startDate: '2026-08-04', today: '2026-08-06', submittedSince: 75 }));
-  `], { env: { ...process.env, CAMPAIGN_CARRY_HOLD: '0' } }).toString().trim();
+    console.log(String(S.dailyQuota(HOLD, 75, { startDate: '2026-08-04', today: '2026-08-06', submittedSince: 75 })));
+  `], { env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', CAMPAIGN_CARRY_HOLD: '0' } }).toString().trim();
   eq('★ 킬스위치 CAMPAIGN_CARRY_HOLD=0 → hold 무시(자동 45)', out, '45');
 }
 
