@@ -31,6 +31,12 @@ const { RECIPIENT_PICK_SQL, recipientJoinSql } = require('./captureOwnerName.ser
 
 /** 표준 리뷰 캡처 파일명의 꼬리 — `_{순번}_{yyyyMMdd}_{HHmmss}.{확장자}` */
 const TAIL_RE = /_(\d+)_(\d{8})_(\d{6})\.([A-Za-z0-9]+)$/;
+/* ★★ 같은 규칙의 POSIX 표현 — **목록을 SQL 에서 걸러내기 위해** 필요하다.
+   JS 에서만 거르고 SQL 은 앞에서부터 잘라 읽으면, 대상이 뒤쪽에 있는 파일에는
+   **영원히 도달하지 못한다**(실측: 전체 1,782건인데 한 번에 41건만 잡혔다).
+   ★ 두 표현이 갈리면 "SQL 은 대상이라는데 JS 는 건너뛰는" 헛돌기가 되므로
+     회귀가드가 **같은 문자열에 같은 판정을 하는지 실행으로 대조**한다. */
+const TAIL_SQL = '_[0-9]+_[0-9]{8}_[0-9]{6}\\.[A-Za-z0-9]+$';
 /** Drive 파일명에 넣을 수 없는 글자 — `generateReviewFileName` 과 같은 규칙(사본 아님: 같은 표를 쓴다) */
 const UNSAFE_RE = /[\/\\:*?"<>|]/g;
 
@@ -61,14 +67,20 @@ function renamedTo(fileName, recipient) {
  */
 async function planRecipientRenames({ db, sheetId = null, tabName = null, limit = MAX_BATCH } = {}) {
   const cap = Math.max(1, Math.min(MAX_BATCH, Number(limit) || MAX_BATCH));
+  /* ★★ 거르기는 **SQL 에서** 한다 — 표준형이 아니거나 수취인을 모르거나 이미 같은 이름인 건을
+     DB 가 빼고 주므로, `LIMIT` 이 **실제 대상 기준**이 된다. 그래서 반복 실행이 앞으로 나아간다
+     (바꾼 건은 다음 조회에서 "이미 같은 이름"이 되어 자동으로 빠진다).
+     ★ JS `renamedTo` 가 최종 판정이다 — SQL 은 그보다 **넓게** 거를 뿐이라 둘이 어긋나도
+       "SQL 이 준 것을 JS 가 건너뛰는" 안전한 방향으로만 갈린다. */
   const { rows } = await db.query(
     `WITH f AS (
        SELECT rs.file_id, rs.file_name, rs.sheet_id, rs.tab_name,
-              COALESCE(rs.row_index, ri2.row_index) AS row_index
+              COALESCE(rs.row_index, ri2.row_index) AS row_index,
+              regexp_replace(rs.file_name, '${TAIL_SQL}', '') AS cur_name
          FROM review_submissions rs
          LEFT JOIN review_index ri2 ON ri2.id = rs.review_index_id
         WHERE COALESCE(rs.slot_key, 'review') = 'review'
-          AND rs.file_name IS NOT NULL
+          AND rs.file_name ~ '^.+${TAIL_SQL}'
           AND ($1::text IS NULL OR rs.sheet_id = $1)
           AND ($2::text IS NULL OR rs.tab_name = $2)
      )
@@ -79,9 +91,11 @@ async function planRecipientRenames({ db, sheetId = null, tabName = null, limit 
        FROM f
        ${recipientJoinSql('f')}
       WHERE f.row_index IS NOT NULL
+        AND ${RECIPIENT_PICK_SQL} IS NOT NULL
+        AND ${RECIPIENT_PICK_SQL} <> f.cur_name
       ORDER BY f.tab_name, f.row_index, f.file_name
       LIMIT $3`,
-    [sheetId || null, tabName || null, cap * 4]   // 이름이 이미 맞는 건을 아래에서 걸러내므로 넉넉히 읽는다
+    [sheetId || null, tabName || null, cap]
   );
 
   const out = [];
@@ -171,6 +185,6 @@ async function revertRecipientRenames({ db, sheetId = null, tabName = null, limi
 }
 
 module.exports = {
-  splitFileName, renamedTo, planRecipientRenames,
+  splitFileName, renamedTo, planRecipientRenames, TAIL_RE, TAIL_SQL,
   applyRecipientRenames, revertRecipientRenames, MAX_BATCH,
 };
