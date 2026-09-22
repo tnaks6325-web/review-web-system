@@ -24,6 +24,7 @@ const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
 const { verifyReviewerSession } = require('../services/reviewerSession.service');
+const { recipientNameForRow } = require('../services/captureOwnerName.service');
 
 /** 리뷰어 화면이 보낸 세션에서 서버가 검증한 신원만 반환한다. */
 function verifiedReviewerIdentity(req) {
@@ -1642,7 +1643,7 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
 // POST /api/image/review-upload — 리뷰 캡처 Drive 업로드 (새 4단계 구조)
 //
 // 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰] → [옵션(선택)]
-// 파일명 규칙: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
+// 파일명 규칙: {수취인}_{index}_{yyyyMMdd_HHmmss}.{ext}  ← 이름은 서버가 그 행에서 해석(captureOwnerName)
 //
 // 프론트엔드 페이로드:
 //   { sheetId, tabName, reviewerName, campaignName, optionFolderName,
@@ -1911,6 +1912,15 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       } catch (_) { /* 교체 안내용 보조값 — 실패해도 업로드는 계속 */ }
     }
 
+    /* ★★ 파일명에 쓸 이름은 **서버가 그 행의 수취인으로 정한다**(사용자 확정 2026-09-22).
+       타계정 참여는 주문자가 로그인 본계정 한 사람이라, 화면이 보낸 이름을 그대로 쓰면
+       같은 작업의 캡처가 전부 같은 이름으로 쌓여 **어떤 타계정의 리뷰인지 구분되지 않는다**.
+       ★ 해석은 `captureOwnerName` 단일 출처 — 리뷰어 제출 2경로와 작업보드 [📎 리뷰 대신 제출]이
+         각자 이름을 고르던 사본이 여기로 모인다. ★ 못 찾으면 종전 값(화면이 보낸 이름)으로 접는다.
+       ★ `reviewerName` 자체는 건드리지 않는다 — 원장·알림·검수는 계속 참여자 기준이다. */
+    const captureOwnerName =
+      (await recipientNameForRow({ db: pool, sheetId, tabName, rowIndex })) || reviewerName || '익명';
+
     // ── 3단계: 파일 업로드 (복수 파일 루프) ──
     const uploadResults = [];
     // 파일 루프의 판정값은 루프 밖 원장 기록 단계에서도 필요하다. 응답 객체에 붙이면
@@ -1920,9 +1930,9 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       const file = files[i];
       if (!file.data) continue;
 
-      // 파일명 생성: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
+      // 파일명 생성: {수취인}_{index}_{yyyyMMdd_HHmmss}.{ext}
       const reviewFileName = driveService.generateReviewFileName(
-        reviewerName || '익명',
+        captureOwnerName,
         i + 1,
         file.mimeType || 'image/jpeg'
       );
