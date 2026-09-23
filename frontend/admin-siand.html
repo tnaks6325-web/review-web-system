@@ -20,9 +20,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <!-- 시안 D: Pretendard -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css"/>
-  <link rel="stylesheet" href="css/index.css?v=20260908-two-line-log"/>
+  <link rel="stylesheet" href="css/index.css"/>
 <script src="api.js"></script>
-<script src="js/drive-thumb.js"></script>
 <style id="sianD">
 /* ===== 시안 D 테마: Indigo #5046E4 + Mint(페이백) #12B886 · Pretendard =====
    ※ 정보·배치·마크업은 원본 admin.html과 100% 동일. 색/폰트/라운드만 교체. */
@@ -1622,12 +1621,9 @@ body::after{ content:"시안 D"; position:fixed; left:8px; bottom:8px; z-index:9
           <label class="rform-label">배송유형</label>
           <select id="rf_delivery_type" class="rform-input">
             <option value="">선택 안 함</option>
+            <option value="빈택배">빈택배</option>
             <option value="실배송">실배송</option>
-            <option value="빈박스">빈박스</option>
-            <option value="택배발송대행">택배발송대행</option>
-            <option value="직접배송(가구 등)">직접배송(가구 등)</option>
-            <option value="회수">회수</option>
-            <option value="혼합">혼합</option>
+            <option value="회수건">회수건</option>
           </select>
         </div>
       </div>
@@ -1949,11 +1945,10 @@ body::after{ content:"시안 D"; position:fixed; left:8px; bottom:8px; z-index:9
   <div class="tc-popover-label">리뷰타입</div>
   <div class="tc-option-row" id="tcOptReview">
     <button class="tc-opt" data-val="">미지정</button>
-    <button class="tc-opt" data-val="포토">포토</button>
-    <button class="tc-opt" data-val="텍스트">텍스트</button>
+    <button class="tc-opt" data-val="실배송">실배송</button>
+    <button class="tc-opt" data-val="빈박스">빈박스</button>
     <button class="tc-opt" data-val="구매확정">구매확정</button>
-    <button class="tc-opt" data-val="별점">별점</button>
-    <button class="tc-opt" data-val="혼합">혼합</button>
+    <button class="tc-opt" data-val="믹스">믹스</button>
   </div>
   <div class="tc-popover-label">입금방식</div>
   <div class="tc-option-row" id="tcOptPayment">
@@ -2362,9 +2357,9 @@ body::after{ content:"시안 D"; position:fixed; left:8px; bottom:8px; z-index:9
 
 <!-- 작업오더 상세 렌더러 — 리뷰웹시스템[3버전]과 한 벌로 쓰는 공유 모듈. index-app.js 앞에 둔다
      (호출부·onclick 문자열이 전역 이름으로 참조하므로 먼저 정의돼 있어야 한다). -->
-<script src="js/work-order-detail.js?v=20260916-direct-delivery"></script>
+<script src="js/work-order-detail.js"></script>
 <!-- C/S 문의창구 — 같은 이유로 공유 모듈. 마크업(#csInquiryMount)도 여기서 마운트한다. -->
-<!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
+<!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
 <!-- 관리자 설정 패널(내 닉네임) — admin.html·리뷰웹시스템[3버전]과 한 벌로 쓰는 공유 모듈.
@@ -2517,10 +2512,10 @@ body::after{ content:"시안 D"; position:fixed; left:8px; bottom:8px; z-index:9
 <!-- ══════════════════════════════════════════════════════
      모집공고 관리 (recruit) JS
      ══════════════════════════════════════════════════════ -->
-<script src="js/index-recruit.js?v=20260914-recruit-thumb-paste"></script>
+<script src="js/index-recruit.js"></script>
 
 <!-- 외부모집 구매양식 관리자 수동제출(공용 모달) — admin.html과 같은 모듈 -->
-<script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
+<script src="js/manual-order.js"></script>
 
 <!-- ══════════════════════════════════════════════════════
      Phase 1-2: search.html 블랙리스트 배너 (공지 배너)

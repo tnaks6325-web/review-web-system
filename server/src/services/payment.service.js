@@ -1,5 +1,4 @@
 'use strict';
-const crypto = require('crypto');
 /**
  * 리뷰비 입금 자동화 M1 — 입금대상 추출 · 은행별 분류 · 회차(다운로드) 기록
  *
@@ -11,7 +10,7 @@ const crypto = require('crypto');
  *
  * ★★ 확정 규칙(완화 금지)
  *   ① 이체 단위 = **건별(A안)**. 시트 행 1개 = 이체 1줄. 합산하지 않는다.
- *   ② 대상 = 리뷰 제출완료 ∧ (현금영수증 대상이면 영수증 제출완료) ∧ 미입금 ∧ **다운로드 이력 없음**.
+ *   ② 대상 = 리뷰 제출완료 ∧ 미입금 ∧ **다운로드 이력 없음**.
  *      "다운로드 이력 있으면 무조건 제외"가 이중입금 방지의 핵심이고,
  *      DB 부분유니크(uq_payment_items_active)가 코드 실수까지 막는 최종 방어선이다.
  *   ③ 금액·통장표시·계좌는 **회차 생성 시점 값을 박제**한다(스냅샷). 나중에 규칙이
@@ -24,46 +23,13 @@ const pool = require('../db/pool');           // ★ 이 모듈은 pool 을 직�
 const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { logger } 구조분해다
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
-const { resolveDeliveryReviewFee } = require('../utils/deliveryReviewFee');
-const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
+const { resolveBank, bankNameByCode, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
-const { loadWorkboardAmounts, loadWorkboardAmountPopulation, workboardAmountKey } = require('./paymentWorkboardAmount.service');
-const { filterReceiptEligiblePaymentRows } = require('./paymentReceiptGate.service');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
-// 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
-const { normName } = require('./identity.service');
-// 담당자 판정 **단일 출처**(065 + 회차 #18) — payment.service·trackB.service(홈 목록)가
-// 같은 함수를 부른다. 사본을 두면 "탭 담당자는 만두인데 공고 담당자는 빈칸"이 그대로 재발한다.
-const { resolveWorkManager } = require('../utils/workManager');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
-
-function accountFingerprint(value) {
-  const account = normalizeAccount(value);
-  return account ? crypto.createHash('sha256').update(account).digest('hex') : '';
-}
-function snapshotFingerprint(bankName, account, holder) {
-  return crypto.createHash('sha256').update([String(bankName || '').trim(), normalizeAccount(account), String(holder || '').trim()].join('\u0000')).digest('hex');
-}
-
-function compareAccountSnapshot(item, current) {
-  const itemId = item && item.id;
-  const reviewerId = item && (item.account_reviewer_id || item.accountReviewerId);
-  const source = item && (item.account_source || item.accountSource);
-  const subPhone8 = item && (item.account_sub_phone8 || item.accountSubPhone8 || '');
-  const snapshotAccount = item && (item.bank_account || item.bankAccount);
-  const savedFingerprint = item && (item.account_snapshot_fingerprint || item.accountSnapshotFingerprint)
-    || snapshotFingerprint(item && (item.bank_name || item.bankName), snapshotAccount, item && (item.account_holder || item.accountHolder));
-  if (!item || !reviewerId || !source || !savedFingerprint || !current) return { state: 'unverifiable', itemId };
-  const sameIdentity = String(reviewerId) === String(current.reviewerId)
-    && String(source) === (current.isSub ? 'sub' : 'self')
-    && String(subPhone8) === (current.isSub ? String(current.subPhone8 || '') : '');
-  if (!sameIdentity) return { state: 'mismatch', itemId };
-  return savedFingerprint === snapshotFingerprint(current.bankName, current.bankAccount, current.accountHolder)
-    ? { state: 'match', itemId } : { state: 'mismatch', itemId };
-}
 
 /** 작업오더 물건비 수취방식 → 이체 은행 (사용자 확정 규칙)
  *  현금이체 → 하나은행 / 수수료(세금계산서) → 케이뱅크 */
@@ -100,18 +66,10 @@ function normalizeBankChoice(v) {
 /** `tab_configs.transfer_bank` 에 **되돌려 쓸 때** 의 표기(= 기존 화면이 읽는 한글 라벨) */
 function tabBankLabel(bank) { return BANK_LABEL[bank] || ''; }
 
-/** 입금관리의 담당자는 `utils/workManager.resolveWorkManager` 를 그대로 부른다(사본 금지).
- *  판정 규칙·사고 경위는 그 함수의 문서를 참고 — 여기서 다시 적으면 두 문서가 갈린다. */
-
 function _int(v) {
   const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
   return Number.isFinite(n) ? n : 0;
 }
-
-/** 그 건의 구매양식 계좌를 등록DB 계좌보다 먼저 쓰는가(사용자 확정 2026-09-21 · 기본 켬).
- *  ★ **호출 시점에 읽는다** — Railway 에서 `PAYMENT_FORM_ACCOUNT_FIRST=0` 만 넣으면
- *    재배포 없이 종전 동작(등록 계좌 우선)으로 즉시 되돌아간다. */
-function _formAccountFirst() { return process.env.PAYMENT_FORM_ACCOUNT_FIRST !== '0'; }
 
 /* ══════════════════════════════════════════════════════════
    1) 입금대상 추출
@@ -135,72 +93,35 @@ async function listPaymentTargets(opts = {}) {
     'ri.is_submitted = TRUE',
     'ri.row_index IS NOT NULL',
     "COALESCE(ri.phone8,'') <> ''",
-    // 알림톡 3회 성공 뒤 최종기한까지 미작성으로 종결된 작업은, 나중에 리뷰칸이 바뀌어도
-    // 자동 입금대상으로 되살리지 않는다. 실제 제출 여부(is_submitted)와 종결 원장은 별개다.
-    `NOT EXISTS (
-        SELECT 1 FROM review_closed_targets rrs
-         WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
-           AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review')`,
-    `NOT EXISTS (SELECT 1 FROM reviewer_participations p WHERE p.sheet_id=ri.sheet_id AND p.tab_name=ri.tab_name
-      AND p.row_index=ri.row_index AND p.lifecycle_status='active' AND p.review_obligation_status IN ('pending','unknown'))`,
     // 미입금 — search.service._isPaid 와 동일 규칙(SQL 판)
     `NOT (ri.is_submitted2 = 'PAID' OR EXISTS (
         SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
          WHERE kv.key ILIKE ANY($1) AND btrim(kv.value) <> ''))`,
     // 작업보드에서 수동으로 `8/11`을 입력한 행은 실제 입금완료로 간주한다.
-    // 대상 좌표는 아래 manual_paid CTE에서 한 번만 계산한다. 행별 상관 서브쿼리로
-    // participant_edits 전체를 반복 조회하면 운영 데이터에서 같은 인덱스를 35만 회 이상 탄다.
+    // 취소·공란·오류 문구는 제외하지 않으며, participant seq로 같은 행만 연결한다.
     `NOT EXISTS (
-        SELECT 1 FROM manual_paid mp
-         WHERE mp.sheet_id = ri.sheet_id AND mp.tab_name = ri.tab_name
-           AND mp.row_index = ri.row_index)`,
+        SELECT 1
+          FROM campaign_participants cp
+          JOIN participant_edits pe
+            ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+           AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
+             OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
+             OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+         WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+           AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+           AND pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
+           AND btrim(pe.value_text) = '8/11')`,
     // ★ 다운로드 이력 잠금 — 살아있는 회차 항목이 있으면 제외
     `NOT EXISTS (
         SELECT 1 FROM payment_batch_items pi
          WHERE pi.sheet_id = ri.sheet_id AND pi.tab_name = ri.tab_name
            AND pi.row_index = ri.row_index AND pi.status IN ('pending','paid'))`,
-    // 실제 입금 원장은 성공했는데 작업보드 표시·장부 재생성만 누락된 경우도 재지급 대상으로 살려내지 않는다.
-    // 단, 관리자가 나중에 해당 행을 '미입금'으로 명시 정정(is_paid=false)한 경우에는 그 이전 원장만 풀어준다.
-    // 정정 후 새 입금 원장이 생기면 시각 비교로 다시 잠겨 중복 이체를 막는다.
-    `NOT EXISTS (
-        SELECT 1
-          FROM payment_records pr
-         WHERE pr.sheet_id = ri.sheet_id AND pr.tab_name = ri.tab_name
-           AND pr.row_index = ri.row_index
-           AND NOT EXISTS (
-             SELECT 1
-               FROM campaign_participants cp
-               JOIN participant_edits pe
-                 ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
-                AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
-                  OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
-                  OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
-              WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
-                AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
-                AND pe.field = 'is_paid' AND pe.kind = 'bool' AND pe.value_bool = FALSE
-                AND pe.reverted_at IS NULL AND pe.created_at > pr.paid_at))`,
   ];
   if (opts.sheetId) { params.push(opts.sheetId); where.push(`ri.sheet_id = $${params.length}`); }
   if (opts.tabName) { params.push(opts.tabName); where.push(`ri.tab_name = $${params.length}`); }
 
-  const pageSize = 2000;
-  const resultLimit = 2000;
-  const limitParam = params.length + 1;
-  const offsetParam = params.length + 2;
-  const candidateSql =
-    `WITH manual_paid AS MATERIALIZED (
-       SELECT DISTINCT cp.sheet_id, cp.tab_name, cp.seq AS row_index
-         FROM participant_edits pe
-         JOIN campaign_participants cp
-           ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
-          AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
-            OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
-            OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
-        WHERE cp.deleted_at IS NULL AND cp.active = TRUE
-          AND pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
-          AND btrim(pe.value_text) = '8/11'
-     )
-     SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
+  const { rows } = await pool.query(
+    `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
             ri.reviewer_name AS "reviewerName", ri.phone8 AS "phone8",
             ri.start_date AS "startDate", ri.product_name AS "productName",
             -- 상품비 폴백 재료(주문 원장에 없는 행용). ★ row_json 을 통째로 끌어오지 않는다 —
@@ -209,151 +130,52 @@ async function listPaymentTargets(opts = {}) {
             (SELECT jsonb_object_agg(kv.key, kv.value)
                FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
               WHERE replace(kv.key, ' ', '') LIKE '%금액%'
-                 OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells",
-            -- 혼합배송 리뷰비 판정은 배송구분 한 칸만 필요하다. 행 JSON 전체를 넘기지 않아
-            -- 기존 입금 후보/작업보드 금액 조회의 작은-행 계약을 보존한다.
-            COALESCE(ri.row_json->>'배송구분', '') AS "deliveryKind"
-      FROM review_index ri
+                 OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells"
+       FROM review_index ri
       WHERE ${where.join(' AND ')}
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
-      LIMIT $${limitParam} OFFSET $${offsetParam}`;
-
-  // 현금영수증 미제출 행을 제외한 뒤 2,000건을 채운다. LIMIT을 먼저 적용하면 앞쪽의
-  // 미제출 행이 자리를 계속 차지해 뒤쪽 정상 지급 대상이 영구적으로 조회되지 않는다.
-  const rows = [];
-  let offset = 0;
-  while (rows.length < resultLimit) {
-    const { rows: pageRows } = await pool.query(candidateSql, [...params, pageSize, offset]);
-    if (!pageRows.length) break;
-    const eligibleRows = await filterReceiptEligiblePaymentRows(pool, pageRows);
-    rows.push(...eligibleRows.slice(0, resultLimit - rows.length));
-    if (pageRows.length < pageSize) break;
-    offset += pageRows.length;
-  }
+      LIMIT 2000`,
+    params
+  );
   if (!rows.length) return { items: [], summary: _summarize([]) };
 
   const sheetIds = [...new Set(rows.map(r => r.sheetId))];
   const tabNames = [...new Set(rows.map(r => r.tabName))];
   const phone8s = [...new Set(rows.map(r => r.phone8).filter(Boolean))];
 
-  const [campMap, orderMap, acctMap, tabMap, workboardAmountMap, workboardPopulation] = await Promise.all([
+  const [campMap, orderMap, acctMap, tabMap] = await Promise.all([
     _loadCampaigns(sheetIds, tabNames),
     _loadOrderPrices(sheetIds, tabNames),
     _loadAccounts(phone8s),
     _loadTabMeta(sheetIds, tabNames),
-    loadWorkboardAmounts(pool, rows.map(r => ({
-      // 금액 판정에는 이미 추린 금액 칸만 넘긴다. 배송구분은 위 SELECT의 단일 칸으로
-      // 별도 사용하므로, 행 JSON 전체가 이 경로에 섞여 기존 금액 우선순위를 바꾸지 않는다.
-      sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex, rowJson: r.amountCells,
-    }))),
-    loadWorkboardAmountPopulation(pool, rows),
   ]);
-
-  // 참여행/주문의 현재 소유자 링크는 행 연락처보다 먼저 쓴다. 레거시 제출 링크만 있는 행은
-  // 현재 연락처가 등록 리뷰어 한 명에게 정확히 연결되면 현재 계좌를 우선한다.
-  const ownerAcctMap = await _loadOwnerAccountsByRow(rows);
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
-    // 등록DB 계좌 해석 순서 = ① 현재 참여행/주문 소유자 → ② 현재 행 연락처 → ③ 레거시 제출 링크.
-    const ownerAcct = ownerAcctMap[key + '||' + r.rowIndex] || null;
-    const directAcct = acctMap[r.phone8] || null;
-    // 같은 번호가 여러 등록 리뷰어에게 연결되면 현재 행 소유자를 확정할 수 없다.
-    // 이때 오래된 제출 링크로 빠지면 과거 소유자에게 송금되므로 owner_link는 사용하지 않는다.
-    const safeOwnerAcct = ownerAcct && ownerAcct.source === 'owner_link'
-      && acctMap.ambiguousPhone8s.has(r.phone8) ? null : ownerAcct;
-    const registeredAcct = safeOwnerAcct && safeOwnerAcct.source !== 'owner_link'
-      ? safeOwnerAcct
-      : directAcct || safeOwnerAcct || null;
-    /* ★★★ 그 건의 구매양식 계좌가 이긴다 (사용자 확정 2026-09-21 — 종전 규율을 뒤집었다)
-         왜: 종전에는 **등록DB 계좌가 언제나 이겨** 리뷰어가 양식에 적어 낸 계좌를 보지도 않았다.
-         실사고(모기위키 439/440) — 타계정 "백운"(정재석의 타계정, 전용계좌 미등록) 건이 양식에
-         김솔지 계좌를 적었는데 등록DB의 주인 계좌(정재석)로 나가, 김솔지는 2건 중 1건만 받았다.
-         전수 점검 결과 같은 불일치가 **40건**(예금주까지 다른 건 23건 · 746,800원)이었고, 그중
-         31건은 리뷰어가 **직접** 제출한 건이었다 = 양식에서 계좌를 바꿔 적어도 반영되지 않았다.
-       ★ **다를 때 조용히 보내지 않는다** — 아래 `accountMismatch` 로 두 계좌를 화면에 함께 실어
-         보내고, 담당자가 체크를 풀면 그 건만 보류된다(회차에 안 담긴다).
-       ★ **반쪽 값은 인정하지 않는다** — `_orderAccount` 가 은행·계좌·예금주 셋이 다 있을 때만
-         객체를 돌려준다(반쪽으로 이체 파일을 만들면 은행이 통째로 거부한다).
-       ★ **`reviewerId` 는 만들지 않는다**(112 규율 유지) — 양식 계좌는 지목할 등록 리뷰어가 없어
-         회차 스냅샷 대조에서 `unverifiable` 로 빠져야 다운로드가 막히지 않는다.
-       ★ 되돌리기 = env `PAYMENT_FORM_ACCOUNT_FIRST=0` (코드 변경 0). */
-    const formAcct = _orderAccount(ord, r);
-    const useForm = _formAccountFirst() && !!formAcct;
-    const acct = useForm
-      // 신원 추적 필드(누가 참여했나)는 **등록DB 기준을 유지**한다 — 계좌(어디로 보내나)와 별개다.
-      ? { ...formAcct,
-          ownerReviewerId: (registeredAcct && registeredAcct.ownerReviewerId) || null,
-          participantIdentityId: (registeredAcct && registeredAcct.participantIdentityId) || null }
-      : (registeredAcct || formAcct || null);
-    /* 화면에 **말해야 하는 경우만** 재료를 싣는다(경고 전용 — 판정·보류는 하지 않는다).
-       ★★ **두 계좌가 같으면 `null`** — 양식 계좌가 기본 경로가 되면서 `accountSource==='order'`
-          가 대부분의 행에 붙는데, 그때마다 배지를 띄우면 **진짜 신호(불일치)가 묻힌다**(늑대소년).
-       ★ 비교는 숫자만(`normalizeAccount`) — `725602-00-129824` ↔ `72560200129824` 를 다름으로 오판 금지.
-       ★ `registered: null` = 등록된 계좌가 아예 없어 양식 계좌가 유일한 근거인 경우(112 의 2e). */
-    const _mmForm = formAcct ? {
-      bankName: formAcct.bankName || '',
-      accountTail: normalizeAccount(formAcct.bankAccount).slice(-4),
-      accountHolder: formAcct.accountHolder || '',
-    } : null;
-    const acctMismatch = !useForm ? null
-      : !registeredAcct
-        ? { form: _mmForm, registered: null, holderDiffers: false }
-        : normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
-          ? {
-              form: _mmForm,
-              registered: { bankName: registeredAcct.bankName || '',
-                            accountTail: normalizeAccount(registeredAcct.bankAccount).slice(-4),
-                            accountHolder: registeredAcct.accountHolder || '',
-                            name: registeredAcct.name || '', isSub: !!registeredAcct.isSub },
-              holderDiffers: String(formAcct.accountHolder || '').trim() !== String(registeredAcct.accountHolder || '').trim(),
-            }
-          : null;   // ← 같으면 아무 말도 하지 않는다
+    const acct = acctMap[r.phone8] || null;
 
-    // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
-    // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
-    //   합성하고, 값이 없을 때만 주문 원장으로 폴백한다. 셀에서 18,950 -> 7,650으로 고쳤는데
-    //   이체 파일은 옛 주문금액을 쓰는 두 진실원본 사고를 구조적으로 막는다.
+    // 상품비 = 그 행의 실제 제출 결제금액(주문 원장).
+    // ★ 주문 원장에 없는 행(옛 작업·직원 수기 입력)은 **시트 결제금액 칸**으로 폴백한다 —
+    //   그 칸이 그 행의 실제 결제금액이고, 폴백이 없으면 그런 행은 영영 0원 보류로 남는다.
+    //   출처(priceSource)를 함께 실어 화면이 "시트에서 읽음"을 드러낸다(조용한 추정 금지).
     const orderPrice = ord ? _int(ord.price) : 0;
-    const displayed = workboardAmountMap.get(workboardAmountKey(r)) || { amount: extractAmountNumber(r.amountCells), source: null };
-    const workboardPrice = Number(displayed.amount) || 0;
-    const productPrice = workboardPrice || orderPrice;
-    const priceSource = workboardPrice ? (displayed.source || 'workboard') : (orderPrice ? 'order' : null);
-    const priceMismatch = !!(workboardPrice && orderPrice && workboardPrice !== orderPrice);
+    const sheetPrice = orderPrice ? 0 : extractAmountNumber(r.amountCells);
+    const productPrice = orderPrice || sheetPrice;
+    const priceSource = orderPrice ? 'order' : (sheetPrice ? 'sheet' : null);
 
-    // 리뷰비 = 082 단일 출처(스냅샷 → 구간표 → 폴백). 판정 자체는 `resolveReviewFee` 가 한다.
-    // ★ 폴백 순서만 이체은행·통장표시와 **같은 규율**로 넓혔다: 공고 값 → **탭 값**(128).
-    //   공고가 없는 작업(옛 작업·외부모집)은 리뷰비를 넣을 칸이 아예 없어 상품비만 이체돼 왔다.
-    // ★ 스냅샷·구간표는 여전히 최우선(완화 금지) — 탭 값은 그 뒤의 폴백일 뿐이다.
-    const tabFee = tab && tab.reviewFee != null ? tab.reviewFee : null;
-    const campFee = camp && camp.reviewFee != null ? camp.reviewFee : null;
-    const feeInfo = resolveReviewFee({
-      snapshot: ord ? ord.feeSnapshot : null,
-      schedules: camp ? camp.schedules : [],
-      orderDate: ord ? ord.orderDate : null,
-      sheetDate: camp ? sheetDateToIso(r.startDate, camp.campStartDate) : null,
-      fallback: campFee != null ? campFee : (tabFee != null ? tabFee : 0),
-    });
-    // 혼합 배송은 작업표의 `배송구분` 행값이 기준이다. 한 작업 안에서도 실배송/빈박스가
-    // 서로 다른 리뷰비를 받아야 하므로 공고 단일값으로 다시 접지 않는다. 과거에 이미
-    // 고정된 주문 스냅샷은 최우선으로 보존한다.
-    const deliveryKind = String(r.deliveryKind || '').trim();
-    // 신청 시점의 유형별 스냅샷이 있으면 구간표의 단일 숫자 스냅샷보다 행별 금액이 우선한다.
-    // 유형별 스냅샷이 없는 과거 주문은 기존 단일 스냅샷을 그대로 보존한다.
-    const deliveryFeeMix = ord && ord.deliveryReviewFeeMixSnapshot != null
-      ? ord.deliveryReviewFeeMixSnapshot
-      : (ord && ord.feeSnapshot != null ? null : (camp && camp.deliveryReviewFeeMix));
-    const deliveryFeeInfo = resolveDeliveryReviewFee(deliveryFeeMix, deliveryKind, feeInfo.fee);
-    const fee = deliveryFeeInfo.fee;
-    // 이 금액이 **어디서 왔는지** — 화면이 "공고 값" / "탭 설정" 을 구분해 말한다(조용한 추정 금지).
-    const feeSource = deliveryFeeInfo.source === 'delivery_mix' ? 'delivery_mix'
-      : feeInfo.source === 'snapshot' ? 'snapshot'
-      : feeInfo.source === 'schedule' ? 'schedule'
-      : campFee != null ? 'campaign'
-      : tabFee != null ? 'tab' : null;
+    // 리뷰비 = 082 단일 출처(스냅샷 → 주문일 → 시트 구매일자 → 오늘 → 폴백)
+    const fee = camp
+      ? resolveReviewFee({
+          snapshot: ord ? ord.feeSnapshot : null,
+          schedules: camp.schedules,
+          orderDate: ord ? ord.orderDate : null,
+          sheetDate: sheetDateToIso(r.startDate, camp.campStartDate),
+          fallback: camp.reviewFee,
+        }).fee
+      : 0;
 
     // 은행 우선순위 = 공고(사람이 정한 값) → **탭 설정** → 작업오더 물건비 자동판정.
     // ★ 탭 설정(`tab_configs.transfer_bank`)은 관리자 대시보드 탭설정에서 예전부터 채워 온 칸인데
@@ -387,15 +209,7 @@ async function listPaymentTargets(opts = {}) {
     if (amount <= 0) issues.push('zero_amount');
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
-    /* ★ 양식 계좌 ≠ 등록DB 계좌 — **경고만**(사용자 확정 2026-09-21: 보류시키지 않는다).
-       화면이 두 계좌를 나란히 보여주고, 담당자가 체크를 풀면 그 건만 회차에서 빠진다. */
-    if (acctMismatch) warnings.push('account_form_override');
-    /* ★★ 리뷰비 0 = **리뷰비 없는 작업**이다 — 경고하지 않는다(사용자 확정 2026-08-24).
-       종전에는 "근거(feeSource)를 못 찾으면" 경고했는데, 공고가 없는 옛 작업은 근거가 구조적으로
-       없어 상시 경고로 뒤덮였다(실측: 보완 목록 37개 작업 대부분). 이 계정은 **상품비만 주는
-       작업이 다수**라 0 이 정상값이고, 그 경고가 진짜 신호(계좌·은행 미비)를 묻었다.
-       ★ 리뷰비를 정하고 싶으면 **작업보드 › 작업 조건 › 리뷰비**에서 설정한다(창구는 그대로 있다).
-       ★ `no_review_fee` 는 이제 어디서도 만들지 않는다 — 라벨·화면 분기도 함께 걷어냈다. */
+    if (!fee) warnings.push('no_review_fee');
 
     return {
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
@@ -404,14 +218,8 @@ async function listPaymentTargets(opts = {}) {
       // ★ 무시트/미등록이면 빈 값 = 화면이 버튼을 비활성으로 두고 **사유를 말한다**(죽은 링크 금지).
       sheetUrl: tab ? tab.sheetUrl : '',
       sheetless: !!(tab && tab.sheetless),
-      // 작업보드 바로가기 재료 — ★ 화면이 gid 를 추측하지 않게 서버가 실어 준다(리네임 대비).
-      tabGid: tab ? (tab.tabGid || '') : '',
       manager: tab ? (tab.manager || '') : '',
-      // 담당자를 어디서 읽었는지 — 'order' = 작업 화면과 같은 값 / 'tab' = 탭 설정 폴백
-      managerSource: tab ? (tab.managerSource || null) : null,
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
-      ownerReviewerId: acct && acct.ownerReviewerId ? acct.ownerReviewerId : null,
-      participantIdentityId: acct && acct.participantIdentityId ? acct.participantIdentityId : null,
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
       campaignTitle: camp ? camp.title : '',
@@ -429,78 +237,26 @@ async function listPaymentTargets(opts = {}) {
       accountOwner: acct ? (acct.ownerName || '') : '',
       // 계좌를 고칠 대상 지목 — ★ phone8 은 GENERATED·비유니크라 키로 쓰지 않는다(같은 뒤8자리 타인 행 오염).
       //   본계정은 reviewers.id, 타계정은 소유자 id + 그 명의 phone8.
-      // ★ 폴백(소유자 링크)로 찾은 건은 그 명의가 `sub_accounts` 에 **실제로 등록돼 있을 때만**
-      //   타계정으로 지목한다 — 없는 명의를 지목하면 보완 저장이 `sub_not_found` 로 죽는다.
       accountRef: acct && acct.reviewerId
-        ? { reviewerId: acct.reviewerId,
-            subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null }
+        ? { reviewerId: acct.reviewerId, subPhone8: acct.isSub ? r.phone8 : null }
         : null,
-      // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
-      //   · order(그 건의 구매양식 계좌 — 2026-09-21 확정으로 **기본 경로**가 됐다)
-      accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
-      /* 양식 계좌로 보내는데 등록DB 계좌가 **다를 때만** 실린다(같거나 등록 계좌가 없으면 null).
-         화면은 이 값을 **그리기만** 한다 — 판정 사본을 만들지 않는다. */
-      accountMismatch: acctMismatch,
-      productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
-      workboardPrice, orderPrice, priceMismatch,
-      tabReviewFee: tabFee, campaignReviewFee: campFee,
+      productPrice, reviewFee: fee, amount, priceSource,
       transferMemo: memo, memoSource,
       issues, warnings,
       payable: issues.length === 0,
     };
   });
 
-  flagPriceOutliers(items, workboardPopulation);
   return { items, summary: _summarize(items) };
-}
-
-/**
- * 같은 작업에서 압도적으로 많이 쓰이는 금액과 크게 다른 단독값만 경고한다.
- * 옵션별 정상 금액을 자동으로 막지 않도록 경고 전용이며, 4건 이상/주금액 70% 이상/
- * 단독 1건/차이 5천원 이상/1.5배 이상을 모두 만족할 때만 표시한다.
- */
-function flagPriceOutliers(items, referenceItems = items) {
-  const groups = new Map();
-  for (const item of (referenceItems || [])) {
-    const key = String(item.sheetId || '') + '||' + String(item.tabName || '');
-    if (!groups.has(key)) groups.set(key, []);
-    if (Number(item.productPrice) > 0) groups.get(key).push(item);
-  }
-  const stats = new Map();
-  for (const [key, group] of groups) {
-    if (group.length < 4) continue;
-    const counts = new Map();
-    for (const item of group) counts.set(Number(item.productPrice), (counts.get(Number(item.productPrice)) || 0) + 1);
-    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-    if (!ranked.length || (ranked[1] && ranked[0][1] === ranked[1][1])) continue;
-    const [dominantAmount, dominantCount] = ranked[0];
-    if (dominantCount < 3 || dominantCount / group.length < 0.7) continue;
-    stats.set(key, { counts, dominantAmount, dominantCount, workCount: group.length });
-  }
-  for (const item of (items || [])) {
-    const key = String(item.sheetId || '') + '||' + String(item.tabName || '');
-    const stat = stats.get(key); if (!stat) continue;
-    const candidate = Number(item.productPrice);
-    if (candidate === stat.dominantAmount || stat.counts.get(candidate) !== 1) continue;
-    const difference = Math.abs(candidate - stat.dominantAmount);
-    const ratio = Math.max(candidate, stat.dominantAmount) / Math.min(candidate, stat.dominantAmount);
-    if (difference < 5000 || ratio < 1.5) continue;
-    item.priceOutlier = { dominantAmount: stat.dominantAmount, dominantCount: stat.dominantCount,
-      workCount: stat.workCount, difference, ratio };
-    if (!Array.isArray(item.warnings)) item.warnings = [];
-    if (!item.warnings.includes('price_outlier')) item.warnings.push('price_outlier');
-  }
-  return items;
 }
 
 function _summarize(items) {
   const s = {
     total: items.length, totalAmount: 0,
     kbank: 0, kbankAmount: 0, hana: 0, hanaAmount: 0,
-    noBank: 0, noAccount: 0, blocked: 0, noMemo: 0, priceOutliers: 0,
+    noBank: 0, noAccount: 0, blocked: 0, noMemo: 0,
   };
   for (const it of items) {
-    if ((it.warnings || []).includes('price_outlier')) s.priceOutliers++;
     if (it.payable) {
       s.totalAmount += it.amount;
       if ((it.warnings || []).includes('no_memo')) s.noMemo++;
@@ -522,8 +278,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
   const { rows } = await pool.query(
     `SELECT DISTINCT ON (c.linked_sheet_id, c.linked_tab_name)
             c.id, c.title, c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
-            c.review_fee AS "reviewFee",
-            c.delivery_review_fee_mix AS "deliveryReviewFeeMix",
+            COALESCE(c.review_fee, 0) AS "reviewFee",
             c.transfer_bank AS "transferBank", c.transfer_memo AS "transferMemo",
             to_char(c.start_date,'YYYY-MM-DD') AS "campStartDate",
             wo.goods_cost_type AS "goodsCostType"
@@ -540,11 +295,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
   );
   for (const c of rows) {
     map[c.sheetId + '||' + c.tabName] = {
-      /* 0 을 NULL 로 접지 말 것 — "0원으로 정한 무상 작업"과 "값이 없는 공고"는 다르다.
-         종전 COALESCE(...,0) + || 0 이 둘을 같은 값으로 만들어, 무상 작업 전건이
-         no_review_fee 경고를 달았다(실측 2026-08-19 위프 800건 24/24). */
-      id: c.id, title: c.title || '', reviewFee: (c.reviewFee == null ? null : Number(c.reviewFee)),
-      deliveryReviewFeeMix: c.deliveryReviewFeeMix || [],
+      id: c.id, title: c.title || '', reviewFee: c.reviewFee || 0,
       transferBank: c.transferBank || null, transferMemo: c.transferMemo || '',
       campStartDate: c.campStartDate || null, goodsCostType: c.goodsCostType || '',
       schedules: [],
@@ -578,11 +329,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     // ★ order_submissions 의 제출 시각 컬럼은 **submitted_at** 이다(created_at 이 아니다 — 001:179).
     //   틀리면 42703 으로 이 쿼리가 통째로 죽어 입금대상 화면이 서버오류가 된다.
     `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
-            price, review_fee_snapshot AS "feeSnapshot",
-            delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", submitted_at AS "orderedAt",
-            -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
-            --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
-            bank AS "bank", account AS "account", depositor AS "depositor"
+            price, review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt"
        FROM order_submissions
       WHERE deleted_at IS NULL AND sheet_row IS NOT NULL
         AND sheet_id = ANY($1) AND tab_name = ANY($2)`,
@@ -590,35 +337,10 @@ async function _loadOrderPrices(sheetIds, tabNames) {
   );
   for (const o of rows) {
     map[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = {
-      price: o.price, feeSnapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
-      orderDate: toKstDate(o.orderedAt),
-      bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
+      price: o.price, feeSnapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt),
     };
   }
   return map;
-}
-
-/**
- * 그 건의 구매양식으로 제출된 계좌(order_submissions.bank/account/depositor).
- *
- * ★★ 등록리뷰어DB에 계좌가 없어도 **그 건 자체에는 리뷰어가 적어 낸 계좌가 있다**(작업보드 표에
- *    보이는 은행·계좌번호·예금주가 그 값이다). 이걸 안 보면 "시트엔 계좌가 멀쩡히 있는데
- *    입금관리는 리뷰어 정보 없음" 이 된다(실사고 2026-08-19 최영순7).
- * ★ **지목할 리뷰어가 없으므로 `reviewerId` 를 만들지 않는다** — 화면 계좌 보완 팝업의 대상이
- *   아니고(고칠 대상은 등록리뷰어DB다) 회차 스냅샷 대조에서도 가드 밖(unverifiable)이다.
- * ★ 세 값이 다 있어야 인정한다 — 반쪽 값으로 이체 파일을 만들면 은행이 통째로 거부한다.
- */
-function _orderAccount(ord, row) {
-  if (!ord) return null;
-  const bankName = String(ord.bank || '').trim();
-  const account = normalizeAccount(ord.account || '');
-  const holder = String(ord.depositor || '').trim();
-  if (!bankName || !account || !holder) return null;
-  return {
-    reviewerId: null, bankName, bankAccount: account, accountHolder: holder,
-    isSub: false, source: 'order',
-    name: String((row && row.reviewerName) || ''), ownerName: '',
-  };
 }
 
 /**
@@ -628,7 +350,6 @@ function _orderAccount(ord, row) {
  */
 async function _loadAccounts(phone8s) {
   const map = {};
-  Object.defineProperty(map, 'ambiguousPhone8s', { value: new Set(), enumerable: false });
   if (!phone8s.length) return map;
   const { rows: subs } = await pool.query(
     `SELECT RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) AS "phone8",
@@ -643,22 +364,12 @@ async function _loadAccounts(phone8s) {
       WHERE RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) = ANY($1)`,
     [phone8s]
   );
-  const subsByPhone = new Map();
   for (const s of subs) {
-    if (!s.phone8) continue;
-    if (!subsByPhone.has(s.phone8)) subsByPhone.set(s.phone8, []);
-    subsByPhone.get(s.phone8).push(s);
-  }
-  for (const [p8, matches] of subsByPhone) {
-    if (matches.length === 1) {
-      const s = matches[0];
+    if (s.phone8 && !map[s.phone8]) {
       // ★ 명의 이름(sub_accounts[].name)과 소유자 이름을 함께 싣는다 —
       //   같은 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 화면이 "누구 계좌인지" 말할 수 없다(실사고).
-      map[p8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
-                  ownerReviewerId: s.reviewerId, participantIdentityId: null,
-                  isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
-    } else {
-      map.ambiguousPhone8s.add(p8);
+      map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
+                        isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
     }
   }
   const { rows: own } = await pool.query(
@@ -667,260 +378,11 @@ async function _loadAccounts(phone8s) {
        FROM reviewers WHERE phone8 = ANY($1)`,
     [phone8s]
   );
-  const ownByPhone = new Map();
   for (const r of own) {
-    if (!ownByPhone.has(r.phone8)) ownByPhone.set(r.phone8, []);
-    ownByPhone.get(r.phone8).push(r);
+    map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '',
+                      isSub: false, name: r.name || '', ownerName: r.name || '' };
   }
-  // 현재 등록 번호가 유일해도 과거에 다른 소유자의 본/타계정 번호였다면 자동 선택하지 않는다.
-  // 전화번호 변경 서비스는 세대에 따라 reviewer_phone_changes 또는 identity alias에 이력을 남긴다.
-  const { rows: historicalPhoneRows } = await pool.query(
-    `SELECT old_phone8 AS "phone8", reviewer_id AS "reviewerId"
-       FROM reviewer_phone_changes
-      WHERE old_phone8 = ANY($1::text[])
-     UNION
-     SELECT ria.phone8, ri.owner_reviewer_id AS "reviewerId"
-       FROM reviewer_identity_aliases ria
-       JOIN reviewer_identities ri ON ri.id = ria.identity_id
-      WHERE ria.phone8 = ANY($1::text[])`,
-    [phone8s]
-  );
-  const historicalByPhone = new Map();
-  for (const row of historicalPhoneRows) {
-    if (!historicalByPhone.has(row.phone8)) historicalByPhone.set(row.phone8, []);
-    historicalByPhone.get(row.phone8).push(row);
-  }
-  for (const p8 of new Set([...subsByPhone.keys(), ...ownByPhone.keys()])) {
-    const ownerIds = new Set([
-      ...(subsByPhone.get(p8) || []).map(x => String(x.reviewerId)),
-      ...(ownByPhone.get(p8) || []).map(x => String(x.reviewerId)),
-      ...(historicalByPhone.get(p8) || []).map(x => String(x.reviewerId)),
-    ]);
-    if (ownerIds.size > 1) map.ambiguousPhone8s.add(p8);
-  }
-  for (const [p8, matches] of ownByPhone) {
-    if (matches.length !== 1 || map.ambiguousPhone8s.has(p8)) {
-      if (matches.length !== 1) map.ambiguousPhone8s.add(p8);
-      delete map[p8];
-      continue;
-    }
-    const r = matches[0];
-    map[p8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '',
-                ownerReviewerId: r.reviewerId, participantIdentityId: null,
-                isSub: false, name: r.name || '', ownerName: r.name || '' };
-  }
-  for (const p8 of map.ambiguousPhone8s) delete map[p8];
   return map;
-}
-
-/**
- * 계좌를 phone8 으로 못 찾은 행 → **소유자(로그인 리뷰어) 링크**로 역조회.
- *
- * ★★ 왜 필요한가(실사고 2026-08-19 "김수만/명지수"): 타계정 매칭 키는 `sub_accounts[].phone`
- *    하나뿐이라, 소유자가 타계정을 **이름만** 등록했거나 번호를 다르게 적어 두면 그 참여 건이
- *    `리뷰어 정보 없음` 으로 **영구 보류**된다. 계좌(김수만)는 멀쩡히 있는데 지목할 길이 없었다.
- *
- * ★★ **이름으로 소유자를 추측하지 않는다(완화 금지)** — 동명이인 한 번이면 남의 계좌로 송금이다.
- *    근거는 그 행에 이미 박제된 **하드 링크 두 개**뿐:
- *      ① 참여 원장 `campaign_applications.owner_phone8`(주문 id 로 그 행에 결속 — 홀드 생성 시
- *         서버가 명의 검증을 거쳐 기록한 값이라 "이 명의는 이 소유자의 것"이 확정돼 있다)
- *      ② 제출 신원 링크 `participation_links.phone8`(= 로그인 phone8). 현재 행 연락처가 다른
- *         등록 리뷰어에게 정확히 연결되면 그 현재 계좌를 우선하고, 그렇지 않을 때만 링크 소유자의
- *         본계좌를 사용한다.
- * ★ ① 이 ② 를 이긴다(원장이 더 강한 근거).
- * ★ `reviewers.phone8` 은 GENERATED·비유니크 → **후보가 유일할 때만** 채택(모호 = 미채택).
- * ★ 조회 실패는 throw 하지 않는다 — 폴백이 죽어도 입금대상 목록은 종전대로 나온다.
- */
-async function _loadOwnerAccountsByRow(rows) {
-  const out = {};
-  if (!rows.length) return out;
-  const key = r => r.sheetId + '||' + r.tabName + '||' + r.rowIndex;
-  const sheetIds = rows.map(r => r.sheetId);
-  const tabNames = rows.map(r => r.tabName);
-  const rowIdx = rows.map(r => r.rowIndex);
-  const nameByRow = new Map(rows.map(r => [key(r), String(r.reviewerName || '')]));
-
-  try {
-    // 현재 작업표 참여행의 불변 소유자 UUID. 이 값이 있으면 행의 이름·연락처가 달라도
-    // 등록리뷰어DB의 해당 소유자 계좌를 사용한다.
-    const { rows: viaParticipant } = await pool.query(
-      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
-              cp.owner_reviewer_id AS "ownerReviewerId",
-              cp.participant_identity_id AS "participantIdentityId", cp.phone8 AS "subPhone8"
-         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
-         JOIN campaign_participants cp
-           ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
-          AND cp.deleted_at IS NULL AND cp.active = TRUE
-        WHERE cp.owner_reviewer_id IS NOT NULL`,
-      [sheetIds, tabNames, rowIdx]);
-
-    // 주문/신청 링크. 현재 참여행에 UUID가 아직 없는 과거 자료도 신청 시 기록한
-    // owner_phone8로 유일한 등록 리뷰어를 찾을 수 있다.
-    const { rows: viaOrder } = await pool.query(
-      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
-              COALESCE(os.owner_reviewer_id, ca.owner_reviewer_id) AS "ownerReviewerId",
-              CASE WHEN os.owner_reviewer_id IS NULL OR os.owner_reviewer_id = ca.owner_reviewer_id
-                   THEN COALESCE(os.participant_identity_id, ca.participant_identity_id)
-                   ELSE os.participant_identity_id END AS "participantIdentityId",
-              CASE WHEN os.owner_reviewer_id IS NULL THEN ca.owner_phone8 ELSE NULL END AS "ownerPhone8",
-              CASE WHEN os.owner_reviewer_id IS NULL OR os.owner_reviewer_id = ca.owner_reviewer_id
-                   THEN ca.phone8 ELSE NULL END AS "subPhone8"
-         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
-         JOIN order_submissions os
-           ON os.sheet_id = t.sheet_id AND os.tab_name = t.tab_name
-          AND os.sheet_row = t.row_index AND os.deleted_at IS NULL
-         LEFT JOIN LATERAL (
-           SELECT app.owner_reviewer_id, app.participant_identity_id, app.owner_phone8, app.phone8
-             FROM campaign_applications app
-            WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
-            ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
-            LIMIT 1
-         ) ca ON TRUE
-        WHERE COALESCE(os.owner_reviewer_id, ca.owner_reviewer_id) IS NOT NULL
-           OR (os.owner_reviewer_id IS NULL AND ca.owner_reviewer_id IS NULL
-               AND COALESCE(ca.owner_phone8, '') <> '')`,
-      [sheetIds, tabNames, rowIdx]);
-
-    // 제출 시점에 확정한 로그인 소유자. 현재 참여행·주문 링크가 없는 레거시 행의 마지막 근거다.
-    const { rows: viaLink } = await pool.query(
-      `SELECT pl.sheet_id AS "sheetId", pl.tab_name AS "tabName", pl.row_index AS "rowIndex",
-              pl.owner_reviewer_id AS "ownerReviewerId",
-              pl.participant_identity_id AS "participantIdentityId", pl.phone8 AS "ownerPhone8"
-         FROM participation_links pl
-         JOIN unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
-           ON pl.sheet_id = t.sheet_id AND pl.tab_name = t.tab_name AND pl.row_index = t.row_index
-        WHERE pl.owner_reviewer_id IS NOT NULL OR COALESCE(pl.phone8, '') <> ''`,
-      [sheetIds, tabNames, rowIdx]);
-
-    const links = [...viaParticipant, ...viaOrder, ...viaLink];
-    const ownerIds = [...new Set(links.map(x => x.ownerReviewerId).filter(Boolean).map(String))];
-    const ownerPhones = [...new Set(links.filter(x => !x.ownerReviewerId).map(x => x.ownerPhone8).filter(Boolean))];
-    const participantIds = [...new Set(links.map(x => x.participantIdentityId).filter(Boolean).map(String))];
-    if (!ownerIds.length && !ownerPhones.length) return out;
-
-    const { rows: revs } = await pool.query(
-      `SELECT id AS "reviewerId", phone8, COALESCE(name,'') AS "name",
-              bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder",
-              CASE WHEN jsonb_typeof(sub_accounts) = 'array' THEN sub_accounts ELSE '[]'::jsonb END AS "subAccounts"
-         FROM reviewers
-        WHERE id = ANY($1::uuid[]) OR phone8 = ANY($2::text[])`, [ownerIds, ownerPhones]);
-    const { rows: identityRows } = participantIds.length ? await pool.query(
-      `SELECT id, owner_reviewer_id AS "ownerReviewerId", member_no AS "memberNo",
-              current_name AS "currentName", current_phone8 AS "currentPhone8", status
-         FROM reviewer_identities
-        WHERE id = ANY($1::uuid[])`, [participantIds]) : { rows: [] };
-    const { rows: historicalPhoneRows } = await pool.query(
-      `SELECT old_phone8 AS "phone8", reviewer_id AS "reviewerId"
-         FROM reviewer_phone_changes
-        WHERE old_phone8 = ANY($1::text[])
-       UNION
-       SELECT ria.phone8, ri.owner_reviewer_id AS "reviewerId"
-         FROM reviewer_identity_aliases ria
-         JOIN reviewer_identities ri ON ri.id = ria.identity_id
-        WHERE ria.phone8 = ANY($1::text[])`, [ownerPhones]);
-    const historicalPhoneOwners = new Map();
-    for (const row of historicalPhoneRows) {
-      if (!historicalPhoneOwners.has(row.phone8)) historicalPhoneOwners.set(row.phone8, new Set());
-      historicalPhoneOwners.get(row.phone8).add(String(row.reviewerId));
-    }
-    const byId = new Map(revs.map(r => [String(r.reviewerId), r]));
-    const identityById = new Map(identityRows.map(r => [String(r.id), r]));
-    const byPhone = new Map();
-    for (const r of revs) {
-      if (!byPhone.has(r.phone8)) byPhone.set(r.phone8, []);
-      byPhone.get(r.phone8).push(r);
-    }
-    const resolveOwner = link => {
-      if (link.ownerReviewerId) return byId.get(String(link.ownerReviewerId)) || null;
-      const list = byPhone.get(link.ownerPhone8) || [];
-      const historicalOwners = historicalPhoneOwners.get(link.ownerPhone8) || new Set();
-      if (list.length === 1 && [...historicalOwners].some(id => id !== String(list[0].reviewerId))) return null;
-      return list.length === 1 ? list[0] : null;
-    };
-    const pack = (owner, sub, source, link) => ({
-      reviewerId: owner.reviewerId,
-      ownerReviewerId: owner.reviewerId,
-      participantIdentityId: link.participantIdentityId || null,
-      bankName:      (sub && String(sub.bankName || '').trim())      || owner.bankName || '',
-      bankAccount:   (sub && String(sub.bankAccount || '').trim())   || owner.bankAccount || '',
-      accountHolder: (sub && String(sub.accountHolder || '').trim()) || owner.accountHolder || '',
-      isSub: !!sub, source,
-      name: (sub && String(sub.name || '').trim()) || owner.name || '',
-      ownerName: owner.name || '',
-      // ★ 지목 대상 = 그 명의 항목이 실제로 등록돼 있을 때만 타계정, 아니면 소유자 본계좌.
-      //   (등록돼 있지 않은 명의를 subPhone8 로 지목하면 보완 저장이 `sub_not_found` 로 죽는다)
-      subPhone8: (sub && sub.__phone8) || null,
-    });
-    const findSub = (owner, { subPhone8, name }) => {
-      const arr = Array.isArray(owner.subAccounts) ? owner.subAccounts : [];
-      const p8 = String(subPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
-      for (const s of arr) {
-        if (!s) continue;
-        const sp8 = String(s.phone || '').replace(/[^0-9]/g, '').slice(-8);
-        if (p8 && sp8 === p8) return { ...s, __phone8: sp8 };
-      }
-      const n = normName(name);
-      if (!n) return null;
-      const hits = arr.filter(s => s && normName(s.name) === n);
-      // ★ 같은 이름이 두 개면 어느 명의인지 정할 수 없다 → 미채택
-      if (hits.length !== 1) return null;
-      const sp8 = String(hits[0].phone || '').replace(/[^0-9]/g, '').slice(-8);
-      return { ...hits[0], __phone8: sp8 || null };
-    };
-    const resolveParticipant = (owner, link, name, allowLegacy = true) => {
-      if (!link.participantIdentityId) {
-        return { ok: true, sub: allowLegacy ? findSub(owner, { subPhone8: link.subPhone8, name }) : null };
-      }
-      const identity = identityById.get(String(link.participantIdentityId));
-      if (!identity || String(identity.ownerReviewerId) !== String(owner.reviewerId)) return { ok: false, sub: null };
-      if (identity.status !== 'active') return { ok: false, sub: null };
-      const memberNo = Number(identity.memberNo);
-      if (!Number.isSafeInteger(memberNo) || memberNo < 0) return { ok: false, sub: null };
-      if (memberNo === 0) return { ok: true, sub: null };
-      const arr = Array.isArray(owner.subAccounts) ? owner.subAccounts : [];
-      const sub = arr[memberNo - 1];
-      if (!sub) return { ok: false, sub: null };
-      const sp8 = String(sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
-      // member_no는 부여 당시의 배열 위치다. 앞 타계정이 삭제되면 같은 위치가 다른 사람을
-      // 가리킬 수 있으므로, 현재 코드 신원의 이름·번호와 둘 다 맞을 때만 그 계좌를 쓴다.
-      if (String(sub.name || '').trim() !== String(identity.currentName || '').trim()
-          || sp8 !== String(identity.currentPhone8 || '').replace(/[^0-9]/g, '').slice(-8)) {
-        return { ok: false, sub: null };
-      }
-      return { ok: true, sub: { ...sub, __phone8: sp8 || null } };
-    };
-
-    // 제출 링크 → 주문/신청 → 현재 참여행 순서로 덮어쓴다. 현재 참여행이 최종 권위다.
-    // 링크만 남은 과거 행은 참여자 이름·번호가 달라도 확정된 등록 소유자의 본계좌로 귀속한다.
-    for (const x of viaLink) {
-      const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
-      if (out[k]) continue;
-      const owner = resolveOwner(x);
-      if (!owner) continue;
-      const participant = resolveParticipant(owner, x, nameByRow.get(k), false);
-      if (!participant.ok) { delete out[k]; continue; }
-      out[k] = pack(owner, participant.sub, 'owner_link', x);
-    }
-    for (const x of viaOrder) {
-      const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
-      const owner = resolveOwner(x);
-      if (!owner) continue;
-      const participant = resolveParticipant(owner, x, nameByRow.get(k));
-      if (!participant.ok) { delete out[k]; continue; }
-      out[k] = pack(owner, participant.sub, 'owner_order', x);
-    }
-    for (const x of viaParticipant) {
-      const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
-      const owner = resolveOwner(x);
-      if (!owner) continue;
-      const participant = resolveParticipant(owner, x, nameByRow.get(k));
-      if (!participant.ok) { delete out[k]; continue; }
-      out[k] = pack(owner, participant.sub, 'owner_participant', x);
-    }
-  } catch (e) {
-    logger.warn('[payment] 소유자 링크 계좌 폴백 실패(종전대로 보류): ' + e.message);
-  }
-  return out;
 }
 
 /**
@@ -939,15 +401,11 @@ async function _loadTabMeta(sheetIds, tabNames) {
               COALESCE(NULLIF(btrim(tc.display_name),''), tc.tab_name) AS "label",
               tc.manager AS "manager",
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
-              tc.review_fee AS "reviewFee",
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
-              wo.goods_cost_type AS "goodsCostType",
-              -- ★ 담당자 판정 원천 = 인트라넷 작업담당(065) 하나뿐
-              --   (담당AE 실명 칸은 여기서 읽지 않는다 — 065 이전 사고 자리)
-              wo.work_manager AS "orderWorkManager"
+              wo.goods_cost_type AS "goodsCostType"
          FROM tab_configs tc
          LEFT JOIN LATERAL (
-              SELECT w.goods_cost_type, w.work_manager FROM work_orders w
+              SELECT w.goods_cost_type FROM work_orders w
                WHERE w.deleted_at IS NULL
                  AND w.linked_tab_sheet_id = tc.sheet_id
                  AND w.linked_tab_name = tc.tab_name
@@ -955,16 +413,10 @@ async function _loadTabMeta(sheetIds, tabNames) {
         WHERE tc.sheet_id = ANY($1) AND tc.tab_name = ANY($2)`,
       [sheetIds, tabNames]);
     for (const t of rows) {
-      const mgr = resolveWorkManager({ orderWorkManager: t.orderWorkManager, tabManager: t.manager });
       map[t.sheetId + '||' + t.tabName] = {
-        label: t.label, manager: mgr.manager, managerSource: mgr.managerSource,
-        transferBank: t.transferBank || '', depositName: t.depositName || '',
-        // ★ 리뷰비는 **NULL(미설정)과 0(무상 지정)을 구분**한다 — `|| 0` 으로 접으면
-        //   미설정이 조용히 0원이 되어 공고 값이 있는데도 탭 폴백이 이긴 것처럼 보인다.
-        reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
+        label: t.label, manager: t.manager || '', transferBank: t.transferBank || '', depositName: t.depositName || '',
         goodsCostType: t.goodsCostType || '',
         sheetless: t.sheetless === true,
-        tabGid: String(t.tabGid == null ? '' : t.tabGid),
         sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
       };
     }
@@ -1038,33 +490,14 @@ async function createBatch({ bank, rows, by }) {
       // 건별 SAVEPOINT — 23505(다른 담당자가 먼저 담음)는 그 건만 건너뛴다.
       await client.query('SAVEPOINT sp_item');
       try {
-        // Serialize with manual closure; a stale payment list cannot enqueue a closed row.
-        await client.query(`SELECT id FROM campaign_participants
-          WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3 AND active=TRUE AND deleted_at IS NULL FOR UPDATE`,
-        [it.sheetId, it.tabName, it.rowIndex]);
-        const closed = await client.query(`SELECT 1 FROM review_closed_targets
-          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [it.sheetId, it.tabName, it.rowIndex]);
-        if (closed.rows.length) {
-          await client.query('RELEASE SAVEPOINT sp_item');
-          skipped.push({ key: it.sheetId + '||' + it.tabName + '||' + it.rowIndex, reason: 'closed_no_review' });
-          continue;
-        }
         const { rows: [row] } = await client.query(
           `INSERT INTO payment_batch_items
              (batch_id, sheet_id, tab_name, row_index, campaign_id, reviewer_name, phone8,
-              owner_reviewer_id, participant_identity_id,
               bank_name, bank_code, bank_account, account_holder,
-              account_reviewer_id, account_source, account_sub_phone8, account_fingerprint, account_snapshot_fingerprint,
               product_price, review_fee, amount, transfer_memo)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
           [batch.id, it.sheetId, it.tabName, it.rowIndex, it.campaignId, it.reviewerName, it.phone8,
-           it.ownerReviewerId || null, it.participantIdentityId || null,
            it.bankName, it.bankCode, it.bankAccount, it.accountHolder,
-           it.accountRef && it.accountRef.reviewerId || null,
-           // ★ 'sub' 은 **등록된 명의**(subPhone8)를 가리킬 때만 — 없으면 값은 소유자 본계좌이므로
-           //   'self' 로 박제해야 다음 대조(reconcileAccountSnapshots)가 같은 곳을 본다.
-           it.accountRef ? (it.accountRef.subPhone8 ? 'sub' : 'self') : null,
-           it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount), snapshotFingerprint(it.bankName, it.bankAccount, it.accountHolder),
            it.productPrice, it.reviewFee, it.amount, it.transferMemo]);
         await client.query('RELEASE SAVEPOINT sp_item');
         saved.push({ ...it, id: row.id });
@@ -1147,69 +580,20 @@ async function listBatches(limit = 50) {
 }
 
 /** 회차 상세(항목 포함) */
-async function getBatch(batchId, { db = pool, lock = false } = {}) {
-  const { rows: [b] } = await db.query(
-    `SELECT * FROM payment_batches WHERE id = $1${lock ? ' FOR UPDATE' : ''}`,
-    [batchId]
-  );
+async function getBatch(batchId) {
+  const { rows: [b] } = await pool.query(`SELECT * FROM payment_batches WHERE id = $1`, [batchId]);
   if (!b) return null;
-  const { rows: items } = await db.query(
+  const { rows: items } = await pool.query(
     `SELECT * FROM payment_batch_items WHERE batch_id = $1 ORDER BY created_at, id`, [batchId]);
   return { batch: _batchView(b), items };
 }
 
 /** 재다운로드 이력 기록(사용자 확정: 재다운로드도 이력에 남는다) */
-async function markDownloaded(batchId, by, { db = pool } = {}) {
-  await db.query(
+async function markDownloaded(batchId, by) {
+  await pool.query(
     `UPDATE payment_batches
         SET download_count = download_count + 1, last_downloaded_at = NOW(), last_downloaded_by = $2
       WHERE id = $1`, [batchId, by || '']);
-}
-
-async function checkBatchAccountSnapshots({ batch, items }, { db = pool } = {}) {
-  const guarded = (items || []).filter(i => i.account_reviewer_id && i.account_source);
-  if (!guarded.length) return { ok: true, mismatches: [], unverifiable: (items || []).length };
-  const ids = [...new Set(guarded.map(i => String(i.account_reviewer_id)))];
-  const { rows } = await db.query(
-    `SELECT id AS "reviewerId", bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder", sub_accounts AS "subAccounts"
-       FROM reviewers WHERE id::text = ANY($1::text[])`, [ids]);
-  const byId = new Map(rows.map(r => [String(r.reviewerId), r]));
-  return reconcileAccountSnapshots(guarded, byId);
-}
-
-/** 최초 이체파일 생성 직전, 회차 생성 후 바뀐 영수증 검수 상태를 현재 원장으로 다시 확인한다. */
-async function checkBatchReceiptEligibility({ items } = {}, { db = pool, lock = false } = {}) {
-  const live = (items || []).filter(item => item.status !== 'cancelled');
-  const coords = live.map(item => ({
-    sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index,
-  }));
-  const eligible = await filterReceiptEligiblePaymentRows(db, coords, { lock });
-  const allowed = new Set(eligible.map(item => `${item.sheetId}\u0000${item.tabName}\u0000${item.rowIndex}`));
-  const blocked = live.filter(item => !allowed.has(`${item.sheet_id}\u0000${item.tab_name}\u0000${item.row_index}`));
-  return {
-    ok: blocked.length === 0,
-    blocked: blocked.map(item => ({ itemId: item.id, reviewerName: item.reviewer_name || '' })),
-  };
-}
-
-function reconcileAccountSnapshots(items, ownersById) {
-  const mismatches = [];
-  let unverifiable = 0;
-  for (const item of items || []) {
-    const owner = ownersById.get(String(item.account_reviewer_id));
-    let current = null;
-    if (owner && item.account_source === 'self') {
-      current = { reviewerId: owner.reviewerId, isSub: false, bankName: owner.bankName || '', bankAccount: owner.bankAccount || '', accountHolder: owner.accountHolder || '' };
-    } else if (owner && item.account_source === 'sub') {
-      const subs = Array.isArray(owner.subAccounts) ? owner.subAccounts : [];
-      const sub = subs.find(s => String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8) === String(item.account_sub_phone8 || ''));
-      if (sub) current = { reviewerId: owner.reviewerId, isSub: true, subPhone8: item.account_sub_phone8 || '', bankName: sub.bankName || owner.bankName || '', bankAccount: sub.bankAccount || owner.bankAccount || '', accountHolder: sub.accountHolder || owner.accountHolder || '' };
-    }
-    const comparison = compareAccountSnapshot(item, current);
-    if (comparison.state !== 'match') mismatches.push({ itemId: item.id, reviewerName: item.reviewer_name || '', accountTail: String(item.bank_account || '').replace(/[^0-9]/g, '').slice(-4) });
-    if (comparison.state === 'unverifiable') unverifiable++;
-  }
-  return { ok: mismatches.length === 0, mismatches, unverifiable };
 }
 
 function _batchView(b) {
@@ -1257,101 +641,28 @@ function _batchView(b) {
    3) 은행 서식 엑셀 생성
    ══════════════════════════════════════════════════════════ */
 
-
 /**
- * 은행별 다건이체 등록 서식.
+ * 은행별 다건이체 등록 서식(.xlsx).
  * ★ 헤더·열 순서는 각 은행 **공식 양식 그대로**다(케이뱅크는 공유받은 원본 양식 기준).
  *   임의로 바꾸면 은행 사이트가 파일을 거부한다.
- *
- * ★★ **파일 형식이 은행마다 다르다(완화 금지 — 2026-08-19 실측 사고)**
- *   · 케이뱅크 = **.xlsx**(OOXML) — 종전 그대로.
- *   · 하나은행 = **.xls(BIFF8 · OLE2)** — 하나 기업뱅킹 다건이체 업로드가 xlsx 를
- *     `해당 파일은 엑셀파일이 아닙니다. 다시 올려주십시오.` 로 **통째로 거부**했다.
- *     엑셀로 열어 다시 저장한 정상 xlsx 도 같은 거부였다 = 우리 파일이 깨진 게 아니라
- *     그쪽이 **구형 형식만 읽는다**. 하나가 돌려주는 이체결과 파일도 실측상 OLE2 .xls
- *     (`utils/paymentResultParse.js` 주석) — 같은 계열이다.
- *   되돌리기 = env `PAYMENT_HANA_XLS=0`(하나도 종전 xlsx 로 생성).
- *
- * ★ 형식·확장자·MIME 는 `BANK_FILE_FORMAT` **단일 출처**다 — 내용은 .xls 인데 파일명만
- *   .xlsx 로 나가면 은행 화면이 확장자만 보고 다시 거부한다(둘이 갈리면 안 된다).
  */
-const BANK_FILE_FORMAT = {
-  kbank: { kind: 'xlsx', ext: 'xlsx', sheet: '대량이체등록정보',
-    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-  hana: { kind: 'xls', ext: 'xls', sheet: '다건이체',
-    mime: 'application/vnd.ms-excel' },
-};
-
-/** 그 회차 파일의 형식(확장자·MIME) — 파일명·응답 헤더·본문 생성이 같은 값을 본다. */
-function batchFileFormat(bank) {
-  const f = BANK_FILE_FORMAT[bank] || BANK_FILE_FORMAT.kbank;
-  if (bank === 'hana' && process.env.PAYMENT_HANA_XLS === '0') {
-    return { ...f, kind: 'xlsx', ext: 'xlsx', mime: BANK_FILE_FORMAT.kbank.mime };
-  }
-  return f;
-}
-
-/**
- * OOXML(.xlsx) 직렬화 — 케이뱅크(+하나 킬스위치 복귀분).
- * ★★ 계좌·은행코드는 **문자열 셀 + 텍스트 서식(`@`)** 으로 나간다 —
- *    숫자로 해석되면 `0123…` 의 앞 0 이 날아가거나 긴 계좌가 지수표기(1.23E+12)로 바뀌어
- *    은행 업로드가 통째로 거부된다(담당자가 매번 `'0123` 처럼 손으로 고치던 지점).
- *    금액만 숫자 그대로 둔다(은행 양식이 수치를 요구).
- */
-async function _writeXlsx(sheetName, rows, widths) {
+async function buildWorkbook(bank, items) {
+  // ★ 서식에 찍히는 **정식 명칭**(`bankNameByCode`)이 오버레이 값이어야 한다 —
+  //   화면에서 이름을 고쳐 놓고 파일엔 옛 이름이 나가면 은행이 거부한다.
+  await _bankOv.ensureBankOverrides();
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'review-web-system';
-  const ws = wb.addWorksheet(sheetName);
-  for (const r of rows) ws.addRow(r);
-  ws.columns = widths.map(w => ({ width: w }));
-  ws.eachRow((row, i) => {
-    if (i === 1) return;
-    row.eachCell(cell => { if (typeof cell.value === 'string') cell.numFmt = '@'; });
-  });
-  return Buffer.from(await wb.xlsx.writeBuffer());
-}
-
-/**
- * 구형 엑셀(.xls · BIFF8/OLE2) 직렬화 — 하나은행 전용.
- * ★ 문자열/숫자 구분과 텍스트 서식(`@`) 규칙은 xlsx 경로와 **같다**(계좌 앞 0 보존).
- * ★ SheetJS(`@e965/xlsx`)는 이미 이체결과 해석에 쓰는 의존성이라 신규 의존 0.
- */
-function _writeXls(sheetName, rows, widths) {
-  const XLSX = require('@e965/xlsx');
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = 1; R <= range.e.r; R++) {           // 헤더(0행) 제외
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-      if (cell && cell.t === 's') cell.z = '@';
-    }
-  }
-  ws['!cols'] = widths.map(w => ({ wch: w }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  return Buffer.from(XLSX.write(wb, { bookType: 'biff8', type: 'buffer' }));
-}
-
-async function buildWorkbook(bank, items) {
-  // ★ 서식에 찍히는 **정식 명칭**(`bankFormLabel`)이 오버레이 값이어야 한다 —
-  //   화면에서 이름을 고쳐 놓고 파일엔 옛 이름이 나가면 은행이 거부한다.
-  await _bankOv.ensureBankOverrides();
-  const fmt = batchFileFormat(bank);
-  const rows = [];
-  let widths;
 
   if (bank === 'kbank') {
-    rows.push(['* 입금은행(코드/은행명/증권사명)', '* 입금계좌', '* 이체금액(원)', '받는분 통장표시 ', '예금주']);
+    const ws = wb.addWorksheet('대량이체등록정보');
+    ws.addRow(['* 입금은행(코드/은행명/증권사명)', '* 입금계좌', '* 이체금액(원)', '받는분 통장표시 ', '예금주']);
     for (const it of items) {
       // ★ 리뷰어가 적은 원문('신한')이 아니라 **표준코드에서 파생한 정식명**('신한은행')을 쓴다.
       //   양식 가이드가 "형식에 맞는 은행/증권사명 혹은 코드만" 허용하므로 원문은 거부될 수 있다.
-      // ★★ 케이뱅크가 이름을 인식 못 하는 기관(031 대구은행 — 2026-08-21 실측)은
-      //   `bankFormLabel` 이 **코드**를 돌려준다. 판정은 `utils/bankCodes` 단일 출처이고
-      //   여기에 예외 사본을 만들지 않는다.
       const code = String(it.bank_code || it.bankCode || '');
-      rows.push([
-        bankFormLabel(code) || code,
+      ws.addRow([
+        bankNameByCode(code) || code,
         // ★ 계좌는 마지막까지 `normalizeAccount` 단일 출처로 숫자만 남긴다 —
         //   옛 원장 스냅샷에 '-' 가 섞여 있어도 은행 서식에는 절대 나가지 않게(업로드 거부 방지).
         normalizeAccount(it.bank_account || it.bankAccount || ''),
@@ -1360,11 +671,12 @@ async function buildWorkbook(bank, items) {
         it.account_holder || it.accountHolder || '',
       ]);
     }
-    widths = [28, 20, 14, 18, 14];
+    ws.columns = [{ width: 28 }, { width: 20 }, { width: 14 }, { width: 18 }, { width: 14 }];
   } else {
-    rows.push(['입금은행코드', '입금계좌번호', '이체금액', '예상예금주', '보내는분 통장표시내용', '받는분 통장표시내용', 'CMS/모집인코드']);
+    const ws = wb.addWorksheet('다건이체');
+    ws.addRow(['입금은행코드', '입금계좌번호', '이체금액', '예상예금주', '보내는분 통장표시내용', '받는분 통장표시내용', 'CMS/모집인코드']);
     for (const it of items) {
-      rows.push([
+      ws.addRow([
         String(it.bank_code || it.bankCode || ''),     // ★ 문자열 — '045'의 앞 0이 사라지면 안 됨
         normalizeAccount(it.bank_account || it.bankAccount || ''),   // ★ 위와 같은 이유(숫자만 · 앞 0 보존)
         _int(it.amount),
@@ -1374,18 +686,25 @@ async function buildWorkbook(bank, items) {
         '',
       ]);
     }
-    widths = [14, 22, 14, 14, 20, 20, 16];
+    ws.columns = [{ width: 14 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 20 }, { width: 20 }, { width: 16 }];
   }
-
-  return fmt.kind === 'xls' ? _writeXls(fmt.sheet, rows, widths) : _writeXlsx(fmt.sheet, rows, widths);
+  // ★★ 계좌·은행코드는 **문자열 셀 + 텍스트 서식(`@`)** 으로 나간다 —
+  //    숫자로 해석되면 `0123…` 의 앞 0 이 날아가거나 긴 계좌가 지수표기(1.23E+12)로 바뀌어
+  //    은행 업로드가 통째로 거부된다(담당자가 매번 `'0123` 처럼 손으로 고치던 지점).
+  //    금액만 숫자 그대로 둔다(은행 양식이 수치를 요구).
+  wb.worksheets[0].eachRow((row, i) => {
+    if (i === 1) return;
+    row.eachCell(cell => { if (typeof cell.value === 'string') cell.numFmt = '@'; });
+  });
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-/** 다운로드 파일명 — 예) 하나은행_다건이체_20260819_124.xls / 케이뱅크_…_124.xlsx */
+/** 다운로드 파일명 — 예) 케이뱅크_다건이체_20260804_124.xlsx */
 function batchFileName(batch) {
   const d = new Date(batch.createdAt || Date.now());
   const kst = new Date(d.getTime() + 9 * 3600 * 1000);
   const ymd = kst.toISOString().slice(0, 10).replace(/-/g, '');
-  return `${BANK_LABEL[batch.bank] || batch.bank}_다건이체_${ymd}_${batch.seq}.${batchFileFormat(batch.bank).ext}`;
+  return `${BANK_LABEL[batch.bank] || batch.bank}_다건이체_${ymd}_${batch.seq}.xlsx`;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1410,19 +729,18 @@ class PaymentFixError extends Error {
  *   덮는 것을 막는다(계약 오링크와 같은 규율).
  *
  * @param {{sheetId:string, tabName:string, campaignId?:string|null,
- *          bank?:string|null, memo?:string|null, reviewFee?:number|string|null}} p
- *        bank/memo/reviewFee 는 **undefined = 변경 없음**, `''`(또는 null) = 지움(자동/미설정으로 되돌림).
- * @returns {{ok:true, target:'campaign'|'tab', bank:string|null, memo:string, reviewFee:number|null}}
+ *          bank?:string|null, memo?:string|null}} p
+ *        bank/memo 는 **undefined = 변경 없음**, `''` = 지움(자동으로 되돌림).
+ * @returns {{ok:true, target:'campaign'|'tab', bank:string|null, memo:string}}
  */
-async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, reviewFee }) {
+async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo }) {
   const sid = String(sheetId || '').trim();
   const tab = String(tabName || '').trim();
   if (!sid || !tab) throw new PaymentFixError('bad_target', '작업(시트·탭)이 지정되지 않았습니다.');
 
   const touchBank = bank !== undefined;
   const touchMemo = memo !== undefined;
-  const touchFee = reviewFee !== undefined;
-  if (!touchBank && !touchMemo && !touchFee) throw new PaymentFixError('empty', '변경할 값이 없습니다.');
+  if (!touchBank && !touchMemo) throw new PaymentFixError('empty', '변경할 값이 없습니다.');
 
   // 빈 값 = 지움(자동 판정으로 되돌림) / 모르는 표기는 거부(추측 저장 금지)
   let bankCode = null;
@@ -1431,16 +749,6 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
     if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크 또는 하나은행만 지정할 수 있습니다.');
   }
   const memoText = touchMemo ? normalizeMemo(String(memo || '')) : null;
-
-  // 리뷰비 — 빈 값(''·null) = **미설정으로 되돌림**(0원 지정과 구분).
-  // ★ 숫자가 아니거나 음수는 거부한다(추측 저장 금지 — 잘못 넣으면 리뷰어에게 잘못된 금액이 나간다).
-  let feeVal = null;
-  if (touchFee && !(reviewFee === null || String(reviewFee).trim() === '')) {
-    const n = Number(String(reviewFee).replace(/[,\s]/g, ''));
-    if (!Number.isFinite(n) || n < 0) throw new PaymentFixError('bad_fee', '리뷰비는 0 이상의 숫자로 입력해 주세요.');
-    if (n > 10000000) throw new PaymentFixError('bad_fee', '리뷰비가 너무 큽니다(1천만원 이하).');
-    feeVal = Math.floor(n);
-  }
 
   // 공고 대상 검증 — 그 탭에 연결된 공고만 인정
   let campId = null;
@@ -1455,30 +763,25 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
 
   if (campId) {
     // ★ 이 두 칸만 UPDATE — 공고의 다른 설정은 절대 건드리지 않는다(축약 폼 클로버 금지).
-    // ★ 공고의 `review_fee` 는 **구간표(082)가 없을 때의 그 공고 금액**이다 — 구간이 있으면
-    //   구간이 계속 이긴다(그 사실을 화면이 문장으로 말한다). 0 은 무상 지정이라 그대로 저장한다.
     await pool.query(
       `UPDATE recruit_campaigns
           SET transfer_bank = CASE WHEN $2::bool THEN $3::text ELSE transfer_bank END,
-              transfer_memo = CASE WHEN $4::bool THEN $5::text ELSE transfer_memo END,
-              review_fee    = CASE WHEN $6::bool THEN COALESCE($7::int, 0) ELSE review_fee END
+              transfer_memo = CASE WHEN $4::bool THEN $5::text ELSE transfer_memo END
         WHERE id = $1`,
-      [campId, touchBank, bankCode, touchMemo, memoText, touchFee, feeVal]);
-    return { ok: true, target: 'campaign', bank: bankCode, memo: memoText || '', reviewFee: touchFee ? (feeVal == null ? 0 : feeVal) : undefined };
+      [campId, touchBank, bankCode, touchMemo, memoText]);
+    return { ok: true, target: 'campaign', bank: bankCode, memo: memoText || '' };
   }
 
   // 탭 설정 — ★ 표기는 **한글 라벨**(관리자 대시보드 탭설정이 그 형식을 그대로 비교해 배지를 그린다)
-  // ★ 탭 리뷰비(128)는 **NULL = 미설정**을 유지한다(0 으로 접으면 공고 폴백과 구분이 사라진다).
   const { rowCount } = await pool.query(
     `UPDATE tab_configs
         SET transfer_bank = CASE WHEN $3::bool THEN $4::text ELSE transfer_bank END,
             deposit_name  = CASE WHEN $5::bool THEN $6::text ELSE deposit_name END,
-            review_fee    = CASE WHEN $7::bool THEN $8::int ELSE review_fee END,
             updated_at    = NOW()
       WHERE sheet_id = $1 AND tab_name = $2`,
-    [sid, tab, touchBank, bankCode ? tabBankLabel(bankCode) : '', touchMemo, memoText, touchFee, feeVal]);
+    [sid, tab, touchBank, bankCode ? tabBankLabel(bankCode) : '', touchMemo, memoText]);
   if (!rowCount) throw new PaymentFixError('tab_not_found', '탭 설정이 없어 저장하지 못했습니다(작업오더 접수 전 탭일 수 있습니다).');
-  return { ok: true, target: 'tab', bank: bankCode, memo: memoText || '', reviewFee: touchFee ? feeVal : undefined };
+  return { ok: true, target: 'tab', bank: bankCode, memo: memoText || '' };
 }
 
 /**
@@ -1490,7 +793,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
  *   소유자 공통계좌를 덮지 않는다(타계정 전용계좌 규약 유지).
  * ★ 빈 값은 **덮지 않는다**(부분 보완 허용) — 지우려면 화면이 아니라 등록리뷰어DB에서.
  */
-async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder, by }) {
+async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder }) {
   // ★ 아래 `resolveBank` 검증이 화면에서 방금 등록한 표기를 알아야 한다(안 그러면
   //   표기를 넣어 두고도 계좌 저장이 '인식불가'로 거부되는 막다른 길).
   await _bankOv.ensureBankOverrides();
@@ -1506,66 +809,37 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
   if (bn && !resolveBank(bn)) throw new PaymentFixError('bad_bank_name', `'${bn}' 은행명을 인식할 수 없습니다. 정식 은행명으로 입력해 주세요(예: 국민은행 · 카카오뱅크).`);
 
   const sub = String(subPhone8 || '').replace(/[^0-9]/g, '');
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query("SELECT set_config('app.changed_by', $1, true)", [String(by || 'payment-workdesk')]);
-    if (sub) {
-      // 타계정 — 소유자 행의 배열에서 그 명의 항목만 병합
-      const { rows } = await client.query(`SELECT sub_accounts FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
-      if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
-      const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
-      let hit = false;
-      const next = arr.map(s => {
-        const p8 = String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8);
-        if (p8 !== sub || hit) return s;
-        hit = true;
-        return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
-      });
-      if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
-      await client.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
-      await client.query('COMMIT');
-      return { ok: true, target: 'sub' };
-    }
-
-    const { rows: [existing] } = await client.query(`SELECT bank_name, bank_account FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
-    if (!existing) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
-    const { rowCount } = await client.query(
-      `UPDATE reviewers
-          SET bank_name      = CASE WHEN $2::text <> '' THEN $2::text ELSE bank_name END,
-              bank_account   = CASE WHEN $3::text <> '' THEN $3::text ELSE bank_account END,
-              account_holder = CASE WHEN $4::text <> '' THEN $4::text ELSE account_holder END
-        WHERE id = $1`,
-      [id, bn, ba, ah]);
-    if (!rowCount) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
-    await client.query('COMMIT');
-    return { ok: true, target: 'self' };
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* best effort */ }
-    throw err;
-  } finally {
-    client.release();
+  if (sub) {
+    // 타계정 — 소유자 행의 배열에서 그 명의 항목만 병합
+    const { rows } = await pool.query(`SELECT sub_accounts FROM reviewers WHERE id = $1`, [id]);
+    if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
+    const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
+    let hit = false;
+    const next = arr.map(s => {
+      const p8 = String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8);
+      if (p8 !== sub || hit) return s;
+      hit = true;
+      return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
+    });
+    if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
+    await pool.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
+    return { ok: true, target: 'sub' };
   }
-}
 
-/** ★★ 은행 계산이 실제로 쓰는 그 공고를 그대로 돌려준다(사본 금지 — 코드리뷰 P1 지적 반영).
- *  한 탭에 공고가 여럿(차수 재발행)이면 `_loadCampaigns`(이체 계산의 유일한 진실원본)와
- *  **정확히 같은 규칙**(이름 일치 · created_at 최신 하나 · 상태 무관 · GID 폴백 없음)으로 고른다.
- *  워크보드의 「작업 조건」 카드가 이 함수로 은행을 그려야 "화면은 하나은행인데 이체 파일은
- *  케이뱅크" 같은 divergence 가 구조적으로 불가능해진다(사본을 두면 두 규칙이 각자 진화한다). */
-async function campaignForTab(sheetId, tabName) {
-  if (!sheetId || !tabName) return null;
-  const map = await _loadCampaigns([sheetId], [tabName]);
-  return map[sheetId + '||' + tabName] || null;
+  const { rowCount } = await pool.query(
+    `UPDATE reviewers
+        SET bank_name      = CASE WHEN $2::text <> '' THEN $2::text ELSE bank_name END,
+            bank_account   = CASE WHEN $3::text <> '' THEN $3::text ELSE bank_account END,
+            account_holder = CASE WHEN $4::text <> '' THEN $4::text ELSE account_holder END
+      WHERE id = $1`,
+    [id, bn, ba, ah]);
+  if (!rowCount) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
+  return { ok: true, target: 'self' };
 }
 
 module.exports = {
-  campaignForTab,
-
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
-  checkBatchReceiptEligibility,
-  buildWorkbook, batchFileName, batchFileFormat,
-  saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
-  compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
+  buildWorkbook, batchFileName,
+  saveTransferSetting, saveReviewerAccount, PaymentFixError,
 };

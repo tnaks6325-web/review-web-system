@@ -45,20 +45,6 @@ function __setPoolForTest(p) { _pool = p; }
 /** 리뷰제출 칸에 쓰는 값 — Track B write-back(`_wantMark`)과 같은 표기 */
 const SUBMIT_MARK = 'O';
 
-/**
- * 그 탭이 쓰는 상태 칸(리뷰제출·입금) 헤더명 — **줄이 아니라 탭 단위**로 해석한다.
- * ★ 소비처가 둘이다: 무시트 상태 기록(markStatusCell)과 **관리자 수동 리뷰제출**
- *   (수동/작업표로 추가한 줄은 `campaign_participants.submit_col` 이 비어 있다 —
- *    그 칸은 `review_index` 복제 경로에서만 채워진다). 각자 SQL 을 쓰면 "장부는 A 칸에
- *    쓰는데 수동 제출은 B 칸에 쓰는" 상태가 된다.
- * @param {object} db  pool 또는 **트랜잭션 client**(잠근 tx 안에서 부를 수 있어야 한다)
- */
-async function statusHeaderForTab(db, { sheetId, tabName, kind = 'submit' } = {}) {
-  if (!db || !sheetId || !tabName) return '';
-  const col = kind === 'paid' ? 'submit_col2' : 'submit_col';
-  return _resolveStatusHeader(db, { sheetId, tabName, col, kind });
-}
-
 async function _v2StatusHeaders(db, { sheetId, tabName }) {
   const { rows: configs } = await db.query(
     `SELECT tab_gid, workboard_schema_version FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]
@@ -70,7 +56,7 @@ async function _v2StatusHeaders(db, { sheetId, tabName }) {
   );
   const headers = Array.isArray(tabRows[0] && tabRows[0].h) ? tabRows[0].h : [];
   const bindings = await require('./statusColumnBinding.service').loadV2StatusBindings(db, {
-    sheetId, tabGid: configs[0] && configs[0].tab_gid, tabName, headers,
+    sheetId, tabGid: configs[0] && configs[0].tab_gid, headers,
   });
   return { submit: bindings.review_submit.header, paid: bindings.payment_status.header };
 }
@@ -105,18 +91,17 @@ async function _resolveStatusHeader(db, { sheetId, tabName, col, kind }) {
  * @returns {Promise<{handled:boolean, ok?:boolean, reason?:string, column?:string}>}
  *   handled=false → 무시트 탭이 아님(호출부는 종전 경로 유지)
  */
-async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by = 'system', deferRebuild = false, client = null } = {}) {
+async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by = 'system', deferRebuild = false } = {}) {
   if (!sheetId || !tabName || !rowIndex) return { handled: false };
   if (kind !== 'submit' && kind !== 'paid') return { handled: false };
 
-  const db = client || getPool();
+  const db = getPool();
 
   // ── 무시트 판정은 단일 출처 ──
   let sheetless = false;
   try {
     sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
   } catch (_) {
-    if (client) return { handled: true, ok: false, reason: 'scope_lookup_failed' };
     // 판정 실패 = 모른다 → 종전 경로(시트 쓰기)로 보낸다.
     // ★ 여기서 handled:true 로 접으면 시트 기반 탭의 입금 기록이 조용히 사라진다.
     return { handled: false };
@@ -141,8 +126,8 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
   //   담당자가 열을 추가해야 표시가 남는다(모르면 "왜 입금 표시가 안 뜨지"가 된다).
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
-  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by, kind,
-    mergeDeposit: kind === 'paid', deferRebuild: deferRebuild || !!client });
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by,
+    mergeDeposit: kind === 'paid', deferRebuild });
 }
 
 /**
@@ -201,48 +186,12 @@ async function verifyStatusCell({ sheetId, tabName, rowIndex, kind, value = '' }
  * ★★ 열 고르기는 `utils/memoColumn` 단일 출처(시트 경로·큐 재시도와 같은 규칙) — 사본을 두면
  *   "시트 탭은 포스팅 칸, 무시트 탭은 비고 칸"으로 갈린다.
  * ★ 헤더 출처는 `detected_headers || headers` — `rebuildLedgers` 가 읽는 그 값(A1 행이 아니다).
- * ★ 시트 기반 탭이면 `{handled:false}` = 호출부 종전 경로.
- * 완료 트랜잭션에서는 범위 확인 실패도 실패로 반환하고 장부 재생성은 COMMIT 뒤로 미룬다.
+ * ★ 시트 기반 탭이면 `{handled:false}` = 호출부 종전 경로. 판정 실패도 같다(fail-open).
  */
-async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = false, by = 'system', client = null, deferRebuild = false } = {}) {
+async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = false, by = 'system' } = {}) {
   if (!sheetId || !tabName || !rowIndex) return { handled: false };
   const text = String(memo == null ? '' : memo).trim();
   if (!text) return { handled: false };                       // 쓸 값이 없으면 관여하지 않는다
-
-  const db = client || getPool();
-  let sheetless = false;
-  try {
-    sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
-  } catch (e) {
-    if (client) return { handled: true, ok: false, reason: 'scope_lookup_failed', message: e.message };
-    return { handled: false };
-  }
-  if (!sheetless) return { handled: false };
-
-  let headers = [];
-  try {
-    const { rows } = await db.query(
-      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
-        WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
-      [sheetId, tabName]);
-    headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
-  } catch (e) {
-    return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
-  }
-  const header = require('../utils/memoColumn').pickMemoColumnName(headers, { blog });
-  // ★ 조용히 성공으로 접지 않는다 — 그 작업표에 비고/포스팅 열이 없다는 뜻이다.
-  if (!header) return { handled: true, ok: false, reason: 'no_memo_column' };
-
-  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by,
-    deferRebuild: deferRebuild || !!client });
-}
-
-/** 127: 포스팅제출일 자동 기록(blog 제출 완료 시) — memo 기록과 같은 규율·같은 실행부.
- *  열 고르기는 utils/memoColumn.pickPostDateColumnName 단일 출처(시트 경로·큐 재시도와 동일). */
-async function markSheetlessPostDate({ sheetId, tabName, rowIndex, date, by = 'system' } = {}) {
-  if (!sheetId || !tabName || !rowIndex) return { handled: false };
-  const text = String(date == null ? '' : date).trim();
-  if (!text) return { handled: false };
 
   const db = getPool();
   let sheetless = false;
@@ -261,99 +210,51 @@ async function markSheetlessPostDate({ sheetId, tabName, rowIndex, date, by = 's
   } catch (e) {
     return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
   }
-  const header = require('../utils/memoColumn').pickPostDateColumnName(headers);
-  if (!header) return { handled: true, ok: false, reason: 'no_post_date_column' };
-
-  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
-}
-
-/**
- * 무시트 탭의 **구매일자 칸**에 날짜를 기록한다 (2026-08-21 · 달력 편집 창구).
- *
- * ★ 어느 칸인가 = `campaignSchedule.findDateColumnIndex` 단일 출처(재번호·일정 인식과 같은 판정).
- * ★ 표기 = `worktablePlan.sheetDateStr`(`M / D (요일)`) — 재번호 파서(parseDateColumn)가 그대로 읽는다.
- * ★ 시트 기반 탭은 handled:false(시트가 진실원본 — 그쪽 편집은 시트에서).
- * @param {string} o.dateYmd 'YYYY-MM-DD'
- */
-async function markSheetlessPurchaseDate({ sheetId, tabName, rowIndex, dateYmd, by = 'system' } = {}) {
-  if (!sheetId || !tabName || !rowIndex) return { handled: false };
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateYmd || '').trim());
-  if (!m) return { handled: true, ok: false, reason: 'bad_date' };
-  const o = { y: +m[1], m: +m[2], d: +m[3] };
-  const chk = new Date(Date.UTC(o.y, o.m - 1, o.d));
-  if (chk.getUTCFullYear() !== o.y || chk.getUTCMonth() + 1 !== o.m || chk.getUTCDate() !== o.d) {
-    return { handled: true, ok: false, reason: 'bad_date' };
-  }
-
-  const db = getPool();
-  let sheetless = false;
-  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
-  catch (_) { return { handled: false }; }
-  if (!sheetless) return { handled: false };
-
-  let headers = [];
-  try {
-    const { rows } = await db.query(
-      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
-        WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
-      [sheetId, tabName]);
-    headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
-  } catch (e) {
-    return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
-  }
-  const di = require('./campaignSchedule.service').findDateColumnIndex(headers);
-  if (di < 0) return { handled: true, ok: false, reason: 'no_date_column' };
-  const header = String(headers[di] || '').trim();
-
-  const value = require('../utils/worktablePlan').sheetDateStr(o);
-  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by });
-}
-
-/**
- * 무시트 탭의 **주문자·수취인 칸**에 이름을 기록한다 (2026-08-24 · 리뷰내역 반영 창구).
- *
- * ★★ 왜 필요한가 — 리뷰어 홈 "리뷰 내역" 카드(`search.service`)의 이름은 `review_index.reviewer_name`
- *   이고, 그 값은 **작업표의 '주문자' 계열 칸**(`orderLedger._fieldToCol(headers,'orderer')`가 찾는
- *   헤더 — 흔히 '주문자제출')에서 온다. `review_index.recipient_name`(작업표 '수취인' 칸)은
- *   현재 리뷰어 화면 어디에도 표시되지 않는다 — 그래도 참고용으로 함께 실제 반영시킨다.
- * ★ 어느 칸이 주문자/수취인인가 = **`orderLedger._fieldToCol` 단일 출처**(관리자 주문 편집이 이미
- *   쓰는 판정 — 사본을 두면 "주문 편집은 이 칸에 쓰는데 여기는 저 칸을 찾는" 드리프트가 생긴다).
- * ★ 이 행에 연결된 주문(`order_submissions`)이 있으면 이 함수를 부르지 않는다 — 그 경우는
- *   원장을 먼저 고치고 `writeOrderToWorktable`로 재기록해야 다음 주문 편집에 안 덮인다
- *   (호출부 `trackB.service.setWorkdeskIdentityField` 가 분기).
- */
-async function markSheetlessIdentityName({ sheetId, tabName, rowIndex, field, name, by = 'system' } = {}) {
-  if (!sheetId || !tabName || !rowIndex) return { handled: false };
-  if (field !== 'orderer' && field !== 'recipient') return { handled: false };
-  const text = String(name == null ? '' : name).trim();
-  if (!text) return { handled: true, ok: false, reason: 'empty_value' };
-
-  const db = getPool();
-  let sheetless = false;
-  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
-  catch (_) { return { handled: false }; }
-  if (!sheetless) return { handled: false };
-
-  let headers = [];
-  try {
-    const { rows } = await db.query(
-      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
-        WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
-      [sheetId, tabName]);
-    headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
-  } catch (e) {
-    return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
-  }
-  const { _fieldToCol } = require('./orderLedger.service');
-  const idx = _fieldToCol(headers, field);
-  if (idx < 0) return { handled: true, ok: false, reason: field === 'orderer' ? 'no_orderer_column' : 'no_recipient_column' };
-  const header = String(headers[idx] || '').trim();
+  const header = require('../utils/memoColumn').pickMemoColumnName(headers, { blog });
+  // ★ 조용히 성공으로 접지 않는다 — 그 작업표에 비고/포스팅 열이 없다는 뜻이다.
+  if (!header) return { handled: true, ok: false, reason: 'no_memo_column' };
 
   return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
 }
 
 /** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
-async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, kind = null, mergeDeposit = false, deferRebuild = false }) {
+/** 작업표 한 칸 병합 쓰기 — 상태·memo·셀 편집(130) 공용. exec 에 client 를 주면 그 tx 안에서 실행된다. */
+async function writeRowJsonCell(exec, { sheetId, tabName, rowIndex, header, value }) {
+  const r = await exec.query(
+    `UPDATE campaign_participants
+        SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
+            updated_at = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
+    [sheetId, tabName, rowIndex, header, value]);
+  return r.rowCount;
+}
+
+/** 작업표 한 칸 제거(키 삭제) — 되돌리기 전용(had_prev=false 였던 편집). */
+async function removeRowJsonCell(exec, { sheetId, tabName, rowIndex, header }) {
+  const r = await exec.query(
+    `UPDATE campaign_participants
+        SET row_json = COALESCE(row_json, '{}'::jsonb) - $4::text, updated_at = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
+    [sheetId, tabName, rowIndex, header]);
+  return r.rowCount;
+}
+
+/**
+ * 장부 재생성 예약 — 편집 경로는 rebuild 를 직접 부르지 않는다(붙여넣기 500칸 = 락 점유).
+ * ★ `ledger_dirty_at IS NULL` 조건: **첫 편집만** 그 행을 잠그고 나머지는 술어 불일치로 잠금 0.
+ *   (안 걸면 500 동시 편집이 같은 tab_configs 행에 줄 선다)
+ */
+async function markLedgerDirty(exec, { sheetId, tabName }) {
+  try {
+    await exec.query(
+      `UPDATE tab_configs SET ledger_dirty_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND ledger_dirty_at IS NULL`,
+      [sheetId, tabName]);
+    return true;
+  } catch (_) { return false; }   // 42703(미적용) 등 — 호출부가 사유를 응답에 싣는다
+}
+
+async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, mergeDeposit = false, deferRebuild = false }) {
   let nextValue = value;
   if (mergeDeposit) {
     try {
@@ -368,24 +269,9 @@ async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, va
     }
   }
   try {
-    const r = await db.query(
-      `UPDATE campaign_participants
-          SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
-              is_submitted = CASE WHEN $6::text = 'submit' THEN TRUE ELSE is_submitted END,
-              updated_at = NOW()
-        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
-          AND ($6::text IS DISTINCT FROM 'submit' OR (
-            active=TRUE
-            AND NOT EXISTS (SELECT 1 FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2
-              AND (tc.is_closed OR (NULLIF(btrim(campaign_participants.round),'') IS NOT NULL
-                AND btrim(campaign_participants.round)=ANY(regexp_split_to_array(btrim(COALESCE(tc.archived_rounds,'')),'[[:space:]]*,[[:space:]]*')))))
-            AND NOT EXISTS (SELECT 1 FROM index_master_archive a WHERE a.sheet_id=$1 AND a.tab_name=$2)
-            AND
-            review_cell_text(row_json ->> $4) NOT IN ('미작성 종결','미제출','취소건')
-            AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
-              WHERE closed.sheet_id=$1 AND closed.tab_name=$2 AND closed.row_index=$3)))`,
-      [sheetId, tabName, rowIndex, header, nextValue, kind]);
-    if (!r.rowCount) return { handled: true, ok: false, reason: 'row_not_found', column: header };
+    // ★ 쓰기는 공용 헬퍼 한 곳(writeRowJsonCell) — 셀 편집 쓰기-through(130) 와 같은 문장을 쓴다(사본 금지).
+    const n = await writeRowJsonCell(db, { sheetId, tabName, rowIndex, header, value: nextValue });
+    if (!n) return { handled: true, ok: false, reason: 'row_not_found', column: header };
   } catch (e) {
     return { handled: true, ok: false, reason: 'write_failed', message: e.message, column: header };
   }
@@ -512,12 +398,11 @@ async function backfillReviewSubmitTimes({ dryRun = true, by = 'system' } = {}) 
 
 module.exports = {
   markStatusCell,
-  statusHeaderForTab,
+  writeRowJsonCell,
+  removeRowJsonCell,
+  markLedgerDirty,
   verifyStatusCell,
   markSheetlessMemo,
-  markSheetlessPostDate,
-  markSheetlessPurchaseDate,
-  markSheetlessIdentityName,
   backfillReviewSubmitTimes,
   REVIEW_SUBMIT_TIME_BACKFILL_DAYS,
   SUBMIT_MARK,

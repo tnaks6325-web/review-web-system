@@ -51,7 +51,7 @@ function stubPool(handlers) {
     const r = await svc.resolveInspection({ fileId: 'F', by: '만두', resolution: 'ok' });
     assert.strictEqual(r.resolved, 1);
     assert.strictEqual(r.aliasAdded, 1, '상품명 의심 + ok 확인 = 별칭 1건 학습');
-    assert.ok(/WHEN product_resolution = 'fail' THEN 'bad'/.test(p.calls[0].sql));
+    assert.ok(/SET status = 'resolved', resolution = COALESCE\(\$3, resolution\)/.test(p.calls[0].sql));
     assert.strictEqual(p.calls[0].params[2], 'ok');
     assert.ok(/inspect_product_aliases = \$1/.test(p.calls[2].sql), '별칭이 tab_configs 에 저장');
     assert.ok(String(p.calls[2].params[0]).includes('이노크아든'), '캡처 표기(정리본)가 별칭으로');
@@ -83,28 +83,6 @@ function stubPool(handlers) {
     const r4 = await svc.resolveInspection({ fileId: 'F', by: '만두', resolution: 'ok' });
     assert.strictEqual(r4.aliasAdded, 0);
     ok('A4: ★ 별칭 학습은 상품명 의심(product warn) 건만 — 아무 확인이나 기대값을 넓히지 않는다');
-
-    // A5: 상품명 의심이 있어도 다른 사유가 섞인 전체 종결은 상품명 정답이 아니다.
-    const p5 = stubPool([
-      { rows: [{ sheet_id: 's', tab_name: 't', ocr_product: '메디큐브 파라다이스 그레인',
-                 checks: { product: { verdict: 'warn' }, duplicate: { verdict: 'fail' } } }] },
-    ]);
-    svc.__setPoolForTest(p5);
-    const r5 = await svc.resolveInspection({ fileId: 'F', by: '만두', resolution: 'ok' });
-    assert.strictEqual(r5.aliasAdded, 0);
-    assert.strictEqual(p5.calls.length, 1, '복합 사유 전체 종결은 탭 별칭을 오염시키지 않는다');
-    ok('A5: ★★ 복합 사유 전체 종결은 상품명 학습에서 제외');
-
-    // A6: 군집에서 이미 미통과로 확정된 복합 건은 다른 사유를 정상 처리해도 전체 bad 유지
-    const p6 = stubPool([
-      { rows: [{ sheet_id: 's', tab_name: 't', ocr_product: '다른 상품', product_resolution: 'fail',
-                 checks: { product: { verdict: 'fail', humanVerdict: 'fail' }, duplicate: { verdict: 'warn' } } }] },
-    ]);
-    svc.__setPoolForTest(p6);
-    const r6 = await svc.resolveInspection({ fileId: 'F', by: '만두', resolution: 'ok' });
-    assert.strictEqual(r6.aliasAdded, 0);
-    assert.ok(/WHEN product_resolution = 'fail' THEN 'bad'/.test(p6.calls[0].sql));
-    ok('A6: 확정 상품 미통과 + 다른 사유 정상 처리 = 전체 resolution bad 강제');
   }
 
   /* ═══ B. 별칭 = 가산 병합 (우선순위 불변) ═══ */
@@ -155,8 +133,6 @@ function stubPool(handlers) {
     assert.strictEqual(r.resolved, 3);
     assert.strictEqual(r.aliasAdded, 1, '같은 표기 2건 = 별칭 1건(중복 접힘)');
     assert.ok(/status IN \('suspect', 'fail'\)/.test(p.calls[0].sql), '일괄 대상 = 미확인 의심·불량만(resolved·pass·pending 무접촉)');
-    assert.ok(/slot_key[\s\S]*= 'review'[\s\S]*receiptValidation[\s\S]*format'[\s\S]*receipt[\s\S]*review_submissions[\s\S]*slot_key[\s\S]*<> 'review'/.test(p.calls[0].sql),
-      '전용 검수 키가 없는 구형·수동 슬롯 영수증도 일괄 정상 처리로 지급 승인되면 안 된다');
     ok('C1: 일괄 정상 처리 — suspect/fail 만 종결 + 별칭 일괄 학습(중복 접힘)');
     assert.deepStrictEqual(await svc.resolveInspectionsBulk({}), { ok: false, error: 'sheetId, tabName이 필요합니다.' });
     ok('C2: 탭 미지정 일괄 거부(전 시스템 일괄 종결 사고 방지)');
@@ -174,7 +150,7 @@ function stubPool(handlers) {
     ok('D1: migration 092 + 부팅 프리플라이트 등록');
 
     const ri = read('src/services/reviewInspect.service.js');
-    assert.ok(/i\.resolution,[\s\S]*i\.inspected_at/.test(ri), '목록 SELECT 에 resolution');
+    assert.ok(ri.includes('i.resolution, i.inspected_at'), '목록 SELECT 에 resolution');
     const tb = read('src/routes/trackB.routes.js');
     // ⚠ 반려 통지 도입으로 배선 형태가 바뀌었다(const 분리) — 검사 의미 불변: resolution 이 서비스까지 간다.
     assert.ok(tb.includes("const resolution = String((req.body || {}).resolution || '')")

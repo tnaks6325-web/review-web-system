@@ -112,27 +112,12 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
   /* ══════════════ B. 시트 없는 접수(F1) ══════════════ */
   console.log('\n[B] 시트 없는 접수 — 가상 탭 + 작업표');
   {
-    /* ★★ 검사 의미 갱신(2026-08-19 실사고 — 작업바 11줄 중복): 가상 시트ID 는 **랜덤이 아니라
-       작업오더 id 파생(결정적)** 이다. 랜덤이면 링크 기록(8단계) 전에 실패해 재시도할 때마다
-       `ON CONFLICT (sheet_id, tab_name)` 이 안 걸려 탭이 하나씩 늘어난다. 랜덤 발급을 되살리면
-       아래 두 단언이 깨진다. */
-    const id = slAccept.virtualSheetIdForOrder('11111111-2222-3333-4444-555555555555');
+    const id = slAccept.newVirtualSheetId();
     ok('가상 시트 ID 는 wt_ 접두 + 구글 ID 형식 길이(20자 이상)',
       /^wt_[0-9a-f]{20}$/.test(id) && /^[A-Za-z0-9_-]{20,}$/.test(id));
-    ok('가상 gid 는 숫자 문자열(여러 곳이 /^\\d+$/ 를 요구)',
-      /^\d+$/.test(slAccept.virtualGidForOrder('11111111-2222-3333-4444-555555555555')));
+    ok('가상 gid 는 숫자 문자열(여러 곳이 /^\\d+$/ 를 요구)', /^\d+$/.test(slAccept.newVirtualGid()));
     ok('가상 ID 판별', slAccept.isVirtualSheetId(id) && !slAccept.isVirtualSheetId('1AbCdEfGhIjKlMnOpQrStUvWxYz'));
-    ok('★ 같은 오더는 항상 같은 시트ID·gid (재시도 중복 차단)',
-      slAccept.virtualSheetIdForOrder('11111111-2222-3333-4444-555555555555') === id
-      && slAccept.virtualGidForOrder('11111111-2222-3333-4444-555555555555')
-         === slAccept.virtualGidForOrder('11111111-2222-3333-4444-555555555555'));
-    ok('★ 다른 오더는 다른 시트ID (오더끼리 섞이지 않는다)',
-      slAccept.virtualSheetIdForOrder('99999999-2222-3333-4444-555555555555') !== id);
-    ok('★ 오더 id 없이 발급하지 않는다(랜덤 폴백 금지)', (() => {
-      try { slAccept.virtualSheetIdForOrder(''); return false; } catch (_) { return true; }
-    })());
-    ok('★ 랜덤 발급 함수는 남아 있지 않다',
-      typeof slAccept.newVirtualSheetId === 'undefined' && typeof slAccept.newVirtualGid === 'undefined');
+    ok('두 번 발급하면 다른 값(충돌 방지)', slAccept.newVirtualSheetId() !== slAccept.newVirtualSheetId());
 
     const sa = noLineComments(srv('src/services/sheetlessAccept.service.js'));
     ok('접수 작업표 생성에 구글 API 호출 0',
@@ -155,19 +140,8 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       const client = {
         query: async (sql, params) => {
           log.client.push({ sql: String(sql).trim(), params });
-          if (/SELECT \* FROM order_submissions/.test(sql)) {
-            const id = params[0];
-            const values = id === 'os-1'
-              ? { recipient: '김수취', phone: '010-1234-5678', selected_opt_key: '레드' }
-              : id === 'os-2' ? { recipient: '나중', phone: '010-0000-1111' } : {};
-            return { rows: [{ id, mirror_status: 'pending', ...values }] };
-          }
-          // ⚠ 컬럼 목록은 구현이 늘릴 수 있다(seq 추가 등) — 열 이름을 고정하면 가드가 조용히 빨개진다.
-          if (/SELECT id,[\s\S]*?row_json FROM campaign_participants/.test(sql)) {
+          if (/SELECT id, seq, row_json FROM campaign_participants/.test(sql)) {
             return { rows: exists ? [{ id: 'p1', row_json: curRowJson }] : [] };
-          }
-          if (/SELECT id FROM campaign_participants/.test(sql) && /order_submission_id = \$4::uuid/.test(sql)) {
-            return { rows: exists ? [{ id: 'p1' }] : [] };
           }
           return { rows: [], rowCount: 1 };
         },
@@ -225,8 +199,9 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
         orderData: { recipient: '나중', phone: '010-0000-1111' }, orderSubmissionId: 'os-2',
       });
       const ins = log.client.find(c => /INSERT INTO campaign_participants/.test(c.sql));
-      ok('일반 주문은 없는 지정 행도 만들지 않는다', r.ok === false && r.reason === 'no_open_slot' && !ins);
-      ok('없는 지정 행을 거부할 때 트랜잭션을 되돌린다', log.client.some(c => c.sql === 'ROLLBACK'));
+      ok('표 끝을 넘어 배정되면 그 자리에 줄을 만든다', r.ok === true && !!ins);
+      ok("새 줄 source='worktable' (상태 칸이 켜지는 값 — 'manual' 금지)", /'worktable'/.test(ins.sql));
+      ok('이미 있으면 덮지 않는다(ON CONFLICT DO NOTHING)', /ON CONFLICT .*DO NOTHING/.test(ins.sql));
     }
     {
       // 장부 재생성 실패 = 완결로 찍지 않는다(표엔 있는데 검색은 안 되는 상태 차단)
@@ -270,9 +245,9 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     const ol = noLineComments(srv('src/services/orderLedger.service.js'));
 
     ok('① 리뷰어 제출: 무시트면 큐 미경유', /isSheetless\(/.test(sub) && /writeOrderToWorktable\(/.test(sub));
-    ok('① 제출은 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(sub));
+    ok('① 제출은 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone\)/.test(sub));
     ok('② 외부모집 수동제출도 같은 분기', /isSheetless\(/.test(man) && /writeOrderToWorktable\(/.test(man));
-    ok('② 수동제출도 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(man));
+    ok('② 수동제출도 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone\)/.test(man));
     // ★★ 백스톱이 핵심 — 이관 전에 쌓여 있던 큐·새 호출부·판정 실패분이 여기서 막힌다
     ok('③ 큐 실행부 백스톱: 쓰기 직전 다시 판정', /isSheetless\(pool, sheetId, tabName\)/.test(sq));
     // ★ 위치가 곧 방어다 — 시트를 **읽기 전에** 막아야 한다. 함수 본문 안에서 순서를 본다
@@ -299,7 +274,7 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('⑤ 그 게이트는 헤더 읽기·writeSheet **앞**(구글 호출 0)',
       gateAt >= 0 && gateAt < bg.indexOf('getCachedHeaders(') && gateAt < bg.indexOf('writeSheet('));
     ok('⑤ 판정 실패는 fail-open(시트 기반 탭이 절대 다수)',
-      /isSheetless\(pool, sheetId, tabName\)[\s\S]*?catch \(_\) \{ \/\* fail-open \*\/ \}/.test(bg.slice(0,bg.indexOf('getCachedHeaders('))));
+      /isSheetless\(pool, sheetId, tabName\)[\s\S]{0,400}catch \(_\) \{ \/\* fail-open \*\/ \}/.test(sub));
   }
 
   /* ══════════════ E. 시트 대조 경로 제외 ══════════════ */
@@ -360,16 +335,6 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('무시트는 시트 빌드·RAW 미러 대신 장부 생성기', /sheetlessPlan\.persist\(\)/.test(orN));
     ok('장부 생성 실패를 응답으로 알린다(조용한 누락 금지)', /worktable: wantSheetless \?/.test(orN));
     ok('재접수는 새 작업표를 또 만들지 않는다', /isVirtualSheetId\(priorSheetId\)/.test(orN));
-    ok('★ 링크 기록 전 실패 잔재도 흡수한다(오더 파생 시트ID lookup)',
-      /virtualSheetIdForOrder\(o\.id\)/.test(orN)
-      && /FROM tab_configs WHERE sheet_id = \$1/.test(orN)
-      && /priorOwn && priorOwn\.tab_name/.test(orN)
-      // ⚠ 변이시험이 잡은 구멍: SQL·조건문 문자열만 보면 `priorOwn = null` 로 무력화해도 통과한다
-      //   → **조회 결과를 실제로 대입하는 형태**까지 고정한다.
-      && /priorOwn = pr\[0\] \|\| null;/.test(orN));
-    ok('★ 잔재 흡수 시에도 그 탭 이름으로 작업표를 채운다(명단 0 방치 금지)',
-      /tabName: \(priorOwn && priorOwn\.tab_name\) \|\|/.test(orN));
-    ok('★ 접수 경로에 랜덤 시트ID 발급이 없다', !/newVirtualSheetId|newVirtualGid/.test(orN));
 
     // 라우터 스택 실검사 — 게이트가 실제로 걸려 있는지
     const router = require('../src/routes/order.routes');
@@ -393,48 +358,6 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     const led = noLineComments(srv('src/services/sheetlessLedger.service.js'));
     ok('장부 재생성은 탭 단위로 직렬화(검색 명단이 잠깐 비는 창 차단)',
       /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(led));
-  }
-
-  /* ══════════════ I. 화면 판정(표시) — 서버 규칙과 같은 방향 ══════════════
-     ★★ 2026-08-19 신고: 서버는 v3_sheetless_only 로 **항상 무시트**인데 화면만 `work_sheet_url`
-        유무로 판정해, URL 이 실려 온 오더에서 접수 확인창·툴팁·작업표 미리보기가 "그 시트 탭이
-        등록된다 / 아래 구성은 미적용"이라고 **거짓 안내**했고, 관리자 대시보드는 gid 가 없으면
-        접수를 **아예 막았다**(막다른 길). 판정은 `_woAcceptSheetless` 한 곳이다. */
-  console.log('\n[I] 화면 접수 판정 — 서버와 같은 방향(무시트 전용)');
-  {
-    const wod = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/js/work-order-detail.js'), 'utf8');
-    // 함수 본문을 꺼내 **실행**한다 — 문자열 검사만으로는 판정식이 되살아나도 통과한다.
-    const m = /function _woAcceptSheetless\(o\) \{([\s\S]*?)\n\}/.exec(wod);
-    ok('_woAcceptSheetless 선언 존재', !!m);
-    const fn = new Function('o', m[1]);
-    ok('시트URL 없는 오더 = 무시트(표시)', fn({}) === true);
-    ok('시트URL 이 있어도 무시트(표시) — 서버 resolveAcceptMode 와 같은 답',
-      fn({ work_sheet_url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1' }) === true);
-    // 서버 판정과 **같은 입력에 같은 답**인지 교차 확인(두 규칙이 갈라지면 화면이 또 거짓말한다)
-    for (const wo of [{}, { work_sheet_url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1' }]) {
-      ok('화면 판정 ≡ 서버 판정', fn(wo) === slAccept.resolveAcceptMode({ workOrder: wo, body: {} }).sheetless);
-    }
-    ok('판정 사본 0 — 화면 함수가 work_sheet_url 을 다시 보지 않는다', !/work_sheet_url/.test(m[1]));
-
-    const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/workdesk.html'), 'utf8');
-    const wdN = noLineComments(wd);
-    // 모듈 미로드 폴백도 무시트 방향이어야 한다(폴백이 반대면 그 화면만 시트 기반으로 말한다)
-    ok('접수 확인창 폴백 = 무시트', /_woAcceptSheetless\(o\) : true;/.test(wdN));
-    ok('미리보기 시트결속 폴백 = 아님', /_woAcceptSheetless\(wo\) : false;/.test(wdN));
-    /* ★ 사용자 확정 2026-08-21 — 접수 버튼 툴팁은 더 이상 시트/무시트로 갈리지 않는다.
-       3버전은 무시트 전용(`resolveAcceptMode` 가 항상 sheetless)이라 그 분기가 이미 유명무실했고,
-       지금은 "작업오더 값 그대로 만들고 곧바로 모집공고로" 라는 **두 단계**를 말한다.
-       ★ 확인창·미리보기의 폴백 방향(위 두 검사)은 그대로 = 무시트. */
-    ok('접수 버튼 툴팁이 두 단계를 말한다(시트/무시트 분기 없음)',
-      /작업오더 값 그대로 시스템 작업표를 만들고 곧바로 모집공고 설정으로 넘어갑니다/.test(wdN)
-      && !/_woEditActions\(o\)\{[\s\S]{0,1600}_woAcceptSheetless/.test(wdN));
-
-    const ia = noLineComments(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/js/index-app.js'), 'utf8'));
-    const wa = /async function woAccept\(id, pickGid, linkAdvertiserId\) \{([\s\S]*?)\n\}/.exec(ia);
-    ok('관리자 대시보드 woAccept 선언 존재', !!wa);
-    // ★ gid 선검증으로 접수를 막던 막다른 길이 없어야 한다(서버는 무시트로 등록한다)
-    ok('gid 없다고 접수를 막지 않는다', !/작업시트탭URL에 gid가 없습니다/.test(wa[1]));
-    ok('관리자 대시보드도 공유 판정을 쓴다', /_woAcceptSheetless\(o\)/.test(wa[1]));
   }
 
   console.log(`\n총 ${passed}개 통과\n`);

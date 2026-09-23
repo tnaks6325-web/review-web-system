@@ -374,63 +374,9 @@ const _ACTION_MAP = {
 // ═══════════════════════════════════════════════════════════
 // JWT 토큰 관리
 // ═══════════════════════════════════════════════════════════
-const _REVIEWER_AUTH_STORAGE_KEY = 'rapp_reviewer_auth';
-
-/**
- * 현재 탭의 리뷰어 세션 저장소를 고른다.
- * 관리자 `홈 열기` 세션은 다른 탭의 실제 리뷰어 로그인을 덮지 않도록 sessionStorage에만 둔다.
- * 탭 세션이 하나라도 있으면(만료·손상 포함) 그것이 이 탭의 권위다. 잘못된 탭 세션을
- * localStorage의 다른 리뷰어로 폴백시키면 본계정과 타계정 소유자가 섞인다.
- */
-function _getReviewerSessionStore() {
-  try {
-    if (sessionStorage.getItem(_REVIEWER_AUTH_STORAGE_KEY) !== null) return sessionStorage;
-  } catch (_) { /* sessionStorage를 쓸 수 없는 브라우저는 일반 로그인 저장소를 사용한다 */ }
-  try { return localStorage; } catch (_) { return null; }
-}
-
-/** 캠페인·구매양식·인증 헤더가 함께 쓰는 단일 리뷰어 세션 판독기. */
-function _getReviewerSession() {
-  try {
-    const store = _getReviewerSessionStore();
-    const raw = store && store.getItem(_REVIEWER_AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    const reviewer = JSON.parse(raw);
-    if (!reviewer || !reviewer.reviewerToken) return null;
-    if (reviewer.expAt) {
-      const expAt = Number(reviewer.expAt);
-      if (!Number.isFinite(expAt) || Date.now() > expAt) return null;
-    }
-    return reviewer;
-  } catch (_) { return null; }
-}
-
-/** 로그아웃은 현재 탭에서 실제로 선택된 저장소만 지운다. */
-function _clearReviewerSession() {
-  try {
-    if (sessionStorage.getItem(_REVIEWER_AUTH_STORAGE_KEY) !== null) {
-      // 빈 탭 값을 남겨 이 탭이 localStorage의 다른 리뷰어로 즉시 폴백하지 않게 한다.
-      sessionStorage.setItem(_REVIEWER_AUTH_STORAGE_KEY, '');
-      return;
-    }
-  } catch (_) { /* sessionStorage를 쓸 수 없으면 일반 로그인 저장소만 정리한다 */ }
-  try { localStorage.removeItem(_REVIEWER_AUTH_STORAGE_KEY); } catch (_) {}
-}
-
-/** 명시적인 일반 로그인으로 전환하기 전에 탭 한정 관리자 홈 신원을 함께 끝낸다. */
-function _prepareReviewerLocalSession() {
-  try {
-    sessionStorage.removeItem(_REVIEWER_AUTH_STORAGE_KEY);
-    sessionStorage.removeItem('iad_reviewer_home_session');
-  } catch (_) { /* 일반 로그인 저장은 localStorage에서 계속 진행한다 */ }
-}
-
 function _getAuthHeaders() {
   const token = sessionStorage.getItem('admin_token');
-  const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
-  const reviewer = _getReviewerSession();
-  if (reviewer) headers['X-Reviewer-Token'] = reviewer.reviewerToken;
-  return headers;
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 
 /**
@@ -646,8 +592,8 @@ function _xhrPost(url, jsonBody, timeoutMs, onProgress) {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     // JWT 인증 헤더
-    const headers = _getAuthHeaders();
-    Object.keys(headers).forEach((key) => xhr.setRequestHeader(key, headers[key]));
+    const token = sessionStorage.getItem('admin_token');
+    if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
     xhr.timeout = timeoutMs;
 
     // 업로드 진행률
@@ -690,7 +636,7 @@ async function gasPostUpload(body, timeout) {
   // 진행률 오버레이 표시
   const actionLabels = {
     uploadOrderImage: '주문 캡처 업로드 중...',
-    uploadReviewImage: '리뷰 캡처 업로드 중...',
+    uploadReviewImage: '리뷰 이미지 업로드 중...',
     extractOrderImage: 'AI 이미지 분석 중...',
   };
   _uploadProgress.show(actionLabels[action] || '업로드 중...');

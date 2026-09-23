@@ -1,22 +1,21 @@
 /**
- * 리뷰웹시스템[3버전] 작업오더·모집공고 편집 권한.
+ * 리뷰웹시스템[3버전] 편집 허용명단 — 작업오더·모집공고 탭.
  *
- * 작업오더 접수와 모집공고 운영은 AE의 기본 업무다. 자체 staff 계정은 AE 계정 테이블에서
- * 발급되므로 허용한다. 인트라넷 SSO는 일반 직원도 role=staff가 될 수 있어, 인사DB에서 판정해
- * 서명한 `ae:true` 클레임이 있을 때만 명단 없이 허용한다. master는 잠금 방지 안전판으로 항상
- * 허용하고, admin은 기존 운영 방식대로 `workdesk_editors` 이름 명단을 따른다.
+ * 배경: 두 탭은 **AE(staff)에게도 열려 있다**(사용자 확정). 그런데 작업오더 접수는
+ *   시트/탭을 `tab_configs`·`campaigns` 에 등록하는 단일 관문이고, 모집공고 발행·수정은
+ *   정원·금액을 바꾼다 — 보는 사람 전부에게 열 수는 없다.
+ *   → **역할이 아니라 이름 명단**으로 편집 권한을 준다.
  *
- * 명단은 master/admin/확인된 AE가 리뷰웹시스템[3버전]에서 관리하고
- * (migration 079 `workdesk_editors`), 후보는 **인트라넷 직원DB**에서 고른다
- * (`GET /api/trackb/intranet/users` 자동완성).
+ * 명단은 **master/admin 이 리뷰웹시스템[3버전]에서 직접 관리**하고(migration 079 `workdesk_editors`),
+ * 후보는 **인트라넷 직원DB**에서 고른다(`GET /api/trackb/intranet/users` 자동완성).
  *
  * 대조 키 = JWT 의 `name`
  *   · 인트라넷 SSO  → display_name(실명)
  *   · 관리자 로그인 → username
  * 표기 흔들림(공백·전각)을 흡수하려고 공백 제거 후 비교한다.
  *
- * ★ master·실제 AE staff 는 명단과 무관하게 허용 — 일반 인트라넷 staff와 admin의
- *   과승격은 막는다.
+ * ★ master 는 명단과 무관하게 항상 허용 — 명단을 비우거나 잘못 넣어 **아무도 편집 못 하는
+ *   잠금사고**를 막는 안전판.
  * ★ 명단에 없는 admin 은 이 화면에서 읽기 전용이 된다 — 기존 관리자 대시보드에서는
  *   종전대로 작업할 수 있다(권한을 뺏는 게 아니라 이 화면만 좁힌 것).
  * ★ 조회 실패(테이블 부재·DB 오류)는 **읽기 전용으로 수렴**한다(fail-closed).
@@ -83,36 +82,13 @@ async function removeEditor(id) {
  */
 async function canEdit(admin) {
   const role = (admin && admin.role) || '';
-  if (role === 'master') return true;                    // 안전판 — 명단 오설정 잠금 방지
-  if (role === 'staff' && admin && admin.via === 'intranet' && admin.ae === true) return true;
-                                                         // 인사DB에서 확인해 JWT에 서명한 AE staff
-  if (role === 'staff' && admin && admin.via !== 'intranet') return true; // 자체 staff_users = AE 계정
+  if (role === 'master') return true;                 // 안전판 — 명단 오설정 잠금 방지
   if (role === 'advertiser' || !role) return false;   // 광고주는 이 탭 자체가 없음
   const me = _norm(admin && admin.name);
   if (!me) return false;
   const set = await _loadSet();
   if (!set) return false;                             // ★ fail-closed
   return set.has(me);
-}
-
-/**
- * 허용명단 관리 권한.
- * 일반 인트라넷 staff가 자신을 명단에 추가해 편집 권한을 만드는 경로를 차단한다.
- * 기존 관리자 명단 관리와 자체 AE 계정 동작은 유지한다.
- */
-function canManageEditors(admin) {
-  const role = (admin && admin.role) || '';
-  if (role === 'master' || role === 'admin') return true;
-  if (role !== 'staff' || !admin) return false;
-  if (admin.via === 'intranet') return admin.ae === true;
-  return true;                                           // 자체 staff_users = AE 계정
-}
-
-function editorManagerMiddleware(req, res, next) {
-  if (canManageEditors(req.admin)) return next();
-  return res.status(403).json({
-    ok: false, error: '편집 허용명단은 관리자 또는 확인된 AE만 관리할 수 있습니다.',
-  });
 }
 
 /** 라우트 가드 — 편집 계열 엔드포인트 앞에 둔다 */
@@ -125,7 +101,4 @@ async function editorOnlyMiddleware(req, res, next) {
   });
 }
 
-module.exports = {
-  canEdit, canManageEditors, editorOnlyMiddleware, editorManagerMiddleware,
-  listEditors, addEditor, removeEditor, invalidate,
-};
+module.exports = { canEdit, editorOnlyMiddleware, listEditors, addEditor, removeEditor, invalidate };

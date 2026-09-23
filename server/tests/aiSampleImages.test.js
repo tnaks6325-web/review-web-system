@@ -128,13 +128,11 @@ console.log('\n2) 서비스 실행');
   console.log('\n5) 소비처 배선');
   // 조립이 submissionSamples 한 곳으로 수렴 — 영수증 슬롯 분기는 서비스 안(검사 의미 불변)
   ok('★★ 영수증 슬롯 업로드에 현금영수증 예시가 동봉된다',
-    /slot === 'review' \|\| _isReceiptUpload/.test(diag)
-    && /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: _slotRole \}\)/.test(diag)
+    /slot === 'review' \|\| slot === 'receipt'/.test(diag)
+    && /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: slot \}\)/.test(diag)
     && /slotKey === 'receipt'\s*\?\s*await loadReceiptSamplesFor\(expectedChannel\)/.test(svc));
-  ok('★★ 슬롯 역할이 같으면 샘플을 재사용하고, 자동 이동하면 최종 역할 샘플을 다시 읽는다',
-    /let _finalInspectSamples = _inspectSamples/.test(diag)
-    && /_finalSlotRole !== _slotRole[\s\S]*submissionSamples\(\{[\s\S]*slotKey: _finalSlotRole/.test(diag)
-    && /samples: _finalInspectSamples/.test(diag));
+  ok('★★ 슬롯 검수와 2차 검수가 같은 samples 를 쓴다(같은 이미지에 AI 콜 2번 금지)',
+    (diag.match(/samples: _inspectSamples/g) || []).length >= 2);
   ok('★ 채널 판정은 기존 loadTabExpectations 재사용 — 채널 파생 규칙 사본 없음',
     /loadTabExpectations\(\{ sheetId, tabName \}\)/.test(diag));
   ok('★ 리뷰 예시와 현금영수증 예시가 같은 로더를 쓴다(캐시·URL 검증이 갈리지 않게)',

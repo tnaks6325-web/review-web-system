@@ -1,6 +1,6 @@
 const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
 const { logger } = require('../utils/logger');
-const { findSameDayDuplicateInTx, findEquivalentOrderInTx, sameDayDuplicateLockKey } = require('./orderDuplicate.service');
+const { findSameDayDuplicateInTx, sameDayDuplicateLockKey } = require('./orderDuplicate.service');
 const { parseSelectionKey } = require('./productOptions.service');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
@@ -28,9 +28,6 @@ function getPool() {
 
 function __setPoolForTest(pool) {
   _pool = pool || null;
-  // ★ 풀에서 파생된 캐시(감지대상 허용목록)도 함께 버린다 — 안 버리면 앞 시나리오의 목록이
-  //   다음 시나리오에 남아 "왜 건너뛰지?"로 헤맨다(실제로 밟았다).
-  _slessKeys = null; _slessAt = 0;
 }
 
 // ★ 미러 안 된 탭에 주문이 오면 그 시트를 백그라운드로 1회 자동미러(탭당 60초 debounce)
@@ -187,13 +184,9 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
   }
   const optParts = selectedOptKey ? selectedOptKey.split('|').map(v => v.trim().toLowerCase()) : [];
   const optColIndices = [];
-  // ★ 리뷰옵션 칸(행별 리뷰형태 지시 — 작업표 생성이 '포토리뷰'·'텍스트'를 선기입)은 매칭에서
-  //   제외한다. 포함하면 리뷰어가 고른 상품옵션('블랙')을 리뷰옵션 칸 값과 대조해 매칭이
-  //   구조적으로 전패 → 옵션별 행 소진이 무너진다(판정은 utils/reviewType 단일 출처).
-  const { isReviewOptionHeader: _isRtCol } = require('../utils/reviewType');
   (headers || []).forEach((h, idx) => {
     const key = String(h || '').toLowerCase();
-    if (optColIndices.length < 3 && !_isRtCol(h) && OPTION_COL_KEYWORDS.some(kw => key.includes(kw))) {
+    if (optColIndices.length < 3 && OPTION_COL_KEYWORDS.some(kw => key.includes(kw))) {
       optColIndices.push(idx);
     }
   });
@@ -237,13 +230,6 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
 //   (버그이력: 옛 규칙 key==='id' 는 헤더 '쿠팡id'를 못 잡아 쿠팡탭 id열이 영구 공란이었다.)
 const _ID_EXACT_ADMIN = ['번호', 'no', '#'];
 const _ID_ADMIN_KW = ['인애드', '카톡', '닉네임', '상품', '상품명'];
-
-/* ── 138 선택 상품 칸 ────────────────────────────────────────────────────────────
-   복합유형 작업(137)의 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이라, 옵션 칸에 쓰면
-   관리자 작업지시('텍스트'·'포토리뷰')를 덮는다(8/3 사고). 그래서 **옵션과 다른 칸**에 적는다.
-   ★ 좌측 정렬 우선순위(사용자 확정 2026-08-25) = 상품 > 옵션 > 리뷰옵션. */
-const PRODUCT_HEADER = '상품';
-const PRODUCT_HEADER_KEY = PRODUCT_HEADER.toLowerCase();
 function _isIdHeader(key) {
   const k = String(key || '').toLowerCase().trim();
   if (!k) return false;
@@ -287,15 +273,6 @@ function mapOrderToSheetRow(headers, orderData = {}) {
     if (stagedSelection && /^(1차|1st)\s*옵션$/.test(key)) return stagedSelection.option1Value;
     if (stagedSelection && /^(2차|2nd)\s*옵션$/.test(key)) return stagedSelection.option2Value;
     if (_ID_EXACT_ADMIN.includes(key)) return null;
-    /* ★★ 138 선택 상품 — 자리는 `_ID_ADMIN_KW`('상품' 포함) **바로 앞**이어야 한다.
-         그 목록이 상품류 헤더를 통째로 보호열로 막으므로, 뒤에 두면 이 규칙에 영영 도달 못 한다.
-       ★★ **정확일치 `상품` 하나만** 연다 — `상품명`·`상품URL`·`상품아이디` 는 관리자가 적어 두는
-         칸이라 계속 보호열로 남는다(includes 로 넓히면 그 값들을 덮는다).
-       ★★ 값이 없으면 `''` 가 아니라 **`null`(=안 씀)** — 빈 문자열은 **그 칸을 지우는 쓰기**가
-         된다(7/31 옵션 칸 사고와 같은 메커니즘). 그래서 상품 값이 없는 기존 주문은 이 규칙이
-         생기기 전과 **바이트 동일**하게 동작한다(무회귀의 근거).
-       ★ 덮어쓰기 방지(blank-only)는 호출부가 한다 — 옵션 칸과 같은 규율. */
-    if (key === PRODUCT_HEADER_KEY) return orderData.selectedProduct || null;
     if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return null;
     /* ★★ 101 블로그URL(블로그 주소) — **주소·URL 규칙보다 먼저** 본다.
          `블로그주소` 는 아래 `key.includes('주소')` 에 걸려 **배송 주소가 그 칸에 찍히고**,
@@ -407,22 +384,6 @@ function optionWriteColumns(headers) {
  *   관리자 사전등록이 매퍼가 안 쓰는 칸에 주소를 넣어 리뷰어 제출 때 다른 칸이 채워지는 사고.
  *   ★ 센티널에 공백·NUL 금지(매퍼가 trim, NUL은 git이 바이너리 취급 — 실측으로 밟은 함정).
  */
-/**
- * ★★ "매퍼가 실제로 **선택 상품**을 기입하는 열" — 옵션 칸과 **같은 기법**으로 매퍼에서 파생한다(138).
- *   헤더 문자열로 따로 찾으면(`key === '상품'` 사본) **쓰는 칸 ≠ 보존(blank-only) 판정 칸** 으로 갈려,
- *   관리자가 적어 둔 상품명을 덮는 사고가 그 틈으로 되살아난다.
- * ★ 센티널에 공백·NUL 금지(매퍼가 trim, NUL 은 git 이 바이너리 취급 — 실측으로 밟은 함정).
- */
-const _PRODUCT_SENTINEL = '__SELECTEDPRODUCT_SENTINEL__';
-function productWriteColumns(headers) {
-  const n = (headers || []).length;
-  if (!n) return [];
-  const mapped = mapOrderToSheetRow(headers, { selectedProduct: _PRODUCT_SENTINEL });
-  const out = [];
-  mapped.forEach((v, i) => { if (v === _PRODUCT_SENTINEL) out.push(i); });
-  return out;
-}
-
 const _BLOG_SENTINEL = '__BLOGURL_SENTINEL__';
 function blogUrlWriteColumns(headers) {
   const n = (headers || []).length;
@@ -744,171 +705,6 @@ async function loadRawTabContext(sheetId, tabGid, tabName) {
   };
 }
 
-/**
- * 탭의 감지 헤더 목록만 가볍게 조회 — `loadRawTabContext`(raw_sheet_rows 전체를 읽는다)보다
- * 훨씬 싸다. `trackB.service._isTabColumn`(col: 편집 검증, editWorkdeskRow 트랜잭션 안에서 매
- * 편집마다 실행)과 **같은 모양의 질의**다 — 그쪽은 `client`(트랜잭션 커넥션)로 읽고 여기는
- * 커밋 후 별도 요청에서 풀 커넥션으로 읽는다(연결 컨텍스트가 달라 통합하지 않았다).
- * gid 우선(리네임 대비), 못 찾으면 headers=[]·tabGid=''.
- */
-async function tabDetectedHeaders(sheetId, tabGid, tabName) {
-  const db = getPool();
-  const { rows } = await db.query(
-    `SELECT detected_headers, tab_gid FROM raw_sheet_tabs
-      WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
-      ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
-    [sheetId, tabGid || null, tabName]).catch(() => ({ rows: [] }));
-  const r = rows[0];
-  const headers = r && Array.isArray(r.detected_headers) ? r.detected_headers : [];
-  return { headers, tabGid: (r && r.tab_gid) || tabGid || '' };
-}
-
-/* 그리드 셀(col:<헤더>) 편집 → 주문 원장 through-write 대상 역할 → order_submissions 컬럼명.
- *   worktableTemplate.ROLE_META 의 부분집합만 — 은행·계좌·예금주·주문번호·비고는 제외한다.
- *   결제금액은 운영자가 작업보드에서 바로 정정할 수 있도록 원장과 무시트 작업표에도 함께 쓴다.
- *   값(=order_submissions 컬럼명)은 columnMapping.service.STANDARD_FIELDS 의 key 와 **같은 표기**
- *   (예 'user_id')다 — 오버라이드 대조(아래)에서 이 값을 그대로 조회 키로 쓴다.
- *   ★ 'orderer'→reviewer_name 은 매핑하지 않는다 — reviewer_name(참여자 신원열)은 로그인 계정을
- *     우선하는 별개 의미라(`writeOrderToWorktable` 참조), 시트의 "주문자" 칸 정정으로 덮으면 안 된다.
- */
-const _OS_COL_BY_ROLE = { orderer: 'orderer', recipient: 'recipient', userId: 'user_id', phone: 'phone', address: 'address', price: 'price' };
-
-// 원장 금액은 TEXT지만, 작업보드에서의 정정은 원화 정수만 받는다. 표시용 쉼표/"원"은 허용하되
-// 음수·소수·수식 같은 값은 막아 정산 집계(regexp_replace 기반)에 다른 값이 섞이지 않게 한다.
-function normalizeWorkdeskPrice(value) {
-  const raw = String(value == null ? '' : value).trim();
-  const compact = raw.replace(/원\s*$/, '').replace(/[\s,]/g, '');
-  if (!/^\d+$/.test(compact)) return null;
-  const n = Number(compact);
-  if (!Number.isSafeInteger(n)) return null;
-  return String(n);
-}
-
-// 라우트가 오버레이를 저장하기 전에 금액열인지 알아내는 공용 판정. 헤더 별칭(상품가격/금액/price)
-// 도 worktableTemplate의 같은 분류기를 쓰므로, 표시값만 바뀌고 원장이 거절되는 분리 상태를 막는다.
-async function normalizeWorkdeskColumnValue({ sheetId, tabName, header, value } = {}) {
-  if (!sheetId || !tabName || !header) return { isPrice: false, ok: true, value };
-  const { headers } = await tabDetectedHeaders(sheetId, null, tabName);
-  const idx = headers.findIndex(h => String(h == null ? '' : h).trim() === header);
-  if (idx < 0) return { isPrice: false, ok: true, value };
-  const { classifyHeaders } = require('../utils/worktableTemplate');
-  const role = (classifyHeaders(headers)[idx] || {}).role;
-  if (role !== 'price') return { isPrice: false, ok: true, value, role: role || null };
-  const normalized = normalizeWorkdeskPrice(value);
-  return { isPrice: true, ok: normalized != null, value: normalized, role };
-}
-
-/**
- * 작업보드 그리드 셀 편집(col:<헤더>)을 주문 원장(order_submissions) + 무시트 작업표(row_json)에
- * through-write 한다 — 관리자가 표에서 연락처 등을 고쳐도 review_index(리뷰어 "리뷰 내역" 검색)에는
- * 전혀 반영되지 않던 문제의 수정.
- *
- * ★★ `editWorkdeskRow`(participant_edits 오버레이 저장)가 **끝나고 커밋된 뒤, 별도 호출**에서만
- *   쓴다 — 그 함수의 FOR UPDATE 트랜잭션 안에서 부르면, 무시트 경로가 같은 물리행을 다시 잠그려다
- *   자기 자신을 기다려 사실상 항상 교착한다(레드팀 실증: 커넥션 풀 고갈로 전체 서비스 장애).
- *
- * ★★ `writeOrderToWorktable`(order_submissions 전체 필드를 그 행의 모든 매칭 컬럼에 재기입)을
- *   재사용하지 않는다 — 그 함수는 "리뷰어가 방금 낸 폼 전체를 반영"하는 용도라 적절하지만, 이번
- *   용도(관리자가 셀 하나만 고침)에 그대로 쓰면 관리자가 손대지 않은 다른 열(운영 메모 등)까지
- *   조용히 값이 바뀔 수 있다. 여기서는 **편집된 그 헤더 하나만** row_json 에 갈아끼운다.
- *
- * ★ 그 역할에 DB 컬럼매핑 오버라이드(`tab_column_mappings`)가 걸려 있는데 지금 편집한 열과
- *   다르면 동기화하지 않는다 — `columnResolver`(review_index 파생)는 오버라이드를 키워드보다
- *   우선하므로, 무시하고 진행하면 "review_index 는 안 고쳐지는데 엉뚱한 값이 order_submissions
- *   에는 들어가는" 상태가 된다.
- *
- * @param {object} o
- * @param {string} o.sheetId · o.tabName        편집이 일어난 탭(그리드가 보여준 문맥)
- * @param {string} o.header                     편집된 시트 헤더(field.slice(4))
- * @param {*} o.value                            새 값
- * @param {*} [o.oldValue]                       편집 **전** row_json 값(시트 기반 탭의 큐가 "내가 알던
- *                                                옛값" 대조에 쓴다 — 없으면 라이브 셀이 비어있지 않은 한
- *                                                `mirror_status='conflict'`로 영구 정지해 반영되지 않는다)
- * @param {string} o.orderSubmissionId           editWorkdeskRow 가 확정한 order 앵커
- * @param {string} [o.by]
- * @returns {Promise<{attempted:boolean, ok:boolean, reason?:string, role?:string|null, mode?:string}>}
- */
-async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldValue, orderSubmissionId, by = 'admin' } = {}) {
-  if (!sheetId || !tabName || !header || !orderSubmissionId) return { attempted: false, ok: false, reason: 'bad_request' };
-  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { attempted: false, ok: false, reason: 'ledger_write_disabled' };
-  if (process.env.WORKDESK_CELL_ORDER_SYNC === '0') return { attempted: false, ok: false, reason: 'disabled' };
-
-  const { headers, tabGid } = await tabDetectedHeaders(sheetId, null, tabName);
-  if (!headers.length) return { attempted: true, ok: false, reason: 'no_headers' };
-  const idx = headers.findIndex(h => String(h == null ? '' : h).trim() === header);
-  if (idx < 0) return { attempted: true, ok: false, reason: 'header_not_found' };
-
-  const { classifyHeaders } = require('../utils/worktableTemplate');   // lazy(순환참조 회피)
-  const classified = classifyHeaders(headers);
-  const role = classified[idx] && classified[idx].role;
-  const osCol = _OS_COL_BY_ROLE[role];
-  if (!osCol) return { attempted: true, ok: false, reason: 'role_not_syncable', role: role || null };
-
-  if (tabGid) {
-    const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid).catch(() => null);
-    const ov = dbColMap && dbColMap.get(osCol);
-    if (ov && ov.colIndex !== idx) return { attempted: true, ok: false, reason: 'column_mapping_mismatch', role };
-  }
-
-  const { withJobLock } = require('../utils/jobLock');
-  const { isSheetless } = require('../utils/sheetlessScope');
-  const db = getPool();
-  const editSeq = Date.now();
-  const newValue = role === 'price'
-    ? normalizeWorkdeskPrice(value)
-    : (value == null ? '' : String(value).slice(0, 2000));
-  if (newValue == null) return { attempted: true, ok: false, reason: 'invalid_price', role };
-
-  const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
-    const { rows } = await db.query(
-      `UPDATE order_submissions SET ${osCol} = $2, updated_at = NOW(),
-              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
-        WHERE id = $1 AND sheet_id = $4 AND tab_name = $5 AND deleted_at IS NULL
-      RETURNING id, sheet_id, tab_name`,
-      [orderSubmissionId, newValue, editSeq, sheetId, tabName]);
-    if (!rows.length) return { ok: false, reason: 'order_cancelled_or_missing' };
-    const os = rows[0];
-    // ★ 편집 시점에 알던 탭과 지금 주문이 속한 탭이 다르면(그 사이 재연결됨) 중단 — 잘못된 탭의
-    //   장부를 재생성하는 것보다 안 하는 게 낫다.
-    if (String(os.sheet_id) !== String(sheetId) || String(os.tab_name) !== String(tabName)) {
-      return { ok: false, reason: 'tab_mismatch' };
-    }
-
-    let isSl = false;
-    try { isSl = await isSheetless(db, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
-
-    if (isSl) {
-      const p8 = role === 'phone' ? (toPhone8(newValue) || null) : null;
-      const { rowCount } = await db.query(
-        `UPDATE campaign_participants
-            SET row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$1::text], to_jsonb($2::text), true),
-                recipient_name = CASE WHEN $3 = 'recipient' THEN COALESCE(NULLIF($2, ''), recipient_name) ELSE recipient_name END,
-                phone8         = CASE WHEN $3 = 'phone' AND $4::text IS NOT NULL THEN $4 ELSE phone8 END,
-                price          = CASE WHEN $3 = 'price' THEN $2 ELSE price END,
-                updated_by = 'workdesk-cell-sync', updated_at = NOW()
-          WHERE sheet_id = $5 AND tab_name = $6 AND order_submission_id = $7::uuid AND deleted_at IS NULL`,
-        [header, newValue, role, p8, os.sheet_id, os.tab_name, orderSubmissionId]);
-      if (rowCount !== 1) return { ok: false, reason: rowCount === 0 ? 'row_reassigned' : 'ambiguous_row' };
-      try {
-        await require('./sheetlessLedger.service').rebuildLedgers({ sheetId: os.sheet_id, tabName: os.tab_name, by: 'workdesk-cell-sync' });
-      } catch (e) {
-        return { ok: false, reason: 'ledger_rebuild_failed', message: e.message };
-      }
-      return { ok: true, mode: 'sheetless' };
-    }
-
-    const { enqueue } = require('./syncQueue.service');   // lazy(순환참조 회피)
-    await enqueue('order_update', {
-      orderSubmissionId, editSeq,
-      edits: [{ field: osCol, oldValue: oldValue == null ? '' : String(oldValue), newValue }],
-    });
-    return { ok: true, mode: 'queued' };
-  }, { onBusy: () => ({ ok: false, reason: 'concurrent_edit' }) });
-
-  if (out && out.mode === 'queued') { try { require('../jobs/queuePump').kickQueuePump(); } catch (_) {} }
-  return { attempted: true, ok: !!(out && out.ok), reason: out && out.reason, role, mode: out && out.mode };
-}
-
 async function claimRow({ client, sheetId, tabGid, tabName, dedupKey, candidateRows, orderId, meta = {} }) {
   const db = client || getPool();
   const candidates = (candidateRows || []).filter(r => Number.isInteger(parseInt(r, 10)) && parseInt(r, 10) > 0);
@@ -980,17 +776,15 @@ async function createOrderLedgerEntry(input) {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
     skipSheetMirror = false,
-    deferSheetlessApply = false, // workboard_apply 큐가 실제 작업보드 반영 후 written으로 전이한다.
     campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
     sameDayDuplicateGuard, // 구매양식의 오늘 동일 제출 차단(선택 입력)
-    source = 'order_submit', // 호출 시 확정한 접수 출처도 최초 INSERT와 함께 보존한다.
   } = input;
   // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo, blog_url,
-       selected_product, source, dedup_key, mirror_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending')
+       dedup_key, mirror_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULL,'pending')
      RETURNING id`;
   const orderInsertParams = [
     sheetId,
@@ -1011,10 +805,6 @@ async function createOrderLedgerEntry(input) {
     orderData.price || '',
     orderData.memo || '',
     orderData.blogUrl || null,   // ★ 101 — 없으면 NULL(빈 문자열로 굳히지 않는다: 나중 전파/사전등록이 COALESCE 로 채운다)
-    /* ★ 138 선택 상품 — 컬럼이 NOT NULL DEFAULT '' 라 빈 문자열이 곧 "안 고름"이다.
-       원장에 남겨야 무시트 재기록·큐 재시도·reconcile 이 같은 값을 다시 쓴다(_osRowToOrderData). */
-    orderData.selectedProduct || '',
-    source || 'order_submit',
   ];
 
   let orderSubmissionId;
@@ -1024,12 +814,7 @@ async function createOrderLedgerEntry(input) {
   const guardDuplicate = async (client) => {
     if (!sameDayDuplicateGuard) return null;
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [sameDayDuplicateLockKey(sameDayDuplicateGuard)]);
-    const sameDay = await findSameDayDuplicateInTx(client, sameDayDuplicateGuard);
-    if (sameDay) return sameDay;
-    // ★ 무시트(탈시트) 경로만 날짜를 넘는 같은 구매까지 본다 — 그쪽은 claim(dedup_key 유니크)을
-    //   건너뛰어 수렴점이 없다. 시트 경로 동작은 한 줄도 바뀌지 않는다(crossDay 미전달).
-    if (!sameDayDuplicateGuard.crossDay) return null;
-    return findEquivalentOrderInTx(client, sameDayDuplicateGuard);
+    return findSameDayDuplicateInTx(client, sameDayDuplicateGuard);
   };
 
   if (campaignHold && campaignHold.applicationId) {
@@ -1047,33 +832,6 @@ async function createOrderLedgerEntry(input) {
       orderSubmissionId = ins.rows[0].id;
       dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
       await client.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
-      // 명의 게이트가 검증한 소유자 UUID+참여 명의 해시를 같은 트랜잭션으로 고정한다.
-      // 구버전 호출은 신청행의 코드 UUID가 모두 있을 때만 종전처럼 복사한다.
-      if (campaignHold.identityBinding?.ownerReviewerId && campaignHold.identityBinding?.participantIdentityKeyHash) {
-        await client.query(
-          `UPDATE order_submissions
-              SET owner_reviewer_id = $3::uuid,
-                  participant_identity_id = $4::uuid,
-                  participant_identity_key_hash = $5
-            WHERE id = $1
-              AND EXISTS (SELECT 1 FROM campaign_applications ca WHERE ca.id = $2)`,
-          [orderSubmissionId, campaignHold.applicationId,
-           campaignHold.identityBinding.ownerReviewerId,
-           campaignHold.identityBinding.participantIdentityId || null,
-           campaignHold.identityBinding.participantIdentityKeyHash]
-        );
-      } else {
-        await client.query(
-          `UPDATE order_submissions os
-              SET owner_reviewer_id = ca.owner_reviewer_id,
-                  participant_identity_id = ca.participant_identity_id
-             FROM campaign_applications ca
-            WHERE os.id = $1 AND ca.id = $2
-              AND ca.owner_reviewer_id IS NOT NULL
-              AND (os.owner_reviewer_id IS NULL OR os.owner_reviewer_id=ca.owner_reviewer_id)`,
-          [orderSubmissionId, campaignHold.applicationId]
-        );
-      }
       await client.query('SAVEPOINT hold_confirm');
       try {
         const { confirmHoldInTx } = require('./campaignHold.service'); // 지연 require(순환 방지 — 기존 패턴)
@@ -1135,16 +893,15 @@ async function createOrderLedgerEntry(input) {
   if (skipSheetMirror) {
     await db.query(
       `UPDATE order_submissions
-          SET mirror_status = CASE WHEN $2 THEN 'pending' ELSE 'written' END,
-              sheet_error = CASE WHEN $2 THEN 'workboard_apply_pending' ELSE NULL END
+          SET mirror_status = 'written', sheet_error = NULL
         WHERE id = $1`,
-      [orderSubmissionId, !!deferSheetlessApply]
+      [orderSubmissionId]
     );
     return {
       orderSubmissionId,
       dedupKey,
       sheetRow: null,
-      claim: { row: null, error: deferSheetlessApply ? 'workboard_apply_pending' : 'db_only' },
+      claim: { row: null, error: 'db_only' },
       tabContext: null,
       tabGid: gid || '',
       headers: [],
@@ -1290,25 +1047,6 @@ async function markOrderWritten(orderSubmissionId, sheetRow, sig = null) {
   );
 }
 
-/**
- * 중복 주문 취소(소프트) — 작업보드 중복 줄 정리의 짝. 2026-08-19.
- *
- * ★ 이 함수는 **호출자가 이미 "중복이고 입금 회차에 걸리지 않는다"를 확인한 id 만** 받는다.
- *   여기서 다시 판정하지 않는다(판정 단일 출처 = sheetlessLedger.dedupeRows).
- * ★ 하드삭제 금지 — `deleted_at` + `mirror_status='canceled'`(migration 120 과 같은 표기)라
- *   감사·복구 경로가 남는다. 이미 취소된 건은 건드리지 않는다(멱등).
- */
-async function softDeleteDuplicateOrders(ids = [], by = 'dedupe') {
-  const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean).slice(0, 5000);
-  if (!list.length) return 0;
-  const { rowCount } = await getPool().query(
-    `UPDATE order_submissions
-        SET deleted_at = NOW(), canceled_by = $2, mirror_status = 'canceled', updated_at = NOW()
-      WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
-    [list, String(by).slice(0, 100)]);
-  return rowCount;
-}
-
 async function markOrderMirrorFailed(orderSubmissionId, err) {
   if (!orderSubmissionId) return;
   await getPool().query(
@@ -1353,7 +1091,6 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   const db = getPool();
   const { enqueue } = require('./syncQueue.service'); // lazy: require 순환 회피
   const _metaByTab = new Map(); // F2/J-2: 사이클 내 getSpreadsheetMeta 중복콜 제거(시트당 1콜)
-  const _queuedTargetByTab = new Map(); // 큐 대상 판정도 탭별 1회만 조회한다.
 
   const params = [staleQueuedMinutes];
   let sheetFilter = '';
@@ -1362,18 +1099,13 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   params.push(limit);
   const limitIdx = params.length;
 
-  /* ★★ 참여형 무시트 주문의 원장 좌표는 `campaign:<공고ID>` 다 — 구글시트 탭이 아니라
-     **큐로는 영원히 복구되지 않는다**(RAW 메타가 없어 매 사이클 `skippedNoMeta` 로 스킵될 뿐).
-     그 건들이 `submitted_at ASC` 정렬의 앞자리를 차지하면 진짜 복구 대상이 LIMIT 밖으로 밀린다.
-     → 스캔에서 제외한다. 이 좌표의 반영은 제출 경로(작업보드 기록)와 무시트 복구 잡이 담당한다. */
   const { rows } = await db.query(
     `SELECT os.id, os.sheet_id, os.tab_name, os.gid, os.tab_gid, os.dedup_key,
             os.orderer, os.recipient, os.user_id, os.phone, os.address,
-            os.order_num, os.date_str, os.selected_opt_key, os.selected_product, os.bank, os.account,
+            os.order_num, os.date_str, os.selected_opt_key, os.bank, os.account,
             os.depositor, os.price, os.memo, os.mirror_status, os.sheet_row, os.sheet_error
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
-        AND os.sheet_id NOT LIKE 'campaign:%'
         AND (os.mirror_status IN ('pending','pending_no_row','failed')
              OR (os.mirror_status = 'queued'
                  AND os.queued_at IS NOT NULL
@@ -1393,7 +1125,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   const tabCount = new Map();
   const tabCursors = new Map(); // tabKey → 마지막 배정 append 행(순차 커서, 20행 한계 제거)
 
-  /* ★★ 무시트 탭(탈 구글시트 W2)은 **order_append 큐로 복구하지 않는다** — 큐는 구글시트에 쓴다.
+  /* ★★ 무시트 탭(탈 구글시트 W2)은 **큐로 복구하지 않는다** — 큐는 구글시트에 쓴다.
      대신 같은 자리에서 작업표 기록을 다시 시도한다(그게 무시트의 "반영"이다).
      ★ 목록에서 통째로 빼면 그 주문은 영영 복구되지 않는다 → 반드시 대체 경로를 준다. */
   const _slKeys = await require('../utils/sheetlessScope').sheetlessTabKeys(db);
@@ -1409,8 +1141,6 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       address: row.address, orderNum: row.order_num, dateStr: row.date_str,
       selectedOptKey: row.selected_opt_key, bank: row.bank, account: row.account,
       depositor: row.depositor, price: row.price, memo: row.memo,
-      // ★ 138 — 재기록도 같은 상품값을 쓴다(빠지면 복구 한 번에 「상품」 칸이 비워진다).
-      selectedProduct: row.selected_product,
     };
     // ★ D4 보강(리뷰 should-fix): INSERT↔dedup_key UPDATE 사이 크래시로 dedup_key가 NULL이면,
     //   여기서 osid(row.id) 폴백을 넣어 재계산해야 원래 osid 키와 일치(없으면 약한 rcp 키로 떨어져 #5 충돌 재발).
@@ -1420,42 +1150,6 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     //   하단에 다시 적히므로, 큐가 비고란에 [시스템 재기록 · 확인요망]으로 남겨 사람이 확인하게 한다.
     //   (일반 복구는 [시스템 재기록].) sheet_error 는 배정 성공 시 NULL 로 지워지므로 여기서 읽어 전달.
     const recoverReason = /^ghost written/.test(String(row.sheet_error || '')) ? 'lost' : '';
-
-    // workboard_apply 전환 탭은 일반 주문이라도 원장 단계에서 sheet_row를 만들지 않는다.
-    // enqueue 직후 DB/네트워크 오류가 나면 failed 상태만 남을 수 있으므로, reconcile이 같은
-    // 주문 ID의 살아있는 큐를 확인한 뒤 정확히 한 번 다시 등록한다. 이 분기는 일반 sheetless
-    // 직접기록보다 먼저 실행해야 기존 RAW 행 배정 경로로 되돌아가지 않는다.
-    let queuedTarget;
-    try {
-      if (_queuedTargetByTab.has(tabKey)) {
-        queuedTarget = _queuedTargetByTab.get(tabKey);
-      } else {
-        queuedTarget = await require('./workboardQueueApply.service').resolveQueuedWorkboardTarget({
-          sheetId: row.sheet_id, tabName: row.tab_name,
-        });
-        _queuedTargetByTab.set(tabKey, queuedTarget);
-      }
-    } catch (_) {
-      queuedTarget = null; // 대상 판정 실패는 기존 복구 경로를 보존한다.
-    }
-    if (queuedTarget && queuedTarget.enabled) {
-      if (dryRun) { result.requeued++; continue; }
-      try {
-        const { rows: dup } = await db.query(
-          `SELECT 1 FROM sync_queue WHERE type = 'workboard_apply' AND status IN ('pending','processing')
-             AND (payload->>'orderSubmissionId') = $1 LIMIT 1`,
-          [String(row.id)]
-        );
-        if (dup.length) { result.requeued++; continue; }
-        await enqueue('workboard_apply', {
-          sheetId: row.sheet_id, tabName: row.tab_name, gid,
-          orderSubmissionId: row.id, loginPhone8: '', loginName: '', recovered: true,
-        });
-        await markOrderQueued(row.id);
-        result.requeued++;
-      } catch (_) { result.stillStuck++; }
-      continue;
-    }
 
     // ── 무시트 탭: 큐 대신 작업표 재기록 ──────────────────────────────
     if (isSheetlessTab(_slKeys, row.sheet_id, row.tab_name, gid)) {
@@ -1608,8 +1302,6 @@ function _osRowToOrderData(os) {
     memo: os.memo, dateStr: os.date_str, selectedOptKey: os.selected_opt_key,
     // ★ 101: 큐 재시도·reconcile 재기록도 같은 값을 쓴다(제출 시점과 시트 기입이 갈리지 않게).
     blogUrl: os.blog_url,
-    // ★ 138: 선택 상품도 같은 이유로 재기록 재료에 들어간다 — 빠지면 재기록 한 번에 도로 사라진다.
-    selectedProduct: os.selected_product,
   };
 }
 
@@ -1711,19 +1403,6 @@ async function rowIdentityMatches(os, tabContext) {
 async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false, ignoreBusy = false, useLiveHeaders = true } = {}) {
   if (process.env.SHEET_REVERSE_SYNC !== '1') return { skipped: true, reason: 'disabled' };
   if (!sheetId || !tabName) throw new Error('detectReverseSyncProposals: sheetId, tabName 필수');
-  // ★★ "지금도 사람이 고칠 수 있는 시트"만 읽는다 — 이 함수의 존재 이유가 "시트를 사람이 고쳤나"인데,
-  //   그럴 수 없는 탭을 계속 읽으면 (a) 쿼터를 죽은 시트에 쓰고 (b) 낡은 시트값으로
-  //   "원장을 시트값으로" 를 권하게 된다.
-  //   실측(2026-08-24): 닫히지 않은 탭 113개가 **전부** 무시트인데 detect 는 3분마다 계속 돌아
-  //   하루 약 2,880콜을 썼고, 열린 제안 108건이 전원 무시트 탭 소속이었다.
-  //   ⚠ 처음엔 무시트 탭만 뺐는데(#1143) **닫힌 탭 3개에서 계속 새 제안이 생겼다** — sheetless=FALSE 라
-  //     무시트 목록에 안 잡히고, 아카이브로 tab_configs 행이 지워진 탭은 목록에 담길 수조차 없었다.
-  //     그래서 제외목록이 아니라 **허용목록**으로 뒤집었다(sheetlessScope.DETECTABLE_TABS_SQL).
-  //   ★ 판정은 utils/sheetlessScope 단일 출처 — 스마트빌드·RAW 미러·변경감지가 쓰는 그 게이트다
-  //     (그 파일 머리주석이 나열한 주기작업 중 역동기화만 빠져 있었다).
-  //   ★ 목록을 못 얻으면 건너뛰지 않는다(fail-open) — 게이트가 죽었다고 감지를 멈추지 않는다.
-  //   ★ 영구 배제가 아니다. 마감을 풀거나 시트를 재연결하면 그 즉시 다시 감지 대상이 된다.
-  if (await _skipDetectTab(sheetId, tabName)) return { skipped: true, reason: 'tab_not_detectable' };
   const { withJobLock } = require('../utils/jobLock');
   return withJobLock('order_reconcile',
     () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }),
@@ -1731,31 +1410,6 @@ async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, inclu
 }
 
 const _HEADER_SCAN_ROWS = parseInt(process.env.REVERSE_SYNC_HEADER_SCAN || '20', 10);
-
-/** 무시트 탭 키 집합 — 한 사이클(3탭)에서 같은 목록을 세 번 뜨지 않도록 짧게 캐시한다.
- *  ★ 캐시 수명을 짧게 두는 이유: 무시트 전환·재연결이 다음 사이클에 바로 반영돼야 한다.
- *  ★ 실패하면 빈 집합 → isSheetlessTab 이 전부 false → 종전 동작(fail-open). */
-const _SLESS_TTL_MS = 60000;
-let _slessKeys = null, _slessAt = 0;
-/** 감지해도 되는 탭 허용목록(무시트 아님 · 마감 아님 · tab_configs 에 등록됨). null = 판정 불가. */
-async function _detectableKeysCached() {
-  const now = Date.now();
-  if (_slessKeys !== null && (now - _slessAt) < _SLESS_TTL_MS) return _slessKeys;
-  try {
-    _slessKeys = await require('../utils/sheetlessScope').detectableTabKeys(getPool());
-  } catch (e) {
-    logger.warn(`[reverseSync] 감지대상 목록 조회 실패(종전대로 감지 진행): ${e.message}`);
-    _slessKeys = null;
-  }
-  _slessAt = now;
-  return _slessKeys;
-}
-/** 이 탭을 감지에서 건너뛸 것인가. ★ 목록을 못 얻으면(null) 건너뛰지 않는다(fail-open). */
-async function _skipDetectTab(sheetId, tabName, tabGid) {
-  const keys = await _detectableKeysCached();
-  if (!keys) return false;
-  return !require('../utils/sheetlessScope').hasTabKey(keys, sheetId, tabName, tabGid);
-}
 
 async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }) {
   const db = getPool();
@@ -1988,10 +1642,6 @@ async function _autoApplyInner({ limit, dryRun }) {
   let applied = 0, ordersApplied = 0, dismissed = 0, reverifyFail = 0, staleG6 = 0, tabsSkipped = 0;
   for (const [, tabProps] of byTab) {
     const first = tabProps[0];
-    // ★ 감지 대상이 아닌 탭은 재검증 읽기도 하지 않는다 — detect 를 막아도 **이미 쌓인** 제안이 남아
-    //   여기서 탭당 라이브 2콜(헤더+사각형)이 계속 나간다. 읽어 봐야 아무도 안 고치는 시트다.
-    //   제안은 지우지 않고 그대로 둔다(사람이 화면에서 판단할 몫 — 여기서 조용히 기각하지 않는다).
-    if (await _skipDetectTab(first.sheet_id, first.tab_name, first.tab_gid)) { tabsSkipped++; continue; }
     const ctx = await loadRawTabContext(first.sheet_id, first.tab_gid, first.tab_name);
     if (!ctx || !ctx.tabGid) { tabsSkipped++; continue; }
     let headers = ctx.headers;
@@ -2159,20 +1809,11 @@ async function runReverseSyncAutoCycle({ tabsPerCycle } = {}) {
   const db = getPool();
   const perCycle = Math.min(Math.max(parseInt(tabsPerCycle || process.env.REVERSE_SYNC_TABS_PER_CYCLE || '3', 10), 1), 30);
   // 시트 편집은 주문 updated_at을 바꾸지 않으므로 시간필터 없이 written+sig 탭 전체를 라운드로빈(오래된 주문의 시트편집도 커버).
-  const { rows: rawTabs } = await db.query(
+  const { rows: tabs } = await db.query(
     `SELECT sheet_id, tab_name FROM order_submissions
       WHERE deleted_at IS NULL AND mirror_status = 'written' AND sheet_row IS NOT NULL AND last_sheet_write_sig IS NOT NULL
       GROUP BY sheet_id, tab_name ORDER BY sheet_id, tab_name LIMIT 500`
   );
-  // ★ 감지 대상이 아닌 탭을 여기서 걸러 낸다. detect 안에도 같은 게이트가 있지만(단일 관문),
-  //   사이클당 탭이 3개뿐이라 그런 탭이 라운드로빈 자리를 먹으면 **진짜 시트 탭이 며칠씩 밀린다**.
-  //   ⚠ 무시트 전환도 탭 마감도 last_sheet_write_sig 를 지우지 않는다(전환·마감 전에 시트에 써진
-  //     주문이라 표식이 그대로 남는다) → 위 쿼리만으로는 그 탭들이 전부 따라 들어온다.
-  //     그게 이번 낭비의 원인이었다.
-  const _okKeys = await _detectableKeysCached();
-  const { hasTabKey } = require('../utils/sheetlessScope');
-  const tabs = _okKeys ? rawTabs.filter(t => hasTabKey(_okKeys, t.sheet_id, t.tab_name)) : rawTabs;
-  const skippedNotDetectable = rawTabs.length - tabs.length;
   let detected = 0, detectRuns = 0;
   if (tabs.length) {
     const start = _reverseAutoCursor % tabs.length;
@@ -2187,14 +1828,11 @@ async function runReverseSyncAutoCycle({ tabsPerCycle } = {}) {
     _reverseAutoCursor = (start + perCycle) % tabs.length;
   }
   const apply = await autoApplyReverseSync({});
-  return { activeTabs: tabs.length, skippedNotDetectable, detectRuns, detected, apply };
+  return { activeTabs: tabs.length, detectRuns, detected, apply };
 }
 
 module.exports = {
-  /** 테스트 전용 — 무시트 판정 캐시를 비운다(전환 직후 동작을 스위트에서 확인하기 위한 것). */
-  _resetSheetlessCacheForTest: () => { _slessKeys = null; _slessAt = 0; },
   computeDedupKey,
-  softDeleteDuplicateOrders,
   buildCandidateRows,
   reconcileStuckOrders,
   // 시트 변경 감지용 공개 트리거: 가드 차단(=시트가 예상과 다름 신호) 시 그 시트만 자동 재미러+리컨실.
@@ -2214,8 +1852,6 @@ module.exports = {
   optionColIndexes,
   existingOptionKeyAt,
   optionWriteColumns,
-  productWriteColumns,   // 138 — 선택 상품 기입 칸(매퍼 파생 · 사본 금지)
-  PRODUCT_HEADER,        // 138 — 작업표 「상품」 열 이름 단일 출처
   blogUrlWriteColumns,
   filterOptionWritesBlankOnly,
   _colIdxFromRange,
@@ -2225,10 +1861,6 @@ module.exports = {
   guardBlocksWrite,
   normalizeGuardValue,
   loadRawTabContext,
-  tabDetectedHeaders,
-  normalizeWorkdeskPrice,
-  normalizeWorkdeskColumnValue,
-  syncCellToOrderIdentity,
   claimRow,
   createOrderLedgerEntry,
   markOrderQueued,

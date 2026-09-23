@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
-  <script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
+  <script src="js/campaign-cards.js?v=20260817-hidden-prerequisite-c119"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
     :root{ --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da; --ok:#12b886; --ok-light:#D1FAE5;
@@ -144,7 +144,7 @@
     <div class="sec">
       <div class="cardbx lockcard">
         <div class="e">🧾</div><div class="m">내 정보를 먼저 등록해주세요</div>
-        <div class="s">참여 후에는 <b id="missTtl">30분</b> 안에 구매와 구매양식 제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요. <b>아직 자리는 차지하지 않았어요.</b></div>
+        <div class="s">참여 후에는 <b id="missTtl">15분</b> 안에 구매와 구매양식 제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요. <b>아직 자리는 차지하지 않았어요.</b></div>
         <div class="misslist" id="missList"></div>
         <button class="btn" onclick="location.href='/'">리뷰어 홈에서 내 정보 등록하기</button>
         <button class="btn ghost" style="margin-top:8px" onclick="showPre()">다음에 할게요</button>
@@ -179,37 +179,6 @@
       <button class="btn" id="addSubBtn" style="margin-top:2px;display:none;background:linear-gradient(135deg,#7C3AED,#6D28D9)" onclick="onAddSubJoin()">＋ 타계정으로 추가참여하기</button>
       <button class="btn ghost" style="margin-top:2px" onclick="onCancel()">참여 취소</button>
       <div class="muted" style="text-align:center;margin-top:6px">구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.</div>
-    </div>
-  </div>
-
-  <!-- 📝 127 블로그 승인제: 승인 대기 -->
-  <div id="vBlogPending" class="statebig" style="display:none">
-    <div class="e">📮</div><h2>신청이 접수됐어요</h2>
-    <p>관리자가 블로그를 확인한 뒤 승인하면<br/><b>이 페이지에서 바로 구매를 진행</b>할 수 있어요.</p>
-    <div class="sec">
-      <div class="cardbx" style="border-color:#7C3AED">
-        <div class="wd-tt" style="color:#6D28D9">📝 제출한 블로그 주소</div>
-        <div id="bpUrl" style="font-size:.82rem;word-break:break-all;color:#374151"></div>
-      </div>
-      <div class="cardbx lockcard"><div class="e">⏳</div><div class="m">승인을 기다리는 중</div>
-        <div class="s">승인되면 이 화면이 자동으로 바뀌어요(30초마다 확인). 결과는 리뷰어 홈 1:1문의로도 알려드려요.</div>
-      </div>
-      <button class="btn ghost" onclick="onCancel()">신청 취소</button>
-      <button class="btn ghost" onclick="location.href='/'">홈으로</button>
-    </div>
-  </div>
-
-  <!-- 📝 127 블로그 승인제: 반려 -->
-  <div id="vBlogRejected" class="statebig" style="display:none">
-    <div class="e">↩️</div><h2>신청이 반려되었어요</h2>
-    <p id="brReasonHead">아래 사유를 확인하고 다시 신청할 수 있어요.</p>
-    <div class="sec">
-      <div class="cardbx" style="border-color:#F59E0B">
-        <div class="wd-tt" style="color:#B45309">반려 사유</div>
-        <div id="brReason" style="font-size:.84rem;white-space:pre-wrap;color:#374151"></div>
-      </div>
-      <button class="btn" onclick="retryBlogApply()">블로그 주소 확인하고 다시 신청하기</button>
-      <button class="btn ghost" onclick="location.href='/'">홈으로</button>
     </div>
   </div>
 
@@ -287,7 +256,7 @@
 <div class="sheet-ovl" id="popGate">
   <div class="sheet" style="max-height:82vh;overflow-y:auto">
     <h3>🔥 인기 상품 참여 조건</h3>
-    <p><b>최근 1일(24시간) 안에 일반 모집 구매양식을 제출완료한 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>
+    <p><b>일반 모집 구매양식 제출완료 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>
       어떤 일반 모집을 제출할지는 직접 선택할 수 있습니다.</p>
     <div class="muted" id="popGateCount" style="margin-bottom:8px"></div>
     <div id="popGateSubs" style="display:none;margin:-4px 0 8px;font-size:.8rem;color:#047857"></div>
@@ -326,8 +295,6 @@ let _camp = null;          // /api/campaign/:id 공개 페이로드
 let _detail = null;        // work-detail 응답
 let _holdTick = null;
 let _pollTimer = null;
-let _campaignLoadPromise = null; // 같은 화면의 동시 새로고침은 하나의 요청만 사용
-let _campaign429Retried = false; // 429 자동 재시도는 제한 창마다 한 번만
 let _afterLogin = null;    // 본인확인 성공 후 이어서 할 동작
 let _pvStep = 'pre';       // 미리보기 현재 단계
 let _pvForceOpen = true;   // 미리보기 ①단계를 '모집중'으로 가정해 보여줄지(마감·게시전 공고 확인용)
@@ -336,22 +303,25 @@ let _pvSimSubmitted = false; // 미리보기 가상 제출 완료 여부(브라�
 function $(id){ return document.getElementById(id); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3200); }
-function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone','vBlogPending','vBlogRejected'].forEach(v=>$(v).style.display = v===view?'':'none'); }
+function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone'].forEach(v=>$(v).style.display = v===view?'':'none'); }
 function showPre(){ if(_camp) renderPre(); else show('vPre'); } // renderPre가 참여 버튼 상태도 복원(N4)
 
 /* ═══ 세션 (index.html·search-app.js와 동일 키·포맷) ═══ */
 function getSession(){
-  const s = _getReviewerSession();
-  if(!s || !s.phone8 || String(s.phone8).length !== 8) return null;
-  return s;
+  try{
+    const raw = localStorage.getItem('rapp_reviewer_auth');
+    if(!raw) return null;
+    const s = JSON.parse(raw);
+    if(!s || Date.now() > (s.expAt||0)) return null;
+    if(!s.phone8 || String(s.phone8).length !== 8) return null;
+    return s;
+  }catch(_){ return null; }
 }
-function saveSession(name, phone8, reviewerToken){
+function saveSession(name, phone8){
   const session = { name, verified:true, registeredMember:true,
-    phone8:String(phone8).replace(/\D/g,'').slice(-8), reviewerToken:reviewerToken||'', expAt: Date.now()+12*60*60*1000 };
-  // 같은 탭의 만료된 관리자 홈 세션이 새 일반 로그인을 가리지 않게 한다.
-  _prepareReviewerLocalSession();
+    phone8:String(phone8).replace(/\D/g,'').slice(-8), expAt: Date.now()+12*60*60*1000 };
   localStorage.setItem('rapp_reviewer_auth', JSON.stringify(session));
-  try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8, reviewerToken:session.reviewerToken})); }catch(_){}
+  try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8})); }catch(_){}
   return session;
 }
 function needLogin(then){ _afterLogin = then || null; $('loginSheet').style.display='flex'; }
@@ -365,7 +335,7 @@ async function doVerify(){
     const r = await fetch(API_BASE_URL + '/api/reviewer/verify?phone8=' + encodeURIComponent(p8) + '&name=' + encodeURIComponent(name));
     const j = await r.json();
     if(!j || !j.ok){ toast(j && j.error ? j.error : '등록된 리뷰어를 찾을 수 없어요'); return; }
-    saveSession(j.name || name, p8, j.reviewerToken);
+    saveSession(j.name || name, p8);
     hideSheet();
     const fn = _afterLogin; _afterLogin = null;
     if(fn) fn();
@@ -406,10 +376,24 @@ function activeP8(){
 }
 function setActiveP8(p8){ if(PREVIEW) return; try{ localStorage.setItem(ACTIVE_KEY, String(p8||'')); }catch(_){} }
 
-/* 이전 일괄 제출 배치 스냅샷 키.
-   다계정 참여 건도 각 명의의 홀드(application)별로 별도 제출한다. 남아 있는 구 세션 값은
-   iframe을 열 때 지워, 과거 페이지가 만든 batch=1 URL로 여러 건이 다시 묶이지 않게 한다. */
+/* ═══ 일괄 제출 스냅샷 (batch) ═══
+   구매양식 iframe 이 "지금 유효한 홀드 전부"를 한 화면에 카드로 펼칠 수 있도록 넘기는 값.
+   ★ 유효 홀드만·만료 임박 오름차순. 만료 홀드는 제외한다 — 만료 건까지 카드로 띄우면
+     "다 사고 와서 한 번에" 를 UI 가 부추겨 지각(late) 폭증이 기본값이 된다.
+   ★ 홀드 1건이면 null = batch 미설정 = 기존 단건 동작 100% 불변. */
 const BATCH_KEY = 'camp_batch_' + CAMP_ID;
+function _batchSnapshot(){
+  if(PREVIEW) return null;                                   // 미리보기 2중 방어 ①(iframe 이 ②)
+  const m = _allHolds(), now = CampCards.serverNow();
+  const arr = Object.keys(m).map(k => m[k])
+    .filter(h => h && h.applicationId && h.holdToken && String(h.phone8||'').length === 8)
+    .filter(h => !h.expiresAt || Date.parse(h.expiresAt) > now)
+    .sort((a,b) => Date.parse(a.expiresAt || 0) - Date.parse(b.expiresAt || 0));
+  if(arr.length < 2) return null;                            // 홀드 1건 = 현행 동작 완전 불변
+  return arr.map(h => ({ app:String(h.applicationId), holdToken:h.holdToken, phone8:String(h.phone8),
+                         name:h.name||'', isSub:!!h.isSub, expiresAt:h.expiresAt||'',
+                         optionKey:h.optionKey||'' }));
+}
 
 /** 활성 명의의 홀드(인자로 명의 p8 지정 가능) — 기존 호출부는 무인자로 그대로 동작 */
 function getHold(p8){
@@ -436,50 +420,6 @@ function clearHold(p8){
     const old = JSON.parse(localStorage.getItem(HOLD_KEY) || 'null');
     if(old && String(old.phone8) === key) localStorage.removeItem(HOLD_KEY);
   }catch(_){}
-}
-
-let _holdRecoveryPromise = null;
-/**
- * 모바일 앱 내 브라우저가 새 컨텍스트로 열려 localStorage 홀드만 잃은 경우,
- * 서명된 리뷰어 세션으로 본인 활성 홀드를 다시 받아 구매양식을 이어 연다.
- */
-function recoverActiveHolds(preferredPhone){
-  if(PREVIEW) return Promise.resolve(false);
-  if(_holdRecoveryPromise) return _holdRecoveryPromise;
-  const s = getSession();
-  if(!s) return Promise.resolve(false);
-  _holdRecoveryPromise = (async ()=>{
-    try{
-      const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/my-active-holds', {
-        headers:_getAuthHeaders(), cache:'no-store'
-      });
-      const j = await r.json().catch(()=>({}));
-      if(!r.ok || !j.ok || !Array.isArray(j.holds) || !j.holds.length) return false;
-      // 서버 홀드를 저장하기 전에 기존 활성 명의를 잡아야 한다. 저장 후 읽으면
-      // 빈 저장소에서도 첫 복구 명의가 "기존 선택"처럼 보여 로그인 명의보다 앞선다.
-      const prior = activeP8();
-      const m = _allHolds();
-      const recovered = [];
-      for(const h of j.holds){
-        const p8 = _p8(h && h.phone8);
-        if(p8.length !== 8 || !h.holdToken || !h.applicationId) continue;
-        m[p8] = {
-          applicationId:h.applicationId, holdToken:String(h.holdToken), phone8:p8,
-          expiresAt:h.expiresAt || null, optionKey:h.optionKey || '', name:h.name || '',
-          isSub:!!h.isSub, ownerPhone8:_p8(h.ownerPhone8 || s.phone8)
-        };
-        if(!recovered.includes(p8)) recovered.push(p8);
-      }
-      if(!recovered.length) return false;
-      _saveHolds(m);
-      const loginP8 = _p8(s.phone8);
-      const preferredP8 = _p8(preferredPhone);
-      setActiveP8(recovered.includes(preferredP8) ? preferredP8
-        : (recovered.includes(prior) ? prior : (recovered.includes(loginP8) ? loginP8 : recovered[0])));
-      return true;
-    }catch(_){ return false; }
-  })().finally(()=>{ _holdRecoveryPromise = null; });
-  return _holdRecoveryPromise;
 }
 
 /* ═══ 작업내용 표시 정규화 (표시 직전 · 스냅샷 불변 · 문제 패턴일 때만 개입) ═══ */
@@ -522,12 +462,7 @@ function renderPre(){
   const c = _camp;
   $('hdTitle').textContent = c.title || '캠페인';
   CampCards.startTicker(loadCampaign);   // 카드 CSS 주입 + preopen 카운트다운 틱(S2)
-  // ★ 미리보기 '모집중 가정' — 카드도 열린 모습으로 그린다(리본 '모집 종료'·회색 오버레이 제거).
-  //   서버 데이터(_camp)는 건드리지 않고 **그리는 값만** 덮는다(토글을 끄면 즉시 실제 상태로 복귀).
-  const _cardData = _pvOpenSim()
-    ? { ...c, state:'open', stateReason:'', status:'active' }
-    : { ...c };
-  $('preCard').innerHTML = CampCards.cardHtml(_cardData);
+  $('preCard').innerHTML = CampCards.cardHtml({ ...c });
   // 상세 페이지 안의 카드는 클릭(자기 자신 이동) 비활성
   const pc = $('preCard').querySelector('.pcard');
   if(pc){ pc.onclick = null; pc.style.cursor='default';
@@ -594,7 +529,8 @@ function renderCrNotice(){
 }
 
 /* ═══ 🔥 인기상품 참여 조건 (064) ═══
-   명의별 최근 1일(24시간) 안의 일반 "구매양식 제출완료" 1건을 인기 참여권 1건으로 쓴다.
+   선행참여 우선순위가 있는 인기 공고는 명의별 "구매양식 제출완료" 이력을 기준으로
+   첫 미완료 일반(비인기) 공고를 먼저 요구한다.
    서버 게이트(apply 403 popular_locked)가 최종 권위 — 여기 안내·목록은 UX 보조. */
 /* ★ 참여권 상태(popular-status). null = 모름(구버전 백엔드·조회 실패·비로그인·미리보기)
    — **모르면 잠그지 않는다**(fail-open). 서버 apply 403 이 최종 권위이고 여기는 "누르기 전 고지"일 뿐. */
@@ -609,7 +545,7 @@ let _popUnknown = false;       // 한 명의라도 조회에 실패하면 true �
 
 function _popCalc(o){
   const nd = Number(o && o.normalDone) || 0, pu = Number(o && o.popularUsed) || 0;
-  return { normalDone: nd, popularUsed: pu, credits: Math.max(0, nd - pu), validityDays: Number(o && o.validityDays) || 1 };
+  return { normalDone: nd, popularUsed: pu, credits: Math.max(0, nd - pu) };
 }
 function _setPopCredit(o){ if(o) _popCredit = _popCalc(o); }
 /** 한 명의의 참여권 조회. 실패는 null(= 모름) — 0건으로 꾸미지 않는다. */
@@ -673,7 +609,7 @@ function _applyPopLock(){
   if(!jb || !_popLockable()) return;
   if(jb.disabled) return;                              // 마감·옵션 마감 등 다른 사유가 이미 잠갔으면 그 문구를 유지
   jb.disabled = true;
-  jb.textContent = '🔒 최근 1일 일반 모집 제출 후 참여 가능';
+  jb.textContent = '🔒 일반 모집 제출완료 후 참여 가능';
 }
 /** 그 명의의 참여권. null = 모름(인기 공고가 아니거나 아직 조회 전·실패) — 모르면 막지 않는다. */
 function _popCreditFor(phone8){
@@ -710,8 +646,8 @@ function renderPopNotice(){
   const c = _popCredit;
   let line = !c ? ''
     : (c.credits > 0
-        ? '<div style="margin-top:8px;font-size:.8rem;color:#047857"><b>남은 참여권 ' + c.credits + '건</b> · 최근 1일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>'
-        : '<div style="margin-top:8px;font-size:.8rem;color:#DC2626"><b>남은 참여권 0건</b> — 아직 참여할 수 없어요 · 최근 1일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>');
+        ? '<div style="margin-top:8px;font-size:.8rem;color:#047857"><b>남은 참여권 ' + c.credits + '건</b> · 제출완료 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>'
+        : '<div style="margin-top:8px;font-size:.8rem;color:#DC2626"><b>남은 참여권 0건</b> — 아직 참여할 수 없어요 · 제출완료 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>');
   // ★ 타계정 참여가 열린 공고: 참여권은 명의별이라 "어느 명의로 참여할 수 있는지"를 말해준다.
   if(c && multiEnabled() && _popSubCredits){
     const ok = _popSubsWithCredit();
@@ -731,7 +667,7 @@ function renderPopNotice(){
   }
   box.innerHTML =
     '<div class="wd-tt" style="color:#DC2626">🔥 인기 상품 — 참여 조건이 있어요</div>' +
-    '<div style="font-size:.82rem;line-height:1.65"><b>최근 1일(24시간) 안에 일반 모집 구매양식을 제출완료한 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>' +
+    '<div style="font-size:.82rem;line-height:1.65"><b>일반 모집 구매양식 제출완료 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>' +
     '<span class="muted">참여 신청만 하고 취소하면 인정되지 않아요 — 구매양식 제출까지 완료해야 해요.</span></div>' +
     line +
     '<button class="btn ghost" style="margin-top:10px;padding:10px" onclick="openPopGate()">📋 지금 참여 가능한 일반 모집 보기</button>';
@@ -750,7 +686,7 @@ async function openPopGate(gateInfo){
   const normalDone = Number(info && info.normalDone) || 0;
   const popularUsed = Number(info && info.popularUsed) || 0;
   cnt.textContent = info
-    ? `최근 1일 일반 ${normalDone}건 · 사용한 인기 ${popularUsed}건 · 남은 참여권 ${Math.max(0, normalDone - popularUsed)}건`
+    ? `제출완료 일반 ${normalDone}건 · 사용한 인기 ${popularUsed}건 · 남은 참여권 ${Math.max(0, normalDone - popularUsed)}건`
     : '';
   // ★ 타계정 참여가 열린 공고: 참여권은 명의별이라 위 한 줄(그 명의 기준)만으로는 오해가 생긴다
   //   — 참여할 수 있는 다른 명의가 있으면 여기서도 말해준다(안내 카드와 같은 출처·같은 문장).
@@ -801,14 +737,12 @@ function goPopNormal(id){
   try{ sessionStorage.setItem('pop_return_camp', JSON.stringify({ campaignId:CAMP_ID })); }catch(_){}
   location.href = 'campaign.html?id=' + encodeURIComponent(id);
 }
-function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 30) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
+function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
 
 /* ═══ 상품옵션 (061 2단계) ═══ */
 let _optSheetMode = 'join';   // 'join' | 'change'
 let _optSheetSel  = null;     // 시트에서 선택된 optKey
 function _optRemainText(o){
-  // ★ 관리자 미리보기 '모집중 가정' — 마감 상태를 잔여 문구로 드러내지 않는다(진행 화면 확인이 목적)
-  if(_pvOpenSim() && o.status !== 'open') return '모집중 가정(미리보기)';
   if(o.status === 'soldout' || o.status === 'closed') return '마감';
   if(o.status === 'today_done') return '오늘 마감 (내일 가능)';
   const parts = [];
@@ -823,20 +757,11 @@ function _optSubText(o){
 }
 function _optBadgeHtml(o, isCur){
   if(isCur) return '<span class="obadge cur">현재</span>';
-  if(_pvOpenSim()) return '';   // ★ 모집중 가정: 마감 배지를 붙이지 않는다
   if(o.status === 'soldout' || o.status === 'closed') return '<span class="obadge soldout">마감</span>';
   if(o.status === 'today_done') return '<span class="obadge soldout">오늘마감</span>';
   if(o.remaining != null && o.remaining <= 3) return '<span class="obadge hot">임박</span>';
   return '';
 }
-/** ★ 미리보기 '모집중 가정' 판정 단일 출처 — 카드·옵션·참여 버튼이 같은 값을 본다.
- *  (판정이 갈리면 "카드는 열렸는데 옵션은 전부 마감"처럼 반쪽 시뮬레이션이 된다) */
-function _pvOpenSim(){ return PREVIEW && _pvForceOpen; }
-// 관리자 미리보기는 실제 공고의 게시·시간 상태를 무시하고 옵션을 가상으로 선택한다.
-// ★ '모집중 가정'에서는 마감된 옵션도 선택 가능 — 마감 공고의 진행 화면을 확인하는 것이 이 모드의 목적이다.
-//   ('실제 상태' 토글로 언제든 서버 판정 그대로 볼 수 있다.)
-// 실제 리뷰어 화면은 서버가 계산한 selectable 값을 그대로 사용한다(PREVIEW=false면 이 함수 미도달).
-function _pvOptionSelectable(o){ return !!o && (_pvOpenSim() || o.status === 'open'); }
 /**
  * ★★ 복합 작업(134) — 선택지를 **상품별로 묶어** 그린다.
  *
@@ -866,6 +791,9 @@ function _optGroupEl(text){
   d.textContent = text;          // 상품명은 관리자 입력값 — textContent 로만 넣는다
   return d;
 }
+// 관리자 미리보기는 실제 공고의 게시·시간 상태를 무시하고, 마감되지 않은 옵션을 가상으로 선택한다.
+// 실제 리뷰어 화면은 서버가 계산한 selectable 값을 그대로 사용한다.
+function _pvOptionSelectable(o){ return !!(o && o.status === 'open'); }
 // 참여 전: 옵션명+잔여 읽기전용 표시
 function renderPreOptions(){
   const opts = (_camp && _camp.options) || [];
@@ -876,7 +804,7 @@ function renderPreOptions(){
   _optListItems(opts).forEach(it => {
     if (it.header) { wrap.appendChild(_optGroupEl(it.header)); return; }
     const o = it.opt;
-    const dim = !_pvOpenSim() && o.status !== 'open';   // 마감/오늘마감만 흐리게, 열린 옵션은 정상 표시(읽기전용)
+    const dim = o.status !== 'open';   // 마감/오늘마감만 흐리게, 열린 옵션은 정상 표시(읽기전용)
     const div = document.createElement('div');
     div.className = 'optrow' + (dim ? ' dis' : '');
     div.style.cursor = 'default';
@@ -931,8 +859,7 @@ function openChangeOptSheet(){
 function hideOptSheet(){ $('optSheet').style.display = 'none'; }
 function onOptSheetConfirm(){
   if(!_optSheetSel) return toast('옵션을 선택해주세요');
-  if(_optSheetMode === 'join_identity') { hideOptSheet(); _applyInitialAcct(_optSheetSel); }
-  else if(_optSheetMode === 'join') _joinWithOption(_optSheetSel);
+  if(_optSheetMode === 'join') _joinWithOption(_optSheetSel);          // 타계정 가능 공고면 명의 선택으로 이어짐
   else if(_optSheetMode === 'join_sub'){ hideOptSheet(); openAcctSheet(_optSheetSel); }  // 추가참여: 옵션 → 명의
   else _doChangeOption(_optSheetSel);
 }
@@ -941,31 +868,32 @@ function onOptSheetConfirm(){
    서버 계약: apply body에 subName/subPhone 있으면 타계정 참여. 서버가 소유자 sub_accounts로
    명의를 재검증하고, 응답 phone8 = "명의" p8(= 홀드 키). 화면 상태는 클라 추정이고 최종 권위는 서버 409. */
 let _subs = null;          // 소유자의 타계정 목록(profile get 캐시)
-let _subsLoadError = null; // 조회 실패를 타계정 0개로 오인해 명의 선택을 건너뛰지 않는다
 let _acctSel = null;       // 시트에서 고른 명의 { type:'self'|'sub', name, phone8, phone }
 let _acctOptKey = null;    // 옵션 공고에서 명의 선택 후 이어질 옵션키
-let _acctNext = 'apply';   // apply | option — 최초 참여는 명의를 먼저 고른 뒤 옵션으로 이동
-let _initialAcctSel = null;
 const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
 let _repurchaseAccounts = {};
 
 function multiEnabled(){ return !!(_camp && _camp.multi_account_mode === true); }
 
-/** 타계정 목록 로드 — 로그인 서명 토큰의 소유자 UUID 범위만 조회 */
+/** 타계정 목록 로드(무인증 profile API — 본인 phone8 스코프, 내정보 화면과 동일 경로) */
 async function loadSubs(force){
   if(_subs && !force) return _subs;
   const s = getSession(); if(!s) return (_subs = []);
   try{
-    const r = await fetch(API_BASE_URL + '/api/reviewer/profile/secure', { headers:_getAuthHeaders() });
+    const r = await fetch(API_BASE_URL + '/api/reviewer/profile', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'get', phone8: s.phone8 })
+    });
     const j = await r.json().catch(()=>({}));
-    if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || '명의 정보를 불러오지 못했습니다.');
-    const identities = (j && j.profile && j.profile.identities) || [];
-    _subs = Array.isArray(identities)
-      ? identities.filter(x => x && x.type === 'sub' && x.name && x.phone)
-      : [];
-    _subsLoadError = null;
-    try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
-  }catch(e){ _subs = null; _subsLoadError = e; }
+    let list = (j && j.profile && j.profile.subAccounts) || [];
+    if(typeof list === 'string'){ try{ list = JSON.parse(list); }catch(_){ list = []; } }
+    _subs = Array.isArray(list) ? list.filter(x => x && x.name && x.phone) : [];
+    try{
+      const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?phone8=' + encodeURIComponent(s.phone8) + '&ids=' + encodeURIComponent(CAMP_ID));
+      const sj = await sr.json().catch(()=>({})); const entry = sj && sj.ok && sj.status && sj.status[CAMP_ID];
+      _repurchaseAccounts = {}; ((entry && entry.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; });
+    }catch(_){ _repurchaseAccounts = {}; }
+  }catch(_){ _subs = []; }
   return _subs;
 }
 
@@ -975,24 +903,21 @@ const _p8 = v => String(v || '').replace(/\D/g,'').slice(-8);
 function _acctRows(){
   const s = getSession(); if(!s) return [];
   const held = _allHolds();
-  const repState = p8 => _repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'locked'
-    ? 'repurchase'
-    : (_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'unknown' ? 'verify'
-      : (_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'login_only' ? 'login_only' : 'ok'));
   const rows = [{ type:'self', name: s.name, phone8: s.phone8, phone: s.phone8,
-                  state: held[s.phone8] ? 'joined' : repState(s.phone8), repurchase:_repurchaseAccounts[s.phone8] || null }];
+                  state: held[s.phone8] ? 'joined' : 'ok' }];
   (_subs || []).forEach((x, i) => {
     const p8 = _p8(x.phone);
     rows.push({ type:'sub', idx:i, name:String(x.name||'').trim(), phone8:p8, phone:String(x.phone||''),
-      state: held[p8] ? 'joined' : (p8 === s.phone8 ? 'same_phone' : (p8.length !== 8 ? 'invalid' : repState(p8))), repurchase:_repurchaseAccounts[p8] || null });
+      state: held[p8] ? 'joined' : (p8 === s.phone8 ? 'same_phone' : (p8.length !== 8 ? 'invalid' : ((_repurchaseAccounts[p8] && _repurchaseAccounts[p8].status === 'locked') ? 'repurchase' : 'ok'))), repurchase:_repurchaseAccounts[p8] || null });
   });
+  if(rows[0] && _repurchaseAccounts[rows[0].phone8] && _repurchaseAccounts[rows[0].phone8].status === 'locked' && rows[0].state === 'ok') { rows[0].state = 'repurchase'; rows[0].repurchase = _repurchaseAccounts[rows[0].phone8]; }
   // 서버가 거절한 명의는 잠금(자리는 점유되지 않았고, 사유를 그대로 보여준다)
-  rows.forEach(r => { if(_acctBlocked[r.phone8] && (r.state === 'ok' || r.state === 'verify')){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
+  rows.forEach(r => { if(_acctBlocked[r.phone8] && r.state === 'ok'){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
   // ★ 인기 공고: 참여권은 명의별이라 어느 명의로 참여할 수 있는지 여기서 말해준다.
   //   참여권 0이 확인된 명의는 고를 수 없게 한다(고르면 서버가 403 — 헛걸음을 만들지 않는다).
   //   **모르면(조회 전·실패·인기 공고 아님) 손대지 않는다** — 우리 오류로 정당한 참여를 막지 않는다.
   rows.forEach(r => {
-    if(r.state !== 'ok' && r.state !== 'verify') return;
+    if(r.state !== 'ok') return;
     const cr = _popCreditFor(r.phone8);
     if(!cr) return;
     r.credits = cr.credits;
@@ -1005,17 +930,15 @@ function _acctStateText(r){
   return r.state === 'joined' ? '이 공고에 참여중'
     : r.state === 'same_phone' ? '본계정과 같은 번호 — 별도 참여 불가'
     : r.state === 'invalid' ? '전화번호를 확인해주세요'
-    : r.state === 'repurchase' ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) + ' 이후 재참여 가능'
-    : r.state === 'verify' ? '신청 시 재참여 이력 확인'
-    : r.state === 'login_only' ? '현재 로그인한 명의만 선택 가능'
-    : r.state === 'nocredit' ? base + '참여권 없음 — 최근 1일 일반 모집 제출 후 가능'
+    : r.state === 'repurchase' ? ((r.repurchase && r.repurchase.availableFrom ? new Date(r.repurchase.availableFrom).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) : '재참여 가능일') + ' 이후 재참여 가능')
+    : r.state === 'nocredit' ? base + '참여권 없음 — 일반 모집 제출완료 후 가능'
     : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }
 function renderAcctList(){
   const box = $('acctSheetList'); box.innerHTML = ''; _acctSel = null;
   const rows = _acctRows();
   rows.forEach((r, i) => {
-    const pickable = r.state === 'ok' || r.state === 'verify';
+    const pickable = r.state === 'ok';
     const div = document.createElement('div');
     div.className = 'optrow' + (pickable ? '' : ' dis');
     div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(r.name) +
@@ -1023,7 +946,6 @@ function renderAcctList(){
       '</div><div class="sub">' + _escAttr(_acctStateText(r)) + ' · ***' + _escAttr(r.phone8.slice(-4)) + '</div></div>' +
       (r.state === 'joined' ? '<span class="obadge cur">참여중</span>'
         : r.state === 'nocredit' ? '<span class="obadge soldout">참여권 0</span>'
-        : r.state === 'verify' ? '<span class="obadge">확인</span>'
         : (pickable ? '' : '<span class="obadge soldout">불가</span>'));
     if(pickable){
       div.onclick = () => {
@@ -1036,7 +958,7 @@ function renderAcctList(){
     box.appendChild(div);
   });
   $('acctSheetGo').disabled = true;
-  const canAny = rows.some(r => r.state === 'ok' || r.state === 'verify');
+  const canAny = rows.some(r => r.state === 'ok');
   const onlyNoCredit = !canAny && rows.some(r => r.state === 'nocredit');
   $('acctSheetNote').textContent = canAny
     ? '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).'
@@ -1044,12 +966,10 @@ function renderAcctList(){
       ? '참여권이 남은 명의가 없어요. 일반 모집을 구매양식 제출까지 완료하면 그 명의로 참여할 수 있어요.'
       : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
 }
-async function openAcctSheet(optionKey, next){
+async function openAcctSheet(optionKey){
   if(PREVIEW) return _pvBlock('참여하기');
   _acctOptKey = optionKey || null;
-  _acctNext = next || 'apply';
   await loadSubs();
-  if(_subsLoadError){ toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요'); return; }
   await loadPopCredit();          // ★ 명의별 참여권이 도착한 뒤에 그린다(모르면 종전대로 그린다)
   // 타계정이 하나도 없고 본계정도 이미 참여중이면 → 등록 유도
   const rows = _acctRows();
@@ -1057,7 +977,6 @@ async function openAcctSheet(optionKey, next){
     return openAcctEmpty();
   }
   renderAcctList();
-  $('acctSheetGo').textContent = _acctNext === 'option' ? '이 명의로 계속' : '이 명의로 참여';
   $('acctSheet').style.display = 'flex';
 }
 function hideAcctSheet(){ $('acctSheet').style.display = 'none'; }
@@ -1072,39 +991,30 @@ function onAcctSheetConfirm(){
   if(!_acctSel) return toast('참여할 명의를 선택해주세요');
   hideAcctSheet();
   const sel = _acctSel;
-  if(_acctNext === 'option') {
-    _initialAcctSel = sel;
-    return _continueInitialAcct();
-  }
   _doApply(_acctOptKey, sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null);
-}
-function _applyInitialAcct(optionKey){
-  const sel = _initialAcctSel; _initialAcctSel = null;
-  if(!sel) return toast('참여할 명의를 다시 선택해주세요');
-  return _doApply(optionKey, sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null);
-}
-function _continueInitialAcct(){
-  const opts = (_camp && _camp.options) || [];
-  if(!opts.length) return _applyInitialAcct(null);
-  const pickable = opts.filter(o => o.selectable);
-  if(!pickable.length){ _initialAcctSel = null; toast('지금은 선택 가능한 옵션이 없어요'); return loadCampaign(); }
-  if(pickable.length === 1) return _applyInitialAcct(pickable[0].optKey);
-  _optSheetMode = 'join_identity';
-  $('optSheetTitle').textContent = '참여할 옵션 선택';
-  $('optSheetDesc').textContent = (_initialAcctSel?.name || '선택 명의') + ' 명의로 참여할 옵션을 골라주세요.';
-  $('optSheetNote').textContent = '선택한 명의와 옵션으로 자리가 잡혀요.';
-  $('optSheetGo').textContent = '이 옵션으로 참여';
-  _renderOptSheetList(opts, null);
-  $('optSheet').style.display = 'flex';
 }
 /** 참여 후 화면의 [＋타계정으로 추가참여하기] */
 async function onAddSubJoin(){
   if(PREVIEW) return _pvBlock('타계정 추가참여');
   const s = getSession(); if(!s) return needLogin(onAddSubJoin);
   await loadSubs();
-  if(_subsLoadError) return toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요');
   if(!(_subs || []).length) return openAcctEmpty();
-  return openAcctSheet(null, 'option');
+  // 옵션 공고면 옵션부터 고르고, 아니면 바로 명의 선택
+  const opts = (_camp && _camp.options) || [];
+  const pickable = opts.filter(o => o.selectable);
+  if(opts.length){
+    if(!pickable.length){ toast('지금은 선택 가능한 옵션이 없어요'); return; }
+    if(pickable.length === 1) return openAcctSheet(pickable[0].optKey);
+    _optSheetMode = 'join_sub';
+    $('optSheetTitle').textContent = '추가참여할 옵션 선택';
+    $('optSheetDesc').textContent = '타계정으로 참여할 옵션을 골라주세요.';
+    $('optSheetNote').textContent = '옵션을 고르면 다음 화면에서 명의를 선택해요.';
+    $('optSheetGo').textContent = '이 옵션으로 계속';
+    _renderOptSheetList(opts, null);
+    $('optSheet').style.display = 'flex';
+    return;
+  }
+  return openAcctSheet(null);
 }
 
 /** 참여 후 화면의 명의 패널 — 타계정 참여가 있을 때만 노출(본계정 단독은 현행과 동일한 화면) */
@@ -1200,12 +1110,6 @@ async function onJoin(){
   if(!PREVIEW){
     const s = getSession();
     if(!s) return needLogin(onJoin);
-    if(multiEnabled()) {
-      await loadSubs();
-      if(_subsLoadError) return toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요');
-      // 타계정이 하나 이상인 허용 공고에서만 명의를 먼저 고른다.
-      if((_subs || []).length) return openAcctSheet(null, 'option');
-    }
   }
   const opts = (_camp && _camp.options) || [];
   if(opts.length){
@@ -1227,47 +1131,11 @@ async function _joinWithOption(optionKey){
   return openAcctSheet(optionKey);
 }
 
-/**
- * 미리보기에서 고른 선택지 = 목록의 그 옵션 + **그 선택지 전용 유입가이드**.
- *
- * ★★ 서버가 주는 `options` 는 실제 리뷰어 응답과 같은 모양이라 선택지별 유입가이드가
- *   **덜어져 있다**(고르지도 않은 선택지의 안내 HTML·사진을 리뷰어에게 통째로 보내지 않는 규칙).
- *   그대로 고르면 가이드 없는 껍데기가 되어 "등록된 유입가이드가 없어요" 가 뜬다
- *   (2026-08-25 실측 — 미리보기는 항상 옵션을 고르고 들어가는 흐름이라 선택지 전 건이 그렇게 보였다).
- *   실제 리뷰어 경로는 참여·옵션변경 뒤 서버(work-detail)를 다시 물어보므로 정상이다.
- * ★ 재료는 미리보기 전용 optionGuides 맵 **하나** — 진입 시점에 확보한다(구버전 백엔드는
- *   서버가 고른 selectedOption 으로 그 자리에서 맵을 만든다). 출처를 둘로 두면 시뮬레이션이
- *   selectedOption 을 덮은 뒤 한쪽만 조용히 갈린다.
- * ★★ 둘 다 없으면(구버전 백엔드) **가이드를 덧붙이지 않고 "모른다"고 돌려준다** —
- *   호출부가 그 사실을 말한다(없는 것으로 꾸미면 이번 사고가 그대로 재현된다).
- * ★★ 사본 금지 — 가상 참여·가상 옵션변경이 이 함수 하나를 쓴다(따로 고르면 한쪽만 가이드를 잃는다).
- * ★ 서버를 부르지 않는다(미리보기는 서버 상태 무변경 — 이 전제를 회귀가드가 고정한다).
- */
-function _pvPickOption(optionKey){
-  const options = (_detail && _detail.options) || (_camp && _camp.options) || [];
-  const base = optionKey
-    ? (options.find(o => String(o.optKey) === String(optionKey)) || null)
-    : ((_detail && _detail.selectedOption) || null);
-  if(!base) return { opt:null, guideKnown:true };
-  const g = ((_detail && _detail.optionGuides) || {})[base.optKey];
-  if(!g) return { opt: base, guideKnown:false };
-  return {
-    opt: Object.assign({}, base, {
-      inflowGuideHtml: g.inflowGuideHtml || '',
-      inflowGuideImages: Array.isArray(g.inflowGuideImages) ? g.inflowGuideImages : [],
-    }),
-    guideKnown: true,
-  };
-}
-/** 가이드 재료를 못 받았을 때의 고지 — 조용히 "없어요" 로 넘기지 않는다. */
-const _PV_GUIDE_UNKNOWN = '이 선택지의 유입가이드를 불러오지 못했어요 — 새로고침 후 다시 확인해주세요.';
-
 /** 관리자 미리보기 전용 가상 참여. 서버/스토리지에 전혀 기록하지 않는다. */
 function _pvSimulateApply(optionKey){
   if(!PREVIEW || !_detail) return;
   const options = _detail.options || (_camp && _camp.options) || [];
-  const picked = _pvPickOption(optionKey);
-  const selectedOption = picked.opt;
+  const selectedOption = optionKey ? (options.find(o => String(o.optKey) === String(optionKey)) || null) : (_detail.selectedOption || null);
   _detail = {
     ..._detail,
     application: { ...(_detail.application || {}), id:'preview', status:'applied', optionKey: selectedOption ? selectedOption.optKey : null },
@@ -1278,16 +1146,13 @@ function _pvSimulateApply(optionKey){
   hideOptSheet();
   _pvStep = 'joined';
   _renderJoinedView(_detail, null);
-  toast(picked.guideKnown
-    ? '가상 참여로 작업가이드를 열었습니다. 실제 참여 기록은 남지 않습니다.'
-    : _PV_GUIDE_UNKNOWN);
+  toast('가상 참여로 작업가이드를 열었습니다. 실제 참여 기록은 남지 않습니다.');
 }
 
 /** 관리자 미리보기 전용 가상 옵션 변경. 서버 요청·재고·참여 기록을 만들지 않는다. */
 function _pvSimulateChangeOption(newKey){
   if(!PREVIEW || !_detail) return;
-  const picked = _pvPickOption(newKey);         // ★ 참여와 같은 재료·같은 함수(가이드 유실 방지)
-  const selectedOption = picked.opt;
+  const selectedOption = (_detail.options || []).find(o => String(o.optKey) === String(newKey));
   if(!_pvOptionSelectable(selectedOption)) return toast('선택한 옵션은 현재 마감 상태예요');
   _detail = {
     ..._detail,
@@ -1297,9 +1162,7 @@ function _pvSimulateChangeOption(newKey){
   };
   hideOptSheet();
   _renderJoinedView(_detail, null);
-  toast(picked.guideKnown
-    ? '가상 옵션을 변경했습니다. 실제 참여 기록은 남지 않습니다.'
-    : _PV_GUIDE_UNKNOWN);
+  toast('가상 옵션을 변경했습니다. 실제 참여 기록은 남지 않습니다.');
 }
 
 /** @param sub {name,phone}|null — 있으면 타계정 명의로 참여(서버가 sub_accounts로 재검증) */
@@ -1317,7 +1180,7 @@ async function _doApply(optionKey, sub){
     if(isBlogCampaign() && _blogUrl) body.blogUrl = _blogUrl;
     if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
-      method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
     });
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
@@ -1351,7 +1214,7 @@ async function _doApply(optionKey, sub){
         _popSubCredits[_subP8] = Object.assign({ name: (sub && sub.name) || '' }, _popCalc(j));
       }else{ _setPopCredit(j); }
       _popCreditPromise = _popCreditPromise || Promise.resolve(); renderPopNotice(); _applyPopLock();
-      toast('최근 1일 안에 일반 모집 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
+      toast('선행 공고의 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
     }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
@@ -1360,11 +1223,6 @@ async function _doApply(optionKey, sub){
       await loadCampaign();
       const pickable = ((_camp && _camp.options) || []).filter(o => o.selectable);
       if(pickable.length) openOptSheet();
-      return;
-    }
-    if(j.reason === 'duplicate_hold' && await recoverActiveHolds((sub && sub.phone) || s.phone8)){
-      toast('참여 중인 구매양식을 이어서 열었어요');
-      await enterJoined();
       return;
     }
     const msg = {
@@ -1381,7 +1239,7 @@ async function _doApply(optionKey, sub){
       sub_not_registered:'등록된 타계정이 아니에요. 내정보 > 타계정에서 먼저 등록해주세요',
       sub_is_registered_reviewer:'이 번호는 이미 리뷰어로 등록되어 있어요. 그 번호의 본인 계정으로 참여해주세요',
       owner_hold_cap:'동시에 잡아둘 수 있는 자리 수를 넘었어요(구매·제출을 먼저 끝내주세요)',
-      sub_daily_limit:'이 공고의 타계정 참여 한도에 도달했어요',
+      sub_daily_limit:'타계정 참여는 이 공고에서 오늘 한도를 다 썼어요(내일 가능)',
       blocked_by_other_owner:'이 번호는 다른 계정에서 이미 참여 신청했어요',
       same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요',
     }[j.reason] || (j.error || '지금은 참여할 수 없어요');
@@ -1440,31 +1298,6 @@ function renderMissing(missing){
 let _detailRetry = 0;
 // 당일 미제출 홀드는 재참여를 허용한다. 만료 토큰을 그대로 복원하면 서버는 계속 expired를
 // 반환하므로, 해당 명의의 로컬 홀드만 제거하고 참여 전 화면으로 되돌린다.
-/* ═══ 📝 127 블로그 승인제: 대기/반려 화면 ═══
-   ★ 상태의 단일 출처 = work-detail 응답(reason) — 화면은 30초 폴링으로 승인을 감지한다.
-   ★ 홀드 토큰은 지우지 않는다(승인되면 같은 토큰으로 work-detail 이 열린다). */
-let _bpTimer = null;
-function renderBlogPending(){
-  clearInterval(_pollTimer); clearInterval(_holdTick); clearInterval(_bpTimer);
-  const u = $('bpUrl'); if(u) u.textContent = _blogUrl || (function(){ try{ return localStorage.getItem(_BLOG_URL_LS) || ''; }catch(_){ return ''; } })();
-  show('vBlogPending');
-  _bpTimer = setInterval(enterJoined, 30000);
-}
-function renderBlogRejected(j, h){
-  clearInterval(_pollTimer); clearInterval(_holdTick); clearInterval(_bpTimer);
-  const el = $('brReason'); if(el) el.textContent = (j && j.rejectReason) || '관리자가 별도 사유를 남기지 않았어요.';
-  show('vBlogRejected');
-}
-/** 반려 후 재신청 — 반려는 즉시 재신청 가능(사용자 확정 ③). 새 주소를 받기 위해 기존 값을 비운다. */
-async function retryBlogApply(){
-  const h = getHold();
-  clearHold(h && h.phone8);
-  _blogUrl = '';
-  try{ await loadCampaign(); }catch(_){ /* 상태 갱신 실패해도 신청은 진행 가능 */ }
-  if(_camp) renderPre();
-  onJoin();
-}
-
 async function releaseExpiredHold(h){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   clearHold(h && h.phone8);
@@ -1475,16 +1308,12 @@ async function releaseExpiredHold(h){
 }
 async function enterJoined(){
   const h = getHold();
-  clearInterval(_bpTimer);
   if(!h) return renderPre();
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
       '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
     const j = await r.json().catch(()=>({}));
     if(!r.ok || !j.ok){
-      /* 📝 127 블로그 승인제 — 대기/반려는 만료가 아니다(토큰 보존). 서버 reason 이 단일 출처. */
-      if(j.reason === 'pending_approval'){ renderBlogPending(); return; }
-      if(j.reason === 'apply_rejected'){ renderBlogRejected(j, h); return; }
       if(j.reason === 'expired'){ await releaseExpiredHold(h); return; }
       if(j.reason === 'no_hold'){ clearHold(); renderPre(); return; } // 확정 무효일 때만 토큰 파기
       // 일시 장애(429/5xx/배포 중 응답 파싱 실패): holdToken 보존 + 자동 재시도
@@ -1538,16 +1367,21 @@ function _renderJoinedView(j, h){
       if(PREVIEW){ qp.set('preview','1'); }
       else {
         qp.set('app', String(j.application.id)); qp.set('holdToken', h.holdToken); qp.set('holdPhone8', h.phone8);
-        // 다계정이어도 선택한 명의의 application 하나만 iframe에 전달한다.
-        // 이전 일괄제출 세션은 제거해, 새로고침·뒤로가기로 여러 명의가 다시 묶이는 일을 막는다.
-        try{ sessionStorage.removeItem(BATCH_KEY); }catch(_){}
+        // ★ 일괄 제출: 유효 홀드가 2건 이상이면 스냅샷을 넘긴다(저장 실패 = batch 미설정 = 단건 fail-closed).
+        //   옵션 공고인데 optionKey 를 모르는 홀드(이 배포 이전에 만들어진 홀드)가 섞여 있으면 배치 금지 —
+        //   틀린 옵션을 보고 구매하게 하느니 단건이 낫다.
+        const snap = _batchSnapshot();
+        const optOk = !(((_camp && _camp.options) || []).length) || (snap || []).every(x => x.optionKey);
+        if(snap && optOk){
+          try{ sessionStorage.setItem(BATCH_KEY, JSON.stringify(snap)); qp.set('batch','1'); }
+          catch(_){ try{ sessionStorage.removeItem(BATCH_KEY); }catch(_2){} }
+        } else { try{ sessionStorage.removeItem(BATCH_KEY); }catch(_){} }
       }
       // 선택 옵션을 embed에 전달 → 구매양식이 옵션 피커 대신 잠금표시(서버가 최종 권위)
       //   ★ 미리보기는 '선택 가능한' 옵션일 때만 — 마감 옵션을 참여 옵션처럼 고정 표시하면 실제로
       //     리뷰어가 도달할 수 없는 화면을 보여주게 된다.
       const _selOpt = j.selectedOption;
-      //     ★ '모집중 가정'에서는 마감 옵션도 그대로 넘긴다 — 그것이 이 모드의 목적이다.
-      const _pvOptBlocked = PREVIEW && !_pvOpenSim() && !(_selOpt && _selOpt.selectable);
+      const _pvOptBlocked = PREVIEW && !(_selOpt && _selOpt.selectable);
       if(!_pvOptBlocked){
         if(j.application && j.application.optionKey) qp.set('optionKey', j.application.optionKey);
       }
@@ -1566,18 +1400,11 @@ function _renderJoinedView(j, h){
     show('vJoined');
 }
 
-// 옵션 없는 단일상품은 선택지가 곧 상품 본문이다. 이미 바로 아래 상품 카드에 같은
-// 상품명·결제금액이 표시되므로 별도 "내가 참여한 옵션" 카드를 내지 않는다.
-function _isSingleProductUnitCampaign(j){
-  const options = j && Array.isArray(j.options) ? j.options : [];
-  return options.length === 1 && options[0] && options[0].unitKind === 'product';
-}
-
-// 참여 후: 내가 고른 옵션 카드(+변경 버튼) — 옵션 미등록·단일상품 캠페인은 숨김
+// 참여 후: 내가 고른 옵션 카드(+변경 버튼) — 옵션 미등록 캠페인은 숨김
 function renderJoinedOption(j){
   const box = $('joinedOptionBox');
   const so = j && j.selectedOption;
-  if(!(j && j.options && j.options.length && so) || _isSingleProductUnitCampaign(j)){ box.style.display = 'none'; return; }
+  if(!(j && j.options && j.options.length && so)){ box.style.display = 'none'; return; }
   box.style.display = '';
   // ★ 134 — 복합 작업은 상품이 둘 이상이라 옵션명만으론 어느 상품인지 못 가린다.
   //   옵션 없는 상품(unitKind='product')은 줄 이름이 곧 상품명이라 상품 표기를 겹쳐 적지 않는다.
@@ -1598,13 +1425,6 @@ function startHoldCountdown(expiresAtIso){
   _holdTick = setInterval(()=>{
     const remain = end - CampCards.serverNow();
     if(remain <= 0){ clearInterval(_holdTick); el.textContent = '00 : 00'; pollOnce(); return; }
-    // 📝 127: 블로그 구매기한(24h)처럼 1시간 이상 남으면 시:분으로 — 분:초로 '1440 : 00' 이 뜨지 않게
-    if(remain >= 3600000){
-      const hh = Math.floor(remain/3600000);
-      const mm = String(Math.floor(remain%3600000/60000)).padStart(2,'0');
-      el.textContent = hh + '시간 ' + mm + '분';
-      return;
-    }
     const m = String(Math.floor(remain/60000)).padStart(2,'0');
     const s2 = String(Math.floor(remain%60000/1000)).padStart(2,'0');
     el.textContent = m + ' : ' + s2;
@@ -1700,13 +1520,6 @@ let _batchActive = false;
 window.addEventListener('message', (ev)=>{
   if(ev.origin !== location.origin) return;
   const d = ev.data || {};
-  if(d.type === 'purchase-field-focus'){
-    const frame = $('orderFrame');
-    if(frame && ev.source === frame.contentWindow && Number.isFinite(d.top) && d.top >= 0 && d.top <= 20000){
-      window.scrollTo({top:Math.max(0,frame.getBoundingClientRect().top+window.scrollY+d.top-180),behavior:'smooth'});
-    }
-    return;
-  }
   // ★ 일괄 제출 여부는 iframe 이 실제로 홀드 배열을 읽는 데 성공했을 때 보내는 ack 로만 인정한다.
   //   부모 HTML 만 새 버전이고 iframe JS 가 캐시된 구버전인 배포 스큐에서, 부모가 혼자
   //   "5건 제출됐겠지" 로 화면을 정하면 리뷰어가 1건만 낸 채 이탈한다(지금 사고의 재현).
@@ -1872,14 +1685,6 @@ async function _enterPreview(){
             : ((j.error || '미리보기를 불러오지 못했어요.')));
       return;
     }
-    /* 구버전 백엔드 폴백 — 선택지별 가이드 맵을 안 주면 서버가 고른 선택지 하나만이라도
-       재료로 남긴다. ★ 가상 참여가 _detail 을 통째로 갈아치우며 selectedOption 을 덮으므로
-       **여기서 미리** 떠 둬야 한다(뒤에서 읽으면 두 번째 선택부터 가이드를 잃는다 — 실측). */
-    if(!j.optionGuides && j.selectedOption && j.selectedOption.optKey){
-      j.optionGuides = { [j.selectedOption.optKey]: {
-        inflowGuideHtml: j.selectedOption.inflowGuideHtml || '',
-        inflowGuideImages: j.selectedOption.inflowGuideImages || [] } };
-    }
     _detail = j;
     if(j.serverNow) CampCards.setServerNow(j.serverNow);
     const stLabel = { open:'모집중', preopen:'오픈 전', cutoff:'오늘 마감', daily_done:'오늘 인원 마감',
@@ -1927,35 +1732,9 @@ function _pvBlock(what){
 }
 
 /* ═══ 초기 로드 ═══ */
-function _retryAfterMs(response){
-  const raw = response && response.headers && response.headers.get('Retry-After');
-  const seconds = Number(raw);
-  if(Number.isFinite(seconds) && seconds > 0) return Math.min(65000, Math.max(1000, Math.ceil(seconds * 1000)));
-  const retryAt = Date.parse(raw || '');
-  if(Number.isFinite(retryAt)) return Math.min(65000, Math.max(1000, retryAt - Date.now()));
-  return 62000; // 서버의 1분 제한 창을 넘긴다. 짧은 반복 재시도는 같은 창을 다시 소진한다.
-}
-
-function _scheduleCampaign429Retry(waitMs){
-  if(_campaign429Retried) return;
-  _campaign429Retried = true;
-  toast('요청이 많아요. 약 ' + Math.ceil(waitMs / 1000) + '초 후 다시 불러올게요.');
-  setTimeout(()=>{
-    loadCampaign().catch(()=>{}); // 재시도 실패는 현재 안내를 유지하고 무한 재시도하지 않는다.
-  }, waitMs);
-}
-
-function loadCampaign(){
-  if(_campaignLoadPromise) return _campaignLoadPromise;
-  _campaignLoadPromise = (async ()=>{
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID));
-    if(r.status === 429){
-      const waitMs = _retryAfterMs(r);
-      _scheduleCampaign429Retry(waitMs);
-      throw new Error('요청이 너무 많습니다. 잠시 후 다시 시도하세요.');
-    }
-    const j = await r.json();
-    _campaign429Retried = false;
+async function loadCampaign(){
+  const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID));
+  const j = await r.json();
   if(!j.ok) throw new Error(j.error || '캠페인을 찾을 수 없어요');
   if(j.serverNow) CampCards.setServerNow(j.serverNow);
   _camp = j.data;
@@ -1970,9 +1749,6 @@ function loadCampaign(){
   if(!onPre) return;                                   // 데이터(_camp)만 갱신하고 화면 전환은 생략
   if(PREVIEW && _pvStep !== 'pre') return;
   renderPre();
-  })();
-  _campaignLoadPromise = _campaignLoadPromise.finally(()=>{ _campaignLoadPromise = null; });
-  return _campaignLoadPromise;
 }
 /** KST 날짜 문자열(YYYY-MM-DD) */
 function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0,10); }
@@ -2006,7 +1782,6 @@ function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0
         }catch(_){}
       }
     }
-    await recoverActiveHolds();
     const h = getHold();
     if(h) await enterJoined();      // 재방문: 홀드 있으면 참여 후 화면 복원(만료면 만료 화면)
     // 참여 전 화면 카운터 갱신(15초)

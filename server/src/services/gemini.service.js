@@ -21,7 +21,7 @@ const crypto = require('crypto');
 const { logger } = require('../utils/logger');
 
 // ── 멀티 키 라운드로빈 풀 ──
-const _modelPool = [];    // [{ genAI, model, keyLabel }]
+const _modelPool = [];    // [{ genAI, model, key(마스킹) }]
 let _poolIndex = 0;
 
 // 모델/생성 설정 — 기본을 thinking 없는 빠른 모델로. 필요시 GEMINI_MODEL로 override.
@@ -41,11 +41,6 @@ const GEN_CONFIG = {
 const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '9000', 10);
 
 const _sleep = ms => new Promise(r => setTimeout(r, ms));
-function _errorSummary(err) {
-  const name = String(err && err.name || 'Error').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 80) || 'Error';
-  const status = Number(err && (err.status || err.statusCode));
-  return Number.isFinite(status) ? `${name}:${status}` : name;
-}
 function _withTimeout(promise, ms, label) {
   let t;
   const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${label} timeout ${ms}ms`)), ms); });
@@ -59,19 +54,19 @@ async function _runModel(parts, label, genConfigOverride) {
   const attempts = Math.max(2, Math.min(_modelPool.length, 3));
   let lastErr;
   for (let i = 0; i < attempts; i++) {
-    const { model, keyLabel } = _getModel();
+    const { model, key } = _getModel();
     try {
       const req = genConfigOverride
         ? { contents: [{ role: 'user', parts: Array.isArray(parts) ? parts : [parts] }],
             generationConfig: { ...GEN_CONFIG, ...genConfigOverride } }
         : parts;
       const res = await _withTimeout(model.generateContent(req), GEMINI_TIMEOUT_MS, `[Gemini ${label}]`);
-      return { text: res.response.text(), key: keyLabel };
+      return { text: res.response.text(), key };
     } catch (e) {
       lastErr = e;
       const msg = e.message || '';
       const transient = /429|quota|rate|exhaust|deadline|timeout|unavailable|50[023]|ECONN|ETIMEDOUT|fetch failed|socket hang/i.test(msg);
-      logger.warn(`[Gemini] ${label} 시도 ${i + 1}/${attempts} 실패(key=${keyLabel}, 오류=${_errorSummary(e)})`);
+      logger.warn(`[Gemini] ${label} 시도 ${i + 1}/${attempts} 실패(key=${key}): ${msg}`);
       if (i < attempts - 1 && transient) { await _sleep(250 * (i + 1)); continue; }
       break;
     }
@@ -117,11 +112,11 @@ function _initGemini() {
   }
 
   try {
-    keys.forEach((key, index) => {
+    for (const key of keys) {
       const genAI = new GoogleGenerativeAI(key);
       const model = genAI.getGenerativeModel({ model: MODEL_NAME, generationConfig: GEN_CONFIG });
-      _modelPool.push({ genAI, model, keyLabel: `key-${index + 1}` });
-    });
+      _modelPool.push({ genAI, model, key: key.slice(0, 6) + '...' });
+    }
     logger.info(`[Gemini] 초기화 완료 (${MODEL_NAME} × ${_modelPool.length}키 라운드로빈, JSON모드, timeout ${GEMINI_TIMEOUT_MS}ms)`);
     return true;
   } catch (err) {
@@ -193,62 +188,17 @@ const EXTRACT_PROMPT = `당신은 한국 온라인 쇼핑몰 주문 캡쳐 이�
 - 전화번호는 하이픈(-) 포함 그대로 추출 (예: 010-1234-5678)
 - 금액은 숫자와 쉼표만 추출 (예: 15,900)
 - 주소는 전체 주소를 한 줄로 추출
-- 이름은 자연스러운 이름으로 추정하거나 교정하지 말고 화면에 보이는 글자를 그대로 옮길 것
-- 별표(*)로 가려진 이름·전화번호·주소는 별표를 그대로 보존할 것
-- 화면에 주문자 이름이 따로 없으면 수취인과 같다고 추정하지 말고 orderer를 빈 문자열로 둘 것
-- 결제금액은 상품가격·할인 전 가격이 아니라 실제 "총 결제금액" 또는 "주문금액"을 우선할 것
-
-화면 유형별 배송정보 읽기 규칙:
-- 쿠팡 모바일: 수취인/연락처/주소 라벨이 없을 수 있다. 배송정보 카드 안의 첫 번째 짧은 한글 이름,
-  그 뒤의 우편번호·주소, 010 전화번호를 한 묶음으로 읽는다. 주변의 "배송요청사항"은 배송메모이며 이름이 아니다.
-- 쿠팡 PC: "받는사람 정보" 아래의 "받는사람", "연락처", "받는주소", "배송요청사항" 라벨과 오른쪽 값을 대응한다.
-- 네이버 모바일·PC: "배송지" 아래 카드에서 이름(배송지 별칭), 전화번호, 주소가 순서대로 나온다.
-  예를 들어 "박윤정(집)"은 recipient="박윤정"이며 괄호 안 "집"은 배송지 별칭이므로 이름에 포함하지 않는다.
-  이 규칙은 "배송지" 카드 안에서 다음 줄이 전화번호일 때만 적용한다.
-- 네이버 결제금액은 "결제정보" 아래 "주문금액"의 총액을 사용한다.
 - 이미지가 주문 캡쳐가 아닌 경우 모든 필드를 빈 문자열로 반환`;
 
-// 프롬프트·화면 규칙이 달라지면 접두를 올려 옛 오인식 캐시가 새 판독을 가로막지 않게 한다.
-const EXTRACT_CACHE_VERSION = 'extract3';
-// Gemini inline 요청 한도(20MB)에 JSON/프롬프트 여유를 남긴 실제 base64 문자 예산.
-const EXTRACT_INLINE_CHAR_BUDGET = 18 * 1024 * 1024;
-
-function _fitExtractionSamples(samples, targetBase64) {
-  let remaining = Math.max(0,
-    EXTRACT_INLINE_CHAR_BUDGET - Buffer.byteLength(String(targetBase64 || ''), 'utf8') - (64 * 1024));
-  const selected = [];
-  for (const s of samples) {
-    const data = String(s.data || '').replace(/^data:image\/[a-z]+;base64,/, '');
-    const size = Buffer.byteLength(data, 'utf8');
-    if (size > remaining) continue;
-    selected.push({ ...s, data });
-    remaining -= size;
-  }
-  if (selected.length < samples.length) {
-    logger.warn(`[Gemini] 주문추출 예시 ${samples.length}장 중 ${selected.length}장만 동봉(요청 크기 예산)`);
-  }
-  return selected;
-}
-
-async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts = {}) {
+async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
   if (!_initGemini()) {
     throw new Error('Gemini API가 설정되지 않았습니다. GEMINI_API_KEY 환경변수를 확인하세요.');
   }
 
   const startTime = Date.now();
 
-  /* 구매캡처 기준이미지(few-shot). 화면 배치와 글꼴을 참고시키되 예시 안의 개인정보를
-     결과로 복사하지 않도록 대상 이미지와 명확히 분리한다. key에는 URL 지문이 포함되어
-     예시를 추가·교체하면 기존 OCR 캐시가 자동으로 무효화된다. */
-  const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
-  const requestedSamples = Array.isArray(opts.samples) ? opts.samples.filter(s => s && s.data) : [];
-  const samples = _fitExtractionSamples(requestedSamples, cleanBase64);
-  const sampleSig = samples.length
-    ? crypto.createHash('sha1').update(samples.map(s => s.key || s.label || '').join('|')).digest('hex').slice(0, 12)
-    : '';
-
   // ── 4번: 캐시 확인 ──
-  const cacheHash = _getCacheKey(EXTRACT_CACHE_VERSION + ':' + sampleSig + ':' + base64Data);
+  const cacheHash = _getCacheKey(base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) {
     const elapsed = Date.now() - startTime;
@@ -257,6 +207,9 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts =
   }
 
   try {
+    // base64 데이터에서 data URL prefix 제거 (있는 경우)
+    const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+
     const imagePart = {
       inlineData: {
         data: cleanBase64,
@@ -265,24 +218,7 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts =
     };
 
     // ── 라운드로빈 + 재시도 + 타임아웃 ──
-    const parts = [EXTRACT_PROMPT];
-    if (samples.length) {
-      parts.push(`아래 이미지들은 구매캡처 화면의 레이아웃·글꼴 참고 예시입니다.
-예시 속 이름·전화번호·주소·주문번호·금액은 절대 답에 복사하지 마세요.
-예시는 필드 위치와 화면 구조를 찾는 기준으로만 사용하고, 반환값은 마지막 [판독 대상 이미지]에서만 읽으세요.`);
-      for (const s of samples) {
-        parts.push(`[레이아웃 예시] ${s.label || s.key || '구매캡처'}`);
-        parts.push({ inlineData: {
-          data: s.data,
-          mimeType: s.mimeType || 'image/jpeg',
-        } });
-      }
-      parts.push('― 여기까지는 참고 예시이며 추출 대상이 아닙니다. ―');
-    }
-    parts.push(`[판독 대상 이미지]
-이 마지막 이미지의 글자를 확대해 한 글자씩 재확인하세요. 특히 수취인 이름은 비슷한 한글(남/낭, 혜/해 등)을 문맥으로 고치지 말고 실제 획 모양을 기준으로 두 번 확인하세요.`);
-    parts.push(imagePart);
-    const { text, key: usedKey } = await _runModel(parts, 'extract');
+    const { text, key: usedKey } = await _runModel([EXTRACT_PROMPT, imagePart], 'extract');
 
     // 빈 응답 가드: thinking 이 토큰을 다 먹거나 잘리면 text 가 빈 문자열로 온다.
     // 이 경우 ok:true 로 위장(전 필드 공란)하면 "분석 완료인데 추출 실패"가 되므로 명시적 에러.
@@ -296,7 +232,7 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts =
     try {
       extracted = JSON.parse(jsonStr);
     } catch (parseErr) {
-      logger.warn(`[Gemini] JSON 파싱 실패 (응답길이=${text.length})`);
+      logger.warn(`[Gemini] JSON 파싱 실패, 텍스트: ${text.substring(0, 200)}`);
       // 부분 파싱 시도
       extracted = _fallbackParse(text);
     }
@@ -305,12 +241,12 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts =
     const _v = k => String(extracted[k] || '').trim();
     const allBlank = !['orderNumber', 'recipient', 'phone', 'address', 'price'].some(_v);
     if (allBlank) {
-      logger.warn(`[Gemini] 추출 결과 전 필드 공란 (key=${usedKey}, 응답길이=${text.length})`);
+      logger.warn(`[Gemini] 추출 결과 전 필드 공란 (key=${usedKey}, 응답: ${text.substring(0, 200)})`);
       throw new Error('주문 정보를 인식하지 못했습니다. 주문 캡처 이미지가 맞는지 확인 후 다시 시도해주세요.');
     }
 
     const elapsed = Date.now() - startTime;
-    logger.info(`[Gemini] 이미지 분석 완료: ${elapsed}ms, key=${usedKey}, 추출필드=${Object.values(extracted).filter(Boolean).length}`);
+    logger.info(`[Gemini] 이미지 분석 완료: ${elapsed}ms, key=${usedKey}, 수취인=${extracted.recipient || '-'}, 주문번호=${extracted.orderNumber || '-'}`);
 
     const finalResult = { ok: true, ...extracted };
 
@@ -320,7 +256,7 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts =
     return { ...finalResult, elapsed };
   } catch (err) {
     const elapsed = Date.now() - startTime;
-    logger.error(`[Gemini] 이미지 분석 실패 (${elapsed}ms, 오류=${_errorSummary(err)})`);
+    logger.error(`[Gemini] 이미지 분석 실패 (${elapsed}ms): ${err.message}`);
     throw err;
   }
 }
@@ -380,24 +316,14 @@ async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg', opts
     : '';
 
   // 같은 파일 재업로드·재시도는 캐시로 상각(extractOrderFromImage와 같은 저장소, 키에 용도 접두)
-  // ★ 접두 'classify7:' (kind 에 order_cancel(주문취소) 이 추가됐다 — 옛 캐시는 새 종류를
-  //   모른 채 히트하므로 접두 상향이 필수).
-  //   그 이전 6 (사용자 확정 2026-08-23 — 구매확정 작업의 증빙 범위를 넓혔다:
-  //   "구매확정" 글자도 적립 완료도 없는 **리뷰 작성 대기 화면**(작성기한·리뷰쓰기 유도)까지
-  //   구매확정 이후 단계로 인정한다. ⚠ 그 대신 "실제로 구매확정을 눌렀는가"는 더 이상 화면으로
-  //   검증되지 않는다(사용자가 대가를 알고 고른 완화 — CLAUDE.md 참조).
-  //   그 이전 'classify5:' (purchase_confirm 판정 기준을 넓혔다 — "구매확정" 글자가 없어도
-  //   구매확정을 눌러야만 나오는 완료 신호(네이버페이 적립 완료 안내)를 인정한다.
-  //   **판정 기준을 바꾸면 접두를 반드시 올린다** — 안 올리면 같은 이미지의 옛 판정이 캐시에서
-  //   그대로 히트해 프롬프트 수정이 조용히 무효가 된다).
-  //   그 이전 4 (자동 분류에서 kind 에 order_capture 가 추가돼 한 번 더 올렸다 —
+  // ★ 접두 'classify4:' (자동 분류에서 kind 에 order_capture 가 추가돼 한 번 더 올렸다 —
   //   옛 캐시는 새 종류를 모른 채 히트하므로 접두 상향이 필수. 087 2차와 같은 규율).
   //   그 이전 'classify3:' (087 2차에서 kind 에 purchase_confirm 이 추가돼 올렸다).
   //   옛 접두를 그대로 쓰면 새 종류를 모르는 판정이 히트한다. 원래 이유: 응답에 channel/reviewText 등이 추가됐다. 옛 접두를 그대로 쓰면
   //   배포 직후 옛 캐시(새 필드 없음)가 히트해 채널이 undefined 인 판정이 나간다.
   //   이 캐시는 **첨부 시점 1차 필터 → 제출 시점 2차 검수** 사이의 재사용이 핵심이라
   //   (같은 이미지 = 같은 해시) AI 콜이 사실상 늘지 않는다.
-  const cacheHash = _getCacheKey('classify7:' + sampleSig + ':' + base64Data);
+  const cacheHash = _getCacheKey('classify4:' + sampleSig + ':' + base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) return { ...cached, elapsed: Date.now() - startTime, cached: true };
 
@@ -411,9 +337,8 @@ async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg', opts
 kind 판정 기준:
 - "review": 쇼핑몰 리뷰 화면. 별점(★), 리뷰 본문, 상품평 목록, "리뷰 작성 완료" 같은 UI가 보임.
 - "receipt": 현금영수증/결제 영수증. 국세청, 현금영수증, 승인번호, 사업자등록번호, 지출증빙, 거래일시 중 하나 이상이 보임.
-- "purchase_confirm": 구매확정 완료 화면, 또는 구매확정 이후 단계임을 보여주는 주문 화면. 다음 중 하나라도 보이면 purchase_confirm 이다: (a) "구매확정" 문구와 함께 완료됨을 나타내는 표시(구매확정 완료, 구매확정됨, 확정일시, 구매확정 버튼이 비활성/완료 상태) (b) 적립이 이미 완료되었다는 표시 — 예: 네이버페이 주문/결제 화면(orders.pay.naver.com)의 "N원 적립되었어요" (c) 그 주문에 대한 리뷰 작성 대기 화면 — 상품과 함께 리뷰 작성기한("작성기한", "D-14")이나 "리뷰쓰기"·"리뷰 쓰고 N원 받기" 같은 리뷰 작성 유도가 보이는 마이쇼핑·주문내역 화면. 별점·리뷰 본문은 없어도 된다.
-- "order_cancel": 주문이 취소된 화면. "취소완료", "주문취소", "취소 신청", "취소된 주문"처럼 그 주문이 취소되었음을 나타내는 표시가 주문 상세·주문내역 화면에 보인다. 리뷰어가 작업을 취소한 신호다.
-- "order_capture": 구매캡처(주문/결제 내역) 화면. 주문번호·결제금액·배송지·주문상품 목록이 보이는 주문 상세/주문 완료/결제 내역 화면. 별점·리뷰 본문이 없고, 위 purchase_confirm 의 (a)(b)(c) 중 어느 것도 보이지 않는다(하나라도 보이면 purchase_confirm, 취소 표시가 보이면 order_cancel).
+- "purchase_confirm": 구매확정 완료 화면. "구매확정" 문구와 함께 완료됨을 나타내는 표시(구매확정 완료, 구매확정됨, 확정일시, 구매확정 버튼이 비활성/완료 상태)가 주문 상세·주문내역 화면에 보임. 별점·리뷰 본문은 없어도 된다.
+- "order_capture": 구매캡처(주문/결제 내역) 화면. 주문번호·결제금액·배송지·주문상품 목록이 보이는 주문 상세/주문 완료/결제 내역 화면. 별점·리뷰 본문이 없고, "구매확정 완료" 표시도 없다("구매확정" 완료 표시가 있으면 purchase_confirm).
 - "other": 둘 다 아님(상품 사진, 주문내역, 빈 화면 등).
 
 channel 판정 기준 (kind가 "review"일 때만, 확실하지 않으면 빈 문자):
@@ -429,7 +354,7 @@ channel 판정 기준 (kind가 "review"일 때만, 확실하지 않으면 빈 �
 - signals: 위 판정의 근거가 된 화면 속 문구·요소 (최대 5개 문자열)
 
 JSON 형식:
-{"kind":"review|receipt|purchase_confirm|order_capture|order_cancel|other","confidence":0.0~1.0,"channel":"coupang|naver|kakao|oliveyoung 또는 빈문자","device":"pc|mobile 또는 빈문자","productName":"","reviewText":"","authorMask":"","signals":[],"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
+{"kind":"review|receipt|purchase_confirm|order_capture|other","confidence":0.0~1.0,"channel":"coupang|naver|kakao|oliveyoung 또는 빈문자","device":"pc|mobile 또는 빈문자","productName":"","reviewText":"","authorMask":"","signals":[],"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
 
   try {
     // 예시가 있으면 **먼저** 보여주고(라벨과 함께) 마지막에 판별 대상을 준다 —
@@ -457,7 +382,7 @@ JSON 형식:
     if (!text || !text.trim()) throw new Error('AI 응답이 비어 있습니다.');
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const p = JSON.parse(jsonStr);
-    const kind = ['review', 'receipt', 'purchase_confirm', 'order_capture', 'order_cancel', 'other'].includes(p.kind) ? p.kind : 'other';
+    const kind = ['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'].includes(p.kind) ? p.kind : 'other';
     const CH = ['coupang', 'naver', 'kakao', 'oliveyoung'];
     const out = {
       kind,
@@ -505,7 +430,7 @@ async function verifyAddressMatch(naverInfo, coupangInfo) {
     try {
       parsed = JSON.parse(jsonStr);
     } catch (parseErr) {
-      logger.warn(`[Gemini] 주소비교 JSON 파싱 실패 (응답길이=${text.length})`);
+      logger.warn(`[Gemini] 주소비교 JSON 파싱 실패: ${text.substring(0, 200)}`);
       parsed = { isSamePerson: false, confidence: 0, reason: 'AI 응답 파싱 실패' };
     }
 
@@ -521,7 +446,7 @@ async function verifyAddressMatch(naverInfo, coupangInfo) {
     };
   } catch (err) {
     const elapsed = Date.now() - startTime;
-    logger.error(`[Gemini] 주소비교 실패 (${elapsed}ms, 오류=${_errorSummary(err)})`);
+    logger.error(`[Gemini] 주소비교 실패 (${elapsed}ms): ${err.message}`);
     throw err;
   }
 }

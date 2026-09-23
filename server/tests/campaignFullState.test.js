@@ -50,14 +50,9 @@ eq('총원 무제한(0)이면 총원 판정이 끼어들지 않는다',
 
 ok('★★ 참여 차단은 두 상태 모두 동일 — 순서 변경이 참여 동작을 바꾸지 않는다',
   S.APPLY_BLOCK_REASON.soft_full === 'soft_full' && S.APPLY_BLOCK_REASON.daily_done === 'daily_done');
-// ★ 패턴 갱신(2026-08-20, 검사 의미 불변): 표 기준 총량 게이트 블록이 두 판정 사이에 끼어
-//   고정 폭(220자) 창으로는 못 본다 → 존재 확인 후 인덱스 비교(-1 < n 함정 방지 — 레포 규율).
-{
-  const src = readS('services/campaignState.service.js');
-  const iFull = src.indexOf("usedAll >= rt) return { ...payload, state: 'soft_full' }");
-  const iDaily = src.indexOf('if (todayCount >= quota)');
-  ok('총원 판정이 일일 마감보다 앞에 있다(순서 고정)', iFull >= 0 && iDaily >= 0 && iFull < iDaily);
-}
+ok('총원 판정이 일일 마감보다 앞에 있다(순서 고정)',
+  /usedAll >= rt\) return \{ \.\.\.payload, state: 'soft_full' \};[\s\S]{0,220}if \(todayCount >= quota\)/.test(
+    readS('services/campaignState.service.js')));
 
 /* 시트 일정 캠페인도 같은 규율 — totalSlots 충족 시 soft_full */
 {
@@ -119,53 +114,25 @@ ok('최소 날짜 종수 상수는 2 유지', SCH.MIN_DISTINCT_DATES === 2);
     /catch \(siErr\) \{ logger\.warn\('\[campaign\/admin\/applications\] 시트 대조 실패/.test(rt));
   ok('★ 진단은 읽기 전용 — 상태를 바꾸는 코드가 없다',
     !/sheetInfo[\s\S]{0,400}UPDATE recruit_campaigns/.test(rt));
-  // ⚠ 무시트 어휘 정리(2026-08-19)로 이 문구들이 `_srcWords` 템플릿이 됐다 — 검사 의미는 불변
-  //   ("차이를 숫자로 말한다" · "자리는 있는데 확정이 아니다를 설명한다"). 어휘 자체는
-  //   sheetVocabulary 가드가 실행으로 고정한다.
   ok('관제 화면이 로스터 차이를 표시한다',
     /function _campSheetInfo/.test(rec) && /차이 \$\{diff\}건/.test(rec)
-    && /\$\{w\.src\}에는 자리가 있는데 확정으로 안 잡힌 건입니다/.test(rec));
+    && /시트에는 자리가 있는데 확정으로 안 잡힌 건입니다/.test(rec));
   ok('관제 화면이 "시트 일정 미적용" 사유를 설명한다',
-    /single_date:/.test(rec) && /\$\{w\.sched\}이 적용되지 않습니다/.test(rec)
+    /single_date:/.test(rec) && /시트 일정이 적용되지 않습니다/.test(rec)
     && /no_mirror:/.test(rec));
 
   /* ═══ 차이가 난 **행**을 짚어준다 ═══ */
   ok('차이가 있을 때만 불일치 행을 조회한다(평상시 쿼리 0)',
-    /if \(rosterRows > confirmed\) \{[\s\S]{0,1200}NOT EXISTS/.test(rt));
-  /* ⚠ 2026-08-19: 대조 키가 phone8 하나 → **세 키**로 넓어졌다(검사 의미 = 사용자 확정 규칙).
-     되돌리면 위프 800건에서 실측된 오표시(정상 확정 17건이 "미확정"으로, 같은 건이 반대편에서
-     "확정인데 줄 없음"으로 이중 계수)가 그대로 재현된다. */
-  ok('대조 키 ㉮ 명의 phone8',
-    /s\.phone8 <> '' AND s\.phone8 = ri\.phone8/.test(rt));
-  ok('★ 대조 키 ㉯ 소유자 owner_phone8 — 타계정 건의 작업표 연락처는 소유자 번호일 수 있다',
-    /s\.owner_phone8 = ri\.phone8/.test(rt));
-  ok('★★ 대조 키 ㉰ 주문 링크 — 연락처 오타·수취인 번호 기입은 번호로 영원히 못 짝짓는다',
-    /JOIN sub s ON s\.order_submission_id = cp\.order_submission_id/.test(rt)
-    && /cp\.seq = ri\.row_index AND cp\.deleted_at IS NULL/.test(rt));
-  ok('★ 종류별 건수를 서버가 세어 내려준다(목록은 30건 상한이라 화면에서 못 센다)',
-    /unmatchedCounts = \{ total, hold, orderOnly, neither/.test(rt) && /unmatchedCounts,/.test(rt));
-  ok('★ 홀드 이력·주문 유무를 줄마다 실어 보낸다',
-    /hasHold: r\.has_hold === true/.test(rt) && /hasOrder: r\.has_order === true/.test(rt));
-  ok('★ 조치 대상이 목록 앞에 온다(30건 상한에 밀려 안 보이면 안 된다)',
-    /ORDER BY has_hold DESC, has_order ASC, row/.test(rt));
+    /if \(rosterRows > confirmed\) \{[\s\S]{0,400}NOT EXISTS/.test(rt));
+  ok('대조 키는 phone8 — 시스템 신원키와 같아야 오탐이 없다',
+    /ca\.phone8 <> '' AND ca\.phone8 = ri\.phone8/.test(rt));
   ok('행 번호·이름과 함께 돌려준다(어느 줄인지 짚기)',
     /ri\.row_index AS row, ri\.reviewer_name AS name/.test(rt) && /LIMIT 30/.test(rt));
   ok('★ 연락처 뒤 4자리만 내려준다(관제 화면 PII 최소화)',
     /phone4: String\(r\.phone8 \|\| ''\)\.replace\(\/\\D\/g, ''\)\.slice\(-4\)/.test(rt)
     && !/phone8: r\.phone8/.test(rt));
   ok('관제가 불일치 행을 나열한다',
-    /function _campUnmatchedRows/.test(rec) && /확정으로 안 잡힌 \$\{w\.rows\}/.test(rec));
-  /* ★★ 종류별로 할 일이 다르다 — 섞어서 "[수동확정]하세요"로 안내하면 담당자가
-     만료·취소 목록에 없는 건을 찾게 된다(위프 800건 실측: 196건 중 163건이 그랬다). */
-  ok('★ 공고 미경유 제출은 "조치 불필요"라고 말한다',
-    /조치 불필요/.test(rec) && /만료·취소 목록에는 없습니다/.test(rec));
-  ok('★ 홀드 이력이 있는 줄에만 [수동확정]을 안내한다',
-    /참여 기록은 있는데 확정이 아닙니다[\s\S]{0,120}\[수동확정\]/.test(rec));
-  ok('★ 머리줄 "차이"와 목록 건수가 다른 이유를 말한다(말없이 다르면 오해)',
-    /주문 기록·소유자 번호로 확정과 짝지어진/.test(rec) && /diff > c\.total/.test(rec));
-  ok('★ 건수는 서버가 준 값만 쓴다(구버전 백엔드면 요약 줄 자체를 안 그린다)',
-    /counts && typeof counts\.total === "number" \? counts : null/.test(rec)
-    && !/list\.length[\s\S]{0,40}건<\/b>/.test(rec));
+    /function _campUnmatchedRows/.test(rec) && /확정으로 안 잡힌 시트 행/.test(rec));
   ok('★ "정원은 위치가 아니라 숫자"임을 코드에 남긴다(오해 방지)',
     /캠페인 정원은 '위치'가 아니라 '숫자'/.test(rec));
   ok('연락처 없는 행은 대조 불가임을 안내(영구 오탐 오해 방지)',

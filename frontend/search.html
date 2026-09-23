@@ -25,7 +25,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="css/search.css"/>
 <script src="api.js"></script>
-<script src="js/drive-thumb.js"></script>
 <style id="sianC">
 /* ===== 시안 C 테마 오버레이 (search.html — 톤 통일) ===== */
 body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
@@ -90,84 +89,13 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
     <div class="success-circle"><i class="fas fa-check"></i></div>
     <h2>제출 완료!</h2>
     <p id="successMessage">리뷰가 성공적으로 제출되었습니다.</p>
-    <button class="btn-primary full-width" onclick="goToReviewerMain('review')">
-      <i class="fas fa-clipboard-list"></i> 리뷰 내역으로
+    <button class="btn-primary full-width" onclick="resetApp()">
+      <i class="fas fa-redo"></i> 처음으로
     </button>
   </div>
 </div>
 
 <!-- ────────── GAS URL 설정 모달 (비밀번호 인증 후 설정) ────────── -->
-<div id="gasUrlModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3><i class="fas fa-link"></i> GAS 웹앱 URL 설정</h3>
-      <button class="btn-icon-sm" onclick="closeGasUrlModal()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-
-      <!-- STEP 1: 비밀번호 확인 -->
-      <div id="gasUrlStep1">
-        <div class="info-banner" style="margin-bottom:14px">
-          <i class="fas fa-lock"></i>
-          <span>설정 접근을 위해 비밀번호를 입력하세요.</span>
-        </div>
-        <div class="field-group">
-          <label>접근 비밀번호 <span class="req">*</span></label>
-          <div class="pw-input-wrap">
-            <input type="password" id="gasUrlPwInput" placeholder="비밀번호 입력"
-                   onkeydown="if(event.key==='Enter') verifyGasUrlPw()"/>
-            <button class="btn-pw-toggle" onclick="togglePwVisible('gasUrlPwInput', this)">
-              <i class="fas fa-eye"></i>
-            </button>
-          </div>
-        </div>
-        <p id="gasUrlPwError" class="login-error hidden" style="display:none"></p>
-        <div class="modal-actions">
-          <button class="btn-ghost" onclick="closeGasUrlModal()">취소</button>
-          <button class="btn-primary" onclick="verifyGasUrlPw()">
-            <i class="fas fa-unlock"></i> 확인
-          </button>
-        </div>
-      </div>
-
-      <!-- STEP 2: URL 입력 (비밀번호 확인 후 표시) -->
-      <div id="gasUrlStep2" class="hidden" style="display:none">
-        <div class="info-banner" style="margin-bottom:14px">
-          <i class="fas fa-info-circle"></i>
-          <span>Google Apps Script 배포 URL을 입력하세요.<br>
-          형식: <code>https://script.google.com/macros/s/.../exec</code></span>
-        </div>
-        <div class="field-group">
-          <label>GAS 웹앱 URL <span class="req">*</span></label>
-          <input type="url" id="gasUrlInput" placeholder="https://script.google.com/macros/s/.../exec"
-                 style="font-size:.82rem"
-                 onkeydown="if(event.key==='Enter') saveGasUrl()"/>
-          <p class="field-hint">GAS 편집 URL이 아닌 <strong>배포(/exec) URL</strong>을 입력하세요</p>
-        </div>
-        <p id="gasUrlError" class="login-error hidden" style="display:none"></p>
-
-        <!-- ── URL 변경 이력 ── -->
-        <div id="gasUrlHistoryWrap" style="margin-top:12px;display:none">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-            <span style="font-size:.72rem;font-weight:700;color:var(--t2)"><i class="fas fa-history" style="margin-right:4px;color:var(--p)"></i>변경 이력</span>
-            <button onclick="clearGasUrlHistory()" style="font-size:.65rem;color:#EF4444;background:none;border:none;cursor:pointer;padding:2px 4px;border-radius:4px" title="이력 전체 삭제">전체 삭제</button>
-          </div>
-          <div id="gasUrlHistoryList" style="max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn-ghost" onclick="closeGasUrlModal()">취소</button>
-          <button class="btn-primary" onclick="saveGasUrl()">
-            <i class="fas fa-save"></i> 저장
-          </button>
-        </div>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-
 <!-- ────────── 비밀번호 변경 모달 ────────── -->
 <div id="changePwModal" class="modal-overlay hidden" style="display:none">
   <div class="modal-box">
@@ -643,10 +571,6 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
                 <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">전화번호</div>
                 <div id="inlineSelfPhone" style="font-size:.82rem;color:var(--t2)">-</div>
               </div>
-              <div style="flex:1 1 220px;min-width:180px">
-                <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">아이디</div>
-                <div style="display:flex;gap:5px"><input id="inlineSelfShoppingId" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:5px 7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.75rem"><button onclick="_saveIdentityShoppingId(0)" style="padding:4px 8px;border:1px solid #93C5FD;border-radius:6px;background:#EFF6FF;color:#2563EB;font-size:.67rem;font-weight:700">저장</button></div>
-              </div>
               <div style="flex:1;min-width:100px">
                 <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">소득명의</div>
                 <div style="display:flex;align-items:center;gap:4px">
@@ -767,16 +691,13 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       <div id="btnNameNext"       style="display:none"></div>
 
       <!-- GAS 미설정 안내 -->
-      <div id="gasNotSet" class="notice-card hidden" style="display:none">
+      <div id="gasNotSet" class="notice-card hidden" style="display:none" aria-hidden="true">
         <i class="fas fa-exclamation-triangle"></i>
         <div style="flex:1">
           <strong>GAS URL 설정이 필요합니다</strong>
           <p>관리자에게 문의하거나, 관리자라면 아래 버튼을 눌러 URL을 설정하세요.<br>
           <span style="font-size:.72rem;color:var(--t3)">설정 후 모든 접속자에게 자동 반영됩니다.</span></p>
         </div>
-        <button class="btn-primary" style="flex-shrink:0;padding:8px 14px;font-size:.82rem" onclick="openGasUrlModal()">
-          <i class="fas fa-link"></i> URL 설정
-        </button>
       </div>
 
     </main>
@@ -972,8 +893,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       </div>
       <div class="stepbar-labels">
         <span id="sl1" class="sl active">① 정보 확인</span>
-        <span id="sl2" class="sl">② 리뷰 제출</span>
-        <span id="sl3" class="sl hidden">③ 현금영수증</span>
+        <span id="sl2" class="sl">② 이미지 제출</span>
       </div>
     </div>
 
@@ -1008,13 +928,13 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
         </div>
       </div>
 
-      <!-- STEP 2: 리뷰 제출 -->
+      <!-- STEP 2: 이미지 제출 -->
       <div id="step2" class="step-pane">
         <div class="pane-card">
           <div class="pane-title">
             <div class="pane-num">2</div>
             <div>
-              <h2>리뷰 캡처 제출</h2>
+              <h2>리뷰 이미지 제출</h2>
               <p style="color:#DC2626;font-weight:700;font-size:.82rem">⚠️ 리뷰는 반드시 제대로 확인 후 제출. 오제출 문제발생 책임소재 리뷰어 귀책됩니다.</p>
             </div>
           </div>
@@ -1050,9 +970,6 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <button id="btnSubmit" class="btn-submit" onclick="submitReview()">
               <i class="fas fa-paper-plane"></i> 제출하기
             </button>
-            <button id="btnToReceipt" class="btn-submit hidden" onclick="_submitReviewThenReceipt()">
-              <i class="fas fa-paper-plane"></i> 리뷰 제출 후 다음
-            </button>
           </div>
           <p class="submit-safe">
             <i class="fas fa-shield-alt"></i> 이미지는 캠페인 진행자만 확인합니다
@@ -1066,44 +983,6 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <li><i class="fas fa-check"></i> 별점·내용·날짜가 모두 포함되어야 합니다</li>
             <li><i class="fas fa-check"></i> 화면 전체가 나오도록 캡처해주세요</li>
           </ul>
-        </div>
-      </div>
-
-      <!-- STEP 3: 현금영수증 제출 (현금영수증 슬롯이 있는 작업만 표시) -->
-      <div id="step3" class="step-pane">
-        <div class="pane-card receipt-step-card">
-          <div class="pane-title">
-            <div class="pane-num receipt-step-num">3</div>
-            <div>
-              <h2>현금영수증 제출</h2>
-              <p>발행이 확정된 경우에만 이미지를 선택하세요</p>
-            </div>
-          </div>
-
-          <div id="csReceiptHost"></div>
-
-          <div class="receipt-step-note">
-            <i class="fas fa-clock"></i>
-            <div>
-              <strong>아직 발행 전이면 나중에 제출해도 됩니다</strong>
-              <p>리뷰 제출은 먼저 완료되고, 현금영수증은 발행 확정 후 이 화면에서 따로 제출할 수 있어요.</p>
-            </div>
-          </div>
-
-          <div class="step-nav receipt-step-actions">
-            <button class="btn-ghost" onclick="goStep(2)">
-              <i class="fas fa-arrow-left"></i> 이전
-            </button>
-            <button id="btnSkipReceipt" class="btn-ghost" onclick="_skipReceiptStep()">
-              <i class="fas fa-clock"></i> 나중에 제출
-            </button>
-            <button id="btnSubmitReceipt" class="btn-submit" onclick="submitReview()" disabled>
-              <i class="fas fa-receipt"></i> 현금영수증 제출하기
-            </button>
-          </div>
-          <p class="submit-safe">
-            <i class="fas fa-shield-alt"></i> 현금영수증은 내부 담당자만 확인합니다
-          </p>
         </div>
       </div>
 
@@ -1153,7 +1032,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       <div id="ofProfileGate" style="display:none;margin-bottom:14px;padding:14px 16px;background:#FEF2F2;border:2px solid #FCA5A5;border-radius:12px;color:#991B1B"></div>
 
       <!-- 제공정보 카드 -->
-      <div id="orderFormProductCard" class="pane-card" style="margin-bottom:16px;padding:14px 16px">
+      <div class="pane-card" style="margin-bottom:16px;padding:14px 16px">
         <div style="font-size:.7rem;font-weight:700;color:var(--t3);margin-bottom:8px;letter-spacing:.04em">📦 제공정보</div>
         <div id="orderFormProductName" style="font-size:.95rem;font-weight:700;color:var(--t1)">-</div>
         <!-- ★ 제공정보 추가안내 (진행방식/사업자번호/특이사항) — 내용 있을 때만 표시 -->
@@ -1229,21 +1108,15 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       </div>
 
       <!-- 제출 버튼 -->
-      <style>
-        .identity-field-attention{outline:2px solid #F59E0B!important;background:#FFFBEB!important;scroll-margin-top:160px}
-        .identity-issue-link{display:block;width:100%;margin:8px 0;padding:12px;text-align:left;border:1px solid #FCD34D;border-radius:9px;background:#fff;color:#81450c;font:inherit;line-height:1.6;cursor:pointer}
-        .identity-issue-link span{display:block;color:#2563EB;margin-top:4px}
-      </style>
-      <div id="orderIdentityAction" role="region" aria-label="제출 전 명의 확인" aria-live="polite" tabindex="-1" style="display:none;margin:12px 0;padding:14px;border:2px solid #F59E0B;border-radius:12px;background:#FFFBEB;overflow-wrap:anywhere"></div>
       <button id="btnOrderFormSubmit" class="btn-primary" style="width:100%;justify-content:center;font-size:1rem;padding:14px;border-radius:12px" onclick="confirmOrderSubmit()">
-        <i class="fas fa-paper-plane"></i> 구매양식 제출
+        <i class="fas fa-paper-plane"></i> 제출
       </button>
 
       <!-- 제출 전 마지막 확인 팝업 (모든 구매양식 제출 공통, [제출완료하기] 단독) -->
       <!-- 구매캡쳐 미첨부 게이트 — 제출을 붙잡되 [지금 올리기]를 기본으로. ★[캡처 없이 제출]을 없애면
            정당한 무캡처 제출(수기·재제출)까지 막혀 주문이 유실되므로 반드시 남긴다(완료화면·리뷰어홈에서 회수). -->
-      <div id="captureGateModal" class="of-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:9999;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_closeCaptureGate()">
-        <div class="of-modal-card" style="width:100%;max-width:340px;background:#fff;border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+      <div id="captureGateModal" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:9999;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_closeCaptureGate()">
+        <div style="width:100%;max-width:340px;background:#fff;border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)">
           <div style="width:52px;height:52px;border-radius:50%;background:#FFFBEB;display:grid;place-items:center;margin:0 auto 12px;font-size:1.55rem">📷</div>
           <div style="font-size:1.05rem;font-weight:800;color:#B45309;margin-bottom:8px">구매 캡처가 없습니다</div>
           <div id="captureGateMsg" style="font-size:.9rem;color:#4B5563;line-height:1.65;margin-bottom:18px">주문완료 화면 캡처는 <b style="color:#111827">구매 확인과 리뷰비 정산</b>에 쓰입니다.<br>지금 올리시면 한 번에 끝납니다.</div>
@@ -1253,8 +1126,8 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
         </div>
       </div>
 
-      <div id="orderConfirmModal" class="of-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:9999;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_closeOrderConfirm()">
-        <div class="of-modal-card" style="width:100%;max-width:340px;background:#fff;border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+      <div id="orderConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:9999;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_closeOrderConfirm()">
+        <div style="width:100%;max-width:340px;background:#fff;border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)">
           <div style="width:52px;height:52px;border-radius:50%;background:#FEF3C7;color:#F59E0B;display:grid;place-items:center;margin:0 auto 12px;font-size:1.55rem">⚠️</div>
           <div style="font-size:1.05rem;font-weight:800;color:#B45309;margin-bottom:8px">잠깐만요!</div>
           <div style="font-size:.9rem;color:#4B5563;line-height:1.65;margin-bottom:18px">구매양식 제출 후,<br><b style="color:#111827">임의 취소하지마세요.</b></div>

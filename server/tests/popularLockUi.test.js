@@ -71,7 +71,6 @@ function ctx({ camp, preview = false, btn = { disabled: false, textContent: '참
   const calls = [];
   const sandbox = {
     _camp: camp, PREVIEW: preview,
-    _repurchaseAccounts: {},
     API_BASE_URL: 'http://x',
     getSession: () => ({ phone8: '99998888', name: '나' }),
     multiEnabled: () => !!(camp && camp.multi_account_mode === true),
@@ -120,7 +119,7 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
   const r = run({ camp: POP, credit: { normalDone: 0, popularUsed: 0 } });
   assert.equal(r.locked, true);
   assert.equal(r.btn.disabled, true, '참여권 0건이면 [참여하기]를 비활성화한다');
-  assert(r.btn.textContent.includes('최근 1일 일반 모집 제출'), '잠금 사유와 참여권 유효기간을 버튼이 말해야 한다');
+  assert(r.btn.textContent.includes('일반 모집 제출완료'), '잠금 사유를 버튼이 말해야 한다');
 }
 // ② 크레딧 1 이상 → 잠그지 않는다
 {

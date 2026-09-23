@@ -239,41 +239,8 @@ t('탭 설정 팝오버 선택지가 새 목록(두 화면 모두)', ['admin.htm
   return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
       && !/data-val="실배송"/.test(block) && !/data-val="믹스"/.test(block);
 }));
-/* ★★ 2026-08-23 전수 점검 — **입력 창구가 전부 새 어휘여야 한다**.
-   표시(배지)만 갱신하고 입력 창구를 옛 어휘로 두면, 거기서 고른 '실배송'이 그대로 저장되어
-   `resolveReviewType` 이 null 로 떨어진다 = "설정했는데 검수는 미지정"(2026-08-06 사고의 입구).
-   창구를 하나라도 빠뜨리면 정리 도구(087)가 고친 값을 그 화면이 다시 되돌린다. */
-t('★ 탭 설정 팝오버 = 세 화면 모두 새 목록(admin·admin-siand·search)',
-  ['admin.html', 'admin-siand.html', 'search.html'].every(f => {
-    const block = (F(f).match(/<div class="tc-option-row" id="tcOptReview">([\s\S]*?)<\/div>/) || [, ''])[1];
-    return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
-        && !/data-val="실배송"|data-val="빈박스"|data-val="믹스"/.test(block);
-  }));
-t('★ 관리자 대시보드 입력 2곳(빠른편집·인라인 셀렉트)은 목록을 다시 적지 않는다',
-  /const opts = _tcReviewOptions\(\)/.test(APP)
-  && /_inlineSelect\(t, "review_type", "reviewType", _tcReviewOptions\(\),/.test(APP)
-  && /RF_REVIEW_TYPE_LABELS\.map\(\(\[, l\]\) => l\)/.test(APP)
-  && !/\['실배송','빈박스','구매확정','믹스'\]/.test(APP)
-  && !/\["실배송","빈박스","구매확정","믹스"\]/.test(APP));
-t('★ 그 파생의 전제 — 두 관리자 화면이 index-recruit.js 를 로드한다',
-  ['admin.html', 'admin-siand.html'].every(f => /js\/index-recruit\.js/.test(F(f))));
-t('★ search-app 의 빠른편집은 그 화면 팝오버(#tcOptReview)에서 읽는다(사본 0)',
-  /querySelectorAll\('#tcOptReview \.tc-opt'\)/.test(F('js/search-app.js'))
-  && !/\['실배송','빈박스','구매확정','믹스'\]/.test(F('js/search-app.js')));
-/* ★ AE 작업오더 제출(staff.html)의 리뷰타입은 **자유 입력**이라 목록으로 강제할 수 없다.
-   그런데 종전 안내문이 `텍스트20·포토80` 같은 형태를 권해, 그렇게 적으면 `normalizeReviewType`
-   이 혼합을 못 읽고 **'포토' 단일로 판정**한다(혼합 키워드가 없다). 사람이 보는 유일한 지침이
-   그 placeholder 라 표준 어휘와 혼합 표기를 그대로 보여준다. */
-t('★ 작업오더 제출 폼의 리뷰타입 안내가 표준 어휘를 보여준다(혼합 표기 포함)', (() => {
-  const ph = (F('staff.html').match(/id="soReviewType"[^>]*placeholder="([^"]*)"/) || [, ''])[1];
-  return RT.REVIEW_TYPE_LABELS.every(l => ph.includes(l)) && /혼합\(포토 \d+건, 텍스트 \d+건\)/.test(ph);
-})());
 t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지)',
   /'실배송': 'tc-review-실배송'/.test(APP) && /'믹스': 'tc-review-믹스'/.test(APP)
-  && /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
-  /* ★ 인라인 셀렉트가 쓰는 색 맵도 같다 — 여기서 옛 값을 빼면 그 탭의 기존 설정이
-     회색으로 바래 "설정 없음"처럼 보인다(선택지에서만 빼고 표시는 남긴다는 규율). */
-  && ['실배송', '빈박스', '믹스'].every(v => new RegExp(`"${v}":"#`).test(APP))
   && ['css/index.css', 'css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
   ['admin.html', 'admin-siand.html', 'staff.html', 'workdesk.html',
@@ -367,13 +334,8 @@ t('★★ kind 판정 기준 3줄은 한 글자도 안 바뀌었다(오래 검�
 t('purchase_confirm 종류 추가 + 화이트리스트 + JSON 형식',
   /- "purchase_confirm": 구매확정 완료 화면/.test(GEM)
   // 자동 분류(파일 라우팅)에서 order_capture 가 추가됐다 — purchase_confirm 생존 검사는 그대로
-  // ★ 종류는 계속 는다 → 기존 종류의 **생존**만 본다(검사 의미 불변)
-  && (() => {
-    const m = /const kind = \[([^\]]*)\]\.includes\(p\.kind\)/.exec(GEM);
-    const have = m ? m[1].split(',').map(x => x.trim().replace(/'/g, '')) : [];
-    return ['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'].every(k => have.includes(k));
-  })()
-  && /"kind":"review\|receipt\|purchase_confirm\|order_capture\|/.test(GEM));
+  && /\['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'\]\.includes\(p\.kind\)/.test(GEM)
+  && /"kind":"review\|receipt\|purchase_confirm\|order_capture\|other"/.test(GEM));
 t('★★ 캐시 접두 상향 — 옛 캐시가 새 종류를 모른 채 히트하는 것 차단',
   /_getCacheKey\('classify[4-9]\d*:'/.test(GEM) && !/_getCacheKey\('classify[23]:'/.test(GEM));
 
@@ -413,16 +375,12 @@ const SRCH = S('src/services/search.service.js');
 const SUB = S('src/routes/submit.routes.js');
 const RE = S('src/routes/reviewEdit.routes.js');
 t('① 리뷰어 화면 슬롯 (search.service)',
-  /effectiveCaptureSlots\([\s\S]{0,180}row\.captureSlots,[\s\S]{0,180}row\.incomeType,[\s\S]{0,180}_rtMap\.get[\s\S]{0,180}_crMap\.get/.test(SRCH));
+  /effectiveCaptureSlots\(row\.captureSlots, row\.incomeType, _rtMap\.get/.test(SRCH));
 t('② 제출 완료 판정 (submit.routes)',
-  /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt, _crRequired === true\)/.test(SUB));
+  /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(SUB));
 t('③ 업로드 폴더 라벨 + 검수 기대값 (diag review-upload)',
-  // ★ 폴더 라벨은 **탭 값 그대로**(행마다 폴더가 갈리면 안 된다), AI 기대 종류는 **행 우선**
-  //   (`_effReviewType = _rowReviewType || _tabReviewType`) — 혼합 탭의 구매확정 행 인정(2026-08-19).
-  /slotLabelOf\([\s\S]{0,180}slot, _tabReviewType, _campaignCashReceipt\)/.test(DIAG)
-  && /reviewType: _effReviewType/.test(DIAG)
-  && /const _effReviewType = _rowReviewType \|\| _tabReviewType/.test(DIAG)
-  && /reviewTypeForRow\(\{ sheetId, tabName, rowIndex \}\)/.test(DIAG));
+  /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot, _tabReviewType\)/.test(DIAG)
+  && /reviewType: _tabReviewType/.test(DIAG));
 t('④ 교체요청 라벨 2곳 (reviewEdit)',
   (RE.match(/reviewTypeForTab\(/g) || []).length >= 2);
 t('★ 조회는 단일 출처 서비스 하나 — 네 곳이 각자 SQL 을 쓰면 조용히 갈라진다',

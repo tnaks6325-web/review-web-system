@@ -150,11 +150,6 @@ function makeTable(opts) {
     _renderPreview: () => {},
     syncRecruitProductMainUrl: () => {},
     showToast: () => {},
-    /* 정원 잠금(2026-08-19) — 이 하네스는 신규 발행 상태(편집 아님)라 잠금이 꺼진 채 돈다.
-       ★ 표 함수가 부르는 전역은 여기(또는 아래 추출 목록)에 반드시 함께 넣는다 —
-         빠지면 ReferenceError 로 가드 전체가 빨개진다(실측: `_renderProdModeHelp` 누락). */
-    _recruitEditId: null,
-    _rfQuotaUnlock: false,
     escHtml: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     // 선택지별 유입가이드(134) 위젯의 화면 조작부는 스텁 — 이 가드가 보는 것은 "모드와 저장 페이로드"다
     _igBind: () => {},
@@ -169,14 +164,13 @@ function makeTable(opts) {
   vm.runInContext('window._igState = { inflow: [], review: [], notes: [] };', sandbox);
   vm.runInContext('let _ugSeq = 0;', sandbox);
   [
-    '_htmlToPlainPreview', '_igSetList', '_igSplitInflow', '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries',
+    '_htmlToPlainPreview', '_igSetList', '_igSplitInflow', '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName',
     '_ugNewKey', '_ugRegister', '_ugDrop', '_ugDropAll', '_ugDropBox', '_ugBuild', '_ugLoad', '_ugCompose', '_ugMark', '_ugAttachAll',
     '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', 'setProdMode', '_convertProdRows',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows', 'renderOptRowsWithProduct',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
     'parseProductLinesToRows', 'applyProductRowsFromOrder',
-    '_renderProdModeHelp', '_rfQuotaNotice', '_syncQuotaLockUi',
   ].forEach(fn => vm.runInContext(grab(recruitSrc, fn), sandbox));
   return { dom, sandbox, run: (code) => vm.runInContext(code, sandbox) };
 }

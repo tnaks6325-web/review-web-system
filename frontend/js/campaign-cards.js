@@ -21,21 +21,6 @@
     if (Number.isFinite(t)) _serverOffsetMs = t - Date.now();
   }
 
-  /* ★ 배송유형 배지는 **기본형만** 그린다 — 회수·혼합은 부속정보가 붙은 문장으로 저장될 수 있어
-     ('회수(회수택배사: CJ대한통운, 회수상품명칭: …)') 원문을 그대로 그리면 배지가 카드를 덮는다.
-     ★★ **아는 어휘일 때만** 접는다 — 모르는 값('기타배송(박스)')을 괄호 앞에서 잘라내면
-       그건 다듬기가 아니라 **정보 삭제**다. 판정 불가는 원문 그대로 통과시킨다.
-     ★ 부속정보는 참여 후 작업내용에서 안내한다(참여 전 카드에 업체 물류 정보를 싣지 않는다). */
-  const _DL_BASES = ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)', '회수', '혼합'];
-  const _dlBadge = (v) => {
-    const raw = String(v == null ? '' : v).trim();
-    if (_DL_BASES.indexOf(raw) >= 0) return raw;
-    const cut = raw.indexOf('(');
-    if (cut <= 0) return raw;
-    const head = raw.slice(0, cut).trim();
-    return _DL_BASES.indexOf(head) >= 0 ? head : raw;
-  };
-
   function _esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -73,19 +58,12 @@
    *   담당자가 [📅 인원]으로 조절해야 할 상황(휴무일·0명 조절)을 놓치게 된다(사용자 신고).
    *   판정 재료는 전부 서버 상태엔진이 실어 준 값(state·stateReason) — 화면이 새로 세지 않는다.
    */
-  /** 쉬는 날 미게시 라벨 — 서버가 실어 준 closedKind 로만 가른다(화면이 공휴일을 새로 판정하지 않는다).
-   *  ★ closedKind 가 없으면(구버전 백엔드) 종전 문구 '주말 미게시' 그대로. */
-  function _closedLabel(c) {
-    return c && c.closedKind === 'holiday' ? '공휴일 미게시' : '주말 미게시';
-  }
   function _zeroQuotaNote(c, isPre, isDraft) {
     if (isPre) return { label: '오픈 전', desc: '오픈하면 집계가 시작됩니다' };
     if (isDraft) return { label: '게시 전', desc: '게시하면 집계가 시작됩니다' };
     if (c.stateReason === 'weekend_unpublished') {
-      const resume = _fmtMD(c.resumesOn);
-      const lab = _closedLabel(c);
-      const what = c.closedKind === 'holiday' ? '공휴일' : '주말';
-      return { label: lab, desc: resume ? `${what}에는 신청할 수 없습니다 · ${resume} 재개` : `${what}에는 신청할 수 없습니다 · 다음 진행일 재개` };
+      const monday = _fmtMD(c.resumesOn);
+      return { label: '주말 미게시', desc: monday ? `주말에는 신청할 수 없습니다 · ${monday} 재개` : '주말에는 신청할 수 없습니다 · 월요일 재개' };
     }
     if (c.stateReason === 'rest_day') {
       const nx = _fmtMD(c.nextWorkDate);
@@ -240,10 +218,6 @@
       .pcard .pg-hold{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;cursor:pointer;
         background:#EDE9FE;color:#6D28D9;border:1px solid #DDD6FE;font-size:.62rem;font-weight:800;vertical-align:1px}
       .pcard .pg-hold:hover{background:#DDD6FE}
-      /* 표(주문 원장) 기준 총량 칩(2단계) — observe=앰버(관측), on=빨강(실제 마감) */
-      .pcard .pg-tq{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;
-        font-size:.56rem;font-weight:800;background:#FEF3C7;color:#92400E}
-      .pcard .pg-tq.on{background:#FEE2E2;color:#B91C1C}
       /* 095: 차수 구분 줄(관리자 카드 전용) — 1차 200/200 완료 · 2차 12/100 · 총 212/300 */
       .pcard .prounds{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:4px 0 0;font-size:.62rem;color:#6B7280}
       .pcard .prounds .rchip{background:#F1F5F9;border-radius:999px;padding:1px 7px;font-weight:800;color:#334155}
@@ -344,28 +318,10 @@
       .cae-toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:100001;background:#111827;color:#fff;
         font-size:.8rem;font-weight:700;border-radius:10px;padding:10px 16px;max-width:86vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}
       .cae-toast.err{background:#DC2626}
-      /* ★ 재참여(재구매) 기간 안내 — 썸네일 하단 띠(시안 A, 사용자 확정 2026-08-24).
-         우상단 채널배지·좌상단 리본을 안 건드리고, 사진도 대부분 그대로 보인다. */
-      .pcard .pt-sash{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:6px 8px 7px;
-        display:flex;align-items:center;justify-content:center;gap:6px;text-align:center}
-      .pcard .pt-sash.lock{background:linear-gradient(0deg,rgba(30,41,59,.86),rgba(30,41,59,.7))}
-      .pcard .pt-sash.lock .ps-t{color:#fff;font-size:.62rem;font-weight:800}
-      .pcard .pt-sash.lock .ps-d{background:rgba(255,255,255,.18);color:#fff;font-size:.58rem;font-weight:900;
-        border-radius:99px;padding:1px 8px;flex-shrink:0}
-      .pcard .pt-sash.ready{background:linear-gradient(0deg,rgba(11,122,91,.88),rgba(18,184,134,.72))}
-      .pcard .pt-sash.ready .ps-t{color:#fff;font-size:.64rem;font-weight:900}
+      .pcard .pt-repurchase{margin-top:6px;padding:5px 7px;border-radius:7px;font-size:.62rem;font-weight:800;line-height:1.35}
+      .pcard .pt-repurchase.ready{background:#DCFCE7;color:#166534}.pcard .pt-repurchase.lock{background:#FEF3C7;color:#92400E}
     `;
     document.head.appendChild(st);
-  }
-
-  /** 'YYYY-MM-DD'가 아닌 일반 ISO 일시 → 'M/D(요일)'(요일만 로컬 규칙, 시각은 버림).
-   *  재참여 가능일은 "참여 시각 + N일"이라 시:분까지 있는데, 안내 문구엔 날짜만 필요하다. */
-  function _fmtDateKo(iso) {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return '';
-    const yo = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
-    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')';
   }
 
   /** 참여형 카드 1장 HTML. c = /api/campaign/list 의 참여형 행.
@@ -417,14 +373,9 @@
     //   안내문으로 들어갈 수 있으므로, 텍스트 유무로 가이드유입으로 덮어쓰지 않는다.
     let _wd = c.work_detail;
     if (typeof _wd === 'string') { try { _wd = JSON.parse(_wd); } catch (_) { _wd = null; } }
-    /* ★ 저장값이 없으면 서버가 실어 준 **작업오더 폴백**을 쓴다(관리자 목록 전용 필드) —
-       리뷰어 화면(work-detail)이 이미 같은 폴백을 쓰므로, 없으면 카드만 '링크유입'으로 갈렸다.
-       공개 목록 응답에는 이 필드가 없어 종전 동작 그대로. */
-    const inflowType = (_wd && _wd.inflowType) || c.orderInflowType || '';
-    /* 신규 공고는 공통 유입가이드가 없다. 안내 텍스트의 존재 여부로 링크유입을
-       추론하면 선택지 전용 가이드만 있는 공고를 링크유입으로 오표기한다.
-       명시값이 없는 오래된 공고에만 종전 URL 폴백을 남긴다. */
-    const isLinkInflow = inflowType === 'link' || (!inflowType && !!c.landing_url);
+    const inflowType = _wd && _wd.inflowType;
+    const hasGuide = !!(_wd && _wd.inflowGuideHtml);
+    const isLinkInflow = inflowType === 'link' || (!inflowType && c.landing_url && !hasGuide);
     chips.push(isLinkInflow
       ? '<span class="sp-chip flow">링크유입</span>'
       : '<span class="sp-chip flow">가이드유입</span>');
@@ -437,20 +388,7 @@
     // 원본 recruit_total=0은 무제한 정책값이라 여기서 덮어쓰지 않는다.
     const total = Number(c.display_recruit_total) || Number(c.recruit_total) || 0;
     const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;
-    // ★★ 1단계(표 기준 누적): 분자 = 작업보드 표의 "채워진 줄"(archiveSuggest.filled — 서버가
-    //   rowNumbering.filledSql 로 센 값 = 작업보드 게이지와 같은 판정). null/부재 = 셀 수 없음 →
-    //   종전(공고 확정)으로 폴백하고 툴팁이 그 사실을 말한다(0 위장·거짓 "표 기준" 표기 금지).
-    // ★ 차이(표 ≠ 공고 확정)는 외부모집·수기 입력·지각 확정 대기 신호 — 툴팁이 병기해 신호를 남긴다.
-    const sug = c.archiveSuggest;
-    const tf = (sug && Number.isFinite(Number(sug.filled))) ? Number(sug.filled) : null;
-    const n = tf != null ? tf : done;
-    const tip = tf != null
-      ? `작업보드 표에 채워진 줄 ${tf}줄 (표 ${Number(sug.total) || 0}줄) · 공고를 거쳐 확정된 건 ${done}명 · 차수·이월 칩은 공고 확정 기준`
-      : '표 기준 집계를 받지 못해 공고 확정 기준으로 표기 중';
-    // ★ 출처는 툴팁이 말한다 — [표] 배지는 제거(사용자 확정 2026-08-20).
-    const totTxt = `<span title="${_esc(tip)}">`
-      + (total > 0 ? `총 <b>${n}</b>/${total}명` : (n ? `누적 <b>${n}</b>명` : '총 <b>0</b>명'))
-      + '</span>';
+    const totTxt = total > 0 ? `총 <b>${done}</b>/${total}명` : (done ? `누적 <b>${done}</b>명` : '총 <b>0</b>명');
     /* ★★ 시트 탭 연결 표기는 그리지 않는다 (탈 구글시트 · 사용자 확정 2026-08-19).
        리뷰웹시스템은 무시트라 담당자가 시트 탭을 고를 일이 없고, 공고의 작업보드는
        접수 또는 첫 주문 때 시스템이 확보한다(`campaignWorktable.ensureCampaignWorktable`).
@@ -558,7 +496,7 @@
     //   종전엔 6개를 한 줄에 욱여넣어 라벨이 잘리고 「게시」 토글과 겹쳤다(실측: 카드 244px 중
     //   토글 57px 고정 → 버튼 하나에 27px 인데 글자는 35~48px 필요 = 6개 전부 넘침).
     //   ★ 버튼이 더 늘어도 [⋯] 안으로 들어가므로 **같은 방식으로 다시 깨지지 않는다**.
-    //   ★ 로그의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
+    //   ★ 관제의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
     /* 📦 130 보관/보관 해제 — 카드 주 줄이 아니라 [⋯] 안에 둔다(주 줄은 3개 고정 규율).
        ★ 보관은 되돌릴 수 있지만 리뷰어 목록·참여를 닫으므로 **확인창을 거친다**(CampCards.toggleArchive). */
     const arcBtn = c.archived_at
@@ -568,7 +506,7 @@
     return `<div class="pact">
       <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')"><span class="lbl">✏️ 수정</span></button>
       ${viewBtn}
-      <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')"><span class="lbl">🧾 로그</span>${bdg}</button>
+      <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')"><span class="lbl">📡 관제</span>${bdg}</button>
       <button type="button" class="uic more" onclick="${stop}CampCards._more('${id}',this)"
         title="더보기 — 날짜별 인원 조절 · 참여 리뷰어 관리">⋯</button>
       ${pubToggle}
@@ -637,22 +575,10 @@
    */
   function cardHtml(c, o) {
     _injectStyles();   // ★ 카드 HTML만 쓰는 호출부(관리자 목록)도 CSS를 확실히 받게 — 폭 측정(칩 흐름)이 스타일 적용 후 이뤄져야 한다
-    _cacheMoCtx(c);    // 외부모집 수동제출 문맥(연결 탭) 캐시 — 카드·로그 팝업이 같은 값을 본다
+    _cacheMoCtx(c);    // 외부제출 문맥(연결 탭) 캐시 — 카드·관제 패널이 같은 값을 본다
     const admin = !!(o && o.admin);
     const channel = c.channel === '직접입력' ? (c.channel_custom || '') : (c.channel || '');
-    let deliveryFeeMix = c.delivery_review_fee_mix;
-    if (typeof deliveryFeeMix === 'string') { try { deliveryFeeMix = JSON.parse(deliveryFeeMix); } catch (_) { deliveryFeeMix = []; } }
-    const feeByType = (Array.isArray(deliveryFeeMix) ? deliveryFeeMix : []).reduce((out, row) => {
-      const type = row && row.type;
-      const amount = Number(row && (row.reviewFee ?? row.review_fee ?? row.fee));
-      if ((type === 'real' || type === 'empty') && Number.isFinite(amount) && amount >= 0) out[type] = amount;
-      return out;
-    }, {});
-    // 혼합 배송은 하나의 금액으로 축약하지 않는다. 입금관리의 행별 산정과 같은 두 값을
-    // 카드·미리보기에도 보여, 실배송/빈박스 중 어느 설정이 적용되는지 숨기지 않는다.
-    const fee = Object.prototype.hasOwnProperty.call(feeByType, 'real') && Object.prototype.hasOwnProperty.call(feeByType, 'empty')
-      ? `실배송 ${feeByType.real.toLocaleString()}원 · 빈박스 ${feeByType.empty.toLocaleString()}원`
-      : (c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '');
+    const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '';
     const isClosed = c.state === 'closed' || c.status === 'closed';
     const isPre = c.state === 'preopen';
     const isDaily = c.state === 'daily_done';
@@ -691,7 +617,7 @@
     const isBlogCard = c.work_kind === 'blog';
     const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>` : '';
     const badges = (channel || c.delivery_type || crChip || blogChip)
-      ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(_dlBadge(c.delivery_type))}</span>` : ''}${crChip}</div>`
+      ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
       : '';
     const isDraft = admin && (c.status || 'draft') === 'draft';
     // 오늘 마감 카드는 썸네일 가운데 카운트다운 오버레이가 같은 말을 하므로 리본을 겹치지 않는다
@@ -708,9 +634,9 @@
     //   리뷰어앱 공고수정 스코프 토큰(via:'reviewer_campaign')은 /api/manual-order/* 에 도달할 수
     //   없어(403) 버튼을 보여주면 막다른 길이 된다(별표 칩과 같은 규율).
     const moChip = (!admin && c.participation_mode && _realAdminTok())
-      ? `<button type="button" class="pmochip" onclick="event.stopPropagation();event.preventDefault();CampCards.openManualOrder('${_esc(c.id)}')">🧾 외부모집 수동제출</button>`
+      ? `<button type="button" class="pmochip" onclick="event.stopPropagation();event.preventDefault();CampCards.openManualOrder('${_esc(c.id)}')">🧾 외부제출</button>`
       : '';
-    // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(최근 1일 일반 제출완료 1건당 1건 참여 조건)
+    // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(일반 모집 1건 제출완료당 1건 참여 조건)
     const popBadge = c.is_popular === true ? `<span class="pt-pop">🔥 인기!</span>` : '';
     // ★ 085: 리뷰어 미노출(내부 테스트) 배지 — 관리자 화면에서만. 리뷰어 응답엔 이 필드가 없어
     //   렌더될 일이 없지만, admin 분기로 한 번 더 못 박는다(공개 뷰에 관리 레이어 유출 금지 규율).
@@ -741,7 +667,7 @@
     let overlay = '';
     if (weekendUnpublished && c.resumesAt) {
       const wkLab = _fmtMD(c.resumesOn) ? _fmtMD(c.resumesOn) + ' 재개' : _fmtOpenLabel(c.resumesAt);
-      overlay = `<div class="pt-ovl pre"><span class="ol">${_esc(_closedLabel(c))}</span><span class="ot" data-camp-countdown="${_esc(c.resumesAt)}">--:--:--</span><span class="ol">${_esc(wkLab)}</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">주말 미게시</span><span class="ot" data-camp-countdown="${_esc(c.resumesAt)}">--:--:--</span><span class="ol">${_esc(wkLab)}</span></div>`;
     } else if (c.stateReason === 'rest_day' && c.opensAt) {
       // 휴무일(주말·공휴일·다음 블록 대기) — 다음 진행일까지 카운트다운
       overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenWhen(c.opensAt))} 오픈</span></div>`;
@@ -755,29 +681,12 @@
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
 
-    // ★ 재참여(재구매) 기간 안내(사용자 확정 2026-08-24) — 리뷰어 개인별. 관리자 카드는 집계
-    //   화면이라 "내 참여 이력" 개념이 안 맞아 렌더하지 않는다. 서버 apply 게이트(같은 판정 —
-    //   utils/repurchaseGuard)와 어긋나지 않게, 값은 항상 서버(GET /my-repurchase-status)가 준다.
-    //   ★ c.repurchaseStatus 가 없으면(조회 전·평소 카드·구버전 백엔드) 아무것도 안 그린다.
     const repAccounts = (c.repurchase && Array.isArray(c.repurchase.accounts)) ? c.repurchase.accounts : [];
-    // 타계정 로그인에서 형제 명의는 서버가 login_only로 내린다. 카드 잠금/안내 계산에서도
-    // 선택 불가능한 형제 명의를 제외하고 실제 로그인 명의만 본다.
-    const repUsable = repAccounts.filter(a => a && a.status !== 'login_only');
-    const repReady = repUsable.filter(a => a.status === 'ready');
-    const repLocked = repUsable.filter(a => a.status === 'locked');
-    const repUnknown = repUsable.filter(a => a.status === 'unknown');
-    let repurchaseSash = '';
-    const repurchaseLocked = !admin && repUsable.length > 0 && repUsable.every(a => a.status === 'locked');
-    if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
-    else if (!admin && repUnknown.length) repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">타계정 참여 시 재참여 이력 확인</span></div>';
-    else if (repurchaseLocked) {
-      // 모든 명의가 잠겼다면 그중 가장 먼저 풀리는 명의의 시각을 안내한다.
-      const d = repLocked.map(a => a.availableFrom).filter(Boolean)
-        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
-      const dLeft = Math.max(0, Math.ceil((new Date(d).getTime() - _now()) / 86400000));
-      repurchaseSash = `<div class="pt-sash lock"><span class="ps-t">${_esc(_fmtDateKo(d))} 재참여 가능</span><span class="ps-d">D-${dLeft}</span></div>`;
-    }
-
+    const repReady = repAccounts.filter(a => a && a.status === 'ready');
+    const repLocked = repAccounts.filter(a => a && a.status === 'locked');
+    const repOnlyLocked = repAccounts.length > 0 && !repReady.length && repLocked.length > 0;
+    const repLabel = a => (a.type === 'sub' ? '타계정 ' : '본계정 ') + (a.displayName || '');
+    const repHtml = repAccounts.length ? (repReady.length ? `<div class="pt-repurchase ready">✅ ${_esc(repLabel(repReady[0]))}로 재참여 가능</div>` : `<div class="pt-repurchase lock">⏳ ${_esc(repLabel(repLocked[0]))} 재참여 대기 중</div>`) : '';
     const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));
     const timeIcon = (c.opensAt && c.closesAt) ? '🕑' : '⏱';
@@ -823,15 +732,7 @@
           ? `<span class="pg-hold" onclick="event.stopPropagation();event.preventDefault();CampaignDailyPlan.quickApplyHeld('${_esc(c.id)}')" title="보류된 이월 ${heldN}명 — 누르면 오늘 정원에 반영할지 물어봅니다 (세부 선택은 [📅 인원])">⏸ 보류 ${heldN}</span>`
           : `<span class="pg-hold" title="보류된 이월 ${heldN}명 — 반영은 관리자 화면 [📅 인원]에서">⏸ 보류 ${heldN}</span>`)
         : '';
-      // ★ 표(주문 원장) 기준 총량(2단계) — 서버 payload 가 있을 때만 그린다(없으면 한 글자도
-      //   안 그린다 = 구버전 백엔드·조회 실패에서 "표 기준 적용 중"이라는 거짓 표시 금지).
-      const tq = c.tableQuota;
-      const tqChip = (showChips && tq && tq.wouldClose)
-        ? (tq.mode === 'on'
-          ? `<span class="pg-tq on" title="주문 원장 ${Number(tq.orders) || 0}건이 총모집을 채워 표 기준으로 마감 중입니다. 상태 저장이 아니라 주문이 줄면 자동 재오픈됩니다(게시 토글 무관).">표 기준 마감</span>`
-          : `<span class="pg-tq" title="관측 모드: 표 기준을 켜면 이 공고는 마감됩니다(주문 원장 ${Number(tq.orders) || 0}건 ≥ 총모집). 지금은 표시만 하고 참여는 막지 않습니다.">표 기준이면 마감</span>`)
-        : '';
-      const chips = `${tqChip}${holdTip}${planTip}${carryTip}`;
+      const chips = `${holdTip}${planTip}${carryTip}`;
       if (quota > 0 && !isPre) {
         const confirmedN = Math.max(0, today - holdNow);     // todayCount = 제출확정 + 유효홀드
         // 표기 숫자 = 표 기준(있으면). 게이지 채움·완료 판정도 같은 값을 따라간다(숫자와 색이 어긋나지 않게).
@@ -866,14 +767,11 @@
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
-    if (c.state === 'open' && repurchaseLocked) {
-      // ★ 참여는 실제로 서버(apply 게이트)에서 막히므로, 버튼도 그 사실을 보여준다 —
-      //   안 그러면 "카드는 열려 보이는데 눌러도 거부"라는 헷갈리는 상태가 된다.
-      footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">재참여 가능일 이후 다시 참여할 수 있어요</div>`;
-    } else if (c.state === 'open') footer = isBlogCard
+    if (c.state === 'open' && repOnlyLocked) footer = `<button type="button" class="pbtn off">재참여 대기 중</button>`;
+    else if (c.state === 'open') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
       : `<button type="button" class="pbtn go">참여하기</button>`;
-    else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">${_esc(_closedLabel(c))}</button><div class="pnote">${_esc(c.stateMessage || (_closedLabel(c) + ' · 다음 진행일 재개'))}</div>`;
+    else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
     else if (restDay) footer = `<button type="button" class="pbtn off">오늘은 진행 없음</button><div class="pnote">${c.nextWorkDate ? '다음 진행일 ' + _esc(_fmtMD(c.nextWorkDate)) : '다음 진행일 안내 예정'}</div>`;
@@ -897,7 +795,7 @@
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
-          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>${repHtml}
           ${gauge}
           ${_roundsLine(c)}
           ${_adminSpec(c)}
@@ -908,7 +806,7 @@
     return `
       <article class="pcard${isClosed ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}" data-camp-id="${_esc(c.id)}"
            onclick="location.href='campaign.html?id=${encodeURIComponent(c.id)}'">
-        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${repurchaseSash}${editChip}${moChip}</div>
+        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${editChip}${moChip}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
@@ -1108,12 +1006,9 @@
           <div><label class="cae-lb">배송 형태</label>
             <select id="cae_delivery" class="cae-in">
               <option value="">선택 안 함</option>
+              <option value="빈택배">빈택배</option>
               <option value="실배송">실배송</option>
-              <option value="빈박스">빈박스</option>
-              <option value="택배발송대행">택배발송대행</option>
-              <option value="직접배송(가구 등)">직접배송(가구 등)</option>
-              <option value="회수">회수</option>
-              <option value="혼합">혼합</option>
+              <option value="회수건">회수건</option>
             </select></div>
         </div>
         <div class="cae-g2">
@@ -1488,7 +1383,7 @@
     window.open(url, '_blank', 'noopener');   // 팝업이 막힌 경우의 폴백
   }
 
-  /** 공고 id로 외부모집 수동제출 모달 열기(카드 칩·로그 팝업 공용) */
+  /** 공고 id로 외부제출 모달 열기(카드 칩·관제 패널 공용) */
   async function openManualOrder(id) {
     if (!window.ManualOrder) { alert('수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.'); return; }
     const tok = _realAdminTok();

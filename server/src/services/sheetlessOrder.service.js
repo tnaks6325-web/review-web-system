@@ -30,7 +30,6 @@
 'use strict';
 
 const { logger } = require('../utils/logger');
-const { tableOrderNumSql } = require('../utils/tableOrderNum');
 const pool = require('../db/pool');
 
 let _pool = null;
@@ -41,56 +40,6 @@ function __setPoolForTest(p) { _pool = p; }
 function _phone8(v) {
   const d = String(v || '').replace(/\D/g, '');
   return d.length >= 8 ? d.slice(-8) : '';
-}
-// 중복 판정 키 정규화 — SQL 쪽 regexp_replace(…, '\D', '', 'g') 와 **같은 규칙**이어야 한다.
-function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
-
-/*
- * 작업표 정원을 넘겨 줄을 만들 수 있는 경우.
- *
- * 외부모집 수동제출은 이미 외부에서 구매가 확정된 건을 사후 기록하는 흐름이라, 준비된
- * 슬롯이 모두 찬 경우에도 실제 주문 행 하나를 남길 필요가 있다. 여기에 더해 최근 48시간 내
- * `workboard_apply` 큐 자체가 누락돼 복구기가 다시 넣은 일반 구매 주문과, 서버가 홀드를
- * `submitted`로 확정한 참여형 구매도 이미 결제가 끝난 원장이다. 이 경우에만 복구 표식 또는
- * 캠페인 확정 상태 + 원장 상태·작업보드 연결·수취인·연락처·주문번호를 모두 확인해 초과 행을
- * 허용한다. 단순 재시도나 호출자 플래그 하나만으로는 열리지 않는다.
- */
-async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-  allowMissingQueueRecoveryOverflow = false, allowConfirmedCampaignOverflow = false, workboardId = null,
-} = {}) {
-  const { rows } = await client.query(
-    `SELECT source,
-            NULLIF(btrim(COALESCE(recipient, '')), '') AS recipient,
-            regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS phone_digits,
-            NULLIF(btrim(COALESCE(order_num, '')), '') AS order_num,
-            mirror_status, submitted_at, workboard_id,
-            EXISTS (
-              SELECT 1 FROM campaign_applications ca
-               WHERE ca.status = 'submitted'
-                 AND (ca.order_submission_id = order_submissions.id
-                   OR ca.late_order_id = order_submissions.id
-                   OR ca.id = order_submissions.campaign_application_id)
-            ) AS campaign_confirmed
-       FROM order_submissions
-      WHERE id = $1::uuid AND deleted_at IS NULL
-      FOR KEY SHARE`, [orderSubmissionId]);
-  const order = rows[0];
-  const identified = !!(order && order.recipient && String(order.phone_digits || '').length >= 8);
-  if (!identified) return false;
-  if (order.source === 'admin_external') return true; // 기존 외부모집 수동제출 규칙 보존
-  const trustedRecovery = allowMissingQueueRecoveryOverflow === true;
-  const confirmedCampaign = allowConfirmedCampaignOverflow === true && order.campaign_confirmed === true;
-  if ((!trustedRecovery && !confirmedCampaign) || order.source !== 'order_submit' || !order.order_num || !workboardId) return false;
-  const mirrorStatus = String(order.mirror_status || '');
-  // 무시트 직접 제출은 원장을 먼저 안전 저장하면서 written으로 선표시한 뒤 작업보드에 쓴다.
-  // 서버가 확인한 참여형 확정 건에 한해서만 그 초기 상태를 허용하고, 일반 written 재시도는 막는다.
-  const initialConfirmedWrite = confirmedCampaign && mirrorStatus === 'written';
-  if (!initialConfirmedWrite && !['pending', 'pending_no_row', 'failed', 'queued'].includes(mirrorStatus)) return false;
-  if (!order.workboard_id || String(order.workboard_id) !== String(workboardId)) return false;
-  const submittedAt = new Date(order.submitted_at).getTime();
-  return Number.isFinite(submittedAt)
-    && submittedAt <= Date.now() + 5 * 60 * 1000
-    && submittedAt > Date.now() - 48 * 60 * 60 * 1000;
 }
 
 /**
@@ -103,19 +52,13 @@ async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
  *   patch = 덮어쓸 {헤더명: 값}. 매퍼가 `null` 을 준 칸(관리자 보호열 등)은 들어가지 않는다.
  */
 function buildRowPatch(headers, orderData, currentRowJson = {}) {
-  const { mapOrderToSheetRow, optionWriteColumns, productWriteColumns } = require('./orderLedger.service');
+  const { mapOrderToSheetRow, optionWriteColumns } = require('./orderLedger.service');
   const mapped = mapOrderToSheetRow(headers || [], orderData || {});
   const optCols = new Set(optionWriteColumns(headers || []));
-  /* ★ 138 선택 상품 칸 — 판정은 매퍼 파생 단일 출처(`productWriteColumns`). 옵션 칸과 **같은
-     blank-only 규율**을 건다: 관리자가 적어 둔 상품명을 리뷰어 제출이 덮으면 안 된다. */
-  const prodCols = new Set(productWriteColumns(headers || []));
   const blankOnly = process.env.ORDER_OPTION_BLANK_ONLY !== '0';
 
   const patch = {};
   const optionSuppressed = [];
-  const productSuppressed = [];
-  let optionWritten = false;
-  let productWritten = false;
   (headers || []).forEach((h, i) => {
     const val = mapped[i];
     if (val === null || val === undefined) return;          // 매퍼가 "쓰지 않음"이라 한 칸
@@ -125,31 +68,9 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
       const cur = String((currentRowJson || {})[name] == null ? '' : (currentRowJson || {})[name]).trim();
       if (cur) { optionSuppressed.push({ header: name, want: String(val), cur }); return; }
     }
-    if (prodCols.has(i) && blankOnly) {
-      const cur = String((currentRowJson || {})[name] == null ? '' : (currentRowJson || {})[name]).trim();
-      if (cur) { productSuppressed.push({ header: name, want: String(val), cur }); return; }
-    }
-    if (optCols.has(i) && String(val).trim()) optionWritten = true;
-    if (prodCols.has(i) && String(val).trim()) productWritten = true;
     patch[name] = String(val);
   });
-
-  /* ★★ 조용한 누락 차단 (2026-08-20) — 리뷰어가 고른 옵션이 있는데 **기입할 칸이 없는** 경우.
-     매퍼는 '옵션' 헤더가 없으면 그 값을 `null` 로 떨어뜨리고, 종전에는 경고도 로그도 없이
-     사라졌다(8/20 「선물세트 3종 빈박스」 — 원장에는 3종 선택이 남았는데 표에는 흔적 0).
-     ★ 보존(blank-only)으로 안 쓴 것과는 **다른 신호**다 — 그쪽은 값이 이미 있는 정상 동작이고,
-       이쪽은 **칸 자체가 없다**(사람이 칸을 만들어야 풀린다). */
-  const wantOpt = String((orderData || {}).selectedOptKey || '').trim();
-  const optionUnmapped = (wantOpt && !optionWritten && !optionSuppressed.length) ? wantOpt : '';
-
-  /* ★★ 138 — 상품도 **같은 조용한 누락 차단**을 건다. 복합유형 작업(137)에서 리뷰어가 고른
-     "옵션 없는 상품"은 옵션 칸에 쓰지 않으므로(8/3 규율), 「상품」 칸이 없으면 그 선택이
-     표에서 통째로 사라진다 — 2026-08-25 「업소용 간장」이 정확히 그 상태였고 **경고조차 없었다**.
-     ★ 보존(blank-only)으로 안 쓴 것과는 **다른 신호**다(그쪽은 값이 이미 있는 정상 동작). */
-  const wantProd = String((orderData || {}).selectedProduct || '').trim();
-  const productUnmapped = (wantProd && !productWritten && !productSuppressed.length) ? wantProd : '';
-
-  return { patch, optionSuppressed, optionUnmapped, productSuppressed, productUnmapped };
+  return { patch, optionSuppressed };
 }
 
 /**
@@ -162,35 +83,14 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
  * @param {string} o.orderSubmissionId
  * @param {string} [o.loginPhone8] · [o.loginName]
  * @param {boolean} [o.recovered]        복구 재기록(비고 표기용 — 시트 경로와 같은 의미)
- * @param {boolean} [o.allowMissingQueueRecoveryOverflow] 큐 자체가 누락된 복구 주문만 초과 행 허용
- * @param {boolean} [o.allowConfirmedCampaignOverflow] 서버가 확정한 참여형 구매만 초과 행 허용
  * @returns {Promise<{ok:boolean, written?:boolean, reason?:string, ledger?:object}>}
  */
 async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
-  orderSubmissionId, workboardId = null, loginPhone8 = '', loginName = '', recovered = false,
-  allowMissingQueueRecoveryOverflow = false, allowConfirmedCampaignOverflow = false,
+  orderSubmissionId, loginPhone8 = '', loginName = '', recovered = false,
 } = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
-
-  // 새 통폐합 경로에서는 작업보드 ID가 진짜 대상이다. 전달된 예전 키는 그 작업보드에
-  // 연결된 호환키로 다시 확정하고, 불일치·보관 보드는 쓰지 않는다.
-  if (workboardId) {
-    const { rows: boardTargets } = await db.query(
-      `SELECT tc.sheet_id, tc.tab_name, COALESCE(tc.tab_gid, '') AS tab_gid
-         FROM workboards w
-         JOIN tab_configs tc ON tc.workboard_id = w.id
-        WHERE w.id = $1 AND w.state = 'active' LIMIT 1`, [workboardId]
-    );
-    if (!boardTargets.length) return { ok: false, reason: 'workboard_not_active' };
-    if (boardTargets[0].sheet_id !== sheetId || boardTargets[0].tab_name !== tabName) {
-      return { ok: false, reason: 'workboard_target_mismatch' };
-    }
-    sheetId = boardTargets[0].sheet_id;
-    tabName = boardTargets[0].tab_name;
-    tabGid = boardTargets[0].tab_gid || tabGid;
-  }
 
   const ledgerSvc = require('./orderLedger.service');
   const { loadRawTabContext, markOrderWritten } = ledgerSvc;
@@ -220,223 +120,62 @@ async function writeOrderToWorktable({
 
   const requestedSeq = sheetRow == null ? null : parseInt(sheetRow, 10);
   if (sheetRow != null && (!Number.isInteger(requestedSeq) || requestedSeq < 1)) return { ok: false, reason: 'bad_row' };
-  // 예정된 옵션 행은 모집공고에서 선택한 옵션만 채울 수 있다.
-  // 큐 작업표는 트랜잭션 안에서 최신 원장값으로 교체될 수 있으므로, 옵션 키도 반드시
-  // 그 교체 뒤에 다시 계산한다. 상품명은 작업표 표시 문구와 모집공고 문구가 다를 수 있으므로
-  // 빈 슬롯 선택 조건으로 절대 사용하지 않는다. 선택 상품은 아래 buildRowPatch가 `상품` 열에
-  // 별도로 기록한다.
-  let selectedOptKey = '';
-  let scheduledOptionKey = '';
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
   //     재기록(reconcile)·관리자 편집과의 경합까지 직렬화한다.
   const client = await db.connect();
   let optionSuppressed = [];
-  let optionUnmapped = '';
-  let productSuppressed = [];
-  let productUnmapped = '';
-  // ★★ `seq` 는 try 밖에서 선언한다 — 아래 catch·완결 표시·신원 링크·로그가 전부 이 값을 쓴다.
-  //   try 안에서 `let` 으로 선언하면 블록 스코프라 커밋 뒤 `markOrderWritten(…, seq)` 부터
-  //   ReferenceError 가 나고, 마지막 logger.info 에서 함수 밖으로 던져진다. 그러면 행은 이미
-  //   기록됐는데 호출부가 예외를 잡아 주문을 'failed' 로 강등하고 리뷰어 화면엔 제출 실패로 보여
-  //   **재제출 → 새 주문 → 작업보드 중복 줄**이 된다(2026-08-19 실사고).
+  // 트랜잭션 뒤의 장부·완결·신원 링크도 확정된 같은 행 번호를 사용한다.
+  // 블록 내부 let 이면 기록은 성공해도 후속 완료 단계가 ReferenceError 로 끊긴다.
   let seq = requestedSeq;
   try {
     await client.query('BEGIN');
-    /* ★ 탭 단위 직렬화 — 빈 슬롯 선점과 줄 이어붙이기(MAX(seq)+1)가 겹쳐도 두 건이 같은
-       번호를 집지 않는다. 트랜잭션 스코프라 누수 불가이고, 장부 재생성 락은 커밋 뒤
-       별도 트랜잭션에서 잡히므로 중첩(=교착) 이 생기지 않는다. */
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
-      [`sheetless_worktable:${sheetId}:${tabName}`]);
-    /* 모집정원/날짜계획의 과거 생성 경로가 작업보드 연결값 없이 만든 행을 먼저 보정한다.
-       ★ 활성 작업보드 + 정확한 탭 + 아직 미연결인 행만 대상이다. 다른 작업보드 행은
-         건드리지 않으며, 탭 잠금 안에서 실행돼 새 제출/복구가 같은 빈자리를 함께 먹지 않는다. */
-    if (workboardId) {
-      const affinity = await require('./workboardSlotAffinity.service')
-        .bindUnassignedRowsToActiveWorkboard(client, {
-          sheetId, tabName, expectedWorkboardId: workboardId,
-        });
-      if (!affinity.workboardId || String(affinity.workboardId) !== String(workboardId)) {
-        await client.query('ROLLBACK');
-        return { ok: false, reason: 'workboard_target_mismatch' };
-      }
-    }
-    // 새 큐 경로에서는 직원 수정과 늦은 반영이 경합해도 최신 원장값이 이긴다. 기존 무시트
-    // 즉시 반영은 호출 직전에 만든 orderData를 그대로 써서, 전환 전 동작과 쿼리 수를 보존한다.
-    if (workboardId) {
-      const { rows: freshOrders } = await client.query(
-        `SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
-        [orderSubmissionId]
-      );
-      if (!freshOrders.length || freshOrders[0].mirror_status === 'canceled') {
-        await client.query('ROLLBACK');
-        return { ok: true, written: false, reason: 'deleted_or_canceled' };
-      }
-      orderData = ledgerSvc._osRowToOrderData(freshOrders[0]);
-    }
-    selectedOptKey = String(orderData.selectedOptKey || '').trim();
-    scheduledOptionKey = selectedOptKey;
     let cur;
     if (seq != null) {
       ({ rows: cur } = await client.query(
-        `SELECT id, seq, option_text, row_json FROM campaign_participants
+        `SELECT id, seq, row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
-            AND ($4::uuid IS NULL OR workboard_id = $4)
-          FOR UPDATE`, [sheetId, tabName, seq, workboardId]));
+          FOR UPDATE`, [sheetId, tabName, seq]));
     } else {
       // 재시도는 이미 연결된 행을 먼저 잠근다. 없을 때만 준비된 빈 슬롯을 선점한다.
       ({ rows: cur } = await client.query(
-        `SELECT id, seq, option_text, row_json FROM campaign_participants
+        `SELECT id, seq, row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
             AND order_submission_id = $3::uuid
-            AND ($4::uuid IS NULL OR workboard_id = $4)
-          FOR UPDATE`, [sheetId, tabName, orderSubmissionId, workboardId]));
-      // ★★ 빈 슬롯을 새로 먹기 전에 "같은 구매가 이미 이 표에 있는가" 를 본다.
-      //   무시트 경로는 시트 시절의 `sheet_row_claims`(=(sheet,tab,dedup_key) 유니크)를 건너뛰고
-      //   `campaign_participants.order_submission_id` 도 유니크가 아니라, **주문원장 행이 하나 더 생기면
-      //   작업보드 줄도 하나 더 생긴다**(2026-08-19 중복 사고). 여기서 그 마지막 수렴점을 만든다.
-      //   ★ 판정 키 = 주문번호(숫자만) + 연락처(숫자만). 주문번호가 없으면(비번호 쿠팡 등) 판정하지
-      //     않고 종전대로 진행한다 — 모르면 막지 않는다(fail-open).
-      if (!cur.length && _digits(orderData.orderNum).length >= 6) {
-        let { rows: dup } = await client.query(
-          `SELECT cp.seq, cp.order_submission_id
-             FROM campaign_participants cp
-             JOIN order_submissions os2 ON os2.id = cp.order_submission_id
-            WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL
-              AND cp.order_submission_id <> $3::uuid
-              AND os2.deleted_at IS NULL
-              AND regexp_replace(COALESCE(os2.order_num, ''), '\D', '', 'g') = $4
-              AND regexp_replace(COALESCE(os2.phone, ''), '\D', '', 'g') = $5
-            ORDER BY cp.seq
-            LIMIT 1`,
-          [sheetId, tabName, orderSubmissionId,
-           _digits(orderData.orderNum), _digits(orderData.phone)]);
-        /* ★★ 2차 방어 — **링크를 타지 않고 표에 적힌 주문번호로도** 본다 (2026-08-19 실사고).
-             위 1차 방어는 `cp.order_submission_id → os2` 조인으로 판정한다. 그래서 그 **링크가
-             오염되면**(다른 주문을 가리키면) 이미 반영된 줄을 보지 못하고 새 빈 슬롯을 먹는다 —
-             10분 복구 크론이 매 주기 한 줄씩, 「8/3(쿠팡)위프_블랙 탈취제」 권정현 한 사람에게만
-             11줄을 만들었다(16:40~18:20). 링크 오염 하나가 줄 오삭제와 줄 중복 생성 두 방향으로
-             동시에 사고를 냈다.
-             ★ 판정 값은 **담당자가 표에서 눈으로 보는 주문번호** — 중복 정리(`dedupeRows`)와
-               **같은 SQL 조각**(`tableOrderNumSql`)을 쓴다. 두 기능이 다른 규칙으로 "표 주문번호"를
-               뽑으면 한쪽은 지우고 다른 쪽은 또 만드는 상태가 된다.
-             ★ **명의(phone8)까지 같을 때만** 중복으로 본다 — 표 주문번호만으로는 담당자가 옆 줄에
-               같은 번호를 적어 둔 경우까지 막아 정상 주문이 표에 못 들어간다(모르면 막지 않는다).
-             ★ 연락처를 8자리로 못 만들면 이 검사를 건너뛴다(fail-open). */
-        if (!dup.length && String(_digits(orderData.phone)).length >= 8) {
-          const { rows: dupRow } = await client.query(
-            `SELECT cp.seq, cp.order_submission_id
-               FROM campaign_participants cp
-              WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL
-                AND (cp.order_submission_id IS NULL OR cp.order_submission_id <> $3::uuid)
-                AND ${tableOrderNumSql('cp')} = $4
-                AND cp.phone8 = $5
-              ORDER BY cp.seq
-              LIMIT 1`,
-            [sheetId, tabName, orderSubmissionId,
-             _digits(orderData.orderNum), String(_digits(orderData.phone)).slice(-8)]);
-          if (dupRow.length) dup = dupRow;
-        }
-        if (dup.length) {
-          // 이미 반영된 구매다. 새 줄을 만들지 않고 그 줄을 가리켜 돌려준다.
-          //   ★ 기존 줄의 `order_submission_id` 는 **바꾸지 않는다** — 링크를 빼앗으면 원래 주문이
-          //     "미반영"으로 되살아나 복구 잡이 다시 줄을 만든다(막으려던 사고의 재현).
-          await client.query('ROLLBACK');
-          /* ★ 표 주문번호로 찾은 줄은 **링크가 비어 있을 수 있다**(담당자 수기 입력 줄).
-               그때 `String(null)` 은 문자열 "null" 이 되어 로그·응답이 거짓을 말한다. */
-          const dupOf = dup[0].order_submission_id ? String(dup[0].order_submission_id) : null;
-          logger.warn(`[sheetlessOrder] 같은 구매가 이미 반영됨 tab=${tabName} seq=${dup[0].seq} ` +
-            `os=${orderSubmissionId} 기존os=${dupOf || '(링크 없음 — 표 주문번호로 확인)'} — 새 줄을 만들지 않는다`);
-          return { ok: true, written: false, reason: 'duplicate_row',
-                   seq: Number(dup[0].seq), duplicateOf: dupOf };
-        }
-      }
+          FOR UPDATE`, [sheetId, tabName, orderSubmissionId]));
       if (!cur.length) {
         ({ rows: cur } = await client.query(
-          `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
-            WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
-              AND ($3::uuid IS NULL OR cp.workboard_id = $3)
-              AND cp.order_submission_id IS NULL
-              AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
-              AND (
-                ($4 <> '' AND (NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL OR cp.option_text = $4))
-                OR
-                ($4 = '' AND (
-                  NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL
-                  OR NOT EXISTS (
-                    SELECT 1
-                      FROM order_submissions scope_os
-                      JOIN campaign_applications scope_ca ON scope_ca.id = scope_os.campaign_application_id
-                      JOIN campaign_options scope_co ON scope_co.campaign_id = scope_ca.campaign_id
-                     WHERE scope_os.id = $5::uuid
-                       AND COALESCE(scope_co.unit_kind, 'option') <> 'product'
-                       AND scope_co.opt_key = cp.option_text
-                  )
-                ))
-              )
-            ORDER BY CASE
-                       WHEN $4 <> '' AND cp.option_text = $4 THEN 0
-                       WHEN $4 = '' AND NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL THEN 0
-                       ELSE 1
-                     END, cp.seq
+          `SELECT id, seq, row_json FROM campaign_participants
+            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+              AND order_submission_id IS NULL
+              AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
+            ORDER BY seq
             FOR UPDATE SKIP LOCKED
-            LIMIT 1`, [sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId]));
+            LIMIT 1`, [sheetId, tabName]));
       }
       if (!cur.length) {
-        /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문,
-           최근 48시간 내 큐 누락 복구 주문, 서버가 확정한 참여형 구매뿐이며 원장 필드와
-           캠페인 상태를 같은 트랜잭션에서 다시 확인한다. */
-        const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-          allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
-        });
-        if (!confirmedOverflow) {
-          await client.query('ROLLBACK');
-          logger.warn(`[sheetlessOrder] 빈 슬롯 없음 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} os=${orderSubmissionId}`);
-          return { ok: false, reason: 'no_open_slot' };
-        }
-        /* ★ 허용된 확정 주문만: 주문 데이터를 곧바로 채울 행을 하나 추가한다.
-           append와 UPDATE는 같은 트랜잭션이므로 중간 실패 시 ROLLBACK되어 빈 행이 남지 않는다.
-           ★ fail-closed — 무시트로 등록된 탭에서만 이어붙인다. */
-        const { rows: tc } = await client.query(
-          `SELECT COALESCE(sheetless, FALSE) AS sheetless FROM tab_configs
-            WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
-        if (!tc.length || !tc[0].sheetless) {
-          await client.query('ROLLBACK');
-          return { ok: false, reason: 'no_open_slot' };
-        }
-        const appended = await require('./participants.service').appendSlot(client, {
-          sheetId, tabName, tabGid: gid || null, workboardId, by: 'sheetless-order-append',
-        });
-        if (!appended) { await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
-        logger.warn(`[sheetlessOrder] 확정된 초과 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
-        cur = [appended];
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'no_open_slot' };
       }
       seq = Number(cur[0].seq);
     }
 
-    if (cur[0] && scheduledOptionKey && cur[0].option_text && String(cur[0].option_text) !== scheduledOptionKey) {
-      await client.query('ROLLBACK');
-      return { ok: false, reason: 'scheduled_option_mismatch' };
-    }
     const currentRowJson = (cur[0] && cur[0].row_json && typeof cur[0].row_json === 'object') ? cur[0].row_json : {};
     const built = buildRowPatch(headers, orderData, currentRowJson);
     optionSuppressed = built.optionSuppressed;
-    optionUnmapped = built.optionUnmapped || '';
-    productSuppressed = built.productSuppressed || [];
-    productUnmapped = built.productUnmapped || '';
     const merged = { ...currentRowJson, ...built.patch };
 
     const reviewerName = String(loginName || orderData.orderer || orderData.recipient || '').slice(0, 200);
     const recipientName = String(orderData.recipient || '').slice(0, 200);
     const p8 = _phone8(orderData.phone) || String(loginPhone8 || '').replace(/\D/g, '').slice(-8);
     // ★ 옵션은 리뷰어가 고른 값만 원장에 — 시트값 역주입 금지(C′ 규율). 빈 값이면 기존 값 보존.
-    const optText = selectedOptKey;
+    const optText = String(orderData.selectedOptKey || '').trim();
 
     if (cur.length) {
-      const persisted = await client.query(
+      await client.query(
         `UPDATE campaign_participants
             SET row_json = $4::jsonb,
                 reviewer_name  = COALESCE(NULLIF($5,''), reviewer_name),
@@ -444,85 +183,27 @@ async function writeOrderToWorktable({
                 phone8         = COALESCE(NULLIF($7,''), phone8),
                 option_text    = COALESCE(NULLIF($8,''), option_text),
                 order_submission_id = $9::uuid,
-                workboard_id = COALESCE($10::uuid, workboard_id),
                 updated_by = 'sheetless-order', updated_at = NOW()
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3`,
-        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId, workboardId]);
-      // UPDATE 대상이 사라졌다면 "완결"로 진행하면 안 된다. 이 함수의 성공은 실제 작업표 행과
-      // 주문 원장이 연결됐다는 뜻이어야 한다.
-      if (persisted.rowCount !== 1) {
-        await client.query('ROLLBACK');
-        return { ok: false, reason: 'workboard_row_not_linked', message: '선점한 작업표 행을 갱신하지 못했습니다.' };
-      }
+        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId]);
     } else {
-      // 행 번호가 명시됐어도 없는 번호에 일반 주문 행을 만들면, 오래된 행배정 값 하나가
-      // 모집 인원을 넘는 빈 슬롯을 재생성한다. 위와 같은 확정 초과 주문만 예외로 허용한다.
+      // 행 번호가 명시된 레거시 복구만 표 끝 append를 허용한다. 신규 무시트 접수는 위의
+      // 준비 슬롯 선점만 사용하므로 모집 인원을 초과해 작업보드 행을 만들지 않는다.
       if (requestedSeq == null) {
         await client.query('ROLLBACK');
         return { ok: false, reason: 'no_open_slot' };
       }
-      const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
-        allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
-      });
-      if (!confirmedOverflow) {
-        await client.query('ROLLBACK');
-        logger.warn(`[sheetlessOrder] 없는 지정 행 거부 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} seq=${requestedSeq} os=${orderSubmissionId}`);
-        return { ok: false, reason: 'no_open_slot' };
-      }
-      // 확정 초과 주문만: 표 끝을 넘어 배정된 그 자리에 완성 행을 만든다.
+      // 표 끝을 넘어 배정된 경우(append) — 그 자리에 줄을 만든다.
       //   ★ source='worktable' — `importTabFromIndex` 상태 CASE 가 인정하는 값(신규 값 금지).
-      const inserted = await client.query(
+      await client.query(
         `INSERT INTO campaign_participants
            (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8,
-            option_text, order_submission_id, row_json, workboard_id, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::jsonb,$11::uuid,'worktable','sheetless-order',NOW())
-         ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
-         RETURNING id`,
+            option_text, order_submission_id, row_json, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::jsonb,'worktable','sheetless-order',NOW())
+         ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
         [sheetId, gid || null, tabName, seq, reviewerName, recipientName, p8,
-         optText || null, orderSubmissionId, JSON.stringify(merged), workboardId]);
-      // 지정 행이 다른 행과 충돌해 INSERT가 0건이면, 종전에는 이후 단계가 그대로 진행되어
-      // "큐 done + 작업표 미기록"이 될 수 있었다. 이 경우는 재시도 가능한 실패다.
-      if (inserted.rowCount !== 1) {
-        await client.query('ROLLBACK');
-        return { ok: false, reason: 'workboard_row_not_linked', message: '지정 작업표 행이 이미 점유되어 주문을 연결하지 못했습니다.' };
-      }
+         optText || null, orderSubmissionId, JSON.stringify(merged)]);
     }
-    // SQL 성공 여부가 아니라, 이 주문이 목표 작업표 행에 실제 연결됐는지를 완료 조건으로 삼는다.
-    // workboardId가 있는 통폐합 큐는 다른 작업보드의 동명 탭 행을 성공으로 오인하지 않는다.
-    const { rows: linkedRows } = await client.query(
-      `SELECT id FROM campaign_participants
-        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3
-          AND order_submission_id = $4::uuid AND deleted_at IS NULL
-          AND ($5::uuid IS NULL OR workboard_id = $5)
-        FOR SHARE`,
-      [sheetId, tabName, seq, orderSubmissionId, workboardId]
-    );
-    if (linkedRows.length !== 1) {
-      await client.query('ROLLBACK');
-      return { ok: false, reason: 'workboard_row_not_linked', message: '작업표 행과 주문 원장 연결을 검증하지 못했습니다.' };
-    }
-    // 주문원장에 이미 확정된 코드 신원을 작업표 참여행에도 그대로 전파한다. 여기서 이름/번호로
-    // 다시 찾지 않으므로, 제출 후 프로필이 바뀌어도 이 행의 실제 참여자 귀속은 고정된다.
-    await client.query(
-      `UPDATE campaign_participants cp
-          SET owner_reviewer_id = os.owner_reviewer_id,
-              participant_identity_id = COALESCE(cp.participant_identity_id,os.participant_identity_id), updated_at=NOW()
-         FROM order_submissions os
-        WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3
-          AND os.id = $4::uuid
-          AND cp.order_submission_id=os.id AND cp.active=TRUE AND cp.deleted_at IS NULL
-          AND os.owner_reviewer_id IS NOT NULL
-          AND (cp.owner_reviewer_id IS NULL OR cp.owner_reviewer_id=os.owner_reviewer_id)`,
-      [sheetId, tabName, seq, orderSubmissionId]
-    );
-    /* ── 번호·담당자 자동 채움 + 구매일자 기준 재번호 ────────────────────────────
-       ★ 이어붙인 줄은 `row_json` 이 비어 있어 `번호`·`담당자` 가 영구 빈칸으로 남았다
-         (매퍼가 그 두 칸을 쓰지 않는다). 여기서 그 탭 전체를 구매일자 순으로 다시 매긴다.
-       ★★ **DB `seq` 는 건드리지 않는다** — 표시 번호(`row_json`)만 바뀐다.
-       ★★ SAVEPOINT 격리 + 절대 throw 없음 — 번호 때문에 주문 기록을 잃지 않는다. */
-    await require('./rowNumbering.service')
-      .renumberTabInTx(client, { sheetId, tabName, by: 'auto-order' });
-
     await client.query('COMMIT');
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
@@ -552,15 +233,9 @@ async function writeOrderToWorktable({
   }
   try {
     const { recordParticipationLink } = require('./participation.service');
-    const { rows: identityRows } = await getPool().query(
-      `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
-         FROM order_submissions WHERE id = $1`, [orderSubmissionId]
-    );
-    const codeIdentity = identityRows[0] || {};
     await recordParticipationLink({
       sheetId, tabName, rowIndex: seq, phone8: loginPhone8,
-      phone: orderData.phone, name: loginName || orderData.orderer, source: 'sheetless_order',
-      ownerReviewerId: codeIdentity.ownerReviewerId, participantIdentityId: codeIdentity.participantIdentityId });
+      phone: orderData.phone, name: loginName || orderData.orderer, source: 'sheetless_order' });
     await ledgerSvc.recordReviewIdentity({
       sheetId, tabName, tabGid: gid, rowIndex: seq, phone8: loginPhone8,
       phone: orderData.phone, name: loginName || orderData.orderer, recipient: orderData.recipient });
@@ -573,41 +248,8 @@ async function writeOrderToWorktable({
       optionSuppressed.map(s => `${s.header}: "${s.cur}" 유지`).join(' · '));
   }
 
-  /* ★ 기입할 옵션 칸이 아예 없으면 **소리 내어 알린다** — 조용히 사라지지 않게(2026-08-20).
-     조치는 [⋯] → [🧩 옵션 열](칸 생성 + 소급 기입). 관측 실패가 완결을 막지 않는다. */
-  if (optionUnmapped) {
-    logger.warn(`[sheetlessOrder] ⚠️ 옵션 기입 칸 없음 — 리뷰어가 고른 옵션이 표에 안 들어감 ` +
-      `tab=${tabName} seq=${seq} 선택="${optionUnmapped}" os=${orderSubmissionId}`);
-    try {
-      require('./errorLog.service').logAbnormal({
-        flow: 'order_mirror', step: 'option_column_missing', severity: 'warn',
-        error: new Error(`option column missing: "${optionUnmapped}"`),
-        context: { sheetId, tabName, tabGid: gid, sheetRow: seq, orderSubmissionId },
-      });
-    } catch (_) { /* 관측 실패가 쓰기를 막지 않는다 */ }
-  }
-
-  if (productSuppressed.length) {
-    logger.warn(`[sheetlessOrder] 상품 칸 보존(blank-only) tab=${tabName} seq=${seq} ` +
-      productSuppressed.map(s => `${s.header}: "${s.cur}" 유지`).join(' · '));
-  }
-
-  /* ★ 138 — 「상품」 칸이 없어 **리뷰어가 고른 상품이 표에서 사라지는** 경우. 옵션 칸과 같은 규율:
-     조용히 넘기지 않는다. 조치는 공고 저장(연결 작업표에 상품 칸 보장) 또는 작업표 재구성. */
-  if (productUnmapped) {
-    logger.warn(`[sheetlessOrder] ⚠️ 상품 기입 칸 없음 — 리뷰어가 고른 상품이 표에 안 들어감 ` +
-      `tab=${tabName} seq=${seq} 선택="${productUnmapped}" os=${orderSubmissionId}`);
-    try {
-      require('./errorLog.service').logAbnormal({
-        flow: 'order_mirror', step: 'product_column_missing', severity: 'warn',
-        error: new Error(`product column missing: "${productUnmapped}"`),
-        context: { sheetId, tabName, tabGid: gid, sheetRow: seq, orderSubmissionId },
-      });
-    } catch (_) { /* 관측 실패가 쓰기를 막지 않는다 */ }
-  }
-
   logger.info(`[sheetlessOrder] 즉시 완결 tab=${tabName} seq=${seq} os=${orderSubmissionId}${recovered ? ' (복구)' : ''}`);
-  return { ok: true, written: true, seq, ledger, optionSuppressed, optionUnmapped, productSuppressed, productUnmapped };
+  return { ok: true, written: true, seq, ledger, optionSuppressed };
 }
 
 /**
@@ -651,106 +293,50 @@ async function reconcileCampaignWorktableLinks() {
   return { linked: rows.length, items: rows };
 }
 
-/**
- * @param {number}  [o.limit=100]
- * @param {number|null} [o.sinceHours=null]  최근 N시간 내 제출분만(주기 잡용 폭발반경 제한).
- *   ★ null = 전체(사람이 부르는 수동 복구). 주기 잡은 반드시 창을 준다 — 옛 고아 주문까지
- *     자동으로 줄을 이어붙이면 8/18 중복 사고와 같은 대량 append 가 무인으로 일어난다.
- * @param {string[]|null} [o.orderSubmissionIds=null] 지정 주문만 복구. []는 0건이다.
- * @param {boolean} [o.dryRun=false] 대상만 조회하고 쓰지 않는다.
- */
-async function recoverUnwrittenSheetlessOrders({
-  limit = 100,
-  sinceHours = null,
-  by = 'sheetless-order-recovery',
-  orderSubmissionIds = null,
-  dryRun = false,
-} = {}) {
+async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-order-recovery' } = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
-  const win = (sinceHours == null) ? null : Math.min(Math.max(parseInt(sinceHours, 10) || 0, 1), 24 * 30);
-  const ids = Array.isArray(orderSubmissionIds)
-    ? orderSubmissionIds.map(id => String(id).trim()).slice(0, 100)
-    : null;
-  // 미리보기는 링크 보정 UPDATE까지 포함해 쓰기가 전혀 없어야 한다.
-  // 지정 복구도 실행 중 새 후보를 만들어 미리보기보다 범위가 넓어지면 안 된다.
-  const links = (dryRun || ids !== null) ? { linked: 0 } : await reconcileCampaignWorktableLinks();
+  const links = await reconcileCampaignWorktableLinks();
   const { rows } = await db.query(
-    `SELECT os.id, os.submitted_at, os.orderer, os.recipient, os.user_id, os.phone, os.address,
+    `SELECT os.id, os.orderer, os.recipient, os.user_id, os.phone, os.address,
             os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
-            os.memo, os.selected_opt_key, os.selected_product,
+            os.memo, os.selected_opt_key,
             ca.phone8 AS login_phone8, ca.owner_phone8, r.name AS login_name,
-            rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
-            tc.workboard_id
+            rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid
        FROM order_submissions os
        JOIN campaign_applications ca
          ON (os.campaign_application_id = ca.id
              OR ca.order_submission_id = os.id
              OR ca.late_order_id = os.id)
        JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-       LEFT JOIN tab_configs tc
-         ON tc.sheet_id = rc.linked_sheet_id AND tc.tab_name = rc.linked_tab_name
-        AND COALESCE(tc.sheetless, FALSE) = TRUE
-       LEFT JOIN workboards w ON w.id = tc.workboard_id AND w.state = 'active'
        LEFT JOIN reviewers r ON r.phone8 = COALESCE(ca.owner_phone8, ca.phone8)
       WHERE os.deleted_at IS NULL
         AND COALESCE(rc.linked_sheet_id, '') <> ''
         AND COALESCE(rc.linked_tab_name, '') <> ''
-        AND tc.workboard_id IS NOT NULL AND w.id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM campaign_participants cp
            WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
         )
-        AND ($2::int IS NULL OR os.submitted_at > NOW() - ($2 || ' hours')::interval)
-        AND ($3::uuid[] IS NULL OR os.id = ANY($3::uuid[]))
       ORDER BY os.submitted_at ASC
-      LIMIT $1`, [lim, win, ids]);
+      LIMIT $1`, [lim]);
 
-  const result = {
-    linked: links.linked,
-    scanned: rows.length,
-    sinceHours: win,
-    dryRun: !!dryRun,
-    written: 0,
-    failed: 0,
-    noOpenSlot: 0,
-    items: [],
-  };
-  if (dryRun) {
-    result.items = rows.map(row => ({
-      orderSubmissionId: row.id,
-      name: row.orderer || row.recipient || '',
-      submittedAt: row.submitted_at || null,
-    }));
-    return result;
-  }
+  const result = { linked: links.linked, scanned: rows.length, written: 0, failed: 0, noOpenSlot: 0, items: [] };
   for (const row of rows) {
     let out;
     try {
-      await db.query(
-        `UPDATE order_submissions SET workboard_id=$2::uuid, sheet_error=NULL, updated_at=NOW()
-          WHERE id=$1::uuid AND workboard_id IS NULL`,
-        [row.id, row.workboard_id]
-      );
       out = await writeOrderToWorktable({
         sheetId: row.linked_sheet_id, tabName: row.linked_tab_name, tabGid: row.linked_tab_gid || '',
-        orderSubmissionId: row.id, workboardId: row.workboard_id,
+        orderSubmissionId: row.id,
         loginPhone8: row.login_phone8 || row.owner_phone8 || '', loginName: row.login_name || row.orderer || '',
-        recovered: true, allowConfirmedCampaignOverflow: true,
+        recovered: true,
         orderData: {
           orderer: row.orderer, recipient: row.recipient, userId: row.user_id, phone: row.phone,
           address: row.address, bank: row.bank, account: row.account, depositor: row.depositor,
           price: row.price, dateStr: row.date_str, orderNum: row.order_num, memo: row.memo,
           selectedOptKey: row.selected_opt_key,
-          selectedProduct: row.selected_product,   // ★ 138 — 복구 재기록도 같은 상품값
         },
       });
-      if (out.ok) {
-        if (out.reason === 'duplicate_row') {
-          await require('./orderLedger.service').markOrderWritten(row.id, out.seq || null);
-        }
-        result.written++;
-      }
+      if (out.ok) result.written++;
       else {
         result.failed++;
         if (out.reason === 'no_open_slot') result.noOpenSlot++;
@@ -761,103 +347,16 @@ async function recoverUnwrittenSheetlessOrders({
       result.failed++;
       await require('./orderLedger.service').markOrderMirrorFailed(row.id, err);
     }
-    result.items.push({
-      orderSubmissionId: row.id,
-      name: row.orderer || row.recipient || '',
-      ok: !!out.ok,
-      reason: out.reason || null,
-      seq: out.seq || null,
-    });
+    result.items.push({ orderSubmissionId: row.id, ok: !!out.ok, reason: out.reason || null, seq: out.seq || null });
   }
   logger.info(`[sheetlessOrder] 과거 작업보드 복구 by=${by} scanned=${result.scanned} written=${result.written} failed=${result.failed}`);
   return result;
 }
 
-/**
- * 작업보드 줄은 **이미 있는데** 원장만 미완결(`failed` 등)로 굳은 주문의 완결 표시를 정정한다.
- *
- * ═══════════════════════════════════════════════════════════════════════
- * ★★ 왜 필요한가 — `writeOrderToWorktable` 이 줄을 **커밋한 뒤** 장부 재생성(`ledger_failed`)이나
- *   예외로 빠지면 호출부가 그 주문을 `failed` 로 강등한다. 화면(작업보드·리뷰어 리뷰 내역)에는
- *   이미 보이는데 원장만 미완결이라 ① `order_unmirrored` 비정상로그가 계속 쌓이고
- *   ② 미반영 집계가 부풀어 **다음 진짜 사고를 가린다**. `campaign:*` 좌표는 큐 리컨실에서
- *   제외돼(orderLedger `NOT LIKE 'campaign:%'`) 스스로 풀릴 길이 없다.
- *
- * ★★ 판정 근거는 딱 하나 — **`campaign_participants.order_submission_id` 링크**.
- *   그 링크는 `writeOrderToWorktable` 이 **기록 성공 후에만** 남긴다(낙관적 선기입 금지 규율).
- *   즉 링크가 있다 = 그 주문이 실제로 그 줄에 반영됐다. 복구 잡이 "이미 반영됨"을 판정하는
- *   근거와 **같은 것**을 쓴다(사본 0).
- * ★ 소프트삭제된 줄(`deleted_at`)은 근거가 아니다 — [줄 정리]로 내린 줄이면 그 주문은
- *   반영된 게 아니다(그대로 미완결로 남겨 복구 잡이 다시 줄을 만들게 둔다).
- * ★★ 상태 화이트리스트(완화 금지) — `failed`·`pending`·`pending_no_row` 만.
- *   `canceled`(취소된 주문을 되살리면 안 됨) · `queued`(인플라이트) · `stuck_manual`(사람이
- *   수동 입력해야 하는 표시) · `conflict` 는 건드리지 않는다.
- * ★ 완결 표시는 `markOrderWritten` **단일 출처**로 한다(UPDATE 사본을 두면 `sheet_error`·
- *   `sheet_written_at` 처리가 갈린다).
- * ★ dryRun 기본 — 세어 보고 나서 사람이 실행한다.
- * ═══════════════════════════════════════════════════════════════════════
- *
- * @returns {Promise<{scanned:number, repaired:number, dryRun:boolean, byStatus:object, items:Array}>}
- */
-const REPAIRABLE_MIRROR_STATUSES = ['failed', 'pending', 'pending_no_row'];
-
-async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 'mirror-repair', orderSubmissionIds = null } = {}) {
-  const db = getPool();
-  const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
-  // null = 필터 미지정(기존 전체 복구), [] = 명시적으로 선택한 주문 없음(0건)이다.
-  const ids = Array.isArray(orderSubmissionIds)
-    ? [...new Set(orderSubmissionIds.map(v => String(v || '').trim()).filter(Boolean))]
-    : null;
-  const { rows } = await db.query(
-    `SELECT os.id, os.mirror_status, os.tab_name,
-            (SELECT MIN(cp.seq) FROM campaign_participants cp
-              WHERE cp.order_submission_id = os.id
-                AND cp.deleted_at IS NULL AND cp.active = TRUE
-                AND (os.workboard_id IS NULL OR cp.workboard_id = os.workboard_id)) AS seq
-       FROM order_submissions os
-      WHERE os.deleted_at IS NULL
-        AND os.sheet_id LIKE 'campaign:%'
-        AND os.mirror_status = ANY($1::text[])
-        AND EXISTS (SELECT 1 FROM campaign_participants cp
-                     WHERE cp.order_submission_id = os.id
-                       AND cp.deleted_at IS NULL AND cp.active = TRUE
-                       AND (os.workboard_id IS NULL OR cp.workboard_id = os.workboard_id))
-        AND ($3::uuid[] IS NULL OR os.id = ANY($3::uuid[]))
-      ORDER BY os.submitted_at ASC
-      LIMIT $2`, [REPAIRABLE_MIRROR_STATUSES, lim, ids]);
-
-  const byStatus = {};
-  rows.forEach(r => { byStatus[r.mirror_status] = (byStatus[r.mirror_status] || 0) + 1; });
-  const result = { scanned: rows.length, repaired: 0, dryRun: !!dryRun, byStatus, items: [] };
-  if (dryRun) {
-    result.items = rows.slice(0, 50).map(r => ({ orderSubmissionId: r.id, from: r.mirror_status, seq: r.seq }));
-    return result;
-  }
-
-  const { markOrderWritten } = require('./orderLedger.service');
-  for (const r of rows) {
-    try {
-      await markOrderWritten(r.id, r.seq);
-      result.repaired++;
-      result.items.push({ orderSubmissionId: r.id, from: r.mirror_status, seq: r.seq, ok: true });
-    } catch (err) {
-      logger.warn(`[sheetlessOrder] 완결 표시 정정 실패 os=${r.id}: ${err.message}`);
-      result.items.push({ orderSubmissionId: r.id, from: r.mirror_status, ok: false, error: err.message });
-    }
-  }
-  /* 원인이 사라진 리뷰어 비정상로그(`order_unmirrored`)는 그 함수가 스스로 정리한다 — 사본 0. */
-  try { await require('./reviewerEventLog.service').autoResolveHealed(); } catch (_) { /* fail-soft */ }
-  logger.info(`[sheetlessOrder] 완결 표시 정정 by=${by} scanned=${result.scanned} repaired=${result.repaired}`);
-  return result;
-}
-
 module.exports = {
   writeOrderToWorktable,
-  repairWrittenMarkForBoardRows,
-  REPAIRABLE_MIRROR_STATUSES,
   reconcileCampaignWorktableLinks,
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,
-  __canAppendConfirmedOverflowOrderForTest: _canAppendConfirmedOverflowOrder,
   __setPoolForTest,
 };

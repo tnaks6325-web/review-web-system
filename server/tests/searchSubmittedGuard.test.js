@@ -14,8 +14,6 @@ const path = require('path');
 const poolPath = require.resolve('../src/db/pool');
 const captured = { queries: [] };
 let reviewRows = [];
-let rawSubmissionRows = [];
-let eligibleReceiptRows = [];
 let forceTrgm = false;   // true면 본검색(= ANY) 강제실패 → pg_trgm fallback(searchByNameFallback) 경로 진입
 
 const fakePool = {
@@ -24,25 +22,7 @@ const fakePool = {
     if (/FROM reviewers/.test(sql)) return { rows: [] };            // 프로필(타계정) 없음
     if (/set_limit/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ count: '0', built_at: null }] };
-    if (/provenance AS/.test(sql) && Array.isArray(params?.[2])) {
-      return { rows: params[0].map((sheetId, i) => ({
-        sheet_id: sheetId,
-        tab_name: params[1][i],
-        row_index: params[2][i],
-        cash_receipt_required: params[1][i] === '현영탭',
-        resolution: 'exact',
-      })) };
-    }
-    if (/FROM recruit_campaigns/.test(sql) && Array.isArray(params?.[1])) {
-      return { rows: params[0].map((sheetId, i) => ({
-        sheet_id: sheetId,
-        tab_name: params[1][i],
-        cash_receipt_required: params[1][i] === '현영탭',
-      })) };
-    }
-    if (/FROM review_submissions/.test(sql)) {
-      return { rows: /review_inspections/.test(sql) ? eligibleReceiptRows : rawSubmissionRows };
-    }
+    if (/FROM review_submissions/.test(sql)) return { rows: [] };
     // 본검색(= ANY)만 강제실패 → searchByName catch → searchByNameFallback(= $) 재실행
     if (forceTrgm && /FROM review_index/.test(sql) && /= ANY\(\$/.test(sql)) {
       throw new Error('operator does not exist: % boolean');
@@ -56,7 +36,6 @@ require.cache[poolPath] = {
 };
 
 const { searchByName } = require('../src/services/search.service');
-const submittedState=require('../src/services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)');
 
 function mainSql() {
   const q = captured.queries.find(x => /FROM review_index/.test(x.sql));
@@ -104,7 +83,7 @@ async function run() {
   reviewRows = [makeRow()];
   await searchByName('홍길동', '12345678');
   let sql = mainSql();
-  assert.ok(sql.includes(submittedState+' = FALSE'), '1: 기본은 리뷰 의무 미충족 필터');
+  assert.ok(sql.includes('ri.is_submitted = FALSE'), '1: 기본은 is_submitted=FALSE 필터');
   assert.ok(!sql.includes('is_submitted ASC'), '1: 기본은 정렬 프리픽스 없음');
   assert.ok(sql.includes('LIMIT 200'), '1: 기본 LIMIT 200');
   console.log('  1. 기본(옵션 미지정) 기존 쿼리 불변 ✓');
@@ -118,12 +97,12 @@ async function run() {
   const r2 = await searchByName('홍길동', '12345678', { includeSubmitted: true });
   sql = mainSql();
   assert.ok(
-    sql.includes('('+submittedState+' = FALSE OR ri.phone8 = ANY('),
+    sql.includes('(ri.is_submitted = FALSE OR ri.phone8 = ANY('),
     '2: 제출완료 행은 phone8/확정신원 일치 시에만 (이름/근접 매칭엔 미개방)'
   );
   assertPlGated(sql, '2 이름+phone8');   // pl 신원키는 stale 교차노출 차단 게이트 뒤에만
   assert.ok(!/WHERE TRUE/.test(sql), '2: 하이브리드 분기에 무조건 TRUE 해제 금지');
-  assert.ok(sql.includes('ORDER BY '+submittedState+' ASC'), '2: 미제출 우선 정렬(대기 건 LIMIT 보호)');
+  assert.ok(sql.includes('ORDER BY ri.is_submitted ASC'), '2: 미제출 우선 정렬(대기 건 LIMIT 보호)');
   assert.ok(sql.includes('LIMIT 400'), '2: 완료 포함 시 LIMIT 상향');
   // 데이터 최소화: 제출완료 행 row 비움 + 대기 행 row 유지
   const pending = r2.results.find(x => !x.isSubmitted);
@@ -142,7 +121,7 @@ async function run() {
   reviewRows = [makeRow()];
   await searchByName('홍길동', '', { includeSubmitted: true });
   sql = mainSql();
-  assert.ok(sql.includes(submittedState+' = FALSE'), '3: 이름 단독은 항상 리뷰 의무 미충족 필터');
+  assert.ok(sql.includes('ri.is_submitted = FALSE'), '3: 이름 단독은 항상 FALSE 필터');
   assert.ok(!sql.includes('is_submitted ASC') && !/WHERE TRUE/.test(sql), '3: 이름 단독은 완료 미개방');
   assert.ok(sql.includes('LIMIT 200'), '3: 이름 단독 LIMIT 200 유지');
   console.log('  3. 이름 단독 — includeSubmitted 무시 ✓');
@@ -156,14 +135,14 @@ async function run() {
   assert.ok(/WHERE TRUE/.test(sql), '4: phone8 단독 분기는 필터 해제');
   assert.ok(sql.includes('ri.phone8 = ANY('), '4: 매칭은 phone8/확정신원 한정');
   assertPlGated(sql, '4 phone8단독');
-  assert.ok(sql.includes('LIMIT 400') && sql.includes(submittedState+' ASC'), '4: LIMIT 상향 + 대기 우선');
+  assert.ok(sql.includes('LIMIT 400') && sql.includes('ri.is_submitted ASC'), '4: LIMIT 상향 + 대기 우선');
   assert.equal(r4.results[0].isPaid, true, '4: 입금 키워드 컬럼 값 존재 → isPaid=true (폴백)');
   assert.deepEqual(r4.results[0].row, {}, '4: isPaid 판정 후에도 완료 행 row는 비움');
   console.log('  4. phone8 단독 — 필터 해제(강한 키 매칭) + isPaid 폴백 ✓');
 
   // ── 5) pg_trgm 미설치 fallback 경로(searchByNameFallback)도 동일 pl 게이트 ──
-  captured.queries = []; forceTrgm = true; reviewRows = [makeRow({ tabName: '현영탭' })];
-  const fallbackResult = await searchByName('홍길동', '12345678', { includeSubmitted: true });
+  captured.queries = []; forceTrgm = true; reviewRows = [makeRow()];
+  await searchByName('홍길동', '12345678', { includeSubmitted: true });
   forceTrgm = false;
   const fbSql = captured.queries
     .filter(x => /FROM review_index/.test(x.sql))
@@ -171,20 +150,7 @@ async function run() {
     .find(s => /pl\.phone8 = \$/.test(s));   // fallback은 '= $'(본검색 '= ANY(' 와 구분)
   assert.ok(fbSql, '5: pg_trgm fallback review_index 쿼리가 실행되어야 함');
   assertPlGatedFallback(fbSql, '5 fallback');
-  assert.deepStrictEqual(fallbackResult.results[0].captureSlots.map(s => s.key), ['review', 'receipt'],
-    '5: fallback도 공고 현금영수증 설정으로 첨부 슬롯을 파생해야 함');
-  console.log('  5. pg_trgm fallback 경로 pl 게이트 + 현금영수증 슬롯 ✓');
-
-  // 검수에서 불량/보류된 영수증은 원본 파일이 남아 있어도 다시 제출할 수 있어야 한다.
-  captured.queries = [];
-  rawSubmissionRows = [{ sheet_id: 'S', tab_name: '현영탭2', row_index: 8, slot_key: 'receipt' }];
-  eligibleReceiptRows = [];
-  reviewRows = [makeRow({ tabName: '현영탭2', rowIndex: 8, isSubmitted: true, incomeType: '현영' })];
-  const rejectedReceipt = await searchByName('', '12345678', { includeSubmitted: true });
-  assert.ok(!rejectedReceipt.results[0].submittedSlots.includes('receipt'),
-    '5b: 불량·보류 영수증 파일이 제출완료로 남아 재제출 입구를 숨기면 안 됨');
-  rawSubmissionRows = []; eligibleReceiptRows = [];
-  console.log('  5b. 불량·보류 영수증 재제출 슬롯 복원 ✓');
+  console.log('  5. pg_trgm fallback 경로 pl 게이트 ✓');
 
   // ── 6) 게이트 시맨틱 고정: stale pl(재배정 전 주인)은 미개방 / 현재주인(ri.phone8)은 개방 ──
   //   ri.phone8(현재 시트 소유자)이 채워진 행에서는 stale pl 이 그 행을 절대 못 연다

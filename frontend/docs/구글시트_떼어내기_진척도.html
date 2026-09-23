@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>구글시트 떼어내기 — 처리 항목별 진척도</title>
+<style>
+  :root{
+    color-scheme: light;
+    --ink:#1b1f24; --sub:#5b636d; --line:#c9ced6; --line2:#e4e8ee;
+    --bg:#f4f6f9; --card:#ffffff; --wire:#f9fafc;
+    --ok:#1f7a45; --okbg:#e8f5ed; --part:#8a5a00; --partbg:#fdf3e0;
+    --wait:#1d5fa8; --waitbg:#e8f1fb; --keep:#4b5563; --keepbg:#eef0f3;
+    --accent:#2d6cdf;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"Malgun Gothic","맑은 고딕",AppleSDGothicNeo-Regular,"Apple SD Gothic Neo",sans-serif;
+       font-size:15px;line-height:1.65;-webkit-text-size-adjust:100%}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+
+  /* ── 와이어프레임 톤: 실물이 아니라 '설계 도면'처럼 보이게 ── */
+  .sheet{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:24px 26px;margin:0 0 20px}
+  .sheet.wire{background:var(--wire);border-style:dashed}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+  h2{font-size:19px;margin:0 0 4px;letter-spacing:-.3px}
+  h3{font-size:15px;margin:0 0 6px}
+  .lead{color:var(--sub);margin:0 0 4px}
+  .meta{color:var(--sub);font-size:13px;margin-top:10px}
+  .kicker{display:inline-block;font-size:11px;letter-spacing:1.2px;color:var(--sub);
+          border:1px dashed var(--line);border-radius:4px;padding:2px 8px;margin-bottom:12px}
+
+  /* 진척 게이지 */
+  .gauge{margin:18px 0 6px}
+  .gbar{height:26px;border:1px solid var(--line);border-radius:6px;overflow:hidden;display:flex;background:#fff}
+  .gbar span{display:block;height:100%}
+  .g-ok{background:#57b483}
+  .g-part{background:#e0b45c}
+  .g-wait{background:#8fb6e8}
+  .glegend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:13px;color:var(--sub)}
+  .glegend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px}
+  .kpi{border:1px dashed var(--line);border-radius:8px;padding:14px 16px;background:#fff}
+  .kpi b{display:block;font-size:26px;line-height:1.2;letter-spacing:-1px}
+  .kpi small{color:var(--sub);font-size:12.5px}
+
+  /* 경고 배너 */
+  .banner{border:1px solid #dcb; background:#fff8e8; border-left:5px solid #d8a13a;
+          border-radius:8px;padding:14px 18px;margin:0 0 20px}
+  .banner b{color:#8a5a00}
+
+  /* 항목 카드 */
+  .items{display:grid;gap:12px}
+  .item{border:1px solid var(--line2);border-radius:8px;background:#fff;padding:0;overflow:hidden}
+  .item > .hd{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-bottom:1px dashed var(--line2)}
+  .item .no{flex:0 0 30px;height:30px;border:1px solid var(--line);border-radius:6px;
+            display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--sub);background:var(--wire)}
+  .item .ttl{flex:1;min-width:0}
+  .item .ttl b{display:block;font-size:15.5px}
+  .item .ttl small{color:var(--sub);font-size:13px}
+  .badge{flex:0 0 auto;font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+  .b-ok{background:var(--okbg);color:var(--ok);border-color:#bfe0cd}
+  .b-part{background:var(--partbg);color:var(--part);border-color:#ecd7a8}
+  .b-wait{background:var(--waitbg);color:var(--wait);border-color:#c3d9f2}
+  .b-keep{background:var(--keepbg);color:var(--keep);border-color:#d6dae0}
+  .item .bd{padding:12px 16px 14px;display:grid;grid-template-columns:110px 1fr;gap:6px 14px;font-size:14px}
+  .item .bd dt{color:var(--sub);font-size:13px}
+  .item .bd dd{margin:0}
+  .tag{display:inline-block;font-size:11.5px;color:var(--sub);border:1px solid var(--line2);
+       border-radius:4px;padding:1px 6px;margin-right:5px;background:var(--wire)}
+
+  /* 전후 비교 표 */
+  table{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}
+  th,td{border:1px solid var(--line2);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--wire);font-weight:600;color:var(--sub);font-size:13px}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .up{color:var(--ok);font-weight:700}
+  .down{color:#b3261e}
+
+  /* 흐름 도식 */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:14px 0 4px}
+  .step{flex:1 1 150px;border:1px dashed var(--line);border-radius:8px;background:#fff;padding:12px;text-align:center}
+  .step b{display:block;font-size:14px;margin-bottom:3px}
+  .step small{color:var(--sub);font-size:12px}
+  .step.done{border-style:solid;border-color:#bfe0cd;background:var(--okbg)}
+  .arrow{align-self:center;color:var(--sub);font-size:16px}
+
+  ul.plain{margin:8px 0 0;padding-left:18px}
+  ul.plain li{margin:5px 0}
+  .note{font-size:13px;color:var(--sub);margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)}
+  .foot{color:var(--sub);font-size:12.5px;text-align:center;margin-top:26px}
+  @media (max-width:640px){
+    .item .bd{grid-template-columns:1fr}
+    .item .bd dt{margin-top:6px}
+    .arrow{display:none}
+  }
+  @media print{ body{background:#fff} .sheet{break-inside:avoid} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="sheet">
+    <span class="kicker">진척 보고서 · 와이어프레임</span>
+    <h1>구글시트 떼어내기 — 처리 항목별 진척도</h1>
+    <p class="lead">리뷰웹시스템[3버전] 기준 · 2026-08-19</p>
+    <p style="margin:14px 0 0">
+      <b>한 줄 요약 —</b> 작업 하나가 굴러가는 한 바퀴는 <b>구글시트 없이 끝까지 완결</b>됩니다.
+      남은 것은 <b>과거에 쌓인 자료</b>와 <b>사람이 시트를 직접 열어 보던 습관</b>입니다.
+    </p>
+
+    <div class="gauge">
+      <div class="gbar" role="img" aria-label="제거 대상 16항목 중 완료 13, 부분 2, 남음 1">
+        <span class="g-ok"    style="flex:13"></span>
+        <span class="g-part"  style="flex:2"></span>
+        <span class="g-wait"  style="flex:1"></span>
+      </div>
+      <div class="glegend">
+        <span><i class="g-ok"></i>완료 13</span>
+        <span><i class="g-part"></i>부분 완료 2</span>
+        <span><i class="g-wait"></i>남음 1</span>
+        <span>+ 일부러 남겨 둔 것 2</span>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><b>13 / 16</b><small>제거 대상 항목 중 완료</small></div>
+      <div class="kpi"><b>0회</b><small>작업 한 바퀴에 필요한 구글시트 접속</small></div>
+      <div class="kpi"><b>86건</b><small>이미 시트에서 떼어낸 기존 작업</small></div>
+      <div class="kpi"><b>358건</b><small>과거 자료로 분류(이관하지 않기로 결정)</small></div>
+    </div>
+  </div>
+
+  <div class="banner">
+    <b>먼저 알아두실 것 —</b> 아래 <b>5·6번 항목</b>(표 편집이 원본까지 반영 / 붙여넣기·되돌리기)은
+    현재 <b>테스트 서버에서만 켜져 있습니다.</b> 실제 운영 서버는 손대지 않았고, 같은 코드가 올라가더라도
+    <b>스스로 꺼진 상태</b>로 동작합니다. 운영 적용 시점은 따로 정하시면 됩니다.
+  </div>
+
+  <div class="sheet wire">
+    <h2>작업 한 바퀴가 어떻게 도는가</h2>
+    <p class="lead">아래 다섯 단계 전부 구글시트를 거치지 않습니다.</p>
+    <div class="flow">
+      <div class="step done"><b>① 작업 접수</b><small>시트 주소 없이 접수<br>작업표가 자동 생성</small></div>
+      <div class="arrow">›</div>
+      <div class="step done"><b>② 리뷰어 검색</b><small>작업표에서<br>명단이 자동 생성</small></div>
+      <div class="arrow">›</div>
+      <div class="step done"><b>③ 구매양식 제출</b><small>대기 없이<br>그 자리에서 확정</small></div>
+      <div class="arrow">›</div>
+      <div class="step done"><b>④ 표에서 편집</b><small>고친 값이<br>원본까지 반영</small></div>
+      <div class="arrow">›</div>
+      <div class="step done"><b>⑤ 제출·입금 표시</b><small>작업표 칸에 기록<br>다시 만들어도 안 사라짐</small></div>
+    </div>
+    <p class="note">
+      예전에는 ②③⑤가 구글시트를 읽고 쓰는 것에 매달려 있었습니다. 지금은 <b>작업표가 진실</b>이고,
+      기존 화면들이 쓰던 명단·검색 자료는 그 작업표에서 <b>자동으로 다시 만들어집니다.</b>
+      그래서 화면 수십 곳을 고치지 않고도 시트를 떼어낼 수 있었습니다.
+    </p>
+  </div>
+
+  <div class="sheet">
+    <h2>처리 항목별 진척도</h2>
+    <p class="lead">각 항목은 “무엇을 시트에서 떼어냈는가”입니다.</p>
+
+    <div class="items" style="margin-top:16px">
+
+      <div class="item"><div class="hd"><div class="no">1</div><div class="ttl">
+        <b>작업 등록(접수)</b><small>새 작업을 시스템에 올리는 첫 단추</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>예전</dt><dd>구글시트 탭 주소가 있어야만 접수됐다. 인트라넷에서 넘어온 오더는 주소 칸이 없어 <b>접수 자체가 불가능</b>했다.</dd>
+          <dt>지금</dt><dd>주소 없이 접수하면 시스템이 <b>작업표를 직접 만든다.</b> 구글 접속 0회.</dd>
+          <dt>확인</dt><dd><span class="tag">테스트 완료</span>실제 오더로 접수 → 표 생성까지 완주</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">2</div><div class="ttl">
+        <b>리뷰어 검색 명단</b><small>리뷰어가 자기 참여 건을 찾는 근거</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>예전</dt><dd>시트를 읽어 명단을 만들었다.</dd>
+          <dt>지금</dt><dd>작업표에서 <b>같은 모양의 명단이 자동 생성</b>된다. 검색·제출·리뷰 화면은 한 줄도 고치지 않았다.</dd>
+          <dt>주의</dt><dd>표를 고치면 명단도 다시 만들어진다 — 그래서 아래 5번이 중요했다.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">3</div><div class="ttl">
+        <b>구매양식 제출(주문)</b><small>리뷰어가 주문 정보를 넣는 순간</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>예전</dt><dd>제출하면 “시트에 쓸 차례”를 기다리는 대기줄에 들어갔다. 밀리면 몇 분씩 안 보였다.</dd>
+          <dt>지금</dt><dd>대기줄 없이 <b>그 요청 안에서 바로 확정</b>(실측 0.5초). 시트로 새어나가는 길은 <b>5중으로 막았다.</b></dd>
+          <dt>확인</dt><dd><span class="tag">테스트 완료</span>준비된 빈 줄에 제자리 배정까지 확인</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">4</div><div class="ttl">
+        <b>리뷰 제출·입금 표시</b><small>“냈다 / 줬다”를 표시하는 칸</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>문제였던 것</dt><dd>표시를 시트 칸에만 적어와서, 시트를 안 쓰는 작업에서는 <b>표를 다시 만들 때마다 표시가 사라졌다.</b></dd>
+          <dt>지금</dt><dd>작업표 칸에 적는다 → 몇 번을 다시 만들어도 남는다.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">5</div><div class="ttl">
+        <b>표에서 고친 값이 원본까지 반영</b><small>작업보드에서 칸을 고칠 때</small></div>
+        <span class="badge b-part">테스트 서버 적용</span></div>
+        <dl class="bd">
+          <dt>문제였던 것</dt><dd>고친 값이 <b>화면 위에만</b> 얹혀 있었다. 명단을 다시 만들면 조용히 옛 값으로 되돌아갔다.</dd>
+          <dt>지금</dt><dd>고친 값이 <b>작업표 원본에 기록</b>되고, 되돌리기를 누르면 이전 값으로 복구된다.</dd>
+          <dt>안전장치</dt><dd>아무 칸이나 쓰지 않는다 — <b>입금·금액·주문번호·이름·연락처 칸은 거부</b>(리뷰비 미지급·명의 뒤바뀜을 막기 위해). 허용은 비고·송장·옵션·차수 같은 정보 칸부터.</dd>
+          <dt>상태</dt><dd><b>운영 서버는 자동으로 꺼져 있다.</b> 켜려면 사람이 명시적으로 켜야 한다.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">6</div><div class="ttl">
+        <b>붙여넣기 · 되돌리기</b><small>여러 칸을 한 번에 다루는 조작</small></div>
+        <span class="badge b-part">테스트 서버 적용</span></div>
+        <dl class="bd">
+          <dt>문제였던 것</dt><dd>칸마다 서버에 한 번씩 요청을 보냈다. <b>500칸 붙여넣기는 구조적으로 완주 불가</b>(실측 419칸 실패), 되돌리기도 리미터에 잘렸다.</dd>
+          <dt>지금</dt><dd>여러 칸을 <b>한 번에 묶어</b> 보낸다. 500칸 붙여넣기 <b>500/500 성공</b>, 되돌리기도 묶음 처리.</dd>
+          <dt>덤</dt><dd>되돌리기가 한 칸에서 막혀도 <b>나머지는 되돌린다</b>(예전엔 첫 칸에서 통째로 중단).</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">7</div><div class="ttl">
+        <b>투입 일정(그날 몇 명 여는가)</b><small>모집 정원의 근거</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>예전</dt><dd>시트 “구매일자” 칸을 세어 그날 정원을 정했다.</dd>
+          <dt>지금</dt><dd>발행할 때 <b>달력(날짜별 인원)</b>으로 옮겨 담고, 그 뒤로는 달력이 기준. [📅 인원] 화면에서 그대로 조절.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">8</div><div class="ttl">
+        <b>자동 작업이 시트를 그만 읽음</b><small>5분마다 도는 백그라운드 작업</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>왜 중요</dt><dd>이걸 막지 않으면 <b>시스템에서 고친 내용을 옛 시트 값이 다시 덮는다.</b></dd>
+          <dt>지금</dt><dd>시트를 읽는 자동 작업 <b>4곳 전부</b>에 제외 게이트. 같은 시트에 시트 쓰는 작업이 남아 있으면 그 시트는 계속 읽는다(탭 단위 판단).</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">9</div><div class="ttl">
+        <b>리뷰 캡처 저장 폴더 이름</b><small>드라이브 폴더 첫 칸</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>예전</dt><dd>폴더 이름이 <b>구글시트 파일 제목</b>이었다 — 시트가 없으면 만들 이름이 없다.</dd>
+          <dt>지금</dt><dd><b>업체명</b>으로 만든다(없으면 캠페인명 → 작업명 순). 기존 폴더 수백 개는 <b>그대로 유지</b>된다.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">10</div><div class="ttl">
+        <b>이관 전환 화면</b><small>작업 하나를 시트에서 떼어내는 창구</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>구성</dt><dd>5가지 점검을 통과해야 [이관]이 열린다. 통과 못 하면 <b>무엇을 고쳐야 하는지</b>와 <b>그 자리에서 고치는 버튼</b>을 함께 보여준다.</dd>
+          <dt>되돌리기</dt><dd>[재연결]로 언제든 원복 가능(점검 없이).</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">11</div><div class="ttl">
+        <b>화면에서 시트 흔적 정리</b><small>배지 · 죽은 링크</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>지금</dt><dd>떼어낸 작업에는 <b>“무시트” 배지</b>가 붙고, 열리지 않는 시트 링크는 <b>사유와 함께 비활성</b>. 담당자가 시트를 찾으러 가지 않아도 된다.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">12</div><div class="ttl">
+        <b>옛 방식 공고의 참여자 추가</b><small>참여 확정 시 줄이 생기는 경로</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>위험했던 것</dt><dd>이 경로만 시트에 직접 줄을 썼다. 그대로 뒀으면 <b>참여자가 명단에서 통째로 사라졌을</b> 자리.</dd>
+          <dt>지금</dt><dd>떼어낸 작업이면 작업표에 넣는다.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">13</div><div class="ttl">
+        <b>인트라넷 오더의 시트 주소 칸</b><small>오더를 넣을 때 붙이던 주소</small></div>
+        <span class="badge b-ok">완료</span></div>
+        <dl class="bd">
+          <dt>지금</dt><dd>칸 자체가 없다. 리뷰웹이 <b>주소가 없으면 무시트로 접수</b>한다.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">14</div><div class="ttl">
+        <b>기존 진행 작업 이관</b><small>이미 돌아가고 있던 작업들</small></div>
+        <span class="badge b-part">부분 완료</span></div>
+        <dl class="bd">
+          <dt>완료</dt><dd><b>86건</b> 이관 완료.</dd>
+          <dt>남은 358건</dt><dd>구매일 기준으로 <b>과거 자료</b>라 <b>이관하지 않기로 결정</b>. 화면이 그 건수를 숨기지 않고 고지한다.</dd>
+          <dt>남은 위험</dt><dd>그 358건 중 일부는 아직 시트를 읽는 대상에 남아 있을 수 있다 — 필요하면 목록에서 제외 처리로 정리.</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">15</div><div class="ttl">
+        <b>업체(광고주)에게 시트 공유</b><small>업체가 진행 현황을 보던 방법</small></div>
+        <span class="badge b-part">자동 소멸 중</span></div>
+        <dl class="bd">
+          <dt>지금</dt><dd>업체는 <b>전용 접속 링크</b>로 시스템 화면에서 본다. 작업을 떼어내면 시트 공유는 <b>자연히 의미가 없어진다.</b></dd>
+          <dt>남은 일</dt><dd>이미 공유해 둔 옛 시트 파일의 권한 정리(사람이 판단할 일).</dd>
+        </dl></div>
+
+      <div class="item"><div class="hd"><div class="no">16</div><div class="ttl">
+        <b>되돌리기는 한 단계까지</b><small>같은 칸을 여러 번 고쳤을 때</small></div>
+        <span class="badge b-wait">남음(문서화)</span></div>
+        <dl class="bd">
+          <dt>현상</dt><dd>같은 칸을 3번 고치고 1번 되돌리면 <b>맨 처음 값이 아니라 직전 값</b>으로 돌아간다.</dd>
+          <dt>왜</dt><dd>고친 값이 원본에 기록되므로, 그 직전 상태가 새 기준이 된다. 데이터가 깨지는 것은 아니다.</dd>
+          <dt>대응</dt><dd>화면 안내 문구 추가를 권고. 전체 이력 되돌리기는 별도 과제.</dd>
+        </dl></div>
+
+    </div>
+
+    <h3 style="margin-top:22px">일부러 남겨 둔 것</h3>
+    <div class="items">
+      <div class="item"><div class="hd"><div class="no">▣</div><div class="ttl">
+        <b>구글시트 주소로 작업 가져오기</b><small>업체관리의 마법사</small></div>
+        <span class="badge b-keep">유지</span></div>
+        <dl class="bd"><dt>이유</dt><dd>시트에만 있고 시스템에는 없는 과거 작업을 <b>끌어오는 창구</b>다. 떼어내기의 반대가 아니라 <b>흡수 통로</b>.</dd></dl></div>
+      <div class="item"><div class="hd"><div class="no">▣</div><div class="ttl">
+        <b>시트 반영 엔진</b><small>아직 시트를 쓰는 작업용</small></div>
+        <span class="badge b-keep">유지</span></div>
+        <dl class="bd"><dt>이유</dt><dd>떼어내지 않은 작업은 여전히 시트를 써야 한다. <b>떼어낸 작업은 이 엔진에서 제외</b>되므로 서로 간섭하지 않는다.</dd></dl></div>
+    </div>
+  </div>
+
+  <div class="sheet">
+    <h2>이번 회차에 한 일 — 붙여넣기 · 되돌리기</h2>
+    <p class="lead">테스트 서버 실측값입니다.</p>
+    <table>
+      <thead><tr><th>항목</th><th class="num">전</th><th class="num">후</th><th>무슨 뜻인가</th></tr></thead>
+      <tbody>
+        <tr><td>500칸 붙여넣기 성공</td><td class="num down">81 / 500</td><td class="num up">500 / 500</td>
+            <td>예전엔 400칸 넘게 조용히 되돌아갔다</td></tr>
+        <tr><td>서버에 보내는 요청 수</td><td class="num">500회</td><td class="num up">10회</td>
+            <td>분당 120회 제한에 더는 걸리지 않는다</td></tr>
+        <tr><td>동시에 쓰는 서버 연결</td><td class="num down">최대 500</td><td class="num up">최대 6</td>
+            <td>한 사람의 붙여넣기가 다른 사람 요청을 굶기지 않는다</td></tr>
+        <tr><td>200칸 되돌리기 요청 수</td><td class="num">200회</td><td class="num up">4회</td>
+            <td>500칸 되돌리기에서 63건 실패하던 것이 해소</td></tr>
+        <tr><td>한 칸이 막혔을 때</td><td class="num down">전체 중단</td><td class="num up">그 칸만 남김</td>
+            <td>“120칸 되돌림 · 3칸은 값이 바뀌어 그대로” 로 사실대로 보고</td></tr>
+      </tbody>
+    </table>
+    <p class="note">
+      중간에 통신이 끊겨도 <b>이미 저장된 부분은 화면에서 되돌리지 않습니다</b> —
+      서버에는 남았는데 화면에서만 지우면 더 어긋나기 때문입니다. 대신 “N개까지 저장됨”이라고 알려 줍니다.
+    </p>
+  </div>
+
+  <div class="sheet wire">
+    <h2>남은 일 · 정하실 것</h2>
+    <ul class="plain">
+      <li><b>운영 서버 적용 시점</b> — 5·6번은 지금 테스트 서버에서만 켜져 있습니다. 운영은 자동으로 꺼진 상태라 <b>언제 켤지만 정하시면</b> 됩니다.</li>
+      <li><b>과거 358건</b> — 이관하지 않기로 정하셨습니다. 다만 그중 시트를 아직 읽는 건이 있으면 목록에서 제외 처리로 정리하는 편이 깔끔합니다.</li>
+      <li><b>되돌리기 한 단계 한계</b>(16번) — 화면 안내 문구를 넣을지 정해 주세요.</li>
+      <li><b>옛 공유 시트 권한 정리</b> — 업체에게 이미 공유된 시트 파일들의 접근 권한.</li>
+    </ul>
+  </div>
+
+  <div class="sheet wire">
+    <h2>용어 풀이</h2>
+    <dl class="bd" style="grid-template-columns:130px 1fr">
+      <dt>작업표</dt><dd>시스템 안에 있는 진짜 표. 이제 여기가 <b>원본</b>입니다.</dd>
+      <dt>명단(장부)</dt><dd>리뷰어 검색·리뷰 화면이 보는 자료. 작업표에서 <b>자동으로 다시 만들어집니다.</b></dd>
+      <dt>무시트</dt><dd>그 작업이 구글시트를 더는 쓰지 않는 상태.</dd>
+      <dt>이관</dt><dd>작업 하나를 시트에서 떼어내는 것. 점검을 통과해야 하고, 언제든 되돌릴 수 있습니다.</dd>
+      <dt>오버레이</dt><dd>표 위에만 얹혀 있던 수정값. 예전에는 이게 원본에 닿지 않아 사라졌습니다(5번).</dd>
+    </dl>
+  </div>
+
+  <p class="foot">리뷰웹시스템[3버전] · 구글시트 떼어내기 진척 보고 · 이 문서는 외부 연결 없이 열립니다</p>
+</div>
+</body>
+</html>

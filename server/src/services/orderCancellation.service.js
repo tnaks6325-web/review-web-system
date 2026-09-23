@@ -22,9 +22,6 @@ async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', 
       // 선택한 참여행 제거는 주문 취소와 같은 트랜잭션에 둔다. 실패하면 주문 취소도 롤백한다.
       if (typeof beforeCancelCommit === 'function') await beforeCancelCommit(client);
 
-      await client.query(`UPDATE review_reminder_states SET review_status='cancelled', updated_at=NOW()
-        WHERE order_submission_id=$1`, [orderSubmissionId]);
-
       await client.query(
         `DELETE FROM sync_queue WHERE status='pending'
            AND type IN ('order_append','order_update','order_cancel')

@@ -31,7 +31,7 @@ const SRC = read('src/routes/order.routes.js');
   /* ═══ A. 단일 출처 ═══ */
   console.log('\nA) 어휘 단일 출처');
   {
-    assert.deepStrictEqual(LEGACY_DELIVERY_VALUES, ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)']);
+    assert.deepStrictEqual(LEGACY_DELIVERY_VALUES, ['실배송', '빈박스', '택배발송대행']);
     assert.ok(/const \{[^}]*\bLEGACY_DELIVERY_VALUES\b[^}]*\} = require\('\.\.\/utils\/reviewType'\)/.test(SRC),
       '접수 라우트가 목록을 utils 에서 가져온다');
     assert.ok(/= ANY\(\$12::text\[\]\)/.test(SRC), '파라미터로 넘긴다');

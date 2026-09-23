@@ -1,8 +1,0 @@
-# ★ 리뷰검수 수동 확인 = AI 판별 학습 루프 (migration 092)
-- **목적(사용자 요청 2026-08-05)**: 수동 확인 백로그(실측 1632건)를 치우는 과정 자체가 **AI 판별의 기준을 키우는 학습 재료**가 되게 한다. Gemini는 파인튜닝이 아니라 few-shot이므로 학습 경로는 3갈래: ① **확인 2분화 원장**(`review_inspections.resolution` — `ok`=정상/오탐 · `bad`=불량 맞음, 오탐률 관측의 원천) ② **상품명 별칭 자동 학습** ③ **판별 예시 승격**(검수 카드의 실물 캡처 → few-shot 기준).
-- ★★ **별칭은 가산만**(`tab_configs.inspect_product_aliases`, 기대 상품명과 **분리 저장**): [정상] 확인 시 **상품명 의심(product warn) 건만** 캡처 표기(`_cleanProductForMatch` 정리본, 4자 미만 제외)를 그 탭 인정 별칭으로 등록 → `loadTabExpectations`가 manual/work_order 어느 소스에든 **병합만** 한다. ★ `inspect_product_names`에 섞으면 안 되는 이유 = manual 값이 생기는 순간 작업오더 파생 후보가 꺼지는 우선순위 규칙이 있어 **후보가 좁아진다**(별칭은 소스 전환을 절대 만들지 않는다 — 가드 B1). 잡는 범위가 좁아질 뿐이라 정상 제출을 새로 불량으로 모는 회귀 없음.
-- ★ **조용한 자동수정 금지**: 학습된 별칭은 [⚙ 기대 상품명] 창이 목록으로 보여주고 **사람이 편집·비울 수 있다**(`saveProductAliases`, POST product-names `aliases` 필드 — 미전송=유지).
-- **확인 버튼 2분화**(workdesk 리뷰검수): 카드 [✓ 정상]/[✕ 불량], 상세 팝업 동일 + **[🖼 판별 예시로 등록]**(admin — 슬롯 목록은 GET samples 서버 응답 그대로, 이미지는 기존 무인증 프록시 `/api/drive/image/<id>` URL 재사용 = 신규 저장소 0, 선택은 인덱스만 전달). 구분 없이 확인된 옛 건은 resolution NULL(호환).
-- **일괄 정상 처리**: 탭 선택 시 [✔ 일괄 정상] → `POST /api/trackb/review-inspect/resolve-bulk`(★ **adminOrMaster** — 대량 종결은 되돌리기 어렵다. 건별 확인은 종전대로 staff 담당 탭). 대상 = 미확인 suspect/fail 만, 별칭도 일괄 학습(중복 접힘·30건 캡). 백로그 권장 순서 = **[♻ 재검수](새 기준 자동 소거) → 실불량 건별 [✕ 불량] → [✔ 일괄 정상]**.
-- ★ **REQUIRED_SCHEMA 등록 2종**(`review_inspections.resolution`·`tab_configs.inspect_product_aliases`) — resolution은 목록 SELECT·확인 UPDATE의 하드 의존이라 없으면 **리뷰검수 탭 전면 42703**.
-- 회귀가드 `tests/reviewInspectLearn.test.js`(스텁 pool로 resolve/bulk 실제 실행 + 가산 병합·중복 접힘·화이트리스트 + 배선). ⚠ `workdeskInspectView` 가드의 상세 블록 추출 경계를 갱신(검사 의미 불변).

@@ -13,7 +13,7 @@ const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = 
 const DEFAULT_SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
 const DEFAULT_NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
 const { allowAutoRegister } = require('../utils/tabRegistration');
-const { sweepSkipSheetIds, sheetlessTabKeys, isSheetlessTab } = require('../utils/sheetlessScope');
+const { fullySheetlessSheetIds, sheetlessTabKeys, isSheetlessTab } = require('../utils/sheetlessScope');
 
 const DEFAULT_SYSTEM_TABS = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정', 'detail', 'config'];
 const DEFAULT_DATA_TAB_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
@@ -242,7 +242,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     );
     // ★★ 무시트 작업 제외(탈 구글시트 W1, `sheetlessScope` 단일 출처) — 등록 탭이 전부 무시트인
     //   시트는 구글에 없거나 더는 읽을 이유가 없다. 안 걸러내면 매 사이클 404 반복.
-    const _slSheets = await sweepSkipSheetIds(pool);
+    const _slSheets = await fullySheetlessSheetIds(pool);
     const sheetIds = [...new Set(
       campaignRows.map(r => r.sheet_id)
     )].filter(Boolean).filter(id => !_slSheets.has(id));
@@ -631,12 +631,21 @@ async function _processOneSheet(sheetId, opts) {
     if (oldTabName && oldTabName !== tabName) {
       logger.info(`[buildIndex] 탭 이름 변경 감지: "${oldTabName}" → "${tabName}" (gid=${tabGid}, sheet=${sheetId.substring(0, 15)})`);
       try {
-        const renamed = await require('./tabRename.service').renameTabState(pool, {
-          sheetId, oldTabName, newTabName: tabName, tabGid,
-        });
-        const riResult = { rowCount: renamed.reviewIndexUpdated };
-        const imResult = { rowCount: renamed.indexMasterUpdated };
-        if (renamed.campaignLinksUpdated) logger.info(`[smartBuild] 공고 연결 탭 이름 보정 ${renamed.campaignLinksUpdated}건: "${oldTabName}" → "${tabName}"`);
+        // ── review_index: 리뷰어 데이터 보존하면서 탭명만 UPDATE ──
+        const riResult = await pool.query(
+          'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+          [tabName, sheetId, oldTabName]
+        );
+        // ── index_master: 탭명 + tab_gid UPDATE (행 보존) ──
+        const imResult = await pool.query(
+          'UPDATE index_master SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
+          [tabName, tabGid, sheetId, oldTabName]
+        );
+        // ── tab_configs: 탭명 UPDATE ──
+        await pool.query(
+          'UPDATE tab_configs SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+          [tabName, sheetId, oldTabName]
+        );
         // ── URL 교정: 정규화된 시트 URL로 업데이트 ──
         const correctUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
         await pool.query(
@@ -697,16 +706,49 @@ async function _processOneSheet(sheetId, opts) {
         continue;
       }
 
-      /* ★ 차수 마감 필터 — 판정·집행은 `closedRounds.service` **단일 출처**(2026-08-24 이관).
-         종전 인라인 사본을 그대로 옮긴 것이며, 무시트 장부 재생성(`sheetlessLedger`)이
-         **같은 함수**를 쓴다. 사본을 되살리면 "시트에서는 빠지는데 무시트에서는
-         되살아나는" 드리프트가 다시 생긴다. */
-      const _cr = require('./closedRounds.service');
-      const excludeRounds = _cr.excludedRounds(tcMap[key]);
+      // ★ 차수 마감 필터: closed_rounds + archived_rounds에 해당하는 행을 review_index_archive로 이동 후 제외
+      const tcConfig = tcMap[key];
+      const closedRounds = (tcConfig?.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const archivedRounds = (tcConfig?.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      // 두 목록을 합쳐서 제외할 차수 집합 생성
+      const excludeRounds = [...new Set([...closedRounds, ...archivedRounds])];
       let filteredRows = rows;
       if (excludeRounds.length > 0) {
-        filteredRows = _cr.filterRows(rows, excludeRounds);
-        await _cr.archiveExcludedRounds({ sheetId, tabName, exclude: excludeRounds, db: pool, by: 'buildIndex' });
+        filteredRows = rows.filter(r => !excludeRounds.includes(r.round));
+        // 마감된 차수의 기존 review_index 행 → review_index_archive로 이동
+        for (const cr of excludeRounds) {
+          try {
+            // 이미 아카이브된 행은 제외 (NOT EXISTS)
+            const { rowCount: movedCount } = await pool.query(`
+              INSERT INTO review_index_archive
+                (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+                 row_index, is_submitted, is_submitted2, product_url, product_name,
+                 submit_col, submit_col2, row_json, start_date, end_date,
+                 round, phone8, built_at, archived_at)
+              SELECT
+                ri.reviewer_name, ri.sheet_id, ri.tab_gid, ri.tab_name, ri.campaign_name,
+                ri.row_index, ri.is_submitted, ri.is_submitted2, ri.product_url, ri.product_name,
+                ri.submit_col, ri.submit_col2, ri.row_json, ri.start_date, ri.end_date,
+                ri.round, ri.phone8, ri.built_at, NOW()
+              FROM review_index ri
+              WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.round = $3
+                AND NOT EXISTS (
+                  SELECT 1 FROM review_index_archive ria
+                  WHERE ria.sheet_id = ri.sheet_id AND ria.tab_name = ri.tab_name AND ria.row_index = ri.row_index
+                )
+            `, [sheetId, tabName, cr]);
+            // 원본에서 삭제 (아카이브 여부 무관하게 review_index에서 제거)
+            const { rowCount: deletedCount } = await pool.query(
+              'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND round = $3',
+              [sheetId, tabName, cr]
+            );
+            if (movedCount > 0 || deletedCount > 0) {
+              logger.info(`[buildIndex] 마감 차수 아카이브: ${tabName}/${cr} — ${movedCount}행 이동, ${deletedCount}행 삭제`);
+            }
+          } catch (archErr) {
+            logger.warn(`[buildIndex] 마감 차수 아카이브 실패 (${tabName}/${cr}): ${archErr.message}`);
+          }
+        }
       }
 
       await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, filteredRows, currentModifiedTime, spreadsheetTitle, detectMeta);
@@ -1056,7 +1098,13 @@ async function _resolveRecognizedTab(sheetId, tabName, tabGid) {
   } catch (_) {}
 }
 
-module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows, checkDirtySheets, buildOneSheet, loadKeywordsFromDB: _loadKeywordsFromDB };
+// ★ 라이브 값을 읽어야 한다 — `loadKeywordsFromDB` 가 let 을 재대입하므로 스냅샷 export 금지.
+//   소비처: utils/sheetlessCellWrite(이름 열 거부 판정) — 사본을 두면 파서와 갈린다.
+function getKeywords() {
+  return { NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES };
+}
+
+module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows, checkDirtySheets, buildOneSheet, loadKeywordsFromDB: _loadKeywordsFromDB, getKeywords };
 
 // ═══════════════════════════════════════════════════════════
 // ★ Phase 4: 경량 변경 감지 (Drive API만 사용, 인덱스 빌드 없음)
@@ -1070,7 +1118,7 @@ async function checkDirtySheets() {
     'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
   );
   // ★ 변경감지도 같은 게이트 — 무시트 시트를 Drive 로 물으면 404(W1)
-  const _slSheets = await sweepSkipSheetIds(pool);
+  const _slSheets = await fullySheetlessSheetIds(pool);
   const sheetIds = [...new Set(
     campaignRows.map(r => r.sheet_id)
   )].filter(Boolean).filter(id => !_slSheets.has(id));

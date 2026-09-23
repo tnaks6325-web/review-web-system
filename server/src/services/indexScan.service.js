@@ -647,12 +647,21 @@ async function syncTabListToDB({ dryRun = true, fromCache = false, allowNewTabs 
       if (renamedSet.has(renameKey)) continue;
       renamedSet.add(renameKey);
       logger.info(`[syncTabListToDB] 탭 이름 변경: "${r.oldTabName}" → "${r.newTabName}" (gid=${r.tabGid})`);
-      const renamed = await require('./tabRename.service').renameTabState(client, {
-        sheetId: r.sheetId, oldTabName: r.oldTabName, newTabName: r.newTabName, tabGid: r.tabGid,
-      });
-      const riResult = { rowCount: renamed.reviewIndexUpdated };
-      const imResult = { rowCount: renamed.indexMasterUpdated };
-      if (renamed.campaignLinksUpdated) logger.info(`[syncTabListToDB] 공고 연결 탭 이름 보정 ${renamed.campaignLinksUpdated}건: "${r.oldTabName}" → "${r.newTabName}"`);
+      // review_index: 리뷰어 데이터 보존하면서 탭명만 UPDATE
+      const riResult = await client.query(
+        'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+        [r.newTabName, r.sheetId, r.oldTabName]
+      );
+      // index_master: 탭명 UPDATE (행 보존)
+      const imResult = await client.query(
+        'UPDATE index_master SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
+        [r.newTabName, r.tabGid, r.sheetId, r.oldTabName]
+      );
+      // tab_configs: 탭명 UPDATE
+      await client.query(
+        'UPDATE tab_configs SET tab_name = $1, tab_gid = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+        [r.newTabName, r.tabGid, r.sheetId, r.oldTabName]
+      );
       // URL 교정
       const correctUrl = `https://docs.google.com/spreadsheets/d/${r.sheetId}/edit`;
       await client.query(

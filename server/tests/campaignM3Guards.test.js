@@ -28,10 +28,9 @@ ok('prefill: 링크유입이면 landing_url = 유입링크 우선', /_woGuideUrl
 ok('modal: 프리필 소비 시 참여형 토글 자동 ON + 시간대 파서', /prefill\.participation && document\.getElementById\("rf_participation"\)/.test(recjs) && /rfApplyPurchaseTime\(\{ timeRange: prefill\.purchase_time/.test(recjs));
 // ⚠ 배선 형태 갱신(작업내용 첨부 이미지 도입) — 조립이 _igComposeInflow 한 곳으로 모였다.
 //   검사 의미는 불변: "글을 안 고쳤으면 원본 HTML 그대로 · 고치면 평문 전환".
-ok('modal: 선택지 유입가이드 원본 HTML은 미수정 시 그대로 전송(수정하면 평문 전환)',
-  /function _ugCompose\(row, key\)/.test(recjs)
-  && /return \{ html: raw, images \}/.test(recjs)
-  && /inflowGuideHtml: guide\.html/.test(recjs));
+ok('modal: 원본 HTML은 미수정 시 그대로 전송(수정하면 평문 전환)',
+  /return window\._wdInflowRawHtml;/.test(recjs) && /dataset\.rawHtml = ""/.test(recjs)
+  && /inflowGuideHtml: _igComposeInflow\(\)/.test(recjs));
 ok('modal: 미리보기 변환(_htmlToPlainPreview) 존재', /function _htmlToPlainPreview/.test(recjs));
 
 // ── 상품정보 기본값(작업오더) + 자동수집 성공 항목만 덮어쓰기 ──
@@ -61,45 +60,16 @@ ok('시작일: UPDATE는 CASE 센티널(null=유지·\'\'=제거) — COALESCE �
 ok('시간창: UPDATE ""=비움(자율주문 전환) + auto_order 강제 비움(인라인 편집기 갭 봉합)', /window_start = CASE WHEN \$25::text IS NULL/.test(routes) && /auto_order === true\) \? '' : window_start/.test(routes));
 ok('카드: D-일수 카운트다운 + 날짜 인지 오픈 라벨', /'D-' \+ days/.test(cards) && /function _fmtOpenLabel/.test(cards));
 
-// ── 모집공고 로그 위젯 ──
-ok('로그: 참여형 카드에만 로그 버튼', /c\.participation_mode \? .*openCampControl/.test(recjs)
-  && /fa-list-ul[\s\S]{0,80}로그/.test(recjs) && /🧾 로그/.test(cards) && !/📡 관제/.test(cards));
-ok('로그: 기본 화면은 작업보드형 작업 로그', /await _ccSetMode\("log"\)/.test(recjs)
-  && /_ccMode === "log" \? "🗒 작업 로그"/.test(recjs)
-  && /activity-log\?kind=/.test(recjs) && /ccSearchLogs/.test(recjs));
-ok('로그: 작업보드와 같은 집계 서비스를 단일 출처로 사용', /tabActivityLog\(\{/.test(routes)
-  && /linked_sheet_id, linked_tab_name, linked_tab_gid/.test(routes)
-  && /LOG_KINDS\.filter\(k => k\.key !== 'inspect'\)/.test(routes));
-ok('로그: 유형 탭·커서형 과거 이력·부분 실패 안내를 지원', /result\.kinds/.test(recjs)
-  && /result\.nextBefore/.test(recjs) && /before=/.test(recjs) && /ccLogWarn/.test(recjs));
-ok('로그: 기존 구매확인·취소확정은 참여 관리로 보존', /"👥 참여 관리"/.test(recjs)
-  && /else await _loadCampControl\(_ccCampId\)/.test(recjs));
-ok('로그: 늦게 끝난 참여 관리 조회가 작업 로그 화면을 덮지 않는다', /_ccManageSeq/.test(recjs)
-  && /manageSeq !== _ccManageSeq \|\| _ccMode !== "manage"/.test(recjs)
-  && /String\(campId\) !== String\(_ccCampId\)/.test(recjs));
-ok('로그: 작업 로그 실패 응답도 참여 관리 전환 뒤 화면을 덮지 않는다',
-  (recjs.match(/seq !== _ccLogSeq \|\| _ccMode !== "log"/g) || []).length >= 4);
-ok('로그: 제출 정보와 리뷰어 정보를 한 줄에 합쳐 기록당 최대 2단',
-  /<span class="tlwho"> · \$\{who\}<\/span>/.test(recjs)
-  && !/event\.who \? `<div class="tlwho">/.test(recjs));
+// ── 관제 위젯 ──
+ok('관제: 참여형 카드에만 관제 버튼', /c\.participation_mode \? .*openCampControl/.test(recjs));
 ok('관제: 오늘 집계는 KST + 유효홀드 시각 기준', /kstDay/.test(recjs) && /Date\.parse\(r\.expires_at\) > now/.test(recjs));
 ok('관제: 수동확정 → POST admin/:id/confirm', /\/confirm`/.test(recjs) && /applicationId: appId/.test(recjs));
 ok('관제: 수동확정은 만료·취소 건만(진행중 확정 = 주문링크 결번 방지, 리뷰 #4)', /canConfirm = \(r\.status === "expired" \|\| r\.status === "cancelled"\)/.test(recjs));
 ok('관제: 무주문 확정은 강한 경고 분기', /연결된 구매 제출이 없는 신청/.test(recjs));
-ok('로그: 일반·외부모집·지각 제출을 주문 원장 기준으로 구분',
-  /order_submission_type/.test(routes) && /r\.order_source === 'admin_external'/.test(routes)
-  && /기구매\/지각 주문도착/.test(recjs) && /외부모집 수동제출/.test(recjs) && /구매양식 제출/.test(recjs));
-ok('로그: 실제 제출시각과 지각 초과시간을 표시',
-  /order_submitted_at/.test(routes) && /order_overdue_seconds/.test(routes)
-  && /<b>주문제출시각<\/b>/.test(recjs) && /<b>제출시각<\/b>/.test(recjs)
-  && /overdueT\(r\.order_overdue_seconds\)/.test(recjs));
-ok('로그: 주문 취소 뒤에도 신청 FK로 마지막 주문 출처를 복구',
-  /os\.campaign_application_id = ca\.id/.test(routes) && /ORDER BY os\.submitted_at DESC/.test(routes));
-// ── 확정 분리: 수동확정 → 구매확인 / 취소확정(미참여) ──
+ok('관제: 기구매(late_order_id) 배지 노출', /late_order_id \? chip/.test(recjs));
+// ── 확정 분리: 수동확정 → 제출확정(구매완) / 취소확정(미참여) ──
 ok('관제: 만료 배지 문구 = "구매시간만료"', /chip\("#FEE2E2", "#B91C1C", "구매시간만료"\)/.test(recjs));
-ok('로그: 구매확인·취소확정 두 버튼으로 분리', /✅ 구매확인/.test(recjs) && /🚫 취소확정/.test(recjs));
-ok('로그: 주문 없는 운영자 확정은 구매양식 제출로 꾸미지 않는다',
-  /r\.status === "submitted" && hasOrder/.test(recjs) && /구매확인 수동확정/.test(recjs));
+ok('관제: 제출확정·취소확정 두 버튼으로 분리', /✅ 제출확정/.test(recjs) && /🚫 취소확정/.test(recjs));
 ok('관제: 취소확정 → POST admin/:id/dismiss + campDismiss()', /\/dismiss`/.test(recjs) && /function campDismiss/.test(recjs));
 ok('관제: 취소확정(dismissed)된 건은 버튼 미노출(다시 알림 안 뜸)',
   /const dismissed = !!r\.dismissed_at/.test(recjs) && /&& !dismissed/.test(recjs));

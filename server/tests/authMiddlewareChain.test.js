@@ -43,8 +43,6 @@ ok('★★ 역할 미들웨어 앞에 authMiddleware가 빠진 라우트가 없�
     /router\.post\('\/company-business-no', authMiddleware, adminOrMasterMiddleware/.test(tc));
   ok('현금영수증 발행방법 이미지 저장이 authMiddleware + adminOrMaster',
     /router\.post\('\/cash-receipt-guide', authMiddleware, adminOrMasterMiddleware/.test(tc));
-  ok('탭 설정 저장은 외부 역할을 차단하고 담당 탭 범위를 검사',
-    /router\.post\('\/config', authMiddleware, internalOnlyMiddleware, tabConfigWriteScopeMiddleware/.test(tc));
   ok('왜 필요한지 코드에 남아 있다(다음 사람이 또 빠뜨리지 않도록)',
     /빠뜨리면 req\.admin이 undefined라 \*\*마스터를 포함해 아무도\*\*/.test(tc));
 }

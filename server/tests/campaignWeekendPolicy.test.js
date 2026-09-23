@@ -11,10 +11,7 @@ test('주말 제외 공고는 한국 시간 토요일에 게시 보류 상태가
   assert.deepStrictEqual(state, {
     blocked: true,
     reason: 'weekend_unpublished',
-    // 2026-09-23: 재개일은 "다음 월요일" 고정이 아니라 실제 첫 진행일을 날짜로 말한다(추석 사고).
-    closedKind: 'weekend',
-    holidayName: null,
-    message: '주말 미게시 · 8/17(월) 재개',
+    message: '주말 미게시 · 월요일 재개',
     resumesOn: '2026-08-17',
   });
 });
@@ -27,15 +24,6 @@ test('주말 제외 공고는 한국 시간 월요일에 자동 재개된다', (
 
 test('주말 포함 공고는 주말에도 차단되지 않는다', () => {
   const state = weekendPublicationState({ skip_weekends: false }, new Date('2026-08-15T15:00:00.000Z'));
-  assert.strictEqual(state.blocked, false);
-});
-
-test('주말 제외 공고라도 날짜별 모집계획이 있는 주말은 모집을 연다', () => {
-  const state = weekendPublicationState(
-    { skip_weekends: true },
-    new Date('2026-08-14T15:00:00.000Z'),
-    { '2026-08-15': 20 }
-  );
   assert.strictEqual(state.blocked, false);
 });
 

@@ -1069,8 +1069,7 @@ function enterAdminScreen() {
   // ★ 컨텍스트 툴바 초기화
   _updateContextToolbar('dashboard');
 
-  // 서버 설정을 먼저 가져와야 다른 기기에서 맞춘 컬럼 폭으로 첫 렌더링된다.
-  _loadServerColWidths().finally(() => loadAdminDashboard());
+  loadAdminDashboard();
 
   // ★ 공지사항 자동 표시 (배포 변경 이력)
   checkAndShowNotice();
@@ -1439,7 +1438,7 @@ function _renderWorkOrderWorkspace(list) {
         <b style="font-size:11px;line-height:1.35;color:#243247">${escHtml(order.title || "(제목 없음)")}</b>
         <span style="flex:none;padding:2px 5px;border-radius:4px;background:${bg};color:${fg};font-size:9px;font-weight:800;white-space:nowrap">${WO_LABELS[status] || status}</span>
       </span>
-      <span style="display:block;margin-top:3px;color:#718096;font-size:10px">${escHtml(order.created_by || "-")} · ${order.courier_proxy ? "택배발송대행" : ((typeof _woDeliveryBase === "function" ? _woDeliveryBase(order.delivery_type) : "") || order.delivery_type || "배송유형 미지정")}</span>
+      <span style="display:block;margin-top:3px;color:#718096;font-size:10px">${escHtml(order.created_by || "-")} · ${order.courier_proxy ? "택배발송대행" : (order.delivery_type || "배송유형 미지정")}</span>
     </button>`;
   }).join("");
 
@@ -1760,20 +1759,20 @@ async function woSendMemo(id) {
 //   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
 // ★ pickGid: 탭 교정 재접수 — URL의 gid가 시트에 없을 때(404 gidNotFound) 팝업에서
 //   사람이 고른 탭의 gid. 서버가 이 gid로 접수하고 work_sheet_url까지 교정한다.
-async function woAccept(id, pickGid, linkAdvertiserId) {
+async function woAccept(id, pickGid) {
   const o = (_woCache || []).find(x => x.id === id);
   const url = ((o && o.work_sheet_url) || "").trim();
 
   // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
-  // ★★ 접수는 **항상 무시트**다(서버 `sheetlessAccept.resolveAcceptMode` = v3_sheetless_only).
-  //   판정 사본을 두지 않고 공유 모듈 `_woAcceptSheetless`(표시용)를 그대로 쓴다.
-  //   ★ 종전에는 여기서 `work_sheet_url` 을 보고 ① URL 이 있으면 시트 접수인 양 확인창을 건너뛰고
-  //     ② gid 가 없으면 **접수를 아예 막았다** — 서버는 무시트로 등록하는데 화면만 시트 기반으로
-  //     인식하던 막다른 길이다(2026-08-19 신고). URL 은 과거 이력일 뿐 접수 모드를 바꾸지 않는다.
-  const _ns = (typeof _woAcceptSheetless === "function") ? _woAcceptSheetless(o) : true;
-  if (_ns && !linkAdvertiserId && !pickGid) {
-    if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다."
-      + (url ? "\n\n※ 이 오더에 남아 있는 작업시트탭URL은 사용하지 않습니다(과거 이력)." : ""))) return;
+  // ★★ 시트탭URL이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성 — 사용자 확정 2026-08-10).
+  //   종전엔 여기서 막아 인트라넷 리뷰오더(시트URL 칸 없음)를 접수할 방법이 없었다.
+  //   판정·생성은 서버(`sheetlessAccept.resolveAcceptMode`)가 하고 화면은 확인만 받는다.
+  if (!url) {
+    if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.")) return;
+  }
+  if (url && !/[#?&]gid=\d+/.test(url) && !pickGid) {
+    woNotice("작업시트탭URL에 gid가 없습니다.\n특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.\n\n현재 URL:\n" + url);
+    return;
   }
 
   const btn = document.getElementById("woAcceptBtn_" + id);
@@ -1781,22 +1780,13 @@ async function woAccept(id, pickGid, linkAdvertiserId) {
   try {
     // 2) 접수 단일 처리 (탭 등록 + 작업오더 기본정보 메타 매핑 + 인덱스 빌드 + 상태 reviewing)
     const payload = pickGid ? { action: "orderAdminAccept", id, gid: pickGid } : { action: "orderAdminAccept", id };
-    // ★ 같은 이름의 기존 업체를 사람이 "같은 업체"라고 확인한 경우에만 실린다(자동 병합 금지).
-    if (linkAdvertiserId) payload.linkAdvertiserId = linkAdvertiserId;
     const r = await gasGet(payload, 60000);
     if (!(r && r.ok)) {
       // ★ URL의 gid가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서
       //   사람이 골라 재접수(교정 흐름). 공용 팝업 = work-order-detail.js woAcceptTabPicker.
       if (r && r.gidNotFound && typeof woAcceptTabPicker === "function") {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
-        woAcceptTabPicker(r, g => woAccept(id, g, linkAdvertiserId));
-        return;
-      }
-      // ★ 같은 이름의 기존 업체가 있어 자동 병합하지 않음 → 사람이 확인해 연결하고 재접수.
-      //   공용 팝업 = work-order-detail.js woAdvertiserLinkPicker.
-      if (r && r.advertiserNameConflict && typeof woAdvertiserLinkPicker === "function") {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
-        woAdvertiserLinkPicker(r, advId => woAccept(id, pickGid, advId));
+        woAcceptTabPicker(r, g => woAccept(id, g));
         return;
       }
       // ★ 무시트 접수가 막힌 경우는 사유(건수 0·표준 열 미설정 등)를 그대로 보여준다.
@@ -3919,116 +3909,6 @@ const DASH_COL_DEFS = [
   { key: 'info',        varName: '--dc-info',        label: '⚙',         minPx: 82,  default: 90, noScale: true  },
 ];
 const COL_WIDTH_LS_KEY = 'dashColWidths_v11'; // ★ v11.1: 새 컬럼 레이아웃
-const COL_WIDTH_PENDING_LS_KEY = 'dashColWidthsPending_v1';
-let _serverColWidths = null; // null=서버 미저장/오프라인, {}=사용자가 서버에서 기본값으로 초기화함
-let _colWidthsSaveVersion = 0;
-let _colWidthsSaveChain = Promise.resolve();
-
-function _readLocalColWidths() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}');
-    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
-  } catch (_) {
-    return {};
-  }
-}
-
-function _savedColWidths() {
-  return _serverColWidths === null ? _readLocalColWidths() : _serverColWidths;
-}
-
-function _readPendingColWidths() {
-  try {
-    const pending = JSON.parse(localStorage.getItem(COL_WIDTH_PENDING_LS_KEY) || 'null');
-    return pending && typeof pending === 'object' && !Array.isArray(pending) ? pending : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function _setPendingColWidths(columnWidths) {
-  try { localStorage.setItem(COL_WIDTH_PENDING_LS_KEY, JSON.stringify(columnWidths)); } catch (_) {}
-}
-
-function _clearPendingColWidths() {
-  try { localStorage.removeItem(COL_WIDTH_PENDING_LS_KEY); } catch (_) {}
-}
-
-function _workboardPreferenceHeaders() {
-  const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
-  return token ? { 'Authorization': 'Bearer ' + token } : null;
-}
-
-async function _saveServerColWidths(columnWidths) {
-  const headers = _workboardPreferenceHeaders();
-  if (!headers) return false;
-  let timer;
-  try {
-    const controller = new AbortController();
-    timer = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(API_BASE_URL + '/api/admin/my-workboard-preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ columnWidths }),
-      signal: controller.signal,
-    });
-    return response.ok;
-  } catch (_) {
-    // 네트워크 실패는 로컬 폴백을 보존하며 다음 저장 때 다시 시도한다.
-    return false;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-// 모든 저장은 순서대로 처리한다. 각 요청 직전에 최신 버전인지 재확인하므로,
-// 빠르게 두 번 드래그해도 오래된 전체 스냅샷이 나중에 DB를 덮어쓰지 않는다.
-function _queueServerColWidths(columnWidths) {
-  const snapshot = { ...columnWidths };
-  const version = ++_colWidthsSaveVersion;
-  _setPendingColWidths(snapshot);
-  _colWidthsSaveChain = _colWidthsSaveChain.catch(() => false).then(async () => {
-    if (version !== _colWidthsSaveVersion) return false;
-    const saved = await _saveServerColWidths(snapshot);
-    if (saved && version === _colWidthsSaveVersion) _clearPendingColWidths();
-    return saved;
-  });
-  return _colWidthsSaveChain;
-}
-
-async function _loadServerColWidths() {
-  _serverColWidths = null;
-  const headers = _workboardPreferenceHeaders();
-  if (!headers) return false;
-  let timer;
-  try {
-    // 설정 API 지연이 작업보드 자체를 막지 않도록 짧게 제한한다.
-    const controller = new AbortController();
-    timer = setTimeout(() => controller.abort(), 4000);
-    const response = await fetch(API_BASE_URL + '/api/admin/my-workboard-preferences', { headers, signal: controller.signal });
-    if (!response.ok) return false;
-    const data = await response.json();
-    if (!data || !data.ok) return false;
-
-    const pending = _readPendingColWidths();
-    if (pending) {
-      // 실패했던 로컬 변경은 서버의 오래된 값보다 우선하며, 온라인이 되면 다시 저장한다.
-      _serverColWidths = pending;
-      void _queueServerColWidths(pending);
-    } else if (data.hasSaved) {
-      _serverColWidths = data.columnWidths && typeof data.columnWidths === 'object' ? data.columnWidths : {};
-    } else {
-      // 기존 브라우저 설정은 최초 한 번 서버로 이관해 사용자가 다시 조절하지 않게 한다.
-      _serverColWidths = _readLocalColWidths();
-      if (Object.keys(_serverColWidths).length) void _queueServerColWidths(_serverColWidths);
-    }
-    return true;
-  } catch (_) {
-    return false;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 /** 컨테이너 content 너비 반환 (padding/border 제외, 실제 사용 가능한 너비) */
 function _getContainerWidth() {
@@ -4062,7 +3942,8 @@ function _getContainerWidth() {
 
 /** localStorage에서 저장된 너비 로드 후 CSS 변수 적용 (CB 컬럼 제외 - 모드 토글이 관리) */
 function loadColWidths() {
-  const saved = _savedColWidths();
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) {}
   const root = document.documentElement;
   let applied = 0;
   DASH_COL_DEFS.forEach(col => {
@@ -4089,8 +3970,6 @@ function saveColWidths() {
     if (w && Number.isFinite(w) && w > 0) data[col.key] = w;
   });
   try { localStorage.setItem(COL_WIDTH_LS_KEY, JSON.stringify(data)); } catch(_) {}
-  _serverColWidths = data;
-  void _queueServerColWidths(data);
 }
 
 /** (호환성 stub) */
@@ -4124,7 +4003,9 @@ function _syncTabnameWidth(availW) {
   _lastAppliedW = availW;
 
   const root = document.documentElement;
-  const savedWidths = _savedColWidths();
+  const savedWidths = (() => {
+    try { return JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) { return {}; }
+  })();
   const pad = 28; // 좌우 padding 합계
 
   // 사용자가 수동으로 숨긴 열 (col-hidden 시스템)
@@ -4294,8 +4175,6 @@ function resetColWidths() {
     root.style.removeProperty(col.varName);
   });
   try { localStorage.removeItem(COL_WIDTH_LS_KEY); } catch(_) {}
-  _serverColWidths = {};
-  void _queueServerColWidths({});
   _closeColResizePopup();
   _lastAppliedW = 0; // 강제 재계산
   _syncTabnameWidth(); // 초기화 후 반응형 재계산
@@ -6806,15 +6685,8 @@ async function submitOrderForm() {
             displayName: ctx.displayName || "",  // 상품명 → 캠페인폴더명
             tabName:     ctx.tabName,            // 탭명 → 인덱스폴더명 기준
             round:       ctx.round       || "",  // 차수 → 폴더명에 삽입
-            sheetId:     ctx.sheetId     || "",  // ★ 탭명 변경 대응: ID로 세부목록 조회
-            orderSubmissionId: res.orderSubmissionId || "",
-            captureSessionId: res.captureSession && res.captureSession.id || "",
-            captureSessionToken: res.captureSession && res.captureSession.token || ""
+            sheetId:     ctx.sheetId     || ""   // ★ 탭명 변경 대응: ID로 세부목록 조회
           };
-
-          if (!uploadPayload.orderSubmissionId || !uploadPayload.captureSessionId || !uploadPayload.captureSessionToken) {
-            throw new Error("구매캡처 제출 세션을 발급받지 못했습니다.");
-          }
 
           // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 — 진행률 표시 + 2회 재시도
           let upJson = null;
@@ -6833,6 +6705,26 @@ async function submitOrderForm() {
           }
           if (upJson && upJson.ok) {
             console.log("[이미지 업로드] 완료:", upJson.fileUrl);
+            // ── 캡처 폴더 URL을 세부목록에 저장 (대시보드 바로가기 버튼용) ──
+            if (upJson.captureFolderUrl) {
+              try {
+                // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
+                const sfJson = await gasPost({
+                  action:           "saveCaptureFolder",
+                  sheetId:          ctx.sheetId  || "",
+                  sheetUrl:         ctx.sheetUrl || "",
+                  tabName:          ctx.tabName,
+                  captureFolderUrl: upJson.captureFolderUrl
+                });
+                if (sfJson && sfJson.ok) {
+                  console.log("[캡처폴더 저장] 완료:", upJson.captureFolderUrl);
+                } else {
+                  console.warn("[캡처폴더 저장] 실패:", sfJson?.error);
+                }
+              } catch(sfErr) {
+                console.warn("[캡처폴더 저장] 실패 (무시):", sfErr.message);
+              }
+            }
           } else {
             console.warn("[이미지 업로드] 실패:", upJson?.error);
           }
@@ -7011,12 +6903,7 @@ async function quickEditCell(e, cell) {
 
   } else if (field === '리뷰타입') {
     const _existingReview = (tcData.reviewType || '').trim();
-    const opts = _tcReviewOptions();          // ★ 단일 출처(위 _tcReviewOptions 주석 참조)
-    if (!opts.length) {
-      // 목록 모듈을 못 불러왔다 — 빈 선택지를 그려 "고를 게 없는 창"을 만들지 않는다.
-      popup.innerHTML += `<div style="font-size:.72rem;color:#B91C1C;padding:4px 2px">리뷰타입 목록 모듈을 불러오지 못했습니다 — 새로고침 후 다시 시도하세요.</div>`;
-      getValue = () => _existingReview;       // 저장해도 값이 바뀌지 않는다(조용한 해제 금지)
-    } else {
+    const opts = ['실배송','빈박스','구매확정','믹스'];
     popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
     getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
     // 기존값 pre-select
@@ -7031,7 +6918,6 @@ async function quickEditCell(e, cell) {
         btn.classList.add("sel");
       });
     });
-    }
 
   } else if (field === '담당자') {
     const _existingManager = (tcData.manager || '').trim();
@@ -7838,18 +7724,17 @@ async function _renderCaptureSlotsEditor(tcData) {
 
   list.innerHTML = "";
   if (!slots || slots.length === 0) {
-    _csAddSlotRow("리뷰", "review");   // 첫 슬롯 시드 (기존 리뷰 제출과 호환)
+    _csAddSlotRow("리뷰");   // 첫 슬롯 시드 (기존 리뷰 제출과 호환)
   } else {
-    slots.forEach(s => _csAddSlotRow((s && s.label) || "", (s && s.key) || ""));
+    slots.forEach(s => _csAddSlotRow((s && s.label) || ""));
   }
 }
 
-function _csAddSlotRow(label, key) {
+function _csAddSlotRow(label) {
   const list = document.getElementById("tcCaptureSlotsList");
   if (!list) return;
   const row = document.createElement("div");
   row.className = "tc-cs-row";
-  row.dataset.slotKey = key || "";
   row.style.cssText = "display:flex;gap:6px;margin-bottom:5px;align-items:center";
   row.innerHTML =
     '<span class="tc-cs-num" style="font-size:.66rem;color:#92400E;width:14px;text-align:center;flex-shrink:0"></span>' +
@@ -7875,17 +7760,15 @@ async function saveCaptureSlots() {
   const tabName = _tcCurrent.tabName || "";
   if (!sheetId || !tabName) { showToast("sheetId/tabName을 특정할 수 없습니다.", true); return; }
 
-  const slots = Array.from(document.querySelectorAll("#tcCaptureSlotsList .tc-cs-row"))
-    .map(row => ({ key: row.dataset.slotKey || "", label: row.querySelector(".tc-cs-label")?.value.trim() || "" }))
-    .filter(slot => slot.label);
-  const labels = slots.map(slot => slot.label);
+  const labels = Array.from(document.querySelectorAll("#tcCaptureSlotsList .tc-cs-label"))
+    .map(i => i.value.trim()).filter(Boolean);
 
   // 라벨 중복 방지
   const dup = labels.find((l, i) => labels.indexOf(l) !== i);
   if (dup) { showToast(`슬롯 라벨이 중복됩니다: "${dup}"`, "error"); return; }
 
   try {
-    const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: slots });
+    const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: labels });
     if (json && json.ok) {
       const n = (json.captureSlots || []).length;
       if (n > 1) {
@@ -12658,24 +12541,6 @@ async function _saveLinkInput(id, sheetId, tabName, apiKey, dbKey) {
 }
 
 /** 택일 팝업: 버튼 클릭 → 드롭다운 */
-/* ══ 리뷰타입 선택지 — **단일 출처는 서버 `utils/reviewType.REVIEW_TYPES`** ══════════════
-   화면 사본은 `index-recruit.js` 의 `RF_REVIEW_TYPE_LABELS` 하나뿐이고 회귀가드가 서버 목록과의
-   일치를 고정한다(workManager 사본 규율). 여기서 목록을 다시 적으면 안 되는 이유:
-   ★★ 옛 어휘(실배송·빈박스·믹스)를 고르면 `tab_configs.review_type` 에 **배송유형**이 들어가
-     `resolveReviewType` 이 null 로 떨어진다 → "설정했는데 검수는 미지정"(2026-08-06 실사고의 입구).
-   ★ 표시(배지)는 옛 값도 그대로 남긴다 — 입력 창구에서만 뺀다. */
-function _tcReviewOptions() {
-  return (typeof RF_REVIEW_TYPE_LABELS !== 'undefined')
-    ? RF_REVIEW_TYPE_LABELS.map(([, l]) => l) : [];
-}
-/* 배지 색 — 옛 값도 남긴다(그 탭에 무엇이 설정돼 있었는지 보여야 한다). 목록 밖은 회색 기본. */
-const TC_REVIEW_COLORS = {
-  "포토":"#5B21B6","포토_bg":"#EDE9FE","텍스트":"#075985","텍스트_bg":"#E0F2FE",
-  "구매확정":"#065F46","구매확정_bg":"#D1FAE5","별점":"#92400E","별점_bg":"#FEF3C7",
-  "혼합":"#9D174D","혼합_bg":"#FCE7F3",
-  "실배송":"#0ca678","실배송_bg":"#D1FAE5","빈박스":"#3182f6","빈박스_bg":"#e8f1fe",
-  "믹스":"#D97706","믹스_bg":"#FEF3C7"
-};
 function _inlineSelect(t, dbKey, apiKey, options, colorMap, round) {
   const cur = t[dbKey] || "";
   const display = cur || "—";
@@ -13077,8 +12942,9 @@ function _cellVal(t, col) {
   if (k === "manager") return _inlineSelect(t, "manager", "manager", ["만두","망고"], {
     "만두":"#1D4ED8","만두_bg":"#DBEAFE","망고":"#D97706","망고_bg":"#FEF3C7"
   }, t._isRoundRow ? t._roundLabel : null);
-  if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", _tcReviewOptions(),
-    TC_REVIEW_COLORS, t._isRoundRow ? t._roundLabel : null);
+  if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", ["실배송","빈박스","구매확정","믹스"], {
+    "실배송":"#0ca678","실배송_bg":"#D1FAE5","빈박스":"#3182f6","빈박스_bg":"#e8f1fe","구매확정":"#1D4ED8","구매확정_bg":"#DBEAFE","믹스":"#D97706","믹스_bg":"#FEF3C7"
+  }, t._isRoundRow ? t._roundLabel : null);
   if (k === "payment_type") return _inlineSelect(t, "payment_type", "paymentType", ["현금","현영","소득"], {
     "현금":"#0ca678","현금_bg":"#D1FAE5","현영":"#1D4ED8","현영_bg":"#DBEAFE","소득":"#3182f6","소득_bg":"#e8f1fe"
   }, t._isRoundRow ? t._roundLabel : null);
@@ -16022,14 +15888,9 @@ function _relocateToggleImg(headerEl, id) {
   if (!wrap) return;
   if (wrap.style.display === 'none' || !wrap.style.display) {
     if (!wrap.dataset.loaded) {
-      /* ★ 최대 440px 로 보여주는 자리 — 원본을 먼저 받던 순서를 뒤집어 CDN 썸네일 우선(js/drive-thumb.js).
-         모듈이 없으면 종전 동작(원본 우선 + CDN 폴백) 그대로. */
       const proxy = `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
       const thumb = `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`;
-      const at = window.DriveThumb
-        ? DriveThumb.attrs(id, 800, proxy)
-        : ` src="${proxy}" onerror="this.onerror=null;this.src='${thumb}'"`;
-      wrap.innerHTML = `<div style="padding:4px 0 8px"><img${at} loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block"></div>`;
+      wrap.innerHTML = `<div style="padding:4px 0 8px"><img src="${proxy}" loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block" onerror="this.onerror=null;this.src='${thumb}'"></div>`;
       wrap.dataset.loaded = '1';
     }
     wrap.style.display = 'block';
@@ -16348,7 +16209,7 @@ async function _relocateMakeReportPageLink() {
           <button onclick="_relocateCopyLink('rlcReportPageLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
           <a href="${escHtml(link)}" target="_blank" rel="noopener" title="미리보기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
         </div>
-        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 캡처를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 이미지를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
         <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 링크를 아는 사람은 열람할 수 있습니다(추측불가 코드). 리뷰어 이름이 함께 표시됩니다.</div>
       </div>`;
     showToast('업체 보고 링크 준비됨', 'success');
@@ -16409,7 +16270,7 @@ function _relocateCopyLink(inputId) {
 
 // ── 선택 탭 [리뷰] 폴더 이미지 연결 백필 — POST /api/drive/review-folder-backfill ──
 //   폴더 안 이미지를 파일명 이름↔행 결정적 매칭으로 원장(review_submissions)·대표 이미지에 연결.
-//   업체 뷰어 "리뷰 캡처 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
+//   업체 뷰어 "리뷰 이미지 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
 async function _reviewFolderBackfill(apply) {
   const t = _relocateTabs[_relocateSelIdx];
   if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }

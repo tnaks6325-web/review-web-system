@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { registerLimiter, imageApiLimiter, campaignTokenLimiter } = require('../middleware/rateLimit.middleware');
 const { issueCampaignToken } = require('../services/reviewerCampaignEditor.service');
@@ -19,149 +18,7 @@ const { _getReviewerPhoneList, PAYMENT_COL_KEYWORDS } = require('../services/sea
 const adminNickname = require('../services/adminNickname.service');
 // ★ 082: 기간별 리뷰비 — 판정은 utils/campaignFee 가 단일 출처(화면마다 규칙을 만들면 합계가 갈라진다)
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
-const { resolveDeliveryReviewFee } = require('../utils/deliveryReviewFee');
 const { extractAmountNumber } = require('../utils/paymentAmount');
-const { normalizeStoredBanner, validateBannerInput, toPublicBanner } = require('../utils/reviewerHomeBanner');
-const purchaseSessions = require('../services/purchaseSubmissionSession.service');
-const {
-  issueReviewerSession,
-  verifyReviewerSession,
-  reviewerSessionMiddleware,
-} = require('../services/reviewerSession.service');
-const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
-const { earningsCandidates } = require('../services/reviewEarningsCandidates.service');
-const { boundedReviewRead } = require('../services/boundedReviewRead.service');
-
-router.get('/participations', reviewerSessionMiddleware, async (req, res, next) => {
-  res.set('Cache-Control','no-store');
-  try {
-    const session=req.reviewer;
-    const history=require('../services/reviewerHistory.service');
-    if (!await history.availability(session.ownerReviewerId)) {
-      return res.json({ok:true,mode:'legacy',reason:'ownership_not_certified'});
-    }
-    const phone=String(session.loginPhone8||'').replace(/\D/g,'').slice(-8);
-    if(phone.length!==8) return res.status(401).json({ok:false,code:'REVIEWER_AUTH_INVALID',error:'다시 로그인해 주세요.'});
-    const sub=session.loginKind==='sub';
-    const identity=sub ? await require('../services/reviewerIdentity.service').resolveParticipantIdentity({
-      ownerReviewerId:session.ownerReviewerId,participantPhone8:phone}) : null;
-    const result=await require('../services/search.service').searchByName('',phone,{
-      ownerHistory:true,ownerReviewerId:session.ownerReviewerId,ownerPhone8s:[phone],strictPhoneScope:true,
-      restrictParticipant:sub,participantIdentityId:identity&&identity.id||null,includeSubmitted:true,
-      historyStatus:req.query.status||'all',historyLimit:req.query.limit,historyCursor:req.query.cursor,
-    });
-    res.json({ok:true,...result});
-  } catch(err) {
-    if(err.code==='HISTORY_CURSOR_INVALID') return res.status(409).json({ok:false,code:err.code,error:err.message});
-    next(err);
-  }
-});
-
-// 참여행 → 주문 → 신청 → 과거 링크의 소유자 우선순위를 participant identity에도 적용한다.
-// 충돌하는 하위 레코드의 identity를 채택하면 타계정 자신의 행이 화면에서 사라질 수 있다.
-function _participantIdentityByOwnerSql({ cp = null, os = null, ca = null, pl = null } = {}) {
-  const aliases = [cp, os, ca, pl].filter(Boolean);
-  const owner = `COALESCE(${aliases.map(a => `${a}.owner_reviewer_id`).join(', ')})`;
-  return `COALESCE(${aliases.map(a =>
-    `CASE WHEN ${a}.owner_reviewer_id IS NULL OR ${a}.owner_reviewer_id = ${owner} ` +
-    `THEN ${a}.participant_identity_id END`).join(', ')})`;
-}
-
-function sendReviewerIdentityError(res, err, next) {
-  if (err instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
-    return res.status(err.status || 400).json({ ok: false, code: err.code, error: err.message });
-  }
-  return next(err);
-}
-
-function sendReviewerSessionError(res, err) {
-  if (!err || !['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err.name)) return false;
-  const expired = err.name === 'TokenExpiredError';
-  res.status(401).json({
-    ok: false,
-    code: expired ? 'REVIEWER_SESSION_EXPIRED' : 'REVIEWER_AUTH_INVALID',
-    error: expired ? '로그인 시간이 만료되었습니다. 다시 로그인해주세요.' : '유효하지 않은 리뷰어 로그인입니다.',
-  });
-  return true;
-}
-
-function _phone8(value) {
-  return String(value || '').replace(/\D/g, '').slice(-8);
-}
-
-function _reviewerTaskName(row) {
-  const internal = /^(campaign:|wt_)/i;
-  const candidates = [
-    row && row.campaignTitle,
-    row && row.targetDisplayName,
-    row && row.targetCampaignName,
-    row && row.indexCampaignName,
-    row && row.targetTabName,
-  ];
-  for (const candidate of candidates) {
-    const value = String(candidate || '').trim();
-    if (value && !internal.test(value)) return value;
-  }
-  return '참여 작업';
-}
-
-async function _reviewerPhoneScopeFromSession(session) {
-  const ownerReviewerId = String(session && session.ownerReviewerId || '');
-  if (!ownerReviewerId) return { ownerReviewerId: '', phone8s: [] };
-  if (session && session.loginKind === 'sub') {
-    const loginPhone8 = _phone8(session.loginPhone8);
-    const identity = loginPhone8.length === 8
-      ? await require('../services/reviewerIdentity.service').resolveParticipantIdentity({
-        ownerReviewerId,
-        participantPhone8: loginPhone8,
-      })
-      : null;
-    return {
-      ownerReviewerId,
-      phone8s: loginPhone8.length === 8 ? [loginPhone8] : [],
-      participantIdentityId: identity && identity.id || null,
-      restrictParticipant: true,
-    };
-  }
-  return {
-    ...await require('../services/reviewerIdentity.service').getOwnerScopeByReviewerId(ownerReviewerId),
-    participantIdentityId: null,
-    restrictParticipant: false,
-  };
-}
-
-async function _reviewerScopeFromRequest(req, phone8, label) {
-  const token = (req.headers || {})['x-reviewer-token'];
-  if (token) {
-    const session = verifyReviewerSession(token);
-    return _reviewerPhoneScopeFromSession(session);
-  }
-  try {
-    return await require('../services/reviewerIdentity.service').getOwnerScopeByLoginPhone8(phone8);
-  } catch (scopeErr) {
-    logger.warn(`[${label}] 코드 스코프 조회 실패(현재 번호만): ${scopeErr.message}`);
-    return { ownerReviewerId: null, phone8s: [phone8] };
-  }
-}
-
-async function bindProfileOwnerWhenEnabled(req, res, next) {
-  if (!reviewerOrderIdentity.isEnabled()) return next();
-  try {
-    const token = req.headers['x-reviewer-token'];
-    if (!token) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인이 필요합니다.' });
-    const session = verifyReviewerSession(token);
-    const { rows } = await pool.query('SELECT phone8 FROM reviewers WHERE id = $1 LIMIT 1', [session.ownerReviewerId]);
-    if (rows.length !== 1) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
-    req.body = { ...(req.body || {}), phone8: rows[0].phone8, ownerReviewerId: session.ownerReviewerId };
-    req.reviewer = session;
-    next();
-  } catch (err) {
-    if (err && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err.name)) {
-      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인이 만료되었거나 유효하지 않습니다.' });
-    }
-    next(err);
-  }
-}
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -188,52 +45,12 @@ router.post('/campaign-token', campaignTokenLimiter, async (req, res, next) => {
   }
 });
 
-// 관리자 등록리뷰어DB에서 새 탭으로 연 리뷰어 홈의 로그인 교환.
-// 교환권은 Track B의 adminOrMaster 경로에서만 발급되고 5분 뒤 만료된다.
-// 브라우저 공용 localStorage 대신 새 탭의 sessionStorage에만 저장하게 해 관리자 화면을 건드리지 않는다.
-router.post('/home-session', async (req, res, next) => {
-  try {
-    const ticket = String((req.body && req.body.ticket) || '');
-    const p = jwt.verify(ticket, process.env.JWT_SECRET, { issuer: 'review-web-system' });
-    if (!p || p.scope !== 'reviewer_home_admin' || !p.name || !/^\d{8}$/.test(String(p.phone8 || ''))) {
-      return res.status(401).json({ ok: false, error: '유효하지 않은 리뷰어 홈 링크입니다.' });
-    }
-    // 관리자 홈 링크 발급과 같은 규칙: status와 무관하게 현재 등록 레코드만 재확인한다.
-    const { rows } = await pool.query(
-      `SELECT id, name, phone, phone8 FROM reviewers WHERE name = $1 AND phone8 = $2 LIMIT 2`,
-      [String(p.name), String(p.phone8)]
-    );
-    if (rows.length !== 1) return res.status(401).json({ ok: false, error: '유효하지 않거나 중복된 리뷰어 홈 링크입니다.' });
-    const reviewerToken = issueReviewerSession({
-      ownerReviewerId: rows[0].id,
-      loginName: rows[0].name,
-      loginPhone8: rows[0].phone8,
-      loginKind: 'self',
-    });
-    const { id: _id, ...user } = rows[0];
-    res.json({ ok: true, user, reviewerToken });
-  } catch (err) {
-    if (err && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err.name)) {
-      return res.status(401).json({ ok: false, error: '리뷰어 홈 링크가 만료되었거나 유효하지 않습니다.' });
-    }
-    next(err);
-  }
-});
-
 // GET /api/reviewer/verify — 리뷰어 인증 (GAS: verifyReviewer)
 router.get('/verify', async (req, res, next) => {
   try {
     const { name, phone8 } = req.query;
     const result = await verifyReviewer(name, phone8);
-    if (!result.ok) return res.json(result);
-    const reviewerToken = issueReviewerSession({
-      ownerReviewerId: result._ownerReviewerId,
-      loginName: result.name,
-      loginPhone8: result._loginPhone8,
-      loginKind: result._loginKind,
-    });
-    const { _ownerReviewerId, _loginPhone8, _loginKind, ...publicResult } = result;
-    res.json({ ...publicResult, reviewerToken });
+    res.json(result);
   } catch (err) {
     console.error('[verify] Error:', err.message, err.stack);
     res.status(500).json({ ok: false, error: '로그인 처리 중 오류: ' + err.message });
@@ -274,49 +91,13 @@ router.post('/delete', authMiddleware, async (req, res, next) => {
 
 // POST /api/reviewer/profile — 프로필 관리 (GAS: getReviewerProfile/saveSubAccounts/saveIncomeInfo)
 // 리뷰어 본인이 phone8을 통해 접근 (인증 불필요 — phone8이 사실상 인증 토큰 역할)
-router.post('/profile', bindProfileOwnerWhenEnabled, async (req, res, next) => {
+router.post('/profile', async (req, res, next) => {
   try {
     const result = await handleReviewerProfile(req.body);
     res.json(result);
   } catch (err) {
     next(err);
   }
-});
-
-// 서명된 리뷰어 세션에 귀속된 프로필. phone8 단독 조회와 달리 동명이인/중복번호를 섞지 않는다.
-router.get('/profile/secure', reviewerSessionMiddleware, async (req, res, next) => {
-  try {
-    res.json(await reviewerOrderIdentity.getSecureProfile(req.reviewer.ownerReviewerId));
-  } catch (err) { return sendReviewerIdentityError(res, err, next); }
-});
-
-// 명의별 공통 쇼핑 아이디. 구매양식의 체크박스를 선택한 경우에만 프론트가 이 경로를 호출한다.
-router.patch('/profile/identities/:identityKey/shopping-id', reviewerSessionMiddleware, async (req, res, next) => {
-  try {
-    res.json(await reviewerOrderIdentity.saveShoppingId(
-      req.reviewer.ownerReviewerId,
-      decodeURIComponent(String(req.params.identityKey || '')),
-      req.body && req.body.shoppingId
-    ));
-  } catch (err) { return sendReviewerIdentityError(res, err, next); }
-});
-
-router.post('/order-identity-context', reviewerSessionMiddleware, async (req, res, next) => {
-  try {
-    res.json(await reviewerOrderIdentity.getParticipationIdentityContext(req.body || {}, req.reviewer));
-  } catch (err) { return sendReviewerIdentityError(res, err, next); }
-});
-
-router.post('/order-identity-match', imageApiLimiter, reviewerSessionMiddleware, async (req, res, next) => {
-  try {
-    res.json(await reviewerOrderIdentity.matchCapture(req.body || {}, req.reviewer));
-  } catch (err) { return sendReviewerIdentityError(res, err, next); }
-});
-
-router.post('/order-identity-match/manual-confirm', imageApiLimiter, reviewerSessionMiddleware, async (req, res, next) => {
-  try {
-    res.json(await reviewerOrderIdentity.manualConfirm(req.body || {}, req.reviewer));
-  } catch (err) { return sendReviewerIdentityError(res, err, next); }
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -330,16 +111,15 @@ router.post('/order-identity-match/manual-confirm', imageApiLimiter, reviewerSes
 //   (최종 게이트는 /api/submit/order 서버검증).
 // ═══════════════════════════════════════════════════════════
 // ★ Gemini 비용 보호: 이미지 API와 동일한 리미터 적용 (무인증 엔드포인트 DoS 방지)
-router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, async (req, res) => {
+router.post('/identity-precheck', imageApiLimiter, async (req, res) => {
   try {
     const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
     const p8 = String(req.body?.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
     if (p8.length !== 8) return res.json({ ok: false, error: 'phone8이 필요합니다.' });
 
-    const profileScope = req.reviewer && req.reviewer.ownerReviewerId;
     const { rows } = await pool.query(
       `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
-       FROM reviewers WHERE ${profileScope ? 'id' : 'phone8'} = $1 LIMIT 1`, [profileScope || p8]
+       FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]
     );
     if (rows.length === 0) return res.json({ ok: false, error: '등록된 리뷰어가 아닙니다.' });
 
@@ -398,8 +178,7 @@ router.get('/my-applications', async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     }
 
-    // 1. 본계정 코드 스코프(본인+타계정+이전 별칭)를 읽는다. 코드가 아직 없는 레거시 행도
-    //    sub_accounts 범위로 계속 읽혀야 하므로 서비스가 기존 폴백까지 맡는다.
+    // 1. reviewers 테이블에서 이름/전화번호 조회
     const { rows: reviewerRows } = await pool.query(
       `SELECT name, phone FROM reviewers WHERE phone8 = $1 LIMIT 1`,
       [phone8]
@@ -407,12 +186,9 @@ router.get('/my-applications', async (req, res, next) => {
     if (reviewerRows.length === 0) {
       return res.json({ ok: true, applications: [], message: '등록된 리뷰어를 찾을 수 없습니다.' });
     }
-    let phoneList = [phone8], ownerReviewerId = null;
-    try { const scope = await require('../services/reviewerIdentity.service').getOwnerScopeByLoginPhone8(phone8); phoneList = scope.phone8s || phoneList; ownerReviewerId = scope.ownerReviewerId || null; }
-    catch (scopeErr) { logger.warn('[my-applications] 코드 스코프 조회 실패(현재 번호만): ' + scopeErr.message); }
+    const reviewer = reviewerRows[0];
 
-    // 2. campaign_applications에서 소유자 전체의 신청 이력 조회. 표시/정산 집계는 소유자 기준이되,
-    //    같은 공고 재참여 제한은 계속 apply 경로의 실제 참여자 phone8/identity 기준으로 따로 판정한다.
+    // 2. campaign_applications에서 해당 리뷰어의 신청 이력 조회
     const { rows: appRows } = await pool.query(`
       SELECT
         ca.id,
@@ -429,26 +205,13 @@ router.get('/my-applications', async (req, res, next) => {
         rc.status AS "campaignStatus"
       FROM campaign_applications ca
       LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
-      WHERE (ca.owner_reviewer_id = $2
-             OR (ca.owner_reviewer_id IS NULL AND (
-               ca.phone8 = ANY($1)
-               OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                 SELECT 1 FROM reviewer_phone_changes rpc
-                  WHERE rpc.old_phone8 = ca.owner_phone8
-                    AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-               ) AND NOT EXISTS (
-                 SELECT 1
-                   FROM reviewer_identity_aliases ria
-                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                  WHERE ria.phone8 = ca.owner_phone8
-                    AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-               ))
-             )))
+      WHERE (ca.applicant_name = $1
+         OR ca.applicant_phone LIKE $2)
         -- 작업보드에서 참여행을 삭제하며 취소된 건은 리뷰어의 참여이력에서 제외한다.
         AND ca.status <> 'cancelled'
       ORDER BY ca.applied_at DESC
       LIMIT 50
-    `, [phoneList, ownerReviewerId]);
+    `, [reviewer.name, '%' + phone8]);
 
     res.json({ ok: true, applications: appRows, total: appRows.length });
   } catch (err) {
@@ -463,13 +226,8 @@ router.get('/my-status', async (req, res, next) => {
     if (!phone8 || phone8.length !== 8) {
       return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     }
-    const scope = await _reviewerScopeFromRequest(req, phone8, 'my-status');
-    const phoneList = scope.phone8s && scope.phone8s.length ? scope.phone8s : [phone8];
-    const ownerReviewerId = scope.ownerReviewerId || null;
-    const participantIdentityId = scope.participantIdentityId || null;
-    const restrictParticipant = scope.restrictParticipant === true;
 
-    // review_index에서 본계정 코드 스코프의 모든 참여 내역 조회 (시트 기반)
+    // review_index에서 해당 phone8의 모든 참여 내역 조회 (시트 기반)
     const { rows } = await pool.query(`
       SELECT
         ri.id,
@@ -489,122 +247,10 @@ router.get('/my-status', async (req, res, next) => {
         tc.manager,
         tc.review_type AS "reviewType",
         tc.delivery_type AS "deliveryType",
-        tc.is_closed AS "isClosed",
-        (SELECT s.review_status FROM review_closed_targets s
-          WHERE s.sheet_id = ri.sheet_id AND s.tab_name = ri.tab_name
-            AND s.row_index = ri.row_index AND s.review_status = 'closed_no_review'
-          LIMIT 1) AS "reviewReminderStatus"
+        tc.is_closed AS "isClosed"
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      LEFT JOIN campaign_participants cp
-        ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
-       AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
-      LEFT JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
-      LEFT JOIN LATERAL (
-        SELECT app.owner_reviewer_id, app.owner_phone8, app.participant_identity_id
-          FROM campaign_applications app
-         WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
-         ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
-         LIMIT 1
-      ) ca ON TRUE
-      LEFT JOIN participation_links pl ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-      LEFT JOIN reviewers ro ON ro.id = $2
-      WHERE (
-        (cp.id IS NOT NULL AND (
-          ($2::uuid IS NULL AND cp.phone8 = ANY($1))
-          OR cp.owner_reviewer_id = $2
-          OR (cp.owner_reviewer_id IS NULL AND (
-            os.owner_reviewer_id = $2
-            OR (os.owner_reviewer_id IS NULL AND (
-              ca.owner_reviewer_id = $2
-              OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                SELECT 1 FROM reviewer_phone_changes rpc
-                 WHERE rpc.old_phone8 = ca.owner_phone8
-                   AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-              ) AND NOT EXISTS (
-                SELECT 1
-                  FROM reviewer_identity_aliases ria
-                  JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                 WHERE ria.phone8 = ca.owner_phone8
-                   AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-              ))
-              OR (
-                ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                AND (
-                  pl.owner_reviewer_id = $2
-                  OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)
-                    AND NOT EXISTS (
-                      SELECT 1 FROM reviewer_phone_changes rpc
-                       WHERE rpc.old_phone8 = pl.phone8
-                         AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-                    )
-                    AND NOT EXISTS (
-                      SELECT 1
-                        FROM reviewer_identity_aliases ria
-                        JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                       WHERE ria.phone8 = pl.phone8
-                         AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-                    )
-                    AND (
-                      regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                      OR regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g') = regexp_replace(COALESCE(ro.name, ''), '\\s', '', 'g')
-                      OR EXISTS (
-                        SELECT 1 FROM jsonb_array_elements(
-                          CASE WHEN jsonb_typeof(ro.sub_accounts) = 'array' THEN ro.sub_accounts ELSE '[]'::jsonb END
-                        ) sub
-                        WHERE regexp_replace(COALESCE(sub->>'name', ''), '\\s', '', 'g') IN (
-                          regexp_replace(COALESCE(ri.reviewer_name, ''), '\\s', '', 'g'),
-                          regexp_replace(COALESCE(ri.recipient_name, ''), '\\s', '', 'g')
-                        )
-                      )
-                    )
-                  )
-                )
-              )
-              OR (ca.owner_reviewer_id IS NULL
-                  AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($1))
-            ))
-          ))
-        ))
-        OR (cp.id IS NULL AND (
-          pl.owner_reviewer_id = $2
-          OR (pl.owner_reviewer_id IS NULL AND (
-            (ri.phone8 = ANY($1)
-             AND NOT EXISTS (
-               SELECT 1 FROM reviewer_phone_changes rpc
-                WHERE rpc.old_phone8 = ri.phone8
-                  AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-             )
-             AND NOT EXISTS (
-               SELECT 1
-                 FROM reviewer_identity_aliases ria
-                 JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                WHERE ria.phone8 = ri.phone8
-                  AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-             ))
-            OR (ri.phone8 IS NULL AND pl.phone8 = ANY($1)
-                AND NOT EXISTS (
-                  SELECT 1 FROM reviewer_phone_changes rpc
-                   WHERE rpc.old_phone8 = pl.phone8
-                     AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-                )
-                AND NOT EXISTS (
-                  SELECT 1
-                    FROM reviewer_identity_aliases ria
-                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                   WHERE ria.phone8 = pl.phone8
-                     AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-                ))
-          ))
-        ))
-      )
-        AND (NOT $3::boolean OR (
-          ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} = $4
-          OR (
-            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
-            AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($1)
-          )
-        ))
+      WHERE ri.phone8 = $1
         -- 작업보드에서 실제 삭제된 정확한 참여 행은 리뷰어의 참여내역에도 노출하지 않는다.
         AND NOT EXISTS (
           SELECT 1 FROM workdesk_participant_deletions wd
@@ -613,7 +259,7 @@ router.get('/my-status', async (req, res, next) => {
         )
       ORDER BY ri.built_at DESC
       LIMIT 100
-    `, [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]);
+    `, [phone8]);
 
     // 진행단계 매핑:
     // 배정됨(review_index에 있음) → 리뷰제출(is_submitted=true) → 입금완료(is_submitted2='PAID')
@@ -622,7 +268,6 @@ router.get('/my-status', async (req, res, next) => {
       if (r.isSubmitted) stage = 'submitted'; // 리뷰 제출완료
       if (r.paymentStatus === 'PAID') stage = 'paid'; // 입금완료
       if (r.isClosed && !r.isSubmitted) stage = 'closed'; // 마감(미제출)
-      if (r.reviewReminderStatus === 'closed_no_review') stage = 'closed_no_review';
 
       return { ...r, stage, source: 'review_index' };
     });
@@ -651,35 +296,7 @@ router.get('/my-status', async (req, res, next) => {
         tc.is_closed AS "isClosed"
       FROM order_submissions os
       LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
-      LEFT JOIN LATERAL (
-        SELECT app.owner_reviewer_id, app.owner_phone8, app.phone8, app.participant_identity_id
-          FROM campaign_applications app
-         WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
-         ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
-         LIMIT 1
-      ) ca ON TRUE
-      WHERE (os.owner_reviewer_id = $2
-             OR (os.owner_reviewer_id IS NULL AND (
-               ca.owner_reviewer_id = $2
-               OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                 SELECT 1 FROM reviewer_phone_changes rpc
-                  WHERE rpc.old_phone8 = ca.owner_phone8
-                    AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-               ) AND NOT EXISTS (
-                 SELECT 1
-                   FROM reviewer_identity_aliases ria
-                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                  WHERE ria.phone8 = ca.owner_phone8
-                    AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-               ))
-               OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                   AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-             )))
-        AND (NOT $3::boolean OR (
-          ${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} = $4
-          OR (${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} IS NULL
-              AND COALESCE(ca.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
-        ))
+      WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
         AND os.deleted_at IS NULL
         -- 주문 원장은 감사용으로 남겨도, 실제 삭제된 작업보드 참여행의 주문은 리뷰어
         -- 참여현황에 다시 나타나면 안 된다.
@@ -689,7 +306,7 @@ router.get('/my-status', async (req, res, next) => {
         )
       ORDER BY os.submitted_at DESC
       LIMIT 100
-    `, [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]);
+    `, [phone8]);
 
     for (const o of orderRows) {
       // 이미 시트에 반영돼 review_index가 대표하는 주문은 건너뜀(중복 방지)
@@ -729,35 +346,16 @@ router.get('/my-status', async (req, res, next) => {
     try {
       const { rows: holdRows } = await pool.query(`
         SELECT ca.id, ca.campaign_id AS "campaignId", ca.applicant_name AS "name",
-               ca.status, ca.applied_at AS "appliedAt", ca.expires_at AS "expiresAt",
+               ca.applied_at AS "appliedAt", ca.expires_at AS "expiresAt",
                (ca.owner_phone8 IS NOT NULL AND ca.owner_phone8 <> ca.phone8) AS "isSub",
                rc.title, rc.thumbnail_url AS "thumbnailUrl"
           FROM campaign_applications ca
           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE (ca.owner_reviewer_id = $2
-                OR (ca.owner_reviewer_id IS NULL AND (
-                  ca.phone8 = ANY($1)
-                  OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                    SELECT 1 FROM reviewer_phone_changes rpc
-                     WHERE rpc.old_phone8 = ca.owner_phone8
-                       AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-                  ) AND NOT EXISTS (
-                    SELECT 1
-                      FROM reviewer_identity_aliases ria
-                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                     WHERE ria.phone8 = ca.owner_phone8
-                       AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-                  ))
-                )))
-           AND (NOT $3::boolean OR (
-             ca.participant_identity_id = $4
-             OR (ca.participant_identity_id IS NULL AND ca.phone8 = ANY($1))
-           ))
-           AND ((ca.status = 'applied' AND ca.expires_at > NOW())
-                OR ca.status = 'blog_pending')
+         WHERE (ca.phone8 = $1 OR ca.owner_phone8 = $1)
+           AND ca.status = 'applied' AND ca.expires_at > NOW()
          ORDER BY ca.applied_at DESC
          LIMIT 20
-      `, [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]);
+      `, [phone8]);
       for (const h of holdRows) {
         items.unshift({
           id: `hold-${h.id}`,
@@ -773,8 +371,7 @@ router.get('/my-status', async (req, res, next) => {
           thumbnailUrl: h.thumbnailUrl || '',
           isSubmitted: false,
           paymentStatus: null,
-          // 127: 블로그 승인 대기(blog_pending)는 별도 stage — 화면이 "승인 대기 중"으로 구분 표기
-          stage: h.status === 'blog_pending' ? 'blog_pending' : 'applied',
+          stage: 'applied',           // 참여 확보 — 구매양식 제출 대기(만료 시 자동 제외)
           source: 'campaign_hold',
         });
       }
@@ -796,204 +393,6 @@ router.get('/my-status', async (req, res, next) => {
 
     res.json({ ok: true, items, stats });
   } catch (err) {
-    if (sendReviewerSessionError(res, err)) return;
-    next(err);
-  }
-});
-
-// GET /api/reviewer/overdue-review-warning — 로그인 시 보여줄 가장 오래된 리뷰 미제출 1건.
-// 구매양식 제출 뒤 10일이 지난 주문 중 현재 리뷰내역의 참여행과 연결된 건만 고른다.
-// 경고 표시 여부는 캠페인 참여 제한과 무관하며 이 API는 읽기만 수행한다.
-router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res, next) => {
-  try {
-    if (process.env.REVIEW_OVERDUE_WARNING_ENABLED === '0') {
-      return res.status(503).json({ ok: false, code: 'REVIEW_WARNING_DEFERRED' });
-    }
-    const scope = await _reviewerPhoneScopeFromSession(req.reviewer);
-    if (!scope.ownerReviewerId || !scope.phone8s.length) {
-      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
-    }
-
-    const { rows } = await require('../services/boundedReviewRead.service').boundedReviewRead(client => client.query(`
-      WITH warning_candidate_ids AS MATERIALIZED (
-        SELECT id FROM order_submissions
-         WHERE owner_reviewer_id = $1
-            OR RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2)
-        UNION
-        SELECT order_submission_id FROM campaign_participants
-         WHERE owner_reviewer_id = $1 OR phone8 = ANY($2)
-            OR participant_identity_id IN (SELECT id FROM reviewer_identities WHERE owner_reviewer_id = $1)
-        UNION
-        SELECT os.id FROM order_submissions os
-          JOIN campaign_applications app ON app.id = os.campaign_application_id
-         WHERE app.owner_reviewer_id = $1 OR app.owner_phone8 = ANY($2)
-      ), warning_orders AS MATERIALIZED (
-        SELECT os.* FROM order_submissions os
-          JOIN warning_candidate_ids candidate ON candidate.id = os.id
-         WHERE os.deleted_at IS NULL AND os.mirror_status = 'written'
-           AND os.submitted_at <= NOW() - INTERVAL '10 days'
-      ), warning_participants AS MATERIALIZED (
-      -- Resolve an order's participant once, before the index/obligation joins.
-      -- Otherwise the planner can repeat this lateral scan for every index row.
-      SELECT os.id AS warning_order_id, cp.*
-        FROM warning_orders os
-        LEFT JOIN LATERAL (
-          /* 한 주문 UUID에 과거 다른 리뷰어 행이 섞인 사례가 있으므로 최신 행을 임의로
-             고르지 않는다. 로그인 소유자의 본계정·타계정 범위만 먼저 모으고, 그 안의
-             어느 명의로든 같은 작업이 완료됐다면 주문 전체를 완료로 본다. 소유자 범위에
-             서로 다른 작업행이 여러 개 남으면 잘못된 독촉보다 미노출이 안전하므로 제외한다. */
-          WITH owner_rows AS (
-            SELECT p.*,
-                   (COALESCE(p.is_submitted, FALSE)
-                    OR EXISTS (
-                      SELECT 1 FROM review_index dri
-                       WHERE dri.sheet_id = p.sheet_id
-                         AND dri.tab_name = p.tab_name
-                         AND dri.row_index = p.seq
-                         AND dri.is_submitted = TRUE
-                    )
-                    OR EXISTS (
-                      SELECT 1 FROM review_index_archive dra
-                       WHERE dra.sheet_id = p.sheet_id
-                         AND dra.tab_name = p.tab_name
-                         AND dra.row_index = p.seq
-                         AND dra.is_submitted = TRUE
-                    )) AS work_submitted
-              FROM campaign_participants p
-             WHERE p.order_submission_id = os.id
-               AND p.deleted_at IS NULL
-               AND (
-                 p.owner_reviewer_id = $1
-                 OR (p.owner_reviewer_id IS NULL AND (
-                   (p.participant_identity_id IS NOT NULL AND EXISTS (
-                     SELECT 1 FROM reviewer_identities owner_identity
-                      WHERE owner_identity.id = p.participant_identity_id
-                        AND owner_identity.owner_reviewer_id = $1
-                   ))
-                   OR (p.participant_identity_id IS NULL
-                       AND p.phone8 = ANY($2)
-                       /* 전화번호는 재사용될 수 있다. 주문 또는 신청서에 다른 소유자가
-                          명시된 경우에는 소유자 없는 과거 참여행을 현재 계정에 붙이지 않는다. */
-                       AND (
-                         os.owner_reviewer_id = $1
-                         OR (os.owner_reviewer_id IS NULL AND NOT EXISTS (
-                           SELECT 1
-                             FROM campaign_applications legacy_owner_ca
-                            WHERE legacy_owner_ca.id = os.campaign_application_id
-                              AND legacy_owner_ca.owner_reviewer_id IS NOT NULL
-                              AND legacy_owner_ca.owner_reviewer_id <> $1
-                         ))
-                       ))
-                 ))
-               )
-               AND (NOT $3::boolean OR (
-                 p.participant_identity_id = $4
-                 OR (p.participant_identity_id IS NULL AND p.phone8 = ANY($2))
-               ))
-          ), owner_summary AS (
-            SELECT COUNT(DISTINCT (sheet_id, tab_name, seq))::int AS owner_link_count,
-                   COALESCE(BOOL_OR(work_submitted), FALSE) AS owner_work_submitted
-              FROM owner_rows
-          )
-          SELECT p.sheet_id, p.tab_name, p.seq, p.is_submitted, p.phone8,
-                 p.owner_reviewer_id, p.participant_identity_id,
-                 s.owner_link_count, s.owner_work_submitted
-            FROM owner_rows p CROSS JOIN owner_summary s
-           ORDER BY p.work_submitted DESC, p.updated_at DESC, p.id DESC
-           LIMIT 1
-        ) cp ON TRUE
-      )
-      SELECT os.id AS "orderSubmissionId", os.submitted_at AS "submittedAt",
-             FLOOR(EXTRACT(EPOCH FROM (NOW() - os.submitted_at)) / 86400)::int AS "elapsedDays",
-             ri.sheet_id AS "targetSheetId", ri.tab_name AS "targetTabName", ri.row_index AS "targetRowIndex",
-             rc.title AS "campaignTitle", rt.display_name AS "targetDisplayName",
-             rt.campaign_name AS "targetCampaignName", ri.campaign_name AS "indexCampaignName"
-        FROM warning_orders os
-        LEFT JOIN warning_participants cp ON cp.warning_order_id = os.id
-        JOIN review_index ri
-          ON ri.sheet_id = COALESCE(cp.sheet_id, os.sheet_id)
-         AND ri.tab_name = COALESCE(cp.tab_name, os.tab_name)
-         AND ri.row_index = COALESCE(cp.seq, os.sheet_row)
-         -- 주문 UUID 연결이 없는 레거시 행은 위치와 연락처가 모두 맞을 때만 보조 매칭한다.
-         AND (cp.sheet_id IS NOT NULL
-              OR ri.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
-              OR (ri.phone8 IS NULL AND EXISTS (
-                SELECT 1
-                  FROM participation_links pl
-                 WHERE pl.sheet_id = ri.sheet_id
-                   AND pl.tab_name = ri.tab_name
-                   AND pl.row_index = ri.row_index
-                   AND pl.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
-              )))
-        LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
-        LEFT JOIN recruit_campaigns rc
-          ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
-        LEFT JOIN tab_configs rt ON rt.sheet_id = ri.sheet_id AND rt.tab_name = ri.tab_name
-       WHERE (cp.sheet_id IS NOT NULL
-              OR os.owner_reviewer_id = $1
-              OR (os.owner_reviewer_id IS NULL AND (
-                ca.owner_reviewer_id = $1
-                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($2) AND NOT EXISTS (
-                  SELECT 1 FROM reviewer_phone_changes rpc
-                   WHERE rpc.old_phone8 = ca.owner_phone8
-                     AND rpc.reviewer_id <> $1
-                ) AND NOT EXISTS (
-                  SELECT 1
-                    FROM reviewer_identity_aliases ria
-                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                   WHERE ria.phone8 = ca.owner_phone8
-                     AND rii.owner_reviewer_id <> $1
-                ))
-                OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                    AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2))
-              )))
-         AND (NOT $3::boolean OR (
-           ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} = $4
-           OR (${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} IS NULL
-               AND COALESCE(cp.phone8, ca.phone8,
-                   RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($2))
-         ))
-         AND os.deleted_at IS NULL
-         AND os.mirror_status = 'written'
-         AND os.submitted_at <= NOW() - INTERVAL '10 days'
-         AND NOT COALESCE(cp.owner_work_submitted, FALSE)
-         AND NOT COALESCE(ri.is_submitted, FALSE)
-         AND ${require('../services/reviewObligation.service').unfulfilledSql('ri')}
-         AND COALESCE(cp.owner_link_count, 1) = 1
-         AND NOT EXISTS (
-           SELECT 1 FROM review_closed_targets rrs
-            WHERE rrs.order_submission_id = os.id
-              AND rrs.review_status = 'closed_no_review'
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM workdesk_participant_deletions wd
-            WHERE wd.order_submission_id = os.id
-               OR (wd.sheet_id = ri.sheet_id AND wd.tab_name = ri.tab_name AND wd.seq = ri.row_index)
-         )
-       ORDER BY os.submitted_at ASC, os.id ASC
-       LIMIT 1`,
-      [scope.ownerReviewerId, scope.phone8s, scope.restrictParticipant === true, scope.participantIdentityId || null]
-    ));
-
-    if (!rows.length) return res.json({ ok: true, item: null });
-    const row = rows[0];
-    res.json({
-      ok: true,
-      item: {
-        orderSubmissionId: row.orderSubmissionId,
-        submittedAt: row.submittedAt,
-        elapsedDays: Number(row.elapsedDays) || 10,
-        displayName: _reviewerTaskName(row),
-        sheetId: row.targetSheetId,
-        tabName: row.targetTabName,
-        rowIndex: row.targetRowIndex,
-      },
-    });
-  } catch (err) {
-    if (['REVIEW_WARNING_BUSY', '57014', '53400', '55P03'].includes(err.code)) {
-      res.set('Retry-After', '10');
-      return res.status(503).json({ ok: false, code: 'REVIEW_WARNING_DEFERRED' });
-    }
     next(err);
   }
 });
@@ -1009,138 +408,24 @@ router.get('/review-earnings', async (req, res, next) => {
     if (!phone8 || phone8.length !== 8) {
       return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     }
-    const scope = await _reviewerScopeFromRequest(req, phone8, 'review-earnings');
-    const phoneList = scope.phone8s && scope.phone8s.length ? scope.phone8s : await _getReviewerPhoneList(phone8);
-    const ownerReviewerId = scope.ownerReviewerId || null;
-    const participantIdentityId = scope.participantIdentityId || null;
-    const restrictParticipant = scope.restrictParticipant === true;
+    const phoneList = await _getReviewerPhoneList(phone8);
 
     // 참여중(미제출) + 제출완료 행을 한 번에.
     //   ★ 입금완료 판정은 search.service의 _isPaid와 동일 규칙을 SQL로 옮긴 것 —
     //     is_submitted2='PAID' 또는 row_json의 입금 키워드 컬럼에 값이 있으면 완료.
     //     키워드 배열을 그대로 패턴화해 판정이 갈라지지 않게 한다(row_json은 서버로 안 끌어옴 = 메모리 안전).
     const payPatterns = PAYMENT_COL_KEYWORDS.map(k => '%' + k + '%');
-    const { rows: riRows } = await boundedReviewRead(client => client.query(
-      `WITH ${earningsCandidates('$3', '$1')}
-       SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
-               ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)')} AS "isSubmitted", ri.start_date AS "startDate",
-               ri.row_json AS "rowJson",
-               (ri.is_submitted2 = 'PAID' OR EXISTS (
-                  SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
+    const { rows: riRows } = await pool.query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex",
+              is_submitted AS "isSubmitted", start_date AS "startDate",
+              (is_submitted2 = 'PAID' OR EXISTS (
+                 SELECT 1 FROM jsonb_each_text(COALESCE(row_json, '{}'::jsonb)) kv
                   WHERE kv.key ILIKE ANY($2) AND btrim(kv.value) <> ''
                )) AS "isPaid"
-         FROM earnings_rows ri
-         LEFT JOIN campaign_participants cp
-           ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
-          AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
-         LEFT JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
-         LEFT JOIN LATERAL (
-           SELECT app.owner_reviewer_id, app.owner_phone8, app.participant_identity_id
-             FROM campaign_applications app
-            WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
-            ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
-            LIMIT 1
-         ) ca ON TRUE
-         LEFT JOIN participation_links pl
-           ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-         WHERE ri.row_index IS NOT NULL AND (
-          (cp.id IS NOT NULL AND (
-            ($3::uuid IS NULL AND cp.phone8 = ANY($1))
-            OR cp.owner_reviewer_id = $3
-            OR (cp.owner_reviewer_id IS NULL AND (
-              os.owner_reviewer_id = $3
-              OR (os.owner_reviewer_id IS NULL AND (
-                ca.owner_reviewer_id = $3
-                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                  SELECT 1 FROM reviewer_phone_changes rpc
-                   WHERE rpc.old_phone8 = ca.owner_phone8
-                     AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
-                ) AND NOT EXISTS (
-                  SELECT 1
-                    FROM reviewer_identity_aliases ria
-                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                   WHERE ria.phone8 = ca.owner_phone8
-                     AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
-                ))
-                OR (
-                  ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                  AND (pl.owner_reviewer_id = $3 OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($1)
-                      AND NOT EXISTS (
-                        SELECT 1 FROM reviewer_phone_changes rpc
-                         WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $3
-                      )
-                      AND NOT EXISTS (
-                        SELECT 1
-                          FROM reviewer_identity_aliases ria
-                          JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                         WHERE ria.phone8 = pl.phone8 AND rii.owner_reviewer_id <> $3
-                      )))
-                  AND NOT EXISTS (
-                    SELECT 1 FROM reviewers current_owner
-                     WHERE current_owner.id <> $3
-                       AND (
-                         current_owner.phone8 = cp.phone8
-                         OR EXISTS (
-                           SELECT 1 FROM jsonb_array_elements(
-                             CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
-                                  THEN current_owner.sub_accounts ELSE '[]'::jsonb END
-                           ) sub
-                            WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
-                         )
-                       )
-                  )
-                )
-                OR (ca.owner_reviewer_id IS NULL
-                    AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($1))
-              ))
-            ))
-          ))
-          OR (cp.id IS NULL AND (
-            pl.owner_reviewer_id = $3
-            OR (pl.owner_reviewer_id IS NULL AND (
-              (ri.phone8 = ANY($1)
-               AND NOT EXISTS (
-                 SELECT 1 FROM reviewer_phone_changes rpc
-                  WHERE rpc.old_phone8 = ri.phone8
-                    AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
-               )
-               AND NOT EXISTS (
-                 SELECT 1
-                   FROM reviewer_identity_aliases ria
-                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                  WHERE ria.phone8 = ri.phone8
-                    AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
-               ))
-              OR (ri.phone8 IS NULL AND pl.phone8 = ANY($1)
-                  AND NOT EXISTS (
-                    SELECT 1 FROM reviewer_phone_changes rpc
-                     WHERE rpc.old_phone8 = pl.phone8
-                       AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1
-                      FROM reviewer_identity_aliases ria
-                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                     WHERE ria.phone8 = pl.phone8
-                       AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
-                  ))
-            ))
-          ))
-        )
-        AND (NOT $4::boolean OR (
-          ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} = $5
-          OR (
-            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
-            AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($1)
-          )
-        ))
-        AND NOT EXISTS (
-          SELECT 1 FROM review_closed_targets rrs
-           WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
-             AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
-        )`,
-      [phoneList, payPatterns, ownerReviewerId, restrictParticipant, participantIdentityId]
-    ));
+         FROM review_index
+        WHERE phone8 = ANY($1) AND row_index IS NOT NULL`,
+      [phoneList, payPatterns]
+    );
     const sheetIds = [...new Set(riRows.map(r => r.sheetId))];
     const tabNames = [...new Set(riRows.map(r => r.tabName))];
 
@@ -1150,7 +435,7 @@ router.get('/review-earnings', async (req, res, next) => {
       const { rows: camps } = await pool.query(
         `SELECT DISTINCT ON (linked_sheet_id, linked_tab_name)
                 id, linked_sheet_id AS "sheetId", linked_tab_name AS "tabName",
-                COALESCE(review_fee, 0) AS "reviewFee", delivery_review_fee_mix AS "deliveryReviewFeeMix", thumbnail_url AS "thumbnailUrl",
+                COALESCE(review_fee, 0) AS "reviewFee", thumbnail_url AS "thumbnailUrl",
                 to_char(start_date,'YYYY-MM-DD') AS "campStartDate"
            FROM recruit_campaigns
           WHERE linked_sheet_id = ANY($1) AND linked_tab_name = ANY($2)
@@ -1158,7 +443,7 @@ router.get('/review-earnings', async (req, res, next) => {
         [sheetIds, tabNames]
       );
       for (const c of camps) campMap[c.sheetId + '||' + c.tabName] = {
-        id: c.id, reviewFee: c.reviewFee || 0, deliveryReviewFeeMix: c.deliveryReviewFeeMix || [], thumbnailUrl: c.thumbnailUrl || '',
+        id: c.id, reviewFee: c.reviewFee || 0, thumbnailUrl: c.thumbnailUrl || '',
         campStartDate: c.campStartDate || null, schedules: [],
       };
       // ★ 082: 기간별 리뷰비 구간(1쿼리). 구간이 없는 공고는 종전대로 review_fee 하나만 쓴다.
@@ -1185,307 +470,72 @@ router.get('/review-earnings', async (req, res, next) => {
     const priceMap = {};
     const orderFeeMap = {};   // ★ 082: 행별 리뷰비 근거(참여시점 스냅샷 · 주문 제출일)
     if (sheetIds.length) {
-      const { rows: orders } = await boundedReviewRead(client => client.query(
-        `WITH ${earningsCandidates('$3', '$1')}
-         SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.sheet_row AS "sheetRow", os.price,
-                os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", os.submitted_at AS "orderedAt"
+      const { rows: orders } = await pool.query(
+        `SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.sheet_row AS "sheetRow", os.price,
+                os.review_fee_snapshot AS "feeSnapshot", os.submitted_at AS "orderedAt"
                 , cp.row_json AS "rowJson"
-           FROM earnings_orders os
-           LEFT JOIN campaign_participants cp
-             ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL AND cp.active = TRUE
-           LEFT JOIN LATERAL (
-             SELECT app.owner_reviewer_id, app.owner_phone8, app.participant_identity_id
-               FROM campaign_applications app
-              WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
-              ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
-              LIMIT 1
-           ) ca ON TRUE
-           WHERE (
-             (cp.id IS NOT NULL AND (
-               ($3::uuid IS NULL AND cp.phone8 = ANY($1))
-               OR cp.owner_reviewer_id = $3
-               OR (cp.owner_reviewer_id IS NULL AND (
-                 os.owner_reviewer_id = $3
-                 OR (os.owner_reviewer_id IS NULL AND (
-                   ca.owner_reviewer_id = $3
-                   OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                     SELECT 1 FROM reviewer_phone_changes rpc
-                      WHERE rpc.old_phone8 = ca.owner_phone8
-                        AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
-                   ) AND NOT EXISTS (
-                     SELECT 1
-                       FROM reviewer_identity_aliases ria
-                       JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                      WHERE ria.phone8 = ca.owner_phone8
-                        AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
-                   ))
-                   OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                       AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-                 ))
-               ))
-             ))
-             OR (cp.id IS NULL AND (
-               ($3::uuid IS NULL AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-               OR os.owner_reviewer_id = $3
-               OR (os.owner_reviewer_id IS NULL AND (
-                 ca.owner_reviewer_id = $3
-                 OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                   SELECT 1 FROM reviewer_phone_changes rpc
-                    WHERE rpc.old_phone8 = ca.owner_phone8
-                      AND ($3::uuid IS NULL OR rpc.reviewer_id <> $3)
-                 ) AND NOT EXISTS (
-                   SELECT 1
-                     FROM reviewer_identity_aliases ria
-                     JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                    WHERE ria.phone8 = ca.owner_phone8
-                      AND ($3::uuid IS NULL OR rii.owner_reviewer_id <> $3)
-                 ))
-                 OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                     AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-               ))
-             ))
-           )
-             AND (NOT $4::boolean OR (
-               ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} = $5
-               OR (${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} IS NULL
-                   AND COALESCE(cp.phone8, ca.owner_phone8,
-                       RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
-             ))
-             AND os.deleted_at IS NULL AND os.sheet_row IS NOT NULL AND os.sheet_id = ANY($2)`,
-        [phoneList, sheetIds, ownerReviewerId, restrictParticipant, participantIdentityId]
-      ));
+           FROM order_submissions os
+           LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
+          WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+            AND os.deleted_at IS NULL AND os.sheet_row IS NOT NULL AND os.sheet_id = ANY($2)`,
+        [phoneList, sheetIds]
+      );
       for (const o of orders) {
         const key = o.sheetId + '||' + o.tabName + '||' + o.sheetRow;
         const n = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
         const price = Number.isFinite(n) && n > 0 ? n : extractAmountNumber(o.rowJson);
         if (price > 0) priceMap[key] = price;
         // ★ 082: 그 행의 참여 근거(스냅샷·구매일) — 리뷰비 판정에 쓴다.
-        orderFeeMap[key] = { snapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot, orderDate: toKstDate(o.orderedAt) };
+        orderFeeMap[key] = { snapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt) };
       }
     }
 
     // 무시트 전환 후 주문은 review_index 행이 아직 없을 수 있다. 이 경우에도
     // 작업보드(campaign_participants)의 결제금액을 리뷰어 예상 금액에 바로 반영한다.
     // 시트 색인으로 이미 보이는 주문은 NOT EXISTS로 제외해 이중 집계를 막는다.
-    const { rows: sheetlessOrders } = await boundedReviewRead(client => client.query(
-      `WITH ${earningsCandidates('$2', '$1')}
-       SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
-              cp.sheet_id AS "participantSheetId", cp.tab_name AS "participantTabName", cp.seq AS "participantRowIndex",
-              ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, FALSE)', 'cp', 'seq')} AS "isSubmitted",
-              COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
-              os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
+    const { rows: sheetlessOrders } = await pool.query(
+      `SELECT os.id, os.price, os.review_fee_snapshot AS "feeSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
-              COALESCE(rc.review_fee, 0) AS "reviewFee", rc.delivery_review_fee_mix AS "deliveryReviewFeeMix",
+              COALESCE(rc.review_fee, 0) AS "reviewFee",
               rc.thumbnail_url AS "thumbnailUrl",
               to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
-         FROM earnings_orders os
-         LEFT JOIN campaign_participants cp
-           ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL AND cp.active = TRUE
+         FROM order_submissions os
+         LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
          LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
-         -- 오래된/복구된 무시트 주문은 campaign_application_id가 비어 있을 수 있다.
-         -- 이때 원장 좌표 campaign:<공고ID>는 이미 검증된 작업표 연결키이므로 같은 공고로 복원한다.
-         LEFT JOIN recruit_campaigns rc
-           ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
-        WHERE (
-          (cp.id IS NOT NULL AND (
-            ($2::uuid IS NULL AND cp.phone8 = ANY($1))
-            OR cp.owner_reviewer_id = $2
-            OR (cp.owner_reviewer_id IS NULL AND (
-              os.owner_reviewer_id = $2
-              OR (os.owner_reviewer_id IS NULL AND (
-                ca.owner_reviewer_id = $2
-                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                  SELECT 1 FROM reviewer_phone_changes rpc
-                   WHERE rpc.old_phone8 = ca.owner_phone8
-                     AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-                ) AND NOT EXISTS (
-                  SELECT 1
-                    FROM reviewer_identity_aliases ria
-                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                   WHERE ria.phone8 = ca.owner_phone8
-                     AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-                ))
-                OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                    AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-              ))
-            ))
-          ))
-          OR (cp.id IS NULL AND (
-            ($2::uuid IS NULL AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-            OR os.owner_reviewer_id = $2
-            OR (os.owner_reviewer_id IS NULL AND (
-              ca.owner_reviewer_id = $2
-              OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                SELECT 1 FROM reviewer_phone_changes rpc
-                 WHERE rpc.old_phone8 = ca.owner_phone8
-                   AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-              ) AND NOT EXISTS (
-                SELECT 1
-                  FROM reviewer_identity_aliases ria
-                  JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                 WHERE ria.phone8 = ca.owner_phone8
-                   AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-              ))
-              OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
-                  AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
-            ))
-          ))
-        )
-          AND (NOT $3::boolean OR (
-            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} = $4
-            OR (${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca' })} IS NULL
-                AND COALESCE(cp.phone8, ca.phone8,
-                    RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
-          ))
+         LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
           AND os.deleted_at IS NULL
-          -- A board can be archived while tab_configs.is_closed still says false.
-          -- Prefer the live participant coordinate; otherwise resolve the order's board.
+          AND ca.campaign_id IS NOT NULL
           AND NOT EXISTS (
-            SELECT 1 FROM index_master_archive archived
-             WHERE (cp.id IS NOT NULL AND archived.sheet_id = cp.sheet_id
-                    AND (archived.tab_name = cp.tab_name OR archived.tab_gid = NULLIF(cp.tab_gid, '')))
-                OR (cp.id IS NULL AND os.sheet_id NOT LIKE 'campaign:%'
-                    AND archived.sheet_id = os.sheet_id
-                    AND (archived.tab_name = os.tab_name OR archived.tab_gid = NULLIF(os.tab_gid, '')))
-                OR (cp.id IS NULL AND os.sheet_id LIKE 'campaign:%'
-                    AND archived.sheet_id = rc.linked_sheet_id
-                    AND (archived.tab_name = rc.linked_tab_name OR archived.tab_gid = NULLIF(rc.linked_tab_gid, '')))
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM review_closed_targets rrs
-             WHERE rrs.order_submission_id = os.id AND rrs.review_status = 'closed_no_review'
-          )
-          -- 신청 FK·공고 메타가 누락됐어도 campaign:<공고ID> 작업표 주문은 리뷰어에게 숨기지 않는다.
-          -- 공고 메타는 리뷰비·썸네일 보강용일 뿐, 참여 이력 노출의 전제는 아니다.
-          AND (rc.id IS NOT NULL OR os.sheet_id LIKE 'campaign:%')
-          /* ★★ 이중 집계 방지 — 위치키만 보면 참여형(무시트) 주문은 **절대** 걸러지지 않는다:
-             원장 좌표가 campaign:<공고ID>(submit.routes _resolveCampaignOrderScope)이고
-             sheet_row 에는 작업표 seq 가 들어가 review_index 좌표와 계가 다르다.
-             그래서 같은 참여가 명단(review_index)과 주문원장 양쪽에서 세어져
-             "참여중 3건 / 49,800원"처럼 **건수와 금액이 함께 부풀었다**(2026-08-19 실측).
-             → 리뷰 내역 카드 dedup 과 **같은 키**(작업표 줄 = 주문 id 링크)로도 짝짓는다. */
-          AND NOT EXISTS (
-            SELECT 1
-              FROM review_index ri
-              LEFT JOIN campaign_participants dri_cp
-                ON dri_cp.sheet_id = ri.sheet_id AND dri_cp.tab_name = ri.tab_name
-               AND dri_cp.seq = ri.row_index AND dri_cp.deleted_at IS NULL AND dri_cp.active = TRUE
-              LEFT JOIN order_submissions dri_os
-                ON dri_os.id = dri_cp.order_submission_id AND dri_os.deleted_at IS NULL
-              LEFT JOIN LATERAL (
-                SELECT app.owner_reviewer_id, app.owner_phone8, app.phone8, app.participant_identity_id
-                  FROM campaign_applications app
-                 WHERE app.id = dri_os.campaign_application_id OR app.order_submission_id = dri_os.id
-                 ORDER BY (app.id = dri_os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
-                 LIMIT 1
-              ) dri_ca ON TRUE
-              LEFT JOIN participation_links dri_pl
-                ON dri_pl.sheet_id = ri.sheet_id AND dri_pl.tab_name = ri.tab_name
-               AND dri_pl.row_index = ri.row_index
-             WHERE ((ri.sheet_id = os.sheet_id
-                     AND ri.tab_name = os.tab_name
-                     AND ri.row_index = os.sheet_row)
-                 OR (cp.id IS NOT NULL
-                     AND ri.sheet_id = cp.sheet_id
-                     AND ri.tab_name = cp.tab_name
-                     AND ri.row_index = cp.seq))
-               -- 좌표가 같아도 다른 소유자의 과거 행이면 현재 주문을 숨기지 않는다.
-               AND (
-                 (dri_cp.id IS NOT NULL AND (
-                   ($2::uuid IS NULL AND dri_cp.phone8 = ANY($1))
-                   OR dri_cp.owner_reviewer_id = $2
-                   OR (dri_cp.owner_reviewer_id IS NULL AND (
-                     dri_os.owner_reviewer_id = $2
-                     OR (dri_os.owner_reviewer_id IS NULL AND (
-                       dri_ca.owner_reviewer_id = $2
-                       OR (dri_ca.owner_reviewer_id IS NULL AND dri_ca.owner_phone8 = ANY($1)
-                           AND NOT EXISTS (
-                             SELECT 1 FROM reviewer_phone_changes rpc
-                              WHERE rpc.old_phone8 = dri_ca.owner_phone8
-                                AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-                           )
-                           AND NOT EXISTS (
-                             SELECT 1
-                               FROM reviewer_identity_aliases ria
-                               JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                              WHERE ria.phone8 = dri_ca.owner_phone8
-                                AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-                           ))
-                     ))
-                   ))
-                 ))
-                 OR (dri_cp.id IS NULL AND (
-                   dri_pl.owner_reviewer_id = $2
-                   OR (dri_pl.owner_reviewer_id IS NULL
-                       AND COALESCE(dri_pl.phone8, ri.phone8) = ANY($1)
-                       AND NOT EXISTS (
-                         SELECT 1 FROM reviewer_phone_changes rpc
-                          WHERE rpc.old_phone8 = COALESCE(dri_pl.phone8, ri.phone8)
-                            AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-                       )
-                       AND NOT EXISTS (
-                         SELECT 1
-                           FROM reviewer_identity_aliases ria
-                           JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                          WHERE ria.phone8 = COALESCE(dri_pl.phone8, ri.phone8)
-                            AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-                       ))
-                 ))
-               )
-               AND (NOT $3::boolean OR (
-                 ${_participantIdentityByOwnerSql({ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' })} = $4
-                 OR (${_participantIdentityByOwnerSql({ cp: 'dri_cp', os: 'dri_os', ca: 'dri_ca', pl: 'dri_pl' })} IS NULL
-                     AND COALESCE(dri_cp.phone8, dri_ca.phone8, dri_pl.phone8, ri.phone8) = ANY($1))
-               ))
+            SELECT 1 FROM review_index ri
+             WHERE ri.phone8 = ANY($1)
+               AND ri.sheet_id = os.sheet_id
+               AND ri.tab_name = os.tab_name
+               AND ri.row_index = os.sheet_row
           )`,
-      [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]
-    ));
+      [phoneList]
+    );
 
     // 아이템별 맵 + 합계 (참여중=받을 예정 / 제출완료 중 입금완료=누적)
     const items = {};
-    // review_index의 행 번호가 작업보드 순번과 달라 정확 행 매칭이 실패한 과거 건 보완용.
-    // 같은 작업에 주문이 하나일 때만 카드에 대체 연결해 다건 작업의 오매칭을 막는다.
-    const sheetlessFallbackCounts = new Map();
-    // These rows already passed the full owner/sub-account scope above. Reuse
-    // that result for legacy participants whose owner UUIDs are still empty.
-    const indexedParticipationKeys = new Set(riRows.map(r => JSON.stringify([r.sheetId, r.tabName, r.rowIndex])));
-    for (const o of sheetlessOrders) {
-      if (!o.participantSheetId || !indexedParticipationKeys.has(
-        JSON.stringify([o.participantSheetId, o.participantTabName, o.participantRowIndex])
-      )) continue;
-      // A virtual campaign coordinate cannot populate the real row's maps in
-      // the earlier order query. Retain its monetary evidence before deduping.
-      const pk = `${o.participantSheetId}||${o.participantTabName}||${o.participantRowIndex}`;
-      const parsed = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
-      const price = Number.isFinite(parsed) && parsed > 0 ? parsed : extractAmountNumber(o.rowJson);
-      if (!Object.prototype.hasOwnProperty.call(priceMap, pk) && price > 0) priceMap[pk] = price;
-      if (!orderFeeMap[pk]) orderFeeMap[pk] = {
-        snapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
-        orderDate: toKstDate(o.orderedAt),
-      };
-    }
     let productTotal = 0, reviewTotal = 0, count = 0, productUnknown = 0;
     let dProductTotal = 0, dReviewTotal = 0, dCount = 0, dProductUnknown = 0, dUnpaidCount = 0;
     for (const r of riRows) {
       const tk = r.sheetId + '||' + r.tabName;
       const camp = campMap[tk] || {};
       const pk = tk + '||' + r.rowIndex;
-      const price = Object.prototype.hasOwnProperty.call(priceMap, pk) ? priceMap[pk] : extractAmountNumber(r.rowJson);
+      const price = Object.prototype.hasOwnProperty.call(priceMap, pk) ? priceMap[pk] : null;
       // ★★ 082: 리뷰비는 **그 건의 참여 시점** 기준 — 공고의 현재 값을 그대로 쓰면
       //   금액을 올리는 순간 과거 참여자의 카드·누적 합계까지 바뀐다(2026-08 사고).
       //   순서: 참여시점 스냅샷 → 주문 제출일 → 시트 구매일자 → 오늘 → 기존 review_fee 폴백.
       const of = orderFeeMap[pk] || {};
-      const scalarFee = resolveReviewFee({
+      const reviewFee = resolveReviewFee({
         schedules: camp.schedules,
         fallback: camp.reviewFee || 0,
         snapshot: of.snapshot,
         orderDate: of.orderDate,
         sheetDate: sheetDateToIso(r.startDate, camp.campStartDate),
       }).fee;
-      const mix = of.deliveryReviewFeeMixSnapshot != null
-        ? of.deliveryReviewFeeMixSnapshot
-        : (of.snapshot != null ? null : camp.deliveryReviewFeeMix);
-      const reviewFee = resolveDeliveryReviewFee(mix, r.rowJson && r.rowJson['배송구분'], scalarFee).fee;
       items[pk] = {
         reviewFee,
         productPrice: price,
@@ -1506,64 +556,24 @@ router.get('/review-earnings', async (req, res, next) => {
     }
 
     for (const o of sheetlessOrders) {
-      if (o.participantSheetId && indexedParticipationKeys.has(
-        JSON.stringify([o.participantSheetId, o.participantTabName, o.participantRowIndex])
-      )) continue;
       const parsed = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
       const price = Number.isFinite(parsed) && parsed > 0 ? parsed : extractAmountNumber(o.rowJson);
-      const scalarFee = resolveReviewFee({
+      const reviewFee = resolveReviewFee({
         schedules: [],
         fallback: o.reviewFee || 0,
         snapshot: o.feeSnapshot,
         orderDate: toKstDate(o.orderedAt),
         sheetDate: o.campStartDate || null,
       }).fee;
-      const mix = o.deliveryReviewFeeMixSnapshot != null
-        ? o.deliveryReviewFeeMixSnapshot
-        : (o.feeSnapshot != null ? null : o.deliveryReviewFeeMix);
-      const reviewFee = resolveDeliveryReviewFee(mix, o.rowJson && o.rowJson['배송구분'], scalarFee).fee;
       items[`order||${o.id}`] = {
         reviewFee,
         productPrice: price > 0 ? price : null,
         thumbnailUrl: o.thumbnailUrl || '',
         purchaseDate: toKstDate(o.orderedAt) || o.campStartDate || null,
       };
-      // Completed sheetless orders still supply their own card amount, but must
-      // not become expected earnings or a pending card's fallback amount.
-      // Completion alone is not proof of payment, so do not add to doneTotals.
-      if (o.isSubmitted) {
-        dUnpaidCount++;
-        continue;
-      }
-      const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
-      const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
-      if (existingFallback) {
-        existingFallback.count++;
-      } else {
-        sheetlessFallbackCounts.set(fallbackKey, {
-          count: 1,
-          value: items[`order||${o.id}`],
-        });
-      }
       count++;
       reviewTotal += reviewFee;
       if (price > 0) productTotal += price; else productUnknown++;
-    }
-
-    for (const [fallbackKey, fallback] of sheetlessFallbackCounts) {
-      if (fallback.count === 1) items[fallbackKey + '||order'] = fallback.value;
-    }
-
-    // 구 시트 색인의 sheet/tab 값이 무시트 작업의 식별자와 다른 과도기 데이터 보완.
-    // 같은 모집공고의 미매칭 주문이 정확히 한 건일 때만 기존 카드 행에 연결한다.
-    for (const r of riRows) {
-      const rowKey = `${r.sheetId}||${r.tabName}||${r.rowIndex}`;
-      const current = items[rowKey];
-      const campaignId = campMap[`${r.sheetId}||${r.tabName}`]?.id;
-      const fallback = campaignId ? sheetlessFallbackCounts.get(campaignId) : null;
-      if (current && current.productPrice == null && fallback && fallback.count === 1) {
-        items[rowKey] = fallback.value;
-      }
     }
 
     res.json({
@@ -1577,10 +587,13 @@ router.get('/review-earnings', async (req, res, next) => {
       items,
     });
   } catch (err) {
-    if (sendReviewerSessionError(res, err)) return;
     logger.warn('[review-earnings] 실패: ' + err.message);
-    res.set('Retry-After', '10');
-    res.status(503).json({ ok: false, code: 'REVIEW_EARNINGS_DEFERRED', error: '금액 조회가 지연되고 있습니다.' });
+    res.json({
+      ok: true,
+      totals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0 },
+      doneTotals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0, unpaidCount: 0 },
+      items: {},
+    });
   }
 });
 
@@ -1653,8 +666,16 @@ function _normPhone8(v) {
 // ── 문의 첨부 이미지 URL 검증 ──
 //   화면에 <img src>로 나가므로 자유 문자열 금지 — 우리 서버의 guide-image 프록시 URL만 허용.
 //   (외부 URL 주입·트래킹 픽셀 차단)
-/** C/S 첨부 URL 화이트리스트 — 규칙은 `utils/csImageUrls` 단일 출처(사본 금지). */
-const { sanitizeCsImageUrls: _sanitizeCsImageUrls } = require('../utils/csImageUrls');
+function _sanitizeCsImageUrls(v) {
+  const arr = Array.isArray(v) ? v : (v ? [v] : []);
+  const out = [];
+  for (const raw of arr.slice(0, 5)) {          // 메시지당 최대 5장
+    const s = String(raw || '').trim();
+    if (!/^https?:\/\/[^\s"'<>]+\/api\/order\/guide-image\/[-\w]{20,}$/.test(s)) continue;
+    out.push(s);
+  }
+  return out;
+}
 
 // POST /api/reviewer/cs/upload — 문의 첨부 이미지 업로드(무인증, phone8 스코프)
 //   body: { phone8, imageBase64, mimeType?, fileName? } → { ok, url }
@@ -1794,29 +815,17 @@ router.get('/cs/threads', async (req, res, next) => {
   }
 });
 
-// GET /api/reviewer/cs/messages?phone8=&threadId= (campaignKey 폴백) — 특정 대화 메시지
-// 목록에서 받은 threadId를 phone8과 함께 검증해, 캐시된 campaignKey가 어긋나도
-// 다른 방이나 빈 방을 열지 않는다. 새 문의 진입은 campaignKey 조회를 계속 지원한다.
+// GET /api/reviewer/cs/messages?phone8=&campaignKey= — 특정 캠페인 대화 메시지(열람 시 미확인 리셋)
 router.get('/cs/messages', async (req, res, next) => {
   try {
     const phone8 = _normPhone8(req.query.phone8);
     if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     const campaignKey = (req.query.campaignKey || '').toString();
-    const rawThreadId = (req.query.threadId || '').toString().trim();
-    const threadId = rawThreadId || null;
-    if (threadId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(threadId)) {
-      return res.status(400).json({ ok: false, error: '올바른 문의방 ID가 필요합니다.' });
-    }
 
-    const { rows: tRows } = threadId
-      ? await pool.query(
-        `SELECT id, campaign_label AS "campaignLabel", status FROM cs_threads
-         WHERE reviewer_phone8 = $1 AND id = $2 LIMIT 1`, [phone8, threadId]
-      )
-      : await pool.query(
-        `SELECT id, campaign_label AS "campaignLabel", status FROM cs_threads
-         WHERE reviewer_phone8 = $1 AND campaign_key = $2 LIMIT 1`, [phone8, campaignKey]
-      );
+    const { rows: tRows } = await pool.query(
+      `SELECT id, campaign_label AS "campaignLabel", status FROM cs_threads
+       WHERE reviewer_phone8 = $1 AND campaign_key = $2 LIMIT 1`, [phone8, campaignKey]
+    );
     if (tRows.length === 0) return res.json({ ok: true, threadId: null, messages: [] });
     const thread = tRows[0];
 
@@ -2008,36 +1017,6 @@ router.post('/notices/delete', authMiddleware, adminOrMasterMiddleware, async (r
   } catch (err) { next(err); }
 });
 
-// 리뷰어 홈 가로 배너. 공개 응답은 완성되어 활성화된 배너만 노출한다.
-const REVIEWER_HOME_BANNER_KEY = 'reviewer_home_banner';
-async function _loadReviewerHomeBanner() {
-  const { rows } = await pool.query('SELECT value FROM app_settings WHERE key = $1 LIMIT 1', [REVIEWER_HOME_BANNER_KEY]);
-  return normalizeStoredBanner(rows[0] && rows[0].value);
-}
-
-router.get('/home-banner', async (req, res, next) => {
-  try { res.json({ ok: true, banner: toPublicBanner(await _loadReviewerHomeBanner()) }); }
-  catch (err) { next(err); }
-});
-
-router.get('/home-banner/all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, banner: await _loadReviewerHomeBanner() }); }
-  catch (err) { next(err); }
-});
-
-router.post('/home-banner/save', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const checked = validateBannerInput(req.body);
-    if (!checked.ok) return res.status(400).json(checked);
-    await pool.query(
-      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-      [REVIEWER_HOME_BANNER_KEY, JSON.stringify(checked.banner)]
-    );
-    res.json({ ok: true, banner: checked.banner });
-  } catch (err) { next(err); }
-});
-
 // ═══════════════════════════════════════════════════════════
 // GET /api/reviewer/my-missing-captures?phone8=XX — 구매캡쳐가 빠진 내 주문 (무인증·phone8 스코프)
 //
@@ -2045,7 +1024,7 @@ router.post('/home-banner/save', authMiddleware, adminOrMasterMiddleware, async 
 //   자기 주문에 캡처가 빠졌다는 걸 알 방법이 없어 관리자가 개별 독촉해야 한다.
 //   리뷰어 홈에서 스스로 보완하게 하면 그 왕복이 사라진다.
 // 노출은 my-status 와 같은 수준(phone8 = 연락처 끝 8자리 소유자만 자기 건 조회) + 필드 최소화.
-//   첨부는 기존 업로드 경로를 재사용하되 조회 응답에서 발급한 세션+주문ID를 함께 검증한다.
+//   첨부는 기존 업로드 경로(/api/image/image-upload + orderSubmissionId) 재사용 — 신규 쓰기 표면 0.
 // ═══════════════════════════════════════════════════════════
 router.get('/my-missing-captures', async (req, res, next) => {
   try {
@@ -2061,75 +1040,21 @@ router.get('/my-missing-captures', async (req, res, next) => {
       cutoff = (cf[0] && cf[0].value) || null;
     } catch (_) { /* 못 읽으면 기간 조건만 적용 */ }
 
-    /* ★★ 리뷰어에게 보이는 이름은 **사람이 읽는 작업 이름**이어야 한다(2026-08-19 신고).
-       참여형(무시트) 주문의 원장 좌표는 `campaign:<공고ID>`(submit.routes `_resolveCampaignOrderScope`)라
-       `tc` 조인이 비어 화면에 그 내부 키가 그대로 찍혔다.
-       → 리뷰 내역 카드와 **같은 우선순위**로 이름을 정한다: 지금 적용된 공고 제목 →
-         공고에 연결된 작업표 탭 이름 → 원장 좌표의 탭 설정.
-       ★ `tabName`/`sheetId` 는 종전대로 내려보낸다 — 첨부 업로드의 폴더 좌표라 이름이 아니다
-         (화면은 이 값을 그리지 않는다). */
     const { rows } = await pool.query(`
       SELECT os.id, os.tab_name AS "tabName", os.recipient, os.orderer,
              os.submitted_at AS "submittedAt", os.sheet_id AS "sheetId",
-             COALESCE(NULLIF(rc.linked_sheet_id, ''), os.sheet_id) AS "captureSheetId",
-             COALESCE(NULLIF(rc.linked_tab_name, ''), os.tab_name) AS "captureTabName",
-             COALESCE(NULLIF(rc.title, ''), NULLIF(wt.display_name, ''), NULLIF(wt.tab_name, ''),
-                      NULLIF(tc.display_name, ''), NULLIF(tc.campaign_name, '')) AS "displayName",
-             COALESCE(NULLIF(rc.title, ''), NULLIF(tc.campaign_name, '')) AS "campaignName"
+             tc.display_name AS "displayName", tc.campaign_name AS "campaignName"
         FROM order_submissions os
         LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
-        LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
-        LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-        LEFT JOIN tab_configs wt
-          ON wt.sheet_id = rc.linked_sheet_id AND wt.tab_name = rc.linked_tab_name
        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
          AND os.deleted_at IS NULL
          AND os.capture_uploaded_at IS NULL
-         /* 구매 캡처가 빠졌더라도, 연결된 참여 작업의 리뷰가 제출완료라면 이미 끝난
-            작업이다. 홈과 리뷰 내역 상단의 보완 알림에서 다시 독촉하지 않는다.
-            campaign_participants.order_submission_id → 작업표 행의 불변 주문 링크로만
-            확인한다. 시트/행 좌표만으로 묶으면 과거 완료 행과 새 참여가 충돌할 수 있으므로,
-            링크가 없는 옛 작업은 fail-soft로 종전처럼 보완을 안내한다. 활성/보관 인덱스를
-            함께 보므로 완료 탭·차수 보관 뒤에도 알림이 되살아나지 않는다. */
-         AND NOT EXISTS (
-           SELECT 1
-             FROM (
-               SELECT sheet_id, tab_name, row_index, is_submitted FROM review_index
-               UNION ALL
-               SELECT sheet_id, tab_name, row_index, is_submitted FROM review_index_archive
-             ) ri
-            WHERE ri.is_submitted = TRUE
-              AND (
-                EXISTS (
-                  SELECT 1
-                    FROM campaign_participants cp
-                   WHERE cp.order_submission_id = os.id
-                     AND cp.deleted_at IS NULL
-                     AND cp.sheet_id = ri.sheet_id
-                     AND cp.tab_name = ri.tab_name
-                     AND cp.seq = ri.row_index
-                )
-              )
-         )
          AND os.submitted_at > NOW() - ($2 || ' days')::interval
          AND ($3::timestamptz IS NULL OR os.submitted_at > $3::timestamptz)
        ORDER BY os.submitted_at DESC
        LIMIT 30`, [phone8, String(days), cutoff]);
 
-    const items = await Promise.all(rows.map(async row => {
-      try {
-        const captureSession = await purchaseSessions.issueForOrder({
-          orderSubmissionId: row.id,
-          captureSheetId: row.captureSheetId,
-          captureTabName: row.captureTabName,
-          source: 'reviewer_capture_retry',
-        });
-        return { ...row, captureSession };
-      } catch (_) {
-        return { ...row, captureSession: null };
-      }
-    }));
-    res.json({ ok: true, count: items.length, items });
+    res.json({ ok: true, count: rows.length, items: rows });
   } catch (err) { next(err); }
 });
 

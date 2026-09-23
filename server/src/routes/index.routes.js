@@ -6,72 +6,16 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 const { emitIndexBuild } = require('../utils/sse');
 const { calcNextCronTimes } = require('../utils/cronCalc');
 const pool = require('../db/pool');
-const { verifyReviewerSession } = require('../services/reviewerSession.service');
-const reviewerIdentity = require('../services/reviewerIdentity.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/search — 이름/전화번호 검색 (GAS: searchAll)
 // ═══════════════════════════════════════════════════════════
 router.get('/', async (req, res, next) => {
   try {
-    const { query, phone8, includeSubmitted, ownerScope } = req.query;
-    let ownerReviewerId = null;
-    let ownerPhone8s = null;
-    let scopedQuery = query;
-    let scopedPhone8 = phone8;
-    let strictPhoneScope = false;
-    let participantIdentityId = null;
-    let restrictParticipant = false;
-    if (ownerScope === '1' || ownerScope === 'true') {
-      const token = req.headers['x-reviewer-token'];
-      if (!token) {
-        return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인이 필요합니다.' });
-      }
-      try {
-        const session = verifyReviewerSession(token);
-        const scope = await reviewerIdentity.getOwnerScopeByReviewerId(session.ownerReviewerId);
-        if (!scope.ownerReviewerId) {
-          return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
-        }
-        const loginPhone8 = String(session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
-        if (session.loginKind === 'sub') {
-          if (loginPhone8.length !== 8) {
-            return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
-          }
-          // 타계정 로그인은 본계정 UUID나 형제 타계정 번호로 확장하지 않는다.
-          // 요청 query/phone8도 신뢰하지 않고 토큰의 로그인 번호 하나로만 검색한다.
-          const identity = await reviewerIdentity.resolveParticipantIdentity({
-            ownerReviewerId: scope.ownerReviewerId,
-            participantPhone8: loginPhone8,
-          });
-          ownerReviewerId = scope.ownerReviewerId;
-          ownerPhone8s = [loginPhone8];
-          participantIdentityId = identity && identity.id || null;
-          restrictParticipant = true;
-          scopedQuery = '';
-          scopedPhone8 = loginPhone8;
-          strictPhoneScope = true;
-        } else {
-          ownerReviewerId = scope.ownerReviewerId;
-          ownerPhone8s = scope.phone8s;
-        }
-      } catch (err) {
-        const expired = err && err.name === 'TokenExpiredError';
-        return res.status(401).json({
-          ok: false,
-          code: expired ? 'REVIEWER_SESSION_EXPIRED' : 'REVIEWER_AUTH_INVALID',
-          error: expired ? '로그인 시간이 만료되었습니다. 다시 로그인해주세요.' : '유효하지 않은 리뷰어 로그인입니다.',
-        });
-      }
-    }
-    const result = await searchByName(scopedQuery, scopedPhone8, {
+    const { query, phone8, includeSubmitted } = req.query;
+    const result = await searchByName(query, phone8, {
       // 리뷰어 홈 제출대기/제출완료 탭용 — 제출 완료 행도 포함해 반환
       includeSubmitted: includeSubmitted === '1' || includeSubmitted === 'true',
-      ownerReviewerId,
-      ownerPhone8s,
-      strictPhoneScope,
-      participantIdentityId,
-      restrictParticipant,
     });
     res.json(result);
   } catch (err) {

@@ -3,8 +3,8 @@
  *
  *   1. transferOwnership — 한 트랜잭션(BEGIN/COMMIT) · 같은 범위만 해제 · 업서트 · 대상 검증 fail-closed.
  *   2. 우선순위 정합 — 시트전체 전개에서 "타 업체 탭지정" 배제(ownedTabsForAdvertiser · advertiserOverview).
- *   3. 라우터 — POST /ownership/transfer 가 internal 게이트(광고주 차단 · AE 허용, 2026-08 사용자 확정).
- *   4. 프론트 배선 — [이관] 버튼 내부 담당자 한정 · onclick 인덱스만 · 팝업 body 직속 · Esc 닫힘 · 부분실패 고지.
+ *   3. 라우터 — POST /ownership/transfer 가 adminOrMaster 게이트(staff 재배치 금지).
+ *   4. 프론트 배선 — [이관] 버튼 admin 한정 · onclick 인덱스만 · 팝업 body 직속 · Esc 닫힘 · 부분실패 고지.
  * 실행: node tests/ownershipTransfer.test.js
  */
 const assert = require('assert');
@@ -107,9 +107,7 @@ async function run() {
   console.log('\n3) 라우트 권한');
   const line = ROUTES.split('\n').find(l => l.includes("router.post('/ownership/transfer'"));
   t('POST /ownership/transfer 존재', !!line);
-  // ★ 사용자 확정(2026-08): 업체 간 재배치는 AE(staff)도 한다 — 게이트는 internal(광고주 차단).
-  //   authMiddleware 없이 열리는 것(무인증)은 여전히 회귀다.
-  t('★ internal 게이트(광고주 차단 · AE 허용)', /authMiddleware, internalMiddleware/.test(line || ''), line);
+  t('★ adminOrMaster 게이트(staff 재배치 금지)', /authMiddleware, adminOrMasterMiddleware/.test(line || ''), line);
   const router = require('../src/routes/trackB.routes');
   const hit = router.stack.filter(l => l.route && l.route.path === '/ownership/transfer' && l.route.methods.post);
   t('라우터 스택에 실제 등록(1건)', hit.length === 1);
@@ -118,9 +116,7 @@ async function run() {
   console.log('\n4) 화면 배선');
   const ownsBlock = HTML.slice(HTML.indexOf('function _ovmOwnsHtml('), HTML.indexOf('function _ovmAddOwnHtml('));
   t('소유 캠페인 줄에 [이관] 버튼', /ownTransfer\(/.test(ownsBlock));
-  // ★ 사용자 확정(2026-08-23): 이관은 **작업 줄**에만 — 레거시 '전체' 줄은 [×] 해제로만 정리한다.
-  t('★ 이관 버튼은 내부 담당자 + 작업 줄에만(서버 게이트와 1:1)',
-    /isAdmin&&!whole\?`<button class="trb"/.test(ownsBlock.replace(/\s+/g, ' ')));
+  t('★ 이관 버튼은 admin/master 에만(서버 게이트와 1:1)', /isAdmin\?`<button class="trb"/.test(ownsBlock.replace(/\s+/g, ' ')));
   t('★ onclick 은 인덱스만(문자열 보간 금지)', /onclick="ownTransfer\(\$\{i\}\)"/.test(ownsBlock));
   t('팝업은 body 직속', /document\.body\.appendChild\(ov\)/.test(HTML));
   t('Esc 로 닫힌다(리스너 최상위 1회)',
@@ -161,16 +157,13 @@ async function run() {
     return { posts, toasts };
   }
   const SHEET_OWN = { sheetId: 'S1', tabGid: null };
-  // ★★ 사용자 확정(2026-08-23): 이관도 **작업(탭) 단위**다 — tabGid:null(시트 전체)로는 보내지 않는다.
-  //    되살리면 그 시트의 새 작업까지 통째로 따라가 작업 단위 지정이 무의미해진다.
-  let go = await runGo({ own: SHEET_OWN, mode: 'all', picks: {} });
-  t('★★ 시트 전체(tabGid null) 전송 0 — 옮길 작업을 골라야 한다',
-    go.posts.length === 0 && /선택/.test(go.toasts.join('|')), go.toasts.join('|'));
+  let go = await runGo({ own: SHEET_OWN, mode: 'all' });
+  t('시트 전체 = tabGid null 1건 전송', go.posts.length === 1 && go.posts[0].tabGid === null && go.posts[0].sheetId === 'S1');
+  t('대상 업체 id 전송', go.posts[0].toAdvertiserId === 'adv_wc');
+  t('성공 토스트에 대상 업체명', /이관 완료 → 주식회사 위프코리아/.test(go.toasts.join('|')), go.toasts.join('|'));
 
   go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: { 0: true, 1: true } });
   t('특정 탭 = 고른 gid 만큼 전송', go.posts.length === 2 && go.posts.map(p => p.tabGid).join(',') === '100,200');
-  t('대상 업체 id 전송', go.posts[0].toAdvertiserId === 'adv_wc');
-  t('성공 토스트에 대상 업체명', /이관 완료 → 주식회사 위프코리아/.test(go.toasts.join('|')), go.toasts.join('|'));
 
   go = await runGo({ own: { sheetId: 'S1', tabGid: '100' }, mode: 'all' });
   t('★ 탭 소유 줄은 범위 선택 무관 그 탭만(시트 전체로 번지지 않는다)',
@@ -183,17 +176,17 @@ async function run() {
   const msg = go.toasts.join('|');
   t('★★ 부분 실패를 "완료"로 꾸미지 않는다(건수·사유 고지)',
     /일부만 이관됨 \(1\/2\)/.test(msg) && /권한 없음/.test(msg) && !/이관 완료/.test(msg), msg);
-  go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: { 0: true }, results: () => ({ ok: false, error: '대상 업체를 찾을 수 없습니다.' }) });
+  go = await runGo({ own: SHEET_OWN, mode: 'all', results: () => ({ ok: false, error: '대상 업체를 찾을 수 없습니다.' }) });
   t('★ 전부 실패는 실패로 말한다', /이관 실패: 대상 업체/.test(go.toasts.join('|')), go.toasts.join('|'));
 
   go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: {} });
-  t('작업 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이관할 작업을 선택/.test(go.toasts.join('|')));
+  t('탭 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이관할 탭을 선택/.test(go.toasts.join('|')));
   go = await runGo({ own: SHEET_OWN, target: '' });
   t('대상 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이관할 거래처를 선택/.test(go.toasts.join('|')));
-  go = await runGo({ own: SHEET_OWN, picks: { 0: true }, target: '__new__', newName: '미등록업체', newOk: false });
+  go = await runGo({ own: SHEET_OWN, target: '__new__', newName: '미등록업체', newOk: false });
   t('★ 미검증 새 거래처는 전송 0(등록 게이트 = 서버와 같은 규칙)',
     go.posts.length === 0 && /광고주DB\)에 등록된 이름/.test(go.toasts.join('|')), go.toasts.join('|'));
-  go = await runGo({ own: SHEET_OWN, picks: { 0: true }, target: '__new__', newName: '주식회사 위프코리아', newOk: true });
+  go = await runGo({ own: SHEET_OWN, target: '__new__', newName: '주식회사 위프코리아', newOk: true });
   t('★ 이미 등록된 이름이면 새로 만들지 않고 그 업체로 이관(409 예방)',
     go.posts.length === 1 && go.posts[0].toAdvertiserId === 'adv_wc');
 

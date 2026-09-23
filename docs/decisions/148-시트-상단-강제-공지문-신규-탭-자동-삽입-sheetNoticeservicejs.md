@@ -1,5 +1,0 @@
-# 시트 상단 강제 공지문 (신규 탭 자동 삽입 · `sheetNotice.service.js`)
-- 직원이 시트에서 **줄(행)을 삭제하면 그 아래 모든 기록의 행번호가 밀리므로**, "행 삭제 금지·값만 삭제" 규칙을 시트 안에 상시 노출한다. 기본 문구(사유 포함형) = `⚠️ 구매취소·중복이 생겨도 줄(행)은 삭제하지 마시고 값만 지워주세요 · 줄을 지우면 아래 기록의 줄 번호가 전부 밀립니다`(운영 중 교체는 `app_settings.sheet_notice_text`).
-- **위치 C1:R1 고정**(템플릿 메타영역 A1 캠페인명 오른쪽 여백, 병합+앰버 배경+굵게) — **행 삽입을 하지 않으므로 기존 기록의 행번호 무영향**(리스크 0). 회귀가드가 `insertDimension` 부재를 고정한다.
-- ★★**안전 불변식(완화 금지)**: 공지문에 헤더 탐지 키워드(`HEADER_DETECT_KEYWORDS`)가 **2개 이상**이면 `detectSheetHeader`가 **공지 줄을 헤더로 오인**(공지는 헤더보다 위 + 위에서부터 첫 매칭 확정)해 그 탭 파싱이 통째로 깨진다 → `validateNoticeText`가 쓰기 전·문구 저장 전 양쪽에서 차단. 회귀가드 `tests/sheetNotice.test.js`가 실제 탐지기와 교차검증(위험 문구 주입 시 headerRowIndex가 1로 무너지는 것까지 고정).
-- 삽입 시점: `create-campaign-sheet` 두 모드(new=복사 파일 전 탭 / existing=새 탭만) **best-effort**(실패해도 시트·탭 생성은 성공). env `SHEET_NOTICE_ON_CREATE=0`으로 비활성. 기존 탭은 `POST /api/diag/sheet-notice {sheetId, gid|tabName, dryRun?, force?}`(admin/master)로 수동 적용 — **이미 내용이 있으면 force 없이는 덮지 않고**(사람 메모 보호), 같은 문구면 no-op(멱등).

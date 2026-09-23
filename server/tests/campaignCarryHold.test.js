@@ -72,18 +72,12 @@ eq('★ 불변식 ②: hold 여도 총량 clamp(남은 자리 10 → 10)',
 eq('모르는 carry_mode 값 = auto 취급(45)', S.dailyQuota({ ...AUTO, carry_mode: 'weird' }, 75, carry(75)), 45);
 
 // 킬스위치 — require 시점 상수라 자식 프로세스로 검증(전건 자동 = 현행 복귀)
-  /* ★★ 자식 프로세스의 출력은 **문자열로** 찍고 색을 끈다(2026-09-22 실측).
-     `console.log(<숫자>)` 는 Node 가 `util.inspect` 로 찍어 색 기호(ANSI)를 덧붙인다.
-     터미널이 색을 켜 두면(`FORCE_COLOR`) 그 설정이 자식에게 그대로 상속돼 출력이
-     `\x1b[33m40\x1b[39m` 이 되고, `=== '40'` 이 **영문 모를 실패**로 뜬다.
-     CI 는 색이 꺼져 있어 초록이라 더 위험하다 — 사람 화면에서만 빨간 가드는
-     곧 아무도 안 보게 되고, 빨간 가드는 새 변경도 못 지킨다. */
 {
   const out = execFileSync(process.execPath, ['-e', `
     const S = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'services', 'campaignState.service.js'))});
     const HOLD = { daily_limit: 40, recruit_total: 200, carry_mode: 'hold' };
-    console.log(String(S.dailyQuota(HOLD, 75, { startDate: '2026-08-04', today: '2026-08-06', submittedSince: 75 })));
-  `], { env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', CAMPAIGN_CARRY_HOLD: '0' } }).toString().trim();
+    console.log(S.dailyQuota(HOLD, 75, { startDate: '2026-08-04', today: '2026-08-06', submittedSince: 75 }));
+  `], { env: { ...process.env, CAMPAIGN_CARRY_HOLD: '0' } }).toString().trim();
   eq('★ 킬스위치 CAMPAIGN_CARRY_HOLD=0 → hold 무시(자동 45)', out, '45');
 }
 
@@ -121,7 +115,7 @@ eq('시작일이 기준선보다 늦으면 시작일부터(어제 시작 → 40�
 console.log('\n[3] 서버 배선');
 const st = readS('services/campaignState.service.js');
 ok('판정 단일 출처 isCarryHold(게이트·잔량·목록이 공유)', /function isCarryHold\(c\)/.test(st)
-  && /!isCarryHold\(c\)[\s\S]{0,100}CARRY_ENABLED/.test(st));
+  && /!isCarryHold\(c\) && CARRY_ENABLED/.test(st));
 ok('기준선 2종은 한 쿼리(066 가드의 쿼리 순서 계약 유지)',
   /key IN \('campaign_carry_start', 'campaign_carry_hold_start'\)/.test(st));
 ok('counts.hold 창 집계(FILTER $4)', /submitted_since_hold/.test(st) && /\$4 AND submitted_at < \$2/.test(st));
@@ -164,9 +158,9 @@ ok('★ getPlanOverview: 일정 판정 실패(unknown)면 이월·잔량을 계�
   && /heldCarry\(camp, counts, today, carryAppliedSum, sch\)/.test(cp)
   && /carryPending = pendingCarry\(camp, counts, today, counts && counts\.carry, sch\)/.test(cp));
 ok('public list includes carry mode with other publication controls',
-  /\bcarry_mode\b/.test(rt) && /\bskip_weekends\b/.test(rt) && /\bcash_receipt_required\b/.test(rt));
+  /carry_mode,\s+skip_weekends,\s+cash_receipt_required/.test(rt));
 ok('campaign creation persists carry mode after review-type mix',
-  /review_type, review_type_mix, carry_mode, carry_strategy, work_kind/.test(rt)
+  /review_type, review_type_mix, carry_mode, work_kind/.test(rt)
   && /carry_mode === 'hold' \? 'hold' : 'auto'/.test(rt));
 /*
 ok('★ 코드리뷰 B1: 공개 /list SELECT 에 carry_mode — 빠지면 hold 공고가 목록에선 자동 이월 정원으로 계산돼 "카드는 열렸는데 참여 거부"',
@@ -196,10 +190,9 @@ ok('★ 원칙 ⑤: 보류 선택 고지문(오늘 정원 복귀 + 물량 불소
 ok('페이로드는 세그먼트 UI 있는 화면에서만 전송(미전송=유지)',
   /if \(document\.getElementById\("rf_carry_mode"\)\)/.test(recruit)
   && /payload\.carry_mode = document\.getElementById\("rf_carry_mode"\)\.value === "hold" \? "hold" : "auto"/.test(recruit));
-ok('프리필·신규 초기화는 현재 이월 배치 전략을 복원한다',
-  /\["next", "spread", "extend"\]\.includes\(c\.carry_strategy\)/.test(recruit)
-  && /rfCarrySet\(carryStrategy, \{ silent: true \}\)/.test(recruit)
-  && /rfCarrySet\("extend", \{ silent: true \}\)/.test(recruit));
+ok('프리필·신규 초기화(silent — 사람이 고른 순간에만 고지 펼침)',
+  /rfCarrySet\(c\.carry_mode === "hold" \? "hold" : "auto", \{ silent: true \}\)/.test(recruit)
+  && /rfCarrySet\("auto", \{ silent: true \}\)/.test(recruit));
 ok('홈 인라인 모달 세그먼트(cae_carry_mode) + 항상 명시 전송',
   /cae_carry_mode/.test(cards) && /_caeCarry\(data\.carry_mode === 'hold'/.test(cards)
   && /carry_mode: _caeV\('cae_carry_mode'\) === 'hold' \? 'hold' : 'auto'/.test(cards));

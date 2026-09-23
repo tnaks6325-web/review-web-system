@@ -49,9 +49,9 @@ ok('자유시간대 전환 뒤 시간 지정으로 돌아오면 기존 시간창
 ok('시작일 프리필', /setV\("rf_start_date", prefill\.start_date\)/.test(rec) && /시작일<\/span>/.test(doc));
 ok('하루 진행 건수 — 텍스트형 숫자 폴백까지',
   /daily_count_text[\s\S]{0,60}match\(\/\\d\+\//.test(app) && /숫자만 추출/.test(doc));
-ok('배송유형 매핑(직접배송 포함 6종)',
-  /const WO_DELIVERY_TYPES = \['실배송', '빈박스', '택배발송대행', '직접배송\(가구 등\)', '회수', '혼합'\]/.test(app)
-  && /실배송 · 빈박스 · 택배발송대행 · 직접배송\(가구 등\) · 회수 · 혼합/.test(doc));
+ok('배송유형 매핑(실배송·빈박스·택배발송대행)',
+  /WO_DELIVERY_MAP = \{ '실배송':'실배송', '빈박스':'빈박스', '택배발송대행':'택배발송대행' \}/.test(app)
+  && /실배송→실배송, 빈박스→빈박스, 택배발송대행→택배발송대행/.test(doc));
 ok('팀채팅방 URL', /chat_url:\s+o\.chat_room_url/.test(app) && /팀채팅방 URL/.test(doc));
 ok('상품 URL + 자동수집 1회',
   /if \(prefill\.product_url\) setTimeout\(\(\) => \{ try \{ fetchProductInfo\(\{ auto: true \}\)/.test(rec)
@@ -133,7 +133,7 @@ ok('시트 일정이 폼 값보다 우선한다는 사실을 명시',
     /시트 일정\(구매일자 컬럼 파생\)이 있으면 시작일·마감일·정원의 진실원천/.test(st)
     && /const sd = sch \? sch\.firstDate : dateOnlyStr\(c\.start_date\)/.test(st)
     // 시트 일정이 있으면 그쪽, 없으면 daily_limit 경로(066 이월 포함)
-    && /const campaignQuota = sch\s*\n?\s*\?[\s\S]{0,1200}: dailyQuota\(c, submittedBefore/.test(st));
+    && /const quota = sch\s*\n?\s*\?[\s\S]{0,1200}: dailyQuota\(c, submittedBefore/.test(st));
   ok('마감일 경과는 영속하지 않는다 = 시트에 날짜 추가 시 자동 재개(문서의 "자동으로 다시 열립니다")',
     /state: 'closed', stateReason: 'schedule_ended'/.test(st)
     && /마감된 공고도 자동으로 다시 열립니다/.test(doc));

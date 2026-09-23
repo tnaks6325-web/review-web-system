@@ -29,13 +29,16 @@ ok('우클릭(contextmenu) 로 편집 메뉴를 연다', /addEventListener\('con
 ok('우클릭 메뉴에 [이 셀 편집] → beginEditCell', /_menuEditCell\(\)\s*\{[\s\S]{0,200}beginEditCell\(td\)/.test(HTML));
 ok('copy 이벤트로 선택 범위를 TSV 복사', /addEventListener\('copy'/.test(HTML) && /_selectionTsv\(\)/.test(HTML));
 ok('paste 이벤트로 선택 범위에 붙여넣기', /addEventListener\('paste'/.test(HTML) && /_pasteIntoSelection\(/.test(HTML));
-ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.map\(j=>commitCellEdit\(/.test(HTML));
+// ★ 붙여넣기 저장은 왕복 1회(edit-batch) — 칸마다 요청하면 리미터(분당 120)·PG 풀에 막힌다.
+//   낙관 반영·롤백은 단건과 같은 `_applyCellLocal` 한 벌(사본 없음).
+ok('붙여넣기 저장은 왕복 1회(edit-batch) 한 경로', /_pasteCommitBatch\(jobs,/.test(HTML)
+  && /\/api\/trackb\/workdesk\/edit-batch/.test(HTML));
+ok('낙관 반영·롤백은 단건과 같은 한 벌(_applyCellLocal)', /function _applyCellLocal\(/.test(HTML)
+  && (HTML.match(/_applyCellLocal\(/g) || []).length >= 3);
 ok('재렌더 시 선택 범위를 비운다(엉뚱한 칸 적용 차단)', /STATE\.gSelRange=null;/.test(HTML.slice(HTML.indexOf('function buildGrid'), HTML.indexOf('function buildGrid') + 1200)));
 ok('한 번에 붙여넣는 칸 수 상한', /_PASTE_MAX\s*=\s*\d+/.test(HTML));
-ok('입금 날짜 열도 내부·광고주 공통 자동맞춤과 사용자 너비 설정을 쓴다',
-  /STATE\.gColWidths=_gridAutoColumnWidths\(wd,vcols\)/.test(HTML)
-  && /STATE\.gColWidths=_gridApplyWidthPrefs\(STATE\.gColWidths,vcols\)/.test(HTML)
-  && /function _isDepositCol\(h\)/.test(HTML));
+ok('입금 날짜 열은 내부·광고주 작업보드에서 지정 폭을 쓴다', /'입금':96/.test(HTML)
+  && /'입금':88,'입금일':88/.test(HTML));
 ok('그리드 안내 문구는 렌더하지 않는다', !/<span class="gnote">/.test(HTML));
 ok('선택 요약 렌더 영역이 있다', /id="gselstat"/.test(HTML));
 ok('선택 요약은 그리드 툴바의 오른쪽 끝에 남아 있다', /\$\{_folBarHtml\(\)\}\s*\n\s*<output id="gselstat"/.test(HTML));
@@ -109,8 +112,16 @@ function buildFakeGrid() {
   return { body, rows, stat };
 }
 
+/* 동기로 해소되는 thenable — 붙여넣기가 묶음을 이어 보내는 체인을 그 자리에서 끝까지 태운다
+   (실제 Promise 를 쓰면 이 가드의 동기 단언이 완료 처리보다 먼저 실행된다). */
+function syncThen(v) {
+  return {
+    then(f) { const r = f ? f(v) : v; return (r && typeof r.then === 'function') ? r : syncThen(r); },
+    catch() { return this; },
+  };
+}
 function makeCtx(fake) {
-  const commits = [], toasts = [];
+  const commits = [], toasts = [], batches = [];
   const sandbox = {
     STATE: { canEdit: true, gSelRange: null, cur: { sheetId: 's', tabName: 't' } },
     $: sel => (sel === '#gbody' ? fake.body : (sel === '#gselstat' ? fake.stat : null)),
@@ -128,44 +139,32 @@ function makeCtx(fake) {
     commitCellEdit: (rowId, field, val) => commits.push({ rowId, field, val }),
     _beginCellUndoGroup: kind => ({ kind, entries: [], pending: 0 }),
     _finishCellUndoGroup: () => {},
+    // ★ 붙여넣기는 왕복 1회(`/workdesk/edit-batch`)로 나간다 — 저장 대상은 그 페이로드에서 센다.
+    //   (칸마다 commitCellEdit 을 부르던 옛 경로로 되돌아가면 아래 [3]이 전부 0건이 되어 잡힌다)
+    _applyCellLocal: (rowId, field, value, td) => ({ had: false, prev: undefined, rollback() {} }),
+    _recordCellUndo: () => {},
+    _wtNotice: () => {},
+    reloadWorkdesk: () => {},
+    setTimeout: () => 0,
+    api: (url, opt) => {
+      const body = JSON.parse(opt.body);
+      batches.push({ url, body });
+      (body.edits || []).forEach(e => commits.push({ rowId: e.rowId, field: e.field, val: e.value }));
+      // 성공 응답을 동기로 흘려 완료 처리(확정 토스트·되돌리기 기록)까지 실제로 태운다
+      const resp = { ok: true, total: (body.edits || []).length, succeeded: (body.edits || []).length, failed: 0,
+                     results: (body.edits || []).map((e, i) => ({ index: i, rowId: e.rowId, field: e.field, ok: true })) };
+      return syncThen(resp);
+    },
     _PASTE_MAX: 500,
+    _PASTE_CHUNK: 50,
+    Promise: { resolve: v => syncThen(v) },
     console,
   };
   vm.createContext(sandbox);
-  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_moveCellSel', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_dataEdgeIndex', '_cellHasValue', '_rowEdgeIndex', '_colEdgeIndex'].forEach(n => {
+  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_pasteCommitBatch', '_pasteApplyResults'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
-  return { sandbox, commits, toasts };
-}
-
-/* ── 1B. 고정 헤더에 가린 띠에서도 우클릭 메뉴가 열린다 (2026-08-19 신고) ──────────
-   sticky thead 는 표를 조금만 스크롤해도 **맨 윗줄 데이터 행의 위쪽 띠를 덮는다**. 그 띠를 우클릭하면
-   이벤트 대상이 th(또는 그 안의 span)라 종전엔 메뉴가 통째로 안 떴다(브라우저 기본 메뉴만).
-   실브라우저 실측: 6px 스크롤이면 첫 행 상단, 30px 이면 첫 행 전체가 그 상태가 된다. */
-console.log('\n[1B] 고정 헤더에 가린 띠 보정');
-ok('우클릭 핸들러에 좌표 폴백이 있다',
-  /let td=e\.target\.closest\('#gbody td'\);\s*\n\s*if\(!td\) td=_cellUnderPoint\(e\.clientX, e\.clientY\);/.test(HTML));
-ok('★ 왼쪽 클릭(드래그 선택)에는 폴백을 넣지 않는다 — 헤더 열 메뉴 동작 무접촉', (() => {
-  // ★ 파일에 mousedown 리스너가 여럿이라 첫 매칭으로 자르면 **엉뚱한 블록**을 검사한다(변이시험이 잡았다).
-  //   셀 범위 UI 안의 그 리스너로 스코프를 좁힌다.
-  const s0 = HTML.indexOf('function _ensureCellRangeUI');
-  const i = HTML.indexOf("addEventListener('mousedown'", s0);
-  const body = HTML.slice(i, HTML.indexOf("addEventListener('mousemove'", i));
-  return s0 > 0 && i > s0 && !/_cellUnderPoint/.test(body);
-})());
-{
-  const sb = { document: null };
-  vm.createContext(sb);
-  vm.runInContext(grab('_cellUnderPoint'), sb);
-  const mkEl = (tag, td) => ({ tagName: tag, closest: sel => (sel === '#gbody td' ? td : null) });
-  const cell = { tagName: 'TD', name: '첫 행 송장 칸' };
-  sb.document = { elementsFromPoint: () => [mkEl('SPAN', null), mkEl('TH', null), mkEl('TD', cell)] };
-  eq('가려진 지점 아래에 깔린 셀을 찾는다', vm.runInContext('_cellUnderPoint(10,10)', sb), cell);
-  sb.document = { elementsFromPoint: () => [mkEl('TH', null), mkEl('DIV', null)] };
-  eq('★ 그 지점에 셀이 없으면(평소 헤더) 종전대로 null — 헤더 우클릭 동작 불변',
-    vm.runInContext('_cellUnderPoint(10,10)', sb), null);
-  sb.document = {};
-  eq('elementsFromPoint 미지원 브라우저도 죽지 않는다', vm.runInContext('_cellUnderPoint(10,10)', sb), null);
+  return { sandbox, commits, toasts, batches };
 }
 
 console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)');
@@ -254,12 +253,7 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
   vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
   vm.runInContext('_selectionTsv()', sandbox);
   ok('열람 전용도 복사는 된다(선택은 유효)', vm.runInContext('_selectionTsv()', sandbox) === '이진우');
-  // 2026-08-19 사용자 확정: 업체(광고주)는 택배송장 칸만 편집·붙여넣기 한다 → 게이트가 `_canEditCells()` 로 바뀌었다.
-  //   (열람 전용 계정은 그 함수가 false 를 돌려주므로 차단은 그대로 — 실제 대상 판정은 `.gedit` 이 최종적으로 한다.)
-  eq('붙여넣기 이벤트는 "고칠 수 있는 칸이 있는 계정"에만 걸린다(배선)',
-    /if\(!_canEditCells\(\) \|\| !STATE\.gSelRange\) return;/.test(HTML), true);
-  eq('열람 전용(업체 아님)은 _canEditCells 가 false — 종전대로 차단',
-    /function _canEditCells\(\)\{\s*if\(STATE\.canEdit\) return true;\s*return STATE\.role==='advertiser'/.test(HTML), true);
+  eq('열람 전용 계정에는 붙여넣기 이벤트가 애초에 걸리지 않는다(배선)', /if\(!STATE\.canEdit \|\| !STATE\.gSelRange\) return;/.test(HTML), true);
   void commits; void toasts;
 }
 
@@ -315,161 +309,6 @@ ok('드래그 중에는 활성 범위만 갱신(앞서 더한 범위 보존)', /
   vm.runInContext('_setCellSel({r0:0,c0:2,r1:2,c1:3},false)', sandbox);   // 3행 선택
   vm.runInContext('_pasteIntoSelection("가\\t나")', sandbox);              // 1행짜리 복사본
   eq('복사본에 없는 행은 건드리지 않는다(빈 값으로 지우지 않음)', commits.length, 2);
-}
-
-/* ── 9. 방향키 이동 · Shift+방향키 범위 확장 (사용자 확정 2026-08-19) ──────────────────
-   ★ 이동해도 선택은 **직사각형**이라 복사·붙여넣기·배경색·합계가 드래그 선택과 같은 재료를 쓴다.
-   ★ Shift 없이 누르면 떨어진 범위(Ctrl 선택)를 정리하고 한 칸으로 되돌린다. */
-console.log('\n[9] 방향키 이동 · Shift 범위 확장');
-{
-  const fake = buildFakeGrid();
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:1,c0:2,r1:1,c1:2})', sandbox);
-  vm.runInContext('_moveCellSel(1,0,false)', sandbox);
-  eq('아래 방향키 = 한 행 아래 한 칸', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
-    JSON.stringify({ r0: 2, c0: 2, r1: 2, c1: 2 }));
-  vm.runInContext('_moveCellSel(0,1,false)', sandbox);
-  eq('오른쪽 방향키 = 한 열 오른쪽', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
-    JSON.stringify({ r0: 2, c0: 3, r1: 2, c1: 3 }));
-  eq('★ Shift 없이 이동하면 한 칸만 선택된다', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 1);
-}
-{
-  const fake = buildFakeGrid();
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
-  vm.runInContext('_moveCellSel(1,0,true)', sandbox);
-  vm.runInContext('_moveCellSel(0,1,true)', sandbox);
-  eq('★ Shift+방향키 = 시작 모서리 고정, 끝만 이동', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
-    JSON.stringify({ r0: 0, c0: 2, r1: 1, c1: 3 }));
-  eq('확장된 범위 = 2행 × 2열', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 4);
-  eq('★ 확장 범위도 드래그 선택과 같은 복사본을 만든다', vm.runInContext('_selectionTsv()', sandbox),
-    '이진우\t이진우\n조수빈\t조수빈');
-}
-{
-  const fake = buildFakeGrid();
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:0,r1:0,c1:0})', sandbox);
-  vm.runInContext('_moveCellSel(-1,0,false)', sandbox);
-  vm.runInContext('_moveCellSel(0,-1,false)', sandbox);
-  eq('★ 표 경계에서는 제자리(선택이 사라지지 않는다)', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
-    JSON.stringify({ r0: 0, c0: 0, r1: 0, c1: 0 }));
-}
-{
-  const fake = buildFakeGrid();
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
-  vm.runInContext('_setCellSel({r0:2,c0:4,r1:2,c1:4}, true)', sandbox);   // Ctrl 로 떨어진 범위 추가
-  vm.runInContext('_moveCellSel(1,0,false)', sandbox);
-  eq('★ Shift 없는 이동은 떨어진 범위를 정리한다', vm.runInContext('_selRanges().length', sandbox), 1);
-}
-ok('★ 모달·라이트박스가 떠 있으면 방향키를 가로채지 않는다',
-  /ArrowUp:\[-1,0\][\s\S]{0,400}querySelector\('\.modalov,#woImgOv,#rvpop'\)/.test(HTML));
-ok('★ Alt 조합은 가로채지 않는다(브라우저 단축키 보존)', /if\(D && !e\.altKey\)/.test(HTML));
-ok('★ 안 그려진 청크를 먼저 그린다(표 아래쪽으로도 이동)',
-  /function _moveCellSel[\s\S]{0,300}_gsFlushAll\(\)/.test(HTML));
-
-/* ── 9B. Ctrl(⌘)+방향키 = 데이터 끝으로 (엑셀과 같은 규칙, 사용자 확정 2026-08-23) ──────────
-   ★ 엑셀 규칙 그대로: 이어진 덩어리면 그 끝 · 그 밖이면 다음 값 있는 칸 · 없으면 표 끝.
-   ★ 정적 grep 으로는 규칙을 못 본다 → 순수함수와 실제 이동을 **돌려서** 대조한다. */
-console.log('\n[9B] Ctrl(⌘)+방향키 — 데이터 끝으로');
-{
-  const { sandbox } = makeCtx(buildFakeGrid());
-  const edge = (seq, i, step) => vm.runInContext(`_dataEdgeIndex(${JSON.stringify(seq)},${i},${step})`, sandbox);
-  const F = true, E = false;
-  eq('이어진 덩어리 → 그 끝', edge([F, F, F, E, F], 0, 1), 2);
-  eq('덩어리 끝에서 한 번 더 → 빈 구간을 건너뛴 다음 값', edge([F, F, F, E, F], 2, 1), 4);
-  eq('빈 칸에서 출발 → 그 방향 첫 값', edge([E, E, F, F], 0, 1), 2);
-  eq('그 방향에 값이 없으면 표 끝', edge([F, E, E, E], 0, 1), 3);
-  eq('역방향도 같은 규칙', edge([F, E, F, F], 3, -1), 2);
-  eq('★ 한 칸 뒤가 표 밖이면 제자리(선택이 사라지지 않는다)', edge([F, F], 1, 1), 1);
-  eq('★ 값이 하나도 없어도 표 끝까지만', edge([E, E, E], 0, 1), 2);
-}
-{
-  const fake = buildFakeGrid();
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
-  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
-  eq('Ctrl+↓ = 값이 이어진 마지막 행으로', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
-    JSON.stringify({ r0: 3, c0: 2, r1: 3, c1: 2 }));
-  vm.runInContext('_moveCellSel(0,1,false,true)', sandbox);
-  eq('Ctrl+→ = 그 행의 마지막 값 칸으로', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
-    JSON.stringify({ r0: 3, c0: 5, r1: 3, c1: 5 }));
-  eq('★ 도착해도 한 칸 선택(직사각형 불변)', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 1);
-  ok('★ 표 끝에서 한 번 더 눌러도 제자리(기본 스크롤만 막는다)',
-    vm.runInContext('_moveCellSel(1,0,false,true)', sandbox) === true
-    && JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)) === JSON.stringify({ r0: 3, c0: 5, r1: 3, c1: 5 }));
-}
-{
-  const fake = buildFakeGrid();
-  fake.rows[2].children[2].setAttribute('data-val', '');   // 가운데가 빈 칸 = 덩어리가 끊긴다
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
-  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
-  eq('★ 빈 칸 앞에서 멈춘다(덩어리의 끝)', vm.runInContext('STATE.gSelRange.r1', sandbox), 1);
-  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
-  eq('★ 한 번 더 = 빈 칸을 건너뛴 다음 값', vm.runInContext('STATE.gSelRange.r1', sandbox), 3);
-}
-{
-  const fake = buildFakeGrid();
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
-  vm.runInContext('_moveCellSel(1,0,true,true)', sandbox);
-  eq('★ Ctrl+Shift+↓ = 시작 모서리 고정, 끝까지 확장', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
-    JSON.stringify({ r0: 0, c0: 2, r1: 3, c1: 2 }));
-  eq('확장 범위 = 4칸', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 4);
-}
-{ // 그룹 머리행은 셀이 없다 — 세로 점프에서 건너뛴다(멈추면 그 아래로 영영 못 간다)
-  const fake = buildFakeGrid();
-  const gh = mkRow([mkCell({ cls: ['ghd'], text: '그룹' })], true);
-  gh.parentBody = fake.body;
-  fake.rows.splice(2, 0, gh);
-  fake.body.children = fake.rows;
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
-  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
-  eq('★ 그룹 머리행을 건너뛰고 마지막 데이터 행으로', vm.runInContext('STATE.gSelRange.r1', sandbox), 4);
-}
-{ /* ★ 문자열이 "있는지"가 아니라 **불렸는지**를 본다 — 종전 패턴은 `if(false) _gsFlushAll()`
-     로 바꿔도 통과했다(변이시험 실측). Ctrl+↓ 는 이것에 특히 기댄다: 아직 안 그려진 행은
-     "값 없음"으로 보여 덩어리가 그 자리에서 끊긴다. */
-  const fake = buildFakeGrid();
-  const { sandbox } = makeCtx(fake);
-  let flushed = 0;
-  sandbox._gsFlushAll = () => { flushed++; };
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
-  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
-  ok('★ 점프 전에 안 그려진 청크를 실제로 그린다(호출 확인)', flushed === 1, 'flushed=' + flushed);
-}
-ok('★ 배선 — Ctrl(⌘) 를 jump 로 넘긴다(Shift 와 독립)',
-  /_moveCellSel\(D\[0\],D\[1\],e\.shiftKey,e\.ctrlKey\|\|e\.metaKey\)/.test(HTML));
-ok('★ 값 판정 사본 금지 — 복사값(`_cellCopyText`)과 같은 함수를 쓴다',
-  /function _cellHasValue\([\s\S]{0,320}_cellCopyText\(td\)/.test(HTML));
-ok('★ 점프 전용 이동 경로를 따로 두지 않는다(범위·칠·스크롤은 _moveCellSel 하나)', (() => {
-  // 끝 판정 헬퍼는 **선언 1 + 호출 1**뿐이고 그 호출은 _moveCellSel 안에 있다.
-  const mv = grab('_moveCellSel');
-  return ['_rowEdgeIndex', '_colEdgeIndex'].every(n =>
-    (HTML.match(new RegExp(n + '\\(', 'g')) || []).length === 2 && mv.includes(n + '('));
-})());
-
-/* ── 10. 선택 요약은 빈 셀을 세지 않는다 (사용자 확정 2026-08-19) ─────────────────── */
-console.log('\n[10] 선택 요약 — 빈 셀 제외');
-{
-  const fake = buildFakeGrid();
-  // 마지막 두 행의 주문자제출 칸을 비워 둔다(드래그로 여백까지 훑은 상태)
-  fake.rows[2].children[2].setAttribute('data-val', '');
-  fake.rows[3].children[2].setAttribute('data-val', '');
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:3,c1:2})', sandbox);
-  eq('★ 값이 든 칸만 센다', vm.runInContext('_selectionStats().count', sandbox), 2);
-  eq('상단 표기도 같은 수', fake.stat.textContent, '선택 셀 2개');
-}
-{
-  const fake = buildFakeGrid();
-  fake.rows[1].children[5].setAttribute('data-val', '');   // 결제금액 한 칸이 빈 값
-  const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:5,r1:2,c1:5})', sandbox);
-  eq('★ 빈 결제금액 칸은 합계에도 셀 수에도 안 든다', vm.runInContext('_selectionStats().count', sandbox), 2);
-  eq('합계는 값이 든 칸만', vm.runInContext('_selectionStats().amount', sandbox), 44000);
 }
 
 console.log(`\n${fail ? '❌' : '✅'} pass ${pass} · fail ${fail}`);

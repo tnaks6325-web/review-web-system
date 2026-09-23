@@ -1,7 +1,5 @@
 'use strict';
 
-const { parseDateToken } = require('../utils/koreanDate');
-
 // v2 작업표의 상태 열은 이름 추측으로 찾지 않는다. 생성 시의 열 위치와 헤더를
 // 함께 저장/검증하여, 리뷰옵션 같은 비어있지 않은 작업지시 값이 제출로 읽히는
 // 사고를 차단한다.
@@ -37,12 +35,7 @@ function validateV2StatusBindings(headers, bindings) {
 
 function isV2ReviewSubmitted(value) {
   const text = String(value || '').trim();
-  if (text === '제출' || text === 'O') return true; // 기존 v2 전환 중 생성분 호환
-  // 수동 제출·백필이 실제로 쓰는 M/D HH:mm(또는 날짜) 형식만 인정한다.
-  // 날짜 판정은 쓰기 경로와 같은 공통 파서를 써서 2/30·'완료' 같은 임의 텍스트는 제출으로 새지 않는다.
-  const time = /\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(text);
-  if (time && (Number(time[1]) > 23 || Number(time[2]) > 59 || (time[3] != null && Number(time[3]) > 59))) return false;
-  return parseDateToken(text) !== null;
+  return text === '제출' || text === 'O'; // 기존 v2 전환 중 생성분의 O만 읽기 호환
 }
 
 function isV2PaymentSubmitted(value) {
@@ -72,74 +65,13 @@ async function seedV2StatusBindings(db, { sheetId, tabGid, tabName, headers, by 
   return validateV2StatusBindings(headers, stored);
 }
 
-async function _rebindV2StatusBindings(db, { sheetId, tabGid, tabName, headers, canonical }) {
-  const client = typeof db.connect === 'function' ? await db.connect() : db;
-  const ownsTransaction = client !== db;
-  try {
-    if (ownsTransaction) await client.query('BEGIN');
-    const { rows } = await client.query(
-      `SELECT role, header_text, col_index FROM tab_status_column_bindings
-        WHERE sheet_id=$1 AND tab_gid=$2 FOR UPDATE`, [sheetId, String(tabGid)]
-    );
-    const current = Object.fromEntries(rows.map(r => [r.role, { header: r.header_text, colIndex: Number(r.col_index) }]));
-    try {
-      // 다른 요청이 먼저 동기화했으면 불필요한 쓰기를 하지 않는다.
-      validateV2StatusBindings(headers, current);
-      if (ownsTransaction) await client.query('COMMIT');
-      return current;
-    } catch (error) {
-      if (!(error instanceof StatusColumnBindingError) || error.code !== 'v2_status_binding_drift') throw error;
-    }
-
-    /* (sheet_id, tab_gid, col_index)는 UNIQUE라서 한 칸 이동 시에도 개별 UPDATE는 충돌할 수 있다.
-       저장된 두 역할을 먼저 충돌하지 않는 임시 대역으로 함께 옮긴 뒤, 최종 좌표를 기록한다. */
-    await client.query(
-      `UPDATE tab_status_column_bindings
-          SET col_index = col_index + 1000000
-        WHERE sheet_id=$1 AND tab_gid=$2
-          AND role = ANY(ARRAY['review_submit', 'payment_status'])`,
-      [sheetId, String(tabGid)]
-    );
-    for (const [role, binding] of Object.entries(canonical)) {
-      await client.query(
-        `INSERT INTO tab_status_column_bindings
-           (sheet_id, tab_gid, tab_name, role, header_text, col_index, workboard_schema_version, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,2,'auto-rebind')
-         ON CONFLICT (sheet_id, tab_gid, role) DO UPDATE
-           SET header_text=EXCLUDED.header_text,
-               col_index=EXCLUDED.col_index,
-               workboard_schema_version=2,
-               created_by='auto-rebind',
-               created_at=NOW()`,
-        [sheetId, String(tabGid), tabName, role, binding.header, binding.colIndex]
-      );
-    }
-    if (ownsTransaction) await client.query('COMMIT');
-    return canonical;
-  } catch (error) {
-    if (ownsTransaction) await client.query('ROLLBACK').catch(() => {});
-    throw error;
-  } finally {
-    if (ownsTransaction) client.release();
-  }
-}
-
-async function loadV2StatusBindings(db, { sheetId, tabGid, tabName = '', headers, allowRebind = true }) {
-  // 저장된 위치가 우연히 맞더라도, 현재 헤더가 중복/누락이면 상태 열로 쓸 수 없다.
-  // 이 선검증이 없으면 '리뷰'가 두 개인 작업표에서 옛 좌표 하나를 임의로 신뢰하게 된다.
-  const canonical = buildV2StatusBindings(headers);
+async function loadV2StatusBindings(db, { sheetId, tabGid, headers }) {
   const { rows } = await db.query(
     `SELECT role, header_text, col_index FROM tab_status_column_bindings
       WHERE sheet_id=$1 AND tab_gid=$2`, [sheetId, String(tabGid)]
   );
   const stored = Object.fromEntries(rows.map(r => [r.role, { header: r.header_text, colIndex: Number(r.col_index) }]));
-  try {
-    return validateV2StatusBindings(headers, stored);
-  } catch (error) {
-    if (!(error instanceof StatusColumnBindingError) || error.code !== 'v2_status_binding_drift') throw error;
-    if (!allowRebind) throw error;
-    return _rebindV2StatusBindings(db, { sheetId, tabGid, tabName, headers, canonical });
-  }
+  return validateV2StatusBindings(headers, stored);
 }
 
 module.exports = { STATUS_HEADERS, StatusColumnBindingError, buildV2StatusBindings, validateV2StatusBindings,
