@@ -2023,6 +2023,15 @@ function _cdpFail(res, err) {
   }
   return false;
 }
+/* 쉬는 날(주말·공휴일)에 시스템이 자동으로 적어 둔 모집 인원 정리(2026-09-23 · 1회성 정리 도구).
+   ★ 미리보기 기본(confirm!==true = 쓰기 0) · 사람이 정한 값은 대상이 아니다 · 지운 값은 이력에 남긴다.
+   ★ adminOrMaster — 여러 공고의 모집 일정을 한 번에 바꾼다. */
+router.post('/settings/closed-day-plan-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { cleanupClosedDaySystemPlans } = require('../services/closedDayPlanCleanup.service');
+    res.json(await cleanupClosedDaySystemPlans({ confirm: (req.body || {}).confirm === true, by: _by(req) }));
+  } catch (err) { if (!_cdpNotReady(res, err)) next(err); }
+});
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');
