@@ -213,8 +213,66 @@ async function projectIntranetAdvertiser(order, context, deps) {
   }
 }
 
+/**
+ * 접수된 작업(탭)을 그 업체 소유로 지정한다 — 업체관리·작업보드의 업체 묶음이 읽는 `advertiser_campaigns`.
+ *
+ * ★★ 2026-09-23 실사고(「고양이사료」): 리뷰오더에서 광고주를 고르고 계약(견적서)까지 붙였는데
+ *   접수가 `work_orders.advertiser_id`·포털 작업만 채우고 **소유 행은 만들지 않아** 작업이
+ *   업체관리·작업바에서 「미지정」으로 떨어졌다(같은 상태 4건 — 사람이 손으로 지정해야만 풀렸다).
+ *
+ * 규율:
+ *   - ★ **작업(탭) 단위만**(결정 082) — gid 가 없으면 지정하지 않는다(시트 전체 소유 금지).
+ *   - ★★ **이미 누가 소유하고 있으면 덮지 않는다**(탭 지정·시트 전체 어느 쪽이든) — 사람이 정한 소유를
+ *     재접수 한 번으로 바꾸면 안 된다(정산 계약 자동 연결의 kept_existing 과 같은 규율).
+ *   - ★ 같은 업체의 **해제된(soft-deleted) 행은 되살리지 않는다** — 사람이 [×]로 뺀 결정이다.
+ *   - ★ 종료(ended) 거래처로는 지정하지 않는다.
+ *   - 판정과 쓰기는 **한 문장**(INSERT … WHERE NOT EXISTS) — 조회 후 쓰기 사이 경합 창을 두지 않는다.
+ *   - 절대 throw 하지 않는다 — 호출부(접수)는 이미 끝난 일이다. 결과 코드로 사실을 말한다.
+ *
+ * @returns {Promise<{status:'assigned'|'already'|'kept_existing'|'kept_removed'|'advertiser_ended'|'no_gid'|'no_advertiser'|'failed', owner?:string, error?:string}>}
+ */
+async function ensureTabOwnership({ advertiserId, sheetId, tabGid, by } = {}, deps) {
+  const pool = (deps && deps.pool) || defaultPool;
+  const adv = _text(advertiserId, 64);
+  const sid = _text(sheetId, 200);
+  const gid = _text(tabGid, 64);
+  if (!adv || !sid) return { status: 'no_advertiser' };
+  if (!gid) return { status: 'no_gid' };
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid, assigned_by)
+       SELECT $1, $2, $3, $4
+        WHERE EXISTS (SELECT 1 FROM advertisers WHERE id = $1 AND COALESCE(status,'') <> 'ended')
+          AND NOT EXISTS (SELECT 1 FROM advertiser_campaigns
+                           WHERE deleted_at IS NULL AND sheet_id = $2
+                             AND (tab_gid IS NULL OR tab_gid = $3))
+       ON CONFLICT (advertiser_id, sheet_id, COALESCE(tab_gid,'')) DO NOTHING
+       RETURNING id`,
+      [adv, sid, gid, _text(by, 100) || '자동(작업오더)']
+    );
+    if (rows.length) return { status: 'assigned' };
+    // 왜 안 넣었는지 사실대로 말한다(조용한 no-op 금지).
+    const { rows: own } = await pool.query(
+      `SELECT ac.advertiser_id AS "advertiserId", a.name
+         FROM advertiser_campaigns ac LEFT JOIN advertisers a ON a.id = ac.advertiser_id
+        WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1 AND (ac.tab_gid IS NULL OR ac.tab_gid = $2)
+        ORDER BY (ac.tab_gid IS NULL) ASC LIMIT 1`, [sid, gid]);
+    if (own.length) {
+      return own[0].advertiserId === adv
+        ? { status: 'already' }
+        : { status: 'kept_existing', owner: own[0].name || own[0].advertiserId };
+    }
+    const { rows: a } = await pool.query(`SELECT status FROM advertisers WHERE id = $1`, [adv]);
+    if (!a.length || String(a[0].status || '') === 'ended') return { status: 'advertiser_ended' };
+    return { status: 'kept_removed' };
+  } catch (err) {
+    return { status: 'failed', error: err.message };
+  }
+}
+
 module.exports = {
   projectIntranetAdvertiser,
+  ensureTabOwnership,
   AdvertiserLinkError,
   ADVERTISER_NAME_CONFLICT,
 };
