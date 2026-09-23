@@ -408,7 +408,7 @@ async function loadRecruitTabOptions() {
     });
 
     _rfTabsErr = null;
-    _populateCampaignSelect();
+    _rfRepopulateLinkedSelects();
   } catch(e) {
     console.warn("[recruit] 탭 옵션 로드 실패:", e);
     _rfTabsErr = (e && e.message) || "불러오기 실패";
@@ -438,9 +438,25 @@ async function loadRecruitTabOptions() {
     });
     // DOM 폴백이 실제로 건졌으면 실패로 취급하지 않는다(관리자 대시보드 경로)
     if (_recruitTabList.length) _rfTabsErr = null;
-    _populateCampaignSelect();
+    _rfRepopulateLinkedSelects();
   }
   try { _rfRefreshLinkedTabNote(); } catch (_) {}   // 목록 상태가 바뀌면 안내도 다시 판단
+}
+
+/* ★★ 목록 갱신이 모달에 이미 골라 둔 연결 작업을 지우지 않게 한다 (2026-09-23 실사고).
+   [⚙ 작업 시작 설정]은 모집공고 화면으로 옮기면서(renderCampaignsView — 목록을 await 없이 다시 받음)
+   동시에 모달을 연다. 모달이 연결 작업을 고른 **뒤에** 그 요청이 끝나면 드롭다운이 통째로
+   비워져, 저장이 "연결 안 함"(unlinked)으로 나가고 작업보드 표시명은
+   「연결된 작업보드에서만 설정할 수 있습니다」로 거부됐다(표시명을 안 적었으면 공고가 연결 없이 저장된다).
+   ⇒ 다시 채우는 순간의 선택을 기억했다가 목록에 있으면 되살린다. 목록에서 사라졌으면 빈 값이 맞다. */
+function _rfRepopulateLinkedSelects() {
+  const cur = document.getElementById("rf_linked_tab")?.value || "";
+  _populateCampaignSelect();
+  if (cur) {
+    const i = cur.indexOf("||");
+    if (i > 0) _restoreLinkedTab(cur.slice(0, i), cur.slice(i + 2));
+  }
+  _syncWorkboardDisplayNameInput();
 }
 
 /* 1단계: 캠페인(시트) 선택 드롭다운 구성 */
@@ -471,6 +487,7 @@ function _populateCampaignSelect(currentSheetId) {
     tabSel.innerHTML = `<option value="">② 탭 선택 (캠페인 먼저 선택)</option>`;
     tabSel.disabled = true;
   }
+  _syncWorkboardDisplayNameInput();   // 연결이 비면 표시명 칸도 함께 잠근다(잠금 상태가 남아 저장 거부되던 것 방지)
 }
 
 /* 캠페인 선택 시 → 해당 시트의 탭 목록 표시 */
@@ -3556,8 +3573,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
             inflowHtml: orderPrefill.wd_inflow_html || orderPrefill.wd_inflow_text || '',
           }, wd);
         }
-        setV("rf_thumbnail", c.thumbnail_url || "");
-        setV("rf_thumb_url", c.thumbnail_url || "");
+        // 공고 저장값이 비었을 때만 작업오더(리뷰오더)의 썸네일을 제안한다 — 저장해야 공고에 반영된다.
+        const _thumbV = c.thumbnail_url || (prefill && prefill.thumbnail_url) || "";
+        setV("rf_thumbnail", _thumbV);
+        setV("rf_thumb_url", _thumbV);
         _syncCampThumbUrlPreview();
         renderOptRowsWithProduct(json.options || [], wd.productLines, c);   // 🧩 옵션표 + 상품명 복원
         renderPartCheck();
@@ -3618,6 +3637,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
         if (pEl && prefill.price)        pEl.value = prefill.price;
       }
       /* ★ 상품확인용 URL이 있으면 자동수집 1회 시도 — 성공 항목만 덮어쓰고, 실패하면 위 기본값 유지 */
+      // ★ 리뷰오더에서 정한 썸네일이 있으면 그대로 싣는다(사람이 고른 값 — 자동수집이 덮지 않는다).
+      if (prefill.thumbnail_url) {
+        ["rf_thumbnail", "rf_thumb_url"].forEach(i => { const el = document.getElementById(i); if (el) el.value = prefill.thumbnail_url; });
+        _syncCampThumbUrlPreview();
+      }
       if (prefill.product_url) setTimeout(() => { try { fetchProductInfo({ auto: true }); } catch (_) {} }, 0);
 
       /* ★ M3: 참여형 자동 프리필 — 작업오더 세부내용 → 발행 폼 스냅샷 (관리자는 확인·수정만) */
@@ -3706,7 +3730,9 @@ async function fetchProductInfo(opts) {
     const pEl = document.getElementById("rf_price");
     if (has) {
       // ★ 리뷰 #10: 자동추출이 빈 값으로 직접 업로드 썸네일을 덮지 않게
-      if (r.thumbnail) {
+      // 자동 1회 시도는 이미 채워진 썸네일(작업오더 지정·직접 업로드)을 덮지 않는다.
+      const _hasThumb = !!(document.getElementById("rf_thumbnail")?.value || "").trim();
+      if (r.thumbnail && !(auto && _hasThumb)) {
         document.getElementById("rf_thumbnail").value = r.thumbnail;
         const _thumbUrl = document.getElementById("rf_thumb_url");
         if (_thumbUrl) _thumbUrl.value = r.thumbnail;
@@ -5397,7 +5423,8 @@ async function saveRecruitPostImpl() {
     source_work_order_id: (!_recruitEditId && _woPrefillOrderId) ? _woPrefillOrderId : undefined,
   };
   const workboardDisplayNameInput = document.getElementById('rf_workboard_display_name');
-  if (workboardDisplayNameInput && !workboardDisplayNameInput.disabled) {
+  // 연결값(tabKey)과 같은 근거로 보낸다 — 신규 공고인데 연결이 비면 서버가 거부하므로 싣지 않는다.
+  if (workboardDisplayNameInput && !workboardDisplayNameInput.disabled && (tabKey || _recruitEditId)) {
     payload.workboard_display_name = workboardDisplayNameInput.value.trim();
   }
 
