@@ -948,6 +948,8 @@ function _woCampaignPrefill(o) {
     // ★ 099: 체험단 종류 — 발행 폼이 그대로 저장한다(빈 값 = 리뷰 = 기존 동작).
     work_kind:     String(o.work_kind || "").trim(),
     product_url:   o.product_url || "",
+    // 모집공고 썸네일(163) — 리뷰오더에서 고른 사진(우리 프록시 URL). 비면 종전처럼 상품정보 자동수집이 채운다.
+    thumbnail_url: o.thumbnail_url || "",
     // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
     product_name:  _pi.name || "",
     price:         _pi.price || "",
