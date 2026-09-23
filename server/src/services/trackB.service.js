@@ -1611,8 +1611,27 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   const quoteResult = link.salesId ? await _quoteForSalesResult(link.salesId) : { quote: null, lookupFailed: false };
   const quote = quoteResult.quote;
   const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
+  // 같은 계약을 함께 쓰는 다른 작업(내부 전용 — 광고주에겐 다른 업체 작업명이 섞일 수 있어 미동봉).
+  //   ★ fail-soft: 조회 실패면 필드를 싣지 않는다(화면은 "모름"을 공유 없음으로 꾸미지 않고 아무것도 안 그린다).
+  let sharedTabs, sharedTabCount;
+  if (!isAdv && link.salesId) {
+    try {
+      const { rows: sh } = await db.query(
+        `SELECT l.sheet_id AS "sheetId", l.tab_name AS "tabName",
+                COALESCE(NULLIF(tc.display_name, ''), l.tab_name) AS label,
+                COUNT(*) OVER ()::int AS total
+           FROM trackb_settlement_links l
+           LEFT JOIN tab_configs tc ON tc.sheet_id = l.sheet_id AND tc.tab_name = l.tab_name
+          WHERE l.sales_id = $1 AND l.deleted_at IS NULL AND NOT (l.sheet_id = $2 AND l.tab_name = $3)
+          ORDER BY l.created_at ASC LIMIT 20`, [link.salesId, sheetId, tabName]);
+      // ★ 이름 목록은 20개까지만 싣지만 숫자는 전체로 센다(잘린 목록 길이로 세면 21에서 멈춘다).
+      sharedTabCount = sh.length ? sh[0].total + 1 : 1;
+      sharedTabs = sh.map(({ total, ...r }) => r);
+    } catch (e) { logger.warn(`[settlement] 공유 작업 조회 실패: ${e.message}`); }
+  }
   return {
     linked: true, contractNumber, salesId: link.salesId,
+    sharedTabs, sharedTabCount,
     // Nit5: 광고주에겐 내부 정보(linkedBy·담당자) 미노출.
     linkedBy: isAdv ? undefined : link.linkedBy,
     proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
@@ -1769,6 +1788,10 @@ async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
     const [sales, quote] = await Promise.all([_salesById(sid), _quoteForSales(sid)]);
     bySales.set(sid, { sales, quote });
   }));
+  // 계약 1건을 작업 여러 개가 함께 쓰는 경우 표시용(사용자 확정 2026-09-23 「1번」 — 금액은 나누지 않는다).
+  //   ★ 세는 범위 = 활성 정산 링크 전체(다른 업체 탭 포함 — 내부 화면 전용 함수라 새지 않는다).
+  //   ★ fail-soft: 조회 실패 시 이 업체 목록 안에서 센 값으로 접는다(배지가 사라지는 쪽보다 낫다).
+  const shareCount = await _sharedTabCounts([...bySales.keys()], linked);
   return linked.map(t => {
     const { sales = null, quote = null } = bySales.get(t.salesId) || {};
     const quoteAmount = quote && quote.totalAmount > 0 ? quote.totalAmount : null;
@@ -1787,8 +1810,25 @@ async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
       // 총비용 = 견적서상 금액(원칙). 견적 없으면 계약금액 폴백. 견적↔계약 금액 불일치는 ⚠ 신호만(자동 판정 안 함).
       totalCost: quoteAmount != null ? quoteAmount : contractAmount,
       amountMismatch: !!(quoteAmount && contractAmount && quoteAmount !== contractAmount),
+      // 이 계약을 함께 쓰는 작업 수(자기 포함). 2 이상이면 총비용·입금액은 "계약 전체" 금액이다.
+      sharedTabCount: shareCount.get(t.salesId) || 1,
     };
   });
+}
+// 계약(sales_id)별 활성 정산 링크 수. 실패하면 넘겨받은 목록 안에서 센다(fail-soft).
+async function _sharedTabCounts(salesIds, fallbackRows) {
+  const m = new Map();
+  if (!salesIds.length) return m;
+  try {
+    const { rows } = await getPool().query(
+      `SELECT sales_id AS "salesId", COUNT(*)::int AS n FROM trackb_settlement_links
+        WHERE deleted_at IS NULL AND sales_id = ANY($1::text[]) GROUP BY sales_id`, [salesIds]);
+    for (const r of rows) m.set(r.salesId, r.n);
+  } catch (e) {
+    logger.warn(`[settlement] 계약 공유 수 조회 실패 — 목록 안에서 셈: ${e.message}`);
+    for (const t of (fallbackRows || [])) if (t.salesId) m.set(t.salesId, (m.get(t.salesId) || 0) + 1);
+  }
+  return m;
 }
 // ── 업체용 뷰어 "내 작업 목록"(화면 A) — 광고주 렌즈 요약 배치. ──
 //   ownedTabsForAdvertiser(카운트) + settlementSummaryForAdvertiser(정산 배치)를 광고주에게 내도 되는
@@ -1824,6 +1864,11 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
   const brandsOut = brandId ? undefined : (await brandsForAdvertiser({ advertiserId }).catch(() => null));
   // 136: 작업별 브랜드 담당자 — 배치 1쿼리(fail-soft 빈 맵). 브랜드 관리 화면의 작업 행이 현재 값을 그린다.
   const bmgr = await tabBrandManagersMap({ advertiserId });
+  // 계약 공유 묶음 — ★ 광고주에게 보이는 작업들 안에서만 센다(다른 업체·다른 브랜드 작업 수를 새지 않는다).
+  //   인트라넷 계약 ID 는 이 렌즈에서 버리므로, 화면이 합계를 한 번만 세도록 불투명한 묶음 번호만 싣는다.
+  const shareN = new Map(), shareGrp = new Map();
+  for (const t of tabs) { const s = setlByTab.get(t.sheetId + '\t' + t.tabName); if (s && s.salesId) shareN.set(s.salesId, (shareN.get(s.salesId) || 0) + 1); }
+  for (const [sid, n] of shareN) if (n > 1) shareGrp.set(sid, shareGrp.size + 1);
   return {
     settlementHidden: !visible,
     brand: brand ? { id: brand.id, name: brand.name, color: brand.color } : null,
@@ -1860,6 +1905,8 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
           paidAmount: s.paidAmount != null ? s.paidAmount : null,
           paidDate: s.paidDate || null,
           paymentStatus: s.paymentStatus || null,
+          sharedTabCount: shareN.get(s.salesId) || 1,
+          shareGroup: shareGrp.get(s.salesId) || null,
         } : null,
       };
     }),
