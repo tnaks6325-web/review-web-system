@@ -197,6 +197,34 @@ async function run() {
     dr2.restore();
   }
 
+  console.log('\n[J] 페이징 — 대상이 뒤쪽에 있어도 도달한다');
+  {
+    /* ★★ 실사고(2026-09-22 미리보기): 거르기를 JS 에서만 하고 SQL 은 앞에서부터 잘라 읽어
+       전체 1,782건 중 **41건만** 잡혔다. 반복 실행해도 같은 앞쪽만 다시 읽어 전진하지 못한다. */
+    const d = stubDb([ROW()]);
+    await SVC.planRecipientRenames({ db: d, limit: 7 });
+    const sql = d.calls[0].sql;
+    ok('★★ 이미 같은 이름인 건은 SQL 이 걸러낸다(LIMIT 이 실제 대상 기준)',
+      /<> f\.cur_name/.test(sql));
+    ok('★★ 수취인을 모르는 건도 SQL 이 걸러낸다', /IS NOT NULL AND COALESCE/.test(sql.replace(/\s+/g,' ')));
+    ok('★★ 표준 파일명만 읽는다', /rs\.file_name ~ '\^\.\+_\[0-9\]/.test(sql));
+    ok('★★ LIMIT 을 부풀리지 않는다(cap*N 금지 — 그러면 뒤쪽에 영영 도달 못 한다)',
+      d.calls[0].params[2] === 7);
+  }
+  {
+    /* ★★ 같은 규칙을 JS·SQL 두 표현으로 적는다 — **같은 판정**이어야 한다.
+       갈리면 "SQL 은 대상이라는데 JS 는 건너뛰는" 헛돌기(진행 0)가 된다. */
+    const jsRe = SVC.TAIL_RE;
+    const sqlRe = new RegExp(SVC.TAIL_SQL);
+    const samples = [
+      '허다은_1_20260824_101112.jpg', '김_석_진_12_20260101_000000.png',
+      '이름.jpg', '이름_1_2026_101112.jpg', '_1_20260824_101112.jpg',
+      '이름_1_20260824_101112.jpeg', '이름_1_20260824_1011.jpg',
+    ];
+    const mismatch = samples.filter(x => jsRe.test(x) !== sqlRe.test(x));
+    ok('★★ JS 정규식 ≡ SQL 정규식(같은 파일명에 같은 판정)', mismatch.length === 0, mismatch.join(','));
+  }
+
   console.log('\n[G] 해석 사본 0');
   {
     const own = srv('src/services/captureOwnerName.service.js');
