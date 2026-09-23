@@ -988,7 +988,8 @@
   function close() {
     // ★ 균형 모드는 열자마자 구간을 펼쳐 두므로 dirty 가 항상 크다 — "사람이 실제로 바꾼 게 있나"로
     //   판정해야 아무것도 안 건드리고 닫을 때 매번 경고가 뜨지 않는다.
-    var touched = S && S.data && (balanceOn() ? changedFromOpen() : dirtyDates().length > 0);
+    var touched = S && S.data && ((balanceOn() ? changedFromOpen() : dirtyDates().length > 0)
+      || (S.closedPin && Object.keys(S.closedPin).length > 0));
     if (touched && !window.confirm('저장하지 않은 조절이 있습니다. 닫을까요?')) return;
     var m = document.getElementById('cdpModal');
     if (m) m.style.display = 'none';
@@ -1028,6 +1029,7 @@
     });
     S.baseEnd = null;
     S.balance = false; S.horiz = null; S.carryMap = null; S.openPlan = null; S.outside = null;
+    S.closedPin = {};   // [주말·공휴일 0명 확정] 스테이징 — 저장·재조회하면 비운다
     // ★ 기본 보충 방식 = "다음날(첫 진행일) 정원에 더하기"(사용자 확정) — 펼치지 못하면(총량 무제한·
     //   구간이 저장 상한 초과 등) 균형 모드를 끄고 종전 동작(14일 성긴 표)으로 둔다.
     // ★★ **고른 방식은 저장·재조회·재오픈에도 유지한다**(사용자 신고 2026-08-07 — "종료일 뒤에
@@ -1091,6 +1093,10 @@
       if (v == null) { if (S.base[d] != null) remove.push(d); return; }
       var nat = naturalFor(d), residual = Math.max(0, target - cum);
       cum += v;
+      /* ★★ [주말·공휴일 0명 확정]으로 스테이징한 날은 **명시 0(set)** 으로 보낸다(2026-09-23).
+         아래 "손대지 않은 값은 안 보낸다"·"기본값이면 해제" 규칙에 걸리면 그날이 저장 계획에서 빠져
+         작업표 재배치 대상(managed)에 못 들어가고 빈 줄이 그 날짜에 그대로 남는다. */
+      if (S.closedPin && S.closedPin[d]) { if (S.base[d] !== v) set.push({ date: d, count: v }); return; }
       // ★ 마지막 부분일(총량에 맞춰 남은 만큼만 연 날)은 고정할 필요가 없다 — 서버도 같은
       //   총량 clamp 를 걸고, 고정하지 않으면 앞 날이 미달했을 때 그날이 온전히 열린다(더 안전).
       // ★ **시스템이 깐 값 그대로일 때만** 건너뛴다 — 그냥 `v === residual` 로 두면 균형이 맞은
@@ -1106,7 +1112,9 @@
       if (!pinAll && v === nat) return;                      // 손대지 않은 값 = 보낼 필요 없음
       // 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(시트/일건수 우선권 복귀).
       // ★ 단 pinAll(이월 억제)일 때는 해제하면 안 된다 — 해제 = 자동 이월 복귀 = 고른 방식 무효.
-      if (!pinAll && S.base[d] != null && v === baseFor(d)) remove.push(d);
+      // ★ 쉬는 날(주말·공휴일)의 0명은 "기본값 복귀(해제)"가 아니라 **명시 0** 이다 — 해제하면 그날이
+      //   작업표 재배치 대상에서 빠지고, 저장돼 있던 인원이 사라진 자리에 빈 줄이 남는다(2026-09-23).
+      if (!pinAll && S.base[d] != null && v === baseFor(d) && !(v === 0 && policyClosed(d))) remove.push(d);
       else set.push({ date: d, count: v });
       return;
     });
@@ -1470,6 +1478,7 @@
       + statBlk
       + carryBlk
       + wkNote
+      + closedNote()
       + '</aside><section class="cdp-main"><div class="cdp-fix">'
       + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
       + (j.status !== 'active'
@@ -1783,6 +1792,63 @@
     render();
   }
   function _autoFit() { if (S && S.data) autoFit(); }
+
+  /* ── 주말·공휴일 0명 확정(2026-09-23 사용자 확정) ─────────────────────────────
+     쉬는 날인데 작업표에 줄이 남아 있고 그날 저장된 계획이 없는 날 = 서버는 그날을 닫지만(신청 불가)
+     작업보드에는 그 날짜 줄이 그대로 보인다. 버튼 한 번으로 그날을 **명시 0** 으로 스테이징하고,
+     빠진 인원은 고른 이월 방식대로 [자동 맞춤]이 뒤에 붙인다(총량 유지). ★ 자동 저장하지 않는다 —
+     [확정 저장]을 눌러야 계획·작업표가 바뀐다. ★ 이미 참여·주문이 있는 줄은 0 으로 못 내린다(하한). */
+  function closedNote() {
+    if (!S || !S.data || S.rebalanced) return '';
+    var ds = closedDayTargets();
+    var pinned = S.closedPin ? Object.keys(S.closedPin).length : 0;
+    if (!ds.length && !pinned) return '';
+    if (!ds.length) {
+      return '<div class="cdp-note">✓ 주말·공휴일 <b>' + pinned + '일</b>을 0명으로 확정했습니다 — '
+        + '<b>[확정 저장]</b>을 눌러야 작업보드의 그 날짜 줄이 정리됩니다.</div>';
+    }
+    var hol = ds.filter(function (d) { return holidayName(d); }).length;
+    var what = hol === ds.length ? '공휴일' : (hol ? '주말·공휴일' : '주말');
+    return '<div class="cdp-note warn">⚠ <b>' + what + ' ' + ds.length + '일</b>을 0명으로 확정하세요 — '
+      + '이 날은 신청이 막히는데 작업보드에 그 날짜 줄이 남아 있습니다('
+      + _esc(ds.slice(0, 4).map(fmtMD).join(' · ')) + (ds.length > 4 ? ' 외' : '') + ').'
+      + '<div style="margin-top:6px"><button type="button" class="cdp-btn sm" onclick="CampaignDailyPlan._pinClosed()">'
+      + what + ' ' + ds.length + '일 0명으로 확정</button></div></div>';
+  }
+  function closedDayTargets() {
+    if (!S || !S.data || S.data.skipWeekends !== true || S.data.planEnabled === false) return [];
+    var today = S.data.today, seen = {}, out = [];
+    var cand = (S.data.worktableDates || []).map(function (x) { return String(x && x.date || '').slice(0, 10); })
+      .concat(S.horiz || []);
+    cand.forEach(function (d) {
+      if (!d || seen[d] || d < today) return;
+      seen[d] = 1;
+      if (S.closedPin && S.closedPin[d]) return;
+      if (S.base[d] != null) return;                      // 이미 저장된 계획(사람이 정한 값 포함) = 대상 아님
+      if (!(worktableFor(d) > 0)) return;                  // 작업표에 줄이 없으면 정리할 것이 없다
+      if (!policyClosed(d)) return;
+      out.push(d);
+    });
+    return out.sort();
+  }
+  function _pinClosed() {
+    if (!S || !S.data) return;
+    var ds = closedDayTargets();
+    if (!ds.length) { toast('0명으로 확정할 주말·공휴일이 없습니다'); return; }
+    if (!S.closedPin) S.closedPin = {};
+    var kept = [];
+    ds.forEach(function (d) {
+      var lo = minFor(d);
+      S.plan[d] = lo;
+      S.closedPin[d] = 1;
+      if (lo > 0) kept.push(d);
+      if (balanceOn() && S.horiz && S.horiz.indexOf(d) < 0) { S.horiz.push(d); S.horiz.sort(); }
+    });
+    if (balanceOn()) autoFit(); else render();
+    toast(ds.length + '일을 0명으로 확정했습니다'
+      + (kept.length ? ' — ' + kept.length + '일은 이미 참여·주문이 있어 그 수까지만 줄였습니다' : '')
+      + ' · [확정 저장]을 눌러야 반영됩니다');
+  }
 
   /* ── 보류 이월 반영(098) — 계획에 얹는 스테이징. 저장 시 carryApply 로 잔량 차감 기록 ── */
   function _heldApply(mode) {
@@ -2144,6 +2210,7 @@
     _chExtend: _chExtend, _chSpread: _chSpread, _chCancel: _chCancel,
     _roundForm: _roundForm, _roundAdd: _roundAdd, _roundRemove: _roundRemove,
     _heldApply: _heldApply,
+    _pinClosed: _pinClosed,
     quickApplyHeld: quickApplyHeld, _quickDo: _quickDo, _quickDetail: _quickDetail, _quickClose: _quickClose,
   };
 })();

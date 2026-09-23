@@ -102,6 +102,8 @@ function isWeekend(o) { const w = dowOf(o); return w === 0 || w === 6; }
  * 날짜 분배 — 하루 `daily` 건씩, 주말 제외 옵션.
  * 시작일이 없으면 **날짜를 만들지 않는다**(빈 칸 = 담당자가 나중에 채움).
  */
+const { isHoliday } = require('./krHolidays');
+
 function distributeDates({ total, daily, startDate, skipWeekends = true, holidays = [] } = {}) {
   const n = Math.max(0, parseInt(total, 10) || 0);
   const per = Math.max(0, parseInt(daily, 10) || 0);
@@ -113,7 +115,9 @@ function distributeDates({ total, daily, startDate, skipWeekends = true, holiday
   const rowDates = [];
   let cur = start, guard = 0;
   while (rowDates.length < n && guard++ < MAX_DAYS) {
-    if ((skipWeekends && isWeekend(cur)) || skip.has(ymdStr(cur))) { cur = addDays(cur, 1); continue; }
+    // ★★ "주말 제외" = 주말 + 법정공휴일 제외(2026-09-23 사용자 확정) — 공휴일에 줄을 깔면 발행 때
+    //   그 줄 수가 날짜별 계획으로 옮겨 적혀 공휴일 모집이 열린다. 판정 = utils/krHolidays 단일 출처.
+    if ((skipWeekends && (isWeekend(cur) || isHoliday(ymdStr(cur)))) || skip.has(ymdStr(cur))) { cur = addDays(cur, 1); continue; }
     const take = Math.min(per, n - rowDates.length);
     days.push({ date: ymdStr(cur), label: sheetDateStr(cur), dow: DOW[dowOf(cur)], count: take });
     for (let i = 0; i < take; i++) rowDates.push({ date: ymdStr(cur), label: sheetDateStr(cur) });
