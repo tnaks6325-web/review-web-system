@@ -1844,7 +1844,15 @@
       if (lo > 0) kept.push(d);
       if (balanceOn() && S.horiz && S.horiz.indexOf(d) < 0) { S.horiz.push(d); S.horiz.sort(); }
     });
-    if (balanceOn()) autoFit(); else render();
+    /* ★★ 빠진 인원은 **항상 종료일 뒤에 붙인다**(사용자 확정 2026-09-23) — 공고의 이월 방식(next/spread)을
+       그대로 쓰면 부족분이 기존 진행일, 특히 오늘에 몰린다(임시 테섭 실측: 120명이 오늘로 몰림).
+       방식은 이 한 번의 맞춤에만 빌리고 곧바로 되돌린다(공고 설정·화면의 방식 선택은 불변). */
+    if (balanceOn()) {
+      var _prevMode = S.carryMode;
+      S.carryMode = 'extend';
+      try { autoFit(); } finally { S.carryMode = _prevMode; }
+      render();
+    } else render();
     toast(ds.length + '일을 0명으로 확정했습니다'
       + (kept.length ? ' — ' + kept.length + '일은 이미 참여·주문이 있어 그 수까지만 줄였습니다' : '')
       + ' · [확정 저장]을 눌러야 반영됩니다');

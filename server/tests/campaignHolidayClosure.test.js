@@ -203,6 +203,23 @@ const modalP = (async () => {
   const at = d => { const h = set.find(x => x.date === d); return h ? h.count : null; };
   ok('★★ 추석 두 날이 명시 0 으로 저장된다(작업표 재배치 대상에 들어간다)', at('2026-09-24') === 0 && at('2026-09-25') === 0);
   ok('★★ 해제(remove)로 빠지지 않는다', !((post && post.body.remove) || []).some(d => d === '2026-09-24' || d === '2026-09-25'));
+  ok('★★ 빠진 인원이 오늘·기존 진행일에 몰리지 않는다(종료일 뒤에 붙인다 — 임시 테섭 실측 회귀)',
+    (at('2026-09-23') === null || at('2026-09-23') <= 30) && !set.some(x => x.count > 30));
+
+  // ★★ 임시 테섭 실측 재현 — 작업표가 9/25 까지만 있어 부족분이 큰 공고(이월 방식 = 기본값).
+  //   0명 확정의 빠진 인원이 오늘(9/23)로 몰리면 안 되고 종료일 뒤 평일에 붙어야 한다.
+  NET.overview = OV({ carryStrategy: 'next', worktableDates: ['2026-09-23', '2026-09-24', '2026-09-25']
+    .map(d => ({ date: d, slots: 30, filled: 0 })), plans: [{ date: '2026-09-23', count: 30, updatedBy: 'admin' }] });
+  NET.posts = [];
+  await CDP.open('c1');
+  CDP._pinClosed();
+  await CDP._save();
+  const p3 = NET.posts.find(x => /daily-plan/.test(x.url));
+  const s3 = (p3 && p3.body.set) || [];
+  const at3 = d => { const h = s3.find(x => x.date === d); return h ? h.count : null; };
+  ok('★★ 부족분이 오늘로 몰리지 않는다(오늘은 30 그대로 · 저장 대상 아님)', at3('2026-09-23') === null || at3('2026-09-23') === 30);
+  ok('★★ 부족분이 종료일 뒤 평일(9/28~)에 붙는다 · 주말·공휴일엔 안 붙는다',
+    at3('2026-09-28') > 0 && !s3.some(x => /2026-09-2[4-7]/.test(x.date) && x.count > 0));
 
   // 이미 참여자가 있는 공휴일은 그 수까지만
   NET.overview = OV({ worktableDates: OV().worktableDates.map(x => x.date === '2026-09-24' ? Object.assign({}, x, { filled: 3 }) : x) });
