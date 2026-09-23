@@ -164,32 +164,6 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
-  // ── 작업보드 큐 누락 복구: 홀수 분마다(DB-only) ───────────────────────
-  // ORDER_BATCH_AUTO=1은 위 시트 리컨실을 끄고, 시트 배치 대상에서도 무시트 탭을 제외한다.
-  // 그래서 원장 저장 뒤 workboard_apply INSERT만 실패한 주문은 실행 주체가 없었다.
-  // 최근 48시간 중 기존 큐 이력이 전혀 없는 2분 이상 지난 주문만 재등록하며,
-  // 같은 order_reconcile 락으로 기존 리컨실과 겹치지 않는다. 큐 소비는 기존 30초 워커 하나가 계속 담당한다.
-  if (process.env.WORKBOARD_RECONCILE_CRON !== '0') {
-    const wbReconcileSchedule = process.env.WORKBOARD_RECONCILE_CRON_SCHEDULE || '1-59/2 * * * *';
-    cron.schedule(wbReconcileSchedule, async () => {
-      try {
-        const { withJobLock } = require('../utils/jobLock');
-        const { recoverMissingWorkboardQueues } = require('../services/workboardQueueApply.service');
-        const r = await withJobLock('order_reconcile', () => recoverMissingWorkboardQueues({
-          limit: parseInt(process.env.WORKBOARD_RECONCILE_LIMIT || '100', 10),
-          staleSeconds: parseInt(process.env.WORKBOARD_RECONCILE_STALE_SECONDS || '120', 10),
-          sinceHours: parseInt(process.env.WORKBOARD_RECONCILE_WINDOW_HOURS || '48', 10),
-        }));
-        if (r && (r.requeued > 0 || r.failed > 0)) {
-          logger.info(`[CRON-WorkboardReconcile] scanned=${r.scanned} requeued=${r.requeued} failed=${r.failed}`);
-        }
-      } catch (err) {
-        logger.error(`[CRON-WorkboardReconcile] error: ${err.message}`);
-        logAbnormal({ flow: 'cron', step: 'workboard_reconcile', error: err, context: { job: 'workboard_reconcile' } });
-      }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
   // ── written 사후검증(유령 written 감지·자가치유 + 캡처미첨부/적체 한글로그): 기본 ON ──
   //   7/24 이지유 사건 재발방지: written 주문의 기록 행을 RAW 미러와 신원대조 →
   //   행이동=포인터 보정 / 소실=critical 알림+failed 강등(reconcile 재기록) / 반복소실=stuck_manual.
@@ -243,72 +217,6 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
-  // ── 무시트 작업표 번호 자동 정리(스윕) ──────────────────────────────────────
-  //   주문이 들어올 때는 그 자리에서 다시 매겨지지만(renumberTabInTx), **이미 비어 있던 줄**과
-  //   그때 실패한 건은 남는다. 사람이 [🔢 번호 정리]를 누르지 않아도 채워지도록 주기로 훑는다.
-  //   ★ 대상은 **한 쿼리 스캔으로 추린 작업만**(정리가 끝나면 매 사이클 쿼리 1번으로 끝난다).
-  //   ★ 사이클 상한이 있어 업무 시간에 DB 를 흔들지 않는다 — 남은 것은 다음 사이클.
-  //   ★ 다른 크론과 분(minute)을 겹치지 않게(*/5 미러 · */2 리컨실 · 4-59/10 검수와 오프셋).
-  //   끄기: WORKTABLE_RENUMBER_SWEEP=0 (기능 전체는 WORKTABLE_AUTO_NUMBER=0)
-  if (process.env.WORKTABLE_AUTO_NUMBER !== '0' && process.env.WORKTABLE_RENUMBER_SWEEP !== '0') {
-    const rnSchedule = process.env.WORKTABLE_RENUMBER_SWEEP_SCHEDULE || '3-59/5 * * * *';
-    let rnRunning = false;
-    cron.schedule(rnSchedule, async () => {
-      if (rnRunning) return;
-      rnRunning = true;
-      try {
-        const { sweepNumbering } = require('../services/rowNumbering.service');
-        const { withJobLock } = require('../utils/jobLock');
-        const cap = parseInt(process.env.WORKTABLE_RENUMBER_SWEEP_CAP || '12', 10);
-        const r = await withJobLock('worktable_renumber_sweep', () => sweepNumbering({ cap }));
-        // 할 일이 있었을 때만 로그(평상시 로그 소음 0)
-        if (r && !r.skipped && (r.changedTabs || r.failed)) {
-          logger.info(`[CRON-Renumber] 대상=${r.need} 처리=${r.tabs} 작업=${r.changedTabs} 줄=${r.changedRows}`
-            + `${r.failed ? ` 실패=${r.failed}` : ''}${r.remaining ? ` 남음=${r.remaining}` : ''}`);
-        }
-      } catch (err) {
-        logger.error(`[CRON-Renumber] error: ${err.message}`);
-      } finally {
-        rnRunning = false;
-      }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
-  // ── 무시트 작업표 정원 자동 복구 ─────────────────────────────────────────────
-  //   날짜별 조절·발주 정원 변경·과거 장애로 "총 500 / 줄 751"처럼 벌어진 경우를
-  //   사람이 [작업표 재구성] 버튼으로 고치지 않아도 자동으로 수렴시킨다.
-  //   빈 초과 슬롯만 후순위부터 soft-delete하고, 같은 실행에서 번호 1..N 및 원장을 재생성한다.
-  //   공유 탭·비활성 행은 서비스가 안전하게 건너뛴다. 멀티 인스턴스는 DB 락으로 1회만 실행.
-  //   끄기: WORKTABLE_CAP_AUTOFIX=0. 기본 5분, 배포 직후에도 30초 후 한 번 실행한다.
-  if (process.env.WORKTABLE_CAP_AUTOFIX !== '0') {
-    const capRepairSchedule = process.env.WORKTABLE_CAP_AUTOFIX_SCHEDULE || '1-59/5 * * * *';
-    const capRepairLimit = Math.min(Math.max(parseInt(process.env.WORKTABLE_CAP_AUTOFIX_LIMIT || '30', 10) || 30, 1), 200);
-    const capRepairBootDelay = Math.min(Math.max(parseInt(process.env.WORKTABLE_CAP_AUTOFIX_BOOT_DELAY_MS || '30000', 10) || 30000, 10000), 300000);
-    let capRepairRunning = false;
-    const runCapRepair = async (source) => {
-      if (capRepairRunning) return;
-      capRepairRunning = true;
-      try {
-        const { withJobLock } = require('../utils/jobLock');
-        const { cleanupOverflowEmptyWorktableSlots } = require('../services/linkedRecruitQuota.service');
-        const r = await withJobLock('worktable_cap_autofix', () => cleanupOverflowEmptyWorktableSlots({
-          dryRun: false, limit: capRepairLimit, by: `cron:${source}`,
-        }));
-        const failures = (r && r.items || []).filter(x => x && x.error);
-        if (failures.length) {
-          logger.warn(`[CRON-WorktableCap] source=${source} failed=${failures.length} `
-            + failures.map(x => `camp=${x.campaignId || '?'}:${x.code || x.error}`).join(' | '));
-        } else if (r && !r.skipped && (r.retired || (r.items || []).some(x => x && x.projection))) {
-          logger.info(`[CRON-WorktableCap] source=${source} scanned=${r.scanned} retired=${r.retired} skipped=${r.skipped}`);
-        }
-      } catch (err) {
-        logger.error(`[CRON-WorktableCap] source=${source} error: ${err.message}`);
-      } finally { capRepairRunning = false; }
-    };
-    setTimeout(() => { void runCapRepair('boot'); }, capRepairBootDelay);
-    cron.schedule(capRepairSchedule, () => { void runCapRepair('cron'); }, { timezone: 'Asia/Seoul' });
-  }
-
   // ── 시트→DB 역동기화 무인 사이클(detect+constrained auto-apply): 기본 OFF ──
   //   REVERSE_SYNC_AUTO=1 에서만 동작(SHEET_REVERSE_SYNC=1·ORDER_LEDGER_WRITE_ENABLED=true 추가게이트는 서비스 내부).
   //   활성탭 라운드로빈 detect → 안전필드만 apply시점 라이브 재검증 후 자동적용(전용 락 reverse_sync_auto).
@@ -340,84 +248,6 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
-  // ── 무시트 주문 작업보드 인계(자동 복구): 기본 ON · 최근 창만 ─────────────────────
-  //   ★★ 왜 필요한가 — 참여형(무시트) 주문의 원장 좌표는 `campaign:<공고ID>` 라 큐 리컨실이
-  //     **스캔에서 제외**한다(orderLedger `NOT LIKE 'campaign:%'` — 큐는 구글시트에 쓰므로
-  //     이 좌표로는 영원히 복구되지 않는다). 그래서 제출 경로에서 작업보드 기록이 한 번 실패하면
-  //     (배포 스큐·공고 작업표 미연결·일시 장애) **자동 복구 경로가 0** 이었다 — 사람이
-  //     `POST /api/diag/sheetless-worktable-recover` 를 부를 때까지 결제한 리뷰어가 어느 표에도
-  //     없고 리뷰어 "리뷰 내역"에도 안 뜬다(2026-08-19 실사고 85건).
-  //   ★★ 폭발반경 제한 3중(8/18 대량 append 사고의 교훈 — 그때 부팅 잡은 창도 상한도 없었다):
-  //     ① 최근 `SHEETLESS_RECOVER_WINDOW_HOURS`(기본 48) 시간 제출분만 — 옛 고아 주문까지
-  //        무인으로 줄을 이어붙이지 않는다(그건 사람이 수동 복구로 판단한다)
-  //     ② 사이클당 `SHEETLESS_RECOVER_CRON_LIMIT`(기본 50) 건
-  //     ③ `withJobLock('sheetless_worktable_recover')` — 수동 실행·다른 인스턴스와 상호배제
-  //   ★ 중복 줄 방어는 `writeOrderToWorktable` 안에 구조적으로 있다(같은 주문번호+연락처가 이미
-  //     반영돼 있으면 새 슬롯을 먹지 않고 `duplicate_row` 로 그 줄을 가리킨다).
-  //   ★ 구글시트·GAS 호출 0(DB→DB) — 시트 쿼터 무영향.
-  //   되돌리기 = Railway `SHEETLESS_RECOVER_CRON=0`.
-  if (process.env.SHEETLESS_RECOVER_CRON !== '0') {
-    const slrSchedule = process.env.SHEETLESS_RECOVER_CRON_SCHEDULE || '*/10 * * * *';
-    let slrRunning = false;
-    cron.schedule(slrSchedule, async () => {
-      if (slrRunning) return;
-      slrRunning = true;
-      try {
-        const { recoverUnwrittenSheetlessOrders } = require('../services/sheetlessOrder.service');
-        const { withJobLock } = require('../utils/jobLock');
-        const limit = parseInt(process.env.SHEETLESS_RECOVER_CRON_LIMIT || '50', 10);
-        const sinceHours = parseInt(process.env.SHEETLESS_RECOVER_WINDOW_HOURS || '48', 10);
-        const r = await withJobLock('sheetless_worktable_recover', () =>
-          recoverUnwrittenSheetlessOrders({ limit, sinceHours, by: 'cron' }));
-        if (r && r.skipped) {
-          logger.debug('[CRON-SheetlessRecover] lock busy — 다른 실행 진행 중, 양보');
-        } else if (r && (r.written > 0 || r.failed > 0)) {
-          // ★ 조용히 넘기지 않는다 — 여기 숫자가 곧 "제출 경로가 새고 있다"는 신호다.
-          logger.warn(`[CRON-SheetlessRecover] scanned=${r.scanned} written=${r.written} failed=${r.failed} noOpenSlot=${r.noOpenSlot} linked=${r.linked}`);
-          if (r.failed > 0) {
-            logAbnormal({
-              flow: 'cron', step: 'sheetless_worktable_recover', severity: 'warn',
-              error: new Error(`작업보드 인계 실패 ${r.failed}건(복구 시도 후에도 미반영)`),
-              context: { job: 'sheetless_worktable_recover', scanned: r.scanned, written: r.written, failed: r.failed },
-            });
-          }
-        }
-      } catch (err) {
-        logger.error(`[CRON-SheetlessRecover] error: ${err.message}`);
-        logAbnormal({ flow: 'cron', step: 'sheetless_worktable_recover', error: err, context: { job: 'sheetless_worktable_recover' } });
-      } finally { slrRunning = false; }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
-  // ── 작업표 중복 줄 감시망: 기본 ON · 읽기 전용 ─────────────────────────────
-  //   ★★ 왜 필요한가 — 같은 구매가 표에 여러 줄로 늘어난 사고(2026-08-19 권정현 11줄)를
-  //     **아무도 몰랐다**. 사람이 표를 보다 우연히 발견했다. 기록 경로의 2차 중복 판정이
-  //     최종 방어지만, 그것이 또 뚫려도 알 길이 없는 상태를 없앤다.
-  //   ★ 읽기 전용 — 줄을 내리지도 주문을 취소하지도 않는다. 정리는 사람이 [♻ 중복 줄 정리]로.
-  //   ★ 같은 상태가 이어지면 알리지 않는다(직전 스냅샷과 달라졌을 때만) — 늑대소년 방지.
-  //   ★ 구글시트·GAS 호출 0(DB→DB).
-  //   되돌리기 = Railway `WORKTABLE_DUP_WATCH=0`.
-  if (process.env.WORKTABLE_DUP_WATCH !== '0') {
-    const dwSchedule = process.env.WORKTABLE_DUP_WATCH_SCHEDULE || '17 * * * *';
-    let dwRunning = false;
-    cron.schedule(dwSchedule, async () => {
-      if (dwRunning) return;
-      dwRunning = true;
-      try {
-        const { watchDuplicateRows } = require('../services/worktableDupWatch.service');
-        const { withJobLock } = require('../utils/jobLock');
-        const r = await withJobLock('worktable_dup_watch', () => watchDuplicateRows({ by: 'cron' }));
-        if (r && r.skipped) logger.debug('[CRON-DupWatch] lock busy — 양보');
-        else if (r && r.ok && r.groupCount > 0) {
-          logger.warn(`[CRON-DupWatch] 중복 묶음 ${r.groupCount}개 · 군더더기 ${r.extraRows}줄 (알림 ${r.alerted ? '발신' : '생략 — 직전과 동일'})`);
-        }
-      } catch (err) {
-        // ★ 감시망이 크론을 죽이지 않는다.
-        logger.error(`[CRON-DupWatch] error: ${err.message}`);
-      } finally { dwRunning = false; }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
   // ── Phase 4: campaign_participants를 review_index에서 주기 최신화(DB를 살아있는 원본화): 기본 OFF ──
   //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
   //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).
@@ -441,34 +271,6 @@ function startCronJobs() {
       } catch (err) {
         logger.error(`[CRON-ParticipantsSync] error: ${err.message}`);
       } finally { partSyncRunning = false; }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
-  // ── 작업 자동 마감: 기본 ON · 10분마다 ─────────────────────────────────────────
-  //   "인원·제출·입금이 모두 채워진 작업"을 홈 작업목록에서 **마감 보관함**으로 자동 이동한다
-  //   (2026-09-21 사용자 확정). 대상 판정은 화면의 `✓ 마감 후보` 배지와 **같은 함수**이고,
-  //   사람이 [↩ 진행중으로 복귀]로 되돌린 작업은 다시 마감하지 않는다(서비스 주석 참조).
-  //   ★ 마감은 화면 분류일 뿐이라 시트·리뷰어 화면·주문·정산 무접촉 — 되돌리기는 클릭 한 번.
-  //   ★ 조회가 하나라도 실패하면 **한 건도 건드리지 않는다**(fail-closed — 서비스가 판정).
-  //   되돌리기 = Railway `TAB_AUTO_FINISH=0`.
-  if (process.env.TAB_AUTO_FINISH !== '0') {
-    const afSchedule = process.env.TAB_AUTO_FINISH_SCHEDULE || '*/10 * * * *';
-    let afRunning = false;
-    cron.schedule(afSchedule, async () => {
-      if (afRunning) return;
-      afRunning = true;
-      try {
-        const { autoFinishEligibleTabs } = require('../services/trackB.service');
-        const { withJobLock } = require('../utils/jobLock');
-        // ★ 멀티 인스턴스가 같은 탭을 동시에 마감하지 않게(활성 1건 부분유니크가 최종 방어지만
-        //   무의미한 경합 쓰기를 미리 막는다). 기존 락 이름들과 비충돌.
-        const r = await withJobLock('tab_auto_finish', () => autoFinishEligibleTabs({ dryRun: false, by: '자동 마감' }));
-        if (r && r.skipped) logger.debug('[CRON-AutoFinish] lock busy — 양보');
-        else if (r && r.ok === false) logger.warn(`[CRON-AutoFinish] 건너뜀(${r.code}): ${r.error}`);
-      } catch (err) {
-        // ★ 자동 마감이 크론을 죽이지 않는다.
-        logger.error(`[CRON-AutoFinish] error: ${err.message}`);
-      } finally { afRunning = false; }
     }, { timezone: 'Asia/Seoul' });
   }
 
@@ -605,39 +407,6 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  // ── 고아 캡처 정리(A종류: 링크 끊김): 기본 ON · 매일 새벽 4시 40분 ─────────
-  //   ★★ 왜 필요한가 — 행 삭제·구매기록 취소(`orderCancellation`)도, 작업 통째 삭제
-  //     (`workTabDelete`)도 **Drive 파일을 건드리지 않는다**. 그래서 지울수록 "폴더엔
-  //     캡처가 있는데 화면엔 리뷰 이미지 미등록"인 고아가 쌓이는데 치우는 자동 경로가
-  //     어디에도 없었다(중복 정리 도구는 같은 SHA-256 지문의 사본만 잡는다).
-  //   ★ 판정 근거는 file_id / review_index_id 뿐 — **위치키(row_index) 금지**
-  //     (번호 정리·재배정으로 수시로 깨져 멀쩡한 캡처를 지운다. 서비스 주석 참조).
-  //   ★ 삭제는 **휴지통만**(30일 복구창) · 유예 ORPHAN_CAPTURE_GRACE_DAYS(기본 7일)
-  //     · 한 회차 상한 ORPHAN_CAPTURE_CLEAN_CAP(기본 200).
-  //   되돌리기 = Railway `ORPHAN_CAPTURE_CLEAN=0`.
-  if (process.env.ORPHAN_CAPTURE_CLEAN !== '0') {
-    const occSchedule = process.env.ORPHAN_CAPTURE_CLEAN_SCHEDULE || '40 4 * * *';
-    let occRunning = false;
-    cron.schedule(occSchedule, async () => {
-      if (occRunning) return;
-      occRunning = true;
-      try {
-        const { trashOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
-        const { withJobLock } = require('../utils/jobLock');
-        const r = await withJobLock('orphan_capture_clean',
-          () => trashOrphanCaptures({ dryRun: false, by: 'cron' }));
-        if (r && r.skipped) logger.debug('[CRON-OrphanCapture] lock busy — 양보');
-        else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
-          logger.warn(`[CRON-OrphanCapture] 휴지통 ${r.trashed}건 · 실패 ${r.failed}건`
-            + ` · 경합회피 ${r.skippedRecheck || 0}건 (유예 ${r.graceDays}일)`);
-        }
-      } catch (err) {
-        // ★ 정리가 크론을 죽이지 않는다.
-        logger.error(`[CRON-OrphanCapture] error: ${err.message}`);
-      } finally { occRunning = false; }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
   // ── 완료된 큐 항목 정리: 매일 새벽 3시 (24시간 이상 경과) ──
   cron.schedule('0 3 * * *', async () => {
     try {
@@ -689,28 +458,27 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  // ── 리뷰 미작성 알림톡: 기본 OFF, KST 10~18시 매시 ──
-  // 공급자 최종 성공(4000)만 회차로 세며, 3회 성공 뒤 final_due_at이 지나야 별도 상태로 종결한다.
-  // 일일 상한은 서비스에서 다시 적용된다. 롤링배포 중복 실행은 advisory lock으로 막는다.
-  if (process.env.REVIEW_REMINDER_ENABLED === '1') {
-    const reminderSchedule = process.env.REVIEW_REMINDER_CRON_SCHEDULE || '0 10-18 * * *';
-    cron.schedule(reminderSchedule, async () => {
+  // ── 무시트 장부 재생성 스윕(130) — 편집 tx 가 찍은 dirty 를 탭당 1회 재생성 ──
+  //   ★ 편집 경로에서 rebuild 를 빼낸 짝. 실패하면 dirty 가 남아 다음 주기에 재시도(자가치유).
+  //   ★ 킬스위치 SHEETLESS_LEDGER_SWEEP=0 (그러면 편집은 오버레이로만 남는다).
+  if (process.env.SHEETLESS_LEDGER_SWEEP !== '0') {
+    let ledgerSweepRunning = false;
+    cron.schedule(process.env.SHEETLESS_LEDGER_SWEEP_SCHEDULE || '* * * * *', async () => {
+      if (ledgerSweepRunning) return;
+      ledgerSweepRunning = true;
       try {
         const { withJobLock } = require('../utils/jobLock');
-        const { run } = require('../services/reviewReminder.service');
-        const r = await withJobLock('review_reminder_alimtalk', () => run({ dryRun: false }));
-        if (r && !r.skipped && ((r.sent || 0) > 0 || (r.closed || 0) > 0
-            || (r.reconciled && ((r.reconciled.delivered || 0) > 0 || (r.reconciled.failed || 0) > 0)))) {
-          logger.info(`[CRON-ReviewReminder] sent=${r.sent || 0} accepted=${r.accepted || 0} `
-            + `delivered=${(r.reconciled && r.reconciled.delivered) || 0} failed=${r.failed || 0} closed=${r.closed || 0}`);
-        }
+        const { sweepDirtyLedgers } = require('../services/sheetlessLedgerSweep.service');
+        await withJobLock('sheetless_ledger_sweep', () => sweepDirtyLedgers({ by: 'cron' }));
       } catch (err) {
-        logger.error(`[CRON-ReviewReminder] ${err.message}`);
+        logger.warn(`[CRON-LedgerSweep] ${err.message}`);
+      } finally {
+        ledgerSweepRunning = false;
       }
     }, { timezone: 'Asia/Seoul' });
   }
 
-  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분, 리뷰알림=${process.env.REVIEW_REMINDER_ENABLED === '1' ? 'ON' : 'OFF'}`);
+  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분`);
 }
 
 module.exports = { startCronJobs };

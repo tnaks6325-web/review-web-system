@@ -19,17 +19,14 @@ const crypto = require('crypto');
 const router = express.Router();
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { slotLabel: slotLabelOf, isCashReceiptSlot } = require('../utils/captureSlots');
+const { slotLabel: slotLabelOf } = require('../utils/captureSlots');
 const driveService = require('../services/drive.service');
-const fileRouteService = require('../services/fileRoute.service');
 const { _getReviewerPhoneList } = require('../services/search.service');
-const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const sse = require('../utils/sse');
 const csBridge = require('../services/csBridge.service');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
-const { recipientNameForRow } = require('../services/captureOwnerName.service');
 
 // ── 공통 헬퍼 ──
 
@@ -40,27 +37,6 @@ function _p8(v) {
 /** 사유 정화: HTML 태그 제거 + 길이 제한(텍스트로만 취급) */
 function _sanitizeReason(v) {
   return String(v || '').replace(/<[^>]*>/g, '').trim().slice(0, 500);
-}
-
-/** 서명된 리뷰어 세션의 소유자·타계정 전화번호 범위. 요청 query의 phone8은 권한 근거로 쓰지 않는다. */
-async function _sessionPhoneList(session) {
-  const ownerId = String(session && session.ownerReviewerId || '');
-  if (!ownerId) return [];
-  const { rows } = await pool.query('SELECT phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1', [ownerId]);
-  if (rows.length !== 1) return [];
-  const out = new Set();
-  const add = value => { const p = _p8(value); if (p.length === 8) out.add(p); };
-  add(rows[0].phone8);
-  for (const sub of (Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [])) add(sub && sub.phone);
-  try {
-    const identities = await pool.query(
-      `SELECT current_phone8 FROM reviewer_identities
-        WHERE owner_reviewer_id = $1 AND status <> 'separated'`, [ownerId]);
-    for (const identity of identities.rows) add(identity.current_phone8);
-  } catch (e) {
-    if (!e || e.code !== '42P01') throw e;
-  }
-  return [...out];
 }
 
 /**
@@ -120,25 +96,13 @@ async function _resolveFolders(sheetId, tabName, slot) {
   }
   if (!reviewFolderId) throw new Error('리뷰 폴더를 확보하지 못했습니다.');
 
-  // 대상 폴더(구 파일이 사는 곳): 기본 슬롯은 [리뷰], 현금영수증은 비공개 구매캡처 경로,
-  // 그 외는 [리뷰] 아래 슬롯 라벨 서브폴더.
+  // 대상 폴더(구 파일이 사는 곳): 기본 슬롯은 [리뷰], 그 외는 슬롯 라벨 서브폴더
   let targetFolderId = reviewFolderId;
   if (slot && slot !== 'review') {
     // 라벨 판정은 공용 유틸 — 현영 자동 슬롯도 같은 폴더명을 쓰게(업로드 경로와 일치해야 파일이 흩어지지 않음)
-    const rt = await reviewTypeForTab({ sheetId, tabName }).catch(() => null);
-    const cr = await require('../services/cashReceiptContext.service')
-      .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null);
-    const label = slotLabelOf(cfg.capture_slots, cfg.income_type, slot, rt, cr === true);
-    if (isCashReceiptSlot(cfg.capture_slots, cfg.income_type, slot, rt, cr === true)) {
-      targetFolderId = await fileRouteService.resolveTargetFolder({
-        target: 'receipt', sheetId, tabName, reviewBaseFolderId: reviewFolderId, receiptLabel: label,
-      });
-      // 현금영수증은 업체 공개 가능성이 있는 [리뷰] 폴더로 절대 폴백하지 않는다.
-      if (!targetFolderId) throw new Error('비공개 현금영수증 폴더를 확보하지 못했습니다.');
-    } else {
-      const sf = await driveService.getOrCreateSubFolder(reviewFolderId, label);
-      targetFolderId = sf.id;
-    }
+    const label = slotLabelOf(cfg.capture_slots, cfg.income_type, slot, await reviewTypeForTab({ sheetId, tabName }).catch(() => null));
+    const sf = await driveService.getOrCreateSubFolder(reviewFolderId, label);
+    targetFolderId = sf.id;
   }
 
   // 스테이징: 최상위 [리뷰수정대기] — 모든 탭 [리뷰] 폴더 "밖"에 격리한다.
@@ -177,12 +141,12 @@ function _archiveName(r, origName) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 리뷰어 측 (서명 세션 + 세션 소유 phone8 강한-키 게이트)
+// 리뷰어 측 (무인증 · phone8 강한-키 게이트)
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/review-edit/my-files?phone8&sheetId&tabName&rowIndex
 //   그 행의 소유(강한-키)가 확인되면 제출 이미지 목록(썸네일용 fileId 포함) + 대기중 요청을 반환.
-router.get('/my-files', reviewerSessionMiddleware, async (req, res) => {
+router.get('/my-files', async (req, res) => {
   try {
     const p8 = _p8(req.query.phone8);
     const sheetId = req.query.sheetId;
@@ -192,10 +156,7 @@ router.get('/my-files', reviewerSessionMiddleware, async (req, res) => {
       return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
     }
 
-    const phoneList = await _sessionPhoneList(req.reviewer);
-    if (!phoneList.includes(p8)) {
-      return res.status(403).json({ ok: false, error: '로그인한 리뷰어의 제출 내역만 조회할 수 있습니다.' });
-    }
+    const phoneList = await _getReviewerPhoneList(p8);
     if (!(await _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex))) {
       return res.status(403).json({ ok: false, error: '본인 제출 내역만 조회할 수 있습니다.' });
     }
@@ -216,9 +177,7 @@ router.get('/my-files', reviewerSessionMiddleware, async (req, res) => {
     );
     // ★ 087 2차: 라벨도 리뷰타입을 봐야 '구매확정' 자리가 '리뷰'로 표시되지 않는다
     const _rt = await reviewTypeForTab({ sheetId, tabName }).catch(() => null);
-    const _cr = await require('../services/cashReceiptContext.service')
-      .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null);
-    const slotLabel = (k) => slotLabelOf(tc[0]?.capture_slots, tc[0]?.income_type, k, _rt, _cr === true);
+    const slotLabel = (k) => slotLabelOf(tc[0]?.capture_slots, tc[0]?.income_type, k, _rt);
 
     // 이 행의 대기중 요청(슬롯/파일별 UI 잠금용)
     const { rows: pending } = await pool.query(
@@ -266,10 +225,9 @@ function _pickReviewGuide(raw) {
 
 // GET /api/review-edit/participation-brief?phone8&sheetId&tabName&gid&rowIndex
 //   리뷰 내역 카드 → "참여상품 정보" 시트용. 행 소유권(강한-키) 통과 시에만 그 행의 연결 공고
-//   brief(제목·카톡URL·상품URL·상품정보·리뷰가이드·본인 구매캡처)를 반환. 카톡 URL과 구매캡처는
-//   이름 단독 약한-키론 절대 안 나간다
+//   brief(제목·카톡URL·상품URL·상품정보·리뷰가이드)를 반환. 카톡 URL은 이름 단독 약한-키론 절대 안 나간다
 //   (참여형 chat_url 게이트와 동일 사상 — my-files 소유권 술어 재사용).
-router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) => {
+router.get('/participation-brief', async (req, res) => {
   try {
     const p8 = _p8(req.query.phone8);
     const sheetId = req.query.sheetId;
@@ -279,14 +237,7 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
       return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
     }
 
-    let phoneList = await _sessionPhoneList(req.reviewer);
-    if (req.reviewer && req.reviewer.loginKind === 'sub') {
-      const loginPhone8 = _p8(req.reviewer.loginPhone8);
-      phoneList = phoneList.filter(phone => phone === loginPhone8);
-    }
-    if (!phoneList.includes(p8)) {
-      return res.status(403).json({ ok: false, error: '로그인한 리뷰어의 참여 내역만 조회할 수 있습니다.' });
-    }
+    const phoneList = await _getReviewerPhoneList(p8);
     if (!(await _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex))) {
       return res.status(403).json({ ok: false, error: '본인 참여 내역만 조회할 수 있습니다.' });
     }
@@ -305,8 +256,8 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
 
     // ★ D: 이 행의 **작업 옵션(리뷰 형태)** — 관리자가 로스터에 미리 적어둔 '텍스트'·'포토리뷰' 같은
     //   작업지시다. 지금까지 관리자만 보고 리뷰어는 자기 행의 지시를 확인할 방법이 없었다.
-    //   ★ 판정은 전용 `리뷰옵션` 헤더 + `optionWriteColumns`(상품 옵션 매퍼 파생) —
-    //     '옵션금액'(=결제금액 칸)·'비고(옵션확인)'을 오분류하면 금액·메모가 새어 나간다.
+    //   ★ 판정은 `optionWriteColumns`(매퍼 파생, C′ 단일 출처) — '옵션금액'(=결제금액 칸)·
+    //     '비고(옵션확인)'을 옵션으로 오분류하면 금액·메모가 리뷰어 화면에 새어 나간다.
     //   ★ row_json 은 헤더명→값 맵(columnResolver)이라 키 순서 = 헤더 순서. 읽기 전용·fail-soft.
     let workOptions = [];
     try {
@@ -318,12 +269,9 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
       const rj = ri[0] && ri[0].row_json;
       if (rj && typeof rj === 'object') {
         const { optionWriteColumns } = require('../services/orderLedger.service');
-        const { isReviewOptionHeader } = require('../utils/reviewType');
         const headers = Object.keys(rj);
-        const optionHeaders = headers.filter(isReviewOptionHeader)
-          .concat(optionWriteColumns(headers).map(i => headers[i]));
-        workOptions = [...new Set(optionHeaders)]
-          .map(label => ({ label, value: String(rj[label] == null ? '' : rj[label]).trim() }))
+        workOptions = optionWriteColumns(headers)
+          .map(i => ({ label: headers[i], value: String(rj[headers[i]] == null ? '' : rj[headers[i]]).trim() }))
           .filter(o => o.label && o.value);
       }
     } catch (_) { /* 표시용 — 실패해도 나머지 brief 는 그대로 나간다 */ }
@@ -362,81 +310,6 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
       }
     } catch (_) { /* 표시용 — fail-soft */ }
 
-    /* ★ 관리자가 작업보드에서 **수동으로 확정한 입금일**(우클릭 [💰 입금수정]) — 이체 회차를 타지
-       않은 건(외부 이체·통장 직접 송금)은 `payment_batch_items` 가 없어 리뷰어 화면에 날짜가 한 번도
-       뜨지 않았다(배지만). 작업보드 입금 칸이 그 건의 유일한 근거이므로 그 값을 페이백 날짜로 쓴다.
-       ★★ 근거의 우선순위는 **이체 원장이 먼저**다 — 자동 반영이 있으면 그 값이 이긴다(위에서 이미 잡힘).
-       ★ 관리자가 칸을 비우면 여기도 자동으로 사라진다(같은 칸 하나만 본다 = 사본 0).
-       ★ 읽기 전용·fail-soft. */
-    if (!payment) {
-      try {
-        const { rows: dep } = await pool.query(
-          `SELECT btrim(COALESCE(cp.row_json ->> ri.submit_col2, '')) AS "depositCell"
-             FROM review_index ri
-             JOIN campaign_participants cp
-               ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name AND cp.seq = ri.row_index
-              AND cp.deleted_at IS NULL
-            WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
-              AND COALESCE(ri.submit_col2, '') <> ''
-            LIMIT 1`,
-          [sheetId, tabName, rowIndex]
-        );
-        const cell = (dep[0] && dep[0].depositCell) || '';
-        if (cell) payment = { status: 'paid', paidDate: cell };
-      } catch (_) { /* 표시용 — fail-soft */ }
-    }
-
-    /* ★ 본인이 제출한 구매 캡처 — 위의 강한 행 소유권 검증을 통과한 뒤, 현재 작업표 줄이
-       직접 가리키는 주문 원장만 읽는다. 좌표가 같다는 이유로 과거 주문을 추측해 붙이면
-       재사용된 줄에서 다른 리뷰어의 캡처가 노출될 수 있으므로 `order_submission_id` 없는
-       레거시 줄은 fail-closed(버튼 비활성)한다. 파일 ID는 기존 이미지 프록시에서만 사용한다. */
-    let purchaseCapture = null;
-    try {
-      const { rows: caps } = await pool.query(
-        `SELECT os.capture_file_id, os.capture_uploaded_at, os.submitted_at
-           FROM campaign_participants cp
-           JOIN order_submissions os
-             ON os.id = cp.order_submission_id
-            AND os.deleted_at IS NULL
-            AND os.sheet_row = cp.seq
-          WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3
-            AND cp.deleted_at IS NULL
-            AND COALESCE(os.capture_file_id, '') <> ''
-            AND (
-              (COALESCE(cp.owner_reviewer_id, os.owner_reviewer_id) = $4
-               AND (cp.owner_reviewer_id IS NULL OR cp.owner_reviewer_id = $4)
-               AND (os.owner_reviewer_id IS NULL OR os.owner_reviewer_id = $4))
-              OR (
-                cp.owner_reviewer_id IS NULL AND os.owner_reviewer_id IS NULL
-                AND COALESCE(cp.phone8, '') = ANY($5)
-                AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($5)
-              )
-            )
-            AND (NOT $6::boolean OR (
-              COALESCE(cp.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($5)
-              AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($5)
-            ))
-          LIMIT 1`,
-        [sheetId, tabName, rowIndex, String(req.reviewer.ownerReviewerId), phoneList, req.reviewer.loginKind === 'sub']
-      );
-      if (caps.length) {
-        purchaseCapture = {
-          fileId: String(caps[0].capture_file_id || ''),
-          uploadedAt: caps[0].capture_uploaded_at || caps[0].submitted_at || null,
-        };
-      }
-    } catch (_) { /* 표시용 — fail-closed */ }
-
-    /* ★ 주문취소 가능 여부 — **판정 단일 출처**(`assessReviewerCancel`)를 화면 게이트와
-       실제 실행이 함께 쓴다. 버튼을 그릴지 말지를 화면이 스스로 정하면 "보이는데 거부"가 된다.
-       ★ 읽기 전용·fail-soft — 실패하면 필드를 싣지 않고(=화면은 버튼 미표시) 나머지 brief 는 그대로. */
-    let cancelable = null;
-    try {
-      const roc = require('../services/reviewerOrderCancel.service');
-      const g = await roc.assessReviewerCancel(pool, { sheetId, tabName, rowIndex });
-      cancelable = { ok: g.cancelable, reason: g.reason, message: g.message, reasons: roc.CANCEL_REASONS };
-    } catch (_) { /* 표시용 — fail-soft */ }
-
     // 공고 미연결 탭(카톡 없음 → 프론트는 제출 버튼만). ★ D: 그래도 작업 옵션은 알려준다
     //   — 리뷰 형태는 공고가 아니라 **그 행**에 적힌 지시라 공고 유무와 무관하다.
     //   ★ 입금 결과도 공고와 무관하므로 같은 규율로 함께 내려준다.
@@ -444,8 +317,6 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
       const only = {};
       if (workOptions.length) only.workOptions = workOptions;
       if (payment) only.payment = payment;
-      if (purchaseCapture) only.purchaseCapture = purchaseCapture;
-      if (cancelable) only.cancelable = cancelable;
       return res.json({ ok: true, brief: Object.keys(only).length ? only : null });
     }
     const c = camps[0];
@@ -480,52 +351,12 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
         productLines,
         reviewGuide,
         workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
-        payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'paid', paidDate} (관리자 수동 확정) | {status:'failed'} | null
-        purchaseCapture,      // ★ 강한 행 소유권 + 현재 order_submission_id 로 확인된 {fileId, uploadedAt} | null
-        cancelable,           // ★ 주문취소 게이트 {ok, reason, message, reasons[]} — 실패 시 null
+        payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'failed'} | null
       },
     });
   } catch (err) {
     logger.error(`[review-edit] participation-brief 실패: ${err.message}`);
     res.status(500).json({ ok: false, error: '조회 중 오류가 발생했습니다.' });
-  }
-});
-
-/* ═══ POST /api/review-edit/order-cancel — 리뷰어 주문취소 (사용자 확정 2026-08-23) ═══
-   body: { phone8, sheetId, tabName, rowIndex, reasonKey, reasonEtc? }
-   ★★ 신규 인증 표면 0 — 이 파일의 강한-키 소유권(`_verifyRowOwnership`)을 그대로 쓴다.
-   ★★ 주문 번호는 **서버가 좌표로 다시 찾는다**(요청 본문 불신) — 낡은 화면·조작 요청이
-      남의 주문을 지목할 수 없다.
-   ★ 실행부는 작업보드 [행 삭제]와 같은 함수(사본 0) — 보충 슬롯·장부 재생성이 함께 온다. */
-router.post('/order-cancel', imageApiLimiter, async (req, res) => {
-  try {
-    const b = req.body || {};
-    const p8 = _p8(b.phone8);
-    const sheetId = String(b.sheetId || '');
-    const tabName = String(b.tabName || '');
-    const rowIndex = parseInt(b.rowIndex, 10);
-    if (p8.length !== 8 || !sheetId || !tabName || !Number.isInteger(rowIndex)) {
-      return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
-    }
-    const phoneList = await _getReviewerPhoneList(p8);
-    if (!(await _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex))) {
-      return res.status(403).json({ ok: false, error: '본인 참여 내역만 취소할 수 있습니다.' });
-    }
-    const roc = require('../services/reviewerOrderCancel.service');
-    // ★ 사유는 **필수**(선택지 밖 값은 거부) — 왜 취소가 느는지 모르면 손을 쓸 수 없다.
-    if (!roc.cancelReasonLabel(b.reasonKey)) {
-      return res.status(400).json({ ok: false, code: 'reason_required', error: '취소 사유를 선택해주세요.' });
-    }
-    const out = await roc.cancelOrderByReviewer({
-      sheetId, tabName, rowIndex, phone8: p8,
-      reviewerName: String(b.name || '').trim().slice(0, 60),
-      reasonKey: b.reasonKey, reasonEtc: b.reasonEtc,
-    });
-    if (!out.ok) return res.status(409).json(out);
-    res.json(out);
-  } catch (err) {
-    logger.error(`[review-edit] order-cancel 실패: ${err.message}`);
-    res.status(500).json({ ok: false, error: '취소 처리 중 오류가 발생했습니다.' });
   }
 });
 
@@ -737,11 +568,10 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     if (!r0.new_file_id) return res.json({ ok: false, error: '스테이징된 새 파일이 없습니다.' });
 
     // 1) 대상 폴더 확보(트랜잭션 밖) — 요청 이후 폴더가 이동/재생성됐어도 현재 [리뷰]로 배치
-    // 요청 당시 저장된 폴더를 신뢰하지 않고 현재 슬롯 역할로 다시 계산한다.
-    // 배포 전에 생성된 영수증 교체요청의 공개 [리뷰] 하위 target_folder_id도 여기서 교정된다.
-    const targetFolderId = (await _resolveFolders(
-      r0.sheet_id, r0.tab_name, r0.slot_key || 'review'
-    )).targetFolderId;
+    let targetFolderId = r0.target_folder_id;
+    if (!targetFolderId) {
+      targetFolderId = (await _resolveFolders(r0.sheet_id, r0.tab_name, r0.slot_key || 'review')).targetFolderId;
+    }
 
     // 2) 새 파일을 대상 폴더로 이동(멱등: 이미 대상이면 skip) + 정식 리뷰 파일명으로 rename
     //    (스테이징 중엔 비리뷰형식 이름이었으므로 승인 시점에 정식명으로 되돌린다)
@@ -751,13 +581,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     if (!parents.includes(targetFolderId)) {
       await driveService.moveFile(r0.new_file_id, targetFolderId, parents[0] || r0.new_parent_id);
     }
-    /* ★ 정식명의 이름도 업로드와 **같은 해석**(그 행의 수취인)을 쓴다 — 여기만 참여자 이름으로 두면
-       "처음 제출은 수취인인데 한 번 교체하면 주문자로 바뀌는" 드리프트가 생긴다.
-       못 찾으면 종전대로 요청에 적힌 이름으로 접는다(파일명 때문에 승인이 막히면 안 된다). */
-    const _finalOwner =
-      (await recipientNameForRow({ db: pool, sheetId: r0.sheet_id, tabName: r0.tab_name, rowIndex: r0.row_index }))
-      || r0.reviewer_name || '익명';
-    const finalName = driveService.generateReviewFileName(_finalOwner, 1, 'image/jpeg');
+    const finalName = driveService.generateReviewFileName(r0.reviewer_name || '익명', 1, 'image/jpeg');
     try { await driveService.renameFile(r0.new_file_id, finalName); }
     catch (e) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e.message}`); }
     const finalUrl = r0.new_file_url || `https://drive.google.com/file/d/${r0.new_file_id}/view`;
@@ -776,19 +600,9 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       // review_submissions: 구 파일 레코드를 새 파일로 (원 제출시각 uploaded_at 보존 = 제출일 유지)
       await client.query(
         `UPDATE review_submissions
-            SET file_id = $1, file_url = $2, file_name = $3, file_hash = NULL
+            SET file_id = $1, file_url = $2, file_name = $3
           WHERE file_id = $4 AND sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
         [r.new_file_id, finalUrl, finalName, r.old_file_id, r.sheet_id, r.tab_name, r.row_index]
-      );
-      // 새 파일 ID에는 기존 검수 판정을 승계하지 않는다. pending 원장을 먼저 만들어 두면
-      // 즉시 재검수가 실패해도 30일 업로드 시각 제한과 무관하게 다음 스윕이 다시 처리한다.
-      await client.query(
-        `INSERT INTO review_inspections
-           (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,'pending',$7::jsonb,NOW())
-         ON CONFLICT (file_id) DO NOTHING`,
-        [r.new_file_id, r.sheet_id, r.tab_name, r.row_index, r.reviewer_name || null,
-         r.slot_key || 'review', JSON.stringify({ replacement: { verdict: 'skip', reason: 'approved_file_replacement' } })]
       );
       // review_index: 대표이미지가 구 파일과 일치할 때만 교체 (원 연결시각 review_file_at 보존)
       await client.query(
@@ -828,37 +642,6 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       }
     } catch (e) {
       logger.warn(`[review-edit] 구 파일 보관 이동 실패(무시): ${e.message}`);
-    }
-
-    // 현금영수증 교체본은 입금 조건에 직접 영향을 주므로 승인 요청 안에서 바로 재검수한다.
-    // 실패 시 위 pending 원장이 남아 다음 스윕 또는 내부 정상 승인으로 처리할 수 있다.
-    try {
-      const { rows: tc } = await pool.query(
-        'SELECT capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [committed.sheet_id, committed.tab_name]
-      );
-      const rt = await reviewTypeForTab({ sheetId: committed.sheet_id, tabName: committed.tab_name }).catch(() => null);
-      const cr = await require('../services/cashReceiptContext.service')
-        .cashReceiptRequiredForTab({ sheetId: committed.sheet_id, tabName: committed.tab_name }).catch(() => null);
-      if (isCashReceiptSlot(tc[0]?.capture_slots, tc[0]?.income_type,
-        committed.slot_key || 'review', rt, cr === true)) {
-        const f = await driveService.downloadFile(committed.new_file_id);
-        if (!f || !f.buffer) throw new Error('교체 영수증 파일을 받지 못했습니다');
-        const b64 = f.buffer.toString('base64');
-        const inspect = require('../services/reviewInspect.service');
-        await inspect.inspectSubmission({
-          base64: b64, mimeType: f.mimeType || 'image/jpeg', fileId: committed.new_file_id,
-          fileHash: crypto.createHash('sha256').update(f.buffer).digest('hex'),
-          sheetId: committed.sheet_id, tabName: committed.tab_name, rowIndex: committed.row_index,
-          reviewerName: committed.reviewer_name, slotKey: committed.slot_key || 'review', slotRole: 'receipt',
-        });
-        await inspect.saveFileHash({
-          fileId: committed.new_file_id,
-          fileHash: crypto.createHash('sha256').update(f.buffer).digest('hex'),
-        });
-      }
-    } catch (e) {
-      logger.warn(`[review-edit] 교체 영수증 즉시 재검수 실패(pending 유지): ${e.message}`);
     }
 
     // 5) 관리자 위젯 실시간 갱신

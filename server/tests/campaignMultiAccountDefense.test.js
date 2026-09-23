@@ -75,19 +75,15 @@ async function callHandler(method, routePath, req) {
   // D1 / D1b — 사칭 차단 · 차단 사유 귀속
   // ══════════════════════════════════════════════════════════════
   ok('D1: 등록번호 명의 차단 사유 코드', routes.includes("'sub_is_registered_reviewer'"));
-  const conflictBlock = routes.slice(routes.indexOf('FROM reviewers other'), routes.indexOf('LIMIT 1`, [subP8'));
-  ok('D1: 다른 소유자의 본계정·코드 신원 번호 충돌만 차단',
-    conflictBlock.includes('other.id <> $2::uuid') && conflictBlock.includes('other.phone8 = $1')
-    && conflictBlock.includes('reviewer_identities ri'));
-  ok('D1: 자유 편집 타계정 목록은 타인의 정상 참여를 막는 권위로 쓰지 않음',
-    !conflictBlock.includes('jsonb_array_elements'));
-  ok('D1: 개인정보 경계는 운영 스위치로 우회할 수 없음', !/CAMPAIGN_SUB_REGISTERED_POLICY/.test(routes));
+  ok('D1: EXISTS 판정(reviewers.phone8 은 GENERATED·비유니크 → 행 동일성 금지)',
+    /SELECT 1 FROM reviewers WHERE phone8 = \$1 LIMIT 1/.test(routes));
+  ok('D1: 완화 스위치(block 기본 · warn/allow)', /CAMPAIGN_SUB_REGISTERED_POLICY/.test(routes));
   ok('D1: 차단은 타계정 참여 경로에서만(자기참여 무영향)',
     routes.indexOf("'sub_is_registered_reviewer'") > routes.indexOf('const holdP8 = isSubApply'));
 
-  ok('D1b: 제출완료 재참여는 공고별 기간 사유를 사용(영구차단 금지)',
-    routes.includes("'repurchase_window'") && !routes.includes("'already_submitted'") && !routes.includes("'already_today'"));
-  ok('D1b: 타소유자 귀속 충돌은 기간과 무관하게 차단', routes.includes("'blocked_by_other_owner'"));
+  ok('D1b: 기존 사유 코드 불변(프론트 문구 계약)',
+    routes.includes("'already_submitted'") && !routes.includes("'already_today'"));
+  ok('D1b: 귀속 판별 사유 신설', routes.includes("'blocked_by_other_owner'") && routes.includes("'same_phone_other_name'"));
   ok('D1b: done/hist 2쿼리 → 1쿼리(왕복 순증 0)',
     !/const done = await client\.query/.test(routes) && !/const hist = await client\.query/.test(routes)
     && /const blk = await client\.query/.test(routes));
@@ -107,7 +103,7 @@ async function callHandler(method, routePath, req) {
   ok('D2: 조회 실패는 부팅 계속(DB 일시장애 크래시루프 방지)', /프리플라이트 조회 실패/.test(index));
   ok('D2: 긴급 탈출구 ALLOW_SCHEMA_DRIFT', /ALLOW_SCHEMA_DRIFT/.test(index));
   ok('D7: set_config 파라미터 바인딩(SET 문자열 보간 금지)', /set_config\('lock_timeout', \$1, false\)/.test(index));
-  ok('D7: 락 대기 초과·교착상태는 미기록 후 재시도', /\['55P03', '57014', '40P01'\]\.includes\(err\.code\)/.test(index));
+  ok('D7: 락 대기 초과(55P03)는 미기록 후 재시도', /55P03/.test(index));
 
   // ══════════════════════════════════════════════════════════════
   // D3 — 명의 ↔ 주문 신원 드리프트(순수함수)

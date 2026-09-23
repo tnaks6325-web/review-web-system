@@ -7,8 +7,6 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "node scripts/run-tests.js",
-    "test:list": "node scripts/run-tests.js --list",
     "start": "node index.js",
     "dev": "nodemon index.js",
     "migrate": "node src/db/migrate.js",
@@ -42,7 +40,6 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8",
     "nodemon": "^3.0.2"
   }
 }

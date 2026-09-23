@@ -169,10 +169,7 @@ function _woGuideHtml(raw) {
   return tmp.innerHTML;
 }
 
-/* ★ 용어 통일(사용자 확정 2026-09-22): 유입**방식** 이름은 "가이드유입"(모집공고 모달과 같은 말).
-   ★ 가이드 **글 칸**의 이름은 여전히 "유입가이드" 다 — 그 칸에 "가이드유입"이라고 적으면 더 헷갈린다.
-   ★ 저장값(`inflow_type`)은 종전 그대로 `guide`/`link` — 보이는 말만 바뀐다. */
-const _INFLOW_LABEL = { guide: "가이드유입", link: "링크유입" };
+const _INFLOW_LABEL = { guide: "유입가이드", link: "링크유입" };
 
 // 인트라넷이 review_guide/special_notes에 [헤더] 섹션으로 모든 항목을 중복 포함시켜 보내므로,
 // 개별 필드로 이미 표시되는 섹션은 버리고 지정한 라벨의 섹션 내용만 추출한다.
@@ -372,13 +369,6 @@ function _woDetailHtml(o) {
     _woSection("상품·옵션", prodText, txtR),
     // ★ 134 — 「상품·옵션」 바로 아래(같은 문맥)에 선택지별 가이드. 값 없으면 빈 문자열 = 종전 화면.
     _woUnitGuideBlock(o),
-    // ★ 시작일 — 모집공고 발행 프리필이 **이 값을 그대로 복사**하는데(062, `_woCampaignPrefill`)
-    //   상세 화면에는 없어서, 목록의 '제출/접수' 날짜와 공고의 '모집 시작일'이 다르면
-    //   어디서 온 값인지 확인할 길이 없었다(2026-08-21 신고: 접수 8/19인데 공고 시작일 8/12).
-    //   인트라넷 리뷰오더는 시작일을 월/일로 직접 입력하고 [이 오더로 다시 만들기]가 옛 값을
-    //   그대로 채우므로 접수일과 다른 것이 정상일 수 있다 — 그래서 **보여만 준다**(경고 아님).
-    //   ★ 값이 없는 과거 오더는 줄 자체가 안 나온다(_woKv 가 빈 값을 버림) = 종전 화면 그대로.
-    _woKv("시작일", String(o.start_date || "").slice(0, 10)),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
     _woKv("구매채널", _woChannel(o)),
@@ -530,28 +520,7 @@ const WO_TRANSITIONS = {
   revision:       ['reviewing'],
 };
 
-/* ★★ 배송유형 6종 — 서버 `utils/deliveryType.DELIVERY_TYPES` 의 **최소 사본**(회귀가드가 일치를 고정).
-   회수·혼합은 인트라넷이 `회수(회수택배사: …)` · `혼합(실배송 20건, 빈박스 80건)` 처럼 **문장**으로
-   보내므로 정확일치 맵으로는 못 받는다 → 앞머리 토큰을 기본형으로 접는다(서버와 같은 규칙). */
-const WO_DELIVERY_TYPES = ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)', '회수', '혼합'];
-const _WO_DELIVERY_RULES = [
-  { base: '택배발송대행', re: /^택배\s*발송\s*대행$/ },
-  { base: '직접배송(가구 등)', re: /^직접\s*배송$/ },
-  { base: '실배송',       re: /^실\s*배송$/ },
-  { base: '빈박스',       re: /^빈\s*(?:택배|박스)$/ },   // 옛 표기 `빈택배` 도 읽어서 접는다
-  { base: '회수',         re: /^회수\s*건?$/ },           // 옛 표기 `회수건`
-  { base: '혼합',         re: /^(?:혼합|믹스|mix(?:ed)?)$/i },
-];
-/** 배송유형 문자열 → 기본형. 판정 불가면 '' (추측하지 않는다 — 틀린 값보다 빈 값). */
-function _woDeliveryBase(v) {
-  var s = String(v == null ? '' : v).trim();
-  var cut = s.indexOf('(');
-  var head = (cut >= 0 ? s.slice(0, cut) : s).trim();
-  if (!head) return '';
-  for (var i = 0; i < _WO_DELIVERY_RULES.length; i++)
-    if (_WO_DELIVERY_RULES[i].re.test(head)) return _WO_DELIVERY_RULES[i].base;
-  return '';
-}
+const WO_DELIVERY_MAP = { '실배송':'실배송', '빈박스':'빈박스', '택배발송대행':'택배발송대행' };
 
 /* ★ 구매채널 = 상품 URL의 **호스트**로 판정한다.
    쿼리스트링까지 보면 `coupang.com/...?src=naver_ad` 같은 광고 링크를 네이버로 오판한다.
@@ -585,34 +554,14 @@ function _woChannel(o) {
  *    그래서 **첫 상품만** 보던 종전 판정을 전 상품으로 넓힌다 — 하나라도 'opt' 면 표는 옵션 모드로 연다
  *    (상품 단위 줄은 행마다 `unitKind:'product'` 로 구분되므로 표 모드와 충돌하지 않는다).
  *  ★ 전부 'none' 이라고 **명시**했으면 그것도 신호다 — 'none' 을 돌려줘 옵션 칸 없는 표로 연다.
- *  ★ 명시가 하나도 없으면(구버전 오더) 빈 값 = 종전 추론 규칙(동작 불변).
- *
- *  ★★★ 상품이 둘 이상이면 전부 'none' 이어도 **'opt'** 다 (2026-08-24 실사고 · 사용자 확정)
- *    137 모델에서 선택 단위는 "리뷰어가 고르는 한 줄"이고 `unit_kind='product'` 인 상품은
- *    **그 상품 자체가 선택지 하나**다. 상품이 3개면 선택지도 3개이므로 표는 옵션 모드로 열어야 한다.
- *    'none' 으로 열면 발행 폼이 그 3줄을 옵션 원장에 **한 줄도 저장하지 않아**
- *    (`readOptRows` 가 `_prodMode() !== "opt"` 에서 조기 return) 상품별 유입가이드가 통째로
- *    사라지고, 리뷰어에게는 공고 공통 안내만 보인다(실측: 프리필엔 사진 3장이 그대로 실려 오는데
- *    저장 payload 의 options 가 `[]`).
- *    ★ 상품 1개 + 옵션 없음도, 그 상품에 전용 유입가이드가 있으면 'opt' 다.
- *      단일 선택지라 해도 가이드를 입력·저장할 원장이 필요하다. 이때 행은 여전히
- *      `unitKind:'product'` 이므로 옵션명이나 작업표 옵션 칸으로 오인하지 않는다.
- *      가이드가 없는 단일상품만 종전대로 'none'으로 둔다.
- *    ★ 옵션 칸이 화면에 뜨는 것은 표기일 뿐이고, 상품 단위 줄은 옵션명 칸을 비운 채
- *      `unitKind:'product'` 로 저장된다(`opt_key` = 상품명, 시트 옵션 칸에는 쓰지 않는다). */
+ *  ★ 명시가 하나도 없으면(구버전 오더) 빈 값 = 종전 추론 규칙(동작 불변). */
 function _woProductMode(o) {
   try {
     const products = JSON.parse(o.product_options_json || "[]");
     if (!Array.isArray(products) || !products.length) return "";
     const modes = products.map(p => String((p && p.product_mode) || ""));
     if (modes.some(m => m === "opt")) return "opt";
-    if (modes.some(m => m === "none")) {
-      if (products.length > 1) return "opt";
-      // 단일상품 가이드도 상품별 가이드 편집·저장 영역의 대상이다.
-      // `_woOptionRows`가 product 단위 행으로 만들고, opt 모드만 그 행을 campaign_options에 저장한다.
-      const guide = _woUnitGuide(_woProductUnitSrc(products[0]));
-      return (guide.html || guide.images.length) ? "opt" : "none";
-    }
+    if (modes.some(m => m === "none")) return "none";
     return "";
   } catch (_) {
     return "";
@@ -698,9 +647,6 @@ function _woOptionRows(o) {
       return mix;
     }, []);
   };
-  // 옵션 없는 상품도 리뷰어가 고르는 선택지 하나다. 인트라넷의 상품별 혼합 조합은
-  // base.review_type_mix 에 실리므로, 옵션 행과 같은 정화 규칙으로 모집공고 행에 보존한다.
-  const productReviewTypeMix = prod => optionReviewTypeMix(prod && (prod.base || prod));
   const clean = s => String(s || "").replace(/\|/g, "").trim();
   const rows = [];
   for (const prod of arr) {
@@ -736,9 +682,7 @@ function _woOptionRows(o) {
           // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.
           recruitTotal: Math.max(0, Number(op.count) || 0),
           dailyLimit: Math.max(0, Number(op.daily_limit ?? op.dailyLimit ?? op.daily) || 0),
-          // "옵션 없음"은 옵션 행이 아니라 상품 자체 선택지다. 이 형태도 인트라넷이
-          // base.review_type_mix 에 보낸 상품별 조합을 써야 발행 검증에서 재입력이 생기지 않는다.
-          reviewTypeMix: isNone ? productReviewTypeMix(prod) : optionReviewTypeMix(op),
+          reviewTypeMix: optionReviewTypeMix(op),
         });
       }
     } else if (name) {
@@ -752,7 +696,6 @@ function _woOptionRows(o) {
         //   0 으로 두면 그 선택지만 "무제한"이 되어 복합 작업의 정원 합계가 통째로 무너진다(테섭 실측).
         recruitTotal: Math.max(0, Number(prod.base && prod.base.count) || 0), dailyLimit: baseDaily,
         inflowGuideHtml: ug.html, inflowGuideImages: ug.images,
-        reviewTypeMix: productReviewTypeMix(prod),
       });
     }
   }
@@ -903,15 +846,11 @@ function _woAcceptable(o) { return WO_ACCEPT_ELIGIBLE.indexOf(String((o && o.sta
 function _woAccepted(o) { return !_woAcceptable(o); }
 
 /* ★★ 이 오더를 접수하면 **구글시트 없이 시스템 작업표로 등록되는가**(표시용 판정).
-   ★★ 서버 `sheetlessAccept.resolveAcceptMode` 가 **항상 무시트**를 돌려주므로(v3_sheetless_only)
-   여기도 항상 true 다. 종전엔 `work_sheet_url` 유무로 판정해, URL 이 실려 온(또는
-   과거 잔재가 남은) 오더에서 화면이 **서버와 반대로** 말했다 — 접수 확인창은 "그 시트 탭이
-   등록된다", 작업표 미리보기는 "아래 구성은 미적용"이라고 안내해 담당자가 조정을 포기했다
-   (2026-08-19 신고). 판정은 여기 한 곳이므로 소비처 3곳(접수 확인창·버튼 툴팁·미리보기
-   안내문)이 함께 정정된다.
-   ★ 화면은 이 값을 **서버로 보내지 않는다**(표시 전용) — 최종 판정은 여전히 서버가 한다. */
+   지금부터 들어오는 작업은 무시트가 기본이라(사용자 확정 2026-08-10) 시트탭URL이 비어 있으면
+   서버가 무시트로 접수한다 — 화면은 그 사실을 확인창 문구로만 가른다.
+   ★ 최종 판정은 서버 `sheetlessAccept.resolveAcceptMode` 하나다(화면은 값을 보내지 않는다). */
 function _woAcceptSheetless(o) {
-  return true;
+  return !String((o && o.work_sheet_url) || '').trim();
 }
 
 
@@ -932,12 +871,7 @@ function _woCampaignPrefill(o) {
     review_fee:    Number(o.review_fee ?? o.reviewFee ?? 0) || 0,
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
-    delivery_type: _woDeliveryBase(o.delivery_type),
-    // ★ 135: 회수·혼합 부속정보는 **기본형과 함께** 넘긴다 — 발행 폼이 그 값을 채우고
-    //   사람이 확인한 뒤 저장하면 공고 원장에도 남는다(작업표 부속 열 보장의 재료).
-    delivery_type_mix: o.delivery_type_mix || null,
-    recall_courier: o.recall_courier || "",
-    recall_product: o.recall_product || "",
+    delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
     // ★ 087: 리뷰타입 — 인트라넷 발주 폼의 값이 그대로 온다(`포토` · `구매확정` ·
     //   `혼합(포토 10건, 텍스트 20건, …)`). 표준 key 변환은 발행 폼이 하고 저장 시 서버가 다시 정규화한다.
     //   ★ 여기서 미리 변환하지 않는 이유 = 이 모듈은 상세 표시도 겸해 **원문**을 그대로 보여줘야 한다.
@@ -1127,29 +1061,6 @@ function woAdminEditModal(order, opts) {
 
   var body = mk("div", "padding:14px 18px;overflow-y:auto;background:#FBFCFE", box);
 
-  /* ★★ 이 화면이 무엇인지 먼저 말한다 — 여기 값의 22칸 중 19칸이 모집공고와 겹치는데,
-     **역할이 다르다**: 이 화면 = 발주서 원문(인트라넷 "보낸 오더" 카드가 실시간 조회) ·
-     모집공고 = 리뷰어에게 보이는 값과 참여 정원. 안 밝히면 "여기서 고쳤는데 리뷰어 화면이
-     그대로"라는 오해가 난다. 반대로 접수 전에는 **작업표 계획(열·행 수·날짜 분배)이 오직 이
-     원장에서 나오므로** 여기가 유일한 창구다. */
-  var linkedCamp = !!(o.linked_campaign_id && String(o.linked_campaign_id).trim());
-  var banner = mk("div", "font-size:12px;line-height:1.6;border-radius:9px;padding:9px 12px;margin-bottom:12px;border:1px solid "
-    + (linkedCamp ? "#BFDBFE;background:#EFF6FF;color:#1E3A8A" : "#BBF7D0;background:#F0FDF4;color:#14532D"), body);
-  banner.innerHTML = linkedCamp
-    ? "여기는 <b>발주서 원문</b>입니다 — 인트라넷 <b>보낸 오더</b> 카드가 이 값을 그대로 보여줍니다.<br>"
-      + "이 오더에는 <b>모집공고가 연결돼 있어</b> 리뷰어 화면에 보이는 값과 참여 정원은 <b>공고</b>가 정합니다"
-      + "(공고 총인원·일건수가 0일 때만 아래 값이 정원으로 쓰입니다).<br>"
-      + "<b>여기서만 정하는 것</b> — 담당AE · 물건비(이체은행 자동분류) · 배송·택배대행(작업표 열 구성) · 작업표 계획."
-    : "여기는 <b>발주서 원문</b>입니다 — 아직 모집공고가 없어 <b>이 값이 곧 작업표 계획(열·행 수·날짜 분배)과 정원의 기준</b>입니다.<br>"
-      + "접수 전에 총 모집건수 · 일일 진행건수 · 시작일 · 옵션 · 리뷰타입을 여기서 맞춰 두세요.";
-
-  /* 공고가 이기는 칸에는 그 사실을 한 줄로 덧붙인다(조용한 no-op 오해 방지). */
-  function ch(base, what) {
-    if (!linkedCamp) return base || "";
-    var add = "리뷰어 화면·정원에는 연결된 모집공고의 " + what + " 값이 우선합니다.";
-    return base ? (base + " " + add) : add;
-  }
-
   var c1 = card(body, "📌 기본 정보");
   field(c1, "title", "작업명 *", { full: true, hint: "⚠ 접수된 오더의 작업명을 바꿔도 이미 등록된 시트 탭 이름은 바뀌지 않습니다.", warn: true });
   field(c1, "start_date", "시작일", { type: "date" });
@@ -1160,13 +1071,13 @@ function woAdminEditModal(order, opts) {
   ]);
 
   var c2 = card(body, "📦 진행 조건");
-  field(c2, "recruit_count", "총 모집건수", { type: "number", hint: ch("", "총인원") });
-  field(c2, "daily_count", "일일 진행건수", { type: "number", hint: ch("", "일 모집인원") });
-  pills(c2, "delivery_type", "배송유형", WO_DELIVERY_TYPES.map(function (v) { return { v: v, l: v }; }));
+  field(c2, "recruit_count", "총 모집건수", { type: "number" });
+  field(c2, "daily_count", "일일 진행건수", { type: "number" });
+  pills(c2, "delivery_type", "배송유형", [{ v: "실배송", l: "실배송" }, { v: "빈박스", l: "빈박스" }, { v: "택배발송대행", l: "택배발송대행" }]);
   pills(c2, "review_type", "리뷰타입", [
     { v: "포토", l: "포토" }, { v: "텍스트", l: "텍스트" }, { v: "구매확정", l: "구매확정" },
     { v: "별점", l: "별점" }, { v: "혼합", l: "혼합" },
-  ], { hint: ch("", "리뷰타입") });
+  ]);
   pills(c2, "goods_cost_type", "물건비", [{ v: "현금", l: "현금" }, { v: "계산서", l: "계산서" }],
     { hint: "입금관리의 은행 자동분류(하나/케이뱅크)가 이 값을 따라갑니다." });
 
@@ -1174,7 +1085,7 @@ function woAdminEditModal(order, opts) {
   field(c3, "product_url", "상품확인용 URL", { full: true });
   field(c3, "product_option", "상품 · 옵션 · 결제금액", { full: true, area: true });
   field(c3, "pay_amount", "결제금액(원)", { type: "number" });
-  field(c3, "review_fee", "리뷰비(원)", { type: "number", hint: ch("모집공고 생성 시 같은 금액으로 자동 표시됩니다.", "리뷰비(구간표 포함)") });
+  field(c3, "review_fee", "리뷰비(원)", { type: "number", hint: "모집공고 생성 시 같은 금액으로 자동 표시됩니다." });
   pills(c3, "inflow_type", "유입방식", [{ v: "guide", l: "가이드유입" }, { v: "link", l: "링크유입" }]);
   field(c3, "inflow_keyword", "유입 키워드", { full: true });
   field(c3, "inflow_guide", "유입가이드", { full: true, area: true, hint: "⚠ 내용을 수정하지 않으면 원본(첨부 이미지 포함)이 그대로 보존됩니다.", warn: true });
@@ -1295,143 +1206,6 @@ function woAcceptTabPicker(resp, onPick) {
   document.body.appendChild(ov);
 }
 
-
-/* ══════════════════════════════════════════════════════════════
-   접수 실패(동일 이름 광고주) 확인 팝업 — 관리자 대시보드·리뷰웹시스템[3버전] 공용.
-
-   서버 /admin/accept 가 409 에 advertiserNameConflict(인트라넷 광고주 + 이름이 같은
-   기존 업체 후보)를 실어 주면, 사람이 "같은 업체입니다"를 확인해 body.linkAdvertiserId
-   로 재접수한다. 서버는 그때만 기존 업체에 인트라넷 원본 ID 를 채운다(blank-only).
-   ★ 자동 병합은 만들지 않는다 — 이름은 표시값이라 잘못 붙으면 그 업체의 작업 소유·
-     정산 계약·광고주 접속 링크가 남에게 열린다. 고르는 것은 항상 사람이다.
-   ★ 이미 다른 인트라넷 광고주에 연결된 후보는 **비활성 + 사유**(눌러도 서버가 거부한다).
-   ★ 업체명·담당자는 외부 문자열 — onclick 문자열 보간 금지, DOM 생성 + addEventListener. */
-/* 후보 업체의 사업자번호 줄 — "없음"과 "다름"은 전혀 다른 신호다.
-   ★ 리뷰웹 업체는 업체관리에서 만들면 사업자번호 칸이 애초에 비어 있다(103 이전 개념).
-     그걸 "사업자번호 없음"이라고만 적으면 **대조 실패(=다른 회사)** 로 읽혀, 사업자번호로
-     확인하려던 판단을 오히려 방해한다(2026-08-19 사용자 지적) → 미등록임을 말하고
-     연결하면 원본에서 채워진다는 사실까지 적는다.
-   ★ 값이 있는데 원본과 **다르면** 그때는 눈에 띄게 경고한다(다른 회사일 수 있다).
-     단 막지는 않는다 — 판단은 사람이 한다.
-   ★ 비교는 숫자만(표기 차이 `365-87-02833` ↔ `36587202833` 를 다름으로 오판하지 않게).
-   @returns {{text:string, tone:'plain'|'ok'|'warn'|'muted'}} */
-function _woAdvBizLine(candidateBiz, sourceBiz) {
-  var digits = function (v) { return String(v == null ? "" : v).replace(/[^0-9]/g, ""); };
-  var c = String(candidateBiz == null ? "" : candidateBiz).trim();
-  var srcRaw = String(sourceBiz == null ? "" : sourceBiz).trim();
-  if (!c) {
-    return srcRaw
-      ? { text: "사업자번호 미등록 · 연결하면 원본에서 채워집니다", tone: "muted" }
-      : { text: "사업자번호 미등록", tone: "muted" };
-  }
-  if (!srcRaw || !digits(srcRaw)) return { text: "사업자 " + c, tone: "plain" };
-  if (digits(c) === digits(srcRaw)) return { text: "사업자 " + c + " · 원본과 일치", tone: "ok" };
-  return { text: "⚠ 사업자 " + c + " · 원본(" + srcRaw + ")과 다릅니다", tone: "warn" };
-}
-
-function woAdvertiserLinkPicker(resp, onLink) {
-  var c = (resp && resp.advertiserNameConflict) || {};
-  var cands = c.candidates || [];
-  var old = document.getElementById("woAdvLinkModal");
-  if (old) old.remove();
-  var ov = document.createElement("div");
-  ov.id = "woAdvLinkModal";
-  ov.style.cssText = "position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px";
-  var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.3);overflow:hidden";
-
-  var head = document.createElement("div");
-  head.style.cssText = "padding:16px 18px 12px;border-bottom:1px solid #E5E7EB";
-  var h = document.createElement("div");
-  h.textContent = "⚠ 같은 이름의 업체가 이미 있습니다";
-  h.style.cssText = "font-size:15px;font-weight:700;color:#B91C1C;margin-bottom:6px";
-  var p = document.createElement("div");
-  p.textContent = "이름만으로는 같은 회사인지 알 수 없어 자동으로 붙이지 않았습니다. 아래 업체가 이 광고주와 같은 회사라면 연결해 접수합니다(연결하면 이후 접수는 자동으로 이어집니다).";
-  p.style.cssText = "font-size:12.5px;color:#6B7280;line-height:1.5";
-  head.appendChild(h); head.appendChild(p);
-
-  // 인트라넷 원본(비교 기준)
-  var src = document.createElement("div");
-  src.style.cssText = "margin:12px 14px 0;padding:10px 12px;border:1.5px solid #C7D2FE;background:#EEF2FF;border-radius:8px;font-size:12.5px;line-height:1.6";
-  var srcT = document.createElement("div");
-  srcT.textContent = "작업오더의 광고주 (인트라넷 원본)";
-  srcT.style.cssText = "font-weight:700;color:#3730A3;margin-bottom:2px";
-  var srcB = document.createElement("div");
-  srcB.textContent = (c.name || "(이름 없음)")
-    + (c.businessNumber ? "  ·  사업자 " + c.businessNumber : "")
-    + (c.contact ? "  ·  " + c.contact : "");
-  src.appendChild(srcT); src.appendChild(srcB);
-
-  var list = document.createElement("div");
-  list.style.cssText = "overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px";
-  cands.forEach(function (a) {
-    var linked = String(a.intranetAdvertiserId || "");
-    var row = document.createElement("div");
-    row.style.cssText = "border:1.5px solid " + (linked ? "#E5E7EB" : "#D1D5DB") + ";border-radius:8px;padding:10px 12px;background:" + (linked ? "#F9FAFB" : "#fff");
-    var t = document.createElement("div");
-    t.textContent = (a.name || "(이름 없음)") + (a.status === "ended" ? "  (종료된 거래처)" : "");
-    t.style.cssText = "font-size:13.5px;font-weight:700;color:#111827;margin-bottom:3px";
-    // 사업자번호는 판단의 핵심 근거라 따로 한 줄(색으로 상태 구분).
-    var biz = _woAdvBizLine(a.businessNumber, c.businessNumber);
-    var bizEl = document.createElement("div");
-    bizEl.textContent = biz.text;
-    bizEl.style.cssText = "font-size:12px;line-height:1.5;margin-bottom:2px;color:"
-      + (biz.tone === "ok" ? "#047857" : biz.tone === "warn" ? "#B91C1C" : "#6B7280")
-      + (biz.tone === "warn" || biz.tone === "ok" ? ";font-weight:700" : "");
-    var meta = document.createElement("div");
-    var bits = [];
-    if (a.contact) bits.push(a.contact);
-    if (a.inadPm) bits.push("담당 " + a.inadPm);
-    bits.push(a.ownedTabs == null ? "소유 작업 ?" : "소유 작업 " + a.ownedTabs + "건");
-    meta.textContent = bits.join("  ·  ");
-    meta.style.cssText = "font-size:12px;color:#6B7280;margin-bottom:8px;line-height:1.5";
-    row.appendChild(t); row.appendChild(bizEl); row.appendChild(meta);
-
-    var b = document.createElement("button");
-    b.type = "button";
-    if (linked) {
-      b.disabled = true;
-      b.textContent = "다른 인트라넷 광고주에 이미 연결됨";
-      b.title = "원본 ID=" + linked;
-      b.style.cssText = "width:100%;padding:9px 12px;border:1.5px solid #E5E7EB;border-radius:8px;background:#F3F4F6;color:#9CA3AF;font-size:13px;cursor:not-allowed";
-    } else {
-      b.textContent = "같은 업체입니다 · 연결하고 접수";
-      b.style.cssText = "width:100%;padding:9px 12px;border:1.5px solid #4F46E5;border-radius:8px;background:#4F46E5;color:#fff;font-size:13px;font-weight:700;cursor:pointer";
-      b.addEventListener("click", function () {
-        if (!confirm('"' + (a.name || "") + '" 업체를 이 광고주의 원본으로 연결하고 접수할까요?\n\n· 이 업체가 인트라넷 광고주와 같은 회사일 때만 눌러주세요.\n· 연결 후에는 이 광고주의 작업오더가 이 업체로 자동 연결됩니다.')) return;
-        ov.remove();
-        if (typeof onLink === "function") onLink(String(a.id || ""), a);
-      });
-    }
-    row.appendChild(b);
-    list.appendChild(row);
-  });
-  if (!cands.length) {
-    var empty = document.createElement("div");
-    empty.textContent = "겹치는 업체 정보를 가져오지 못했습니다. 업체관리에서 같은 이름의 업체를 확인해 주세요.";
-    empty.style.cssText = "font-size:13px;color:#6B7280;padding:14px";
-    list.appendChild(empty);
-  }
-
-  var note = document.createElement("div");
-  note.textContent = "다른 회사라면 연결하지 마세요. 업무포털 거래처 관리에서 기존 업체 이름을 구분되게 바꾼 뒤 다시 접수하면 새 업체로 등록됩니다.";
-  note.style.cssText = "margin:0 14px 10px;font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:9px 11px;line-height:1.5";
-
-  var foot = document.createElement("div");
-  foot.style.cssText = "padding:10px 14px;border-top:1px solid #E5E7EB;text-align:right";
-  var cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.textContent = "취소";
-  cancel.style.cssText = "padding:8px 16px;border:1.5px solid #D1D5DB;border-radius:8px;background:#fff;font-size:13px;cursor:pointer";
-  cancel.addEventListener("click", function () { ov.remove(); });
-  foot.appendChild(cancel);
-
-  box.appendChild(head); box.appendChild(src); box.appendChild(list); box.appendChild(note); box.appendChild(foot);
-  ov.appendChild(box);
-  ov.addEventListener("click", function (e) { if (e.target === ov) ov.remove(); });
-  document.body.appendChild(ov);
-}
-
   // 전역 공개 — index-app.js 의 기존 호출부와 onclick/onerror 문자열이 이름 그대로 쓴다.
   //   (모듈 안에서 선언만 하면 admin 화면의 기존 호출이 전부 깨진다)
   var EXPORTS = {
@@ -1452,7 +1226,7 @@ function woAdvertiserLinkPicker(resp, onLink) {
     WO_TRANSITIONS: WO_TRANSITIONS, WO_ACCEPT_ELIGIBLE: WO_ACCEPT_ELIGIBLE,
     _woAcceptable: _woAcceptable, _woAccepted: _woAccepted,
     _woAcceptSheetless: _woAcceptSheetless,
-    WO_DELIVERY_TYPES: WO_DELIVERY_TYPES, _woDeliveryBase: _woDeliveryBase, WO_CHANNEL_HOSTS: WO_CHANNEL_HOSTS,
+    WO_DELIVERY_MAP: WO_DELIVERY_MAP, WO_CHANNEL_HOSTS: WO_CHANNEL_HOSTS,
     _woChannelFromUrl: _woChannelFromUrl, _woChannel: _woChannel,
     _woPlainGuideToHtml: _woPlainGuideToHtml, _woReviewImgHtml: _woReviewImgHtml,
     _woBuildInflowHtml: _woBuildInflowHtml, _woFirstProductInfo: _woFirstProductInfo,
@@ -1460,7 +1234,6 @@ function woAdvertiserLinkPicker(resp, onLink) {
     _woOptionRows: _woOptionRows, _woProductMode: _woProductMode, _woCampaignPrefill: _woCampaignPrefill,
     _woUnitGuide: _woUnitGuide, _woUnitGuideBlock: _woUnitGuideBlock,
     woAcceptTabPicker: woAcceptTabPicker,
-    woAdvertiserLinkPicker: woAdvertiserLinkPicker, _woAdvBizLine: _woAdvBizLine,
     woAdminEditModal: woAdminEditModal,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];

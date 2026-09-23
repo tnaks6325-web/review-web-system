@@ -84,16 +84,6 @@ function errorHandler(err, req, res, next) {
   if (err.status === 401) {
     return res.status(401).json({ error: err.message });
   }
-
-  // 작업오더 접수는 인트라넷이 HTTP 상태로 전송 실패를 재시도한다. 이 표식은
-  // intake 경로에서만 부여되며, 위의 공통 관측 처리를 거친 뒤 안전한 계약으로 응답한다.
-  if (err.intakeHttp500) {
-    return res.status(500).json({
-      ok: false,
-      code: 'order_intake_failed',
-      error: '작업오더 접수 중 오류가 발생했습니다.',
-    });
-  }
   /* ★★ 본문 크기 초과(413) — GAS 호환 200 으로 접지 않는다.
      이건 "기다리면 풀리는 실패"가 아니라 **더 줄여 보내야 풀리는 실패**라, 클라이언트가
      429(분당 상한)와 구분할 수 있어야 재시도 전략이 갈린다(구매 캡처 업로드 경로).
@@ -104,20 +94,13 @@ function errorHandler(err, req, res, next) {
 
 
   // 기본: GAS 호환 에러 응답 (HTTP 200, error 필드)
-  // ★ 관리자 API는 디버깅을 위해 실제 에러 메시지 포함. 캠페인 API에는 리뷰어 공개
-  // 참여 경로도 있으므로, 인증된 관리자 요청일 때만 원문을 준다.
+  // ★ 관리자 API 및 캠페인 API는 디버깅을 위해 실제 에러 메시지 포함
   // /api/manual-order/ = 관리자 전용 대리제출 도구 — 실패 원인이 곧 조치 안내라 마스킹하면 못 쓴다
-  //   ★ 리뷰웹시스템[3버전]은 같은 도구를 /api/trackb/manual-order/* 프록시로 쓴다(인트라넷 SSO
-  //     토큰이 Track A 경로에 도달 불가) — 화면이 같으니 안내도 같아야 한다.
-  const hasTrustedCampaignAdminError = !!(req && Object.prototype.hasOwnProperty.call(req, '_trustedCampaignAdminError') && req._trustedCampaignAdminError === true);
-  const isCampaignAdminRequest = !!(req.path && req.path.startsWith('/api/campaign/') && (req.admin || hasTrustedCampaignAdminError));
-  const isPublicCampaignApply = !!(req.path && /^\/api\/campaign\/[^/]+\/apply$/.test(req.path) && !req.admin);
-  const isAdminApi = req.path && (req.path.startsWith('/api/admin/') || isCampaignAdminRequest
-    || req.path.startsWith('/api/order/') || req.path.startsWith('/api/manual-order/')
-    || req.path.startsWith('/api/trackb/manual-order/'));
+  const isAdminApi = req.path && (req.path.startsWith('/api/admin/') || req.path.startsWith('/api/campaign/')
+    || req.path.startsWith('/api/order/') || req.path.startsWith('/api/manual-order/'));
   res.status(200).json({
     error: (process.env.NODE_ENV === 'production' && !isAdminApi)
-      ? (isPublicCampaignApply ? '참여 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' : '서버 오류가 발생했습니다.')
+      ? '서버 오류가 발생했습니다.'
       : err.message,
   });
 }

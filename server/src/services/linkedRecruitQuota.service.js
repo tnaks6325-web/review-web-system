@@ -59,25 +59,10 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
   if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { synced: false, reason: 'no_worktable_link' };
   const { isSheetless } = require('../utils/sheetlessScope');
   if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { synced: false, reason: 'not_sheetless' };
-  // 작업표는 탭 단위의 물리 행이라 두 공고가 같은 활성 탭을 공유하면 현재 공고의
-  // 정원만으로 줄 수를 맞출 수 없다. 그 상태에서 빈 행을 정리하면 다른 공고의
-  // 준비 자리를 지울 수 있으므로, 탭 단위 목표를 별도로 만들기 전까지는 안전하게 건너뛴다.
-  if (campaign.id) {
-    const { rows: shared } = await client.query(
-      `SELECT id FROM recruit_campaigns
-        WHERE participation_mode AND status='active' AND archived_at IS NULL
-          AND linked_sheet_id=$1 AND linked_tab_name=$2
-        FOR UPDATE`,
-      [campaign.linked_sheet_id, campaign.linked_tab_name]
-    );
-    if (shared.some(r => String(r.id) !== String(campaign.id))) {
-      return { synced: false, reason: 'shared_worktable', sharedCampaignIds: shared.map(r => String(r.id)) };
-    }
-  }
   const { rows } = await client.query(
     `SELECT id, seq, tab_gid, reviewer_name, recipient_name, phone8, order_submission_id
        FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
       ORDER BY seq FOR UPDATE`, [campaign.linked_sheet_id, campaign.linked_tab_name]
   );
   const fixed = rows.filter(r => !_worktableSlotEmpty(r));
@@ -104,12 +89,8 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
     for (let i = 0; i < delta.add; i++) {
       await client.query(
         `INSERT INTO campaign_participants
-           (sheet_id, tab_gid, tab_name, seq, row_json, workboard_id, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,'{}'::jsonb,
-           (SELECT tc.workboard_id FROM tab_configs tc
-             JOIN workboards w ON w.id=tc.workboard_id AND w.state='active'
-            WHERE tc.sheet_id=$1 AND tc.tab_name=$3 LIMIT 1),
-           'worktable',$5,NOW())`,
+           (sheet_id, tab_gid, tab_name, seq, row_json, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,'{}'::jsonb,'worktable',$5,NOW())`,
         [campaign.linked_sheet_id, tabGid, campaign.linked_tab_name, maxSeq + i + 1, String(by).slice(0, 100)]
       );
     }
@@ -122,253 +103,20 @@ async function assertWorktableSlotsInTx(client, campaign, target) {
   if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { checked: false, reason: 'no_worktable_link' };
   const { isSheetless } = require('../utils/sheetlessScope');
   if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { checked: false, reason: 'not_sheetless' };
-  if (campaign.id) {
-    const { rows: shared } = await client.query(
-      `SELECT id FROM recruit_campaigns
-        WHERE participation_mode AND status='active' AND archived_at IS NULL
-          AND linked_sheet_id=$1 AND linked_tab_name=$2
-        FOR UPDATE`,
-      [campaign.linked_sheet_id, campaign.linked_tab_name]
-    );
-    if (shared.some(r => String(r.id) !== String(campaign.id))) {
-      return { checked: false, reason: 'shared_worktable', sharedCampaignIds: shared.map(r => String(r.id)) };
-    }
-  }
   const { rows } = await client.query(
     `SELECT reviewer_name, recipient_name, phone8, order_submission_id
        FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE FOR UPDATE`,
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL FOR UPDATE`,
     [campaign.linked_sheet_id, campaign.linked_tab_name]
   );
   return { checked: true, ...worktableSlotDelta({ current: rows.length, protectedCount: rows.filter(r => !_worktableSlotEmpty(r)).length, target }) };
 }
 
-async function rebuildWorktableProjection(worktable, by, force = false) {
-  if (!worktable || !worktable.synced || (!force && !worktable.add && !worktable.retire)) return worktable;
+async function rebuildWorktableProjection(worktable, by) {
+  if (!worktable || !worktable.synced || (!worktable.add && !worktable.retire)) return worktable;
   const { rebuildLedgers } = require('./sheetlessLedger.service');
   const rebuilt = await rebuildLedgers({ sheetId: worktable.sheetId, tabName: worktable.tabName, by: String(by).slice(0, 100) });
   return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
-}
-
-/**
- * 중복 줄 정리처럼 정원을 직접 바꾸지 않는 행 정리 뒤, 단일 연결 공고의 목표보다
- * 활성 작업표가 작아졌을 때 빈 슬롯만 보충한다. 여러 공고가 한 작업표를 공유하면
- * 어느 공고의 정원을 쓸지 추측하지 않고 건너뛴다.
- *
- * 이 함수는 초과 행을 줄이지 않는다. 삭제 작업의 후속 보충 전용이라 현재 행이 목표
- * 이상이면 그대로 둔다. 실제 campaign_participants 쓰기는 기존 정원 동기화 한 벌을 쓴다.
- */
-async function replenishWorktableSlotsToLinkedQuota({ sheetId, tabName, by = 'quota-replenish' } = {}) {
-  if (!sheetId || !tabName) return { synced: false, reason: 'bad_target', add: 0 };
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
-      [`sheetless_worktable:${sheetId}:${tabName}`]);
-    const { rows } = await client.query(
-      `SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
-              rc.recruit_total, rc.status, rc.source_work_order_id,
-              (
-                SELECT w.recruit_count
-                  FROM work_orders w
-                 WHERE w.deleted_at IS NULL
-                   AND (NULLIF(w.linked_campaign_id, '') = rc.id
-                     OR NULLIF(rc.source_work_order_id, '') = w.id)
-                 ORDER BY (NULLIF(w.linked_campaign_id, '') = rc.id) DESC, w.updated_at DESC
-                 LIMIT 1
-              ) AS work_order_recruit_total
-         FROM recruit_campaigns rc
-        WHERE rc.linked_sheet_id=$1 AND rc.linked_tab_name=$2
-          AND rc.archived_at IS NULL
-        ORDER BY rc.updated_at DESC
-        FOR UPDATE OF rc`, [sheetId, tabName]
-    );
-    const open = rows.filter(r => r.status === 'draft' || r.status === 'active');
-    const tier = open.length ? open : rows;
-    if (tier.length !== 1) {
-      await client.query('ROLLBACK');
-      return { synced: false, reason: tier.length ? 'shared_worktable' : 'no_campaign', add: 0 };
-    }
-    const campaign = tier[0];
-    const target = displayRecruitTotal(campaign.recruit_total, campaign.work_order_recruit_total).total;
-    if (target <= 0) {
-      await client.query('ROLLBACK');
-      return { synced: false, reason: 'no_positive_quota', add: 0 };
-    }
-    const { rows: liveRows } = await client.query(
-      `SELECT COUNT(*)::int AS live
-         FROM campaign_participants
-        WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE`,
-      [sheetId, tabName]
-    );
-    const live = Number(liveRows[0] && liveRows[0].live) || 0;
-    // 초과 표는 이 보충 경로의 대상이 아니다. 보호 행이 목표보다 많아도 축소 판정에
-    // 넣지 않으므로, 이미 존재하는 행을 건드리거나 오류로 보고하지 않는다.
-    if (live >= target) {
-      await client.query('ROLLBACK');
-      return { synced: false, reason: 'already_at_or_above_target', target, current: live, add: 0 };
-    }
-    const checked = await assertWorktableSlotsInTx(client, campaign, target);
-    if (!checked.checked || checked.add <= 0) {
-      await client.query('ROLLBACK');
-      return { ...checked, synced: false, reason: checked.reason || 'already_at_or_above_target', add: 0 };
-    }
-    const synced = await syncWorktableSlotsInTx(client, campaign, target, by);
-    await client.query('COMMIT');
-    return synced;
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-// 과거의 빈 초과 슬롯만 정리한다. 수동 진단 API와 자동 복구 크론이 같은 경로를 사용한다.
-// 잠금 뒤 기존 정원 동기화의 보호 규칙을 재사용하므로 참여·주문 행은 절대 은퇴하지 않는다.
-async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, by = 'overflow-cleanup' } = {}) {
-  const cap = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
-  // renumberTab은 대형 비정상 표를 부분 번호정리하지 않도록 상한을 둔다. 초과 탭을
-  // 먼저 줄이고 부분 번호만 재생성하면 중복 번호를 새로 만들 수 있으므로 자동 정리 대상에서 제외한다.
-  const { MAX_RENUMBER_ROWS } = require('../utils/rowNumbering');
-  const pendingBy = `overflow-cleanup-pending:${String(by).slice(0, 70)}`;
-  const rebuiltBy = `overflow-cleanup-rebuilt:${String(by).slice(0, 70)}`;
-  const { rows: campaigns } = await pool.query(
-    `WITH candidates AS (
-       SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at,
-              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL AND cp.active = TRUE) AS live_slots,
-              COUNT(cp.id) FILTER (WHERE cp.deleted_at IS NULL AND cp.active = TRUE
-                AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
-                AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
-                AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
-                AND cp.order_submission_id IS NULL) AS empty_slots,
-              BOOL_OR(cp.deleted_at IS NOT NULL AND cp.updated_by LIKE 'overflow-cleanup-pending:%') AS pending_projection
-         FROM recruit_campaigns rc
-         JOIN tab_configs tc ON tc.sheet_id = rc.linked_sheet_id AND tc.tab_name = rc.linked_tab_name
-                            AND COALESCE(tc.sheetless, FALSE) = TRUE
-         LEFT JOIN campaign_participants cp ON cp.sheet_id = rc.linked_sheet_id AND cp.tab_name = rc.linked_tab_name
-        WHERE rc.participation_mode AND rc.status = 'active' AND rc.archived_at IS NULL
-          AND COALESCE(rc.recruit_total, 0) > 0
-          AND COALESCE(rc.recruit_total, 0) <= ${Number(MAX_RENUMBER_ROWS) || 5000}
-          AND COALESCE(rc.linked_sheet_id, '') <> '' AND COALESCE(rc.linked_tab_name, '') <> ''
-          AND NOT EXISTS (
-            SELECT 1 FROM recruit_campaigns shared
-             WHERE shared.id <> rc.id
-               AND shared.participation_mode AND shared.status = 'active' AND shared.archived_at IS NULL
-               AND shared.linked_sheet_id = rc.linked_sheet_id AND shared.linked_tab_name = rc.linked_tab_name
-          )
-       GROUP BY rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid, rc.recruit_total, rc.updated_at
-     )
-     SELECT id, linked_sheet_id, linked_tab_name, linked_tab_gid, recruit_total, pending_projection
-       FROM candidates
-      WHERE (live_slots > recruit_total AND empty_slots >= live_slots - recruit_total)
-         OR COALESCE(pending_projection, FALSE)
-      ORDER BY updated_at DESC LIMIT $1`, [cap]);
-  const out = { ok: true, dryRun: !!dryRun, scanned: campaigns.length, retired: 0, skipped: 0, items: [] };
-  for (const campaign of campaigns) {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const checked = await assertWorktableSlotsInTx(client, campaign, campaign.recruit_total);
-      const retryProjection = !!campaign.pending_projection;
-      if (checked.checked && checked.target > Number(MAX_RENUMBER_ROWS)) {
-        await client.query('ROLLBACK');
-        out.skipped++;
-        out.items.push({ campaignId: campaign.id, reason: 'renumber_limit', target: checked.target });
-        continue;
-      }
-      if (!checked.checked || (!checked.retire && !retryProjection)) { await client.query('ROLLBACK'); out.skipped++; continue; }
-      if (dryRun) {
-        await client.query('ROLLBACK');
-        out.items.push({ campaignId: campaign.id, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
-          target: checked.target, wouldRetire: checked.retire, wouldRebuildProjection: retryProjection || !!checked.retire });
-        continue;
-      }
-      const changed = checked.retire
-        ? await syncWorktableSlotsInTx(client, campaign, campaign.recruit_total, pendingBy)
-        : { synced: true, add: 0, retire: 0, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name, target: checked.target };
-      if (checked.retire) await client.query('COMMIT');
-      else await client.query('ROLLBACK');
-      // 슬롯 은퇴 뒤 화면 번호는 DB seq와 별개로 활성 행 1..N 이어야 한다. 수동 버튼을
-      // 누르지 않아도 자동 복구 한 번으로 행 수·마지막 번호·투영 원장을 함께 맞춘다.
-      let numbering = null;
-      if (checked.retire || retryProjection) {
-        const { renumberTab } = require('./rowNumbering.service');
-        numbering = await renumberTab({
-          sheetId: campaign.linked_sheet_id,
-          tabName: campaign.linked_tab_name,
-          by: String(by).slice(0, 100),
-          rebuild: false,
-        });
-      }
-      const rebuilt = await rebuildWorktableProjection(changed, by, retryProjection);
-      await pool.query(
-        `UPDATE campaign_participants
-            SET updated_by=$3, updated_at=NOW()
-          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
-            AND updated_by LIKE 'overflow-cleanup-pending:%'`,
-        [campaign.linked_sheet_id, campaign.linked_tab_name, rebuiltBy]
-      );
-      out.retired += changed.retire || 0;
-      out.items.push({ campaignId: campaign.id, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
-        target: changed.target,
-        retired: changed.retire || 0, numbering, projection: rebuilt.projection || null });
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
-      out.items.push({ campaignId: campaign.id, error: err.message, code: err.code || null });
-    } finally { client.release(); }
-  }
-  return out;
-}
-
-/**
- * 그 공고에 연결된 작업오더 1건(읽기 전용).
- *
- * ★★ **짝짓기 규칙 단일 출처** — 역방향 링크(`work_orders.linked_campaign_id`) 우선 →
- *   정방향(`recruit_campaigns.source_work_order_id`), 같으면 최근 수정 오더. 067 백필·정원
- *   폴백·혼합 조합 프리필이 **같은 오더**를 봐야 "정원은 A 오더, 조합은 B 오더"가 안 생긴다.
- * ★ 소프트삭제된 오더는 근거가 아니다.
- * ★ 컬럼 이름은 화이트리스트 정규식으로 검증한다(문자열 조립 — 주입 차단).
- */
-/* ★★ 짝짓기 SQL 조각 — 소비처가 늘어도 **규칙은 여기 한 곳**이다.
-   역방향 링크(`work_orders.linked_campaign_id`) 우선 → 정방향(`recruit_campaigns.source_work_order_id`),
-   같으면 최근 수정 오더. 067 백필·정원 폴백·혼합 조합·유입방식이 전부 이 조각을 태운다. */
-const LINKED_WO_ON = `((NULLIF(w.linked_campaign_id, '') = c.id) OR (NULLIF(c.source_work_order_id, '') = w.id))`;
-const LINKED_WO_ORDER = `(NULLIF(w.linked_campaign_id, '') = c.id) DESC, w.updated_at DESC`;
-
-/**
- * 공고들에 연결된 작업오더 일괄 조회 → Map(campaignId → 그 오더의 요청 컬럼).
- *
- * ★ 소프트삭제된 오더는 근거가 아니다.
- * ★ 컬럼 이름은 화이트리스트 정규식으로 검증한다(문자열 조립 — 주입 차단).
- * ★ `db` 를 받는다 — 잠금 트랜잭션의 client 로도 부를 수 있어야 한다(SAVEPOINT 격리는 호출부 몫).
- */
-async function linkedWorkOrdersForCampaigns(db, ids, columns = ['recruit_count']) {
-  const list = (Array.isArray(ids) ? ids : []).filter(Boolean).map(String);
-  const safe = (Array.isArray(columns) ? columns : []).filter(c => /^[a-z_][a-z0-9_]*$/.test(String(c)));
-  if (!list.length || !safe.length || !db || typeof db.query !== 'function') return new Map();
-  const cols = safe.map(c => `w.${c}`).join(', ');
-  const { rows } = await db.query(
-    `SELECT DISTINCT ON (c.id) c.id AS campaign_id, ${cols}
-       FROM recruit_campaigns c
-       JOIN work_orders w ON ${LINKED_WO_ON}
-      WHERE c.id = ANY($1) AND w.deleted_at IS NULL
-      ORDER BY c.id, ${LINKED_WO_ORDER}`,
-    [list]
-  );
-  const out = new Map();
-  for (const r of rows) {
-    const { campaign_id: cid, ...rest } = r;
-    out.set(cid, rest);
-  }
-  return out;
-}
-
-/** 단건 — 배치와 **같은 규칙**을 태운다(사본 0). */
-async function linkedWorkOrderForCampaign(campaign, columns = ['recruit_count']) {
-  if (!campaign || !campaign.id) return null;
-  const m = await linkedWorkOrdersForCampaigns(pool, [campaign.id], columns);
-  return m.get(String(campaign.id)) || null;
 }
 
 /** 연결 작업오더의 모집인원으로 레거시 공고의 표시 총정원을 보완한다(읽기 전용). */
@@ -376,8 +124,17 @@ async function displayRecruitTotalForCampaign(campaign) {
   const primary = quota(campaign && campaign.recruit_total);
   if (primary > 0) return { total: primary, source: 'campaign' };
   if (!campaign || !campaign.id) return { total: 0, source: 'none' };
-  const wo = await linkedWorkOrderForCampaign(campaign, ['recruit_count']);
-  return displayRecruitTotal(primary, wo && wo.recruit_count);
+  const sourceId = String(campaign.source_work_order_id || '').trim();
+  const { rows } = await pool.query(
+    `SELECT recruit_count
+       FROM work_orders
+      WHERE deleted_at IS NULL
+        AND ((linked_campaign_id = $1 AND $1 <> '') OR (id = $2 AND $2 <> ''))
+      ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC
+      LIMIT 1`,
+    [String(campaign.id), sourceId]
+  );
+  return displayRecruitTotal(primary, rows[0] && rows[0].recruit_count);
 }
 
 /** 차수 공고에서는 뒤 차수를 보존하고 1차만 조절해 합계를 목표 정원과 일치시킨다. */
@@ -526,17 +283,7 @@ async function assertCampaignRecruitTotal({ campaignId, recruitTotal }) {
   } finally { client.release(); }
 }
 
-/**
- * ★★ `skipWorktable` = "이번 저장에서 총정원이 한 명도 안 바뀌었다"는 호출자의 확언.
- *   그때는 작업보드 슬롯 맞추기를 건너뛴다 — 초과 상태(채워진 줄 > 정원)인 작업은
- *   목표가 그대로여도 delta.retire 가 잡혀 `worktableSlotDelta`/빈 슬롯 부족 두 겹에서
- *   throw 하고, 그 throw 가 공고 저장 맨 끝에 있어 **저장은 이미 커밋됐는데 화면엔 실패**로
- *   보였다(2026-08-24 실측 13개 작업). ★ 줄이려는 조작은 종전대로 막는다(호출자가 값이
- *   달라졌을 때만 이 플래그를 끄므로 게이트는 그대로 산다). ★ 역방향 링크 백필
- *   (`work_orders.linked_campaign_id`)은 **건너뛰지 않는다** — 그것까지 빠지면 연결이
- *   조용히 비는 별개 사고가 된다.
- */
-async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktable = false }) {
+async function syncCampaignRecruitTotal({ campaignId, recruitTotal }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -549,9 +296,7 @@ async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktabl
       `UPDATE work_orders SET linked_campaign_id=$2, recruit_count=$3, updated_at=NOW() WHERE id=$1`,
       [order.id, campaignId, total]
     );
-    const worktable = skipWorktable
-      ? { synced: false, reason: 'quota_unchanged' }
-      : await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
+    const worktable = await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
     await client.query('COMMIT');
     return { linked: true, workOrderId: order.id, recruitTotal: total, worktable: await rebuildWorktableProjection(worktable, 'campaign-quota-sync') };
   } catch (err) {
@@ -612,21 +357,13 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
 
 module.exports = {
   quota,
-  /* ★ 작업오더 → 연결 공고 짝짓기 단일 출처 — 금액 전파(160-2)도 같은 규칙을 써야
-     "정원은 A 공고, 금액은 B 공고" 가 안 생긴다. */
-  linkedCampaign,
   displayRecruitTotal,
   displayRecruitTotalForCampaign,
-  linkedWorkOrderForCampaign,
-  linkedWorkOrdersForCampaigns,
   worktableSlotDelta,
-  syncWorktableSlotsInTx,
   firstRoundQuota,
   allocateOptionQuotas,
   assertWorkOrderQuota,
   assertCampaignRecruitTotal,
   syncCampaignRecruitTotal,
   syncWorkOrderRecruitTotal,
-  cleanupOverflowEmptyWorktableSlots,
-  replenishWorktableSlotsToLinkedQuota,
 };

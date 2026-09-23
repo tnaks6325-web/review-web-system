@@ -13,33 +13,17 @@
 (function (global) {
   'use strict';
 
-  /**
-   * ★★ 축척 계산 **단일 출처** — `fromDataUrl`·`fromFile` 이 같은 규칙을 쓴다.
-   * @param {boolean} longest  true = **긴 변** 기준(세로로 긴 캡처도 줄어든다)
-   *                           false(기본) = 가로 폭 기준 — **기존 소비처 동작 그대로**.
-   * ★ 세로로 긴 모바일 스크린샷(예 1080×2400)은 가로가 상한보다 작아 **폭 기준으로는
-   *   한 번도 줄지 않는다**. 리뷰 캡처가 그 모양이라 업로드가 느렸다(2026-09-22 실측).
-   * ★ 이미 상한 안이면 1(=줄이지 않는다) — 확대는 하지 않는다.
-   */
-  function _scale(w, h, maxPx, longest) {
-    const side = longest ? Math.max(w || 0, h || 0) : (w || 0);
-    if (!side || !maxPx || side <= maxPx) return 1;
-    return maxPx / side;
-  }
-
   /** dataURL → dataURL(JPEG). 실패 시 "" (호출부가 원본으로 폴백). */
-  function fromDataUrl(dataUrl, maxPx, quality, opts) {
+  function fromDataUrl(dataUrl, maxPx, quality) {
     const mx = maxPx || 1920;
     const q = typeof quality === 'number' ? quality : 0.8;
-    const longest = !!(opts && opts.longest);
     return new Promise(function (resolve) {
       try {
         const img = new Image();
         img.onload = function () {
           try {
             let w = img.width || mx, h = img.height || mx;
-            const sc = _scale(w, h, mx, longest);
-            if (sc < 1) { w = Math.round(w * sc); h = Math.round(h * sc); }
+            if (w > mx) { h = Math.round(h * (mx / w)); w = mx; }
             const cv = document.createElement('canvas');
             cv.width = Math.max(1, w); cv.height = Math.max(1, h);
             cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
@@ -53,7 +37,7 @@
   }
 
   /** File → {base64, mime}. 실패 시 원본 그대로 읽어 돌려준다(null 은 파일 자체를 못 읽은 경우). */
-  function fromFile(file, maxPx, quality, opts) {
+  function fromFile(file, maxPx, quality) {
     return new Promise(function (resolve) {
       const raw = function () {
         try {
@@ -75,11 +59,9 @@
           URL.revokeObjectURL(url);
           const mx = maxPx || 1920;
           const q = typeof quality === 'number' ? quality : 0.8;
-          const longest = !!(opts && opts.longest);
           try {
             let w = img.width, h = img.height;
-            const sc = _scale(w, h, mx, longest);
-            if (sc < 1) { w = Math.round(w * sc); h = Math.round(h * sc); }
+            if (w > mx) { h = Math.round(h * (mx / w)); w = mx; }
             const cv = document.createElement('canvas');
             cv.width = Math.max(1, w); cv.height = Math.max(1, h);
             cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
@@ -97,5 +79,5 @@
   /** 서버 본문 상한(10MB) 대비 base64 예산. 초과하면 줄인다. */
   const UPLOAD_BUDGET = 6000000;
 
-  global.ImageShrink = { fromDataUrl: fromDataUrl, fromFile: fromFile, UPLOAD_BUDGET: UPLOAD_BUDGET, _scale: _scale };
+  global.ImageShrink = { fromDataUrl: fromDataUrl, fromFile: fromFile, UPLOAD_BUDGET: UPLOAD_BUDGET };
 })(window);

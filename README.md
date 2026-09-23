@@ -277,8 +277,6 @@ CREATE TABLE slot_locks (
 | `/api/short/*` | GET/POST | 단축URL |
 | `/api/memo` | GET/POST | 메모 |
 | `/api/payment/*` | GET/POST | 입금처리 |
-| `/api/review-reminders/status` | GET | 알림톡 설정·발송 상태(관리자 인증) |
-| `/api/review-reminders/run` | POST | 알림톡 dry-run 또는 수동 실행(관리자 인증, 기본 dry-run) |
 | `/api/archive/*` | GET/POST | 아카이브 |
 | `/api/diag/*` | GET/POST | 진단/모니터링 |
 | `/api/tab/fix-campaign-tab-swap` | POST | campaign_name/tab_gid 일괄 교정 (인증 필요, dryRun 지원) |
@@ -301,10 +299,6 @@ DRIVE_ROOT_FOLDER_ID  → (드라이브 폴더 ID)
 ALLOWED_ORIGINS       → https://review-web-system.pages.dev
 INDEX_CRON_SCHEDULE   → 0 9-19 * * 1-6
 SENTRY_DSN            → (선택: Sentry 에러 트래킹)
-REVIEW_REMINDER_ENABLED → 0 (SOLAPI 설정·dry-run 확인 후 1)
-SOLAPI_API_KEY / SOLAPI_API_SECRET → (Railway secret, 저장소 기록 금지)
-SOLAPI_PF_ID / SOLAPI_SENDER_NUMBER → (카카오 채널 ID / 등록 발신번호)
-SOLAPI_REVIEW_TEMPLATE_ID_1..3 → (승인된 리뷰 미작성 템플릿 ID)
 ```
 
 ## 프론트엔드 페이지

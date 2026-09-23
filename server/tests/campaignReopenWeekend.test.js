@@ -39,7 +39,7 @@ console.log('\n[1] 주말 판정 단일 출처');
 {
   const src = read('src/services/campaignState.service.js');
   ok('★★ 상태엔진이 게시 차단과 같은 함수를 쓴다(isWeekendClosedOn require — 판정 사본 0)',
-    /require\('\.\/campaignWeekend\.service'\)/.test(src) && /isWeekendClosedOn\(c, d, plans\)/.test(src));
+    /require\('\.\/campaignWeekend\.service'\)/.test(src) && /isWeekendClosedOn\(c, d\)/.test(src));
   ok('★ "무조건 내일" 헬퍼(kstTomorrowStr) 부재 — 되살리면 신고 건이 그대로 재현된다',
     !/kstTomorrowStr/.test(src));
   ok('주말 판정과 게시 차단이 같은 날짜에 대해 어긋나지 않는다(토요일)',
@@ -161,7 +161,7 @@ console.log('\n[6] 카드 렌더 실행');
   ok('★ 푸터도 "내일"을 박지 않고 실제 재오픈일을 말한다',
     /8\/24\(월\)/.test(daily) && !/내일/.test(daily));
   ok('★ 썸네일 문구에 "오픈"이 두 번 찍히지 않는다(_fmtOpenWhen 조각 사용)',
-    /8\/24\(월\)(?: \d{2}:\d{2})? 다시 오픈/.test(daily) && !/오픈 다시 오픈/.test(daily));
+    /8\/24\(월\) 다시 오픈/.test(daily) && !/오픈 다시 오픈/.test(daily));
 
   const wk = CC.cardHtml({ ...base, state: 'weekend_unpublished', stateReason: 'weekend_unpublished',
     stateMessage: '주말 미게시 · 월요일 재개', resumesOn: MON, resumesAt: '2026-08-24T00:00:00.000Z' });

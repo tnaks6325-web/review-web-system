@@ -57,51 +57,12 @@ const thead = /<thead><tr>([\s\S]*?)<\/tr><\/thead>/.exec(
 const cols = [...thead[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(m => m[1].trim());
 /* 2026-08-05 자동 블랙리뷰어(091-2)로 갱신: 타계정 뒤에 누적참여·이전 리뷰,
    삭제 바로 왼쪽에 참여설정 — 나머지 순서는 종전 사용자 확정 그대로. */
-const want = ['리뷰어 홈', '이름', '연락처', '주소', '은행', '계좌번호', '예금주', '주민번호', '소득유형', '타계정', '누적참여', '이전 리뷰', '등록일'];
-ok(`앞 13개 = ${want.join(' · ')}`, JSON.stringify(cols.slice(0, 13)) === JSON.stringify(want));
+const want = ['이름', '연락처', '주소', '은행', '계좌번호', '예금주', '주민번호', '소득유형', '타계정', '누적참여', '이전 리뷰', '등록일'];
+ok(`앞 12개 = ${want.join(' · ')}`, JSON.stringify(cols.slice(0, 12)) === JSON.stringify(want));
 ok('그 뒤에 상태·관리자 메모·참여설정·삭제(기존 열을 지우지 않았고 토글은 삭제 바로 왼쪽)',
-  cols[13] === '상태' && cols[14] === '관리자 메모' && cols[15] === '참여설정' && cols.length === 17);
+  cols[12] === '상태' && cols[13] === '관리자 메모' && cols[14] === '참여설정' && cols.length === 16);
 ok(`펼침행 colspan(${/colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) ? 'RV_COLSPAN' : '?'}) 이 열 수와 같다`,
-  /const RV_COLSPAN = 17;/.test(jsNoComment) && /colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) && cols.length === 17);
-
-console.log('\n②-1 실시간 검색 · 리뷰어 홈 바로가기');
-ok('검색 입력마다 180ms 후 서버 검색을 다시 한다',
-  /oninput="_rvSearchInput\(this,event\)"/.test(jsNoComment) && /function _rvSearchInput[\s\S]{0,500}?setTimeout[\s\S]{0,300}?_loadReviewers\(/.test(jsNoComment));
-ok('검색창은 상태/블랙리스트 필터 행의 맨 왼쪽에 있다', (() => {
-  const head = (/function _renderRvHead\(total\)[\s\S]*?\n\}/.exec(jsNoComment) || [''])[0];
-  const row = (/margin:0 16px 10px">([\s\S]*?)<\/div>`;/.exec(head) || ['',''])[1];
-  return row.indexOf('id="rvq"') > -1 && row.indexOf('id="rvq"') < row.indexOf("[['','전체']");
-})());
-ok('느린 이전 검색 응답이 최신 결과를 덮지 않는다',
-  /requestId!==STATE\.rvRequestId\) return/.test(jsNoComment));
-ok('★ 실시간 검색 응답은 검색창 헤더를 재생성하지 않는다(빈 값 Backspace 뒤로가기 방지)',
-  /_loadReviewers\(\{preserveSearchInput:true\}\)/.test(jsNoComment)
-  && /if\(preserveSearchInput\) _refreshRvHead\(r\.total\|0\);/.test(jsNoComment)
-  && /function _refreshRvHead\(total\)[\s\S]{0,700}?textContent/.test(jsNoComment));
-ok('★ 검색 중 갱신은 건수 표기만 바꾸고 #rvq 를 담은 헤더 innerHTML을 건드리지 않는다', (() => {
-  const start=jsNoComment.indexOf('function _refreshRvHead(total)');
-  const end=jsNoComment.indexOf('let _rvSearchTimer', start);
-  const refresh=start<0||end<0?'':jsNoComment.slice(start,end);
-  return refresh.includes("$('#rvTotal')") && refresh.includes("$('#rvRange')") && !refresh.includes('innerHTML');
-})());
-ok('이름 왼쪽에 리뷰어 홈 버튼이 있고 행 인덱스로만 연다',
-  /<th style="width:72px">리뷰어 홈<\/th><th class="c-nm">이름/.test(jsNoComment)
-  && /onclick="_rvOpenHome\(\$\{i\}\)"/.test(jsNoComment));
-ok('홈 링크는 관리자 전용 API로 발급하고 새 탭을 연다',
-  /function _rvOpenHome[\s\S]{0,900}?window\.open\('', '_blank'\)[\s\S]{0,900}?\/api\/trackb\/reviewers\/home-link/.test(jsNoComment));
-ok('홈 교환권 발급은 adminOrMaster이고 5분짜리 서명 토큰이다',
-  /router\.post\('\/reviewers\/home-link', authMiddleware, adminOrMasterMiddleware/.test(routes)
-  && /scope: 'reviewer_home_admin'/.test(routes) && /expiresIn: '5m'/.test(routes)
-  && /SELECT name, phone8 FROM reviewers WHERE id = \$1 LIMIT 1/.test(routes));
-const home = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
-const reviewerRoutes = fs.readFileSync(path.join(root, 'server', 'src', 'routes', 'reviewer.routes.js'), 'utf8');
-ok('홈 세션 교환도 status와 무관하게 현재 등록 레코드를 다시 확인한다',
-  /home-session[\s\S]{0,1400}?WHERE name = \$1 AND phone8 = \$2 LIMIT 2/.test(reviewerRoutes)
-  && /rows\.length !== 1/.test(reviewerRoutes));
-ok('만료·실패한 관리자 홈 링크는 기존 localStorage 리뷰어로 폴백하지 않는다',
-  /hasAdminReviewerTicket && !exchanged[\s\S]{0,400}?viewLogin/.test(home));
-ok('관리자 링크 교환이 끝난 뒤에만 해시 탭을 처리한다',
-  /DOMContentLoaded", async \(\) => \{\s*await initPage\(\);[\s\S]{0,500}?location\.hash/.test(home));
+  /const RV_COLSPAN = 16;/.test(jsNoComment) && /colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) && cols.length === 16);
 
 /* ── ③ 줄바꿈 금지 ── */
 console.log('\n③ 주소 말고는 전부 한 줄(행 높이 붕괴 방지)');
@@ -116,35 +77,18 @@ ok('예금주 폭 104px — 한글 6~7자가 한 줄로 들어간다(원래 신�
 ok('은행 폭 90px — "카카오뱅크"(5자) 기준', /\.lgtable \.c-bank\{width:90px\}/.test(css));
 ok('★ 삭제·저장 버튼도 nowrap — 두 글자가 접히면 그 행만 16px 높아진다(실측)',
   /\.rvdel\{[^}]*white-space:nowrap/.test(css) && /\.rvmemosave\{[^}]*white-space:nowrap/.test(css));
-ok('FHD에서는 등록리뷰어DB가 전폭을 쓰고 17열을 화면 안에 고정 배치한다',
-  /#rvhead \.mh\{max-width:none\}/.test(css)
-  && /#rvbody \.lgwrap\{max-width:none\}/.test(css)
-  && /@media\(min-width:1500px\)\{[\s\S]{0,250}?#rvbody table\.lgtable\{min-width:0;table-layout:fixed\}/.test(css));
-ok('FHD 압축 규칙은 바깥 등록리뷰어 표의 직접 셀에만 적용한다(타계정 상세표 보존)',
-  /table\.lgtable>thead>tr>th,#rvbody table\.lgtable>tbody>tr:not\(\.rvsubrow\)>td/.test(css)
-  && /table\.lgtable>thead>tr>th:nth-child\(1\)/.test(css));
-ok('연락처 변경 버튼은 이름과 번호를 함께 바꾸는 현재 명의 편집 문구다', />이름 및 번호변경<\/button><\/td>/.test(jsNoComment));
 
 /* ── ④ 타계정 펼침 ── */
 console.log('\n④ 타계정 클릭 → 행 바로 아래 펼침');
 ok('타계정 수가 0보다 크면 버튼, 0이면 그냥 숫자(누를 게 없는 걸 누르게 하지 않는다)',
   /\(r\.subCount\|0\)>0[\s\S]{0,260}?onclick="_rvToggleSub\(/.test(jsNoComment));
-ok('검색어가 있으면 타계정이 있는 모든 검색 결과를 자동으로 펼친다(본계정·타계정 이름 모두 동일)',
-  /const autoOpenSub = !!String\(STATE\.rvq\|\|''\)\.trim\(\) && \(r\.subCount\|0\)>0;/.test(jsNoComment)
-  && /class="rvsubbtn\$\{autoOpenSub\?' on':''\}"/.test(jsNoComment)
-  && /data-rvsub="\$\{i\}"\$\{autoOpenSub\?'':' hidden'\}/.test(jsNoComment));
-ok('자동으로 펼친 타계정은 한 번만 만들고, 이후 클릭으로 접고 다시 펼칠 수 있다',
-  /autoOpenSub\?' data-filled="1"':''/.test(jsNoComment)
-  && /autoOpenSub\?_rvSubHtml\(r\):''/.test(jsNoComment));
 ok('펼침행이 그 리뷰어 행 **바로 다음**에 렌더된다',
-  /<\/tr>\s*<tr class="rvsubrow" data-rvsub="\$\{i\}"/.test(jsNoComment));
+  /<\/tr>\s*<tr class="rvsubrow" data-rvsub="\$\{i\}" hidden>/.test(jsNoComment));
 ok('내용은 열 때 한 번만 만든다(dataset.filled — 목록 50행 동시 렌더 방지)',
   /_rvToggleSub[\s\S]{0,400}?tr\.dataset\.filled/.test(jsNoComment));
 ok('서버가 이미 주는 subAccounts 를 쓴다(신규 엔드포인트 0)',
   /_rvSubHtml[\s\S]{0,400}?r\.subAccounts/.test(jsNoComment)
   && /sub_accounts AS "subAccounts"/.test(routes));
-ok('타계정 이름 검색은 본계정 행을 한 번만 찾는다(EXISTS + 안전한 JSON 배열 처리)',
-  /EXISTS \([\s\S]{0,500}?jsonb_array_elements\(CASE WHEN jsonb_typeof\(reviewers\.sub_accounts\)='array'[\s\S]{0,500}?COALESCE\(sub\.value->>'name', ''\) ILIKE \$\$\{nameLikeParam\}/.test(routes));
 ok('문자열로 저장된 구형 sub_accounts 도 파싱한다',
   /typeof r\.subAccounts==='string' \? JSON\.parse/.test(jsNoComment));
 ok('계좌 3종이 비면 "본인 공통계좌 사용" 로 표기(빈칸=누락 오해 방지)',
@@ -176,20 +120,8 @@ ok('★ force 없이 부르면 needConfirm 만 반환하고 **DELETE 하지 않�
   /if \(!force && \(historyTotal > 0 \|\| countsPartial\)\) \{[\s\S]{0,320}?needConfirm: true/.test(routes));
 ok('★ needConfirm 반환이 DELETE 문보다 먼저 온다(early return 이 실제로 막는다)',
   routes.indexOf('needConfirm: true') < routes.indexOf("DELETE FROM reviewers WHERE id = $1"));
-ok('이력 집계는 주문·참여·문의 3종', /FROM order_submissions/.test(routes)
+ok('이력 집계는 주문·참여·문의 3종', /order_submissions WHERE phone8/.test(routes)
   && /campaign_applications WHERE phone8/.test(routes) && /cs_threads WHERE reviewer_phone8/.test(routes));
-// ★★ `order_submissions` 에는 **phone8 컬럼이 없다**(전체 번호 `phone` 뿐) — 종전 가드는 그 버그 쪽
-//   컬럼명(`order_submissions WHERE phone8`)을 고정하고 있었고, 실제 코드는 42703 으로 **항상 실패**해
-//   확인창이 "구매양식 제출 0건"으로 조용히 속였다(진짜 PG 검증으로 발견·수정됨).
-//   가드를 수정본에 맞추고, 되돌아가지 못하게 못박는다.
-ok('★★ 주문 집계는 phone(뒤 8자리 파생)으로 센다 — order_submissions.phone8 은 없는 컬럼', (() => {
-  const i = routes.indexOf("'/reviewers/delete'");
-  const j = routes.indexOf('FROM order_submissions', i);
-  // ★ 슬라이스를 **그 probe 안에서** 끊는다 — 넘치면 다음 probe(campaign_applications WHERE phone8)가
-  //   섞여 들어와 "phone8 없음" 단언이 항상 실패한다.
-  const q = routes.slice(j, routes.indexOf('],', j));
-  return j > -1 && /RIGHT\(regexp_replace\(COALESCE\(phone,''\)/.test(q) && !/\bphone8\b/.test(q);
-})());
 ok('★ 집계 실패를 0건으로 속이지 않는다(countsPartial 로 알린다)',
   /countsPartial = true/.test(routes) && /countsPartial/.test(jsNoComment));
 ok('삭제는 감사 로그를 남긴다(누가·누구를·이력 몇 건)',

@@ -24,7 +24,6 @@ const assert = require('assert');
 const ROOT = path.join(__dirname, '..');
 const R = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const RF = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8');
-const ledgerGuardMig = R('migrations/149_payment_target_ledger_guard.sql');
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -194,21 +193,6 @@ t('★ 대상 추출에 다운로드 이력 잠금 조건이 있다', () => {
     '살아있는 회차 항목 제외 조건이 없다 = 이중입금');
 });
 
-t('★ 입금 원장이 있는 행은 표시 누락에도 재지급 대상에서 제외한다', () => {
-  assert.ok(/NOT EXISTS[\s\S]{0,180}payment_records pr[\s\S]{0,180}pr\.sheet_id = ri\.sheet_id[\s\S]{0,120}pr\.row_index = ri\.row_index/.test(noComment),
-    '입금 원장을 동일 작업·탭·행으로 대조하는 중복 방지 조건이 없다');
-});
-
-t('★ 관리자의 나중 미입금 정정만 과거 원장 잠금을 풀고, 정정 후 새 입금은 다시 잠그다', () => {
-  assert.ok(/participant_edits pe[\s\S]{0,900}pe\.field = 'is_paid'[\s\S]{0,120}pe\.kind = 'bool'[\s\S]{0,120}pe\.value_bool = FALSE[\s\S]{0,160}pe\.reverted_at IS NULL[\s\S]{0,120}pe\.created_at > pr\.paid_at/.test(noComment),
-    '행 단위 미입금 정정시각과 입금시각의 선후 비교가 없다');
-});
-
-t('★ 입금 원장 중복 가드는 작업·탭·행·시각 복합 인덱스를 사용한다', () => {
-  assert.ok(/CREATE INDEX IF NOT EXISTS idx_payment_records_target_guard[\s\S]*\(sheet_id,\s*tab_name,\s*row_index,\s*paid_at DESC\)[\s\S]*WHERE row_index IS NOT NULL/.test(ledgerGuardMig),
-    '입금대상 조회가 탭 전체 원장을 반복 스캔할 수 있다');
-});
-
 t('★ 미입금 판정이 search.service 와 같은 출처(PAYMENT_COL_KEYWORDS)를 쓴다', () => {
   assert.ok(/PAYMENT_COL_KEYWORDS/.test(svcSrc), '입금 키워드 사본을 만들었다');
   assert.ok(/is_submitted2 = 'PAID'/.test(noComment), 'PAID 판정이 없다');
@@ -232,29 +216,21 @@ t('cancelBatch 는 이미 반영·입금된 회차를 막는다', () => {
   assert.ok(/status = 'paid'/.test(fn[0]), '입금완료 항목 포함 시 차단이 없다');
 });
 
-// buildWorkbook 안의 은행별 분기를 잘라 본다(직렬화 형식과 무관하게 값 규칙을 고정)
-const _bwSrc = (() => {
-  const a = svcSrc.indexOf('async function buildWorkbook(');
-  const b = svcSrc.indexOf('function batchFileName(', a);
-  return a >= 0 && b > a ? svcSrc.slice(a, b) : '';
-})();
-const _bwKbank = _bwSrc.slice(_bwSrc.indexOf("if (bank === 'kbank')"), _bwSrc.indexOf('} else {'));
-const _bwHana = _bwSrc.slice(_bwSrc.indexOf('} else {'));
-
 t('은행 서식 헤더가 공식 양식 그대로다', () => {
   assert.ok(svcSrc.includes("'* 입금은행(코드/은행명/증권사명)'"), '케이뱅크 헤더가 바뀌었다');
-  assert.ok(/sheet: '대량이체등록정보'/.test(svcSrc), '케이뱅크 시트명이 바뀌었다');
-  assert.ok(/sheet: '다건이체'/.test(svcSrc), '하나은행 시트명이 바뀌었다');
+  assert.ok(svcSrc.includes("addWorksheet('대량이체등록정보')"), '케이뱅크 시트명이 바뀌었다');
   assert.ok(svcSrc.includes("'입금은행코드'") && svcSrc.includes("'예상예금주'"), '하나은행 헤더가 바뀌었다');
 });
 
 t('★ 하나은행 은행코드는 문자열로 쓴다(앞 0 유실 방지)', () => {
-  assert.ok(/String\(it\.bank_code \|\| it\.bankCode \|\| ''\)/.test(_bwHana),
+  const hana = svcSrc.match(/addWorksheet\('다건이체'\)[\s\S]*?\}\);/);
+  assert.ok(/String\(it\.bank_code \|\| it\.bankCode \|\| ''\)/.test(hana[0]),
     "bank_code 를 String() 없이 넣으면 '045'가 45 가 된다");
 });
 
 t('★ 케이뱅크 은행명은 코드에서 파생한 정식명(리뷰어 원문 아님)', () => {
-  assert.ok(/bankFormLabel\(code\)/.test(_bwKbank),
+  const kb = svcSrc.match(/addWorksheet\('대량이체등록정보'\)[\s\S]*?\}\);/);
+  assert.ok(/bankNameByCode\(code\)/.test(kb[0]),
     "리뷰어 원문('신한')을 그대로 넣으면 양식 형식 검증에서 거부될 수 있다");
 });
 
@@ -384,11 +360,7 @@ t('★ 다운로드 전 확인 + 잠금 안내가 있다(되돌리기 어려운 
   const fn = wd.match(/async function _pmDownload[\s\S]*?\n}/);
   assert.ok(fn, '_pmDownload 없음');
   assert.ok(/confirm\(/.test(fn[0]), '확인 없이 회차가 만들어진다');
-  // 확인창 문구는 빌더 한 곳에서 만든다(담당자·작업까지 함께 읽어 준다 — 회차 #18).
-  const text = wd.match(/function _pmDownloadConfirmText[\s\S]*?\n}/);
-  assert.ok(text, '_pmDownloadConfirmText 없음');
-  assert.ok(/잠겨/.test(text[0]), '잠금 사실을 안내하지 않는다');
-  assert.ok(/담당자:/.test(text[0]), '무엇이 담기는지(담당자)를 말하지 않는다');
+  assert.ok(/잠겨/.test(fn[0]), '잠금 사실을 안내하지 않는다');
 });
 
 t('★ 보류·통장표시 미설정 건을 화면에 드러낸다(조용한 누락 금지)', () => {
@@ -408,25 +380,10 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
 (async () => {
   console.log('\n[8] 은행 서식 파일 — 계좌 앞 0 보존 · 하이픈 제거');
   const ExcelJS = require('exceljs');
-  const XLSX = require('@e965/xlsx');
   const ACCT_COL = { kbank: 2, hana: 2 };      // 두 양식 모두 2열이 계좌
   const AMT_COL  = { kbank: 3, hana: 3 };
 
-  /* ★★ 되읽기도 은행별 형식을 그대로 따라간다 —
-        하나는 **.xls(BIFF8)** 라 exceljs 로는 열리지 않는다. 형식이 되돌아가면
-        (하나가 다시 xlsx 로 나가면) 이 되읽기가 그 자리에서 터진다. */
-  const readBack = async (bank, buf) => {
-    const fmt = paySvc.batchFileFormat(bank);
-    if (fmt.kind === 'xls') {
-      const wb = XLSX.read(buf, { type: 'buffer', cellNF: true });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      return {
-        getRow: r => ({ getCell: c => {
-          const cell = ws[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })] || {};
-          return { value: cell.v === undefined ? null : cell.v, numFmt: cell.z || 'General' };
-        } }),
-      };
-    }
+  const readBack = async buf => {
     const w = new ExcelJS.Workbook();
     await w.xlsx.load(buf);
     return w.worksheets[0];
@@ -436,7 +393,7 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
     const items = [{ bank_code: '004', bank_account: '0123456789012', amount: 26900,
       transfer_memo: '파우더망고', account_holder: '김리뷰' }];
     for (const bank of ['kbank', 'hana']) {
-      const ws = await readBack(bank, await paySvc.buildWorkbook(bank, items));
+      const ws = await readBack(await paySvc.buildWorkbook(bank, items));
       const cell = ws.getRow(2).getCell(ACCT_COL[bank]);
       assert.strictEqual(typeof cell.value, 'string', `${bank}: 계좌가 문자열 셀이 아니다(숫자면 앞 0 소실)`);
       assert.strictEqual(cell.value, '0123456789012', `${bank}: 계좌 값이 바뀌었다 — ${cell.value}`);
@@ -448,35 +405,23 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
     const items = [{ bank_code: '088', bank_account: '110-123-456789', amount: 1000,
       transfer_memo: '망고', account_holder: '김리뷰' }];
     for (const bank of ['kbank', 'hana']) {
-      const ws = await readBack(bank, await paySvc.buildWorkbook(bank, items));
+      const ws = await readBack(await paySvc.buildWorkbook(bank, items));
       assert.strictEqual(ws.getRow(2).getCell(ACCT_COL[bank]).value, '110123456789',
         `${bank}: 계좌에 '-' 가 그대로 나갔다(은행 업로드 거부)`);
     }
   });
 
   await ta('하나 서식의 은행코드도 앞 0 을 지킨다(045 ≠ 45)', async () => {
-    const ws = await readBack('hana', await paySvc.buildWorkbook('hana',
+    const ws = await readBack(await paySvc.buildWorkbook('hana',
       [{ bank_code: '045', bank_account: '9002176640741', amount: 500, account_holder: '김리뷰' }]));
     const cell = ws.getRow(2).getCell(1);
     assert.strictEqual(cell.value, '045', `은행코드가 ${cell.value} 로 나갔다`);
     assert.strictEqual(cell.numFmt, '@', '은행코드 셀에 텍스트 서식이 없다');
   });
 
-  /* ★★ 2026-08-21 실측: 케이뱅크 대량이체는 031 대구은행을 `대구은행`·`대구`·`im뱅크`·
-     `IM뱅크` 어느 이름으로도 인식하지 못하고 **코드 `031`** 로만 통과한다. */
-  await ta('★★ 케이뱅크 서식 — 031 대구은행은 이름이 아니라 코드로 나간다', async () => {
-    const ws = await readBack('kbank', await paySvc.buildWorkbook('kbank',
-      [{ bank_code: '031', bank_account: '508-12-345678', amount: 15800, transfer_memo: '망고', account_holder: '김리뷰' },
-       { bank_code: '088', bank_account: '110123456789', amount: 15800, transfer_memo: '망고', account_holder: '박리뷰' }]));
-    assert.strictEqual(ws.getRow(2).getCell(1).value, '031',
-      `대구은행이 '${ws.getRow(2).getCell(1).value}' 로 나갔다 — 케이뱅크가 인식하지 못한다`);
-    assert.strictEqual(ws.getRow(3).getCell(1).value, '신한은행',
-      '나머지 은행까지 코드로 바뀌면 확인되지 않은 형식으로 회차 전체가 거부될 수 있다');
-  });
-
   await ta('금액은 숫자 셀로 나간다(은행 양식이 수치를 요구)', async () => {
     for (const bank of ['kbank', 'hana']) {
-      const ws = await readBack(bank, await paySvc.buildWorkbook(bank,
+      const ws = await readBack(await paySvc.buildWorkbook(bank,
         [{ bank_code: '004', bank_account: '0123', amount: 26900, account_holder: '김리뷰' }]));
       assert.strictEqual(ws.getRow(2).getCell(AMT_COL[bank]).value, 26900, `${bank}: 금액이 숫자가 아니다`);
     }
@@ -490,57 +435,6 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
     const n = (fn[0].match(/normalizeAccount\(/g) || []).length;
     assert.strictEqual(n, 2, `buildWorkbook 이 normalizeAccount 를 ${n}회 쓴다(두 양식 = 2회)`);
     assert.ok(!/replace\(\s*\/\[\^0-9\]/.test(fn[0]), 'buildWorkbook 안에 정규화 사본이 생겼다');
-  });
-
-  /* ═══ 8B. ★★ 은행별 파일 형식 — 하나은행은 구형 .xls(BIFF8) ═══
-     2026-08-19 실측: 하나 기업뱅킹 다건이체 업로드가 xlsx 를
-     `해당 파일은 엑셀파일이 아닙니다. 다시 올려주십시오.` 로 거부했다
-     (엑셀로 다시 저장한 정상 xlsx 도 같은 거부 = 그쪽이 구형 형식만 읽는다).
-     되돌아가면 담당자가 파일을 아예 못 올린다. */
-  await ta('★★ 하나은행 파일은 OLE2(.xls · BIFF8) 로 나간다', async () => {
-    const buf = await paySvc.buildWorkbook('hana',
-      [{ bank_code: '045', bank_account: '9002176640741', amount: 500, account_holder: '김리뷰' }]);
-    assert.strictEqual(buf.slice(0, 8).toString('hex'), 'd0cf11e0a1b11ae1',
-      '하나 파일이 OLE2 가 아니다 — 은행이 "엑셀파일이 아닙니다" 로 거부한다');
-    assert.notStrictEqual(buf.slice(0, 2).toString(), 'PK', '하나 파일이 여전히 xlsx(zip) 다');
-  });
-
-  await ta('케이뱅크 파일은 종전대로 xlsx(zip) 다(무회귀)', async () => {
-    const buf = await paySvc.buildWorkbook('kbank',
-      [{ bank_code: '045', bank_account: '9002176640741', amount: 500, account_holder: '김리뷰' }]);
-    assert.strictEqual(buf.slice(0, 2).toString(), 'PK', '케이뱅크 파일 형식이 바뀌었다');
-  });
-
-  await ta('★ 확장자·MIME 는 단일 출처이고 파일명과 갈리지 않는다', async () => {
-    const hana = paySvc.batchFileFormat('hana');
-    const kbank = paySvc.batchFileFormat('kbank');
-    assert.strictEqual(hana.ext, 'xls', '하나 확장자가 .xls 가 아니다(내용은 xls 인데 이름이 xlsx 면 은행이 거부)');
-    assert.strictEqual(hana.mime, 'application/vnd.ms-excel', '하나 MIME 가 구형 엑셀이 아니다');
-    assert.strictEqual(kbank.ext, 'xlsx', '케이뱅크 확장자가 바뀌었다');
-    for (const bank of ['hana', 'kbank']) {
-      const name = paySvc.batchFileName({ bank, createdAt: '2026-08-19T00:00:00Z', seq: 7 });
-      assert.ok(name.endsWith('.' + paySvc.batchFileFormat(bank).ext),
-        `${bank}: 파일명 확장자(${name})가 형식과 다르다`);
-    }
-  });
-
-  await ta('★ 다운로드 라우트가 확장자·MIME 를 하드코딩하지 않는다', async () => {
-    const rt = R('src/routes/trackB.routes.js');
-    const i = rt.indexOf("router.get('/payment/batch/:id/file'");
-    const fn = rt.slice(i, rt.indexOf('\nrouter.', i + 10));
-    assert.ok(/batchFileFormat\(/.test(fn), '라우트가 형식 단일 출처를 안 쓴다');
-    assert.ok(/Content-Type', fmt\.mime/.test(fn), 'MIME 가 하드코딩돼 있다(하나 파일이 xlsx MIME 로 나간다)');
-    assert.ok(!/payment_\$\{out\.batch\.seq\}\.xlsx/.test(fn), 'ASCII 폴백 파일명에 .xlsx 가 하드코딩돼 있다');
-  });
-
-  await ta('킬스위치 PAYMENT_HANA_XLS=0 이면 하나도 종전 xlsx 로 되돌아간다', async () => {
-    const { execFileSync } = require('child_process');
-    const out = execFileSync(process.execPath, ['-e', `
-      const svc = require('./src/services/payment.service');
-      svc.buildWorkbook('hana', [{ bank_code: '045', bank_account: '1', amount: 1 }])
-        .then(b => console.log(b.slice(0, 2).toString() + '|' + svc.batchFileFormat('hana').ext));
-    `], { cwd: ROOT, env: { ...process.env, PAYMENT_HANA_XLS: '0', DATABASE_URL: '' }, encoding: 'utf8' });
-    assert.ok(out.includes('PK|xlsx'), `킬스위치가 안 먹는다 — ${out.trim()}`);
   });
 
   /* ═══ 9. 진짜 PG 검증 (PGTEST_URL 있을 때만) ═════════════════ */
@@ -622,11 +516,10 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
     await ta('은행 서식 파일이 실제로 만들어진다(두 은행)', async () => {
       const items = [{ bank_code: '045', bank_account: '9002176640741', amount: 26900,
         transfer_memo: '파우더망고', account_holder: '김리뷰' }];
-      const SIG = { kbank: '504b', hana: 'd0cf' };   // 케이뱅크=zip(xlsx) · 하나=OLE2(xls)
       for (const bank of ['kbank', 'hana']) {
         const buf = await svc.buildWorkbook(bank, items);
         assert.ok(Buffer.isBuffer(buf) && buf.length > 3000, `${bank} 파일이 비었다`);
-        assert.strictEqual(buf.slice(0, 2).toString('hex'), SIG[bank], `${bank} 파일 형식이 바뀌었다`);
+        assert.strictEqual(buf.slice(0, 2).toString(), 'PK', `${bank} 가 xlsx(zip) 가 아니다`);
       }
     });
 

@@ -36,7 +36,7 @@ const {
 const { logger } = require('../utils/logger');
 const { logAbnormal } = require('./errorLog.service');
 // 비고/포스팅 열 고르기 — 제출 경로(submit.routes)·무시트 기록과 **같은 규칙**(사본 금지)
-const { pickMemoColumnIndex, pickPostDateColumnIndex } = require('../utils/memoColumn');
+const { pickMemoColumnIndex } = require('../utils/memoColumn');
 const { mergeDepositStamps } = require('../utils/depositStamp');
 
 // ── 큐에 작업 추가 ──
@@ -54,21 +54,6 @@ async function enqueue(type, payload, maxRetry = 3) {
     logger.error(`[syncQueue] 등록 실패: ${err.message}`);
     throw err;
   }
-}
-
-async function markWorkboardQueueOrderState(item, queueStatus, err) {
-  if (!item || !['workboard_apply', 'workboard_legacy_apply'].includes(item.type)) return;
-  let payload = item.payload || {};
-  try { if (typeof payload === 'string') payload = JSON.parse(payload); }
-  catch (_) { return; }
-  if (!payload.orderSubmissionId) return;
-  await pool.query(
-    `UPDATE order_submissions
-        SET mirror_status = CASE WHEN $2 = 'failed' THEN 'failed' ELSE 'queued' END,
-            sheet_error = CASE WHEN $2 = 'failed' THEN $3 ELSE NULL END, updated_at = NOW()
-      WHERE id = $1 AND mirror_status <> 'written' AND deleted_at IS NULL`,
-    [payload.orderSubmissionId, queueStatus, String((err && err.message) || err || '').slice(0, 500)]
-  );
 }
 
 // ── 큐 처리 (pending → processing → done/failed) ──
@@ -162,7 +147,6 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType 
           `UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
           [newStatus, err.message.substring(0, 500), item.id]
         );
-        await markWorkboardQueueOrderState(item, newStatus, err);
 
         if (newStatus === 'failed') {
           failed++;
@@ -550,15 +534,9 @@ async function _executeBatch(items, sheetId, tabName) {
         continue;  // 이미 written(다른 경로가 먼저 씀) → 신원기록 생략(이중 흡수)
       }
       try {
-        const { rows: codeRows } = await pool.query(
-          `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
-             FROM order_submissions WHERE id = $1`, [x.p.orderSubmissionId]
-        );
-        const codeIdentity = codeRows[0] || {};
         await recordParticipationLink({ sheetId, tabName: ctxTab, rowIndex: x.sheetRow,
           phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
-          name: x.p.loginName || (x.orderData && x.orderData.orderer), source: 'order_batch_drain',
-          ownerReviewerId: codeIdentity.ownerReviewerId, participantIdentityId: codeIdentity.participantIdentityId });
+          name: x.p.loginName || (x.orderData && x.orderData.orderer), source: 'order_batch_drain' });
         await recordReviewIdentity({ sheetId, tabName: ctxTab, tabGid: ctxGid, rowIndex: x.sheetRow,
           phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
           name: x.p.loginName || (x.orderData && x.orderData.orderer), recipient: x.orderData && x.orderData.recipient });
@@ -598,7 +576,7 @@ async function _executeItem(item) {
          읽지도 쓰지도 않아 **시트 쓰기가 한 번 실패해 큐로 내려가면 비고/포스팅URL 이 영구 유실**됐다
          (제출열만 다시 써지고 memo 는 사라진다). 블로그체험단은 그 값이 곧 결과물이라 치명적이지만,
          리뷰체험단에서도 현행 버그였다. 열 고르기는 `utils/memoColumn` 단일 출처(제출 경로와 같은 규칙). */
-      const { sheetId, tabName, rowIndex, submitCol, value, memo, blog, postDate } = payload;
+      const { sheetId, tabName, rowIndex, submitCol, value, memo, blog } = payload;
       if (!sheetId || !tabName || !rowIndex) throw new Error('payload 누락');
 
       // 헤더 행을 최대 50행까지 읽어서 실제 헤더 위치 찾기
@@ -635,18 +613,6 @@ async function _executeItem(item) {
             logger.warn(`[queue:review_submit] 비고/포스팅 열 없음 tab=${tabName} row=${rowIndex}`);
           }
         }
-        /* ★ 127: 포스팅제출일(blog 완료 시각) — 제출 시점에 계산된 날짜를 그대로 쓴다
-           (재시도 시각으로 다시 만들면 실제 제출일과 어긋난다). 열 고르기 단일 출처 = memoColumn. */
-        const postDateText = String(postDate == null ? '' : postDate).trim();
-        if (postDateText) {
-          const dateIdx = pickPostDateColumnIndex(headers);
-          if (dateIdx >= 0) {
-            const dateRange = `'${tabName}'!${_getColLetter(dateIdx)}${rowIndex}`;
-            await throttledCall(() => writeSheet(sheetId, dateRange, [[postDateText]]));
-          } else {
-            logger.warn(`[queue:review_submit] 포스팅제출일 열 없음 tab=${tabName} row=${rowIndex}`);
-          }
-        }
       } else {
         throw new Error('헤더 행을 읽을 수 없음');
       }
@@ -654,20 +620,29 @@ async function _executeItem(item) {
     }
 
     case 'deposit_mark': {
-      // 입금 기록은 서버 DB 작업보드만 사용한다. 이전 배포에서 남은 큐는
-      // 구글시트에 쓰지 않고 정상 소진해 재시도 루프를 막는다.
-      logger.info('[queue:deposit_mark] DB-only 입금 정책으로 구글시트 기록 건너뜀');
-      break;
-    }
+      // 입금처리 이체완료시각을 구글시트 입금칸(submit_col2)에 기록 (재시도)
+      const { sheetId, tabName, rowIndex, depositColKey, value, gid } = payload;
+      if (!sheetId || !tabName || !rowIndex || !depositColKey) throw new Error('payload 누락');
 
-    case 'workboard_apply': {
-      // 새 통폐합 경로. legacy/미이관 대상이면 __defer로 pending을 유지해 기존 직접 경로와 섞지 않는다.
-      await require('./workboardQueueApply.service').applyQueuedWorkboardOrder(payload);
-      break;
-    }
+      const headerValues = await throttledCall(() => readSheet(sheetId, `'${tabName}'!1:50`));
+      if (!headerValues || headerValues.length === 0) throw new Error('헤더 행을 읽을 수 없음');
 
-    case 'workboard_legacy_apply': {
-      await require('./workboardQueueApply.service').applyLegacyRecoveryOrder(payload);
+      const HEADER_KEYWORDS = ['주문자', '수취인', '연락처', '주소', '은행', '계좌', '금액', '아이디', '인애드', '리뷰', '입금'];
+      let headerRow = headerValues[0];
+      for (const row of headerValues) {
+        const matchCount = (row || []).filter(c => HEADER_KEYWORDS.some(k => String(c || '').includes(k))).length;
+        if (matchCount >= 2) { headerRow = row; break; }
+      }
+      const headers = (headerRow || []).map(h => String(h || '').trim());
+      const colIdx = headers.findIndex(h => h === depositColKey);
+      if (colIdx < 0) throw new Error(`입금컬럼 '${depositColKey}' 을 헤더에서 찾을 수 없음`);
+
+      const colLetter = _getColLetter(colIdx);
+      const range = `'${tabName}'!${colLetter}${rowIndex}`;
+      const sheetOpts = gid ? { gid } : {};
+      const current = await throttledCall(() => readSheet(sheetId, range, sheetOpts));
+      await throttledCall(() => writeSheet(sheetId, range,
+        [[mergeDepositStamps(current && current[0] && current[0][0], value || '')]], sheetOpts));
       break;
     }
 
@@ -785,17 +760,11 @@ async function _executeItem(item) {
           ));
         }
 
-        const { rows: codeRows } = await pool.query(
-          `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
-             FROM order_submissions WHERE id = $1`, [orderSubmissionId]
-        );
-        const codeIdentity = codeRows[0] || {};
         await recordParticipationLink({
           sheetId, tabName: tabContext.tabName || tabName, rowIndex: sheetRow,
           phone8: loginPhone8, phone: orderData && orderData.phone,
           name: loginName || (orderData && orderData.orderer),
           source: 'order_submit_queue',
-          ownerReviewerId: codeIdentity.ownerReviewerId, participantIdentityId: codeIdentity.participantIdentityId,
         });
         await recordReviewIdentity({
           sheetId, tabName: tabContext.tabName || tabName, tabGid: tabContext.tabGid || gid,
@@ -1046,12 +1015,11 @@ async function retryItem(id) {
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = NULL
      WHERE id = $1 AND status = 'failed'
-     RETURNING id, type, payload`,
+     RETURNING id, type`,
     [id]
   );
   if (rows.length === 0) throw new Error(`id=${id}인 실패 항목을 찾을 수 없습니다.`);
-  await markWorkboardQueueOrderState(rows[0], 'pending', null);
-  return { id: rows[0].id, type: rows[0].type };
+  return rows[0];
 }
 
 // ── 모든 실패 항목 재시도 ──
@@ -1302,7 +1270,6 @@ async function drainOrderQueue(orderSubmissionId, { maxItems = 5 } = {}) {
       const newStatus = (newAttempts >= item.max_retry && !isQuotaError) ? 'failed' : 'pending';
       await pool.query(`UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
         [newStatus, String(err.message || '').substring(0, 500), item.id]);
-      await markWorkboardQueueOrderState(item, newStatus, err);
       failed++;
       if (isQuotaError) break;
     }

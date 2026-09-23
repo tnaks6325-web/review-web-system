@@ -84,13 +84,13 @@ async function run() {
   t('★ 규칙은 effectiveCaptureSlots 파생(사본 금지)',
     /function cashReceiptSlotInfo[\s\S]{0,260}effectiveCaptureSlots\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
   t('★ hasCashReceiptSlot 은 cashReceiptSlotInfo 위임(판정 사본 0)',
-    /function hasCashReceiptSlot\(captureSlots, incomeType,[^)]*\) \{\s*return !!cashReceiptSlotInfo\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
+    /function hasCashReceiptSlot\(captureSlots, incomeType\) \{\s*return !!cashReceiptSlotInfo\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
 
   const CSSRC = fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8');
   t('export 되어 세 소비처가 같은 함수를 쓴다', /module\.exports = \{[\s\S]{0,400}hasCashReceiptSlot/.test(CSSRC));
-  t('★ tabStatsMap(홈) 도 같은 함수', /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType, r\.cashReceiptRequired === true\)/.test(SVC));
+  t('★ tabStatsMap(홈) 도 같은 함수', /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType\)/.test(SVC));
   t('★ /tab-folders 허용 판정도 같은 함수(눌리는데 거부 금지)',
-    /const cr = cashReceiptSlotInfo\(tc\.capture_slots, tc\.income_type, campaignCashReceipt\);/.test(ROUTES) && /if \(!cr\.slot\)/.test(ROUTES));
+    /const cr = cashReceiptSlotInfo\(tc\.capture_slots, tc\.income_type\);/.test(ROUTES) && /if \(!cr\.slot\)/.test(ROUTES));
   t('★★ Drive 폴더 이름은 슬롯 실제 label(슬롯 key 가 receipt 가 아닐 수 있다)',
     /const label = \(cr\.slot && cr\.slot\.label\) \|\| '현금영수증';/.test(ROUTES) && !/slotLabel\([^)]*'receipt'/.test(ROUTES_CODE));
   t("★ 오설정은 '대상 아님' 이 아니라 고칠 곳을 말한다", /cr\.incomeSaysCashReceipt \? CR_MISCONFIG_NOTE/.test(ROUTES));
@@ -103,9 +103,6 @@ async function run() {
     /tc\.capture_slots AS "captureSlots", tc\.income_type AS "incomeType"/.test(SVC));
   t('folder_url·capture_folder_url 은 종전대로 함께 온다',
     /tc\.folder_url AS "folderUrl", tc\.capture_folder_url AS "captureFolderUrl"/.test(SVC));
-  const ownedBlock = SVC.slice(SVC.indexOf('async function ownedTabsForAdvertiser'), SVC.indexOf('async function ownedTabsForAdvertiser') + 14000);
-  t('★ 재사용 탭 현영 여부는 최신 공고 1건이 아니라 연결 공고 전체를 합산한다',
-    /BOOL_OR\(cash_receipt_required\) OVER \(\) AS cash_receipt_required[\s\S]{0,300}ORDER BY \(rc\.status = 'active'\) DESC[\s\S]{0,100}LIMIT 1/.test(ownedBlock));
   const svc = require('../src/services/trackB.service');
   {
     svc.__resetTabStatsCacheForTest && svc.__resetTabStatsCacheForTest();
@@ -124,20 +121,12 @@ async function run() {
       out.statsUnavailable === false && out.rows[0].folderUrl);
   }
 
-  /* ═══ 2b. /ownership/tabs — 폴더 링크는 담당 무관 내부인 전원(사용자 확정 2026-08-24) ═══
-     종전: staff 는 담당 업체가 아니면 이 목록에서 폴더 URL·현영 판정을 못 받았다.
-     지금: 그 마스킹을 없앴다 — **폴더를 실제로 여는 통로(/tab-folders)가 이미 내부인 전원에게
-     열려 있어**("staff는 작업보드 전체 운영 권한") 버튼만 흐린 반쪽 규칙이었다.
-     ★ 되돌리려면 /tab-folders 스코프와 **함께** 좁힌다(한쪽만 좁히면 지금 상태로 되돌아온다). */
-  console.log('\n2b) 업체관리 목록의 폴더 링크 — 담당 무관');
-  {
-    const i2 = ROUTES_CODE.indexOf("router.get('/ownership/tabs'");
-    const block = ROUTES_CODE.slice(i2, ROUTES_CODE.indexOf('\nrouter.', i2 + 10));
-    t('★★ 담당 여부로 폴더를 비우는 분기가 없다', !/staffOwnsAdvertiser/.test(block), block.slice(0, 200));
-    t('★★ 비우기·고지 플래그가 통째로 사라졌다(죽은 규칙 부활 금지)',
-      !/folderUrl: null|folderScoped/.test(block));
-    t('★ 광고주·리뷰어 차단은 그대로', /authMiddleware, internalMiddleware/.test(block.split('\n')[0]));
-  }
+  /* ═══ 2b. /ownership/tabs — staff 는 담당 업체가 아니면 폴더 URL 미수신 ═══ */
+  console.log('\n2b) 업체관리 목록의 staff 폴더 스코프');
+  t('담당 여부는 기존 헬퍼 한 쿼리(inad_pm)로 판정', /svc\.staffOwnsAdvertiser\(\{ advertiserId: req\.query\.advertiserId/.test(ROUTES_CODE));
+  t('★ 담당 밖이면 폴더 URL·현영 판정을 비운다', /folderUrl: null, captureFolderUrl: null, cashReceipt: false/.test(ROUTES_CODE));
+  t('★ 조용히 비우지 않고 folderScoped:false 로 고지', /folderScoped: false/.test(ROUTES_CODE));
+  t('★ admin/master 응답은 종전 그대로(플래그 미동봉)', /\.\.\.\(folderScoped \? \{\} : \{ folderScoped: false \}\)/.test(ROUTES_CODE));
   {
     // ★ 정규식이 아니라 **핸들러를 실제로 호출**해 확인한다(스코프 판정은 실행으로만 증명된다).
     const express = require('express');
@@ -155,27 +144,28 @@ async function run() {
     svc2.ownedTabsForAdvertiser = async () => ({ rows: [{ sheetId: 'S1', tabName: 'T1',
       folderUrl: 'https://drive.google.com/drive/folders/RV', captureFolderUrl: 'https://drive.google.com/drive/folders/CAP',
       cashReceipt: true, hasTabConfig: true }], statsUnavailable: false, finishedUnavailable: false });
-    let mineCalls = 0;
-    svc2.staffOwnsAdvertiser = async () => { mineCalls++; return false; };   // "담당 아님" — 그래도 열려야 한다
-    const callOwn = (role) => new Promise(res => {
+    const callOwn = (role, mine) => new Promise(res => {
+      svc2.staffOwnsAdvertiser = async () => mine;
       h({ query: { advertiserId: 'a1' }, admin: { role, name: 'AE1' } },
         { json: b => res(b), status: () => ({ json: b => res(b) }) }, e => res({ err: String(e) }));
     });
-    const asAdmin = await callOwn('admin');
-    t('admin 은 종전 그대로 폴더 URL 을 받는다', asAdmin.items[0].folderUrl && asAdmin.items[0].captureFolderUrl);
-    const staffOther = await callOwn('staff');
-    t('★★ 담당 아닌 업체여도 staff 가 폴더 URL 두 개를 받는다',
-      staffOther.items[0].folderUrl === 'https://drive.google.com/drive/folders/RV'
-      && staffOther.items[0].captureFolderUrl === 'https://drive.google.com/drive/folders/CAP',
-      JSON.stringify(staffOther.items[0]));
-    t('★ 현영 판정도 함께 돌아온다(마스킹이 이 값도 지우고 있었다)', staffOther.items[0].cashReceipt === true);
-    t('★ 고지 플래그는 응답에 없다(안내할 제한이 없다)', staffOther.folderScoped === undefined);
-    t('★★ 담당 여부를 아예 재지 않는다(불필요한 쿼리 0)', mineCalls === 0, String(mineCalls));
+    const asAdmin = await callOwn('admin', false);
+    t('admin 은 종전 그대로 폴더 URL 을 받는다(플래그 미동봉)',
+      asAdmin.items[0].folderUrl && asAdmin.items[0].captureFolderUrl && asAdmin.folderScoped === undefined, JSON.stringify(asAdmin).slice(0, 130));
+    const staffMine = await callOwn('staff', true);
+    t('담당 업체면 staff 도 종전 그대로', staffMine.items[0].folderUrl && staffMine.folderScoped === undefined);
+    const staffOther = await callOwn('staff', false);
+    t('★★ 담당 밖 업체 = 폴더 URL 두 개와 현영 판정이 비워져 나간다(버튼이 우회 수단이 되지 않는다)',
+      staffOther.items[0].folderUrl === null && staffOther.items[0].captureFolderUrl === null
+      && staffOther.items[0].cashReceipt === false, JSON.stringify(staffOther.items[0]));
+    t('★ 그리고 그 사실을 folderScoped:false 로 말한다(조용히 비우지 않는다)', staffOther.folderScoped === false);
     t('다른 값(작업명·통계 플래그)은 그대로 나간다', staffOther.items[0].tabName === 'T1' && staffOther.statsUnavailable === false);
     svc2.ownedTabsForAdvertiser = realOwned; svc2.staffOwnsAdvertiser = realMine;
   }
-  t('★ 화면에도 그 제한이 남아 있지 않다(죽은 안내·죽은 분기 0)',
-    !/folderScoped/.test(HTML) && !/담당하지 않은 업체라 <b>\[자료\]<\/b>/.test(HTML));
+  t('프론트가 그 플래그를 소비 — 버튼은 사유를 말하고 표 상단에 안내',
+    /\(STATE\.ownTabMeta\|\|\{\}\)\.folderScoped===false/.test(HTML) && /담당하지 않은 업체라 <b>\[자료\]<\/b>/.test(HTML));
+  t('meta 에 folderScoped 를 실어 둔다(구버전 응답은 true 로 수렴 = 동작 불변)',
+    /folderScoped: rt\.folderScoped===false \? false : true/.test(HTML));
 
   /* ═══ 3. 서버 — /tab-folders?kind=info 가산 분기 ═══ */
   console.log('\n3) /tab-folders?kind=info(작업보드 상단 재료)');
@@ -213,37 +203,28 @@ async function run() {
     t('kind=info = 세 재료를 한 번에(folderUrl·captureFolderUrl·cashReceipt)',
       info.b.ok === true && info.b.folderUrl && info.b.captureFolderUrl && info.b.cashReceipt === true, JSON.stringify(info.b));
     t("★★ 신규 응답에 kind:'info' 표식(배포 스큐 판별의 유일한 근거)", info.b.kind === 'info', JSON.stringify(info.b));
-    t('★ Drive 무접촉 — 공고 현금영수증 설정 + tab_configs만 조회',
-      calls.length === 2 && calls.some(c => /FROM recruit_campaigns/.test(c)) && calls.some(c => /FROM tab_configs/.test(c)), calls.join(' | '));
+    t('★ Drive 무접촉 — tab_configs 한 줄 조회뿐',
+      calls.length === 1 && /FROM tab_configs/.test(calls[0]), calls.join(' | '));
     t('★ 무거운 stats=1(review_index 전체 GROUP BY) 경로를 타지 않는다',
       !calls.some(c => /review_index/.test(c)));
     const cached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'admin');
-    t('재조회는 캐시(같은 탭을 다시 열어도 쿼리 순증 0)', cached.b.ok === true && calls.length === 2, 'queries=' + calls.length);
+    t('재조회는 캐시(같은 탭을 다시 열어도 쿼리 순증 0)', cached.b.ok === true && calls.length === 1, 'queries=' + calls.length);
     t("★★ **캐시 응답에도** kind 표식(한 경로만 붙이면 스큐 판별이 샌다)", cached.b.kind === 'info', JSON.stringify(cached.b));
-    // ★★ AE(staff) 범위 — **사용자 확정 2026-08-19: 담당이 아니어도 전부 연다.**
-    //   이 자리는 원래 "담당 밖 staff = 403(캐시가 스코프를 우회하지 않는다)" 를 고정했다. 그러나
-    //   그때 이미 `/workdesk`(작업보드 본문)·`/tabs`(작업 목록)가 `allowAllStaff` 로 전체를 열어 주고
-    //   있어 **폴더 버튼만 막는 반쪽 규칙**이었고, 지금 라우트는 그 사실을 주석으로 못박고 있다
-    //   (“staff는 작업보드 전체 운영 권한이므로 담당 여부와 무관하게 폴더를 연다”).
-    //   ★ 되돌린다면 `/workdesk`·`/tabs`·공유 링크(`/share-link/:code`)와 **함께** 좁혀야 한다.
+    // ★★★ 블로커 재발 차단 — **캐시 히트가 스코프 게이트를 우회하지 않는다**:
+    //   admin 이 채운 캐시 키에 담당 밖 staff 가 접근해도 403 이어야 한다(종전엔 200 + Drive 링크 2개).
+    //   `canAccessTab` 을 스텁해 "담당 아님"을 만들고, **같은 키**로 두 번 부른다.
+    const realCanAccess = svc.canAccessTab;
+    svc.canAccessTab = async () => false;
     const staffCached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'staff');
-    t('★★ AE 는 담당이 아니어도 연다 — 캐시된 탭에서도(작업보드와 같은 규칙)',
-      staffCached.b.ok === true && !!staffCached.b.folderUrl, JSON.stringify(staffCached));
+    t('★★ 캐시된 탭도 담당 밖 staff 는 403(캐시가 스코프를 우회하지 않는다)',
+      staffCached.code === 403 && !staffCached.b.folderUrl && !staffCached.b.captureFolderUrl, JSON.stringify(staffCached));
     const staffCached2 = await run1({ sheetId: 'S1', tabName: 'T1' }, 'staff');   // 현영(receipt) 분기도 같은 규율
-    // 현영(receipt) 분기도 같은 규칙 — 권한으로 막히지 않고 **실제 폴더 해석 로직까지 도달**한다
-    //   (이 픽스처는 리뷰 폴더가 없어 그 사유를 돌려주는 것이 정상 결과다).
-    t('★★ 현영 분기도 같은 규칙 — 권한으로 막히지 않는다(분기마다 기준이 갈리지 않는다)',
-      staffCached2.code !== 403 && !/권한|담당 범위/.test(staffCached2.b.error || ''), JSON.stringify(staffCached2));
-    t('★ 담당 스코프 판정을 이 라우트가 따로 만들지 않는다(작업보드와 갈리는 두 번째 기준 금지)',
-      !/tab-folders'[\s\S]{0,2600}canAccessTab/.test(ROUTES_CODE));
-    // ★ 남은 경계는 **광고주 차단**이고, 그것은 핸들러가 아니라 라우터 단계가 맡는다 —
-    //   미들웨어가 핸들러보다 앞이면 캐시 히트가 그 앞을 우회할 수 없다.
-    t('★ 광고주 차단은 라우터 단계(internalMiddleware 가 핸들러보다 앞)', (() => {
-      const layer = require('../src/routes/trackB.routes').stack.find(l => l.route && l.route.path === '/tab-folders');
-      const ns = layer.route.stack.map(x => x.name);
-      const k = ns.indexOf('internalMiddleware');
-      return k > -1 && k < ns.length - 1;
-    })());
+    t('★★ 현영 분기도 캐시보다 스코프가 먼저(10분 캐시 창으로 새던 경로)',
+      staffCached2.code === 403 && !staffCached2.b.url, JSON.stringify(staffCached2));
+    svc.canAccessTab = realCanAccess;
+    t('★ 소스 순서 고정 — 스코프 검사가 캐시 조회보다 앞',
+      ROUTES_CODE.indexOf("_role(req) === 'staff'") < ROUTES_CODE.indexOf('_tabFolderInfoCache.get(key)')
+      && ROUTES_CODE.indexOf("_role(req) === 'staff'") < ROUTES_CODE.indexOf('_tabFolderCache.get(key)'));
     // 미등록 탭은 사유를 말한다(빈 값으로 위장하지 않는다)
     poolMod.query = async () => ({ rows: [] });
     const none = await run1({ kind: 'info', sheetId: 'S9', tabName: 'T9' }, 'admin');
@@ -255,13 +236,11 @@ async function run() {
   console.log('\n4) 폴더 버튼 렌더러(vm 실행)');
   t('★ 렌더러는 한 벌 — _folBtnsInner 정의는 1개', (HTML.match(/function _folBtnsInner\(/g) || []).length === 1);
   t('★ 재료 정규화도 한 벌 — _folMat 정의는 1개', (HTML.match(/function _folMat\(/g) || []).length === 1);
-  t('★ 열 수 있는가 판정도 한 벌 — _folState 정의는 1개(버튼·제출물 미리보기 공용)',
-    (HTML.match(/function _folState\(/g) || []).length === 1);
   t('★ URL 검증은 한 벌 — _folUrlOk 정의는 1개', (HTML.match(/function _folUrlOk\(/g) || []).length === 1);
   t('★ Drive 호스트만 연다(시트/DB 를 거쳐 온 문자열을 새창에 넣지 않는다)',
     /function _folUrlOk\(u\)\{ return \/\^https:\\\/\\\/drive\\\.google\\\.com\\\/\/\.test/.test(HTML));
 
-  const src = [grab('_folUrlOk'), grab('_folRow'), grab('_folMat'), grab('_folState'), grab('_folBtnsInner'), grab('_folBtnsHtml'), grab('_folBarHtml')].join('\n');
+  const src = [grab('_folUrlOk'), grab('_folRow'), grab('_folMat'), grab('_folBtnsInner'), grab('_folBtnsHtml'), grab('_folBarHtml')].join('\n');
   const mk = (extra = {}) => {
     const sb = Object.assign({
       STATE: { tabs: [], ownTabs: [], cur: null, role: 'admin' },
@@ -305,15 +284,13 @@ async function run() {
       b[2].dis && /알 수 없습니다/.test(b[2].attrs), b[2].attrs);
   }
   {
-    /* ★★ 담당 밖 업체여도 버튼은 살아 있다(사용자 확정 2026-08-24) — 폴더를 여는 통로가 이미
-       내부인 전원에게 열려 있어 여기만 흐리게 두는 것은 반쪽 규칙이었다.
-       ★ own 에 남은 '모른다'는 tab_configs 행 없음 하나뿐이다. */
+    // ★ own 의 두 가지 '모른다' — 담당 밖 업체 / tab_configs 행 없음
     const sb = mk({});
-    sb.STATE.ownTabMeta = {};
+    sb.STATE.ownTabMeta = { folderScoped: false };
     sb.STATE.ownTabs = [{ sheetId: 'S1', tabName: 'T5', folderUrl: D('r'), captureFolderUrl: D('c'), cashReceipt: true }];
     let b = btns(vm.runInContext("_folBtnsHtml(STATE.ownTabs[0],0,'own')", sb));
-    t('★★ 담당 밖 업체여도 3버튼 전부 활성(담당으로 흐리게 두지 않는다)',
-      b.every(x => !x.dis) && !/담당하지 않은 업체/.test(b.map(x => x.attrs).join('')), b[0].attrs);
+    t('★ 담당 밖 업체 = 비활성 + 문의 안내(폴더 미생성으로 위장하지 않는다)',
+      b.every(x => x.dis) && /담당하지 않은 업체/.test(b[0].attrs), b[0].attrs);
     sb.STATE.ownTabMeta = {};
     sb.STATE.ownTabs = [{ sheetId: 'S1', tabName: 'T6', hasTabConfig: false }];
     b = btns(vm.runInContext("_folBtnsHtml(STATE.ownTabs[0],0,'own')", sb));
@@ -349,28 +326,15 @@ async function run() {
     sb.STATE.cur._fol = { folderUrl: D('r'), captureFolderUrl: D('c'), cashReceipt: true };
     const html = vm.runInContext('_folBarHtml()', sb);
     b = btns(html);
-    /* ★★ 사용자 확정 2026-08-21 — 구매캡처·리뷰캡처 바로가기는 **제출물 미리보기 칸 제목**으로
-       옮겼다. 상단 줄에 남는 것은 현금영수증 하나뿐이다(창구를 두 곳에 두지 않는다). */
-    t('★ 상단 줄 = 현금영수증 하나(구매·리뷰는 제출물 미리보기로 이동)',
-      b.length === 1 && !b[0].dis && /🧾 현금영수증 ↗/.test(b[0].label), JSON.stringify(b.map(x => x.label)));
-    t('★ 상단 줄에 구매캡처·리뷰캡처 버튼이 되살아나지 않는다',
-      !/구매캡처/.test(html) && !/리뷰캡처/.test(html));
+    t('재료 도착 = 3버튼 활성', b.length === 3 && b.every(x => !x.dis));
+    t('큰 버튼 = 라벨 전체 + ↗(작업이 하나로 특정된 자리)',
+      /🛒 구매캡처 ↗/.test(b[0].label) && /📸 리뷰캡처 ↗/.test(b[1].label) && /🧾 현금영수증 ↗/.test(b[2].label), JSON.stringify(b.map(x => x.label)));
     t('★ 갱신 대상 id(folBar) + folbig 클래스', /id="folBar"/.test(html) && /wbl-fol folbig/.test(html));
     // 홈에서 온 stats 가 있으면 그것을 쓴다(요청 0)
     const sb2 = mk({});
     sb2.STATE.cur = { sheetId: 'S1', tabName: 'C2', stats: { folderUrl: D('r'), captureFolderUrl: null, cashReceipt: false } };
-    const html2 = vm.runInContext('_folBarHtml()', sb2);
-    b = btns(html2);
-    /* ★ 현영 대상 아님이 **확정**이면 비활성 버튼 하나만 남는 노이즈를 만들지 않는다(줄은 비운다).
-       ★ 단 id/클래스는 유지해야 한다 — 지연조회 도착 시 `#folBar` 를 찾아 갈아끼운다. */
-    t('★ 현영 비대상 확정 = 버튼 0(빈 줄) + #folBar 자리 유지',
-      b.length === 0 && /id="folBar"/.test(html2));
-    // '모른다'는 지우지 않는다 — 사유를 말하는 비활성 버튼으로 남는다
-    const sb2b = mk({});
-    sb2b.STATE.cur = { sheetId: 'S1', tabName: 'C2b' };
-    const b2b = btns(vm.runInContext('_folBarHtml()', sb2b));
-    t('★ 현영 여부 미상(로딩·조회 실패)은 지우지 않고 사유를 말한다',
-      b2b.length === 1 && b2b[0].dis && /불러오는 중/.test(b2b[0].attrs), JSON.stringify(b2b));
+    b = btns(vm.runInContext('_folBarHtml()', sb2));
+    t('홈 stats 가 있으면 그 재료를 재사용(추가 조회 없음)', b[0].dis && !b[1].dis && b[2].dis);
     // ★ 광고주 격리
     const sb3 = mk({});
     sb3.STATE.role = 'advertiser';
@@ -409,12 +373,11 @@ async function run() {
   t('★★ 배포 스큐 — kind 표식이 없는 응답은 info 로 믿지 않는다',
     /if\(r&&r\.kind!=='info'\) t\._fol=\{err:'서버 업데이트 대기/.test(HTML) && /kind: 'info'/.test(ROUTES));
   t('★ 도착 후에는 버튼 묶음만 갈아치운다(그리드 전체 재렌더 금지 — 편집 셀·검색 하이라이트 보존)',
-    /const el=\$\('#folBar'\); if\(el&&STATE\.cur===t\)\{[\s\S]{0,220}el\.innerHTML=\(st\.known&&st\.cr!==true\)\?'':_folBtnsInner\(t,0,'cur',true,\['receipt'\]\)/.test(HTML));
+    /const el=\$\('#folBar'\); if\(el&&STATE\.cur===t\) el\.innerHTML=_folBtnsInner/.test(HTML));
   t('★ 다른 작업으로 옮긴 뒤 도착한 응답은 반영하지 않는다(STATE.cur===t 확인)', /STATE\.cur===t/.test(HTML));
-  // 폭 — 헤더·도구줄은 같은 상한, 표 섹션은 인라인 카드의 부모 폭을 그대로 쓴다.
+  // 폭 — 헤더·도구줄·표 섹션 세 곳이 같은 값(버튼이 데이터 오른쪽 끝에 붙는다는 레포 규칙)
   const caps = (HTML.match(/max-width:1560px/g) || []).length;
-  t('★ 폭 상한 1560px 을 헤더·도구줄에 같이 적용하고 표 섹션은 부모 폭을 쓴다',
-    caps === 2 && /\.ovm-inline-card>#owntabsSect\{max-width:none/.test(HTML), 'count=' + caps);
+  t('★ 폭 상한 1560px 을 헤더·도구줄·표 섹션 세 곳에 같이(자료 열이 늘어난 만큼 넓힘)', caps === 3, 'count=' + caps);
   t('종전 1400px 상한은 남아 있지 않다(한 곳만 넓히면 버튼이 데이터 끝에서 어긋난다)',
     !/\.ovm-hd\{max-width:1400px\}/.test(HTML) && !/id="owntabsSect" style="max-width:1400px"/.test(HTML));
   t('큰 버튼 변형 CSS(.wbl-fol.folbig)', /\.wbl-fol\.folbig\{display:inline-flex/.test(HTML));

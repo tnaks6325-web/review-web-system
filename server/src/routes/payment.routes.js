@@ -3,21 +3,19 @@ const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 
-/* ★★ 입금 기록(review_index PAID + payment_records + 무시트 작업표 칸)은
+/* ★★ 입금 기록(review_index PAID + payment_records + 무시트 작업표 칸 + 시트 칸/큐)은
    `paymentApply.service` **한 곳**이 한다 — M2 이체결과 반영이 같은 함수를 쓴다.
    사본을 두면 "수동 처리는 작업표에 남는데 자동 반영은 안 남는" 드리프트가 조용히 생긴다. */
-const { recordDeposits } = require('../services/paymentApply.service');
+const { nowStamp, recordDeposits, markDepositCells } = require('../services/paymentApply.service');
 
 // ── 헬퍼: row_json에서 결제금액 추출 ──
 // ★ 규칙 본체는 utils/paymentAmount.js 단일 출처(입금관리 M1 의 상품비 폴백과 공용).
 //   여기 사본을 되살리면 "레거시 화면과 입금관리의 금액이 갈리는" 드리프트가 난다.
 const { extractAmountText: _extractAmount } = require('../utils/paymentAmount');
-const { filterReceiptEligiblePaymentRows } = require('../services/paymentReceiptGate.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/payment/targets — 입금 대상 목록 (GAS: getPaymentTargets)
-//   리뷰 완료(is_submitted) + 현금영수증 대상이면 영수증 제출 완료
-//   + 입금 미처리(is_submitted2 != PAID) + 미마감 탭
+//   리뷰 완료(is_submitted) + 입금 미처리(is_submitted2 != PAID) + 미마감 탭
 //   리뷰어 마스터(reviewers)에서 계좌/소득명의/주민번호를 결합한다.
 // ═══════════════════════════════════════════════════════════
 router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -47,22 +45,13 @@ router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res,
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       LEFT JOIN reviewers   rev ON rev.phone8 = ri.phone8
       WHERE ri.is_submitted = TRUE
-        AND NOT EXISTS (SELECT 1 FROM reviewer_participations rp
-          WHERE rp.sheet_id=ri.sheet_id AND rp.tab_name=ri.tab_name AND rp.row_index=ri.row_index
-            AND rp.lifecycle_status='active' AND rp.review_obligation_status IN ('pending','unknown'))
         AND (tc.is_closed IS NULL OR tc.is_closed = FALSE)
         AND (ri.is_submitted2 IS NULL OR ri.is_submitted2 = 'NONE')
-        AND NOT EXISTS (
-          SELECT 1 FROM review_closed_targets rrs
-           WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
-             AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
-        )
       ORDER BY ri.tab_name, ri.reviewer_name
     `);
 
     // row_json → 결제금액 추출 후 응답 슬림화 (row_json 자체는 제외)
-    const receiptEligibleRows = await filterReceiptEligiblePaymentRows(pool, rows);
-    const targets = receiptEligibleRows.map(r => {
+    const targets = rows.map(r => {
       const { rowJson, ...rest } = r;
       return { ...rest, amount: _extractAmount(rowJson) };
     });
@@ -76,7 +65,8 @@ router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res,
 // ═══════════════════════════════════════════════════════════
 // POST /api/payment/mark-done — 이체 완료 처리 (GAS: markPaymentDone)
 //   1) DB: review_index.is_submitted2='PAID' + payment_records 이력
-//   2) 작업보드 상태는 서버 DB 원장만 사용한다(구글시트 입금칸 미기록)
+//   2) 백그라운드: 구글시트 입금칸(submit_col2)에 이체완료시각 기록
+//      (실패 시 sync_queue 'deposit_mark' 로 재시도)
 // ═══════════════════════════════════════════════════════════
 router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -87,23 +77,13 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
       return res.json({ error: '처리할 항목이 없습니다.' });
     }
 
+    const stamp = nowStamp();
     let updated = 0;
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-      // 화면을 연 뒤 영수증이 무효화·이동될 수 있고 API를 직접 호출할 수도 있으므로,
-      // 실제 입금 원장을 쓰는 같은 transaction 안에서 좌표 전부를 다시 검증한다.
-      const receiptEligibleItems = await filterReceiptEligiblePaymentRows(client, items, { lock: true });
-      if (receiptEligibleItems.length !== items.length) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({
-          ok: false,
-          code: 'CASH_RECEIPT_NOT_VERIFIED',
-          error: '현금영수증 제출·검수가 완료되지 않은 항목이 있어 입금 처리하지 않았습니다. 목록을 새로고침해 주세요.',
-        });
-      }
-      updated = await recordDeposits(client, receiptEligibleItems, { by: req.admin?.name || '' });
+      await client.query('BEGIN');
+      updated = await recordDeposits(client, items, { by: req.admin?.name || '' });
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -113,7 +93,11 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
     }
 
     // ── 즉시 응답 (DB 저장 = 처리 성공) ──
-    res.json({ ok: true, updated, successCount: updated, errors: [] });
+    res.json({ ok: true, updated, successCount: updated, paidAt: stamp, errors: [] });
+
+    // ── 백그라운드: 입금칸 기록(무시트=작업표 / 시트=구글시트·실패 시 큐) ──
+    //    ★ 실행부는 paymentApply.service 한 벌 — M2 이체결과 반영이 같은 함수를 쓴다.
+    setImmediate(() => markDepositCells(items, { stamp, by: req.admin?.name || 'payment' }));
   } catch (err) {
     next(err);
   }

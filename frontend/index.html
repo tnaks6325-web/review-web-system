@@ -18,14 +18,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
-  <script src="js/reviewer-history-loader.js"></script>
-  <script src="js/drive-thumb.js"></script>
   <!-- 업로드 직전 이미지 축소(단일 출처) — 구매 캡처 보완 첨부가 413 되는 것 방지 -->
   <script src="js/image-shrink.js"></script>
-  <script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
+  <script src="js/campaign-cards.js?v=20260817-hidden-prerequisite-c119"></script>
   <script src="js/campaign-workdetail.js"></script>
   <!-- 외부모집 수동제출(공용 모달) — 진짜 admin_token 보유자가 참여형 카드에서 여는 경로 -->
-  <script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
+  <script src="js/manual-order.js"></script>
   <style>
     :root {
       --p: #3182f6; --p-light: #e8f1fe; --p-dark: #1b64da; --p-m: #a6c8fb;
@@ -241,6 +239,11 @@
     .status-badge-order { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0EDFF; color:#1B4F9C; }
     .status-badge-order.attention { background:#FEE2E2; color:#991B1B; }
     .status-badge-order.reflected { background:#DCFCE7; color:#166534; }
+    .status-badge-deadline { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .status-badge-deadline.good { background:#DCFCE7; color:#166534; }
+    .status-badge-deadline.warn { background:var(--warn-light); color:#92400E; }
+    .status-badge-deadline.danger { background:#FEE2E2; color:#991B1B; }
+    .deadline-close-note { color:#B91C1C; font-size:.59rem; font-weight:700; line-height:1.35; text-align:right; }
     .result-card.is-order-pending { cursor:default; }
 
     /* ─── 리뷰 내역 3줄 카드 (참여중): 썸네일 + 날짜·이름 / 상품명 / 상품비·리뷰비 ─── */
@@ -254,9 +257,10 @@
     .c-meta { font-size:.69rem; font-weight:600; color:var(--t3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .c-meta .c-who { color:var(--t2); font-weight:700; }
     .c-meta .c-tail { color:var(--t4); font-weight:600; }
-    /* 완료 건의 입금완료 배지는 상태 배지 아래에 유지한다. */
+    /* 오른쪽 상태 열: 반영 상태 위, 제출기한 아래로 고정해 좁은 화면에서도 읽는다. */
     .result-right.rr-col { flex-direction:column; align-items:flex-end; gap:4px; }
     .result-right .rr-row { display:flex; align-items:center; gap:6px; }
+    .status-stack { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
     .status-badge-order.reflected { padding:5px 9px; }
     .c-name { font-size:.83rem; font-weight:700; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:2px 0 6px; }
     .fee-line { display:flex; align-items:center; gap:4px 6px; flex-wrap:wrap; overflow:visible; }
@@ -265,7 +269,6 @@
     .fee.rev  { background:var(--ok-light); color:#065F46; }
     .fee.rev.none { background:#F1F3F6; color:#6B7280; }
     .fee.unknown { background:#F1F3F6; color:#9199A6; font-weight:700; }
-    .fee.reflected { background:#DCFCE7; color:#166534; }
 
     /* ─── 받을 예정 금액 요약 카드 ─── */
     .sumcard { background:#fff; border:1px solid #D8E6FA; border-radius:var(--radius); padding:13px 15px; margin-bottom:12px; box-shadow:0 1px 5px rgba(49,130,246,.07); }
@@ -343,37 +346,6 @@
     .result-group-item-badge.order { background:#E0EDFF; color:#1B4F9C; }
     .result-group-item-badge.order.attention { background:#FEE2E2; color:#991B1B; }
     .result-group-item-badge.order.reflected { background:#DCFCE7; color:#166534; }
-
-    /* 참여상품 정보: 좁은 휴대폰에서도 2열×3행을 유지한다. 각 열은 정확히 1fr. */
-    .part-info-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
-    .part-info-grid > .part-info-btn,
-    .part-info-grid > button {
-      width:100% !important; min-width:0; height:50px; margin:0 !important; padding:0 6px !important;
-      display:flex !important; align-items:center; justify-content:center; gap:5px;
-      border-radius:11px !important; font-size:.76rem !important; font-weight:800 !important;
-      line-height:1.15; white-space:nowrap; box-sizing:border-box;
-    }
-    .part-info-btn { width:100%; height:50px; display:flex; align-items:center; justify-content:center; gap:5px; border:1.5px solid #D7DEE9; border-radius:11px; cursor:pointer; font-family:inherit; font-size:.76rem; font-weight:800; }
-    .part-info-btn.product { border-color:#111827; background:#111827; color:#fff; }
-    .part-info-btn.chat { border-color:#F5D900; background:#FEE500; color:#191919; }
-    .part-info-btn.submit { border-color:#2875E8; background:#2875E8; color:#fff; }
-    .part-info-btn.cs { border-color:#CFE0FD; background:#EEF3FB; color:#1B4F9C; }
-    .part-info-btn.capture { border-color:#BDE5CA; background:#EFFBF3; color:#17643A; }
-    .part-info-btn.cancel { border-color:#FECACA; background:#fff; color:#B91C1C; }
-    .part-info-btn:disabled { border-color:#E5E7EB; background:#F8FAFC; color:#9CA3AF; cursor:not-allowed; box-shadow:none; }
-    .part-info-cancel-reason { grid-column:1/-1; margin-top:-2px; color:#9CA3AF; font-size:.68rem; line-height:1.45; text-align:center; }
-    .part-info-picker { display:none; grid-column:1/-1; margin-top:2px; padding:9px; border:1px solid #DBEAFE; border-radius:11px; background:#F8FBFF; }
-    .part-info-picker.on { display:block; }
-    .part-info-capture-ovl { z-index:430; }
-    .part-info-capture-wrap { padding:10px 0 4px; }
-    .part-info-capture-meta { margin-bottom:9px; color:#6B7280; font-size:.7rem; line-height:1.45; }
-    .part-info-capture-img { display:block; width:100%; max-height:66vh; object-fit:contain; border-radius:12px; background:#111827; }
-    .part-info-capture-choice { width:100%; display:flex; align-items:center; gap:9px; margin-top:8px; padding:11px 12px; border:1px solid #BDE5CA; border-radius:11px; background:#EFFBF3; color:#17643A; font-family:inherit; font-size:.76rem; font-weight:800; text-align:left; cursor:pointer; }
-    @media (max-width:360px) {
-      .part-info-grid { gap:7px; }
-      .part-info-grid > .part-info-btn,
-      .part-info-grid > button { height:48px; padding:0 4px !important; font-size:.7rem !important; gap:4px; }
-    }
 
     /* ─── 내 문의함 (1:1문의 탭 인라인) ─── */
     .cs-general-btn {
@@ -545,12 +517,6 @@
   .home-section-title,.results-title{ font-size:.98rem; color:var(--t1); font-weight:800; }
   .results-badge{ background:#e8f1fe; color:#3182f6; }
 
-  /* ===== 모집공고 종류 탭 (127 — 리뷰체험단/블로그체험단) ===== */
-  .rc-kind-tabs{display:flex;gap:6px;margin:2px 0 10px}
-  .rc-kt{flex:0 0 auto;font-size:.78rem;font-weight:800;padding:6px 14px;border-radius:999px;border:1.5px solid var(--border,#E5E7EB);background:#fff;color:#6B7280;cursor:pointer}
-  .rc-kt.on{background:var(--p,#6C5CE7);border-color:var(--p,#6C5CE7);color:#fff}
-  .rc-kt .n{font-weight:700;opacity:.85;margin-left:3px;font-size:.7rem}
-
   /* ===== 모집공고 카드/행 전환 토글 ===== */
   .rc-title-row{ justify-content:space-between; }
   .rc-viewtoggle{ display:inline-flex; background:#ECEDF2; border-radius:11px; padding:3px; gap:2px; flex-shrink:0; }
@@ -663,7 +629,7 @@
   /* ===== 온보딩 바텀시트 ===== */
   .ovl{ position:fixed; inset:0; background:rgba(25,31,40,.45); z-index:400; display:none; align-items:flex-end; justify-content:center; }
   .ovl.on{ display:flex; }
-  /* ===== 리뷰 캡처 확인·수정요청 ===== */
+  /* ===== 리뷰 이미지 확인·수정요청 ===== */
   .re-edit-minibtn{ flex-shrink:0; background:#F2F7FF; color:#1b64da; border:1px solid #d6e6ff; border-radius:8px; font-size:.66rem; font-weight:700; padding:2px 8px; cursor:pointer; }
   .re-edit-sheet{ background:#fff; border-radius:24px 24px 0 0; width:100%; max-width:440px; max-height:88vh; overflow-y:auto; padding:8px 20px 26px; animation:obIn .3s cubic-bezier(.2,.8,.2,1); }
   .re-edit-head{ display:flex; align-items:center; justify-content:space-between; font-size:1rem; font-weight:800; letter-spacing:-.02em; padding:14px 0 4px; position:sticky; top:0; background:#fff; }
@@ -697,27 +663,6 @@
   .ostep .tx b{ font-size:.9rem; font-weight:700; } .ostep .tx p{ font-size:.78rem; color:var(--t3); margin-top:2px; }
   .obx .ostart{ width:100%; margin-top:18px; padding:16px; border:none; border-radius:14px; background:#3182f6; color:#fff; font-weight:700; font-size:1rem; cursor:pointer; }
   .obx .oskip{ width:100%; text-align:center; margin-top:12px; color:var(--t3); font-size:.82rem; font-weight:600; background:none; border:none; cursor:pointer; }
-
-  /* 로그인 시 오래된 리뷰 1건 경고 — 카드의 기존 기한 표시는 되살리지 않는다. */
-  .orw-layer{ position:fixed; inset:0; z-index:520; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(19,25,34,.56); backdrop-filter:blur(2px); }
-  .orw-layer.on{ display:flex; animation:orwFade .18s ease both; }
-  .orw-modal{ position:relative; width:100%; max-width:384px; overflow:hidden; border-radius:22px; background:#fff; box-shadow:0 18px 52px rgba(25,31,40,.24); animation:orwIn .28s cubic-bezier(.2,.85,.2,1) both; }
-  .orw-strip{ display:flex; align-items:center; gap:7px; min-height:39px; padding:10px 48px 10px 17px; color:#815000; background:#FFF4D6; font-size:.72rem; font-weight:800; }
-  .orw-x{ position:absolute; top:6px; right:7px; width:30px; height:30px; display:grid; place-items:center; border:0; border-radius:9px; color:#73664B; background:transparent; cursor:pointer; font-size:1.35rem; line-height:1; }
-  .orw-x:hover{ background:rgba(121,90,20,.09); }
-  .orw-body{ padding:22px 19px 19px; }
-  .orw-title{ margin:0; color:#191F28; font-size:1.22rem; line-height:1.4; letter-spacing:-.035em; font-weight:800; }
-  .orw-task{ margin:16px 0 14px; padding:13px; border:1px solid #E6E9ED; border-radius:13px; background:#F8F9FA; }
-  .orw-task-label{ display:block; color:#8B95A1; font-size:.64rem; font-weight:700; }
-  .orw-task-name{ display:block; margin-top:5px; color:#191F28; font-size:.88rem; line-height:1.5; word-break:keep-all; }
-  .orw-task-date{ display:flex; align-items:center; gap:5px; margin-top:7px; color:#C9343A; font-size:.66rem; font-weight:700; }
-  .orw-task-date::before{ content:""; width:5px; height:5px; flex:none; border-radius:50%; background:#E5484D; }
-  .orw-go{ width:100%; min-height:49px; padding:11px 15px; border:0; border-radius:13px; color:#fff; background:#3182F6; box-shadow:0 7px 16px rgba(49,130,246,.25); cursor:pointer; font-size:.88rem; font-weight:800; }
-  .orw-go:hover{ background:#1B64DA; }
-  .orw-note{ margin:10px 2px 0; color:#7B8490; font-size:.66rem; line-height:1.55; text-align:center; }
-  @keyframes orwFade{ from{opacity:0} to{opacity:1} }
-  @keyframes orwIn{ from{opacity:0;transform:translateY(14px) scale(.97)} to{opacity:1;transform:none} }
-  @media(prefers-reduced-motion:reduce){ .orw-layer.on,.orw-modal{ animation:none; } }
 
   </style>
 <link rel="stylesheet" href="css/toss-theme.css"/>
@@ -753,10 +698,6 @@
           <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
         </span>
       </div>
-      <div class="rc-kind-tabs">
-        <button type="button" class="rc-kt" data-kind="review" onclick="setRecruitKind('review')">리뷰체험단</button>
-        <button type="button" class="rc-kt" data-kind="blog" onclick="setRecruitKind('blog')">블로그체험단</button>
-      </div>
       <div id="recruitPreviewList" class="rc-list">
         <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
       </div>
@@ -784,23 +725,6 @@
       </div>
     </div>
   </header>
-
-  <div id="overdueReviewWarning" class="orw-layer" role="dialog" aria-modal="true" aria-labelledby="orwTitle" aria-hidden="true">
-    <section class="orw-modal">
-      <div class="orw-strip"><i class="fas fa-clock" aria-hidden="true"></i><span id="orwElapsed">리뷰 미제출 · 10일 경과</span></div>
-      <button type="button" class="orw-x" onclick="closeOverdueReviewWarning()" aria-label="리뷰 제출 알림 닫기">×</button>
-      <div class="orw-body">
-        <h2 class="orw-title" id="orwTitle">리뷰를 제출해 주세요</h2>
-        <div class="orw-task">
-          <span class="orw-task-label">제출할 작업</span>
-          <strong class="orw-task-name" id="orwTaskName">참여 작업</strong>
-          <span class="orw-task-date" id="orwSubmittedAt"></span>
-        </div>
-        <button type="button" class="orw-go" onclick="goToOverdueReview()">리뷰 제출하기</button>
-        <p class="orw-note">닫아도 다른 캠페인에 참여할 수 있어요.</p>
-      </div>
-    </section>
-  </div>
 
   <div class="content-area">
     <!-- 관리자 권한모드 배너 (공고수정 허용 명단에 든 리뷰어에게만 표시) -->
@@ -861,6 +785,7 @@
         <!-- 본인 통합 카드 (내 등록정보 + 계좌) -->
         <article class="pf-acct self">
           <div class="pf-head">
+            <div class="pf-avatar" id="pfSelfAvatar"></div>
             <div class="pf-id"><div class="pf-nm">
               <span class="pf-who" id="inlineSelfName">-</span>
               <span class="pf-ph" id="inlineSelfPhone">-</span>
@@ -870,8 +795,6 @@
           <div class="pf-lines">
             <div class="pf-ln"><span class="pf-k">주소</span>
               <span class="pf-v"><span id="inlineSelfAddress" class="pf-muted">미등록</span><button id="btnAddAddress" class="pf-edit" onclick="openAddressForm()">추가</button></span></div>
-            <div class="pf-ln"><span class="pf-k">아이디</span>
-              <span class="pf-v" style="display:flex;gap:6px;align-items:center"><input id="pfSelfShoppingId" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem"><button class="pf-edit" onclick="saveIdentityShoppingId(0)">저장</button></span></div>
             <div class="pf-ln"><span class="pf-k">계좌</span>
               <span class="pf-v"><span id="pfBankLine" class="pf-muted">미등록</span><button id="btnAddBankInfo" class="pf-edit" onclick="openBankForm()">등록</button></span></div>
             <div class="pf-ln"><span class="pf-k">소득</span>
@@ -1052,8 +975,6 @@
     </div>
 
     <!-- 모집공고 섹션 -->
-    <div id="reviewerHomeBanner" class="home-section" style="display:none;padding-bottom:14px"></div>
-
     <div class="home-section" id="sectionRecruit">
       <div class="home-section-title rc-title-row">
         <span><i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고</span>
@@ -1061,10 +982,6 @@
           <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
           <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
         </span>
-      </div>
-      <div class="rc-kind-tabs">
-        <button type="button" class="rc-kt" data-kind="review" onclick="setRecruitKind('review')">리뷰체험단</button>
-        <button type="button" class="rc-kt" data-kind="blog" onclick="setRecruitKind('blog')">블로그체험단</button>
       </div>
       <div id="recruitPreviewList2" class="rc-list">
         <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
@@ -1082,7 +999,7 @@
     <button class="tab-home on" onclick="switchTab('home')"><i class="fas fa-house"></i>홈</button>
     <button class="tab-review" onclick="switchTab('review')"><i class="fas fa-clipboard-list"></i>리뷰내역</button>
     <button id="tabBtnCs" class="tab-cs" onclick="switchTab('cs')" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:0;right:8px;min-width:16px;height:16px;padding:0 4px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:16px;text-align:center;border-radius:8px;box-sizing:border-box"></span></button>
-    <button class="tab-my" onclick="switchTab('my')"><i class="fas fa-id-card"></i>내정보</button>
+    <button class="tab-my" onclick="switchTab('my')"><i class="fas fa-id-card"></i>내정보/현황</button>
     <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
   </div>
 
@@ -1095,7 +1012,7 @@
       <p class="od">처음이시군요! 4단계만 알면 바로 참여할 수 있어요.</p>
       <div class="ostep"><div class="num">1</div><div class="tx"><b>캠페인 찾기</b><p>모집공고에서 마음에 드는 캠페인을 골라요.</p></div></div>
       <div class="ostep"><div class="num">2</div><div class="tx"><b>신청 &amp; 구매</b><p>참여 신청 후 안내대로 구매하고 리뷰를 남겨요.</p></div></div>
-      <div class="ostep"><div class="num">3</div><div class="tx"><b>페이백 받기</b><p>영업일 기준 6일 이내로 등록 계좌에 입금돼요(주말·공휴일 제외).</p></div></div>
+      <div class="ostep"><div class="num">3</div><div class="tx"><b>페이백 받기</b><p>리뷰 완료 후 매주 화/금 등록 계좌로 정산돼요.</p></div></div>
       <div class="ostep"><div class="num">4</div><div class="tx"><b>1:1 문의</b><p>궁금한 점은 하단 탭바의 1:1문의에서 바로 물어봐요.</p></div></div>
       <button class="ostart" onclick="closeOnboard()">시작하기</button>
       <button class="oskip" onclick="closeOnboard()">다음에 볼게요</button>
@@ -1108,129 +1025,18 @@
    리뷰어 홈 JS
 ═══════════════════════════════════════ */
 const USER_KEY = "iad_reviewer_user";
-const HOME_SESSION_KEY = "iad_reviewer_home_session";
-const HOME_VIEW_KEY = "iad_reviewer_home_view_v1";
-
-function _reviewerHomeViewKey(user) {
-  const phone8 = String(user && user.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
-  return phone8 ? HOME_VIEW_KEY + ':' + phone8 : '';
-}
-
-function _reviewerHomeViewStore(user) {
-  return user && user.adminPreview ? sessionStorage : localStorage;
-}
-
-function _readReviewerHomeView(user) {
-  const key = _reviewerHomeViewKey(user);
-  if (!key) return null;
-  try {
-    const saved = JSON.parse(_reviewerHomeViewStore(user).getItem(key) || 'null');
-    const tabs = ['home', 'review', 'cs', 'my'];
-    if (!saved || tabs.indexOf(saved.tab) < 0) return null;
-    return {
-      tab: saved.tab,
-      reviewSubTab: saved.reviewSubTab === 'done' ? 'done' : 'pending',
-    };
-  } catch (_) { return null; }
-}
-
-function _saveReviewerHomeView() {
-  const user = getSavedUser();
-  const key = _reviewerHomeViewKey(user);
-  if (!key) return;
-  try {
-    _reviewerHomeViewStore(user).setItem(key, JSON.stringify({
-      tab: ['home', 'review', 'cs', 'my'].indexOf(_currentTab) >= 0 ? _currentTab : 'home',
-      reviewSubTab: _reviewSubTab === 'done' ? 'done' : 'pending',
-    }));
-  } catch (_) { /* 저장소 제한 환경에서는 종전처럼 홈에서 시작 */ }
-}
-
-function _clearReviewerHomeView(user) {
-  const key = _reviewerHomeViewKey(user);
-  if (!key) return;
-  try { _reviewerHomeViewStore(user).removeItem(key); } catch (_) {}
-}
-
-function _restoreReviewerHomeView(user) {
-  const saved = _readReviewerHomeView(user);
-  if (saved && saved.reviewSubTab === 'done') _reviewSubTab = 'done';
-  else _reviewSubTab = 'pending';
-  switchTab(saved ? saved.tab : 'home');
-}
 
 function getSavedUser() {
-  try {
-    // 관리자 바로가기 탭은 sessionStorage만 사용한다. 같은 브라우저의 다른 탭 로그인은 건드리지 않는다.
-    return JSON.parse(sessionStorage.getItem(HOME_SESSION_KEY) || localStorage.getItem(USER_KEY));
-  } catch(e) { return null; }
+  try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e) { return null; }
 }
 
-function _reviewerTokenFresh(token) {
-  try {
-    const part = String(token || "").split(".")[1];
-    if (!part) return false;
-    const b64 = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
-    const payload = JSON.parse(atob(b64));
-    return Number(payload.exp || 0) * 1000 > Date.now() + 60000;
-  } catch (_) { return false; }
-}
-
-async function _refreshReviewerHomeSession(user) {
-  if (!user || !user.name || !user.phone8) return null;
-  const r = await fetch(API_BASE_URL + "/api/reviewer/verify?phone8=" + encodeURIComponent(user.phone8)
-    + "&name=" + encodeURIComponent(user.name));
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j?.ok || !j.reviewerToken) return null;
-  const next = { ...user, name:j.name || user.name, phone:j.phone || user.phone, reviewerToken:j.reviewerToken };
-  const store = next.adminPreview ? sessionStorage : localStorage;
-  store.setItem(next.adminPreview ? HOME_SESSION_KEY : USER_KEY, JSON.stringify(next));
-  syncSearchSession(next);
-  return next;
-}
-
-async function consumeAdminReviewerHomeLink() {
-  const ticket = new URLSearchParams(location.search).get('admin_reviewer_ticket');
-  if (!ticket) return false;
-  try {
-    const res = await fetch(API_BASE_URL + '/api/reviewer/home-session', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket })
-    });
-    const json = await res.json();
-    if (!json || !json.ok || !json.user) throw new Error((json && json.error) || '로그인 링크를 확인하지 못했습니다.');
-    sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify({ ...json.user, reviewerToken: json.reviewerToken || "", loginAt: Date.now(), adminPreview: true }));
-    history.replaceState(null, '', location.pathname + location.hash); // 주소·복사 기록에 교환권을 남기지 않는다.
-    return true;
-  } catch (e) {
-    history.replaceState(null, '', location.pathname + location.hash);
-    showToast(e && e.message ? e.message : '리뷰어 홈 로그인에 실패했습니다.');
-    return false;
-  }
-}
-
-async function initPage() {
-  const hasAdminReviewerTicket = new URLSearchParams(location.search).has('admin_reviewer_ticket');
-  const exchanged = await consumeAdminReviewerHomeLink();
-  // 만료·위조·통신실패한 관리자 링크가 같은 브라우저의 기존 리뷰어 localStorage로
-  // 폴백하면 다른 사람 홈을 여는 사고가 난다. 이 경우는 반드시 로그인 화면에 남긴다.
-  if (hasAdminReviewerTicket && !exchanged) {
-    document.getElementById("viewLogin").style.display = "";
-    document.getElementById("viewHome").style.display = "none";
-    return false;
-  }
-  let user = getSavedUser();
-  if (user && user.name && user.phone8 && !_reviewerTokenFresh(user.reviewerToken)) {
-    try {
-      user = await _refreshReviewerHomeSession(user) || user;
-    } catch (_) { /* 프로필의 기존 읽기 기능은 유지하고 보안 API만 재로그인 후 사용 */ }
-  }
+function initPage() {
+  const user = getSavedUser();
   if (user && user.name) {
     showHome(user);
-    return true;
   } else {
     document.getElementById("viewLogin").style.display = "";
     document.getElementById("viewHome").style.display = "none";
-    return false;
   }
 }
 
@@ -1244,9 +1050,6 @@ function showHome(user) {
   // ★ /search 페이지 세션 동기화 (rapp_reviewer_auth 키)
   syncSearchSession(user);
 
-  // C/S 모듈은 이 탭에서 선택된 리뷰어 세션으로 SSE·미확인 배지를 즉시 맞춘다.
-  if (window.ReviewerCS && typeof window.ReviewerCS.syncSession === 'function') window.ReviewerCS.syncSession();
-
   // ★ 공고수정 권한 — 마스터 허용명단(phone8)에 있는 리뷰어만 스코프 토큰 발급받아
   //   홈 공고카드에서 인라인 수정 가능(비허용자는 401 → 조용히 일반 동작).
   maybeFetchCampEditToken(user);
@@ -1254,19 +1057,12 @@ function showHome(user) {
   // 프로필 + 리뷰 내역 + 소식·공지 로드
   loadInlineProfile(user);
   loadReviewList(user);
-  const overdueLoad = loadOverdueReviewWarning(user);
   loadReviewerNoticesHome();
-  loadReviewerHomeBanner();
 
-  // 마지막으로 보던 탭을 복원한다. 저장값이 없거나 손상되면 종전처럼 홈에서 시작한다.
-  _restoreReviewerHomeView(user);
+  // 기본 탭 = 홈(소식·공지 + 모집공고)
+  switchTab('home');
   // 첫 이용 온보딩 (1회)
-  if (!localStorage.getItem('inad_onboarded')) {
-    Promise.resolve(overdueLoad).finally(() => setTimeout(() => {
-      const warning = document.getElementById('overdueReviewWarning');
-      if (!warning || !warning.classList.contains('on')) openOnboard();
-    }, 500));
-  }
+  if (!localStorage.getItem('inad_onboarded')) setTimeout(openOnboard, 500);
 }
 
 /** 공고수정 스코프 토큰 발급 시도 (마스터 허용명단에 있는 리뷰어만 성공) */
@@ -1368,17 +1164,9 @@ function syncSearchSession(user) {
     verified: true,
     registeredMember: true,
     phone8: user.phone8 || "",
-    reviewerToken: user.reviewerToken || "",
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
-  // 관리자 바로가기 탭은 다른 탭의 검색/리뷰어 로그인까지 바꾸지 않는다.
-  if (user && user.adminPreview) {
-    sessionStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
-  } else {
-    // 같은 탭의 만료된 관리자 홈 세션이 새 일반 로그인을 가리지 않게 한다.
-    _prepareReviewerLocalSession();
-    localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
-  }
+  localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
 }
 
 async function doLogin() {
@@ -1399,7 +1187,7 @@ async function doLogin() {
     const json = await res.json();
 
     if (json.ok) {
-      const user = { name: json.name, phone: json.phone, phone8: phone, reviewerToken: json.reviewerToken || "", loginAt: Date.now() };
+      const user = { name: json.name, phone: json.phone, phone8: phone, loginAt: Date.now() };
       localStorage.setItem(USER_KEY, JSON.stringify(user));
       showHome(user);
     } else {
@@ -1439,17 +1227,12 @@ function _highlightLoginField(field) {
 }
 
 function doLogout() {
-  _clearReviewerHomeView(getSavedUser());
-  sessionStorage.removeItem(HOME_SESSION_KEY);
-  sessionStorage.removeItem("rapp_reviewer_auth");
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem("rapp_reviewer_auth");
   sessionStorage.removeItem("rapp_camp_edit_token");
   // ★ 홈에서 받은 관리자 토큰도 함께 정리 — 공용 PC에서 리뷰어만 로그아웃하고
   //   관리자 권한이 남아 있는 상태를 만들지 않는다.
   sessionStorage.removeItem("admin_token");
-  _historyCoordinator.reset(); _historySessionKey='';
-  _reviewListData={pending:[],done:[]}; _reviewEarnings={totals:null,doneTotals:null,items:{}};
   window._reviewerProfile = null;
   location.reload();
 }
@@ -1467,6 +1250,8 @@ async function loadInlineProfile(user) {
   // 즉시 이름 표시
   const nameEl = document.getElementById("inlineSelfName");
   if (nameEl) nameEl.textContent = name || "-";
+  const avEl0 = document.getElementById("pfSelfAvatar");
+  if (avEl0) avEl0.textContent = ((name || "?").charAt(0)) || "?";
   section.style.display = "";
 
   try {
@@ -1475,6 +1260,8 @@ async function loadInlineProfile(user) {
       const p = res.profile;
       window._reviewerProfile = { ...res, ...p, found: true };
       if (nameEl) nameEl.textContent = p.name || name || "-";
+      if (avEl0) avEl0.textContent = (((p.name || name || "?").trim()).charAt(0)) || "?";
+
       const phoneEl = document.getElementById("inlineSelfPhone");
       if (phoneEl) phoneEl.textContent = p.phone || "-";
       
@@ -1524,7 +1311,6 @@ async function loadInlineProfile(user) {
       if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
       if (!Array.isArray(subs)) subs = [];
       renderInlineSubList(subs);
-      await loadSecureIdentityProfile();
     } else {
       const phoneEl = document.getElementById("inlineSelfPhone");
       if (phoneEl) phoneEl.textContent = "-";
@@ -1532,47 +1318,6 @@ async function loadInlineProfile(user) {
   } catch(e) {
     console.warn("[inlineProfile]", e.message);
   }
-}
-
-async function loadSecureIdentityProfile() {
-  try {
-    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/secure", { headers: _getAuthHeaders() });
-    const data = await response.json();
-    if (!response.ok || !data?.ok || !Array.isArray(data.profile?.identities)) return;
-    window._secureReviewerProfile = data.profile;
-    const self = data.profile.identities.find(x => x.type === "self");
-    const selfInput = document.getElementById("pfSelfShoppingId");
-    if (selfInput && self) {
-      selfInput.value = self.shoppingId || "";
-      selfInput.dataset.identityKey = self.identityKey || "self";
-      selfInput.dataset.savedValue = self.shoppingId || "";
-    }
-    const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
-    renderInlineSubList(subs);
-  } catch (e) {
-    console.warn("[secureProfile]", e.message);
-  }
-}
-
-async function saveIdentityShoppingId(subIndex) {
-  const input = subIndex === 0
-    ? document.getElementById("pfSelfShoppingId")
-    : document.getElementById("pfSubShoppingId_" + (subIndex - 1));
-  if (!input || !input.dataset.identityKey) { showToast("명의 정보를 다시 불러온 뒤 저장해주세요."); return; }
-  try {
-    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/"
-      + encodeURIComponent(input.dataset.identityKey) + "/shopping-id", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
-      body: JSON.stringify({ shoppingId: input.value.trim() }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data?.ok) throw new Error(data?.error || "저장하지 못했습니다.");
-    input.value = data.shoppingId || "";
-    input.dataset.savedValue = data.shoppingId || "";
-    showToast("아이디가 이 명의에 저장되었습니다.");
-    await loadSecureIdentityProfile();
-  } catch (e) { showToast(e.message || "아이디 저장에 실패했습니다."); }
 }
 
 /* ═══════════════════════════════════════
@@ -1587,96 +1332,28 @@ let _reviewListTruncated = false;                    // 서버 LIMIT(400)에 걸
 
 let _orderPollTimer = null;   // '구매양식 반영중' 주문 자동 재조회 타이머
 let _orderPollCount = 0;      // 폴링 상한(무한폴링 방지)
-const _historyCoordinator=ReviewerHistoryLoader.createCoordinator();
-let _historySessionKey='',_historyMode='legacy',_historyCounts=null;
-let _historyAppliedResponse=null;
-let _historyGeneration=0;
-let _historyCursors={pending:null,done:null},_historyMoreBusy=false;
-
-function _historyKey(user){return String(user&&user.reviewerToken||'')+'|'+String(user&&user.phone8||'');}
-async function _fetchReviewHistory(user){
-  const token=user.reviewerToken;
-  if(token){
-    const pending=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'pending');
-    if(pending.mode==='owner_id'){
-      const done=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'fulfilled');
-      if(done.mode!=='owner_id') throw new Error('조회 전환 상태가 바뀌었습니다. 다시 불러와 주세요.');
-      if(done.scopeVersion!==pending.scopeVersion) throw new Error('참여 상태가 변경되었습니다. 다시 불러와 주세요.');
-      return {mode:'owner_id',results:[...(pending.results||[]),...(done.results||[])],counts:pending.counts,
-        cursors:{pending:pending.nextCursor,done:done.nextCursor}};
-    }
-  }
-  return gasGet({action:'searchAll',query:user.name||'',phone8:user.phone8||'',includeSubmitted: "1", ownerScope: "1"});
-}
-async function loadMoreReviewHistory(){
-  const user=getSavedUser(),key=_historyKey(user),tab=_reviewSubTab,cursor=_historyCursors[tab];
-  const generation=_historyGeneration;
-  if(!user||!cursor||_historyMoreBusy||key!==_historySessionKey) return;
-  _historyMoreBusy=true;
-  try {
-    const res=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,user.reviewerToken,tab==='done'?'fulfilled':'pending',cursor);
-    if(key!==_historySessionKey||cursor!==_historyCursors[tab]||generation!==_historyGeneration) return;
-    if(res.mode!=='owner_id') {await loadReviewList(user,{force:true});return;}
-    const merged=new Map(_reviewListData[tab].map(r=>[r.participationId,r]));
-    for(const item of res.results||[]) merged.set(item.participationId,item);
-    _reviewListData[tab]=[...merged.values()];_historyCursors[tab]=res.nextCursor;_historyCounts=res.counts;_reviewListError='';
-  }catch(e){if(key===_historySessionKey&&generation===_historyGeneration){
-    if(e.code==='HISTORY_CURSOR_INVALID') await loadReviewList(user,{force:true});
-    else _reviewListError=e.message||'추가 내역을 불러오지 못했습니다.';
-  }}
-  finally{if(key===_historySessionKey&&generation===_historyGeneration) _historyMoreBusy=false;renderReviewSubTab();}
-}
 
 async function loadReviewList(user, opts = {}) {
-  if(!user) return;
-  const sessionKey=_historyKey(user);
-  if(opts.force||sessionKey!==_historySessionKey){_historyGeneration++;_historyMoreBusy=false;}
-  if(sessionKey!==_historySessionKey){
-    _historySessionKey=sessionKey;_reviewListData={pending:[],done:[]};_historyCounts=null;
-    _historyCursors={pending:null,done:null};_reviewListError='';_reviewEarnings={totals:null,doneTotals:null,items:{}};
-    if(_orderPollTimer) clearTimeout(_orderPollTimer);
-  }
   const name = user.name || "";
   const phone8 = user.phone8 || "";
   const silent = !!opts.silent;   // 폴링 재조회는 스피너 깜빡임/에러표시 없이
 
-  if (!silent) { _reviewListLoading = !_reviewListData.pending.length&&!_reviewListData.done.length; renderReviewSubTab(); }
+  if (!silent) { _reviewListLoading = true; renderReviewSubTab(); }
   try {
     // includeSubmitted=1 → 제출완료 건 포함 응답 (isSubmitted로 대기/완료 분리)
-    const loaded=await _historyCoordinator.load(sessionKey,()=>_fetchReviewHistory(user),{force:!!opts.force});
-    if(loaded.stale||sessionKey!==_historySessionKey) return;
-    if(_historyAppliedResponse===loaded) return;
-    _historyAppliedResponse=loaded;
-    let res=loaded.value;
-    if (res && res.code === "REVIEWER_SESSION_EXPIRED" && !opts.sessionRetried) {
-      const refreshed = await _refreshReviewerHomeSession(user);
-      if (refreshed && refreshed.reviewerToken) {
-        return loadReviewList(refreshed, { ...opts, sessionRetried: true });
-      }
-    }
-    if (!res || res.error || res.ok===false) throw new Error(res&&res.error||'리뷰 내역을 불러오지 못했습니다.');
-    const resultsRaw = res.data || res.results || [];
-    // ★ '확인필요'(orderStage='attention') 카드는 리뷰어에게 그리지 않는다 — 서버(search.service)가 이미 걸러내지만,
-    //   프론트/백엔드 배포 시점이 갈릴 수 있어 화면에서도 한 번 더 막는다(사용자 확정 2026-08-19, C/S 문의 급증).
-    const results = resultsRaw.filter(item => !(item && item.isOrderPending && item.orderStage === 'attention'));
-    _historyGeneration++;_historyMoreBusy=false;
-    _historyMode=res.mode||'legacy';_historyCounts=res.counts||null;
-    _historyCursors=res.cursors||{pending:null,done:null};
+    const res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1" });
+    if (res.error && !Array.isArray(res.results) && !Array.isArray(res.data)) throw new Error(res.error);
+    const results = res.data || res.results || [];
     _reviewListData = {
       pending: results.filter(item => !item.isSubmitted),
       done:    results.filter(item => item.isSubmitted),
     };
     // 병합된 주문(isOrderPending)은 서버 LIMIT(400) 밖 append분 → 절단 판정에서 제외
-    _reviewListTruncated = _historyMode==='legacy'&&results.filter(item => !item.isOrderPending).length >= 400;
+    _reviewListTruncated = results.filter(item => !item.isOrderPending).length >= 400;
     _reviewListError = '';
   } catch(e) {
     // silent 재조회 실패는 기존 화면 유지(조용히 무시) — 방금 보던 목록이 사라지지 않게
-    if(sessionKey!==_historySessionKey) return;
-    if(e.code==='REVIEWER_SESSION_EXPIRED'&&!opts.sessionRetried){
-      const refreshed=await _refreshReviewerHomeSession(user);
-      if(refreshed&&refreshed.reviewerToken) return loadReviewList(refreshed,{...opts,sessionRetried:true});
-    }
-    _reviewListError = e.name==='AbortError'?'응답이 늦어지고 있습니다. 다시 불러와 주세요.':e.message||'조회하지 못했습니다.';
+    if (!silent) { _reviewListData = { pending: [], done: [] }; _reviewListError = e.message || '알 수 없는 오류'; }
   }
   _reviewListLoading = false;
   renderReviewSubTab();
@@ -1694,33 +1371,32 @@ function _fnum(n) { return (Math.round(Number(n) || 0)).toLocaleString('ko-KR');
 function _thumbErr(img) { try { img.onerror = null; const p = img.parentNode; if (p) p.innerHTML = '<i class="fas fa-box"></i>'; } catch (_) {} }
 /** 카드 item → 매칭된 상품비/리뷰비/썸네일 (없으면 null) — 키: sheetId||tabName||rowIndex */
 function _feeForItem(item) {
-  if (!item) return null;
-  if (item.orderSubmissionId) {
-    return _reviewEarnings.items['order||' + item.orderSubmissionId] || null;
-  }
-  if (item.rowIndex == null) return null;
+  if (!item || item.rowIndex == null) return null;
   const key = (item.sheetId || '') + '||' + (item.tabName || '') + '||' + item.rowIndex;
-  const exact = _reviewEarnings.items[key] || null;
-  if (exact && exact.productPrice != null) return exact;
-  const fallback = _reviewEarnings.items[(item.sheetId || '') + '||' + (item.tabName || '') + '||order'] || null;
-  return fallback || exact;
+  return _reviewEarnings.items[key] || null;
+}
+function _reviewDeadlineState(purchaseDate, now = new Date()) {
+  const match = String(purchaseDate || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(now).reduce((out, part) => {
+    if (part.type !== 'literal') out[part.type] = part.value;
+    return out;
+  }, {});
+  const purchased = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const today = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  const remaining = Math.max(0, 30 - Math.max(0, Math.floor((today - purchased) / 86400000)));
+  const tone = remaining >= 20 ? 'good' : remaining >= 10 ? 'warn' : 'danger';
+  return { remaining, tone, notice: remaining <= 5 ? `${remaining}일 뒤 작업종료 · 페이백 불가` : '' };
 }
 async function _loadReviewEarnings(phone8) {
-  const sessionKey=_historySessionKey;
   if (!phone8 || phone8.length !== 8) { _reviewEarnings = { totals: null, doneTotals: null, items: {} }; renderReviewSummary(); return; }
   try {
     const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
-    const r = await fetch(base + '/api/reviewer/review-earnings?phone8=' + encodeURIComponent(phone8), {
-      headers: { ..._getAuthHeaders() },
-    }).then(x => x.json());
-    if(sessionKey!==_historySessionKey) return;
-    _reviewEarnings = r && r.ok
-      ? { totals: r.totals || null, doneTotals: r.doneTotals || null, items: r.items || {} }
-      : { totals: null, doneTotals: null, items: {} };
-  } catch (_) {
-    if(sessionKey!==_historySessionKey) return;
-    _reviewEarnings = { totals: null, doneTotals: null, items: {} };
-  }
+    const r = await fetch(base + '/api/reviewer/review-earnings?phone8=' + encodeURIComponent(phone8)).then(x => x.json());
+    if (r && r.ok) _reviewEarnings = { totals: r.totals || null, doneTotals: r.doneTotals || null, items: r.items || {} };
+  } catch (_) { /* 조용히 무시 — 요약/배지 없이 목록은 유지 */ }
   renderReviewSummary();
   renderReviewSubTab();   // 카드별 상품비/리뷰비 배지 채우기(도착 후 재렌더)
 }
@@ -1761,118 +1437,15 @@ function renderReviewSummary() {
 //   실측상 '캡처 미첨부' 알림의 85%가 진짜 미첨부인데, 리뷰어는 자기 주문에 캡처가 빠진 걸
 //   알 방법이 없었다. 홈에 남겨 스스로 채우게 하면 관리자 독촉 왕복이 사라진다.
 //   첨부는 기존 업로드 경로(/api/image/image-upload + orderSubmissionId) 재사용 = 신규 쓰기 표면 0.
-/** ★★ 리뷰어 화면에 보여줄 **작업 이름** — 단일 출처.
- *  내부 키(`campaign:<공고ID>` 원장 좌표 · `wt_` 가상 시트)는 **절대 그리지 않는다**
- *  (2026-08-19 신고: 구매 캡처 보완 카드에 `campaign:camp_0df34a3b8664` 가 그대로 찍혔다).
- *  서버가 사람이 읽는 이름을 확정해 내려주지만, 배포 스큐·미연결 탭에서도 코드가 새지 않게
- *  화면에서 한 번 더 거른다. 이름을 못 찾으면 빈 문자열이 아니라 '참여 작업'으로 말한다. */
-const _INTERNAL_KEY_RE = /^(campaign:|wt_)/i;
-function _taskLabel(item, fallback) {
-  const it = item || {};
-  const cands = [it.displayNameTC, it.tcDisplayName, it.displayName, it.campaignName, it.tabName];
-  for (const c of cands) {
-    const v = String(c == null ? '' : c).trim();
-    if (v && !_INTERNAL_KEY_RE.test(v)) return v;
-  }
-  return fallback === undefined ? '참여 작업' : fallback;
-}
-
-// ── 로그인 시 오래된 리뷰 경고 ───────────────────────────────────
-// 장기 숨김 상태는 저장하지 않는다. X는 현재 화면에서만 닫고, 다음 로그인에는 다시 조회한다.
-let _orwItem = null;
-let _orwRequested = false;
-
-function _orwFormatSubmittedAt(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return '';
-  const parts = new Intl.DateTimeFormat('ko-KR', {
-    timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit',
-    hour:'2-digit', minute:'2-digit', hour12:false,
-  }).formatToParts(date).reduce((acc, part) => { acc[part.type] = part.value; return acc; }, {});
-  return `구매양식 제출 ${parts.year}.${parts.month}.${parts.day} ${parts.hour}:${parts.minute}`;
-}
-
-function _orwPaint(item) {
-  const layer = document.getElementById('overdueReviewWarning');
-  if (!layer || !item) return;
-  const days = Math.max(10, Number(item.elapsedDays) || 10);
-  document.getElementById('orwElapsed').textContent = `리뷰 미제출 · ${days}일 경과`;
-  document.getElementById('orwTaskName').textContent = _taskLabel({ displayName:item.displayName }, '참여 작업');
-  document.getElementById('orwSubmittedAt').textContent = _orwFormatSubmittedAt(item.submittedAt);
-  layer.classList.add('on');
-  layer.setAttribute('aria-hidden', 'false');
-  requestAnimationFrame(() => layer.querySelector('.orw-x')?.focus({ preventScroll:true }));
-}
-
-async function loadOverdueReviewWarning(user) {
-  if (_orwRequested) return;
-  _orwRequested = true;
-  try {
-    let current = user || getSavedUser();
-    let token = current && current.reviewerToken;
-    if (!token) return;
-    const url = API_BASE_URL + '/api/reviewer/overdue-review-warning';
-    let response = await fetch(url, { headers:{ 'X-Reviewer-Token':token } });
-    if (response.status === 401) {
-      current = await _refreshReviewerHomeSession(current);
-      token = current && current.reviewerToken;
-      if (!token) return;
-      response = await fetch(url, { headers:{ 'X-Reviewer-Token':token } });
-    }
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok || !json.ok || !json.item) return;
-    _orwItem = json.item;
-    _orwPaint(_orwItem);
-  } catch (_) { /* 경고 조회 실패가 홈 사용을 막지 않는다. */ }
-}
-
-function closeOverdueReviewWarning() {
-  const layer = document.getElementById('overdueReviewWarning');
-  if (!layer) return;
-  layer.classList.remove('on');
-  layer.setAttribute('aria-hidden', 'true');
-}
-
-function _orwSameTarget(item, target) {
-  if (!item || !target) return false;
-  if (target.orderSubmissionId && item.orderSubmissionId
-      && String(target.orderSubmissionId) === String(item.orderSubmissionId)) return true;
-  return String(item.sheetId || '') === String(target.sheetId || '')
-    && String(item.tabName || '') === String(target.tabName || '')
-    && Number(item.rowIndex) === Number(target.rowIndex);
-}
-
-async function goToOverdueReview() {
-  const target = _orwItem;
-  closeOverdueReviewWarning();
-  _reviewSubTab = 'pending';
-  switchTab('review');
-  if (!target) return;
-  let item = (_reviewListData.pending || []).find(candidate => _orwSameTarget(candidate, target));
-  if (!item) {
-    const user = getSavedUser();
-    if (user) await loadReviewList(user);
-    item = (_reviewListData.pending || []).find(candidate => _orwSameTarget(candidate, target));
-  }
-  if (item && !item.isOrderPending) {
-    openPartInfoSheet([item], { done:false });
-  } else {
-    showToast('리뷰 내역에서 해당 작업을 선택해 주세요.');
-  }
-}
-
 let _mcItems = [], _mcTargetId = '';
 async function _loadMissingCaptures(phone8) {
-  const sessionKey=_historySessionKey;
   const sec = document.getElementById('sectionMissingCapture');
   if (!sec || !phone8) return;
   try {
     const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
     const r = await fetch(base + '/api/reviewer/my-missing-captures?phone8=' + encodeURIComponent(phone8)).then(x => x.json());
-    if(sessionKey!==_historySessionKey) return;
     _mcItems = (r && r.ok && Array.isArray(r.items)) ? r.items : [];
-  } catch (_) { if(sessionKey!==_historySessionKey) return; _mcItems = []; }
+  } catch (_) { _mcItems = []; }   // 실패는 조용히(평상시 화면을 방해하지 않음)
   _renderMissingCaptures();
 }
 function _renderMissingCaptures() {
@@ -1886,9 +1459,8 @@ function _renderMissingCaptures() {
   const esc2 = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   list.innerHTML = _mcItems.map(it => {
     const when = String(it.submittedAt || '').slice(5, 10).replace('-', '/');
-    // ★ 이름은 `_taskLabel` 한 곳 — tabName(원장 좌표)은 첨부 업로드용이지 사람이 읽는 이름이 아니다
     return `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:11px 12px;margin-bottom:8px">
-      <div style="font-size:.8rem;font-weight:700;color:#191F28;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc2(_taskLabel(it))}</div>
+      <div style="font-size:.8rem;font-weight:700;color:#191F28;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc2(it.displayName || it.campaignName || it.tabName || '')}</div>
       <div style="font-size:.7rem;color:#92400E;margin-top:3px">${esc2(when)} 제출 · 구매 캡처가 아직 없습니다</div>
       <button type="button" onclick="_mcPick('${esc2(it.id)}')" style="margin-top:8px;width:100%;padding:9px;border:none;border-radius:10px;background:#3182f6;color:#fff;font-size:.8rem;font-weight:750;cursor:pointer;font-family:inherit">📷 캡처 첨부하기</button>
     </div>`;
@@ -1920,11 +1492,6 @@ function _mcOnFile(input) {
     if (!b64) { alert('이미지를 읽지 못했습니다.'); return; }
     const ext = mime === 'image/png' ? 'png' : (mime === 'image/webp' ? 'webp' : 'jpg');
     const nameBase = (it.recipient || it.orderer || '주문캡처');
-    const capSession = it.captureSession || {};
-    if (!capSession.id || !capSession.token) {
-      alert('구매캡처 제출 세션을 발급받지 못했습니다. 목록을 새로고침한 뒤 다시 시도해주세요.');
-      return;
-    }
     try {
       const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
       const r = await fetch(base + '/api/image/image-upload', {
@@ -1933,8 +1500,6 @@ function _mcOnFile(input) {
           imageBase64: b64, mimeType: mime, fileName: nameBase + '.' + ext,
           displayName: it.displayName || '', tabName: it.tabName || '', sheetId: it.sheetId || '',
           orderSubmissionId: it.id,        // ← 이 키로 서버가 capture_uploaded_at 을 채운다
-          captureSessionId: capSession.id,
-          captureSessionToken: capSession.token,
         }),
       }).then(x => x.json());
       if (!r || !r.ok) throw new Error((r && r.error) || '업로드 실패');
@@ -1965,13 +1530,12 @@ function _scheduleOrderPendingRefresh(user) {
 window.addEventListener('pageshow', (e) => {
   if (!e.persisted) return;
   const u = getSavedUser();
-  if (u && u.name) loadReviewList(u,{force:true});
+  if (u && u.name) loadReviewList(u);
 });
 
 /** 서브탭 전환 (제출대기 ↔ 제출완료) */
 function switchReviewSubTab(key) {
   _reviewSubTab = key === 'done' ? 'done' : 'pending';
-  _saveReviewerHomeView();
   renderReviewSubTab();
   renderReviewSummary();   // 참여중=요약 노출 / 제출완료=숨김
 }
@@ -1997,22 +1561,10 @@ function _fmtReviewDateMeta(v) {
 
 /** 대기 건 배지 텍스트 — 다중 캡처 슬롯 부분 제출이면 "n/m 제출"로 진행 표시 */
 function _pendingBadgeText(item) {
-  if(item.reviewObligationStatus==='unknown') return '관리자 확인 중';
   const total = Array.isArray(item.captureSlots) ? item.captureSlots.length : 0;
   const done = Array.isArray(item.submittedSlots) ? Math.min(item.submittedSlots.length, total) : 0;
   if (total > 1 && done > 0) return "리뷰 " + done + "/" + total + " 제출";
   return "구매양식반영완료";
-}
-
-/** 리뷰 완료 뒤 현금영수증만 남은 참여 건 — search.html과 같은 슬롯/제출 원장을 사용한다. */
-function _hasPendingCashReceipt(item) {
-  if (!item || !item.isSubmitted) return false;
-  if (item.cashReceiptPending === true) return true;
-  const slots = Array.isArray(item.captureSlots) ? item.captureSlots : [];
-  const receipt = slots.find(slot => slot && (slot.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(slot.label || ''))));
-  if (!receipt) return false;
-  const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
-  return !submitted.has(receipt.key);
 }
 
 /** 작업보드에 구매양식의 필수 주문정보가 기록된 경우만 리뷰 제출 상태와 별도로 표시한다. */
@@ -2047,8 +1599,8 @@ function renderReviewSubTab() {
   if (btnDone) btnDone.classList.toggle('active', isDone);
   const cntPending = document.getElementById("subtabPendingCount");
   const cntDone = document.getElementById("subtabDoneCount");
-  if (cntPending) cntPending.textContent = _historyCounts?_historyCounts.pending:_reviewListData.pending.length;
-  if (cntDone) cntDone.textContent = _historyCounts?_historyCounts.done:_reviewListData.done.length;
+  if (cntPending) cntPending.textContent = _reviewListData.pending.length;
+  if (cntDone) cntDone.textContent = _reviewListData.done.length;
 
   // 로딩 중에는 스피너 유지 (빈 상태 문구로 착각하지 않게)
   if (_reviewListLoading) {
@@ -2057,22 +1609,16 @@ function renderReviewSubTab() {
     return;
   }
 
-  if (_reviewListError && !_reviewListData.pending.length && !_reviewListData.done.length) {
-    if (countEl) countEl.textContent = "조회 실패";
-    if (cntPending) cntPending.textContent = "—";
-    if (cntDone) cntDone.textContent = "—";
-    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(_reviewListError)}</span><br><button onclick="loadReviewList(getSavedUser(),{force:true})">다시 불러오기</button></div>`;
+  if (_reviewListError) {
+    if (countEl) countEl.textContent = "0건";
+    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(_reviewListError)}</span></div>`;
     return;
   }
 
   const list = isDone ? _reviewListData.done : _reviewListData.pending;
-  if (countEl) countEl.textContent = (_historyCounts?(_historyCounts.pending+_historyCounts.done):list.length) + "건";
+  if (countEl) countEl.textContent = list.length + "건";
 
   if (list.length === 0) {
-    if(_reviewListError){
-      listEl.innerHTML=`<div class="empty-state">${escHtml(_reviewListError)}<br><button onclick="loadReviewList(getSavedUser(),{force:true})">다시 불러오기</button></div>`;
-      return;
-    }
     listEl.innerHTML = isDone
       ? `<div class="empty-state"><i class="fas fa-clipboard-check"></i>제출 완료한 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">리뷰를 제출하면 이곳에 표시됩니다</span></div>`
       : `<div class="empty-state"><i class="fas fa-clipboard-list"></i>아직 참여 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">신규 캠페인이 배정되면 이곳에 표시됩니다</span></div>`;
@@ -2091,12 +1637,6 @@ function renderReviewSubTab() {
   });
 
   listEl.innerHTML = "";
-  if(_reviewListError){
-    const notice=document.createElement('div');notice.className='empty-state';
-    notice.textContent='새로고침에 실패해 이전 내역을 표시합니다. '+_reviewListError;
-    const retry=document.createElement('button');retry.textContent='다시 불러오기';retry.onclick=()=>loadReviewList(getSavedUser(),{force:true});
-    notice.appendChild(retry);listEl.appendChild(notice);
-  }
   groups.forEach((items, groupKey) => {
     const itemName = groupKey.split("\x00")[0];
     const isSingle = items.length === 1;
@@ -2108,18 +1648,14 @@ function renderReviewSubTab() {
         ? '<span class="status-badge-submitted">제출완료</span>'
         : item.isOrderPending
           ? `<span class="status-badge-order ${_orderStageClass(item.orderStage)}">${_orderStageLabel(item.orderStage)}</span>`
-          : item.reviewObligationStatus==='unknown'
-            ? '<span class="status-badge-order">관리자 확인 중</span>'
-            : '<span class="status-badge-order reflected">구매양식반영완료</span>';
+          : '<span class="status-badge-order reflected">구매양식반영완료</span>';
       const subBadgeHtml = (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '';
-      const receiptBadgeHtml = isDone && _hasPendingCashReceipt(item)
-        ? '<span style="font-size:.62rem;font-weight:800;color:#B45309">현금영수증 미제출</span>' : '';
       const roundBadge = item.round
         ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
         : "";
 
       const taskDate = item.startDate || "";
-      const taskName = _taskLabel(item, "");
+      const taskName = item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || "";
       const optionName = item.productName || "";
       const taskParts = [];
       if (taskDate) taskParts.push(taskDate);
@@ -2127,7 +1663,7 @@ function renderReviewSubTab() {
       if (optionName) taskParts.push("옵션:" + optionName);
       const taskLabel = taskParts.join(" ");
 
-      // 제출완료 건은 제출일(대표 리뷰 캡처 연결 시각)을 첫 줄 이름 뒤에 옅게
+      // 제출완료 건은 제출일(대표 리뷰 이미지 연결 시각)을 첫 줄 이름 뒤에 옅게
       const doneDate = isDone ? _fmtReviewDateMeta(item.reviewFileAt) : '';
 
       const card = document.createElement("div");
@@ -2136,17 +1672,18 @@ function renderReviewSubTab() {
       //   두 탭 카드를 한 코드로 그린다 — 사본을 두면 두 탭이 계속 어긋난다.
       //   완료 건의 액션(이미지 확인·수정요청)·1:1문의는 카드가 아니라 참여상품 정보 팝업 안에 있다.
       const fee = _feeForItem(item);
+      const deadline = (!isDone && !item.isOrderPending && fee)
+        ? _reviewDeadlineState(fee.purchaseDate)
+        : null;
+      const deadlineHtml = deadline
+        ? `<span class="status-badge-deadline ${deadline.tone}">제출기한 : ${deadline.remaining}일 남음</span>`
+        : '';
       const thumbUrl = (fee && fee.thumbnailUrl) ? fee.thumbnailUrl : '';
       const thumbHtml = thumbUrl
         ? `<img src="${_escAttrX(thumbUrl)}" alt="" onerror="_thumbErr(this)">`
         : '<i class="fas fa-box"></i>';
       const metaTail = doneDate ? ` <span class="c-tail">· 제출 ${escHtml(doneDate)}</span>` : '';
-      /* ★★ 카드에 적는 이름 = **그 참여의 명의(수취인)** — 다건 그룹 줄과 **같은 판정 한 벌**
-         (`_partInfoParticipantName`)을 쓴다. 그전에는 단건 카드만 작업표의 이름 칸(= 주문자열,
-         파서가 '주문자'를 최우선으로 잡는다)을 그려 **같은 화면에서 두 규칙이 갈렸다**.
-         ★ 수취인을 모르는 작업(그 칸이 없는 표)은 종전대로 이름 칸 값으로 접는다 — 빈칸이 되면 안 된다. */
-      const whoName = _partInfoParticipantName(item) || itemName;
-      const metaHtml = `<div class="c-meta">${taskDate ? escHtml(taskDate) + ' ' : ''}<span class="c-who">${escHtml(whoName)}</span>${metaTail}</div>`;
+      const metaHtml = `<div class="c-meta">${taskDate ? escHtml(taskDate) + ' ' : ''}<span class="c-who">${escHtml(itemName)}</span>${metaTail}</div>`;
       const nameText = taskName || itemName || '참여 작업 정보 없음';
       const optSuffix = optionName ? ` <span style="color:var(--t3);font-weight:600">· 옵션:${escHtml(optionName)}</span>` : '';
       const nameHtml = `<div class="c-name">${escHtml(nameText)}${roundBadge}${optSuffix}</div>`;
@@ -2169,12 +1706,16 @@ function renderReviewSubTab() {
         </div>
         <div class="result-right rr-col">
           <div class="rr-row">
-            ${badgeHtml}
-            ${item.isOrderPending||item.reviewObligationStatus==='unknown' ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
+            <div class="status-stack">
+              ${badgeHtml}
+              ${deadlineHtml}
+            </div>
+            ${item.isOrderPending ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
           </div>
-          ${receiptBadgeHtml || subBadgeHtml}
+          ${deadline && deadline.notice ? `<div class="deadline-close-note">${deadline.notice}</div>` : ''}
+          ${subBadgeHtml}
         </div>`;
-      if (item.isOrderPending||item.reviewObligationStatus==='unknown') {
+      if (item.isOrderPending) {
         card.classList.add("is-order-pending");   // 시트반영 전 주문 = 제출 대상 아님(클릭 비활성)
       } else {
         card.addEventListener("click", () => openPartInfoSheet(isDone ? [item] : items, { done: isDone }));
@@ -2184,21 +1725,25 @@ function renderReviewSubTab() {
       // 다건 그룹 카드
       const groupCard = document.createElement("div");
       groupCard.className = "result-group-card" + (isDone ? " done" : "");
-      const campLabel = _taskLabel(items[0], "");
-      const groupSubmitItems = items.filter(i => !i.isOrderPending&&i.reviewObligationStatus!=='unknown');
+      const campLabel = items[0].displayNameTC || items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
+      const groupSubmitItems = items.filter(i => !i.isOrderPending);   // 주문(반영중) 항목은 제출 대상 아님
       const groupClickable = !isDone && groupSubmitItems.length > 0;
 
       const itemLines = items.map(item => {
         const taskDate = item.startDate || "";
-        // 같은 참여상품 그룹에서는 상품명을 줄마다 반복하지 않는다.
-        // 리뷰어 본인 이름이 아니라 실제 해당 주문의 수취인(타계정 참여 명의)을 말한다.
-        const participantName = _partInfoParticipantName(item);
-        const rowLabel = [taskDate, participantName].filter(Boolean).join(" ") || "참여 건";
+        const taskName = item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || "";
+        const optionName = item.productName || "";
+        const roundTxt = item.round ? ` · ${item.round}` : "";
+        const taskParts = [];
+        if (taskDate) taskParts.push(taskDate);
+        if (taskName) taskParts.push(taskName);
+        if (optionName) taskParts.push("옵션:" + optionName);
+        const taskLabel = taskParts.join(" ") || "작업 정보 없음";
         const doneDate = isDone ? _fmtReviewDate(item.reviewFileAt) : '';
         return `<div class="result-group-item">
           <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
-          <span class="result-group-item-label">${escHtml(rowLabel)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
-          ${isDone && _hasPendingCashReceipt(item) ? '<span class="result-group-item-badge" style="background:#FEF3C7;color:#B45309">현금영수증 미제출</span>' : isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
+          <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
+          ${isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
           <span class="result-group-item-badge${isDone ? ' done' : ''}${item.isOrderPending ? ' order ' + _orderStageClass(item.orderStage) : ''}">${isDone ? '제출완료' : item.isOrderPending ? _orderStageLabel(item.orderStage, true) : escHtml(_pendingBadgeText(item))}</span>
           ${isDone ? _reEditBtnHtml(item) : ''}
         </div>`;
@@ -2209,6 +1754,7 @@ function renderReviewSubTab() {
           <i class="fas fa-user-circle" style="font-size:1.4rem;color:${isDone ? 'var(--ok)' : 'var(--p)'};flex-shrink:0"></i>
           <div style="flex:1;min-width:0">
             <div class="result-group-name">${escHtml(campLabel || itemName)}</div>
+            ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(itemName)}</div>` : ""}
           </div>
           <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
           ${(groupClickable || isDone) ? '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>' : ''}
@@ -2222,10 +1768,6 @@ function renderReviewSubTab() {
   });
 
   // 서버 LIMIT 도달 시(장기 활동 리뷰어) 오래된 완료 내역이 잘릴 수 있음을 고지
-  if(_historyMode==='owner_id'&&_historyCursors[_reviewSubTab]){
-    const more=document.createElement('button');more.textContent='내역 더 보기';more.onclick=loadMoreReviewHistory;
-    more.disabled=_historyMoreBusy;listEl.appendChild(more);
-  }
   if (isDone && _reviewListTruncated) {
     const note = document.createElement("div");
     note.style.cssText = "text-align:center;padding:8px 4px 2px;font-size:.7rem;color:var(--t4)";
@@ -2235,7 +1777,7 @@ function renderReviewSubTab() {
 }
 
 /* ═══════════════════════════════════════
-   리뷰 캡처 확인 · 수정요청 (리뷰어 → 관리자 승인)
+   리뷰 이미지 확인 · 수정요청 (리뷰어 → 관리자 승인)
    — 새 파일은 즉시 교체되지 않고 관리자 승인 후 [리뷰] 폴더 파일이 교체된다.
 ═══════════════════════════════════════ */
 window._reEditReg = window._reEditReg || {};
@@ -2250,17 +1792,15 @@ function _reEditImgUrl(fileId){
   const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
   return base + '/api/drive/image/' + encodeURIComponent(fileId);
 }
-/* ★ 썸네일 URL 규칙은 `js/drive-thumb.js` 한 곳 — 여기는 위임(사본 0).
-   모듈이 없으면 원본 프록시로 접는다(마크업의 onerror 폴백은 그대로). */
 function _reEditThumb(fileId){
-  return window.DriveThumb ? DriveThumb.url(fileId, 400) : _reEditImgUrl(fileId);
+  return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(fileId) + '&sz=w400';
 }
 
 function _reEditRegister(item){
   const id = 're' + (_reEditSeq++);
   window._reEditReg[id] = {
     sheetId: item.sheetId, tabName: item.tabName, gid: item.gid, rowIndex: item.rowIndex,
-    label: _taskLabel(item, '')
+    label: item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || ''
   };
   return id;
 }
@@ -2472,15 +2012,6 @@ function goToSubmit(items) {
 let _partInfoSubmitItems = null;   // [리뷰제출하기]가 넘길 대기 항목(완료 시 null)
 let _partInfoChatUrl = '';
 let _partInfoProductUrl = '';      // [상품 바로가기] 버튼용 상품 URL
-let _partInfoCaptureFileId = '';   // 강한 소유권 검증 뒤 받은 본인 구매캡처 파일 ID
-let _partInfoCaptureUploadedAt = '';
-let _partInfoCaptureItems = [];    // 묶음 카드의 행별 구매캡처 [{fileId, uploadedAt, label}]
-let _partInfoBriefSeq = 0;         // 먼저 연 카드의 늦은 응답이 현재 카드를 덮지 못하게 하는 요청 세대
-/* 🚫 주문취소 — 게이트 판정은 **서버(brief.cancelable)** 가 준 것만 쓴다.
-   화면이 스스로 정하면 "보이는데 거부"가 된다(판정 사본 0). */
-let _partInfoCancelable = null;    // {ok, reason, message, reasons[]} | null(=미상 → 버튼 미표시)
-let _partInfoCoord = null;         // {sheetId, tabName, rowIndex} — 취소 요청 좌표
-let _partInfoCoordLabel = '';      // 확인창에 보여줄 그 참여의 이름(카드와 같은 라벨)
 
 function _partInfoEnsure(){
   if (document.getElementById('partInfoOvl')) return;
@@ -2496,26 +2027,13 @@ function _partInfoEnsure(){
   ovl.addEventListener('click', (e)=>{ if (e.target === ovl) closePartInfo(); });
   document.body.appendChild(ovl);
 }
-function closePartInfo(){
-  _partInfoBriefSeq++;
-  const o = document.getElementById('partInfoOvl'); if (o) o.classList.remove('on');
-  const cap = document.getElementById('partInfoCaptureOvl'); if (cap) cap.classList.remove('on');
-  document.body.style.overflow='';
-}
+function closePartInfo(){ const o = document.getElementById('partInfoOvl'); if (o) o.classList.remove('on'); document.body.style.overflow=''; }
 
 function _partInfoLabel(it){
   const d = it.startDate || '';
-  const t = _taskLabel(it, '');
+  const t = it.displayNameTC || it.tcDisplayName || it.tabName || it.campaignName || '';
   const o = it.productName ? ('옵션:' + it.productName) : '';
   return [d, t, o].filter(Boolean).join(' ') || (it.displayName || '참여 작업');
-}
-/** 같은 상품으로 묶인 줄에 표시할 실제 참여 명의. 리뷰어 본인 이름은 대체값으로 쓰지 않는다. */
-function _partInfoParticipantName(it){
-  const row = (it && it.row && typeof it.row === 'object') ? it.row : {};
-  return String((it && (it.recipientName || it.recipient || it.orderer)) || row['수취인'] || row['주문자'] || '').trim();
-}
-function _partInfoGroupRowLabel(it){
-  return [it && it.startDate, _partInfoParticipantName(it)].filter(Boolean).join(' ') || '참여 건';
 }
 
 function openPartInfoSheet(items, opts){
@@ -2523,29 +2041,16 @@ function openPartInfoSheet(items, opts){
   const done = !!opts.done;
   const list = (items || []).filter(Boolean);
   if (!list.length) return;
-  // 완료 건도 현금영수증이 남았으면 같은 제출 화면으로 다시 들어간다.
-  _partInfoSubmitItems = done ? list.filter(_hasPendingCashReceipt) : list;
+  _partInfoSubmitItems = done ? null : list;     // 리뷰제출하기는 대기 항목에만
   _partInfoChatUrl = '';
   _partInfoProductUrl = '';
-  _partInfoCaptureFileId = '';
-  _partInfoCaptureUploadedAt = '';
-  _partInfoCaptureItems = [];
-  _partInfoCancelable = null;
-  const briefSeq = ++_partInfoBriefSeq;
   _partInfoEnsure();
   const it = list[0];
-  /* ★ 제출완료 건에는 취소 좌표를 만들지 않는다 — 버튼 자체가 뜨지 않아야 한다(사용자 확정 2026-08-23).
-       서버도 `review_submitted` 로 거부하지만, 화면에서 먼저 없앤다. */
-  /* ★ 한 팝업에 여러 참여가 묶인 경우(같은 작업 다건)는 취소 버튼을 그리지 않는다 —
-       어느 건인지 화면이 특정할 수 없다. 그 경우는 1:1 문의로 간다. */
-  _partInfoCoord = (!done && list.length === 1 && it && it.sheetId && it.tabName && it.rowIndex != null)
-    ? { sheetId: it.sheetId, tabName: it.tabName, rowIndex: Number(it.rowIndex) } : null;
-  _partInfoCoordLabel = _partInfoCoord ? _partInfoLabel(it) : '';
   // 1:1 문의 문맥 — 문의 기준은 "진행한 탭"(sheetId||tabName). 리뷰어에겐 시트제목을 노출하지 않으므로
   //   라벨은 카드와 같은 표시명(상품명 우선 → 탭명)만 쓴다.
   _partInfoCsCtx = (it.sheetId && it.tabName)
     ? { campaignKey: it.sheetId + '||' + it.tabName,
-        campaignLabel: (it.productName || _taskLabel(it, '문의')) }
+        campaignLabel: (it.productName || it.displayNameTC || it.tcDisplayName || it.tabName || '문의') }
     : null;
   // 이미지 확인·수정요청은 행 단위 작업이라 단건일 때만(다건 그룹은 목록의 줄별 버튼 유지)
   _partInfoReEditId = (done && list.length === 1) ? _reEditRegister(it) : '';
@@ -2555,12 +2060,11 @@ function openPartInfoSheet(items, opts){
     : '<span style="font-size:.6rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">미제출</span>';
   const listRows = many
     ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">' + list.map(x =>
-        '<div style="font-size:.74rem;color:#374151;display:flex;gap:6px;align-items:center"><i class="fas fa-box" style="color:#3182f6;font-size:.66rem;flex:none"></i><span style="min-width:0">' + escHtml(_partInfoGroupRowLabel(x)) + '</span></div>').join('') + '</div>'
+        '<div style="font-size:.74rem;color:#374151;display:flex;gap:6px;align-items:center"><i class="fas fa-box" style="color:#3182f6;font-size:.66rem;flex:none"></i><span style="min-width:0">' + escHtml(_partInfoLabel(x)) + '</span></div>').join('') + '</div>'
     : '';
   document.getElementById('partInfoBody').innerHTML =
     '<div style="font-size:.9rem;font-weight:800;color:#111827;line-height:1.4">' + escHtml(_partInfoLabel(it)) + statusChip + '</div>' +
-    /* 카드 첫 줄과 **같은 이름**을 말한다 — 누른 카드와 열린 팝업이 서로 다른 명의를 말하면 안 된다. */
-    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + (many ? ('총 ' + list.length + '건') : escHtml(_partInfoParticipantName(it) || it.displayName || '')) + '</div>' +
+    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + escHtml(it.displayName || '') + (many ? (' · 총 ' + list.length + '건') : '') + '</div>' +
     listRows +
     '<div id="partInfoDetail" style="border:1px solid #EEF1F7;border-radius:11px;margin-top:11px;padding:9px 11px;font-size:.74rem;color:#9CA3AF">' +
       '<i class="fas fa-circle-notch fa-spin"></i> 상품 정보 불러오는 중…</div>' +
@@ -2568,51 +2072,21 @@ function openPartInfoSheet(items, opts){
   _partInfoRenderBtns(done, '');
   document.getElementById('partInfoOvl').classList.add('on');
   document.body.style.overflow = 'hidden';
-  _partInfoLoadBrief(list, done, briefSeq);
+  _partInfoLoadBrief(it, done);
 }
 
-async function _partInfoLoadBrief(list, done, requestSeq){
-  const items = (list || []).filter(Boolean);
-  const it = items[0];
-  let user = getSavedUser();
+async function _partInfoLoadBrief(it, done){
+  const user = getSavedUser();
   const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
   const detailEl = document.getElementById('partInfoDetail');
   const hide = () => { if (detailEl) detailEl.style.display = 'none'; };
   if (phone8.length !== 8 || !it.sheetId || !it.tabName || it.rowIndex == null){ hide(); _partInfoRenderBtns(done, ''); return; }
   try{
-    if (!_reviewerTokenFresh(user && user.reviewerToken)) user = await _refreshReviewerHomeSession(user);
-    let token = user && user.reviewerToken;
-    if (!token) { hide(); _partInfoRenderBtns(done, ''); return; }
-    const loadOne = async (row, reviewerToken) => {
-      if (!row || !row.sheetId || !row.tabName || row.rowIndex == null) return { status:0, brief:null };
-      try {
-        const qs = new URLSearchParams({ phone8, sheetId: row.sheetId, tabName: row.tabName, gid: row.gid || '', rowIndex: String(row.rowIndex) });
-        const r = await fetch(API_BASE_URL + '/api/review-edit/participation-brief?' + qs.toString(), {
-          headers: { 'X-Reviewer-Token': reviewerToken }
-        });
-        const j = await r.json().catch(()=>({}));
-        return { status:r.status, brief:(r.ok && j.ok) ? j.brief : null };
-      } catch (_) { return { status:0, brief:null }; }
-    };
-    let results = await Promise.all(items.map(row => loadOne(row, token)));
-    if (results.some(result => result.status === 401)) {
-      user = await _refreshReviewerHomeSession(user);
-      token = user && user.reviewerToken;
-      if (token) results = await Promise.all(items.map(row => loadOne(row, token)));
-    }
-    const ovl = document.getElementById('partInfoOvl');
-    if (requestSeq !== _partInfoBriefSeq || !ovl || !ovl.classList.contains('on')) return;
-    const brief = (results[0] && results[0].brief) || {};
-    _partInfoCaptureItems = results.map((result, index) => {
-      const pc = result && result.brief && result.brief.purchaseCapture;
-      if (!pc || !pc.fileId) return null;
-      return { fileId:String(pc.fileId), uploadedAt:pc.uploadedAt ? String(pc.uploadedAt) : '', label:_partInfoGroupRowLabel(items[index]) };
-    }).filter(Boolean);
-    const firstCapture = _partInfoCaptureItems[0] || null;
-    _partInfoCaptureFileId = firstCapture ? firstCapture.fileId : '';
-    _partInfoCaptureUploadedAt = firstCapture ? firstCapture.uploadedAt : '';
-    if (!results[0] || !results[0].brief) hide();
-    _partInfoCancelable = brief.cancelable || null;
+    const qs = new URLSearchParams({ phone8, sheetId: it.sheetId, tabName: it.tabName, gid: it.gid || '', rowIndex: String(it.rowIndex) });
+    const r = await fetch(API_BASE_URL + '/api/review-edit/participation-brief?' + qs.toString());
+    const j = await r.json().catch(()=>({}));
+    const brief = (r.ok && j.ok) ? j.brief : null;
+    if (!brief){ hide(); _partInfoRenderBtns(done, ''); return; }
     const rows = [];
     // ★ D: 이 행의 작업 옵션(리뷰 형태 — '텍스트'/'포토리뷰' 등). 관리자가 로스터에 미리 적어둔
     //   작업지시이고 "어떻게 써야 하는가"라 **상품정보보다 위**에, 눈에 띄게 둔다.
@@ -2636,7 +2110,7 @@ async function _partInfoLoadBrief(list, done, requestSeq){
       '<div style="font-size:.76rem;color:#047857;font-weight:800;line-height:1.5">리뷰비 입금 완료' +
       (pay.amount ? ' · ' + Number(pay.amount).toLocaleString() + '원' : '') + '</div>' +
       '<div style="font-size:.7rem;color:#374151;margin-top:2px">' +
-      (pay.paidAt ? escHtml(_partInfoPaidAt(pay.paidAt)) : (pay.paidDate ? escHtml(_partInfoPaidDate(pay.paidDate)) : '')) +
+      (pay.paidAt ? escHtml(_partInfoPaidAt(pay.paidAt)) : '') +
       (pay.memo ? ' · 입금자명 <b>' + escHtml(pay.memo) + '</b>' : '') + '</div>' +
       '</div></div>');
     else if (pay && pay.status === 'failed') rows.push(
@@ -2658,12 +2132,8 @@ async function _partInfoLoadBrief(list, done, requestSeq){
     _partInfoProductUrl = /^https?:\/\//i.test(pu) ? pu : '';
     if (rows.length){ if (detailEl){ detailEl.style.display=''; detailEl.style.color=''; detailEl.innerHTML = rows.join(''); } }
     else hide();
-    _partInfoCancelable = (brief && brief.cancelable) || null;
     _partInfoRenderBtns(done, brief.chatUrl || '', _partInfoProductUrl);
-  }catch(_){
-    if (requestSeq !== _partInfoBriefSeq) return;
-    hide(); _partInfoRenderBtns(done, '');
-  }
+  }catch(_){ hide(); _partInfoRenderBtns(done, ''); }
 }
 /* 입금 시각 표기 — 서버가 준 ISO 를 사람이 읽는 형태로. ★ 값이 이상하면 그리지 않는다(빈 문자열). */
 function _partInfoPaidAt(v){
@@ -2671,12 +2141,6 @@ function _partInfoPaidAt(v){
   const k = new Date(d.getTime() + 9*3600*1000);   // KST
   const s = k.toISOString();
   return s.slice(0,4) + '.' + s.slice(5,7) + '.' + s.slice(8,10) + ' ' + s.slice(11,16) + ' 입금';
-}
-/* 페이백 날짜 표기 — 관리자가 작업보드에서 확정한 입금일(`M/D`)은 시각이 없다.
-   ★ 서버가 준 칸 값을 **그대로** 쓴다(여기서 연도를 지어내지 않는다 — 틀린 날짜보다 짧은 날짜가 낫다). */
-function _partInfoPaidDate(v){
-  const s = String(v == null ? '' : v).trim();
-  return s ? s + ' 입금' : '';
 }
 /* 실패 안내 → 내정보(계좌) 화면으로. ★ 팝업을 닫고 이동한다(팝업 뒤에 가려 안 보이는 이동 금지). */
 function _partInfoGoAccount(){
@@ -2699,201 +2163,22 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
   const reEditHtml = (done && _partInfoReEditId)
     ? '<button onclick="_partInfoOpenReEdit()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;cursor:pointer;background:#fff;color:#1b64da;font-size:.85rem;font-weight:800;border-radius:12px;padding:12px;margin-top:8px">🖼 제출 이미지 확인 · 수정요청</button>'
     : '';
-  const submitItems = _partInfoSubmitItems || [];
-  const captureBtn = _partInfoCaptureItems.length || _partInfoCaptureFileId
-    ? '<button class="part-info-btn capture" onclick="_partInfoOpenCapture()">📷 구매캡처보기</button>'
-    : '<button class="part-info-btn capture" disabled title="연결된 구매 캡처가 없습니다">📷 구매캡처보기</button>';
-
-  /* 제출완료는 최신 main의 현금영수증 제출 흐름과 주문취소 숨김 규칙을 그대로 둔다. */
-  if (done) {
-    if (_partInfoProductUrl) html += '<button onclick="_partInfoOpenProduct()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#111827;color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-bottom:8px">🛒 상품바로가기</button>';
-    if (chatUrl) html += '<button onclick="_partInfoOpenChat()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#FEE500;color:#191919;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px">💬 팀채팅방</button>';
-    if (submitItems.length === 1) {
-      html += '<button onclick="_partInfoSubmit(0)" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">🧾 현금영수증 제출하기</button>';
-    } else if (submitItems.length > 1) {
-      html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF1F7">'
-        + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">현금영수증을 제출할 참여 건을 선택하세요</div>'
-        + submitItems.map((x, i) => {
-          const recipient = _partInfoParticipantName(x);
-          const label = recipient || ((i + 1) + '번째 참여 건');
-          return '<button onclick="_partInfoSubmit(' + i + ')" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;border:1.5px solid #BFDBFE;cursor:pointer;background:#fff;color:#1D4ED8;font-size:.82rem;font-weight:800;border-radius:12px;padding:11px 12px;margin-top:' + (i ? '8' : '0') + ';box-shadow:0 2px 7px rgba(37,99,235,.08)">'
-            + '<span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;flex:none;border-radius:50%;background:#DBEAFE;color:#2563EB;font-size:.72rem">' + (i + 1) + '</span>'
-            + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">이 참여 건의 현금영수증 제출</span></span>'
-            + '<i class="fas fa-chevron-right" style="color:#60A5FA;font-size:.72rem"></i></button>';
-        }).join('') + '</div>';
-    }
-    html += captureBtn + reEditHtml + csBtnHtml;
-    box.innerHTML = html;
-    return;
+  // 🛒 상품 바로가기 (상품 페이지 열기)
+  if (_partInfoProductUrl){
+    html += '<button onclick="_partInfoOpenProduct()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#111827;color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-bottom:8px">🛒 상품 바로가기</button>';
   }
-
-  const productBtn = _partInfoProductUrl
-    ? '<button class="part-info-btn product" onclick="_partInfoOpenProduct()">🛒 상품바로가기</button>'
-    : '<button class="part-info-btn product" disabled title="연결된 상품 페이지가 없습니다">🛒 상품바로가기</button>';
-  const chatBtn = chatUrl
-    ? '<button class="part-info-btn chat" onclick="_partInfoOpenChat()">💬 팀채팅방</button>'
-    : '<button class="part-info-btn chat" disabled title="연결된 팀 채팅방이 없습니다">💬 팀채팅방</button>';
-  const submitBtn = submitItems.length > 1
-    ? '<button class="part-info-btn submit" onclick="_partInfoToggleSubmitPicker()" aria-expanded="false">📤 리뷰제출하기</button>'
-    : '<button class="part-info-btn submit" onclick="_partInfoSubmit(0)">📤 리뷰제출하기</button>';
-  const csGridBtn = csBtnHtml || '<button class="part-info-btn cs" disabled>🎧 1:1문의하기</button>';
-  const cancelGridBtn = _partInfoCancelBtnHtml(false)
-    || '<button class="part-info-btn cancel" disabled title="이 참여 건은 주문취소할 수 없습니다">🚫 주문취소</button>';
-
-  html = '<div class="part-info-grid" id="partInfoActionGrid">'
-    + productBtn + chatBtn + submitBtn + csGridBtn + captureBtn + cancelGridBtn;
-  if (submitItems.length > 1) {
-    /* 다건 그룹은 메인 그리드를 유지한 채 선택 목록만 펼친다. */
-    html += '<div class="part-info-picker" id="partInfoSubmitPicker">'
-      + '<div style="font-size:.72rem;color:#4B5563;font-weight:800;margin-bottom:7px">제출할 참여 건을 선택하세요</div>'
-      + submitItems.map((x, i) => {
-        const recipient = _partInfoParticipantName(x);
-        const label = recipient || ((i + 1) + '번째 참여 건');
-        return '<button onclick="_partInfoSubmit(' + i + ')" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;border:1.5px solid #BFDBFE;cursor:pointer;background:#fff;color:#1D4ED8;font-size:.82rem;font-weight:800;border-radius:12px;padding:11px 12px;margin-top:' + (i ? '8' : '0') + ';box-shadow:0 2px 7px rgba(37,99,235,.08)">'
-          + '<span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;flex:none;border-radius:50%;background:#DBEAFE;color:#2563EB;font-size:.72rem">' + (i + 1) + '</span>'
-          + '<span style="min-width:0;flex:1"><span style="display:block;color:#111827">' + escHtml(label) + '</span><span style="display:block;margin-top:2px;color:#6B7280;font-size:.67rem;font-weight:700">이 참여 건만 리뷰 제출</span></span>'
-          + '<i class="fas fa-chevron-right" style="color:#60A5FA;font-size:.72rem"></i></button>';
-      }).join('') + '</div>';
+  if (chatUrl){
+    html += '<button onclick="_partInfoOpenChat()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#FEE500;color:#191919;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;box-shadow:0 3px 10px rgba(250,225,0,.42)">💬 이 캠페인의 카톡 팀채팅방 입장</button>';
+  } else {
+    html += '<div style="text-align:center;font-size:.7rem;color:#9CA3AF;border:1.5px dashed #D1D5DB;border-radius:11px;padding:10px">연결된 팀 채팅방이 없어요</div>';
   }
-  html += '</div>';
+  if (!done){
+    const n = (_partInfoSubmitItems && _partInfoSubmitItems.length > 1) ? (' (' + _partInfoSubmitItems.length + '건)') : '';
+    html += '<button onclick="_partInfoSubmit()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">📤 리뷰제출하기' + n + '</button>';
+  }
+  html += reEditHtml;
+  html += csBtnHtml;
   box.innerHTML = html;
-}
-
-function _partInfoToggleSubmitPicker(){
-  const picker = document.getElementById('partInfoSubmitPicker');
-  const btn = document.querySelector('#partInfoActionGrid .part-info-btn.submit');
-  if (!picker || !btn) return;
-  const on = !picker.classList.contains('on');
-  picker.classList.toggle('on', on);
-  btn.setAttribute('aria-expanded', on ? 'true' : 'false');
-}
-
-/* ═══ 🚫 주문취소 (사용자 확정 2026-08-23) ═══
-   ★ 리뷰 제출 완료 건에는 **버튼 자체를 그리지 않는다**(사용자 확정 ②).
-   ★ 못 누를 때는 **숨기지 않고 흐리게 + 사유** — 왜 못 누르는지 모르면 문의가 늘어난다.
-   ★ 판정은 서버가 준 값만(사본 0). 값이 없으면(구버전 백엔드·조회 실패) 그리지 않는다. */
-function _partInfoCancelBtnHtml(done){
-  if (done || !_partInfoCoord) return '';
-  const g = _partInfoCancelable;
-  if (!g) return '';
-  if (g.ok) {
-    return '<button class="part-info-btn cancel" onclick="_partInfoOpenCancel()">🚫 주문취소</button>';
-  }
-  /* 버튼은 여섯 번째 칸을 지키고, 서버 사유만 그 아래 2열 전체 폭으로 보여준다. */
-  return '<button class="part-info-btn cancel" disabled style="cursor:not-allowed">🚫 주문취소</button>'
-    + '<div class="part-info-cancel-reason">' + escHtml(g.message || '') + '</div>';
-}
-
-let _pcReason = '', _pcBusy = false;
-function _partInfoOpenCancel(){
-  const g = _partInfoCancelable;
-  if (!_partInfoCoord || !g || !g.ok) return;
-  _pcReason = ''; _pcBusy = false;
-  let ov = document.getElementById('pcOvl');
-  if (!ov){
-    ov = document.createElement('div'); ov.id = 'pcOvl';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(16,24,40,.42);display:none;'
-      + 'align-items:flex-end;justify-content:center;z-index:12000';
-    /* ★ 바깥 클릭으로 닫지 않는다 — 입력해 둔 사유를 실수로 잃지 않게(Esc·[그대로 두기]만). */
-    document.body.appendChild(ov);
-  }
-  ov.style.display = 'flex';
-  const reasons = (g.reasons || []).map(function(r){
-    return '<button class="pcrsn" data-k="' + escHtml(r.key) + '" onclick="_pcPick(this)" '
-      + 'style="display:block;width:100%;text-align:left;border:1.5px solid #D1D5DB;background:#fff;'
-      + 'border-radius:10px;padding:10px 12px;font-size:.8rem;font-weight:700;margin-bottom:6px;cursor:pointer">'
-      + escHtml(r.label) + '</button>';
-  }).join('');
-  ov.innerHTML = '<div style="width:100%;max-width:440px;background:#fff;border-radius:18px 18px 0 0;'
-    + 'padding:18px 16px 20px;max-height:92vh;overflow:auto">'
-    + '<div style="font-size:1rem;font-weight:800">주문을 취소할까요?</div>'
-    + '<div style="font-size:.76rem;color:#6B7280;margin:3px 0 13px">' + escHtml(_partInfoTitleText()) + '</div>'
-    + '<div style="font-size:.76rem;font-weight:800;margin-bottom:7px">취소 사유를 알려주세요</div>'
-    + reasons
-    + '<input id="pcEtc" maxlength="200" placeholder="직접 입력 (선택)" style="width:100%;border:1.5px solid #D1D5DB;'
-    + 'border-radius:10px;padding:10px 12px;font-size:.8rem;font-family:inherit;margin-top:2px">'
-    + '<label style="display:flex;gap:8px;align-items:flex-start;background:#FEF2F2;border:1px solid #FECACA;'
-    + 'border-radius:10px;padding:10px 11px;font-size:.74rem;line-height:1.55;margin:11px 0 4px;cursor:pointer">'
-    + '<input type="checkbox" id="pcChk" onchange="_pcSync()" style="margin-top:2px">'
-    + '<span><b>되돌릴 수 없습니다.</b> 제출한 구매양식이 무효가 되고 작업 명단에서도 빠집니다.</span></label>'
-    + '<button id="pcGo" disabled onclick="_pcSubmit()" style="display:block;width:100%;text-align:center;border:none;'
-    + 'background:#DC2626;color:#fff;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;margin-top:8px;'
-    + 'cursor:pointer;opacity:.45">주문 취소하기</button>'
-    + '<button onclick="_pcClose()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;'
-    + 'background:#EEF3FB;color:#1B4F9C;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;'
-    + 'margin-top:8px;cursor:pointer">그대로 두기</button></div>';
-  /* Esc 리스너는 **최상위 1회만**(열 때마다 걸면 겹쳐 쌓인다). */
-  if (!window._pcKeyBound){
-    window._pcKeyBound = true;
-    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') _pcClose(); });
-  }
-}
-function _partInfoTitleText(){ return _partInfoCoordLabel || ''; }
-function _pcClose(){ const ov = document.getElementById('pcOvl'); if (ov) ov.style.display = 'none'; }
-function _pcPick(btn){
-  _pcReason = btn.getAttribute('data-k') || '';
-  const box = document.getElementById('pcOvl'); if (!box) return;
-  box.querySelectorAll('.pcrsn').forEach(function(b){
-    const on = b === btn;
-    b.style.borderColor = on ? '#DC2626' : '#D1D5DB';
-    b.style.background  = on ? '#FEF2F2' : '#fff';
-    b.style.color       = on ? '#B91C1C' : '';
-  });
-  _pcSync();
-}
-/* ★ 2단 확인 — 사유 선택 **그리고** 체크가 둘 다여야 열린다. */
-function _pcSync(){
-  const go = document.getElementById('pcGo'); const chk = document.getElementById('pcChk');
-  if (!go) return;
-  const ok = !!_pcReason && !!(chk && chk.checked) && !_pcBusy;
-  go.disabled = !ok; go.style.opacity = ok ? '1' : '.45';
-}
-async function _pcSubmit(){
-  if (_pcBusy || !_pcReason || !_partInfoCoord) return;
-  const user = getSavedUser();
-  const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
-  if (phone8.length !== 8){ try{ showToast('로그인 후 이용해주세요'); }catch(_){} return; }
-  _pcBusy = true; _pcSync();
-  const go = document.getElementById('pcGo'); if (go) go.textContent = '취소하는 중…';
-  try{
-    const etcEl = document.getElementById('pcEtc');
-    const r = await fetch(API_BASE_URL + '/api/review-edit/order-cancel', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phone8: phone8, name: (user && user.name) || '',
-        sheetId: _partInfoCoord.sheetId, tabName: _partInfoCoord.tabName, rowIndex: _partInfoCoord.rowIndex,
-        reasonKey: _pcReason, reasonEtc: (etcEl && etcEl.value) || '',
-      }),
-    });
-    const j = await r.json().catch(function(){ return {}; });
-    if (!r.ok || !j.ok) throw new Error(j.error || '취소하지 못했습니다.');
-    _pcDone();
-  }catch(e){
-    /* ★ 실패해도 입력한 사유를 지우지 않는다 — 다시 누르면 그대로 이어서 보낸다. */
-    _pcBusy = false; if (go) go.textContent = '주문 취소하기'; _pcSync();
-    try{ showToast((e && e.message) || '취소하지 못했습니다.'); }catch(_){}
-  }
-}
-function _pcDone(){
-  const ov = document.getElementById('pcOvl');
-  if (ov) ov.innerHTML = '<div style="width:100%;max-width:440px;background:#fff;border-radius:18px 18px 0 0;'
-    + 'padding:26px 18px 24px;text-align:center">'
-    + '<div style="font-size:1.9rem">✓</div>'
-    + '<div style="font-size:.98rem;font-weight:800;margin-top:4px">주문이 취소되었습니다</div>'
-    + '<div style="font-size:.76rem;color:#6B7280;margin:7px 0 4px;line-height:1.6">'
-    + '구매양식 제출이 무효 처리되고<br>작업 명단에서도 빠졌어요.</div>'
-    + '<div style="font-size:.7rem;color:#9CA3AF">담당자에게도 취소 사유가 함께 전달됩니다.</div>'
-    + '<button onclick="_pcAfter()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;'
-    + 'background:#EEF3FB;color:#1B4F9C;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;'
-    + 'margin-top:16px;cursor:pointer">리뷰 내역으로</button></div>';
-}
-function _pcAfter(){
-  _pcClose(); closePartInfo();
-  /* 목록에서 사라지는 것이 정상 동작이라(사용자 확정 ③) 그 자리에서 다시 불러온다. */
-  try {
-    const u = getSavedUser();
-    if (u && typeof loadReviewList === 'function') loadReviewList(u, { silent: true, force: true });
-  } catch(_){}
 }
 
 /* ═══ 참여상품 정보 팝업 → 1:1 문의 ═══
@@ -2907,7 +2192,7 @@ function _partInfoCsBtnHtml(){
   const badge = n > 0
     ? '<span style="display:inline-block;min-width:17px;height:17px;padding:0 5px;background:#EF4444;color:#fff;font-size:.62rem;font-weight:800;line-height:17px;text-align:center;border-radius:9px;margin-left:6px;vertical-align:middle;box-sizing:border-box">' + (n > 99 ? '99+' : n) + '</span>'
     : '';
-  return '<button class="part-info-btn cs" aria-label="1:1 문의하기" onclick="_partInfoOpenCs()">🎧 1:1문의하기' + badge + '</button>';
+  return '<button onclick="_partInfoOpenCs()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;cursor:pointer;background:#EEF3FB;color:#1B4F9C;font-size:.85rem;font-weight:800;border-radius:12px;padding:12px;margin-top:8px">🎧 1:1 문의하기' + badge + '</button>';
 }
 function _partInfoOpenCs(){
   const ctx = _partInfoCsCtx;
@@ -2923,77 +2208,7 @@ function _partInfoOpenReEdit(){
 }
 function _partInfoOpenChat(){ if (_partInfoChatUrl) window.open(_partInfoChatUrl, '_blank', 'noopener'); }
 function _partInfoOpenProduct(){ if (_partInfoProductUrl) window.open(_partInfoProductUrl, '_blank', 'noopener'); }
-function _partInfoCaptureTime(v){
-  if (!v) return '';
-  const d = new Date(v); if (isNaN(d)) return '';
-  try { return new Intl.DateTimeFormat('ko-KR', { timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(d); }
-  catch (_) { return ''; }
-}
-function _partInfoBindCaptureEsc(){
-  if (window._partInfoCaptureEscBound) return;
-  window._partInfoCaptureEscBound = true;
-  document.addEventListener('keydown', function(e){
-    const o = document.getElementById('partInfoCaptureOvl');
-    if (e.key === 'Escape' && o && o.classList.contains('on')) _partInfoCloseCapture();
-  });
-}
-function _partInfoOpenCapture(index){
-  const captures = _partInfoCaptureItems.length ? _partInfoCaptureItems : (_partInfoCaptureFileId ? [{ fileId:_partInfoCaptureFileId, uploadedAt:_partInfoCaptureUploadedAt, label:_partInfoCoordLabel || '참여상품' }] : []);
-  if (!captures.length) { try { showToast('연결된 구매 캡처가 없습니다.'); } catch (_){} return; }
-  let ovl = document.getElementById('partInfoCaptureOvl');
-  if (!ovl) {
-    ovl = document.createElement('div');
-    ovl.id = 'partInfoCaptureOvl';
-    ovl.className = 'ovl part-info-capture-ovl';
-    ovl.addEventListener('click', function(e){ if (e.target === ovl) _partInfoCloseCapture(); });
-    document.body.appendChild(ovl);
-  }
-  _partInfoBindCaptureEsc();
-  const selectedIndex = Number(index);
-  if (captures.length > 1 && !Number.isInteger(selectedIndex)) {
-    ovl.innerHTML = '<div class="re-edit-sheet" style="max-width:440px">'
-      + '<div class="re-edit-head"><div><i class="fas fa-camera" style="color:#17643A"></i> 구매캡처 선택</div>'
-      + '<button class="re-edit-x" onclick="_partInfoCloseCapture()" aria-label="닫기">&times;</button></div>'
-      + '<div class="part-info-capture-wrap"><div class="part-info-capture-meta">확인할 참여 건을 선택하세요.</div>'
-      + captures.map(function(capture, i){
-        return '<button class="part-info-capture-choice" onclick="_partInfoOpenCapture(' + i + ')"><span>📷</span><span>' + escHtml(capture.label || ((i + 1) + '번째 참여 건')) + '</span></button>';
-      }).join('') + '</div></div>';
-    ovl.classList.add('on');
-    document.body.style.overflow = 'hidden';
-    return;
-  }
-  const capture = captures[Number.isInteger(selectedIndex) ? selectedIndex : 0];
-  if (!capture) { try { showToast('구매 캡처를 찾지 못했습니다.'); } catch (_){} return; }
-  const at = _partInfoCaptureTime(capture.uploadedAt);
-  ovl.innerHTML = '<div class="re-edit-sheet" style="max-width:440px">'
-    + '<div class="re-edit-head"><div><i class="fas fa-camera" style="color:#17643A"></i> 내가 제출한 구매캡처</div>'
-    + '<button class="re-edit-x" onclick="_partInfoCloseCapture()" aria-label="닫기">&times;</button></div>'
-    + '<div class="part-info-capture-wrap">'
-    + '<div class="part-info-capture-meta">' + escHtml(capture.label || _partInfoCoordLabel || '참여상품')
-    + (at ? '<br>' + escHtml(at) + ' 제출' : '') + '</div>'
-    + '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId)) + '" alt="내가 제출한 구매 캡처">'
-    + '<div style="font-size:.68rem;color:#9CA3AF;line-height:1.5;margin-top:9px">주문번호와 주소 등 개인정보가 포함될 수 있어 본인 참여 내역에서만 확인할 수 있습니다.</div>'
-    + '</div></div>';
-  ovl.classList.add('on');
-  document.body.style.overflow = 'hidden';
-}
-function _partInfoCloseCapture(){
-  const ovl = document.getElementById('partInfoCaptureOvl');
-  if (ovl) ovl.classList.remove('on');
-  const part = document.getElementById('partInfoOvl');
-  document.body.style.overflow = part && part.classList.contains('on') ? 'hidden' : '';
-}
-/**
- * 리뷰내역의 묶음 카드는 표시만 함께 한다. 실제 제출 화면에는 선택한 한 행만 전달한다.
- * index 인자가 없거나 잘못된 다건 요청은 막아, 새 호출부가 다시 전체 배열을 제출하는 회귀를 차단한다.
- */
-function _partInfoSubmit(index){
-  const items = _partInfoSubmitItems || [];
-  const i = Number(index);
-  if (!Number.isInteger(i) || i < 0 || i >= items.length) return toast('제출할 참여 건을 선택해주세요');
-  closePartInfo();
-  goToSubmit([items[i]]);
-}
+function _partInfoSubmit(){ const items = _partInfoSubmitItems; closePartInfo(); if (items && items.length) goToSubmit(items); }
 function _escAttrX(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ═══════════════════════════════════════
@@ -3030,11 +2245,10 @@ function renderInlineSubList(subs) {
     } else {
       jHtml = '<span class="pf-muted">미등록</span>';
     }
-    const secureSub = (window._secureReviewerProfile?.identities || []).filter(x => x.type === "sub")[idx] || null;
-    const shoppingId = secureSub?.shoppingId || sub.shoppingId || "";
-    const identityKey = secureSub?.identityKey || "";
+    const initial = escHtml(((sub.name || '?').trim().charAt(0)) || '?');
     return `<article class="pf-acct">
       <div class="pf-head">
+        <div class="pf-avatar">${initial}</div>
         <div class="pf-id"><div class="pf-nm">
           <span class="pf-who">${escHtml(sub.name || '-')}</span>
           <span class="pf-ph">${escHtml(sub.phone || '')}</span>
@@ -3047,7 +2261,6 @@ function renderInlineSubList(subs) {
       </div>
       <div class="pf-lines">
         <div class="pf-ln"><span class="pf-k">주소</span><span class="pf-v">${addrHtml}</span></div>
-        <div class="pf-ln"><span class="pf-k">아이디</span><span class="pf-v" style="display:flex;gap:6px;align-items:center"><input id="pfSubShoppingId_${idx}" data-identity-key="${_escAttrX(identityKey)}" data-saved-value="${_escAttrX(shoppingId)}" value="${_escAttrX(shoppingId)}" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem"><button class="pf-edit" onclick="saveIdentityShoppingId(${idx + 1})">저장</button></span></div>
         <div class="pf-ln"><span class="pf-k">계좌</span><span class="pf-v">${bankHtml}</span></div>
         <div class="pf-ln"><span class="pf-k">소득</span><span class="pf-v">${incHtml}${_dot}${jHtml}</span></div>
       </div>
@@ -3491,16 +2704,12 @@ function showToast(msg) {
 }
 
 // Enter key support
-document.addEventListener("DOMContentLoaded", async () => {
-  await initPage();
+document.addEventListener("DOMContentLoaded", () => {
+  initPage();
   loadRecruitPreview();
   applyRecruitView();
-  // ★ 해시 진입 시 요청한 하단 탭을 자동 오픈.
-  //   #review = 리뷰 제출 완료 후 완료내역으로 복귀 / #my·#info = 구매양식 내정보 게이트.
-  if (location.hash === "#review") {
-    try { switchReviewSubTab("done"); } catch (_) {}
-    try { switchTab("review"); } catch (_) {}
-  } else if (location.hash === "#my" || location.hash === "#info") {
+  // ★ #my / #info 해시 진입 시 내정보/현황 탭 자동 오픈 (구매양식 내정보 게이트 배너 링크용)
+  if (location.hash === "#my" || location.hash === "#info") {
     try { switchTab("my"); } catch (_) {}
   }
   // ★ 063 2단계: 공고에서 "타계정 정보 먼저 등록하기"로 넘어온 경우 —
@@ -3550,7 +2759,6 @@ function switchTab(tab) {
   // 리뷰 내역 탭 진입 시 최신 데이터 재조회(로그인 상태일 때만)
   if (key === 'review') { try { const u = getSavedUser(); if (u && u.phone8) loadReviewList(u); } catch (_) {} }
   if (key === 'cs') { try { loadCsInbox(); } catch (_) {} }
-  _saveReviewerHomeView();
   window.scrollTo(0, 0);
 }
 
@@ -3667,7 +2875,7 @@ function renderCsInbox() {
 function csInboxOpen(idx) {
   const t = (_csInbox.threads || [])[idx];
   if (!t || !window.ReviewerCS) return;
-  ReviewerCS.openChat(t.campaignKey || '', t.campaignLabel || '문의', t.campaignSource || 'general', t.threadId);
+  ReviewerCS.openChat(t.campaignKey || '', t.campaignLabel || '문의', t.campaignSource || 'general');
 }
 /** 작업과 무관한 일반 문의 */
 function csInboxGeneral() {
@@ -3709,138 +2917,41 @@ async function loadReviewerNoticesHome() {
 }
 
 /* ═══ 모집공고 미리보기 (홈 인라인) ═══ */
-async function loadReviewerHomeBanner() {
-  const wrap = document.getElementById('reviewerHomeBanner');
-  if (!wrap) return;
-  wrap.style.display = 'none';
-  wrap.innerHTML = '';
-  try {
-    const res = await fetch(API_BASE_URL + '/api/reviewer/home-banner');
-    const json = await res.json();
-    const banner = json && json.banner;
-    if (!banner || !/^https?:\/\//i.test(banner.imageUrl || '') || !/^https?:\/\//i.test(banner.clickUrl || '')) return;
-    const imageUrl = escHtml(banner.imageUrl);
-    const clickUrl = escHtml(banner.clickUrl);
-    wrap.innerHTML = `<a href="${clickUrl}" target="_blank" rel="noopener noreferrer" style="display:block;border-radius:12px;overflow:hidden;background:#F1F5F9;box-shadow:0 2px 8px rgba(15,23,42,.08)"><img src="${imageUrl}" alt="광고 배너" width="1080" height="240" style="display:block;width:100%;height:auto;aspect-ratio:4.5/1;object-fit:cover"></a>`;
-    wrap.style.display = '';
-  } catch (_) { /* 배너 오류는 홈의 다른 콘텐츠를 막지 않는다. */ }
-}
-
-/* ═══ 127: 모집공고 종류 탭(리뷰체험단/블로그체험단) ═══
-   판정은 서버가 준 work_kind 정확 일치(빈 값·필드 부재 = 리뷰 — utils/workKind 어휘와 동일).
-   탭은 화면 필터일 뿐이라 렌더러는 기존 CampCards.cardHtml 한 벌 그대로(사본 0). */
-let _rcKind = (function(){ try{ const v = sessionStorage.getItem("rc_kind_v1"); return v === "blog" ? "blog" : "review"; }catch(_){ return "review"; } })();
-let _rcLastJson = null;
-/* ★ 재참여(재구매) 기간 안내(사용자 확정 2026-08-24) — 카드별로 "N일 후 재참여 가능"/
-   "지금 재참여 가능"을 썸네일에 표시한다. 목록 자체는 무인증 캐시 응답이라(카드에 개인화를
-   섞으면 캐시가 전 사용자에 공유돼 오염된다) **별도 왕복**으로 로그인 리뷰어의 phone8만 물어
-   받은 뒤, 카드 데이터에 병합해 다시 그린다(1차 렌더는 종전과 동일 — 이 조회가 실패해도
-   목록 자체는 그대로 뜬다). */
-let _rcRepurchaseStatus = {};
-let _rcRepurchaseFetchKey = "";
-function _rcKindOf(c){ return c && c.work_kind === "blog" ? "blog" : "review"; }
-function setRecruitKind(k){
-  _rcKind = k === "blog" ? "blog" : "review";
-  try{ sessionStorage.setItem("rc_kind_v1", _rcKind); }catch(_){}
-  _rcPaintKindTabs();
-  if (_rcLastJson) _renderRecruitPreview(_rcLastJson); else loadRecruitPreview();
-}
-function _rcPaintKindTabs(counts){
-  document.querySelectorAll(".rc-kind-tabs .rc-kt").forEach(b => {
-    b.classList.toggle("on", b.dataset.kind === _rcKind);
-    if (counts) {
-      const n = counts[b.dataset.kind] || 0;
-      b.innerHTML = (b.dataset.kind === "blog" ? "블로그체험단" : "리뷰체험단") + (n ? `<span class="n">${n}</span>` : "");
-    }
-  });
-}
-
-/* 재참여 안내 왕복 — 로그인 리뷰어의 phone8을 알 때만, 지금 화면에 걸린 공고 id들을 한 번에
-   묻는다(카드마다 따로 물으면 카드 수만큼 왕복이 생긴다). 같은 조합(공고 목록+번호)은
-   다시 묻지 않는다(재렌더가 재조회를 부르는 순환 방지). */
-async function _rcLoadRepurchaseStatus(ids) {
-  try {
-    const user = getSavedUser();
-    const phone8 = user && user.phone8;
-    let reviewerToken = user && user.reviewerToken;
-    // campaign.html의 서명 세션과 홈 표시 세션은 키가 다르다. 표시 세션에 토큰이 없는
-    // 기존 로그인도 동일 인물(이름+phone8)일 때만 서명 세션의 토큰을 사용한다.
-    if (!reviewerToken && user) {
-      try {
-        const store = user.adminPreview ? sessionStorage : localStorage;
-        const auth = JSON.parse(store.getItem("rapp_reviewer_auth") || "null");
-        const samePhone = String(auth && auth.phone8 || "").replace(/\D/g, "") === String(phone8 || "").replace(/\D/g, "");
-        const sameName = String(auth && auth.name || "").trim() === String(user.name || "").trim();
-        if (samePhone && sameName && (!auth.expAt || Date.now() <= auth.expAt)) reviewerToken = auth.reviewerToken || "";
-      } catch (_) { reviewerToken = ""; }
-    }
-    if (!phone8 || !reviewerToken || !ids.length) return;
-    // 상태는 시간에 따라 바뀌므로 목록 재조회 때마다 영구 캐시하지 않는다(1분 단위 갱신).
-    const key = phone8 + "|" + ids.slice().sort().join(",") + "|" + Math.floor(Date.now() / 60000);
-    if (key === _rcRepurchaseFetchKey) return;
-    _rcRepurchaseFetchKey = key;
-    const statusUrl = API_BASE_URL + "/api/campaign/my-repurchase-status?ids=" + encodeURIComponent(ids.join(","));
-    let res = await fetch(statusUrl, { headers: { "X-Reviewer-Token": reviewerToken } });
-    // 열린 채 12시간이 지난 화면도 잠금 안내를 잃지 않게 인증 만료 시 한 번 갱신 후 재시도한다.
-    if (res.status === 401) {
-      const refreshed = await _refreshReviewerHomeSession(user);
-      if (!refreshed) return;
-      reviewerToken = refreshed.reviewerToken;
-      res = await fetch(statusUrl, { headers: { "X-Reviewer-Token": reviewerToken } });
-    }
-    const json = await res.json();
-    if (!json || !json.ok) return;
-    const status = json.status || {};
-    // 요청한 공고의 예전 상태를 먼저 지운 뒤 현재 응답으로 교체한다. 관리자가 제한을 0일로
-    // 바꾸거나 이력이 취소되면 빈 응답도 기존 locked 캐시를 즉시 해제해야 한다.
-    const nextStatus = Object.assign({}, _rcRepurchaseStatus);
-    ids.forEach(id => { delete nextStatus[id]; });
-    _rcRepurchaseStatus = Object.assign(nextStatus, status);
-    if (_rcLastJson) _renderRecruitPreview(_rcLastJson);   // 병합된 데이터로 다시 그린다(위 키 덕분에 재조회는 없음)
-  } catch (_) { /* 재참여 안내는 부가 정보 — 실패해도 목록 자체는 그대로 뜬다 */ }
-}
-
+let _repurchaseStatus = {};
+let _repurchaseStatusKey = '';
 async function loadRecruitPreview() {
   try {
     const res = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
-    _rcLastJson = json;
-    _renderRecruitPreview(json);
-  } catch(e) {
-    const errHtml = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>모집공고 로드 실패</div>`;
-    const el1 = document.getElementById("recruitPreviewList");
-    const el2 = document.getElementById("recruitPreviewList2");
-    if (el1) el1.innerHTML = errHtml;
-    if (el2) el2.innerHTML = errHtml;
-  }
-}
-
-function _renderRecruitPreview(json) {
-  try {
+    // 공고 목록은 공용 캐시라 개인 상태를 싣지 않는다. 소유자 번호 하나만 보내면
+    // 서버가 등록 타계정까지 확장해 계정별 상태를 반환한다.
+    const user = getSavedUser();
+    const ids = (json.data || []).filter(c => c.participation_mode && c.status !== 'closed').map(c => c.id);
+    const p8 = user && String(user.phone8 || '').replace(/\D/g, '').slice(-8);
+    const statusKey = p8 + '|' + ids.slice().sort().join(',');
+    if (p8 && p8.length === 8 && ids.length && statusKey !== _repurchaseStatusKey) {
+      _repurchaseStatusKey = statusKey;
+      try {
+        const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?phone8=' + encodeURIComponent(p8) + '&ids=' + encodeURIComponent(ids.join(',')));
+        const sj = await sr.json();
+        _repurchaseStatus = (sj && sj.ok && sj.status) ? sj.status : {};
+      } catch (_) { _repurchaseStatus = {}; }
+    }
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈(campaign-cards.js)로 렌더 —
     //   카드 탭 시 전용 상세(campaign.html)로 이동해 참여·작업내용·인라인 제출 진행.
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
     // 정렬 = 지금 참여 가능한 공고가 위(오늘 마감된 건은 아래로) — 공용 규칙(campaign-cards.js)
-    // 127: 종류 탭 건수(탭에 표기 — 필터 전에 센다)
-    const _all = (json.data || []).filter(c => (c.participation_mode && c.status !== "closed") || (c.status === "active" && !c.participation_mode));
-    _rcPaintKindTabs({ review: _all.filter(c => _rcKindOf(c) === "review").length, blog: _all.filter(c => _rcKindOf(c) === "blog").length });
     const parts = window.CampCards
-      ? CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind))
-      : (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind);
-    // 재참여 안내 — 이미 받아 둔 결과가 있으면 카드 데이터에 병합(없으면 아래에서 조회 후 재렌더)
-    parts.forEach(c => {
-      const rs = _rcRepurchaseStatus[c.id];
-      if (rs) c.repurchase = rs;
-      else delete c.repurchase;   // 캐시된 목록 객체에 남은 이전 locked/ready 상태도 함께 제거
-    });
+      ? CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed"))
+      : (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+    parts.forEach(c => { if (_repurchaseStatus[c.id]) c.repurchase = _repurchaseStatus[c.id]; });
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
       : "";
-    if (parts.length) _rcLoadRepurchaseStatus(parts.map(c => c.id));
-    const list = (json.data || []).filter(c => c.status === "active" && !c.participation_mode && _rcKindOf(c) === _rcKind);
+    const list = (json.data || []).filter(c => c.status === "active" && !c.participation_mode);
 
     const html = partHtml + ((list.length === 0 && !partHtml)
-      ? `<div class="empty-state" style="padding:16px"><i class="fas fa-inbox"></i>${_rcKind === "blog" ? "진행 중인 블로그체험단 공고가 없습니다" : "현재 진행 중인 모집공고가 없습니다"}</div>`
+      ? `<div class="empty-state" style="padding:16px"><i class="fas fa-inbox"></i>현재 진행 중인 모집공고가 없습니다</div>`
       : list.map(c => {
           const channel = c.channel === "직접입력" ? (c.channel_custom || "") : (c.channel || "");
           const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + "원" : "";
@@ -3903,7 +3014,7 @@ function _renderRecruitPreview(json) {
     // 참여형 오픈예정 카운트다운 틱 + 0 도달 시 재조회(오픈 전환)
     if (partHtml && window.CampCards) CampCards.startTicker(loadRecruitPreview);
   } catch(e) {
-    const errHtml = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>모집공고 렌더 실패</div>`;
+    const errHtml = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>모집공고 로드 실패</div>`;
     const el1 = document.getElementById("recruitPreviewList");
     const el2 = document.getElementById("recruitPreviewList2");
     if (el1) el1.innerHTML = errHtml;
@@ -4014,7 +3125,7 @@ function closeOnboard(){ const o=document.getElementById('onboard'); if(o) o.cla
 </script>
 <script src="js/pwa.js"></script>
 <!-- 리뷰어 C/S 문의창구 -->
-<!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
+<!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/reviewer-cs.js"></script>
 </body>

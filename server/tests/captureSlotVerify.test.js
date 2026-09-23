@@ -27,27 +27,6 @@ ok('현영 탭은 리뷰+현금영수증 2슬롯 자동',
   JSON.stringify(keys(cs.effectiveCaptureSlots(null, '사업자현영'))) === JSON.stringify(['review', 'receipt']));
 ok('관리자 명시 설정(capture_slots)이 최우선',
   JSON.stringify(keys(cs.effectiveCaptureSlots([{ key: 'a', label: 'A' }], '사업자현영'))) === JSON.stringify(['a']));
-ok('모집공고 직접 설정도 리뷰+현금영수증 2슬롯으로 연결',
-  JSON.stringify(keys(cs.effectiveCaptureSlots(null, '', null, true))) === JSON.stringify(['review', 'receipt']));
-ok('모집공고가 현영인데 옛 명시 슬롯에 영수증이 없으면 선택 슬롯을 보탠다',
-  JSON.stringify(keys(cs.effectiveCaptureSlots([{ key: 'review', label: '리뷰' }], '', null, true)))
-    === JSON.stringify(['review', 'receipt']));
-ok('수동 slot2 현금영수증은 중복 추가 없이 영수증 역할로 판정',
-  cs.isCashReceiptSlot([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }], '', 'slot2'));
-const previousSlots = [{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }];
-ok('슬롯 삽입 후에도 기존 현금영수증 key를 보존',
-  JSON.stringify(cs.assignStableCaptureSlotKeys(['주문내역', '리뷰', '현금영수증'], previousSlots))
-    === JSON.stringify([{ key: 'slot3', label: '주문내역' }, { key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }]));
-ok('슬롯 재정렬 후에도 기존 제출 key를 보존',
-  JSON.stringify(cs.assignStableCaptureSlotKeys(['현금영수증', '리뷰'], previousSlots))
-    === JSON.stringify([{ key: 'slot2', label: '현금영수증' }, { key: 'review', label: '리뷰' }]));
-ok('기존 key를 보낸 라벨 변경은 같은 key를 유지',
-  cs.assignStableCaptureSlotKeys([{ key: 'slot2', label: '현영 증빙' }, { key: 'review', label: '리뷰' }], previousSlots)[0].key === 'slot2');
-ok('라벨만 보내는 구형 편집기에서도 첫 리뷰 슬롯 이름 변경은 review key를 유지',
-  cs.assignStableCaptureSlotKeys(['후기 캡처', '현금영수증'], previousSlots)[0].key === 'review');
-ok('공고 컨텍스트 장애 중에도 예약 receipt key는 영수증 역할·라벨을 유지',
-  cs.isCashReceiptSlot(null, '', 'receipt', null, false)
-  && cs.slotLabel(null, '', 'receipt', null, false) === '현금영수증');
 /* ★ 사용자 확정(2026-08-05): 현금영수증은 발행확정(배송완료·구매확정 후 0~3일) 전에는 캡처가
  *   존재할 수 없어 **완료 판정에서 제외**(required:false) — 화면 슬롯은 2개 그대로, 필수는 리뷰만. */
 ok('★ 현영 탭 완료 판정 = 리뷰만(현금영수증 슬롯은 선택 — 화면엔 뜨되 완료를 막지 않음)',
@@ -74,8 +53,6 @@ const submit = readS('routes/submit.routes.js');
 const search = readS('services/search.service.js');
 const diag = readS('routes/diag.routes.js');
 const revEdit = readS('routes/reviewEdit.routes.js');
-const tabConfig = readS('routes/tabconfig.routes.js');
-const indexApp = readF('js/index-app.js');
 
 ok('완료 판정(submit)이 공용 유틸 사용 — 자체 구현 없음',
   /require\('\.\.\/utils\/captureSlots'\)/.test(submit)
@@ -84,25 +61,15 @@ ok('완료 판정(submit)이 공용 유틸 사용 — 자체 구현 없음',
 //   검사 의미(세 재료를 다 읽는가)는 그대로고, 리뷰타입 인자 존재를 함께 고정한다.
 ok('완료 판정이 income_type·리뷰타입을 함께 읽는다(안 읽으면 현영/구매확정 슬롯을 못 봄)',
   /tc\.income_type AS income_type/.test(submit)
-  && /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt, _crRequired === true\)/.test(submit)
-  && /cashReceiptRequirementsForRows/.test(submit));
+  && /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(submit));
 ok('검색 응답이 파생 슬롯을 내려준다',
-  /cashReceiptRequirementsForRows/.test(search)
-  && /effectiveCaptureSlots\([\s\S]{0,220}_crMap\.get\(cashReceiptSubmissionRowKey/.test(search)
+  /effectiveCaptureSlots\(row\.captureSlots, row\.incomeType, _rtMap\.get/.test(search)
   && /tc\.income_type\s+AS "incomeType"/.test(search));
 ok('업로드 폴더 라벨이 공용 유틸 사용(리뷰타입 포함 — 087 2차)',
-  /slotLabelOf\([\s\S]{0,180}_campaignCashReceipt\)/.test(diag)
-  && /isCashReceiptSlot/.test(diag));
+  /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot, _tabReviewType\)/.test(diag));
 ok('리뷰 교체요청도 같은 라벨 규칙(파일이 다른 폴더로 흩어지지 않게)',
-  /slotLabelOf\(cfg\.capture_slots, cfg\.income_type, slot, rt, cr === true\)/.test(revEdit)
-  && /slotLabelOf\(tc\[0\]\?\.capture_slots, tc\[0\]\?\.income_type, k, _rt, _cr === true\)/.test(revEdit));
-ok('캡처 슬롯 저장은 기존 설정을 잠그고 stable key 부여를 적용',
-  /SELECT capture_slots FROM tab_configs[\s\S]*FOR UPDATE[\s\S]*assignStableCaptureSlotKeys\(raw, existing\[0\]\?\.capture_slots\)/.test(tabConfig));
-ok('탭 설정 변경은 내부 역할 + 담당 탭 범위를 통과해야 한다',
-  /router\.post\('\/config', authMiddleware, internalOnlyMiddleware, tabConfigWriteScopeMiddleware/.test(tabConfig));
-ok('관리자 슬롯 편집기는 저장된 key를 라벨 변경 뒤에도 서버로 돌려보낸다',
-  /row\.dataset\.slotKey = key \|\| ""/.test(indexApp)
-  && /captureSlots: slots/.test(indexApp));
+  /slotLabelOf\(cfg\.capture_slots, cfg\.income_type, slot, await reviewTypeForTab/.test(revEdit)
+  && /slotLabelOf\(tc\[0\]\?\.capture_slots, tc\[0\]\?\.income_type, k, _rt\)/.test(revEdit));
 
 /* ═══ 3단계: 검수 정책(실제 핸들러 · Gemini 스텁) ═══ */
 const orig = Module.prototype.require;
@@ -132,7 +99,7 @@ const cv = require('../src/services/captureVerify.service');
 
   await t('★★ AI 장애는 제출을 막지 않는다(fail-open)', 'throw', { base64: 'x', slotKey: 'review' }, 'skipped');
   await t('★★ 저확신도 통과 — 모호한 캡처로 리뷰어를 붙잡지 않는다', 'low', { base64: 'x', slotKey: 'review' }, 'skipped');
-  await t('리뷰 슬롯 + 리뷰 캡처 = 통과', 'ok', { base64: 'x', slotKey: 'review' }, 'ok');
+  await t('리뷰 슬롯 + 리뷰 이미지 = 통과', 'ok', { base64: 'x', slotKey: 'review' }, 'ok');
   await t('리뷰 슬롯에 영수증이 오면 경고', 'receipt', { base64: 'x', slotKey: 'review' }, 'mismatch');
   await t('영수증 슬롯 + 영수증 = 통과', 'receipt', { base64: 'x', slotKey: 'receipt' }, 'ok');
   await t('영수증 사업자번호가 회사와 다르면 경고', 'bizmismatch',

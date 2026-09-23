@@ -8,10 +8,10 @@
 // saveGasUrl() 실행 시 GAS PropertiesService에도 저장되어
 // 다음 접속자는 GAS에서 자동으로 URL을 가져옵니다.
 // ★ [Node.js 이관] GAS URL → API_BASE_URL 대체
-const BOOTSTRAP_GAS_URL = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "http://localhost:3000";
+const REVIEW_API_URL = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "http://localhost:3000";
 
 const DEFAULT_CONFIG = {
-  GAS_WEB_APP_URL: BOOTSTRAP_GAS_URL,
+  GAS_WEB_APP_URL: REVIEW_API_URL,
   BASE_SHEET_ID: "1YW2KgPo-fvwBUS1nuzWTutqE_n2RVAnHPXXYVn4o2i4",
   BASE_SHEET_GID: "240447267",
   COL_ALIASES: {
@@ -41,9 +41,9 @@ const APP_CONFIG = (() => {
     if (raw) stored = JSON.parse(raw);
   } catch (_) {}
   const cfg = Object.assign({}, DEFAULT_CONFIG, stored);
-  // ★ BOOTSTRAP_GAS_URL이 하드코딩된 경우 항상 우선 적용
+  // Deployment-selected API endpoint always takes precedence.
   //    (localStorage 값이 달라도 코드에 박힌 URL 사용)
-  if (BOOTSTRAP_GAS_URL) cfg.GAS_WEB_APP_URL = BOOTSTRAP_GAS_URL;
+  cfg.GAS_WEB_APP_URL = REVIEW_API_URL;
   return cfg;
 })();
 

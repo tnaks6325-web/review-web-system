@@ -23,7 +23,6 @@ const { enqueue } = require('./syncQueue.service');
 const { registerReviewer } = require('./reviewer.service');
 const { findSubAccount } = require('./identity.service');
 const { digits } = require('../utils/slashForm');
-const purchaseSessions = require('./purchaseSubmissionSession.service');
 
 /** 외부 대리제출 건의 출처 표시.
  *  ★ diag의 `order-manual-add`가 `order_submissions.source='manual'`을 쓰므로 그 값과 겹치면
@@ -148,49 +147,6 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
 }
 
 /**
- * 오늘 남은 자리 — "일 정원(daily quota) 대비 몇 명 더 받을 수 있나".
- *
- * ★★ **판정 사본 금지** — 정원은 `computeCampaignState` 하나가 정한다(리뷰어 apply 게이트·카드
- *    게이지·[📅 인원] 이 보는 그 값). 여기서 `daily_limit` 을 직접 세면 066 이월·095 날짜별 조절·
- *    098 이월 보류·총량 clamp 를 모르는 두 번째 기준이 생겨 "화면은 15인데 서버는 20"으로 갈린다.
- *
- * ★ **모르면 막지 않는다(fail-soft)** — 조회 실패·판정 불가·무제한(quota<=0)은 `null` 을 돌려주고
- *   호출부는 종전대로 통과시킨다. 외부모집은 이미 약속된 구매라, 우리 오류로 접수를 막는 쪽이 나쁘다.
- *
- * @returns {Promise<{remaining:number, quota:number, todayCount:number}|null>}
- */
-async function dailyRemainingForCampaign(db, campaignId, now = new Date()) {
-  if (!campaignId) return null;
-  try {
-    const { rows } = await db.query('SELECT * FROM recruit_campaigns WHERE id = $1', [campaignId]);
-    if (!rows.length || rows[0].participation_mode !== true) return null;
-    const camp = rows[0];
-    const { fetchCampaignCounts, computeCampaignState } = require('./campaignState.service');
-    const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('./campaignSchedule.service');
-    const counts = await fetchCampaignCounts(db, [campaignId], now);
-    let stateCounts = counts.get(campaignId);
-    if (camp.linked_sheet_id && camp.linked_tab_name) {
-      try {
-        const { todayFilledForTab } = require('./tabFilled.service');
-        const filled = await todayFilledForTab(db, camp.linked_sheet_id, camp.linked_tab_name, now);
-        if (filled != null) stateCounts = { ...(stateCounts || {}), tableTodayFilled: Math.max(0, Number(filled) || 0) };
-      } catch (e) {
-        logger.warn(`[manual-order] 작업표 오늘 채움 집계 실패(공고 신청 기준 유지) camp=${campaignId}: ${e.message}`);
-      }
-    }
-    const sch = await deriveSchedules(db, tabsOfCampaigns([camp]), now);
-    const st = computeCampaignState(camp, stateCounts, now, scheduleFor(sch, camp));
-    const quota = Number(st.dailyQuota) || 0;
-    if (quota <= 0) return null;                      // 무제한·정원 개념 없음 = 판정하지 않는다
-    const todayCount = Number(st.todayCount) || 0;
-    return { remaining: Math.max(0, quota - todayCount), quota, todayCount };
-  } catch (e) {
-    logger.warn(`[manual-order] 일 정원 판정 실패(통과 처리) camp=${campaignId}: ${e.message}`);
-    return null;
-  }
-}
-
-/**
  * 참여형 캠페인 신청 행 생성 → 즉시 확정(submitted). 정원 차감의 유일한 수단
  * (정원 = campaign_applications.status='submitted' 행 수).
  * 잠금 계층 준수: recruit_campaigns FOR UPDATE → 신청 행.
@@ -216,79 +172,45 @@ async function confirmExternalApplication(client, {
     }
   }
 
+  // 같은 (캠페인, 명의)로 이미 확정된 참여가 있으면 중복 차단(리뷰어 apply와 같은 규칙)
+  const { rows: dup } = await client.query(
+    `SELECT id FROM campaign_applications
+      WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`, [campaignId, phone8]);
+  if (dup.length) return { ok: false, error: `이 캠페인에 이미 확정된 참여(#${dup[0].id})가 있습니다` };
+
+  // 정원 확인 — 외부모집은 이미 약속된 건이라 기본 허용하되, 초과 사실은 호출부에 알린다
+  const total = Number(cRows[0].recruit_total) || 0;
+  let overCapacity = false;
+  if (total > 0) {
+    const { rows: cnt } = await client.query(
+      `SELECT COUNT(*)::int AS n FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`, [campaignId]);
+    if (cnt[0].n >= total) {
+      if (!allowOverCapacity) return { ok: false, error: `모집 정원(${total}명)이 이미 찼습니다` };
+      overCapacity = true;
+    }
+  }
+
   let appId;
   const selectedId = parseInt(targetApplicationId, 10);
-  let selectedApplication = null;
   if (selectedId) {
+    // ★ 전화번호만으로 가장 최근 applied를 잡으면, 만료 홀드 정리 뒤 생성된 새 홀드를
+    // 이전 외부주문으로 확정할 수 있다. 선택된 신청을 캠페인·명의까지 묶어 잠근다.
     const { rows: selected } = await client.query(
-      `SELECT id, status,
-              (status = 'applied' AND expires_at > NOW()) AS active_hold
-         FROM campaign_applications
+      `SELECT id, status FROM campaign_applications
         WHERE id = $1 AND campaign_id = $2 AND phone8 = $3 FOR UPDATE`,
       [selectedId, campaignId, phone8]);
     if (!selected.length) return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청을 찾을 수 없거나 연락처가 일치하지 않습니다' };
     if (!['applied', 'expired', 'cancelled'].includes(selected[0].status)) {
       return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청은 확정할 수 있는 상태가 아닙니다' };
     }
-    selectedApplication = selected[0];
-  }
-
-  // 정원 확인 — 외부모집은 이미 약속된 건이라 기본 허용하되, 초과 사실은 호출부에 알린다
-  let capacityTotal = Number(cRows[0].recruit_total) || 0;
-  let overCapacity = false;
-  let capacityUsed = 0;
-  let capacitySource = 'applications';
-  let capacityUnknown = false;
-  const hasLinkedOrderLedger = !!(cRows[0].linked_sheet_id && cRows[0].linked_tab_name);
-  if (capacityTotal > 0 || hasLinkedOrderLedger) {
-    const { rows: cnt } = await client.query(
-      `SELECT COUNT(*)::int AS n FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`, [campaignId]);
-    capacityUsed = Number(cnt[0] && cnt[0].n) || 0;
-    // 연결 공고는 신규 참여·날짜계획과 같은 주문 원장 총량을 본다. 이 경로는 이미 구매된 건의
-    // 사후 기록이므로 조회 실패나 초과여도 기록 자체는 버리지 않고 경고 재료만 반환한다.
-    if (hasLinkedOrderLedger) {
-      try {
-        const { fetchCampaignCounts, totalQuotaUsage } = require('./campaignState.service');
-        const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('./campaignSchedule.service');
-        const now = new Date();
-        const counts = (await fetchCampaignCounts(client, [campaignId])).get(campaignId) || null;
-        // 일반 참여 게이트와 같은 일정 총량을 사용한다. 일정이 적용되지 않는 공고는 null로
-        // 돌아와 공고/발주 총량으로 자연스럽게 폴백한다.
-        const schedules = await deriveSchedules(client, tabsOfCampaigns(cRows), now);
-        const usage = totalQuotaUsage(cRows[0], counts, scheduleFor(schedules, cRows[0]));
-        capacityTotal = Number(usage.cap) || capacityTotal;
-        capacityUnknown = !usage.known;
-        // 이 함수가 호출될 때 주문 원장은 이미 만들어져 있어 usage.orders에 현재 주문도 포함된다.
-        // 초과 여부는 "이 주문 직전" 소비량으로 판정해야 마지막 정상 주문을 초과로 오인하지 않는다.
-        const currentOrder = orderSubmissionId && usage.source === 'order_ledger' ? 1 : 0;
-        // 선택한 유효 홀드는 이미 소비량에 포함된 자리다. submitted 전환을 새 1건으로 오인해
-        // 10/10의 마지막 정상 구매를 11번째 초과로 경고하지 않도록 그 홀드 하나만 제외한다.
-        const selectedHold = selectedApplication && selectedApplication.active_hold ? 1 : 0;
-        const ledgerBase = usage.source === 'order_ledger'
-          ? Math.max(Number(usage.submitted) || 0, Math.max(0, (Number(usage.orders) || 0) - currentOrder))
-          : (Number(usage.submitted) || 0);
-        const usedBeforeThisConfirmation = ledgerBase
-          + Math.max(0, (Number(usage.activeHolds) || 0) - selectedHold);
-        capacityUsed = Math.max(capacityUsed, usedBeforeThisConfirmation);
-        capacitySource = usage.source;
-      } catch (e) {
-        capacityUnknown = true;
-        logger.warn(`[manual-order] 주문 원장 총량 확인 실패(외부구매 기록은 계속) camp=${campaignId}: ${e.message}`);
-      }
-    }
-    if (capacityTotal > 0 && capacityUsed >= capacityTotal) {
-      if (!allowOverCapacity) return { ok: false, error: `모집 정원(${capacityTotal}명)이 이미 찼습니다` };
-      overCapacity = true;
-    }
-  }
-
-  if (selectedId) {
-    appId = selectedApplication.id;
+    appId = selected[0].id;
     await client.query(
       `UPDATE campaign_applications
           SET status = 'submitted', submitted_at = NOW(), order_submission_id = $2, option_key = COALESCE($3, option_key)
         WHERE id = $1`, [appId, orderSubmissionId, optionKey || null]);
   } else {
+    // ★ 기존 신청이 하나라도 있으면 자동 추측 금지. 특히 재참여로 새 applied가 생긴 경우
+    // 이전 주문과 섞이지 않게 운영자가 신청을 명시 선택해야 한다.
     const { rows: candidates } = await client.query(
       `SELECT id FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2
@@ -307,20 +229,9 @@ async function confirmExternalApplication(client, {
     appId = ins.rows[0].id;
   }
 
-  /* 외부모집 수동제출도 일반 홀드 제출과 같은 불변 역링크를 남긴다. 신청 쪽
-     order_submission_id가 취소 때 비워져도 모집공고 로그가 원래 제출시각·출처를 복구할 수 있다. */
-  if (orderSubmissionId) {
-    await client.query(
-      `UPDATE order_submissions
-          SET campaign_application_id = COALESCE(campaign_application_id, $2)
-        WHERE id = $1::uuid`,
-      [orderSubmissionId, appId]
-    );
-  }
-
   const { maybePersistClosed } = require('./campaignHold.service');
   await maybePersistClosed(client, campaignId);
-  return { ok: true, applicationId: appId, overCapacity, capacityUsed, capacityTotal, capacitySource, capacityUnknown };
+  return { ok: true, applicationId: appId, overCapacity };
 }
 
 /**
@@ -328,12 +239,18 @@ async function confirmExternalApplication(client, {
  * @returns {{ok:boolean, orderSubmissionId?:string, sheetRow?:number, warnings:string[], error?:string, ...}}
  */
 async function submitExternalOrder({
-  sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
-  allowOverDaily = false, allowRepurchase = false,
-  repurchaseDaysOverride,
+  sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false, allowRepurchase = false,
 }) {
   const warnings = [];
   const f = fields || {};
+  if (!allowRepurchase) {
+    try {
+      const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
+      const rw = await checkRepurchaseWindow(pool, { sheetId, tabName, phone: f.phone });
+      if (rw.blocked) return { ok: false, repurchaseBlocked: true, days: rw.days, availableFrom: rw.availableFrom,
+        error: `이 참여계정은 최근 ${rw.days}일 안에 같은 작업에 참여한 이력이 있습니다.` };
+    } catch (e) { warnings.push('재참여 기간 확인 실패(제출은 계속): ' + e.message); }
+  } else warnings.push('재참여 기간 제한을 관리자 확인으로 넘겨 접수했습니다');
   const phoneDigits = digits(f.phone);
   const p8 = phoneDigits.slice(-8);
   if (phoneDigits.length < 10) {
@@ -361,51 +278,19 @@ async function submitExternalOrder({
     } catch (e) { warnings.push('중복 확인 실패(제출은 계속): ' + e.message); }
   }
 
-  // ⓪-1.5 재참여(재구매) 기간 제한 — **"같은 작업(탭)" 기준**(사용자 확정 2026-08-24). 위 24시간
-  //     중복 체크는 사고 방지용이고, 이 기간 판정이 반복 참여 허용 여부의 단일 정책이다.
-  //     이번에 문제된 사고(8/20 참여 → 4일 뒤 이 화면으로 같은 탭 재구매)는 캠페인 지정 없이
-  //     등록될 때 ⓪-2가 통째로 비활성화되면서 통과됐다 — 그래서 여기서는 campaignId 유무와
-  //     무관하게 항상 본다. 단일 출처 = utils/repurchaseGuard(리뷰어 셀프 참여와 공용).
-  //     ★ 여기만 유일하게 확인 후 강제 통과(allowRepurchase)를 허용한다(관리자가 "다른 사람인데
-  //     번호만 같다" 같은 사정을 판단해 넘길 수 있게 — 사용자 확정, 리뷰어 셀프 참여는 예외 없음).
-  if (!allowRepurchase) {
-    try {
-      const { checkRepurchaseWindow, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
-      const effectiveRepurchaseDays = repurchaseDaysOverride === undefined
-        ? await resolveCampaignRepurchaseDays(pool, campaignId)
-        : repurchaseDaysOverride;
-      const rw = await checkRepurchaseWindow(pool, {
-        sheetId, tabName, campaignId, phone: f.phone, days: effectiveRepurchaseDays,
-      });
-      if (rw.blocked) {
-        const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
-          timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
-        });
-        return {
-          ok: false, repurchaseBlocked: true, days: rw.days, availableFrom: rw.availableFrom,
-          error: `이 작업은 최근 ${rw.days}일 안에 같은 연락처로 이미 참여한 이력이 있습니다 — ${dateStr} 이후 다시 가능합니다. 다른 사람인데 번호만 같다면 확인 후 강제로 등록할 수 있습니다.`,
-        };
-      }
-    } catch (e) { warnings.push('재참여 기간 확인 실패(제출은 계속): ' + e.message); }
-  } else {
-    warnings.push('재참여 기간 제한을 넘겨 접수했습니다(관리자 확인됨)');
-  }
-
-  // ⓪-2 참여형이면 **원장 기록 전에** 확정할 기존 신청을 명시적으로 고른다 — 나중에 거절되면
+  // ⓪-2 참여형이면 **원장 기록 전에** 확정 가능 여부를 본다 — 나중에 거절되면
   //     시트 행만 생기고 정원은 안 깎이는 어긋난 상태가 남는다.
-  let selectedApplication = null;
   if (campaignId) {
     try {
-      const selectedId = parseInt(targetApplicationId, 10);
-      if (selectedId) {
-        const { rows: selected } = await pool.query(
-          `SELECT id, status, option_key FROM campaign_applications
-            WHERE id = $1 AND campaign_id = $2 AND phone8 = $3`, [selectedId, campaignId, p8]);
-        if (!selected.length || !['applied', 'expired', 'cancelled'].includes(selected[0].status)) {
-          return { ok: false, reason: 'application_target_invalid', error: '선택한 참여 신청을 찾을 수 없거나 확정할 수 없는 상태입니다' };
-        }
-        selectedApplication = selected[0];
-      } else {
+      const { rows: pre } = await pool.query(
+        `SELECT id FROM campaign_applications
+          WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`, [campaignId, p8]);
+      if (pre.length) {
+        return { ok: false, duplicate: true, error: `이 공고에 이미 확정된 참여(#${pre[0].id})가 있습니다` };
+      }
+      // 원장을 만들기 전에 선택 누락을 막아, 식별 불가 주문이 원장만 남는 상태를 피한다.
+      // 단, 동시 재참여는 아래 확정 트랜잭션에서도 다시 검사한다.
+      if (!parseInt(targetApplicationId, 10)) {
         const { rows: existing } = await pool.query(
           `SELECT id FROM campaign_applications
             WHERE campaign_id = $1 AND phone8 = $2
@@ -418,28 +303,9 @@ async function submitExternalOrder({
     } catch (e) { warnings.push('참여 이력 확인 실패(제출은 계속): ' + e.message); }
   }
 
-  // ⓪-3 일 정원(오늘 몫) 게이트 — **원장 기록 전에** 본다(⓪-2 와 같은 이유: 뒤에서 거절하면
-  //     시트 행만 생기고 정원은 안 깎이는 어긋난 상태가 남는다).
-  //   ★★ **막지 않는다 — 확인만 받는다**(사용자 확정 2026-08-19 "나"안): 외부모집은 **이미 구매가
-  //     끝난 건의 사후 등록**이라, 막으면 되돌릴 수 없는 구매가 시스템에 기록되지 않은 채 남는다
-  //     (초과를 막는 것보다 기록이 비는 쪽이 훨씬 나쁘다). 확인은 '허가'가 아니라 '고지'다. 대신 `allowOverDaily` 없이 오면 초과 사실과 숫자를
-  //     돌려주고, 담당자가 확인창에서 승인해 재전송하면 그대로 접수한다.
-  //   ★ 종전에는 총 정원(`recruit_total`)만 봤고 일 정원은 **아예 보지 않아**, 오늘 몫이 찬 뒤에도
-  //     아무 신호 없이 들어갔다(2026-08-19 실측: 정원 15인 두 공고에 각 +2, 확정 17).
-  if (campaignId && !allowOverDaily) {
-    const dq = await dailyRemainingForCampaign(pool, campaignId);
-    if (dq && dq.remaining <= 0) {
-      return {
-        ok: false, overDaily: true, quota: dq,
-        error: `오늘 모집인원(${dq.quota}명)이 이미 찼습니다 — 현재 ${dq.todayCount}명. 이미 구매가 끝난 건이므로 초과로 기록하려면 확인이 필요합니다`,
-      };
-    }
-  }
-
   // ①-0 옵션 확정 — 화면 값 → 살아있는 홀드 → 공고에 옵션이 하나뿐이면 그것.
   //   (셋 다 아니면 배정 행의 기존 값을 되쓴다 — 아래 ② 뒤에서 처리)
   let resolvedOptKey = String(optionKey || '').trim();
-  if (!resolvedOptKey && selectedApplication && selectedApplication.option_key) resolvedOptKey = selectedApplication.option_key;
   if (!resolvedOptKey && campaignId) {
     try {
       const { rows: h } = await pool.query(
@@ -459,18 +325,12 @@ async function submitExternalOrder({
   //   (리뷰어 제출 경로 submit.routes 와 같은 규율 — 8/3 상품명이 리뷰옵션 칸을 덮은 사고 재현 방지).
   //   빈 값 = "안 고름" = 배정 행의 기존 옵션값을 되쓴다(칸을 지우지 않는다).
   //   ★ 조회 실패는 종전 동작(그대로 사용) — fail-open.
-  /* ★ 138 선택 상품 — 옵션 칸을 비우는 위 규율은 그대로 두고, 그 상품명을 **별개의 「상품」 칸**으로
-     흘려보낸다(리뷰어 제출 경로와 같은 규율). 같은 왕복에서 읽으므로 쿼리 순증 0. */
-  let resolvedProduct = '';
   if (resolvedOptKey && campaignId) {
     try {
       const { rows: u } = await pool.query(
-        `SELECT unit_kind, product_name FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`,
+        `SELECT unit_kind FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`,
         [campaignId, resolvedOptKey]);
-      if (u.length) {
-        resolvedProduct = String(u[0].product_name || '');
-        if (String(u[0].unit_kind || '') === 'product') resolvedOptKey = '';
-      }
+      if (u.length && String(u[0].unit_kind || '') === 'product') resolvedOptKey = '';
     } catch (_) { /* fail-open: 종전 동작 */ }
   }
 
@@ -490,24 +350,11 @@ async function submitExternalOrder({
     dateStr: todayKstDateStr(), orderNum: f.orderNum || '',
     memo: `외부모집 수동제출${adminName ? ' · ' + adminName : ''}`,
     selectedOptKey: resolvedOptKey || '',
-    selectedProduct: resolvedProduct || '',   // ★ 138 — 고른 상품은 「상품」 칸으로(옵션 칸과 별개)
   };
-  let queuedWorkboardApply = false;
-  try {
-    const target = await require('./workboardQueueApply.service').resolveQueuedWorkboardTarget({ sheetId, tabName });
-    queuedWorkboardApply = !!target.enabled;
-  } catch (e) {
-    logger.warn(`[manual-order] 작업보드 큐 대상 판정 실패 — 기존 경로 유지: ${e.message}`);
-  }
   const ledger = await createOrderLedgerEntry({
     sheetId, tabName, gid, orderData,
     slotRowNumber: null,
     loginPhone8: p8, loginName: f.recipient || '',
-    skipSheetMirror: queuedWorkboardApply,
-    deferSheetlessApply: queuedWorkboardApply,
-    // 작업표의 정원 밖 완성 행 허용은 이 출처가 DB에 확정돼야만 가능하다.
-    // 사후 best-effort UPDATE로 두면 일시 오류 때 정상 외부모집 건이 빈 슬롯 취급된다.
-    source: SOURCE_EXTERNAL,
     // 신규 신청 행을 우리가 직접 만들어 확정하므로 홀드 문맥은 넘기지 않는다(이중 확정 방지)
   });
 
@@ -515,6 +362,11 @@ async function submitExternalOrder({
   //   원장(selected_opt_key)이나 신청(option_key)으로 역주입하지 않는다 —
   //   관리자 작업지시값이 "리뷰어가 고른 옵션"으로 굳어 정원·CS·정산이 오독한다.
   //   (역주입은 리뷰어 제출 경로와도 갈려 "수동제출만 다르게 동작"하는 드리프트를 만든다.)
+
+  // 출처 표시 — 목록에서 대리제출 건을 구분
+  try {
+    await pool.query('UPDATE order_submissions SET source = $2 WHERE id = $1', [ledger.orderSubmissionId, SOURCE_EXTERNAL]);
+  } catch (_) { /* 표시 실패는 접수에 영향 없음 */ }
 
   // ③ 참여형이면 정원 차감
   let application = null;
@@ -528,12 +380,7 @@ async function submitExternalOrder({
         targetApplicationId,
         sheetId, gid: ledger.tabGid || gid || '', tabName,
       });
-      if (r.ok) {
-        await client.query('COMMIT');
-        application = r;
-        if (r.overCapacity) warnings.push(`총 모집 ${r.capacityTotal}건을 넘어 ${r.capacityUsed + 1}번째 주문으로 기록했습니다`);
-        if (r.capacityUnknown) warnings.push('주문 원장 총량을 확인하지 못했지만 이미 구매된 건이라 기록했습니다');
-      }
+      if (r.ok) { await client.query('COMMIT'); application = r; if (r.overCapacity) warnings.push('모집 정원을 초과해 확정했습니다'); }
       else { await client.query('ROLLBACK'); warnings.push(r.skipped ? '참여형 공고가 아니라 정원 차감은 건너뜁니다' : ('정원 반영 실패: ' + r.error)); }
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
@@ -545,40 +392,21 @@ async function submitExternalOrder({
   //   ★ 판정은 `sheetlessScope` 단일 출처. 실패 시 종전 경로(fail-open) — 큐 실행부가 최종 방어.
   let queued = false;
   let sheetlessDone = null;
-  // resolveQueuedWorkboardTarget가 이미 sheetless+승인+연결을 확인한 새 경로는 두 번째 조회에
-  // 의존하지 않는다. 이 조회가 일시 실패해도 주문이 큐 없이 pending으로 고립되면 안 된다.
-  let isSl = queuedWorkboardApply;
-  if (!queuedWorkboardApply) {
-    try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); }
-    catch (_) { isSl = false; }
-  }
-  if (queuedWorkboardApply) {
-    try {
-      await enqueue('workboard_apply', {
-        sheetId, tabName, tabGid: ledger.tabGid || gid || '', orderSubmissionId: ledger.orderSubmissionId,
-        loginPhone8: p8, loginName: f.recipient || '',
-      });
-      await markOrderQueued(ledger.orderSubmissionId);
-      queued = true;
-      try { require('../jobs/queuePump').kickQueuePump(); } catch (_) {}
-    } catch (e) {
-      await markOrderMirrorFailed(ledger.orderSubmissionId, e);
-      warnings.push('작업보드 반영 예약 실패: ' + e.message);
+  if (ledger.sheetRow) {
+    let isSl = false;
+    try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); } catch (_) { isSl = false; }
+    if (isSl) {
+      try {
+        sheetlessDone = await require('./sheetlessOrder.service').writeOrderToWorktable({
+          sheetId, tabName, tabGid: ledger.tabGid || gid || '',
+          sheetRow: ledger.sheetRow, orderData, orderSubmissionId: ledger.orderSubmissionId,
+          loginPhone8: p8, loginName: f.recipient || '',
+        });
+      } catch (e) { sheetlessDone = { ok: false, reason: 'exception', message: e.message }; }
+      if (!sheetlessDone.ok) warnings.push('작업표 기록 실패(자동복구 대상): ' + (sheetlessDone.message || sheetlessDone.reason));
     }
-  } else if (isSl) {
-    /* 외부모집은 원장 출처가 admin_external이고 수취인·연락처가 확정된 경우에만 작업표 서비스가
-       정원 밖의 완성 행을 허용한다. 그래서 sheetRow가 없어도 호출해야 하며, 일반 경로에는 이
-       서비스가 호출되지 않는다. */
-    try {
-      sheetlessDone = await require('./sheetlessOrder.service').writeOrderToWorktable({
-        sheetId, tabName, tabGid: ledger.tabGid || gid || '',
-        sheetRow: ledger.sheetRow, orderData, orderSubmissionId: ledger.orderSubmissionId,
-        loginPhone8: p8, loginName: f.recipient || '',
-      });
-    } catch (e) { sheetlessDone = { ok: false, reason: 'exception', message: e.message }; }
-    if (!sheetlessDone.ok) warnings.push('작업표 기록 실패(자동복구 대상): ' + (sheetlessDone.message || sheetlessDone.reason));
   }
-  if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
+  if (ledger.sheetRow && !sheetlessDone) {
     try {
       await enqueue('order_append', {
         sheetId, tabName, gid: ledger.tabGid || gid || '',
@@ -597,29 +425,16 @@ async function submitExternalOrder({
       await markOrderMirrorFailed(ledger.orderSubmissionId, e);
       warnings.push('시트 반영 예약 실패(자동복구 대상): ' + e.message);
     }
-  } else if (!ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
+  } else if (!ledger.sheetRow) {
     warnings.push('빈 행을 찾지 못해 보류 — 자동복구가 하단에 기록합니다');
   }
 
   logger.info(`[manual-order] 외부제출 tab=${tabName} name=${f.recipient} osid=${ledger.orderSubmissionId}`
     + (application ? ` app=${application.applicationId}` : '') + ` by=${adminName || '?'}`);
 
-  let captureSession = null;
-  try {
-    captureSession = await purchaseSessions.issueForOrder({
-      orderSubmissionId: ledger.orderSubmissionId,
-      captureSheetId: sheetId,
-      captureTabName: tabName,
-      source: SOURCE_EXTERNAL,
-    });
-  } catch (e) {
-    warnings.push('구매캡처 제출 세션 발급 실패: ' + e.message);
-  }
-
   return {
     ok: true,
     orderSubmissionId: ledger.orderSubmissionId,
-    captureSession,
     sheetRow: ledger.sheetRow || null,
     queued,
     reviewerRegistered: reviewerInfo.registered,
@@ -632,7 +447,6 @@ async function submitExternalOrder({
 
 module.exports = {
   submitExternalOrder,
-  dailyRemainingForCampaign,
   ensureExternalReviewer,
   confirmExternalApplication,
   todayKstDateStr,

@@ -187,7 +187,7 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   t('여러 건이면 개수를 표시하고 점은 가장 열린 상태', /공고 2/.test(h) && /wbl-cdot open/.test(h), h);
 
   h = ctx._campBtnHtml(tab([]), 2);
-  t('미발행(편집자) = 공고발행 — 띄어쓰기 없이 같은 칸 폭', />공고발행/.test(h) && !/공고 발행/.test(h), h);
+  t('미발행(편집자) = ＋공고발행 — 띄어쓰기 없이 같은 칸 폭', /＋공고발행/.test(h) && !/＋ 공고 발행/.test(h), h);
   ctx.STATE.campEdit = false;
   h = ctx._campBtnHtml(tab([]), 2);
   t('★ 편집 권한 없으면 발행 버튼을 아예 안 준다(눌러도 아무 일 없는 버튼 금지)', /disabled/.test(h) && !/openTabCampaign/.test(h), h);
@@ -196,62 +196,8 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   ctx.STATE.campsUnavailable = true;
   h = ctx._campBtnHtml(tab([]), 2);
   t('★ 조회 실패는 "공고 없음"이 아니라 비활성 + 사유(중복 발행 차단)',
-    /disabled/.test(h) && /공고 \?/.test(h) && !/>공고발행/.test(h), h);
+    /disabled/.test(h) && /공고 \?/.test(h) && !/＋공고발행/.test(h), h);
   ctx.STATE.campsUnavailable = false;
-
-  /* ── 모집이 다 찬 작업 = `모집완료` (사용자 확정 2026-09-22) ──────────────────────
-     참여수가 총건수에 도달하면 더 뽑을 것이 없다 → 발행 권유(공고발행)를 거두고, 공고가 있으면
-     "모집 중"과 글자가 같던 `공고` 도 완료로 말한다. 판정은 **참여 칸 파랑과 같은 함수**. */
-  const tabQ = (camps, stats, sheetless) => ({
-    sheetId: 'S1', tabName: "x'),alert(1),String('", tabGid: '1',
-    campaigns: camps, stats, sheetless: sheetless !== false,
-  });
-  const CAMP1 = [{ id: 'c1', title: '공고A', state: 'soft_full', status: 'closed', recruitTotal: 200 }];
-
-  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 200, submitted: 120, paid: 100 }), 5);
-  t('다 차면 모집완료 — 공고가 있으면 눌러서 그 공고를 연다',
-    />모집완료/.test(h) && /openTabCampaign\(5\)/.test(h) && !/disabled/.test(h) && /cmp done/.test(h), h);
-  t('★ onclick 에는 여전히 인덱스만(시트/공고 문자열 미보간 — XSS)', !/alert\(1\)/.test(h), h);
-
-  h = ctx._campBtnHtml(tabQ([], { total: 200, filled: 200 }), 6);
-  t('★ 공고가 없어도 다 찼으면 공고발행 대신 모집완료',
-    />모집완료/.test(h) && !/>공고발행/.test(h), h);
-  t('★★ 발행 길을 막지 않는다 — 흐리게 두되 여전히 눌린다(차수 추가가 정상 흐름)',
-    /cmp done dim/.test(h) && /openTabCampaign\(6\)/.test(h) && !/disabled/.test(h), h);
-  t('★ 왜 끝났는지 툴팁이 말한다(참여 N / 기준 M)', /참여 200명 \/ 200건/.test(h), h);
-
-  ctx.STATE.campEdit = false;
-  h = ctx._campBtnHtml(tabQ([], { total: 200, filled: 200 }), 6);
-  t('권한 없으면 누를 수 없다(서버 게이트와 1:1) — 표기는 그대로 모집완료',
-    /disabled/.test(h) && !/openTabCampaign/.test(h) && />모집완료/.test(h), h);
-  ctx.STATE.campEdit = true;
-
-  /* ★★ 모르는 것을 "완료"라고 말하지 않는다 — 틀린 완료 표기는 담당자가 남은 모집을 놓치게 한다. */
-  h = ctx._campBtnHtml(tabQ([], { total: 200 }), 7);                 // 구버전 백엔드 = 채움 수 미동봉
-  t('★ 채움 수를 모르면 종전 표기 그대로', />공고발행/.test(h) && !/>모집완료/.test(h), h);
-  h = ctx._campBtnHtml(tabQ([], null), 7);                            // 통계 자체가 없다
-  t('★ 통계가 아예 없어도 종전 표기 그대로', />공고발행/.test(h) && !/>모집완료/.test(h), h);
-  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 120 }), 8);
-  t('아직 안 찼으면 종전 [공고] 그대로', /공고</.test(h) && !/>모집완료/.test(h), h);
-
-  /* 총건수를 못 구하면 참여 칸과 **같은 폴백**(작업표 줄 수)으로 접되, 접었다는 사실을 말한다. */
-  h = ctx._campBtnHtml(tabQ([], { total: 50, filled: 50 }), 9);
-  t('★ 총건수를 몰라 줄 수로 접었으면 툴팁이 그 사실을 말한다',
-    />모집완료/.test(h) && /줄 수 기준/.test(h), h);
-
-  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 201 }), 10);
-  t('총건수를 넘겨 들어온 작업도 모집완료로 본다(056: 초과는 감추지 않는다)',
-    />모집완료/.test(h) && /넘겨 들어왔습니다/.test(h), h);
-  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 201 }, false), 10);
-  t('★ 초과 경고는 무시트 작업만 — 시트 기반 탭엔 붙지 않는다(거짓 경고 금지)',
-    !/넘겨 들어왔습니다/.test(h), h);
-
-  /* ★★ 판정 사본 0 — 참여 칸(_finNumCells)과 이 칸이 같은 함수를 본다. 따로 세면 한 줄 안에서
-     "참여는 200/200 파랑인데 옆 칸은 공고발행" 으로 갈린다. */
-  const campBody = grab('function _campBtnHtml(t,i){', '\n/** 작업오더·모집공고 편집 권한');
-  t('★★ 판정은 _finQuotaFill 하나 — 칸에서 다시 세지 않는다',
-    /const q=_finQuotaFill\(t\);/.test(campBody)
-    && !/filled>=/.test(campBody) && !/\.filled>/.test(campBody), campBody.slice(0, 200));
 
   t('레거시 공고 라벨은 status 로 만든다', ctx._campLabel({ state: 'legacy', status: 'active' }) === '진행중');
   t('레거시 마감도 회색(등급 2)', ctx._campRank({ state: 'legacy', status: 'closed' }) === 2);
@@ -273,16 +219,13 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   t('작업바 로드(stats 없음)에서 주석을 이월한다(버튼이 깜빡이며 사라지지 않게)', /_prevCamp\[k\]/.test(WD));
   t('여러 건은 생성일과 함께 고르게 한다(사용자 확정)', /_campPickerOpen/.test(WD) && /생성/.test(WD.slice(WD.indexOf('_campPickerOpen'), WD.indexOf('_campPickerClose'))));
   t('★ 선택 목록도 인덱스만 넘긴다', /_campPick\(\$\{i\},\$\{ci\}\)/.test(WD));
-  // ★ 인자 개수는 늘 수 있다(작업오더 id 전달 등) — 고정하는 것은 "공유 모달을 그대로 연다"는 사실이다.
-  t('모달은 기존 공유 모달을 그대로 연다(사본 금지)', /openRecruitModal\(id\|\|null, prefill[,)]/.test(WD));
+  t('모달은 기존 공유 모달을 그대로 연다(사본 금지)', /openRecruitModal\(id\|\|null, prefill\)/.test(WD));
   t('연결 탭 드롭다운 재료를 먼저 채운다(_recruitTabList 의존)', /loadRecruitTabOptions/.test(WD.slice(WD.indexOf('async function _campOpenModal'), WD.indexOf('function _campPickerOpen'))));
   t('미발행은 그 작업의 탭을 프리필한다', /linked_sheet_id:t\.sheetId, linked_tab_name:t\.tabName/.test(WD));
   t('★ 편집 권한은 홈 전용 플래그(STATE.campEdit) — 그리드 편집 플래그와 섞지 않는다',
     /STATE\.campEdit=!!\(r&&r\.ok&&r\.canEdit\)/.test(WD) && /campEdit:null/.test(WD));
   t('계정 전환 시 편집 플래그를 비운다(logout·401 둘 다)',
-    (WD.match(/campEdit:null,[^}]{0,160}campsUnavailable:false/g) || []).length >= 2);
-  t('계정 전환 시 명단 관리 플래그도 비운다(logout·401 둘 다)',
-    (WD.match(/canManageEditors:null/g) || []).length >= 3); // 초기값 + 두 전환 경로
+    (WD.match(/campEdit:null,campsUnavailable:false/g) || []).length >= 2);
 
   /* ── 6) 공유 모듈 무회귀 ─────────────────────────────────────── */
   console.log('\n6) index-recruit.js (관리자 대시보드 무회귀)');

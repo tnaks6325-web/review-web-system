@@ -17,8 +17,8 @@
  */
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { kstTodayStr, dateOnlyStr, isCarryHold, carryStrategy, heldCarry, pendingCarry, fetchCampaignCounts,
-  computeCampaignState, totalQuotaUsage } = require('./campaignState.service');
+const { kstTodayStr, dateOnlyStr, isCarryHold, heldCarry, pendingCarry, fetchCampaignCounts,
+  computeCampaignState } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
@@ -105,11 +105,6 @@ async function getPlanOverview(campaignId) {
   const { rows: allQ } = await pool.query(
     `SELECT COUNT(*) AS n FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`,
     [campaignId]);
-  // 날짜계획 화면과 저장 게이트가 같은 총량 재료를 사용한다. 주문 원장 조회 실패는 null로
-  // 보존해 화면이 증원을 잠그고, 작업표 미연결 공고만 신청 원장으로 계속 동작한다.
-  let quotaCounts = null;
-  try { quotaCounts = (await fetchCampaignCounts(pool, [camp.id])).get(camp.id) || null; }
-  catch (e) { logger.warn(`[campaignPlan] 총량 소비량 조회 실패 camp=${camp.id}: ${e.message}`); }
 
   const byDateSubmitted = {};
   for (const r of byDateQ.rows) byDateSubmitted[r.d] = Number(r.n) || 0;
@@ -119,7 +114,7 @@ async function getPlanOverview(campaignId) {
   //   공고에는 보류가 적용되지 않으므로, 모르는 채 숫자를 띄우면 효과 없는 칩이 될 수 있다.
   if (schedule !== 'unknown') {
     try {
-      const counts = quotaCounts || (await fetchCampaignCounts(pool, [camp.id])).get(camp.id);
+      const counts = (await fetchCampaignCounts(pool, [camp.id])).get(camp.id);
       const sch = schedule || null;
       if (isCarryHold(camp)) {
         const sums = await fetchCarryAppliedSums(pool, [camp.id]);
@@ -182,44 +177,6 @@ async function getPlanOverview(campaignId) {
     logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 예외 camp=${camp.id}: ${e.message}`);
   }
 
-  // 모집인원 조절의 진행·잔여·자동 맞춤은 작업보드와 같은 기준을 쓴다.
-  // 무시트 작업표가 연결된 경우에는 모집공고 제출 원장보다, 실제 참여자가 채워진
-  // 작업표 행이 운영상 완료 수량의 권위다. 작업표를 읽지 못하면 기존 제출 원장으로
-  // 안전하게 폴백한다.
-  let plannerSubmittedAll = Number(allQ[0] && allQ[0].n) || 0;
-  let plannerByDateSubmitted = byDateSubmitted;
-  let plannerProgressSource = 'applications';
-  if (sheetlessLinked === true && Array.isArray(worktableDates)) {
-    plannerByDateSubmitted = {};
-    plannerSubmittedAll = 0;
-    for (const row of worktableDates) {
-      const date = String((row && row.date) || '').slice(0, 10);
-      const filled = Math.max(0, Number(row && row.filled) || 0);
-      if (!date || filled <= 0) continue;
-      plannerByDateSubmitted[date] = filled;
-      plannerSubmittedAll += filled;
-    }
-    plannerProgressSource = 'worktable_filled';
-  }
-
-  const applicationSubmittedAll = Number(allQ[0] && allQ[0].n) || 0;
-  const quotaMaterial = quotaCounts || {
-    submittedAll: applicationSubmittedAll,
-    todaySubmitted: byDateSubmitted[today] || 0,
-    activeHolds: 0,
-    todayActiveHolds: 0,
-    linked: null,
-  };
-  const totalUsage = totalQuotaUsage(
-    camp,
-    quotaMaterial,
-    (schedule && schedule !== 'unknown') ? schedule : null
-  );
-  const planGateTodayUsed = Math.max(
-    byDateSubmitted[today] || 0,
-    Number(quotaMaterial.todaySubmitted) || 0
-  ) + (Number(quotaMaterial.todayActiveHolds) || 0);
-
   return {
     campaignId: camp.id,
     title: camp.title || '',
@@ -237,22 +194,13 @@ async function getPlanOverview(campaignId) {
     planEnabled: process.env.CAMPAIGN_DAILY_PLAN !== '0',
     // 이월 보류(098) — carryHeld: null=계산 불가(조회 실패·기준선 없음), 숫자=잔여 보류 인원
     carryMode: isCarryHold(camp) ? 'hold' : 'auto',
-    // ★ 139: 공고 설정의 실제 배치 전략. NULL(배포 전 공고)은 현행 next로 해석한다.
-    carryStrategy: carryStrategy(camp),
     carryHeld,
     carryAppliedSum,
     // 이월(미달) 인원 — 화면이 날짜에 배치하는 재료. null = 계산 불가(0 으로 꾸미지 않는다).
     //   저장 전까지는 표시일 뿐 정원을 바꾸지 않는다(정원은 저장된 날짜별 계획이 정한다).
     carryPending,
     // 오늘 확정분 — 화면의 "배분해야 할 인원" = recruit_total − (전체 확정 − 오늘 확정)
-    todaySubmitted: plannerByDateSubmitted[today] || 0,
-    // ★ 날짜계획 저장과 동일한 총량 소비량. 비공유 연결 탭은 주문 원장, 공유 탭은 공고 신청,
-    // 둘 다 유효 홀드를 포함한다. known=false 면 화면은 기존 계획 축소·해제 외 증원을 잠근다.
-    planGateSubmittedAll: totalUsage.used,
-    planGateTodaySubmitted: planGateTodayUsed,
-    planGateKnown: totalUsage.known,
-    planGateSource: totalUsage.source,
-    totalQuotaFull: totalUsage.full,
+    todaySubmitted: byDateSubmitted[today] || 0,
     // 손대지 않았을 때 **오늘 실제로 열리는 정원**(computeCampaignState 판정 그대로).
     //   null = 계산 불가 → 화면은 균형 모드를 켜지 않는다(잘못된 기준으로 저장 판정 금지).
     todayNaturalQuota,
@@ -267,10 +215,9 @@ async function getPlanOverview(campaignId) {
     plans: plansQ.rows.map(r => ({
       date: r.date, count: Number(r.count) || 0, updatedBy: r.updated_by || '', updatedAt: r.updated_at,
     })),
-    byDateSubmitted: plannerByDateSubmitted,
+    byDateSubmitted,
     todayUsed,
-    submittedAll: plannerSubmittedAll,
-    progressSource: plannerProgressSource,
+    submittedAll: Number(allQ[0] && allQ[0].n) || 0,
     rounds,
     roundsTotal,
     // 차수 합계 ≠ 총모집 = 드리프트(다른 창구가 총모집을 고친 흔적) — 화면이 경고한다.
@@ -291,14 +238,9 @@ async function getPlanOverview(campaignId) {
  *  ★ 런타임 정원 판정(computeCampaignState)이 총량으로 쓰는 값과 같은 것을 본다 —
  *    시트 일정 공고는 시트 행 수(totalSlots), 그 외는 `recruit_total`.
  *    다른 값을 쓰면 "화면에서는 저장됐는데 실제로는 안 열리는" 계획이 생긴다. */
-function _totalCapFor(camp, schedule, orderTotal = 0) {
+function _totalCapFor(camp, schedule) {
   if (schedule && schedule !== 'unknown' && Number(schedule.totalSlots) > 0) return Number(schedule.totalSlots);
-  /* ★★ 발주 폴백(2026-08-24) — 공고 총인원이 0(미설정)이면 **발주서 총건수가 실제 정원**이다
-     (`displayRecruitTotal` = 상태엔진·작업 조건 카드와 같은 판정). 종전엔 `recruit_total` 만 봐서
-     그런 작업은 `totalCap=0` 이 되어 **총량 게이트가 통째로 생략**됐다 — 정원이 발주에만 있는
-     작업이 운영에 흔하므로, 게이트가 가장 필요한 곳에서 꺼져 있던 셈이다. */
-  const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
-  return displayRecruitTotal(camp && camp.recruit_total, orderTotal).total;
+  return Number(camp && camp.recruit_total) || 0;
 }
 
 async function savePlans(campaignId, body, actor) {
@@ -310,7 +252,7 @@ async function savePlans(campaignId, body, actor) {
   if (!rawSet.length && !rawRemove.length) { const e = new Error('변경할 내용이 없습니다.'); e.code = 'empty'; throw e; }
   if (rawSet.length + rawRemove.length > MAX_PLAN_ENTRIES) { const e = new Error(`한 번에 ${MAX_PLAN_ENTRIES}일까지만 저장할 수 있습니다.`); e.code = 'too_many'; throw e; }
 
-  let camp = await _loadCampaign(campaignId);
+  const camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 인원 조절을 지원합니다.'); e.code = 'not_participation'; throw e; }
   // ★★ 시트 일정 캠페인도 조절 가능(사용자 확정 2026-08-07 — 종전 `schedule_driven` 거부 해제):
   //   저장한 날짜만 리뷰웹이 이기고(computeCampaignState 의 planOverrideFor), 저장하지 않은 날은
@@ -319,14 +261,6 @@ async function savePlans(campaignId, body, actor) {
   //     (모르면 일건수 기준의 보수적 검사로 떨어진다 — 저장을 통째로 막지 않는다).
   let schedule = null;
   try { schedule = await _scheduleFor(camp); } catch (_) { schedule = null; }
-  /* 연결 발주의 총건수 — 공고 총인원이 0 일 때 총량 게이트가 볼 값.
-     ★ fail-soft: 조회 실패면 0 = 종전 동작(공고 값만 본다). 게이트가 죽어 저장이 막히면 안 된다. */
-  let orderTotal = 0;
-  try {
-    const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');
-    const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
-    orderTotal = Number(wo && wo.recruit_count) || 0;
-  } catch (e) { logger.warn(`[campaignPlan] 연결 발주 정원 조회 실패(공고 값만 사용) camp=${campaignId}: ${e.message}`); }
 
   const today = kstTodayStr();
   const seen = new Set();
@@ -366,16 +300,7 @@ async function savePlans(campaignId, body, actor) {
     await client.query('BEGIN');
     // 캠페인 행 잠금 — apply 게이트(잠금 후 재집계)와 직렬화: "오늘 정원 축소"와 "신청"이
     // 동시에 달리면 축소 하한(확정+홀드) 검사가 낡은 값을 보게 되는 write-skew 차단.
-    const { rows: lockedCampaignRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
-    if (!lockedCampaignRows.length) { const e = new Error('캠페인을 찾을 수 없습니다.'); e.code = 'not_found'; throw e; }
-    // 잠금 전 읽은 총정원으로 작업표를 되돌리지 않도록, 이후 모든 슬롯 판단은 잠금된 최신 행을 쓴다.
-    camp = lockedCampaignRows[0];
-    try { schedule = await _scheduleFor(camp); } catch (_) { schedule = null; }
-    try {
-      const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');
-      const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
-      orderTotal = Number(wo && wo.recruit_count) || 0;
-    } catch (e) { logger.warn(`[campaignPlan] 잠금 후 연결 발주 정원 재조회 실패(공고 값만 사용) camp=${campaignId}: ${e.message}`); }
+    await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
 
     // 원칙 ⑤: 오늘 계획은 "오늘 확정 + 유효 홀드" 아래로 못 내린다(참여 취소는 이 기능의 일이 아님).
     // 해제(remove)로 기본값 복귀해도 결과가 하한 밑이면 같은 이유로 거부(모순된 화면 방지).
@@ -400,16 +325,15 @@ async function savePlans(campaignId, body, actor) {
       }
     }
 
-    /* ★★ 총량 게이트 — 조절은 **총 모집 인원 안에서만** 한다.
+    /* ★★ 총량 게이트(사용자 확정 2026-08-19) — 조절은 **총 모집 인원 안에서만** 한다.
        총인원·일건수는 작업오더가 준 값으로 고정되고(모집공고 수정에서 잠금), 날짜별 조절은
        그 총량을 나눠 담는 일이다. 그래서 "이미 확정된 인원 + 앞으로의 계획"이 총량을 넘으면 거부한다.
-       ★ 비공유 연결 공고는 주문 원장까지 포함한 totalQuotaUsage 를 사용한다. 외부모집·수기 주문이
-         신청 원장에 아직 없더라도 이미 구매된 수량만큼 총량을 소비한다.
        ★ 계획이 없는 날의 자연 정원(기본 일건수·이월)은 세지 않는다 — 그쪽은 런타임 총량 clamp 가
          이미 막으므로, 여기서 세면 멀쩡한 조절이 과대 거부된다(거부는 확실한 초과에만).
        ★ 총량 0(무제한)·set 없음(해제만)은 검사 대상이 아니다.
-       ★ 연결 주문 원장을 모르면 새 날짜·증원은 fail-closed, 기존 계획 축소·해제는 허용한다. */
-    const totalCap = _totalCapFor(camp, schedule, orderTotal);
+       ★ 조회 실패는 **통과**시키고 경고만 남긴다(fail-open) — 이 게이트가 죽었다고 조절 자체가
+         막히면 막다른 길이 되고, 실제로 총량을 넘겨 열리는 것은 런타임 clamp 가 막는다. */
+    const totalCap = _totalCapFor(camp, schedule);
     if (totalCap > 0 && set.length) {
       let sp = false;
       try { await client.query('SAVEPOINT plan_total'); sp = true; } catch (_) {}
@@ -424,58 +348,26 @@ async function savePlans(campaignId, body, actor) {
              FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`,
           [campaignId, kstDayStartUtc().toISOString()]);
         if (sp) await client.query('RELEASE SAVEPOINT plan_total');
-        const beforePlans = new Map(planRows.map(r => [r.date, Number(r.count) || 0]));
-        const planned = new Map(beforePlans);
+        const planned = new Map(planRows.map(r => [r.date, Number(r.count) || 0]));
         for (const x of set) planned.set(x.date, x.count);
         for (const dt of remove) planned.delete(dt);
         const confirmedAll = Number(cfRows[0] && cfRows[0].all_n) || 0;
         const confirmedToday = Number(cfRows[0] && cfRows[0].today_n) || 0;
-        const onlyReductions = set.length > 0
-          && set.every(x => beforePlans.has(x.date) && Number(x.count) <= Number(beforePlans.get(x.date)))
-          && (remove.length > 0 || set.some(x => Number(x.count) < Number(beforePlans.get(x.date))));
-        let quotaCounts = null;
-        try { quotaCounts = (await fetchCampaignCounts(client, [campaignId])).get(campaignId) || null; }
-        catch (e) { logger.warn(`[campaignPlan] 주문 원장 총량 조회 예외 camp=${campaignId}: ${e.message}`); }
-        const totalUsage = totalQuotaUsage(camp, quotaCounts || {
-          submittedAll: confirmedAll,
-          todaySubmitted: confirmedToday,
-          activeHolds: 0,
-          todayActiveHolds: 0,
-          linked: null,
-        }, schedule);
-        if (!totalUsage.known && !onlyReductions) {
-          const e = new Error('주문 원장 총량을 확인하지 못해 모집인원을 늘릴 수 없습니다 — 잠시 후 다시 시도해주세요. 기존 계획 축소·해제는 가능합니다.');
-          e.code = 'quota_unknown';
-          throw e;
-        }
-        const usedAll = Math.max(confirmedAll, Number(totalUsage.used) || 0);
-        const usedToday = Math.max(
-          confirmedToday,
-          Number(quotaCounts && quotaCounts.todaySubmitted) || 0
-        ) + (Number(quotaCounts && quotaCounts.todayActiveHolds) || 0);
         let future = 0;
         planned.forEach((c, dt) => { if (dt > today) future += c; });
-        // 오늘은 "그날 정원" 개념이라 이미 소비된 오늘분과 겹친다 — 큰 쪽 하나만 센다.
-        // 주문 원장의 날짜별 귀속을 모르는 외부 주문은 과소차단보다 안전한 쪽으로 과거 소비량에 둔다.
-        const todayPart = planned.has(today) ? Math.max(planned.get(today), usedToday) : usedToday;
-        const need = Math.max(0, usedAll - usedToday) + todayPart + future;
+        // 오늘은 "그날 정원" 개념이라 이미 확정된 오늘분과 겹친다 — 큰 쪽 하나만 센다(이중 계수 방지).
+        const todayPart = planned.has(today) ? Math.max(planned.get(today), confirmedToday) : confirmedToday;
+        const need = (confirmedAll - confirmedToday) + todayPart + future;
         if (need > totalCap) {
-          /* 이미 총량보다 큰 옛 계획은 줄여야 복구된다. 종전에는 30→20처럼 명백한 축소도
-             결과가 아직 초과라는 이유로 거부돼 한 번에 전부 고치지 못하면 영구히 막혔다.
-             기존 명시 계획을 낮추거나 해제하는 변경만 통과시키고, 새 날짜·증원은 계속 거부한다. */
-          if (onlyReductions) {
-            logger.warn(`[campaignPlan] 총량 초과 계획 축소 저장 허용 camp=${campaignId} need=${need} cap=${totalCap}`);
-          } else {
-            const e = new Error(
-              `총 모집 ${totalCap.toLocaleString()}명을 넘겨 조절할 수 없습니다 — `
-              + `확정·주문·진행 ${usedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
-              + `${(need - totalCap).toLocaleString()}명을 줄여주세요.`);
-            e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = usedAll;
-            throw e;
-          }
+          const e = new Error(
+            `총 모집 ${totalCap.toLocaleString()}명을 넘겨 조절할 수 없습니다 — `
+            + `확정 ${confirmedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
+            + `${(need - totalCap).toLocaleString()}명을 줄여주세요.`);
+          e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = confirmedAll;
+          throw e;
         }
       } catch (e) {
-        if (e && ['over_total', 'quota_unknown'].includes(e.code)) throw e;
+        if (e && e.code === 'over_total') throw e;
         if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT plan_total'); } catch (_) {} }
         logger.warn(`[campaignPlan] 총량 게이트 확인 실패(통과) camp=${campaignId}: ${e.message}`);
       }
@@ -570,18 +462,7 @@ async function savePlans(campaignId, body, actor) {
           today,
           by: actor || 'campaign-plan',
         });
-        /* 모집계획의 합계만 제한하면 과거 조절에서 남은 빈 준비 행은 계속 살아 있어
-           "총건수 500 · 번호 751"처럼 작업표 슬롯 수가 정원과 갈라진다. 날짜 이동/생성 뒤
-           같은 트랜잭션에서 공통 슬롯 동기화기를 실행해 활성 행 수를 총정원에 맞춘다.
-           이 함수는 참여자·수취인·연락처·주문이 있는 행을 절대 은퇴시키지 않고, 남는 빈 행만
-           가장 큰 seq부터 soft-delete 한다. 정원보다 채워진 행이 많으면 저장 전체를 롤백한다. */
-        if (totalCap > 0) {
-          const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
-          worktableSync.slotCap = await syncWorktableSlotsInTx(
-            client, camp, totalCap, actor || 'campaign-plan-slot-cap'
-          );
-        }
-        if (!worktableSync.skipped || (worktableSync.slotCap && (worktableSync.slotCap.add || worktableSync.slotCap.retire))) {
+        if (!worktableSync.skipped) {
           projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
         }
         /* ★★ 조절을 저장하면 **오늘 이후 전체를 자동 재구성**한다(사용자 확정 2026-08-19).
@@ -609,50 +490,6 @@ async function savePlans(campaignId, body, actor) {
             logger.warn(`[campaignPlan] 저장 후 자동 재구성 실패(계획 저장은 유지) camp=${campaignId}: ${err.message}`);
           }
         }
-        /* 재구성은 모자란 계획 행을 새로 만들 수도 있으므로, 마지막에도 같은 잠금 동기화를
-           한 번 더 통과시킨다. 이 시점이 커밋 직전의 최종 불변식 검사다. */
-        if (totalCap > 0) {
-          const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
-          worktableSync.slotCap.afterRebuild = await syncWorktableSlotsInTx(
-            client, camp, totalCap, actor || 'campaign-plan-slot-cap-final'
-          );
-        }
-        /* ★★ 작업표 줄 수 대조(2026-08-24 신고 — "총건수 500인데 홈에 581") ────────────────
-           총량 게이트(위)는 **계획 합계**만 본다. 그런데 이번 사고의 여분 줄은 *계획에 없는 날짜*의
-           준비 행이었다 — 접수(작업오더 배분)가 깔아 둔 줄인데, 조절 동기화는 규율상 **저장한
-           날짜만** 손대므로 그 줄들이 그대로 남아 총건수를 넘긴다.
-           ★★ 그렇다고 **저장을 거부하지 않는다** — 그 줄은 이번 조절이 만든 것이 아니고, 막으면
-              고치러 들어온 담당자가 아무것도 못 하는 막다른 길이 된다(레포의 반복 규율).
-           ★ 대신 **사실을 응답에 실어 화면이 말한다**(조용한 누락 금지) — 이 신호가 곧 소급 정리
-              (계획 밖 날짜를 조절 대상에 넣어 다시 저장)로 가는 안내다.
-           ★ 읽기 전용 · SAVEPOINT 격리 · 어떤 실패도 저장을 되돌리지 않는다. */
-        if (totalCap > 0 && !(worktableSync.slotCap && worktableSync.slotCap.reason === 'shared_worktable')
-          && !(worktableSync.slotCap && worktableSync.slotCap.afterRebuild && worktableSync.slotCap.afterRebuild.reason === 'shared_worktable')) {
-          let sp = false;
-          try { await client.query('SAVEPOINT cp_row_audit'); sp = true; } catch (_) {}
-          try {
-            /* ★ `campaign_participants.start_date` 는 `8 / 31 (월)` 같은 **표시 문자열(TEXT)** 이라
-                 여기서 날짜로 캐스팅하지 않는다 — 줄 수만 센다. "왜 많은지"는 추정하지 않는다
-                 (모르는 것을 지어내지 않는다 — 원인은 [📅 인원] 표에서 사람이 본다). */
-            const { rows: ar } = await client.query(
-              `SELECT COUNT(*)::int AS rows_n FROM campaign_participants
-                WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE`,
-              [camp.linked_sheet_id, camp.linked_tab_name]);
-            if (sp) await client.query('RELEASE SAVEPOINT cp_row_audit');
-            const rowsN = Number(ar[0] && ar[0].rows_n) || 0;
-            if (rowsN > totalCap) {
-              worktableSync.rowAudit = {
-                rows: rowsN, cap: totalCap, over: rowsN - totalCap,
-                message: `작업표 줄이 ${rowsN.toLocaleString()}줄로 총건수 ${totalCap.toLocaleString()}건보다 `
-                  + `${(rowsN - totalCap).toLocaleString()}줄 많습니다 — [📅 인원]에서 날짜별 인원을 확인해 주세요.`,
-              };
-              logger.warn(`[campaignPlan] 작업표 줄(${rowsN}) > 총건수(${totalCap}) camp=${campaignId}`);
-            }
-          } catch (e) {
-            if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT cp_row_audit'); } catch (_) {} }
-            logger.warn(`[campaignPlan] 작업표 줄 수 대조 실패(저장은 유지) camp=${campaignId}: ${e.message}`);
-          }
-        }
       } else {
         /* ★★ 시트 기반 탭은 이제 정상 상태가 아니다(탈 구글시트 완료 — 2026-08 사용자 확정).
            표식(tab_configs.sheetless)이 안 켜진 탭이면 조절은 **정원만 바꾸고 작업표는 그대로**인데,
@@ -675,19 +512,8 @@ async function savePlans(campaignId, body, actor) {
     // raw/review 원장이 이전 날짜를 유지한다. 커밋 후 같은 탭의 투영을 즉시 재생성해
     // 저장 결과와 작업보드 표를 같은 요청 안에서 맞춘다.
     let worktableProjection = null;
-    let worktableNumbering = null;
     if (projectionTarget) {
       try {
-        // 조절로 새로 생긴 준비 행의 DB seq와 화면 `번호`는 별도 값이다. 신규 경로는
-        // sheetlessDailyPlan에서 함께 채우고, 기존 빈 번호·날짜 재배치로 생긴 순서 틀어짐은
-        // 여기서 활성 행 전체를 1..N으로 보정한다. 이후 장부를 재생성해 다음 동기화에서
-        // 빈 번호가 되돌아오지 않게 한다.
-        const { renumberTab } = require('./rowNumbering.service');
-        worktableNumbering = await renumberTab({
-          ...projectionTarget,
-          by: actor || 'campaign-plan',
-          rebuild: false,
-        });
         const { rebuildLedgers } = require('./sheetlessLedger.service');
         const rebuilt = await rebuildLedgers({ ...projectionTarget, by: actor || 'campaign-plan' });
         worktableProjection = {
@@ -708,7 +534,7 @@ async function savePlans(campaignId, body, actor) {
       }
     }
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} 계획 저장 — set ${set.length} / remove ${remove.length}`);
-    return { applied: set.length + remove.length, worktableSync, worktableNumbering, worktableProjection };
+    return { applied: set.length + remove.length, worktableSync, worktableProjection };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
@@ -719,7 +545,7 @@ async function savePlans(campaignId, body, actor) {
 
 /** 관리자가 명시적으로 실행하는 빈 준비 행 날짜 재구성. 일반 저장과 달리 과거의 빈 오염 행도 정리한다. */
 async function rebuildWorktableFromPlans(campaignId, actor) {
-  let camp = await _loadCampaign(campaignId);
+  const camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 작업표 재구성을 지원합니다.'); e.code = 'not_participation'; throw e; }
   if (!camp.linked_sheet_id || !camp.linked_tab_name) { const e = new Error('연결된 작업표가 없습니다.'); e.code = 'worktable_not_linked'; throw e; }
   const today = kstTodayStr();
@@ -727,9 +553,7 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
   let target = null;
   try {
     await client.query('BEGIN');
-    const { rows: lockedCampaignRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
-    if (!lockedCampaignRows.length) { const e = new Error('캠페인을 찾을 수 없습니다.'); e.code = 'not_found'; throw e; }
-    camp = lockedCampaignRows[0];
+    await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
     const { isSheetless } = require('../utils/sheetlessScope');
     if (!await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
       const e = new Error('이 작업표는 시트 원본으로 설정되어 있어 안전하게 재구성할 수 없습니다. 먼저 무시트 작업표 설정을 확인해주세요.');
@@ -738,49 +562,17 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
     const plans = (await client.query(
       `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
          FROM campaign_daily_plans WHERE campaign_id=$1 AND plan_date >= $2::date ORDER BY plan_date`, [campaignId, today])).rows;
-    /* [작업표 재구성]도 날짜만 다시 배열하고 남은 빈 슬롯을 방치하면 번호가 총건수를
-       넘길 수 있다. 저장 경로와 같은 공통 동기화로 먼저 활성 슬롯 수를 맞춘 뒤 재배치한다. */
-    let worktableSlotCap = null;
-    // 레거시 공고는 recruit_total=0 이더라도 연결 발주의 모집인원이 실제 상한이다.
-    let orderTotal = 0;
-    try {
-      const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');
-      const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
-      orderTotal = Number(wo && wo.recruit_count) || 0;
-    } catch (e) { logger.warn(`[campaignPlan] 작업표 재구성 연결 발주 정원 조회 실패 camp=${campaignId}: ${e.message}`); }
-    const totalCap = _totalCapFor(camp, null, orderTotal);
-    if (totalCap > 0) {
-      const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
-      worktableSlotCap = await syncWorktableSlotsInTx(
-        client, camp, totalCap, actor || 'campaign-plan-rebuild-slot-cap'
-      );
-    }
     const { rebuildAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
     const worktableRebuild = await rebuildAdjustedPlansToWorktable({ client, sheetId: camp.linked_sheet_id,
       tabName: camp.linked_tab_name, plans, today, by: actor || 'campaign-plan-rebuild' });
-    if (totalCap > 0) {
-      const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
-      worktableSlotCap.afterRebuild = await syncWorktableSlotsInTx(
-        client, camp, totalCap, actor || 'campaign-plan-rebuild-slot-cap-final'
-      );
-    }
     target = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
     await client.query(`INSERT INTO campaign_plan_events (campaign_id,actor,action,detail) VALUES ($1,$2,'worktable_rebuild',$3)`,
-      [campaignId, actor || null, JSON.stringify({ today, plannedDates: worktableRebuild.plannedDates, ...worktableRebuild, slotCap: worktableSlotCap })]);
+      [campaignId, actor || null, JSON.stringify({ today, plannedDates: worktableRebuild.plannedDates, ...worktableRebuild })]);
     await client.query('COMMIT');
     try {
-      // 수동 재구성도 신규 행을 만들 수 있다. 삭제 이력 뒤에서는 DB seq가 연속되지 않을 수
-      // 있으므로, 화면 번호는 저장 경로와 동일하게 활성 행 기준으로 1..N 재정렬한다.
-      const { renumberTab } = require('./rowNumbering.service');
-      const worktableNumbering = await renumberTab({
-        ...target,
-        by: actor || 'campaign-plan-rebuild',
-        rebuild: false,
-      });
       const { rebuildLedgers } = require('./sheetlessLedger.service');
       const r = await rebuildLedgers({ ...target, by: actor || 'campaign-plan-rebuild' });
-      return { worktableRebuild, worktableSlotCap, worktableNumbering,
-        worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
+      return { worktableRebuild, worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
     } catch (cause) {
       logger.error(`[campaignPlan] 작업표 재구성 투영 실패 camp=${campaignId}: ${cause.message}`);
       const e = new Error('작업표 날짜는 재구성됐지만 작업보드 갱신에 실패했습니다. 다시 실행해주세요.');

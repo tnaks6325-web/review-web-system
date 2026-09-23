@@ -23,39 +23,20 @@ const MIG_LOCK_RETRIES = 3;
 // 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
 // /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
 const REQUIRED_SCHEMA = [
-  ['campaign_participants', 'review_participation_id'],
-  ['workdesk_review_resolutions', 'review_participation_id'],
-  ['reviewer_participations', 'review_obligation_status'],
-  ['reviewer_history_rollouts', 'coverage_epoch'],
-  ['reviewer_history_control', 'coverage_epoch'],
-  ['workdesk_review_resolutions', 'resolution'],
-  ['review_closed_targets', 'resolution_id'],
-  ['reviewers', 'shopping_id'],                    // 147 — 명의별 공통 쇼핑 아이디(본인)
-  ['reviewer_identities', 'shopping_id'],          // 147 — 코드 명의별 공통 쇼핑 아이디
   ['campaign_applications', 'owner_phone8'],       // 063 — apply INSERT·my-status·관제
   ['recruit_campaigns', 'multi_account_mode'],     // 063 — 공개 /list 명시 SELECT
   ['recruit_campaigns', 'multi_daily_limit'],      // 063 — apply 게이트·공고 저장
   ['recruit_campaigns', 'sub_hold_ttl_min'],       // 063 — 공개 /list 명시 SELECT
   ['campaign_applications', 'review_fee_snapshot'],// 082 — apply INSERT(없으면 참여 전면 42703)·리뷰어 참여내역
   ['order_submissions', 'review_fee_snapshot'],    // 082 — 홀드확정 전파·review-earnings(없으면 금액이 조용히 0원)
-  ['order_submissions', 'repurchase_work_key'],    // 144 — 재참여 가드(없으면 fail-open으로 제한이 조용히 풀림)
-  ['order_submissions', 'campaign_was_late'],      // 149 — 취소 뒤에도 지각 주문 작업 로그 이력 보존
-  ['order_submissions', 'participant_identity_key_hash'], // 158 — 검증된 참여 명의에 묶인 주문정보 추천·제출 원장 기록
-  ['recruit_campaigns', 'repurchase_days'],        // 148 — 공고별 재참여 기간 저장·apply/카드 판정
   ['trackb_advertiser_links', 'login_required'],   // 083 — 광고주 링크 로그인 게이트·업체관리 링크/계정 카드
   ['recruit_campaigns', 'reviewer_hidden'],        // 085 — 공개 /list WHERE 절(없으면 리뷰어 공고목록 전면 42703)
   ['recruit_campaigns', 'transfer_bank'],         // 086 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['recruit_campaigns', 'transfer_memo'],         // 086 — 위와 같은 문장에 들어가므로 함께 막아야 한다
   ['recruit_campaigns', 'review_type'],           // 087 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['work_orders', 'sales_id'],                    // 088 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
-  ['work_orders', 'thumbnail_url'],               // 163 — _insertWorkOrder INSERT 목록(같은 문장이라 없으면 접수가 통째로 죽는다)
   ['work_orders', 'guide_images'],                // 090 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'source_review_order_id'],      // 102 — 원본 오더 식별자(중복 수신 방지)
-  ['work_orders', 'delivery_type_mix'],           // 135 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
-  ['recruit_campaigns', 'delivery_type_mix'],     // 135 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
-  ['recruit_campaigns', 'delivery_review_fee_mix'], // 152 — 혼합 배송별 리뷰비(입금 대상 산정)
-  ['campaign_applications', 'delivery_review_fee_mix_snapshot'], // 153 — 신청 시점 유형별 리뷰비
-  ['order_submissions', 'delivery_review_fee_mix_snapshot'], // 153 — 입금·리뷰내역 행별 스냅샷
   ['work_orders', 'source_revision'],             // 102 — 원본 수정 버전
   ['work_orders', 'workboard_schema_version'],    // 135 — 작업표 열 규격(원본 생성 시점 고정)
   ['work_orders', 'work_series_id'],              // 136 — 같은 작업의 차수 계열(원본 수신·작업표 생성)
@@ -71,20 +52,13 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'advertiser_id'],              // 103 — 접수된 리뷰웹 광고주 연결
   ['review_inspections', 'resolution'],           // 092 — 리뷰검수 목록 SELECT·확인 UPDATE(없으면 리뷰검수 탭 전면 42703)
   ['tab_configs', 'inspect_product_aliases'],     // 092 — 기대값 조회·별칭 학습(조회는 fail-soft지만 대조가 조용히 죽는다)
-  ['review_inspections', 'product_resolution'],   // 148 — 상품명 축 사람 판정(건 전체 resolution 과 분리)
-  ['review_inspections', 'product_resolution_note'], // 148 — 판정 근거 메모
-  ['review_inspections', 'product_resolved_at'],  // 148 — 상품명 판정 시각
-  ['review_inspections', 'product_resolved_by'],  // 148 — 상품명 판정자
-  ['review_inspections', 'product_cluster_key'],  // 148 — 동일 OCR 군집 소급 종결
-  ['tab_configs', 'inspect_product_rules'],       // 148 — 작업 한정 상품명 exact 학습 규칙
-  ['tab_configs', 'review_fee'],                  // 128 — 입금관리 보류 보완의 작업 단위 리뷰비(없으면 탭 메타가 fail-soft 로 조용히 죽어 이체은행·통장표시까지 함께 미설정으로 보인다)
-  ['tab_configs', 'workboard_display_name'],      // 145 — 작업조건·내부/업체 작업보드의 표시 전용 상품명
   ['tab_configs', 'sheetless'],                   // 096 — 크론 단속·장부 생성기·접수 업서트(없으면 무시트 경로 전면 42703)
   ['work_orders', 'skip_weekends'],               // 097 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'holidays'],                    // 097 — 위와 같은 문장에 들어가므로 함께 막아야 한다
-  ['work_orders', 'tab_deleted_at'],              // 134 — 작업 삭제 시 UPDATE 목록(없으면 홈 작업목록 [작업 삭제]가 전면 42703)
   ['work_orders', 'review_type_mix'],             // 107 — 인트라넷 혼합 리뷰 수량의 원장 보존·모집공고 프리필
   ['recruit_campaigns', 'skip_weekends'],         // 104 — public weekend publication guard
+  ['participant_edits', 'wrote_row_json'],        // 130 — 셀 편집 INSERT 목록(없으면 작업보드 편집 전면 42703)
+  ['tab_configs', 'ledger_dirty_at'],             // 130 — 편집 tx 의 장부 재생성 예약(dirty 마킹)
   ['recruit_campaigns', 'cash_receipt_required'], // 105 — 모집공고 현금영수증 직접 설정·공개 안내
   ['recruit_campaigns', 'review_type_mix'],       // 106 — 혼합 리뷰 유형별 모집 수량(발행 전 합계 검증)
   ['campaign_options', 'review_type_mix'],        // 109 — 옵션별 혼합 리뷰 수량(옵션 정원별 검증)
@@ -95,10 +69,6 @@ const REQUIRED_SCHEMA = [
   ['campaign_options', 'inflow_guide_html'],
   ['campaign_options', 'inflow_guide_images'],
   ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
-  ['recruit_campaigns', 'carry_strategy'],        // 139 — 이월 배치 전략(next/spread/extend)·공개 /list 상태엔진 입력
-  // 130 — 보관(폐기). 공개 /list·관리자 /admin/list 의 WHERE 절에 들어가므로 컬럼이 없으면
-  //   **리뷰어 공고목록·관리자 모집공고 탭이 전면 42703**(무신호 장애) — 085 와 같은 규율.
-  ['recruit_campaigns', 'archived_at'],
   // 099 — 체험단 종류(리뷰/블로그) 축. 셋 다 INSERT·SET 목록에 들어가므로 하나라도 없으면
   //   ① 인트라넷 오더 접수 ② 작업오더 접수(tab_configs 업서트) ③ 공고 발행·수정이 전면 42703.
   ['work_orders', 'work_kind'],
@@ -117,38 +87,13 @@ const REQUIRED_SCHEMA = [
   // 126 — 만료 자동 취소확정 마커. 스윕 UPDATE·되살리기 판정이 이 컬럼을 읽으므로
   //   없으면 매분 스윕이 42703 으로 죽어 **만료 마킹까지 함께 멈춘다**.
   ['campaign_applications', 'dismissed_by'],
-  // 127 — 블로그 승인제. reject_reason·decided_at 은 work-detail SELECT 에도 들어가므로
-  //   없으면 **모든 참여형 공고의 work-detail 이 전면 42703**(리뷰어 작업가이드 전멸).
-  ['campaign_applications', 'decided_at'],
-  ['campaign_applications', 'decided_by'],
-  ['campaign_applications', 'reject_reason'],
-  // 138 — 리뷰어가 고른 **상품**(복합유형 작업). 주문 원장 INSERT 목록에 들어가므로
-  //   없으면 **구매양식 제출이 전면 42703**(101 blog_url 과 같은 자리).
-  ['order_submissions', 'selected_product'],
-  // 139~140 — 작업보드 통폐합. 이 열이 없는데 서버가 뜨면 구매양식 제출 중 새 경로가 42703으로 실패한다.
-  ['tab_configs', 'workboard_id'],
-  ['work_orders', 'workboard_id'],
-  ['recruit_campaigns', 'workboard_id'],
-  ['order_submissions', 'workboard_id'],
-  ['campaign_participants', 'workboard_id'],
 ];
 
 // V2 상태 표시는 열 이름 추측을 하지 않고, 생성 시점의 위치를 이 표에 고정한다.
 // 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
-  'review_reminder_states',
-  'review_reminder_deliveries',
-  'reviewer_identity_match_audits',                // 147 — 캡처/수동 명의확인 비식별 감사기록
   'tab_status_column_bindings',                   // 137 — 리뷰/입금일 상태열 위치 바인딩
-  'purchase_submission_sessions',                // 146 — 구매양식 제출 세션·주문ID 기반 캡처 연결
-  'trackb_workdesk_advertiser_order',             // 143 — 작업보드 업체목록 개인별 배치
-  'workboards',
-  'workboard_consolidation_controls',
-  'workboard_consolidation_backups',
-  'workboard_consolidation_backup_records',
-  'workboard_consolidation_link_events',
-  'workboard_consolidation_targets',
 ];
 
 async function _runOneMigration(pool, sql) {
@@ -258,8 +203,8 @@ async function runMigrations() {
           await pool.query('INSERT INTO _migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
           logger.info(`[migrate] ⏭ ${file} (이미 적용됨, code=${err.code})`);
           applied = true;
-        } else if (['55P03', '57014', '40P01'].includes(err.code)) { // lock_not_available / statement_timeout / deadlock_detected
-          logger.warn(`[migrate] ⏳ ${file} DB 락 충돌(${err.code}, ${attempt}/${MIG_LOCK_RETRIES}) — 미기록, 재시도`);
+        } else if (err.code === '55P03' || err.code === '57014') { // lock_not_available / statement_timeout
+          logger.warn(`[migrate] ⏳ ${file} 락 대기 초과(${attempt}/${MIG_LOCK_RETRIES}) — 미기록, 재시도`);
           await new Promise(r => setTimeout(r, 2000 * attempt));
         } else {
           // ★ 미기록 = 다음 부팅 재시도. 부팅 가부는 assertSchemaReady 가 결정한다.

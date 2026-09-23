@@ -1,5 +1,4 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
@@ -21,16 +20,13 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 // ═══════════════════════════════════════════════════════════
 const { requiredSlotKeys, effectiveCaptureSlots } = require('../utils/captureSlots');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
-const purchaseSessions = require('../services/purchaseSubmissionSession.service');
-const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
-const { verifyReviewerSession } = require('../services/reviewerSession.service');
 
 // ═══════════════════════════════════════════════════════════
 // 블로그체험단(099) — memo 가 들어갈 열은 종류에 따라 우선순위가 다르다.
 // 열 고르기는 `utils/memoColumn` 단일 출처(이 경로·큐 재시도·무시트 작업표 기록 공용).
 // ★ 판정 실패·리뷰체험단은 종전 순서 그대로 = 무회귀.
 // ═══════════════════════════════════════════════════════════
-const { pickMemoColumnIndex, pickPostDateColumnIndex } = require('../utils/memoColumn');
+const { pickMemoColumnIndex } = require('../utils/memoColumn');
 const { workKindForTab } = require('../services/workKindContext.service');
 const { isBlogKind } = require('../utils/workKind');
 const { isPostUrl, POST_URL_HINT } = require('../utils/blogPostUrl');
@@ -465,42 +461,10 @@ router.post('/find-slot', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/review', async (req, res, next) => {
   try {
-    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo, uploadBatchId } = req.body;
+    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo } = req.body;
 
     if (!sheetId || !tabName || !rowIndex) {
       return res.json({ error: '필수 파라미터 누락 (sheetId, tabName, rowIndex)' });
-    }
-    let reviewerSession = null;
-    const reviewerToken = req.headers['x-reviewer-token'];
-    if (reviewerToken) {
-      try { reviewerSession = verifyReviewerSession(reviewerToken); }
-      catch (_) { return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인을 다시 확인해주세요.' }); }
-    } else {
-      const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
-      let internal = null;
-      try { internal = bearer && jwt.verify(bearer[1], process.env.JWT_SECRET); } catch (_) {}
-      if (!internal || !['master', 'admin', 'staff'].includes(internal.role)
-          || ['reviewer_campaign', 'intranet'].includes(internal.via)) {
-        return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
-      }
-    }
-    if (reviewerSession) {
-      const ownsTarget = await require('../services/reviewerTargetOwnership.service').ownsReviewerTarget({
-        session: reviewerSession, sheetId, tabName, rowIndex,
-      });
-      if (!ownsTarget) {
-        return res.status(403).json({ ok: false, code: 'REVIEW_SUBMIT_TARGET_FORBIDDEN', error: '이 구매양식의 리뷰를 제출할 권한이 없습니다.' });
-      }
-    }
-
-    const closedReminder = await require('../services/reviewReminder.service')
-      .closedStateForTarget({ sheetId, tabName, rowIndex });
-    if (closedReminder) {
-      return res.status(409).json({
-        ok: false,
-        code: 'REVIEW_CLOSED_NO_REVIEW',
-        error: '최종 제출기한이 지나 미작성으로 종결된 작업입니다.',
-      });
     }
 
     const submitValue = value || '제출';
@@ -520,37 +484,6 @@ router.post('/review', async (req, res, next) => {
       return res.json({ error: POST_URL_HINT, code: 'post_url_required' });
     }
 
-    /* ★★ 127(사용자 확정 2026-08-19): 블로그 결과물 = **리뷰 캡처 + 포스팅결과URL 둘 다**.
-       — M4-2 의 "포스팅URL만 제출 = 완료(캡처 0장 허용)" 확정을 사용자가 뒤집었다.
-       업로드(/api/image/review-upload)가 이 호출보다 먼저라 원장(review_submissions)·대표
-       이미지(review_index.review_file_id)에 캡처 흔적이 있어야 한다. 화면만 막으면 낡은
-       화면·직접 호출이 우회하므로 서버가 최종 방어한다.
-       ★ 조회 실패는 fail-open(warn) — 검사 인프라 장애로 정상 제출을 막는 쪽이 더 나쁘다. */
-    if (_isBlog) {
-      try {
-        const { rows: capRows } = await pool.query(
-          `SELECT 1 FROM review_submissions
-            WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-              AND COALESCE(slot_key, '') <> 'trashed'
-            LIMIT 1`, [sheetId, tabName, rowIndex]);
-        let hasCapture = capRows.length > 0;
-        if (!hasCapture) {
-          const { rows: fRows } = await pool.query(
-            `SELECT 1 FROM review_index
-              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                AND COALESCE(review_file_id, '') <> '' LIMIT 1`, [sheetId, tabName, rowIndex]);
-          hasCapture = fRows.length > 0;
-        }
-        if (!hasCapture) {
-          return res.json({ error: '블로그체험단은 리뷰 캡처와 포스팅URL을 함께 제출해야 해요. 캡처를 먼저 첨부해주세요.', code: 'capture_required' });
-        }
-      } catch (capErr) {
-        logger.warn(`[submit/review] blog 캡처 확인 실패(fail-open): ${capErr.message}`);
-      }
-    }
-    // 127 ⑤: 포스팅제출일 = 제출 시각을 시스템이 자동 기록(KST 날짜, 사본 금지 — kstTodayStr 재사용)
-    const _postDate = _isBlog ? require('../services/campaignState.service').kstTodayStr(new Date()) : '';
-
     // ── Step 1: 완료 판정 + DB 업데이트 ──
     //   다중 캡처 슬롯 탭(예: 리뷰+현금영수증)은 "필요 슬롯 전부 제출"되어야 완료.
     //   업로드(/api/image/review-upload)가 submitReview보다 먼저 실행되어 원장
@@ -559,9 +492,6 @@ router.post('/review', async (req, res, next) => {
     let dbUpdated = false;     // is_submitted=TRUE 로 전이/유지되었는지
     let complete = true;       // 모든 필요 슬롯 충족 여부
     let missingSlots = [];
-    let completionHistoryError = null;
-    let completionClient = null;
-    let sheetlessSubmission = false;
     try {
       // 탭의 필요 슬롯 + 현재 행의 is_submitted 조회
       const { rows: ctxRows } = await pool.query(
@@ -573,29 +503,17 @@ router.post('/review', async (req, res, next) => {
           LIMIT 1`,
         [sheetId, tabName, rowIndex]
       );
-      let wasSubmitted = ctxRows[0]?.is_submitted === true;
+      const wasSubmitted = ctxRows[0]?.is_submitted === true;
       // ★ 087 2차: 슬롯 파생은 리뷰타입까지 봐야 한다 — 넷 중 하나만 빠지면
       //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
       const _rt = await reviewTypeForTab({ sheetId, tabName });
-      const _cashContext = require('../services/cashReceiptContext.service');
-      const _crByRow = await _cashContext.cashReceiptRequirementsForRows([
-        { sheetId, tabName, rowIndex: Number(rowIndex) },
-      ]);
-      let _crRequired = _crByRow.values().next().value;
-      // 주문/신청 provenance가 없는 구형 행만 기존 탭 단위 판정으로 닫는다.
-      if (_crRequired == null) {
-        _crRequired = await _cashContext.cashReceiptRequiredForTab({ sheetId, tabName });
-      }
-      const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt, _crRequired === true);
-      const requiresReviewHistory = required.includes('review');
+      const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
       // ★★ 슬롯 모드 판정은 required 개수가 아니라 **화면 슬롯(effectiveCaptureSlots)** 기준.
       //   현금영수증 슬롯이 선택(required:false)이 되면서 현영 탭도 required=['review'] 하나가 됐는데,
       //   그걸 근거로 fast-path를 타면 **영수증만 올리고 제출해도 완료**가 된다(리뷰 캡처 0장).
       //   슬롯 UI가 뜨는 탭은 원장 대조를 거쳐 "필수 슬롯 ⊆ 제출 슬롯"을 확인해야 한다.
-      const _effSlots = effectiveCaptureSlots(
-        ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt, _crRequired === true);
+      const _effSlots = effectiveCaptureSlots(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
       const isMultiSlot = Array.isArray(_effSlots) && _effSlots.length > 1;
-      let reviewIndexMarkedWithHistory = false;
 
       /* ★★ 블로그체험단은 슬롯 대조를 하지 않는다 — 완료 조건이 위에서 검증한 포스팅URL 이다.
          현영을 겸한 blog 탭은 화면 슬롯이 2개가 되는데(리뷰+현금영수증), 그대로 두면
@@ -614,162 +532,32 @@ router.post('/review', async (req, res, next) => {
       }
 
       if (complete) {
-        completionClient = await pool.connect();
-        await completionClient.query('BEGIN');
-        const lockedIndex=await require('../services/reviewCompletionTransaction.service').lockTarget(completionClient,{sheetId,tabName,rowIndex,reviewerSession});
-        wasSubmitted=lockedIndex.is_submitted===true;
-        if(isMultiSlot && !_isBlog) {
-          const slots=await completionClient.query('SELECT DISTINCT slot_key FROM review_submissions WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3',[sheetId,tabName,rowIndex]);
-          if(required.some(k=>!slots.rows.some(r=>r.slot_key===k))) throw Object.assign(new Error('첨부 구성이 변경되었습니다.'),{code:'REVIEW_TARGET_CHANGED'});
-        }
-        // Cell, attachment completion and both flags commit together. Uploads remain
-        // staged on failure so the reviewer can retry without uploading again.
-        try {
-          const st = await require('../services/sheetlessStatus.service')
-            .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue, by: 'review-submit', client: completionClient });
-          if(st.handled && !st.ok) throw new Error(st.reason||'write_failed');
-          sheetlessSubmission = st.handled === true;
-        } catch(e) { e.code='REVIEW_BOARD_WRITE_FAILED'; throw e; }
-        // Required blog URL and completion must commit together on sheetless boards.
-        // Ordinary review memos remain optional; sheet-backed tabs keep their sync path.
-        if (_isBlog) {
-          try {
-            const mm = await require('../services/sheetlessStatus.service')
-              .markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog: _isBlog, by: 'review-submit', client: completionClient });
-            if ((mm.handled && !mm.ok) || (sheetlessSubmission && !mm.handled)) {
-              throw new Error(mm.reason || 'required_post_url_not_saved');
-            }
-          } catch (e) { e.code='REVIEW_POST_URL_WRITE_FAILED'; throw e; }
-        }
-        // 이번 제출 요청이 실제로 업로드한 리뷰 묶음만 상태 확정보다 먼저 완료 이력으로 고정한다.
-        // 이 기록이 실패하면 중복 차단 근거가 사라지므로 제출 성공으로 응답하지 않는다.
-        try {
-          if (!requiresReviewHistory) {
-            // 구매확정·영수증 전용 작업은 리뷰 캡처 이력이 없으므로 완료 이력을 만들지 않는다.
-          } else if (uploadBatchId) {
-            const completedBatch = await completionClient.query(
-              `WITH locked_row AS (
-                 SELECT review_file_id
-                   FROM review_index
-                  WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                  FOR UPDATE
-               ), current_batch AS (
-                 SELECT 1
-                   FROM locked_row lr
-                   JOIN review_submissions s ON s.file_id = lr.review_file_id
-                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
-                    AND COALESCE(s.slot_key, 'review') = 'review'
-                    AND s.upload_batch_id = $4::uuid
-                  LIMIT 1
-               ), completed_batch AS (
-                 UPDATE review_submissions s
-                    SET completed_at = COALESCE(s.completed_at, NOW())
-                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
-                    AND COALESCE(s.slot_key, 'review') = 'review'
-                    AND s.upload_batch_id = $4::uuid
-                    AND EXISTS (SELECT 1 FROM current_batch)
-                  RETURNING 1
-               ), marked AS (
-                 UPDATE review_index ri
-                    SET is_submitted = TRUE, built_at = NOW()
-                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
-                    AND EXISTS (SELECT 1 FROM completed_batch)
-                  RETURNING 1
-               )
-               SELECT (SELECT COUNT(*)::int FROM completed_batch) AS completed_count,
-                      (SELECT COUNT(*)::int FROM marked) AS marked_count`,
-              [sheetId, tabName, rowIndex, uploadBatchId]
-            );
-            if (!completedBatch.rows[0]?.completed_count || !completedBatch.rows[0]?.marked_count) {
-              throw new Error('현재 리뷰 캡처와 일치하는 업로드 묶음을 찾을 수 없습니다.');
-            }
-            reviewIndexMarkedWithHistory = true;
-          } else {
-            // 보완 제출에서는 리뷰 파일을 이번 요청에 다시 올리지 않는다. 현재 대표 리뷰 파일이
-            // 속한 묶음을 확정한다. 새 슬롯 추가로 재오픈된 행은 이 묶음이 이미 완료 상태일 수
-            // 있으므로 completed_at 여부와 무관하게 현재 대표를 인정한다. 배치 컬럼 도입 전에 올린
-            // 대표 파일은 그 파일 한 건만 처리해, 이전에 교체된 낡은 파일까지 편입하지 않는다.
-            const completedPendingBatch = await completionClient.query(
-              `WITH locked_row AS (
-                 SELECT review_file_id
-                   FROM review_index
-                  WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
-                  FOR UPDATE
-               ), current_review AS (
-                 SELECT s2.upload_batch_id, s2.file_id
-                   FROM review_submissions s2
-                   JOIN locked_row lr ON lr.review_file_id = s2.file_id
-                  WHERE s2.sheet_id = $1 AND s2.tab_name = $2 AND s2.row_index = $3
-                    AND COALESCE(s2.slot_key, 'review') = 'review'
-                  LIMIT 1
-               ), completed_batch AS (
-                 UPDATE review_submissions s
-                    SET completed_at = COALESCE(s.completed_at, NOW())
-                   FROM current_review cr
-                  WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.row_index = $3
-                    AND COALESCE(s.slot_key, 'review') = 'review'
-                    AND (
-                      (cr.upload_batch_id IS NOT NULL AND s.upload_batch_id = cr.upload_batch_id)
-                      OR (cr.upload_batch_id IS NULL AND s.upload_batch_id IS NULL AND s.file_id = cr.file_id)
-                    )
-                  RETURNING 1
-               ), marked AS (
-                 UPDATE review_index ri
-                    SET is_submitted = TRUE, built_at = NOW()
-                  WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
-                    AND EXISTS (SELECT 1 FROM completed_batch)
-                  RETURNING 1
-               )
-               SELECT (SELECT COUNT(*)::int FROM completed_batch) AS completed_count,
-                      (SELECT COUNT(*)::int FROM marked) AS marked_count`,
-              [sheetId, tabName, rowIndex]
-            );
-            if (!completedPendingBatch.rows[0]?.completed_count && !wasSubmitted) {
-              throw new Error('리뷰 업로드 묶음 정보가 없습니다. 화면을 새로고침한 뒤 다시 제출해주세요.');
-            }
-            reviewIndexMarkedWithHistory = !!completedPendingBatch.rows[0]?.marked_count;
-          }
-        } catch (batchErr) {
-          batchErr.code = 'REVIEW_COMPLETION_HISTORY_FAILED';
-          throw batchErr;
-        }
-
         // 완료 → is_submitted=TRUE (멱등). 이미 TRUE여도 안전.
-        const result = reviewIndexMarkedWithHistory
-          ? { rowCount: 1 }
-          : await completionClient.query(
-            `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
-             WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
-            [sheetId, tabName, rowIndex]
-          );
-        // 제출 상태의 진실원본은 작업보드 참여자 행이다. 시트 기반 탭도 같은 상태를
-        // 함께 확정해야 리뷰어 화면이 인덱스 재생성 시점에 따라 되돌아가지 않는다.
-        await completionClient.query(
-          `UPDATE campaign_participants SET is_submitted = TRUE, updated_at = NOW()
-           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
+        const result = await pool.query(
+          `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
+           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
           [sheetId, tabName, rowIndex]
         );
         dbUpdated = result.rowCount > 0;
-        if (!dbUpdated) throw Object.assign(new Error('제출 대상이 변경되었습니다.'),{code:'REVIEW_TARGET_CHANGED'});
-        // Sheet-backed cells can lag behind this transaction. Bind web completion
-        // to the current participation token; never infer it from old boolean flags.
-        await completionClient.query(
-          `UPDATE reviewer_participations p SET review_obligation_status='fulfilled',
-             review_evidence=p.review_evidence||jsonb_build_object('web_submission',cp.review_participation_id),
-             record_version=p.record_version+1,updated_at=now()
-           FROM campaign_participants cp
-           WHERE cp.sheet_id=$1 AND cp.tab_name=$2 AND cp.seq=$3 AND cp.active=TRUE AND cp.deleted_at IS NULL
-             AND cp.is_submitted=TRUE AND p.campaign_participant_id=cp.id AND p.lifecycle_status='active'
-             AND p.index_snapshot->>'_review_participation_id'=cp.review_participation_id::text
-             AND p.review_obligation_status<>'closed_no_review'`,
-          [sheetId,tabName,rowIndex]
-        );
-        await completionClient.query('COMMIT');
-        completionClient.release(); completionClient=null;
 
-        // Optional review memo failure does not undo completion. Required blog URL
-        // was already saved inside the transaction; never write it a second time here.
-        if (!_isBlog) try {
+        /* ★★ 무시트 탭은 위 UPDATE 가 **다음 장부 재생성에 지워진다**(주문 한 건만 들어와도).
+           시트 기반 탭은 같은 값이 시트 칸에도 써져 살아남지만 무시트는 시트 쓰기가 막혀 있다.
+           → 작업표의 리뷰제출 칸에 기록해 **재생성이 그것을 다시 읽게** 한다(진실원본 일원화).
+           ★ 시트 기반 탭이면 handled:false = 종전 동작 그대로. 실패해도 제출은 성공(fail-soft). */
+        try {
+          const st = await require('../services/sheetlessStatus.service')
+            .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue, by: 'review-submit' });
+          if (st.handled && !st.ok) {
+            logger.warn(`[submit] 무시트 리뷰제출 표시 기록 실패 tab=${tabName} row=${rowIndex} reason=${st.reason}`);
+          }
+        } catch (e) {
+          logger.warn(`[submit] 무시트 리뷰제출 표시 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
+        }
+
+        /* ★ memo(비고 / 블로그는 포스팅URL)도 무시트 탭에서는 시트 쓰기가 막혀 있어 사라진다.
+           같은 이유·같은 방식으로 작업표 칸에 남긴다(열 고르기는 memoColumn 단일 출처).
+           ★ 시트 기반 탭이면 handled:false = 아래 Step 3 배경 시트 쓰기가 종전대로 처리. */
+        try {
           const mm = await require('../services/sheetlessStatus.service')
             .markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog: _isBlog, by: 'review-submit' });
           if (mm.handled && !mm.ok) {
@@ -777,19 +565,6 @@ router.post('/review', async (req, res, next) => {
           }
         } catch (e) {
           logger.warn(`[submit] 무시트 memo 기록 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
-        }
-
-        /* ★ 127: 포스팅제출일(blog) — 같은 규율로 작업표 칸에 자동 기록(재제출 = 최신 제출일 갱신). */
-        if (_isBlog && _postDate) {
-          try {
-            const pd = await require('../services/sheetlessStatus.service')
-              .markSheetlessPostDate({ sheetId, tabName, rowIndex, date: _postDate, by: 'review-submit' });
-            if (pd.handled && !pd.ok) {
-              logger.warn(`[submit] 무시트 포스팅제출일 기록 실패 tab=${tabName} row=${rowIndex} reason=${pd.reason}`);
-            }
-          } catch (e) {
-            logger.warn(`[submit] 무시트 포스팅제출일 기록 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
-          }
         }
 
         // index_master 카운트: FALSE→TRUE 전이일 때만 증가 (보완 제출 중복 방지)
@@ -814,26 +589,7 @@ router.post('/review', async (req, res, next) => {
         logger.info(`[submit/review] 부분 제출 — 미충족 슬롯: ${missingSlots.join(', ')} (row=${rowIndex})`);
       }
     } catch (dbErr) {
-      if(completionClient) {
-        try { await completionClient.query('ROLLBACK'); } catch(_) {}
-        completionClient.release(); completionClient=null;
-      }
-      dbUpdated=false;
-      completionHistoryError = dbErr;
       logger.warn(`[submit/review] DB 업데이트 실패: ${dbErr.message}`);
-    }
-
-    if (completionHistoryError) {
-      const terminal=['REVIEW_CLOSED_NO_REVIEW','REVIEW_TARGET_ARCHIVED','REVIEW_TARGET_CHANGED','REVIEW_SUBMIT_TARGET_FORBIDDEN','REVIEW_LEGACY_RESOLUTION_PENDING'].includes(completionHistoryError.code);
-      if(terminal) return res.status(completionHistoryError.code==='REVIEW_SUBMIT_TARGET_FORBIDDEN'?403:409).json({
-        ok:false,retryable:false,code:completionHistoryError.code,error:completionHistoryError.message});
-      return res.status(503).json({
-        ok: false, retryable: true,
-        code: completionHistoryError.code==='REVIEW_COMPLETION_HISTORY_FAILED' ? 'review_completion_history_failed' : (completionHistoryError.code||'REVIEW_COMPLETION_WRITE_FAILED'),
-        error: completionHistoryError.code==='REVIEW_POST_URL_WRITE_FAILED'
-          ? '포스팅 URL을 저장하지 못해 제출을 완료하지 않았습니다. URL을 확인한 뒤 다시 제출해 주세요. 첨부 파일은 다시 올리지 않아도 됩니다.'
-          : '제출 완료를 저장하지 못했습니다. 첨부 파일을 다시 올리지 말고 제출을 다시 시도해 주세요.',
-      });
     }
 
     // ── ★ Step 2: 즉시 응답 반환 (DB 저장 완료 = 제출 성공) ──
@@ -869,11 +625,7 @@ router.post('/review', async (req, res, next) => {
          ★ 판정 실패는 종전 경로(fail-open) — 시트 기반 탭이 절대 다수다. */
       try {
         const { isSheetless } = require('../utils/sheetlessScope');
-        if (sheetlessSubmission || await isSheetless(pool, sheetId, tabName)) {
-          if (complete && sheetlessSubmission) {
-            try { await require('../services/sheetlessLedger.service').rebuildLedgers({sheetId,tabName,by:'review-submit'}); }
-            catch(e) { logger.warn(`[submit/review:bg] 작업보드 저장 완료, 장부 재생성 지연: ${e.message}`); }
-          }
+        if (await isSheetless(pool, sheetId, tabName)) {
           logger.info(`[submit/review:bg] 무시트 탭 — 시트 쓰기 생략 (tab=${tabName}, row=${rowIndex})`);
           return;
         }
@@ -908,17 +660,6 @@ router.post('/review', async (req, res, next) => {
               logger.warn(`[submit/review:bg] 비고/포스팅 컬럼을 찾을 수 없음 (headers: ${headers.slice(0, 30).join(',')})`);
             }
           }
-
-          // ★ 127: 포스팅제출일(blog 완료) — 열 고르기는 memoColumn 단일 출처(큐 재시도와 동일).
-          if (_isBlog && complete && _postDate) {
-            const dateColIdx = pickPostDateColumnIndex(headers);
-            if (dateColIdx >= 0) {
-              const dateRange = `'${tabName}'!${getColLetter(dateColIdx)}${rowIndex}`;
-              await throttledCall(() => writeSheet(sheetId, dateRange, [[_postDate]], sheetOpts));
-            } else {
-              logger.warn(`[submit/review:bg] 포스팅제출일 컬럼을 찾을 수 없음 (tab=${tabName})`);
-            }
-          }
         })();
 
         const timeoutPromise = new Promise((_, reject) =>
@@ -941,7 +682,6 @@ router.post('/review', async (req, res, next) => {
             value: submitValue,
             memo: memo || '',
             blog: _isBlog,          // ★ 재시도도 같은 열 우선순위를 써야 값이 흩어지지 않는다
-            postDate: (_isBlog && complete) ? _postDate : '',   // 127: 제출 시점 날짜(재시도 시각 아님)
           });
         } catch (queueErr) {
           logger.error(`[submit/review:bg] 큐 등록도 실패: ${queueErr.message}`);
@@ -1039,14 +779,11 @@ async function _authoritativeHold(ctx) {
   if (!ctx || !ctx.applicationId || !ctx.holdToken) return ctx;
   try {
     const { rows } = await pool.query(
-      `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
+      `SELECT ca.phone8, ca.option_key, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id,
               co.unit_kind AS unit_kind,
-              co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
-              (lo.id IS NOT NULL) AS late_alive,
-              so.mirror_status AS sub_mirror_status,
-              lo.mirror_status AS late_mirror_status
+              (lo.id IS NOT NULL) AS late_alive
          FROM campaign_applications ca
          LEFT JOIN campaign_options co
                 ON co.campaign_id = ca.campaign_id AND co.opt_key = ca.option_key
@@ -1060,8 +797,6 @@ async function _authoritativeHold(ctx) {
     if (!rows.length) return ctx;                     // 미확인 = 기존 late 경로(오확정 없음)
     ctx.verified = true;
     const srv = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
-    const ownerPhone8 = String(rows[0].owner_phone8 || '').replace(/\D/g, '').slice(-8);
-    ctx.isSub = ownerPhone8.length === 8 && srv.length === 8 && ownerPhone8 !== srv;
     if (srv.length === 8 && srv !== ctx.phone8) {
       logger.warn(`[submit/order] holdPhone8 보정 app=${ctx.applicationId} ` +
         `클라=${ctx.phone8 || '∅'} → 서버=***${srv.slice(-4)} (구버전 프론트/문맥 불일치 의심)`);
@@ -1071,10 +806,6 @@ async function _authoritativeHold(ctx) {
     // ★ 134 복합 작업: 이 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이지 옵션명이 아니다.
     //   같은 왕복에서 읽어 온다(순증 0). 모르면 'option'(종전 동작 — 추측 승격 금지).
     ctx.unitKind = String(rows[0].unit_kind || '') === 'product' ? 'product' : 'option';
-    /* ★ 138 선택 상품 — 같은 왕복에서 읽는다(순증 0). 137 데이터 모델상 선택 단위는 언제나
-       (상품, 옵션) 짝이다: unit_kind='product' 면 상품명이 곧 선택 키이고, 'option' 이면
-       product_name 이 그 옵션이 속한 상품이다. 그래서 **어느 쪽이든 상품 칸에 적을 값이 있다**. */
-    ctx.productName = String(rows[0].product_name || '');
     // ★ 101: 블로그 주소도 **서버가 홀드에서 읽는다**(클라 전달 금지 — 옵션 서버권위와 같은 규율).
     //   같은 왕복이라 순증 0. 이 값이 주문 원장 INSERT 와 시트 '블로그URL' 칸으로 그대로 간다.
     ctx.blogUrl = rows[0].blog_url || null;
@@ -1084,10 +815,8 @@ async function _authoritativeHold(ctx) {
     //   링크조차 못 남기고 주문만 새로 생긴다(관제에 흔적 0인 고아 주문).
     if (rows[0].status === 'submitted' && rows[0].sub_alive) {
       ctx.doneOrderId = rows[0].order_submission_id; ctx.doneKind = 'confirmed';
-      ctx.doneMirrorStatus = rows[0].sub_mirror_status || '';
     } else if (rows[0].late_alive) {
       ctx.doneOrderId = rows[0].late_order_id;       ctx.doneKind = 'late';
-      ctx.doneMirrorStatus = rows[0].late_mirror_status || '';
     }
     return ctx;
   } catch (e) {
@@ -1110,12 +839,9 @@ async function _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx }) {
   // linked_* 값은 Google Sheet 접근 정보가 아니라 기존 작업보드 행의 DB 내부 식별자다.
   // 이 조회는 DB만 읽으며, Google Sheet/GAS를 읽거나 쓰지 않는다.
   const { rows } = await pool.query(
-    `SELECT rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
-            COALESCE(rc.workboard_id, tc.workboard_id) AS workboard_id
-       FROM recruit_campaigns rc
-       LEFT JOIN tab_configs tc
-         ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
-      WHERE rc.id = $1
+    `SELECT linked_sheet_id, linked_tab_name, linked_tab_gid
+       FROM recruit_campaigns
+      WHERE id = $1
       LIMIT 1`,
     [holdCtx.campaignId]
   );
@@ -1129,23 +855,8 @@ async function _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx }) {
       sheetId: campaign.linked_sheet_id,
       tabName: campaign.linked_tab_name,
       tabGid: campaign.linked_tab_gid || '',
-      workboardId: campaign.workboard_id || null,
     } : null,
   };
-}
-
-async function _issueCaptureSession(orderSubmissionId, target, source = 'order_submit') {
-  try {
-    return await purchaseSessions.issueForOrder({
-      orderSubmissionId,
-      captureSheetId: target && target.sheetId || '',
-      captureTabName: target && target.tabName || '',
-      source,
-    });
-  } catch (err) {
-    logger.error(`[submit/order] 구매캡처 세션 발급 실패(주문은 저장됨): ${err.message}`);
-    return null;
-  }
 }
 
 router.post('/order', async (req, res, next) => {
@@ -1156,24 +867,6 @@ router.post('/order', async (req, res, next) => {
             memo, selectedOptKey, isCoupang, ncMode,
             // ★ 슬롯 매칭 파라미터 (find-slot에서 받은 값)
             slotRowNumber, slotInadName, loginPhone8, loginName } = b;
-
-    /* ★★ 주문자 = 로그인한 리뷰어 이름 (사용자 확정 2026-08-24 · "가" 안)
-       ──────────────────────────────────────────────────────────────
-       리뷰웹시스템[3버전]에서는 **작업보드의 참여자 칸이 주문자 자리를 대체**한다
-       (`sheetlessOrder` 가 참여자 이름을 `loginName || orderer || recipient` 로 정한다).
-       그래서 구매양식에서 주문자를 한 번 더 치게 하지 않고 로그인 이름으로 채운다.
-
-       ★ **값이 오면 그 값이 이긴다**(빈 값일 때만 채운다) — 두 경로가 이 규칙에 기댄다:
-         ㉮ 인애드명단이 있는 탭 = 리뷰어가 명단에서 고른 이름(그 이름이 행 배정·옵션 잠금의
-            근거다 — `buildCandidateRows` 의 인애드 열 매칭) ㉯ 타계정 다건 제출 = 카드마다
-            그 명의 이름이 프리필된다. 둘 다 로그인 이름으로 덮으면 기존 동작이 깨진다.
-       ★ **로그인 이름이 없으면 채우지 않는다**(레거시·관리자 경유 = 빈 값 그대로).
-         ⚠ 그 경로는 애초에 주문자 필수 검증 대상이 아니다 — 아래 검증 블록 전체가
-         `if (_idPhone8.length === 8)`(리뷰어 제출) 안에 있다. 이 변경 전과 동일하다
-         (가상테스트 실측: loginName 없이 주문자 없이 제출해도 종전처럼 200).
-       ★ 이 값 하나를 아래 전 소비처(필수검증·orderData·SSE)가 함께 쓴다 — 한 곳만 쓰면
-         "검증은 통과인데 원장은 빈 주문자"로 갈린다. */
-    const _orderer = String(orderer || '').trim() || String(loginName || '').trim();
 
     // ═══ 신원 게이트: 내정보(사용자명/전화/주소/계좌) 완비 + 제출정보 유사도 검증 ═══
     // - loginPhone8이 있는 리뷰어 제출에만 적용 (레거시/관리자 경유 제출은 통과)
@@ -1197,59 +890,14 @@ router.post('/order', async (req, res, next) => {
     if (holdCtx && holdCtx.doneKind) {
       logger.info(`[submit/order] 멱등 통과(이미 접수된 홀드) app=${holdCtx.applicationId} ` +
         `kind=${holdCtx.doneKind} os=${holdCtx.doneOrderId}`);
-      const captureSession = await _issueCaptureSession(
-        holdCtx.doneOrderId,
-        orderScope.worktable || orderScope,
-        'order_retry'
-      );
       return res.json({
         ok: true, alreadySubmitted: true, dbSaved: true, sheetsWritten: false, queued: false,
-        orderSubmissionId: holdCtx.doneOrderId, mirrorStatus: holdCtx.doneMirrorStatus || '',
-        captureSession,
+        orderSubmissionId: holdCtx.doneOrderId, mirrorStatus: '',
         campaignHold: holdCtx.doneKind,     // 'confirmed' | 'late' — 부모 화면이 거짓말하지 않게
       });
     }
 
-    const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
-    let verifiedIdentityBinding = null;
-    if (_newIdentityGate) {
-      try {
-        const reviewerToken = req.headers['x-reviewer-token'];
-        if (!reviewerToken) {
-          return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인이 만료되었습니다. 다시 로그인해주세요.' });
-        }
-        const reviewerSession = verifyReviewerSession(reviewerToken);
-        const _reqFields = [
-          [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
-          [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
-        ];
-        const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, label]) => label);
-        if (_emptyFields.length) {
-          return res.status(400).json({ ok: false, code: 'FIELDS_REQUIRED', error: `필수 항목이 비어 있습니다: ${_emptyFields.join(', ')}` });
-        }
-        const verifiedIdentity = await reviewerOrderIdentity.verifyApprovalForSubmission({
-          ...b,
-          campaignApplicationId: holdCtx.applicationId,
-          campaignId: holdCtx.campaignId,
-          holdToken: holdCtx.holdToken,
-          recipient, phone, address,
-        }, reviewerSession);
-        verifiedIdentityBinding = {
-          ownerReviewerId: verifiedIdentity.context.owner.id,
-          participantIdentityId: verifiedIdentity.context.selected.participantIdentityId || null,
-          participantIdentityKeyHash: verifiedIdentity.approval.selectedIdentityHash,
-        };
-      } catch (gateErr) {
-        if (gateErr instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
-          return res.status(gateErr.status || 400).json({ ok: false, code: gateErr.code, error: gateErr.message });
-        }
-        if (gateErr && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(gateErr.name)) {
-          return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인이 만료되었거나 유효하지 않습니다.' });
-        }
-        logger.error(`[order-identity] 새 명의 게이트 오류(차단): ${gateErr.message}`);
-        return res.status(503).json({ ok: false, code: 'IDENTITY_GATE_UNAVAILABLE', error: '명의 확인을 완료할 수 없습니다. 잠시 후 다시 시도하거나 수동 확인해주세요.' });
-      }
-    } else if (_idPhone8.length === 8) {
+    if (_idPhone8.length === 8) {
       try {
         const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
         let { rows: _rvRows } = await pool.query(
@@ -1286,7 +934,7 @@ router.post('/order', async (req, res, next) => {
 
           // ★ 서버측 필수필드 검증 (주문번호·비고 제외 전 필드 — 리뷰어 제출에만 적용, 프론트 우회 차단)
           const _reqFields = [
-            [_orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
+            [orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
             [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
           ];
           const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, l]) => l);
@@ -1388,37 +1036,13 @@ router.post('/order', async (req, res, next) => {
 
     // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
     //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
-    const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
-                        selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
-                        /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
-                           옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
-                        selectedProduct: (holdCtx && holdCtx.productName) || '' };
-    // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
-    // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
-    let queuedWorkboardApply = false;
-    try {
-      const target = await require('../services/workboardQueueApply.service')
-        .resolveQueuedWorkboardTarget({ sheetId: orderScope.sheetId, tabName: orderScope.tabName });
-      queuedWorkboardApply = !!target.enabled;
-    } catch (targetErr) {
-      logger.warn(`[submit/order] workboard_apply 대상 판정 실패 — 기존 경로 유지: ${targetErr.message}`);
-    }
-    /*
-     * `orderScope.sheetless`는 참여형 공고의 서버 소유 범위만 표시한다. 반면 일반 구매양식은
-     * 기존 호환 범위를 그대로 받아 false일 수 있어도, 대상 탭 자체는 이미 무시트·통폐합
-     * workboard_apply 대상일 수 있다. 둘을 섞으면 원장은 시트 행을 선점하고(legacy),
-     * 실제 반영은 큐 방식으로 판단한 뒤 큐 등록 분기를 건너뛰는 고아 pending 주문이 생긴다.
-     *
-     * 따라서 승인된 큐 대상 여부가 반영 방식을 최종 결정한다. 큐 대상이면 원장도 시트
-     * 미러를 건너뛰며, 아래에서 반드시 workboard_apply를 enqueue한다.
-     */
-    const skipSheetMirrorForWrite = !!orderScope.sheetless || queuedWorkboardApply;
+    const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
+                        selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '' };
     const ledger = await createOrderLedgerEntry({
       sheetId: orderScope.sheetId,
       tabName: orderScope.tabName,
       gid: orderScope.gid,
-      skipSheetMirror: skipSheetMirrorForWrite,
-      deferSheetlessApply: queuedWorkboardApply,
+      skipSheetMirror: orderScope.sheetless,
       orderData,
       slotRowNumber: slotRowNumber || null,
       loginPhone8: loginPhone8 || '',
@@ -1427,13 +1051,10 @@ router.post('/order', async (req, res, next) => {
       //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
       //   ★ 063: expectedOptKey = 시트에 실제 기입되는 옵션 → 확정 시점 홀드 옵션과 다르면 warn(관제 대조 신호).
       //   ★ 방어 D3: orderIdentity = 시트에 실제 기입되는 연락처(정산 귀속 기준) → 명의 드리프트 경고 입력.
-      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone },
-        identityBinding: verifiedIdentityBinding, skipTabBinding: orderScope.sheetless } : undefined,
+      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone }, skipTabBinding: orderScope.sheetless } : undefined,
       // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
       // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
-      // crossDay: 실제로 시트 claim을 건너뛴 모든 경로는 날짜를 넘는 같은 구매도 막는다.
-      // workboard_apply 대상도 원장 단계에서 claim을 만들지 않으므로 sheetless와 같은 보호가 필요하다.
-      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData, crossDay: skipSheetMirrorForWrite },
+      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData },
     });
 
     if (ledger && ledger.duplicateOrderSubmissionId) {
@@ -1459,78 +1080,30 @@ router.post('/order', async (req, res, next) => {
     // 참여형 무시트 주문은 `campaign:*` 원장 키와 별도로, 공고에 연결된 DB 작업보드의
     // 빈 슬롯 하나를 즉시 선점한다. sheetRow가 없는 것은 정상이며 서비스가 원자적으로 배정한다.
     let sheetlessDone = null;
-    let queued = false;
-    let captureTarget = orderScope.worktable || orderScope;
-    // 큐 대상 판정은 참여형 여부보다 우선한다. 이 분기가 orderScope.sheetless 안에 있으면
-    // 일반 구매양식에서 "큐도 직접기록도 하지 않는" 상태가 다시 생긴다.
-    if (queuedWorkboardApply) {
+    if (orderScope.sheetless) {
       try {
-        await enqueue('workboard_apply', {
-          sheetId: orderScope.sheetId, tabName: orderScope.tabName, gid: orderScope.gid || '',
-          orderSubmissionId: ledger.orderSubmissionId, loginPhone8: loginPhone8 || '', loginName: loginName || '',
-        });
-        await markOrderQueued(ledger.orderSubmissionId);
-        queued = true;
-        sheetlessDone = { ok: true, queued: true };
-      } catch (queueErr) {
-        sheetlessDone = { ok: false, reason: 'queue_enqueue_failed', message: queueErr.message };
-      }
-    } else if (orderScope.sheetless) {
-      try {
-        /* ★★ 공고에 작업보드가 아직 없으면 **그 자리에서 만들어 연결**한다(사람이 시트탭을
-           고르는 절차 없음 — 탈 구글시트). 종전에는 여기서 `no_worktable_mapping` 으로 주문을
-           failed 로 강등하고 critical 로그를 남겼는데, 그 주문은 `campaign:*` 키라 큐 복구가
-           해석하지 못해 2분마다 스킵만 반복됐다(반복 이상현상의 실체).
-           ★ 이미 연결된 공고는 손대지 않는다(멱등) · 실패해도 예외를 던지지 않는다. */
-        let wt = orderScope.worktable;
-        if (!wt && holdCtx && holdCtx.campaignId) {
-          try {
-            const ens = await require('../services/campaignWorktable.service')
-              .ensureCampaignWorktable({ campaignId: holdCtx.campaignId, by: 'order-submit' });
-            if (ens && ens.ok) wt = { sheetId: ens.sheetId, tabName: ens.tabName, tabGid: ens.tabGid || '',
-              workboardId: ens.workboardId || null };
-          } catch (ensErr) {
-            logger.warn(`[submit/order] 공고 작업보드 확보 실패: ${ensErr.message}`);
-          }
-        }
-        if (wt && wt.workboardId) {
-          await pool.query(
-            `UPDATE order_submissions SET workboard_id=$2::uuid, updated_at=NOW()
-              WHERE id=$1::uuid AND workboard_id IS NULL`,
-            [ledger.orderSubmissionId, wt.workboardId]
-          );
-        }
+        const wt = orderScope.worktable;
         sheetlessDone = wt
           ? await require('../services/sheetlessOrder.service').writeOrderToWorktable({
               sheetId: wt.sheetId, tabName: wt.tabName, tabGid: wt.tabGid,
-              workboardId: wt.workboardId || null,
               orderData, orderSubmissionId: ledger.orderSubmissionId,
               loginPhone8: loginPhone8 || '', loginName: loginName || '',
-              allowConfirmedCampaignOverflow: true,
             })
           : { ok: false, reason: 'no_worktable_mapping' };
-        if (wt) captureTarget = wt;
       } catch (slErr) {
         sheetlessDone = { ok: false, reason: 'exception', message: slErr.message };
       }
-    }
-    // 큐 등록 실패와 직접 기록 실패는 모두 원장에 실패 상태를 남긴다. 여기서 공통 처리하지
-    // 않으면 "큐 등록을 시도했지만 실패"한 주문이 pending으로 남아 자동복구 대상에서도
-    // 혼동될 수 있다.
-    if (sheetlessDone && !sheetlessDone.ok) {
-      try {
+      if (!sheetlessDone.ok) {
         await markOrderMirrorFailed(ledger.orderSubmissionId, sheetlessDone.message || sheetlessDone.reason);
-      } catch (statusErr) {
-        logger.error(`[submit/order] 작업표 실패상태 저장 실패(원장 저장은 완료): ${statusErr.message}`);
+        logger.error(`[submit/order] 작업보드 기록 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
+        logAbnormal({
+          flow: 'order_submit', step: 'sheetless_worktable_write', severity: 'critical',
+          error: new Error(`작업보드 기록 실패: ${sheetlessDone.reason}`),
+          context: { campaignId: holdCtx && holdCtx.campaignId, orderSubmissionId: ledger.orderSubmissionId },
+        });
       }
-      logger.error(`[submit/order] 작업보드 반영 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
-      logAbnormal({
-        flow: 'order_submit', step: queuedWorkboardApply ? 'workboard_apply_enqueue' : 'sheetless_worktable_write', severity: 'critical',
-        error: new Error(`작업보드 반영 실패: ${sheetlessDone.reason}`),
-        context: { campaignId: holdCtx && holdCtx.campaignId, orderSubmissionId: ledger.orderSubmissionId },
-      });
     }
-    if (ledger.sheetRow && !queuedWorkboardApply) {
+    if (ledger.sheetRow) {
       let isSl = false;
       try {
         isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName);
@@ -1547,16 +1120,6 @@ router.post('/order', async (req, res, next) => {
           sheetlessDone = { ok: false, reason: 'exception', message: slErr.message };
         }
         if (!sheetlessDone.ok) {
-          // ★ 원장에는 행 배정값이 있어도, 무시트 작업표 기록 자체가 실패하면
-          // pending으로 방치하면 안 된다. 실패 원인을 남겨야 복구 작업과 화면이
-          // "제출됨 + 작업표 미반영"을 명확히 구분할 수 있다.
-          // 상태 저장도 같은 DB 장애로 실패할 수 있다. 원장은 이미 커밋됐으므로,
-          // 그 2차 실패가 구매양식 전체의 실패 응답으로 바뀌어 재제출을 유도하면 안 된다.
-          try {
-            await markOrderMirrorFailed(ledger.orderSubmissionId, sheetlessDone.message || sheetlessDone.reason);
-          } catch (statusErr) {
-            logger.error(`[submit/order] 무시트 실패상태 저장 실패(원장 저장은 완료): ${statusErr.message}`);
-          }
           logger.error(`[submit/order] 무시트 기록 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
           logAbnormal({
             flow: 'order_submit', step: 'sheetless_write', severity: 'critical',
@@ -1567,7 +1130,8 @@ router.post('/order', async (req, res, next) => {
       }
     }
 
-    if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
+    let queued = false;
+    if (ledger.sheetRow && !sheetlessDone) {
       try {
         await enqueue('order_append', {
           sheetId,
@@ -1590,7 +1154,7 @@ router.post('/order', async (req, res, next) => {
           context: { sheetId, tabName, type: 'order_append', orderSubmissionId: ledger.orderSubmissionId },
         });
       }
-    } else if (!ledger.sheetRow && !skipSheetMirrorForWrite) {
+    } else if (!ledger.sheetRow && !orderScope.sheetless) {
       logger.warn(`[submit/order] RAW 행 배정 실패: sheet=${sheetId}, tab=${tabName}, orderSubmissionId=${ledger.orderSubmissionId}`);
       logAbnormal({
         flow: 'order_submit', step: 'row_claim', severity: 'warn',
@@ -1599,7 +1163,6 @@ router.post('/order', async (req, res, next) => {
       });
     }
 
-    const captureSession = await _issueCaptureSession(ledger.orderSubmissionId, captureTarget, 'order_submit');
     res.json({
       ok: true,
       dbSaved: true,
@@ -1609,22 +1172,16 @@ router.post('/order', async (req, res, next) => {
       slotRowNumber: slotRowNumber ? parseInt(slotRowNumber) : null,
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
-      captureSession,
       // 무시트는 DB 작업보드 기록까지 성공한 경우에만 완결이다.
-      mirrorStatus: queuedWorkboardApply ? (queued ? 'queued' : 'failed')
-        : orderScope.sheetless ? (sheetlessDone && sheetlessDone.ok ? 'written' : 'failed')
+      mirrorStatus: orderScope.sheetless ? (sheetlessDone && sheetlessDone.ok ? 'written' : 'failed')
         : (sheetlessDone && sheetlessDone.ok) ? 'written'
         : queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
       campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내
     });
 
-    // 참여형 구매는 요청 주소에 작업 좌표가 없고 서버가 위에서 실제 작업표를 확정한다.
-    // 알림도 요청의 빈 값이 아니라 캡처/기록에 사용한 최종 작업표를 써야 열린 작업보드가 갱신된다.
-    const liveWorktable = captureTarget || orderScope;
     emitOrderSubmit({
-      tabName: liveWorktable.tabName, sheetId: liveWorktable.sheetId,
-      workboardId: liveWorktable.workboardId || null,
-      orderer: _orderer || '', recipient: recipient || '',
+      tabName, sheetId,
+      orderer: orderer || '', recipient: recipient || '',
       dbSaved: true, sheetsWritten: false, queued, usedSlot: !!slotRowNumber,
       sheetRow: ledger.sheetRow,
     });
@@ -1636,9 +1193,7 @@ router.post('/order', async (req, res, next) => {
       try {
         // ★ 상시 배치(ORDER_BATCH_AUTO=1): 주문은 배치 스케줄러가 탭별로 묶어 근실시간 반영
         //   (단건 펌프보다 throttle 효율 수십배). 미설정 시 기존 단건 펌프(되돌리기).
-        if (queuedWorkboardApply) {
-          require('../jobs/queuePump').kickQueuePump();
-        } else if (process.env.ORDER_BATCH_AUTO === '1') {
+        if (process.env.ORDER_BATCH_AUTO === '1') {
           // ★ 공정화 #1: 제출한 탭을 타깃으로 전달 → 그 탭이 글로벌 우선순위 밖이어도 이 사이클에 직접 드레인(즉시성).
           require('../jobs/orderBatchScheduler').kickOrderBatch(sheetId, tabName);
         } else {

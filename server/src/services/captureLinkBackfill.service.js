@@ -50,10 +50,6 @@ async function auditCaptureLinks(opts = {}) {
   const days = _clamp(opts.days, 3, 1, 3650);
   const limit = _clamp(opts.limit, 200, 1, 2000);
   const maxTabs = _clamp(opts.maxTabs, 20, 1, 60);
-  /* ★ 탭 좁히기(시범 실행용) — **정확일치만**. 부분일치로 두면 `…100건` 이 `…1000건` 까지
-     끌어와 "한 탭만 돌린다"는 약속이 조용히 깨진다. 미지정이면 종전 동작(전 탭). */
-  const onlyTab = String(opts.tabName == null ? '' : opts.tabName).trim() || null;
-  const onlySheet = String(opts.sheetId == null ? '' : opts.sheetId).trim() || null;
 
   // ★ 컷오프 = 캡처↔주문 연결 기능 배포 시각. 그 이전 주문은 링크가 비어 있는 게 정상이라
   //   감지기(detectMissingCaptures)도 알림을 내지 않는다 — 화면이 두 구간을 갈라 보여줘야
@@ -66,7 +62,7 @@ async function auditCaptureLinks(opts = {}) {
   } catch (_) { /* 못 읽으면 구분 없이 보고(판정은 그대로 유효) */ }
 
   const { rows: orders } = await db().query(
-    `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.tab_gid AS "tabGid",
+    `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
             os.recipient, os.orderer, os.submitted_at AS "submittedAt",
             ($3::timestamptz IS NOT NULL AND os.submitted_at <= $3::timestamptz) AS "preCutoff",
             EXISTS(SELECT 1 FROM reviewer_event_logs l
@@ -76,22 +72,18 @@ async function auditCaptureLinks(opts = {}) {
       WHERE os.deleted_at IS NULL AND os.capture_uploaded_at IS NULL
         AND os.submitted_at < NOW() - interval '20 minutes'
         AND os.submitted_at > NOW() - ($1 || ' days')::interval
-        AND ($4::text IS NULL OR os.tab_name = $4)
-        AND ($5::text IS NULL OR os.sheet_id = $5)
       ORDER BY os.submitted_at DESC
       LIMIT $2`,
-    [String(days), limit, cutoff, onlyTab, onlySheet]
+    [String(days), limit, cutoff]
   );
-  if (!orders.length) return { days, cutoff, onlyTab, onlySheet, scanned: 0, tabs: 0, tabsSkipped: 0, items: [] };
+  if (!orders.length) return { days, cutoff, scanned: 0, tabs: 0, tabsSkipped: 0, items: [] };
 
   // 탭 단위로 묶어 Drive 조회 횟수를 최소화(탭당 1회 재귀 조회)
   const byTab = new Map();
-  const gidOf = new Map();   // 탭키 → 그 탭의 gid(주문 원장이 기록해 둔 값)
   for (const o of orders) {
     const k = `${o.sheetId}\t${o.tabName}`;
     if (!byTab.has(k)) byTab.set(k, []);
     byTab.get(k).push(o);
-    if (!gidOf.get(k) && o.tabGid) gidOf.set(k, String(o.tabGid));
   }
   const tabKeys = [...byTab.keys()].slice(0, maxTabs);
   const tabsSkipped = byTab.size - tabKeys.length;
@@ -102,19 +94,9 @@ async function auditCaptureLinks(opts = {}) {
     const group = byTab.get(k);
     let files = null, folderErr = '';
     try {
-      /* ★★ 이름 → gid 폴백 (2026-08-20 실측): 시트 탭은 건수가 바뀌며 **리네임된다**
-         (`…_500건` → `…_443건`). 주문 원장은 제출 당시 이름을 그대로 들고 있고 `tab_configs` 는
-         현재 이름이라, 이름으로만 조인하면 **폴더가 멀쩡히 있는데 `no_capture_folder`** 로 떨어진다
-         (실측: 미링크 808건 중 상당수). 레포가 반복해 못박은 gid 폴백 규율을 여기에도 적용한다.
-         ★ 이름 일치가 우선(같은 gid 를 여러 탭이 쓰는 일은 없지만 이름이 더 강한 신호다).
-         ★ 빈 gid 는 절을 켜지 않는다 — 켜면 gid 없는 행이 전부 매칭된다. */
-      const gid = gidOf.get(k) || '';
       const { rows: cfg } = await db().query(
-        `SELECT capture_folder_url FROM tab_configs
-          WHERE sheet_id = $1 AND (tab_name = $2 OR ($3 <> '' AND tab_gid = $3))
-          ORDER BY (tab_name = $2) DESC
-          LIMIT 1`,
-        [sheetId, tabName, gid]
+        'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
       );
       const url = cfg[0] && cfg[0].capture_folder_url;
       const folderId = url ? drv().extractFolderIdFromUrl(url) : null;
@@ -162,26 +144,15 @@ async function auditCaptureLinks(opts = {}) {
       });
     }
   }
-  return { days, cutoff, onlyTab, onlySheet, scanned: items.length, tabs: tabKeys.length, tabsSkipped, items };
+  return { days, cutoff, scanned: items.length, tabs: tabKeys.length, tabsSkipped, items };
 }
-
-/* ★★ 수취인명이 같으면 시각 창은 보지 않는다 (사용자 확정 2026-08-20)
-     — "행에 있는 수취인명과 주문캡쳐본에 있는 수취인명이 일치하면 매칭해도 된다".
-     파일명의 첫 토큰은 **항상 수취인**(search-app.js 가 제출 폼의 수취인 칸으로 짓는다)이라,
-     같은 탭 안에서 그 이름으로 걸린 파일은 그 주문의 캡처로 본다.
-     ★ 푸는 것은 **시각 창 하나뿐** — 후보 유일성(ambiguous)·역유일성(ambiguous_file)·
-       주문자만 매칭(orderer_only) 게이트는 그대로다(모르면 붙이지 않는다).
-     ★ 되돌리기 = env `CAPTURE_LINK_NAME_ONLY=0`(시각 창 게이트 복귀). */
-const NAME_ONLY = process.env.CAPTURE_LINK_NAME_ONLY !== '0';
 
 /** 백필 대상 판정 — ★ 완화 금지. 틀린 파일을 붙이면 남의 캡처가 그 주문의 정산 증빙이 된다. */
 function backfillEligibility(item, { allowLow = false } = {}) {
   if (!item || item.verdict !== 'attachedButUnlinked') return { ok: false, reason: 'not_attached' };
   if (!item.fileId) return { ok: false, reason: 'no_file_id' };
-  /* ★ 시각 창 밖(low)이어도 **수취인명으로 걸렸다면** 통과시킨다(위 확정).
-     수취인 칸이 비어 주문자 이름으로만 걸린 건은 대조할 이름이 없으므로 종전대로 창을 본다. */
-  const nameOk = NAME_ONLY && item.matchedBy === 'recipient';
-  if (item.confidence !== 'high' && !allowLow && !nameOk) return { ok: false, reason: 'low_confidence' };
+  // ★ 시각 창 밖(low)은 "이름만 같은" 신호다 — 동명이인·과거 회차 파일일 수 있어 자동 대상이 아니다.
+  if (item.confidence !== 'high' && !allowLow) return { ok: false, reason: 'low_confidence' };
   // ★★ 후보가 여럿이면 붙이지 않는다 — 어느 것이 그 주문의 캡처인지 정할 근거가 없다.
   //    (감사는 사람이 보라고 첫 후보를 보여 주지만, 자동 반영은 유일할 때만 한다.)
   const n = item.confidence === 'high' ? item.winCandidates : item.candidates;

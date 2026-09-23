@@ -42,29 +42,6 @@ ok('★ 기본 뷰 = 홈(내부인) / 광고주는 workdesk(전용 대시보드)
   /switchView\(STATE\.view\|\|\(isAdv\?'workdesk':'home'\)\)/.test(src));
 ok('switchView 가 home → renderHomeView 분기', /v==='home'\)\s*renderHomeView\(\)/.test(src));
 
-ok('모바일 상단 메뉴는 720px 이하에서 한 줄 가로 탐색으로 전환',
-  /@media\(max-width:720px\)\{[\s\S]{0,1200}\.nav\{[^}]*overflow-x:auto/.test(src));
-ok('모바일 홈은 바깥 여백을 회수해 화면 폭을 사용',
-  /#hmwrap\{margin:-18px -22px;padding:12px 12px 28px;max-width:none\}/.test(src));
-ok('모바일 작업 목록은 표 머리글을 숨기고 같은 행을 압축 행으로 전환',
-  /table\.wbl-t thead\{display:none\}/.test(src)
-    && /table\.wbl-t tbody tr\{display:grid;grid-template-columns:minmax\(0,1fr\) auto auto auto/.test(src));
-ok('모바일 카드 필드에 읽을 수 있는 라벨을 제공',
-  ['작업명','작업표','공유','담당','상태','저장폴더','모집공고','오늘완료','마감','더보기']
-    .every(label => src.includes(`data-label="${label}"`) || label === '마감')
-  // 숫자 4칸은 한 함수가 `data-label="${label}"` 로 찍으므로 라벨 리터럴로 확인한다(시안 확정 2026-09-22).
-  && ['총건수','참여','제출','입금'].every(label => src.includes(`,'${label}')`)));
-ok('모바일 카드 버튼은 1px 데스크톱 열 폭을 해제하고 최소 38px 높이',
-  /table\.wbl-t td\.wbl-btncol\{width:auto\}/.test(src)
-    && /table\.wbl-t td \.wbl-b\{width:100%;min-height:38px/.test(src));
-ok('모바일 압축 행은 도구를 기본으로 숨기고 펼친 행에서만 표시',
-  /td:nth-child\(2\),table\.wbl-t td:nth-child\(3\),table\.wbl-t td:nth-child\(n\+10\)\{display:none\}/.test(src)
-    && /tr\.mob-open td:nth-child\(2\)[\s\S]{0,160}display:flex/.test(src));
-ok('모바일 펼침 버튼은 행 열기를 막고 aria 상태를 함께 갱신',
-  /function _mobileToggleTaskRow\(btn,event\)\{[\s\S]{0,180}preventDefault\(\)[\s\S]{0,80}stopPropagation\(\)/.test(src)
-    && /aria-expanded="false" aria-label="작업 도구 펼치기"/.test(src)
-    && /setAttribute\('aria-expanded',String\(open\)\)/.test(src));
-
 ok('★ _loadOrders 는 _woSyncNavBadge() 를 부른다(인라인 표기 사본 제거)',
   /_renderWoHead\(\); _renderWoBody\(\);\s*\n\s*_woSyncNavBadge\(\);/.test(src));
 ok('★ #woNavBadge 표기는 _woSyncNavBadge 안 한 곳뿐(값 단일 출처)',
@@ -106,24 +83,13 @@ ok('★ renderHomeView 도 역할을 자기 스코프에서 구한다',
   const cssBlock = /\/\* ══ 홈\(첫 진입\)[\s\S]*?(?=<\/style>|$)/.exec(style);
   ok('홈 CSS 블록을 찾았다', !!cssBlock);
   const rules = cssBlock[0].replace(/\/\*[\s\S]*?\*\//g, '');
-  const sels = [...rules.matchAll(/(^|\})\s*([^{}@]+)\{/g)].map(m => m[2].trim()).filter(Boolean)
-    // @keyframes 의 구간 키워드(`from`·`to`·`50%`)는 선택자가 아니다 — 이 검사의 대상은 "남의 화면을
-    // 오염시킬 수 있는 선택자"이고, 키프레임은 이름(`@keyframes wpIn`)으로 이미 스코프돼 있다.
-    .filter(x => !/^(from|to|[\d.]+%)$/.test(x));
+  const sels = [...rules.matchAll(/(^|\})\s*([^{}@]+)\{/g)].map(m => m[2].trim()).filter(Boolean);
   // ★ 이 검사의 의미 = "새 선택자는 전용 접두를 써서 남의 화면을 오염시키지 않는다".
   //   holdover: 홈 아래 작업 목록 블록(migration 088)은 wbl- 접두를 쓴다 — 접두를 늘리는 것은 의미 불변,
   //   대신 **접두 없는 일반 선택자**(.card, table 같은 것)는 여전히 금지된다.
-  // holdover ②: 이 블록 추출은 `/* ══ 홈(첫 진입)` 부터 `</style>` 끝까지를 통째로 집으므로, 그 뒤에
-  //   덧붙은 **오버레이 전용 스타일**(`#abOv …`·`#rnOv …`·`#ddOv …`·`#hbOv …`)까지 함께 들어온다.
-  //   그것들도 "전용 스코프를 쓴다"는 이 검사의 의미를 지키고 있으므로(오버레이 id 로 스코프), 허용한다.
-  //   ★ 여전히 금지되는 것은 **스코프 없는 일반 선택자**(`.card`·`table`·`th` 같은 것)다.
-  // holdover ③: 작업 목록 블록의 **전용 id**(`#wblMount`·`#wblBody`·`#wblQ`)도 같은 wbl 네임스페이스다
-  //   — 검색 중 높이 고정(_finSearch)을 모바일에서 무력화하는 `#wblBody{min-height:0!important}` 가 여기 해당.
-  //   접두를 늘리는 것은 의미 불변이고, 스코프 없는 일반 선택자는 여전히 걸린다.
-  const SCOPED = /^(#hmwrap|\.hm-|\.wbl-|#wbl[A-Za-z]|table\.wbl-|#[A-Za-z][\w-]*Ov[\s.:[#>]|#[A-Za-z][\w-]*Ov$)/;
-  ok('★ 홈 CSS 선택자는 전부 전용 스코프(#hmwrap/.hm-/.wbl- 또는 오버레이 #…Ov): ' + sels.length + '개',
-    sels.length > 5 && sels.every(s => s.split(',').every(p => SCOPED.test(p.trim()))),
-    sels.filter(s => s.split(',').some(p => !SCOPED.test(p.trim()))).join(' | '));
+  ok('★ 홈 CSS 선택자는 전부 #hmwrap/.hm-/.wbl- 스코프(남의 화면 오염 금지): ' + sels.length + '개',
+    sels.length > 5 && sels.every(s => s.split(',').every(p => /^(#hmwrap|\.hm-|\.wbl-|table\.wbl-)/.test(p.trim()))),
+    sels.filter(s => s.split(',').some(p => !/^(#hmwrap|\.hm-|\.wbl-|table\.wbl-)/.test(p.trim()))).join(' | '));
 }
 
 /* ── B. 런타임(vm) — 실제 실행으로 프리변수·표시 규칙 고정 ─────────────── */
@@ -189,11 +155,8 @@ function makeSandbox(role, apiImpl) {
     const { viewroot } = makeSandbox('staff');
     const sb2 = makeSandbox('staff'); vm.runInContext('renderHomeView()', sb2.sb);
     const h = sb2.viewroot._html;
-    // ★ 2026-08 사용자 확정: 관측은 AE 도 본다(서버 /overview·/parity 가 internal) — 타일도 함께 열었다.
-    //   입금관리·등록리뷰어DB 는 여전히 adminOrMaster 라 타일이 없어야 한다(눌러도 403 인 막다른 길 금지).
-    ok('staff: admin 전용 타일(입금관리·등록리뷰어DB)이 없다 — nav 정책과 1:1',
-      !h.includes('등록리뷰어DB') && !h.includes('입금관리'));
-    ok('staff: 관측 타일은 있다(서버 게이트 internal 과 1:1)', h.includes('Track B 전환 현황'));
+    ok('staff: admin 전용 타일(관측·입금관리·등록리뷰어DB)이 없다 — nav 정책과 1:1',
+      !h.includes('등록리뷰어DB') && !h.includes('입금관리') && !h.includes('Track B 전환 현황'));
     ok('staff: 미확인 문의 줄이 없다(AE 는 문의 미열람 — 영원한 – 방지)', !h.includes('미확인 문의'));
     ok('staff: 공통 타일(작업보드·C/S·리뷰검수)은 있다', h.includes('작업보드') && h.includes('리뷰검수'));
     void viewroot;

@@ -92,7 +92,7 @@ t('3f: 강한 신호로 과거가 확인되면 후보', () => {
 });
 
 /* ── 4) 서비스 실행(스텁 pool) ──────────────────────────── */
-function stubPool(rows, { onUpdate, counts } = {}) {
+function stubPool(rows, { onUpdate } = {}) {
   const q = []; let connects = 0;
   const client = {
     async query(sql, params) {
@@ -111,8 +111,6 @@ function stubPool(rows, { onUpdate, counts } = {}) {
       const s = String(sql).replace(/\s+/g, ' ').trim();
       q.push({ s, params });
       if (/FROM tab_configs tc/.test(s)) return { rows };
-      // 빈 껍데기 삭제의 장부·주문 계수(스텁은 SQL 을 해석하지 않으므로 형태로 분기)
-      if (counts && /FROM review_index/.test(s) && /FROM index_master/.test(s)) return { rows: [counts] };
       return { rows: [] };
     },
   };
@@ -122,11 +120,6 @@ const ROWS = [
   { sheetId: 's', tabName: '과거B', tabGid: '2', sampleStartDate: '24.6.1' },
   { sheetId: 's', tabName: '최근', tabGid: '3', sampleStartDate: '26.8.1' },
   { sheetId: 's', tabName: '이미마감', tabGid: '4', sampleStartDate: '24.5.1', isClosed: true },
-  // 이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 탭 — smartBuild 는 새 이름으로 계속 읽는다
-  { sheetId: 's', tabName: '리네임후', tabGid: '5', sampleStartDate: '24.5.1', archivedGidOnly: true },
-  // 마감인데 보관 기록만 옛 이름 — 읽히지 않으므로 gid-only 건수에 **세면 안 된다**
-  { sheetId: 's', tabName: '마감_gid만', tabGid: '6', sampleStartDate: '24.5.1',
-    archivedGidOnly: true, isClosed: true },
 ];
 
 (async () => {
@@ -134,23 +127,16 @@ const ROWS = [
   svc.__setPoolForTest(p1);
   const scan = await svc.scanPastSheetTabs({ since: SINCE });
   t('4a: 스캔은 읽기 전용 — 커넥션도 잡지 않고 쓰기 쿼리 0', () => {
-    assert.equal(scan.candidates, 3);
-    assert.equal(scan.stillReading, 4);
-    assert.equal(scan.alreadyQuiet, 2, '이미 조용한 탭 건수를 말한다');
+    assert.equal(scan.candidates, 2);
+    assert.equal(scan.stillReading, 3);
+    assert.equal(scan.alreadyQuiet, 1, '이미 조용한 탭 건수를 말한다');
     assert.equal(p1.connects, 0, '읽기에 커넥션 불필요');
     // ★ `deleted_at IS NULL` 이 /DELETE/i 에 걸린다 — **문장 형태**로 본다(낱말 검사 금지)
     assert.ok(!p1.q.some(x => /\b(UPDATE\s+\w|INSERT\s+INTO|DELETE\s+FROM)/i.test(x.s)), '쓰기 쿼리 0');
   });
   t('4b: 후보가 아닌 사유를 건수로 말한다(조용한 누락 금지)', () => {
     assert.equal(scan.heldBy.recent, 1);
-    assert.equal(scan.quietBy.already_closed, 2);
-  });
-  t('4c: 리네임 탭 건수를 응답이 실제로 싣는다(문자열 존재가 아니라 실행으로)', () => {
-    // ★ SRC 에 이름이 있는지만 보면 **주석**이 대신 통과시킨다(변이시험 실측)
-    assert.equal(scan.archivedByGidOnly, 1, '받음 ' + scan.archivedByGidOnly);
-    // ★★ 안 읽히는 탭까지 세면 "여전히 읽습니다"가 거짓이 된다(2026-08-19 실측 6개)
-    assert.ok(!scan.items.some(i => !i.reads), '후보는 전부 읽히는 탭');
-    assert.ok(scan.items.some(i => i.tabName === '리네임후'), '아카이브로 접지 않고 후보로');
+    assert.equal(scan.quietBy.already_closed, 1);
   });
 
   const p2 = stubPool(ROWS);
@@ -228,7 +214,9 @@ const ROWS = [
     assert.ok(/onclick="_ptScan\(\)"/.test(FE), '진입 버튼');
     assert.ok(/id="ptBox"/.test(FE), '마운트 지점');
     const i = FE.indexOf('function _ptRender');
-    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    // ★ 주석의 날짜(사용자 확정 2026-08-19)가 검사에 걸린다 — **주석을 걷어내고** 본다
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'))
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     // 화면이 과거를 다시 판정하면 서버와 갈린다 — 날짜 비교·컷오프가 있으면 안 된다
     assert.ok(!/new Date\(|20\d\d-\d\d-\d\d/.test(body), '화면 자체 날짜 판정 금지');
     assert.ok(/r\.candidates/.test(body) && /r\.stillReading/.test(body), '서버 집계를 그대로 표기');
@@ -244,20 +232,13 @@ const ROWS = [
     assert.ok(cfm > pre, '확인창이 미리보기 뒤 (받음 ' + cfm + ')');
     assert.ok(run > cfm, '실행은 확인창 뒤');
     assert.ok(/if\(!confirm\([\s\S]{0,600}\)\) return;/.test(body), '확인하지 않으면 실행하지 않는다');
-    assert.ok(/되돌리려면/.test(body), '되돌리는 길을 문장으로 말한다');
-    // ★★ `is_closed` 는 표시가 아니라 **마감(아카이브) 예약**이다 — 다음 전체 빌드가
-    //   장부를 보관함으로 옮기고 tab_configs 행까지 지운다. 그래서 확인창은
-    //   "한 칸만 바꾼다 / 데이터는 안 지운다"로 줄여 말하면 **거짓**이 된다.
+    // ★★ 마감은 "표시 한 칸"이 아니다 — 다음 전체 빌드가 아카이브로 옮기고 tab_configs 행까지 지운다.
+    //   확인창이 그 사실을 말하지 않으면 담당자가 되돌리기 비용을 모른 채 누른다.
+    assert.ok(/아카이브/.test(body), '아카이브로 옮겨진다는 사실을 말한다');
+    assert.ok(/되돌리기/.test(body), '되돌리는 방법을 말한다');
+    assert.ok(/리뷰어의 제출완료 내역/.test(body), '리뷰어 화면 부작용을 말한다');
     assert.ok(!/데이터는 지우지 않습니다/.test(body),
-      '축소된 안내 부활 금지 — 실제로는 아카이브되고 목록에서 사라진다');
-    assert.ok(/아카이브/.test(body), '아카이브된다고 말한다');
-    assert.ok(/리뷰어의 제출완료 내역/.test(body), '리뷰어 화면에서 사라지는 것까지 말한다');
-  });
-  t('8b-2: 안내 문구에도 축소된 표현이 없다(렌더 본문)', () => {
-    const i = FE.indexOf('function _ptRender');
-    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
-    assert.ok(!/데이터는 지우지 않습니다/.test(body), '렌더 안내도 축소 금지');
-    assert.ok(/아카이브/.test(body) && /제출완료 내역/.test(body), '결과를 사실대로');
+      '"데이터를 지우지 않는다"는 부정확한 설명이 되살아나면 안 된다(전체 빌드가 원본을 지운다)');
   });
   t('8c: 실패는 자리표시자를 남기지 않는다(무한 로딩 금지)', () => {
     const i = FE.indexOf('async function _ptScan');
@@ -265,219 +246,39 @@ const ROWS = [
     assert.ok(/catch\s*\(e\)\s*\{[\s\S]{0,400}다시 시도/.test(body), '예외 시 사유 + 다시 시도');
   });
 
-  /* ── 3g) 이름 어긋남 = 마감·아카이브 스킵이 빗나간다 ────── */
-  t('3g: 시트 탭 이름이 바뀌면 마감·아카이브여도 읽힌다(마감으로 못 멈춘다)', () => {
-    // smartBuild 의 tcMap/archivedSet 은 둘 다 sheet_id||tab_name 키다(gid 미참조)
-    const IB = R('server/src/services/indexBuilder.service.js');
-    assert.ok(/tcMap\[`\$\{r\.sheet_id\}\|\|\$\{r\.tab_name\}`\]/.test(IB), 'tcMap 키 = 이름');
-    assert.ok(/const key = `\$\{sheetId\}\|\|\$\{t\.properties\.title\}`/.test(IB),
-      '조회는 **시트의 현재 탭 이름**으로 한다 = 등록명이 다르면 빗나간다');
-    for (const flag of ['isClosed', 'isArchived']) {
-      const r = cls({ [flag]: true, liveTabName: '바뀐이름', sampleStartDate: '24.5.1' });
-      assert.equal(r.reads, true, flag + ': 여전히 읽힌다');
-      assert.equal(r.reason, 'name_drift');
-      assert.equal(r.candidate, false, '★ 마감해도 안 멈추므로 후보로 올리지 않는다(죽은 조작 금지)');
-    }
-    // 이름이 같으면 종전대로 조용하다(무회귀)
-    assert.equal(cls({ isClosed: true, liveTabName: 'T' }).reason, 'already_closed');
-    // 무시트는 gid 폴백이 있어(sheetlessScope) 이름이 바뀌어도 유효
-    assert.equal(cls({ sheetless: true, liveTabName: '바뀐이름' }).reason, 'already_sheetless');
+  /* ── 9) 순서: 연도 확인 먼저 → 정리 ─────────────────────── */
+  t('9a: 연도 미확정이 있으면 [① 연도 확인] 을 먼저 권한다', () => {
+    const i = FE.indexOf('function _ptProbeBlock');
+    assert.ok(i > 0, '_ptProbeBlock 정의');
+    const body = FE.slice(i, FE.indexOf('async function _ptProbe'));
+    // ★ 대상은 year_unknown 만이 아니다 — weak_signal(등록일 폴백)이 실제로는 더 많다.
+    //   하나만 세면 "연도 확인이 필요 없다"고 잘못 말한다.
+    const u = FE.slice(FE.indexOf('function _ptUnconfirmed'), i);
+    assert.ok(/h\.year_unknown/.test(u) && /h\.weak_signal/.test(u), '두 사유를 함께 센다');
+    assert.ok(/if\(!n\) return ''/.test(body), '연도 미확정이 없으면 안내를 띄우지 않는다');
+    assert.ok(/시트 읽기 1회/.test(body), '비용을 말한다');
   });
-
-  t('4d: 행을 부풀리는 조인이 없다 — 탭 하나에 결과 한 줄', () => {
-    // ★★ `campaigns` 는 UNIQUE(sheet_id, campaign_name) 이라 **한 시트에 여러 행**이 정상이다.
-    //   시트 단위 JOIN 이면 그 시트의 **모든 탭이 배수**가 되어 총계·목록이 부푼다
-    //   (2026-08-19 실측: 화면에 같은 줄 2개, 진짜 PG 로 12→24 재현).
-    // ★ 낱말로 찾으면 **주석 문장**이 대신 걸린다(이 레포 상습 함정) — 문장 형태로 본다.
-    //   블록 주석을 정규식으로 지우는 방법은 금지(정규식 리터럴을 물어 파일을 통째로 먹는다).
-    assert.ok(!/^\s*(LEFT\s+)?JOIN\s+campaigns\b/im.test(SRC),
-      'campaigns 를 조인하지 않는다(스칼라 서브쿼리로 읽는다)');
-    assert.ok(/SELECT MIN\(c\.created_at\) FROM campaigns c/.test(SRC.replace(/\s+/g, ' ')),
-      '등록일은 시트 단위 최솟값 — 반영 점검과 같은 형태');
-    // 다른 LATERAL 들은 전부 집계/LIMIT 1 이라 행을 늘리지 않는다
-    const laterals = SRC.match(/LEFT JOIN LATERAL \(([\s\S]*?)\) \w+ ON TRUE/g) || [];
-    assert.ok(laterals.length >= 4, 'LATERAL 개수 (받음 ' + laterals.length + ')');
-    for (const l of laterals) {
-      assert.ok(/COUNT\(|MAX\(|MIN\(|LIMIT 1/.test(l), '행을 늘리지 않는 LATERAL: ' + l.slice(0, 60));
-    }
-  });
-
-  /* ── 8d) 아카이브 판정 = smartBuild 와 같은 규칙 ─────────
-   *  이 판정은 "그 탭이 무엇인가"가 아니라 **"저쪽(smartBuild)이 읽는가"** 다.
-   *  더 넓게 잡으면(gid 폴백) 이름이 바뀐 탭이 "이미 안 읽음"으로 접혀 **정리 대상이 사라진다**
-   *  (2026-08-19 실측 「826개 중 0개」 보고로 발견). */
-  t('8d: 아카이브 판정은 이름만 본다 — indexBuilder 의 스킵 키와 같다', () => {
-    const IB = R('server/src/services/indexBuilder.service.js');
-    assert.ok(/archivedSet\.add\(`\$\{r\.sheet_id\}\|\|\$\{r\.tab_name\}`\)/.test(IB),
-      'smartBuild 스킵 키 = sheet_id||tab_name (규칙이 바뀌면 이 가드가 먼저 깨진다)');
-    // ★ 슬라이스를 넓게 잡으면 무관한 tab_gid 가 섞인다 — **아카이브 집합을 만드는 구간만** 본다
-    const seg0 = IB.slice(IB.indexOf('const { rows: archivedRows }'), IB.indexOf('archivedSheetCounts[r.sheet_id]'));
-    assert.ok(!/tab_gid/.test(seg0), 'smartBuild 는 아카이브 판정에 gid 를 안 본다');
-    assert.ok(/archivedSet\.has\(key\)/.test(IB), '스킵도 그 키로만');
-    const seg = SRC.slice(SRC.indexOf('AS "isArchived"'), SRC.indexOf(') arch ON TRUE'));
-    assert.ok(/ima\.tab_name = tc\.tab_name/.test(seg), '이름 일치');
-    assert.ok(!/tab_gid/.test(seg), '★ gid 폴백 부활 금지 — 정리 대상이 조용히 사라진다');
-  });
-  t('8e: 이름이 바뀐 탭은 아카이브로 접지 않고 정상 판정에 태운다 + 건수를 말한다', () => {
-    const c = cls({ tabName:'새이름', tabGid:'7', archivedGidOnly:true, sampleStartDate:'24.5.10' });
-    assert.equal(c.reads, true, '읽힌다고 봐야 한다');
-    assert.equal(c.reason, 'past', '정상 판정을 거쳐 후보가 된다');
-    assert.equal(c.archivedGidOnly, true, '표식을 실어 건수로 말할 수 있게');
-    assert.ok(/archivedByGidOnly/.test(SRC), '스캔 응답에 건수 동봉(조용한 변화 금지)');
-  });
-
-  t('8f: 이름 어긋난 탭을 목록으로 보여준다(건수만으로는 고칠 수 없다)', () => {
-    assert.ok(/function _ptDriftBlock/.test(FE), '목록 렌더러');
-    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
-    assert.ok(/\$\{_ptDriftBlock\(r\)\}/.test(rd), '렌더가 실제로 그린다');
-    const b = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
-    assert.ok(/reason\s*===\s*'name_drift'/.test(b), '서버가 준 사유로 고른다(판정 사본 0)');
-    assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b),
-      '★ 탭명은 시트발 외부 문자열 — 반드시 escape');
-    // 어긋남이 없어도 **빈 껍데기 행은 보여준다**(그쪽도 사람이 알아야 한다)
-    assert.ok(/if\(!d\.length\) return _ptGhostBlock\(r\)/.test(b), '없으면 빈 껍데기 블록만');
-    assert.ok(/sync-tab-names/.test(b), '고칠 곳을 말한다');
-    assert.ok(/index_master_archive/.test(b), '그 도구가 못 고치는 것까지 말한다(조용한 누락 금지)');
-  });
-  t('8f-2: 두 표 모두 시트를 함께 적는다 + 헤더 칸 수 ≡ 행 칸 수', () => {
-    // ★ tab_configs 는 UNIQUE(sheet_id, tab_name) 이라 **다른 시트에 같은 탭 이름**이 있을 수 있다
-    //   (시트 복사본이 흔하다) — 시트를 안 적으면 똑같아 보이는 줄이 여럿 생겨
-    //   어느 것을 고르는지 알 수 없다(2026-08-19 실측 4줄). 체크박스 표에서는 오조작이 된다.
-    assert.ok(/campaignName/.test(SRC), '서버가 시트명을 싣는다');
-    const drift = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
-    const rend = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
-    for (const [name, body] of [['drift', drift], ['candidates', rend]]) {
-      assert.ok(/esc\((h|it)\.campaignName/.test(body), name + ': 시트를 그린다(escape)');
-      const th = (body.match(/<th[ >]/g) || []).length;
-      const td = (body.match(/<td[ >]/g) || []).length;
-      assert.equal(th, td, name + ': 헤더 칸 수 ≡ 행 칸 수 (th ' + th + ' / td ' + td + ')');
-    }
-  });
-  t('3h: 새 이름이 이미 등록된 행은 아무 일도 하지 않는다 — 읽는 것으로 세지 않는다', () => {
-    // smartBuild 는 **시트의 현재 이름**으로 tcMap 을 찾으므로(indexBuilder:548) 읽기 여부는
-    // 새 이름 행이 정한다. 옛 이름 행은 빈 껍데기다 — "지금도 읽습니다"에 세면 거짓이 된다.
-    const IB = R('server/src/services/indexBuilder.service.js');
-    assert.ok(/const tc = tcMap\[key\]/.test(IB) && /if \(tc && tc\.is_closed\)/.test(IB),
-      '읽기 판정은 그 키의 tc 가 한다');
-    const g = cls({ isClosed: true, liveTabName: '새이름', liveNameRegistered: true });
-    assert.equal(g.reason, 'ghost_row');
-    assert.equal(g.reads, false, '★ 읽는 것으로 세지 않는다');
-    assert.equal(g.candidate, false);
-    // 등록돼 있지 않으면 종전대로 name_drift(읽힌다)
-    assert.equal(cls({ isClosed: true, liveTabName: '새이름' }).reason, 'name_drift');
-  });
-  t('8f-3: 빈 껍데기 행은 따로 보여주고 조치를 다르게 말한다', () => {
-    assert.ok(/liveNameRegistered/.test(SRC), '서버가 판정을 싣는다');
-    assert.ok(/ghosts: items\.filter\(i => i\.reason === 'ghost_row'\)/.test(SRC),
-      '건수만이 아니라 목록을 준다(어느 행인지 알아야 지운다)');
-    const b = FE.slice(FE.indexOf('function _ptGhostBlock'), FE.indexOf('function _ptRender'));
-    assert.ok(/r\.ghosts/.test(b) && /if\(!g\.length\) return ''/.test(b), '없으면 안 그린다');
-    assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b), 'escape');
-    assert.ok(/그대로 두셔도 됩니다/.test(b), '읽기에 영향 없음을 말한다');
-    assert.ok(/탭명 교정으로는 고칠 수 없습니다/.test(b), '되지 않는 조치를 시키지 않는다');
-    assert.ok(/_ptDelGhost\(\)/.test(b), '지울 수단을 준다');
-    // 어긋남 목록이 비어도 빈 껍데기는 보여준다
-    const d = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
-    assert.ok(/if\(!d\.length\) return _ptGhostBlock\(r\)/.test(d), '어긋남 0건이어도 표시');
-  });
-  t('9-sync: 탭명 교정이 마감·아카이브 탭의 gid 를 tab_configs 에서도 찾는다', () => {
-    // ★ auto-clean-closed 가 index_master 행을 지우므로 im.tab_gid 만 보면 gid 가 null →
-    //   그 탭의 리네임을 영영 못 잡는다("GID 없음 + 시트에 해당 탭명 없음"으로 스킵).
-    //   (2026-08-19 실측: 본섭 미리보기 「변경 0건 · 스킵 27건」 — 3건이 그 안에 묻혔다)
-    const TC = R('server/src/routes/tabconfig.routes.js');
-    const q = TC.slice(TC.indexOf("router.post('/sync-tab-names'"), TC.indexOf('2. 고유 sheet_id'));
-    assert.ok(/COALESCE\(NULLIF\(im\.tab_gid, ''\), NULLIF\(tc\.tab_gid, ''\)\)\s+AS tab_gid/.test(q),
-      'index_master 우선 · tab_configs 폴백');
-  });
-  t('8g: 「정리 대상에 포함」이라고 말하지 않는다(후보가 0일 수 있다)', () => {
-    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
-    const i = rd.indexOf('archivedByGidOnly');
-    assert.ok(i > 0);
-    assert.ok(!/정리 대상에 포함/.test(rd.slice(i, i + 220)),
-      '읽히지만 후보가 아닌 탭이 있으므로 "포함"은 거짓이 될 수 있다(2026-08-19 실측)');
-  });
-
-  /* ── 10) 빈 껍데기 행 삭제 — 유일한 비가역 조작 ────────── */
-  t('10a: 쓰기 표면 — DELETE 대상은 tab_configs 하나뿐', () => {
-    const dels = [...SRC.matchAll(/DELETE FROM (\w+)/g)].map(m => m[1]);
-    assert.deepEqual([...new Set(dels)], ['tab_configs'], '받음 ' + JSON.stringify(dels));
-  });
-  // ★ `t()` 는 동기 함수라 async 콜백의 단언은 process.exit(0) 뒤로 밀려 **실행되지 않는다**
-  //   (변이시험 3종이 전부 미검출로 통과했다) → 비동기 작업은 t() **밖에서** 먼저 끝낸다.
-  const GROWS = [
-    { sheetId: 's', tabName: '유령', tabGid: '9', isClosed: true,
-      liveTabName: '새이름', liveNameRegistered: true, sampleStartDate: '24.5.1' },
-    { sheetId: 's', tabName: '보통', tabGid: '1', sampleStartDate: '24.5.1' },
-  ];
-  const gp1 = stubPool(GROWS, { counts: { ri: 0, im: 0, os: 3 } });
-  svc.__setPoolForTest(gp1);
-  const gPre = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }] });
-  const gp2 = stubPool(GROWS, { counts: { ri: 0, im: 0, os: 0 } });
-  svc.__setPoolForTest(gp2);
-  const gNot = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '보통' }], dryRun: false });
-  const gp3 = stubPool(GROWS, { counts: { ri: 12, im: 1, os: 0 } });
-  svc.__setPoolForTest(gp3);
-  const gLed = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }], dryRun: false });
-  t('10b: 미리보기는 쓰지 않고 주문은 막지 않는다', () => {
-    assert.equal(gPre.dryRun, true);
-    assert.equal(gPre.wouldDelete, 1);
-    assert.equal(gPre.targets[0].orderRows, 3, '주문은 막지 않고 건수만 말한다');
-    assert.ok(!gp1.q.some(x => /\bDELETE\s+FROM\b/i.test(x.s)), '미리보기는 쓰기 0');
-  });
-  t('10b-2: ghost 가 아닌 탭은 서버가 거부한다(쓰기 0)', () => {
-    assert.equal(gNot.deleted, 0);
-    assert.equal(gNot.refused[0].reason, 'not_ghost');
-    assert.ok(!gp2.q.some(x => /\bDELETE\s+FROM\b/i.test(x.s)), '거부 시 쓰기 0');
-  });
-  t('10b-3: 장부가 한 줄이라도 있으면 지우지 않는다(fail-closed)', () => {
-    assert.equal(gLed.deleted, 0);
-    assert.equal(gLed.refused[0].reason, 'has_ledger');
-    assert.equal(gLed.refused[0].reviewRows, 12);
-    assert.ok(!gp3.q.some(x => /\bDELETE\s+FROM\b/i.test(x.s)), '★ 장부가 있으면 한 줄도 지우지 않는다');
-  });
-  t('10d: 삭제 라우트도 미리보기가 기본 + adminOrMaster', () => {
-    assert.ok(/router\.post\('\/past-tabs\/delete-ghost', authMiddleware, adminOrMasterMiddleware/.test(RT),
-      '이관과 같은 게이트');
-    const seg = RT.slice(RT.indexOf("'/past-tabs/delete-ghost'"), RT.indexOf("'/past-tabs/reopen'"));
-    assert.ok(/dryRun:\s*dryRun !== false/.test(seg),
-      '★ dryRun 을 안 보내면 지우지 않는다(기본 미리보기)');
-  });
-  t('10c: 화면은 미리보기 → confirm 2단계 · 되돌릴 수 없다고 말한다', () => {
-    const i = FE.indexOf('async function _ptDelGhost');
-    const b = FE.slice(i, FE.indexOf('\n}', FE.indexOf('catch(e)', i)));
-    const pre = b.indexOf('body:JSON.stringify({tabs})');
-    const cfm = b.indexOf('if(!confirm(');
-    const run = b.indexOf('dryRun:false');
-    assert.ok(pre > 0 && cfm > pre && run > cfm, '미리보기 → 확인 → 실행');
-    assert.ok(/되돌릴 수 없습니다/.test(b), '비가역임을 말한다');
-    assert.ok(/구글시트 탭·명단·주문은 그대로/.test(b), '무엇을 안 건드리는지 말한다');
-    assert.ok(/has_ledger/.test(b), '거부 사유를 사람 말로 옮긴다');
-  });
-
-  /* ── 9) 연도 확인 먼저 (사용자 확정 2026-08-19) ─────────
-   *  시트 표기에 연도가 없으면(`7 / 12 (금)`) 판정이 시트 등록일로 폴백해
-   *  `weak_signal` 이 되어 **정리 대상에서 빠진다**. 그래서 연도 확인이 먼저다. */
-  t('9a: 연도 미확정 건수를 세어 확인 창구를 띄운다', () => {
-    assert.ok(/function _ptUnconfirmed/.test(FE), '미확정 건수 계산');
-    const i = FE.indexOf('function _ptUnconfirmed');
-    const body = FE.slice(i, FE.indexOf('function _ptProbeBlock'));
-    assert.ok(/year_unknown/.test(body) && /weak_signal/.test(body),
-      '두 사유 모두 — weak_signal 을 빼면 연도 없는 표기가 통째로 누락된다');
-    // ★ 파일 전체로 보면 **함수 선언**(`function _ptProbeBlock(r){`)이 대신 통과시킨다
-    //   (변이시험 실측) — 렌더 본문 안에서 호출되는지를 본다
-    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
-    assert.ok(/\$\{_ptProbeBlock\(r\)\}/.test(rd), '렌더가 확인 블록을 그린다');
-    const rb = FE.slice(FE.indexOf('function _ptProbeBlock'), FE.indexOf('async function _ptProbe'));
-    assert.ok(/if\(!n\) return ''/.test(rb), '확정할 것이 없으면 안 띄운다');
-  });
-  t('9b: 확인은 기존 year-probe 를 쓰고(신규 엔드포인트 0) 끝나면 다시 판정한다', () => {
+  t('9b: 연도 확인은 기존 도구를 그대로 부른다(판정·엔드포인트 신설 0)', () => {
     const i = FE.indexOf('async function _ptProbe');
-    const body = FE.slice(i, FE.indexOf('function _ptRender'));
-    assert.ok(/sheet-sync\/year-probe/.test(body), '기존 엔드포인트 재사용');
-    assert.ok(/while\s*\(\s*round\s*<\s*\d+\s*\)/.test(body), '무한 루프 금지(상한)');
-    assert.ok(/!r\.probed\s*\|\|\s*!r\.remaining/.test(body), '남은 것이 없으면 멈춘다');
-    assert.ok(body.indexOf('_ptScan()') > body.indexOf('year-probe'),
-      '확인 뒤 재판정 — 안 하면 확인해도 화면이 그대로다');
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    assert.ok(/\/api\/trackb\/sheet-sync\/year-probe/.test(body), '기존 year-probe 사용');
+    assert.ok(!/past-tabs\/probe|year-probe2/.test(FE), '전용 엔드포인트 신설 금지');
+  });
+  t('9c: 남은 대상이 있으면 이어서 부르되 무한 루프가 아니다', () => {
+    const i = FE.indexOf('async function _ptProbe');
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    assert.ok(/while\(round\s*<\s*\d+\)/.test(body), '회차 상한');
+    assert.ok(/if\(!r\.probed \|\| !r\.remaining\) break;/.test(body), '더 읽을 것이 없으면 중단');
+    assert.ok(/remaining\?/.test(body), '남은 건수를 말한다(조용한 절단 금지)');
+  });
+  t('9d: 연도 확인이 끝나면 자동으로 다시 살펴본다(두 단계가 끊기지 않게)', () => {
+    const i = FE.indexOf('async function _ptProbe');
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    const probe = body.indexOf('year-probe');
+    const rescan = body.indexOf('await _ptScan()');
+    assert.ok(probe > 0 && rescan > probe, '확인 → 재스캔 순서');
+    assert.ok(/finally\{[^}]*disabled = false/.test(body.replace(/\s+/g, m => m.includes('\n') ? '' : m)) || /finally\{/.test(body),
+      '실패해도 버튼을 되살린다(죽은 화면 금지)');
   });
 
   console.log('\n✅ 통과 ' + pass + '건\n');

@@ -56,8 +56,6 @@
     noticesAll:   "/api/reviewer/notices/all",       // GET
     noticeSave:   "/api/reviewer/notices/save",      // POST
     noticeDelete: "/api/reviewer/notices/delete",    // POST
-    homeBanner: "/api/reviewer/home-banner/all",
-    homeBannerSave: "/api/reviewer/home-banner/save",
   };
   var EP_SUFFIX = {
     nickname:     "/my-nickname",
@@ -68,8 +66,6 @@
     noticesAll:   "/notices",
     noticeSave:   "/notices/save",
     noticeDelete: "/notices/delete",
-    homeBanner: "/home-banner",
-    homeBannerSave: "/home-banner/save",
   };
   function _ep(key) {
     var base = window.ADMIN_SETTINGS_API;
@@ -856,17 +852,6 @@ async function runRouteSweep() {
    ══════════════════════════════════════════════════════════════ */
 let _rvNotices = [];
 
-function _homeBannerHtml() {
-  return '<div class="as-noticebox" style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">' +
-    '<div class="admin-section-header"><span style="font-size:.95rem;font-weight:700;color:var(--t1)">리뷰홈 배너광고</span></div>' +
-    '<p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">리뷰어 홈의 공지와 모집공고 사이에 노출됩니다. <b>권장 이미지 크기: 1080 × 240px (4.5:1)</b></p>' +
-    '<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap"><div style="width:216px;height:48px;border:1px dashed #CBD5E1;border-radius:8px;overflow:hidden;background:#F8FAFC;display:grid;place-items:center"><img id="rvHomeBannerPreview" alt="배너 미리보기" style="display:none;width:100%;height:100%;object-fit:cover"><span id="rvHomeBannerEmpty" style="font-size:.7rem;color:#94A3B8">이미지 없음</span></div><div style="flex:1;min-width:220px"><label class="as-btn" for="rvHomeBannerFile">이미지 첨부</label><input class="as-file" id="rvHomeBannerFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onchange="uploadReviewerHomeBanner(this)"><div style="font-size:.7rem;color:#94A3B8;margin-top:6px">PNG, JPG, WebP, GIF · 최대 5MB</div><input id="rvHomeBannerUrl" type="url" maxlength="2048" placeholder="https:// 클릭 시 새 창으로 열 URL" style="margin-top:10px;width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font:inherit;font-size:.78rem"><label style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--t2);margin-top:10px"><input id="rvHomeBannerActive" type="checkbox"> 배너 노출</label><button class="as-btn" style="margin-top:10px;background:#2563EB;color:#fff;border-color:#2563EB" onclick="saveReviewerHomeBanner()">저장</button></div></div></div>';
-}
-function _setHomeBannerPreview(url) { var img=document.getElementById('rvHomeBannerPreview'), empty=document.getElementById('rvHomeBannerEmpty'); if(!img||!empty)return; img.src=url||''; img.style.display=url?'':'none'; empty.style.display=url?'none':''; }
-async function loadReviewerHomeBanner() { if(!document.getElementById('rvHomeBannerUrl'))return; try { var j=await _get('homeBanner'),b=(j&&j.banner)||{}; document.getElementById('rvHomeBannerUrl').value=b.clickUrl||''; document.getElementById('rvHomeBannerActive').checked=!!b.active; window._rvHomeBannerImageUrl=b.imageUrl||''; _setHomeBannerPreview(b.imageUrl||''); } catch(e){showToast('배너 설정을 불러오지 못했습니다: '+e.message,true);} }
-async function uploadReviewerHomeBanner(input) { var file=input&&input.files&&input.files[0]; if(!file)return; if(!/^image\/(png|jpeg|webp|gif)$/.test(file.type)||file.size>5*1024*1024){showToast('PNG, JPG, WebP, GIF 파일만 최대 5MB까지 올릴 수 있습니다.',true);input.value='';return;} var data=await new Promise(function(resolve,reject){var r=new FileReader();r.onload=function(){resolve(r.result);};r.onerror=reject;r.readAsDataURL(file);}); try {var j=await _post('guideImage',{imageBase64:data,mimeType:file.type,fileName:'reviewer_home_banner_'+Date.now()+'_'+file.name});if(!j||!j.ok||!j.url)throw new Error((j&&j.error)||'업로드 실패');window._rvHomeBannerImageUrl=j.url;_setHomeBannerPreview(j.url);showToast('배너 이미지를 올렸습니다. 저장하면 반영됩니다.');}catch(e){showToast('이미지 업로드 실패: '+e.message,true);} }
-async function saveReviewerHomeBanner() { try {var j=await _post('homeBannerSave',{active:document.getElementById('rvHomeBannerActive').checked,imageUrl:window._rvHomeBannerImageUrl||'',clickUrl:(document.getElementById('rvHomeBannerUrl').value||'').trim()});if(!j||!j.ok)throw new Error((j&&j.error)||'저장 실패');window._rvHomeBannerImageUrl=j.banner.imageUrl;_setHomeBannerPreview(j.banner.imageUrl);showToast('리뷰홈 배너광고를 저장했습니다.');}catch(e){showToast('배너 저장 실패: '+e.message,true);} }
-
 function _noticeHtml() {
   return `
         <!-- 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
@@ -1033,14 +1018,11 @@ async function deleteReviewerNotice(id) {
      호스트별로 다를 이유가 없다(다르게 두면 두 화면이 서로 다른 설정을 보게 된다).
    ══════════════════════════════════════════════════════════════ */
 var WT_EP = { stats: '/api/trackb/worktable/header-stats', template: '/api/trackb/worktable/template' };
-/* 공통 기본값 프리셋(사용자 확정 14열) — [공통을 기본 N열로] 버튼이 채운다.
+/* 공통 기본값 프리셋(사용자 확정 15열) — [공통을 기본 N열로] 버튼이 채운다.
    ★ 자동 적용하지 않는다: 저장된 설정이 없을 때 조용히 이 값이 쓰이면 "정하지 않았는데 정해진"
-     상태가 된다(학습은 제안까지·확정은 사람이 — 이 화면의 원칙).
-   ★★ `주문자` 는 일부러 없다(사용자 확정 2026-08-24) — 리뷰웹시스템[3버전]에서는 **참여자 칸이
-     그 자리를 대체**한다(`sheetlessOrder` 가 `loginName || orderer || recipient` 로 채운다).
-     주문자 원문은 주문 원장(`order_submissions.orderer`)에 그대로 남는다. 되살리지 말 것. */
-var WT_PRESET_CORE = ['번호', '구매일자', '수취인', 'ID', '연락처', '주소',
-  '은행', '계좌번호', '예금주', '결제금액', '주문번호', '리뷰', '입금', '비고'];   // ★ 리뷰제출 칸의 표준 이름 = '리뷰'(사용자 확정 2026-08-21)
+     상태가 된다(학습은 제안까지·확정은 사람이 — 이 화면의 원칙). */
+var WT_PRESET_CORE = ['번호', '구매일자', '주문자', '수취인', 'ID', '연락처', '주소',
+  '은행', '계좌번호', '예금주', '결제금액', '주문번호', '리뷰제출', '입금', '비고'];
 var _wtTpl = null;      // { core:[names], channels:{key:[names]}, columns:[...], ... }
 var _wtStats = null;    // 헤더 학습 리포트(펼칠 때 1회 로드)
 
@@ -1049,13 +1031,7 @@ async function _wtFetch(url, body) {
   var r = await fetch(_apiBase() + url, opt);
   var j = await r.json().catch(function () { return null; });
   if (!j) throw new Error('HTTP ' + r.status);
-  if (j.ok === false) {
-    // ★ 사유 코드를 오류에 실어 보낸다 — 호출부가 "빈 저장 거부"와 일반 실패를 갈라야 한다
-    //   (문구만으로 판정하면 문구를 고치는 순간 조용히 안 갈린다).
-    var e = new Error(j.error || '요청 실패');
-    e.code = j.code || ''; e.prevCoreCount = j.prevCoreCount;
-    throw e;
-  }
+  if (j.ok === false) throw new Error(j.error || '요청 실패');
   return j;
 }
 
@@ -1156,9 +1132,6 @@ function _worktableHtml() {
           </button>
           <span id="wtSaveHint" style="font-size:.74rem;color:var(--t3)"></span>
         </div>
-
-        <!-- ③ 되돌리기 — 저장 직전 값 최근 10개. 8/23 전멸 사고 때 되돌릴 방법이 없었다. -->
-        <div id="wtHistory" style="margin-top:10px"></div>
 
         <div style="margin-top:20px;border-top:1px dashed #E5E7EB;padding-top:14px">
           <button onclick="wtToggleReport()" id="wtReportBtn"
@@ -1868,7 +1841,7 @@ function wtChMove(key, i, dir) {
   _wtAfterEdit(key);
 }
 
-/** 공통을 사용자 확정 기본 열로 되돌린다(채널 행은 건드리지 않는다). ★ `주문자` 는 제외 — 참여자 칸이 대체한다. */
+/** 공통을 사용자 확정 기본 15열로 되돌린다(채널 행은 건드리지 않는다). */
 function wtLoadPreset() {
   if (!_wtTpl) return;
   if ((_wtTpl.core || []).length && !confirm('공통 열을 기본 ' + WT_PRESET_CORE.length + '개로 바꿉니다. 채널별 열은 그대로 둡니다. 계속할까요?')) return;
@@ -1939,7 +1912,6 @@ async function loadWorktableTemplate() {
     if (!_wtTpl.workTypes) _wtTpl.workTypes = [];
     _wtRenderChans();  // 🌐 공통 줄 요약
     _wtRenderCols();   // 내부에서 알약 줄·미리보기까지 갱신
-    _wtRenderHistory();
     var tpl = document.getElementById('wtTplSheet');
     if (tpl) tpl.value = _wtTpl.templateSheetId || '';
     var at = document.getElementById('wtSavedAt');
@@ -1955,59 +1927,6 @@ async function loadWorktableTemplate() {
   }
 }
 
-/* ── ③ 저장 이력(되돌리기) ─────────────────────────────
-   ★ 서버가 준 **요약만** 그린다(전체 스냅샷은 안 내려온다) — 복구할 값은 서버가 원본에서 읽는다.
-   ★ 이력이 없으면 아무것도 그리지 않는다(빈 상자로 화면을 늘리지 않는다).
-   ★ onclick 은 **인덱스만** — 시각·사람 이름은 외부발 문자열이라 보간하지 않는다. */
-function _wtRenderHistory() {
-  var box = document.getElementById('wtHistory');
-  if (!box) return;
-  var h = (_wtTpl && _wtTpl.history) || [];
-  if (!h.length) { box.innerHTML = ''; return; }
-  box.innerHTML = '<div style="font-size:.78rem;font-weight:700;margin-bottom:5px">최근 저장 이력 '
-    + '<span style="font-weight:500;color:var(--t3)">— 저장 직전 값으로 되돌립니다</span></div>'
-    + h.map(function (x, i) {
-      var when = String(x.at || '').replace('T', ' ').slice(0, 16) || '시각 미상';
-      var who = x.by ? ' · ' + escHtml(x.by) : '';
-      var what = '공통 ' + (x.coreCount || 0) + '열 · 작업유형 ' + (x.typeCount || 0) + '종'
-        + (x.hasSheet ? ' · 템플릿 시트 있음' : '');
-      return '<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid #F3F4F6">'
-        + '<span style="font-size:.75rem;color:var(--t2);min-width:130px">' + escHtml(when) + who + '</span>'
-        + '<span style="font-size:.75rem;color:var(--t3);flex:1">' + escHtml(what) + '</span>'
-        + '<button onclick="wtRestoreTemplate(' + i + ')" style="padding:4px 10px;background:#fff;color:#374151;'
-        + 'border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">↩ 되돌리기</button>'
-        + '</div>';
-    }).join('');
-}
-
-async function wtRestoreTemplate(i) {
-  var h = (_wtTpl && _wtTpl.history) || [];
-  var x = h[i];
-  if (!x || !x.at) return;
-  var when = String(x.at).replace('T', ' ').slice(0, 16);
-  if (!confirm(when + ' 시점 값(공통 ' + (x.coreCount || 0) + '열)으로 되돌립니다.\n\n'
-    + '지금 값은 이력에 남아 다시 되돌릴 수 있습니다.')) return;
-  try {
-    var j = await _wtFetch(WT_EP.template, { restore: x.at });
-    _wtApplySaved(j.data);
-    showToast('되돌렸습니다 (공통 ' + ((_wtTpl.core || []).length) + '개)');
-  } catch (e) { showToast('되돌리기 실패: ' + e.message, true); }
-}
-
-/** 저장·복구 응답을 화면에 반영 — 두 경로가 같은 것을 쓴다(사본 금지). */
-function _wtApplySaved(data) {
-  _wtTpl = data;
-  // ★ 서버가 정식 키를 발급할 수 있으므로(임시 `new1` → `c1`) 알약 줄까지 다시 그린다.
-  _wtRenderChans();
-  _wtRenderCols();
-  _wtRenderHistory();
-  var tpl = document.getElementById('wtTplSheet');
-  if (tpl) tpl.value = _wtTpl.templateSheetId || '';
-  var at = document.getElementById('wtSavedAt');
-  if (at) at.textContent = '최근 저장: ' + String(_wtTpl.updatedAt || '').slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '');
-  _wtDirty(false);
-}
-
 async function wtSaveTemplate() {
   if (!_wtTpl) return;
   // ★ 화면이 곧 저장값 — 배열 그대로 보낸다(쉼표 파싱 없음).
@@ -2016,8 +1935,9 @@ async function wtSaveTemplate() {
   _wtChannels().forEach(function (c) {
     channels[c.key] = ((_wtTpl.channels || {})[c.key] || []).slice();
   });
-  var tplEl = document.getElementById('wtTplSheet');
-  var payload = {
+  try {
+    var tplEl = document.getElementById('wtTplSheet');
+    var j = await _wtFetch(WT_EP.template, {
       core: _wtTpl.core, channels: channels,
       customChannels: (_wtTpl.customChannels || []).map(function (c) { return { key: c.key, label: c.label }; }),
       workTypes: _wtTypes().map(function (t) {
@@ -2027,23 +1947,16 @@ async function wtSaveTemplate() {
           autoTrigger: t.autoTrigger || 'auto', columns: (t.columns || []).slice() };
       }),
       templateSheetId: tplEl ? tplEl.value : (_wtTpl.templateSheetId || ''),
-  };
-  try {
-    var j;
-    try {
-      j = await _wtFetch(WT_EP.template, payload);
-    } catch (e) {
-      /* ① 서버가 "공통 열 0개 저장"을 거부했다 — 8/23 전멸 사고의 그 경로.
-         ★ 사람이 확인해야만 통과한다(조용히 재전송 금지). 취소하면 **아무것도 저장하지 않는다**. */
-      if (e.code !== 'empty_core') throw e;
-      if (!confirm(e.message + '\n\n비우면 작업표를 만들 수 없게 됩니다.\n'
-        + '되돌리기용으로 지금 값은 이력에 남습니다.\n\n정말 비울까요?')) {
-        showToast('저장하지 않았습니다', true); return;
-      }
-      payload.confirmClear = true;
-      j = await _wtFetch(WT_EP.template, payload);
-    }
-    _wtApplySaved(j.data);
+    });
+    _wtTpl = j.data;
+    // ★ 서버가 정식 키를 발급할 수 있으므로(임시 `new1` → `c1`) 알약 줄까지 다시 그린다.
+    _wtRenderChans();
+    _wtRenderCols();
+    var tpl = document.getElementById('wtTplSheet');
+    if (tpl) tpl.value = _wtTpl.templateSheetId || '';
+    var at = document.getElementById('wtSavedAt');
+    if (at) at.textContent = '최근 저장: ' + String(_wtTpl.updatedAt || '').slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '');
+    _wtDirty(false);
     showToast('작업표 표준 열을 저장했습니다 (' + (_wtTpl.core || []).length + '개)');
   } catch (e) { showToast('저장 실패: ' + e.message, true); }
 }
@@ -2200,159 +2113,6 @@ async function reviewTypeCleanupRun(dryRun) {
 function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
 
 /* ══════════════════════════════════════════════════════════════
-   🚚 배송유형 표기 정리 (★ 135 후속) — 옛 어휘를 표준 6종으로 접는다.
-
-   · 빈택배 → 빈박스 · 회수건 → 회수 (판정은 서버 `utils/deliveryType` 단일 출처)
-
-   ★★ 왜 남아 있나: 화면마다 어휘가 갈려 있었다 — 현행 모집공고 모달은 6종인데,
-      인라인 공고수정 모달과 구형 관리자 화면이 `빈택배`·`회수건` 을 저장했다.
-      그렇게 저장된 값은 현행 모달 select 에 option 이 없어 **다시 열면 빈 값으로 보이고,**
-      아무것도 안 건드리고 저장만 눌러도 **조용히 지워질 수 있다**.
-   ★★ 접히는 값만 바꾼다 — 모르는 값(`기타배송(박스)`)은 손대지 않는다.
-   ★★ 부속정보가 붙은 문장(`회수(회수택배사: …)`)은 **대상이 아니다** — 원문이 곧 정보다.
-   ★ 미리보기를 사람이 보고 결정한다(기존 행을 건드리는 작업 — 담당자 정리와 같은 규율).
-   ★ 지금 그대로 두어도 화면·판정은 정상이다(읽을 때 접어서 판정한다). 이 정리는 저장값을
-     맞춰 위의 '조용히 지워질 수 있다'를 없애는 것이다.
-   ══════════════════════════════════════════════════════════════ */
-var DTC_EP = '/api/trackb/settings/delivery-type-cleanup';
-
-function _deliveryCleanupHtml() {
-  return `
-        <div class="admin-section-header">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">🚚 배송유형 표기 정리</span>
-        </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
-          배송유형은 <b>실배송 · 빈박스 · 택배발송대행 · 직접배송(가구 등) · 회수 · 혼합</b> 여섯 가지로 운영합니다.
-          예전 화면에서 저장된 작업은 <b>빈택배 · 회수건</b> 같은 옛 표기가 남아 있습니다.
-          여기서 표준 표기로 바꿉니다.<br>
-          <b>지금 그대로 두어도 화면은 정상입니다.</b> 시스템이 읽을 때 알아서 접어서 판단합니다 —
-          다만 그 공고를 모집공고 창에서 열면 배송유형이 <b>빈 칸으로 보이고</b>,
-          그대로 저장하면 배송유형이 <b>지워질 수 있습니다</b>.<br>
-          <b>모르는 값과 회수택배사가 적힌 값은 건드리지 않습니다.</b>
-        </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <button class="as-btn" id="dtcPreviewBtn" onclick="deliveryCleanupRun(true)">🔍 미리보기</button>
-          <button class="as-btn" id="dtcApplyBtn" style="display:none" onclick="deliveryCleanupRun(false)">적용하기</button>
-        </div>
-        <div id="dtcResult" style="font-size:.8rem;color:var(--t2);line-height:1.7"></div>`;
-}
-
-var _DTC_TABLE_NM = { tab_configs: '작업 탭', recruit_campaigns: '모집공고', work_orders: '작업오더' };
-
-/** 미리보기·적용 공용. ★ dryRun=false 는 미리보기를 본 뒤에만 눌릴 수 있다(버튼이 그전엔 숨김). */
-async function deliveryCleanupRun(dryRun) {
-  var out = document.getElementById('dtcResult');
-  var applyBtn = document.getElementById('dtcApplyBtn');
-  if (!out) return;
-  if (!dryRun && !confirm('배송유형 칸의 옛 표기를 표준으로 바꿉니다.\n\n· 빈택배 → 빈박스\n· 회수건 → 회수\n\n작업 내용·정산은 바뀌지 않고 배송유형 표기만 통일됩니다.\n진행할까요?')) return;
-  out.innerHTML = '<span style="color:var(--t3)">확인 중…</span>';
-  try {
-    var j = await _postAt(DTC_EP, { dryRun: !!dryRun });
-    if (!j || j.ok === false) throw new Error((j && j.error) || '실패');
-    var rows = (j.preview || []).map(function (r) {
-      var where = _DTC_TABLE_NM[r.table] || r.table;
-      return '<li><b>' + escHtml(r.from) + '</b> → <b>' + escHtml(r.to) + '</b> · ' + where + ' ' + r.cnt + '건</li>';
-    }).join('');
-    if (!j.total) {
-      out.innerHTML = '<span style="color:var(--t2)">정리할 옛 표기가 없습니다. 이미 전부 표준 표기입니다.</span>';
-      if (applyBtn) applyBtn.style.display = 'none';
-      _setNavBadge('deliverycleanup', '정상');
-      return;
-    }
-    if (j.dryRun) {
-      out.innerHTML = '<div style="margin-bottom:6px">대상 <b>' + j.total + '건</b></div><ul style="margin:0;padding-left:18px">' + rows + '</ul>'
-        + '<div style="margin-top:10px;color:var(--t3)">숫자를 확인한 뒤 [적용하기]를 누르세요.</div>';
-      if (applyBtn) applyBtn.style.display = '';
-      _setNavBadge('deliverycleanup', j.total + '건', 'warn');
-    } else {
-      out.innerHTML = '<div style="color:#0F7B4F;font-weight:700">정리 완료 — ' + j.updated + '건</div>'
-        + '<ul style="margin:6px 0 0;padding-left:18px">' + rows + '</ul>';
-      if (applyBtn) applyBtn.style.display = 'none';
-      _setNavBadge('deliverycleanup', '완료');
-    }
-  } catch (e) {
-    out.innerHTML = '<span style="color:#B42318">실패: ' + escHtml(e.message) + '</span>';
-  }
-}
-
-/* ══════════════════════════════════════════════════════════════
-   👥 담당자 표기 정리 (★ 065 후속) — 담당자 칸에 남은 **실명**을 닉네임으로 접는다.
-
-   · 박세희 → 만두 · 박은비 → 망고 (판정은 서버 `utils/workManager` 단일 출처)
-
-   ★★ 왜 남아 있나: 065 **이전** 접수가 담당AE 실명을 그대로 넣었고, 접수 업서트는
-      blank-only 라 재접수로도 안 고쳐진다 → 홈 작업목록 담당자 칩이 만두/망고/박세희/박은비
-      넷으로 갈리고, 실명 행은 색 배지·🥟🥭·카카오 ID 매핑에서 **조용히** 빠진다.
-   ★★ 매핑되는 값만 바꾼다 — 모르는 이름(자유입력 담당자)은 손대지 않는다.
-   ★ 미리보기를 사람이 보고 결정한다(기존 행을 건드리는 작업 — 리뷰타입 정리와 같은 규율).
-   ★ 앞으로 저장되는 값은 서버가 저장 직전에 접으므로(tabconfig 저장 경로) 재발하지 않는다.
-   ══════════════════════════════════════════════════════════════ */
-/* ★ 경로는 재기준(ADMIN_SETTINGS_API)하지 않는다 — RTC_EP 와 같은 판단(양쪽 호스트에서 그대로 닿는다). */
-var MGC_EP = '/api/trackb/settings/manager-cleanup';
-
-function _managerCleanupHtml() {
-  return `
-        <div class="admin-section-header">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">👥 담당자 표기 정리</span>
-        </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
-          담당자는 <b>만두 · 망고</b> 두 표기로만 운영합니다(<b>만두 = 박세희 · 망고 = 박은비</b>).
-          예전에 접수된 작업은 담당자 칸에 <b>실명</b>이 그대로 들어가 있어,
-          홈 작업목록의 담당자 칩이 <b>만두 / 망고 / 박세희 / 박은비</b> 넷으로 갈립니다.
-          여기서 실명을 닉네임으로 바꿉니다.<br>
-          <b>지금 그대로 두어도 안전합니다.</b> 칩만 갈려 보일 뿐 작업 내용은 바뀌지 않습니다 —
-          다만 실명으로 남은 작업은 담당자 색 배지·🥟🥭 표시·카카오 아이디 안내에서 빠집니다.<br>
-          <b>모르는 이름은 건드리지 않습니다.</b> 앞으로 저장하는 값은 자동으로 닉네임이 됩니다.
-        </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <button class="as-btn" id="mgcPreviewBtn" onclick="managerCleanupRun(true)">🔍 미리보기</button>
-          <button class="as-btn" id="mgcApplyBtn" style="display:none" onclick="managerCleanupRun(false)">적용하기</button>
-        </div>
-        <div id="mgcResult" style="font-size:.8rem;color:var(--t2);line-height:1.7"></div>`;
-}
-
-var _MGC_TABLE_NM = { tab_configs: '작업 탭', recruit_campaigns: '모집공고' };
-
-/** 미리보기·적용 공용. ★ dryRun=false 는 미리보기를 본 뒤에만 눌릴 수 있다(버튼이 그전엔 숨김). */
-async function managerCleanupRun(dryRun) {
-  var out = document.getElementById('mgcResult');
-  var applyBtn = document.getElementById('mgcApplyBtn');
-  if (!out) return;
-  if (!dryRun && !confirm('담당자 칸의 실명을 닉네임으로 바꿉니다.\n\n· 박세희 → 만두\n· 박은비 → 망고\n\n작업 내용·정산은 바뀌지 않고 담당자 표기만 통일됩니다.\n진행할까요?')) return;
-  out.innerHTML = '<span style="color:var(--t3)">확인 중…</span>';
-  try {
-    var j = await _postAt(MGC_EP, { dryRun: !!dryRun });
-    if (!j || j.ok === false) throw new Error((j && j.error) || '실패');
-    var rows = (j.preview || []).map(function (r) {
-      var where = _MGC_TABLE_NM[r.table] || r.table;
-      return '<li><b>' + escHtml(r.from) + '</b> → <b>' + escHtml(r.to) + '</b> · ' + where + ' ' + r.cnt + '건</li>';
-    }).join('');
-    if (!j.total) {
-      out.innerHTML = '<span style="color:var(--t2)">정리할 실명 표기가 없습니다. 이미 전부 닉네임입니다.</span>';
-      if (applyBtn) applyBtn.style.display = 'none';
-      _setNavBadge('managercleanup', '정상');
-      return;
-    }
-    if (j.dryRun) {
-      out.innerHTML = '<div style="margin-bottom:6px">대상 <b>' + j.total + '건</b></div><ul style="margin:0;padding-left:18px">' + rows + '</ul>'
-        + '<div style="margin-top:10px;color:var(--t3)">숫자를 확인한 뒤 [적용하기]를 누르세요.</div>';
-      if (applyBtn) applyBtn.style.display = '';
-      _setNavBadge('managercleanup', j.total + '건', 'warn');
-    } else {
-      out.innerHTML = '<div style="color:#0F7B4F;font-weight:700">정리 완료 — ' + j.updated + '건</div>'
-        + '<ul style="margin:6px 0 0;padding-left:18px">' + rows + '</ul>';
-      if (applyBtn) applyBtn.style.display = 'none';
-      _setNavBadge('managercleanup', '완료');
-    }
-  } catch (e) {
-    out.innerHTML = '<span style="color:#B42318">실패: ' + escHtml(e.message) + '</span>';
-  }
-}
-
-/** ★ 펼칠 때 자동으로 돌리지 않는다 — 설정 화면을 열 때마다 전 탭을 훑을 이유가 없다. */
-function loadManagerCleanup() { _setNavBadge('managercleanup', '점검'); }
-
-/* ══════════════════════════════════════════════════════════════
    📎 구매 캡처 연결 복구 — Drive 엔 있는데 링크만 빈 주문을 이어 붙인다
    ★ 경로는 재기준하지 않는다(RTC_EP 와 같은 판단 — 양쪽 호스트에서 그대로 닿는다).
    ══════════════════════════════════════════════════════════════ */
@@ -2365,7 +2125,7 @@ function _captureLinkHtml() {
         </div>
         <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
           리뷰어는 캡처를 올렸는데 <b>주문과의 연결만 끊긴</b> 건을 찾아 이어 붙입니다.
-          그 탭의 <b>[구매캡처] 폴더</b>를 실제로 훑어 <b>파일명의 수취인명이 그 행의 수취인명과 같은</b> 파일을 찾습니다.<br>
+          그 탭의 <b>[구매캡처] 폴더</b>를 실제로 훑어 파일명(수취인)이 맞는 파일을 찾습니다.<br>
           ★ <b>파일이 아예 없는 건은 여기서 복구할 수 없습니다</b> — 그건 리뷰어가 다시 올려야 하고,
           리뷰어 홈의 <b>보완 첨부 카드</b>가 그 창구입니다.<br>
           ★ 파일을 만들거나 옮기거나 지우지 않습니다. 바뀌는 것은 주문의 <b>캡처 연결 두 칸</b>뿐입니다.
@@ -2375,9 +2135,9 @@ function _captureLinkHtml() {
             <input id="clbDays" type="number" min="1" max="3650" value="30" style="width:74px;padding:5px 7px;border:1px solid var(--border,#e5e8eb);border-radius:6px;font-size:.78rem;font-family:inherit"> 일
           </label>
           <label style="font-size:.78rem;color:var(--t2);display:flex;align-items:center;gap:5px">
-            <input id="clbAllowLow" type="checkbox"> 수취인명 없는 건도 이름만 보고 포함
+            <input id="clbAllowLow" type="checkbox"> 시각이 먼 파일까지 포함
           </label>
-          <span style="font-size:.72rem;color:var(--t3)">(기본: <b>수취인명이 같으면</b> 제출 시각과 무관하게 연결 — 후보가 둘 이상이거나 한 파일을 두 주문이 노리면 건너뜁니다)</span>
+          <span style="font-size:.72rem;color:var(--t3)">(기본은 제출 시각 근처 파일만 — 동명이인·과거 회차 오연결 방지)</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <button class="as-btn" id="clbPreviewBtn" onclick="captureLinkRun(true)">🔍 미리보기</button>
@@ -2519,20 +2279,17 @@ async function saveGateCriteria() {
   }
 }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, managercleanup: _managerCleanupHtml, deliverycleanup: _deliveryCleanupHtml, capturelink: _captureLinkHtml, gatecriteria: _gateCriteriaHtml, homebanner: _homeBannerHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, managercleanup: loadManagerCleanup, capturelink: loadCaptureLinkBackfill, gatecriteria: loadGateCriteria, homebanner: loadReviewerHomeBanner, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, capturelink: _captureLinkHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, capturelink: loadCaptureLinkBackfill, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
-    homebanner: { ic: '🖼️', nm: '리뷰홈 배너광고' },
     nickname:  { ic: '👤', nm: '내 닉네임' },
     business:  { ic: '🏢', nm: '제공정보' },
     aisamples: { ic: '🤖', nm: 'AI 판별 예시' },
     inspectmsg: { ic: '💬', nm: '리뷰어 안내문구' },
     worktable: { ic: '📋', nm: '작업표 표준 열' },
     reviewtype: { ic: '✅', nm: '리뷰타입 정리' },
-    managercleanup: { ic: '👥', nm: '담당자 표기 정리' },
-    deliverycleanup: { ic: '🚚', nm: '배송유형 표기 정리' },
     capturelink: { ic: '📎', nm: '구매 캡처 연결 복구' },
     gatecriteria: { ic: '🚫', nm: '블랙리스트 관리기준' },
     notice:    { ic: '📣', nm: '리뷰어 공지' },
@@ -2937,9 +2694,6 @@ async function saveGateCriteria() {
   window.runRouteSweep = runRouteSweep;           // 오제출 소급 정리(실행)
   window.loadReviewTypeCleanup = loadReviewTypeCleanup;
   window.reviewTypeCleanupRun = reviewTypeCleanupRun;
-  window.loadManagerCleanup = loadManagerCleanup;
-  window.managerCleanupRun = managerCleanupRun;
-  window.deliveryCleanupRun = deliveryCleanupRun;
   window.captureLinkRun = captureLinkRun;   // 📎 구매 캡처 연결 복구(onclick 에서 부른다)
   window.saveGateCriteria = saveGateCriteria;       /* 블랙리스트 관리기준(091) 저장 버튼 onclick */
   window.loadGateCriteria = loadGateCriteria;
@@ -2978,12 +2732,8 @@ async function saveGateCriteria() {
   window.wtLoadPreset = wtLoadPreset;
   window.wtLoadSuggested = wtLoadSuggested;
   window.wtSaveTemplate = wtSaveTemplate;
-  window.wtRestoreTemplate = wtRestoreTemplate;
   window.wtToggleReport = wtToggleReport;
   window.loadReviewerNoticesAdmin = loadReviewerNoticesAdmin;
-  window.loadReviewerHomeBanner = loadReviewerHomeBanner;
-  window.uploadReviewerHomeBanner = uploadReviewerHomeBanner;
-  window.saveReviewerHomeBanner = saveReviewerHomeBanner;
   window.saveReviewerNotice = saveReviewerNotice;
   window.toggleReviewerNoticeForm = toggleReviewerNoticeForm;
   window.editReviewerNotice = editReviewerNotice;

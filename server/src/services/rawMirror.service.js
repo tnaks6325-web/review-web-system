@@ -22,7 +22,7 @@ const { computeChecksum } = require('../utils/checksum');
 const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
 const { detectSheetHeader } = require('../utils/sheetHeader');
-const { sweepSkipSheetIds, REGISTERED_SHEET_IDS_SQL } = require('../utils/sheetlessScope');
+const { fullySheetlessSheetIds } = require('../utils/sheetlessScope');
 
 // 시스템 탭 키워드 — 제외하지 않고 is_system_tab 플래그만 부여
 const SYSTEM_TAB_KEYWORDS = [
@@ -77,15 +77,16 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
   const startTime = Date.now();
 
   // ── 1) 인덱스 기반 sheet_id 목록 ──
-  // ★ 열거식은 `sheetlessScope` 단일 출처 — 읽는 범위 진단이 같은 문장을 봐야 관측이 거짓말을 안 한다.
-  const { rows: idRows } = await pool.query(REGISTERED_SHEET_IDS_SQL);
+  const { rows: idRows } = await pool.query(
+    'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
+  );
   let sheetIds = [...new Set(idRows.map(r => r.sheet_id))].filter(Boolean);
   const totalRegistered = sheetIds.length;
 
   // ★★ 무시트 작업 제외(탈 구글시트 W1) — 등록 탭이 전부 무시트인 시트는 구글에 존재하지 않거나
   //   더는 읽을 이유가 없다. 안 걸러내면 **매 사이클 404 반복**(오류 로그·재시도 낭비).
   //   판정은 `sheetlessScope` 단일 출처이고 조회 실패는 빈 집합(fail-open = 종전 동작).
-  const _slSheets = await sweepSkipSheetIds(pool);
+  const _slSheets = await fullySheetlessSheetIds(pool);
   let sheetlessSkipped = 0;
   if (_slSheets.size) {
     const before = sheetIds.length;

@@ -9,8 +9,7 @@
  *   4. 라우터 스택 실검사 + 핸들러 실행(?overview=1 병합 · 플래그 전달).
  *   5. 프론트 배선 — 기존 계약 생존 · IME(입력칸 미재렌더) · ESC document 1회 · onclick 인덱스만.
  *   6. 동적 열 구성 — 헤더 칸 ≡ grid 열(8조합 실행) · min-width 파생 · 기본은 정산상세 접힘.
- *   7. 인라인 업체 펼침 + 최신 작업의뢰순 — 개요 유지·썸네일 제거·서버 날짜 정렬.
- *   8. 무신호 금지 — 집계·통계 실패를 '?'·경고로 고지(0 으로 위장하지 않는다).
+ *   7. 무신호 금지 — 집계·통계 실패를 '?'·경고로 고지(0 으로 위장하지 않는다).
  * 실행: node tests/vendorManagementRedesign.test.js
  */
 const assert = require('assert');
@@ -68,9 +67,9 @@ async function run() {
   const savedFetch = global.fetch;
   let fetched = 0; global.fetch = async () => { fetched++; return { ok: false, status: 500, json: async () => ({}) }; };
   const ownRows = [
-    { advertiserId: 'A', sheetId: 'S1', tabGid: 11, tabName: 'T1', latestRequestAt: '2026-08-10T00:00:00Z' },   // 계약O · 후보O
-    { advertiserId: 'A', sheetId: 'S1', tabGid: 12, tabName: 'T2', latestRequestAt: '2026-09-03T00:00:00Z' },   // 계약X · 후보X
-    { advertiserId: 'A', sheetId: 'S1', tabGid: 13, tabName: 'T3', latestRequestAt: '2026-08-20T00:00:00Z' },   // 계약X · 후보지만 **마감됨**(gid 로 매칭)
+    { advertiserId: 'A', sheetId: 'S1', tabGid: 11, tabName: 'T1' },   // 계약O · 후보O
+    { advertiserId: 'A', sheetId: 'S1', tabGid: 12, tabName: 'T2' },   // 계약X · 후보X
+    { advertiserId: 'A', sheetId: 'S1', tabGid: 13, tabName: 'T3' },   // 계약X · 후보지만 **마감됨**(gid 로 매칭)
     { advertiserId: 'B', sheetId: 'S2', tabGid: 21, tabName: 'U1' },   // 계약X · 통계없음
   ];
   let db = pool([
@@ -90,8 +89,6 @@ async function run() {
   let ov = await svc.advertiserOverview({ force: true });
   t('집계 성공', ov.ok === true);
   t('작업 수 = 소유 탭 수', ov.byAdvertiser.A.works === 3 && ov.byAdvertiser.B.works === 1);
-  t('★ 업체 최신 작업의뢰 시각 = 소유 작업 중 work_orders.created_at 최댓값',
-    String(ov.byAdvertiser.A.latestRequestAt).startsWith('2026-09-03'), String(ov.byAdvertiser.A.latestRequestAt));
   t('계약 미매칭 = 정산 링크 없는 탭', ov.byAdvertiser.A.noMatch === 2, JSON.stringify(ov.byAdvertiser.A));
   t('★ 마감된 탭은 마감자료 검수 대기에서 제외(gid 폴백으로 매칭 — 리네임 대비)', ov.byAdvertiser.A.finishCand === 1,
     'finishCand=' + ov.byAdvertiser.A.finishCand);
@@ -104,7 +101,7 @@ async function run() {
 
   // 소스별 실패는 플래그로 — 조용히 0 을 돌려주지 않는다
   db = pool([
-    [/FROM tabs t JOIN own o/, () => ({ rows: [{ advertiserId: 'A', sheetId: 'S1', tabGid: 11, tabName: 'T1', latestRequestAt: '2026-09-03T00:00:00Z' }] })],
+    [/FROM tabs t JOIN own o/, () => ({ rows: [{ advertiserId: 'A', sheetId: 'S1', tabGid: 11, tabName: 'T1' }] })],
     [/FROM trackb_settlement_links WHERE deleted_at IS NULL/, () => { throw new Error('42P01'); }],
     [/FROM trackb_advertiser_links/, () => { throw new Error('boom'); }],
     [/FROM tab_configs tc/, () => { throw new Error('boom'); }],
@@ -189,7 +186,7 @@ async function run() {
       { id: 'A', name: '어니스트캄', inadPm: '황운하', owned: 1, settlementVisible: true },
       { id: 'Z', name: '소유없는업체', inadPm: '', owned: 0, settlementVisible: true },
     ] })],
-    [/FROM tabs t JOIN own o/, () => ({ rows: [{ advertiserId: 'A', sheetId: 'S1', tabGid: 11, tabName: 'T1', latestRequestAt: '2026-09-03T00:00:00Z' }] })],
+    [/FROM tabs t JOIN own o/, () => ({ rows: [{ advertiserId: 'A', sheetId: 'S1', tabGid: 11, tabName: 'T1' }] })],
     [/FROM trackb_settlement_links WHERE deleted_at IS NULL/, () => ({ rows: [] })],
     [/FROM trackb_advertiser_links/, () => ({ rows: [{ advertiserId: 'A', active: true, loginRequired: true, lastUsedAt: null, hasToken: true }] })],
     [/FROM tab_configs tc/, () => ({ rows: [{ sheetId: 'S1', tabName: 'T1', rowCount: 5, submittedCount: 5, paidCount: 5 }] })],
@@ -202,20 +199,14 @@ async function run() {
     out.body.items[0].works === 1 && out.body.items[0].noMatch === 1 && out.body.items[0].finishCand === 1);
   t('소유 탭 0건 업체도 0 으로 채워진다(undefined 로 남기지 않는다)',
     out.body.items[1].works === 0 && out.body.items[1].noMatch === 0);
-  t('★ overview 응답에 최신 작업의뢰 시각을 병합하고 소유 0건은 null',
-    String(out.body.items[0].latestRequestAt).startsWith('2026-09-03') && out.body.items[1].latestRequestAt === null);
   t('접속링크 상태 병합 · 없는 업체는 null', out.body.items[0].link.loginRequired === true && out.body.items[1].link === null);
   t('★ overview 플래그를 응답에 실어 화면이 고지할 수 있게 한다', out.body.overview && out.body.overview.ok === true);
-  // ★ 접속링크 상태는 **내부인 전원**(AE 포함, 2026-08-19 사용자 확정) — 링크 CRUD(/advertiser-link)가
-  //   이미 internalMiddleware 라 목록만 admin 으로 좁히면 "서버는 허용하는데 화면은 —" 인 비대칭이 된다.
-  //   ★ 단 토큰은 어느 역할에도 싣지 않는다(hasToken 만 — 복사는 누를 때 ensure 로 받아온다).
+  // ★ 접속링크 상태(공개/로그인/폐기·마지막 접속)는 보안 설정 메타 — 링크 CRUD 가 전부 adminOrMaster 인데
+  //   목록만 staff 에게 열면 서버가 프론트보다 넓어진다(프론트는 이미 admin 분기).
   svc.__resetTabStatsCacheForTest();
   const staffOut = await runHandler(advL, { query: { overview: '1' }, admin: { role: 'staff', name: 'ae' } });
-  t('★ staff 응답에도 접속링크 상태가 실린다(라우트 게이트와 1:1)',
-    staffOut.body.items[0].link && staffOut.body.items[0].link.active === true && staffOut.body.items[1].link === null,
+  t('★ staff 응답에는 접속링크 상태가 실리지 않는다', staffOut.body.items.every(it => it.link === undefined),
     JSON.stringify(staffOut.body.items[0]).slice(0, 160));
-  t('★ 어느 역할에도 접속 토큰은 내려보내지 않는다(데이터 최소화)',
-    !/"token"/.test(JSON.stringify(staffOut.body.items)) && !/"token"/.test(JSON.stringify(out.body.items)));
   t('staff 도 작업수·미매칭·검수 집계는 받는다(담당 판단에 필요)', staffOut.body.items[0].works === 1);
   out = await runHandler(advL, { query: {}, admin: { role: 'admin', name: 'k' } });
   t('★ overview 미지정이면 종전 응답 그대로(기존 소비처 무영향)',
@@ -240,9 +231,7 @@ async function run() {
   t('★ renderOwnershipView 첫 동작 = pendingAdv 없으면 advCur 비움(히스토리 항목 ↔ 화면 일치)',
     /async function renderOwnershipView\(\)\{[\s\S]{0,500}if\(!STATE\.pendingAdv\) STATE\.advCur=null;/.test(HTML));
   t('뒤로가기 복원 경로 유지(pendingAdv → selAdv)', /STATE\.pendingAdv[\s\S]{0,300}selAdv\(ix,\{nav:!!pa\.__nav\}\)/.test(HTML));
-  // ★★ 사용자 확정(2026-08-23): 지정 단위가 **작업(작업보드)** 로 바뀌며 시트 선택 칸(#addSheet·#advSheet·
-  //    #taboptions)은 작업 선택 칸(#addTabSel·#advTabSel)으로 교체됐다 — 나머지 계약은 그대로.
-  for (const id of ['ownPanel', 'owntabsSect', 'advs', 'addTabSel', 'advTabSel', 'advName',
+  for (const id of ['ownPanel', 'owntabsSect', 'advs', 'addSheet', 'taboptions', 'advSheet', 'advName',
     'advSug', 'advNameChk', 'advPm', 'advPmChk', 'advCreateBtn', 'setvis', 'aebox']) {
     t(`기존 id 생존: #${id}`, new RegExp(`id="${id}"`).test(HTML));
   }
@@ -271,12 +260,8 @@ async function run() {
   t('★ 설정 패널은 position:fixed(스크롤 컨테이너 안에 두면 화면 흐름에 섞인다)',
     /\.ovm-drawer\{position:fixed/.test(HTML) && /\.ovm-scrim\{position:fixed/.test(HTML));
   t('열 선택은 브라우저에 기억(localStorage)', /_OVM_COLS_KEY='wd_own_cols'/.test(HTML) && /localStorage\.setItem\(_OVM_COLS_KEY/.test(HTML));
-  // ★ 2026-08 사용자 확정: 접속링크·광고주 계정도 AE 가 관리한다(서버 라우트 internalMiddleware).
-  //   그래서 검사는 "admin 만"이 아니라 **화면 판정이 서버 게이트와 같은 함수를 쓰는가**로 바꾼다 —
-  //   `_isInternalRole()` 이 사라지고 좁은/넓은 사본이 생기면 버튼과 서버가 다시 갈린다.
-  t('접속링크·계정 버튼 게이트 = 서버 게이트와 1:1(_isInternalRole 단일 판정)',
-    /const isAdmin=_isInternalRole\(\);[\s\S]{0,2200}\$\{isAdmin\?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer\('link'\)/.test(HTML)
-    && /function _isInternalRole\(\)\{[^}]*r==='master'[^}]*r==='admin'[^}]*r==='staff'/.test(HTML));
+  t('staff 에게 접속링크·계정 버튼 미노출(서버 게이트와 1:1)',
+    /const isAdmin=STATE\.role==='master'\|\|STATE\.role==='admin';[\s\S]{0,2200}\$\{isAdmin\?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer\('link'\)/.test(HTML));
   t('개요·연결탭이 같은 판정을 쓴다(서버 불리언 소비 — 프론트 재계산 금지)',
     /t\.finishCand/.test(HTML) && !/function isOwnFinishCandidate/.test(HTML));
 
@@ -324,26 +309,15 @@ async function run() {
   t('★ 목록 조회 실패·예외를 화면이 종결한다(무한 "불러오는 중" 금지)',
     /catch\(err\)\{ _ovmLoadFailed\(err&&err\.message\); return; \}/.test(HTML)
     && /function _ovmLoadFailed\(why\)\{/.test(HTML) && /onclick="renderOwnershipView\(\)"/.test(HTML));
-  // ★ 어휘 통일(2026-08-23): '연결된 탭' → '연결된 작업'. 검사 의미 불변(실패를 "없음"으로 위장 금지).
-  t('연결 작업 조회 실패는 "없음"이라고 행동을 지시하지 않는다',
-    /unreachable\)\s*\n?\s*return `<div class="st">연결된 작업 <span class="sthint">불러오지 못함/.test(HTML));
+  t('연결탭 조회 실패는 "연결된 탭 없음"이라고 행동을 지시하지 않는다',
+    /unreachable\)\s*\n?\s*return `<div class="st">연결된 탭 <span class="sthint">불러오지 못함/.test(HTML));
   t('닫은 설정 패널은 Tab 순서에서 빠진다(화면 밖 폼 갇힘 방지)',
     /d\.classList\.remove\('on'\); d\.setAttribute\('aria-hidden','true'\); d\.innerHTML='';/.test(HTML));
   t('개요 행은 Enter/Space 로도 열린다', /onkeydown="if\(event\.key==='Enter'\|\|event\.key===' '\)/.test(HTML));
-  t('★ 개요 행 클릭은 전체 패널 전환이 아니라 인라인 토글',
-    /onclick="_ovmToggleAdv\(\$\{i\}\)"/.test(HTML) && /id="ovmbDetail-\$\{i\}" hidden/.test(HTML));
-  t('★ selAdv 는 #ownPanel 을 교체하지 않고 선택 행을 연다',
-    /_ovmOpenInline\(i,true\)/.test(grab('selAdv')) && !/\$\('#ownPanel'\)\.innerHTML/.test(grab('selAdv')));
-  t('★ 펼친 첫 줄에 업체명·문자 썸네일을 중복 렌더하지 않는다',
-    !/class="ph2 ovm-hd"/.test(grab('renderOwnPanel'))
-    && !/<span class="ava">/.test(grab('_ovmRenderOverview'))
-    && !/<span class="ava">/.test(grab('_ovmRenderAdvs')));
   t('[← 전체 개요] 복귀도 히스토리에 쌓는다(뒤로가기 헛클릭 방지)', /if\(wasAdv && !\(opt&&opt\.nav\) && typeof _navPush==='function'\) _navPush\(\);/.test(HTML));
-  // ★ 사용자 확정(2026-08-23): 배너 재료가 '미지정 시트(/owned-sheets)' → **미지정 작업(mapTabs)** 로 바뀌었다.
-  //   [×] 해제 뒤에도 숫자가 옛값으로 남지 않으려면 여기서 mapTabs 를 다시 받아야 한다.
-  t('소유 변경 후 미지정 작업 배너도 갱신(사이드바 상시 노출이라 stale 이 눈에 띈다)',
-    /async function refreshAdvCounts\(\)\{[\s\S]{0,400}_ovmReloadMapTabs\(\)/.test(HTML));
-  t('staff 설정 패널은 소유 작업만(막다른 길 제거)', /const keys=isAdmin\?\['link','acct','own'\]:\['own'\];/.test(HTML));
+  t('소유 변경 후 미지정 시트 배너도 갱신(사이드바 상시 노출이라 stale 이 눈에 띈다)',
+    /async function refreshAdvCounts\(\)\{[\s\S]{0,300}owned-sheets/.test(HTML));
+  t('staff 설정 패널은 소유 시트만(막다른 길 제거)', /const keys=isAdmin\?\['link','acct','own'\]:\['own'\];/.test(HTML));
 
   /* ═══ 6. 동적 열 구성 ═══ */
   console.log('\n6) 동적 열 구성(헤더 ≡ grid)');
@@ -379,7 +353,7 @@ async function run() {
   {
     const sb = { STATE: { ownSettle: { 'S\tT1': { totalCost: 100, paidAmount: 40 }, 'S\tT2': { totalCost: 100, paidAmount: 100 } } },
       parseTabMeta: () => ({}) };
-    vm.createContext(sb); vm.runInContext(grab('_ownBrand'), sb); vm.runInContext(grab('_tabLabel'), sb); vm.runInContext(grab('_ovmRowMatch'), sb);
+    vm.createContext(sb); vm.runInContext(grab('_ownBrand'), sb); vm.runInContext(grab('_ovmRowMatch'), sb);
     const m = (t2, f) => vm.runInContext('_ovmRowMatch', sb)(t2, f, '');
     t('미매칭 필터', m({ sheetId: 'S', tabName: 'T1', salesId: null }, 'nomatch') === true
       && m({ sheetId: 'S', tabName: 'T1', salesId: 'X' }, 'nomatch') === false);
@@ -416,33 +390,8 @@ async function run() {
     t('★ 서버·프론트 마감 후보 판정이 실제로 같은 답을 낸다(현실 입력 8종)', true);
   }
 
-  /* ═══ 7. 인라인 업체 펼침 + 최신 작업의뢰순 ═══ */
-  console.log('\n7) 인라인 업체 펼침 · 최신 작업의뢰순');
-  {
-    const sb = {}; vm.createContext(sb); vm.runInContext(grab('_ovmOrderedAdvs'), sb);
-    const ordered = vm.runInContext('_ovmOrderedAdvs', sb)([
-      { name: '과거', latestRequestAt: '2026-08-01T00:00:00Z' },
-      { name: '없음', latestRequestAt: null },
-      { name: '최신', latestRequestAt: '2026-09-03T00:00:00Z' },
-    ]);
-    t('업체 정렬은 latestRequestAt 내림차순, 날짜 없음은 마지막',
-      ordered.map(x => x.a.name).join(',') === '최신,과거,없음', ordered.map(x => x.a.name).join(','));
-    t('정렬 뒤에도 onclick 인덱스는 STATE.advs 원본 인덱스를 보존', ordered.map(x => x.i).join(',') === '2,0,1');
-  }
-  t('업체 원장에 최신 작업의뢰순을 명시', /업체 · 최신 작업의뢰순 ↓/.test(HTML));
-  t('업체 원장과 기본 연결작업 원장의 최소 폭을 맞춤',
-    /\.own-wrap\.ovm-bwrap \.own-panel\{max-width:1608px/.test(HTML)
-    && /\.ovm-bledger \.ovm-ovt\{[^}]*min-width:1480px/.test(HTML));
-  t('서버 작업목록은 작업의뢰 생성시각 우선 최신순',
-    /ORDER BY COALESCE\(wo\.latest_work_order_created_at, cnt\.first_seen, t\.mirrored_at\) DESC NULLS LAST/.test(SVC));
-  t('최신 작업의뢰는 Track A 승인 링크와 Track B 수동 링크를 모두 읽음',
-    /w\.linked_tab_sheet_id = t\.sheet_id[\s\S]{0,260}trackb_work_order_links l/.test(SVC));
-  t('명시 Track B 링크가 상세 작업오더를 우선하고 최신 시각은 정렬 전용으로 분리',
-    /MAX\(ranked\.created_at\) OVER \(\) AS latest_work_order_created_at/.test(SVC)
-    && /ORDER BY ranked\.link_rank, ranked\.created_at DESC LIMIT 1/.test(SVC));
-
-  /* ═══ 8. 무신호 금지 + CSS 무결성 ═══ */
-  console.log('\n8) 무신호 금지 · CSS 무결성');
+  /* ═══ 7. 무신호 금지 + CSS 무결성 ═══ */
+  console.log('\n7) 무신호 금지 · CSS 무결성');
   t('★ 통계·마감 실패 시 연결탭 표가 사유를 적는다', /ovm-warn[\s\S]{0,200}마감자료 검수/.test(HTML));
   t('★ 마감자료 검수 칩은 판정 불가면 비활성 + ?', /candKnown\?n\('cand'\):'\?'/.test(HTML) && /!candKnown/.test(HTML));
   t('★ 미입금 칩은 정산 요약 도착 전 …(0 으로 위장 금지)', /setlArrived\?n\('unpaid'\):'…'/.test(HTML));
@@ -456,9 +405,7 @@ async function run() {
     sb.$ = sel => boxes[sel] || null;
     vm.createContext(sb);
     // 실제 헬퍼를 함께 올린다 — 배지 조건이 _ovmCandKnown 을 거치므로 플래그 로직까지 함께 실행된다.
-    // ★ _isInternalRole 도 함께 올린다 — 업체 삭제(×) 버튼 게이트가 그 함수를 부른다(스텁을 두면
-    //   역할 판정이 거기서만 딴판이 된다: workbarRecruitSort 가드의 WANT 목록과 같은 규율).
-    vm.runInContext([grab('_isInternalRole'), grab('_ovmCandKnown'), grab('_ovmCandWhy'), grab('_ovmAdvMatch'), grab('_ovmOrderedAdvs'), grab('_ovmRenderAdvs')].join('\n'), sb);
+    vm.runInContext([grab('_ovmCandKnown'), grab('_ovmCandWhy'), grab('_ovmAdvMatch'), grab('_ovmRenderAdvs')].join('\n'), sb);
     const render = (advs, ovMeta) => { sb.STATE.advs = advs; sb.STATE.ovMeta = ovMeta;
       boxes['#advs'].innerHTML = ''; vm.runInContext('_ovmRenderAdvs()', sb); return boxes['#advs'].innerHTML; };
     const A = [{ id: 'A', name: '업체A', inadPm: 'AE', owned: 1, finishCand: 3 }, { id: 'B', name: '업체B', inadPm: 'AE', owned: 1, finishCand: 0 }];
@@ -485,9 +432,6 @@ async function run() {
   t('★ 신설 CSS 는 ovm- 접두만(기존 클래스 재정의 0 — 남의 화면이 조용히 무너진다)', bad.length === 0, JSON.stringify(bad).slice(0, 200));
   t('★ 이 뷰는 내부 스크롤(.own-wrap 고정 높이) — sticky 도구줄의 전제',
     /\.own-wrap\{display:grid;grid-template-columns:250px 1fr;height:calc\(100vh - var\(--toph/.test(cssBlock));
-  t('★ 인라인 원장·카드는 sticky 도구줄을 가두는 overflow 조상이 아니다',
-    /\.ovm-bledger\{[^}]*overflow:visible/.test(cssBlock)
-    && /\.ovm-inline-card\{[^}]*overflow:visible/.test(cssBlock));
   t('★ 좁은 화면은 문서 스크롤로 복귀(고정 높이면 아래가 잘린다)', /@media\(max-width:780px\)\{\.own-wrap\{grid-template-columns:1fr;height:auto\}/.test(cssBlock));
   t('도구줄 sticky + 상단바를 덮지 않는 z-index', /\.ovm-tools\{position:sticky;top:-18px;z-index:3/.test(cssBlock));
   // 주석·중괄호 균형(주석 조기 종료는 규칙을 통째로 삼키고 브라우저는 에러 없이 넘어간다)
