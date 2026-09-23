@@ -693,6 +693,7 @@ function _publicView(row, counts, now, schedule) {
       state: weekend.blocked ? 'weekend_unpublished' : row.status,
       stateReason: weekend.blocked ? weekend.reason : null,
       stateMessage: weekend.blocked ? weekend.message : null,
+      closedKind: weekend.blocked ? (weekend.closedKind || 'weekend') : null,
       resumesOn: resume ? resume.date : weekend.resumesOn,
       resumesAt: resume ? resume.iso : null,
     };
@@ -718,6 +719,7 @@ function _publicView(row, counts, now, schedule) {
     scheduleSource: st.scheduleSource || null,
     stateReason: weekend.blocked ? weekend.reason : (st.stateReason || null),
     stateMessage: weekend.blocked ? weekend.message : null,
+    closedKind: weekend.blocked ? (weekend.closedKind || 'weekend') : null,
     resumesOn: resume ? resume.date : weekend.resumesOn,
     // 주말 미게시 카드의 "재개까지" 카운트다운 기준(ISO). 차단 중이 아니면 null.
     resumesAt: resume ? resume.iso : null,
@@ -1780,6 +1782,7 @@ async function _applyParticipation(req, res, next, campPre) {
       return res.status(403).json({
         ok: false,
         reason: weekend.reason,
+        closedKind: weekend.closedKind || 'weekend',
         resumesOn: weekend.resumesOn,
         error: weekend.message,
       });
@@ -2199,14 +2202,21 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
       return res.status(403).json({ ok: false, reason: 'archived', error: '모집이 종료된 공고입니다.' });
     }
 
-    const weekend = weekendPublicationState(camp);
-    if (weekend.blocked) {
-      return res.status(403).json({
-        ok: false,
-        reason: weekend.reason,
-        resumesOn: weekend.resumesOn,
-        error: weekend.message,
-      });
+    /* ★★ 참여형 공고는 여기서 쉬는 날을 판정하지 않는다 — 날짜별 계획(095)을 본 판정이
+       `_applyParticipation` 의 잠금 뒤 관문에 있다. 여기서 계획 없이 막으면 사람이 인원을 넣어
+       연 주말·공휴일도 첫 관문에서 막혀 "카드는 열렸는데 참여는 거부"가 된다(2026-09-23).
+       레거시 공고는 날짜별 계획 개념이 없으므로 종전대로 여기서 판정한다. */
+    if (!camp.participation_mode) {
+      const weekend = weekendPublicationState(camp);
+      if (weekend.blocked) {
+        return res.status(403).json({
+          ok: false,
+          reason: weekend.reason,
+          closedKind: weekend.closedKind || 'weekend',
+          resumesOn: weekend.resumesOn,
+          error: weekend.message,
+        });
+      }
     }
 
     // ★ 참여형 공고는 레거시 경로(슬롯 증가·시트 행 추가) 진입 금지 — 홀드 기반 신규 경로로 처리
@@ -2449,7 +2459,9 @@ async function _adminCampaignList(req, res, next) {
       /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼
          토요일 관리자 카드가 "오늘 모집 0/30 · 모집중"으로 보였다(리뷰어는 신청 불가인데).
          카드 렌더러의 weekend 분기(_zeroQuotaNote·footer)가 이미 이 값을 기다리고 있었다. */
-      const _weekend = weekendPublicationState(r, now);
+      /* ★ 날짜별 계획(095)을 함께 넘긴다 — 빠지면 사람이 인원을 넣어 연 주말·공휴일도 관리자 카드엔
+         "미게시"로 보여 신청 관문(계획을 보는 쪽)과 갈린다(2026-09-23 공휴일 정리). */
+      const _weekend = weekendPublicationState(r, now, stateCnt && stateCnt.plans);
       const _resume = _weekendResume(r, _weekend, stateCnt, now, _sch);
       return {
         ...r,
@@ -2463,6 +2475,7 @@ async function _adminCampaignList(req, res, next) {
         state: _weekend.blocked ? 'weekend_unpublished' : st.state,
         stateReason: _weekend.blocked ? _weekend.reason : (st.stateReason || null),
         stateMessage: _weekend.blocked ? _weekend.message : null,
+        closedKind: _weekend.blocked ? (_weekend.closedKind || 'weekend') : null,
         resumesOn: _resume ? _resume.date : _weekend.resumesOn,
         resumesAt: _resume ? _resume.iso : null,
         // 표(주문 원장) 기준 총량(2단계) — null = 집계 불가/연결 없음(카드는 표 기준 문구를 그리지 않는다)
