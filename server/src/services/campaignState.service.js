@@ -293,6 +293,23 @@ function carryStrategy(c) {
 //   시트 기입·검수 인력이 감당 못 하는 버스트가 난다.
 const CARRY_CAP_MULT = Math.max(1, Number(process.env.CAMPAIGN_DAILY_CARRY_CAP || 2));
 
+/**
+ * [from, to] 구간(양끝 포함)에서 **계획이 없고 공고가 닫는 날**(주말·공휴일)의 수.
+ * ★★ 이월 계산의 "원래 받기로 한 인원" 누적에서 이 날들의 기본 일건수를 뺀다(사용자 확정
+ *   2026-09-23 — 주말·공휴일 몫이 다음 진행일로 몰리지 않게). 판정은 isWeekendClosedOn 하나
+ *   (신청 관문·카드와 같은 판정 — 사본 금지). 계획이 있는 날은 plans 루프가 이미 반영한다.
+ * ★ 주말 포함 공고(skip_weekends≠true)는 0 — 종전 동작 그대로.
+ */
+function _closedDaysWithoutPlan(c, from, to, plans) {
+  if (!c || c.skip_weekends !== true || !from || !to || from > to) return 0;
+  let n = 0, d = from, guard = 0;
+  while (d && d <= to && guard++ < 1500) {
+    if (!(plans && plans[d] != null) && isWeekendClosedOn(c, d, plans)) n++;
+    d = addIsoDays(d, 1);
+  }
+  return n;
+}
+
 /** 'YYYY-MM-DD' 두 개의 날짜 차이(일). b - a */
 function _dayDiff(a, b) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
@@ -350,6 +367,8 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
             if (d >= anchor && d <= carry.today) planned += Math.max(0, Number(plans[d]) || 0) - dl;
           }
         }
+        // 쉬는 날(주말·공휴일)은 원래 받지 않는 날이라 계획 누적에서 뺀다 — 미달로 세면 다음 진행일로 몰린다.
+        planned -= dl * _closedDaysWithoutPlan(c, anchor, carry.today, plans);
         const done = Number(carry.submittedSince) || 0;
         q = Math.min(planned - done, dl * CARRY_CAP_MULT);
         if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 그날 계획(기본 일건수)을 줄이지 않는다
@@ -775,6 +794,8 @@ function pendingCarry(c, counts, todayStr, win, schedule = null) {
       if (d >= anchor && d < todayStr) planned += Math.max(0, Number(plans[d]) || 0) - dl;
     }
   }
+  // dailyQuota 와 같은 규칙 — 계획 없는 쉬는 날(주말·공휴일)은 원래 받기로 한 인원이 아니다.
+  planned -= dl * _closedDaysWithoutPlan(c, anchor, addIsoDays(todayStr, -1), plans);
   return Math.max(0, planned - (Number(win.submittedSince) || 0));
 }
 

@@ -73,12 +73,19 @@
    *   담당자가 [📅 인원]으로 조절해야 할 상황(휴무일·0명 조절)을 놓치게 된다(사용자 신고).
    *   판정 재료는 전부 서버 상태엔진이 실어 준 값(state·stateReason) — 화면이 새로 세지 않는다.
    */
+  /** 쉬는 날 미게시 라벨 — 서버가 실어 준 closedKind 로만 가른다(화면이 공휴일을 새로 판정하지 않는다).
+   *  ★ closedKind 가 없으면(구버전 백엔드) 종전 문구 '주말 미게시' 그대로. */
+  function _closedLabel(c) {
+    return c && c.closedKind === 'holiday' ? '공휴일 미게시' : '주말 미게시';
+  }
   function _zeroQuotaNote(c, isPre, isDraft) {
     if (isPre) return { label: '오픈 전', desc: '오픈하면 집계가 시작됩니다' };
     if (isDraft) return { label: '게시 전', desc: '게시하면 집계가 시작됩니다' };
     if (c.stateReason === 'weekend_unpublished') {
-      const monday = _fmtMD(c.resumesOn);
-      return { label: '주말 미게시', desc: monday ? `주말에는 신청할 수 없습니다 · ${monday} 재개` : '주말에는 신청할 수 없습니다 · 월요일 재개' };
+      const resume = _fmtMD(c.resumesOn);
+      const lab = _closedLabel(c);
+      const what = c.closedKind === 'holiday' ? '공휴일' : '주말';
+      return { label: lab, desc: resume ? `${what}에는 신청할 수 없습니다 · ${resume} 재개` : `${what}에는 신청할 수 없습니다 · 다음 진행일 재개` };
     }
     if (c.stateReason === 'rest_day') {
       const nx = _fmtMD(c.nextWorkDate);
@@ -734,7 +741,7 @@
     let overlay = '';
     if (weekendUnpublished && c.resumesAt) {
       const wkLab = _fmtMD(c.resumesOn) ? _fmtMD(c.resumesOn) + ' 재개' : _fmtOpenLabel(c.resumesAt);
-      overlay = `<div class="pt-ovl pre"><span class="ol">주말 미게시</span><span class="ot" data-camp-countdown="${_esc(c.resumesAt)}">--:--:--</span><span class="ol">${_esc(wkLab)}</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">${_esc(_closedLabel(c))}</span><span class="ot" data-camp-countdown="${_esc(c.resumesAt)}">--:--:--</span><span class="ol">${_esc(wkLab)}</span></div>`;
     } else if (c.stateReason === 'rest_day' && c.opensAt) {
       // 휴무일(주말·공휴일·다음 블록 대기) — 다음 진행일까지 카운트다운
       overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenWhen(c.opensAt))} 오픈</span></div>`;
@@ -866,7 +873,7 @@
     } else if (c.state === 'open') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
       : `<button type="button" class="pbtn go">참여하기</button>`;
-    else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
+    else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">${_esc(_closedLabel(c))}</button><div class="pnote">${_esc(c.stateMessage || (_closedLabel(c) + ' · 다음 진행일 재개'))}</div>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
     else if (restDay) footer = `<button type="button" class="pbtn off">오늘은 진행 없음</button><div class="pnote">${c.nextWorkDate ? '다음 진행일 ' + _esc(_fmtMD(c.nextWorkDate)) : '다음 진행일 안내 예정'}</div>`;

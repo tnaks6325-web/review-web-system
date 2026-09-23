@@ -184,6 +184,8 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     dailyPlan.__setPoolForTest({
       query: async (sql) => {
         if (/FROM campaign_participants/.test(sql)) return { rows: many };
+        // 2026-09-23: 쉬는 날 판정용 공고 조회는 INSERT 가 아니다(세지 않는다). 공고 없음 = 종전 동작.
+        if (/FROM recruit_campaigns/.test(sql)) return { rows: [] };
         insertCount++;
         return { rowCount: 1 };
       },

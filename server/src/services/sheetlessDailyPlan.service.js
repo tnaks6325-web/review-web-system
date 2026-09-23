@@ -445,9 +445,21 @@ async function prefillFromWorktable({ campaignId, sheetId, tabName, today = '', 
 
   const dates = Object.keys(read.byDate).sort();
   const db = getPool();
-  let inserted = 0, skipped = 0;
+  /* ★★ 쉬는 날(주말·공휴일)에는 옮겨 적지 않는다(2026-09-23 사용자 확정) — 날짜별 계획에 1명 이상이
+     저장된 날은 "사람이 연 날"로 읽혀 신청 관문이 연다. 작업표에 우연히 깔린 공휴일 줄을 적으면
+     공휴일 모집이 열린다(추석 사고). 공고 조회 실패는 종전 동작(모르면 건너뛰지 않는다). */
+  let camp = null;
+  try {
+    const { rows } = await db.query('SELECT skip_weekends FROM recruit_campaigns WHERE id = $1', [campaignId]);
+    camp = rows[0] || null;
+  } catch (e) {
+    logger.warn(`[sheetlessDailyPlan] 프리필 쉬는 날 판정용 공고 조회 실패(종전 동작): ${e.message}`);
+  }
+  const { isWeekendClosedOn } = require('./campaignWeekend.service');
+  let inserted = 0, skipped = 0, closedSkipped = 0;
   for (const d of dates.slice(0, MAX_PLAN_DAYS)) {
     if (todayStr && d < todayStr) { skipped++; continue; }   // 지난 날짜는 화면에서 지울 수도 없다
+    if (camp && isWeekendClosedOn(camp, d, null)) { closedSkipped++; continue; }
     try {
       const r = await db.query(
         `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
@@ -463,7 +475,7 @@ async function prefillFromWorktable({ campaignId, sheetId, tabName, today = '', 
   if (dates.length > MAX_PLAN_DAYS) skipped += dates.length - MAX_PLAN_DAYS;
 
   logger.info(`[sheetlessDailyPlan] 달력 프리필 camp=${campaignId} tab=${tabName} 신규 ${inserted}일 · 유지 ${skipped}일`);
-  return { ok: true, inserted, skipped, days: dates.length, dateHeader: read.dateHeader };
+  return { ok: true, inserted, skipped, closedSkipped, days: dates.length, dateHeader: read.dateHeader };
 }
 
 module.exports = {
