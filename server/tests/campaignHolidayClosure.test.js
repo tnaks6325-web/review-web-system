@@ -208,11 +208,12 @@ const modalP = (async () => {
   NET.overview = OV({ worktableDates: OV().worktableDates.map(x => x.date === '2026-09-24' ? Object.assign({}, x, { filled: 3 }) : x) });
   NET.posts = [];
   await CDP.open('c1');
+  ok('★ 참여자가 있는 공휴일은 0명 확정 대상이 아니다(안내는 1일만)', /공휴일 1일<\/b>을 0명으로 확정하세요/.test(BODY.innerHTML));
   CDP._pinClosed();
   await CDP._save();
   const p2 = NET.posts.find(x => /daily-plan/.test(x.url));
   const s2 = (p2 && p2.body.set) || [];
-  ok('★★ 참여자 3명이 있는 공휴일은 3명까지만 줄인다(재배치 거부 회피)',
+  ok('★★ 참여자 3명이 있는 공휴일은 3명으로 저장된다(작업표 재배치 거부 회피) · 나머지는 0',
     (s2.find(x => x.date === '2026-09-24') || {}).count === 3 && (s2.find(x => x.date === '2026-09-25') || {}).count === 0);
 
   // 이미 0명으로 저장된 공휴일은 대상 아님
