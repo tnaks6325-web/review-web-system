@@ -61,10 +61,11 @@ async function run() {
 
   // ═══ B. 작업보드 정산 칸 ═══
   const linkRoute = [/FROM trackb_settlement_links WHERE sheet_id=\$1 AND tab_name=\$2/, () => ({ rows: [{ salesId: 'SA1', contractNumber: 'C-1' }] })];
-  p = pool([linkRoute, [/NOT \(l\.sheet_id = \$2 AND l\.tab_name = \$3\)/, () => ({ rows: [{ sheetId: 'S', tabName: 'B', label: '작업 B' }] })]]);
+  p = pool([linkRoute, [/NOT \(l\.sheet_id = \$2 AND l\.tab_name = \$3\)/, () => ({ rows: [{ sheetId: 'S', tabName: 'B', label: '작업 B', total: 24 }] })]]);
   svc.__setPoolForTest(p);
   let out = await svc.settlementForTab({ sheetId: 'S', tabName: 'A', role: 'admin' });
   ok(Array.isArray(out.sharedTabs) && out.sharedTabs.length === 1 && out.sharedTabs[0].label === '작업 B', 'B1: 내부는 함께 쓰는 작업 이름을 받는다');
+  ok(out.sharedTabCount === 25 && !('total' in out.sharedTabs[0]), 'B1b: 숫자는 잘리기 전 전체(자기 포함 25) — 목록 길이로 세지 않는다');
 
   p = pool([linkRoute]);
   svc.__setPoolForTest(p);
@@ -95,6 +96,7 @@ async function run() {
   const box = { esc: s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) };
   vm.createContext(box);
   vm.runInContext(cut('function _shareBadge(', 'function _awRowHtml(').replace(/function _awRowHtml[\s\S]*$/, ''), box);
+  ok(/외 22개/.test(box._shareBadge(25, ['a', 'b'])), 'D2b: 이름이 잘렸으면 나머지 개수를 말한다');
   ok(box._shareBadge(1) === '' && box._shareBadge(null) === '' && box._shareBadge(undefined) === '', 'D1: 2 미만·모름은 아무것도 안 그린다');
   const bdg = box._shareBadge(3, ['작업 "B"', '<C>']);
   ok(/🔗 작업 3개 공유/.test(bdg) && /계약 전체 금액/.test(bdg), 'D2: 배지 문구 + 계약 전체 금액이라는 설명');
@@ -112,7 +114,7 @@ async function run() {
   ok(/const tc=s&&s\.totalCost!=null\?\+s\.totalCost:null/.test(cut('function _awSetl(', 'function _shareBadge(')), 'D8: 줄마다의 표시값(_awSetl)은 그대로(금액을 나누지 않는다)');
   ok(/\$\{_shareBadge\(st\.sharedTabCount\)\}/.test(wd), 'D9: 업체관리 입금액/총비용 칸에 배지');
   ok(/\$\{s\?_shareBadge\(s\.sharedTabCount\):''\}/.test(wd), 'D10: 업체 화면 작업 목록 줄에 배지');
-  ok(/d\.sharedTabs\.length\?`<span class="tp3share">\$\{_shareBadge\(d\.sharedTabs\.length\+1/.test(wd), 'D11: 작업보드 정산 칸에 배지(자기 포함 +1)');
+  ok(/d\.sharedTabs\.length\?`<span class="tp3share">\$\{_shareBadge\(d\.sharedTabCount\|\|d\.sharedTabs\.length\+1/.test(wd), 'D11: 작업보드 정산 칸에 배지(자기 포함 +1)');
   ok((wd.match(/🔗 작업 \$\{n\}개 공유/g) || []).length === 1, 'D12: 배지 문구는 한 곳(사본 금지)');
   ok(/\.owntab \.bb\.shr\{display:flex/.test(wd), 'D13: 업체관리 칸은 줄을 내려 배지를 보인다(ocol 의 overflow:hidden 에 잘리지 않게)');
 

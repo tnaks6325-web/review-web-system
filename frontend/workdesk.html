@@ -3597,7 +3597,7 @@ function _awSetl(it){
 function _shareBadge(n, names){
   n=Number(n)||0; if(n<2) return '';
   const tip=`이 계약을 작업 ${n}개가 함께 씁니다 — 총비용·입금액은 계약 전체 금액입니다(작업별로 나눈 값이 아닙니다)`
-    +(names&&names.length?`\n함께 쓰는 작업: ${names.join(', ')}`:'');
+    +(names&&names.length?`\n함께 쓰는 작업: ${names.join(', ')}${n-1>names.length?` 외 ${n-1-names.length}개`:''}`:'');
   return `<span class="bb shr" title="${esc(tip)}">🔗 작업 ${n}개 공유</span>`;
 }
 /* 합계용 — 같은 계약(shareGroup)은 첫 줄만 남긴다. 줄마다의 표시값(_awSetl)은 그대로 두고 **더할 때만** 한 번 센다. */
@@ -7618,7 +7618,7 @@ function setlSummaryHtml(d){
   const btn=(kind,label,ready,sub,disabled=!d,unknown=false)=>`<button type="button" class="tp3doc${ready?' ready':''}${unknown?' unknown':''}"${disabled?' disabled':''} onclick="openSettlementDocument(event,'${kind}')"><span class="tp3dot"></span>${label}<span class="tp3sub">${esc(sub)}</span></button>`;
   const canMatch=!!d&&!d.hidden&&!d.linked&&(STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff');
   const match=canMatch?'<button type="button" class="tp3doc tp3match" onclick="openProgressContractMatch(event)">계약 매칭</button>':'';
-  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,qSub,dead(qReady,qRetry),qRetry)}${btn('invoice','계산서',iReady,iSub,dead(iReady,iRetry),iRetry)}${btn('payment','입금',pReady,pSub,dead(pReady,pRetry),pRetry)}${match}</span>${d&&d.linked&&!d.hidden&&Array.isArray(d.sharedTabs)&&d.sharedTabs.length?`<span class="tp3share">${_shareBadge(d.sharedTabs.length+1,d.sharedTabs.map(x=>x&&x.label||''))}</span>`:''}</span>`;
+  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,qSub,dead(qReady,qRetry),qRetry)}${btn('invoice','계산서',iReady,iSub,dead(iReady,iRetry),iRetry)}${btn('payment','입금',pReady,pSub,dead(pReady,pRetry),pRetry)}${match}</span>${d&&d.linked&&!d.hidden&&Array.isArray(d.sharedTabs)&&d.sharedTabs.length?`<span class="tp3share">${_shareBadge(d.sharedTabCount||d.sharedTabs.length+1,d.sharedTabs.map(x=>x&&x.label||''))}</span>`:''}</span>`;
 }
 function openSettlementDocument(ev,kind){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }

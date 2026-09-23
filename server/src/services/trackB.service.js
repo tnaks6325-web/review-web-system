@@ -1613,22 +1613,25 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
   // 같은 계약을 함께 쓰는 다른 작업(내부 전용 — 광고주에겐 다른 업체 작업명이 섞일 수 있어 미동봉).
   //   ★ fail-soft: 조회 실패면 필드를 싣지 않는다(화면은 "모름"을 공유 없음으로 꾸미지 않고 아무것도 안 그린다).
-  let sharedTabs;
+  let sharedTabs, sharedTabCount;
   if (!isAdv && link.salesId) {
     try {
       const { rows: sh } = await db.query(
         `SELECT l.sheet_id AS "sheetId", l.tab_name AS "tabName",
-                COALESCE(NULLIF(tc.display_name, ''), l.tab_name) AS label
+                COALESCE(NULLIF(tc.display_name, ''), l.tab_name) AS label,
+                COUNT(*) OVER ()::int AS total
            FROM trackb_settlement_links l
            LEFT JOIN tab_configs tc ON tc.sheet_id = l.sheet_id AND tc.tab_name = l.tab_name
           WHERE l.sales_id = $1 AND l.deleted_at IS NULL AND NOT (l.sheet_id = $2 AND l.tab_name = $3)
           ORDER BY l.created_at ASC LIMIT 20`, [link.salesId, sheetId, tabName]);
-      sharedTabs = sh;
+      // ★ 이름 목록은 20개까지만 싣지만 숫자는 전체로 센다(잘린 목록 길이로 세면 21에서 멈춘다).
+      sharedTabCount = sh.length ? sh[0].total + 1 : 1;
+      sharedTabs = sh.map(({ total, ...r }) => r);
     } catch (e) { logger.warn(`[settlement] 공유 작업 조회 실패: ${e.message}`); }
   }
   return {
     linked: true, contractNumber, salesId: link.salesId,
-    sharedTabs,
+    sharedTabs, sharedTabCount,
     // Nit5: 광고주에겐 내부 정보(linkedBy·담당자) 미노출.
     linkedBy: isAdv ? undefined : link.linkedBy,
     proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
