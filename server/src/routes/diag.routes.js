@@ -1942,7 +1942,11 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           file.data,
           reviewFileName,
           file.mimeType || 'image/jpeg',
-          targetFolderId
+          targetFolderId,
+          /* ★ 공개 권한은 **응답을 기다리지 않고** 뒤에서 건다 — Drive 왕복 1회(약 1초)인데
+             업로드 결과(파일 ID·링크)에는 영향이 없고, 그 1초를 리뷰어가 그대로 기다리고 있었다.
+             공개가 늦어지는 동안의 영향은 구글 CDN 썸네일이 잠깐 우리 프록시로 폴백하는 것뿐. */
+          { deferShare: true }
         );
 
         // ── 3단계 AI 검수: 이 슬롯에 맞는 형식인지 판별(fail-open — 업로드는 이미 끝났고 막지 않는다) ──
