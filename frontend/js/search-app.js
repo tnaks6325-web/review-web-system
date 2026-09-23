@@ -11975,19 +11975,40 @@ function _jsonpGet(fullUrl, timeoutMs) {
 
 /* ── 유틸 ── */
 
+/* ★★ 리뷰 캡처 축소 기준 — **값 단일 출처**(아래 ImageShrink 경로와 폴백이 같은 값을 쓴다).
+   ★ 긴 변 1600px (사용자 확정 2026-09-22): 리뷰 캡처는 세로로 긴 모바일 스크린샷
+     (예 1080×2400)이라 **가로 폭 기준으로는 한 번도 줄지 않았다** — 종전 `width > 1920`
+     조건이 참이 되는 일이 없어 원본 해상도 그대로 올라갔고, Drive 업로드가 3~9초였다.
+   ★ 품질 0.75 는 종전 그대로(바꾸지 않는다 — 한 번에 두 축을 흔들면 화질 문제의 원인을 못 가린다).
+   ⚠ 이 값은 **AI 판정의 입력 화질**이기도 하다(1차 필터·2차 검수가 같은 이미지를 읽는다).
+     더 낮추면 상품명·리뷰 본문 OCR 이 흔들린다 — 내리기 전에 실물로 확인할 것. */
+const REVIEW_CAPTURE_MAX_PX  = 1600;
+const REVIEW_CAPTURE_QUALITY = 0.75;
+
 /**
  * ★ 이미지 압축/리사이즈 (모바일 최적화)
- * - 최대 1920px으로 리사이즈
- * - JPEG 품질 0.75로 압축
- * - 원본 1MB 이하면 압축 스킵 (이미 작은 파일)
+ * - **긴 변** 기준 REVIEW_CAPTURE_MAX_PX 로 축소 (세로로 긴 캡처도 줄어든다)
+ * - JPEG 품질 REVIEW_CAPTURE_QUALITY
+ * - 원본 1MB 이하 JPEG 면 손대지 않는다(재인코딩은 화질만 깎는다)
+ *
+ * ★★ 축소 실행부 단일 출처 = `ImageShrink`(js/image-shrink.js) — 구매 캡처 업로드가
+ *   쓰는 그 모듈이다. 여기서는 **긴 변 기준**(`{longest:true}`)으로 부르고,
+ *   기존 소비처(구매 캡처 1920/0.8 · 배치 1080/0.6)는 인자를 안 넘겨 **가로 기준 그대로**다.
+ * ★ 모듈을 못 불러온 페이지를 위한 폴백을 남긴다 — 축소가 통째로 빠지면 큰 캡처가
+ *   서버 본문 상한(10MB)에 걸려 **증빙만 조용히 빠진다**(image-shrink.js 주석의 그 사고).
  */
-function compressImage(file, maxWidth = 1920, quality = 0.75) {
-  return new Promise((resolve, reject) => {
-    // 1MB 이하이고 JPEG이면 압축 불필요
-    if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') {
-      return fileToBase64Raw(file).then(resolve).catch(reject);
-    }
+function compressImage(file, maxPx = REVIEW_CAPTURE_MAX_PX, quality = REVIEW_CAPTURE_QUALITY) {
+  // 1MB 이하이고 JPEG이면 압축 불필요
+  if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') return fileToBase64Raw(file);
 
+  if (window.ImageShrink && typeof window.ImageShrink.fromFile === 'function') {
+    return window.ImageShrink.fromFile(file, maxPx, quality, { longest: true })
+      .then(r => (r && r.base64) ? r.base64 : fileToBase64Raw(file))
+      .catch(() => fileToBase64Raw(file));
+  }
+
+  // ── 폴백: 모듈 미로드. 위와 **같은 상한·같은 긴 변 기준**으로 직접 줄인다 ──
+  return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
 
@@ -11995,21 +12016,20 @@ function compressImage(file, maxWidth = 1920, quality = 0.75) {
       URL.revokeObjectURL(url);
 
       let { width, height } = img;
-
-      // 리사이즈 필요 여부 확인
-      if (width > maxWidth) {
-        height = Math.round(height * (maxWidth / width));
-        width = maxWidth;
+      const scale = Math.min(1, maxPx / Math.max(width || 1, height || 1));
+      if (scale < 1) {
+        width  = Math.round(width  * scale);
+        height = Math.round(height * scale);
       }
 
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
 
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // JPEG로 압축 (품질 0.75)
+      // JPEG로 압축
       const dataUrl = canvas.toDataURL('image/jpeg', quality);
       const b64 = dataUrl.split(',')[1];
       if (!b64) {
@@ -12017,9 +12037,8 @@ function compressImage(file, maxWidth = 1920, quality = 0.75) {
         return;
       }
 
-      // 압축된 크기 계산
       const compressedSize = Math.round(b64.length * 0.75); // base64 → binary 크기 추정
-      console.log(`[compress] ${file.name}: ${(file.size/1024).toFixed(0)}KB → ${(compressedSize/1024).toFixed(0)}KB (${width}x${height})`);
+      console.log(`[compress] ${file.name}: ${(file.size/1024).toFixed(0)}KB → ${(compressedSize/1024).toFixed(0)}KB (${canvas.width}x${canvas.height})`);
 
       resolve(b64);
     };
