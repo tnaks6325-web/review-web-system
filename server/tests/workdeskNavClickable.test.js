@@ -61,6 +61,9 @@ while ((m = ruleRe.exec(css.replace(/\n/g, ' ')))) {
   if (!/position\s*:\s*(fixed|absolute)/.test(body)) continue;
   if (/pointer-events\s*:\s*none/.test(body)) continue;
   if (/@|:hover|\.show|\.on\b/.test(sel)) continue;
+  // 가상요소는 독립 오버레이가 아니며 부모의 히트영역을 따른다. 리사이즈 손잡이처럼
+  // 투명 상태에서도 부모가 입력을 받아야 하는 장식까지 막으면 기능 자체가 죽는다.
+  if (/::(?:before|after)\b/.test(sel)) continue;
   offenders.push(sel);
 }
 ok(`★ opacity:0 으로만 숨긴 fixed/absolute 오버레이는 전부 pointer-events:none — 위반 없음${

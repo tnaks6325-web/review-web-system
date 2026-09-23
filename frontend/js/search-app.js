@@ -21,7 +21,7 @@ function show(idOrEl, displayType) {
 // selectedRows: item 배열 (1건이면 길이 1)
 // filesByIdx:   { [idx]: File[] }  — 슬롯별 파일 목록
 // memoByIdx:    { [idx]: string }  — 슬롯별 메모 (기존 단건 memoTxt와 별도)
-const S = { selectedRow: null, selectedRows: [], filesByIdx: {}, memoByIdx: {}, files: [], step: 1 };
+const S = { selectedRow: null, selectedRows: [], filesByIdx: {}, memoByIdx: {}, files: [], step: 1, receiptStepMode: false };
 const ADMIN_SESSION_KEY  = "rapp_admin_exp";
 const ADMIN_SESSION_MS   = 8 * 60 * 60 * 1000;
 const REVIEWER_AUTH_KEY  = "rapp_reviewer_auth";  // ★ 리뷰어 로그인 세션 키
@@ -46,6 +46,507 @@ const _EMBED_CTX = (() => {
 })();
 /** 미리보기(제출 차단) 단일 판정 — embed 컨텍스트 안에서만 참이 될 수 있다. */
 const _PREVIEW_MODE = !!(_EMBED_CTX && _EMBED_CTX.preview);
+let _activeIdentityContext = null;
+let _identityContextPromise = null;
+let _orderInfoSuggestions = [];
+let _dismissedOrderInfoIds = {};
+const _ORDER_INFO_DISMISS_KEY = "rapp_order_info_dismissed_v1";
+
+function _reviewerIdentityRequestBody(extra) {
+  return Object.assign({
+    campaignId: _EMBED_CTX?.campId || "",
+    campaignApplicationId: _EMBED_CTX?.app || "",
+    holdToken: _EMBED_CTX?.holdToken || "",
+  }, extra || {});
+}
+
+async function _loadOrderIdentityContext() {
+  if (!_EMBED_CTX || _PREVIEW_MODE || !_EMBED_CTX.app) return null;
+  if (_identityContextPromise) return _identityContextPromise;
+  _identityContextPromise = (async () => {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-context", {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify(_reviewerIdentityRequestBody()),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || "참여 명의를 확인하지 못했습니다.");
+    _activeIdentityContext = data;
+    _orderInfoSuggestions = Array.isArray(data.orderInfoSuggestions) ? data.orderInfoSuggestions : [];
+    const identity = data.selectedIdentity || {};
+    (_orderCardIds || []).forEach((cid) => {
+      const idEl = document.getElementById(cid + "_userId");
+      if (idEl && !idEl.value) idEl.value = identity.shoppingId || "";
+      if (idEl) idEl.dataset.savedValue = identity.shoppingId || "";
+      const who = document.getElementById(cid + "_identityWho");
+      if (who) {
+        const identityName = identity.name || "선택 명의";
+        const identityKind = identity.type === "sub" ? "타계정" : "본계정";
+        const phoneDigits = String(identity.phone || "").replace(/[^0-9]/g, "");
+        const maskedPhone = phoneDigits ? "***" + phoneDigits.slice(-4) : "";
+        who.innerHTML = '<span class="of-identity-kicker">현재 참여 명의</span>'
+          + '<strong class="of-identity-name">' + _safeText(identityName) + '</strong>'
+          + '<span class="of-identity-kind">' + identityKind + '</span>'
+          + '<span class="of-identity-help">' + (maskedPhone ? _safeText(maskedPhone) + ' · ' : '')
+          + 'AI가 캡처와 이 명의를 확인합니다.</span>';
+        who.setAttribute("aria-label", "현재 참여 명의 " + identityName + " " + identityKind);
+      }
+    });
+    _renderSavedOrderInfoPickers();
+    _renderOrderInfoSuggestions();
+    return data;
+  })().catch((err) => { _identityContextPromise = null; throw err; });
+  return _identityContextPromise;
+}
+
+function _invalidateIdentityApproval(cid) {
+  const st = _cardAiState[cid]; if (!st) return;
+  // 자동/수동 확인이 끝난 뒤 사용자가 수취인·연락처·주소를 수정하면 기존 토큰은
+  // 제출에 쓸 수 없지만, 같은 캡처가 이미 서버 확인을 통과했다는 증명은 재확인에 필요하다.
+  // 이를 버리면 MATCH → 필드수정 상태에서 수동확인 버튼도 없는 교착상태가 된다.
+  if (st.approvalToken) st.priorApprovalToken = st.approvalToken;
+  st.approvalToken = "";
+  const box = document.getElementById(cid + "_identityStatus");
+  if (box && (st.extracted || st.priorApprovalToken)) {
+    if (st.priorApprovalToken) _renderIdentityMatchState(cid, "REVIEW", ["수정한 정보로 명의를 다시 확인해주세요."], true);
+    else if (st.reviewToken) _renderIdentityMatchState(cid, "REVIEW", ["수정한 정보를 직접 확인해주세요."], true);
+    else if (st.matchError && st.extractToken) _renderIdentityMatchState(cid, "ERROR", ["수정한 정보를 직접 확인해주세요."], true);
+    else _renderIdentityMatchState(cid, "REVIEW", ["입력 정보가 변경되었습니다. 캡처를 다시 분석해주세요."], false);
+  }
+}
+
+function _clearSavedIdentitySelection(cid, field) {
+  const st = _cardAiState[cid];
+  if (st?.savedIdentitySelections && field) delete st.savedIdentitySelections[field];
+}
+
+function _savedIdentitySelections(cid) {
+  const selected = _cardAiState[cid]?.savedIdentitySelections || {};
+  return {
+    recipient: String(selected.recipient || ""),
+    phone: String(selected.phone || ""),
+    address: String(selected.address || ""),
+  };
+}
+
+function _selectShoppingIdSave(cid) {
+  const selected = document.getElementById(cid + "_saveIdChk");
+  if (!selected || !selected.checked) return;
+  (_orderCardIds || []).forEach((otherCid) => {
+    if (otherCid === cid) return;
+    const other = document.getElementById(otherCid + "_saveIdChk");
+    if (other) other.checked = false;
+  });
+}
+
+const _SAVED_ORDER_INFO_FIELDS = Object.freeze({
+  userId: { key: "shoppingId", label: "아이디", emptyLabel: "저장된 아이디 없음" },
+  recipient: { key: "name", label: "수취인", emptyLabel: "저장된 수취인 없음" },
+  phone: { key: "phone", label: "연락처", emptyLabel: "저장된 연락처 없음" },
+  address: { key: "address", label: "배송주소", emptyLabel: "저장된 주소 없음" },
+});
+
+function _savedOrderInfoMarkup(cid, field) {
+  const label = _SAVED_ORDER_INFO_FIELDS[field]?.label || "내 정보";
+  const menuId = cid + "_" + field + "SavedInfoMenu";
+  return '<div class="of-saved-info" id="' + cid + '_' + field + 'SavedInfo" hidden>'
+    + '<button type="button" class="of-saved-info-trigger" data-cid="' + cid + '" data-field="' + field + '" '
+    + 'aria-label="' + label + ' 내 정보에서 선택" aria-expanded="false" aria-controls="' + menuId + '">'
+    + '<span class="of-saved-info-trigger-label">내 정보에서 선택</span><span class="of-saved-info-chevron" aria-hidden="true">⌄</span></button>'
+    + '<div class="of-saved-info-menu" id="' + menuId + '" aria-label="' + label + ' 저장 정보 목록" hidden></div>'
+    + '</div>';
+}
+
+function _orderInfoSuggestionsMarkup(cid) {
+  const listId = cid + "_orderInfoSuggestionList";
+  return '<section class="of-order-info-suggestions" id="' + cid + '_orderInfoSuggestions" hidden>'
+    + '<button type="button" class="of-order-info-heading" onclick="_toggleOrderInfoSuggestions(\'' + cid + '\')" '
+    + 'aria-expanded="true" aria-controls="' + listId + '">'
+    + '<span class="of-order-info-heading-main"><i class="fas fa-thumbtack" aria-hidden="true"></i>'
+    + '<strong>자주 쓰는 주문정보</strong><span class="of-order-info-count"></span></span>'
+    + '<span class="of-order-info-heading-help">누르면 수취인·연락처·주소가 함께 입력돼요</span>'
+    + '<i class="fas fa-chevron-up of-order-info-chevron" aria-hidden="true"></i></button>'
+    + '<div class="of-order-info-list" id="' + listId + '"></div>'
+    + '</section>';
+}
+
+function _savedBankAccountMarkup() {
+  return '<div class="of-saved-info" id="of_bankSavedInfo" hidden>'
+    + '<button type="button" class="of-saved-info-trigger" aria-label="저장된 계좌 선택" '
+    + 'aria-expanded="false" aria-controls="of_bankSavedInfoMenu">'
+    + '<span class="of-saved-info-trigger-label">저장된 계좌에서 선택</span><span class="of-saved-info-chevron" aria-hidden="true">⌄</span></button>'
+    + '<div class="of-saved-info-menu" id="of_bankSavedInfoMenu" aria-label="저장된 계좌 목록" hidden></div>'
+    + '</div>';
+}
+
+function _closeSavedInfoDropdowns(exceptWrap) {
+  document.querySelectorAll(".of-saved-info.is-open").forEach((wrap) => {
+    if (wrap === exceptWrap) return;
+    wrap.classList.remove("is-open");
+    const trigger = wrap.querySelector(".of-saved-info-trigger");
+    const menu = wrap.querySelector(".of-saved-info-menu");
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+    if (menu) menu.hidden = true;
+  });
+}
+
+function _toggleSavedInfoDropdown(trigger) {
+  if (!trigger || trigger.disabled) return;
+  const wrap = trigger.closest(".of-saved-info");
+  const menu = wrap?.querySelector(".of-saved-info-menu");
+  if (!wrap || !menu) return;
+  const opening = !wrap.classList.contains("is-open");
+  _closeSavedInfoDropdowns(opening ? wrap : null);
+  wrap.classList.toggle("is-open", opening);
+  trigger.setAttribute("aria-expanded", String(opening));
+  menu.hidden = !opening;
+  if (opening) menu.querySelector(".of-saved-info-option")?.focus({ preventScroll: true });
+}
+
+document.addEventListener("click", (event) => {
+  const trigger = event.target.closest(".of-saved-info-trigger");
+  if (trigger) { _toggleSavedInfoDropdown(trigger); return; }
+  if (!event.target.closest(".of-saved-info")) _closeSavedInfoDropdowns();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const openWrap = document.querySelector(".of-saved-info.is-open");
+  const trigger = openWrap?.querySelector(".of-saved-info-trigger");
+  _closeSavedInfoDropdowns();
+  trigger?.focus({ preventScroll: true });
+});
+
+function _scopedSavedOrderIdentities() {
+  const selected = _activeIdentityContext?.selectedIdentity || null;
+  let identities = Array.isArray(_activeIdentityContext?.savedIdentities)
+    ? _activeIdentityContext.savedIdentities.filter(Boolean)
+    : (selected ? [selected] : []);
+  if (selected?.type === "sub") {
+    identities = identities.filter((item) => item.identityKey === selected.identityKey);
+    if (!identities.length) identities = [selected];
+  }
+  return identities;
+}
+
+function _restoreSavedInfoInputHandler(el, cid, field, locked) {
+  if (!el || locked) return;
+  if (field === "userId") el.oninput = () => _ofClearError(cid + "_userId");
+  else if (field === "recipient") el.oninput = () => {
+    _clearSavedIdentitySelection(cid, "recipient");
+    _ofClearError(cid + "_recipient"); _invalidateIdentityApproval(cid);
+  };
+  else if (field === "phone") el.oninput = function () {
+    _clearSavedIdentitySelection(cid, "phone");
+    formatPhoneInput(this); _ofClearError(cid + "_phone"); _invalidateIdentityApproval(cid);
+  };
+  else if (field === "address") el.oninput = () => {
+    _clearSavedIdentitySelection(cid, "address");
+    _ofClearError(cid + "_address"); _invalidateIdentityApproval(cid);
+  };
+}
+
+function _renderSavedOrderInfoPickers() {
+  const identities = _scopedSavedOrderIdentities();
+  (_orderCardIds || []).forEach((cid) => {
+    Object.entries(_SAVED_ORDER_INFO_FIELDS).forEach(([field, spec]) => {
+      const wrap = document.getElementById(cid + "_" + field + "SavedInfo");
+      const trigger = wrap?.querySelector(".of-saved-info-trigger");
+      const triggerLabel = trigger?.querySelector(".of-saved-info-trigger-label");
+      const menu = wrap?.querySelector(".of-saved-info-menu");
+      if (!wrap || !trigger || !triggerLabel || !menu) return;
+      const available = identities.filter((item) => String(item?.[spec.key] || "").trim());
+      menu.replaceChildren();
+      available.forEach((item) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "of-saved-info-option";
+        option.dataset.cid = cid;
+        option.dataset.field = field;
+        option.dataset.savedIdentityKey = item.identityKey;
+        option.textContent = (item.name || "저장 정보") + " · "
+          + (item.type === "sub" ? "타계정" : "본계정") + " — " + item[spec.key];
+        option.addEventListener("click", () => window._applySavedOrderInfo(option));
+        menu.appendChild(option);
+      });
+      triggerLabel.textContent = available.length ? "내 정보에서 선택" : spec.emptyLabel;
+      trigger.disabled = available.length === 0;
+      wrap.classList.remove("is-open");
+      trigger.setAttribute("aria-expanded", "false");
+      menu.hidden = true;
+      wrap.hidden = false;
+      if (field === "phone") {
+        const phoneEl = document.getElementById(cid + "_phone");
+        if (phoneEl) {
+          phoneEl.readOnly = false;
+          phoneEl.classList.remove("of-participant-phone");
+          phoneEl.removeAttribute("aria-readonly");
+          _restoreSavedInfoInputHandler(phoneEl, cid, field, false);
+        }
+      }
+    });
+  });
+  _renderSavedBankAccountPicker();
+}
+
+function _renderSavedBankAccountPicker() {
+  const wrap = document.getElementById("of_bankSavedInfo");
+  const trigger = wrap?.querySelector(".of-saved-info-trigger");
+  const triggerLabel = trigger?.querySelector(".of-saved-info-trigger-label");
+  const menu = wrap?.querySelector(".of-saved-info-menu");
+  if (!wrap || !trigger || !triggerLabel || !menu) return;
+  const available = _scopedSavedOrderIdentities().filter((item) =>
+    [item?.bankName, item?.bankAccount, item?.accountHolder]
+      .every((value) => String(value || "").trim()));
+  menu.replaceChildren();
+  available.forEach((item) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "of-saved-info-option of-saved-bank-option";
+    option.dataset.savedIdentityKey = item.identityKey;
+    const title = document.createElement("span");
+    title.className = "of-saved-info-option-title";
+    title.textContent = [item.accountHolder || item.name, item.bankName, item.bankAccount].join(" · ");
+    const help = document.createElement("span");
+    help.className = "of-saved-info-option-help";
+    help.textContent = "은행·계좌·예금주를 한 번에 적용";
+    option.append(title, help);
+    option.addEventListener("click", () => window._applySavedBankAccount(option));
+    menu.appendChild(option);
+  });
+  triggerLabel.textContent = available.length ? "저장된 계좌에서 선택" : "저장된 계좌 없음";
+  trigger.disabled = available.length === 0;
+  wrap.classList.remove("is-open");
+  trigger.setAttribute("aria-expanded", "false");
+  menu.hidden = true;
+  wrap.hidden = false;
+}
+
+window._applySavedBankAccount = function (option) {
+  const identityKey = option?.dataset?.savedIdentityKey;
+  if (!identityKey) return;
+  const identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === identityKey);
+  if (!identity) return;
+  const fields = [
+    ["of_bank", identity.bankName],
+    ["of_account", identity.bankAccount],
+    ["of_depositor", identity.accountHolder],
+  ];
+  if (fields.some(([id, value]) => !document.getElementById(id) || !String(value || "").trim())) {
+    return;
+  }
+  fields.forEach(([id, value]) => {
+    const input = document.getElementById(id);
+    input.value = String(value).trim();
+    input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
+    _ofClearError(id);
+  });
+  (_orderCardIds || []).slice(1).forEach((cid) => {
+    if (document.getElementById(cid + "_sameChk")?.checked) _syncSharedInfoToCard(cid);
+  });
+  const wrap = option.closest(".of-saved-info");
+  const triggerLabel = wrap?.querySelector(".of-saved-info-trigger-label");
+  if (triggerLabel) triggerLabel.textContent = [identity.accountHolder || identity.name, identity.bankName, identity.bankAccount].join(" · ");
+  _closeSavedInfoDropdowns();
+  _embedSaveForm();
+  showToast((identity.accountHolder || identity.name || "선택한") + "님의 계좌 정보를 적용했습니다.", "success");
+};
+
+window._applySavedOrderInfo = function (option) {
+  const cid = option?.dataset?.cid;
+  const field = option?.dataset?.field;
+  const identityKey = option?.dataset?.savedIdentityKey;
+  const spec = _SAVED_ORDER_INFO_FIELDS[field];
+  if (!cid || !spec || !identityKey) return;
+  const selected = _activeIdentityContext?.selectedIdentity || null;
+  let identity = _scopedSavedOrderIdentities().find((item) => item.identityKey === identityKey);
+  const input = document.getElementById(cid + "_" + field);
+  const value = String(identity?.[spec.key] || "").trim();
+  if (!input || !value) return;
+
+  const appliedFields = [];
+  const applyIdentityField = (targetField, targetValue) => {
+    const target = document.getElementById(cid + "_" + targetField);
+    const cleanValue = String(targetValue || "").trim();
+    if (!target || !cleanValue) return;
+    target.value = cleanValue;
+    if (targetField === "phone") formatPhoneInput(target);
+    target.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked", "of-participant-phone");
+    target.readOnly = false;
+    target.removeAttribute("tabindex");
+    target.removeAttribute("aria-readonly");
+    target.style.paddingRight = "";
+    target.parentElement?.querySelector(".ai-lock-badge")?.remove();
+    _restoreSavedInfoInputHandler(target, cid, targetField, false);
+    _ofClearError(cid + "_" + targetField);
+    appliedFields.push(targetField);
+  };
+  applyIdentityField(field, value);
+  // 쿠팡은 연락처·주소도 가려서 보여준다. 수취인 저장정보를 선택하면 같은 명의의
+  // 가림/빈 연락처와 주소만 함께 보완하고, 사용자가 이미 적은 완전한 배송정보는 건드리지 않는다.
+  if (field === "recipient") {
+    for (const [relatedField, key] of [["phone", "phone"], ["address", "address"]]) {
+      const related = document.getElementById(cid + "_" + relatedField);
+      if (related && (!String(related.value || "").trim() || _hasIdentityMask(related.value))) {
+        applyIdentityField(relatedField, identity?.[key]);
+      }
+    }
+  }
+  if (["recipient", "phone", "address"].includes(field)) {
+    _invalidateIdentityApproval(cid);
+    const st = _cardAiState[cid];
+    if (st) {
+      st.savedIdentitySelections = st.savedIdentitySelections || {};
+      appliedFields.forEach((appliedField) => { st.savedIdentitySelections[appliedField] = identity.identityKey; });
+    }
+  }
+  if (field === "userId" && selected && identity.identityKey !== selected.identityKey) {
+    const saveChk = document.getElementById(cid + "_saveIdChk");
+    if (saveChk) saveChk.checked = false;
+  }
+  const wrap = option.closest(".of-saved-info");
+  const triggerLabel = wrap?.querySelector(".of-saved-info-trigger-label");
+  if (triggerLabel) triggerLabel.textContent = option.textContent;
+  _closeSavedInfoDropdowns();
+  _embedSaveForm();
+  _syncSubmissionIdentityAction();
+  showToast((identity.name || "선택한") + "님의 " + (appliedFields.length > 1
+    ? "수취인과 가림 처리된 연락처·배송주소를 적용했습니다."
+    : spec.label + "를 적용했습니다."), "success");
+};
+
+function _loadDismissedOrderInfoIds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(_ORDER_INFO_DISMISS_KEY) || "{}");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      _dismissedOrderInfoIds = Object.assign({}, saved, _dismissedOrderInfoIds);
+    }
+  } catch (_) { /* 메모리 숨김값은 유지 */ }
+  return _dismissedOrderInfoIds;
+}
+
+function _saveDismissedOrderInfoIds(saved) {
+  try {
+    const entries = Object.entries(saved || {})
+      .filter(([id, at]) => /^[0-9a-f]{64}$/i.test(id) && Number.isFinite(Number(at)))
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 60);
+    _dismissedOrderInfoIds = Object.fromEntries(entries);
+    localStorage.setItem(_ORDER_INFO_DISMISS_KEY, JSON.stringify(_dismissedOrderInfoIds));
+  } catch (_) { /* 저장 실패 시 현재 화면에서만 숨김 */ }
+}
+
+function _visibleOrderInfoSuggestions() {
+  const dismissed = _loadDismissedOrderInfoIds();
+  return (_orderInfoSuggestions || []).filter((item) => item && item.id && !dismissed[item.id]);
+}
+
+function _toggleOrderInfoSuggestions(cid) {
+  const wrap = document.getElementById(cid + "_orderInfoSuggestions");
+  const heading = wrap?.querySelector(".of-order-info-heading");
+  const list = wrap?.querySelector(".of-order-info-list");
+  if (!wrap || !heading || !list) return;
+  const willOpen = list.hidden;
+  list.hidden = !willOpen;
+  wrap.classList.toggle("is-collapsed", !willOpen);
+  heading.setAttribute("aria-expanded", String(willOpen));
+}
+
+function _renderOrderInfoSuggestions() {
+  const suggestions = _visibleOrderInfoSuggestions();
+  (_orderCardIds || []).forEach((cid) => {
+    const wrap = document.getElementById(cid + "_orderInfoSuggestions");
+    const list = wrap?.querySelector(".of-order-info-list");
+    const count = wrap?.querySelector(".of-order-info-count");
+    if (!wrap || !list || !count) return;
+    list.replaceChildren();
+    count.textContent = suggestions.length ? suggestions.length + "개" : "";
+    wrap.hidden = suggestions.length === 0;
+    if (!suggestions.length) return;
+
+    suggestions.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "of-order-info-row";
+
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.className = "of-order-info-apply";
+      apply.dataset.cid = cid;
+      apply.dataset.suggestionId = item.id;
+      apply.setAttribute("aria-label", item.recipient + " 주문정보 적용");
+
+      const top = document.createElement("span");
+      top.className = "of-order-info-top";
+      const recipient = document.createElement("strong");
+      recipient.textContent = item.recipient || "수취인 없음";
+      const phone = document.createElement("span");
+      phone.textContent = item.phone || "";
+      top.append(recipient, phone);
+      if (Number(item.useCount) > 1) {
+        const used = document.createElement("span");
+        used.className = "of-order-info-used";
+        used.textContent = Number(item.useCount) + "회";
+        top.appendChild(used);
+      }
+      const address = document.createElement("span");
+      address.className = "of-order-info-address";
+      address.textContent = item.address || "";
+      apply.append(top, address);
+      apply.addEventListener("click", () => _applyOrderInfoSuggestion(apply));
+
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "of-order-info-dismiss";
+      dismiss.dataset.suggestionId = item.id;
+      dismiss.setAttribute("aria-label", item.recipient + " 주문정보 추천 숨기기");
+      dismiss.textContent = "×";
+      dismiss.addEventListener("click", () => _dismissOrderInfoSuggestion(dismiss));
+      row.append(apply, dismiss);
+      list.appendChild(row);
+    });
+  });
+}
+
+function _applyOrderInfoSuggestion(button) {
+  const cid = button?.dataset?.cid;
+  const suggestionId = button?.dataset?.suggestionId;
+  const item = (_orderInfoSuggestions || []).find((entry) => entry?.id === suggestionId);
+  if (!cid || !item) return;
+  const fields = [
+    ["recipient", item.recipient],
+    ["phone", item.phone],
+    ["address", item.address],
+  ];
+  const resolved = fields.map(([field, rawValue]) => {
+    const input = document.getElementById(cid + "_" + field);
+    if (!input) return null;
+    const value = String(rawValue || "").trim();
+    return value ? { field, input, value } : null;
+  });
+  if (resolved.some((entry) => !entry)) return;
+  for (const { field, input, value } of resolved) {
+    input.value = value;
+    if (field === "phone") formatPhoneInput(input);
+    input.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
+    input.classList.remove("of-participant-phone");
+    input.readOnly = false;
+    input.style.paddingRight = "";
+    input.parentElement?.querySelector(".ai-lock-badge")?.remove();
+    _restoreSavedInfoInputHandler(input, cid, field, false);
+    _ofClearError(cid + "_" + field);
+  }
+  _invalidateIdentityApproval(cid);
+  _embedSaveForm();
+  _syncSubmissionIdentityAction();
+  showToast("수취인·연락처·주소를 함께 입력했습니다.", "success");
+}
+
+function _dismissOrderInfoSuggestion(button) {
+  const suggestionId = button?.dataset?.suggestionId;
+  if (!suggestionId) return;
+  const dismissed = _loadDismissedOrderInfoIds();
+  dismissed[suggestionId] = Date.now();
+  _saveDismissedOrderInfoIds(dismissed);
+  _renderOrderInfoSuggestions();
+}
 function _embedPost(msg) {
   if (_EMBED_CTX && window.parent !== window) {
     try { window.parent.postMessage(msg, location.origin); } catch (_) { /* noop */ }
@@ -61,7 +562,7 @@ function _embedSaveForm() {
     const scr = document.getElementById("screenOrderForm");
     if (!scr) return;
     const vals = [...scr.querySelectorAll("input, select, textarea")]
-      .filter(el => el.type !== "file") // file input은 저장·복원 불가(복원 시 InvalidStateError) — 양쪽에서 동일하게 제외해 인덱스 정렬 유지
+      .filter(el => el.type !== "file")
       .map(el => (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || ""));
     sessionStorage.setItem(_EMBED_FORM_KEY, JSON.stringify(vals));
   } catch (_) { /* noop */ }
@@ -75,7 +576,8 @@ function _embedRestoreForm() {
     const vals = JSON.parse(raw);
     const scr = document.getElementById("screenOrderForm");
     if (!scr || !Array.isArray(vals)) return;
-    const els = [...scr.querySelectorAll("input, select, textarea")].filter(el => el.type !== "file");
+    const els = [...scr.querySelectorAll("input, select, textarea")]
+      .filter(el => el.type !== "file");
     els.forEach((el, i) => {
       try {
         if (i >= vals.length || vals[i] === "" || el.value) return; // 이미 값 있으면 미덮어씀
@@ -113,7 +615,7 @@ function _lockEmbedOption() {
    = 기존 단건 동작 100% 불변(fail-closed). 서버 계약(요청 1건 = 홀드 1건)도 그대로다 —
    카드마다 자기 홀드 문맥을 실어 기존 엔드포인트로 순차 전송한다.
 
-   ★ 이 모드가 묶는 것은 "제출"이지 "구매"가 아니다. 홀드 TTL(본계정 15분·타계정 10분)은
+   ★ 이 모드가 묶는 것은 "제출"이지 "구매"가 아니다. 홀드 TTL(본계정 30분·타계정 15분)은
      그대로이므로, 만료된 홀드는 카드에서 잠기고 페이로드에서도 빠진다.
    ══════════════════════════════════════════════════════════════════════════ */
 let _BATCH = null;   // { holds:[], byCid:{}, byP8:{}, byApp:{}, files:{}, small:{}, done:{} }
@@ -121,21 +623,14 @@ const _BATCH_DONE_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.campId)
 function _batchLoadDone() { try { return JSON.parse(sessionStorage.getItem(_BATCH_DONE_KEY) || "{}") || {}; } catch (_) { return {}; } }
 function _batchSaveDone(d) { try { sessionStorage.setItem(_BATCH_DONE_KEY, JSON.stringify(d)); } catch (_) { /* noop */ } }
 
-/** 부팅 판정 — 어떤 예외·미달 조건도 null(단건)로 수렴한다. */
+/**
+ * 다계정 참여도 application 하나씩 별도 제출한다.
+ *
+ * 과거 배포본이 남긴 `batch=1` URL/세션을 열어도 이 함수가 항상 null을 돌려주므로,
+ * A 명의 화면에서 B·C 명의의 주문 카드가 함께 생성될 수 없다.
+ */
 function _batchBoot() {
-  try {
-    if (!_EMBED_CTX || _PREVIEW_MODE) return null;                  // ★ 관리자 미리보기 절대 금지
-    if (window._ncMode) return null;                                // ★ nc 2카드 고정과 겹치면 배송지 오염
-    if (new URLSearchParams(location.search).get("batch") !== "1") return null;
-    const raw = sessionStorage.getItem("camp_batch_" + (_EMBED_CTX.campId || ""));
-    if (!raw) return null;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr) || arr.length < 2) return null;
-    if (arr.length > MAX_ORDER_CARDS) return null;                  // ★ 조용한 누락 금지 — 전량 단건으로
-    if (!arr.every(h => h && h.app && h.holdToken && String(h.phone8 || "").length === 8)) return null;
-    if (_EMBED_CTX.app && !arr.some(h => String(h.app) === String(_EMBED_CTX.app))) return null; // stale 스냅샷
-    return { holds: arr, byCid: {}, byP8: {}, byApp: {}, files: {}, small: {}, done: _batchLoadDone() };
-  } catch (_) { return null; }
+  return null;
 }
 
 /** 배치 카드 장식: 명의 헤더 · 만료 카운트다운 · 프리필 · sameChk 해제 · 삭제버튼 제거 */
@@ -161,7 +656,11 @@ function _batchDecorateCard(cid, h) {
   if (row) {
     row.childNodes.forEach(n => { if (n.nodeType === 3 && n.textContent.trim()) n.textContent = " 1번 카드의 계좌정보와 동일하게 사용"; });
   }
-  // ④ 명의 프리필(빈 칸만 — 사용자가 이미 쓴 값은 절대 덮지 않는다)
+  /* ④ 명의 프리필(빈 칸만 — 사용자가 이미 쓴 값은 절대 덮지 않는다)
+     ★★ 배치는 카드마다 **그 명의 이름**이 주문자로 간다(서버는 값이 오면 그대로 쓴다) —
+        그래서 "로그인한 본인 이름으로 자동 기록됩니다" 안내를 여기서는 감춘다.
+        문구를 그대로 두면 화면이 거짓을 말한다(카드 머리의 명의 표기가 사실이다). */
+  document.getElementById("ofOrderCardsWrap")?.classList.add("of-orderer-batch");
   const set = (sfx, v) => { const el = document.getElementById(cid + sfx); if (el && !el.value && v) el.value = v; };
   set("_recipient", h.name); set("_orderer", h.name);
   _batchTickCard(cid, h);
@@ -525,27 +1024,21 @@ let _authState = null;
 
 /** 세션 복원 */
 function _loadAuthSession() {
-  try {
-    const raw = localStorage.getItem(REVIEWER_AUTH_KEY);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj || Date.now() > obj.expAt) {
-      localStorage.removeItem(REVIEWER_AUTH_KEY);
-      return null;
-    }
-    return obj;
-  } catch(_) { return null; }
+  return _getReviewerSession();
 }
 
 /** 세션 저장 (phone8 포함 → 동명이인 구분) */
-function _saveAuthSession(name, verified, registeredMember, phone8) {
+function _saveAuthSession(name, verified, registeredMember, phone8, reviewerToken) {
   const obj = {
     name,
     verified,
     registeredMember,
     phone8: (phone8 || "").replace(/[^0-9]/g, ""), // 뒤 8자리 숫자만
+    reviewerToken: reviewerToken || "",
     expAt: Date.now() + REVIEWER_AUTH_MS
   };
+  // 명시적인 일반 로그인은 이 탭에 남은 관리자 홈 세션을 끝낸다.
+  _prepareReviewerLocalSession();
   localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(obj));
   _authState = obj;
 }
@@ -682,7 +1175,7 @@ async function _doAdminSearch() {
 
 /** 로그아웃 */
 function _logout() {
-  localStorage.removeItem(REVIEWER_AUTH_KEY);
+  _clearReviewerSession();
   _authState = null;
 
   // ── 결과 영역 숨기기 ──
@@ -1001,7 +1494,7 @@ async function _doLoginDirect() {
     }
 
     // 성공
-    _saveAuthSession(data.name || name, true, true, data.phone8 || phone8);
+    _saveAuthSession(data.name || name, true, true, data.phone8 || phone8, data.reviewerToken);
     _applyLoginUI(data.name || name);
     const ni = document.getElementById("nameInput");
     if (ni) ni.value = data.name || name;
@@ -1061,7 +1554,7 @@ async function _doLoginWithLookup() {
     }
 
     // 성공
-    _saveAuthSession(name, true, true, data.phone8 || phone8);
+    _saveAuthSession(name, true, true, data.phone8 || phone8, data.reviewerToken);
     _applyLoginUI(name);
     const ni = document.getElementById("nameInput");
     if (ni) ni.value = name;
@@ -1105,7 +1598,7 @@ async function _doLogin() {
     if (!data.ok) {
       _showLoginErr(data.error || "인증에 실패했습니다. 다시 시도해주세요."); return;
     }
-    _saveAuthSession(name, true, true, data.phone8 || phone8);
+    _saveAuthSession(name, true, true, data.phone8 || phone8, data.reviewerToken);
     _applyLoginUI(name);
 
     // ★ Phase 5: 구매양식 대기 중이면 폼으로 복귀
@@ -1251,7 +1744,9 @@ async function _submitRegister(name, phone, p1, p2) {
     if (data && data.ok) {
       const regPhone8 = (p1 + p2).slice(-8);
       showToast("등록 완료! 자동 로그인합니다.", "success");
-      _saveAuthSession(name, true, true, regPhone8);
+      const login = await gasGet({ action: "verifyReviewer", name, phone8: regPhone8 });
+      if (!login?.ok || !login.reviewerToken) throw new Error(login?.error || "등록 후 로그인 세션을 발급하지 못했습니다.");
+      _saveAuthSession(login.name || name, true, true, login.phone8 || regPhone8, login.reviewerToken);
       _applyLoginUI(name);
 
       // ★ v9.14: authScreen 등록 시 소득정보 입력 시 백그라운드 저장
@@ -1268,6 +1763,8 @@ async function _submitRegister(name, phone, p1, p2) {
       if (ni) ni.value = name;
 
       await doSearch();
+    } else if (data && data.reason === "phone_registered_as_sub_account") {
+      _showRegErr("다른 리뷰어의 타계정으로 이미 등록된 번호입니다.");
     } else if (data && data.isDuplicate) {
       // 중복 전화번호 → 로그인 탭으로 자동 전환 + 전화번호 pre-fill
       _showRegErr("이미 등록된 전화번호입니다. 로그인 탭에서 로그인해주세요.");
@@ -1336,7 +1833,7 @@ document.addEventListener("DOMContentLoaded", () => {
     _switchAuthTab("register");
   }
   // ★ GAS URL 자동 부트스트랩
-  // Node API endpoint is selected by deployment configuration.
+  // BOOTSTRAP_GAS_URL이 없으면 localStorage → GAS PropertiesService 순서로 조회
   bootstrapGasUrl();
 
   // ★ Phase 1-2: 공지 배너 로드 (비동기, 실패 무시)
@@ -1361,10 +1858,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 /**
  * GAS URL 자동 로드 순서:
- * The endpoint is provided by the deployment configuration.
+ * 1. BOOTSTRAP_GAS_URL 하드코딩값 → 있으면 즉시 사용
+ * 2. localStorage 저장값 → 있으면 그 URL로 GAS getAppUrl 호출해서 최신값 확인
+ * 3. 둘 다 없으면 gasNotSet 배너 표시
  */
 async function bootstrapGasUrl() {
-  APP_CONFIG.GAS_WEB_APP_URL = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) || APP_CONFIG.GAS_WEB_APP_URL;
   // ★ [Node.js 이관] GAS URL 부트스트랩 → API_BASE_URL 헬스체크로 대체
   if (APP_CONFIG.GAS_WEB_APP_URL) {
     hide("gasNotSet");
@@ -1682,7 +2180,8 @@ function extractProductOption(row) {
 function renderResults(results) {
   const section = document.getElementById("resultsSection");
   const list    = document.getElementById("resultsList");
-  const pending = results.filter(item => !item.isSubmitted);
+  // 리뷰를 먼저 끝내고 영수증을 나중에 내는 정상 흐름도 검색 결과에서 다시 열려야 한다.
+  const pending = results.filter(item => !item.isSubmitted || _isReceiptPendingItem(item));
 
   document.getElementById("resultsCount").textContent = `${pending.length}건`;
   list.innerHTML = "";
@@ -1717,7 +2216,10 @@ function renderResults(results) {
     const name    = (item.displayName || "이름 없음").trim();
     const sid     = (item.sheetId     || "").trim();
     const tab     = (item.tabName     || "").trim();
-    const key     = name + "\x00" + sid + "\x00" + tab; // null구분자로 key 구성
+    // 영수증만 남은 완료 행은 단건으로 연다. 미제출 다건 묶음과 합치면 슬롯×행 화면이 없어
+    // 어느 참여 건의 영수증인지 고를 수 없다.
+    const receiptSuffix = _isReceiptPendingItem(item) ? "\x00receipt\x00" + String(item.rowIndex) : "";
+    const key     = name + "\x00" + sid + "\x00" + tab + receiptSuffix; // null구분자로 key 구성
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -1749,12 +2251,13 @@ function renderResults(results) {
         : `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
            <div class="result-product-label result-product-empty">참여 작업 정보 없음</div>`;
       const card = document.createElement("div");
+      const receiptPending = _isReceiptPendingItem(item);
       card.className = "result-card";
       card.innerHTML = `
         <div class="result-avatar"></div>
         <div class="result-body">${productHtml}</div>
         <div class="result-right">
-          <span class="status-badge status-pending">미제출</span>
+          <span class="status-badge status-pending">${receiptPending ? '현금영수증 미제출' : '미제출'}</span>
           <i class="fas fa-chevron-right result-chevron"></i>
         </div>`;
       card.addEventListener("click", () => openSubmitMulti(items));
@@ -1824,6 +2327,9 @@ function openSubmitMulti(items) {
   //   (다중 행 선택 시에는 기존 행별 슬롯 UI를 유지 — MVP는 슬롯×행 매트릭스 미지원)
   const cs0 = items[0] && Array.isArray(items[0].captureSlots) ? items[0].captureSlots : null;
   S.captureSlots = (items.length === 1 && cs0 && cs0.length > 1) ? cs0 : null;
+  const receiptSlot = S.captureSlots && S.captureSlots.find(_csIsReceiptSlot);
+  S.receiptStepMode = !!receiptSlot;
+  _setReceiptStepMode(S.receiptStepMode);
 
   // 헤더 타이틀 — [날짜] [표시명/탭명] 옵션:옵션명
   const firstForTitle = items[0];
@@ -1832,7 +2338,7 @@ function openSubmitMulti(items) {
   const subtitleName = firstForTitle.tcDisplayName || firstForTitle.tabName || firstForTitle.campaignName || "";
   if (subtitleName) subtitleParts.push(subtitleName);
   if (firstForTitle.productName) subtitleParts.push(`옵션:${firstForTitle.productName}`);
-  document.getElementById("submitTitle").textContent    = "리뷰 이미지 제출";
+  document.getElementById("submitTitle").textContent    = "리뷰 캡처 제출";
   document.getElementById("submitSubtitle").textContent = subtitleParts.join(" ") || "";
 
   // 상품 URL (첫 번째 항목 기준)
@@ -1871,12 +2377,17 @@ function openSubmitMulti(items) {
   const anyDone = items.some(it => it.isSubmitted);
   const doneBox  = document.getElementById("alreadyDoneBox");
   const btnStep2 = document.getElementById("btnToStep2");
+  const submitted0 = new Set(Array.isArray(firstItem.submittedSlots) ? firstItem.submittedSlots : []);
+  const receiptPending = !!(receiptSlot && !submitted0.has(receiptSlot.key));
   doneBox.classList.toggle("hidden", !anyDone);
   doneBox.style.display = anyDone ? "" : "none";
-  btnStep2.disabled = items.every(it => it.isSubmitted);
+  // 리뷰가 끝난 뒤에도 미제출 현금영수증만 추가할 수 있어야 한다.
+  btnStep2.disabled = items.every(it => it.isSubmitted) && !receiptPending;
 
   // STEP1 버튼 텍스트: 다건이면 "N건 모두 맞습니다"
-  btnStep2.innerHTML = items.length > 1
+  btnStep2.innerHTML = receiptPending && firstItem.isSubmitted
+    ? `<i class="fas fa-receipt"></i> 현금영수증 제출로 이동`
+    : items.length > 1
     ? `<i class="fas fa-check"></i> ${items.length}건 모두 맞습니다`
     : `<i class="fas fa-check"></i> 맞습니다`;
 
@@ -1905,8 +2416,11 @@ function _renderMySubmitStatus(items) {
     const opt = options.length ? ` (${escHtml(options.map(o => o.value).filter(Boolean).join("/"))})` : "";
     const done = !!it.isSubmitted;
     const when = done ? _dupWhen(it.reviewFileAt) : "";
+    /* ★ 34×44 로 그리는 자리라 원본(중앙값 276KB)을 받을 이유가 없다 — CDN 썸네일(js/drive-thumb.js).
+       모듈이 없으면 종전 원본으로 접는다(URL 규칙 사본 0). */
+    const _tu = it.reviewFileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(it.reviewFileId)}` : '';
     const thumb = (done && it.reviewFileId)
-      ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(it.reviewFileId)}" alt=""
+      ? `<img${window.DriveThumb ? DriveThumb.attrs(it.reviewFileId, 400, _tu) : ` src="${_tu}"`} alt=""
            style="width:34px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;flex:none">`
       : `<div style="width:34px;height:44px;border-radius:5px;background:#F1F3F7;flex:none"></div>`;
     return `<div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-bottom:1px solid #EEF1F5">
@@ -2028,8 +2542,9 @@ function _buildInfoFallback(item) {
 }
 
 /** STEP2: 다건 이미지 슬롯 동적 생성 */
-/* ═══ 블로그체험단(099 · M4-2) — 결과물은 포스팅URL 하나 ═══
-   사용자 확정: "포스팅URL 제출 = 리뷰제출 완료" · 사진은 선택.
+/* ═══ 블로그체험단(099 · M4-2 → 127 개정) — 결과물 = 리뷰 캡처 + 포스팅URL 둘 다 ═══
+   사용자 확정(2026-08-19): 캡처와 포스팅URL 을 **함께** 제출해야 완료다 — M4-2 의
+   "포스팅URL만 = 완료(사진 선택)" 확정을 뒤집었다(서버 /submit/review 가 최종 방어).
    ★ 판정은 서버가 실어 준 `item.workKind` 하나만 본다 — 탭명·상품명으로 추측하지 않는다
      (추측하면 리뷰체험단이 블로그로 오인돼 사진 없이 제출이 완료로 찍힌다).
    ★ 필드가 없으면(구버전 백엔드) false = 종전 동작 그대로. */
@@ -2065,7 +2580,7 @@ function _applyBlogMemoUi(el, item) {
   const h = document.createElement('div');
   h.id = hintId;
   h.style.cssText = 'font-size:.74rem;color:#1D4ED8;margin:6px 2px 0;line-height:1.5';
-  h.textContent = '📝 블로그체험단이에요 — 포스팅URL만 넣으면 제출이 완료됩니다(사진은 선택).';
+  h.textContent = '📝 블로그체험단이에요 — 리뷰 캡처(포스팅 화면)와 포스팅URL을 함께 제출해주세요.';
   el.parentNode.insertBefore(h, el.nextSibling);
 }
 
@@ -2078,6 +2593,8 @@ function _renderMultiImageSlots(items) {
   if (slotsWrap) slotsWrap.remove();
   let csWrap = document.getElementById("csSlotsWrap");
   if (csWrap) csWrap.remove();
+  const receiptHost = document.getElementById("csReceiptHost");
+  if (receiptHost) receiptHost.innerHTML = "";
   // 기존 단건 dropZone / memoWrap 가시성 제어
   const singleDrop  = document.getElementById("dropZone");
   const singleMemo  = document.querySelector(".memo-wrap");
@@ -2160,8 +2677,11 @@ function _renderCaptureSlots(item, slots, paneCard) {
   wrap.id = "csSlotsWrap";
   wrap.style.marginBottom = "14px";
 
-  slots.forEach((slot, i) => {
+  let reviewIndex = 0;
+  let receiptIndex = 0;
+  slots.forEach((slot) => {
     const isDone = submitted.has(slot.key);
+    const isReceipt = _csIsReceiptSlot(slot);
     // ★ D안(사용자 확정 2026-08-05): required:false 슬롯(현금영수증)은 **선택** —
     //   발행확정(배송완료·구매확정 후 0~3일) 전에는 캡처가 존재할 수 없어 완료 판정에서 빠진다.
     //   서버(requiredSlotKeys)가 같은 플래그로 판정하므로 여기는 표시만 맞춘다.
@@ -2177,7 +2697,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
     slotEl.id = `csSlot_${slot.key}`;
     slotEl.innerHTML = `
       <div class="mr-slot-header">
-        <div class="mr-slot-num">${i + 1}</div>
+        <div class="mr-slot-num">${isReceipt ? ++receiptIndex : ++reviewIndex}</div>
         <div class="mr-slot-title">${escHtml(slot.label || slot.key)}${optional ? ' <span style="font-size:.72rem;color:#B45309;font-weight:700">(선택 · 발행 확정 후 제출)</span>' : ''}${isDone ? ' <span style="font-size:.72rem;color:#16a34a;font-weight:600">(이미 제출 — 다시 올리면 교체)</span>' : ''}</div>
         ${statusHtml}
       </div>
@@ -2195,12 +2715,15 @@ function _renderCaptureSlots(item, slots, paneCard) {
       </div>
       ${optionalHint}
       <div id="csGuide_${slot.key}"></div>`;
-    wrap.appendChild(slotEl);
+    const receiptHost = document.getElementById("csReceiptHost");
+    if (isReceipt && receiptHost) receiptHost.appendChild(slotEl);
+    else wrap.appendChild(slotEl);
   });
 
   // ★ D안 ③: 현금영수증 슬롯이 있으면 발행방법 이미지를 "다시 보기"로 재안내(결제 후 재확인 시점).
   //   fail-soft — 조회 실패·미등록이면 아무것도 안 그린다(제출 흐름 무영향).
-  if (slots.some(s => s.key === 'receipt')) _csLoadCrGuides(item);
+  const receiptSlot = slots.find(_csIsReceiptSlot);
+  if (receiptSlot) _csLoadCrGuides(item, receiptSlot.key);
 
   // 공통 비고 입력 (행 1개이므로 단일 메모)
   const memoEl = document.createElement("textarea");
@@ -2214,18 +2737,32 @@ function _renderCaptureSlots(item, slots, paneCard) {
 
   const stepNav = paneCard.querySelector(".step-nav");
   paneCard.insertBefore(wrap, stepNav);
+  _updateReceiptStepActions();
 }
 
 /* ★ D안 ③ — 현금영수증 슬롯 아래 "발행방법 다시 보기" (접이식).
  *   이미지·라벨은 서버 provider-info의 cashReceiptGuideList(채널 표 단일 출처) 그대로 —
  *   프론트에 채널 사본을 두지 않는다. 등록된 이미지가 없거나 조회 실패 = 아무것도 안 그림. */
-async function _csLoadCrGuides(item) {
+function _csIsReceiptSlot(slot) {
+  return !!(slot && (slot.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(slot.label || ''))));
+}
+
+function _isReceiptPendingItem(item) {
+  if (!item || !item.isSubmitted) return false;
+  if (item.cashReceiptPending === true) return true;
+  const receiptSlot = Array.isArray(item.captureSlots) ? item.captureSlots.find(_csIsReceiptSlot) : null;
+  if (!receiptSlot) return false;
+  const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+  return !submitted.has(receiptSlot.key);
+}
+
+async function _csLoadCrGuides(item, receiptSlotKey = 'receipt') {
   try {
     const data = await gasGet({ action: 'getProviderInfo', sheetId: item.sheetId, tabName: item.tabName });
     // https 절대 URL만 <img src>로(저장 라우트도 같은 제약) + 따옴표 포함 값은 버림(속성 breakout 방지)
     const list = ((data && data.ok && Array.isArray(data.cashReceiptGuideList)) ? data.cashReceiptGuideList : [])
       .filter(g => g && /^https:\/\/[^"'<>\s]+$/.test(String(g.imageUrl || '')));
-    const box = document.getElementById('csGuide_receipt');
+    const box = document.getElementById('csGuide_' + receiptSlotKey);
     if (!box || !list.length) return;
     const bizNo = String((data && data.companyBusinessNo) || '').trim();
     box.innerHTML = `
@@ -2256,6 +2793,7 @@ async function _csAddFiles(slotKey, newFiles) {
     }
   }
   _csRenderPreview(slotKey);
+  _updateReceiptStepActions();
   // 1차 필터 — 미리보기는 먼저 그리고(사용자가 기다리지 않게) 판별은 뒤따라 붙인다
   _preCheckFiles('slot:' + slotKey, 'csSlot_' + slotKey, S.filesBySlot[slotKey],
     { ..._preCtx(0), slotKey });
@@ -2320,6 +2858,7 @@ function _csOnDrop(e, slotKey) {
 function _csRemoveFile(slotKey, fileIdx) {
   if (S.filesBySlot[slotKey]) S.filesBySlot[slotKey].splice(fileIdx, 1);
   _csRenderPreview(slotKey);
+  _updateReceiptStepActions();
   _preCheckFiles('slot:' + slotKey, 'csSlot_' + slotKey, S.filesBySlot[slotKey],
     { ..._preCtx(0), slotKey });
 }
@@ -2333,7 +2872,8 @@ function _csRenderPreview(slotKey) {
     preview.innerHTML = "";
     preview.classList.add("hidden");
     if (hint) hint.style.display = "";
-    if (status) { status.textContent = "대기"; status.className = "mr-slot-status wait"; }
+    const slot = (S.captureSlots || []).find(s => s.key === slotKey);
+    if (status) { status.textContent = slot?.required === false ? "선택" : "대기"; status.className = "mr-slot-status wait"; }
     return;
   }
   if (hint) hint.style.display = "none";
@@ -2357,43 +2897,60 @@ function _csRenderPreview(slotKey) {
  *   첨부 직후에는 **아직 아무것도 저장되지 않아** 파일만 바꾸면 끝난다.
  *
  * ★★ 완화 금지
- *   ① 잠금은 "리뷰 화면이 아님"이 확실할 때 하나뿐. 채널 불일치는 경고만.
+ *   ① AI 잠금은 "리뷰 화면이 아님"이 확실할 때뿐이다. 서버가 반영 완료까지 확인한
+ *      동일 캡처는 별도 확정 규칙으로 잠그며 우회할 수 없다.
  *   ② 판정 실패·네트워크 오류·AI 미설정은 **아무것도 표시하지 않고 통과**.
  *   ③ 같은 자리에서 2번 잠기면 "제가 올린 게 맞습니다" 우회가 열린다 —
  *      오판으로 리뷰어가 제출 자체를 못 하는 상태(참여 소각)를 만들지 않는다.
  * ════════════════════════════════════════════════════════════════ */
 const _PRE_BLOCK_LIMIT = 2;          // 이 횟수만큼 잠기면 우회 체크 노출
-const _preState = {};                // scope → { blocked, count, overridden, message, verdict }
+const _preState = {};                // scope → { blocked, duplicateBlocked, checking, count, overridden, message, verdict }
 
 /** 판별에 필요한 행 컨텍스트(시트·탭). 세 첨부 경로가 같은 출처를 본다. */
 function _preCtx(idx) {
   const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
   const it = rows[idx || 0] || rows[0] || {};
+  /* ★★★ 로그인 세션은 **이 자리에서 다시 읽는다**(`_loadAuthSession` 단일 출처).
+     — 종전엔 `authSession` 을 맨몸으로 참조했는데 그 이름은 구매양식 모드 함수의
+       **지역 변수**(`let authSession`)라 여기서는 존재하지 않는다 → 호출할 때마다
+       ReferenceError. 첨부 경로 3곳(`addFiles`·`_mrAddFiles`·`_csAddFiles`)이
+       `_preCheckFiles(..., { ..._preCtx(idx) })` 로 부르므로 **인자 평가 단계에서** 터졌고,
+       그 셋은 전부 async 인데 호출부가 await·catch 를 하지 않아 rejected promise 가
+       조용히 사라졌다 ⇒ 파일 첨부·미리보기는 그 앞에서 이미 끝나 **화면은 정상으로 보이는데
+       1차 필터만 배포 이래 한 번도 실행되지 않았다**(2026-08-06 ~ 2026-09-22, 서버 요청 0건).
+     ★ 다른 함수의 지역 변수에 기대지 않는다 — 리뷰검수 화면의 프리변수 무한로딩과 같은 계열.
+     ★ 세션 조회가 실패해도 판정은 계속한다(fail-open) — 이름·연락처는 중복 대조용 보조값이다. */
+  let au = {};
+  try { au = _loadAuthSession() || {}; } catch (_) { au = {}; }
   // ★ 줄 번호·이름·연락처를 함께 보낸다 — 서버가 "이 리뷰어가 **다른 건에** 이미 낸 사진인지"를
   //   첨부 즉시 대조하기 위한 최소 정보다(같은 건 재첨부는 중복으로 치지 않으므로 줄 번호가 필요).
   return {
     sheetId: it.sheetId || '', tabName: it.tabName || '',
     rowIndex: (it.rowIndex != null ? it.rowIndex : null),
-    reviewerName: it.name || (authSession && authSession.name) || '',
-    phone8: (authSession && authSession.phone8) || '',
+    reviewerName: it.name || au.name || '',
+    phone8: au.phone8 || '',
   };
 }
 
 function _preGet(scope) {
-  if (!_preState[scope]) _preState[scope] = { blocked: false, count: 0, overridden: false, message: '', verdict: '' };
+  if (!_preState[scope]) _preState[scope] = { blocked: false, duplicateBlocked: false, checking: false, count: 0, overridden: false, message: '', verdict: '' };
   return _preState[scope];
 }
 function _preReset(scope) { delete _preState[scope]; }
-/** 잠긴 슬롯이 하나라도 있으면 제출을 막는다(우회 체크한 것은 제외). */
+/** 중복 확인 중이거나 잠긴 슬롯이 하나라도 있으면 제출을 막는다. 확정 중복은 우회할 수 없다. */
 function _preHasBlock() {
-  return Object.values(_preState).some(s => s.blocked && !s.overridden);
+  return Object.values(_preState).some(s => s.checking || s.duplicateBlocked || (s.blocked && !s.overridden));
 }
 function _preBlockedMessage() {
-  const s = Object.values(_preState).find(x => x.blocked && !x.overridden);
+  const states = Object.values(_preState);
+  if (states.some(s => s.checking)) return '사진 중복 여부를 확인하고 있어요. 잠시만 기다려주세요.';
+  if (states.some(s => s.duplicateBlocked)) return '이미 제출됬던 사진이에요';
+  const s = states.find(x => x.blocked && !x.overridden);
   return s ? s.message : '';
 }
 function _preOverride(scope) {
   const s = _preGet(scope);
+  if (s.duplicateBlocked) return;
   s.overridden = true;
   _preRender(scope);
 }
@@ -2410,15 +2967,40 @@ function _dupWhen(iso) {
   try {
     const d = new Date(iso);
     if (isNaN(d)) return '';
-    const h = d.getHours();
-    return `${d.getMonth() + 1}월 ${d.getDate()}일 ${h < 12 ? '오전' : '오후'} ${((h % 12) || 12)}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const kst = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+    const day = ['일','월','화','수','목','금','토'][kst.getDay()];
+    return `${kst.getMonth() + 1}/${kst.getDate()}(${day})`;
   } catch (_) { return ''; }
 }
-/** 같은 작업이면 그 줄이 화면의 몇 번째 건인지 — 없으면 0(=순번 미표기). */
-function _dupOrdinal(rowIndex) {
-  const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
-  const i = rows.findIndex(r => r && r.rowIndex === rowIndex);
-  return i >= 0 ? i + 1 : 0;
+function _duplicateHistoryLine(d) {
+  const when = _dupWhen(d && d.submittedAt);
+  const recipient = String((d && d.recipientName) || '이전 수취인').trim();
+  return `${when ? when + ' ' : ''}${recipient} 참여건에 제출된 리뷰캡처 입니다.`;
+}
+function _showDuplicateBlockModal(d, anchor) {
+  const old = document.getElementById('_reviewDuplicateBlockModal');
+  if (old) old.remove();
+  const overlay = document.createElement('div');
+  overlay.id = '_reviewDuplicateBlockModal';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', '_reviewDuplicateBlockTitle');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(17,25,39,.52);display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(2px)';
+  overlay.innerHTML = `<div style="width:min(390px,100%);background:#fff;border-radius:18px;padding:22px 20px;box-shadow:0 24px 70px rgba(0,0,0,.28)">
+    <div style="width:44px;height:44px;border-radius:14px;background:#FFF1F0;color:#C7372F;display:grid;place-items:center;font-size:23px;font-weight:900;margin-bottom:14px">!</div>
+    <h3 id="_reviewDuplicateBlockTitle" style="font-size:18px;letter-spacing:-.025em;margin:0 0 8px;color:#17202E">이미 제출됬던 사진이에요</h3>
+    <p style="font-size:13px;color:#596477;margin:0 0 16px">이 사진은 다른 구매양식에 제출되어 반영됐어요.</p>
+    <div style="padding:11px;border-radius:10px;background:#F7F8FA;font-size:11px;color:#657083;margin-bottom:15px">${escHtml(_duplicateHistoryLine(d))}</div>
+    <button type="button" style="width:100%;border:0;border-radius:11px;background:#246BFD;color:#fff;font-weight:800;padding:12px;cursor:pointer">다른 사진 선택</button>
+  </div>`;
+  overlay.querySelector('button').addEventListener('click', () => {
+    overlay.remove();
+    const fileInput = anchor && (anchor.matches?.('input[type="file"]')
+      ? anchor : anchor.querySelector?.('input[type="file"]'));
+    if (fileInput && typeof fileInput.click === 'function') fileInput.click();
+    else if (anchor && typeof anchor.click === 'function') anchor.click();
+  });
+  document.body.appendChild(overlay);
 }
 function _preRenderDup(scope, anchor) {
   const s = _preGet(scope);
@@ -2432,30 +3014,17 @@ function _preRenderDup(scope, anchor) {
     el.addEventListener('click', (e) => e.stopPropagation());   // 드롭존 파일창이 같이 열리지 않게
     anchor.appendChild(el);
   }
-  const ord = d.sameTab ? _dupOrdinal(d.rowIndex) : 0;
-  const where = d.sameTab
-    ? (ord ? `같은 작업 <b>${ord}번 건</b>으로` : '같은 작업의 <b>다른 건</b>으로')
-    : '<b>다른 작업</b>에';
-  const when = _dupWhen(d.uploadedAt);
+  const _du = d.fileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}` : '';
   const thumb = d.fileId
-    ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}" alt=""
-         style="width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #F3C8C4;flex:none">` : '';
+    ? `<img${window.DriveThumb ? DriveThumb.attrs(d.fileId, 400, _du) : ` src="${_du}"`} alt="앞서 제출한 리뷰 캡처"
+         style="width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #E1E6EE;flex:none">` : '';
   el.style.cssText = 'margin-top:8px;padding:10px 12px;border-radius:9px;background:#FEF3F2;'
     + 'border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5';
   el.innerHTML =
-    '이미 제출한 사진이에요'
-    + `<div style="font-weight:500;margin-top:4px;color:#7F1D1D">이 사진은 ${when ? `<b>${escHtml(when)}</b>에 ` : ''}${where} 제출하셨어요.`
-    + ' 이번 건은 <b>다른 리뷰 화면</b>을 캡처해 올려주세요.</div>'
-    + (thumb ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">${thumb}`
-        + '<div style="font-weight:500;font-size:.73rem;color:#7F1D1D">앞서 낸 사진<br>(같은 사진이에요)</div></div>' : '')
-    /* ★ 다른 작업 건은 **정상일 수 있다** — 두 작업에 함께 참여해 리뷰 목록에 두 리뷰가
-       한 화면에 보이면 캡처 한 장으로 두 건을 내는 것이 맞다(실사고 2026-08-06).
-       그 경우까지 "다른 화면을 캡처하세요"라고만 하면 맞게 한 리뷰어가 헤맨다. */
-    + (d.sameTab ? ''
-        : '<div style="font-weight:500;font-size:.73rem;margin-top:6px;color:#7F1D1D">'
-          + '두 작업에 함께 참여해 <b>한 화면에 두 리뷰가 같이 보이는 캡처</b>라면 그대로 제출하셔도 괜찮아요.</div>')
-    + '<div style="font-weight:500;font-size:.72rem;margin-top:6px;color:#8A93A3">'
-    + '그래도 이 사진이 맞다면 그대로 제출하셔도 됩니다 — 담당자가 확인합니다.</div>';
+    '이미 제출됬던 사진이에요'
+    + '<div style="font-weight:500;margin-top:4px;color:#7F1D1D">이 사진은 다른 구매양식에 제출되어 반영됐어요.</div>'
+    + `<div style="font-weight:500;font-size:.72rem;margin-top:7px;padding:8px 9px;border-radius:7px;background:#F7F8FA;color:#657083">${escHtml(_duplicateHistoryLine(d))}</div>`
+    + (thumb ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">${thumb}<span style="font-size:.72rem;font-weight:500;color:#7F1D1D">앞서 제출한 사진</span></div>` : '');
 }
 
 function _preRender(scope, anchorId) {
@@ -2512,7 +3081,7 @@ function _preRender(scope, anchorId) {
 async function _preCheckOne(fileObj, ctx) {
   try {
     const r = await fetch(API_BASE_URL + '/api/image/review-precheck', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
       body: JSON.stringify({
         base64: fileObj.b64, mimeType: fileObj.type || 'image/jpeg',
         sheetId: ctx.sheetId, tabName: ctx.tabName, slotKey: ctx.slotKey || 'review',
@@ -2529,25 +3098,58 @@ async function _preCheckOne(fileObj, ctx) {
  * 첨부된 파일들을 판별해 상태를 갱신한다. 세 첨부 경로(단일·다건·슬롯)가 모두 이걸 부른다.
  * ★ 미리보기 모드(관리자)에서는 돌리지 않는다 — 제출 자체가 막혀 있어 의미가 없다.
  */
+/**
+ * ★★★ 1차 필터는 **어떤 예외에도 조용히 사라지지 않는다**.
+ *   호출부 6곳이 `await` 도 `.catch()` 도 하지 않으므로(첨부 직후 비차단 실행),
+ *   안에서 던진 예외는 아무도 받지 않는 rejected promise 가 되어 **화면은 정상인데
+ *   판정만 영영 안 도는** 상태를 만든다(2026-08-06 `_preCtx` 프리변수 사고가 정확히 이것).
+ * ★★ 특히 `checking:true` 가 남으면 `_preHasBlock()` 이 **제출을 영구 차단**한다 —
+ *   그래서 실패 시 반드시 그 플래그를 내리고 화면을 종결한다(fail-open: 판정만 생략).
+ */
 async function _preCheckFiles(scope, anchorId, fileObjs, ctx) {
+  try {
+    return await _preCheckFilesInner(scope, anchorId, fileObjs, ctx);
+  } catch (e) {
+    console.warn('[precheck] 판정 실패(통과 처리):', (e && e.message) || e);
+    try {
+      const s = _preGet(scope);
+      s.checking = false;
+      _preRender(scope, anchorId);
+    } catch (_) { /* 화면 정리까지 실패해도 첨부·제출은 막지 않는다 */ }
+  }
+}
+
+async function _preCheckFilesInner(scope, anchorId, fileObjs, ctx) {
   const s = _preGet(scope);
   s._anchorId = anchorId;
   if (_PREVIEW_MODE || !Array.isArray(fileObjs) || fileObjs.length === 0) {
     _preReset(scope); _preRender(scope, anchorId); return;
   }
+  // 비동기 판정 중 제출 클릭과 오래된 응답 덮어쓰기를 막는다.
+  const requestId = (s.requestId || 0) + 1;
+  s.requestId = requestId;
+  s.checking = true;
   // 여러 장이면 가장 나쁜 판정을 그 슬롯의 상태로 삼는다(한 장이라도 이상하면 확인이 필요하다)
   const results = await Promise.all(fileObjs.slice(0, 5).map(fo => _preCheckOne(fo, ctx)));
+  if (!_preState[scope] || _preState[scope].requestId !== requestId) return;
   const rank = { block: 3, warn: 2, pass: 1, skip: 0 };
   let worst = null;
   for (const r of results) {
     if (!r || !r.verdict) continue;
     if (!worst || (rank[r.verdict] || 0) > (rank[worst.verdict] || 0)) worst = r;
   }
-  // ★ 중복 경고는 형식 판정과 **따로** 모은다 — AI 가 통과시킨 사진도 "이미 낸 사진"일 수 있다.
-  //   사용자 확정 ①: 알려주기만 하고 막지 않는다(잘못 알아본 경우에도 제출이 가능해야 한다).
+  // ★ 서버에서 실제 제출 완료까지 확인한 중복은 AI 형식 판정과 무관하게 즉시 차단한다.
   cur_dup: {
     const d = (results.find(r => r && r.duplicate) || {}).duplicate || null;
-    _preGet(scope).dup = d;
+    const cur = _preGet(scope);
+    cur.dup = d;
+    cur.duplicateBlocked = !!d;
+    cur.checking = false;
+    const modalKey = d ? `${d.fileId || ''}:${d.submittedAt || ''}` : '';
+    if (d && cur.duplicateModalKey !== modalKey) {
+      cur.duplicateModalKey = modalKey;
+      _showDuplicateBlockModal(d, document.getElementById(anchorId));
+    }
   }
   const cur = _preGet(scope);
   if (!worst) { cur.verdict = ''; cur.blocked = false; cur.message = ''; _preRender(scope, anchorId); return; }
@@ -2637,16 +3239,105 @@ function openSubmit(item) {
 
 /* _openSubmitLegacy 제거됨 — openSubmit은 openSubmitMulti([item]) 래퍼로 대체 */
 
+/* ── 현금영수증 대상 작업만 리뷰/영수증 제출을 3단계로 분리 ── */
+function _setReceiptStepMode(on) {
+  const enabled = !!on;
+  const sl3 = document.getElementById("sl3");
+  const step3 = document.getElementById("step3");
+  const btnSubmit = document.getElementById("btnSubmit");
+  const btnToReceipt = document.getElementById("btnToReceipt");
+  if (sl3) sl3.classList.toggle("hidden", !enabled);
+  if (!enabled && step3) step3.classList.remove("active");
+  if (btnSubmit) btnSubmit.classList.toggle("hidden", enabled);
+  if (btnToReceipt) btnToReceipt.classList.toggle("hidden", !enabled);
+}
+
+function _csRequiredReviewSlots(item) {
+  if (!S.captureSlots) return [];
+  if (item?.isSubmitted) return [];
+  const submitted = new Set(Array.isArray(item?.submittedSlots) ? item.submittedSlots : []);
+  return S.captureSlots.filter(slot =>
+    !_csIsReceiptSlot(slot)
+    && slot.required !== false
+    && !submitted.has(slot.key)
+    && !(S.filesBySlot[slot.key] || []).length
+  );
+}
+
+function _updateReceiptStepActions() {
+  if (!S.receiptStepMode || !S.captureSlots) return;
+  const item = (S.selectedRows && S.selectedRows[0]) || S.selectedRow || {};
+  const receiptSlot = S.captureSlots.find(_csIsReceiptSlot);
+  const hasReceiptFile = !!(receiptSlot && (S.filesBySlot[receiptSlot.key] || []).length);
+  const btnSubmitReceipt = document.getElementById("btnSubmitReceipt");
+  const btnSkipReceipt = document.getElementById("btnSkipReceipt");
+  if (btnSubmitReceipt) btnSubmitReceipt.disabled = !hasReceiptFile;
+  if (btnSkipReceipt) {
+    btnSkipReceipt.classList.toggle("hidden", hasReceiptFile);
+    btnSkipReceipt.innerHTML = '<i class="fas fa-clock"></i> 나중에 제출';
+  }
+  const btnToReceipt = document.getElementById("btnToReceipt");
+  const hasReviewFiles = (S.captureSlots || []).some(slot =>
+    !_csIsReceiptSlot(slot) && (S.filesBySlot[slot.key] || []).length > 0
+  );
+  if (btnToReceipt) btnToReceipt.innerHTML = item.isSubmitted && !hasReviewFiles
+    ? '다음: 현금영수증 <i class="fas fa-arrow-right"></i>'
+    : '<i class="fas fa-paper-plane"></i> 리뷰 제출 후 다음';
+}
+
+function _submitReviewThenReceipt() {
+  const item = (S.selectedRows && S.selectedRows[0]) || S.selectedRow || {};
+  const missing = _csRequiredReviewSlots(item);
+  if (missing.length) {
+    const labels = missing.map(s => s.label || s.key).join(", ");
+    showToast(`${labels} 이미지를 먼저 선택해 주세요.`, "warning");
+    return;
+  }
+  const hasReviewFiles = (S.captureSlots || []).some(slot =>
+    !_csIsReceiptSlot(slot) && (S.filesBySlot[slot.key] || []).length > 0
+  );
+  // 이미 완료된 행의 재진입은 리뷰를 다시 제출하지 않고 영수증 단계만 연다.
+  // 블로그 포스팅 URL도 새 리뷰 제출이 아니므로 이 분기 뒤에서만 검사한다.
+  if (item.isSubmitted && !hasReviewFiles) {
+    goStep(3);
+    return;
+  }
+  if (_isBlogItem(item) && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
+    showToast(_BLOG_POST_URL_HINT, "warning");
+    return;
+  }
+  S.slotSubmitTrigger = "reviewThenReceipt";
+  submitReview();
+}
+
+function _skipReceiptStep() {
+  const item = (S.selectedRows && S.selectedRows[0]) || S.selectedRow || {};
+  if (item.isSubmitted) {
+    showToast("현금영수증은 발행 확정 후 따로 제출할 수 있어요.", "success");
+    resetApp();
+    return;
+  }
+  showToast("리뷰 제출을 먼저 완료해 주세요.", "warning");
+  goStep(2);
+}
+
 /* ── STEP 이동 ── */
 function goStep(n) {
-  [1, 2].forEach(i => {
+  const steps = S.receiptStepMode ? [1, 2, 3] : [1, 2];
+  if (!steps.includes(n)) n = 1;
+  steps.forEach(i => {
     document.getElementById(`step${i}`).classList.toggle("active", i === n);
     const sl = document.getElementById(`sl${i}`);
     sl.classList.remove("active", "done");
     if (i < n)        sl.classList.add("done");
     else if (i === n) sl.classList.add("active");
   });
-  document.getElementById("stepFill").style.width = n === 1 ? "25%" : "100%";
+  if (!S.receiptStepMode) {
+    document.getElementById("step3")?.classList.remove("active");
+    document.getElementById("stepFill").style.width = n === 1 ? "25%" : "100%";
+  } else {
+    document.getElementById("stepFill").style.width = n === 1 ? "33%" : n === 2 ? "66%" : "100%";
+  }
   S.step = n;
   // STEP2 진입 시 제출 버튼 텍스트 업데이트
   if (n === 2) {
@@ -2656,6 +3347,7 @@ function goStep(n) {
       ? `<i class="fas fa-paper-plane"></i> ${cnt}건 모두 제출하기`
       : '<i class="fas fa-paper-plane"></i> 제출하기';
   }
+  if (n === 3) _updateReceiptStepActions();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -2911,19 +3603,34 @@ function renderPreviews() {
 async function _submitReviewSlots(item) {
   const slots = S.captureSlots || [];
   const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+  const slotSubmitTrigger = S.slotSubmitTrigger;
+  S.slotSubmitTrigger = null;
 
-  // 이번에 업로드할 슬롯 = 파일이 첨부된 슬롯
-  const slotsToUpload = slots.filter(s => (S.filesBySlot[s.key] || []).length > 0);
+  // 2단계에서는 리뷰만, 3단계에서는 현금영수증만 업로드한다.
+  const slotsToUpload = slots.filter(s =>
+    (S.filesBySlot[s.key] || []).length > 0
+    && (slotSubmitTrigger === "reviewThenReceipt" ? !_csIsReceiptSlot(s) : true)
+  );
 
-  /* ★★ 블로그체험단(099)은 결과물이 포스팅URL 이라 캡처 0장으로도 제출된다(사용자 확정).
-     현영을 겸한 blog 탭이 슬롯 모드로 뜨는데, 여기서 막으면 **제출할 방법 자체가 없다**.
-     ★ 대신 URL 은 그 자리에서 검증한다(서버 `/submit/review` 가 최종 방어). */
+  const requiredReviewKeys = slots
+    .filter(s => !_csIsReceiptSlot(s) && s.required !== false)
+    .map(s => s.key);
+  const reviewWasComplete = !!item.isSubmitted || requiredReviewKeys.every(k => submitted.has(k));
+  // 완료된 작업의 재진입은 작업 종류와 무관하게 영수증 파일만 추가한다. 블로그도 여기서
+  // 포스팅 URL을 다시 요구하거나 submitReview를 재호출하면 기존 완료 시각·메모가 덮인다.
+  const receiptOnlyAfterComplete = reviewWasComplete
+    && slotsToUpload.length > 0
+    && slotsToUpload.every(_csIsReceiptSlot);
+
+  /* ★ 127(사용자 확정 2026-08-19): 블로그도 **캡처 + 포스팅URL 둘 다** 필수 — M4-2 의
+     "캡처 0장 허용"을 뒤집었다. 이미 제출한 슬롯이 있는 재제출(URL 만 고침)은 캡처 재첨부 불요. */
   const _blogSlot = _isBlogItem(item);
-  if (_blogSlot && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
+  if (_blogSlot && !receiptOnlyAfterComplete
+      && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
     showToast(_BLOG_POST_URL_HINT, "warning");
     return;
   }
-  if (slotsToUpload.length === 0 && !_blogSlot) {
+  if (slotsToUpload.length === 0 && !(_blogSlot && submitted.size > 0)) {
     showToast("제출할 캡처 이미지를 1장 이상 첨부해주세요.", "warning");
     return;
   }
@@ -2943,7 +3650,12 @@ async function _submitReviewSlots(item) {
     return;
   }
 
-  const btn = document.getElementById("btnSubmit");
+  const btn = slotSubmitTrigger === "reviewThenReceipt"
+    ? document.getElementById("btnToReceipt")
+    : (S.receiptStepMode && S.step === 3)
+    ? document.getElementById("btnSubmitReceipt")
+    : document.getElementById("btnSubmit");
+  if (!btn) return;
   btn.disabled = true;
 
   const reviewerName = item.recipientName || item.displayName || "이름없음";
@@ -2953,6 +3665,8 @@ async function _submitReviewSlots(item) {
 
   const uploadErrors = [];
   const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
+  let replacedCurrent = false;
+  let reviewUploadBatchId = null;
   try {
     // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
     for (const slot of slotsToUpload) {
@@ -2982,12 +3696,14 @@ async function _submitReviewSlots(item) {
             data:     b64,
           }))
         }, 180000);
+        replacedCurrent = replacedCurrent || !!(upRes && upRes.replacedCurrent);
         if (!upRes || (!upRes.ok && !upRes.success)) {
           // 전부 중복 반려로 실패한 경우 — 그 슬롯에 빨간 안내를 남기고 실패로 처리
           const rj0 = upRes && Array.isArray(upRes.files) ? upRes.files.find(r => r && r.rejected) : null;
           if (rj0) {
             slotOutcome[slot.key] = { stayed: false, movedTo: [] };
             _csShowVerdict(slot.key, rj0.message || "이미 제출된 파일과 같아 등록되지 않았어요.", true);
+            if (rj0.duplicate) _showDuplicateBlockModal(rj0.duplicate, document.getElementById('csSlot_' + slot.key));
           }
           throw new Error(upRes?.error || "이미지 업로드 실패");
         }
@@ -3000,6 +3716,9 @@ async function _submitReviewSlots(item) {
         const rejectedF = flist.filter(r => r && r.rejected);
         const routedF = flist.filter(r => r && r.routed);
         const stayed = flist.some(r => r && r.fileId && !r.routed);
+        const suppliedReview = (slot.key === 'review' && stayed)
+          || routedF.some(r => r.routed && r.routed.to === 'review');
+        if (suppliedReview && upRes.uploadBatchId) reviewUploadBatchId = upRes.uploadBatchId;
         slotOutcome[slot.key] = { stayed, movedTo: routedF.map(r => r.routed.to) };
         const bad = flist.find(r => r && r.verdict && r.verdict.status === "mismatch" && !r.routed && !r.rejected);
         if (rejectedF.length) {
@@ -3039,21 +3758,27 @@ async function _submitReviewSlots(item) {
       return;
     }
 
-    // ── 제출 기록 + 완료 판정 (서버가 필요 슬롯 충족 여부 계산) ──
-    const now = new Date();
-    const submitTimeValue = `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const result = await gasPost({
-      action:       "submitReview",
-      sheetId:      item.sheetId,
-      tabName:      item.tabName,
-      gid:          item.gid,
-      rowIndex:     item.rowIndex,
-      reviewerName,
-      submitCol:    item.submitCol,
-      value:        submitTimeValue,
-      campaignName: item.campaignName,
-      memo,
-    }, 30000);
+    // 이미 리뷰가 끝난 건에 현금영수증만 추가하면 원래 리뷰 완료 시각을 다시 쓰지 않는다.
+    let result;
+    if (receiptOnlyAfterComplete) {
+      result = { success: true, ok: true, complete: true, missingSlots: [] };
+    } else {
+      const now = new Date();
+      const submitTimeValue = `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      result = await gasPost({
+        action:       "submitReview",
+        sheetId:      item.sheetId,
+        tabName:      item.tabName,
+        gid:          item.gid,
+        rowIndex:     item.rowIndex,
+        reviewerName,
+        submitCol:    item.submitCol,
+        value:        submitTimeValue,
+        campaignName: item.campaignName,
+        memo,
+        uploadBatchId: reviewUploadBatchId,
+      }, 30000);
+    }
     hideLoading();
 
     if (!result || (!result.success && !result.ok)) {
@@ -3074,19 +3799,45 @@ async function _submitReviewSlots(item) {
       if (slots.some(s => s.key === mk)) justUploaded.add(mk);
     }));
     const coveredKeys = new Set([...submitted, ...justUploaded]);
+    const receiptStored = slots
+      .filter(_csIsReceiptSlot)
+      .some(s => justUploaded.has(s.key));
+    if (receiptOnlyAfterComplete && !receiptStored) {
+      showToast("현금영수증 칸에 저장되지 않았습니다. 화면 안내를 확인하고 다시 첨부해 주세요.", "warning", 5000);
+      return;
+    }
     const complete = (typeof result.complete === 'boolean')
       ? result.complete
-      : slots.every(s => coveredKeys.has(s.key));
+      : slots.filter(s => s.required !== false).every(s => coveredKeys.has(s.key));
     const missing = Array.isArray(result.missingSlots) && result.missingSlots.length
       ? result.missingSlots
-      : slots.filter(s => !coveredKeys.has(s.key)).map(s => s.key);
+      : slots.filter(s => s.required !== false && !coveredKeys.has(s.key)).map(s => s.key);
 
     const slotLabel = k => (slots.find(s => s.key === k)?.label) || k;
+    if (slotSubmitTrigger === "reviewThenReceipt" && complete) {
+      item.isSubmitted = true;
+      item.submittedSlots = Array.from(coveredKeys);
+      slotsToUpload.forEach(slot => {
+        S.filesBySlot[slot.key] = [];
+        const status = document.getElementById("csStatus_" + slot.key);
+        if (status) { status.textContent = "✓ 제출됨"; status.className = "mr-slot-status ok"; }
+      });
+      showToast("리뷰 제출이 완료되었습니다.", "success");
+      goStep(3);
+      return;
+    }
     if (complete) {
-      const doneList = slots.map(s => `${escHtml(s.label || s.key)} ✓`).join(" / ");
-      document.getElementById("successMessage").innerHTML =
-        `<strong>${escHtml(reviewerName)}</strong>님의 캡처가 모두 제출되었습니다 😊<br>`
-        + `<span style="font-size:.82rem;color:#16a34a">${doneList}</span>`;
+      const doneList = slots.map(s => coveredKeys.has(s.key)
+        ? `${escHtml(s.label || s.key)} ✓`
+        : `${escHtml(s.label || s.key)} <span style="color:#B45309">나중에 제출</span>`
+      ).join(" / ");
+      document.getElementById("successMessage").innerHTML = receiptOnlyAfterComplete
+        ? `<strong>${escHtml(reviewerName)}</strong>님의 현금영수증이 제출되었습니다.<br>`
+          + '<span style="font-size:.82rem;color:#16a34a">기존 리뷰 완료 시각은 변경하지 않았습니다.</span>'
+        : replacedCurrent
+        ? '현재 건의 제출물을 교체했습니다.'
+        : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊<br>`
+          + `<span style="font-size:.82rem;color:#16a34a">${doneList}</span>`;
       show("successModal", "flex");
     } else {
       const doneList = slots.map(s =>
@@ -3109,7 +3860,12 @@ async function _submitReviewSlots(item) {
     console.error("[submitReviewSlots] 오류:", err);
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-paper-plane"></i> 제출하기';
+    btn.innerHTML = btn.id === "btnSubmitReceipt"
+      ? '<i class="fas fa-receipt"></i> 현금영수증 제출하기'
+      : btn.id === "btnToReceipt"
+      ? '<i class="fas fa-paper-plane"></i> 리뷰 제출 후 다음'
+      : '<i class="fas fa-paper-plane"></i> 제출하기';
+    _updateReceiptStepActions();
   }
 }
 
@@ -3131,9 +3887,8 @@ async function submitReview() {
   const isMulti = items.length > 1;
 
   /* ── 파일 유효성 검사 ──
-     ★★ 블로그체험단(099)은 **결과물이 포스팅URL** 이라 사진 0장으로도 제출된다(사용자 확정).
-       대신 URL 이 비었거나 형식이 아니면 그 자리에서 막는다 — 서버가 최종 방어하지만,
-       거기까지 갔다 돌아오면 리뷰어는 "왜 실패했는지"를 토스트 한 줄로만 알게 된다.
+     ★ 127(사용자 확정 2026-08-19): 블로그도 **캡처 + 포스팅URL 둘 다** 필수 — M4-2 의
+       "사진 0장 허용"을 뒤집었다. URL 형식 검증도 그 자리에서(서버가 최종 방어).
      ★ 판정은 행마다(다건은 서로 다른 작업일 수 있다). 리뷰체험단 규칙은 종전 그대로. */
   if (isMulti) {
     const badUrl = [];
@@ -3142,7 +3897,6 @@ async function submitReview() {
       if (_isBlogItem(it)) {
         const m = document.getElementById("mrMemo_" + idx)?.value.trim() || "";
         if (!_isPostUrl(m)) badUrl.push(idx + 1);
-        return;                                   // 사진은 선택 — 빈 슬롯으로 세지 않는다
       }
       if ((S.filesByIdx[idx] || []).length === 0) emptySlots.push(idx + 1);
     });
@@ -3158,6 +3912,7 @@ async function submitReview() {
   } else if (_isBlogItem(items[0])) {
     const m = document.getElementById("memoTxt")?.value.trim() || "";
     if (!_isPostUrl(m)) { showToast(_BLOG_POST_URL_HINT, "warning"); return; }
+    if (S.files.length === 0) { showToast("리뷰 캡처(포스팅 화면)를 1장 이상 첨부해주세요.", "warning"); return; }
   } else {
     if (S.files.length === 0) { showToast("이미지를 1장 이상 첨부해주세요.", "warning"); return; }
   }
@@ -3172,6 +3927,7 @@ async function submitReview() {
   const MAX_TOTAL_MB = 15;
   let successCount = 0;
   const errors = [];
+  let replacedCurrent = false;
 
   try {
     for (let idx = 0; idx < items.length; idx++) {
@@ -3191,6 +3947,7 @@ async function submitReview() {
       }
 
       try {
+        let reviewUploadBatchId = null;
         // ★ 파일명에 사용할 이름: 수취인명 우선, 없으면 reviewer_name fallback
         //   (업로드를 건너뛰는 blog 건도 Step 2 제출 기록에 쓴다 → 블록 밖에 둔다)
         const reviewerName = item.recipientName || item.displayName || "이름없음";
@@ -3237,8 +3994,16 @@ async function submitReview() {
               data:     b64,
             }))
           }, 180000);
+          replacedCurrent = replacedCurrent || !!(uploadResult && uploadResult.replacedCurrent);
+          if (uploadResult && uploadResult.uploadBatchId) reviewUploadBatchId = uploadResult.uploadBatchId;
 
           if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
+            const _rj0 = uploadResult && Array.isArray(uploadResult.files)
+              ? uploadResult.files.find(r => r && r.rejected && r.duplicate) : null;
+            if (_rj0) {
+              const _anchor = document.getElementById(isMulti ? 'mrSlot_' + idx : 'dropZone');
+              _showDuplicateBlockModal(_rj0.duplicate, _anchor);
+            }
             throw new Error(uploadResult?.error || "이미지 업로드 실패");
           }
 
@@ -3249,6 +4014,10 @@ async function submitReview() {
           if (!_rtStayed && _rtFiles.length) {
             const _rj = _rtFiles.find(r => r && r.rejected);
             const _mv = _rtFiles.find(r => r && r.routed);
+            if (_rj && _rj.duplicate) {
+              const _anchor = document.getElementById(isMulti ? 'mrSlot_' + idx : 'dropZone');
+              _showDuplicateBlockModal(_rj.duplicate, _anchor);
+            }
             throw new Error(_rj ? (_rj.message || "이미 제출된 파일과 같아 등록되지 않았어요.")
               : _mv ? ((_mv.routed && _mv.routed.message) || "첨부한 이미지가 리뷰 캡처가 아닌 것으로 확인되어 옮겨졌어요. 리뷰 캡처를 다시 첨부해주세요.")
               : "이미지 업로드 실패");
@@ -3276,6 +4045,7 @@ async function submitReview() {
           value:            submitTimeValue,
           campaignName:     item.campaignName,
           memo,
+          uploadBatchId:    reviewUploadBatchId,
         }, 30000);
 
         hideLoading();
@@ -3312,7 +4082,9 @@ async function submitReview() {
       const successMsg = isMulti
         ? `<strong>${escHtml(reviewerName)}</strong>님의 리뷰 <b>${successCount}건</b>이 제출되었습니다 😊`
           + (errors.length > 0 ? `<br><span style="color:#DC2626;font-size:.82rem">${errors.length}건 실패 (콘솔 확인)</span>` : "")
-        : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊`;
+        : (replacedCurrent
+            ? '현재 건의 리뷰 캡처를 교체하였습니다.'
+            : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊`);
       document.getElementById("successMessage").innerHTML = successMsg;
       show("successModal", "flex");
     } else {
@@ -3338,7 +4110,8 @@ async function submitReview() {
 function resetApp() {
   hide("successModal");
   S.files = []; S.selectedRow = null; S.selectedRows = []; S.filesByIdx = {}; S.memoByIdx = {};
-  S.filesBySlot = {}; S.captureSlots = null;
+  S.filesBySlot = {}; S.captureSlots = null; S.receiptStepMode = false; S.slotSubmitTrigger = null;
+  _setReceiptStepMode(false);
   // ★ 1차 필터 상태도 함께 비운다 — 남겨두면 다음 제출이 지난 판정 때문에 잠긴다.
   Object.keys(_preState).forEach(k => delete _preState[k]);
   const nameEl = document.getElementById("nameInput");
@@ -3353,6 +4126,8 @@ function resetApp() {
   if (slotsWrap) slotsWrap.remove();
   const csWrap = document.getElementById("csSlotsWrap");
   if (csWrap) csWrap.remove();
+  const receiptHost = document.getElementById("csReceiptHost");
+  if (receiptHost) receiptHost.innerHTML = "";
   const singleDrop = document.getElementById("dropZone");
   const singleMemo = document.querySelector(".memo-wrap");
   if (singleDrop) singleDrop.style.display = "";
@@ -3369,8 +4144,173 @@ function clearAdminSession() {}
 function getAdminSessionRemaining() { return null; }
 
 /* ── GAS URL 설정 모달 (비밀번호 인증) ── */
-// GAS URL configuration was retired; deployment-owned Node API is used instead.
+const GAS_URL_PW = "rhakdnjdy1!"; // 설정 접근 비밀번호
 
+function openGasUrlModal() {
+  // 항상 STEP1(비밀번호)부터 시작
+  show("gasUrlStep1");
+  hide("gasUrlStep2");
+  const pwEl = document.getElementById("gasUrlPwInput");
+  pwEl.value = "";
+  hide("gasUrlPwError");
+  hide("gasUrlError");
+  show("gasUrlModal", "flex");
+  setTimeout(() => pwEl.focus(), 100);
+}
+function closeGasUrlModal() {
+  hide("gasUrlModal");
+}
+function verifyGasUrlPw() {
+  const pw    = document.getElementById("gasUrlPwInput").value;
+  const errEl = document.getElementById("gasUrlPwError");
+  hide(errEl);
+  if (!pw) {
+    errEl.textContent = "비밀번호를 입력하세요.";
+    show(errEl);
+    return;
+  }
+  if (pw !== GAS_URL_PW) {
+    errEl.textContent = "비밀번호가 틀렸습니다.";
+    show(errEl);
+    document.getElementById("gasUrlPwInput").value = "";
+    document.getElementById("gasUrlPwInput").focus();
+    return;
+  }
+  // 비밀번호 확인 성공 → STEP2로 전환
+  hide("gasUrlStep1");
+  const urlInput = document.getElementById("gasUrlInput");
+  urlInput.value = APP_CONFIG.GAS_WEB_APP_URL || "";
+  hide("gasUrlError");
+  show("gasUrlStep2");
+  _renderGasUrlHistory(); // ← 이력 목록 갱신
+  setTimeout(() => urlInput.focus(), 100);
+}
+function saveGasUrl() {
+  const url   = document.getElementById("gasUrlInput").value.trim();
+  const errEl = document.getElementById("gasUrlError");
+  hide(errEl);
+  if (!url) {
+    errEl.textContent = "URL을 입력해주세요.";
+    show(errEl);
+    return;
+  }
+  if (!url.includes("script.google.com/macros/s/")) {
+    errEl.textContent = "올바른 GAS 배포 URL 형식이 아닙니다. (/macros/s/.../exec)";
+    show(errEl);
+    return;
+  }
+  // ── 변경 이력 기록 ──
+  _addGasUrlHistory(url);
+  saveConfig({ GAS_WEB_APP_URL: url });
+  APP_CONFIG.GAS_WEB_APP_URL = url;
+  // ★ GAS PropertiesService에도 저장 → 다른 접속자에게 자동 반영
+  _saveAppUrlToGas(url);
+  closeGasUrlModal();
+  hide("gasNotSet");
+  showToast("GAS URL이 저장되었습니다. 다른 접속자에게도 자동 반영됩니다.", "success");
+}
+
+/* ── GAS URL 변경 이력 관리 ── */
+const GAS_URL_HISTORY_KEY = "rapp_url_history";
+const GAS_URL_HISTORY_MAX = 10; // 최대 보관 건수
+
+/** 이력 배열 반환 (최신순) */
+function _loadGasUrlHistory() {
+  try {
+    const raw = localStorage.getItem(GAS_URL_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) { return []; }
+}
+
+/** URL 저장 시 이력에 추가 */
+function _addGasUrlHistory(url) {
+  const list = _loadGasUrlHistory();
+  // 버전 번호: 현재 이력 중 같은 URL의 최대 버전 + 1, 없으면 전체 최대 버전 + 1
+  const allVersions = list.map(h => h.version || 0);
+  const nextVersion = (allVersions.length ? Math.max(...allVersions) : 0) + 1;
+
+  // 동일 URL이 최신 항목이면 중복 추가 안 함
+  if (list.length && list[0].url === url) return;
+
+  const entry = {
+    version:   nextVersion,
+    url:       url,
+    savedAt:   Date.now()  // ms timestamp
+  };
+  list.unshift(entry); // 최신을 앞에
+  if (list.length > GAS_URL_HISTORY_MAX) list.splice(GAS_URL_HISTORY_MAX);
+  try { localStorage.setItem(GAS_URL_HISTORY_KEY, JSON.stringify(list)); } catch (_) {}
+}
+
+/** 이력 전체 삭제 */
+function clearGasUrlHistory() {
+  if (!confirm("변경 이력을 모두 삭제하시겠습니까?")) return;
+  try { localStorage.removeItem(GAS_URL_HISTORY_KEY); } catch (_) {}
+  _renderGasUrlHistory();
+}
+
+/** 이력 목록을 모달에 렌더링 */
+function _renderGasUrlHistory() {
+  const wrap = document.getElementById("gasUrlHistoryWrap");
+  const list = document.getElementById("gasUrlHistoryList");
+  if (!wrap || !list) return;
+  const history = _loadGasUrlHistory();
+  if (!history.length) { wrap.style.display = "none"; return; }
+  wrap.style.display = "block";
+  list.innerHTML = history.map((h, i) => {
+    const dt  = new Date(h.savedAt);
+    const pad = n => String(n).padStart(2, "0");
+    const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    // URL 중간 생략 (앞 30자 + … + 끝 20자)
+    const short = h.url.length > 54
+      ? h.url.slice(0, 32) + "…" + h.url.slice(-20)
+      : h.url;
+    const isCurrent = (APP_CONFIG.GAS_WEB_APP_URL === h.url);
+    return `
+      <div class="gas-url-history-item${isCurrent ? ' gas-url-history-current' : ''}"
+           onclick="_selectGasUrlHistory('${i}')" title="${h.url}">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0">
+          <span class="gas-url-ver-badge">v${h.version}</span>
+          <span class="gas-url-history-url">${short}</span>
+          ${isCurrent ? '<span class="gas-url-cur-tag">현재</span>' : ''}
+        </div>
+        <span class="gas-url-history-date">${dateStr}</span>
+      </div>`;
+  }).join('');
+}
+
+/** 이력 항목 클릭 → 입력칸에 자동 입력 */
+function _selectGasUrlHistory(idx) {
+  const history = _loadGasUrlHistory();
+  const entry   = history[Number(idx)];
+  if (!entry) return;
+  const input = document.getElementById("gasUrlInput");
+  if (input) {
+    input.value = entry.url;
+    input.focus();
+    // 선택 피드백
+    document.querySelectorAll(".gas-url-history-item").forEach((el, i) => {
+      el.classList.toggle("gas-url-history-selected", i === Number(idx));
+    });
+  }
+}
+
+/** GAS PropertiesService에 URL 저장 (백그라운드, 비동기) */
+async function _saveAppUrlToGas(url) {
+  try {
+    const pw = GAS_URL_PW; // 설정 비밀번호 (기존 상수 그대로 사용)
+    const res = await fetch(`${url}?action=saveAppUrl&url=${encodeURIComponent(url)}&pw=${encodeURIComponent(pw)}`, { redirect: "follow" });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.ok) console.log("[GAS] URL PropertiesService 저장 완료");
+      else console.warn("[GAS] URL 저장 실패:", json.error);
+    }
+  } catch (e) {
+    console.warn("[GAS] URL 저장 오류 (무시):", e.message);
+  }
+}
+
+/* ── 관리자 접근 차단 (search.html에서는 모든 경로 비활성) ── */
 function openAdminLogin() {}
 function closeAdminLogin() {}
 async function submitAdminLogin() {}
@@ -3824,10 +4764,18 @@ function _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tR
     : empty;
 
   // 리뷰타입 열
+  /* 리뷰타입 배지 — 값 목록의 단일 출처는 server/src/utils/reviewType.js(087 어휘 통일).
+     ★ 목록에 없는 옛 값(실배송·빈박스·믹스)도 **그대로 표시**한다 — 선택지에서 빠졌다고
+       화면에서까지 지우면 그 탭에 무엇이 설정돼 있었는지 알 수 없다. */
   const reviewClass = {
+    '포토': 'tc-review-포토',
+    '텍스트': 'tc-review-텍스트',
+    '구매확정': 'tc-review-구매확정',
+    '별점': 'tc-review-별점',
+    '혼합': 'tc-review-혼합',
+    // 옛 값(선택지에는 없음)
     '실배송': 'tc-review-실배송',
     '빈박스': 'tc-review-빈박스',
-    '구매확정': 'tc-review-구매확정',
     '믹스': 'tc-review-믹스'
   }[t.reviewType] || '';
   const reviewCell = t.reviewType
@@ -4578,7 +5526,7 @@ function openFormLink(btnEl) {
   const gid = gidMatch ? gidMatch[1] : "";
 
   // gasUrl은 URL에 포함하지 않음 → 링크를 짧고 깔끔하게 유지
-  // Reviewer links use the deployment-selected Node API.
+  // 리뷰어 접속 시 BOOTSTRAP_GAS_URL(하드코딩) 또는 localStorage에서 자동 확보
   const base   = location.origin + location.pathname;
   const params = new URLSearchParams({
     mode: "form",
@@ -4650,7 +5598,11 @@ function initOrderFormMode() {
         const resp = await fetch(apiBase + '/api/short/resolve?code=' + encodeURIComponent(shortCode));
         return await resp.json();
       }
-      throw new Error("Node API URL이 설정되지 않았습니다.");
+      // GAS 폴백 (JSONP)
+      const savedUrl = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
+      const gasUrl = BOOTSTRAP_GAS_URL || savedUrl || "";
+      if (!gasUrl) throw new Error("API URL이 설정되지 않았습니다.");
+      return await _jsonpGet(gasUrl + "?action=resolveShort&code=" + encodeURIComponent(shortCode), 10000);
     };
 
     resolveViaApi()
@@ -4698,8 +5650,12 @@ function initOrderFormMode() {
 
   // GAS URL 확보 순서:
   // 1) URL 파라미터 gasUrl (구버전 링크 하위 호환용)
-  // Legacy gasUrl values are ignored.
-  // Legacy gasUrl parameters are intentionally ignored. Node API selection is deployment-owned.
+  // 2) BOOTSTRAP_GAS_URL (하드코딩 — 가장 신뢰할 수 있는 값)
+  // 3) localStorage 저장값
+  const gasUrlParam = params.get("gasUrl") || "";
+  const savedUrl    = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
+  const resolvedGasUrl = gasUrlParam || BOOTSTRAP_GAS_URL || savedUrl || "";
+  if (resolvedGasUrl) APP_CONFIG.GAS_WEB_APP_URL = resolvedGasUrl;
 
   // 전역에 폼 컨텍스트 저장 (sheetUrl, round, ncMode 포함)
   const _sheetUrl = sheetId ? "https://docs.google.com/spreadsheets/d/" + sheetId + "/edit" : "";
@@ -4738,7 +5694,7 @@ function initOrderFormMode() {
     return true; // 일반 초기화 스킵
   }
   // 로그인 완료 상태 → 슬롯 매칭 정보 전역 저장
-  window._slotAuth = { name: authSession.name, phone8: authSession.phone8 || "" };
+  window._slotAuth = { name: authSession.name, phone8: authSession.phone8 || "", reviewerToken: authSession.reviewerToken || "" };
 
   // 헤더 제목 설정: "상품명의 구매양식 제출"
   const titleEl    = document.getElementById("orderFormTitle");
@@ -4769,6 +5725,8 @@ function initOrderFormMode() {
 
   // ── 다건 카드 초기화: 기존 카드 제거 후 첫 번째 카드 생성 ──
   _orderCardIds = [];
+  const identityActionPanel = document.getElementById("orderIdentityAction");
+  if (identityActionPanel) { identityActionPanel.style.display = "none"; identityActionPanel.dataset.cid = ""; identityActionPanel.innerHTML = ""; }
   _cardAiState  = {};
   _cardSeq      = 0;
   const wrapEl = document.getElementById("ofOrderCardsWrap");
@@ -4835,6 +5793,11 @@ function initOrderFormMode() {
   //   ★ 관리자 미리보기 제외: 이 함수는 localStorage의 리뷰어 세션을 직접 읽으므로,
   //     관리자 브라우저에 남아 있던 세션의 계좌번호·예금주가 미리보기 화면에 찍힐 수 있다(PII 노출).
   if (!_PREVIEW_MODE) {
+    if (_EMBED_CTX) {
+      _loadOrderIdentityContext().catch(e => {
+        showToast(e.message || "참여 명의를 확인하지 못했습니다.", "error");
+      });
+    }
     _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
 
     // ★ 내정보(사용자명/전화/주소/계좌) 미등록 안내 배너 (비차단 — 제출 시 차단)
@@ -4855,11 +5818,8 @@ async function _prefillBankFromProfile() {
 
   let profile = window._reviewerProfile;
   if (!profile || (!profile.bankAccount && !profile.bankName)) {
-    const authRaw = localStorage.getItem("rapp_reviewer_auth");
-    if (!authRaw) return;
-    let auth;
-    try { auth = JSON.parse(authRaw); } catch(_) { return; }
-    if (!auth || Date.now() > (auth.expAt || 0)) return;
+    const auth = _getReviewerSession();
+    if (!auth) return;
     const name = auth.name || "", phone8 = auth.phone8 || "";
     if (!name || !phone8) return;
     try {
@@ -5102,14 +6062,17 @@ async function _loadInaedList(sheetId, gid, tabName, round) {
         "| 옵션헤더:", _optionHeaders, "| 비고:", _memoHeader, "| 주문번호:", _orderNumHeader);
       // 비고/주문번호 입력란 동적 표시 + 옵션 피커 렌더링
       _renderDynamicFields();
+      _applyOrdererPicker();      // 후보가 있으면 주문자 칸을 보여준다
     } else {
       // 데이터 없어도 입력란은 항상 활성화 유지
       _setOrdererDisabled(false);
+      _applyOrdererPicker();      // 후보 0건 = 감춘 채로 둔다(서버가 로그인 이름으로 채움)
     }
   } catch (err) {
     console.warn("[자동완성] 인애드명단 로드 실패:", err.message);
     // ★ GAS 호출 실패해도 입력란은 반드시 활성화 (로드 실패가 입력 차단으로 이어지지 않도록)
     _setOrdererDisabled(false);
+    _applyOrdererPicker();
   }
 }
 
@@ -5389,6 +6352,21 @@ function selectOptionKey(key) {
   // 드롭다운 바로 열기
   const candidates = _filterInaed("");
   _renderAcList(candidates, "");
+}
+
+/* ★★ 주문자 칸 노출 판정 — 인애드명단 후보가 있을 때만 보여준다 (사용자 확정 2026-08-24)
+   ────────────────────────────────────────────────────────────────────────
+   그 명단이 있는 탭에서는 "명단에서 내 이름 고르기"가 **행 배정·옵션 잠금의 진입점**이다
+   (서버 `buildCandidateRows` 가 인애드 열 값 == 제출 주문자인 행을 우선 배정한다).
+   후보가 0건이면(무시트 작업표 = 현 운영 대부분) 칸을 감추고 서버가 로그인 이름으로 채운다.
+   ★ 판정은 이 함수 하나 — 화면·검증이 같은 값을 본다(따로 세면 "안 보이는데 필수"가 된다). */
+function _ordererPickerOn() {
+  return !!document.getElementById("ofOrderCardsWrap")?.classList.contains("of-orderer-on");
+}
+function _applyOrdererPicker() {
+  const wrap = document.getElementById("ofOrderCardsWrap");
+  if (!wrap) return;
+  wrap.classList.toggle("of-orderer-on", (_inaedNames || []).length > 0);
 }
 
 /** 주문자 입력란 비활성/활성 토글 */
@@ -6015,6 +6993,13 @@ function _buildOrderCardHtml(cid, idx, type) {
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
       <div class="ofc-ai-section-title">📸 구매 캡처 <span style="font-weight:800;color:#fff;background:#E5484D;border-radius:4px;padding:1px 5px;font-size:.6rem;vertical-align:middle">필수</span></div>
+      <div id="${cid}_identityWho" class="of-identity-context" aria-label="선택한 참여 명의 확인">
+        <span class="of-identity-kicker">현재 참여 명의</span>
+        <strong class="of-identity-name">선택한 참여 명의</strong>
+        <span class="of-identity-kind">AI 확인</span>
+        <span class="of-identity-help">AI가 캡처와 이 명의를 확인합니다.</span>
+      </div>
+      <div id="${cid}_identityStatus" style="display:none;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55"></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
@@ -6085,12 +7070,16 @@ function _buildOrderCardHtml(cid, idx, type) {
 
     <!-- 주문번호 -->
     <div class="of-field">
-      <label class="of-label">주문번호</label>
+      <label class="of-label" for="${cid}_orderNumber">주문번호</label>
       <input id="${cid}_orderNumber" class="of-input" type="text" placeholder="캡처 분석 후 자동기입">
     </div>
 
-    <!-- 주문자 (공유 가능) -->
-    <div id="${cid}_ordererWrap" class="${lockClass}">
+    <!-- 주문자 (공유 가능) — ★ 기본은 감춤. 서버가 로그인한 리뷰어 이름으로 채운다.
+         인애드명단 후보가 있는 탭에서만 of-orderer-on 클래스로 다시 보인다(CSS).
+         ★ 이 주석에 백틱을 쓰지 말 것 — 템플릿 리터럴이 그 자리에서 끊긴다(실측 사고). -->
+    ${isFirst ? `<div class="ofc-orderer-note"><i class="fas fa-user-check"></i>
+      주문자는 로그인한 <b>본인 이름</b>으로 자동 기록됩니다.</div>` : ""}
+    <div id="${cid}_ordererWrap" class="ofc-orderer-wrap ${lockClass}">
       ${isFirst ? `
       <div class="of-field">
         <label class="of-label of-label-required" for="of_orderer">주문자</label>
@@ -6114,31 +7103,51 @@ function _buildOrderCardHtml(cid, idx, type) {
     <!-- 아이디 (필수, 각 건마다 별도) -->
     <div class="of-field">
       <label class="of-label of-label-required" for="${cid}_userId">아이디</label>
-      <input id="${cid}_userId" class="of-input" type="text" placeholder="쇼핑몰 아이디" oninput="_ofClearError('${cid}_userId')">
+      <div class="of-field-control">
+        <input id="${cid}_userId" class="of-input" type="text" placeholder="쇼핑몰 아이디" oninput="_ofClearError('${cid}_userId')">
+        ${_savedOrderInfoMarkup(cid, "userId")}
+        <label class="of-save-id" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
+      </div>
     </div>
     <div class="of-error-msg" id="${cid}_userId_err"><i class="fas fa-exclamation-circle"></i> 아이디는 필수 입력 항목입니다.</div>
 
     <!-- 수취인 -->
+    ${_orderInfoSuggestionsMarkup(cid)}
     <div class="of-field">
-      <label class="of-label of-label-required">수취인</label>
-      <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient')">
+      <label class="of-label of-label-required" for="${cid}_recipient">수취인</label>
+      <div class="of-field-control">
+        <div class="of-input-status-wrap">
+          <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_clearSavedIdentitySelection('${cid}','recipient');_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
+        </div>
+        ${_savedOrderInfoMarkup(cid, "recipient")}
+      </div>
     </div>
     <!-- 연락처 -->
     <div class="of-field">
-      <label class="of-label of-label-required">연락처</label>
-      <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone')" maxlength="13">
+      <label class="of-label of-label-required" for="${cid}_phone">연락처</label>
+      <div class="of-field-control">
+        <div class="of-input-status-wrap">
+          <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="_clearSavedIdentitySelection('${cid}','phone');formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
+        </div>
+        ${_savedOrderInfoMarkup(cid, "phone")}
+      </div>
     </div>
     <!-- 배송주소 -->
-    <div class="of-field">
-      <label class="of-label of-label-required">배송주소</label>
-      <input id="${cid}_address" class="of-input" type="text" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address')">
+    <div class="of-field of-field--stack">
+      <label class="of-label of-label-required" for="${cid}_address">배송주소</label>
+      <div class="of-field-control">
+        <div class="of-input-status-wrap">
+          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+        </div>
+        ${_savedOrderInfoMarkup(cid, "address")}
+      </div>
     </div>
 
     <!-- 은행/계좌/예금주 (공유 가능) -->
     <div id="${cid}_bankWrap" class="${lockClass}">
       ${isFirst ? `
       <div class="of-field">
-        <label class="of-label of-label-required">은행</label>
+        <label class="of-label of-label-required" for="of_bank">은행</label>
         <div class="of-autocomplete-wrap">
           <input id="of_bank" class="of-input" type="text" placeholder="은행명 (클릭시 선택도 가능)" autocomplete="off"
             oninput="onBankInput(this);_ofClearError('of_bank')" onkeydown="onBankKeydown(event)" onfocus="onBankFocus()" onblur="onBankBlur()">
@@ -6146,38 +7155,41 @@ function _buildOrderCardHtml(cid, idx, type) {
         </div>
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">계좌</label>
+        <label class="of-label of-label-required" for="of_account">계좌</label>
         <input id="of_account" class="of-input" type="text" placeholder="계좌번호" oninput="_ofClearError('of_account')">
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">예금주</label>
-        <input id="of_depositor" class="of-input" type="text" placeholder="예금주 이름" oninput="_ofClearError('of_depositor')">
+        <label class="of-label of-label-required" for="of_depositor">예금주</label>
+        <div class="of-field-control">
+          <input id="of_depositor" class="of-input" type="text" placeholder="예금주 이름" oninput="_ofClearError('of_depositor')">
+          ${_savedBankAccountMarkup()}
+        </div>
       </div>` : `
       <div class="of-field">
-        <label class="of-label of-label-required">은행</label>
+        <label class="of-label of-label-required" for="${cid}_bank">은행</label>
         <input id="${cid}_bank" class="of-input" type="text" placeholder="은행명" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_bank')">
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">계좌</label>
+        <label class="of-label of-label-required" for="${cid}_account">계좌</label>
         <input id="${cid}_account" class="of-input" type="text" placeholder="계좌번호" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_account')">
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required">예금주</label>
+        <label class="of-label of-label-required" for="${cid}_depositor">예금주</label>
         <input id="${cid}_depositor" class="of-input" type="text" placeholder="예금주" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_depositor')">
       </div>`}
     </div>
 
     <!-- 결제금액 -->
     <div class="of-field">
-      <label class="of-label of-label-required">결제금액</label>
+      <label class="of-label of-label-required" for="${cid}_price">결제금액</label>
       <input id="${cid}_price" class="of-input" type="text" placeholder="결제한 금액 (예: 47,000)"
         oninput="formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')" inputmode="numeric">
     </div>
 
     <!-- 비고 (모든 카드에 표시) -->
-    <div class="of-field" id="${cid}_memo_wrap">
-      <label class="of-label" id="${cid}_memo_label">비고</label>
-      <input id="${cid}_memo" class="of-input" type="text" placeholder="포스팅URL 또는 기타메모 입력">
+    <div class="of-field of-field--stack" id="${cid}_memo_wrap">
+      <label class="of-label" id="${cid}_memo_label" for="${cid}_memo">비고</label>
+      <textarea id="${cid}_memo" class="of-input of-textarea" rows="2" placeholder="포스팅URL 또는 기타메모 입력"></textarea>
     </div>
 
     <div style="font-size:.7rem;color:var(--t3);padding:6px 8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
@@ -6189,7 +7201,7 @@ function _buildOrderCardHtml(cid, idx, type) {
     <label class="ofc-same-row" id="${cid}_sameChkRow" for="${cid}_sameChk">
       <input type="checkbox" id="${cid}_sameChk" checked onchange="toggleSameInfo('${cid}')">
       <i class="fas fa-copy" style="font-size:.8rem"></i>
-      주문자 / 은행 / 계좌 / 예금주를 1번째 주문과 동일하게 사용
+      <span class="ofc-same-orderer">주문자 / </span>은행 / 계좌 / 예금주를 1번째 주문과 동일하게 사용
     </label>` : ""}
 
     <!-- ★ v9.14: 소득신고 입력 (소득신고 모드일 때만 표시) -->
@@ -6559,11 +7571,8 @@ async function _loadReviewerProfileForForm() {
   const incomeType = window._incomeType || "";
   if (incomeType !== "소득신고") return;
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  if (!authRaw) return;
-  let auth;
-  try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.expAt || 0)) return;
+  const auth = _getReviewerSession();
+  if (!auth) return;
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
@@ -6601,11 +7610,8 @@ async function _loadInlineProfile() {
   const section = document.getElementById("inlineProfileSection");
   if (!section) return;
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  if (!authRaw) return;
-  let auth;
-  try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.expAt || 0)) return;
+  const auth = _getReviewerSession();
+  if (!auth) return;
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
@@ -6652,6 +7658,7 @@ async function _loadInlineProfile() {
       if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
       if (!Array.isArray(subs)) subs = [];
       _renderInlineSubList(subs);
+      await _loadSecureIdentityProfile();
     } else {
       // 프로필 미등록 상태
       const phoneEl = document.getElementById("inlineSelfPhone");
@@ -6662,17 +7669,50 @@ async function _loadInlineProfile() {
   }
 }
 
+async function _loadSecureIdentityProfile() {
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/secure", { headers: _getAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok || !data?.ok || !Array.isArray(data.profile?.identities)) return;
+    window._secureReviewerProfile = data.profile;
+    const self = data.profile.identities.find(x => x.type === "self");
+    const input = document.getElementById("inlineSelfShoppingId");
+    if (input && self) {
+      input.value = self.shoppingId || "";
+      input.dataset.identityKey = self.identityKey || "self";
+      input.dataset.savedValue = self.shoppingId || "";
+    }
+    _renderInlineSubList(_parseSubAccounts(window._reviewerProfile?.subAccounts));
+  } catch (e) { console.warn("[secureProfile]", e.message); }
+}
+
+async function _saveIdentityShoppingId(position) {
+  const input = position === 0
+    ? document.getElementById("inlineSelfShoppingId")
+    : document.getElementById("inlineSubShoppingId_" + (position - 1));
+  if (!input?.dataset.identityKey) { showToast("명의 정보를 다시 불러온 뒤 저장해주세요.", "warning"); return; }
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/"
+      + encodeURIComponent(input.dataset.identityKey) + "/shopping-id", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ shoppingId: input.value.trim() }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || "저장하지 못했습니다.");
+    input.dataset.savedValue = data.shoppingId || "";
+    showToast("아이디가 이 명의에 저장되었습니다.", "success");
+    await _loadSecureIdentityProfile();
+  } catch (e) { showToast(e.message || "아이디 저장에 실패했습니다.", "error"); }
+}
+
 /** 리뷰어 프로필 모달 열기 */
 async function openReviewerProfileModal() {
   const modal = document.getElementById("reviewerProfileModal");
   if (!modal) return;
 
   // 인증 세션 확인
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  if (!authRaw) { showToast("로그인 후 이용하세요.", "warning"); return; }
-  let auth;
-  try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.expAt || 0)) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
+  const auth = _getReviewerSession();
+  if (!auth) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
@@ -6797,9 +7837,7 @@ async function saveSubAccount() {
   if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
 
   // 인증 세션
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName   = auth.name   || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -6816,7 +7854,7 @@ async function saveSubAccount() {
   };
 
   if (editIdx >= 0 && editIdx < subs.length) {
-    subs[editIdx] = newSub; // 수정
+    subs[editIdx] = { ...subs[editIdx], ...newSub }; // 공통 아이디 등 확장 필드 보존
   } else {
     if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
     subs.push(newSub); // 추가
@@ -6853,9 +7891,7 @@ async function saveSubAccount() {
 async function deleteSubAccount(idx) {
   if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName   = auth.name   || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -6949,9 +7985,7 @@ async function saveIncomeInfoInline() {
   if (!incomeName && !juminRaw) { showToast("소득명의 또는 주민번호를 입력해주세요.", "warning"); return; }
   if (juminRaw && juminRaw.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -7061,9 +8095,7 @@ function cancelInlineSubForm() {
 /** 인라인 타계정 삭제 */
 async function deleteInlineSubAccount(idx) {
   if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -7153,9 +8185,7 @@ async function confirmSaveInlineSubAccount() {
   const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
   const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
 
-  const authRaw = localStorage.getItem("rapp_reviewer_auth");
-  let auth;
-  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const auth = _getReviewerSession() || {};
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
@@ -7173,7 +8203,7 @@ async function confirmSaveInlineSubAccount() {
   };
 
   if (editIdx >= 0 && editIdx < subs.length) {
-    subs[editIdx] = newSub;
+    subs[editIdx] = { ...subs[editIdx], ...newSub }; // 공통 아이디 등 확장 필드 보존
   } else {
     if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
     subs.push(newSub);
@@ -7220,10 +8250,14 @@ function _renderInlineSubList(subs) {
     const jDisplay = subJd.length === 13
       ? subJd.slice(0,6) + "-" + subJd.slice(6,7) + "••••••"
       : (subJd ? "등록됨" : "-");
+    const secureSub = (window._secureReviewerProfile?.identities || []).filter(x => x.type === "sub")[idx] || null;
+    const shoppingId = secureSub?.shoppingId || sub.shoppingId || "";
+    const identityKey = secureSub?.identityKey || "";
     return `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">
       <div style="flex:1;min-width:0">
         <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
         <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
+        <div style="display:flex;gap:5px;margin-top:5px"><input id="inlineSubShoppingId_${idx}" data-identity-key="${escHtml(identityKey)}" data-saved-value="${escHtml(shoppingId)}" value="${escHtml(shoppingId)}" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:5px 7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem"><button onclick="_saveIdentityShoppingId(${idx + 1})" style="padding:4px 8px;border:1px solid #93C5FD;border-radius:6px;background:#EFF6FF;color:#2563EB;font-size:.65rem;font-weight:700">저장</button></div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         <button onclick="editInlineSubAccount(${idx})" style="padding:3px 7px;background:#EFF6FF;color:#2563EB;border:1.5px solid #93C5FD;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">수정</button>
@@ -7259,6 +8293,11 @@ function addOrderCard() {
 
   // ★ v9.14: 소득신고 모드면 카드 incomeBlock 표시
   _onCardAddedIncome(cid, idx);
+
+  if (_activeIdentityContext) {
+    _renderSavedOrderInfoPickers();
+    _renderOrderInfoSuggestions();
+  }
 
   _updateCardCountBadge();
   // 스크롤
@@ -7383,19 +8422,25 @@ function onCardImgDrop(e, cid) {
 
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
-  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.lastBase64=""; st.lastMime=""; st.extracted=null; }
+  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
+  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.savedIdentitySelections = {}; }
+  _syncSubmissionIdentityAction();
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
   document.getElementById(cid+"_aiLoading").classList.remove("show");
   document.getElementById(cid+"_aiResult").classList.remove("show");
   document.getElementById(cid+"_aiError").style.display = "none";
+  const identityStatus = document.getElementById(cid+"_identityStatus"); if (identityStatus) { identityStatus.style.display = "none"; identityStatus.innerHTML = ""; }
+  const identityPanel = document.getElementById("orderIdentityAction");
+  if (identityPanel?.dataset.cid === cid) { identityPanel.style.display = "none"; identityPanel.dataset.cid = ""; }
   // ★ ai-locked 필드 잠금 해제 헬퍼
   function _unlockAiField(fid) {
     const f = document.getElementById(fid);
     if (!f) return;
     f.classList.remove("ai-filled", "ai-locked");
     f.readOnly = false;
+    f.removeAttribute("aria-readonly");
     f.removeAttribute("tabindex");
     f.style.paddingRight = "";
     // 자물쇠 배지 제거
@@ -7454,8 +8499,19 @@ function _retryCardAi(cid) {
 
 async function _callCardExtractAi(cid, base64, mimeType) {
   const st = _cardAiState[cid]; if (!st) return;
+  const requestId = (Number(st.analysisRequestId) || 0) + 1;
+  st.analysisRequestId = requestId;
+  // 새 캡처를 분석하기 시작하는 순간 이전 캡처의 추출/검토/승인 증명은 모두 폐기한다.
+  // 새 분석이 실패해도 과거 승인토큰으로 제출되는 stale-capture 우회를 막는다.
+  st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
+  st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
+  st.savedIdentitySelections = {};
+  st.identityBusy = true; st.identityCanManual = false; st.identityChecks = [];
+  const identityStatus = document.getElementById(cid + "_identityStatus");
+  if (identityStatus) identityStatus.innerHTML = '<strong>캡처를 분석하고 있습니다. 잠시 기다려주세요.</strong>';
+  _syncSubmissionIdentityAction(cid);
   const gasUrl = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!gasUrl) { _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
+  if (!gasUrl) { st.identityBusy = false; _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
   st.lastBase64 = base64; st.lastMime = mimeType;
 
   // 로딩 UI 시작
@@ -7464,12 +8520,12 @@ async function _callCardExtractAi(cid, base64, mimeType) {
 
   // 카운트다운
   if (st.countdownId) clearInterval(st.countdownId);
-  let remaining = 15;
+  let remaining = 35;
   const countEl = document.getElementById(cid+"_aiCountdown");
   const barEl   = document.getElementById(cid+"_aiBar");
   const tick = () => {
     if (countEl) { countEl.textContent = remaining; countEl.style.color = remaining<=3?"#DC2626":"#3182f6"; }
-    if (barEl)   barEl.style.width = (remaining/15*100)+"%";
+    if (barEl)   barEl.style.width = (remaining/35*100)+"%";
     remaining--;
   };
   tick();
@@ -7477,18 +8533,24 @@ async function _callCardExtractAi(cid, base64, mimeType) {
 
   // Abort
   if (st.abortCtrl) st.abortCtrl.abort();
-  st.abortCtrl = new AbortController();
-  const tid = setTimeout(() => { st.abortCtrl.abort(); st.abortCtrl = null; }, 15000);
+  const abortCtrl = new AbortController();
+  st.abortCtrl = abortCtrl;
+  const tid = setTimeout(() => {
+    abortCtrl.abort();
+    if (st.abortCtrl === abortCtrl) st.abortCtrl = null;
+  }, 35000);
 
   try {
     const payload = { action: "extractOrderImage", imageBase64: base64, mimeType };
     let json;
     try {
       // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
-      json = await gasPostUpload(payload);
+      json = await gasPostUpload(payload, 35000);
       clearTimeout(tid);
+      if (st.analysisRequestId !== requestId) return;
     } catch(fe) {
       clearTimeout(tid);
+      if (st.analysisRequestId !== requestId) return;
       _stopCardCountdown(cid);
       document.getElementById(cid+"_aiLoading").classList.remove("show");
       _showCardAiError(cid, fe.name==="AbortError" ? "⏱ 15초 안에 응답이 없었습니다." : "이미지 전송 실패: "+fe.message, true);
@@ -7497,10 +8559,22 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     _stopCardCountdown(cid);
     document.getElementById(cid+"_aiLoading").classList.remove("show");
     const lblDone = document.getElementById(cid+"_imgLabel"); if (lblDone) lblDone.textContent = "분석 완료 ✓";
-    if (!json || json.error) { _showCardAiError(cid, json?.error||"알 수 없는 오류", true); return; }
+    if (!json || json.error) {
+      st.extractToken = json?.extractToken || "";
+      st.imageHash = json?.imageHash || "";
+      _showCardAiError(cid, json?.error||"알 수 없는 오류", true);
+      _renderIdentityMatchState(cid, "ERROR", ["AI 분석을 완료하지 못했습니다."], !!st.extractToken);
+      return;
+    }
 
-    st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"" };
-    _showCardAiResult(cid, st.extracted);
+    st.extractToken = json.extractToken || "";
+    st.imageHash = json.imageHash || "";
+    st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
+    // extractToken은 AI 원본 추출값의 해시에 결속된다. 서버가 가림정보를 보완한
+    // st.extracted와 섞지 않고 재확인 때 동일 증명을 검증할 수 있도록 원본을 보존한다.
+    st.proofExtracted = { ...st.extracted };
+    await _matchCardIdentity(cid, requestId);
+    if (st.analysisRequestId !== requestId) return;
 
     // 주문번호 자동 입력
     if (st.extracted.orderNumber) {
@@ -7513,10 +8587,225 @@ async function _callCardExtractAi(cid, base64, mimeType) {
       _ncVerifyIdentity(cid, st.extracted);
     }
   } catch(err) {
+    if (st.analysisRequestId !== requestId) return;
     _stopCardCountdown(cid);
     document.getElementById(cid+"_aiLoading").classList.remove("show");
     _showCardAiError(cid, err.message, true);
+  } finally {
+    if (st.analysisRequestId === requestId) { st.identityBusy = false; _renderIdentityMatchState(cid, st.identityStatus || "ERROR", st.identityReasons || [], !!st.identityCanManual); }
   }
+}
+
+function _cardIdentityForm(cid) {
+  return {
+    recipient: (document.getElementById(cid + "_recipient")?.value || "").trim(),
+    phone: (document.getElementById(cid + "_phone")?.value || "").trim(),
+    address: (document.getElementById(cid + "_address")?.value || "").trim(),
+  };
+}
+
+function _identityAddressDifference(cid) {
+  const registered = String(_activeIdentityContext?.selectedIdentity?.address || "").trim();
+  const entered = String(document.getElementById(cid + "_address")?.value || _cardAiState[cid]?.extracted?.address || "").trim();
+  const normalize = (value) => value.replace(/\s+/g, "");
+  return registered && entered && normalize(registered) !== normalize(entered) ? { registered, entered } : null;
+}
+
+function _identityIssues(cid) {
+  const st = _cardAiState[cid] || {};
+  const labels = { recipient:"수취인", phone:"연락처", address:"배송주소", price:"결제금액" };
+  const issues = [];
+  for (const [field, label] of Object.entries(labels)) {
+    const el = document.getElementById(cid + "_" + field);
+    if (!el) continue;
+    const value = String(el.value || "").trim();
+    if (!value) {
+      const unread = st.proofExtracted && !String(st.proofExtracted[field] || "").trim();
+      issues.push({ field, label, edit:true, reason:unread ? "캡처에서 읽지 못했습니다. 직접 입력해주세요." : "입력해주세요." });
+    } else if (field !== "price" && _hasIdentityMask(value)) {
+      issues.push({ field, label, edit:true, reason:"가림문자를 실제 정보로 바꿔주세요." });
+    } else if (!st.approvalToken && field === "address" && _identityAddressDifference(cid)) {
+      issues.push({ field, label, edit:false, reason:"등록 주소와 다릅니다. 실제 배송지가 맞는지 확인해주세요." });
+    } else if (!st.approvalToken) {
+      const check = (st.identityChecks || []).find((item) => item.field === field && item.status !== "match");
+      if (check && value === String(st.extracted?.[field] || "").trim()) {
+        issues.push({ field, label, edit:check.status === "mismatch" && !st.identityCanManual, reason:check.reason });
+      }
+    }
+  }
+  return issues;
+}
+
+function _pointToIdentityField(cid, field) {
+  if (!["recipient", "phone", "address", "price"].includes(field)) return;
+  const el = document.getElementById(cid + "_" + field); if (!el) return;
+  el.scrollIntoView({ behavior:"smooth", block:"center" });
+  el.focus({ preventScroll:true });
+  // iframe 전체 높이가 커진 모바일 화면에서도 부모 스크롤을 해당 항목으로 옮긴다.
+  if (window.parent !== window) window.parent.postMessage({ type:"purchase-field-focus", top:el.getBoundingClientRect().top + window.scrollY }, location.origin);
+}
+
+function _purchaseIdentityTarget() {
+  for (const cid of _orderCardIds) {
+    const st = _cardAiState[cid];
+    if (!st || !(st.lastBase64 || st.extractToken || st.identityStatus)) continue;
+    const issues = _identityIssues(cid);
+    if (!st.approvalToken || issues.length) return { cid, st, issues };
+  }
+  return null;
+}
+
+function _purchasePrimaryAction() {
+  if (window._submitOrderFormInProgress) return;
+  const target = _purchaseIdentityTarget();
+  if (target) {
+    if (target.st.identityBusy) return;
+    const edit = target.issues.find((issue) => issue.edit);
+    if (edit) { _pointToIdentityField(target.cid, edit.field); return; }
+    if (!target.st.approvalToken) {
+      if (target.st.identityCanManual) return _manualConfirmIdentity(target.cid);
+      return _retrySubmissionIdentity(target.cid);
+    }
+  }
+  confirmOrderSubmit();
+}
+
+function _syncSubmissionIdentityAction() {
+  if (!_EMBED_CTX || _PREVIEW_MODE) return;
+  const panel = document.getElementById("orderIdentityAction");
+  const btn = document.getElementById("btnOrderFormSubmit");
+  const target = _purchaseIdentityTarget();
+  if (panel) {
+    panel.style.display = target ? "block" : "none";
+    panel.dataset.cid = target?.cid || "";
+    panel.innerHTML = target ? '<strong>' + (_orderCardIds.indexOf(target.cid) + 1) + '번째 주문</strong><div style="margin-top:8px">'
+      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML || "캡처 확인이 필요합니다.") + '</div>' : "";
+  }
+  if (!btn || window._submitOrderFormInProgress) return;
+  btn.onclick = _purchasePrimaryAction;
+  btn.disabled = !!target?.st.identityBusy;
+  btn.textContent = target?.st.identityBusy ? "확인 중…"
+    : target && !target.st.approvalToken && target.st.identityCanManual && !target.issues.some((item) => item.edit)
+      ? "내 주문이 맞습니다" : "제출";
+}
+
+function _retrySubmissionIdentity(cid) {
+  const st = _cardAiState[cid];
+  if (st?.identityBusy) return;
+  if (st?.lastBase64) _retryCardAi(cid);
+  else document.getElementById(cid + "_imgInput")?.click();
+}
+
+function _renderIdentityMatchState(cid, status, reasons, canManual) {
+  const st = _cardAiState[cid];
+  const box = document.getElementById(cid + "_identityStatus"); if (!box || !st) return;
+  st.identityStatus = status; st.identityReasons = reasons || []; st.identityCanManual = canManual;
+  const issues = _identityIssues(cid);
+  for (const field of ["recipient", "phone", "address", "price"]) {
+    const el = document.getElementById(cid + "_" + field); if (!el) continue;
+    el.classList.toggle("identity-field-attention", issues.some((item) => item.field === field));
+    if (!el.dataset.identityGuidanceBound) {
+      el.dataset.identityGuidanceBound = "1";
+      el.addEventListener("input", () => _renderIdentityMatchState(cid, st.identityStatus, st.identityReasons, st.identityCanManual));
+    }
+  }
+  box.style.cssText = "border-radius:9px;padding:10px;margin-bottom:8px;font-size:.8rem;line-height:1.6;background:#FFFBEB;color:#81450c;border:1px solid #FCD34D";
+  box.style.display = status === "MATCH" && !issues.length ? "none" : "block";
+  box.innerHTML = issues.map((item) => '<button type="button" class="identity-issue-link" onclick="_pointToIdentityField(\'' + cid + '\',\'' + item.field + '\')"><b>'
+    + item.label + '</b><div>' + _safeText(item.reason) + '</div><span>입력칸으로 이동 ↑</span></button>').join('');
+  if (issues.some((item) => item.field === "address" && !item.edit)) {
+    const diff = _identityAddressDifference(cid);
+    if (diff) box.innerHTML += '<div style="overflow-wrap:anywhere"><b>등록 주소</b><br>' + _safeText(diff.registered) + '<br><b>주문 배송지</b><br>' + _safeText(diff.entered) + '</div>';
+  }
+  if (!issues.length && status !== "MATCH") box.innerHTML = '<div>' + _safeText((reasons || []).filter(Boolean).join(' · ') || '선택 명의의 주문인지 확인해주세요.') + '</div>';
+  if (!st.approvalToken && !canManual && !st.identityBusy) box.innerHTML += '<button type="button" class="identity-issue-link" onclick="_retrySubmissionIdentity(\'' + cid + '\')">'
+    + (st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
+  _syncSubmissionIdentityAction();
+}
+
+
+async function _matchCardIdentity(cid, requestId) {
+  const st = _cardAiState[cid]; if (!st?.extracted || !st.extractToken) return;
+  try {
+    await _loadOrderIdentityContext();
+    if (requestId != null && st.analysisRequestId !== requestId) return;
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match", {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify(_reviewerIdentityRequestBody({ extractToken: st.extractToken, extracted: st.extracted })),
+    });
+    const data = await response.json();
+    if (requestId != null && st.analysisRequestId !== requestId) return;
+    if (!response.ok || !data?.ok) {
+      const error = new Error(data?.error || "명의를 확인하지 못했습니다.");
+      error.canManualIdentityCheck = response.status >= 500;
+      throw error;
+    }
+    st.matchError = false;
+    st.approvalToken = data.approvalToken || "";
+    st.priorApprovalToken = "";
+    st.reviewToken = data.reviewToken || "";
+    st.identityChecks = data.checks || [];
+    if (data.resolved) st.extracted = { ...st.extracted, ...data.resolved };
+    _showCardAiResult(cid, st.extracted);
+    if (data.status === "MATCH" || data.status === "REVIEW") applyCardAiResult(cid);
+    _renderIdentityMatchState(cid, data.status, data.reasons || [], data.status === "REVIEW" && !!st.reviewToken);
+  } catch (err) {
+    if (requestId != null && st.analysisRequestId !== requestId) return;
+    st.approvalToken = "";
+    // 인증·문맥·증명 오류(4xx)는 재로그인/재분석 대상이다. 서버/AI 장애와 네트워크
+    // 실패만 수동 확인 대상으로 열고, 서버가 다시 결정적 불일치를 검사한다.
+    st.matchError = err.canManualIdentityCheck !== false;
+    _showCardAiResult(cid, st.extracted);
+    _renderIdentityMatchState(cid, "ERROR", [err.message], !!(st.matchError && st.extractToken));
+  }
+}
+
+async function _manualConfirmIdentity(cid) {
+  const st = _cardAiState[cid]; if (!st) return;
+  const mode = st.priorApprovalToken ? "form_edit"
+    : (st.reviewToken ? "review" : (st.matchError && st.extracted ? "match_error" : "ai_error"));
+  if (st.identityBusy) return;
+  const edit = _identityIssues(cid).find((issue) => issue.edit);
+  if (edit) { _pointToIdentityField(cid, edit.field); return; }
+  const inputSnapshot = JSON.stringify({
+    formFields: _cardIdentityForm(cid), savedIdentitySelections: _savedIdentitySelections(cid),
+  });
+  const requestId = st.analysisRequestId;
+  st.identityBusy = true; _syncSubmissionIdentityAction();
+  try {
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify(_reviewerIdentityRequestBody({
+        mode, manualConfirmed: true, reviewToken: st.reviewToken || "",
+        priorApprovalToken: st.priorApprovalToken || "",
+        extractToken: st.extractToken || "",
+        extracted: (mode === "form_edit" ? st.proofExtracted : st.extracted) || {},
+        formFields: _cardIdentityForm(cid),
+        savedIdentitySelections: _savedIdentitySelections(cid),
+      })),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok || !data.approvalToken) {
+      const error = new Error(data?.error || "수동 확인을 저장하지 못했습니다.");
+      error.needsAnalysis = ['IDENTITY_TOKEN_INVALID','EXTRACT_FIELDS_TAMPERED','IDENTITY_CONTEXT_CHANGED'].includes(data?.code);
+      throw error;
+    }
+    if (st.analysisRequestId !== requestId || JSON.stringify({
+      formFields: _cardIdentityForm(cid), savedIdentitySelections: _savedIdentitySelections(cid),
+    }) !== inputSnapshot) {
+      if (st.analysisRequestId === requestId) _renderIdentityMatchState(cid, "REVIEW", ["입력값이 변경되었습니다. 다시 확인해주세요."], true);
+      return;
+    }
+    st.approvalToken = data.approvalToken || "";
+    st.priorApprovalToken = "";
+    st.reviewToken = "";
+    st.matchError = false;
+    _renderIdentityMatchState(cid, "MATCH", ["사용자가 주문 정보를 직접 확인했습니다."], false);
+  } catch (err) {
+    if (st.analysisRequestId !== requestId) return;
+    _renderIdentityMatchState(cid, "ERROR", [err.message], !err.needsAnalysis);
+    showToast(err.message, "error");
+  } finally { if (st.analysisRequestId === requestId) { st.identityBusy = false; _renderIdentityMatchState(cid, st.identityStatus || "ERROR", st.identityReasons || [], !!st.identityCanManual); } }
 }
 
 function _stopCardCountdown(cid) {
@@ -7526,6 +8815,10 @@ function _stopCardCountdown(cid) {
   const barEl   = document.getElementById(cid+"_aiBar");
   if (countEl) { countEl.textContent=""; countEl.style.color="#3182f6"; }
   if (barEl)   barEl.style.width = "100%";
+}
+
+function _hasIdentityMask(value) {
+  return /[*＊●○◯◉•·xX]/.test(String(value || ""));
 }
 
 function _showCardAiResult(cid, data) {
@@ -7540,7 +8833,7 @@ function _showCardAiResult(cid, data) {
   document.getElementById(cid+"_aiError").style.display = "none";
 
   // ★ 별표(*) 탐지: 수취인/전화번호/주소에 * 포함 시 경고 표시 (적용은 허용)
-  const hasAsterisk = [data.recipient, data.phone, data.address].some(v => v && v.includes("*"));
+  const hasAsterisk = [data.recipient, data.phone, data.address].some(_hasIdentityMask);
   const asteriskWarnEl = document.getElementById(cid+"_asteriskWarn");
   if (asteriskWarnEl) asteriskWarnEl.style.display = hasAsterisk ? "block" : "none";
 
@@ -7559,6 +8852,11 @@ function _showCardAiResult(cid, data) {
 }
 
 function _showCardAiError(cid, msg, showRetry) {
+  const panel = document.getElementById("orderIdentityAction");
+  if (panel?.dataset.cid === cid) {
+    const st = _cardAiState[cid];
+    _renderIdentityMatchState(cid, "ERROR", [msg], !!(st?.extractToken && !st.extracted));
+  }
   const errEl = document.getElementById(cid+"_aiError"); if(!errEl) return;
   errEl.style.display = "block";
   const msgEl = document.getElementById(cid+"_aiErrorMsg"); if(msgEl) msgEl.textContent = msg;
@@ -7577,7 +8875,7 @@ function applyCardAiResult(cid) {
   const d = st.extracted;
 
   // ★ 별표(*) 탐지: 포함된 필드는 핑크색 표시 (적용은 허용)
-  const hasAsterisk = [d.recipient, d.phone, d.address].some(v => v && v.includes("*"));
+  const hasAsterisk = [d.recipient, d.phone, d.address].some(_hasIdentityMask);
 
   // ★ 잠금 적용 헬퍼: 값 채우기 + readonly + ai-locked + 자물쇠 배지
   // 별표 포함 필드: 핑크색 + 수정 가능 (잠금 X)
@@ -7586,16 +8884,18 @@ function applyCardAiResult(cid) {
     const el = document.getElementById(id);
     if (!el) return;
     el.value = val;
-    const valHasAsterisk = val.includes("*");
+    const valHasAsterisk = _hasIdentityMask(val);
     if (valHasAsterisk) {
       // 별표 포함: 핑크색 표시 + 수정 가능
       el.classList.add("ai-filled-asterisk");
       el.classList.remove("ai-filled", "ai-locked");
       el.readOnly = false;
+      el.removeAttribute("tabindex");
       // ★ 실시간 별표 감지 핸들러: 별표 제거 시 녹색 전환
       el.addEventListener("input", function _asteriskWatch() {
+        _invalidateIdentityApproval(cid);
         const curVal = el.value;
-        const stillHas = curVal.includes("*");
+        const stillHas = _hasIdentityMask(curVal);
         const badge = el.parentElement?.querySelector(".ai-lock-badge");
         if (stillHas) {
           el.classList.add("ai-filled-asterisk");
@@ -7648,7 +8948,7 @@ function applyCardAiResult(cid) {
     const addrEl = document.getElementById(cid+"_address");
     if (addrEl) {
       addrEl.value = d.address;
-      const addrHasAsterisk = d.address.includes("*");
+      const addrHasAsterisk = _hasIdentityMask(d.address);
       if (addrHasAsterisk) {
         addrEl.classList.add("ai-filled-asterisk");
         addrEl.classList.remove("ai-filled", "ai-locked");
@@ -7659,7 +8959,7 @@ function applyCardAiResult(cid) {
       // ★ 실시간 별표 감지 핸들러 (주소)
       addrEl.addEventListener("input", function() {
         const curVal = addrEl.value;
-        const stillHas = curVal.includes("*");
+        const stillHas = _hasIdentityMask(curVal);
         const badge = addrEl.parentElement?.querySelector(".ai-lock-badge");
         if (stillHas) {
           addrEl.classList.add("ai-filled-asterisk");
@@ -7822,81 +9122,126 @@ function _ofClearError(inputId) {
    - 사전검증 API 오류 시 fail-open (서버 /api/submit/order가 최종 방어)
    ══════════════════════════════════════════════════════ */
 async function _runIdentityPrecheck(auth, orders) {
-  let pre;
-  try {
-    pre = await gasPost({
-      action: "identityPrecheck",
-      phone8: auth.phone8,
-      orders: orders.map(o => ({
-        recipient: o.recipient, phone: o.phone, address: o.address,
-        bank: o.bank, account: o.account, depositor: o.depositor,
-        extractedRecipient: o.extractedRecipient, extractedPhone: o.extractedPhone,
-        extractedAddress: o.extractedAddress,
-      })),
-    }, 30000);
-  } catch (e) {
-    console.warn("[identityPrecheck] 오류(서버 최종검증으로 진행):", e.message);
+  const _handledIds = new Set();
+  const _precheckPayload = () => ({
+    action: "identityPrecheck",
+    phone8: auth.phone8,
+    orders: orders.map(o => ({
+      recipient: o.recipient, phone: o.phone, address: o.address,
+      bank: o.bank, account: o.account, depositor: o.depositor,
+      extractedRecipient: o.extractedRecipient, extractedPhone: o.extractedPhone,
+      extractedAddress: o.extractedAddress,
+    })),
+  });
+
+  // 새 타계정들을 모두 저장한 뒤 같은 입력으로 전체를 한 번만 다시 판정한다. 카드마다
+  // identityPrecheck를 호출하면 이미지 분석과 공유하는 분당 제한을 소진하므로 왕복은 최대 2회다.
+  for (let pass = 0; pass < 2; pass++) {
+    let pre;
+    try {
+      pre = await gasPost(_precheckPayload(), 30000);
+    } catch (e) {
+      console.warn("[identityPrecheck] 오류:", e.message);
+      if (pass === 0) return true; // 첫 사전검증 장애는 기존처럼 서버 최종 게이트에 맡긴다.
+      showToast("타계정 등록은 완료됐지만 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", "error");
+      return false;
+    }
+    if (!pre || !pre.ok) {
+      if (pass === 0) return true;
+      showToast(pre?.error || "타계정 등록 후 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", "error");
+      return false;
+    }
+
+    // ① 내정보 미등록 → 차단 + 게이트 배너
+    if (Array.isArray(pre.profileMissing) && pre.profileMissing.length > 0) {
+      _showProfileGateBanner(pre.profileMissing);
+      showToast("내정보 미등록 항목: " + pre.profileMissing.join(", ") + " — 등록 후 제출할 수 있습니다.", "error");
+      return false;
+    }
+
+    // ② 주문별 신원 판정 처리. 첫 판정에서 필요한 타계정을 모두 저장한 뒤 한 번만 재검증한다.
+    let registeredAny = false;
+    for (const r of (pre.results || [])) {
+      if (r.status === "NEED_SUB_REGISTER") {
+        const idn = r.identity || {};
+        const _idKey = (idn.name || "").replace(/\s+/g, "") + "|" + (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
+        if (_handledIds.has(_idKey)) {
+          if (pass === 0) continue; // 같은 명의 주문이 여러 장이면 등록은 한 번만 한다.
+          showToast("타계정 등록 후에도 입력 정보가 일치하지 않습니다. 이름과 연락처를 확인해주세요.", "error");
+          return false;
+        }
+        if (pass > 0) {
+          showToast("타계정 등록 후에도 입력 정보가 일치하지 않습니다. 이름과 연락처를 확인해주세요.", "error");
+          return false;
+        }
+        const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
+          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
+          + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
+          + "현재 입력값을 나의 타계정으로 등록할까요?\n(등록해야 제출을 계속할 수 있습니다)";
+        if (!confirm(msg)) {
+          showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
+          return false;
+        }
+        const reg = await _registerSubAccountFromOrder(auth, idn);
+        if (!reg.ok) {
+          showToast(reg.error || "타계정 등록에 실패했습니다. 리뷰어 홈 > 내정보에서 확인해주세요.", "error");
+          return false;
+        }
+        _handledIds.add(_idKey);
+        showToast(reg.alreadyRegistered
+          ? `타계정(${idn.name}) 등록 정보를 확인했습니다.`
+          : `타계정(${idn.name}) 등록 완료 — 정보를 다시 확인합니다.`, "success");
+        registeredAny = true;
+        continue;
+      }
+      if (r.status === "NEED_CONFIRM") {
+        if (orders[r.idx]?.identityConfirmed) continue;
+        const msg = "⚠️ 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n"
+          + "- " + (r.reasons || []).join("\n- ")
+          + "\n\n입력 정보가 정확한지 확인했으며 그대로 제출할까요?";
+        if (!confirm(msg)) {
+          showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
+          return false;
+        }
+        if (orders[r.idx]) orders[r.idx].identityConfirmed = true;
+      }
+    }
+    if (pass === 0 && registeredAny) continue;
     return true;
   }
-  if (!pre || !pre.ok) return true; // fail-open — 서버 게이트가 최종 방어
 
-  // ① 내정보 미등록 → 차단 + 게이트 배너
-  if (Array.isArray(pre.profileMissing) && pre.profileMissing.length > 0) {
-    _showProfileGateBanner(pre.profileMissing);
-    showToast("내정보 미등록 항목: " + pre.profileMissing.join(", ") + " — 등록 후 제출할 수 있습니다.", "error");
-    return false;
-  }
-
-  // ② 주문별 신원 판정 처리
-  const _handledIds = new Set(); // 같은 신원 다건 → 다이얼로그/등록 1회만
-  for (const r of (pre.results || [])) {
-    if (r.status === "NEED_SUB_REGISTER") {
-      const idn = r.identity || {};
-      const _idKey = (idn.name || "").replace(/\s+/g, "") + "|" + (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
-      if (_handledIds.has(_idKey)) continue; // 이미 이번 제출에서 등록 처리됨
-      const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
-        + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
-        + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
-        + "현재 입력값을 나의 타계정으로 등록할까요?\n(등록해야 제출을 계속할 수 있습니다)";
-      if (!confirm(msg)) {
-        showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
-        return false;
-      }
-      const okReg = await _registerSubAccountFromOrder(auth, idn);
-      if (!okReg) {
-        showToast("타계정 등록에 실패했습니다. 리뷰어 홈 > 내정보에서 직접 등록해주세요.", "error");
-        return false;
-      }
-      showToast(`타계정(${idn.name}) 등록 완료 — 제출을 계속합니다.`, "success");
-      _handledIds.add(_idKey);
-    } else if (r.status === "NEED_CONFIRM") {
-      const msg = "⚠️ 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n"
-        + "- " + (r.reasons || []).join("\n- ")
-        + "\n\n입력 정보가 정확한지 확인했으며 그대로 제출할까요?";
-      if (!confirm(msg)) {
-        showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
-        return false;
-      }
-      if (orders[r.idx]) orders[r.idx].identityConfirmed = true;
-    }
-  }
-  return true;
+  showToast("타계정 정보를 확인하지 못했습니다. 입력값을 확인한 뒤 다시 제출해주세요.", "error");
+  return false;
 }
 
 /** 신원 불일치 감지 시 현재 주문 입력값을 타계정으로 자동 등록 */
 async function _registerSubAccountFromOrder(auth, idn) {
   try {
     const prof = await gasGet({ action: "getReviewerProfile", name: auth.name, phone8: auth.phone8 });
-    if (!prof?.ok || !prof.profile) return false;
+    if (!prof?.ok || !prof.profile) {
+      return { ok: false, code: prof?.code || "PROFILE_LOAD_FAILED", error: prof?.error || "내정보를 불러오지 못했습니다." };
+    }
     const subs = Array.isArray(prof.profile.subAccounts) ? prof.profile.subAccounts : [];
-    // ★ 중복 등록 방지: 같은 이름+전화(뒤8자리) 타계정이 이미 있으면 성공으로 간주
+    // 같은 전화번호가 이미 있으면 새 행을 추가하지 않는다. 이름까지 같으면 등록 완료로
+    // 간주하고, 이름이 다르면 어느 값을 고쳐야 하는지 알려준다.
     const _n = (idn.name || "").replace(/\s+/g, "");
     const _p8 = (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
-    if (subs.some(s => (s?.name || "").replace(/\s+/g, "") === _n
-        && (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8)) {
-      return true;
+    if (!_n || _p8.length !== 8) {
+      return { ok: false, code: "SUB_ACCOUNT_IDENTITY_REQUIRED", error: "타계정 이름과 연락처를 확인해주세요." };
     }
-    if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록할 수 있습니다.", "error"); return false; }
+    const samePhone = subs.find(s => (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8);
+    if (samePhone) {
+      const savedName = (samePhone?.name || "").trim();
+      if (savedName.replace(/\s+/g, "") === _n) return { ok: true, alreadyRegistered: true };
+      return {
+        ok: false,
+        code: "SUB_PHONE_NAME_MISMATCH",
+        error: `이 연락처는 이미 타계정 '${savedName || "이름 미등록"}'으로 등록되어 있습니다. 입력 이름과 등록 이름을 확인해주세요.`,
+      };
+    }
+    if (subs.length >= 10) {
+      return { ok: false, code: "SUB_ACCOUNT_LIMIT", error: "타계정은 최대 10개까지 등록할 수 있습니다. 기존 타계정을 정리한 뒤 다시 시도해주세요." };
+    }
     subs.push({
       name: (idn.name || "").trim(),
       phone: (idn.phone || "").trim(),
@@ -7910,12 +9255,12 @@ async function _registerSubAccountFromOrder(auth, idn) {
     const r = await gasPost({ action: "saveSubAccounts", name: auth.name, phone8: auth.phone8, subAccounts: JSON.stringify(subs) });
     if (r?.ok) {
       if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
-      return true;
+      return { ok: true, registered: true };
     }
-    return false;
+    return { ok: false, code: r?.code || "SUB_ACCOUNT_SAVE_FAILED", error: r?.error || "타계정 등록에 실패했습니다." };
   } catch (e) {
     console.warn("[subRegister] 실패:", e.message);
-    return false;
+    return { ok: false, code: "SUB_ACCOUNT_SAVE_FAILED", error: e.message || "타계정 등록 중 오류가 발생했습니다." };
   }
 }
 
@@ -7999,6 +9344,7 @@ function confirmOrderSubmit() {
   }
   if (_PREVIEW_MODE) { _openOrderConfirm(); return; }
   window._captureSkipped = false;
+  if (_EMBED_CTX && !_PREVIEW_MODE) { submitOrderForm(); return; }
   _openOrderConfirm();
 }
 function _closeOrderConfirm() {
@@ -8008,6 +9354,61 @@ function _closeOrderConfirm() {
 function _proceedOrderSubmit() {
   _closeOrderConfirm();
   submitOrderForm();
+}
+
+async function _prepareIdentityApprovals(orders) {
+  if (!_EMBED_CTX || _PREVIEW_MODE) return true;
+  try { await _loadOrderIdentityContext(); }
+  catch (e) { showToast(e.message, "error"); return false; }
+  for (const order of orders) {
+    const st = _cardAiState[order.cid] || {};
+    const hasCapture = String(order.imgThumbSrc || "").startsWith("data:");
+    if (hasCapture) {
+      if (!st.approvalToken) {
+        const panel = document.getElementById("orderIdentityAction");
+        if (panel) panel.dataset.cid = order.cid;
+        const source = document.getElementById(order.cid + "_identityStatus");
+        if (!source?.innerHTML) _renderIdentityMatchState(order.cid, st.extractToken ? "REVIEW" : "ERROR",
+          [st.extractToken ? "명의 확인을 완료해주세요." : "캡처 AI 분석을 다시 시도해주세요."],
+          !!(st.priorApprovalToken || st.reviewToken || (st.extractToken && (!st.extracted || st.matchError))));
+        _syncSubmissionIdentityAction(order.cid);
+        panel?.focus({ preventScroll:true });
+        panel?.scrollIntoView({ behavior:"smooth", block:"nearest" });
+        showToast("제출 버튼 위의 명의 확인 영역에서 확인을 완료해주세요.", "warning");
+        return false;
+      }
+      order.identityApprovalToken = st.approvalToken;
+      continue;
+    }
+    if (!window._captureSkipped) {
+      showToast("캡처 없이 제출하려면 예외 확인 버튼을 먼저 선택해주세요.", "warning");
+      return false;
+    }
+    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
+      method:"POST", headers:{ "Content-Type":"application/json", ..._getAuthHeaders() },
+      body:JSON.stringify(_reviewerIdentityRequestBody({
+        mode:"no_capture", manualConfirmed:true,
+        formFields:{ recipient:order.recipient, phone:order.phone, address:order.address },
+      })),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) { showToast(data?.error || "무캡처 확인에 실패했습니다.", "error"); return false; }
+    order.identityApprovalToken = data.approvalToken;
+  }
+  return true;
+}
+
+async function _saveOrderShoppingIdIfRequested(order) {
+  const checkbox = document.getElementById(order.cid + "_saveIdChk");
+  if (!checkbox?.checked || !_activeIdentityContext?.selectedIdentity?.identityKey) return;
+  const response = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/"
+    + encodeURIComponent(_activeIdentityContext.selectedIdentity.identityKey) + "/shopping-id", {
+    method:"PATCH", headers:{ "Content-Type":"application/json", ..._getAuthHeaders() },
+    body:JSON.stringify({ shoppingId: order.userId || "" }),
+  });
+  const data = await response.json();
+  if (!response.ok || !data?.ok) throw new Error(data?.error || "아이디를 명의에 저장하지 못했습니다.");
+  checkbox.checked = false;
 }
 
 /** 관리자 미리보기 전용 완료 처리. 주문·첨부·작업보드 API를 호출하지 않는다. */
@@ -8037,6 +9438,7 @@ async function submitOrderForm() {
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = label || '<i class="fas fa-paper-plane"></i> 제출';
+      if (!label) _syncSubmissionIdentityAction();
       // 재제출 모드가 아니면 스타일 초기화
       if (!label) {
         btn.style.background = "";
@@ -8095,12 +9497,12 @@ async function submitOrderForm() {
 
   let hasError = false;
 
-  // 주문자 필수
-  if (!firstOrderer) { _ofShowError("of_orderer"); hasError = true; }
+  // 주문자 필수 — ★ 칸이 보일 때만(감춰져 있으면 서버가 로그인 이름으로 채운다)
+  if (_ordererPickerOn() && !firstOrderer) { _ofShowError("of_orderer"); hasError = true; }
 
   // ★ 주문번호·비고 제외 전 항목 필수 (카드별)
   //   - 주문자/은행/계좌/예금주는 "1번과 동일" 체크 시 1번 카드 값을 유효값으로 인정
-  //   - nc모드 2번(쿠팡) 카드는 주문자/은행/계좌/예금주/수취인/연락처/주소를 1번 카드에서 재사용하므로 검사 제외
+  //   - nc모드 2번(쿠팡)도 캡처에서 확인한 수취인/연락처/주소를 독립 기록
   const _missingLabels = [];
   _orderCardIds.forEach((cid, idx) => {
     const isFirst = idx === 0;
@@ -8112,16 +9514,14 @@ async function submitOrderForm() {
       [cid + "_userId", "아이디"],
       [cid + "_price", "결제금액"],
     ];
-    if (!isCoupangCard) {
-      perCard.push([cid + "_recipient", "수취인"], [cid + "_phone", "연락처"], [cid + "_address", "배송주소"]);
-    }
+    perCard.push([cid + "_recipient", "수취인"], [cid + "_phone", "연락처"], [cid + "_address", "배송주소"]);
     perCard.forEach(([id, label]) => {
       if (!gv(id)) { _ofShowError(id); _missingLabels.push(label); hasError = true; }
     });
 
     // 주문자/은행/계좌/예금주 — 공유 로직 반영한 유효값 기준
     if (!isFirst && !isCoupangCard && !chkSame) {
-      if (!gv(cid + "_orderer")) { _ofShowError(cid + "_orderer"); _missingLabels.push("주문자"); hasError = true; }
+      if (_ordererPickerOn() && !gv(cid + "_orderer")) { _ofShowError(cid + "_orderer"); _missingLabels.push("주문자"); hasError = true; }
       if (!gv(cid + "_bank"))     { _ofShowError(cid + "_bank");     _missingLabels.push("은행"); hasError = true; }
       if (!gv(cid + "_account"))  { _ofShowError(cid + "_account");  _missingLabels.push("계좌"); hasError = true; }
       if (!gv(cid + "_depositor")){ _ofShowError(cid + "_depositor");_missingLabels.push("예금주"); hasError = true; }
@@ -8133,7 +9533,7 @@ async function submitOrderForm() {
   if (!firstDepositor) { _ofShowError("of_depositor"); _missingLabels.push("예금주"); hasError = true; }
 
   // ★ nc 모드: 쿠팡 결제금액 필수 + 동일인 검증 확인
-  if (window._ncMode && _orderCardIds.length >= 2) {
+  if (window._ncMode && _orderCardIds.length >= 2 && !_activeIdentityContext) {
     const coupangCid = _orderCardIds[1];
     const cpPrice = gv(coupangCid + "_price");
     if (!cpPrice) {
@@ -8171,7 +9571,7 @@ async function submitOrderForm() {
     _resetBtn(); return;
   }
 
-  // ★ 별표(*) 포함 검사: 수취인/연락처/주소에 *가 남아있으면 제출 차단
+  // ★ 가림문자 포함 검사: 자동 보완되지 않은 값은 그대로 제출하지 않는다.
   {
     let asteriskFound = false;
     let asteriskField = null;
@@ -8183,7 +9583,7 @@ async function submitOrderForm() {
       ];
       for (const f of fieldsToCheck) {
         const el = document.getElementById(f.id);
-        if (el && el.value.includes("*")) {
+        if (el && /[*＊●○◯◉•]/.test(el.value)) {
           asteriskFound = true;
           if (!asteriskField) asteriskField = el;
           el.classList.add("of-input--error");
@@ -8192,7 +9592,7 @@ async function submitOrderForm() {
     }
     if (asteriskFound) {
       if (asteriskField) asteriskField.scrollIntoView({ behavior: "smooth", block: "center" });
-      showToast("⚠️ 양식에 *표시가 포함된 경우 제출이 불가합니다.\n별표(*)를 제거한 뒤 정확한 정보를 입력해주세요.", "error");
+      showToast("⚠️ 자동 보완되지 않은 가림 문자가 남아 있습니다.\n정확한 정보를 입력한 뒤 수동 확인해주세요.", "error");
       _resetBtn(); return;
     }
   }
@@ -8222,11 +9622,11 @@ async function submitOrderForm() {
     const priceRaw = document.getElementById(cid+"_price")?.value || "";
     const price    = priceRaw.replace(/[^0-9]/g, "");
 
-    // 쿠팡 카드: recipient/phone/address는 네이버 카드에서 가져옴 (배송지 통일)
-    const naverCid = _orderCardIds[0];
-    const recipient = isCoupangCard ? gv(naverCid+"_recipient") : gv(cid+"_recipient");
-    const phone     = isCoupangCard ? gv(naverCid+"_phone")     : gv(cid+"_phone");
-    const address   = isCoupangCard ? gv(naverCid+"_address")   : gv(cid+"_address");
+    // 각 쇼핑몰 캡처에서 확인한 값을 그대로 기록한다. 같은 장소라도 도로명/지번 표기가 다를 수 있어
+    // 네이버 값을 쿠팡 카드에 복사하면 캡처 원문 보존 및 승인토큰 결속이 깨진다.
+    const recipient = gv(cid+"_recipient");
+    const phone     = gv(cid+"_phone");
+    const address   = gv(cid+"_address");
 
     // ★ v9.14: 카드별 소득신고 정보 수집
     // - 1번 카드: 직접 입력값 사용
@@ -8278,6 +9678,7 @@ async function submitOrderForm() {
       extractedPhone:     _cardAiState[cid]?.extracted?.phone     || "",
       extractedAddress:   _cardAiState[cid]?.extracted?.address   || "",
       identityConfirmed:  false
+      ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
   });
 
@@ -8287,7 +9688,11 @@ async function submitOrderForm() {
 
   // ═══ 내정보 게이트 + 신원 사전검증 (제출 전) ═══
   // 프로필(사용자명/전화/주소/계좌) 미등록 → 차단, 신원 불일치 → 타계정 등록/확인 다이얼로그
-  {
+  if (_activeIdentityContext || (_EMBED_CTX && !_PREVIEW_MODE)) {
+    if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 선택 명의 확인 중...';
+    const ready = await _prepareIdentityApprovals(orders);
+    if (!ready) { _resetBtn(); return; }
+  } else {
     const _idAuth = window._slotAuth || {};
     if (_idAuth.phone8) {
       if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 내정보 대조 중...';
@@ -8328,19 +9733,6 @@ async function submitOrderForm() {
 
   // ── 각 주문 순차 제출 ──
   let successCount = 0;
-  let firstCaptureFolderUrl = "";
-  /* ★ 업로드가 순차 큐로 바뀌면서 완료 시점이 제출 루프보다 늦어질 수 있다 →
-     캡처폴더 URL 저장은 "먼저 성공한 업로드가 한 번만" 하는 헬퍼로 옮긴다(중복 저장 방지). */
-  let _capFolderSaved = false;
-  const _saveCaptureFolderOnce = async (url) => {
-    if (!url || _capFolderSaved) return;
-    _capFolderSaved = true;
-    firstCaptureFolderUrl = url;
-    try {
-      const sfJ = await gasPost({ action:"saveCaptureFolder", sheetId:ctx.sheetId||"", sheetUrl:ctx.sheetUrl||"", tabName:ctx.tabName, captureFolderUrl:url });
-      if (sfJ?.ok) console.log("[캡처폴더] 저장 완료");
-    } catch(sfErr) { console.warn("[캡처폴더] 저장 실패:", sfErr.message); }
-  };
   const mirrorStatuses = [];   // ★ 제출 응답의 시트반영 상태(queued/failed/pending_no_row) 수집 → 완료화면 즉시 안내용
 
   const results = [];   // ★ 배치: 명의별 결과(부모 화면이 단수 값 하나로 거짓말하지 않게)
@@ -8403,6 +9795,7 @@ async function submitOrderForm() {
       extractedPhone:     o.extractedPhone     || "",
       extractedAddress:   o.extractedAddress   || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
+      identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정
       //   배치는 **그 카드에 결속된 홀드**를 싣는다(요청 1건 = 홀드 1건이라는 서버 계약 그대로).
       ...(bh ? {
@@ -8448,12 +9841,13 @@ async function submitOrderForm() {
         const msgR = `⚠️ ${i+1}번째 주문: 내 정보와 다른 정보가 감지되었습니다.\n\n`
           + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
         if (confirm(msgR)) {
-          const okReg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
-          if (okReg2) {
+          const reg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
+          if (reg2.ok) {
             try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (타계정 등록 후 재제출)"); }
           } else {
-            showToast("타계정 등록 실패 — 이 주문은 건너뜁니다. 내정보에서 등록 후 다시 제출해주세요.", "error");
-            results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "타계정 등록에 실패했어요" });
+            const regError = reg2.error || "타계정 등록에 실패했습니다. 내정보에서 확인해주세요.";
+            showToast(regError, "error");
+            results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: regError });
             continue;
           }
         } else {
@@ -8475,6 +9869,10 @@ async function submitOrderForm() {
       if (!res.ok) throw new Error(res.error||"제출 실패");
 
       successCount++;
+      if (o.saveShoppingId) {
+        try { await _saveOrderShoppingIdIfRequested(o); }
+        catch (saveErr) { showToast("주문은 접수됐지만 아이디 저장에 실패했습니다: " + saveErr.message, "warning"); }
+      }
       // ★ DB-first: 이 시점에 주문은 서버 DB에 확정 저장됨. 시트 반영 상태를 수집(완료화면 안내용).
       mirrorStatuses.push(String(res.mirrorStatus || (res.queued ? "queued" : "")));
       // ★ 배치: 명의별 결과를 모은다. 단수 값 하나로 화면을 정하면 5건 중 4건이 지각이어도
@@ -8513,9 +9911,10 @@ async function submitOrderForm() {
             }
             const _ext = (m) => m==="image/png"?"png":m==="image/webp"?"webp":"jpg";
             const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
-            // ★ 캡처↔주문 연결(062): 제출 응답의 orderSubmissionId 를 실어 서버가 order_submissions 에
-            //   capture_file_id/capture_uploaded_at 을 기록 → "캡처 미첨부" 자동 감지·중요알림의 근거.
-            const upPayload = { action:"uploadOrderImage", imageBase64:b64, mimeType:mime, fileName:namePart+"."+_ext(mime), displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:_osId };
+            const _capSession = res && res.captureSession;
+            if (!_capSession || !_capSession.id || !_capSession.token) throw new Error("구매캡처 제출 세션을 발급받지 못했습니다.");
+            // 서버 발급 세션+주문ID를 함께 보내며 서버는 세션에 고정된 작업 좌표만 사용한다.
+            const upPayload = { action:"uploadOrderImage", imageBase64:b64, mimeType:mime, fileName:namePart+"."+_ext(mime), displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:_osId, captureSessionId:_capSession.id, captureSessionToken:_capSession.token };
             // ★ 재시도: 이 업로드가 실패하면 서버는 capture_uploaded_at 이 비어 있어
             //   "구매캡쳐 미첨부"로 자동 감지한다 → 실제로는 첨부한 리뷰어에게 잘못된 독촉이 나간다.
             //   과거엔 1회 실패 시 console.warn 만 하고 조용히 끝나 이 오탐의 주원인이었다.
@@ -8540,7 +9939,6 @@ async function submitOrderForm() {
               const wait = st === 429 ? 62000 : 1500 * Math.pow(2, attempt);   // 1.5s → 3s → 6s
               await new Promise(r2 => setTimeout(r2, wait));
             }
-            if (upJson?.ok && upJson.captureFolderUrl) _saveCaptureFolderOnce(upJson.captureFolderUrl);
             // ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 리뷰어는 첨부했다고 믿고 창을 닫아버린다.
             if (!upJson?.ok) {
               console.warn(`[이미지 업로드 ${_idx}] 최종 실패:`, upErrLast && upErrLast.message);
@@ -8566,9 +9964,7 @@ async function submitOrderForm() {
       const saveIncomeName = firstOrder?.incomeName || "";
       const saveJumin      = firstOrder?.residentNo  || "";
       if (saveIncomeName && saveJumin) {
-        const authRawInc = localStorage.getItem("rapp_reviewer_auth");
-        let authInc;
-        try { authInc = JSON.parse(authRawInc || "{}"); } catch(_) { authInc = {}; }
+        const authInc = _getReviewerSession() || {};
         const myPhone8Inc = authInc.phone8 || "";
         if (myPhone8Inc) {
           const incPayload = {
@@ -8586,11 +9982,13 @@ async function submitOrderForm() {
   }
 
   // ★ 입금받을 계좌정보 저장 (1번 카드 은행/계좌/예금주 기준, 리뷰어 마스터에 영구 저장, 백그라운드)
+  // ★★ onlyIfEmpty = 빈 칸일 때만 채운다(덮어쓰지 않는다). 1번 카드가 타계정 명의면 그 계좌가
+  //   로그인 리뷰어의 마스터 계좌를 덮어 **본인 리뷰비가 타계정 계좌로 송금**된다(입금 대상 추출은
+  //   본인 건에 reviewers.bank_account 를 그대로 쓴다). 계좌는 제출 필수 게이트(profileMissing)라
+  //   이 호출이 닿는 시점엔 이미 등록돼 있어 사실상 덮어쓰기뿐이었다. 계좌 "변경"은 내정보 화면에서.
   if (successCount > 0 && (firstBank || firstAccount || firstDepositor)) {
     try {
-      const authRawBank = localStorage.getItem("rapp_reviewer_auth");
-      let authBank;
-      try { authBank = JSON.parse(authRawBank || "{}"); } catch(_) { authBank = {}; }
+      const authBank = _getReviewerSession() || {};
       const myPhone8Bank = authBank.phone8 || "";
       if (myPhone8Bank) {
         gasPost({
@@ -8599,6 +9997,7 @@ async function submitOrderForm() {
           bankName:      firstBank,
           bankAccount:   firstAccount,
           accountHolder: firstDepositor,
+          onlyIfEmpty:   true,
         })
           .then(r => { if (r?.ok) console.log("[saveBankInfo] 저장 완료"); })
           .catch(e => console.warn("[saveBankInfo] 저장 실패:", e.message));
@@ -8606,7 +10005,7 @@ async function submitOrderForm() {
     } catch(bankErr) { console.warn("[saveBankInfo] 오류:", bankErr.message); }
   }
 
-  // 캡처폴더 URL 저장은 _saveCaptureFolderOnce(업로드 성공 시점)가 한 번만 수행한다.
+  // 캡처폴더 URL은 업로드 서버가 세션에 고정된 작업 좌표로 직접 저장한다.
 
   window._submitOrderFormInProgress = false;
 
@@ -8652,15 +10051,21 @@ async function submitOrderForm() {
   const doneMsgEl = document.getElementById("orderFormDoneMsg");
   if (doneMsgEl) {
     const total = orders.length;
-    const headline = total > 1
-      ? `총 <b>${total}건</b> 중 <b>${successCount}건</b>이 정상제출 되었습니다.`
-      : `구매양식이 정상제출 되었습니다.`;
+    const mirrorFailed = mirrorStatuses.some(s => s === 'failed' || s === 'pending_no_row');
+    const headline = mirrorFailed
+      ? `구매양식은 접수되었지만 <b>작업보드 반영 확인이 필요합니다.</b>`
+      : total > 1
+        ? `총 <b>${total}건</b> 중 <b>${successCount}건</b>이 정상제출 되었습니다.`
+        : `구매양식이 정상제출 되었습니다.`;
     // ★ 제출완료 안내: 서버 저장 성공 확인 + 내정보/현황 안내 + 중복제출 방지("다시 제출하지 마세요").
-    const reflectNote =
-      `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:#ECFDF5;border:1px solid #A7F3D0;text-align:left;line-height:1.6">`
-      + `<div style="display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#065F46;font-size:.72rem;background:#D1FAE5;border:1px solid #A7F3D0;padding:3px 9px;border-radius:999px;margin-bottom:8px"><i class="fas fa-hard-drive"></i> 서버 저장 성공!</div>`
-      + `<div style="font-size:.82rem;color:#334155"><b>내정보 / 현황</b>에서 참여한 내역을 확인하세요. 구글시트·리뷰 내역 반영은 <b>몇 분</b> 걸릴 수 있으며 "구매양식 반영중"으로 먼저 표시됩니다.<br><b style="color:#B91C1C">이미 제출됐으니 다시 제출하지 마세요.</b></div>`
-      + `</div>`;
+    const reflectNote = mirrorFailed
+      ? `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:#FFF7ED;border:1px solid #FDBA74;text-align:left;line-height:1.6">`
+        + `<div style="font-weight:800;color:#9A3412;margin-bottom:6px"><i class="fas fa-triangle-exclamation"></i> 주문은 저장됐지만 작업보드 반영을 확인하고 있습니다.</div>`
+        + `<div style="font-size:.82rem;color:#7C2D12">다시 제출하지 마세요. 자동 복구 후에도 반영되지 않으면 운영자에게 문의해 주세요.</div></div>`
+      : `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:#ECFDF5;border:1px solid #A7F3D0;text-align:left;line-height:1.6">`
+        + `<div style="display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#065F46;font-size:.72rem;background:#D1FAE5;border:1px solid #A7F3D0;padding:3px 9px;border-radius:999px;margin-bottom:8px"><i class="fas fa-hard-drive"></i> 서버 저장 성공!</div>`
+        + `<div style="font-size:.82rem;color:#334155"><b>내정보 / 현황</b>에서 참여한 내역을 확인하세요. 구글시트·리뷰 내역 반영은 <b>몇 분</b> 걸릴 수 있으며 "구매양식 반영중"으로 먼저 표시됩니다.<br><b style="color:#B91C1C">이미 제출됐으니 다시 제출하지 마세요.</b></div>`
+        + `</div>`;
     doneMsgEl.innerHTML = `${headline}${reflectNote}<div id="capChecklist" style="margin-top:12px"></div>`;
   }
   if (doneEl) doneEl.style.display = "";
@@ -8733,15 +10138,37 @@ function resetOrderFormForReentry() {
   window._submitOrderFormInProgress = false;
 }
 
+/** search.html 인증을 신규 리뷰어 홈 세션으로 승계한다.
+ *  일반 로그인은 localStorage, 관리자 홈 탭은 sessionStorage 격리를 그대로 유지한다. */
+function _syncReviewerHomeSessionForReturn() {
+  try {
+    const auth = _getReviewerSession();
+    if (!auth || !auth.name || !auth.phone8 || !auth.reviewerToken) return;
+    const homeUser = {
+      name: auth.name,
+      phone8: auth.phone8,
+      reviewerToken: auth.reviewerToken,
+      loginAt: Date.now()
+    };
+    const reviewerStore = _getReviewerSessionStore();
+    if (reviewerStore === sessionStorage) {
+      sessionStorage.setItem("iad_reviewer_home_session", JSON.stringify({ ...homeUser, adminPreview: true }));
+    } else {
+      localStorage.setItem("iad_reviewer_user", JSON.stringify(homeUser));
+    }
+  } catch (_) { /* 이동은 유지하고 홈에서 재로그인을 안내한다 */ }
+}
+
 /** ★ 리뷰어 메인화면으로 이동 = 신규 포털(index.html)
- *  구 search.html 의 screenSearch(아이에이리뷰 리뷰내역 화면)는 더 이상 메인으로 쓰지 않는다.
- *  리뷰어 로그인 세션(localStorage)은 동일 오리진이라 index.html 에서 그대로 유지된다. */
-function goToReviewerMain() {
+ *  구 search.html 의 screenSearch(아이에이리뷰 리뷰내역 화면)는 더 이상 메인으로 쓰지 않는다. */
+function goToReviewerMain(tab) {
   // 구매양식 입력 상태 정리 (혹시 모를 잔여 상태 초기화)
   try { resetOrderFormForReentry(); } catch (_) {}
   window._pendingOrderForm = false;
-  // 신규 리뷰어 홈(index.html = 루트)으로 전체 페이지 이동
-  window.location.href = "index.html";
+  _syncReviewerHomeSessionForReturn();
+  // 신규 리뷰어 홈(index.html = 루트)으로 전체 페이지 이동.
+  // 리뷰 제출 완료 버튼은 방금 제출한 건을 확인할 수 있게 리뷰내역 탭을 지정한다.
+  window.location.href = tab === "review" ? "index.html#review" : "index.html";
 }
 
 async function quickEditCell(e, cell) {
@@ -8879,7 +10306,11 @@ async function quickEditCell(e, cell) {
     };
 
   } else if (field === '리뷰타입') {
-    const opts = ['실배송','빈박스','구매확정','믹스'];
+    /* ★★ 선택지는 **이 화면의 탭 설정 팝오버(#tcOptReview)** 에서 읽는다 — 목록을 여기에 다시
+       적으면 087 어휘 통일에서 빠져 옛 값(실배송·빈박스·믹스)을 저장하게 되고, 그 값은
+       `resolveReviewType` 에서 null 로 떨어져 "설정했는데 검수는 미지정"이 된다(2026-08-06 사고). */
+    const opts = [...document.querySelectorAll('#tcOptReview .tc-opt')]
+      .map(b => (b.dataset.val || '').trim()).filter(Boolean);
     popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
     getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
     popup.querySelectorAll(".qe-opt").forEach(btn => {
@@ -9489,7 +10920,7 @@ async function confirmTcSave() {
   if (!APP_CONFIG.GAS_WEB_APP_URL) {
     showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다. 설정 화면에서 URL을 먼저 입력해주세요.", true);
     _tcCurrent = null;
-    // Node API is always deployment-configured; no browser-side setup is available.
+    openGasUrlModal();
     return;
   }
 
@@ -10388,7 +11819,7 @@ async function testGasJsonp() {
 
   try {
     const t0   = Date.now();
-    const data = await gasGet({ action: "indexStatus" });
+    const data = await _jsonpGet(`${url}?action=indexStatus`, 10000);
     const ms   = Date.now() - t0;
     if (data && (data.exists !== undefined || data.count !== undefined)) {
       const verBadge = data.codeVersion
@@ -10436,12 +11867,51 @@ async function testGasJsonp() {
  * GAS 웹앱은 긴 요청 시 302 리다이렉트 발생 → CORS 헤더 유실 문제
  * 해결: <script> 태그 JSONP 방식으로 완전 우회 (preflight 없음, CORS 무관)
  */
+let _jsonpSeq = 0;
+function _jsonpGet(fullUrl, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const cbName = "__gasCb" + (++_jsonpSeq) + "_" + Date.now();
+    const script  = document.createElement("script");
+    let   settled = false;
+    const tid = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      script.remove();
+      delete window[cbName];
+      reject(new Error("요청 시간 초과"));
+    }, timeoutMs || 60000);
+
+    window[cbName] = function(data) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(tid);
+      script.remove();
+      delete window[cbName];
+      resolve(data);
+    };
+
+    // GAS에 callback 파라미터 추가
+    const sep = fullUrl.includes("?") ? "&" : "?";
+    script.src = fullUrl + sep + "callback=" + cbName;
+    script.onerror = function() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(tid);
+      script.remove();
+      delete window[cbName];
+      reject(new Error("스크립트 로드 실패 (GAS URL 확인)"));
+    };
+    document.head.appendChild(script);
+  });
+}
+
 // ★ [Node.js 이관] api.js로 대체됨
 // // async function gasGet(params, timeoutMs) {
 //   const url = APP_CONFIG.GAS_WEB_APP_URL;
 //   if (!url) throw new Error("GAS URL 없음");
 //   const qs      = new URLSearchParams(params).toString();
 //   const fullUrl = `${url}?${qs}`;
+//   const json = await _jsonpGet(fullUrl, timeoutMs || 60000);
 //   if (json && json.error) throw new Error(json.error);
 //   return json;
 // }
@@ -10498,25 +11968,47 @@ async function testGasJsonp() {
 //     )
 //   ).toString();
 //   const fullUrl = `${url}?${qs}`;
+//   const json = await _jsonpGet(fullUrl, 30000);
 //   if (json && json.error) throw new Error(json.error);
 //   return json;
 // }
 
 /* ── 유틸 ── */
 
+/* ★★ 리뷰 캡처 축소 기준 — **값 단일 출처**(아래 ImageShrink 경로와 폴백이 같은 값을 쓴다).
+   ★ 긴 변 1600px (사용자 확정 2026-09-22): 리뷰 캡처는 세로로 긴 모바일 스크린샷
+     (예 1080×2400)이라 **가로 폭 기준으로는 한 번도 줄지 않았다** — 종전 `width > 1920`
+     조건이 참이 되는 일이 없어 원본 해상도 그대로 올라갔고, Drive 업로드가 3~9초였다.
+   ★ 품질 0.75 는 종전 그대로(바꾸지 않는다 — 한 번에 두 축을 흔들면 화질 문제의 원인을 못 가린다).
+   ⚠ 이 값은 **AI 판정의 입력 화질**이기도 하다(1차 필터·2차 검수가 같은 이미지를 읽는다).
+     더 낮추면 상품명·리뷰 본문 OCR 이 흔들린다 — 내리기 전에 실물로 확인할 것. */
+const REVIEW_CAPTURE_MAX_PX  = 1600;
+const REVIEW_CAPTURE_QUALITY = 0.75;
+
 /**
  * ★ 이미지 압축/리사이즈 (모바일 최적화)
- * - 최대 1920px으로 리사이즈
- * - JPEG 품질 0.75로 압축
- * - 원본 1MB 이하면 압축 스킵 (이미 작은 파일)
+ * - **긴 변** 기준 REVIEW_CAPTURE_MAX_PX 로 축소 (세로로 긴 캡처도 줄어든다)
+ * - JPEG 품질 REVIEW_CAPTURE_QUALITY
+ * - 원본 1MB 이하 JPEG 면 손대지 않는다(재인코딩은 화질만 깎는다)
+ *
+ * ★★ 축소 실행부 단일 출처 = `ImageShrink`(js/image-shrink.js) — 구매 캡처 업로드가
+ *   쓰는 그 모듈이다. 여기서는 **긴 변 기준**(`{longest:true}`)으로 부르고,
+ *   기존 소비처(구매 캡처 1920/0.8 · 배치 1080/0.6)는 인자를 안 넘겨 **가로 기준 그대로**다.
+ * ★ 모듈을 못 불러온 페이지를 위한 폴백을 남긴다 — 축소가 통째로 빠지면 큰 캡처가
+ *   서버 본문 상한(10MB)에 걸려 **증빙만 조용히 빠진다**(image-shrink.js 주석의 그 사고).
  */
-function compressImage(file, maxWidth = 1920, quality = 0.75) {
-  return new Promise((resolve, reject) => {
-    // 1MB 이하이고 JPEG이면 압축 불필요
-    if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') {
-      return fileToBase64Raw(file).then(resolve).catch(reject);
-    }
+function compressImage(file, maxPx = REVIEW_CAPTURE_MAX_PX, quality = REVIEW_CAPTURE_QUALITY) {
+  // 1MB 이하이고 JPEG이면 압축 불필요
+  if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') return fileToBase64Raw(file);
 
+  if (window.ImageShrink && typeof window.ImageShrink.fromFile === 'function') {
+    return window.ImageShrink.fromFile(file, maxPx, quality, { longest: true })
+      .then(r => (r && r.base64) ? r.base64 : fileToBase64Raw(file))
+      .catch(() => fileToBase64Raw(file));
+  }
+
+  // ── 폴백: 모듈 미로드. 위와 **같은 상한·같은 긴 변 기준**으로 직접 줄인다 ──
+  return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
 
@@ -10524,21 +12016,20 @@ function compressImage(file, maxWidth = 1920, quality = 0.75) {
       URL.revokeObjectURL(url);
 
       let { width, height } = img;
-
-      // 리사이즈 필요 여부 확인
-      if (width > maxWidth) {
-        height = Math.round(height * (maxWidth / width));
-        width = maxWidth;
+      const scale = Math.min(1, maxPx / Math.max(width || 1, height || 1));
+      if (scale < 1) {
+        width  = Math.round(width  * scale);
+        height = Math.round(height * scale);
       }
 
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
 
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // JPEG로 압축 (품질 0.75)
+      // JPEG로 압축
       const dataUrl = canvas.toDataURL('image/jpeg', quality);
       const b64 = dataUrl.split(',')[1];
       if (!b64) {
@@ -10546,9 +12037,8 @@ function compressImage(file, maxWidth = 1920, quality = 0.75) {
         return;
       }
 
-      // 압축된 크기 계산
       const compressedSize = Math.round(b64.length * 0.75); // base64 → binary 크기 추정
-      console.log(`[compress] ${file.name}: ${(file.size/1024).toFixed(0)}KB → ${(compressedSize/1024).toFixed(0)}KB (${width}x${height})`);
+      console.log(`[compress] ${file.name}: ${(file.size/1024).toFixed(0)}KB → ${(compressedSize/1024).toFixed(0)}KB (${canvas.width}x${canvas.height})`);
 
       resolve(b64);
     };

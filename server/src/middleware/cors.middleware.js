@@ -45,7 +45,7 @@ const corsOptions = {
     callback(new Error(`CORS 차단: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Intake-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Intake-Key', 'X-Reviewer-Token'],
   credentials: true,
   maxAge: 86400,
 };

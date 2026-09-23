@@ -189,7 +189,135 @@ function withStubPool(handler, run) {
     });
   });
 
-  await ta('3d ★ 상품비 시트 폴백 — 주문 원장이 없어도 금액이 선다', async () => {
+  /* ── 리뷰비(128) — 판정은 여전히 082 단일 출처, **폴백 순서만** 공고 → 탭으로 넓혔다 ── */
+  await ta('3c2 ★ 공고 없는 작업도 탭 리뷰비가 이체금액에 실린다(상품비만 나가던 것)', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: 3000, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '22,000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 3000);
+      assert.strictEqual(it.feeSource, 'tab');
+      assert.strictEqual(it.amount, 25000, '이체금액 = 상품비 + 리뷰비');
+      assert.ok(!(it.warnings || []).includes('no_review_fee'));
+    });
+  });
+
+  await ta('3c3 공고 리뷰비가 탭 값을 이긴다 · 탭 미설정이면 0(추측 금지)', async () => {
+    await withStubPool(targetsHandler({
+      campRows: [{ id: 'C1', title: '공고', sheetId: 'S1', tabName: 'T1', reviewFee: 1500,
+        transferBank: 'hana', transferMemo: 'M', campStartDate: null, goodsCostType: '' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '', depositName: '', reviewFee: 3000, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 1500);
+      assert.strictEqual(it.feeSource, 'campaign');
+    });
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 0);
+      assert.strictEqual(it.feeSource, null, '미설정을 "탭에서 왔다"고 말하면 안 된다');
+      assert.ok(!(it.warnings || []).includes('no_review_fee'), '★ 0 = 리뷰비 없는 작업 — 경고하지 않는다');
+    });
+  });
+
+  await ta('3c4 ★★ 스냅샷은 여전히 최우선 — 탭 리뷰비가 참여 시점 금액을 덮지 않는다', async () => {
+    await withStubPool(targetsHandler({
+      orderRows: [{ sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: 1000, feeSnapshot: 700, orderDate: '2026-08-01' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: 3000, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 700, '★ 스냅샷 우선(082 완화 금지)');
+      assert.strictEqual(it.feeSource, 'snapshot');
+    });
+  });
+
+  await ta('3c5 ★ 탭 메타 SELECT 가 review_fee 를 실제로 읽는다(스텁은 SQL 을 해석하지 않는다)', async () => {
+    await withStubPool(targetsHandler({}), async (svc, calls) => {
+      await svc.listPaymentTargets();
+      const q = calls.find(c => /FROM tab_configs tc/.test(c.sql));
+      assert.ok(q && /tc\.review_fee\s+AS\s+"reviewFee"/.test(q.sql), '탭 리뷰비를 안 읽으면 저장해도 화면이 안 바뀐다');
+    });
+  });
+
+  /* ── 0원 = 무상 확정 (사용자 확정 2026-08-19) ─────────────────────────────
+     이 계정은 상품비만 주는 작업이 다수(실측 공고 32건 중 27건이 0원)라, 0 을 "미설정"으로
+     읽으면 입금관리가 상시 경고로 뒤덮여 진짜 신호(계좌·은행 미비)가 묻힌다.
+     ★ 종전 버그: 공고 로더가 COALESCE(...,0) + `|| 0` 로 0 과 NULL 을 같은 값으로 만들고,
+       campFee 가 truthiness 로 0 을 걸러 **무상 작업 전건이 경고**를 달았다(위프 800건 24/24). */
+  await ta('3c6 ★★ 공고 리뷰비 0원 = 사람이 정한 무상 — 경고를 띄우지 않는다', async () => {
+    await withStubPool(targetsHandler({
+      campRows: [{ id: 'C1', title: '무상 작업', sheetId: 'S1', tabName: 'T1', reviewFee: 0,
+        transferBank: 'kbank', transferMemo: 'M', campStartDate: null, goodsCostType: '' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '', depositName: '', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '22,000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 0);
+      assert.strictEqual(it.feeSource, 'campaign', '0 도 "공고에서 온 값"이다');
+      assert.strictEqual(it.campaignReviewFee, 0, '★ 0 을 null 로 접으면 팝업 프리필도 비어 보인다');
+      assert.ok(!(it.warnings || []).includes('no_review_fee'), '★ 0원 설정에는 경고가 없다');
+      assert.strictEqual(it.amount, 22000, '이체금액은 상품비 그대로');
+      assert.strictEqual(it.payable, true);
+    });
+  });
+
+  await ta('3c7 ★ 탭 리뷰비 0원도 무상 확정 · 근거가 아예 없을 때만 경고', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: 0, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.feeSource, 'tab');
+      assert.ok(!(it.warnings || []).includes('no_review_fee'));
+    });
+    // 공고도 탭도 없는 줄 = 근거 없음 → **경고하지 않는다**(0 = 리뷰비 없는 작업, 사용자 확정 2026-08-24)
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.feeSource, null);
+      assert.ok(!(it.warnings || []).includes('no_review_fee'),
+        '★ 0 = 리뷰비 없는 작업(사용자 확정 2026-08-24) — 근거가 없어도 경고하지 않는다. 정하려면 작업 조건 카드에서.');
+    });
+  });
+
+  await ta('3c7b ★ 공고는 있는데 리뷰비가 NULL = 미설정 — 0 으로 접지 않는다', async () => {
+    await withStubPool(targetsHandler({
+      campRows: [{ id: 'C1', title: '공고', sheetId: 'S1', tabName: 'T1', reviewFee: null,
+        transferBank: 'kbank', transferMemo: 'M', campStartDate: null, goodsCostType: '' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '', depositName: '', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.campaignReviewFee, null, '★ NULL 을 0 으로 바꾸면 미설정이 무상으로 둔갑한다');
+      assert.strictEqual(it.feeSource, null, '근거 없음은 계속 null 로 말한다(작업 조건 카드가 [미설정]로 그린다)');
+    });
+  });
+
+  await ta('3c8 ★ 공고 로더가 0 과 NULL 을 구분해 읽는다(COALESCE 로 접지 않는다)', async () => {
+    await withStubPool(targetsHandler({}), async (svc, calls) => {
+      await svc.listPaymentTargets();
+      const q = calls.find(c => /FROM recruit_campaigns c/.test(c.sql));
+      assert.ok(q, '공고 로더 쿼리를 찾지 못했다');
+      assert.ok(!/COALESCE\(c\.review_fee/.test(q.sql), '★ COALESCE 로 0 과 NULL 을 같은 값으로 만들지 않는다');
+    });
+  });
+
+  await ta('3d ★ 상품비 작업보드 우선 — 주문 원장이 없어도 금액이 선다', async () => {
     await withStubPool(targetsHandler({
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
       ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
@@ -197,14 +325,14 @@ function withStubPool(handler, run) {
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.productPrice, 22000);
-      assert.strictEqual(it.priceSource, 'sheet');
+      assert.strictEqual(it.priceSource, 'workboard');
       assert.ok(!it.issues.includes('no_price'));
       assert.ok(!it.issues.includes('zero_amount'));
       assert.strictEqual(it.payable, true);
     });
   });
 
-  await ta('3e 주문 원장이 있으면 그 값이 우선(폴백은 없을 때만)', async () => {
+  await ta('3e ★ 작업보드 표시값이 주문 원장과 다르면 작업보드가 우선', async () => {
     await withStubPool(targetsHandler({
       orderRows: [{ sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: 30000, feeSnapshot: null, orderedAt: null }],
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
@@ -212,8 +340,10 @@ function withStubPool(handler, run) {
       amountCells: { '결제금액': '22,000원' },
     }), async (svc) => {
       const it = (await svc.listPaymentTargets()).items[0];
-      assert.strictEqual(it.productPrice, 30000);
-      assert.strictEqual(it.priceSource, 'order');
+      assert.strictEqual(it.productPrice, 22000);
+      assert.strictEqual(it.priceSource, 'workboard');
+      assert.strictEqual(it.orderPrice, 30000);
+      assert.strictEqual(it.priceMismatch, true);
     });
   });
 
@@ -269,16 +399,39 @@ function withStubPool(handler, run) {
     });
   });
 
+  t('3i2 ★ 대부분 7,650원인 작업의 단독 18,950원만 이상금액 경고', () => {
+    const items = [7650, 7650, 7650, 7650, 18950].map((productPrice, i) => ({
+      sheetId: 'S1', tabName: 'T1', rowIndex: i + 1, productPrice, warnings: [],
+    }));
+    svc0.flagPriceOutliers(items);
+    assert.ok(items[4].warnings.includes('price_outlier'));
+    assert.strictEqual(items[4].priceOutlier.dominantAmount, 7650);
+    assert.ok(items.slice(0, 4).every(item => !item.warnings.includes('price_outlier')));
+    const remainingTarget = [{ sheetId: 'S1', tabName: 'T1', rowIndex: 5, productPrice: 18950, warnings: [] }];
+    svc0.flagPriceOutliers(remainingTarget, items);
+    assert.ok(remainingTarget[0].warnings.includes('price_outlier'),
+      '대부분이 이미 입금돼 현재 대상이 1건뿐이어도 작업보드 제출행 전체를 기준으로 감지해야 한다');
+  });
+
+  t('3i3 ★ 소수 표본·복수 옵션 금액은 자동 경고하지 않는다', () => {
+    const few = [7650, 7650, 18950].map((productPrice, i) => ({ sheetId: 'S1', tabName: 'T1', rowIndex: i, productPrice, warnings: [] }));
+    const options = [7650, 7650, 7650, 18950, 18950].map((productPrice, i) => ({ sheetId: 'S2', tabName: 'T2', rowIndex: i, productPrice, warnings: [] }));
+    svc0.flagPriceOutliers([...few, ...options]);
+    assert.ok([...few, ...options].every(item => !item.warnings.includes('price_outlier')));
+  });
+
   await ta('3j ★ 자리표시자 정합 — 금액 후보($2)와 선택 필터($3·$4)가 안 어긋난다', async () => {
     await withStubPool(targetsHandler({ tabRows: [], amountCells: null }), async (svc, calls) => {
       await svc.listPaymentTargets({ sheetId: 'S1', tabName: 'T1' });
       const q = calls.find(c => /FROM review_index ri/.test(c.sql));
       const used = new Set((q.sql.match(/\$\d+/g) || []).map(s => parseInt(s.slice(1), 10)));
-      assert.strictEqual(q.params.length, 4, '파라미터 4개');
+      assert.strictEqual(q.params.length, 6, '기본 4개 + 페이지 limit/offset 2개');
       for (const n of used) assert.ok(n <= q.params.length, `$${n} 자리표시자에 파라미터가 없다`);
       assert.deepStrictEqual(q.params[1], PA.EXACT_KEYS, '$2 = 결제금액 정확일치 후보');
       assert.strictEqual(q.params[2], 'S1');
       assert.strictEqual(q.params[3], 'T1');
+      assert.strictEqual(q.params[4], 2000, '$5 = 페이지 크기');
+      assert.strictEqual(q.params[5], 0, '$6 = 첫 페이지 offset');
     });
   });
 
@@ -294,7 +447,7 @@ function withStubPool(handler, run) {
      ══════════════════════════════════════════════════════════ */
   console.log('\n§4 보완 저장(saveTransferSetting · saveReviewerAccount)');
 
-  await ta('4a 공고가 있으면 공고에 저장 — 이체설정 2칸만 UPDATE', async () => {
+  await ta('4a 공고가 있으면 공고에 저장 — 이체설정 2칸 + 리뷰비만 UPDATE', async () => {
     await withStubPool((sql) => {
       if (/FROM recruit_campaigns/.test(sql) && /linked_sheet_id/.test(sql)) return { rows: [{ id: 'C1' }] };
       return { rows: [], rowCount: 1 };
@@ -304,7 +457,9 @@ function withStubPool(handler, run) {
       const upd = calls.find(c => /UPDATE recruit_campaigns/.test(c.sql));
       assert.ok(upd, '공고 UPDATE 가 없다');
       const setCols = (upd.sql.match(/SET([\s\S]*?)WHERE/)[1].match(/(\w+)\s*=\s*CASE/g) || []);
-      assert.deepStrictEqual(setCols.map(s => s.split(/\s/)[0]).sort(), ['transfer_bank', 'transfer_memo'],
+      // 128 로 `review_fee` 가 합류했다(사용자 확정 — 보류 보완에서 리뷰비도 정한다).
+      // ★ 그 외 칸이 늘면 축약 폼이 공고 설정을 조용히 덮는다 = 이 단언이 막는 것.
+      assert.deepStrictEqual(setCols.map(s => s.split(/\s/)[0]).sort(), ['review_fee', 'transfer_bank', 'transfer_memo'],
         '★ 공고의 다른 설정을 건드리면 안 된다(축약 폼 클로버)');
     });
   });
@@ -354,8 +509,64 @@ function withStubPool(handler, run) {
     });
   });
 
-  await ta('4g 리뷰어 계좌 — reviewers.id 로 지목하고 빈 칸은 안 덮는다', async () => {
+  /* ── 리뷰비(128) — 통장표시와 같은 팝업에서 정하고, 저장처도 같은 규칙(공고 → 탭) ── */
+  await ta('4f2 리뷰비 — 공고가 있으면 공고 review_fee, 없으면 탭 review_fee', async () => {
+    await withStubPool((sql) => {
+      if (/FROM recruit_campaigns/.test(sql) && /linked_sheet_id/.test(sql)) return { rows: [{ id: 'C1' }] };
+      return { rows: [], rowCount: 1 };
+    }, async (svc, calls) => {
+      const out = await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', campaignId: 'C1', reviewFee: '3,000' });
+      assert.strictEqual(out.target, 'campaign');
+      assert.strictEqual(out.reviewFee, 3000, '쉼표는 걷어내고 숫자로 저장한다');
+      const upd = calls.find(c => /UPDATE recruit_campaigns/.test(c.sql));
+      assert.ok(/review_fee\s*=\s*CASE/.test(upd.sql), '공고 저장처는 recruit_campaigns.review_fee');
+      assert.strictEqual(upd.params[1], false, '★ 미전송 은행은 그대로(부분 저장)');
+      assert.strictEqual(upd.params[3], false, '★ 미전송 통장표시도 그대로');
+      assert.strictEqual(upd.params[5], true);
+      assert.strictEqual(upd.params[6], 3000);
+    });
     await withStubPool(() => ({ rows: [], rowCount: 1 }), async (svc, calls) => {
+      const out = await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: 2500 });
+      assert.strictEqual(out.target, 'tab');
+      const upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.ok(/review_fee\s*=\s*CASE WHEN \$7::bool THEN \$8::int/.test(upd.sql),
+        '★ 탭 리뷰비는 int 그대로 — 텍스트로 넣으면 다음 조회가 숫자로 못 읽는다');
+      assert.strictEqual(upd.params[6], true);
+      assert.strictEqual(upd.params[7], 2500);
+    });
+  });
+
+  await ta('4f3 ★ 빈 리뷰비 = 미설정으로 되돌림(0 지정과 구분) · 미전송은 변경 없음', async () => {
+    await withStubPool(() => ({ rows: [], rowCount: 1 }), async (svc, calls) => {
+      await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: '' });
+      let upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.strictEqual(upd.params[6], true, '빈 값도 "고치는 것"이다');
+      assert.strictEqual(upd.params[7], null, '★ 탭은 NULL = 미설정(0 으로 접으면 공고 폴백과 구분이 사라진다)');
+      calls.length = 0;
+      await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: 0 });
+      upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.strictEqual(upd.params[7], 0, '0 은 "무상 지정" 이라 그대로 저장한다');
+      calls.length = 0;
+      await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', bank: 'hana' });
+      upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.strictEqual(upd.params[6], false, '★ 리뷰비 칸이 없는 화면이 저장해도 리뷰비가 지워지면 안 된다');
+    });
+  });
+
+  await ta('4f4 리뷰비 형식은 서버가 최종 판정 — 숫자 아님·음수는 쓰기 0건', async () => {
+    for (const bad of ['삼천원', -1, '1e9999']) {
+      await withStubPool(() => ({ rows: [], rowCount: 1 }), async (svc, calls) => {
+        await assert.rejects(() => svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: bad }),
+          e => e.code === 'bad_fee', '거부해야 한다: ' + bad);
+        assert.ok(!calls.some(c => /UPDATE/.test(c.sql)), '거부 시 쓰기 0건: ' + bad);
+      });
+    }
+  });
+
+  await ta('4g 리뷰어 계좌 — reviewers.id 로 지목하고 빈 칸은 안 덮는다', async () => {
+    await withStubPool((sql) => (/SELECT bank_name, bank_account FROM reviewers/.test(sql)
+      ? { rows: [{ bank_name: '국민은행', bank_account: '0000' }], rowCount: 1 }
+      : { rows: [], rowCount: 1 }), async (svc, calls) => {
       const out = await svc.saveReviewerAccount({
         reviewerId: '22222222-2222-2222-2222-222222222222',
         bankName: '국민은행', bankAccount: '123-456', accountHolder: '',
@@ -462,12 +673,30 @@ function withStubPool(handler, run) {
     assert.ok(n >= 1);
   });
 
-  t('6b 상단 묶음 목록 + 팝업 2종 + 행별 [보완] 이 모두 배선돼 있다', () => {
-    for (const s of ['_pmBuildFix', '_pmFixBlock', '_pmFixWork', '_pmFixAcct', '_pmRowFix', '_pmRowMemo', '_pmDialog']) {
+  t('6b 상단 묶음 목록 + 계좌 팝업 + 행별 [보완] 이 모두 배선돼 있다', () => {
+    for (const s of ['_pmBuildFix', '_pmFixBlock', '_pmFixAcct', '_pmRowFix', '_pmRowMemo', '_pmDialog', '_pmOpenBoard']) {
       assert.ok(HTML.includes('function ' + s), s + ' 없음');
     }
     assert.ok(/\$\{_pmFixBlock\(\)\}/.test(HTML), '묶음 목록이 화면에 렌더되지 않는다');
     assert.ok(/onclick="_pmRowFix\(\$\{idx\}\)"/.test(HTML), '행별 [보완] 버튼 배선 없음');
+  });
+
+  t('6b2 ★★ 작업 단위 값(이체은행·통장표시)을 고치는 창구는 **작업 조건 카드 하나**다', () => {
+    // 입금관리에는 그 전용 팝업이 없다(창구 둘이면 문구·권한이 갈린다 — 사용자 확정 2026-08-24)
+    assert.ok(!/function _pmFixWork\(/.test(HTML), '★ 입금관리 전용 보완 팝업이 되살아났다');
+    assert.ok(!/id="pmBankPick"/.test(HTML) && !/id="pmMemoIn"/.test(HTML),
+      '★ 입금관리에 이체은행·통장표시 입력칸이 되살아났다');
+    // 대신 그 작업의 작업보드로 보낸다
+    const blk = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmRowFix'));
+    assert.ok(/_pmBoardBtn\(i\)/.test(blk), '묶은 줄이 작업보드로 보내지 않는다');
+    const rowFix = HTML.slice(HTML.indexOf('function _pmRowFix'), HTML.indexOf('function _pmRowMemo'));
+    assert.ok(/_pmOpenBoard\(i\)/.test(rowFix), '표의 [보완](이체은행)이 작업보드로 가지 않는다');
+    const rowMemo = HTML.slice(HTML.indexOf('function _pmRowMemo'), HTML.indexOf('function _pmRowMemo') + 500);
+    assert.ok(/_pmOpenBoard\(i\)/.test(rowMemo), '표의 통장표시 [미설정]이 작업보드로 가지 않는다');
+    // 작업 조건 카드에 세 값의 창구가 모두 있다
+    assert.ok(/\['이체은행','bank'/.test(HTML), '작업 조건에 이체은행 줄이 없다');
+    assert.ok(/\['리뷰비','fee'/.test(HTML) && /\['입금명','memo'/.test(HTML), '작업 조건에 리뷰비·입금명 줄이 없다');
+    assert.ok(/function _cndBankModal\(/.test(HTML), '공고 없는 작업의 이체은행 저장 창구가 없다');
   });
 
   t('6c ★★ onclick 에 시트발 문자열을 보간하지 않는다(인덱스만)', () => {
@@ -476,7 +705,7 @@ function withStubPool(handler, run) {
     const handlers = tbl.match(/onclick="[^"]*"|onchange="[^"]*"/g) || [];
     assert.ok(handlers.length >= 3, '표에 핸들러가 없다');
     for (const h of handlers) {
-      assert.ok(/\(\$\{idx\}(,[^)]*)?\)/.test(h), '인덱스가 아닌 값을 넘긴다: ' + h);
+      assert.ok(/\(\$\{(?:idx|i)\}(,[^)]*)?\)/.test(h), '인덱스가 아닌 값을 넘긴다: ' + h);
       assert.ok(!/esc\(/.test(h), 'onclick 안에서 esc() 로 문자열을 보간하고 있다(엔티티 디코드로 탈출된다): ' + h);
     }
   });
@@ -506,13 +735,12 @@ function withStubPool(handler, run) {
 
   t('6h ★ 저장 성공 뒤 순서 = 닫기 → 안내 → 재조회(후처리 실패가 성공을 실패처럼 보이게 하면 안 된다)', () => {
     const fn = HTML.slice(HTML.indexOf('function _pmAfterFix'), HTML.indexOf('/* ── 공용 팝업 골격'));
-    const close = fn.indexOf('_pmCloseDialog()'), t2 = fn.indexOf('toast('), load = fn.indexOf('_pmLoad()');
+    const close = fn.indexOf('_pmCloseDialog()'), t2 = fn.indexOf('toast('), load = fn.indexOf('_pmLoad(');
     assert.ok(close >= 0 && t2 > close && load > close, '닫기가 먼저여야 한다: ' + fn);
     assert.ok(/try\{\s*toast\(/.test(fn), '안내 실패가 재조회를 막으면 안 된다');
-    // 두 팝업 모두 이 마무리를 쓴다(사본을 두면 한쪽만 안 닫힌다)
-    const work = HTML.slice(HTML.indexOf('function _pmFixWork'), HTML.indexOf('function _pmPickBank'));
+    // 남은 팝업(리뷰어 계좌)이 이 마무리를 쓴다 — 작업 단위 팝업은 작업 조건 카드로 옮겨 없앴다
     const acct = HTML.slice(HTML.indexOf('function _pmFixAcct'), HTML.indexOf('/** 저장 성공 뒤 공통 마무리'));
-    for (const [n, s] of [['작업', work], ['리뷰어', acct]]) {
+    for (const [n, s] of [['리뷰어', acct]]) {
       assert.ok(/_pmAfterFix\(/.test(s), n + ' 팝업이 공통 마무리를 쓰지 않는다');
       assert.ok(!/await _pmLoad\(\);\s*return true/.test(s), n + ' 팝업이 옛 순서(재조회 후 닫기)로 되돌아갔다');
     }
@@ -532,11 +760,33 @@ function withStubPool(handler, run) {
     assert.ok(/catch\(e\)\{[\s\S]*?toast\(/.test(dlg), 'onOk 예외 안내가 없다');
   });
 
+  t('6j ★ 리뷰비·입금명·이체은행 저장은 **작업 조건 카드**가 같은 API 로 한다(신규 경로 0)', () => {
+    const tabVal = HTML.slice(HTML.indexOf('function _cndTabValueModal'), HTML.indexOf('function _cndRtypeModal'));
+    assert.ok(/body\.reviewFee=v/.test(tabVal) && /body\.memo=v/.test(tabVal), '리뷰비·입금명 저장이 없다');
+    assert.ok(/payment\/transfer-setting/.test(tabVal), '기존 저장 API 를 쓰지 않는다');
+    const bank = HTML.slice(HTML.indexOf('function _cndBankModal'), HTML.indexOf('function _cndBkPick'));
+    assert.ok(/payment\/transfer-setting/.test(bank) && /bank:sel\.dataset\.v/.test(bank),
+      '이체은행 저장이 같은 API 를 쓰지 않는다');
+    // 서버 계약(undefined = 변경 없음)이 라우트까지 이어지는지
+    const routes = read('routes/trackB.routes.js');
+    const seg = routes.slice(routes.indexOf("'/payment/transfer-setting'"), routes.indexOf("'/payment/reviewer-account'"));
+    assert.ok(/reviewFee:\s*b\.reviewFee/.test(seg), '라우트가 리뷰비를 서비스로 넘기지 않는다');
+    assert.ok(!/b\.reviewFee\s*\|\|/.test(seg), "★ `|| 0` 로 접으면 미전송이 '0원 지정'이 된다");
+  });
+
+  t('6k ★ 묶은 줄은 말줄임 대신 접어서 다 보여준다(항목이 셋이면 좁은 카드에서 잘린다)', () => {
+    assert.ok(/\.pmfixrow\.work \.nm\{[^}]*white-space:normal/.test(HTML),
+      '묶음 줄이 nowrap 이면 "이체은행 · 통장…" 으로 잘려 무엇을 입력할지 알 수 없다');
+  });
+
   t('6g 표 [보완] 버튼은 고칠 수 있을 때만 그린다(죽은 버튼 금지)', () => {
     const tbl = HTML.slice(HTML.indexOf('function _pmTargetTable'), HTML.indexOf('function _pmBatchTable'));
-    assert.ok(/const fixable[\s\S]*?PAY_FIX_KIND/.test(tbl), '고칠 수 있는지 판정이 없다');
+    assert.ok(/const isFixable[\s\S]*?PAY_FIX_KIND/.test(tbl), '고칠 수 있는지 판정이 없다');
     assert.ok(/accountRef && it\.accountRef\.reviewerId/.test(tbl), '리뷰어 지목이 불가능한 행까지 버튼을 그린다');
-    assert.ok(/fixable \? `<button/.test(tbl), '조건부 렌더가 아니다');
+    // ★ 판정은 한 곳(isFixable)이고 **줄과 그룹 머리줄 둘 다** 그것으로 조건부 렌더한다
+    //   (머리줄에만 걸면 못 고치는 작업에 죽은 버튼이 생긴다)
+    assert.strictEqual((tbl.match(/isFixable\((?:it|g\.items\[0\])\) *\? *`<button/g) || []).length, 2,
+      '조건부 렌더가 아니거나 판정 사본이 생겼다');
   });
 
   /* ══════════════════════════════════════════════════════════
@@ -557,7 +807,7 @@ function withStubPool(handler, run) {
     const capLine = (HTML.match(/const _PM_FIX_CARD_CAP\s*=\s*\d+;/) || [])[0];
     assert.ok(capLine, '_PM_FIX_CARD_CAP 선언을 찾지 못했다');
     // vm 최상위 `const` 는 전역 객체에 안 붙는다 → 값을 밖에서도 읽도록 `var` 로만 바꿔 주입(값은 소스 그대로)
-    const src = [capLine.replace(/^const/, 'var'), pick('_pmSheetOk'), pick('_pmSheetBtn'),
+    const src = [capLine.replace(/^const/, 'var'), pick('_pmBoardBtn'),
       pick('_pmBuildFix'), pick('_pmAcctName'), pick('_pmAcctTail'), pick('_pmAcctLabel'),
       pick('_pmAcctPlain'), pick('_pmFixBlock'), pick('_pmFixAcct')].join('\n');
     const sandbox = {
@@ -568,6 +818,9 @@ function withStubPool(handler, run) {
       STATE: {},
       _dlg: null,
       _pmDialog(o) { sandbox._dlg = o; },       // 팝업은 열지 않고 인자만 잡아 둔다
+      _went: null,
+      _pmCloseDialog() {},
+      switchView(v) { sandbox._went = v; },     // 작업보드 이동은 뷰 전환만 잡아 둔다
     };
     vm.createContext(sandbox);
     new vm.Script(src).runInContext(sandbox);
@@ -608,6 +861,41 @@ function withStubPool(handler, run) {
     assert.strictEqual(f.works.length, 1);
     assert.strictEqual(f.works[0].needMemo, true);
     assert.strictEqual(f.works[0].needBank, false, '은행은 멀쩡한데 은행 카드에 들어가면 안 된다');
+  });
+
+  t('7c2 ★★ 리뷰비는 보완 목록에 넣지 않는다 — 0 = 리뷰비 없는 작업(사용자 확정 2026-08-24)', () => {
+    const S = loadFixFns();
+    // 서버가 더 이상 no_review_fee 를 만들지 않지만, 옛 응답이 와도 화면이 그 줄을 만들지 않는다
+    S.STATE.pmFix = S._pmBuildFix([mkItem({ transferMemo: '망고', bank: 'hana', warnings: ['no_review_fee'] })]);
+    assert.strictEqual(S.STATE.pmFix.works.length, 0,
+      '★ 리뷰비만 비었는데 보완 카드가 뜬다 — 상품비만 주는 작업이 상시 경고가 된다');
+    assert.strictEqual(S._pmFixBlock(), '');
+  });
+
+  t('7c2b ★★ 리뷰비는 어디서도 보완 사유로 만들지 않는다(서버·화면 양쪽)', () => {
+    // 서버: 그 경고를 더는 만들지 않는다
+    const svc = read('services/payment.service.js');
+    const push = svc.match(/warnings\.push\('([a-z_]+)'\)/g) || [];
+    assert.ok(!push.some(x => x.includes('no_review_fee')),
+      '★ 리뷰비 경고가 되살아났다 — 상품비만 주는 작업이 상시 경고가 된다(0 = 리뷰비 없는 작업)');
+    // 화면: 묶음 재료에도 그 사유가 없다
+    const build = HTML.slice(HTML.indexOf('function _pmBuildFix'), HTML.indexOf('function _pmWorkRowsHtml') > 0
+      ? Math.max(HTML.indexOf('function _pmBuildFix') + 4000, 0) : HTML.indexOf('function _pmBuildFix') + 4000);
+    assert.ok(!/no_review_fee/.test(build), '★ 화면 묶음 재료에 리뷰비 사유가 되살아났다');
+    assert.ok(!/needFee/.test(HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmRowFix'))),
+      '★ 보완 카드에 리뷰비 줄이 되살아났다');
+  });
+
+  t('7c3 ★ 리뷰비 창구는 **작업 조건 카드**다 — 값의 출처(스냅샷·구간)를 그곳이 말한다', () => {
+    // 입금관리에는 리뷰비 입력칸이 없다(창구 하나 — 사용자 확정 2026-08-24)
+    assert.ok(!/id="pmFeeIn"/.test(HTML), '★ 입금관리에 리뷰비 입력칸이 되살아났다');
+    // 작업 조건 카드가 리뷰비 줄과 저장 창구를 갖는다
+    assert.ok(/\['리뷰비','fee'/.test(HTML), '작업 조건에 리뷰비 줄이 없다');
+    const tabVal = HTML.slice(HTML.indexOf('function _cndTabValueModal'), HTML.indexOf('function _cndRtypeModal'));
+    assert.ok(/리뷰비\(원\)/.test(tabVal), '공고 없는 작업의 리뷰비 입력칸이 없다');
+    assert.ok(/0 = 무상/.test(tabVal), '0 의 뜻(무상)을 말하지 않는다');
+    // 구간(082)에서 온 값이면 카드가 그 사실을 칩으로 말한다
+    assert.ok(/feeSource==='schedule'/.test(HTML), '기간별 구간 표기가 없다');
   });
 
   t('7d ★ 리뷰어는 accountRef 기준으로 묶인다(같은 사람의 여러 작업이 한 번에)', () => {
@@ -669,9 +957,9 @@ function withStubPool(handler, run) {
     const html = S._pmFixBlock();
     assert.ok(!/<img src=x/.test(html), '작업명이 이스케이프되지 않았다');
     assert.ok(!/<script>/.test(html.replace(/&lt;script&gt;/g, '')), '리뷰어명이 이스케이프되지 않았다');
-    assert.ok(/_pmFixWork\(0\)/.test(html), '작업 버튼이 인덱스를 넘겨야 한다');
+    assert.ok(/_pmOpenBoard\(0\)/.test(html), '작업 버튼(작업보드)이 인덱스를 넘겨야 한다');
     assert.ok(/_pmFixAcct\(0\)/.test(html), '리뷰어 버튼이 인덱스를 넘겨야 한다');
-    assert.ok(/이체은행 미지정/.test(html) && /계좌 —/.test(html));
+    assert.ok(/이체은행/.test(html) && /계좌 —/.test(html));
   });
 
   t('7j 묶음 인덱스 = STATE.pmFix 배열 인덱스(팝업이 엉뚱한 작업을 열지 않게)', () => {
@@ -683,9 +971,9 @@ function withStubPool(handler, run) {
     ]);
     const html = S._pmFixBlock();
     // 은행 줄의 버튼 인덱스는 works 배열에서 T2 의 위치여야 한다(카드 표시 순서가 아니라)
-    const idx = parseInt(html.slice(html.indexOf('이체은행 미지정')).match(/_pmFixWork\((\d+)\)/)[1], 10);
+    const idx = parseInt(html.slice(html.indexOf('이체은행')).match(/_pmOpenBoard\((\d+)\)/)[1], 10);
     assert.strictEqual(S.STATE.pmFix.works[idx].tabName, 'T2',
-      '★ 표시 순서를 인덱스로 넘기면 다른 작업이 열린다');
+      '★ 표시 순서를 인덱스로 넘기면 다른 작업의 보드가 열린다');
   });
 
   t('7k ★ 사유가 여럿이어도 그 작업은 카드 하나(사유별로 흩어 놓지 않는다)', () => {
@@ -704,6 +992,50 @@ function withStubPool(handler, run) {
       '한 카드가 그 작업의 할 일을 전부 담아야 한다');
     const html = S._pmFixBlock();
     assert.strictEqual((html.match(/pmfixcard/g) || []).length, 1, '카드가 하나여야 한다');
+  });
+
+  t('7k2 ★★ 작업 단위(이체은행·통장표시)는 **한 줄**로 묶이고 작업보드로 보낸다', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 1, issues: ['no_bank'], warnings: ['no_memo'] }),
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 2, issues: [], warnings: ['no_memo'] }),
+      // ★ 카드 전체 행 수(w.rows=3)와 **다른 숫자**여야 검사가 공허해지지 않는다
+      //   (결제금액 없음은 작업 설정으로 못 고치는 사유 = setupRows 에 안 들어간다)
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 3, issues: ['no_price'], warnings: [] }),
+    ]);
+    const w = S.STATE.pmFix.works[0];
+    assert.strictEqual(w.rows, 3, '카드에 걸린 행 수');
+    assert.strictEqual(w.setupRows, 2, '작업 설정 보완이 필요한 행 수는 **합집합**이어야 한다(두 사유)');
+    const html = S._pmFixBlock();
+    assert.strictEqual((html.match(/pmfixrow work/g) || []).length, 1,
+      '★ 사유별로 줄이 갈리면 같은 [보완] 버튼이 세 번 반복된다');
+    // 카드 머리 + 묶은 줄 = 같은 작업보드로 가는 두 자리(사유별로 반복되지 않는다)
+    assert.strictEqual((html.match(/_pmOpenBoard\(/g) || []).length, 2,
+      '★ 사유마다 버튼이 반복되면 "두 번 해야 하나"로 읽힌다');
+    // 두 항목이 그 한 줄에 다 적힌다(열어보지 않고 무엇을 설정할지 알 수 있게)
+    for (const k of ['이체은행', '통장표시'])
+      assert.ok(html.includes(k), k + ' 가 줄에서 사라졌다');
+    assert.ok(/작업 조건/.test(html), '★ 어디서 고치는지(작업 조건)를 말해야 한다');
+    assert.ok(!/리뷰비/.test(html), '★ 리뷰비는 보완 대상이 아니다(0 = 없는 작업)');
+    // ★ 사유별 건수를 조용히 버리지 않는다(title 로 남는다)
+    assert.ok(/이체은행 미지정 1건/.test(html) && /통장표시 없음 2건/.test(html),
+      '사유별 건수가 어디에도 남지 않았다: ' + html);
+    // ★ 줄에 적히는 건수는 그 줄을 눌러 풀리는 건수(합집합)여야 한다 — 카드 전체 건수가 아니다
+    // ★ 카드 머리의 건수(3건 = 카드에 걸린 전체)와 헷갈리지 않게 **묶은 줄만** 잘라서 본다
+    const workRow = html.slice(html.indexOf('pmfixrow work'));
+    const n = (workRow.match(/<span class="n">(\d+)건<\/span>/) || [])[1];
+    assert.strictEqual(n, '2', '묶은 줄이 작업 설정으로 못 고치는 건까지 세고 있다: ' + workRow.slice(0, 300));
+  });
+
+  t('7k3 ★ 한 종류만 필요하면 그것만 적는다(멀쩡한 항목을 입력할 것처럼 말하지 않는다)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([mkItem({ transferMemo: '', bank: 'hana', warnings: ['no_memo'] })]);
+    // ★ 안내 문구(카드 위 설명)에도 항목 이름이 나오므로 **묶은 줄만** 잘라서 본다
+    const workRow = S._pmFixBlock().slice(S._pmFixBlock().indexOf('pmfixrow work'));
+    assert.ok(/통장표시/.test(workRow));
+    assert.ok(!/이체은행/.test(workRow),
+      '★ 멀쩡한 항목이 보완 줄에 들어가면 담당자가 값을 덮어쓰게 된다: ' + workRow.slice(0, 200));
+    assert.strictEqual((S._pmFixBlock().match(/pmfixrow work/g) || []).length, 1);
   });
 
   t('7m ★ 계좌 버튼 인덱스는 accts 배열 위치(카드 안 순번이면 남의 계좌 창이 열린다)', () => {
@@ -735,6 +1067,131 @@ function withStubPool(handler, run) {
     const html = S._pmFixBlock();
     assert.strictEqual((html.match(/pmfixcard/g) || []).length, S._PM_FIX_CARD_CAP, '상한만큼만 카드로 편다');
     assert.ok(/외 3개 작업/.test(html), '남은 작업 수 고지가 없다');
+  });
+
+  /* ══════════════════════════════════════════════════════════
+     §7B 입금 대상 표 — 같은 작업을 줄마다 되풀이하지 않는다(사용자 확정 2026-08-24)
+       실사고 아님: 50건짜리 작업에서 작업명·이체은행·통장표시가 50번 반복돼
+       정작 줄마다 다른 값(리뷰어·금액·계좌)이 묻혔다.
+     ══════════════════════════════════════════════════════════ */
+  console.log('\n§7B 입금 대상 표 그룹 묶음(_pmTargetTable)');
+
+  /** 표 렌더러를 vm 으로 꺼내 실제 실행한다(정적 검사로는 "되풀이하지 않는다"가 고정되지 않는다) */
+  function loadTableFns(items) {
+    const vm = require('vm');
+    const pick = name => {
+      const i = HTML.indexOf('function ' + name + '(');
+      assert.ok(i > 0, name + ' 를 찾지 못했다');
+      const j = HTML.indexOf('\nfunction ', i + 1);
+      return HTML.slice(i, j > 0 ? j : i + 9000);
+    };
+    const sandbox = {
+      esc: v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+      _pmNum: n => String(Number(n) || 0),
+      _pmOn: it => it.payable && !it.excluded,
+      _pmAcctSrcTip: () => '',
+      PAY_FIX_KIND: { no_bank: 'work', no_account: 'account', bank_unknown: 'account', no_holder: 'account' },
+      PAY_ISSUE_LABEL: { no_bank: '이체은행 미지정', no_account: '계좌 미등록', bank_unknown: '은행명 인식불가' },
+      STATE: { pmItems: items },
+      document: { querySelector: () => null },
+    };
+    vm.createContext(sandbox);
+    new vm.Script([pick('_pmWorkKey'), pick('_pmTargetTable'), pick('_pmFoldWork')].join('\n')).runInContext(sandbox);
+    return sandbox;
+  }
+  /** 이체 가능한 한 줄(대상) */
+  const payRow = (o = {}) => mkItem(Object.assign({
+    payable: true, bank: 'hana', bankLabel: '하나은행', bankAuto: false, transferMemo: '망고',
+    amount: 20000, productPrice: 17000, reviewFee: 3000, accountHolder: '홍길동',
+    bankName: '국민', bankOfficial: '국민은행', bankAccount: '1234', startDate: '8 / 5',
+  }, o));
+  // ★ 표 머리(thead)까지 세면 검사가 엉뚱한 이유로 빨개진다 — tbody 안만 본다
+  const tbodyOf = html => html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
+  const dataRows = html => tbodyOf(html).split('<tr').slice(1).filter(r => !/class="pmgrp"/.test(r));
+
+  t('7B-a ★★ 같은 작업 50줄이어도 작업명은 **머리줄 한 번**만 적힌다', () => {
+    const items = [];
+    for (let i = 1; i <= 50; i++) items.push(payRow({ rowIndex: i, reviewerName: 'R' + i, tabLabel: '0804)비타민,글루타치온_블로그 50건' }));
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.strictEqual((html.match(/class="pmgrp"/g) || []).length, 1, '그룹 머리줄이 하나여야 한다');
+    assert.strictEqual((html.match(/0804\)비타민/g) || []).length, 2,
+      '★ 작업명이 줄마다 되풀이된다(머리줄 본문 + title 로 2회가 정상): ' + (html.match(/0804\)비타민/g) || []).length);
+    assert.strictEqual(dataRows(html).length, 50, '줄이 사라지면 안 된다(감추는 게 아니라 안 적을 뿐)');
+  });
+
+  t('7B-b ★★ 그 작업에서 값이 **같은 칸**(이체은행·통장표시)은 머리줄로만 올린다', () => {
+    const items = [payRow({ rowIndex: 1 }), payRow({ rowIndex: 2 }), payRow({ rowIndex: 3 })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.strictEqual((html.match(/하나은행/g) || []).length, 1, '이체은행이 줄마다 반복된다');
+    assert.strictEqual((html.match(/망고/g) || []).length, 1, '통장표시가 줄마다 반복된다');
+  });
+
+  t('7B-c ★★ 값이 하나라도 다르면 그 칸은 **줄마다** 그린다(조용히 숨기지 않는다)', () => {
+    const items = [payRow({ rowIndex: 1, transferMemo: '망고' }),
+      payRow({ rowIndex: 2, transferMemo: '만두' }), payRow({ rowIndex: 3, transferMemo: '망고' })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.ok(/만두/.test(html) && (html.match(/망고/g) || []).length === 2,
+      '★ 서로 다른 통장표시가 한 값으로 뭉개졌다: ' + html);
+    // 이체은행은 셋 다 같으니 여전히 머리줄로만
+    assert.strictEqual((html.match(/하나은행/g) || []).length, 1);
+  });
+
+  t('7B-d 작업이 바뀌면 머리줄이 새로 생기고, 순서는 그대로다', () => {
+    const items = [payRow({ rowIndex: 1, tabLabel: 'A작업' }),
+      payRow({ sheetId: 'S2', rowIndex: 2, tabLabel: 'B작업' }), payRow({ sheetId: 'S2', rowIndex: 3, tabLabel: 'B작업' })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.strictEqual((html.match(/class="pmgrp"/g) || []).length, 2);
+    assert.ok(html.indexOf('A작업') < html.indexOf('B작업'), '서버가 준 순서를 바꾸면 안 된다');
+    assert.strictEqual(dataRows(html).length, 3);
+  });
+
+  t('7B-e ★ 머리줄이 선택 건수·합계를 말한다(접어도 무엇이 담겼는지 알 수 있게)', () => {
+    const items = [payRow({ rowIndex: 1 }), payRow({ rowIndex: 2, excluded: true }), payRow({ rowIndex: 3 })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.ok(/선택 2\/3건/.test(html), '선택 현황이 없다: ' + html);
+    assert.ok(/40000원/.test(html), '선택 합계가 없다');
+  });
+
+  t('7B-f ★★ 접기는 **표시 전용** — 체크 상태·이체 대상은 건드리지 않는다', () => {
+    const items = [payRow({ rowIndex: 1 }), payRow({ rowIndex: 2 })];
+    const S = loadTableFns(items);
+    S._pmTargetTable(items);                       // STATE.pmGroups 채움
+    const before = items.map(it => S._pmOn(it)).join(',');
+    S._pmFoldWork(0);                              // document 스텁이라 DOM 조작은 no-op
+    assert.strictEqual(items.map(it => S._pmOn(it)).join(','), before, '★ 접었더니 이체 대상이 달라졌다');
+    assert.strictEqual(S.STATE.pmFold[S.STATE.pmGroups[0]], true, '접힘 상태가 기록되지 않았다');
+    // 다시 그리면 그 그룹 줄만 감춰지고, 줄 자체는 남는다
+    const html = S._pmTargetTable(items);
+    assert.strictEqual(dataRows(html).length, 2, '접었다고 줄을 지우면 안 된다');
+    assert.strictEqual((html.match(/pmhide/g) || []).length, 2, '접힘이 화면에 반영되지 않았다');
+    S._pmFoldWork(0);
+    assert.ok(!S.STATE.pmFold[S.STATE.pmGroups[0]], '다시 눌러도 안 펴진다');
+  });
+
+  t('7B-g ★★ 머리줄·데이터 줄의 onclick 은 인덱스만(작업명은 시트발 문자열)', () => {
+    const items = [payRow({ rowIndex: 1, tabLabel: `x"><img src=x onerror=alert(1)>`, transferMemo: '', warnings: ['no_memo'] })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    assert.ok(!/<img src=x/.test(html), '작업명이 이스케이프되지 않았다');
+    for (const h of html.match(/onclick="[^"]*"/g) || [])
+      assert.ok(/\((\d+)(,[^)]*)?\)/.test(h), '인덱스가 아닌 값을 넘긴다: ' + h);
+  });
+
+  t('7B-h ★ 머리줄 칸 수(colspan) = 표 머리 칸 수 — 어긋나면 표가 통째로 밀린다', () => {
+    const items = [payRow({ rowIndex: 1 })];
+    const S = loadTableFns(items);
+    const html = S._pmTargetTable(items);
+    const heads = (html.match(/<th\b[^>]*>/g) || []).length;
+    const span = Number((html.match(/colspan="(\d+)"/) || [])[1]);
+    assert.strictEqual(span, heads, `머리줄 colspan=${span} ≠ 표 머리 ${heads}칸`);
+    // 데이터 줄의 칸 수도 같아야 한다(작업 칸을 지우지 않고 **비운다**)
+    const tds = (dataRows(html)[0].match(/<td/g) || []).length;
+    assert.strictEqual(tds, heads, `데이터 줄 ${tds}칸 ≠ 표 머리 ${heads}칸`);
   });
 
   /* ══════════════════════════════════════════════════════════
@@ -826,7 +1283,7 @@ function withStubPool(handler, run) {
   });
 
   t('7C-h ★ 명의 표기는 한 벌(_pmAcctLabel) — 카드·팝업이 사본을 두지 않는다', () => {
-    const blk = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmFixWork'));
+    const blk = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmRowFix'));
     const acct = HTML.slice(HTML.indexOf('function _pmFixAcct'), HTML.indexOf('/** 저장 성공 뒤 공통 마무리'));
     assert.ok(/_pmAcctLabel\(/.test(blk), '카드 줄이 공용 표기 함수를 쓰지 않는다');
     assert.ok(/_pmAcctPlain\(/.test(acct) && /_pmAcctName\(/.test(acct), '팝업이 공용 표기 함수를 쓰지 않는다');
@@ -925,61 +1382,62 @@ function withStubPool(handler, run) {
     assert.ok(/tc\.tab_gid AS "tabGid"/.test(q), 'gid 를 안 읽으면 시트만 열려 엉뚱한 탭을 본다');
   });
 
-  t('8e 프론트 링크 검증 — docs.google.com 만 연다(응답에 임의 URL 이 실려도)', () => {
-    const S = loadFixFns();
-    assert.strictEqual(S._pmSheetOk('https://docs.google.com/spreadsheets/d/A/edit'), true);
-    for (const bad of ['javascript:alert(1)', 'http://docs.google.com/x', 'https://evil.com/docs.google.com/',
-      'https://docs.google.com.evil.kr/x', '']) {
-      assert.strictEqual(S._pmSheetOk(bad), false, '열면 안 되는 주소를 통과시켰다: ' + bad);
+  /* ── UI 는 **구글시트로 보내지 않는다**(사용자 확정 2026-08-19) ──
+       탈시트 이후 진실원본은 작업보드 표다. 시트를 열어 두면 거기서 고친 값이
+       시스템에 반영되지 않아 사고가 난다 → 보완 창구의 바로가기는 작업보드 하나. */
+  t('8e ★★ 보완 창구에 구글시트 링크·버튼이 남아 있지 않다', () => {
+    const blk = HTML.slice(HTML.indexOf('function _pmBoardBtn'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
+    assert.ok(blk.length > 100 && /_pmOpenBoard/.test(blk), '바로가기 블록을 잘못 잘랐다(빈 문자열은 무엇이든 통과한다)');
+    const fix = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmFixAcct'));
+    for (const [n, src] of [['바로가기', blk], ['보완 카드·팝업', fix]]) {
+      assert.ok(!/docs\.google\.com/.test(src), n + ' 에 구글시트 주소가 남아 있다');
+      assert.ok(!/_pmOpenSheet|_pmSheetBtn|_pmSheetOk/.test(src), n + ' 에 옛 시트 버튼이 되살아났다');
     }
+    assert.ok(!/function _pmOpenSheet|function _pmSheetBtn|function _pmSheetOk/.test(HTML),
+      '★ 시트 열기 함수가 되살아났다(창구가 둘이 되면 시트에서 고친 값이 조용히 사라진다)');
+    /* ★ 안내 **문구**도 없는 버튼을 가리키면 안 된다 — 버튼은 [📋 작업보드]인데 문장만 [📄 시트]로
+         남아 담당자가 화면에 없는 버튼을 찾던 드리프트가 실제로 있었다(2026-08-19). */
+    assert.ok(!/\[📄 시트\]/.test(fix), '★ 보완 안내 문구가 아직 [📄 시트]를 가리킨다(그 버튼은 없다)');
+    assert.ok(/\[📋 작업보드\]/.test(fix), '보완 안내 문구가 작업보드 바로가기를 말해야 한다');
   });
 
-  t('8f 시트 버튼 — 열 수 있으면 인덱스만 넘기고, 못 열면 사유를 말한다', () => {
+  t('8f 작업보드 버튼 — 인덱스만 넘긴다(카드·묶은 줄이 같은 렌더러)', () => {
     const S = loadFixFns();
     S.STATE.pmFix = S._pmBuildFix([
       mkItem({ tabName: 'T1', tabLabel: 'A', issues: ['no_bank'] }),
-      // ★ 이관된 작업 = 링크 있음 → **활성**(경고는 클릭 후 팝업)
       mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 2, issues: ['no_bank'], sheetless: true }),
-      // 시스템이 만든 무시트(가상 ID) = 링크 없음 → 비활성 + 사유
-      mkItem({ tabName: 'T3', tabLabel: 'C', rowIndex: 3, issues: ['no_bank'], sheetUrl: '', sheetless: true }),
-      mkItem({ tabName: 'T4', tabLabel: 'D', rowIndex: 4, issues: ['no_bank'], sheetUrl: '', sheetless: false }),
     ]);
     const html = S._pmFixBlock();
-    assert.strictEqual((html.match(/onclick="_pmOpenSheet\(\d+\)"/g) || []).length, 2,
-      '★ 링크가 있는 작업(이관 포함)은 눌러서 열 수 있어야 한다');
-    assert.ok(!/onclick="_pmOpenSheet\([^)]*'/.test(html), '★ onclick 에 문자열을 보간했다');
-    assert.ok(!/docs\.google\.com/.test(html), '★ URL 을 onclick·href 로 화면에 심지 않는다(인덱스 참조)');
-    assert.ok(/title="[^"]*참고용으로만[^"]*"[^>]*onclick="_pmOpenSheet/.test(html),
-      '이관 작업 버튼이 "참고용" 임을 말하지 않는다');
-    assert.strictEqual((html.match(/disabled title="[^"]*열 수 있는 구글시트가 없습니다/g) || []).length, 1,
-      '가상 시트 작업의 사유 안내가 없다');
-    assert.strictEqual((html.match(/disabled title="[^"]*시트 링크를 알 수 없습니다/g) || []).length, 1,
-      '★ "링크 없음"을 "시트 없음"으로 뭉뚱그리면 담당자가 원인을 엉뚱한 데서 찾는다');
+    assert.strictEqual((html.match(/onclick="_pmOpenBoard\(\d+\)"/g) || []).length, 4,
+      '★ 작업마다 카드 머리 + 묶은 줄 두 곳에서 작업보드로 갈 수 있어야 한다(이관 작업도 동일)');
+    assert.ok(!/onclick="_pmOpenBoard\([^)]*['"]/.test(html), '★ onclick 에 문자열을 보간했다');
+    assert.ok(!/disabled/.test(html.slice(html.indexOf('작업보드') - 200, html.indexOf('작업보드') + 40)),
+      '작업보드는 항상 열 수 있다 — 비활성 버튼이 되면 안 된다');
+    // 사본 금지: 카드 머리줄과 묶은 줄이 같은 렌더러를 쓴다
+    const blk = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmRowFix'));
+    assert.strictEqual((blk.match(/_pmBoardBtn\(i\)/g) || []).length, 2,
+      '카드 머리와 묶은 줄이 같은 렌더러(_pmBoardBtn)를 써야 한다');
   });
 
-  t('8f2 ★★ 이관된 작업은 경고 팝업을 거쳐서만 열린다(사용자 확정 문구)', () => {
-    const src = HTML.slice(HTML.indexOf('function _pmOpenSheet'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
-    // 이관 아님 = 곧바로 열고, 이관 = 팝업
-    assert.ok(/if\(!w\.sheetless\)\{ window\.open\(/.test(src), '일반 작업은 곧바로 열려야 한다(불필요한 마찰 금지)');
-    assert.ok(/_pmDialog\(/.test(src), '이관 작업 경고 팝업이 없다');
-    for (const phrase of ['탈구글시트를 진행했습니다', '시스템에 반영되지 않으므로',
-      '시트를 편집하지 마시고', '참고용으로만', '확인하고 시트로 이동하기']) {
-      assert.ok(src.indexOf(phrase) > 0, '확정 문구 누락: ' + phrase);
-    }
-    // ★ window.open 은 onOk 동기 구간에서 — async 로 만들면 팝업 차단에 걸린다
-    assert.ok(/onOk:\s*\(\)=>\{ window\.open\(/.test(src),
-      '★ onOk 가 async 이거나 await 뒤에서 열면 브라우저가 팝업을 막는다');
+  t('8g ★ 작업보드 이동은 pendingTab 계약 그대로(사본 금지) + 팝업을 먼저 닫는다', () => {
+    const fn = HTML.slice(HTML.indexOf('function _pmOpenBoard'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
+    const close = fn.indexOf('_pmCloseDialog()'), pend = fn.indexOf('STATE.pendingTab'), sw = fn.indexOf("switchView('workdesk')");
+    assert.ok(close >= 0, '팝업을 안 닫으면 오버레이가 작업보드를 가린다');
+    assert.ok(pend > close && sw > pend, '닫기 → 예약 → 화면 전환 순서여야 한다');
+    assert.ok(/sheetId:w\.sheetId, tabName:w\.tabName/.test(fn.replace(/\s+/g, ' ')), '탭 지목 재료가 없다');
+    assert.ok(/tabGid:w\.tabGid/.test(fn), '★ gid 를 빠뜨리면 목록에 없는 탭이 gid 없이 열린다');
   });
 
-  t('8g 작업 보완 팝업에도 시트 바로가기가 있다(고치다가 시트를 확인한다)', () => {
-    const work = HTML.slice(HTML.indexOf('function _pmFixWork'), HTML.indexOf('function _pmPickBank'));
-    assert.ok(/_pmSheetBtn\(i\)/.test(work), '팝업에 시트 버튼이 없다');
-  });
-
-  t('8h 새 창은 noopener 로 연다', () => {
-    const fn = HTML.slice(HTML.indexOf('function _pmOpenSheet'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
-    assert.ok(/_pmSheetOk\(w\.sheetUrl\)/.test(fn), '열기 직전 재검증이 없다');
-    assert.ok(/window\.open\(w\.sheetUrl,\s*'_blank',\s*'noopener'\)/.test(fn), 'noopener 가 없다');
+  await ta('8h ★ 작업보드 바로가기 재료(tabGid)를 서버가 실어 준다(화면이 추측하지 않게)', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M',
+        goodsCostType: '', tabGid: '77', sheetless: false }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.tabGid, '77');
+    });
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

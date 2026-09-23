@@ -226,6 +226,9 @@ function bankTable() {
       baseName,
       renamed: !!(_ov && _ov.name.has(code) && _byCode.has(code)),
       custom: !!(_ov && _ov.extra.has(code)),
+      // ★ 이름 대신 코드가 서식에 나가는 기관(케이뱅크가 이름을 인식 못 함) — 화면이
+      //   그 사실을 말해야 담당자가 "이름을 고쳤는데 파일이 안 바뀐다"로 헤매지 않는다.
+      formCodeOnly: FORM_CODE_ONLY.has(code),
       aliases,
       // ★ 지운 것까지 포함한 **기본 별칭 전체** — 화면이 저장 페이로드의 `del` 을
       //   "여기 있는데 지금 목록에 없는 것"으로 계산한다(프론트에 정규화 사본을 두지 않기 위해
@@ -357,7 +360,31 @@ function bankNameByCode(code) {
   return _effName(c);
 }
 
+/**
+ * ★★ 케이뱅크 대량이체가 **이름을 인식하지 못하는** 기관 — 서식에는 코드로 내보낸다.
+ *
+ * 실측(2026-08-21 사용자 확인): 031 대구은행은 `대구은행`·`대구`·`im뱅크`·`IM뱅크` 어느
+ * 표기로도 업로드가 인식하지 못하고 **표준코드 `031` 로만** 통과한다. 케이뱅크 양식의
+ * 은행 칸은 헤더가 말하듯(`* 입금은행(코드/은행명/증권사명)`) 코드도 받으므로, 그 기관만
+ * 코드로 적어 보낸다.
+ *
+ * ★ **여기 있는 기관은 화면에서 이름을 고쳐도 서식에는 코드가 나간다** — 오버레이 이름을
+ *   존중하면 막으려던 거부가 그대로 재현된다(그래서 `_effName` 보다 이 판정이 먼저다).
+ *   대신 `bankTable()` 이 `formCodeOnly` 로 그 사실을 화면에 알린다(조용한 no-op 금지).
+ * ★ **넓히지 말 것** — 이름이 잘 통과하는 기관까지 코드로 바꾸면(국민 85건·농협 43건 등)
+ *   확인되지 않은 형식으로 회차 전체가 거부될 수 있다. 은행이 거부한 것이 실제로 확인된
+ *   기관만 한 줄씩 추가한다.
+ */
+const FORM_CODE_ONLY = new Set(['031']);
+
+/** 이체 서식(케이뱅크 은행 칸)에 실제로 찍히는 값 — 이름 또는 코드. */
+function bankFormLabel(code) {
+  const c = String(code == null ? '' : code).replace(/[^0-9]/g, '').padStart(3, '0');
+  if (FORM_CODE_ONLY.has(c)) return c;
+  return _effName(c);
+}
+
 module.exports = {
-  BANKS, resolveBank, bankNameByCode, normalizeAccount, normalizeMemo,
+  BANKS, FORM_CODE_ONLY, resolveBank, bankNameByCode, bankFormLabel, normalizeAccount, normalizeMemo,
   setBankOverrides, bankTable, validateBankOverrides,
 };

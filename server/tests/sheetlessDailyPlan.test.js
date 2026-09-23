@@ -184,6 +184,8 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     dailyPlan.__setPoolForTest({
       query: async (sql) => {
         if (/FROM campaign_participants/.test(sql)) return { rows: many };
+        // 2026-09-23: 쉬는 날 판정용 공고 조회는 INSERT 가 아니다(세지 않는다). 공고 없음 = 종전 동작.
+        if (/FROM recruit_campaigns/.test(sql)) return { rows: [] };
         insertCount++;
         return { rowCount: 1 };
       },
@@ -233,6 +235,8 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
       client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15', set: [{ date: '2026-08-15', count: 2 }], by: 'tester' });
     ok('빈 행이 없어도 0→2 증원은 새 작업표 행 2개를 만든다', r.ok && r.created === 2 && inserts.length === 2);
     ok('새 행은 이어지는 seq와 목표 날짜를 갖는다', inserts[0][3] === 8 && inserts[1][3] === 9 && inserts.every(p => p[4] === '8 / 15 (토)'));
+    ok('★★ 모집인원 조절로 늘어난 새 행도 화면 번호를 함께 채운다',
+      JSON.parse(inserts[0][5])['번호'] === '8' && JSON.parse(inserts[1][5])['번호'] === '9');
   }
   {
     // [기본으로]는 조절 후 남은 행 수가 아니라, 처음 조절하기 직전 작업표의 날짜별 행 수로 돌아간다.

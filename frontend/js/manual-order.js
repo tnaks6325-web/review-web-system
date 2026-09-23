@@ -30,6 +30,17 @@
   }
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  /* ★★ 경로는 호스트가 재기준한다(`window.MANUAL_ORDER_API` — CAMPAIGN_ADMIN_API·CS_API_BASE 와 같은 장치).
+     리뷰웹시스템[3버전]은 인트라넷 SSO 토큰(via:'intranet')을 쓰는데 그 토큰은 authMiddleware 에서
+     `/api/trackb/*` 로만 도달 가능하다 → `/api/manual-order/...` 하드코딩이면 미리보기·제출이
+     403("인트라넷 연동 계정은 …Track B…에서만")으로 죽고 화면엔 '분해 실패'로만 보인다.
+     전역 미설정 = 종전 경로(관리자 대시보드·리뷰어 홈 동작 불변). 이미지 업로드/추출(/api/image/*)은
+     무인증 라우트라 재기준하지 않는다. */
+  function _moBase() {
+    var b = window.MANUAL_ORDER_API;
+    return (typeof b === 'string' && b) ? b.replace(/\/$/, '') : '/api/manual-order';
+  }
+
   async function api(path, opts) {
     const o = Object.assign({ headers: {} }, opts || {});
     o.headers['Authorization'] = 'Bearer ' + tok();
@@ -39,7 +50,7 @@
   }
 
   let CTX = null;      // { sheetId, tabName, gid, campaignId, title }
-  let ROWS = [];       // 파싱 결과 + 캡처 상태 + targetApplicationId(운영자 명시 선택)
+  let ROWS = [];       // 파싱 결과 + 캡처 상태 + targetApplicationId
   let STAGED = [];     // 1단계에서 먼저 받아 둔 구매캡쳐(줄이 나뉜 뒤 수취인 이름으로 배정)
   let BUSY = false;
 
@@ -302,7 +313,7 @@
     if (!text.trim()) { alert('붙여넣은 내용이 없습니다.'); return; }
     let r;
     try {
-      r = await api('/api/manual-order/preview', { method: 'POST', body: JSON.stringify({ text }) });
+      r = await api(_moBase() + '/preview', { method: 'POST', body: JSON.stringify({ text }) });
     } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
     ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null, applications: [], targetApplicationId: '' }));
@@ -348,11 +359,11 @@
       <td style="width:110px">${inp('account')}</td>
       <td style="width:74px">${inp('depositor')}</td>
       <td style="width:74px">${inp('price')}</td>
-       <td style="width:130px">
-         <div class="${capCls}" tabindex="0" onpaste="ManualOrder.onPaste(event,${i})" onclick="this.focus()">${capTxt}</div>
-         ${capPick}
-         ${appSelect}
-         ${msgs}
+      <td style="width:130px">
+        <div class="${capCls}" tabindex="0" onpaste="ManualOrder.onPaste(event,${i})" onclick="this.focus()">${capTxt}</div>
+        ${capPick}
+        ${appSelect}
+        ${msgs}
       </td>
     </tr>`;
   }
@@ -376,8 +387,8 @@
         <div class="mo-hint">
           · 칸을 눌러 바로 수정할 수 있습니다 · 오류가 있는 줄은 제출에서 제외됩니다<br>
           · 구매캡쳐 칸을 클릭하고 <b>Ctrl+V</b> 하면 첨부됩니다 — 캡처 속 주문번호를 자동으로 읽습니다<br>
-           · 참여형 공고에서 기존 신청이 보이면 <b>확정할 신청을 반드시 선택</b>하세요. 전화번호만으로 새 신청을 자동 확정하지 않습니다<br>
-           · <b>🔧 자동보정 / 🤖 AI 보정</b> 표시가 붙은 줄은 <b>슬래시(/)가 빠진 자리를 시스템이 찾아 나눈 것</b>입니다 — 값이 맞는지 꼭 확인하세요
+          · 참여형 공고에서 기존 신청이 보이면 <b>확정할 신청을 반드시 선택</b>하세요. 전화번호만으로 새 신청을 자동 확정하지 않습니다<br>
+          · <b>🔧 자동보정 / 🤖 AI 보정</b> 표시가 붙은 줄은 <b>슬래시(/)가 빠진 자리를 시스템이 찾아 나눈 것</b>입니다 — 값이 맞는지 꼭 확인하세요
         </div>
       </div>`,
       `<button class="mo-btn gh" onclick="ManualOrder.back()">← 다시 붙여넣기</button><span class="sp"></span>
@@ -392,7 +403,7 @@
     try {
       const r = await api('/api/campaign/admin/' + encodeURIComponent(CTX.campaignId) + '/applications');
       data = r && r.ok && Array.isArray(r.data) ? r.data : [];
-    } catch (_) { return; } // 서버가 후보를 못 주면 서버가 제출 전 fail-closed로 막는다.
+    } catch (_) { return; }
     const p8 = v => String(v || '').replace(/\D/g, '').slice(-8);
     ROWS.forEach(row => {
       const key = p8(row.fields && row.fields.phone);
@@ -519,16 +530,64 @@
     const btn = document.getElementById('moSubmit');
     if (btn) { btn.disabled = true; btn.textContent = '제출 중…'; }
 
+    // ★ 오늘 정원 초과는 **막지 않고 확인만 받는다**(사용자 확정 2026-08-19). 서버가 배치를
+    //   시작하기 전에 판정해 `needConfirm`으로 되돌리므로, 이 시점까지 **쓰기는 0건**이다.
+    //   확인하면 `allowOverDaily`로 재전송한다.
+    const post = (allowOverDaily, allowRepurchase) => api(_moBase() + '/submit', {
+      method: 'POST',
+      body: JSON.stringify({
+        sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '',
+        campaignId: CTX.campaignId || null,
+        allowOverDaily: allowOverDaily === true,
+        allowRepurchase: allowRepurchase === true,
+        items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '', targetApplicationId: x.r.targetApplicationId || null })),
+      }),
+    });
+
     let out;
+    let _repurchaseOk = false;
     try {
-      out = await api('/api/manual-order/submit', {
-        method: 'POST',
-        body: JSON.stringify({
-          sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '',
-          campaignId: CTX.campaignId || null,
-          items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '', targetApplicationId: x.r.targetApplicationId || null })),
-        }),
-      });
+      out = await post(false, false);
+      // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)"에 최근 며칠 안에 같은 연락처로 이미 접수된
+      //   건이 있으면 서버가 **쓰기 0건**으로 되돌린다. 다른 사람인데 번호만 같은 경우가 있어
+      //   막지 않고 확인만 받는다(사용자 확정 2026-08-24) — over_daily와 같은 확인창 흐름.
+      if (out && out.needConfirm === 'repurchase_window') {
+        const list = (out.blocked || []).map(b => {
+          const d = b.availableFrom ? new Date(b.availableFrom).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }) : '?';
+          return `· ${b.name || '(이름없음)'} — ${d} 이후 재참여 가능`;
+        }).join('\n');
+        const okGo = confirm(
+          `${(out.blocked || []).length}건이 최근 며칠 안에 이 작업에 이미 참여한 연락처예요.\n\n${list}\n\n`
+          + `다른 사람인데 번호만 같은 경우가 아니라면 [취소]하고 확인해주세요.\n`
+          + `[확인] 그대로 강제 접수합니다.\n`
+          + `[취소] 아무것도 접수되지 않았습니다.`);
+        if (!okGo) {
+          BUSY = false;
+          if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
+          return;   // 서버는 아직 아무것도 쓰지 않았다
+        }
+        _repurchaseOk = true;
+        out = await post(false, true);
+      }
+      if (out && out.needConfirm === 'over_daily') {
+        const q = out.quota || {};
+        // ★ 외부모집은 **이미 구매가 끝난 건의 사후 등록**이다 — 취소해도 구매가 되돌아가지
+        //   않고 기록만 빠진다. 그래서 "진행할까요?"(취소가 안전해 보이는 질문)가 아니라
+        //   "초과로 기록됩니다"(고지) + 취소의 실제 의미를 문장으로 말한다(사용자 지적 2026-08-19).
+        const okGo = confirm(
+          `오늘 모집인원을 넘겨 기록됩니다.\n\n`
+          + `· 오늘 정원 ${q.quota}명 중 ${q.todayCount}명 접수됨 (남은 자리 ${q.remaining}명)\n`
+          + `· 지금 접수 ${q.want}건 → ${q.over}명 초과\n\n`
+          + `이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.\n`
+          + `[확인] 초과 상태로 그대로 기록합니다.\n`
+          + `[취소] 이 건은 시스템에 남지 않습니다 — 나중에 다시 접수해야 합니다.`);
+        if (!okGo) {
+          BUSY = false;
+          if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
+          return;   // 서버는 아직 아무것도 쓰지 않았다
+        }
+        out = await post(true, _repurchaseOk);
+      }
     } catch (e) { out = { ok: false, error: e.message }; }
 
     if (!out || !out.ok) {
@@ -544,6 +603,12 @@
       const t = (res && typeof res.index === 'number') ? targets[res.index] : targets[k];
       const src = t && t.r;
       if (!res || !res.ok || !src || !src.capture || !res.orderSubmissionId) continue;
+      const capSession = res.captureSession || {};
+      if (!capSession.id || !capSession.token) {
+        res.captureAttached = false;
+        (res.warnings = res.warnings || []).push('구매캡쳐 제출 세션을 발급받지 못했습니다');
+        continue;
+      }
       try {
         const up = await api('/api/image/image-upload', {
           method: 'POST',
@@ -552,6 +617,8 @@
             fileName: (src.fields.recipient || '주문캡처') + '.' + (src.capture.mime === 'image/png' ? 'png' : 'jpg'),
             tabName: CTX.tabName, sheetId: CTX.sheetId, displayName: CTX.title || '',
             orderSubmissionId: res.orderSubmissionId,
+            captureSessionId: capSession.id,
+            captureSessionToken: capSession.token,
           }),
         });
         res.captureAttached = !!(up && up.ok);

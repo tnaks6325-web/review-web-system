@@ -1,19 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware } = require('../middleware/auth.middleware');
+const { tabConfigWriteScopeMiddleware } = require('../middleware/tabConfigScope.middleware');
 const { getSpreadsheetMeta, readSheet } = require('../services/sheets.service');
 // [DEPRECATED — v11.8.0] masterSheet.service.js 함수들은 2탭 통합으로 deprecated
 // import는 유지하되 라우트에서 deprecated 응답 반환
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
 const { runIndexScan, applyCachedIndexScan, hasIndexScanCache, syncTabListToDB } = require('../services/indexScan.service');
 const { getTabRegistrationMode } = require('../utils/tabRegistration');
+// ★ 담당자 표기 단일 출처(065) — 실명(박세희·박은비)이 들어오면 닉네임(만두·망고)으로 접는다.
+//   여기서 접지 않으면 자유입력 한 번에 담당자 필터 칩이 다시 넷으로 갈린다.
+const { normalizeManagerForStore } = require('../utils/workManager');
 const {
   CASH_RECEIPT_CHANNELS, CASH_RECEIPT_SETTING_KEYS,
   cashReceiptSettingKey, isCashReceiptChannelKey, cashReceiptChannelLabel,
 } = require('../utils/cashReceiptChannels');
 const { logger } = require('../utils/logger');
 const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
+const { assignStableCaptureSlotKeys } = require('../utils/captureSlots');
+const { renameTabState } = require('../services/tabRename.service');
 
 // ── Auto-migration: display_name_map JSONB 컬럼 추가 (차수별 표시명) ──
 (async () => {
@@ -142,7 +148,7 @@ function _isSystemHeader(header) {
 }
 
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
-router.post('/config', authMiddleware, async (req, res, next) => {
+router.post('/config', authMiddleware, internalOnlyMiddleware, tabConfigWriteScopeMiddleware, async (req, res, next) => {
   try {
     const b = req.body;
     const tabName = (b.tabName || '').trim();
@@ -196,7 +202,9 @@ router.post('/config', authMiddleware, async (req, res, next) => {
     if (roundKey) {
       const metaUpdate = {};
       for (const [apiKey, dbKey] of Object.entries(ROUND_META_FIELDS)) {
-        if (b[apiKey] !== undefined) metaUpdate[dbKey] = b[apiKey];
+        if (b[apiKey] === undefined) continue;
+        // ★ 담당자는 저장 직전 정규화(만두/망고) — 본 칸과 같은 규칙(사본 금지).
+        metaUpdate[dbKey] = (apiKey === 'manager') ? normalizeManagerForStore(b[apiKey]) : b[apiKey];
       }
       if (Object.keys(metaUpdate).length > 0) {
         try {
@@ -226,37 +234,47 @@ router.post('/config', authMiddleware, async (req, res, next) => {
       }
     }
 
-    // ★ 캡처 슬롯(capture_slots) 처리 — 전용 분기 (JSONB 타입 안전, 키는 위치 기준 자동 부여)
-    //   요청은 라벨 목록만 보내면 됨(문자열 배열 또는 {label} 배열).
-    //   key는 서버가 위치로 부여: 0번=review(기존 단일 슬롯/원장과 호환), 그 외=slot2,slot3...
+    // ★ 캡처 슬롯(capture_slots) 처리 — 전용 분기 (JSONB 타입 안전)
+    //   순서가 바뀌어도 기존 key를 보존해 review_submissions 원장이 끊기지 않게 한다.
+    //   기존 화면의 라벨 목록과 신규 화면의 {key,label} 모두 받는다.
     //   슬롯이 1개 이하이면 NULL 저장(= 단일 기본 'review' 슬롯, 기존 동작 그대로).
     if (b.captureSlots !== undefined) {
+      const client = await pool.connect();
       try {
         const raw = Array.isArray(b.captureSlots) ? b.captureSlots : [];
-        const labels = raw
-          .map(s => (typeof s === 'string' ? s : (s && s.label)) || '')
-          .map(l => String(l).trim())
-          .filter(Boolean);
-        const slotsArr = labels.map((label, i) => ({ key: i === 0 ? 'review' : `slot${i + 1}`, label }));
+        await client.query('BEGIN');
+        const { rows: existing } = await client.query(
+          `SELECT capture_slots FROM tab_configs
+            WHERE sheet_id = $1 AND tab_name = $2
+            FOR UPDATE`,
+          [sheetId, tabName]
+        );
+        const slotsArr = assignStableCaptureSlotKeys(raw, existing[0]?.capture_slots);
         const slotsJson = slotsArr.length > 1 ? JSON.stringify(slotsArr) : null;
-        await pool.query(
+        await client.query(
           `INSERT INTO tab_configs (sheet_id, tab_name, capture_slots, updated_at)
            VALUES ($1, $2, $3::jsonb, NOW())
            ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
              capture_slots = $3::jsonb, updated_at = NOW()`,
           [sheetId, tabName, slotsJson]
         );
+        await client.query('COMMIT');
         return res.json({ ok: true, tabName, sheetId, captureSlots: slotsArr });
       } catch (csErr) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
         logger.error('[tab/config] capture_slots 저장 오류:', csErr.message);
         return res.json({ error: '캡처 슬롯 저장 오류: ' + csErr.message });
+      } finally {
+        client.release();
       }
     }
 
     // null 처리: undefined(미전송) = 기존값 보존, 빈문자열("") = 빈값 저장
     const fields = {
       sheet_url:    b.sheetUrl  || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit${b.tabGid ? '#gid=' + b.tabGid : ''}` : undefined),
-      manager:      b.manager      !== undefined ? b.manager      : undefined,
+      // ★★ 실명(박세희·박은비)으로 저장되던 것이 담당자 필터 칩이 넷으로 갈린 원인이다 —
+      //   저장 직전에 닉네임으로 접는다. 모르는 값은 원문 보존, 빈 값은 해제 그대로.
+      manager:      b.manager      !== undefined ? normalizeManagerForStore(b.manager) : undefined,
       time_range:   b.timeRange    !== undefined ? b.timeRange    : undefined,
       taekhap:      b.taekhap      !== undefined ? Boolean(b.taekhap) : undefined,
       review_type:  b.reviewType   !== undefined ? b.reviewType   : undefined,
@@ -356,11 +374,23 @@ router.post('/reopen-slots', authMiddleware, async (req, res, next) => {
 
     // 실제 재오픈
     const { rows: reopenedRows } = await pool.query(
-      `UPDATE review_index ri
-          SET is_submitted = FALSE, built_at = NOW()
-        WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.is_submitted = TRUE
-          AND ${coverCond}
-        RETURNING ri.row_index`,
+      `WITH reopened AS (
+         UPDATE review_index ri
+            SET is_submitted = FALSE, built_at = NOW()
+          WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.is_submitted = TRUE
+            AND ${coverCond}
+          RETURNING ri.row_index
+       ), participant_reset AS (
+         UPDATE campaign_participants cp
+            SET is_submitted = FALSE,
+                updated_at = NOW(),
+                updated_by = 'reopen-slots'
+           FROM reopened r
+          WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = r.row_index
+            AND cp.active = TRUE AND cp.deleted_at IS NULL
+          RETURNING cp.seq
+       )
+       SELECT row_index FROM reopened`,
       [sheetId, tabName, required, required.length]
     );
     const reopened = reopenedRows.length;
@@ -690,7 +720,13 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     const { rows: allTabs } = await pool.query(`
       SELECT tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
              tc.is_closed,
-             im.tab_gid, im.tab_name AS index_tab_name
+             -- ★★ gid 는 index_master 우선, 없으면 tab_configs 폴백 (2026-08-19).
+             --   마감·아카이브된 탭은 auto-clean-closed 가 index_master 행을 지우므로
+             --   im.tab_gid 만 보면 gid 가 null 이 되어 **리네임을 영영 못 잡는다**
+             --   (그 탭은 "GID 없음 + 시트에 해당 탭명 없음"으로 스킵된다).
+             --   그런 탭도 tab_configs.tab_gid 는 남아 있어 gid 매칭이 가능하다.
+             COALESCE(NULLIF(im.tab_gid, ''), NULLIF(tc.tab_gid, '')) AS tab_gid,
+             im.tab_name AS index_tab_name
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
       ORDER BY tc.campaign_name, tc.tab_name
@@ -855,20 +891,12 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
             try {
               // ── 탭명 변경 (GID 기반으로 확인된 rename) ──
               if (newName) {
-                await pool.query(
-                  `UPDATE tab_configs SET tab_name = $1, sheet_url = $2, updated_at = NOW()
-                   WHERE sheet_id = $3 AND tab_name = $4`,
-                  [newName, correctSheetUrl, sheetId, oldName]
-                );
-                await pool.query(
-                  'UPDATE index_master SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-                  [newName, sheetId, oldName]
-                );
-                const riResult = await pool.query(
-                  'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
-                  [newName, sheetId, oldName]
-                );
-                entry.reviewIndexUpdated = riResult.rowCount;
+                const changed = await renameTabState(pool, {
+                  sheetId, oldTabName: oldName, newTabName: newName,
+                  tabGid: effectiveGid, sheetUrl: correctSheetUrl,
+                });
+                entry.reviewIndexUpdated = changed.reviewIndexUpdated;
+                entry.paymentItemsUpdated = changed.paymentItemsUpdated;
                 renamed++;
                 logger.info(`[sync-tab-names] 탭명 변경: "${oldName}" → "${newName}" (sheet=${sheetId.substring(0, 15)})`);
               }
@@ -1100,6 +1128,10 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
 
           if (!dryRun) {
             try {
+              const changed = await renameTabState(pool, {
+                sheetId: sid, oldTabName: dbTabName, newTabName, tabGid: newGid,
+                sheetUrl: correctSheetUrl,
+              });
               await pool.query(
                 'DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
                 [sid, dbTabName]
@@ -1122,10 +1154,8 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
                    tab_gid = $3, campaign_name = $4, status = 'active', built_at = NOW()`,
                 [sid, newTabName, newGid, newCampaignName]
               );
-              await pool.query(
-                'UPDATE review_index SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
-                [newTabName, newGid, sid, dbTabName]
-              );
+              fix.reviewIndexUpdated = changed.reviewIndexUpdated;
+              fix.paymentItemsUpdated = changed.paymentItemsUpdated;
               fix.status = 'fixed';
               fixed++;
               logger.info(`[fix-swap] 교정: "${dbTabName}" → tab="${newTabName}", campaign="${newCampaignName}", gid=${newGid}`);

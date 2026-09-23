@@ -123,11 +123,11 @@ t('C3. 상태코드는 가산 필드다(기존 소비처 계약 불변)', () => 
   assert.ok(/서버 응답 파싱 실패 \(HTTP/.test(fn), '파싱 실패 폴백이 사라졌다');
 });
 
-t('C4. 캡처폴더 저장은 업로드 성공 시점에 한 번만(순차 큐로 늦어져도 유실 없음)', () => {
-  assert.ok(/const _saveCaptureFolderOnce = async \(url\)/.test(SA), '헬퍼 없음');
-  assert.ok(/if \(!url \|\| _capFolderSaved\) return;/.test(SA), '중복 저장 가드 없음');
-  assert.ok(/_saveCaptureFolderOnce\(upJson\.captureFolderUrl\)/.test(UP), '업로드 성공 시 호출하지 않음');
-  assert.ok(!/if \(firstCaptureFolderUrl\) \{\n    try \{/.test(SA), '루프 뒤 사본이 남아 있다');
+t('C4. 캡처폴더 저장은 세션에 고정된 좌표로 업로드 서버가 소유한다', () => {
+  assert.ok(!/_saveCaptureFolderOnce|firstCaptureFolderUrl/.test(SA), '공개 화면의 별도 폴더 저장 경로가 남아 있다');
+  assert.ok(/captureSessionId:_capSession\.id/.test(UP), '세션 ID가 업로드 요청에 없다');
+  assert.ok(/captureSessionToken:_capSession\.token/.test(UP), '세션 토큰이 업로드 요청에 없다');
+  assert.ok(/캡처폴더 URL은 업로드 서버가 세션에 고정된 작업 좌표로 직접 저장한다/.test(SA), '서버 소유 계약 설명이 없다');
 });
 
 console.log(`\n${n} checks passed`);

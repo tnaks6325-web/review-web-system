@@ -1,0 +1,273 @@
+<meta charset="utf-8">
+<title>작업보드 → 리뷰어 메시지 보내기 (PRD · 유저플로우)</title>
+<style>
+  :root{color-scheme:light}
+  body{margin:0;background:#f6f8fb;color:#0f172a;font:15px/1.72 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-size:1.5rem;margin:0 0 6px}
+  h2{font-size:1.08rem;margin:34px 0 10px;padding-bottom:7px;border-bottom:2px solid #e2e8f0}
+  h3{font-size:.98rem;margin:20px 0 8px}
+  .sub{color:#64748b;font-size:.9rem;margin:0 0 22px}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 18px;margin:12px 0;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+  .warn{background:#fff7ed;border-color:#fdba74}
+  .bad{background:#fef2f2;border-color:#fca5a5}
+  .ok{background:#f0fdf4;border-color:#86efac}
+  .ask{background:#eff6ff;border-color:#93c5fd}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;background:#f1f5f9;border-radius:4px;padding:1px 5px}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:.9rem;background:#fff}
+  th,td{border:1px solid #e2e8f0;padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f8fafc;font-weight:700;white-space:nowrap}
+  ul{margin:8px 0;padding-left:20px}
+  li{margin:5px 0}
+  .tag{display:inline-block;font-size:.74rem;font-weight:700;padding:2px 8px;border-radius:999px;margin-right:6px}
+  .t-new{background:#dcfce7;color:#166534}.t-keep{background:#e0e7ff;color:#3730a3}.t-none{background:#f1f5f9;color:#475569}
+  .flow{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px 18px;margin:12px 0}
+  .flow ol{margin:0;padding-left:22px}
+  .flow li{margin:9px 0}
+  .mock{background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:0;margin:12px 0;overflow:hidden;max-width:420px}
+  .mock .mh{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:9px 12px;font-weight:700;font-size:.9rem}
+  .mock .mb{padding:12px}
+  .menu{border:1px solid #cbd5e1;border-radius:9px;max-width:250px;padding:5px;box-shadow:0 8px 22px rgba(16,24,40,.14);background:#fff}
+  .menu div{padding:6px 9px;border-radius:6px;font-size:.88rem}
+  .menu div.hl{background:#eff6ff;font-weight:700}
+  .menu .divider{height:1px;background:#e2e8f0;margin:4px 2px;padding:0}
+  .to{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 10px;font-size:.85rem;margin-bottom:10px}
+  .ta{border:1px solid #cbd5e1;border-radius:8px;padding:8px;min-height:64px;color:#94a3b8;font-size:.85rem}
+  .btns{display:flex;gap:6px;justify-content:flex-end;margin-top:10px}
+  .btn{border:1px solid #cbd5e1;border-radius:7px;padding:6px 12px;font-size:.83rem;background:#fff}
+  .btn.p{background:#3182f6;border-color:#3182f6;color:#fff;font-weight:700}
+  small{color:#64748b}
+</style>
+<div class="wrap">
+
+<h1>작업보드 → 리뷰어에게 메시지 보내기</h1>
+<p class="sub">우클릭 한 번으로 그 줄의 리뷰어에게 1:1 문의방을 <b>관리자가 먼저 열고</b> 메시지를 보낸다 · 코드 구조 점검 결과 + 구현 계획 + 유저플로우 · 2026-08-21</p>
+
+<div class="card ask">
+  <b>요청 요약</b>
+  <ul>
+    <li>작업보드 표에서 <b>모집공고를 통해 참여한 리뷰어의 행을 우클릭</b> → 그 리뷰어에게 메시지 전송.</li>
+    <li>참여자 칸의 명의가 타계정이어도 <b>리뷰어 로그인 아이디(본계정)</b>로 발송되어야 한다.</li>
+    <li><b>C/S 창에도 채팅방이 생성</b>되어야 한다.</li>
+    <li>현행: 리뷰어가 먼저 문의를 보내야만 방이 생김 → 변경: <b>관리자도 방을 열 수 있다</b>.</li>
+  </ul>
+</div>
+
+<h2>1. 코드 구조 점검 — 이미 있는 것 / 없는 것</h2>
+
+<div class="card ok">
+  <b>결론: "관리자가 방을 먼저 여는 기능"은 이미 서버에 있다.</b> 다만 <b>부르는 창구가 리뷰검수·입금 실패 안내뿐</b>이라 작업보드에서 닿을 길이 없었다.
+</div>
+
+<table>
+  <tr><th>조각</th><th>위치</th><th>지금 상태</th></tr>
+  <tr>
+    <td>방 생성 + 관리자 발신 + SSE 푸시</td>
+    <td><code>services/csBridge.service.js</code> → <code>postAdminNotice</code>(= <code>postInspectionReject</code>)</td>
+    <td><span class="tag t-keep">그대로 재사용</span> 스레드 없으면 생성 · <code>admin_unread=0</code> · 닉네임 fail-closed 치환 · <b>절대 throw 없음</b></td>
+  </tr>
+  <tr>
+    <td>스레드/메시지 원장</td>
+    <td><code>migrations/030_cs_inquiry.sql</code> · <code>077</code> · <code>080</code> · <code>093</code></td>
+    <td><span class="tag t-none">마이그레이션 0</span> <code>UNIQUE(reviewer_phone8, campaign_key)</code> 그대로 사용</td>
+  </tr>
+  <tr>
+    <td>관리자 C/S 화면(방 목록·대화창)</td>
+    <td><code>frontend/js/cs-inquiry.js</code> · 작업보드 <code>renderCsView()</code></td>
+    <td><span class="tag t-keep">무수정</span> 목록은 <code>/cs/threads</code> 그대로 — 새 방이 <b>'진행중' 기본 필터</b>에 바로 뜬다</td>
+  </tr>
+  <tr>
+    <td>리뷰어 화면(내 문의함)</td>
+    <td><code>index.html loadCsInbox</code> ← <code>/api/reviewer/cs/threads?phone8=</code></td>
+    <td><span class="tag t-keep">무수정</span> 서버 스레드 목록을 그대로 그린다 → 관리자가 연 방도 즉시 보인다</td>
+  </tr>
+  <tr>
+    <td>우클릭 메뉴</td>
+    <td><code>workdesk.html _openCellMenu()</code> (8055행) · 메뉴는 <code>body</code> 직속 <code>#gcellmenu</code></td>
+    <td><span class="tag t-new">항목 1개 추가</span> 이미 <code>선택 행 id</code>(<code>STATE._gMenuRowId</code>)를 들고 있다</td>
+  </tr>
+  <tr>
+    <td>수신자(본계정) 판정</td>
+    <td>—</td>
+    <td><span class="tag t-new">신규</span> <b>이 기능의 유일한 새 판정</b> — 아래 3장</td>
+  </tr>
+  <tr>
+    <td>API</td>
+    <td><code>/api/trackb/cs/*</code>(프록시 8경로, <code>adminOrMaster</code>)</td>
+    <td><span class="tag t-new">1개 추가</span> <code>POST /api/trackb/cs/notify-participant</code></td>
+  </tr>
+</table>
+
+<h3>왜 "본계정"이 요구사항이 아니라 <u>동작 조건</u>인가</h3>
+<div class="card warn">
+  리뷰어 문의함은 <code>reviewer.routes.js:844</code> <code>WHERE reviewer_phone8 = $1</code> — <b>로그인 phone8 한 개로만</b> 조회한다(타계정 번호는 스코프에 없다).
+  그래서 표의 <b>연락처 칸 값(타계정 번호)</b>으로 방을 만들면 <b>리뷰어 화면에 영영 안 보이는 유령 방</b>이 되고, 관리자는 보냈다고 믿는다.
+  → <b>본계정 판정에 실패하면 보내지 않는다(fail-closed)</b>가 이 기능의 1순위 불변식.
+</div>
+
+<h2>2. 모델 — 새 저장소 0</h2>
+<ul>
+  <li><b>마이그레이션 없음.</b> <code>cs_threads</code> / <code>cs_messages</code> 를 그대로 쓴다.</li>
+  <li>스레드 키 <code>campaign_key = `${sheetId}||${tabName}`</code> — <code>csBridge.campaignKeyOf()</code> <b>단일 출처</b>(리뷰어 UI·교체요청·검수 반려와 같은 규칙이라 <b>이미 열려 있는 그 작업 방에 이어 붙는다</b>. 다른 규칙을 쓰면 같은 작업에 방이 두 개 생긴다).</li>
+  <li><code>campaign_label</code> = 그 작업의 <b>탭 표시명</b>(기존 규칙 그대로 · <b>시트 제목 미노출</b>). 기존 방이 있으면 <b>라벨을 덮지 않는다</b>.</li>
+  <li><code>admin_unread_count</code> = <b>0으로 둔다</b> — 관리자가 스스로 보낸 메시지가 관리자 미확인 뱃지를 올리면 안 된다(<code>postAdminNotice</code>가 이미 그렇게 동작).</li>
+  <li>메시지 <code>msg_type='text'</code> · <code>sender_name</code>은 <b>로그인명 그대로 저장</b>(책임추적), 리뷰어에게는 <b>읽는 시점에 닉네임 치환</b>(<code>adminNickname</code>, 맵에 없으면 '관리자' fail-closed).</li>
+</ul>
+
+<h2>3. ★ 수신자 판정 (이 기능의 핵심 · 완화 금지)</h2>
+<p>대상은 화면이 보낸 번호가 아니라 <b>서버가 참여자 줄(<code>campaign_participants.id</code>)에서 다시 도출</b>한다. 낡은 화면·조작 요청이 남에게 메시지를 보내는 경로를 만들지 않는다.</p>
+
+<table>
+  <tr><th>순위</th><th>근거</th><th>왜 이 순서인가</th></tr>
+  <tr><td>①</td><td><code>campaign_applications.owner_phone8</code><br><small>(그 줄의 <code>order_submission_id</code>로 조인)</small></td><td>참여 홀드 생성 시 <b>서버가 명의 검증을 거쳐 기록</b>한 값 — "이 명의는 이 소유자의 것"이 확정돼 있다(가장 강한 근거)</td></tr>
+  <tr><td>②</td><td><code>participation_links.phone8</code><br><small>(sheet_id, tab_name, row_index=seq)</small></td><td>구매양식 제출이 <b>시트/작업표 기록 성공 후</b>에만 남기는 <b>로그인 phone8</b>. ★ 재배정된 줄의 stale 링크 차단을 위해 <b>이름 일치할 때만</b> 인정(검색 게이트와 같은 규율)</td></tr>
+  <tr><td>③</td><td><code>reviewers.phone8 = 그 줄의 phone8</code></td><td>명의 자체가 등록 리뷰어 = 그 번호가 곧 로그인 계정(자기 명의 참여의 정상 경로)</td></tr>
+  <tr><td>④</td><td><code>reviewers.sub_accounts</code> 역조회<br><small>(그 번호/이름이 등록된 소유자)</small></td><td>①②가 없는 옛 줄 구제. ★ <b>소유자 후보가 유일할 때만</b> 채택(<code>phone8</code>은 GENERATED·비유니크)</td></tr>
+</table>
+
+<div class="card bad">
+  <b>완화 금지 4종</b>
+  <ul>
+    <li><b>이름만으로 추측하지 않는다.</b> 동명이인 한 번이면 남의 채팅방에 그 사람의 작업 얘기가 들어간다(리뷰비 계좌 오송금과 같은 계열의 사고).</li>
+    <li><b>모호하면 보내지 않는다</b> — 후보 2명 이상·근거 0이면 <b>쓰기 0건</b>으로 거부하고 <b>사유를 문장으로</b> 말한다(<code>resolveReviewerPhone8</code>의 사유 구분 규율 그대로).</li>
+    <li><b>빈 슬롯·연락처 없는 줄은 대상 아님</b> — 메뉴 항목을 <b>비활성 + 사유 툴팁</b>으로 둔다(눌러도 아무 일 없는 버튼 금지).</li>
+    <li>판정 결과(<b>받는 사람 이름 + 번호 뒤 4자리 + 명의와 다르면 그 사실</b>)를 <b>보내기 전에 화면이 말한다</b>. 조용한 전송 금지.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <b>판정 단일 출처</b> = <code>services/csRecipient.service.js</code> (신설, 순수 조회 + 판정).
+  미리보기(<code>GET .../recipient</code>)와 전송(<code>POST .../notify-participant</code>)이 <b>같은 함수</b>를 쓴다 — 사본을 두면 "미리보기엔 A인데 실제로는 B에게 갔다"가 된다.
+  전송은 <b>서버가 그 자리에서 다시 판정</b>하고(화면이 보낸 phone8 불신), 미리보기와 결과가 달라졌으면 <b>보내지 않고 되돌려준다</b>.
+</div>
+
+<h2>4. API — 1개 추가(+미리보기 1개)</h2>
+<table>
+  <tr><th>경로</th><th>권한</th><th>동작</th></tr>
+  <tr>
+    <td><code>GET /api/trackb/cs/participant-recipient?sheetId&amp;tabName&amp;participantId</code></td>
+    <td rowspan="2">🔒 <b>결정 필요</b> — 기본안 <code>authMiddleware + adminOrMaster</code><br><small>(C/S 본문 열람 정책과 동일. AE 허용 여부는 §8 결정사항)</small></td>
+    <td><b>쓰기 0</b> · 받는 사람(이름·뒤4자리·판정 근거·기존 방 유무·미확인 수) 반환</td>
+  </tr>
+  <tr>
+    <td><code>POST /api/trackb/cs/notify-participant</code><br><small>{ sheetId, tabName, participantId, content }</small></td>
+    <td>재판정 → <code>csBridge.postAdminNotice</code> 호출 → <code>{ok, threadId, to:{name, phone8Tail}}</code></td>
+  </tr>
+</table>
+<ul>
+  <li>경로를 <code>/api/trackb/*</code>에 두는 이유 = 기존 C/S 프록시와 같다. <b>인트라넷 SSO 토큰(<code>via:'intranet'</code>)은 <code>/api/cs/*</code>에 도달 자체가 불가능</b>하다.</li>
+  <li>실행부는 <b>기존 <code>postAdminNotice</code> 한 벌</b> — 사본을 만들면 "절대 throw 없음 · 닉네임 치환 · SSE 푸시" 방어가 한쪽에서만 풀린다.</li>
+  <li>스코프는 작업보드 표와 같은 <code>_ensureThreadScope</code>/<code>canAccessTab</code> 계열 게이트를 통과시킨다(그 탭을 볼 수 있는 사람만).</li>
+  <li>입력 상한 1000자 · 빈 본문 거부 · 42P01/42703은 <code>not_ready</code>로 사유 반환(500 마스킹 금지).</li>
+</ul>
+
+<h2>5. 화면 — 우클릭 메뉴 + 전송 팝업</h2>
+
+<h3>메뉴 (기존 <code>_openCellMenu</code>에 항목 1개)</h3>
+<div style="display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start">
+  <div class="menu">
+    <div>✏️ 이 셀 편집</div>
+    <div class="hl">💬 리뷰어에게 메시지</div>
+    <div>📋 복사</div>
+    <div>📥 붙여넣기</div>
+    <div class="divider"></div>
+    <div style="color:#94a3b8">🎨 색 · 🗑 행 삭제</div>
+  </div>
+  <div style="flex:1;min-width:280px">
+    <ul style="margin-top:0">
+      <li><b>한 줄만 선택했을 때</b>만 보인다(다건 일괄 발송은 §8 결정사항).</li>
+      <li><b>표시 조건</b>: 내부 권한 + 받는 사람 판정 가능. 광고주(<code>advertiser</code>)에게는 <b>그리지 않는다</b>.</li>
+      <li>판정 불가 줄은 <b>흐린 항목 + 사유 툴팁</b>("연락처가 비어 있어 보낼 수 없습니다" 등).</li>
+    </ul>
+  </div>
+</div>
+
+<h3>전송 팝업 (<code>body</code> 직속)</h3>
+<div class="mock">
+  <div class="mh">💬 리뷰어에게 메시지</div>
+  <div class="mb">
+    <div class="to">
+      받는 사람 <b>김영숙</b> · <span class="mono">…0135</span><br>
+      <small>표의 명의 <b>김영숙</b>의 <b>로그인 본계정</b>입니다 · 진행 중인 문의방에 이어서 보냅니다</small>
+    </div>
+    <div class="ta">보낼 내용을 입력하세요…</div>
+    <div class="btns"><span class="btn">취소</span><span class="btn p">보내기</span></div>
+  </div>
+</div>
+<ul>
+  <li><b>바깥 클릭으로 닫지 않는다</b>(입력한 내용 보호) — Esc·[취소]만. Esc 리스너는 닫을 때 해제.</li>
+  <li><code>onclick</code>에는 <b>id/인덱스만</b> — 시트발 문자열(이름·탭명) 보간 금지(실측 XSS 규율).</li>
+  <li>명의 ≠ 본계정이면 <b>"타계정 ○○○ 명의로 참여 · 본계정 △△△에게 보냅니다"</b>를 문장으로 밝힌다.</li>
+  <li>기존 방이 있으면 "<b>이어서 보냅니다</b>", 없으면 "<b>새 문의방이 열립니다</b>" — 어느 쪽인지 미리 말한다.</li>
+  <li>전송 후 토스트 + <b>[문의방 열기]</b> → <code>switchView('cs')</code> → <code>csOpenConversation(threadId, …)</code>(이미 전역 노출).</li>
+</ul>
+
+<h2>6. 유저플로우</h2>
+
+<div class="flow">
+  <b>A. 정상 — 본인 명의 참여</b>
+  <ol>
+    <li>관리자가 작업보드에서 그 리뷰어 줄을 <b>우클릭</b> → [💬 리뷰어에게 메시지].</li>
+    <li>팝업이 열리며 서버에 받는 사람을 물어본다 → <b>"김영숙 ·0135 · 새 문의방이 열립니다"</b>.</li>
+    <li>내용을 쓰고 [보내기] → 서버가 <b>재판정</b> 후 방 생성 + 관리자 메시지 1건.</li>
+    <li>리뷰어에게 <b>SSE 실시간 푸시</b> + 내 문의함에 방이 뜬다(미확인 1).</li>
+    <li>관리자 C/S 탭 <b>'진행중' 목록 맨 위</b>에 그 방이 보인다(관리자 미확인 뱃지는 <b>안 올라간다</b>).</li>
+    <li>리뷰어가 답하면 그때부터 <b>기존 문의와 완전히 같은 대화</b>(관리자 미확인 +1).</li>
+  </ol>
+</div>
+
+<div class="flow">
+  <b>B. 타계정 명의로 참여한 줄</b>
+  <ol>
+    <li>표의 참여자·연락처는 <b>타계정(박○○ ·7191)</b>.</li>
+    <li>서버가 ①<code>owner_phone8</code> → ②<code>participation_links</code> 순으로 <b>소유자(로그인 계정)</b>를 찾는다.</li>
+    <li>팝업이 <b>"타계정 박○○ 명의 · 본계정 김△△ ·2233 에게 보냅니다"</b>라고 밝힌다.</li>
+    <li>보내면 <b>본계정 방</b>에 도착 — 리뷰어가 평소 로그인하는 그 화면에서 받는다.</li>
+  </ol>
+</div>
+
+<div class="flow">
+  <b>C. 보낼 수 없는 줄 (fail-closed)</b>
+  <ol>
+    <li>빈 슬롯 · 연락처 없음 · 등록 리뷰어 아님 · 동명이인 다수 → 메뉴 항목이 <b>비활성</b>.</li>
+    <li>툴팁이 사유를 말한다: "이 줄의 연락처가 비어 있습니다" / "같은 이름이 이 작업에 2명이라 로그인 계정을 특정할 수 없습니다".</li>
+    <li>보내려면 등록리뷰어DB에서 그 번호를 등록하거나, 연락처 칸을 채운다.</li>
+  </ol>
+</div>
+
+<h2>7. 실패·엣지 케이스</h2>
+<table>
+  <tr><th>상황</th><th>동작</th></tr>
+  <tr><td>같은 줄에 두 번 보냄</td><td>같은 방에 메시지가 이어 쌓인다(방은 <code>UNIQUE(phone8, campaign_key)</code>로 1개).</td></tr>
+  <tr><td>한 리뷰어가 같은 작업에 2회 참여(<code>2회</code> 배지)</td><td>방은 <b>작업 단위</b>라 하나 — 어느 줄에서 보내도 같은 방. 팝업이 그 사실을 말한다.</td></tr>
+  <tr><td>리뷰어가 방을 '종료'한 상태</td><td><code>postAdminNotice</code>가 <code>status='open'</code>으로 되살린다(기존 동작).</td></tr>
+  <tr><td>SSE 전송 실패</td><td>메시지는 이미 DB에 있다 → 리뷰어가 화면을 열면 보인다(fail-soft).</td></tr>
+  <tr><td>미리보기 이후 그 줄의 주문이 취소·재배정</td><td>전송 시 재판정 결과가 다르면 <b>보내지 않고</b> 바뀐 대상을 되돌려준다(TOCTOU).</td></tr>
+  <tr><td>번호 변경(126 승격)된 리뷰어</td><td>새 번호가 본계정 → ①②가 옛 번호를 가리키면 <code>reviewers</code> 재조회로 현재 본계정에 붙인다.</td></tr>
+</table>
+
+<h2>8. ★ 결정이 필요한 4가지</h2>
+<div class="card ask">
+  <ol>
+    <li><b>권한</b> — 기본안은 <b>master/admin 전용</b>(C/S 본문 정책과 동일: 문의방에 실명·연락처·주소가 실린다). AE(staff)도 담당 작업 리뷰어에게 보낼 수 있게 할지?</li>
+    <li><b>방 단위</b> — 기본안은 <b>그 작업 방</b>(<code>sheetId||tabName</code>). 작업과 무관한 안내는 <b>일반 문의방</b>(<code>campaign_key=''</code>)에 보내는 선택지도 둘지?</li>
+    <li><b>UI 스타일</b> — 우클릭 → ㉮ <b>전용 팝업</b>(위 목업, 권장) / ㉯ 우클릭 즉시 <b>C/S 탭으로 이동해 방을 열고 거기서 작성</b>(창구 단일화, 작업보드를 떠남) / ㉰ 표 오른쪽 <b>인라인 사이드 패널</b>.</li>
+    <li><b>다건 발송</b> — 여러 줄을 선택해 같은 내용을 <b>일괄 발송</b>할 수 있게 할지(예: 그날 참여자 전원 공지). 기본안은 <b>1단계는 단건만</b>.</li>
+  </ol>
+</div>
+
+<h2>9. 회귀가드 · 범위</h2>
+<ul>
+  <li><code>tests/workboardReviewerMessage.test.js</code> — 스텁 pool로 <b>수신자 판정 4갈래 실제 실행</b>(①&gt;②&gt;③&gt;④ 우선순위 · 이름 불일치 미채택 · 모호 미채택 · 판정 실패 시 <b>쓰기 0건</b>) + 라우터 스택 실검사 + <b>메뉴·팝업 vm 실행</b>(광고주 미노출 · 비활성 사유 · onclick 인덱스만 · XSS) + 변이시험.</li>
+  <li><b>쓰기 표면 = <code>cs_threads</code> / <code>cs_messages</code> 두 곳뿐</b> — 참여자 표·주문 원장·정원·시트 무접촉(가드가 고정).</li>
+  <li>영향 없는 것: 리뷰어 문의 기존 흐름 · 교체요청 카드 · 검수 반려 통지 · 입금 실패 안내(전부 같은 <code>postAdminNotice</code>를 계속 쓴다).</li>
+</ul>
+
+<h2>10. 잔여·한계(문서화)</h2>
+<ul>
+  <li>리뷰어가 <b>본계정으로 로그인해야</b> 메시지를 본다(타계정 세션은 자기 phone8 방만 조회 — 기존 구조상 한계).</li>
+  <li>사진 첨부는 1단계 제외 — 필요하면 방을 연 뒤 C/S 대화창에서 보낸다(기존 첨부 3경로 그대로).</li>
+  <li>메시지 <b>회수·삭제 기능은 없다</b>(기존 C/S와 동일) — 팝업이 "보내면 리뷰어에게 즉시 도착합니다"를 말한다.</li>
+</ul>
+
+</div>

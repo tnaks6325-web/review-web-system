@@ -253,7 +253,8 @@ console.log('\n=== F. 배선·안전 규율 ===');
   ok('저장 payload 에 두 배열이 실린다',
     /reviewGuideImages: _igUrls\("review"\)/.test(recjs) && /specialNotesImages: _igUrls\("notes"\)/.test(recjs));
   ok('★ 미리보기와 저장이 같은 조립 함수를 쓴다(갈라질 수 없다)',
-    (recjs.match(/_igComposeInflow\(\)/g) || []).length >= 2);
+    (recjs.match(/_igComposeInflow\(\)/g) || []).length >= 1
+    && (recjs.match(/_ugCompose\(/g) || []).length >= 4);
   ok('★ 확인창 문구가 "사진 유지"로 바뀌었다(종전 "이미지가 빠진 평문" 은 사실이 아니었다)',
     /사진 \$\{_n\}장은 그대로 유지되고/.test(recjs) && !/원본에 있던 이미지가 빠진 평문으로 게시됩니다/.test(recjs));
   ok('미리보기 평문에 [이미지] 자리표시자·꼬리표를 남기지 않는다', (() => {
@@ -265,18 +266,15 @@ console.log('\n=== F. 배선·안전 규율 ===');
     /Object\.keys\(_IG_FIELDS\)\.forEach\(_igBind\)/.test(recjs) && /_igResetAll\(\);/.test(recjs));
 
   // 마크업
-  ok('세 칸 모두 스트립·파일입력이 있다', ['inflow', 'review', 'notes'].every(f =>
+  ok('공통 리뷰가이드·특이사항 두 칸에 스트립·파일입력이 있다', ['review', 'notes'].every(f =>
     modaljs.includes(`id="rf_ig_${f}"`) && modaljs.includes(`id="rf_igf_${f}"`) && modaljs.includes(`id="rf_igm_${f}"`)));
-  ok('★ 기존 필드 id 는 그대로(프리필·저장·정리 도우미가 묶여 있다)',
-    ['rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes'].every(i => modaljs.includes(`id="${i}"`)));
-  ok('★ 세 칸의 높이가 같다(rows=3 · 스트립 82px)', (() => {
-    const rows = ['rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes'].map(id => {
-      const m = modaljs.match(new RegExp(`id="${id}"[^>]*rows="(\\d)"`));
-      return m ? m[1] : '';
-    });
-    return rows.every(r => r === '3') && /\.ig-strip\{[^}]*height:82px/.test(modaljs)
-      && /\.ig-wrap>textarea\.rform-input\{[^}]*height:82px/.test(modaljs);
-  })());
+  ok('★ 신규 공고의 유입가이드는 공통 입력이 아니라 상품·옵션별 공용 위젯을 쓴다',
+    /function _ugBuild\(key\)/.test(recjs)
+    && /id="rf_legacy_inflow_row"[^>]*hidden/.test(modaljs)
+    && !/id="rf_wd_inflow"/.test(modaljs));
+  ok('★ 공통 두 칸은 모바일 압축 규격에서 입력창·스트립 높이가 같다',
+    /\.rf-compact-main \.work-compose textarea[^}]*height:58px!important/.test(modaljs)
+    && /\.rf-compact-main \.work-image-strip\{[^}]*height:58px/.test(modaljs));
   ok('★ box-sizing 을 호스트 리셋에 기대지 않는다(높이 어긋남 실측 방지)',
     /#recruitModal \.ig-wrap,#recruitModal \.ig-wrap \*\{box-sizing:border-box\}/.test(modaljs));
 }

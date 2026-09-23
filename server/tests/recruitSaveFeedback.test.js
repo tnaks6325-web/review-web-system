@@ -127,8 +127,12 @@ const blk = pick(modal, 'recruitSaveBlock');
 ok('B1. recruitSaveBlock / recruitSaveBlockClear 전역 노출',
   /window\.recruitSaveBlock\s*=\s*recruitSaveBlock/.test(modal) &&
   /window\.recruitSaveBlockClear\s*=\s*recruitSaveBlockClear/.test(modal));
-ok('B2. ★ 모달 푸터 **안쪽**에 붙인다(덮개 z-index 와 무관해진다)',
-  /querySelector\('#recruitModal \.modal-footer'\)/.test(blk) && /foot\.appendChild\(bar\)/.test(blk));
+/* ★ 2026-08-19: 푸터가 둘(숨은 인라인 + 보이는 하단)이라 첫 번째를 집으면 배너가 0×0 으로
+   렌더돼 차단 사유가 통째로 사라졌다(실측) → "보이는 푸터를 고른다"로 의미를 강화. */
+ok('B2. ★ 모달 푸터 **안쪽**에 붙이되 보이는 푸터를 고른다(덮개 z-index 와 무관해진다)',
+  /querySelectorAll\('#recruitModal \.modal-footer'\)/.test(modal)
+  && /offsetParent !== null/.test(modal)
+  && /foot\.appendChild\(bar\)/.test(blk));
 /* ★ 약한 패턴(`setTimeout\([^)]*bar\.remove`)은 `setTimeout(function(){ bar.remove(); },3000)` 을
    통과시킨다(변이시험 실측) — 함수 리터럴의 ')' 때문. 그래서 "이 함수 안에서 무엇이든
    지우는가"를 본다(흔들림 클래스 해제만 예외). */

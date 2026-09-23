@@ -1,0 +1,434 @@
+/**
+ * tabActivityLog.service.js — 작업(탭) 로그 (2026-08-23 사용자 확정 ⑥-㉮ 6종 전부)
+ *
+ * ★★ **신규 저장소 0** — 이미 쌓이고 있는 기록을 한 타임라인으로 모으기만 한다.
+ *    새 이벤트 테이블을 만들면 "어떤 것은 여기, 어떤 것은 저기"로 갈리고 과거 기록이 비어 보인다.
+ *
+ * ★★ **읽기 전용** — 이 파일에는 쓰기 문장이 한 줄도 없다(회귀가드가 고정).
+ *    되돌리기·수정은 각자의 자리에서 한다.
+ *
+ * ★ 소스별 조회는 **독립**이다 — 하나가 실패해도 나머지는 나오고, 실패한 종류는
+ *   `failed[]` 로 **말한다**(0건으로 꾸미면 "아무 일도 없었다"로 읽힌다).
+ *
+ * ★★ **과거로 이어 붙이기(무한 스크롤) — 커서 `before` (2026-08-24 사용자 확정)**
+ *    "최근 N건만"에서 **처음까지 전부**로 바뀌었다. 화면이 아래로 내려가면 `before`(= 지금까지
+ *    보여준 것 중 가장 오래된 항목의 시각)를 들고 다시 물어 **더 과거**를 이어 받는다.
+ *    ★ 그래서 이 파일의 두 가지 규율이 새로 생겼다:
+ *      ① **한 행 = 한 항목** — 한 행이 두 시각(접수/취소 · 편집/되돌리기 · 마감/복귀)을 내면
+ *         행 단위 커서로는 **한쪽이 조용히 사라진다**(커서가 두 시각 사이에 놓이는 순간 옛 항목이
+ *         영영 안 나온다) → 그런 소스는 **UNION ALL 로 항목 단위로 편다**.
+ *      ② **유형(kind) 조건은 SQL 로 내린다** — JS 에서만 거르면 `[취소]` 탭에서 LIMIT 이
+ *         접수 행으로 다 차 **그 페이지가 0건**이 되고 커서가 제자리에 멈춘다.
+ *    ★ 경계 시각이 겹치는 항목을 잃지 않도록 커서는 `<=`(엄격 부등호 아님)이고,
+ *      대신 **항목마다 `id`(각 표의 PK 파생)를 발급**해 화면이 이미 받은 것을 걸러낸다.
+ */
+const { logger } = require('../utils/logger');
+
+/**
+ * 작업 로그의 리뷰어 표기 단일 출처.
+ * `본계정`만 쓰면 본인 이름만, 수취인(실사용 계정)이 다르면 `본계정 타계 수취인`으로 밝힌다.
+ * 이름이 비어 있거나 레거시 행이라도 기록 자체를 숨기지 않도록 가능한 이름 하나를 남긴다.
+ */
+function _reviewerLabel(owner, recipient) {
+  const main = _clip(owner, 40);
+  const used = _clip(recipient, 40);
+  if (main && used && main.replace(/\s/g, '') !== used.replace(/\s/g, '')) return `${main} 타계 ${used}`;
+  return main || used || '이름 없음';
+}
+
+/** 유형 — 화면 탭이 이 목록을 그대로 그린다(라벨 사본 0). */
+const LOG_KINDS = [
+  { key: 'order',  label: '주문' },
+  { key: 'cancel', label: '취소' },
+  { key: 'review', label: '리뷰' },
+  // 검수는 타임라인 이력이 아니라 "지금 처리할 대상" 카드다. 화면이 같은 작업 로그 탭
+  // 목록을 쓰되 별도 검수 API로 읽고 기존 검수 실행부로 처리한다(새 원장 0).
+  { key: 'inspect', label: '검수' },
+  { key: 'edit',   label: '편집' },
+  { key: 'quota',  label: '정원' },
+  { key: 'money',  label: '정산' },
+  { key: 'sys',    label: '시스템' },
+];
+const LOG_KIND_KEYS = LOG_KINDS.map(k => k.key);
+
+const _clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+const _num = (v) => (v === 0 || v ? Number(v) : null);
+
+/* ── 소스 정의 ────────────────────────────────────────────────
+   각 항목: { key, kinds, run(db, ctx) → { items:[{id, at, kind, message, who}], hitLimit } }
+   ★ 모든 소스 쿼리에 `LIMIT` 을 건다 — 한 소스가 목록을 통째로 먹지 않게.
+   ★ 커서 절은 "값이 없으면 통과, 있으면 그 시각 이하"이고 **정렬 기준과 같은 식**을 써야 한다 —
+     다른 식을 쓰면 페이지 경계에서 항목이 샌다. */
+const SOURCES = [
+  {
+    key: 'orders',
+    kinds: ['order', 'cancel'],
+    async run(db, { sheetId, tabName, workboardId, limit, before, want }) {
+      /* ★ 한 행이 접수·취소 두 항목을 내므로 **UNION ALL 로 항목 단위로 편다**(위 ① 규율). */
+      const { rows } = await db.query(
+        `SELECT x.id, x.sheet_row, x.orderer, x.recipient, x.price, x.canceled_by,
+                x.source, x.ev, x.at,
+                COALESCE(direct_app.expires_at, legacy_app.expires_at) AS expires_at,
+                (COALESCE(x.campaign_was_late, FALSE)
+                  OR COALESCE(direct_app.late_order_id = x.id, legacy_app.is_late, FALSE)) AS is_late
+           FROM (
+            /* 먼저 최신 사건만 자른 뒤 신청표를 찾는다. 레거시 주문 전체 × 신청표 전체 조회를 막는다. */
+            SELECT ev.* FROM (
+              SELECT os.id, os.sheet_row, os.orderer, os.recipient, os.campaign_application_id, os.campaign_was_late,
+                     price, canceled_by, source, 'order'::text AS ev, submitted_at AS at
+                FROM order_submissions os
+               WHERE (
+                      (os.sheet_id=$1 AND os.tab_name=$2)
+                      /* 캠페인 주문은 원장 범위를 campaign:<id>로 보존한다. 실제 작업표에
+                         기록된 불변 주문 UUID를 통해서만 해당 작업 로그에 합류시킨다. */
+                      OR EXISTS (
+                        SELECT 1 FROM campaign_participants cp
+                         WHERE cp.order_submission_id=os.id
+                           AND cp.sheet_id=$1 AND cp.tab_name=$2
+                      )
+                      /* 참여자 미러 전의 과거 주문/수동 행은 서버가 확정한 작업보드 ID로만 보완한다. */
+                      OR ($6::uuid IS NOT NULL AND os.workboard_id=$6::uuid)
+                    )
+                 AND os.submitted_at IS NOT NULL
+              UNION ALL
+              SELECT os.id, os.sheet_row, os.orderer, os.recipient, os.campaign_application_id, os.campaign_was_late,
+                     price, canceled_by, source, 'cancel'::text AS ev, deleted_at AS at
+                FROM order_submissions os
+               WHERE (
+                      (os.sheet_id=$1 AND os.tab_name=$2)
+                      OR EXISTS (
+                        SELECT 1 FROM campaign_participants cp
+                         WHERE cp.order_submission_id=os.id
+                           AND cp.sheet_id=$1 AND cp.tab_name=$2
+                      )
+                      OR ($6::uuid IS NOT NULL AND os.workboard_id=$6::uuid)
+                    )
+                 AND os.deleted_at IS NOT NULL
+            ) ev
+            WHERE ($4::text = 'all' OR ev.ev = $4::text)
+              AND ($5::timestamptz IS NULL OR ev.at <= $5::timestamptz)
+            ORDER BY ev.at DESC
+            LIMIT $3
+          ) x
+          /* 정상 리뷰어 제출은 주문 원장의 FK→신청 PK로 즉시 찾는다(페이지마다 신청표 전수탐색 금지). */
+          LEFT JOIN campaign_applications direct_app ON direct_app.id = x.campaign_application_id
+          LEFT JOIN LATERAL (
+            /* 외부모집·과거 데이터는 주문 원장의 FK가 없을 수 있어 신청행의 정방향/지각 링크로 보완한다. */
+            SELECT ca.expires_at, (ca.late_order_id = x.id) AS is_late
+              FROM campaign_applications ca
+             WHERE direct_app.id IS NULL
+               AND (ca.late_order_id = x.id OR ca.order_submission_id = x.id)
+             ORDER BY (ca.late_order_id = x.id) DESC, ca.applied_at DESC, ca.id DESC
+             LIMIT 1
+          ) legacy_app ON TRUE
+          ORDER BY x.at DESC
+          `, [sheetId, tabName, limit, want, before, workboardId || null]);
+      const items = rows.map(r => {
+        const name = _reviewerLabel(r.orderer, r.recipient);
+        if (r.ev === 'order') {
+          const submittedMs = new Date(r.at).getTime();
+          const expiresMs = r.expires_at ? new Date(r.expires_at).getTime() : NaN;
+          const isLate = r.is_late === true;
+          /* 초과시간은 주문이 실제로 제출된 시각 - 홀드 마감시각. 음수는 0, 불명은 null로 두되
+             late 링크 자체는 보존해 '기구매/지각 주문도착'이라는 사건을 숨기지 않는다. */
+          const overdueSeconds = isLate && Number.isFinite(submittedMs) && Number.isFinite(expiresMs)
+            ? Math.max(0, Math.floor((submittedMs - expiresMs) / 1000)) : null;
+          const submissionType = isLate ? 'late' : (r.source === 'admin_external' ? 'external' : 'standard');
+          const label = submissionType === 'late' ? '기구매/지각 주문도착'
+            : submissionType === 'external' ? '외부모집 수동제출' : '구매양식 제출';
+          return {
+            id: `o:${r.id}:n`, at: r.at, kind: 'order',
+            message: `${label} — ${name}`,
+            who: `리뷰어${r.sheet_row ? ` · ${r.sheet_row}행` : ''}${r.price ? ` · 결제금액 ${_clip(r.price, 20)}` : ''}`,
+            submittedAt: r.at,
+            submissionType,
+            overdueSeconds,
+          };
+        }
+        /* ★ 누가 취소했는지 그대로 말한다 — `canceled_by` 는 `reviewer:1234`·`dedupe:…`·담당자명이다.
+           "취소됨"만 적으면 리뷰어 자발 취소와 정리 도구를 구분할 수 없다. */
+        const by = String(r.canceled_by || '');
+        const whoLabel = /^reviewer:/i.test(by) ? '리뷰어 본인'
+          : /^dedupe/i.test(by) ? '중복 정리'
+          : (by || '담당자');
+        return {
+          id: `o:${r.id}:c`, at: r.at, kind: 'cancel',
+          message: `주문 취소 — ${name}`,
+          who: `${whoLabel}${r.sheet_row ? ` · ${r.sheet_row}행` : ''}`,
+        };
+      });
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+  {
+    key: 'reviewer_events',
+    kinds: ['cancel', 'sys'],
+    async run(db, { sheetId, tabName, workboardId, limit, before, want }) {
+      /* ★ 유형 조건을 SQL 로 내린다(위 ② 규율) — JS 에서만 거르면 그 페이지가 통째로 빌 수 있다. */
+      const { rows } = await db.query(
+        `SELECT rel.id, rel.occurred_at, rel.event_type, rel.severity, rel.message, rel.reviewer_name, rel.context
+           FROM reviewer_event_logs rel
+           LEFT JOIN order_submissions os ON os.id=rel.order_submission_id
+          WHERE (
+                  (rel.sheet_id=$1 AND rel.tab_name=$2)
+                  /* 주문 귀속 시스템 이벤트도 주문과 같은 실제 작업표 기준으로 되찾는다. */
+                  OR (rel.order_submission_id IS NOT NULL AND (
+                    (os.sheet_id=$1 AND os.tab_name=$2)
+                    OR EXISTS (
+                      SELECT 1 FROM campaign_participants cp
+                       WHERE cp.order_submission_id=os.id
+                         AND cp.sheet_id=$1 AND cp.tab_name=$2
+                    )
+                    OR ($6::uuid IS NOT NULL AND os.workboard_id=$6::uuid)
+                  ))
+                )
+            AND ($4::text = 'all'
+                 OR ($4::text = 'cancel' AND rel.event_type = 'order_canceled_by_reviewer')
+                 OR ($4::text = 'sys'    AND rel.event_type <> 'order_canceled_by_reviewer'))
+            AND ($5::timestamptz IS NULL OR rel.occurred_at <= $5::timestamptz)
+          ORDER BY rel.occurred_at DESC LIMIT $3`, [sheetId, tabName, limit, want, before, workboardId || null]);
+      const items = rows.map(r => ({
+        id: `rel:${r.id}`,
+        at: r.occurred_at,
+        kind: r.event_type === 'order_canceled_by_reviewer' ? 'cancel' : 'sys',
+        message: _clip(r.message, 300),
+        who: [r.severity === 'critical' ? '⚠ 중요' : '시스템', _clip(r.reviewer_name, 40),
+          (r.context && r.context.rowIndex) ? `${r.context.rowIndex}행` : ''].filter(Boolean).join(' · '),
+      }));
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+  {
+    key: 'review_submissions',
+    kinds: ['review'],
+    async run(db, { sheetId, tabName, limit, before }) {
+      // 한 사람이 여러 장을 올려도 **제출 한 번**으로 접는다(장 수는 함께 말한다).
+      const { rows } = await db.query(
+        `WITH submitted AS (
+           SELECT MAX(uploaded_at) AS at, row_index, reviewer_name, COUNT(*)::int AS n
+             FROM review_submissions
+            WHERE sheet_id=$1 AND tab_name=$2 AND uploaded_at IS NOT NULL
+            GROUP BY row_index, reviewer_name
+           HAVING ($4::timestamptz IS NULL OR MAX(uploaded_at) <= $4::timestamptz)
+         )
+         SELECT s.*, ri.reviewer_name AS owner_name, ri.recipient_name
+           FROM submitted s
+           LEFT JOIN LATERAL (
+             SELECT reviewer_name, recipient_name FROM review_index
+              WHERE sheet_id=$1 AND tab_name=$2 AND row_index=s.row_index
+              LIMIT 1
+           ) ri ON TRUE
+          ORDER BY s.at DESC LIMIT $3`, [sheetId, tabName, limit, before]);
+      const items = rows.map(r => ({
+        id: `rs:${r.row_index == null ? '-' : r.row_index}:${_clip(r.reviewer_name, 40)}`,
+        at: r.at, kind: 'review',
+        message: `리뷰 캡처 제출 — ${_reviewerLabel(r.owner_name || r.reviewer_name, r.recipient_name || r.reviewer_name)}`,
+        who: `리뷰어${r.row_index ? ` · ${r.row_index}행` : ''} · ${r.n}장`,
+      }));
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+  {
+    key: 'inspections',
+    kinds: ['review'],
+    async run(db, { sheetId, tabName, limit, before }) {
+      const { rows } = await db.query(
+        `SELECT i.id, COALESCE(i.resolved_at, i.updated_at, i.created_at) AS at,
+                i.status, i.resolution, i.reviewer_name, i.row_index, i.resolved_by,
+                ri.reviewer_name AS owner_name, ri.recipient_name
+           FROM review_inspections i
+           LEFT JOIN LATERAL (
+             SELECT reviewer_name, recipient_name FROM review_index
+              WHERE sheet_id=i.sheet_id AND tab_name=i.tab_name AND row_index=i.row_index
+              LIMIT 1
+           ) ri ON TRUE
+          WHERE i.sheet_id=$1 AND i.tab_name=$2 AND i.status IN ('fail','suspect','resolved')
+            AND ($4::timestamptz IS NULL OR COALESCE(i.resolved_at, i.updated_at, i.created_at) <= $4::timestamptz)
+          ORDER BY COALESCE(i.resolved_at, i.updated_at, i.created_at) DESC LIMIT $3`, [sheetId, tabName, limit, before]);
+      const items = rows.map(r => ({
+        id: `ri:${r.id}`,
+        at: r.at, kind: 'review',
+        /* 첫 줄은 검수 대상의 본계정/타계정, 보조 줄은 작업표 좌표만 — 처리자·판정은 여기서 섞지 않는다. */
+        message: `리뷰 캡처 검수 — ${_reviewerLabel(r.owner_name || r.reviewer_name, r.recipient_name || r.reviewer_name)}`,
+        who: `리뷰어${r.row_index ? ` · ${r.row_index}행` : ''}`,
+      }));
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+  {
+    key: 'edits',
+    kinds: ['edit'],
+    async run(db, { sheetId, tabName, limit, before }) {
+      /* ★ 편집·되돌리기 두 항목 → UNION ALL 로 항목 단위(위 ① 규율). */
+      const { rows } = await db.query(
+        `SELECT x.id, x.field, x.kind, x.value_text, x.value_bool, x.actor, x.ev, x.at FROM (
+            SELECT id, field, kind, value_text, value_bool, created_by AS actor,
+                   'new'::text AS ev, created_at AS at
+              FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND created_at IS NOT NULL
+            UNION ALL
+            SELECT id, field, kind, value_text, value_bool, reverted_by AS actor,
+                   'rev'::text AS ev, reverted_at AS at
+              FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NOT NULL
+          ) x
+          WHERE ($4::timestamptz IS NULL OR x.at <= $4::timestamptz)
+          ORDER BY x.at DESC
+          LIMIT $3`, [sheetId, tabName, limit, before]);
+      const fieldLabel = (f) => String(f || '').replace(/^col:/, '').replace(/^ccol:.*$/, '추가 열');
+      const items = rows.map(r => {
+        if (r.ev === 'rev') return {
+          id: `pe:${r.id}:r`, at: r.at, kind: 'edit',
+          message: `표 편집 되돌리기 — ${fieldLabel(r.field)}`, who: _clip(r.actor, 40) || '담당자',
+        };
+        const v = r.kind === 'bool' ? (r.value_bool ? '켬' : '끔') : _clip(r.value_text, 60);
+        /* ★ 빈 값은 “”(빈 따옴표)가 아니라 **(값 지움)** 이라고 말한다 — 관리자 수동 입금처리의
+           [입금일 비우기]처럼 "지웠다"가 곧 사건인 편집이 있는데, 빈 따옴표로 적으면 로그를
+           읽는 사람이 무슨 일이 있었는지 알 수 없다. */
+        const shown = (r.kind !== 'bool' && !String(r.value_text || '').trim()) ? '(값 지움)' : `“${v}”`;
+        return {
+          id: `pe:${r.id}:n`, at: r.at, kind: 'edit',
+          message: `표 편집 — ${fieldLabel(r.field)} → ${shown}`, who: _clip(r.actor, 40) || '담당자',
+        };
+      });
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+  {
+    key: 'plans',
+    kinds: ['quota'],
+    async run(db, { sheetId, tabName, gid, limit, before }) {
+      /* 정원은 **공고**에 매달려 있어 그 탭에 연결된 공고를 거쳐 찾는다(이름 → gid 폴백).
+         ★ 빈 gid 는 절을 켜지 않는다 — 켜면 gid 없는 공고가 전부 매칭된다. */
+      const { rows } = await db.query(
+        `SELECT e.id, e.created_at AS at, e.action, e.detail, e.actor
+           FROM campaign_plan_events e
+           JOIN recruit_campaigns rc ON rc.id = e.campaign_id
+          WHERE rc.linked_sheet_id=$1
+            AND (rc.linked_tab_name=$2 OR ($3 <> '' AND rc.linked_tab_gid=$3))
+            AND ($5::timestamptz IS NULL OR e.created_at <= $5::timestamptz)
+          ORDER BY e.created_at DESC LIMIT $4`, [sheetId, tabName, String(gid || ''), limit, before]);
+      const lab = {
+        plan_save: '날짜별 인원 조절', carry_apply: '이월 반영',
+        round_add: '차수 추가', round_remove: '차수 제거',
+        worktable_rebuild: '작업표 재구성', participant_delete_replenish: '행 삭제 보충',
+      };
+      const items = rows.map(r => {
+        const d = (r.detail && typeof r.detail === 'object') ? r.detail : {};
+        const n = Array.isArray(d.set) ? d.set.length : null;
+        return {
+          id: `cpe:${r.id}`,
+          at: r.at, kind: 'quota',
+          message: `${lab[r.action] || r.action}${n ? ` — ${n}일치` : ''}${_num(d.amount) != null ? ` ${d.amount}명` : ''}`,
+          who: _clip(r.actor, 40) || '담당자',
+        };
+      });
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+  {
+    key: 'payments',
+    kinds: ['money'],
+    async run(db, { sheetId, tabName, limit, before }) {
+      const { rows } = await db.query(
+        `SELECT MAX(paid_at) AS at, batch_id, COUNT(*)::int AS n
+           FROM payment_batch_items
+          WHERE sheet_id=$1 AND tab_name=$2 AND status='paid' AND paid_at IS NOT NULL
+          GROUP BY batch_id
+         HAVING ($4::timestamptz IS NULL OR MAX(paid_at) <= $4::timestamptz)
+          ORDER BY MAX(paid_at) DESC LIMIT $3`, [sheetId, tabName, limit, before]);
+      const items = rows.map(r => ({
+        id: `pb:${r.batch_id}`,
+        at: r.at, kind: 'money',
+        message: `리뷰비 입금 반영 — 이 작업 ${r.n}건`,
+        who: '입금관리',
+      }));
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+  {
+    key: 'finished',
+    kinds: ['money'],
+    async run(db, { sheetId, tabName, limit, before }) {
+      /* ★ 마감·복귀 두 항목 → UNION ALL 로 항목 단위(위 ① 규율). */
+      const { rows } = await db.query(
+        `SELECT x.id, x.actor, x.ev, x.at FROM (
+            SELECT id, finished_by AS actor, 'fin'::text AS ev, finished_at AS at
+              FROM trackb_tab_finished
+             WHERE sheet_id=$1 AND tab_name=$2 AND finished_at IS NOT NULL
+            UNION ALL
+            SELECT id, reopened_by AS actor, 'reo'::text AS ev, deleted_at AS at
+              FROM trackb_tab_finished
+             WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NOT NULL
+          ) x
+          WHERE ($4::timestamptz IS NULL OR x.at <= $4::timestamptz)
+          ORDER BY x.at DESC
+          LIMIT $3`, [sheetId, tabName, limit, before]);
+      const items = rows.map(r => (r.ev === 'fin'
+        ? { id: `tf:${r.id}:f`, at: r.at, kind: 'money', message: '작업 마감', who: _clip(r.actor, 40) || '담당자' }
+        : { id: `tf:${r.id}:r`, at: r.at, kind: 'money', message: '마감 복귀', who: _clip(r.actor, 40) || '담당자' }));
+      return { items, hitLimit: rows.length >= limit };
+    },
+  },
+];
+
+/** 커서 파싱 — 못 읽는 값은 **없는 것으로 접는다**(잘못된 값 때문에 목록이 통째로 비지 않게). */
+function _parseBefore(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * 작업 로그 — 소스별 독립 조회 후 시간순 병합.
+ * @param {string} [before] 이 시각 **이하**(`<=`)의 기록만 — 화면이 아래로 내려갈 때 더 과거를 이어 받는다.
+ * @returns {{ok:true, items:[], failed:[], kinds:[], hasMore:boolean, nextBefore:string|null, truncated:boolean}}
+ */
+async function tabActivityLog({ sheetId, tabName, gid = '', workboardId = null, kind = 'all', limit = 60, before = null, pool } = {}) {
+  const db = pool || require('../db/pool');
+  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName 필수' };
+  const want = LOG_KIND_KEYS.includes(String(kind)) ? String(kind) : 'all';
+  const cap = Math.min(Math.max(parseInt(limit, 10) || 60, 10), 300);
+  const perSource = cap + 20;   // 병합 후 잘리므로 소스마다 조금 넉넉히
+  const cursor = _parseBefore(before);
+
+  const targets = SOURCES.filter(s => want === 'all' || s.kinds.includes(want));
+  const failed = [];
+  let anyHitLimit = false;
+  const settled = await Promise.all(targets.map(async (s) => {
+    try {
+      const out = await s.run(db, { sheetId, tabName, gid, workboardId, limit: perSource, before: cursor, want });
+      const list = (out && out.items) || [];
+      if (out && out.hitLimit) anyHitLimit = true;
+      return list;
+    }
+    catch (e) {
+      // ★ 실패를 빈 배열로 접지 않는다 — 화면이 "조회 실패"라고 말해야 한다.
+      logger.warn(`[tab-log] ${s.key} 조회 실패 tab=${tabName}: ${(e && e.message) || e}`);
+      failed.push(s.key);
+      return [];
+    }
+  }));
+
+  let items = settled.flat()
+    .filter(x => x && x.at && (want === 'all' || x.kind === want))
+    .sort((a, b) => new Date(b.at) - new Date(a.at));
+  /* ★ 더 있는가 = 잘렸거나(병합 결과가 한 페이지보다 많다) 어느 소스든 자기 LIMIT 을 채웠다.
+     모르면 "더 있다" 쪽으로 접는다 — 다음 요청이 0건이면 화면이 그때 끝을 말한다(끝을 지어내지 않는다). */
+  const hasMore = items.length > cap || anyHitLimit;
+  items = items.slice(0, cap).map(x => ({
+    id: x.id || '', at: x.at, kind: x.kind, message: x.message, who: x.who || '',
+    /* 주문 항목만 실제 제출시각/출처/초과시간을 동봉한다. 화면이 `at`의 의미를 추측하거나
+       지각시간을 다시 계산하지 않게 서버 결과를 단일 출처로 둔다. */
+    ...(x.submittedAt ? {
+      submittedAt: x.submittedAt,
+      submissionType: x.submissionType || 'standard',
+      overdueSeconds: x.overdueSeconds == null ? null : Math.max(0, Number(x.overdueSeconds) || 0),
+    } : {}),
+  }));
+  /* ★ 다음 커서는 **지금 페이지의 가장 오래된 항목 시각**이고 `<=` 로 다시 묻는다(경계 동시각 유실 방지).
+     그래서 겹치는 항목이 다시 오며, 화면은 `id` 로 이미 받은 것을 걸러낸다. */
+  const last = items.length ? items[items.length - 1] : null;
+  const nextBefore = (hasMore && last && last.at) ? new Date(last.at).toISOString() : null;
+  return { ok: true, items, failed, kinds: LOG_KINDS, hasMore, nextBefore, truncated: hasMore };
+}
+
+module.exports = { LOG_KINDS, LOG_KIND_KEYS, tabActivityLog };

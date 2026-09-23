@@ -31,8 +31,11 @@ const { logger } = require('../utils/logger');
 const { formatDepositStamp } = require('../utils/depositStamp');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly, parseTransferAt } = require('../utils/paymentResultParse');
-const paymentApply = require('./paymentApply.service');
+const { extractAmountNumber } = require('../utils/paymentAmount');
+const { loadWorkboardAmounts, workboardAmountKey } = require('./paymentWorkboardAmount.service');
+let paymentApply = require('./paymentApply.service');
 const { recordDeposits } = paymentApply;
+function __setPaymentApplyForTest(v) { paymentApply = v || require('./paymentApply.service'); }
 const { rebuildLedgers } = require('./sheetlessLedger.service');
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
@@ -89,6 +92,57 @@ async function _saveBoardWriteOutcome({ batchId, outcome, stamp, by }) {
     [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, stamp || '', by || 'payment']);
 }
 
+/**
+ * 회차 단위 작업보드 입금칸 기록 — 결과 반영·소급 백필의 **공용 실행부**.
+ *
+ * ★★ **건별 장부 재생성 금지(완화 금지 — 2026-08-19 회차 #12 실사고)**
+ *   종전 결과 반영 경로는 `markDepositCells` 를 기본값으로 불러, 한 건 쓸 때마다 그 탭 장부를
+ *   통째로 다시 만들었다(`sheetlessStatus._writeCellAndRebuild`). 517건·20탭 회차에서 300~800행
+ *   재생성이 **517번 직렬**로 돌아 커밋 뒤 루프가 **6번째에서 끊겼고**, 입금 원장은 517건인데
+ *   작업보드 입금일은 **5건만** 남았다. 게다가 루프 끝의 `_saveBoardWriteOutcome` 에 도달하지
+ *   못해 `board_*` 가 전부 0 → 화면은 "입금일 미기록"이라고만 말했다.
+ *   → 쓰기는 모아서 하고 **탭당 1회만** 재생성한다(같은 회차 실측: 517건 약 40초).
+ *
+ * ★ 재생성은 **탭 단위로 격리**한다 — 한 탭이 실패해도 나머지 탭은 계속 간다. 값은 이미
+ *   작업표(`campaign_participants.row_json`)에 있으므로 다음 재생성에 자동 반영된다.
+ * ★ 무시트 판정은 `utils/sheetlessScope` 단일 출처(시트 기반 탭은 애초에 재생성 대상이 아니다).
+ *   백필 경로처럼 호출부가 `sheetless` 를 이미 알고 있으면 그 값을 쓴다(조회 순증 0).
+ * ★ 반환 모양은 종전과 동일하다(`recorded/queued/skipped/failed`) — 호출부가 자기 사유
+ *   (날짜 없는 건 등)를 `skipped` 에 더한다.
+ */
+async function _rebuildTouchedLedgers(items, by) {
+  const tabs = [...new Map((items || [])
+    .map(x => [`${x.sheetId}\u0000${x.tabName}`, x])).values()];
+  for (const tab of tabs) {
+    if (!tab.sheetId || !tab.tabName) continue;
+    try {
+      if (tab.sheetless !== true) {
+        const sheetless = await require('../utils/sheetlessScope').isSheetless(_db(), tab.sheetId, tab.tabName);
+        if (!sheetless) continue;   // 시트 기반 탭 — 장부는 시트에서 만들어진다
+      }
+      await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
+    } catch (e) {
+      logger.warn(`[paymentResult] 입금일 기록 후 장부 재생성 실패(값은 작업표에 남음) tab=${tab.tabName}: ${e.message}`);
+    }
+  }
+}
+
+async function _writeBoardDeposits(items, { by } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const writeResult = await paymentApply.markDepositCells(list,
+    { by: by || 'payment', deferSheetlessRebuild: true }) || {};
+  await _rebuildTouchedLedgers(list, by);
+  const verification = await paymentApply.verifyDepositCells(list) || {};
+  const queued = Number(writeResult.queued) || 0;
+  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
+  return {
+    recorded: Number(verification.verified) || 0,
+    queued,
+    skipped: Number(writeResult.skipped) || 0,
+    failed: (Number(writeResult.failed) || 0) + verificationMissing,
+  };
+}
+
 /** DB 행 → 짝맞추기 입력 모양(파서는 DB 컬럼명을 모른다) */
 function _itemView(r) {
   return {
@@ -97,6 +151,7 @@ function _itemView(r) {
     reviewerName: r.reviewer_name || '', phone8: r.phone8 || '',
     bankName: r.bank_name || '', bankAccount: r.bank_account || '',
     accountHolder: r.account_holder || '',
+    productPrice: Number(r.product_price || 0), reviewFee: Number(r.review_fee || 0),
     amount: Number(r.amount || 0),
     transferMemo: r.transfer_memo || '',
     status: r.status, failReason: r.fail_reason || '', resultStatus: r.result_status || '',
@@ -117,7 +172,11 @@ function _pairView(p) {
     holder: it.accountHolder,
     memo: it.transferMemo,
     status: it.status,
+    /* ★ 이미 처리된 건(paid/failed)의 표시는 **항목 상태가 정한다** — 라벨링 2차가 결과 줄을
+         붙여도 판정을 바꾸지 않는다(2차는 이체시각을 채우려고 붙이는 것뿐이다).
+         이 분기가 없으면 실패로 확정된 건이 파일의 성공 줄과 짝지어져 '성공'으로 보인다. */
     outcome: it.status === 'paid' ? 'already_paid'
+           : it.status === 'failed' ? 'not_in_file'
            : !p.result ? 'not_in_file'
            : (p.success ? 'success' : 'failed'),
     resultStatus: p.result ? p.result.statusRaw : '',
@@ -158,8 +217,20 @@ async function _analyze(batchId, fileName, base64) {
   const targets = items.filter(it => it.status === 'pending');
   const m = matchResults(targets, parse.rows);
 
-  const donePairs = items.filter(it => it.status !== 'pending')
-    .map(it => ({ item: it, result: null, matchKey: '', success: false, reason: 'already' }));
+  /* ★★ 2차는 **라벨링 전용**(반영 대상 아님) — 이미 처리된 건에도 결과 줄을 붙여 본다.
+       왜: 반영이 끝난 뒤 같은 파일을 다시 올리면 pending 이 0 이라 파일의 **모든 줄이
+       "짝 없음"** 이 되어 화면이 그것을 "미확인 이체"라고 불렀다(2026-08-19 회차 #12:
+       실제 미확인은 1건인데 **518건**으로 표시). 미확인 행에는 [작업 검색·대조] → 승인
+       경로가 붙어 있어, 이미 입금된 517건에 **이중 입금**을 낼 입구가 열려 있었다.
+     ★★ **판별은 정보 일치(계좌 숫자 + 금액)뿐 — 줄 번호를 근거로 쓰지 않는다**(사용자 확정
+       2026-08-19): 은행 다건이체는 **내려받은 순서대로 이체되지 않는 경우가 있어** 결과 파일의
+       행 순서가 회차 순서와 다를 수 있다. `matchResults` 의 키가 이미 계좌+금액이라 순서가
+       뒤바뀌어도 같은 결과가 나온다(실측: 파일을 역순으로 뒤집어도 미확인 1건 동일).
+     ★ **1차에서 안 쓰인 줄만** 넘긴다 — 결과 줄은 1:1 로 소비되므로, 은행이 **진짜로 두 번**
+       보낸 경우 두 번째 줄은 짝지을 항목이 남지 않아 **그대로 미확인으로 남는다**(실측 확인).
+       즉 이 2차는 중복 이체를 숨기지 않는다. */
+  const labeled = matchResults(items.filter(it => it.status !== 'pending'), m.unmatchedResults);
+  const donePairs = labeled.pairs.map(p => ({ ...p, reason: 'already' }));
 
   return {
     batch: b,
@@ -167,7 +238,8 @@ async function _analyze(batchId, fileName, base64) {
     format: loaded.format,
     pairs: m.pairs,
     view: [...m.pairs, ...donePairs].map(_pairView),
-    unmatchedResults: m.unmatchedResults.map(r => ({
+    /* 미확인 = **양쪽 어디에도 짝이 없는 줄**(1차 pending · 2차 라벨링). */
+    unmatchedResults: labeled.unmatchedResults.map(r => ({
       seq: r.seq, accountTail: String(r.accountDigits || '').slice(-4),
       amount: r.amount, holder: r.holder, memo: r.memo || '',
       transferredAt: r.transferredStamp || '', status: r.statusRaw, success: r.success,
@@ -175,6 +247,9 @@ async function _analyze(batchId, fileName, base64) {
     orderAssigned: m.orderAssigned,
     summary: {
       ...m.summary,
+      /* ★ 반영 판정 수치(matched/success/failed/notInFile)는 **1차 그대로** — 반영 대상은
+           여전히 pending 뿐이다. 여기서 덮는 것은 "미확인" 집계 하나뿐이다. */
+      unmatchedResults: labeled.unmatchedResults.length,
       alreadyPaid: items.filter(it => it.status === 'paid').length,
       alreadyFailed: items.filter(it => it.status === 'failed').length,
     },
@@ -192,12 +267,20 @@ function _previewArchive(a) {
     format: a.format,
     fileRows: a.parse.rows.length,
     warnings: a.parse.warnings || [],
-    items: a.view.map(({ outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus }) =>
-      ({ outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus })),
+    items: a.view.map(({ itemId, resultSeq, outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus }) =>
+      ({ itemId, resultSeq, outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus })),
     unmatchedResults: a.unmatchedResults,
     orderAssigned: a.orderAssigned,
     summary: a.summary,
   };
+}
+
+function _adminUnconfirmedAccountPreview(preview, rows) {
+  if (!preview || !Array.isArray(preview.unmatchedResults)) return preview;
+  const accountBySeq = new Map((rows || []).map(r => [Number(r.seq), String(r.accountDigits || '')]));
+  return { ...preview, unmatchedResults: preview.unmatchedResults.map(r => ({
+    ...r, accountNumber: accountBySeq.get(Number(r.seq)) || '',
+  })) };
 }
 
 /** 미리보기는 입금·실패 상태를 전혀 바꾸지 않는다. 마스킹된 화면 보관본만 감사 이력에 남긴다. */
@@ -219,7 +302,7 @@ async function previewResultFile({ batchId, fileName, base64, by }) {
     uploadId: stored && stored.id ? stored.id : null,
     canApply: (a.summary.success || 0) + (a.summary.failed || 0) > 0,
     fileName: String(fileName || ''),
-    ...preview,
+    ..._adminUnconfirmedAccountPreview(preview, a.parse.rows),
   };
 }
 
@@ -276,12 +359,24 @@ async function autoApplyResultFile({ batchId, fileName, base64, by, notifyFailed
 async function getLatestResultPreview(batchId) {
   if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
   const { rows: [row] } = await _db().query(
-    `SELECT id, file_name, uploaded_at, applied, file_blob IS NOT NULL AS has_file, summary
+    `SELECT id, file_name, uploaded_at, applied, file_blob, file_blob IS NOT NULL AS has_file, summary
        FROM payment_result_uploads
       WHERE batch_id = $1
       ORDER BY uploaded_at DESC, id DESC LIMIT 1`, [batchId]);
   const preview = row && row.summary && row.summary.preview;
   if (!preview || !Array.isArray(preview.items)) return { ok: true, found: false };
+  let adminPreview = preview;
+  try {
+    const loaded = row.file_blob && loadSheetAoa(row.file_blob, row.file_name || '');
+    const parsed = loaded && loaded.ok && parseResultAoa(loaded.aoa, { expectBank: preview.bank });
+    if (parsed && parsed.ok) adminPreview = _adminUnconfirmedAccountPreview(preview, parsed.rows);
+  } catch (_) { /* historical previews remain safely masked if the original cannot be parsed */ }
+  const { rows: reviewedRows } = await _db().query(
+    'SELECT result_seq FROM unconfirmed_transfer_reviews WHERE upload_id = $1', [row.id]);
+  const reviewedSeqs = new Set(reviewedRows.map(x => Number(x.result_seq)));
+  adminPreview = { ...adminPreview,
+    unmatchedResults: (adminPreview.unmatchedResults || []).filter(x => !reviewedSeqs.has(Number(x && x.seq))),
+  };
   return {
     ok: true, found: true, persisted: true, uploadId: row.id,
     canApply: row.applied !== true && row.has_file === true
@@ -289,7 +384,7 @@ async function getLatestResultPreview(batchId) {
     applied: row.applied === true,
     fileName: row.file_name || '', uploadedAt: row.uploaded_at || null,
     autoApply: row.summary && row.summary.autoApply ? row.summary.autoApply : undefined,
-    ...preview,
+    ...adminPreview,
   };
 }
 
@@ -309,7 +404,8 @@ function _reconciliationName(value) {
 }
 
 /**
- * 계좌가 바뀐 실제 이체 결과는 자동 반영하지 않는다. 같은 회차의 결과파일 누락 실패 항목 중
+ * 계좌가 바뀐 실제 이체 결과는 자동 반영하지 않는다. 같은 회차의 결과파일 누락 실패 또는
+ * 자동반영 전 pending 항목 중
  * 이름(괄호 설명 제외)과 금액이 정확히 하나만 맞을 때에만 관리자 확인용 후보로 제시한다.
  */
 function findAccountMismatchCandidates({ transfers, items }) {
@@ -319,8 +415,8 @@ function findAccountMismatchCandidates({ transfers, items }) {
     const holder = _reconciliationName(transfer.holder);
     if (!holder) continue;
     const matches = (items || []).filter(item =>
-      item && item.status === 'failed'
-      && String(item.failReason || '').includes('결과 파일에 해당 이체내역 없음')
+      item && (item.status === 'pending'
+        || (item.status === 'failed' && String(item.failReason || '').includes('결과 파일에 해당 이체내역 없음')))
       && Number(item.amount) === Number(transfer.amount)
       && _reconciliationName(item.reviewerName) === holder);
     if (matches.length !== 1) continue;
@@ -337,13 +433,72 @@ function findAccountMismatchCandidates({ transfers, items }) {
   return candidates;
 }
 
+function _sameTransferAccount(transfer, item) {
+  const expected = digitsOnly(item && (item.bankAccount || item.accountTail) || '');
+  const actual = digitsOnly(transfer && (transfer.accountDigits || transfer.accountNumber) || '');
+  if (expected && actual) return expected === actual;
+  const expectedTail = expected.slice(-4) || String(item && item.accountTail || '').slice(-4);
+  const actualTail = actual.slice(-4) || String(transfer && transfer.accountTail || '').slice(-4);
+  return !!expectedTail && expectedTail === actualTail;
+}
+
+/**
+ * 회차 스냅샷 금액과는 다르지만, 현재 작업보드 표시 상품비(+회차 리뷰비)와 실제 이체금액이
+ * 정확히 맞는 유일한 행만 관리자 금액조정 승인 후보로 올린다.
+ */
+function findAmountMismatchCandidates({ transfers, items }) {
+  const candidates = [];
+  for (const transfer of (transfers || [])) {
+    if (!transfer || transfer.success !== true || !transfer.seq || !(Number(transfer.amount) > 0)) continue;
+    const holder = _reconciliationName(transfer.holder);
+    if (!holder) continue;
+    const matches = (items || []).filter(item => {
+      const currentProduct = Number(item && item.workboardAmount || 0);
+      const currentAmount = currentProduct > 0 ? currentProduct + Number(item.reviewFee || 0) : 0;
+      return item && (item.status === 'pending'
+          || (item.status === 'failed' && String(item.failReason || '').includes('결과 파일에 해당 이체내역 없음')))
+        && Number(item.amount) !== Number(transfer.amount)
+        && currentAmount === Number(transfer.amount)
+        && _reconciliationName(item.accountHolder || item.reviewerName) === holder
+        && _sameTransferAccount(transfer, item);
+    });
+    if (matches.length !== 1) continue;
+    const item = matches[0];
+    candidates.push({
+      resultSeq: Number(transfer.seq), itemId: item.id, reviewerName: item.reviewerName || '',
+      rowIndex: item.rowIndex, tabName: item.tabName || '',
+      expectedAmount: Number(item.amount), workboardProductAmount: Number(item.workboardAmount),
+      reviewFee: Number(item.reviewFee || 0), workboardAmount: Number(transfer.amount),
+      actualAmount: Number(transfer.amount), accountTail: digitsOnly(item.bankAccount || item.accountTail || '').slice(-4),
+      transferredAt: transfer.transferredAt || '',
+    });
+  }
+  return candidates;
+}
+
+function _restoreStoredAccountDigits(upload, archivedTransfers) {
+  if (!upload || !upload.file_blob) return archivedTransfers || [];
+  try {
+    const loaded = loadSheetAoa(upload.file_blob, upload.file_name || '');
+    const parsed = loaded && loaded.ok && parseResultAoa(loaded.aoa, {});
+    if (!parsed || !parsed.ok) return archivedTransfers || [];
+    const bySeq = new Map(parsed.rows.map(row => [Number(row.seq), row]));
+    return (archivedTransfers || []).map(row => ({
+      ...row, accountDigits: String((bySeq.get(Number(row && row.seq)) || {}).accountDigits || ''),
+    }));
+  } catch (_) { return archivedTransfers || []; }
+}
+
 async function searchUnconfirmedWorkCandidates({ query }) {
   const q = String(query || '').trim();
   if (q.length < 2) throw new ResultError('bad_request', '작업명 두 글자 이상을 입력해 주세요.');
   const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
   const { rows } = await _db().query(
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
-            COALESCE(NULLIF(MAX(tc.display_name), ''), NULLIF(MAX(rc.title), ''), ri.tab_name) AS "label"
+            COALESCE(NULLIF(MAX(tc.display_name), ''), NULLIF(MAX(rc.title), ''), ri.tab_name) AS "label",
+            COALESCE(NULLIF(MAX(rc.title), ''), '') AS "campaignTitle",
+            COALESCE(NULLIF(MAX(rc.transfer_memo), ''), '') AS "depositName",
+            BOOL_OR(LOWER(TRIM(COALESCE(rc.transfer_memo, ''))) = LOWER($2)) AS "recommended"
        FROM review_index ri
        LEFT JOIN tab_configs tc ON tc.sheet_id = ri.sheet_id AND tc.tab_name = ri.tab_name
        LEFT JOIN recruit_campaigns rc
@@ -352,27 +507,42 @@ async function searchUnconfirmedWorkCandidates({ query }) {
       WHERE ri.tab_name ILIKE $1 ESCAPE '\\'
          OR COALESCE(tc.display_name, '') ILIKE $1 ESCAPE '\\'
          OR COALESCE(rc.title, '') ILIKE $1 ESCAPE '\\'
+         OR COALESCE(rc.transfer_memo, '') ILIKE $1 ESCAPE '\\'
       GROUP BY ri.sheet_id, ri.tab_name
-      ORDER BY "label", ri.tab_name
-      LIMIT 30`, [like]);
-  return { ok: true, candidates: rows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, label: r.label || r.tabName })) };
+      ORDER BY "recommended" DESC, "label", ri.tab_name
+      LIMIT 30`, [like, q]);
+  return { ok: true, candidates: rows.map(r => ({
+    sheetId: r.sheetId, tabName: r.tabName, label: r.label || r.tabName,
+    campaignTitle: r.campaignTitle || '', depositName: r.depositName || '', recommended: r.recommended === true,
+  })) };
 }
 
-async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName }) {
+function _unconfirmedWorkboardAccount(rowJson) {
+  if (!rowJson || typeof rowJson !== 'object') return '';
+  const entry = Object.entries(rowJson).find(([key, value]) =>
+    String(key || '').replace(/\s/g, '').includes('계좌번호') && String(value || '').trim());
+  return entry ? digitsOnly(entry[1]) : '';
+}
+
+async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db = _db() }) {
   const normalizedMemo = _unconfirmedMemo(memo);
   if (!batchId || !uploadId || !normalizedMemo || !sheetId || !tabName) {
     throw new ResultError('bad_request', '회차·결과파일·통장표시·작업을 모두 선택해 주세요.');
   }
-  const { rows: [upload] } = await _db().query(
-    `SELECT summary FROM payment_result_uploads WHERE id = $1 AND batch_id = $2`, [uploadId, batchId]);
+  const { rows: [upload] } = await db.query(
+    `SELECT summary, file_blob, file_name FROM payment_result_uploads WHERE id = $1 AND batch_id = $2`, [uploadId, batchId]);
   const outside = upload && upload.summary && upload.summary.preview && upload.summary.preview.unmatchedResults;
   if (!Array.isArray(outside)) throw new ResultError('not_found', '저장된 미확인 이체 결과를 찾을 수 없습니다.');
-  const transfers = outside.filter(x => _unconfirmedMemo(x && x.memo) === normalizedMemo);
+  const { rows: reviewedRows } = await db.query(
+    'SELECT result_seq FROM unconfirmed_transfer_reviews WHERE upload_id = $1', [uploadId]);
+  const reviewedSeqs = new Set(reviewedRows.map(x => Number(x.result_seq)));
+  const transfers = _restoreStoredAccountDigits(upload, outside)
+    .filter(x => _unconfirmedMemo(x && x.memo) === normalizedMemo && !reviewedSeqs.has(Number(x && x.seq)));
   if (!transfers.length) throw new ResultError('not_found', '선택한 통장표시의 미확인 이체가 이 결과파일에 없습니다.');
 
   const holders = [...new Set(transfers.map(x => String(x && x.holder || '').trim()).filter(Boolean))];
-  const { rows: participants } = holders.length ? await _db().query(
-    `SELECT ri.reviewer_name AS "reviewerName", ri.row_index AS "rowIndex",
+  const { rows: participants } = holders.length ? await db.query(
+    `SELECT ri.reviewer_name AS "reviewerName", ri.row_index AS "rowIndex", ri.row_json AS "rowJson",
             ri.is_submitted2 = 'PAID' OR EXISTS (
               SELECT 1 FROM payment_records pr
                WHERE pr.sheet_id = ri.sheet_id AND pr.tab_name = ri.tab_name AND pr.row_index = ri.row_index
@@ -386,11 +556,22 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
       ORDER BY ri.reviewer_name, ri.row_index`, [sheetId, tabName, holders]) : [];
   // The selection is scoped to this work, but uniqueness must be checked against
   // every item in the batch to prevent same-name/same-amount cross-work matching.
-  const { rows: batchItems } = await _db().query(
+  const { rows: batchItems } = await db.query(
     'SELECT * FROM payment_batch_items WHERE batch_id = $1', [batchId]);
   const selectedItemIds = new Set(batchItems
     .filter(x => x.sheet_id === sheetId && x.tab_name === tabName)
     .map(x => String(x.id)));
+  const amountTargets = [
+    ...participants.map(p => ({ sheetId, tabName, rowIndex: p.rowIndex, rowJson: p.rowJson })),
+    ...batchItems.map(item => ({ sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index })),
+  ];
+  const displayedAmounts = await loadWorkboardAmounts(db, amountTargets);
+  const batchItemViews = batchItems.map(row => ({
+    ..._itemView(row),
+    workboardAmount: Number((displayedAmounts.get(workboardAmountKey({
+      sheetId: row.sheet_id, tabName: row.tab_name, rowIndex: row.row_index,
+    })) || {}).amount || 0),
+  }));
   const byName = new Map();
   for (const p of participants) {
     const key = String(p.reviewerName || '');
@@ -400,27 +581,204 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
   const results = transfers.map(t => {
     const matches = byName.get(String(t.holder || '').trim()) || [];
     const paid = matches.filter(m => m.alreadyPaid === true);
-    const state = paid.length ? 'duplicate_payment'
+    const participant = matches.length === 1 ? matches[0] : null;
+    const state = t.success !== true ? 'transfer_not_confirmed'
+      : paid.length ? 'duplicate_payment'
       : matches.length === 1 ? 'candidate_unpaid'
       : matches.length ? 'ambiguous_participant' : 'participant_not_found';
     return {
       seq: t.seq, holder: t.holder || '', amount: t.amount, accountTail: t.accountTail || '', transferredAt: t.transferredAt || '',
-      state, participantCount: matches.length, alreadyPaidCount: paid.length,
+      state, rowIndex: participant ? participant.rowIndex : null,
+      workboardAmount: participant ? Number((displayedAmounts.get(workboardAmountKey({
+        sheetId, tabName, rowIndex: participant.rowIndex,
+      })) || {}).amount || extractAmountNumber(participant.rowJson)) : 0,
+      workboardAccount: participant ? _unconfirmedWorkboardAccount(participant.rowJson) : '',
+      participantCount: matches.length, alreadyPaidCount: paid.length,
     };
   });
+  const duplicateResultSeqs = new Set(results
+    .filter(result => result.state === 'duplicate_payment')
+    .map(result => Number(result.seq)));
+  const reconciliationCandidates = findAccountMismatchCandidates({ transfers, items: batchItemViews })
+    .filter(x => selectedItemIds.has(String(x.itemId)) && !duplicateResultSeqs.has(Number(x.resultSeq)));
+  const amountMismatchCandidates = findAmountMismatchCandidates({ transfers, items: batchItemViews })
+    .filter(x => selectedItemIds.has(String(x.itemId)) && !duplicateResultSeqs.has(Number(x.resultSeq)));
+  const amountMismatchSeqs = new Set(amountMismatchCandidates.map(x => Number(x.resultSeq)));
+  const accountMismatchSeqs = new Set(reconciliationCandidates.map(x => Number(x.resultSeq)));
+  // 전용 승인 경로를 우회해 일반 미확인 승인으로 처리하면 원래 회차 항목이 실패로 남는다.
+  // 서버 판정 자체를 분리해 직접 API 호출도 전용 감사 경로만 통과하게 한다.
+  for (const result of results) {
+    if (result.state === 'candidate_unpaid' && amountMismatchSeqs.has(Number(result.seq))) {
+      result.state = 'amount_mismatch_candidate';
+    } else if (result.state === 'candidate_unpaid' && accountMismatchSeqs.has(Number(result.seq))) {
+      result.state = 'account_mismatch_candidate';
+    }
+  }
   return {
     ok: true,
     work: { sheetId, tabName }, memo: normalizedMemo,
     results,
-    reconciliationCandidates: findAccountMismatchCandidates({ transfers, items: batchItems.map(_itemView) })
-      .filter(x => selectedItemIds.has(String(x.itemId))),
+    reconciliationCandidates,
+    amountMismatchCandidates,
     summary: {
       duplicatePayment: results.filter(x => x.state === 'duplicate_payment').length,
       candidateUnpaid: results.filter(x => x.state === 'candidate_unpaid').length,
+      amountMismatch: results.filter(x => x.state === 'amount_mismatch_candidate').length,
+      accountMismatch: results.filter(x => x.state === 'account_mismatch_candidate').length,
       ambiguous: results.filter(x => x.state === 'ambiguous_participant').length,
       notFound: results.filter(x => x.state === 'participant_not_found').length,
+      transferNotConfirmed: results.filter(x => x.state === 'transfer_not_confirmed').length,
     },
   };
+}
+
+const DUPLICATE_CASE_STATUSES = new Set(['PENDING', 'RECOVERY_REQUESTED', 'REFUND_REQUESTED', 'RECOVERED', 'REFUNDED', 'CLOSED']);
+const DUPLICATE_CASE_TYPES = new Set(['RECOVERY', 'REFUND']);
+
+function _reviewText(value, limit = 500) {
+  return String(value || '').trim().slice(0, limit);
+}
+
+function _reviewDate(value) {
+  if (!value) return null;
+  const normalized = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) throw new ResultError('bad_request', '처리 기한은 YYYY-MM-DD 형식으로 입력해 주세요.');
+  return normalized;
+}
+
+function _reviewUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
+async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tabName, resultSeq, action, note, caseInfo, by }) {
+  const normalizedAction = String(action || '').trim().toUpperCase();
+  if (!['APPROVE', 'DUPLICATE'].includes(normalizedAction) || !Number.isInteger(Number(resultSeq))) {
+    throw new ResultError('bad_request', '이체 결과와 처리 조치를 확인해 주세요.');
+  }
+  const client = await _db().connect();
+  let approvedDepositItem = null;
+  let response;
+  try {
+    await client.query('BEGIN');
+    const { rows: [batch] } = await client.query('SELECT id, status FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    if (!batch) throw new ResultError('not_found', '이체 회차를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 이체 회차는 대조할 수 없습니다.');
+    const match = await inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db: client });
+    const result = match.results.find(x => Number(x.seq) === Number(resultSeq));
+    if (!result) throw new ResultError('not_found', '선택한 이체 결과를 찾을 수 없습니다.');
+    const allowed = normalizedAction === 'APPROVE' ? result.state === 'candidate_unpaid' : result.state === 'duplicate_payment';
+    if (!allowed) throw new ResultError('not_eligible', '현재 판정에서는 선택한 조치를 실행할 수 없습니다.');
+
+    const decision = normalizedAction === 'APPROVE' ? 'APPROVED' : 'DUPLICATE_CASE_OPENED';
+    const { rows: [review] } = await client.query(
+      `INSERT INTO unconfirmed_transfer_reviews
+        (batch_id, upload_id, result_seq, memo, sheet_id, tab_name, participant_row_index, decision, review_note, reviewed_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (upload_id, result_seq) DO NOTHING
+       RETURNING *`,
+      [batchId, uploadId, Number(resultSeq), match.memo, sheetId, tabName, result.rowIndex, decision, _reviewText(note), _reviewText(by, 100)]);
+    if (!review) throw new ResultError('already_reviewed', '이 이체 결과는 이미 처리되었습니다. 새로고침 후 확인해 주세요.');
+
+    if (normalizedAction === 'APPROVE') {
+      const paidAt = parseTransferAt(result.transferredAt || '');
+      if (!paidAt || !paidAt.stamp) {
+        throw new ResultError('missing_transfer_time', '은행 이체시각이 없어 입금일을 기록할 수 없습니다. 결과 파일을 확인해 주세요.');
+      }
+      approvedDepositItem = {
+        sheetId, tabName, rowIndex: result.rowIndex,
+        reviewerName: result.holder || '', amount: String(result.amount || ''),
+        paidAt: paidAt.iso, stamp: paidAt.stamp,
+      };
+      const recorded = await recordDeposits(client, [approvedDepositItem], { by: by || '' });
+      if (recorded !== 1) {
+        throw new ResultError('already_paid', '참여자의 입금 기록이 이미 존재하거나 변경할 수 없습니다. 새로고침 후 확인해 주세요.');
+      }
+    }
+
+    let duplicateCase = null;
+    if (normalizedAction === 'DUPLICATE') {
+      const resolutionType = String(caseInfo && caseInfo.resolutionType || 'RECOVERY').trim().toUpperCase();
+      if (!DUPLICATE_CASE_TYPES.has(resolutionType)) throw new ResultError('bad_request', '회수 또는 환불 조치 유형을 선택해 주세요.');
+      const caseStatus = resolutionType === 'REFUND' ? 'REFUND_REQUESTED' : 'RECOVERY_REQUESTED';
+      const { rows: [created] } = await client.query(
+        `INSERT INTO duplicate_payment_cases
+          (review_id, case_status, owner_name, due_at, resolution_type, memo, created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+         RETURNING *`,
+        [review.id, caseStatus, _reviewText(caseInfo && caseInfo.ownerName, 100), _reviewDate(caseInfo && caseInfo.dueAt),
+          resolutionType, _reviewText(caseInfo && caseInfo.memo), _reviewText(by, 100)]);
+      duplicateCase = created;
+      await client.query(
+        `INSERT INTO duplicate_payment_case_events (case_id, event_type, after_status, note, changed_by)
+         VALUES ($1, 'CREATED', $2, $3, $4)`,
+        [created.id, caseStatus, _reviewText(caseInfo && caseInfo.memo), _reviewText(by, 100)]);
+    }
+    await client.query('COMMIT');
+    response = { ok: true, review: { id: review.id, decision: review.decision, resultSeq: review.result_seq }, duplicateCase };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally { client.release(); }
+
+  if (approvedDepositItem) {
+    try {
+      const boardItems = approvedDepositItem.stamp ? [approvedDepositItem] : [];
+      const write = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
+      const verify = await paymentApply.verifyDepositCells(boardItems) || {};
+      const queued = Number(write.queued) || 0;
+      response.board = {
+        recorded: Number(verify.verified) || 0,
+        queued,
+        skipped: (Number(write.skipped) || 0) + (approvedDepositItem.stamp ? 0 : 1),
+        failed: (Number(write.failed) || 0) + Math.max(0, (Number(verify.missing) || 0) - queued),
+      };
+    } catch (err) {
+      logger.warn(`[paymentResult] 미확인 이체 승인 후 입금셀 기록 실패(${sheetId}/${tabName}/${resultSeq}): ${err.message}`);
+      response.board = { recorded: 0, queued: 0, skipped: 0, failed: 1 };
+    }
+  }
+  return response;
+}
+
+async function createDuplicatePaymentCase(input) {
+  return reviewUnconfirmedTransfer({ ...input, action: 'DUPLICATE' });
+}
+
+async function updateDuplicatePaymentCase({ caseId, caseStatus, ownerName, dueAt, memo, by }) {
+  const status = String(caseStatus || '').trim().toUpperCase();
+  if (!_reviewUuid(caseId) || !DUPLICATE_CASE_STATUSES.has(status)) throw new ResultError('bad_request', '중복입금 후속관리 상태를 확인해 주세요.');
+  const client = await _db().connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [current] } = await client.query('SELECT * FROM duplicate_payment_cases WHERE id = $1 FOR UPDATE', [caseId]);
+    if (!current) throw new ResultError('not_found', '중복입금 후속관리 건을 찾을 수 없습니다.');
+    const { rows: [updated] } = await client.query(
+      `UPDATE duplicate_payment_cases
+          SET case_status = $2, owner_name = $3, due_at = $4, memo = $5, updated_by = $6, updated_at = NOW()
+        WHERE id = $1 RETURNING *`,
+      [caseId, status, _reviewText(ownerName, 100), _reviewDate(dueAt), _reviewText(memo), _reviewText(by, 100)]);
+    await client.query(
+      `INSERT INTO duplicate_payment_case_events (case_id, event_type, before_status, after_status, note, changed_by)
+       VALUES ($1, 'UPDATED', $2, $3, $4, $5)`,
+      [caseId, current.case_status, status, _reviewText(memo), _reviewText(by, 100)]);
+    await client.query('COMMIT');
+    return { ok: true, duplicateCase: updated };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally { client.release(); }
+}
+
+async function listDuplicatePaymentCases({ batchId }) {
+  if (!batchId) throw new ResultError('bad_request', '이체 회차를 선택해 주세요.');
+  const { rows } = await _db().query(
+    `SELECT c.*, r.result_seq AS "resultSeq", r.memo AS "transferMemo", r.sheet_id AS "sheetId", r.tab_name AS "tabName",
+            r.reviewed_at AS "reviewedAt", r.reviewed_by AS "reviewedBy"
+       FROM duplicate_payment_cases c
+       JOIN unconfirmed_transfer_reviews r ON r.id = c.review_id
+      WHERE r.batch_id = $1
+      ORDER BY CASE WHEN c.case_status = 'CLOSED' THEN 1 ELSE 0 END, c.due_at NULLS LAST, c.updated_at DESC`, [batchId]);
+  return { ok: true, cases: rows };
 }
 
 async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, by }) {
@@ -447,6 +805,17 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
     const row = batchItems.find(x => String(x.id) === String(itemId));
     if (!row) throw new ResultError('not_found', '회차 대상 항목을 찾을 수 없습니다.');
     const item = _itemView(row);
+    const { rows: [paidState] } = await client.query(
+      `SELECT ri.is_submitted2 AS "isSubmitted2",
+              EXISTS (SELECT 1 FROM payment_records WHERE sheet_id = ri.sheet_id AND tab_name = ri.tab_name AND row_index = ri.row_index) AS "hasPaymentRecord",
+              EXISTS (SELECT 1 FROM payment_batch_items WHERE sheet_id = ri.sheet_id AND tab_name = ri.tab_name AND row_index = ri.row_index AND status = 'paid') AS "hasPaidBatchItem"
+         FROM review_index ri
+        WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+        FOR UPDATE`,
+      [item.sheetId, item.tabName, item.rowIndex]);
+    if (!paidState || paidState.isSubmitted2 === 'PAID' || paidState.hasPaymentRecord || paidState.hasPaidBatchItem) {
+      throw new ResultError('already_paid', '이미 입금 처리된 참여자는 수동 대조할 수 없습니다.');
+    }
     const candidates = findAccountMismatchCandidates({ transfers: [transfer], items: batchItems.map(_itemView) });
     const candidate = candidates.find(x => x.itemId === item.id && x.resultSeq === Number(resultSeq));
     if (!candidate || candidates.length !== 1) throw new ResultError('not_eligible', '계좌 불일치 수동 대조 조건을 충족하지 않습니다.');
@@ -463,9 +832,28 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
       `UPDATE payment_batch_items
           SET status = 'paid', paid_at = COALESCE($2::timestamptz, NOW()), result_status = '관리자 확인: 계좌 불일치 이체완료',
               result_seq = $3, fail_reason = NULL
-        WHERE id = $1 AND status = 'failed' AND result_status = '결과 파일에 없음'`,
+        WHERE id = $1 AND (status = 'pending' OR (status = 'failed' AND result_status = '결과 파일에 없음'))`,
       [itemId, paidAt, Number(resultSeq)]);
-    if (!updated.rowCount) throw new ResultError('not_eligible', '결과 파일 누락으로 실패 처리된 미입금 항목만 대조할 수 있습니다.');
+    if (!updated.rowCount) throw new ResultError('not_eligible', '대기 또는 결과 파일 누락 실패 처리된 미입금 항목만 대조할 수 있습니다.');
+    const preview = (upload.summary && upload.summary.preview) || {};
+    const oldSummary = preview.summary || {};
+    const nextItems = Array.isArray(preview.items) ? preview.items.map(entry => {
+      const isTarget = String(entry && entry.itemId || '') === String(itemId)
+        || (!entry.itemId && entry && entry.outcome === 'not_in_file'
+          && entry.reviewerName === item.reviewerName && Number(entry.amount) === Number(item.amount)
+          && String(entry.accountTail || '') === digitsOnly(item.bankAccount).slice(-4));
+      return isTarget ? { ...entry, outcome: 'success', status: 'paid', resultSeq: Number(resultSeq),
+        transferredAt: transfer.transferredAt || entry.transferredAt || '', resultStatus: '관리자 확인: 계좌 불일치 이체완료' } : entry;
+    }) : [];
+    const nextPreview = { ...preview, items: nextItems,
+      unmatchedResults: outside.filter(x => Number(x && x.seq) !== Number(resultSeq)),
+      summary: { ...oldSummary, success: Number(oldSummary.success || 0) + 1,
+        failed: Math.max(0, Number(oldSummary.failed || 0) - 1),
+        notInFile: Math.max(0, Number(oldSummary.notInFile || 0) - 1) } };
+    await client.query(
+      `UPDATE payment_result_uploads SET success_count = success_count + 1, failed_count = GREATEST(0, failed_count - 1),
+          applied_count = applied_count + 1, summary = COALESCE(summary, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+      [uploadId, JSON.stringify({ preview: nextPreview })]);
     paidItem = {
       sheetId: item.sheetId, tabName: item.tabName, rowIndex: item.rowIndex, reviewerName: item.reviewerName,
       amount: String(item.amount || ''), depositColKey: null, gid: '', paidAt,
@@ -502,6 +890,140 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
       board_recorded_at = NOW(), board_recorded_by = $7 WHERE id = $1`,
     [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, paidItem.stamp || '', by || 'payment']);
   return { ok: true, itemId, resultSeq: Number(resultSeq), amount: Number(transfer.amount), board: outcome };
+}
+
+async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, note, by }) {
+  const reviewNote = _reviewText(note);
+  if (!batchId || !uploadId || !itemId || !Number.isInteger(Number(resultSeq))) {
+    throw new ResultError('bad_request', '회차·결과파일·대상 항목·결과 행을 모두 지정해 주세요.');
+  }
+  if (!reviewNote) throw new ResultError('bad_request', '금액 조정 승인 사유를 입력해 주세요.');
+  const client = await _db().connect();
+  let paidItem;
+  let transfer;
+  let candidate;
+  try {
+    await client.query('BEGIN');
+    const { rows: [batch] } = await client.query('SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 대조할 수 없습니다.');
+    const { rows: [upload] } = await client.query(
+      'SELECT summary, file_blob, file_name FROM payment_result_uploads WHERE id = $1 AND batch_id = $2 FOR UPDATE', [uploadId, batchId]);
+    const outside = upload && upload.summary && upload.summary.preview && upload.summary.preview.unmatchedResults;
+    const restored = _restoreStoredAccountDigits(upload, outside);
+    transfer = Array.isArray(restored) && restored.find(x => Number(x && x.seq) === Number(resultSeq));
+    if (!transfer || transfer.success !== true) throw new ResultError('not_found', '저장된 이체완료 미확인 행을 찾을 수 없습니다.');
+
+    const { rows: batchItems } = await client.query(
+      'SELECT * FROM payment_batch_items WHERE batch_id = $1 FOR UPDATE', [batchId]);
+    const row = batchItems.find(x => String(x.id) === String(itemId));
+    if (!row) throw new ResultError('not_found', '회차 대상 항목을 찾을 수 없습니다.');
+    const displayedAmounts = await loadWorkboardAmounts(client, batchItems.map(item => ({
+      sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index,
+    })));
+    const itemViews = batchItems.map(item => ({
+      ..._itemView(item),
+      workboardAmount: Number((displayedAmounts.get(workboardAmountKey({
+        sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index,
+      })) || {}).amount || 0),
+    }));
+    const item = itemViews.find(x => String(x.id) === String(itemId));
+
+    const { rows: [paidState] } = await client.query(
+      `SELECT ri.is_submitted2 AS "isSubmitted2",
+              EXISTS (SELECT 1 FROM payment_records WHERE sheet_id = ri.sheet_id AND tab_name = ri.tab_name AND row_index = ri.row_index) AS "hasPaymentRecord",
+              EXISTS (SELECT 1 FROM payment_batch_items WHERE sheet_id = ri.sheet_id AND tab_name = ri.tab_name AND row_index = ri.row_index AND status = 'paid') AS "hasPaidBatchItem"
+         FROM review_index ri
+        WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+        FOR UPDATE`,
+      [item.sheetId, item.tabName, item.rowIndex]);
+    if (!paidState || paidState.isSubmitted2 === 'PAID' || paidState.hasPaymentRecord || paidState.hasPaidBatchItem) {
+      throw new ResultError('already_paid', '이미 입금 처리된 참여자는 금액 조정 승인할 수 없습니다.');
+    }
+
+    const candidates = findAmountMismatchCandidates({ transfers: [transfer], items: itemViews });
+    candidate = candidates.find(x => String(x.itemId) === String(item.id) && x.resultSeq === Number(resultSeq));
+    if (!candidate || candidates.length !== 1) {
+      throw new ResultError('not_eligible', '현재 작업보드 금액·계좌·예금주와 정확히 일치하는 유일한 금액 조정 후보가 아닙니다.');
+    }
+    const { rowCount: inserted } = await client.query(
+      `INSERT INTO payment_amount_mismatch_reconciliations
+        (batch_id, upload_id, result_seq, batch_item_id, expected_amount, workboard_product_amount,
+         review_fee, workboard_amount, actual_amount, review_note, reconciled_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
+      [batchId, uploadId, Number(resultSeq), itemId, candidate.expectedAmount,
+        candidate.workboardProductAmount, candidate.reviewFee, candidate.workboardAmount,
+        candidate.actualAmount, reviewNote, by || '']);
+    if (!inserted) throw new ResultError('already_reconciled', '이 결과 행 또는 대상 항목은 이미 금액 조정 승인되었습니다.');
+
+    const parsedAt = parseTransferAt(transfer.transferredAt || '');
+    const paidAt = parsedAt ? parsedAt.iso : null;
+    const updated = await client.query(
+      `UPDATE payment_batch_items
+          SET status = 'paid', paid_at = COALESCE($2::timestamptz, NOW()), result_status = '관리자 확인: 금액 조정 이체완료',
+              result_seq = $3, fail_reason = NULL
+        WHERE id = $1 AND (status = 'pending' OR (status = 'failed' AND
+              (result_status = '결과 파일에 없음' OR fail_reason LIKE '%결과 파일에 해당 이체내역 없음%')))`,
+      [itemId, paidAt, Number(resultSeq)]);
+    if (!updated.rowCount) throw new ResultError('not_eligible', '대기 또는 결과 파일 누락 실패 처리된 미입금 항목만 승인할 수 있습니다.');
+
+    const preview = (upload.summary && upload.summary.preview) || {};
+    const oldSummary = preview.summary || {};
+    const nextItems = Array.isArray(preview.items) ? preview.items.map(entry => {
+      const isTarget = String(entry && entry.itemId || '') === String(itemId)
+        || (!entry.itemId && entry && entry.outcome === 'not_in_file'
+          && entry.reviewerName === item.reviewerName && Number(entry.amount) === Number(item.amount)
+          && String(entry.accountTail || '') === digitsOnly(item.bankAccount).slice(-4));
+      return isTarget ? { ...entry, amount: candidate.actualAmount, expectedAmount: candidate.expectedAmount,
+        workboardAmount: candidate.workboardAmount, outcome: 'success', status: 'paid', resultSeq: Number(resultSeq),
+        transferredAt: transfer.transferredAt || entry.transferredAt || '', resultStatus: '관리자 확인: 금액 조정 이체완료' } : entry;
+    }) : [];
+    const nextPreview = { ...preview, items: nextItems,
+      unmatchedResults: outside.filter(x => Number(x && x.seq) !== Number(resultSeq)),
+      summary: { ...oldSummary, success: Number(oldSummary.success || 0) + 1,
+        failed: Math.max(0, Number(oldSummary.failed || 0) - 1),
+        notInFile: Math.max(0, Number(oldSummary.notInFile || 0) - 1) } };
+    await client.query(
+      `UPDATE payment_result_uploads SET success_count = success_count + 1, failed_count = GREATEST(0, failed_count - 1),
+          applied_count = applied_count + 1, summary = COALESCE(summary, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+      [uploadId, JSON.stringify({ preview: nextPreview })]);
+
+    paidItem = {
+      sheetId: item.sheetId, tabName: item.tabName, rowIndex: item.rowIndex, reviewerName: item.reviewerName,
+      amount: String(candidate.actualAmount), depositColKey: null, gid: '', paidAt,
+      stamp: _depositDateFromResultStamp(transfer.transferredAt || ''),
+    };
+    await recordDeposits(client, [paidItem], { by: by || '' });
+    const { rows: [meta] } = await client.query(
+      'SELECT submit_col2, tab_gid FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3',
+      [paidItem.sheetId, paidItem.tabName, paidItem.rowIndex]);
+    if (meta) { paidItem.depositColKey = meta.submit_col2 || null; paidItem.gid = meta.tab_gid || ''; }
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally { client.release(); }
+
+  const boardItems = paidItem && paidItem.stamp ? [paidItem] : [];
+  const write = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
+  const verify = await paymentApply.verifyDepositCells(boardItems) || {};
+  const queued = Number(write.queued) || 0;
+  const outcome = { recorded: Number(verify.verified) || 0, queued,
+    skipped: (Number(write.skipped) || 0) + (paidItem ? 1 - boardItems.length : 0),
+    failed: (Number(write.failed) || 0) + Math.max(0, (Number(verify.missing) || 0) - queued) };
+  await _db().query(
+    `UPDATE payment_batches SET board_recorded_count = COALESCE(board_recorded_count,0) + $2,
+      board_queued_count = COALESCE(board_queued_count,0) + $3, board_skipped_count = COALESCE(board_skipped_count,0) + $4,
+      board_failed_count = COALESCE(board_failed_count,0) + $5,
+      board_stamp = CASE
+        WHEN COALESCE(board_stamp, '') = '' THEN $6
+        WHEN $6 = '' OR POSITION($6 IN board_stamp) > 0 THEN board_stamp
+        ELSE board_stamp || ', ' || $6
+      END,
+      board_recorded_at = NOW(), board_recorded_by = $7 WHERE id = $1`,
+    [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, paidItem.stamp || '', by || 'payment']);
+  return { ok: true, itemId, resultSeq: Number(resultSeq), expectedAmount: candidate.expectedAmount,
+    workboardAmount: candidate.workboardAmount, actualAmount: candidate.actualAmount, board: outcome };
 }
 
 /* ★★ 실패 안내 문구는 **여기 한 곳**(사용자 확정 ⑤ "등록한 계좌 정보를 확인해 주세요").
@@ -698,17 +1220,8 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
        ★ 날짜는 결과파일의 건별 실제 이체일(item.stamp)만 사용한다. */
   const boardItems = paidItems.filter(x => x.stamp);
   const undatedPaid = paidItems.length - boardItems.length;
-  const writeResult = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
-  const verification = await paymentApply.verifyDepositCells(boardItems) || {};
-  const verified = Number(verification.verified) || 0;
-  const queued = Number(writeResult.queued) || 0;
-  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
-  const board = {
-    recorded: verified,
-    queued,
-    skipped: (Number(writeResult.skipped) || 0) + undatedPaid,
-    failed: (Number(writeResult.failed) || 0) + verificationMissing,
-  };
+  const board = await _writeBoardDeposits(boardItems, { by: by || 'payment' });
+  board.skipped += undatedPaid;
   const boardStamp = [...new Set(boardItems.map(x => x.stamp))].join(', ');
   await _saveBoardWriteOutcome({ batchId, outcome: board, stamp: boardStamp, by: by || 'payment' });
 
@@ -863,22 +1376,8 @@ async function backfillPaidDepositStamp({ batchId, by }) {
 
   const datedItems = items.filter(x => x.stamp);
   const normalizedStamp = [...new Set(datedItems.map(x => x.stamp))].join(', ');
-  const writeResult = await paymentApply.markDepositCells(datedItems,
-    { by: by || 'payment', deferSheetlessRebuild: true }) || {};
-  const sheetlessTabs = [...new Map(datedItems.filter(x => x.sheetless)
-    .map(x => [`${x.sheetId}\t${x.tabName}`, x])).values()];
-  for (const tab of sheetlessTabs) {
-    await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
-  }
-  const verification = await paymentApply.verifyDepositCells(datedItems) || {};
-  const queued = Number(writeResult.queued) || 0;
-  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
-  const outcome = {
-    recorded: Number(verification.verified) || 0,
-    queued,
-    skipped: (Number(writeResult.skipped) || 0) + (items.length - datedItems.length),
-    failed: (Number(writeResult.failed) || 0) + verificationMissing,
-  };
+  const outcome = await _writeBoardDeposits(datedItems, { by: by || 'payment' });
+  outcome.skipped += (items.length - datedItems.length);
   await _saveBoardWriteOutcome({ batchId, outcome, stamp: normalizedStamp, by: by || 'payment' });
   return { ok: true, candidates: items.length, stamp: normalizedStamp, verified: outcome.recorded, ...outcome };
 }
@@ -913,4 +1412,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, findAccountMismatchCandidates, reconcileAccountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, findAmountMismatchCandidates, reconcileAmountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest, __setPaymentApplyForTest };

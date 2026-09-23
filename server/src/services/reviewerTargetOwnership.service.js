@@ -1,0 +1,174 @@
+const pool = require('../db/pool');
+const { getOwnerScopeByLoginPhone8 } = require('./reviewerIdentity.service');
+
+function phone8(value) {
+  return String(value || '').replace(/\D/g, '').slice(-8);
+}
+
+async function ownsReviewerTarget({ session, sheetId, tabName, rowIndex, client = pool }) {
+  if (!session?.ownerReviewerId || !sheetId || !tabName || !rowIndex) return false;
+  const projected=await require('./reviewerHistory.service').ownsProjectedTarget({session,sheetId,tabName,rowIndex,client});
+  if(projected !== null) return projected;
+  const loginPhone8 = phone8(session.loginPhone8);
+  const isSubAccount = session.loginKind === 'sub';
+  if (isSubAccount && loginPhone8.length !== 8) return false;
+  let phone8s = loginPhone8 ? [loginPhone8] : [];
+  if (!isSubAccount) {
+    try {
+      const scope = await getOwnerScopeByLoginPhone8(loginPhone8);
+      if (String(scope.ownerReviewerId || '') === String(session.ownerReviewerId)) {
+        phone8s = scope.phone8s || phone8s;
+      }
+    } catch (_) { /* FK가 없는 과거 행은 로그인 번호로만 제한한다. */ }
+  }
+
+  const { rows } = await client.query(
+    `SELECT 1
+       FROM review_index ri
+       LEFT JOIN participation_links pl
+         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
+       LEFT JOIN campaign_participants cp
+         ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name AND cp.seq = ri.row_index
+        AND cp.deleted_at IS NULL
+      WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+        AND (
+          (
+            $6::boolean = FALSE
+            AND (
+              (
+                cp.seq IS NOT NULL
+                AND (
+                  cp.owner_reviewer_id = $4::uuid
+                  OR (cp.owner_reviewer_id IS NULL AND cp.phone8 = ANY($5::text[]))
+                  OR (cp.owner_reviewer_id IS NULL
+                      AND (pl.owner_reviewer_id = $4::uuid
+                           OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($5::text[])
+                               AND NOT EXISTS (
+                                 SELECT 1 FROM reviewer_phone_changes rpc
+                                  WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $4::uuid
+                               )
+                               AND NOT EXISTS (
+                                 SELECT 1
+                                   FROM reviewer_identity_aliases ria
+                                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                                  WHERE ria.phone8 = pl.phone8
+                                    AND rii.owner_reviewer_id <> $4::uuid
+                               )))
+                      AND NOT EXISTS (
+                        SELECT 1 FROM reviewers current_owner
+                         WHERE current_owner.id <> $4::uuid
+                           AND (
+                             current_owner.phone8 = cp.phone8
+                             OR EXISTS (
+                               SELECT 1 FROM jsonb_array_elements(
+                                 CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
+                                      THEN current_owner.sub_accounts ELSE '[]'::jsonb END
+                               ) sub
+                                WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+                             )
+                           )
+                      ))
+                )
+              )
+              OR (
+                cp.seq IS NULL
+                AND (
+                  pl.owner_reviewer_id = $4::uuid
+                  OR (
+                    pl.owner_reviewer_id IS NULL
+                    AND (
+                      (pl.phone8 = ANY($5::text[])
+                       AND NOT EXISTS (
+                         SELECT 1 FROM reviewer_phone_changes rpc
+                          WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $4::uuid
+                       )
+                       AND NOT EXISTS (
+                         SELECT 1
+                           FROM reviewer_identity_aliases ria
+                           JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                          WHERE ria.phone8 = pl.phone8
+                            AND rii.owner_reviewer_id <> $4::uuid
+                       ))
+                      OR (ri.phone8 = ANY($5::text[])
+                          AND NOT EXISTS (
+                            SELECT 1 FROM reviewer_phone_changes rpc
+                             WHERE rpc.old_phone8 = ri.phone8 AND rpc.reviewer_id <> $4::uuid
+                          )
+                          AND NOT EXISTS (
+                            SELECT 1
+                              FROM reviewer_identity_aliases ria
+                              JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                             WHERE ria.phone8 = ri.phone8
+                               AND rii.owner_reviewer_id <> $4::uuid
+                          ))
+                    )
+                  )
+                )
+              )
+            )
+          )
+          OR (
+            $6::boolean = TRUE
+            AND (
+              (
+                cp.seq IS NOT NULL
+                AND cp.phone8 = $7
+                AND (
+                  cp.owner_reviewer_id = $4::uuid
+                  OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id = $4::uuid)
+                  OR (cp.owner_reviewer_id IS NULL AND pl.owner_reviewer_id IS NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM reviewer_phone_changes rpc
+                         WHERE rpc.old_phone8 = cp.phone8 AND rpc.reviewer_id <> $4::uuid
+                      )
+                      AND NOT EXISTS (
+                        SELECT 1
+                          FROM reviewer_identity_aliases ria
+                          JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                         WHERE ria.phone8 = cp.phone8
+                           AND rii.owner_reviewer_id <> $4::uuid
+                      ))
+                )
+              )
+              OR (
+                cp.seq IS NULL
+                AND (
+                  (pl.owner_reviewer_id = $4::uuid AND pl.phone8 = $7)
+                  OR (pl.owner_reviewer_id IS NULL AND (
+                    (pl.phone8 = $7
+                     AND NOT EXISTS (
+                       SELECT 1 FROM reviewer_phone_changes rpc
+                        WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $4::uuid
+                     )
+                     AND NOT EXISTS (
+                       SELECT 1
+                         FROM reviewer_identity_aliases ria
+                         JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                        WHERE ria.phone8 = pl.phone8
+                          AND rii.owner_reviewer_id <> $4::uuid
+                     ))
+                    OR (ri.phone8 = $7
+                        AND NOT EXISTS (
+                          SELECT 1 FROM reviewer_phone_changes rpc
+                           WHERE rpc.old_phone8 = ri.phone8 AND rpc.reviewer_id <> $4::uuid
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1
+                            FROM reviewer_identity_aliases ria
+                            JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                           WHERE ria.phone8 = ri.phone8
+                             AND rii.owner_reviewer_id <> $4::uuid
+                        ))
+                  ))
+                )
+              )
+            )
+          )
+        )
+      LIMIT 1`,
+    [sheetId, tabName, rowIndex, session.ownerReviewerId, phone8s, isSubAccount, loginPhone8]
+  );
+  return rows.length === 1;
+}
+
+module.exports = { ownsReviewerTarget };

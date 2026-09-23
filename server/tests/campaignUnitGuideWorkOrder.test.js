@@ -130,7 +130,7 @@ const COMPOSITE = {
     },
     {
       name: '상품B', url: 'https://coupang.com/B',
-      base: { pay: 9000, daily_limit: 3, guide: '상품B 유입', guide_images: [img('2'.repeat(24))] },
+      base: { pay: 9000, daily_limit: 3, guide: '상품B 유입', guide_images: [img('2'.repeat(24))], review_type_mix: [{ type: 'photo', quantity: 25 }, { type: 'text', quantity: 15 }] },
       options: [],
     },
   ]),
@@ -154,6 +154,8 @@ const COMPOSITE = {
     o1.optionUrl === 'https://coupang.com/A');
   ok('옵션에 링크가 있으면 그것이 이긴다', o2.optionUrl === 'https://coupang.com/A?opt=2');
   ok('상품 단위 줄의 링크 = 그 상품 메인 URL', pb.optionUrl === 'https://coupang.com/B');
+  ok('★ 상품 단위 줄도 base.review_type_mix 를 모집공고 조합으로 보존한다',
+    JSON.stringify(pb.reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 25 }, { type: 'text', quantity: 15 }]));
 
   // 무회귀 — 종전 필드
   ok('종전 필드(옵션명·결제금액·정원·일건수)는 그대로',
@@ -164,13 +166,15 @@ const COMPOSITE = {
   const noneish = s._woOptionRows({
     product_options_json: JSON.stringify([{
       name: '상품C', url: 'https://coupang.com/C', product_mode: 'opt',
-      base: { pay: 8000, guide: '상품C 유입' },
+      base: { pay: 8000, guide: '상품C 유입', review_type_mix: [{ type: 'photo', quantity: 6 }, { type: 'text', quantity: 4 }] },
       options: [{ label: '옵션 없음', pay: 8000, count: 10 }],
     }]),
   });
   ok('★ "옵션 없음"류는 상품 단위로 떨어지고 상품 가이드를 쓴다',
     noneish.length === 1 && noneish[0].unitKind === 'product' && noneish[0].optKey === ''
     && /상품C 유입/.test(noneish[0].inflowGuideHtml));
+  ok('★ "옵션 없음" 대체 행도 상품(base) 리뷰 조합을 쓴다',
+    JSON.stringify(noneish[0].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 6 }, { type: 'text', quantity: 4 }]));
 
   // 종전 오더(가이드 없음) 무회귀
   const legacy = s._woOptionRows({
@@ -211,9 +215,52 @@ console.log('\n[B2] product_mode — 상품별 명시 신호');
       { name: '상품Y', product_mode: 'none', base: { pay: 2000 }, options: [] },
     ]),
   };
-  ok('★ 전부 "옵션 없음"이라 명시하면 그것도 신호다(none)', sb._woProductMode(allNone) === 'none');
+  /* ★★★ 2026-08-24 실사고 · 사용자 확정으로 기대값이 **뒤집혔다**(종전 'none').
+     137 모델에서 `unit_kind='product'` 상품은 **그 자체가 선택지 하나**다. 상품이 둘 이상이면
+     선택지도 둘 이상이므로 표를 옵션 모드로 열어야 한다 — 'none' 으로 열면 발행 폼의
+     `readOptRows` 가 `_prodMode() !== "opt"` 에서 조기 return 해 **옵션 원장에 한 줄도
+     저장되지 않고**, 상품별 유입가이드가 통째로 사라진다(실측: 프리필엔 사진 3장이 그대로
+     실려 오는데 저장 payload 의 options 는 `[]`). 되돌리면 그 사고가 재현된다. */
+  ok('★★★ 상품이 둘 이상이면 전부 "옵션 없음"이어도 옵션 모드로 연다(상품 = 선택지)',
+    sb._woProductMode(allNone) === 'opt');
   ok('★ 명시가 있으면 옵션 줄이 0개여도 상품 줄을 그대로 넘긴다',
     sb._woOptionRows(allNone).length === 2 && sb._woOptionRows(allNone).every(r => r.unitKind === 'product'));
+
+  /* ★ 상품 하나·옵션 없음은 가이드가 없을 때만 종전 'none'을 유지한다.
+     상품 가이드가 있으면 그 상품 자체를 선택 단위로 저장해야 안내가 사라지지 않는다. */
+  const oneNone = {
+    product_options_json: JSON.stringify([
+      { name: '상품X', product_mode: 'none', base: { pay: 1000 }, options: [] },
+    ]),
+  };
+  ok('★ 가이드 없는 상품 1개 + 옵션 없음은 종전 그대로 none(단일상품 공고 무회귀)',
+    sb._woProductMode(oneNone) === 'none');
+
+  const oneNoneWithGuide = {
+    product_options_json: JSON.stringify([
+      { name: '상품가이드', product_mode: 'none', base: { pay: 1000, count: 5 }, options: [],
+        guide: { text: '상품가이드 검색 후 구매', images: ['https://api.example.com/api/order/guide-image/singleProductGuide123'] } },
+    ]),
+  };
+  const singleGuideRows = sb._woOptionRows(oneNoneWithGuide);
+  ok('★★ 단일상품의 상품 가이드도 opt 모드로 열어 입력·저장 대상이 된다',
+    sb._woProductMode(oneNoneWithGuide) === 'opt'
+    && singleGuideRows.length === 1
+    && singleGuideRows[0].unitKind === 'product'
+    && /상품가이드 검색 후 구매/.test(singleGuideRows[0].inflowGuideHtml)
+    && singleGuideRows[0].inflowGuideImages.length === 1);
+
+  /* ★ 상품이 하나여도 **옵션이 있다고 명시**하면 opt — 가장 흔한 단일상품 옵션공고다.
+     (상품 개수 판정을 넣으면서 'opt' 우선 판정이 지워져도 위 두 케이스는 결과가 같아
+      통과해버린다 — 이 케이스만이 그 회귀를 잡는다. 변이시험으로 확인.) */
+  const oneOpt = {
+    product_options_json: JSON.stringify([
+      { name: '상품Z', product_mode: 'opt', base: { pay: 0 },
+        options: [{ label: '옵1', pay: 1000 }, { label: '옵2', pay: 2000 }] },
+    ]),
+  };
+  ok('★ 상품 1개라도 옵션이 있다고 명시하면 opt(단일상품 옵션공고 무회귀)',
+    sb._woProductMode(oneOpt) === 'opt' && sb._woOptionRows(oneOpt).length === 2);
 
   const legacy = { product_options_json: JSON.stringify([{ name: '옛상품', base: { pay: 5000 }, options: [{ label: 'a', pay: 5000 }] }]) };
   ok('★ 명시가 하나도 없으면 빈 값 = 종전 추론 규칙(동작 불변)',
@@ -282,8 +329,8 @@ console.log('\n[D] 배선 — 상세 본문 · 발행 프리필');
   const sb = { console, p: { options: null } };
   vm.createContext(sb);
   sb.p.options = [
-    { productName: '상품A', optKey: '옵션1', unitKind: 'option', inflowGuideHtml: '<p>옵션1</p>', inflowGuideImages: [img('1'.repeat(24))], optionUrl: 'https://coupang.com/A', payAmount: 12000, recruitTotal: 30, dailyLimit: 5 },
-    { productName: '상품B', optKey: '', unit_kind: 'product', inflow_guide_html: '<p>상품B</p>', inflow_guide_images: [img('2'.repeat(24))], optionUrl: 'https://coupang.com/B', payAmount: 9000 },
+    { productName: '상품A', optKey: '옵션1', unitKind: 'option', inflowGuideHtml: '<p>옵션1</p>', inflowGuideImages: [img('1'.repeat(24))], optionUrl: 'https://coupang.com/A', payAmount: 12000, recruitTotal: 30, dailyLimit: 5, reviewTypeMix: [{ type: 'photo', quantity: 24 }, { type: 'text', quantity: 6 }] },
+    { productName: '상품B', optKey: '', unit_kind: 'product', inflow_guide_html: '<p>상품B</p>', inflow_guide_images: [img('2'.repeat(24))], optionUrl: 'https://coupang.com/B', payAmount: 9000, reviewTypeMix: [{ type: 'photo', quantity: 4 }, { type: 'text', quantity: 1 }] },
   ];
   const mapped = vm.runInContext('(' + mapExpr + ')', sb);
   ok('★★ 발행 프리필이 unitKind 를 통과시킨다(상품 단위가 이름 없는 옵션 줄로 무너지지 않는다)',
@@ -292,6 +339,9 @@ console.log('\n[D] 배선 — 상세 본문 · 발행 프리필');
     /옵션1/.test(mapped[0].inflowGuideHtml) && mapped[0].inflowGuideImages.length === 1
     && /상품B/.test(mapped[1].inflowGuideHtml) && mapped[1].inflowGuideImages.length === 1);
   ok('snake_case 별칭도 받는다(서버·인트라넷 표기 차 흡수)', mapped[1].unitKind === 'product');
+  ok('★★ 모집공고 설정 행에도 선택지별 리뷰 조합을 그대로 보존한다',
+    JSON.stringify(mapped[0].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 24 }, { type: 'text', quantity: 6 }])
+    && JSON.stringify(mapped[1].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 4 }, { type: 'text', quantity: 1 }]));
   ok('모르는 unitKind 는 option 으로 접는다(종전 동작)',
     (sb.p.options = [{ optKey: 'x', unitKind: 'weird' }], vm.runInContext('(' + mapExpr + ')', sb)[0].unitKind === 'option'));
 }

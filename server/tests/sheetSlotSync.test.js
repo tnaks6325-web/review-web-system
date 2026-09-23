@@ -5,8 +5,8 @@
  *   1. 준비 행 판독은 **RAW 미러**에서(시트 API 무접촉) + `cells->>$n::int` 캐스트 필수
  *      (빼면 에러 없이 전 행 NULL — 063 이 배포 이래 무음으로 꺼져 있던 실측 함정).
  *   2. 판정 사본 금지: 날짜 열 = campaignSchedule.findDateColumnIndex ·
- *      **옵션 칸 = orderLedger.optionWriteColumns**(직접 '옵션' 매칭하면 `옵션금액`(결제금액)·
- *      `비고(옵션확인)`을 오분류한다) — 실제 실행으로 대조.
+ *      **구매 옵션 칸 = orderLedger.optionWriteColumns**(직접 '옵션' 매칭하면 리뷰 지시용 `리뷰옵션`·
+ *      `옵션금액`(결제금액)·`비고(옵션확인)`을 오분류한다) — 실제 실행으로 대조.
  *   3. 슬롯은 **seq = 시트 실제 행 번호** · `source='worktable'` · ON CONFLICT DO NOTHING(비파괴·멱등).
  *      seq 가 어긋나면 주문이 채워질 때 새 행이 생겨 표가 두 겹이 된다.
  *   4. 백필의 tabGid 는 **서버가 tab_configs 에서 다시 구한다**(클라이언트 gid 불신 — 엉뚱한 탭 오염 차단).
@@ -89,10 +89,10 @@ function mkDb(overrides = {}) {
 /* ══ 1) 판정 단일 출처 ══════════════════════════════════════ */
 console.log('\n1) 판정 단일 출처(사본 금지)');
 
-t('★★ 옵션 칸은 optionWriteColumns 가 고른다 — 옵션금액·비고(옵션확인) 오분류 없음', () => {
+t('★★ 구매 옵션 칸은 optionWriteColumns 가 고른다 — 리뷰옵션·옵션금액·비고 오분류 없음', () => {
   const cols = optionWriteColumns(HEADERS);
-  assert.deepStrictEqual(cols.map(i => HEADERS[i]), ['리뷰옵션'],
-    '옵션 칸 판정이 리뷰옵션 하나가 아니다 — 결제금액/비고가 섞이면 금액 칸을 옵션으로 오독한다');
+  assert.deepStrictEqual(cols.map(i => HEADERS[i]), [],
+    '리뷰 지시용 옵션이나 결제금액/비고를 구매 옵션 칸으로 오독한다');
   assert.ok(SRC.includes("require('./orderLedger.service')") && SRC.includes('optionWriteColumns'),
     '옵션 칸 판정 사본이 들어왔다 — orderLedger.optionWriteColumns 를 써야 한다');
   assert.ok(!/['"]옵션['"]\s*\)/.test(SRC.replace(/\/\/.*$/gm, '')), '헤더 문자열로 직접 옵션 칸을 고르고 있다');
@@ -122,7 +122,7 @@ await ta('감사 모드: 준비 3행 중 날짜 해석 2행만 prepared · 나�
   assert.strictEqual(out.ok, true);
   assert.strictEqual(out.headerRow, HEADER_ROW, '헤더 행 번호가 시트 실제 행이 아니다');
   assert.strictEqual(out.dateColumn, '구매일자');
-  assert.strictEqual(out.optionColumn, '리뷰옵션');
+  assert.strictEqual(out.optionColumn, null);
   assert.deepStrictEqual(out.prepared.map(p => p.seq), [19, 20, 21, 22]);
   assert.strictEqual(out.datelessFilled, 1, '날짜로 못 읽은 칸을 조용히 버렸다');
 });
@@ -135,7 +135,7 @@ await ta('includeCells 모드: row_json = 헤더명→값 맵(그리드가 그�
   const row21 = out.prepared.find(p => p.seq === 21);
   assert.ok(row21.rowJson && row21.rowJson['구매일자'] === '8/4(화)', 'row_json 에 구매일자가 없다');
   assert.strictEqual(row21.rowJson['리뷰옵션'], '포토');
-  assert.strictEqual(row21.optionText, '포토');
+  assert.strictEqual(row21.optionText, '', '리뷰 지시용 옵션을 구매 옵션으로 노출했다');
   assert.ok(!Object.prototype.hasOwnProperty.call(row21.rowJson, ''), '빈 헤더가 키로 들어갔다');
 });
 await ta('미러 없음/헤더 인식 실패/날짜 열 없음 = 각각 사유와 함께 실패(추측 금지)', async () => {

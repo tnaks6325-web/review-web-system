@@ -1,7 +1,7 @@
 /**
- * C/S 문의창구 — 관리자 API
- * 모든 라우트는 JWT(authMiddleware) + 관리자/마스터(adminOrMasterMiddleware) 전용.
- * staff(영업담당자)·리뷰어는 접근 불가.
+ * C/S 문의창구 — 내부 담당자 API
+ * 모든 라우트는 JWT(authMiddleware) + 내부 역할(master/admin/staff) 전용.
+ * 리뷰어·광고주는 접근 불가.
  *
  * 동적 /:id 경로는 프론트 gasGet/gasPost 래퍼가 미지원이라, 전부 평면 경로 + body/query id 사용.
  */
@@ -10,30 +10,30 @@ const router = express.Router();
 const pool = require('../db/pool');
 const adminNickname = require('../services/adminNickname.service');
 const { logger } = require('../utils/logger');
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const { emitCsReplyToReviewer, broadcast } = require('../utils/sse');
 
-// 이하 모든 라우트 보호
-router.use(authMiddleware, adminOrMasterMiddleware);
+// 이하 모든 라우트 보호. AE(staff)도 리뷰어 C/S를 조회·답변할 수 있다.
+function internalMiddleware(req, res, next) {
+  const role = req.user?.role;
+  if (role === 'master' || role === 'admin' || role === 'staff') return next();
+  return res.status(403).json({ ok: false, error: '권한 없음' });
+}
+router.use(authMiddleware, internalMiddleware);
 
 // ── 첨부 이미지 URL 검증: 우리 서버의 guide-image 프록시 URL만 허용 ──
 //   화면에 <img src>로 나가므로 자유 문자열 금지(외부 URL·스킴 주입 차단). 메시지당 최대 5장.
-function _sanitizeCsImageUrls(v) {
-  const arr = Array.isArray(v) ? v : (v ? [v] : []);
-  const out = [];
-  for (const raw of arr.slice(0, 5)) {
-    const s = String(raw || '').trim();
-    if (!/^https?:\/\/[^\s"'<>]+\/api\/order\/guide-image\/[-\w]{20,}$/.test(s)) continue;
-    out.push(s);
-  }
-  return out;
-}
+/** C/S 첨부 URL 화이트리스트 — 규칙은 `utils/csImageUrls` 단일 출처(사본 금지). */
+const { sanitizeCsImageUrls: _sanitizeCsImageUrls } = require('../utils/csImageUrls');
 
-// GET /api/cs/threads?status=open|closed|all&q=검색어 — 문의방 목록(리뷰어별 그룹은 프론트에서)
+// GET /api/cs/threads?status=open|closed|all&q=검색어&campaignKey=시트ID||작업명 — 문의방 목록
 router.get('/threads', async (req, res, next) => {
   try {
     const status = (req.query.status || 'all').toString();
     const q = (req.query.q || '').toString().trim();
+    const campaignKey = (req.query.campaignKey || '').toString();
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
+    const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
 
     const where = [];
     const params = [];
@@ -44,6 +44,13 @@ router.get('/threads', async (req, res, next) => {
     if (q) {
       params.push('%' + q + '%');
       where.push(`(t.reviewer_name ILIKE $${params.length} OR t.reviewer_phone8 LIKE $${params.length} OR t.campaign_label ILIKE $${params.length})`);
+    }
+    // 작업보드 안의 미니 C/S는 현재 작업 방만 필요하다. 전체 문의방을 먼저 페이지로
+    // 자른 뒤 프론트에서 거르면, 미확인 방이 많은 날에는 관리자가 방금 연 방도 뒤쪽
+    // 페이지로 밀려 목록이 0건처럼 보인다. 정확한 campaign_key를 서버에서 먼저 좁힌다.
+    if (campaignKey) {
+      params.push(campaignKey);
+      where.push(`t.campaign_key = $${params.length}`);
     }
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
@@ -60,16 +67,31 @@ router.get('/threads', async (req, res, next) => {
         t.last_message_preview AS "lastMessagePreview",
         t.admin_unread_count   AS "adminUnread",
         t.created_at           AS "createdAt",
-        rv.admin_memo          AS "adminMemo"
+        rv.admin_memo          AS "adminMemo",
+        -- 목록의 업체명 검색도 대화 상세와 같은 출처·우선순위를 쓴다.
+        -- campaign_key는 sheetId||tabName 형식이며 tabName 안의 || 는 첫 구분자 뒤에
+        -- 그대로 남겨 상세 조회의 split 규칙과 일치한다.
+        COALESCE(
+          (SELECT ri.campaign_name FROM review_index ri
+            WHERE ri.sheet_id = split_part(t.campaign_key, '||', 1)
+              AND ri.tab_name = substring(t.campaign_key FROM position('||' IN t.campaign_key) + 2)
+              AND COALESCE(ri.campaign_name, '') <> ''
+            LIMIT 1),
+          (SELECT tc.campaign_name FROM tab_configs tc
+            WHERE tc.sheet_id = split_part(t.campaign_key, '||', 1)
+              AND tc.tab_name = substring(t.campaign_key FROM position('||' IN t.campaign_key) + 2)
+              AND COALESCE(tc.campaign_name, '') <> ''
+            LIMIT 1),
+          '') AS "companyLabel"
       FROM cs_threads t
       LEFT JOIN reviewers rv ON rv.phone8 = t.reviewer_phone8
       ${whereSql}
       ORDER BY (t.admin_unread_count > 0) DESC, COALESCE(t.last_message_at, t.created_at) DESC
-      LIMIT 500
-    `, params);
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `, [...params, limit, offset]);
 
     const totalUnread = rows.reduce((s, r) => s + (r.adminUnread || 0), 0);
-    res.json({ ok: true, threads: rows, total: rows.length, totalUnread });
+    res.json({ ok: true, threads: rows, total: rows.length, totalUnread, hasMore: rows.length === limit });
   } catch (err) {
     next(err);
   }

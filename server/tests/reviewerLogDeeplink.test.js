@@ -140,7 +140,8 @@ t('9. _consumeGo: 탭 예약 + 강조 대상 지정 + 주소창 해시 제거(�
   assert.strictEqual(STATE.view, 'workdesk', '작업보드 뷰로 안 감');
   assert.deepStrictEqual(STATE.pendingTab.sheetId, 'S1');
   assert.deepStrictEqual(STATE.pendingTab.tabName, '탄소매트 900건');
-  assert.deepStrictEqual(STATE.pendingFocus, { phone8: '12345678', name: '손아리' });
+  // ★ row = C/S 문의방 딥링크가 실어 주는 "그 주문의 줄 번호"(로그 딥링크는 안 보낸다 → 빈 값 = 종전 동작)
+  assert.deepStrictEqual(STATE.pendingFocus, { phone8: '12345678', name: '손아리', row: '' });
   assert.strictEqual(replaced, 1, '해시를 안 지우면 새로고침마다 재발동하고 연락처가 주소창에 남는다');
   assert.strictEqual(F.__getGo(), null, '1회 소비 후 비워야 중복 적용 안 됨');
 });

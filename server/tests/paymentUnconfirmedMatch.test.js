@@ -4,8 +4,8 @@ const fs = require('fs');
 const svc = require('../src/services/paymentResult.service');
 
 const outside = [
-  { seq: 8, memo: '올바디로션만두', holder: '리뷰어A', amount: 20300, accountTail: '1623', transferredAt: '2026.8.14 12:42' },
-  { seq: 9, memo: '올바디로션만두', holder: '리뷰어B', amount: 20300, accountTail: '8350', transferredAt: '2026.8.14 12:42' },
+  { seq: 8, memo: '올바디로션만두', holder: '리뷰어A', amount: 20300, accountTail: '1623', transferredAt: '2026.8.14 12:42', success: true },
+  { seq: 9, memo: '올바디로션만두', holder: '리뷰어B', amount: 20300, accountTail: '8350', transferredAt: '2026.8.14 12:42', success: true },
 ];
 
 assert.equal(typeof svc.findAccountMismatchCandidates, 'function',
@@ -43,16 +43,20 @@ svc.__setPoolForTest({
     if (/FROM payment_result_uploads WHERE id/.test(sql)) {
       return { rows: [{ summary: { preview: { unmatchedResults: outside } } }] };
     }
+    if (/FROM unconfirmed_transfer_reviews WHERE upload_id/.test(sql)) {
+      return { rows: [] };
+    }
     if (/FROM payment_batch_items WHERE batch_id = \$1/.test(sql)) {
       return { rows: [] };
     }
     if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) {
       assert.match(sql, /ri\.is_submitted2 = 'PAID'/);
       return { rows: [
-        { reviewerName: '리뷰어A', rowIndex: 5, alreadyPaid: true },
-        { reviewerName: '리뷰어B', rowIndex: 6, alreadyPaid: false },
+        { reviewerName: '리뷰어A', rowIndex: 5, alreadyPaid: true, rowJson: { '결제금액': '20,300', '계좌번호': '3515516491623' } },
+        { reviewerName: '리뷰어B', rowIndex: 6, alreadyPaid: false, rowJson: { '결제금액': '17,800', '계좌번호': '3515516491623' } },
       ] };
     }
+    if (/WITH targets AS/.test(sql)) return { rows: [] };
     throw new Error(`unexpected query: ${sql.slice(0, 90)}`);
   },
 });
@@ -61,6 +65,8 @@ svc.__setPoolForTest({
   const search = await svc.searchUnconfirmedWorkCandidates({ query: '바디로션' });
   assert.equal(search.candidates.length, 1);
   assert.match(searchSql, /tc\.display_name/);
+  assert.match(searchSql, /rc\.transfer_memo/, '공고 입금명도 미확인 이체 후보 검색에 포함한다');
+  assert.match(searchSql, /AS "recommended"/, '입금명 정확 일치 후보를 추천으로 표시한다');
   assert.doesNotMatch(searchSql, /tc\.label/);
 
   const out = await svc.inspectUnconfirmedWorkMatch({
@@ -69,41 +75,80 @@ svc.__setPoolForTest({
   assert.equal(out.results.length, 2);
   assert.equal(out.results[0].state, 'duplicate_payment');
   assert.equal(out.results[1].state, 'candidate_unpaid');
+  assert.equal(out.results[1].rowIndex, 6, 'unique workboard participant exposes its source row');
+  assert.equal(out.results[1].workboardAmount, 17800, '작업보드 결제금액을 대조표에 제공해야 한다');
+  assert.equal(out.results[1].workboardAccount, '3515516491623', '작업보드 계좌번호를 대조표에 제공해야 한다');
   assert.equal(out.summary.duplicatePayment, 1);
   assert.equal(out.summary.candidateUnpaid, 1);
   assert.deepEqual(out.reconciliationCandidates, []);
+  const paymentResultSource = fs.readFileSync(require.resolve('../src/services/paymentResult.service.js'), 'utf8');
+  assert.match(paymentResultSource, /FROM unconfirmed_transfer_reviews WHERE upload_id = \$1/,
+    '이미 검토한 이체 결과는 다시 미확인 목록에 나타나지 않아야 한다');
+  assert.doesNotMatch(paymentResultSource, /const state = paid.length/, '이체 성공 여부를 먼저 판정해야 한다');
   const routes = fs.readFileSync(require.resolve('../src/routes/trackB.routes.js'), 'utf8');
   assert.match(routes, /router\.get\('\/payment\/unconfirmed-work-search', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware/);
-  assert.match(routes, /workboardMatch:/,
-    'test transfers include their resolved workboard comparison values');
-  assert.match(routes, /payment\/batch\/:id\/test-unconfirmed-match/,
-    'test-only matching removes a resolved transfer from the persisted unconfirmed list');
   assert.match(routes, /b\.confirm !== true/);
   const workdesk = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
   assert.match(workdesk, /작업 검색·대조/);
   assert.match(workdesk, /function _pmUnconfirmedLiveSearch\(\)/);
-  assert.doesNotMatch(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/,
-    '연결값 대조 모달은 수동 검색을 실행하지 않는다');
+  assert.match(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/);
   assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
   assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
-  assert.match(workdesk, /pm-unconfirmed-listbox/);
-  assert.match(workdesk, /pm-unconfirmed-direct-match/,
-    'selected transfers render their linked workboard values without a search step');
-  assert.match(workdesk, /pm-unconfirmed-two-row-table/,
-    'comparison uses separate workboard and transfer-result rows');
-  assert.match(workdesk, /table\.lgtable\.pm-unconfirmed-two-row-table\{width:100%;min-width:0;table-layout:fixed\}/,
-    'comparison table fits the modal instead of inheriting the shared minimum width');
-  assert.match(workdesk, /\.lgwrap\.pm-unconfirmed-direct-match\{overflow-x:hidden\}/,
-    'the comparison wrapper does not provide a horizontal scrollbar');
-  assert.match(workdesk, /function _pmCompleteTestUnconfirmedMatch\(\)/,
-    'approved test matches remove the selected unconfirmed card immediately');
-  assert.match(workdesk, /test-unconfirmed-match/);
-  assert.doesNotMatch(workdesk, /선택한 이체의 작업 또는 모집공고 검색/,
-    'the comparison modal does not retain a manual work search field');
+  assert.match(workdesk, /pm-unconfirmed-candidates/);
+  assert.match(workdesk, /추천 공고/);
+  assert.match(workdesk, /pmUnconfirmedRecommendation/);
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
-  assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
+  assert.match(workdesk, /function _pmOpenUnconfirmedMatchList\(i\)/,
+    '미확인 이체를 여러 건 목록에서 선택해 대조하는 진입점이 있어야 한다');
+  assert.match(workdesk, /pm-unconfirmed-listbox/,
+    '다건 미확인 이체 목록은 고정 높이 스크롤 영역으로 렌더링해야 한다');
+  assert.match(workdesk, /function _pmSelectUnconfirmedMemo\(i\)/,
+    '목록에서 선택한 이체만 아래 검색 및 대조 대상으로 전환해야 한다');
+  assert.match(workdesk, /pm-unconfirmed-compare-table/,
+    '작업보드와 이체결과를 표 행으로 비교해야 한다');
+  assert.match(workdesk, /function _pmRenderUnconfirmedDirect\(match=null\)/,
+    '팝업을 열면 검색 없이 즉시 비교표를 렌더링해야 한다');
+  assert.match(workdesk, /const workRowForTransfer=\(transfer,result\)=>/,
+    '각 이체결과에 연결된 작업보드 행을 개별로 생성해야 한다');
+  assert.match(workdesk, /return workRowForTransfer\(transfer,result\)\+`<tr class="pm-transfer-row">/,
+    '작업보드값행과 이체결과값행은 결과별로 연속된 2행 세트여야 한다');
+  assert.match(workdesk, /const transfers=group\?\.items\|\|\[\]/,
+    '선택한 통장표시 묶음의 미확인 이체결과 전체를 비교표에 표시해야 한다');
+  assert.match(workdesk, /그룹 작업 선택 필요/,
+    '작업 미연결 상태는 행별 선택이 아니라 그룹 단위 선택으로 안내해야 한다');
+  assert.match(workdesk, /작업 1회 선택/,
+    '한 미확인 이체 그룹은 작업 하나만 선택하도록 단일 진입점을 제공해야 한다');
+  assert.match(workdesk, /function _pmOpenUnconfirmedWorkSearch\(\)/,
+    '연결된 작업보드가 없을 때 관리자가 작업보드를 직접 연결할 수 있어야 한다');
+  assert.match(workdesk, /function _pmAccountNumber\(transfer\)/,
+    '계좌번호는 전체 값이 있을 때 끝자리로 축약하지 않고 표시해야 한다');
+  assert.match(workdesk, /function _pmUnconfirmedStateLabel\(state\)/,
+    '대조 판정 코드는 운영자가 읽을 수 있는 한글로 변환해야 한다');
+  assert.match(workdesk, /function _pmReviewUnconfirmedResult\(rowIndex, action\)/,
+    '여러 이체결과는 카드 전체가 아니라 행별 판정에 맞춰 처리해야 한다');
+  assert.match(workdesk, /입금 성공 승인/,
+    '입금 이력이 없는 행에만 대조 승인 동작을 제공해야 한다');
+  assert.match(workdesk, /중복 입금 처리/,
+    '이미 입금된 행은 중복입금 후속관리로 보내야 한다');
+  assert.doesNotMatch(workdesk, /남은 행 전체 완료/,
+    '서로 다른 판정의 행을 일괄 대조 완료할 수 없어야 한다');
+  assert.match(paymentResultSource, /function _adminUnconfirmedAccountPreview\(preview, rows\)/,
+    '저장본은 마스킹을 유지하고 관리자 대조 응답에서만 전체 계좌번호를 복원해야 한다');
+  assert.match(workdesk, /\.lgwrap\.pm-unconfirmed-compare-table\{overflow-x:hidden;/,
+    '운영 대조표는 모달 안에서 가로 스크롤을 만들지 않아야 한다');
+  assert.match(workdesk, /\.pm-unconfirmed-compare-table table\.lgtable\{min-width:0;table-layout:fixed\}/,
+    '운영 대조표는 공통 테이블의 최소 폭을 상속하지 않아야 한다');
+  assert.match(workdesk, /table\.lgtable\.pm-unconfirmed-two-row-table\{width:100%;min-width:0;table-layout:fixed\}/,
+    '7열 비교표는 모달 폭 안에서 모든 값을 보여주는 전용 폭 규칙을 가져야 한다');
+  assert.match(workdesk, /\.pm-unconfirmed-two-row-table thead th:nth-child\(8\)\{width:16%\}/,
+    '행별 조치 열은 밀리지 않도록 전용 폭을 가져야 한다');
+  assert.match(workdesk, /function _pmReconcileMismatch\(rowIndex\)/);
+  assert.match(workdesk, /const c=_pmUnconfirmedContext\(rowIndex\), R=STATE\.pmResult, x=c\.accountCandidate/,
+    '계좌 불일치 승인은 현재 열린 그룹의 캐시 후보를 사용해야 한다');
+  assert.doesNotMatch(workdesk, /STATE\.pmReconciliationCandidates/,
+    '다른 그룹을 열었을 때 오래된 전역 계좌 후보를 사용하면 안 된다');
   assert.match(workdesk, /unconfirmed-reconcile/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
   assert.match(workdesk, /STATE\.pmUnconfirmedGroups=groups\.map/);

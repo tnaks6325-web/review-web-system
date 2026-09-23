@@ -143,7 +143,7 @@ function stubDb({ sheetless = true, headers = HDR, rowCount = 1 } = {}) {
     async query(sql, params) {
       q.push({ sql: String(sql), params });
       const s = String(sql);
-      if (/FROM tab_configs/.test(s)) return { rows: [{ sheetless }], rowCount: 1 };
+      if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(s)) return { rows: [{ sheetless }], rowCount: 1 };
       if (/detected_headers/.test(s)) return { rows: [{ h: headers }], rowCount: 1 };
       if (/UPDATE campaign_participants/.test(s)) return { rows: [], rowCount };
       return { rows: [], rowCount: 0 };
@@ -239,11 +239,8 @@ t('★★ 상태 칸·memo 칸이 같은 쓰기 함수를 쓴다(쓰기 규율 �
   const writerEnd = statusSrc.indexOf('const REVIEW_SUBMIT_TIME_BACKFILL_DAYS', writerStart);
   assert.ok(writerStart >= 0 && writerEnd > writerStart, 'common writer not found');
   const writer = statusSrc.slice(writerStart, writerEnd);
-  // 130 — 실제 UPDATE 문은 공용 헬퍼 `writeRowJsonCell` 한 곳으로 추출됐다(셀 편집 쓰기-through 와 공유).
-  //   검사 의미는 그대로 "작업표 쓰기 문장은 하나" 이고, 범위만 파일 전체로 넓어졌다(더 강함).
-  assert.ok(/writeRowJsonCell\(/.test(writer), '_writeCellAndRebuild 는 공용 헬퍼로 위임해야 한다');
-  const merges = (statusSrc.match(/UPDATE campaign_participants\s*\n?\s*SET row_json = COALESCE\(row_json, '\{\}'::jsonb\) \|\|/g) || []).length;
-  assert.strictEqual(merges, 1, `작업표 병합 UPDATE 가 ${merges}곳 — 사본이 생겼다`);
+  const n = (writer.match(/UPDATE campaign_participants/g) || []).length;
+  assert.strictEqual(n, 1, `작업표 UPDATE 가 ${n}곳 — 사본이 생겼다`);
   assert.ok(/markStatusCell[\s\S]*?_writeCellAndRebuild/.test(statusSrc));
   assert.ok(/markSheetlessMemo[\s\S]*?_writeCellAndRebuild/.test(statusSrc));
 });
@@ -254,20 +251,22 @@ t('★★ 판정 실패·리뷰체험단은 false(종전 동작) — isBlogKind 
   assert.ok(/_isBlog = isBlogKind\(await workKindForTab\(\{ sheetId, tabName \}\)\)/.test(submitSrc));
   assert.ok(/catch \(_\) \{ _isBlog = false; \}/.test(submitSrc), '조회 실패 폴백 없음');
 });
-t('★ 무시트 memo 기록을 제출 완료 분기에서 호출', () => {
-  const i1 = submitSrc.indexOf("kind: 'submit'");
+t('필수 블로그 URL은 완료 COMMIT 전에 같은 client로 기록', () => {
+  const i1 = submitSrc.indexOf("completionClient.query('COMMIT')");
   const i2 = submitSrc.indexOf('markSheetlessMemo');
-  assert.ok(i1 > 0 && i2 > i1 && (i2 - i1) < 1200, '완료 분기 밖이거나 미호출');
+  assert.ok(i2 > 0 && i2 < i1, 'URL 저장보다 먼저 완료를 확정함');
+  assert.ok(/client: completionClient/.test(submitSrc.slice(i2,i2+260)));
 });
 t('★★ 무시트 기록에도 같은 blog 판정을 넘긴다(시트 경로와 칸이 갈리면 안 된다)', () => {
   const i = submitSrc.indexOf('markSheetlessMemo');
   const block = submitSrc.slice(i, i + 300);
   assert.ok(/blog: _isBlog/.test(block), '무시트 기록에 고정값을 넘겼다 — 시트 경로와 다른 칸에 쓴다');
 });
-t('★ memo 기록 실패가 제출을 죽이지 않는다(fail-soft)', () => {
+t('필수 URL 저장 실패는 재시도 오류, 선택 비고만 완료 뒤 기록', () => {
   const i = submitSrc.indexOf('markSheetlessMemo');
   const block = submitSrc.slice(i - 200, i + 600);
-  assert.ok(/catch \(e\)/.test(block), 'try/catch 없음');
+  assert.ok(/REVIEW_POST_URL_WRITE_FAILED/.test(block));
+  assert.ok(submitSrc.indexOf('if (!_isBlog) try')>submitSrc.indexOf("completionClient.query('COMMIT')"));
 });
 
 // ── 6. 검색 응답 workKind ─────────────────────────────────────────────────

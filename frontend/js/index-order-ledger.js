@@ -8,6 +8,7 @@
   const EDITABLE = ['orderer', 'recipient', 'phone', 'address', 'bank', 'account', 'depositor', 'price', 'order_num', 'date_str', 'memo'];
   const COLS = [
     { k: 'mirrorStatus', label: '상태', w: 110 },
+    { k: 'sheetError', label: '실패 이유', w: 220 },
     { k: 'orderer', label: '주문자', w: 90, edit: 1 },
     { k: 'recipient', label: '수취인', w: 90, edit: 1 },
     { k: 'phone', label: '연락처', w: 120, edit: 1 },
@@ -89,7 +90,9 @@
         return `<td style="padding:4px 6px;font-size:.74rem;color:#374151;white-space:nowrap">${esc(v)}</td>`;
       }).join('');
       const cancelBtn = (row.deletedAt || row.mirrorStatus === 'canceled') ? '' : `<button onclick="window._olCancel('${esc(row.id)}')" style="font-size:.68rem;color:#991B1B;background:#FEE2E2;border:none;border-radius:6px;padding:3px 8px;cursor:pointer">취소</button>`;
-      return `<tr style="border-bottom:1px solid #F3F4F6">${tds}<td style="padding:4px 6px">${cancelBtn}</td></tr>`;
+      const retryBtn = row.mirrorStatus === 'failed' && row.queue && row.queue.id
+        ? `<button onclick="window._olRetry('${esc(row.queue.id)}')" style="font-size:.68rem;color:#1D4ED8;background:#DBEAFE;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;margin-right:4px">다시 처리</button>` : '';
+      return `<tr style="border-bottom:1px solid #F3F4F6">${tds}<td style="padding:4px 6px;white-space:nowrap">${retryBtn}${cancelBtn}</td></tr>`;
     }).join('');
     grid.innerHTML = `<table style="border-collapse:collapse;width:max-content;min-width:100%">${head}${body}</table>`;
   }
@@ -112,6 +115,12 @@
     const r = await gasPost({ action: 'orderCancel', orderSubmissionId: id });
     if (r && r.ok) { _msg(r.alreadyCanceled ? '이미 취소됨' : '취소 처리 중…'); _fetch(); }
     else { _msg('취소 실패: ' + ((r && r.error) || '오류'), true); }
+  };
+
+  window._olRetry = async function (queueId) {
+    const r = await gasPost({ action: 'syncQueueRetry', id: String(queueId) });
+    if (r && r.ok) { _msg('다시 처리하도록 대기열에 넣었습니다.'); _fetch(); }
+    else _msg('재처리 요청 실패: ' + ((r && r.error) || '오류'), true);
   };
 
   window._olManualAdd = async function () {

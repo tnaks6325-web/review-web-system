@@ -10,6 +10,7 @@ const { logger } = require('../utils/logger');
 const {
   computeCampaignState, nextOpenAt,
   fetchCampaignCounts,
+  totalQuotaUsage,
   fetchOptionCounts,
   computeOptionView,
   liveOptions,
@@ -27,6 +28,9 @@ const {
 //   (화면마다 규칙을 두면 "공고는 구매확정인데 검수는 리뷰"로 갈라진다)
 const { normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix, validateReviewTypeMix, validateOptionReviewTypeMix } = require('../utils/reviewTypeMix');
+const { normalizeDeliveryTypeMix, validateDeliveryTypeMix } = require('../utils/deliveryTypeMix');
+const { deliveryBaseType } = require('../utils/deliveryType');
+const { normalizeDeliveryReviewFeeMix, validateDeliveryReviewFeeMix, DELIVERY_MIX_KEYS } = require('../utils/deliveryReviewFee');
 const { normalizeRecruitBadges } = require('../utils/recruitBadges');
 // ★ 099: 체험단 종류(리뷰/블로그) 저장 정규화 — 판정 단일 출처. 사본을 만들지 않는다.
 const { workKindForStore, resolveWorkKind, isBlogKind } = require('../utils/workKind');
@@ -36,7 +40,10 @@ const { weekendPublicationState } = require('../services/campaignWeekend.service
 const { isPostUrl, BLOG_URL_HINT } = require('../utils/blogPostUrl');
 const { workKindForTab: tabWorkKind } = require('../services/workKindContext.service');
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
-const { loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
+const { loadPopularCreditMatches, loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
+const { repurchaseDays } = require('../utils/repurchaseGuard');
+const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
+const { recoverActiveHolds } = require('../services/campaignHoldRecovery.service');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -70,21 +77,24 @@ function _genCampaignId() {
 /** 공고에 연결된 작업오더의 유입방식(inflow_type)을 라이브 역조회.
  *  우선순위: work_orders.linked_campaign_id = campId(발행 시 기록) → source_work_order_id 보조.
  *  Track A 무접촉(읽기만) · 실패/미연결은 '' 폴백(fail-soft — 홀드/제출 경로에 영향 없음). */
+/* ★★ 짝짓기 규칙 사본 금지 — 정원 폴백·혼합 조합과 **같은 작업오더**를 본다
+     (`linkedRecruitQuota` 공유 조각). ⚠ 이 통합으로 **소프트삭제된 오더는 근거에서 빠진다**
+     (종전에는 `deleted_at` 필터가 없어 지워진 오더의 값도 썼다) — 레포의 반복 규율과 같은 방향이다. */
 async function _lookupInflowType(campId, sourceWoId) {
   try {
-    const { rows } = await pool.query(
-      `SELECT inflow_type
-         FROM work_orders
-        WHERE (linked_campaign_id = $1 AND $1 <> '')
-           OR (id = $2 AND $2 <> '')
-        ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC
-        LIMIT 1`,
-      [campId || '', sourceWoId || '']
-    );
-    return (rows[0] && rows[0].inflow_type) || '';
+    const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
+    const wo = await linkedWorkOrderForCampaign(
+      { id: campId || '', source_work_order_id: sourceWoId || '' }, ['inflow_type']);
+    return (wo && wo.inflow_type) || '';
   } catch (_) {
     return '';   // 컬럼/테이블 이슈 등은 조용히 폴백(라이브 핫패스 보호)
   }
+}
+
+/** 저장된 유입방식(둘 중 하나일 때만 값) — 없으면 ''(= 작업오더 폴백 대상). */
+function _savedInflowType(workDetail) {
+  const v = String((workDetail && workDetail.inflowType) || '');
+  return (v === 'guide' || v === 'link') ? v : '';
 }
 
 /**
@@ -227,6 +237,20 @@ function _normalizeOptionsInput(arr) {
   return out;
 }
 
+/** 가이드유입은 실제 참여 가능한 선택지마다 안내가 있어야 한다.
+ * 공통 유입가이드는 레거시 공고를 읽는 호환값일 뿐, 신규 공고의 누락을 메우지 않는다. */
+function _validateActiveUnitInflowGuides(inflowType, options) {
+  if (inflowType !== 'guide' || !Array.isArray(options)) return '';
+  const missing = options
+    .filter(option => option && option.status !== 'closed')
+    .filter(option => !String(option.inflowGuideHtml || '').trim()
+      && !(Array.isArray(option.inflowGuideImages) && option.inflowGuideImages.length))
+    .map(option => option.optKey || option.productName || '이름 없는 선택지');
+  return missing.length
+    ? `가이드유입은 모든 활성 상품·옵션에 유입가이드를 설정해야 합니다: ${missing.join(', ')}`
+    : '';
+}
+
 /** 옵션 저장(replace-set): 제공 옵션 upsert + 목록에서 빠진 기존 옵션은 참여자 있으면 closed, 없으면 삭제.
  *  ★ 참여자 있는 옵션은 절대 삭제하지 않음(기록·정원 보호).
  *  ★★ 원자성·상호배제(레드/블루 #2·#7): 자체 트랜잭션 + recruit_campaigns 행 FOR UPDATE로
@@ -274,6 +298,157 @@ async function _saveCampaignOptions(campaignId, options) {
     throw e;
   } finally {
     client.release();
+  }
+}
+
+// 실제 상품명·주문·참여 이력과 분리된, 작업보드 탭 전용 표시값이다.
+// 빈 값은 별칭 해제이며 화면은 기존 상품명으로 폴백한다.
+function _normalizeWorkboardDisplayName(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _normalizeRepurchaseDays(value, fallback) {
+  if (value === undefined || value === null) return { value: fallback };
+  const raw = typeof value === 'number' ? String(value) : (typeof value === 'string' ? value.trim() : '');
+  const days = Number(raw);
+  if (!/^\d{1,3}$/.test(raw) || !Number.isInteger(days) || days < 0 || days > 365) {
+    return { error: '재참여 제한 기간은 제한 없음(0일) 또는 1~365일로 설정해주세요.' };
+  }
+  return { value: days };
+}
+
+async function _saveWorkboardDisplayName({ sheetId, tabName, displayName }) {
+  const sid = String(sheetId || '').trim();
+  const tab = String(tabName || '').trim();
+  const name = _normalizeWorkboardDisplayName(displayName);
+  if (!sid || !tab) throw new Error('작업보드 표시명은 연결된 작업보드에서만 설정할 수 있습니다.');
+  if (name.length > 100) throw new Error('작업보드 표시명은 100자 이하로 입력해주세요.');
+  const { rows } = await pool.query(
+    `INSERT INTO tab_configs (sheet_id, tab_name, workboard_display_name, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+       workboard_display_name = EXCLUDED.workboard_display_name,
+       updated_at = NOW()
+     RETURNING workboard_display_name`,
+    [sid, tab, name]
+  );
+  return (rows[0] && rows[0].workboard_display_name) || '';
+}
+
+/**
+ * ★★ 공고 옵션 ↔ 작업표 옵션 칸 정합 (2026-08-20 실측 사고) ─────────────────────
+ * 작업표 열 구성(`worktablePlan.buildColumns`)은 **작업오더의 옵션만** 본다 —
+ * `campaign_options` 는 참조하지 않는다. 그래서 "작업오더엔 옵션이 없고 공고에서 옵션을
+ * 나눈" 작업은 **옵션 칸 없이** 만들어졌고, 리뷰어가 고른 옵션이 원장에는 남는데
+ * 작업표·화면에는 **경고 한 줄 없이 사라졌다**.
+ *
+ * → 옵션이 2종 이상인 공고를 저장하면 연결된 무시트 작업표에 옵션 칸을 **보장**한다
+ *   (이미 있으면 아무 것도 하지 않는 조회 3번 = 사실상 무비용).
+ *
+ * ★ 완화 금지: 실행부는 `worktableOptionColumn.service` **한 벌**(복구 창구와 같은 함수) —
+ *   여기서 헤더를 직접 만지면 두 경로가 다른 칸을 만든다.
+ * ★ **절대 throw 하지 않는다** — 정합 보조가 공고 저장을 죽이면 안 된다(082 apply 규율).
+ * ★ 시트 기반 탭·미등록 탭은 서비스가 fail-closed 로 거부한다(열은 시트가 정한다).
+ */
+async function _ensureLinkedWorktableOptionColumn(campaignId, by = 'campaign') {
+  try {
+    const { rows } = await pool.query(
+      /* ★★ 컬럼명 주의: `recruit_campaigns` 는 `linked_sheet_id` 다 — `linked_tab_sheet_id` 는
+         **`work_orders`** 의 컬럼이다(033). 그걸 여기 쓰면 42703 이 나는데 아래 catch 가
+         "해당 없음" 으로 삼켜, 이 재발 방지 훅이 **배포 이래 한 번도 안 돌았다**(2026-08-23 실측). */
+      `SELECT c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
+              (SELECT COUNT(*) FROM campaign_options o
+                WHERE o.campaign_id = c.id AND COALESCE(o.status,'active') <> 'closed') AS "liveOpts"
+         FROM recruit_campaigns c WHERE c.id = $1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.sheetId || !r.tabName) return null;
+    if (Number(r.liveOpts || 0) < 2) return null;   // 선택지가 하나면 기입 의미가 없다(배분 규칙과 같은 기준)
+    const { ensureOptionColumn } = require('../services/worktableOptionColumn.service');
+    const out = await ensureOptionColumn({
+      sheetId: r.sheetId, tabName: r.tabName, dryRun: false, backfill: true, by: `campaign:${by}`,
+    });
+    if (out && (out.headerAdded || out.backfillCount)) {
+      logger.info(`[campaign/options] 작업표 옵션 칸 정합 ${r.sheetId}/${r.tabName} 열추가=${out.headerAdded} 소급=${out.backfillCount}`);
+    }
+    return out;
+  } catch (e) {
+    // not_sheetless·tab_not_registered·no_headers 는 정상적인 "해당 없음" 이다.
+    logger.warn(`[campaign/options] 작업표 옵션 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
+    return null;
+  }
+}
+
+/**
+ * 공고 저장 시 연결된 **무시트 작업표**에 「상품」 칸을 보장하고 선택을 소급 기입한다(138).
+ * ★ 옵션 칸 훅과 같은 자리·같은 규율 — **절대 throw 하지 않는다**(열 보장 실패가 공고 저장을 죽이면 안 된다).
+ * ★★ 문턱은 **상품 2종 이상**(살아있는 옵션 기준) — 상품이 하나면 리뷰어가 고를 여지가 없어
+ *   적을 값이 없다(옵션 칸 훅의 "옵션 2종 이상"과 같은 기준).
+ * ★ 컬럼명 주의: recruit_campaigns 는 linked_sheet_id 다(work_orders 의 linked_tab_sheet_id 아님) —
+ *   옵션 칸 훅이 이 오타로 배포 이래 한 번도 안 돌았던 자리다(2026-08-23 실측).
+ */
+async function _ensureLinkedWorktableProductColumn(campaignId, by = 'campaign') {
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
+              (SELECT COUNT(DISTINCT o.product_name) FROM campaign_options o
+                WHERE o.campaign_id = c.id AND COALESCE(o.status,'active') <> 'closed'
+                  AND COALESCE(o.product_name,'') <> '') AS "liveProducts"
+         FROM recruit_campaigns c WHERE c.id = $1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.sheetId || !r.tabName) return null;
+    if (Number(r.liveProducts || 0) < 2) return null;
+    const { ensureProductColumn } = require('../services/worktableProductColumn.service');
+    const out = await ensureProductColumn({
+      sheetId: r.sheetId, tabName: r.tabName, dryRun: false, backfill: true, by: `campaign:${by}`,
+    });
+    if (out && (out.headerAdded || out.backfillCount)) {
+      logger.info(`[campaign/products] 작업표 상품 칸 정합 ${r.sheetId}/${r.tabName} 열추가=${out.headerAdded} 소급=${out.backfillCount}`);
+    }
+    return out;
+  } catch (e) {
+    // not_sheetless·tab_not_registered·no_live_products 는 정상적인 "해당 없음" 이다.
+    logger.warn(`[campaign/products] 작업표 상품 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
+    return null;
+  }
+}
+
+/**
+ * 회수·혼합 공고 저장 시 연결된 **무시트 작업표**에 부속 열을 보장한다(135).
+ * ★ 옵션 칸 훅(_ensureLinkedWorktableOptionColumn)과 같은 자리·같은 규율 —
+ *   **절대 throw 하지 않는다**(열 보장 실패가 공고 저장을 죽이면 안 된다).
+ * ★ 열 이름·자리·배분은 worktablePlan 단일 출처(서비스가 그것을 그대로 쓴다).
+ */
+async function _ensureLinkedWorktableDeliveryColumns(campaignId, by = 'campaign') {
+  try {
+    const { rows } = await pool.query(
+      /* ★ 컬럼명 주의: recruit_campaigns 는 linked_sheet_id 다(work_orders 의 linked_tab_sheet_id 아님) —
+         옵션 칸 훅이 이 오타로 배포 이래 한 번도 안 돌았던 자리다(2026-08-23 실측). */
+      `SELECT linked_sheet_id AS "sheetId", linked_tab_name AS "tabName",
+              delivery_type, delivery_type_mix, recall_courier, recall_product
+         FROM recruit_campaigns WHERE id = $1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.sheetId || !r.tabName) return null;
+    const base = deliveryBaseType(r.delivery_type);
+    if (base !== '혼합' && base !== '회수') return null;
+    const { ensureDeliveryColumns } = require('../services/worktableDeliveryColumn.service');
+    const out = await ensureDeliveryColumns({
+      sheetId: r.sheetId, tabName: r.tabName, deliveryBase: base,
+      mix: r.delivery_type_mix, recall: { courier: r.recall_courier, product: r.recall_product },
+      dryRun: false, backfill: true, by: `campaign:${by}`,
+    });
+    if (out && ((out.headerAdded && out.headerAdded.length) || out.backfillCount)) {
+      logger.info(`[campaign/delivery] 작업표 배송 칸 정합 ${r.sheetId}/${r.tabName} 열추가=${(out.headerAdded || []).join(',')} 소급=${out.backfillCount}`);
+    }
+    return out;
+  } catch (e) {
+    // not_applicable·not_sheetless·tab_not_registered·no_headers·no_delivery_mix 는 정상적인 "해당 없음".
+    logger.warn(`[campaign/delivery] 작업표 배송 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
+    return null;
   }
 }
 
@@ -471,14 +646,20 @@ const PUBLIC_FIELDS_LEGACY = [
   'delivery_type', 'review_fee', 'badges', 'notes', 'chat_url',
   'status', 'sort_order', 'max_slots', 'current_slots', 'deadline',
   'description', 'linked_sheet_id', 'linked_tab_name', 'created_at',
+  // ★ 139: 공개 목록도 서버가 저장한 이월 배치 방식을 전달해야 카드·일정 모달이
+  // 다음날 가산 기본값으로 되돌아가지 않는다. 민감정보가 아닌 운영 규칙값이다.
+  'carry_strategy',
   'is_popular', // ★ 064: [인기!] 배지(표시용 — 선행참여 게이트는 참여형 apply에서만 판정)
+  'work_kind',  // ★ 127: 리뷰어 홈 공고 탭(리뷰/블로그) 필터 재료 — 레거시 공고도 같은 축으로 갈린다
 ];
 const PUBLIC_FIELDS_PARTICIPATION = [
   'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
-  'delivery_type', 'review_fee', 'badges', 'status', 'sort_order',
+  'delivery_type', 'review_fee', 'delivery_review_fee_mix', 'badges', 'status', 'sort_order',
   'thumbnail_url', 'created_at',
   'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
   'multi_account_mode', 'sub_hold_ttl_min', // ★ 063: 카드 "타계정 가능" 배지(§09-4)+타계정 10분 안내. multi_daily_limit는 비공개(409 사유로만 전달)
+  // ★ 139: 서버 영속 이월 방식. 이 값이 없으면 프런트가 이전 next 동작으로 폴백한다.
+  'carry_strategy',
   'is_popular', // ★ 064: [인기!] 배지 + 선행참여 안내
   'work_kind',  // ★ 101: 블로그 공고면 참여 시 블로그 주소를 받아야 한다(작업 종류 — 민감정보 아님)
 ];
@@ -504,7 +685,7 @@ function _weekendResume(row, weekend, counts, now, schedule) {
 /** 공개 뷰: 레거시/참여형 분기 + 참여형은 상태엔진 페이로드 병합 */
 function _publicView(row, counts, now, schedule) {
   if (!row.participation_mode) {
-    const weekend = weekendPublicationState(row, now);
+    const weekend = weekendPublicationState(row, now, counts && counts.plans);
     const resume = _weekendResume(row, weekend, counts, now, null);
     return {
       ..._pick(row, PUBLIC_FIELDS_LEGACY),
@@ -512,6 +693,7 @@ function _publicView(row, counts, now, schedule) {
       state: weekend.blocked ? 'weekend_unpublished' : row.status,
       stateReason: weekend.blocked ? weekend.reason : null,
       stateMessage: weekend.blocked ? weekend.message : null,
+      closedKind: weekend.blocked ? (weekend.closedKind || 'weekend') : null,
       resumesOn: resume ? resume.date : weekend.resumesOn,
       resumesAt: resume ? resume.iso : null,
     };
@@ -519,7 +701,7 @@ function _publicView(row, counts, now, schedule) {
   const st = computeCampaignState(row, counts || {
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
   }, now, schedule);
-  const weekend = weekendPublicationState(row, now);
+  const weekend = weekendPublicationState(row, now, counts && counts.plans);
   const resume = _weekendResume(row, weekend, counts, now, schedule);
   return {
     ..._pick(row, PUBLIC_FIELDS_PARTICIPATION),
@@ -537,6 +719,7 @@ function _publicView(row, counts, now, schedule) {
     scheduleSource: st.scheduleSource || null,
     stateReason: weekend.blocked ? weekend.reason : (st.stateReason || null),
     stateMessage: weekend.blocked ? weekend.message : null,
+    closedKind: weekend.blocked ? (weekend.closedKind || 'weekend') : null,
     resumesOn: resume ? resume.date : weekend.resumesOn,
     // 주말 미게시 카드의 "재개까지" 카운트다운 기준(ISO). 차단 중이 아니면 null.
     resumesAt: resume ? resume.iso : null,
@@ -544,6 +727,84 @@ function _publicView(row, counts, now, schedule) {
     // daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준(오늘의 opensAt은 이미 지난 시각)
     reopensAt: st.reopensAt || null,
   };
+}
+
+/* 작업표 기준 오늘 채움 수를 상태엔진 입력에 붙인다. null/실패는 기존 공고 신청 집계를 그대로
+ * 쓰며, 0으로 덮어 쓰지 않는다. 카드에 보이는 "오늘 모집 N/N"이 일일 마감 게이트와 같은
+ * 기준을 보게 하는 유일한 접점이다. */
+function _withTableTodayFilled(counts, tableTodayFilled) {
+  if (tableTodayFilled == null) return counts;
+  return { ...(counts || {}), tableTodayFilled: Math.max(0, Number(tableTodayFilled) || 0) };
+}
+
+function _withMappedTableTodayFilled(counts, row, filled) {
+  if (!filled || !row || !row.linked_sheet_id || !row.linked_tab_name) return counts;
+  const key = filled.key(row.linked_sheet_id, row.linked_tab_name);
+  return filled.map.has(key) ? _withTableTodayFilled(counts, filled.map.get(key)) : counts;
+}
+
+async function _withFreshTableTodayFilled(db, row, counts, now) {
+  if (!row || !row.linked_sheet_id || !row.linked_tab_name) return counts;
+  try {
+    const { todayFilledForTab } = require('../services/tabFilled.service');
+    const { rows } = await db.query(
+      `SELECT * FROM recruit_campaigns
+        WHERE participation_mode = TRUE AND status = 'active'
+          AND linked_sheet_id = $1 AND linked_tab_name = $2`,
+      [row.linked_sheet_id, row.linked_tab_name]);
+    const peers = rows.length ? rows : [row];
+    const peerCounts = await fetchCampaignCounts(db, peers.map(r => r.id), now);
+    if (counts) peerCounts.set(row.id, counts);
+    const peerSchedules = await deriveSchedules(db, tabsOfCampaigns(peers), now);
+    const tableTodayFilled = await todayFilledForTab(db, row.linked_sheet_id, row.linked_tab_name, now);
+    if (tableTodayFilled == null) return counts;
+    const key = `${row.linked_sheet_id}\u0000${row.linked_tab_name}`;
+    const grouped = _groupedTableTodayCounts(peers, peerCounts,
+      { map: new Map([[key, tableTodayFilled]]), key: (sheetId, tabName) => `${sheetId}\u0000${tabName}` },
+      now, peerSchedules);
+    return grouped.get(row.id) || counts;
+  } catch (e) {
+    logger.warn(`[campaign] 상태용 작업표 오늘 채움 집계 실패 — 공고 신청 기준 유지: ${e.message}`);
+    return counts;
+  }
+}
+
+/* 같은 탭을 공유한 재발행 공고는 표의 오늘 채움 수가 공통 분자다. 개별 공고마다 그 수를
+ * 대입하면 서로의 정원을 침범해 조기 마감한다. 따라서 탭 단위로 정원·확정 신청·유효 홀드를
+ * 합산해 상태엔진에 한 번만 전달한다. */
+function _groupedTableTodayCounts(rows, countsMap, filled, now, schedMap) {
+  const out = new Map();
+  if (!filled || !filled.map || !filled.key) return out;
+  const groups = new Map();
+  for (const row of (rows || [])) {
+    if (!row || !row.participation_mode || String(row.status || 'active') !== 'active' ||
+        !row.linked_sheet_id || !row.linked_tab_name) continue;
+    const key = filled.key(row.linked_sheet_id, row.linked_tab_name);
+    if (!filled.map.has(key)) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  for (const [key, group] of groups) {
+    let tableTodayQuota = 0, tableTodaySubmitted = 0, tableTodayActiveHolds = 0;
+    for (const row of group) {
+      const raw = (countsMap && countsMap.get(row.id)) || {};
+      const rawState = computeCampaignState(row, raw, now, schedMap ? scheduleFor(schedMap, row) : null);
+      tableTodayQuota += Number(rawState.dailyQuota) || 0;
+      tableTodaySubmitted += Math.max(0, Number(raw.todaySubmitted) || 0);
+      tableTodayActiveHolds += Math.max(0, Number(raw.todayActiveHolds) || 0);
+    }
+    for (const row of group) {
+      const raw = (countsMap && countsMap.get(row.id)) || {};
+      out.set(row.id, {
+        ...raw,
+        tableTodayFilled: Math.max(0, Number(filled.map.get(key)) || 0),
+        tableTodayQuota,
+        tableTodaySubmitted,
+        tableTodayActiveHolds,
+      });
+    }
+  }
+  return out;
 }
 
 /** 요청의 JWT를 검증해 decoded 반환(없거나 무효면 null) */
@@ -580,6 +841,8 @@ function _scopedEditorView(row) {
     sort_order: row.sort_order, max_slots: row.max_slots,
     // ★ 098: 이월 반영 방식(허용명단 리뷰어도 세그먼트 프리필·변경 가능 — 확정 ③)
     carry_mode: row.carry_mode || 'auto',
+    // ★ 139: 배치 전략은 보류 설정과 별도다. 기존 NULL은 서버 상태엔진과 같이 next로 해석한다.
+    carry_strategy: ['next', 'spread', 'extend'].includes(row.carry_strategy) ? row.carry_strategy : 'next',
     // 작업내용은 **읽기 전용 프리필**로만 포함 — 수정 모달에서 "지금 어떤 유입가이드가 걸려 있는지"를
     // 육안 확인하는 용도. 저장 경로(_scopedCampaignEdit)는 여전히 work_detail을 화이트리스트에서
     // 제외하므로 쓰기 표면은 넓어지지 않는다. 내용도 이미 홀드 보유 리뷰어에게 공개되는 값이고
@@ -635,6 +898,8 @@ async function _scopedCampaignEdit(req, res) {
   //   수정할 수 있는 신원이라 같은 급. 알 수 없는 값·미전송 = 유지. 반영(carryApply)은 여전히
   //   adminOrMaster 전용 API 라 스코프 토큰이 보류분을 열 수는 없다.
   const carry_mode = ['auto', 'hold'].includes(b.carry_mode) ? b.carry_mode : (c.carry_mode || 'auto');
+  const carry_strategy = ['next', 'spread', 'extend'].includes(b.carry_strategy)
+    ? b.carry_strategy : (['next', 'spread', 'extend'].includes(c.carry_strategy) ? c.carry_strategy : 'next');
 
   // 참여형 활성화 게이트 재적용(linked_*는 현재값 — 편집 불가라 우회 불가)
   if (status === 'active') {
@@ -647,11 +912,11 @@ async function _scopedCampaignEdit(req, res) {
        title=$2, status=$3, delivery_type=$4, review_fee=$5, time_range=$6,
        thumbnail_url=$7, landing_url=$8, window_start=$9, window_end=$10,
        daily_limit=$11, recruit_total=$12, sort_order=$13, max_slots=$14,
-       carry_mode=$15, updated_at=NOW()
+       carry_mode=$15, carry_strategy=$16, updated_at=NOW()
      WHERE id=$1 RETURNING *`,
     [id, title, status, delivery_type, review_fee, time_range,
      thumbnail_url, landing_url, window_start || null, window_end || null,
-     daily_limit, recruit_total, sort_order, max_slots, carry_mode]
+     daily_limit, recruit_total, sort_order, max_slots, carry_mode, carry_strategy]
   );
   // ★ 095(Codex P1): 잠금 검사와 UPDATE 사이 "첫 차수 추가" 경합 자가치유(PUT 본 라우트와 동일)
   try {
@@ -666,7 +931,10 @@ async function _scopedCampaignEdit(req, res) {
 //   키 = phone8(있으면) — 공유 NAT/프록시에서도 개인별 버킷. 없으면 req.ip(app.js trust proxy 1홉 전제).
 //   ※ express-rate-limit 7.5.1엔 ipKeyGenerator export가 없다(심판 실측) — req.ip 직접 사용.
 function _p8Key(req) {
-  const src = (req.body && (req.body.phone8 || req.body.phone)) || (req.query && req.query.phone8) || '';
+  // 인증 미들웨어가 먼저 실행되는 조회 경로는 서명 세션의 명의로 버킷을 나눈다.
+  // phone8 쿼리를 제거한 뒤 IP로 폴백하면 공유망 이용자 12명이 서로를 막게 된다.
+  const src = (req.reviewer && req.reviewer.loginPhone8)
+    || (req.body && (req.body.phone8 || req.body.phone)) || (req.query && req.query.phone8) || '';
   const p8 = String(src).replace(/\D/g, '').slice(-8);
   return p8.length === 8 ? 'p8:' + p8 : 'ip:' + (req.ip || 'unknown');
 }
@@ -827,16 +1095,19 @@ router.get('/list', async (req, res, next) => {
     if (!rows || now.getTime() - _listCache.at > LIST_CACHE_MS) {
       const q = await pool.query(`
         SELECT id, title, channel, channel_custom, manager, time_range,
-               delivery_type, review_fee, badges, notes, chat_url,
+               delivery_type, review_fee, delivery_review_fee_mix, badges, notes, chat_url,
                status, sort_order, max_slots, current_slots, deadline,
                description, linked_sheet_id, linked_tab_name, linked_tab_gid, created_at,
                participation_mode, thumbnail_url, daily_limit, recruit_total,
                window_start, window_end, close_buffer_min, hold_ttl_min, start_date,
                multi_account_mode, sub_hold_ttl_min, is_popular,
-               carry_mode, skip_weekends, cash_receipt_required  -- ★ 098(코드리뷰 B1): dailyQuota 가 읽는다 — 빠지면 목록은 자동 이월
+               carry_mode, carry_strategy, skip_weekends, cash_receipt_required  -- ★ 098/139: 상태엔진 입력. 빠지면 목록·apply 정원이 갈린다.
                            --   정원, apply(SELECT *)는 보류 정원을 봐서 "카드는 열렸는데 참여 거부"
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
+          -- ★ 130: 보관(폐기)한 공고 제외. 모집이 끝난 공고가 리뷰어 목록에 영구히 남던 것을
+          --   여기 한 줄이 덮는다(085 reviewer_hidden 과 같은 자리 = 리뷰어 노출의 유일한 출처).
+          AND archived_at IS NULL
           -- ★ 085: 리뷰어 미노출(비공개/테스트) 공고 제외. 이 API 가 리뷰어 홈 미리보기·공고 목록·
           --   인기상품 게이트 모달의 유일한 출처라 여기 한 줄이 리뷰어 노출 경로 전체를 덮는다.
           --   관리자 목록·상세·참여(apply)는 무변경 → 링크로 들어가 실제 참여·제출 테스트가 가능하다.
@@ -870,8 +1141,10 @@ router.get('/list', async (req, res, next) => {
     }
     // ★ 시트 일정 파생(063) — 자체 1분 캐시라 목록 캐시 밖에서 호출해도 저비용. 실패=null(폴백).
     const schedMap = await deriveSchedules(pool, tabsOfCampaigns(rows), now);
+    const groupedTableCounts = _groupedTableTodayCounts(rows, countsMap, filledMap, now, schedMap);
     const data = rows.map(r => {
-      const view = _publicView(r, countsMap.get(r.id), now, scheduleFor(schedMap, r));
+      const viewCounts = groupedTableCounts.get(r.id) || countsMap.get(r.id);
+      const view = _publicView(r, viewCounts, now, scheduleFor(schedMap, r));
       _applyCurrentFee(view, feeMap && feeMap.get(r.id), now);   // ★ 082: 카드 리뷰비 = 오늘 구간
       if (crMap) view.cashReceiptRequired = crMap.get(r.id) === true;   // 조회 실패면 필드 자체가 없음(배지 미표시)
       // 표 기준 오늘 참여(B안) — 카드가 작업보드와 같은 숫자를 쓰기 위한 재료.
@@ -900,8 +1173,8 @@ router.get('/list', async (req, res, next) => {
 });
 
 // GET /api/campaign/popular-status?phone8= — 인기상품 참여 가능 여부(무인증 phone8 스코프, 064)
-//   apply의 popular_locked 게이트와 **동일 계산**(명의 기준): 크레딧 = 일반(비인기) 참여형 제출완료 수
-//   − 인기 소비(제출확정 + 유효홀드). 만료·취소된 인기 건은 자동 환불(미계수).
+//   apply의 popular_locked 게이트와 **동일 계산**(명의 기준): 최근 1일(24시간) 안에 제출완료한
+//   일반 참여권을 인기 소비(제출확정 + 유효홀드)와 시간순 1:1 매칭한다.
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 'popular-status'를 id로 삼킨다.
 router.get('/popular-status', applyLimiter, async (req, res, next) => {
   try {
@@ -913,30 +1186,120 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
   }
 });
 
-router.get('/my-repurchase-status', applyLimiter, async (req, res, next) => {
+// GET /api/campaign/my-repurchase-status?ids=id1,id2,… — 재참여(재구매) 기간 안내(리뷰어 세션 스코프)
+//   화면(카드 목록)의 "N일 후 재참여 가능"/"지금 재참여 가능" 썸네일 안내가 이 응답으로 채워진다.
+//   판정 단일 출처 = utils/repurchaseGuard(apply 게이트와 같은 기준 — 카드는 열려 있는데 참여는
+//   거부되는 불일치를 만들지 않는다). ★ 참여 이력이 아예 없는 공고는 응답 맵에 없다(=평소 카드).
+//   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 이 경로를 id로 삼킨다.
+router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
   try {
-    const ownerP8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
-    if (ownerP8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return res.json({ ok: true, status: {} });
-    const { rows } = await pool.query('SELECT name, sub_accounts FROM reviewers WHERE phone8 = $1 LIMIT 1', [ownerP8]);
-    let subs = rows[0] && rows[0].sub_accounts || [];
+    // 전화번호 파라미터를 신원으로 믿지 않는다. 서명된 세션의 소유자 ID에서 본·타계정을 읽는다.
+    const { rows } = await pool.query(
+      'SELECT name, phone8, sub_accounts FROM reviewers WHERE id = $1 LIMIT 1',
+      [req.reviewer.ownerReviewerId]
+    );
+    if (rows.length !== 1) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 찾을 수 없습니다.' });
+    const p8 = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
+    if (p8.length !== 8) return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 확인할 수 없습니다.' });
+    let subs = rows[0].sub_accounts;
     if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
     if (!Array.isArray(subs)) subs = [];
-    const accounts = [{ phone8: ownerP8, type: 'self', displayName: String(rows[0] && rows[0].name || '본계정') }];
-    for (const sub of subs) { const p8 = String(sub && sub.phone || '').replace(/\D/g, '').slice(-8); if (p8.length === 8 && p8 !== ownerP8 && !accounts.some(a => a.phone8 === p8)) accounts.push({ phone8:p8, type:'sub', displayName:String(sub && sub.name || '타계정') }); }
+    const seen = new Set([p8]);
+    const allAccounts = [{ phone8: p8, type: 'self', displayName: String(rows[0].name || '본계정') }];
+    for (const sub of subs) {
+      const subP8 = String((sub && sub.phone) || '').replace(/\D/g, '').slice(-8);
+      const displayName = String((sub && sub.name) || '').trim();
+      if (subP8.length !== 8 || !displayName || seen.has(subP8)) continue;
+      seen.add(subP8);
+      allAccounts.push({ phone8: subP8, type: 'sub', displayName });
+    }
+    // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 후보로 구성한다.
+    // 단, multi_account_mode=false 공고는 실제 신청 화면과 똑같이 로그인 명의 하나만 계산한다.
+    // 소유자 UUID/phone8로 증명되지 않은 타명의 이력은 조회하지 않고 unknown으로 표시한다.
+    const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    // 같은 전화번호·다른 이름인 레거시 타계정은 seen 중복제거 때문에 self 행 하나로 접힌다.
+    // sub 타입만 찾으면 이런 로그인은 상태가 통째로 비므로, 실제 로그인 phone8의 대표 행을 쓴다.
+    const loginAccount = allAccounts.find(a => a.phone8 === loginP8);
+    const loginScoped = req.reviewer.loginKind === 'sub';
+    const historyAccounts = loginScoped
+      ? (loginAccount ? [{ ...loginAccount,
+          displayName: String(req.reviewer.loginName || loginAccount.displayName || '') }] : [])
+      : allAccounts;
+    if (!historyAccounts.length) return res.json({ ok: true, status: {} });
+    const { rows: campaignModes } = await pool.query(
+      'SELECT id, multi_account_mode, repurchase_days FROM recruit_campaigns WHERE id = ANY($1::text[])', [ids]
+    );
+    const settingsByCampaign = new Map(campaignModes.map(row => [String(row.id), {
+      multiAccountMode: row.multi_account_mode === true,
+      repurchaseDays: repurchaseDays(row.repurchase_days),
+    }]));
     const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
-    const byAccount = await checkRepurchaseStatusForAccounts(pool, { campaignIds: ids, phone8List: accounts.map(a => a.phone8) });
+    const map = await checkRepurchaseStatusForAccounts(pool, {
+      campaignIds: ids, phone8List: historyAccounts.map(a => a.phone8), ownerPhone8: p8,
+      ownerReviewerId: req.reviewer.ownerReviewerId,
+    });
     const status = {};
-    for (const id of ids) { const a = accounts.map(x => ({ ...x, ...(byAccount.get(x.phone8)?.get(id) || { status:'ready' }) })); if (a.some(x => byAccount.get(x.phone8)?.has(id))) status[id] = { accounts:a, readyAccounts:a.filter(x => x.status === 'ready').map(x => x.phone8) }; }
+    for (const cid of ids) {
+      const setting = settingsByCampaign.get(cid);
+      // 전역 킬스위치 또는 공고별 0일이면 apply 가드와 똑같이 안내 기능도 완전히 끈다.
+      if (!setting || setting.repurchaseDays <= 0) continue;
+      // 타계정으로 로그인한 세션에는 현재 로그인 명의만 사용 가능하다. profile/secure가 소유자의
+      // 전체 명의를 돌려주는 기존 계약 때문에 화면에 형제 명의가 남더라도, 응답에서 login_only로
+      // 명시해 누락 상태가 '참여 가능'으로 오인되지 않게 한다.
+      const scopedAccounts = loginScoped
+        ? allAccounts.map(a => a.phone8 === loginP8
+          ? { ...a, displayName: String(req.reviewer.loginName || a.displayName || '') }
+          : a)
+        : (setting.multiAccountMode ? historyAccounts : historyAccounts.filter(a => a.phone8 === loginP8));
+      const states = scopedAccounts.map(a => ({
+        ...a,
+        ...(loginScoped && a.phone8 !== loginP8
+          ? { status: 'login_only' }
+          : (map.get(a.phone8)?.get(cid) || { status: a.type === 'self' ? 'ready' : 'unknown' })),
+      }));
+      // unknown은 참여 이력 유무와 무관한 동일 응답이라 타번호의 최근 참여 여부를 누설하지 않는다.
+      if (loginScoped || states.some(a => a.status === 'unknown' || map.get(a.phone8)?.has(cid))) {
+        status[cid] = {
+          accounts: states,
+          readyAccounts: states.filter(a => a.status === 'ready').map(a => a.phone8),
+        };
+      }
+    }
     res.json({ ok: true, status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 관리자 정적 경로는 반드시 '/:id'보다 앞에 둔다. 그렇지 않으면 Express가 'admin'을
+// id로 해석해 목록·감사 API가 캠페인 상세 핸들러로 빠질 수 있다.
+router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, _adminCampaignList);
+
+// GET /api/campaign/admin/popular-credit-audit — 인기상품 참여권 운영 집계(PII 미반환)
+router.get('/admin/popular-credit-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const evaluatedAt = new Date();
+    const matches = await loadPopularCreditMatches(pool, null, { evaluatedAt });
+    const data = {
+      total_popular_uses: matches.popularEvents.length,
+      submitted_uses: matches.popularEvents.filter((event) => event.status === 'submitted').length,
+      active_holds: matches.popularEvents.filter((event) => event.status === 'applied').length,
+      pending_uses: matches.popularEvents.filter((event) => event.status === 'blog_pending').length,
+      reconstructed_compliant: matches.matchedPopularIds.size,
+      needs_review: matches.popularEvents.length - matches.matchedPopularIds.size,
+    };
+    res.json({ ok: true, data, scope: 'rolling_1_day_snapshot_based_current_state',
+      note: '최근 1일 안의 일반 제출완료와 현재 유효 인기 사용건을 같은 FIFO 규칙으로 재구성한 집계입니다.',
+      calculatedAt: evaluatedAt.toISOString() });
   } catch (err) { next(err); }
 });
 
 // GET /api/campaign/:id — 캠페인 상세
 //   ★ M1 보안: SELECT * 무인증 반환 제거. admin/master JWT면 전체(관리자 수정 모달 호환),
 //     그 외에는 공개 화이트리스트(레거시/참여형 분기)만.
-router.get('/:id', async (req, res, next) => {
+async function getCampaignDetail(req, res, next) {
   try {
     const { id } = req.params;
     const { rows } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
@@ -946,17 +1309,117 @@ router.get('/:id', async (req, res, next) => {
       // 리뷰어앱 공고수정 스코프 토큰 = 프리필 필요 필드만(민감/구조필드 미노출, 레드팀 #4)
       return res.json({ ok: true, data: _scopedEditorView(rows[0]) });
     }
-    if (_isAdminReq(req)) {
+    const isAdminDetail = _isAdminReq(req);
+    if (isAdminDetail) {
+      // 이 뒤의 옵션·구간·작업보드 추가 조회가 실패해도, 이미 검증된 관리자 상세 요청이라는
+      // 사실을 오류 미들웨어에 전달한다. HTTP 입력으로 만들 수 없는 서버 전용 own-property다.
+      Object.defineProperty(req, '_trustedCampaignAdminError', { value: true, enumerable: false });
       // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필) + 리뷰비 구간(082)
       const options = await _loadOptionsRaw(pool, id);
       const feeSchedules = await _loadFeeSchedules(pool, id);
-      return res.json({ ok: true, data: rows[0], options, feeSchedules });
+      // 표시명은 탭 설정에만 저장한다. 공고 행에 중복 저장하면 실제 상품명과 역할이 섞인다.
+      let workboardDisplayName = '';
+      if (rows[0].linked_sheet_id && rows[0].linked_tab_name) {
+        try {
+          const { rows: tabRows } = await pool.query(
+            `SELECT COALESCE(workboard_display_name, '') AS name
+               FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+            [rows[0].linked_sheet_id, rows[0].linked_tab_name]
+          );
+          workboardDisplayName = String((tabRows[0] && tabRows[0].name) || '');
+        } catch (e) {
+          logger.warn(`[campaign] 작업보드 표시명 조회 실패 camp=${id}: ${e.message}`);
+        }
+      }
+      /* ★★ 혼합 조합 프리필 보완(2026-08-21) — `review_type_mix`(106)는 2026-08-20 에 생긴
+         컬럼이고 **백필이 없다**. 그 전에 발행된 혼합 공고는 조합이 통째로 빈 배열이라
+         수정 화면이 전부 0 으로 열리고, 혼합 저장 검증(두 유형 이상)에 막혀 손댈 수가 없다.
+         → **연결 작업오더에 조합이 실려 있으면 그 값을 프리필 재료로 함께 내려준다.**
+         ★ 저장값(`review_type_mix`)은 **덮지 않는다** — 별도 필드로 주고 화면이 "작업오더에서
+           불러왔다"고 말한 뒤 사람이 저장할 때 반영된다(조용한 자동 적용 금지).
+         ★ 공고에 이미 조합이 있으면 조회하지 않는다(공고가 언제나 이긴다).
+         ★ fail-soft — 못 읽어도 수정 모달은 그대로 열린다. */
+       let orderReviewTypeMix = null;
+       let orderInflowType = null;
+       // 7번: 발행 뒤 수정된 안내성 값은 공고 저장값이 비어 있을 때만 화면에 제안한다.
+       // work_detail에 섞어 넣지 않는다. 저장 전에는 여전히 작업오더가 근거이고, 사람이
+       // 확인해 저장한 뒤에만 공고의 값이 된다.
+       let orderCampaignContent = null;
+      /* ★ 연결 작업오더의 **시작일** — 대조 전용(저장값을 덮지 않는다).
+         발행은 스냅샷이라 발행 뒤 오더 시작일이 바뀌어도 공고는 따라가지 않는데,
+         그 사실을 확인할 창구가 어디에도 없었다(2026-08-21 신고: 오더 8/19 · 공고 8/12).
+         ★ 시작일은 **저장값이 항상 있어** 유입방식·혼합 조합처럼 blank-only 폴백이 성립하지
+           않는다 → 값을 바꾸지 않고 화면이 "다르다"고 말하기만 한다. */
+      let orderStartDate = null;
+      /* ★★ 차수 원장(095)이 있으면 **총모집 전송값을 서버가 무시한다**(`roundsLockRecruitTotal`).
+         종전에는 그 사실을 저장한 **뒤**에야(`recruitTotalLocked` → 잠깐 뜨는 안내) 알 수 있어
+         "총인원을 200 으로 고쳐 저장했는데 다시 열면 비어 있다"가 원인 불명으로 보였다
+         (2026-08-21 신고). → 수정 모달이 **열 때부터** 그 사실을 말하고 칸을 잠그도록 재료를 준다.
+         ★ 조회 실패·095 미적용 = **null(모름)** — 화면이 "잠금 없음"으로 꾸미지 않는다. */
+      let roundsLock = null;
+      try {
+        const { rows: _rr } = await pool.query(
+          `SELECT COUNT(*)::int AS n, COALESCE(SUM(slot_count), 0)::int AS total
+             FROM campaign_rounds WHERE campaign_id = $1`, [id]);
+        const _n = Number(_rr[0] && _rr[0].n) || 0;
+        roundsLock = { locked: _n > 0, count: _n, total: Number(_rr[0] && _rr[0].total) || 0 };
+      } catch (_) { /* 095 미적용·조회 실패 = 모름(null) */ }
+      try {
+        const cur = normalizeReviewTypeMix(rows[0].review_type_mix);
+        const needMix = normalizeReviewType(rows[0].review_type) === 'mixed' && !(cur.mix || []).length;
+        /* ★★ 유입방식은 리뷰어 화면(work-detail)이 **이미** 작업오더로 폴백하는데(_lookupInflowType)
+           수정 모달만 저장값(work_detail.inflowType)만 봤다 → 값이 없으면 무조건 '링크유입'으로
+           열리고, 그대로 저장하면 그 link 가 굳어 **리뷰어 화면의 폴백을 이긴다**
+           (가이드유입 공고에 [상품 페이지 열기]가 노출 = 유입가이드 무력화). 모달도 같은 값을 보게 한다. */
+        const needInflow = !_savedInflowType(rows[0].work_detail);
+        // ★ 조회는 **한 번** — 모든 값을 같은 오더에서 가져온다(같은 근거·쿼리 순증 0).
+        //   시작일은 늘 필요해 조건 없이 조회한다(모달 열 때 1회 — 목록이 아니다).
+        const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
+        const wo = await linkedWorkOrderForCampaign(rows[0], [
+          'review_type_mix', 'inflow_type', 'start_date',
+          'product_url', 'review_guide', 'special_notes', 'inflow_guide', 'guide_images',
+        ]);
+        if (needMix) {
+          const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
+          if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
+        }
+        if (needInflow) {
+          const v = String((wo && wo.inflow_type) || '');
+          if (v === 'guide' || v === 'link') orderInflowType = v;
+        }
+        /* ★ 화면이 `(c.start_date||'').slice(0,10)` 로 읽는 것과 **같은 변환**을 쓴다 —
+           양쪽을 다른 방식으로 자르면 같은 날짜가 다르게 보인다. */
+        if (wo && wo.start_date) {
+          const iso = new Date(wo.start_date).toISOString().slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) orderStartDate = iso;
+        }
+        if (wo) {
+          orderCampaignContent = {
+            productUrl: String(wo.product_url || ''),
+            reviewGuide: String(wo.review_guide || ''),
+            specialNotes: String(wo.special_notes || ''),
+            inflowGuide: String(wo.inflow_guide || ''),
+            guideImages: wo.guide_images || null,
+            inflowType: String(wo.inflow_type || ''),
+          };
+        }
+      } catch (e) {
+        logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일·안내값) 실패 camp=${id}: ${e.message}`);
+      }
+      return res.json({
+        ok: true,
+        data: { ...rows[0], repurchase_days: repurchaseDays(rows[0].repurchase_days), workboard_display_name: workboardDisplayName },
+        options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock,
+      });
     }
     const now = new Date();
     const row = rows[0];
     const countsMap = row.participation_mode ? await fetchCampaignCounts(pool, [id], now) : null;
     const schedMap = row.participation_mode ? await deriveSchedules(pool, tabsOfCampaigns([row]), now) : null;
-    const view = _publicView(row, countsMap && countsMap.get(id), now, schedMap && scheduleFor(schedMap, row));
+    const detailCounts = row.participation_mode
+      ? await _withFreshTableTodayFilled(pool, row, countsMap && countsMap.get(id), now)
+      : null;
+    const view = _publicView(row, detailCounts, now, schedMap && scheduleFor(schedMap, row));
     _applyCurrentFee(view, await _loadFeeSchedules(pool, id), now);   // ★ 082: 오늘 구간 리뷰비
     // ★ D안 ①: 참여 전 상세에도 현금영수증 대상 여부(불리언만 — 상세 안내는 참여 후 work-detail)
     const _crm = await _cashReceiptFlags([row]);
@@ -971,7 +1434,12 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-});
+}
+
+// 관리자 수정 모달은 /admin 네임스페이스를 사용한다. 기존 상세 핸들러를
+// 재사용해 공개 뷰로 축약되지 않으면서도 Track B와 동일한 프리필 응답을 유지한다.
+router.get('/admin/:id', authMiddleware, adminOrMasterMiddleware, getCampaignDetail);
+router.get('/:id', getCampaignDetail);
 
 // GET /api/campaign/:id/applications — 참여 카운트 (공개)
 //   ★ M1 보안: 신청자 실명 명단 무인증 반환 제거 — count만 반환(프론트 소비처 없음 확인).
@@ -990,6 +1458,22 @@ router.get('/:id/applications', async (req, res, next) => {
     const r = rows[0] || {};
     const count = (Number(r.legacy_count) || 0) + (Number(r.participation_count) || 0);
     res.json({ ok: true, data: [], count });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/campaign/:id/my-active-holds — 모바일 웹뷰/새 브라우저 컨텍스트의 홀드 복구.
+// 로컬 저장값을 신원으로 믿지 않고 서명된 리뷰어 세션의 소유자·로그인 명의로만 반환한다.
+router.get('/:id/my-active-holds', reviewerSessionMiddleware, detailLimiter, async (req, res, next) => {
+  try {
+    const result = await recoverActiveHolds(pool, { campaignId: req.params.id, session: req.reviewer });
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+    if (!result.authorized) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 정보를 다시 확인해주세요.' });
+    }
+    return res.json({ ok: true, holds: result.holds });
   } catch (err) {
     next(err);
   }
@@ -1014,7 +1498,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
 
     // holdToken은 신청 시 발급된 1회성 열쇠 — phone8만 아는 제3자의 열람 차단(정확 일치)
     const { rows: apps } = await pool.query(
-      `SELECT id, status, expires_at, applied_at, submitted_at, option_key
+      `SELECT id, status, expires_at, applied_at, submitted_at, option_key, reject_reason, decided_at
          FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
         ORDER BY applied_at DESC
@@ -1025,6 +1509,23 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       return res.status(403).json({ ok: false, error: '참여 내역이 없습니다.', reason: 'no_hold' });
     }
     const app = apps[0];
+    /* ★ 127 블로그 승인제 — 대기/반려는 '만료'가 아니다. 별도 reason 으로 구분해 돌려준다.
+       구버전 화면은 모르는 reason 을 재시도 경로로 처리해 홀드 토큰을 지우지 않는다(안전).
+       신형 campaign.html 은 이 응답으로 대기/반려 화면을 그리고 30초 폴링으로 승인을 감지한다. */
+    if (app.status === 'blog_pending') {
+      return res.status(403).json({
+        ok: false, reason: 'pending_approval',
+        appliedAt: app.applied_at, serverNow: new Date().toISOString(),
+        error: '신청이 접수되었어요. 관리자가 블로그를 확인하고 승인하면 구매를 진행할 수 있어요.',
+      });
+    }
+    if (app.status === 'blog_rejected') {
+      return res.status(403).json({
+        ok: false, reason: 'apply_rejected',
+        rejectReason: app.reject_reason || '', decidedAt: app.decided_at,
+        error: '신청이 반려되었어요.' + (app.reject_reason ? ' 사유: ' + app.reject_reason : ''),
+      });
+    }
     const now = new Date();
     const validHold = app.status === 'applied' && app.expires_at && new Date(app.expires_at) > now;
     const isSubmitted = app.status === 'submitted';
@@ -1094,12 +1595,13 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
     if (p8.length !== 8 || !token) {
       return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
     }
-    // status='applied' 조건부 UPDATE — 제출확정·스윕과의 경합에서도 원자적(이미 submitted면 0행)
+    // status 조건부 UPDATE — 제출확정·스윕과의 경합에서도 원자적(이미 submitted면 0행)
+    //   ★ 127: 블로그 승인 대기(blog_pending)도 리뷰어가 직접 취소할 수 있다(자리 미점유 상태라 무해).
     const { rows } = await pool.query(
       `UPDATE campaign_applications
           SET status = 'cancelled'
         WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
-          AND status = 'applied'
+          AND status IN ('applied', 'blog_pending')
         RETURNING id`,
       [id, p8, token]
     );
@@ -1206,6 +1708,7 @@ async function _applyParticipation(req, res, next, campPre) {
   //   ★ 판정은 `workKindContext`(공고 > 탭, 60초 캐시) 단일 출처 — 규칙 사본 0.
   //   ★ **판정 실패·리뷰체험단은 종전 동작 그대로**(모르면 요구하지 않는다 — 멀쩡한 참여를 막는 쪽이 더 나쁘다).
   let blogUrlIns = null;
+  let blogApply = false;   // ★ 127: 이 신청이 블로그체험단인가(승인제 분기의 근거)
   {
     let _kind = null;
     try {
@@ -1215,6 +1718,7 @@ async function _applyParticipation(req, res, next, campPre) {
       });
     } catch (_) { _kind = null; }
     if (isBlogKind(_kind)) {
+      blogApply = true;
       const raw = String(req.body.blogUrl || '').trim().slice(0, 500);
       if (!isPostUrl(raw)) {
         return res.status(403).json({
@@ -1234,16 +1738,6 @@ async function _applyParticipation(req, res, next, campPre) {
     if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
     const camp = cRows[0];
     const now = new Date();
-    const weekend = weekendPublicationState(camp, now);
-    if (weekend.blocked) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({
-        ok: false,
-        reason: weekend.reason,
-        resumesOn: weekend.resumesOn,
-        error: weekend.message,
-      });
-    }
 
     // ★ 타계정 게이트 1(063): 공고 토글(§09-1 기본 불가) + 명의 형식 + 같은번호 배제(phone8=시스템 신원키 보호)
     if (isSubApply) {
@@ -1271,11 +1765,44 @@ async function _applyParticipation(req, res, next, campPre) {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('camp_hold_phone:' || $1::text))`, [holdP8]);
 
     // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
+    // 같은 작업표에 재발행 공고가 여럿이면 공통 정원을 보므로, 공고별 행 락만으로는 교차 신청이
+    // 동시에 통과할 수 있다. 탭 키 xact 락으로 표 기준 일일 정원 판정을 하나로 직렬화한다.
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      await client.query(
+        // 두 int 키 advisory lock: 작업표 ID에는 네임스페이스를 붙이고, 탭명은 별도 키로 둔다.
+        // PostgreSQL text에는 NUL(0x00)을 넣을 수 없으므로 문자열 구분자로 E'\\000'을 쓰면 안 된다.
+        `SELECT pg_advisory_xact_lock(hashtext('camp_tab_daily:' || $1::text), hashtext($2::text))`,
+        [camp.linked_sheet_id, camp.linked_tab_name]);
+    }
     const countsMap = await fetchCampaignCounts(client, [id], now);
+    const stateCounts = await _withFreshTableTodayFilled(client, camp, countsMap.get(id), now);
+    const weekend = weekendPublicationState(camp, now, countsMap.get(id) && countsMap.get(id).plans);
+    if (weekend.blocked) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        ok: false,
+        reason: weekend.reason,
+        closedKind: weekend.closedKind || 'weekend',
+        resumesOn: weekend.resumesOn,
+        error: weekend.message,
+      });
+    }
     // ★ 카드 표시와 동일한 일정을 참여 게이트에도 적용(불일치 = 오픈처럼 보이는데 참여 거부 / 그 반대).
     //   1분 캐시라 보통 추가 쿼리 없음. 잠금 커넥션(client)으로 읽어 커넥션 고갈 교착을 피한다.
     const schedMap = await deriveSchedules(client, tabsOfCampaigns([camp]), now);
-    const st = computeCampaignState(camp, countsMap.get(id), now, scheduleFor(schedMap, camp));
+    const activeSchedule = scheduleFor(schedMap, camp);
+    const totalUsage = totalQuotaUsage(camp, stateCounts, activeSchedule);
+    // 주문 원장 게이트가 켜진 연결 공고는 총량을 확인하지 못한 상태에서 새 자리를 내주지 않는다.
+    // 읽기·기존 주문 확정은 계속 가능하고, 신규 참여만 잠시 재시도를 요청한다.
+    if (!totalUsage.known) {
+      await client.query('ROLLBACK');
+      return res.status(503).json({
+        ok: false,
+        reason: 'quota_unknown',
+        error: '총 모집 완료 여부를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.',
+      });
+    }
+    const st = computeCampaignState(camp, stateCounts, now, activeSchedule);
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
@@ -1317,7 +1844,7 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 등록 리뷰어만(레드 #12) — 조회 대상은 항상 "소유자"(로그인 p8). ★ 063: sub_accounts 동봉(명의 검증용)
     const reg = await client.query(
-      `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
+      `SELECT id, name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
          FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]);
     if (!reg.rows.length) {
       await client.query('ROLLBACK');
@@ -1377,24 +1904,48 @@ async function _applyParticipation(req, res, next, campPre) {
 
       // ★★ 방어 D1(사칭 차단): sub_accounts 는 "소유 증명"이 아니다 — 무인증
       //   POST /api/reviewer/profile{action:'saveSubAccounts'} 가 phone8 만 알면 배열을 통째로 덮어쓴다
-      //   (번호 소유 증명 없음). 그래서 "이미 리뷰어로 직접 등록된 번호"는 타인의 명의로 못 쓰게 한다.
-      //   ─ 피해자 = 자기 계정으로 참여하는 실존 리뷰어이므로 이 한 줄이 강탈 대상 전체를 덮는다.
-      //   ─ 정당 사용자 손실 0: 그 번호의 본인이 자기 계정으로 직접 참여하면 된다.
-      //   ─ reviewers.phone8 은 phone 파생 GENERATED 컬럼이고 유니크는 UNIQUE(phone)(원문)뿐 →
-      //     같은 phone8 행이 복수 존재 가능하므로 행 동일성이 아니라 EXISTS 로 판정(idx_reviewers_phone8).
-      //   ─ 완화: CAMPAIGN_SUB_REGISTERED_POLICY = block(기본) | warn(로그만) | allow(검사 자체 생략)
-      const _subPolicy = String(process.env.CAMPAIGN_SUB_REGISTERED_POLICY || 'block').toLowerCase();
-      if (_subPolicy !== 'allow') {
-        const { rows: regHit } = await client.query(
-          'SELECT 1 FROM reviewers WHERE phone8 = $1 LIMIT 1', [subP8]);
-        if (regHit.length) {
-          logger.warn(`[campaign/apply] 등록번호 명의 시도 camp=${id} owner=***${p8.slice(-4)} ` +
-            `명의=***${subP8.slice(-4)} policy=${_subPolicy}`);
-          if (_subPolicy === 'block') {
-            await client.query('ROLLBACK');
-            return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
-              error: '이 번호는 이미 리뷰어로 직접 등록되어 있어요. 해당 번호의 본인 계정으로 로그인해서 참여해주세요.' });
-          }
+      //   (번호 소유 증명 없음). 그래서 다른 소유자의 본계정·타계정·코드 신원에 등록된 번호는
+      //   현재 소유자의 타명의로 못 쓴다. 충돌한 정상 사용자는 고객센터에서 귀속을 정리해야 한다.
+      // 다른 소유자의 직접 등록 본계정/관리자 검증 코드 신원과 겹치면 막는다. 자유 편집 가능한
+      // 다른 소유자의 sub_accounts까지 권위로 인정하면 번호를 먼저 적어 넣는 것만으로 정상 사용자를
+      // 영구 차단할 수 있으므로 충돌 근거에 넣지 않는다. 개인정보 경계라 운영 스위치로 우회하지 않는다.
+      const { rows: regHit } = await client.query(
+        `SELECT 1
+           FROM reviewers other
+          WHERE other.id <> $2::uuid
+            AND (
+              other.phone8 = $1
+              OR EXISTS (
+                SELECT 1 FROM reviewer_identities ri
+                 WHERE ri.owner_reviewer_id = other.id
+                   AND ri.current_phone8 = $1
+                   AND ri.status = 'active'
+              )
+            )
+          LIMIT 1`, [subP8, reg.rows[0].id]);
+      if (regHit.length) {
+        logger.warn(`[campaign/apply] 타소유자 등록번호 명의 차단 camp=${id} owner=***${p8.slice(-4)} ` +
+          `명의=***${subP8.slice(-4)}`);
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
+          error: '이 번호는 다른 계정에 이미 등록되어 있어요. 본인 번호가 맞다면 고객센터로 알려주세요.' });
+      }
+    }
+
+    // 코드 기반 새 쓰기는 전체 충돌정리와 bootstrap이 끝난 뒤 환경변수로만 활성화한다.
+    // 활성 상태에서 코드 신원을 못 찾으면 phone8만으로 조용히 기록하지 않는다. 그렇게 하면
+    // "소유자 표시에는 합산되지만 실제 참여자 제한은 불명확"한 반쪽 데이터를 만들게 된다.
+    let codeIdentity = null;
+    {
+      const identitySvc = require('../services/reviewerIdentity.service');
+      if (identitySvc.isWriteEnabled()) {
+        codeIdentity = await identitySvc.resolveParticipantIdentity({
+          client, ownerReviewerId: reg.rows[0].id, participantPhone8: holdP8,
+        });
+        if (!codeIdentity) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ ok: false, reason: 'participant_identity_not_ready',
+            error: '참여자 코드가 아직 준비되지 않았습니다. 관리자에게 코드 등록 상태를 확인해주세요.' });
         }
       }
     }
@@ -1405,54 +1956,61 @@ async function _applyParticipation(req, res, next, campPre) {
     // 구매양식이 정상 제출되어 status='submitted'가 된 건만 참여 완료로 본다.
     //   신규 사유: blocked_by_other_owner(=남이 이 번호를 명의로 선점 = 사칭/오등록 신호),
     //             same_phone_other_name(=같은번호 다른명의 A안이 phone8 키잉으로 접힌 경우의 원인 설명).
-    const holdNameCandidate = isSubApply ? String((subEntry && subEntry.name) || subName).trim() : name;
     const blk = await client.query(
-      `SELECT status, applicant_name, owner_phone8
+      `SELECT owner_phone8, submitted_at
          FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted'
+          AND (order_submission_id IS NULL OR EXISTS (
+            SELECT 1 FROM order_submissions linked_os
+             WHERE linked_os.id = campaign_applications.order_submission_id
+               AND linked_os.deleted_at IS NULL
+          ))
         ORDER BY submitted_at DESC NULLS LAST
         LIMIT 1`,
       [id, holdP8]);
+    let sameCampaignSubmittedAt = null;
     if (blk.rows.length) {
       const b0 = blk.rows[0];
       const blockedByOther = !!b0.owner_phone8 && String(b0.owner_phone8) !== p8;
-      await client.query('ROLLBACK');
       if (blockedByOther) {
+        await client.query('ROLLBACK');
         logger.warn(`[campaign/apply] 타소유자 선점 차단 camp=${id} 명의=***${holdP8.slice(-4)} ` +
           `선점owner=***${String(b0.owner_phone8).slice(-4)} 요청owner=***${p8.slice(-4)} status=${b0.status}`);
         return res.status(409).json({ ok: false, reason: 'blocked_by_other_owner',
           error: '이 번호는 다른 계정에서 이미 참여 신청했어요. 본인 번호가 맞다면 고객센터로 알려주세요.' });
       }
-      if (b0.status === 'submitted') {
-        return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 참여 완료한 캠페인이에요.' });
-      }
-      const { normName } = require('../services/identity.service');
-      const usedBy = String(b0.applicant_name || '').trim();
-      if (normName(usedBy) && normName(usedBy) !== normName(holdNameCandidate)) {
-        // ★ 이름 공개는 "요청자가 그 번호에 대한 근거를 가진 경우"로 제한 —
-        //   자기참여(그 번호로 로그인) 또는 내 소유로 귀속된 행. 레거시(owner NULL) 행을 타계정 명의로
-        //   조회하는 경우엔 이름을 숨긴다(무인증 API로 남의 실명을 캐는 통로 차단).
-        const nameSafe = !isSubApply || String(b0.owner_phone8 || '') === p8;
-        return res.status(409).json({ ok: false, reason: 'same_phone_other_name',
-          usedBy: nameSafe ? usedBy : undefined,
-          error: nameSafe
-            ? `같은 번호로 등록된 다른 명의(${usedBy})가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.`
-            : '같은 번호로 등록된 다른 명의가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.' });
-      }
-      return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 구매양식 제출까지 완료한 캠페인이에요.' });
+      // 같은 공고의 제출완료도 영구 차단하지 않는다. 아래 공고별 기간 판정의 폴백 시각으로 사용해
+      // 제한 없음(0일)과 기간 경과 후 재참여가 실제 신청 경로에서도 그대로 동작하게 한다.
+      sameCampaignSubmittedAt = b0.submitted_at;
     }
 
-    // 실제 선택 명의(본계정 또는 타계정)의 번호로 최종 차단한다.
-    if (camp.linked_sheet_id && camp.linked_tab_name) {
-      try {
-        const { checkRepurchaseWindow } = require('../utils/repurchaseGuard');
-        const rw = await checkRepurchaseWindow(client, { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, phone8: holdP8 });
-        if (rw.blocked) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({ ok:false, reason:'repurchase_window', days:rw.days, availableFrom:rw.availableFrom,
-            error:`이 참여계정은 최근 ${rw.days}일 안에 이미 참여한 이력이 있어요. 재참여 가능일 이후 다시 참여해 주세요.` });
-        }
-      } catch (e) { logger.warn('[campaign/apply] 재참여 기간 판정 실패(fail-open): ' + e.message); }
+    // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)" 기준(사용자 확정 2026-08-24).
+    //   공고가 재발행(차수)돼도 작업 전체를 확인하고, 주문 원장이 아직 없는 레거시/비연결 공고는
+    //   위에서 읽은 같은 공고 제출시각으로 폴백한다. 단일 기간 계산 = utils/repurchaseGuard.
+    //   ★ 하드 차단·예외 없음(리뷰어 셀프 참여는 관리자 확인 창구가 없다 — 관리자 대신등록만 예외 허용).
+    //   조회 실패는 fail-open(막는 기능의 오류로 정상 참여를 막지 않는다 — 신원게이트와 같은 규율).
+    try {
+      const { checkRepurchaseWindow, repurchaseWindowFromSubmittedAt } = require('../utils/repurchaseGuard');
+      let rw = repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime());
+      if (camp.linked_sheet_id && camp.linked_tab_name) {
+        const workRw = await checkRepurchaseWindow(client, {
+          sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, campaignId: id, phone8: holdP8,
+          days: camp.repurchase_days,
+        });
+        if (workRw.blocked) rw = workRw;
+      }
+      if (rw.blocked) {
+        await client.query('ROLLBACK');
+        const dateStr = rw.availableFrom.toLocaleDateString('ko-KR', {
+          timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
+        });
+        return res.status(409).json({
+          ok: false, reason: 'repurchase_window', days: rw.days, availableFrom: rw.availableFrom,
+          error: `이 작업은 최근 ${rw.days}일 안에 이미 참여한 이력이 있어요 — ${dateStr} 이후 다시 참여할 수 있어요.`,
+        });
+      }
+    } catch (e) {
+      logger.warn('[campaign/apply] 재참여 기간 판정 실패(fail-open): ' + e.message);
     }
 
     // 만료 스윕은 정리 작업이지만, 부분 유니크 인덱스는 `status='applied'` 행을 즉시
@@ -1496,34 +2054,36 @@ async function _applyParticipation(req, res, next, campPre) {
         error: `본인+타계정 합산 동시 ${ownerCap}건까지만 자리를 잡을 수 있어요.` });
     }
 
-    // ★ 캠페인별 타계정 하루한도(063, §09-5): 구매양식 제출완료만 집계한다.
+    // ★ 캠페인별 타계정 하루한도(063, §09-5): 유효홀드부터 수량을 예약한다.
+    //   제출완료만 세면 한도 1이어도 여러 타계정 자리를 먼저 잡은 뒤 일괄 제출할 수 있다.
     if (isSubApply && Number(camp.multi_daily_limit) > 0) {
-      const md = await client.query(
-        `SELECT COUNT(*) AS n FROM campaign_applications
-          WHERE campaign_id = $1 AND owner_phone8 = $2 AND phone8 <> owner_phone8
-            AND status = 'submitted' AND submitted_at >= $3`,
-        [id, p8, dayStartIso]);
-      if (Number(md.rows[0].n) >= Number(camp.multi_daily_limit)) {
+      const { countCampaignSubDailyUsage } = require('../services/campaignSubAccountLimit.service');
+      const used = await countCampaignSubDailyUsage(client, {
+        campaignId: id, ownerPhone8: p8, dayStartIso,
+      });
+      if (used >= Number(camp.multi_daily_limit)) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'sub_daily_limit',
-          error: `타계정 참여는 이 공고에서 하루 ${camp.multi_daily_limit}건까지예요(내일 가능).` });
+          error: `이 공고의 타계정 참여 한도는 하루 ${camp.multi_daily_limit}계정입니다.` });
       }
     }
 
-    // ★ 인기상품 참여권: 동일 명의의 일반 모집 제출완료 1건당 인기상품 1건을 허용한다.
+    // ★ 인기상품 참여권: 동일 명의가 최근 1일(24시간) 안에 제출완료한 일반 모집 1건당
+    //   인기상품 1건을 허용한다. 기간을 벗어난 미사용 참여권은 별도 이관 없이 즉시 만료된다.
     //   기존 선행우선순위 데이터는 삭제하지 않고 무시해 롤백 가능성을 보존한다.
     if (camp.is_popular === true) {
       const creditState = await loadPopularCreditState(client, holdP8);
       if (!canUsePopularCredit(creditState)) {
         await client.query('ROLLBACK');
         return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone: creditState.normalDone, popularUsed: creditState.popularUsed,
-          error: '인기 상품은 일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
+          validityDays: creditState.validityDays,
+          error: '인기 상품은 최근 1일(24시간) 안에 일반 모집 구매양식을 제출완료한 참여권이 있어야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
       }
     }
 
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
     // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
-    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 10) : (Number(camp.hold_ttl_min) || 15);
+    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 15) : (Number(camp.hold_ttl_min) || 30);
     const ttlMs = ttlMin * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
     const expiresAt = new Date(closesAt ? Math.min(now.getTime() + ttlMs, closesAt.getTime()) : now.getTime() + ttlMs);
@@ -1538,6 +2098,14 @@ async function _applyParticipation(req, res, next, campPre) {
     //      (구간 테이블이 아직 없는 배포 창 등) → 스냅샷 조회 실패가 참여 INSERT 를 통째로
     //      죽이는 것을 격리한다. 주문원장의 홀드확정 SAVEPOINT 와 같은 규율.
     let feeSnapshot = null;
+    // 구간표는 단일 숫자지만 혼합 배송은 행별로 금액이 다르다. 신청 시점의 유형별
+    // 설정 자체를 함께 보관해 이후 공고를 수정해도 이미 신청한 건의 금액이 변하지 않게 한다.
+    const deliveryFeeSnapshotState = normalizeDeliveryReviewFeeMix(camp.delivery_review_fee_mix);
+    const deliveryFeeMixSnapshot = !deliveryFeeSnapshotState.error
+      && Array.isArray(deliveryFeeSnapshotState.mix)
+      && deliveryFeeSnapshotState.mix.length === DELIVERY_MIX_KEYS.size
+      ? JSON.stringify(deliveryFeeSnapshotState.mix)
+      : null;
     try {
       await client.query('SAVEPOINT fee_snap');
       const sched = await _loadFeeSchedules(client, id);
@@ -1547,17 +2115,44 @@ async function _applyParticipation(req, res, next, campPre) {
       feeSnapshot = null;
       try { await client.query('ROLLBACK TO SAVEPOINT fee_snap'); } catch (_e) { /* noop */ }
     }
+    /* ★★ 127 블로그 승인제(사용자 확정 2026-08-19): 블로그 공고의 신청은 홀드가 아니라
+         **승인 대기(blog_pending)** 로 들어간다 — TTL 없음(expires_at NULL)·정원 미점유.
+         관리자가 [승인]하면 그때 status='applied' + 구매기한(기본 24h)이 찍혀 기존 홀드
+         파이프라인을 그대로 탄다. 킬스위치 BLOG_APPROVAL_FLOW=0 = 신규 신청만 종전
+         즉시-홀드 경로(이미 대기 중인 신청은 승인 API 로 소화 — 되돌려도 고아 없음). */
+    const blogApproval = blogApply && String(process.env.BLOG_APPROVAL_FLOW || '1') !== '0';
+    const insStatus = blogApproval ? 'blog_pending' : 'applied';
+    const insExpires = blogApproval ? null : expiresAt.toISOString();
     const ins = await client.query(
       `INSERT INTO campaign_applications
          (campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key, review_fee_snapshot, blog_url, is_popular_snapshot)
-       VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8,$9,$10,$11)
-       RETURNING id, expires_at, option_key`,
-      [id, insName, insPhone, holdP8, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true]);
+       VALUES ($1,$2,$3,$4,$5,$12,$6,$7,$8,$9,$10,$11)
+       RETURNING id, status, expires_at, option_key`,
+      [id, insName, insPhone, holdP8, p8, insExpires, holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true, insStatus]);
+    if (deliveryFeeMixSnapshot) {
+      await client.query(
+        `UPDATE campaign_applications
+            SET delivery_review_fee_mix_snapshot = $2::jsonb
+          WHERE id = $1`,
+        [ins.rows[0].id, deliveryFeeMixSnapshot]
+      );
+    }
+    if (codeIdentity) {
+      await client.query(
+        `UPDATE campaign_applications
+            SET owner_reviewer_id = $2, participant_identity_id = $3
+          WHERE id = $1`,
+        [ins.rows[0].id, codeIdentity.ownerReviewerId, codeIdentity.id]
+      );
+    }
     await client.query('COMMIT');
     logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
       (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));
     return res.json({
       ok: true, applicationId: ins.rows[0].id, holdToken,
+      // ★ 127: pending=true = 승인 대기(구매 불가) — 프론트가 "승인 대기 중" 화면으로 분기
+      pending: ins.rows[0].status === 'blog_pending',
+      status: ins.rows[0].status,
       phone8: holdP8,   // ★ 계약(레드 #4): 응답 phone8 = "명의" p8 — 프론트 h.phone8 → work-detail/cancel/change-option/embed holdPhone8 전 경로 무수정 정합
       ownerPhone8: p8,  // 소유자(요청자 자신 — 유출 아님). 2단계 명의 배지·복원용
       participant: { type: isSubApply ? 'sub' : 'self', name: insName },
@@ -1600,14 +2195,28 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
     }
     const camp = campRows[0];
 
-    const weekend = weekendPublicationState(camp);
-    if (weekend.blocked) {
-      return res.status(403).json({
-        ok: false,
-        reason: weekend.reason,
-        resumesOn: weekend.resumesOn,
-        error: weekend.message,
-      });
+    /* ★★ 130: 보관된 공고는 참여를 받지 않는다. 목록에는 안 보이는데 링크로는 참여되는
+       상태를 만들지 않는다(085 리뷰어 숨김이 "링크를 알면 참여 가능"인 것과 의도적으로 다르다
+       — 저쪽은 테스트용 비공개, 이쪽은 끝난 공고다). 레거시·참여형 분기보다 앞에 둔다. */
+    if (camp.archived_at) {
+      return res.status(403).json({ ok: false, reason: 'archived', error: '모집이 종료된 공고입니다.' });
+    }
+
+    /* ★★ 참여형 공고는 여기서 쉬는 날을 판정하지 않는다 — 날짜별 계획(095)을 본 판정이
+       `_applyParticipation` 의 잠금 뒤 관문에 있다. 여기서 계획 없이 막으면 사람이 인원을 넣어
+       연 주말·공휴일도 첫 관문에서 막혀 "카드는 열렸는데 참여는 거부"가 된다(2026-09-23).
+       레거시 공고는 날짜별 계획 개념이 없으므로 종전대로 여기서 판정한다. */
+    if (!camp.participation_mode) {
+      const weekend = weekendPublicationState(camp);
+      if (weekend.blocked) {
+        return res.status(403).json({
+          ok: false,
+          reason: weekend.reason,
+          closedKind: weekend.closedKind || 'weekend',
+          resumesOn: weekend.resumesOn,
+          error: weekend.message,
+        });
+      }
     }
 
     // ★ 참여형 공고는 레거시 경로(슬롯 증가·시트 행 추가) 진입 금지 — 홀드 기반 신규 경로로 처리
@@ -1701,6 +2310,23 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
  *   ※ 만료·취소 자체는 세지 않는다 — 신청만 하고 구매하지 않은 건이라 자리가 이미 반환돼 할 일이 없다.
  *     매일 숫자가 떠 있으면 정작 급한 지각 건이 묻히므로 의도적으로 제외한다.
  */
+/** 127: 공고별 승인 대기(blog_pending) 건수 — 카드 관제 버튼 배지 재료(지각 배지와 같은 규율:
+ *  "반드시 눌러야 하는" 신호. blog 에서 그 신호는 승인 대기다). 실패는 호출부 fail-soft. */
+async function _fetchBlogPendingCounts(pool, campaignIds) {
+  const out = new Map();
+  const ids = (campaignIds || []).filter(Boolean);
+  if (!ids.length) return out;
+  const { rows } = await pool.query(
+    `SELECT campaign_id, COUNT(*) AS n
+       FROM campaign_applications
+      WHERE campaign_id = ANY($1) AND status = 'blog_pending'
+      GROUP BY campaign_id`,
+    [ids]
+  );
+  for (const r of rows) out.set(r.campaign_id, Number(r.n) || 0);
+  return out;
+}
+
 async function _fetchLateCounts(pool, campaignIds) {
   const out = new Map();
   const ids = (campaignIds || []).filter(Boolean);
@@ -1726,28 +2352,42 @@ async function _fetchLateCounts(pool, campaignIds) {
  *   불일치가 생기므로 계산 경로를 하나로 묶는다.
  *   ops = 관리자 전용 운영 수치(진행중 홀드·오늘 제출·누적 확정·지각) — 리뷰어 응답엔 없다.
  */
-router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+async function _adminCampaignList(req, res, next) {
   try {
     await _ensureTables();
     const now = new Date();
+    /* ★ 130: 기본 목록은 **보관하지 않은 공고만**. `?archived=1` 이면 보관함(보관분만).
+       거르는 곳이 두 갈래인 이유 = 보관함을 보여줄 화면이 필요하기 때문(서버가 통째로
+       거르면 보관함이 영원히 빈다 — 088 마감 보관함과 같은 규율). */
+    const _archivedView = String(req.query.archived || '') === '1';
     const { rows } = await pool.query(`
       SELECT * FROM recruit_campaigns
+      WHERE archived_at IS ${_archivedView ? 'NOT NULL' : 'NULL'}
       ORDER BY
+        ${_archivedView ? 'archived_at DESC,' : ''}
         CASE WHEN status = 'active' THEN 0 WHEN status = 'draft' THEN 1 ELSE 2 END,
         created_at DESC
     `);
+    /* 보관함으로 넘어간 건수 — 목록에서 빠진 공고가 몇 건인지 화면이 말해야 한다
+       (조용히 사라지면 "공고가 없어졌다"가 된다). 실패는 null = 표시 안 함. */
+    let _archivedCount = null;
+    try {
+      const { rows: ac } = await pool.query('SELECT COUNT(*) AS n FROM recruit_campaigns WHERE archived_at IS NOT NULL');
+      _archivedCount = Number(ac[0] && ac[0].n) || 0;
+    } catch (e) { logger.warn(`[campaign] admin/list 보관 건수 조회 실패(표기 생략): ${e.message}`); }
     const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
     // 실패해도 목록 자체는 떠야 한다(관리 기능 마비 방지) — 집계만 비우고 진행.
     // carrySumMap: null = 반영 합계 모름(조회 실패) → 잔량도 null(부풀린 칩 금지 — 코드리뷰 M3)
-    let countsMap = new Map(), schedMap = null, lateMap = new Map(), roundsMap = new Map(), carrySumMap = null;
+    let countsMap = new Map(), schedMap = null, lateMap = new Map(), roundsMap = new Map(), carrySumMap = null, blogPendingMap = new Map();
     try {
       const { fetchRoundsSummary, fetchCarryAppliedSums } = require('../services/campaignPlan.service');
-      [countsMap, schedMap, lateMap, roundsMap, carrySumMap] = await Promise.all([
+      [countsMap, schedMap, lateMap, roundsMap, carrySumMap, blogPendingMap] = await Promise.all([
         fetchCampaignCounts(pool, partIds, now),
         deriveSchedules(pool, tabsOfCampaigns(rows), now),
         _fetchLateCounts(pool, partIds),
         fetchRoundsSummary(pool, partIds),   // 095: 카드 차수 칩 재료(자체 fail-soft = 빈 Map)
         fetchCarryAppliedSums(pool, partIds), // 098: 이월 반영 누적(보류 잔량 차감분, 자체 fail-soft)
+        _fetchBlogPendingCounts(pool, partIds), // 127: 카드 관제 버튼 승인 대기 배지 재료
       ]);
     } catch (e) {
       logger.warn(`[campaign] admin/list 집계 실패 — 목록만 반환: ${e.message}`);
@@ -1765,6 +2405,16 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
     } catch (e) {
       logger.warn(`[campaign] admin/list 표 기준 집계 실패 — 종전(공고 기준) 표기로 폴백: ${e.message}`);
     }
+    const _groupedTableCounts = _groupedTableTodayCounts(rows, countsMap, _filled, now, schedMap);
+    /* ★ 130: 보관 **제안** 재료 — 연결 작업표의 모든 줄이 채워졌는가(사용자 확정 조건).
+       자동 보관은 하지 않는다. 화면이 배지로 제안하고 실행은 사람이 누른다.
+       ★ null = 판정 실패 → 제안 없음(0/0 을 "다 찼다"로 읽지 않는다). */
+    let _archiveSuggest = null;
+    try {
+      const { archiveSuggestions } = require('../services/campaignArchive.service');
+      _archiveSuggest = await archiveSuggestions(pool, rows);
+    } catch (e) { logger.warn(`[campaign] admin/list 보관 제안 실패(제안 없이 계속): ${e.message}`); }
+
     const { isCarryHold, heldCarry, kstTodayStr } = require('../services/campaignState.service');
     const _todayStr = kstTodayStr(now);
     const displayTotals = new Map();
@@ -1772,29 +2422,64 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
       try { displayTotals.set(r.id, await displayRecruitTotalForCampaign(r)); }
       catch (e) { logger.warn(`[campaign] admin/list 작업오더 모집인원 표시 대체 실패 camp=${r.id}: ${e.message}`); }
     }));
+    /* ★★ 유입방식 폴백 재료 — 카드 칩이 리뷰어 화면(work-detail)과 **같은 값**을 보게 한다.
+       종전엔 카드만 저장값(work_detail.inflowType)만 봐서, 값이 없는 옛 공고가 카드에서는
+       '링크유입'인데 리뷰어 화면에서는 가이드유입으로 갈렸다.
+       ★ **배치 1회**(N+1 금지) · 저장값이 없는 공고만 대상 · 실패 = 미부착 = 종전 동작(fail-soft).
+       ★ `work_detail` 을 고쳐 내려보내지 않는다 — 별도 필드로만 준다(저장 시 굳지 않게). */
+    const inflowFallback = new Map();
+    try {
+      const need = rows.filter(r => !_savedInflowType(r.work_detail)).map(r => r.id);
+      if (need.length) {
+        const { linkedWorkOrdersForCampaigns } = require('../services/linkedRecruitQuota.service');
+        const m = await linkedWorkOrdersForCampaigns(pool, need, ['inflow_type']);
+        for (const [cid, wo] of m) {
+          const v = String((wo && wo.inflow_type) || '');
+          if (v === 'guide' || v === 'link') inflowFallback.set(cid, v);
+        }
+      }
+    } catch (e) {
+      logger.warn(`[campaign] admin/list 유입방식 폴백 실패(칩 없이 계속): ${e.message}`);
+    }
     const data = rows.map(r => {
       const displayTotal = displayTotals.get(r.id) || { total: Number(r.recruit_total) || 0, source: 'campaign' };
-      if (!r.participation_mode) return { ...r, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source };
+      const _sug = _archiveSuggest ? (_archiveSuggest.get(r.id) || null) : null;
+      // ★ 148: 마이그레이션 전 기존 공고(NULL)는 운영 중이던 env 기본값을 그대로 상속한다.
+      //   편집 화면에는 그 유효값을 내려 저장 시 운영 정책이 갑자기 14일로 바뀌지 않게 한다.
+      const effectiveRepurchaseDays = repurchaseDays(r.repurchase_days);
+      // archiveSuggest: {total, filled, full} — full=true 일 때만 화면이 [📦 보관 제안] 배지를 그린다.
+      const _oif = inflowFallback.get(r.id) || null;
+      if (!r.participation_mode) return { ...r, repurchase_days: effectiveRepurchaseDays, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source, archiveSuggest: _sug, orderInflowType: _oif };
       const cnt = countsMap.get(r.id) || {
         activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
       };
+      const stateCnt = _groupedTableCounts.get(r.id) || cnt;
       const _sch = schedMap ? scheduleFor(schedMap, r) : null;
-      const st = computeCampaignState(r, cnt, now, _sch);
+      const st = computeCampaignState(r, stateCnt, now, _sch);
       /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼
          토요일 관리자 카드가 "오늘 모집 0/30 · 모집중"으로 보였다(리뷰어는 신청 불가인데).
          카드 렌더러의 weekend 분기(_zeroQuotaNote·footer)가 이미 이 값을 기다리고 있었다. */
-      const _weekend = weekendPublicationState(r, now);
-      const _resume = _weekendResume(r, _weekend, cnt, now, _sch);
+      /* ★ 날짜별 계획(095)을 함께 넘긴다 — 빠지면 사람이 인원을 넣어 연 주말·공휴일도 관리자 카드엔
+         "미게시"로 보여 신청 관문(계획을 보는 쪽)과 갈린다(2026-09-23 공휴일 정리). */
+      const _weekend = weekendPublicationState(r, now, stateCnt && stateCnt.plans);
+      const _resume = _weekendResume(r, _weekend, stateCnt, now, _sch);
       return {
         ...r,
+        repurchase_days: effectiveRepurchaseDays,
+        archiveSuggest: _sug,
+        // 카드 유입방식 칩 폴백(표시 전용) — 저장값이 없을 때만 채워진다.
+        orderInflowType: _oif,
         // 카드 표기 전용 값. recruit_total 원본은 참여 제한/기존 정책을 위해 그대로 둔다.
         display_recruit_total: displayTotal.total,
         display_recruit_total_source: displayTotal.source,
         state: _weekend.blocked ? 'weekend_unpublished' : st.state,
         stateReason: _weekend.blocked ? _weekend.reason : (st.stateReason || null),
         stateMessage: _weekend.blocked ? _weekend.message : null,
+        closedKind: _weekend.blocked ? (_weekend.closedKind || 'weekend') : null,
         resumesOn: _resume ? _resume.date : _weekend.resumesOn,
         resumesAt: _resume ? _resume.iso : null,
+        // 표(주문 원장) 기준 총량(2단계) — null = 집계 불가/연결 없음(카드는 표 기준 문구를 그리지 않는다)
+        tableQuota: st.tableQuota || null,
         todayCount: st.todayCount, dailyQuota: st.dailyQuota,
         // 표 기준 오늘 참여 인원(B안) — null = 셀 수 없음(연결 탭 없음·조회 실패).
         //   화면은 이 값이 있으면 이것을 쓰고, 없으면 종전 todayCount 로 폴백하며 그 사실을 말한다.
@@ -1828,11 +2513,42 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
           todaySubmitted: cnt.todaySubmitted,
           totalConfirmed: cnt.submittedAll,
           late: lateMap.get(r.id) || 0,
+          blogPending: blogPendingMap.get(r.id) || 0,   // 127: 승인 대기(블로그) — 카드 관제 배지
         },
       };
     });
-    res.json({ ok: true, data, serverNow: now.toISOString() });
+    res.json({ ok: true, data, serverNow: now.toISOString(), archivedView: _archivedView, archivedCount: _archivedCount });
   } catch (err) {
+    next(err);
+  }
+}
+
+/* POST /api/campaign/admin/:id/archive {archived:true|false} — 보관/보관 해제 (130)
+   ★ 게이트는 adminOrMaster(정원·총량 변경과 같은 급 — 남의 업체 공고를 치울 수 있다).
+   ★ 스코프 토큰(via:'reviewer_campaign')은 PUT /api/campaign/admin/:id 끝앵커로만 허용되므로
+     이 POST 에 도달 불가(노출 권한 상승 차단 — flags 와 같은 규율). */
+router.post('/admin/:id/archive', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const want = (req.body || {}).archived;
+    if (typeof want !== 'boolean') {
+      return res.status(400).json({ ok: false, error: 'archived(true|false)를 명시하세요.' });
+    }
+    const svc = require('../services/campaignArchive.service');
+    const by = (req.admin && req.admin.name) || null;
+    const out = want ? await svc.archiveCampaign(pool, id, by) : await svc.unarchiveCampaign(pool, id);
+    // ★ /list 5초 캐시 즉시 무효화 — 보관하자마자 리뷰어 목록에서 빠지게(flags 와 같은 처리).
+    if (out.ok) _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
+    if (!out.ok) {
+      // 검증 실패는 400대로 — errorHandler 500 마스킹이면 담당자가 무엇을 고칠지 모른다.
+      return res.status(out.code === 'not_found' ? 404 : 409).json(out);
+    }
+    res.json(out);
+  } catch (err) {
+    if (err && err.code === '42703') {
+      logger.error(`[campaign] archived_at 컬럼 없음(migration 130 미적용): ${err.message}`);
+      return res.status(503).json({ ok: false, code: 'not_ready', error: '보관 기능이 아직 준비되지 않았습니다(migration 130 미적용) — 관리자에게 알려주세요.' });
+    }
     next(err);
   }
 });
@@ -1887,14 +2603,21 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
       start_date, // ★ 062: 시작일(YYYY-MM-DD) — 시작일 전 게시 시 오픈예정 카운트다운
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min, // ★ 063: 타계정 추가참여(§09-1·5·2)
+      repurchase_days, // ★ 148: 공고별 재참여 제한(0=제한 없음, 1~365일)
       options, // ★ 061: 상품옵션 목록(참여형)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 저장, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트 공고) — 목록에서만 숨김, 참여는 정상
       transfer_bank, transfer_memo, // ★ 086: 입금 이체은행(kbank|hana, 빈 값=자동)·받는분 통장표시
       review_type, review_type_mix, // 혼합 시 유형별 수량을 함께 저장(합계=총인원)
       carry_mode, // ★ 098: 이월 반영 방식 — 발행 시 세그먼트 선택이 조용히 'auto'로 떨어지지 않게(코드리뷰 M1)
+      carry_strategy, // ★ 139: next|spread|extend — 공고 설정의 실제 이월 배치 규칙
       work_kind, // ★ 099: 체험단 종류(review|blog) — 빈 값=리뷰체험단(기존 동작). 블로그면 리뷰타입 미사용
       cash_receipt_required, // 모집공고 직접 설정 — 무시트 공고도 구매 안내·배지에 반영
+      workboard_display_name, // 탭 단위 표시 별칭(실제 상품명·주문/참여 이력은 무접촉)
+      // ★ 135: 회수·혼합 부속정보. 배송유형이 그 기본형일 때만 저장하고, 아니면 비운다
+      //   (작업오더 접수의 _deliveryMixJson·_recallFields 와 같은 규율 — 유형을 바꾸면
+      //    옛 조합이 남아 작업표가 유령 배분을 돈다).
+      delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product,
     } = req.body;
 
     const requestedSkipWeekends = req.body.skip_weekends === true;
@@ -1904,14 +2627,36 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
+    const repurchaseDaysState = _normalizeRepurchaseDays(repurchase_days, 14);
+    if (repurchaseDaysState.error) return res.status(400).json({ ok: false, error: repurchaseDaysState.error });
     const normalizedReviewType = normalizeReviewType(review_type);
     const reviewMixState = normalizeReviewTypeMix(review_type_mix);
     const reviewMixError = validateReviewTypeMix(normalizedReviewType, reviewMixState, recruit_total, { requireWhenMixed: true });
     if (reviewMixError) return res.status(400).json({ ok: false, error: reviewMixError });
+    // ★ 135: 배송 부속정보 — 리뷰 혼합과 같은 모양(합계 = 총 건수).
+    const deliveryBase = deliveryBaseType(delivery_type);
+    const deliveryMixState = normalizeDeliveryTypeMix(delivery_type_mix);
+    const deliveryMixError = validateDeliveryTypeMix(deliveryBase, deliveryMixState, recruit_total, { requireWhenMixed: true });
+    if (deliveryMixError) return res.status(400).json({ ok: false, error: deliveryMixError });
+    // ★ 기본형이 아니면 비운다 — "혼합으로 저장했다가 실배송으로 바꾼" 공고에 옛 조합이 남으면
+    //   작업표 열 보장이 있지도 않은 배분을 돌린다(order.routes 와 같은 규율).
+    const storeDeliveryMix = deliveryBase === '혼합' ? (deliveryMixState.mix || []) : [];
+    const deliveryFeeMixState = normalizeDeliveryReviewFeeMix(delivery_review_fee_mix);
+    // 구 화면/기존 API는 단일 review_fee만 보낸다. 새 혼합 설정을 보냈을 때만 두 값을
+    // 완성형으로 요구해, 배포 직후 기존 공고 생성·수정 경로를 막지 않는다.
+    const deliveryFeeMixError = validateDeliveryReviewFeeMix(deliveryBase, deliveryFeeMixState, {
+      requireWhenMixed: delivery_review_fee_mix !== undefined,
+    });
+    if (deliveryFeeMixError) return res.status(400).json({ ok: false, error: deliveryFeeMixError });
+    const storeDeliveryReviewFeeMix = deliveryBase === '혼합' ? (deliveryFeeMixState.mix || []) : [];
+    const storeRecallCourier = deliveryBase === '회수' ? String(recall_courier || '').trim() : '';
+    const storeRecallProduct = deliveryBase === '회수' ? String(recall_product || '').trim() : '';
     const normOpts = _normalizeOptionsInput(options);
     if (normalizedReviewType !== 'mixed' && normOpts) normOpts.forEach(option => { option.reviewTypeMix = []; });
     const optionReviewMixError = validateOptionReviewTypeMix(normalizedReviewType, normOpts);
     if (optionReviewMixError) return res.status(400).json({ ok: false, error: optionReviewMixError });
+    const inflowGuideError = _validateActiveUnitInflowGuides(_savedInflowType(work_detail), normOpts);
+    if (inflowGuideError) return res.status(400).json({ ok: false, error: inflowGuideError });
     const normalizedBadges = normalizeRecruitBadges(badges, {
       cashReceiptRequired: cash_receipt_required === true,
       channel: channel || '',
@@ -1936,11 +2681,28 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const effectiveSkipWeekends = sourceWorkOrder
       ? sourceWorkOrder.skipWeekends
       : requestedSkipWeekends;
+    const hasWorkboardDisplayName = Object.prototype.hasOwnProperty.call(req.body, 'workboard_display_name');
+    const workboardDisplayName = _normalizeWorkboardDisplayName(workboard_display_name);
+    if (hasWorkboardDisplayName && workboardDisplayName.length > 100) {
+      return res.status(400).json({ ok: false, error: '작업보드 표시명은 100자 이하로 입력해주세요.' });
+    }
+    if (hasWorkboardDisplayName && (!lSheet || !lTab)) {
+      return res.status(400).json({ ok: false, error: '작업보드 표시명은 연결된 작업보드에서만 설정할 수 있습니다.' });
+    }
+
+    /* ★ 127: 블로그 공고의 일건수 정규화 — 블로그는 '그날 정원' 개념이 없다(구매일 미정·승인제).
+       일건수가 비면 총모집(무제한이면 9999)으로 채워 활성화 게이트·상태엔진(daily_done 판정)이
+       블로그 모집을 조용히 막지 않게 한다. **상태엔진은 무수정**(가장 위험한 경로 무접촉) —
+       daily=총원이면 일일 마감이 총원 마감보다 먼저 올 수 없어 리뷰 규칙 위에서 안전하다. */
+    let effDailyLimit = Number(daily_limit) || 0;
+    if (isBlogKind(workKindForStore(work_kind)) && effDailyLimit <= 0) {
+      effDailyLimit = (Number(recruit_total) || 0) > 0 ? Number(recruit_total) : 9999;
+    }
 
     // 참여형을 active로 "생성"하는 것도 활성화 게이트 통과 필요(status 라우트 우회 방지)
     if (participation_mode && (status === 'active')) {
       const errs = _participationActivationErrors({
-        linked_sheet_id: lSheet, linked_tab_name: lTab, linked_tab_gid: lGid, window_start, window_end, daily_limit,
+        linked_sheet_id: lSheet, linked_tab_name: lTab, linked_tab_gid: lGid, window_start, window_end, daily_limit: effDailyLimit,
       });
       if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
     }
@@ -1954,9 +2716,11 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
         start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
-        transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, work_kind, skip_weekends, cash_receipt_required)
+        transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, carry_strategy, work_kind, skip_weekends, cash_receipt_required,
+        delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product, repurchase_days)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
+               $45,$46,$47,$48,$49,$50)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -1982,33 +2746,47 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         participation_mode === true,
         thumbnail_url || '',
         landing_url || '',
-        Number(daily_limit) || 0,
+        effDailyLimit,
         Number(recruit_total) || 0,
         window_start || null,
         window_end || null,
         Number.isFinite(Number(close_buffer_min)) && close_buffer_min !== null && close_buffer_min !== undefined && close_buffer_min !== '' ? Number(close_buffer_min) : 10,
-        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 15,
+        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 30,
         _prepWorkDetail(work_detail) ?? null,
         source_work_order_id || '',
         start_date || null,
         multi_account_mode === true,                            // ★ 063 §09-1: 기본 [불가]
         Math.max(0, Number(multi_daily_limit) || 0),            // ★ 063 §09-5: 0=무제한
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '')
-          ? 10 : Math.max(1, Number(sub_hold_ttl_min) || 10),   // ★ 063 §09-2: 타계정 10분(≥1 클램프 — 0=즉시만료 footgun 차단)
+          ? 15 : Math.max(1, Number(sub_hold_ttl_min) || 15),   // ★ 063 §09-2: 타계정 15분(133, ≥1 클램프 — 0=즉시만료 footgun 차단)
         reviewer_hidden === true,                               // ★ 085: 기본 FALSE(공개) — 명시로만 숨김
         _normTransferBank(transfer_bank),                       // ★ 086: 빈 값=NULL(작업오더 물건비에서 자동 판정)
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(), // ★ 086
         normalizedReviewType,                                   // ★ 087: 판정 불가·미전송=NULL(기존 동작)
         JSON.stringify(normalizedReviewType === 'mixed' ? (reviewMixState.mix || []) : []),
         carry_mode === 'hold' ? 'hold' : 'auto',                // ★ 098: auto/hold 만 — 그 외 전부 기본 auto(현행)
+        ['next', 'spread', 'extend'].includes(carry_strategy) ? carry_strategy : 'next', // ★ 139: 구 UI 미전송=기존 next
         workKindForStore(work_kind),                            // ★ 099: 체험단 종류. 미전송=''(=리뷰)로 저장 — 기존 동작 불변
         effectiveSkipWeekends,
         cash_receipt_required === true,
+        JSON.stringify(storeDeliveryMix),                       // ★ 135: 혼합이 아니면 [] (유형 전환 시 옛 조합 잔류 차단)
+        JSON.stringify(storeDeliveryReviewFeeMix),              // ★ 152: 실배송·빈박스별 리뷰비(수량은 delivery_type_mix 단일 원장)
+        storeRecallCourier,                                     // ★ 135: 회수가 아니면 '' — NOT NULL 컬럼이라 null 금지
+        storeRecallProduct,
+        repurchaseDaysState.value,
       ]
     );
+    require('../services/cashReceiptContext.service')
+      .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
+    if (hasWorkboardDisplayName) {
+      rows[0].workboard_display_name = await _saveWorkboardDisplayName({ sheetId: lSheet, tabName: lTab, displayName: workboardDisplayName });
+    }
+    if (normOpts) await _ensureLinkedWorktableOptionColumn(rows[0].id, 'create');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
+    if (normOpts) await _ensureLinkedWorktableProductColumn(rows[0].id, 'create');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
+    await _ensureLinkedWorktableDeliveryColumns(rows[0].id, 'create');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
     // 작업오더와 모집공고는 별도 값이 아니라 같은 목표 인원이다. 생성 시에도 서버가
     // 역방향 링크와 작업오더 정원을 함께 저장해, 프론트 후속 호출 실패로 드리프트하지 않게 한다.
     let quotaSync = null;
@@ -2069,6 +2847,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       // ★ 063: 타계정 추가참여(전부 optional — 미전달 시 COALESCE로 기존값 유지).
       //   ※ 아래 UPDATE의 $33~$35가 이 이름들을 참조하므로 구조분해 누락 = 수정 저장 전면 ReferenceError(500).
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min,
+      repurchase_days, // ★ 148: undefined/null=유지, 0=제한 없음, 1~365일
       options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 교체, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트) — undefined=유지, true/false=명시 변경
@@ -2076,13 +2855,19 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       review_type, review_type_mix, // undefined=유지 / mixed면 유형별 수량을 함께 갱신
       work_kind,   // ★ 099: undefined=유지 / ''=해제
       carry_mode, // ★ 098: 이월 반영 방식 'auto'|'hold' — undefined=유지
+      carry_strategy, // ★ 139: 이월 배치 전략 next|spread|extend — undefined=유지
       cash_receipt_required, // undefined=유지 / true·false=모집공고 직접 설정
+      workboard_display_name, // undefined=유지 / ''=표시명 해제(실제 상품명으로 폴백)
       skip_weekends, // undefined=유지 / true·false=주말 게시 직접 설정
+      // ★ 135: 회수·혼합 부속정보 — undefined=유지(부속 칸 없는 화면이 저장해도 안 지워진다).
+      delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product,
     } = req.body;
 
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
+    const repurchaseDaysState = _normalizeRepurchaseDays(repurchase_days, null);
+    if (repurchaseDaysState.error) return res.status(400).json({ ok: false, error: repurchaseDaysState.error });
 
     // ★ 062: 시간창 유효값 — ''=비움(자율주문 전환), null/undefined=유지, 'HH:MM'=설정.
     //   auto_order=true(카드 인라인 편집기)는 강제 비움 — 종전엔 스코프 라우트만 해석해
@@ -2122,6 +2907,52 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       reviewMixCurrent = { reviewType: effectiveReviewType, reviewTypeMix: reviewMixState.mix || [] };
     }
 
+    /* ★ 135: 배송 부속정보 — 리뷰 혼합과 **같은 모양**(현재값 병합 → 검증 → 기본형 아니면 비움).
+       null 을 넣으면 아래 CASE 센티널이 "유지"로 읽는다(미전송 = 변경 없음). */
+    let deliveryMixForStore = null;
+    let deliveryReviewFeeMixForStore = null;
+    let recallCourierForStore = null;
+    let recallProductForStore = null;
+    if (delivery_type !== undefined || delivery_type_mix !== undefined || delivery_review_fee_mix !== undefined
+        || recall_courier !== undefined || recall_product !== undefined || recruit_total !== undefined) {
+      const { rows: curDvRows } = await pool.query(
+        `SELECT delivery_type, delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product, recruit_total
+           FROM recruit_campaigns WHERE id = $1`, [id]
+      );
+      const curDv = curDvRows[0];
+      if (!curDv) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+      const effDeliveryBase = deliveryBaseType(
+        (delivery_type === undefined || delivery_type === null) ? curDv.delivery_type : delivery_type
+      );
+      const dvMixState = normalizeDeliveryTypeMix(
+        delivery_type_mix === undefined ? curDv.delivery_type_mix : delivery_type_mix
+      );
+      const effTotal = (recruit_total === undefined || recruit_total === null || recruit_total === '')
+        ? curDv.recruit_total
+        : recruit_total;
+      const dvMixError = validateDeliveryTypeMix(effDeliveryBase, dvMixState, effTotal, {
+        requireWhenMixed: delivery_type !== undefined || recruit_total !== undefined,
+      });
+      if (dvMixError) return res.status(400).json({ ok: false, error: dvMixError });
+      // ★ 기본형을 벗어나면 남아 있던 부속정보를 함께 지운다(리뷰 혼합과 같은 규율).
+      if (effDeliveryBase !== '혼합') deliveryMixForStore = [];
+      else if (dvMixState.provided) deliveryMixForStore = dvMixState.mix;
+      const dvFeeMixState = normalizeDeliveryReviewFeeMix(
+        delivery_review_fee_mix === undefined ? curDv.delivery_review_fee_mix : delivery_review_fee_mix
+      );
+      const dvFeeMixError = validateDeliveryReviewFeeMix(effDeliveryBase, dvFeeMixState, {
+        requireWhenMixed: delivery_review_fee_mix !== undefined,
+      });
+      if (dvFeeMixError) return res.status(400).json({ ok: false, error: dvFeeMixError });
+      if (effDeliveryBase !== '혼합') deliveryReviewFeeMixForStore = [];
+      else if (dvFeeMixState.provided) deliveryReviewFeeMixForStore = dvFeeMixState.mix;
+      if (effDeliveryBase !== '회수') { recallCourierForStore = ''; recallProductForStore = ''; }
+      else {
+        if (recall_courier !== undefined) recallCourierForStore = String(recall_courier || '').trim();
+        if (recall_product !== undefined) recallProductForStore = String(recall_product || '').trim();
+      }
+    }
+
     if (normOpts) {
       if (effectiveReviewTypeForOptions === null) {
         const { rows: currentOptionReviewRows } = await pool.query(
@@ -2133,6 +2964,21 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       if (effectiveReviewTypeForOptions !== 'mixed') normOpts.forEach(option => { option.reviewTypeMix = []; });
       const optionReviewMixError = validateOptionReviewTypeMix(effectiveReviewTypeForOptions, normOpts);
       if (optionReviewMixError) return res.status(400).json({ ok: false, error: optionReviewMixError });
+      const requestedInflowType = _savedInflowType(work_detail);
+      if (requestedInflowType) {
+        // 레거시 공통 가이드는 새 입력으로는 고칠 수 없지만, 제목·일정 같은 무관한 수정에서
+        // 선택지 가이드 누락으로 막히면 안 된다. 저장 직전의 보존 병합과 같은 원본을 여기서도
+        // 먼저 읽어 검증의 호환 분기로 쓴다.
+        const { rows: legacyGuideRows } = await pool.query(
+          'SELECT work_detail FROM recruit_campaigns WHERE id = $1', [id]
+        );
+        const legacyGuideDetail = sanitizeWorkDetail(legacyGuideRows[0]?.work_detail) || {};
+        const hasLegacySharedGuide = String(legacyGuideDetail.inflowGuideHtml || '').trim().length > 0;
+        const inflowGuideError = hasLegacySharedGuide
+          ? ''
+          : _validateActiveUnitInflowGuides(requestedInflowType, normOpts);
+        if (inflowGuideError) return res.status(400).json({ ok: false, error: inflowGuideError });
+      }
     }
 
     // 자동 배지는 어떤 저장 경로에서도 같은 조건으로 계산한다. 그래서 오래된 화면이나 API 직접 호출이
@@ -2195,6 +3041,22 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         logger.warn(`[campaign] 연결탭 보정 조회 실패(무시): ${e.message}`);
       }
     }
+    const hasWorkboardDisplayName = Object.prototype.hasOwnProperty.call(req.body, 'workboard_display_name');
+    const workboardDisplayName = _normalizeWorkboardDisplayName(workboard_display_name);
+    if (hasWorkboardDisplayName && workboardDisplayName.length > 100) {
+      return res.status(400).json({ ok: false, error: '작업보드 표시명은 100자 이하로 입력해주세요.' });
+    }
+    if (hasWorkboardDisplayName) {
+      const { rows: displayScopeRows } = await pool.query(
+        'SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1', [id]
+      );
+      const displayScope = displayScopeRows[0] || {};
+      const displaySheet = intentionallyUnlinked ? '' : (lSheet || displayScope.linked_sheet_id || '');
+      const displayTab = intentionallyUnlinked ? '' : (lTab || displayScope.linked_tab_name || '');
+      if (!displaySheet || !displayTab) {
+        return res.status(400).json({ ok: false, error: '작업보드 표시명은 연결된 작업보드에서만 설정할 수 있습니다.' });
+      }
+    }
 
     // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지.
     //   이 라우트가 바꿀 수 있는 게이트 입력(연결탭·시간창·일일건수)을 본문값으로 병합해 판정.
@@ -2216,7 +3078,18 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       }
     }
 
-    const wdPrepared = _prepWorkDetail(work_detail); // undefined=유지, null=비움, 문자열=교체
+    /* 신규 편집기는 공통 유입가이드 필드를 더 보내지 않는다. work_detail은 통째 저장되므로
+       기존 공고를 제목 등 다른 값만 고쳐 저장할 때 레거시 공통 안내가 지워지지 않게 병합한다. */
+    let effectiveWorkDetail = work_detail;
+    if (work_detail && typeof work_detail === 'object'
+      && !Object.prototype.hasOwnProperty.call(work_detail, 'inflowGuideHtml')) {
+      const { rows: legacyWorkDetailRows } = await pool.query(
+        'SELECT work_detail FROM recruit_campaigns WHERE id = $1', [id]
+      );
+      const legacyWorkDetail = sanitizeWorkDetail(legacyWorkDetailRows[0]?.work_detail) || {};
+      effectiveWorkDetail = { ...work_detail, inflowGuideHtml: legacyWorkDetail.inflowGuideHtml || '' };
+    }
+    const wdPrepared = _prepWorkDetail(effectiveWorkDetail); // undefined=유지, null=비움, 문자열=교체
 
     // ★ 095: 차수 원장이 있는 공고의 총모집(recruit_total)은 차수 합계가 진실원본 —
     //   수정 모달 재전송(진행상품 표 파생 hidden 값)이 차수 추가분을 조용히 되돌리지 않게
@@ -2232,9 +3105,25 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       }
     } catch (_) { /* 기존 동작 */ }
 
-    // 총인원을 줄일 때는 실제 작업보드에 이미 채워진 행도 함께 검사한다.
-    // 이 검사를 UPDATE 앞에 두어, 저장은 실패했는데 공고 정원만 낮아지는 반쪽 상태를 막는다.
-    if (_rtEff !== undefined && _rtEff !== null && _rtEff !== '') {
+    /* 총인원을 줄일 때는 실제 작업보드에 이미 채워진 행도 함께 검사한다.
+       이 검사를 UPDATE 앞에 두어, 저장은 실패했는데 공고 정원만 낮아지는 반쪽 상태를 막는다.
+
+       ★★ 검사·동기화는 **총정원이 이번 저장에서 실제로 달라졌을 때만** 한다(2026-08-24 사용자 확정).
+         종전에는 전송만 되면(수정 모달은 진행상품 표 파생 hidden 값을 늘 재전송한다) 같은
+         값이어도 검사가 돌아, 채워진 줄이 정원보다 많은 **초과 상태 공고**에서는 제목·리뷰비만
+         고쳐도 저장이 실패로 보였다(본섭 실측 13개 작업). 게다가 그 throw 는 UPDATE·옵션·리뷰비가
+         모두 커밋된 **뒤**라 "저장은 됐는데 실패로 보고"였다. 초과는 감추지 않고 표시하는 것이
+         확정 정책이므로(41/40), 그 상태를 "저장 불가"로 대접하지 않는다.
+       ★ **줄이려는 조작은 종전대로 막는다** — 값이 달라질 때만 게이트를 건너뛰지 않는다.
+       ★ 이전 값을 못 읽으면(조회 실패·행 없음) **검사하는 쪽으로 접는다**(fail-closed). */
+    let _rtPrev = null;
+    try {
+      const { rows: prevRt } = await pool.query('SELECT recruit_total FROM recruit_campaigns WHERE id = $1', [id]);
+      if (prevRt.length) _rtPrev = Number(prevRt[0].recruit_total) || 0;
+    } catch (_) { _rtPrev = null; }
+    const _rtSent = _rtEff !== undefined && _rtEff !== null && _rtEff !== '';
+    const _rtChanged = _rtSent && (_rtPrev === null || (Number(_rtEff) || 0) !== _rtPrev);
+    if (_rtChanged) {
       await assertCampaignRecruitTotal({ campaignId: id, recruitTotal: Number(_rtEff) || 0 });
     }
 
@@ -2293,11 +3182,20 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
                            WHEN $39::text = '' THEN NULL ELSE $39::text END,
         review_type_mix = CASE WHEN $40::jsonb IS NULL THEN review_type_mix ELSE $40::jsonb END,
         carry_mode = COALESCE($41, carry_mode),
+        carry_strategy = COALESCE($49, carry_strategy),
         -- ★ 099: 체험단 종류. null=유지 / ''=미지정으로 해제 — 리뷰타입과 같은 CASE 센티널.
         --   ★ 체험단 종류 UI 가 없는 화면(리뷰어앱 인라인 수정 등)이 저장해도 설정이 안 풀린다.
         work_kind = CASE WHEN $42::text IS NULL THEN work_kind ELSE $42::text END,
         skip_weekends = CASE WHEN $43::boolean IS NULL THEN skip_weekends ELSE $43::boolean END,
         cash_receipt_required = COALESCE($44::boolean, cash_receipt_required),
+        -- ★ 135: 회수·혼합 부속정보. null=유지 — 부속 칸이 없는 화면(리뷰어앱 인라인 수정 등)이
+        --   저장해도 값이 조용히 지워지지 않는다(리뷰 혼합·옵션표와 같은 원칙).
+        --   NOT NULL 컬럼이라 '지움'은 빈 배열·빈 문자열로 표현한다.
+        delivery_type_mix = CASE WHEN $46::jsonb IS NULL THEN delivery_type_mix ELSE $46::jsonb END,
+        recall_courier = CASE WHEN $47::text IS NULL THEN recall_courier ELSE $47::text END,
+        recall_product = CASE WHEN $48::text IS NULL THEN recall_product ELSE $48::text END,
+        repurchase_days = COALESCE($50::integer, repurchase_days),
+        delivery_review_fee_mix = CASE WHEN $51::jsonb IS NULL THEN delivery_review_fee_mix ELSE $51::jsonb END,
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -2325,7 +3223,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
-        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 10), // $35
+        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 15), // $35
         (reviewer_hidden === undefined || reviewer_hidden === null) ? null : reviewer_hidden === true, // $36 ★ 085: null=유지
         (transfer_bank === undefined || transfer_bank === null) ? null : (_normTransferBank(transfer_bank) || ''), // $37 ★ 086
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(),            // $38 ★ 086
@@ -2342,16 +3240,35 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (work_kind === undefined || work_kind === null) ? null : workKindForStore(work_kind),
         (skip_weekends === undefined || skip_weekends === null) ? null : skip_weekends === true,
         (cash_receipt_required === undefined || cash_receipt_required === null) ? null : cash_receipt_required === true,
-        intentionallyUnlinked,
+        intentionallyUnlinked,                                   // $45
+        // $46~$48 ★ 135: null=유지 / []·''=해제(기본형을 벗어나면 위에서 그렇게 정해진다).
+        deliveryMixForStore === null ? null : JSON.stringify(deliveryMixForStore),
+        recallCourierForStore,
+        recallProductForStore,
+        // $49 ★ 139: 세그먼트가 없는 옛 화면은 미전송=유지. 알 수 없는 값도 유지해
+        // 잘못된 API 호출이 기존 공고 전략을 next로 되돌리지 않게 한다.
+        ['next', 'spread', 'extend'].includes(carry_strategy) ? carry_strategy : null,
+        repurchaseDaysState.value,                                // $50 ★ 148: null=유지, 0=제한 없음
+        deliveryReviewFeeMixForStore === null ? null : JSON.stringify(deliveryReviewFeeMixForStore), // $51 ★ 152
       ]
     );
 
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     }
+    require('../services/cashReceiptContext.service')
+      .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
+    if (hasWorkboardDisplayName) {
+      rows[0].workboard_display_name = await _saveWorkboardDisplayName({
+        sheetId: rows[0].linked_sheet_id, tabName: rows[0].linked_tab_name, displayName: workboardDisplayName,
+      });
+    }
+    if (normOpts) await _ensureLinkedWorktableOptionColumn(id, 'update');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
+    if (normOpts) await _ensureLinkedWorktableProductColumn(id, 'update');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
+    await _ensureLinkedWorktableDeliveryColumns(id, 'update');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
     // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
     //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.
     const normFees = normalizeFeeSchedules(fee_schedules);
@@ -2369,7 +3286,10 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // 차수 합계 보정까지 끝난 최종 정원을 연결 작업오더에도 즉시 반영한다.
     // 이 호출이 공고 수정 → 작업오더 동기화의 단일 진입점이다.
     let quotaSync = null;
-    try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total }); }
+    // ★ 정원이 안 바뀐 저장에서는 작업보드 슬롯 맞추기를 건너뛴다(위 게이트와 같은 판정).
+    //   역방향 링크 백필은 그대로 수행된다. 차수 보정이 값을 바꿨을 수 있으므로 최종값으로 비교한다.
+    const _rtSkipWorktable = _rtPrev !== null && (Number(rows[0].recruit_total) || 0) === _rtPrev;
+    try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total, skipWorktable: _rtSkipWorktable }); }
     catch (e) { logger.error('[campaign/update] 작업오더 정원 동기화 실패: ' + e.message); throw e; }
     res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id),
       feeSchedules: await _loadFeeSchedules(pool, id),
@@ -2386,6 +3306,28 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
 router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
+    /* ★★ 130: 참여 이력이 있는 공고는 삭제하지 않는다 — 보관으로 안내한다.
+       이 DELETE 는 FK CASCADE 로 campaign_applications(참여 이력) · campaign_options ·
+       campaign_fee_schedules(참여 시점 리뷰비 스냅샷) · campaign_rounds ·
+       campaign_daily_plans · campaign_reviewer_gates 를 **함께 지우고**,
+       payment_batch_items.campaign_id 는 SET NULL 로 입금 회차의 공고 연결까지 끊는다.
+       → 리뷰어의 리뷰 내역·누적 금액·정산 근거가 조용히 사라진다.
+       삭제는 **발행 직후 오발행분**(참여 0건)에만 남긴다. force 우회는 두지 않는다. */
+    let _apps = null;
+    try {
+      const { rows: ac } = await pool.query(
+        'SELECT COUNT(*) AS n FROM campaign_applications WHERE campaign_id = $1', [id]);
+      _apps = Number(ac[0] && ac[0].n) || 0;
+    } catch (e) {
+      // ★ 세지 못하면 지우지 않는다(fail-closed — 모르는 채로 파괴하지 않는다).
+      logger.warn(`[campaign] 삭제 전 참여 이력 조회 실패 — 삭제 보류 camp=${id}: ${e.message}`);
+      return res.status(503).json({ ok: false, code: 'unknown_history',
+        error: '참여 이력을 확인하지 못해 삭제를 보류했습니다. 잠시 후 다시 시도하거나 [보관]을 이용하세요.' });
+    }
+    if (_apps > 0) {
+      return res.status(409).json({ ok: false, code: 'has_applications', count: _apps,
+        error: `참여 이력이 ${_apps}건 있어 삭제할 수 없습니다 — 대신 [📦 보관]으로 목록에서 내리세요(데이터는 그대로 남고 언제든 되돌릴 수 있습니다).` });
+    }
     const result = await pool.query('DELETE FROM recruit_campaigns WHERE id = $1', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
@@ -2431,17 +3373,56 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
 router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
+    const evaluatedAt = new Date();
     // ★ M3 리뷰 #11: hold_token(열람·취소 열쇠)은 관제에 불필요 — 브라우저로 내리지 않음(컬럼 화이트리스트)
     const { rows } = await pool.query(
-      `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
-              status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
-              order_submission_id, late_order_id, option_key, owner_phone8, dismissed_at,
-              dismissed_by
-       FROM campaign_applications
-       WHERE campaign_id = $1
-       ORDER BY applied_at ASC`,
+      `SELECT ca.id, ca.campaign_id, ca.applicant_name, ca.applicant_phone, ca.applicant_inad,
+              ca.status, ca.sheet_row_added, ca.applied_at, ca.phone8, ca.expires_at, ca.submitted_at,
+              ca.order_submission_id, ca.late_order_id, ca.option_key, ca.owner_phone8, ca.dismissed_at,
+              ca.dismissed_by, ca.blog_url, ca.reject_reason, ca.decided_at, ca.decided_by,
+              COALESCE(linked_order.submitted_at, history_order.submitted_at) AS order_submitted_at,
+              COALESCE(linked_order.source, history_order.source) AS order_source,
+              (COALESCE(linked_order.campaign_was_late, history_order.campaign_was_late, FALSE)
+                OR (ca.order_submission_id IS NULL AND ca.late_order_id IS NOT NULL)) AS order_was_late
+       FROM campaign_applications ca
+       /* 현재 링크를 우선하고, 주문 취소로 신청 쪽 링크가 비워진 뒤에는 주문 원장의 불변 FK로
+          마지막 제출을 복구한다. 로그 화면이 신청 상태에서 제출시각·출처를 추측하지 않게 한다. */
+       LEFT JOIN order_submissions linked_order
+         /* 만료/취소 건을 외부모집으로 다시 제출하면 과거 late_order_id가 남을 수 있다.
+            이때도 현재 확정 주문(order_submission_id)이 화면의 출처·시각 기준이다. */
+         ON linked_order.id = COALESCE(ca.order_submission_id, ca.late_order_id)
+       LEFT JOIN LATERAL (
+         SELECT os.submitted_at, os.source, os.campaign_was_late
+           FROM order_submissions os
+          WHERE linked_order.id IS NULL
+            /* submitted인데 현재 주문 링크가 없으면 새 주문 없는 구매확인 수동확정이다.
+               취소된 과거 주문을 현재 제출처럼 복구하지 않는다. */
+            AND ca.status IS DISTINCT FROM 'submitted'
+            AND os.campaign_application_id = ca.id
+          ORDER BY os.submitted_at DESC, os.id DESC
+          LIMIT 1
+       ) history_order ON TRUE
+       WHERE ca.campaign_id = $1
+       ORDER BY ca.applied_at ASC`,
       [id]
     );
+    const purposeMatches = await loadPopularCreditMatches(pool,
+      [...new Set(rows.map((row) => String(row.phone8 || '')).filter(Boolean))], { evaluatedAt });
+    /* 주문 표시는 작업 로그와 같은 서버 판정값을 쓴다. 초과시간을 브라우저에서 다시 계산하면
+       시간대/반올림 차이로 두 화면이 갈릴 수 있어 초 단위 정수까지 여기서 확정한다. */
+    const controlRows = rows.map(r => {
+      const submittedMs = r.order_submitted_at ? new Date(r.order_submitted_at).getTime() : NaN;
+      const expiresMs = r.expires_at ? new Date(r.expires_at).getTime() : NaN;
+      const isLate = r.order_was_late === true;
+      const orderOverdueSeconds = isLate && Number.isFinite(submittedMs) && Number.isFinite(expiresMs)
+        ? Math.max(0, Math.floor((submittedMs - expiresMs) / 1000)) : null;
+      return {
+        ...r,
+        popular_purpose: purposeMatches.matchedNormalIds.has(String(r.id)),
+        order_submission_type: isLate ? 'late' : (r.order_source === 'admin_external' ? 'external' : 'standard'),
+        order_overdue_seconds: orderOverdueSeconds,
+      };
+    });
     // 🧩 옵션별 현황(061 3단계 관제): 옵션 뷰(정원·잔여·상태) + 금액 포함(관리자 전용)
     let options = [];
     try {
@@ -2470,44 +3451,144 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
         );
         const confirmed = rows.filter(r => r.status === 'submitted').length;
         const rosterRows = Number(ri[0]?.n) || 0;
-        // ★ 차이가 있을 때만 "어느 행이 확정에 없는지"를 찾는다(평상시 쿼리 0).
-        //   대조 키 = phone8(연락처 끝 8자리). 시스템의 신원키와 같아야 오탐이 없다.
+        /* ★ 차이가 있을 때만 "어느 행이 확정에 없는지"를 찾는다(평상시 쿼리 0).
+           ★★ 대조는 **세 키를 모두** 본다 — 종전처럼 명의 phone8 정확일치 하나만 보면
+              정상 확정이 무더기로 "미확정"으로 뜬다(실측 2026-08-19 위프 800건: 196건 중
+              17건이 이 사유였고, 같은 건들이 반대편에서는 "확정인데 줄이 없음"으로 또 세어졌다).
+              ㉮ 명의 `phone8`
+              ㉯ 소유자 `owner_phone8` — 타계정 참여에서 **작업표 연락처 칸에 소유자 번호**가
+                 적히는 정상 케이스(홀드 명의와 구매양식 연락처는 원래 다를 수 있다)
+              ㉰ ★ **주문 링크** — 그 줄의 `order_submission_id` 가 확정 홀드의 것과 같으면 확정이다.
+                 연락처 오타(끝 4자리 1글자 차이)·수취인 번호 기입은 번호로는 **영원히** 못 짝지어지는데,
+                 주문 id 는 이름·연락처·줄 번호가 바뀌어도 불변이다(리뷰어 홈 dedup 과 같은 규율).
+           ★★ 남은 미확정을 **한 덩어리로 보여주지 않는다**: 홀드 이력이 아예 없는 줄은
+              "공고를 거치지 않은 제출"이라 **만료·취소 목록에 애초에 없다** — 종전 화면은 그것까지
+              "[수동확정]하세요"로 안내해, 담당자가 찾을 수 없는 건을 찾게 만들었다(위프 800건에서
+              196건 중 163건이 그랬다). `hasHold`/`hasOrder` 로 갈라 세고 목록도 조치 대상을 먼저 낸다.
+           ★ 판정은 여전히 **관측 전용**이다 — 여기서 무엇이 나오든 캠페인 상태·정원을 바꾸지 않는다. */
         let unmatched = [];
+        let unmatchedCounts = null;
         if (rosterRows > confirmed) {
           const { rows: um } = await pool.query(
-            `SELECT ri.row_index AS row, ri.reviewer_name AS name, ri.phone8
-               FROM review_index ri
-              WHERE ri.sheet_id = $1 AND ri.tab_name = $2
-                AND NOT EXISTS (
-                  SELECT 1 FROM campaign_applications ca
-                   WHERE ca.campaign_id = $3 AND ca.status = 'submitted'
-                     AND ca.phone8 <> '' AND ca.phone8 = ri.phone8
-                )
-              ORDER BY ri.row_index
-              LIMIT 30`,
+            `WITH sub AS (
+                SELECT phone8, owner_phone8, order_submission_id
+                  FROM campaign_applications
+                 WHERE campaign_id = $3 AND status = 'submitted'
+              ), un AS (
+                SELECT ri.row_index AS row, ri.reviewer_name AS name, ri.phone8,
+                       EXISTS (
+                         SELECT 1 FROM campaign_applications ca
+                          WHERE ca.campaign_id = $3 AND COALESCE(ri.phone8, '') <> ''
+                            AND (ca.phone8 = ri.phone8 OR ca.owner_phone8 = ri.phone8)
+                       ) AS has_hold,
+                       EXISTS (
+                         SELECT 1 FROM order_submissions os
+                          WHERE os.sheet_id = $1 AND os.tab_name = $2
+                            AND COALESCE(ri.phone8, '') <> ''
+                            AND right(regexp_replace(COALESCE(os.phone, ''), '\\D', '', 'g'), 8) = ri.phone8
+                       ) AS has_order
+                  FROM review_index ri
+                 WHERE ri.sheet_id = $1 AND ri.tab_name = $2
+                   AND NOT EXISTS (SELECT 1 FROM sub s WHERE s.phone8 <> '' AND s.phone8 = ri.phone8)
+                   AND NOT EXISTS (SELECT 1 FROM sub s WHERE COALESCE(s.owner_phone8, '') <> '' AND s.owner_phone8 = ri.phone8)
+                   AND NOT EXISTS (
+                         SELECT 1 FROM campaign_participants cp
+                           JOIN sub s ON s.order_submission_id = cp.order_submission_id
+                          WHERE cp.sheet_id = $1 AND cp.tab_name = $2
+                            AND cp.seq = ri.row_index AND cp.deleted_at IS NULL
+                       )
+              )
+              SELECT un.*,
+                     count(*) OVER ()::int AS total_cnt,
+                     (count(*) FILTER (WHERE has_hold) OVER ())::int AS hold_cnt,
+                     (count(*) FILTER (WHERE NOT has_hold AND has_order) OVER ())::int AS order_only_cnt
+                FROM un
+               ORDER BY has_hold DESC, has_order ASC, row
+               LIMIT 30`,
             [c0.linked_sheet_id, c0.linked_tab_name, id]
           );
           unmatched = um.map(r => ({
             row: r.row, name: r.name || '',
             phone4: String(r.phone8 || '').replace(/\D/g, '').slice(-4),
             noPhone: !String(r.phone8 || '').trim(),
+            hasHold: r.has_hold === true,
+            hasOrder: r.has_order === true,
           }));
+          const total = um.length ? Number(um[0].total_cnt) || 0 : 0;
+          const hold = um.length ? Number(um[0].hold_cnt) || 0 : 0;
+          const orderOnly = um.length ? Number(um[0].order_only_cnt) || 0 : 0;
+          // ★ 세 칸의 합 ≡ total (화면이 나머지를 스스로 빼서 계산하지 않게 한다)
+          unmatchedCounts = { total, hold, orderOnly, neither: Math.max(0, total - hold - orderOnly) };
         }
+        /* ★ 어휘 재료 — 이 작업이 무시트(작업표)인지 시트 기반인지. 화면은 **이 값으로만**
+           "시트/작업표" 어휘를 가른다(ID 모양(`wt_`)으로 추측하지 않는다 — 이관된 작업은
+           진짜 시트 ID 를 그대로 쓰면서 무시트가 된다).
+           ★ 판정 단일 출처 = `sheetlessScope.isSheetless`(이름 → gid 폴백). 그 함수는 조회
+             실패를 false 로 접으므로 **모르면 종전(시트) 어휘**가 된다 — 표시 계층이라
+             그 방향이 안전하다(무시트 작업에 "시트"라고 적는 쪽이, 시트 작업에 "작업표"라고
+             적어 담당자가 시트를 안 보게 되는 쪽보다 덜 위험하다). */
+        let sheetless = false;
+        try {
+          sheetless = await require('../utils/sheetlessScope')
+            .isSheetless(pool, c0.linked_sheet_id, c0.linked_tab_name);
+        } catch (slErr) { sheetless = false; }
         sheetInfo = {
           tabName: c0.linked_tab_name,
+          sheetless,
           rosterRows,
           confirmed,
           diff: rosterRows > 0 ? rosterRows - confirmed : null,
           unmatched,
+          unmatchedCounts,
           schedule: await describeTabDates(pool, c0.linked_sheet_id, c0.linked_tab_gid, new Date()),
         };
       }
     } catch (siErr) { logger.warn('[campaign/admin/applications] 시트 대조 실패: ' + siErr.message); }
 
-    res.json({ ok: true, data: rows, count: rows.length, options, sheetInfo });
+    res.json({ ok: true, data: controlRows, count: controlRows.length, options, sheetInfo });
   } catch (err) {
     next(err);
   }
+});
+
+/* GET /api/campaign/admin/:id/activity-log — 모집공고에서 연결 작업보드의 로그를 그대로 읽는다.
+   ★ 신규 로그 저장소·별도 집계 0: 작업보드가 쓰는 tabActivityLog 서비스가 단일 출처다.
+   공고 id로 연결 탭을 서버에서 다시 찾아 화면이 다른 sheet/tab을 끼워 넣지 못하게 한다. */
+router.get('/admin/:id/activity-log', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
+              COALESCE(tc.workboard_id, rc.workboard_id) AS workboard_id
+         FROM recruit_campaigns rc
+         LEFT JOIN tab_configs tc
+           ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
+        WHERE rc.id = $1 LIMIT 1`, [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+    const camp = rows[0];
+    const { tabActivityLog, LOG_KINDS } = require('../services/tabActivityLog.service');
+    /* 연결 전 공고도 빈 기록으로 꾸미지 않고 화면이 이유를 말할 수 있게 명시한다. */
+    if (!camp.linked_sheet_id || !camp.linked_tab_name) {
+      return res.json({
+        ok: true, unlinked: true, items: [], failed: [],
+        kinds: LOG_KINDS.filter(k => k.key !== 'inspect'),
+        hasMore: false, nextBefore: null, truncated: false,
+      });
+    }
+    const out = await tabActivityLog({
+      sheetId: camp.linked_sheet_id,
+      tabName: camp.linked_tab_name,
+      gid: camp.linked_tab_gid || '',
+      workboardId: camp.workboard_id || null,
+      kind: req.query.kind,
+      limit: req.query.limit,
+      before: req.query.before,
+      pool,
+    });
+    /* 검수는 과거 로그가 아니라 작업보드의 현재 조치 화면이다. 모집공고에서는 시간 이력만
+       공유하고, 기존 구매확인·취소확정 조치는 별도 [참여 관리]에 보존한다. */
+    res.json({ ...out, kinds: (out.kinds || []).filter(k => k.key !== 'inspect') });
+  } catch (err) { next(err); }
 });
 
 // GET /api/campaign/admin/:id/preview — 관리자: 리뷰어 참여 화면 미리보기 (읽기 전용)
@@ -2534,10 +3615,31 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     // 미리보기용 대표 옵션 — 선택 가능한 첫 옵션(없으면 첫 옵션). 실제 선택이 아니라 화면 예시.
     const sample = optionsRaw.find(o => o.selectable) || optionsRaw[0] || null;
     const options = _optionListForReviewer(optionsRaw);   // ★ 실제 리뷰어 응답과 같은 모양(미리보기 ≠ 실화면 금지)
+    /**
+     * ★★ 미리보기 전용 재료 — 선택지별 유입가이드 맵(optKey → {html, images}).
+     *
+     * 위 `options` 는 실제 리뷰어 응답과 같은 모양이라 선택지별 가이드가 **덜어져 있다**
+     * (고르지도 않은 선택지의 안내 HTML·사진을 리뷰어에게 통째로 보내지 않는 규칙).
+     * 그런데 미리보기 화면은 옵션을 고를 때 그 목록에서 선택지를 다시 찾으므로,
+     * 재료가 없으면 **고르는 순간 가이드가 사라진다**(2026-08-25 실측 — 미리보기는 항상
+     * 옵션을 고르고 들어가는 흐름이라 선택지 전 건이 "등록된 유입가이드가 없어요"로 보였다).
+     *
+     * ★ 목록의 모양은 그대로 두고(계약 불변) 재료만 따로 싣는다.
+     * ★ 이 경로는 adminOrMaster 게이트 뒤 — 관리자는 그 값을 편집하는 주체다.
+     * ★ 리뷰어 경로(`/work-detail`)는 무접촉: 거기는 서버가 고른 selectedOption 이 원본이라 정상이다.
+     */
+    const optionGuides = {};
+    for (const o of optionsRaw) {
+      if (!o || !o.optKey) continue;
+      optionGuides[o.optKey] = {
+        inflowGuideHtml: o.inflowGuideHtml || '',
+        inflowGuideImages: Array.isArray(o.inflowGuideImages) ? o.inflowGuideImages : [],
+      };
+    }
     const workDetail = sanitizeWorkDetail(camp.work_detail);
     // 미리보기에도 모집공고 직접 설정을 우선 적용한다.
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';
-    const ttlMin = Number(camp.hold_ttl_min) || 15;
+    const ttlMin = Number(camp.hold_ttl_min) || 30;
 
     res.json({
       ok: true,
@@ -2554,6 +3656,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
       },
       options,
       selectedOption: sample,
+      optionGuides,                         // 미리보기에서 고른 선택지의 유입가이드 재료(가산 필드)
       canChangeOption: false,               // 미리보기에서는 옵션 변경 불가(서버 상태 무변경)
       workDetail,
       inflowType,
@@ -2594,11 +3697,33 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: `'${a.status}' 상태는 확정 대상이 아닙니다(레거시 오확정 방지).` });
     }
-    // 레드 #7: 같은 (campaign, phone8)의 다른 활성행 정리 — submitted 존재 시 이중확정 거부, applied는 선-취소
-    const { rows: dup } = await client.query(
-      `SELECT id FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'submitted' LIMIT 1`,
-      [id, a.phone8, appId]);
-    if (dup.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, error: `이미 확정된 참여(#${dup[0].id})가 있습니다.` }); }
+    // 지각 주문은 과거 제출시각으로 소급 확정된다. 그 사이 같은 작업에 새 제출이 생겼다면
+    // 대상 주문 자체를 제외하고 양쪽 제출시각의 간격을 검사해 기간 제한 우회를 막는다.
+    const targetOrderId = a.late_order_id || a.order_submission_id || null;
+    const { rows: targetTimeRows } = await client.query(
+      `SELECT COALESCE(
+         (SELECT submitted_at FROM order_submissions WHERE id = $1::uuid),
+         $2::timestamptz, NOW()
+       ) AS submitted_at`,
+      [targetOrderId, a.applied_at]
+    );
+    const { checkRepurchaseConflictAt } = require('../utils/repurchaseGuard');
+    const conflict = await checkRepurchaseConflictAt(client, {
+      sheetId: cRows[0].linked_sheet_id, tabName: cRows[0].linked_tab_name,
+      campaignId: id, phone8: a.phone8, days: cRows[0].repurchase_days,
+      targetSubmittedAt: targetTimeRows[0].submitted_at,
+      excludeApplicationId: appId, excludeOrderSubmissionId: targetOrderId,
+    });
+    if (conflict.blocked) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false, reason: 'repurchase_window', days: conflict.days,
+        conflictingSubmittedAt: conflict.conflictingSubmittedAt,
+        error: `이 주문의 제출시각 전후 ${conflict.days}일 안에 같은 작업 참여가 있어 확정할 수 없습니다.`,
+      });
+    }
+    // 같은 (campaign, phone8)의 진행 중 홀드만 정리한다. 기간을 지킨 재참여는 과거 submitted 행과
+    // 함께 존재할 수 있으므로, 늦게 도착한 구매양식의 수동확정도 과거 확정을 이유로 영구 차단하지 않는다.
     await client.query(
       `UPDATE campaign_applications SET status = 'cancelled'
         WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'applied'`, [id, a.phone8, appId]);
@@ -2621,6 +3746,153 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     if (err.code === '23505') return res.status(409).json({ ok: false, error: '동일 리뷰어의 활성 참여와 충돌 — 새로고침 후 재시도하세요.' });
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/* ═══ 127 블로그 승인제 — 승인/반려 (사용자 확정 2026-08-19) ═══
+   승인 = blog_pending → 'applied' + expires_at=NOW()+구매기한(기본 24h = BLOG_PURCHASE_TTL_MIN)
+     → 그 뒤로는 **기존 홀드 파이프라인 그대로**(카운트·스윕(만료→expired)·확정·late 구제·work-detail).
+   반려 = blog_pending → 'blog_rejected' + 사유(필수 — 리뷰어 화면에 그대로 표시) → 즉시 재신청 가능.
+   ★ 승인 시점에 정원 재검사(사용자 확정 ① "승인한 사람만 센다" — 대기는 미점유이므로 승인이 소비 시점).
+     잠금 계층 = confirm 과 동일(캠페인 행 FOR UPDATE → 신청 행 FOR UPDATE).
+   ★ 알림(사용자 확정 ④ 둘 다): 공고 페이지 상태 표시(work-detail reason) + 1:1 문의 자동 메시지
+     (csBridge.postAdminNotice — COMMIT 뒤 fail-soft, 통지 실패가 승인/반려를 되돌리지 않는다). */
+const BLOG_PURCHASE_TTL_MIN = () => {
+  const v = parseInt(process.env.BLOG_PURCHASE_TTL_MIN || '1440', 10);
+  return (Number.isFinite(v) && v > 0) ? v : 1440;
+};
+
+async function _notifyBlogDecision(camp, app, text, by) {
+  // 1:1 문의 자동 메시지 — 스레드 키는 연결 탭(sheetId||tabName). 무시트 공고도 가상 시트ID 로 성립.
+  // ★ 절대 throw 하지 않는다(csBridge 규율). 연결 탭 없는 공고는 통지 생략(스레드 키가 없다).
+  try {
+    if (!camp.linked_tab_sheet_id || !camp.linked_tab_name) return;
+    await require('../services/csBridge.service').postAdminNotice({
+      sheetId: camp.linked_tab_sheet_id, tabName: camp.linked_tab_name,
+      reviewerName: app.applicant_name, phone8: app.phone8, message: text, by,
+    });
+  } catch (e) { logger.warn(`[campaign/blog-decide] 1:1 통지 실패(무해): ${e.message}`); }
+}
+
+// POST /api/campaign/admin/:id/blog-approve {applicationId}
+router.post('/admin/:id/blog-approve', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const { id } = req.params;
+  const appId = parseInt(req.body.applicationId, 10);
+  if (!appId) return res.status(400).json({ ok: false, error: 'applicationId 필수' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    const camp = cRows[0];
+    const { rows: t } = await client.query(
+      `SELECT * FROM campaign_applications WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [appId, id]);
+    if (!t.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '신청을 찾을 수 없습니다.' }); }
+    const a = t[0];
+    if (a.status === 'applied') { await client.query('ROLLBACK'); return res.json({ ok: true, already: true, expiresAt: a.expires_at }); } // 멱등(더블클릭)
+    if (a.status !== 'blog_pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'not_pending', status: a.status,
+        error: `'${a.status}' 상태는 승인 대상이 아닙니다(승인 대기 건만 승인할 수 있어요).` });
+    }
+    /* ★ 정원 재검사 — 승인이 정원 소비 시점(사용자 확정 ①). 총원 0 = 무제한.
+       사용량 = 제출확정 + 유효홀드(승인분 포함) — fetchCampaignCounts 와 같은 판정 시각 기준. */
+    const total = Number(camp.recruit_total) || 0;
+    if (total > 0) {
+      const { rows: u } = await client.query(
+        `SELECT COUNT(*) FILTER (WHERE status='submitted') AS sub,
+                COUNT(*) FILTER (WHERE status='applied' AND expires_at > NOW()) AS holds
+           FROM campaign_applications WHERE campaign_id = $1`, [id]);
+      const used = (Number(u[0].sub) || 0) + (Number(u[0].holds) || 0);
+      if (used >= total) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'capacity_full', used, total,
+          error: `정원이 가득 찼어요(확정+진행 ${used} / 총 ${total}). 총모집을 늘리거나 다른 신청을 정리한 뒤 승인하세요.` });
+      }
+    }
+    /* ★ 옵션 정원 재검사 — 신청이 고른 옵션이 이미 소진됐으면 승인 불가(자리 없는 승인 금지). */
+    if (a.option_key) {
+      const { rows: opt } = await client.query(
+        `SELECT recruit_total FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`, [id, a.option_key]);
+      const optTotal = opt.length ? (Number(opt[0].recruit_total) || 0) : 0;
+      if (optTotal > 0) {
+        const { rows: ou } = await client.query(
+          `SELECT COUNT(*) FILTER (WHERE status='submitted') AS sub,
+                  COUNT(*) FILTER (WHERE status='applied' AND expires_at > NOW()) AS holds
+             FROM campaign_applications WHERE campaign_id = $1 AND option_key = $2`, [id, a.option_key]);
+        const optUsed = (Number(ou[0].sub) || 0) + (Number(ou[0].holds) || 0);
+        if (optUsed >= optTotal) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ ok: false, reason: 'option_full', optionKey: a.option_key,
+            error: `선택한 옵션(${a.option_key})의 정원이 가득 찼어요(${optUsed}/${optTotal}).` });
+        }
+      }
+    }
+    const ttlMin = BLOG_PURCHASE_TTL_MIN();
+    const { rows: up } = await client.query(
+      `UPDATE campaign_applications
+          SET status = 'applied',
+              expires_at = NOW() + make_interval(mins => $2),
+              decided_at = NOW(), decided_by = $3, reject_reason = NULL
+        WHERE id = $1 AND status = 'blog_pending'
+        RETURNING expires_at`, [appId, ttlMin, String((req.admin && req.admin.name) || 'admin').slice(0, 100)]);
+    if (!up.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, error: '상태가 바뀌었어요. 새로고침 후 다시 시도하세요.' }); }
+    await client.query('COMMIT');
+    logger.info(`[campaign/blog-approve] camp=${id} app=${appId} ttl=${ttlMin}m by=${req.admin && req.admin.name}`);
+    const hours = Math.round(ttlMin / 60);
+    await _notifyBlogDecision(camp, a,
+      `블로그체험단 참여가 승인되었어요! 🎉\n공고 페이지에서 ${hours}시간 안에 구매를 진행하고 구매양식을 제출해주세요. 기한이 지나면 자리가 자동 취소됩니다.`,
+      (req.admin && req.admin.name) || 'admin');
+    res.json({ ok: true, expiresAt: up[0].expires_at });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    if (err.code === '23505') return res.status(409).json({ ok: false, error: '같은 명의의 활성 참여와 충돌 — 새로고침 후 재시도하세요.' });
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/campaign/admin/:id/blog-reject {applicationId, reason}
+router.post('/admin/:id/blog-reject', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const { id } = req.params;
+  const appId = parseInt(req.body.applicationId, 10);
+  const reason = String(req.body.reason || '').trim().slice(0, 500);
+  if (!appId) return res.status(400).json({ ok: false, error: 'applicationId 필수' });
+  // ★ 사유 필수 — 리뷰어 화면·1:1 문의에 그대로 전달된다(사유 없는 반려는 리뷰어가 고칠 방법을 모른다).
+  if (!reason) return res.status(400).json({ ok: false, error: '반려 사유를 입력해주세요(리뷰어에게 그대로 전달됩니다).' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    const camp = cRows[0];
+    const { rows: t } = await client.query(
+      `SELECT * FROM campaign_applications WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [appId, id]);
+    if (!t.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '신청을 찾을 수 없습니다.' }); }
+    const a = t[0];
+    if (a.status === 'blog_rejected') { await client.query('ROLLBACK'); return res.json({ ok: true, already: true }); } // 멱등
+    if (a.status !== 'blog_pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'not_pending', status: a.status,
+        error: `'${a.status}' 상태는 반려 대상이 아닙니다(승인 대기 건만 반려할 수 있어요).` });
+    }
+    await client.query(
+      `UPDATE campaign_applications
+          SET status = 'blog_rejected', reject_reason = $2, decided_at = NOW(), decided_by = $3
+        WHERE id = $1 AND status = 'blog_pending'`,
+      [appId, reason, String((req.admin && req.admin.name) || 'admin').slice(0, 100)]);
+    await client.query('COMMIT');
+    logger.info(`[campaign/blog-reject] camp=${id} app=${appId} by=${req.admin && req.admin.name}`);
+    await _notifyBlogDecision(camp, a,
+      `블로그체험단 참여 신청이 반려되었어요.\n사유: ${reason}\n블로그 주소를 확인한 뒤 공고 페이지에서 바로 다시 신청할 수 있어요.`,
+      (req.admin && req.admin.name) || 'admin');
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     next(err);
   } finally {
     client.release();

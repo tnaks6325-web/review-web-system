@@ -35,6 +35,10 @@ ok('campaign.html: 옵션 확정 → _joinWithOption → (타계정 미사용 �
 ok('campaign.html: _doApply가 optionKey를 apply body에 실음', /function _doApply\(optionKey, sub\)[\s\S]*?if\(optionKey\) body\.optionKey = optionKey/.test(camp));
 ok('campaign.html: 옵션 소진 사유 처리(재선택 유도)', /option_required','option_invalid','option_soldout','option_today_done','option_unavailable/.test(camp));
 ok('campaign.html: 참여 후 옵션카드+변경(renderJoinedOption)', /function renderJoinedOption\(j\)/.test(camp) && /openChangeOptSheet\(\)/.test(camp));
+ok('campaign.html: 단일상품 선택지(product 1개)는 중복 참여옵션 카드를 숨김',
+  /function _isSingleProductUnitCampaign\(j\)/.test(camp)
+  && /options\.length === 1/.test(camp)
+  && /_isSingleProductUnitCampaign\(j\)/.test(camp));
 ok('campaign.html: 옵션변경은 change-option 호출 + work-detail 재조회(iframe 재로드)', /\/change-option/.test(camp) && /_doChangeOption[\s\S]*?await enterJoined\(\)/.test(camp));
 ok('campaign.html: iframe에 optionKey 전달(embed 잠금표시)', /if\(j\.application && j\.application\.optionKey\) qp\.set\('optionKey', j\.application\.optionKey\)/.test(camp));
 

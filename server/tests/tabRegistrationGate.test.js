@@ -44,6 +44,10 @@ async function _dispatchQuery(sql, params) {
   if (/SELECT value FROM app_settings WHERE key = 'smart_build_modified_cache'/.test(s)) {
     return { rows: _persistedCacheJson ? [{ value: _persistedCacheJson }] : [] };
   }
+  // ★★ 스윕 제외 게이트(`sheetlessScope.SWEEP_SKIP_SHEET_IDS_SQL`)는 열거식을 서브쿼리로 **품고 있다**
+  //   → 더 좁은 이 분기를 먼저. 뒤에 두면 게이트가 열거 fixture 를 받아 전 시트가 제외되고
+  //   등록 게이트 계수가 통째로 0 이 된다(실측 함정, 레포 관용구: 스텁 분기는 좁은 것부터).
+  if (/BOOL_AND/.test(s)) return { rows: [] };
   if (/SELECT DISTINCT sheet_id FROM campaigns/.test(s)) return { rows: _sheetIdRows };
   // smartBuild: 마감+등록 탭 로드 (신규 쿼리)
   if (/SELECT sheet_id, tab_name, tab_gid, is_closed FROM tab_configs$/.test(s)) return { rows: _tcRowsAll };
