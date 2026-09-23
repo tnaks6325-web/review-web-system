@@ -43,7 +43,7 @@
     <div class="sub" id="sub">불러오는 중…</div>
   </div>
   <div class="wrap" id="wrap">
-    <div class="state"><div class="spin"></div>리뷰 이미지를 불러오는 중입니다…</div>
+    <div class="state"><div class="spin"></div>리뷰 캡처를 불러오는 중입니다…</div>
   </div>
   <div class="lb" id="lb" onclick="if(event.target===this)_closeLb()">
     <button class="x" onclick="_closeLb()" aria-label="닫기">&times;</button>
@@ -52,6 +52,7 @@
   </div>
 
   <script src="api.js"></script>
+  <script src="js/drive-thumb.js"></script>
   <script>
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function qparam(k){ return new URLSearchParams(location.search).get(k) || ''; }
@@ -69,11 +70,11 @@
 
     function render(data){
       document.getElementById('title').textContent = data.title || '리뷰 보고';
-      document.getElementById('sub').textContent = `총 ${data.count}장의 리뷰 이미지`;
+      document.getElementById('sub').textContent = `총 ${data.count}장의 리뷰 캡처`;
       document.title = (data.title || '리뷰 보고') + ' — 리뷰 보고';
       var wrap=document.getElementById('wrap');
       if(!data.images || !data.images.length){
-        wrap.innerHTML = `<div class="state"><div class="ic">🗂️</div>아직 등록된 리뷰 이미지가 없습니다.</div>`;
+        wrap.innerHTML = `<div class="state"><div class="ic">🗂️</div>아직 등록된 리뷰 캡처가 없습니다.</div>`;
         return;
       }
       // 리뷰어별 그룹핑(이름 없으면 '기타')
@@ -87,8 +88,7 @@
       var html = order.map(function(name){
         var cells = groups[name].map(function(im){
           return `<div class="cell" onclick="_openLb('${esc(im.id)}')">
-            <div class="imgbox"><img loading="lazy" src="${IMG(im.id)}" alt="${esc(im.name)}"
-              onerror="this.onerror=null;this.src='${THUMB(im.id)}'"></div>
+            <div class="imgbox"><img loading="lazy"${window.DriveThumb ? DriveThumb.attrs(im.id, 400, IMG(im.id)) : ` src="${IMG(im.id)}" onerror="this.onerror=null;this.src='${THUMB(im.id)}'"`} alt="${esc(im.name)}"></div>
             <div class="cap">${esc(name)}</div>
           </div>`;
         }).join('');

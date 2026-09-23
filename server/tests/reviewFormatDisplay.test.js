@@ -26,12 +26,15 @@ const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + nam
 const routes = nc(R('src/routes/reviewEdit.routes.js'));
 const home = nc(RF('index.html'));
 const { optionWriteColumns } = require('../src/services/orderLedger.service');
+const { isReviewOptionHeader } = require('../src/utils/reviewType');
 
 /* ═══ 값 추출 — 실제 함수로 실행(라우트와 같은 파생 규칙) ═══ */
 const extract = (rj) => {
   const headers = Object.keys(rj);
-  return optionWriteColumns(headers)
-    .map(i => ({ label: headers[i], value: String(rj[headers[i]] == null ? '' : rj[headers[i]]).trim() }))
+  const optionHeaders = headers.filter(isReviewOptionHeader)
+    .concat(optionWriteColumns(headers).map(i => headers[i]));
+  return [...new Set(optionHeaders)]
+    .map(label => ({ label, value: String(rj[label] == null ? '' : rj[label]).trim() }))
     .filter(o => o.label && o.value);
 };
 {
@@ -49,7 +52,7 @@ ok('빈 값은 표시하지 않는다(없는 지시를 지어내지 않는다)',
 ok('옵션 칸이 없는 탭은 빈 목록(무영향)', extract({ '번호': '1', '수취인': 'A' }).length === 0);
 ok('여러 옵션 칸이면 전부 병기', (() => {
   const out = extract({ '옵션1': '블랙', '리뷰옵션': '포토리뷰', '수취인': 'A' });
-  return out.length === 2 && out[0].value === '블랙' && out[1].value === '포토리뷰';
+  return out.length === 2 && out.some(o => o.value === '블랙') && out.some(o => o.value === '포토리뷰');
 })());
 // ★ 한계(의도된 것): 헤더에 '상품'이 들어간 옵션열은 매퍼가 관리자 전용열로 보호해 기입 대상이
 //   아니므로 표시에서도 빠진다. 표시 규칙을 따로 만들면 "쓰는 칸"과 "보여주는 칸"이 갈려 드리프트한다.
@@ -58,8 +61,9 @@ ok('한계 고정: 상품옵션명류(관리자 보호열)는 표시 대상 아�
 
 /* ═══ 서버 배선 ═══ */
 ok('participation-brief 가 workOptions 를 반환한다', /workOptions,\s*$/m.test(routes) || /workOptions,/.test(routes));
-ok('★ 판정은 C′ 단일 출처(optionWriteColumns) — 헤더 문자열 규칙 재구현 금지',
+ok('★ 판정은 리뷰옵션 단일 출처 + optionWriteColumns — 헤더 문자열 규칙 재구현 금지',
   /const \{ optionWriteColumns \} = require\('\.\.\/services\/orderLedger\.service'\)/.test(routes)
+  && /const \{ isReviewOptionHeader \} = require\('\.\.\/utils\/reviewType'\)/.test(routes)
   && !/optionColIndexes/.test(routes));
 ok('★ 소유권 검증 뒤에서만 읽는다(무인증 노출 금지)', (() => {
   const i = routes.indexOf("router.get('/participation-brief'");

@@ -3,16 +3,24 @@
    - 문의 시작 = 리뷰 내역 카드 → 참여상품 정보 팝업의 [1:1 문의하기] (index.html)
    - 1:1문의 탭 = 이미 문의한 목록(내 문의함, index.html의 #sectionCsInbox) — 팝업 없음
    - 이 파일은 대화창 + 미확인 뱃지 + 관리자 답장 실시간(SSE) 담당
-   의존: api.js(gasGet/gasPost, API_BASE_URL), localStorage "iad_reviewer_user"
+   의존: api.js(gasGet/gasPost, API_BASE_URL), index.html getSavedUser()
    ═══════════════════════════════════════════════════════════ */
 (function () {
   const USER_KEY = "iad_reviewer_user";
+  const HOME_SESSION_KEY = "iad_reviewer_home_session";
   let _open = null;        // { campaignKey, campaignLabel, campaignSource, threadId }
   let _sse = null;
+  let _ssePhone8 = "";
   let _unread = false;
 
   function getUser() {
-    try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { return null; }
+    // 목록(index.html)과 대화창이 반드시 같은 리뷰어를 보아야 한다.
+    // 관리자 바로가기는 현재 탭의 sessionStorage를 우선하므로, 이 모듈에서
+    // localStorage를 다시 직접 읽으면 목록은 A, 대화는 B 계정을 조회할 수 있다.
+    try {
+      if (typeof window.getSavedUser === "function") return window.getSavedUser();
+      return JSON.parse(sessionStorage.getItem(HOME_SESSION_KEY) || localStorage.getItem(USER_KEY));
+    } catch (e) { return null; }
   }
   function esc(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -31,7 +39,13 @@
   //    여기서는 미확인 표시 점(#rcsTabDot)과 SSE 연결만 관리한다.
   function ensureConnected() {
     const user = getUser();
-    if (user && user.name && !_sse) connectSSE();
+    const phone8 = user && user.name && user.phone8 ? String(user.phone8) : "";
+    if (!phone8) {
+      if (_sse) { try { _sse.close(); } catch (_) {} }
+      _sse = null; _ssePhone8 = ""; setTabBadge(0);
+      return;
+    }
+    if (!_sse || _ssePhone8 !== phone8) connectSSE();
   }
   // 하단 탭바 "1:1문의" 뱃지에 총 미확인 수(숫자) 표기
   function setTabBadge(count) {
@@ -85,10 +99,10 @@
   }
 
   // ── 대화창 ──
-  async function openChat(campaignKey, campaignLabel, campaignSource) {
+  async function openChat(campaignKey, campaignLabel, campaignSource, threadId) {
     const user = getUser();
     if (!user || !user.phone8) { toast("로그인이 필요합니다"); return; }
-    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", threadId: null };
+    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", threadId: threadId || null };
     const headerSub = "관리자에게 문의를 남겨주세요";
     _pending = [];                                   // 방을 바꾸면 이전 첨부는 버린다
     const ov = overlay();
@@ -122,7 +136,10 @@
     if (!_open) return;
     const user = getUser();
     try {
-      const data = await gasGet({ action: "csReviewerMessages", phone8: user.phone8, campaignKey: _open.campaignKey });
+      // 목록에서 연 방은 threadId로 정확히 조회한다. campaignKey는 새 문의창과
+      // 예전 호출부를 위한 폴백이다. 서버는 threadId와 phone8 소유권을 함께 확인한다.
+      const data = await gasGet({ action: "csReviewerMessages", phone8: user.phone8,
+        threadId: _open.threadId || undefined, campaignKey: _open.campaignKey });
       if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
       _open.threadId = data.threadId || _open.threadId;
       renderMessages(data.messages || []);
@@ -143,7 +160,7 @@
     }
     box.innerHTML = messages.map(m => {
       const mine = m.senderRole === 'reviewer';
-      // 리뷰이미지 교체요청 = 카드(관리자 화면과 **같은 렌더러**, 여기선 읽기 전용).
+      // 리뷰캡처 교체요청 = 카드(관리자 화면과 **같은 렌더러**, 여기선 읽기 전용).
       //   리뷰어가 자기 요청의 진행 상태를 채팅 안에서 그대로 확인한다.
       if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
         return `<div style="display:flex;flex-direction:column;align-items:${mine ? 'flex-end' : 'flex-start'}">
@@ -271,6 +288,7 @@
     if (!user || !user.phone8) return;
     if (_sse) { try { _sse.close(); } catch (_) {} _sse = null; }
     try {
+      _ssePhone8 = String(user.phone8);
       _sse = new EventSource(API_BASE_URL + "/api/reviewer/cs/events?phone8=" + encodeURIComponent(user.phone8));
       _sse.addEventListener("cs_message", function (event) {
         let data = {}; try { data = JSON.parse(event.data); } catch (_) {}
@@ -287,7 +305,13 @@
           toast("관리자 답변이 도착했습니다");
         }
       });
-    } catch (_) {}
+    } catch (_) { _sse = null; _ssePhone8 = ""; }
+  }
+
+  // 로그인·관리자 바로가기 계정이 바뀌면 폴링을 기다리지 않고 즉시 반영한다.
+  function syncSession() {
+    ensureConnected();
+    refreshUnread();
   }
 
   // ── 초기화 ──
@@ -303,5 +327,5 @@
   else init();
 
   window.ReviewerCS = { open: openInbox, openChat, send, back: backToInbox, close: closeAll,
-                        pickFiles, removeAttach, viewImage, refreshUnread };
+                        pickFiles, removeAttach, viewImage, refreshUnread, syncSession };
 })();

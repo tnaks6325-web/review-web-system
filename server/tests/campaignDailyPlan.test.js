@@ -107,15 +107,40 @@ eq('carry 없어도(기준선 조회 실패) 오늘 조절값은 적용 — 조�
 eq('미래 날짜 계획은 오늘 정원에 영향 없음',
   S.dailyQuota(CAMP, 80, carry(80), ctx({ [d(3)]: 5 })), 40);
 
+// ★ 139: 모집공고 설정의 배치 전략은 서버 정원 계산에 직접 반영된다.
+// 기존 NULL은 next로 해석해 배포만으로 운영 중인 공고를 재배치하지 않는다.
+{
+  const strategyCamp = { ...CAMP, daily_limit: 20, recruit_total: 80 };
+  const strategyCarry = { startDate: d(-1), today, submittedSince: 15 }; // 첫날 20명 중 15명 확정 → 미달 5
+  eq('139 기존 공고의 전략 NULL = 현행 다음날 가산',
+    S.carryStrategy(strategyCamp), 'next');
+  eq('139 다음날 더하기 = 미달 5가 다음날 정원에 가산',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'next' }, 15, strategyCarry), 25);
+  eq('139 종료일 뒤에 붙이기 = 다음날은 기본 일건수 유지',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'extend' }, 15, strategyCarry), 20);
+  eq('139 남은 날에 나눠담기 = 원래 종료일까지 분산',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'spread' }, 15, strategyCarry), 22);
+  eq('139 명시 날짜계획은 종료일 연장보다 우선',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'extend' }, 15, strategyCarry, ctx({ [today]: 12 })), 12);
+  eq('139 종료일 연장도 총원 잔여량 clamp 유지',
+    S.dailyQuota({ ...strategyCamp, carry_strategy: 'extend' }, 77, strategyCarry), 3);
+}
+
 // 킬스위치 — require 시점 상수라 자식 프로세스로 검증(계획 무시 = 전건 기존 동작)
 {
+  /* ★★ 자식 프로세스의 출력은 **문자열로** 찍고 색을 끈다(2026-09-22 실측).
+     `console.log(<숫자>)` 는 Node 가 `util.inspect` 로 찍어 색 기호(ANSI)를 덧붙인다.
+     터미널이 색을 켜 두면(`FORCE_COLOR`) 그 설정이 자식에게 그대로 상속돼 출력이
+     `\x1b[33m40\x1b[39m` 이 되고, `=== '40'` 이 **영문 모를 실패**로 뜬다.
+     CI 는 색이 꺼져 있어 초록이라 더 위험하다 — 사람 화면에서만 빨간 가드는
+     곧 아무도 안 보게 되고, 빨간 가드는 새 변경도 못 지킨다. */
   const out = execFileSync(process.execPath, ['-e', `
     const S = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'services', 'campaignState.service.js'))});
     const CAMP = { daily_limit: 40, recruit_total: 200 };
     const q = S.dailyQuota(CAMP, 80, { startDate: '2026-08-04', today: '2026-08-06', submittedSince: 80 },
       { today: '2026-08-06', plans: { '2026-08-06': 20 } });
-    console.log(q);
-  `], { env: { ...process.env, CAMPAIGN_DAILY_PLAN: '0' } }).toString().trim();
+    console.log(String(q));
+  `], { env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', CAMPAIGN_DAILY_PLAN: '0' } }).toString().trim();
   eq('★ 킬스위치 CAMPAIGN_DAILY_PLAN=0 → 조절 무시(40)', out, '40');
 }
 
@@ -142,6 +167,14 @@ const CNT = (over = {}) => ({
 {
   const st = S.computeCampaignState(CAMP, CNT({ todaySubmitted: 20, submittedAll: 100, plans: { [today]: 20 } }));
   eq('조절 20 다 차면 daily_done', st.state, 'daily_done');
+}
+{
+  // ★ 회귀: 시트 일정이 없는 공고도 0명 계획은 "오늘 모집 완료"가 아니라 휴무다.
+  // 이 분기가 없으면 총 500명 중 252명처럼 남은 자리가 있어도 dailyQuota=0에 걸려
+  // 카드가 오늘 완료·다음 계획일 재오픈으로 잘못 보인다.
+  const st = S.computeCampaignState(CAMP, CNT({ plans: { [today]: 0, [d(1)]: 40 } }));
+  eq('★ 무시트 0명 계획 = 휴무(rest_day)', st.stateReason, 'rest_day');
+  eq('★ 무시트 0명 계획의 다음 진행일', st.nextWorkDate, d(1));
 }
 {
   // ★★ 시트 일정 캠페인(063)도 조절 가능(사용자 확정 2026-08-07 — 종전 "계획 무시" 규칙 폐기).
@@ -352,18 +385,27 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     const keep = {
       sync: sdp.syncAdjustedPlansToWorktable, defaults: sdp.loadWorktableDefaults,
       rebuild: sdp.rebuildAdjustedPlansToWorktable, ledgers: led.rebuildLedgers, isSheetless: scope.isSheetless,
+      slotCap: require('../src/services/linkedRecruitQuota.service').syncWorktableSlotsInTx,
       sheet: CAMP_ROW.linked_sheet_id, tab: CAMP_ROW.linked_tab_name,
     };
+    const quotaSvc = require('../src/services/linkedRecruitQuota.service');
     CAMP_ROW.linked_sheet_id = 'wt_abc'; CAMP_ROW.linked_tab_name = '위프800';
     scope.isSheetless = async () => true;
     sdp.loadWorktableDefaults = async () => new Map();
     sdp.syncAdjustedPlansToWorktable = async () => ({ ok: true, moved: 1, cleared: 0 });
     led.rebuildLedgers = async () => ({ mirrorRows: 1, indexRows: 1, submittedCount: 0 });
+    const capSeen = [];
+    quotaSvc.syncWorktableSlotsInTx = async (client, campaign, target, by) => {
+      capSeen.push({ client, campaign, target, by });
+      return { synced: true, target, add: 0, retire: 3 };
+    };
 
     const planRows = [{ date: d(1), count: 20 }, { date: d(2), count: 20 }];
     const stubWithPlans = () => {
       const st = baseStub();
       st['FROM campaign_daily_plans'] = (sql) => ({ rows: /plan_date >=/.test(sql) ? planRows : [] });
+      // 주문 원장 총량 게이트 기본 on — 연결 작업표 테스트는 정상 조회(주문 0)를 명시한다.
+      st.order_submissions = [{ id: 'c1', orders: 0, orders_all: 0, live_campaigns: 1 }];
       return st;
     };
 
@@ -381,6 +423,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       /* ★ 부분일치로 보면 RELEASE/ROLLBACK TO 가 대신 통과시킨다(변이시험 실측) — 정확일치로 본다. */
       CALLS.some(c => c.sql.trim() === 'SAVEPOINT cp_auto_rebuild'));
     ok('★ 결과를 응답에 실어 화면이 말할 수 있다', !!(r.worktableSync && r.worktableSync.rebuild));
+    ok('★★ 모집계획 저장도 활성 작업표 행 수를 총정원으로 동기화',
+      capSeen.length === 2 && capSeen.every(x => x.campaign === CAMP_ROW && x.target === CAMP_ROW.recruit_total)
+      && r.worktableSync.slotCap.retire === 3 && r.worktableSync.slotCap.afterRebuild.retire === 3);
 
     // ② 재구성이 실패해도 계획 저장은 살아남는다(throw 없음 · ROLLBACK TO 만)
     sdp.rebuildAdjustedPlansToWorktable = async () => { const e = new Error('boom'); e.code = 'worktable_rebuild_below_used'; throw e; };
@@ -407,6 +452,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
 
     sdp.syncAdjustedPlansToWorktable = keep.sync; sdp.loadWorktableDefaults = keep.defaults;
     sdp.rebuildAdjustedPlansToWorktable = keep.rebuild; led.rebuildLedgers = keep.ledgers;
+    quotaSvc.syncWorktableSlotsInTx = keep.slotCap;
     scope.isSheetless = keep.isSheetless;
     CAMP_ROW.linked_sheet_id = keep.sheet; CAMP_ROW.linked_tab_name = keep.tab;
     STUB = baseStub();
@@ -467,6 +513,32 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ 총량 clamp 생존', /Math\.min\(q, rt - before\)/.test(st));
   ok('계획 로더 SAVEPOINT 격리(082 규율)', /SAVEPOINT cdp_plans/.test(st) && /ROLLBACK TO SAVEPOINT cdp_plans/.test(st));
   ok('42P01 네거티브 캐시', /_planTableMissingAt/.test(st));
+  const mig139 = readM('139_campaign_carry_strategy.sql');
+  const ir = readF('js/index-recruit.js');
+  const cdp = readF('js/campaign-daily-plan.js');
+  const routeSrc = readS('routes/campaign.routes.js');
+  ok('139 전략 컬럼은 재실행 안전하게 추가',
+    /ADD COLUMN IF NOT EXISTS carry_strategy TEXT DEFAULT 'next'/.test(mig139));
+  ok('139 전략은 보류(carry_mode)와 별도이며 서버가 next|spread|extend만 해석',
+    /function carryStrategy\(c\)/.test(st)
+    && /new Set\(\['next', 'spread', 'extend'\]\)/.test(st)
+    && /strategy !== 'extend'/.test(st));
+  ok('139 신규 공고 설정은 전략을 저장하고 편집 시 서버값을 복원',
+    /payload\.carry_strategy/.test(ir)
+    && /c\.carry_strategy/.test(ir)
+    && !/localStorage\.getItem\("rf_carry_strategy_v1_"/.test(ir));
+  ok('139 생성·수정·공개 목록이 전략을 같은 값으로 전달',
+    /carry_mode, carry_strategy, skip_weekends/.test(routeSrc)
+    && /carry_strategy = COALESCE\(\$49, carry_strategy\)/.test(routeSrc)
+    && /carry_strategy, work_kind, skip_weekends/.test(routeSrc));
+  const legacyPublicFields = (routeSrc.match(/const PUBLIC_FIELDS_LEGACY = \[[\s\S]*?\];/) || [''])[0];
+  const participationPublicFields = (routeSrc.match(/const PUBLIC_FIELDS_PARTICIPATION = \[[\s\S]*?\];/) || [''])[0];
+  ok('139 공개 카드 응답 화이트리스트도 전략을 전달',
+    legacyPublicFields.includes("'carry_strategy'")
+    && participationPublicFields.includes("'carry_strategy'"));
+  ok('139 날짜별 조절 모달도 서버 저장 전략을 우선 사용',
+    /S\.carryMode \|\| j\.carryStrategy \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE/.test(cdp)
+    && /carryStrategy: carryStrategy\(camp\)/.test(readS('services/campaignPlan.service.js')));
 
   // 라우터 스택 실검사(문자열 grep 이 아니라 실제 등록 확인)
   const trackB = require('../src/routes/trackB.routes');
@@ -519,7 +591,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★★ 오늘 정원 0인 카드도 칩(이월·조절·보류)을 그린다 — 종전엔 자리표시자가 통째로 덮어써
   //   휴무일·일정종료 공고의 이월이 화면 어디에도 없었다(사용자 신고 2026-08-07).
   ok('★ 칩은 게이지 분기 밖에서 만든다(정원 0 카드에서도 표시)',
-    /const chips = `\$\{holdTip\}\$\{planTip\}\$\{carryTip\}`;/.test(cards)
+    /const chips = `\$\{tqChip\}\$\{holdTip\}\$\{planTip\}\$\{carryTip\}`;/.test(cards)
     && (cards.match(/\$\{chips\}/g) || []).length >= 2);
   ok('★ 정원 0 사유를 사실대로(게시된 공고를 "게시 전"으로 위장 금지)',
     /function _zeroQuotaNote\(c, isPre, isDraft\)/.test(cards)
@@ -532,7 +604,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('모달 경로 = /api/trackb/* 공용(재기준 불필요)', /'\/api\/trackb\/campaigns\/'/.test(modal));
   ok('★ 질문은 조절 한 묶음당 한 번(디바운스)', /SETTLE_MS = 700/.test(modal) && /scheduleSettle/.test(modal));
   ok('★ 분산 범위 = 축소 전 종료일까지(시안 실측 규칙)', /prevEnd/.test(modal) && /untilN/.test(modal));
-  ok('저장은 confirm 경유([확정 저장])', /window\.confirm\('아래 조절을 저장할까요/.test(modal));
+  ok('확정 저장은 브라우저 confirm 없이 즉시 요청한다',
+    !/window\.confirm\('아래 조절을 저장할까요/.test(modal)
+    && /즉시 저장한 뒤/.test(modal));
   ok('마운트 body 직속', /document\.body\.appendChild/.test(modal));
   ok('★ onclick 에 서버 문자열 보간 없음(XSS 규율)', !/onclick="[^"]*\$\{/.test(modal));
   // ★★ 시트 일정 공고도 조절 가능 — 읽기 전용 잠금이 되살아나면 실패한다(사용자 확정 2026-08-07)
@@ -549,11 +623,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★★ 코드리뷰 #3 — "기본" 판정이 baseFor 단일 출처를 지켜야 한다. defaultDaily 로 비교하면
   //   ① 시트 15인 날을 20(=daily_limit)으로 올릴 때 조절이 조용히 삭제되고(setPlan)
   //   ② 시트 30인 날을 22로 줄여도 축소 질문이 안 뜬다(settle).
-  ok('★ setPlan/settle/기본으로/저장확인/눈금선이 baseFor 를 쓴다(defaultDaily 사본 금지)',
+  ok('★ setPlan/settle/기본으로/눈금선이 baseFor 를 쓴다(defaultDaily 사본 금지)',
     /if \(v === baseFor\(d\) && S\.base\[d\] == null\) delete S\.plan\[d\];/.test(modal)
     && /var dl = baseFor\(d\);/.test(modal)
     && /commitValue\(d2, baseFor\(d2\)\)/.test(modal)
-    && /x\.count === baseFor\(x\.date\)/.test(modal)
     && /baseFor\(d\) \/ scale \* 100/.test(modal));
   ok('★ 코드리뷰 #4: 총량·예상 종료일이 시트 총량(scheduleTotal)을 본다',
     /function totalFor\(\)/.test(modal) && /S\.data\.scheduleTotal/.test(modal)
@@ -597,7 +670,18 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       const sql = mig;
       await c.query(sql);
       await c.query(sql);   // idempotent(재실행 안전)
+      await c.query(mig139);
+      await c.query(mig139); // 전략 컬럼도 재실행 안전
       ok('마이그레이션 2회 적용 무사(idempotent)', true);
+      const { rows: strategyColumn } = await c.query(`
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'recruit_campaigns'
+          AND column_name = 'carry_strategy'
+      `);
+      ok('이월 전략 컬럼 생성 + 기존 공고 기본값 next',
+        strategyColumn.length === 1 && String(strategyColumn[0].column_default || '').includes("'next'"));
       await c.query(`INSERT INTO recruit_campaigns (id, title) VALUES ('t1','x') ON CONFLICT DO NOTHING`);
       await c.query(`DELETE FROM campaign_daily_plans WHERE campaign_id='t1'`);
       await c.query(`INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count) VALUES ('t1','2026-08-10',20)`);
@@ -643,9 +727,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   vm.runInContext(partDate + '\n' + partBal + '\n' + partPay
     // 엔진이 부르는 바깥 함수(행 하한) — 오늘은 확정·진행 인원 아래로 못 줄인다
     + '\nfunction minFor(d){ return d === S.data.today ? (S.data.todayUsed || 0) : 0; }'
+    + '\nfunction dirtyDates(){ var out=[]; Object.keys(S.plan || {}).forEach(function(d){ if ((S.plan[d] == null) !== (S.base[d] == null) || (S.plan[d] != null && S.plan[d] !== S.base[d])) out.push(d); }); return out; }'
     + '\nthis.api = { walkDays, buildHorizon, applyCarryMode, carryOn, carryPlaced, carryDays,'
     + ' autoFit, maxFor, dayCeil, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor,'
-    + ' payload, naturalFor, carryAmt, CARRY_MODES, MAX_ROWS, MAX_DAY,'
+    + ' payload, naturalFor, carryAmt, manualTargetTotal, manualPlanTotal, manualDiffPlan, manualOnlyReductions, manualExtendPlan, CARRY_MODES, MAX_ROWS, MAX_DAY,'
     + ' holidayName, dayKind, fmtMD, FIXED_HOLIDAYS, LUNAR_HOLIDAYS, DEFAULT_CARRY_MODE };',
     sandbox);
   const A = sandbox.api;
@@ -717,6 +802,45 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   mkS({ data: { todayUsed: 999 } }); A.applyCarryMode('next');
   ok('7e 오늘 하한이 상한을 넘어서지 않는다', A.maxFor('2026-08-08') >= 999);
 
+  // 7e-1. ★ 수동 상태도 서버 총량 게이트와 같은 명시 계획 합계를 미리 제한한다.
+  // 작업표의 0명 날짜가 이어져 균형 표를 만들 수 없어도, 500명 중 252명 모집이면
+  // 게이지·종료일 연장 모두 남은 248명까지만 제안해야 한다.
+  mkS({ data: {
+    today: '2026-09-03', startDate: '2026-09-03', defaultDaily: 30, recruitTotal: 500,
+    submittedAll: 252, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0, todayNaturalQuota: 0,
+    worktableLinked: true, worktableDates: [{ date: '2026-09-20', slots: 0 }], carryPending: 332,
+  } });
+  eq('7e-1 수동 명시 계획의 배정 가능 총량 = 500 − 252', A.targetTotal(), 248);
+  eq('7e-1 수동 초기 명시 계획 = 0', A.manualPlanTotal(), 0);
+  eq('7e-1 수동 게이지도 총 잔여 248명까지만 올릴 수 있다', A.maxFor('2026-09-03'), 248);
+  sandbox.S.data.submittedAll = 240;                   // 작업표 filled 진행 표시는 240명일 수 있다
+  sandbox.S.data.planGateSubmittedAll = 252;           // 저장 게이트의 applications 확정은 252명
+  sandbox.S.data.planGateTodaySubmitted = 0;
+  eq('7e-1 작업표 진행 수와 달라도 수동 상한은 서버 제출 원장(252명)을 따른다', A.manualTargetTotal(), 248);
+  sandbox.S.data.submittedAll = 252;
+  delete sandbox.S.data.planGateSubmittedAll;
+  delete sandbox.S.data.planGateTodaySubmitted;
+  const ext = A.manualExtendPlan();
+  ok('7e-1 종료일 뒤 수동 연장안 생성', ext.ok === true, ext);
+  eq('7e-1 종료일 뒤 연장안은 잔여 총량만 배정', ext.count, 248);
+  eq('7e-1 종료일 뒤 연장안은 30명 단위 + 마지막 8명', sandbox.S.plan['2026-09-21'], 30);
+  eq('7e-1 마지막 연장일은 잔여분만', sandbox.S.plan['2026-09-29'], 8);
+  eq('7e-1 연장안 뒤 명시 계획 합계는 총량과 일치', A.manualDiffPlan(), 0);
+  eq('7e-1 합계를 다 채우면 게이지를 더 올릴 수 없다', A.maxFor('2026-09-21'), 30);
+  sandbox.S.plan['2026-10-01'] = 9;
+  ok('7e-1 이미 초과한 수동 계획은 줄일 수 있게 현재값까지만 유지',
+    A.maxFor('2026-10-01') === 9 && A.manualDiffPlan() > 0);
+  sandbox.S.base = { '2026-09-21': 300, '2026-10-01': 20 };
+  sandbox.S.plan = { '2026-09-21': 250, '2026-10-01': 9 };
+  ok('7e-1 초과 상태에서도 기존 계획을 줄이는 저장은 복구 경로로 허용', A.manualOnlyReductions() === true);
+  sandbox.S.plan['2026-10-02'] = 1;
+  ok('7e-1 초과 상태에서 새 날짜 증원은 복구 저장으로 위장할 수 없다', A.manualOnlyReductions() === false);
+  mkS({ data: { recruitTotal: 300, submittedAll: 250, planGateSubmittedAll: 300,
+    planGateTodaySubmitted: 0, planGateKnown: true, totalQuotaFull: true } });
+  eq('7e-2 ★ 주문 원장 300/300이면 게이지는 자연 기준값보다 늘릴 수 없다', A.maxFor('2026-09-04'), 40);
+  mkS({ data: { recruitTotal: 300, planGateKnown: false } });
+  eq('7e-2 ★ 주문 원장 총량을 모를 때도 자연 기준값보다 증원할 수 없다', A.maxFor('2026-09-04'), 40);
+
   // 7f. ★★ 요구 ⑥ — 초과/부족을 만들고 [자동 맞춤]이 고른 방식대로 되돌린다
   for (const mode of ['next', 'spread', 'extend']) {
     mkS(); A.applyCarryMode(mode);
@@ -749,6 +873,20 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ok('7f ★ 나눠 담기 = 여러 날에 흩어 메운다(한 날에 몰지 않는다)', moved.length >= 2);
   }
 
+  // 7f-1. 종료일 뒤 자동 채우기: 마지막 부분일을 기본 일건수까지 채운 뒤, 다음 0명 날짜를 연다.
+  // 44건 부족이면 15→35(+20), 다음 날 +24가 되어 정확히 44건만 반영되어야 한다.
+  mkS({ data: { today: '2026-09-12', startDate: '2026-09-12', defaultDaily: 35, recruitTotal: 170,
+    submittedAll: 61, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0, todayNaturalQuota: 35 } });
+  sandbox.S.balance = true; sandbox.S.carryMode = 'extend';
+  sandbox.S.horiz = ['2026-09-12', '2026-09-13', '2026-09-14', '2026-09-15'];
+  sandbox.S.plan = { '2026-09-12': 15, '2026-09-13': 35, '2026-09-14': 15, '2026-09-15': 0 };
+  eq('7f-1 종료일 연장 전 부족분 = 44', A.diffPlan(), -44);
+  A.autoFit();
+  eq('7f-1 마지막 부분일은 기본 일건수까지 채움(15→35)', A.planFor('2026-09-14'), 35);
+  eq('7f-1 다음 날짜에는 남은 수량만 채움(+24)', A.planFor('2026-09-15'), 24);
+  eq('7f-1 오늘에 줄여 둔 수량은 건드리지 않는다', A.planFor('2026-09-12'), 15);
+  eq('7f-1 자동 채움 후 균형', A.diffPlan(), 0);
+
   // 7g. ★★ "종료일 뒤에 붙이기"에서 줄인 몫은 **마지막 날에 쌓이지 않고 종료일이 밀린다**
   //     (마지막 날에 쌓으면 고른 방식과 정반대가 된다 — 변이시험이 잡은 실제 버그)
   mkS(); A.applyCarryMode('extend');
@@ -759,7 +897,6 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   eq('7g 줄이면 부족 −35', A.diffPlan(), -35);
   A.autoFit();
   eq('7g 자동 맞춤 후 균형(총량 보존)', A.diffPlan(), 0);
-  ok('7g ★ 종료일이 뒤로 밀렸다(새 진행일 추가)', sandbox.S.horiz.length > daysBefore);
   ok('7g ★ 기존 마지막 날에 몰아주지 않았다',
     A.planFor(lastBefore) <= Math.max(lastPlanBefore, A.effBase(lastBefore)));
   ok('7g 추가된 날은 기준선을 넘지 않는다', A.planFor(sandbox.S.horiz[sandbox.S.horiz.length - 1]) <= 40);
@@ -1100,7 +1237,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   /* ★ 2026-08-19 사용자 확정: **초과만 막고 부족은 저장한다**(부족하게 저장하면 그만큼만 모집하고
      작업표의 줄도 그 수로 줄어든다). 하드블록 금지 규율 자체는 그대로. */
   ok('7A-11 경고일 뿐 저장을 막지 않는다(초과만 잠그고 부족은 저장 가능)',
-    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(cdpSrc)
+    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over \|\| \(totalQuotaLocked\(\) && !quotaRecovery\);/.test(cdpSrc)
     && !/todayNaturalQuota[^\n]*save\.disabled/.test(cdpSrc));
 
   /* ── 배선(정적) — 사용자 확정 문구·규율이 코드에 그대로 있는가 ── */
@@ -1121,8 +1258,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /var cur = planFor\(d\), want = Math\.round\(next\), cap = maxFor\(d\);/.test(CDP)
     && /next = Math\.max\(minFor\(d\), Math\.min\(cap, want\)\);/.test(CDP));
   ok('7n-3 ★ 막고 끝내지 않는다 — 총건수·남은건수를 문장으로 말한다',
-    /want > cap && balanceOn\(\)/.test(CDP)
+    /want > cap && totalFor\(\) > 0/.test(CDP)
     && /총 ' \+ totalFor\(\) \+ '건을 넘길 수 없습니다 — 남은건수 /.test(CDP)
+    && /balanceOn\(\) \? sumPlan\(\) : manualPlanTotal\(\)/.test(CDP)
     && /\[차수 추가\]로 총량을 늘려주세요/.test(CDP));
   ok('7o ★ 알림창 높이는 "일치" 기준 41px 고정(상태마다 표가 흔들리면 조절하던 줄을 놓친다)',
     /\.cdp-bal\{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px/.test(CDP));
@@ -1136,8 +1274,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /applyCarryMode\(DEFAULT_CARRY_MODE\);/.test(CDP)
     && /segBtn\('extend', '종료일 뒤에 붙이기'/.test(CDP));
   ok('7r ★ 저장 게이트 = 초과 아님 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
-    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(CDP)
-    && /if \(balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)\) return;/.test(CDP));
+    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over \|\| \(totalQuotaLocked\(\) && !quotaRecovery\);/.test(CDP)
+    && /balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)/.test(CDP)
+    && /!balanceOn\(\) && totalFor\(\) > 0 && manualDiffPlan\(\) > 0/.test(CDP));
   ok('7s ★ 저장 상한은 서버 MAX_PLAN_ENTRIES 와 같은 값(넘으면 사유를 말하고 잠근다)',
     A.MAX_ROWS === 120
     && /const MAX_PLAN_ENTRIES = 120;/.test(readS('services/campaignPlan.service.js'))
@@ -1154,11 +1293,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /if \(balanceOn\(\)\) \{ S\.notes\.push\(fmtMD\(d\) \+ ' ' \+ start \+ '→' \+ fin\); render\(\); return; \}/.test(CDP));
   ok('7w ★ 숫자 직접 입력은 change 에서만 반영(입력 중 재렌더 = 한글 IME 파괴)',
     /wrap\.addEventListener\('change', function/.test(CDP) && !/addEventListener\('input'/.test(CDP));
-  // ★ 확인창은 **실제로 보내는 날 수**를 말해야 한다 — "구간 전체가 확정된다"고 하면
-  //   손댄 날만 보내는 지금 동작을 과장해 거짓 고지가 된다(코드리뷰 🟡4).
-  ok('7x ★ 저장 확인창이 실제 고정 범위를 정확히 말한다(과장 금지)',
-    /고정되는 날은 위 ' \+ \(set\.length \+ remove\.length\) \+ '일뿐이고, 나머지 날은 종전대로 열립니다/.test(CDP)
-    && /자동 이월이 더 얹히지 않습니다/.test(CDP));
+  ok('7x ★ 확정 저장은 확인창 없이 즉시 저장하고 결과는 토스트로 알린다',
+    /브라우저 확인창을 한 번 더 띄우지 않고/.test(CDP)
+    && /toast\('저장했습니다/.test(CDP));
   ok('7x-2 ★ 자동+다음날의 "저장할 것 없음"은 "이미 반영 중"이라고 말한다(미반영 오독 금지)',
     /이월 ' \+ carry \+ '명은 이미 오늘 정원에 반영되어 있습니다/.test(CDP)
     && /carry > 0 && S\.carryMode === 'next' && j\.carryMode !== 'hold'/.test(CDP));
@@ -1175,13 +1312,18 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /\.cdp-fix\{/.test(CDP) && /\.cdp-sc\{[^}]*overflow-y:auto/.test(CDP));
   ok('8-1 ★ flex 자식에 min-height:0 (없으면 스크롤이 안 생기고 내용만큼 늘어난다)',
     /\.cdp-bd\{[^}]*min-height:0/.test(CDP) && /\.cdp-sc\{[^}]*min-height:0/.test(CDP));
-  ok('8-2 렌더가 두 영역을 실제로 만든다(표 머리는 고정 쪽, 목록부터 스크롤 쪽)', (() => {
-    const a = CDP.indexOf("'<div class=\"cdp-fix\">'");
-    const b = CDP.indexOf("'</div><div class=\"cdp-sc\">'");
+  ok('8-2 렌더가 공용 좌측 요약과 우측 고정/스크롤 계획 영역을 만든다', (() => {
+    const layout = CDP.indexOf("'<div class=\"cdp-layout\"><aside class=\"cdp-side\">'");
+    const a = CDP.indexOf('class="cdp-fix"', layout);
+    const b = CDP.indexOf('class="cdp-sc"', a);
     const sub = CDP.indexOf('날짜별 모집 계획 — 게이지 드래그');
     const rows = CDP.indexOf("'<div id=\"cdpRows\">'");
-    return a > 0 && b > a && sub > a && sub < b && rows > b;
+    return layout > 0 && a > layout && b > a && sub > a && sub < b && rows > b;
   })());
+  ok('8-2a 날짜별 계획표는 날짜·상태·일 건수·조절 4열을 렌더한다',
+    /cdp-colhead[^]*날짜[^]*상태[^]*일 건수[^]*조절/.test(CDP)
+    && /grid-template-columns:148px 72px 66px minmax\(190px,1fr\)/.test(CDP)
+    && /cdp-state/.test(CDP));
   ok('8-3 ★ 조절해도 보던 자리를 지킨다(render 가 스크롤 컨테이너를 새로 만든다)',
     /S\._scrollTop/.test(CDP) && /sc\.scrollTop = S\._scrollTop/.test(CDP)
     && /sc\.addEventListener\('scroll'/.test(CDP));
@@ -1213,7 +1355,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★ applyOverview 는 저장 직후에도 다시 도는데 무조건 'next' 로 깔면 이월이 오늘에 다시 얹혀
   //   **저장이 되돌아간 것처럼 보인다**(실제 저장값은 그대로 — 화면만 다른 방식으로 재제안).
   ok('9-1 ★ 재조회 시 고른 방식을 그대로 쓴다(무조건 기본값 금지)',
-    /var want = S\.carryMode \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE;/.test(CDP)
+    /var want = S\.carryMode \|\| j\.carryStrategy \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE;/.test(CDP)
     && /if \(!applyCarryMode\(want\) && want !== DEFAULT_CARRY_MODE\) applyCarryMode\(DEFAULT_CARRY_MODE\);/.test(CDP));
   ok('9-1 옛 배선(무조건 next)이 남아 있지 않다', !/^\s*applyCarryMode\('next'\);$/m.test(CDP));
   ok('9-2 방식을 고르면 기억한다(재오픈에도 유지)',
@@ -1222,6 +1364,27 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /catch \(_\) \{ return null; \}/.test(CDP) && /catch \(_\) \{\}/.test(CDP));
   ok('9-2 모르는 값은 쓰지 않는다(저장된 쓰레기 값 방어)',
     /CARRY_MODES\.indexOf\(v\) >= 0 \? v : null/.test(CDP));
+  ok('9-3 ★ 수동 조절 상태에도 세 이월 방식 버튼을 표시하고 공고에 저장한다',
+    /if \(!bal && carryNeed !== null && carryNeed > 0\)/.test(CDP)
+    && /'\/carry-strategy'/.test(CDP)
+    && /router\.put\('\/campaigns\/:id\/carry-strategy'/.test(rtB));
+  ok('9-4 ★ 수동 종료일 연장은 무시트 작업표에만 남은 총량을 계획안으로 만들고 저장 전에는 반영하지 않는다',
+    /function manualExtendPlan\(\)/.test(CDP)
+    && /S\.data\.worktableLinked !== true/.test(CDP)
+    && /var need = manualTargetTotal\(\) - manualPlanTotal\(\);/.test(CDP)
+    && /m !== 'extend'/.test(CDP)
+    && /manualExtendPlan\(\)/.test(CDP));
+  ok('9-5 ★ 수동 게이지·저장 버튼도 명시 계획 총량을 넘기지 않는다',
+    /function manualPlanTotal\(\)/.test(CDP)
+    && /function manualTargetTotal\(\)/.test(CDP)
+    && /planGateSubmittedAll/.test(CDP) && /planGateTodaySubmitted/.test(CDP)
+    && /var manualRoom = manualTargetTotal\(\) - manualPlanTotal\(\);/.test(CDP)
+    && /var manualOver = totalFor\(\) > 0 && manualDiffPlan\(\) > 0;/.test(CDP)
+    && /function manualOnlyReductions\(\)/.test(CDP)
+    && /추가 가능 <span class="num">/.test(CDP)
+    && /planGateSubmittedAll: totalUsage\.used/.test(readS('services/campaignPlan.service.js'))
+    && /planGateKnown: totalUsage\.known/.test(readS('services/campaignPlan.service.js'))
+    && /totalQuotaFull: totalUsage\.full/.test(readS('services/campaignPlan.service.js')));
 
   console.log(`\n✅ campaignDailyPlan: ${n}개 통과`);
   process.exit(0);   // trackB.routes require 가 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

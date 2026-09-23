@@ -134,13 +134,14 @@ console.log('\n[3] 호스트 배선 — 두 화면 모두');
 
 t('⑤ index-app.js: gidNotFound → 팝업 → woAccept(id, g) 재시도', () => {
   assert.ok(/r\.gidNotFound && typeof woAcceptTabPicker === "function"/.test(appSrc), 'gidNotFound 분기 없음');
-  assert.ok(/woAcceptTabPicker\(r, g => woAccept\(id, g\)\)/.test(appSrc), '재접수 배선 없음');
+  // ★ 인자가 늘어도(광고주 연결 확인값 등) "고른 gid 로 재접수한다"는 계약은 같다.
+  assert.ok(/woAcceptTabPicker\(r, g => woAccept\(id, g[,)]/.test(appSrc), '재접수 배선 없음');
   assert.ok(/gid: pickGid/.test(appSrc), '재접수 요청에 gid 미포함');
 });
 
 t('⑤ workdesk.html: gidNotFound → 팝업 → _woAccept(id, g) 재시도 + body 에 gid', () => {
   assert.ok(/r&&r\.gidNotFound&&typeof woAcceptTabPicker==='function'/.test(wdSrc), 'gidNotFound 분기 없음');
-  assert.ok(/woAcceptTabPicker\(r, g=>_woAccept\(id, g\)\)/.test(wdSrc), '재접수 배선 없음');
+  assert.ok(/woAcceptTabPicker\(r, g=>_woAccept\(id, g[,)]/.test(wdSrc), '재접수 배선 없음');
   assert.ok(/pickGid \? \{id, gid:pickGid\} : \{id\}/.test(wdSrc), '재접수 body 에 gid 미포함');
 });
 

@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════
-   C/S 대화 안의 "리뷰이미지 교체요청" 카드 (공유 렌더러)
+   C/S 대화 안의 "리뷰캡처 교체요청" 카드 (공유 렌더러)
 
    같은 카드를 세 곳이 그린다 —
      · 관리자 C/S 대화창(cs-inquiry.js) : 기존↔변경 이미지 + [승인]/[반려]
@@ -10,7 +10,7 @@
 
    ★ 이미지는 meta 의 **파일ID**로 그린다 — cs_messages.image_urls 에 넣지 않는다.
      image_urls 는 `/api/order/guide-image/<id>` 만 허용하는 sanitize 를 통과해야 하는데,
-     리뷰 이미지는 `/api/drive/image/<id>` 프록시라 허용목록을 넓혀야 한다.
+     리뷰 캡처는 `/api/drive/image/<id>` 프록시라 허용목록을 넓혀야 한다.
      ID만 저장하고 URL은 **프론트가 신뢰 베이스로 재구성**하면 그 가드를 건드릴 필요가 없다.
    ★ 파일ID는 쓰기 전에 형식 검증한다(`[-\w]{20,}`) — meta 는 서버가 쓰지만
      화면에 <img src>로 나가므로 자유 문자열을 그대로 흘리지 않는다.
@@ -71,7 +71,10 @@
     var call = 'CsReviewEditCard.zoomPair(&quot;' + _idAttr(p.oldFileId) + '&quot;,&quot;'
       + _idAttr(p.newFileId) + '&quot;,&quot;' + (p.focus === 'new' ? 'new' : 'old') + '&quot;)';
     return '<div style="' + box + '">'
-      + '<img src="' + _esc(u) + '" alt="' + _esc(caption) + '" loading="lazy"'
+      /* ★ 132×132 카드라 원본이 필요 없다 — CDN 썸네일(js/drive-thumb.js).
+         확대(zoomPair)는 아래에서 **원본 프록시**를 그대로 쓴다(대조는 원본으로). */
+      + '<img' + (window.DriveThumb ? DriveThumb.attrs(fileId, 400, u) : ' src="' + _esc(u) + '"')
+      + ' alt="' + _esc(caption) + '" loading="lazy"'
       + ' onclick="' + call + '"'
       + ' style="width:132px;height:132px;object-fit:cover;border-radius:10px;border:1.5px solid ' + tone + ';cursor:zoom-in;background:#fff;display:block">'
       + '<div style="font-size:.66rem;color:' + tone + ';font-weight:700;text-align:center;margin-top:4px">' + _esc(caption) + '</div></div>';
@@ -89,7 +92,7 @@
     var rid = _esc(meta.requestId || '');
 
     var head = '<div style="display:flex;align-items:center;gap:7px;margin-bottom:9px;flex-wrap:wrap">'
-      + '<span style="font-size:.78rem;font-weight:800;color:#1E3A8A">🖼 리뷰이미지 교체요청</span>'
+      + '<span style="font-size:.78rem;font-weight:800;color:#1E3A8A">🖼 리뷰캡처 교체요청</span>'
       + '<span style="font-size:.64rem;font-weight:700;padding:2px 8px;border-radius:6px;background:' + st.bg + ';color:' + st.fg + '">' + _esc(st.label) + '</span>'
       + (meta.rowIndex ? '<span style="font-size:.66rem;color:#94A3B8">시트 ' + _esc(meta.rowIndex) + '행</span>' : '')
       + (meta.slotKey && meta.slotKey !== 'review' ? '<span style="font-size:.66rem;color:#94A3B8">' + _esc(meta.slotKey) + '</span>' : '')

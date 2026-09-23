@@ -24,11 +24,12 @@ const physRows = [
   { id: 'p2', seq: 2, name: '이영희', recipient: '이영희', phone8: '87654321', round: '1', option: 'B', product: '샴푸', submitted: false, paid: false, submittedAt: null, source: 'manual', order_submission_id: null, identity_key: null },
   { id: 'p3', seq: 3, name: '=HYPERLINK("http://evil")', recipient: '박', phone8: '11112222', round: '1', option: 'C', product: '샴푸', submitted: true, paid: false, submittedAt: '2026-07-29T10:00:00Z', source: 'manual', order_submission_id: null, identity_key: null },
 ];
-// 회귀: p2 는 _hidden 오버레이(제거됨) → 마감자료 제외돼야 함(SF-3). manual 앵커 = 물리행 id.
+/* ★★ 회귀 방향이 뒤집혔다(사용자 확정 2026-08-23 — 행 숨김 기능 폐기): 옛 `_hidden` 오버레이가
+   남아 있어도 **마감자료에서 빼지 않는다**. 화면·표·마감자료가 서로 다른 사실을 말하던 원인이다. */
 const editsHidden = [{ anchor_type: 'manual', anchor_value: 'p2', field: '_hidden', kind: 'bool', value_bool: true, value_text: null }];
 
 async function run() {
-  // ═══ 1. generateCloseout — 오버레이 반영(SF-3: _hidden 제외) ═══
+  // ═══ 1. generateCloseout — 오버레이 반영(옛 _hidden 은 무시) ═══
   const rosterRoutes = (hidden) => [
     [/FROM campaign_participants WHERE sheet_id=\$1 AND tab_name=\$2 AND active=TRUE/, () => ({ rows: physRows })],
     [/FROM participant_edits WHERE sheet_id=\$1 AND tab_name=\$2 AND reverted_at IS NULL/, () => ({ rows: hidden ? editsHidden : [] })],
@@ -38,7 +39,7 @@ async function run() {
     [/INSERT INTO trackb_tab_closeouts/, (s, prm) => ({ rows: [{ id: 1, date: '2026-07-28', rowCount: prm[3], subCount: prm[4], createdBy: prm[5] }] })],
   ]); svc.__setPoolForTest(p);
   let r = await svc.generateCloseout({ sheetId: 'S1', tabName: 'T', by: 'kim' });
-  assert.equal(r.ok, true); assert.equal(r.closeout.rowCount, 2, '1a: SF-3 — _hidden(p2) 제외 후 2건(p1,p3)');
+  assert.equal(r.ok, true); assert.equal(r.closeout.rowCount, 3, '1a: 옛 _hidden(p2) 도 마감자료에 남는다(숨김 폐기)');
   assert.equal(r.closeout.subCount, 2, '1b: 제출완료 2건(p1,p3)');
   assert.ok(/INSERT INTO trackb_tab_closeouts/.test(p.q[p.q.length - 1].s), '1c: 마감 원장 INSERT(이력 보존)');
   assert.ok(!p.q.some(x => /review_index|order_submissions|raw_sheet|UPDATE campaign_participants/.test(x.s)), '1d: Track A·시트 무접촉(읽기만)');
@@ -47,7 +48,7 @@ async function run() {
   p = pool([[/FROM campaign_participants WHERE/, () => ({ rows: [] })], [/FROM participant_edits WHERE/, () => ({ rows: [] })]]); svc.__setPoolForTest(p);
   r = await svc.generateCloseout({ sheetId: 'S1', tabName: 'T' });
   assert.equal(r.ok, false, '1e: 빈 명단 거부'); assert.equal(r.code, 400);
-  console.log('  1. generateCloseout — 집계·SF-3 숨김제외·이력 INSERT·읽기만·빈명단 거부 ✓');
+  console.log('  1. generateCloseout — 집계·옛 숨김 무시·이력 INSERT·읽기만·빈명단 거부 ✓');
 
   // ═══ 2. latestCloseout (정의 존재 = closeoutAvailable 라이브) ═══
   assert.equal(typeof svc.latestCloseout, 'function', '2a: latestCloseout 정의됨');

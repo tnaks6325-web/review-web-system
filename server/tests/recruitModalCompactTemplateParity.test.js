@@ -12,8 +12,21 @@ const root = path.join(__dirname, '..', '..');
 const modal = fs.readFileSync(path.join(root, 'frontend', 'js', 'recruit-modal.js'), 'utf8');
 const recruit = fs.readFileSync(path.join(root, 'frontend', 'js', 'index-recruit.js'), 'utf8');
 
-assert(/class="modal-box rf-box"[^>]*max-width:1124px/.test(modal),
-  '모집공고 설정 팝업은 미리보기를 포함한 데스크톱 폭을 유지해야 합니다.');
+/* ★★ 데스크톱 폭 = **1124px (사용자 확정 2026-08-19)**.
+   ⚠ 이 숫자를 바꾸려면 **이 줄도 함께** 고쳐야 한다 — 그것이 이 검사의 목적이다(실수로 바뀌는 것을 잡는다).
+   ⚠ 그동안 이 자리가 1020 으로 굳어 있어(문서 1280 · 가드 1020 · 코드 1124 로 셋이 갈림) 가드가
+     상시 빨간 상태였고, 그 더미에 진짜 회귀가 묻혔다. 값이 바뀔 땐 반드시 같이 갱신할 것. */
+const RF_DESKTOP_WIDTH = 1124;
+{
+  const box = (/class="modal-box rf-box"[^>]*style="([^"]*)"/.exec(modal) || [, ''])[1];
+  const w = Number((/max-width:(\d+)px/.exec(box) || [, ''])[1]);
+  assert(w === RF_DESKTOP_WIDTH,
+    `모집공고 편집 팝업의 데스크톱 폭은 확정값 ${RF_DESKTOP_WIDTH}px 이어야 합니다(현재 ${w || '없음'}px). ` +
+    '의도한 변경이라면 이 테스트의 RF_DESKTOP_WIDTH 도 함께 고치세요.');
+  assert(/width:\d+%/.test(box) && /max-height:\d+vh/.test(box),
+    '좁은 화면·낮은 화면에서 접히도록 %·vh 상한이 함께 있어야 합니다.');
+}
+
 assert(!/class="rf-rail"/.test(modal) && !/data-rf-step=/.test(modal),
   '좌측 단계 사이드바는 렌더링하지 않아야 합니다.');
 assert(!modal.includes('작업보드와 공고의 기준 정보 및 입금 기준을 먼저 확인합니다.'),
@@ -21,6 +34,17 @@ assert(!modal.includes('작업보드와 공고의 기준 정보 및 입금 기�
 const compact = modal.slice(modal.indexOf('class="rf-main rf-compact-main"'));
 assert(compact.indexOf('startup-setting-bar') < compact.indexOf('id="editorScroller"'),
   '작업 시작 설정 바는 스크롤 영역 위에 고정되어야 합니다.');
+assert(!compact.includes('시작 전 상태를 확인하고 설정을 저장하세요.'),
+  '작업 시작 설정 바의 보조 안내 문구는 표시하지 않는다');
+assert(!compact.includes('id="rf_status_buttons"'),
+  '모집공고 설정에서는 상태 버튼을 표시하지 않는다');
+assert(compact.includes('id="rf_status" hidden'),
+  '저장 호환을 위한 상태 필드는 숨김으로 유지한다');
+const startCheckRender = recruit.slice(recruit.indexOf('function renderRecruitStartCheck()'), recruit.indexOf('\n/** 칩 클릭'));
+assert(!/box\.innerHTML[\s\S]*?🚀 작업 시작 설정 —/.test(startCheckRender),
+  '미설정 배지는 카드 안에서 제목과 남은 개수를 반복하지 않는다');
+assert(!/box\.innerHTML[\s\S]*?나머지 값은 작업오더에서 자동으로 채워졌습니다/.test(startCheckRender),
+  '작업오더 자동 채움 안내는 카드 안에 반복하지 않는다');
 assert(compact.indexOf('id="editorScroller"') < compact.indexOf('for="rf_title"'),
   '공고 제목 행은 스크롤 영역 안에 있어야 합니다.');
 assert(/#recruitModal \.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal),

@@ -11,7 +11,8 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
-const { submitExternalOrder } = require('../services/manualOrder.service');
+const { submitExternalOrder, dailyRemainingForCampaign } = require('../services/manualOrder.service');
+const { checkRepurchaseWindowBatch, phone8Of, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
 
 const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로 수백 건이 들어가는 사고 방지)
@@ -82,6 +83,51 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
     const items = Array.isArray(b.items) ? b.items.slice(0, MAX_LINES) : [];
     if (!items.length) return res.status(400).json({ ok: false, error: '제출할 건이 없습니다' });
 
+    const allowOverDaily = b.allowOverDaily === true;
+    const allowRepurchase = b.allowRepurchase === true;
+    const effectiveRepurchaseDays = await resolveCampaignRepurchaseDays(pool, campaignId);
+
+    /* ★★ 재참여(재구매) 기간 사전 판정 — "같은 작업(탭)" 기준(사용자 확정 2026-08-24).
+       배치를 시작하기 전에 전 건의 전화번호를 한 번에 훑어, 최근 며칠 안에 같은 탭에서 이미
+       접수된 번호가 있으면 **쓰기 0건**으로 되돌려 확인을 받는다(일 정원 사전 판정과 같은 이유
+       — 건별로 막으면 "몇 건은 들어가고 몇 건은 막힘"이 남아 담당자가 무엇이 들어갔는지 모른다).
+       ★ 서버 최종 방어는 건별 게이트(`submitExternalOrder` ⓪-1.5)가 맡는다 — 낡은 화면이 이
+       사전 판정을 건너뛰고 호출해도 그쪽에서 다시 걸린다. */
+    if (!allowRepurchase) {
+      const p8List = items.map(it => phone8Of((it.fields || {}).phone));
+      const blockedMap = await checkRepurchaseWindowBatch(pool, {
+        sheetId, tabName, campaignId, phone8List: p8List, days: effectiveRepurchaseDays,
+      });
+      if (blockedMap.size) {
+        const blocked = items
+          .map((it, i) => ({ index: i, name: (it.fields || {}).recipient || '', p8: phone8Of((it.fields || {}).phone) }))
+          .filter(x => blockedMap.has(x.p8))
+          .map(x => ({ ...x, availableFrom: blockedMap.get(x.p8).availableFrom }));
+        return res.json({
+          ok: false, needConfirm: 'repurchase_window', blocked,
+          error: `${blocked.length}건이 최근 ${effectiveRepurchaseDays}일 안에 이 작업에 이미 참여한 연락처입니다.`,
+        });
+      }
+    }
+
+    /* ★★ 일 정원(오늘 몫) 사전 판정 — 배치를 **시작하기 전에** 한 번만 본다.
+       건별로 막으면 "앞 3건은 들어가고 뒤 2건은 거절"이라는 부분 처리가 남아, 담당자가 무엇이
+       들어갔는지 모른 채 재붙여넣기를 하게 된다(중복 접수의 입구). 여기서 되돌리면 **쓰기 0건**.
+       ★ 막지 않는다 — 숫자를 돌려주고 확인창을 받는다(사용자 확정 "나"안).
+       ★ 판정 불가(null)는 통과 = 종전 동작(모르면 막지 않는다).
+       ★ 서버 최종 방어는 건별 게이트(`submitExternalOrder` ⓪-3)가 맡는다 — 낡은 화면이 이
+         사전 판정을 건너뛰고 호출해도 그쪽에서 다시 걸린다. */
+    if (campaignId && !allowOverDaily) {
+      const dq = await dailyRemainingForCampaign(pool, campaignId);
+      if (dq && items.length > dq.remaining) {
+        return res.json({
+          ok: false, needConfirm: 'over_daily',
+          quota: { ...dq, want: items.length, over: items.length - dq.remaining },
+          error: `오늘 모집인원 ${dq.quota}명 중 ${dq.todayCount}명이 찼습니다. 남은 자리 ${dq.remaining}명인데 ${items.length}건을 접수하면 ${items.length - dq.remaining}명 초과합니다. 이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.`,
+        });
+      }
+    }
+
     const adminName = (req.admin && req.admin.name) || '';
     const results = [];
     for (let i = 0; i < items.length; i++) {
@@ -111,8 +157,15 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           targetApplicationId: it.targetApplicationId || null,
           adminName,
           force: b.force === true,   // 중복 경고를 확인한 뒤 재시도할 때만
-          allowRepurchase: b.allowRepurchase === true, // 재참여 기간 예외는 관리자 확인 때만
+          allowOverDaily,            // 오늘 정원 초과 확인을 받은 뒤 재시도할 때만
+          allowRepurchase,           // 재참여 기간 제한 확인을 받은 뒤 재시도할 때만
+          repurchaseDaysOverride: effectiveRepurchaseDays, // 선택한 모집공고의 저장값(사전·최종 판정 일치)
         });
+        // ★ 초과 접수는 결과 화면에 남긴다 — 확인을 받았더라도 "조용히 넘어간" 것으로 보이면
+        //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.
+        if (allowOverDaily && r && r.ok) {
+          r.warnings = (r.warnings || []).concat('오늘 모집인원을 초과해 접수했습니다(관리자 확인됨)');
+        }
         results.push({ index: i, name: f.recipient || '', ...r });
       } catch (e) {
         logger.error(`[manual-order] 건별 실패 idx=${i}: ${e.message}`);

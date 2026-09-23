@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>재참여 안내 시안 — 모집공고 썸네일</title>
+<style>
+  :root{
+    --bg:#F3F5F9; --card-bg:#fff; --line:#E5E7EB; --ink:#111827; --sub:#6B7280;
+    --blue:#1b64da; --blue2:#3182f6; --amber:#B45309; --amber-bg:#FFF7ED; --amber-bd:#FDBA74;
+    --green:#0B7A5B; --green-bg:#DDF5EC; --green-bd:#12b886;
+    --indigo:#4338CA; --indigo-bg:#EEF2FF;
+    --lock:#334155; --lock-bg:#EEF1F7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    background:var(--bg);color:var(--ink)}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
+  header.page{margin-bottom:22px}
+  header.page h1{font-size:1.3rem;font-weight:900;margin:0 0 6px}
+  header.page p{margin:0;color:var(--sub);font-size:.86rem;line-height:1.6}
+  header.page p b{color:var(--ink)}
+
+  /* ── 옵션 전환 탭 ── */
+  .optbar{display:flex;gap:8px;margin:18px 0 20px;flex-wrap:wrap}
+  .optbar button{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:9px 16px;
+    font-size:.82rem;font-weight:800;color:var(--sub);cursor:pointer;font-family:inherit}
+  .optbar button.on{border-color:var(--blue);background:var(--blue);color:#fff;box-shadow:0 3px 10px rgba(27,100,218,.28)}
+  .optbar button:hover:not(.on){border-color:#C7D2E8;color:var(--ink)}
+
+  section.opt{display:none}
+  section.opt.on{display:block}
+  .optd{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:20px}
+  .optd h2{font-size:.95rem;font-weight:900;margin:0 0 6px;display:flex;align-items:center;gap:8px}
+  .optd .tag{font-size:.62rem;font-weight:900;border-radius:6px;padding:2px 8px;background:var(--indigo-bg);color:var(--indigo)}
+  .optd p{margin:0;font-size:.8rem;color:var(--sub);line-height:1.7}
+  .optd .pro,.optd .con{display:inline-block;font-size:.72rem;font-weight:800;margin-top:8px;margin-right:14px}
+  .optd .pro{color:#0F766E}
+  .optd .con{color:#B45309}
+
+  .row-label{font-size:.72rem;font-weight:800;color:var(--sub);margin:22px 0 10px;letter-spacing:.02em;
+    display:flex;align-items:center;gap:8px}
+  .row-label::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+  @media(max-width:900px){.grid3{grid-template-columns:1fr;max-width:340px}}
+
+  /* ══════ 실제 리뷰어 카드 재현 (campaign-cards.js CSS 토큰 그대로) ══════ */
+  .pcard{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    box-shadow:0 2px 10px rgba(21,40,80,.06);display:flex;flex-direction:column}
+  .pthumb{position:relative;width:100%;aspect-ratio:1/1;background:#F1F4FA;overflow:hidden;
+    display:flex;align-items:center;justify-content:center}
+  .pthumb .ph-fake{width:74%;height:74%;border-radius:14px;display:flex;align-items:center;justify-content:center;
+    font-size:2.6rem;background:linear-gradient(135deg,#EAF0FB,#DCE6F9);color:#94A3B8;filter:grayscale(0)}
+  .pcard.dim .pthumb .ph-fake{filter:grayscale(.4);opacity:.75}
+
+  .pt-badges{position:absolute;top:8px;right:8px;z-index:6;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:78%}
+  .pt-badge{font-size:.6rem;font-weight:800;border-radius:6px;padding:2px 6px;box-shadow:0 1px 3px rgba(0,0,0,.16);white-space:nowrap}
+  .pt-badge.ch{background:rgba(255,255,255,.95);color:#1550b8}
+  .pt-badge.dl{background:rgba(21,27,38,.76);color:#fff}
+
+  .pbody{padding:9px 10px 10px;display:flex;flex-direction:column;gap:6px}
+  .ptitle{font-size:.82rem;font-weight:800;color:#111827;margin:0;line-height:1.3;min-height:2.6em;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .pmeta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.68rem;color:var(--sub);font-weight:600}
+  .pt-fee{color:#111827;font-weight:700}
+
+  .pgauge{display:flex;flex-direction:column;gap:4px;margin-top:1px}
+  .pg-row{display:flex;justify-content:space-between;align-items:baseline;font-size:.66rem}
+  .pg-lb{color:var(--sub);font-weight:700}
+  .pg-vl{font-weight:800;font-variant-numeric:tabular-nums;color:#111827}
+  .pg-vl b{color:#1b64da;font-size:.86rem}
+  .pg-track{height:6px;border-radius:99px;background:#EEF1F7;border:1px solid var(--line);overflow:hidden}
+  .pg-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3182f6,#1b64da)}
+
+  .pspec{display:flex;flex-direction:column;gap:4px;min-height:38px;border-top:1px solid #F1F4FA;padding-top:7px}
+  .sp-row{display:flex;align-items:center;gap:4px}
+  .sp-chip{font-size:.58rem;font-weight:800;border-radius:5px;padding:2px 6px;white-space:nowrap}
+  .sp-chip.flow{background:#EEF3FD;color:#1550b8}
+  .sp-chip.pay{background:#F3F0FE;color:#6D28D9}
+  .sp-tot{margin-left:auto;font-size:.61rem;font-weight:800;color:#4B5563}
+  .sp-tot b{color:#111827}
+
+  .pact{display:flex;align-items:center;gap:4px;border-top:1px solid #F1F4FA;padding-top:8px;margin-top:auto}
+  .pbtn{display:block;text-align:center;border:none;width:100%;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;
+    font-size:.76rem;font-weight:800;border-radius:9px;padding:9px;font-family:inherit}
+  .pbtn.off{background:var(--lock-bg);color:#94A3B8}
+  .pnote{font-size:.6rem;color:#9CA3AF;text-align:center;margin-top:4px}
+  .pnote.now{color:var(--green);font-weight:800}
+
+  .cardfoot{padding:0}
+
+  /* ── 상태 라벨(각 카드 위에 붙는 설명 캡션, 실물엔 없음) ── */
+  .caption{font-size:.72rem;font-weight:800;color:var(--sub);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .caption .dot{width:7px;height:7px;border-radius:50%}
+  .caption .dot.plain{background:#CBD5E1}
+  .caption .dot.lock{background:#94A3B8}
+  .caption .dot.ready{background:var(--green-bd)}
+
+  /* ══════ 옵션 A — 썸네일 하단 띠(sash) ══════ */
+  .sashA{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:6px 8px 7px;
+    display:flex;align-items:center;justify-content:center;gap:6px;text-align:center;backdrop-filter:blur(1px)}
+  .sashA.lock{background:linear-gradient(0deg,rgba(30,41,59,.86),rgba(30,41,59,.7))}
+  .sashA.lock .tA{color:#fff;font-size:.66rem;font-weight:800}
+  .sashA.lock .dday{background:rgba(255,255,255,.18);color:#fff;font-size:.6rem;font-weight:900;
+    border-radius:99px;padding:1px 8px;flex-shrink:0}
+  .sashA.ready{background:linear-gradient(0deg,rgba(11,122,91,.88),rgba(18,184,134,.72))}
+  .sashA.ready .tA{color:#fff;font-size:.68rem;font-weight:900}
+
+  /* ══════ 옵션 B — 좌상단 리본 + 하단 안내줄 ══════ */
+  .ribB{position:absolute;top:8px;left:8px;z-index:6;font-size:.62rem;font-weight:900;border-radius:7px;
+    padding:3px 8px;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.18)}
+  .ribB.lock{background:#475569}
+  .ribB.ready{background:linear-gradient(135deg,#12b886,#0B7A5B)}
+
+  /* ══════ 옵션 C — 썸네일 전체 오버레이(기존 마감 오버레이 스타일 재사용) ══════ */
+  .ovlC{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:3px;padding:8px;text-align:center}
+  .ovlC.lock{background:rgba(24,30,45,.66);backdrop-filter:grayscale(1)}
+  .ovlC.lock .ol{font-size:.6rem;font-weight:700;color:rgba(255,255,255,.86);letter-spacing:.03em}
+  .ovlC.lock .ot{font-size:1.1rem;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;text-shadow:0 1px 8px rgba(0,0,0,.4)}
+  .ovlC.lock .lab{font-size:.62rem;font-weight:800;color:rgba(255,255,255,.92)}
+  .pillC{position:absolute;top:8px;left:8px;z-index:6;display:inline-flex;align-items:center;gap:4px;
+    font-size:.6rem;font-weight:800;color:#fff;background:#12b886;border-radius:99px;padding:2px 9px 2px 7px;
+    box-shadow:0 2px 6px rgba(18,184,134,.4)}
+  .pillC .dot2{width:5px;height:5px;border-radius:50%;background:#fff}
+
+  footer.page{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);font-size:.76rem;color:var(--sub);line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <h1>재참여 안내 시안 — 모집공고 썸네일</h1>
+    <p>리뷰어별로 <b>이 상품(작업)에 예전에 참여한 적이 있는지</b>를 보고, 모집공고 카드 썸네일에 <b>"N일 후 재참여 가능"</b> / <b>"지금 재참여 가능"</b>을 표시하는 3가지 방식입니다. 위 탭을 눌러 비교해보세요. 실제 사진 대신 회색 상자를 썼을 뿐, 나머지 카드 모양(글자 크기·색·배지 위치)은 지금 리뷰어 화면과 동일합니다.</p>
+  </header>
+
+  <div class="optbar">
+    <button class="on" data-opt="A">A. 썸네일 하단 띠</button>
+    <button data-opt="B">B. 좌상단 리본 + 안내줄</button>
+    <button data-opt="C">C. 전체 오버레이(마감 화면 재사용)</button>
+  </div>
+
+  <!-- ══════════════ 옵션 A ══════════════ -->
+  <section class="opt on" id="opt-A">
+    <div class="optd">
+      <h2>A. 썸네일 하단 띠(sash) <span class="tag">추천</span></h2>
+      <p>썸네일 맨 아래에 얇은 색 띠를 깔고 그 위에 문구를 씁니다. 지금 오른쪽 위(채널 배지)·왼쪽 위(리본)를 건드리지 않아서 안전하고, 사진도 대부분 그대로 보입니다.</p>
+      <span class="pro">✓ 장점: 기존 배지들과 안 겹침 · 사진이 안 가려짐 · 잠김/가능 상태가 색으로 바로 구분됨</span>
+      <span class="con">△ 참고: 정사각 사진 맨 아래쪽 일부는 살짝 가려집니다</span>
+    </div>
+
+    <div class="row-label">비교 예시</div>
+    <div class="grid3">
+
+      <div>
+        <div class="caption"><span class="dot plain"></span>참여 이력 없음 (평소 카드)</div>
+        <div class="pcard">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn">참여하기</button></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="caption"><span class="dot lock"></span>4일 전 참여 → 잠김</div>
+        <div class="pcard dim">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+            <div class="sashA lock"><span class="tA">9/3(수) 재참여 가능</span><span class="dday">D-6</span></div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn off">재참여 대기 중</button></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="caption"><span class="dot ready"></span>14일 지남 → 재참여 가능</div>
+        <div class="pcard">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+            <div class="sashA ready"><span class="tA">✅ 지금 재참여 가능</span></div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn">참여하기</button></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════ 옵션 B ══════════════ -->
+  <section class="opt" id="opt-B">
+    <div class="optd">
+      <h2>B. 좌상단 리본 + 버튼 아래 안내줄</h2>
+      <p>썸네일 왼쪽 위에 작은 리본만 짧게 붙이고("D-6" 처럼), 정확한 날짜는 맨 아래 참여 버튼 밑에 작은 글씨로 안내합니다. 썸네일을 거의 가리지 않는 대신, 정보가 두 군데(리본+버튼밑)로 나뉩니다.</p>
+      <span class="pro">✓ 장점: 사진이 가장 적게 가려짐 · 리본이 짧아 한눈에 훑기 좋음</span>
+      <span class="con">△ 참고: "며칠 후인지"를 보려면 카드를 한 번 더 봐야 함(리본은 D-표시만)</span>
+    </div>
+
+    <div class="row-label">비교 예시</div>
+    <div class="grid3">
+
+      <div>
+        <div class="caption"><span class="dot plain"></span>참여 이력 없음 (평소 카드)</div>
+        <div class="pcard">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn">참여하기</button></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="caption"><span class="dot lock"></span>4일 전 참여 → 잠김</div>
+        <div class="pcard dim">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+            <div class="ribB lock">⏳ D-6</div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact" style="flex-direction:column;gap:2px">
+            <button class="pbtn off">재참여 대기 중</button>
+            <div class="pnote">9/3(수) 재참여 가능</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="caption"><span class="dot ready"></span>14일 지남 → 재참여 가능</div>
+        <div class="pcard">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+            <div class="ribB ready">🔁 재참여 가능</div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn">참여하기</button></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════ 옵션 C ══════════════ -->
+  <section class="opt" id="opt-C">
+    <div class="optd">
+      <h2>C. 썸네일 전체 오버레이 (지금 "마감" 화면과 같은 스타일)</h2>
+      <p>지금 시스템이 이미 쓰고 있는 "오늘 모집 완료 · 다시 오픈까지" 회색 오버레이를 그대로 재사용합니다. 가장 눈에 띄지만, <b>공고 자체가 마감된 것과 헷갈릴 위험</b>이 있습니다(실제로는 공고는 열려 있고, 이 사람만 재참여가 막힌 것).</p>
+      <span class="pro">✓ 장점: 가장 확실하게 눈에 띔 · 기존 코드/스타일을 그대로 재사용해 구현이 간단함</span>
+      <span class="con">△ 참고: "공고가 마감됐나?" 로 오해할 수 있어 문구를 각별히 신경써야 함</span>
+    </div>
+
+    <div class="row-label">비교 예시</div>
+    <div class="grid3">
+
+      <div>
+        <div class="caption"><span class="dot plain"></span>참여 이력 없음 (평소 카드)</div>
+        <div class="pcard">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn">참여하기</button></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="caption"><span class="dot lock"></span>4일 전 참여 → 잠김</div>
+        <div class="pcard dim">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="ovlC lock">
+              <span class="ol">이미 참여한 상품 · 재참여까지</span>
+              <span class="ot">D-6</span>
+              <span class="lab">9/3(수) 다시 참여 가능</span>
+            </div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn off">재참여 대기 중</button></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="caption"><span class="dot ready"></span>14일 지남 → 재참여 가능</div>
+        <div class="pcard">
+          <div class="pthumb">
+            <div class="ph-fake">🧴</div>
+            <div class="pt-badges"><span class="pt-badge ch">쿠팡</span><span class="pt-badge dl">실배송</span></div>
+            <div class="pillC"><span class="dot2"></span>지금 재참여 가능</div>
+          </div>
+          <div class="pbody">
+            <p class="ptitle">넛세린 슈퍼 넛 너리싱 밤 (네이처) 168시간 보습력 지속</p>
+            <div class="pmeta"><span class="pt-fee">상품비+리뷰비 지급</span></div>
+            <div class="pgauge">
+              <div class="pg-row"><span class="pg-lb">참여자</span><span class="pg-vl"><b>97</b> / 200</span></div>
+              <div class="pg-track"><div class="pg-fill" style="width:49%"></div></div>
+            </div>
+            <div class="pspec">
+              <div class="sp-row"><span class="sp-chip flow">가이드유입</span><span class="sp-chip pay">현영 없음</span><span class="sp-tot">총 <b>200</b>명</span></div>
+            </div>
+          </div>
+          <div class="pact"><button class="pbtn">참여하기</button></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer class="page">
+    <p><b>참고</b> — 잠김 상태에서 [참여하기] 버튼을 회색으로 바꾸고 눌러도 반응 없게 하는 것은 세 옵션 공통입니다(실제로 참여가 막혀 있으니, 버튼도 그 사실을 보여줘야 헷갈리지 않습니다). 세 옵션의 차이는 <b>썸네일 위에 어떻게 표시하느냐</b>뿐입니다.<br>
+    옵션을 정해주시면 그 모양대로 실제 화면(리뷰어 홈·모집공고 목록)에 연결하겠습니다.</p>
+  </footer>
+
+</div>
+<script>
+  document.querySelectorAll('.optbar button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var opt = btn.getAttribute('data-opt');
+      document.querySelectorAll('.optbar button').forEach(function (b) { b.classList.toggle('on', b === btn); });
+      document.querySelectorAll('section.opt').forEach(function (s) { s.classList.toggle('on', s.id === 'opt-' + opt); });
+      try { history.replaceState(null, '', '?v=' + opt); } catch (e) {}
+    });
+  });
+  (function () {
+    var v = (new URLSearchParams(location.search)).get('v');
+    if (v && document.getElementById('opt-' + v)) {
+      var btn = document.querySelector('.optbar button[data-opt="' + v + '"]');
+      if (btn) btn.click();
+    }
+  })();
+</script>
+</body>
+</html>

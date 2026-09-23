@@ -9,6 +9,7 @@ const {
   LEGACY_WORKBOARD_SCHEMA_VERSION,
   WorkboardSchemaError,
   assertSupportedWorkboardSchemaVersion,
+  isAutomatedWorkboardEnabled,
 } = require('../services/workboardSchema.service');
 const {
   ProductOptionsError,
@@ -27,8 +28,11 @@ const { fetchThumbFromUrl } = require('../utils/thumbFetch');
 const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
 const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
+const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierProxyDelivery } = require('../utils/deliveryType');
+const { normalizeDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
 const { assertWorkOrderQuota, syncWorkOrderRecruitTotal } = require('../services/linkedRecruitQuota.service');
+const { projectIntranetAdvertiser, ADVERTISER_NAME_CONFLICT } = require('../services/advertiserProjection.service');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -71,13 +75,16 @@ const AE_FIELDS = [
 // updated_by / updated_by_name 은 감사용으로 별도 처리(컨텐츠 수정으로 카운트하지 않음).
 const INTAKE_EDITABLE_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
-  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_channel', 'purchase_time',
+  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'product_distribution_mode', 'purchase_channel', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
-  'delivery_type', 'courier_proxy', 'review_type', 'review_type_mix', 'recruit_count',
+  'delivery_type', 'courier_proxy',
+  'delivery_type_mix', 'recall_courier', 'recall_product',   // 135 — 회수·혼합 부속정보(가산적: 미전송이면 문장 파싱 폴백)
+  'review_type', 'review_type_mix', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
   'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
   'sales_id', 'contract_number', 'quote_id',   // 인트라넷 계약건 — 088
   'guide_images',   // 첨부 이미지 URL 배열(JSON) — 090 · 칸=칸 매핑 2단계
+  'thumbnail_url',  // 모집공고 썸네일 — 163(표·정원과 무관해 접수 뒤에도 고칠 수 있다)
   // ★ 097(탈 구글시트 W2-b): 진행 일정 신호 — 시트 구매일자를 손으로 적던 규칙을 오더가 말해준다.
   //   미전송(구버전 인트라넷) = NULL = 종전 동작(계획 계산 기본값 + 미리보기에서 지정).
   'skip_weekends', 'holidays',
@@ -100,6 +107,7 @@ async function _ensureTables() {
         pay_amount      INTEGER DEFAULT 0,
         review_fee      INTEGER DEFAULT 0,
         daily_count     INTEGER DEFAULT 0,
+        product_distribution_mode TEXT NOT NULL DEFAULT 'balanced',
         purchase_time   TEXT DEFAULT '',
         inflow_keyword  TEXT DEFAULT '',
         inflow_type     TEXT DEFAULT '',
@@ -132,6 +140,7 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_type          TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide         TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS daily_count_text     TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_distribution_mode TEXT NOT NULL DEFAULT 'balanced'`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_options_json TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS review_fee INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS review_type_mix JSONB NOT NULL DEFAULT '[]'::jsonb`);
@@ -191,6 +200,11 @@ function _intOrZero(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// 상품·옵션 행 순서: 새 기본값은 균등 순환, 명시한 순차 진행만 sequential로 보관한다.
+function _productDistributionMode(v) {
+  return String(v == null ? '' : v).trim().toLowerCase() === 'sequential' ? 'sequential' : 'balanced';
+}
+
 // guide_images(090 · 칸=칸 매핑 2단계): 첨부 이미지 URL 배열 → 정규화된 JSON 문자열.
 // 배열/JSON 문자열 어느 쪽이 와도 받아주되, http(s) URL 만 · 최대 8장 · 항목 600자 컷 —
 // <img src>로 그대로 나가는 값이라 자유 문자열을 저장하지 않는다. 실패·빈 값은 ''(종전 동작).
@@ -230,7 +244,7 @@ function _isTrue(v) {
 }
 
 function _isCourierProxyDeliveryType(v) {
-  return /^택배\s*발송\s*대행$/.test(String(v == null ? '' : v).trim());
+  return isCourierProxyDelivery(v);   // 판정 단일 출처 = utils/deliveryType (사본 금지)
 }
 
 // 배송유형이 택배발송대행이면 courier_proxy는 파생값이다. 이전의 별도 boolean을
@@ -238,9 +252,32 @@ function _isCourierProxyDeliveryType(v) {
 function _canonicalDeliveryType(deliveryType, courierProxy) {
   const raw = String(deliveryType == null ? '' : deliveryType).trim();
   if (_isCourierProxyDeliveryType(raw) || _isTrue(courierProxy)) return '택배발송대행';
-  if (/^빈\s*(?:택배|박스)$/.test(raw)) return '빈박스';
-  if (/^실\s*배송$/.test(raw)) return '실배송';
-  return raw;
+  /* ★★ 회수·혼합은 **부속정보가 붙은 문장**으로 온다 — 기본형만 남기면 회수택배사·혼합 건수가
+     그 자리에서 증발한다. canonicalDeliveryValue 는 부속이 있으면 원문을 보존하고,
+     맨 토큰만 표준형으로 접는다(빈택배→빈박스·회수건→회수). 판정 불가값은 원문 통과(종전 계약). */
+  return canonicalDeliveryValue(raw);
+}
+
+/* ── 회수·혼합 부속정보 파생 ────────────────────────────────────────────
+   ★ 우선순위 = 인트라넷 구조화 필드 → **문장 파싱 폴백**(구조화 전송 이전 오더 구제).
+   ★ 배송유형이 그 종류가 아니면 빈 값으로 정리한다 — 이전 오더의 잔여 구성이 다음 오더로
+     번지지 않게(_reviewTypeMixJson 의 '단일 타입이면 빈 배열' 규율과 같다). */
+function _deliveryMixJson(b, deliveryType) {
+  if (deliveryBaseType(deliveryType) !== '혼합') return '[]';
+  const st = normalizeDeliveryTypeMix(b && b.delivery_type_mix);
+  if (st.provided && !st.error && Array.isArray(st.mix) && st.mix.length) return JSON.stringify(st.mix);
+  const fb = normalizeDeliveryTypeMix(parseDeliveryType(deliveryType).mix ?? undefined);
+  return JSON.stringify((!fb.error && fb.mix) || []);
+}
+
+function _recallFields(b, deliveryType) {
+  if (deliveryBaseType(deliveryType) !== '회수') return { courier: '', product: '' };
+  const parsed = parseDeliveryType(deliveryType);
+  const pick = (v, fb) => String(v == null || v === '' ? (fb || '') : v).trim().slice(0, 120);
+  return {
+    courier: pick(b && b.recall_courier, parsed.recall && parsed.recall.courier),
+    product: pick(b && b.recall_product, parsed.recall && parsed.recall.product),
+  };
 }
 
 function _courierProxyFromDelivery(deliveryType, courierProxy) {
@@ -260,30 +297,43 @@ function _holidaysJson(v) {
   } catch (_) { return null; }
 }
 
+/**
+ * 요청 본문에서 **상품 구성 원문**을 읽는 단일 출처.
+ *
+ * ★★ 전체 저장(`_insertWorkOrder`)과 부분 수정(`_intakeSourceRevisionHandler`)이 **이 함수 하나**를 쓴다 —
+ *    한쪽만 폴백을 가지면 "같은 본문인데 경로마다 다른 값으로 비교되는" 자리가 생긴다.
+ *    `_normalized_product_options_json` 은 두 경로 모두 핸들러 앞단에서 미리 채워 넣는 **정규화 결과**이고,
+ *    나머지 두 갈래는 리뷰웹 내부 호출부(정규화를 거치지 않는 자리)를 위한 폴백이다.
+ * ★ 값이 없으면 `''`(빈 원문) — `undefined`(모름)와 구분된다. 빈 원문끼리는 정상적으로 "같다"로 비교된다.
+ */
+function _requestOptionsJson(b) {
+  const o = b || {};
+  if (o._normalized_product_options_json !== undefined) return o._normalized_product_options_json;
+  if (typeof o.product_options_json === 'string') return o.product_options_json;
+  return o.product_options_json ? JSON.stringify(o.product_options_json) : '';
+}
+
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy, sourceContract) {
   const source = sourceContract || {
     sourceReviewOrderId: '', sourceRevision: 0, workboardSchemaVersion: LEGACY_WORKBOARD_SCHEMA_VERSION, idempotencyKey: '', intranetAdvertiserId: '',
     intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '', workSeriesId: '', workRound: 1,
   };
-  const optionsJson = b._normalized_product_options_json !== undefined
-    ? b._normalized_product_options_json
-    : ((typeof b.product_options_json === 'string')
-      ? b.product_options_json
-      : (b.product_options_json ? JSON.stringify(b.product_options_json) : ''));
+  const optionsJson = _requestOptionsJson(b);
   const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
   const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
   const { rows } = await pool.query(
     `INSERT INTO work_orders
-      (id, title, start_date, product_option, product_options_json, pay_amount, review_fee, daily_count, daily_count_text,
+      (id, title, start_date, product_option, product_options_json, pay_amount, review_fee, daily_count, daily_count_text, product_distribution_mode,
        purchase_channel, purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
        review_type, review_type_mix, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
        sales_id, contract_number, quote_id, skip_weekends, holidays,
        source_review_order_id, source_revision, workboard_schema_version, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
-       status, created_by, work_kind, work_series_id, work_round)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,'submitted',$41,$42,$43,$44)
+       status, created_by, work_kind, delivery_type_mix, recall_courier, recall_product,
+       work_series_id, work_round, thumbnail_url)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,'submitted',$42,$43,$44,$45,$46,$47,$48,$49)
      RETURNING *`,
     [
       _genOrderId(),
@@ -295,6 +345,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       _intOrZero(b.review_fee),
       b.daily_count || 0,
       b.daily_count_text || '',
+      _productDistributionMode(b.product_distribution_mode),
       String(b.purchase_channel || '').trim(),
       b.purchase_time || '',
       b.inflow_keyword || '',
@@ -337,8 +388,14 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       //   "한 번도 정하지 않음"과 "리뷰로 정함"이 구분돼야 접수의 blank-only 전파가 성립한다.
       //   판정에서는 어차피 빈 값 = 리뷰라 동작은 같고 원장만 정직해진다.
       workKindForStore(b.work_kind),
+      // ★ 135: 회수·혼합 부속정보. 배송유형이 그 종류가 아니면 빈 값 — 잔여 구성이 다음 오더로 번지지 않게.
+      _deliveryMixJson(b, deliveryType),
+      _recallFields(b, deliveryType).courier,
+      _recallFields(b, deliveryType).product,
       source.workSeriesId,
       source.workRound,
+      // ★ 163: 모집공고 썸네일. 우리 프록시 절대 URL만 통과 — 형식 밖·미전송은 빈 값(종전 동작).
+      _thumbnailUrl(b.thumbnail_url),
     ]
   );
   return rows[0];
@@ -367,102 +424,8 @@ function _emitWorkOrderNew(row, extra) {
 // 인트라넷(inadd-system)에서 직접 POST. created_by 는 페이로드의 requester_name.
 // 필요 env: ORDER_INTAKE_KEY
 // ═══════════════════════════════════════════════════════════
-function _portalWorkId() {
-  return 'pw_' + crypto.randomBytes(6).toString('hex');
-}
-
-function _sourceText(value, maxLength) {
-  return String(value == null ? '' : value).trim().slice(0, maxLength);
-}
-
-// 이름은 표시값이다. 원본 연결은 인트라넷 광고주 ID가 같을 때에만 허용한다.
-async function _upsertIntranetAdvertiserAndPortalWork(order, context) {
-  const intranetId = _sourceText(order.intranet_advertiser_id, 128);
-  if (!intranetId) return null;
-
-  const name = _sourceText(order.intranet_advertiser_name, 200);
-  if (!name) throw new Error('원본 광고주명이 없어 광고주를 연결할 수 없습니다.');
-  const contact = _sourceText(order.intranet_advertiser_contact, 300);
-  const businessNumber = _sourceText(order.intranet_advertiser_business_number, 80);
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { rows: existingRows } = await client.query(
-      `SELECT id, intranet_advertiser_id FROM advertisers
-        WHERE intranet_advertiser_id = $1
-        FOR UPDATE`,
-      [intranetId]
-    );
-
-    let advertiserId = existingRows[0] && existingRows[0].id;
-    if (!advertiserId) {
-      const { rows: sameNameRows } = await client.query(
-        `SELECT id, intranet_advertiser_id FROM advertisers WHERE name = $1 FOR UPDATE`, [name]
-      );
-      if (sameNameRows.length) {
-        throw new Error('동일 이름의 기존 광고주가 있어 자동 병합하지 않았습니다. 원본 연결을 확인해 주세요.');
-      }
-      const { rows: inserted } = await client.query(
-        `INSERT INTO advertisers
-           (id, name, intranet_advertiser_id, intranet_contact, intranet_business_number)
-         VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (intranet_advertiser_id) WHERE intranet_advertiser_id <> ''
-         DO UPDATE SET
-           name = EXCLUDED.name,
-           intranet_contact = COALESCE(NULLIF(EXCLUDED.intranet_contact, ''), advertisers.intranet_contact),
-           intranet_business_number = COALESCE(NULLIF(EXCLUDED.intranet_business_number, ''), advertisers.intranet_business_number),
-           updated_at = NOW()
-         RETURNING id`,
-        ['adv_' + crypto.randomBytes(6).toString('hex'), name, intranetId, contact, businessNumber]
-      );
-      advertiserId = inserted[0].id;
-    } else {
-      await client.query(
-        `UPDATE advertisers SET
-           name = $2,
-           intranet_contact = COALESCE(NULLIF($3, ''), intranet_contact),
-           intranet_business_number = COALESCE(NULLIF($4, ''), intranet_business_number),
-           updated_at = NOW()
-         WHERE id = $1`,
-        [advertiserId, name, contact, businessNumber]
-      );
-    }
-
-    const { rows: workRows } = await client.query(
-      `INSERT INTO portal_works
-         (id, advertiser_id, work_order_id, inad_manager, work_type, product, channel,
-          qty, progress_date, work_sheet_url, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       ON CONFLICT (work_order_id) WHERE work_order_id <> ''
-       DO UPDATE SET
-         advertiser_id = EXCLUDED.advertiser_id,
-         inad_manager = EXCLUDED.inad_manager,
-         work_type = EXCLUDED.work_type,
-         product = EXCLUDED.product,
-         channel = EXCLUDED.channel,
-         qty = EXCLUDED.qty,
-         progress_date = EXCLUDED.progress_date,
-         work_sheet_url = COALESCE(NULLIF(EXCLUDED.work_sheet_url, ''), portal_works.work_sheet_url),
-         updated_at = NOW()
-       RETURNING id`,
-      [
-        _portalWorkId(), advertiserId, order.id, _sourceText(order.manager_name || order.work_manager, 100),
-        order.work_kind === 'blog' ? '블로그 체험단' : '리뷰 체험단',
-        _sourceText(order.product_option || order.title, 1000), _sourceText(order.inflow_type, 100),
-        _intOrZero(order.recruit_count), _dateOrNull(order.start_date),
-        _sourceText(context && context.workSheetUrl, 1000), _sourceText(context && context.by, 100),
-      ]
-    );
-    await client.query(`UPDATE work_orders SET advertiser_id = $2, updated_at = NOW() WHERE id = $1`, [order.id, advertiserId]);
-    await client.query('COMMIT');
-    return { advertiserId, portalWorkId: workRows[0].id };
-  } catch (error) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw error;
-  } finally {
-    client.release();
-  }
-}
+// 인트라넷 광고주 → 업체/포털 작업 원본 연결은 서비스 한 곳(advertiserProjection.service)이 맡는다.
+//   동일 이름 충돌 시의 "사람 확인 후 연결" 규칙까지 그 안에 있다(사본 금지).
 
 router.post('/intake', async (req, res, next) => {
   try {
@@ -538,6 +501,16 @@ router.post('/intake', async (req, res, next) => {
       }
     }
 
+    // 기존 원본의 재시도는 위에서 idempotent로 반환한다. 이 지점은 새 작업만 막아
+    // 긴급 복귀 때 이미 만든 v2 작업의 원본 이력까지 끊지 않는다.
+    if (sourceContract && sourceContract.workboardSchemaVersion === 2 && !isAutomatedWorkboardEnabled()) {
+      return res.status(409).json({
+        ok: false,
+        code: 'workboard_v2_disabled',
+        error: '새 작업표 자동 규격은 현재 보류 중입니다. 기존 규격으로 다시 전송해 주세요.',
+      });
+    }
+
     let data;
     try {
       data = await _insertWorkOrder(b, requester, sourceContract);
@@ -563,9 +536,260 @@ router.post('/intake', async (req, res, next) => {
     _emitWorkOrderNew(data);
     res.json({ ok: true, data });
   } catch (err) {
+    // 인트라넷은 HTTP 실패를 기준으로 재시도를 판정한다. 다만 next(err)로 넘겨
+    // Sentry·최근 오류·이상 로그의 공통 관측 경로는 반드시 유지한다.
+    err.intakeHttp500 = true;
     next(err);
   }
 });
+
+// ── 계약 후속 매칭(인트라넷) 판정 ────────────────────────────────────────────
+// 인트라넷의 "계약 후속 매칭"은 접수가 끝난 뒤에 온다(공고가 이미 붙은 오더가 대부분).
+// 그래서 원본 수정 잠금(공고·광고주 확정)을 그대로 적용하면 계약을 영영 못 붙인다.
+// 대신 "작업 내용이 하나도 안 바뀐 요청"인지 값으로 확인해, 그때만 계약·광고주 칸을 갱신한다.
+// ★ 아래 목록은 원본 수정 UPDATE 의 컨텐츠 칸과 1:1 이어야 한다 — 어긋나면 실제로 바뀐 내용을
+//   "계약만 바뀐 요청"으로 오판해 잠금이 뚫린다.
+function _sourceContentNextValues(b, derived) {
+  return {
+    title: String(b.title || '').trim(),
+    start_date: _dateOrNull(b.start_date),
+    product_option: b.product_option || '',
+    product_options_json: derived.optionsJson,
+    pay_amount: _intOrZero(b.pay_amount),
+    review_fee: _intOrZero(b.review_fee),
+    daily_count: _intOrZero(b.daily_count),
+    daily_count_text: b.daily_count_text || '',
+    product_distribution_mode: _productDistributionMode(b.product_distribution_mode),
+    purchase_channel: String(b.purchase_channel || '').trim(),
+    purchase_time: b.purchase_time || '',
+    inflow_keyword: b.inflow_keyword || '',
+    inflow_type: b.inflow_type || '',
+    inflow_guide: b.inflow_guide || '',
+    guide_images: _guideImagesJson(b.guide_images),
+    /* ★ 163 썸네일 — **보냈을 때만** 비교에 넣는다(135 부속정보와 같은 규율):
+       이 칸을 모르는 구버전 인트라넷 payload 가 "빈 값으로 바뀌었다" 로 읽히면
+       계약 후속 매칭이 새로 막힌다. */
+    ...(b.thumbnail_url === undefined ? {} : { thumbnail_url: _thumbnailUrl(b.thumbnail_url) }),
+    delivery_type: derived.deliveryType,
+    courier_proxy: derived.courierProxy,
+    review_type: b.review_type || '',
+    review_type_mix: _reviewTypeMixJson(b.review_type_mix, b.review_type),
+    recruit_count: _intOrZero(b.recruit_count),
+    review_guide: b.review_guide || '',
+    special_notes: b.special_notes || '',
+    product_url: b.product_url || '',
+    work_sheet_url: String(b.work_sheet_url || '').trim(),
+    goods_cost_type: b.goods_cost_type || '',
+    manager_name: b.manager_name || '',
+    work_manager: pickWorkManager(b),
+    skip_weekends: _boolOrNull(b.skip_weekends),
+    holidays: _holidaysJson(b.holidays),
+    work_kind: workKindForStore(b.work_kind),
+    // ★★ 회수·혼합 부속정보(135)는 **요청이 실제로 보냈을 때만** 비교 대상에 넣는다.
+    //   이 칸을 보내지 않던 시절의 오더가 문장 파싱 폴백 때문에 "바뀐 것"으로 읽혀
+    //   계약 후속 매칭이 새로 막히는 일을 만들지 않는다(2026-08-20 실장애와 같은 자리).
+    //   ★ 빠뜨리면 그 칸만 고친 요청이 "바뀐 게 없다"로 읽혀 **저장했다고 답하면서 값을 버린다**.
+    ...(b.delivery_type_mix === undefined ? {} : { delivery_type_mix: _deliveryMixJson(b, derived.deliveryType) }),
+    ...(b.recall_courier === undefined ? {} : { recall_courier: _recallFields(b, derived.deliveryType).courier }),
+    ...(b.recall_product === undefined ? {} : { recall_product: _recallFields(b, derived.deliveryType).product }),
+  };
+}
+
+// ★★ 접수된 뒤에도 원본에서 고칠 수 있는 칸 (사용자 확정 2026-08-25).
+//   종전에는 접수(광고주 확정)·게시가 끝나면 **내용 수정이 전부** 409 로 막혀, 가이드 오타
+//   하나를 고치려 해도 인트라넷에는 저장되고 리뷰웹에는 안 붙는 어긋남만 쌓였다.
+//   ★ 여기 있는 칸은 접수 이후 **아무 계산에도 쓰이지 않는다** — 작업명은 접수 때 탭·공고
+//     이름을 만들고 끝, 담당AE 는 접수 때 업무포털로 넘어가고 끝, 나머지는 표시·발행
+//     프리필 전용이다. 작업표 열·줄·날짜, 정원, 금액, 시트/공고 연결은 하나도 안 바뀐다.
+//   ★★ 넓히지 말 것 — 정원(recruit_count·daily_count)·일정(start_date·skip_weekends·
+//     holidays)·열 구성(purchase_channel·review_type·delivery_type·courier_proxy·
+//     work_kind·product_options_json)·금액·work_sheet_url 은 이미 깔린 작업표와 어긋난다.
+//     그쪽은 리뷰웹시스템 작업보드에서 고친다.
+//   ★ 값 계산은 _sourceContentNextValues 하나에서 나온다(사본 0) — 여기서 따로 계산하면
+//     "부분 수정으로 저장한 값 ≠ 전체 수정으로 저장한 값" 이 된다.
+//   ★ `pay_amount`(= **결제합계**)는 상품 구성의 1건당 금액과 **함께 바뀌는 짝**이라 같이 연다
+//     (인트라넷이 1건당을 고치면 합계를 다시 계산해 보낸다). 작업표·정원·주문에는 쓰이지 않고
+//     작업보드·업체 화면의 **잔여집행** 표시가 이 값을 쓴다.
+const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflow_keyword',
+  'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount',
+  //   ★ 163 썸네일 — 작업표 열·줄·정원·금액 어디에도 쓰이지 않는다(공고 카드 그림 하나).
+  'thumbnail_url',
+  /* ★★ 유입방식·구매시간대(사용자 확정 2026-09-22) — 둘 다 **작업표와 무관**하다(작업표를 만드는
+     `utils/worktablePlan` 에 유입·구매시간 참조가 한 건도 없다). 열·줄·날짜 배치를 바꾸지 않으므로
+     접수 뒤에도 고칠 수 있다. 대신 **공고까지 전파**해야 리뷰어 화면이 따라온다(아래 전파 호출). */
+  'inflow_type', 'purchase_time'];
+
+// ★★ 상품 구성(product_options_json) 안에서 접수 뒤에도 고칠 수 있는 키 (2026-09-21 실측).
+//   ★ 왜 칸 전체가 아니라 키 단위인가: 인트라넷은 **상품 주소와 선택지별 유입가이드**를 이 한
+//     덩어리에 담아 보낸다(유입방식이 '유입가이드'면 유입 안내가 다른 칸으로는 아예 안 온다 —
+//     inadd-webapp `reviewOrderBuildInflowGuide` 가 그때 undefined 를 돌려준다).
+//     그래서 칸을 통째로 잠그면 위 허용 목록이 약속한 **'상품 주소·유입 가이드·첨부 사진'을
+//     실제로는 한 번도 못 고친다** — 안내가 지킬 수 없는 약속이 된다(핸들러를 그대로 돌려 재현).
+//   ★★ 넓히지 말 것 — 상품명·옵션값·금액(pay)·인원(count)·일건수(daily)·리뷰 조합은
+//     **작업표의 칸과 줄에 그대로 박히는 값**이라 이미 깔린 표와 어긋난다(사용자 확정 2026-09-21).
+/**
+ * ★★ 모집공고 썸네일 URL 정규화(163) — **우리 프록시 절대 URL만** 통과시킨다.
+ *   리뷰어 화면의 `<img src>` 로 그대로 나가므로 임의 주소를 저장하면 남의 서버를 부르게 되고,
+ *   Drive 원본 주소는 교차 오리진에서 깨진다(관리자 썸네일이 "절대 프록시 URL" 을 쓰는 것과 같은 규율).
+ *   ★ 형식 밖이면 **빈 값**(틀린 값보다 빈 값) — 빈 값이면 공고 전파도 하지 않는다.
+ */
+function _thumbnailUrl(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) return '';
+  if (!/\/api\/order\/guide-image\/[-\w]{10,}$/.test(s)) return '';
+  return s.slice(0, 500);
+}
+
+//   ★★ `pay`(1건당 결제금액)는 **모집공고까지 전파되는 조건으로** 열렸다(사용자 확정 2026-09-21):
+//     리뷰어가 보는 금액은 공고에 있어, 오더만 고치면 "통과했는데 화면은 옛 금액" 이 된다.
+//     전파는 `campaignPayAmountSync.service` 가 하고 **근거가 없으면 안 고치고 사유를 보고**한다.
+const PRODUCT_OPTION_EDITABLE_KEYS = new Set(['url', 'guide', 'pay']);
+// 조건부 허용 칸 — "잠긴 부분이 그대로일 때만" 통과한다(전부 허용도, 전부 잠금도 아니다).
+const SOURCE_PARTIAL_JSON_COLUMN = 'product_options_json';
+
+/**
+ * ★★★ **파생 요약 칸** — 사람이 읽는 한 줄 요약이라 잠그지 않고 **따라오게** 둔다(실사고 2026-09-22).
+ *
+ * `product_option` 은 인트라넷이 상품 구성에서 **자동으로 만들어 보내는 문장**이다:
+ *   `[상품/옵션/금액] 1. <상품명> (<주소>) - 결제금액 55,200원 / 5명 …`
+ * 여기에는 **접수 뒤에도 고칠 수 있는 값**(상품 주소 `url`·1건당 금액 `pay`·`pay_amount`)이 그대로 박힌다.
+ *
+ * ★★★ 그래서 이 칸을 잠가 두면 두 가지가 동시에 터진다(실제로 터졌다 — 티피링크 Tapo C113 오더):
+ *   ① 161(결제금액 수정)로 금액을 고치면 숫자 칸만 갱신되고 **이 문장은 옛 금액으로 남는다**
+ *      → 작업보드 카드·리뷰검수 상품명 대조·광고주 화면이 전부 **옛 금액**을 보여준다.
+ *   ② 그 다음부터 인트라넷이 보내는 문장(새 금액)과 저장된 문장(옛 금액)이 달라
+ *      **무엇을 고치든 항상 409** 가 된다 — 그 오더는 원본에서 영영 수정 불가가 된다.
+ *
+ * ★★ 이것이 "칸을 하나 더 여는 것"이 **아닌** 이유: 요약의 재료는 전부 **따로따로 잠겨 있다**.
+ *    상품명·옵션값·인원(`count`)·일건수(`daily`)는 `product_options_json` 의 잠긴 키로,
+ *    모집인원은 `recruit_count` 로 각각 막힌다. 그 중 하나라도 바뀌면 **요약과 무관하게** 409다.
+ *    요약만 따로 바꿔 넣어 잠긴 값을 우회할 길은 없다.
+ * ★★ 그래서 `SOURCE_EDIT_AFTER_ACCEPT`(= 인트라넷 화면이 "여기는 고칠 수 있다"고 표시하는 목록)에는
+ *    **넣지 않는다** — 사람이 직접 고치는 칸이 아니라 따라오는 값이다.
+ */
+const SOURCE_DERIVED_SUMMARY_COLUMNS = new Set(['product_option']);
+
+// 사람이 읽는 칸 이름 — 409 문구가 "무엇을 못 고쳤는지"를 말한다(코드명 노출 금지).
+const SOURCE_FIELD_LABELS = {
+  title: '작업명', start_date: '시작일', product_option: '상품·옵션',
+  product_options_json: '상품 구성(상품명·금액·인원·옵션)', pay_amount: '결제금액', review_fee: '리뷰비',
+  daily_count: '일 모집인원', daily_count_text: '일 모집인원 표기', product_distribution_mode: '투입방식', purchase_channel: '구매채널',
+  purchase_time: '구매시간대', inflow_keyword: '유입 검색어', inflow_type: '유입방식',
+  inflow_guide: '유입 가이드', guide_images: '첨부 이미지', delivery_type: '배송유형',
+  courier_proxy: '택배대행', review_type: '리뷰타입', review_type_mix: '리뷰 조합',
+  recruit_count: '총 모집인원', review_guide: '리뷰 가이드', special_notes: '특이사항',
+  product_url: '상품 주소', work_sheet_url: '작업시트', goods_cost_type: '물건비',
+  manager_name: '담당AE', work_manager: '작업담당', skip_weekends: '주말 제외',
+  delivery_type_mix: '실배송·빈박스 건수', recall_courier: '회수 택배사', recall_product: '회수 상품명칭',
+  holidays: '휴무일', work_kind: '체험단 종류', thumbnail_url: '공고 썸네일',
+};
+const _sourceFieldLabel = column => SOURCE_FIELD_LABELS[column] || column;
+
+const _SOURCE_JSON_COLUMNS = new Set(['product_options_json', 'guide_images', 'review_type_mix', 'delivery_type_mix', 'holidays']);
+
+// 표기 차이(키 순서·공백·NULL/빈문자·DATE 객체)로 "바뀌었다"고 오판하지 않게 값을 맞춘다.
+function _sourceCanonicalJson(value) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return '';
+    try { parsed = JSON.parse(text); } catch (_) { return text; }
+  }
+  if (parsed === null || parsed === undefined) return '';
+  const sort = v => (Array.isArray(v) ? v.map(sort)
+    : (v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sort(v[k])])) : v));
+  try { return JSON.stringify(sort(parsed)); } catch (_) { return String(value); }
+}
+
+function _sourceCompareValue(column, value) {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  if (_SOURCE_JSON_COLUMNS.has(column)) return _sourceCanonicalJson(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value).trim();
+}
+
+// 실제로 달라진 컨텐츠 칸만 돌려준다. 빈 배열 = 계약·광고주 칸만 바뀐 요청.
+function _sourceContentChanges(current, b, derived) {
+  const next = _sourceContentNextValues(b, derived);
+  return Object.keys(next).filter(column =>
+    _sourceCompareValue(column, next[column]) !== _sourceCompareValue(column, current[column]));
+}
+
+// ── 상품 구성의 "잠긴 부분만" 비교 ──────────────────────────────────────────
+/** 허용 키(url·guide)를 걷어낸 모양 — 이것이 같으면 상품 구성은 **안 바뀐 것**이다.
+ *  ★ 비교 규칙은 `_sourceCanonicalJson`(키 순서·표기 차이 흡수) 그대로 쓴다(사본 0).
+ *  ★ 못 읽는 값(빈 값·JSON 아님)은 **null** — 호출부가 잠금 쪽으로 접는다(fail-closed). */
+function _productOptionsLockedShape(value) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    try { parsed = JSON.parse(text); } catch (_) { return null; }
+  }
+  if (!Array.isArray(parsed)) return null;
+  const strip = node => {
+    if (Array.isArray(node)) return node.map(strip);
+    if (node && typeof node === 'object') {
+      return Object.fromEntries(Object.entries(node)
+        .filter(([key]) => !PRODUCT_OPTION_EDITABLE_KEYS.has(key))
+        .map(([key, v]) => [key, strip(v)]));
+    }
+    return node;
+  };
+  return _sourceCanonicalJson(strip(parsed));
+}
+
+/** 상품 구성에서 **잠긴 부분이 실제로 달라졌나**(= 막아야 하나).
+ *  ★ 한쪽이라도 못 읽으면 true = 잠금. 모르는 채로 표에 박히는 값을 통과시키지 않는다. */
+function _productOptionsLockedChanged(currentValue, nextValue) {
+  const current = _productOptionsLockedShape(currentValue);
+  const next = _productOptionsLockedShape(nextValue);
+  if (current === null || next === null) return true;
+  return current !== next;
+}
+
+/**
+ * ★★ 이 작업오더가 "원본에서 내용을 못 고치는" 상태인가 — **판정 단일 출처**.
+ *   접수(광고주 확정)·공고 연결·게시·완료·삭제 중 하나라도 걸리면 잠긴다.
+ *   ★ 인트라넷 화면이 이 판정을 **따라 만들지 않는다** — 목록·상세 응답이 결과를 그대로 싣고
+ *     화면은 그리기만 한다(규칙이 두 벌이면 "회색인데 저장되는" / "멀쩡한데 막히는" 이 생긴다).
+ *   ★ 재료 중 `advertiser_id`·`deleted_at` 은 종전 목록 SELECT 에 없었다 — 그래서 인트라넷은
+ *     저장해 보고 409 를 받아야 알 수 있었다(2026-09-21 신고).
+ */
+function isSourceEditLocked(order) {
+  const o = order || {};
+  return Boolean(o.deleted_at || o.status === 'done' || o.status === 'published'
+    || o.linked_campaign_id || o.advertiser_id);
+}
+
+/**
+ * 접수된 오더에서 **지금 고칠 수 있는 칸 목록**(화면이 나머지를 잠그는 재료).
+ * ★ 잠기지 않았으면 `null` — "전부 가능" 과 "목록에 있는 것만 가능" 을 화면이 구분한다.
+ * ★ 상품 구성(`product_options_json`)은 **키 단위로 일부만** 열려 있어 별도로 실어 보낸다.
+ */
+function sourceEditableFields(order) {
+  if (!isSourceEditLocked(order)) return null;
+  return {
+    fields: SOURCE_EDIT_AFTER_ACCEPT.slice(),
+    productOptionKeys: [...PRODUCT_OPTION_EDITABLE_KEYS],
+  };
+}
+
+/** 접수된 오더에서 이 칸을 고칠 수 있나.
+ *  ★★ **차단 판정(blockedChanges)과 저장 대상 선정(editable)이 같은 이 함수를 쓴다** —
+ *    갈리면 "막히지도 않는데 저장도 안 되는" 조용한 무동작이 된다(저장했다고 답하면서 값을 버림). */
+function _sourceEditAllowedAfterAccept(column, current, nextOptionsJson) {
+  if (SOURCE_EDIT_AFTER_ACCEPT.includes(column)) return true;
+  if (SOURCE_DERIVED_SUMMARY_COLUMNS.has(column)) return true;
+  if (column === SOURCE_PARTIAL_JSON_COLUMN) {
+    return !_productOptionsLockedChanged(current[SOURCE_PARTIAL_JSON_COLUMN], nextOptionsJson);
+  }
+  return false;
+}
 
 // Intranet review-order revisions use a source identity rather than the
 // work-order id.  This deliberately updates only source-owned values: the
@@ -627,30 +851,47 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!current) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
     }
+    const optionsJson = _requestOptionsJson(b);
+    const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
+    const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+
     if (Number(current.workboard_schema_version || LEGACY_WORKBOARD_SCHEMA_VERSION) !== source.workboardSchemaVersion) {
-      return res.status(409).json({
-        ok: false,
-        code: 'workboard_schema_immutable',
-        error: '작업표 규격은 원본 작업오더 생성 후 변경할 수 없습니다.',
-        work_order_id: current.id,
-        workboard_schema_version: current.workboard_schema_version || LEGACY_WORKBOARD_SCHEMA_VERSION,
-      });
+      return res.status(409).json({ ok: false, code: 'workboard_schema_immutable', error: '작업표 규격은 원본 작업오더 생성 후 변경할 수 없습니다.', work_order_id: current.id });
     }
     if (String(current.work_series_id || '') !== String(source.workSeriesId || '')
       || Number(current.work_round || 1) !== Number(source.workRound || 1)) {
-      return res.status(409).json({
-        ok: false,
-        code: 'work_round_immutable',
-        error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.',
-        work_order_id: current.id,
-      });
+      return res.status(409).json({ ok: false, code: 'work_round_immutable', error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.', work_order_id: current.id });
     }
-    if (current.deleted_at || current.status === 'done' || current.status === 'published'
-      || current.linked_campaign_id || current.advertiser_id) {
+
+    // 접수·게시 기준이 확정된 오더는 원본에서 내용을 바꾸지 못한다.
+    // 단 계약 후속 매칭(작업 내용은 그대로 · 계약/광고주 칸만 채움)은 예외다 —
+    // 그 매칭은 접수가 끝난 뒤에 오는 것이 정상이라, 여기서 막으면 계약을 붙일 길이 없다.
+    const sourceEditLocked = isSourceEditLocked(current);
+    // 삭제된 작업오더에는 예외를 두지 않는다 — 없는 오더에 계약을 붙일 이유가 없다.
+    const contractMatchAllowed = sourceEditLocked && !current.deleted_at;
+    const contentChanges = contractMatchAllowed
+      ? _sourceContentChanges(current, b, { optionsJson, deliveryType, courierProxy })
+      : [];
+    // 접수 뒤에도 고칠 수 있는 칸(안내 문구·사진·이름)만 바뀐 요청이면 그 칸만 갱신한다.
+    // 계약 후속 매칭(바뀐 내용 0)도 같은 경로다 — 잠긴 칸에는 어느 쪽도 손대지 못한다.
+    const blockedChanges = contentChanges.filter(column =>
+      !_sourceEditAllowedAfterAccept(column, current, optionsJson));
+    const partialEdit = contractMatchAllowed && blockedChanges.length === 0;
+    if (sourceEditLocked && !partialEdit) {
+      const names = blockedChanges.map(_sourceFieldLabel);
       return res.status(409).json({
         ok: false,
-        error: '이미 접수·게시 기준이 확정된 작업오더는 원본 리뷰오더에서 변경할 수 없습니다.',
+        error: names.length
+          ? `이미 접수된 작업오더라 이 칸은 원본에서 바꿀 수 없습니다: ${names.join(', ')}`
+            + ' — 리뷰웹시스템 작업보드에서 고쳐주세요.'
+            /* ★ 고칠 수 있는 칸을 **손으로 적지 않는다** — 허용 목록에서 파생한다.
+               손으로 적어 두면 칸을 더 열어도 안내만 옛 목록으로 남아 "바꿀 수 있는데
+               못 바꾼다고 적힌" 문장이 된다(164 에서 실제로 어긋났다). */
+            + ` (${SOURCE_EDIT_AFTER_ACCEPT.map(_sourceFieldLabel).join('·')}은 여기서 바꿀 수 있습니다)`
+          : '이미 접수·게시 기준이 확정된 작업오더는 원본 리뷰오더에서 변경할 수 없습니다.',
         work_order_id: current.id,
+        changed_fields: contentChanges,
+        blocked_fields: blockedChanges,
       });
     }
 
@@ -677,9 +918,135 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       });
     }
 
-    const optionsJson = b._normalized_product_options_json;
-    const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
-    const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+    // 접수된 오더의 부분 수정 — 계약·광고주 칸 + 허용된 안내 칸만 갱신한다.
+    // ★ 잠긴 칸은 이 SET 목록에 아예 없다(코드 실수로도 못 쓴다).
+    // ★ 작업 내용·인원이 그대로라 정원 검증과 작업표 동기화는 건드리지 않는다
+    //   (접수팀이 잡아둔 상태를 그대로 보존).
+    if (partialEdit) {
+      const nextValues = _sourceContentNextValues(b, { optionsJson, deliveryType, courierProxy });
+      // ★ 실제로 달라진 칸만 쓴다 — 바뀐 것이 없으면(계약 후속 매칭) 내용 칸은 SET 에
+      //   아예 안 들어가 종전 동작과 한 글자도 다르지 않다.
+      //   칸 이름은 우리 화이트리스트를 거친 리터럴뿐이라 문자열 조립이 안전하다(주입 없음).
+      const editable = contentChanges
+        .filter(column => _sourceEditAllowedAfterAccept(column, current, optionsJson) && /^[a-z_]+$/.test(column));
+      const params = [current.id];
+      const sets = editable.map(column => {
+        params.push(nextValues[column]);
+        return `${column} = $${params.length}`;
+      });
+      const add = value => { params.push(value); return `$${params.length}`; };
+      const sql = `UPDATE work_orders SET
+           ${sets.map(part => `${part},`).join('\n           ')}
+           sales_id = ${add(String(b.sales_id || '').trim())},
+           contract_number = ${add(String(b.contract_number || '').trim())},
+           quote_id = ${add(String(b.quote_id || '').trim())},
+           source_revision = ${add(source.sourceRevision)},
+           intake_idempotency_key = ${add(source.idempotencyKey)},
+           intranet_advertiser_id = ${add(source.intranetAdvertiserId)},
+           intranet_advertiser_name = ${add(source.intranetAdvertiserName)},
+           intranet_advertiser_contact = ${add(source.intranetAdvertiserContact)},
+           intranet_advertiser_business_number = ${add(source.intranetAdvertiserBusinessNumber)},
+           updated_at = NOW()
+         WHERE id = $1 AND source_review_order_id = ${add(sourceReviewOrderId)}
+         RETURNING *`;
+      const { rows: matched } = await pool.query(sql, params);
+      const linked = matched[0];
+      /* ★★ 결제금액이 바뀌었으면 연결 모집공고까지 반영한다(사용자 확정 2026-09-21).
+         리뷰어가 보는 금액은 공고에 있어, 여기서 멈추면 "저장됐는데 화면은 옛 금액" 이 된다.
+         ★ **절대 throw 하지 않는다** — 전파 실패가 이미 끝난 원본 저장을 되돌리면 안 된다.
+         ★ 근거가 없으면(옵션 짝 못 지음·금액 여러 종) 안 고치고 사유만 싣는다(fail-closed) —
+           틀린 금액이 리뷰어 화면에 뜨는 것은 안 바뀌는 것보다 나쁘다. */
+      let campaignPaySync;
+      if (contentChanges.includes(SOURCE_PARTIAL_JSON_COLUMN) || contentChanges.includes('pay_amount')) {
+        try {
+          const { syncCampaignPayAmount } = require('../services/campaignPayAmountSync.service');
+          campaignPaySync = await syncCampaignPayAmount({
+            workOrderId: current.id, productOptionsJson: optionsJson, by: 'intake-source',
+          });
+        } catch (syncErr) {
+          logger.warn(`[order/source] 공고 금액 전파 실패(원본 수정은 유지): ${syncErr.message}`);
+          campaignPaySync = { applied: false, reason: 'error', error: syncErr.message };
+        }
+      }
+      /* ★ 썸네일이 바뀌었으면 공고 그림도 함께 바꾼다(163) — 금액 전파와 같은 규율
+         (절대 throw 없음 · 빈 값이면 아무것도 안 한다 · 결과를 응답에 싣는다). */
+      let campaignThumbSync;
+      if (contentChanges.includes('thumbnail_url')) {
+        try {
+          const { syncCampaignThumbnail } = require('../services/campaignPayAmountSync.service');
+          campaignThumbSync = await syncCampaignThumbnail({
+            workOrderId: current.id, thumbnailUrl: nextValues.thumbnail_url, by: 'intake-source',
+          });
+        } catch (thumbErr) {
+          logger.warn(`[order/source] 공고 썸네일 전파 실패(원본 수정은 유지): ${thumbErr.message}`);
+          campaignThumbSync = { applied: false, reason: 'error', error: thumbErr.message };
+        }
+      }
+      /* ★★ 유입방식·유입가이드가 바뀌었으면 공고까지 반영한다(사용자 확정 2026-09-22).
+         리뷰어 화면은 **공고에 저장된 유입방식을 작업오더 폴백보다 먼저** 보므로 여기서 멈추면
+         "인트라넷은 가이드유입인데 리뷰어에게는 상품 페이지 버튼" 이 된다.
+         ★ 가이드가 빈 채로 가이드유입이 되면 되돌린다(서비스가 전파 뒤 상태로 검사) — 사유는 응답에. */
+      let campaignInflowSync;
+      const _inflowTouched = ['inflow_type', 'inflow_guide', 'guide_images', SOURCE_PARTIAL_JSON_COLUMN]
+        .some(c => contentChanges.includes(c));
+      if (_inflowTouched) {
+        try {
+          const { syncCampaignInflow } = require('../services/campaignPayAmountSync.service');
+          const _guideTouched = contentChanges.includes('inflow_guide') || contentChanges.includes('guide_images');
+          campaignInflowSync = await syncCampaignInflow({
+            workOrderId: current.id,
+            inflowType: contentChanges.includes('inflow_type') ? nextValues.inflow_type : undefined,
+            commonGuide: _guideTouched
+              ? { text: nextValues.inflow_guide != null ? nextValues.inflow_guide : current.inflow_guide,
+                  images: nextValues.guide_images != null ? nextValues.guide_images : current.guide_images }
+              : undefined,
+            productOptionsJson: contentChanges.includes(SOURCE_PARTIAL_JSON_COLUMN) ? optionsJson : undefined,
+            by: 'intake-source',
+          });
+        } catch (inflowErr) {
+          logger.warn(`[order/source] 공고 유입 전파 실패(원본 수정은 유지): ${inflowErr.message}`);
+          campaignInflowSync = { applied: false, reason: 'error', error: inflowErr.message };
+        }
+      }
+      /* ★ 구매시간대가 바뀌었으면 이미 발행된 공고의 참여 가능 시간창도 함께 바꾼다.
+         ★ 해석 못 하는 문장이면 아무것도 바꾸지 않는다(추측해서 멀쩡한 공고를 닫지 않는다). */
+      let campaignTimeSync;
+      if (contentChanges.includes('purchase_time')) {
+        try {
+          const { syncCampaignPurchaseWindow } = require('../services/campaignPayAmountSync.service');
+          campaignTimeSync = await syncCampaignPurchaseWindow({
+            workOrderId: current.id, purchaseTime: nextValues.purchase_time, by: 'intake-source',
+          });
+        } catch (timeErr) {
+          logger.warn(`[order/source] 공고 시간창 전파 실패(원본 수정은 유지): ${timeErr.message}`);
+          campaignTimeSync = { applied: false, reason: 'error', error: timeErr.message };
+        }
+      }
+      /* ★★ 전파 결과를 **사람이 읽는 한 줄**로 함께 보낸다 — 인트라넷이 그걸 그대로 보여준다.
+         종전에는 결과 객체만 실어 보냈고 인트라넷이 버려서, 공고에 못 넣었는데도 화면은
+         "저장됐습니다" 만 말했다(막다른 길). 문구는 리뷰웹이 정한다(사유 사본 금지). */
+      {
+        const { campaignSyncNotice } = require('../services/campaignPayAmountSync.service');
+        const _n = (kind, out) => { if (out) { const m = campaignSyncNotice(kind, out); if (m) out.notice = m; } };
+        _n('pay', campaignPaySync); _n('thumb', campaignThumbSync);
+        _n('inflow', campaignInflowSync); _n('time', campaignTimeSync);
+      }
+      const contractOnly = contentChanges.length === 0;
+      _emitWorkOrderNew(linked, {
+        event: contractOnly ? 'source_contract_match' : 'source_partial_edit',
+        source_revision: source.sourceRevision,
+      });
+      return res.json({
+        ok: true, data: linked,
+        contract_only: contractOnly,
+        edited_fields: contentChanges,
+        ...(campaignPaySync ? { campaign_pay_sync: campaignPaySync } : {}),
+        ...(campaignThumbSync ? { campaign_thumb_sync: campaignThumbSync } : {}),
+        ...(campaignInflowSync ? { campaign_inflow_sync: campaignInflowSync } : {}),
+        ...(campaignTimeSync ? { campaign_time_sync: campaignTimeSync } : {}),
+      });
+    }
+
     // 원본 리뷰오더의 목표 인원이 바뀌면 연결된 공고도 같은 값으로 저장한다.
     // 실제 UPDATE 전에 하한을 검증해, 이미 참여한 인원보다 낮춘 값으로 반쪽만 남지 않게 한다.
     await assertWorkOrderQuota({ workOrderId: current.id, recruitTotal: _intOrZero(b.recruit_count) });
@@ -695,6 +1062,8 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          work_kind = $32, source_revision = $33, intake_idempotency_key = $34,
          intranet_advertiser_id = $35, intranet_advertiser_name = $36,
          intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
+         delivery_type_mix = $41, recall_courier = $42, recall_product = $43, product_distribution_mode = $44,
+         thumbnail_url = $45,
          updated_at = NOW()
        WHERE id = $1 AND source_review_order_id = $40
        RETURNING *`,
@@ -711,6 +1080,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         workKindForStore(b.work_kind), source.sourceRevision, source.idempotencyKey,
         source.intranetAdvertiserId, source.intranetAdvertiserName, source.intranetAdvertiserContact,
         source.intranetAdvertiserBusinessNumber, _intOrZero(b.review_fee), sourceReviewOrderId,
+        _deliveryMixJson(b, deliveryType), _recallFields(b, deliveryType).courier, _recallFields(b, deliveryType).product,
+        _productDistributionMode(b.product_distribution_mode),
+        _thumbnailUrl(b.thumbnail_url),
       ]
     );
     const updated = rows[0];
@@ -749,14 +1121,28 @@ router.get('/intake/list', async (req, res, next) => {
     }
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
-              inflow_type, work_kind, work_sheet_url, linked_campaign_id, chat_room_url, admin_memo,
-              source_review_order_id, source_revision, intranet_advertiser_id, created_at, updated_at
+              inflow_type, work_kind,
+              -- 카드 첫 화면에서 자주 보는 짧은 값만 가산한다. 긴 안내 문구·HTML은
+              -- /intake/:id 상세 조회로만 보내 목록 폴링 응답이 200건분으로 불어나지 않게 한다.
+              purchase_time, delivery_type, review_type, pay_amount, daily_count,
+              work_sheet_url, linked_campaign_id, chat_room_url, admin_memo,
+              source_review_order_id, source_revision, intranet_advertiser_id, created_at, updated_at,
+              -- 134: 연결 작업(작업표)이 삭제된 시각 — 인트라넷 "보낸 오더" 카드가 그대로 표시한다.
+              tab_deleted_at, tab_deleted_tab,
+              -- ★ 원본 수정 잠금 판정 재료(2026-09-21) — 이 둘이 없어서 인트라넷은 저장해 보고
+              --   409 를 받아야 잠김을 알 수 있었다. 판정은 서버가 하고 아래에서 결과를 싣는다.
+              advertiser_id, deleted_at
          FROM work_orders ${where}
         ORDER BY created_at DESC
         LIMIT 200`,
       params
     );
-    res.json({ ok: true, data: rows });
+    /* ★ 화면이 "무엇을 잠글지" 를 스스로 판정하지 않게 결과를 그대로 싣는다(사본 0).
+       ★ 잠기지 않은 오더는 `source_editable` 이 null — "전부 가능" 과 구분된다. */
+    res.json({ ok: true, data: rows.map(row => Object.assign({}, row, {
+      source_edit_locked: isSourceEditLocked(row),
+      source_editable: sourceEditableFields(row),
+    })) });
   } catch (err) {
     next(err);
   }
@@ -788,7 +1174,11 @@ router.get('/intake/:id', async (req, res, next) => {
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
     }
-    res.json({ ok: true, data: rows[0] });
+    /* 상세도 같은 판정을 싣는다 — 목록과 갈리면 화면이 창을 열 때와 목록에서 다른 잠금을 본다. */
+    res.json({ ok: true, data: Object.assign({}, rows[0], {
+      source_edit_locked: isSourceEditLocked(rows[0]),
+      source_editable: sourceEditableFields(rows[0]),
+    }) });
   } catch (err) {
     next(err);
   }
@@ -893,6 +1283,13 @@ async function _intakeUpdateHandler(req, res, next) {
       );
       b.delivery_type = deliveryType;
       b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+      /* ★★ 배송유형이 바뀌면 부속정보도 그 종류에 맞춰 다시 세운다 — 안 하면 혼합→실배송으로
+         바꿔도 옛 조합이 남아 **작업표가 유령 배분을 돈다**(_reviewTypeMixJson 의 정리 규율과 같다).
+         ★ 명시 전송이 없으면 문장 파싱 폴백이 채우고, 종류가 아니면 빈 값으로 정리된다. */
+      b.delivery_type_mix = _deliveryMixJson(b, deliveryType);
+      const _rc = _recallFields(b, deliveryType);
+      b.recall_courier = _rc.courier;
+      b.recall_product = _rc.product;
     }
 
     // 동적 SET (전달된 수정 가능 필드만 — 부분 수정)
@@ -915,6 +1312,7 @@ async function _intakeUpdateHandler(req, res, next) {
       else if (f === 'guide_images') vals.push(_guideImagesJson(b[f]));   // 배열 → 정규화 JSON(090)
       else if (f === 'skip_weekends') vals.push(_boolOrNull(b[f]));       // 097 — 안 보냄/끔 구분
       else if (f === 'holidays') vals.push(_holidaysJson(b[f]));          // 097 — 배열 → 정규화 JSON
+      else if (f === 'product_distribution_mode') vals.push(_productDistributionMode(b[f]));
       // ★ 099: 저장 시점에 표준 key 로 정규화한다 — 인트라넷은 라벨('블로그체험단')을 보낼 수도,
       //   코드값을 보낼 수도 있는데 원장에 두 표기가 섞이면 SQL 로 거르는 곳(준비 행 판정 등)이
       //   둘 다 알아야 한다. 판정 함수는 어차피 둘 다 읽지만 **원장은 한 표기로 굳힌다**.
@@ -1146,6 +1544,13 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
       );
       b.delivery_type = deliveryType;
       b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+      /* ★★ 배송유형이 바뀌면 부속정보도 그 종류에 맞춰 다시 세운다 — 안 하면 혼합→실배송으로
+         바꿔도 옛 조합이 남아 **작업표가 유령 배분을 돈다**(_reviewTypeMixJson 의 정리 규율과 같다).
+         ★ 명시 전송이 없으면 문장 파싱 폴백이 채우고, 종류가 아니면 빈 값으로 정리된다. */
+      b.delivery_type_mix = _deliveryMixJson(b, deliveryType);
+      const _rc = _recallFields(b, deliveryType);
+      b.recall_courier = _rc.courier;
+      b.recall_product = _rc.product;
     }
 
     // 동적 SET (전달된 AE 필드만)
@@ -1329,17 +1734,42 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     let sheetlessPlan = null;      // 무시트일 때만 채워짐(작업표 행·열 구성)
 
     if (wantSheetless) {
-      const { createSheetlessWorktable, isVirtualSheetId } = require('../services/sheetlessAccept.service');
+      const { createSheetlessWorktable, isVirtualSheetId, virtualSheetIdForOrder } =
+        require('../services/sheetlessAccept.service');
       // ★ 재접수(2차 등)는 **새 작업표를 또 만들지 않는다** — 이미 연결된 가상 탭을 그대로 쓴다.
       //   (차수 구분은 시트 경로와 동일하게 '차수' 컬럼 → review_index.round 가 담당)
       const priorSheetId = String(o.linked_tab_sheet_id || '');
+      // ★★ 이 오더의 가상 시트ID = 오더 id 파생(결정적). 랜덤 발급이던 종전에는 링크 기록(8단계)
+      //   **전에** 실패해 빠져나가면 재시도가 매번 새 시트를 만들어 작업바에 같은 이름이 여러 줄
+      //   생겼다(2026-08-19 실사고 11줄). 지금은 아래 lookup + `ON CONFLICT (sheet_id, tab_name)`
+      //   업서트가 스스로 dedupe 한다.
+      const ownSheetId = virtualSheetIdForOrder(o.id);
+      // ★ 링크가 안 걸린 잔재(실패 후 재시도)도 흡수한다 — 그 시트에 이미 만들어 둔 탭이 있으면
+      //   **그것을 그대로 쓴다**(새 이름으로 또 만들지 않는다 = "동일 탭 재접수" 규율과 같다).
+      let priorOwn = null;
+      try {
+        const { rows: pr } = await pool.query(
+          `SELECT tab_name, tab_gid FROM tab_configs WHERE sheet_id = $1 ORDER BY updated_at ASC LIMIT 1`,
+          [ownSheetId]
+        );
+        priorOwn = pr[0] || null;
+      } catch (lookupErr) {
+        // 조회 실패는 접수를 막지 않는다 — 업서트 키가 결정적이라 중복 줄은 여전히 생기지 않는다.
+        logger.warn(`[order/accept] 기존 무시트 탭 조회 실패(접수는 계속): ${lookupErr.message}`);
+      }
       if (isVirtualSheetId(priorSheetId) && o.linked_tab_gid && o.linked_tab_name) {
         sheetId = priorSheetId; gid = String(o.linked_tab_gid); tabName = o.linked_tab_name;
         spreadsheetTitle = o.title || tabName; tabSheetUrl = '';
       } else {
+        // ★ 잔재가 있으면 **그 탭 이름으로** 계획을 만든다 — sheetId·gid 는 오더 파생이라 이미 같고,
+        //   작업표 줄 INSERT 는 `ON CONFLICT DO NOTHING`(멱등)이라 기존 줄은 그대로 보존된다.
+        //   그래서 "탭 줄만 남고 명단은 0" 인 실패 잔재가 재시도 한 번으로 정상 상태가 된다.
+        if (priorOwn && priorOwn.tab_name) {
+          logger.info(`[order/accept] 무시트 재시도 — 기존 작업표 재사용 tab="${priorOwn.tab_name}" sheet=${ownSheetId}`);
+        }
         const made = await createSheetlessWorktable({
           workOrder: o,
-          tabName: String((req.body || {}).tabName || '').trim(),
+          tabName: (priorOwn && priorOwn.tab_name) || String((req.body || {}).tabName || '').trim(),
           planOptions: (req.body || {}).planOptions || {},
           by: (req.admin?.name || 'admin'),
         });
@@ -1527,15 +1957,21 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     // ════════════════════════════════════════════════════════════════════
     let advertiserProjection = null;
     try {
-      advertiserProjection = await _upsertIntranetAdvertiserAndPortalWork(o, {
+      advertiserProjection = await projectIntranetAdvertiser(o, {
         workSheetUrl: wantSheetless ? '' : tabSheetUrl,
         by: req.admin?.name || '',
+        // ★ 사람이 "같은 업체입니다"라고 확인한 경우에만 기존 업체에 원본 ID 를 백필한다.
+        //   (자동 병합 금지 — 이름은 표시값이라 잘못 붙으면 남의 작업·정산·접속링크가 열린다)
+        linkAdvertiserId: String((req.body || {}).linkAdvertiserId || '').trim(),
       });
     } catch (projectionErr) {
+      const conflict = projectionErr && projectionErr.code === ADVERTISER_NAME_CONFLICT;
       return res.status(409).json({
         ok: false,
         error: `광고주 작업 연결을 완료하지 못했습니다: ${projectionErr.message}`,
         work_order_id: o.id,
+        // ★ 막다른 길로 두지 않는다 — 무엇과 겹쳤는지(후보)를 함께 내려 화면이 확인을 받게 한다.
+        ...(conflict ? { advertiserNameConflict: projectionErr.detail } : {}),
       });
     }
 
@@ -1590,11 +2026,31 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
          linked_tab_gid = $5,
          processed_by = $6,
          work_sheet_url = COALESCE($7, work_sheet_url),
+         -- ★ 재접수하면 "작업 삭제됨" 표시를 지운다(134) — 다시 연결됐는데 삭제 배지가
+         --   남아 있으면 화면이 거짓을 말한다. 이력은 memo_log(kind:'tab_deleted')에 남는다.
+         tab_deleted_at = NULL, tab_deleted_by = NULL, tab_deleted_tab = NULL,
          updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
       [id, nextStatus, sheetId, tabName, gid, (req.admin?.name || ''), (gidCorrected ? tabSheetUrl : null)]
     );
+
+    let workboardMapping = null;
+    if (wantSheetless) {
+      try {
+        workboardMapping = await require('../services/workboardConsolidation.service').ensureNewWorkTarget({
+          sheetId, tabName, by: `order-accept:${req.admin?.name || ''}`,
+        });
+      } catch (mappingErr) {
+        logger.error(`[order/accept] 새 작업보드 ID 연결 실패: ${mappingErr.message}`);
+        return res.status(500).json({
+          ok: false,
+          error: '작업은 등록됐지만 작업보드 연결을 완료하지 못했습니다. 같은 작업을 다시 접수해 주세요.',
+          detail: mappingErr.message,
+          work_order_id: id,
+        });
+      }
+    }
 
     // 8b) 정산 계약 자동 연결 (088) — 인트라넷 리뷰오더 등록에서 고른 계약을 그대로 이 탭에 매칭한다.
     //   ★★ 이것이 "계약 매칭을 따로 하지 않아도 되는" 이유. 리뷰웹의 계약 매칭 화면은 이 규칙 이전에
@@ -1636,6 +2092,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       gidCorrected,       // true = 사람이 고른 탭으로 URL 의 죽은 gid 를 교정해 접수함
       settlementLinked,   // linked | already | kept_existing | failed | null(계약 미첨부 오더)
       advertiserProjection,
+      workboardMapping,
       sheetless: wantSheetless || undefined,
       // 무시트일 때만: 만든 작업표 줄 수·장부 결과(실패 사유 포함 — 조용한 누락 금지)
       worktable: wantSheetless ? {
@@ -1697,15 +2154,16 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
 // ═══════════════════════════════════════════════════════════
 const ADMIN_EDIT_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
-  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_time',
+  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'product_distribution_mode', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
-  'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
+  'delivery_type', 'courier_proxy', 'delivery_type_mix', 'recall_courier', 'recall_product',
+  'review_type', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'goods_cost_type', 'work_manager',
 ];
 const ADMIN_EDIT_LABELS = {
   title: '작업명', start_date: '시작일', manager_name: '담당AE', product_option: '상품·옵션',
   product_options_json: '상품옵션표', pay_amount: '결제금액', review_fee: '리뷰비', daily_count: '일일건수',
-  daily_count_text: '일일건수(텍스트)', purchase_time: '구매시간대', inflow_keyword: '유입키워드',
+  daily_count_text: '일일건수(텍스트)', product_distribution_mode: '투입방식', purchase_time: '구매시간대', inflow_keyword: '유입키워드',
   inflow_type: '유입방식', inflow_guide: '유입가이드', delivery_type: '배송유형',
   courier_proxy: '택배대행', review_type: '리뷰타입', recruit_count: '총모집',
   review_guide: '리뷰가이드', special_notes: '특이사항', product_url: '상품URL',
@@ -1745,6 +2203,13 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
       );
       b.delivery_type = deliveryType;
       b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+      /* ★★ 배송유형이 바뀌면 부속정보도 그 종류에 맞춰 다시 세운다 — 안 하면 혼합→실배송으로
+         바꿔도 옛 조합이 남아 **작업표가 유령 배분을 돈다**(_reviewTypeMixJson 의 정리 규율과 같다).
+         ★ 명시 전송이 없으면 문장 파싱 폴백이 채우고, 종류가 아니면 빈 값으로 정리된다. */
+      b.delivery_type_mix = _deliveryMixJson(b, deliveryType);
+      const _rc = _recallFields(b, deliveryType);
+      b.recall_courier = _rc.courier;
+      b.recall_product = _rc.product;
     }
 
     const sets = [], vals = [], changes = [];
@@ -1765,6 +2230,9 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
         if (String(b[f]).trim() === '') continue;
         nv = _intOrZero(b[f]);
         curCmp = String(_intOrZero(o[f])); nvCmp = String(nv);
+      } else if (f === 'product_distribution_mode') {
+        nv = _productDistributionMode(b[f]);
+        curCmp = _productDistributionMode(o[f]); nvCmp = nv;
       } else {
         nv = String(b[f]);
         if (!nv.trim()) continue;                         // 빈 값 = 변경 없음
@@ -1824,34 +2292,10 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
 //   인트라넷은 이 payload 를 review_order_memos 로 받아 "보낸 오더" 카드의
 //   주황 처리메모 블록에 표시한다(수신부 무변경). fail-soft(실패해도 호출측 저장은 성공).
 // 필요 env: INTRANET_MEMO_WEBHOOK_URL (인트라넷 수신 URL), INTRANET_WEBHOOK_KEY (공유 시크릿)
-async function _pushIntranetMemo(o, memo, sentBy, sentAt) {
-  let delivered = false, deliverError = null;
-  const hook = process.env.INTRANET_MEMO_WEBHOOK_URL;
-  if (hook) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8000);
-      const resp = await fetch(hook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
-        body: JSON.stringify({
-          order_id: o.id, title: o.title, requester_name: o.created_by, status: o.status,
-          memo, sent_by: sentBy, sent_at: sentAt,
-        }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      delivered = resp.ok;
-      if (!resp.ok) deliverError = 'HTTP ' + resp.status;
-    } catch (e) {
-      deliverError = e.message;
-      logger.warn(`[order] 인트라넷 메모 webhook 실패: ${e.message}`);
-    }
-  } else {
-    deliverError = 'webhook 미설정';
-  }
-  return { delivered, deliverError };
-}
+// ★★ 실행부는 `services/intranetMemo.service.js` 한 벌 — 처리메모 전송·관리자 수정 알림·
+//    작업 삭제 알림이 같은 함수를 쓴다(사본 금지).
+const _pushIntranetMemo = (o, memo, sentBy, sentAt) =>
+  require('../services/intranetMemo.service').pushIntranetMemo(o, memo, sentBy, sentAt);
 
 // PUT /api/order/admin/send-memo — 처리메모 저장 + 인트라넷으로 즉시 push(webhook)
 // body: { id, memo }

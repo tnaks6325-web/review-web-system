@@ -1,5 +1,5 @@
 /**
- * reviewEditCsBridge.test.js — 리뷰이미지 교체요청 ↔ C/S 문의창구 연동 회귀가드
+ * reviewEditCsBridge.test.js — 리뷰캡처 교체요청 ↔ C/S 문의창구 연동 회귀가드
  * 실행: node tests/reviewEditCsBridge.test.js
  *
  * 이 연동의 위험 네 가지를 고정한다.
@@ -21,7 +21,7 @@ const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
 
-console.log('\n▶ 리뷰이미지 교체요청 ↔ C/S 연동 회귀가드\n');
+console.log('\n▶ 리뷰캡처 교체요청 ↔ C/S 연동 회귀가드\n');
 
 const MIG = R('migrations/080_cs_message_card.sql');
 const BR = R('src/services/csBridge.service.js');
@@ -102,8 +102,8 @@ t('★★ 기존 스레드의 라벨·이름을 덮어쓰지 않는다(시트제
 });
 t('★ 승인/반려는 카드를 제자리 갱신 + 통지 메시지는 따로', () => {
   assert.ok(/SET meta = meta \|\| \$2::jsonb/.test(BR), 'meta 를 통째로 덮으면 requestId·파일ID 가 날아간다');
-  assert.ok(/리뷰이미지 수정요청이 승인되었습니다\./.test(BR));
-  assert.ok(/리뷰이미지 수정요청이 반려되었습니다[\s\S]{0,40}사유/.test(BR));
+  assert.ok(/리뷰캡처 수정요청이 승인되었습니다\./.test(BR));
+  assert.ok(/리뷰캡처 수정요청이 반려되었습니다[\s\S]{0,40}사유/.test(BR));
   assert.ok(/reviewer_unread_count = reviewer_unread_count \+ 1/.test(BR));
 });
 t('★ 처리 중 뒤늦은 스레드 생성은 "새 문의" 알림을 내지 않고, 재귀는 1회 제한', () => {
@@ -196,8 +196,16 @@ t('두 조회 엔드포인트가 msgType·meta 를 내려준다', () => {
 t('★ 기존 CS 이미지 허용목록을 넓히지 않았다(파일ID로 그린다)', () => {
   assert.ok(/\/api\/drive\/image\/' \+ encodeURIComponent\(id\)/.test(CARD));
   assert.ok(/\/\^\[-\\w\]\{20,\}\$\/\.test\(id\)/.test(CARD), '파일ID 형식 검증 없이 <img src> 에 넣는다');
+  /* ⚠ 2026-08-21: 같은 정규식이 두 라우트에 복사돼 있던 것을 **단일 출처**로 옮겼다
+     (`utils/csImageUrls` — 한쪽만 넓히면 그 경로로 임의 URL 이 들어온다). 검사 의미는 불변:
+     "우리 프록시 주소만 통과한다". 소비처는 그 단일 출처를 부르는지만 본다. */
+  const U = require('../src/utils/csImageUrls');
+  assert.ok(U.sanitizeCsImageUrls(['https://x.dev/api/order/guide-image/abcdefghij0123456789']).length === 1,
+    '우리 프록시 주소가 막힌다');
+  assert.ok(U.sanitizeCsImageUrls(['https://evil.example/a.png',
+    'https://x.dev/api/order/guide-image/short']).length === 0, '이미지 허용목록이 바뀌었다');
   [['cs.routes.js', CSR], ['reviewer.routes.js', RVR]].forEach(([n, s]) =>
-    assert.ok(/\/api\\\/order\\\/guide-image\\\/\[-\\w\]\{20,\}\$/.test(s), n + ': 이미지 허용목록이 바뀌었다'));
+    assert.ok(/require\((['"]).*csImageUrls\1\)/.test(s), n + ': 허용목록 단일 출처를 부르지 않는다'));
 });
 
 /* ── 7) 사본 금지 · 배선 ───────────────────────────────────── */
@@ -206,7 +214,7 @@ t('★ 카드 렌더러는 공유 모듈 하나뿐', () => {
   assert.ok(/window\.CsReviewEditCard = \{/.test(CARD));
   [['cs-inquiry.js', CSJ], ['reviewer-cs.js', RCS], ['workdesk.html', WD]].forEach(([n, s]) => {
     assert.ok(/CsReviewEditCard\.html\(/.test(s), n + ' 가 공용 렌더러를 안 쓴다');
-    assert.ok(!/리뷰이미지 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
+    assert.ok(!/리뷰캡처 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
   });
 });
 t('네 화면이 같은 모듈을 로드한다', () => {
@@ -415,38 +423,49 @@ t('★★ 잘못된 id 로 승인/반려해도 **응답이 온다**(Express4 han
     pass += 1; console.log('  ✓ ★★ 확대 보기 — 두 장이 준비될 때까지 감췄다 **동시에** 표시(실패·지연은 fail-open)');
   }
 
-  /* ★★ AE 화면에는 문의창구를 **마운트조차 하지 않는다**
-     교체요청이 C/S 문의 안으로 들어가면서 그 메뉴가 AE 에게도 열렸다. 보안 경계는 이제
-     "메뉴가 보이나"가 아니라 **"AE 화면에 문의 본문을 그리나"** 다.
+  /* ★★ C/S 본문은 서버 `internalMiddleware`와 같은 역할 경계를 쓴다.
+     교체요청이 C/S 문의 안으로 들어간 뒤 AE(staff)도 C/S를 처리하도록 정책이 확장됐다.
+     보안 경계는 이제 내부 담당자와 광고주 사이에 있다.
      ★ grep 으로 "isAdmin 분기가 있다"만 보면 스코프·실행경로를 못 본다(레포에서 이미 밟은 맹점)
        → renderCsView 를 꺼내 **역할별로 실제 호출**하고 mount/목록조회 횟수를 센다. */
   {
-    const src = WD.slice(WD.indexOf('async function renderCsView()'));
-    const body = src.slice(0, src.indexOf('\n}\n') + 3);
+    const start = WD.indexOf('async function renderCsView()');
+    assert.ok(start >= 0, 'renderCsView 함수 없음');
+    const open = WD.indexOf('{', start);
+    let depth = 0, close = -1;
+    for (let i = open; i < WD.length; i++) {
+      if (WD[i] === '{') depth += 1;
+      else if (WD[i] === '}' && --depth === 0) { close = i; break; }
+    }
+    assert.ok(close > open, 'renderCsView 중괄호 불균형');
+    const body = WD.slice(start, close + 1);
     const run = async (role) => {
       const calls = { mount: 0, rooms: 0, queue: 0, load: 0 };
       const els = {};
       const el = (id) => (els[id] = els[id] || { innerHTML: '', classList: { add() {} } });
       const win = { CsInquiry: { mount: () => { calls.mount++; } } };
       const fn = new Function('STATE', '$', 'document', 'window', 'CsInquiry', 'loadCsRooms',
-        '_reRenderQueue', '_loadReedit', body + '\nreturn renderCsView();');
+        '_reRenderQueue', '_loadReedit', '_isInternalRole', body + '\nreturn renderCsView();');
       await fn({ role }, (sel) => el(String(sel).replace('#', '')),
         { getElementById: (id) => (id === 'tab-cs-inquiry' ? null : el(id)) },
         win, win.CsInquiry,
-        async () => { calls.rooms++; }, () => { calls.queue++; }, async () => { calls.load++; });
+        async () => { calls.rooms++; }, () => { calls.queue++; }, async () => { calls.load++; },
+        () => ['master', 'admin', 'staff'].includes(role));
       return { calls, els };
     };
-    const s = await run('staff'), a = await run('admin');
-    assert.strictEqual(s.calls.mount, 0, '★★ AE 화면에 문의창구가 마운트됐다 — 리뷰어 실명·연락처·주소가 그려진다');
-    assert.strictEqual(s.calls.rooms, 0, '★★ AE 인데 문의 목록을 조회한다(서버 403 이어도 그리려는 시도 자체가 회귀)');
-    assert.ok(/관리자만 열람/.test(s.els.csTopNote.innerHTML), 'AE 에게 "왜 문의가 없는지" 안내가 없다(고장으로 오해)');
+    const s = await run('staff'), a = await run('admin'), x = await run('advertiser');
+    assert.strictEqual(s.calls.mount, 1, '★★ AE 화면에 문의창구가 안 뜬다');
+    assert.strictEqual(s.calls.rooms, 1, '★★ AE 문의 목록을 안 읽는다');
     assert.strictEqual(a.calls.mount, 1, '관리자 화면에 문의창구가 안 뜬다');
     assert.strictEqual(a.calls.rooms, 1, '관리자 문의 목록을 안 읽는다');
     assert.ok(!(a.els.csTopNote && a.els.csTopNote.innerHTML), '관리자 화면에 AE 안내가 뜬다');
-    // 교체요청 큐는 **양쪽 다** — AE 가 이 화면에서 하는 일이 그것뿐이다
+    assert.strictEqual(x.calls.mount, 0, '★★ 광고주 화면에 문의창구가 마운트됐다');
+    assert.strictEqual(x.calls.rooms, 0, '★★ 광고주가 문의 목록을 조회한다');
+    assert.ok(/내부 담당자만 열람/.test(x.els.csTopNote.innerHTML), '광고주에게 접근 불가 안내가 없다');
+    // 교체요청 큐는 이 렌더러가 열린 역할 모두에서 같은 흐름을 탄다.
     assert.ok(s.calls.queue >= 1 && s.calls.load === 1 && a.calls.queue >= 1 && a.calls.load === 1,
       '역할에 따라 교체요청 큐가 안 뜬다');
-    pass += 1; console.log('  ✓ ★★ 역할별 renderCsView 실행 — AE 는 문의 미마운트·미조회 / 교체요청 큐는 양쪽');
+    pass += 1; console.log('  ✓ ★★ 역할별 renderCsView 실행 — 내부 담당자는 문의 허용 / 광고주는 미마운트·미조회');
   }
 
   console.log(`\n✅ ${pass} checks passed\n`);

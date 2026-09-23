@@ -26,13 +26,25 @@ function _mask(phone8) {
 async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test' } = {}) {
   if (!sheetId || !tabName) throw new Error('importTabFromIndex: sheetId, tabName 필수');
   const db = getPool();
-  /* ★★ 무시트 탭의 `row_json` 은 **작업표가 진실원본**이고 `review_index` 는 그 파생물이다(130).
-     되임포트하면 A→B→A 순환이라 정보 이득이 0인데, 장부 재생성이 늦은 순간에는
-     **작업보드 편집을 옛 값으로 덮는다**(10분 뒤 조용한 롤백).
-     ★ 동결 대상은 `row_json` **한 칸뿐** — 신원 컬럼은 row_json 파생이라 동결하면 오히려 스테일이 된다.
-     ★ 판정 실패는 종전 경로(fail-open). */
-  let sheetless = false;
-  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); } catch (_) {}
+
+  /* ★★★ 무시트 탭은 이 복사의 **방향이 반대다** — 건너뛴다 (2026-08-23).
+     시트 시절 흐름은 `시트 → review_index → 작업표` 였고 이 함수가 마지막 화살표다.
+     탈시트 이후 무시트 탭의 진실원본은 **작업표**이고 `review_index` 는 거기서 만들어진다
+     (`sheetlessLedger.rebuildLedgers`) → 그대로 두면 **결과물로 원본을 덮는다**.
+     실측(프로덕션): 5분 스윕이 고친 번호를 이 복사가 10분마다 되돌렸다(35→23→35→23 반복).
+     ★★ 게이트를 **이 함수 안**에 둔다 — 호출부가 넷(투영 크론·동기화 크론·수동 import·수동 sync)이라
+       바깥에 두면 한 곳만 빠져도 그 경로로 되돌림이 되살아난다(판정 사본 0).
+     ★★ 호출부는 **`skipped` 를 보고 `_reconcileSeen` 을 건너뛰어야 한다** — 임포트를 안 했는데
+       그 정리를 돌리면 `imported_at < runStart` 조건에 걸려 그 탭의 `source='import'` 활성 줄이
+       **전부 비활성화**된다(이관된 무시트 탭에 그런 줄이 남아 있다).
+     ★ 판정은 `utils/sheetlessScope.isSheetless` 단일 출처(조회 실패 = false = 종전 경로).
+     ★ 되돌리기: `TRACKB_PROJECT_SHEETLESS=1` 이면 종전처럼 무시트 탭도 임포트한다. */
+  if (process.env.TRACKB_PROJECT_SHEETLESS !== '1') {
+    const { isSheetless } = require('../utils/sheetlessScope');
+    if (await isSheetless(db, sheetId, tabName)) {
+      return { skipped: true, reason: 'sheetless', dryRun: !!dryRun, indexRows: 0, inserted: 0, updated: 0 };
+    }
+  }
   const { rows: idx } = await db.query(
     `SELECT reviewer_name, recipient_name, tab_gid, campaign_name, row_index, is_submitted, is_submitted2,
             submit_col, submit_col2, product_url, product_name, row_json, start_date, end_date, round, phone8
@@ -79,7 +91,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          product_name = EXCLUDED.product_name, product_url = EXCLUDED.product_url,
          start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
          submit_col = EXCLUDED.submit_col, submit_col2 = EXCLUDED.submit_col2,
-         row_json = CASE WHEN $20 THEN campaign_participants.row_json ELSE EXCLUDED.row_json END,
+         row_json = EXCLUDED.row_json,
          sheet_row = EXCLUDED.sheet_row,
          -- ★ Phase 4: import 행은 리뷰제출/입금 상태도 review_index에서 최신화(DB를 살아있는 원본화).
          --   campaign_participants.* = 갱신 전(기존행) 값(EXCLUDED=새 행). 기존행 source='import'면 새 상태로,
@@ -97,7 +109,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
       [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.recipient_name, r.phone8, r.round,
        r.product_name, r.product_url, r.start_date, r.end_date, !!r.is_submitted, isPaid,
        r.submit_col || null, r.submit_col2 || null,
-       JSON.stringify(r.row_json || {}), String(by).slice(0, 100), sheetless]
+       JSON.stringify(r.row_json || {}), String(by).slice(0, 100)]
     );
     if (res.rows[0] && res.rows[0].inserted) inserted++; else updated++;
   }
@@ -175,14 +187,16 @@ async function syncImportedTabs({ limit = 200, by = 'auto-sync' } = {}) {
       GROUP BY sheet_id, tab_name ORDER BY sheet_id, tab_name LIMIT $1`,
     [Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000)]
   );
-  let tabsSynced = 0, updated = 0, inserted = 0, errors = 0;
+  let tabsSynced = 0, updated = 0, inserted = 0, errors = 0, skipped = 0;
   for (const t of tabs) {
     try {
       const r = await importTabFromIndex({ sheetId: t.sheetId, tabName: t.tabName, by });
+      /* ★ 건너뛴 탭은 "동기화했다" 고 세지 않는다(로그가 사실과 달라진다). */
+      if (r && r.skipped) { skipped++; continue; }
       tabsSynced++; updated += r.updated || 0; inserted += r.inserted || 0;
     } catch (e) { errors++; logger.warn(`[participantsSync] ${t.tabName} 실패: ${e.message}`); }
   }
-  return { candidateTabs: tabs.length, tabsSynced, inserted, updated, errors };
+  return { candidateTabs: tabs.length, tabsSynced, inserted, updated, errors, skipped };
 }
 
 // ── Phase 2a: 참여자 직접 추가/수정/삭제 (여전히 신규 테이블만 — 라이브·시트 무영향) ──
@@ -193,6 +207,18 @@ const _MANUAL_SEQ_BASE = 900000;
 async function addParticipant({ sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by = 'test' } = {}) {
   if (!sheetId || !tabName) throw new Error('addParticipant: sheetId, tabName 필수');
   const db = getPool();
+  /* ★★ 무시트(sheetless) 탭은 900000 대역을 쓰지 않는다 (2026-08-21 실측 결함 수정).
+     그 대역은 "시트 행을 모를 때"의 격리 대역인데, 무시트 탭에서는 작업표 seq 가 곧 장부의
+     행 번호라 ① 장부 생성기(sheetlessLedger.buildValues)가 seq 크기만큼 시트 모양 배열을
+     만들며 90만 칸을 할당하고 ② row_json 이 빈 줄은 파서가 이름 없는 행으로 버려
+     **검색 명단·입금대상에서 영영 빠진다**. → 실제 행 번호에 이어붙이고 row_json 을 채운 뒤
+     장부를 재생성한다(sheetlessApplicant.addApplicantRow 와 같은 재료·같은 규율).
+     ★ 판정 실패 = 종전 경로(fail-open — 시트 기반이 절대 다수, manualOrder 와 같은 판단). */
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); } catch (_) { sheetless = false; }
+  if (sheetless) {
+    return _addParticipantSheetless(db, { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by });
+  }
   // 동시 add가 같은 nextSeq를 계산해도 uq_participants_seq(sheet_id,tab_name,seq)가 중복행을 차단한다.
   //   23505(유니크 위반) 시 seq를 재계산해 재시도(advisory 락 불필요 — 예방 대신 회복, 동일 정확성).
   for (let attempt = 0; ; attempt++) {
@@ -214,6 +240,79 @@ async function addParticipant({ sheetId, tabName, reviewerName, recipientName, p
          round || null, optionText || null, productName || null, String(by).slice(0, 100)]
       );
       return { added: 1, id: rows[0].id, seq: rows[0].seq };
+    } catch (e) {
+      if (e && e.code === '23505' && attempt < 4) continue;   // seq 레이스 → 재계산 재시도
+      throw e;
+    }
+  }
+}
+
+/**
+ * 무시트 탭 전용 참여자 추가 — 실제 행 번호 대역 + row_json + 장부 재생성.
+ *
+ * ★★ fail-closed 3종(sheetlessApplicant·registerBlogger 와 같은 규율):
+ *   이름 없음 / 미등록 탭 / 열 구성 미상이면 **쓰기 0건으로 거부**한다 — 조용히 900000 대역으로
+ *   낙하시키면 "표에는 있고 어디에도 안 잡히는 줄"이라는 원래 결함이 그대로 재현된다.
+ * ★ 번호 칸은 **비워 둔다** — 자동 재번호 스윕(5분)이 구매일자 순으로 채운다. 여기서 seq−1 을
+ *   적으면 헤더가 1행이 아닌 탭에서 틀린 번호가 박힌다(틀린 값보다 빈 값).
+ * ★ `source='worktable'` — 'manual' 로 넣으면 투영 상태 CASE 가 인정하지 않아
+ *   리뷰제출·입금 표시가 영영 안 켜진다(M2b-2 규율 그대로).
+ * ★ 장부 재생성 실패는 add 를 되돌리지 않는다 — 줄은 이미 표에 있고 다음 재생성이 메운다.
+ *   대신 결과(`ledger`)로 사실을 말한다(조용한 누락 금지).
+ */
+async function _addParticipantSheetless(db, { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by }) {
+  const nm = String(reviewerName || recipientName || '').trim();
+  if (!nm) throw new Error('무시트 작업은 이름이 필요합니다 — 이름 없는 줄은 검색 명단에 실리지 않습니다.');
+
+  const { rows: tc } = await db.query(
+    `SELECT tab_gid, campaign_name FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+    [sheetId, tabName]);
+  if (!tc.length) throw new Error('등록되지 않은 작업입니다(접수 후 이용해주세요).');
+  const tabGid = String(tc[0].tab_gid || '');
+
+  // 열 이름 = 장부가 쓰는 것과 같은 원본(detected_headers 우선 — 시트 A1 행이 아니라 진짜 헤더).
+  const { rows: rt } = await db.query(
+    `SELECT detected_headers, headers FROM raw_sheet_tabs WHERE sheet_id=$1 AND tab_gid=$2 LIMIT 1`,
+    [sheetId, tabGid]);
+  const rawH = rt.length ? (rt[0].detected_headers || rt[0].headers) : null;
+  const headers = (Array.isArray(rawH) ? rawH : []).map(h => String(h == null ? '' : h)).filter(h => h.trim());
+  if (!headers.length) throw new Error('이 작업의 열 구성을 알 수 없습니다(작업표 열 이름 줄을 확인해주세요).');
+  const col = require('../utils/applicantColumns').resolveApplicantColumns(headers);
+  if (col.name < 0) throw new Error('이름(수취인) 열이 없어 사람을 넣을 수 없습니다.');
+
+  // row_json = 장부 생성기의 유일한 재료 — 이 맵이 비면 그 줄은 명단에서 사라진다(결함의 본체).
+  const rowJson = {};
+  rowJson[headers[col.name]] = nm;
+  if (col.phone >= 0 && phone) rowJson[headers[col.phone]] = String(phone).trim();
+
+  for (let attempt = 0; ; attempt++) {
+    /* ★ 실제 행 번호 대역(< _MANUAL_SEQ_BASE)만 세어 이어붙인다 — 과거에 잘못 들어간 900000 대역
+       줄이 있어도 그 위(900001+)로 이어붙지 않는다. 빈 표는 1+1=2(1행 = 헤더 가정,
+       addApplicantRow 와 동일). 23505 는 재계산 재시도(기존 add 와 같은 회복 전략). */
+    const { rows: mx } = await db.query(
+      `SELECT COALESCE(MAX(seq) FILTER (WHERE seq < ${_MANUAL_SEQ_BASE}), 1) + 1 AS nextseq
+         FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+    const nextSeq = Number(mx[0].nextseq);
+    try {
+      const { rows } = await db.query(
+        `INSERT INTO campaign_participants
+           (sheet_id, tab_gid, tab_name, campaign_name, seq, reviewer_name, recipient_name, phone8,
+            round, option_text, product_name, row_json, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,'worktable',$13,NOW())
+         RETURNING id, seq`,
+        [sheetId, tabGid || null, tabName, tc[0].campaign_name || null, nextSeq,
+         nm, recipientName || null, _toPhone8(phone), round || null, optionText || null,
+         productName || null, JSON.stringify(rowJson), String(by).slice(0, 100)]);
+      // 장부 재생성 — 이걸 빼면 표에는 있는데 **검색·행배정·입금대상에는 없는** 줄이 된다.
+      let ledger = null;
+      try {
+        const r = await require('./sheetlessLedger.service').rebuildLedgers({ sheetId, tabName, by });
+        ledger = { ok: !!(r && r.ok) };
+      } catch (e) {
+        ledger = { ok: false, error: e.message };
+        logger.warn(`[participants] 무시트 추가 후 장부 재생성 실패 tab=${tabName} seq=${nextSeq}: ${e.message} — 줄은 남아 있고 다음 재생성이 메운다`);
+      }
+      return { added: 1, id: rows[0].id, seq: rows[0].seq, sheetless: true, ledger };
     } catch (e) {
       if (e && e.code === '23505' && attempt < 4) continue;   // seq 레이스 → 재계산 재시도
       throw e;
@@ -307,6 +406,35 @@ async function createSlotsFromSheetRows({ sheetId, tabName, tabGid = null, campa
      ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
     [sheetId, tabGid, tabName, campaignName, ...vals]);
   return { created: rowCount, requested: list.length };
+}
+
+/**
+ * 빈 자리가 없을 때 작업표에 **줄을 하나 이어붙인다**(무시트 전용).
+ *
+ * ★★ 왜 필요한가: 무시트 공고는 준비된 빈 슬롯이 동나면 `no_open_slot` 으로 주문이 미반영이
+ *   되어 "결제는 했는데 작업보드 어디에도 없는" 주문이 남고, 복구 잡이 같은 실패를 반복했다.
+ *   작업표가 진실원본인 지금은 **확정된 주문에는 줄이 있어야 한다** — 그래서 이어붙인다.
+ * ★★ `seq` 는 **`MAX(seq)+1`(삭제된 줄도 세어 재사용하지 않는다)** — 번호를 재사용하면
+ *   `(sheet_id, tab_name, seq)` 키가 충돌해 표가 두 겹이 된다.
+ *   ★ 단 **실제 행 번호 대역(< 900000)만** 센다 — 과거에 잘못 들어간 900000 대역(수동 격리
+ *   대역) 줄이 하나라도 있으면 그 뒤(900001+)로 이어붙어 모든 새 주문이 90만 대역으로 밀린다.
+ * ★ `client` 를 받는다 — 호출부(주문 기록)의 트랜잭션·탭 advisory 락 안에서 실행되어야
+ *   동시 주문 두 건이 같은 번호를 집지 않는다.
+ * ★ `source='worktable'` — 'manual' 로 넣으면 투영의 상태 CASE 가 인정하지 않아
+ *   리뷰제출·입금 표시가 영영 안 켜진다.
+ */
+async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignName = null, rowJson = {}, workboardId = null, by = 'sheetless-append' } = {}) {
+  if (!client || !sheetId || !tabName) throw new Error('appendSlot: client, sheetId, tabName 필수');
+  const { rows } = await client.query(
+    `INSERT INTO campaign_participants
+       (sheet_id, tab_gid, tab_name, campaign_name, seq, row_json, workboard_id, source, updated_by, updated_at)
+     SELECT $1, $2, $3, $4, COALESCE(MAX(seq) FILTER (WHERE seq < ${_MANUAL_SEQ_BASE}), 0) + 1, $5::jsonb, $6::uuid, 'worktable', $7, NOW()
+       FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
+     ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
+     RETURNING id, seq, row_json`,
+    [sheetId, tabGid, tabName, campaignName,
+     JSON.stringify(rowJson && typeof rowJson === 'object' ? rowJson : {}), workboardId, String(by).slice(0, 100)]);
+  return rows[0] || null;
 }
 
 /**
@@ -519,7 +647,19 @@ async function listActiveTabs({ limit = 500 } = {}) {
             /* ★ workKind — [＋ 블로거 추가] 버튼을 어느 작업에 보일지(M5-2). tab_configs 는 이미
                조인돼 있어 **쿼리 순증 0**. 판정 최종 권한은 서버(공고 > 탭)이고 이 값은 표시용 힌트다 —
                그래서 화면은 'review' 로 **명시된** 작업만 숨기고 빈 값(미지정)은 열어 둔다(모르는 것을 단정하지 않는다). */
-            COALESCE(tc.work_kind, '') AS "workKind"
+            COALESCE(tc.work_kind, '') AS "workKind",
+            /* ★ displayName — 화면이 그리는 **작업명**(헤더 옆 ✏️ 로 편집하는 그 값).
+               종전에는 목록에 안 실려 작업바·검색·홈 목록·업체관리가 전부 **탭 이름**밖에 못 써서,
+               같은 작업이 작업보드 제목과 목록에서 다른 이름으로 보였다(실측: 「맛고」↔「0720수진코리아고양이캔」).
+               ★ 빈 값이면 화면이 종전대로 탭 이름으로 접는다(이름이 비는 일은 없다).
+               ★ 두 CTE 는 UNION ALL(SELECT *) 이라 **칸 순서가 같아야 한다** — 한쪽만 넣으면 값이 밀린다. */
+            COALESCE(tc.display_name, '') AS "displayName",
+            /* 최신 작업 정렬은 동기화 시각이 아니라 최초 관측 시각을 쓴다.
+               업체관리의 생성 최신순 근사와 같은 원천이며, 활성 탭 키 인덱스로만 좁힌다. */
+            COALESCE((SELECT MIN(cp.first_seen_at)
+                        FROM campaign_participants cp
+                       WHERE cp.sheet_id = rst.sheet_id AND cp.tab_name = rst.tab_name
+                         AND cp.deleted_at IS NULL), rst.mirrored_at) AS "firstSeenAt"
        FROM raw_sheet_tabs rst
        LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE
@@ -530,7 +670,12 @@ async function listActiveTabs({ limit = 500 } = {}) {
        SELECT tc.sheet_id AS "sheetId",
               COALESCE(NULLIF(tc.campaign_name, ''), NULLIF(tc.display_name, ''), tc.tab_name) AS "spreadsheetTitle",
               tc.tab_gid AS "tabGid", tc.tab_name AS "tabName", COALESCE(im.row_count, 0) AS "rowCount",
-              TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind"
+              TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind",
+              COALESCE(tc.display_name, '') AS "displayName",
+              COALESCE((SELECT MIN(cp.first_seen_at)
+                        FROM campaign_participants cp
+                       WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
+                         AND cp.deleted_at IS NULL), tc.sheetless_at, tc.updated_at) AS "firstSeenAt"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
         WHERE COALESCE(tc.sheetless, FALSE) = TRUE
@@ -549,8 +694,57 @@ async function listActiveTabs({ limit = 500 } = {}) {
   return rows;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   표에서 분리(보관) — 2026-08-19 사용자 확정 "표에서만 빼기"
+   ──────────────────────────────────────────────────────────────────
+   왜: 중복 반영으로 생긴 줄 중 **이체 근거가 걸려 지울 수 없는 줄**(입금 회차에 담김)이
+   작업표에 남아 매일 눈에 걸린다. 그렇다고 지우면(soft delete) 그 줄이 들고 있던 입금 표시가
+   표에서 사라져 **남길 줄이 미입금으로 보이고 다음 회차에 다시 담겨 이중 송금**이 난다.
+   ★★ 그래서 이건 **삭제가 아니라 화면 분리**다 — `deleted_at` 을 건드리지 않는다.
+      장부 재생성·리뷰어 검색·입금대상 추출은 `deleted_at` 만 보므로 **한 글자도 안 바뀐다**.
+   ★ 되돌리기가 기본(`hold:false`) · 누가 왜 분리했는지 남긴다.
+   ★ 쓰기 소유자 규율 — `campaign_participants` 쓰기는 이 서비스가 한다.
+   ══════════════════════════════════════════════════════════════════ */
+async function holdRows({ sheetId, tabName, seqs, hold = true, reason = '', by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('holdRows: sheetId, tabName 필수');
+  const list = [...new Set((Array.isArray(seqs) ? seqs : []).map(v => parseInt(v, 10))
+    .filter(n => Number.isInteger(n) && n > 0))];
+  if (!list.length) return { ok: false, reason: 'empty', changed: 0 };
+  const db = getPool();
+  const { rowCount } = hold
+    ? await db.query(
+      `UPDATE campaign_participants
+          SET held_at = NOW(), held_reason = LEFT($4, 300), held_by = LEFT($5, 100), updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND seq = ANY($3::int[])
+          AND deleted_at IS NULL AND held_at IS NULL`,
+      [sheetId, tabName, list, String(reason || ''), String(by || 'admin')])
+    : await db.query(
+      `UPDATE campaign_participants
+          SET held_at = NULL, held_reason = NULL, held_by = NULL, updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND seq = ANY($3::int[])
+          AND deleted_at IS NULL AND held_at IS NOT NULL`,
+      [sheetId, tabName, list]);
+  return { ok: true, changed: rowCount, hold: !!hold, seqs: list };
+}
+
+/** 분리된 줄 목록(보관함) — 읽기 전용. 되돌릴 때 사람이 무엇을 되돌리는지 보게 한다. */
+async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
+  if (!sheetId || !tabName) throw new Error('listHeldRows: sheetId, tabName 필수');
+  const { rows } = await getPool().query(
+    `SELECT seq, reviewer_name AS name, recipient_name AS recipient, phone8,
+            held_at AS "heldAt", held_reason AS "heldReason", held_by AS "heldBy",
+            COALESCE(is_submitted, FALSE) AS submitted, COALESCE(is_paid, FALSE) AS paid,
+            row_json AS "rowJson"
+       FROM campaign_participants
+      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND held_at IS NOT NULL
+      ORDER BY seq
+      LIMIT $3`, [sheetId, tabName, Math.min(Math.max(parseInt(limit, 10) || 300, 1), 1000)]);
+  return rows;
+}
+
 module.exports = {
-  createWorktableSlots, createSlotsFromSheetRows, deleteWorktableRows, retireRows, retireInactiveImportRows,
+  holdRows, listHeldRows,
+  createWorktableSlots, createSlotsFromSheetRows, appendSlot, deleteWorktableRows, retireRows, retireInactiveImportRows,
   purgeImportedRows,
   importTabFromIndex,
   syncImportedTabs,
@@ -562,5 +756,6 @@ module.exports = {
   updateParticipant,
   softDeleteParticipant,
   listActiveTabs,
+  MANUAL_SEQ_BASE: _MANUAL_SEQ_BASE,
   __setPoolForTest,
 };

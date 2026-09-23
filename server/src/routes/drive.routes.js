@@ -1,11 +1,23 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { linkReviewFilesToRows } = require('../services/reviewFileLink.service');
+const captureRename = require('../services/captureFileRename.service');
+
+// 공개 리포트에서 제외할 영수증 검수 증거. 리뷰 슬롯 파일을 AI가 영수증으로 오판했어도
+// 담당자가 정상(ok)으로 확정했다면 format 흔적만으로 숨기지 않는다. 영수증 전용
+// receiptValidation이 있으면 승인 상태와 무관하게 계속 제외한다.
+const PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL = `(
+  COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+  OR (
+    COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
+    AND NOT (COALESCE(ri.status, '') = 'resolved' AND COALESCE(ri.resolution, '') = 'ok')
+  )
+)`;
 
 /**
  * 헬퍼: Google Drive URL에서 폴더 ID 추출
@@ -640,7 +652,9 @@ router.post('/organize-capture', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/save-capture', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, folderUrl } = req.body;
+    const { sheetId, tabName } = req.body;
+    // 공개 구매양식이 사용하던 이름(captureFolderUrl)과 관리자 API 이름(folderUrl)을 함께 받는다.
+    const folderUrl = req.body.folderUrl || req.body.captureFolderUrl || '';
     if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
 
     await pool.query(
@@ -771,7 +785,7 @@ router.post('/find-candidates', authMiddleware, async (req, res, next) => {
       const curInsp = await driveService.inspectFolder(curReviewId);
       const hasReviewElsewhere = candidates.some(c => c.id !== curReviewId && c.reviewLikeCount > 0);
       if (curInsp.fileCount === 0 && hasReviewElsewhere) {
-        warnings.push('현재 연결된 리뷰폴더가 비어 있고, 리뷰 이미지가 다른 폴더에 있습니다. 위치 불일치(drift)로 보입니다.');
+        warnings.push('현재 연결된 리뷰폴더가 비어 있고, 리뷰 캡처가 다른 폴더에 있습니다. 위치 불일치(drift)로 보입니다.');
       }
     } else {
       warnings.push('현재 리뷰폴더(folder_url)가 연결되어 있지 않습니다.');
@@ -1391,11 +1405,43 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
 });
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/capture-rename-recipient — 과거 리뷰 캡처 파일명 소급 정정(주문자 → 수취인)
+//
+// 배경: 타계정 참여 캡처가 Drive 에 전부 주문자(로그인 본계정) 이름으로 쌓여 어떤 타계정의
+//   리뷰인지 구분할 수 없다(2026-09-22 신고 · 결정 009 후속). 앞으로의 저장은 서버 판정으로
+//   고쳤고, 이미 올라간 파일은 이 창구가 **이름만** 바꾼다(꼬리 = 순번·제출시각·확장자 보존).
+//
+// ★★ 되돌리기 어려운 외부 저장 쓰기라 **미리보기 기본** — `dryRun:false` **와** `confirm:true`
+//    가 둘 다 있어야 실행한다. 바꾸기 전 이름은 `review_submissions.renamed_from`(164)에 남고
+//    `revert:true` 로 되돌린다.
+// ★ adminOrMaster — 리뷰 캡처 정리(relocate)와 같은 급의 Drive 쓰기 도구다.
+// ═══════════════════════════════════════════════════════════
+router.post('/capture-rename-recipient', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, limit, dryRun, confirm, revert } = req.body || {};
+    const by = (req.admin && req.admin.name) || 'admin';
+    const args = { db: pool, sheetId: sheetId || null, tabName: tabName || null,
+                   limit, dryRun: dryRun !== false, confirm: confirm === true, by };
+    const out = revert === true
+      ? await captureRename.revertRecipientRenames(args)
+      : await captureRename.applyRecipientRenames(args);
+    res.json({ ok: true, revert: revert === true, ...out });
+  } catch (err) {
+    // 마이그레이션 164 미적용은 원인을 말해 준다(조용한 500 금지).
+    if (err && err.code === '42703') {
+      return res.status(400).json({ ok: false, code: 'not_ready',
+        error: '이 기능은 migration 164(review_submissions.renamed_from) 적용 후 사용할 수 있습니다.' });
+    }
+    next(err);
+  }
+});
+
 // POST /api/drive/review-folder-backfill — 탭 [리뷰] 폴더 스캔 → 파일↔행 링크 백필
 //
 // 배경: 업체 뷰어 리뷰 미리보기는 원장(review_submissions)·대표 이미지(review_index.review_file_*)를
 //   읽는데, 031/032 배포 이전 제출분·직원이 Drive 에 직접 넣은 캡처는 폴더에만 있고 원장이 비어
-//   "리뷰 이미지 미등록"으로 뜬다. 이 엔드포인트가 그 탭의 [리뷰] 폴더를 스캔해 파일명 이름↔행
+//   "리뷰 캡처 미등록"으로 뜬다. 이 엔드포인트가 그 탭의 [리뷰] 폴더를 스캔해 파일명 이름↔행
 //   결정적 매칭으로 백필한다(규칙 = relocate-orphan-reviews 와 공용 헬퍼 한 벌).
 //
 // relocate-orphan-reviews 와의 차이: 저쪽은 "흩어진 파일"을 OCR 전문검색(brandKeywords 필수)으로
@@ -1639,7 +1685,7 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
 // POST /api/drive/share-review-folder — 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
 //   만들어 업체 보고용 폴더 링크를 반환한다.
 //
-// 목적: 직원이 리뷰 이미지를 자기 드라이브에 복제(→ 직원 용량 차감)하지 않고도,
+// 목적: 직원이 리뷰 캡처를 자기 드라이브에 복제(→ 직원 용량 차감)하지 않고도,
 //   tnaks 소유 원본 [리뷰] 폴더 링크를 그대로 업체에 전달해 보고할 수 있게 한다.
 //   (복제 0 · 직원 용량 0 · 업체는 로그인 없이 열람·다운로드)
 //
@@ -1648,27 +1694,25 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
 //     생성·연결한 뒤 공유(미연결 탭이어도 유효한 링크 확보, 빈 폴더 가능).
 // 비파괴: 파일 이동/복제 없음. 폴더에 읽기 권한만 부여(드라이브에서 언제든 해제 가능).
 // ═══════════════════════════════════════════════════════════
-router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
+router.post('/share-review-folder', authMiddleware, internalOnlyMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, folderUrl } = req.body || {};
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) {
+      return res.status(400).json({ ok: false, error: 'sheetId와 tabName이 필요합니다.' });
+    }
 
     // ── 1) 대상 [리뷰] 폴더 확보 ──
-    let url = (folderUrl || '').trim();
-    if (!url && sheetId && tabName) {
-      const { rows } = await pool.query(
-        'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
-      );
-      url = rows[0]?.folder_url || '';
-    }
+    // caller의 folderUrl은 받지 않는다. 서버에 연결된 정확한 리뷰 폴더만 공유할 수 있다.
+    const { rows: configured } = await pool.query(
+      'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]
+    );
+    let url = configured[0]?.folder_url || '';
     let folderId = extractFolderId(url);
 
     // 미연결 탭이면 [리뷰] 폴더를 생성·연결 (빈 폴더라도 유효한 링크 확보)
     let created = false;
     if (!folderId) {
-      if (!sheetId || !tabName) {
-        return res.json({ ok: false, error: '폴더를 찾을 수 없습니다. folderUrl 또는 sheetId+tabName이 필요합니다.' });
-      }
       const rootFolderId = getRootFolderId();
       if (!rootFolderId) return res.json({ ok: false, error: 'AI_REVIEW_FOLDER_ID 미설정' });
       const sheetTitle = await getSheetTitle(sheetId, tabName);
@@ -1708,7 +1752,7 @@ router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // 업체 보고용 공개 링크 (탭 단위)
 //   - POST /report-link (관리자): 탭당 추측불가 코드 발급(재생성 시 동일 코드 재사용)
-//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 이미지 목록 반환(이미지 자체는
+//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 캡처 목록 반환(이미지 자체는
 //     기존 /api/drive/image/:id 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0)
 // ═══════════════════════════════════════════════════════════
 const _REPORT_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'; // 혼동문자 제외
@@ -1772,8 +1816,9 @@ router.post('/report-link', authMiddleware, async (req, res, next) => {
   }
 });
 
-// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 이미지 목록 (무인증)
-//   review_submissions 원장 우선 → 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백.
+// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 캡처 목록 (무인증)
+//   명시적 review 원장 우선 → 비어 있으면 review_index 대표 리뷰만 사용.
+//   폴더 재귀 스캔은 역할을 판별할 수 없어 현금영수증을 노출하므로 공개 경로에서 사용하지 않는다.
 router.get('/report/:code', async (req, res, next) => {
   try {
     const code = String(req.params.code || '').trim();
@@ -1790,9 +1835,16 @@ router.get('/report/:code', async (req, res, next) => {
     let images = [];
     try {
       const sub = await pool.query(
-        `SELECT file_id, file_name, reviewer_name, uploaded_at
-           FROM review_submissions
-          WHERE sheet_id = $1 AND tab_name = $2 AND file_id IS NOT NULL AND file_id <> ''
+        `SELECT rs.file_id, rs.file_name, rs.reviewer_name, rs.uploaded_at
+           FROM review_submissions rs
+          WHERE rs.sheet_id = $1 AND rs.tab_name = $2
+            AND rs.file_id IS NOT NULL AND rs.file_id <> ''
+            AND COALESCE(rs.slot_key, 'review') = 'review'
+            AND NOT EXISTS (
+              SELECT 1 FROM review_inspections ri
+               WHERE ri.file_id = rs.file_id
+                 AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
+            )
           ORDER BY reviewer_name NULLS LAST, uploaded_at ASC NULLS LAST`,
         [sheetId, tabName]
       );
@@ -1803,22 +1855,35 @@ router.get('/report/:code', async (req, res, next) => {
       }));
     } catch (_) {}
 
-    // 2) 원장이 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백
+    // 2) 원장이 비어 있으면 명시적 대표 리뷰만 폴백
     if (images.length === 0) {
       try {
-        const { rows: tcfg } = await pool.query(
-          'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        const fallback = await pool.query(
+          `SELECT r.review_file_id AS file_id, r.review_file_name AS file_name,
+                  r.reviewer_name, r.review_file_at AS uploaded_at
+             FROM review_index r
+            WHERE r.sheet_id = $1 AND r.tab_name = $2
+               AND r.review_file_id IS NOT NULL AND r.review_file_id <> ''
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_submissions rs_role
+                  WHERE rs_role.file_id = r.review_file_id
+                    AND COALESCE(rs_role.slot_key, 'review') <> 'review'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_inspections ri
+                 WHERE ri.file_id = r.review_file_id
+                   AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
+              )
+            ORDER BY r.reviewer_name NULLS LAST, r.review_file_at ASC NULLS LAST`,
           [sheetId, tabName]
         );
-        const folderId = extractFolderId(tcfg[0]?.folder_url);
-        if (folderId) {
-          const files = await driveService.listFolderFilesRecursive(folderId);
-          images = files
-            .filter(f => (f.mimeType || '').indexOf('image/') === 0 || /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''))
-            .map(f => ({ id: f.id, name: f.name || '', reviewer: (driveService.extractReviewerNameFromFile(f.name) || '').trim() }));
-        }
+        images = fallback.rows.map(r => ({
+          id: r.file_id,
+          name: r.file_name || '',
+          reviewer: (r.reviewer_name || driveService.extractReviewerNameFromFile(r.file_name) || '').trim(),
+        }));
       } catch (e) {
-        logger.warn(`[report] 폴더 스캔 폴백 실패 (${code}): ${e.message}`);
+        logger.warn(`[report] 대표 리뷰 폴백 실패 (${code}): ${e.message}`);
       }
     }
 
@@ -1852,6 +1917,54 @@ router.get('/image/:id', async (req, res) => {
     logger.warn(`[drive] image 프록시 실패(${id}): ${err.message} → thumbnail 폴백`);
     return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w1600`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/orphan-capture-cleanup — 고아 캡처 미리보기·정리 (세 종류 한 창구)
+//
+// A 'linked'(기본) 링크 끊김 — 원장은 살아 있는데 그 칸이 파일을 더는 안 가리킨다
+//     크론(매일 04:40, `ORPHAN_CAPTURE_CLEAN`)이 하는 일과 **완전히 같은 함수**를 부른다.
+//     사본을 두면 "자동 정리와 손으로 누른 정리가 다른 것을 지우는" 드리프트가 생긴다.
+// C 'tombstoned'  작업 소멸 — 작업이 통째로 지워져 원장 자체가 없다(묘비 134 가 좌표를 남긴다)
+// B 'folder'      원장 없음 — Drive 폴더에는 있는데 원장 어디에서도 안 가리킨다
+//     ★★★ B 는 **사람이 고른 파일만**(`fileIds` 필수) 처리한다. "원장에 없다"에는
+//        업로드는 됐는데 기록만 실패한 **정상 캡처**가 섞이므로 일괄 삭제 표면을 두지 않는다.
+//     ★ 그래서 B·C 는 크론이 절대 부르지 않는다 — 사람이 눌러야만 움직인다.
+//
+// body: { kind? ('linked'|'tombstoned'|'folder', 기본 'linked'), dryRun? (기본 true),
+//         fileIds?: string[], sheetId?/tabName? (folder 필수) }
+//   ★ fileIds 를 줘도 서버가 후보를 다시 골라 **교집합**만 처리한다(화면 목록 불신).
+//   ★ 삭제는 휴지통만(30일 복구창) — 영구삭제 API 를 쓰지 않는다.
+//   ★ 모르는 kind 는 400 으로 거부한다 — 오타가 조용히 A 를 실행하면 안 된다.
+// ═══════════════════════════════════════════════════════════
+router.post('/orphan-capture-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const by = (req.admin && req.admin.name) || 'admin';
+    const dryRun = b.dryRun !== false;   // ★ 기본 미리보기 — 실행은 dryRun:false 를 명시해야만
+    const fileIds = Array.isArray(b.fileIds) && b.fileIds.length ? b.fileIds : null;
+    const svc = require('../services/orphanCaptureCleanup.service');
+
+    /* kind — 어떤 종류의 고아를 다루는가. 미지정은 종전 동작(A) 그대로.
+         'linked'(기본) A 링크 끊김   — 크론이 자동으로 도는 것과 같은 함수
+         'tombstoned'   C 작업 소멸   — 묘비(134) 기준, 사람이 실행
+         'folder'       B 원장 없음   — Drive 스캔, **고른 파일만** 실행 */
+    const kind = String(b.kind || 'linked');
+    if (kind === 'tombstoned') {
+      return res.json(await svc.trashTombstonedCaptures({ dryRun, fileIds, by }));
+    }
+    if (kind === 'folder') {
+      if (!b.sheetId || !b.tabName) {
+        return res.status(400).json({ ok: false, error: 'folder 종류는 sheetId, tabName 이 필요합니다.' });
+      }
+      return res.json(await svc.trashFolderOrphans({
+        sheetId: b.sheetId, tabName: b.tabName, fileIds, dryRun, by }));
+    }
+    if (kind !== 'linked') {
+      return res.status(400).json({ ok: false, error: `알 수 없는 kind: ${kind}` });
+    }
+    return res.json(await svc.trashOrphanCaptures({ dryRun, fileIds, by }));
+  } catch (err) { return next(err); }
 });
 
 module.exports = router;

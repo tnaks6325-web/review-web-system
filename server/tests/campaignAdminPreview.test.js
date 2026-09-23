@@ -85,12 +85,27 @@ ok('③-5b Track B 경로 폴백은 401/403 에서만',
 
 // ── ④ 상태 변경 동작 차단 ──
 for (const [label, re] of [
-  ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
+  // ★ 옵션변경은 "막기" 대신 **가상 시뮬레이션**으로 바뀌었다(관리자가 흐름을 끝까지 볼 수 있게).
+  //   규칙은 그대로다 — 서버 상태를 바꾸지 않는다. 아래에서 그 시뮬레이션에 **서버 호출이 0** 임을 못박는다.
+  ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvSimulateChangeOption/],
   // ★ 063 2단계 신규 진입점도 동일 차단(명의 선택·타계정 추가참여)
-  ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
+  ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey, next\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   ['타계정 추가참여(onAddSubJoin)', /async function onAddSubJoin\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
 ]) ok('④ 미리보기에서 ' + label + ' 차단', re.test(camp));
 ok('④ 미리보기에서 명의 전환(switchAcct)도 무동작', /async function switchAcct\(p8\)\{\s*\n\s*if\(PREVIEW\) return;/.test(camp));
+// ★★ 시뮬레이션 경로에 **서버 호출이 한 줄도 없어야** "미리보기는 서버 상태를 안 바꾼다"가 성립한다.
+//   (막는 대신 흉내내는 방식으로 바뀐 만큼, 이 검사가 그 전제를 대신 지킨다.)
+for (const fn of ['_pvSimulateChangeOption', '_pvSimulateApply']) {
+  const i = camp.indexOf('function ' + fn);
+  ok('④ ' + fn + ' 가 존재한다', i > -1);
+  const m = /\n(?:async )?function /g; m.lastIndex = i + 10;
+  const e = m.exec(camp);
+  const body = camp.slice(i, e ? e.index : i + 2000);
+  ok('★★ ' + fn + ' 는 서버를 부르지 않는다(가상 진행만)',
+    !/\bfetch\(|\bapi\(|_pvGet\(|\/apply|\/change-option/.test(body));
+}
+ok('★ 미리보기임을 화면이 말한다(실제 기록으로 오해 금지)',
+  /실제 참여 기록은 남지 않습니다/.test(camp));
 
 // ── ⑤ 구매양식 제출 차단 (최악 시나리오 방어) ──
 ok('⑤-1 preview 플래그는 embed 컨텍스트 안에서만 정의(embed=1 없으면 도달 불가)',
@@ -171,7 +186,7 @@ ok('⑦-R4 수정 모달 미리보기 버튼은 참여형일 때만(레거시 �
   && /id="rf_preview_full"[\s\S]{0,240}display:none/.test((readF('js/recruit-modal.js') + readF('admin.html'))));
 ok('⑦-R5 미리보기는 잔여 리뷰어 세션을 쓰지 않음(타인 계좌·실명 노출 차단)',
   /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};/.test(sapp)
-  && /if \(!_PREVIEW_MODE\) \{\s*\n\s*_prefillBankFromProfile\(\)/.test(sapp));
+  && /if \(!_PREVIEW_MODE\) \{[\s\S]{0,500}_prefillBankFromProfile\(\)/.test(sapp));
 ok('⑦-R6 미리보기 단계 전환 시만 iframe 재로드 생략(리뷰어는 항상 재로드 = TOCTOU 봉합 유지)',
   /if\(!PREVIEW \|\| frame\.getAttribute\('src'\) !== _src\)\{/.test(camp));
 ok('⑦-R8b 참여 취소 후에는 참여 전 화면으로 명시 복귀(가드로 인한 정체 방지)',
@@ -181,12 +196,32 @@ ok('⑦-R7 미리보기 로드 실패 시 단계 버튼 제거(가짜 완료화�
 ok('⑦-R8 카운트다운 0 재조회가 작업가이드·완료 화면을 되돌리지 않음(리뷰어 경로 포함)',
   /const onPre = \$\('vPre'\)\.style\.display !== 'none' \|\| \$\('vLoading'\)\.style\.display !== 'none';/.test(camp)
   && /if\(!onPre\) return;/.test(camp));
-ok('⑦-R10 미리보기는 선택 가능한 옵션만 고정표시(마감 옵션 오표시 방지) · 리뷰어 전달 경로는 불변',
-  /const _pvOptBlocked = PREVIEW && !\(_selOpt && _selOpt\.selectable\);/.test(camp)
+ok('⑦-R10 미리보기 실제 상태 모드는 선택 가능한 옵션만 고정표시(마감 옵션 오표시 방지) · 리뷰어 전달 경로는 불변',
+  /const _pvOptBlocked = PREVIEW && !_pvOpenSim\(\) && !\(_selOpt && _selOpt\.selectable\);/.test(camp)
   && /if\(j\.application && j\.application\.optionKey\) qp\.set\('optionKey', j\.application\.optionKey\)/.test(camp));
 ok('⑦-R11 팝업 차단 시 안내(무반응 방지)', /if \(!w\) showToast\("팝업이 차단되었습니다/.test(recjs));
 ok('⑦-R12 관리자 미리보기는 새 URL로 열려 이전 캐시가 아닌 현재 시뮬레이션 코드를 사용',
   /&preview=1&previewBuild=sim-20260814#tok=/.test(recjs)
   && /q\.delete\('previewBuild'\)/.test(camp));
+
+// ── ⑧ '모집중 가정' = 마감 공고도 끝까지 시뮬레이션 (사용자 확정 2026-08-20) ──
+//   마감된 공고는 카드·옵션·참여 버튼이 전부 잠겨 정작 확인하려는 진행 화면을 볼 수 없었다.
+//   판정은 _pvOpenSim() 하나로 모으고(사본 금지), 토글을 끄면 즉시 실제 상태로 복귀한다.
+ok('⑧-1 모집중 가정 판정 단일 출처 _pvOpenSim()',
+  /function _pvOpenSim\(\)\{ return PREVIEW && _pvForceOpen; \}/.test(camp));
+ok('⑧-2 모집중 가정에서는 마감 옵션도 선택 가능(실제 리뷰어 경로는 서버 selectable 그대로)',
+  /function _pvOptionSelectable\(o\)\{ return !!o && \(_pvOpenSim\(\) \|\| o\.status === 'open'\); \}/.test(camp)
+  && /o => PREVIEW \? _pvOptionSelectable\(o\) : o\.selectable/.test(camp));
+ok('⑧-3 카드도 열린 모습으로 그린다 — 단, 서버 데이터(_camp)는 안 건드린다',
+  /_pvOpenSim\(\)\s*\n?\s*\? \{ \.\.\.c, state:'open', stateReason:'', status:'active' \}/.test(camp)
+  && /CampCards\.cardHtml\(_cardData\)/.test(camp));
+ok('⑧-4 옵션 목록에 마감 표기·흐림 처리를 하지 않는다',
+  /if\(_pvOpenSim\(\) && o\.status !== 'open'\) return '모집중 가정\(미리보기\)';/.test(camp)
+  && /if\(_pvOpenSim\(\)\) return '';/.test(camp)
+  && /const dim = !_pvOpenSim\(\) && o\.status !== 'open';/.test(camp));
+ok('⑧-5 실제 상태 토글로 되돌릴 수 있다(가정은 표시 전용)',
+  /function pvToggleForce\(\)\{[\s\S]{0,320}_pvForceOpen = !_pvForceOpen;/.test(camp));
+ok('⑧-6 서버 상태 변경 0 유지 — 가상 참여는 여전히 _pvSimulateApply 로만',
+  /if\(PREVIEW\) return _pvSimulateApply\(optionKey\); \/\/ 어떤 경로로도/.test(camp));
 
 console.log(`\n✅ campaignAdminPreview: ${passed}개 통과`);

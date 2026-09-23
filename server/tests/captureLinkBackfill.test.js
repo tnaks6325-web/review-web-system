@@ -93,13 +93,73 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
     /os\.deleted_at IS NULL AND os\.capture_uploaded_at IS NULL/.test(SRC)
     && /os\.submitted_at < NOW\(\) - interval '20 minutes'/.test(SRC));
 
+  {
+    /* ★★ 탭 좁히기(시범 실행) — **정확일치만**. 부분일치면 `…100건` 이 `…1000건` 까지 끌어와
+       "한 탭만 돌린다"는 약속이 조용히 깨진다. 미지정이면 종전 동작(전 탭). */
+    ok('★ 탭/시트 좁히기는 SQL 에서 정확일치(LIKE 금지)',
+      /\(\$4::text IS NULL OR os\.tab_name = \$4\)/.test(SRC)
+      && /\(\$5::text IS NULL OR os\.sheet_id = \$5\)/.test(SRC)
+      && !/tab_name LIKE/.test(SRC));
+    let seen = null;
+    const pool = { query: async (sql, params) => {
+      if (/app_settings/.test(sql)) return { rows: [] };
+      if (/FROM order_submissions os/.test(sql)) { seen = params; return { rows: [] }; }
+      return { rows: [] };
+    } };
+    SVC.__setDepsForTest(pool, { extractFolderIdFromUrl: () => null, listFolderFilesRecursive: async () => [] },
+                         async (n, fn) => fn());
+    let r = await SVC.auditCaptureLinks({ days: 30, tabName: '  모키위키 100건  ', sheetId: 'SH1' });
+    ok('★ 지정한 탭/시트가 쿼리 파라미터로 나간다(트림)', seen && seen[3] === '모키위키 100건' && seen[4] === 'SH1', JSON.stringify(seen));
+    ok('★ 응답이 좁힌 대상을 밝힌다(조용한 축소 금지)', r.onlyTab === '모키위키 100건' && r.onlySheet === 'SH1');
+    r = await SVC.auditCaptureLinks({ days: 30 });
+    ok('★ 미지정이면 종전 동작 — 필터 절이 꺼진다(NULL)', seen && seen[3] === null && seen[4] === null, JSON.stringify(seen));
+    ok('★ 빈 문자열도 미지정으로 접는다', (await SVC.auditCaptureLinks({ days: 30, tabName: '   ' })) && seen[3] === null);
+    SVC.__setDepsForTest(null, null, null);
+  }
+
+  {
+    /* ★★ 탭 리네임 폴백 (2026-08-20 실측) — 시트 탭은 건수가 바뀌며 이름이 바뀐다
+       (`…_500건` → `…_443건`). 주문 원장은 제출 당시 이름을 들고 있어 **이름으로만 조인하면
+       폴더가 멀쩡히 있는데 `no_capture_folder`** 로 떨어진다. gid 로도 찾아야 한다. */
+    ok('★ 폴더 조회에 gid 폴백이 있다(이름 우선)',
+      /WHERE sheet_id = \$1 AND \(tab_name = \$2 OR \(\$3 <> '' AND tab_gid = \$3\)\)/.test(SRC)
+      && /ORDER BY \(tab_name = \$2\) DESC/.test(SRC));
+    ok('★ 빈 gid 는 절을 켜지 않는다(켜면 gid 없는 행이 전부 매칭)', /\$3 <> ''/.test(SRC));
+    ok('★ 주문의 tab_gid 를 실제로 읽는다', /os\.tab_gid AS "tabGid"/.test(SRC));
+    // 실행으로 확인 — 이름이 바뀐 탭도 폴더를 찾아 판정이 unknown 에서 벗어난다
+    let seenParams = null;
+    const pool = { query: async (sql, params) => {
+      if (/app_settings/.test(sql)) return { rows: [] };
+      if (/FROM order_submissions os/.test(sql)) return { rows: [order({ tabGid: '777', tabName: '옛이름_500건' })] };
+      if (/capture_folder_url FROM tab_configs/.test(sql)) {
+        seenParams = params;
+        // 이름은 안 맞지만 gid 로 찾은 상황을 흉내낸다
+        return { rows: [{ capture_folder_url: 'https://drive.google.com/drive/folders/F' }] };
+      }
+      return { rows: [] };
+    } };
+    SVC.__setDepsForTest(pool, { extractFolderIdFromUrl: () => 'F', listFolderFilesRecursive: async () => [file()] },
+                         async (n, fn) => fn());
+    const r = await SVC.auditCaptureLinks({ days: 30 });
+    ok('★★ 리네임된 탭도 gid 로 폴더를 찾아 판정된다(unknown 아님)',
+      r.items[0].verdict === 'attachedButUnlinked', r.items[0].verdict + '/' + (r.items[0].reason || ''));
+    ok('★ gid 를 조회 파라미터로 넘긴다', seenParams && seenParams[2] === '777', JSON.stringify(seenParams));
+    SVC.__setDepsForTest(null, null, null);
+  }
+
   console.log('\nB) fail-closed — 무엇을 자동으로 붙이지 않는가');
   {
     const hi = { verdict: 'attachedButUnlinked', confidence: 'high', fileId: 'F1', winCandidates: 1, candidates: 1 };
     ok('시각 창 안 · 후보 유일 → 대상', SVC.backfillEligibility(hi).ok === true);
-    ok('★ 시각 창 밖(low)은 기본 제외',
-      SVC.backfillEligibility({ ...hi, confidence: 'low' }).reason === 'low_confidence');
-    ok('★ low 는 명시 옵션으로만 열린다(그때도 후보 유일 조건은 남는다)',
+    /* ★★ 사용자 확정(2026-08-20): 행 수취인명 == 캡처 수취인명이면 시각 창은 보지 않는다.
+       푸는 것은 **시각 창 하나뿐** — 아래 유일성 게이트들은 그대로 남아야 한다. */
+    ok('★★ 수취인명으로 걸렸으면 시각 창 밖이어도 대상',
+      SVC.backfillEligibility({ ...hi, confidence: 'low', matchedBy: 'recipient', hasRecipient: true }).ok === true);
+    ok('★★ 시각 창을 풀어도 후보 유일성은 남는다',
+      SVC.backfillEligibility({ ...hi, confidence: 'low', matchedBy: 'recipient', hasRecipient: true, candidates: 2 }).reason === 'ambiguous');
+    ok('★ 대조할 수취인명이 없으면(주문자만 매칭) 종전대로 시각 창을 본다',
+      SVC.backfillEligibility({ ...hi, confidence: 'low', matchedBy: 'orderer', hasRecipient: false }).reason === 'low_confidence');
+    ok('★ low 는 명시 옵션으로도 열린다(그때도 후보 유일 조건은 남는다)',
       SVC.backfillEligibility({ ...hi, confidence: 'low', candidates: 1 }, { allowLow: true }).ok === true
       && SVC.backfillEligibility({ ...hi, confidence: 'low', candidates: 2 }, { allowLow: true }).reason === 'ambiguous');
     ok('★★ 후보가 여럿이면 붙이지 않는다(어느 것인지 정할 근거가 없다)',
@@ -108,6 +168,17 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
       SVC.backfillEligibility({ verdict: 'notAttached' }).reason === 'not_attached'
       && SVC.backfillEligibility({ verdict: 'unknown' }).reason === 'not_attached');
     ok('fileId 가 없으면 붙이지 않는다', SVC.backfillEligibility({ ...hi, fileId: '' }).reason === 'no_file_id');
+
+    /* ★ 되돌리기 스위치는 require 시점에 읽히므로 자식 프로세스로 확인한다. */
+    const { execFileSync } = require('child_process');
+    const probe = "const S=require(process.argv[1]);"
+      + "process.stdout.write(String(S.backfillEligibility({verdict:'attachedButUnlinked',confidence:'low',fileId:'F1',winCandidates:1,candidates:1,matchedBy:'recipient',hasRecipient:true}).reason||'ok'));";
+    let off = '';
+    try {
+      off = execFileSync(process.execPath, ['-e', probe, require.resolve('../src/services/captureLinkBackfill.service.js')],
+        { env: { ...process.env, CAPTURE_LINK_NAME_ONLY: '0' } }).toString();
+    } catch (e) { off = 'ERR:' + e.message; }
+    ok('★ 킬스위치 CAPTURE_LINK_NAME_ONLY=0 이면 시각 창 게이트로 복귀', off === 'low_confidence', off);
   }
 
   {
@@ -239,6 +310,19 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
     // AE 목록에는 넣지 않는다 — 서버가 adminOrMaster 라 눌러도 403 인 죽은 버튼이 된다.
     const aePart = wdCall.slice(wdCall.indexOf(':', wdCall.indexOf('isAdmin ?')));
     ok('★ AE 목록에는 넣지 않는다(서버 게이트와 1:1 — 죽은 버튼 금지)', !/'capturelink'/.test(aePart));
+  }
+  {
+    /* ★★★ 일반 규칙 — **등록만 하고 마운트를 빠뜨리는 실수**를 이 자리에서 끝낸다.
+       `PANELS` 에 있어도 어느 호스트의 `mount({panels:[...]})` 에도 없으면 사람이 열 방법이 없다
+       (실제로 capturelink 가 그랬고, [✅ 리뷰타입 정리]는 그 상태로 오래 방치돼 있었다).
+       ★ 어느 호스트에 두는지는 기능마다 다르므로 **최소 한 곳**만 요구한다. */
+    const hosts = ADM + '\n' + WD + '\n' + front('admin-siand.html');
+    const keys = (/var PANELS = \{([^}]*)\}/.exec(AS) || [, ''])[1]
+      .split(',').map(x => x.split(':')[0].trim()).filter(Boolean);
+    ok('PANELS 키를 읽었다(3개 이상)', keys.length >= 3, keys.join('|'));
+    const orphan = keys.filter(k => !new RegExp("'" + k + "'").test(hosts));
+    ok('★★★ 등록된 설정 패널은 어느 호스트든 최소 한 곳에서 마운트된다(도달 불가 패널 0)',
+      orphan.length === 0, '마운트 안 된 패널: ' + orphan.join(', '));
   }
   ok('실행 핸들러가 전역에 노출된다(onclick 에서 부른다)', /window\.captureLinkRun = captureLinkRun/.test(AS));
   {

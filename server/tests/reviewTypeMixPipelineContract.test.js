@@ -24,7 +24,7 @@ const boot = readReview('server/index.js');
 if (intranetRoot) {
   assert.match(intranetUi, /reviewOrderReviewTypeMix/);
   assert.match(intranetUi, /review-order-review-confirm-count/);
-  assert.match(intranetUi, /review_type_mix:\s*reviewOrderReviewTypeMix\(products\)/);
+  assert.match(intranetUi, /review_type_mix:[\s\S]{0,160}reviewOrderReviewTypeMix\(products\)/);
   assert.match(intranetUi, /review_type_mix:\s*option\.reviewTypeMix\s*\|\|\s*\[\]/);
   assert.match(intranetApi, /'review_type_mix'/);
 } else {
@@ -37,6 +37,7 @@ assert.match(orderRoute, /review_type_mix = \$18/);
 assert.match(workOrderUi, /review_type_mix: _woIsBlogKind/);
 
 assert.match(recruitUi, /prefill\.review_type_mix/);
+assert.match(recruitUi, /reviewTypeMix:\s*o\.reviewTypeMix\s*\?\?\s*o\.review_type_mix\s*\?\?\s*\[\]/);
 assert.match(recruitUi, /payload\.review_type_mix = getRecruitReviewTypeMix\(\)/);
 assert.match(campaignRoute, /review_type_mix = CASE WHEN \$40::jsonb/);
 assert.match(campaignRoute, /validateReviewTypeMix/);

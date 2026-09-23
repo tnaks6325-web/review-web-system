@@ -42,33 +42,102 @@
    ══════════════════════════════════════════════════════════════ */
 let _csRooms = [];               // 방 목록 캐시
 let _csActiveThreadId = null;    // 현재 열린 대화방 threadId
+let _csReadFilter = 'all';       // all | read | unread — 서버 상태가 아니라 확인 여부만 거른다
+let _csRoomSearchQuery = '';     // 목록 안에서 즉시 거르는 검색어
+let _csAllGroupsFolded = false;
+let _csFoldedGroupKeys = new Set();
+let _csVisibleGroupKeys = [];
+let _csRoomLoadGeneration = 0;
 
 async function loadCsRooms() {
   const wrap = document.getElementById("csRoomListWrap");
   if (!wrap) return;
+  const generation = ++_csRoomLoadGeneration;
+  const pageSize = 100;
   wrap.innerHTML = '<div style="padding:30px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
-  const status = (document.getElementById("csStatusFilter") || {}).value || "all";
-  const q = (document.getElementById("csSearchInput") || {}).value || "";
   try {
-    const data = await gasGet({ action: "csAdminThreads", status, q });
+    // 첫 페이지는 즉시 표시하고, 오래된 방은 배경 페이지로 이어 받아 첫 진입을 막지 않는다.
+    const data = await gasGet({ action: "csAdminThreads", status: "all", q: "", limit: pageSize, offset: 0 });
     if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
     _csRooms = data.threads || [];
-    _renderCsRooms(_csRooms);
+    _renderCsRooms(_csVisibleRooms());
     csUpdateBadge(data.totalUnread || 0);
+    if (data.hasMore) void _csLoadRemainingRooms(generation, pageSize, _csRooms.length);
   } catch (err) {
     wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#EF4444;font-size:.85rem">오류: ${escHtml(err.message)}</div>`;
   }
 }
 
-function csFilterRooms(keyword) {
-  const kw = (keyword || "").trim().toLowerCase();
-  if (!kw) { _renderCsRooms(_csRooms); return; }
-  const filtered = _csRooms.filter(r =>
-    (r.reviewerName || "").toLowerCase().includes(kw) ||
-    (r.reviewerPhone8 || "").includes(kw) ||
-    (r.campaignLabel || "").toLowerCase().includes(kw)
-  );
-  _renderCsRooms(filtered);
+async function _csLoadRemainingRooms(generation, pageSize, offset) {
+  while (generation === _csRoomLoadGeneration) {
+    const data = await gasGet({ action: "csAdminThreads", status: "all", q: "", limit: pageSize, offset });
+    if (!data || data.ok === false || generation !== _csRoomLoadGeneration) return;
+    const rows = data.threads || [];
+    if (!rows.length) return;
+    const seen = new Set(_csRooms.map(r => r.id));
+    _csRooms.push(...rows.filter(r => !seen.has(r.id)));
+    _renderCsRooms(_csVisibleRooms());
+    offset += rows.length;
+    if (!data.hasMore) return;
+  }
+}
+
+function _csVisibleRooms() {
+  let rooms = _csRooms;
+  if (_csReadFilter === 'read') rooms = rooms.filter(r => !(r.adminUnread > 0));
+  if (_csReadFilter === 'unread') rooms = rooms.filter(r => r.adminUnread > 0);
+  const keyword = _csRoomSearchQuery.trim().toLocaleLowerCase();
+  if (!keyword) return rooms;
+  return rooms.filter(r => [
+    r.reviewerName, r.reviewerPhone8, r.campaignLabel, r.companyLabel, r.lastMessagePreview,
+  ].some(value => String(value || '').toLocaleLowerCase().includes(keyword)));
+}
+
+/** 검색창 입력마다 서버 왕복 없이 현재 받은 채팅방 목록을 즉시 다시 그린다.
+    백그라운드 페이지 적재 중에도 _csLoadRemainingRooms가 같은 필터를 적용하므로
+    오래된 방의 검색 결과도 도착하는 즉시 목록에 이어진다. */
+function csSetRoomSearch(keyword) {
+  _csRoomSearchQuery = String(keyword || '');
+  _renderCsRooms(_csVisibleRooms());
+}
+
+function csSetReadFilter(filter) {
+  _csReadFilter = _csReadFilter === filter ? 'all' : filter;
+  ['read', 'unread'].forEach(name => {
+    const btn = document.getElementById('csReadFilter-' + name);
+    if (!btn) return;
+    const active = _csReadFilter === name;
+    btn.classList.toggle('cs-filter-active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  _renderCsRooms(_csVisibleRooms());
+}
+
+function csToggleAllGroups() {
+  _csAllGroupsFolded = !_csAllGroupsFolded;
+  _csFoldedGroupKeys = new Set(_csAllGroupsFolded ? _csVisibleGroupKeys : []);
+  const btn = document.getElementById('csFoldAllBtn');
+  if (btn) {
+    btn.classList.toggle('cs-filter-active', _csAllGroupsFolded);
+    btn.setAttribute('aria-pressed', _csAllGroupsFolded ? 'true' : 'false');
+    btn.innerHTML = `<i class="fas fa-${_csAllGroupsFolded ? 'expand-alt' : 'compress-alt'}"></i><span>전체 ${_csAllGroupsFolded ? '펼치기' : '접기'}</span>`;
+  }
+  _renderCsRooms(_csVisibleRooms());
+}
+
+function csToggleGroup(index) {
+  const key = _csVisibleGroupKeys[index];
+  if (key === undefined) return;
+  if (_csFoldedGroupKeys.has(key)) _csFoldedGroupKeys.delete(key);
+  else _csFoldedGroupKeys.add(key);
+  _csAllGroupsFolded = _csVisibleGroupKeys.length > 0 && _csVisibleGroupKeys.every(k => _csFoldedGroupKeys.has(k));
+  const btn = document.getElementById('csFoldAllBtn');
+  if (btn) {
+    btn.classList.toggle('cs-filter-active', _csAllGroupsFolded);
+    btn.setAttribute('aria-pressed', _csAllGroupsFolded ? 'true' : 'false');
+    btn.innerHTML = `<i class="fas fa-${_csAllGroupsFolded ? 'expand-alt' : 'compress-alt'}"></i><span>전체 ${_csAllGroupsFolded ? '펼치기' : '접기'}</span>`;
+  }
+  _renderCsRooms(_csVisibleRooms());
 }
 
 function _csTimeAgo(iso) {
@@ -86,7 +155,8 @@ function _renderCsRooms(list) {
   const wrap = document.getElementById("csRoomListWrap");
   if (!wrap) return;
   if (!list.length) {
-    wrap.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-comment-slash" style="font-size:1.6rem;display:block;margin-bottom:8px;opacity:.5"></i>문의가 없습니다.</div>';
+    const emptyText = _csRoomSearchQuery.trim() ? '검색 결과가 없습니다.' : '문의가 없습니다.';
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-comment-slash" style="font-size:1.6rem;display:block;margin-bottom:8px;opacity:.5"></i>${emptyText}</div>`;
     return;
   }
   // ★ 캠페인별 그룹핑 — 캠페인(작업) 아래에 문의를 보낸 리뷰어들이 나열된다.
@@ -98,21 +168,28 @@ function _renderCsRooms(list) {
     if (!groups.has(key)) groups.set(key, { label: r.campaignLabel || "문의", rows: [] });
     groups.get(key).rows.push(r);
   });
+  _csVisibleGroupKeys = [...groups.keys()];
+  // 필터를 바꿔도 "전체 펼치기" 표기와 실제 접힘 상태가 어긋나지 않게 현재 그룹으로 재결속한다.
+  if (_csAllGroupsFolded) _csFoldedGroupKeys = new Set(_csVisibleGroupKeys);
+  else _csFoldedGroupKeys = new Set([..._csFoldedGroupKeys].filter(key => groups.has(key)));
   let html = "";
+  let groupIndex = 0;
   for (const [campKey, grp] of groups) {
     const campLabel = grp.label;
     const rooms = grp.rows;
     const unread = rooms.reduce((s, r) => s + (r.adminUnread || 0), 0);
     const isGeneral = !campKey;
-    html += `<div style="padding:10px 13px;background:${isGeneral ? '#F7F5FF' : '#f1f6ff'};border-bottom:1px solid ${isGeneral ? '#E3DDFF' : '#e3ecfa'}">
+    const isFolded = _csFoldedGroupKeys.has(campKey);
+    html += `<div class="cs-room-group-head" role="button" tabindex="0" aria-expanded="${isFolded ? 'false' : 'true'}" onclick="csToggleGroup(${groupIndex})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();csToggleGroup(${groupIndex})}" style="padding:10px 13px;background:${isGeneral ? '#F7F5FF' : '#f1f6ff'};border-bottom:1px solid ${isGeneral ? '#E3DDFF' : '#e3ecfa'}">
       <div style="display:flex;align-items:center;gap:7px">
+        <i class="fas fa-chevron-${isFolded ? 'right' : 'down'}" style="color:#94A3B8;font-size:.65rem;width:9px"></i>
         <i class="fas ${isGeneral ? 'fa-comment-dots' : 'fa-bullhorn'}" style="color:${isGeneral ? '#7C3AED' : '#3182f6'};font-size:.78rem;flex-shrink:0"></i>
         <span style="font-weight:800;color:${isGeneral ? '#5B21B6' : '#1E3A8A'};font-size:.82rem;line-height:1.4;flex:1;min-width:0">${escHtml(campLabel)}</span>
         ${unread > 0 ? `<span style="background:#EF4444;color:#fff;font-size:.64rem;font-weight:800;padding:1px 7px;border-radius:9px;flex-shrink:0">미확인 ${unread}</span>` : ''}
       </div>
       <div style="font-size:.68rem;color:#64748B;margin-top:3px">문의 리뷰어 ${rooms.length}명</div>
     </div>`;
-    rooms.forEach(r => {
+    if (!isFolded) rooms.forEach(r => {
       const nameSafe = (r.reviewerName || "").replace(/'/g, "\\'");
       const phoneSafe = (r.reviewerPhone8 || "").replace(/'/g, "\\'");
       const initial = escHtml((r.reviewerName || "?").trim().charAt(0) || "?");
@@ -136,6 +213,7 @@ function _renderCsRooms(list) {
         </div>
       </div>`;
     });
+    groupIndex++;
   }
   wrap.innerHTML = html;
   // 현재 열린 대화방 강조 유지
@@ -155,16 +233,19 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
   const pane = document.getElementById("csConvPane");
   if (!pane) return;
   pane.innerHTML = `
-    <div style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
+    <div id="csConvHead" class="cs-conv-head" onclick="csToggleCtx(event)" title="클릭하면 아래 주문정보·참여이력이 접히거나 펼쳐집니다"
+         style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
       <i class="fas fa-comments" style="color:var(--p,#3182F6)"></i>
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:.9rem;color:var(--t1,#0F172A)">${escHtml(reviewerName)} <span style="color:#94a3b8;font-weight:400;font-size:.76rem;font-family:monospace">${escHtml(reviewerPhone8)}</span></div>
         <div id="csConvCampaign" style="font-size:.74rem;color:var(--t3,#94A3B8)">불러오는 중...</div>
       </div>
+      <span class="cs-conv-hint">주문정보 접기/펼치기</span>
+      <span id="csCtxChev" class="cs-conv-chev"${_csCtxFolded() ? ' data-fold="1"' : ''}>∨</span>
       <button id="csConvStatusBtn" onclick="csToggleStatus()" style="padding:5px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.74rem;font-weight:600;cursor:pointer">—</button>
     </div>
     <!-- ★ 미리 보는 정보: 이 캠페인에서 그 리뷰어의 주문정보 + 참여이력 -->
-    <div id="csCtxWrap" style="display:flex;gap:10px;padding:11px 15px;background:#fbfcfe;border-bottom:1px solid #eef2f7">
+    <div id="csCtxWrap" style="display:${_csCtxFolded() ? 'none' : 'flex'};gap:10px;padding:11px 15px;background:#fbfcfe;border-bottom:1px solid #eef2f7">
       <div style="flex:1;color:#9CA3AF;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 주문정보 불러오는 중...</div>
     </div>
     <div style="display:flex;flex:1;min-height:0">
@@ -277,6 +358,29 @@ function _csBindDropZone() {
   });
 }
 
+/* ── 주문정보·참여이력 접기/펼치기(사용자 확정 2026-08-21) ─────────────────────
+   대화 헤더([문의 종료] 가 있는 줄) **어디를 눌러도** 아래 두 카드가 접히고 펼쳐진다.
+   ★ 상태는 localStorage 로 기억한다 — 방을 옮길 때마다 `csOpenConversation` 이 대화창을
+     통째로 다시 그리므로, 기억하지 않으면 접어 둔 것이 매번 되살아난다.
+   ★ [문의 종료]·재오픈 버튼 클릭은 토글로 먹지 않는다(그 줄에 있는 유일한 조작 버튼이다).
+   ★ 접힘은 표시만 바꾼다 — `csLoadOrderContext` 는 `#csCtxWrap` 의 **innerHTML 만**
+     갈아끼우므로 접혀 있어도 데이터는 그대로 들어오고, 펼치면 바로 보인다. */
+var _CS_CTX_FOLD_KEY = "cs_ctx_fold_v1";
+function _csCtxFolded() {
+  try { return localStorage.getItem(_CS_CTX_FOLD_KEY) === "1"; } catch (_) { return false; }
+}
+function csToggleCtx(ev) {
+  // 헤더 안의 버튼(문의 종료/재오픈)을 누른 것이면 토글하지 않는다.
+  if (ev && ev.target && ev.target.closest && ev.target.closest("button")) return;
+  var wrap = document.getElementById("csCtxWrap");
+  if (!wrap) return;
+  var fold = wrap.style.display !== "none";
+  wrap.style.display = fold ? "none" : "flex";
+  var chev = document.getElementById("csCtxChev");
+  if (chev) { if (fold) chev.dataset.fold = "1"; else delete chev.dataset.fold; }
+  try { if (fold) localStorage.setItem(_CS_CTX_FOLD_KEY, "1"); else localStorage.removeItem(_CS_CTX_FOLD_KEY); } catch (_) {}
+}
+
 /* ── 미리 보는 정보(주문정보·참여이력) ── */
 async function csLoadOrderContext(threadId) {
   const wrap = document.getElementById("csCtxWrap");
@@ -286,6 +390,14 @@ async function csLoadOrderContext(threadId) {
     if (!d || d.ok === false) throw new Error((d && d.error) || "불러오기 실패");
     if (_csActiveThreadId !== threadId) return;   // 그새 다른 방으로 이동
     wrap.innerHTML = _csCtxHtml(d);
+    /* ★ 그 주문이 기록된 줄 번호를 링크 문맥에 얹는다 — 한 사람이 같은 작업에 여러 번 참여했을 때
+         "이 문의의 그 건"을 정확히 짚는 키. 도착이 헤더보다 늦어도 되도록 **덧붙이기만** 한다
+         (문맥 자체를 여기서 만들지 않는다 — 작업 미지정 문의에 링크가 생기면 안 된다). */
+    if (_csGoCtx) {
+      const o = d.order || {}, sh = d.sheet || {};
+      const row = o.sheetRow || sh.rowIndex || '';
+      _csGoCtx.row = row ? String(row) : '';
+    }
   } catch (err) {
     if (_csActiveThreadId !== threadId) return;
     wrap.innerHTML = `<div style="flex:1;color:#9CA3AF;font-size:.76rem">주문정보를 불러오지 못했습니다 (${escHtml(err.message)})</div>`;
@@ -344,16 +456,79 @@ function _csCtxHtml(d) {
   return orderCard + histCard;
 }
 
+/* ══ 문의방 제목 → 그 작업의 작업보드(새 탭·해당 리뷰어 행 강조) ═════════════════════
+   ★★ 실행부 사본 0 — 작업보드의 **리뷰어 로그 딥링크(`#go=`)와 같은 계약**을 그대로 쓴다
+     ({s:시트, t:작업, g:gid, p:연락처8, n:이름, st:시트제목}). 받는 쪽(`_consumeGo` →
+     `pendingTab`/`pendingFocus` → `_applyPendingFocus`)이 이미 "행을 찾아 스크롤+강조,
+     못 찾으면 사유를 토스트"까지 한다. 여기서 새 규칙을 만들면 두 창구가 갈린다.
+   ★ 서버 변경 0 — 필요한 재료(campaignKey="시트ID||작업명", 연락처, 이름)가 이미 스레드
+     응답에 실려 온다.
+   ★★ 링크가 권한을 넓히지 않는다 — 새 탭도 평소처럼 서버 스코프 검증(canAccessTab)을
+     그대로 거친다. 토큰을 함께 싣는 이유는 새 탭이 sessionStorage 를 물려받지 못해
+     로그인 화면으로 떨어지기 때문이며, **사람에게 건네는 주소가 아니라 자기 새 탭**이다
+     (로그 탭 `_logOpenWorkdesk` 와 같은 선례).                                        */
+var _csGoCtx = null;   // ★ onclick 에 시트발 문자열을 보간하지 않는다 — 열려 있는 방은 하나뿐이라 인자가 없다
+
+// campaignKey("시트ID||작업명") → {sheetId, tabName}. 형식이 아니면 null(추측하지 않는다).
+function _csGoParseKey(key) {
+  var ck = (key == null ? '' : String(key));
+  var sep = ck.indexOf('||');
+  if (sep < 0) return null;
+  var sheetId = ck.slice(0, sep), tabName = ck.slice(sep + 2);
+  if (!sheetId || !tabName) return null;
+  return { sheetId: sheetId, tabName: tabName };
+}
+
+/* 목적지 경로 — 작업보드는 workdesk 한 곳뿐이라 재기준 훅을 두지 않고 현재 주소에서 조립한다.
+   ★ 확장자 유무를 **유지**한다: Pages 는 `/workdesk`, 테섭(Railway)·로컬은 `/workdesk.html`
+     로 열리므로 한쪽으로 고정하면 반대쪽에서 죽은 링크가 된다.                          */
+function _csWorkdeskPath() {
+  var p = String(location.pathname || '');
+  return p.replace(/[^/]*$/, function (last) { return /\.html?$/i.test(last) ? 'workdesk.html' : 'workdesk'; });
+}
+
+// 문의방 제목 클릭 → 그 작업보드를 새 탭으로.
+function csOpenWorkboard(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }   // 헤더 전체에 걸린 접기/펼치기와 분리
+  var c = _csGoCtx;
+  if (!c) return;
+  var payload = { s: c.sheetId, t: c.tabName, g: '', p: c.phone8 || '', n: c.name || '',
+                  st: c.sheetTitle || '', r: c.row || '' };   // r = 그 주문이 기록된 줄 번호(있으면 정확히 짚는다)
+  var url = location.origin + _csWorkdeskPath() + '#go=' + encodeURIComponent(JSON.stringify(payload));
+  var tk = '';
+  try { tk = sessionStorage.getItem('admin_token') || ''; } catch (_) { }
+  if (tk) url += '&sso=' + encodeURIComponent(tk);
+  window.open(url, '_blank', 'noopener');   // noopener = 새 탭이 이 창을 조작하지 못하게
+}
+
 async function csReloadConversation(threadId) {
   if (_csActiveThreadId !== threadId) return;
   try {
     const data = await gasGet({ action: "csAdminMessages", threadId });
     if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    // 서버가 열람과 함께 미확인을 0으로 만든다. 필터/배지도 같은 사실을 즉시 반영한다.
+    const cached = _csRooms.find(r => r.id === threadId);
+    if (cached && cached.adminUnread > 0) {
+      cached.adminUnread = 0;
+      _renderCsRooms(_csVisibleRooms());
+    }
     const t = data.thread || {};
     const camp = document.getElementById("csConvCampaign");
     if (camp) {
       const sheet = t.companyLabel ? ` <span style="color:#9CA3AF">· 시트: ${escHtml(t.companyLabel)}</span>` : '';
-      camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${escHtml(t.campaignLabel || '문의')}${sheet}`;
+      const label = escHtml(t.campaignLabel || '문의');
+      // ★ 작업이 지정된 문의만 링크 — 일반 문의(campaign_key 빈 값)는 갈 곳이 없어 종전대로 글자로 둔다.
+      const go = _csGoParseKey(t.campaignKey);
+      if (go) {
+        _csGoCtx = { sheetId: go.sheetId, tabName: go.tabName,
+                     phone8: t.reviewerPhone8 || '', name: t.reviewerName || '', sheetTitle: t.companyLabel || '' };
+        camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ` +
+          `<a href="#" class="cs-camp-link" onclick="csOpenWorkboard(event)"` +
+          ` title="이 작업의 작업보드를 새 탭으로 엽니다 — 이 리뷰어의 행을 찾아 표시합니다">${label} ↗</a>${sheet}`;
+      } else {
+        _csGoCtx = null;
+        camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${label}${sheet}`;
+      }
     }
     const memo = document.getElementById("csMemoText");
     if (memo && document.activeElement !== memo) memo.value = t.adminMemo || "";
@@ -395,7 +570,7 @@ function _csRenderMessages(messages) {
         <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts1}</div>
       </div>`;
     }
-    // 리뷰이미지 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
+    // 리뷰캡처 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
     //   렌더러는 리뷰어 화면·전용 탭과 공용(js/cs-review-edit-card.js) — 사본 금지.
     if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
       const meta = m.meta || {};
@@ -529,9 +704,12 @@ function csOnSSE(evtType, data) {
   if (_csActiveThreadId && data.threadId === _csActiveThreadId) {
     try { csReloadConversation(_csActiveThreadId); } catch(_){}
   }
+  // 작업보드 미니 C/S도 같은 서버 이벤트를 구독한다. 전역 상태를 복제하지 않고
+  // 이벤트만 전달해, 같은 방의 읽음·답장 상태를 다시 조회하게 한다.
+  try { window.dispatchEvent(new CustomEvent('cs:sse', { detail: { evtType, data } })); } catch (_) {}
 }
 
-/* ── 리뷰이미지 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
+/* ── 리뷰캡처 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
    ★ 경로는 C/S 와 같은 방식으로 재기준한다(window.REVIEW_EDIT_API_BASE):
      관리자 대시보드 = /api/review-edit, 리뷰웹시스템[3버전] = /api/trackb/review-edit
      (인트라넷 SSO 토큰은 /api/review-edit/* 에 도달 자체가 불가능하다).
@@ -553,7 +731,7 @@ async function _reCall(path, body) {
 async function csApproveReviewEdit(requestId, opts) {
   if (!requestId) return;
   opts = opts || {};
-  if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 이미지가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
+  if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 캡처가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
   const r = await _reCall('/approve', { id: requestId });
   if (r && r.ok) {
     showToast('승인했습니다. 리뷰어에게 안내가 전송되었습니다.');
@@ -584,8 +762,7 @@ async function csRejectReviewEdit(requestId, opts) {
 function csReloadAfterReviewEdit() {
   try { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); } catch (_) {}
   // ★ 문의방 목록은 **C/S 화면이 실제로 떠 있을 때만** 다시 읽는다.
-  //   전용 탭(AE)에서 처리한 경우 AE 는 /cs/threads(adminOrMaster)에 403 이고,
-  //   async 함수의 rejection 은 sync try 로 안 잡혀 콘솔에 unhandled rejection 이 남는다.
+  //   화면이 떠 있을 때만 갱신해 불필요한 목록 요청과 숨은 화면의 렌더를 막는다.
   try {
     if (document.getElementById('csRoomListWrap')) {
       const p = loadCsRooms();
@@ -604,7 +781,23 @@ function csReloadAfterReviewEdit() {
        고정)은 그대로 두고 대화창만 상한을 받으므로, 남는 폭은 부모 flex row(gap:12px)
        안에서 오른쪽으로 자연히 흘러간다 — 별도 스페이서 요소가 필요 없다(flex:1 이
        max-width 에서 멈추고, 형제가 없어 남는 공간을 아무도 못 가져간다). */
-  var HTML = "      <div id=\"tab-cs-inquiry\" class=\"admin-tab-pane\" style=\"padding:16px\">\n        <div class=\"admin-section-header\" style=\"margin-bottom:12px\">\n          <span style=\"font-size:.95rem;font-weight:700;color:var(--t1,#0F172A)\"><i class=\"fas fa-comments\" style=\"color:var(--p,#3182F6);margin-right:6px\"></i>\ub9ac\ubdf0\uc5b4 C/S \ubb38\uc758</span>\n          <div style=\"display:flex;gap:6px;margin-left:auto;align-items:center\">\n            <input id=\"csSearchInput\" type=\"text\" placeholder=\"\ub9ac\ubdf0\uc5b4/\ucea0\ud398\uc778 \uac80\uc0c9...\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none;width:150px\"\n              oninput=\"csFilterRooms(this.value)\">\n            <select id=\"csStatusFilter\" onchange=\"loadCsRooms()\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none\">\n              <option value=\"all\">\uc804\uccb4</option>\n              <option value=\"open\" selected>\uc9c4\ud589\uc911</option>\n              <option value=\"closed\">\uc885\ub8cc</option>\n            </select>\n            <button onclick=\"loadCsRooms()\" style=\"padding:6px 12px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px\">\n              <i class=\"fas fa-sync-alt\"></i> \uc0c8\ub85c\uace0\uce68\n            </button>\n          </div>\n        </div>\n        <style>\n          .cs-room-row{ cursor:pointer; transition:background .12s; }\n          .cs-room-row:hover{ background:#f9fafb; }\n          .cs-room-active{ background:#eef5ff !important; box-shadow:inset 3px 0 0 #3182f6; }\n        </style>\n        <!-- \uc88c\uce21: \ucc44\ud305\ubc29 \ubaa9\ub85d / \uc6b0\uce21: \ub300\ud654\ucc3d (\uc778\ub77c\uc778 \ubd84\ud560) -->\n        <div style=\"display:flex;gap:12px;align-items:stretch;height:calc(100vh - 250px);min-height:480px\">\n          <div id=\"csRoomListWrap\" style=\"width:360px;flex-shrink:0;overflow-y:auto;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07))\">\n            <div style=\"padding:30px;text-align:center;color:var(--t3,#94A3B8)\">\n              <i class=\"fas fa-circle-notch fa-spin\"></i> \ubd88\ub7ec\uc624\ub294 \uc911...\n            </div>\n          </div>\n          <div id=\"csConvPane\" style=\"flex:1;min-width:0;max-width:860px;display:flex;flex-direction:column;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07));overflow:hidden\">\n            <div style=\"margin:auto;text-align:center;color:var(--t3,#94A3B8);padding:40px\">\n              <i class=\"fas fa-comments\" style=\"font-size:2rem;display:block;margin-bottom:10px;opacity:.4\"></i>\n              \uc67c\ucabd\uc5d0\uc11c \ubb38\uc758\ubc29\uc744 \uc120\ud0dd\ud558\uc138\uc694\n            </div>\n          </div>\n        </div>\n      </div><!-- /tab-cs-inquiry -->";
+  var HTML = "      <div id=\"tab-cs-inquiry\" class=\"admin-tab-pane\" style=\"padding:16px\">\n        <div class=\"admin-section-header\" style=\"margin-bottom:12px\">\n          <span style=\"font-size:.95rem;font-weight:700;color:var(--t1,#0F172A)\"><i class=\"fas fa-comments\" style=\"color:var(--p,#3182F6);margin-right:6px\"></i>\ub9ac\ubdf0\uc5b4 C/S \ubb38\uc758</span>\n          <div style=\"display:flex;gap:6px;margin-left:auto;align-items:center\">\n            <input id=\"csSearchInput\" type=\"text\" placeholder=\"\ub9ac\ubdf0\uc5b4/\ucea0\ud398\uc778 \uac80\uc0c9...\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none;width:150px\"\n              oninput=\"csFilterRooms(this.value)\">\n            <select id=\"csStatusFilter\" onchange=\"loadCsRooms()\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none\">\n              <option value=\"all\">\uc804\uccb4</option>\n              <option value=\"open\" selected>\uc9c4\ud589\uc911</option>\n              <option value=\"closed\">\uc885\ub8cc</option>\n            </select>\n            <button onclick=\"loadCsRooms()\" style=\"padding:6px 12px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px\">\n              <i class=\"fas fa-sync-alt\"></i> \uc0c8\ub85c\uace0\uce68\n            </button>\n          </div>\n        </div>\n        <style>\n          .cs-room-row{ cursor:pointer; transition:background .12s; }\n          .cs-room-row:hover{ background:#f9fafb; }\n          .cs-room-active{ background:#eef5ff !important; box-shadow:inset 3px 0 0 #3182f6; }\n          .cs-conv-head{ cursor:pointer; user-select:none; transition:background .12s; }\n          .cs-conv-head:hover{ background:#f7fafd; }\n          .cs-conv-hint{ opacity:0; transition:opacity .15s; font-size:.68rem; color:#94A3B8; }\n          .cs-conv-head:hover .cs-conv-hint{ opacity:1; }\n          .cs-conv-chev{ color:#94A3B8; font-size:.78rem; transition:transform .18s; }\n          .cs-conv-chev[data-fold]{ transform:rotate(-90deg); }\n          .cs-camp-link{ color:#2563EB; font-weight:600; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:2px; cursor:pointer; }\n          .cs-camp-link:hover{ color:#1D4ED8; text-decoration-style:solid; }\n        </style>\n        <!-- \uc88c\uce21: \ucc44\ud305\ubc29 \ubaa9\ub85d / \uc6b0\uce21: \ub300\ud654\ucc3d (\uc778\ub77c\uc778 \ubd84\ud560) -->\n        <div style=\"display:flex;gap:12px;align-items:stretch;height:calc(100vh - 250px);min-height:480px\">\n          <div id=\"csRoomListWrap\" style=\"width:360px;flex-shrink:0;overflow-y:auto;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07))\">\n            <div style=\"padding:30px;text-align:center;color:var(--t3,#94A3B8)\">\n              <i class=\"fas fa-circle-notch fa-spin\"></i> \ubd88\ub7ec\uc624\ub294 \uc911...\n            </div>\n          </div>\n          <div id=\"csConvPane\" style=\"flex:1;min-width:0;max-width:860px;display:flex;flex-direction:column;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07));overflow:hidden\">\n            <div style=\"margin:auto;text-align:center;color:var(--t3,#94A3B8);padding:40px\">\n              <i class=\"fas fa-comments\" style=\"font-size:2rem;display:block;margin-bottom:10px;opacity:.4\"></i>\n              \uc67c\ucabd\uc5d0\uc11c \ubb38\uc758\ubc29\uc744 \uc120\ud0dd\ud558\uc138\uc694\n            </div>\n          </div>\n        </div>\n      </div><!-- /tab-cs-inquiry -->";
+
+  // 진행상태 드롭다운은 제거한다. 목록 제어는 채팅방 세로선(360px) 안에 맞춰 둔다.
+  // 검색창은 새로고침 바로 오른쪽의 남은 폭을 모두 써서, 목록과 대화창의 경계에 정확히 맞는다.
+  HTML = HTML.replace(/<div style="display:flex;gap:6px;margin-left:auto;align-items:center">[\s\S]*?<\/select>[\s\S]*?<\/button>\n          <\/div>/,
+    `<div class="cs-room-controls" aria-label="문의방 목록 제어">
+            <button id="csFoldAllBtn" class="cs-list-control" type="button" aria-pressed="false" onclick="csToggleAllGroups()" title="캠페인 그룹 전체 접기/펼치기"><i class="fas fa-compress-alt"></i><span>전체 접기</span></button>
+            <button id="csReadFilter-read" class="cs-list-control" type="button" aria-pressed="false" onclick="csSetReadFilter('read')">읽음</button>
+            <button id="csReadFilter-unread" class="cs-list-control" type="button" aria-pressed="false" onclick="csSetReadFilter('unread')">안읽음</button>
+            <button class="cs-list-control cs-refresh-control" type="button" onclick="loadCsRooms()" title="새로고침" aria-label="새로고침"><i class="fas fa-sync-alt"></i></button>
+            <label class="cs-room-search" for="csRoomSearchInput">
+              <i class="fas fa-search" aria-hidden="true"></i>
+              <input id="csRoomSearchInput" type="search" autocomplete="off" placeholder="채팅방 검색" aria-label="채팅방 검색" oninput="csSetRoomSearch(this.value)">
+            </label>
+          </div>`);
+  HTML = HTML.replace('.cs-room-row{ cursor:pointer; transition:background .12s; }',
+    '#tab-cs-inquiry .admin-section-header{display:block}.cs-room-controls{display:flex;gap:6px;width:360px;max-width:100%;margin-top:8px;align-items:center;box-sizing:border-box}.cs-list-control{height:32px;min-width:48px;padding:0 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:7px;background:#fff;color:var(--t2,#475569);font-size:.76rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;transition:background .12s,border-color .12s,color .12s}.cs-list-control:hover{border-color:var(--p,#3182F6);color:var(--p,#3182F6);background:#F7FAFF}.cs-list-control.cs-filter-active{background:var(--p,#3182F6);border-color:var(--p,#3182F6);color:#fff}.cs-refresh-control{width:32px;min-width:32px;padding:0}.cs-room-search{height:32px;min-width:0;flex:1;display:flex;align-items:center;gap:6px;padding:0 9px;border:1.5px solid var(--border,#E2E8F0);border-radius:7px;background:#fff;color:#98A2B3;box-sizing:border-box}.cs-room-search:focus-within{border-color:var(--p,#3182F6);box-shadow:0 0 0 2px rgba(49,130,246,.12)}.cs-room-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--t1,#0F172A);font:inherit;font-size:.76rem}.cs-room-search input::placeholder{color:#98A2B3}.cs-room-group-head{cursor:pointer;user-select:none;transition:filter .12s}.cs-room-group-head:hover{filter:brightness(.98)}.cs-room-row{ cursor:pointer; transition:background .12s; }');
 
   function mount(hostId) {
     var host = document.getElementById(hostId || "csInquiryMount");
@@ -616,7 +809,8 @@ function csReloadAfterReviewEdit() {
   /* 전역 공개 — 생성 HTML 의 onclick 문자열과 index-payment.js 의 SSE 훅이 이름으로 쓴다.
      (모듈 안에만 두면 버튼이 전부 "함수 없음"으로 조용히 죽는다) */
   var EXPORTS = {
-    loadCsRooms: loadCsRooms, csFilterRooms: csFilterRooms,
+    loadCsRooms: loadCsRooms, csSetReadFilter: csSetReadFilter, csSetRoomSearch: csSetRoomSearch,
+    csToggleAllGroups: csToggleAllGroups, csToggleGroup: csToggleGroup,
     csOpenConversation: csOpenConversation, csLoadOrderContext: csLoadOrderContext,
     csReloadConversation: csReloadConversation, csViewImage: csViewImage,
     // 열려 있는 방을 다시 그린다 — 닉네임을 바꾸면 이미 보낸 답장의 표시 이름까지 바뀌므로
@@ -624,12 +818,16 @@ function csReloadAfterReviewEdit() {
     // 바깥에서 읽을 수 없어 **훅으로 노출**한다(전역 사본을 두면 두 값이 갈라진다).
     csReloadActiveConversation: function () { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); },
     csSendReply: csSendReply, csSaveMemo: csSaveMemo, csToggleStatus: csToggleStatus,
+    // 헤더 클릭 = 주문정보·참여이력 접기/펼치기(생성 HTML 의 onclick 문자열이 이름으로 찾는다)
+    csToggleCtx: csToggleCtx,
     csCloseConversation: csCloseConversation, csUpdateBadge: csUpdateBadge,
     csRefreshBadge: csRefreshBadge, csOnSSE: csOnSSE,
     csApproveReviewEdit: csApproveReviewEdit, csRejectReviewEdit: csRejectReviewEdit,
     csCanActOnReviewEdit: csCanActOnReviewEdit, csReloadAfterReviewEdit: csReloadAfterReviewEdit,
     // 사진 첨부(파일선택·Ctrl+V·드래그앤드롭) — 생성 HTML의 onclick/onchange/onpaste 문자열이 이름으로 찾는다
     csPickFiles: csPickFiles, csRemoveAttach: csRemoveAttach, csHandlePaste: csHandlePaste,
+    // 문의방 제목 → 그 작업의 작업보드(새 탭·해당 리뷰어 행 강조). 생성 HTML 의 onclick 이 이름으로 찾는다
+    csOpenWorkboard: csOpenWorkboard,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];
   window.CsInquiry = { mount: mount, html: HTML };

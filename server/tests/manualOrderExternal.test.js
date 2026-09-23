@@ -193,10 +193,11 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
 {
   const c = stubClient([
     [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 0 }]],
-    [/status = 'submitted' LIMIT 1/i, [{ id: 55 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 56 }]],
   ]);
   const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '11112222' });
-  ok('B16 같은 명의의 확정 참여가 이미 있으면 차단(이중 차감 금지)', r.ok === false && /이미 확정된 참여/.test(r.error));
+  ok('B16 기간 판정을 통과한 같은 명의의 반복 참여는 새 확정으로 기록',
+    r.ok === true && r.applicationId === 56 && !c.log.some(q => /status = 'submitted' LIMIT 1/i.test(q.sql)));
 }
 {
   const c = stubClient([
@@ -218,6 +219,98 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
   ok('B19 확정 후 마감 영속 판정을 호출', persistCalls === 1);
 }
 {
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 3, todaySubmitted: 0, activeHolds: 0, todayActiveHolds: 0,
+    // 현재 주문이 원장에 먼저 생성된 뒤 이 함수가 호출되므로 10건 초과의 현재 원장값은 11이다.
+    linked: { ok: true, orders: 11, ordersAll: 11, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 3 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 92 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', allowOverCapacity: true,
+    orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18b ★ 신청 3명이어도 주문 원장 10/10이면 초과 사실을 알리고 기록',
+    r.ok === true && r.overCapacity === true && r.capacityUsed === 10 && r.capacitySource === 'order_ledger');
+}
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 9, todaySubmitted: 0, activeHolds: 0, todayActiveHolds: 0,
+    linked: { ok: true, orders: 10, ordersAll: 10, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 9 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 93 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', allowOverCapacity: true,
+    orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18c ★ 현재 주문을 제외한 9/10이면 마지막 정상 주문을 11번째로 오인하지 않는다',
+    r.ok === true && r.overCapacity === false && r.capacityUsed === 9);
+}
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 9, todaySubmitted: 0, activeHolds: 1, todayActiveHolds: 1,
+    linked: { ok: true, orders: 10, ordersAll: 10, sharedTab: false },
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 10, linked_sheet_id: 'S', linked_tab_name: 'T' }]],
+    [/id = \$1 AND campaign_id = \$2 AND phone8 = \$3 FOR UPDATE/i, [{ id: 42, status: 'applied', active_hold: true }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 9 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', targetApplicationId: 42, orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+    allowOverCapacity: false,
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  ok('B18d ★ 현재 주문·마지막 유효 홀드를 함께 제외해 11번째 초과로 오인하지 않는다', r.ok === true && r.overCapacity === false);
+}
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realFetch = stateSvc.fetchCampaignCounts;
+  const realDerive = schedSvc.deriveSchedules;
+  stateSvc.fetchCampaignCounts = async () => new Map([['x', {
+    submittedAll: 3, todaySubmitted: 0, activeHolds: 0, todayActiveHolds: 0,
+    linked: { ok: true, orders: 11, ordersAll: 11, sharedTab: false },
+  }]]);
+  schedSvc.deriveSchedules = async () => new Map([['S::7', {
+    ok: true,
+    dates: [{ date: '2026-09-08', slots: 5 }, { date: '2026-09-09', slots: 5 }],
+    byDate: { '2026-09-08': 5, '2026-09-09': 5 },
+    totalSlots: 10,
+  }]]);
+  const c = stubClient([
+    [/FROM recruit_campaigns/i, [{
+      id: 'x', participation_mode: true, recruit_total: 999,
+      linked_sheet_id: 'S', linked_tab_gid: '7', linked_tab_name: 'T',
+    }]],
+    [/COUNT\(\*\)::int AS n/i, [{ n: 3 }]],
+    [/INSERT INTO campaign_applications/i, [{ id: 94 }]],
+  ]);
+  const r = await svc.confirmExternalApplication(c, {
+    campaignId: 'x', phone8: '1', allowOverCapacity: true,
+    orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+  });
+  stateSvc.fetchCampaignCounts = realFetch;
+  schedSvc.deriveSchedules = realDerive;
+  ok('B18e ★ 일정형 공고는 저장 총량 999가 아니라 일정 총량 10으로 초과를 판정',
+    r.ok === true && r.overCapacity === true && r.capacityTotal === 10 && r.capacityUsed === 10);
+}
+{
   const c = stubClient([
     [/FROM recruit_campaigns/i, [{ id: 'x', participation_mode: true, recruit_total: 0 }]],
     [/status IN \('applied', 'expired', 'cancelled'\)/i, [{ id: 42 }]],
@@ -235,6 +328,9 @@ function stubClient(routes) { const d = stubDb(routes); return d; }
   const r = await svc.confirmExternalApplication(c, { campaignId: 'x', phone8: '1', targetApplicationId: 42, orderSubmissionId: 'os-1' });
   ok('B22 운영자가 선택한 신청만 확정한다(만료 건 포함)', r.ok === true && r.applicationId === 42);
   ok('B23 선택 확정은 새 신청 INSERT를 만들지 않는다', !c.log.some(q => /INSERT INTO campaign_applications/.test(q.sql)));
+  const provenance = c.log.find(q => /UPDATE order_submissions/.test(q.sql) && /campaign_application_id/.test(q.sql));
+  ok('B23b 외부모집 주문에도 신청 역링크를 남겨 취소 후 로그 출처를 보존',
+    !!provenance && provenance.params[0] === 'os-1' && provenance.params[1] === 42);
 }
 {
   const c = stubClient([
@@ -312,8 +408,13 @@ console.log('\nD. 프론트 배선');
   ok('D2d 참여형 수동제출은 관리자 신청목록에서 후보를 읽고 명시 선택값을 전송한다',
     mo.includes('/applications') && mo.includes('targetApplicationId') && mo.includes('신청 선택 필수'));
   ok('D3 파싱은 서버 파서에 맡긴다(프론트 사본 금지)',
-    mo.includes('/api/manual-order/preview') && !/split\('\/'\)/.test(mo));
-  ok('D4 제출은 인증 라우트로만', mo.includes('/api/manual-order/submit'));
+    /_moBase\(\) \+ '\/preview'/.test(mo) && !/split\('\/'\)/.test(mo));
+  ok('D4 제출은 인증 라우트로만', /_moBase\(\) \+ '\/submit'/.test(mo));
+  // ★ 경로 재기준(호스트가 정한다) — 하드코딩이면 리뷰웹시스템[3버전]의 인트라넷 SSO 토큰이 403.
+  ok('D4b 경로는 window.MANUAL_ORDER_API 로 재기준하되 미설정 = 종전 경로',
+    /window\.MANUAL_ORDER_API/.test(mo) && /'\/api\/manual-order'/.test(mo));
+  ok('D4c 이미지 경로는 재기준하지 않는다(무인증 라우트)',
+    mo.includes("'/api/image/image-upload'") && mo.includes("'/api/image/image-extract'"));
   ok('D5 캡처는 기존 업로드 경로 재사용 + 주문에 연결',
     mo.includes('/api/image/image-upload') && mo.includes('orderSubmissionId: res.orderSubmissionId'));
   ok('D6 캡처 붙여넣기(Ctrl+V)를 지원', mo.includes('clipboardData') && mo.includes('getAsFile'));
@@ -325,6 +426,10 @@ console.log('\nD. 프론트 배선');
   ok('D9 ★ 리뷰어 홈 칩은 진짜 admin_token + 참여형일 때만 — 스코프 토큰에겐 미노출(403 막다른 길 금지)',
     /const moChip = \(!admin && c\.participation_mode && _realAdminTok\(\)\)/.test(cc));
   ok('D10 칩이 실제로 카드에 삽입된다', cc.includes('${editChip}${moChip}'));
+  const irNames = F('js/index-recruit.js');
+  ok('D10b 카드와 모집공고 로그의 버튼 명칭은 외부모집 수동제출로 통일',
+    (cc.match(/외부모집 수동제출/g) || []).length >= 1 && irNames.includes('외부모집 수동제출')
+    && !/>🧾 외부제출</.test(cc) && !/>🧾 외부제출</.test(irNames));
   ok('D11 연결 탭 문맥은 단일 렌더러가 캐시한다', cc.includes('_cacheMoCtx(c);'));
   ok('D12 캐시가 비면 관리자 조회로 보충(공개 목록엔 연결 탭이 없다)',
     /'\/api\/campaign\/' \+ encodeURIComponent\(id\)/.test(cc));
@@ -336,7 +441,7 @@ console.log('\nD. 프론트 배선');
 }
 {
   const ir = F('js/index-recruit.js');
-  ok('D16 관제 패널에 외부제출 버튼', ir.includes('id="ccMoBtn"'));
+  ok('D16 모집공고 로그에 외부모집 수동제출 버튼', ir.includes('id="ccMoBtn"') && ir.includes('외부모집 수동제출'));
   ok('D17 관제 버튼은 열 때마다 현재 공고로 다시 배선(오버레이 재사용 함정)',
     /_moBtn\.onclick = \(\) =>/.test(ir) && ir.includes('CampCards.openManualOrder(campId)'));
   ok('D17b 모듈이 없는 화면(admin-siand)에서는 버튼을 숨긴다 — 눌러도 안 되는 버튼 금지',
@@ -397,6 +502,10 @@ console.log('\nE. 데이터 보전 가드');
     !/existingOptionKeyAt\(ledger\.tabContext, ledger\.sheetRow\)/.test(src)
     && !/UPDATE order_submissions SET selected_opt_key = \$2 WHERE id = \$1/.test(src));
 
+  ok('E9b ★ 무시트 외부모집은 배정 빈 행이 없어도 작업표 기록을 시도한다(원장 출처 게이트가 초과행 여부를 판정)',
+    /if \(isSl\) \{[\s\S]{0,900}?writeOrderToWorktable\([\s\S]{0,500}?sheetRow: ledger\.sheetRow/.test(src)
+    && !/if \(ledger\.sheetRow\) \{\s*let isSl/.test(src));
+
   ok('E10 ★ 공유 매퍼는 건드리지 않았다 — order_cancel의 칸 비우기·TrackB 컬럼 disjoint 마스크가 ""에 의존',
     /return orderData\.dateStr \|\| '';/.test(R('src/services/orderLedger.service.js')));
 }
@@ -408,8 +517,8 @@ console.log('\nE. 데이터 보전 가드');
   ok('E13 ★ 24시간 내 같은 연락처 재접수는 막는다(재붙여넣기 = 예상되는 복구 동작)',
     /submitted_at > NOW\(\) - interval '24 hours'/.test(src) && /duplicate: true/.test(src));
   ok('E14 중복 확인은 force 로만 우회', /if \(!force\) \{/.test(src));
-  ok('E15 ★ 확정 불가한 참여형 건은 원장 기록 **전에** 걸러낸다(시트만 쓰이고 정원은 안 깎이는 상태 방지)',
-    src.indexOf("status = 'submitted' LIMIT 1") < src.indexOf('createOrderLedgerEntry('));
+  ok('E15 ★ 재참여 기간 게이트는 원장 기록 **전에** 실행(차단됐는데 주문만 생기는 상태 방지)',
+    src.indexOf('if (!allowRepurchase)') < src.indexOf('createOrderLedgerEntry('));
   ok('E16 ★ 등록된 리뷰어 번호를 남의 타계정으로 붙이지 않는다(063과 같은 정책 스위치)',
     src.includes('CAMPAIGN_SUB_REGISTERED_POLICY') && src.includes('sub_accounts'));
   ok('E17 큐 등록 후 kick — cron까지 시트에 안 뜨던 문제', /kickOrderBatch\(sheetId, tabName\)/.test(src));
@@ -417,6 +526,7 @@ console.log('\nE. 데이터 보전 가드');
 {
   const em = R('src/middleware/error.middleware.js');
   ok('E18 관리자 전용 도구라 오류 메시지를 마스킹하지 않는다', em.includes("startsWith('/api/manual-order/')"));
+  ok('E18b Track B 프록시 경로도 같은 안내를 준다', em.includes("startsWith('/api/trackb/manual-order/')"));
 }
 {
   const mo = F('js/manual-order.js');
@@ -424,7 +534,7 @@ console.log('\nE. 데이터 보전 가드');
     /toDataURL\('image\/jpeg', 0\.75\)/.test(mo));
   ok('E20 ★ 업로드 응답을 확인한 뒤에만 "첨부됨"으로 보고', /res\.captureAttached = !!\(up && up\.ok\)/.test(mo));
   ok('E21 분해 요청도 오류를 잡는다(프록시 HTML 응답에 버튼이 죽던 문제)',
-    /try \{\s*r = await api\('\/api\/manual-order\/preview'/.test(mo));
+    /try \{\s*r = await api\(_moBase\(\) \+ '\/preview'/.test(mo));
   ok('E22 결과↔제출건 매칭은 서버가 준 index 로', /res\.index === 'number'\) \? targets\[res\.index\]/.test(mo));
   ok('E23 셀을 고치면 옛 오류 문구도 지운다', /querySelectorAll\('\.mo-msg'\)\.forEach\(el => el\.remove\(\)\)/.test(mo));
 }
@@ -665,6 +775,192 @@ console.log('\nI. 1단계 캡처 첨부');
   STAGED = [{ base64: 'NEW', mime: 'i', extract: { recipient: 'A' } }];
   distributeStaged();
   ok('I18 이미 붙은 캡처를 덮어쓰지 않는다', ROWS[0].capture.base64 === 'KEEP');
+}
+
+/* ══════════════════════════════════════════════════════════
+   J. 일 정원(오늘 몫) 확인 게이트 — 2026-08-19 사용자 확정 "나"안
+   ──────────────────────────────────────────────────────────
+   사고: 외부모집 수동제출이 **총 정원(recruit_total)만** 보고 일 정원은 아예 안 봐서,
+   정원 15인 공고 두 개에 각 +2 가 아무 신호 없이 들어갔다(운영 실측: 확정 17).
+   ★★ 막지 않는다 — 숫자를 보여주고 확인을 받는다. 확인하면 그대로 접수된다.
+   ══════════════════════════════════════════════════════════ */
+console.log('\nJ. 일 정원 확인 게이트');
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realCounts = stateSvc.fetchCampaignCounts;
+  const realDerive = schedSvc.deriveSchedules;
+
+  // 정원 판정은 computeCampaignState 를 그대로 태운다 — 여기서는 그 입력만 스텁한다.
+  schedSvc.deriveSchedules = async () => new Map();
+  const setCounts = (todaySubmitted, todayActiveHolds) => {
+    stateSvc.fetchCampaignCounts = async (_db, ids) => new Map(ids.map(id => [id, {
+      activeHolds: todayActiveHolds, todayActiveHolds, submittedAll: todaySubmitted,
+      todaySubmitted, submittedBeforeToday: 0, carry: null, hold: null, plans: null,
+    }]));
+  };
+  const campRow = (over) => ({
+    id: 'c1', participation_mode: true, status: 'active', daily_limit: 15,
+    recruit_total: 0, window_start: null, window_end: null, start_date: null, ...over,
+  });
+  const dbWith = (row) => stubDb([[/FROM recruit_campaigns WHERE id/i, row ? [row] : []]]);
+
+  setCounts(10, 0);
+  const r1 = await svc.dailyRemainingForCampaign(dbWith(campRow()), 'c1');
+  ok('J1 남은 자리를 정원 판정(computeCampaignState)에서 그대로 읽는다',
+    r1 && r1.quota === 15 && r1.todayCount === 10 && r1.remaining === 5);
+
+  setCounts(12, 3);
+  const r2 = await svc.dailyRemainingForCampaign(dbWith(campRow()), 'c1');
+  ok('J2 ★ 진행 중 홀드도 자리를 차지한 것으로 센다', r2 && r2.remaining === 0);
+
+  setCounts(20, 0);
+  const r3 = await svc.dailyRemainingForCampaign(dbWith(campRow()), 'c1');
+  ok('J3 이미 초과면 남은 자리 0(음수로 새지 않는다)', r3 && r3.remaining === 0);
+
+  setCounts(0, 0);
+  ok('J4 참여형이 아니면 판정하지 않는다(레거시 무회귀)',
+    await svc.dailyRemainingForCampaign(dbWith(campRow({ participation_mode: false })), 'c1') === null);
+  ok('J5 공고를 못 찾으면 판정하지 않는다',
+    await svc.dailyRemainingForCampaign(dbWith(null), 'c1') === null);
+  ok('J6 campaignId 가 없으면 판정하지 않는다',
+    await svc.dailyRemainingForCampaign(dbWith(campRow()), '') === null);
+  ok('J7 ★ 일건수 0(무제한)은 판정하지 않는다',
+    await svc.dailyRemainingForCampaign(dbWith(campRow({ daily_limit: 0 })), 'c1') === null);
+
+  // ★ fail-soft — 조회가 터져도 null(통과). 외부모집은 약속된 구매라 우리 오류로 막지 않는다.
+  const boom = { query: async () => { throw new Error('DB down'); } };
+  ok('J8 ★ 조회 실패는 null = 통과(모르면 막지 않는다)',
+    await svc.dailyRemainingForCampaign(boom, 'c1') === null);
+
+  stateSvc.fetchCampaignCounts = realCounts;
+  schedSvc.deriveSchedules = realDerive;
+}
+{
+  // 게이트가 **원장 기록 전**에 걸리는지 = 주문만 접수되고 정원은 미반영인 어긋난 상태 금지.
+  // ★ 서비스가 모듈 스코프의 pool 을 직접 쓰므로 **pool 자체를 갈아끼운다** — 밖에서 export 를
+  //   감싸는 방식은 렉시컬 참조라 먹지 않는다(CS 뱃지 훅에서 겪은 그 함정).
+  const poolMod = require('../src/db/pool');
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realQuery = poolMod.query, realCounts = stateSvc.fetchCampaignCounts;
+  const realDerive = schedSvc.deriveSchedules;
+
+  poolMod.query = async (sql) => (/FROM recruit_campaigns WHERE id/i.test(String(sql))
+    ? { rows: [{ id: 'c1', participation_mode: true, status: 'active', daily_limit: 15, recruit_total: 0,
+                 window_start: null, window_end: null, start_date: null }] }
+    : { rows: [] });
+  schedSvc.deriveSchedules = async () => new Map();
+  stateSvc.fetchCampaignCounts = async (_db, ids) => new Map(ids.map(id => [id, {
+    activeHolds: 0, todayActiveHolds: 0, submittedAll: 15, todaySubmitted: 15,
+    submittedBeforeToday: 0, carry: null, hold: null, plans: null,
+  }]));
+  const fields = { recipient: '가나', phone: '010-1111-2222', address: 'a', bank: 'b', account: 'c', depositor: 'd' };
+  const args = { sheetId: 'S', tabName: 'T', gid: '', fields, campaignId: 'c1', adminName: 'A', force: true };
+
+  /* ★★ 원장 호출은 **스텁할 수 없다** — 서비스가 require 시점에 구조분해로 캡처하기 때문
+     (`const { createOrderLedgerEntry } = require(...)`). export 를 갈아끼워도 렉시컬 참조는
+     그대로다. 그래서 "스텁이 몇 번 불렸나" 대신 **실제로 거기까지 갔는지**로 고정한다:
+     이 테스트 환경엔 DB 가 없어 원장에 도달하면 반드시 그 안에서 예외가 난다. */
+  const run = async (over) => {
+    try { return { res: await svc.submitExternalOrder({ ...args, allowOverDaily: over }), atLedger: false }; }
+    catch (e) { return { res: null, atLedger: /orderLedger|createOrderLedgerEntry/.test(e.stack || '') }; }
+  };
+
+  const a = await run(false);
+  ok('J9 ★ 오늘 정원이 찼으면 확인 없이는 접수하지 않는다',
+    a.res && a.res.ok === false && a.res.overDaily === true);
+  ok('J10 ★★ 거절은 원장에 닿기 전에 일어난다(부분 처리 0)', a.atLedger === false);
+  ok('J11 거절 문구가 숫자를 말한다(무엇을 확인하는지)',
+    /15/.test(a.res.error) && !!a.res.quota && a.res.quota.quota === 15);
+
+  // 확인을 받으면 게이트를 지나 원장까지 간다 — 막는 기능이 아니다(사용자 확정).
+  const b = await run(true);
+  ok('J12 ★★ 확인하면 초과여도 원장까지 진행된다(외부모집 흐름을 죽이지 않는다)', b.atLedger === true);
+
+  poolMod.query = realQuery; stateSvc.fetchCampaignCounts = realCounts;
+  schedSvc.deriveSchedules = realDerive;
+}
+{
+  /* ★★ 정적 검사만으로는 "조건이 살아 있나"를 못 본다(변이시험이 `if (false)` 로 뚫었다).
+     → 라우트 핸들러를 **실제로 호출**해 쓰기 0건으로 되돌아오는지 확인한다. */
+  const poolMod = require('../src/db/pool');
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realQuery = poolMod.query, realCounts = stateSvc.fetchCampaignCounts, realDerive = schedSvc.deriveSchedules;
+  let writes = 0;
+  poolMod.query = async (sql) => {
+    const q = String(sql);
+    // 재참여 사전 확인은 `WITH ... SELECT` 읽기 쿼리다. 선두 WITH만으로 쓰기로 오인하지 않되,
+    // 데이터 변경 CTE는 INSERT/UPDATE/DELETE 키워드가 있으므로 계속 쓰기로 센다.
+    if (!/^\s*(?:SELECT|WITH)\b/i.test(q) || /\b(?:INSERT|UPDATE|DELETE)\b/i.test(q)) writes++;
+    return /FROM recruit_campaigns WHERE id/i.test(q)
+      ? { rows: [{ id: 'c1', participation_mode: true, status: 'active', daily_limit: 15, recruit_total: 0,
+                   window_start: null, window_end: null, start_date: null }] }
+      : { rows: [] };
+  };
+  schedSvc.deriveSchedules = async () => new Map();
+  let todaySub = 14;   // 정원 15 → 남은 자리 1
+  stateSvc.fetchCampaignCounts = async (_db, ids) => new Map(ids.map(id => [id, {
+    activeHolds: 0, todayActiveHolds: 0, submittedAll: todaySub, todaySubmitted: todaySub,
+    submittedBeforeToday: 0, carry: null, hold: null, plans: null,
+  }]));
+
+  const router = require('../src/routes/manualOrder.routes');
+  const layer = router.stack.find(l => l.route && l.route.path === '/submit');
+  const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+  const f = { recipient: '가', phone: '010-1111-2222', address: 'a', bank: 'b', account: 'c', depositor: 'd' };
+  const call = async (body) => {
+    let out = null;
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(v) { out = v; return this; } };
+    await handler({ body, admin: { name: 'A' } }, res, (e) => { if (e) throw e; });
+    return out;
+  };
+
+  // 남은 자리 1(15-14)인데 3건 제출 → 확인 요구 + 쓰기 0건
+  const r = await call({ sheetId: 'S', tabName: 'T', campaignId: 'c1', items: [{ fields: f }, { fields: f }, { fields: f }] });
+  ok('J13 ★★ 남은 자리보다 많이 제출하면 확인을 요구한다', r && r.ok === false && r.needConfirm === 'over_daily');
+  ok('J14 ★★ 그때 쓰기는 0건이다(부분 처리 금지)', writes === 0);
+  ok('J15 초과 숫자를 그대로 알려준다', r.quota && r.quota.remaining === 1 && r.quota.want === 3 && r.quota.over === 2);
+
+  /* ★★ 확인한 뒤에는 **끝까지 통과해야 한다** — 라우트가 서비스에 확인값을 안 넘기면
+     건별 게이트가 다시 거절해 "확인했는데 계속 막히는" 막다른 길이 된다(변이시험이 잡은 구멍). */
+  //   ★ 자리가 **완전히 찬** 상태로 본다 — 남은 자리가 남아 있으면 건별 게이트가 애초에
+  //     발동하지 않아, 확인값이 서비스까지 갔는지 확인할 수 없다(변이시험으로 확인).
+  todaySub = 15;
+  const r3 = await call({ sheetId: 'S', tabName: 'T', campaignId: 'c1', allowOverDaily: true,
+                          items: [{ fields: f }, { fields: f }, { fields: f }] });
+  todaySub = 14;
+  ok('J16 ★★ 확인하면 건별 게이트도 통과한다(막다른 길 금지)',
+    r3 && r3.needConfirm !== 'over_daily'
+    && !(r3.results || []).some(x => /확인이 필요/.test(String(x.error || ''))));
+
+  // 남은 자리 안이면 확인 없이 종전대로 진행한다(무회귀)
+  const r2 = await call({ sheetId: 'S', tabName: 'T', campaignId: 'c1', items: [{ fields: f }] });
+  ok('J17 ★ 남은 자리 안이면 확인을 묻지 않는다(무회귀)', !r2 || r2.needConfirm !== 'over_daily');
+
+  poolMod.query = realQuery; stateSvc.fetchCampaignCounts = realCounts; schedSvc.deriveSchedules = realDerive;
+}
+{
+  const src = nc(R('src/routes/manualOrder.routes.js'));
+  ok('J18 라우트가 배치 시작 전에 1회 판정한다(부분 처리 방지)',
+    /dailyRemainingForCampaign\(pool, campaignId\)/.test(src) && /needConfirm: 'over_daily'/.test(src));
+  ok('J19 ★ 확인값은 프론트가 보낸 것만 인정(기본 false)',
+    /allowOverDaily = b\.allowOverDaily === true/.test(src));
+  ok('J20 ★ 확인 후 접수는 결과에 남는다(조용한 초과 금지)',
+    /초과해 접수했습니다/.test(src));
+  const svcSrc = nc(R('src/services/manualOrder.service.js'));
+  ok('J21 ★ 건별 게이트가 서버 최종 방어로 남는다(낡은 화면 우회 차단)',
+    /if \(campaignId && !allowOverDaily\)/.test(svcSrc));
+  ok('J22 ★★ 정원 판정 사본 금지 — daily_limit 을 직접 세지 않는다',
+    /computeCampaignState/.test(svcSrc) && !/daily_limit\s*-\s*/.test(svcSrc));
+  const fe = nc(F('js/manual-order.js'));
+  // ★ post(true, …) — 재구매 기간 확인(2026-08-24) 이 같은 체인에 합류하며 두 번째 인자가
+  //   생겼다(over_daily 재확인 때 이미 확정된 repurchase 확인 상태를 잃지 않게). allowOverDaily
+  //   가 true 로 재전송된다는 원래 의미는 그대로다 — repurchaseGuard.test.js 가 그 값을 고정.
+  ok('J23 프론트가 확인창을 띄우고 allowOverDaily 로 재전송한다',
+    /needConfirm === 'over_daily'/.test(fe) && /post\(true,/.test(fe));
+  ok('J24 ★ 취소하면 아무것도 보내지 않는다', /if \(!okGo\)/.test(fe));
 }
 
 console.log(`\n✅ manualOrderExternal 회귀가드 통과 — ${passed}건\n`);

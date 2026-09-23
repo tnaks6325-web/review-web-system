@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>제출물 미리보기 개선 — 와이어프레임 시안</title>
+<style>
+/* ★ 외부 리소스 0 — 오프라인에서도 그대로 열린다. 색이 뒤집히면 "실물과 같다"가 깨지므로 라이트 고정. */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+  --mono:'SF Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.6}
+.page{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+h1{font-size:21px;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px;margin:0 0 22px}
+h2{font-size:15px;margin:34px 0 4px;display:flex;align-items:center;gap:8px}
+h2 .no{width:22px;height:22px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;
+       display:grid;place-items:center;flex:none;font-weight:800}
+.lead{color:var(--muted);font-size:12.5px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.tag{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;margin-bottom:9px}
+.tag.now{background:var(--bad-soft);color:var(--bad)}
+.tag.next{background:var(--safe-soft);color:var(--safe)}
+.note{background:var(--warn-soft);border:1px solid #f0dfc4;border-radius:9px;padding:10px 12px;font-size:12.5px;color:#7a4d10;margin-top:12px}
+.note b{color:#5c3a0b}
+ul.tight{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)}
+ul.tight li{margin:3px 0}
+ul.tight b{color:var(--ink)}
+code{font-family:var(--mono);font-size:11.5px;background:var(--card2);padding:1px 5px;border-radius:4px;color:var(--accent-deep)}
+
+/* ── ① 패널 헤더 ─────────────────────────────────────────── */
+.rvpane{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+.rvhd{font-size:11.5px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:6px}
+.rvhd .rvsub{margin-left:auto;font-weight:600;color:var(--faint);font-size:10px}
+/* ★ 신규 — 제목 바로 아래 제출현황 줄 */
+.rvstat{display:flex;gap:7px;margin-top:7px;flex-wrap:wrap}
+.rvstat .s{flex:1;min-width:0;display:flex;align-items:center;gap:6px;background:var(--card2);
+           border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.rvstat .s .ic{font-size:12px;flex:none}
+.rvstat .s .lb{font-size:10px;color:var(--faint);font-weight:700;flex:none}
+.rvstat .s .nm{margin-left:auto;font-size:11.5px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.rvstat .s .nm small{font-weight:600;color:var(--faint)}
+.rvstat .s .bar{position:absolute;left:0;bottom:0;height:2px;background:var(--accent)}
+.rvstat .s.unk .nm{color:var(--faint)}
+.rvwho{margin-top:8px;font-size:12.5px;font-weight:800;display:flex;align-items:center;gap:6px}
+.rvwho span{margin-left:auto;font-weight:600;color:var(--faint);font-size:10.5px}
+.rv2{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:8px;height:190px}
+/* ★ flex 자식은 기본 min-height:auto 라 이 한 줄이 없으면 900px 짜리 캡처가 카드를 뚫고 나온다(레포 상습 함정) */
+.rv2c{min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px}
+.rv2h{flex:none;font-size:10px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:6px}
+.rv2h .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
+.rvhold{flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;background:var(--card);overflow-y:auto;overflow-x:hidden}
+.rvhold img{width:100%;display:block}
+
+/* ── ③ 팝업 ──────────────────────────────────────────────── */
+.popdemo{background:rgba(15,35,42,.5);border-radius:14px;padding:20px;display:grid;place-items:center}
+.rvpop{width:100%;max-width:1040px;height:620px;background:var(--card);border-radius:14px;overflow:hidden;
+       box-shadow:0 14px 44px rgba(0,0,0,.28);display:grid;grid-template-columns:318px minmax(0,1fr)}
+@media(max-width:860px){.rvpop{grid-template-columns:1fr;grid-template-rows:220px minmax(0,1fr);height:720px}}
+.rvplist{border-right:1px solid var(--line);overflow-y:auto;background:var(--card2);padding:10px;min-width:0}
+.rvplhd{font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;margin:3px 4px 8px;
+        display:flex;align-items:center;gap:6px}
+.rvplhd .cnt{margin-left:auto;font-weight:800;color:var(--muted)}
+/* ★ 신규 — 목록이 표가 된다: 번호 / 수취인 / 구매캡처 / 리뷰이미지 */
+.rvplcols{display:grid;grid-template-columns:38px minmax(0,1fr) 30px 30px;gap:6px;align-items:center;
+          padding:4px 9px;font-size:9.5px;font-weight:800;color:var(--faint);letter-spacing:.02em}
+.rvplcols .c{text-align:center}
+.rvplitem{width:100%;display:grid;grid-template-columns:38px minmax(0,1fr) 30px 30px;gap:6px;align-items:center;
+          text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;
+          color:var(--muted);font:inherit;font-size:12px;cursor:pointer;font-family:inherit}
+.rvplitem:hover{background:var(--card);border-color:var(--line)}
+.rvplitem.on{background:var(--card);border-color:var(--accent-line);color:var(--accent-deep);font-weight:750}
+.rvplitem .no{font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint);font-weight:700}
+.rvplitem.on .no{color:var(--accent-deep)}
+.rvplitem .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rvplitem .mk{text-align:center;font-size:12px;line-height:1}
+.mk.y{color:var(--safe)} .mk.n{color:var(--line2)}
+.rvpstage{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--card);padding:40px 16px 14px}
+.rvpmeta{position:absolute;left:18px;top:13px;font-size:12.5px;font-weight:750;color:var(--muted)}
+.rvpmeta span{font-weight:600;color:var(--faint);margin-left:6px}
+.rvpclose{position:absolute;right:12px;top:10px;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;
+          background:var(--card);color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer}
+/* ★★ 신규 — 무대가 좌우 2분할(구매 캡처 · 리뷰 이미지) */
+.rvpcols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rvpc{min-width:0;min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);
+      border-radius:10px;background:var(--card2);padding:9px}
+.rvpch{font-size:10.5px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:7px;flex:none}
+.rvpch .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
+.rvpbody{flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;background:var(--card);
+         overflow-y:auto;overflow-x:hidden}
+.rvpbody img{width:100%;display:block}
+.rvpempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+          border:1px dashed var(--line2);border-radius:8px;font-size:11px;color:var(--faint);text-align:center;padding:12px}
+.rvpempty b{font-size:12px;color:var(--muted)}
+.rvpempty.warn b{color:var(--warn)}
+.rvppg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;
+       font-size:10.5px;color:var(--muted);font-weight:700}
+.rvppg button{font:inherit;font-size:12px;line-height:1;padding:3px 9px;border-radius:6px;
+              border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer}
+.rvppg button:disabled{opacity:.35;cursor:default}
+
+/* 변형 스위치 */
+.vsw{display:flex;gap:6px;margin:14px 0 6px;flex-wrap:wrap}
+.vsw a{font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;border:1px solid var(--line2);
+       background:var(--card);color:var(--muted);text-decoration:none}
+.vsw a.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.vhelp{font-size:12px;color:var(--muted);margin:0 0 12px}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>제출물 미리보기 개선 — 와이어프레임 시안</h1>
+<p class="sub">작업보드 상단 ③ 미리보기 패널 + 크게 보기 팝업. 가짜 데이터로 <b>실제 동작</b>합니다 — 목록을 눌러 보세요.</p>
+
+<!-- ①  ─────────────────────────────────────────────── -->
+<h2><span class="no">1</span> 패널 제목 아래 제출현황</h2>
+<p class="lead">지금은 "제출물 미리보기"만 있어 <b>이 작업이 얼마나 걷혔는지</b>를 표를 세지 않으면 알 수 없습니다.</p>
+<div class="grid2">
+  <div class="card">
+    <span class="tag now">지금</span>
+    <div class="rvpane">
+      <div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>
+      <div class="rvwho">김아미<span>#4</span></div>
+      <div class="rv2">
+        <div class="rv2c"><div class="rv2h">🛒 구매 캡처<span class="cnt">1</span></div><div class="rvhold" id="nowCap"></div></div>
+        <div class="rv2c"><div class="rv2h">📷 리뷰 이미지<span class="cnt">1</span></div><div class="rvhold" id="nowRev"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <span class="tag next">제안</span>
+    <div class="rvpane">
+      <div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>
+      <div class="rvstat">
+        <div class="s"><span class="ic">🛒</span><span class="lb">구매 캡처</span><span class="nm">130<small> / 500</small></span></div>
+        <div class="s"><span class="ic">📷</span><span class="lb">리뷰 이미지</span><span class="nm">57<small> / 500</small></span></div>
+      </div>
+      <div class="rvwho">김아미<span>#4</span></div>
+      <div class="rv2">
+        <div class="rv2c"><div class="rv2h">🛒 구매 캡처<span class="cnt">1</span></div><div class="rvhold" id="nxCap"></div></div>
+        <div class="rv2c"><div class="rv2h">📷 리뷰 이미지<span class="cnt">1</span></div><div class="rvhold" id="nxRev"></div></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:10px">
+      <b>분모는 "채워진 줄"</b> — 상단 참여자 게이지와 <b>같은 값</b>(<code>counts.filled</code>)을 씁니다.
+      여기서 따로 세면 <i>게이지는 500인데 미리보기는 512</i> 로 갈립니다.
+      <br>조회 실패·구버전 백엔드면 <b><code>? / 500</code></b> 로 두고 0으로 꾸미지 않습니다.
+    </div>
+  </div>
+</div>
+
+<!-- ②③  ─────────────────────────────────────────────── -->
+<h2><span class="no">2</span> 크게 보기 팝업 — 좌우 동시 + 목록 4열</h2>
+<p class="lead">
+  ② 지금은 클릭한 <b>한 장만</b> 보여 구매 캡처와 리뷰 이미지를 대조하려면 팝업을 닫았다 열어야 합니다 → 무대를 좌우로 나눕니다.<br>
+  ③ 왼쪽 목록의 <code>#4</code> 는 시트 행 번호(<code>seq</code>)라 <b>작업보드 표의 「번호」 와 다릅니다</b> → 표의 번호로 바꾸고 제출 유무 두 칸을 붙입니다.
+</p>
+
+<div class="vsw" id="vsw"></div>
+<p class="vhelp" id="vhelp"></p>
+
+<div class="popdemo">
+  <section class="rvpop">
+    <aside class="rvplist">
+      <div class="rvplhd">참여자<span class="cnt" id="plCnt"></span></div>
+      <div class="rvplcols"><span>번호</span><span>수취인</span><span class="c">🛒</span><span class="c">📷</span></div>
+      <div id="plBody"></div>
+    </aside>
+    <div class="rvpstage">
+      <button class="rvpclose" type="button" title="닫기(시안에서는 동작하지 않습니다)">×</button>
+      <div class="rvpmeta" id="stMeta"></div>
+      <div class="rvpcols">
+        <div class="rvpc">
+          <div class="rvpch">🛒 구매 캡처<span class="cnt" id="capCnt">0</span></div>
+          <div id="capBox" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>
+        </div>
+        <div class="rvpc">
+          <div class="rvpch">📷 리뷰 이미지<span class="cnt" id="revCnt">0</span></div>
+          <div id="revBox" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2 style="margin-top:0"><span class="no">?</span> 확인이 필요한 것 — 목록에 누구를 넣을까</h2>
+  <ul class="tight">
+    <li><b>A안 (지금 계약 유지)</b> — 제출물이 <b>한 장이라도 있는 줄만</b>. 목록을 누르면 항상 볼 게 있습니다.
+        대신 <b>둘 다 없는 사람은 목록에 아예 없습니다</b>.</li>
+    <li><b>B안</b> — <b>채워진 줄 전체</b>. 구매도 리뷰도 안 낸 사람이 <code>✗ ✗</code> 로 보여 <b>빠진 사람을 여기서 찾을 수 있습니다</b>.
+        대신 목록이 길어지고, 누르면 양쪽 다 빈 칸입니다.</li>
+  </ul>
+  <div class="note">
+    위 <b>[A안] / [B안]</b> 버튼으로 실제로 바꿔 보실 수 있습니다. 목록 길이와 <code>✗ ✗</code> 줄의 느낌을 보고 정해 주세요.
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2 style="margin-top:0"><span class="no">✓</span> 구현 시 지킬 것</h2>
+  <ul class="tight">
+    <li><b>번호는 표의 「번호」 칸</b>(<code>rowJson['번호']</code>) — 그 칸이 비면 <b>추측하지 않고</b> <code>—</code> 로 두고
+        시트 행 번호는 툴팁으로만 남깁니다(<i>모른다</i>와 <i>없다</i>를 구분).</li>
+    <li><b>구매/리뷰 갈래 판정은 한 곳</b>(<code>_rvKindFiles</code>) — 패널·팝업·현황 줄이 같은 함수를 씁니다.
+        사본을 두면 "패널은 1장인데 팝업은 0장"으로 갈립니다.</li>
+    <li><b>분모는 게이지와 같은 <code>counts.filled</code></b> · 못 세면 <code>?</code>.</li>
+    <li>목록 클릭은 <b>인덱스만</b> 넘깁니다(수취인·번호는 시트발 문자열).</li>
+    <li>2장 이상이면 칸마다 <b>‹ 1/2 ›</b> 넘김 — 끝에서 순환하지 않습니다.</li>
+  </ul>
+</div>
+
+</div>
+
+<script>
+/* ── 가짜 데이터 ────────────────────────────────────────── */
+function shot(kind,seed){
+  var h = kind==='cap' ? 900 : 620;
+  var head = kind==='cap' ? '주문상세' : '리뷰 관리';
+  var c1   = kind==='cap' ? '#eef4ff' : '#f2fbf4';
+  var c2   = kind==='cap' ? '#2563eb' : '#16a34a';
+  var rows='';
+  for(var i=0;i<(kind==='cap'?9:6);i++){
+    var y=150+i*(kind==='cap'?80:88);
+    rows+='<rect x="24" y="'+y+'" width="342" height="'+(kind==='cap'?58:66)+'" rx="8" fill="#fff" stroke="#e6eaf0"/>';
+    rows+='<rect x="40" y="'+(y+16)+'" width="'+(120+((seed*37+i*53)%140))+'" height="10" rx="5" fill="#d0d9e4"/>';
+    rows+='<rect x="40" y="'+(y+34)+'" width="'+(70+((seed*17+i*31)%110))+'" height="9" rx="4" fill="#e6eaf0"/>';
+    if(kind==='rev') rows+='<text x="300" y="'+(y+30)+'" font-size="13" fill="#f5a524">★★★★★</text>';
+  }
+  var svg='<svg xmlns="http://www.w3.org/2000/svg" width="390" height="'+h+'" viewBox="0 0 390 '+h+'">'
+    +'<rect width="390" height="'+h+'" fill="'+c1+'"/>'
+    +'<rect x="0" y="0" width="390" height="88" fill="#fff"/>'
+    +'<text x="195" y="52" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="700" fill="#101828">'+head+'</text>'
+    +'<rect x="24" y="104" width="150" height="11" rx="5" fill="'+c2+'" opacity=".45"/>'
+    +rows
+    +'<rect x="0" y="'+(h-56)+'" width="390" height="56" fill="#fff"/>'
+    +'<circle cx="78" cy="'+(h-28)+'" r="9" fill="#d0d9e4"/><circle cx="156" cy="'+(h-28)+'" r="9" fill="#d0d9e4"/>'
+    +'<circle cx="234" cy="'+(h-28)+'" r="9" fill="#d0d9e4"/><circle cx="312" cy="'+(h-28)+'" r="9" fill="#d0d9e4"/>'
+    +'</svg>';
+  return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+}
+
+var NAMES=['심수현','조성훈','김아미','조은혜','백영이','한정숙','이진우','송나리','문은정','현명옥','장민영','김연지',
+           '변유영','이혜정','문성대','이지유','김희지','서화란','김혜선','박다솔','최하영','정라희','오성은','윤솔아',
+           '김리아','전명진','임서령','안은영','백희주','황보리'];
+/* 번호 = 작업보드 표의 「번호」 칸 · seq = 시트 실제 행 번호(1 차이가 나는 것이 정상) */
+var PEOPLE=NAMES.map(function(n,i){
+  var m=(i*7+3)%10;
+  return {no:i+1, seq:i+2, name:n,
+          caps: m<7 ? (m===2?2:1) : 0,        // 구매 캡처 장수
+          revs: m<3 ? (m===1?2:1) : 0 };      // 리뷰 이미지 장수
+});
+/* 미리보기 패널 예시 이미지 */
+['nowCap','nxCap'].forEach(function(id){var e=document.getElementById(id);e.innerHTML='<img src="'+shot('cap',3)+'" alt="">';});
+['nowRev','nxRev'].forEach(function(id){var e=document.getElementById(id);e.innerHTML='<img src="'+shot('rev',3)+'" alt="">';});
+
+/* ── 변형 A/B ───────────────────────────────────────────── */
+var V=(new URLSearchParams(location.search).get('v')||'A').toUpperCase();
+if(V!=='B') V='A';
+document.getElementById('vsw').innerHTML=
+  ['A','B'].map(function(v){return '<a href="?v='+v+'" class="'+(v===V?'on':'')+'">'+v+'안 — '
+     +(v==='A'?'제출물 있는 줄만':'채워진 줄 전체')+'</a>';}).join('');
+document.getElementById('vhelp').textContent = V==='A'
+  ? 'A안: 한 장이라도 낸 사람만 목록에 있습니다(지금 계약). 눌렀을 때 항상 볼 것이 있습니다.'
+  : 'B안: 아직 아무것도 안 낸 사람도 ✗ ✗ 로 보입니다. 빠진 사람을 여기서 찾을 수 있습니다.';
+
+var LIST = V==='A' ? PEOPLE.filter(function(p){return p.caps||p.revs;}) : PEOPLE.slice();
+var sel=0, idxCap=0, idxRev=0;
+for(var k=0;k<LIST.length;k++){ if(LIST[k].caps&&LIST[k].revs){ sel=k; break; } }
+
+function pick(i){ sel=i; idxCap=0; idxRev=0; render(); }
+function step(kind,d,n){ if(kind==='cap') idxCap=Math.max(0,Math.min(n-1,idxCap+d)); else idxRev=Math.max(0,Math.min(n-1,idxRev+d)); render(); }
+window.pick=pick; window.step=step;
+
+function box(kind,n,i,emptyB,emptyS,warn){
+  if(!n) return '<div class="rvpempty'+(warn?' warn':'')+'"><b>'+emptyB+'</b><span>'+emptyS+'</span></div>';
+  return '<div class="rvpbody"><img src="'+shot(kind,sel+i)+'" alt=""></div>'
+    +'<div class="rvppg"'+(n>1?'':' style="visibility:hidden"')+'>'
+    +'<button type="button" '+(i===0?'disabled':'')+' onclick="step(\''+kind+'\',-1,'+n+')">‹</button>'
+    +'<span>'+(i+1)+' / '+n+'</span>'
+    +'<button type="button" '+(i===n-1?'disabled':'')+' onclick="step(\''+kind+'\',1,'+n+')">›</button></div>';
+}
+function render(){
+  document.getElementById('plCnt').textContent=LIST.length+'명';
+  document.getElementById('plBody').innerHTML=LIST.map(function(p,i){
+    return '<button type="button" class="rvplitem'+(i===sel?' on':'')+'" onclick="pick('+i+')" title="시트 행 '+p.seq+'">'
+      +'<span class="no">'+p.no+'</span>'
+      +'<span class="nm">'+p.name+'</span>'
+      +'<span class="mk '+(p.caps?'y':'n')+'">'+(p.caps?'✓':'✗')+'</span>'
+      +'<span class="mk '+(p.revs?'y':'n')+'">'+(p.revs?'✓':'✗')+'</span></button>';
+  }).join('');
+  var p=LIST[sel]||LIST[0]; if(!p) return;
+  document.getElementById('stMeta').innerHTML=p.name+'<span>번호 '+p.no+' · '+(sel+1)+'/'+LIST.length+'</span>';
+  document.getElementById('capCnt').textContent=p.caps;
+  document.getElementById('revCnt').textContent=p.revs;
+  idxCap=Math.min(idxCap,Math.max(0,p.caps-1));
+  idxRev=Math.min(idxRev,Math.max(0,p.revs-1));
+  document.getElementById('capBox').innerHTML=box('cap',p.caps,idxCap,'미제출','아직 구매 캡처가 제출되지 않았습니다.',true);
+  document.getElementById('revBox').innerHTML=box('rev',p.revs,idxRev,'리뷰 미제출','아직 리뷰 이미지가 제출되지 않았습니다.',true);
+}
+render();
+</script>
+</body>
+</html>

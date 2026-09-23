@@ -1,8 +1,50 @@
 const pool = require('../db/pool');
+const reviewObligation = require('./reviewObligation.service');
 const { logger } = require('../utils/logger');
-const { effectiveCaptureSlots } = require('../utils/captureSlots');
+const { effectiveCaptureSlots, cashReceiptSlotInfo } = require('../utils/captureSlots');
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
 const { workKindsForTabs } = require('./workKindContext.service');
+const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
+const { cashReceiptRequirementsForRows } = require('./cashReceiptContext.service');
+const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
+
+// 참여자 신원도 소유자와 같은 우선순위로 고른다. 상위 행의 소유자 UUID와 충돌하는
+// 주문·신청·과거 링크의 identity는 데이터 보강에 사용하지 않는다.
+function _participantIdentityByOwnerSql({ cp = null, os = null, ca = null, pl = null } = {}) {
+  const aliases = [cp, os, ca, pl].filter(Boolean);
+  const owner = `COALESCE(${aliases.map(a => `${a}.owner_reviewer_id`).join(', ')})`;
+  return `COALESCE(${aliases.map(a =>
+    `CASE WHEN ${a}.owner_reviewer_id IS NULL OR ${a}.owner_reviewer_id = ${owner} ` +
+    `THEN ${a}.participant_identity_id END`).join(', ')})`;
+}
+
+/** 검수에서 거절·보류된 영수증은 파일이 남아 있어도 리뷰어에게는 다시 제출할 슬롯이다. */
+async function _removeUnpayableReceiptSlots(items) {
+  const source = Array.isArray(items) ? items : [];
+  if (!source.length) return;
+  let states = null;
+  try {
+    states = await cashReceiptSubmissionStates(pool, source);
+  } catch (e) {
+    // 판정 조회 실패 때 raw 파일 존재만으로 제출완료를 꾸미면 재제출 입구가 사라진다.
+    logger.warn('[Search] 현금영수증 지급상태 조회 실패(재제출 가능으로 표시): ' + e.message);
+  }
+  for (const item of source) {
+    const receipt = cashReceiptSlotInfo(item.captureSlots, item.incomeType).slot;
+    if (!receipt) continue;
+    const state = states && states.get(cashReceiptSubmissionRowKey(
+      item.sheetId, item.tabName, item.rowIndex));
+    if (state && state.submitted) {
+      // 예전 슬롯 key로 올린 파일이라도 영수증 전용 검증을 통과했다면
+      // 현재 설정 key를 제출 완료로 내려 재제출을 요구하지 않는다.
+      if (!(item.submittedSlots || []).includes(receipt.key)) {
+        item.submittedSlots = [...(item.submittedSlots || []), receipt.key];
+      }
+    } else {
+      item.submittedSlots = (item.submittedSlots || []).filter(key => key !== receipt.key);
+    }
+  }
+}
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -20,6 +62,14 @@ function _parseRowJson(rowJson) {
 
 // 입금 컬럼 키워드 (admin.routes.js 대시보드 집계와 동일 판정)
 const PAYMENT_COL_KEYWORDS = ['입금', '페이백', '입금완료', '입금확인', '입금여부'];
+
+// 3회 알림 후 최종기한까지 미작성으로 종결된 행은 리뷰 제출대기에서 다시 열지 않는다.
+// is_submitted를 거짓 완료값으로 바꾸지 않고 별도 종결 원장을 확인한다.
+const OPEN_REVIEW_COND = `NOT EXISTS (
+  SELECT 1 FROM review_closed_targets rrs
+   WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
+     AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
+)`;
 
 /**
  * 입금 완료 여부 — is_submitted2='PAID'(입금칸 감지+값 존재) 우선,
@@ -90,10 +140,42 @@ async function _getReviewerPhoneList(phone8) {
 const _ORDER_MERGE_LIMIT = 40;
 const _ORDER_MERGE_DAYS = 14;
 const _ORDER_ATTENTION_STATUSES = new Set(['failed', 'stuck_manual']);
+// 확인필요 상태를 리뷰어 화면에 노출할지(기본 미노출). 킬스위치: REVIEW_ORDER_ATTENTION_VISIBLE=1
+const _ORDER_ATTENTION_VISIBLE = process.env.REVIEW_ORDER_ATTENTION_VISIBLE === '1';
 
-async function _mergeOrderSubmissions(results, phoneList) {
+async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null, participantIdentityId = null, restrictParticipant = false) {
   if (!Array.isArray(results) || !Array.isArray(phoneList) || phoneList.length === 0) return results;
   try {
+    const seenOwnerCondition = ownerReviewerId
+      ? `((cp.owner_reviewer_id = $2 OR (cp.owner_reviewer_id IS NULL AND ri.phone8 = ANY($1)))
+          AND (NOT $4::boolean OR (
+            cp.participant_identity_id = $3
+            OR (cp.participant_identity_id IS NULL AND cp.phone8 = ANY($1))
+          )))`
+      : `ri.phone8 = ANY($1)`;
+    const orderOwnerCondition = ownerReviewerId
+      ? `(os.owner_reviewer_id = $3
+          OR (os.owner_reviewer_id IS NULL AND (
+            ca.owner_reviewer_id = $3
+            OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($1) AND NOT EXISTS (
+              SELECT 1 FROM reviewer_phone_changes rpc
+               WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $3
+            ) AND NOT EXISTS (
+              SELECT 1
+                FROM reviewer_identity_aliases ria
+                JOIN reviewer_identities rii ON rii.id = ria.identity_id
+               WHERE ria.phone8 = ca.owner_phone8
+                 AND rii.owner_reviewer_id <> $3
+            ))
+            OR (ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1))
+          )))
+          AND (NOT $5::boolean OR (
+            ${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} = $4
+            OR (${_participantIdentityByOwnerSql({ os: 'os', ca: 'ca' })} IS NULL
+                AND COALESCE(ca.phone8, RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)) = ANY($1))
+          ))`
+      : `RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)`;
     // dedup 기준 = phoneList 전체의 written 색인행(결과 필터/아카이브로 빠진 행까지 포함).
     // idx_review_phone8(migration 001)로 인덱스 스캔 — 신규 seq scan 아님.
     const { rows: seenRows } = await pool.query(
@@ -103,13 +185,41 @@ async function _mergeOrderSubmissions(results, phoneList) {
       [phoneList]
     );
     const seen = new Set(seenRows.map(r => `${r.sheetId}||${r.tabName}||${r.rowIndex}`));
+    for (const item of results) {
+      if (item && item.rowIndex != null) seen.add(`${item.sheetId}||${item.tabName}||${item.rowIndex}`);
+    }
+
+    /* ★★ 참여형(무시트) 주문은 위치키로 짝지을 수 없다 — 원장 좌표가 `campaign:<공고ID>`라
+       작업표(review_index) 좌표와 **영원히** 일치하지 않는다(submit.routes `_resolveCampaignOrderScope`).
+       그래서 **주문 id**(`campaign_participants.order_submission_id`)로 짝짓는다. 이 키는 제목·탭명·
+       행번호가 바뀌어도 변하지 않아, 공고 제목을 고쳤다고 한 참여가 두 장으로 쪼개지지 않는다.
+       ★ `review_index` 와 조인해 "이 리뷰어에게 실제로 보이는 행"만 seen 으로 인정한다 —
+         위 위치키 dedup 과 같은 보장(안 그러면 화면에서 사라지는 참여가 생긴다).
+       ★ fail-soft: 이 조회가 실패해도 병합 자체는 계속된다(중복 노출 > 참여 실종). */
+    let seenOsid = new Set();
+    try {
+      const { rows: osidRows } = await pool.query(
+        `SELECT DISTINCT cp.order_submission_id AS "osid"
+           FROM campaign_participants cp
+           JOIN review_index ri
+             ON ri.sheet_id = cp.sheet_id AND ri.tab_name = cp.tab_name AND ri.row_index = cp.seq
+          WHERE cp.order_submission_id IS NOT NULL
+            AND cp.deleted_at IS NULL
+             AND ${seenOwnerCondition}`,
+         ownerReviewerId ? [phoneList, ownerReviewerId, participantIdentityId, restrictParticipant === true] : [phoneList]
+      );
+      seenOsid = new Set(osidRows.map(r => String(r.osid)));
+    } catch (e) {
+      logger.warn('[Search] 주문 id dedup 조회 실패(위치키만 사용): ' + e.message);
+    }
 
     // ★ mirror_status 리터럴 IN-list는 migration 051 부분 인덱스 predicate와 동일(파라미터 배열 금지).
     const { rows: orderRows } = await pool.query(
       `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               os.tab_gid AS "gid", os.sheet_row AS "sheetRow",
               os.mirror_status AS "mirrorStatus", os.recipient AS "recipientName",
-              COALESCE(rc.title, tc.display_name) AS "displayNameTC",
+              COALESCE(NULLIF(rc.title, ''), NULLIF(wt.display_name, ''),
+                       NULLIF(wt.tab_name, ''), tc.display_name) AS "displayNameTC",
               COALESCE(rc.title, tc.campaign_name) AS "campaignName",
               tc.manager, tc.review_type AS "reviewType",
               tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
@@ -121,22 +231,54 @@ async function _mergeOrderSubmissions(results, phoneList) {
            ON ca.id = os.campaign_application_id
          LEFT JOIN recruit_campaigns rc
            ON rc.id = ca.campaign_id
-        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+         /* ★ 공고에 연결된 작업표 탭 — 공고가 없을 때의 이름 폴백.
+            카드 이름은 **지금 적용된 공고 제목**이 먼저다(사용자 확정) — 색인행 카드도
+            campaignTitleContext 로 같은 제목을 쓰므로 두 이름으로 갈리지 않는다.
+            (중복 자체는 주문 id dedup 이 막는다 — 이름이 달라도 카드가 늘지 않는다.) */
+         LEFT JOIN tab_configs wt
+           ON wt.sheet_id = rc.linked_sheet_id AND wt.tab_name = rc.linked_tab_name
+        WHERE ${orderOwnerCondition}
           AND os.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed WHERE closed.order_submission_id=os.id)
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
           AND os.submitted_at > now() - ($2 || ' days')::interval
           AND (os.mirror_status <> 'written' OR os.sheet_written_at > now() - interval '2 hours')
+          AND NOT (
+            os.sheet_id LIKE 'campaign:%'
+            AND os.mirror_status IN ('failed', 'stuck_manual')
+            AND EXISTS (
+              SELECT 1
+                FROM review_index ri
+               WHERE ri.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
+                 /* ★ 제목 문자열은 언제든 바뀐다 — 바뀌는 순간 이 dedup 이 통째로 풀려
+                    정리됐던 카드가 되살아난다. 연결 작업표 **좌표**로도 짝지어 준다(가산적). */
+                 AND (ri.tab_name = rc.title
+                      OR (NULLIF(rc.linked_tab_name, '') IS NOT NULL
+                          AND ri.sheet_id = rc.linked_sheet_id
+                          AND ri.tab_name = rc.linked_tab_name))
+                 AND COALESCE(NULLIF(ri.row_json->>'주문번호', ''), '') <> ''
+            )
+          )
         ORDER BY os.submitted_at DESC
         LIMIT ${_ORDER_MERGE_LIMIT}`,
-      [phoneList, String(_ORDER_MERGE_DAYS)]
+      ownerReviewerId
+        ? [phoneList, String(_ORDER_MERGE_DAYS), ownerReviewerId, participantIdentityId, restrictParticipant === true]
+        : [phoneList, String(_ORDER_MERGE_DAYS)]
     );
 
     for (const o of orderRows) {
+      // ★ 주문 id 로 이미 작업표 행이 있으면 중복 — 위치키보다 **먼저** 본다(참여형은 위치키가 못 맞는다)
+      if (o.id != null && seenOsid.has(String(o.id))) continue;
       // 이미 시트반영→색인 대표행이 있으면 중복 제거(재배정으로 sheet_row NULL이면 스킵 안 함 → 다음 빌드까지 노출)
       if (o.sheetRow != null && seen.has(`${o.sheetId}||${o.tabName}||${o.sheetRow}`)) continue;
       // written=시트반영완료(반영완료), failed/stuck_manual=확인필요, 그 외(pending/queued/pending_no_row)=반영중
       const orderStage = _ORDER_ATTENTION_STATUSES.has(o.mirrorStatus) ? 'attention'
         : (o.mirrorStatus === 'written' ? 'reflected' : 'processing');
+      // ★★ 확인필요(attention = failed/stuck_manual)는 리뷰어에게 노출하지 않는다(사용자 확정 2026-08-19).
+      //   시트 기록에 실패해 담당자가 손봐야 하는 내부 상태라, 리뷰어가 보면 "내 참여가 잘못됐나"로 읽혀
+      //   C/S 문의만 늘고 리뷰어가 할 수 있는 조치는 없다. 주문 원장·복구(reconcile)·관리자 알림은 그대로다.
+      //   되돌리기 = env REVIEW_ORDER_ATTENTION_VISIBLE=1.
+      if (orderStage === 'attention' && !_ORDER_ATTENTION_VISIBLE) continue;
       // 색인행 item shape와 정합(displayName=사람이름 자리=recipient, displayNameTC=탭표시명).
       // PII 최소: row:{}, submitCol:null, order_num 미노출. rowIndex:null → goToSubmit 대상 아님.
       results.push({
@@ -150,6 +292,9 @@ async function _mergeOrderSubmissions(results, phoneList) {
         incomeType: o.incomeType, displayNameTC: o.displayNameTC, ncMode: null,
         folderUrl: null, captureFolderUrl: null, captureSlots: null, submittedSlots: [],
         row: {}, submitCol: null, reviewFileAt: null, isPaid: false, score: 0.5,
+        // 리뷰 내역 금액은 주문원장 집계의 order||<id> 키로 연결한다.
+        // sheet_row가 없는 무시트 주문도 카드별 결제금액을 보여주기 위한 식별자다.
+        orderSubmissionId: o.id,
         isOrderPending: true, orderMirrorStatus: o.mirrorStatus,
         orderStage,
       });
@@ -158,6 +303,148 @@ async function _mergeOrderSubmissions(results, phoneList) {
     logger.warn('[Search] order_submissions 병합 실패(무시): ' + e.message);
   }
   return results;
+}
+
+// 로그인 홈 전용 보강. 현재 참여행이 있으면 그 행의 owner UUID가 최우선이고, UUID가 없는
+// 과거 행만 주문/신청의 소유자 링크와 기존 phone8 범위를 차례로 사용한다.
+async function _loadOwnerReviewRows(selectFields, ownerReviewerId, phoneList, includeSubmitted, participantIdentityId = null, restrictParticipant = false) {
+  if (!ownerReviewerId || !Array.isArray(phoneList) || !phoneList.length) return [];
+  const submittedState = reviewObligation.submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)');
+  const { rows } = await pool.query(
+    `WITH owner_candidate_coordinates AS MATERIALIZED (
+       -- A superset only: the complete ownership/alias checks below still decide
+       -- visibility. Do not run those checks against every unrelated index row.
+       SELECT p.sheet_id,p.tab_name,p.seq AS row_index
+         FROM campaign_participants p
+        WHERE p.owner_reviewer_id=$1 OR p.phone8=ANY($2)
+       UNION
+       SELECT p.sheet_id,p.tab_name,p.seq
+         FROM campaign_participants p JOIN order_submissions o ON o.id=p.order_submission_id
+        WHERE o.owner_reviewer_id=$1
+           OR o.campaign_application_id IN (
+             SELECT a.id FROM campaign_applications a WHERE a.owner_reviewer_id=$1 OR a.owner_phone8=ANY($2))
+           OR o.id IN (
+             SELECT a.order_submission_id FROM campaign_applications a
+              WHERE a.owner_reviewer_id=$1 OR a.owner_phone8=ANY($2))
+       UNION
+       SELECT l.sheet_id,l.tab_name,l.row_index FROM participation_links l
+        WHERE l.owner_reviewer_id=$1 OR l.phone8=ANY($2)
+       UNION
+       SELECT i.sheet_id,i.tab_name,i.row_index FROM review_index i WHERE i.phone8=ANY($2)
+     )
+     SELECT ${selectFields}, 1.0::float AS score
+       FROM review_index ri
+       JOIN owner_candidate_coordinates candidate
+         ON candidate.sheet_id=ri.sheet_id AND candidate.tab_name=ri.tab_name AND candidate.row_index=ri.row_index
+       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+       LEFT JOIN campaign_participants cp
+         ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+       LEFT JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+       LEFT JOIN LATERAL (
+         SELECT app.owner_reviewer_id, app.owner_phone8, app.participant_identity_id
+           FROM campaign_applications app
+          WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
+          ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
+          LIMIT 1
+       ) ca ON TRUE
+       LEFT JOIN participation_links pl
+         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
+       WHERE tc.sheet_id IS NOT NULL
+        AND ($3::boolean OR ${submittedState} = FALSE)
+        AND ${OPEN_REVIEW_COND}
+        AND (
+          (cp.id IS NOT NULL AND (
+            cp.owner_reviewer_id = $1
+            OR (cp.owner_reviewer_id IS NULL AND (
+              os.owner_reviewer_id = $1
+              OR (os.owner_reviewer_id IS NULL AND (
+                ca.owner_reviewer_id = $1
+                OR (ca.owner_reviewer_id IS NULL AND ca.owner_phone8 = ANY($2) AND NOT EXISTS (
+                  SELECT 1 FROM reviewer_phone_changes rpc
+                   WHERE rpc.old_phone8 = ca.owner_phone8 AND rpc.reviewer_id <> $1
+                ) AND NOT EXISTS (
+                  SELECT 1
+                    FROM reviewer_identity_aliases ria
+                    JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                   WHERE ria.phone8 = ca.owner_phone8
+                     AND rii.owner_reviewer_id <> $1
+                ))
+                OR (
+                  ca.owner_reviewer_id IS NULL AND COALESCE(ca.owner_phone8, '') = ''
+                  AND (pl.owner_reviewer_id = $1
+                       OR (pl.owner_reviewer_id IS NULL AND pl.phone8 = ANY($2)
+                           AND NOT EXISTS (
+                             SELECT 1 FROM reviewer_phone_changes rpc
+                              WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
+                           )
+                           AND NOT EXISTS (
+                             SELECT 1
+                               FROM reviewer_identity_aliases ria
+                               JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                              WHERE ria.phone8 = pl.phone8
+                                AND rii.owner_reviewer_id <> $1
+                           )))
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewers current_owner
+                     WHERE current_owner.id <> $1
+                       AND (
+                         current_owner.phone8 = cp.phone8
+                         OR EXISTS (
+                           SELECT 1 FROM jsonb_array_elements(
+                             CASE WHEN jsonb_typeof(current_owner.sub_accounts) = 'array'
+                                  THEN current_owner.sub_accounts ELSE '[]'::jsonb END
+                           ) sub
+                            WHERE RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = cp.phone8
+                         )
+                       )
+                  )
+                )
+                OR (ca.owner_reviewer_id IS NULL
+                    AND COALESCE(ca.owner_phone8, '') = '' AND cp.phone8 = ANY($2))
+              ))
+            ))
+          ))
+          OR (cp.id IS NULL AND (
+            pl.owner_reviewer_id = $1
+            OR (pl.owner_reviewer_id IS NULL AND (
+              (ri.phone8 = ANY($2)
+               AND NOT EXISTS (
+                 SELECT 1 FROM reviewer_phone_changes rpc
+                  WHERE rpc.old_phone8 = ri.phone8 AND rpc.reviewer_id <> $1
+               )
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM reviewer_identity_aliases ria
+                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                  WHERE ria.phone8 = ri.phone8 AND rii.owner_reviewer_id <> $1
+               ))
+              OR (ri.phone8 IS NULL AND pl.phone8 = ANY($2)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM reviewer_phone_changes rpc
+                     WHERE rpc.old_phone8 = pl.phone8 AND rpc.reviewer_id <> $1
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM reviewer_identity_aliases ria
+                      JOIN reviewer_identities rii ON rii.id = ria.identity_id
+                     WHERE ria.phone8 = pl.phone8 AND rii.owner_reviewer_id <> $1
+                  ))
+            ))
+          ))
+        )
+        AND (NOT $5::boolean OR (
+          ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} = $4
+          OR (
+            ${_participantIdentityByOwnerSql({ cp: 'cp', os: 'os', ca: 'ca', pl: 'pl' })} IS NULL
+            AND COALESCE(cp.phone8, ca.owner_phone8, pl.phone8, ri.phone8) = ANY($2)
+          )
+        ))
+      ORDER BY ${submittedState} ASC, ri.start_date DESC NULLS LAST
+      LIMIT 400`,
+    [ownerReviewerId, phoneList, includeSubmitted === true, participantIdentityId, restrictParticipant === true]
+  );
+  return rows;
 }
 
 /**
@@ -194,7 +481,10 @@ async function searchByName(query, phone8, opts = {}) {
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
   // 제출완료 포함은 phone8(8자리)이 있을 때만 유효 — 이름 단독 분기에서는 무시
   const includeSubmitted = !!(opts && opts.includeSubmitted) && p8.length === 8;
-  const orderPrefix = includeSubmitted ? 'ri.is_submitted ASC, ' : '';
+  // 작업보드 참여자 행이 제출 상태의 진실원본이다. 참여자 원본이 없는 과거 이력만
+  // review_index 값을 보조로 사용해 기존 완료 내역을 보존한다.
+  const submittedState = opts.ownerHistory ? "(p.review_obligation_status='fulfilled')" : reviewObligation.submittedSql('COALESCE(cp.is_submitted, ri.is_submitted)');
+  const orderPrefix = includeSubmitted ? `${submittedState} ASC, ` : '';
   // 완료 이력이 합산되므로 LIMIT 상향(대기 건은 정렬 프리픽스로 보호됨)
   const limit = includeSubmitted ? 400 : 200;
 
@@ -205,6 +495,9 @@ async function searchByName(query, phone8, opts = {}) {
   const params = [];
   let paramIdx = 1;
   let mergePhoneList = null;   // includeSubmitted 강한키(phone8) 분기에서만 order 병합용
+  const strictPhoneList = opts && opts.strictPhoneScope && Array.isArray(opts.ownerPhone8s)
+    ? [...new Set(opts.ownerPhone8s.map(v => String(v || '').replace(/[^0-9]/g, '').slice(-8)).filter(v => v.length === 8))]
+    : null;
 
   const SELECT_FIELDS = `
     ri.reviewer_name     AS "idxName",
@@ -214,7 +507,7 @@ async function searchByName(query, phone8, opts = {}) {
     ri.sheet_id          AS "sheetId",
     ri.tab_gid           AS "gid",
     ri.row_index         AS "rowIndex",
-    ri.is_submitted      AS "isSubmitted",
+    ${submittedState}    AS "isSubmitted",
     ri.product_name      AS "productName",
     ri.product_url       AS "productUrl",
     ri.start_date        AS "startDate",
@@ -252,7 +545,7 @@ async function searchByName(query, phone8, opts = {}) {
     //    전화번호가 맞으면 본인 건이므로 누락하지 않음. 이름은 점수 가산용으로만 사용)
     // ★ P5: participation_links(제출 시점 확정 신원)도 단독 통과 키로 사용.
     //   기존 동작(이름 일치 + 전화 근접/NULL)도 그대로 유지(하위 호환).
-    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneList = strictPhoneList && strictPhoneList.length ? strictPhoneList : await _getReviewerPhoneList(p8);
     mergePhoneList = phoneList;
 
     const nameParam = paramIdx++;
@@ -262,8 +555,8 @@ async function searchByName(query, phone8, opts = {}) {
 
     // ★ 제출완료 행은 강한 신원키(phone8/확정신원) 일치 시에만 포함 — 약한 키(이름+근접)는 대기 건만
     const submittedCond = includeSubmitted
-      ? `(ri.is_submitted = FALSE OR ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))`
-      : 'ri.is_submitted = FALSE';
+      ? `(${submittedState} = FALSE OR ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))`
+      : `${submittedState} = FALSE`;
 
     sql = `
       SELECT ${SELECT_FIELDS},
@@ -281,9 +574,12 @@ async function searchByName(query, phone8, opts = {}) {
              END::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (
           ri.phone8 = ANY($${phoneListParam})                              -- P0: 연락처 phone8 단독 통과
@@ -306,18 +602,21 @@ async function searchByName(query, phone8, opts = {}) {
   } else if (p8.length === 8) {
     // ── phone8 단독 검색 (이름 미입력) ──
     // ★ P0/P5: 본인+타계정 phone8 또는 확정 신원(participation_links)으로 매칭
-    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneList = strictPhoneList && strictPhoneList.length ? strictPhoneList : await _getReviewerPhoneList(p8);
     mergePhoneList = phoneList;
     const phoneListParam = paramIdx++;
     // 이 분기는 매칭 자체가 강한 신원키(phone8/확정신원)뿐 → 제출완료 포함 시 필터만 해제
-    const submittedCond = includeSubmitted ? 'TRUE' : 'ri.is_submitted = FALSE';
+    const submittedCond = includeSubmitted ? 'TRUE' : `${submittedState} = FALSE`;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))
       ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
@@ -338,7 +637,10 @@ async function searchByName(query, phone8, opts = {}) {
              1.0::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      WHERE ri.is_submitted = FALSE
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+      WHERE ${submittedState} = FALSE
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
@@ -351,12 +653,36 @@ async function searchByName(query, phone8, opts = {}) {
   const startMs = Date.now();
 
   try {
-    // 유사도 임계값 설정 (세션 단위)
-    if (q) {
-      await pool.query(`SELECT set_limit(${SIMILARITY_THRESHOLD})`);
+    let rows;
+    let historyPage = null;
+    if (opts.ownerHistory) {
+      historyPage = await require('./reviewerHistory.service').loadPage(SELECT_FIELDS, opts);
+      rows = historyPage.rows;
+    } else if (opts.ownerReviewerId) {
+      const ownerRows = await _loadOwnerReviewRows(
+        SELECT_FIELDS,
+        opts.ownerReviewerId,
+        Array.isArray(opts.ownerPhone8s) && opts.ownerPhone8s.length ? opts.ownerPhone8s : [p8],
+        includeSubmitted,
+        opts.participantIdentityId || null,
+        opts.restrictParticipant === true
+      );
+      const byCoordinate = new Map();
+      // ownerScope는 로그인 홈 전용이다. 이름/근접번호 공개검색 결과를 섞지 않고 소유권이
+      // 확인된 행만 반환해 동명이인·재사용 번호의 참여내역이 넘어오지 않게 한다.
+      for (const row of ownerRows) {
+        const key = `${row.sheetId}||${row.tabName}||${row.rowIndex}`;
+        if (!byCoordinate.has(key)) byCoordinate.set(key, row);
+      }
+      rows = [...byCoordinate.values()];
+    } else {
+      // 유사도 임계값 설정 (세션 단위). 로그인 ownerScope는 이름 유사도 검색을 실행하지 않는다.
+      if (q) {
+        await pool.query(`SELECT set_limit(${SIMILARITY_THRESHOLD})`);
+      }
+      const searched = await pool.query(sql, params);
+      rows = searched.rows;
     }
-
-    const { rows } = await pool.query(sql, params);
     const queryMs = Date.now() - startMs;
 
     // 느린 쿼리 경고 (500ms 초과)
@@ -365,7 +691,7 @@ async function searchByName(query, phone8, opts = {}) {
     }
 
     // 인덱스 메타 정보 가져오기
-    const metaResult = await pool.query(
+    const metaResult = opts.ownerReviewerId ? { rows: [{}] } : await pool.query(
       'SELECT COUNT(*) AS count, MAX(built_at) AS built_at FROM review_index'
     );
     const meta = metaResult.rows[0] || {};
@@ -394,11 +720,31 @@ async function searchByName(query, phone8, opts = {}) {
         filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
     } catch (_) { _wkMap = new Map(); }
 
+    /* ★★ 카드에 보이는 작업 이름 = **지금 적용된 공고 제목**(2026-08-19 사용자 확정).
+       `tab_configs.display_name` 은 접수 시점 값으로 고정(업서트가 blank-only)이라 관리자가
+       제목을 고쳐도 화면만 옛 이름으로 남아 "다른 작업"으로 읽힌다.
+       ★ 리뷰타입·체험단 종류와 **같은 배치·같은 fail-soft**(조회 실패 = 종전 이름). */
+    let _ctMap = new Map();
+    try {
+      _ctMap = await campaignTitlesForTabs(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+    } catch (_) { _ctMap = new Map(); }
+
+    /* 모집공고의 현금영수증 직접 설정 — 안내 카드에만 쓰던 값을 제출 슬롯에도 연결한다. */
+    let _crMap = new Map();
+    try {
+      _crMap = await cashReceiptRequirementsForRows(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
+    } catch (_) { _crMap = new Map(); }
+
     // GAS 호환 결과 변환
     const results = filteredRows.map(row => {
       const rowObj = _parseRowJson(row.rowJson);
       return {
       displayName: (row.idxName || '').split('/')[0],
+      participationId: row.participationId || null,
+      reviewObligationStatus: row.reviewObligationStatus || null,
+      recordVersion: row.recordVersion || null,
       idxName:     row.idxName,
       recipientName: row.recipientName || '',
       campaignName: row.tcCampaignName || row.campaignName || '',
@@ -421,13 +767,18 @@ async function searchByName(query, phone8, opts = {}) {
       deliveryType: row.deliveryType,
       isBulk:      row.isBulk,
       incomeType:  row.incomeType,
-      displayNameTC: row.displayName,
+      // 공고 제목이 있으면 그것이 이름 — 없으면(미연결·조회 실패) 종전 탭 표시명
+      displayNameTC: _ctMap.get(`${row.sheetId} ${row.tabName}`) || row.displayName,
       ncMode:      row.ncMode,
       folderUrl:   row.folderUrl,
       captureFolderUrl: row.captureFolderUrl,
       // 현영 탭은 capture_slots 설정이 없어도 리뷰+현금영수증 2슬롯이 자동 적용된다(공용 유틸)
       // ★ 087 2차: 구매확정 + 현영이면 리뷰 자리가 구매확정으로 치환된다(단독은 종전 단일 화면).
-      captureSlots: effectiveCaptureSlots(row.captureSlots, row.incomeType, _rtMap.get(`${row.sheetId} ${row.tabName}`) || null),
+      captureSlots: effectiveCaptureSlots(
+        row.captureSlots,
+        row.incomeType,
+        _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
+        _crMap.get(cashReceiptSubmissionRowKey(row.sheetId, row.tabName, row.rowIndex)) === true),
       reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 리뷰어 안내문용
       workKind:    _wkMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 'blog' = 포스팅URL 제출
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
@@ -471,11 +822,18 @@ async function searchByName(query, phone8, opts = {}) {
       } catch (slotErr) {
         logger.warn('[Search] submittedSlots 조회 실패 (무시): ' + slotErr.message);
       }
+      await _removeUnpayableReceiptSlots(multiSlotItems);
     }
 
     // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
-    if (includeSubmitted && mergePhoneList) {
-      await _mergeOrderSubmissions(results, mergePhoneList);
+    if (includeSubmitted && mergePhoneList && !opts.ownerHistory) {
+      await _mergeOrderSubmissions(
+        results,
+        Array.isArray(opts.ownerPhone8s) && opts.ownerPhone8s.length ? opts.ownerPhone8s : mergePhoneList,
+        opts.ownerReviewerId || null,
+        opts.participantIdentityId || null,
+        opts.restrictParticipant === true
+      );
     }
 
     return {
@@ -486,8 +844,10 @@ async function searchByName(query, phone8, opts = {}) {
       indexBuiltAt: meta.built_at || null,
       indexCount: parseInt(meta.count) || 0,
       searchMs: queryMs,  // Phase 7: 검색 소요시간 반환
+      ...(historyPage ? { counts: historyPage.counts, nextCursor: historyPage.nextCursor, hasMore: historyPage.hasMore, scopeVersion:historyPage.scopeVersion, mode: 'owner_id' } : {}),
     };
   } catch (err) {
+    if (opts.ownerHistory) throw err;
     // pg_trgm 미설치 시 fallback: 기존 ILIKE 검색
     if (err.message.includes('function similarity') || err.message.includes('operator does not exist: %')) {
       logger.warn('[Search] pg_trgm 미설치 — ILIKE fallback 사용');
@@ -504,9 +864,10 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
   let sql;
   const params = [];
   let paramIdx = 1;
+  const submittedState = 'COALESCE(cp.is_submitted, ri.is_submitted)';
   // ★ 보안 가드(본검색과 동일): 제출완료 행은 phone8 정확 일치 매칭에만 포함,
   //   이름 매칭(ILIKE 부분일치 포함)에는 절대 열지 않는다
-  const orderPrefix = includeSubmitted ? 'ri.is_submitted ASC, ' : '';
+  const orderPrefix = includeSubmitted ? `${submittedState} ASC, ` : '';
   const limit = includeSubmitted ? 400 : 200;
 
   if (q && p8.length === 8) {
@@ -514,15 +875,18 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     const nameParam = paramIdx++;
     const phoneParam = paramIdx++;
     const submittedCond = includeSubmitted
-      ? `(ri.is_submitted = FALSE OR ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))`
-      : 'ri.is_submitted = FALSE';
+      ? `(${submittedState} = FALSE OR ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))`
+      : `${submittedState} = FALSE`;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (
           ri.phone8 = $${phoneParam}
@@ -536,14 +900,17 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     params.push(`%${q}%`, p8);
   } else if (p8.length === 8) {
     const phoneParam = paramIdx++;
-    const submittedCond = includeSubmitted ? 'TRUE' : 'ri.is_submitted = FALSE';
+    const submittedCond = includeSubmitted ? 'TRUE' : `${submittedState} = FALSE`;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))
       ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
@@ -557,7 +924,10 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      WHERE ri.is_submitted = FALSE
+      LEFT JOIN campaign_participants cp ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+        AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+      WHERE ${submittedState} = FALSE
+        AND ${OPEN_REVIEW_COND}
         AND tc.sheet_id IS NOT NULL
         AND (ri.reviewer_name ILIKE $${nameParam}
              OR ri.recipient_name ILIKE $${nameParam})
@@ -583,6 +953,26 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     return !archivedSet.has(row.round);
   });
 
+  // ★ 본검색과 같은 이름을 쓴다(사본 금지 — 폴백 경로만 옛 이름이면 화면이 갈린다)
+  let _ctMap = new Map();
+  try {
+    _ctMap = await campaignTitlesForTabs(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+  } catch (_) { _ctMap = new Map(); }
+
+  // pg_trgm 대체 검색도 본검색과 같은 서버 기준으로 슬롯을 파생한다. 이 값이 빠지면
+  // 공고에서만 현금영수증을 켠 작업은 첨부 칸이 보이지 않는데 지급 게이트는 닫히는 교착이 난다.
+  let _rtMap = new Map();
+  try {
+    _rtMap = await reviewTypesForTabs(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+  } catch (_) { _rtMap = new Map(); }
+  let _crMap = new Map();
+  try {
+    _crMap = await cashReceiptRequirementsForRows(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
+  } catch (_) { _crMap = new Map(); }
+
   const results = filteredRows.map(row => {
     const rowObj = _parseRowJson(row.rowJson);
     return {
@@ -600,10 +990,16 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     startDate:   row.startDate,
     endDate:     row.endDate,
     round:       row.round,
-    displayNameTC: row.displayName,
+    displayNameTC: _ctMap.get(`${row.sheetId} ${row.tabName}`) || row.displayName,
     folderUrl:   row.folderUrl,
     captureFolderUrl: row.captureFolderUrl,
-    captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
+    incomeType:  row.incomeType,
+    captureSlots: effectiveCaptureSlots(
+      row.captureSlots,
+      row.incomeType,
+      _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
+      _crMap.get(cashReceiptSubmissionRowKey(row.sheetId, row.tabName, row.rowIndex)) === true),
+    reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,
     submittedSlots: [],
     // ★ 제출완료 행은 행 전체 JSON 미반환 (본검색과 동일한 데이터 최소화)
     row:         row.isSubmitted ? {} : rowObj,
@@ -613,6 +1009,37 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     isPaid:      _isPaid(row.isSubmitted2, rowObj),
     };
   });
+
+  // 대체 검색으로 재진입해도 이미 낸 리뷰와 현금영수증을 다시 요구하지 않는다.
+  const multiSlotItems = results.filter(r => r.captureSlots);
+  if (multiSlotItems.length > 0) {
+    try {
+      const keyOf = (sheetId, tabName, rowIndex) => `${sheetId}\u0000${tabName}\u0000${rowIndex}`;
+      const { rows: subRows } = await pool.query(
+        `SELECT sheet_id, tab_name, row_index, slot_key
+           FROM review_submissions
+          WHERE sheet_id = ANY($1) AND tab_name = ANY($2) AND row_index = ANY($3)`,
+        [
+          [...new Set(multiSlotItems.map(r => r.sheetId))],
+          [...new Set(multiSlotItems.map(r => r.tabName))],
+          [...new Set(multiSlotItems.map(r => r.rowIndex))],
+        ]
+      );
+      const coverMap = new Map();
+      for (const sr of subRows) {
+        const key = keyOf(sr.sheet_id, sr.tab_name, sr.row_index);
+        if (!coverMap.has(key)) coverMap.set(key, new Set());
+        coverMap.get(key).add(sr.slot_key);
+      }
+      for (const item of multiSlotItems) {
+        const covered = coverMap.get(keyOf(item.sheetId, item.tabName, item.rowIndex));
+        item.submittedSlots = covered ? [...covered] : [];
+      }
+    } catch (slotErr) {
+      logger.warn('[Search] fallback submittedSlots 조회 실패 (무시): ' + slotErr.message);
+    }
+    await _removeUnpayableReceiptSlots(multiSlotItems);
+  }
 
   // ── order_submissions 병합(폴백 경로도 누락 없이) — 폴백은 phoneList 미계산이므로 [p8] ──
   if (includeSubmitted && p8 && p8.length === 8) {

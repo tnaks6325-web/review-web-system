@@ -32,7 +32,16 @@ require.cache[poolPath] = {
       const h = _handlers[Math.min(_hi, Math.max(_handlers.length - 1, 0))]; _hi++;
       return h || { rows: [], rowCount: 0 };
     },
-    connect: async () => { throw new Error('connect 불필요'); },
+    /* ★ csBridge 는 방 생성·메시지·방 갱신을 **한 트랜잭션**으로 묶는다(빈 방 방지, 2026-08-21).
+         그래서 스텁도 client 를 내줘야 한다 — 쿼리는 같은 핸들러로 흘려보내고
+         BEGIN/COMMIT/ROLLBACK 만 흡수한다(검사 의미는 그대로). */
+    connect: async () => ({
+      query: async (sql, params) => {
+        if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(String(sql))) return { rows: [], rowCount: 0 };
+        return require('../src/db/pool').query(sql, params);
+      },
+      release: () => {},
+    }),
   },
 };
 function resetPool(handlers) { _q = []; _handlers = handlers || []; _hi = 0; }

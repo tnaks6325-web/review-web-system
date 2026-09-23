@@ -3,8 +3,8 @@
  * 실행: node tests/workdeskOrdersCampaigns.test.js
  *
  * 이 화면의 위험은 두 가지다.
- *  ① **권한** — 두 탭은 AE 에게도 열려 있는데, 작업오더 접수는 시트/탭 등록의 단일 관문이고
- *     공고 발행·수정은 정원·금액을 바꾼다. 게이트가 한 칸만 어긋나면 아무나 누른다.
+ *  ① **권한** — AE는 작업오더 접수와 모집공고 운영을 모두 수행한다. 광고주 차단이나
+ *     AE 허용이 한 칸만 어긋나도 화면과 API가 갈린다.
  *     → 라우터 스택을 **실제로 검사**한다.
  *  ② **사본 드리프트** — 카드·모달·저장 로직을 리뷰웹시스템[3버전]용으로 베끼면 관리자 대시보드와
  *     계속 어긋난다(레포가 반복해서 경고한 그것). → 같은 파일을 쓰는지 고정한다.
@@ -32,11 +32,26 @@ router.stack.filter(l => l.route).forEach(l => {
 });
 
 const READ = ['GET /work-orders/list', 'GET /campaigns/list', 'GET /campaigns/:id/applications',
+  'GET /campaigns/:id/activity-log',
   'GET /campaigns/:id/preview', 'GET /perm'];
 const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
+  'PUT /work-orders/update', 'PUT /work-orders/edit', 'POST /work-orders/submit',
   'POST /campaigns/create', 'PUT /campaigns/:id', 'POST /campaigns/:id/flags',
   'DELETE /campaigns/:id', 'POST /campaigns/:id/confirm', 'PUT /campaigns/:id/status',
-  'POST /campaigns/:id/dismiss'];
+  'POST /campaigns/:id/dismiss', 'POST /campaigns/:id/blog-approve',
+  'POST /campaigns/:id/blog-reject', 'POST /campaigns/:id/archive',
+  'GET /worktable/plan', 'POST /worktable/create', 'POST /worktable/delete',
+  'POST /worktable/delete-tab',
+  // 외부모집 구매양식 수동제출 — 리뷰어 등록·주문 원장·정원 차감·시트 쓰기를 일으키는 창구라
+  // 접수·발행과 같은 공통 권한을 적용한다.
+  'POST /manual-order/preview', 'POST /manual-order/submit'];
+const AE_CAMPAIGN_CONTROL = [
+  'GET /campaigns/:id/daily-plan', 'POST /campaigns/:id/daily-plan',
+  'PUT /campaigns/:id/carry-strategy', 'POST /campaigns/:id/worktable-rebuild',
+  'POST /campaigns/:id/rounds', 'DELETE /campaigns/:id/rounds',
+  'GET /campaigns/:id/reviewer-gate', 'GET /campaigns/:id/reviewer-gate/search',
+  'POST /campaigns/:id/reviewer-gate',
+];
 
 t('열람 라우트가 전부 등록돼 있다', () => {
   READ.forEach(k => assert.ok(L[k], '없음: ' + k));
@@ -48,32 +63,89 @@ t('★ 열람은 내부인만(광고주 차단) — internalMiddleware', () => {
   READ.forEach(k => assert.ok(L[k].includes('internalMiddleware'),
     k + ': internalMiddleware 없음 — 광고주에게 열릴 수 있다'));
 });
-t('★★ 편집은 전부 editorOnlyMiddleware 뒤 — 이름 명단만 통과', () => {
+t('★★ 편집은 전부 공통 게이트 뒤 — AE 허용과 광고주 차단이 한 곳에서 적용', () => {
   WRITE.forEach(k => {
     assert.ok(L[k].includes('authMiddleware'), k + ': authMiddleware 없음');
     assert.ok(L[k].includes('internalMiddleware'), k + ': internalMiddleware 없음');
     assert.ok(L[k].includes('editorOnlyMiddleware'),
-      k + ': editorOnlyMiddleware 없음 — 명단 밖 AE 가 접수·발행할 수 있다');
+      k + ': editorOnlyMiddleware 없음 — 기능마다 AE 권한이 갈릴 수 있다');
   });
 });
 t('★ 열람 라우트에는 편집 게이트를 걸지 않는다(읽기까지 막히면 탭이 무의미)', () => {
   READ.forEach(k => assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 열람에 편집 게이트'));
 });
-// ★ 2026-08 사용자 확정: 명단 관리도 내부 담당자(AE 포함)가 한다 — 광고주·리뷰어는 차단.
-//   ⚠ 명단이 자기 자신을 게이트하면(editorOnly) 명단에서 빠지는 순간 아무도 못 고치므로 그 금지는 유지.
-t('명단 관리는 내부 담당자 전용(광고주 차단)', () => {
+t('날짜별 인원·차수·작업표 재구성·참여 제한도 AE가 조절', () => {
+  AE_CAMPAIGN_CONTROL.forEach(k => {
+    assert.ok(L[k], '없음: ' + k);
+    assert.ok(L[k].includes('internalMiddleware'), k + ': AE 허용 internalMiddleware 없음');
+    assert.ok(!L[k].includes('adminOrMasterMiddleware') && !L[k].includes('masterOnlyMiddleware'),
+      k + ': AE를 막는 관리자 전용 게이트가 있음');
+  });
+});
+// 명단 관리자는 master/admin/확인된 AE다. 일반 인트라넷 staff가 자신을 넣어 권한을 만들면 안 된다.
+t('명단 관리는 관리자·확인된 AE 전용(일반 직원의 자기승격 차단)', () => {
   ['GET /workdesk-editors', 'POST /workdesk-editors', 'DELETE /workdesk-editors/:id'].forEach(k => {
     assert.ok(L[k], '없음: ' + k);
     assert.ok(L[k].includes('internalMiddleware'), k + ': internal 게이트 없음');
-    assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 명단이 자기 자신을 게이트하면 안 됨');
+    assert.ok(L[k].includes('editorManagerMiddleware'), k + ': 명단 관리자 게이트 없음');
   });
+});
+
+/* ── 1-b) 외부모집 수동제출 프록시 ─────────────────────────── */
+//  인트라넷 SSO 토큰(via:'intranet')은 authMiddleware 에서 `/api/trackb/*` 밖으로 못 나가,
+//  `/api/manual-order/*` 하드코딩이 리뷰웹시스템[3버전]에서 403("Track B에서만")으로 죽었다.
+console.log('\n1-b) 외부모집 수동제출');
+const _moRouter = require('../src/routes/manualOrder.routes');
+const _moHandler = (m, p) => {
+  const l = _moRouter.stack.find(x => x.route && x.route.path === p && x.route.methods[m]);
+  assert.ok(l, '원본 라우트 없음: ' + m + ' ' + p);
+  return l.route.stack;
+};
+t('★ 로직 복제 0 — 원본 핸들러를 그대로 태운다', () => {
+  [['preview', 'post', '/preview'], ['submit', 'post', '/submit']].forEach(([name, m, p]) => {
+    const src = _moHandler(m, p);
+    const proxy = router.stack.find(l => l.route && l.route.path === '/manual-order/' + name);
+    assert.ok(proxy, '프록시 없음: ' + name);
+    assert.strictEqual(proxy.route.stack[proxy.route.stack.length - 1].handle.name,
+      src[src.length - 1].handle.name, name + ': 위임 대상이 원본 핸들러가 아니다(사본 의심)');
+  });
+});
+t('★ 원본 /api/manual-order/* 게이트는 무변경(adminOrMaster)', () => {
+  ['/preview', '/submit'].forEach(p => {
+    const names = _moHandler('post', p).map(s => s.name);
+    assert.ok(names.includes('authMiddleware') && names.includes('adminOrMasterMiddleware'),
+      p + ': 원본 게이트가 느슨해졌다');
+  });
+});
+t('★ 오류 메시지를 마스킹하지 않는다(관리자 도구는 실패 원인이 곧 조치 안내)', () => {
+  const em = R('src/middleware/error.middleware.js');
+  assert.ok(em.includes("startsWith('/api/trackb/manual-order/')"));
 });
 
 /* ── 2) 편집 판정 로직 ─────────────────────────────────────── */
 console.log('\n2) 편집 판정(workdeskEditors)');
 const WD = R('src/utils/workdeskEditors.js');
-t('★ master 는 명단 무관 허용(명단 오설정 잠금 방지)', () => {
-  assert.ok(/if \(role === 'master'\) return true;/.test(WD));
+t('★ master·검증된 AE는 명단 무관 허용', () => {
+  assert.ok(/role === 'staff' && admin && admin\.via === 'intranet' && admin\.ae === true/.test(WD),
+    '인트라넷 AE staff만 서명된 AE 클레임으로 허용해야 한다');
+  assert.ok(/role === 'staff' && admin && admin\.via !== 'intranet'/.test(WD),
+    '자체 staff_users AE 계정은 기존처럼 허용해야 한다');
+  assert.ok(WD.indexOf('admin.ae === true') < WD.indexOf('await _loadSet()'),
+    'AE 허용은 명단 조회보다 먼저 끝나야 한다');
+  assert.ok(!/role === 'master' \|\| role === 'staff'/.test(WD),
+    '일반 인트라넷 staff까지 무조건 여는 우회가 있으면 안 된다');
+});
+t('★ 일반 인트라넷 staff는 허용명단을 직접 관리할 수 없다', () => {
+  assert.ok(/function canManageEditors\(admin\)/.test(WD), '명단 관리자 판정 없음');
+  assert.ok(/if \(admin\.via === 'intranet'\) return admin\.ae === true;/.test(WD),
+    '일반 인트라넷 staff의 명단 자기승격을 막아야 한다');
+  assert.ok(/role === 'master' \|\| role === 'admin'/.test(WD), '기존 관리자 명단 관리가 사라졌다');
+  const { canManageEditors } = require('../src/utils/workdeskEditors');
+  assert.strictEqual(canManageEditors({ role: 'staff', via: 'intranet', ae: false }), false);
+  assert.strictEqual(canManageEditors({ role: 'staff', via: 'intranet', ae: true }), true);
+  assert.strictEqual(canManageEditors({ role: 'staff' }), true);
+  assert.strictEqual(canManageEditors({ role: 'admin', via: 'intranet', ae: false }), true);
+  assert.strictEqual(canManageEditors({ role: 'advertiser' }), false);
 });
 t('★ 조회 실패는 읽기 전용으로 수렴(fail-closed)', () => {
   assert.ok(/if \(!set\) return false;/.test(WD), '명단을 못 읽으면 열지 말아야 한다');
@@ -158,7 +230,7 @@ t('★ API 베이스만 갈아끼워 재사용(경로 하드코딩 제거)', () 
 t('Track B 네임스페이스가 admin 과 같은 모양(베이스 치환만으로 동작)', () => {
   const SRC = R('src/routes/trackB.routes.js');
   ['/campaigns/list', '/campaigns/create', '/campaigns/:id', '/campaigns/:id/flags',
-    '/campaigns/:id/status', '/campaigns/:id/applications', '/campaigns/:id/confirm',
+    '/campaigns/:id/status', '/campaigns/:id/applications', '/campaigns/:id/activity-log', '/campaigns/:id/confirm',
     '/campaigns/:id/dismiss'].forEach(p => {
     assert.ok(SRC.includes("'" + p + "'"), '경로 모양 불일치: ' + p);
   });
@@ -170,6 +242,11 @@ t('편집 계열은 기존 핸들러에 위임(로직 복제 0)', () => {
     '대상이 사라지면 부팅 때 터져야 한다(조용한 404 금지)');
   assert.ok(!/INSERT INTO recruit_campaigns/.test(SRC), 'Track B 가 공고를 직접 INSERT 하면 사본이다');
   assert.ok(!/INSERT INTO work_orders/.test(SRC), 'Track B 가 오더를 직접 INSERT 하면 사본이다');
+});
+t('★ 모집공고 작업 로그도 원본의 공유 집계 핸들러에 위임', () => {
+  const SRC = R('src/routes/trackB.routes.js');
+  assert.ok(/activityLog:\s*_delegate\(_campRoutes, 'get', '\/admin\/:id\/activity-log'\)/.test(SRC));
+  assert.ok(/_campHandlers\.activityLog\(req, res, next\)/.test(SRC));
 });
 
 /* ── 4) 프론트 배선 ────────────────────────────────────────── */
@@ -211,13 +288,13 @@ t('접수는 되돌리기 어려우니 확인을 받는다', () => {
   assert.ok(/이 작업오더를 접수할까요\?/.test(HTML) && /&& !confirm\(msg\)\) return false;/.test(HTML));
 });
 
-// ★ 2026-08-19 사용자 확정(AE 권한 확대): 명단 관리는 **내부 담당자(AE 포함)** 가 한다.
-//   위 1) 절이 서버 게이트를 `internalMiddleware` 로 이미 고정하고 있으므로, 화면 게이트도 같아야
-//   서버보다 좁거나 넓은 버튼이 생기지 않는다(같은 파일 안에서 두 기준이 갈리던 것을 맞춘다).
-t('명단 관리 UI — 내부 담당자에게만(광고주 차단), 인트라넷 자동완성 재사용', () => {
-  assert.ok(/_isInternalRole\(\)\?'<button class="btn" onclick="openEditorList\(\)/.test(HTML),
-    '명단 버튼이 내부 담당자 게이트(_isInternalRole)를 쓰지 않는다 — 서버 게이트와 어긋난다');
+// 명단 버튼과 직접 호출 모두 서버가 준 관리자 판정을 따른다. 숨김만으로 끝내면 콘솔 호출이 남는다.
+t('명단 관리 UI — 관리자·확인된 AE만 노출, 직접 호출도 차단', () => {
+  assert.ok(/STATE\.canManageEditors\?'<button class="btn" onclick="openEditorList\(\)/.test(HTML),
+    '명단 버튼이 서버 판정 canManageEditors를 쓰지 않는다');
   assert.ok(/async function openEditorList\(\)/.test(HTML));
+  assert.ok(/if\(!STATE\.canManageEditors\)[\s\S]{0,160}return;/.test(HTML),
+    '숨겨진 버튼을 직접 호출하는 경로도 막아야 한다');
   assert.ok(/api\('\/api\/trackb\/intranet\/users\?q='/.test(HTML),
     '후보는 인트라넷 직원DB에서 골라야 한다(기존 프록시 재사용)');
   assert.ok(/STATE\.canEdit=null;/.test(HTML), '명단 변경 후 내 권한 캐시를 비워야 즉시 반영된다');

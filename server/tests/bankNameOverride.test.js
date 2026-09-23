@@ -351,13 +351,53 @@ t('6b 서식의 정식명은 코드에서 파생한다(리뷰어 원문 금지)'
   const src = noLineComments(read('services/payment.service.js'));
   const i = src.indexOf('async function buildWorkbook(');
   const body = src.slice(i, src.indexOf('\nasync function', i + 10));
-  assert.ok(/bankNameByCode\(code\)/.test(body), '서식에 bankNameByCode 가 아닌 값이 나가고 있다');
+  assert.ok(/bankFormLabel\(code\)/.test(body), '서식에 bankFormLabel 이 아닌 값이 나가고 있다');
+  assert.ok(!/bankNameByCode\(/.test(body),
+    '서식이 bankFormLabel 을 우회하면 케이뱅크가 이름을 인식 못 하는 기관(031)이 다시 이름으로 나간다');
 });
 
 t('6c bankNameByCode 가 오버레이 이름을 돌려준다(서식이 옛 이름으로 나가지 않게)', () => {
   reset();
   BC.setBankOverrides({ banks: { '031': { name: 'iM뱅크' } } });
   assert.strictEqual(BC.bankNameByCode('031'), 'iM뱅크');
+  reset();
+});
+
+/* ══════════════════════════════════════════════════════════════
+   §6-D ★★ 케이뱅크가 **이름을 인식 못 하는** 기관은 서식에 코드로 나간다
+   2026-08-21 실측(사용자): 031 대구은행은 `대구은행`·`대구`·`im뱅크`·`IM뱅크`
+   어느 표기로도 업로드가 인식하지 못하고 표준코드 `031` 로만 통과한다.
+   ══════════════════════════════════════════════════════════════ */
+t('6d ★★ 031 은 서식에 코드로 나간다 — 이름을 고쳐도 코드가 이긴다', () => {
+  reset();
+  assert.strictEqual(BC.bankFormLabel('031'), '031', '대구은행이 이름으로 나가면 케이뱅크가 거부한다');
+  assert.strictEqual(BC.bankFormLabel('31'), '031', '2자리로 들어와도 3자리로 맞춘다');
+  BC.setBankOverrides({ banks: { '031': { name: 'iM뱅크' } } });
+  assert.strictEqual(BC.bankFormLabel('031'), '031',
+    '오버레이 이름이 이기면 막으려던 거부가 그대로 재현된다');
+  assert.strictEqual(BC.bankNameByCode('031'), 'iM뱅크', '표시용 이름은 종전대로 오버레이 값');
+  reset();
+});
+
+t('6e ★ 나머지 기관은 종전대로 이름으로 나간다(예외를 넓히지 않는다)', () => {
+  reset();
+  assert.strictEqual(BC.FORM_CODE_ONLY.size, 1, '코드로 내보내는 기관이 늘었다 — 은행이 거부한 것만 넣는다');
+  for (const [c, n] of BC.BANKS) {
+    if (c === '031') continue;
+    assert.strictEqual(BC.bankFormLabel(c), n, `${c} ${n} 이 코드로 나간다(확인되지 않은 형식)`);
+  }
+  BC.setBankOverrides({ banks: { '011': { name: '농협' } } });
+  assert.strictEqual(BC.bankFormLabel('011'), '농협', '편집한 이름이 서식에 나가야 한다');
+  reset();
+});
+
+t('6f 화면 목록이 "코드로 나간다"를 말한다(조용한 no-op 금지)', () => {
+  reset();
+  const row = BC.bankTable().find(r => r.code === '031');
+  assert.strictEqual(row.formCodeOnly, true, 'bankTable 이 formCodeOnly 를 안 준다');
+  assert.ok(BC.bankTable().filter(r => r.formCodeOnly).length === 1);
+  const wd = readRoot('frontend/workdesk.html');
+  assert.ok(/r\.formCodeOnly\?/.test(wd), '화면이 그 사실을 표기하지 않는다 — 이름을 고쳐도 안 바뀌는 이유를 알 수 없다');
   reset();
 });
 
@@ -477,6 +517,42 @@ t('7k 저장 후 입금대상을 다시 읽어 보류가 풀렸는지 반영한�
   const body = WD.slice(i, WD.indexOf('\n/* ═', i));
   assert.ok(/payment\/targets/.test(body), '저장하고 끝내면 보류가 그대로인 것처럼 보인다');
   assert.ok(!/_pmPaint\(\)/.test(body), '저장 뒤 화면을 갈아타면 사용자가 하던 자리를 잃는다');
+});
+
+t('7l ★★ 편집 입력칸이 열린 채 [저장]을 눌러도 요청이 나간다 (2026-08-19 "정식 명칭 저장 안 됨")', () => {
+  // 원인: mousedown → blur → commit → _bnRender() 가 버튼 DOM 을 갈아치워 click 이 아예 발생하지 않았다.
+  const bi = WD.indexOf('const bar = S.dirty');
+  const bar = WD.slice(bi, bi + 900);
+  const btns = bar.match(/<button[^>]*onclick="_bn(Save|Load)\([^"]*\)"/g) || [];
+  assert.strictEqual(btns.length, 2, '바의 버튼 2개(저장·되돌리기)를 찾지 못했다');
+  for (const b of btns) {
+    assert.ok(/onmousedown="event\.preventDefault\(\)"/.test(b),
+      'blur 를 막지 않으면 재렌더가 클릭을 먹어 저장이 조용히 안 나간다: ' + b);
+  }
+
+  // 저장·연결은 열린 편집을 **먼저 확정**한다(값 누락 방지)
+  for (const fn of ['async function _bnSave(', 'async function _bnLink(']) {
+    const i = WD.indexOf(fn);
+    assert.ok(i > 0, fn + ' 없음');
+    // ★ 줄 주석을 지우고 본다 — 주석 안의 호출은 실행되지 않는다(변이시험이 잡은 자리)
+    const head = WD.slice(i, i + 320).split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+    assert.ok(/^\s*_bnFlushEdit\(\);/m.test(head), fn + ' 은 _bnFlushEdit() 로 편집값을 먼저 확정해야 한다');
+  }
+
+  // 확정은 **재렌더하지 않는다** — 재렌더가 곧 이 사고의 원인이다
+  const fi = WD.indexOf('function _bnFlushEdit(');
+  assert.ok(fi > 0, '_bnFlushEdit 없음');
+  const fbody = WD.slice(fi, WD.indexOf('\n}', fi));
+  assert.ok(/silent\s*:\s*true/.test(fbody), 'silent 확정이어야 한다');
+  assert.ok(!/_bnRender\(\)/.test(fbody), '여기서 재렌더하면 같은 사고가 재현된다');
+
+  // 두 편집 진입점이 열린 편집을 등록한다(등록이 빠지면 flush 가 아무 일도 안 한다)
+  for (const fn of ['function _bnEditName(', 'function _bnAddKw(']) {
+    const i = WD.indexOf(fn);
+    const body = WD.slice(i, WD.indexOf('\n}', WD.indexOf("addEventListener('blur'", i)));
+    assert.ok(/S\._flush\s*=\s*commit/.test(body), fn + ' 이 열린 편집을 등록하지 않는다');
+    assert.ok(/silent/.test(body), fn + ' commit 에 silent 옵션이 없다');
+  }
 });
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);

@@ -1,4 +1,6 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
+const { randomUUID } = require('crypto');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
@@ -12,13 +14,47 @@ const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middl
 const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
-const { slotLabel: slotLabelOf, effectiveCaptureSlots } = require('../utils/captureSlots');
+const { slotLabel: slotLabelOf, effectiveCaptureSlots, isCashReceiptSlot } = require('../utils/captureSlots');
 const { verifyCapture, logCaptureMismatch, resolveCaptureMismatch } = require('../services/captureVerify.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 const { mirrorOneSheet } = require('../services/rawMirror.service');
 const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistration');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
+const purchaseSessions = require('../services/purchaseSubmissionSession.service');
+const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
+const { verifyReviewerSession } = require('../services/reviewerSession.service');
+const { recipientNameForRow } = require('../services/captureOwnerName.service');
+
+/** 리뷰어 화면이 보낸 세션에서 서버가 검증한 신원만 반환한다. */
+function verifiedReviewerIdentity(req) {
+  const token = req.headers['x-reviewer-token'];
+  if (!token) return null;
+  try {
+    const session = verifyReviewerSession(token);
+    const phone8 = String(session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    if (phone8.length !== 8) return null;
+    return { reviewerName: String(session.loginName || '').trim(), phone8, session };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** 리뷰어 토큰이 없는 수동 업로드는 내부 담당자 JWT로만 허용한다. */
+function verifiedInternalUploadIdentity(req) {
+  const auth = String(req.headers.authorization || '');
+  const match = /^Bearer\s+(.+)$/i.exec(auth);
+  if (!match) return null;
+  try {
+    const decoded = jwt.verify(match[1], process.env.JWT_SECRET);
+    if (!decoded || !['master', 'admin', 'staff'].includes(decoded.role)) return null;
+    if (decoded.via === 'reviewer_campaign') return null;
+    if (decoded.via === 'intranet' && req.trackBUploadAuthorized !== true) return null;
+    return decoded;
+  } catch (_) {
+    return null;
+  }
+}
 
 // ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
 // 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
@@ -1278,11 +1314,20 @@ router.get('/drive-diag', authMiddleware, async (req, res) => {
 // 프론트엔드 기대 응답: { ok, orderNumber, recipient, phone, address, price, orderer, ... }
 // ═══════════════════════════════════════════════════════════
 router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
+  let imageHash = '';
   try {
     const { imageBase64, mimeType } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
 
-    const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg');
+    imageHash = reviewerOrderIdentity.hashImageBase64(imageBase64);
+
+    // 설정 › AI 판별 예시의 구매캡처 기준이미지를 실제 주문정보 OCR에도 동봉한다.
+    // 예시 조회/다운로드 장애는 기존 추출을 막지 않는다(fail-open).
+    let extractionSamples = [];
+    try {
+      extractionSamples = await require('../services/reviewInspect.service').loadOrderExtractionSamples();
+    } catch (_) { extractionSamples = []; }
+    const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg', { samples: extractionSamples });
     // result: { ok, orderNumber, recipient, phone, address, price, orderer, productName, orderDate, store, elapsed }
 
     // ── SSE 알림: AI 분석 완료 ──
@@ -1294,18 +1339,23 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
       });
     }
 
-    res.json(result);
+    const proof = reviewerOrderIdentity.issueExtractionProof({ imageHash, extracted: result, ok: !!result.ok });
+    res.json({ ...result, ...proof });
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
     logAbnormal({
       flow: 'image_extract', step: 'gemini_call', source: 'external_api', error: err,
       context: { path: req.path, method: 'POST' },
     });
-    res.json({
+    const failed = {
       ok: false,
       error: err.message || '이미지 분석 중 오류가 발생했습니다.',
       orderNumber: '', recipient: '', phone: '', address: '', price: ''
-    });
+    };
+    const proof = imageHash
+      ? reviewerOrderIdentity.issueExtractionProof({ imageHash, extracted: failed, ok: false, errorCode: err.code || err.name || 'extract_failed' })
+      : {};
+    res.json({ ...failed, ...proof });
   }
 });
 
@@ -1313,19 +1363,35 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 // POST /api/image/upload — 주문캡처 이미지 Drive 업로드 (새 3단계 구조)
 //
 // 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [구매캡처]
-// 프론트엔드 페이로드:
-//   { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId,
-//     savedCaptureFolderUrl }
-//
-// 폴더 접근 우선순위:
-//   1. savedCaptureFolderUrl (프론트엔드 전달)
-//   2. tab_configs.capture_folder_url (DB)
-//   3. 자동 생성 (ensureCaptureFolderPath)
+// 프론트엔드 페이로드는 이미지와 서버가 발급한 주문ID·세션ID·세션토큰을 함께 보낸다.
+// 폴더 좌표는 클라이언트 값이 아니라 세션에 고정된 sheetId/tabName만 사용한다.
+// tab_configs.capture_folder_url이 없으면 ensureCaptureFolderPath로 만들고 서버가 직접 저장한다.
 // ═══════════════════════════════════════════════════════════
 router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
   try {
-    const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId, savedCaptureFolderUrl } = req.body;
+    const { imageBase64, mimeType, fileName, displayName, round,
+            orderSubmissionId, captureSessionId, captureSessionToken } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
+
+    // 구매캡처는 서버가 주문 응답으로 발급한 세션과 주문 ID가 모두 맞아야 한다.
+    // 이름·최근시각 추정이나 클라이언트가 보낸 폴더 URL은 신뢰하지 않는다.
+    const uploadCtx = await purchaseSessions.inspectForUpload({
+      sessionId: captureSessionId,
+      sessionToken: captureSessionToken,
+      orderSubmissionId,
+    });
+    if (!uploadCtx.ok) {
+      return res.status(403).json({ ok: false, code: uploadCtx.code, error: '구매캡처 제출 세션이 유효하지 않습니다. 구매양식을 다시 열어주세요.' });
+    }
+    if (uploadCtx.alreadyCompleted) {
+      return res.json({ ok: true, alreadyCompleted: true, fileId: uploadCtx.captureFileId });
+    }
+    const claimed = await purchaseSessions.markUploading({ sessionId: captureSessionId, orderSubmissionId });
+    if (!claimed) {
+      return res.status(409).json({ ok: false, code: 'capture_upload_in_progress', retryable: true, error: '같은 구매캡처가 이미 업로드 중입니다.' });
+    }
+    const sheetId = uploadCtx.captureSheetId;
+    const tabName = uploadCtx.captureTabName;
 
     const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
@@ -1337,16 +1403,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     let targetFolderId = null;
     let captureFolderUrl = null;
 
-    // STEP 1: savedCaptureFolderUrl (프론트엔드 전달)
-    if (savedCaptureFolderUrl) {
-      targetFolderId = driveService.extractFolderIdFromUrl(savedCaptureFolderUrl);
-      if (targetFolderId) {
-        captureFolderUrl = savedCaptureFolderUrl;
-        logger.info(`[image-upload] savedCaptureFolderUrl 사용: ${targetFolderId}`);
-      }
-    }
-
-    // STEP 2: tab_configs.capture_folder_url (DB)
+    // STEP 1: 세션에 고정된 작업의 tab_configs.capture_folder_url
     if (!targetFolderId && sheetId && tabName) {
       const { rows } = await pool.query(
         'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
@@ -1361,11 +1418,11 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       }
     }
 
-    // STEP 3: 자동 생성 (3단계 구조: 시트제목 → 탭명 → [구매캡처])
+    // STEP 2: 자동 생성 (3단계 구조: 시트제목 → 탭명 → [구매캡처])
     if (!targetFolderId) {
       try {
         // 시트 제목 조회
-        let sheetTitle = displayName || tabName || '기타';
+        let sheetTitle = tabName || '기타';
         if (sheetId) {
           try {
             // campaign_name에서 먼저 조회
@@ -1401,7 +1458,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
         }
       } catch (folderErr) {
         logger.error(`[image-upload] 폴더 생성 실패: ${folderErr.message}`);
-        targetFolderId = rootFolderId;
+        throw folderErr;
       }
     }
 
@@ -1412,7 +1469,12 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     }
 
     // ── 3단계: 중복 파일 처리 (동일 이름 → 휴지통 이동) ──
-    const finalFileName = fileName || `캡처_${Date.now()}.jpg`;
+    const rawName = String(fileName || '주문캡처.jpg');
+    const dot = rawName.lastIndexOf('.');
+    const baseName = (dot > 0 ? rawName.slice(0, dot) : rawName).slice(0, 80) || '주문캡처';
+    const ext = (dot > 0 ? rawName.slice(dot + 1) : 'jpg').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'jpg';
+    // 같은 주문의 네트워크 재시도는 같은 파일명으로 수렴하고, 동명이인의 파일은 충돌하지 않는다.
+    const finalFileName = `${baseName}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}.${ext}`;
     try {
       await driveService.trashDuplicateFile(targetFolderId, finalFileName);
     } catch (trashErr) {
@@ -1426,55 +1488,56 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 
     logger.info(`[image-upload] 업로드 완료: ${uploaded.name} → ${uploaded.id}`);
 
-    // ── 캡처↔주문 연결(062, best-effort) — "캡처 미첨부" 감지·중요알림의 근거 ──
-    //   ① orderSubmissionId 직접 연결(신형 프론트) ② 없으면 같은 탭 최근 24h 동일 수취인/주문자 폴백.
-    //   실패해도 업로드 자체는 유효(연결은 관측용 메타데이터).
+    // ── 캡처↔주문 연결 — 세션+주문ID 정확일치, 주문 단위 직렬화 ──
+    let finalLinkedFileId = uploaded.id;
     try {
-      const osId = String(req.body.orderSubmissionId || '').trim();
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(osId)) {
-        await pool.query(
-          `UPDATE order_submissions SET capture_file_id = $2, capture_uploaded_at = NOW()
-            WHERE id = $1 AND capture_uploaded_at IS NULL`,
-          [osId, uploaded.id]
-        );
-      } else if (sheetId && tabName && finalFileName) {
-        // 파일명 규칙: {수취인}.ext 또는 {수취인}_{주문자}.ext (search-app.js) → 첫 토큰이 수취인
-        const nameBase = String(finalFileName).replace(/\.[^.]+$/, '').split('_')[0].replace(/\s+/g, '');
-        if (nameBase) {
-          await pool.query(
-            `UPDATE order_submissions SET capture_file_id = $3, capture_uploaded_at = NOW()
-              WHERE id = (SELECT id FROM order_submissions
-                           WHERE sheet_id = $1 AND tab_name = $2
-                             AND capture_uploaded_at IS NULL AND deleted_at IS NULL
-                             AND submitted_at > NOW() - interval '24 hours'
-                             AND (replace(COALESCE(recipient, ''), ' ', '') = $4
-                                  OR replace(COALESCE(orderer, ''), ' ', '') = $4)
-                           ORDER BY submitted_at DESC LIMIT 1)`,
-            [sheetId, tabName, uploaded.id, nameBase]
-          );
-        }
+      const linked = await purchaseSessions.completeCapture({
+        sessionId: captureSessionId,
+        sessionToken: captureSessionToken,
+        orderSubmissionId,
+        captureFileId: uploaded.id,
+      });
+      if (!linked.ok) throw Object.assign(new Error(linked.code), { code: linked.code });
+      finalLinkedFileId = linked.captureFileId || uploaded.id;
+      // 다른 세션이 먼저 같은 주문을 완료했으면 이번에 올라간 패배 파일만 휴지통으로 보낸다.
+      if (linked.alreadyCompleted && linked.captureFileId && linked.captureFileId !== uploaded.id) {
+        try { await driveService.trashFiles([{ id: uploaded.id, name: uploaded.name }]); }
+        catch (cleanupErr) { logger.warn(`[image-upload] 동시 업로드 패배 파일 정리 실패: ${cleanupErr.message}`); }
       }
     } catch (linkErr) {
-      logger.warn(`[image-upload] 캡처↔주문 연결 실패(무시): ${linkErr.message}`);
+      await purchaseSessions.markFailed({ sessionId: captureSessionId, orderSubmissionId, code: linkErr.code || 'db_link_failed' });
+      logger.error(`[image-upload] 캡처↔주문 연결 실패: ${linkErr.message}`);
+      return res.status(503).json({
+        ok: false,
+        code: 'capture_link_failed',
+        retryable: true,
+        error: '캡처 파일은 임시 저장됐지만 주문 연결에 실패했습니다. 다시 시도해주세요.',
+      });
     }
 
     // ── SSE 알림 ──
     emitImageUpload({
       fileName: uploaded.name,
-      fileId: uploaded.id,
+      fileId: finalLinkedFileId,
       tabName: tabName || '',
       displayName: displayName || '',
     });
 
     res.json({
       ok: true,
-      fileId: uploaded.id,
+      fileId: finalLinkedFileId,
+      alreadyCompleted: finalLinkedFileId !== uploaded.id,
       fileName: uploaded.name,
       webViewLink: uploaded.webViewLink || '',
       webContentLink: uploaded.webContentLink || '',
       captureFolderUrl: captureFolderUrl || '',
     });
   } catch (err) {
+    await purchaseSessions.markFailed({
+      sessionId: req.body && req.body.captureSessionId,
+      orderSubmissionId: req.body && req.body.orderSubmissionId,
+      code: err.code || 'upload_failed',
+    });
     logger.error(`[image-upload] ${err.message}`);
     logAbnormal({
       flow: 'order_submit', step: 'image_upload', source: 'external_api', error: err,
@@ -1491,8 +1554,8 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 // ★ Drive 업로드 0 · DB 쓰기 0 — 순수 판정만 돌려준다. 리뷰어가 캡처를 **고른 직후**
 //   호출되므로, 잘못된 파일이 저장되거나 제출로 기록되기 **전에** 되돌릴 수 있다.
 //   (사후에 교체요청 → 리뷰어 재제출은 왕복 비용이 커서 실무에서 가장 번거롭다)
-// ★ 무인증 — 리뷰어 제출 화면이 무인증이라 같은 조건. 남용은 imageApiLimiter 로 막고,
-//   같은 이미지는 Gemini 해시 캐시로 상각된다.
+// ★ 현재 리뷰어 화면은 X-Reviewer-Token을 보내며, 중복 차단 신원은 검증된 세션에서만 읽는다.
+//   같은 이미지는 Gemini 해시 캐시로 상각되고 남용은 imageApiLimiter 로 막는다.
 // Body: { base64, mimeType, sheetId, tabName, slotKey }
 // ═══════════════════════════════════════════════════════════
 router.post('/review-precheck', imageApiLimiter, async (req, res) => {
@@ -1501,20 +1564,23 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
   try {
     const { base64, mimeType, sheetId, tabName, slotKey, rowIndex, reviewerName, phone8 } = req.body || {};
     const inspect = require('../services/reviewInspect.service');
+    const reviewerIdentity = verifiedReviewerIdentity(req);
 
     /* ── 중복 대조(첨부 즉시) ─────────────────────────────────────────
      * ★★ 리뷰어가 스스로 고칠 수 있는 **유일한 시점**이다 — 사진이 저장되기 전이라
      *   다른 사진으로 바꾸기만 하면 끝난다(제출 후 2차 검수는 관리자 사후처리가 된다).
-     * ★ 형식 판정(아래)과 **독립적으로** 계산해 응답에 얹는다 — AI 가 죽어도 중복 경고는 나가고,
-     *   중복 조회가 죽어도 형식 판정은 나간다. 둘 다 fail-open.
+     * ★ 형식 판정(아래)과 **독립적으로** 계산해 응답에 얹는다 — AI 가 죽어도 중복 차단은 나가고,
+     *   중복 조회가 죽으면 동명이인 오차단을 피하기 위해 그 판정만 생략한다.
      * ★ 기존 응답 계약(verdict/blocked)은 건드리지 않는다 — `duplicate` 필드만 **가산**이라
      *   구버전 프론트는 아무 영향이 없다. */
     const dupOf = async () => {
-      if (!base64) return null;
+      if (!base64 || !reviewerIdentity) return null;
       try {
         return await inspect.findOwnDuplicate({
           fileHash: inspect.hashBase64(base64),
-          sheetId, tabName, rowIndex, reviewerName, phone8,
+          sheetId, tabName, rowIndex,
+          reviewerName: reviewerIdentity.reviewerName || reviewerName,
+          phone8: reviewerIdentity.phone8,
         });
       } catch (_) { return null; }
     };
@@ -1537,6 +1603,15 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
       expectedChannel = exp.expectedChannel;
       reviewType = exp.reviewType;        // ★ 087: 구매확정 작업이면 1차 필터를 돌리지 않는다(안전핀)
       workKind = exp.workKind;            // ★ 099: 블로그체험단도 같은 안전핀(결과물이 포스팅URL)
+      /* ★ 행 단위 리뷰타입(리뷰옵션 칸) — 혼합 탭은 탭/공고 값이 null 이라 구매확정 **행**의
+         안전핀이 여기서만 켜진다. 행을 모르는 첨부(참여형 임베드 = 행 배정 전)는 종전 그대로.
+         fail-open: 조회 실패 = 탭 값 유지. */
+      if (rowIndex) {
+        try {
+          const rt = await require('../services/reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex });
+          if (rt) reviewType = rt;
+        } catch (_) {}
+      }
       // ★★ 조립은 submissionSamples 한 곳 — 업로드 검수·2차 검수와 같은 배열이어야
       //   캐시 지문(sampleSig)이 일치해 첨부 판정이 제출 때 히트한다(AI 콜 순증 0).
       samples = await inspect.submissionSamples({ expectedChannel, slotKey: 'review' });
@@ -1565,10 +1640,10 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/image/review-upload — 리뷰 이미지 Drive 업로드 (새 4단계 구조)
+// POST /api/image/review-upload — 리뷰 캡처 Drive 업로드 (새 4단계 구조)
 //
 // 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰] → [옵션(선택)]
-// 파일명 규칙: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
+// 파일명 규칙: {수취인}_{index}_{yyyyMMdd_HHmmss}.{ext}  ← 이름은 서버가 그 행에서 해석(captureOwnerName)
 //
 // 프론트엔드 페이로드:
 //   { sheetId, tabName, reviewerName, campaignName, optionFolderName,
@@ -1578,6 +1653,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
   try {
     const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;
     const slot = (slotKey || 'review').toString().trim() || 'review';
+    const reviewerIdentity = verifiedReviewerIdentity(req);
+    const internalIdentity = verifiedInternalUploadIdentity(req);
 
     if (!files || !Array.isArray(files) || files.length === 0) {
       return res.json({ ok: false, error: '업로드할 파일이 필요합니다.' });
@@ -1585,6 +1662,60 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     if (!sheetId || !tabName) {
       return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
     }
+    if (!reviewerIdentity && !internalIdentity) {
+      return res.status(401).json({
+        ok: false, code: 'REVIEW_UPLOAD_AUTH_REQUIRED',
+        error: '리뷰어 로그인을 다시 확인해주세요.',
+      });
+    }
+    if (reviewerIdentity) {
+      const ownsTarget = await require('../services/reviewerTargetOwnership.service').ownsReviewerTarget({
+        session: reviewerIdentity.session, sheetId, tabName, rowIndex,
+      });
+      if (!ownsTarget) {
+        return res.status(403).json({
+          ok: false, code: 'REVIEW_UPLOAD_TARGET_FORBIDDEN',
+          error: '이 구매양식의 리뷰를 제출할 권한이 없습니다.',
+        });
+      }
+    }
+
+    if (slot === 'review') {
+      const closedReminder = await require('../services/reviewReminder.service')
+        .closedStateForTarget({ sheetId, tabName, rowIndex });
+      if (closedReminder) {
+        return res.status(409).json({
+          ok: false,
+          code: 'REVIEW_CLOSED_NO_REVIEW',
+          error: '최종 제출기한이 지나 미작성으로 종결된 작업입니다.',
+        });
+      }
+    }
+
+    const _riSvc = require('../services/reviewInspect.service');
+    // ★ 최종 서버 방어: 한 요청에 여러 장이 있어도 한 장이라도 반영 완료 중복이면
+    //   어떤 파일도 Drive에 올리지 않는다. 프런트 검사 우회·응답 경쟁에도 제출은 여기서 멈춘다.
+    if (slot === 'review' && reviewerIdentity) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file || !file.data) continue;
+        const duplicate = await _riSvc.findOwnDuplicate({
+          fileHash: _riSvc.hashBase64(file.data), sheetId, tabName, rowIndex,
+          reviewerName: reviewerIdentity.reviewerName || reviewerName,
+          phone8: reviewerIdentity.phone8,
+        });
+        if (duplicate) {
+          const rejected = {
+            index: i + 1, rejected: 'duplicate_submitted',
+            message: '이미 제출됬던 사진이에요', duplicate,
+          };
+          logger.warn(`[review-upload] 반영 완료된 중복 리뷰캡처 차단 (tab=${tabName}, row=${rowIndex}, match=${duplicate.fileId})`);
+          return res.json({ ok: false, uploaded: 0, total: files.length, files: [rejected], error: rejected.message });
+        }
+      }
+    }
+    // 한 업로드 요청의 여러 리뷰 이미지를 같은 제출 묶음으로 보존한다.
+    const uploadBatchId = randomUUID();
 
     const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
@@ -1607,12 +1738,37 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   fail-soft(null = 종전 동작).
     let _tabReviewType = null;
     try { _tabReviewType = await reviewTypeForTab({ sheetId, tabName }); } catch (_) {}
+    let _campaignCashReceipt = null;
+    try {
+      const _cashContext = require('../services/cashReceiptContext.service');
+      const _rowNo = Number(rowIndex);
+      if (Number.isInteger(_rowNo)) {
+        const _byRow = await _cashContext.cashReceiptRequirementsForRows([
+          { sheetId, tabName, rowIndex: _rowNo },
+        ]);
+        _campaignCashReceipt = _byRow.get(`${sheetId}\u0000${tabName}\u0000${_rowNo}`);
+      }
+      // 원본 행이 없거나 행별 판정이 실패한 구형 제출만 기존 탭 단위 보수 판정으로 폴백한다.
+      if (_campaignCashReceipt == null) {
+        _campaignCashReceipt = await _cashContext.cashReceiptRequiredForTab({ sheetId, tabName });
+      }
+    } catch (_) {}
+    _campaignCashReceipt = _campaignCashReceipt === true;
+    /* ★ 행 단위 리뷰타입(리뷰옵션 칸) — AI 기대 화면 종류(verifyCapture)에만 쓴다.
+       혼합 탭에서 구매확정 행의 캡처가 "리뷰 화면 아님"으로 몰리지 않게 한다.
+       ★ 폴더 라벨(slotLabelOf)은 **탭 값 그대로** — 폴더 이름이 행마다 갈리면 안 된다. */
+    let _rowReviewType = null;
+    if (rowIndex) {
+      try { _rowReviewType = await require('../services/reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex }); } catch (_) {}
+    }
+    const _effReviewType = _rowReviewType || _tabReviewType;
 
     let slotLabel = null;
     if (slot !== 'review') {
       // 라벨 판정은 공용 유틸(utils/captureSlots) — 검색·완료판정과 같은 규칙이라
       // 현영 자동 슬롯(receipt)도 '현금영수증' 서브폴더로 일관되게 들어간다.
-      slotLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType);
+      slotLabel = slotLabelOf(
+        tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType, _campaignCashReceipt);
     }
     if (tabRows[0]?.folder_url) {
       targetFolderId = driveService.extractFolderIdFromUrl(tabRows[0].folder_url);
@@ -1668,10 +1824,24 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   그 탭 [리뷰] 폴더를 기억해 둔다(targetFolderId 는 아래에서 계속 변이된다).
     const reviewBaseFolderId = targetFolderId;
 
+    const _fileRoute = require('../services/fileRoute.service');
+    const _isReceiptUpload = isCashReceiptSlot(
+      tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType, _campaignCashReceipt);
+    const _slotRole = _isReceiptUpload ? 'receipt' : slot;
+
     // ── 1.5단계: 슬롯 서브폴더 ([리뷰] → {슬롯라벨}) ──
     // 'review'(기본) 슬롯은 하위폴더 없이 [리뷰] 바로 아래 — 기존 동작/정리로직 보존.
-    // 그 외 슬롯(예: 현금영수증)은 라벨 서브폴더로 분리한다.
-    if (slotLabel) {
+    // 현금영수증은 공개 업체 리포트와 분리된 구매캡처 폴더 아래에 보관한다.
+    if (_isReceiptUpload) {
+      targetFolderId = await _fileRoute.resolveTargetFolder({
+        target: 'receipt', sheetId, tabName, reviewBaseFolderId, receiptLabel: slotLabel || '현금영수증',
+      });
+      if (!targetFolderId) {
+        logger.error('[review-upload] 비공개 현금영수증 폴더 확보 실패 — 공개 리뷰 폴더 업로드 차단');
+        return res.json({ ok: false, error: '현금영수증 보관 폴더를 확보하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+      logger.info(`[review-upload] 비공개 현금영수증 폴더: ${targetFolderId}`);
+    } else if (slotLabel) {
       const slotFolder = await driveService.getOrCreateSubFolder(targetFolderId, slotLabel);
       targetFolderId = slotFolder.id;
       logger.info(`[review-upload] 슬롯 서브폴더: ${slotLabel} → ${slotFolder.id}`);
@@ -1679,7 +1849,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     // 영수증 슬롯 대조용 회사 사업자번호(없어도 검수는 형식 판별만 수행)
     let _companyBizNo = '';
-    if (slot === 'receipt') {
+    if (_isReceiptUpload) {
       try {
         const { rows: bz } = await pool.query("SELECT value FROM app_settings WHERE key = 'company_business_no'");
         _companyBizNo = bz[0]?.value || '';
@@ -1699,21 +1869,19 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   등록된 예시가 없으면 빈 배열 = 오늘과 완전히 같은 동작.
     let _inspectSamples = [];
     let _expectedChannel = null;
-    const _riSvc = require('../services/reviewInspect.service');
     try {
       // ★ 슬롯에 맞는 예시를 고른다 — 리뷰 슬롯엔 리뷰 화면, 영수증 슬롯엔 그 채널의
       //   현금영수증 실물. 반대로 주면 "영수증 자리에 리뷰가 왔다"는 판정이 흔들린다.
       // ★★ 조립은 submissionSamples 한 곳 — 1차 필터·2차 검수와 같은 배열이어야
       //   캐시 지문(sampleSig)이 일치한다(AI 콜 순증 0). 자동 분류 예시(구매캡처·구매확정)도
       //   여기서 함께 실린다.
-      if (slot === 'review' || slot === 'receipt') {
+      if (slot === 'review' || _isReceiptUpload) {
         try { _expectedChannel = (await _riSvc.loadTabExpectations({ sheetId, tabName })).expectedChannel; } catch (_) {}
-        _inspectSamples = await _riSvc.submissionSamples({ expectedChannel: _expectedChannel, slotKey: slot });
+        _inspectSamples = await _riSvc.submissionSamples({ expectedChannel: _expectedChannel, slotKey: _slotRole });
       }
     } catch (_) { _inspectSamples = []; }   // 준비 실패 = 예시 없이 진행(동작 불변)
 
     // ── 자동 분류(파일 라우팅) 판정 재료 — 규칙은 utils/captureRoute 전이표 단일 출처 ──
-    const _fileRoute = require('../services/fileRoute.service');
     const { routeDecision: _routeDecision, routeMode: _routeMode,
             rejectEnabled: _routeRejectEnabled, routeSlotLabel: _routeSlotLabel } = require('../utils/captureRoute');
     const _sampleKindSet = new Set(_inspectSamples.map(s => s.kind));
@@ -1721,20 +1889,50 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     const _hasRouteSamples = _sampleKindSet.has('order_capture') && _sampleKindSet.has('purchase_confirm');
     let _hasReceiptSlot = false;
     try {
-      _hasReceiptSlot = (effectiveCaptureSlots(tabRows[0]?.capture_slots, tabRows[0]?.income_type, _tabReviewType) || [])
-        .some(sl => sl.key === 'receipt');
+      _hasReceiptSlot = (effectiveCaptureSlots(
+        tabRows[0]?.capture_slots, tabRows[0]?.income_type, _tabReviewType, _campaignCashReceipt) || [])
+        .some(sl => sl.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(sl.label || '')));
     } catch (_) {}
-    const _receiptLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, 'receipt', _tabReviewType) || '현금영수증';
+    const _receiptInfo = require('../utils/captureSlots').cashReceiptSlotInfo(
+      tabRows[0]?.capture_slots, tabRows[0]?.income_type, _campaignCashReceipt, _tabReviewType);
+    const _receiptLabel = (_receiptInfo.slot && _receiptInfo.slot.label) || '현금영수증';
+
+    // 같은 구매양식·같은 행의 기존 캡처는 중복 차단 대상이 아니라 교체 제출이다.
+    let replacedCurrent = false;
+    if (slot === 'review' && rowIndex) {
+      try {
+        const { rows: currentRows } = await pool.query(
+          `SELECT 1 FROM review_submissions
+            WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+              AND COALESCE(slot_key, 'review') = 'review'
+            LIMIT 1`,
+          [sheetId, tabName, rowIndex]
+        );
+        replacedCurrent = currentRows.length > 0;
+      } catch (_) { /* 교체 안내용 보조값 — 실패해도 업로드는 계속 */ }
+    }
+
+    /* ★★ 파일명에 쓸 이름은 **서버가 그 행의 수취인으로 정한다**(사용자 확정 2026-09-22).
+       타계정 참여는 주문자가 로그인 본계정 한 사람이라, 화면이 보낸 이름을 그대로 쓰면
+       같은 작업의 캡처가 전부 같은 이름으로 쌓여 **어떤 타계정의 리뷰인지 구분되지 않는다**.
+       ★ 해석은 `captureOwnerName` 단일 출처 — 리뷰어 제출 2경로와 작업보드 [📎 리뷰 대신 제출]이
+         각자 이름을 고르던 사본이 여기로 모인다. ★ 못 찾으면 종전 값(화면이 보낸 이름)으로 접는다.
+       ★ `reviewerName` 자체는 건드리지 않는다 — 원장·알림·검수는 계속 참여자 기준이다. */
+    const captureOwnerName =
+      (await recipientNameForRow({ db: pool, sheetId, tabName, rowIndex })) || reviewerName || '익명';
 
     // ── 3단계: 파일 업로드 (복수 파일 루프) ──
     const uploadResults = [];
+    // 파일 루프의 판정값은 루프 밖 원장 기록 단계에서도 필요하다. 응답 객체에 붙이면
+    // 사업자번호 같은 판정 세부값이 리뷰어에게 노출될 수 있어 서버 내부 Map으로만 보존한다.
+    const captureVerdictsByFileId = new Map();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file.data) continue;
 
-      // 파일명 생성: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
+      // 파일명 생성: {수취인}_{index}_{yyyyMMdd_HHmmss}.{ext}
       const reviewFileName = driveService.generateReviewFileName(
-        reviewerName || '익명',
+        captureOwnerName,
         i + 1,
         file.mimeType || 'image/jpeg'
       );
@@ -1752,7 +1950,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         try {
           verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
-            slotKey: slot, companyBusinessNo: _companyBizNo, reviewType: _tabReviewType,
+            // ★ 행 우선 유효 리뷰타입 — 혼합 탭의 구매확정 행은 구매확정 화면이 정상 제출이다.
+            slotKey: _slotRole, companyBusinessNo: _companyBizNo, reviewType: _effReviewType,
             // ★★ 아래 2차 검수와 **같은 예시이미지**를 넘긴다 — 다르면 캐시 키가 갈려
             //   같은 이미지에 AI 콜이 두 번 나간다(순증 0 이라는 전제가 깨진다).
             samples: _inspectSamples,
@@ -1768,10 +1967,14 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           const _mode = _routeMode();
           if (_mode !== 'off' && verdict && verdict.status === 'mismatch') {
             const rd = _routeDecision({
-              slotKey: slot, verdict, hasReceiptSlot: _hasReceiptSlot,
+              slotKey: _slotRole, verdict, hasReceiptSlot: _hasReceiptSlot,
               hasRouteSamples: _hasRouteSamples, expectedChannel: _expectedChannel,
             });
             if (rd.action === 'route') {
+              // 자동 분류 규칙은 receipt라는 역할명을 돌려주지만, 수동 슬롯의 실제 원장 key는
+              // slot2일 수 있다. 폴더·중복·제출 원장은 설정된 key 한 벌로 맞춘다.
+              const toSlotKey = rd.toSlot === 'receipt' && _receiptInfo.slot?.key
+                ? String(_receiptInfo.slot.key) : rd.toSlot;
               const toLabel = _routeSlotLabel(rd.toSlot);
               const gotLabel = _routeSlotLabel(verdict.got) || verdict.got;
               const pct = Math.round((verdict.confidence || 0) * 100);
@@ -1788,7 +1991,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                 const _fh = _riSvc.hashBase64(file.data);
                 const dup = await _fileRoute.findSlotDuplicate({
                   sheetId, tabName, rowIndex, reviewerName,
-                  toSlot: rd.toSlot, fileHash: _fh, fileId: uploaded.id,
+                  toSlot: toSlotKey, fileHash: _fh, fileId: uploaded.id,
                 });
                 if (dup && _routeRejectEnabled()) {
                   // 중복 반려 — 방금 파일을 휴지통으로(영구삭제 아님, 30일 복구창)
@@ -1801,7 +2004,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                     eventType: 'capture_dup_rejected', severity: 'warn',
                     sheetId, tabName, reviewerName,
                     message: `${reviewerName || '리뷰어'}님이 ${rowIndex ? rowIndex + '행 ' : ''}${_routeSlotLabel(slot)} 칸에 올린 파일이 ${toLabel} 칸의 기존 제출과 동일 파일(SHA-256 일치)이라 휴지통으로 옮기고 반려했습니다.`,
-                    context: { fileId: uploaded.id, matchFileId: dup.file_id, from: slot, to: rd.toSlot, row: String(rowIndex ?? '') },
+                    context: { fileId: uploaded.id, matchFileId: dup.file_id, from: slot, to: toSlotKey, row: String(rowIndex ?? '') },
                   });
                 } else if (!dup) {
                   const toFolderId = await _fileRoute.resolveTargetFolder({
@@ -1809,9 +2012,9 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                   });
                   if (toFolderId) {
                     await driveService.moveFile(uploaded.id, toFolderId, targetFolderId);
-                    finalSlot = rd.toSlot;
+                    finalSlot = toSlotKey;
                     routed = {
-                      from: slot, to: rd.toSlot, toLabel,
+                      from: slot, to: toSlotKey, toLabel,
                       message: `첨부하신 이미지가 ${gotLabel}(으)로 확인되어 ${toLabel} ${rd.target === 'capture' ? '폴더' : '칸'}으로 옮겨 드렸어요.`
                         + (slot === 'review' ? ' 리뷰 캡처를 여기에 다시 올려주세요.' : ''),
                     };
@@ -1819,7 +2022,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                       eventType: 'capture_routed', severity: 'warn',
                       sheetId, tabName, reviewerName,
                       message: `${reviewerName || '리뷰어'}님이 ${rowIndex ? rowIndex + '행 ' : ''}${_routeSlotLabel(slot)} 칸에 올린 이미지가 ${gotLabel}(AI 확신 ${pct}%)으로 판정되어 ${toLabel} 폴더로 자동 이동했습니다. 리뷰어 화면에는 안내가 표시됐습니다.`,
-                      context: { fileId: uploaded.id, from: slot, to: rd.toSlot, row: String(rowIndex ?? '') },
+                      context: { fileId: uploaded.id, from: slot, to: toSlotKey, row: String(rowIndex ?? '') },
                     });
                   }
                 }
@@ -1852,6 +2055,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           uploadResults.push({ index: i + 1, rejected: rejected.reason, message: rejected.message });
           logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 중복 반려(휴지통): ${uploaded.name}`);
         } else {
+          if (verdict) captureVerdictsByFileId.set(uploaded.id, verdict);
           uploadResults.push({
             index: i + 1,
             fileId: uploaded.id,
@@ -1897,22 +2101,25 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
       // A-1: 대표 파일을 review_index 행에 기록
       //   ★ 대표 이미지는 기본 'review' 슬롯만 기록한다. 현금영수증 등 다른 슬롯이
-      //     대표 리뷰 이미지를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
+      //     대표 리뷰 캡처를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
       //   ★ 자동 분류로 슬롯 구성이 바뀐 호출은 아래 recomputePrimary 가 원장 기준으로
       //     대표를 다시 계산한다(여기 레거시 경로는 라우팅 없을 때 종전 그대로).
       const _routedAny = uploadResults.some(r => r && (r.routed || r.rejected));
+      let primaryMappingError = null;
       if (slot === 'review' && !_routedAny) {
         try {
           const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
-          await pool.query(
+          const linked = await pool.query(
             `UPDATE review_index
                 SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
                     review_file_count = $4, review_file_at = NOW()
               WHERE sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
             [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, rowIdx]
           );
+          if (!linked.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
         } catch (linkErr) {
-          logger.warn(`[review-upload] 인덱스 파일링크 저장 실패 (무시): ${linkErr.message}`);
+          primaryMappingError = linkErr;
+          logger.error(`[review-upload] 인덱스 파일링크 저장 실패: ${linkErr.message}`);
         }
       }
 
@@ -1920,6 +2127,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       //   ★ file_hash 는 여기서 함께 넣는다 — base64 를 이미 쥔 시점이라 계산 비용이 0이고,
       //     나중에 UPDATE 로 채우면 그 사이 올라온 다른 파일이 중복 대조 대상을 놓친다.
       const _inspect = require('../services/reviewInspect.service');
+      let submissionLedgerError = null;
       for (const r of uploadResults) {
         if (!r.fileId) continue;
         const _b64 = (files[r.index - 1] && files[r.index - 1].data) || '';
@@ -1929,15 +2137,30 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           await pool.query(
             `INSERT INTO review_submissions
                (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
-                file_id, file_url, file_name, source, slot_key, file_hash, uploaded_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,NOW())
+                file_id, file_url, file_name, source, slot_key, file_hash, upload_batch_id,
+                completed_at, uploaded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,$12,
+               CASE WHEN
+                 EXISTS (
+                   SELECT 1 FROM review_index ri
+                    WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $4
+                      AND ri.is_submitted = TRUE
+                 ) OR EXISTS (
+                   SELECT 1 FROM campaign_participants cp
+                    WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $4
+                      AND cp.deleted_at IS NULL AND cp.is_submitted = TRUE
+                 )
+               THEN NOW() ELSE NULL END,
+               NOW())
              ON CONFLICT (file_id) DO UPDATE
                SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
                    row_index = EXCLUDED.row_index, review_index_id = EXCLUDED.review_index_id,
                    reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key,
-                   file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash)`,
+                   file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash),
+                   upload_batch_id = EXCLUDED.upload_batch_id,
+                   completed_at = COALESCE(review_submissions.completed_at, EXCLUDED.completed_at)`,
             [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
-             r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash]
+             r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash, uploadBatchId]
           );
           // 자동 분류로 이동된 파일은 이동 이력을 함께 남긴다(되돌리기의 유일한 재료)
           if (r.routed) {
@@ -1945,7 +2168,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
               .markRouted({ fileId: r.fileId, fromSlot: r.routed.from, by: 'auto:upload' });
           }
         } catch (subErr) {
-          logger.warn(`[review-upload] 제출원장 기록 실패 (무시): ${subErr.message}`);
+          submissionLedgerError = submissionLedgerError || subErr;
+          logger.error(`[review-upload] 제출원장 기록 실패: ${subErr.message}`);
         }
 
         // ── 2차 검수(M1): 상품명·같은 파일·본문 겹침 대조 후 review_inspections 에 기록 ──
@@ -1954,11 +2178,26 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         //   ★ 절대 throw 하지 않는다(서비스가 내부에서 삼킨다) — 업로드는 이미 끝났고,
         //     검수 실패가 "파일은 올라갔는데 제출 실패"로 보이면 안 된다.
         try {
+          const _finalSlotKey = r.slotKey || slot;
+          const _finalSlotRole = isCashReceiptSlot(
+            tabRows[0]?.capture_slots, tabRows[0]?.income_type, _finalSlotKey,
+            _tabReviewType, _campaignCashReceipt) ? 'receipt' : _finalSlotKey;
+          let _finalInspectSamples = _inspectSamples;
+          if (_finalSlotRole !== _slotRole) {
+            try {
+              _finalInspectSamples = await _riSvc.submissionSamples({
+                expectedChannel: _expectedChannel, slotKey: _finalSlotRole,
+              });
+            } catch (_) { _finalInspectSamples = []; }
+          }
           const _ins = await _inspect.inspectSubmission({
             base64: _b64, mimeType: (files[r.index - 1] && files[r.index - 1].mimeType) || 'image/jpeg',
             fileId: r.fileId, fileHash: _hash,
-            sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: r.slotKey || slot,
-            samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
+            sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: _finalSlotKey,
+            slotRole: _finalSlotRole,
+            // 자동 이동으로 슬롯 역할이 바뀌었으면 옛 슬롯 기준 판정을 재사용하지 않는다.
+            captureVerdict: _finalSlotRole === _slotRole ? (captureVerdictsByFileId.get(r.fileId) || null) : null,
+            samples: _finalInspectSamples,
           });
           // ★ 첨부 즉시 경고(1차)를 지나쳐 제출된 중복은 **리뷰어에게 그 자리에서** 한 번 더 알린다.
           //   관리자 쪽은 위 검수 기록이 리뷰검수 탭에 바로 뜨므로 별도 알림을 새로 쌓지 않는다
@@ -1973,7 +2212,22 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       // 자동 분류로 review 슬롯 구성이 바뀌었으면 대표 이미지를 원장 기준으로 재계산
       //   (영수증이 대표로 남거나, 옮겨 들어온 리뷰가 대표에 안 잡히는 것 방지)
       if (_routedAny) {
-        await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
+        const recomputed = await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
+        if (!recomputed?.ok) primaryMappingError = new Error(recomputed?.error || '대표 이미지 재계산 실패');
+      }
+      if (submissionLedgerError) {
+        return res.status(503).json({
+          ok: false, code: 'REVIEW_SUBMISSION_LEDGER_FAILED', uploaded: successCount,
+          total: files.length, files: uploadResults,
+          error: '리뷰 파일 기록에 실패했습니다. 잠시 후 다시 제출해주세요.',
+        });
+      }
+      if (primaryMappingError) {
+        return res.status(503).json({
+          ok: false, code: 'REVIEW_PRIMARY_LINK_FAILED', uploaded: successCount,
+          total: files.length, files: uploadResults,
+          error: '리뷰 파일 연결에 실패했습니다. 잠시 후 다시 제출해주세요.',
+        });
       }
     }
 
@@ -1984,12 +2238,14 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       total: files.length,
       files: uploadResults,
       reviewFolderUrl: reviewFolderUrl || '',
+      uploadBatchId,
+      replacedCurrent,
       // 전부 반려면 실패 사유를 최상위 error 로도 실어준다(단일 첨부 화면의 기존 오류 표시 경로)
       ...(successCount === 0 && _rejectedResults.length ? { error: _rejectedResults[0].message } : {}),
     });
   } catch (err) {
     logger.error(`[review-upload] ${err.message}`);
-    res.json({ ok: false, error: err.message || '리뷰 이미지 업로드 중 오류가 발생했습니다.' });
+    res.json({ ok: false, error: err.message || '리뷰 캡처 업로드 중 오류가 발생했습니다.' });
   }
 });
 
@@ -2435,12 +2691,114 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
 // DB 작업보드의 준비 슬롯으로 일회성 복구한다. Google Sheet/GAS는 호출하지 않는다.
 router.post('/sheetless-worktable-recover', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
+    const b = req.body || {};
     const { withJobLock } = require('../utils/jobLock');
     const { recoverUnwrittenSheetlessOrders } = require('../services/sheetlessOrder.service');
-    const limit = Math.min(parseInt((req.body || {}).limit, 10) || 100, 1000);
-    const by = (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
-    const out = await withJobLock('sheetless_worktable_recover', () => recoverUnwrittenSheetlessOrders({ limit, by }));
+    const limit = Math.min(Math.max(parseInt(b.limit, 10) || 100, 1), 1000);
+    const dryRun = b.dryRun !== false;
+    if (b.orderSubmissionIds != null && !Array.isArray(b.orderSubmissionIds)) {
+      return res.status(400).json({ ok: false, error: 'orderSubmissionIds는 배열이어야 합니다.' });
+    }
+    if (Array.isArray(b.orderSubmissionIds) && b.orderSubmissionIds.length > 100) {
+      return res.status(400).json({ ok: false, error: '한 번에 최대 100건만 지정할 수 있습니다.' });
+    }
+    const orderSubmissionIds = Array.isArray(b.orderSubmissionIds)
+      ? b.orderSubmissionIds.map(id => String(id).trim())
+      : null;
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (orderSubmissionIds && orderSubmissionIds.some(id => !uuidPattern.test(id))) {
+      return res.status(400).json({ ok: false, error: '올바르지 않은 주문 식별값이 포함되어 있습니다.' });
+    }
+    const by = (req.admin && req.admin.name) ||
+      (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
+    const run = () => recoverUnwrittenSheetlessOrders({ limit, by, orderSubmissionIds, dryRun });
+    const out = dryRun ? await run() : await withJobLock('sheetless_worktable_recover', run);
     if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 작업보드 복구가 진행 중입니다.' });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/worktable-number-order-repair — 표시 번호만 구매양식 제출시각 순으로 다시 맞춘다.
+// 기본은 미리보기이며 실제 실행도 내부 관리자만 가능하다. 행 자체의 연결값은 바꾸지 않는다.
+router.post('/worktable-number-order-repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || '').trim();
+    const tabName = String(b.tabName || '').trim();
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const dryRun = b.dryRun !== false;
+    const by = (req.admin && req.admin.name) ||
+      (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
+    const { renumberTab } = require('../services/rowNumbering.service');
+    if (dryRun) return res.json(await renumberTab({ sheetId, tabName, dryRun: true, by }));
+    const { withJobLock } = require('../utils/jobLock');
+    const run = async () => {
+      const client = await pool.connect();
+      let out;
+      try {
+        await client.query('BEGIN');
+        // 주문 기록이 빈자리를 고르기 전에 잡는 것과 정확히 같은 작업 단위 잠금이다.
+        // 새 제출과 정정이 겹치면 한쪽이 끝난 뒤 최신 상태를 읽어 번호를 다시 매긴다.
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`sheetless_worktable:${sheetId}:${tabName}`]);
+        out = await renumberTab({ sheetId, tabName, dryRun: false, by, client });
+        await client.query('COMMIT');
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+        throw err;
+      } finally {
+        client.release();
+      }
+      // 번호를 바꾼 뒤 검색·내역에서 옛 번호가 되돌아오지 않게 같은 자료를 다시 만든다.
+      if (out && out.ok && out.changed) {
+        try {
+          await require('../services/sheetlessLedger.service')
+            .rebuildLedgers({ sheetId, tabName, by: `renumber:${by}`.slice(0, 100) });
+        } catch (err) {
+          out.ledgerError = (err && (err.code || err.message)) || 'rebuild_failed';
+        }
+      }
+      return out;
+    };
+    // 자동 번호 정리와도 같은 잠금으로 묶어 같은 정정을 두 번 동시에 실행하지 않는다.
+    const out = await withJobLock('worktable_renumber_sweep', run);
+    if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 번호 정리가 진행 중입니다.' });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/cleanup-overflow-worktable-slots — 빈 301/300·501/500 같은 과거 초과 슬롯만 정리.
+router.post('/cleanup-overflow-worktable-slots', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const { cleanupOverflowEmptyWorktableSlots } = require('../services/linkedRecruitQuota.service');
+    const out = await cleanupOverflowEmptyWorktableSlots({
+      dryRun: b.dryRun !== false,
+      limit: Math.min(Math.max(parseInt(b.limit, 10) || 200, 1), 1000),
+      by: (req.admin && req.admin.name) || (req.user && (req.user.name || req.user.username)) || 'admin',
+    });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/order-mirror-repair — 작업보드 줄은 있는데 원장만 미완결(`failed` 등)로 굳은
+//   주문의 완결 표시를 정정한다. 판정 근거 = `campaign_participants.order_submission_id` 링크
+//   (기록 성공 후에만 남는 값 — 복구 잡이 "이미 반영됨"을 판정하는 근거와 같다).
+//   ★ dryRun 기본(세어 보고 나서 사람이 실행) · 쓰기 표면 = order_submissions 완결 표시뿐.
+router.post('/order-mirror-repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { repairWrittenMarkForBoardRows } = require('../services/sheetlessOrder.service');
+    const b = req.body || {};
+    const limit = Math.min(parseInt(b.limit, 10) || 500, 2000);
+    const dryRun = b.dryRun !== false;          // ★ 명시적으로 false 일 때만 실제 정정
+    if (b.orderSubmissionIds != null && !Array.isArray(b.orderSubmissionIds)) {
+      return res.status(400).json({ ok: false, error: 'orderSubmissionIds는 배열이어야 합니다.' });
+    }
+    const orderSubmissionIds = Array.isArray(b.orderSubmissionIds)
+      ? b.orderSubmissionIds.slice(0, 100)
+      : null;
+    const by = (req.admin && req.admin.name) || 'admin';
+    const out = await repairWrittenMarkForBoardRows({ limit, dryRun, by, orderSubmissionIds });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
@@ -2612,18 +2970,42 @@ router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, 
         `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
                 last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
           WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, mirror_status`,
+        RETURNING id, mirror_status, sheet_id, tab_name, tab_gid, gid, sheet_row`,
         [...vals, editSeq]
       );
       if (!rows.length) return { notFound: true };
-      await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
-      return { mirrorStatus: rows[0].mirror_status };
+      /* ★★ 무시트 탭은 큐 대신 작업표에 바로 재기록한다 (2026-08-21 실측 결함 수정).
+         종전엔 order_update 를 그대로 큐에 넣었는데 큐 실행부의 무시트 백스톱이 그 항목을
+         "작업표 기록 경로가 담당"이라며 done 으로 삼켰고, **update 는 그 경로가 없어** 관리자
+         주문 편집이 원장(DB)에만 남고 작업표 row_json·장부(검색·리뷰어 화면)에는 영영 반영되지
+         않았다(조용한 소실). 실행부는 manualOrder ④ 와 같은 `writeOrderToWorktable` 한 벌 —
+         기존 연결 행(order_submission_id)을 잠가 최신 DB 값으로 병합하고 장부까지 재생성한다.
+         ★ 판정 실패·기록 실패는 종전 경로(enqueue) 폴백 — 백스톱이 삼키는 건 같지만 동작이
+           조용히 나빠지지는 않고, 응답 `sheetlessApplied` 로 사실을 말한다(조용한 누락 금지). */
+      const os = rows[0];
+      let sheetlessApplied = null;
+      let isSl = false;
+      try { isSl = await require('../utils/sheetlessScope').isSheetless(pool, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
+      if (isSl && os.sheet_row) {
+        try {
+          const { rows: full } = await pool.query(`SELECT * FROM order_submissions WHERE id = $1`, [orderSubmissionId]);
+          const { _osRowToOrderData } = require('../services/orderLedger.service');
+          sheetlessApplied = await require('../services/sheetlessOrder.service').writeOrderToWorktable({
+            sheetId: os.sheet_id, tabName: os.tab_name, tabGid: os.tab_gid || os.gid || '',
+            sheetRow: os.sheet_row, orderData: _osRowToOrderData(full[0]), orderSubmissionId,
+          });
+        } catch (e) { sheetlessApplied = { ok: false, reason: 'exception', message: e.message }; }
+      }
+      if (!sheetlessApplied || !sheetlessApplied.ok) {
+        await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
+      }
+      return { mirrorStatus: os.mirror_status, sheetlessApplied };
     });
     if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
     if (out && out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
     require('../jobs/queuePump').kickQueuePump();
     require('../utils/sse').emitOrderLedger({ action: 'edit', orderSubmissionId, mirror_status: out.mirrorStatus });
-    res.json({ ok: true, queued: true, editSeq });
+    res.json({ ok: true, queued: !(out.sheetlessApplied && out.sheetlessApplied.ok), editSeq, sheetlessApplied: out.sheetlessApplied || null });
   } catch (err) { next(err); }
 });
 
@@ -2654,16 +3036,28 @@ router.get('/reverse-sync-list', authMiddleware, adminOrMasterMiddleware, async 
     const conds = ['status = $1'];
     if (req.query.sheetId) { params.push(req.query.sheetId); conds.push(`sheet_id = $${params.length}`); }
     if (req.query.tabName) { params.push(req.query.tabName); conds.push(`tab_name = $${params.length}`); }
+    /* 종류 필터 — 화면 뱃지는 **손댈 수 있는 것만** 센다. `cancel_suspect` 는 설계상 영영 플래그로만
+       남으므로(자동취소 금지) 함께 세면 "584건"처럼 손쓸 수 없는 숫자가 떠 담당자가 곧 무시하게 된다. */
+    if (['edit', 'cancel_suspect'].includes(req.query.type)) {
+      params.push(req.query.type); conds.push(`proposal_type = $${params.length}`);
+    }
     const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const where = conds.join(' AND ');
     const { rows } = await pool.query(
       `SELECT id, os_id AS "osId", sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
               proposal_type AS "type", field, old_value AS "oldValue", new_value AS "newValue",
               status, detected_at AS "detectedAt", resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"
-         FROM reverse_sync_proposals WHERE ${conds.join(' AND ')}
+         FROM reverse_sync_proposals WHERE ${where}
         ORDER BY detected_at DESC LIMIT ${lim}`,
       params
     );
-    res.json({ ok: true, count: rows.length, items: rows });
+    /* ★★ `total` 은 **자르기 전** 개수다. 종전에는 `count: rows.length` 뿐이라 584건이 쌓여 있어도
+       limit 만큼만 보였고, 호출부는 잘렸다는 사실 자체를 알 수 없었다(조용한 누락).
+       COUNT 는 (status, proposal_type) 조건이라 인덱스를 타고, 뱃지가 limit=1 로 싸게 총계를 얻는다. */
+    const { rows: cnt } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM reverse_sync_proposals WHERE ${where}`, params);
+    const total = (cnt[0] && cnt[0].n) || 0;
+    res.json({ ok: true, count: rows.length, total, truncated: total > rows.length, items: rows });
   } catch (err) { next(err); }
 });
 
@@ -2698,6 +3092,24 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
         [p.os_id, p.new_value, editSeq]
       );
       if (!up.length) return { stale: true };
+      // ★ 같은 감지 묶음의 **형제 제안**을 살려 둔다.
+      //   한 주문에 은행·계좌·예금주가 함께 어긋나면 detect 는 같은 detected_edit_seq·detected_sig 로
+      //   제안을 여러 건 만든다(_replaceOpenProposalEdits — 실측 28건 중 세 칸이 모두 깨진 행이 있다).
+      //   그런데 바로 위 UPDATE 가 last_edit_seq 를 올리므로 두 번째 제안부터는 G6 가 stale 로 보고
+      //   **조용히 기각**해 버렸다 — 담당자가 세 칸을 다 고칠 방법이 없고, 못 고친 건은 목록에서 사라진다.
+      //   G6 가 막으려는 것은 "감지 뒤 **다른** 편집이 끼어든 경우"다. 방금 우리가 만든 편집은
+      //   같은 시트 읽기에서 나온 형제라 그 스냅샷을 무효화하지 않는다 → seq 만 이월한다.
+      //   detected_sig 까지 같을 때만 이월한다(다른 감지 회차의 제안은 그대로 stale 로 남아야 한다).
+      //   detected_edit_seq 가 null 인 제안은 애초에 G6 검사 대상이 아니므로 건드리지 않는다.
+      if (p.detected_edit_seq != null) {
+        await pool.query(
+          `UPDATE reverse_sync_proposals SET detected_edit_seq = $3
+             WHERE os_id = $1 AND id <> $2 AND status = 'open' AND proposal_type = 'edit'
+               AND detected_edit_seq = $4
+               AND detected_sig IS NOT DISTINCT FROM $5`,
+          [p.os_id, p.id, editSeq, p.detected_edit_seq, p.detected_sig]
+        );
+      }
       await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq, edits: [{ field: p.field, oldValue: p.old_value, newValue: p.new_value }] });
       return { mirrorStatus: up[0].mirror_status };
     });
@@ -3480,7 +3892,13 @@ router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req,
     const sql = `SELECT id, sheet_id AS "sheetId", tab_name AS "tabName", orderer, recipient, user_id AS "userId",
             phone, address, bank, account, depositor, price, order_num AS "orderNum", date_str AS "dateStr",
             selected_opt_key AS "selectedOptKey", memo, mirror_status AS "mirrorStatus", sheet_row AS "sheetRow",
-            source, deleted_at AS "deletedAt", last_edit_seq AS "lastEditSeq", submitted_at AS "submittedAt"
+            sheet_error AS "sheetError", source, deleted_at AS "deletedAt", last_edit_seq AS "lastEditSeq",
+            submitted_at AS "submittedAt",
+            (SELECT jsonb_build_object('id',sq.id,'status',sq.status,'attempts',sq.attempts,'maxRetry',sq.max_retry)
+               FROM sync_queue sq
+              WHERE sq.payload->>'orderSubmissionId'=order_submissions.id::text
+                AND sq.type IN ('workboard_apply','workboard_legacy_apply')
+              ORDER BY sq.created_at DESC LIMIT 1) AS queue
        FROM order_submissions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
        ORDER BY submitted_at DESC, id DESC LIMIT ${lim + 1}`;
     const { rows } = await pool.query(sql, params);
@@ -3575,6 +3993,142 @@ router.post('/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, asy
 
     logger.info(`[review-type-cleanup] 배송유형 이관 ${moved}건 · 믹스→혼합 ${renamed}건`);
     res.json({ ok: true, dryRun: false, total, preview, moved, renamed });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/manager-cleanup — 담당자 칸에 남은 **실명**을 닉네임으로 정리 (★ 065 후속)
+//
+//   배경(2026-08-23 신고 — 담당자 칩이 만두/망고/박세희/박은비 넷으로 갈림):
+//     065 **이전** 접수는 `tab_configs.manager` 에 담당AE 실명(manager_name·created_by)을
+//     그대로 넣었다. 065 는 `work_orders` 에 컬럼만 추가했을 뿐 **백필이 없고**, 접수 업서트가
+//     blank-only(`COALESCE(NULLIF(tab_configs.manager,''), …)`)라 재접수·차수 추가로도
+//     영영 고쳐지지 않는다 → 실명 행이 그대로 남아 홈 작업목록 담당자 칩이 넷으로 갈렸다.
+//     게다가 소비처는 전부 닉네임 리터럴 비교라(색 배지·🥟🥭·카카오 ID) 실명 행은 **조용히** 빠진다.
+//
+//   ★★ 판정은 `utils/workManager.mapWorkManager` **단일 출처**다 — SQL 에 이름을 박지 않는다.
+//      그래서 표기 흔들림('박 세희'·'박은비(망고)')도 같은 규칙으로 접히고, 매핑에 사람이
+//      늘면 이 창구가 자동으로 따라온다.
+//   ★★ **매핑되는 값만** 바꾼다 — 모르는 이름(자유입력 담당자)은 손대지 않는다(빈 값으로
+//      접으면 막으려던 것보다 큰 손실). 이미 닉네임인 행도 대상이 아니다.
+//   ★ 쓰기 표면 = `manager` **한 칸**뿐. `updated_at` 도 건드리지 않는다 — 이 정리는 표기
+//      통일이지 내용 변경이 아니라, 타임스탬프를 흔들면 그것을 tiebreak 로 쓰는 곳이 함께 움직인다.
+//   ★ 기존 행을 건드리는 작업이라 **기본 dryRun**(리뷰타입 정리와 같은 규율) — 사람이 숫자를
+//      먼저 보고 [적용하기]. 안 돌려도 안전하다(칩만 갈려 보일 뿐 동작은 종전 그대로).
+//
+//   body: { dryRun? = true } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+/** 정리 대상 테이블 — 담당자 칸을 가진 곳. ★ 이름은 코드 안 리터럴이라 주입 여지가 없다. */
+const MANAGER_TABLES = [
+  { table: 'tab_configs',       label: '작업 탭 담당자' },   // 홈 작업목록 담당자 칩·필터의 재료
+  { table: 'recruit_campaigns', label: '모집공고 담당자' },  // 공고 카드 🥟🥭·카카오 ID 매핑의 재료
+];
+router.post('/manager-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { mapWorkManager } = require('../utils/workManager');
+    const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
+
+    // 무엇이 바뀔지 먼저 센다(dryRun·실행 공통 — 실행 후 결과와 대조할 수 있게).
+    //   ★ 판정을 SQL 로 옮기지 않는다: 값 목록을 가져와 **매핑 함수로** 고른다(사본 0).
+    const preview = [];
+    for (const t of MANAGER_TABLES) {
+      const { rows } = await pool.query(
+        `SELECT manager AS raw, COUNT(*)::int AS cnt
+           FROM ${t.table}
+          WHERE COALESCE(btrim(manager), '') <> ''
+          GROUP BY manager
+          ORDER BY manager`);
+      for (const r of rows) {
+        const nick = mapWorkManager(r.raw);
+        if (!nick || nick === r.raw) continue;   // 매핑 밖 값·이미 닉네임 = 대상 아님
+        preview.push({ table: t.table, label: t.label, from: r.raw, to: nick, cnt: r.cnt });
+      }
+    }
+    const total = preview.reduce((a, r) => a + r.cnt, 0);
+    if (dryRun || total === 0) {
+      return res.json({ ok: true, dryRun: true, total, preview,
+        note: total === 0 ? '정리할 실명 표기가 없습니다.'
+                          : '실제 적용하려면 {dryRun:false} 로 다시 호출하세요.' });
+    }
+
+    let updated = 0;
+    for (const p of preview) {
+      // ★ 정확일치(`manager = $1`)로만 바꾼다 — 미리보기가 보여 준 그 값만 손댄다.
+      const { rowCount } = await pool.query(
+        `UPDATE ${p.table} SET manager = $2 WHERE manager = $1`, [p.from, p.to]);
+      p.updated = rowCount;
+      updated += rowCount;
+    }
+    logger.info(`[manager-cleanup] 담당자 표기 정리 ${updated}건 (${preview.map(p => `${p.table}:${p.from}→${p.to}`).join(' · ')})`);
+    res.json({ ok: true, dryRun: false, total, preview, updated });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/delivery-type-cleanup — 배송유형 칸의 **옛 어휘**를 표준 6종으로 정리
+//
+//   배경(2026-08-24 사용자 확정): 배송유형 어휘가 화면마다 갈려 있었다 —
+//     현행 모집공고 모달은 실배송·빈박스·택배발송대행인데, 인라인 공고수정 모달과
+//     구형 관리자 화면은 `빈택배`·`회수건` 을 저장하고 있었다. 그렇게 저장된 값은
+//     현행 모달 select 에 해당 option 이 없어 **다시 열면 빈 값으로 보이고, 아무것도
+//     안 건드리고 저장만 눌러도 조용히 지워질 수 있다**(COALESCE 가 빈 문자열은 안 막는다).
+//
+//   ★★ 판정은 `utils/deliveryType.canonicalDeliveryValue` **단일 출처**다 — SQL 에 어휘를
+//      박지 않는다. 그래서 표기 흔들림(`빈 택배`·`회수 건`)도 같은 규칙으로 접히고,
+//      어휘가 늘면 이 창구가 자동으로 따라온다.
+//   ★★ **접히는 값만** 바꾼다 — 모르는 값(`기타배송(박스)`)은 손대지 않는다(빈 값으로
+//      접으면 막으려던 것보다 큰 손실). 이미 표준형인 행도 대상이 아니다.
+//   ★★ **부속정보가 붙은 문장은 대상이 아니다** — `회수(회수택배사: …)` 는 원문이 곧 정보라
+//      기본형으로 줄이면 회수택배사가 증발한다(canonicalDeliveryValue 가 원문을 그대로 돌려준다).
+//   ★ 쓰기 표면 = `delivery_type` **한 칸**뿐. `updated_at` 도 건드리지 않는다 — 표기 통일이지
+//      내용 변경이 아니라, 타임스탬프를 흔들면 그것을 tiebreak 로 쓰는 곳이 함께 움직인다.
+//   ★ 기존 행을 건드리므로 **기본 dryRun**(담당자 표기 정리와 같은 규율) — 사람이 숫자를 먼저
+//      보고 [적용하기]. 안 돌려도 안전하다(읽을 때 접어서 판정하므로 화면·판정은 이미 정상).
+//
+//   body: { dryRun? = true } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+/** 정리 대상 — 배송유형 칸을 가진 표. ★ 이름은 코드 안 리터럴이라 주입 여지가 없다. */
+const DELIVERY_TYPE_TABLES = [
+  { table: 'tab_configs',       label: '작업 탭 배송유형' },
+  { table: 'recruit_campaigns', label: '모집공고 배송유형' },
+  { table: 'work_orders',       label: '작업오더 배송유형' },
+];
+router.post('/delivery-type-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { canonicalDeliveryValue } = require('../utils/deliveryType');
+    const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
+
+    const preview = [];
+    for (const t of DELIVERY_TYPE_TABLES) {
+      const { rows } = await pool.query(
+        `SELECT delivery_type AS raw, COUNT(*)::int AS cnt
+           FROM ${t.table}
+          WHERE COALESCE(btrim(delivery_type), '') <> ''
+          GROUP BY delivery_type
+          ORDER BY delivery_type`);
+      for (const r of rows) {
+        const std = canonicalDeliveryValue(r.raw);
+        if (!std || std === r.raw) continue;   // 판정 밖 값·이미 표준형·부속 문장 = 대상 아님
+        preview.push({ table: t.table, label: t.label, from: r.raw, to: std, cnt: r.cnt });
+      }
+    }
+    const total = preview.reduce((a, r) => a + r.cnt, 0);
+    if (dryRun || total === 0) {
+      return res.json({ ok: true, dryRun: true, total, preview,
+        note: total === 0 ? '정리할 옛 배송유형 표기가 없습니다.'
+                          : '실제 적용하려면 {dryRun:false} 로 다시 호출하세요.' });
+    }
+
+    let updated = 0;
+    for (const p of preview) {
+      // ★ 정확일치로만 바꾼다 — 미리보기가 보여 준 그 값만 손댄다.
+      const { rowCount } = await pool.query(
+        `UPDATE ${p.table} SET delivery_type = $2 WHERE delivery_type = $1`, [p.from, p.to]);
+      p.updated = rowCount;
+      updated += rowCount;
+    }
+    logger.info(`[delivery-type-cleanup] 배송유형 표기 정리 ${updated}건 (${preview.map(x => `${x.table}:${x.from}→${x.to}`).join(' · ')})`);
+    res.json({ ok: true, dryRun: false, total, preview, updated });
   } catch (err) { next(err); }
 });
 
@@ -3758,7 +4312,12 @@ router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async
               os.bank, os.account, os.depositor, os.price,
               os.order_num AS "orderNum", os.date_str AS "dateStr",
               os.selected_opt_key AS "selectedOptKey", os.memo,
-              os.sheet_written_at AS "writtenAt", os.submitted_at AS "submittedAt"
+              os.sheet_written_at AS "writtenAt", os.submitted_at AS "submittedAt",
+              /* 취소 내력(진단 전용) — "누가 왜 취소했나"를 API 밖에서 알 방법이 없어
+                 canceled 주문을 만나면 원인 추적이 막다른 길이 됐다(2026-08-19 유재휘 건).
+                 ★ JSON 응답에만 실린다 — 아래 CSV 는 head 목록으로 칸을 정하므로
+                   직원 붙여넣기용 CSV 의 열 구성은 한 칸도 바뀌지 않는다. */
+              os.canceled_by AS "canceledBy", os.deleted_at AS "deletedAt"
          FROM order_submissions os
         WHERE os.sheet_id = $1 AND os.tab_name = $2${statusCond}
         ORDER BY os.sheet_row ASC NULLS LAST, os.submitted_at ASC

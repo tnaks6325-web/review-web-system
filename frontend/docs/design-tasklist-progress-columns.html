@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>작업목록 진행 표기 — 참여·제출·입금을 한눈에 (시안 A/B/C)</title>
+<style>
+  :root{color-scheme:light;
+    --ink:#1a2233;--muted:#5b667a;--faint:#98a2b3;--line:#e5e8ee;--line2:#d8dde6;
+    --card:#fff;--card2:#f7f8fa;--bg:#eef1f5;
+    --accent:#2f6bff;--accent-deep:#1d4fd7;--accent-soft:#eaf0ff;--accent-line:#c5d4ff;
+    --safe:#177a4c;--safe-soft:#e7f6ee;--safe-line:#bfe3d0;
+    --warn:#a15c00;--warn-soft:#fdf3e2;--warn-line:#f0dcb8;
+    --bad:#c22f2f;--bad-soft:#fdecec;--bad-line:#f3c9c9;
+    /* 진행 3단계 색 — 참여(연) → 제출(중) → 입금(진). 같은 계열이라 "쌓이는 것"으로 읽힌다. */
+    --s1:#bcd0ff;--s2:#5b8dff;--s3:#1d4fd7}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6;padding:26px 16px 90px}
+  .page{max-width:1180px;margin:0 auto}
+  h1{font-size:21px;margin-bottom:4px}
+  .lead{color:var(--muted);font-size:12.5px;margin-bottom:8px}
+  h2{font-size:16px;margin:30px 0 8px;padding-left:10px;border-left:4px solid var(--accent)}
+  h3{font-size:13.5px;margin:16px 0 7px}
+  p{margin:6px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:10px 0;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .tag{display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 9px;vertical-align:2px;margin-right:4px}
+  .tag.fix{background:var(--bad-soft);color:var(--bad)}
+  .tag.new{background:var(--accent-soft);color:var(--accent-deep)}
+  .tag.ok{background:var(--safe-soft);color:var(--safe)}
+  .tag.rec{background:var(--safe);color:#fff}
+  code{background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Consolas,monospace}
+  ul{padding-left:19px;margin:6px 0}
+  li{margin:3px 0}
+  table.doc{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0}
+  table.doc th{background:var(--card2);text-align:left;padding:7px 10px;border:1px solid var(--line);font-size:11.5px;color:var(--muted);white-space:nowrap}
+  table.doc td{padding:7px 10px;border:1px solid var(--line);vertical-align:top}
+  .navbar{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 6px}
+  .navbar a{font-size:12px;font-weight:700;text-decoration:none;color:var(--muted);background:var(--card);border:1px solid var(--line2);border-radius:999px;padding:5px 13px}
+  .navbar a.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  /* ══ 실제 화면(workdesk 홈 작업목록) 표 재현 — 폭·글자크기까지 실물과 맞춘다 ══ */
+  .wbl-box{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .wbl-h{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--card2);font-size:12px}
+  .wbl-ttl{font-weight:800;font-size:12.5px}
+  .wbl-seg button{font-size:11.5px;font-weight:700;border:1px solid var(--line2);background:#fff;color:var(--muted);border-radius:7px;padding:3px 10px;cursor:pointer}
+  .wbl-seg button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  table.wbl-t{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+  table.wbl-t th{position:sticky;top:0;background:var(--card2);text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:700;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--line)}
+  table.wbl-t td{padding:8px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
+  table.wbl-t tr:last-child td{border-bottom:0}
+  table.wbl-t tr:hover td{background:#fafbfd}
+  .wbl-nm{font-weight:750;font-size:12.5px}
+  .wbl-sub{font-size:10px;color:var(--faint)}
+  .wbl-c{text-align:center}
+  .wbl-b{font-size:10.5px;font-weight:700;border:1px solid var(--line2);background:#fff;color:var(--ink);border-radius:6px;padding:3px 8px;cursor:pointer;white-space:nowrap}
+  /* ★ 상태 배지 글자 = **담당 열 값과 동일**(12px / 400) — 실측으로 맞췄다(사용자 지시 2026-09-21).
+     종전 10px/800 은 표에서 혼자 작고 굵어 눈에 먼저 꽂혔다(같은 줄의 어느 값보다 강했다).
+     ★ 초록은 쓰지 않는다 — 상태는 **글자가 말하고**, 배경은 있는 듯 없는 듯한 바탕으로만 둔다. */
+  .wbl-s{display:inline-block;font-size:12px;font-weight:400;border-radius:6px;padding:1px 8px;white-space:nowrap;color:var(--muted);background:var(--card2)}
+  .wbl-s.run{background:var(--card2);color:var(--muted)}
+  /* 마감 후보 = 파랑 채움(사용자 지시) · 체크 글리프는 쓰지 않는다 — 글자가 이미 말한다. */
+  .wbl-s.cand{background:var(--accent);color:#fff}
+  .wbl-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  /* ── 현재(as-is) 표기 ── */
+  .now-g{display:inline-block;width:76px;height:8px;border-radius:5px;background:var(--line);position:relative;vertical-align:middle;margin-right:6px}
+  .now-g i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--accent)}
+
+  /* ── A안: 3층 누적 게이지 ── */
+  .pgA{display:flex;align-items:center;gap:8px}
+  .pgA .bar{position:relative;width:92px;height:9px;border-radius:5px;background:var(--line);overflow:hidden;flex:0 0 auto}
+  .pgA .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+  .pgA .bar .l1{background:var(--s1)}
+  .pgA .bar .l2{background:var(--s2)}
+  .pgA .bar .l3{background:var(--s3)}
+  .pgA .nums{font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px}
+  .pgA .nums b{font-weight:800}
+  .pgA .dot{display:inline-block;width:6px;height:6px;border-radius:50%;vertical-align:1px;margin-right:3px}
+  .pgA .lack{font-size:10px;font-weight:800;color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-line);border-radius:999px;padding:0 6px;white-space:nowrap}
+  .pgA .done{font-size:10px;font-weight:800;color:var(--safe);background:var(--safe-soft);border:1px solid var(--safe-line);border-radius:999px;padding:0 6px;white-space:nowrap}
+
+  /* ── B안: **표 열 4개** (총건수 · 참여 · 제출 · 입금) — 숫자만 ──────────────────
+     ★ 한 칸 안에 우겨넣지 않고 **진짜 열**로 나눈다 — 그래야 위아래 줄의 같은 항목이
+       세로로 정렬돼 눈이 한 줄기로 훑는다(사용자 지시). 무엇을 뜻하는지는 **머리글이 말한다**
+       → 칸 안에는 라벨도 체크도 넣지 않는다(같은 말을 줄마다 87번 반복하지 않는다).
+     ★ 숫자는 **오른쪽 정렬 + 고정폭 숫자**(tabular-nums) — 자릿수가 어긋나면 세로 비교가 깨진다. */
+  /* ★★ **머리글과 숫자가 같은 선에 서야 한다**(사용자 지적 2026-09-21).
+     종전에는 머리글·값을 둘 다 오른쪽 정렬했는데, 값이 상자 안에 있고 그 상자에 좌우 여백이
+     있어 **숫자가 머리글보다 안쪽으로 밀렸다** — 열마다 기준선이 달라 보여 혼란스러웠다.
+     고친 방법 = ① 열(머리글·칸)은 **가운데 정렬** ② 상자는 **고정폭**이라 줄이 바뀌어도
+     같은 자리에 선다 ③ 상자 **안에서만** 오른쪽 정렬이라 100 과 89 의 자릿수는 그대로 맞는다.
+     ★ 담당 열처럼 왼쪽 정렬로 두지 않는 이유 — 숫자는 자릿수가 왼쪽에 붙으면 비교가 깨진다. */
+  /* ★★ 특이성 주의(실측으로 밟았다) — 바로 위 `table.wbl-t th{text-align:left}` 가
+     (0,1,2) 라 `th.nh`(0,1,1) 로는 **이기지 못한다**. 그래서 머리글이 계속 왼쪽에 붙어
+     값과 어긋나 보였다. 실제 화면에 옮길 때도 같은 함정이 있으니 선택자를 이 형태로 둘 것. */
+  /* ★★ 좌우 여백을 **열까지** 줄여 네 숫자를 붙인다(사용자 지시 2026-09-21 — 한눈에 파악).
+     ⚠ 여기서도 우선순위 함정: 기본 `table.wbl-t td{padding:8px 9px}` 가 (0,1,2) 라
+       `td.nc` (0,1,1) 로는 padding 을 못 이긴다 → **`table.wbl-t td.nc`** 로 쓴다. */
+  table.wbl-t th.nh,table.wbl-t td.nc{text-align:center;white-space:nowrap;padding-left:3px;padding-right:3px}
+  /* ★★ **폭을 고정하지 않으면 다시 벌어진다**(실측 307→258px 에서 멈췄다) — 표는 남는 폭을
+     열에 나눠 주므로, 여백만 줄여서는 네 숫자가 붙지 않는다. 머리글 열에 폭을 못박아
+     상자 + 최소 여백만 차지하게 한다(내용이 넘치면 브라우저가 알아서 넓힌다). */
+  table.wbl-t th.nh{width:48px}
+  td.nc{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:700}
+  /* ★ 상자 **안**까지 가운데로 — 오른쪽 정렬로 두면 숫자가 여백만큼 밀려(실측 6.4px)
+     머리글 중심과 어긋난다. 담당 열이 맞아 보이는 이유가 바로 "머리글과 값의 중심이 같아서"다.
+     자릿수는 tabular-nums 가 잡아 주므로 같은 자릿수끼리는 그대로 정렬된다. */
+  /* ★ 폭은 **네 자리(1000건)** 기준으로 고정 — 500·800·1000건 작업이 실재한다.
+     고정이라 줄이 바뀌어도 상자가 같은 자리에 서고, 여백을 줄여도 숫자가 잘리지 않는다. */
+  td.nc .box{display:inline-block;width:42px;text-align:center;border-radius:6px;padding:2px 2px;background:var(--card2);border:1px solid var(--line)}
+  td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted);font-weight:800}
+  /* ★ 총건수에 도달하면 **파랑으로 채운다**(사용자 지시 2026-09-22). 초록은 쓰지 않는다.
+     색은 이 표에서 **파랑 하나**만 쓴다 — 완료와 마감 후보가 같은 색이라 "다 찼다"가 한 가지 뜻으로 읽힌다
+     (Refactoring UI: 강조는 색과 굵기로, 색 종류는 최소로). */
+  td.nc .box.full{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* ★ 모자란 쪽은 빨강이 아니라 중립 — 「입금 체크 38」이 말하듯 흔한 상태라
+     전부 빨갛게 칠하면 진짜 신호(정원 초과)가 묻힌다. */
+  td.nc .box.short{color:var(--ink)}
+  td.nc .box.over{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
+  td.nc .lack{display:block;font-size:9.5px;font-weight:800;color:var(--muted);line-height:1.15;margin-top:1px}
+  /* 변형 대조용 — 상자 없이 숫자만 */
+  td.nc.bare .box{background:transparent;border-color:transparent;padding:2px 2px}
+  td.nc.bare .box.full{color:var(--accent-deep);font-weight:600}
+
+  /* ── C안: 남은 일 중심 ── */
+  .pgC{display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .pgC .base{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
+  .pgC .base b{color:var(--ink);font-weight:800}
+  .pgC .todo{font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 8px;background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn-line)}
+  .pgC .ok{font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 8px;background:var(--safe-soft);color:var(--safe);border:1px solid var(--safe-line)}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin:8px 0 2px;align-items:center}
+  .legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+  .note{font-size:11.5px;color:var(--muted);margin-top:8px}
+  .hl{background:#fff6cc;border-radius:3px;padding:0 3px}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>작업목록 진행 표기 — 참여 · 총건수 · 제출 · 입금을 한눈에</h1>
+<p class="lead">
+  홈 <b>작업 목록</b>의 「인원/제출」 칸을 다시 짠 시안입니다. 아래 표는 <b>실제 화면 그대로 동작</b>하며 숫자는 예시입니다
+  (작업명은 실제 목록에서 가져왔고, 입금 수치는 화면에 안 보여 임의로 넣었습니다).
+</p>
+
+<div class="card" style="border-color:var(--safe-line);background:var(--safe-soft)">
+  <p style="margin:0"><b>B안(수정본)</b> — 표의 <b>열을 네 개</b>로 나눕니다: <b>총건수 · 참여 · 제출 · 입금</b>.
+  칸 안에는 <b>숫자만</b> 두고(무엇인지는 머리글이 말합니다) <b>체크는 쓰지 않습니다</b> — 다 찬 항목은 연한 초록으로만 구분합니다.
+  같은 항목이 <b>세로로 나란히</b> 서서 줄끼리 비교가 되고, 막대가 없어 “꽉 찬 것처럼 보이는” 착시도 사라집니다.
+  <br>아래 <b>세 변형</b>(B-1 숫자만 · B-2 모자란 수 덧붙임 · B-3 상자 없이) 중에서 골라 주세요.
+  참고로 A·C안은 처음 검토했던 안이며 아래에 그대로 남겨 두었습니다.</p>
+</div>
+
+<div class="navbar" id="nav"></div>
+
+<!-- ══════════ 문제 ══════════ -->
+<h2>지금 무엇이 문제인가</h2>
+<div class="card">
+  <p><span class="tag fix">문제</span> 게이지가 <b>참여자 수만</b> 그립니다. 그래서 <code>50/50</code> 으로 막대가 꽉 차면 <b>다 끝난 것처럼 보이는데</b>,
+     정작 리뷰를 낸 사람은 49명입니다. 그 49는 <span class="hl">회색 작은 글씨</span>라 눈에 들어오지 않습니다.</p>
+  <p><span class="tag fix">문제</span> <b>입금은 아예 다른 열</b>에 있어, 한 작업이 어디까지 끝났는지 보려면 눈이 좌우로 왔다 갔다 해야 합니다.</p>
+  <p><span class="tag fix">문제</span> 머리글은 <b>「인원/제출」</b> 인데 굵은 숫자는 <b>참여/총건수</b> 입니다 — 머리글과 내용이 어긋납니다.</p>
+
+  <h3>지금 화면(그대로 재현)</h3>
+  <div class="wbl-box">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th><th>인원/제출</th><th>입금</th><th>상태</th>
+    </tr></thead><tbody id="tbNow"></tbody></table>
+  </div>
+  <p class="note">↑ <b>0807 바디로션</b> 줄을 보세요. 막대가 꽉 차고 <code>100/100</code> 이지만 <b>리뷰는 89명만</b> 냈고 입금은 80명입니다.
+     지금 화면에서는 이 작업이 「거의 끝난 작업」처럼 보입니다.</p>
+</div>
+
+<!-- ══════════ A ══════════ -->
+<section data-v="A">
+<h2>A안 — 한 막대에 3단계를 쌓는다</h2>
+<div class="card">
+  <p>막대 하나에 <b>참여 → 제출 → 입금</b> 을 겹쳐 그립니다. <b>진한 색이 끝까지 차야 완료</b>이므로,
+     연한 부분이 남아 있으면 그게 곧 <b>남은 일</b>입니다. 숫자는 <code>참여·제출·입금 / 총건수</code> 순서로 한 줄에 둡니다.</p>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--s1)"></i>참여(구매)</span>
+    <span><i class="sw" style="background:var(--s2)"></i>리뷰 제출</span>
+    <span><i class="sw" style="background:var(--s3)"></i>입금 완료</span>
+    <span><i class="sw" style="background:var(--line)"></i>아직 안 참</span>
+  </div>
+  <div class="wbl-box" style="margin-top:10px">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th><th>참여 · 제출 · 입금</th><th>상태</th>
+    </tr></thead><tbody id="tbA"></tbody></table>
+  </div>
+  <table class="doc">
+    <tr><th style="width:92px">무엇이 바뀌나</th><td>게이지가 <b>세 단계</b>를 쌓아 보여주고, 숫자 셋이 같은 크기로 나란히 섭니다. <b>입금 열이 이 칸으로 들어와 열이 하나 줄어듭니다</b>(가로가 넉넉해집니다).</td></tr>
+    <tr><th>무엇을 해결하나</th><td>「꽉 찬 막대 = 완료」라는 <b>착시가 사라집니다</b>. 남은 일이 연한 색 길이로 즉시 보이고, 모자란 항목은 <b>빨간 배지</b>(<span class="pgA"><span class="lack">제출 11</span></span>)로 못박습니다.</td></tr>
+    <tr><th>위험은</th><td><b>차이가 작으면 막대로는 안 보입니다</b> — 100건 중 89명 제출은 막대에서 11픽셀 차이라, 위 표에서도 거의 한 덩어리로 보입니다.
+      즉 <b>실제로 구분해 주는 것은 막대가 아니라 오른쪽 숫자·배지</b>입니다(그래서 권장에서 뺐습니다). 색 세 단계의 뜻도 한 번은 익혀야 합니다.</td></tr>
+  </table>
+</div>
+</section>
+
+<!-- ══════════ B ══════════ -->
+<section data-v="B">
+<h2>B안 — 열 네 개로 나눈다 <span class="tag rec">권장 · 수정본</span></h2>
+<div class="card">
+  <p>한 칸에 우겨넣지 않고 <b>표의 열을 네 개로</b> 나눕니다 — <b>총건수 · 참여 · 제출 · 입금</b> 순서입니다.
+     그래야 위아래 줄의 같은 항목이 <b>세로로 나란히</b> 서서, 눈이 한 줄기로 훑어 내려가며 비교할 수 있습니다.</p>
+  <ul>
+    <li>칸 안에는 <b>숫자만</b> 둡니다 — 무엇을 뜻하는지는 <b>머리글이 말합니다</b>(같은 말을 87줄 반복하지 않습니다).</li>
+    <li><b>체크(✓)도 초록도 쓰지 않습니다.</b> 완료는 <b>숫자가 같다는 사실</b>이 말합니다
+        (총건수 = 참여 = 제출 = 입금). 상태 열이 같은 말을 한 번 더 하므로, 색을 더 얹으면
+        <b>같은 정보를 세 번</b> 말하면서 표만 알록달록해집니다.</li>
+    <li><b>상태 배지의 글자를 담당 열 값과 똑같이</b> 맞췄습니다(12px · 보통 굵기 — 실측으로 확인).
+        <br><span class="note">종전 배지는 10px에 굵기 800이라 표에서 혼자 작고 굵어,
+        정작 봐야 할 숫자보다 눈에 먼저 꽂혔습니다.</span></li>
+    <li><b>머리글과 숫자의 중심을 맞췄습니다</b> — 담당 열이 안정돼 보이는 이유가 바로 그것입니다.
+        <br><span class="note">고치기 전에는 머리글이 <b>15.7~20.3픽셀</b> 왼쪽으로 밀려 있었습니다(브라우저로 직접 측정).
+        기존 표 규칙이 머리글을 왼쪽에 붙이고 있었는데 그게 새 규칙보다 우선순위가 높았던 탓입니다.
+        지금은 네 열 모두 <b>0.0픽셀</b>입니다.</span></li>
+    <li>숫자는 <b>고정폭 글꼴</b>이라 같은 자릿수끼리는 그대로 줄이 맞습니다.</li>
+    <li><b>네 자리(1000건)를 기준</b>으로 칸 폭을 잡았습니다 — 500·800·1000건 작업이 실재하므로 자릿수가 늘어도 깨지지 않습니다.</li>
+    <li><b>여백을 줄여 네 숫자를 붙였습니다</b> — 눈이 좌우로 움직이지 않고 한 번에 넷을 읽습니다.
+        <br><span class="note">네 열이 차지하는 폭 <b>307px → 192px</b>(브라우저 실측). 여백만 줄였을 땐 258px 에서 멈췄는데,
+        표가 남는 폭을 열에 나눠 주기 때문이라 <b>열 폭을 못박아</b> 붙였습니다.</span></li>
+  </ul>
+
+  <h3>B-1 · 숫자만 <span class="tag ok">지시 그대로</span></h3>
+  <div class="wbl-box">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th>
+      <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
+      <th>상태</th>
+    </tr></thead><tbody id="tbB1"></tbody></table>
+  </div>
+
+  <h3>B-2 · 모자란 수를 작게 덧붙인 변형</h3>
+  <p class="note">“몇 명 남았나”를 자주 보신다면 이쪽입니다. 숫자 아래 <code>−11</code> 한 줄만 더 붙고 나머지는 같습니다.</p>
+  <div class="wbl-box">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th>
+      <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
+      <th>상태</th>
+    </tr></thead><tbody id="tbB2"></tbody></table>
+  </div>
+
+  <h3>B-3 · 상자 없이 숫자만(가장 담백)</h3>
+  <p class="note">상자 테두리도 빼면 표가 더 조용해집니다. 다 찬 항목은 <b>초록 글자</b>로만 구분합니다.</p>
+  <div class="wbl-box">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th>
+      <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
+      <th>상태</th>
+    </tr></thead><tbody id="tbB3"></tbody></table>
+  </div>
+
+  <table class="doc">
+    <tr><th style="width:96px">무엇이 바뀌나</th><td>「인원/제출」 + 「입금」 <b>두 열이 네 열로</b> 바뀝니다(총건수·참여·제출·입금). 게이지 막대와 회색 보조 글씨는 사라집니다.</td></tr>
+    <tr><th>무엇을 해결하나</th><td>막대 착시가 <b>원천적으로</b> 없고, 같은 항목이 세로로 정렬돼 <b>줄끼리 비교</b>가 됩니다. 「총건수 = 참여 = 제출 = 입금」이면 그게 완료입니다.</td></tr>
+    <tr><th>가로 폭은</th><td><b>오히려 줄어듭니다.</b> 지금 「인원/제출」은 막대(76px)+숫자+보조글씨로 <b>약 175px</b>, 입금 40px 를 합쳐 <b>≈215px</b> 인데,
+      네 열은 붙여서 <b>192px</b>(실측)입니다. 열 개수는 12 → 13 이지만 실제 폭은 더 줄어듭니다.</td></tr>
+    <tr><th>위험은</th><td>완료를 알려주는 <b>색·기호가 전혀 없습니다</b> — 숫자 넷을 눈으로 견줘야 합니다.
+      그래서 <b>총건수를 맨 왼쪽</b>에 두고 네 값을 붙여, 한 번에 훑도록 했습니다. 상태 열의 「마감 후보」가 보조로 말합니다.</td></tr>
+  </table>
+</div>
+</section>
+
+<!-- ══════════ C ══════════ -->
+<section data-v="C">
+<h2>C안 — “남은 일”만 크게</h2>
+<div class="card">
+  <p>기본은 <code>참여/총건수</code> 하나만 조용히 두고, <b>아직 안 끝난 것</b>을 배지로 크게 띄웁니다.
+     전부 끝났으면 <span class="pgC"><span class="ok">✓ 완료</span></span> 하나만 남습니다.</p>
+  <p class="note">★ 배지는 <b>주황</b>입니다(빨강 아님) — 덜 끝난 것은 사고가 아니라 남은 일이기 때문입니다.</p>
+  <div class="wbl-box" style="margin-top:10px">
+    <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg"><button class="on">진행 중</button><button>마감 보관함</button></span></div>
+    <table class="wbl-t"><thead><tr>
+      <th>작업명</th><th>담당</th><th>진행 · 남은 일</th><th>상태</th>
+    </tr></thead><tbody id="tbC"></tbody></table>
+  </div>
+  <table class="doc">
+    <tr><th style="width:92px">무엇이 바뀌나</th><td>“무엇이 몇 명 남았다”가 <b>문장처럼</b> 읽힙니다. 끝난 작업은 초록 한 덩어리라 목록에서 눈이 그냥 지나갑니다.</td></tr>
+    <tr><th>무엇을 해결하나</th><td>사용자가 말한 <b>“완성인지 아닌지”가 가장 빨리</b> 판별됩니다. 챙길 작업만 튀어나옵니다.</td></tr>
+    <tr><th>위험은</th><td>제출·입금의 <b>실제 인원수를 화면에서 잃습니다</b>(마우스를 올려야 보입니다). “몇 명이 냈나”를 자주 보는 담당자에겐 불편할 수 있습니다.</td></tr>
+  </table>
+</div>
+</section>
+
+<!-- ══════════ 비교 ══════════ -->
+<section data-v="ALL">
+<h2>한자리 비교 — 같은 작업 4줄</h2>
+<div class="card">
+  <table class="doc">
+    <thead><tr><th style="width:190px">작업</th><th>지금</th><th>A안</th><th>B안</th><th>C안</th></tr></thead>
+    <tbody id="cmp"></tbody>
+  </table>
+  <p class="note">※ <b>0807 바디로션</b>(참여 100 · 제출 89 · 입금 80) 줄에서 차이가 가장 큽니다 — 지금은 “끝난 작업”으로 보이고, 세 안은 모두 “아직 아니다”라고 말합니다.</p>
+</div>
+</section>
+
+<h2>공통으로 정해야 할 것</h2>
+<div class="card">
+  <ul>
+    <li><b>입금 열은 없앱니다</b> — 세 안 모두 진행 칸이 입금을 품습니다. 열이 12개에서 11개로 줄어 가로가 넉넉해집니다.
+        <br><span class="note">단, 지금 「입금 체크」 필터를 켤 때 나오던 <code>(미입금 N)</code> 표시는 새 칸이 이어받아야 합니다.</span></li>
+    <li><b>총건수를 모르는 작업</b>(지금 <code>50/50*</code> 의 별표)은 세 안 모두 <b>별표를 유지</b>하고 마우스를 올리면 사유를 말합니다.</li>
+    <li><b>정원을 넘겨 들어온 작업</b>(101/100)은 지금처럼 빨간 숫자 + 초과 배지를 유지합니다.</li>
+    <li><b>휴대폰 화면</b>에서는 막대를 숨기고 숫자만 남깁니다(지금 규칙 그대로).</li>
+  </ul>
+</div>
+
+<h2>고르신 뒤</h2>
+<div class="card">
+  <p>고른 안으로 구현하고, 같은 판정을 쓰는 다른 화면(작업보드 위쪽 진행 현황·업체 화면)과 <b>숫자가 갈리지 않게</b> 맞추겠습니다.
+     표기만 바뀌고 <b>데이터·집계 방식은 그대로</b>입니다.</p>
+</div>
+
+</div>
+
+<script>
+/* 목업 데이터 — 작업명은 실제 목록, 입금은 예시값(화면에 안 보여 임의). */
+var ROWS=[
+  {n:'0528핸드크림',            a:'주식회사 키오스킨', m:'만두', f:60,  t:60,  s:60, p:60},
+  {n:'0326삼푸실배송',           a:'주식회사 키오스킨', m:'만두', f:50,  t:50,  s:49, p:47},
+  {n:'0807(올리브영)블랑카우 바디로션 100건', a:'주식회사 키오스킨', m:'만두', f:100, t:100, s:89, p:80},
+  {n:'0727(올리브영)블랑카우 바디로션 100건', a:'주식회사 키오스킨', m:'만두', f:97,  t:100, s:95, p:90},
+  {n:'노티드_ 두바이 쫀득쿠키',    a:'주식회사 지에프에프씨', m:'만두', f:98, t:98, s:96, p:96},
+  /* ★ 네 자리(1000건) 작업 — 열 폭이 여기서 깨지면 안 된다(사용자 지시 2026-09-21). */
+  {n:'0915(쿠팡)대용량 세탁세제 1000건', a:'주식회사 키오스킨', m:'망고', f:1000, t:1000, s:987, p:950}
+];
+function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function pct(v,d){return d?Math.min(100,Math.round(v/d*100)):0;}
+function tip(r){return '참여 '+r.f+'명 · 리뷰 제출 '+r.s+'명 · 입금 완료 '+r.p+'명 · 총건수 '+r.t+'건';}
+function done(r){return r.f>=r.t&&r.s>=r.t&&r.p>=r.t;}
+
+/* 지금(as-is) — 실제 _finProgHtml 과 같은 모양: 참여 게이지 + 굵은 참여/총 + 회색 제출 */
+function cellNow(r){
+  return '<span class="now-g" title="'+esc(tip(r))+'"><i style="width:'+pct(r.f,r.t)+'%"></i></span>'
+       + '<span class="wbl-num">'+r.f+'/'+r.t+'</span>'
+       + '<span class="wbl-sub">제출 '+r.s+'</span>';
+}
+/* A — 3층 누적 게이지 */
+function cellA(r){
+  var lack=[];
+  if(r.s<r.t) lack.push('제출 '+(r.t-r.s)+'명');
+  if(r.p<r.t) lack.push('입금 '+(r.t-r.p)+'명');
+  var badge=done(r)?'<span class="done">✓ 완료</span>'
+                   :(lack.length?'<span class="lack">'+lack.join(' · ')+'</span>':'');
+  return '<span class="pgA" title="'+esc(tip(r))+'">'
+       +   '<span class="bar">'
+       +     '<i class="l1" style="width:'+pct(r.f,r.t)+'%"></i>'
+       +     '<i class="l2" style="width:'+pct(r.s,r.t)+'%"></i>'
+       +     '<i class="l3" style="width:'+pct(r.p,r.t)+'%"></i>'
+       +   '</span>'
+       +   '<span class="nums"><span class="dot" style="background:var(--s1)"></span><b>'+r.f+'</b>'
+       +     '<span class="dot" style="background:var(--s2);margin-left:7px"></span><b>'+r.s+'</b>'
+       +     '<span class="dot" style="background:var(--s3);margin-left:7px"></span><b>'+r.p+'</b>'
+       +     ' <span style="color:var(--faint)">/ '+r.t+'</span></span>'
+       +   badge
+       + '</span>';
+}
+/* B — 표 열 4개(총건수·참여·제출·입금) · 숫자만
+   ★ 완료는 체크가 아니라 **색**으로만(사용자 지시) · 라벨은 머리글이 말한다. */
+function numCell(v,r,opt){
+  opt=opt||{};
+  var cls = opt.tot ? 'tot' : (v>=r.t ? 'full' : (v>r.t ? 'over' : 'short'));
+  if(!opt.tot && v>r.t) cls='over';
+  var lack = (!opt.tot && opt.lack && v<r.t) ? '<span class="lack">−'+(r.t-v)+'</span>' : '';
+  return '<td class="nc'+(opt.bare?' bare':'')+'" title="'+esc(tip(r))+'"><span class="box '+cls+'">'+v+'</span>'+lack+'</td>';
+}
+function rowB(r,opt){
+  return '<tr><td><div class="wbl-nm">'+esc(r.n)+'</div><div class="wbl-sub">'+esc(r.a)+'</div></td>'
+       + '<td>'+esc(r.m)+'</td>'
+       + numCell(r.t,r,{tot:true,bare:opt.bare})
+       + numCell(r.f,r,{lack:opt.lack,bare:opt.bare})
+       + numCell(r.s,r,{lack:opt.lack,bare:opt.bare})
+       + numCell(r.p,r,{lack:opt.lack,bare:opt.bare})
+       + '<td><span class="wbl-s '+(done(r)?'cand':'run')+'">'+(done(r)?'마감 후보':'진행 중')+'</span></td></tr>';
+}
+function fillB(id,opt){
+  var el=document.getElementById(id); if(!el) return;
+  el.innerHTML=ROWS.map(function(r){return rowB(r,opt||{});}).join('');
+}
+/* 비교표에서 쓰는 한 칸짜리 요약(4열을 한 칸에 눌러 담은 형태 — 비교용) */
+function cellB(r){
+  function b(v){var c=v>=r.t?'full':'short';return '<span class="box '+c+'" style="min-width:34px;display:inline-block;text-align:right;border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:700;'
+    +'background:var(--card2);border:1px solid var(--line)'+'">'+v+'</span>';}
+  return '<span title="'+esc(tip(r))+'" style="display:inline-flex;gap:3px;align-items:center;font-variant-numeric:tabular-nums">'
+       + '<span style="color:var(--muted);font-weight:800;margin-right:2px">'+r.t+'</span>'
+       + b(r.f)+b(r.s)+b(r.p)+'</span>';
+}
+/* C — 남은 일 중심 */
+function cellC(r){
+  var todo=[];
+  if(r.f<r.t) todo.push('참여 '+(r.t-r.f)+'명');
+  if(r.s<r.t) todo.push('제출 '+(r.t-r.s)+'명');
+  if(r.p<r.t) todo.push('입금 '+(r.t-r.p)+'명');
+  var right=todo.length
+    ? '<span class="todo'+(todo.length===1?' warn':'')+'">'+todo.join(' · ')+' 남음</span>'
+    : '<span class="ok">✓ 완료</span>';
+  return '<span class="pgC" title="'+esc(tip(r))+'"><span class="base"><b>'+r.f+'</b>/'+r.t+'</span>'+right+'</span>';
+}
+
+function row(r,cellFn,withPay){
+  return '<tr><td><div class="wbl-nm">'+esc(r.n)+'</div><div class="wbl-sub">'+esc(r.a)+'</div></td>'
+       + '<td>'+esc(r.m)+'</td>'
+       + '<td>'+cellFn(r)+'</td>'
+       + (withPay?'<td class="wbl-num">'+r.p+'</td>':'')
+       + '<td><span class="wbl-s '+(done(r)?'cand':'run')+'">'+(done(r)?'마감 후보':'진행 중')+'</span></td></tr>';
+}
+function fill(id,fn,withPay){
+  var el=document.getElementById(id); if(!el) return;
+  el.innerHTML=ROWS.map(function(r){return row(r,fn,withPay);}).join('');
+}
+fill('tbNow',cellNow,true); fill('tbA',cellA,false); fill('tbC',cellC,false);
+fillB('tbB1',{});                 // 지시 그대로 — 숫자만
+fillB('tbB2',{lack:true});        // 모자란 수 덧붙임
+fillB('tbB3',{bare:true});        // 상자 없이
+
+var cmp=document.getElementById('cmp');
+if(cmp) cmp.innerHTML=ROWS.map(function(r){
+  return '<tr><td><b>'+esc(r.n)+'</b><div class="wbl-sub">참여 '+r.f+' · 제출 '+r.s+' · 입금 '+r.p+' / '+r.t+'</div></td>'
+       + '<td>'+cellNow(r)+'</td><td>'+cellA(r)+'</td><td>'+cellB(r)+'</td><td>'+cellC(r)+'</td></tr>';
+}).join('');
+
+/* ?v=A|B|C 단독 보기 — 레포 시안 관용구 */
+(function(){
+  var v=(location.search.match(/[?&]v=([A-Za-z]+)/)||[])[1];
+  var nav=document.getElementById('nav');
+  var items=[['','전체 보기'],['A','A안만'],['B','B안만'],['C','C안만']];
+  nav.innerHTML=items.map(function(it){
+    var on=((v||'')===it[0])?' class="on"':'';
+    return '<a'+on+' href="?'+(it[0]?'v='+it[0]:'')+'">'+it[1]+'</a>';
+  }).join('');
+  if(!v) return;
+  var keep=String(v).toUpperCase();
+  [].forEach.call(document.querySelectorAll('section[data-v]'),function(s){
+    var d=s.getAttribute('data-v');
+    if(d!==keep&&d!=='ALL') s.style.display='none';
+  });
+})();
+</script>
+</body>
+</html>

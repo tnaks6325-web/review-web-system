@@ -33,6 +33,10 @@ mockModule('../src/db/pool', {
       _persistedCacheJson = params[0];
       return { rows: [] };
     }
+    // ★★ 스윕 제외 게이트(`sheetlessScope.SWEEP_SKIP_SHEET_IDS_SQL`)는 열거식을 서브쿼리로 **품고 있어**
+    //   아래 열거 분기의 정규식에도 걸린다 → 더 좁은 이 분기를 먼저 둔다(레포 관용구: 스텁 분기는 좁은 것부터).
+    //   빠뜨리면 게이트가 S1·S2 를 "제외 대상"으로 받아 변경 감지가 0 이 된다(실측).
+    if (/BOOL_AND/.test(s)) return { rows: [] };
     if (/SELECT DISTINCT sheet_id FROM campaigns/.test(s)) return { rows: [{ sheet_id: 'S1' }, { sheet_id: 'S2' }] };
     return { rows: [], rowCount: 0 };
   },

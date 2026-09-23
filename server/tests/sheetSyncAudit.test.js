@@ -692,6 +692,119 @@ t('★ 라우트: ignore 는 adminOrMaster · 기본은 제외(ignored !== false
   assert.ok(ig && ig.mw.includes('authMiddleware') && ig.mw.includes('adminOrMasterMiddleware'), '게이트 부족');
 });
 
+/* ══ 10) 무시트 작업은 점검 대상이 아니다 (2026-08-19) ═══════
+   왜: 무시트 탭의 `raw_sheet_*` 는 시트 사본이 아니라 **작업표에서 재생성한 장부**라,
+   이름이 아직 안 채워진 준비 자리만 있는 정상 작업이 `미러 500행 · 인덱스 0행` 으로 보여
+   `index_empty`(헤더 인식 실패 의심)로 오진됐다. 게다가 [반영]은 미러·인덱스 빌드가
+   sheetlessScope 게이트로 그 탭을 건너뛰어 **아무것도 못 고친다**(막다른 길). */
+console.log('\n10) 무시트 작업 — 점검 제외 + 사유 표기');
+
+t('★★ 무시트면 진단하지 않고 skip — "정상(ok)"으로 꾸미지 않는다', () => {
+  // 오진 재현 조건 그대로(미러 500행 · 인덱스 0행)인데도 index_empty 가 나오면 안 된다.
+  const c = classifySyncRow({ sheetless: true, rawRows: 500, dataRows: 500, mirroredAt: 'x',
+    idxStatus: 'active', idxBuiltAt: 'x', indexRows: 0, boardRows: 500 });
+  assert.strictEqual(c.severity, 'skip', 'severity=' + c.severity);
+  assert.deepStrictEqual(c.flags, ['sheetless_excluded']);
+  assert.ok(!c.flags.includes('index_empty'), '무시트인데 헤더 인식 실패로 오진한다');
+  assert.ok(/무시트/.test(c.reasonKo) && /대상이 아닙니다/.test(c.reasonKo), '사유를 말하지 않는다');
+});
+t('★ 무시트가 아니면 판정은 종전 그대로(무회귀)', () => {
+  const c = classifySyncRow({ rawRows: 500, dataRows: 500, mirroredAt: 'x',
+    idxStatus: 'active', idxBuiltAt: 'x', indexRows: 0, boardRows: 500 });
+  assert.ok(c.flags.includes('index_empty'), '시트 기반 탭의 기존 진단이 사라졌다');
+  assert.strictEqual(c.severity, 'broken');
+});
+await ta('★★ 목록은 무시트를 기본 제외하되 **건수를 센다**(조용한 누락 금지)', async () => {
+  const nsTab = { ...baseTab, sheetId: 'S2', tabName: '무시트작업', displayName: '무시트작업',
+    sheetless: true, idxStatus: 'active', idxBuiltAt: 'x', indexRows: 0, boardRows: 500, rawRows: 500 };
+  svc.__setPoolForTest(auditPool({ tabs: [baseTab, nsTab], imRows: [] }));
+  const out = await svc.auditSheetSync({});
+  assert.strictEqual(out.sheetlessCount, 1, '무시트 건수를 세지 않는다');
+  assert.ok(!out.items.some(i => i.sheetless), '무시트가 기본 목록에 남아 있다');
+  assert.strictEqual(out.includeSheetless, false);
+  svc.__setPoolForTest(null);
+});
+await ta('★★ includeSheetless 로 열어 보면 skip 으로 뜨고 **문제 건수에는 안 든다**', async () => {
+  const nsTab = { ...baseTab, sheetId: 'S2', tabName: '무시트작업', displayName: '무시트작업',
+    sheetless: true, idxStatus: 'active', idxBuiltAt: 'x', indexRows: 0, boardRows: 500, rawRows: 500 };
+  const p = auditPool({ tabs: [nsTab], imRows: [] });
+  svc.__setPoolForTest(p);
+  const out = await svc.auditSheetSync({ includeSheetless: true });
+  assert.strictEqual(out.items.length, 1);
+  assert.strictEqual(out.items[0].severity, 'skip');
+  assert.strictEqual(out.items[0].sheetless, true, '화면이 배지를 그릴 재료가 없다');
+  assert.strictEqual(out.flagged, 0, '점검 제외를 문제로 센다([문제 작업 전체 반영] 대상이 된다)');
+  assert.strictEqual(p.seen.headScan, 0, '점검 대상도 아닌 탭에 정밀 진단 쿼리를 돌린다');
+  svc.__setPoolForTest(null);
+});
+await ta('★★ 무시트 작업의 [반영]은 실행하지 않고 사유를 돌려준다(막다른 길 금지)', async () => {
+  let called = 0;
+  svc.__setPoolForTest({ query: async (sql) => {
+    if (/COALESCE\(sheetless, FALSE\)/.test(String(sql))) return { rows: [{ s: true }] };
+    return { rows: [] };
+  } });
+  const out = await svc.repairSheetSync({ sheetId: 'S', tabName: 'T', deps: {
+    mirrorOneSheet: async () => { called++; }, buildOneSheet: async () => { called++; },
+    projectTab: async () => { called++; }, compareWithIndex: async () => null,
+  } });
+  assert.strictEqual(out.ok, false);
+  assert.strictEqual(out.code, 'sheetless');
+  assert.strictEqual(called, 0, '무시트인데 미러·빌드·투영을 실행한다');
+  svc.__setPoolForTest(null);
+});
+await ta('★ 판정 실패는 막지 않는다 — 조회 오류로 복구 도구를 잠그지 않는다(fail-open)', async () => {
+  let called = 0;
+  svc.__setPoolForTest({ query: async () => { throw new Error('boom'); } });
+  const out = await svc.repairSheetSync({ sheetId: 'S', tabName: 'T', deps: {
+    mirrorOneSheet: async () => { called++; return {}; }, buildOneSheet: async () => { called++; return { ok: true }; },
+    projectTab: async () => { called++; return { ok: true }; }, compareWithIndex: async () => null,
+  } });
+  assert.strictEqual(called, 3, '조회 실패를 이유로 반영을 막는다');
+  assert.ok(out.ok);
+  svc.__setPoolForTest(null);
+});
+t('★★ 화면: 무시트는 [반영] 버튼을 만들지 않고 사유를 적는다 · 제외 건수를 고지한다', () => {
+  const i = HTML.indexOf('function rowActions(');
+  const body = HTML.slice(i, HTML.indexOf('\n  }', i));
+  assert.ok(/it\.sheetless === true/.test(body), '무시트 분기가 없다 — 눌러도 안 되는 버튼이 남는다');
+  const fixIdx = body.indexOf("repairOne(' + i + ')");
+  const nsIdx = body.indexOf('it.sheetless === true');
+  assert.ok(nsIdx >= 0 && nsIdx < fixIdx, '무시트 분기가 [반영] 버튼 생성보다 뒤에 있다');
+  assert.ok(/meta\.sheetlessCount/.test(HTML), '제외 건수를 화면이 말하지 않는다(조용한 누락)');
+  assert.ok(/toggleSheetless\(\)/.test(HTML) && /includeSheetless=1/.test(HTML), '무시트 열람 경로가 없다');
+  assert.ok(/tag skip/.test(HTML) && /점검 제외/.test(HTML), "'정상'으로 그리면 점검해서 이상 없음으로 읽힌다");
+});
+await ta('★★ 무시트는 "구매일 연도 미확정" 으로도 세지 않는다 — 누를 수 없는 버튼을 권하지 않게', async () => {
+  // 연도 판정 재료가 전혀 없는 탭(= purchaseUnconfirmed 참) 둘: 시트 기반 1 · 무시트 1
+  const bare = { ...baseTab, registeredAt: '2026-08-14T00:00:00Z', lastOrderAt: null,
+    campaignCreatedAt: null, sampleStartDate: null };
+  const nsTab = { ...bare, sheetId: 'wt_x', tabName: '무시트작업', displayName: '무시트작업', sheetless: true };
+  svc.__setPoolForTest(auditPool({ tabs: [bare, nsTab], imRows: [] }));
+  const out = await svc.auditSheetSync({ includeUnknown: true, includeSheetless: true });
+  assert.strictEqual(out.purchaseUnconfirmed, 1,
+    '무시트까지 세면 화면이 "시트에서 연도 확인" 을 계속 권한다(그 탭엔 읽을 시트가 없다) — ' + out.purchaseUnconfirmed);
+  svc.__setPoolForTest(null);
+});
+t('★★ 연도 확인(probe) 후보 SQL 이 무시트를 제외한다 — 가상 시트로 구글을 읽지 않는다', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const i = src.indexOf('async function probeUnknownYears(');
+  const fn = src.slice(i, src.indexOf('\n}', i));
+  const q = fn.slice(fn.indexOf('FROM tab_configs tc'), fn.indexOf('LIMIT $1'));
+  assert.ok(/COALESCE\(tc\.sheetless, FALSE\) = FALSE/.test(q),
+    'probe 후보에 무시트 탭이 들어간다 — 시트 API 호출이 read_error 로 낭비된다');
+  // 시트 읽기가 이 게이트 뒤에 있어야 한다(후보에 들어오면 곧바로 호출로 이어진다)
+  assert.ok(fn.indexOf('COALESCE(tc.sheetless, FALSE) = FALSE') < fn.indexOf('readSheet('),
+    '게이트가 시트 읽기보다 뒤에 있다');
+});
+
+t("★ 문제 건수 기준이 서버와 같다 — 'skip' 은 문제가 아니다", () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  assert.ok(/severity !== 'ok' && i\.severity !== 'skip'/.test(src), '서버 flagged 계수가 skip 을 센다');
+  assert.ok(/severity !== 'ok' && i\.severity !== 'skip'/.test(HTML), '화면 flagged 계수가 skip 을 센다');
+  assert.ok(/x\.it\.severity !== 'ok' && x\.it\.severity !== 'skip'/.test(HTML),
+    '[문제 작업 전체 반영] 이 점검 제외 작업까지 돌린다');
+});
+
 t('★ 시트 우위 점검도 같은 기준 입력(sinceDate)을 쓴다 — 두 화면이 다른 범위를 보면 안 된다', () => {
   const i = HTML.indexOf('async function runSlotAudit(');
   const body = HTML.slice(i, HTML.indexOf('const SS_REASON', i));

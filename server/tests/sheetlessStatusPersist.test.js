@@ -6,7 +6,7 @@
  *   무시트 탭의 `review_index` 는 지우고 작업표에서 다시 만들어지므로,
  *   시스템이 그 표에 직접 쓴 값은 **주문 한 건만 더 들어와도 증발**한다.
  *   · 시트에도 칸이 있는 값(리뷰제출·입금) → **작업표 칸에 쓴다**(진실원본 일원화)
- *   · 시트에 칸이 없는 값(대표 리뷰 이미지) → **재생성 시 보존한다**
+ *   · 시트에 칸이 없는 값(대표 리뷰 캡처) → **재생성 시 보존한다**
  */
 'use strict';
 const fs = require('fs');
@@ -33,7 +33,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
 {
   // 시트 기반 탭이면 손대지 않는다 = 종전 동작 100%
   status.__setPoolForTest({ query: async (sql) => {
-    if (/FROM tab_configs/.test(sql)) return { rows: [] };          // 무시트 아님
+    if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(sql)) return { rows: [] };          // 무시트 아님
     return { rows: [], rowCount: 0 };
   } });
   const r = await status.markStatusCell({ sheetId: 'S1', tabName: 'T', rowIndex: 5, kind: 'paid', value: '2026-08-07 14:00' });
@@ -42,7 +42,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
 {
   const calls = { upd: null, rebuild: 0 };
   status.__setPoolForTest({ query: async (sql, params) => {
-    if (/FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
+    if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
     if (/submit_col2 AS h/.test(sql)) return { rows: [{ h: '입금일자' }] };
     if (/UPDATE campaign_participants/.test(sql)) { calls.upd = { sql, params }; return { rowCount: 1 }; }
     return { rows: [], rowCount: 0 };
@@ -65,7 +65,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
   // 리뷰 제출 표시 = submit_col + Track B write-back 과 같은 표기('O')
   let header = null, val = null;
   status.__setPoolForTest({ query: async (sql, params) => {
-    if (/FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
+    if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
     if (/submit_col AS h/.test(sql)) return { rows: [{ h: '리뷰제출' }] };
     if (/UPDATE campaign_participants/.test(sql)) { header = params[3]; val = params[4]; return { rowCount: 1 }; }
     return { rows: [], rowCount: 0 };
@@ -80,7 +80,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
 {
   // 조용한 성공 위장 금지
   status.__setPoolForTest({ query: async (sql) => {
-    if (/FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
+    if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
     if (/AS h/.test(sql)) return { rows: [] };                       // 상태 칸 없음
     return { rows: [], rowCount: 0 };
   } });
@@ -88,7 +88,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
   ok('상태 칸이 없으면 사유를 말한다(성공으로 접지 않음)', r.handled === true && r.ok === false && r.reason === 'no_status_column');
 
   status.__setPoolForTest({ query: async (sql) => {
-    if (/FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
+    if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
     if (/AS h/.test(sql)) return { rows: [{ h: '입금' }] };
     return { rows: [], rowCount: 0 };                                // UPDATE 0행
   } });
@@ -109,7 +109,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
 {
   // 장부 재생성이 실패해도 값은 작업표에 남았다 → 다음 재생성에 자동 반영
   status.__setPoolForTest({ query: async (sql) => {
-    if (/FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
+    if (/^\s*SELECT[\s\S]*FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };
     if (/AS h/.test(sql)) return { rows: [{ h: '입금' }] };
     return { rows: [], rowCount: 1 };
   } });
@@ -121,7 +121,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
 }
 
 /* ══════════════ B. 재생성 시 시스템 전용 값 보존 ══════════════ */
-console.log('\n[B] 대표 리뷰 이미지는 재생성에도 살아남는다');
+console.log('\n[B] 대표 리뷰 캡처는 재생성에도 살아남는다');
 {
   const src = noLineComments(srv('src/services/sheetlessLedger.service.js'));
   const cols = ['review_file_id', 'review_file_url', 'review_file_name', 'review_file_count', 'review_file_at'];
@@ -148,21 +148,20 @@ console.log('\n[C] 두 기록 경로가 무시트 분기를 탄다');
   ok('sheetless reviewer submission passes its timestamp to the worktable',
     /markStatusCell\(\{ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue/.test(sub));
   ok('리뷰 제출 완료에서 상태 기록 호출', /sheetlessStatus\.service'\)\s*\n?\s*\.markStatusCell\(\{ sheetId, tabName, rowIndex, kind: 'submit'/.test(sub));
-  ok('제출 성공을 막지 않는다(fail-soft)',
-    /markStatusCell[\s\S]{0,600}?catch \(e\) \{[\s\S]{0,200}?logger\.warn/.test(sub));
-  // 위치: is_submitted UPDATE 직후여야 한다(완료 판정 밖이면 미제출 행에도 표시가 남는다)
-  const i1 = sub.indexOf("UPDATE review_index SET is_submitted = TRUE");
+  ok('제출 기록 실패는 롤백 후 재시도 오류로 반환한다',
+    /REVIEW_BOARD_WRITE_FAILED/.test(sub) && /completionClient.query\('ROLLBACK'\)/.test(sub) && /retryable: true/.test(sub));
+  // A completed request opens a transaction before the source cell is written.
+  const i1 = sub.indexOf('if (complete) {');
   const i2 = sub.indexOf("kind: 'submit'");
-  ok('완료 분기 안에서 호출(미제출 행 오표시 방지)', i1 > 0 && i2 > i1 && (i2 - i1) < 1400);
+  ok('완료 분기 안에서 같은 트랜잭션으로 기록', i1 > 0 && i2 > i1 && /client: completionClient/.test(sub.slice(i1,i2+200)));
 
   /* ⚠ 입금 기록은 입금 M2(이체결과 반영)에서 `paymentApply.service` 로 **단일 출처 이관**됐다
      (수동 처리·자동 반영이 같은 순서를 타게). 검사 의미는 그대로 — 읽는 파일만 따라간다. */
   const pay = noLineComments(srv('src/services/paymentApply.service.js'));
   ok('입금 완료에서 상태 기록 호출', /markStatusCell\(\{[\s\S]{0,200}?kind: 'paid', value: stamp/.test(pay));
   ok('★ 무시트면 시트 쓰기·deposit_mark 큐로 내려가지 않는다', /if \(st\.handled\) \{[\s\S]{0,400}?continue;/.test(pay));
-  // 시트 경로는 그대로 살아 있어야 한다(무회귀)
-  ok('시트 기반 경로(writeSheet)는 그대로', /await writeSheet\(item\.sheetId, range/.test(pay));
-  ok("시트 실패 시 deposit_mark 큐도 그대로", /enqueue\('deposit_mark'/.test(pay));
+  ok('입금 처리에는 시트 기반 경로가 없다', !/writeSheet\(/.test(pay));
+  ok('입금 처리에는 deposit_mark 큐가 없다', !/enqueue\('deposit_mark'/.test(pay));
 }
 
 /* ══════════════ F. Existing O → submission-time backfill ══════════════ */

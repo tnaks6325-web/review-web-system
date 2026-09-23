@@ -253,9 +253,15 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
   const reasons = [];
   const selfName = normName(reviewer.name);
   const selfPhone = normPhone8(reviewer.phone || reviewer.phone8);
+  const subs = Array.isArray(reviewer.sub_accounts) ? reviewer.sub_accounts : [];
+  const sameNameCount = (idName && idName === selfName ? 1 : 0)
+    + subs.filter((sub) => idName && idName === normName(sub && sub.name)).length;
 
-  // ── 1) 본인 매칭 (이름+전화) ──
-  if (idName && idName === selfName && idPhone && idPhone === selfPhone) {
+  // ── 1) 본인 매칭 ──
+  // 구매양식 연락처는 주문/배송 연락처다. 같은 이름의 등록 명의가 하나뿐이면
+  // 등록 전화번호와 달라도 본인으로 분류하고 주소·계좌 검사는 그대로 유지한다.
+  if (idName && idName === selfName
+      && ((idPhone && idPhone === selfPhone) || sameNameCount === 1)) {
     if (skipDetail) return { status: 'SELF', subIndex: -1, reasons: [], identity };
     // 주소 대조
     const addrCheck = await addressSame(reviewer.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
@@ -272,13 +278,17 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
     return { status: 'NEED_CONFIRM', subIndex: -1, reasons, identity };
   }
 
-  // ── 2) 타계정 매칭 (이름+전화) ──
-  const subs = Array.isArray(reviewer.sub_accounts) ? reviewer.sub_accounts : [];
+  // ── 2) 타계정 매칭 ──
   const mainAcct = normAccount(reviewer.bank_account);
   const mainHolder = normName(reviewer.account_holder);
+  let phoneOnlySubIndex = -1;
   for (let i = 0; i < subs.length; i++) {
     const sub = subs[i] || {};
-    if (idName && idName === normName(sub.name) && idPhone && idPhone === normPhone8(sub.phone)) {
+    if (phoneOnlySubIndex < 0 && idPhone && idPhone === normPhone8(sub.phone)) {
+      phoneOnlySubIndex = i;
+    }
+    if (idName && idName === normName(sub.name)
+        && ((idPhone && idPhone === normPhone8(sub.phone)) || sameNameCount === 1)) {
       if (skipDetail) return { status: 'SUB', subIndex: i, reasons: [], identity };
       // 타계정에 주소/계좌가 등록돼 있으면 대조, 없으면 통과(자동 보강 대상)
       const subReasons = [];
@@ -304,9 +314,41 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
     }
   }
 
+  // 연락처는 이미 이 리뷰어가 등록한 타계정인데 캡처 이름만 다른 경우, 새 타계정 등록을
+  // 유도하면 같은 연락처를 배열에 두 번 넣으려다 저장 단계에서 막힌다. 등록된 연락처의
+  // 소유 범위는 유지하되 이름 차이는 리뷰어가 명시적으로 확인하도록 분리한다.
+  if (phoneOnlySubIndex >= 0) {
+    const sub = subs[phoneOnlySubIndex] || {};
+    if (skipDetail) {
+      return { status: 'SUB', subIndex: phoneOnlySubIndex, reasons: [], identity };
+    }
+    const subReasons = [
+      `등록된 타계정 이름(${String(sub.name || '').trim() || '-'})과 입력 이름(${pickedName || '-'})이 다름`,
+    ];
+    if (String(sub.address || '').trim() && idAddr) {
+      const addrCheck = await addressSame(sub.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
+      if (addrBad(addrCheck.verdict)) subReasons.push(`타계정 등록 주소와 상이: ${addrCheck.reason}`);
+    }
+    const subAcct = normAccount(sub.bankAccount);
+    const acctOkSub =
+      (subAcct && idAcct && subAcct === idAcct)
+      || (idHolder && idHolder === normName(sub.accountHolder))
+      || (mainAcct && idAcct && mainAcct === idAcct)
+      || (idHolder && mainHolder && idHolder === mainHolder);
+    if (subAcct && idAcct && !acctOkSub) {
+      subReasons.push('타계정 등록 계좌·본인 계좌 어느 쪽과도 상이');
+    }
+    return {
+      status: 'NEED_CONFIRM',
+      subIndex: phoneOnlySubIndex,
+      reasons: subReasons,
+      identity,
+    };
+  }
+
   // ── 3) 어느 쪽과도 불일치 → 타계정 등록 유도 ──
-  if (idName === selfName && idPhone !== selfPhone) {
-    reasons.push('이름은 본인과 같으나 연락처가 다름 (별도 계정으로 판단)');
+  if (sameNameCount > 1) {
+    reasons.push('같은 이름의 등록 명의가 여러 개라 참여 명의를 확정할 수 없음');
   } else {
     reasons.push('본인/타계정 정보와 일치하지 않음');
   }
