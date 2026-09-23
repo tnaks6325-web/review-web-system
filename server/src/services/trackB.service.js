@@ -4577,7 +4577,15 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
           WHERE campaign_id=$1 AND plan_date=$2::date
           FOR UPDATE`, [campaignId, removedDate]);
       const sourceCount = sourcePlans.length ? Number(sourcePlans[0].planned_count) : (dateCount.get(removedDate) || 0);
-      if (sourceCount >= 1) {
+      /* ★★ 계획이 없는 쉬는 날(주말·공휴일) 줄을 지웠으면 계획을 옮기지 않는다(2026-09-23) — 그날은
+         원래 받지 않는 날이라 계획 총량에 없다. 여기서 "줄 수 − 1"을 새로 적으면 1명 이상 저장된 날 =
+         "사람이 연 날"로 읽혀 공휴일 모집이 열린다(추석 사고의 재발 경로). 판정 단일 출처 = isWeekendClosedOn. */
+      let closedNoPlan = false;
+      if (!sourcePlans.length) {
+        const { rows: cw } = await client.query('SELECT skip_weekends FROM recruit_campaigns WHERE id=$1', [campaignId]);
+        closedNoPlan = require('./campaignWeekend.service').isWeekendClosedOn(cw[0] || null, removedDate, null);
+      }
+      if (sourceCount >= 1 && !closedNoPlan) {
         await client.query(
           `UPDATE campaign_daily_plans
               SET planned_count=planned_count+1, updated_by=$3, updated_at=NOW()
