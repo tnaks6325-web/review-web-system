@@ -44,6 +44,14 @@ function harness(){
  s2.identityReasonCodes=['x<b>'];c._activeIdentityContext.selectedIdentity.name='<img>';c._renderIdentityMatchState('card','MISMATCH',[],false);assert(!e.card_identityStatus.innerHTML.includes('<img>'));
  console.log('PASS 명의 불일치 = 재분석 반복 금지 · 사유 안내 · 다른 캡처 선택');
  }
+ {
+ // nc 모드 2번(쿠팡) 카드: 안내 상자가 없어도 MISMATCH 가 기록돼 재분석 반복이 없어야 한다(코덱스 리뷰 P1).
+ const {ctx:c,elements:e}=harness();delete e.card_identityStatus;const s3=c._cardAiState.card;s3.reviewToken='';let re=0;c._retryCardAi=()=>{re++};
+ s3.identityReasonCodes=['other_owner_identity_matches'];c._renderIdentityMatchState('card','MISMATCH',[],false);
+ assert.equal(s3.identityStatus,'MISMATCH');assert.equal(e.btnOrderFormSubmit.textContent,'다른 캡처 올리기');assert(e.orderIdentityAction.innerHTML.includes('다른 명의의 주문 캡처로 보입니다'));
+ c._purchasePrimaryAction();assert.equal(re,0);assert.equal(e.card_imgInput.clicked,1);
+ console.log('PASS 안내 상자 없는 카드(nc 쿠팡)도 불일치 기록 · 재분석 반복 금지');
+ }
  for(const mask of ['*','＊','●','○','◯','◉','•','·','x','X']){const {ctx:c,elements:e}=harness();c._cardAiState.card.extracted={recipient:'김'+mask+'수'};c.applyCardAiResult('card');assert.equal(e.card_recipient.readOnly,false);}
  console.log('PASS 가림문자 10종 수정 가능');
 })().catch(e=>{console.error(e);process.exitCode=1});

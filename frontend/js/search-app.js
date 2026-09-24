@@ -8681,7 +8681,8 @@ function _syncSubmissionIdentityAction() {
     panel.style.display = target ? "block" : "none";
     panel.dataset.cid = target?.cid || "";
     panel.innerHTML = target ? '<strong>' + (_orderCardIds.indexOf(target.cid) + 1) + '번째 주문</strong><div style="margin-top:8px">'
-      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML || "캡처 확인이 필요합니다.") + '</div>' : "";
+      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML
+        || (_identityNeedsNewCapture(target.st) ? _identityMismatchNotice(target.st) : "캡처 확인이 필요합니다.")) + '</div>' : "";
   }
   if (!btn || window._submitOrderFormInProgress) return;
   btn.onclick = _purchasePrimaryAction;
@@ -8725,8 +8726,12 @@ function _retrySubmissionIdentity(cid) {
 
 function _renderIdentityMatchState(cid, status, reasons, canManual) {
   const st = _cardAiState[cid];
-  const box = document.getElementById(cid + "_identityStatus"); if (!box || !st) return;
+  if (!st) return;
+  // 판정 상태는 안내 상자 유무와 무관하게 기록한다 — nc 모드 2번(쿠팡) 카드는 상자가 없어
+  // 여기서 먼저 반환하면 MISMATCH 가 기록되지 않아 재분석 반복이 그대로 남는다.
   st.identityStatus = status; st.identityReasons = reasons || []; st.identityCanManual = canManual;
+  const box = document.getElementById(cid + "_identityStatus");
+  if (!box) { _syncSubmissionIdentityAction(); return; }
   const issues = _identityIssues(cid);
   for (const field of ["recipient", "phone", "address", "price"]) {
     const el = document.getElementById(cid + "_" + field); if (!el) continue;
