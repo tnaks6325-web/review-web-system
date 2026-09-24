@@ -238,8 +238,15 @@ async function ensureTabOwnership({ advertiserId, sheetId, tabGid, by } = {}, de
   const gid = _text(tabGid, 64);
   if (!adv || !sid) return { status: 'no_advertiser' };
   if (!gid) return { status: 'no_gid' };
+  // ★ 동시 접수 직렬화 — NOT EXISTS 는 "없는 행"을 잠그지 못하고 유니크 인덱스는 업체별이라,
+  //   서로 다른 업체의 접수 둘이 같은 탭에 동시에 들어오면 둘 다 소유자가 된다(Codex 리뷰).
+  //   (시트·탭) 키로 트랜잭션 잠금을 잡고 판정·쓰기를 그 안에서 한다.
+  let client = null;
   try {
-    const { rows } = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`adv_own:${sid}:${gid}`]);
+    const { rows } = await client.query(
       `INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid, assigned_by)
        SELECT $1, $2, $3, $4
         WHERE EXISTS (SELECT 1 FROM advertisers WHERE id = $1 AND COALESCE(status,'') <> 'ended')
@@ -250,23 +257,32 @@ async function ensureTabOwnership({ advertiserId, sheetId, tabGid, by } = {}, de
        RETURNING id`,
       [adv, sid, gid, _text(by, 100) || '자동(작업오더)']
     );
-    if (rows.length) return { status: 'assigned' };
-    // 왜 안 넣었는지 사실대로 말한다(조용한 no-op 금지).
-    const { rows: own } = await pool.query(
-      `SELECT ac.advertiser_id AS "advertiserId", a.name
-         FROM advertiser_campaigns ac LEFT JOIN advertisers a ON a.id = ac.advertiser_id
-        WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1 AND (ac.tab_gid IS NULL OR ac.tab_gid = $2)
-        ORDER BY (ac.tab_gid IS NULL) ASC LIMIT 1`, [sid, gid]);
-    if (own.length) {
-      return own[0].advertiserId === adv
-        ? { status: 'already' }
-        : { status: 'kept_existing', owner: own[0].name || own[0].advertiserId };
+    let result;
+    if (rows.length) {
+      result = { status: 'assigned' };
+    } else {
+      // 왜 안 넣었는지 사실대로 말한다(조용한 no-op 금지).
+      const { rows: own } = await client.query(
+        `SELECT ac.advertiser_id AS "advertiserId", a.name
+           FROM advertiser_campaigns ac LEFT JOIN advertisers a ON a.id = ac.advertiser_id
+          WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1 AND (ac.tab_gid IS NULL OR ac.tab_gid = $2)
+          ORDER BY (ac.tab_gid IS NULL) ASC LIMIT 1`, [sid, gid]);
+      if (own.length) {
+        result = own[0].advertiserId === adv
+          ? { status: 'already' }
+          : { status: 'kept_existing', owner: own[0].name || own[0].advertiserId };
+      } else {
+        const { rows: a } = await client.query(`SELECT status FROM advertisers WHERE id = $1`, [adv]);
+        result = (!a.length || String(a[0].status || '') === 'ended') ? { status: 'advertiser_ended' } : { status: 'kept_removed' };
+      }
     }
-    const { rows: a } = await pool.query(`SELECT status FROM advertisers WHERE id = $1`, [adv]);
-    if (!a.length || String(a[0].status || '') === 'ended') return { status: 'advertiser_ended' };
-    return { status: 'kept_removed' };
+    await client.query('COMMIT');
+    return result;
   } catch (err) {
+    if (client) { try { await client.query('ROLLBACK'); } catch (_) {} }
     return { status: 'failed', error: err.message };
+  } finally {
+    if (client) client.release();
   }
 }
 

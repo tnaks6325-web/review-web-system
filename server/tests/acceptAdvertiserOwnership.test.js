@@ -15,11 +15,13 @@ let failed = 0;
 const ok = (m, c) => { if (c) console.log('  ✓ ' + m); else { failed++; console.log('  ✗ ' + m); } };
 function stub(handlers) {
   const log = [];
-  return { log, pool: { query: async (sql, p) => {
+  const query = async (sql, p) => {
     const t = String(sql); log.push({ t, p });
     for (const [re, res] of handlers) if (re.test(t)) { if (res instanceof Error) throw res; return typeof res === 'function' ? res(p) : res; }
     return { rows: [] };
-  } } };
+  };
+  const client = { query, release: () => { log.released = true; } };
+  return { log, pool: { connect: async () => client } };
 }
 const ARGS = { advertiserId: 'adv_1', sheetId: 'wt_x', tabGid: '123', by: '자동' };
 
@@ -28,7 +30,10 @@ const ARGS = { advertiserId: 'adv_1', sheetId: 'wt_x', tabGid: '123', by: '자�
   { const s = stub([[/INSERT INTO advertiser_campaigns/, { rows: [{ id: 'u1' }] }]]);
     const r = await ensureTabOwnership(ARGS, s);
     ok('소유 없으면 지정(assigned)', r.status === 'assigned');
-    const ins = s.log[0];
+    const ins = s.log.find(q => /INSERT INTO advertiser_campaigns/.test(q.t));
+    const lockAt = s.log.findIndex(q => /pg_advisory_xact_lock/.test(q.t));
+    ok('(시트·탭) 잠금을 INSERT 전에 잡는다(동시 접수 직렬화)', lockAt >= 0 && lockAt < s.log.indexOf(ins) && s.log[lockAt].p[0] === 'adv_own:wt_x:123');
+    ok('커밋하고 커넥션 반납', s.log.some(q => q.t === 'COMMIT') && s.log.released === true);
     ok('탭 단위 INSERT(gid 전달)', ins.p[2] === '123' && ins.p[1] === 'wt_x' && ins.p[0] === 'adv_1');
     ok('기존 소유(탭·시트 전체) 있으면 안 넣는 조건', /NOT EXISTS[\s\S]*tab_gid IS NULL OR tab_gid = \$3/.test(ins.t));
     ok('종료 거래처 제외 조건', /status,''\) <> 'ended'/.test(ins.t));
@@ -47,7 +52,7 @@ const ARGS = { advertiserId: 'adv_1', sheetId: 'wt_x', tabGid: '123', by: '자�
     ok('gid 없으면 쓰기 0(no_gid) — 시트 전체 소유 금지', r.status === 'no_gid' && s.log.length === 0); }
   { const s = stub([[/INSERT/, new Error('boom')]]);
     const r = await ensureTabOwnership(ARGS, s);
-    ok('DB 오류도 throw 없이 failed', r.status === 'failed' && /boom/.test(r.error)); }
+    ok('DB 오류도 throw 없이 failed + ROLLBACK', r.status === 'failed' && /boom/.test(r.error) && s.log.some(q => q.t === 'ROLLBACK') && s.log.released === true); }
 
   const i8c = route.indexOf('8c) 업체 소유 자동 지정');
   ok('접수 라우트가 ensureTabOwnership 호출', /ensureTabOwnership\(\{[\s\S]{0,200}tabGid: gid/.test(route));
