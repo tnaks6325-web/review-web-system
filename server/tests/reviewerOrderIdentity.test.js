@@ -81,6 +81,21 @@ const other = {
     assert.ok(!maskedCompatible('박*희', '김민수', 'name'));
   });
 
+  // 코덱스 리뷰 P1(PR #1485): 한 글자 차이 이름의 다른 저장 명의 캡처는 오인식으로 풀지 않는다.
+  await test('한 글자 차이 이름의 다른 명의와 일치하는 캡처는 차단한다', async () => {
+    const minsu = { identityKey:'sub:minsu', type:'sub', name:'김민수', phone:'010-1234-5678', address:'서울 강남구 테헤란로 10 101동 1203호' };
+    const minwoo = { identityKey:'sub:minwoo', type:'sub', name:'김민우', phone:'010-5555-6666', address:'부산 해운대구 센텀로 20 202동 505호' };
+    const r = await evaluateSelectedIdentity({ recipient:'김민우', phone:minwoo.phone, address:minwoo.address },
+      minsu, [minsu, minwoo], { useGemini:false, allowPlainNameCorrection:true });
+    assert.strictEqual(r.status, 'MISMATCH', JSON.stringify(r));
+    assert.ok(!r.reasonCodes.includes('plain_name_ocr_correction'));
+    // 반대로 김민수 주문을 김민우로 잘못 읽은 경우(연락처·주소는 김민수)는 여전히 확인 단계
+    const r2 = await evaluateSelectedIdentity({ recipient:'김민우', phone:minsu.phone, address:minsu.address },
+      minsu, [minsu, minwoo], { useGemini:false, allowPlainNameCorrection:true });
+    assert.strictEqual(r2.status, 'REVIEW', JSON.stringify(r2));
+    assert.ok(r2.reasonCodes.includes('plain_name_ocr_correction'));
+  });
+
   // 실사고 2026-09-24: 같은 사람이 번호만 달리해 두 번 등록(참여 칸은 주소 없음) → 다른 칸이 "다른 명의"로 잡혀 차단.
   await test('같은 이름의 중복 명의는 다른 명의로 보지 않고 재확인으로 둔다', async () => {
     const a1 = { identityKey:'sub:a1', type:'sub', name:'김수만', phone:'010-1111-2222', address:'' };

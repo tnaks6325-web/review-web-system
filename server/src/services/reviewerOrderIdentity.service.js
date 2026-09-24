@@ -453,7 +453,9 @@ function canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIden
 }
 
 function canReviewPlainNameOcrCorrection(selectedScore, selected, competingIdentity) {
-  if (!selectedScore || !selected) return false;
+  // ★ 다른 이름의 저장 명의가 캡처와 맞으면 오인식이 아니라 그 명의의 주문이다(가림 이름 경로와 같은 조건).
+  //   빼면 한 글자 차이 이름(김민수/김민우)의 다른 명의 캡처가 확인 단계로 풀려 남의 캡처 제출이 된다.
+  if (competingIdentity || !selectedScore || !selected) return false;
   const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
   return selectedScore.parts.name.verdict === 'mismatch'
     // 전체 이름 OCR 불일치는 주소나 다른 저장 명의와의 유사도만으로 즉시 막지 않는다.
