@@ -384,6 +384,28 @@ router.get('/overview', authMiddleware, internalMiddleware, async (req, res, nex
     res.json({ ok: true, items, coverage });
   } catch (err) { next(err); }
 });
+// ── 명의 카드(2단계 조각 1 · migration 166 · 결정 기록 175) — adminOrMaster ──
+//   리뷰어 명의(본인·타계정)를 고유 번호 카드로 옮긴다. 이 조각에서는 아무도 카드를 읽지 않는다.
+//   미리보기 = 쓰기 0 / 적용 = confirm:true 필수 · 소유자마다 한 트랜잭션 · 여러 번 돌려도 결과 동일.
+const identityCards = require('../services/reviewerIdentityCards.service');
+router.get('/identity-cards/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await identityCards.previewCards()); } catch (err) { next(err); }
+});
+router.post('/identity-cards/apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await identityCards.applyCards({
+      confirm: b.confirm === true, limit: b.limit, afterId: b.afterId || null,
+      by: (req.admin && req.admin.name) || '',
+    });
+    res.status(out.ok === false ? 400 : 200).json(out);
+  } catch (err) {
+    if (err && err.code === '42P01') {
+      return res.json({ ok: false, code: 'not_ready', error: '명의 카드 표(migration 166)가 아직 적용되지 않았습니다 — 배포 완료 후 다시 시도해주세요.' });
+    }
+    next(err);
+  }
+});
 // ── 시트 데이터 반영 점검(sheet-sync audit) — adminOrMaster ──
 //   등록된 작업(tab_configs) 전수를 분모로 "시트 → 검색인덱스 → 작업보드" 반영 사슬의 끊긴 곳을
 //   진단(읽기 전용·시트 API 무접촉). ?before=YYYY-MM-DD 면 그 날짜 이전 등록(+ 등록일 미상)만.
