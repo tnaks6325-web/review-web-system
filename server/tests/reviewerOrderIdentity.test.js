@@ -96,6 +96,20 @@ const other = {
     assert.ok(r2.reasonCodes.includes('plain_name_ocr_correction'));
   });
 
+  // PR #1486 리뷰 P1: 같은 번호·주소를 쓰는 가족 명의가 있어도 본인 이름 한 글자 오인식은 막지 않는다.
+  await test('같은 번호·주소의 가족 명의가 있어도 본인 이름 한 글자 오인식은 확인 단계로 둔다', async () => {
+    const me = { identityKey:'self', type:'self', name:'김수만', phone:'010-1111-2222', address:'서울 강남구 테헤란로 10 101동 502호' };
+    const family = { identityKey:'sub:family', type:'sub', name:'이영희', phone:me.phone, address:me.address };
+    const r = await evaluateSelectedIdentity({ recipient:'김슈만', phone:me.phone, address:me.address },
+      me, [me, family], { useGemini:false, allowPlainNameCorrection:true });
+    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('plain_name_ocr_correction'));
+    // 가족 명의(이영희) 본인의 캡처는 여전히 차단
+    const r2 = await evaluateSelectedIdentity({ recipient:'이영희', phone:me.phone, address:me.address },
+      me, [me, family], { useGemini:false, allowPlainNameCorrection:true });
+    assert.strictEqual(r2.status, 'MISMATCH', JSON.stringify(r2));
+  });
+
   // 실사고 2026-09-24: 같은 사람이 번호만 달리해 두 번 등록(참여 칸은 주소 없음) → 다른 칸이 "다른 명의"로 잡혀 차단.
   await test('같은 이름의 중복 명의는 다른 명의로 보지 않고 재확인으로 둔다', async () => {
     const a1 = { identityKey:'sub:a1', type:'sub', name:'김수만', phone:'010-1111-2222', address:'' };
