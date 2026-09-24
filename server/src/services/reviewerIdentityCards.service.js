@@ -197,10 +197,12 @@ async function applyCards({ db = pool, confirm = false, limit = 500, afterId = n
       out.owners++;
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      // 표가 없으면(migration 166 미적용) 모든 소유자가 같은 이유로 실패한다 — 건별 실패로 삼키면
+      // ok:true + 다음 커서가 나가 백필 전체를 건너뛴 채 성공처럼 보인다(PR #1488 리뷰 P2). 멈추고 올린다.
+      if (err && err.code === '42P01') { client.release(); throw err; }
       out.failed.push({ ownerId: id, code: err.code || '', error: String(err.message || err).slice(0, 200) });
-    } finally {
-      client.release();
     }
+    client.release();
     out.nextAfterId = id;
   }
   if (ids.length < cap) out.nextAfterId = null;

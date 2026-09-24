@@ -94,6 +94,18 @@ const OWNER = {
     assert.strictEqual(queried, false);
   });
 
+  await test('카드 표가 없으면(마이그레이션 미적용) 성공으로 꾸미지 않고 멈춘다', async () => {
+    let released = 0;
+    const client = { query: async (sql) => {
+      if (/FOR UPDATE/.test(sql)) return { rows: [{ ...OWNER }] };
+      if (/reviewer_identity_cards/.test(sql)) { const e = new Error('relation does not exist'); e.code = '42P01'; throw e; }
+      return { rows: [] };
+    }, release: () => { released++; } };
+    const db = { query: async () => ({ rows: [{ id: OWNER.id }] }), connect: async () => client };
+    await assert.rejects(svc.applyCards({ db, confirm: true }), (e) => e.code === '42P01');
+    assert.strictEqual(released, 1, '커넥션은 반납한다');
+  });
+
   if (!process.env.PGTEST_URL) {
     console.log(`\n✅ reviewerIdentityCards: ${passed}개 통과 (PGTEST_URL 없음 — 진짜 PG 단계 생략)`);
     process.exit(0);
