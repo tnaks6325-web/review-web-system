@@ -81,6 +81,22 @@ const other = {
     assert.ok(!maskedCompatible('박*희', '김민수', 'name'));
   });
 
+  // 실사고 2026-09-24: 같은 사람이 번호만 달리해 두 번 등록(참여 칸은 주소 없음) → 다른 칸이 "다른 명의"로 잡혀 차단.
+  await test('같은 이름의 중복 명의는 다른 명의로 보지 않고 재확인으로 둔다', async () => {
+    const a1 = { identityKey:'sub:a1', type:'sub', name:'김수만', phone:'010-1111-2222', address:'' };
+    const a2 = { identityKey:'sub:a2', type:'sub', name:'김수만', phone:'010-3333-4444', address:'서울 강남구 테헤란로 10 101동 502호' };
+    const b  = { identityKey:'sub:b',  type:'sub', name:'이영희', phone:'010-1111-2222', address:'부산 해운대구 센텀로 5 1203호' };
+    const r = await evaluateSelectedIdentity({ recipient:'김수만', phone:'010-3333-4444', address:a2.address },
+      a1, [a1, a2, b], { useGemini:false, allowPlainNameCorrection:true });
+    assert.notStrictEqual(r.status, 'MISMATCH', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('duplicate_name_identity'));
+    assert.ok(!r.reasonCodes.includes('other_owner_identity_matches'));
+    // 이름이 다른 명의(이영희)의 캡처는 여전히 차단
+    const r2 = await evaluateSelectedIdentity({ recipient:'이영희', phone:b.phone, address:b.address },
+      a1, [a1, a2, b], { useGemini:false, allowPlainNameCorrection:true });
+    assert.strictEqual(r2.status, 'MISMATCH', JSON.stringify(r2));
+  });
+
   await test('가림 이름의 노출 글자 1개 OCR 오류만 근접오류로 제한한다', async () => {
     assert.ok(maskedNameOcrNearMiss('최*회', '최영희'));
     assert.ok(maskedNameOcrNearMiss('김*순', '김민수'));
@@ -89,10 +105,15 @@ const other = {
     assert.ok(!maskedNameOcrNearMiss('김**순', '김민수'));
   });
 
-  await test('전체 이름 OCR 불일치는 글자 수와 차이 개수에 관계없이 재확인 후보로 둔다', async () => {
+  // ★ 사용자 확정 2026-09-24(결정 1가): 한 글자(바뀜·빠짐·더해짐)까지만 재확인, 통째로 다르면 차단.
+  await test('전체 이름 OCR 불일치는 한 글자 차이까지만 재확인 후보로 둔다', async () => {
     assert.ok(plainNameOcrCorrectionCandidate('업혜연', '임혜연'));
-    assert.ok(plainNameOcrCorrectionCandidate('박다른이름', '임혜연'));
+    assert.ok(plainNameOcrCorrectionCandidate('김슈만', '김수만'));
     assert.ok(plainNameOcrCorrectionCandidate('임혜', '임혜연'));
+    assert.ok(plainNameOcrCorrectionCandidate('임혜연이', '임혜연'));
+    assert.ok(!plainNameOcrCorrectionCandidate('박다른이름', '임혜연'));
+    assert.ok(!plainNameOcrCorrectionCandidate('박철수', '김수만'));
+    assert.ok(!plainNameOcrCorrectionCandidate('김철만', '김수혁'));
     assert.ok(!plainNameOcrCorrectionCandidate('임혜연', '임혜연'));
     assert.ok(!plainNameOcrCorrectionCandidate('임*연', '임혜연'));
   });
@@ -198,23 +219,25 @@ const other = {
     assert.strictEqual(r.resolved.address, selected.address);
   });
 
-  await test('다른 저장 명의와 일치하는 전체 이름 캡처도 자동승인 없이 재확인 대상으로 둔다', async () => {
+  // ★ 사용자 확정 2026-09-24(결정 1가): 이름이 다른 저장 명의의 캡처는 재확인 없이 차단.
+  await test('다른 이름의 저장 명의와 일치하는 캡처는 차단한다', async () => {
     const r = await evaluateSelectedIdentity({ recipient:other.name, phone:other.phone, address:other.address }, selected, [selected, other], {
       useGemini:false, allowPlainNameCorrection:true,
     });
-    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
+    assert.strictEqual(r.status, 'MISMATCH', JSON.stringify(r));
     assert.strictEqual(r.competingIdentity.identityKey, other.identityKey);
-    assert.ok(r.reasonCodes.includes('plain_name_ocr_correction'));
+    assert.ok(!r.reasonCodes.includes('plain_name_ocr_correction'));
   });
 
-  await test('선택 명의도 충분히 맞고 중복 저장 명의도 맞으면 수동확인 대상으로 둔다', async () => {
+  // 같은 이름의 중복 칸은 같은 사람이다 — 캡처가 참여 명의와 완전히 맞으면 수동확인 없이 통과(2026-09-24).
+  await test('선택 명의가 충분히 맞으면 같은 이름의 중복 저장 명의가 있어도 통과한다', async () => {
     const duplicate = { ...selected, identityKey:'sub:duplicate' };
     const r = await evaluateSelectedIdentity(
       { recipient:selected.name, phone:selected.phone, address:selected.address },
       selected, [selected, duplicate], { useGemini:false }
     );
-    assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
-    assert.ok(r.reasonCodes.includes('multiple_identity_candidates'));
+    assert.strictEqual(r.status, 'MATCH', JSON.stringify(r));
+    assert.ok(r.reasonCodes.includes('duplicate_name_identity'));
   });
 
   await test('이름과 연락처가 일치하고 동·호수만 다르면 직접 확인 대상으로 둔다', async () => {
