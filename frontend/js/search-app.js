@@ -8423,7 +8423,7 @@ function onCardImgDrop(e, cid) {
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
   if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
-  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.savedIdentitySelections = {}; }
+  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = []; st.savedIdentitySelections = {}; }
   _syncSubmissionIdentityAction();
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
@@ -8506,7 +8506,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
   st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
   st.savedIdentitySelections = {};
-  st.identityBusy = true; st.identityCanManual = false; st.identityChecks = [];
+  st.identityBusy = true; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = [];
   const identityStatus = document.getElementById(cid + "_identityStatus");
   if (identityStatus) identityStatus.innerHTML = '<strong>캡처를 분석하고 있습니다. 잠시 기다려주세요.</strong>';
   _syncSubmissionIdentityAction(cid);
@@ -8660,6 +8660,8 @@ function _purchasePrimaryAction() {
   const target = _purchaseIdentityTarget();
   if (target) {
     if (target.st.identityBusy) return;
+    // 불일치 판정은 캡처에서 읽은 값으로 내려지므로 입력칸 수정으로는 풀리지 않는다.
+    if (_identityNeedsNewCapture(target.st)) return _retrySubmissionIdentity(target.cid);
     const edit = target.issues.find((issue) => issue.edit);
     if (edit) { _pointToIdentityField(target.cid, edit.field); return; }
     if (!target.st.approvalToken) {
@@ -8679,27 +8681,57 @@ function _syncSubmissionIdentityAction() {
     panel.style.display = target ? "block" : "none";
     panel.dataset.cid = target?.cid || "";
     panel.innerHTML = target ? '<strong>' + (_orderCardIds.indexOf(target.cid) + 1) + '번째 주문</strong><div style="margin-top:8px">'
-      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML || "캡처 확인이 필요합니다.") + '</div>' : "";
+      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML
+        || (_identityNeedsNewCapture(target.st) ? _identityMismatchNotice(target.st) : "캡처 확인이 필요합니다.")) + '</div>' : "";
   }
   if (!btn || window._submitOrderFormInProgress) return;
   btn.onclick = _purchasePrimaryAction;
   btn.disabled = !!target?.st.identityBusy;
   btn.textContent = target?.st.identityBusy ? "확인 중…"
+    : target && _identityNeedsNewCapture(target.st) ? "다른 캡처 올리기"
     : target && !target.st.approvalToken && target.st.identityCanManual && !target.issues.some((item) => item.edit)
       ? "내 주문이 맞습니다" : "제출";
+}
+
+// 명의 불일치는 같은 캡처를 다시 분석해도 결과가 같다(실사고 2026-09-24: 재분석 48회 반복·참여 만료).
+// 불일치에서는 재분석 대신 다른 캡처를 고르게 한다. AI 분석 실패(ERROR)는 종전대로 재분석.
+function _identityNeedsNewCapture(st) {
+  return !!st && st.identityStatus === "MISMATCH" && !st.approvalToken;
+}
+
+function _identityMismatchNotice(st) {
+  const name = String(_activeIdentityContext?.selectedIdentity?.name || "").trim();
+  const who = name ? "참여한 명의(" + name + ")" : "참여한 명의";
+  const otherOwner = (st.identityReasonCodes || []).includes("other_owner_identity_matches");
+  return '<div class="identity-mismatch-notice" style="margin-bottom:8px"><b>'
+    + (otherOwner ? "다른 명의의 주문 캡처로 보입니다" : "캡처의 주문 정보가 참여 명의와 맞지 않습니다")
+    + '</b><div>' + _safeText(otherOwner
+      ? "이 캡처는 " + who + "가 아닌, 내 정보에 저장된 다른 명의의 주문으로 보입니다."
+      : "이 캡처의 주문 정보가 " + who + "와 맞지 않습니다.")
+    + '</div><div>' + _safeText(who + "로 구매한 주문의 캡처를 올려주세요. 다른 명의로 구매했다면 그 명의로 다시 참여해야 합니다.")
+    + '</div></div>';
 }
 
 function _retrySubmissionIdentity(cid) {
   const st = _cardAiState[cid];
   if (st?.identityBusy) return;
+  if (_identityNeedsNewCapture(st)) {
+    const input = document.getElementById(cid + "_imgInput");
+    if (input) { input.value = ""; input.click(); }
+    return;
+  }
   if (st?.lastBase64) _retryCardAi(cid);
   else document.getElementById(cid + "_imgInput")?.click();
 }
 
 function _renderIdentityMatchState(cid, status, reasons, canManual) {
   const st = _cardAiState[cid];
-  const box = document.getElementById(cid + "_identityStatus"); if (!box || !st) return;
+  if (!st) return;
+  // 판정 상태는 안내 상자 유무와 무관하게 기록한다 — nc 모드 2번(쿠팡) 카드는 상자가 없어
+  // 여기서 먼저 반환하면 MISMATCH 가 기록되지 않아 재분석 반복이 그대로 남는다.
   st.identityStatus = status; st.identityReasons = reasons || []; st.identityCanManual = canManual;
+  const box = document.getElementById(cid + "_identityStatus");
+  if (!box) { _syncSubmissionIdentityAction(); return; }
   const issues = _identityIssues(cid);
   for (const field of ["recipient", "phone", "address", "price"]) {
     const el = document.getElementById(cid + "_" + field); if (!el) continue;
@@ -8718,8 +8750,10 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
     if (diff) box.innerHTML += '<div style="overflow-wrap:anywhere"><b>등록 주소</b><br>' + _safeText(diff.registered) + '<br><b>주문 배송지</b><br>' + _safeText(diff.entered) + '</div>';
   }
   if (!issues.length && status !== "MATCH") box.innerHTML = '<div>' + _safeText((reasons || []).filter(Boolean).join(' · ') || '선택 명의의 주문인지 확인해주세요.') + '</div>';
+  const needsNewCapture = _identityNeedsNewCapture(st);
+  if (needsNewCapture) box.innerHTML = _identityMismatchNotice(st) + box.innerHTML;
   if (!st.approvalToken && !canManual && !st.identityBusy) box.innerHTML += '<button type="button" class="identity-issue-link" onclick="_retrySubmissionIdentity(\'' + cid + '\')">'
-    + (st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
+    + (needsNewCapture ? '다른 캡처 올리기' : st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
   _syncSubmissionIdentityAction();
 }
 
@@ -8745,6 +8779,7 @@ async function _matchCardIdentity(cid, requestId) {
     st.priorApprovalToken = "";
     st.reviewToken = data.reviewToken || "";
     st.identityChecks = data.checks || [];
+    st.identityReasonCodes = Array.isArray(data.reasonCodes) ? data.reasonCodes : [];
     if (data.resolved) st.extracted = { ...st.extracted, ...data.resolved };
     _showCardAiResult(cid, st.extracted);
     if (data.status === "MATCH" || data.status === "REVIEW") applyCardAiResult(cid);
