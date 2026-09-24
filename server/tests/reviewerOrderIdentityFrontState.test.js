@@ -40,7 +40,7 @@ function harness(){
  assert(e.card_identityStatus.innerHTML.includes('다른 캡처 올리기'));assert(!e.card_identityStatus.innerHTML.includes('캡처 다시 분석하기'));
  c._purchasePrimaryAction();assert.equal(reanalyzed,0);assert.equal(e.card_imgInput.clicked,1);assert.equal(e.card_imgInput.value,'');assert.equal(k().submissions,0);assert(!e.card_recipient.focused);
  s2.identityReasonCodes=['selected_identity_conflict'];c._renderIdentityMatchState('card','MISMATCH',['이름 불일치'],false);
- assert(e.card_identityStatus.innerHTML.includes('참여 명의와 맞지 않습니다'));assert.equal(e.btnOrderFormSubmit.textContent,'다른 캡처 올리기');
+ assert(e.card_identityStatus.innerHTML.includes('캡처의 주문자가 참여한 명의와 다릅니다'));assert(e.card_identityStatus.innerHTML.includes('1:1 문의'));assert.equal(e.btnOrderFormSubmit.textContent,'다른 캡처 올리기');
  s2.identityReasonCodes=['x<b>'];c._activeIdentityContext.selectedIdentity.name='<img>';c._renderIdentityMatchState('card','MISMATCH',[],false);assert(!e.card_identityStatus.innerHTML.includes('<img>'));
  console.log('PASS 명의 불일치 = 재분석 반복 금지 · 사유 안내 · 다른 캡처 선택');
  }
@@ -51,6 +51,12 @@ function harness(){
  assert.equal(s3.identityStatus,'MISMATCH');assert.equal(e.btnOrderFormSubmit.textContent,'다른 캡처 올리기');assert(e.orderIdentityAction.innerHTML.includes('다른 명의의 주문 캡처로 보입니다'));
  c._purchasePrimaryAction();assert.equal(re,0);assert.equal(e.card_imgInput.clicked,1);
  console.log('PASS 안내 상자 없는 카드(nc 쿠팡)도 불일치 기록 · 재분석 반복 금지');
+ }
+ {
+ const {ctx:c,elements:e}=harness();const s4=c._cardAiState.card;s4.approvalToken='';
+ s4.identityReasonCodes=['duplicate_name_identity'];c._renderIdentityMatchState('card','REVIEW',[],true);
+ assert(e.card_identityStatus.innerHTML.includes('두 번 저장돼'));assert.equal(e.btnOrderFormSubmit.textContent,'내 주문이 맞습니다');
+ console.log('PASS 같은 이름 중복 명의 = 확인 단계 안내(차단 아님)');
  }
  for(const mask of ['*','＊','●','○','◯','◉','•','·','x','X']){const {ctx:c,elements:e}=harness();c._cardAiState.card.extracted={recipient:'김'+mask+'수'};c.applyCardAiResult('card');assert.equal(e.card_recipient.readOnly,false);}
  console.log('PASS 가림문자 10종 수정 가능');

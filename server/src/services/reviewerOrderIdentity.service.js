@@ -419,11 +419,24 @@ function maskedNameOcrNearMiss(raw, stored) {
   return visible >= 2 && matches >= 1 && mismatches === 1;
 }
 
-// 가림 없이 노출된 이름은 OCR 오탐 폭을 미리 제한하지 않고 재확인 후보로 둔다.
-// 실제 승인은 아래 수동확인에서 현재 참여 명의 직접 선택과 완전한 최종 입력을 요구한다.
+// 가림 없이 노출된 이름은 "한 글자" 오인식(바뀜·빠짐·더해짐 1개)까지만 재확인 후보로 둔다.
+// ★ 사용자 확정 2026-09-24(결정 1가): 이름이 통째로 다르면(김수만→박철수) 막는다. 종전에는 차이 폭을
+//   제한하지 않아, 남의 주문 캡처도 저장된 내 이름을 고르면 통과됐다(보고서 원인 3).
+function nameEditDistance(a, b) {
+  const x = [...a], y = [...b];
+  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= y.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[y.length];
+}
 function plainNameOcrCorrectionCandidate(raw, stored) {
   const a = cleanName(raw), b = cleanName(stored);
-  return !!a && !!b && !MASK_RE.test(a) && a !== b;
+  return !!a && !!b && !MASK_RE.test(a) && a !== b && nameEditDistance(a, b) <= 1;
 }
 
 function canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIdentity) {
@@ -521,6 +534,13 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   for (const identity of allIdentities) {
     if (identity.identityKey === selected.identityKey) continue;
     const other = await scoreIdentity(extracted, identity, { useGemini: false });
+    // 같은 소유자 안에서 이름이 같은 명의 = 같은 사람의 중복 등록(실사고 2026-09-24: 번호만 다른
+    // 두 칸 중 주소 빈 칸으로 참여 → 주소 있는 칸이 "다른 명의"로 잡혀 차단). 차단하지 않고
+    // 사유만 남긴다 — 참여 명의 확인은 선택 명의 자체의 판정(REVIEW/수동확인)이 맡는다.
+    if (cleanName(identity.name) && cleanName(identity.name) === cleanName(selected.name)) {
+      if (other.matches >= 2 && !reasonCodes.includes('duplicate_name_identity')) reasonCodes.push('duplicate_name_identity');
+      continue;
+    }
     if (other.matches >= 2 && other.score >= selectedScore.score) {
       competingIdentity = identity;
       // 선택 명의 자체도 독립 필드 2개 이상 명확히 맞으면 중복 저장정보 때문에 생긴
@@ -727,6 +747,18 @@ async function manualConfirm(body, reviewer) {
     const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
     if (!extract.extractOk) throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', '캡처 추출에 실패한 건은 AI 분석 장애 확인 절차를 이용해주세요.', 409);
     imageHash = extract.imageHash; extractedHash = extract.fieldsHash; reasonCodes = ['identity_match_unavailable'];
+    // ★ 캡처 자체도 결정적으로 재검사한다. 아래 공통 검사는 사용자가 보낸 입력칸(formFields)만 보므로,
+    //   입력칸을 내 정보로 채우면 남의 주문 캡처도 통과했다(2026-09-24 실측 우회). 네트워크 오류로도
+    //   이 경로에 들어오므로 악용이 아니어도 캡처 확인이 통째로 빠질 수 있었다.
+    const captureCheck = await evaluateSelectedIdentity(body.extracted || {}, context.selected, context.identities, {
+      useGemini: false, allowPlainNameCorrection: true,
+    });
+    if (captureCheck.status === 'MISMATCH') {
+      await audit({ context, status: 'MISMATCH', approvalMode: mode,
+        reasonCodes: ['identity_match_unavailable', ...captureCheck.reasonCodes], imageHash, extractedHash });
+      throw new ReviewerOrderIdentityError('IDENTITY_MISMATCH',
+        '캡처의 주문자가 참여한 명의와 다릅니다. 참여한 명의로 구매한 주문의 캡처를 올려주세요.', 409);
+    }
   } else if (mode === 'no_capture') {
     reasonCodes = ['no_capture_exception'];
   } else {

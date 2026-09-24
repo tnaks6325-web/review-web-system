@@ -8702,13 +8702,16 @@ function _identityNeedsNewCapture(st) {
 function _identityMismatchNotice(st) {
   const name = String(_activeIdentityContext?.selectedIdentity?.name || "").trim();
   const who = name ? "참여한 명의(" + name + ")" : "참여한 명의";
+  // 서버는 같은 이름의 중복 명의를 "다른 명의"로 보지 않는다(duplicate_name_identity) — 그래서
+  // other_owner_identity_matches 는 이름이 다른 저장 명의와 맞은 경우에만 온다.
   const otherOwner = (st.identityReasonCodes || []).includes("other_owner_identity_matches");
   return '<div class="identity-mismatch-notice" style="margin-bottom:8px"><b>'
-    + (otherOwner ? "다른 명의의 주문 캡처로 보입니다" : "캡처의 주문 정보가 참여 명의와 맞지 않습니다")
+    + (otherOwner ? "다른 명의의 주문 캡처로 보입니다" : "캡처의 주문자가 참여한 명의와 다릅니다")
     + '</b><div>' + _safeText(otherOwner
-      ? "이 캡처는 " + who + "가 아닌, 내 정보에 저장된 다른 명의의 주문으로 보입니다."
-      : "이 캡처의 주문 정보가 " + who + "와 맞지 않습니다.")
+      ? "이 캡처는 " + who + "가 아닌, 내 정보에 저장된 다른 이름의 명의 주문으로 보입니다."
+      : "캡처에서 읽은 주문자 이름이 " + who + "와 다릅니다.")
     + '</div><div>' + _safeText(who + "로 구매한 주문의 캡처를 올려주세요. 다른 명의로 구매했다면 그 명의로 다시 참여해야 합니다.")
+    + '</div><div style="margin-top:4px;color:#6b7280">' + _safeText("캡처가 맞는데도 이 안내가 계속 뜨면 1:1 문의로 알려주세요.")
     + '</div></div>';
 }
 
@@ -8752,6 +8755,10 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
   if (!issues.length && status !== "MATCH") box.innerHTML = '<div>' + _safeText((reasons || []).filter(Boolean).join(' · ') || '선택 명의의 주문인지 확인해주세요.') + '</div>';
   const needsNewCapture = _identityNeedsNewCapture(st);
   if (needsNewCapture) box.innerHTML = _identityMismatchNotice(st) + box.innerHTML;
+  else if (!st.approvalToken && (st.identityReasonCodes || []).includes("duplicate_name_identity")) {
+    const dupName = String(_activeIdentityContext?.selectedIdentity?.name || "").trim() || "같은";
+    box.innerHTML = '<div style="margin-bottom:8px">' + _safeText("내 정보에 " + dupName + " 이름의 명의가 두 번 저장돼 있어 자동으로 확인하지 못했습니다. 참여한 명의의 주문이 맞다면 [내 주문이 맞습니다]를 눌러주세요.") + '</div>' + box.innerHTML;
+  }
   if (!st.approvalToken && !canManual && !st.identityBusy) box.innerHTML += '<button type="button" class="identity-issue-link" onclick="_retrySubmissionIdentity(\'' + cid + '\')">'
     + (needsNewCapture ? '다른 캡처 올리기' : st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
   _syncSubmissionIdentityAction();

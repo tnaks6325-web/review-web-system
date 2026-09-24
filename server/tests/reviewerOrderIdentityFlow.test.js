@@ -385,26 +385,37 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     selectedAddress = selectedFields.address;
   });
 
-  await test('다른 저장 명의와 일치하는 캡처도 현재 참여 명의를 직접 선택하면 제출한다', async () => {
+  // ★ 사용자 확정 2026-09-24(결정 1가): 이름이 통째로 다른 캡처는 막는다. 종전에는 이 캡처(박영희)도
+  //   저장된 김민수를 고르면 제출됐다 — 남의 주문 캡처로 리뷰비를 받을 수 있던 경로.
+  await test('다른 이름의 저장 명의와 일치하는 캡처는 재확인 없이 차단한다', async () => {
     const otherFields = { recipient:'박영희', phone:'010-9999-8888', address:'부산 해운대구 센텀로 20 202동 505호' };
     const proof = identity.issueExtractionProof({ imageHash:'f'.repeat(64), extracted:otherFields, ok:true });
     const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:otherFields }, reviewer);
-    assert.strictEqual(reviewed.status, 'REVIEW');
+    assert.strictEqual(reviewed.status, 'MISMATCH');
     assert.strictEqual(reviewed.approvalToken, '');
-    assert.ok(reviewed.reviewToken);
-    const corrected = { ...otherFields, recipient:selectedFields.recipient };
+    assert.strictEqual(reviewed.reviewToken, '');
+    assert.ok(reviewed.reasonCodes.includes('other_owner_identity_matches'));
+  });
+
+  await test('전혀 다른 사람 캡처는 명의 매칭 장애 경로에서 입력칸을 내 정보로 채워도 차단한다', async () => {
+    const other = { recipient:'박철수', phone:'010-7777-0000', address:'광주 서구 상무대로 1 5호' };
+    const proof = identity.issueExtractionProof({ imageHash:'7'.repeat(64), extracted:other, ok:true });
+    const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:other }, reviewer);
+    assert.strictEqual(matched.status, 'MISMATCH');
     await assert.rejects(identity.manualConfirm({
-      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
-      formFields:corrected,
-    }, reviewer), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+      ...base, mode:'match_error', manualConfirmed:true, extractToken:proof.extractToken,
+      extracted:other, formFields:selectedFields,
+    }, reviewer), (err) => err.code === 'IDENTITY_MISMATCH');
+  });
+
+  await test('이름 한 글자 오인식은 명의 매칭 장애 경로에서도 확인 후 제출한다', async () => {
+    const misread = { ...selectedFields, recipient:'김민슈' };
+    const proof = identity.issueExtractionProof({ imageHash:'6'.repeat(64), extracted:misread, ok:true });
     const manual = await identity.manualConfirm({
-      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
-      formFields:corrected,
-      savedIdentitySelections:{ recipient:`identity:${selectedId}` },
+      ...base, mode:'match_error', manualConfirmed:true, extractToken:proof.extractToken,
+      extracted:misread, formFields:selectedFields,
     }, reviewer);
-    await identity.verifyApprovalForSubmission({
-      ...base, ...corrected, identityApprovalToken:manual.approvalToken,
-    }, reviewer);
+    assert.strictEqual(manual.mode, 'match_error');
   });
 
   console.log(`\n✅ reviewerOrderIdentityFlow: ${passed}개 통과`);
