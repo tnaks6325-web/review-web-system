@@ -32,7 +32,7 @@ const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierPr
 const { normalizeDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
 const { assertWorkOrderQuota, syncWorkOrderRecruitTotal } = require('../services/linkedRecruitQuota.service');
-const { projectIntranetAdvertiser, ADVERTISER_NAME_CONFLICT } = require('../services/advertiserProjection.service');
+const { projectIntranetAdvertiser, ensureTabOwnership, ADVERTISER_NAME_CONFLICT } = require('../services/advertiserProjection.service');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -2079,6 +2079,23 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       }
     }
 
+    // 8c) 업체 소유 자동 지정 — 리뷰오더에서 고른 광고주(원본 연결된 업체)를 이 작업의 소유로 둔다.
+    //   ★★ 없으면 광고주·계약이 다 붙어 있어도 업체관리·작업바에서 「미지정」으로 떨어진다(2026-09-23 실사고).
+    //   ★ 작업(탭) 단위만 · 이미 누가 소유하면 덮지 않음 · 해제된 행 미부활 — 규율은 서비스 한 곳.
+    //   ★ fail-soft: 실패해도 접수는 성공(업체관리에서 손으로 지정할 수 있다). 결과는 응답에 싣는다.
+    let ownershipAssigned = null;
+    const _ownAdv = (advertiserProjection && advertiserProjection.advertiserId) || (upd[0] && upd[0].advertiser_id) || '';
+    if (_ownAdv) {
+      ownershipAssigned = await ensureTabOwnership({
+        advertiserId: _ownAdv, sheetId, tabGid: gid, by: `자동(작업오더):${req.admin?.name || ''}`,
+      });
+      if (ownershipAssigned.status === 'failed') {
+        logger.warn(`[order/accept] 업체 소유 자동 지정 실패 (접수는 완료): ${ownershipAssigned.error}`);
+      } else if (ownershipAssigned.status !== 'already') {
+        logger.info(`[order/accept] 업체 소유 자동 지정: ${sheetId}/${tabName} → ${ownershipAssigned.status}`);
+      }
+    }
+
     logger.info(`[order/accept] ${id} → 탭 "${tabName}"${wantSheetless ? '(무시트)' : ''} (${wasRegistered ? '기존탭 연결' : '신규 등록'}), 캠페인=${spreadsheetTitle}, 빌드=${indexBuilt}`);
 
     res.json({
@@ -2091,6 +2108,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       indexBuilt,
       gidCorrected,       // true = 사람이 고른 탭으로 URL 의 죽은 gid 를 교정해 접수함
       settlementLinked,   // linked | already | kept_existing | failed | null(계약 미첨부 오더)
+      ownershipAssigned,  // {status: assigned|already|kept_existing|kept_removed|advertiser_ended|no_gid|failed} | null(광고주 없음)
       advertiserProjection,
       workboardMapping,
       sheetless: wantSheetless || undefined,
