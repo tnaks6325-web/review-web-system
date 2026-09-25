@@ -1639,11 +1639,14 @@ function _normIssueDate(v) {
   const d = String(v || '').replace(/[^0-9]/g, '').slice(0, 8);
   return d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : null;
 }
+const _INVOICE_VOID_RE = /취소|거부/;
 // 계산서 진행 판정 단일 출처 — settlementForTab·settlementSummaryForAdvertiser 가 함께 쓴다.
 function _invoiceProgress(sales, invRows, totalCost) {
   const legacy = sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null;
   if (!sales) return null;
-  const issued = (invRows || []).filter(t => _normIssueDate(t.issue_date));
+  // ★ 발행 뒤 취소·거부된 계산서는 계약에 연결된 채로 남으므로 발행 합계에서 뺀다(인트라넷 status 문구:
+  //   '발행취소' · 거부). 인트라넷 발행 흐름이 계산서 쪽에도 계약을 적게 되면서(2026-09-26) 연결이 늘어난다.
+  const issued = (invRows || []).filter(t => _normIssueDate(t.issue_date) && !_INVOICE_VOID_RE.test(String(t.status || '')));
   if (!invRows || !issued.length) return { ...legacy, count: 0, issuedAmount: 0, targetAmount: null };
   const mixed = sales.salesType === 'mixed' && sales.invoiceLegAmount > 0;
   // 목표 = 혼합계약은 발행분, 아니면 계약금액(계산서는 계약 기준으로 끊는다) — 계약금액을 모를 때만 견적 합계.

@@ -49,6 +49,10 @@ const DB = {
         quotes: [{ id: 'z', quote_number: 'Z', status: 'accepted', quote_date: '2026-08-01', total_amount: 10000000 }],
         inv: [{ sales_id: 'S5', issue_date: '2026-08-01', total_amount: 3000000 }, { sales_id: 'S5', issue_date: '2026-08-20', total_amount: 3000000 }, { sales_id: 'S5', issue_date: '2026-09-10', total_amount: 4000000 }] },
   S6: { sales: { id: 'S6', amount: 10000000, invoice_status: 'issued', invoice_date: '2026-09-01' }, quotes: [], invFail: true },
+  S7: { sales: { id: 'S7', amount: 10000000, invoice_status: 'issued', invoice_date: '2026-09-01' }, quotes: [],
+        inv: [{ sales_id: 'S7', issue_date: '20260901', total_amount: 3000000, status: '발행완료' },
+              { sales_id: 'S7', issue_date: '20260905', total_amount: 7000000, status: '발행취소' },
+              { sales_id: 'S7', issue_date: '20260906', total_amount: 7000000, status: '국세청전송' }] },
 };
 
 async function run() {
@@ -91,6 +95,9 @@ async function run() {
 
   d = await forTab('S6');
   ok(d.invoice.status === 'issued' && d.invoice.count === 0, 'B7: 계산서 조회 실패 → 종전 상태(모르는 채로 일부라고 말하지 않는다)');
+
+  d = await forTab('S7');
+  ok(d.invoice.status === 'issued' && d.invoice.count === 2 && d.invoice.issuedAmount === 10000000, 'B8: 발행취소 계산서는 합계에서 뺀다 · 국세청전송은 발행으로 센다');
 
   // ═══ C. 업체관리 요약 · 업체 화면 ═══
   const own = [{ sheetId: 'S', tabName: 'T1', salesId: 'S1', contractNumber: 'C-1' }, { sheetId: 'S', tabName: 'T2', salesId: 'S2' }];
