@@ -1639,11 +1639,20 @@ function _normIssueDate(v) {
   const d = String(v || '').replace(/[^0-9]/g, '').slice(0, 8);
   return d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : null;
 }
+const _INVOICE_VOID_RE = /취소|거부/;
 // 계산서 진행 판정 단일 출처 — settlementForTab·settlementSummaryForAdvertiser 가 함께 쓴다.
 function _invoiceProgress(sales, invRows, totalCost) {
   const legacy = sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null;
   if (!sales) return null;
-  const issued = (invRows || []).filter(t => _normIssueDate(t.issue_date));
+  // ★ 발행 뒤 취소·거부된 계산서는 계약에 연결된 채로 남으므로 발행 합계에서 뺀다(인트라넷 status 문구:
+  //   '발행취소' · 거부). 인트라넷 발행 흐름이 계산서 쪽에도 계약을 적게 되면서(2026-09-26) 연결이 늘어난다.
+  const dated = (invRows || []).filter(t => _normIssueDate(t.issue_date));
+  const issued = dated.filter(t => !_INVOICE_VOID_RE.test(String(t.status || '')));
+  // ★ 연결된 계산서가 있는데 **전부 취소·거부**면 '미발행'이다 — 종전 상태(수기 '발행')로 접으면
+  //   유일한 계산서를 취소한 계약이 계속 발행 완료로 보인다(코덱스 리뷰 P1). 연결 0장·조회 실패만 종전 상태.
+  if (invRows && dated.length && !issued.length) {
+    return { status: 'not_issued', date: null, count: 0, issuedAmount: 0, targetAmount: null, voided: dated.length };
+  }
   if (!invRows || !issued.length) return { ...legacy, count: 0, issuedAmount: 0, targetAmount: null };
   const mixed = sales.salesType === 'mixed' && sales.invoiceLegAmount > 0;
   // 목표 = 혼합계약은 발행분, 아니면 계약금액(계산서는 계약 기준으로 끊는다) — 계약금액을 모를 때만 견적 합계.
@@ -1651,6 +1660,11 @@ function _invoiceProgress(sales, invRows, totalCost) {
   //   (그 불일치는 이미 amountMismatch ⚠ 가 따로 말한다).
   const target = mixed ? sales.invoiceLegAmount : (sales.amount > 0 ? sales.amount : (Number(totalCost) || 0));
   const issuedAmount = issued.reduce((n, t) => n + (Number(t.total_amount) || 0), 0);
+  // ★ 수정세금계산서(마이너스)가 원본 계약을 물려받으면(inadd-webapp) 계약 해제 = 원본 + 전액 마이너스 = 0 이다.
+  //   합계가 0 이하면 '미발행' — "일부 발행 0 / 500만"으로 말하지 않는다.
+  if (issuedAmount <= 0) {
+    return { status: 'not_issued', date: null, count: 0, issuedAmount: 0, targetAmount: null, voided: issued.length };
+  }
   const dates = issued.map(t => _normIssueDate(t.issue_date)).sort();
   const done = !(target > 0) || issuedAmount >= target;
   return {
