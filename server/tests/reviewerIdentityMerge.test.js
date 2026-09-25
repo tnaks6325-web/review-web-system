@@ -44,9 +44,16 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
   await test('칩 숫자는 참여 집계(구매 원장 조회) 없이 센다', async () => {
     const merge0 = require('../src/services/reviewerIdentityMerge.service');
     const sqls = [];
-    const db0 = { query: async (sql) => { sqls.push(String(sql)); return { rows: [] }; } };
+    // 묶음이 실제로 있어야 참여 집계 경로가 열린다 — 빈 결과로는 이 검사가 공허해진다(변이시험 실측)
+    const db0 = { query: async (sql) => {
+      sqls.push(String(sql));
+      if (/HAVING COUNT\(DISTINCT c\.phone8\)/.test(sql)) return { rows: [{ owner: 'o', owner_name: 'x', name_key: 'k', cards: [{ id: 'a', phone8: '11112222' }, { id: 'b', phone8: '33334444' }] }] };
+      if (/HAVING COUNT\(DISTINCT c\.owner_reviewer_id\)/.test(sql)) return { rows: [{ phone8: '55556666', cards: [{ owner: 'o1', phone8: '55556666' }, { owner: 'o2', phone8: '55556666' }] }] };
+      return { rows: [] };
+    } };
     const r = await merge0.counts({ db: db0 });
-    assert.strictEqual(r.duplicates, 0);
+    assert.strictEqual(r.duplicates, 1);
+    assert.strictEqual(r.sharedPhones, 1);
     assert.ok(!sqls.some((q) => /order_submissions/.test(q)), '칩 숫자에 구매 원장을 읽으면 안 된다');
   });
 
