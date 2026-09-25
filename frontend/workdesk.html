@@ -3757,7 +3757,9 @@ function _renderAdvHome(){
 function _awRowHtml(it){
   const i=_awTabIdx(it); if(i<0) return '';
   const st=_awStatus(it), { s, tc, pa, rest }=_awSetl(it);
-  const qs=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||[s.quoteStatus,''])[0]:null, qt=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||['',''])[1]:'';
+  // 견적서 여러 장이면 상태 한 낱말 대신 "수락 N/M"(첫 미수락 장의 상태만 보이면 몇 장 중 몇 장인지 안 보인다).
+  const qMany=s&&s.quoteCount>1;
+  const qs=s&&s.quoteStatus?(qMany?`수락 ${s.quoteAccepted||0}/${s.quoteCount}`:(_SETTLE_Q[s.quoteStatus]||[s.quoteStatus,''])[0]):null, qt=s&&s.quoteStatus?(qMany&&(s.quoteAccepted||0)>=s.quoteCount?'safe':(_SETTLE_Q[s.quoteStatus]||['',''])[1]):'';
   const iv=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||[s.invoiceStatus,''])[0]:null, ivt=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||['','neutral'])[1]:'';
   const paidDate=s&&s.paidDate?_awMD(s.paidDate):'—';
   return `<div class="awlrow" onclick="selTab(${i})" title="${esc(_tabTip(it))}">

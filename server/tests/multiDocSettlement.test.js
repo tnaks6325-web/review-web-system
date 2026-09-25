@@ -156,6 +156,7 @@ async function run() {
   ok(/\.tp3doc \.tp3meter\{position:absolute;left:0;bottom:0;height:2px;background:var\(--accent\)/.test(wd), 'E10: 진행선 = 기존 파랑');
   ok(/function _qdocPick\(di\)/.test(wd) && /onclick="_qdocPick\(\$\{di\}\)"/.test(wd), 'E11: 견적서 팝업 장 전환(인덱스만 전달)');
   ok(/partial:\['일부 발행',''\]/.test(wd), 'E12: 업체 화면 계산서 칩 "일부 발행"');
+  ok(/const qMany=s&&s\.quoteCount>1;/.test(wd) && /수락 \$\{s\.quoteAccepted\|\|0\}\/\$\{s\.quoteCount\}/.test(wd), 'E13: 업체 화면 견적서 칩 = 여러 장이면 "수락 N/M"(첫 미수락 장 상태만 보이지 않게)');
 
   console.log(`✅ multiDocSettlement: ${pass} cases passed`);
   process.exit(0);
