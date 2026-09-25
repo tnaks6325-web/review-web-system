@@ -1033,6 +1033,46 @@
   .lgtable .lgby{font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap}
   .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠(맨 앞=조치 칸) */
   .lgtable tr.lgdone td{opacity:.55}
+  /* ── 등록리뷰어DB 명의 합치기(조각 4 · rvim 접두) ── */
+  .rvimchip{font:inherit;font-size:.72rem;font-weight:700;padding:3px 12px;border-radius:999px;border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-deep);cursor:pointer;height:auto}
+  .rvimchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .rvimchip b{margin-left:4px}
+  .rvimwrap{padding:0 16px 20px;display:flex;flex-direction:column;gap:12px;max-width:1180px}
+  .rvimhelp{font-size:12.5px;color:var(--muted);background:var(--card2);border-radius:8px;padding:9px 12px}
+  .rvimhelp b{color:var(--ink)}
+  .rvimg{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+  .rvimgh{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--card2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .rvimgh .who{font-weight:800}
+  .rvimgh .why{font-size:12px;color:var(--warn);font-weight:700}
+  .rvimtw{overflow-x:auto}
+  table.rvimt{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:620px}
+  table.rvimt th{text-align:left;font-size:11px;font-weight:700;color:var(--muted);padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--card)}
+  table.rvimt td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+  table.rvimt tr:last-child td{border-bottom:none}
+  table.rvimt tr.pk{cursor:pointer}
+  table.rvimt tr.pk:hover td{background:var(--card2)}
+  table.rvimt tr.pk.sel td{background:var(--accent-soft)}
+  table.rvimt tr.pk.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  table.rvimt tr.fixed td{cursor:default}
+  .rvimchk{display:inline-flex;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line2);align-items:center;justify-content:center;font-size:11px;color:transparent}
+  tr.sel .rvimchk{background:var(--accent);border-color:var(--accent);color:#fff}
+  .rvimkeep{font-size:10.5px;font-weight:800;color:#fff;background:var(--accent);padding:2px 7px;border-radius:999px;margin-left:6px}
+  .rvimok{color:var(--safe);font-weight:700} .rvimno{color:var(--bad);font-weight:700}
+  .rvimft{display:flex;gap:8px;padding:9px 12px;border-top:1px solid var(--line);flex-wrap:wrap;align-items:center}
+  .rvimft .hint{font-size:12px;color:var(--muted);flex:1;min-width:200px}
+  .rvimask{margin:0 12px 12px;border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:10px;padding:11px 13px;display:flex;flex-direction:column;gap:7px;font-size:12.5px}
+  .rvimask h4{margin:0;font-size:13.5px;font-weight:800}
+  .rvimask ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+  .rvimdone{padding:10px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px}
+  .rvimtag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;background:var(--card2);color:var(--muted)}
+  .rvimtag.m{background:var(--safe-soft);color:var(--safe)}
+  .rvimlink{font:inherit;font-size:12.5px;font-weight:700;color:var(--accent-deep);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:3px}
+  .rvimpair{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;padding:12px}
+  .rvimside{border:1px solid var(--line);border-radius:8px;padding:9px 11px;display:flex;flex-direction:column;gap:2px;font-size:12.5px}
+  .rvimside .nm{font-weight:800}
+  .rvimvs{align-self:center;font-size:11px;font-weight:800;color:var(--faint)}
+  .rvimmemo{width:100%;font:inherit;font-size:12.5px;padding:7px 9px;border-radius:8px;border:1px solid var(--line2);background:var(--card);color:var(--ink)}
+  @media(max-width:720px){.rvimpair{grid-template-columns:1fr}.rvimvs{justify-self:center}}
   /* ── 등록리뷰어DB 전용(rv 접두) ──
      ★ 접두를 나눠 쓰는 이유: 작업보드 '작업세부' 패널이 .worow/.wodetail 같은 이름을 이미 쓰고 있어
        클래스가 겹치면 그쪽 규칙(display:grid 등)이 이 표의 <tr> 에 걸려 표가 통째로 무너진다(실측). */
@@ -2888,7 +2928,8 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
                         advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
-                        favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'' });
+                        favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
+                        rvIm:'',rvImData:null,rvImSel:null,rvImAsk:null,rvImDone:null,rvImCounts:null,rvImMemo:null });   // ★ 명의 합치기 목록(실명·번호) 잔재 제거
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
   const r=await fetch(API_BASE+path,o);
@@ -3115,7 +3156,8 @@ function logout(){
                         advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,
                         finUnavailable:false,statsUnavailable:false,dailyUnavailable:false,finTruncated:false,worktabsUnavailable:false,
-                        campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'' });
+                        campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
+                        rvIm:'',rvImData:null,rvImSel:null,rvImAsk:null,rvImDone:null,rvImCounts:null,rvImMemo:null });   // ★ 명의 합치기 목록(실명·번호) 잔재 제거
   _NAVCS.cs=null; _NAVCS.re=null;   // 합산 뱃지도 초기화 — 안 하면 이전 계정의 건수가 다음 로그인에 남는다
   _NAVRI.n=null;                    // 리뷰검수 값도 같은 이유(홈 타일·브리핑이 이 값을 본다)
   boot(); }
@@ -15877,6 +15919,8 @@ const RV_PAGE = 50;
 async function renderReviewersView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rvhead"></div><div id="rvbody"><div class="empty">불러오는 중…</div></div></div>`;
   STATE.rvOffset = STATE.rvOffset||0;
+  STATE.rvImSel=STATE.rvImSel||{}; STATE.rvImDone=STATE.rvImDone||{}; STATE.rvImMemo=STATE.rvImMemo||{};
+  _rvImLoadCounts();   // 칩 숫자(비차단)
   await _loadReviewers();
 }
 /* The live-search path must keep #rvq itself alive. Replacing #rvhead removes
@@ -15884,6 +15928,7 @@ async function renderReviewersView(){
    history instead of the input. */
 async function _loadReviewers({preserveSearchInput=false}={}){
   const requestId=(STATE.rvRequestId||0)+1; STATE.rvRequestId=requestId;
+  if(STATE.rvIm){ if(!preserveSearchInput) _renderRvHead(STATE.rvTotal|0); return _rvImLoad(); }   // 명의 합치기 보기(조각 4)
   const qs = new URLSearchParams({ limit:String(RV_PAGE), offset:String(STATE.rvOffset||0) });
   if(STATE.rvq) qs.set('q', STATE.rvq);
   if(STATE.rvStatus) qs.set('status', STATE.rvStatus);
@@ -15898,7 +15943,210 @@ async function _loadReviewers({preserveSearchInput=false}={}){
   else _renderRvHead(r.total|0);
   _renderRvBody();
 }
-function _rvSetFlag(f){ STATE.rvFlag = (STATE.rvFlag===f?'':f); STATE.rvOffset=0; _loadReviewers(); }
+function _rvSetFlag(f){ STATE.rvIm=''; STATE.rvFlag = (STATE.rvFlag===f?'':f); STATE.rvOffset=0; _loadReviewers(); }
+/* ── 등록리뷰어DB 명의 합치기(조각 4 · 결정 기록 179 · 사용자 확정 2026-09-25 모두 가) ──
+   ① 중복 의심 명의: 한 리뷰어 밑 이름 같고 번호 다른 명의 → 남길 명의를 줄 눌러 골라 합치기 / 다른 사람으로 두기
+   ② 겹치는 번호: 두 리뷰어에게 같은 번호 → 확인함 + 메모만(번호는 옮기거나 지우지 않는다)
+   ③ 판단 내역: 되돌리기 창구
+   ★ onclick 에는 인덱스만 넘긴다(이름·번호는 리뷰어가 적은 문자열). ★ 판정은 서버가 한다(화면 재판정 0). */
+function _rvImChipsHtml(){
+  const c=STATE.rvImCounts||{};
+  const n=v=>Number.isFinite(v)?v:'…';
+  const on=m=>STATE.rvIm===m?' on':'';
+  return `<button class="rvimchip${on('dup')}" type="button" onclick="_rvImOpen('dup')">🧩 중복 의심 명의<b>${n(c.duplicates)}</b></button>
+    <button class="rvimchip${on('shared')}" type="button" onclick="_rvImOpen('shared')">🔁 다른 리뷰어와 겹치는 번호<b>${n(c.sharedPhones)}</b></button>
+    <button class="rvimchip${on('log')}" type="button" onclick="_rvImOpen('log')">📜 판단 내역</button>
+    ${STATE.rvIm?'<button class="rvimlink" type="button" onclick="_rvImOpen(\'\')">리뷰어 목록으로</button>':''}`;
+}
+async function _rvImLoadCounts(){
+  try{ const r=await api('/api/trackb/identity-cards/merge-counts');
+    if(r && r.ok){ STATE.rvImCounts={duplicates:r.duplicates, sharedPhones:r.sharedPhones}; _rvImRefreshChips(); }
+  }catch(_){ }
+}
+function _rvImRefreshChips(){
+  const box=document.querySelector('.rvimchip') && document.querySelector('.rvimchip').parentElement;
+  if(box) box.innerHTML=_rvImChipsHtml();
+}
+function _rvImOpen(mode){
+  STATE.rvIm = (STATE.rvIm===mode ? '' : mode);
+  STATE.rvImSel={}; STATE.rvImAsk=null; STATE.rvImDone={}; STATE.rvImMemo={};
+  _renderRvHead(STATE.rvTotal|0);   // 윗줄 필터(전체·참여가능…)의 선택 표시도 함께 바꾼다
+  if(!STATE.rvIm) return _loadReviewers();
+  _rvImLoad();
+}
+async function _rvImLoad(){
+  const b=$('#rvbody'); if(!b) return;
+  const mode=STATE.rvIm;
+  b.innerHTML='<div class="empty">불러오는 중…</div>';
+  const path = mode==='dup' ? '/api/trackb/identity-cards/duplicates?limit=200'
+    : mode==='shared' ? '/api/trackb/identity-cards/shared-phones?limit=200'
+    : '/api/trackb/identity-cards/decisions?limit=100';
+  let r;
+  try{ r=await api(path); }catch(e){ r={ok:false,error:e.message}; }
+  if(STATE.rvIm!==mode) return;
+  if(!r || !r.ok){
+    b.innerHTML=`<div class="empty">불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''} <button class="rvimlink" type="button" onclick="_rvImLoad()">다시 시도</button></div>`;
+    return;
+  }
+  STATE.rvImData=r;
+  if(mode==='dup' && Number.isFinite(r.total)){ STATE.rvImCounts=Object.assign({},STATE.rvImCounts,{duplicates:r.total}); _rvImRefreshChips(); }
+  if(mode==='shared' && Number.isFinite(r.total)){ STATE.rvImCounts=Object.assign({},STATE.rvImCounts,{sharedPhones:r.total}); _rvImRefreshChips(); }
+  _rvImRender();
+}
+const _rvImDate = iso => { if(!iso) return '—'; const d=new Date(iso); return (d.getMonth()+1)+'/'+d.getDate(); };
+const _rvImDT = iso => { if(!iso) return ''; const d=new Date(iso); return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
+function _rvImRender(){
+  const b=$('#rvbody'); if(!b) return;
+  const d=STATE.rvImData||{};
+  if(STATE.rvIm==='dup'){
+    const gs=d.groups||[];
+    b.innerHTML=`<div class="rvimwrap">
+      <div class="rvimhelp">한 리뷰어 밑에 <b>이름은 같고 번호가 다른 명의</b>가 있습니다. 같은 사람이면 <b>남길 명의를 한 줄 눌러 고른 뒤</b> 합치고, 다른 사람이면 그대로 둡니다.
+        합쳐진 번호는 <b>옛 번호</b>로 남아 로그인·참여 내역이 그대로 유지되고, 참여할 때 고르는 명의 목록에만 하나로 보입니다. 판단은 언제든 [📜 판단 내역]에서 되돌릴 수 있습니다.</div>
+      ${gs.length? gs.map((g,gi)=>_rvImGroupHtml(g,gi)).join('') : '<div class="empty">확인할 중복 의심 명의가 없습니다.</div>'}
+    </div>`;
+    return;
+  }
+  if(STATE.rvIm==='shared'){
+    const it=d.items||[];
+    b.innerHTML=`<div class="rvimwrap">
+      <div class="rvimhelp">같은 번호가 <b>서로 다른 리뷰어</b> 밑에 등록돼 있습니다. 누구 명의인지 시스템은 알 수 없어 담당자가 확인합니다.
+        이 화면에서는 번호를 옮기거나 지우지 않고 <b>확인했다는 표시와 메모</b>만 남깁니다.</div>
+      ${it.length? it.map((x,xi)=>_rvImSharedHtml(x,xi)).join('') : '<div class="empty">확인할 겹치는 번호가 없습니다.</div>'}
+    </div>`;
+    return;
+  }
+  const ds=d.decisions||[];
+  const kindLb={merge:'합침',keep_separate:'다른 사람',shared_phone_ok:'겹치는 번호 확인'};
+  b.innerHTML=`<div class="rvimwrap">
+    <div class="rvimhelp">최근 판단 100건입니다. 되돌리면 합친 명의가 다시 살아나고, 합칠 때 빈 칸에 채운 값은 <b>그 뒤 아무도 고치지 않았을 때만</b> 다시 비웁니다.</div>
+    ${ds.length? `<div class="rvimtw"><table class="rvimt"><thead><tr><th>판단 시각</th><th>종류</th><th>대상</th><th>내용</th><th>담당자</th><th>상태</th><th></th></tr></thead><tbody>
+      ${ds.map((x,i)=>`<tr><td>${esc(_rvImDT(x.decidedAt))}</td><td>${esc(kindLb[x.kind]||x.kind)}</td>
+        <td>${x.kind==='shared_phone_ok'?`<span class="mono">…${esc(String(x.phone8||'').slice(-4))}</span>`:esc(x.ownerName||'')}</td>
+        <td style="white-space:normal;min-width:220px">${x.kind==='merge'&&x.kept?`${esc(x.kept.name)} ${esc(x.kept.phone||'')} 로 남김 · 합친 번호 ${(x.merged||[]).map(m=>esc(m.phone||'')).join(', ')}${x.filled&&x.filled.length?' · 빈 칸 채움: '+x.filled.map(esc).join(', '):''}`:esc(x.memo||'')}</td>
+        <td>${esc(x.decidedBy||'')}</td>
+        <td>${x.undone?`<span class="rvimtag">되돌림 · ${esc(x.undoneBy||'')}</span>`:'<span class="rvimtag m">적용 중</span>'}</td>
+        <td>${x.undone?'':`<button class="rvimlink" type="button" onclick="_rvImUndo(${i})">되돌리기</button>`}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty">아직 판단한 내역이 없습니다.</div>'}
+  </div>`;
+}
+function _rvImGroupHtml(g,gi){
+  const done=STATE.rvImDone[g.groupKey];
+  const head=`<div class="rvimgh"><span class="who">${esc(g.ownerName||'')}</span><span class="rvimtag">리뷰어</span>
+    <span class="why">${g.hasSelf?'본인과 이름 같은 타계정':'이름 같은 명의 '+g.cards.length+'장'}</span></div>`;
+  if(done){
+    return `<div class="rvimg">${head}<div class="rvimdone">${done.kind==='merge'
+      ? `<span class="rvimtag m">합침</span><span>${esc(done.text)}</span>`
+      : `<span class="rvimtag">다른 사람</span><span>그대로 두었습니다 · 이 묶음은 다시 목록에 뜨지 않습니다</span>`}
+      <span style="color:var(--muted);font-size:12px;flex:1">방금</span>
+      <button class="rvimlink" type="button" onclick="_rvImUndoDone(${gi})">되돌리기</button></div></div>`;
+  }
+  const selfIdx=g.cards.findIndex(c=>c.kind==='self');
+  const sel = selfIdx>=0 ? selfIdx : (STATE.rvImSel[g.groupKey]!=null ? STATE.rvImSel[g.groupKey] : null);
+  const ask = STATE.rvImAsk===g.groupKey && sel!=null;
+  const total=g.cards.reduce((a,c)=>a+(c.participation|0),0);
+  const rows=g.cards.map((c,ci)=>`<tr class="pk${sel===ci?' sel':''}${selfIdx>=0?' fixed':''}" ${selfIdx>=0?'':`tabindex="0" onclick="_rvImPick(${gi},${ci})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_rvImPick(${gi},${ci});}"`}>
+      <td><span class="rvimchk" aria-hidden="true">✓</span></td>
+      <td><b>${esc(c.name)}</b>${c.kind==='self'?' <span class="rvimtag">본인</span>':''}${sel===ci?'<span class="rvimkeep">남길 명의</span>':''}</td>
+      <td class="mono">${esc(c.phone||'')}</td>
+      <td>${c.hasAddress?'<span class="rvimok">있음</span>':'<span class="rvimno">없음</span>'}</td>
+      <td>${c.hasBank?'<span class="rvimok">있음</span>':'<span class="rvimno">없음</span>'}</td>
+      <td>${c.participation|0}건</td><td>${esc(_rvImDate(c.lastParticipatedAt))}</td></tr>`).join('');
+  const keep = sel!=null ? g.cards[sel] : null;
+  const others = keep ? g.cards.filter((_,i)=>i!==sel) : [];
+  const askHtml = ask ? `<div class="rvimask" role="group" aria-label="합치기 확인">
+      <h4>${esc(keep.name)} ${esc(keep.phone||'')} 로 합칩니다</h4>
+      <ul>
+        <li>참여 내역 ${total}건이 이 명의 하나로 모여 보입니다.</li>
+        <li>${others.map(o=>esc(o.phone||'')).join(', ')} 는 <b>옛 번호</b>로 남습니다. 옛 번호로도 로그인되고 옛 참여 내역도 그대로 보입니다.</li>
+        <li>남길 명의에 비어 있는 주소·계좌는 다른 명의의 값으로 채웁니다(값이 있는 칸은 덮지 않음).</li>
+        <li>리뷰어가 참여할 때 고르는 명의 목록에는 하나만 보입니다.</li>
+      </ul>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" type="button" onclick="_rvImMerge(${gi})">합치기 확정</button>
+        <button class="btn" type="button" onclick="_rvImAskOff()">취소</button></div></div>` : '';
+  return `<div class="rvimg">${head}
+    <div class="rvimtw"><table class="rvimt"><thead><tr><th style="width:34px"></th><th>명의</th><th>번호</th><th>주소</th><th>계좌</th><th>참여</th><th>마지막 참여</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    ${askHtml}
+    <div class="rvimft"><span class="hint">${selfIdx>=0?'본인 명의는 로그인 계정이라 항상 본인 명의가 남습니다.':(sel==null?'같은 사람이면 남길 명의를 한 줄 눌러 고르세요.':'고른 명의로 나머지를 합칩니다.')}</span>
+      <button class="btn pri" type="button" onclick="_rvImAskOn(${gi})" ${sel==null||ask?'disabled':''}>같은 사람 — 합치기</button>
+      <button class="btn" type="button" onclick="_rvImKeep(${gi})">다른 사람 — 그대로 두기</button></div></div>`;
+}
+function _rvImSharedHtml(x,xi){
+  const done=STATE.rvImDone[x.groupKey];
+  const head=`<div class="rvimgh"><span class="who mono">${esc(x.entries[0]?x.entries[0].phone:'')}</span><span class="why">리뷰어 ${new Set(x.entries.map(e=>e.ownerId)).size}명 밑에 등록됨</span></div>`;
+  if(done) return `<div class="rvimg">${head}<div class="rvimdone"><span class="rvimtag m">확인함</span><span>${esc(done.text||'메모 없음')}</span>
+    <span style="color:var(--muted);font-size:12px;flex:1">방금</span><button class="rvimlink" type="button" onclick="_rvImUndoDone(${xi})">되돌리기</button></div></div>`;
+  const side=e=>`<div class="rvimside"><span style="font-size:11px;color:var(--muted);font-weight:700">리뷰어</span><span class="nm">${esc(e.ownerName||'')}</span>
+    <span>${e.kind==='self'?'본인 명의':`타계정 명의 "${esc(e.name)}"`}</span><span style="color:var(--muted)">이 번호로 참여 ${e.participation|0}건</span></div>`;
+  const sides=x.entries.map(side);
+  const pair = sides.length===2 ? `${sides[0]}<span class="rvimvs">같은 번호</span>${sides[1]}` : sides.join('');
+  return `<div class="rvimg">${head}<div class="rvimpair"${sides.length===2?'':' style="grid-template-columns:1fr"'}>${pair}</div>
+    <div class="rvimft" style="flex-direction:column;align-items:stretch">
+      <label for="rvimMemo${xi}" style="font-size:12px;color:var(--muted);font-weight:700">메모 (예: 가족이 한 폰을 씀 · 본인께 확인함)</label>
+      <input class="rvimmemo" id="rvimMemo${xi}" maxlength="500" value="${esc((STATE.rvImMemo||{})[x.groupKey]||'')}" oninput="_rvImMemoSet(${xi},this.value)" placeholder="확인한 내용을 적어 두면 다음 사람이 다시 묻지 않습니다">
+      <div><button class="btn pri" type="button" onclick="_rvImSharedOk(${xi})">확인함으로 표시</button></div></div></div>`;
+}
+function _rvImMemoSet(xi,v){ const x=((STATE.rvImData||{}).items||[])[xi]; if(x){ STATE.rvImMemo=STATE.rvImMemo||{}; STATE.rvImMemo[x.groupKey]=v; } }
+function _rvImPick(gi,ci){
+  const g=(STATE.rvImData.groups||[])[gi]; if(!g || STATE.rvImAsk===g.groupKey) return;
+  STATE.rvImSel[g.groupKey] = STATE.rvImSel[g.groupKey]===ci ? null : ci;
+  _rvImRender();
+}
+function _rvImAskOn(gi){ const g=(STATE.rvImData.groups||[])[gi]; if(!g) return; STATE.rvImAsk=g.groupKey; _rvImRender(); }
+function _rvImAskOff(){ STATE.rvImAsk=null; _rvImRender(); }
+function _rvImFailMsg(r){ return (r&&r.error)||'처리하지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.'; }
+async function _rvImMerge(gi){
+  const g=(STATE.rvImData.groups||[])[gi]; if(!g) return;
+  const selfIdx=g.cards.findIndex(c=>c.kind==='self');
+  const sel= selfIdx>=0 ? selfIdx : STATE.rvImSel[g.groupKey];
+  const keep=g.cards[sel]; if(!keep) return;
+  let r; try{ r=await api('/api/trackb/identity-cards/merge',{method:'POST',body:JSON.stringify({ownerId:g.ownerId,nameKey:g.nameKey,groupKey:g.groupKey,keepCardId:keep.cardId})}); }catch(e){ r={ok:false,error:e.message}; }
+  if(!r || !r.ok){ toast(_rvImFailMsg(r)); return; }
+  STATE.rvImAsk=null;
+  STATE.rvImDone[g.groupKey]={kind:'merge',decisionId:r.decisionId,text:`${keep.name} ${keep.phone||''} 로 남김${r.filled&&Object.keys(r.filled).length?' · 빈 칸('+Object.keys(r.filled).length+'개) 채움':''}`};
+  if(STATE.rvImCounts && Number.isFinite(STATE.rvImCounts.duplicates)) STATE.rvImCounts.duplicates=Math.max(0,STATE.rvImCounts.duplicates-1);
+  _rvImRefreshChips(); _rvImRender(); toast('합쳤습니다');
+}
+async function _rvImKeep(gi){
+  const g=(STATE.rvImData.groups||[])[gi]; if(!g) return;
+  let r; try{ r=await api('/api/trackb/identity-cards/keep-separate',{method:'POST',body:JSON.stringify({ownerId:g.ownerId,nameKey:g.nameKey,groupKey:g.groupKey})}); }catch(e){ r={ok:false,error:e.message}; }
+  if(!r || !r.ok){ toast(_rvImFailMsg(r)); return; }
+  STATE.rvImAsk=null; STATE.rvImSel[g.groupKey]=null;
+  STATE.rvImDone[g.groupKey]={kind:'keep',decisionId:r.decisionId};
+  if(STATE.rvImCounts && Number.isFinite(STATE.rvImCounts.duplicates)) STATE.rvImCounts.duplicates=Math.max(0,STATE.rvImCounts.duplicates-1);
+  _rvImRefreshChips(); _rvImRender(); toast('다른 사람으로 두었습니다');
+}
+async function _rvImSharedOk(xi){
+  const x=(STATE.rvImData.items||[])[xi]; if(!x) return;
+  const memo=String((STATE.rvImMemo||{})[x.groupKey]||'').trim();
+  let r; try{ r=await api('/api/trackb/identity-cards/shared-phone-ok',{method:'POST',body:JSON.stringify({phone8:x.phone8,groupKey:x.groupKey,memo})}); }catch(e){ r={ok:false,error:e.message}; }
+  if(!r || !r.ok){ toast(_rvImFailMsg(r)); return; }
+  STATE.rvImDone[x.groupKey]={kind:'shared',decisionId:r.decisionId,text:memo};
+  if(STATE.rvImCounts && Number.isFinite(STATE.rvImCounts.sharedPhones)) STATE.rvImCounts.sharedPhones=Math.max(0,STATE.rvImCounts.sharedPhones-1);
+  _rvImRefreshChips(); _rvImRender(); toast('확인함으로 표시했습니다');
+}
+async function _rvImUndoId(decisionId){
+  let r; try{ r=await api('/api/trackb/identity-cards/decision-undo',{method:'POST',body:JSON.stringify({decisionId})}); }catch(e){ r={ok:false,error:e.message}; }
+  if(!r || !r.ok){ toast(_rvImFailMsg(r)); return false; }
+  toast('되돌렸습니다'); return true;
+}
+async function _rvImUndoDone(i){
+  const list = STATE.rvIm==='dup' ? (STATE.rvImData.groups||[]) : (STATE.rvImData.items||[]);
+  const x=list[i]; if(!x) return;
+  const done=STATE.rvImDone[x.groupKey]; if(!done) return;
+  if(await _rvImUndoId(done.decisionId)){
+    delete STATE.rvImDone[x.groupKey];
+    const k = STATE.rvIm==='dup' ? 'duplicates' : 'sharedPhones';
+    if(STATE.rvImCounts && Number.isFinite(STATE.rvImCounts[k])) STATE.rvImCounts[k]+=1;
+    _rvImRefreshChips(); _rvImRender();
+  }
+}
+async function _rvImUndo(i){
+  const x=((STATE.rvImData||{}).decisions||[])[i]; if(!x) return;
+  if(await _rvImUndoId(x.decisionId)){ STATE.rvImCounts=null; _rvImLoadCounts(); _rvImLoad(); }
+}
+
 function _renderRvHead(total){
   const from=(STATE.rvOffset|0)+1, to=Math.min((STATE.rvOffset|0)+RV_PAGE, total);
   $('#rvhead').innerHTML=`<div class="mh"><h1>등록리뷰어DB</h1>
@@ -15919,10 +16167,11 @@ function _renderRvHead(total){
              oninput="_rvSearchInput(this,event)" oncompositionend="_rvSearchInput(this,null,true)"
              onkeydown="if(event.key==='Enter'){event.preventDefault();STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers({preserveSearchInput:true});}">
       ${[['','전체'],['available','참여가능'],['blacklist','블랙리스트'],['candidate','🚨 후보 (미작성 1건↑)'],['overdue','기한경과만']]
-        .map(([f,lb])=>`<button class="btn" style="padding:3px 12px;border-radius:999px;font-size:.72rem${(STATE.rvFlag||'')===f?';background:#111827;border-color:#111827;color:#fff':''}"
+        .map(([f,lb])=>`<button class="btn" style="padding:3px 12px;border-radius:999px;font-size:.72rem${!STATE.rvIm&&(STATE.rvFlag||'')===f?';background:#111827;border-color:#111827;color:#fff':''}"
           onclick="_rvSetFlag('${f}')">${lb}</button>`).join('')}
       <span style="font-size:.68rem;color:var(--muted)">판정 기준: 기한경과 = 미제출 14일↑ · 리뷰미작성 = 미제출 30일↑ — 설정 › 블랙리스트 관리기준</span>
-    </div>`;
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 16px 10px">${_rvImChipsHtml()}</div>`;
 }
 /* Update only values outside the input. #rvq retains focus, selection and IME
    state while a search response updates the reviewer table. */

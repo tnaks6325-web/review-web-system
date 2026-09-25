@@ -112,7 +112,8 @@ const opsOf = (ops) => ops.map((o) => `${o.op}:${o.id || (o.card && o.card.name 
         else if (p.endsWith('.js') && fs.readFileSync(p, 'utf8').includes('reviewer_identity_cards')) hits.push(path.relative(path.resolve(__dirname, '../src'), p));
       }
     })(path.resolve(__dirname, '../src'));
-    assert.deepStrictEqual(hits, ['services/reviewerIdentityCards.service.js']);
+    // 조각 4(결정 179): 담당자 합치기 서비스도 카드 표를 다룬다 — 카드 표를 만지는 곳은 이 두 서비스뿐.
+    assert.deepStrictEqual(hits.sort(), ['services/reviewerIdentityCards.service.js', 'services/reviewerIdentityMerge.service.js']);
   });
   await test('10분 크론은 작업 잠금 아래에서 돌고 끌 수 있다', async () => {
     const cron = src('src/jobs/cron.js');

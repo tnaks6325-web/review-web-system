@@ -961,7 +961,7 @@ async function loadSubs(force){
     if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || '명의 정보를 불러오지 못했습니다.');
     const identities = (j && j.profile && j.profile.identities) || [];
     _subs = Array.isArray(identities)
-      ? identities.filter(x => x && x.type === 'sub' && x.name && x.phone)
+      ? identities.filter(x => x && x.type === 'sub' && x.name && x.phone && !x.merged)   // 담당자가 합친 명의(옛 번호)는 고르는 목록에서 숨김(조각 4)
       : [];
     _subsLoadError = null;
     try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
