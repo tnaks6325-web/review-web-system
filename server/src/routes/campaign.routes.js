@@ -1879,8 +1879,9 @@ async function _applyParticipation(req, res, next, campPre) {
     //   여기서 미리 막으면 홀드 미생성 = 자리 미점유 = 당일 참여권 무손실. 제출 단계 검사는 안전망으로 유지.
     //   ★ 063: 판정 기준은 항상 "소유자"(타계정 프로필은 제출측 SUB 자동보강이 담당, §02 신원확인 재사용)
     {
-      const { profileMissing } = require('../services/identity.service');
-      const missing = profileMissing(reg.rows[0]);
+      // ★ 조각 5(결정 181): 주소는 참여 뒤 구매양식에서 캡처 주소로 받는다 — 여기서는 요구하지 않는다.
+      const { participationProfileMissing } = require('../services/identity.service');
+      const missing = participationProfileMissing(reg.rows[0]);
       if (missing.length) {
         await client.query('ROLLBACK');
         return res.status(403).json({

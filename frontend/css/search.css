@@ -1194,3 +1194,40 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 /* ── 닫기 버튼 ── */
 .btn-reg-close{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;background:#F3F4F6;color:#6B7280;border:1.5px solid #E5E7EB;border-radius:var(--rs);padding:10px;font-size:.87rem;font-weight:600;cursor:pointer;transition:var(--tr)}
 .btn-reg-close:hover{background:#E5E7EB;color:#374151}
+
+/* ═══ 조각 5: 배송주소 — 참고 문구 · 명의 주소 [저장] · 저장 주소 고르기 (결정 기록 181) ═══ */
+.of-addr-help{font-size:.7rem;font-weight:400;color:#6B7280;margin-top:4px;line-height:1.45}
+.of-addr-help.is-warn{color:#be185d}
+.of-addr-save{display:flex;align-items:center;gap:8px;margin-top:7px;font-size:.78rem;font-weight:700;color:#374151}
+.of-addr-save-text{flex:1;min-width:0}
+.of-addr-save.is-off{color:#9CA3AF}
+.of-addr-save.is-done .of-addr-save-text{color:#047857;animation:ofAddrFade .3s ease}
+.of-addr-save-btn{font-family:inherit;font-size:.76rem;font-weight:800;border:none;border-radius:8px;padding:7px 14px;background:#3182f6;color:#fff;cursor:pointer;min-width:74px;transition:background-color .25s ease,transform .1s ease}
+.of-addr-save-btn:active{transform:scale(.96)}
+.of-addr-save-btn:disabled{cursor:default;background:#E5E7EB;color:#9CA3AF}
+.of-addr-save-btn.is-busy{background:#93C5FD;color:#fff}
+.of-addr-save-btn.is-done,.of-addr-save-btn.is-done:disabled{background:#10B981;color:#fff;animation:ofAddrPop .38s cubic-bezier(.2,1.6,.4,1)}
+.of-addr-spin{display:inline-block;width:11px;height:11px;border:2px solid rgba(255,255,255,.55);border-top-color:#fff;border-radius:50%;animation:ofAddrSpin .7s linear infinite;vertical-align:-1px}
+.of-addr-chip{display:flex;align-items:center;gap:8px;border:1.5px solid #BFDBFE;background:#EFF6FF;border-radius:9px;padding:7px 8px 7px 10px;margin-bottom:6px}
+.of-addr-chip-ad{flex:1;min-width:0;font-size:.76rem;color:#111827}
+.of-addr-chip-ad b{display:block;font-size:.64rem;color:#1d4ed8;margin-bottom:1px}
+.of-addr-chip-btn{font-family:inherit;font-size:.74rem;font-weight:800;border:none;background:#3182f6;color:#fff;border-radius:7px;padding:7px 11px;cursor:pointer;flex-shrink:0}
+.of-addr-chip.is-on{border-color:#A7F3D0;background:#ECFDF5}
+.of-addr-chip.is-on .of-addr-chip-ad b{color:#047857}
+.of-addr-pick{margin-top:6px}
+.of-addr-pick-btn{display:flex;align-items:center;gap:6px;width:100%;font-family:inherit;font-size:.76rem;font-weight:700;color:#1d4ed8;background:#fff;border:1.5px solid #BFDBFE;border-radius:8px;padding:7px 10px;cursor:pointer;text-align:left}
+.of-addr-pick-label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.of-addr-pick-car{color:#60A5FA;transition:transform .15s ease}
+.of-addr-pick.is-open .of-addr-pick-car{transform:rotate(180deg)}
+.of-addr-pick-menu{margin-top:4px;background:#fff;border:1px solid #E5E7EB;border-radius:10px;box-shadow:0 10px 24px rgba(17,24,39,.12);padding:4px;animation:ofAddrFade .14s ease}
+.of-addr-pick-opt{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font-family:inherit;border:none;background:none;border-radius:7px;padding:8px;cursor:pointer;color:#111827}
+.of-addr-pick-opt:hover,.of-addr-pick-opt:focus-visible{background:#F3F4F6}
+.of-addr-pick-opt.is-on{background:#ECFDF5}
+.of-addr-pick-ad{flex:1;min-width:0;font-size:.78rem;line-height:1.4}
+.of-addr-pick-ad small{display:block;font-size:.64rem;color:#9CA3AF;margin-top:1px}
+.of-addr-pick-ck{width:16px;color:#10B981;font-weight:800;font-size:.8rem;flex-shrink:0;text-align:center}
+@keyframes ofAddrPop{0%{transform:scale(.85)}60%{transform:scale(1.12)}100%{transform:scale(1)}}
+@keyframes ofAddrFade{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
+@keyframes ofAddrSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.of-addr-save-btn.is-done,.of-addr-save.is-done .of-addr-save-text,.of-addr-spin,.of-addr-pick-menu{animation:none}}
+.of-addr-help[hidden],.of-addr-save[hidden],.of-addr-chip[hidden],.of-addr-pick[hidden]{display:none}

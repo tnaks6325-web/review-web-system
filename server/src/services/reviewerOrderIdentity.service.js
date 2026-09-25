@@ -363,6 +363,72 @@ async function saveShoppingId(ownerReviewerId, identityKey, shoppingId) {
   } finally { client.release(); }
 }
 
+function cleanAddress(value) {
+  return String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 참여 직전 빈 주소 한 번 받기 (조각 5 · 결정 기록 181).
+ * ★ 빈 칸일 때만 채운다 — 이미 있는 주소는 절대 덮지 않는다(이 경로는 "고치기"가 아니라 "처음 넣기").
+ *   이미 있으면 저장하지 않고 filled:false 로 지금 주소를 돌려준다(화면은 그대로 참여를 이어간다).
+ * ★ saveShoppingId 와 같은 규율: 읽기 전에 소유자 행을 잠그고, 저장 뒤 같은 트랜잭션에서 카드를 맞춘다.
+ */
+async function saveIdentityAddress(ownerReviewerId, identityKey, address) {
+  const value = cleanAddress(address);
+  if (value.length < 5 || value.length > 300) {
+    throw new ReviewerOrderIdentityError('ADDRESS_INVALID', '배송 주소를 확인해주세요 (5~300자).', 400);
+  }
+  // 쇼핑몰이 가린(*) 주소는 명의 주소로 굳히지 않는다 — 가린 부분을 고친 뒤에만 저장.
+  if (/[*＊●○◯◉•]/.test(value)) {
+    throw new ReviewerOrderIdentityError('ADDRESS_MASKED', '가려진 부분(*)을 고친 뒤 저장해주세요.', 400);
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (UUID_RE.test(String(ownerReviewerId || ''))) {
+      await client.query('SELECT 1 FROM reviewers WHERE id = $1 FOR NO KEY UPDATE', [ownerReviewerId]);
+    }
+    const { owner, identities } = await loadOwnerProfile(ownerReviewerId, client);
+    const wanted = String(identityKey || '');
+    let matches = identities.filter((item) => item.identityKey === wanted);
+    if (!matches.length && wanted) matches = identities.filter((item) => item.legacyIdentityKey === wanted);
+    if (matches.length !== 1) throw new ReviewerOrderIdentityError('IDENTITY_NOT_FOUND', '저장할 명의를 찾을 수 없습니다.', 404);
+    const selected = matches[0];
+    let filled = false;
+    let current = '';
+    if (selected.type === 'self') {
+      current = String(owner.address || '').trim();
+      if (!current) {
+        // ★ 빈 칸 판단을 JS trim() 과 맞춘다 — BTRIM 은 공백만 지워 탭·줄바꿈만 든 주소를 "있음"으로 봐
+        //   0행 갱신인데 filled:true 로 답했다(Codex P2). 실제로 바뀐 행이 있을 때만 filled.
+        const upd = await client.query(
+          "UPDATE reviewers SET address = $2 WHERE id = $1 AND COALESCE(address, '') ~ '^[[:space:]]*$'",
+          [owner.id, value]
+        );
+        filled = upd.rowCount === 1;
+      }
+    } else {
+      const subs = asSubs(owner.sub_accounts);
+      const sub = subs[selected.subIndex];
+      if (!sub || cleanName(sub.name) !== cleanName(selected.name) || phone8(sub.phone) !== phone8(selected.phone)) {
+        throw new ReviewerOrderIdentityError('IDENTITY_CHANGED', '타계정 정보가 변경되었습니다. 화면을 새로고침해주세요.', 409);
+      }
+      current = String(sub.address || '').trim();
+      if (!current) {
+        subs[selected.subIndex] = { ...sub, address: value };
+        await client.query('UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1', [owner.id, JSON.stringify(subs)]);
+        filled = true;
+      }
+    }
+    if (filled) await syncCardsAfterWrite(client, owner.id, { source: 'address_fill' });
+    await client.query('COMMIT');
+    return { ok: true, identityKey: selected.identityKey, address: filled ? value : current, filled };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally { client.release(); }
+}
+
 async function resolveApplicationIdentity({ ownerReviewerId, applicationId, campaignId, holdToken }, db = pool) {
   const { owner, identities } = await loadOwnerProfile(ownerReviewerId, db);
   const appId = Number(applicationId);
@@ -937,6 +1003,7 @@ module.exports = {
   loadOwnerProfile,
   getSecureProfile,
   saveShoppingId,
+  saveIdentityAddress,
   resolveApplicationIdentity,
   maskedCompatible,
   maskedNameOcrNearMiss,

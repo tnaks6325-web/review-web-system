@@ -93,6 +93,7 @@ async function _loadOrderIdentityContext() {
     });
     _renderSavedOrderInfoPickers();
     _renderOrderInfoSuggestions();
+    _renderAddressTools();
     return data;
   })().catch((err) => { _identityContextPromise = null; throw err; });
   return _identityContextPromise;
@@ -241,6 +242,7 @@ function _restoreSavedInfoInputHandler(el, cid, field, locked) {
   else if (field === "address") el.oninput = () => {
     _clearSavedIdentitySelection(cid, "address");
     _ofClearError(cid + "_address"); _invalidateIdentityApproval(cid);
+    _syncAddressTools(cid, true);
   };
 }
 
@@ -285,6 +287,241 @@ function _renderSavedOrderInfoPickers() {
     });
   });
   _renderSavedBankAccountPicker();
+}
+
+/* ═══ 조각 5: 배송주소 — 캡처 주소를 명의 주소로 [저장] · 저장 주소 고르기 (결정 기록 181) ═══
+   ★ 명의 주소는 참여 전에 묻지 않는다. 구매양식에서 캡처로 읽은(또는 고친) 주소를 [저장]으로 그 명의에 넣는다.
+     [저장]은 그 명의에 저장된 주소가 없을 때만 보이고, 서버도 빈 칸만 채운다(이미 있는 주소는 덮지 않는다).
+   ★ 저장하면 명의 확인(캡처 대조)을 자동으로 다시 돌린다 — 저장 주소가 승인 증명에 묶여 있어서
+     그대로 두면 제출이 "저장 정보가 변경되었습니다"로 거절된다(사용자 확정 2026-09-26 1나).
+   ★ 고르는 주소 = 이 참여 명의의 저장 주소 + 이 명의로 지난 주문에 쓴 주소(최대 3개). 다른 명의 주소는 섞지 않는다(2가).
+     1개면 칸 위 칩 [적용], 2개 이상이면 칸 아래 한 줄 드롭다운(펼쳐도 아래 내용을 밀어낸다 — iframe 잘림 방지). */
+const _ADDR_MASK_RE = /[*＊●○◯◉•]/;
+const _addrUi = {};
+function _addrState(cid) { return _addrUi[cid] || (_addrUi[cid] = { applied: null, open: false, saving: false, saved: false, aiValue: null }); }
+function _addrKey(v) { return String(v || "").replace(/[()\[\],./·]/g, " ").replace(/\s+/g, " ").trim().toLowerCase(); }
+function _addrSelected() { return (_activeIdentityContext && _activeIdentityContext.selectedIdentity) || null; }
+
+/** 이 참여 명의가 고를 수 있는 주소 — 저장 주소 먼저, 나머지는 많이 쓴 순. 가림(*) 주소는 뺀다. */
+function _addressChoices() {
+  const sel = _addrSelected(); if (!sel) return [];
+  const list = []; const byKey = new Map();
+  const add = (address, saved, uses) => {
+    const value = String(address || "").trim();
+    if (!value || _ADDR_MASK_RE.test(value)) return;
+    const key = _addrKey(value);
+    const hit = byKey.get(key);
+    if (hit) { hit.saved = hit.saved || saved; hit.uses = Math.max(hit.uses, uses); return; }
+    const item = { address: value, saved, uses };
+    byKey.set(key, item); list.push(item);
+  };
+  add(sel.address, true, 0);
+  (_orderInfoSuggestions || []).forEach((s) => add(s && s.address, false, Number(s && s.useCount) || 1));
+  list.sort((a, b) => (b.saved - a.saved) || (b.uses - a.uses));
+  return list.slice(0, 3);
+}
+function _addressChoiceMeta(c) {
+  return (c.saved ? "저장 주소" : "") + (c.saved && c.uses ? " · " : "") + (c.uses ? "주문 " + c.uses + "번 사용" : "");
+}
+
+function _addressChipMarkup(cid) {
+  return `<div class="of-addr-chip" id="${cid}_addrChip" hidden></div>`;
+}
+function _addressToolsMarkup(cid) {
+  return `<div class="of-addr-help" id="${cid}_addrHelp" hidden></div>`
+    + `<div class="of-addr-pick" id="${cid}_addrPick" hidden></div>`
+    + `<div class="of-addr-save" id="${cid}_addrSave" hidden>`
+    + `<span class="of-addr-save-text" id="${cid}_addrSaveText"></span>`
+    + `<button type="button" class="of-addr-save-btn" id="${cid}_addrSaveBtn" onclick="_saveCardAddress('${cid}')">저장</button></div>`;
+}
+
+function _renderAddressTools() { (_orderCardIds || []).forEach((cid) => _syncAddressTools(cid, false)); }
+
+/** 주소 칸 주변(칩·드롭다운·참고 문구·[저장])을 지금 값에 맞춰 다시 그린다. fromInput = 사용자가 칸을 고쳤다. */
+function _syncAddressTools(cid, fromInput) {
+  const ta = document.getElementById(cid + "_address"); if (!ta) return;
+  const ui = _addrState(cid);
+  const sel = _addrSelected();
+  const value = String(ta.value || "").trim();
+  const masked = _ADDR_MASK_RE.test(value);
+  const name = (sel && sel.name) || "이";
+  const choices = sel ? _addressChoices() : [];
+  const appliedIdx = choices.findIndex((c) => value && _addrKey(c.address) === _addrKey(value));
+  if (fromInput) ui.open = false;
+
+  // 저장 행 — 그 명의에 저장된 주소가 없을 때만(저장 직후엔 "저장됨"으로 남는다)
+  const saveRow = document.getElementById(cid + "_addrSave");
+  const showSave = !!sel && !!sel.identityKey && (ui.saved || !String(sel.address || "").trim());
+  if (saveRow) {
+    saveRow.hidden = !showSave;
+    const txt = document.getElementById(cid + "_addrSaveText");
+    const btn = document.getElementById(cid + "_addrSaveBtn");
+    if (showSave && txt && btn) {
+      saveRow.classList.toggle("is-done", ui.saved);
+      saveRow.classList.toggle("is-off", !ui.saved && (masked || value.length < 5));
+      if (ui.saved) {
+        txt.textContent = (ui.savedName || name) + " 명의 주소로 저장됐어요";
+        btn.innerHTML = "✓ 저장됨"; btn.disabled = true; btn.className = "of-addr-save-btn is-done";
+      } else {
+        txt.textContent = "이 주소를 " + name + " 명의 주소로";
+        btn.innerHTML = ui.saving ? '<span class="of-addr-spin" aria-hidden="true"></span>' : "저장";
+        btn.setAttribute("aria-label", ui.saving ? "저장 중" : "저장");
+        btn.disabled = ui.saving || masked || value.length < 5;
+        btn.className = "of-addr-save-btn" + (ui.saving ? " is-busy" : "");
+      }
+    }
+  }
+
+  // 참고 문구 — 배지가 아니라 일반 참고 텍스트
+  const help = document.getElementById(cid + "_addrHelp");
+  if (help) {
+    let msg = ""; let warn = false;
+    if (value && masked) { msg = showSave && !ui.saved ? "* 가려진 부분(*)을 고치면 저장할 수 있어요" : "* 가려진 부분(*)은 직접 고쳐야 해요"; warn = true; }
+    else if (ui.aiValue != null && value) msg = _addrKey(value) === _addrKey(ui.aiValue) ? "* AI 자동추출 주소 · 오탈자는 직접 수정 가능" : "* 직접 수정한 주소";
+    help.textContent = msg; help.hidden = !msg; help.classList.toggle("is-warn", warn);
+  }
+
+  // 1개 = 칸 위 칩 [적용]
+  const chip = document.getElementById(cid + "_addrChip");
+  if (chip) {
+    if (choices.length === 1) {
+      const c = choices[0]; const on = appliedIdx === 0;
+      const head = (on ? "✓ " : "") + name + (c.saved ? " 저장 주소" : " 지난 주문 주소") + (on ? " 적용됨" : "");
+      chip.className = "of-addr-chip" + (on ? " is-on" : "");
+      chip.innerHTML = '<div class="of-addr-chip-ad"><b></b><span></span></div>'
+        + (on ? "" : '<button type="button" class="of-addr-chip-btn" onclick="_applyAddressChoice(\'' + cid + '\',0)">적용</button>');
+      chip.querySelector("b").textContent = head;
+      chip.querySelector("span").textContent = c.address;
+      chip.hidden = false;
+    } else { chip.hidden = true; chip.innerHTML = ""; }
+  }
+
+  // 2개 이상 = 칸 아래 한 줄 드롭다운
+  const pick = document.getElementById(cid + "_addrPick");
+  if (pick) {
+    if (choices.length >= 2) {
+      const label = appliedIdx >= 0
+        ? "✓ " + name + " 주소 " + (appliedIdx + 1) + "번째 적용됨 · 바꾸기"
+        : name + " 주소 " + choices.length + "개 중 선택";
+      pick.className = "of-addr-pick" + (ui.open ? " is-open" : "");
+      pick.innerHTML = '<button type="button" class="of-addr-pick-btn" aria-haspopup="listbox" aria-expanded="' + (ui.open ? "true" : "false")
+        + '" onclick="_toggleAddressPick(\'' + cid + '\')"><span class="of-addr-pick-pin" aria-hidden="true">📍</span><span class="of-addr-pick-label"></span><span class="of-addr-pick-car" aria-hidden="true">▾</span></button>'
+        + (ui.open ? '<div class="of-addr-pick-menu" role="listbox"></div>' : "");
+      pick.querySelector(".of-addr-pick-label").textContent = label;
+      const menu = pick.querySelector(".of-addr-pick-menu");
+      if (menu) choices.forEach((c, i) => {
+        const opt = document.createElement("button");
+        opt.type = "button"; opt.className = "of-addr-pick-opt" + (i === appliedIdx ? " is-on" : "");
+        opt.setAttribute("role", "option"); opt.setAttribute("aria-selected", i === appliedIdx ? "true" : "false");
+        const ad = document.createElement("span"); ad.className = "of-addr-pick-ad"; ad.textContent = c.address;
+        const meta = document.createElement("small"); meta.textContent = _addressChoiceMeta(c); ad.appendChild(meta);
+        const ck = document.createElement("span"); ck.className = "of-addr-pick-ck"; ck.setAttribute("aria-hidden", "true"); ck.textContent = i === appliedIdx ? "✓" : "";
+        opt.appendChild(ad); opt.appendChild(ck);
+        opt.addEventListener("click", () => window._applyAddressChoice(cid, i));
+        menu.appendChild(opt);
+      });
+      pick.hidden = false;
+    } else { pick.hidden = true; pick.innerHTML = ""; ui.open = false; }
+  }
+}
+
+window._toggleAddressPick = function (cid) {
+  const ui = _addrState(cid); ui.open = !ui.open;
+  Object.keys(_addrUi).forEach((k) => { if (k !== cid) _addrUi[k].open = false; });
+  _syncAddressTools(cid, false);
+};
+document.addEventListener("click", (e) => {
+  // ★ 드롭다운 버튼을 누르면 그 자리에서 다시 그려 원래 버튼은 문서에서 떨어져 나간다 — 떨어진 버튼을
+  //   "바깥 클릭"으로 보면 열자마자 닫힌다(테스트 서버 실측 2026-09-26). 문서에 붙어 있는 대상만 판단한다.
+  if (!e.target || !e.target.isConnected) return;
+  if (e.target.closest && e.target.closest(".of-addr-pick")) return;
+  Object.keys(_addrUi).forEach((cid) => { if (_addrUi[cid].open) { _addrUi[cid].open = false; _syncAddressTools(cid, false); } });
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  Object.keys(_addrUi).forEach((cid) => { if (_addrUi[cid].open) { _addrUi[cid].open = false; _syncAddressTools(cid, false); } });
+});
+
+/** 칩·드롭다운에서 주소를 골라 칸에 채운다. 저장 주소를 고른 경우만 "명의 저장정보 선택"으로 기록한다. */
+window._applyAddressChoice = function (cid, idx) {
+  const c = _addressChoices()[idx];
+  const ta = document.getElementById(cid + "_address");
+  const sel = _addrSelected();
+  if (!c || !ta || !sel) return;
+  ta.value = c.address;
+  ta.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
+  ta.style.paddingRight = "";
+  ta.parentElement?.querySelector(".ai-lock-badge")?.remove();
+  const st = _cardAiState[cid];
+  if (st) {
+    st.savedIdentitySelections = st.savedIdentitySelections || {};
+    if (c.saved) st.savedIdentitySelections.address = sel.identityKey;
+    else delete st.savedIdentitySelections.address;
+  }
+  const ui = _addrState(cid); ui.open = false; ui.aiValue = null;
+  _ofClearError(cid + "_address");
+  _invalidateIdentityApproval(cid);
+  _syncAddressTools(cid, false);
+  _embedSaveForm();
+  _syncSubmissionIdentityAction();
+};
+
+/** [저장] — 그 칸의 주소를 이 참여 명의 주소로 저장(빈 칸만) → 명의 확인을 다시 돌린다. */
+window._saveCardAddress = async function (cid) {
+  const ui = _addrState(cid);
+  const sel = _addrSelected();
+  const ta = document.getElementById(cid + "_address");
+  if (ui.saving || ui.saved || !sel || !sel.identityKey || !ta) return;
+  const value = String(ta.value || "").replace(/\s+/g, " ").trim();
+  if (value.length < 5 || _ADDR_MASK_RE.test(value)) { showToast("배송 주소를 확인해주세요", true); return; }
+  ui.saving = true; _syncAddressTools(cid, false);
+  try {
+    const res = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/" + encodeURIComponent(sel.identityKey) + "/address", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ address: value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || "주소를 저장하지 못했어요. 다시 눌러주세요.");
+    const stored = String(data.address || value).trim();
+    sel.address = stored;
+    (_activeIdentityContext?.savedIdentities || []).forEach((x) => { if (x && x.identityKey === sel.identityKey) x.address = stored; });
+    ui.saving = false; ui.saved = true; ui.savedName = sel.name || "";
+    _syncAddressTools(cid, false);
+    if (data.filled === false) showToast("이미 저장된 주소가 있어요");
+  } catch (err) {
+    ui.saving = false; _syncAddressTools(cid, false);
+    showToast(err.message || "주소를 저장하지 못했어요. 다시 눌러주세요.", true);
+    return;
+  }
+  await _recheckCardIdentity(cid);
+};
+
+/**
+ * 명의 저장 정보가 바뀐 뒤 명의 확인을 다시 돌린다(같은 캡처 · 같은 추출 증명 — AI 재추출 없음).
+ * ★ 사용자가 고친 주소는 지킨다 — 다시 맞춰 보는 과정이 칸을 캡처 값으로 되돌리면 되살리고, 고친 값 확인 단계로 넘긴다.
+ * ★ 캡처가 아직 없으면 명의 정보만 새로 받는다(확인할 것이 없다).
+ */
+async function _recheckCardIdentity(cid) {
+  _identityContextPromise = null;
+  try { await _loadOrderIdentityContext(); } catch (_) { /* 아래 대조가 다시 시도한다 */ }
+  const st = _cardAiState[cid];
+  if (!st || !st.extractToken || !st.proofExtracted) { _syncSubmissionIdentityAction(); return; }
+  const ta = document.getElementById(cid + "_address");
+  const typed = ta ? ta.value : "";
+  const requestId = st.analysisRequestId;
+  st.extracted = { ...st.proofExtracted };
+  st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
+  st.identityBusy = true;
+  _renderIdentityMatchState(cid, "REVIEW", ["저장한 정보로 명의를 다시 확인하고 있어요."], false);
+  try { await _matchCardIdentity(cid, requestId); }
+  finally { if (st.analysisRequestId === requestId) st.identityBusy = false; }
+  if (st.analysisRequestId !== requestId) return;
+  if (ta && _addrKey(ta.value) !== _addrKey(typed)) {
+    ta.value = typed;
+    _invalidateIdentityApproval(cid);
+  }
+  _syncAddressTools(cid, false);
+  _renderIdentityMatchState(cid, st.identityStatus || "ERROR", st.identityReasons || [], !!st.identityCanManual);
 }
 
 function _renderSavedBankAccountPicker() {
@@ -406,6 +643,7 @@ window._applySavedOrderInfo = function (option) {
   const triggerLabel = wrap?.querySelector(".of-saved-info-trigger-label");
   if (triggerLabel) triggerLabel.textContent = option.textContent;
   _closeSavedInfoDropdowns();
+  if (appliedFields.includes("address")) { _addrState(cid).aiValue = null; _syncAddressTools(cid, false); }
   _embedSaveForm();
   _syncSubmissionIdentityAction();
   showToast((identity.name || "선택한") + "님의 " + (appliedFields.length > 1
@@ -534,6 +772,7 @@ function _applyOrderInfoSuggestion(button) {
     _ofClearError(cid + "_" + field);
   }
   _invalidateIdentityApproval(cid);
+  _addrState(cid).aiValue = null; _syncAddressTools(cid, false);
   _embedSaveForm();
   _syncSubmissionIdentityAction();
   showToast("수취인·연락처·주소를 함께 입력했습니다.", "success");
@@ -7136,10 +7375,11 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-field of-field--stack">
       <label class="of-label of-label-required" for="${cid}_address">배송주소</label>
       <div class="of-field-control">
+        ${_addressChipMarkup(cid)}
         <div class="of-input-status-wrap">
-          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}');_syncAddressTools('${cid}',true)"></textarea>
         </div>
-        ${_savedOrderInfoMarkup(cid, "address")}
+        ${_addressToolsMarkup(cid)}
       </div>
     </div>
 
@@ -8450,6 +8690,7 @@ function removeCardImg(cid) {
   }
   [cid+"_recipient", cid+"_phone", cid+"_address",
    cid+"_orderNumber", cid+"_price"].forEach(_unlockAiField);
+  _addrState(cid).aiValue = null; _syncAddressTools(cid, false);
   // oninput 핸들러 복원 (price)
   const priceEl = document.getElementById(cid+"_price");
   if (priceEl) priceEl.setAttribute("oninput", `formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')`);
@@ -8998,37 +9239,16 @@ function applyCardAiResult(cid) {
         addrEl.classList.add("ai-filled");
         addrEl.classList.remove("ai-locked", "ai-filled-asterisk");
       }
-      // ★ 실시간 별표 감지 핸들러 (주소)
+      // ★ 실시간 별표 감지(주소) — 표시는 배지가 아니라 칸 아래 일반 참고 문구(_syncAddressTools · 조각 5)
       addrEl.addEventListener("input", function() {
-        const curVal = addrEl.value;
-        const stillHas = _hasIdentityMask(curVal);
-        const badge = addrEl.parentElement?.querySelector(".ai-lock-badge");
-        if (stillHas) {
-          addrEl.classList.add("ai-filled-asterisk");
-          addrEl.classList.remove("ai-filled");
-          if (badge) { badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수'; }
-        } else {
-          addrEl.classList.remove("ai-filled-asterisk");
-          addrEl.classList.add("ai-filled");
-          if (badge) { badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-check-circle"></i> 수정완료'; }
-        }
+        const stillHas = _hasIdentityMask(addrEl.value);
+        addrEl.classList.toggle("ai-filled-asterisk", stillHas);
+        addrEl.classList.toggle("ai-filled", !stillHas);
       });
-      // 배지: 별표 여부에 따라 스타일 분기
-      const addrParent = addrEl.parentElement;
-      if (addrParent && !addrParent.querySelector(".ai-lock-badge")) {
-        addrEl.style.paddingRight = "100px";
-        const badge = document.createElement("span");
-        badge.className = "ai-lock-badge";
-        if (addrHasAsterisk) {
-          badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap";
-          badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수';
-        } else {
-          badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap";
-          badge.innerHTML = '<i class="fas fa-pencil-alt"></i> AI 자동입력';
-        }
-        addrParent.style.position = "relative";
-        addrParent.appendChild(badge);
-      }
+      addrEl.parentElement?.querySelector(".ai-lock-badge")?.remove();
+      addrEl.style.paddingRight = "";
+      _addrState(cid).aiValue = d.address;
+      _syncAddressTools(cid, false);
     }
   }
 
@@ -9313,7 +9533,7 @@ function _showProfileGateBanner(missing) {
   const items = (missing || []).map(m => `<b>${_safeText(m)}</b>`).join(", ");
   box.innerHTML =
     '<div style="font-size:.9rem;font-weight:700;margin-bottom:6px"><i class="fas fa-user-lock" style="margin-right:6px"></i>내정보 등록이 필요합니다</div>'
-    + `<div style="font-size:.8rem;line-height:1.6;margin-bottom:10px">미등록 항목: ${items}<br>구매양식은 내정보(사용자명·전화번호·주소·계좌)를 등록한 리뷰어만 제출할 수 있습니다.</div>`
+    + `<div style="font-size:.8rem;line-height:1.6;margin-bottom:10px">미등록 항목: ${items}<br>구매양식은 내정보(사용자명·전화번호·계좌)를 등록한 리뷰어만 제출할 수 있습니다.</div>`
     + '<a href="index.html#my" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;background:#DC2626;color:#fff;border-radius:9px;font-size:.82rem;font-weight:700;text-decoration:none"><i class="fas fa-id-card"></i> 내정보 등록하러 가기</a>'
     + '<span style="font-size:.72rem;color:#991B1B;margin-left:10px">등록 후 이 화면에서 다시 제출하면 됩니다.</span>';
   box.style.display = "block";
@@ -9908,6 +10128,12 @@ async function submitOrderForm() {
         break; // 이후 주문도 동일하게 막히므로 중단
       }
 
+      if (!res.ok && (res.code === "IDENTITY_APPROVAL_STALE" || res.code === "IDENTITY_CONTEXT_CHANGED")) {
+        // ★ 조각 5: 명의 저장 정보가 바뀌어 승인이 낡았다 — 같은 토큰으로 재제출하면 영영 실패한다.
+        //   명의 확인을 자동으로 다시 돌리고, 끝나면 다시 제출하게 한다.
+        _recheckCardIdentity(o.cid);
+        throw new Error("명의 정보가 바뀌어 다시 확인하고 있어요. 확인이 끝나면 다시 제출해주세요.");
+      }
       if (!res.ok) throw new Error(res.error||"제출 실패");
 
       successCount++;

@@ -1252,7 +1252,7 @@ router.post('/order', async (req, res, next) => {
       }
     } else if (_idPhone8.length === 8) {
       try {
-        const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
+        const { participationProfileMissing, resolveOrderIdentity } = require('../services/identity.service');
         let { rows: _rvRows } = await pool.query(
           `SELECT id, name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
            FROM reviewers WHERE phone8 = $1 LIMIT 1`, [_idPhone8]
@@ -1277,7 +1277,7 @@ router.post('/order', async (req, res, next) => {
           }
           if (!Array.isArray(_rv.sub_accounts)) _rv.sub_accounts = [];
 
-          const _missing = profileMissing(_rv);
+          const _missing = participationProfileMissing(_rv);   // 주소는 주문 칸 필수값으로 받는다(결정 181)
           if (_missing.length > 0) {
             return res.json({
               ok: false, code: 'PROFILE_INCOMPLETE', profileMissing: _missing,
