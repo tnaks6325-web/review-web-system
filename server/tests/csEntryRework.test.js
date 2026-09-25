@@ -73,7 +73,9 @@ ok('index: 완료·대기 모두 썸네일 + 3줄(camp-thumb / c-meta / c-name /
   /const metaHtml = `<div class="c-meta">/.test(indexHtml));
 ok('index: 제출일은 첫 줄 꼬리로(줄 수 유지)', /const metaTail = doneDate \? ` <span class="c-tail">· 제출/.test(indexHtml));
 ok('index: 입금완료 배지는 상태 배지 아랫줄(제목 잘림 완화)',
-  /const subBadgeHtml = \(isDone && item\.isPaid\)/.test(indexHtml) && /\.result-right\.rr-col/.test(indexHtml));
+  /const subBadgeHtml =/.test(indexHtml)
+  && /status-badge-paid">입금완료</.test(indexHtml)
+  && /\$\{receiptBadgeHtml \|\| subBadgeHtml\}/.test(indexHtml));
 ok('index: 완료 카드도 클릭 가능(팝업 진입) — cursor:default 무력화 CSS 제거',
   !/\.result-card\.done, \.result-group-card\.done \{ cursor:default/.test(indexHtml));
 ok('index: 완료 카드는 그 행 1건만 팝업에 전달(다건 그룹과 혼동 금지)',
