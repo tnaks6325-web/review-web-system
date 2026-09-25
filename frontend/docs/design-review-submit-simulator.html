@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰 제출 — 리뷰어 경험 시뮬레이터</title>
+<!--
+  리뷰어가 리뷰 캡처를 제출할 때 겪는 흐름을 그대로 재현한 시안.
+  ① 지금(개선 전)  ② 바뀐 뒤(제안 — 검사를 뒤로 미루고, 결과가 불량이면 '제출 반려'로 표시)
+  외부 리소스 0 · 가짜 데이터로 실제 동작 · 색/치수는 frontend/index.html 실물 값 그대로.
+-->
+<style>
+  /* 실물 리뷰어 화면 재현이므로 라이트 고정 — 다크에서 색이 뒤집히면 '실물과 같다'가 깨진다 */
+  :root{
+    color-scheme:light;
+    --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da;
+    --ok:#12b886; --ok-light:#D1FAE5;
+    --warn:#F59E0B; --warn-light:#FEF3C7;
+    --err:#EF4444; --err-light:#FEE2E2;
+    --t1:#111827; --t2:#4B5563; --t3:#9CA3AF; --t4:#94A3B8;
+    --bg:#F0F2FA; --card:#FFFFFF;
+    --border:#E5E7EB; --shadow:0 2px 12px rgba(0,0,0,.07);
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:#eceff6; color:var(--t1);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{max-width:1240px; margin:0 auto; padding:22px 18px 60px}
+  h1{font-size:1.18rem; margin:0 0 4px; letter-spacing:-.4px}
+  .sub{font-size:.82rem; color:var(--t2); margin:0 0 18px; line-height:1.6}
+
+  .layout{display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap}
+  .panel{
+    background:#fff; border:1px solid var(--border); border-radius:16px;
+    padding:16px 16px 18px; box-shadow:var(--shadow);
+  }
+  .ctrl{width:298px; flex:none}
+  .side{flex:1; min-width:300px}
+
+  .ctrl h3, .side h3{font-size:.78rem; font-weight:800; margin:0 0 9px; color:var(--t2); letter-spacing:-.2px}
+  .ctrl .grp{margin-bottom:16px}
+  .ctrl .lab{font-size:.72rem; font-weight:800; color:var(--t2); margin-bottom:6px; display:block}
+  .ctrl .hint{font-size:.66rem; color:var(--t3); line-height:1.5; margin-top:5px}
+
+  .seg{display:flex; gap:0; border:1px solid var(--border); border-radius:10px; overflow:hidden}
+  .seg button{
+    flex:1; border:0; background:#fff; padding:9px 6px; font-size:.74rem; font-weight:800;
+    color:var(--t2); cursor:pointer; font-family:inherit;
+  }
+  .seg button + button{border-left:1px solid var(--border)}
+  .seg button.on{background:var(--p); color:#fff}
+
+  .rlist{display:flex; flex-direction:column; gap:5px}
+  .rlist label{
+    display:flex; align-items:center; gap:8px; font-size:.75rem; font-weight:700; color:var(--t2);
+    border:1px solid var(--border); border-radius:9px; padding:8px 10px; cursor:pointer;
+  }
+  .rlist label.on{border-color:var(--p); background:var(--p-light); color:var(--p-dark)}
+  .rlist input{accent-color:var(--p); margin:0}
+
+  input[type=range]{width:100%; accent-color:var(--p)}
+  .rngval{font-size:.8rem; font-weight:800; color:var(--p-dark); font-variant-numeric:tabular-nums}
+
+  .btn{
+    width:100%; border:1px solid var(--border); background:#fff; color:var(--t2);
+    border-radius:10px; padding:10px; font-size:.76rem; font-weight:800; cursor:pointer; font-family:inherit;
+  }
+  .btn:hover{background:#F8FAFC}
+
+  /* ── 휴대폰 목업 ── */
+  .phonewrap{flex:none; display:flex; flex-direction:column; align-items:center; gap:10px}
+  .phone{
+    width:390px; height:760px; background:var(--bg); border-radius:34px;
+    border:9px solid #1f2430; box-shadow:0 16px 42px rgba(15,23,42,.28);
+    overflow:hidden; position:relative; display:flex; flex-direction:column;
+  }
+  .statusbar{
+    height:26px; background:#fff; display:flex; align-items:center; justify-content:space-between;
+    padding:0 16px; font-size:.62rem; font-weight:800; color:var(--t2); flex:none;
+  }
+  .apphead{
+    background:#fff; border-bottom:1px solid var(--border); padding:11px 16px;
+    display:flex; align-items:center; gap:9px; flex:none;
+  }
+  .apphead .ttl{font-size:.92rem; font-weight:800; letter-spacing:-.3px}
+  .screen{flex:1; min-height:0; overflow:auto; padding:14px}
+  .phonecap{font-size:.72rem; font-weight:800; color:var(--t3)}
+
+  /* 리뷰 제출 화면 */
+  .sheetcard{background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:14px; margin-bottom:10px}
+  .sheetcard .h{font-size:.84rem; font-weight:800; margin-bottom:3px}
+  .sheetcard .s{font-size:.7rem; color:var(--t3)}
+  .dropzone{
+    border:1.5px dashed #C7D2E4; border-radius:12px; background:#F8FAFF;
+    padding:18px 12px; text-align:center; margin-top:11px; cursor:pointer;
+  }
+  .dropzone .ic{font-size:1.5rem}
+  .dropzone .t{font-size:.76rem; font-weight:800; color:var(--p-dark); margin-top:5px}
+  .dropzone .d{font-size:.66rem; color:var(--t3); margin-top:3px}
+  .thumbrow{display:flex; gap:8px; margin-top:11px; flex-wrap:wrap}
+  .thumb{
+    width:64px; height:82px; border-radius:9px; border:1px solid var(--border);
+    background:linear-gradient(160deg,#dbeafe,#eef2ff); position:relative; overflow:hidden;
+    display:flex; align-items:center; justify-content:center; font-size:.58rem; font-weight:800; color:#64748b;
+  }
+  .thumb .x{
+    position:absolute; top:3px; right:3px; width:16px; height:16px; border-radius:50%;
+    background:rgba(17,24,39,.72); color:#fff; font-size:.6rem; display:flex; align-items:center; justify-content:center;
+  }
+  .submitbtn{
+    width:100%; border:0; border-radius:12px; background:var(--p); color:#fff;
+    padding:14px; font-size:.86rem; font-weight:800; cursor:pointer; margin-top:13px; font-family:inherit;
+  }
+  .submitbtn[disabled]{background:#A9C4F0; cursor:default}
+
+  /* 진행 오버레이 */
+  .loadovl{
+    position:absolute; inset:0; background:rgba(17,24,39,.55); backdrop-filter:blur(1.5px);
+    display:none; align-items:center; justify-content:center; z-index:30;
+  }
+  .loadovl.on{display:flex}
+  .loadbox{
+    background:#fff; border-radius:16px; padding:22px 20px; width:250px; text-align:center;
+    box-shadow:0 10px 30px rgba(0,0,0,.22);
+  }
+  .spin{
+    width:34px; height:34px; border-radius:50%; border:3px solid #E5E7EB; border-top-color:var(--p);
+    margin:0 auto 12px; animation:sp .8s linear infinite;
+  }
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .loadbox .lt{font-size:.82rem; font-weight:800}
+  .loadbox .ls{font-size:.68rem; color:var(--t3); margin-top:5px}
+  .loadbox .elapsed{
+    font-size:1.3rem; font-weight:800; color:var(--p-dark); margin-top:9px; font-variant-numeric:tabular-nums;
+  }
+  .loadbox .warnline{font-size:.66rem; font-weight:800; color:var(--err); margin-top:7px; display:none}
+
+  /* 토스트 */
+  .toast{
+    position:absolute; left:50%; bottom:26px; transform:translateX(-50%) translateY(14px);
+    background:rgba(17,24,39,.92); color:#fff; font-size:.74rem; font-weight:700;
+    padding:10px 16px; border-radius:11px; opacity:0; transition:opacity .22s, transform .22s; z-index:40;
+    white-space:nowrap; pointer-events:none;
+  }
+  .toast.on{opacity:1; transform:translateX(-50%) translateY(0)}
+
+  /* 리뷰 내역 (실물 마크업 그대로) */
+  .subtabs{display:flex; gap:6px; margin-bottom:11px}
+  .subtab{
+    flex:1; border:1px solid var(--border); background:#fff; border-radius:10px; padding:8px 6px;
+    font-size:.74rem; font-weight:800; color:var(--t3); cursor:pointer; font-family:inherit;
+  }
+  .subtab.on{background:var(--p-light); border-color:#cce0fb; color:var(--p-dark)}
+  .result-card{
+    display:flex; align-items:center; gap:10px; padding:12px 14px;
+    background:#fff; border:1px solid var(--border); border-radius:var(--radius);
+    margin-bottom:8px; cursor:pointer; transition:border-color .15s, box-shadow .15s;
+  }
+  .result-card:hover{border-color:#C7D2E4}
+  .result-card.rejected{border-color:#FCA5A5; background:#FFFBFB}
+  .camp-thumb{
+    width:46px; height:46px; border-radius:11px; flex-shrink:0; align-self:center;
+    display:flex; align-items:center; justify-content:center; font-size:1.1rem;
+    background:linear-gradient(135deg,#eef2ff,#e0e7ff); border:1px solid #E5E7EB; overflow:hidden;
+  }
+  .result-body{flex:1; min-width:0}
+  .c-meta{font-size:.69rem; font-weight:600; color:var(--t3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .c-meta .c-who{color:var(--t2); font-weight:700}
+  .c-meta .c-tail{color:var(--t4); font-weight:600}
+  .c-name{font-size:.83rem; font-weight:700; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:2px 0 6px}
+  .fee-line{display:flex; align-items:center; gap:4px 6px; flex-wrap:wrap}
+  .fee{font-size:.63rem; font-weight:800; padding:3px 8px; border-radius:7px; white-space:nowrap; font-variant-numeric:tabular-nums}
+  .fee.prod{background:#EEF2FF; color:#3730A3}
+  .fee.rev{background:var(--ok-light); color:#065F46}
+  .result-right{display:flex; align-items:center; gap:6px; flex-shrink:0}
+  .result-right.rr-col{flex-direction:column; align-items:flex-end; gap:4px}
+  .result-right .rr-row{display:flex; align-items:center; gap:6px}
+  .result-chevron{color:var(--t3); font-size:.75rem}
+  .status-badge-submitted{font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--ok-light); color:#065F46}
+  .status-badge-paid{font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0E7FF; color:#3730A3}
+  .status-badge-checking{font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#F1F3F6; color:#6B7280}
+  .status-badge-rejected{font-size:.62rem; font-weight:800; padding:3px 8px; border-radius:6px; background:var(--err-light); color:#991B1B}
+  .flash{animation:fl 1.1s ease-out 2}
+  @keyframes fl{0%{box-shadow:0 0 0 0 rgba(239,68,68,.55)}100%{box-shadow:0 0 0 11px rgba(239,68,68,0)}}
+
+  /* 참여상품 정보 팝업 (실물: 하단 시트) */
+  .ovl{
+    position:absolute; inset:0; background:rgba(17,24,39,.42); z-index:50;
+    display:none; align-items:flex-end;
+  }
+  .ovl.on{display:flex}
+  .sheet{
+    width:100%; background:#fff; border-radius:18px 18px 0 0; padding:16px 16px 20px;
+    max-height:78%; overflow:auto;
+  }
+  .sheet .grab{width:38px; height:4px; border-radius:3px; background:#E5E7EB; margin:0 auto 12px}
+  .sheet .ttl{font-size:.9rem; font-weight:800; color:#111827; line-height:1.4}
+  .sheet .who{font-size:.72rem; color:#9CA3AF; margin-top:3px}
+  .sheet .box{border:1px solid #EEF1F7; border-radius:11px; margin-top:11px; padding:10px 12px; font-size:.74rem; color:#4B5563; line-height:1.65}
+  .rejbox{border:1px solid #FCA5A5; background:#FFF5F5; border-radius:11px; margin-top:11px; padding:12px}
+  .rejbox .rh{font-size:.78rem; font-weight:800; color:#991B1B; display:flex; align-items:center; gap:6px}
+  .rejbox .rr{font-size:.73rem; color:#7F1D1D; line-height:1.65; margin-top:6px}
+  .rejbox .rt{font-size:.66rem; color:#B91C1C; margin-top:7px; font-weight:700}
+  .sbtns{display:flex; flex-direction:column; gap:7px; margin-top:12px}
+  .sbtn{
+    border:1px solid var(--border); background:#fff; border-radius:11px; padding:11px;
+    font-size:.78rem; font-weight:800; color:var(--t2); cursor:pointer; font-family:inherit; text-align:center;
+  }
+  .sbtn.pri{background:var(--p); border-color:var(--p); color:#fff}
+  .chip{font-size:.6rem; font-weight:800; border-radius:8px; padding:2px 7px; margin-left:6px; vertical-align:middle}
+  .chip.done{background:#D1FAE5; color:#0ca678}
+  .chip.rej{background:#FEE2E2; color:#B91C1C}
+
+  /* 로그 패널 */
+  .log{font-size:.73rem; line-height:1.55; color:var(--t2)}
+  .log .row{display:flex; gap:9px; padding:7px 0; border-bottom:1px dashed #EEF1F7}
+  .log .row:last-child{border-bottom:0}
+  .log .tm{flex:none; width:58px; font-weight:800; color:var(--t3); font-variant-numeric:tabular-nums; text-align:right}
+  .log .tx{flex:1; min-width:0}
+  .log .row.wait .tx{color:var(--warn)}
+  .log .row.bad .tx{color:var(--err); font-weight:800}
+  .log .row.good .tx{color:#0ca678; font-weight:800}
+  .log .row.bg .tx{color:var(--t3)}
+  .log .empty{color:var(--t3); font-size:.74rem; padding:8px 0}
+  .totline{
+    margin-top:12px; padding-top:11px; border-top:1px solid var(--border);
+    display:flex; align-items:baseline; justify-content:space-between;
+  }
+  .totline .k{font-size:.74rem; font-weight:800; color:var(--t2)}
+  .totline .v{font-size:1.32rem; font-weight:800; color:var(--p-dark); font-variant-numeric:tabular-nums}
+  .totline .v.slow{color:var(--err)}
+
+  .nextonly{display:none}
+  body.mode-next .nextonly{display:block}
+  .adminbar{
+    margin-top:12px; border:1px dashed #C7D2E4; border-radius:11px; padding:10px 12px; background:#FBFCFF;
+  }
+  .adminbar .k{font-size:.68rem; font-weight:800; color:var(--t3); margin-bottom:7px}
+  .adminbar button{
+    width:100%; border:1px solid #FCA5A5; background:#FFF5F5; color:#991B1B; border-radius:9px;
+    padding:9px; font-size:.74rem; font-weight:800; cursor:pointer; font-family:inherit;
+  }
+  .adminbar button[disabled]{opacity:.45; cursor:default}
+  .decide{
+    margin-top:14px; background:#FFFBF2; border:1px solid #FDE2B3; border-radius:11px;
+    padding:12px 13px; font-size:.73rem; color:#7C4A03; line-height:1.7;
+  }
+  .decide .h{font-size:.76rem; font-weight:800; color:#92400E; margin-bottom:6px}
+  .decide ol{margin:0; padding-left:17px}
+  .decide li{margin-bottom:5px}
+  .note{
+    margin-top:14px; background:#F8FAFF; border:1px solid #DBE6FB; border-radius:11px;
+    padding:11px 13px; font-size:.72rem; color:#1B4F9C; line-height:1.65;
+  }
+  .note b{color:#14448a}
+  .cmp{display:flex; gap:10px; margin-top:12px}
+  .cmpbox{flex:1; border:1px solid var(--border); border-radius:11px; padding:10px 11px; background:#fff}
+  .cmpbox .k{font-size:.66rem; font-weight:800; color:var(--t3)}
+  .cmpbox .v{font-size:1.05rem; font-weight:800; margin-top:3px; font-variant-numeric:tabular-nums}
+  .cmpbox.now .v{color:var(--err)}
+  .cmpbox.next .v{color:#0ca678}
+  @media (max-width:980px){ .layout{justify-content:center} .side{min-width:280px} }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>리뷰 제출 — 리뷰어 경험 시뮬레이터</h1>
+  <p class="sub">
+    리뷰어가 리뷰 캡처를 올리고 제출하기까지 실제로 겪는 화면과 시간을 그대로 재현했습니다.<br>
+    왼쪽에서 <b>지금</b> / <b>바뀐 뒤</b>를 바꿔 가며 눌러 보세요. 시간도 실제로 흐릅니다.
+  </p>
+
+  <div class="layout">
+    <!-- 컨트롤 -->
+    <div class="panel ctrl">
+      <h3>설정</h3>
+
+      <div class="grp">
+        <span class="lab">어느 쪽을 볼까요</span>
+        <div class="seg" id="segMode">
+          <button data-v="now" class="on">지금</button>
+          <button data-v="next">바뀐 뒤</button>
+        </div>
+        <div class="hint" id="modeHint"></div>
+      </div>
+
+      <div class="grp">
+        <span class="lab">사진 올리는 데 걸리는 시간</span>
+        <input type="range" id="rngUp" min="2" max="35" step="0.5" value="3.7">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px">
+          <span class="hint" style="margin:0">보통 3.7초</span>
+          <span class="rngval" id="rngUpV">3.7초</span>
+        </div>
+      </div>
+
+      <div class="grp">
+        <span class="lab">사진 검사에 걸리는 시간</span>
+        <input type="range" id="rngChk" min="0.2" max="30" step="0.2" value="0.6">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px">
+          <span class="hint" style="margin:0">보통 0.6초 · 가끔 28초</span>
+          <span class="rngval" id="rngChkV">0.6초</span>
+        </div>
+      </div>
+
+      <div class="grp">
+        <span class="lab">검사 결과</span>
+        <div class="rlist" id="rlResult">
+          <label class="on"><input type="radio" name="res" value="ok" checked><span>정상 — 문제 없음</span></label>
+          <label><input type="radio" name="res" value="dup"><span>중복 리뷰 이미지</span></label>
+          <label><input type="radio" name="res" value="notreview"><span>리뷰 화면이 아님</span></label>
+          <label><input type="radio" name="res" value="product"><span>다른 상품의 리뷰</span></label>
+        </div>
+      </div>
+
+      <div class="grp nextonly" id="grpJudge">
+        <span class="lab">반려를 누가 정할까요 <span style="color:#EF4444">(정해주셔야 합니다)</span></span>
+        <div class="seg" id="segJudge">
+          <button data-v="auto" class="on">시스템이 바로</button>
+          <button data-v="human">담당자 확인 후</button>
+        </div>
+        <div class="hint" id="judgeHint"></div>
+      </div>
+
+      <div class="grp nextonly" id="grpFirst">
+        <span class="lab">제출 직후 리뷰어에게 보일 표시</span>
+        <div class="seg" id="segFirst">
+          <button data-v="done" class="on">제출완료</button>
+          <button data-v="checking">확인 중</button>
+        </div>
+        <div class="hint" id="firstHint"></div>
+      </div>
+
+      <button class="btn" id="btnReset">처음부터 다시</button>
+    </div>
+
+    <!-- 폰 -->
+    <div class="phonewrap">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 82%</span></div>
+        <div class="apphead">
+          <span style="font-size:1rem">📝</span>
+          <span class="ttl" id="appTitle">리뷰 제출</span>
+        </div>
+        <div class="screen" id="screen"></div>
+
+        <!-- 진행 오버레이 -->
+        <div class="loadovl" id="loadOvl">
+          <div class="loadbox">
+            <div class="spin"></div>
+            <div class="lt" id="loadTitle">업로드 중...</div>
+            <div class="ls" id="loadSub">잠시 기다려주세요</div>
+            <div class="elapsed" id="loadElapsed">0.0초</div>
+            <div class="warnline" id="loadWarn">⚠️ 리뷰어가 화면을 못 떠납니다</div>
+          </div>
+        </div>
+
+        <!-- 참여상품 정보 팝업 -->
+        <div class="ovl" id="partOvl">
+          <div class="sheet" id="partSheet"></div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+      </div>
+      <div class="phonecap">리뷰어 휴대폰 화면 (실제 크기)</div>
+    </div>
+
+    <!-- 로그 -->
+    <div class="panel side">
+      <h3>지금 무슨 일이 일어나는지</h3>
+      <div class="log" id="log"><div class="empty">아래 [리뷰 제출] 버튼을 눌러 보세요.</div></div>
+
+      <div class="totline">
+        <span class="k">리뷰어가 기다린 시간</span>
+        <span class="v" id="totV">—</span>
+      </div>
+
+      <div class="cmp">
+        <div class="cmpbox now"><div class="k">지금</div><div class="v" id="cmpNow" style="font-size:.74rem;color:#9CA3AF">눌러 보세요</div></div>
+        <div class="cmpbox next"><div class="k">바뀐 뒤</div><div class="v" id="cmpNext" style="font-size:.74rem;color:#9CA3AF">눌러 보세요</div></div>
+      </div>
+
+      <div class="note" id="noteBox"></div>
+
+      <div class="decide">
+        <div class="h">정해주셔야 하는 것 3가지</div>
+        <ol>
+          <li><b>반려를 누가 정할까요</b> — 검사가 끝나면 바로 반려로 보일지, 담당자가 확인한 뒤에만 보일지.
+            (왼쪽에서 바꿔 가며 눌러 보세요)</li>
+          <li><b>제출 직후 무엇으로 보일까요</b> — “제출완료”로 보였다가 문제가 있을 때만 반려로 바뀔지,
+            처음부터 “확인 중”으로 보일지.</li>
+          <li><b>반려를 리뷰어가 어떻게 알까요</b> — 리뷰 내역을 다시 열어야 알게 할지,
+            1:1 문의로도 바로 알려줄지. (1:1 문의 알림은 이미 있는 기능이라 켜기만 하면 됩니다)</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ── 상태 ─────────────────────────────────────────── */
+  var S = {
+    mode: 'now',            // now | next
+    upSec: 3.7,             // 사진 올리는 시간
+    chkSec: 0.6,            // 검사 시간
+    result: 'ok',           // ok | dup | notreview | product
+    view: 'submit',         // submit | history
+    card: 'none',           // none | checking | done | rejected
+    running: false,
+    t0: 0,
+    timers: [],
+    waited: null,           // 리뷰어가 실제로 기다린 초
+    logRows: [],
+    judge: 'auto',          // auto | human  — 반려를 누가 정하나
+    first: 'done',          // done | checking — 제출 직후 표시
+    pendingBad: false,      // 담당자 확인 대기(불량 판정은 났지만 아직 리뷰어에겐 안 보임)
+  };
+
+  var REASON = {
+    dup: {
+      badge: '제출 반려',
+      title: '중복 리뷰 이미지로 제출이 반려되었습니다',
+      body: '앞서 제출하신 사진과 같은 사진입니다. 이 작업에 맞는 리뷰 화면을 새로 캡처해 다시 올려주세요.',
+      short: '중복 리뷰 이미지',
+    },
+    notreview: {
+      badge: '제출 반려',
+      title: '리뷰 화면이 아닌 사진으로 제출이 반려되었습니다',
+      body: '올려주신 사진에서 리뷰 화면(별점·리뷰 본문)을 찾지 못했습니다. 작성하신 리뷰가 보이는 화면을 캡처해 다시 올려주세요.',
+      short: '리뷰 화면이 아님',
+    },
+    product: {
+      badge: '제출 반려',
+      title: '다른 상품의 리뷰로 제출이 반려되었습니다',
+      body: '이 작업의 상품과 다른 상품의 리뷰로 보입니다. 이번에 진행하신 상품의 리뷰 화면을 캡처해 다시 올려주세요.',
+      short: '다른 상품의 리뷰',
+    },
+  };
+
+  var $ = function(id){ return document.getElementById(id); };
+  var fmt = function(s){ return (Math.round(s * 10) / 10).toFixed(1) + '초'; };
+
+  /* ── 타이머 관리(모드 전환·초기화 때 전부 취소) ───── */
+  function later(fn, ms){ var h = setTimeout(fn, ms); S.timers.push(h); return h; }
+  function clearAll(){ S.timers.forEach(clearTimeout); S.timers = []; }
+
+  /* ── 로그 ─────────────────────────────────────────── */
+  function logClear(){ S.logRows = []; paintLog(); }
+  function logAdd(sec, text, kind){
+    S.logRows.push({ sec: sec, text: text, kind: kind || '' });
+    paintLog();
+  }
+  function paintLog(){
+    var el = $('log');
+    if (!S.logRows.length){
+      el.innerHTML = '<div class="empty">아래 [리뷰 제출] 버튼을 눌러 보세요.</div>';
+      return;
+    }
+    el.innerHTML = S.logRows.map(function(r){
+      return '<div class="row ' + r.kind + '">' +
+             '<span class="tm">' + (r.sec == null ? '' : fmt(r.sec)) + '</span>' +
+             '<span class="tx">' + r.text + '</span></div>';
+    }).join('');
+  }
+
+  /* ── 토스트 ───────────────────────────────────────── */
+  function toast(msg){
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('on');
+    later(function(){ t.classList.remove('on'); }, 2200);
+  }
+
+  /* ── 화면 그리기 ──────────────────────────────────── */
+  function render(){
+    $('appTitle').textContent = (S.view === 'submit') ? '리뷰 제출' : '내 정보 · 리뷰 내역';
+    $('screen').innerHTML = (S.view === 'submit') ? submitHtml() : historyHtml();
+    bind();
+  }
+
+  function submitHtml(){
+    return '' +
+      '<div class="sheetcard">' +
+        '<div class="h">9/26 · 넛세린 너리싱밤</div>' +
+        '<div class="s">리뷰를 등록하셨다면 화면을 캡처해 올려주세요.</div>' +
+        '<div class="dropzone" id="dz">' +
+          '<div class="ic">🖼️</div>' +
+          '<div class="t">리뷰 캡처 올리기</div>' +
+          '<div class="d">사진을 고르거나 여기에 끌어다 놓으세요</div>' +
+        '</div>' +
+        '<div class="thumbrow"><div class="thumb">리뷰 캡처<div class="x">×</div></div></div>' +
+        '<button class="submitbtn" id="btnSubmit">리뷰 제출</button>' +
+      '</div>' +
+      '<div class="sheetcard" style="background:#F8FAFF;border-color:#DBE6FB">' +
+        '<div class="s" style="color:#1B4F9C;line-height:1.6">' +
+          '제출하시면 담당자가 확인 후 리뷰비를 입금해 드립니다.' +
+        '</div>' +
+      '</div>';
+  }
+
+  function historyHtml(){
+    var badge, sub = '', cls = '', chevron = '<span class="result-chevron">›</span>';
+    if (S.card === 'checking'){
+      badge = '<span class="status-badge-checking">확인 중</span>';
+    } else if (S.card === 'rejected'){
+      badge = '<span class="status-badge-rejected">제출 반려</span>';
+      cls = ' rejected';
+      sub = '<span style="font-size:.6rem;font-weight:800;color:#B91C1C">' +
+            REASON[S.result].short + '</span>';
+    } else {
+      badge = '<span class="status-badge-submitted">제출완료</span>';
+      sub = '<span class="status-badge-paid">입금완료</span>';
+    }
+
+    var card =
+      '<div class="result-card' + cls + '" id="card">' +
+        '<div class="camp-thumb">📦</div>' +
+        '<div class="result-body">' +
+          '<div class="c-meta">9/26 <span class="c-who">김윤경</span>' +
+            '<span class="c-tail">· 제출 09.26</span></div>' +
+          '<div class="c-name">넛세린 너리싱밤</div>' +
+          '<div class="fee-line">' +
+            '<span class="fee prod">상품비 24,900</span>' +
+            '<span class="fee rev">리뷰비 1,500</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="result-right rr-col">' +
+          '<div class="rr-row">' + badge + chevron + '</div>' + sub +
+        '</div>' +
+      '</div>';
+
+    var older =
+      '<div class="result-card">' +
+        '<div class="camp-thumb">📦</div>' +
+        '<div class="result-body">' +
+          '<div class="c-meta">9/18 <span class="c-who">김윤경</span>' +
+            '<span class="c-tail">· 제출 09.18</span></div>' +
+          '<div class="c-name">블랑카우 바디로션</div>' +
+          '<div class="fee-line">' +
+            '<span class="fee prod">상품비 19,800</span>' +
+            '<span class="fee rev">리뷰비 1,000</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="result-right rr-col">' +
+          '<div class="rr-row"><span class="status-badge-submitted">제출완료</span>' +
+          '<span class="result-chevron">›</span></div>' +
+          '<span class="status-badge-paid">입금완료</span>' +
+        '</div>' +
+      '</div>';
+
+    var admin = '';
+    if (S.mode === 'next' && S.judge === 'human' && S.pendingBad){
+      admin =
+        '<div class="adminbar">' +
+          '<div class="k">↓ 이 줄은 담당자 화면입니다 (리뷰어에게는 안 보입니다)</div>' +
+          '<button id="btnAdminBad">담당자가 [✕ 불량]으로 확인 처리</button>' +
+        '</div>';
+    }
+    return '' +
+      '<div class="subtabs">' +
+        '<button class="subtab">제출대기 <span>0</span></button>' +
+        '<button class="subtab on">제출완료 <span>2</span></button>' +
+      '</div>' + card + older + admin;
+  }
+
+  function bind(){
+    var b = $('btnSubmit');
+    if (b) b.onclick = start;
+    var c = $('card');
+    if (c) c.onclick = openPart;
+    var ab = $('btnAdminBad');
+    if (ab) ab.onclick = adminReject;
+  }
+
+  /* 담당자가 불량으로 확인 → 그때 리뷰어 화면이 '제출 반려'로 바뀐다 */
+  function adminReject(){
+    S.pendingBad = false;
+    S.card = 'rejected';
+    logAdd(null, '담당자가 <b>[✕ 불량]</b>으로 확인했습니다', 'bad');
+    logAdd(null, '이제 리뷰 내역이 <b>제출 반려</b>로 바뀝니다', 'bad');
+    render();
+    var c = $('card');
+    if (c) c.classList.add('flash');
+    toast('리뷰 1건이 반려되었습니다');
+  }
+
+  /* ── 참여상품 정보 팝업 ───────────────────────────── */
+  function openPart(){
+    var rejected = (S.card === 'rejected');
+    var chip = rejected
+      ? '<span class="chip rej">제출 반려</span>'
+      : '<span class="chip done">제출완료</span>';
+
+    var inner =
+      '<div class="grab"></div>' +
+      '<div class="ttl">넛세린 너리싱밤' + chip + '</div>' +
+      '<div class="who">김윤경</div>';
+
+    if (rejected){
+      var r = REASON[S.result];
+      inner +=
+        '<div class="rejbox">' +
+          '<div class="rh">⛔ ' + r.title + '</div>' +
+          '<div class="rr">' + r.body + '</div>' +
+          '<div class="rt">확인 시각 · 9/26 09:41</div>' +
+        '</div>' +
+        '<div class="sbtns">' +
+          '<button class="sbtn pri" id="sbRe">리뷰 캡처 다시 올리기</button>' +
+          '<button class="sbtn" id="sbCs">🎧 1:1 문의하기</button>' +
+          '<button class="sbtn" id="sbClose">닫기</button>' +
+        '</div>';
+    } else {
+      inner +=
+        '<div class="box">' +
+          '상품 · 넛세린 너리싱밤 50ml<br>' +
+          '결제금액 · 24,900원<br>' +
+          '리뷰비 · 1,500원<br>' +
+          '입금 · 9/26 입금완료' +
+        '</div>' +
+        '<div class="sbtns">' +
+          '<button class="sbtn">🖼 제출 이미지 확인 · 수정요청</button>' +
+          '<button class="sbtn" id="sbCs">🎧 1:1 문의하기</button>' +
+          '<button class="sbtn" id="sbClose">닫기</button>' +
+        '</div>';
+    }
+
+    $('partSheet').innerHTML = inner;
+    $('partOvl').classList.add('on');
+
+    var close = function(){ $('partOvl').classList.remove('on'); };
+    $('sbClose').onclick = close;
+    $('partOvl').onclick = function(e){ if (e.target === $('partOvl')) close(); };
+    var cs = $('sbCs'); if (cs) cs.onclick = function(){ close(); toast('1:1 문의 화면으로 이동합니다'); };
+    var re = $('sbRe'); if (re) re.onclick = function(){
+      close();
+      S.view = 'submit'; S.card = 'none';
+      render();
+      toast('리뷰 캡처를 다시 올려주세요');
+    };
+  }
+
+  /* ── 제출 시작 ────────────────────────────────────── */
+  function start(){
+    if (S.running) return;
+    S.running = true;
+    clearAll();
+    logClear();
+    S.t0 = Date.now();
+
+    var btn = $('btnSubmit');
+    btn.disabled = true;
+    btn.textContent = '제출 중...';
+
+    var up = S.upSec * 1000;
+    var chk = S.chkSec * 1000;
+
+    if (S.mode === 'now') runNow(up, chk);
+    else runNext(up, chk);
+  }
+
+  function showLoad(title, sub){
+    $('loadTitle').textContent = title;
+    $('loadSub').textContent = sub;
+    $('loadOvl').classList.add('on');
+  }
+  function hideLoad(){
+    $('loadOvl').classList.remove('on');
+    $('loadWarn').style.display = 'none';
+    stopTick();
+  }
+
+  var tickH = null;
+  function startTick(){
+    stopTick();
+    tickH = setInterval(function(){
+      var s = (Date.now() - S.t0) / 1000;
+      $('loadElapsed').textContent = fmt(s);
+      if (s >= 8) $('loadWarn').style.display = 'block';
+    }, 100);
+  }
+  function stopTick(){ if (tickH){ clearInterval(tickH); tickH = null; } }
+
+  /* ① 지금 — 사진 올리기 + 검사까지 다 끝나야 화면이 넘어간다 */
+  function runNow(up, chk){
+    logAdd(0, '리뷰어가 <b>[리뷰 제출]</b>을 눌렀습니다');
+    showLoad('업로드 중...', '잠시 기다려주세요');
+    startTick();
+    logAdd(0, '사진을 구글에 올리는 중…', 'wait');
+
+    later(function(){
+      var t1 = S.upSec;
+      logAdd(t1, '사진 올리기 끝');
+      $('loadTitle').textContent = '확인 중...';
+      $('loadSub').textContent = '조금만 더 기다려주세요';
+      logAdd(t1, '사진이 리뷰 화면이 맞는지 검사 중…', 'wait');
+
+      later(function(){
+        var tot = S.upSec + S.chkSec;
+        hideLoad();
+        S.waited = tot;
+        logAdd(tot, '검사 끝 — ' + (S.result === 'ok' ? '문제 없음' : REASON[S.result].short));
+        logAdd(tot, '이제야 <b>제출 완료</b> 화면이 뜹니다', S.result === 'ok' ? 'good' : 'bad');
+        finish(tot);
+
+        toast('리뷰 제출이 완료되었습니다.');
+        S.view = 'history';
+        // 지금은 검사 결과가 불량이어도 리뷰어 화면엔 '제출완료'로만 보인다.
+        S.card = 'done';
+        render();
+        if (S.result !== 'ok'){
+          logAdd(null, '⚠️ 지금은 검사에서 걸러도 <b>리뷰어에게 아무 말도 하지 않습니다</b> — 담당자가 따로 연락해야 합니다', 'bad');
+        }
+      }, chk);
+    }, up);
+  }
+
+  /* ② 바뀐 뒤 — 사진만 올리면 바로 완료, 검사는 뒤에서 */
+  function runNext(up, chk){
+    logAdd(0, '리뷰어가 <b>[리뷰 제출]</b>을 눌렀습니다');
+    showLoad('업로드 중...', '잠시 기다려주세요');
+    startTick();
+    logAdd(0, '사진을 구글에 올리는 중…', 'wait');
+
+    later(function(){
+      var tot = S.upSec;
+      hideLoad();
+      S.waited = tot;
+      logAdd(tot, '사진 올리기 끝 — <b>바로 제출 완료</b> 화면', 'good');
+      finish(tot);
+
+      toast('리뷰 제출이 완료되었습니다.');
+      S.view = 'history';
+      S.card = (S.first === 'checking') ? 'checking' : 'done';
+      S.pendingBad = false;
+      render();
+      logAdd(tot, '리뷰어 화면에는 <b>' +
+        (S.first === 'checking' ? '확인 중' : '제출완료') + '</b>으로 보입니다', 'bg');
+      logAdd(tot, '(리뷰어는 이제 화면을 떠나도 됩니다)', 'bg');
+      logAdd(tot, '뒤에서 사진 검사가 시작됩니다', 'bg');
+
+      later(function(){
+        var t2 = S.upSec + S.chkSec;
+        if (S.result === 'ok'){
+          S.card = 'done';
+          logAdd(t2, '검사 끝 — 문제 없음 · <b>제출완료</b>로 확정', 'good');
+          render();
+          return;
+        }
+        logAdd(t2, '검사 끝 — ' + REASON[S.result].short, 'bad');
+        if (S.judge === 'auto'){
+          S.card = 'rejected';
+          logAdd(t2, '리뷰 내역이 곧바로 <b>제출 반려</b>로 바뀝니다 (카드를 눌러 보세요)', 'bad');
+          render();
+          var c = $('card');
+          if (c){ c.classList.add('flash'); toast('리뷰 1건이 반려되었습니다'); }
+        } else {
+          S.pendingBad = true;
+          S.card = (S.first === 'checking') ? 'checking' : 'done';
+          logAdd(t2, '담당자 리뷰검수 화면에만 올라갑니다 — <b>리뷰어 화면은 아직 그대로</b>', 'wait');
+          logAdd(null, '담당자가 확인해야 반려로 바뀝니다 (아래 버튼을 눌러 보세요)', 'wait');
+          render();
+        }
+      }, chk);
+    }, up);
+  }
+
+  function finish(tot){
+    S.running = false;
+    $('totV').textContent = fmt(tot);
+    $('totV').className = 'v' + (tot >= 8 ? ' slow' : '');
+    var box = (S.mode === 'now') ? $('cmpNow') : $('cmpNext');
+    box.removeAttribute('style');
+    box.textContent = fmt(tot);
+    paintNote();
+  }
+
+  /* ── 안내문 ───────────────────────────────────────── */
+  function paintNote(){
+    var n = $('noteBox');
+    var upv = S.upSec, chkv = S.chkSec;
+    if (S.mode === 'now'){
+      n.innerHTML =
+        '<b>지금</b>은 사진을 올리고(' + fmt(upv) + ') <b>검사까지 다 끝나야</b>(' + fmt(chkv) + ') ' +
+        '완료 화면이 뜹니다. 검사가 느린 날에는 리뷰어가 그만큼 더 기다립니다.<br>' +
+        '게다가 검사에서 걸러진 사진도 <b>리뷰어에게는 알려주지 않습니다.</b>';
+    } else {
+      n.innerHTML =
+        '<b>바뀐 뒤</b>에는 사진만 올라가면(' + fmt(upv) + ') <b>바로 완료</b>입니다. ' +
+        '검사는 뒤에서 하고, 문제가 있으면 리뷰 내역이 <b>제출 반려</b>로 바뀌며 ' +
+        '카드를 누르면 <b>왜 반려됐는지</b> 읽을 수 있습니다.' +
+        (S.judge === 'human'
+          ? '<br>지금 설정은 <b>담당자가 확인한 뒤에만</b> 반려로 바뀝니다.'
+          : '<br>지금 설정은 <b>검사가 끝나는 즉시</b> 반려로 바뀝니다.');
+    }
+  }
+
+  /* ── 컨트롤 배선 ──────────────────────────────────── */
+  function hardReset(){
+    clearAll(); stopTick();
+    S.running = false; S.view = 'submit'; S.card = 'none'; S.waited = null; S.pendingBad = false;
+    $('loadOvl').classList.remove('on');
+    $('partOvl').classList.remove('on');
+    $('toast').classList.remove('on');
+    $('totV').textContent = '—'; $('totV').className = 'v';
+    logClear(); render(); paintNote();
+  }
+
+  Array.prototype.forEach.call($('segMode').querySelectorAll('button'), function(b){
+    b.onclick = function(){
+      Array.prototype.forEach.call($('segMode').querySelectorAll('button'), function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      S.mode = b.getAttribute('data-v');
+      document.body.classList.toggle('mode-next', S.mode === 'next');
+      $('modeHint').textContent = (S.mode === 'now')
+        ? '사진을 올리고 검사가 끝날 때까지 기다립니다.'
+        : '사진만 올리면 바로 완료 — 검사는 뒤에서 합니다.';
+      hardReset();
+    };
+  });
+
+  $('rngUp').oninput = function(){
+    S.upSec = parseFloat(this.value);
+    $('rngUpV').textContent = fmt(S.upSec);
+    paintNote();
+  };
+  $('rngChk').oninput = function(){
+    S.chkSec = parseFloat(this.value);
+    $('rngChkV').textContent = fmt(S.chkSec);
+    paintNote();
+  };
+
+  Array.prototype.forEach.call($('rlResult').querySelectorAll('input'), function(inp){
+    inp.onchange = function(){
+      Array.prototype.forEach.call($('rlResult').querySelectorAll('label'), function(l){ l.classList.remove('on'); });
+      inp.closest('label').classList.add('on');
+      S.result = inp.value;
+      hardReset();
+    };
+  });
+
+  Array.prototype.forEach.call($('segJudge').querySelectorAll('button'), function(b){
+    b.onclick = function(){
+      Array.prototype.forEach.call($('segJudge').querySelectorAll('button'), function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      S.judge = b.getAttribute('data-v');
+      $('judgeHint').textContent = (S.judge === 'auto')
+        ? '검사가 끝나면 사람 손을 거치지 않고 바로 반려로 보입니다. 빠르지만 잘못 걸러낼 수 있습니다.'
+        : '검사 결과는 담당자 화면에만 올라가고, 담당자가 확인해야 반려로 보입니다. 안전하지만 늦습니다.';
+      hardReset();
+    };
+  });
+
+  Array.prototype.forEach.call($('segFirst').querySelectorAll('button'), function(b){
+    b.onclick = function(){
+      Array.prototype.forEach.call($('segFirst').querySelectorAll('button'), function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      S.first = b.getAttribute('data-v');
+      $('firstHint').textContent = (S.first === 'done')
+        ? '리뷰어는 정상 제출된 줄 압니다. 문제가 있을 때만 나중에 반려로 바뀝니다.'
+        : '검사가 끝날 때까지 "확인 중"으로 보입니다. 정직하지만 리뷰어가 불안해할 수 있습니다.';
+      hardReset();
+    };
+  });
+
+  $('btnReset').onclick = hardReset;
+
+  /* 시작 */
+  $('modeHint').textContent = '사진을 올리고 검사가 끝날 때까지 기다립니다.';
+  $('judgeHint').textContent = '검사가 끝나면 사람 손을 거치지 않고 바로 반려로 보입니다. 빠르지만 잘못 걸러낼 수 있습니다.';
+  $('firstHint').textContent = '리뷰어는 정상 제출된 줄 압니다. 문제가 있을 때만 나중에 반려로 바뀝니다.';
+  render();
+  paintNote();
+})();
+</script>
+</body>
+</html>
