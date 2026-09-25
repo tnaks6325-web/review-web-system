@@ -1660,6 +1660,11 @@ function _invoiceProgress(sales, invRows, totalCost) {
   //   (그 불일치는 이미 amountMismatch ⚠ 가 따로 말한다).
   const target = mixed ? sales.invoiceLegAmount : (sales.amount > 0 ? sales.amount : (Number(totalCost) || 0));
   const issuedAmount = issued.reduce((n, t) => n + (Number(t.total_amount) || 0), 0);
+  // ★ 수정세금계산서(마이너스)가 원본 계약을 물려받으면(inadd-webapp) 계약 해제 = 원본 + 전액 마이너스 = 0 이다.
+  //   합계가 0 이하면 '미발행' — "일부 발행 0 / 500만"으로 말하지 않는다.
+  if (issuedAmount <= 0) {
+    return { status: 'not_issued', date: null, count: 0, issuedAmount: 0, targetAmount: null, voided: issued.length };
+  }
   const dates = issued.map(t => _normIssueDate(t.issue_date)).sort();
   const done = !(target > 0) || issuedAmount >= target;
   return {
