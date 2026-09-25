@@ -113,9 +113,12 @@ const OWNER = {
 
   console.log('C. 진짜 PG');
   const { Pool } = require('pg');
-  const db = new Pool({ connectionString: process.env.PGTEST_URL });
+  // ★ 전용 스키마 안에서만 만든다 — 공용 시험 DB 의 reviewers 를 지우면 다른 PG 가드가 전부 깨진다.
+  const SCHEMA = 'ic_cards_test';
+  { const boot = new Pool({ connectionString: process.env.PGTEST_URL });
+    await boot.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE; CREATE SCHEMA ${SCHEMA}`); await boot.end(); }
+  const db = new Pool({ connectionString: process.env.PGTEST_URL, options: `-c search_path=${SCHEMA}` });
   const migration = fs.readFileSync(path.resolve(__dirname, '../migrations/166_reviewer_identity_cards.sql'), 'utf8');
-  await db.query('DROP TABLE IF EXISTS reviewer_identity_cards; DROP TABLE IF EXISTS reviewers');
   await db.query(`CREATE TABLE reviewers (id UUID PRIMARY KEY, name TEXT, phone TEXT, address TEXT, bank_name TEXT,
     bank_account TEXT, account_holder TEXT, shopping_id TEXT, income_type TEXT, sub_accounts JSONB DEFAULT '[]',
     registered_at TIMESTAMPTZ DEFAULT NOW())`);
@@ -184,8 +187,8 @@ const OWNER = {
     assert.strictEqual(out.code, 'bad_after_id');
   });
 
-  await db.query('DROP TABLE IF EXISTS reviewer_identity_cards; DROP TABLE IF EXISTS reviewers');
   await db.end();
+  { const boot = new Pool({ connectionString: process.env.PGTEST_URL }); await boot.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`); await boot.end(); }
   console.log(`\n✅ reviewerIdentityCards: ${passed}개 통과 (진짜 PG 포함)`);
   process.exit(0);
 })().catch((e) => { console.error('❌', e); process.exit(1); });

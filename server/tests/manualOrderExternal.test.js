@@ -110,18 +110,17 @@ const svc = require('../src/services/manualOrder.service');
 /** 질의 로그를 남기는 스텁 — 응답은 (정규식|문자열) → rows 매핑 */
 function stubDb(routes) {
   const log = [];
-  return {
-    log,
-    query: async (sql, params) => {
-      log.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
-      for (const [m, rows] of routes) {
-        if (typeof m === 'string' ? String(sql).includes(m) : m.test(String(sql))) {
-          return { rows: typeof rows === 'function' ? rows(params) : rows };
-        }
+  const query = async (sql, params) => {
+    log.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
+    for (const [m, rows] of routes) {
+      if (typeof m === 'string' ? String(sql).includes(m) : m.test(String(sql))) {
+        return { rows: typeof rows === 'function' ? rows(params) : rows };
       }
-      return { rows: [] };
-    },
+    }
+    return { rows: [] };
   };
+  // ★ 조각 2-2(결정 177): 타계정 추가는 트랜잭션 창구(mutateSubAccounts)를 탄다 — 같은 스텁을 커넥션으로도 준다.
+  return { log, query, connect: async () => ({ query, release() {} }) };
 }
 
 ok('B1 출처 표시가 Track B의 manual 과 겹치지 않는다(오분류 방지)',
@@ -132,6 +131,7 @@ ok('B1 출처 표시가 Track B의 manual 과 겹치지 않는다(오분류 방�
   regCalls = [];
   const db = stubDb([
     [/FROM reviewers\s+WHERE REPLACE/i, [{ id: 7, name: '박서준', phone: '01033334444', phone8: '33334444', sub_accounts: [] }]],
+    [/FOR NO KEY UPDATE/i, [{ id: 7, name: '박서준', phone: '01033334444', sub_accounts: [] }]],
   ]);
   const r = await svc.ensureExternalReviewer({
     reviewerName: '박서준', recipient: '이서연', phone: '010-5555-6666',
@@ -140,8 +140,10 @@ ok('B1 출처 표시가 Track B의 manual 과 겹치지 않는다(오분류 방�
   ok('B2 타계정 — 소유자를 찾으면 연결한다', r.registered === true && r.linkedOwner === '박서준');
   ok('B3 타계정 — 수취인을 소유자의 sub_accounts 에 추가', db.log.some(q => /UPDATE reviewers SET sub_accounts/.test(q.sql)));
   ok('B4 타계정 — registerReviewer 로 새 리뷰어를 만들지 않는다', regCalls.length === 0);
-  const upd = db.log.find(q => /sub_accounts/.test(q.sql) && /UPDATE/.test(q.sql));
-  ok('B5 타계정 — 등록되는 명의는 수취인', JSON.parse(upd.params[0])[0].name === '이서연');
+  const upd = db.log.find(q => /^UPDATE reviewers SET sub_accounts/.test(q.sql));
+  ok('B5 타계정 — 등록되는 명의는 수취인', JSON.parse(upd.params[1])[0].name === '이서연');
+  ok('B5b 타계정 — 저장 전에 소유자 행을 잠그고 id 로 저장한다(동시 저장 유실 방지)',
+    db.log.some(q => /FOR NO KEY UPDATE/.test(q.sql)) && /WHERE id = \$1/.test(upd.sql) && upd.params[0] === 7);
 }
 // ── 타계정: 동명이인 2명 → 연결 안 함(잘못된 사람에게 붙이느니 경고) ──
 {

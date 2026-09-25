@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
+const { syncCardsAfterWrite } = require('./reviewerIdentityCards.service');
 const { addressSame, addressHeuristic, normAddress } = require('./identity.service');
 const { logger } = require('../utils/logger');
 
@@ -289,6 +290,10 @@ async function saveShoppingId(ownerReviewerId, identityKey, shoppingId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 조각 2-2(결정 177): 읽기 전에 소유자 행을 잠근다 — 내정보 저장과 동시에 오면 한쪽이 사라졌다.
+    if (UUID_RE.test(String(ownerReviewerId || ''))) {
+      await client.query('SELECT 1 FROM reviewers WHERE id = $1 FOR NO KEY UPDATE', [ownerReviewerId]);
+    }
     const { owner, identities } = await loadOwnerProfile(ownerReviewerId, client);
     const matches = identities.filter((item) => item.identityKey === String(identityKey || ''));
     if (matches.length !== 1) throw new ReviewerOrderIdentityError('IDENTITY_NOT_FOUND', '저장할 명의를 찾을 수 없습니다.', 404);
@@ -305,6 +310,7 @@ async function saveShoppingId(ownerReviewerId, identityKey, shoppingId) {
       subs[selected.subIndex] = { ...subs[selected.subIndex], shoppingId: value };
       await client.query('UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1', [owner.id, JSON.stringify(subs)]);
     }
+    await syncCardsAfterWrite(client, owner.id, { source: 'shopping_id' });
     if (selected.participantIdentityId) {
       await client.query(
         'UPDATE reviewer_identities SET shopping_id = $2, updated_at = NOW() WHERE id = $1 AND owner_reviewer_id = $3',

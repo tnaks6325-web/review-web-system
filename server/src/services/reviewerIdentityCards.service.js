@@ -344,4 +344,74 @@ async function applyCards({ db = pool, confirm = false, limit = 500, afterId = n
   return out;
 }
 
-module.exports = { buildCardsFromReviewer, previewCards, applyCards, syncOwnerCards, planOwnerSync, reconcileCards, _test: { nameKey, phone8Of } };
+// ─────────────────────────────────────────────────────────────────────────────
+// 조각 2-2 — 타계정 목록 쓰기 창구 하나 (결정 기록 177)
+// ★ 쓰는 곳 8곳이 각자 "읽기 → 고치기 → 통째로 저장"을 잠금 없이 해 왔다(동시 저장 한쪽 유실 ·
+//   칸 순번으로 대상 지목). 여기 한 곳으로 모은다: 잠금 → 다시 읽기 → 고치기 → id 로 저장 → 카드 맞추기.
+// ★ 잠금은 FOR NO KEY UPDATE — 같은 리뷰어의 주문·참여 INSERT(외래키 FOR KEY SHARE)를 막지 않는다.
+// ★ 카드 맞추기 실패는 저장을 되돌리지 않는다(SAVEPOINT 격리 · 10분 거울이 따라잡는다).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 이름(공백 무시)+번호 뒤8자리로 타계정 칸을 찾는다. 같은 이름·번호가 둘이면 -1(모름 = 쓰지 않음). */
+function findSubIndex(subs, name, phone) {
+  const nk = nameKey(name); const p8 = phone8Of(phone);
+  if (!nk || !p8) return -1;
+  const hits = [];
+  asSubs(subs).forEach((s, i) => { if (nameKey(s && s.name) === nk && phone8Of(s && s.phone) === p8) hits.push(i); });
+  return hits.length === 1 ? hits[0] : -1;
+}
+
+/**
+ * 카드를 지금 리뷰어 행에 맞춘다(호출자 트랜잭션 안 · 호출자가 이미 그 행을 잠갔다고 가정).
+ * 절대 throw 하지 않는다 — 실패하면 SAVEPOINT 로 되돌리고 { ok:false } 만 돌려준다.
+ */
+async function syncCardsAfterWrite(client, reviewerId, { source = 'write' } = {}) {
+  const sp = 'ic_sync_' + Math.random().toString(36).slice(2, 8);
+  try {
+    await client.query(`SAVEPOINT ${sp}`);
+    const { rows } = await client.query(`${REVIEWER_SELECT} WHERE id = $1`, [reviewerId]);
+    const out = rows.length ? await syncOwnerCards(client, rows[0], { source }) : null;
+    await client.query(`RELEASE SAVEPOINT ${sp}`);
+    return { ok: true, ...(out || {}) };
+  } catch (err) {
+    try { await client.query(`ROLLBACK TO SAVEPOINT ${sp}`); await client.query(`RELEASE SAVEPOINT ${sp}`); } catch (_) { /* noop */ }
+    logger.warn(`[identity-cards] 저장 후 카드 맞추기 실패(저장은 유지 · 거울이 따라잡음): ${err.code || ''} ${err.message}`);
+    return { ok: false, code: err.code || null };
+  }
+}
+
+/**
+ * 타계정 목록을 안전하게 고친다(호출자 트랜잭션 안).
+ * mutate(subs, reviewer) — 고친 배열을 돌려주면 저장, null/undefined 면 바꾸지 않음, throw 하면 그대로 올린다.
+ * @returns { changed, reviewer, subs, cards }
+ */
+async function mutateSubAccountsInTx(client, reviewerId, mutate, { source = 'write' } = {}) {
+  const { rows } = await client.query(`${REVIEWER_SELECT} WHERE id = $1 FOR NO KEY UPDATE`, [reviewerId]);
+  if (!rows.length) { const e = new Error('리뷰어를 찾을 수 없습니다.'); e.code = 'reviewer_not_found'; throw e; }
+  const reviewer = rows[0];
+  const current = asSubs(reviewer.sub_accounts).map((s) => (s && typeof s === 'object' ? { ...s } : s));
+  const next = await mutate(current, reviewer);
+  if (!Array.isArray(next)) return { changed: false, reviewer, subs: asSubs(reviewer.sub_accounts), cards: null };
+  const same = JSON.stringify(next) === JSON.stringify(asSubs(reviewer.sub_accounts));
+  if (same) return { changed: false, reviewer, subs: next, cards: null };
+  await client.query('UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1', [reviewerId, JSON.stringify(next)]);
+  const cards = await syncCardsAfterWrite(client, reviewerId, { source });
+  return { changed: true, reviewer, subs: next, cards };
+}
+
+/** 자기 트랜잭션을 여는 판. */
+async function mutateSubAccounts(reviewerId, mutate, opts = {}) {
+  const client = await (opts.db || pool).connect();
+  try {
+    await client.query('BEGIN');
+    const out = await mutateSubAccountsInTx(client, reviewerId, mutate, opts);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally { client.release(); }
+}
+
+module.exports = { buildCardsFromReviewer, previewCards, applyCards, syncOwnerCards, planOwnerSync, reconcileCards,
+  findSubIndex, syncCardsAfterWrite, mutateSubAccountsInTx, mutateSubAccounts, _test: { nameKey, phone8Of } };

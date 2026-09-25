@@ -22,6 +22,7 @@ const { createOrderLedgerEntry, markOrderQueued, markOrderMirrorFailed } = requi
 const { enqueue } = require('./syncQueue.service');
 const { registerReviewer } = require('./reviewer.service');
 const { findSubAccount } = require('./identity.service');
+const { mutateSubAccounts } = require('./reviewerIdentityCards.service');
 const { digits } = require('../utils/slashForm');
 const purchaseSessions = require('./purchaseSubmissionSession.service');
 
@@ -108,14 +109,18 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
     }
     if (registeredElsewhere) warnings.push(`'${f.recipient}'은 이미 등록된 리뷰어입니다 — 타계정 연결을 확인하세요`);
     if (!findSubAccount(subs, f.recipient, p8)) {
-      subs.push({
+      // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → 그 사이 누가 먼저 넣었으면 건너뜀 → id 로 저장 · 카드 즉시 맞춤.
+      const entry = {
         name: String(f.recipient || '').trim(),
         phone: f.phone,
         address: f.address || '',
         bankName: f.bank || '', bankAccount: f.account || '', accountHolder: f.depositor || '',
-      });
-      await db.query('UPDATE reviewers SET sub_accounts = $1::jsonb WHERE id = $2',
-        [JSON.stringify(subs), owner.id]);
+      };
+      await mutateSubAccounts(owner.id, (cur) => {
+        if (findSubAccount(cur, f.recipient, p8)) return null;
+        cur.push(entry);
+        return cur;
+      }, { db: typeof db.connect === 'function' ? db : pool, source: 'external_order' });
     }
     return { registered: true, linkedOwner: owner.name, ownerPhone8: owner.phone8 || null, warnings };
   }

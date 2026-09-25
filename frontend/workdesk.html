@@ -12250,7 +12250,7 @@ function _pmBuildFix(items){
     //    작업 카드는 그 리뷰어의 인덱스를 참조만 한다(한 리뷰어가 여러 작업에 걸칠 수 있다).
     if(hasAcct){
       if(it.accountRef && it.accountRef.reviewerId){
-        const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'');
+        const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'')+'||'+(it.accountRef.subName||'');
         let a=accts.get(k);
         /* ★★ 카드·팝업이 가리키는 것은 "리뷰어"가 아니라 **계좌 명의**다 —
              한 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 이름만으로는
@@ -12445,7 +12445,7 @@ function _pmFixAcct(i){
     onOk: async ()=>{
       const g=id=>((document.querySelector('#'+id)||{}).value||'').trim();
       const r=await api('/api/trackb/payment/reviewer-account',{ method:'POST', body: JSON.stringify({
-        reviewerId:a.ref.reviewerId, subPhone8:a.ref.subPhone8||null,
+        reviewerId:a.ref.reviewerId, subPhone8:a.ref.subPhone8||null, subName:a.ref.subName||null,
         bankName:g('pmBankNameIn'), bankAccount:g('pmAcctIn'), accountHolder:g('pmHolderIn') }) });
       if(!r||!r.ok){ toast((r&&r.error)||'저장하지 못했습니다'); return false; }
       _pmAfterFix(`저장했습니다 — ${a.rows}건에 적용`);
@@ -12504,7 +12504,7 @@ function _pmRowFix(idx){
     if(i>=0) return _pmOpenBoard(i);      // 작업 조건 카드에서 정한다(창구 하나)
   }
   if(iss.some(x=>PAY_ACCT_ISSUES.includes(x)) && it.accountRef && it.accountRef.reviewerId){
-    const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'');
+    const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'')+'||'+(it.accountRef.subName||'');
     const i=f.accts.findIndex(a=>a.key===k);
     if(i>=0) return _pmFixAcct(i);
   }

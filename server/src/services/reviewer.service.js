@@ -1,4 +1,5 @@
 const pool = require('../db/pool');
+const { mutateSubAccounts } = require('./reviewerIdentityCards.service');
 
 /**
  * 리뷰어 등록 (GAS: registerReviewer)
@@ -50,7 +51,7 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
     if (result.rowCount === 0) {
       // 번호 중복 — 기존 레코드 조회
       const { rows } = await pool.query(
-        'SELECT name, sub_accounts FROM reviewers WHERE phone = $1', [cleanPhone]
+        'SELECT id, name, sub_accounts FROM reviewers WHERE phone = $1', [cleanPhone]
       );
       const existing = rows[0] || {};
       const existingName = (existing.name || '').trim();
@@ -63,18 +64,17 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
 
       // ★ A안: 같은 번호 + 다른 이름 → 타계정(sub_account)으로 추가하고 등록 허용
       //   (각 이름이 자기 이름으로 로그인 + 같은 번호 참여 조회 가능)
-      let subs = existing.sub_accounts;
-      if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
-      if (!Array.isArray(subs)) subs = [];
+      // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → 없을 때만 추가(동시 저장 유실 방지 · 카드 즉시 맞춤).
       const p8 = cleanPhone.slice(-8);
-      const already = subs.some(s =>
-        (s.name || '').trim() === newName &&
-        (s.phone || '').replace(/[^0-9]/g, '').slice(-8) === p8
-      );
-      if (!already) {
+      await mutateSubAccounts(existing.id, (subs) => {
+        const already = subs.some(s =>
+          (s && s.name || '').trim() === newName &&
+          (s && s.phone || '').replace(/[^0-9]/g, '').slice(-8) === p8
+        );
+        if (already) return null;
         subs.push({ name: newName, phone: cleanPhone });
-        await pool.query('UPDATE reviewers SET sub_accounts = $1 WHERE phone = $2', [JSON.stringify(subs), cleanPhone]);
-      }
+        return subs;
+      }, { source: 'register' });
       return { ok: true, name: newName, phone: cleanPhone, addedAsSubAccount: true, mainName: existingName };
     }
 
@@ -285,43 +285,29 @@ async function handleReviewerProfile(body = {}) {
     // 코드가 부여된 소유자는 배열을 통째로 바꾸면 member_no와 실제 참여자 UUID의 대응이
     // 깨질 수 있다. 코드 관리 화면에 "타계정 추가/분리" 절차가 생기기 전까지는 fail-closed.
     // 기존(코드 미부여) 리뷰어의 종전 프로필 저장은 그대로 허용한다.
-    let currentSubs = [];
+    // ★ 조각 2-2(결정 177): 대상은 id 하나로 확정한 뒤(phone8 은 비유니크 — 여러 행을 한 번에 덮을 수 있다)
+    //   잠금 안에서 다시 읽고 shoppingId 를 보존해 저장한다. 종전에는 읽기와 저장 사이가 열려 있어
+    //   그 사이 저장된 아이디·자동보강 값이 사라졌다.
+    let owner;
     try {
-      const coded = await pool.query(
-        `SELECT reviewer_no, sub_accounts FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 1`,
-        [scopeValue]
-      );
-      if (coded.rows.length && coded.rows[0].reviewer_no != null) {
-        return { ok: false, code: 'identity_accounts_locked',
-          error: '코드가 부여된 타계정은 여기서 변경할 수 없습니다. 관리자 코드 관리 절차를 이용해주세요.' };
-      }
-      if (coded.rows.length) {
-        currentSubs = coded.rows[0].sub_accounts;
-        if (typeof currentSubs === 'string') {
-          try { currentSubs = JSON.parse(currentSubs); } catch (_) { currentSubs = []; }
-        }
-        if (!Array.isArray(currentSubs)) currentSubs = [];
-      }
+      const { rows: found } = await pool.query(
+        `SELECT id, reviewer_no FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 2`, [scopeValue]);
+      if (!found.length) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
+      if (found.length > 1) return { ok: false, code: 'ambiguous_reviewer', error: '같은 번호의 리뷰어가 여럿이라 저장할 수 없습니다. 관리자에게 문의해주세요.' };
+      owner = found[0];
     } catch (identityErr) {
       if (!identityErr || identityErr.code !== '42703') throw identityErr;
+      const { rows: found } = await pool.query(`SELECT id FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 2`, [scopeValue]);
+      if (!found.length) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
+      if (found.length > 1) return { ok: false, code: 'ambiguous_reviewer', error: '같은 번호의 리뷰어가 여럿이라 저장할 수 없습니다. 관리자에게 문의해주세요.' };
+      owner = found[0];
     }
-    // 명의의 공통 아이디는 전용 PATCH 경로에서만 변경한다. 구버전/캐시된 프로필 화면이
-    // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
-    // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
-    const sig = (sub) => `${String(sub && sub.name || '').replace(/\s+/g, '')}|${String(sub && sub.phone || '').replace(/\D/g, '').slice(-8)}`;
-    const usedOld = new Set();
-    subs.forEach((sub, idx) => {
-      let oldIdx = currentSubs.findIndex((old, i) => !usedOld.has(i) && sig(old) === sig(sub));
-      if (oldIdx < 0 && currentSubs[idx] && !usedOld.has(idx)) oldIdx = idx;
-      if (oldIdx < 0) return;
-      usedOld.add(oldIdx);
-      const old = currentSubs[oldIdx] || {};
-      const savedId = old.shoppingId != null ? old.shoppingId : old.shopping_id;
-      if (savedId != null) {
-        sub.shoppingId = String(savedId);
-        delete sub.shopping_id;
-      }
-    });
+    // 코드가 부여된 소유자는 배열을 통째로 바꾸면 member_no와 실제 참여자 UUID의 대응이
+    // 깨질 수 있다. 코드 관리 화면에 "타계정 추가/분리" 절차가 생기기 전까지는 fail-closed.
+    if (owner.reviewer_no != null) {
+      return { ok: false, code: 'identity_accounts_locked',
+        error: '코드가 부여된 타계정은 여기서 변경할 수 없습니다. 관리자 코드 관리 절차를 이용해주세요.' };
+    }
     const phone8s = new Set();
     for (const sub of subs) {
       const subPhone8 = String(sub && sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
@@ -329,10 +315,26 @@ async function handleReviewerProfile(body = {}) {
       if (phone8s.has(subPhone8)) return { ok: false, error: '같은 연락처의 타계정은 한 번만 등록할 수 있습니다.' };
       phone8s.add(subPhone8);
     }
-    await pool.query(
-      `UPDATE reviewers SET sub_accounts = $1::jsonb WHERE ${scopeColumn} = $2`,
-      [JSON.stringify(subs), scopeValue]
-    );
+    // 명의의 공통 아이디는 전용 PATCH 경로에서만 변경한다. 구버전/캐시된 프로필 화면이
+    // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
+    // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
+    const sig = (sub) => `${String(sub && sub.name || '').replace(/\s+/g, '')}|${String(sub && sub.phone || '').replace(/\D/g, '').slice(-8)}`;
+    await mutateSubAccounts(owner.id, (currentSubs) => {
+      const usedOld = new Set();
+      subs.forEach((sub, idx) => {
+        let oldIdx = currentSubs.findIndex((old, i) => !usedOld.has(i) && sig(old) === sig(sub));
+        if (oldIdx < 0 && currentSubs[idx] && !usedOld.has(idx)) oldIdx = idx;
+        if (oldIdx < 0) return;
+        usedOld.add(oldIdx);
+        const old = currentSubs[oldIdx] || {};
+        const savedId = old.shoppingId != null ? old.shoppingId : old.shopping_id;
+        if (savedId != null) {
+          sub.shoppingId = String(savedId);
+          delete sub.shopping_id;
+        }
+      });
+      return subs;
+    }, { source: 'profile' });
     return { ok: true };
   }
 

@@ -21,6 +21,7 @@ const crypto = require('crypto');
  */
 
 const pool = require('../db/pool');           // ★ 이 모듈은 pool 을 직접 export 한다(구조분해 금지)
+const { syncCardsAfterWrite } = require('./reviewerIdentityCards.service');
 const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { logger } 구조분해다
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
@@ -433,7 +434,9 @@ async function listPaymentTargets(opts = {}) {
       //   타계정으로 지목한다 — 없는 명의를 지목하면 보완 저장이 `sub_not_found` 로 죽는다.
       accountRef: acct && acct.reviewerId
         ? { reviewerId: acct.reviewerId,
-            subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null }
+            subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null,
+            // ★ 조각 2-2(결정 177): 같은 번호의 가족 명의를 가르는 이름 — 타계정을 실제로 지목할 때만 싣는다
+            ...(acct.isSub && (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) ? { subName: acct.name || null } : {}) }
         : null,
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
       //   · order(그 건의 구매양식 계좌 — 2026-09-21 확정으로 **기본 경로**가 됐다)
@@ -1490,7 +1493,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
  *   소유자 공통계좌를 덮지 않는다(타계정 전용계좌 규약 유지).
  * ★ 빈 값은 **덮지 않는다**(부분 보완 허용) — 지우려면 화면이 아니라 등록리뷰어DB에서.
  */
-async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder, by }) {
+async function saveReviewerAccount({ reviewerId, subPhone8, subName, bankName, bankAccount, accountHolder, by }) {
   // ★ 아래 `resolveBank` 검증이 화면에서 방금 등록한 표기를 알아야 한다(안 그러면
   //   표기를 넣어 두고도 계좌 저장이 '인식불가'로 거부되는 막다른 길).
   await _bankOv.ensureBankOverrides();
@@ -1515,15 +1518,20 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
       const { rows } = await client.query(`SELECT sub_accounts FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
       if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
       const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
-      let hit = false;
-      const next = arr.map(s => {
-        const p8 = String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8);
-        if (p8 !== sub || hit) return s;
-        hit = true;
-        return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
-      });
-      if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
+      // ★ 조각 2-2(결정 177): 가족이 같은 번호를 쓰면 번호만으로는 누구 칸인지 모른다(운영 17명).
+      //   종전에는 **첫 번째** 칸에 저장해 다른 가족의 계좌를 덮었다 → 이름으로 좁히고, 그래도 여럿이면 저장하지 않는다.
+      const _nk = (v) => String(v || '').replace(/\s+/g, '');
+      const byPhone = [];
+      arr.forEach((s, i) => { if (String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8) === sub) byPhone.push(i); });
+      let cand = byPhone;
+      if (byPhone.length > 1 && _nk(subName)) cand = byPhone.filter((i) => _nk(arr[i] && arr[i].name) === _nk(subName));
+      if (!cand.length) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
+      if (cand.length > 1) throw new PaymentFixError('sub_ambiguous', '같은 번호를 쓰는 타계정이 여럿이라 누구 계좌인지 정할 수 없습니다. 등록리뷰어DB에서 직접 고쳐 주세요.');
+      const target = cand[0];
+      const next = arr.map((s, i) => (i !== target ? s
+        : { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) }));
       await client.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
+      await syncCardsAfterWrite(client, id, { source: 'payment_account' });
       await client.query('COMMIT');
       return { ok: true, target: 'sub' };
     }
