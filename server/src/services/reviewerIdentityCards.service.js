@@ -430,8 +430,8 @@ async function loadActiveCards(db, ownerId) {
   try {
     if (inTx) await db.query(`SAVEPOINT ${sp}`);
     const { rows } = await db.query(
-      `SELECT id, kind, name_key, phone8 FROM reviewer_identity_cards
-        WHERE owner_reviewer_id = $1 AND status = 'active'`, [ownerId]);
+      `SELECT id, kind, name_key, phone8, status, merged_into FROM reviewer_identity_cards
+        WHERE owner_reviewer_id = $1 AND status IN ('active', 'merged')`, [ownerId]);
     if (inTx) await db.query(`RELEASE SAVEPOINT ${sp}`);
     return rows;
   } catch (err) {
@@ -449,6 +449,7 @@ async function loadActiveCards(db, ownerId) {
  */
 function mapSubsToCards(reviewer, cards) {
   const byIndex = new Map();
+  const merged = new Map();        // index -> 합쳐 들어간 카드 번호
   const misses = [];
   const subs = asSubs(reviewer && reviewer.sub_accounts);
   const sigOfSub = (sub) => {
@@ -460,7 +461,10 @@ function mapSubsToCards(reviewer, cards) {
   const selfSig = str(reviewer && reviewer.name) && phone8Of(reviewer && reviewer.phone)
     ? `${nameKey(str(reviewer.name))}|${phone8Of(reviewer.phone)}` : '';
   const subCards = new Map();
+  const mergedBySig = new Map();   // 조각 4: 담당자가 합친 명의 — 이름표는 옛 것 그대로, "합쳐짐" 표시만
   for (const c of cards || []) {
+    if (c.status === 'merged') { mergedBySig.set(`${c.name_key}|${c.phone8}`, String(c.merged_into || '')); continue; }
+    if (c.status && c.status !== 'active') continue;
     if (c.kind !== 'sub') continue;
     const s = `${c.name_key}|${c.phone8}`;
     if (!subCards.has(s)) subCards.set(s, []);
@@ -472,11 +476,12 @@ function mapSubsToCards(reviewer, cards) {
     if (count.get(s) > 1) return misses.push({ index, reason: 'duplicate_in_list' });
     if (s === selfSig) return misses.push({ index, reason: 'same_as_self' });
     const hit = subCards.get(s) || [];
+    if (hit.length === 0 && mergedBySig.has(s)) { merged.set(index, mergedBySig.get(s)); return misses.push({ index, reason: 'merged' }); }
     if (hit.length === 0) return misses.push({ index, reason: 'no_card' });
     if (hit.length > 1) return misses.push({ index, reason: 'ambiguous_card' });
     byIndex.set(index, String(hit[0].id));
   });
-  return { byIndex, misses };
+  return { byIndex, merged, misses };
 }
 
 module.exports = { buildCardsFromReviewer, previewCards, applyCards, syncOwnerCards, planOwnerSync, reconcileCards,

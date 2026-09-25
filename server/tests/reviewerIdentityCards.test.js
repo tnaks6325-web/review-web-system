@@ -79,7 +79,8 @@ const OWNER = {
         else if (p.endsWith('.js') && fs.readFileSync(p, 'utf8').includes('reviewer_identity_cards')) hits.push(path.relative(srcDir, p));
       }
     })(srcDir);
-    assert.deepStrictEqual(hits, ['services/reviewerIdentityCards.service.js']);
+    // 조각 4(결정 179): 담당자 합치기 서비스도 카드 표를 다룬다 — 카드 표를 만지는 곳은 이 두 서비스뿐.
+    assert.deepStrictEqual(hits.sort(), ['services/reviewerIdentityCards.service.js', 'services/reviewerIdentityMerge.service.js']);
   });
   await test('미리보기·적용 라우트는 관리자 전용이다', async () => {
     const routes = fs.readFileSync(path.resolve(__dirname, '../src/routes/trackB.routes.js'), 'utf8');

@@ -433,6 +433,44 @@ router.post('/identity-cards/rebind', authMiddleware, adminOrMasterMiddleware, a
     res.json(await require('../services/reviewerOrderIdentity.service').rebindLegacySubHashes({ dryRun: false }));
   } catch (err) { next(err); }
 });
+// 조각 4(결정 179): 등록리뷰어DB 명의 합치기 — 전부 adminOrMaster(등록리뷰어DB 와 같은 게이트).
+const identityMerge = require('../services/reviewerIdentityMerge.service');
+function _imFail(res, err, next) {
+  if (err && err.code === '42P01') return res.json({ ok: false, code: 'not_ready', error: '명의 합치기 표(migration 167)가 아직 적용되지 않았습니다.' });
+  if (err instanceof identityMerge.IdentityMergeError) return res.status(err.status || 400).json({ ok: false, code: err.code, error: err.message });
+  return next(err);
+}
+router.get('/identity-cards/merge-counts', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await identityMerge.counts()); } catch (err) { _imFail(res, err, next); }
+});
+router.get('/identity-cards/duplicates', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await identityMerge.listDuplicateGroups({ limit: req.query.limit, offset: req.query.offset })); } catch (err) { _imFail(res, err, next); }
+});
+router.get('/identity-cards/shared-phones', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await identityMerge.listSharedPhones({ limit: req.query.limit, offset: req.query.offset })); } catch (err) { _imFail(res, err, next); }
+});
+router.get('/identity-cards/decisions', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await identityMerge.listDecisions({ limit: req.query.limit })); } catch (err) { _imFail(res, err, next); }
+});
+router.post('/identity-cards/merge', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const b = req.body || {};
+  try { res.json(await identityMerge.mergeGroup({ ownerId: b.ownerId, nameKey: b.nameKey, groupKey: b.groupKey, keepCardId: b.keepCardId, by: _by(req) })); }
+  catch (err) { _imFail(res, err, next); }
+});
+router.post('/identity-cards/keep-separate', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const b = req.body || {};
+  try { res.json(await identityMerge.keepSeparate({ ownerId: b.ownerId, nameKey: b.nameKey, groupKey: b.groupKey, memo: b.memo, by: _by(req) })); }
+  catch (err) { _imFail(res, err, next); }
+});
+router.post('/identity-cards/shared-phone-ok', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const b = req.body || {};
+  try { res.json(await identityMerge.confirmSharedPhone({ phone8: b.phone8, groupKey: b.groupKey, memo: b.memo, by: _by(req) })); }
+  catch (err) { _imFail(res, err, next); }
+});
+router.post('/identity-cards/decision-undo', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const b = req.body || {};
+  try { res.json(await identityMerge.undoDecision({ decisionId: b.decisionId, by: _by(req) })); } catch (err) { _imFail(res, err, next); }
+});
 // ── 시트 데이터 반영 점검(sheet-sync audit) — adminOrMaster ──
 //   등록된 작업(tab_configs) 전수를 분모로 "시트 → 검색인덱스 → 작업보드" 반영 사슬의 끊긴 곳을
 //   진단(읽기 전용·시트 API 무접촉). ?before=YYYY-MM-DD 면 그 날짜 이전 등록(+ 등록일 미상)만.

@@ -143,12 +143,14 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
   // ★ 조각 3-1(결정 178): 타계정의 이름표를 "칸 순번"이 아니라 **카드 번호**로 — 칸을 지우거나 순서를 바꿔도
   //   과거 구매 기록과의 짝이 끊기지 않는다. 짝이 확실한 칸만 카드 번호, 나머지는 옛 이름표(막지 않는다).
   let cardByIndex = new Map();
+  let mergedByIndex = new Map();
   if (cards.cardKeysEnabled()) {
     try {
       const active = await cards.loadActiveCards(db, owner.id);
       if (active) {
         const mapped = cards.mapSubsToCards(owner, active);
         cardByIndex = mapped.byIndex;
+        mergedByIndex = mapped.merged || new Map();
         const lagging = mapped.misses.filter((m) => m.reason === 'no_card' || m.reason === 'ambiguous_card');
         if (lagging.length && !_cardMissWarned.has(String(owner.id)) && _cardMissWarned.size < 500) {
           _cardMissWarned.add(String(owner.id));
@@ -185,6 +187,8 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
       identityKey: code ? `identity:${code.id}` : (cardId ? `card:${cardId}` : legacyKey),
       legacyIdentityKey: legacyKey,
       cardId,
+      // 조각 4: 담당자가 다른 명의로 합친 칸 — 목록에서 빼지 않는다(내정보가 순서로 짝짓는다). 참여 명의 고르기만 숨긴다.
+      merged: mergedByIndex.has(index),
       participantIdentityId: code && code.id || null,
       memberNo,
       subIndex: index,
@@ -206,6 +210,7 @@ function publicIdentity(identity, { includeBank = false } = {}) {
   const result = {
     identityKey: identity.identityKey,
     type: identity.type,
+    merged: !!identity.merged,
     name: identity.name,
     phone: identity.phone,
     address: identity.address,
