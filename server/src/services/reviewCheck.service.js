@@ -110,14 +110,27 @@ async function reviewCheckMap(keys) {
     const sheets = list.map(k => String(k.sheetId));
     const tabs   = list.map(k => String(k.tabName));
     const rows_  = list.map(k => parseInt(k.rowIndex, 10));
+    /* ★★ 제출 원장과 **file_id 로 조인**한다(완화 금지 — 두 사고를 한 번에 막는다)
+       ㉮ 교체 승인은 `review_submissions` 의 그 행을 **새 file_id 로 갈아끼운다**
+          (reviewEdit.routes — 옛 file_id 는 이 표에서 사라진다). 조인하지 않고 좌표로만
+          모으면 **옛 파일의 반려 기록이 영원히 이겨** 리뷰어가 안내대로 새 캡처를 올리고
+          관리자가 승인해도 계속 `제출 반려`로 보인다(막다른 길).
+       ㉯ 기준선은 **제출 시각(rs.uploaded_at)** 으로 재야 한다. 검수 생성 시각으로 재면
+          배포 뒤 스윕이 **기준선 이전 제출건**을 뒤늦게 검수하는 순간 그 과거 카드가
+          `확인 중`·`제출 반려`로 뒤집힌다(168 이 약속한 소급 금지가 깨진다).
+          ★ 교체 승인은 `uploaded_at` 을 보존하므로 원 제출 시각이 그대로 유지된다. */
     const { rows } = await pool.query(
       `SELECT ri.sheet_id, ri.tab_name, ri.row_index,
-              ri.status, ri.checks, ri.resolution, ri.created_at
+              ri.status, ri.checks, ri.resolution
          FROM review_inspections ri
+         JOIN review_submissions rs
+           ON rs.file_id = ri.file_id
+          AND rs.sheet_id = ri.sheet_id AND rs.tab_name = ri.tab_name
+          AND COALESCE(rs.row_index, -1) = COALESCE(ri.row_index, -1)
          JOIN unnest($1::text[], $2::text[], $3::int[]) AS t(s, tb, rw)
            ON ri.sheet_id = t.s AND ri.tab_name = t.tb AND ri.row_index = t.rw
-        WHERE ri.created_at >= $4
-          AND COALESCE(ri.slot_key, 'review') <> 'trashed'`,
+        WHERE rs.uploaded_at >= $4
+          AND COALESCE(rs.slot_key, 'review') <> 'trashed'`,
       [sheets, tabs, rows_, from]
     );
 

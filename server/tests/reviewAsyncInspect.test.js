@@ -168,7 +168,7 @@ const reset = () => { notified.clear(); calls.verify = calls.inspect = calls.not
     ok('D1: 중복이면 문의방 안내 1회 + 사진 두 장 카드 + 발신자 system');
 
     // ── E. 킬스위치 / auto 모드는 종전대로 동기 ──────────
-    reset(); duplicateFail = false;
+    reset(); duplicateFail = true;
     process.env.REVIEW_UPLOAD_ASYNC_INSPECT = '0';
     const t3 = Date.now();
     const r3 = await post(base, '/api/image/review-upload', token, body({ rowIndex: 9 }));
@@ -180,7 +180,14 @@ const reset = () => { notified.clear(); calls.verify = calls.inspect = calls.not
       `대조군: 동기 모드는 검수를 기다린다 — 실제 ${took3}ms (${SLOW_MS}ms 이상이어야 한다)`);
     assert.strictEqual(calls.pendingInsert, 0, '동기 모드에서는 pending 예약을 만들지 않는다');
     ok('E1: REVIEW_UPLOAD_ASYNC_INSPECT=0 이면 종전대로 응답 전에 검수');
+    /* ★★ 동기 경로에서도 반려 안내가 나가야 한다 — 종전에는 비동기 경로에서만 불러서
+       동기·auto 모드의 중복이 "리뷰 내역엔 반려인데 문의방엔 아무것도 없는" 상태였다. */
+    await waitFor(() => calls.notify >= 1);
+    assert.strictEqual(calls.notify, 1,
+      `동기 경로에서도 반려 안내가 1회 나가야 한다 — 실제 ${calls.notify}회`);
+    ok('E2: 동기 경로에서도 반려 안내가 나간다 (경로마다 갈리지 않는다)');
     delete process.env.REVIEW_UPLOAD_ASYNC_INSPECT;
+    duplicateFail = false;
 
     // ── F. 판정 단일 출처 ────────────────────────────────
     assert.deepStrictEqual(reviewCheck.AUTO_REJECT_CHECKS, ['duplicate'],
@@ -222,9 +229,36 @@ const reset = () => { notified.clear(); calls.verify = calls.inspect = calls.not
       && /prev === 'checking' && \(now === 'done' \|\| now === 'rejected'\)/.test(home),
       '★ 퍼짐은 **상태가 확정되는 순간**에만 — 확인 중에는 퍼지지 않는다');
     assert.ok(/prefers-reduced-motion/.test(home), '움직임을 줄이는 설정에서는 애니메이션을 끈다');
-    assert.ok(/if \(!checkingCount\) \{ _rcPollLeft = 0; return; \}/.test(home),
-      '★ 확인 중인 건이 없으면 폴링을 멈춘다(상시 폴링 금지)');
+    assert.ok(/if \(!checkingCount\) \{ _rcPollLeft = 0; _rcPollCycle = false; return; \}/.test(home),
+      '★ 확인 중인 건이 없으면 폴링을 멈추고 예산도 되돌린다(상시 폴링 금지)');
     ok('G1: 리뷰어 화면 배선 — 배지·사유·퍼짐·폴링 (판정 사본 0)');
+
+    // ── H. 코드리뷰 4건 회귀 차단 ────────────────────────
+    const rc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'reviewCheck.service.js'), 'utf8');
+    assert.ok(/JOIN review_submissions rs\s*\n\s*ON rs\.file_id = ri\.file_id/.test(rc),
+      '★ 제출 원장과 file_id 로 조인해야 한다 — 교체 승인으로 갈아끼운 옛 파일의 반려가 ' +
+      '좌표에 남아 **영원히 반려로 보이는 막다른 길**을 막는다');
+    assert.ok(/WHERE rs\.uploaded_at >= \$4/.test(rc) && !/ri\.created_at >= /.test(rc),
+      '★ 기준선은 **제출 시각**으로 잰다 — 검수 생성 시각으로 재면 배포 뒤 스윕이 ' +
+      '과거 제출건을 검수하는 순간 그 카드가 확인 중·반려로 뒤집힌다');
+    assert.ok(/COALESCE\(rs\.slot_key, 'review'\) <> 'trashed'/.test(rc),
+      '휴지통으로 간 파일은 판정 재료가 아니다');
+
+    const diagSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'diag.routes.js'), 'utf8');
+    const iSec = diagSrc.indexOf('async function _secondInspect(');
+    const iRun = diagSrc.indexOf('async function _runDeferredInspection(');
+    assert.ok(iSec >= 0 && /applyInspectionOutcome/.test(diagSrc.slice(iSec, iSec + 3000)),
+      '★ 반려 확정·안내는 동기·비동기가 함께 쓰는 `_secondInspect` 안에 있어야 한다');
+    assert.ok(iRun >= 0 && !/applyInspectionOutcome/.test(diagSrc.slice(iRun, iRun + 2000)),
+      '비동기 경로에 사본을 두면 안내가 두 번 나간다');
+    const insp = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'reviewInspect.service.js'), 'utf8');
+    assert.ok(/applyInspectionOutcome/.test(insp),
+      '★ 10분 스윕에서 처음 판정되는 건도 안내를 거쳐야 한다(업로드 직후 처리가 유실된 건)');
+
+    assert.ok(/if \(!_rcPollCycle\) \{ _rcPollCycle = true; _rcPollLeft = 10; \}/.test(home)
+      && /if \(_rcPollLeft <= 0\) return;/.test(home),
+      '★ 폴링 예산은 한 번만 세운다 — 0을 새 사이클로 읽으면 12초마다 영원히 요청한다');
+    ok('H1: 코드리뷰 4건 회귀 차단 (교체 승인·기준선·경로별 안내·폴링 예산)');
 
     console.log(`\n✅ reviewAsyncInspect 회귀가드 ${n}케이스 통과`);
   } finally {

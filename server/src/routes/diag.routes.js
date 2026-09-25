@@ -2079,6 +2079,14 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           r.duplicateNotice = '앞서 제출하신 사진과 같은 사진이에요. 담당자가 확인 후 다시 요청드릴 수 있습니다.';
         }
       } catch (_) { /* 위 서비스가 이미 삼키지만 이중 방어 */ }
+      /* ★★ 반려 확정·안내는 **여기 한 곳**에서 한다 — 동기(응답 전)·비동기(응답 뒤)
+         두 경로가 이 함수를 함께 쓰므로, 바깥에 두면 한쪽에서만 안내가 나간다
+         (실제로 동기 모드·auto 모드에서 중복이 반려로 보이는데 문의방엔 아무것도
+         안 가는 상태였다 — 코드리뷰 지적). ★ 절대 throw 하지 않는다. */
+      try {
+        await require('../services/reviewCheck.service')
+          .applyInspectionOutcome({ fileId: r.fileId, inspection: _out });
+      } catch (_) { /* 안내 실패가 검수 결과를 되돌리지 않는다 */ }
       return _out;
     }
 
@@ -2086,7 +2094,6 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
        순서가 계약이다: ① 형식 검수(AI 캐시를 데운다) → ② 2차 검수(그 캐시를 쓴다)
        → ③ 중복이면 리뷰어 문의방에 안내. ①을 건너뛰면 ②에서 AI 콜이 새로 나간다. */
     async function _runDeferredInspection(rowIdx) {
-      const _reviewCheck = require('../services/reviewCheck.service');
       for (const r of uploadResults) {
         if (!r || !r.fileId) continue;
         const file = files[r.index - 1];
@@ -2099,8 +2106,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
             logger.warn(`[review-upload] 응답 뒤 검수에서 이동/반려 판정 — 응답에는 미반영: ${r.fileId}`);
           }
           const _hash = _riSvc.hashBase64(file.data);
-          const out = await _secondInspect({ r, rowIdx, _b64: file.data, _hash });
-          await _reviewCheck.applyInspectionOutcome({ fileId: r.fileId, inspection: out });
+          // ★ 반려 확정·안내는 `_secondInspect` 안에서 한다(동기 경로와 같은 자리 — 사본 0)
+          await _secondInspect({ r, rowIdx, _b64: file.data, _hash });
         } catch (e) {
           logger.warn(`[review-upload] 파일 검수 실패(무시): ${r.fileId} — ${e.message}`);
         }

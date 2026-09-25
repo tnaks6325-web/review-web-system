@@ -339,8 +339,15 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   ok('★ 사이클 캡 — 한 번에 몰아치지 않는다', /Math\.min\(Number\(limit\) \|\| SWEEP_BATCH, 100\)/.test(svcSrc));
   ok('★ 과거분은 지문이 없다 → 이번에 계산해 채운다(이후 중복 대조의 재료)',
     /if \(!t\.file_hash\) await saveFileHash/.test(svcSrc));
-  ok('★★ 스윕은 throw 하지 않는다(cron 이 죽으면 안 된다)',
-    /async function runInspectSweep[\s\S]{0,2600}catch \(e\) \{\s*\n\s*logger\.warn\(`\[reviewInspect\] 스윕 실패/.test(svcSrc));
+  /* ★★ 고정 폭 창으로 재지 않는다 — 스윕 안에 줄이 늘 때마다(이번엔 반려 안내 호출)
+     검사가 조용히 빨개진다. **함수 구간 안에 있는가**로 고정한다(검사 의미 불변). */
+  {
+    const iSweep = svcSrc.indexOf('async function runInspectSweep');
+    const iNext = svcSrc.indexOf('\nasync function ', iSweep + 10);
+    const seg = iSweep >= 0 ? svcSrc.slice(iSweep, iNext > iSweep ? iNext : undefined) : '';
+    ok('★★ 스윕은 throw 하지 않는다(cron 이 죽으면 안 된다)',
+      iSweep >= 0 && /catch \(e\) \{\s*\n\s*logger\.warn\(`\[reviewInspect\] 스윕 실패/.test(seg));
+  }
   const cronSrc = readS('jobs/cron.js');
   ok('cron 등록 + 멀티 인스턴스 직렬화(jobLock)',
     /review_inspect_sweep/.test(cronSrc) && /withJobLock\('review_inspect_sweep'/.test(cronSrc));

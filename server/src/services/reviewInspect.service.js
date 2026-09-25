@@ -1649,6 +1649,16 @@ async function runInspectSweep({ limit } = {}) {
         });
         // 과거분은 원장에 지문이 없다 — 이번에 계산한 값을 채워 이후 중복 대조의 재료로 만든다
         if (!t.file_hash) await saveFileHash({ fileId: t.file_id, fileHash: hashBase64(b64) });
+        /* ★★ 스윕에서 판정이 끝난 건도 **반려 확정·안내**를 거쳐야 한다 — 업로드 직후 처리가
+           유실돼 여기서 처음 판정되는 건이 있고(그게 이 스윕의 존재 이유다),
+           빠뜨리면 그 건만 "리뷰 내역엔 반려인데 문의방엔 아무것도 없는" 상태가 된다.
+           ★ 지연 require (순환 참조 회피) · 절대 throw 없음. */
+        if (r) {
+          try {
+            await require('./reviewCheck.service')
+              .applyInspectionOutcome({ fileId: t.file_id, inspection: r });
+          } catch (_) { /* 안내 실패가 스윕을 죽이지 않는다 */ }
+        }
         if (r) out.done += 1; else out.failed += 1;
       } catch (e) {
         out.failed += 1;

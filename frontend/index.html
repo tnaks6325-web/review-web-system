@@ -2060,7 +2060,7 @@ function _orderStageLabel(stage, short) {
    ★ 판정은 서버가 준 값(reviewCheck)을 그대로 쓴다. 여기서 다시 세지 않는다.
    ★ 처음 본 카드는 퍼뜨리지 않는다(이전 상태를 모르면 '바뀐 것'이 아니다). */
 var _rcPrev = new Map();
-var _rcPollTimer = null, _rcPollLeft = 0;
+var _rcPollTimer = null, _rcPollLeft = 0, _rcPollCycle = false;
 
 function _rcAfterRender(){
   var cards = document.querySelectorAll('.result-card[data-rck]');
@@ -2085,8 +2085,12 @@ function _rcAfterRender(){
    ★ 확인 중이 없으면 즉시 멈춘다(상시 폴링 금지) · 상한을 둬 무한히 돌지 않는다. */
 function _rcSchedulePoll(checkingCount){
   if (_rcPollTimer) { clearTimeout(_rcPollTimer); _rcPollTimer = null; }
-  if (!checkingCount) { _rcPollLeft = 0; return; }
-  if (_rcPollLeft <= 0) _rcPollLeft = 10;                   // 12초 × 10 = 2분
+  if (!checkingCount) { _rcPollLeft = 0; _rcPollCycle = false; return; }
+  /* ★ 예산은 **한 번만** 세운다. `남은 횟수 0`을 "새 사이클"로 읽으면,
+     마지막 조회가 부른 재렌더가 다시 10으로 되돌려 **영원히 12초마다 요청**하게 된다
+     (검수가 스윕까지 pending 으로 남는 건에서 실제로 그렇게 된다 — 코드리뷰 지적). */
+  if (!_rcPollCycle) { _rcPollCycle = true; _rcPollLeft = 10; }   // 12초 × 10 = 2분
+  if (_rcPollLeft <= 0) return;                                    // 예산 소진 — 더 돌지 않는다
   _rcPollTimer = setTimeout(function(){
     _rcPollTimer = null;
     if (_rcPollLeft-- <= 0) return;
