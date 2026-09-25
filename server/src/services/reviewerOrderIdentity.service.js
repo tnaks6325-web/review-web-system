@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
-const { syncCardsAfterWrite } = require('./reviewerIdentityCards.service');
+const cards = require('./reviewerIdentityCards.service');
+const { syncCardsAfterWrite } = cards;
 const { addressSame, addressHeuristic, normAddress } = require('./identity.service');
 const { logger } = require('../utils/logger');
 
@@ -112,6 +113,7 @@ function verifyExtractionProof(token, extracted) {
   return p;
 }
 
+const _cardMissWarned = new Set();
 function legacyIdentityKey(name, phone, index) {
   return `sub:${stableHash(`${cleanName(name)}|${phone8(phone)}|${Number(index)}`).slice(0, 24)}`;
 }
@@ -138,6 +140,26 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
     if (!err || !['42P01', '42703'].includes(err.code)) throw err;
   }
   const byMember = new Map(coded.map((row) => [Number(row.member_no), row]));
+  // ★ 조각 3-1(결정 178): 타계정의 이름표를 "칸 순번"이 아니라 **카드 번호**로 — 칸을 지우거나 순서를 바꿔도
+  //   과거 구매 기록과의 짝이 끊기지 않는다. 짝이 확실한 칸만 카드 번호, 나머지는 옛 이름표(막지 않는다).
+  let cardByIndex = new Map();
+  if (cards.cardKeysEnabled()) {
+    try {
+      const active = await cards.loadActiveCards(db, owner.id);
+      if (active) {
+        const mapped = cards.mapSubsToCards(owner, active);
+        cardByIndex = mapped.byIndex;
+        const lagging = mapped.misses.filter((m) => m.reason === 'no_card' || m.reason === 'ambiguous_card');
+        if (lagging.length && !_cardMissWarned.has(String(owner.id)) && _cardMissWarned.size < 500) {
+          _cardMissWarned.add(String(owner.id));
+          logger.warn(`[identity-cards] 카드 짝 못 찾음 → 옛 이름표 사용 owner=${owner.id} ${lagging.map((m) => `${m.index}:${m.reason}`).join(',')}`);
+        }
+      }
+    } catch (err) {
+      logger.warn(`[identity-cards] 카드 조회 실패 → 옛 이름표 사용: ${err.code || ''} ${err.message}`);
+      cardByIndex = new Map();
+    }
+  }
   const identities = [];
   const selfCode = byMember.get(0);
   identities.push({
@@ -157,8 +179,12 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
   owner.sub_accounts.forEach((sub, index) => {
     const memberNo = index + 1;
     const code = byMember.get(memberNo);
+    const legacyKey = legacyIdentityKey(sub.name, sub.phone, index);
+    const cardId = cardByIndex.get(index) || null;
     identities.push({
-      identityKey: code ? `identity:${code.id}` : legacyIdentityKey(sub.name, sub.phone, index),
+      identityKey: code ? `identity:${code.id}` : (cardId ? `card:${cardId}` : legacyKey),
+      legacyIdentityKey: legacyKey,
+      cardId,
       participantIdentityId: code && code.id || null,
       memberNo,
       subIndex: index,
@@ -212,6 +238,10 @@ async function loadOrderInfoSuggestions(context, db = pool) {
   const selectedIdentityHash = context?.selected?.identityKey
     ? stableHash(context.selected.identityKey)
     : '';
+  // ★ 조각 3-1: 카드 번호로 옮기기 전의 과거 주문은 옛 이름표로 묶여 있다 — 둘 다 본다.
+  const identityHashes = [selectedIdentityHash];
+  const legacy = context?.selected?.legacyIdentityKey;
+  if (selectedIdentityHash && legacy && legacy !== context.selected.identityKey) identityHashes.push(stableHash(legacy));
   const participantIdentityId = UUID_RE.test(String(context?.selected?.participantIdentityId || ''))
     ? context.selected.participantIdentityId
     : null;
@@ -222,7 +252,7 @@ async function loadOrderInfoSuggestions(context, db = pool) {
        SELECT os.id
          FROM order_submissions os
         WHERE os.owner_reviewer_id = $1::uuid
-          AND os.participant_identity_key_hash = $2
+          AND os.participant_identity_key_hash = ANY($2::text[])
        UNION
        SELECT os.id
          FROM campaign_applications ca
@@ -261,7 +291,7 @@ async function loadOrderInfoSuggestions(context, db = pool) {
        FROM grouped
       ORDER BY use_count DESC, last_used_at DESC
       LIMIT 3`,
-    [context.owner.id, selectedIdentityHash, participantIdentityId]
+    [context.owner.id, identityHashes, participantIdentityId]
   );
   return rows.map((row) => ({
     id: orderInfoSuggestionId(row),
@@ -295,7 +325,10 @@ async function saveShoppingId(ownerReviewerId, identityKey, shoppingId) {
       await client.query('SELECT 1 FROM reviewers WHERE id = $1 FOR NO KEY UPDATE', [ownerReviewerId]);
     }
     const { owner, identities } = await loadOwnerProfile(ownerReviewerId, client);
-    const matches = identities.filter((item) => item.identityKey === String(identityKey || ''));
+    // 새로고침 전 화면은 옛 이름표를 보낼 수 있다 — 옛 이름표로도 찾는다(조각 3-1).
+    const wanted = String(identityKey || '');
+    let matches = identities.filter((item) => item.identityKey === wanted);
+    if (!matches.length && wanted) matches = identities.filter((item) => item.legacyIdentityKey === wanted);
     if (matches.length !== 1) throw new ReviewerOrderIdentityError('IDENTITY_NOT_FOUND', '저장할 명의를 찾을 수 없습니다.', 404);
     const selected = matches[0];
     if (selected.type === 'self') {
@@ -824,6 +857,69 @@ async function verifyApprovalForSubmission(body, reviewer) {
   return { context, approval };
 }
 
+/**
+ * 조각 3-1(결정 178): 과거 구매 기록의 명의 이름표를 "칸 순번" 해시 → 카드 번호 해시로 옮긴다.
+ * ★ 옛 해시가 **지금 목록의 같은 칸**(이름·번호·순번 모두 같음)과 맞을 때만 옮긴다 — 그래야 같은 사람이다.
+ *   이미 순서가 바뀌어 맞는 칸이 없는 기록은 건드리지 않고 건수로 보고한다(추측 금지).
+ * ★ dryRun 기본 · 소유자마다 한 트랜잭션 · 여러 번 돌려도 결과 같음.
+ */
+async function rebindLegacySubHashes({ db = pool, dryRun = true } = {}) {
+  const selfHash = stableHash('self');
+  const { rows } = await db.query(
+    `SELECT owner_reviewer_id AS owner, participant_identity_key_hash AS hash, COUNT(*)::int AS n
+       FROM order_submissions
+      WHERE owner_reviewer_id IS NOT NULL AND NULLIF(participant_identity_key_hash, '') IS NOT NULL
+        AND participant_identity_key_hash <> $1
+      GROUP BY 1, 2`, [selfHash]);
+  const byOwner = new Map();
+  for (const r of rows) {
+    const k = String(r.owner);
+    if (!byOwner.has(k)) byOwner.set(k, []);
+    byOwner.get(k).push(r);
+  }
+  const out = { ok: true, dryRun: !!dryRun, owners: byOwner.size, orders: 0, movable: 0, moved: 0,
+    alreadyCard: 0, noMatch: 0, noCard: 0, failed: [] };
+  for (const [ownerId, list] of byOwner) {
+    let identities;
+    try { ({ identities } = await loadOwnerProfile(ownerId, db)); }
+    catch (err) { out.failed.push({ ownerId, code: err.code || 'load_failed' }); continue; }
+    const cardHashes = new Set(identities.filter((i) => i.cardId).map((i) => stableHash(i.identityKey)));
+    const plan = new Map(); // legacyHash -> cardHash
+    for (const i of identities) {
+      if (i.type !== 'sub' || !i.legacyIdentityKey) continue;
+      const lh = stableHash(i.legacyIdentityKey);
+      plan.set(lh, i.cardId ? stableHash(i.identityKey) : null);
+    }
+    const moves = [];
+    for (const r of list) {
+      out.orders += r.n;
+      if (cardHashes.has(r.hash)) { out.alreadyCard += r.n; continue; }
+      if (!plan.has(r.hash)) { out.noMatch += r.n; continue; }
+      const to = plan.get(r.hash);
+      if (!to) { out.noCard += r.n; continue; }
+      out.movable += r.n;
+      moves.push({ from: r.hash, to });
+    }
+    if (dryRun || !moves.length) continue;
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      for (const m of moves) {
+        const u = await client.query(
+          `UPDATE order_submissions SET participant_identity_key_hash = $3
+            WHERE owner_reviewer_id = $1 AND participant_identity_key_hash = $2`, [ownerId, m.from, m.to]);
+        out.moved += u.rowCount;
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      out.failed.push({ ownerId, code: err.code || 'update_failed' });
+    } finally { client.release(); }
+  }
+  logger.info(`[identity-cards] rebind dryRun=${out.dryRun} orders=${out.orders} movable=${out.movable} moved=${out.moved} already=${out.alreadyCard} noMatch=${out.noMatch} noCard=${out.noCard} failed=${out.failed.length}`);
+  return out;
+}
+
 module.exports = {
   ReviewerOrderIdentityError,
   isEnabled,
@@ -848,4 +944,6 @@ module.exports = {
   matchCapture,
   manualConfirm,
   verifyApprovalForSubmission,
+  rebindLegacySubHashes,
+  _test: { legacyIdentityKey, stableHash },
 };

@@ -157,7 +157,9 @@ ok('타계정 참여는 선택 명의만 노출하되 구매양식 연락처는 
 ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가 모두 맞는 원장만 조회한다',
   /async function loadOrderInfoSuggestions\(context, db = pool\)/.test(service)
   && /os\.owner_reviewer_id = \$1::uuid/.test(service)
-  && /os\.participant_identity_key_hash = \$2/.test(service)
+  // ★ 조각 3-1(결정 178): 카드 번호 이름표 + 옮기기 전 옛 이름표 두 해시만(그 명의의 것만) 본다 — 검사 의미 불변.
+  && /os\.participant_identity_key_hash = ANY\(\$2::text\[\]\)/.test(service)
+  && /identityHashes = \[selectedIdentityHash\]/.test(service)
   && /ca\.owner_reviewer_id = \$1::uuid/.test(service)
   && /ca\.participant_identity_id = \$3::uuid/.test(service)
   && !/SELECT COUNT\(\*\) FROM reviewers r WHERE r\.phone8/.test(service)
