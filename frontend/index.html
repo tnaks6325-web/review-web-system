@@ -241,6 +241,28 @@
     .status-badge-order { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0EDFF; color:#1B4F9C; }
     .status-badge-order.attention { background:#FEE2E2; color:#991B1B; }
     .status-badge-order.reflected { background:#DCFCE7; color:#166534; }
+    /* ── 제출한 리뷰의 검수 결과 (사용자 확정 2026-09-26) ──
+       제출 직후 `확인 중` → 검사가 끝나면 `제출완료` 또는 `제출 반려`.
+       ★ 반려 카드의 테두리·배경은 바꾸지 않는다 — 배지와 사유 글자로만 구분한다. */
+    .status-badge-checking { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#F1F3F6; color:#6B7280; }
+    .status-badge-rejected { font-size:.62rem; font-weight:800; padding:3px 8px; border-radius:6px; background:var(--err-light); color:#991B1B; }
+    .rc-reason { font-size:.6rem; font-weight:800; color:#B91C1C; }
+    /* 상태가 확정되는 순간에만 한 번 퍼진다(확인 중에는 퍼지지 않는다) */
+    .rc-flash-ok  { animation:rcFlashOk  .95s ease-out 3; }
+    .rc-flash-rej { animation:rcFlashRej .95s ease-out 3; }
+    @keyframes rcFlashOk {
+      0%  { box-shadow:0 0 0 0   rgba(18,184,134,0); }
+      18% { box-shadow:0 0 0 4px rgba(18,184,134,.60); }
+      55% { box-shadow:0 0 0 7px rgba(18,184,134,.34); }
+      100%{ box-shadow:0 0 0 11px rgba(18,184,134,0); }
+    }
+    @keyframes rcFlashRej {
+      0%  { box-shadow:0 0 0 0   rgba(239,68,68,0); }
+      18% { box-shadow:0 0 0 4px rgba(239,68,68,.62); }
+      55% { box-shadow:0 0 0 7px rgba(239,68,68,.36); }
+      100%{ box-shadow:0 0 0 11px rgba(239,68,68,0); }
+    }
+    @media (prefers-reduced-motion:reduce){ .rc-flash-ok, .rc-flash-rej { animation:none; } }
     .result-card.is-order-pending { cursor:default; }
 
     /* ─── 리뷰 내역 3줄 카드 (참여중): 썸네일 + 날짜·이름 / 상품명 / 상품비·리뷰비 ─── */
@@ -2034,6 +2056,45 @@ function _orderStageLabel(stage, short) {
 }
 
 /** 현재 서브탭 기준 리뷰 내역 렌더 */
+/* ═══ 제출한 리뷰의 검수 결과 — 상태가 바뀌는 순간에만 한 번 퍼뜨린다 ═══
+   ★ 판정은 서버가 준 값(reviewCheck)을 그대로 쓴다. 여기서 다시 세지 않는다.
+   ★ 처음 본 카드는 퍼뜨리지 않는다(이전 상태를 모르면 '바뀐 것'이 아니다). */
+var _rcPrev = new Map();
+var _rcPollTimer = null, _rcPollLeft = 0;
+
+function _rcAfterRender(){
+  var cards = document.querySelectorAll('.result-card[data-rck]');
+  var checking = 0;
+  for (var i = 0; i < cards.length; i++) {
+    var el = cards[i], k = el.dataset.rck, now = el.dataset.rcs || 'done';
+    if (now === 'checking') checking++;
+    var prev = _rcPrev.get(k);
+    _rcPrev.set(k, now);
+    if (!prev || prev === now) continue;
+    if (prev === 'checking' && (now === 'done' || now === 'rejected')) {
+      el.classList.remove('rc-flash-ok', 'rc-flash-rej');
+      void el.offsetWidth;                                  // 같은 값으로 다시 와도 애니메이션이 돈다
+      el.classList.add(now === 'rejected' ? 'rc-flash-rej' : 'rc-flash-ok');
+    }
+  }
+  _rcSchedulePoll(checking);
+}
+
+/* 확인 중인 건이 있으면 잠깐만 다시 조회한다 — 리뷰어가 화면을 보고 있는 동안
+   `확인 중`이 `제출완료`/`제출 반려`로 바뀌는 것을 보게 하려는 것.
+   ★ 확인 중이 없으면 즉시 멈춘다(상시 폴링 금지) · 상한을 둬 무한히 돌지 않는다. */
+function _rcSchedulePoll(checkingCount){
+  if (_rcPollTimer) { clearTimeout(_rcPollTimer); _rcPollTimer = null; }
+  if (!checkingCount) { _rcPollLeft = 0; return; }
+  if (_rcPollLeft <= 0) _rcPollLeft = 10;                   // 12초 × 10 = 2분
+  _rcPollTimer = setTimeout(function(){
+    _rcPollTimer = null;
+    if (_rcPollLeft-- <= 0) return;
+    if (document.hidden) { _rcSchedulePoll(checkingCount); return; }   // 가려져 있으면 쉰다
+    try { loadReviewList(getSavedUser(), { silent: true, force: true }); } catch (_) {}
+  }, 12000);
+}
+
 function renderReviewSubTab() {
   const listEl = document.getElementById("reviewResultsList");
   const countEl = document.getElementById("reviewResultsCount");
@@ -2104,14 +2165,23 @@ function renderReviewSubTab() {
     if (isSingle) {
       const item = items[0];
       // 상태 배지 — 완료 건의 "입금완료"는 배지 아랫줄(subBadgeHtml)로 내려 제목 잘림을 줄인다
+      /* ★ 검수 결과는 서버가 준 값을 **그리기만** 한다(화면에서 다시 판정하지 않는다 —
+         판정 단일 출처는 서버 reviewCheck.service). 값이 없으면 종전대로 `제출완료`. */
+      const rcState = isDone ? String(item.reviewCheck || '') : '';
       const badgeHtml = isDone
-        ? '<span class="status-badge-submitted">제출완료</span>'
+        ? (rcState === 'rejected' ? '<span class="status-badge-rejected">제출 반려</span>'
+          : rcState === 'checking' ? '<span class="status-badge-checking">확인 중</span>'
+          : '<span class="status-badge-submitted">제출완료</span>')
         : item.isOrderPending
           ? `<span class="status-badge-order ${_orderStageClass(item.orderStage)}">${_orderStageLabel(item.orderStage)}</span>`
           : item.reviewObligationStatus==='unknown'
             ? '<span class="status-badge-order">관리자 확인 중</span>'
             : '<span class="status-badge-order reflected">구매양식반영완료</span>';
-      const subBadgeHtml = (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '';
+      /* 반려면 사유 한 줄, 확인 중이면 아직 아무것도 확정되지 않았으므로 입금 배지를 그리지 않는다. */
+      const subBadgeHtml = rcState === 'rejected'
+        ? `<span class="rc-reason">${escHtml(item.reviewCheckReason || '확인이 필요합니다')}</span>`
+        : (rcState === 'checking' ? ''
+          : (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '');
       const receiptBadgeHtml = isDone && _hasPendingCashReceipt(item)
         ? '<span style="font-size:.62rem;font-weight:800;color:#B45309">현금영수증 미제출</span>' : '';
       const roundBadge = item.round
@@ -2132,6 +2202,11 @@ function renderReviewSubTab() {
 
       const card = document.createElement("div");
       card.className = "result-card" + (isDone ? " done" : "");
+      if (isDone) {
+        // 상태가 **바뀌는 순간**을 알아보려고 행 좌표와 지금 상태를 카드에 적어 둔다.
+        card.dataset.rck = [item.sheetId, item.tabName, item.rowIndex].join('|');
+        card.dataset.rcs = rcState || 'done';
+      }
       // ★ 참여중·제출완료 공통 = 3줄(날짜·이름 / 작업명 / 상품비·리뷰비) + 캠페인 썸네일
       //   두 탭 카드를 한 코드로 그린다 — 사본을 두면 두 탭이 계속 어긋난다.
       //   완료 건의 액션(이미지 확인·수정요청)·1:1문의는 카드가 아니라 참여상품 정보 팝업 안에 있다.
@@ -2232,6 +2307,7 @@ function renderReviewSubTab() {
     note.textContent = "내역이 많아 오래된 제출완료 건 일부는 표시되지 않을 수 있습니다";
     listEl.appendChild(note);
   }
+  _rcAfterRender();
 }
 
 /* ═══════════════════════════════════════
@@ -2551,7 +2627,7 @@ function openPartInfoSheet(items, opts){
   _partInfoReEditId = (done && list.length === 1) ? _reEditRegister(it) : '';
   const many = list.length > 1;
   const statusChip = done
-    ? '<span style="font-size:.6rem;font-weight:800;background:#D1FAE5;color:#0ca678;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">제출완료</span>'
+    ? '<span id="partInfoChip" style="font-size:.6rem;font-weight:800;background:#D1FAE5;color:#0ca678;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">제출완료</span>'
     : '<span style="font-size:.6rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">미제출</span>';
   const listRows = many
     ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">' + list.map(x =>
@@ -2614,6 +2690,32 @@ async function _partInfoLoadBrief(list, done, requestSeq){
     if (!results[0] || !results[0].brief) hide();
     _partInfoCancelable = brief.cancelable || null;
     const rows = [];
+    /* ★ 검수 결과 — 반려면 **가장 먼저** 사유와 다음 행동을 말한다(상품정보보다 위).
+       문구는 서버가 준 것을 그대로 쓴다(1:1 문의방에 간 문장과 같은 글 — 사본 0). */
+    const _rc = brief.reviewCheck;
+    const _chipEl = document.getElementById('partInfoChip');
+    if (_chipEl && _rc && (_rc.state === 'rejected' || _rc.state === 'checking')) {
+      const rej = _rc.state === 'rejected';
+      _chipEl.textContent = rej ? '제출 반려' : '확인 중';
+      _chipEl.style.background = rej ? '#FEE2E2' : '#F1F3F6';
+      _chipEl.style.color = rej ? '#B91C1C' : '#6B7280';
+    }
+    if (_rc && _rc.state === 'rejected') {
+      rows.push(
+        '<div style="background:#FFF5F5;border:1px solid #FCA5A5;border-radius:10px;padding:11px 12px;margin-bottom:9px">' +
+          '<div style="font-size:.78rem;font-weight:800;color:#991B1B">⛔ ' +
+            escHtml(_rc.short ? (_rc.short + '(으)로 제출이 반려되었습니다') : '제출이 반려되었습니다') + '</div>' +
+          '<div style="font-size:.73rem;color:#7F1D1D;line-height:1.65;margin-top:6px;white-space:pre-wrap">' +
+            escHtml(_rc.message || '') + '</div>' +
+          '<div style="font-size:.68rem;color:#B91C1C;font-weight:700;margin-top:7px">' +
+            '아래 [제출 이미지 확인·수정요청]에서 새 캡처를 올려주세요.</div>' +
+        '</div>');
+    } else if (_rc && _rc.state === 'checking') {
+      rows.push(
+        '<div style="background:#F8FAFF;border:1px solid #DBE6FB;border-radius:10px;padding:10px 12px;margin-bottom:9px;font-size:.74rem;color:#1B4F9C;line-height:1.6">' +
+          '올려주신 리뷰 캡처를 확인하고 있어요.<br>문제가 없으면 <b>제출완료</b>로 바뀝니다.' +
+        '</div>');
+    }
     // ★ D: 이 행의 작업 옵션(리뷰 형태 — '텍스트'/'포토리뷰' 등). 관리자가 로스터에 미리 적어둔
     //   작업지시이고 "어떻게 써야 하는가"라 **상품정보보다 위**에, 눈에 띄게 둔다.
     //   라벨은 시트 헤더명을 그대로 쓴다(탭마다 '리뷰옵션'·'작업옵션' 등으로 달라 우리가 고쳐 부르면 어긋난다).

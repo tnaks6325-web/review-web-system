@@ -195,6 +195,37 @@ const reset = () => { notified.clear(); calls.verify = calls.inspect = calls.not
     assert.strictEqual(reviewCheck.autoRejectKind(null), null, '판정 재료가 없으면 반려가 아니다');
     ok('F1: 자동 반려는 중복 하나뿐 (format·product 는 제외 — 사용자 확정)');
 
+    // ── G. 리뷰어 화면 배선 ──────────────────────────────
+    const fs = require('fs'), path = require('path');
+    const home = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'index.html'), 'utf8');
+    const search = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'search.service.js'), 'utf8');
+    const brief = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'reviewEdit.routes.js'), 'utf8');
+
+    assert.ok(/reviewCheckMap\(/.test(search) && /it\.reviewCheck = v\.state/.test(search),
+      '리뷰 내역 재료에 검수 상태를 실어야 한다');
+    assert.ok(/const _doneItems = results\.filter\(r => r\.isSubmitted/.test(search),
+      '완료 행만 대상 — 제출 전 행에는 검수 상태가 없다');
+    assert.ok(/reviewCheckDetail\(/.test(brief) && /reviewCheck,\s*\/\//.test(brief),
+      '참여상품 정보 팝업 재료에도 검수 상태를 실어야 한다');
+
+    assert.ok(/status-badge-checking/.test(home) && /status-badge-rejected/.test(home),
+      '카드 배지 2종(확인 중·제출 반려)이 있어야 한다');
+    assert.ok(/rcState === 'rejected' \? '<span class="status-badge-rejected">/.test(home),
+      '배지는 서버가 준 reviewCheck 로만 정한다(화면 재판정 금지)');
+    assert.ok(!/checks\s*\.\s*duplicate/.test(home) && !/AUTO_REJECT/.test(home),
+      '★ 화면에 반려 판정 사본을 두지 않는다 — 판정 단일 출처는 서버다');
+    assert.ok(/rcState === 'checking' \? ''/.test(home),
+      '확인 중에는 입금완료 배지를 그리지 않는다(아직 아무것도 확정되지 않았다)');
+    assert.ok(!/\.result-card\.rejected\s*\{/.test(home),
+      '★ 반려 카드의 테두리·배경은 바꾸지 않는다(사용자 확정 — 배지와 사유 글자로만 구분)');
+    assert.ok(/rc-flash-ok/.test(home) && /rc-flash-rej/.test(home)
+      && /prev === 'checking' && \(now === 'done' \|\| now === 'rejected'\)/.test(home),
+      '★ 퍼짐은 **상태가 확정되는 순간**에만 — 확인 중에는 퍼지지 않는다');
+    assert.ok(/prefers-reduced-motion/.test(home), '움직임을 줄이는 설정에서는 애니메이션을 끈다');
+    assert.ok(/if \(!checkingCount\) \{ _rcPollLeft = 0; return; \}/.test(home),
+      '★ 확인 중인 건이 없으면 폴링을 멈춘다(상시 폴링 금지)');
+    ok('G1: 리뷰어 화면 배선 — 배지·사유·퍼짐·폴링 (판정 사본 0)');
+
     console.log(`\n✅ reviewAsyncInspect 회귀가드 ${n}케이스 통과`);
   } finally {
     server.close();

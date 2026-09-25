@@ -228,10 +228,33 @@ async function applyInspectionOutcome({ fileId, inspection }) {
   }
 }
 
+/**
+ * 한 행의 검수 상태 + 리뷰어에게 보일 안내문(참여상품 정보 팝업용).
+ * ★ 판정은 `reviewCheckMap` 그대로 — 화면마다 다른 기준이 생기지 않게 한다.
+ * ★ 실패·해당 없음은 **null**(팝업이 아무것도 그리지 않는다).
+ */
+async function reviewCheckDetail({ sheetId, tabName, rowIndex }) {
+  try {
+    const map = await reviewCheckMap([{ sheetId, tabName, rowIndex }]);
+    const v = map.get(rowKey(sheetId, tabName, rowIndex));
+    if (!v) return null;
+    if (v.state !== 'rejected') return { state: v.state };
+    return {
+      state: 'rejected',
+      kind: v.kind || '',
+      short: v.short || '',
+      message: await _rejectMessage(v.kind),   // 문의방에 간 것과 **같은 문장**
+    };
+  } catch (e) {
+    logger.warn(`[reviewCheck] 상세 조회 실패(표시 생략): ${e.message}`);
+    return null;
+  }
+}
+
 module.exports = {
   AUTO_REJECT_CHECKS, REJECT_SHORT, REJECT_MSG_KEY,
   autoRejectKind,
   visibleFrom, _resetVisibleFromCache, VISIBLE_FROM_KEY,
-  rowKey, reviewCheckMap,
+  rowKey, reviewCheckMap, reviewCheckDetail,
   notifyRejectionOnce, applyInspectionOutcome,
 };
