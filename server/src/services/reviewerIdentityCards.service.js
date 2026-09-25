@@ -132,43 +132,175 @@ async function previewCards({ db = pool } = {}) {
   return { ok: true, preview: true, summary };
 }
 
+// ── 조각 2-1: 카드 = sub_accounts(JSON)의 거울 ─────────────────────────────
+// JSON 이 진실원본이다(아직 아무도 카드를 읽지 않는다). 카드는 JSON 을 따라간다 — 값이 바뀌면 덮고,
+// 사라진 명의는 'removed', 돌아온 명의는 같은 카드를 되살린다(번호 유지).
+// ★ 순서가 계약이다(유일 인덱스 23505 방지 — 레드팀 2026-09-24):
+//   ① 본인 명의와 같아진 타계정 카드 제거 → ② 사라진 타계정 카드 제거 → ③ 본인 카드 제자리 갱신(또는 되살림·생성)
+//   → ④ 남은 타계정 갱신 → ⑤ 되살림 → ⑥ 새로 만들기.
+// ★ 본인 카드는 절대 제거하지 않는다(이름이 비면 그대로 둔다 — 제거 후 재생성하면 번호가 바뀐다).
+// ★ 담당자가 합친('merged') 카드의 명의는 JSON 에 남아 있어도 다시 만들지 않는다(합치기가 밤새 무너지지 않게).
+const MIRROR_FIELDS = ['name', 'phone', ...CARD_FIELDS];
+
+function _cardSig(c) { return `${c.name_key != null ? c.name_key : c.nameKey}|${c.phone8}`; }
+function _mostRecent(list) {
+  return list.slice().sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] || null;
+}
+function _diff(existing, want) {
+  const set = {};
+  for (const f of MIRROR_FIELDS) if (String(existing[f] == null ? '' : existing[f]) !== String(want[f] == null ? '' : want[f])) set[f] = want[f];
+  return set;
+}
+
 /**
- * 한 소유자의 카드를 맞춘다(같은 트랜잭션 안에서). 이미 있는 카드는 빈 칸만 채우고,
- * 없는 명의는 새로 만든다. ★ 카드를 지우거나 값이 있는 칸을 덮지 않는다.
+ * 한 소유자의 카드를 JSON 에 맞추는 계획(순수 함수 · DB 미접근).
+ * @param reviewer reviewers 행
+ * @param existing 그 소유자의 모든 카드(상태 무관): {id, kind, status, name, name_key, phone, phone8, ...fields, updated_at}
+ * @returns ops 배열 — 적용 순서 그대로.
  */
-async function syncOwnerCards(client, reviewer) {
-  const { cards } = buildCardsFromReviewer(reviewer);
-  const { rows: existing } = await client.query(
-    `SELECT id, kind, name_key, phone8, ${CARD_FIELDS.join(', ')}
-       FROM reviewer_identity_cards WHERE owner_reviewer_id = $1 AND status = 'active'`, [reviewer.id]);
-  const bySig = new Map(existing.map((c) => [`${c.name_key}|${c.phone8}`, c]));
-  let inserted = 0, filled = 0;
-  for (const card of cards) {
-    const found = bySig.get(sigOf(card));
-    if (found) {
-      const sets = [], params = [found.id];
-      for (const f of CARD_FIELDS) {
-        if (!found[f] && card[f]) { params.push(card[f]); sets.push(`${f} = $${params.length}`); }
-      }
-      if (sets.length) {
-        await client.query(
-          `UPDATE reviewer_identity_cards SET ${sets.join(', ')}, updated_at = NOW(), record_version = record_version + 1
-            WHERE id = $1`, params);
-        filled++;
-      }
+function planOwnerSync(reviewer, existing) {
+  const { cards: want } = buildCardsFromReviewer(reviewer);
+  const ops = [];
+  const active = existing.filter((c) => c.status === 'active');
+  const removedIds = new Set();
+  const wantSelf = want.find((c) => c.kind === 'self') || null;
+  const wantSubs = want.filter((c) => c.kind === 'sub');
+  const activeSelf = active.find((c) => c.kind === 'self') || null;
+  const selfSig = wantSelf ? _cardSig(wantSelf) : (activeSelf ? _cardSig(activeSelf) : null);
+  const wantSubSigs = new Set(wantSubs.map(_cardSig));
+  const mergedSigs = new Set(existing.filter((c) => c.status === 'merged').map(_cardSig));
+  const remove = (c, reason) => { if (!removedIds.has(c.id)) { removedIds.add(c.id); ops.push({ op: 'remove', id: c.id, reason }); } };
+
+  // ① 본인 명의와 같아진 타계정 카드 → 제거(본인 카드가 그 명의를 가진다)
+  if (selfSig) for (const c of active) if (c.kind === 'sub' && _cardSig(c) === selfSig) remove(c, 'became_self');
+  // ② JSON 에서 사라진 타계정 카드 → 제거
+  for (const c of active) if (c.kind === 'sub' && !wantSubSigs.has(_cardSig(c))) remove(c, 'gone');
+  // ③ 본인 카드
+  if (wantSelf) {
+    const row = { name: wantSelf.name, name_key: wantSelf.nameKey, phone: wantSelf.phone, phone8: wantSelf.phone8 };
+    for (const f of CARD_FIELDS) row[f] = wantSelf[f];
+    if (activeSelf) {
+      const set = _diff(activeSelf, row);
+      if (activeSelf.name_key !== row.name_key) set.name_key = row.name_key;
+      if (activeSelf.phone8 !== row.phone8) set.phone8 = row.phone8;
+      if (Object.keys(set).length) ops.push({ op: 'update', id: activeSelf.id, set });
+    } else {
+      const back = _mostRecent(existing.filter((c) => c.kind === 'self' && c.status === 'removed'));
+      if (back) ops.push({ op: 'reactivate', id: back.id, kind: 'self', set: row });
+      else ops.push({ op: 'insert', card: wantSelf });
+    }
+  }
+  // ④⑤⑥ 타계정
+  for (const w of wantSubs) {
+    const sig = _cardSig(w);
+    if (sig === selfSig) continue;                      // 본인 명의와 같은 칸은 본인 카드가 가진다
+    const row = { name: w.name, phone: w.phone };
+    for (const f of CARD_FIELDS) row[f] = w[f];
+    const cur = active.find((c) => c.kind === 'sub' && _cardSig(c) === sig && !removedIds.has(c.id));
+    if (cur) {
+      const set = _diff(cur, row);
+      if (Object.keys(set).length) ops.push({ op: 'update', id: cur.id, set });
       continue;
     }
-    // 본인 카드는 하나뿐 — 이름·번호가 바뀐 본인은 새 카드를 만들지 않고 건너뛴다(조각 2 에서 다룬다).
-    if (card.kind === 'self' && existing.some((c) => c.kind === 'self')) continue;
-    await client.query(
-      `INSERT INTO reviewer_identity_cards
-         (owner_reviewer_id, kind, name, name_key, phone, phone8, ${CARD_FIELDS.join(', ')}, source, source_index)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'backfill',$13)`,
-      [reviewer.id, card.kind, card.name, card.nameKey, card.phone, card.phone8,
-        ...CARD_FIELDS.map((f) => card[f]), card.sourceIndex]);
-    inserted++;
+    if (mergedSigs.has(sig)) continue;                  // 합쳐진 명의 — 다시 만들지 않는다
+    const back = _mostRecent(existing.filter((c) => c.status === 'removed' && _cardSig(c) === sig));
+    if (back) ops.push({ op: 'reactivate', id: back.id, kind: 'sub', set: { ...row, name_key: w.nameKey, phone8: w.phone8 } });
+    else ops.push({ op: 'insert', card: w });
   }
-  return { inserted, filled };
+  // 순서 고정: 제거 → 본인 → 갱신 → 되살림 → 생성
+  const rank = (o) => (o.op === 'remove' ? 0 : (o.kind === 'self' || (o.card && o.card.kind === 'self') || (activeSelf && o.id === activeSelf.id)) ? 1
+    : o.op === 'update' ? 2 : o.op === 'reactivate' ? 3 : 4);
+  return ops.map((o, i) => ({ o, i })).sort((a, b) => rank(a.o) - rank(b.o) || a.i - b.i).map((x) => x.o);
+}
+
+async function _applyOps(client, ownerId, ops, source) {
+  const counts = { inserted: 0, updated: 0, removed: 0, reactivated: 0 };
+  for (const o of ops) {
+    if (o.op === 'remove') {
+      await client.query(`UPDATE reviewer_identity_cards SET status = 'removed', updated_at = NOW(), record_version = record_version + 1
+                           WHERE id = $1 AND status = 'active'`, [o.id]);
+      counts.removed++;
+    } else if (o.op === 'update' || o.op === 'reactivate') {
+      const cols = Object.keys(o.set);
+      const params = [o.id, ...cols.map((c) => o.set[c])];
+      const sets = cols.map((c, i) => `${c} = $${i + 2}`);
+      if (o.op === 'reactivate') { params.push(o.kind); sets.push(`status = 'active'`, `kind = $${params.length}`); }
+      await client.query(`UPDATE reviewer_identity_cards SET ${sets.join(', ')}, updated_at = NOW(), record_version = record_version + 1
+                           WHERE id = $1`, params);
+      counts[o.op === 'update' ? 'updated' : 'reactivated']++;
+    } else if (o.op === 'insert') {
+      const c = o.card;
+      await client.query(
+        `INSERT INTO reviewer_identity_cards
+           (owner_reviewer_id, kind, name, name_key, phone, phone8, ${CARD_FIELDS.join(', ')}, source, source_index)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [ownerId, c.kind, c.name, c.nameKey, c.phone, c.phone8, ...CARD_FIELDS.map((f) => c[f]), source, c.sourceIndex]);
+      counts.inserted++;
+    }
+  }
+  return counts;
+}
+
+const CARD_SELECT = `SELECT id, kind, status, name, name_key, phone, phone8, ${CARD_FIELDS.join(', ')}, updated_at FROM reviewer_identity_cards`;
+
+/**
+ * 한 소유자의 카드를 JSON 에 맞춘다(호출자가 연 트랜잭션 안 · 호출자가 reviewers 행을 먼저 잠근다).
+ * ★ 잠금 순서 = reviewers 행 먼저, 카드 나중(순환 대기 방지).
+ */
+async function syncOwnerCards(client, reviewer, { source = 'sync' } = {}) {
+  const { rows: existing } = await client.query(`${CARD_SELECT} WHERE owner_reviewer_id = $1 FOR UPDATE`, [reviewer.id]);
+  const ops = planOwnerSync(reviewer, existing);
+  if (!ops.length) return { inserted: 0, updated: 0, removed: 0, reactivated: 0 };
+  return _applyOps(client, reviewer.id, ops, source);
+}
+
+const REVIEWER_SELECT = `SELECT id, name, phone, address, bank_name, bank_account, account_holder, shopping_id, income_type, sub_accounts FROM reviewers`;
+
+/**
+ * 전수 대조 — 카드가 JSON 과 다른 리뷰어만 골라 맞춘다(10분 주기 · 저장 경로 19곳은 건드리지 않는다).
+ * dryRun 이면 쓰지 않고 수만 센다. 소유자마다 짧은 트랜잭션 + lock_timeout(제출·결제와 오래 부딪히지 않게).
+ * ★ 잠금은 FOR NO KEY UPDATE — 같은 리뷰어의 주문·참여 기록 INSERT(외래키 FOR KEY SHARE)를 막지 않는다.
+ */
+async function reconcileCards({ db = pool, dryRun = true, by = '', lockTimeoutMs = 2000 } = {}) {
+  const [{ rows: reviewers }, { rows: cards }] = await Promise.all([
+    db.query(REVIEWER_SELECT),
+    db.query(`${CARD_SELECT.replace('SELECT id,', 'SELECT owner_reviewer_id, id,')}`),
+  ]);
+  const byOwner = new Map();
+  for (const c of cards) {
+    const k = String(c.owner_reviewer_id);
+    if (!byOwner.has(k)) byOwner.set(k, []);
+    byOwner.get(k).push(c);
+  }
+  const drifted = reviewers.filter((r) => planOwnerSync(r, byOwner.get(String(r.id)) || []).length > 0);
+  const out = { ok: true, dryRun: !!dryRun, reviewers: reviewers.length, drifted: drifted.length,
+    fixed: 0, inserted: 0, updated: 0, removed: 0, reactivated: 0, busy: 0, failed: [] };
+  if (dryRun || !drifted.length) return out;
+  for (const r of drifted) {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT set_config('lock_timeout', $1, true)`, [`${Math.max(100, Number(lockTimeoutMs) || 2000)}ms`]);
+      const { rows } = await client.query(`${REVIEWER_SELECT} WHERE id = $1 FOR NO KEY UPDATE`, [r.id]);
+      if (rows.length) {
+        const c = await syncOwnerCards(client, rows[0], { source: 'reconcile' });
+        for (const k of ['inserted', 'updated', 'removed', 'reactivated']) out[k] += c[k];
+      }
+      await client.query('COMMIT');
+      out.fixed++;
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      if (err && err.code === '42P01') { client.release(); throw err; }
+      if (err && err.code === '55P03') out.busy++;          // 잠금 대기 초과 = 다음 주기에 다시
+      else out.failed.push({ ownerId: r.id, code: err.code || '', error: String(err.message || err).slice(0, 200) });
+    }
+    client.release();
+  }
+  if (out.failed.length) {
+    logger.warn(`[identity-cards] reconcile 실패 ${out.failed.length}건: ${out.failed.slice(0, 5).map((f) => `${f.ownerId}:${f.code}`).join(', ')}`);
+  }
+  logger.info(`[identity-cards] reconcile by=${String(by).slice(0, 40)} drifted=${out.drifted} fixed=${out.fixed} ins=${out.inserted} upd=${out.updated} rm=${out.removed} re=${out.reactivated} busy=${out.busy} failed=${out.failed.length}`);
+  return out;
 }
 
 /** 적용 — confirm:true 일 때만 쓴다. 소유자마다 한 트랜잭션. 여러 번 돌려도 결과가 같다. */
@@ -190,8 +322,8 @@ async function applyCards({ db = pool, confirm = false, limit = 500, afterId = n
         `SELECT id, name, phone, address, bank_name, bank_account, account_holder, shopping_id, income_type, sub_accounts
            FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
       if (rows.length) {
-        const r = await syncOwnerCards(client, rows[0]);
-        out.inserted += r.inserted; out.filled += r.filled;
+        const r = await syncOwnerCards(client, rows[0], { source: 'backfill' });
+        out.inserted += r.inserted; out.filled += r.updated + r.reactivated;
       }
       await client.query('COMMIT');
       out.owners++;
@@ -210,4 +342,4 @@ async function applyCards({ db = pool, confirm = false, limit = 500, afterId = n
   return out;
 }
 
-module.exports = { buildCardsFromReviewer, previewCards, applyCards, syncOwnerCards, _test: { nameKey, phone8Of } };
+module.exports = { buildCardsFromReviewer, previewCards, applyCards, syncOwnerCards, planOwnerSync, reconcileCards, _test: { nameKey, phone8Of } };

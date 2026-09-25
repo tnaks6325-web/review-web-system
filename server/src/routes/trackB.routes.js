@@ -406,6 +406,22 @@ router.post('/identity-cards/apply', authMiddleware, adminOrMasterMiddleware, as
     next(err);
   }
 });
+// 조각 2-1: 카드 ↔ 리뷰어 정보(sub_accounts) 대조. drift = 쓰기 0(달라진 리뷰어 수만), reconcile = confirm:true 필수.
+router.get('/identity-cards/drift', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await identityCards.reconcileCards({ dryRun: true })); } catch (err) {
+    if (err && err.code === '42P01') return res.json({ ok: false, code: 'not_ready', error: '명의 카드 표(migration 166)가 아직 적용되지 않았습니다.' });
+    next(err);
+  }
+});
+router.post('/identity-cards/reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if ((req.body || {}).confirm !== true) return res.status(400).json({ ok: false, code: 'confirm_required', error: 'drift 로 확인한 뒤 confirm:true 로 실행하세요.' });
+    res.json(await identityCards.reconcileCards({ dryRun: false, by: (req.admin && req.admin.name) || '' }));
+  } catch (err) {
+    if (err && err.code === '42P01') return res.json({ ok: false, code: 'not_ready', error: '명의 카드 표(migration 166)가 아직 적용되지 않았습니다.' });
+    next(err);
+  }
+});
 // ── 시트 데이터 반영 점검(sheet-sync audit) — adminOrMaster ──
 //   등록된 작업(tab_configs) 전수를 분모로 "시트 → 검색인덱스 → 작업보드" 반영 사슬의 끊긴 곳을
 //   진단(읽기 전용·시트 API 무접촉). ?before=YYYY-MM-DD 면 그 날짜 이전 등록(+ 등록일 미상)만.

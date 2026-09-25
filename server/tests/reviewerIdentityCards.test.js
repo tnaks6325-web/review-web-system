@@ -153,16 +153,17 @@ const OWNER = {
     const p = await svc.previewCards({ db });
     assert.strictEqual(p.summary.ownersAlreadyCarded, 2);
   });
-  await test('목록에 명의가 늘거나 빈 칸이 채워지면 반영하되, 값이 있는 칸은 덮지 않는다', async () => {
+  // ★ 조각 2-1(결정 기록 176): 카드는 JSON 의 거울 — 값이 바뀌면 덮는다(조각 1 의 "빈 칸만 채움"을 대체).
+  await test('목록에 명의가 늘거나 값이 바뀌면 카드도 그대로 따라간다', async () => {
     const subs = JSON.parse(JSON.stringify(OWNER.sub_accounts));
-    subs[0].bankName = '우리'; subs[0].address = '바뀐 주소';                  // 이영희: 주소는 이미 있음 → 안 덮음, 은행은 빈 칸 → 채움
+    subs[0].bankName = '우리'; subs[0].address = '바뀐 주소';
     subs.push({ name: '정새명', phone: '010-7777-8888' });
     await db.query('UPDATE reviewers SET sub_accounts = $2 WHERE id = $1', [OWNER.id, JSON.stringify(subs)]);
     const r = await svc.applyCards({ db, confirm: true });
     assert.strictEqual(r.inserted, 1);
     assert.strictEqual(r.filled, 1);
     const lee = (await db.query(`SELECT address, bank_name FROM reviewer_identity_cards WHERE name = '이영희'`)).rows[0];
-    assert.deepStrictEqual(lee, { address: '서울 본인로 1', bank_name: '우리' });
+    assert.deepStrictEqual(lee, { address: '바뀐 주소', bank_name: '우리' });
   });
   await test('같은 소유자 안에서 이름·번호가 완전히 같은 카드는 DB 가 막는다', async () => {
     await assert.rejects(db.query(`INSERT INTO reviewer_identity_cards (owner_reviewer_id, kind, name, name_key, phone8)
