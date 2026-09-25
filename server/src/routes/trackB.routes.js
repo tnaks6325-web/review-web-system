@@ -4051,7 +4051,7 @@ router.post('/payment/batch/:id/cancel', authMiddleware, adminOrMasterMiddleware
      화면이 사유를 못 보여주고 담당자가 무엇을 고쳐야 할지 알 수 없다. */
 const _PAY_FIX_STATUS = {
   bad_target: 400, empty: 400, bad_bank: 400, bad_bank_name: 400, bad_reviewer: 400,
-  campaign_mismatch: 409, tab_not_found: 404, reviewer_not_found: 404, sub_not_found: 404,
+  campaign_mismatch: 409, tab_not_found: 404, reviewer_not_found: 404, sub_not_found: 404, sub_ambiguous: 409,
 };
 function _payFix(res, err, next) {
   if (err && err.code && _PAY_FIX_STATUS[err.code]) {
@@ -4107,7 +4107,7 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
   try {
     const b = req.body || {};
     const out = await paymentSvc.saveReviewerAccount({
-      reviewerId: b.reviewerId, subPhone8: b.subPhone8,
+      reviewerId: b.reviewerId, subPhone8: b.subPhone8, subName: b.subName,
       bankName: b.bankName, bankAccount: b.bankAccount, accountHolder: b.accountHolder,
       by: _by(req),
     });

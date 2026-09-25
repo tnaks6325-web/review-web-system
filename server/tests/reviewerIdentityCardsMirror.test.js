@@ -140,8 +140,11 @@ const opsOf = (ops) => ops.map((o) => `${o.op}:${o.id || (o.card && o.card.name 
 
   console.log('C. 진짜 PG');
   const { Pool } = require('pg');
-  const db = new Pool({ connectionString: process.env.PGTEST_URL });
-  await db.query('DROP TABLE IF EXISTS child_orders; DROP TABLE IF EXISTS reviewer_identity_cards; DROP TABLE IF EXISTS reviewers');
+  // ★ 전용 스키마 안에서만 만든다 — 공용 시험 DB 의 reviewers 를 지우면 다른 PG 가드가 전부 깨진다.
+  const SCHEMA = 'ic_mirror_test';
+  { const boot = new Pool({ connectionString: process.env.PGTEST_URL });
+    await boot.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE; CREATE SCHEMA ${SCHEMA}`); await boot.end(); }
+  const db = new Pool({ connectionString: process.env.PGTEST_URL , options: `-c search_path=${SCHEMA}` });
   await db.query(`CREATE TABLE reviewers (id UUID PRIMARY KEY, name TEXT, phone TEXT, address TEXT, bank_name TEXT,
     bank_account TEXT, account_holder TEXT, shopping_id TEXT, income_type TEXT, sub_accounts JSONB DEFAULT '[]',
     registered_at TIMESTAMPTZ DEFAULT NOW())`);
@@ -222,8 +225,8 @@ const opsOf = (ops) => ops.map((o) => `${o.op}:${o.id || (o.card && o.card.name 
     assert.strictEqual((await svc.reconcileCards({ db, dryRun: true })).drifted, 0);
   });
 
-  await db.query('DROP TABLE IF EXISTS child_orders; DROP TABLE IF EXISTS reviewer_identity_cards; DROP TABLE IF EXISTS reviewers');
   await db.end();
+  { const boot = new Pool({ connectionString: process.env.PGTEST_URL }); await boot.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`); await boot.end(); }
   console.log(`\n✅ reviewerIdentityCardsMirror: ${passed}개 통과 (진짜 PG 포함)`);
   process.exit(0);
 })().catch((e) => { console.error('❌', e); process.exit(1); });

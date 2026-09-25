@@ -6,6 +6,7 @@
  * 충돌이나 비정상 sub_accounts를 발견했을 때 자동으로 잘못된 소유관계를 만들지 않는다.
  */
 const pool = require('../db/pool');
+const { syncCardsAfterWrite } = require('./reviewerIdentityCards.service');
 const { logger } = require('../utils/logger');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -360,6 +361,7 @@ async function applyIdentityChange({ reviewerId, memberNo, name, phone, by = 'ad
     } else {
       await client.query(`UPDATE reviewers SET sub_accounts=$2::jsonb WHERE id=$1`, [reviewerId, JSON.stringify(draft.sub_accounts)]);
     }
+    await syncCardsAfterWrite(client, reviewerId, { source: 'identity_change' }); // 조각 2-2(결정 177)
     await client.query('COMMIT');
     const out = { reviewerNo: reviewer.reviewer_no, code: formatIdentityCode(reviewer.reviewer_no, wanted.memberNo), previous: {
       name: identity.current_name, phone8: identity.current_phone8,

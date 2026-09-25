@@ -5,6 +5,7 @@ const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, 
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
+const { mutateSubAccounts, findSubIndex } = require('../services/reviewerIdentityCards.service');
 const {
   createOrderLedgerEntry,
   markOrderQueued,
@@ -1253,7 +1254,7 @@ router.post('/order', async (req, res, next) => {
       try {
         const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
         let { rows: _rvRows } = await pool.query(
-          `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
+          `SELECT id, name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
            FROM reviewers WHERE phone8 = $1 LIMIT 1`, [_idPhone8]
         );
         // ★ 타계정(063): 로그인 p8로 reviewers 행이 없으면(독립번호 타계정의 서브 로그인 세션 — verifyReviewer
@@ -1261,7 +1262,7 @@ router.post('/order', async (req, res, next) => {
         //   소유권 검증(campaign+명의 phone8+hold_token 정확일치) 통과 홀드에만. fail-open 원칙 유지(try 내부).
         if (!_rvRows.length && holdCtx) {
           const owner = await pool.query(
-            `SELECT r.name, r.phone, r.phone8, r.address, r.bank_name, r.bank_account, r.account_holder, r.sub_accounts
+            `SELECT r.id, r.name, r.phone, r.phone8, r.address, r.bank_name, r.bank_account, r.account_holder, r.sub_accounts
                FROM campaign_applications ca JOIN reviewers r ON r.phone8 = ca.owner_phone8
               WHERE ca.id = $1 AND ca.campaign_id = $2 AND ca.phone8 = $3
                 AND ca.hold_token = $4 AND ca.hold_token <> '' AND ca.owner_phone8 IS NOT NULL
@@ -1329,32 +1330,33 @@ router.post('/order', async (req, res, next) => {
             });
           }
           // SUB 매칭 시 타계정의 빈 주소/계좌 자동 보강 (best-effort)
-          if (_verdict.status === 'SUB' && _verdict.subIndex >= 0) {
+          if (_verdict.status === 'SUB' && _verdict.subIndex >= 0 && _rv.id) {
             try {
-              const _sub = _rv.sub_accounts[_verdict.subIndex] || {};
-              let _dirty = false;
-              if (!String(_sub.address || '').trim() && (b.extractedAddress || address)) {
-                _sub.address = String(b.extractedAddress || address).trim(); _dirty = true;
-              }
-              // 계좌 보강은 "본인 공통계좌와 다른 계좌"일 때만 (본인 계좌로 입금받는 흐름을
-              // 타계정 전용계좌로 오기록하지 않도록)
+              // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → **이름+번호로 대상 재지목** → 빈 칸만 채움 → id 로 저장.
+              //   종전: 잠금 없이 읽은 배열을 통째로 phone8 로 덮어써 동시 저장(내정보)이 사라지고,
+              //   그 사이 목록이 바뀌면 칸 순번이 남을 가리켰다.
+              const _target = _rv.sub_accounts[_verdict.subIndex] || {};
               const _mainAcctDigits = String(_rv.bank_account || '').replace(/[^0-9]/g, '');
               const _orderAcctDigits = String(account || '').replace(/[^0-9]/g, '');
-              if (!String(_sub.bankAccount || '').trim() && _orderAcctDigits && _orderAcctDigits !== _mainAcctDigits) {
-                _sub.bankName = _sub.bankName || bank || '';
-                _sub.bankAccount = account;
-                _sub.accountHolder = _sub.accountHolder || depositor || '';
-                _dirty = true;
-              }
-              if (_dirty) {
-                _rv.sub_accounts[_verdict.subIndex] = _sub;
-                await pool.query(
-                  'UPDATE reviewers SET sub_accounts = $1::jsonb WHERE phone8 = $2',
-                  // ★ 063: owner 폴백 시 _idPhone8은 서브 p8이라 소유자 행에 못 쓴다 — 게이트 기준 행에 기록
-                  [JSON.stringify(_rv.sub_accounts), _rvRows[0].phone8 || _idPhone8]
-                );
-                logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} sub[${_verdict.subIndex}] ${_sub.name || ''}`);
-              }
+              const _res = await mutateSubAccounts(_rv.id, (subs) => {
+                const i = findSubIndex(subs, _target.name, _target.phone);
+                if (i < 0) return null; // 그 사이 사라졌거나 같은 명의가 둘 — 추측해서 쓰지 않는다
+                const sub = subs[i];
+                let dirty = false;
+                if (!String(sub.address || '').trim() && (b.extractedAddress || address)) {
+                  sub.address = String(b.extractedAddress || address).trim(); dirty = true;
+                }
+                // 계좌 보강은 "본인 공통계좌와 다른 계좌"일 때만 (본인 계좌로 입금받는 흐름을
+                // 타계정 전용계좌로 오기록하지 않도록)
+                if (!String(sub.bankAccount || '').trim() && _orderAcctDigits && _orderAcctDigits !== _mainAcctDigits) {
+                  sub.bankName = sub.bankName || bank || '';
+                  sub.bankAccount = account;
+                  sub.accountHolder = sub.accountHolder || depositor || '';
+                  dirty = true;
+                }
+                return dirty ? subs : null;
+              }, { source: 'order_enrich' });
+              if (_res.changed) logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} ${_target.name || ''}`);
             } catch (enrichErr) {
               logger.warn(`[order-identity] 타계정 자동보강 실패(무시): ${enrichErr.message}`);
             }

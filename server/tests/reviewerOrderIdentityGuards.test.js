@@ -65,7 +65,7 @@ ok('가림 주소는 모든 연속 가림문자를 제거해 비교한다',
   /MASK_RUN_RE = \/\[\*＊●○◯◉•·xX\]\+\/g/.test(service)
   && /replace\(MASK_RUN_RE, ' '\)/.test(service));
 ok('타계정 편집 API는 전용 경로의 shoppingId를 구버전 화면에서도 보존한다',
-  /SELECT reviewer_no, sub_accounts FROM reviewers/.test(reviewerServiceSource)
+  /mutateSubAccounts\(owner\.id, \(currentSubs\)/.test(reviewerServiceSource)
   && /sub\.shoppingId = String\(savedId\)/.test(reviewerServiceSource));
 ok('타계정 허용+등록 타계정 존재 시 명의 선택을 옵션보다 먼저 연다',
   /if\(multiEnabled\(\)\)[\s\S]{0,180}?if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(campaign));
@@ -217,19 +217,26 @@ async function verifyLegacySubIdPreservation() {
   const pool = require('../src/db/pool');
   const reviewerService = require('../src/services/reviewer.service');
   const original = pool.query;
+  const originalConnect = pool.connect;
   let saved;
-  pool.query = async (sql, params) => {
-    if (/SELECT reviewer_no, sub_accounts/.test(sql)) {
-      return { rows: [{ reviewer_no: null, sub_accounts: [
+  // ★ 조각 2-2(결정 177): 저장은 id 확정 → 트랜잭션 안에서 잠그고 다시 읽기 → id 로 저장 순서다.
+  const OWNER = '9b9b9b9b-9b9b-4b9b-8b9b-9b9b9b9b9b9b';
+  const query = async (sql, params) => {
+    if (/SELECT id, reviewer_no FROM reviewers/.test(sql)) return { rows: [{ id: OWNER, reviewer_no: null }] };
+    if (/FOR NO KEY UPDATE/.test(sql)) {
+      return { rows: [{ id: OWNER, name: '소유자', phone: '010-9999-8888', sub_accounts: [
         { name:'김민수', phone:'010-1111-2222', shoppingId:'keep-me', address:'기존' },
         { name:'박영희', phone:'010-3333-4444', shoppingId:'keep-two' },
       ] }] };
     }
     if (/UPDATE reviewers SET sub_accounts/.test(sql)) {
-      saved = JSON.parse(params[0]); return { rows: [], rowCount: 1 };
+      saved = JSON.parse(params[1]); return { rows: [], rowCount: 1 };
     }
+    if (/^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)/.test(String(sql).trim()) || /FROM reviewer(s|_identity_cards)\b/.test(sql)) return { rows: [] };
     throw new Error('unexpected query: ' + sql);
   };
+  pool.query = query;
+  pool.connect = async () => ({ query, release() {} });
   try {
     const out = await reviewerService.handleReviewerProfile({
       action:'saveSubAccounts', phone8:'99998888', subAccounts: [
@@ -239,7 +246,7 @@ async function verifyLegacySubIdPreservation() {
     });
     ok('실행 검증: 타계정 이름·번호 수정과 기존 행 수정 모두 공통 아이디를 잃지 않는다',
       out.ok && saved[0].shoppingId === 'keep-me' && saved[1].shoppingId === 'keep-two');
-  } finally { pool.query = original; }
+  } finally { pool.query = original; pool.connect = originalConnect; }
 }
 
 verifyLegacySubIdPreservation().then(() => {
