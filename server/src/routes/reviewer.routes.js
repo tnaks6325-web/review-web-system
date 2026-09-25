@@ -301,6 +301,17 @@ router.patch('/profile/identities/:identityKey/shopping-id', reviewerSessionMidd
   } catch (err) { return sendReviewerIdentityError(res, err, next); }
 });
 
+// 참여 직전 빈 주소 한 번 받기(조각 5). 빈 칸일 때만 채운다 — 이미 있으면 저장하지 않고 filled:false.
+router.patch('/profile/identities/:identityKey/address', reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    res.json(await reviewerOrderIdentity.saveIdentityAddress(
+      req.reviewer.ownerReviewerId,
+      decodeURIComponent(String(req.params.identityKey || '')),
+      req.body && req.body.address
+    ));
+  } catch (err) { return sendReviewerIdentityError(res, err, next); }
+});
+
 router.post('/order-identity-context', reviewerSessionMiddleware, async (req, res, next) => {
   try {
     res.json(await reviewerOrderIdentity.getParticipationIdentityContext(req.body || {}, req.reviewer));
@@ -332,7 +343,7 @@ router.post('/order-identity-match/manual-confirm', imageApiLimiter, reviewerSes
 // ★ Gemini 비용 보호: 이미지 API와 동일한 리미터 적용 (무인증 엔드포인트 DoS 방지)
 router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, async (req, res) => {
   try {
-    const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
+    const { participationProfileMissing, resolveOrderIdentity } = require('../services/identity.service');
     const p8 = String(req.body?.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
     if (p8.length !== 8) return res.json({ ok: false, error: 'phone8이 필요합니다.' });
 
@@ -350,7 +361,7 @@ router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, 
     }
     if (!Array.isArray(reviewer.sub_accounts)) reviewer.sub_accounts = [];
 
-    const missing = profileMissing(reviewer);
+    const missing = participationProfileMissing(reviewer);   // 주소 제외(결정 181) — 제출 배너가 주소로 막지 않게
     if (missing.length > 0) {
       return res.json({ ok: true, profileMissing: missing, results: [] });
     }

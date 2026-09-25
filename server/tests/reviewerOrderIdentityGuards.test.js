@@ -83,9 +83,13 @@ ok('연속 캡처 분석의 늦은 응답은 request id로 폐기해 최신 캡�
 ok('공통 아이디 저장 체크는 카드 한 장만 선택 가능하다',
   /onchange="_selectShoppingIdSave\('\$\{cid\}'\)"/.test(appJs)
   && /other\.checked = false/.test(appJs));
+// ★ 조각 5(결정 181): 배송주소의 "내 정보에서 선택"은 명의 주소 선택기(_addressToolsMarkup — 칩·드롭다운·[저장])로
+//   바뀌었다. 검사 의미 불변 — 내정보 선택은 여전히 네 입력창 아래에만 있다(주소는 새 선택기 한 곳).
 ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입력창 아래에만 둔다',
-  (appJs.match(/\$\{_savedOrderInfoMarkup\(cid, "/g) || []).length === 4
-  && ['userId', 'recipient', 'phone', 'address'].every((field) => appJs.includes(`\${_savedOrderInfoMarkup(cid, "${field}")}`))
+  (appJs.match(/\$\{_savedOrderInfoMarkup\(cid, "/g) || []).length === 3
+  && ['userId', 'recipient', 'phone'].every((field) => appJs.includes(`\${_savedOrderInfoMarkup(cid, "${field}")}`))
+  && (appJs.match(/\$\{_addressToolsMarkup\(cid\)\}/g) || []).length === 1
+  && (appJs.match(/\$\{_addressChipMarkup\(cid\)\}/g) || []).length === 1
   && !/savedOrderInfoMarkup\(cid, "(?:orderNumber|orderer|price)"\)/.test(appJs)
   && /\.of-field-control>\.of-input(?:,|\{)/.test(searchCss));
 ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순서를 바꾸지 않는다',
