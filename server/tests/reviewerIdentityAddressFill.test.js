@@ -90,7 +90,7 @@ const between = (s, a, b) => { const i = s.indexOf(a); const j = s.indexOf(b, i 
       _orderInfoSuggestions: suggestions, _orderCardIds: ['c'], _cardAiState: { c: cardState || { analysisRequestId: 1 } },
       _identityContextPromise: 'cached', API_BASE_URL: 'http://x', _getAuthHeaders: () => ({ Authorization: 'Bearer t' }),
       _hasIdentityMask: (v) => /[*＊●○◯◉•·xX]/.test(String(v || '')),
-      showToast: (m, e) => log.toasts.push([m, !!e]), _ofClearError: () => {}, _embedSaveForm: () => {}, _syncSubmissionIdentityAction: () => {},
+      showToast: (m, e) => log.toasts.push([m, e]), _ofClearError: () => {}, _embedSaveForm: () => {}, _syncSubmissionIdentityAction: () => {},
       _invalidateIdentityApproval: () => { log.invalidated++; },
       _loadOrderIdentityContext: async () => { log.ctxLoads++; },
       _renderIdentityMatchState: (cid, st, r) => log.rendered.push(st),
@@ -204,7 +204,7 @@ const between = (s, a, b) => { const i = s.indexOf(a); const j = s.indexOf(b, i 
       await vm.runInContext("_saveCardAddress('c')", f.sb);
       assert.strictEqual(f.els.c_addrSaveBtn.disabled, false, '다시 누를 수 있다');
       assert.strictEqual(f.els.c_addrSaveBtn.innerHTML, '저장');
-      assert.ok(f.log.toasts.some(([, e]) => e), '실패를 알린다');
+      assert.ok(f.log.toasts.some(([, e]) => e === 'error'), '실패를 오류 모양으로 알린다(구매양식 showToast(msg, type) — true 는 안내 모양이 된다)');
       assert.strictEqual(f.log.matched, 0);
     }
   });
