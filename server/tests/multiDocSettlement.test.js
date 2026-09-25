@@ -53,6 +53,8 @@ const DB = {
         inv: [{ sales_id: 'S7', issue_date: '20260901', total_amount: 3000000, status: '발행완료' },
               { sales_id: 'S7', issue_date: '20260905', total_amount: 7000000, status: '발행취소' },
               { sales_id: 'S7', issue_date: '20260906', total_amount: 7000000, status: '국세청전송' }] },
+  S8: { sales: { id: 'S8', amount: 5000000, invoice_status: 'issued', invoice_date: '2026-09-01' }, quotes: [],
+        inv: [{ sales_id: 'S8', issue_date: '20260901', total_amount: 5000000, status: '발행취소' }] },
 };
 
 async function run() {
@@ -98,6 +100,9 @@ async function run() {
 
   d = await forTab('S7');
   ok(d.invoice.status === 'issued' && d.invoice.count === 2 && d.invoice.issuedAmount === 10000000, 'B8: 발행취소 계산서는 합계에서 뺀다 · 국세청전송은 발행으로 센다');
+
+  d = await forTab('S8');
+  ok(d.invoice.status === 'not_issued' && d.invoice.issuedAmount === 0, 'B9: 유일한 계산서가 취소됐으면 수기 발행 상태로 접지 않고 미발행(코덱스 P1)');
 
   // ═══ C. 업체관리 요약 · 업체 화면 ═══
   const own = [{ sheetId: 'S', tabName: 'T1', salesId: 'S1', contractNumber: 'C-1' }, { sheetId: 'S', tabName: 'T2', salesId: 'S2' }];

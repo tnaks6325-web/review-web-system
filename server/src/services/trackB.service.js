@@ -1646,7 +1646,13 @@ function _invoiceProgress(sales, invRows, totalCost) {
   if (!sales) return null;
   // ★ 발행 뒤 취소·거부된 계산서는 계약에 연결된 채로 남으므로 발행 합계에서 뺀다(인트라넷 status 문구:
   //   '발행취소' · 거부). 인트라넷 발행 흐름이 계산서 쪽에도 계약을 적게 되면서(2026-09-26) 연결이 늘어난다.
-  const issued = (invRows || []).filter(t => _normIssueDate(t.issue_date) && !_INVOICE_VOID_RE.test(String(t.status || '')));
+  const dated = (invRows || []).filter(t => _normIssueDate(t.issue_date));
+  const issued = dated.filter(t => !_INVOICE_VOID_RE.test(String(t.status || '')));
+  // ★ 연결된 계산서가 있는데 **전부 취소·거부**면 '미발행'이다 — 종전 상태(수기 '발행')로 접으면
+  //   유일한 계산서를 취소한 계약이 계속 발행 완료로 보인다(코덱스 리뷰 P1). 연결 0장·조회 실패만 종전 상태.
+  if (invRows && dated.length && !issued.length) {
+    return { status: 'not_issued', date: null, count: 0, issuedAmount: 0, targetAmount: null, voided: dated.length };
+  }
   if (!invRows || !issued.length) return { ...legacy, count: 0, issuedAmount: 0, targetAmount: null };
   const mixed = sales.salesType === 'mixed' && sales.invoiceLegAmount > 0;
   // 목표 = 혼합계약은 발행분, 아니면 계약금액(계산서는 계약 기준으로 끊는다) — 계약금액을 모를 때만 견적 합계.
