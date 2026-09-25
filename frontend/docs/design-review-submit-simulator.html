@@ -88,6 +88,49 @@
   .apphead .ttl{font-size:.92rem; font-weight:800; letter-spacing:-.3px}
   .screen{flex:1; min-height:0; overflow:auto; padding:14px}
   .phonecap{font-size:.72rem; font-weight:800; color:var(--t3)}
+  .tabbar{
+    flex:none; display:flex; border-top:1px solid var(--border); background:#fff;
+  }
+  .tabbar button{
+    flex:1; border:0; background:#fff; padding:9px 4px 11px; cursor:pointer; font-family:inherit;
+    display:flex; flex-direction:column; align-items:center; gap:3px; position:relative;
+  }
+  .tabbar .ic{font-size:1.02rem; line-height:1}
+  .tabbar .tl{font-size:.6rem; font-weight:800; color:var(--t3)}
+  .tabbar button.on .tl{color:var(--p-dark)}
+  .tabbar .dot{
+    position:absolute; top:5px; left:calc(50% + 7px); min-width:15px; height:15px; border-radius:8px;
+    background:var(--err); color:#fff; font-size:.55rem; font-weight:800;
+    display:flex; align-items:center; justify-content:center; padding:0 4px;
+  }
+  /* 1:1 문의 */
+  .csroom{display:flex; flex-direction:column; gap:9px}
+  .csday{text-align:center; font-size:.63rem; font-weight:800; color:var(--t3); margin:2px 0 4px}
+  .csline{display:flex; gap:7px; align-items:flex-end}
+  .csline .av{
+    width:26px; height:26px; border-radius:50%; background:#EEF2FF; flex:none;
+    display:flex; align-items:center; justify-content:center; font-size:.72rem;
+  }
+  .csname{font-size:.62rem; font-weight:800; color:var(--t3); margin-bottom:3px}
+  .csbub{
+    max-width:80%; background:#fff; color:#111827; border:1px solid #e5e7eb;
+    padding:9px 12px; border-radius:14px; font-size:.86rem; line-height:1.5;
+    white-space:pre-wrap; word-break:break-word;
+  }
+  .csbub.sys{border-color:#FCA5A5; background:#FFF5F5}
+  .cstime{font-size:.58rem; color:var(--t4); flex:none; margin-bottom:2px}
+  .csinput{
+    display:flex; gap:7px; margin-top:12px; align-items:center;
+  }
+  .csinput .box{
+    flex:1; border:1px solid var(--border); border-radius:12px; padding:11px 12px;
+    font-size:.78rem; color:var(--t3); background:#fff;
+  }
+  .csinput .send{
+    width:40px; height:40px; border:0; background:var(--p); color:#fff; border-radius:12px;
+    font-size:.9rem; flex:none;
+  }
+  .csempty{text-align:center; color:var(--t3); font-size:.76rem; padding:34px 10px; line-height:1.7}
 
   /* 리뷰 제출 화면 */
   .sheetcard{background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:14px; margin-bottom:10px}
@@ -140,7 +183,7 @@
 
   /* 토스트 */
   .toast{
-    position:absolute; left:50%; bottom:26px; transform:translateX(-50%) translateY(14px);
+    position:absolute; left:50%; bottom:76px; transform:translateX(-50%) translateY(14px);
     background:rgba(17,24,39,.92); color:#fff; font-size:.74rem; font-weight:700;
     padding:10px 16px; border-radius:11px; opacity:0; transition:opacity .22s, transform .22s; z-index:40;
     white-space:nowrap; pointer-events:none;
@@ -213,6 +256,7 @@
   .chip{font-size:.6rem; font-weight:800; border-radius:8px; padding:2px 7px; margin-left:6px; vertical-align:middle}
   .chip.done{background:#D1FAE5; color:#0ca678}
   .chip.rej{background:#FEE2E2; color:#B91C1C}
+  .chip.chk{background:#F1F3F6; color:#6B7280}
 
   /* 로그 패널 */
   .log{font-size:.73rem; line-height:1.55; color:var(--t2)}
@@ -327,8 +371,8 @@
       <div class="grp nextonly" id="grpFirst">
         <span class="lab">제출 직후 리뷰어에게 보일 표시</span>
         <div class="seg" id="segFirst">
-          <button data-v="done" class="on">제출완료</button>
-          <button data-v="checking">확인 중</button>
+          <button data-v="done">제출완료</button>
+          <button data-v="checking" class="on">확인 중</button>
         </div>
         <div class="hint" id="firstHint"></div>
       </div>
@@ -345,6 +389,7 @@
           <span class="ttl" id="appTitle">리뷰 제출</span>
         </div>
         <div class="screen" id="screen"></div>
+        <div class="tabbar" id="tabbar"></div>
 
         <!-- 진행 오버레이 -->
         <div class="loadovl" id="loadOvl">
@@ -385,15 +430,15 @@
       <div class="note" id="noteBox"></div>
 
       <div class="decide">
-        <div class="h">정해주셔야 하는 것 3가지</div>
+        <div class="h">확정된 내용 (2026-09-26)</div>
         <ol>
-          <li><b>반려를 누가 정할까요</b> — 검사가 끝나면 바로 반려로 보일지, 담당자가 확인한 뒤에만 보일지.
-            (왼쪽에서 바꿔 가며 눌러 보세요)</li>
-          <li><b>제출 직후 무엇으로 보일까요</b> — “제출완료”로 보였다가 문제가 있을 때만 반려로 바뀔지,
-            처음부터 “확인 중”으로 보일지.</li>
-          <li><b>반려를 리뷰어가 어떻게 알까요</b> — 리뷰 내역을 다시 열어야 알게 할지,
-            1:1 문의로도 바로 알려줄지. (1:1 문의 알림은 이미 있는 기능이라 켜기만 하면 됩니다)</li>
+          <li><b>반려는 시스템이 정한다</b> — 검사가 끝나면 담당자를 거치지 않고 바로 반려로 표시됩니다.</li>
+          <li><b>제출 직후에는 “확인 중”</b> — 검사가 끝나면 <b>제출완료</b> 또는 <b>제출 반려</b>로 바뀝니다.</li>
+          <li><b>반려는 두 곳에 남는다</b> — 리뷰 내역 카드에 표시되고, <b>1:1 문의방에 안내가 자동으로</b> 남습니다.</li>
         </ol>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #FDE2B3;font-size:.7rem">
+          왼쪽 설정은 <b>확정안이 기본값</b>입니다. 다른 방식과 비교해 보시려면 바꿔 가며 눌러 보세요.
+        </div>
       </div>
     </div>
   </div>
@@ -416,29 +461,44 @@
     timers: [],
     waited: null,           // 리뷰어가 실제로 기다린 초
     logRows: [],
+    runUp: 0,               // ★ 이번 실행에 쓰인 값(스냅샷) — 실행 중 슬라이더를 움직여도 기록이 안 흔들린다
+    runChk: 0,
     judge: 'auto',          // auto | human  — 반려를 누가 정하나
-    first: 'done',          // done | checking — 제출 직후 표시
+    first: 'checking',      // done | checking — 제출 직후 표시 (사용자 확정: 확인 중)
     pendingBad: false,      // 담당자 확인 대기(불량 판정은 났지만 아직 리뷰어에겐 안 보임)
+    csUnread: 0,            // 1:1 문의 미확인 수
+    csMsg: null,            // 반려 시 자동으로 남는 시스템 메시지
   };
 
+  /* ★ 문의방에 남는 글은 지금 운영 중인 기본 문구 그대로다
+     (server/src/utils/inspectMessages.js — duplicate / format_fail / product). */
   var REASON = {
     dup: {
       badge: '제출 반려',
       title: '중복 리뷰 이미지로 제출이 반려되었습니다',
       body: '앞서 제출하신 사진과 같은 사진입니다. 이 작업에 맞는 리뷰 화면을 새로 캡처해 다시 올려주세요.',
       short: '중복 리뷰 이미지',
+      cs: '중복이미지 제출로 반려되었습니다.\n\n'
+        + '앞서 제출하신 사진과 같은 사진이 다시 올라와, 나중에 올리신 사진은 등록되지 않았습니다.\n\n'
+        + '이번 건은 다른 리뷰 화면을 캡처해 다시 제출해 주세요.',
     },
     notreview: {
       badge: '제출 반려',
       title: '리뷰 화면이 아닌 사진으로 제출이 반려되었습니다',
       body: '올려주신 사진에서 리뷰 화면(별점·리뷰 본문)을 찾지 못했습니다. 작성하신 리뷰가 보이는 화면을 캡처해 다시 올려주세요.',
       short: '리뷰 화면이 아님',
+      cs: '제출하신 리뷰 캡처가 검수에서 반려되었습니다.\n\n'
+        + '사유: 리뷰 화면(별점·리뷰 본문)을 찾지 못했습니다.\n\n'
+        + '올바른 캡처로 다시 제출해 주세요. 궁금한 점은 이 채팅으로 답장 주시면 됩니다.',
     },
     product: {
       badge: '제출 반려',
       title: '다른 상품의 리뷰로 제출이 반려되었습니다',
       body: '이 작업의 상품과 다른 상품의 리뷰로 보입니다. 이번에 진행하신 상품의 리뷰 화면을 캡처해 다시 올려주세요.',
       short: '다른 상품의 리뷰',
+      cs: '제출하신 리뷰 캡처가 검수에서 반려되었습니다.\n\n'
+        + '사유: 이 작업의 상품과 다른 상품의 리뷰로 보입니다.\n\n'
+        + '이 작업의 상품이 맞는지 확인 후 다시 제출해 주세요.',
     },
   };
 
@@ -477,10 +537,50 @@
   }
 
   /* ── 화면 그리기 ──────────────────────────────────── */
+  var TITLES = { submit: '리뷰 제출', history: '내 정보 · 리뷰 내역', cs: '1:1 문의' };
   function render(){
-    $('appTitle').textContent = (S.view === 'submit') ? '리뷰 제출' : '내 정보 · 리뷰 내역';
-    $('screen').innerHTML = (S.view === 'submit') ? submitHtml() : historyHtml();
+    $('appTitle').textContent = TITLES[S.view] || '리뷰';
+    $('screen').innerHTML =
+      (S.view === 'submit') ? submitHtml() :
+      (S.view === 'cs')     ? csHtml() : historyHtml();
+    $('tabbar').innerHTML = tabbarHtml();
     bind();
+  }
+
+  function tabbarHtml(){
+    var homeOn = (S.view === 'history' || S.view === 'submit');
+    var dot = S.csUnread ? '<span class="dot">' + S.csUnread + '</span>' : '';
+    return '' +
+      '<button data-go="history" class="' + (homeOn ? 'on' : '') + '">' +
+        '<span class="ic">🏠</span><span class="tl">내 정보</span></button>' +
+      '<button data-go="cs" class="' + (S.view === 'cs' ? 'on' : '') + '">' +
+        '<span class="ic">🎧</span><span class="tl">1:1 문의</span>' + dot + '</button>';
+  }
+
+  function csHtml(){
+    if (!S.csMsg){
+      return '<div class="csempty">아직 주고받은 문의가 없어요.<br>궁금한 점이 있으면 여기로 보내주세요.</div>' +
+        '<div class="csinput"><div class="box">메시지를 입력하세요</div>' +
+        '<button class="send">➤</button></div>';
+    }
+    return '' +
+      '<div class="csday">2026년 9월 26일</div>' +
+      '<div class="csroom">' +
+        '<div class="csline">' +
+          '<div class="av">🎧</div>' +
+          '<div style="min-width:0">' +
+            '<div class="csname">관리자</div>' +
+            '<div class="csbub sys">' + esc(S.csMsg) + '</div>' +
+          '</div>' +
+          '<span class="cstime">09:41</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="csinput"><div class="box">메시지를 입력하세요</div>' +
+      '<button class="send">➤</button></div>';
+  }
+
+  function esc(t){
+    return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
   function submitHtml(){
@@ -514,7 +614,8 @@
             REASON[S.result].short + '</span>';
     } else {
       badge = '<span class="status-badge-submitted">제출완료</span>';
-      sub = '<span class="status-badge-paid">입금완료</span>';
+      /* ★ 방금 제출한 건은 아직 입금 전이다 — 실물도 item.isPaid 일 때만 이 배지를 그린다.
+         여기에 무조건 붙이면 "입금완료였다가 반려로 바뀌는" 없는 화면을 보여주게 된다. */
     }
 
     var card =
@@ -575,12 +676,21 @@
     if (c) c.onclick = openPart;
     var ab = $('btnAdminBad');
     if (ab) ab.onclick = adminReject;
+    Array.prototype.forEach.call($('tabbar').querySelectorAll('button'), function(t){
+      t.onclick = function(){
+        var go = t.getAttribute('data-go');
+        if (go === 'cs') S.csUnread = 0;
+        S.view = go;
+        render();
+      };
+    });
   }
 
   /* 담당자가 불량으로 확인 → 그때 리뷰어 화면이 '제출 반려'로 바뀐다 */
   function adminReject(){
     S.pendingBad = false;
     S.card = 'rejected';
+    pushCsReject();
     logAdd(null, '담당자가 <b>[✕ 불량]</b>으로 확인했습니다', 'bad');
     logAdd(null, '이제 리뷰 내역이 <b>제출 반려</b>로 바뀝니다', 'bad');
     render();
@@ -589,12 +699,19 @@
     toast('리뷰 1건이 반려되었습니다');
   }
 
+  /* 반려가 확정되면 1:1 문의방에 안내가 자동으로 남는다(관리자가 따로 쓰지 않는다) */
+  function pushCsReject(){
+    S.csMsg = REASON[S.result].cs;
+    S.csUnread = 1;
+  }
+
   /* ── 참여상품 정보 팝업 ───────────────────────────── */
   function openPart(){
     var rejected = (S.card === 'rejected');
-    var chip = rejected
-      ? '<span class="chip rej">제출 반려</span>'
-      : '<span class="chip done">제출완료</span>';
+    var checking = (S.card === 'checking');
+    var chip = rejected ? '<span class="chip rej">제출 반려</span>'
+             : checking ? '<span class="chip chk">확인 중</span>'
+             : '<span class="chip done">제출완료</span>';
 
     var inner =
       '<div class="grab"></div>' +
@@ -614,13 +731,29 @@
           '<button class="sbtn" id="sbCs">🎧 1:1 문의하기</button>' +
           '<button class="sbtn" id="sbClose">닫기</button>' +
         '</div>';
+    } else if (checking){
+      inner +=
+        '<div class="box" style="border-color:#DBE6FB;background:#F8FAFF;color:#1B4F9C">' +
+          '올려주신 리뷰 캡처를 확인하고 있어요.<br>' +
+          '보통 1분 안에 끝나며, 문제가 없으면 <b>제출완료</b>로 바뀝니다.' +
+        '</div>' +
+        '<div class="box">' +
+          '상품 · 넛세린 너리싱밤 50ml<br>' +
+          '결제금액 · 24,900원<br>' +
+          '리뷰비 · 1,500원<br>' +
+          '입금 · 리뷰 확인 후 지급' +
+        '</div>' +
+        '<div class="sbtns">' +
+          '<button class="sbtn" id="sbCs">🎧 1:1 문의하기</button>' +
+          '<button class="sbtn" id="sbClose">닫기</button>' +
+        '</div>';
     } else {
       inner +=
         '<div class="box">' +
           '상품 · 넛세린 너리싱밤 50ml<br>' +
           '결제금액 · 24,900원<br>' +
           '리뷰비 · 1,500원<br>' +
-          '입금 · 9/26 입금완료' +
+          '입금 · 리뷰 확인 후 지급' +
         '</div>' +
         '<div class="sbtns">' +
           '<button class="sbtn">🖼 제출 이미지 확인 · 수정요청</button>' +
@@ -635,7 +768,9 @@
     var close = function(){ $('partOvl').classList.remove('on'); };
     $('sbClose').onclick = close;
     $('partOvl').onclick = function(e){ if (e.target === $('partOvl')) close(); };
-    var cs = $('sbCs'); if (cs) cs.onclick = function(){ close(); toast('1:1 문의 화면으로 이동합니다'); };
+    var cs = $('sbCs'); if (cs) cs.onclick = function(){
+      close(); S.csUnread = 0; S.view = 'cs'; render();
+    };
     var re = $('sbRe'); if (re) re.onclick = function(){
       close();
       S.view = 'submit'; S.card = 'none';
@@ -656,11 +791,22 @@
     btn.disabled = true;
     btn.textContent = '제출 중...';
 
-    var up = S.upSec * 1000;
-    var chk = S.chkSec * 1000;
+    /* ★ 이번 실행의 시간을 여기서 고정한다. 실행 중 슬라이더를 움직여도
+       화면에 뜨는 경과·기록·비교값이 실제로 흐른 시간과 어긋나지 않는다. */
+    S.runUp = S.upSec;
+    S.runChk = S.chkSec;
+    lockSliders(true);
 
-    if (S.mode === 'now') runNow(up, chk);
-    else runNext(up, chk);
+    if (S.mode === 'now') runNow(S.runUp * 1000, S.runChk * 1000);
+    else runNext(S.runUp * 1000, S.runChk * 1000);
+  }
+
+  function lockSliders(on){
+    $('rngUp').disabled = on;
+    $('rngChk').disabled = on;
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#rlResult input, #segMode button, #segJudge button, #segFirst button'),
+      function(el){ el.disabled = on; });
   }
 
   function showLoad(title, sub){
@@ -693,14 +839,14 @@
     logAdd(0, '사진을 구글에 올리는 중…', 'wait');
 
     later(function(){
-      var t1 = S.upSec;
+      var t1 = S.runUp;
       logAdd(t1, '사진 올리기 끝');
       $('loadTitle').textContent = '확인 중...';
       $('loadSub').textContent = '조금만 더 기다려주세요';
       logAdd(t1, '사진이 리뷰 화면이 맞는지 검사 중…', 'wait');
 
       later(function(){
-        var tot = S.upSec + S.chkSec;
+        var tot = S.runUp + S.runChk;
         hideLoad();
         S.waited = tot;
         logAdd(tot, '검사 끝 — ' + (S.result === 'ok' ? '문제 없음' : REASON[S.result].short));
@@ -727,7 +873,7 @@
     logAdd(0, '사진을 구글에 올리는 중…', 'wait');
 
     later(function(){
-      var tot = S.upSec;
+      var tot = S.runUp;
       hideLoad();
       S.waited = tot;
       logAdd(tot, '사진 올리기 끝 — <b>바로 제출 완료</b> 화면', 'good');
@@ -744,7 +890,7 @@
       logAdd(tot, '뒤에서 사진 검사가 시작됩니다', 'bg');
 
       later(function(){
-        var t2 = S.upSec + S.chkSec;
+        var t2 = S.runUp + S.runChk;
         if (S.result === 'ok'){
           S.card = 'done';
           logAdd(t2, '검사 끝 — 문제 없음 · <b>제출완료</b>로 확정', 'good');
@@ -754,7 +900,9 @@
         logAdd(t2, '검사 끝 — ' + REASON[S.result].short, 'bad');
         if (S.judge === 'auto'){
           S.card = 'rejected';
+          pushCsReject();
           logAdd(t2, '리뷰 내역이 곧바로 <b>제출 반려</b>로 바뀝니다 (카드를 눌러 보세요)', 'bad');
+          logAdd(t2, '1:1 문의방에도 안내가 <b>자동으로</b> 남습니다 (아래 🎧 탭)', 'bad');
           render();
           var c = $('card');
           if (c){ c.classList.add('flash'); toast('리뷰 1건이 반려되었습니다'); }
@@ -771,6 +919,7 @@
 
   function finish(tot){
     S.running = false;
+    lockSliders(false);
     $('totV').textContent = fmt(tot);
     $('totV').className = 'v' + (tot >= 8 ? ' slow' : '');
     var box = (S.mode === 'now') ? $('cmpNow') : $('cmpNext');
@@ -802,7 +951,7 @@
   /* ── 컨트롤 배선 ──────────────────────────────────── */
   function hardReset(){
     clearAll(); stopTick();
-    S.running = false; S.view = 'submit'; S.card = 'none'; S.waited = null; S.pendingBad = false;
+    S.running = false; S.view = 'submit'; S.card = 'none'; S.waited = null; S.pendingBad = false; S.csUnread = 0; S.csMsg = null;
     $('loadOvl').classList.remove('on');
     $('partOvl').classList.remove('on');
     $('toast').classList.remove('on');
@@ -872,7 +1021,7 @@
   /* 시작 */
   $('modeHint').textContent = '사진을 올리고 검사가 끝날 때까지 기다립니다.';
   $('judgeHint').textContent = '검사가 끝나면 사람 손을 거치지 않고 바로 반려로 보입니다. 빠르지만 잘못 걸러낼 수 있습니다.';
-  $('firstHint').textContent = '리뷰어는 정상 제출된 줄 압니다. 문제가 있을 때만 나중에 반려로 바뀝니다.';
+  $('firstHint').textContent = '검사가 끝날 때까지 "확인 중"으로 보입니다. 끝나면 제출완료 또는 제출 반려로 바뀝니다.';
   render();
   paintNote();
 })();
