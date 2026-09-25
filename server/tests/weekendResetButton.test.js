@@ -34,7 +34,11 @@ const doc = { head: mk('head'), body: mk('body'), createElement: () => mk(''),
 let OV = null;
 const sb = { window: win, document: doc, console: { log() {}, warn() {}, error() {} }, setTimeout, clearTimeout,
   sessionStorage: win.sessionStorage, localStorage: win.localStorage,
-  fetch: async () => ({ ok: true, json: async () => Object.assign({ ok: true }, OV) }) };
+  fetch: async (url, opt) => {
+    if (opt && opt.method === 'POST') POSTS.push({ url: String(url), body: JSON.parse(opt.body || '{}') });
+    return { ok: true, json: async () => Object.assign({ ok: true }, OV) };
+  } };
+const POSTS = [];
 sb.globalThis = sb; win.document = doc;
 vm.createContext(sb);
 vm.runInContext(SRC, sb, { filename: 'campaign-daily-plan.js' });
@@ -80,6 +84,22 @@ const body = () => (els.cdpBody && els.cdpBody.innerHTML) || '';
   ok('확인하면 재설정 결과 안내가 뜬다', /주말제외 재설정<\/b> — 오늘 이후 일정을 다시 짰습니다/.test(body()));
   ok('결과 안내도 0명 날이 채워졌다는 사실을 말한다', /직접 0명으로 바꿔 둔 날도 일건수로 채워졌으니 확인하세요/.test(body()));
   ok('방금 재설정한 상태에서는 버튼을 다시 그리지 않는다', !/cdpRebalBtn/.test(body()));
+
+  console.log('[2b] 주말제외 재설정은 직접 열어 둔 주말도 닫는다(코덱스 리뷰 P1)');
+  const SAT = '2026-08-22', SUN = '2026-08-23';
+  OV = base({ skipWeekends: true,
+    plans: [SAT, SUN].map(d => ({ date: d, count: 30, updatedBy: 'a', updatedAt: '' })) });
+  await CDP.open('c1');
+  confirms.length = 0; confirmAnswer = true;
+  CDP._rebalance();
+  ok('확인창이 "직접 열어 둔 주말·공휴일도 0명으로 닫힙니다"를 말한다', /직접 열어 둔 주말·공휴일도 0명으로 닫힙니다/.test(confirms[0] || ''));
+  POSTS.length = 0;
+  await CDP._save();
+  const post = POSTS.find(x => /daily-plan/.test(x.url));
+  const set = (post && post.body.set) || [];
+  const at = d => { const h = set.find(x => x.date === d); return h ? h.count : null; };
+  ok('★★ 저장된 토·일 30명이 0명으로 닫혀 저장된다', at(SAT) === 0 && at(SUN) === 0);
+  ok('★ 총 모집인원은 그대로(150)', set.reduce((a, x) => a + x.count, 0) === 150);
 
   console.log('[3] 옛 이름 부재');
   const strs = SRC.replace(/^\s*\/\/.*$/gm, '');

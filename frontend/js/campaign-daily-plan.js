@@ -138,6 +138,15 @@
     var k = dayKind(d);
     return k === 'sat' || k === 'hol';
   }
+  /** 공고 설정만으로 본 쉬는 날 — 저장된 계획(사람이 연 주말)을 **예외로 보지 않는다**.
+   *  ★ 재설정 전용: 재설정은 저장된 계획을 통째로 갈아 끼우는 일이라, 갈아 끼울 대상인
+   *    계획을 "사람이 연 날"로 인정하면 「주말제외 재설정」 뒤에도 주말이 열린 채 남는다
+   *    (코덱스 리뷰 P1 · 2026-09-26). 평소 판정은 종전대로 policyClosed(계획 우선). */
+  function policyClosedRaw(d) {
+    if (!S || !S.data || S.data.skipWeekends !== true) return false;
+    var k = dayKind(d);
+    return k === 'sat' || k === 'hol';
+  }
   function baseFor(d) {
     if (policyClosed(d)) return 0;
     if (S.data.scheduleDriven === true) return sheetFor(d);
@@ -617,7 +626,7 @@
     return planWeekendSpread({
       from: from, today: today, target: targetTotal(),
       daily: Number(j.defaultDaily) || 0, floor: minFor(today),
-      closed: policyClosed, floorFor: minFor,
+      closed: policyClosedRaw, floorFor: minFor,
       keep: keep, tail: Object.keys(tail).sort(), maxRows: MAX_ROWS,
     });
   }
@@ -993,6 +1002,7 @@
       + (S.data.skipWeekends === true ? '주말·공휴일을 빼고' : '주말을 포함해')
       + ' 하루 일건수씩 다시 짭니다(총 모집인원은 그대로).\n\n'
       + '⚠ 직접 0명으로 바꿔 둔 날도 다시 일건수로 채워집니다.\n'
+      + (S.data.skipWeekends === true ? '⚠ 직접 열어 둔 주말·공휴일도 0명으로 닫힙니다(이미 참여한 인원이 있는 날은 그 수까지만).\n' : '')
       + '[확정 저장]을 눌러야 반영됩니다.')) return;
     if (!applyWeekendPlan()) { toast(REBAL_WHY.too_long); return; }
     toast(rebalanceLabel() + '을 적용했습니다 — 확인 후 [확정 저장]을 눌러주세요');
