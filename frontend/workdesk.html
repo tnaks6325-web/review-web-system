@@ -15970,7 +15970,7 @@ function _rvImRefreshChips(){
 function _rvImOpen(mode){
   STATE.rvIm = (STATE.rvIm===mode ? '' : mode);
   STATE.rvImSel={}; STATE.rvImAsk=null; STATE.rvImDone={}; STATE.rvImMemo={};
-  _rvImRefreshChips();
+  _renderRvHead(STATE.rvTotal|0);   // 윗줄 필터(전체·참여가능…)의 선택 표시도 함께 바꾼다
   if(!STATE.rvIm) return _loadReviewers();
   _rvImLoad();
 }
