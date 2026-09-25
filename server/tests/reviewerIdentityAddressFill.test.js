@@ -218,6 +218,17 @@ const between = (s, a, b) => { const i = s.indexOf(a); const j = s.indexOf(b, i 
   await test('참여 전에는 주소를 묻지 않는다(명의 선택 창에 주소 칸 없음)', async () => {
     assert.ok(!/\/address'|_acctNeedAddr|acctAddrIn|주소 필요/.test(campHtml));
   });
+  await test('"내 정보를 먼저 등록" 목록에 빈 주소가 ✓(등록됨)로 보이지 않는다 — 서버가 요구할 때만 주소를 보여 준다', async () => {
+    const fnSrc = between(campHtml, 'function renderMissing(missing){', '\n}\n');
+    const els = { missTtl: {}, missList: {} };
+    const sb = { $: (id) => els[id], holdTtlText: () => '30분', show: () => {} };
+    vm.createContext(sb); vm.runInContext(fnSrc + '\n}', sb);
+    sb.renderMissing(['계좌']);
+    assert.ok(!/주소/.test(els.missList.innerHTML), '주소는 참여 조건이 아니다');
+    assert.ok(/✗ 계좌/.test(els.missList.innerHTML) && /✓ 사용자명/.test(els.missList.innerHTML));
+    sb.renderMissing(['주소']);
+    assert.ok(/✗ 주소/.test(els.missList.innerHTML), '서버가 주소를 요구하면 ✗ 로 보인다(옛 서버)');
+  });
 
   if (!process.env.PGTEST_URL) {
     console.log(`\n✅ reviewerIdentityAddressFill: ${passed}개 통과 (PGTEST_URL 없음 — 진짜 PG 단계 생략)`);
