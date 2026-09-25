@@ -23,9 +23,11 @@ CREATE TABLE IF NOT EXISTS reviewer_identity_decisions (
   undone_at         TIMESTAMPTZ
 );
 
--- 같은 묶음에 살아 있는 판단은 하나만(경합으로 두 번 합치는 것 방지).
-CREATE UNIQUE INDEX IF NOT EXISTS uq_identity_decisions_open
-  ON reviewer_identity_decisions (kind, group_key) WHERE undone_at IS NULL;
+-- 같은 묶음에 살아 있는 판단은 **종류와 무관하게** 하나만(옛 화면이 "그대로 두기"한 묶음을 다시 합치지 못하게).
+-- 묶음 키는 dup| / shared| 접두로 갈려 서로 겹치지 않는다.
+DROP INDEX IF EXISTS uq_identity_decisions_open;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_identity_decisions_open_group
+  ON reviewer_identity_decisions (group_key) WHERE undone_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_identity_decisions_recent
   ON reviewer_identity_decisions (decided_at DESC);

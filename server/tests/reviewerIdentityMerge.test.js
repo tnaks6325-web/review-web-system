@@ -41,6 +41,15 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
     }
   });
 
+  await test('칩 숫자는 참여 집계(구매 원장 조회) 없이 센다', async () => {
+    const merge0 = require('../src/services/reviewerIdentityMerge.service');
+    const sqls = [];
+    const db0 = { query: async (sql) => { sqls.push(String(sql)); return { rows: [] }; } };
+    const r = await merge0.counts({ db: db0 });
+    assert.strictEqual(r.duplicates, 0);
+    assert.ok(!sqls.some((q) => /order_submissions/.test(q)), '칩 숫자에 구매 원장을 읽으면 안 된다');
+  });
+
   if (!process.env.PGTEST_URL) {
     console.log(`\n✅ reviewerIdentityMerge: ${passed}개 통과 (PGTEST_URL 없음 — 진짜 PG 단계 생략)`);
     process.exit(0);
@@ -164,6 +173,38 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       assert.ok((await subsNow()).some((s) => s.phone === '010-9090-9090'));
       const log = await merge.listDecisions({ db });
       assert.ok(log.decisions.some((d) => d.kind === 'shared_phone_ok' && d.memo === '가족이 한 폰을 씀'));
+    });
+    await test('★ 카드가 늦게 따라와도 실제로 채운 칸만 기록하고, 되돌리기는 원래 있던 값을 지우지 않는다', async () => {
+      await db.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [A, JSON.stringify([
+        { name: '박카드', phone: '010-9292-1111', address: '부산 1' },
+        { name: '박카드', phone: '010-9292-2222', address: '부산 1', bankName: '신한은행', bankAccount: '222' }])]);
+      await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+      // 남길 명의의 카드만 주소가 빈 채로 늦게 따라온 상태를 만든다(목록에는 이미 '부산 1')
+      await db.query(`UPDATE reviewer_identity_cards SET address = '' WHERE owner_reviewer_id = $1 AND phone8 = '92921111' AND status = 'active'`, [A]);
+      const grp = (await merge.listDuplicateGroups({ db })).groups.find((x) => x.ownerId === A && x.nameKey === '박카드');
+      const keep = grp.cards.find((c) => c.phone8 === '92921111');
+      const d = await merge.mergeGroup({ db, ownerId: A, nameKey: grp.nameKey, groupKey: grp.groupKey, keepCardId: keep.cardId });
+      assert.deepStrictEqual(Object.keys(d.filled).sort(), ['bank_account', 'bank_name'], '주소는 이미 있었으니 기록하지 않는다');
+      await merge.undoDecision({ db, decisionId: d.decisionId });
+      const kept = (await subsNow()).find((x) => x.phone === '010-9292-1111');
+      assert.strictEqual(kept.address, '부산 1', '원래 있던 주소가 지워지면 안 된다');
+      assert.strictEqual(kept.bankAccount, '');
+    });
+    await test('★ "그대로 두기"한 묶음을 옛 화면에서 합치지 못한다(종류 무관 판단 하나)', async () => {
+      const grp = (await merge.listDuplicateGroups({ db })).groups.find((x) => x.ownerId === A && x.nameKey === '박카드');
+      await merge.keepSeparate({ db, ownerId: A, nameKey: grp.nameKey, groupKey: grp.groupKey });
+      await assert.rejects(merge.mergeGroup({ db, ownerId: A, nameKey: grp.nameKey, groupKey: grp.groupKey, keepCardId: grp.cards[0].cardId }),
+        (e) => e.code === 'already_decided');
+    });
+    await test('한 리뷰어가 같은 번호로 명의를 여럿 가져도 참여 수를 겹쳐 세지 않는다', async () => {
+      await db.query(`UPDATE reviewers SET sub_accounts = sub_accounts || '[{"name":"이영희","phone":"010-9090-9090"},{"name":"이영희2","phone":"010-9090-9090"}]'::jsonb WHERE id = $1`, [A]);
+      await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+      await db.query(`INSERT INTO order_submissions (sheet_id, tab_name, owner_reviewer_id, phone) VALUES ('t','t',$1,'010-9090-9090')`, [A]);
+      await db.query(`DELETE FROM reviewer_identity_decisions WHERE group_key LIKE 'shared|90909090|%'`);
+      const it = (await merge.listSharedPhones({ db })).items.find((x) => x.phone8 === '90909090');
+      const mine = it.entries.filter((e) => e.ownerId === A);
+      assert.strictEqual(mine.length, 2);
+      for (const e of mine) assert.strictEqual(e.participation, 1);
     });
     await test('되돌린 판단은 다시 되돌릴 수 없다', async () => {
       await assert.rejects(merge.undoDecision({ db, decisionId: decision.decisionId }), (e) => e.code === 'already_undone');

@@ -21,13 +21,19 @@ class IdentityMergeError extends Error {
 
 // 합칠 때 빈 칸을 채우는 항목 — 카드 칸 → (타계정 목록 키, 리뷰어 칸)
 const FILL_FIELDS = [
-  { card: 'address', sub: 'address', owner: 'address' },
-  { card: 'bank_name', sub: 'bankName', owner: 'bank_name' },
-  { card: 'bank_account', sub: 'bankAccount', owner: 'bank_account' },
-  { card: 'account_holder', sub: 'accountHolder', owner: 'account_holder' },
-  { card: 'shopping_id', sub: 'shoppingId', owner: 'shopping_id' },
+  { card: 'address', sub: 'address', alt: 'address', owner: 'address' },
+  { card: 'bank_name', sub: 'bankName', alt: 'bank_name', owner: 'bank_name' },
+  { card: 'bank_account', sub: 'bankAccount', alt: 'bank_account', owner: 'bank_account' },
+  { card: 'account_holder', sub: 'accountHolder', alt: 'account_holder', owner: 'account_holder' },
+  { card: 'shopping_id', sub: 'shoppingId', alt: 'shopping_id', owner: 'shopping_id' },
 ];
 const blank = (v) => String(v == null ? '' : v).trim() === '';
+const subVal = (s, f) => (s && !blank(s[f.sub]) ? s[f.sub] : (s ? s[f.alt] : ''));
+function asSubs(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') { try { return asSubs(JSON.parse(value)); } catch (_) { return []; } }
+  return [];
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 묶음 키 — 그 순간의 명의 구성(번호 정렬). 구성이 바뀌면 키가 달라져 다시 목록에 뜬다. */
@@ -45,7 +51,10 @@ async function _openDecisionKeys(db, kinds) {
 }
 
 /** 참여 수·마지막 참여 — 구매 원장(order_submissions) 기준. 소유자가 비어 있는 옛 기록도 번호로 센다. */
-async function _participation(db, pairs) {
+async function _participation(db, pairsIn) {
+  // ★ 같은 (소유자, 번호) 가 여러 번 들어오면 주문이 그만큼 겹쳐 세어진다 — 먼저 한 번씩으로 줄인다.
+  const seen = new Set();
+  const pairs = (pairsIn || []).filter((x) => { const k = `${x.owner}|${x.p8}`; if (seen.has(k)) return false; seen.add(k); return true; });
   if (!pairs.length) return new Map();
   const { rows } = await db.query(
     `SELECT p.owner, p.p8, COUNT(os.id)::int AS n, MAX(os.submitted_at) AS last_at
@@ -66,7 +75,7 @@ const _cardView = (c, part) => ({
 });
 
 /** ① 중복 의심 명의 — 한 리뷰어 밑의 이름 같고 번호 다른 활성 카드 묶음(판단한 묶음 제외). */
-async function listDuplicateGroups({ db = pool, limit = 50, offset = 0 } = {}) {
+async function listDuplicateGroups({ db = pool, limit = 50, offset = 0, countOnly = false } = {}) {
   const { rows } = await db.query(
     `SELECT c.owner_reviewer_id AS owner, r.name AS owner_name, c.name_key,
             json_agg(json_build_object('id', c.id, 'kind', c.kind, 'name', c.name, 'phone', c.phone, 'phone8', c.phone8,
@@ -79,6 +88,7 @@ async function listDuplicateGroups({ db = pool, limit = 50, offset = 0 } = {}) {
   const groups = rows
     .map((g) => ({ ...g, groupKey: dupGroupKey(g.owner, g.name_key, g.cards.map((c) => c.phone8)) }))
     .filter((g) => !decided.has(g.groupKey));
+  if (countOnly) return { ok: true, total: groups.length, groups: [] };   // 칩 숫자 — 참여 집계(구매 원장 전체 조회) 생략
   const pairs = [];
   for (const g of groups) for (const c of g.cards) pairs.push({ owner: g.owner, p8: c.phone8 });
   const part = await _participation(db, pairs);
@@ -91,7 +101,7 @@ async function listDuplicateGroups({ db = pool, limit = 50, offset = 0 } = {}) {
 }
 
 /** ② 다른 리뷰어와 겹치는 번호 — 서로 다른 리뷰어의 활성 카드가 같은 번호(확인한 번호 제외). */
-async function listSharedPhones({ db = pool, limit = 50, offset = 0 } = {}) {
+async function listSharedPhones({ db = pool, limit = 50, offset = 0, countOnly = false } = {}) {
   const { rows } = await db.query(
     `SELECT c.phone8,
             json_agg(json_build_object('owner', c.owner_reviewer_id, 'ownerName', r.name, 'id', c.id, 'kind', c.kind,
@@ -105,6 +115,7 @@ async function listSharedPhones({ db = pool, limit = 50, offset = 0 } = {}) {
   const items = rows
     .map((x) => ({ ...x, groupKey: sharedGroupKey(x.phone8, x.cards.map((c) => c.owner)) }))
     .filter((x) => !decided.has(x.groupKey));
+  if (countOnly) return { ok: true, total: items.length, items: [] };
   const pairs = [];
   for (const x of items) for (const c of x.cards) pairs.push({ owner: c.owner, p8: c.phone8 });
   const part = await _participation(db, pairs);
@@ -141,6 +152,13 @@ async function _lockGroup(client, ownerId, nameKey) {
   return rows;
 }
 
+/** 같은 묶음에 살아 있는 판단이 있으면(종류 무관) 거부 — 옛 화면이 "그대로 두기"한 묶음을 다시 합치지 못하게. */
+async function _assertUndecided(client, groupKey) {
+  const { rows } = await client.query(
+    `SELECT kind FROM reviewer_identity_decisions WHERE group_key = $1 AND undone_at IS NULL LIMIT 1 FOR UPDATE`, [groupKey]);
+  if (rows.length) throw new IdentityMergeError('already_decided', '다른 담당자가 이미 이 묶음을 처리했습니다. 화면을 새로고침해 주세요.', 409);
+}
+
 function _assertSameGroup(active, ownerId, nameKey, groupKey) {
   const now = dupGroupKey(ownerId, nameKey, active.map((c) => c.phone8));
   if (!groupKey || now !== groupKey || active.length < 2) {
@@ -156,33 +174,47 @@ async function mergeGroup({ ownerId, nameKey, groupKey, keepCardId, by = '', db 
   return _tx(async (client) => {
     const active = await _lockGroup(client, ownerId, nameKey);
     _assertSameGroup(active, ownerId, nameKey, groupKey);
+    await _assertUndecided(client, groupKey);
     const keep = active.find((c) => String(c.id) === String(keepCardId));
     if (!keep) throw new IdentityMergeError('bad_keep', '남길 명의를 다시 골라 주세요.');
     const merged = active.filter((c) => c.id !== keep.id);
     if (merged.some((c) => c.kind === 'self')) {
       throw new IdentityMergeError('self_cannot_merge', '본인 명의는 합쳐 없앨 수 없습니다. 본인 명의를 남길 명의로 골라 주세요.');
     }
-    // 빈 칸만 채움 — 합쳐지는 명의 중 참여가 앞선(먼저 만든) 것부터 값이 있는 첫 칸
+    // 빈 칸만 채움 — ★ 빈 칸인지·채울 값이 무엇인지는 **리뷰어 정보(진실원본)** 에서 본다(카드는 늦게 따라올 수 있다).
+    //   실제로 채운 칸만 filled 에 적는다 — 되돌리기가 원래 있던 값을 지우지 않게(Codex P1).
+    const { rows: [rv] } = await client.query(
+      `SELECT address, bank_name, bank_account, account_holder, shopping_id, sub_accounts FROM reviewers WHERE id = $1`, [ownerId]);
+    const subsNow = asSubs(rv && rv.sub_accounts);
+    const sources = merged
+      .map((c) => { const i = cards.findSubIndex(subsNow, c.name, c.phone); return i >= 0 ? subsNow[i] : null; })
+      .filter(Boolean);
     const filled = {};
-    for (const f of FILL_FIELDS) {
-      if (!blank(keep[f.card])) continue;
-      const src = merged.find((c) => !blank(c[f.card]));
-      if (src) filled[f.card] = String(src[f.card]).trim();
-    }
-    if (Object.keys(filled).length) {
-      if (keep.kind === 'self') {
-        const cols = FILL_FIELDS.filter((f) => filled[f.card] != null);
+    if (keep.kind === 'self') {
+      const cols = [];
+      for (const f of FILL_FIELDS) {
+        if (!blank(rv[f.owner])) continue;
+        const src = sources.find((x) => !blank(subVal(x, f)));
+        if (src) { filled[f.card] = String(subVal(src, f)).trim(); cols.push(f); }
+      }
+      if (cols.length) {
         const sets = cols.map((f, i) => `${f.owner} = CASE WHEN COALESCE(BTRIM(${f.owner}), '') = '' THEN $${i + 2} ELSE ${f.owner} END`);
         await client.query(`UPDATE reviewers SET ${sets.join(', ')} WHERE id = $1`, [ownerId, ...cols.map((f) => filled[f.card])]);
-      } else {
-        const r = await cards.mutateSubAccountsInTx(client, ownerId, (subs) => {
-          const i = cards.findSubIndex(subs, keep.name, keep.phone);
-          if (i < 0) throw new IdentityMergeError('stale', '남길 명의를 목록에서 찾지 못했습니다. 화면을 새로고침해 주세요.', 409);
-          for (const f of FILL_FIELDS) if (filled[f.card] != null && blank(subs[i][f.sub])) subs[i][f.sub] = filled[f.card];
-          return subs;
-        }, { source: 'merge' });
-        void r;
       }
+    } else if (sources.length) {
+      await cards.mutateSubAccountsInTx(client, ownerId, (subs) => {
+        const i = cards.findSubIndex(subs, keep.name, keep.phone);
+        if (i < 0) throw new IdentityMergeError('stale', '남길 명의를 목록에서 찾지 못했습니다. 화면을 새로고침해 주세요.', 409);
+        let changed = false;
+        for (const f of FILL_FIELDS) {
+          if (!blank(subVal(subs[i], f))) continue;
+          const src = sources.find((x) => !blank(subVal(x, f)));
+          if (!src) continue;
+          const v = String(subVal(src, f)).trim();
+          subs[i][f.sub] = v; filled[f.card] = v; changed = true;
+        }
+        return changed ? subs : null;
+      }, { source: 'merge' });
     }
     await client.query(
       `UPDATE reviewer_identity_cards SET status = 'merged', merged_into = $2, updated_at = NOW(), record_version = record_version + 1
@@ -202,6 +234,7 @@ async function keepSeparate({ ownerId, nameKey, groupKey, memo = '', by = '', db
   return _tx(async (client) => {
     const active = await _lockGroup(client, ownerId, nameKey);
     _assertSameGroup(active, ownerId, nameKey, groupKey);
+    await _assertUndecided(client, groupKey);
     const ins = await client.query(
       `INSERT INTO reviewer_identity_decisions (kind, owner_reviewer_id, group_key, memo, decided_by)
        VALUES ('keep_separate', $1, $2, $3, $4) RETURNING id`,
@@ -299,7 +332,7 @@ async function listDecisions({ db = pool, limit = 50 } = {}) {
 
 /** 등록리뷰어DB 칩의 숫자. */
 async function counts({ db = pool } = {}) {
-  const [a, b] = await Promise.all([listDuplicateGroups({ db, limit: 1 }), listSharedPhones({ db, limit: 1 })]);
+  const [a, b] = await Promise.all([listDuplicateGroups({ db, countOnly: true }), listSharedPhones({ db, countOnly: true })]);
   return { ok: true, duplicates: a.total, sharedPhones: b.total };
 }
 
