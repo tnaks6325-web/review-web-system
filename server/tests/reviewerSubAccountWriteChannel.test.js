@@ -2,7 +2,7 @@
 /*
  * 타계정 목록 쓰기 창구 — 명의 카드 2단계 조각 2-2 (결정 기록 177)
  *   A. 배선: 쓰는 곳 8곳이 전부 창구(mutateSubAccounts) 또는 잠금+카드 맞추기(syncCardsAfterWrite)를 탄다
- *   B. 스텁 실행: 결제 계좌 보완이 같은 번호 가족을 이름으로 가른다 · 모호하면 쓰지 않는다 ·
+ *   B. 스텁 실행: 결제 계좌 보완이 같은 번호를 쓰는 타계정을 이름으로 가른다 · 모호하면 쓰지 않는다 ·
  *      내정보 저장이 같은 번호 리뷰어 여럿이면 쓰지 않는다
  *   C. PGTEST_URL 있으면 진짜 PG: 동시 저장 두 건이 둘 다 남는다 · 저장 즉시 카드가 맞춰진다 ·
  *      카드 맞추기가 실패해도 저장은 유지된다 · 주문·참여 INSERT(외래키)를 막지 않는다
@@ -106,7 +106,7 @@ const stripComments = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.t
   }
   const payment = require('../src/services/payment.service');
   try {
-    await test('결제 계좌 보완: 같은 번호 가족은 이름으로 정확한 사람에게 저장한다', async () => {
+    await test('결제 계좌 보완: 같은 번호를 쓰는 타계정은 이름으로 정확한 명의에 저장한다', async () => {
       const log = [];
       pool.connect = async () => stubConn(family(), log);
       await payment.saveReviewerAccount({ reviewerId: OWNER, subPhone8: '55556666', subName: '김아이', bankAccount: '999', by: 't' });
@@ -115,7 +115,7 @@ const stripComments = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.t
       assert.strictEqual(saved[0].bankAccount, '111');
       assert.strictEqual(saved[1].bankAccount, '999');
     });
-    await test('결제 계좌 보완: 이름 없이 가족 번호만 오면 저장하지 않는다(종전: 첫 사람에게 저장)', async () => {
+    await test('결제 계좌 보완: 이름 없이 여러 타계정이 쓰는 번호만 오면 저장하지 않는다(종전: 첫 사람에게 저장)', async () => {
       const log = [];
       pool.connect = async () => stubConn(family(), log);
       await assert.rejects(payment.saveReviewerAccount({ reviewerId: OWNER, subPhone8: '55556666', bankAccount: '999', by: 't' }),

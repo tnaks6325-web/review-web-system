@@ -463,7 +463,7 @@ function canReviewPlainNameOcrCorrection(selectedScore, selected, competingIdent
   const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
   // ★ 캡처 이름이 다른 저장 명의의 이름과 **정확히 맞으면** 오인식이 아니라 그 명의의 주문이다.
   //   빼면 한 글자 차이 이름(김민수/김민우)의 다른 명의 캡처가 확인 단계로 풀린다(PR #1485 리뷰 P1).
-  //   ★ 경쟁 명의가 있다는 것만으로 막지 말 것 — 같은 번호·주소를 쓰는 가족 명의는 이름이 달라도
+  //   ★ 경쟁 명의가 있다는 것만으로 막지 말 것 — 같은 번호·주소를 쓰는 타계정 명의는 이름이 달라도
   //   두 칸이 맞아 경쟁자로 잡히므로, 본인 이름 한 글자 오인식의 정상 제출까지 막는다(PR #1486 리뷰 P1).
   if (competingIdentity && nameVerdict(rawName, competingIdentity.name).verdict === 'match') return false;
   return selectedScore.parts.name.verdict === 'mismatch'

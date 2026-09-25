@@ -435,7 +435,7 @@ async function listPaymentTargets(opts = {}) {
       accountRef: acct && acct.reviewerId
         ? { reviewerId: acct.reviewerId,
             subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null,
-            // ★ 조각 2-2(결정 177): 같은 번호의 가족 명의를 가르는 이름 — 타계정을 실제로 지목할 때만 싣는다
+            // ★ 조각 2-2(결정 177): 같은 번호를 쓰는 타계정을 가르는 이름 — 타계정을 실제로 지목할 때만 싣는다
             ...(acct.isSub && (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) ? { subName: acct.name || null } : {}) }
         : null,
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
@@ -1518,8 +1518,8 @@ async function saveReviewerAccount({ reviewerId, subPhone8, subName, bankName, b
       const { rows } = await client.query(`SELECT sub_accounts FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
       if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
       const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
-      // ★ 조각 2-2(결정 177): 가족이 같은 번호를 쓰면 번호만으로는 누구 칸인지 모른다(운영 17명).
-      //   종전에는 **첫 번째** 칸에 저장해 다른 가족의 계좌를 덮었다 → 이름으로 좁히고, 그래도 여럿이면 저장하지 않는다.
+      // ★ 조각 2-2(결정 177): 여러 타계정이 같은 번호를 쓰면 번호만으로는 누구 칸인지 모른다(운영 17명).
+      //   종전에는 **첫 번째** 칸에 저장해 다른 타계정의 계좌를 덮었다 → 이름으로 좁히고, 그래도 여럿이면 저장하지 않는다.
       const _nk = (v) => String(v || '').replace(/\s+/g, '');
       const byPhone = [];
       arr.forEach((s, i) => { if (String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8) === sub) byPhone.push(i); });
