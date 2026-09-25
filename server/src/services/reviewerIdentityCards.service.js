@@ -413,5 +413,72 @@ async function mutateSubAccounts(reviewerId, mutate, opts = {}) {
   } finally { client.release(); }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 조각 3-1 — 구매양식 명의 확인이 카드 번호를 이름표로 쓴다 (결정 기록 178)
+// ★ 명의의 값(이름·번호·주소·계좌)은 여전히 목록에서 읽는다 — 카드에서 가져오는 것은 "바뀌지 않는 이름표" 하나뿐.
+// ★ 짝이 확실할 때만 카드 번호를 쓴다(칸마다 판단). 못 찾으면 그 칸만 옛 이름표로 남긴다(막지 않는다).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 카드 읽기 스위치 — Railway `IDENTITY_CARDS_READ=0` 이면 전부 옛 이름표(칸 순번)로 돌아간다. */
+function cardKeysEnabled() { return process.env.IDENTITY_CARDS_READ !== '0'; }
+
+/** 소유자의 활성 카드. 카드 표가 없으면 null(모름 = 옛 이름표). */
+async function loadActiveCards(db, ownerId) {
+  // ★ 커넥션(트랜잭션 안)에서 부르면 SAVEPOINT 로 감싼다 — 조회 실패 하나가 트랜잭션 전체를 죽이지 않게(25P02).
+  const inTx = db && typeof db.release === 'function';
+  const sp = 'ic_read_' + Math.random().toString(36).slice(2, 8);
+  try {
+    if (inTx) await db.query(`SAVEPOINT ${sp}`);
+    const { rows } = await db.query(
+      `SELECT id, kind, name_key, phone8 FROM reviewer_identity_cards
+        WHERE owner_reviewer_id = $1 AND status = 'active'`, [ownerId]);
+    if (inTx) await db.query(`RELEASE SAVEPOINT ${sp}`);
+    return rows;
+  } catch (err) {
+    if (inTx) { try { await db.query(`ROLLBACK TO SAVEPOINT ${sp}`); await db.query(`RELEASE SAVEPOINT ${sp}`); } catch (_) { /* noop */ } }
+    if (err && ['42P01', '42703'].includes(err.code)) return null;
+    throw err;
+  }
+}
+
+/**
+ * 목록의 타계정 칸마다 카드 번호를 짝짓는다(순수 함수).
+ * @returns Map<index, cardId> + misses[{index, reason}]
+ *   reason: no_name_or_phone(카드가 안 만들어지는 칸) · duplicate_in_list(같은 명의 칸이 둘) ·
+ *           same_as_self(본인 카드로 접힘) · no_card(카드가 아직 없음) · ambiguous_card(같은 카드가 둘)
+ */
+function mapSubsToCards(reviewer, cards) {
+  const byIndex = new Map();
+  const misses = [];
+  const subs = asSubs(reviewer && reviewer.sub_accounts);
+  const sigOfSub = (sub) => {
+    const nk = nameKey(str(sub && sub.name)); const p8 = phone8Of(sub && sub.phone);
+    return nk && p8 ? `${nk}|${p8}` : '';
+  };
+  const count = new Map();
+  subs.forEach((sub) => { const s = sigOfSub(sub); if (s) count.set(s, (count.get(s) || 0) + 1); });
+  const selfSig = str(reviewer && reviewer.name) && phone8Of(reviewer && reviewer.phone)
+    ? `${nameKey(str(reviewer.name))}|${phone8Of(reviewer.phone)}` : '';
+  const subCards = new Map();
+  for (const c of cards || []) {
+    if (c.kind !== 'sub') continue;
+    const s = `${c.name_key}|${c.phone8}`;
+    if (!subCards.has(s)) subCards.set(s, []);
+    subCards.get(s).push(c);
+  }
+  subs.forEach((sub, index) => {
+    const s = sigOfSub(sub);
+    if (!s) return misses.push({ index, reason: 'no_name_or_phone' });
+    if (count.get(s) > 1) return misses.push({ index, reason: 'duplicate_in_list' });
+    if (s === selfSig) return misses.push({ index, reason: 'same_as_self' });
+    const hit = subCards.get(s) || [];
+    if (hit.length === 0) return misses.push({ index, reason: 'no_card' });
+    if (hit.length > 1) return misses.push({ index, reason: 'ambiguous_card' });
+    byIndex.set(index, String(hit[0].id));
+  });
+  return { byIndex, misses };
+}
+
 module.exports = { buildCardsFromReviewer, previewCards, applyCards, syncOwnerCards, planOwnerSync, reconcileCards,
-  findSubIndex, syncCardsAfterWrite, mutateSubAccountsInTx, mutateSubAccounts, _test: { nameKey, phone8Of } };
+  findSubIndex, syncCardsAfterWrite, mutateSubAccountsInTx, mutateSubAccounts,
+  cardKeysEnabled, loadActiveCards, mapSubsToCards, _test: { nameKey, phone8Of } };

@@ -422,6 +422,17 @@ router.post('/identity-cards/reconcile', authMiddleware, adminOrMasterMiddleware
     next(err);
   }
 });
+// 조각 3-1(결정 178): 과거 구매 기록의 명의 이름표를 칸 순번 → 카드 번호로. preview = 쓰기 0, apply = confirm:true 필수.
+router.get('/identity-cards/rebind-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await require('../services/reviewerOrderIdentity.service').rebindLegacySubHashes({ dryRun: true })); }
+  catch (err) { next(err); }
+});
+router.post('/identity-cards/rebind', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if ((req.body || {}).confirm !== true) return res.status(400).json({ ok: false, code: 'confirm_required', error: 'rebind-preview 로 확인한 뒤 confirm:true 로 실행하세요.' });
+    res.json(await require('../services/reviewerOrderIdentity.service').rebindLegacySubHashes({ dryRun: false }));
+  } catch (err) { next(err); }
+});
 // ── 시트 데이터 반영 점검(sheet-sync audit) — adminOrMaster ──
 //   등록된 작업(tab_configs) 전수를 분모로 "시트 → 검색인덱스 → 작업보드" 반영 사슬의 끊긴 곳을
 //   진단(읽기 전용·시트 API 무접촉). ?before=YYYY-MM-DD 면 그 날짜 이전 등록(+ 등록일 미상)만.
