@@ -306,12 +306,22 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     && /_finalSlotRole !== _slotRole[\s\S]*slotKey: _finalSlotRole/.test(diag)
     && /samples: _finalInspectSamples/.test(diag)
     && /classifySubmissionImage\(base64, mimeType, \{ samples \}\)/.test(readS('services/captureVerify.service.js')));
-  // ★ 창(window)은 "루프 앞에서 준비한다"를 고정하기 위한 것 — 주석이 늘면 함께 넓힌다
-  //   (검사 의미는 불변: 준비 블록과 파일 루프 사이에 다른 준비가 끼어들지 않는다).
-  // ★ 창을 3500자로 넓혔다 — 자동 분류(파일 라우팅) 판정 재료 준비가 샘플 준비와 루프 사이에
-  //   들어왔다(검사 의미 불변: 샘플 준비는 여전히 루프 앞 1회).
-  ok('예시는 파일 루프 밖에서 1회 준비(파일 수만큼 Drive 호출이 늘지 않게)',
-    /let _inspectSamples = \[\];[\s\S]{0,3500}for \(let i = 0; i < files\.length/.test(diag));
+  /* ★★ 고정 폭 창으로 재지 않는다 — 그 사이에 줄이 늘 때마다(이번엔 검수 추출 함수 3개)
+     검사가 조용히 빨개진다. 대신 **순서 + 그 구간의 호출 횟수**로 고정한다.
+     검사 의미는 같거나 더 강하다: 샘플 준비는 루프보다 앞이고, 그 사이에서 1회뿐이다. */
+  {
+    // ★ 같은 패턴이 다른 라우트에도 있다 — review-upload 라우트 안에서만 찾는다.
+    const iRoute = diag.indexOf("router.post('/review-upload'");
+    const iSamples = diag.indexOf('let _inspectSamples = [];', iRoute);
+    const iLoop = diag.indexOf('for (let i = 0; i < files.length', iSamples);
+    // ★ 세는 것은 **루프마다 도는 준비**다 — `_inspectSamples` 로의 대입 1회.
+    //   (`_finalInspectSamples` 재조회는 슬롯 역할이 바뀐 건에만 있는 별개 변수이고,
+    //    추출된 검수 함수 안에 있어 루프 앞 구간에 텍스트로만 들어온다.)
+    const route = iRoute >= 0 ? diag.slice(iRoute) : '';
+    const prepCount = route.split('_inspectSamples = await _riSvc.submissionSamples(').length - 1;
+    ok('예시는 파일 루프 밖에서 1회 준비(파일 수만큼 Drive 호출이 늘지 않게)',
+      iRoute >= 0 && iSamples >= 0 && iLoop > iSamples && prepCount === 1);
+  }
   // 조립은 submissionSamples 한 곳으로 수렴 — 슬롯 분기는 서비스 안에 있다(검사 의미 불변)
   ok('★ 슬롯에 맞는 예시를 고른다 — 영수증 슬롯엔 현금영수증 예시(리뷰 예시를 주면 판정이 흔들린다)',
     /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: _slotRole \}\)/.test(diag)
@@ -329,8 +339,15 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   ok('★ 사이클 캡 — 한 번에 몰아치지 않는다', /Math\.min\(Number\(limit\) \|\| SWEEP_BATCH, 100\)/.test(svcSrc));
   ok('★ 과거분은 지문이 없다 → 이번에 계산해 채운다(이후 중복 대조의 재료)',
     /if \(!t\.file_hash\) await saveFileHash/.test(svcSrc));
-  ok('★★ 스윕은 throw 하지 않는다(cron 이 죽으면 안 된다)',
-    /async function runInspectSweep[\s\S]{0,2600}catch \(e\) \{\s*\n\s*logger\.warn\(`\[reviewInspect\] 스윕 실패/.test(svcSrc));
+  /* ★★ 고정 폭 창으로 재지 않는다 — 스윕 안에 줄이 늘 때마다(이번엔 반려 안내 호출)
+     검사가 조용히 빨개진다. **함수 구간 안에 있는가**로 고정한다(검사 의미 불변). */
+  {
+    const iSweep = svcSrc.indexOf('async function runInspectSweep');
+    const iNext = svcSrc.indexOf('\nasync function ', iSweep + 10);
+    const seg = iSweep >= 0 ? svcSrc.slice(iSweep, iNext > iSweep ? iNext : undefined) : '';
+    ok('★★ 스윕은 throw 하지 않는다(cron 이 죽으면 안 된다)',
+      iSweep >= 0 && /catch \(e\) \{\s*\n\s*logger\.warn\(`\[reviewInspect\] 스윕 실패/.test(seg));
+  }
   const cronSrc = readS('jobs/cron.js');
   ok('cron 등록 + 멀티 인스턴스 직렬화(jobLock)',
     /review_inspect_sweep/.test(cronSrc) && /withJobLock\('review_inspect_sweep'/.test(cronSrc));

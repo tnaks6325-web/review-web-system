@@ -794,6 +794,31 @@ async function searchByName(query, phone8, opts = {}) {
       };
     });
 
+    /* ── 제출완료 행의 검수 상태(확인 중 / 제출 반려) 배치 조회 ─────────────
+       사용자 확정 2026-09-26 — 제출 직후에는 `확인 중`, 검사가 끝나면 `제출완료`
+       또는 `제출 반려`로 바뀐다. 반려 사유는 리뷰어 카드에 한 줄로 적힌다.
+       ★ 판정은 `reviewCheck.service` 단일 출처 — 여기서 다시 세지 않는다.
+       ★ 배치 1회(N+1 금지) · **fail-soft** — 실패하면 필드를 아예 안 싣고
+         화면은 종전대로 `제출완료`로 그린다(모르는 것을 '확인 중'으로 꾸미지 않는다).
+       ★ 완료 행은 이미 강한 키(연락처 정확 일치)로만 열리므로 새로 새는 정보가 없다. */
+    const _doneItems = results.filter(r => r.isSubmitted && r.sheetId && r.tabName && r.rowIndex != null);
+    if (_doneItems.length > 0) {
+      try {
+        const RC = require('./reviewCheck.service');
+        const map = await RC.reviewCheckMap(
+          _doneItems.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex }))
+        );
+        if (map && map.size) {
+          for (const it of _doneItems) {
+            const v = map.get(RC.rowKey(it.sheetId, it.tabName, it.rowIndex));
+            if (!v) continue;
+            it.reviewCheck = v.state;                      // 'checking' | 'rejected'
+            if (v.short) it.reviewCheckReason = v.short;   // 예: '중복 리뷰 이미지'
+          }
+        }
+      } catch (_) { /* 표시 보조값 — 실패해도 목록은 그대로 나간다 */ }
+    }
+
     // ── 다중 캡처 슬롯 행: 이미 제출된 슬롯(submittedSlots) 일괄 조회 ──
     //   captureSlots가 있는 행이 하나라도 있을 때만 1회 배치 쿼리 (단일 슬롯 검색은 비용 0)
     const multiSlotItems = results.filter(r => r.captureSlots);
