@@ -1427,7 +1427,10 @@ async function _doChangeOption(newKey){
 
 function renderMissing(missing){
   $('missTtl').textContent = holdTtlText();
-  const all = ['사용자명','전화번호','주소','계좌'];
+  // ★ 주소는 참여 조건이 아니다(결정 181) — 구매양식에서 캡처 주소로 [저장]한다. 목록에 넣으면 빈 주소가 "✓"로 보인다.
+  //   서버가 요구 항목으로 알려 준 것(옛 서버의 '주소' 포함)은 그대로 ✗ 로 보여 준다.
+  const all = ['사용자명','전화번호','계좌'];
+  missing.forEach(k => { if(!all.includes(k)) all.push(k); });
   $('missList').innerHTML = all.map(k =>
     missing.includes(k)
       ? `<div class="miss">✗ ${k} — 미등록</div>`
