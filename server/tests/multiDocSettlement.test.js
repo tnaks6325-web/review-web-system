@@ -124,6 +124,24 @@ async function run() {
   doc = await svc.quoteDocForTab({ sheetId: 'X', tabName: 'S4', role: 'admin' });
   ok(snaps.join() === 'S4' && doc.docs.length === 1, 'D4: 한 장이면 종전 키 그대로(과거 기록 보존)');
 
+  // D5: 1장→여러 장 전환 — 옛 키(sales_id)의 같은 견적번호 기록을 그 장 앞에 이어 붙인다(코덱스 리뷰 P2)
+  const legacyPool = pool([
+    [/FROM trackb_settlement_links WHERE sheet_id=\$1 AND tab_name=\$2/, () => ({ rows: [{ salesId: 'S1', contractNumber: 'C' }] })],
+    [/content_hash AS "hash" FROM trackb_quote_snapshots/, () => ({ rows: [
+      { version: 1, payload: { quoteNumber: 'Q-1', status: 'draft' }, capturedAt: '2026-08-01', hash: 'h1' },
+      { version: 2, payload: { quoteNumber: 'Q-1', status: 'accepted' }, capturedAt: '2026-08-05', hash: 'h2' },
+      { version: 3, payload: { quoteNumber: 'OTHER' }, capturedAt: '2026-08-06', hash: 'h3' }] })],
+    [/SELECT version, content_hash FROM trackb_quote_snapshots/, () => ({ rows: [] })],
+    [/INSERT INTO trackb_quote_snapshots/, () => ({ rows: [] })],
+    [/SELECT version, payload, captured_at/, (sq, p) => ({ rows: p[0] === 'S1#q1' ? [{ version: 1, payload: { quoteNumber: 'Q-1', status: 'accepted', v: 'new' }, capturedAt: '2026-09-01' }] : [] })],
+  ]);
+  svc.__setPoolForTest(legacyPool);
+  doc = await svc.quoteDocForTab({ sheetId: 'X', tabName: 'S1', role: 'admin' });
+  const q1 = doc.docs.find(x => x.quoteNumber === 'Q-1');
+  ok(q1.versions.length === 3 && q1.versions[0].payload.status === 'draft' && q1.versions[2].payload.v === 'new', 'D5: 옛 기록 2개(초안·최종) + 새 기록 1개가 이어진다 — 다른 견적번호 기록은 섞지 않는다');
+  ok(q1.versions.map(v => v.version).join() === '1,2,3', 'D6: 버전 번호는 이어서 다시 매긴다');
+  ok(!legacyPool.q.some(x => /DELETE|UPDATE trackb_quote_snapshots/.test(x.s)), 'D7: 옛 기록은 지우지도 옮기지도 않는다(읽기만)');
+
   global.fetch = savedFetch;
 
   // ═══ E. 화면 ═══

@@ -1783,12 +1783,15 @@ function _quoteHash(quote) {
   return crypto.createHash('sha256').update(basis).digest('hex').slice(0, 32);
 }
 // 스냅샷 적재(append-only) — 최신 버전과 해시가 같으면 write 0회. 경합의 UNIQUE 충돌은 무해(다음 조회로 수렴).
-async function _snapshotQuote(salesId, quote) {
+//   seedHash: 이 키에 기록이 아직 없을 때 "이미 옛 키에 같은 내용이 있다"는 뜻 — 같으면 적재하지 않는다
+//   (견적서가 1장→여러 장으로 바뀌는 순간 옛 기록의 마지막 버전을 새 키에 한 번 더 쌓지 않게).
+async function _snapshotQuote(salesId, quote, { seedHash = null } = {}) {
   if (!salesId || !quote) return;
   const db = getPool(); const hash = _quoteHash(quote);
   const { rows } = await db.query(
     'SELECT version, content_hash FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version DESC LIMIT 1', [salesId]);
   if (rows.length && rows[0].content_hash === hash) return;
+  if (!rows.length && seedHash && seedHash === hash) return;
   const next = rows.length ? rows[0].version + 1 : 1;
   try {
     await db.query(
@@ -1816,14 +1819,23 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
   // ★★ 버전 기록 키 — 견적서가 1장이면 종전 키(sales_id) 그대로(과거 기록 보존), 여러 장이면 장마다
   //   `sales_id#quote_id`. 한 키에 여러 장을 적재하면 장이 번갈아 저장돼 가짜 "새 버전"이 쌓인다(종전 결함).
   const multi = rows.length > 1;
+  // ★ 1장→여러 장 전환 시 옛 기록(sales_id 키)을 잃지 않는다 — 옛 키의 기록 중 **같은 견적번호**의 것을
+  //   그 장의 기록 앞에 이어 붙인다(코덱스 리뷰 P2). 옛 기록은 지우지도 옮기지도 않는다(읽기만).
+  let legacy = [];
+  if (multi) {
+    const { rows: lr } = await getPool().query(
+      'SELECT version, payload, captured_at AS "capturedAt", content_hash AS "hash" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
+    legacy = lr;
+  }
   const docs = [];
   for (const row of rows) {
     const quote = _mapQuoteFull(row);
     const key = multi && row.id ? `${link.salesId}#${row.id}` : link.salesId;
-    await _snapshotQuote(key, quote);
+    const mine = multi ? legacy.filter(v => v.payload && String(v.payload.quoteNumber || '') === quote.quoteNumber && quote.quoteNumber) : [];
+    await _snapshotQuote(key, quote, { seedHash: mine.length ? mine[mine.length - 1].hash : null });
     const { rows: vr } = await getPool().query(
       'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [key]);
-    const versions = vr.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload }));
+    const versions = [...mine, ...vr].slice(-30).map((r, i) => ({ version: i + 1, capturedAt: r.capturedAt, payload: r.payload }));
     // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
     if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
     docs.push({ quoteNumber: quote.quoteNumber, workName: quote.workName, totalAmount: quote.totalAmount, status: quote.status, versions });
