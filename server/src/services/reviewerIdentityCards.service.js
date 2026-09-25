@@ -144,7 +144,9 @@ const MIRROR_FIELDS = ['name', 'phone', ...CARD_FIELDS];
 
 function _cardSig(c) { return `${c.name_key != null ? c.name_key : c.nameKey}|${c.phone8}`; }
 function _mostRecent(list) {
-  return list.slice().sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] || null;
+  // ★ pg 는 updated_at 을 Date 로 준다 — 문자열 비교는 요일부터 비교해 최신을 못 고른다(Codex P2). 시각 숫자로 비교.
+  const t = (v) => { const n = v instanceof Date ? v.getTime() : Date.parse(v || ''); return Number.isFinite(n) ? n : 0; };
+  return list.slice().sort((a, b) => t(b.updated_at) - t(a.updated_at))[0] || null;
 }
 function _diff(existing, want) {
   const set = {};

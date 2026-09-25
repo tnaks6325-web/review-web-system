@@ -66,6 +66,14 @@ const opsOf = (ops) => ops.map((o) => `${o.op}:${o.id || (o.card && o.card.name 
     assert.deepStrictEqual(opsOf(ops), ['reactivate:new']);
     assert.strictEqual(ops[0].kind, 'sub');
   });
+  await test('DB 가 준 Date 값으로도 가장 최근 카드를 고른다(문자열 비교 금지 — Codex P2)', async () => {
+    const r = reviewer({ sub_accounts: [{ name: '이영희', phone: '010-2222-2222' }] });
+    // 토요일(이른 시각) vs 월요일(늦은 시각): 문자열로 비교하면 'Sat' > 'Mon' 이라 옛 카드를 고른다
+    const ex = [card('s', 'self', '김수만', '11111111', 'active', { address: '서울 1' }),
+      card('old', 'sub', '이영희', '22222222', 'removed', { updated_at: new Date('2026-09-05T00:00:00Z') }),
+      card('new', 'sub', '이영희', '22222222', 'removed', { updated_at: new Date('2026-09-07T00:00:00Z') })];
+    assert.deepStrictEqual(opsOf(svc.planOwnerSync(r, ex)), ['reactivate:new']);
+  });
   await test('예전 본인 카드가 타계정 명의로 돌아오면 타계정으로 되살린다(본인 유일 위반 방지)', async () => {
     const r = reviewer({ name: '김새명', phone: '010-9999-9999', sub_accounts: [{ name: '김수만', phone: '010-1111-1111' }] });
     const ex = [card('s2', 'self', '김새명', '99999999', 'active'), card('s1', 'self', '김수만', '11111111', 'removed')];
