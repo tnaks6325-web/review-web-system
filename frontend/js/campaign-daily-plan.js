@@ -138,6 +138,15 @@
     var k = dayKind(d);
     return k === 'sat' || k === 'hol';
   }
+  /** 공고 설정만으로 본 쉬는 날 — 저장된 계획(사람이 연 주말)을 **예외로 보지 않는다**.
+   *  ★ 재설정 전용: 재설정은 저장된 계획을 통째로 갈아 끼우는 일이라, 갈아 끼울 대상인
+   *    계획을 "사람이 연 날"로 인정하면 「주말제외 재설정」 뒤에도 주말이 열린 채 남는다
+   *    (코덱스 리뷰 P1 · 2026-09-26). 평소 판정은 종전대로 policyClosed(계획 우선). */
+  function policyClosedRaw(d) {
+    if (!S || !S.data || S.data.skipWeekends !== true) return false;
+    var k = dayKind(d);
+    return k === 'sat' || k === 'hol';
+  }
   function baseFor(d) {
     if (policyClosed(d)) return 0;
     if (S.data.scheduleDriven === true) return sheetFor(d);
@@ -542,15 +551,20 @@
     if (minFor(j.today) > targetTotal()) return 'today_over';
     return null;
   }
+  /* ★ 버튼·안내·확인창이 같은 이름을 쓴다(2026-09-26 사용자 확정) — "재배분"은 무엇을 기준으로
+     다시 까는지 읽히지 않았다. 지금 공고의 주말 설정을 그대로 이름에 싣는다. */
+  function rebalanceLabel() {
+    return (S && S.data && S.data.skipWeekends === true) ? '주말제외 재설정' : '주말포함 재설정';
+  }
   var REBAL_WHY = {
-    plan_off: '날짜별 조절 기능이 꺼져 있어 재배분할 수 없습니다',
+    plan_off: '날짜별 조절 기능이 꺼져 있어 재설정할 수 없습니다',
     schedule_driven: '시트 일정 공고는 시트가 날짜를 정합니다 — 시트에서 진행 날짜를 조정해주세요',
-    no_daily: '하루 진행 인원(일건수)이 없어 재배분할 수 없습니다 — 공고 수정에서 먼저 입력해주세요',
-    unlimited: '총 모집인원이 무제한이라 재배분할 것이 없습니다',
+    no_daily: '하루 진행 인원(일건수)이 없어 재설정할 수 없습니다 — 공고 수정에서 먼저 입력해주세요',
+    unlimited: '총 모집인원이 무제한이라 재설정할 것이 없습니다',
     single_day: '하루에 전량을 여는 공고라 날짜 배분이 없습니다',
     full: '이미 총 모집인원을 다 채웠습니다',
-    today_over: '오늘 확정·진행 인원이 남은 배분수보다 많아 재배분할 수 없습니다',
-    too_long: '재배분 구간이 한 번에 저장 가능한 ' + MAX_ROWS + '일을 넘습니다 — 아래에서 날짜별로 조절해주세요',
+    today_over: '오늘 확정·진행 인원이 남은 배분수보다 많아 재설정할 수 없습니다',
+    too_long: '재설정 구간이 한 번에 저장 가능한 ' + MAX_ROWS + '일을 넘습니다 — 아래에서 날짜별로 조절해주세요',
   };
 
   /** 재배분 계산(순수) — 상태를 읽지 않고 인자만 본다(테스트·사본 방지).
@@ -612,7 +626,7 @@
     return planWeekendSpread({
       from: from, today: today, target: targetTotal(),
       daily: Number(j.defaultDaily) || 0, floor: minFor(today),
-      closed: policyClosed, floorFor: minFor,
+      closed: policyClosedRaw, floorFor: minFor,
       keep: keep, tail: Object.keys(tail).sort(), maxRows: MAX_ROWS,
     });
   }
@@ -973,17 +987,25 @@
     if (!S || !S.data) return;
     S.wkPrompt = true;
     var why = rebalanceReason();
-    if (why) { render(); toast(REBAL_WHY[why] || '재배분 대상이 아닙니다'); return; }
+    if (why) { render(); toast(REBAL_WHY[why] || '재설정 대상이 아닙니다'); return; }
     if (!applyWeekendPlan()) { render(); toast(REBAL_WHY.too_long); return; }
-    toast('주말 설정에 맞춰 다시 배분했습니다 — 확인 후 [확정 저장]을 눌러주세요');
+    toast(rebalanceLabel() + '을 적용했습니다 — 확인 후 [확정 저장]을 눌러주세요');
   }
   /** 배너 버튼 — 사람이 누를 때만 편다(조용한 자동수정 금지) */
   function _rebalance() {
     if (!S || !S.data) return;
     var why = rebalanceReason();
-    if (why) { toast(REBAL_WHY[why] || '재배분 대상이 아닙니다'); return; }
+    if (why) { toast(REBAL_WHY[why] || '재설정 대상이 아닙니다'); return; }
+    /* ★ 오늘 이후 일정을 통째로 다시 깐다 — 사람이 직접 0명으로 바꿔 둔 날(휴무일 등)도
+       일건수로 되돌아가므로 누르기 전에 그 사실을 말한다(사용자 확정 2026-09-26). */
+    if (!window.confirm(rebalanceLabel() + ' — 오늘 이후 일정을 '
+      + (S.data.skipWeekends === true ? '주말·공휴일을 빼고' : '주말을 포함해')
+      + ' 하루 일건수씩 다시 짭니다(총 모집인원은 그대로).\n\n'
+      + '⚠ 직접 0명으로 바꿔 둔 날도 다시 일건수로 채워집니다.\n'
+      + (S.data.skipWeekends === true ? '⚠ 직접 열어 둔 주말·공휴일도 0명으로 닫힙니다(이미 참여한 인원이 있는 날은 그 수까지만).\n' : '')
+      + '[확정 저장]을 눌러야 반영됩니다.')) return;
     if (!applyWeekendPlan()) { toast(REBAL_WHY.too_long); return; }
-    toast('주말 설정에 맞춰 다시 배분했습니다 — 확인 후 [확정 저장]을 눌러주세요');
+    toast(rebalanceLabel() + '을 적용했습니다 — 확인 후 [확정 저장]을 눌러주세요');
   }
   function close() {
     // ★ 균형 모드는 열자마자 구간을 펼쳐 두므로 dirty 가 항상 크다 — "사람이 실제로 바꾼 게 있나"로
@@ -1273,7 +1295,7 @@
     //   균형 바(딱 맞습니다)와 정면으로 어긋나던 것을 막는다(실브라우저가 잡음).
     if (bal && S.shortBy > 0 && diffPlan() < 0) {
       offNote = '<div class="cdp-note warn">⚠ 지금 <b>' + (j.scheduleDriven === true ? '시트' : '기본') + ' 계획</b>만으로는 배분해야 할 인원보다 <b>'
-        + S.shortBy + '명</b>이 모자랍니다 — 아래에서 날짜별 인원을 늘리면(또는 <b>[자동 맞춤]</b>) 합계가 맞는 순간 저장할 수 있습니다'
+        + S.shortBy + '명</b>이 모자랍니다 — 아래에서 날짜별 인원을 늘리면(또는 <b>[자동으로 채우기]</b>) 합계가 맞는 순간 저장할 수 있습니다'
         + (j.scheduleDriven === true ? '. 시트에 진행 날짜를 더 넣어도 됩니다.' : '.') + '</div>';
     }
 
@@ -1285,7 +1307,7 @@
     var wkNote = '';
     if (S.rebalanced) {
       wkNote = '<div class="cdp-note" style="border-color:#86EFAC;background:#F0FDF4;color:#166534">'
-        + '↺ <b>주말 ' + (j.skipWeekends === true ? '제외' : '포함') + '</b> 설정에 맞춰 오늘 이후 일정을 다시 배분했습니다 — '
+        + '↺ <b>' + rebalanceLabel() + '</b> — 오늘 이후 일정을 다시 짰습니다 — '
         + '진행일 <b>' + S.rebalanced.days + '일</b> · 예상 종료일 <b>' + _esc(fmtMD(S.rebalanced.last)) + '</b>'
         + (S.rebalanced.shut ? ' · 뒤에 남아 있던 <b>' + S.rebalanced.shut + '일</b>은 0명으로 닫음' : '')
         + (S.rebalanced.keptN
@@ -1293,14 +1315,15 @@
             + _esc(S.rebalanced.kept.map(fmtMD).join(' · ')) + (S.rebalanced.keptN > S.rebalanced.kept.length ? ' 외' : '')
             + ')은 <b>이미 참여·주문이 있어 닫지 못했습니다</b>'
           : '')
-        + '. <b>총 모집인원은 변하지 않습니다.</b> 아래 표를 확인하고 <b>[확정 저장]</b>을 눌러야 작업표까지 반영됩니다'
+        + '. <b>총 모집인원은 변하지 않습니다.</b> 직접 0명으로 바꿔 둔 날도 일건수로 채워졌으니 확인하세요. '
+        + '아래 표를 확인하고 <b>[확정 저장]</b>을 눌러야 작업표까지 반영됩니다'
         + '(저장하지 않고 닫으면 아무것도 바뀌지 않습니다).</div>';
     } else if (S.wkPrompt) {
       var _why = rebalanceReason();
       wkNote = '<div class="cdp-note warn">⚠ <b>주말 ' + (j.skipWeekends === true ? '제외' : '포함') + '</b>로 바꿨습니다 — '
         + (_why
-          ? '자동 재배분은 하지 않았습니다: ' + _esc(REBAL_WHY[_why] || '대상이 아닙니다')
-          : '아래에서 <b>[주말 기준으로 재배분]</b>을 누르면 오늘 이후 일정을 새 설정으로 다시 깝니다(총량 유지).')
+          ? '자동 재설정은 하지 않았습니다: ' + _esc(REBAL_WHY[_why] || '대상이 아닙니다')
+          : '<b>[' + rebalanceLabel() + ']</b>을 누르면 오늘 이후 일정을 새 설정으로 다시 짭니다(총량 유지).')
         + '</div>';
     } else {
       var _wkOpen = (S.horiz || []).filter(function (d) {
@@ -1308,6 +1331,14 @@
       });
       // 주말에 계획 인원이 있으면 해당 날짜는 일반 진행일처럼 모집된다.
       // 같은 사실을 사이드바에 반복 안내하지 않는다.
+    }
+    /* ★★ 재설정 버튼은 **항상 그린다**(대상일 때) — 종전엔 안내문만 옛 이름(재배분) 버튼을
+       누르면"이라 말하고 버튼 자체가 없어, 창을 한 번 닫으면 다시 할 방법이 없었다(2026-09-26 실측).
+       방금 재설정한 상태에서는 그리지 않는다(같은 일을 두 번 누르게 하지 않는다). */
+    if (!S.rebalanced && !rebalanceReason()) {
+      wkNote += '<div style="margin:6px 0 2px"><button type="button" class="cdp-btn sm" id="cdpRebalBtn"'
+        + ' onclick="CampaignDailyPlan._rebalance()" title="오늘 이후 일정을 지금 주말 설정대로 하루 일건수씩 다시 짭니다 — 직접 0명으로 바꿔 둔 날도 다시 채워집니다">↺ '
+        + rebalanceLabel() + '</button></div>';
     }
 
     var carryBlk = '';
@@ -1322,7 +1353,7 @@
         where = '이월 <b>' + carry + '명</b>을 <b>종료일 연장</b>으로 넘겼습니다 — 추가된 종료일 <b>'
           + _esc(lastD ? fmtMD(lastD) : '-') + '</b>에 <b>' + (lastD ? planFor(lastD) : 0) + '명</b> 늘어납니다.';
       } else if (!cds.length) {
-        where = '이월 <b>' + carry + '명</b>이 지금 어느 날에도 얹혀 있지 않습니다 — [자동 맞춤]으로 배치하세요.';
+        where = '이월 <b>' + carry + '명</b>이 지금 어느 날에도 얹혀 있지 않습니다 — [자동으로 채우기]로 배치하세요.';
       } else if (cds.length === 1 && cds[0] === j.today && planFor(cds[0]) > Number(j.todayNaturalQuota || 0)) {
         // ★ 서버 자동 이월은 하루 상한(066 CARRY_CAP_MULT)에서 잘리는데, 명시 계획으로 저장하면
         //   095 규율상 그 값이 그날의 전부라 **상한을 넘겨 열린다**. 막지는 않되(사용자가 고른
