@@ -418,6 +418,27 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 명의 카드 거울(조각 2-1 · 결정 기록 176): 10분마다 카드를 리뷰어 정보(sub_accounts)에 맞춘다 ──
+  //   ★ 저장 경로 19곳은 건드리지 않는다 — 달라진 리뷰어만 짧은 트랜잭션으로 맞춘다(FOR NO KEY UPDATE + lock_timeout).
+  //   ★ 아직 아무도 카드를 읽지 않으므로 최대 10분 늦어도 영향 없다. 되돌리기 = Railway `IDENTITY_CARDS_RECONCILE=0`.
+  if (process.env.IDENTITY_CARDS_RECONCILE !== '0') {
+    const icSchedule = process.env.IDENTITY_CARDS_RECONCILE_SCHEDULE || '7-59/10 * * * *';
+    let icRunning = false;
+    cron.schedule(icSchedule, async () => {
+      if (icRunning) return;
+      icRunning = true;
+      try {
+        const { reconcileCards } = require('../services/reviewerIdentityCards.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('identity_cards_reconcile', () => reconcileCards({ dryRun: false, by: 'cron' }));
+        if (r && r.skipped) logger.debug('[CRON-IdentityCards] lock busy — 양보');
+      } catch (err) {
+        // ★ 카드 거울이 크론을 죽이지 않는다(표 미적용 42P01 포함 — 로그만).
+        logger.error(`[CRON-IdentityCards] error: ${err.message}`);
+      } finally { icRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── Phase 4: campaign_participants를 review_index에서 주기 최신화(DB를 살아있는 원본화): 기본 OFF ──
   //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
   //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).
