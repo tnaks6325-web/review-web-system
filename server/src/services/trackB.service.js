@@ -1358,6 +1358,10 @@ function _mapSales(r) {
     registrationDate: r.registration_date || r.created_at || null,
     attributionMonth: r.attribution_month || null,
     contractAmount: Number(r.contract_amount) || 0,
+    // 혼합계약(sales_type='mixed') — 계산서 발행분(invoice_leg_amount)만 세금계산서 대상이다.
+    //   상품구입비 몫(cash_leg_amount)은 계산서를 발행하지 않으므로 계산서 진행 목표에서 뺀다.
+    salesType: String(r.sales_type || '').trim(),
+    invoiceLegAmount: Number(r.invoice_leg_amount) || 0,
     contractItems,
   };
 }
@@ -1568,15 +1572,40 @@ async function _salesById(salesId) {
   } catch (_) { return c ? c.sales : null; }   // stale 있으면 유지, 없으면 null
 }
 // S2: 견적서는 sales_id 로 quotes 를 역파생(quotes.sales_id, 화이트리스트 테이블) — 별도 quote 링크 불필요.
+//   ★★ 계약 1건에 견적서가 여러 장일 수 있다(선금·중도금·잔금 / 혼합계약 / 비교견적, 사용자 확정 2026-09-26).
+//     종전엔 `limit=1` + 정렬 없음이라 **아무 1장**만 잡혀 총비용이 반만 잡히거나 볼 때마다 달라졌다.
+//   ★★ 합계에 넣는 견적 = _liveQuotes 단일 출처 — 반려 제외 + 비교견적(A/B안)은 채택된 안만
+//     (인트라넷 견적묶음→계약 연결과 같은 규칙: 채택 표시가 하나라도 있으면 plan_label 없는 것 + 채택된 것만).
 //   20초 캐시(salesId별) — 정산 요약 배치·스텝퍼 연속 렌더의 인트라넷 왕복 방지(_salesById 와 동일 시맨틱).
+const _QUOTE_FETCH_LIMIT = 50;
+function _liveQuotes(rows) {
+  const all = (rows || []).filter(q => q && String(q.status || '') !== 'rejected');
+  const hasSelection = all.some(q => Number(q.plan_selected) === 1);
+  const live = hasSelection ? all.filter(q => q.plan_label == null || q.plan_label === '' || Number(q.plan_selected) === 1) : all;
+  const key = q => String(q.quote_date || '') + '\t' + String(q.created_at || '') + '\t' + String(q.quote_number || '');
+  return live.slice().sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
+}
+// 여러 장을 한 덩어리로 요약 — 기존 소비처가 읽는 {quoteNumber,status,quoteDate,totalAmount} 모양을 유지한다.
+//   status = 전부 수락이면 'accepted', 아니면 첫 미수락 장의 상태(한 장이면 종전과 같은 값).
+function _summarizeQuotes(live) {
+  if (!live.length) return null;
+  const acc = live.filter(q => q.status === 'accepted').length;
+  const firstOpen = live.find(q => q.status !== 'accepted');
+  return {
+    quoteNumber: String(live[0].quote_number || '').trim(),
+    status: acc === live.length ? 'accepted' : ((firstOpen && firstOpen.status) || 'draft'),
+    quoteDate: live[0].quote_date || null,
+    totalAmount: live.reduce((n, q) => n + (Number(q.total_amount) || 0), 0),
+    count: live.length, acceptedCount: acc,
+  };
+}
 const _quoteCache = new Map();   // salesId → { at, quote }
 async function _quoteForSalesResult(salesId) {
   const now = Date.now(); const c = _quoteCache.get(salesId);
   if (c && now - c.at < 20 * 1000) return { quote: c.quote, lookupFailed: false };
   try {
-    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(salesId)}&limit=1`);
-    const q = (j.data || [])[0];
-    const quote = q ? { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 } : null;
+    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    const quote = _summarizeQuotes(_liveQuotes(j.data || []));
     _quoteCache.set(salesId, { at: now, quote });
     return { quote, lookupFailed: false };
   } catch (_) {
@@ -1586,6 +1615,49 @@ async function _quoteForSalesResult(salesId) {
 }
 async function _quoteForSales(salesId) {
   return (await _quoteForSalesResult(salesId)).quote;
+}
+// ── 세금계산서 여러 장(선금·중도금·잔금) — 발행 합계를 목표 금액과 대조해 진행 상태를 정한다. ──
+//   ★★ 종전 판정은 인트라넷 sales.invoice_status 하나라 **계산서가 1장이라도 연결되면 '발행완료'** 였다
+//     (선금만 나갔는데 잔금 미발행이 안 보인다). tax_invoices(sales_id 역링크) 합계로 판정한다.
+//   ★ 목표 = 혼합계약이면 계산서 발행분(invoice_leg_amount), 아니면 총비용(견적 합계 우선). 목표를 모르면(0)
+//     "연결된 계산서가 있다 = 발행"으로 접는다(종전 동작).
+//   ★ 연결된 계산서가 0장이면 종전 sales.invoice_status 를 그대로 쓴다 — 계산서를 연결하지 않고 상태만
+//     수기로 바꾼 과거 계약이 많아, 0장을 '미발행'으로 단정하면 멀쩡한 완료 건이 되돌아간다.
+//   ★ 조회 실패도 종전 상태로 접는다(모르는 채로 '일부'라고 말하지 않는다).
+const _invoiceCache = new Map();   // salesId → { at, rows }
+async function _invoicesForSales(salesId) {
+  const now = Date.now(); const c = _invoiceCache.get(salesId);
+  if (c && now - c.at < 20 * 1000) return { rows: c.rows, lookupFailed: false };
+  try {
+    const j = await _intranetGet(`/api/tables/tax_invoices?where=sales_id=${encodeURIComponent(salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    const rows = (j.data || []).filter(t => t && String(t.sales_id || salesId) === String(salesId));
+    _invoiceCache.set(salesId, { at: now, rows });
+    return { rows, lookupFailed: false };
+  } catch (_) { return { rows: c ? c.rows : null, lookupFailed: true }; }
+}
+function _normIssueDate(v) {
+  const d = String(v || '').replace(/[^0-9]/g, '').slice(0, 8);
+  return d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : null;
+}
+// 계산서 진행 판정 단일 출처 — settlementForTab·settlementSummaryForAdvertiser 가 함께 쓴다.
+function _invoiceProgress(sales, invRows, totalCost) {
+  const legacy = sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null;
+  if (!sales) return null;
+  const issued = (invRows || []).filter(t => _normIssueDate(t.issue_date));
+  if (!invRows || !issued.length) return { ...legacy, count: 0, issuedAmount: 0, targetAmount: null };
+  const mixed = sales.salesType === 'mixed' && sales.invoiceLegAmount > 0;
+  // 목표 = 혼합계약은 발행분, 아니면 계약금액(계산서는 계약 기준으로 끊는다) — 계약금액을 모를 때만 견적 합계.
+  //   견적 합계를 먼저 쓰면 견적만 고치고 계약금액을 안 고친 건이 "일부 발행"으로 거짓 표시된다
+  //   (그 불일치는 이미 amountMismatch ⚠ 가 따로 말한다).
+  const target = mixed ? sales.invoiceLegAmount : (sales.amount > 0 ? sales.amount : (Number(totalCost) || 0));
+  const issuedAmount = issued.reduce((n, t) => n + (Number(t.total_amount) || 0), 0);
+  const dates = issued.map(t => _normIssueDate(t.issue_date)).sort();
+  const done = !(target > 0) || issuedAmount >= target;
+  return {
+    status: done ? 'issued' : 'partial',
+    date: done ? dates[dates.length - 1] : (legacy && legacy.date) || dates[dates.length - 1],
+    count: issued.length, issuedAmount, targetAmount: target > 0 ? target : null, mixed,
+  };
 }
 
 // 탭 정산 스텝퍼(마감자료→견적서→계산서→선금/잔금). 링크 조회 → 인트라넷 프록시 병합 → 역할 렌즈.
@@ -1611,6 +1683,9 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   const quoteResult = link.salesId ? await _quoteForSalesResult(link.salesId) : { quote: null, lookupFailed: false };
   const quote = quoteResult.quote;
   const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
+  // 총비용 = 견적서 합계 우선, 없으면 계약금액 — 업체관리 요약(settlementSummaryForAdvertiser)과 같은 규칙.
+  const totalCost = quote && quote.totalAmount > 0 ? quote.totalAmount : (sales && sales.amount > 0 ? sales.amount : null);
+  const invRes = link.salesId && sales ? await _invoicesForSales(link.salesId) : { rows: null };
   // 같은 계약을 함께 쓰는 다른 작업(내부 전용 — 광고주에겐 다른 업체 작업명이 섞일 수 있어 미동봉).
   //   ★ fail-soft: 조회 실패면 필드를 싣지 않는다(화면은 "모름"을 공유 없음으로 꾸미지 않고 아무것도 안 그린다).
   let sharedTabs, sharedTabCount;
@@ -1638,7 +1713,9 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
     closeout, closeoutAvailable,
     quote: quote || null,
     quoteLookupFailed: !!quoteResult.lookupFailed,
-    invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
+    // 계산서 = 여러 장의 발행 합계 vs 목표(혼합계약은 발행분). 'partial' 은 일부만 발행된 상태(신설).
+    invoice: _invoiceProgress(sales, invRes.rows, totalCost),
+    totalCost,
     payment: sales ? { status: sales.paymentStatus, date: sales.paymentDate } : null,
     amount: sales ? sales.amount : null,
     // 입금매칭 누계/최근 입금일(광고주 정산 카드 금액 4칸용 — 내부 스텝퍼에도 추가만, 기존 필드 불변)
@@ -1731,20 +1808,37 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
   if (role === 'advertiser' && (!(await _settlementVisibleFor(advertiserId)) || (brandId && !(await _brandSettlementVisible(brandId))))) return { linked: false, hidden: true };
   const link = await _settlementLinkForTab(sheetId, tabName);
   if (!link || !link.salesId) return { linked: false };
-  let quote = null, proxyDown = false;
+  let rows = [], proxyDown = false;
   try {
-    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(link.salesId)}&limit=1`);
-    quote = _mapQuoteFull((j.data || [])[0]);
+    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(link.salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    rows = _liveQuotes(j.data || []);
   } catch (_) { proxyDown = true; }
-  if (quote) await _snapshotQuote(link.salesId, quote);
-  const { rows } = await getPool().query(
-    'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
-  const versions = rows.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload }));
-  // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
-  if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
+  // ★★ 버전 기록 키 — 견적서가 1장이면 종전 키(sales_id) 그대로(과거 기록 보존), 여러 장이면 장마다
+  //   `sales_id#quote_id`. 한 키에 여러 장을 적재하면 장이 번갈아 저장돼 가짜 "새 버전"이 쌓인다(종전 결함).
+  const multi = rows.length > 1;
+  const docs = [];
+  for (const row of rows) {
+    const quote = _mapQuoteFull(row);
+    const key = multi && row.id ? `${link.salesId}#${row.id}` : link.salesId;
+    await _snapshotQuote(key, quote);
+    const { rows: vr } = await getPool().query(
+      'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [key]);
+    const versions = vr.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload }));
+    // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
+    if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
+    docs.push({ quoteNumber: quote.quoteNumber, workName: quote.workName, totalAmount: quote.totalAmount, status: quote.status, versions });
+  }
+  // 조회 실패 시에는 종전처럼 쌓여 있던 기록을 보여준다(장 구분 없이 — 모르는 것을 지어내지 않는다).
+  if (!docs.length && proxyDown) {
+    const { rows: vr } = await getPool().query(
+      'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
+    if (vr.length) docs.push({ versions: vr.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload })) });
+  }
   // 실제 인트라넷 PDF와 같은 로고·직인을 사용한다. 에셋 조회 실패는 문서 본문을 막지 않는다.
   const brandAssets = await _quoteBrandAssets();
-  return { linked: true, contractNumber: link.contractNumber || '', proxyDown, versions, brandAssets };
+  // `versions` = 첫 장(구버전 화면 호환). 새 화면은 `docs` 로 장을 넘긴다.
+  return { linked: true, contractNumber: link.contractNumber || '', proxyDown, docs,
+    versions: docs.length ? docs[0].versions : [], brandAssets };
 }
 // 계산서(전자세금계산서) 발행 요약 — sales 상태 + tax_invoices 이력(sales_id 역링크).
 async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserId = null, brandId = null } = {}) {
@@ -1753,10 +1847,11 @@ async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserI
   const link = await _settlementLinkForTab(sheetId, tabName);
   if (!link || !link.salesId) return { linked: false };
   const sales = await _salesById(link.salesId);
-  let records = [], proxyDown = false;
+  let records = [], proxyDown = false, raw = null;
   try {
-    const j = await _intranetGet(`/api/tables/tax_invoices?where=sales_id=${encodeURIComponent(link.salesId)}&limit=20`);
-    records = (j.data || []).map(t => ({
+    const j = await _intranetGet(`/api/tables/tax_invoices?where=sales_id=${encodeURIComponent(link.salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    raw = j.data || [];
+    records = raw.map(t => ({
       invoiceType: t.invoice_type || '', issueDate: t.issue_date || null,
       supplierName: t.supplier_name || '', recipientName: t.recipient_name || '',
       itemName: t.item_name || '',
@@ -1768,7 +1863,11 @@ async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserI
   } catch (_) { proxyDown = true; }
   return {
     linked: true, contractNumber: link.contractNumber || '', proxyDown: proxyDown || (link.salesId && !sales),
-    invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
+    invoice: await (async () => {
+      if (!sales) return null;
+      const q = await _quoteForSales(link.salesId);
+      return _invoiceProgress(sales, raw, q && q.totalAmount > 0 ? q.totalAmount : (sales.amount || null));
+    })(),
     amount: sales ? sales.amount : null,
     records,
   };
@@ -1785,25 +1884,30 @@ async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
   const bySales = new Map();
   for (const t of linked) if (!bySales.has(t.salesId)) bySales.set(t.salesId, null);
   await Promise.all([...bySales.keys()].map(async (sid) => {
-    const [sales, quote] = await Promise.all([_salesById(sid), _quoteForSales(sid)]);
-    bySales.set(sid, { sales, quote });
+    const [sales, quote, inv] = await Promise.all([_salesById(sid), _quoteForSales(sid), _invoicesForSales(sid)]);
+    bySales.set(sid, { sales, quote, invRows: inv.rows });
   }));
   // 계약 1건을 작업 여러 개가 함께 쓰는 경우 표시용(사용자 확정 2026-09-23 「1번」 — 금액은 나누지 않는다).
   //   ★ 세는 범위 = 활성 정산 링크 전체(다른 업체 탭 포함 — 내부 화면 전용 함수라 새지 않는다).
   //   ★ fail-soft: 조회 실패 시 이 업체 목록 안에서 센 값으로 접는다(배지가 사라지는 쪽보다 낫다).
   const shareCount = await _sharedTabCounts([...bySales.keys()], linked);
   return linked.map(t => {
-    const { sales = null, quote = null } = bySales.get(t.salesId) || {};
+    const { sales = null, quote = null, invRows = null } = bySales.get(t.salesId) || {};
     const quoteAmount = quote && quote.totalAmount > 0 ? quote.totalAmount : null;
     const contractAmount = sales && sales.amount > 0 ? sales.amount : null;
+    const inv = _invoiceProgress(sales, invRows, quoteAmount != null ? quoteAmount : contractAmount);
     return {
       sheetId: t.sheetId, tabName: t.tabName, salesId: t.salesId,
       contractNumber: t.contractNumber || (sales && sales.contractNumber) || '',
       proxyDown: !sales,
       quoteDate: quote ? _normIntraDate(quote.quoteDate) : null,
       quoteStatus: quote ? quote.status : null,
-      invoiceDate: sales ? _normIntraDate(sales.invoiceDate) : null,
-      invoiceStatus: sales ? sales.invoiceStatus : null,
+      invoiceDate: inv ? _normIntraDate(inv.date) : null,
+      invoiceStatus: inv ? inv.status : null,
+      // 여러 장 정산(2026-09-26) — 견적서 장수·수락 수, 계산서 장수·발행 합계·목표.
+      quoteCount: quote ? quote.count : 0, quoteAccepted: quote ? quote.acceptedCount : 0,
+      invoiceCount: inv ? inv.count : 0, invoiceIssuedAmount: inv ? inv.issuedAmount : 0,
+      invoiceTargetAmount: inv ? inv.targetAmount : null,
       paidAmount: sales ? sales.paidAmount : null,                            // 현재까지 매칭된 입금 누계
       paidDate: sales ? _normIntraDate(sales.paidDate || sales.paymentDate) : null,   // 최근 입금매칭일
       paymentStatus: sales ? sales.paymentStatus : null,
@@ -1905,6 +2009,10 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
           paidAmount: s.paidAmount != null ? s.paidAmount : null,
           paidDate: s.paidDate || null,
           paymentStatus: s.paymentStatus || null,
+          // 여러 장 정산 진행(금액·장수만 — 인트라넷 ID 없음)
+          quoteCount: s.quoteCount || 0, quoteAccepted: s.quoteAccepted || 0,
+          invoiceCount: s.invoiceCount || 0, invoiceIssuedAmount: s.invoiceIssuedAmount || 0,
+          invoiceTargetAmount: s.invoiceTargetAmount != null ? s.invoiceTargetAmount : null,
           sharedTabCount: shareN.get(s.salesId) || 1,
           shareGroup: shareGrp.get(s.salesId) || null,
         } : null,

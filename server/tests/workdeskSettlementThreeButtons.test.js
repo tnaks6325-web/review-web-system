@@ -17,10 +17,11 @@ assert.match(src, /btn\('invoice','계산서'/);
 assert.match(src, /btn\('payment','입금'/);
 assert.match(src, /function openSettlementPayment\(\)/,
   '입금 버튼도 실제 확인 팝업을 열어야 합니다.');
-assert.match(src, /btn\('quote','견적서',qReady,qSub,dead\(qReady,qRetry\),qRetry\)/,
+// 여러 장 정산(2026-09-26): 진행 중(part) 칸도 볼 것이 있으므로 비활성에서 뺀다 — 같은 dead 함수를 세 칸이 쓰는 규율은 그대로.
+assert.match(src, /btn\('quote','견적서',qReady,qSub,dead\(qReady\|\|qPart,qRetry\),qRetry,/,
   '세 칸이 같은 비활성 판정(dead)을 써야 합니다 - 견적서만 따로 계산하면 표기가 갈립니다.');
-assert.match(src, /btn\('invoice','계산서',iReady,iSub,dead\(iReady,iRetry\),iRetry\)/);
-assert.match(src, /btn\('payment','입금',pReady,pSub,dead\(pReady,pRetry\),pRetry\)/);
+assert.match(src, /btn\('invoice','계산서',iReady,iSub,dead\(iReady\|\|iPart,iRetry\),iRetry,/);
+assert.match(src, /btn\('payment','입금',pReady,pSub,dead\(pReady\|\|pPart,pRetry\),pRetry,/);
 assert.match(src, /const dead=\(ready,retry\)=>!ready&&!retry&&!\(d&&d\.hidden\);/,
   '비활성 판정은 한 곳에서만 만든다 - 뒤에 볼 것이 있는 조회 실패·비공개는 열어 둔다.');
 assert.match(src, /\.tp3doc:disabled\{cursor:not-allowed;color:#aeb6c2;background:#f5f7fa[^}]*opacity:1\}/,
@@ -47,7 +48,7 @@ assert.match(src, /function openProgressContractMatch\(ev\)[\s\S]{0,280}STATE\.r
   '업체 화면이나 이미 매칭된 상태에서 직접 호출해도 계약 매칭 모달이 열리지 않아야 합니다.');
 assert.match(src, /STATE\.cur=t; STATE\.settle=null;/,
   '작업 전환 즉시 이전 정산 상태를 비워야 합니다.');
-assert.match(src, /class="tp3doc\$\{ready\?' ready':''\}\$\{unknown\?' unknown':''\}"\$\{disabled\?' disabled':''\}/,
+assert.match(src, /class="tp3doc\$\{ready\?' ready':''\}\$\{unknown\?' unknown':''\}\$\{part\?' part':''\}"\$\{disabled\?' disabled':''\}/,
   '현재 작업의 정산 정보가 로드되기 전에는 문서 버튼을 비활성화해야 합니다.');
 assert.match(src, /<span class="tp3dot"><\/span>\$\{label\}<span class="tp3sub">\$\{esc\(sub\)\}<\/span>/,
   '정산 버튼은 상태 점과 값 한 조각(날짜/미발행)을 함께 그려야 합니다.');
