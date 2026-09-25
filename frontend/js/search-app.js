@@ -473,7 +473,7 @@ window._saveCardAddress = async function (cid) {
   const ta = document.getElementById(cid + "_address");
   if (ui.saving || ui.saved || !sel || !sel.identityKey || !ta) return;
   const value = String(ta.value || "").replace(/\s+/g, " ").trim();
-  if (value.length < 5 || _ADDR_MASK_RE.test(value)) { showToast("배송 주소를 확인해주세요", true); return; }
+  if (value.length < 5 || _ADDR_MASK_RE.test(value)) { showToast("배송 주소를 확인해주세요", "error"); return; }
   ui.saving = true; _syncAddressTools(cid, false);
   try {
     const res = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/" + encodeURIComponent(sel.identityKey) + "/address", {
@@ -490,7 +490,7 @@ window._saveCardAddress = async function (cid) {
     if (data.filled === false) showToast("이미 저장된 주소가 있어요");
   } catch (err) {
     ui.saving = false; _syncAddressTools(cid, false);
-    showToast(err.message || "주소를 저장하지 못했어요. 다시 눌러주세요.", true);
+    showToast(err.message || "주소를 저장하지 못했어요. 다시 눌러주세요.", "error");
     return;
   }
   await _recheckCardIdentity(cid);
