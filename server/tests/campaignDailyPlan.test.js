@@ -1329,8 +1329,20 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   })());
   ok('8-2a 날짜별 계획표는 날짜·상태·일 건수·조절 4열을 렌더한다',
     /cdp-colhead[^]*날짜[^]*상태[^]*일 건수[^]*조절/.test(CDP)
-    && /grid-template-columns:148px 72px 66px minmax\(190px,1fr\)/.test(CDP)
+    && /grid-template-columns:92px 64px 58px minmax\(190px,1fr\)/.test(CDP)
     && /cdp-state/.test(CDP));
+  // ★ 사용자 확정 2026-09-26: 창 폭 780 · 날짜 배지는 날짜 아래 · 휴대폰은 [−] 숫자 [＋](게이지 숨김)
+  ok('8-2b 창 폭 780px · 날짜 배지는 날짜 아래(block)',
+    /width:min\(780px,94vw\)/.test(CDP) && /#cdpModal \.cdp-d \.cdp-tag\{display:block/.test(CDP));
+  {
+    const mq = CDP.indexOf('@media (max-width:560px){#cdpModal .cdp-row{');
+    const base = ["'#cdpModal .cdp-ctl{display:flex", "'#cdpModal .cdp-st{width:27px", "'#cdpModal .cdp-in{box-sizing"].map(x => CDP.indexOf(x));
+    ok('8-2c 휴대폰 = 게이지 숨김 + [−][숫자][＋] 순서 · ★ 일반 규칙보다 뒤(같은 무게면 뒤가 이긴다)',
+      mq > 0 && base.every(i => i > 0 && i < mq)
+      && /#cdpModal \.cdp-ctl\{display:contents\}#cdpModal \.cdp-g\{display:none\}/.test(CDP)
+      && /\.cdp-st\[data-d="-1"\]\{order:3\}#cdpModal \.cdp-row>\.cdp-num\{order:4;text-align:center\}#cdpModal \.cdp-st\[data-d="1"\]\{order:5\}/.test(CDP)
+      && /\.cdp-in\{[^}]*font-size:16px/.test(CDP.slice(mq)));
+  }
   ok('8-3 ★ 조절해도 보던 자리를 지킨다(render 가 스크롤 컨테이너를 새로 만든다)',
     /S\._scrollTop/.test(CDP) && /sc\.scrollTop = S\._scrollTop/.test(CDP)
     && /sc\.addEventListener\('scroll'/.test(CDP));

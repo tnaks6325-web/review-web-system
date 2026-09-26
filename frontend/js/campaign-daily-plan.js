@@ -1021,7 +1021,7 @@
   /* ── 마운트(body 직속) ───────────────────────────────────── */
   var CSS = ''
     + '#cdpModal{position:fixed;inset:0;z-index:10050;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.55)}'
-    + '#cdpModal .cdp-box{background:var(--card,#fff);color:var(--t1,#1f2937);width:min(920px,94vw);max-height:92vh;display:flex;flex-direction:column;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.28);overflow:hidden}'
+    + '#cdpModal .cdp-box{background:var(--card,#fff);color:var(--t1,#1f2937);width:min(780px,94vw);max-height:92vh;display:flex;flex-direction:column;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.28);overflow:hidden}'
     + '#cdpModal .cdp-hd{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--border,#e5e7eb);background:var(--bg2,#f9fafb);font-weight:800;font-size:.85rem}'
     + '#cdpModal .cdp-x{margin-left:auto;border:0;background:none;font-size:1.05rem;cursor:pointer;color:var(--t3,#9ca3af)}'
     /* ★★ 위(안내·현황·이월 방식·균형 바·표 머리)는 **고정**, 스크롤은 날짜 목록부터
@@ -1095,7 +1095,8 @@
     + '@media (max-width:560px){#cdpModal .cdp-bal{height:auto;min-height:41px;padding:9px 12px;flex-wrap:wrap}'
     + '#cdpModal .cdp-bal .l1{white-space:normal}#cdpModal .cdp-seg{grid-template-columns:1fr}}'
     /* 날짜별 계획표: 시안의 날짜·상태·일 건수·조절 4열을 공용 모달의 실제 행 구조로 쓴다. */
-    + '#cdpModal .cdp-colhead,#cdpModal .cdp-row{display:grid;grid-template-columns:148px 72px 66px minmax(190px,1fr);align-items:center;column-gap:12px}'
+    /* ★ 날짜 칸 = 날짜 + 그 아래 배지(공휴일 이름 등 · 사용자 확정 2026-09-26) — 배지를 옆에 붙이면 칸이 넓어져 창이 커진다 */
+    + '#cdpModal .cdp-colhead,#cdpModal .cdp-row{display:grid;grid-template-columns:92px 64px 58px minmax(190px,1fr);align-items:center;column-gap:12px}'
     + '#cdpModal .cdp-colhead{height:37px;border-bottom:1px solid var(--border,#e5e7eb);font-size:.68rem;color:var(--t3,#718096)}'
     + '#cdpModal .cdp-colhead .n{text-align:right}'
     + '#cdpModal .cdp-row{min-height:54px;padding:6px 8px;border-bottom:1px solid var(--border,#edf1f5)}'
@@ -1110,7 +1111,8 @@
     // 공휴일·일요일 = 빨강 / 토요일 = 파랑(달력 관용) — 색은 리터럴(테마 없는 호스트에도 얹힌다)
     + '#cdpModal .cdp-d.hol{color:#dc2626;font-weight:800}'
     + '#cdpModal .cdp-d.sat{color:#2563eb;font-weight:800}'
-    + '#cdpModal .cdp-tag.hol{color:#b91c1c;background:#fee2e2;max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '#cdpModal .cdp-tag.hol{color:#b91c1c;background:#fee2e2;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '#cdpModal .cdp-d .cdp-tag{display:block;width:fit-content;margin:3px 0 0;vertical-align:0}'
     + '#cdpModal .cdp-state{font-size:.68rem;color:var(--t3,#7b8799)}#cdpModal .cdp-state.open{color:#3866c9;font-weight:700}'
     + '#cdpModal .cdp-g{position:relative;height:8px;border-radius:8px;background:var(--bg2,#f1f5f9);cursor:ew-resize;user-select:none;touch-action:none;flex:1}'
     + '#cdpModal .cdp-g .f{position:absolute;left:0;top:0;bottom:0;border-radius:12px;background:linear-gradient(90deg,#60a5fa,#3b82f6)}'
@@ -1130,6 +1132,16 @@
     + '#cdpModal .cdp-in:focus{border-color:#2f6fed;background:var(--card,#fff);outline:none}'
     + '#cdpModal .cdp-st{width:27px;height:27px;flex:0 0 auto;border-radius:7px;border:1px solid var(--border,#cbd5e1);background:var(--card,#fff);color:var(--t1,#334155);font-size:.9rem;font-weight:800;cursor:pointer;line-height:1}'
     + '#cdpModal .cdp-reset{border:0;background:none;color:var(--t3,#94a3b8);font-size:.62rem;cursor:pointer;text-decoration:underline;padding:0}'
+    /* ★ 휴대폰(≤560px) = 게이지 대신 숫자 입력 조절(사용자 확정 2026-09-26): [−][숫자][＋].
+       줄 구조는 그대로 두고(행 이벤트·점검이 보는 모양 불변) 배치만 바꾼다(★ 일반 규칙보다 **뒤**에 둔다 — 같은 무게면 뒤가 이긴다) — 조절 칸을 풀어(display:contents)
+       −·＋ 를 숫자 칸 양옆에 놓는다. 입력칸 글자는 16px 이상(아이폰이 누를 때 확대하지 않게). */
+    + '@media (max-width:560px){#cdpModal .cdp-row{grid-template-columns:minmax(0,1fr) auto 36px 50px 36px;column-gap:6px;padding:6px 4px}'
+    + '#cdpModal .cdp-ctl{display:contents}#cdpModal .cdp-g{display:none}'
+    + '#cdpModal .cdp-row>.cdp-d{order:1}#cdpModal .cdp-row>.cdp-state{order:2;margin-right:4px}'
+    + '#cdpModal .cdp-st[data-d="-1"]{order:3}#cdpModal .cdp-row>.cdp-num{order:4;text-align:center}#cdpModal .cdp-st[data-d="1"]{order:5}'
+    + '#cdpModal .cdp-st{width:36px;height:36px;font-size:1.05rem}'
+    + '#cdpModal .cdp-in{border-color:var(--border,#cbd5e1);background:var(--card,#fff);height:36px;font-size:16px}'
+    + '#cdpModal .cdp-colhead{grid-template-columns:minmax(0,1fr) auto 134px;column-gap:6px}#cdpModal .cdp-colhead .n{display:none}#cdpModal .cdp-colhead span:last-child{text-align:center}}'
     + '#cdpModal .cdp-end{margin-top:10px;background:var(--bg2,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:10px;padding:9px 13px;font-size:.76rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}'
     + '#cdpModal .cdp-end b{color:#1b64da}'
     + '#cdpModal .cdp-end .chg{color:#b45309;font-weight:700;font-size:.68rem}'
