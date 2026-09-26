@@ -141,6 +141,30 @@ const WRITE = /^\s*(INSERT|UPDATE|DELETE)\b/i;
     rn.renumberTab = orig.renumber; led.rebuildLedgers = orig.rebuild;
   }
 
+  console.log('\n[2a] 새벽 전체 실행 — 앞 N개만이 아니라 끝까지(Codex 리뷰 P1)');
+  {
+    const ALL = Array.from({ length: 450 }, (_, i) => 'c' + String(i).padStart(4, '0'));
+    const queries = [];
+    poolMod.query = async (sql, params) => {
+      if (/SELECT id FROM recruit_campaigns/.test(sql)) {
+        queries.push(params.slice());
+        const [after, lim] = params;
+        return { rows: ALL.filter(id => after == null || id > after).slice(0, lim).map(id => ({ id })) };
+      }
+      return { rows: [] };
+    };
+    // relayAll 은 같은 모듈 안 함수를 직접 부르므로, 연결 단계에서 실패시켜 호출 횟수만 센다
+    poolMod.connect = async () => { const e = new Error('no db'); e.code = 'test_no_db'; throw e; };
+    const r = await cp.relayAllCampaignWorktables({ page: 200 });
+    ok('★★ 450개 전부 돈다(앞 200개에서 멈추지 않는다)', r.total === 450 && r.truncated === false, JSON.stringify(r));
+    ok('번호 순으로 페이지를 넘긴다(200 · 200 · 50)', queries.length === 3 && queries[0][0] === null && queries[1][0] === 'c0199' && queries[2][0] === 'c0399',
+      JSON.stringify(queries));
+    ok('하나가 실패해도 나머지는 계속(throw 없음)', r.failed === 450);
+    const r2 = await cp.relayAllCampaignWorktables({ page: 200, maxTotal: 300 });
+    ok('폭주 방지 상한을 넘으면 멈추고 truncated 로 알린다', r2.total === 300 && r2.truncated === true);
+    poolMod.query = origQueryTop; poolMod.connect = origConnectTop;
+  }
+
   console.log('\n[2b] 배포 시차 가드 — 옛 조절 창의 여러 날 저장은 새로고침 요청');
   {
     poolMod.query = async (sql) => (/FROM recruit_campaigns/.test(sql) ? { rows: [CAMP] } : { rows: [] });

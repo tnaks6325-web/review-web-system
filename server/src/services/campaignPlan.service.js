@@ -442,28 +442,37 @@ async function saveOrderHolidayZeros(campaign, by = 'system') {
  * 전날 못 채운 몫(이월)·종료일 연장이 하루가 지나며 바뀌므로, 조용한 새벽에 한 번 맞춰 둔다.
  * ★ 공고마다 짧은 트랜잭션 · 하나가 실패해도 나머지는 계속 · 절대 throw 없음.
  */
-async function relayAllCampaignWorktables({ cap = 200, by = 'cron-relay' } = {}) {
-  const out = { ok: true, total: 0, moved: 0, cleared: 0, failed: 0, skipped: 0 };
-  let ids = [];
-  try {
-    const { rows } = await pool.query(
-      `SELECT id FROM recruit_campaigns
-        WHERE participation_mode = TRUE AND status = 'active' AND archived_at IS NULL
-          AND linked_sheet_id IS NOT NULL AND linked_tab_name IS NOT NULL
-        ORDER BY id LIMIT $1`, [Math.max(1, Math.min(1000, Number(cap) || 200))]);
-    ids = rows.map(r => r.id);
-  } catch (e) {
-    logger.warn(`[campaignPlan] 날짜 맞추기 대상 조회 실패: ${e.message}`);
-    return { ok: false, reason: 'list_failed', message: e.message };
+// ★ 앞에서 N개만 고르면(ORDER BY id LIMIT) 그 뒤 공고는 **매일 영영 빠진다**(Codex 리뷰 P1) → 번호 순으로
+//   페이지를 넘기며 끝까지 돈다(keyset). `page` = 한 번에 읽는 수, `maxTotal` = 폭주 방지 상한(넘으면 truncated).
+async function relayAllCampaignWorktables({ page = 200, maxTotal = 10000, by = 'cron-relay' } = {}) {
+  const out = { ok: true, total: 0, moved: 0, cleared: 0, failed: 0, skipped: 0, truncated: false };
+  const size = Math.max(1, Math.min(1000, Number(page) || 200));
+  let after = null;
+  for (;;) {
+    let ids;
+    try {
+      const { rows } = await pool.query(
+        `SELECT id FROM recruit_campaigns
+          WHERE participation_mode = TRUE AND status = 'active' AND archived_at IS NULL
+            AND linked_sheet_id IS NOT NULL AND linked_tab_name IS NOT NULL
+            AND ($1::text IS NULL OR id::text > $1::text)
+          ORDER BY id::text LIMIT $2`, [after, size]);
+      ids = rows.map(r => r.id);
+    } catch (e) {
+      logger.warn(`[campaignPlan] 날짜 맞추기 대상 조회 실패: ${e.message}`);
+      return { ...out, ok: false, reason: 'list_failed', message: e.message };
+    }
+    for (const id of ids) {
+      if (out.total >= maxTotal) { out.truncated = true; return out; }
+      out.total++;
+      const r = await relayCampaignWorktable(id, { by });
+      if (!r || r.ok === false) out.failed++;
+      else if (r.skipped) out.skipped++;
+      else { out.moved += Number(r.moved) || 0; out.cleared += Number(r.cleared) || 0; }
+    }
+    if (ids.length < size) return out;
+    after = String(ids[ids.length - 1]);
   }
-  for (const id of ids) {
-    out.total++;
-    const r = await relayCampaignWorktable(id, { by });
-    if (!r || r.ok === false) out.failed++;
-    else if (r.skipped) out.skipped++;
-    else { out.moved += Number(r.moved) || 0; out.cleared += Number(r.cleared) || 0; }
-  }
-  return out;
 }
 
 /* ── 계획 저장 ───────────────────────────────────────────── */
