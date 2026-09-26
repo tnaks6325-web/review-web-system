@@ -45,6 +45,24 @@ const base = () => ({
     ok('주문이 더 적으면 신청 수를 쓴다(작아지지 않는다)', o2.submittedBeforeToday === 361 && o2.todaySubmitted === 1 && o2.carry.submittedSince === 300);
   }
 
+  console.log('\n[1b] 오늘 주문은 남은 자리·앞날 예상에만(Codex 리뷰)');
+  {
+    // 총 100 · 어제까지 신청 90(주문 90) · 오늘 공고 밖 주문 10 → 남은 자리 0
+    const NOW = new Date('2026-09-27T03:00:00Z');
+    const c = { id: 'x', participation_mode: true, status: 'active', recruit_total: 100, daily_limit: 10,
+      start_date: '2026-09-01', carry_strategy: 'extend', carry_mode: 'auto', skip_weekends: false, window_start: null, window_end: null };
+    const o = { activeHolds: 0, todayActiveHolds: 0, submittedAll: 90, todaySubmitted: 0, submittedBeforeToday: 90,
+      carry: null, hold: null, plans: null,
+      linked: { ok: true, orders: 100, ordersAll: 100, ordersBefore: 90, ordersToday: 10, ordersSinceCarry: 0, ordersSinceHold: 0, sharedTab: false } };
+    S._mergeCountBasis(o);
+    ok('오늘 주문은 따로 싣는다(todayOrders 10) · 오늘 판정 재료는 그대로(0)', o.todayOrders === 10 && o.todaySubmitted === 0);
+    const p = S.projectDailyQuotas(c, o, { now: NOW, maxDays: 400 });
+    const future = p.days.filter(d => d.date > '2026-09-27').reduce((a, d) => a + d.quota, 0);
+    ok('★ 앞날에 더 열 자리 0(종전이면 10)', future === 0, JSON.stringify(p.days.slice(0, 3)));
+    const pc = S.pendingCarry(c, o, '2026-09-27', { startDate: '2026-09-01', submittedSince: 90 });
+    ok('★ 이월도 0(남은 자리 = 100 − 90 − 오늘 10)', pc === 0, String(pc));
+  }
+
   console.log('\n[2] 합치지 않는 경우(종전)');
   for (const [name, patch] of [
     ['공유 작업표', L => { L.sharedTab = true; }],

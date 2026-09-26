@@ -206,6 +206,9 @@ function _mergeCountBasis(o) {
     carrySince: o.carry ? o.carry.submittedSince : null, holdSince: o.hold ? o.hold.submittedSince : null,
   };
   o.submittedBeforeToday = Math.max(Number(o.submittedBeforeToday) || 0, L.ordersBefore);
+  // ★ 오늘 주문은 **남은 자리·앞날 예상 전용** 재료로 따로 싣는다(Codex 리뷰) — todaySubmitted(오늘 판정 재료)에는 섞지 않는다.
+  //   없으면 "총 100 · 어제까지 90 · 오늘 공고 밖 10" 에서 남은 자리를 10 으로 말하고 작업표에 날짜 줄을 더 깐다.
+  o.todayOrders = Math.max(0, Number(L.ordersToday) || 0);
   if (o.carry) o.carry = { ...o.carry, submittedSince: Math.max(Number(o.carry.submittedSince) || 0, Number(L.ordersSinceCarry) || 0) };
   if (o.hold) o.hold = { ...o.hold, submittedSince: Math.max(Number(o.hold.submittedSince) || 0, Number(L.ordersSinceHold) || 0) };
   o.countBasis = 'max';
@@ -845,7 +848,7 @@ function _remainingSeats(c, counts) {
   if (!(rt > 0)) return null;
   const cnt = counts || {};
   const done = Math.max(Number(cnt.submittedAll) || 0,
-    (Number(cnt.submittedBeforeToday) || 0) + (Number(cnt.todaySubmitted) || 0));
+    (Number(cnt.submittedBeforeToday) || 0) + Math.max(Number(cnt.todaySubmitted) || 0, Number(cnt.todayOrders) || 0));
   return Math.max(0, rt - done);
 }
 function _capSeats(n, c, counts) {
@@ -939,7 +942,8 @@ function projectDailyQuotas(c, counts, opts = {}) {
     if (d === todayStr) {
       const st = computeCampaignState(c, cnt, now, null);
       quota = closed ? 0 : Math.max(0, Number(st.dailyQuota) || 0);
-      fill = Math.max(quota, Number(st.todayCount) || 0);
+      // 오늘 이미 들어온 사람 = 판정 수(신청+홀드) · 오늘 주문(공고 밖 포함 — 결정 184) 중 큰 값
+      fill = Math.max(quota, Number(st.todayCount) || 0, Number(cnt.todayOrders) || 0);
     } else if (!closed) {
       quota = dailyQuota(c, before,
         cnt.carry ? { ...cnt.carry, today: d, submittedSince: carrySince } : null,
