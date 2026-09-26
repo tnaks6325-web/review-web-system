@@ -23,6 +23,8 @@ let passed = 0;
 const ok = (name, cond, extra) => { assert(cond, name + (extra ? ' — ' + extra : '')); passed++; console.log('  ✓ ' + name); };
 
 const S = require('../src/services/sheetlessOrder.service');
+// 빈 줄 고르기 = 후보 읽기(LIMIT 3000) → 잠그기(FOR UPDATE SKIP LOCKED) 두 쿼리(결정 182).
+const CLAIM = /FOR UPDATE SKIP LOCKED|ORDER BY cp\.seq LIMIT 3000/;
 
 /* ── 스텁 pool ─────────────────────────────────────────────────────────
    ★ 더 좁은 조건을 먼저 둔다(스텁 매칭 순서 함정 — CLAUDE.md 규율). */
@@ -40,7 +42,7 @@ function makePool({ linkedDup = [], rowNumDup = [], openSlot = [] } = {}) {
       // 이미 연결된 줄
       if (/order_submission_id = \$3::uuid/.test(q)) return { rows: [] };
       // 빈 슬롯 선점
-      if (/order_submission_id IS NULL/.test(q) && /FOR UPDATE SKIP LOCKED/.test(q)) return { rows: openSlot };
+      if (/order_submission_id IS NULL/.test(q) && CLAIM.test(q)) return { rows: openSlot };
       return { rows: [] };
     },
     release: () => {},
@@ -82,7 +84,7 @@ function poolWithHeaders(opts) {
     S.__setPoolForTest(null);
     ok('중복으로 판정', r.reason === 'duplicate_row', JSON.stringify(r));
     ok('그 줄을 가리킨다', r.seq === 60);
-    ok('새 슬롯을 먹지 않는다', !pool.seen.some(c => /FOR UPDATE SKIP LOCKED/.test(c.q)));
+    ok('새 슬롯을 먹지 않는다', !pool.seen.some(c => CLAIM.test(c.q)));
   }
 
   console.log('\n[B] 링크가 오염된 경우 — 표 주문번호로 막는다(이번 수정)');
@@ -93,7 +95,7 @@ function poolWithHeaders(opts) {
     S.__setPoolForTest(null);
     ok('1차가 못 잡아도 2차가 잡는다', r.reason === 'duplicate_row', JSON.stringify(r));
     ok('그 줄을 가리킨다', r.seq === 639);
-    ok('★ 새 빈 슬롯을 먹지 않는다(사고 재현 차단)', !pool.seen.some(c => /FOR UPDATE SKIP LOCKED/.test(c.q)));
+    ok('★ 새 빈 슬롯을 먹지 않는다(사고 재현 차단)', !pool.seen.some(c => CLAIM.test(c.q)));
     const g = pool.seen.find(c => /jsonb_each_text/.test(c.q) && /cp\.phone8/.test(c.q));
     ok('2차 방어가 실제로 조회됐다', !!g);
     ok('연락처는 뒤 8자리로 넘긴다', g.params[4] === '89508885', JSON.stringify(g.params));
@@ -134,7 +136,7 @@ function poolWithHeaders(opts) {
     const r = await S.writeOrderToWorktable(ARGS);
     S.__setPoolForTest(null);
     ok('중복이 아니면 종전대로 진행(빈 슬롯 조회까지 간다)',
-      r.reason !== 'duplicate_row' && pool.seen.some(c => /FOR UPDATE SKIP LOCKED/.test(c.q)), JSON.stringify(r));
+      r.reason !== 'duplicate_row' && pool.seen.some(c => CLAIM.test(c.q)), JSON.stringify(r));
   }
 
   console.log('\n[E] 판정 SQL 은 한 벌 — 중복 정리와 같은 조각');

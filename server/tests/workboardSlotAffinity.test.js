@@ -62,7 +62,7 @@ test('기존 미연결 빈자리도 실제 주문 기록 전에 안전하게 회
         }] };
       }
       if (/order_submission_id = \$3::uuid/.test(text) && /FROM campaign_participants/.test(text)) return { rows: [] };
-      if (/SELECT cp\.id, cp\.seq/.test(text) && /FOR UPDATE SKIP LOCKED/.test(text)) {
+      if (/SELECT cp\.id, cp\.seq/.test(text) && /FOR UPDATE SKIP LOCKED|ORDER BY cp\.seq LIMIT 3000/.test(text)) {
         return { rows: slot.workboard_id === WB && !slot.order_submission_id ? [slot] : [] };
       }
       if (/UPDATE campaign_participants\s+SET row_json/.test(text)) {
@@ -115,7 +115,7 @@ test('기존 미연결 빈자리도 실제 주문 기록 전에 안전하게 회
     assert.equal(slot.workboard_id, WB);
     assert.equal(slot.order_submission_id, OS);
     const bindAt = calls.findIndex(c => /WITH target AS/.test(c.sql));
-    const claimAt = calls.findIndex(c => /FOR UPDATE SKIP LOCKED/.test(c.sql));
+    const claimAt = calls.findIndex(c => /FOR UPDATE SKIP LOCKED|ORDER BY cp\.seq LIMIT 3000/.test(c.sql));
     assert.ok(bindAt > -1 && claimAt > bindAt, '탭 잠금 뒤 연결 보정이 먼저, 빈자리 선점이 나중이어야 한다');
   } finally {
     sheetlessOrder.__setPoolForTest(null);
