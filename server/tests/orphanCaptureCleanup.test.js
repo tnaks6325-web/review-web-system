@@ -81,6 +81,13 @@ const C = (fileId, extra = {}) => Object.assign({
     // 고아 "근거"(OR 블록) 안에 row_index 가 들어오면 위치키 판정이 부활한 것이다.
     const orBlock = src.slice(src.indexOf('AND (\n'), src.indexOf('AND NOT EXISTS (SELECT 1 FROM order_submissions ol'));
     ok('고아 근거 블록에 row_index 가 없다', !/row_index/.test(orBlock), orBlock.slice(0, 200));
+    /* ★★ A4 — 살아있는 줄 제외 조건이 **실제로 도는지**. 작업표의 줄 좌표는 `seq` 이고
+       `cp.row_index` 는 없는 칸이라, 잘못 적으면 쿼리가 42703 으로 통째로 죽는다
+       (실제로 만든 날부터 한 달 넘게 그랬다 — 매일 새벽 error 로그, 정리 0건).
+       ★ 실패 방향이 "안 지움"이라 조용했다. 그래서 **칸 이름을 문장으로 고정**한다. */
+    ok('A4: 살아있는 줄 제외는 cp.seq 로 짝짓는다(cp.row_index 는 없는 칸)',
+      /FROM campaign_participants cp[\s\S]{0,200}cp\.seq = rs\.row_index/.test(src)
+      && !/cp\.row_index/.test(src));
     ok('고아 근거는 capture_file_id 와 review_index_id 둘뿐',
       /capture_file_id/.test(orBlock) && /review_index_id/.test(orBlock));
     ok('review_index_id 가 NULL 인 행은 근거로 쓰지 않는다',
@@ -182,7 +189,15 @@ const C = (fileId, extra = {}) => Object.assign({
     const cron = read('src/jobs/cron.js');
     ok('킬스위치 ORPHAN_CAPTURE_CLEAN', /ORPHAN_CAPTURE_CLEAN !== '0'/.test(cron));
     ok('jobLock 으로 직렬화', /withJobLock\('orphan_capture_clean'/.test(cron));
-    ok('크론은 실행 모드로 부른다', /trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
+    /* ★★ 2026-09-26 사용자 확정 "세어보고 보고해" — 크론은 **기본 세기만** 한다.
+       이 정리는 만든 날부터 잘못된 칸 이름으로 한 번도 돌지 못했고(아래 A4 참조),
+       고치는 순간 한 달치가 한꺼번에 휴지통으로 가므로 사람이 건수를 보고 결정한다.
+       실행으로 되돌리려면 `ORPHAN_CAPTURE_CLEAN_APPLY=1` 을 켠다(코드 변경 0). */
+    ok('크론은 기본 세기만 한다(사용자 확정) — 실행은 APPLY 스위치',
+      /ORPHAN_CAPTURE_CLEAN_APPLY === '1'/.test(cron)
+      && /trashOrphanCaptures\(\{ dryRun: !_apply, by: 'cron' \}\)/.test(cron));
+    ok('세기만 한 회차도 건수를 로그로 남긴다(조용한 무동작 금지)',
+      /\(세기만\) 대상/.test(cron));
     ok('정리 실패가 크론을 죽이지 않는다', /\[CRON-OrphanCapture\] error/.test(cron));
     const svc = src;
     ok('유예는 env 로 조절 가능', /ORPHAN_CAPTURE_GRACE_DAYS/.test(svc));
@@ -369,7 +384,8 @@ const C = (fileId, extra = {}) => Object.assign({
     const cron = read('src/jobs/cron.js');
     ok('★★ 크론이 B·C 를 부르지 않는다',
       !/trashTombstonedCaptures|trashFolderOrphans/.test(cron));
-    ok('크론은 A 만', /trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
+    // 크론이 부르는 것은 A 하나뿐(모드는 위 절에서 따로 고정한다 — 지금 기본은 세기만)
+    ok('크론은 A 만', /trashOrphanCaptures\(\{ dryRun: !_apply, by: 'cron' \}\)/.test(cron));
     const routes = read('src/routes/drive.routes.js');
     ok('★ 수동 창구가 종류를 나눠 받는다', /kind === 'tombstoned'/.test(routes) && /kind === 'folder'/.test(routes));
     ok('★ 미지정은 종전 동작(A)', /String\(b\.kind \|\| 'linked'\)/.test(routes));
