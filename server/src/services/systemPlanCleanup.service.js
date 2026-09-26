@@ -89,13 +89,18 @@ async function _endDates(campaignId, dates) {
 }
 
 /**
- * @param {{confirm?:boolean, by?:string, today?:string, kinds?:string[], campaignIds?:string[]}} o
+ * @param {{confirm?:boolean, by?:string, today?:string, kinds?:string[], campaignIds?:string[], todayFn?:Function}} o
+ *   todayFn = 지우기 직전 "오늘"을 주는 함수(시험용 — 기본은 매번 KST 오늘)
  *   kinds = ['worktable'](기본) | ['worktable','rowDelete'] · campaignIds = 이 공고들만(생략 = 전부)
  */
-async function cleanupSystemPlans({ confirm = false, by = 'admin', today = '', kinds, campaignIds } = {}) {
+async function cleanupSystemPlans({ confirm = false, by = 'admin', today = '', kinds, campaignIds, todayFn } = {}) {
   const todayStr = /^\d{4}-\d{2}-\d{2}$/.test(String(today || ''))
     ? String(today) : require('./campaignState.service').kstTodayStr();
   const fromDate = _addDays(todayStr, 1);   // ★ 내일부터(위 ② 참고)
+  /* ★ 공고마다 지우기 직전에 오늘(KST)을 **다시** 본다(Codex 리뷰) — 자정 직전에 시작해 앞 공고의 날짜 맞추기를
+     기다리는 사이 날짜가 넘어가면, 시작 때 "내일"이던 날이 **지금 모집 중인 오늘**이 된다. 명시한 today(시험)는 그대로. */
+  const { kstTodayStr } = require('./campaignState.service');
+  const nowToday = typeof todayFn === 'function' ? todayFn : () => (today ? todayStr : kstTodayStr());
   const prefixes = _prefixesFor(kinds);
   const only = Array.isArray(campaignIds) && campaignIds.length ? new Set(campaignIds.map(String)) : null;
   const db = getPool();
@@ -114,14 +119,23 @@ async function cleanupSystemPlans({ confirm = false, by = 'admin', today = '', k
     let done = [];
     try {
       await client.query('BEGIN');
-      await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.campaignId]);
+      // ★ 잠근 뒤 보관 여부를 다시 본다(Codex 리뷰) — 미리보기 뒤 보관된 공고는 복원용 데이터를 지우지 않는다.
+      const { rows: lk } = await client.query('SELECT archived_at FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.campaignId]);
+      if (!lk.length || lk[0].archived_at) {
+        await client.query('ROLLBACK');
+        camp.skipped = !lk.length ? 'not_found' : 'archived';
+        camp.removed = 0;
+        continue;   // finally 가 연결을 반납한다
+      }
+      const liveToday = nowToday();
       for (const d of camp.days) {
+        if (!(d.date > liveToday)) continue;   // 그사이 오늘·지난 날이 됐으면 남긴다
         // 조회 뒤 사람이 바꿨으면(작성자·인원 변경) 지우지 않는다 — 낙관적 조건.
         const r = await client.query(
           `DELETE FROM campaign_daily_plans
             WHERE campaign_id = $1 AND plan_date = $2::date
-              AND planned_count = $3 AND updated_by = $4
-          RETURNING planned_count`, [camp.campaignId, d.date, d.count, d.updatedBy]);
+              AND planned_count = $3 AND updated_by = $4 AND plan_date > $5::date
+          RETURNING planned_count`, [camp.campaignId, d.date, d.count, d.updatedBy, liveToday]);
         if (r.rowCount) done.push(d);
       }
       if (done.length) {

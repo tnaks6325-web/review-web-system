@@ -74,6 +74,26 @@ const TODAY = '2026-09-26';
     ok('이력 1건(되돌리기 재료: 지운 날짜·인원·작성자)', ev.length === 1 && ev[0].action === 'system_plan_cleanup' && ev[0].actor === '테스터'
       && ev[0].detail.removed[0].date === '2026-09-28' && ev[0].detail.removed[0].count === 3 && ev[0].detail.removed[0].updatedBy === '작업표:관리자');
     ok('지운 공고만 작업표 날짜 맞추기', JSON.stringify(relayed) === '["A"]');
+    relayed.length = 0;
+
+    console.log('\n[2b] 미리보기 뒤 보관된 공고 · 도중에 자정이 지난 경우(Codex 리뷰)');
+    await pool.query(`INSERT INTO recruit_campaigns VALUES ('C','공고C','active',NULL),('D','공고D','active',NULL);
+      INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by) VALUES
+        ('C','2026-10-02',3,'작업표:관리자'), ('D','2026-09-27',3,'작업표:관리자'), ('D','2026-10-02',3,'작업표:관리자')`);
+    // 실행이 C 를 잠그기 직전에 보관된다(목록 조회 → 잠금 사이) — 목록 조회 쿼리 뒤에 보관을 끼워 넣는다
+    const realQuery = pool.query.bind(pool);
+    let armed = true;
+    pool.query = async (...a) => { const r = await realQuery(...a);
+      if (armed && /FROM campaign_daily_plans p/.test(String(a[0]))) { armed = false; await realQuery(`UPDATE recruit_campaigns SET archived_at=NOW() WHERE id='C'`); }
+      return r; };
+    // 시작은 9/26(내일=9/27) 이었는데 지우는 순간엔 9/27 이 됐다 → D 의 9/27 은 이제 "오늘"이라 남긴다
+    const mid = await svc.cleanupSystemPlans({ confirm: true, today: TODAY, campaignIds: ['C', 'D'], todayFn: () => '2026-09-27' });
+    pool.query = realQuery;
+    const cRes = mid.campaigns.find(c => c.campaignId === 'C'), dRes = mid.campaigns.find(c => c.campaignId === 'D');
+    ok('★ 잠근 뒤 보관이 확인되면 지우지 않는다(복원용 데이터 보존)', cRes && cRes.skipped === 'archived' && (await snap()).includes('C 10-02'), JSON.stringify(cRes));
+    ok('★ 지우는 순간 오늘이 된 날(9/27)은 남기고 그 뒤(10/2)만 지운다', dRes && dRes.removed === 1
+      && (await snap()).includes('D 09-27') && !(await snap()).includes('D 10-02'), JSON.stringify(dRes));
+    await pool.query(`DELETE FROM campaign_daily_plans WHERE campaign_id IN ('C','D'); DELETE FROM recruit_campaigns WHERE id IN ('C','D')`);
 
     console.log('\n[3] 공고 골라 실행 · 다시 돌려도 무변경(멱등)');
     await pool.query(`INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by) VALUES ('B','2026-10-01',3,'작업표:관리자')`);
