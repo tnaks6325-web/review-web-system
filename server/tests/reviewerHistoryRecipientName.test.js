@@ -124,9 +124,6 @@ function renderFirstCard(item) {
   const made = [];
   const el = () => ({
     className: '', innerHTML: '', textContent: '',
-    // ★ 카드가 검수 상태를 dataset 에 적는다(rck/rcs) — 실제 DOM 에는 항상 있다.
-    //   여기서 빼면 이 가드가 그 자리에서 죽는다(검사 대상은 카드에 적히는 '이름'이다).
-    dataset: {},
     classList: { toggle() {}, add() {} },
     addEventListener() {}, appendChild() {},
   });

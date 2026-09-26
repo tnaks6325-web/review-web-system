@@ -53,7 +53,6 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'source_review_order_id'],      // 102 — 원본 오더 식별자(중복 수신 방지)
   ['work_orders', 'delivery_type_mix'],           // 135 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['recruit_campaigns', 'delivery_type_mix'],     // 135 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
-  ['review_inspections', 'reviewer_notified_at'],  // 168 — 반려 안내 1회 선점(없으면 제출 뒤 검수가 통째로 42703)
   ['recruit_campaigns', 'delivery_review_fee_mix'], // 152 — 혼합 배송별 리뷰비(입금 대상 산정)
   ['campaign_applications', 'delivery_review_fee_mix_snapshot'], // 153 — 신청 시점 유형별 리뷰비
   ['order_submissions', 'delivery_review_fee_mix_snapshot'], // 153 — 입금·리뷰내역 행별 스냅샷

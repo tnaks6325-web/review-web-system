@@ -470,15 +470,6 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
       reviewGuide = _pickReviewGuide(String((wd && wd.reviewGuide) || ''));
     } catch (_) { /* work_detail 없음/파싱 실패 무시 */ }
 
-    /* 제출한 리뷰가 어떻게 됐는지 — `확인 중` / `제출 반려`(+사유).
-       ★ 판정·문구는 `reviewCheck.service` 단일 출처(문의방에 간 문장과 같다).
-       ★ 실패하면 null — 팝업이 아무것도 그리지 않고 종전 그대로 뜬다. */
-    let reviewCheck = null;
-    try {
-      reviewCheck = await require('../services/reviewCheck.service')
-        .reviewCheckDetail({ sheetId, tabName, rowIndex });
-    } catch (_) { /* 표시 보조값 */ }
-
     res.json({
       ok: true,
       brief: {
@@ -491,7 +482,6 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
         workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
         payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'paid', paidDate} (관리자 수동 확정) | {status:'failed'} | null
         purchaseCapture,      // ★ 강한 행 소유권 + 현재 order_submission_id 로 확인된 {fileId, uploadedAt} | null
-        reviewCheck,          // ★ 검수 결과 {state:'checking'} | {state:'rejected', kind, short, message} | null
         cancelable,           // ★ 주문취소 게이트 {ok, reason, message, reasons[]} — 실패 시 null
       },
     });
