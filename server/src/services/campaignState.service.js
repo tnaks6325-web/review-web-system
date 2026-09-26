@@ -179,29 +179,33 @@ const PLAN_ENABLED = process.env.CAMPAIGN_DAILY_PLAN !== '0';
 const ORDER_QUOTA_ENABLED = process.env.CAMPAIGN_ORDER_QUOTA !== '0';
 
 // ── 확정 인원 기준(결정 184 · 사용자 확정 2026-09-27 「A — 신청·주문 중 큰 값」) ──
-// 'max'(기본) = 오늘 확정·어제까지 확정·이월/보류 기준선 이후 확정을 **구간마다 신청·주문 중 큰 값**으로 센다.
-//   공고를 거치지 않은 실구매(대신 제출·외부 모집·늦은 구매)도 하루 인원·이월·예상 종료일·작업표 날짜에 들어간다.
+// 'max'(기본) = 어제까지 확정·이월/보류 기준선 이후 확정을 **구간마다 신청·주문 중 큰 값**으로 센다.
+//   공고를 거치지 않은 실구매(대신 제출·외부 모집·늦은 구매)도 남은 자리·이월·예상 종료일·작업표 날짜에 들어간다.
+//   ★ 오늘 확정(todaySubmitted)은 합치지 않는다 — 신청 게이트는 이미 작업표 오늘 채움(tableTodayFilled)으로
+//     공고 밖 참여를 세고, 탭 공유 공고의 오늘 합산(_groupedTableTodayCounts)이 공고마다 합친 값을 **다시 더해**
+//     같은 주문을 두 번 센다(레드팀 R1) · 주문만 저장되고 홀드가 남은 건이 오늘 두 번 세진다(Y1).
 // 'applications' = 종전(신청 기록만) — 되돌리기 = env 만.
 const COUNT_BASIS = String(process.env.CAMPAIGN_COUNT_BASIS || 'max').toLowerCase() === 'applications' ? 'applications' : 'max';
 
 /**
  * fetchCampaignCounts 깔때기 안에서 — 연결 작업표의 주문 원장 구간 수와 신청 구간 수를 **구간마다 큰 값**으로 합친다.
- * ★ 합치는 것: submittedBeforeToday · todaySubmitted · carry.submittedSince · hold.submittedSince.
+ * ★ 합치는 것: submittedBeforeToday · carry.submittedSince · hold.submittedSince. (todaySubmitted 는 합치지 않는다 — 위 스위치 주석)
+ * ★ 표(주문 원장) 기준 게이트가 켜졌을 때(`CAMPAIGN_TABLE_QUOTA=on`)만 — observe 에서 합치면 총원 마감(soft_full)은
+ *   신청 기준인데 하루 인원만 0 으로 잘려 매일 "내일 다시 오픈"으로 영구히 잠긴다(레드팀 Y4 · 031 "on 은 사람이 결정").
  * ★★ submittedAll 은 합치지 않는다 — soft_full(총원 마감)의 `usedAll` 재료이고, 주문 기준 마감은 이미
  *   `table_over_total`(비영속) 경로가 맡는다. 합치면 031 의 두 경로 분리가 무너진다(완화 금지).
  * ★ 공유 작업표(한 탭에 공고 둘 이상)·탭 없음·조회 실패·구간 수 없음(구버전 캐시) = 합치지 않는다(종전 · 정원을 좁히지 않는다).
  * ★ 원래 신청 수는 `applications` 에 보존한다(진단·표시용).
  */
 function _mergeCountBasis(o) {
-  if (COUNT_BASIS !== 'max' || !o) return;
+  if (COUNT_BASIS !== 'max' || TABLE_QUOTA_MODE !== 'on' || !o) return;
   const L = o.linked;
-  if (!L || !L.ok || L.noTab || L.sharedTab || !Number.isFinite(L.ordersBefore) || !Number.isFinite(L.ordersToday)) return;
+  if (!L || !L.ok || L.noTab || L.sharedTab || !Number.isFinite(L.ordersBefore)) return;
   o.applications = {
-    submittedBeforeToday: o.submittedBeforeToday, todaySubmitted: o.todaySubmitted,
+    submittedBeforeToday: o.submittedBeforeToday,
     carrySince: o.carry ? o.carry.submittedSince : null, holdSince: o.hold ? o.hold.submittedSince : null,
   };
   o.submittedBeforeToday = Math.max(Number(o.submittedBeforeToday) || 0, L.ordersBefore);
-  o.todaySubmitted = Math.max(Number(o.todaySubmitted) || 0, L.ordersToday);
   if (o.carry) o.carry = { ...o.carry, submittedSince: Math.max(Number(o.carry.submittedSince) || 0, Number(L.ordersSinceCarry) || 0) };
   if (o.hold) o.hold = { ...o.hold, submittedSince: Math.max(Number(o.hold.submittedSince) || 0, Number(L.ordersSinceHold) || 0) };
   o.countBasis = 'max';
