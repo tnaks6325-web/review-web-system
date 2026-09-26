@@ -316,6 +316,36 @@ function _dayDiff(a, b) {
 }
 
 /**
+ * 그날 **원래 받기로 한 인원** — 명시 계획이 있으면 그 값, 없으면 쉬는 날 0 · 진행일 기본 일건수.
+ * ★ 이월 누적(dailyQuota·pendingCarry)이 쓰는 규칙과 같은 판정이다(계획 우선 → isWeekendClosedOn).
+ */
+function _plannedOn(c, d, plans, dl) {
+  if (plans && plans[d] != null) return Math.max(0, Number(plans[d]) || 0);
+  if (isWeekendClosedOn(c, d, plans)) return 0;
+  return dl;
+}
+
+/**
+ * 원래 계획대로 받았다면 총 모집인원을 다 채우는 날(원래 종료일)까지, [fromDate ~ 그날] 중
+ * **실제로 받는 날(원래 인원 ≥ 1)** 의 수. 「남은 날에 나눠 담기」의 나눌 날 수다.
+ * ★★ 종전 식(`총원 ÷ 일건수 − 지난 달력일수`)은 쉬는 날(주말·공휴일)을 진행일로 세어 나눌 날을
+ *   적게 잡았다(= 하루 몫이 커졌다) — 2026-09-26 오류 전수조사.
+ * ★ 원래 종료일이 이미 지났으면 1(오늘 하루에 담는다 — 상한은 호출부가 건다). 판정 불가도 1.
+ */
+function _remainingOpenDays(c, startDate, fromDate, rt, dl, plans) {
+  if (!startDate || !fromDate || rt <= 0 || dl <= 0) return 1;
+  let cum = 0, d = startDate, open = 0, guard = 0;
+  while (d && guard++ < 1500) {
+    const p = _plannedOn(c, d, plans, dl);
+    cum += p;
+    if (d >= fromDate && p > 0) open++;
+    if (cum >= rt) break;
+    d = addIsoDays(d, 1);
+  }
+  return Math.max(1, open);
+}
+
+/**
  * dailyQuota — KST 일 시작 시점 고정 (§03-D). submittedBeforeToday = 전일까지의 누적확정
  *
  * carry = { startDate, today, submittedSince } 가 주어지면 미달분 이월을 적용한다.
@@ -370,15 +400,17 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
         // 쉬는 날(주말·공휴일)은 원래 받지 않는 날이라 계획 누적에서 뺀다 — 미달로 세면 다음 진행일로 몰린다.
         planned -= dl * _closedDaysWithoutPlan(c, anchor, carry.today, plans);
         const done = Number(carry.submittedSince) || 0;
-        q = Math.min(planned - done, dl * CARRY_CAP_MULT);
-        if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 그날 계획(기본 일건수)을 줄이지 않는다
-        // spread는 원래 종료일까지 남은 진행일에 현재 미달분을 고르게 나눈다.
+        const raw = planned - done;           // 오늘 받을 인원(이월 포함, 상한 적용 전)
+        q = Math.min(raw, dl * CARRY_CAP_MULT);
+        // spread는 원래 종료일까지 남은 **진행일**(쉬는 날 제외)에 현재 미달분을 고르게 나눈다.
+        // ★ 나누는 양은 상한 적용 **전** 미달분이다 — 상한을 먼저 걸면 큰 미달분이 두 배 몫으로
+        //   잘린 뒤에 나눠져 하루 몫이 실제보다 작게 나온다. 상한은 나눈 뒤 다시 건다.
         // 총원이 없는 공고는 끝점을 알 수 없으므로 현행 next로 안전하게 유지한다.
-        if (strategy === 'spread' && rt > 0 && q > dl) {
-          const totalDays = Math.max(1, Math.ceil(rt / dl));
-          const remainingDays = Math.max(1, totalDays - (days - 1));
-          q = dl + Math.ceil((q - dl) / remainingDays);
+        if (strategy === 'spread' && rt > 0 && raw > dl) {
+          const remainingDays = _remainingOpenDays(c, sd || anchor, carry.today, rt, dl, plans);
+          q = Math.min(dl + Math.ceil((raw - dl) / remainingDays), dl * CARRY_CAP_MULT);
         }
+        if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 그날 계획(기본 일건수)을 줄이지 않는다
       }
     }
   }
@@ -811,6 +843,67 @@ function heldCarry(c, counts, todayStr, appliedSum = 0, schedule = null) {
 }
 
 /**
+ * 날짜별 **예상** 모집 인원 — 오늘부터 앞으로 매일 몇 명이 열리는가(2026-09-26 사용자 확정:
+ * "일건수·주말·이월 규칙이 날짜별 인원을 정하고 작업표가 따라간다").
+ *
+ * ★★ 새 규칙을 만들지 않는다 — 날마다 **dailyQuota(실제 정원 판정)를 그대로** 불러, 앞날은 "그날
+ *   정원만큼 채워진다"고 가정하며 한 날씩 나아간다. 그래서 이월 방식(다음날에 더하기·남은 날에
+ *   나눠 담기·종료일 뒤에 붙이기)·하루 상한·사람이 정한 날·총량 clamp 가 실제 정원과 **같은 식**으로
+ *   반영된다(화면·작업표가 따로 계산하면 "표는 30인데 실제는 45"로 갈린다).
+ * ★ 오늘은 computeCampaignState 의 값(=실제 오늘 정원)을 쓴다. 쉬는 날(주말·공휴일)·0명 조절일은 0.
+ * ★ 시트 일정 공고(063)·레거시 공고는 대상이 아니다 → null(모르는 것을 지어내지 않는다).
+ * @returns {null | { today, from, days:[{date, quota, planned, closed}], endDate, remaining, truncated }}
+ *   planned = 그날의 명시 계획값(없으면 null) · remaining = 총량 − 어제까지 확정(무제한이면 null)
+ */
+function projectDailyQuotas(c, counts, opts = {}) {
+  if (!c || !c.participation_mode) return null;
+  if (isUsableSchedule(opts.schedule)) return null;
+  const now = opts.now || new Date();
+  const maxDays = Math.max(1, Math.min(400, Number(opts.maxDays) || 180));
+  const cnt = counts || {};
+  const eff = effectiveQuota(c, cnt);
+  const dl = eff.dailyLimit, rt = eff.recruitTotal;
+  const plans = (PLAN_ENABLED && cnt.plans) || null;
+  const todayStr = kstTodayStr(now);
+  const sd = dateOnlyStr(c.start_date);
+  const from = (sd && sd > todayStr) ? sd : todayStr;
+  const closedOn = d => isWeekendClosedOn(c, d, plans) || planOverrideFor(plans, d) === 0;
+
+  let before = Number(cnt.submittedBeforeToday) || 0;
+  let carrySince = cnt.carry ? (Number(cnt.carry.submittedSince) || 0) : 0;
+  const remaining = rt > 0 ? Math.max(0, rt - before) : null;
+  const days = [];
+  let endDate = null, truncated = false;
+  let d = todayStr;
+  for (let i = 0; i < maxDays + 400; i++) {
+    if (rt > 0 && before >= rt) break;
+    if (days.length >= maxDays) { truncated = true; break; }
+    let quota = 0, fill = 0;
+    const closed = d < from ? true : closedOn(d);
+    if (d === todayStr) {
+      const st = computeCampaignState(c, cnt, now, null);
+      quota = closed ? 0 : Math.max(0, Number(st.dailyQuota) || 0);
+      fill = Math.max(quota, Number(st.todayCount) || 0);
+    } else if (!closed) {
+      quota = dailyQuota(c, before,
+        cnt.carry ? { ...cnt.carry, today: d, submittedSince: carrySince } : null,
+        { today: d, plans }, eff);
+      fill = quota;
+    }
+    if (d >= from) {
+      days.push({ date: d, quota, planned: planOverrideFor(plans, d), closed });
+      if (quota > 0) endDate = d;
+    }
+    before += fill;
+    carrySince += fill;
+    // 일건수도 계획도 없는 공고는 영원히 0 이다 — 빈 날만 이어 붙이지 않는다.
+    if (!(dl > 0) && !plans) break;
+    d = addIsoDays(d, 1);
+  }
+  return { today: todayStr, from, days, endDate: rt > 0 ? endDate : null, remaining, truncated };
+}
+
+/**
  * 날짜별 모집 계획 일괄 로드(095) → Map(campaignId → { 'YYYY-MM-DD': planned_count }).
  * ★ fail-open: 테이블 부재(42P01)·조회 실패 = null(계획 미적용 = 기존 동작) — 막는 기능의
  *   오류가 목록/참여를 죽이면 안 된다. 42P01은 5분 네거티브 캐시(마이그레이션 전 배포 로그 도배 방지).
@@ -1102,6 +1195,7 @@ module.exports = {
   isCarryHold,
   pendingCarry,
   heldCarry,
+  projectDailyQuotas,
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
   TABLE_QUOTA_MODE,

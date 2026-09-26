@@ -140,14 +140,8 @@ const db = {
     '자동 receipt 키와 수동 slot2 라벨 영수증을 모두 재시도 대상으로 잡아야 한다');
   assert.match(inspectService, /const slotRole = receiptOnly \|\| t\.receipt_evidence === true \|\| isCashReceiptSlot\([\s\S]*t\.capture_slots, t\.income_type, t\.slot_key[\s\S]*slotRole,/,
     '수동 slot2 현금영수증도 재검수 때 receipt 역할을 유지해야 한다');
-  /* ★ 순서로 묶지 않는다 — 2차 검수가 공용 함수로 추출되면서 `captureVerdict:` 가
-     Map 선언보다 **앞**에 오게 됐다(검사 의미는 불변: 세 조각이 모두 있어야 한다). */
-  for (const [re_, why] of [
-    [/const captureVerdictsByFileId = new Map\(\)/, '업로드 판정을 파일ID 로 보관한다'],
-    [/captureVerdictsByFileId\.set\(uploaded\.id, verdict\)/, '업로드 직후 그 판정을 넣는다'],
-    [/captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
-     '★ 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용한다'],
-  ]) assert.match(uploadRoute, re_, why);
+  assert.match(uploadRoute, /const captureVerdictsByFileId = new Map\(\)[\s\S]*captureVerdictsByFileId\.set\(uploaded\.id, verdict\)[\s\S]*captureVerdict: _finalSlotRole === _slotRole \? \(captureVerdictsByFileId\.get\(r\.fileId\) \|\| null\) : null/,
+    '업로드 판정은 같은 최종 슬롯일 때만 영수증 검수 증거로 재사용해야 한다');
   assert.match(reviewEditRoute, /INSERT INTO review_inspections[\s\S]*approved_file_replacement[\s\S]*isCashReceiptSlot\([\s\S]*inspect\.inspectSubmission\([\s\S]*slotRole: 'receipt'/,
     '관리자가 승인한 영수증 교체본은 pending 원장을 만든 뒤 즉시 receipt 재검수해야 한다');
   assert.match(reviewEditRoute, /isCashReceiptSlot\(cfg\.capture_slots, cfg\.income_type, slot, rt, cr === true\)[\s\S]{0,500}resolveTargetFolder\(\{[\s\S]{0,200}target: 'receipt'[\s\S]{0,300}if \(!targetFolderId\) throw new Error/,

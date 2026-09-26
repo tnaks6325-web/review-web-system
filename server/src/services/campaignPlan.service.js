@@ -18,7 +18,7 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { kstTodayStr, dateOnlyStr, isCarryHold, carryStrategy, heldCarry, pendingCarry, fetchCampaignCounts,
-  computeCampaignState, totalQuotaUsage } = require('./campaignState.service');
+  computeCampaignState, totalQuotaUsage, projectDailyQuotas } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
@@ -114,7 +114,7 @@ async function getPlanOverview(campaignId) {
   const byDateSubmitted = {};
   for (const r of byDateQ.rows) byDateSubmitted[r.d] = Number(r.n) || 0;
   // 이월 보류(098): 모드 + 잔량. ★ 잔량 계산 실패는 null — 화면이 "조회 실패"를 말한다(0 위장 금지).
-  let carryHeld = null, carryAppliedSum = 0, carryPending = null, todayNaturalQuota = null;
+  let carryHeld = null, carryAppliedSum = 0, carryPending = null, todayNaturalQuota = null, projection = null;
   // ★ 시트 일정 판정이 'unknown'(실패)이면 잔량을 계산하지 않는다(fail-closed) — 시트 일정
   //   공고에는 보류가 적용되지 않으므로, 모르는 채 숫자를 띄우면 효과 없는 칩이 될 수 있다.
   if (schedule !== 'unknown') {
@@ -143,9 +143,13 @@ async function getPlanOverview(campaignId) {
       //   갈려 "화면과 실제 정원이 다르다"를 새로 만든다(막으려던 것과 같은 사고).
       const stNow = computeCampaignState(camp, counts, new Date(), sch);
       todayNaturalQuota = Number(stNow.dailyQuota) || 0;
+      // ★ 날짜별 예상 인원(2026-09-26) — 실제 정원 판정(dailyQuota)을 날마다 그대로 태운 값.
+      //   화면·작업표가 앞날 인원을 따로 계산하지 않게 하는 단일 출처다. 시트 일정 공고는 null.
+      try { projection = projectDailyQuotas(camp, counts, { schedule: sch }); }
+      catch (pe) { projection = null; logger.warn('[campaignPlan] 예상 인원 계산 실패(fail-soft): ' + pe.message); }
     } catch (e) {
       logger.warn('[campaignPlan] 이월 계산 실패(fail-soft): ' + e.message);
-      carryHeld = null; carryPending = null; todayNaturalQuota = null;
+      carryHeld = null; carryPending = null; todayNaturalQuota = null; projection = null;
     }
   }
 
@@ -256,6 +260,8 @@ async function getPlanOverview(campaignId) {
     // 손대지 않았을 때 **오늘 실제로 열리는 정원**(computeCampaignState 판정 그대로).
     //   null = 계산 불가 → 화면은 균형 모드를 켜지 않는다(잘못된 기준으로 저장 판정 금지).
     todayNaturalQuota,
+    // 날짜별 예상 인원 — null = 계산 불가·시트 일정 공고(0 으로 꾸미지 않는다).
+    projection,
     // 시트 일정 캠페인 = 조절하지 않은 날의 기준선을 시트가 정함(조절 자체는 가능).
     //   null = 판정 실패 → 화면이 "기본 표시가 부정확할 수 있음"만 고지하고 잠그지는 않는다.
     scheduleDriven: schedule === 'unknown' ? null : !!schedule,
