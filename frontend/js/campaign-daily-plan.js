@@ -156,6 +156,7 @@
     return S.data.defaultDaily || 0;
   }
   function planFor(d) {
+    if (S.pj) return S.pj.pend[d] != null ? S.pj.pend[d] : projQ(d);
     return (S.plan[d] != null) ? S.plan[d] : baseFor(d);
   }
   /** 조절·투영의 기준일 — 시작일이 미래면 그날부터(Codex P2: 오픈 전 날짜를 소진하는 것처럼
@@ -779,6 +780,242 @@
     return null; // 계획이 전부 0이거나 도달 불가 — '계산 불가'로 표기
   }
 
+  /* ══ 예상 인원 방식(결정 182 · 사용자 확정 2026-09-26) ═══════════════════════════
+     날짜별 인원은 규칙(일건수·주말/공휴일·이월 방식·총 인원)이 정하고, 서버가 그 규칙을 날마다
+     그대로 태운 **예상 인원(projection)** 을 내려준다. 이 화면은 그것을 **그리기만** 한다.
+     ★★ 앞날 인원을 화면에서 다시 계산하지 않는다 — 바꾸면 서버에 물어(미리 계산 · 저장 안 함)
+       다시 그린다(사용자 확정 "바꾸는 즉시 다시 계산"). 사본을 두면 화면과 실제 모집이 갈린다.
+     ★★ **사람이 바꾼 날만 저장한다**(pend = 바꾼 값 · rm = [기본으로] 한 저장값). 규칙으로 나오는 날을
+       저장하면 그날은 일건수·이월·주말 변경이 반영되지 않는 상태로 굳는다(완화 금지).
+     ★ 합계 맞추기 막대는 없다 — 하루를 줄이면 종료일이 자동으로 늦춰져 총 인원이 늘 맞는다
+       (사용자 확정 "'총 N명 · 예상 종료일'로 바꿈"). 총 인원을 넘는 저장은 서버가 막는다(over_total).
+     ★ 예상 인원이 없는 공고(시트 일정 · 구버전 서버)는 종전 화면(균형 모드)을 그대로 쓴다. */
+  var PJ_PREVIEW_MS = 250;
+  function projOn() { return !!(S && S.pj); }
+  function _pjSetProj(p) {
+    S.pj.proj = p || null;
+    var m = {};
+    ((p && p.days) || []).forEach(function (x) { m[x.date] = x; });
+    S.pj.map = m;
+  }
+  function projQ(d) { var x = S.pj && S.pj.map[d]; return x ? (Number(x.quota) || 0) : 0; }
+  function projClosed(d) { var x = S.pj && S.pj.map[d]; return !!(x && x.closed); }
+  function pjDirtyList() {
+    var out = {};
+    Object.keys(S.pj.pend).forEach(function (d) { out[d] = 1; });
+    Object.keys(S.pj.rm).forEach(function (d) { out[d] = 1; });
+    return Object.keys(out).sort();
+  }
+  function pjDates() {
+    var ds = {}, from = (S.pj.proj && S.pj.proj.from) || S.data.today;
+    ((S.pj.proj && S.pj.proj.days) || []).forEach(function (x) { ds[x.date] = 1; });
+    Object.keys(S.base).forEach(function (d) { if (d >= from) ds[d] = 1; });
+    Object.keys(S.pj.pend).forEach(function (d) { ds[d] = 1; });
+    return Object.keys(ds).sort().slice(0, 400);
+  }
+  /** 사람이 한 날을 바꿨다 — 저장값이 있으면 그 값과, 없으면 처음 손댄 순간의 예상 인원과 같을 때 "안 바뀜" */
+  function pjSetPend(d, v) {
+    delete S.pj.rm[d];
+    if (S.base[d] != null) {
+      if (v === S.base[d]) delete S.pj.pend[d]; else S.pj.pend[d] = v;
+      return;
+    }
+    if (S.pj.orig[d] == null) S.pj.orig[d] = projQ(d);
+    if (v === S.pj.orig[d]) delete S.pj.pend[d]; else S.pj.pend[d] = v;
+  }
+  function pjCommit(d, next) {
+    if (S.data.planEnabled === false) return;
+    var rem = (S.pj.proj && S.pj.proj.remaining != null) ? Number(S.pj.proj.remaining) : MAX_DAY;
+    var v = Math.max(minFor(d), Math.min(Math.max(minFor(d), rem), MAX_DAY, Math.round(Number(next) || 0)));
+    if (v === planFor(d)) {
+      if (Math.round(Number(next) || 0) < minFor(d) && minFor(d) > 0) toast('이미 확정·참여한 ' + minFor(d) + '명 아래로는 줄일 수 없습니다');
+      return;
+    }
+    pjSetPend(d, v);
+    pjPreview();   // ★ 「다시 계산 중」·저장 잠금과 함께 다시 그린다
+  }
+  /** [기본으로] — 저장값이면 지우고(규칙으로 복귀), 바꾸던 값이면 버린다 */
+  function pjReset(d) {
+    delete S.pj.pend[d];
+    if (S.base[d] != null) S.pj.rm[d] = 1;
+    pjPreview();   // ★ 「다시 계산 중」·저장 잠금과 함께 다시 그린다
+  }
+  /** 바뀐 날을 서버에 보내 예상 인원을 다시 받는다(저장하지 않음). 늦게 온 응답은 버린다. */
+  function pjPreview() {
+    clearTimeout(S.pj.timer);
+    S.pj.loading = true;
+    render();   // ★ 바로 「다시 계산 중」을 보이고 저장을 잠근다(답이 오기 전 옛 숫자로 저장되지 않게)
+    var campId = S.campId;
+    S.pj.timer = setTimeout(async function () {
+      if (!S || !S.pj || S.campId !== campId) return;
+      var seq = ++S.pj.seq;
+      var body = {
+        set: Object.keys(S.pj.pend).map(function (d) { return { date: d, count: S.pj.pend[d] }; }),
+        remove: Object.keys(S.pj.rm),
+      };
+      try {
+        var r = await _req('POST', EP + encodeURIComponent(campId) + '/daily-plan/preview', body);
+        if (!S || !S.pj || seq !== S.pj.seq) return;
+        _pjSetProj(r.projection || null);
+        S.pj.loading = false; S.pj.err = null;
+      } catch (e) {
+        if (!S || !S.pj || seq !== S.pj.seq) return;
+        S.pj.loading = false; S.pj.err = String(e.message || e);
+      }
+      render();
+    }, PJ_PREVIEW_MS);
+  }
+  /** 재설정 = 오늘 이후 **사람이 정한 날을 모두 지우고** 규칙으로 되돌린다(사용자 확정 2026-09-26).
+   *  ★ 인트라넷 오더 휴무일(`오더휴무:`)은 사람이 인트라넷에 적은 값이라 남긴다. */
+  function pjRebalance() {
+    var planned = (S.data.plans || []).filter(function (p) {
+      return String(p.date).slice(0, 10) >= S.data.today && !/^오더휴무:/.test(String(p.updatedBy || ''));
+    });
+    if (!planned.length && !pjDirtyList().length) { toast('직접 정한 날이 없습니다 — 이미 규칙대로 모집 중입니다'); return; }
+    if (!window.confirm(rebalanceLabel() + ' — 오늘 이후 직접 정해 둔 날(' + planned.length + '일)을 모두 지우고 '
+      + (S.data.skipWeekends === true ? '주말·공휴일을 빼고' : '주말을 포함해') + ' 하루 일건수 규칙으로 되돌립니다(총 모집인원은 그대로).\n\n'
+      + '⚠ 직접 0명으로 바꿔 둔 날도 다시 일건수로 채워집니다.\n'
+      + (S.data.skipWeekends === true ? '⚠ 직접 열어 둔 주말·공휴일도 0명으로 닫힙니다.\n' : '')
+      + '인트라넷 오더에 적힌 휴무일은 그대로 둡니다. [확정 저장]을 눌러야 반영됩니다.')) return;
+    S.pj.pend = {};
+    S.pj.rm = {};
+    planned.forEach(function (p) { S.pj.rm[String(p.date).slice(0, 10)] = 1; });
+    S.pj.reset = planned.length;
+    pjPreview();   // ★ 「다시 계산 중」·저장 잠금과 함께 다시 그린다
+    toast(rebalanceLabel() + '을 적용했습니다 — 확인 후 [확정 저장]을 눌러주세요');
+  }
+  /** 규칙이 담지 못한 인원(일건수 0 · 400일 안에 못 채움) — 0 이면 정상 */
+  function pjUnplaced() {
+    var p = S.pj.proj;
+    if (!p || p.remaining == null) return 0;
+    var placed = (p.days || []).reduce(function (a, x) { return a + (Number(x.quota) || 0); }, 0);
+    return Math.max(0, Number(p.remaining) - placed);
+  }
+  function renderProj() {
+    var j = S.data, p = S.pj.proj;
+    var bd = document.getElementById('cdpBody');
+    var save = document.getElementById('cdpSaveBtn');
+    var hint = document.getElementById('cdpHint');
+    var killOff = j.planEnabled === false;
+    var dates = rowDates();   // ★ 행 이벤트와 같은 목록(단일 출처)
+    var scale = gaugeScale();  // ★ 드래그와 같은 눈금(다르면 끌어 놓은 자리와 값이 어긋난다)
+    // 인트라넷 오더 휴무일(접수 때 0명으로 저장 · 작성자 `오더휴무:`)은 "조절"이 아니라 휴무로 보인다
+    var orderHol = {};
+    (j.plans || []).forEach(function (p) { if (/^오더휴무:/.test(String(p.updatedBy || ''))) orderHol[String(p.date).slice(0, 10)] = 1; });
+    var rows = dates.map(function (d, i) {
+      var v = planFor(d), isToday = d === j.today;
+      var pend = S.pj.pend[d] != null, rm = !!S.pj.rm[d], saved = S.base[d] != null && !rm;
+      var oh = saved && !pend && orderHol[d] && v === 0;
+      var closed = (projClosed(d) || oh) && v === 0;
+      var conf = isToday ? (j.todayUsed || 0) : 0;
+      var pw = Math.min(100, v / scale * 100), cw = Math.min(100, conf / scale * 100);
+      var dk = dayKind(d), hol = holidayName(d);
+      var stateText = closed ? '휴무' : (pend || rm ? '변경' : (saved ? '조절' : (isToday ? '오늘' : '규칙')));
+      var tag = pend ? '바꾼 값(저장 전)' : rm ? '규칙으로 되돌림(저장 전)' : oh ? '인트라넷 오더 휴무일' : saved ? '직접 정한 값' : '규칙으로 계산';
+      var reset = (pend || saved) ? ' <button type="button" class="cdp-reset" data-i="' + i + '">기본으로</button>' : '';
+      return '<div class="cdp-row' + (isToday ? ' today' : '') + (closed ? ' zero' : '') + '">'
+        + '<span class="cdp-d' + (dk ? ' ' + dk : '') + '"' + (hol ? ' title="' + _esc(hol) + '"' : '') + '>' + _esc(fmtMD(d))
+        + (hol ? '<span class="cdp-tag hol">' + _esc(hol) + '</span>' : '') + '</span>'
+        + '<span class="cdp-state" title="' + _esc(tag) + '">' + stateText + '</span>'
+        + '<span class="cdp-num"><input type="text" inputmode="numeric" class="cdp-in" data-i="' + i + '" value="' + v + '"'
+        + (killOff ? ' disabled' : '') + '><small>' + (conf > 0 ? '<i>확정 ' + conf + '</i> ' : '') + _esc(tag) + reset + '</small></span>'
+        + '<div class="cdp-ctl">'
+        + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="-1"' + (killOff ? ' disabled' : '') + '>−</button>'
+        + '<div class="cdp-g" data-i="' + i + '" aria-label="' + _esc(fmtMD(d)) + ' 모집인원 조절">'
+        + '<div class="f" style="width:' + pw + '%"></div>'
+        + (conf > 0 ? '<div class="c" style="width:' + cw + '%"></div>' : '')
+        + '<div class="k" style="left:' + pw + '%"></div></div>'
+        + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="1"' + (killOff ? ' disabled' : '') + '>＋</button>'
+        + '</div></div>';
+    }).join('');
+
+    var done = Number(j.submittedAll) || 0, tot = totalFor(), carry = carryAmt();
+    var endTxt = tot <= 0 ? '무제한(총모집 미설정)' : (p && p.endDate ? fmtMD(p.endDate) : '계산 불가');
+    if (S.pj.baseEnd == null) S.pj.baseEnd = endTxt;
+    var unplaced = pjUnplaced();
+    var statBlk = '<div class="cdp-stat"><div class="r1">'
+      + '<span class="big">모집 현황 <em>' + done + '</em> / ' + (tot > 0 ? tot + '명' : '무제한') + '</span>'
+      + (carry === null ? '<span class="cdp-cb un" title="이월 인원을 계산하지 못했습니다">↩ 이월 ?</span>'
+        : (carry > 0 ? '<span class="cdp-cb" title="어제까지 못 채운 인원">↩ 이월 ' + carry + '명</span>' : ''))
+      + '</div>'
+      + (tot > 0 ? '<div class="bar"><i style="width:' + Math.min(100, done / tot * 100).toFixed(1) + '%"></i></div>' : '')
+      + '<div class="kv">'
+      + (tot > 0 ? '<span>남은 모집 <b>' + Math.max(0, tot - done) + '</b>명</span>' : '')
+      + '<span>예상 종료일 <b class="end">' + _esc(endTxt) + '</b></span>'
+      + '</div></div>';
+    /* ★ 합계 맞추기 막대 대신 "총 N명 · 예상 종료일"(사용자 확정) — 규칙이 담지 못한 인원이 있을 때만 경고 */
+    var sumBlk = '<div class="cdp-bal ' + (unplaced > 0 ? 'under' : 'ok') + '"><div class="ico">' + (unplaced > 0 ? '▼' : '✓') + '</div>'
+      + '<div class="txt"><div class="l1">총 <span class="num">' + (tot > 0 ? tot : '무제한') + '</span>' + (tot > 0 ? '명' : '')
+      + ' · 예상 종료일 <b>' + _esc(endTxt) + '</b>'
+      + (S.pj.loading ? ' · <span style="color:#64748b">다시 계산 중…</span>' : '')
+      + (unplaced > 0 ? ' — <b>' + unplaced + '명</b>은 날짜를 정할 수 없습니다(일건수가 0이거나 기간이 너무 깁니다)' : '')
+      + '</div></div></div>'
+      + (S.pj.err ? '<div class="cdp-note err">예상 인원을 다시 계산하지 못했습니다: ' + _esc(S.pj.err) + ' — 표의 숫자는 마지막으로 받은 값입니다.</div>' : '');
+    var mode = S.carryMode || j.carryStrategy || 'next';
+    var modeDesc = { next: '못 채운 인원을 <b>다음 진행일</b>에 더합니다(하루 최대 일건수의 2배).',
+      spread: '못 채운 인원을 <b>원래 종료일까지 남은 진행일</b>에 고르게 나눠 담습니다.',
+      extend: '각 날 인원은 그대로 두고 못 채운 인원만큼 <b>종료일이 뒤로</b> 늘어납니다.' }[mode] || '';
+    var carryBlk = '<div class="cdp-carry"><div class="t">이월 보충 방식</div>'
+      + '<div class="d">' + modeDesc + ' 총 인원은 어느 방식에서도 같고 <b>종료일만</b> 달라집니다. 바꾸면 바로 적용되고 작업표 날짜도 따라갑니다.'
+      + (j.carryMode === 'hold' ? '<br>이 공고는 <b>이월 보류</b> 설정이라 못 채운 인원이 자동으로 얹히지 않습니다'
+        + (j.carryHeld != null ? ' — 보류 <b>' + j.carryHeld + '명</b>' : '') + '. <button type="button" class="cdp-btn sm" onclick="CampaignDailyPlan._pjHeld()">보류 이월 반영하기</button>' : '')
+      + '</div><div class="cdp-seg">'
+      + segBtn('next', '다음날에 더하기', '다음 진행일에')
+      + segBtn('spread', '남은 날에 나눠 담기', '진행일에 고르게')
+      + segBtn('extend', '종료일 뒤에 붙이기', '각 날 인원은 그대로')
+      + '</div></div>';
+    var wkNote = '';
+    if (S.pj.reset != null) {
+      wkNote = '<div class="cdp-note" style="border-color:#86EFAC;background:#F0FDF4;color:#166534">↺ <b>' + rebalanceLabel()
+        + '</b> — 직접 정한 날 <b>' + S.pj.reset + '일</b>을 지우고 규칙으로 되돌렸습니다(저장 전). 예상 종료일 <b>' + _esc(endTxt) + '</b>. [확정 저장]을 눌러야 반영됩니다.</div>';
+    } else if (!rebalanceReason()) {
+      wkNote = '<div style="margin:6px 0 2px"><button type="button" class="cdp-btn sm" id="cdpRebalBtn" onclick="CampaignDailyPlan._rebalance()"'
+        + ' title="오늘 이후 직접 정해 둔 날을 모두 지우고 지금 주말 설정의 규칙으로 되돌립니다">↺ ' + rebalanceLabel() + '</button></div>';
+    }
+    var quotaBlk = !planGateKnown()
+      ? '<div class="cdp-note err"><b>주문 원장 총량을 확인하지 못했습니다.</b> 인원 증원은 잠시 중단되며 기존 계획 축소·해제만 저장할 수 있습니다.</div>'
+      : (j.totalQuotaFull === true ? '<div class="cdp-note warn"><b>총 모집 ' + tot + '건이 완료되었습니다.</b> 인원 증원은 불가하며 차수 추가만 가능합니다.</div>' : '');
+    var wtNote = (j.worktableLinked === false)
+      ? '<div class="cdp-note" style="border-color:#FCA5A5;background:#FEF2F2;color:#B42318">⚠ 이 작업은 <b>무시트 작업표로 전환되지 않은 상태</b>입니다 — 여기서 조절하면 <b>정원만 바뀌고 작업표의 줄은 그대로</b>입니다.</div>'
+      : '';
+    bd.innerHTML = '<div class="cdp-layout"><aside class="cdp-side">' + statBlk + carryBlk + wkNote + '</aside>'
+      + '<section class="cdp-main"><div class="cdp-fix">'
+      + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 조절을 잠갔습니다.</div>' : '')
+      + (j.status !== 'active' ? '<div class="cdp-publish">현재 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b> 상태입니다. 모집을 다시 열려면 공고 카드에서 게시를 켜세요.</div>' : '')
+      + quotaBlk + sumBlk
+      + '<div class="cdp-sub"><span>날짜별 모집 인원 — 규칙으로 계산한 값입니다. 바꾼 날만 저장됩니다</span>'
+      + '<span>기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b> · ' + (j.skipWeekends === true ? '주말·공휴일 제외' : '주말 포함') + ' · 확정 <b>' + done + '명</b></span></div>'
+      + '</div><div class="cdp-sc">'
+      + '<div class="cdp-colhead"><span>날짜</span><span>상태</span><span class="n">일 건수</span><span>조절</span></div>'
+      + '<div id="cdpRows">' + (rows || '<div class="cdp-note">앞으로 모집할 날이 없습니다.</div>') + '</div>'
+      + '<div class="cdp-end"><span>예상 종료일: <b>' + _esc(endTxt) + '</b> '
+      + (endTxt !== S.pj.baseEnd ? '<span class="chg">(원래 ' + _esc(S.pj.baseEnd) + ' → 변경됨)</span>' : '') + '</span>'
+      + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan._revert()" style="padding:5px 10px;font-size:.66rem">바꾼 내용 되돌리기</button></div>'
+      + '<details class="cdp-more"><summary>추가 설정 및 조정 이력</summary>' + wtNote
+      + '<div class="cdp-note">표의 숫자는 규칙(일건수·주말·이월 방식·총 인원)으로 계산한 값입니다. 직접 바꾼 날만 저장되고, 나머지 날은 설정이 바뀌면 자동으로 다시 계산됩니다. 작업표의 빈 줄 날짜도 이 숫자를 따라갑니다.</div>'
+      + roundsSecHtml(j) + histHtml() + '</details>'
+      + '</div></section></div>';
+    var sc = bd.querySelector('.cdp-sc');
+    if (sc && S._scrollTop) sc.scrollTop = S._scrollTop;
+    if (sc && !sc._bound) { sc._bound = true; sc.addEventListener('scroll', function () { S._scrollTop = sc.scrollTop; }); }
+    bindRowEvents();
+    var dirty = pjDirtyList().length;
+    var increases = Object.keys(S.pj.pend).some(function (d) { return S.pj.pend[d] > (S.base[d] != null ? S.base[d] : (S.pj.orig[d] || 0)); });
+    save.disabled = killOff || S.saving || S.pj.loading || !dirty || dirty > MAX_ROWS || (totalQuotaLocked() && increases);
+    hint.textContent = dirty > MAX_ROWS ? '한 번에 저장 가능한 ' + MAX_ROWS + '일을 넘었습니다 — 나눠 저장해주세요'
+      : S.pj.loading ? '다시 계산 중입니다…'
+      : (totalQuotaLocked() && increases) ? (planGateKnown() ? '총 모집이 완료되어 증원할 수 없습니다' : '주문 원장 총량 확인 전에는 증원할 수 없습니다')
+      : dirty ? '바꾼 날 ' + dirty + '일 — [확정 저장]을 누르면 반영되고 작업표 날짜도 따라갑니다'
+      : '바꾼 날이 없습니다 — 규칙대로 모집 중입니다';
+    syncRebuildBtn();
+  }
+  /** 보류 이월 반영 — 종전 빠른 반영 창(단일 출처)을 쓰고, 닫힌 뒤 다시 불러온다 */
+  async function _pjHeld() {
+    if (!S) return;
+    var campId = S.campId;
+    await quickApplyHeld(campId);
+  }
+
   /* ── 마운트(body 직속) ───────────────────────────────────── */
   var CSS = ''
     + '#cdpModal{position:fixed;inset:0;z-index:10050;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.55)}'
@@ -985,6 +1222,14 @@
   async function openWeekendRebalance(campId) {
     await open(campId);
     if (!S || !S.data) return;
+    if (S.pj) {
+      /* ★ 결정 182 — 주말 설정은 저장 즉시 규칙에 반영되고 작업표도 따라간다. 직접 정해 둔 날이 있으면
+         그 날은 그대로이므로 재설정 버튼을 권한다(자동으로 지우지 않는다). */
+      var own = (S.data.plans || []).filter(function (p) { return String(p.date).slice(0, 10) >= S.data.today && !/^오더휴무:/.test(String(p.updatedBy || '')); }).length;
+      toast(own ? '주말 설정이 반영됐습니다 — 직접 정해 둔 날 ' + own + '일은 그대로입니다. 지우려면 [' + rebalanceLabel() + ']을 누르세요'
+        : '주말 설정이 반영됐습니다 — 날짜별 인원과 작업표가 새 설정을 따릅니다');
+      return;
+    }
     S.wkPrompt = true;
     var why = rebalanceReason();
     if (why) { render(); toast(REBAL_WHY[why] || '재설정 대상이 아닙니다'); return; }
@@ -994,6 +1239,7 @@
   /** 배너 버튼 — 사람이 누를 때만 편다(조용한 자동수정 금지) */
   function _rebalance() {
     if (!S || !S.data) return;
+    if (S.pj) { var w = rebalanceReason(); if (w) { toast(REBAL_WHY[w] || '재설정 대상이 아닙니다'); return; } pjRebalance(); return; }
     var why = rebalanceReason();
     if (why) { toast(REBAL_WHY[why] || '재설정 대상이 아닙니다'); return; }
     /* ★ 오늘 이후 일정을 통째로 다시 깐다 — 사람이 직접 0명으로 바꿔 둔 날(휴무일 등)도
@@ -1010,7 +1256,7 @@
   function close() {
     // ★ 균형 모드는 열자마자 구간을 펼쳐 두므로 dirty 가 항상 크다 — "사람이 실제로 바꾼 게 있나"로
     //   판정해야 아무것도 안 건드리고 닫을 때 매번 경고가 뜨지 않는다.
-    var touched = S && S.data && ((balanceOn() ? changedFromOpen() : dirtyDates().length > 0)
+    var touched = S && S.data && ((S.pj ? pjDirtyList().length > 0 : (balanceOn() ? changedFromOpen() : dirtyDates().length > 0))
       || (S.closedPin && Object.keys(S.closedPin).length > 0));
     if (touched && !window.confirm('저장하지 않은 조절이 있습니다. 닫을까요?')) return;
     var m = document.getElementById('cdpModal');
@@ -1052,6 +1298,16 @@
     S.baseEnd = null;
     S.balance = false; S.horiz = null; S.carryMap = null; S.openPlan = null; S.outside = null;
     S.closedPin = {};   // [주말·공휴일 0명 확정] 스테이징 — 저장·재조회하면 비운다
+    /* ★ 결정 182 — 서버가 날짜별 예상 인원을 주면 "예상 인원 방식"으로 연다(시트 일정 공고는 종전 화면) */
+    S.pj = null;
+    if (j.projection && j.scheduleDriven !== true) {
+      S.pj = { proj: null, map: {}, pend: {}, rm: {}, orig: {}, seq: 0, timer: null, loading: false, err: null, baseEnd: null, reset: null };
+      _pjSetProj(j.projection);
+      S.carryMode = j.carryStrategy || 'next';
+      document.getElementById('cdpTitle').textContent = '모집인원 조절 — ' + (S.title || S.campId);
+      render();
+      return;
+    }
     // ★ 기본 보충 방식 = "다음날(첫 진행일) 정원에 더하기"(사용자 확정) — 펼치지 못하면(총량 무제한·
     //   구간이 저장 상한 초과 등) 균형 모드를 끄고 종전 동작(14일 성긴 표)으로 둔다.
     // ★★ **고른 방식은 저장·재조회·재오픈에도 유지한다**(사용자 신고 2026-08-07 — "종료일 뒤에
@@ -1072,6 +1328,7 @@
 
   function dirtyDates() {
     if (!S || !S.data) return [];
+    if (S.pj) return pjDirtyList();
     if (balanceOn()) { var pl = payload(); return pl.set.map(function (x) { return x.date; }).concat(pl.remove).sort(); }
     var out = [];
     var ds = {};
@@ -1145,6 +1402,9 @@
 
   /* ── 렌더 ───────────────────────────────────────────────── */
   function rowDates() {
+    /* ★★ 예상 인원 방식은 renderProj 가 그린 줄 목록(pjDates)과 **같은 목록**이어야 한다 — 행 이벤트(bindRowEvents)가
+       data-i 번호를 이 목록으로 날짜에 되돌리므로, 목록이 다르면 ＋/−·입력이 **다른 날짜**를 바꾼다. */
+    if (projOn()) return pjDates();
     // 균형 모드 = 오늘~종료일 구간 전부(합계를 총량과 맞춰야 하므로 성긴 표로는 셀 수 없다)
     if (balanceOn()) return S.horiz;
     var ds = {};
@@ -1155,6 +1415,7 @@
   }
 
   function render() {
+    if (projOn()) return renderProj();
     var j = S.data;
     var bd = document.getElementById('cdpBody');
     var save = document.getElementById('cdpSaveBtn');
@@ -1461,15 +1722,6 @@
         ? '<div class="cdp-note warn"><b>총 모집 ' + totalFor() + '건이 완료되었습니다.</b> 현재 소비량 ' + planGateSubmittedAll() + '건 — 인원 증원은 불가하며 기존 계획 축소·해제 또는 차수 추가만 가능합니다.</div>'
         : '');
 
-    var roundsHtml = (j.rounds || []).map(function (r, i) {
-      var prev = (j.rounds || []).slice(0, i).reduce(function (s, x) { return s + (x.count || 0); }, 0);
-      var got = Math.max(0, Math.min(r.count || 0, (j.submittedAll || 0) - prev));
-      var done = got >= (r.count || 0);
-      return '<div class="cdp-rr"><span class="cdp-rno">' + r.roundNo + '차</span>'
-        + '<span>' + (r.count || 0) + '건</span>'
-        + '<span class="cdp-rmeta">' + _esc((r.startDate ? fmtMD(r.startDate) + ' 시작' : '시작일 없음') + (r.label ? ' · ' + r.label : '')) + '</span>'
-        + '<span class="cdp-rprog" style="color:' + (done ? '#16a34a' : '#1b64da') + '">' + got + '/' + (r.count || 0) + (done ? ' 완료' : '') + '</span></div>';
-    }).join('');
 
     // ★ 098 보류 이월 블록(보류 공고만) — 잔량 표시 + [오늘/내일/분산] 반영(계획 스테이징).
     //   잔량 null = "조회 실패"를 말하고 반영을 잠근다(숫자를 지어내지 않는다 — 시안 확정).
@@ -1538,18 +1790,7 @@
         ? '주황 막대는 <b>이월분</b>입니다. 배분 합계가 남은 배분수와 같을 때 저장할 수 있습니다.'
         : '총량은 일 건수 조절로 바뀌지 않습니다. 총량 변경은 차수 추가에서만 할 수 있습니다.')
       + '</div>'
-      + '<div class="cdp-sec"><div class="h"><span>차수 (물량 추가 이력)</span>'
-      + '<span><button type="button" class="cdp-btn" onclick="CampaignDailyPlan._roundForm()">＋ 차수 추가</button>'
-      + ((j.rounds || []).length >= 2 ? ' <button type="button" class="cdp-btn" onclick="CampaignDailyPlan._roundRemove()" title="마지막 차수 제거(오등록 복구)">− 마지막 차수 제거</button>' : '')
-      + '</span></div>'
-      + (roundsHtml || '<div class="cdp-rmeta" style="font-size:.7rem">아직 차수가 없습니다 — 물량이 추가되면 [＋ 차수 추가]로 등록하세요(총량 ' + ((j.recruitTotal || 0) > 0 ? j.recruitTotal + '건이 1차(초도)로 흡수됩니다' : '이 추가 건수로 설정됩니다') + ').</div>')
-      + '<div class="cdp-radd" id="cdpRoundForm">'
-      + '<input id="cdpRfCount" type="number" min="1" placeholder="추가 건수" style="width:90px">'
-      + '<input id="cdpRfDate" type="date" title="시작일(선택)">'
-      + '<input id="cdpRfLabel" type="text" maxlength="40" placeholder="메모(선택)" style="width:120px">'
-      + '<button type="button" class="cdp-btn pri" onclick="CampaignDailyPlan._roundAdd()">추가</button></div>'
-      + (j.roundsDrift ? '<div class="cdp-note warn">⚠ 총모집(' + (j.recruitTotal || 0) + ')이 차수 합계(' + (j.roundsTotal || 0) + ')와 다릅니다 — 다른 창구에서 총모집이 바뀐 흔적입니다. 차수를 추가/제거하면 합계로 다시 맞춰집니다.</div>' : '')
-      + '</div>'
+      + roundsSecHtml(j)
       + histHtml()
       + '</details>'
       + '</div></section></div>';   // .cdp-sc · .cdp-main · .cdp-layout 닫기
@@ -1608,6 +1849,31 @@
     syncRebuildBtn();
   }
 
+  /** 차수(물량 추가 이력) 구역 — 종전 화면·예상 인원 화면이 같은 것을 쓴다(사본 금지) */
+  function roundsSecHtml(j) {
+    var roundsHtml = (j.rounds || []).map(function (r, i) {
+      var prev = (j.rounds || []).slice(0, i).reduce(function (s, x) { return s + (x.count || 0); }, 0);
+      var got = Math.max(0, Math.min(r.count || 0, (j.submittedAll || 0) - prev));
+      var done = got >= (r.count || 0);
+      return '<div class="cdp-rr"><span class="cdp-rno">' + r.roundNo + '차</span>'
+        + '<span>' + (r.count || 0) + '건</span>'
+        + '<span class="cdp-rmeta">' + _esc((r.startDate ? fmtMD(r.startDate) + ' 시작' : '시작일 없음') + (r.label ? ' · ' + r.label : '')) + '</span>'
+        + '<span class="cdp-rprog" style="color:' + (done ? '#16a34a' : '#1b64da') + '">' + got + '/' + (r.count || 0) + (done ? ' 완료' : '') + '</span></div>';
+    }).join('');
+    return '<div class="cdp-sec"><div class="h"><span>차수 (물량 추가 이력)</span>'
+      + '<span><button type="button" class="cdp-btn" onclick="CampaignDailyPlan._roundForm()">＋ 차수 추가</button>'
+      + ((j.rounds || []).length >= 2 ? ' <button type="button" class="cdp-btn" onclick="CampaignDailyPlan._roundRemove()" title="마지막 차수 제거(오등록 복구)">− 마지막 차수 제거</button>' : '')
+      + '</span></div>'
+      + (roundsHtml || '<div class="cdp-rmeta" style="font-size:.7rem">아직 차수가 없습니다 — 물량이 추가되면 [＋ 차수 추가]로 등록하세요(총량 ' + ((j.recruitTotal || 0) > 0 ? j.recruitTotal + '건이 1차(초도)로 흡수됩니다' : '이 추가 건수로 설정됩니다') + ').</div>')
+      + '<div class="cdp-radd" id="cdpRoundForm">'
+      + '<input id="cdpRfCount" type="number" min="1" placeholder="추가 건수" style="width:90px">'
+      + '<input id="cdpRfDate" type="date" title="시작일(선택)">'
+      + '<input id="cdpRfLabel" type="text" maxlength="40" placeholder="메모(선택)" style="width:120px">'
+      + '<button type="button" class="cdp-btn pri" onclick="CampaignDailyPlan._roundAdd()">추가</button></div>'
+      + (j.roundsDrift ? '<div class="cdp-note warn">⚠ 총모집(' + (j.recruitTotal || 0) + ')이 차수 합계(' + (j.roundsTotal || 0) + ')와 다릅니다 — 다른 창구에서 총모집이 바뀐 흔적입니다. 차수를 추가/제거하면 합계로 다시 맞춰집니다.</div>' : '')
+      + '</div>';
+  }
+
   function histHtml() {
     var evs = (S.data.events || []);
     if (!evs.length) return '';
@@ -1633,6 +1899,10 @@
   /* ── 값 변경(세션 디바운스 — 질문은 조절 한 묶음당 한 번) ── */
   function gaugeScale() {
     var mx = (S.data.defaultDaily || 0) * 2;
+    if (projOn()) {   // 예상 인원 방식 — 작업표 줄 수는 눈금 기준이 아니다(인원은 규칙이 정한다)
+      rowDates().forEach(function (d) { mx = Math.max(mx, planFor(d)); });
+      return Math.max(10, mx);
+    }
     // 시트 일정 공고는 기본 일건수가 무의미하므로 그날 시트 계획도 눈금 후보에 넣는다
     rowDates().forEach(function (d) { mx = Math.max(mx, planFor(d), baseFor(d) * 2); });
     return Math.max(10, mx);
@@ -1646,6 +1916,7 @@
   }
 
   function commitValue(d, next) {
+    if (S.pj) return pjCommit(d, next);
     if (S.data.planEnabled === false) return;
     var cur = planFor(d), want = Math.round(next), cap = maxFor(d);
     // ★ 합계가 총건수를 넘는 값은 들어가지 않는다(경고가 아니라 차단 — 사용자 확정)
@@ -1668,6 +1939,7 @@
     scheduleSettle(d);
   }
   function setPlan(d, v) {
+    if (S.pj) { pjSetPend(d, v); return; }
     // ★ "기본값 복귀 = 조절 없음" 판정도 baseFor 단일 출처를 써야 한다 — defaultDaily 로 비교하면
     //   시트 15명인 날을 의도적으로 20(= daily_limit)으로 올렸을 때 **조절이 조용히 삭제**되어
     //   드래그가 되돌아가고 저장해도 아무 일이 안 일어난다(코드리뷰 #3).
@@ -1757,6 +2029,7 @@
   }
   function _revert() {
     if (!S || !S.data) return;
+    if (S.pj) { S.pj.pend = {}; S.pj.rm = {}; S.pj.orig = {}; S.pj.reset = null; S.notes = []; pjPreview(); return; }
     if (balanceOn()) {
       // 균형 모드 = "이 방식의 기본 배치로" — 지금 고른 방식대로 다시 깐다(합계는 항상 딱 맞는다)
       applyCarryMode(S.carryMode || DEFAULT_CARRY_MODE);
@@ -1775,6 +2048,25 @@
   async function _mode(m) {
     if (!S || !S.data || CARRY_MODES.indexOf(m) < 0) return;
     if (S.data.planEnabled === false) { toast('날짜별 모집계획 기능이 꺼져 있어 방식을 바꿀 수 없습니다'); return; }
+    if (S.pj) {
+      /* ★ 결정 182 — 방식은 서버 설정 하나(carry_strategy). 저장하면 서버가 예상 인원을 다시 계산하고
+         작업표 날짜도 따라간다 → 다시 불러와 그린다. 바꾼 날(저장 전)이 있으면 먼저 확인한다. */
+      if (m === (S.data.carryStrategy || 'next')) return;
+      if (pjDirtyList().length && !window.confirm('저장하지 않은 날짜 변경이 있습니다 — 이월 방식을 바꾸면 그 변경은 사라집니다. 계속할까요?')) return;
+      var campId = S.campId;
+      try {
+        await _req('PUT', EP + encodeURIComponent(campId) + '/carry-strategy', { carryStrategy: m });
+        var ov = await _req('GET', EP + encodeURIComponent(campId) + '/daily-plan');
+        if (!S || S.campId !== campId) return;
+        applyOverview(ov);
+        var e2 = S.pj && S.pj.proj && S.pj.proj.endDate;
+        toast('이월 방식을 바꿨습니다 — 예상 종료일 ' + (e2 ? fmtMD(e2) : '-') + ' · 작업표 날짜도 따라갔습니다');
+        refreshHost();
+      } catch (e) {
+        toast('모집이월 방식 저장 실패: ' + (e.message || e));
+      }
+      return;
+    }
     var before = S.carryMode || S.data.carryStrategy || DEFAULT_CARRY_MODE;
     if (m !== before) {
       // 먼저 선택을 보이되, 저장 실패 시 이전 값으로 되돌린다. 세션만 바뀌는 유령 연동을 막는다.
@@ -2047,6 +2339,7 @@
       var rs = ev.target.closest('.cdp-reset');
       if (rs) {
         var d2 = dates[Number(rs.dataset.i)];
+        if (S.pj) { pjReset(d2); return; }
         commitValue(d2, baseFor(d2));   // 그날 기준선(시트 공고 = 시트 행 수)으로 되돌린다
         // "기본으로" = 조절 해제 의도 — 값이 기본과 같아도 base 에 있으면 remove 로 저장된다
         if (S.plan[d2] === baseFor(d2) && S.base[d2] != null) { delete S.plan[d2]; render(); }
@@ -2061,7 +2354,7 @@
     var v = Math.round(ratio * sc);
     v = Math.max(minFor(drag.d), Math.min(maxFor(drag.d), v));
     if (v !== planFor(drag.d)) {
-      S.plan[drag.d] = v;   // 드래그 중에는 그 줄만 가볍게 갱신(전체 재렌더 금지 — 드래그 끊김)
+      if (S.pj) S.pj.pend[drag.d] = v; else S.plan[drag.d] = v;   // 드래그 중에는 그 줄만 가볍게 갱신(전체 재렌더 금지 — 드래그 끊김)
       var pw = Math.min(100, v / sc * 100);
       drag.el.querySelector('.f').style.width = pw + '%';
       drag.el.querySelector('.k').style.left = pw + '%';
@@ -2078,7 +2371,13 @@
   async function _save() {
     if (!S || !S.data || S.saving) return;
     var set, remove;
-    if (balanceOn()) { var pl = payload(); set = pl.set; remove = pl.remove; }   // 게이트와 같은 판정
+    if (S.pj) {
+      /* ★ 결정 182 — 사람이 바꾼 날(pend)과 [기본으로] 한 저장값(rm)만 보낸다. 규칙으로 나오는 날은 보내지 않는다. */
+      if (S.pj.loading) return;
+      set = Object.keys(S.pj.pend).map(function (d) { return { date: d, count: S.pj.pend[d] }; });
+      remove = Object.keys(S.pj.rm).filter(function (d) { return S.base[d] != null; });
+    }
+    else if (balanceOn()) { var pl = payload(); set = pl.set; remove = pl.remove; }   // 게이트와 같은 판정
     else {
       set = []; remove = [];
       dirtyDates().forEach(function (d) {
@@ -2089,14 +2388,15 @@
     if (!set.length && !remove.length) return;
     // 균형 모드 저장 게이트(버튼 우회 방어) — **초과**·저장 상한 초과는 보내지 않는다.
     //   ★ 부족은 보낸다(2026-08-19 확정: 그만큼만 모집하고 작업표도 그 수로 줄어든다).
-    if ((balanceOn() && (diffPlan() > 0 || set.length + remove.length > MAX_ROWS))
-        || (!balanceOn() && totalFor() > 0 && manualDiffPlan() > 0 && !manualOnlyReductions())) return;
+    if (S.pj && set.length + remove.length > MAX_ROWS) return;
+    if (!S.pj && (balanceOn() && (diffPlan() > 0 || set.length + remove.length > MAX_ROWS))
+        || (!S.pj && !balanceOn() && totalFor() > 0 && manualDiffPlan() > 0 && !manualOnlyReductions())) return;
     // [확정 저장] 자체가 의도적인 최종 동작이다. 브라우저 확인창을 한 번 더 띄우지 않고
     // 즉시 저장한 뒤, 결과(성공·실패·작업표 동기화 상태)는 화면 토스트로만 알린다.
     // 098 보류 잔량 차감 — 균형 모드는 "지금 계획에 실제로 얹혀 있는 이월"이 곧 반영량이다
-    var apply = balanceOn()
+    var apply = S.pj ? 0 : (balanceOn()
       ? (S.data.carryMode === 'hold' ? carryPlaced() : 0)
-      : S.carryStage;
+      : S.carryStage);
     S.saving = true;
     document.getElementById('cdpSaveBtn').disabled = true;
     try {
@@ -2112,7 +2412,8 @@
            지금은 모든 작업이 무시트라 이 상태 자체가 이상 신호(전환 누락)다. */
         toast(j.worktableSync.message || '정원만 조절됐습니다 — 작업표의 줄은 바뀌지 않았습니다', 'warning');
       } else if (j.worktableSync && j.worktableSync.rebuild && j.worktableSync.rebuild.ok === false
-                 && j.worktableSync.rebuild.reason !== 'worktable_rebuild_empty') {
+                 && j.worktableSync.rebuild.reason !== 'worktable_rebuild_empty'
+                 && j.worktableSync.rebuild.reason !== 'no_worktable_rows') {   // 줄이 아직 없는 작업표 = 맞출 것이 없음(실패 아님)
         /* ★ 저장 후 자동 재구성(오늘 이후 전체)이 실패한 경우 — 조절은 저장됐지만 미래 자리는
            그대로다. 조용히 "저장 완료"라고 말하면 "왜 스케줄이 안 바뀌지"가 원인 불명으로 남는다. */
         toast('조절은 저장됐지만 오늘 이후 자리 재구성에 실패했습니다 — '
@@ -2145,27 +2446,26 @@
     btn.title = linked === false
       ? '이 작업은 아직 무시트 작업표로 전환되지 않아 재구성할 수 없습니다 — 조절은 정원만 바꿉니다'
       : (linked === true
-        // ★ 실제 동작 그대로 적는다 — "빈 줄만 다시 배치"로 줄이면 **부족분 줄 추가**와
-        //   **남는 빈 줄 날짜 비우기**가 안 보여, 표의 줄 수가 바뀐 것을 사고로 오해한다.
-        ? '저장된 오늘 이후 계획에 맞춰 작업표의 빈 줄을 다시 배열합니다 — 날짜 이동 · 모자란 만큼 줄 추가 · 남는 빈 줄 날짜 비우기(참여·주문 있는 줄은 그대로)'
+        /* ★ 실제 동작 그대로 적는다. 결정 182 — 재구성은 날짜별 예상 인원에 맞춰 **빈 줄의 날짜만 옮긴다**(줄을 새로 만들지 않는다). */
+        ? '날짜별 모집 인원(규칙으로 계산한 값)에 맞춰 작업표 빈 줄의 날짜를 옮깁니다 — 날짜 이동 · 남는 빈 줄 날짜 비우기 · 줄은 새로 만들지 않음(참여·주문 있는 줄은 그대로)'
         : '작업표 연결 상태를 확인하지 못했습니다 — 실행하면 서버가 다시 판정합니다');
   }
 
   async function _rebuildWorktable() {
     if (!S || !S.data || S.saving) return;
-    /* ★ 확인창은 실제로 일어나는 일을 전부 말한다(줄 수가 늘거나 줄 수 있다는 사실 포함) —
-       "빈 줄만 다시 배치"로 뭉뚱그리면 사람이 예상하지 못한 변화가 남는다. */
-    if (!window.confirm('저장된 날짜별 모집계획(오늘 이후)에 맞춰 작업표의 빈 줄을 다시 배열할까요?\n\n'
-      + '· 빈 줄의 구매일자를 계획일로 옮깁니다(과거·날짜 없는 줄 포함)\n'
-      + '· 계획 인원이 모자라면 빈 줄을 새로 만듭니다\n'
-      + '· 어느 계획일에도 필요 없는 빈 줄은 구매일자를 비웁니다\n'
-      + '· 참여자·연락처·주문이 있는 줄과, 계획에 없는 미래 날짜의 준비 줄은 건드리지 않습니다')) return;
+    /* ★ 확인창은 실제로 일어나는 일을 전부 말한다(날짜 이동 · 날짜 비우기 · 줄은 만들지 않음 · 보호 대상) —
+       뭉뚱그리면 사람이 예상하지 못한 변화가 남는다. */
+    if (!window.confirm('날짜별 모집 인원(오늘 이후)에 맞춰 작업표 빈 줄의 날짜를 다시 맞출까요?\n\n'
+      + '· 빈 줄의 구매일자를 필요한 날짜로 옮깁니다(과거·날짜 없는 줄 포함)\n'
+      + '· 줄은 새로 만들지 않습니다 — 줄 수는 총 모집인원에 맞춰져 있습니다\n'
+      + '· 어느 날에도 필요 없는 빈 줄은 구매일자를 비웁니다\n'
+      + '· 참여자·연락처·주문이 있는 줄은 건드리지 않습니다')) return;
     S.saving = true;
     var btn = document.getElementById('cdpRebuildBtn'); if (btn) btn.disabled = true;
     try {
       var j = await _req('POST', EP + encodeURIComponent(S.campId) + '/worktable-rebuild', {});
       applyOverview(j);
-      toast('작업표를 재구성했습니다 — 빈 준비 행만 날짜별 계획에 맞췄습니다');
+      toast('작업표를 재구성했습니다 — 빈 줄의 날짜만 날짜별 모집 인원에 맞췄습니다');
       refreshHost();
     } catch (e) {
       toast('작업표 재구성 실패: ' + (e.message || e));
@@ -2248,7 +2548,7 @@
     _save: _save, _rebuildWorktable: _rebuildWorktable, _retry: _retry, _revert: _revert, _mode: _mode, _autoFit: _autoFit,
     _chExtend: _chExtend, _chSpread: _chSpread, _chCancel: _chCancel,
     _roundForm: _roundForm, _roundAdd: _roundAdd, _roundRemove: _roundRemove,
-    _heldApply: _heldApply,
+    _heldApply: _heldApply, _pjHeld: _pjHeld,
     _pinClosed: _pinClosed,
     quickApplyHeld: quickApplyHeld, _quickDo: _quickDo, _quickDetail: _quickDetail, _quickClose: _quickClose,
   };

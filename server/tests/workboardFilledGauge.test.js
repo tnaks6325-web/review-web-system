@@ -104,15 +104,28 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
       && advertiserRes.counts.executionTotalAmount === 300000
       && advertiserRes.counts.remainingExecutionAmount === 100000,
     JSON.stringify(advertiserRes.counts));
-    ok('★ 과거 완료 3행과 미래 계획 1건이 다른 날짜여도 모두 반영해 모집일 미설정 경고를 내지 않는다',
-      res.counts.scheduleUnassigned === undefined, JSON.stringify(res.counts));
-
-    // 날짜가 사라진 채워진 행은 "배정됨"으로 만들지 않는다. 실제 날짜 2행 + 미래 계획 1건만
-    // 반영해 부족 1건을 유지해야, 비표준/빈 날짜 작업의 경고가 조용히 사라지지 않는다.
-    delete rosterRows[2].row_json.구매일자;
-    const partial = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'master', allowAllWorkdesk: true });
-    ok('★ 날짜 없는 채워진 행은 보정에서 제외해 부족 경고를 유지한다',
-      partial.counts.scheduleUnassigned === 1, JSON.stringify(partial.counts));
+    /* ★ 결정 182(2026-09-26): 모집일 부족분 = 남은 인원 − 날짜별 예상 인원(projectDailyQuotas) 합.
+       작업표 줄의 날짜와는 무관하다(날짜별 인원은 규칙이 정한다). 계산기를 바꿔 끼워 실제로 돌린다. */
+    const cs = require('../src/services/campaignState.service');
+    const origProj = cs.projectDailyQuotas, origCnt = cs.fetchCampaignCounts;
+    try {
+      cs.fetchCampaignCounts = async () => new Map([['camp-1', {}]]);
+      cs.projectDailyQuotas = () => ({ remaining: 10, days: [{ quota: 3 }, { quota: 4 }] });
+      const short = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'master', allowAllWorkdesk: true });
+      ok('★ 예상 인원이 남은 인원을 다 못 담으면 그 차이(10−7=3)를 낸다',
+        short.counts.scheduleUnassigned === 3, JSON.stringify(short.counts));
+      cs.projectDailyQuotas = () => ({ remaining: 7, days: [{ quota: 3 }, { quota: 4 }] });
+      const full = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'master', allowAllWorkdesk: true });
+      ok('다 담기면 필드 자체가 없다(화면 경고 없음)', full.counts.scheduleUnassigned === undefined, JSON.stringify(full.counts));
+      cs.projectDailyQuotas = () => { throw new Error('boom'); };
+      const failed = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'master', allowAllWorkdesk: true });
+      ok('★ 계산 실패는 0으로 꾸미지 않고 필드를 생략하며 화면은 뜬다',
+        failed.counts.scheduleUnassigned === undefined && failed.counts.filled === 3, JSON.stringify(failed.counts));
+      const adv = await trackB.workdeskTab({ sheetId: 's1', tabName: 't1', role: 'advertiser', allowAllWorkdesk: true });
+      ok('업체 뷰어에는 계산하지 않는다(내부 편집 화면 전용)', adv.counts.scheduleUnassigned === undefined);
+    } finally {
+      cs.projectDailyQuotas = origProj; cs.fetchCampaignCounts = origCnt;
+    }
 
     if (orig) require.cache[poolPath] = orig; else delete require.cache[poolPath];
     console.log(`\n✅ ${passed} passed\n`);
@@ -134,12 +147,15 @@ console.log('\n[B2] 계산 위치 — 마스킹 전');
   //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
   ok('판정 사본 없음 — utils 를 import 해 쓴다',
     /isFilledRow: _isFilledRow[\s\S]{0,80}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
-  ok('모집일 부족분은 무시트 내부 작업보드에서 날짜별 계획과 실제 배정으로 계산한다',
+  /* ★ 결정 182(2026-09-26): 날짜별 인원은 규칙이 정한다 — 부족분은 **날짜별 예상 인원(projectDailyQuotas)
+     이 남은 인원을 다 담지 못한 수**다. 종전(저장된 계획 합계 비교)은 "사람이 정한 날만 저장"하는 새 방식에서
+     거짓 경고가 된다. 검사 의미(무시트 내부 보드에서만 · 0이면 필드 생략)는 그대로다. */
+  ok('모집일 부족분은 무시트 내부 작업보드에서 날짜별 예상 인원으로 계산한다',
     /showEdits && meta\[0\] && meta\[0\]\.sheetless && _cond && _cond\.campaignId && _recruitCap/.test(src)
-    && /SELECT to_char\(plan_date,'YYYY-MM-DD'\) AS date, planned_count AS count/.test(src)
-    && /_filledScheduledRowsByDate\(out, headers\)/.test(src)
-    && /Math\.max\(plannedByDate\.get\(date\) \|\| 0, actualByDate\.get\(date\) \|\| 0\)/.test(src)
+    && /projectDailyQuotas\(campRows\[0\], cnt, \{ maxDays: 400 \}\)/.test(src)
+    && /scheduleUnassigned = Math\.max\(0, proj\.remaining - placed\)/.test(src)
     && /scheduleUnassigned: scheduleUnassigned > 0 \? scheduleUnassigned : undefined/.test(src));
+  ok('★ 저장된 계획 합계 비교(옛 방식)가 되살아나지 않았다', !/_filledScheduledRowsByDate/.test(src));
 }
 
 console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실행');

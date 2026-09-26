@@ -176,9 +176,13 @@ const appRows = ({ all = 0, todayN = 0, holds = 0, todayHolds = 0 } = {}) => (sq
     /function _totalCapFor\(camp, schedule, orderTotal = 0\)[\s\S]{0,900}schedule\.totalSlots[\s\S]{0,700}displayRecruitTotal\(camp && camp\.recruit_total, orderTotal\)\.total/.test(src));
   ok('★ 정원 판정 사본을 만들지 않는다(recruit_total 직접 반환 부활 차단)',
     !/return Number\(camp && camp\.recruit_total\) \|\| 0;/.test(src));
+  // ★ 저장 함수 본문 안에서 순서를 본다 — 같은 파일의 다른 함수(오더 휴무일 0명 저장 등)가
+  //   `INSERT INTO campaign_daily_plans` 를 먼저 가지면 파일 전체 indexOf 로는 순서가 거짓이 된다.
+  const sp = src.slice(src.indexOf('async function savePlans('));
   ok('★ 게이트는 캠페인 행 잠금 뒤·쓰기 앞에서 돈다',
-    src.indexOf('FOR UPDATE') < src.indexOf('SAVEPOINT plan_total')
-    && src.indexOf('SAVEPOINT plan_total') < src.indexOf('INSERT INTO campaign_daily_plans'));
+    src.indexOf('async function savePlans(') > -1
+    && sp.indexOf('FOR UPDATE') > -1 && sp.indexOf('FOR UPDATE') < sp.indexOf('SAVEPOINT plan_total')
+    && sp.indexOf('SAVEPOINT plan_total') < sp.indexOf('INSERT INTO campaign_daily_plans'));
   ok('★ 초과 상태 예외는 기존 명시 계획을 낮추는 경우로만 한정한다',
     /const onlyReductions = set\.length > 0\s*&&\s*set\.every\(x =>[\s\S]{0,180}beforePlans\.has\(x\.date\)[\s\S]{0,140}x\.count\) <= Number\(beforePlans\.get\(x\.date\)\)/.test(src));
   const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');

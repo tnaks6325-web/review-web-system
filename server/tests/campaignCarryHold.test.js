@@ -216,9 +216,12 @@ ok('[📅 인원] 보류 블록(오늘/내일/분산 스테이징) + 조회 실�
 //   ③ 값은 "실제로 계획에 얹은 이월"(균형 모드 = carryPlaced / 종전 = 스테이징 누계)이다.
 ok('반영도 [확정 저장] 규율(carryApply 는 저장 본문에 동봉)',
   /\.\.\.\(apply > 0 \? \{ carryApply: apply \} : \{\}\)/.test(cdp)
-  && /var apply = balanceOn\(\)/.test(cdp)
+  // ★ 결정 182 — 예상 인원 화면(S.pj)은 보류 반영을 종전 빠른 반영 창(quickApplyHeld)으로 보내므로
+  //   조절 저장 본문에는 싣지 않는다(apply 0). 종전 화면의 규율은 그대로.
+  && /var apply = S\.pj \? 0 : \(balanceOn\(\)/.test(cdp)
   && /S\.data\.carryMode === 'hold' \? carryPlaced\(\) : 0/.test(cdp)
-  && /: S\.carryStage;/.test(cdp));
+  && /: S\.carryStage\);/.test(cdp)
+  && /async function _pjHeld\(\)[\s\S]{0,200}quickApplyHeld\(campId\)/.test(cdp));
 ok('원클릭 확인창 3택(오늘 반영/세부 선택/그대로 두기) + 즉시 저장 경로',
   /quickApplyHeld/.test(cdp) && /_quickDo/.test(cdp) && /그대로 두기/.test(cdp)
   && /carryApply: q\.held/.test(cdp));

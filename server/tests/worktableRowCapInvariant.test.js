@@ -56,9 +56,15 @@ async function run() {
 
   const planSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'campaignPlan.service.js'), 'utf8');
   assert.match(planSource,
-    /rebuildWorktableFromPlans[\s\S]*syncWorktableSlotsInTx[\s\S]*rebuildAdjustedPlansToWorktable/,
+    /async function rebuildWorktableFromPlans[\s\S]*syncWorktableSlotsInTx[\s\S]*_relayInTx\(client, camp, today/,
     '수동 작업표 재구성도 슬롯 상한 동기화 뒤에 날짜를 재배치해야 합니다.',
   );
+  // ★ 결정 182 — 날짜 맞추기(relay)는 줄을 만들지 않는다. 줄 수를 바꾸는 곳은 슬롯 상한 동기화뿐이어야 상한이 지켜진다.
+  const dailySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'sheetlessDailyPlan.service.js'), 'utf8');
+  assert.doesNotMatch(dailySource, /INSERT INTO campaign_participants/,
+    '작업표 날짜 맞추기는 줄을 새로 만들면 안 됩니다(총 인원 상한을 넘긴다).');
+  assert.doesNotMatch(planSource, /rebuildAdjustedPlansToWorktable|syncAdjustedPlansToWorktable/,
+    '줄을 만들던 옛 재배치 함수가 되살아나면 안 됩니다.');
   assert.match(planSource, /_totalCapFor\(camp, null, orderTotal\)/,
     '수동 재구성도 연결 발주 정원을 포함한 실제 총건수를 상한으로 써야 합니다.');
   assert.match(planSource, /SELECT \* FROM recruit_campaigns WHERE id=\$1 FOR UPDATE/,

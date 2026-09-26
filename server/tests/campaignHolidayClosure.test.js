@@ -108,12 +108,15 @@ console.log('\n[5] 작업표 분배 · 프리필');
   const r2 = wp.distributeDates({ total: 60, daily: 30, startDate: '2026-09-23', skipWeekends: false });
   ok('★ 주말 포함 — 공휴일에도 깐다(종전 동작)', r2.days.map(d => d.date).join(',') === '2026-09-23,2026-09-24');
   const sd = read('src/services/sheetlessDailyPlan.service.js');
-  ok('★★ 발행 프리필이 쉬는 날에 계획을 적지 않는다',
-    /isWeekendClosedOn\(camp, d, null\)\) \{ closedSkipped\+\+; continue; \}/.test(sd));
+  /* ★ 결정 182(2026-09-26) — 쉬는 날에 계획이 적히던 두 경로(발행 프리필·줄 삭제 계획 이동)는
+     **통째로 없어졌다**(규칙이 날짜별 인원을 정하므로 아무 날에도 적지 않는다) — 검사 의미는 더 강해졌다. */
+  ok('★★ 발행 시 작업표 줄 수를 계획으로 옮겨 적지 않는다(쉬는 날 포함 어느 날에도)',
+    !/function prefillFromWorktable/.test(sd) && !/INSERT INTO campaign_daily_plans/.test(sd));
   const tb = read('src/services/trackB.service.js');
-  ok('★★ 줄 삭제 계획 이동이 계획 없는 쉬는 날에 새 인원을 적지 않는다',
-    /closedNoPlan = require\('\.\/campaignWeekend\.service'\)\.isWeekendClosedOn/.test(tb)
-    && /if \(sourceCount >= 1 && !closedNoPlan\)/.test(tb));
+  const hide = tb.slice(tb.indexOf('async function _hideParticipantInTx('), tb.indexOf('async function hideWorkdeskRow('));
+  ok('★★ 줄 삭제가 날짜별 계획을 옮기거나 새로 적지 않는다(쉬는 날 포함)',
+    hide.length > 0 && !/UPDATE campaign_daily_plans/.test(hide) && !/INSERT INTO campaign_daily_plans/.test(hide)
+    && /const planMoved = false;/.test(hide));
 }
 
 /* ── [6] 정리 도구 ─────────────────────────────────────────── */

@@ -924,6 +924,10 @@ async function _scopedCampaignEdit(req, res) {
     const fixed = await repairRecruitTotalFromRounds(id);
     if (fixed !== null) rows[0].recruit_total = fixed;
   } catch (_) { /* fail-soft */ }
+  // ★ 결정 182 — 일건수·이월 방식이 바뀌면 연결 작업표 빈 줄 날짜도 따라간다(절대 throw 없음).
+  if (rows[0] && rows[0].participation_mode) {
+    await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: 'reviewer-scoped-edit' });
+  }
   return res.json({ ok: true, data: rows[0] });
 }
 
@@ -2798,18 +2802,20 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const normFees = normalizeFeeSchedules(fee_schedules);
     let feeWarning = null;
     if (normFees) { try { await _saveFeeSchedules(rows[0].id, normFees); } catch (e) { feeWarning = '리뷰비 구간 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + feeWarning); } }
-    /* ★★ D3-a(탈 구글시트 W2-b): 연결 탭이 **무시트**면 작업표의 날짜 분배를 달력에 프리필한다.
-       무시트 작업은 시트 일정 파생 대상이 아니므로(달력이 진실원본), 이게 없으면 그날 정원이
-       발행폼 `daily_limit` 하나로만 돌아가 작업표 계획과 어긋난다.
-       ★ 이미 있는 날짜는 덮지 않고(사람이 조절해 둔 값 보존) 지난 날짜는 넣지 않는다.
-       ★ fail-soft — 실패해도 공고 발행은 성공(달력은 [📅 인원] 모달에서 채울 수 있다). */
+    /* ★★ 결정 182(2026-09-26 — D3-a 뒤집기): 날짜별 인원은 **규칙**(일건수·주말·이월·총량)이 정하고
+       작업표가 따라간다. 그래서 작업표의 날짜별 줄 수를 계획으로 **옮겨 적지 않는다**(옮겨 적으면
+       그날은 일건수·이월·주말 변경이 반영되지 않는다 — 완화 금지). 대신
+       ① 인트라넷 오더의 휴무일만 그날 0명으로 저장하고 ② 작업표 빈 줄 날짜를 규칙에 맞춘다.
+       ★ fail-soft — 실패해도 공고 발행은 성공(사유는 planPrefill 로 응답에 싣는다). */
     let planPrefill = null;
     if (participation_mode === true && lSheet && lTab) {
       try {
         const isSl = await require('../utils/sheetlessScope').isSheetless(pool, lSheet, lTab);
         if (isSl) {
-          planPrefill = await require('../services/sheetlessDailyPlan.service').prefillFromWorktable({
-            campaignId: rows[0].id, sheetId: lSheet, tabName: lTab, by: req.admin?.name || 'admin' });
+          const cp = require('../services/campaignPlan.service');
+          const by = req.admin?.name || 'admin';
+          planPrefill = await cp.saveOrderHolidayZeros(rows[0], by);
+          planPrefill.relay = await cp.relayCampaignWorktable(rows[0].id, { by });
         }
       } catch (e) {
         planPrefill = { ok: false, reason: 'exception', message: e.message };
@@ -3292,7 +3298,13 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const _rtSkipWorktable = _rtPrev !== null && (Number(rows[0].recruit_total) || 0) === _rtPrev;
     try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total, skipWorktable: _rtSkipWorktable }); }
     catch (e) { logger.error('[campaign/update] 작업오더 정원 동기화 실패: ' + e.message); throw e; }
+    /* ★ 결정 182 — 일건수·주말·시작일·총 인원·이월 방식이 바뀌면 날짜별 인원이 바뀐다 → 연결 무시트
+       작업표의 빈 줄 날짜를 따라 맞춘다. 이미 맞으면 아무것도 안 바뀐다. ★ 절대 throw 없음(저장은 끝났다). */
+    const worktableRelay = rows[0].participation_mode
+      ? await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: req.admin?.name || 'admin' })
+      : null;
     res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id),
+      ...(worktableRelay ? { worktableRelay } : {}),
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(quotaSync ? { quotaSync } : {}),

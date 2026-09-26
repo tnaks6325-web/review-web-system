@@ -375,9 +375,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   schedMod.deriveSchedules = async () => new Map();
   schedMod.scheduleFor = () => null;
 
-  /* 4f-2. ★★ 조절을 저장하면 **오늘 이후 전체를 자동 재구성**한다(사용자 확정 2026-08-19).
-     계기 = 「위프 800건」 — 8/20부터여야 할 스케줄이 26.8.26 으로 남아 있었다.
-     종전 증분 동기화는 **이번에 저장한 날짜만** 손대서 과거·꼬인 빈 줄이 미래에 그대로 남는다. */
+  /* 4f-2. ★★ 조절을 저장하면 **작업표 빈 줄 날짜를 날짜별 예상 인원에 맞춘다**(결정 182 · 2026-09-26).
+     종전(2026-08-19)은 "저장된 계획 전부로 재구성(모자라면 줄 생성)"이었다 — 규칙이 날짜별 인원을
+     정하는 새 방식에서는 저장된 계획이 일부 날짜뿐이라, 예상 인원(projectDailyQuotas) 전체로 맞춘다. */
   {
     const sdp = require('../src/services/sheetlessDailyPlan.service');
     const led = require('../src/services/sheetlessLedger.service');
@@ -409,26 +409,28 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       return st;
     };
 
-    // ① 저장하면 재구성이 오늘 이후 계획 전체로 자동 실행된다
+    // ① 저장하면 작업표 날짜 맞추기가 예상 인원 전체로 자동 실행된다
+    const keepRelay = sdp.relayWorktableToProjection;
     let seen = null;
-    sdp.rebuildAdjustedPlansToWorktable = async (a) => { seen = a; return { ok: true, reassigned: 3, cleared: 2, created: 0 }; };
+    sdp.relayWorktableToProjection = async (a) => { seen = a; return { ok: true, moved: 3, cleared: 2, shortage: 0 }; };
     STUB = stubWithPlans(); CALLS.length = 0;
     let r = await P.savePlans('c1', { set: [{ date: d(1), count: 20 }] }, 'tester');
-    ok('★★ 조절 저장 = 오늘 이후 전체 자동 재구성(사용자 확정 2026-08-19)', !!seen);
-    ok('★ 재구성 대상은 오늘 이후 저장된 계획 전부(저장한 날짜만이 아니다)',
-      seen && seen.plans.length === 2 && seen.today === today);
-    ok('★ 재구성은 관리자 버튼과 같은 함수(사본 0)',
-      /rebuildAdjustedPlansToWorktable/.test(readS('services/campaignPlan.service.js')));
+    ok('★★ 조절 저장 = 작업표 빈 줄 날짜 맞추기(결정 182)', !!seen);
+    ok('★ 맞추는 기준은 날짜별 예상 인원(오늘 이후 날짜 배열) — 저장한 날짜만이 아니다',
+      seen && Array.isArray(seen.days) && seen.days.length > 2 && seen.days.every(x => x.date >= today) && seen.today === today);
+    ok('★ 관리자 [작업표 재구성] 버튼과 같은 함수(사본 0)',
+      /async function rebuildWorktableFromPlans[\s\S]*_relayInTx\(client, camp/.test(readS('services/campaignPlan.service.js'))
+      && !/rebuildAdjustedPlansToWorktable\(/.test(readS('services/campaignPlan.service.js')));
     ok('★★ SAVEPOINT 격리(재구성 실패가 계획 저장을 죽이지 않는다)',
       /* ★ 부분일치로 보면 RELEASE/ROLLBACK TO 가 대신 통과시킨다(변이시험 실측) — 정확일치로 본다. */
       CALLS.some(c => c.sql.trim() === 'SAVEPOINT cp_auto_rebuild'));
     ok('★ 결과를 응답에 실어 화면이 말할 수 있다', !!(r.worktableSync && r.worktableSync.rebuild));
-    ok('★★ 모집계획 저장도 활성 작업표 행 수를 총정원으로 동기화',
-      capSeen.length === 2 && capSeen.every(x => x.campaign === CAMP_ROW && x.target === CAMP_ROW.recruit_total)
-      && r.worktableSync.slotCap.retire === 3 && r.worktableSync.slotCap.afterRebuild.retire === 3);
+    ok('★★ 모집계획 저장도 활성 작업표 행 수를 총정원으로 동기화(날짜 맞추기는 줄을 만들지 않아 한 번이면 된다)',
+      capSeen.length === 1 && capSeen.every(x => x.campaign === CAMP_ROW && x.target === CAMP_ROW.recruit_total)
+      && r.worktableSync.slotCap.retire === 3);
 
-    // ② 재구성이 실패해도 계획 저장은 살아남는다(throw 없음 · ROLLBACK TO 만)
-    sdp.rebuildAdjustedPlansToWorktable = async () => { const e = new Error('boom'); e.code = 'worktable_rebuild_below_used'; throw e; };
+    // ② 날짜 맞추기가 실패해도 계획 저장은 살아남는다(throw 없음 · ROLLBACK TO 만)
+    sdp.relayWorktableToProjection = async () => { const e = new Error('boom'); e.code = 'worktable_rebuild_below_used'; throw e; };
     STUB = stubWithPlans(); CALLS.length = 0;
     r = await P.savePlans('c1', { set: [{ date: d(1), count: 20 }] }, 'tester');
     eq('★★ 재구성 실패해도 계획 저장은 성공', r.applied, 1);
@@ -441,14 +443,15 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       /worktableSync\.rebuild/.test(readF('js/campaign-daily-plan.js'))
       && /worktable_rebuild_empty/.test(readF('js/campaign-daily-plan.js')));
 
-    // ③ 킬스위치 = 종전 동작(증분 동기화만)
+    // ③ 킬스위치 = 날짜 맞추기 생략
     seen = null;
-    sdp.rebuildAdjustedPlansToWorktable = async (a) => { seen = a; return { ok: true }; };
+    sdp.relayWorktableToProjection = async (a) => { seen = a; return { ok: true }; };
     process.env.CAMPAIGN_PLAN_AUTO_REBUILD = '0';
     STUB = stubWithPlans();
     await P.savePlans('c1', { set: [{ date: d(1), count: 20 }] }, 'tester');
-    ok('★ 킬스위치 CAMPAIGN_PLAN_AUTO_REBUILD=0 이면 자동 재구성 없음', seen === null);
+    ok('★ 킬스위치 CAMPAIGN_PLAN_AUTO_REBUILD=0 이면 날짜 맞추기 없음', seen === null);
     delete process.env.CAMPAIGN_PLAN_AUTO_REBUILD;
+    sdp.relayWorktableToProjection = keepRelay;
 
     sdp.syncAdjustedPlansToWorktable = keep.sync; sdp.loadWorktableDefaults = keep.defaults;
     sdp.rebuildAdjustedPlansToWorktable = keep.rebuild; led.rebuildLedgers = keep.ledgers;
@@ -572,10 +575,12 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /isSheetless\(client, camp\.linked_sheet_id, camp\.linked_tab_name\)/.test(readS('services/campaignPlan.service.js'))
     && /rebuildLedgers\(\{ \.\.\.projectionTarget/.test(readS('services/campaignPlan.service.js'))
     && /worktableProjection/.test(readS('services/campaignPlan.service.js')));
-  ok('★ 기본으로(remove)도 작업표 원장에 기본값을 적용하고 투영을 재생성',
+  // ★ 결정 182 — [기본으로](remove) = 규칙 값으로 복귀. 옛 "처음 작업표 기준" 복원(loadWorktableDefaults ·
+  //   worktable_default_missing 거부)은 쓰지 않는다 — 그 기준이 없으면 [기본으로]가 막히는 막다른 길이었다.
+  ok('★ 기본으로(remove)도 작업표 날짜 맞추기와 투영 재생성을 거친다(규칙 값으로 복귀)',
     /\(set\.length \|\| remove\.length\)/.test(readS('services/campaignPlan.service.js'))
-    && /loadWorktableDefaults/.test(readS('services/campaignPlan.service.js'))
-    && /remove\.map\(date => \(\{ date, count: defaults\.get\(date\) \}\)\)/.test(readS('services/campaignPlan.service.js')));
+    && !/loadWorktableDefaults/.test(readS('services/campaignPlan.service.js'))
+    && /worktableSync\.rebuild = await _relayInTx\(client, camp, today/.test(readS('services/campaignPlan.service.js')));
   ok('★ 투영 재생성 실패는 성공으로 숨기지 않고 같은 저장으로 재시도 가능',
     /worktable_projection_failed/.test(readS('services/campaignPlan.service.js'))
     && /worktable_projection_failed: 503/.test(rtB));
@@ -1313,12 +1318,14 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('8-1 ★ flex 자식에 min-height:0 (없으면 스크롤이 안 생기고 내용만큼 늘어난다)',
     /\.cdp-bd\{[^}]*min-height:0/.test(CDP) && /\.cdp-sc\{[^}]*min-height:0/.test(CDP));
   ok('8-2 렌더가 공용 좌측 요약과 우측 고정/스크롤 계획 영역을 만든다', (() => {
-    const layout = CDP.indexOf("'<div class=\"cdp-layout\"><aside class=\"cdp-side\">'");
+    // ★ 종전 화면 render() 본문 안에서 본다 — 예상 인원 화면(renderProj)도 같은 틀을 쓰므로 파일 첫 등장은 그쪽이다.
+    const r0 = CDP.indexOf('  function render() {');
+    const layout = CDP.indexOf("'<div class=\"cdp-layout\"><aside class=\"cdp-side\">'", r0);
     const a = CDP.indexOf('class="cdp-fix"', layout);
     const b = CDP.indexOf('class="cdp-sc"', a);
     const sub = CDP.indexOf('날짜별 모집 계획 — 게이지 드래그');
-    const rows = CDP.indexOf("'<div id=\"cdpRows\">'");
-    return layout > 0 && a > layout && b > a && sub > a && sub < b && rows > b;
+    const rows = CDP.indexOf("'<div id=\"cdpRows\">'", r0);
+    return r0 > 0 && layout > 0 && a > layout && b > a && sub > a && sub < b && rows > b;
   })());
   ok('8-2a 날짜별 계획표는 날짜·상태·일 건수·조절 4열을 렌더한다',
     /cdp-colhead[^]*날짜[^]*상태[^]*일 건수[^]*조절/.test(CDP)

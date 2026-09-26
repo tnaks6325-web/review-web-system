@@ -3258,49 +3258,6 @@ function _condSchedule(rows, headers) {
   } catch (_) { return null; }
 }
 
-/* 모집일 경고의 보정 근거: 이미 사람/주문이 채워진 작업표 행을 표에 표시되는 구매일자로
-   묶은 수다. 과거 무시트 전환 작업은 `campaign_daily_plans`에 조절한
-   일부 날짜만 남고, 완료된 행의 날짜는 작업표에만 남아 있을 수 있다. 그 경우 계획 합계만
-   비교하면 완료 작업을 미설정으로 오인한다.
-   ★ `out`은 마스킹 전 내부 렌즈에서 만들며 `filled`도 같은 시점에 확정된다. 날짜 셀 편집
-   오버레이가 있으면 화면에서 보이는 값이 우선한다. 날짜 열을 못 찾거나 파싱할 수 없으면
-   null로 실패 닫기 — 빈/비표준 날짜를 "배정됨"으로 세어 경고를 숨기지 않는다.
-   ★ 읽기 전용 순수 계산이다. 모집계획 저장·작업표 재구성·번호 재정렬 경로를 호출하지 않는다. */
-function _filledScheduledRowsByDate(rows, headers) {
-  try {
-    const list = Array.isArray(rows) ? rows : [];
-    if (!list.length) return null;
-    let keys = Array.isArray(headers) ? headers.filter(h => h != null && String(h).trim() !== '') : [];
-    if (!keys.length) {
-      const seen = new Set(); keys = [];
-      for (const r of list) {
-        const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : null;
-        if (!rj) continue;
-        for (const k of Object.keys(rj)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
-      }
-    }
-    const { findDateColumnIndex } = require('./campaignSchedule.service');
-    const di = findDateColumnIndex(keys);
-    if (di < 0) return null;
-    const key = keys[di];
-    const raw = list.map(r => {
-      const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : {};
-      const edits = (r && r.cellEdits && typeof r.cellEdits === 'object') ? r.cellEdits : {};
-      const v = Object.prototype.hasOwnProperty.call(edits, key) ? edits[key] : rj[key];
-      return v == null ? '' : String(v);
-    });
-    const kst = new Date(Date.now() + 9 * 3600 * 1000);
-    const { parseDateColumn } = require('../utils/koreanDate');
-    const parsed = parseDateColumn(raw, { fallbackAnchor: { y: kst.getUTCFullYear(), m: kst.getUTCMonth() + 1 } });
-    const byDate = new Map();
-    for (let i = 0; i < list.length; i++) {
-      if (!list[i] || list[i].filled !== true || !parsed[i]) continue;
-      byDate.set(parsed[i], (byDate.get(parsed[i]) || 0) + 1);
-    }
-    return byDate;
-  } catch (_) { return null; }
-}
-
 async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null } = {}) {
   try {
     const gid = String(meta.tabGid || '').trim();
@@ -4043,38 +4000,26 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      시트 기반 과거 표에 오탐을 내지 않도록 종전처럼 무시트에만 한정한다. */
   const _recruitCap = (_cond && Number(_cond.recruitTotal) > 0) ? Number(_cond.recruitTotal) : null;
   const _cap = (meta[0] && meta[0].sheetless) ? _recruitCap : null;
-  /* 모집일 미설정 수 = 작업 조건의 총 모집건수 - 유효한 날짜 배정량.
-     무시트 작업표는 달력(campaign_daily_plans)이 날짜별 정원의 진실원본이므로 합계를 그대로
-     비교할 수 있다. 단, 과거에 완료된 무시트 작업은 조절한 날만 계획 테이블에 남고 실제
-     날짜 배정은 작업표 행에만 남아 있을 수 있다. 이때는 날짜별로 작업표의 실제 배정과 저장
-     계획 중 큰 값을 합산한다. 같은 날은 이중 계산하지 않고, 과거 완료분과 미래 계획분이 서로
-     다른 날이면 모두 반영한다. 시트 기반은 이 테이블이 "조절한 날"만 보관하고 나머지는 시트 일정이
-     정하므로, 합산하면 정상 일정까지 미설정으로 오인한다 — 그 경우에는 표시하지 않는다.
-     저장 시 총량 초과는 막혀 있으므로 화면에는 부족분만 낸다. 계획 테이블이 아직 없는 구버전
-     DB/조회 실패는 0으로 위장하지 않고 필드를 생략해 경고 오탐을 막는다. */
+  /* 모집일 미설정 수 — ★ 결정 182(2026-09-26 · 사용자 확정 "예상 인원 기준으로 계산, 0이면 안 보임"):
+     날짜별 인원은 규칙이 정하므로, **날짜별 예상 인원(projectDailyQuotas)** 이 남은 인원을 다 담지
+     못할 때만 그 차이를 낸다(예: 일건수 0 · 400일 안에 못 채움). 정상 공고는 0 = 화면에 안 뜬다.
+     ★ 종전(저장된 계획 합계와 비교)은 계획을 "사람이 정한 날"만 남기는 새 방식에서 거짓 경고가 된다.
+     ★ 예상 인원을 못 구하면(조회 실패·시트 일정 공고) 필드를 생략한다(0 위장 금지). */
   let scheduleUnassigned;
   if (showEdits && meta[0] && meta[0].sheetless && _cond && _cond.campaignId && _recruitCap) {
     try {
-      const { rows: plans } = await db.query(
-        `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
-           FROM campaign_daily_plans WHERE campaign_id=$1`, [_cond.campaignId]);
-      const plannedByDate = new Map();
-      for (const plan of plans) {
-        const date = String(plan && plan.date || '').slice(0, 10);
-        const count = Number(plan && plan.count);
-        if (date && Number.isFinite(count)) plannedByDate.set(date, Math.max(0, count));
+      const { rows: campRows } = await db.query('SELECT * FROM recruit_campaigns WHERE id = $1', [_cond.campaignId]);
+      if (campRows.length) {
+        const { fetchCampaignCounts, projectDailyQuotas } = require('./campaignState.service');
+        const cnt = (await fetchCampaignCounts(db, [campRows[0].id])).get(campRows[0].id) || {};
+        const proj = projectDailyQuotas(campRows[0], cnt, { maxDays: 400 });
+        if (proj && proj.remaining != null) {
+          const placed = proj.days.reduce((a, x) => a + (Number(x.quota) || 0), 0);
+          scheduleUnassigned = Math.max(0, proj.remaining - placed);
+        }
       }
-      const actualByDate = _filledScheduledRowsByDate(out, headers);
-      let scheduled = 0;
-      if (actualByDate == null) {
-        for (const count of plannedByDate.values()) scheduled += count;
-      } else {
-        const dates = new Set([...plannedByDate.keys(), ...actualByDate.keys()]);
-        for (const date of dates) scheduled += Math.max(plannedByDate.get(date) || 0, actualByDate.get(date) || 0);
-      }
-      scheduleUnassigned = Math.max(0, _recruitCap - scheduled);
     } catch (e) {
-      logger.warn(`[trackB] 모집일 계획 합계 조회 실패: ${e.message}`);
+      logger.warn(`[trackB] 모집일 예상 인원 계산 실패: ${e.message}`);
     }
   }
   let overCount = 0;
@@ -4113,7 +4058,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     cap: _cap || undefined,
     /* 총 모집완료 표기용 기준. 시트 기반은 초과행 색칠과 달리 이 값을 사용해야 한다. */
     completionCap: _recruitCap || undefined,
-    /* 총건수 대비 저장된 모집일 계획 부족분. 0이면 화면에 경고를 만들지 않는다. */
+    /* 남은 인원 중 날짜별 예상 인원에 담기지 못한 수(결정 182). 0이면 화면에 경고를 만들지 않는다. */
     scheduleUnassigned: scheduleUnassigned > 0 ? scheduleUnassigned : undefined,
     /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
     over: _cap ? overCount : undefined,
@@ -4623,7 +4568,8 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const dateIdx = findDateColumnIndex(headers);
     const dateHeader = dateIdx >= 0 ? headers[dateIdx] : null;
 
-    // 연결 공고가 있을 때만 계획 이동에 쓸 "마지막 계획일"을 읽는다.
+    // 연결 공고가 있을 때 보충 줄의 임시 날짜로 쓸 "마지막 계획일"을 읽는다(최종 날짜는 커밋 뒤 relay 가 맞춘다).
+    // ★ 결정 182 — 계획을 더 이상 쓰지 않으므로 잠그지 않는다(FOR UPDATE 제거: 저장과 불필요하게 줄 세우지 않는다).
     let finalPlan = null;
     if (campaignId) {
       const { rows: plans } = await client.query(
@@ -4631,8 +4577,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
            FROM campaign_daily_plans
           WHERE campaign_id=$1 AND planned_count > 0
           ORDER BY plan_date DESC
-          LIMIT 1
-          FOR UPDATE`, [campaignId]);
+          LIMIT 1`, [campaignId]);
       finalPlan = plans.length ? plans[0] : null;
     }
     const todayAnchor = (() => {
@@ -4746,41 +4691,11 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const renumbered = await require('./rowNumbering.service')
       .renumberTabInTx(client, { sheetId, tabName, by: `row-delete:${by}`.slice(0, 100) });
 
-    // 삭제된 날 -1 / 마지막 진행일 +1 = 날짜별 배치만 이동한다. 총 계획량은 바뀌지 않는다.
-    // 공고를 못 고른 경우(none/ambiguous)와 날짜를 못 읽은 경우엔 계획을 건드리지 않는다.
-    let planMoved = false;
-    if (shouldReplenish && campaignId && finalPlan && removedDate && removedDate !== finalPlan.date) {
-      const dateCount = new Map();
-      parsedDates.forEach(d => { if (d) dateCount.set(d, (dateCount.get(d) || 0) + 1); });
-      const { rows: sourcePlans } = await client.query(
-        `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
-           FROM campaign_daily_plans
-          WHERE campaign_id=$1 AND plan_date=$2::date
-          FOR UPDATE`, [campaignId, removedDate]);
-      const sourceCount = sourcePlans.length ? Number(sourcePlans[0].planned_count) : (dateCount.get(removedDate) || 0);
-      /* ★★ 계획이 없는 쉬는 날(주말·공휴일) 줄을 지웠으면 계획을 옮기지 않는다(2026-09-23) — 그날은
-         원래 받지 않는 날이라 계획 총량에 없다. 여기서 "줄 수 − 1"을 새로 적으면 1명 이상 저장된 날 =
-         "사람이 연 날"로 읽혀 공휴일 모집이 열린다(추석 사고의 재발 경로). 판정 단일 출처 = isWeekendClosedOn. */
-      let closedNoPlan = false;
-      if (!sourcePlans.length) {
-        const { rows: cw } = await client.query('SELECT skip_weekends FROM recruit_campaigns WHERE id=$1', [campaignId]);
-        closedNoPlan = require('./campaignWeekend.service').isWeekendClosedOn(cw[0] || null, removedDate, null);
-      }
-      if (sourceCount >= 1 && !closedNoPlan) {
-        await client.query(
-          `UPDATE campaign_daily_plans
-              SET planned_count=planned_count+1, updated_by=$3, updated_at=NOW()
-            WHERE campaign_id=$1 AND plan_date=$2::date`,
-          [campaignId, finalPlan.date, `행삭제 보충:${by}`.slice(0, 100)]);
-        await client.query(
-          `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
-           VALUES ($1,$2::date,$3,$4,NOW())
-           ON CONFLICT (campaign_id,plan_date) DO UPDATE
-             SET planned_count=EXCLUDED.planned_count, updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
-          [campaignId, removedDate, sourceCount - 1, `행삭제 이동:${by}`.slice(0, 100)]);
-        planMoved = true;
-      }
-    }
+    /* ★★ 결정 182(2026-09-26) — 줄을 지워도 **날짜별 계획을 옮기지 않는다**(종전: 지운 날 −1 · 마지막 날 +1).
+       날짜별 인원은 규칙(일건수·주말·이월·총량)이 정하므로, 취소로 빈 자리는 그 규칙이 알아서 다시
+       연다. 계획을 적으면 그날이 "사람이 정한 날"로 굳어 일건수·이월 변경이 반영되지 않는다(완화 금지).
+       보충 줄의 날짜는 커밋 뒤 작업표 날짜 맞추기(relayCampaignWorktable)가 규칙대로 옮긴다. */
+    const planMoved = false;
     if (campaignId) {
       await client.query(
         `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail)
@@ -4797,6 +4712,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
       boardTarget: boardTarget || null,
       campaignScope,
       planMoved,
+      campaignId: campaignId || null,
       finalPlanDate: finalPlan ? finalPlan.date : null,
       replacementDate: shouldReplenish ? (finalDateLabel || null) : null,
       replacementSeq: replacement && replacement.rows[0] && replacement.rows[0].seq,
@@ -4878,11 +4794,19 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     };
   }
 
+  /* ★ 결정 182 — 보충 줄의 날짜를 규칙(날짜별 예상 인원)에 맞춘다. 커밋 **뒤**에 한다: 행 삭제 트랜잭션은
+     줄을 잠근 채라, 그 안에서 탭 잠금을 잡으면 구매 기록(탭 잠금 → 줄 잠금)과 순서가 뒤집혀 교착한다.
+     ★ 절대 throw 없음 — 날짜 맞추기 실패가 행 삭제를 되돌리지 않는다. */
+  let worktableRelay = null;
+  if (result && result.campaignId) {
+    worktableRelay = await require('./campaignPlan.service')
+      .relayCampaignWorktable(result.campaignId, { by: `participant-delete:${by}`, ledgers: false });   // 장부는 바로 아래에서 한 번만
+  }
   let ledgerError = null;
   try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by: `participant-delete:${by}` }); }
   catch (e) { ledgerError = (e && (e.code || e.message)) || 'rebuild_failed'; logger.warn(`[trackB] 행 삭제 후 장부 재생성 실패 tab=${tabName}: ${ledgerError}`); }
   _tabStatsCache = { at: 0, map: null };
-  return { ok: true, mode: 'hard_deleted', orderCanceled, sheetCleared, ...result, ledgerError };
+  return { ok: true, mode: 'hard_deleted', orderCanceled, sheetCleared, ...result, ledgerError, worktableRelay };
 }
 
 // 주문이 연결된 한 행을 안전하게 취소한다. 시트 물리행은 유지하고 주문값만 큐로 비워 행 이동 오염을 막는다.
