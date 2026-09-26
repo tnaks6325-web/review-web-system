@@ -825,6 +825,7 @@
   }
   function pjCommit(d, next) {
     if (S.data.planEnabled === false) return;
+    if (S.saving) { render(); return; }   // 저장 중 바꾼 값은 저장 결과로 다시 그릴 때 조용히 사라진다 — 받지 않는다
     var rem = (S.pj.proj && S.pj.proj.remaining != null) ? Number(S.pj.proj.remaining) : MAX_DAY;
     var v = Math.max(minFor(d), Math.min(Math.max(minFor(d), rem), MAX_DAY, Math.round(Number(next) || 0)));
     if (v === planFor(d)) {
@@ -2402,6 +2403,7 @@
     try {
       var j = await _req('POST', EP + encodeURIComponent(S.campId) + '/daily-plan',
         { set: set, remove: remove, note: S.notes.join(' / ').slice(0, 500),
+          clientMode: S.pj ? 'projection' : 'balance',   // 새 화면 표식(서버의 배포 시차 가드 — 없으면 옛 화면으로 본다)
           ...(apply > 0 ? { carryApply: apply } : {}) });
       S.notes = [];
       applyOverview(j);

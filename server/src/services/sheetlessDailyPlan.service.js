@@ -49,11 +49,20 @@ function _kstDateLabel(iso) {
  */
 async function relayWorktableToProjection({ client, sheetId, tabName, days = [], today = '', by = 'system' } = {}) {
   if (!client || !sheetId || !tabName) return { ok: false, reason: 'worktable_not_linked' };
+  const { parseDateColumn } = require('../utils/koreanDate');
+  const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
+  const parseOpts = { fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined };
   const want = new Map();
+  let beyond = 0;
   for (const x of days || []) {
     const date = String((x && x.date) || '');
     const q = Math.max(0, Number(x && x.quota) || 0);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && date >= today && q > 0) want.set(date, q);
+    if (!(/^\d{4}-\d{2}-\d{2}$/.test(date) && date >= today && q > 0)) continue;
+    /* ★★ 작업표 표기(`M / D (요일)`)에는 연도가 없어 오늘 달 ±6개월 안에서만 연도를 맞춘다(koreanDate.inferYear).
+       그 밖의 날(예: 9월 기준 이듬해 3월)을 적으면 다음 실행 때 **지난 날**로 읽혀 매번 다시 섞이고, 구매 때도
+       지난 줄로 먼저 쓰인다. → 적은 표기를 다시 읽어 같은 날이 나오는 날만 맞춘다(그 뒤 날은 가까워지면 맞춘다). */
+    if (parseDateColumn([_kstDateLabel(date)], parseOpts)[0] !== date) { beyond += q; continue; }
+    want.set(date, q);
   }
   const { rows } = await client.query(
     `SELECT id, seq, reviewer_name, recipient_name, phone8, order_submission_id, row_json
@@ -67,17 +76,16 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   const dateIdx = findDateColumnIndex(headers);
   if (dateIdx < 0) return { ok: false, reason: 'no_date_column' };
   const dateHeader = headers[dateIdx];
-  const { parseDateColumn } = require('../utils/koreanDate');
-  const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
-  const parsed = parseDateColumn(rows.map(r => String((r.row_json || {})[dateHeader] || '')), {
-    fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined,
-  });
+  const parsed = parseDateColumn(rows.map(r => String((r.row_json || {})[dateHeader] || '')), parseOpts);
   // ★ 빈 줄 판정은 단일 출처(utils/rowNumbering.isFilledRow — 게이지·번호 정리와 같은 네 칸)
   const { isFilledRow } = require('../utils/rowNumbering');
   const slots = rows.map((r, i) => ({
     id: r.id, seq: Number(r.seq) || 0, date: parsed[i] || '', rawDate: String((r.row_json || {})[dateHeader] || ''),
     empty: !isFilledRow(r),
   }));
+  /* ★ 날짜 칸에 날짜가 아닌 글자(예: "보류")를 사람이 적어 둔 빈 줄은 건드리지 않는다 — 날짜 없음으로 보면
+     가장 먼저 덮이거나 지워진다(빈 칸만 채운다 — 결정 018). */
+  for (const s of slots) if (s.empty && !s.date && s.rawDate.trim()) s.memo = true;
   const fixed = new Map();
   for (const s of slots) if (!s.empty && s.date) fixed.set(s.date, (fixed.get(s.date) || 0) + 1);
   const need = new Map();
@@ -87,7 +95,7 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   const keptOn = new Map();
   const pool = [];
   for (const s of slots) {
-    if (!s.empty) continue;
+    if (!s.empty || s.memo) continue;
     const n = need.get(s.date) || 0;
     const k = keptOn.get(s.date) || 0;
     if (s.date && k < n) keptOn.set(s.date, k + 1);
@@ -125,7 +133,9 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
          FROM (VALUES ${vals.join(',')}) AS v(id,value) WHERE p.id=v.id`, params);
   }
   return { ok: true, dateHeader, moved: changed.filter(c => c.value).length,
-    cleared: changed.filter(c => !c.value).length, shortage };
+    cleared: changed.filter(c => !c.value).length, shortage,
+    beyond,                                           // 연도 없는 표기로 아직 적을 수 없는 먼 날 인원(가까워지면 맞춘다)
+    kept: slots.filter(s => s.memo).length };         // 날짜 칸에 글자가 있어 그대로 둔 빈 줄
 }
 
 /**

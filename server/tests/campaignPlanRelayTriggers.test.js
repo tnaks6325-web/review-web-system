@@ -17,6 +17,7 @@ const ok = (name, cond, extra) => { assert.ok(cond, name + (extra ? ' :: ' + ext
 const rd = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8').replace(/\u0000/g, '');
 
 const poolMod = require('../src/db/pool');
+const origQueryTop = poolMod.query, origConnectTop = poolMod.connect;
 const cp = require('../src/services/campaignPlan.service');
 const { kstTodayStr } = require('../src/services/campaignState.service');
 const TODAY = kstTodayStr();
@@ -114,6 +115,20 @@ const WRITE = /^\s*(INSERT|UPDATE|DELETE)\b/i;
       const r3 = await cp.relayCampaignWorktable('c1');
       ok('★★ 맞추기 중 오류도 throw 없이 되돌린다(ROLLBACK)', r3.ok === false && log.includes('ROLLBACK'));
 
+      // ★★ 여러 공고가 한 작업표를 같이 쓰면 건너뛴다(다른 공고의 날짜 줄을 지우지 않는다)
+      log = [];
+      let relayed = 0;
+      sdp.relayWorktableToProjection = async () => { relayed++; return { ok: true, moved: 1, cleared: 0, shortage: 0 }; };
+      poolMod.connect = async () => ({
+        query: async (sql) => { log.push(String(sql).trim());
+          if (/linked_sheet_id=\$1 AND linked_tab_name=\$2/.test(sql)) return { rows: [{ id: 'c1' }, { id: 'c2' }] };
+          if (/FROM recruit_campaigns/.test(sql)) return { rows: [CAMP] };
+          return { rows: [], rowCount: 0 }; },
+        release() {} });
+      const rs = await cp.relayCampaignWorktable('c1');
+      ok('★★ 공유 작업표는 건너뛴다(날짜 이동 0 · 기록 없음)', rs.skipped === true && rs.reason === 'shared_worktable' && relayed === 0
+        && !log.some(s => /campaign_plan_events/.test(s)), JSON.stringify(rs));
+
       poolMod.connect = async () => mkClient(log);
       sdp.relayWorktableToProjection = async () => ({ ok: true, moved: 1, cleared: 0, shortage: 0 });
       rn.renumberTab = async () => { throw new Error('renumber down'); };
@@ -124,6 +139,23 @@ const WRITE = /^\s*(INSERT|UPDATE|DELETE)\b/i;
     poolMod.query = origQuery; poolMod.connect = origConnect;
     sls.isSheetless = orig.isSheetless; sdp.relayWorktableToProjection = orig.relay;
     rn.renumberTab = orig.renumber; led.rebuildLedgers = orig.rebuild;
+  }
+
+  console.log('\n[2b] 배포 시차 가드 — 옛 조절 창의 여러 날 저장은 새로고침 요청');
+  {
+    poolMod.query = async (sql) => (/FROM recruit_campaigns/.test(sql) ? { rows: [CAMP] } : { rows: [] });
+    poolMod.connect = async () => { const e = new Error('no db in test'); e.code = 'test_no_db'; throw e; };   // 가드 뒤 단계는 여기서 멈춘다
+    const D1 = addDays(TODAY, 1), D2 = addDays(TODAY, 2);
+    const two = [{ date: D1, count: 5 }, { date: D2, count: 5 }];
+    let e1 = null; try { await cp.savePlans('c1', { set: two, remove: [] }, 't'); } catch (e) { e1 = e; }
+    ok('★★ 표식 없는 여러 날 저장(옛 화면) = stale_client', e1 && e1.code === 'stale_client', e1 && e1.code);
+    let e2 = null; try { await cp.savePlans('c1', { set: two, remove: [], clientMode: 'projection' }, 't'); } catch (e) { e2 = e; }
+    ok('새 화면 표식이 있으면 이 가드에 걸리지 않는다', !e2 || e2.code !== 'stale_client', e2 && e2.code);
+    let e3 = null; try { await cp.savePlans('c1', { set: [{ date: D1, count: 5 }], remove: [] }, 't'); } catch (e) { e3 = e; }
+    ok('하루짜리(보류 이월 원클릭)는 옛 화면이어도 받는다', !e3 || e3.code !== 'stale_client', e3 && e3.code);
+    poolMod.query = origQueryTop; poolMod.connect = origConnectTop;
+    const tbr = rd('src/routes/trackB.routes.js');
+    ok('stale_client 는 409(500 위장 금지)', /stale_client: 409/.test(tbr));
   }
 
   console.log('\n[3] 트리거 배선 — 인원이 바뀌는 모든 길');

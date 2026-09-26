@@ -21,7 +21,9 @@ const { kstTodayStr, dateOnlyStr, isCarryHold, carryStrategy, heldCarry, pending
   computeCampaignState, totalQuotaUsage, projectDailyQuotas } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
+const MAX_PLAN_ENTRIES = 120;
+// 날짜별 예상 인원 계산 기간 — 조절 창·미리보기·작업표 맞추기·모집일 미설정이 **같은 값**을 쓴다(다르면 거짓 경고)
+const PROJECTION_DAYS = 400;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
 const MAX_DAY_COUNT = 9999;     // 하루 인원 상식 상한
 const MAX_ROUND_COUNT = 100000; // 차수 건수 상식 상한
 
@@ -145,7 +147,7 @@ async function getPlanOverview(campaignId) {
       todayNaturalQuota = Number(stNow.dailyQuota) || 0;
       // ★ 날짜별 예상 인원(2026-09-26) — 실제 정원 판정(dailyQuota)을 날마다 그대로 태운 값.
       //   화면·작업표가 앞날 인원을 따로 계산하지 않게 하는 단일 출처다. 시트 일정 공고는 null.
-      try { projection = projectDailyQuotas(camp, counts, { schedule: sch }); }
+      try { projection = projectDailyQuotas(camp, counts, { schedule: sch, maxDays: PROJECTION_DAYS }); }
       catch (pe) { projection = null; logger.warn('[campaignPlan] 예상 인원 계산 실패(fail-soft): ' + pe.message); }
     } catch (e) {
       logger.warn('[campaignPlan] 이월 계산 실패(fail-soft): ' + e.message);
@@ -293,6 +295,23 @@ async function getPlanOverview(campaignId) {
  * ★ 탭 잠금(주문 기록과 같은 키 `sheetless_worktable:`)을 먼저 잡아 구매 기록과 직렬화한다.
  * ★ 시트 기반·연결 없음·무제한·시트 일정 공고 = 건너뜀(skipped · 사유). 판정 사본 0.
  */
+/** 작업표 잠금 키 — 주문 기록(sheetlessOrder)·줄 보충·번호 정리와 **같은 키** */
+function _tabLockKey(c) { return `sheetless_worktable:${c.linked_sheet_id}:${c.linked_tab_name}`; }
+/**
+ * ★★ 잠금 순서 = 작업표(탭) 잠금 → 공고 행 → 작업표 줄. 이 저장소의 다른 경로(주문 기록·줄 보충·번호 정리)가
+ *   모두 이 순서다. 공고·줄을 먼저 잡고 탭 잠금을 나중에 기다리면, 탭 잠금을 쥔 주문 기록이 그 줄을 기다려
+ *   **교착(40P01)** 이 난다(결정 182 코드리뷰). 그래서 트랜잭션 **첫 잠금**으로 잡는다(연결 정보는 잠그기 전 값).
+ * @returns {{sheet:string, tab:string}|null} 잡은 탭(없으면 null)
+ */
+async function _lockTabFirst(client, c) {
+  if (!c || !c.linked_sheet_id || !c.linked_tab_name) return null;
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [_tabLockKey(c)]);
+  return { sheet: String(c.linked_sheet_id), tab: String(c.linked_tab_name) };
+}
+function _sameTab(held, c) {
+  return !!(held && c && held.sheet === String(c.linked_sheet_id || '') && held.tab === String(c.linked_tab_name || ''));
+}
+
 async function _relayInTx(client, camp, today, by) {
   if (!camp || !camp.participation_mode || !camp.linked_sheet_id || !camp.linked_tab_name) {
     return { ok: true, skipped: true, reason: 'not_linked' };
@@ -301,10 +320,17 @@ async function _relayInTx(client, camp, today, by) {
   if (!await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
     return { ok: true, skipped: true, reason: 'not_sheetless' };
   }
-  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
-    [`sheetless_worktable:${camp.linked_sheet_id}:${camp.linked_tab_name}`]);
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [_tabLockKey(camp)]);   // 이미 잡았으면 그대로(재진입)
+  /* ★★ 여러 공고가 한 작업표를 같이 쓰면 건너뛴다 — 한 공고의 예상 인원으로 탭 전체 빈 줄을 옮기면
+     다른 공고의 날짜 줄이 지워진다(새벽 전체 실행이면 마지막 공고 기준만 남는다). 판정은 줄 수 동기화
+     (syncWorktableSlotsInTx)와 같은 조건. */
+  const { rows: sharing } = await client.query(
+    `SELECT id FROM recruit_campaigns
+      WHERE participation_mode AND status='active' AND archived_at IS NULL
+        AND linked_sheet_id=$1 AND linked_tab_name=$2`, [camp.linked_sheet_id, camp.linked_tab_name]);
+  if (sharing.some(r => String(r.id) !== String(camp.id))) return { ok: true, skipped: true, reason: 'shared_worktable' };
   const counts = (await fetchCampaignCounts(client, [camp.id])).get(camp.id) || {};
-  const projection = projectDailyQuotas(camp, counts, { maxDays: 400 });
+  const projection = projectDailyQuotas(camp, counts, { maxDays: PROJECTION_DAYS });
   if (!projection) return { ok: true, skipped: true, reason: 'no_projection' };
   if (projection.remaining == null) return { ok: true, skipped: true, reason: 'unlimited' };
   const { relayWorktableToProjection } = require('./sheetlessDailyPlan.service');
@@ -374,7 +400,9 @@ async function previewPlanProjection(campaignId, body) {
     if (DATE_RE.test(date) && Number.isInteger(count) && count >= 0 && count <= MAX_DAY_COUNT) plans[date] = count;
   }
   for (const x of rawRemove) { const date = String(x || '').trim(); if (DATE_RE.test(date)) delete plans[date]; }
-  const projection = projectDailyQuotas(camp, { ...counts, plans }, { schedule, maxDays: 400 });
+  // 바꾼 게 없으면 계획 모양도 그대로(빈 {} 로 바꾸면 '계획 없음'과 다르게 계산될 수 있다)
+  const touched = rawSet.length + rawRemove.length > 0;
+  const projection = projectDailyQuotas(camp, touched ? { ...counts, plans } : counts, { schedule, maxDays: PROJECTION_DAYS });
   return { projection };
 }
 
@@ -478,6 +506,16 @@ async function savePlans(campaignId, body, actor) {
   //     (모르면 일건수 기준의 보수적 검사로 떨어진다 — 저장을 통째로 막지 않는다).
   let schedule = null;
   try { schedule = await _scheduleFor(camp); } catch (_) { schedule = null; }
+  /* ★★ 배포 시차 가드(결정 182 코드리뷰) — 배포 전에 열어 둔 옛 조절 창은 "합계 맞추기" 방식이라 앞날
+     구간 전체를 명시 계획으로 저장한다. 그러면 그 날들이 전부 "사람이 정한 날"로 굳어 일건수·이월·주말
+     변경이 반영되지 않는 상태(완화 금지)로 되돌아간다. 새 화면은 항상 `clientMode`('projection'|'balance')
+     를 싣는다 → 시트 일정이 아닌 공고에 표식 없이 여러 날을 보내면(= 옛 화면) 새로고침을 요청한다.
+     ('balance' = 새 화면이지만 예상 인원 계산이 실패해 종전 화면으로 연 경우 — 막지 않는다)
+     ★ 하루짜리(보류 이월 원클릭 반영)는 옛 화면이어도 그대로 받는다. */
+  if (b.clientMode == null && rawSet.length > 1
+      && !require('./campaignState.service').isUsableSchedule(schedule)) {
+    const e = new Error('화면이 옛 버전입니다 — 새로고침(F5)한 뒤 다시 조절해주세요.'); e.code = 'stale_client'; throw e;
+  }
   /* 연결 발주의 총건수 — 공고 총인원이 0 일 때 총량 게이트가 볼 값.
      ★ fail-soft: 조회 실패면 0 = 종전 동작(공고 값만 본다). 게이트가 죽어 저장이 막히면 안 된다. */
   let orderTotal = 0;
@@ -523,6 +561,8 @@ async function savePlans(campaignId, body, actor) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★★ 작업표 잠금을 **맨 먼저**(주문 기록과 같은 순서 — 뒤에서 잡으면 교착). 연결은 잠그기 전 값.
+    const heldTab = await _lockTabFirst(client, camp);
     // 캠페인 행 잠금 — apply 게이트(잠금 후 재집계)와 직렬화: "오늘 정원 축소"와 "신청"이
     // 동시에 달리면 축소 하한(확정+홀드) 검사가 낡은 값을 보게 되는 write-skew 차단.
     const { rows: lockedCampaignRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
@@ -716,7 +756,10 @@ async function savePlans(campaignId, body, actor) {
         if (process.env.CAMPAIGN_PLAN_AUTO_REBUILD !== '0') {
           try {
             await client.query('SAVEPOINT cp_auto_rebuild');
-            worktableSync.rebuild = await _relayInTx(client, camp, today, actor || 'campaign-plan-relay');
+            // 잠그는 사이 연결 탭이 바뀌었으면 여기서 새 탭 잠금을 잡지 않는다(순서 역전) — 새벽 전체 실행이 맞춘다
+            worktableSync.rebuild = _sameTab(heldTab, camp)
+              ? await _relayInTx(client, camp, today, actor || 'campaign-plan-relay')
+              : { ok: true, skipped: true, reason: 'link_changed' };
             await client.query('RELEASE SAVEPOINT cp_auto_rebuild');
           } catch (err) {
             try { await client.query('ROLLBACK TO SAVEPOINT cp_auto_rebuild'); } catch (_) {}
@@ -834,9 +877,13 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
   let target = null;
   try {
     await client.query('BEGIN');
+    const heldTab = await _lockTabFirst(client, camp);   // ★★ 작업표 잠금 먼저(교착 방지 — savePlans 와 같은 순서)
     const { rows: lockedCampaignRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
     if (!lockedCampaignRows.length) { const e = new Error('캠페인을 찾을 수 없습니다.'); e.code = 'not_found'; throw e; }
     camp = lockedCampaignRows[0];
+    if (!_sameTab(heldTab, camp)) {
+      const e = new Error('그사이 연결된 작업표가 바뀌었습니다 — 창을 새로 열고 다시 시도해주세요.'); e.code = 'link_changed'; throw e;
+    }
     const { isSheetless } = require('../utils/sheetlessScope');
     if (!await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
       const e = new Error('이 작업표는 시트 원본으로 설정되어 있어 안전하게 재구성할 수 없습니다. 먼저 무시트 작업표 설정을 확인해주세요.');
@@ -864,6 +911,11 @@ async function rebuildWorktableFromPlans(campaignId, actor) {
     if (!worktableRebuild.ok) {
       const e = new Error(worktableRebuild.message || '작업표 날짜를 맞추지 못했습니다.');
       e.code = worktableRebuild.reason || 'relay_failed'; throw e;
+    }
+    // 여러 공고가 같이 쓰는 작업표는 건너뛴다 — [재구성]을 눌렀는데 "했다"고 말하지 않는다
+    if (worktableRebuild.skipped && worktableRebuild.reason === 'shared_worktable') {
+      const e = new Error('이 작업표는 여러 공고가 함께 쓰고 있어 한 공고 기준으로 날짜를 맞출 수 없습니다.');
+      e.code = 'shared_worktable'; throw e;
     }
     target = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
     await client.query(`INSERT INTO campaign_plan_events (campaign_id,actor,action,detail) VALUES ($1,$2,'worktable_rebuild',$3)`,

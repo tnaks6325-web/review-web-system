@@ -106,7 +106,7 @@ const appRows = ({ all = 0, todayN = 0, holds = 0, todayHolds = 0 } = {}) => (sq
 
   /* 6. 오늘 확정분과 오늘 계획을 이중 계수하지 않는다 */
   STUB = base({ apps: [{ all_n: 100, today_n: 100, today_submitted: 100, today_holds: 0, n: 100 }] });
-  const okToday = await P.savePlans('c1', { set: [{ date: today, count: 100 }, { date: d(1), count: 100 }] }, 't');
+  const okToday = await P.savePlans('c1', { set: [{ date: today, count: 100 }, { date: d(1), count: 100 }], clientMode: 'balance' }, 't');
   ok('★ 오늘 확정 100 + 오늘 계획 100 은 겹치는 개념 — 큰 쪽 하나만 센다(100+100=200 통과)', okToday.applied === 2);
 
   /* 7. 총량 0(무제한)은 검사하지 않는다 */

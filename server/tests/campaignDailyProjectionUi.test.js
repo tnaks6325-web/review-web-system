@@ -167,6 +167,7 @@ const posts = re => CALLS.filter(c => c.method === 'POST' && re.test(c.url));
     sBody && JSON.stringify(sBody.set.map(x => x.date).sort()) === JSON.stringify(['2026-10-01', '2026-10-02', FAR]), JSON.stringify(sBody));
   ok('remove 는 비어 있다', sBody && sBody.remove.length === 0);
   ok('이월 보류 반영량을 보내지 않는다(예상 인원 방식)', sBody && sBody.carryApply == null);
+  ok('★ 새 화면 표식(clientMode:projection)을 싣는다 — 서버 배포 시차 가드', sBody && sBody.clientMode === 'projection');
 
   console.log('[5] [기본으로] — 저장값은 지워 규칙으로');
   OV = base();

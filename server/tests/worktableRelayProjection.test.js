@@ -111,6 +111,22 @@ async function run(rows, days, today = '2026-09-26') {
     ok('연결 없으면 사유를 말한다', r3.ok === false && r3.reason === 'worktable_not_linked');
   }
 
+  {
+    // ★★ 연도 없는 표기의 한계 — 오늘 달 ±6개월 밖(9월 기준 이듬해 3월)은 적지 않는다(적으면 지난 날로 읽힌다)
+    const rows = [E('a', 1, ''), E('b', 2, '')];
+    const { r, map } = await run(rows, [{ date: '2026-09-28', quota: 1 }, { date: '2027-03-10', quota: 1 }]);
+    ok('★★ 먼 날(2027-03-10)은 적지 않고 beyond 로 알린다', ![...map.values()].includes('3 / 10 (수)') && r.beyond === 1, JSON.stringify(r));
+    ok('가까운 날은 그대로 맞춘다', map.get('a') === '9 / 28 (월)');
+  }
+  {
+    // ★ 날짜 칸에 사람이 적은 글자("보류")가 있는 빈 줄은 덮지도 비우지도 않는다(결정 018)
+    const rows = [E('memo', 1, '보류'), E('b', 2, '')];
+    const { r, map } = await run(rows, [{ date: '2026-09-28', quota: 1 }]);
+    ok('★ 글자가 적힌 빈 줄은 그대로 둔다', !map.has('memo') && map.get('b') === '9 / 28 (월)' && r.kept === 1, JSON.stringify(r));
+    const { map: m2 } = await run([E('memo', 1, '보류')], []);
+    ok('필요 없는 날이어도 글자를 지우지 않는다', !m2.has('memo'));
+  }
+
   console.log('\n[B] 단일 출처 · 기준');
   {
     ok('★ 빈 줄 판정은 rowNumbering.isFilledRow(게이지·번호 정리와 같은 네 칸)',
@@ -145,6 +161,13 @@ async function run(rows, days, today = '2026-09-26') {
     ok('재구성은 relay(_relayInTx)를 쓴다', /await _relayInTx\(client, camp, today/.test(rb));
     ok('재구성은 장부 재생성 전에 화면 번호를 정리한다',
       rb.indexOf('renumberTab({') > 0 && rb.indexOf('renumberTab({') < rb.indexOf('rebuildLedgers({ ...target'));
+    // ★★ 잠금 순서 = 탭 → 공고 → 줄(주문 기록·줄 보충·번호 정리와 같다). 거꾸로면 교착(결정 182 코드리뷰)
+    const sp = planSrc.slice(planSrc.indexOf('async function savePlans'), planSrc.indexOf('async function', planSrc.indexOf('async function savePlans') + 30));
+    ok('★★ 조절 저장은 탭 잠금을 공고 잠금보다 먼저 잡는다',
+      sp.indexOf('_lockTabFirst(client, camp)') > 0 && sp.indexOf('_lockTabFirst(client, camp)') < sp.indexOf("FOR UPDATE', [campaignId]"));
+    ok('★★ [작업표 재구성]도 탭 잠금이 먼저', rb.indexOf('_lockTabFirst(client, camp)') > 0
+      && rb.indexOf('_lockTabFirst(client, camp)') < rb.indexOf('FOR UPDATE'));
+    ok('잠그는 사이 연결이 바뀌면 새 탭 잠금을 잡지 않는다', /_sameTab\(heldTab, camp\)/.test(sp) && /link_changed/.test(rb));
     ok('총량 초과는 서버가 최종 방어', /code = 'over_total'/.test(planSrc)
       && /over_total: 422/.test(rd('src/routes/trackB.routes.js')));
   }

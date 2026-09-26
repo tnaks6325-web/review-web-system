@@ -333,7 +333,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // 4b. 값 검증
   await assert.rejects(P.savePlans('c1', { set: [{ date: today, count: -1 }] }, 't'), (e) => e.code === 'bad_count');
   ok('음수 인원 거부(bad_count)', true);
-  await assert.rejects(P.savePlans('c1', { set: [{ date: today, count: 5 }, { date: today, count: 6 }] }, 't'), (e) => e.code === 'dup_date');
+  await assert.rejects(P.savePlans('c1', { set: [{ date: today, count: 5 }, { date: today, count: 6 }], clientMode: 'balance' }, 't'), (e) => e.code === 'dup_date');
   ok('같은 날짜 중복 거부(dup_date)', true);
   await assert.rejects(P.savePlans('c1', {}, 't'), (e) => e.code === 'empty');
   ok('빈 저장 거부(empty)', true);
@@ -580,7 +580,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ 기본으로(remove)도 작업표 날짜 맞추기와 투영 재생성을 거친다(규칙 값으로 복귀)',
     /\(set\.length \|\| remove\.length\)/.test(readS('services/campaignPlan.service.js'))
     && !/loadWorktableDefaults/.test(readS('services/campaignPlan.service.js'))
-    && /worktableSync\.rebuild = await _relayInTx\(client, camp, today/.test(readS('services/campaignPlan.service.js')));
+    && /worktableSync\.rebuild = _sameTab\(heldTab, camp\)\s*\n\s*\? await _relayInTx\(client, camp, today/.test(readS('services/campaignPlan.service.js')));
   ok('★ 투영 재생성 실패는 성공으로 숨기지 않고 같은 저장으로 재시도 가능',
     /worktable_projection_failed/.test(readS('services/campaignPlan.service.js'))
     && /worktable_projection_failed: 503/.test(rtB));
