@@ -806,7 +806,26 @@ async function _loadOrderQuota(db, ids, now = new Date()) {
  * ★ 재료는 dailyQuota 와 같은 counts(plans 포함) — 계산이 갈리면 화면과 정원이 어긋난다.
  * ★ null = 계산 불가(기준선 모름 · 일건수 0 · 시트 일정) — 화면은 0 으로 꾸미지 않는다.
  */
+/** 남은 자리 = 총 인원(effectiveQuota) − 확정(오늘 포함). 총 인원 없음(무제한) = null(자르지 않는다). */
+function _remainingSeats(c, counts) {
+  const rt = effectiveQuota(c, counts).recruitTotal;
+  if (!(rt > 0)) return null;
+  const cnt = counts || {};
+  const done = Math.max(Number(cnt.submittedAll) || 0,
+    (Number(cnt.submittedBeforeToday) || 0) + (Number(cnt.todaySubmitted) || 0));
+  return Math.max(0, rt - done);
+}
+function _capSeats(n, c, counts) {
+  const left = _remainingSeats(c, counts);
+  return left === null ? n : Math.min(n, left);
+}
+
 function pendingCarry(c, counts, todayStr, win, schedule = null) {
+  const raw = _pendingShortfall(c, counts, todayStr, win, schedule);
+  return raw === null ? null : _capSeats(raw, c, counts);
+}
+/* 자르기 전 부족분(일건수 × 날수 − 확정). ★ 밖에서 직접 쓰지 말 것 — pendingCarry/heldCarry 가 남은 자리로 자른다. */
+function _pendingShortfall(c, counts, todayStr, win, schedule = null) {
   // ★★ 시트 일정 캠페인(063)은 정원을 시트 계획(plannedThrough)이 정하므로 자동 이월 자체가
   //   없다 = 이월 개념이 없다. 숫자를 돌려주면 화면에 **효과 없는** 이월 표시가 떠 막다른 길이 된다.
   if (isUsableSchedule(schedule)) return null;
@@ -828,18 +847,10 @@ function pendingCarry(c, counts, todayStr, win, schedule = null) {
   }
   // dailyQuota 와 같은 규칙 — 계획 없는 쉬는 날(주말·공휴일)은 원래 받기로 한 인원이 아니다.
   planned -= dl * _closedDaysWithoutPlan(c, anchor, addIsoDays(todayStr, -1), plans);
-  const shortfall = Math.max(0, planned - (Number(win.submittedSince) || 0));
-  /* ★★ 이월은 **남은 자리(총 인원 − 확정)** 를 넘을 수 없다(사용자 지적 2026-09-26 — "총 100명인데 이월 366명").
-     "받았어야 할 인원" = 일건수 × 지난 날수는 총 인원을 넘어서도 계속 쌓인다(일건수 100 · 총 100 · 4일 = 400).
-     실제 정원(dailyQuota)은 마지막에 총원으로 잘려 모집이 100명을 넘지는 않았지만, 화면 이월 칩·카드 ⏸ 칩·
-     「보류 이월 반영」 제안이 이 값을 그대로 써서 366명을 보여 주고, 반영하면 총량 초과로 막히는 죽은 버튼이 됐다.
-     → 표시·보류 잔량의 **단일 출처인 이 함수**에서 자른다(heldCarry 도 이 값을 쓴다). 총 인원 없음(무제한) = 자르지 않는다.
-     확정 = 공고 확정 전체(오늘 확정 포함 — 오늘 이미 찬 자리도 남은 자리가 아니다). 완화 금지. */
-  const rt = effectiveQuota(c, counts).recruitTotal;
-  if (!(rt > 0)) return shortfall;
-  const done = Math.max(Number(counts.submittedAll) || 0,
-    (Number(counts.submittedBeforeToday) || 0) + (Number(counts.todaySubmitted) || 0));
-  return Math.min(shortfall, Math.max(0, rt - done));
+  /* ★★ 결정 183 — 이 값은 **총 인원을 모른다**("받았어야 할 인원" = 일건수 × 지난 날수는 총원을 넘어서도 쌓인다:
+     일건수 100 · 총 100 · 4일 → 366). 남은 자리 자르기는 pendingCarry·heldCarry 가 **마지막에** 한다 —
+     보류는 반영분을 **뺀 뒤** 잘라야 한다(먼저 자르고 빼면 채워지지 않은 과거 반영분 때문에 빈자리를 0 으로 말한다 · Codex 리뷰). */
+  return Math.max(0, planned - (Number(win.submittedSince) || 0));
 }
 
 /**
@@ -848,9 +859,10 @@ function pendingCarry(c, counts, todayStr, win, schedule = null) {
  */
 function heldCarry(c, counts, todayStr, appliedSum = 0, schedule = null) {
   if (!isCarryHold(c)) return null;
-  const base = pendingCarry(c, counts, todayStr, counts && counts.hold, schedule);
+  const base = _pendingShortfall(c, counts, todayStr, counts && counts.hold, schedule);
   if (base === null) return null;
-  return Math.max(0, base - Math.max(0, Number(appliedSum) || 0));
+  // ★ 반영분을 먼저 빼고 **그다음** 남은 자리로 자른다(결정 183 · 순서 뒤집기 금지)
+  return _capSeats(Math.max(0, base - Math.max(0, Number(appliedSum) || 0)), c, counts);
 }
 
 /**

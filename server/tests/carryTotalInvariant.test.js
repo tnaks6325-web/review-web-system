@@ -51,6 +51,20 @@ console.log('[1] 실사례 재현 — 닥터바실리온');
   console.log('  ✓ 이월 366 → 66 · 오늘 정원 66 · 보류 반영 ≤ 66');
 }
 
+console.log('[1b] 보류 — 반영분을 뺀 뒤 자른다(Codex 리뷰: 먼저 자르면 빈자리를 적게·0 으로 말한다)');
+{
+  // 총 100 · 확정 34(남은 66) · 부족분 큼 · 예전에 20명 반영했지만 그날이 지나도록 안 찼다(계획에 이미 포함)
+  const c = camp({ recruit_total: 100, daily_limit: 100, start_date: '2026-09-22', carry_mode: 'hold' });
+  const cnt = counts({ before: 34, carryStart: '2026-09-22' });
+  const held = S.heldCarry(c, cnt, TODAY, 20);
+  ok('★ 부족분 366 − 반영 20 = 346 → 남은 자리 66 으로 자름(종전 순서면 46)', held === 66, String(held));
+  const held2 = S.heldCarry(c, cnt, TODAY, 80);
+  ok('반영분이 남은 자리보다 커도 빈자리를 0 으로 말하지 않는다(366 − 80 = 286 → 66)', held2 === 66, String(held2));
+  const held3 = S.heldCarry(c, cnt, TODAY, 350);
+  ok('부족분이 거의 다 반영됐으면 그만큼만(366 − 350 = 16)', held3 === 16, String(held3));
+  console.log('  ✓ 보류 = min(부족분 − 반영분, 남은 자리)');
+}
+
 console.log('[2] 무작위 조합 — 이월 방식 · 주말 · 계획 · 일건수 ≥ 총 인원');
 {
   let seed = 7;
