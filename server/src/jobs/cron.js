@@ -659,6 +659,29 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 작업표 날짜 맞추기(결정 182 · 2026-09-26): 매일 새벽 4시 20분 ──
+  //   날짜별 인원은 규칙(일건수·주말·이월·총량)이 정하고 작업표가 따라간다. 전날 못 채운 몫(이월)과
+  //   종료일 연장은 날이 바뀌며 달라지므로, 조용한 시간에 작업표 빈 줄 날짜를 한 번 맞춘다.
+  //   ★ 0시는 자율주문 공고가 열려 참여가 몰리는 시각이라 피한다. ★ 빈 줄만 옮기고 줄은 만들지 않는다.
+  //   되돌리기 = Railway `CAMPAIGN_WORKTABLE_RELAY_CRON=0`.
+  if (process.env.CAMPAIGN_WORKTABLE_RELAY_CRON !== '0') {
+    const wrSchedule = process.env.CAMPAIGN_WORKTABLE_RELAY_SCHEDULE || '20 4 * * *';
+    let wrRunning = false;
+    cron.schedule(wrSchedule, async () => {
+      if (wrRunning) return;
+      wrRunning = true;
+      try {
+        const { relayAllCampaignWorktables } = require('../services/campaignPlan.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('campaign_worktable_relay', () => relayAllCampaignWorktables({ by: 'cron' }));
+        if (r && r.skipped === true && !r.total) logger.debug('[CRON-WorktableRelay] lock busy — 양보');
+        else if (r) logger.info(`[CRON-WorktableRelay] 공고 ${r.total || 0} · 옮김 ${r.moved || 0} · 비움 ${r.cleared || 0} · 실패 ${r.failed || 0}`);
+      } catch (err) {
+        logger.error(`[CRON-WorktableRelay] error: ${err.message}`);
+      } finally { wrRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 완료된 큐 항목 정리: 매일 새벽 3시 (24시간 이상 경과) ──
   cron.schedule('0 3 * * *', async () => {
     try {

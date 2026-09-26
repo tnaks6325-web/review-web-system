@@ -23,7 +23,13 @@ assert.match(block, /FOR UPDATE/, '삭제 대상 참여행을 잠가 동시 삭�
 assert.match(block, /INSERT INTO workdesk_participant_deletions/, '재투영 차단용 최소 삭제 이력을 남긴다');
 assert.match(block, /DELETE FROM campaign_participants/, '참여행은 작업표에서 실제 삭제한다');
 assert.doesNotMatch(block, /SET deleted_at=NOW/, '참여행을 논리삭제로 남기지 않는다');
-assert.match(block, /planned_count=planned_count\+1/, '행 삭제가 날짜별 모집 총량을 줄이지 않고 마지막 계획에 1건을 보충한다');
+// ★★ 결정 182(2026-09-26): 줄을 지워도 날짜별 계획을 옮기지 않는다 — 날짜별 인원은 규칙이 정한다.
+//   계획을 적으면 그날이 "사람이 정한 날"로 굳어 일건수·이월 변경이 반영되지 않는다(완화 금지).
+assert.doesNotMatch(block, /planned_count=planned_count\+1/, '행 삭제가 날짜별 계획을 +1 하지 않는다');
+assert.doesNotMatch(block, /(UPDATE|INSERT INTO) campaign_daily_plans/, '행 삭제는 날짜별 계획에 쓰지 않는다');
+assert.match(block, /relayCampaignWorktable\(result\.campaignId/, '보충 줄 날짜는 커밋 뒤 규칙대로 맞춘다');
+assert.ok(block.indexOf('relayCampaignWorktable(result.campaignId') > block.indexOf('async function hideWorkdeskRow'),
+  '날짜 맞추기는 행 삭제 트랜잭션 밖(진입점)에서 한다 — 안에서 탭 잠금을 잡으면 구매 기록과 교착');
 assert.match(block, /INSERT INTO campaign_participants[\s\S]*?'worktable'/, '삭제한 자리 대신 마지막 진행일의 빈 작업표 슬롯을 실제 생성한다');
 assert.match(block, /participant_delete_replenish/, '총량 보충은 모집계획 이력에도 남긴다');
 assert.match(block, /ca\.campaign_id=rc\.id AND ca\.order_submission_id=\$3::uuid/, '여러 공고가 같은 작업표를 써도 삭제 행의 주문이 연결된 공고만 고른다');
@@ -53,12 +59,12 @@ assert.match(block, /mode: 'hard_deleted'/, '삭제 결과가 실제 삭제임�
 assert.match(reviewerSrc, /FROM review_index ri[\s\S]*?NOT EXISTS \([\s\S]*?workdesk_participant_deletions wd[\s\S]*?wd\.seq=ri\.row_index/, '시트형 참여내역이 삭제 행을 다시 노출하지 않는다');
 assert.match(reviewerSrc, /FROM order_submissions os[\s\S]*?os\.deleted_at IS NULL[\s\S]*?workdesk_participant_deletions wd[\s\S]*?wd\.order_submission_id=os\.id/, 'DB 주문형 참여내역도 삭제 행을 다시 노출하지 않는다');
 assert.match(reviewerSrc, /ca\.status <> 'cancelled'/, '참여 신청 이력에서도 취소된 행을 제외한다');
-assert.match(workdeskSrc, /마지막 진행일에 미진행 1건이 보충/, '관리자 확인문구가 총량 보충을 안내한다');
+assert.match(workdeskSrc, /총 모집인원은 유지되며 빈 줄 1개가 보충됩니다/, '관리자 확인문구가 총량 보충을 안내한다');
 
 const importSrc = fs.readFileSync(path.join(root, 'src/services/participants.service.js'), 'utf8');
 assert.match(importSrc, /workdesk_participant_deletions[\s\S]*?liveIdx = idx\.filter/, '재임포트가 실제 삭제 행을 다시 만들지 않는다');
 
-test('가상 삭제: 참여기록을 실제 삭제해도 마지막 진행일에 빈 슬롯을 보충해 총량을 유지한다', async () => {
+test('가상 삭제: 참여기록을 실제 삭제해도 빈 슬롯을 보충해 총량을 유지하고, 날짜는 규칙대로 맞춘다', async () => {
   const trackB = require('../src/services/trackB.service.js');
   const calls = [];
   const client = {
@@ -94,6 +100,10 @@ test('가상 삭제: 참여기록을 실제 삭제해도 마지막 진행일에 
   // 삭제 후 장부 재생성 호출 자체도 검증하되, 단위 테스트에서는 외부 DB를 열지 않는다.
   let ledgerArgs = null;
   trackB.__setLedgerRebuildForTest(async args => { ledgerArgs = args; return { ok: true, indexRows: 99 }; });
+  const cp = require('../src/services/campaignPlan.service.js');
+  const origRelay = cp.relayCampaignWorktable;
+  let relayArgs = null;
+  cp.relayCampaignWorktable = async (id, opts) => { relayArgs = { id, opts }; return { ok: true, moved: 1 }; };
   try {
     const out = await trackB.hideWorkdeskRow({ sheetId: 'sheet-a', tabName: '작업A', rowId: 'row-1', by: 'virtual-test' });
     assert.equal(out.ok, true);
@@ -115,17 +125,19 @@ test('가상 삭제: 참여기록을 실제 삭제해도 마지막 진행일에 
     //   `SELECT COALESCE(MAX(seq)...)+1 FROM campaign_participants ...` 로 계산한다 —
     //   그래서 params 에는 더 이상 seq 정수가 없다(sheetId, tabGid, tabName, start_date, row_json, by).
     assert.deepEqual(replacement.params.slice(0, 4), ['sheet-a', 'gid-1', '작업A', '8/21 (금)'], '빈 슬롯은 마지막 진행일의 새 작업표 행으로 보충한다');
-    const plan = calls.find(c => /UPDATE campaign_daily_plans/.test(c.sql));
-    assert.deepEqual(plan.params.slice(0, 2), ['camp-1', '2026-08-21'], '마지막 날짜의 계획만 1건 늘린다');
-    const sourcePlan = calls.find(c => /INSERT INTO campaign_daily_plans/.test(c.sql));
-    assert.deepEqual(sourcePlan.params.slice(0, 3), ['camp-1', '2026-08-18', 29], '삭제된 날짜는 1건 줄여 계획 총량이 증가하지 않는다');
+    assert.ok(!calls.some(c => /(UPDATE|INSERT INTO) campaign_daily_plans/.test(c.sql)), '★★ 날짜별 계획에 쓰지 않는다(결정 182)');
+    assert.equal(out.planMoved, false);
+    assert.deepEqual(relayArgs && relayArgs.id, 'camp-1', '커밋 뒤 그 공고의 작업표 날짜를 규칙대로 맞춘다');
+    assert.equal(relayArgs.opts.ledgers, false, '장부는 바로 뒤에서 한 번만 만든다(두 번 만들지 않는다)');
+    assert.deepEqual(out.worktableRelay, { ok: true, moved: 1 }, '날짜 맞추기 결과를 호출부에 알린다');
     const scope = calls.find(c => /FROM recruit_campaigns rc/.test(c.sql));
-    assert.deepEqual(scope.params, ['sheet-a', '작업A', '00000000-0000-0000-0000-000000000001'], '계획 이동 대상은 삭제한 행의 주문으로 연결된 공고로 한정한다');
+    assert.deepEqual(scope.params, ['sheet-a', '작업A', '00000000-0000-0000-0000-000000000001'], '대상 공고는 삭제한 행의 주문으로 연결된 공고로 한정한다');
     assert.deepEqual(ledgerArgs, { sheetId: 'sheet-a', tabName: '작업A', by: 'participant-delete:virtual-test' }, '삭제 뒤 작업표 장부도 다시 만든다');
     assert.ok(calls.some(c => /^COMMIT$/.test(c.sql)), '모든 해제가 완료된 뒤 커밋한다');
   } finally {
     trackB.__setPoolForTest(null);
     trackB.__setLedgerRebuildForTest(null);
+    cp.relayCampaignWorktable = origRelay;
   }
 });
 

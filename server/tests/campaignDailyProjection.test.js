@@ -108,7 +108,7 @@ console.log('[5] 지어내지 않는다');
 console.log('[6] 모집인원 조절 창 재료');
 {
   const src = fs.readFileSync(path.join(__dirname, '../src/services/campaignPlan.service.js'), 'utf8');
-  ok('getPlanOverview 가 같은 함수(projectDailyQuotas)로 예상 인원을 만든다', /projection = projectDailyQuotas\(camp, counts, \{ schedule: sch \}\)/.test(src));
+  ok('getPlanOverview 가 같은 함수(projectDailyQuotas)·같은 기간(PROJECTION_DAYS)으로 예상 인원을 만든다', /projection = projectDailyQuotas\(camp, counts, \{ schedule: sch, maxDays: PROJECTION_DAYS \}\)/.test(src) && /const PROJECTION_DAYS = 400;/.test(src));
   ok('응답에 projection 을 싣는다', /\n    projection,\n/.test(src));
   ok('계산 실패는 null(0 으로 꾸미지 않는다)', /catch \(pe\) \{ projection = null;/.test(src));
 }

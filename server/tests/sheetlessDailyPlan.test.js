@@ -4,8 +4,9 @@
  *
  * 고정하는 것:
  *  A. 무시트 탭은 **시트 일정 파생 대상이 아니다**(D3-a) — 달력이 진실원본이라야 조절 모달이 열린다
- *  B. 작업표 날짜 → 달력 프리필 — 파서 사본 0 · 기존 조절값 보존 · 지난 날짜 제외
- *  C. 공고 발행 배선 — 참여형 + 무시트 연결 탭일 때만 · fail-soft
+ *  B. 작업표 날짜 읽기(조절 창 기준선) — 파서 사본 0 · 옮겨 적기 함수 부활 금지(결정 182)
+ *  B2. 접수 때 오더 휴무일만 그날 0명 저장 — 덮어쓰기 금지 · `오더휴무:` 표식 · fail-soft
+ *  C. 공고 발행 배선 — 참여형 + 무시트 연결 탭일 때만 · 휴무일 저장 → 날짜 맞추기 · fail-soft
  *  D. 진행 일정 신호(097) — "안 보냄(NULL)"과 "끔(false)"을 구분한다
  *  E. 계획 계산 우선순위 — 미리보기 조정값 > 작업오더 신호 > 기본값
  *  F. 마이그레이션·프리플라이트 등록(없으면 인트라넷 오더 접수 전면 42703)
@@ -81,7 +82,7 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
   sched._clearCache();
 
   /* ══════════════ B. 작업표 날짜 → 달력 ══════════════ */
-  console.log('\n[B] 작업표 날짜 분배 → 달력 프리필');
+  console.log('\n[B] 작업표 날짜 분배 읽기(조절 창 기준선)');
   {
     const PARTS = [
       { row_json: { '번호': '1', '구매일자': '2026-08-07', '수취인': '' } },
@@ -121,154 +122,75 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
       (await dailyPlan.readWorktableDates({ sheetId: 'x', tabName: 'y' })).reason === 'query_failed');
   }
   {
-    // 프리필 — 지난 날짜 제외 + 이미 있는 날 보존
-    const inserts = [];
-    let conflictDate = '2026-08-10';
-    dailyPlan.__setPoolForTest({
-      query: async (sql, params) => {
-        if (/FROM campaign_participants/.test(sql)) {
-          return { rows: [
-            { row_json: { '구매일자': '2026-08-01' } },   // 과거
-            { row_json: { '구매일자': '2026-08-07' } },
-            { row_json: { '구매일자': '2026-08-10' } },
-            { row_json: { '구매일자': '2026-08-10' } },
-          ] };
-        }
-        inserts.push(params);
-        return { rowCount: params[1] === conflictDate ? 0 : 1 };   // 이미 조절해 둔 날 = 0행
-      },
-    });
-    const r = await dailyPlan.prefillFromWorktable({
-      campaignId: 'c1', sheetId: 'wt_a', tabName: 'T1', today: '2026-08-05', by: '관리자' });
-    ok('프리필 성공', r.ok === true);
-    ok('지난 날짜는 넣지 않는다(화면에서 지울 수도 없는 행 방지)',
-      !inserts.some(p => p[1] === '2026-08-01'));
-    ok('앞으로의 날짜만 신규 등록(1일)', r.inserted === 1);
-    // ★★ 이미 사람이 조절해 둔 날은 보존 — 공고 수정 한 번에 되돌리면 안 된다
-    ok('이미 계획이 있는 날은 유지(ON CONFLICT DO NOTHING → 0행)', r.skipped >= 1);
-    const sqlUsed = inserts.length ? true : false;
-    ok('그날 행 수를 인원으로 넣는다', sqlUsed && inserts.some(p => p[1] === '2026-08-10' && p[2] === 2));
-
+    /* ★★ 결정 182(2026-09-26 — D3-a 뒤집기): 작업표 날짜 분배를 달력에 **옮겨 적지 않는다**.
+       옮겨 적힌 날은 일건수·이월·주말 변경이 반영되지 않았다(완화 금지). 옛 함수가 되살아나면 여기서 잡힌다. */
+    ok('★★ 작업표→달력 옮겨 적기 함수가 없다', typeof dailyPlan.prefillFromWorktable === 'undefined');
+    ok('★★ 저장한 날만 맞추기·줄 새로 만들기 함수가 없다',
+      typeof dailyPlan.syncAdjustedPlansToWorktable === 'undefined'
+      && typeof dailyPlan.rebuildAdjustedPlansToWorktable === 'undefined');
     const src = noLineComments(srv('src/services/sheetlessDailyPlan.service.js'));
-    ok('덮어쓰기 금지(ON CONFLICT DO NOTHING)', /ON CONFLICT \(campaign_id, plan_date\) DO NOTHING/.test(src));
     ok('날짜 컬럼 찾기·파싱은 기존 단일 출처(사본 금지)',
       /findDateColumnIndex/.test(src) && /parseDateColumn/.test(src));
-    ok('KST 오늘도 기존 함수 재사용(날짜 규칙 사본 금지)', /kstTodayStr/.test(src));
     ok('구글 API 무접촉', !/sheets\.service|getSpreadsheetMeta/.test(src));
+    ok('★★ 이 파일은 달력(campaign_daily_plans)에 쓰지 않는다', !/campaign_daily_plans/.test(src));
   }
+
+  /* ══════════════ B2. 접수 때 오더 휴무일만 0명으로 저장 ══════════════ */
+  console.log('\n[B2] 오더 휴무일 → 그날 0명 (결정 182)');
   {
-    // 저장 실패는 조용히 넘기지 않는다
-    dailyPlan.__setPoolForTest({
-      query: async (sql) => {
-        if (/FROM campaign_participants/.test(sql)) return { rows: [{ row_json: { '구매일자': '2026-08-07' } }] };
-        const e = new Error('relation "campaign_daily_plans" does not exist'); e.code = '42P01'; throw e;
-      },
-    });
-    const r = await dailyPlan.prefillFromWorktable({ campaignId: 'c1', sheetId: 'a', tabName: 'b', today: '2026-08-05' });
-    ok('달력 저장 실패는 사유를 올린다(095 미적용 등)', r.ok === false && r.reason === 'insert_failed');
-  }
-  {
-    // ★ 상한 — 비정상 데이터(수년치 날짜)로 달력이 폭발하지 않는다.
-    //   MAX_PLAN_DAYS 를 무력화하면 여기서 잡힌다(변이시험 M6).
-    // ★ 상한 값을 구현에서 읽어 오면 상한을 무력화해도 기대값이 함께 움직여 통과한다
-    //   (동어반복 단언 — 변이시험 M6 이 실제로 통과시켰다) → 값을 여기에 못 박는다.
-    const CAP = 400;
-    ok('상한 값은 400일로 고정', dailyPlan.MAX_PLAN_DAYS === CAP);
-    const many = [];
-    const d0 = Date.UTC(2026, 7, 10);                       // 전부 미래 날짜
-    for (let i = 0; i < CAP + 25; i++) {
-      const d = new Date(d0 + i * 86400000).toISOString().slice(0, 10);
-      many.push({ row_json: { '구매일자': d } });
-    }
-    let insertCount = 0;
-    dailyPlan.__setPoolForTest({
-      query: async (sql) => {
-        if (/FROM campaign_participants/.test(sql)) return { rows: many };
-        // 2026-09-23: 쉬는 날 판정용 공고 조회는 INSERT 가 아니다(세지 않는다). 공고 없음 = 종전 동작.
-        if (/FROM recruit_campaigns/.test(sql)) return { rows: [] };
-        insertCount++;
-        return { rowCount: 1 };
-      },
-    });
-    const r = await dailyPlan.prefillFromWorktable({
-      campaignId: 'c1', sheetId: 'wt_a', tabName: 'T1', today: '2026-08-01' });
-    ok('상한을 넘는 날짜는 INSERT 하지 않는다', insertCount === CAP);
-    ok('상한 초과분은 조용히 사라지지 않고 skipped 에 잡힌다', r.ok === true && r.skipped >= 25);
-  }
-  {
-    // 달력 → 작업표 역동기화: 주말 기본 0명도 수동 증원하면 빈 준비 행이 실제로 그 날짜로 이동한다.
-    const updates = [];
-    const client = { query: async (sql, params) => {
-      if (/FROM campaign_participants/.test(sql)) return { rows: [
-        { id: 'a', seq: 1, reviewer_name: null, recipient_name: null, phone8: null, order_submission_id: null, row_json: { '구매일자': '8/18 (화)' } },
-        { id: 'b', seq: 2, reviewer_name: null, recipient_name: null, phone8: null, order_submission_id: null, row_json: { '구매일자': '8/18 (화)' } },
-        { id: 'fixed', seq: 3, reviewer_name: '기존참여자', recipient_name: '기존참여자', phone8: '12345678', order_submission_id: 'order', row_json: { '구매일자': '8/18 (화)' } },
-      ] };
-      if (/UPDATE campaign_participants/.test(sql)) { updates.push(params); return { rowCount: 1 }; }
-      throw new Error('unexpected sql');
-    }};
-    const r = await dailyPlan.syncAdjustedPlansToWorktable({
-      client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15', set: [{ date: '2026-08-15', count: 2 }], by: 'tester' });
-    ok('주말 0→2 조절 시 미래의 빈 준비 행 2개를 작업표 날짜로 이동', r.ok && r.moved === 2 && updates.length === 2);
-    /* ★ 표기는 작업표를 처음 만든 함수(worktablePlan.sheetDateStr)와 **같은 것**을 쓴다 —
-       종전엔 여기만 공백 없는 `8/15 (토)` 라 한 열에 두 표기가 섞였다(2026-08-19 실측). */
-    ok('작업표 날짜 표기는 작업표 생성과 같은 `8 / 15 (토)` 형식', updates.every(p => p[2] === '8 / 15 (토)'));
-    ok('참여자·주문이 있는 행은 절대 이동하지 않는다', !updates.some(p => p[0] === 'fixed'));
-    const src = noLineComments(srv('src/services/sheetlessDailyPlan.service.js'));
-    ok('역동기화는 빈 준비 행만 대상으로 한다', /reviewer_name.*recipient_name.*phone8.*order_submission_id/.test(src));
-  }
-  {
-    // 빈 준비 행이 없는 경우에도 새 행을 만들어 0명 날짜 증원을 실제 작업표에 반영한다.
+    const poolMod = require('../src/db/pool');
+    const lrq = require('../src/services/linkedRecruitQuota.service');
+    const cp = require('../src/services/campaignPlan.service');
+    const origQuery = poolMod.query, origLink = lrq.linkedWorkOrderForCampaign;
+    const { kstTodayStr } = require('../src/services/campaignState.service');
+    const today = kstTodayStr();
+    const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+    const past = addDays(today, -3), fut1 = addDays(today, 2), fut2 = addDays(today, 5);
     const inserts = [];
-    const client = { query: async (sql, params) => {
-      // ★ 새 행의 seq 는 **지운 줄까지 포함한 최대값**을 따로 묻는다(활성 행만 보면 지운 번호를
-      //   재사용해 23505 로 저장이 통째로 실패한다 — 2026-08-19).
-      if (/workdesk_participant_deletions/.test(sql)) return { rows: [{ max_seq: 7 }] };
-      if (/FROM campaign_participants/.test(sql)) return { rows: [
-        { id: 'fixed', seq: 7, tab_gid: 'g1', reviewer_name: '참여자', recipient_name: '참여자', phone8: '12345678', order_submission_id: 'order', row_json: { '번호': '7', '구매일자': '8/18 (화)' } },
-      ] };
-      if (/INSERT INTO campaign_participants/.test(sql)) { inserts.push(params); return { rowCount: 1 }; }
-      if (/UPDATE campaign_participants/.test(sql)) throw new Error('filled row must not be updated');
-      throw new Error('unexpected sql');
-    }};
-    const r = await dailyPlan.syncAdjustedPlansToWorktable({
-      client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15', set: [{ date: '2026-08-15', count: 2 }], by: 'tester' });
-    ok('빈 행이 없어도 0→2 증원은 새 작업표 행 2개를 만든다', r.ok && r.created === 2 && inserts.length === 2);
-    ok('새 행은 이어지는 seq와 목표 날짜를 갖는다', inserts[0][3] === 8 && inserts[1][3] === 9 && inserts.every(p => p[4] === '8 / 15 (토)'));
-    ok('★★ 모집인원 조절로 늘어난 새 행도 화면 번호를 함께 채운다',
-      JSON.parse(inserts[0][5])['번호'] === '8' && JSON.parse(inserts[1][5])['번호'] === '9');
-  }
-  {
-    // [기본으로]는 조절 후 남은 행 수가 아니라, 처음 조절하기 직전 작업표의 날짜별 행 수로 돌아간다.
-    // 그래야 0명 주말을 10명으로 열었다가 해제했을 때 0명으로, 기존 40명을 조절했다가 해제하면 40명으로 복귀한다.
-    const written = [];
-    const client = { query: async (sql, params) => {
-      if (/SELECT row_json FROM campaign_participants/.test(sql)) return { rows: [
-        { row_json: { '구매일자': '8/18 (화)' } },
-        { row_json: { '구매일자': '8/18 (화)' } },
-      ] };
-      if (/INSERT INTO campaign_worktable_defaults/.test(sql)) { written.push(params); return { rowCount: 1 }; }
-      if (/FROM campaign_worktable_defaults/.test(sql)) return { rows: [
-        { date: '2026-08-15', default_count: 0 }, { date: '2026-08-18', default_count: 40 },
-      ] };
-      throw new Error('unexpected sql');
-    }};
-    await dailyPlan.captureWorktableDefaults({ client, campaignId: 'c1', sheetId: 'wt_a', tabName: 'T1',
-      today: '2026-08-15', dates: ['2026-08-15', '2026-08-18'] });
-    ok('기본 복귀 기준은 첫 조절 전 작업표 날짜별 인원으로 기록',
-      written.some(p => p[1] === '2026-08-15' && p[2] === 0) && written.some(p => p[1] === '2026-08-18' && p[2] === 2));
-    const defaults = await dailyPlan.loadWorktableDefaults({ client, campaignId: 'c1', dates: ['2026-08-15', '2026-08-18'] });
-    ok('기본 복귀는 보존된 기준값을 날짜별로 다시 읽는다', defaults.get('2026-08-15') === 0 && defaults.get('2026-08-18') === 40);
+    try {
+      lrq.linkedWorkOrderForCampaign = async () => ({ holidays: JSON.stringify([fut2, past, fut1, fut1, 'garbage']) });
+      poolMod.query = async (sql, params) => {
+        if (/INSERT INTO campaign_daily_plans/.test(sql)) {
+          inserts.push({ sql: String(sql), params });
+          return { rowCount: params[1] === fut2 ? 0 : 1 };   // fut2 = 사람이 이미 정해 둔 날
+        }
+        throw new Error('unexpected sql: ' + String(sql).slice(0, 60));
+      };
+      const r = await cp.saveOrderHolidayZeros({ id: 'c1' }, '관리자');
+      ok('성공 + 새로 넣은 날만 센다', r.ok === true && r.inserted === 1 && r.holidays === 2);
+      ok('지난 날·형식 틀린 값은 넣지 않는다', !inserts.some(x => x.params[1] === past || x.params[1] === 'garbage'));
+      ok('같은 날은 한 번만', inserts.filter(x => x.params[1] === fut1).length === 1);
+      ok('★★ 0명으로만 넣는다', inserts.every(x => /VALUES \(\$1, \$2::date, 0, \$3, NOW\(\)\)/.test(x.sql)));
+      ok('★★ 사람이 이미 정한 날은 덮어쓰지 않는다(ON CONFLICT DO NOTHING)',
+        inserts.every(x => /ON CONFLICT \(campaign_id, plan_date\) DO NOTHING/.test(x.sql)));
+      ok('★ 표식 `오더휴무:` — [재설정]이 이 날은 지우지 않는다', inserts.every(x => x.params[2] === '오더휴무:관리자'));
+
+      lrq.linkedWorkOrderForCampaign = async () => null;
+      inserts.length = 0;
+      const r2 = await cp.saveOrderHolidayZeros({ id: 'c1' }, 'x');
+      ok('연결 오더가 없으면 아무것도 안 넣는다', r2.ok === true && r2.inserted === 0 && inserts.length === 0);
+
+      lrq.linkedWorkOrderForCampaign = async () => { throw new Error('db down'); };
+      const r3 = await cp.saveOrderHolidayZeros({ id: 'c1' }, 'x');
+      ok('실패는 사유를 올리고 throw 하지 않는다(공고 발행을 막지 않는다)', r3.ok === false && r3.reason === 'holiday_save_failed');
+    } finally {
+      poolMod.query = origQuery; lrq.linkedWorkOrderForCampaign = origLink;
+    }
+    const front = srv('../frontend/js/campaign-daily-plan.js');
+    ok('★ 화면 [재설정]은 오더 휴무일(`오더휴무:`)을 지우지 않는다', /오더휴무:/.test(front));
   }
 
   /* ══════════════ C. 공고 발행 배선 ══════════════ */
-  console.log('\n[C] 공고 발행 시 프리필 배선');
+  console.log('\n[C] 공고 발행 시 배선');
   {
-    const cr = noLineComments(srv('src/routes/campaign.routes.js'));
+    const cr = noLineComments(srv('src/routes/campaign.routes.js').replace(/\u0000/g, ''));
     ok('참여형 + 연결 탭이 있을 때만 시도', /participation_mode === true && lSheet && lTab/.test(cr));
     ok('무시트 판정은 단일 출처', /sheetlessScope['"]\)\.isSheetless\(pool, lSheet, lTab\)/.test(cr));
-    ok('프리필 호출', /prefillFromWorktable\(\{/.test(cr));
-    // ★ fail-soft — 달력이 안 채워졌다고 공고 발행을 막으면 안 된다(모달에서 채울 수 있다)
+    ok('★★ 옮겨 적기 호출이 없다', !/prefillFromWorktable\(/.test(cr));
+    ok('오더 휴무일 0명 저장 → 작업표 날짜 맞추기 순서',
+      cr.indexOf('saveOrderHolidayZeros(rows[0], by)') > 0
+      && cr.indexOf('saveOrderHolidayZeros(rows[0], by)') < cr.indexOf('relayCampaignWorktable(rows[0].id'));
+    // ★ fail-soft — 달력이 안 채워졌다고 공고 발행을 막으면 안 된다
     ok('실패해도 공고 발행은 성공(fail-soft)', /planPrefill = \{ ok: false, reason: 'exception'/.test(cr));
     ok('결과를 응답에 실어 화면이 안다(조용한 누락 금지)', /planPrefill \? \{ planPrefill \}/.test(cr));
   }

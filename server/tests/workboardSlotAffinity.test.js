@@ -132,9 +132,9 @@ test('정원·날짜조절로 새로 만드는 모든 준비 행이 활성 작�
   const quota = read('src/services/linkedRecruitQuota.service.js');
   const daily = read('src/services/sheetlessDailyPlan.service.js');
   assert.match(quota, /INSERT INTO campaign_participants[\s\S]*?row_json, workboard_id, source[\s\S]*?JOIN workboards w ON w\.id=tc\.workboard_id AND w\.state='active'/);
-  assert.equal((daily.match(/INSERT INTO campaign_participants/g) || []).length, 2);
-  assert.equal((daily.match(/row_json, workboard_id, source/g) || []).length, 2);
-  assert.equal((daily.match(/JOIN workboards w ON w\.id=tc\.workboard_id AND w\.state='active'/g) || []).length, 2);
+  // ★ 결정 182 — 날짜 조절 경로는 이제 **줄을 새로 만들지 않는다**(빈 줄의 날짜만 옮긴다). 새 준비 행은
+  //   정원 동기화(linkedRecruitQuota) 한 곳에서만 생기고, 위 단언이 그 상속을 고정한다.
+  assert.equal((daily.match(/INSERT INTO campaign_participants/g) || []).length, 0);
 });
 
 test('동시 제출과 다른 작업 보호 규칙을 유지한다', () => {

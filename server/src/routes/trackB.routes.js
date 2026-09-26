@@ -2103,6 +2103,9 @@ function _cdpFail(res, err) {
     // 작업표 재구성은 무시트 원장만 안전하게 변경한다. 전환 전 대상은 500으로 숨기지 말고
     // 운영자가 전환 상태를 바로 확인할 수 있도록 명시적으로 안내한다.
     not_sheetless: 409,
+    // 결정 182 — 작업표 날짜 맞추기: 잠그는 사이 연결 변경 · 여러 공고 공유 · 줄/날짜 칸 없음 = 사람이 확인할 상태
+    link_changed: 409, shared_worktable: 409, no_worktable_rows: 409, no_date_column: 409,
+    stale_client: 409,   // 배포 전 열어 둔 옛 조절 창의 여러 날 저장 — 새로고침 요청
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });
@@ -2133,6 +2136,13 @@ router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, asy
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
+/* 저장하지 않고 날짜별 예상 인원을 다시 계산(결정 182 — 조절 창이 바꾸는 즉시 보여준다). 쓰기 0건. */
+router.post('/campaigns/:id/daily-plan/preview', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { previewPlanProjection } = require('../services/campaignPlan.service');
+    res.json({ ok: true, ...(await previewPlanProjection(String(req.params.id), req.body)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
 // 공고 설정의 "모집이월 방식"과 [📅 인원] 팝업이 같은 저장값을 쓴다.
 // 계획을 바로 펼칠 수 없는 수동 조절 상태에서도 선택을 잃지 않게 별도 저장한다.
 router.put('/campaigns/:id/carry-strategy', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -2150,7 +2160,9 @@ router.put('/campaigns/:id/carry-strategy', authMiddleware, internalMiddleware, 
       [campaignId, carryStrategy]
     );
     if (!rows.length) return res.status(404).json({ ok: false, code: 'not_found', error: '캠페인을 찾을 수 없습니다.' });
-    res.json({ ok: true, carryStrategy: rows[0].carry_strategy });
+    // 결정 182 — 이월 방식이 바뀌면 날짜별 인원이 바뀐다 → 작업표 빈 줄 날짜도 따라간다(절대 throw 없음).
+    const worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
+    res.json({ ok: true, carryStrategy: rows[0].carry_strategy, worktableRelay });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
 router.post('/campaigns/:id/worktable-rebuild', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -2166,6 +2178,8 @@ router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (
     const { addRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
     const out = await addRound(campaignId, req.body, _by(req));
+    // 결정 182 — 총 인원이 바뀌면 날짜별 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
+    out.worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
@@ -2174,6 +2188,8 @@ router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async
     const { removeLastRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
     const out = await removeLastRound(campaignId, _by(req));
+    // 결정 182 — 총 인원이 바뀌면 날짜별 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
+    out.worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
