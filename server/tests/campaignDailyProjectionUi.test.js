@@ -140,6 +140,9 @@ const posts = re => CALLS.filter(c => c.method === 'POST' && re.test(c.url));
   ok('★★ 바꾼 날짜가 정확히 11/5 다', pv[0] && JSON.stringify(pv[0].body.set) === JSON.stringify([{ date: FAR, count: 10 }]), JSON.stringify(pv[0] && pv[0].body));
   ok('예상 종료일 변화를 보여 준다(원래 11/9 → 변경됨)', /예상 종료일 <b>11\/12/.test(body()) && /원래 11\/9[^<]*→ 변경됨/.test(body()));
   ok('이제 저장 버튼이 열린다', els.cdpSaveBtn.disabled === false);
+  typeValue('2026-10-01', 0);
+  ok('★ 저장 전 0명으로 바꾼 날은 「휴무」가 아니라 「변경」으로 보인다', /10\/1 [\s\S]{0,200}?<span class="cdp-state"[^>]*>변경</.test(body()));
+  await sleep(320);
 
   console.log('[3] 늦게 온 미리보기 응답은 버린다');
   {

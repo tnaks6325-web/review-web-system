@@ -911,7 +911,8 @@
       var conf = isToday ? (j.todayUsed || 0) : 0;
       var pw = Math.min(100, v / scale * 100), cw = Math.min(100, conf / scale * 100);
       var dk = dayKind(d), hol = holidayName(d);
-      var stateText = closed ? '휴무' : (pend || rm ? '변경' : (saved ? '조절' : (isToday ? '오늘' : '규칙')));
+      // 저장 전 바꾼 날은 0명이어도 「변경」 — 사람이 방금 한 일이 먼저 보여야 한다
+      var stateText = (pend || rm) ? '변경' : closed ? '휴무' : (saved ? '조절' : (isToday ? '오늘' : '규칙'));
       var tag = pend ? '바꾼 값(저장 전)' : rm ? '규칙으로 되돌림(저장 전)' : oh ? '인트라넷 오더 휴무일' : saved ? '직접 정한 값' : '규칙으로 계산';
       var reset = (pend || saved) ? ' <button type="button" class="cdp-reset" data-i="' + i + '">기본으로</button>' : '';
       return '<div class="cdp-row' + (isToday ? ' today' : '') + (closed ? ' zero' : '') + '">'
