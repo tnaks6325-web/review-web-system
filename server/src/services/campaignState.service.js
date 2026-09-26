@@ -828,7 +828,18 @@ function pendingCarry(c, counts, todayStr, win, schedule = null) {
   }
   // dailyQuota 와 같은 규칙 — 계획 없는 쉬는 날(주말·공휴일)은 원래 받기로 한 인원이 아니다.
   planned -= dl * _closedDaysWithoutPlan(c, anchor, addIsoDays(todayStr, -1), plans);
-  return Math.max(0, planned - (Number(win.submittedSince) || 0));
+  const shortfall = Math.max(0, planned - (Number(win.submittedSince) || 0));
+  /* ★★ 이월은 **남은 자리(총 인원 − 확정)** 를 넘을 수 없다(사용자 지적 2026-09-26 — "총 100명인데 이월 366명").
+     "받았어야 할 인원" = 일건수 × 지난 날수는 총 인원을 넘어서도 계속 쌓인다(일건수 100 · 총 100 · 4일 = 400).
+     실제 정원(dailyQuota)은 마지막에 총원으로 잘려 모집이 100명을 넘지는 않았지만, 화면 이월 칩·카드 ⏸ 칩·
+     「보류 이월 반영」 제안이 이 값을 그대로 써서 366명을 보여 주고, 반영하면 총량 초과로 막히는 죽은 버튼이 됐다.
+     → 표시·보류 잔량의 **단일 출처인 이 함수**에서 자른다(heldCarry 도 이 값을 쓴다). 총 인원 없음(무제한) = 자르지 않는다.
+     확정 = 공고 확정 전체(오늘 확정 포함 — 오늘 이미 찬 자리도 남은 자리가 아니다). 완화 금지. */
+  const rt = effectiveQuota(c, counts).recruitTotal;
+  if (!(rt > 0)) return shortfall;
+  const done = Math.max(Number(counts.submittedAll) || 0,
+    (Number(counts.submittedBeforeToday) || 0) + (Number(counts.todaySubmitted) || 0));
+  return Math.min(shortfall, Math.max(0, rt - done));
 }
 
 /**
