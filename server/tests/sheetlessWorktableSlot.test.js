@@ -31,7 +31,8 @@ assert.ok(/const confirmedOverflow = await _canAppendConfirmedOverflowOrder\(cli
    변이시험이 실제로 뚫었다. 호출 형태와 **순서**를 고정한다. */
 assert.ok(/await client\.query\('SELECT pg_advisory_xact_lock\(hashtext\(\$1\)\)'/.test(source),
   'the per-tab advisory lock must be a real query on the write transaction');
-assert.ok(source.indexOf('pg_advisory_xact_lock') < source.indexOf('FOR UPDATE SKIP LOCKED'),
+assert.ok(source.indexOf("await client.query('SELECT pg_advisory_xact_lock") > -1
+  && source.indexOf("await client.query('SELECT pg_advisory_xact_lock") < source.indexOf('await _pickOpenSlot(client'),
   'the lock must be taken before slots are claimed, otherwise two orders can take the same seq');
 assert.ok(/if \(!tc\.length \|\| !tc\[0\]\.sheetless\) \{[\s\S]{0,200}?no_open_slot/.test(source),
   'append must be fail-closed to sheetless-registered tabs (the branch, not just the query text)');

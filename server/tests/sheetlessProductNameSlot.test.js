@@ -30,7 +30,7 @@ async function run() {
       seen.push({ text, params });
       if (/^BEGIN|^COMMIT|^ROLLBACK|pg_advisory_xact_lock/.test(text)) return { rows: [], rowCount: 0 };
       if (/order_submission_id = \$3::uuid/.test(text) && /FOR UPDATE/.test(text)) return { rows: [], rowCount: 0 };
-      if (/order_submission_id IS NULL/.test(text) && /FOR UPDATE SKIP LOCKED/.test(text)) {
+      if (/order_submission_id IS NULL/.test(text) && /FOR UPDATE SKIP LOCKED|ORDER BY cp\.seq LIMIT 3000/.test(text)) {
         return { rows: [{ id: 'slot-1', seq: 1, option_text: slotProductLabel, row_json: { 상품: '' } }], rowCount: 1 };
       }
       if (/^UPDATE campaign_participants/.test(text)) return { rows: [], rowCount: 1 };
@@ -63,7 +63,8 @@ async function run() {
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.written, true, JSON.stringify(result));
 
-    const claim = seen.find(c => /FOR UPDATE SKIP LOCKED/.test(c.text));
+    // 선택 조건이 담긴 쿼리 = 후보 읽기(결정 182 — 그 뒤 잠그기는 id 하나만 잠근다)
+    const claim = seen.find(c => /ORDER BY cp\.seq LIMIT 3000/.test(c.text));
     assert.ok(claim, '빈 슬롯 선점 쿼리가 실행돼야 한다');
     assert.equal(claim.params[3], '', '상품명은 슬롯 선택 파라미터로 전달하면 안 된다');
     assert.equal(claim.params[4], '00000000-0000-0000-0000-000000000001', '실제 옵션 예약 여부는 주문의 공고 범위로 판정해야 한다');

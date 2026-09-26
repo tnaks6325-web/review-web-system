@@ -152,6 +152,105 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
   return { patch, optionSuppressed, optionUnmapped, productSuppressed, productUnmapped };
 }
 
+/** 빈 줄 후보를 한 번에 읽는 상한 — 한 작업표의 빈 줄이 이보다 많아도 앞에서부터 고르면 충분하다. */
+const PICK_CANDIDATE_CAP = 3000;
+
+/**
+ * 구매 한 건이 쓸 **빈 줄**을 고른다(탭 잠금 안에서 부른다 — 결정 182, 2026-09-26).
+ *
+ * 순서 ① 옵션: 고른 옵션이 적힌 줄 → 옵션 칸이 빈 줄
+ *      ② 날짜: **오늘 날짜 줄 → 날짜가 없거나 지난 줄 → 앞날 줄(가까운 날부터)**
+ *      ③ 줄 번호(seq)
+ * ★ 날짜 칸·연도 해석은 기존 단일 출처(`findDateColumnIndex` + `parseDateColumn` · 오늘 연·월 앵커).
+ * ★★ 그래도 없으면 **옵션 이름 바꿔 쓰기** — 그 공고의 다른 옵션 이름이 적힌 빈 줄을 쓴다(마감된 옵션
+ *   줄부터). 종전에는 옵션 A 줄이 동나면 정원 밖 줄을 새로 붙이고 옵션 B 빈 줄은 영영 남았다.
+ *   ★ 그 공고의 옵션(상품 단위 제외) 이름이 적힌 줄만 대상 — 모르는 이름은 건드리지 않는다.
+ *   ★ 킬스위치 `WORKTABLE_OPTION_RELABEL=0` = 종전 동작(바꿔 쓰지 않음).
+ * @returns {Promise<{rows:Array, relabelFrom:string}>} rows 는 잠근 줄 0~1개
+ */
+async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers, where }) {
+  const key = String(scheduledOptionKey || '');
+  const { findDateColumnIndex } = require('./campaignSchedule.service');
+  const { parseDateColumn } = require('../utils/koreanDate');
+  const { kstTodayStr } = require('./campaignState.service');
+  const today = kstTodayStr();
+  const dateIdx = findDateColumnIndex(headers || []);
+  const dateHeader = dateIdx >= 0 ? headers[dateIdx] : null;
+  const ym = String(today).match(/^(\d{4})-(\d{2})/);
+  const anchor = ym ? { y: Number(ym[1]), m: Number(ym[2]) } : undefined;
+
+  const rank = (rows, optTierOf) => {
+    const dates = dateHeader
+      ? parseDateColumn(rows.map(r => String(((r.row_json || {})[dateHeader]) || '')), { fallbackAnchor: anchor })
+      : rows.map(() => null);
+    return rows.map((r, i) => {
+      const d = dates[i] || '';
+      const dateTier = d === today ? 0 : (!d || d < today) ? 1 : 2;
+      return { r, opt: optTierOf(r), dateTier, d: dateTier === 2 ? d : '', seq: Number(r.seq) || 0 };
+    }).sort((a, b) => (a.opt - b.opt) || (a.dateTier - b.dateTier)
+      || (a.d < b.d ? -1 : a.d > b.d ? 1 : 0) || (a.seq - b.seq));
+  };
+  const lockFirst = async (ranked) => {
+    for (const x of ranked.slice(0, 20)) {
+      const { rows } = await client.query(
+        `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
+          WHERE cp.id = $1 AND cp.deleted_at IS NULL AND cp.active = TRUE
+            AND cp.order_submission_id IS NULL
+          FOR UPDATE SKIP LOCKED`, [x.r.id]);
+      if (rows.length) return rows;
+    }
+    return [];
+  };
+
+  const { rows: cands } = await client.query(
+    `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
+     ${where}
+     ORDER BY cp.seq LIMIT ${PICK_CANDIDATE_CAP}`, [sheetId, tabName, workboardId, key, orderSubmissionId]);
+  if (cands.length) {
+    const optTier = r => {
+      const ot = String(r.option_text == null ? '' : r.option_text).trim();
+      if (key) return ot === key ? 0 : 1;
+      return ot ? 1 : 0;
+    };
+    return { rows: await lockFirst(rank(cands, optTier)), relabelFrom: '' };
+  }
+
+  if (!key || process.env.WORKTABLE_OPTION_RELABEL === '0') return { rows: [], relabelFrom: '' };
+  // ── 옵션 이름 바꿔 쓰기: 그 공고의 다른 옵션 이름이 적힌 빈 줄 ──
+  let opts = [];
+  try {
+    ({ rows: opts } = await client.query(
+      `SELECT co.opt_key, COALESCE(co.status, 'active') AS status
+         FROM order_submissions os
+         JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+         JOIN campaign_options co ON co.campaign_id = ca.campaign_id
+        WHERE os.id = $1::uuid AND COALESCE(co.unit_kind, 'option') <> 'product'`, [orderSubmissionId]));
+  } catch (e) {
+    logger.warn(`[sheetlessOrder] 옵션 바꿔 쓰기 후보 조회 실패(바꿔 쓰지 않음): ${e.message}`);
+    return { rows: [], relabelFrom: '' };
+  }
+  const closedBy = new Map();
+  for (const o of opts) {
+    const k = String(o.opt_key || '').trim();
+    if (k && k !== key) closedBy.set(k, String(o.status) === 'closed');
+  }
+  if (!closedBy.size) return { rows: [], relabelFrom: '' };
+  const { rows: others } = await client.query(
+    `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
+      WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
+        AND ($3::uuid IS NULL OR cp.workboard_id = $3)
+        AND cp.order_submission_id IS NULL
+        AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
+        AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
+        AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
+        AND btrim(COALESCE(cp.option_text, '')) = ANY($4::text[])
+      ORDER BY cp.seq LIMIT ${PICK_CANDIDATE_CAP}`, [sheetId, tabName, workboardId, [...closedBy.keys()]]);
+  if (!others.length) return { rows: [], relabelFrom: '' };
+  // 마감된 옵션의 줄부터(더는 그 옵션으로 올 구매가 없다)
+  const rows = await lockFirst(rank(others, r => (closedBy.get(String(r.option_text).trim()) ? 0 : 1)));
+  return { rows, relabelFrom: rows.length ? String(rows[0].option_text || '').trim() : '' };
+}
+
 /**
  * 무시트 탭의 주문을 작업표에 기록하고 장부를 다시 만든다.
  *
@@ -227,6 +326,8 @@ async function writeOrderToWorktable({
   // 별도로 기록한다.
   let selectedOptKey = '';
   let scheduledOptionKey = '';
+  // 다른 옵션 이름이 적힌 빈 줄을 옵션을 바꿔 쓸 때, 그 줄에 적혀 있던 옛 옵션 이름(없으면 '')
+  let relabelFrom = '';
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -353,8 +454,13 @@ async function writeOrderToWorktable({
         }
       }
       if (!cur.length) {
-        ({ rows: cur } = await client.query(
-          `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
+        /* ★★ 빈 줄 고르기(2026-09-26 · 결정 182) — 옵션 일치 → **오늘 날짜 줄 → 날짜 없는·지난 줄 →
+           앞날 줄(가까운 날부터)** 순. 종전에는 번호(seq) 순이라 오늘 산 사람이 앞날 줄을 먹고, 그 줄의
+           날짜를 오늘로 바꿔 써서 날짜별 줄 수가 주문마다 틀어졌다. 판정은 `_pickOpenSlot` 한 곳.
+           ★ 탭 잠금(pg_advisory_xact_lock) 안이라 후보를 읽고 JS 로 고른 뒤 잠가도 두 주문이 같은 줄을 집지 않는다. */
+        const picked = await _pickOpenSlot(client, {
+          sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers,
+          where: `
             WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
               AND ($3::uuid IS NULL OR cp.workboard_id = $3)
               AND cp.order_submission_id IS NULL
@@ -376,14 +482,10 @@ async function writeOrderToWorktable({
                        AND scope_co.opt_key = cp.option_text
                   )
                 ))
-              )
-            ORDER BY CASE
-                       WHEN $4 <> '' AND cp.option_text = $4 THEN 0
-                       WHEN $4 = '' AND NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL THEN 0
-                       ELSE 1
-                     END, cp.seq
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1`, [sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId]));
+              )`,
+        });
+        cur = picked.rows;
+        relabelFrom = picked.relabelFrom;
       }
       if (!cur.length) {
         /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문,
@@ -417,11 +519,24 @@ async function writeOrderToWorktable({
       seq = Number(cur[0].seq);
     }
 
-    if (cur[0] && scheduledOptionKey && cur[0].option_text && String(cur[0].option_text) !== scheduledOptionKey) {
+    if (!relabelFrom && cur[0] && scheduledOptionKey && cur[0].option_text && String(cur[0].option_text) !== scheduledOptionKey) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'scheduled_option_mismatch' };
     }
-    const currentRowJson = (cur[0] && cur[0].row_json && typeof cur[0].row_json === 'object') ? cur[0].row_json : {};
+    let currentRowJson = (cur[0] && cur[0].row_json && typeof cur[0].row_json === 'object') ? cur[0].row_json : {};
+    if (relabelFrom) {
+      /* ★ 옵션 이름 바꿔 쓰기 — 그 줄의 옵션 칸 중 **옛 옵션 이름과 정확히 같은 칸만** 비운다.
+         시스템이 배분해 적어 둔 값이라 바꿔도 되고, 관리자 작업지시(예: 포토리뷰)처럼 다른 값이
+         적힌 칸은 그대로 둔다(옵션 칸 blank-only 규율 — 결정 018). */
+      const { optionWriteColumns } = require('./orderLedger.service');
+      const cleared = { ...currentRowJson };
+      for (const i of optionWriteColumns(headers)) {
+        const h = headers[i];
+        if (h && String(cleared[h] == null ? '' : cleared[h]).trim() === relabelFrom) cleared[h] = '';
+      }
+      currentRowJson = cleared;
+      logger.info(`[sheetlessOrder] 빈 줄 옵션 바꿔 쓰기 tab=${tabName} seq=${cur[0].seq} ${relabelFrom} → ${scheduledOptionKey} os=${orderSubmissionId}`);
+    }
     const built = buildRowPatch(headers, orderData, currentRowJson);
     optionSuppressed = built.optionSuppressed;
     optionUnmapped = built.optionUnmapped || '';
@@ -859,5 +974,6 @@ module.exports = {
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,
   __canAppendConfirmedOverflowOrderForTest: _canAppendConfirmedOverflowOrder,
+  __pickOpenSlotForTest: _pickOpenSlot,
   __setPoolForTest,
 };
