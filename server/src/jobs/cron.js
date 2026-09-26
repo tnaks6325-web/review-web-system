@@ -636,6 +636,33 @@ function startCronJobs() {
   //   ★ 삭제는 **휴지통만**(30일 복구창) · 유예 ORPHAN_CAPTURE_GRACE_DAYS(기본 7일)
   //     · 한 회차 상한 ORPHAN_CAPTURE_CLEAN_CAP(기본 200).
   //   되돌리기 = Railway `ORPHAN_CAPTURE_CLEAN=0`.
+  /* ★ 임시(2026-09-26) — 사용자 요청 "세어보고 보고해".
+     이 정리는 만든 날부터 잘못된 칸 이름으로 한 번도 돌지 못해 **쌓인 양을 아무도 모른다**.
+     크론은 하루 한 번(새벽 4:40)뿐이라, 배포 직후 **한 번만 세어** 로그에 남긴다.
+     ★ 세기만 한다(dryRun) — 지우지 않는다. 건수를 보고한 뒤 이 블록은 제거한다.
+     ★ 끄려면 ORPHAN_CAPTURE_COUNT_ON_BOOT=0. */
+  if (process.env.ORPHAN_CAPTURE_COUNT_ON_BOOT !== '0') {
+    setTimeout(async () => {
+      try {
+        const { findOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
+        const r = await findOrphanCaptures({ limit: 500 });
+        if (r && r.ok) {
+          logger.warn(`[OrphanCapture/세기] 지금 대상 ${r.total}건`
+            + ` (유예 ${r.graceDays}일${r.truncated ? ' · 500건에서 끊음' : ''})`
+            + ` — 지우지 않았습니다.`);
+          (r.items || []).slice(0, 5).forEach((it, i) => {
+            logger.warn(`[OrphanCapture/세기] 예시 ${i + 1}: ${it.tabName || ''}`
+              + ` ${it.rowIndex ?? ''}행 ${it.reviewerName || ''} · ${it.fileName || it.fileId}`);
+          });
+        } else {
+          logger.warn(`[OrphanCapture/세기] 조회 실패: ${(r && r.error) || '알 수 없음'}`);
+        }
+      } catch (e) {
+        logger.warn(`[OrphanCapture/세기] 실패(무시): ${e.message}`);
+      }
+    }, 20000);
+  }
+
   if (process.env.ORPHAN_CAPTURE_CLEAN !== '0') {
     const occSchedule = process.env.ORPHAN_CAPTURE_CLEAN_SCHEDULE || '40 4 * * *';
     let occRunning = false;
@@ -645,10 +672,20 @@ function startCronJobs() {
       try {
         const { trashOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
         const { withJobLock } = require('../utils/jobLock');
+        /* ★★ 당분간 **세기만** 한다 (사용자 확정 2026-09-26 "세어보고 보고해").
+           이 정리는 만든 날(2026-08-21)부터 잘못된 칸 이름 때문에 **한 번도 돌지 못했다** —
+           고치는 순간 한 달 넘게 쌓인 고아가 한꺼번에 휴지통으로 가므로, 사람이 건수와
+           목록을 확인하고 결정할 때까지 실제 삭제는 하지 않는다.
+           ★ 실행으로 바꾸려면 `ORPHAN_CAPTURE_CLEAN_APPLY=1`(또는 이 기본값을 되돌린다). */
+        const _apply = process.env.ORPHAN_CAPTURE_CLEAN_APPLY === '1';
         const r = await withJobLock('orphan_capture_clean',
-          () => trashOrphanCaptures({ dryRun: false, by: 'cron' }));
+          () => trashOrphanCaptures({ dryRun: !_apply, by: 'cron' }));
         if (r && r.skipped) logger.debug('[CRON-OrphanCapture] lock busy — 양보');
-        else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
+        else if (r && r.ok && !_apply) {
+          // 미리보기 — 매일 건수를 남겨 사람이 추이를 본다(지우지 않는다)
+          logger.warn(`[CRON-OrphanCapture] (세기만) 대상 ${r.total ?? r.trashed ?? 0}건`
+            + ` · 유예 ${r.graceDays}일 — 실제 삭제는 ORPHAN_CAPTURE_CLEAN_APPLY=1 일 때만`);
+        } else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
           logger.warn(`[CRON-OrphanCapture] 휴지통 ${r.trashed}건 · 실패 ${r.failed}건`
             + ` · 경합회피 ${r.skippedRecheck || 0}건 (유예 ${r.graceDays}일)`);
         }
