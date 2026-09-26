@@ -178,6 +178,35 @@ const PLAN_ENABLED = process.env.CAMPAIGN_DAILY_PLAN !== '0';
 // ★ 킬스위치 `CAMPAIGN_ORDER_QUOTA=0` = 재료 미부착 = 전건 종전 동작 즉시 복귀.
 const ORDER_QUOTA_ENABLED = process.env.CAMPAIGN_ORDER_QUOTA !== '0';
 
+// ── 확정 인원 기준(결정 184 · 사용자 확정 2026-09-27 「A — 신청·주문 중 큰 값」) ──
+// 'max'(기본) = 오늘 확정·어제까지 확정·이월/보류 기준선 이후 확정을 **구간마다 신청·주문 중 큰 값**으로 센다.
+//   공고를 거치지 않은 실구매(대신 제출·외부 모집·늦은 구매)도 하루 인원·이월·예상 종료일·작업표 날짜에 들어간다.
+// 'applications' = 종전(신청 기록만) — 되돌리기 = env 만.
+const COUNT_BASIS = String(process.env.CAMPAIGN_COUNT_BASIS || 'max').toLowerCase() === 'applications' ? 'applications' : 'max';
+
+/**
+ * fetchCampaignCounts 깔때기 안에서 — 연결 작업표의 주문 원장 구간 수와 신청 구간 수를 **구간마다 큰 값**으로 합친다.
+ * ★ 합치는 것: submittedBeforeToday · todaySubmitted · carry.submittedSince · hold.submittedSince.
+ * ★★ submittedAll 은 합치지 않는다 — soft_full(총원 마감)의 `usedAll` 재료이고, 주문 기준 마감은 이미
+ *   `table_over_total`(비영속) 경로가 맡는다. 합치면 031 의 두 경로 분리가 무너진다(완화 금지).
+ * ★ 공유 작업표(한 탭에 공고 둘 이상)·탭 없음·조회 실패·구간 수 없음(구버전 캐시) = 합치지 않는다(종전 · 정원을 좁히지 않는다).
+ * ★ 원래 신청 수는 `applications` 에 보존한다(진단·표시용).
+ */
+function _mergeCountBasis(o) {
+  if (COUNT_BASIS !== 'max' || !o) return;
+  const L = o.linked;
+  if (!L || !L.ok || L.noTab || L.sharedTab || !Number.isFinite(L.ordersBefore) || !Number.isFinite(L.ordersToday)) return;
+  o.applications = {
+    submittedBeforeToday: o.submittedBeforeToday, todaySubmitted: o.todaySubmitted,
+    carrySince: o.carry ? o.carry.submittedSince : null, holdSince: o.hold ? o.hold.submittedSince : null,
+  };
+  o.submittedBeforeToday = Math.max(Number(o.submittedBeforeToday) || 0, L.ordersBefore);
+  o.todaySubmitted = Math.max(Number(o.todaySubmitted) || 0, L.ordersToday);
+  if (o.carry) o.carry = { ...o.carry, submittedSince: Math.max(Number(o.carry.submittedSince) || 0, Number(L.ordersSinceCarry) || 0) };
+  if (o.hold) o.hold = { ...o.hold, submittedSince: Math.max(Number(o.hold.submittedSince) || 0, Number(L.ordersSinceHold) || 0) };
+  o.countBasis = 'max';
+}
+
 /**
  * 그 공고에 실제로 적용되는 정원 — 공고 값 우선, 0(미설정)이면 연결 발주 값.
  * ★★ 정원을 읽는 모든 자리(상태엔진·이월·총량 clamp·표시)가 **이 함수 하나**를 쓴다.
@@ -727,11 +756,11 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
   //   같은 정원을 본다 — 별도 인자로 흩으면 "카드는 열렸는데 참여 거부"). 시그니처 무변경 =
   //   소비처 4파일(campaign.routes·trackB·manualOrder·campaignPlan) 호출부 변경 0.
   //   ★ planMaps 뒤에 둔다 — 쿼리 순서를 보는 기존 회귀가드(066 q[0]/q[1])의 계약을 흔들지 않는다.
-  const linkedMap = await _loadLinkedOrderCounts(pool, ids, now);
+  const linkedMap = await _loadLinkedOrderCounts(pool, ids, now, { dayStart, carryFrom: carryFromUtc, holdFrom: holdFromUtc });
   if (linkedMap) {
     for (const id of ids) {
       const o = out.get(id);
-      if (o) o.linked = linkedMap.get(id) || null;
+      if (o) { o.linked = linkedMap.get(id) || null; _mergeCountBasis(o); }
     }
   }
   /* ★ 발주 정원 폴백 재료(2026-08-21) — **이 깔때기에 싣는다**: 목록·상세·apply 게이트·카드가
@@ -983,10 +1012,16 @@ function __resetPlanCacheForTest() { _planTableMissingAt = 0; }
 let _ctqCache = new Map();               // campaignId → {at, val}
 const CTQ_CACHE_MS = 10 * 1000;
 const CTQ_CACHE_MAX = 800;               // 무한 성장 방지(넘으면 통째 비움 — LRU 불필요한 규모)
-async function _loadLinkedOrderCounts(db, ids, now = new Date()) {
+async function _loadLinkedOrderCounts(db, ids, now = new Date(), win = null) {
+  // win = { dayStart, carryFrom, holdFrom } (ISO) — 주문을 신청 집계와 **같은 시간 구간**으로 나눠 센다(결정 184).
+  const dayStart = (win && win.dayStart) || kstDayStartUtc(now).toISOString();
+  const carryFrom = (win && win.carryFrom) || dayStart;
+  const holdFrom = (win && win.holdFrom) || dayStart;
   if (TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
   const inClient = typeof db.release === 'function';   // 체크아웃된 클라이언트 = 잠금 tx 가능성
-  if (!inClient && ids.every(id => { const c = _ctqCache.get(id); return c && now.getTime() - c.at < CTQ_CACHE_MS; })) {
+  // ★ 캐시는 같은 구간(오늘 0시·이월 기준선)으로 센 값만 쓴다 — 자정을 넘긴 10초 사이 어제 기준 값을 쓰지 않게.
+  const winKey = dayStart + '|' + carryFrom + '|' + holdFrom;
+  if (!inClient && ids.every(id => { const c = _ctqCache.get(id); return c && c.win === winKey && now.getTime() - c.at < CTQ_CACHE_MS; })) {
     return new Map(ids.map(id => [id, _ctqCache.get(id).val]));
   }
   let sp = false;
@@ -1008,6 +1043,26 @@ async function _loadLinkedOrderCounts(db, ids, now = new Date()) {
                   OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at)
              )::int AS orders,
              COUNT(DISTINCT os.id)::int AS orders_all,
+             COUNT(DISTINCT os.id) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND (os.submitted_at < $2 OR os.submitted_at IS NULL)
+             )::int AS orders_before,
+             COUNT(DISTINCT os.id) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND os.submitted_at >= $2
+             )::int AS orders_today,
+             COUNT(DISTINCT os.id) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND os.submitted_at >= $3 AND os.submitted_at < $2
+             )::int AS orders_since_carry,
+             COUNT(DISTINCT os.id) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND os.submitted_at >= $4 AND os.submitted_at < $2
+             )::int AS orders_since_hold,
              shared.n::int AS live_campaigns
         FROM recruit_campaigns rc
         JOIN LATERAL (
@@ -1029,18 +1084,20 @@ async function _loadLinkedOrderCounts(db, ids, now = new Date()) {
          )
        WHERE rc.id = ANY($1) AND rc.participation_mode
          AND NULLIF(rc.linked_sheet_id,'') IS NOT NULL AND NULLIF(rc.linked_tab_name,'') IS NOT NULL
-       GROUP BY rc.id, shared.n`, [ids]);
+       GROUP BY rc.id, shared.n`, [ids, dayStart, carryFrom, holdFrom]);
     if (sp) { try { await db.query('RELEASE SAVEPOINT ctq_orders'); } catch (_) {} }
     const m = new Map();
     for (const r of rows) {
       if (!r || r.id == null) continue;   // 범용 스텁 폴백 행 방어(id 없는 행은 재료가 아니다)
       m.set(r.id, { ok: true, orders: Number(r.orders) || 0, ordersAll: Number(r.orders_all) || 0,
+                    ordersBefore: Number(r.orders_before) || 0, ordersToday: Number(r.orders_today) || 0,
+                    ordersSinceCarry: Number(r.orders_since_carry) || 0, ordersSinceHold: Number(r.orders_since_hold) || 0,
                     sharedTab: Number(r.live_campaigns) > 1 });
     }
     for (const id of ids) if (!m.has(id)) m.set(id, { ok: true, noTab: true });
     if (!inClient) {
       if (_ctqCache.size > CTQ_CACHE_MAX) _ctqCache = new Map();
-      for (const [id, val] of m) _ctqCache.set(id, { at: now.getTime(), val });
+      for (const [id, val] of m) _ctqCache.set(id, { at: now.getTime(), win: winKey, val });
     }
     return m;
   } catch (e) {
@@ -1222,6 +1279,8 @@ module.exports = {
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
   TABLE_QUOTA_MODE,
+  COUNT_BASIS,
+  _mergeCountBasis,
   __resetTableQuotaCacheForTest,
   __resetHoldCacheForTest,
 };
