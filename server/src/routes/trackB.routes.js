@@ -2122,6 +2122,18 @@ router.post('/settings/closed-day-plan-cleanup', authMiddleware, adminOrMasterMi
     res.json(await cleanupClosedDaySystemPlans({ confirm: (req.body || {}).confirm === true, by: _by(req) }));
   } catch (err) { if (!_cdpNotReady(res, err)) next(err); }
 });
+/* 시스템이 옮겨 적은 날짜별 계획 정리(결정 182 4단계 · 1회성 정리 도구).
+   ★ 미리보기 기본(confirm!==true = 쓰기 0) · 내일 이후만 · 사람이 정한 값·오더 휴무일은 대상이 아니다 · 지운 값은 이력에.
+   body: { confirm?, kinds?: ['worktable'|'rowDelete'], campaignIds?: [] } · ★ adminOrMaster — 여러 공고 일정을 한 번에 바꾼다. */
+router.post('/settings/system-plan-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const { cleanupSystemPlans } = require('../services/systemPlanCleanup.service');
+    res.json(await cleanupSystemPlans({ confirm: b.confirm === true, by: _by(req),
+      kinds: Array.isArray(b.kinds) ? b.kinds.map(String) : undefined,
+      campaignIds: Array.isArray(b.campaignIds) ? b.campaignIds.map(String).slice(0, 500) : undefined }));
+  } catch (err) { if (!_cdpNotReady(res, err)) next(err); }
+});
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');
