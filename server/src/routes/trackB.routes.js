@@ -667,21 +667,9 @@ router.post('/work-order/link', authMiddleware, adminOrMasterMiddleware, async (
     res.status(out.ok ? 200 : 404).json(out);
   } catch (err) { next(err); }
 });
-router.post('/work-order/unlink', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json(await svc.unlinkWorkOrder({ sheetId, tabName }));
-  } catch (err) { next(err); }
-});
-router.post('/work-order/prepare-roster', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, tabGid } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const out = await svc.prepareRosterFromWorkOrder({ sheetId, tabName, tabGid: tabGid || null, by: _by(req) });
-    res.status(out.ok ? 200 : 400).json(out);
-  } catch (err) { next(err); }
-});
+// (POST /work-order/unlink · /work-order/prepare-roster 는 2026-09-28 제거 — 결정 186 11번.
+//  화면 버튼은 2026-08-23 결함(해제가 폴백에 가려 무효 · 명단 준비가 900000 대역 빈 줄 생성)으로 제거됐다.
+//  진짜 해제 = 홈 [작업 삭제], 줄 생성 = 접수의 createWorktableSlots.)
 
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
 // 내부인(master/admin/staff) 미들웨어 — 소유지정 초기매핑을 AE(staff)에게 개방하되 advertiser(외부)는 차단.
@@ -1086,10 +1074,8 @@ router.post('/workdesk/title', authMiddleware, async (req, res, next) => {
 
 // ══ P2 정산 파이프라인 — 탭 ↔ 인트라넷 계약/견적 링크 + 프록시 스텝퍼 + 광고주 노출 토글. ══
 //   ★ 인트라넷 D1 무접촉(HTTP GET 프록시만). 링크는 trackb_settlement_links 만 write.
-router.get('/settlement/sales-search', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try { res.json(await svc.intranetSalesSearch({ q: req.query.q, limit: req.query.limit })); }
-  catch (err) { next(err); }
-});
+// (GET /settlement/sales-search 는 2026-09-28 제거 — 결정 186 9번. 자유검색은 타 업체 계약 오부착 위험으로
+//  계약 후보(contract-candidates)로 대체됐다. intranetSalesSearch 함수는 그쪽이 계속 쓴다.)
 // 계약 매칭 후보 — 그 작업을 소유한 업체(광고주DB)의 계약만 + 작업명 유사도 추천.
 //   ★ 게이트는 링크(POST /settlement/link)와 **같은 `_ensureEditScope`** — 후보를 보는 사람 = 매칭할 사람.
 //     (계약 목록엔 업체명·계약금액이 실리므로 열람 범위를 링크 권한보다 넓히지 않는다.)
@@ -1172,32 +1158,7 @@ router.post('/settlement/visibility', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
-// ── P3 마감자료: 생성(내부만) + CSV 다운로드(내부·소유 광고주, PII) ──
-router.post('/settlement/closeout', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부(master/admin/staff 담당)만 생성
-    const out = await svc.generateCloseout({ sheetId, tabName, by: _by(req) });
-    res.status(out.ok ? 200 : (out.code || 400)).json(out);
-  } catch (err) { next(err); }
-});
-router.get('/settlement/closeout.csv', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부 + 소유 광고주(reviewer 차단)
-    // 광고주는 정산 노출 토글 OFF 면 CSV(PII)도 차단(N-2: 경량 게이트 — 인트라넷 프록시 왕복 없음).
-    if (_role(req) === 'advertiser') {
-      const visible = await svc.settlementVisibleFor((req.admin && req.admin.advertiser_id) || null);
-      if (!visible) return res.status(403).json({ ok: false, error: '정산 정보가 비공개로 설정되어 있습니다.' });
-    }
-    const csv = await svc.closeoutCsv({ sheetId, tabName, role: _role(req) });
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="closeout_${encodeURIComponent(tabName)}.csv"`);
-    res.send(csv);
-  } catch (err) { next(err); }
-});
+// (P3 마감자료 POST /settlement/closeout · GET /settlement/closeout.csv 는 2026-09-28 제거 — 결정 186 9번.)
 
 // ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) — 역할 스코프(_ensureThreadScope). ══
 //   광고주(외부)도 자기 소유 탭에 양방향 작성. 내부 전용 글(internal_only)은 서비스가 광고주 조회에서 제외.
@@ -1554,22 +1515,8 @@ router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
 });
 
 // ── 편집 이력(감사) — master/admin 전체 · staff 담당 탭만 ──
-router.get('/workdesk/edits', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, limit } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json({ ok: true, items: await svc.listEdits({ sheetId, tabName, limit }) });
-  } catch (err) { next(err); }
-});
-router.post('/workdesk/add', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json({ ok: true, ...(await svc.addWorkdeskRow({ sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by: _by(req) })) });
-  } catch (err) { next(err); }
-});
+// (GET /workdesk/edits · POST /workdesk/add 는 2026-09-28 제거 — 결정 186 6번. 화면 호출 0:
+//  편집 이력은 🗒 로그(tabActivityLog)가, 줄 추가는 수동 주문 흐름이 대신한다.)
 
 // ── 커스텀 열(행별 자유메모) + 셀 배경색(migration 080) — master/admin 전체 · staff 담당 탭만 · advertiser 차단. ──
 //   시트/write-back 무접촉(Track B 전용 오버레이) — _ensureEditScope 로 편집 스코프와 동일하게 가드.
@@ -2441,22 +2388,7 @@ router.post('/review-inspect/product-names', authMiddleware, _reInternal, async 
   }
 });
 
-/* 검수 결과 CSV — 업체 전달 전 사람이 훑어보는 용도(PII 포함 → 내부인만) */
-router.get('/review-inspect/export.csv', authMiddleware, _reInternal, async (req, res) => {
-  try {
-    const sc = await _riScopeQuery(req);
-    if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
-    const items = await _inspectSvc.listInspections({
-      sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'all'), limit: 500,
-      tabs: (sc.scoped && !sc.tabName) ? (sc.allow || []) : undefined,
-    });
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="review-inspect.csv"');
-    res.send(_inspectSvc.inspectionsCsv(items));
-  } catch (err) {
-    res.status(500).json({ ok: false, error: 'CSV 생성에 실패했습니다.' });
-  }
-});
+/* (검수 결과 CSV GET /review-inspect/export.csv 는 2026-09-28 제거 — 결정 186 13번. 화면 버튼은 2026-08-07 #595 에서 제거.) */
 
 /* 판별 예시이미지 — 조회는 내부인, **저장은 adminOrMaster**(전사 설정이라 AE가 못 바꾼다)
    ★ 리뷰 예시(`kind:'review'`, 기본)와 현금영수증 예시(`kind:'receipt'`)가 **한 창구**를 쓴다 —
@@ -3295,52 +3227,8 @@ router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMidd
   } catch (err) { next(err); }
 });
 
-// 작업표 생성 — 시트 탭을 만들고 열 이름 줄 + N행을 쓴다.
-//   ★ 계획은 서버가 **다시 계산**한다(화면이 보낸 행 목록 미신뢰). 잠긴 계획은 생성하지 않는다.
-//   ★ 탭 등록(tab_configs)은 여전히 접수(accept)가 유일한 관문 — 여기서는 등록하지 않는다.
-router.post('/worktable/create', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { createWorktable } = require('../services/worktableCreate.service');
-    const b = req.body || {};
-    if (!b.workOrderId) return res.json({ ok: false, error: 'workOrderId 가 필요합니다.' });
-    const r = await createWorktable({
-      workOrderId: String(b.workOrderId),
-      mode: b.mode === 'new' ? 'new' : 'existing',
-      sheetId: b.sheetId || '',
-      fileTitle: b.fileTitle || '',
-      tabName: b.tabName || '',
-      templateSheetId: b.templateSheetId || '',
-      planOptions: b.planOptions || {},
-      by: _by(req),
-    });
-    res.json(r);
-  } catch (err) { next(err); }
-});
-
-// 작업표 되돌리기 — 작업대 표의 줄만 내린다(시트·주문 원장 무접촉).
-//   ★ 주문이 들어온 줄이 있으면 목록을 돌려주고, 담당자가 "내부 테스트건" 확인 후
-//     confirmed:true 로 다시 부를 때만 최종 삭제(사용자 확정).
-router.post('/worktable/delete', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { deleteWorktableRows } = require('../services/participants.service');
-    const b = req.body || {};
-    if (!b.sheetId || !b.tabName) return res.json({ ok: false, error: 'sheetId, tabName 이 필요합니다.' });
-    const r2 = await deleteWorktableRows({
-      sheetId: String(b.sheetId), tabName: String(b.tabName),
-      confirmed: b.confirmed === true, by: _by(req),
-    });
-    res.json(r2);
-  } catch (err) { next(err); }
-});
-
-// 작업표 **시트 탭** 삭제 — 아무도 안 쓴 탭만(주문·참여자 0건). gid 는 서버가 이름으로 재조회.
-router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { deleteWorktableTab } = require('../services/worktableCreate.service');
-    const b = req.body || {};
-    res.json(await deleteWorktableTab({ sheetId: b.sheetId, tabName: b.tabName, by: _by(req) }));
-  } catch (err) { next(err); }
-});
+// (작업표 시트 탭 생성 /worktable/create · 되돌리기 /worktable/delete · 시트 탭 삭제 /worktable/delete-tab 은
+//  2026-09-28 제거 — 결정 186 10번. 화면 버튼은 2026-08-10 탈시트 때 제거, 접수가 시스템 작업표를 만든다.)
 
 /* ── 🧹 줄 정리(은퇴) HTTP 창구는 제거됐다 (사용자 확정 2026-08-21 / main 2026-08-23) ──
    ★ 양쪽 갈래에서 각각 같은 결론에 도달해 지웠다 — 되살리지 말 것.

@@ -442,7 +442,7 @@ async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignNam
  *
  * ★★ 왜 하드인가: "시트에서 가져오기"의 되돌리기는 **가져오기 전 상태로 복귀**하는 것이고,
  *   그때 `tab_configs` 등록까지 지우므로 소프트로 남기면 등록 없는 유령 줄만 떠돈다.
- *   (평상시 정리는 소프트인 `deleteWorktableRows`/`retireRows` 가 맡는다 — 그쪽을 바꾸지 말 것.)
+ *   (평상시 정리는 소프트인 `retireRows` 가 맡는다 — 그쪽을 바꾸지 말 것. `deleteWorktableRows` 는 2026-09-28 제거 — 결정 186 10번.)
  * ★★ **주문이 붙은 줄이 있으면 호출부가 이미 거부**한 뒤다(sheetImport.revertImport 의 fail-closed 게이트).
  *   여기서도 마지막 방어로 `order_submission_id IS NULL` 을 걸어 **주문이 붙은 줄은 절대 지우지 않는다**.
  * ★ `client` 를 받는다 — 등록·장부 삭제와 **같은 트랜잭션**이어야 반쯤 지워진 상태가 남지 않는다.
@@ -454,33 +454,6 @@ async function purgeImportedRows(client, { sheetId, tabName } = {}) {
       WHERE sheet_id = $1 AND tab_name = $2 AND order_submission_id IS NULL`,
     [sheetId, tabName]);
   return rowCount;
-}
-
-/**
- * 작업표 되돌리기 — 작업대 표에서 그 탭의 줄을 내린다. (시트는 건드리지 않는다)
- *
- * ★ 주문이 들어온 줄이 있으면 **바로 지우지 않고 목록을 돌려준다**(사용자 확정):
- *   담당자가 "내부에서 진행한 테스트건"임을 확인한 뒤 `confirmed:true` 로 다시 부르면 최종 삭제.
- * ★ 삭제는 **소프트**(`deleted_at`) — 이력이 남는다. 그리고 **주문 원장은 건드리지 않는다**
- *   (여기서 지우는 것은 작업대 표의 줄일 뿐, 실제 주문 기록·시트는 그대로다).
- */
-async function deleteWorktableRows({ sheetId, tabName, confirmed = false, by = 'admin' } = {}) {
-  if (!sheetId || !tabName) throw new Error('deleteWorktableRows: sheetId, tabName 필수');
-  const db = getPool();
-  const { rows: withOrder } = await db.query(
-    `SELECT seq, recipient_name AS "recipient", phone8, order_submission_id IS NOT NULL AS "hasOrder"
-       FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
-        AND (order_submission_id IS NOT NULL OR phone8 IS NOT NULL)
-      ORDER BY seq LIMIT 200`, [sheetId, tabName]);
-  if (withOrder.length && !confirmed) {
-    return { ok: false, needsConfirm: true, filledCount: withOrder.length, filled: withOrder };
-  }
-  const { rowCount } = await db.query(
-    `UPDATE campaign_participants
-        SET deleted_at = NOW(), active = FALSE, updated_by = $3, updated_at = NOW()
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [sheetId, tabName, String(by).slice(0, 100)]);
-  return { ok: true, deleted: rowCount, hadFilled: withOrder.length };
 }
 
 /* 정리(은퇴) 대상 선정 조건 — 조회·삭제가 **같은 조건**을 써야 미리보기와 결과가 갈리지 않는다.
@@ -530,43 +503,6 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
         SET deleted_at = NOW(), active = FALSE, updated_by = $5, updated_at = NOW()
       WHERE ${_RETIRE_WHERE}`, [sheetId, tabName, rndList, seqList, String(by).slice(0, 100)]);
   return { ...stat, retired: rowCount };
-}
-
-async function prepareRosterSlots({ sheetId, tabName, target, options = [], productName = null, by = 'system' } = {}) {
-  if (!sheetId || !tabName) throw new Error('prepareRosterSlots: sheetId, tabName 필수');
-  const tgt = Math.max(0, Math.min(parseInt(target, 10) || 0, 2000));   // 상한(폭주 방지)
-  const db = getPool();
-  for (let attempt = 0; ; attempt++) {
-    const { rows: meta } = await db.query(
-      `SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL AND active = TRUE)::int AS cur,
-              COALESCE(MAX(seq) FILTER (WHERE seq >= ${_MANUAL_SEQ_BASE}), ${_MANUAL_SEQ_BASE - 1}) + 1 AS nextseq,
-              (SELECT tab_gid FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL LIMIT 1) AS tab_gid
-         FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
-      [sheetId, tabName]);
-    const cur = meta[0].cur, startSeq = meta[0].nextseq, tabGid = meta[0].tab_gid || null;
-    const need = Math.max(0, tgt - cur);
-    if (!need) return { target: tgt, current: cur, created: 0 };
-    // (seq, reviewer=NULL, recipient=NULL, phone8=NULL, round=NULL, option, product, 'manual', by)
-    const vals = [], ph = [];
-    const opts = Array.isArray(options) ? options.filter(o => o != null && String(o).trim()) : [];
-    for (let i = 0; i < need; i++) {
-      const opt = opts.length ? String(opts[i % opts.length]).slice(0, 200) : null;
-      const b = i * 3;   // 슬롯당 파라미터 3개(option, product, by) — 고정 $1~$3(sheet/gid/tab) 뒤에 이어붙음
-      ph.push(`($1,$2,$3,${startSeq + i},NULL,NULL,NULL,NULL,$${b + 4},$${b + 5},'manual',$${b + 6},NOW())`);
-      vals.push(opt, productName || null, String(by).slice(0, 100));
-    }
-    try {
-      await db.query(
-        `INSERT INTO campaign_participants
-           (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name, source, updated_by, updated_at)
-         VALUES ${ph.join(',')}`,
-        [sheetId, tabGid, tabName, ...vals]);
-      return { target: tgt, current: cur, created: need };
-    } catch (e) {
-      if (e && e.code === '23505' && attempt < 4) continue;   // seq 레이스 → 재계산 재시도
-      throw e;
-    }
-  }
 }
 
 const _EDITABLE_FIELDS = ['reviewer_name', 'recipient_name', 'phone8', 'round', 'option_text', 'product_name'];
@@ -723,7 +659,7 @@ async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
 
 module.exports = {
   holdRows, listHeldRows,
-  createWorktableSlots, createSlotsFromSheetRows, appendSlot, deleteWorktableRows, retireRows,
+  createWorktableSlots, createSlotsFromSheetRows, appendSlot, retireRows,
   purgeImportedRows,
   importTabFromIndex,
   syncImportedTabs,
@@ -731,7 +667,6 @@ module.exports = {
   compareWithIndex,
   setParticipantStatus,
   addParticipant,
-  prepareRosterSlots,
   updateParticipant,
   softDeleteParticipant,
   listActiveTabs,

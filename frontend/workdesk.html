@@ -7583,8 +7583,8 @@ function _woLinkedRow(wd){
          이미 만들어진 작업표 줄·정원은 따라오지 않는 반쪽이라, 오연결 교정은 접수 경로에서 한다.
      ★ 남은 항목이 하나뿐이면 [⋯] 는 껍데기다 — AE 가 이미 쓰던 **같은 직접 버튼**으로 합친다
        (`.tp3wo .btn{margin-left:auto}` 라 자리도 종전 그대로 오른쪽 끝).
-     ★ 서버 라우트(`/work-order/prepare-roster`·`/unlink`·`/link`)와 서비스는 **그대로 둔다** —
-       되살릴 일이 생기면 화면만 다시 붙이면 된다(시트 가져오기 화면과 같은 규율).
+     ★ 서버 `/work-order/prepare-roster`·`/unlink` 와 그 서비스도 2026-09-28 제거됐다(결정 186 11번 —
+       위 두 결함 그대로라 되살릴 가치가 없었다). `/link` 는 [＋ 발주 연결] 이 계속 쓴다.
      ★ `openWorkOrderPicker` 는 **미연결 줄 [＋ 발주 연결]** 이 계속 쓴다(제거 금지). */
   const menu=`<button class="btn xs" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">원문</button>`;
   return `<div class="tp3wo lk"><span class="ic">📋</span><span class="nm" title="${esc(d.title||'')}">${esc(d.title||'(제목 없음)')}</span>`+
@@ -16898,8 +16898,8 @@ async function linkWO(id){ const t=STATE.cur; if(!t)return;
   if(r&&r.ok){ toast('발주 연결됨'); reloadWorkdesk(); } else toast('연결 실패: '+((r&&r.error)||''));
 }
 /* ⚠ `unlinkWO` · `prepareRoster` 는 제거했다(사용자 확정 2026-08-23) — 위 `_woLinkedRow` 주석 참조.
-   서버 라우트는 살아 있으니 되살릴 때는 그 주석의 결함(900000 대역 · 폴백 때문에 무효인 해제)을
-   먼저 고칠 것. 그냥 버튼만 되붙이면 같은 사고가 그대로 재현된다.
+   서버 라우트·서비스도 2026-09-28 제거(결정 186 11번). 되살릴 일이 생기면 그 주석의 결함
+   (900000 대역 · 폴백 때문에 무효인 해제)부터 고친 새 구현으로 만들 것.
    ⚠ 지울 때 그 함수의 닫는 `}` 가 남아 인라인 스크립트 전체가 SyntaxError 로 죽었다
       (#1120 → 배포 후 리뷰웹시스템[3버전] 전면 장애). 함수를 지울 땐 본문·닫는 괄호까지. */
 
