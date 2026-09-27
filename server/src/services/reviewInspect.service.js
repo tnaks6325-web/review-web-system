@@ -2268,41 +2268,13 @@ async function inspectionScope(fileId) {
   return rows[0] || null;
 }
 
-/** 검수 결과 CSV — 업체 전달 전 사람이 훑어보는 용도. UTF-8 BOM(엑셀). */
-function inspectionsCsv(rows) {
-  const head = ['상태', '탭', '행', '리뷰어', '채널', '판정사유', '캡처 상품명', '검수시각'];
-  const esc = (v) => {
-    const s = String(v == null ? '' : v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
-  const reason = (c) => {
-    const o = [];
-    if (c?.format?.verdict === 'fail') {
-      const kind = c.format.got || c.format.kind;
-      o.push(kind === 'receipt' ? '현금영수증으로 보임' : '리뷰 화면 아님');
-    }
-    if (c?.format?.verdict === 'warn') o.push('채널 다름');
-    if (c?.product?.verdict === 'warn' || c?.product?.verdict === 'fail') o.push('상품명 다름');
-    if (c?.duplicate?.verdict === 'fail') o.push(`같은 파일(${c.duplicate.matchTab || ''} ${c.duplicate.matchReviewer || ''})`.trim());
-    if (c?.similarity?.verdict === 'warn') o.push(`본문 ${Math.round((c.similarity.score || 0) * 100)}% 겹침`);
-    if (c?.author?.verdict === 'warn') o.push(`작성자 표기 재사용(${(c.author.others || []).join(',')})`);
-    return o.join(' / ');
-  };
-  const body = (rows || []).map(r => [
-    r.status, r.tab_name, r.row_index ?? '', r.reviewer_name || '',
-    channelLabel(r.channel) || '', reason(r.checks || {}), r.ocr_product || '',
-    r.inspected_at ? new Date(r.inspected_at).toISOString() : '',
-  ].map(esc).join(','));
-  return '﻿' + [head.join(','), ...body].join('\n');
-}
-
 module.exports = {
   precheckPolicy, expectedChannelKey, channelLabel,
   productNamesFromWorkOrder, productNameSettings, saveProductNames, saveProductAliases,
   loadSamplesFor, sampleSettings, saveSample,
   loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
   loadRouteSamples, loadOrderExtractionSamples, routeSampleSettings, saveRouteSample, submissionSamples,
-  findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
+  findAuthorReuse, runInspectSweep, reinspectTab,
   listInspections, inspectionSummary, inspectionTypeCounts,
   listProductClusters, resolveProductCluster, autoResolveProductClusters,
   resolveInspection, resolveInspectionsBulk, inspectionScope,

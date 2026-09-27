@@ -2388,22 +2388,7 @@ router.post('/review-inspect/product-names', authMiddleware, _reInternal, async 
   }
 });
 
-/* 검수 결과 CSV — 업체 전달 전 사람이 훑어보는 용도(PII 포함 → 내부인만) */
-router.get('/review-inspect/export.csv', authMiddleware, _reInternal, async (req, res) => {
-  try {
-    const sc = await _riScopeQuery(req);
-    if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
-    const items = await _inspectSvc.listInspections({
-      sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'all'), limit: 500,
-      tabs: (sc.scoped && !sc.tabName) ? (sc.allow || []) : undefined,
-    });
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="review-inspect.csv"');
-    res.send(_inspectSvc.inspectionsCsv(items));
-  } catch (err) {
-    res.status(500).json({ ok: false, error: 'CSV 생성에 실패했습니다.' });
-  }
-});
+/* (검수 결과 CSV GET /review-inspect/export.csv 는 2026-09-28 제거 — 결정 186 13번. 화면 버튼은 2026-08-07 #595 에서 제거.) */
 
 /* 판별 예시이미지 — 조회는 내부인, **저장은 adminOrMaster**(전사 설정이라 AE가 못 바꾼다)
    ★ 리뷰 예시(`kind:'review'`, 기본)와 현금영수증 예시(`kind:'receipt'`)가 **한 창구**를 쓴다 —

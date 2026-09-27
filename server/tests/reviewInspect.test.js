@@ -244,11 +244,11 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   // ★ 개수가 아니라 **경로별로** 본다 — 라우트를 늘릴 때마다 숫자를 고치는 가드는
   //   결국 숫자만 맞춰 통과시키게 된다(무엇이 있어야 하는지를 고정해야 한다).
   const riHas = (p, m) => riLayers.some(l => l.p === p && l.m.includes(m));
-  ok('검수 목록·확인·기대상품명·예시·스윕·CSV 라우트가 모두 등록돼 있다',
+  ok('검수 목록·확인·기대상품명·예시·스윕 라우트가 모두 등록돼 있다(CSV 는 결정 186 13번에서 제거)',
     riHas('/review-inspect/list', 'get') && riHas('/review-inspect/resolve', 'post')
     && riHas('/review-inspect/product-names', 'get') && riHas('/review-inspect/product-names', 'post')
     && riHas('/review-inspect/samples', 'get') && riHas('/review-inspect/samples', 'post')
-    && riHas('/review-inspect/sweep', 'post') && riHas('/review-inspect/export.csv', 'get'));
+    && riHas('/review-inspect/sweep', 'post') && !riHas('/review-inspect/export.csv', 'get'));
   ok('★★ 전부 authMiddleware 뒤 — 무인증 도달 불가',
     riLayers.every(l => l.mw.includes('authMiddleware')));
   ok('★★ 조회 계열은 _reInternal(내부인) — 광고주는 도달 불가',
@@ -346,9 +346,6 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     && !/findAuthorReuse[\s\S]{0,900}verdict: 'fail'/.test(svcSrc));
   ok('★ 같은 리뷰어 자신의 제출은 재사용으로 세지 않는다',
     /COALESCE\(reviewer_name,''\) <> COALESCE\(\$3,''\)/.test(svcSrc));
-  ok('CSV 내보내기(UTF-8 BOM · 판정사유 문장화)',
-    /function inspectionsCsv/.test(svcSrc) && /'\\ufeff'|﻿/.test(svcSrc)
-    && /review-inspect\/export\.csv/.test(tb));
   ok('★ 예시이미지 저장은 adminOrMaster(전사 설정이라 AE 가 못 바꾼다)',
     /router\.post\('\/review-inspect\/samples', authMiddleware, adminOrMasterMiddleware/.test(tb)
     && /router\.get\('\/review-inspect\/samples', authMiddleware, _reInternal/.test(tb));
