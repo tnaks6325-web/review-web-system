@@ -133,6 +133,10 @@ const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid:
       vm.runInContext('_mhToolsVisible()', makeSandbox({ role: 'advertiser', cur: null })) === false);
   }
 
+  /* 막다른 안내 금지 — 수동 [그림자 투영] 은 제거됐다(결정 186 5번). 빈 명단·빈 스냅샷 안내가
+     없는 버튼을 시키면 사람이 할 수 있는 게 없다(PR #1512 Codex 리뷰). */
+  ok('★ 화면이 없어진 [그림자 투영] 을 실행하라고 안내하지 않는다', !/그림자 투영을 (다시 )?실행하세요/.test(HTML));
+
   console.log('\n[E] 배선 — 열 때만 조회 · 1회만 · 렌더 단일 출처');
   {
     ok('[⋯] 를 열 때만 조회한다', /classList\.contains\('open'\)\)\s*_mhToolsSync\(\)/.test(HTML));

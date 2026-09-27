@@ -6575,7 +6575,7 @@ function renderWorkdesk(wd){
       _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
       _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
       (canEdit?`<td>${canDeleteOrder&&r.hasOrder?`<button class="rdel" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${r.id}')">삭제</button>`:''}${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
-      +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+      +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 아직 이 작업표에 줄이 없습니다.</td></tr>`;
     tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
       <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>
       ${canEdit?`<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — ${noSheet?'주문 기록은':'구글시트·주문은'} 바뀌지 않습니다(리허설). 셀 클릭으로 수정. 되돌리기 버튼은 없습니다 — 값을 다시 적어 고치고, 누가 언제 고쳤는지는 셀의 편집기록에서 봅니다.</div>`:''}`;
@@ -8522,7 +8522,7 @@ function buildGrid(wd){
   let bodyArr=[], emptyBody='';
   const groupOn = STATE.gGroupBy && allCols.includes(STATE.gGroupBy);
   if(!rows.length){
-    emptyBody=`<tr><td colspan="${vcols.length}" class="empty" style="height:56px">${Object.keys(STATE.gFilters).length?'조건에 맞는 행이 없습니다 — 필터를 조정하세요.':'명단 없음 — 그림자 투영을 실행하세요.'}</td></tr>`;
+    emptyBody=`<tr><td colspan="${vcols.length}" class="empty" style="height:56px">${Object.keys(STATE.gFilters).length?'조건에 맞는 행이 없습니다 — 필터를 조정하세요.':'명단 없음 — 아직 이 작업표에 줄이 없습니다.'}</td></tr>`;
   } else if(groupOn){
     const gb=STATE.gGroupBy, groups=new Map();
     rows.forEach(r=>{ const k=gCellDisp(r,gb); if(!groups.has(k))groups.set(k,[]); groups.get(k).push(r); });
@@ -16825,7 +16825,7 @@ function renderDetail(r){
   const keys=Object.keys(rj).filter(k=>String(rj[k]==null?'':rj[k]).trim()!=='');
   const sheetHtml = keys.length
     ? `<div class="dcard"><div class="dch">📋 시트 행 전체 (${keys.length}칸)</div><div class="dgrid">${keys.map(k=>_dpair(k,rj[k])).join('')}</div></div>`
-    : `<div class="dcard"><div class="dch">📋 시트 행</div><div class="dnone">행 스냅샷 없음 — 그림자 투영을 다시 실행하세요.</div></div>`;
+    : `<div class="dcard"><div class="dch">📋 시트 행</div><div class="dnone">행 스냅샷 없음 — 자동 투영(10분마다)이 돈 뒤 다시 열어 보세요.</div></div>`;
   return `<div class="detwrap">${purposeHtml}${orderHtml}${sheetHtml}</div>`;
 }
 function toggleDetail(id){
