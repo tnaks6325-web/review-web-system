@@ -2099,12 +2099,8 @@ function _cdpFail(res, err) {
     worktable_slots_shortage: 409,
     worktable_default_missing: 409,
     worktable_projection_failed: 503,
-    worktable_not_linked: 409, worktable_rebuild_empty: 409, worktable_rebuild_below_used: 422,
-    // 작업표 재구성은 무시트 원장만 안전하게 변경한다. 전환 전 대상은 500으로 숨기지 말고
-    // 운영자가 전환 상태를 바로 확인할 수 있도록 명시적으로 안내한다.
+    // 무시트 원장 전용 조작이 전환 전 대상에 닿으면 500으로 숨기지 말고 전환 상태를 안내한다.
     not_sheetless: 409,
-    // 결정 182 — 작업표 날짜 맞추기: 잠그는 사이 연결 변경 · 여러 공고 공유 · 줄/날짜 칸 없음 = 사람이 확인할 상태
-    link_changed: 409, shared_worktable: 409, no_worktable_rows: 409, no_date_column: 409,
     stale_client: 409,   // 배포 전 열어 둔 옛 조절 창의 여러 날 저장 — 새로고침 요청
   };
   if (err && err.code && codes[err.code]) {
@@ -2175,14 +2171,6 @@ router.put('/campaigns/:id/carry-strategy', authMiddleware, internalMiddleware, 
     // 결정 182 — 이월 방식이 바뀌면 날짜별 인원이 바뀐다 → 작업표 빈 줄 날짜도 따라간다(절대 throw 없음).
     const worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
     res.json({ ok: true, carryStrategy: rows[0].carry_strategy, worktableRelay });
-  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
-});
-router.post('/campaigns/:id/worktable-rebuild', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { rebuildWorktableFromPlans, getPlanOverview } = require('../services/campaignPlan.service');
-    const campaignId = String(req.params.id);
-    const out = await rebuildWorktableFromPlans(campaignId, _by(req));
-    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
 router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (req, res, next) => {

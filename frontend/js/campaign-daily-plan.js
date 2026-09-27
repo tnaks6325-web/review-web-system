@@ -107,8 +107,7 @@
    *  기본 일건수를 빈 날짜에 다시 채우면, 작업표에는 없는 주말/휴무일이 40명으로
    *  꾸며져 조절 화면과 작업표가 다시 갈린다. */
   /** 그날 **이미 참여·주문이 있는 줄** 수 — 재배분이 그 아래로 못 내려가는 하한.
-   *  ★ 서버 rebuildAdjustedPlansToWorktable 이 이 수보다 적은 계획을 거부한다
-   *    (worktable_rebuild_below_used) — 화면이 애초에 그런 값을 만들지 않게 한다.
+   *  ★ 채워진 줄보다 적은 계획은 작업표와 어긋난다 — 화면이 애초에 그런 값을 만들지 않게 한다.
    *  ★ 값을 못 받으면(구버전 백엔드) 0 = 종전 동작(서버가 최종 방어하고 사유를 말한다). */
   function worktableFilledFor(d) {
     if (!S.data._wtFill) {
@@ -531,7 +530,7 @@
        일건수씩 깔고 마지막 날은 남은 만큼만. 그래서 **주말을 닫으면 종료일이 뒤로 밀리고,
        주말을 열면 뒤에 붙어 있던 날이 0으로 닫히며 종료일이 앞당겨진다**(양방향 대칭).
      ★★ **제안까지만 — 반영은 사람이 [확정 저장]을 누를 때** 기존 저장 경로(savePlans →
-       작업표 재구성)로 일어난다. 조용한 자동수정 금지(레포 규율) + 이미 채워진 줄·오늘
+       작업표 날짜 맞추기)로 일어난다. 조용한 자동수정 금지(레포 규율) + 이미 채워진 줄·오늘
        확정분은 서버가 최종 방어한다.
      ★ 구간 뒤에 남는 자리는 **해제(remove)가 아니라 명시 0** 으로 닫는다 — 해제하면 작업표
        행 수가 다시 기준이 되어 그 날이 계속 열린다(= 종료일이 안 당겨진다). */
@@ -581,7 +580,7 @@
     var kept = [];   // 이미 채워져 있어 닫지 못한 날(화면이 사실대로 말한다)
     while (guard++ < 400 && dates.length < maxRows) {
       // ★★ 그날 하한 = 오늘 확정·진행 인원(오늘) 또는 **이미 채워진 작업표 줄 수**(미래 날짜).
-      //   이 아래로 내려간 계획은 서버 재구성이 통째로 거부한다(worktable_rebuild_below_used).
+      //   이 아래로 내려간 계획은 이미 채워진 줄과 어긋난다.
       var lo = (d === o.today) ? Math.max(floor, floorFor(d)) : floorFor(d);
       var cap = o.closed(d) ? 0 : daily;
       if (cap < lo) cap = lo;
@@ -1009,7 +1008,6 @@
       : (totalQuotaLocked() && increases) ? (planGateKnown() ? '총 모집이 완료되어 증원할 수 없습니다' : '주문 원장 총량 확인 전에는 증원할 수 없습니다')
       : dirty ? '바꾼 날 ' + dirty + '일 — [확정 저장]을 누르면 반영되고 작업표 날짜도 따라갑니다'
       : '바꾼 날이 없습니다 — 규칙대로 모집 중입니다';
-    syncRebuildBtn();
   }
   /** 보류 이월 반영 — 종전 빠른 반영 창(단일 출처)을 쓰고, 닫힌 뒤 다시 불러온다 */
   async function _pjHeld() {
@@ -1199,7 +1197,7 @@
       + '<div class="cdp-hd">📅 <span id="cdpTitle"></span><button type="button" class="cdp-x" onclick="CampaignDailyPlan.close()">✕</button></div>'
       + '<div class="cdp-bd" id="cdpBody"></div>'
       + '<div class="cdp-ft"><span class="cdp-hint" id="cdpHint"></span>'
-      + '<span class="cdp-acts"><button type="button" class="cdp-btn" id="cdpRebuildBtn" onclick="CampaignDailyPlan._rebuildWorktable()">작업표 재구성</button> '
+      + '<span class="cdp-acts">'
       + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan.close()">닫기</button> '
       + '<button type="button" class="cdp-btn pri" id="cdpSaveBtn" onclick="CampaignDailyPlan._save()">확정 저장</button></span></div>'
       + '</div>';
@@ -1864,7 +1862,6 @@
           ? '조절 ' + dirty + '일 · 추가 가능 ' + Math.max(0, manualTargetTotal() - manualPlanTotal()) + '건 — [확정 저장]을 눌러야 반영됩니다'
           : '조절은 [확정 저장]을 눌러야 반영됩니다 · 차수는 즉시 반영';
     }
-    syncRebuildBtn();
   }
 
   /** 차수(물량 추가 이력) 구역 — 종전 화면·예상 인원 화면이 같은 것을 쓴다(사본 금지) */
@@ -1926,7 +1923,7 @@
     return Math.max(10, mx);
   }
   /** 그날 아래로 내려갈 수 없는 인원 — 오늘은 확정·진행 인원, 어느 날이든 **이미 채워진
-   *  작업표 줄** 수. 후자를 빼면 서버 재구성이 worktable_rebuild_below_used 로 통째로 거부해
+   *  작업표 줄** 수. 후자를 빼면 채워진 줄보다 적은 계획이 저장돼
    *  "조절은 저장됐는데 표는 안 바뀐다"가 된다(막다른 길). 드래그·−/＋·자동 맞춤·주말 재배분이
    *  전부 이 함수 하나를 본다(판정 사본 0). */
   function minFor(d) {
@@ -2431,12 +2428,11 @@
            지금은 모든 작업이 무시트라 이 상태 자체가 이상 신호(전환 누락)다. */
         toast(j.worktableSync.message || '정원만 조절됐습니다 — 작업표의 줄은 바뀌지 않았습니다', 'warning');
       } else if (j.worktableSync && j.worktableSync.rebuild && j.worktableSync.rebuild.ok === false
-                 && j.worktableSync.rebuild.reason !== 'worktable_rebuild_empty'
                  && j.worktableSync.rebuild.reason !== 'no_worktable_rows') {   // 줄이 아직 없는 작업표 = 맞출 것이 없음(실패 아님)
         /* ★ 저장 후 자동 재구성(오늘 이후 전체)이 실패한 경우 — 조절은 저장됐지만 미래 자리는
            그대로다. 조용히 "저장 완료"라고 말하면 "왜 스케줄이 안 바뀌지"가 원인 불명으로 남는다. */
         toast('조절은 저장됐지만 오늘 이후 자리 재구성에 실패했습니다 — '
-              + (j.worktableSync.rebuild.message || '[작업표 재구성]으로 다시 시도해주세요'), 'warning');
+              + (j.worktableSync.rebuild.message || '매일 새벽 4시 20분에 자동으로 다시 맞춥니다 · 바로 하려면 다시 저장해주세요'), 'warning');
       } else if (j.worktableSync && j.worktableSync.rowAudit) {
         /* ★ 작업표 줄이 총건수보다 많은 상태 — 이번 조절이 만든 것이 아닐 수 있어 저장은 막지
            않지만(서버도 거부하지 않는다), 조용히 "저장 완료"로 넘기면 홈 목록의 인원 숫자가
@@ -2452,44 +2448,6 @@
       render();   // 저장 버튼 되살림(스테이징 유지 — 다시 시도 가능)
     } finally {
       if (S) S.saving = false;
-    }
-  }
-
-  /** [작업표 재구성] 상태 — 무시트 작업표가 아니면 눌러도 409 라 비활성 + 사유를 붙인다.
-   *  ★ 눌러도 아무 일 없는(또는 오류만 나는) 버튼을 두지 않는다. */
-  function syncRebuildBtn() {
-    var btn = document.getElementById('cdpRebuildBtn');
-    if (!btn || !S || !S.data) return;
-    var linked = S.data.worktableLinked;
-    btn.disabled = (linked === false);
-    btn.title = linked === false
-      ? '이 작업은 아직 무시트 작업표로 전환되지 않아 재구성할 수 없습니다 — 조절은 정원만 바꿉니다'
-      : (linked === true
-        /* ★ 실제 동작 그대로 적는다. 결정 182 — 재구성은 날짜별 예상 인원에 맞춰 **빈 줄의 날짜만 옮긴다**(줄을 새로 만들지 않는다). */
-        ? '날짜별 모집 인원(규칙으로 계산한 값)에 맞춰 작업표 빈 줄의 날짜를 옮깁니다 — 날짜 이동 · 남는 빈 줄 날짜 비우기 · 줄은 새로 만들지 않음(참여·주문 있는 줄은 그대로)'
-        : '작업표 연결 상태를 확인하지 못했습니다 — 실행하면 서버가 다시 판정합니다');
-  }
-
-  async function _rebuildWorktable() {
-    if (!S || !S.data || S.saving) return;
-    /* ★ 확인창은 실제로 일어나는 일을 전부 말한다(날짜 이동 · 날짜 비우기 · 줄은 만들지 않음 · 보호 대상) —
-       뭉뚱그리면 사람이 예상하지 못한 변화가 남는다. */
-    if (!window.confirm('날짜별 모집 인원(오늘 이후)에 맞춰 작업표 빈 줄의 날짜를 다시 맞출까요?\n\n'
-      + '· 빈 줄의 구매일자를 필요한 날짜로 옮깁니다(과거·날짜 없는 줄 포함)\n'
-      + '· 줄은 새로 만들지 않습니다 — 줄 수는 총 모집인원에 맞춰져 있습니다\n'
-      + '· 어느 날에도 필요 없는 빈 줄은 구매일자를 비웁니다\n'
-      + '· 참여자·연락처·주문이 있는 줄은 건드리지 않습니다')) return;
-    S.saving = true;
-    var btn = document.getElementById('cdpRebuildBtn'); if (btn) btn.disabled = true;
-    try {
-      var j = await _req('POST', EP + encodeURIComponent(S.campId) + '/worktable-rebuild', {});
-      applyOverview(j);
-      toast('작업표를 재구성했습니다 — 빈 줄의 날짜만 날짜별 모집 인원에 맞췄습니다');
-      refreshHost();
-    } catch (e) {
-      toast('작업표 재구성 실패: ' + (e.message || e));
-    } finally {
-      if (S) { S.saving = false; if (btn) btn.disabled = false; }
     }
   }
 
@@ -2564,7 +2522,7 @@
     openWeekendRebalance: openWeekendRebalance, _rebalance: _rebalance,
     // 회귀가드용 — 순수 배분 함수(상태 미참조)
     _wkSpread: planWeekendSpread,
-    _save: _save, _rebuildWorktable: _rebuildWorktable, _retry: _retry, _revert: _revert, _mode: _mode, _autoFit: _autoFit,
+    _save: _save, _retry: _retry, _revert: _revert, _mode: _mode, _autoFit: _autoFit,
     _chExtend: _chExtend, _chSpread: _chSpread, _chCancel: _chCancel,
     _roundForm: _roundForm, _roundAdd: _roundAdd, _roundRemove: _roundRemove,
     _heldApply: _heldApply, _pjHeld: _pjHeld,

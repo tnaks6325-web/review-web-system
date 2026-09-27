@@ -114,7 +114,7 @@ async function ensureDeliveryColumns({
   });
   if (!cur.length) {
     throw new DeliveryColumnError('no_headers',
-      '열 구성을 알 수 없습니다 — 작업표를 먼저 만들거나 [작업표 재구성]을 실행하세요.');
+      '열 구성을 알 수 없습니다 — 작업표에 줄이 없습니다. 작업표를 먼저 만들어 주세요.');
   }
 
   let next = cur;

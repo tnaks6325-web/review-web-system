@@ -1,4 +1,5 @@
 # ★★ AE(staff) 권한 확대 (사용자 확정 2026-08-19) — 6개 기능을 `adminOrMaster` → `internalMiddleware`
+- ⚠ **2026-09-27** — 수동 [작업표 재구성](`worktable-rebuild`)은 제거됐다([185](185-수동-작업표-재구성-제거-2026-09-27.md)). 아래 그 경로 서술은 이전 상태다.
 - **계기**: AE 가 모집공고 카드의 **[📅 날짜별 인원 조절]** 을 눌렀는데 팝업이 `관리자 권한이 필요합니다`(403) 로만 뜨는 막다른 길. 버튼에는 역할 게이트가 없고 라우트만 `adminOrMaster` 라 **보이는데 안 되는** 비대칭이었다.
 - **개방한 것 6묶음**(전부 광고주·리뷰어는 계속 차단): ① 날짜별 인원 조절·차수·작업표 재구성(`campaigns/:id/daily-plan|rounds|worktable-rebuild`) ② 참여 리뷰어 게이트 + 블랙리스트 관리기준(`campaigns/:id/reviewer-gate*`·`settings/reviewer-gate-criteria`) ③ 관측(`overview`·`parity`·`parity-all`·`parity-trend`·`source-of-truth` **읽기**) ④ 업체 이관·접속링크·광고주 계정·담당AE 지정·거래처 삭제(+후보 자동완성 `intranet/users`) ⑤ 주문 삭제·번호 배정·수동 리뷰제출·줄 정리 ⑥ 편집 허용명단 관리.
 - ★★ **화면 판정 단일 출처 = `_isInternalRole`**(workdesk.html) — 서버 `internalMiddleware` 와 1:1. 역할 문자열 비교 사본을 다시 만들면 **버튼과 서버가 갈려** 이번 사고(보이는데 403)나 그 반대(안 보이는데 권한은 있음)가 재현된다.

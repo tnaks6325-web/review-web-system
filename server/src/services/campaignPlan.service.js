@@ -166,7 +166,7 @@ async function getPlanOverview(campaignId) {
   // 표시해도 가짜 인원이 생기지 않는다.
   let worktableDates = null;
   /* 무시트 작업표 연결 여부 — true=조절이 표의 줄까지 바꾼다 / false=정원만 바뀐다(전환 누락 신호)
-     / null=연결 없음·판정 실패(모름). ★ 화면이 이 값으로 [작업표 재구성] 활성·경고를 정한다.
+     / null=연결 없음·판정 실패(모름). ★ 화면이 이 값으로 "무시트 전환 전" 경고를 정한다.
      worktableDates 유무로 추정하면 "행이 없다·날짜 열이 없다"까지 전환 누락으로 오독한다. */
   let sheetlessLinked = null;
   try {
@@ -760,7 +760,7 @@ async function savePlans(campaignId, body, actor) {
         }
         projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
         /* ★★ SAVEPOINT 격리 + 절대 throw 없음 — 날짜 맞추기 실패로 **계획 저장 자체가 죽으면 안 된다**
-           (082 apply 규율). 실패는 사유만 싣고, 사람이 [작업표 재구성]으로 다시 시도할 수 있다.
+           (082 apply 규율). 실패는 사유만 싣고, 다시 저장하거나 매일 04:20 자동 실행이 다시 맞춘다.
            ★ 킬스위치 `CAMPAIGN_PLAN_AUTO_REBUILD=0` = 날짜 맞추기 생략. */
         if (process.env.CAMPAIGN_PLAN_AUTO_REBUILD !== '0') {
           try {
@@ -876,83 +876,9 @@ async function savePlans(campaignId, body, actor) {
   }
 }
 
-/** 관리자가 명시적으로 실행하는 빈 준비 행 날짜 재구성. 일반 저장과 달리 과거의 빈 오염 행도 정리한다. */
-async function rebuildWorktableFromPlans(campaignId, actor) {
-  let camp = await _loadCampaign(campaignId);
-  if (!camp.participation_mode) { const e = new Error('참여형 공고만 작업표 재구성을 지원합니다.'); e.code = 'not_participation'; throw e; }
-  if (!camp.linked_sheet_id || !camp.linked_tab_name) { const e = new Error('연결된 작업표가 없습니다.'); e.code = 'worktable_not_linked'; throw e; }
-  const today = kstTodayStr();
-  const client = await pool.connect();
-  let target = null;
-  try {
-    await client.query('BEGIN');
-    const heldTab = await _lockTabFirst(client, camp);   // ★★ 작업표 잠금 먼저(교착 방지 — savePlans 와 같은 순서)
-    const { rows: lockedCampaignRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
-    if (!lockedCampaignRows.length) { const e = new Error('캠페인을 찾을 수 없습니다.'); e.code = 'not_found'; throw e; }
-    camp = lockedCampaignRows[0];
-    if (!_sameTab(heldTab, camp)) {
-      const e = new Error('그사이 연결된 작업표가 바뀌었습니다 — 창을 새로 열고 다시 시도해주세요.'); e.code = 'link_changed'; throw e;
-    }
-    const { isSheetless } = require('../utils/sheetlessScope');
-    if (!await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
-      const e = new Error('이 작업표는 시트 원본으로 설정되어 있어 안전하게 재구성할 수 없습니다. 먼저 무시트 작업표 설정을 확인해주세요.');
-      e.code = 'not_sheetless'; throw e;
-    }
-    /* [작업표 재구성]도 날짜만 다시 배열하고 남은 빈 슬롯을 방치하면 번호가 총건수를
-       넘길 수 있다. 저장 경로와 같은 공통 동기화로 먼저 활성 슬롯 수를 맞춘 뒤 재배치한다. */
-    let worktableSlotCap = null;
-    // 레거시 공고는 recruit_total=0 이더라도 연결 발주의 모집인원이 실제 상한이다.
-    let orderTotal = 0;
-    try {
-      const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');
-      const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
-      orderTotal = Number(wo && wo.recruit_count) || 0;
-    } catch (e) { logger.warn(`[campaignPlan] 작업표 재구성 연결 발주 정원 조회 실패 camp=${campaignId}: ${e.message}`); }
-    const totalCap = _totalCapFor(camp, null, orderTotal);
-    if (totalCap > 0) {
-      const { syncWorktableSlotsInTx } = require('./linkedRecruitQuota.service');
-      worktableSlotCap = await syncWorktableSlotsInTx(
-        client, camp, totalCap, actor || 'campaign-plan-rebuild-slot-cap'
-      );
-    }
-    /* ★ 결정 182 — [작업표 재구성]도 저장 경로와 같은 날짜 맞추기(빈 줄만, 줄 생성 없음)를 쓴다. */
-    const worktableRebuild = await _relayInTx(client, camp, today, actor || 'campaign-plan-rebuild');
-    if (!worktableRebuild.ok) {
-      const e = new Error(worktableRebuild.message || '작업표 날짜를 맞추지 못했습니다.');
-      e.code = worktableRebuild.reason || 'relay_failed'; throw e;
-    }
-    // 여러 공고가 같이 쓰는 작업표는 건너뛴다 — [재구성]을 눌렀는데 "했다"고 말하지 않는다
-    if (worktableRebuild.skipped && worktableRebuild.reason === 'shared_worktable') {
-      const e = new Error('이 작업표는 여러 공고가 함께 쓰고 있어 한 공고 기준으로 날짜를 맞출 수 없습니다.');
-      e.code = 'shared_worktable'; throw e;
-    }
-    target = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
-    await client.query(`INSERT INTO campaign_plan_events (campaign_id,actor,action,detail) VALUES ($1,$2,'worktable_rebuild',$3)`,
-      [campaignId, actor || null, JSON.stringify({ today, ...worktableRebuild, slotCap: worktableSlotCap })]);
-    await client.query('COMMIT');
-    try {
-      // 수동 재구성도 신규 행을 만들 수 있다. 삭제 이력 뒤에서는 DB seq가 연속되지 않을 수
-      // 있으므로, 화면 번호는 저장 경로와 동일하게 활성 행 기준으로 1..N 재정렬한다.
-      const { renumberTab } = require('./rowNumbering.service');
-      const worktableNumbering = await renumberTab({
-        ...target,
-        by: actor || 'campaign-plan-rebuild',
-        rebuild: false,
-      });
-      const { rebuildLedgers } = require('./sheetlessLedger.service');
-      const r = await rebuildLedgers({ ...target, by: actor || 'campaign-plan-rebuild' });
-      return { worktableRebuild, worktableSlotCap, worktableNumbering,
-        worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
-    } catch (cause) {
-      logger.error(`[campaignPlan] 작업표 재구성 투영 실패 camp=${campaignId}: ${cause.message}`);
-      const e = new Error('작업표 날짜는 재구성됐지만 작업보드 갱신에 실패했습니다. 다시 실행해주세요.');
-      e.code = 'worktable_projection_failed'; throw e;
-    }
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw e;
-  } finally { client.release(); }
-}
+/* ★ 수동 [작업표 재구성](rebuildWorktableFromPlans · POST /campaigns/:id/worktable-rebuild)은 2026-09-27 제거했다 —
+   전 기간 사용 0회(작업표 150개 실측). 같은 날짜 맞추기가 저장·설정 변경·차수·인트라넷 총 인원·줄 삭제·매일 04:20 에
+   자동으로 돈다(relayCampaignWorktable). 결정 185. */
 
 /* ── 차수(물량 추가) ─────────────────────────────────────── */
 /**
@@ -1139,7 +1065,6 @@ async function fetchCarryAppliedSums(db, campaignIds) {
 module.exports = {
   getPlanOverview,
   savePlans,
-  rebuildWorktableFromPlans,
   addRound,
   removeLastRound,
   roundsLockRecruitTotal,

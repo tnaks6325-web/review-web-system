@@ -193,7 +193,7 @@ async function readWorktableDates({ sheetId, tabName }) {
 
   /* ★★ 날짜별 **채워진 줄** 수도 함께 센다 — 주말 정책 재배분(①②)이 "그 날을 0명으로
      닫아도 되는가"를 판단하는 재료다. 이미 참여·주문이 있는 날을 0 으로 계획하면
-     rebuildAdjustedPlansToWorktable 이 worktable_rebuild_below_used 로 **재구성 전체를
+     (옛 재구성 함수 — 지금은 없다)가 **재구성 전체를
      거부**하므로, 화면이 애초에 그런 값을 만들지 않게 하한을 알려 준다.
      ★ 판정은 `utils/rowNumbering.isFilledRow` 단일 출처(작업보드 게이지·번호 정리와 같은 네 칸). */
   const { isFilledRow } = require('../utils/rowNumbering');
