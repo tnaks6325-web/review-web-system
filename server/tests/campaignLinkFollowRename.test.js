@@ -102,6 +102,15 @@ console.log('── A. 실행부 ──');
   t('★★ isSheetless 시그니처 불변 — gid 폴백을 넣으면 "연결됐다는데 0줄"이 된다',
     !!m && m[1].replace(/\s+/g, ' ').trim() === 'db, sheetId, tabName');
 
+  /* (종전 pastSheetTabCleanup.test.js 9-sync — 그 도구 제거(2026-09-28, 결정 186 1번)로 이리 옮김)
+     auto-clean-closed 가 index_master 행을 지우므로 im.tab_gid 만 보면 마감·아카이브 탭의 gid 가 null →
+     그 탭의 리네임을 영영 못 잡는다(2026-08-19 실측: 「변경 0건 · 스킵 27건」에 3건이 묻혔다). */
+  {
+    const q = tc.slice(tc.indexOf("router.post('/sync-tab-names'"), tc.indexOf('2. 고유 sheet_id'));
+    t('★ 탭명 교정이 마감·아카이브 탭의 gid 를 tab_configs 에서도 찾는다(index_master 우선 · tab_configs 폴백)',
+      /COALESCE\(NULLIF\(im\.tab_gid, ''\), NULLIF\(tc\.tab_gid, ''\)\)\s+AS tab_gid/.test(q));
+  }
+
   console.log(`\n✅ campaignLinkFollowRename: ${pass} cases passed`);
   process.exit(0);
 })();
