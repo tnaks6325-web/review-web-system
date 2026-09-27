@@ -2317,20 +2317,8 @@ async function pendingParticipants({ sheetId, tabName, kind = 'submit', limit = 
     })),
   };
 }
-// 마감자료 생성(이력 보존 — 재생성 시 새 행). 마감일=오늘 KST. 건수=활성/제출.
-async function generateCloseout({ sheetId, tabName, by = '' } = {}) {
-  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
-  const roster = await _closeoutRoster(sheetId, tabName);
-  if (!roster.length) return { ok: false, code: 400, error: '활성 명단이 없습니다(그림자 투영 후 생성).' };
-  const subCount = roster.filter(r => r.submitted).length;
-  const kstDate = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);   // KST 날짜
-  const { rows } = await getPool().query(
-    `INSERT INTO trackb_tab_closeouts (sheet_id, tab_name, closed_date, row_count, sub_count, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     RETURNING id, closed_date AS "date", row_count AS "rowCount", sub_count AS "subCount", created_by AS "createdBy", created_at AS "createdAt"`,
-    [sheetId, tabName, kstDate, roster.length, subCount, String(by || '').slice(0, 100)]);
-  return { ok: true, closeout: rows[0] };
-}
+// (마감자료 생성 generateCloseout · CSV closeoutCsv 는 2026-09-28 제거 — 결정 186 9번. 화면 버튼은 9/7 #1345 에서 이미 제거.
+//  기존 trackb_tab_closeouts 행은 latestCloseout 이 계속 읽는다.)
 // 최신 마감(스텝퍼 ① 소스). settlementForTab 이 병합. N-1: 동시각 tie 는 id DESC 로 결정적.
 async function latestCloseout({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) return null;
@@ -2339,30 +2327,6 @@ async function latestCloseout({ sheetId, tabName } = {}) {
        FROM trackb_tab_closeouts WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
       ORDER BY created_at DESC, id DESC LIMIT 1`, [sheetId, tabName]);
   return rows[0] || null;
-}
-// CSV 셀 이스케이프 + 수식 인젝션 무력화(SF-2/N-4): =+-@ 또는 탭/CR 로 시작하면 앞에 ' 를 붙이고,
-//   ",\r,\n 포함 시 따옴표로 감싼다(Excel/LibreOffice 수식 실행 CWE-1236 차단).
-function _csvCell(v) {
-  let s = v == null ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
-  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-// 마감자료 CSV(UTF-8 BOM). PII라 내부(master/admin/staff) + 소유 광고주만 — reviewer 차단은 라우트 스코프.
-//   광고주 렌즈면 연락처·이름·수취인 마스킹(workdeskTab 정책 일치) — 노출 토글 OFF 여부는 라우트가 사전 게이트.
-async function closeoutCsv({ sheetId, tabName, role = 'master' } = {}) {
-  const roster = await _closeoutRoster(sheetId, tabName);
-  const isAdv = role === 'advertiser';
-  const header = ['번호', '참여자', '연락처', '수취인', '차수', '옵션', '상품', '제출', '입금', '제출일'];
-  const lines = [header.join(',')];
-  for (const r of roster) {
-    const phone = isAdv ? (r.phone8 ? '****' + String(r.phone8).slice(-4) : '') : (r.phone8 || '');
-    lines.push([
-      r.seq, isAdv ? _maskName(r.name) : r.name, phone, isAdv ? _maskName(r.recipient) : r.recipient,
-      r.round, r.option, r.product,
-      r.submitted ? 'O' : '', r.paid ? 'O' : '', r.submittedAt ? String(r.submittedAt).slice(0, 10) : '',
-    ].map(_csvCell).join(','));
-  }
-  return '﻿' + lines.join('\r\n');
 }
 
 // ══ 작업오더(발주) 연동 — 수동 링크 + 작업세부 노출 + 명단 골격 준비. B 내부·격리(라이브 무접촉). ══
@@ -6299,10 +6263,8 @@ module.exports = {
   // 회귀가드 전용 — 인트라넷 사용자(AE) 60초 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
   __resetIntraUserCacheForTest() { _intraUserCache = { at: 0, rows: null }; },
   settlementVisibleFor,
-  generateCloseout,
   latestCloseout,
   pendingParticipants,
-  closeoutCsv,
   listThread,
   addThread,
   setRequestStatus,
