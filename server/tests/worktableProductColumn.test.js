@@ -108,9 +108,8 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
   ok('상품형은 실제 옵션 키로 예약된 슬롯만 제외한다',
     /NOT EXISTS \([\s\S]{0,500}scope_co\.unit_kind[\s\S]{0,180}scope_co\.opt_key = cp\.option_text/.test(sl));
 
-  const create = read('src/services/worktableCreate.service.js');
+  // (시트 생성 조회 createWorktable 은 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거))
   const preview = read('src/routes/trackB.routes.js');
-  ok('시트 생성 조회가 투입방식을 읽는다', /review_type_mix, product_distribution_mode, source_revision/.test(create));
   ok('작업표 미리보기도 투입방식을 읽는다', /review_type_mix, product_distribution_mode, source_revision/.test(preview));
 
   const sub = read('src/routes/submit.routes.js');

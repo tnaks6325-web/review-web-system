@@ -247,8 +247,10 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
       new Set(m[2].match(/\$(\d+)/g)).size === maxPh);
   }
   {
-    const wc = srv('src/services/worktableCreate.service.js');
-    ok('작업오더 로드에 신호 컬럼 포함(안 실으면 계획이 못 본다)', /skip_weekends, holidays/.test(wc));
+    // 종전 대상 worktableCreate._loadWorkOrder 는 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거) — 살아 있는 두 로더를 본다.
+    const tbr = srv('src/routes/trackB.routes.js'), ordr = srv('src/routes/order.routes.js');
+    ok('작업오더 로드에 신호 컬럼 포함(안 실으면 계획이 못 본다) — 미리보기·접수',
+      /skip_weekends, holidays/.test(tbr) && /skip_weekends, holidays/.test(ordr));
   }
 
   /* ══════════════ F. 마이그레이션·프리플라이트 ══════════════ */

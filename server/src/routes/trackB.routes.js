@@ -3254,52 +3254,8 @@ router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMidd
   } catch (err) { next(err); }
 });
 
-// 작업표 생성 — 시트 탭을 만들고 열 이름 줄 + N행을 쓴다.
-//   ★ 계획은 서버가 **다시 계산**한다(화면이 보낸 행 목록 미신뢰). 잠긴 계획은 생성하지 않는다.
-//   ★ 탭 등록(tab_configs)은 여전히 접수(accept)가 유일한 관문 — 여기서는 등록하지 않는다.
-router.post('/worktable/create', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { createWorktable } = require('../services/worktableCreate.service');
-    const b = req.body || {};
-    if (!b.workOrderId) return res.json({ ok: false, error: 'workOrderId 가 필요합니다.' });
-    const r = await createWorktable({
-      workOrderId: String(b.workOrderId),
-      mode: b.mode === 'new' ? 'new' : 'existing',
-      sheetId: b.sheetId || '',
-      fileTitle: b.fileTitle || '',
-      tabName: b.tabName || '',
-      templateSheetId: b.templateSheetId || '',
-      planOptions: b.planOptions || {},
-      by: _by(req),
-    });
-    res.json(r);
-  } catch (err) { next(err); }
-});
-
-// 작업표 되돌리기 — 작업대 표의 줄만 내린다(시트·주문 원장 무접촉).
-//   ★ 주문이 들어온 줄이 있으면 목록을 돌려주고, 담당자가 "내부 테스트건" 확인 후
-//     confirmed:true 로 다시 부를 때만 최종 삭제(사용자 확정).
-router.post('/worktable/delete', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { deleteWorktableRows } = require('../services/participants.service');
-    const b = req.body || {};
-    if (!b.sheetId || !b.tabName) return res.json({ ok: false, error: 'sheetId, tabName 이 필요합니다.' });
-    const r2 = await deleteWorktableRows({
-      sheetId: String(b.sheetId), tabName: String(b.tabName),
-      confirmed: b.confirmed === true, by: _by(req),
-    });
-    res.json(r2);
-  } catch (err) { next(err); }
-});
-
-// 작업표 **시트 탭** 삭제 — 아무도 안 쓴 탭만(주문·참여자 0건). gid 는 서버가 이름으로 재조회.
-router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { deleteWorktableTab } = require('../services/worktableCreate.service');
-    const b = req.body || {};
-    res.json(await deleteWorktableTab({ sheetId: b.sheetId, tabName: b.tabName, by: _by(req) }));
-  } catch (err) { next(err); }
-});
+// (작업표 시트 탭 생성 /worktable/create · 되돌리기 /worktable/delete · 시트 탭 삭제 /worktable/delete-tab 은
+//  2026-09-28 제거 — 결정 186 10번. 화면 버튼은 2026-08-10 탈시트 때 제거, 접수가 시스템 작업표를 만든다.)
 
 /* ── 🧹 줄 정리(은퇴) HTTP 창구는 제거됐다 (사용자 확정 2026-08-21 / main 2026-08-23) ──
    ★ 양쪽 갈래에서 각각 같은 결론에 도달해 지웠다 — 되살리지 말 것.

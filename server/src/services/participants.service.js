@@ -442,7 +442,7 @@ async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignNam
  *
  * ★★ 왜 하드인가: "시트에서 가져오기"의 되돌리기는 **가져오기 전 상태로 복귀**하는 것이고,
  *   그때 `tab_configs` 등록까지 지우므로 소프트로 남기면 등록 없는 유령 줄만 떠돈다.
- *   (평상시 정리는 소프트인 `deleteWorktableRows`/`retireRows` 가 맡는다 — 그쪽을 바꾸지 말 것.)
+ *   (평상시 정리는 소프트인 `retireRows` 가 맡는다 — 그쪽을 바꾸지 말 것. `deleteWorktableRows` 는 2026-09-28 제거 — 결정 186 10번.)
  * ★★ **주문이 붙은 줄이 있으면 호출부가 이미 거부**한 뒤다(sheetImport.revertImport 의 fail-closed 게이트).
  *   여기서도 마지막 방어로 `order_submission_id IS NULL` 을 걸어 **주문이 붙은 줄은 절대 지우지 않는다**.
  * ★ `client` 를 받는다 — 등록·장부 삭제와 **같은 트랜잭션**이어야 반쯤 지워진 상태가 남지 않는다.
@@ -454,33 +454,6 @@ async function purgeImportedRows(client, { sheetId, tabName } = {}) {
       WHERE sheet_id = $1 AND tab_name = $2 AND order_submission_id IS NULL`,
     [sheetId, tabName]);
   return rowCount;
-}
-
-/**
- * 작업표 되돌리기 — 작업대 표에서 그 탭의 줄을 내린다. (시트는 건드리지 않는다)
- *
- * ★ 주문이 들어온 줄이 있으면 **바로 지우지 않고 목록을 돌려준다**(사용자 확정):
- *   담당자가 "내부에서 진행한 테스트건"임을 확인한 뒤 `confirmed:true` 로 다시 부르면 최종 삭제.
- * ★ 삭제는 **소프트**(`deleted_at`) — 이력이 남는다. 그리고 **주문 원장은 건드리지 않는다**
- *   (여기서 지우는 것은 작업대 표의 줄일 뿐, 실제 주문 기록·시트는 그대로다).
- */
-async function deleteWorktableRows({ sheetId, tabName, confirmed = false, by = 'admin' } = {}) {
-  if (!sheetId || !tabName) throw new Error('deleteWorktableRows: sheetId, tabName 필수');
-  const db = getPool();
-  const { rows: withOrder } = await db.query(
-    `SELECT seq, recipient_name AS "recipient", phone8, order_submission_id IS NOT NULL AS "hasOrder"
-       FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
-        AND (order_submission_id IS NOT NULL OR phone8 IS NOT NULL)
-      ORDER BY seq LIMIT 200`, [sheetId, tabName]);
-  if (withOrder.length && !confirmed) {
-    return { ok: false, needsConfirm: true, filledCount: withOrder.length, filled: withOrder };
-  }
-  const { rowCount } = await db.query(
-    `UPDATE campaign_participants
-        SET deleted_at = NOW(), active = FALSE, updated_by = $3, updated_at = NOW()
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [sheetId, tabName, String(by).slice(0, 100)]);
-  return { ok: true, deleted: rowCount, hadFilled: withOrder.length };
 }
 
 /* 정리(은퇴) 대상 선정 조건 — 조회·삭제가 **같은 조건**을 써야 미리보기와 결과가 갈리지 않는다.
@@ -723,7 +696,7 @@ async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
 
 module.exports = {
   holdRows, listHeldRows,
-  createWorktableSlots, createSlotsFromSheetRows, appendSlot, deleteWorktableRows, retireRows,
+  createWorktableSlots, createSlotsFromSheetRows, appendSlot, retireRows,
   purgeImportedRows,
   importTabFromIndex,
   syncImportedTabs,

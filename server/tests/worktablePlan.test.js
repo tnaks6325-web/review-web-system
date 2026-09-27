@@ -368,25 +368,12 @@ console.log('\nI. 작업표 생성');
 const createSrc = readS('services/worktableCreate.service.js');
 const C = require('../src/services/worktableCreate.service');
 
-ok('POST /worktable/create 등록 + 권한(내부인 + 편집 명단)',
-  (() => {
-    const l = layers.find(x => x.route.path === '/worktable/create' && x.route.methods.post);
-    if (!l) return false;
-    const names = l.route.stack.map(s => s.handle.name);
-    return names[0] === 'authMiddleware' && names.includes('internalMiddleware') && names.includes('editorOnlyMiddleware');
-  })());
-ok('★★ 계획은 서버가 다시 계산한다 — 화면이 보낸 행 목록을 믿지 않는다',
-  /buildWorktablePlan\(\{ workOrder: wo, template, options: planOptions/.test(createSrc)
-  && !/req\.body[\s\S]{0,80}\.rows/.test(readS('routes/trackB.routes.js')));
-ok('★ 잠긴 계획은 생성하지 않는다(미리보기 잠금 = 서버 게이트, 같은 판정)',
-  /if \(!plan\.canCreate\)[\s\S]{0,120}return \{ ok: false/.test(createSrc));
-ok('★★ clearSheetValues 를 쓰지 않는다 — gid 를 안 받아 **다른 탭을 지울 수 있다**(런타임 확인으로 잡은 위험)',
-  !/clearSheetValues\(/.test(createSrc));
-ok('시트 쓰기는 전부 gid 를 지정한다(탭 오지정 차단)',
-  (() => {
-    const calls = createSrc.match(/writeSheet\([\s\S]*?\);/g) || [];
-    return calls.length >= 2 && calls.every(c => /\{ gid: newGid \}/.test(c));
-  })());
+/* 시트 탭 생성(createWorktable)·삭제(deleteWorktableTab)·라우트는 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거).
+   남은 것은 접수가 쓰는 planToSheetValues 하나 — 아래는 그 변환만 본다. */
+ok('★★ 생성·삭제 입구가 되살아나지 않았다(되살리면 시트 방식으로 역행)',
+  !layers.some(x => ['/worktable/create', '/worktable/delete', '/worktable/delete-tab'].includes(x.route.path))
+  && !/function (createWorktable|deleteWorktableTab)\b/.test(createSrc)
+  && JSON.stringify(Object.keys(C)) === '["planToSheetValues"]');
 ok('★ 시스템이 값을 넣는 칸은 번호·구매일자·옵션 셋뿐(나머지는 제출이 채운다)',
   (() => {
     const plan2 = P.buildWorktablePlan({
@@ -407,52 +394,6 @@ ok('★★ 구매일자는 시트 형식 그대로 쓰인다(063 시트 일정 �
       template: { core: ['구매일자'], channels: {} } });
     return C.planToSheetValues(plan2).body[0][0] === '8 / 10 (월)';
   })());
-ok('열 문자 변환(A·Z·AA·AZ)',
-  C.colLetter(0) === 'A' && C.colLetter(25) === 'Z' && C.colLetter(26) === 'AA' && C.colLetter(51) === 'AZ');
-ok('★★ 생성 경로는 라이브 무접촉 — 주문원장·투영·큐·행배정을 건드리지 않는다',
-  (() => {
-    // ★ 범위는 createWorktable 함수 본문 — 삭제 경로는 "사용 중인가"를 **읽어야** 하므로 별도 판정.
-    const i = createSrc.indexOf('async function createWorktable');
-    const j = createSrc.indexOf('async function deleteWorktableTab');
-    const code = createSrc.slice(i, j > i ? j : createSrc.length)
-      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-    return !/order_submissions|campaign_participants|sheet_row_claims|enqueue\(|reconcileStuckOrders|review_index/.test(code);
-  })());
-ok('★ 삭제 경로가 원장을 보는 것은 **읽기뿐**(SELECT) — 지우거나 고치지 않는다',
-  (() => {
-    const i = createSrc.indexOf('async function deleteWorktableTab');
-    const body = createSrc.slice(i);
-    return /SELECT COUNT\(\*\) FROM campaign_participants/.test(body)
-      && /SELECT COUNT\(\*\) FROM order_submissions/.test(body)
-      && !/(INSERT INTO|UPDATE|DELETE FROM)\s+(order_submissions|review_index)/i.test(body);
-  })());
-ok('★ 쓰기 표면은 시트 + work_orders.work_sheet_url 뿐(탭 등록은 여전히 접수가 관문)',
-  (() => {
-    // ★ 주석의 '언급'이 아니라 **쓰기 구문**만 센다(tab_configs 는 주석에서 설명된다).
-    const writes = createSrc.match(/\b(?:INSERT INTO|UPDATE)\s+(?!SET\b)\w+/gi) || [];
-    return writes.length === 1 && /work_orders/i.test(writes[0]) && !/DELETE FROM/i.test(createSrc);
-  })());
-ok('★ 생성 경로는 아무것도 지우지 않는다(파일 삭제·행 삭제 없음)',
-  (() => {
-    const i = createSrc.indexOf('async function createWorktable');
-    const j = createSrc.indexOf('async function deleteWorktableTab');
-    const body = createSrc.slice(i, j > i ? j : createSrc.length);
-    return !/deleteSheet|deleteRows|drive\.files\.delete/.test(body);
-  })());
-ok('★★ 파일(스프레드시트) 자체는 어디서도 지우지 않는다 — 탭 삭제만 연다',
-  !/drive\.files\.delete|deleteSpreadsheet/.test(createSrc));
-ok('헤더 줄 위치는 가정하지 않고 탐지한다(템플릿이 바뀌어도 따라감)',
-  /require\('\.\.\/utils\/sheetHeader'\)/.test(createSrc)
-  && /detectSheetHeader\(values \|\| \[\]/.test(createSrc));
-ok('탭 이름 공란은 명확히 거부', /탭 이름이 비어 있습니다/.test(createSrc));
-ok('★★ 템플릿 시트는 **선택** — 없으면 빈 탭으로 만든다(설정 안 된 조직에서 기능이 통째로 막히지 않게)',
-  /빈 스프레드시트\(열·행은 동일, 서식만 없다\)/.test(createSrc)
-  && /addSheet: \{ properties: \{ title \} \}/.test(createSrc)
-  && !/return \{ ok: false, error: 'TEMPLATE_SHEET_ID/.test(createSrc));
-ok('★ 템플릿 해석 순서 = 요청값 → 전사 설정(app_settings) → env',
-  /tplSheetId \|\| template\.templateSheetId \|\| process\.env\.TEMPLATE_SHEET_ID/.test(createSrc));
-ok('★ 빈 탭이면 헤더는 1행(덮을 메타·공지문이 없다) · 템플릿 복사본만 탐지',
-  /usedTemplate\s*\?\s*await _resolveHeaderRow[\s\S]{0,80}\{ row: 1, width: 0 \}/.test(createSrc));
 ok('전사 설정으로 저장·조회된다(브라우저 localStorage 에만 있던 값을 서버로)',
   (() => {
     const svc = readS('services/worktable.service.js');
@@ -473,9 +414,6 @@ ok('설정 화면에 템플릿 시트 입력칸이 있고 저장에 실린다',
     const set = readF('js/admin-settings.js');
     return /id="wtTplSheet"/.test(set) && /templateSheetId: tplEl \? tplEl\.value/.test(set);
   })());
-// ⚠ 이 문구가 있던 화면 창구(시트 생성)는 제거됐다 — 서버는 여전히 서식 유무를 응답으로 알린다.
-ok('★ 템플릿 없이 만들면 서버가 그 사실을 응답으로 알린다(조용한 서식 누락 금지)',
-  /usedTemplate = false;/.test(createSrc) && /usedTemplate, mirrored/.test(createSrc));
 // ★★ 탈 구글시트(사용자 확정 2026-08-10): 미리보기에 **구글시트 생성·삭제 창구가 없다**.
 //   남겨 두면 그 오더에 work_sheet_url 이 붙어 다시 시트 기반으로 접수되는 역행이 된다.
 ok('★★ 프론트에 시트 생성·삭제 창구가 없다(창구 하나 = 접수)',
@@ -514,7 +452,8 @@ ok('★★ 스켈레톤 seq = 시트 실제 행 번호(헤더 바로 아래부�
 ok('★ 900000+ 대역(prepareRosterSlots)을 쓰지 않는다 — 그건 시트 행을 모를 때용',
   (() => {
     const i = partSrc.indexOf('async function createWorktableSlots');
-    const j = partSrc.indexOf('async function deleteWorktableRows');
+    // 끝 표시: 종전 deleteWorktableRows(2026-09-28 제거 — 결정 186 10번) 자리 = 다음 함수 retireRows(구간 의미 불변)
+    const j = partSrc.indexOf('async function retireRows');
     // ★ 대역을 **배정에** 쓰는 것을 막는 가드다 — appendSlot 의 `FILTER (WHERE seq < ${_MANUAL_SEQ_BASE})` 는
     //   반대로 그 대역을 **제외**하는 방어(2026-08-21 [＋ 줄 추가] 결함 수정)라 허용한다(검사 의미 불변).
     const region = partSrc.slice(i, j)
@@ -532,64 +471,8 @@ ok("★ _reconcileSeen 은 그대로 'import' 만 비활성화 — 빈 줄이 �
 ok('★ parity 는 phone8 없는 행을 걸러내므로 빈 줄이 진짜불일치로 잡히지 않는다',
   /const A = aRows\.map\(norm\)\.filter\(r => r\.p8\)/.test(readS('services/trackB.service.js')));
 
-ok('되돌리기: 주문 있는 줄은 목록을 돌려주고 확인 뒤에만 삭제(사용자 확정)',
-  /needsConfirm: true, filledCount/.test(partSrc)
-  && /confirmed = false/.test(partSrc));
-ok('★ 삭제는 소프트(deleted_at) — 이력이 남는다',
-  /SET deleted_at = NOW\(\), active = FALSE/.test(partSrc));
-ok('★★ 삭제가 주문 원장·시트를 건드리지 않는다',
-  (() => {
-    const i = partSrc.indexOf('async function deleteWorktableRows');
-    const body = partSrc.slice(i, i + 2200);
-    return !/order_submissions|sheets\.|deleteSheet/.test(body);
-  })());
-ok('POST /worktable/delete 권한(내부인 + 편집 명단)',
-  (() => {
-    const l = layers.find(x => x.route.path === '/worktable/delete' && x.route.methods.post);
-    if (!l) return false;
-    const names = l.route.stack.map(s => s.handle.name);
-    return names[0] === 'authMiddleware' && names.includes('internalMiddleware') && names.includes('editorOnlyMiddleware');
-  })());
-ok('★ 스켈레톤 생성 실패가 시트 생성을 되돌리지 않는다(시트가 1순위 산출물)',
-  /작업대 표 행 생성 실패\(시트는 만들어짐\)/.test(createSrc)
-  && /slots = \{ error: e\.message \}/.test(createSrc));
-ok('★★ 만든 직후 그 시트를 즉시 미러한다 — 안 하면 주문이 준비된 빈 줄을 못 보고 아래에 붙는다',
-  /mirrorOneSheet\(targetSheetId, \{ force: true \}\)/.test(createSrc)
-  && /생성 직후 미러 실패\(다음 주기가 메운다\)/.test(createSrc));
-ok('★ 미러 실패가 생성을 되돌리지 않는다(시트·표는 이미 만들어졌다)',
-  /mirrored = \{ error: e\.message \}/.test(createSrc));
-ok('킬스위치 WORKTABLE_DB_ROWS=0 이면 시트만 만든다',
-  /process\.env\.WORKTABLE_DB_ROWS !== '0'/.test(createSrc));
-// ⚠ 되돌리기·시트 탭 삭제의 **화면 창구는 제거**(위 참조) — 서버 라우트는 되살리기 쉽게 남겨 둔다.
-ok('서버 되돌리기 라우트는 남아 있다(화면만 제거)',
-  !!layers.find(x => x.route.path === '/worktable/delete' && x.route.methods.post));
-
-/* ══════════════════════════════════════════════════════════
-   K. 시트 탭 삭제 — 아무도 안 쓴 탭만
-   ══════════════════════════════════════════════════════════ */
-console.log('\nK. 시트 탭 삭제');
-ok('POST /worktable/delete-tab 권한(내부인 + 편집 명단)',
-  (() => {
-    const l = layers.find(x => x.route.path === '/worktable/delete-tab' && x.route.methods.post);
-    if (!l) return false;
-    const nm = l.route.stack.map(s => s.handle.name);
-    return nm[0] === 'authMiddleware' && nm.includes('internalMiddleware') && nm.includes('editorOnlyMiddleware');
-  })());
-ok('★★ 주문·참여자가 1건이라도 있으면 거부(되돌릴 수 없는 파괴 차단)',
-  /이 탭에는 이미 주문·참여자 \$\{n\}건이 있어/.test(createSrc)
-  && /FROM campaign_participants[\s\S]{0,200}FROM order_submissions/.test(createSrc));
-ok('★ 확인 실패는 삭제하지 않는다(fail-closed — 모르면 파괴하지 않는다)',
-  /사용 여부 확인 실패 — 삭제 중단/.test(createSrc)
-  && /확인하지 못해 중단했습니다/.test(createSrc));
-ok('★★ gid 는 서버가 이름으로 재조회 — 클라이언트 gid 를 믿고 지우면 엉뚱한 탭이 사라진다',
-  /getSpreadsheetMeta\(sheetId\)[\s\S]{0,300}find\(x => String\(x\.properties\.title\) === String\(tabName\)\)/.test(createSrc)
-  && !/deleteSheet: \{ sheetId: (b|req)\./.test(createSrc));
-ok('마지막 남은 탭은 미리 막는다(구글이 거부하는 동작)',
-  /sheetCount <= 1/.test(createSrc));
-ok('탭 삭제 후 표의 줄도 함께 내린다',
-  /deleteWorktableRows\(\{ sheetId, tabName, confirmed: true/.test(createSrc));
-ok('서버 탭 삭제 라우트는 남아 있다(화면 창구는 제거)',
-  !!layers.find(x => x.route.path === '/worktable/delete-tab' && x.route.methods.post));
+/* (되돌리기 deleteWorktableRows · 시트 생성 후처리 · K. 시트 탭 삭제 검사는 대상 제거로 삭제 —
+   결정 186 10번, 2026-09-28. 입구가 되살아나지 않는지는 위 I 절이 본다.) */
 
 /* ══════════════════════════════════════════════════════════
    L. 리뷰 종류(포토/텍스트/구매확정/별점) 배분 — 사용자 확정(2026-08-19)
