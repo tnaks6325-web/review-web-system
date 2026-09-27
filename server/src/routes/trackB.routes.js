@@ -667,21 +667,9 @@ router.post('/work-order/link', authMiddleware, adminOrMasterMiddleware, async (
     res.status(out.ok ? 200 : 404).json(out);
   } catch (err) { next(err); }
 });
-router.post('/work-order/unlink', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json(await svc.unlinkWorkOrder({ sheetId, tabName }));
-  } catch (err) { next(err); }
-});
-router.post('/work-order/prepare-roster', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, tabGid } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const out = await svc.prepareRosterFromWorkOrder({ sheetId, tabName, tabGid: tabGid || null, by: _by(req) });
-    res.status(out.ok ? 200 : 400).json(out);
-  } catch (err) { next(err); }
-});
+// (POST /work-order/unlink · /work-order/prepare-roster 는 2026-09-28 제거 — 결정 186 11번.
+//  화면 버튼은 2026-08-23 결함(해제가 폴백에 가려 무효 · 명단 준비가 900000 대역 빈 줄 생성)으로 제거됐다.
+//  진짜 해제 = 홈 [작업 삭제], 줄 생성 = 접수의 createWorktableSlots.)
 
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
 // 내부인(master/admin/staff) 미들웨어 — 소유지정 초기매핑을 AE(staff)에게 개방하되 advertiser(외부)는 차단.

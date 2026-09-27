@@ -505,43 +505,6 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
   return { ...stat, retired: rowCount };
 }
 
-async function prepareRosterSlots({ sheetId, tabName, target, options = [], productName = null, by = 'system' } = {}) {
-  if (!sheetId || !tabName) throw new Error('prepareRosterSlots: sheetId, tabName 필수');
-  const tgt = Math.max(0, Math.min(parseInt(target, 10) || 0, 2000));   // 상한(폭주 방지)
-  const db = getPool();
-  for (let attempt = 0; ; attempt++) {
-    const { rows: meta } = await db.query(
-      `SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL AND active = TRUE)::int AS cur,
-              COALESCE(MAX(seq) FILTER (WHERE seq >= ${_MANUAL_SEQ_BASE}), ${_MANUAL_SEQ_BASE - 1}) + 1 AS nextseq,
-              (SELECT tab_gid FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL LIMIT 1) AS tab_gid
-         FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
-      [sheetId, tabName]);
-    const cur = meta[0].cur, startSeq = meta[0].nextseq, tabGid = meta[0].tab_gid || null;
-    const need = Math.max(0, tgt - cur);
-    if (!need) return { target: tgt, current: cur, created: 0 };
-    // (seq, reviewer=NULL, recipient=NULL, phone8=NULL, round=NULL, option, product, 'manual', by)
-    const vals = [], ph = [];
-    const opts = Array.isArray(options) ? options.filter(o => o != null && String(o).trim()) : [];
-    for (let i = 0; i < need; i++) {
-      const opt = opts.length ? String(opts[i % opts.length]).slice(0, 200) : null;
-      const b = i * 3;   // 슬롯당 파라미터 3개(option, product, by) — 고정 $1~$3(sheet/gid/tab) 뒤에 이어붙음
-      ph.push(`($1,$2,$3,${startSeq + i},NULL,NULL,NULL,NULL,$${b + 4},$${b + 5},'manual',$${b + 6},NOW())`);
-      vals.push(opt, productName || null, String(by).slice(0, 100));
-    }
-    try {
-      await db.query(
-        `INSERT INTO campaign_participants
-           (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name, source, updated_by, updated_at)
-         VALUES ${ph.join(',')}`,
-        [sheetId, tabGid, tabName, ...vals]);
-      return { target: tgt, current: cur, created: need };
-    } catch (e) {
-      if (e && e.code === '23505' && attempt < 4) continue;   // seq 레이스 → 재계산 재시도
-      throw e;
-    }
-  }
-}
-
 const _EDITABLE_FIELDS = ['reviewer_name', 'recipient_name', 'phone8', 'round', 'option_text', 'product_name'];
 async function updateParticipant({ id, fields, by = 'test' } = {}) {
   if (!id) throw new Error('updateParticipant: id 필수');
@@ -704,7 +667,6 @@ module.exports = {
   compareWithIndex,
   setParticipantStatus,
   addParticipant,
-  prepareRosterSlots,
   updateParticipant,
   softDeleteParticipant,
   listActiveTabs,

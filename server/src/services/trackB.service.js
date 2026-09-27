@@ -2410,34 +2410,7 @@ async function linkWorkOrder({ workOrderId, sheetId, tabName, tabGid = null, by 
     [sheetId, tabName, workOrderId, String(by).slice(0, 100)]);
   return { ok: true };
 }
-async function unlinkWorkOrder({ sheetId, tabName } = {}) {
-  if (!sheetId || !tabName) throw new Error('unlinkWorkOrder: sheetId, tabName 필수');
-  const db = getPool();
-  const { rowCount } = await db.query(
-    `UPDATE trackb_work_order_links SET deleted_at = NOW()
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [sheetId, tabName]);
-  return { ok: true, unlinked: rowCount };
-}
-
-// 발주 기준 명단 골격 준비: 유효 링크 발주의 모집인원·옵션으로 빈 슬롯을 부족분만 생성(gap-fill·멱등).
-async function prepareRosterFromWorkOrder({ sheetId, tabName, tabGid = null, by = 'admin' } = {}) {
-  if (!sheetId || !tabName) throw new Error('prepareRosterFromWorkOrder: sheetId, tabName 필수');
-  const db = getPool();
-  const linkedId = await _effectiveLinkedWorkOrderId(db, sheetId, tabName);
-  const { rows } = await db.query(
-    `SELECT recruit_count AS "recruitCount", product_options_json AS "optionsJson", product_option AS "productOption", title
-       FROM work_orders
-      WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
-      ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`, [sheetId, tabName, linkedId]);
-  const w = rows[0];
-  if (!w) return { ok: false, error: 'no_linked_work_order' };
-  const target = parseInt(w.recruitCount, 10) || 0;
-  if (target <= 0) return { ok: false, error: 'recruit_count_zero' };
-  let options = _parseWoOptions(w.optionsJson);
-  if (!options.length && w.productOption && String(w.productOption).trim()) options = [String(w.productOption).trim()];
-  const r = await participants.prepareRosterSlots({ sheetId, tabName, target, options, productName: w.title || null, by });
-  return { ok: true, ...r };
-}
+// (unlinkWorkOrder · prepareRosterFromWorkOrder 는 2026-09-28 제거 — 결정 186 11번.)
 
 // ── 관측 대시보드: 투영된 전 탭의 롤업(카운트 대조 + 준비도) 한 번에. 정밀 parity(진짜불일치)는 탭별 온디맨드. ──
 //   ★ fail-closed 신호 계약(레드-블루-심판): "모름/미검증/비었음"은 준비·정상으로 새지 않는다.
@@ -6274,8 +6247,6 @@ module.exports = {
   openRequestCounts,
   listWorkOrders,
   linkWorkOrder,
-  unlinkWorkOrder,
-  prepareRosterFromWorkOrder,
   scopedTabsForAdvertiser,
   scopedTabsForStaff,
   scopedActiveTabs,

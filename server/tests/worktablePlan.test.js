@@ -277,7 +277,7 @@ ok('★★ DB·시트·현재시각에 접근하지 않는다(미리보기 ≡ �
 ok('같은 입력이면 같은 결과(결정적)',
   JSON.stringify(P.buildWorktablePlan({ workOrder: WO, template: TPL }))
   === JSON.stringify(P.buildWorktablePlan({ workOrder: WO, template: TPL })));
-ok('상한이 prepareRosterSlots 와 같은 값(2000)', P.MAX_ROWS === 2000);
+ok('상한 2000(폭주 방지 — 종전 prepareRosterSlots 와 같은 값, 그 함수는 결정 186 11번에서 제거)', P.MAX_ROWS === 2000);
 
 /* ══════════════════════════════════════════════════════════
    G. 미리보기 라우트 — 읽기 전용·권한
