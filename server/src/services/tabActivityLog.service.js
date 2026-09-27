@@ -273,7 +273,8 @@ const SOURCES = [
           WHERE ($4::timestamptz IS NULL OR x.at <= $4::timestamptz)
           ORDER BY x.at DESC
           LIMIT $3`, [sheetId, tabName, limit, before]);
-      const fieldLabel = (f) => String(f || '').replace(/^col:/, '').replace(/^ccol:.*$/, '추가 열');
+      // '_hidden' = 제거된 행 숨김 오버레이의 옛 기록(결정 186 6번에서 옛 편집 이력 목록의 라벨을 이리 옮김).
+      const fieldLabel = (f) => (f === '_hidden' ? '(행 숨김)' : String(f || '').replace(/^col:/, '').replace(/^ccol:.*$/, '추가 열'));
       const items = rows.map(r => {
         if (r.ev === 'rev') return {
           id: `pe:${r.id}:r`, at: r.at, kind: 'edit',

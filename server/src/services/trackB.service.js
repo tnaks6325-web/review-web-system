@@ -4742,7 +4742,6 @@ async function deleteWorkdeskOrderRow(args) {
 }
 
 // 추가: 앵커 대상 없음(신규 참여자) → source='manual' 물리행(오버레이 아님). participants가 seq 원자화.
-async function addWorkdeskRow(args) { return participants.addParticipant(args); }
 
 /**
  * 작업보드 구매일자 달력 편집 (무시트 전용 · 2026-08-21).
@@ -5121,32 +5120,6 @@ async function listCellEdits({ sheetId, tabName, rowId, field, limit = 20 } = {}
   };
 }
 
-// ── 편집 이력(감사): 이 탭의 최근 편집(활성+되돌림)을 시각·편집자·필드·값·상태로. 앵커→참여자명 best-effort. ──
-async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
-  if (!sheetId || !tabName) throw new Error('listEdits: sheetId, tabName 필수');
-  const db = getPool();
-  const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
-  const { rows } = await db.query(
-    `SELECT pe.id, pe.field, pe.kind, pe.value_bool AS "valueBool", pe.value_text AS "valueText",
-            pe.created_by AS "createdBy", pe.created_at AS "createdAt",
-            pe.reverted_by AS "revertedBy", pe.reverted_at AS "revertedAt",
-            (SELECT cp.reviewer_name FROM campaign_participants cp
-               WHERE cp.sheet_id=pe.sheet_id AND cp.tab_name=pe.tab_name AND cp.deleted_at IS NULL AND cp.active=TRUE
-                 AND ((pe.anchor_type='order' AND cp.order_submission_id::text=pe.anchor_value)
-                   OR (pe.anchor_type='manual' AND cp.id::text=pe.anchor_value)
-                   OR (pe.anchor_type='identity' AND cp.identity_key=pe.anchor_value)) LIMIT 1) AS name
-       FROM participant_edits pe
-      WHERE pe.sheet_id=$1 AND pe.tab_name=$2
-      ORDER BY pe.created_at DESC LIMIT $3`,
-    [sheetId, tabName, lim]);
-  return rows.map(r => ({
-    id: r.id, name: r.name || null,
-    field: r.field === '_hidden' ? '(행 숨김)' : (r.field.indexOf('col:') === 0 ? r.field.slice(4) : r.field),
-    value: r.kind === 'bool' ? (r.valueBool ? '완료/있음' : '해제/없음') : (r.valueText || ''),
-    by: r.createdBy || '', at: r.createdAt,
-    reverted: !!r.revertedAt, revertedBy: r.revertedBy || null, revertedAt: r.revertedAt,
-  }));
-}
 
 // ══ 리뷰웹시스템[3버전] 커스텀 열(행별 자유메모) + 셀 배경색(드래그 범위, migration 080) ══
 //   ★ 격리: participant_edits/write-back 무접촉 신규 테이블만 사용 — 시트에 절대 쓰지 않는다.
@@ -6364,8 +6337,6 @@ module.exports = {
   deleteWorkdeskOrderRow,
   assignUnslottedOrderToOpenSlot,
   hideWorkdeskRow,
-  addWorkdeskRow,
-  listEdits,
   listCustomColumns,
   addCustomColumn,
   deleteCustomColumn,

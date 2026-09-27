@@ -1554,22 +1554,8 @@ router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
 });
 
 // ── 편집 이력(감사) — master/admin 전체 · staff 담당 탭만 ──
-router.get('/workdesk/edits', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, limit } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json({ ok: true, items: await svc.listEdits({ sheetId, tabName, limit }) });
-  } catch (err) { next(err); }
-});
-router.post('/workdesk/add', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json({ ok: true, ...(await svc.addWorkdeskRow({ sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by: _by(req) })) });
-  } catch (err) { next(err); }
-});
+// (GET /workdesk/edits · POST /workdesk/add 는 2026-09-28 제거 — 결정 186 6번. 화면 호출 0:
+//  편집 이력은 🗒 로그(tabActivityLog)가, 줄 추가는 수동 주문 흐름이 대신한다.)
 
 // ── 커스텀 열(행별 자유메모) + 셀 배경색(migration 080) — master/admin 전체 · staff 담당 탭만 · advertiser 차단. ──
 //   시트/write-back 무접촉(Track B 전용 오버레이) — _ensureEditScope 로 편집 스코프와 동일하게 가드.
