@@ -445,6 +445,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       /worktableSync\.rebuild/.test(readF('js/campaign-daily-plan.js'))
       && /no_worktable_rows/.test(readF('js/campaign-daily-plan.js'))
       && /매일 새벽 4시 20분에 자동으로 다시 맞춥니다/.test(readF('js/campaign-daily-plan.js'))
+      && !/바로 하려면 다시 저장/.test(readF('js/campaign-daily-plan.js'))   // 저장 직후엔 저장 버튼이 잠겨 못 하는 일을 약속하지 않는다
       && !/\[작업표 재구성\]/.test(readF('js/campaign-daily-plan.js')));
 
     // ③ 킬스위치 = 날짜 맞추기 생략

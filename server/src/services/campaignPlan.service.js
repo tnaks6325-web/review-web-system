@@ -760,7 +760,7 @@ async function savePlans(campaignId, body, actor) {
         }
         projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
         /* ★★ SAVEPOINT 격리 + 절대 throw 없음 — 날짜 맞추기 실패로 **계획 저장 자체가 죽으면 안 된다**
-           (082 apply 규율). 실패는 사유만 싣고, 다시 저장하거나 매일 04:20 자동 실행이 다시 맞춘다.
+           (082 apply 규율). 실패는 사유만 싣고, 매일 04:20 자동 실행(또는 다음 저장·설정 변경)이 다시 맞춘다.
            ★ 킬스위치 `CAMPAIGN_PLAN_AUTO_REBUILD=0` = 날짜 맞추기 생략. */
         if (process.env.CAMPAIGN_PLAN_AUTO_REBUILD !== '0') {
           try {
