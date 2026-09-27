@@ -1170,6 +1170,10 @@
     + '#cdpModal .cdp-hist li{padding:3px 8px;border-left:3px solid #c7d2fe;margin-bottom:3px;background:var(--bg2,#f8fafc);border-radius:0 6px 6px 0}'
     + '#cdpModal .cdp-ft{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 18px;border-top:1px solid var(--border,#e5e7eb);background:var(--bg2,#f8fafc)}'
     + '#cdpModal .cdp-hint{font-size:.64rem;color:var(--t3,#64748b)}'
+    /* ★ 휴대폰(≤560px) — 안내 문구는 윗줄 전체 폭, 버튼 3개는 아랫줄 한 줄(사용자 확정 2026-09-27 — [확정 저장]만 둘째 줄로
+       떨어지던 것). 일반 규칙(.cdp-ft) **뒤**에 둔다(같은 무게면 뒤가 이긴다). */
+    + '@media (max-width:560px){#cdpModal .cdp-ft{flex-wrap:wrap;row-gap:8px;padding:10px 14px}#cdpModal .cdp-hint{flex:1 1 100%}'
+    + '#cdpModal .cdp-acts{display:flex;flex:1 1 100%;justify-content:flex-end;gap:6px;flex-wrap:nowrap}#cdpModal .cdp-acts .cdp-btn{white-space:nowrap}}'
     /* (구 읽기전용 블록 .cdp-ro 는 시트 일정 공고 조절 허용(2026-08-07)으로 제거됐다) */
     + '#cdpChoice{position:fixed;inset:0;z-index:10060;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:16px}'
     + '#cdpChoice .ch-box{width:440px;max-width:100%;background:var(--card,#fff);color:var(--t1,#1f2937);border-radius:14px;padding:18px;box-shadow:0 12px 40px rgba(15,23,42,.3)}'
@@ -1195,7 +1199,7 @@
       + '<div class="cdp-hd">📅 <span id="cdpTitle"></span><button type="button" class="cdp-x" onclick="CampaignDailyPlan.close()">✕</button></div>'
       + '<div class="cdp-bd" id="cdpBody"></div>'
       + '<div class="cdp-ft"><span class="cdp-hint" id="cdpHint"></span>'
-      + '<span><button type="button" class="cdp-btn" id="cdpRebuildBtn" onclick="CampaignDailyPlan._rebuildWorktable()">작업표 재구성</button> '
+      + '<span class="cdp-acts"><button type="button" class="cdp-btn" id="cdpRebuildBtn" onclick="CampaignDailyPlan._rebuildWorktable()">작업표 재구성</button> '
       + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan.close()">닫기</button> '
       + '<button type="button" class="cdp-btn pri" id="cdpSaveBtn" onclick="CampaignDailyPlan._save()">확정 저장</button></span></div>'
       + '</div>';

@@ -1332,6 +1332,13 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /grid-template-columns:92px 64px 58px minmax\(190px,1fr\)/.test(CDP)
     && /cdp-state/.test(CDP));
   // ★ 사용자 확정 2026-09-26: 창 폭 780 · 날짜 배지는 날짜 아래 · 휴대폰은 [−] 숫자 [＋](게이지 숨김)
+  {
+    const baseFt = CDP.indexOf("'#cdpModal .cdp-ft{display:flex");
+    const mqFt = CDP.indexOf("'@media (max-width:560px){#cdpModal .cdp-ft{flex-wrap:wrap");
+    ok('8-2d 휴대폰 하단 = 안내 윗줄 전체 폭 · 버튼 3개 한 줄(줄바꿈 금지) · ★ 일반 규칙 뒤',
+      baseFt > 0 && mqFt > baseFt && /#cdpModal \.cdp-acts\{display:flex;flex:1 1 100%;justify-content:flex-end;gap:6px;flex-wrap:nowrap\}/.test(CDP)
+      && /<span class="cdp-acts"><button type="button" class="cdp-btn" id="cdpRebuildBtn"/.test(CDP));
+  }
   ok('8-2b 창 폭 780px · 날짜 배지는 날짜 아래(block)',
     /width:min\(780px,94vw\)/.test(CDP) && /#cdpModal \.cdp-d \.cdp-tag\{display:block/.test(CDP));
   {
