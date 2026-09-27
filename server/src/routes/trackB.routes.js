@@ -67,17 +67,7 @@ async function _ensureThreadScope(req, sheetId, tabName) {
   return { ok: false, code: 403, error: '권한이 없습니다.' };
 }
 
-// ── 그림자 투영(라이브 읽어 B 최신화) — master 전용 ──
-router.post('/project', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (sheetId && tabName) return res.json({ ok: true, ...(await svc.projectTab({ sheetId, tabName, by: _by(req) })) });
-    // bulk 투영은 cron(trackb_project 락)과 상호배제 — 멀티인스턴스 이중투영·seen-set 플래핑 차단.
-    const { withJobLock } = require('../utils/jobLock');
-    const r = await withJobLock('trackb_project', () => svc.projectActive({ by: _by(req) }));
-    res.json({ ok: true, ...r });
-  } catch (err) { next(err); }
-});
+// (수동 그림자 투영 POST /project 는 2026-09-28 제거 — 결정 186 5번. 자동 투영 크론은 그대로.)
 
 // ── parity 리포트(B ↔ A, 6차원×3버킷) — 내부 담당자(master/admin/staff) ──
 //   관측 뷰의 [정밀] 버튼이 호출하는데 게이트가 더 좁으면 그 버튼이 dead-end 가 된다.
@@ -660,65 +650,7 @@ router.get('/parity-trend', authMiddleware, internalMiddleware, async (req, res,
   } catch (err) { next(err); }
 });
 
-// ── 진실원천(source_of_truth) 컨트롤 — 옵션 A cutover 스위치 ──
-//   ★ 격리: 이 플래그를 읽는 소비처는 Track B write-back 엔진(P2, 미착수)뿐 — 값을 바꿔도 Track A 라이브 불변.
-//   읽기는 내부 담당자(master/admin/staff)(관측), 플립(설정)은 master 전용(되돌리기 어려운 방향 전환이라 보수적).
-router.get('/source-of-truth', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json({ ok: true, sourceOfTruth: await svc.getSourceOfTruth({ sheetId, tabName }) });
-  } catch (err) { next(err); }
-});
-router.post('/source-of-truth', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, value, force } = req.body || {};
-    if (!sheetId || !tabName || !value) return res.status(400).json({ ok: false, error: 'sheetId, tabName, value 필수' });
-    const out = await svc.setSourceOfTruth({ sheetId, tabName, value, by: _by(req), force: !!force });
-    res.status(out.ok ? 200 : (out.error === 'parity_not_clean' ? 409 : 400)).json(out);
-  } catch (err) { next(err); }
-});
-// ── 일괄 cutover: "전환 가능(candidate)" 탭 전부를 단건 게이트 그대로 순차 플립 — master 전용 ──
-//   ★ force 를 받지도 넘기지도 않는다(일괄 우회 금지). 게이트에 걸린 탭은 사유와 함께 보고만.
-router.post('/source-of-truth/all', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, ...(await svc.cutoverAll({ by: _by(req) })) }); }
-  catch (err) { next(err); }
-});
-
-// ── P2 상태 토글 write-back 관측/수동 트리거 — master 전용 ──
-//   status = held/blocked/written 카운트(관측). run = 즉시 스윕(탭 지정 시 그 탭만). 락으로 cron과 상호배제.
-router.get('/writeback/status', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, ...(await svc.writebackStatus()) }); }
-  catch (err) { next(err); }
-});
-router.post('/writeback/run', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    const { withJobLock } = require('../utils/jobLock');
-    const r = await withJobLock('trackb_writeback',
-      () => (sheetId && tabName) ? svc.executeWriteback({ sheetId, tabName }) : svc.writebackSweep({}));
-    res.json({ ok: true, ...r });
-  } catch (err) { next(err); }
-});
-
-// ── P2-2 확장 write-back — 시뮬레이션(시트 무접촉) + 실제 적용 트리거(TRACK_B_WRITEBACK_FULL 게이트) — master ──
-//   simulate = 무엇이 시트에 반영될지 플랜만(안전). apply-full = 트리거 ON+cutover 에서만 안전군 적용(수동).
-router.get('/writeback/simulate', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json({ ok: true, ...(await svc.simulateWriteback({ sheetId, tabName })) });
-  } catch (err) { next(err); }
-});
-router.post('/writeback/apply-full', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const { withJobLock } = require('../utils/jobLock');
-    const r = await withJobLock('trackb_writeback', () => svc.applyWritebackFull({ sheetId, tabName }));
-    res.json({ ok: true, ...r });
-  } catch (err) { next(err); }
-});
+// (진실원천 전환 /source-of-truth* · write-back /writeback/* 는 2026-09-28 제거 — 결정 186 5번.)
 
 // ── 작업오더(발주) 연동 — 수동 링크 + 작업세부 + 명단 골격 준비 — admin/master ──
 //   ★ Track A 무접촉: 링크는 Track B 전용 테이블 trackb_work_order_links(051)에만 저장(work_orders는 읽기만).

@@ -573,7 +573,7 @@
   .mhtools.open .mhmenu{display:block}
   .mhmenu .btn{display:flex;width:100%;justify-content:flex-start;border:none;background:none;height:30px;margin:0}
   .mhmenu .btn:hover{background:var(--card2)}
-  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.sot{background:var(--accent-soft);color:var(--accent);border-color:transparent} .bd.w{background:var(--warn-soft);color:var(--warn);border-color:transparent} .bd.ovcov-miss{cursor:pointer}
+  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.w{background:var(--warn-soft);color:var(--warn);border-color:transparent} .bd.ovcov-miss{cursor:pointer}
   .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
   .mf{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
   .mf .k{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.03em} .mf .v{font-size:13px;font-weight:600;margin-top:2px}
@@ -4400,7 +4400,7 @@ function _mhToolsRender(){
      나중에 게이트가 넓어지면 여기가 자동으로 따라와야 한다(두 곳이 갈리면 "버튼은 있는데
      [⋯] 가 안 뜬다"가 된다). */
 function _mhToolsVisible(){
-  return !!(STATE.role === 'master' || _ddCan() || _brCanAdd());
+  return !!(_ddCan() || _brCanAdd());
 }
 /* 메뉴 내용 — 조건부 버튼은 여기 한 곳에서만 정한다(렌더와 재렌더가 갈리지 않게). */
 function _mhMenuHtml(){
@@ -4408,10 +4408,11 @@ function _mhMenuHtml(){
   const dd = _ddCount();                       // null = 아직 모름 → 노출(fail-open)
   const ddShow = _ddCan() && (dd === null || dd > 0);
   const ddBadge = (dd && dd > 0) ? ` ${dd}` : '';
-  return (STATE._flipBtnHtml || '')
-    + (isMaster ? `<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>` : '')
-    + (ddShow ? `<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리${ddBadge}</button>` : '')
+  /* (master 전용 [Track B로 전환]·[write-back 시뮬]·[그림자 투영] 은 2026-09-28 제거 — 결정 186 5번.) */
+  const html = (ddShow ? `<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리${ddBadge}</button>` : '')
     + (_brCanAdd() ? `<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>` : '');
+  /* 빈 메뉴 금지 — 중복 0건으로 정리 버튼이 숨으면 [⋯] 를 연 사람에게 빈 상자 대신 사유를 말한다. */
+  return html || '<div class="mh-empty" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap">지금 이 작업에 쓸 도구가 없습니다</div>';
 }
 function toggleMhTools(ev){
   if(ev) ev.stopPropagation();
@@ -5384,7 +5385,7 @@ window.CAMP_ON_SAVED=function(){
        **하나도 없다** — 시트 제목 라벨(`_curSheetLabel`)까지 제거했다. 다시 필요해지면
        "무시트면 숨김"이 아니라 **"시트 기반이면 표시"** 로 만들 것(반대로 만들면 활성 작업이
        전부 무시트라 또 상시 표기가 된다). 판정은 `_isNoSheet` 를 그대로 쓰면 된다.
-       (「원본: Track B」 는 시트 표기가 아니라 cutover 상태라 그대로 남는다.)
+       (원본 Track B 배지·전환 버튼도 2026-09-28 전환 기능과 함께 제거 — 결정 186 5번.)
      ★ `.ns-b` CSS 도 쓰던 탈시트 전환 화면이 2026-09-28 제거되며 함께 뺐다(결정 186 2번). */
 function _isNoSheet(t){ return !!(t && t.sheetless===true); }
 /* ══════════════════════════════════════════════════════════════════════════
@@ -6579,21 +6580,8 @@ function renderWorkdesk(wd){
       <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>
       ${canEdit?`<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — ${noSheet?'주문 기록은':'구글시트·주문은'} 바뀌지 않습니다(리허설). 셀 클릭으로 수정. 되돌리기 버튼은 없습니다 — 값을 다시 적어 고치고, 누가 언제 고쳤는지는 셀의 편집기록에서 봅니다.</div>`:''}`;
   }
-  const sot=wd.sourceOfTruth||'sheet';
-  /* ★★ 「원본: 시트」 는 그리지 않는다(사용자 확정 2026-08-23) — 시트 관련 상시 표기 정리의 마지막.
-       본섭 실측(114 전수) 상 `source_of_truth` 는 전부 `sheet` 이고 활성 작업은 전부 무시트라
-       종전 조건(`noSheet && sot!=='db'`)에서도 이미 안 뜨고 있었다. 이제 **시트 기반 작업에서도**
-       안 뜬다(시트 제목 라벨도 함께 제거됐다 — `_curSheetLabel` 자리의 주석 참조).
-     ★ **「원본: Track B」 는 남긴다** — 그건 시트 표기가 아니라 **cutover 상태**(DB 원본으로
-       전환됨)이고, master 의 [⋯] → `Track B로 전환 / 시트로 되돌리기` 버튼과 짝이다.
-       없애면 전환했는지 화면에서 알 수 없어진다. */
-  const sotBadge=(sot==='db')
-    ? `<span class="bd sot" title="이 탭의 진실원천(원본)이 DB(Track B)로 전환된 상태입니다. 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: Track B</span>`
-    : '';
-  /* ★ 전환 버튼은 지역변수가 아니라 STATE 에 싣는다 — [⋯] 메뉴는 열 때 건수를 세고
-       **내용만 다시 그리므로**(`_mhToolsRender`), 그 시점에 이 지역변수는 이미 사라졌다.
-       한 곳(`_mhMenuHtml`)에서만 메뉴를 만들기 위한 배선이다(사본 금지). */
-  STATE._flipBtnHtml=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
+  /* 원본 Track B 배지와 master 의 [Track B로 전환] 버튼은 2026-09-28 제거(결정 186 5번) —
+     본섭 전 탭이 source_of_truth='sheet' 였고 전환 기능 자체를 뺐다. */
   // ★ 제목 행 = [작업명 · 시트 · 배지] ―― 남는 폭 ―― [마감 안내 + 🏁 마감] [⋯ 도구](master)
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
   //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
@@ -6606,7 +6594,7 @@ function renderWorkdesk(wd){
      ★ 옛 [편집 이력] 버튼은 이 안으로 흡수했다(같은 일을 하는 창구를 둘로 두지 않는다). */
   const logBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openTabLog()" title="이 작업의 주문·취소·리뷰·편집·정원·정산 기록을 시간순으로 봅니다.">🗒 로그</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 class="${canEdit?'ttl-ed':''}" title="${esc(workdeskTitle)}${canEdit?' — 눌러서 작업명 수정':''}"${canEdit?' onclick="editWorkdeskTitle()"':''}>${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
-    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${wd.archived?'<span class="bd">*마감 · 열람 전용</span>':(STATE.role==='advertiser'?'':sotBadge)}${warn.join('')}
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${wd.archived?'<span class="bd">*마감 · 열람 전용</span>':''}${warn.join('')}
     ${wd.archived?'':shareBtn}
     ${wd.archived?'':planBtn}
     ${logBtn}
@@ -16511,83 +16499,23 @@ function openCoverageMissing(){
     `<div class="ovnote">Track B 원장(<b>campaign_participants</b>)에 아직 행이 없는 활성 탭입니다. 관측 목록에는 <b>뜨지 않습니다</b>.${
       why.length?`<br>${why.join('<br>')}`:''}</div>${more}${rows}`);
 }
-// ── 일괄 cutover(master 전용) — 서버가 탭마다 단건 게이트(지금 시점 정밀 real=0)를 그대로 태운다.
-//    ★ force 는 보내지도 받지도 않는다(일괄 우회 금지) — 미통과 탭은 결과 모달에 사유로만 보고되고,
-//      정말 강제하려면 그 탭을 열어 단건 전환(+탭명 타이핑 마찰)으로 한다.
-const _CO_SKIP_LABELS = { already_db:'이미 전환됨', ghost:'유령(A·B 0행)', not_candidate:'triage 미충족',
-  parity_not_clean:'진짜 불일치 있음', parity_check_failed:'정밀검증 실패', empty_tab:'빈 탭', tab_not_found:'tab_configs 없음', error:'오류' };
-const _CO_REASON_LABELS = { count_mismatch:'카운트', unowned:'소유', no_work_order:'발주' };
-async function runCutoverAll(){
-  const it=STATE.ov||[]; const cand=it.filter(x=>x.cutoverCandidate).length;
-  if(!cand){ alert('전환 가능(카운트·소유·발주 충족) 탭이 없습니다.\n먼저 [전체 정밀 계산]과 업체 소유·발주 연결 상태를 확인하세요.'); return; }
-  if(!confirm(`전환 가능 ${cand}개 탭을 DB 원본(Track B)으로 전환합니다.\n\n· 각 탭은 지금 시점 정밀 검증(진짜 불일치 0)을 통과해야만 전환됩니다(미통과=건너뜀·보고).\n· 옵션 A(시트 미러 유지)라 되돌리기 가능하며, 시트 쓰기반영은 TRACK_B_WRITEBACK=1 일 때 상태 토글부터 동작합니다.\n\n진행할까요?`)) return;
-  const btn=$('#coAllBtn'); if(btn){btn.disabled=true;btn.textContent='전환 중…';}
-  const r=await api('/api/trackb/source-of-truth/all',{method:'POST',body:JSON.stringify({})});
-  if(!r||!r.ok){ alert('일괄 전환 실패: '+((r&&r.error)||'서버 오류')); if(btn){btn.disabled=false;btn.textContent='DB 원본 일괄 전환';} return; }
-  const rs=r.results||[]; const bad=rs.filter(x=>!x.ok);
-  const rows=rs.length?`<div style="overflow-x:auto"><table class="lgtable" style="table-layout:fixed;width:100%">
-    <thead><tr><th style="width:44%">탭</th><th style="width:18%">결과</th><th>사유</th></tr></thead><tbody>${
-    rs.map(x=>`<tr><td style="word-break:break-all">${esc(x.tabName||'')}</td>
-      <td>${x.ok?'<span class="bd g">전환됨</span>':'<span class="bd w">건너뜀</span>'}</td>
-      <td style="word-break:break-all">${x.ok?'':esc((_CO_SKIP_LABELS[x.skipped]||x.skipped||'')+(x.real!=null?` (진짜 불일치 ${x.real}건)`:'')+((x.reasons||[]).length?` — ${x.reasons.map(k=>_CO_REASON_LABELS[k]||k).join('·')} 미충족`:'')+(x.detail?` — ${x.detail}`:''))}</td></tr>`).join('')
-    }</tbody></table></div>`:`<div class="empty">대상 없음</div>`;
-  _modal(`DB 원본 일괄 전환 — 전환 ${r.flipped} / 건너뜀 ${r.skipped} / 총 ${r.total}`,
-    `<div class="ovnote">건너뜀 탭은 <b>전환되지 않았습니다</b>(강제 우회 없음). 사유를 해소한 뒤 다시 실행하거나, 예외는 그 탭을 열어 단건 전환하세요.${bad.length?'':' 모든 대상이 전환되었습니다.'}<br>시트 쓰기반영(write-back)은 Railway <b>TRACK_B_WRITEBACK=1</b> 설정 시 상태 토글부터 동작합니다.</div>${rows}`);
-  renderOverviewView();
-}
 function renderOverviewHead(){
   const it=STATE.ov||[]; const n=it.length, nM=it.filter(x=>x.countMatch).length, nO=it.filter(x=>x.owned).length, nW=it.filter(x=>x.woLinked).length;
   const nR = it.filter(x=>x.real===0).length, nRk = it.filter(x=>typeof x.real==='number').length;
-  const nReady = it.filter(x=>{const v=_cutoverVerdict(x); return v.txt==='✅ 준비';}).length;
-  const nDb = it.filter(x=>x.sourceOfTruth==='db').length;
   $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g" title="아래 목록에 뜨는 탭 수(= 원장에 행이 있는 탭). 현재 활성 여부와 무관한 잔재도 포함될 수 있습니다.">투영 ${n}탭</span>
     ${_ovCoverageChips()}
-    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}<span class="bd g" title="카운트·소유·발주 + 신선한 진짜불일치0(세션 정밀 30분 내 또는 서버 스냅샷 24h 내) 충족 → cutover 가능">cutover 준비 ${nReady}</span>${nDb?`<span class="bd sot" title="이미 Track B 원본으로 전환된 탭">전환됨 ${nDb}</span>`:''}
+    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}
     <span class="sp" style="flex:1"></span>
-    ${STATE.role==='master'?`<button class="btn" id="coAllBtn" onclick="runCutoverAll()" title="전환 가능(카운트·소유·발주·비유령) 탭 전부를 DB 원본으로 순차 전환합니다. 각 탭은 지금 시점 정밀 검증(진짜 불일치 0)을 통과해야만 전환되며, 미통과 탭은 사유와 함께 보고만 합니다(강제 우회 없음).">DB 원본 일괄 전환</button>`:''}
+    
     <button class="btn pri" id="paBtn" onclick="runParityAll()" title="투영된 전 탭의 진짜 불일치를 일괄 계산하고 추이 스냅샷 저장">전체 정밀 계산</button>
     <input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
-    <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도. 실제 전환 게이트 = <b>진짜 불일치 0</b>(행 [정밀] 또는 "전체 정밀 계산"). 진짜불일치 값 클릭 시 <b>추이</b>(2주 관측)를 봅니다.${STATE.lastBatch?` · 최근 계산 ${esc(_fmtTs(STATE.lastBatch))}`:''}</div>`;
-}
-// cutover 종합 판정 — fail-closed: real은 "신선한" 값만 인정(세션 [정밀] 30분 TTL > 서버 스냅샷 fresh > 없음=미검증).
-const REAL_TTL_MS = 30*60*1000;
-function _freshReal(o){
-  if(typeof o.real==='number' && o.realAt && (Date.now()-o.realAt)<REAL_TTL_MS) return {v:o.real,src:'방금 정밀',at:o.realAt};
-  const lp=o.lastParity;
-  if(lp && lp.fresh && typeof lp.real==='number') return {v:lp.real,src:'스냅샷',at:lp.takenAt?new Date(lp.takenAt).getTime():null};
-  return null;
-}
-function _cutoverVerdict(o){
-  if(o.sourceOfTruth==='db') return {cls:'ok',txt:'전환됨',title:'이미 Track B 원본(cutover 완료)'};
-  if(o.ghost) return {cls:'no',txt:'유령',title:'A·B 모두 활성 0행(아카이브/리네임 잔재) — cutover 대상 아님'};
-  const base=o.countMatch&&o.owned&&o.woLinked;
-  if(!base){ const m=[]; if(!o.countMatch)m.push('카운트'); if(!o.owned)m.push('소유'); if(!o.woLinked)m.push('발주'); return {cls:'no',txt:'미충족',title:'미충족: '+m.join('·')}; }
-  const fr=_freshReal(o);
-  if(fr) return fr.v===0
-    ?{cls:'ok',txt:'✅ 준비',title:`카운트·소유·발주·진짜불일치0 충족 (${fr.src}${fr.at?' '+_fmtTs(fr.at):''}) → cutover 가능`}
-    :{cls:'no',txt:'불일치 '+fr.v,title:`진짜 불일치 ${fr.v}건 (${fr.src})`};
-  if(typeof o.real==='number') return {cls:'warn',txt:'정밀 만료',title:'정밀 결과가 30분 경과 — [정밀] 재실행 필요'};
-  return {cls:'warn',txt:'정밀 필요',title:'카운트·소유·발주 충족 — [정밀]로 진짜불일치 확인 필요'};
-}
-function _wbCell(o){
-  const wb=o.writeback;
-  if(o.sourceOfTruth==='db'){
-    if(!wb||wb.engineOn===undefined) return '<span class="ovsub" title="구 백엔드 응답(배포 스큐) — write-back 상태 미상. 백엔드 배포 완료 후 새로고침">?</span>';
-    if(!wb.engineOn) return `<span class="no" title="TRACK_B_WRITEBACK=1 미설정 — 토글 편집이 시트에 반영되지 않는 중${wb.pending?` (대기 ${wb.pending})`:''}">엔진 OFF</span>`;
-    const parts=[]; if(wb.pending)parts.push('대기 '+wb.pending); if(wb.held)parts.push('held '+wb.held); if(wb.blocked)parts.push('blk '+wb.blocked);
-    if(parts.length) return `<span class="no" title="대기=미시도(스윕 5분 주기·양보 포함) · held=사람셀 충돌(수동 확인, 재시도 없음) · blocked=신원/컬럼 불일치(30분 주기 자가치유)">⚠ ${parts.join('·')}</span>`;
-    return '<span class="ok" title="반영 이슈 없음(엔진 ON·대기/충돌 0)">정상</span>';
-  }
-  return o.editCount
-    ?`<span class="bd" title="활성 편집 ${o.editCount}건 — 이 중 토글(제출/입금) ${o.editToggle||0}건만 cutover 후 자동 write-back 대상, 나머지는 DB 오버레이 유지(시뮬 대상)">편집 ${o.editCount}${(o.editToggle!=null&&o.editToggle!==o.editCount)?` (토글 ${o.editToggle})`:''}</span>`
-    :'<span class="ovsub">—</span>';
+    <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도. <b>진짜 불일치</b>는 행 [정밀] 또는 "전체 정밀 계산"으로 봅니다. 진짜불일치 값 클릭 시 <b>추이</b>(2주 관측)를 봅니다.${STATE.lastBatch?` · 최근 계산 ${esc(_fmtTs(STATE.lastBatch))}`:''}</div>`;
 }
 function renderOverviewBody(q){
   q=(q||'').trim(); STATE.ovq=q; const it=STATE.ov||[];
   const cmp=(a,b)=>`${a}<span class="vs">/</span>${b}${a===b?'':' <span class="diff">≠</span>'}`;
   const chk=b=>b?'<span class="ok">✓</span>':'<span class="no">–</span>';
   const rows=it.map((o,i)=>({o,i})).filter(({o})=>!q||((o.tabName||'')+(o.spreadsheetTitle||'')).includes(q)).map(({o,i})=>{
-    const v=_cutoverVerdict(o);
     return `<tr>
       <td class="ovnm" onclick="openTabFromOverview(${i})" title="작업보드에서 열기"><b>${esc(o.tabName)}</b><div class="ovsub">${esc(o.spreadsheetTitle)}</div></td>
       <td class="num">${o.b.total}</td>
@@ -16601,12 +16529,9 @@ function renderOverviewBody(q){
       <td class="ctr" id="prec-${i}">${typeof o.real==='number'
         ? `<span class="${o.real===0?'ok':'no'}" style="cursor:pointer" title="추이 보기" onclick="showTrend(${i})">${o.real===0?'✓ 0':'✗ '+o.real}</span>`
         : `<button class="btn xs" onclick="checkPrecise(${i})">정밀</button>`}</td>
-      <td class="ctr"><span class="bd ${o.sourceOfTruth==='db'?'sot':''}" title="진실원천(원본): 시트=현행 Track A · Track B=DB 원본(cutover)">${o.sourceOfTruth==='db'?'Track B':'시트'}</span></td>
-      <td class="ctr">${_wbCell(o)}</td>
-      <td class="ctr"><span class="${v.cls==='ok'?'ok':(v.cls==='no'?'no':'')}" style="font-weight:700${v.cls==='warn'?';color:var(--warn)':''}" title="${esc(v.title)}">${esc(v.txt)}</span></td>
     </tr>`;
-  }).join('')||`<tr><td colspan="13" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업보드의 "그림자 투영"을 기다리세요.</td></tr>`;
-  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th><th>원본</th><th>write-back</th><th title="카운트·소유·발주·진짜불일치0 종합">cutover</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }).join('')||`<tr><td colspan="10" class="empty">투영된 탭 없음 — 자동 투영(10분)을 기다리세요.</td></tr>`;
+  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
   const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
@@ -16940,30 +16865,6 @@ function renderReadiness(rd){ if(!rd) return '';
       <div class="rdrow">${dot(fi.linkedOrders>0, fi.activeRows>0&&fi.linkedOrders===0)}<span class="rl">주문 귀속</span><span class="rv">${fi.linkedOrders}/${fi.activeRows} 링크${won!=='0'?(' · '+won+'원'):''}</span></div>
     </div>`;
 }
-async function projectCur(){ if(!STATE.cur)return; const btn=$('#projBtn'); if(btn){btn.disabled=true;btn.textContent='투영 중…';}
-  await api('/api/trackb/project',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName})});
-  selTab(STATE.tabs.indexOf(STATE.cur)); }
-
-// 진실원천 전환(master 전용) — 옵션 A cutover 스위치. 'db' 전환은 진짜불일치 0 게이트(409면 force 확인).
-async function flipSoT(value, force){
-  if(!STATE.cur)return;
-  if(value==='db' && !force && !confirm(`이 탭의 원본을 Track B(DB)로 전환합니다.\n\n옵션 A(미러 유지·되돌리기 가능)이며, 시트 쓰기반영 엔진(P2)이 붙기 전까지 라이브 동작은 바뀌지 않습니다.\n계속할까요?`)) return;
-  const btn=$('#sotBtn'); if(btn){btn.disabled=true;btn.textContent='전환 중…';}
-  const r=await api('/api/trackb/source-of-truth',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName,value,force:!!force})});
-  if(r&&r.ok){ toast(`원본 → ${value==='db'?'Track B':'시트'}`); selTab(STATE.tabs.indexOf(STATE.cur)); return; }
-  if(r&&r.error==='parity_not_clean'){
-    // force 마찰: confirm 원클릭이 아니라 탭명을 직접 타이핑해야 강제 전환(우발적 force 차단, 검증 미통과 명시).
-    const typed=prompt(`방금 서버가 재계산한 진짜 불일치가 ${r.real}건입니다(권장: 0).\n(화면의 이전 [정밀] 결과가 아니라 지금 시점 값입니다.)\n\n검증 미통과 상태로 강제 전환하려면 탭 이름을 정확히 입력하세요:\n${STATE.cur.tabName}`);
-    if(typed!==null && typed.trim()===STATE.cur.tabName) return flipSoT('db', true);
-    if(typed!==null) toast('탭 이름 불일치 — 강제 전환 취소됨');
-  } else if(r&&r.error==='parity_check_failed'){
-    toast('전환 거부: 정밀검증 실패('+((r&&r.detail)||'오류')+') — 잠시 후 재시도하세요');
-  } else if(r&&r.error==='empty_tab'){
-    toast('전환 거부: A·B 모두 0행(유령/아카이브 탭) — cutover 대상이 아닙니다');
-  } else { toast('전환 실패: '+((r&&r.error)||'오류')); }
-  if(btn){btn.disabled=false;btn.textContent=value==='db'?'Track B로 전환':'시트로 되돌리기';}
-}
-
 // ══ 작업오더(발주) 연동 — 연결 상태 바 + 작업세부 표(펼침) + 명단 준비(admin/master) ══
 /* 발주 정형 정보 행 — 종전 「작업세부 펼치기」의 필드 목록·순서를 **그대로** 옮겼다(사본 아님).
    이제 상시 펼침이 아니라 작업 조건 카드 [⋯] → [발주 원문 보기] 팝업에서만 그린다. */
@@ -17001,27 +16902,6 @@ async function linkWO(id){ const t=STATE.cur; if(!t)return;
    먼저 고칠 것. 그냥 버튼만 되붙이면 같은 사고가 그대로 재현된다.
    ⚠ 지울 때 그 함수의 닫는 `}` 가 남아 인라인 스크립트 전체가 SyntaxError 로 죽었다
       (#1120 → 배포 후 리뷰웹시스템[3버전] 전면 장애). 함수를 지울 땐 본문·닫는 괄호까지. */
-
-// ══ write-back 시뮬레이션(P2-2) — 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기(실제 시트 무접촉) ══
-async function showWritebackSim(){
-  const t=STATE.cur; if(!t)return;
-  let ov=document.getElementById('wbov'); if(!ov){ov=document.createElement('div');ov.id='wbov';ov.className='modalov';ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});document.body.appendChild(ov);}
-  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>write-back 시뮬레이션 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('wbov').remove()">닫기</button></div><div class="modalbd" id="wbbd"><div class="empty">계산 중…</div></div></div>`;
-  const r=await api(`/api/trackb/writeback/simulate?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
-  const bd=$('#wbbd'); if(!bd)return;
-  if(!r||!r.ok){ bd.innerHTML=`<div class="empty">${esc((r&&r.error)||'조회 실패')}</div>`; return; }
-  const s=r.summary||{}, ops=r.ops||[];
-  const gmap={ok:'✅ 반영',risky_ownership_key:'⚠️ 위험(소유권키·제외)',risky_order_mapped:'⚠️ 위험(주문매핑칸·제외)',risky_coords:'⚠️ 위험(좌표·제외)',risky_append:'⚠️ 위험(추가·제외)',manual_row:'⚠️ 수동행(검토·제외)',no_anchor:'⛔ 앵커없음',ambiguous:'⛔ 중복신원',no_column:'⛔ 컬럼없음',no_sheet_row:'⛔ 행없음',no_tab_gid:'⛔ gid없음'};
-  const tmap={toggle:'제출/입금',edit:'필드편집',add:'행추가',clear:'행삭제'};
-  const rows=ops.map(o=>{ const nv=(o.newValue&&typeof o.newValue==='object')?JSON.stringify(o.newValue):(o.newValue==null?'':String(o.newValue));
-    return `<tr><td>${esc(tmap[o.type]||o.type)}</td><td>${esc(o.field||'')}</td><td>${esc(o.name||'—')}</td><td>${o.sheetRow||'-'}${o.column?(' · '+esc(o.column)+'열'):''}${o.header?(' <span style="color:var(--faint)">('+esc(o.header)+')</span>'):''}</td><td>${esc(nv)}</td><td>${gmap[o.guard]||esc(o.guard)}</td></tr>`;
-  }).join('')||`<tr><td colspan="6" class="empty">반영할 편집 없음</td></tr>`;
-  bd.innerHTML=`<div style="font-size:12px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:10px">
-      이 탭 편집이 시트에 <b>반영된다면</b> 이렇게 됩니다 — <b style="color:var(--accent)">시뮬레이션이라 실제 시트에는 쓰지 않습니다.</b><br>
-      원본: ${r.cutover?'<b>Track B(cutover)</b>':'시트'} · 실제적용 트리거(<code>TRACK_B_WRITEBACK_FULL</code>): <b>${r.triggerOn?'ON':'OFF'}</b>${r.triggerOn?'':' <span style="color:var(--faint)">(OFF = 시뮬레이션만, 시트 무접촉)</span>'}</div>
-    <div style="font-size:12.5px;font-weight:650;margin-bottom:8px">총 ${s.total||0} · <span class="ok">반영가능 ${s.ok||0}</span> · <span style="color:var(--warn)">위험(적용제외) ${s.risky||0}</span> · <span style="color:var(--bad)">차단 ${s.blocked||0}</span></div>
-    <table class="histtable"><thead><tr><th>유형</th><th>필드</th><th>참여자</th><th>대상(행·열)</th><th>값</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
 
 // ══ 소유 지정 뷰 ══
 async function renderOwnershipView(){

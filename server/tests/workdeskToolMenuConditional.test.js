@@ -97,7 +97,14 @@ const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid:
     const sbW = makeSandbox({ roster: [R('1'), R('1')], dedupe: 0 });
     const hW = vm.runInContext('_mhMenuHtml()', sbW);
     ok('할 일이 없으면 정리 버튼이 안 뜬다', !/openDedupeModal/.test(hW));
-    ok('★ 정리 버튼이 없어도 다른 도구는 그대로', /showWritebackSim/.test(hW));
+    /* 종전: 정리 버튼이 없어도 master 도구(write-back 시뮬 등)는 그대로 — 그 도구들이 제거돼 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거)
+       할 일이 없으면 메뉴가 비므로, 빈 상자 대신 사유 한 줄을 그린다(빈 메뉴 금지). */
+    const hE = vm.runInContext('_mhMenuHtml()', makeSandbox({ roster: [R('1'), R('1')], dedupe: 0, workKind: 'review' }));
+    ok('★ 도구가 하나도 없으면(리뷰 작업·중복 0) 빈 상자 대신 사유를 말한다',
+      /지금 이 작업에 쓸 도구가 없습니다/.test(hE) && !/<button/.test(hE), hE);
+    ok('도구가 있으면 사유 문구를 붙이지 않는다', !/지금 이 작업에 쓸 도구가 없습니다/.test(hW));
+    ok('★ master 라도 할 일 없는 작업에 [⋯] 를 무조건 띄우지 않는다(게이트 = 도구 재료)',
+      !/STATE\.role === 'master'/.test(grab('_mhToolsVisible')));
   }
 
   console.log('\n[D] 권한 — 조건부 노출이 게이트를 넓히지 않는다');
