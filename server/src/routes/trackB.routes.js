@@ -1505,41 +1505,6 @@ router.get('/sheetless/read-scope', authMiddleware, adminOrMasterMiddleware, asy
   }
 });
 
-/* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
- *  "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
- *  조작은 tab_configs.is_closed 한 칸뿐이고 되돌릴 수 있다(서비스 주석 참조).
- *  게이트는 이관(cutover)과 같은 adminOrMaster — 무엇을 읽을지 정하는 전사 조작이다. */
-const _pastTabs = require('../services/pastSheetTabCleanup.service');
-function _pastTabErr(res, err, next) {
-  if (err && typeof err.code === 'string' && !/^\d/.test(err.code)) {
-    const st = err.code === 'not_ready' ? 503 : 400;
-    return res.status(st).json({ ok: false, error: err.code, max: err.max, got: err.got });
-  }
-  return next(err);
-}
-router.get('/past-tabs/scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await _pastTabs.scanPastSheetTabs({ since: req.query.since, limit: req.query.limit })); }
-  catch (err) { _pastTabErr(res, err, next); }
-});
-router.post('/past-tabs/close', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { tabs, since, dryRun } = req.body || {};
-    // 미리보기가 기본 — 값이 빠진 요청이 곧바로 닫으면 안 된다
-    res.json(await _pastTabs.closePastTabs({ tabs, since, by: _by(req), dryRun: dryRun !== false }));
-  } catch (err) { _pastTabErr(res, err, next); }
-});
-// 빈 껍데기 행 삭제 — 이 도구에서 **유일하게 되돌릴 수 없는** 조작이라 미리보기가 기본이고
-// 서버가 스캔을 다시 돌려 ghost 로 판정된 것만, 장부가 비어 있을 때만 지운다.
-router.post('/past-tabs/delete-ghost', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { tabs, dryRun } = req.body || {};
-    res.json(await _pastTabs.deleteGhostRows({ tabs, by: _by(req), dryRun: dryRun !== false }));
-  } catch (err) { _pastTabErr(res, err, next); }
-});
-router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
-  catch (err) { _pastTabErr(res, err, next); }
-});
 /* 수동 리뷰제출 사전 확인 — **쓰기 0**.
    ★ 화면이 캡처를 올리기 **전에** 부른다: 종전에는 업로드 뒤에 거부되어 **드라이브에는 파일이
      남고 제출만 실패**했다(2026-08-21 실사고 — 재시도마다 같은 줄에 캡처가 쌓였다).

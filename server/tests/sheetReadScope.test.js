@@ -211,7 +211,7 @@ const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
   t('5a 버튼·박스·렌더러가 있고 조작 버튼이 없다(읽기 전용)', () => {
     assert.ok(/onclick="_rsScan\(\)"/.test(FE), '버튼 배선이 없다');
     assert.ok(/id="rsBox"/.test(FE), '박스가 없다');
-    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _ptBox'));
+    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _coRender'));
     assert.ok(blk.length > 200, '렌더러 블록을 잘못 잘랐다');
     assert.ok(!/api\('\/api\/trackb\/[^']*',\s*\{/.test(blk), '★ 진단 화면에 쓰기 호출이 생겼다');
   });
@@ -220,12 +220,12 @@ const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
     assert.ok(/catch\s*\(e\)/.test(blk) && /다시 시도/.test(blk), '실패 경로가 화면을 끝내지 않는다');
   });
   t('5c ★ 사유 문구를 화면에서 다시 만들지 않는다(서버 reasons 를 그린다)', () => {
-    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _ptBox'));
+    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _coRender'));
     assert.ok(/r\.reasons/.test(blk), '서버 사유 표를 안 쓴다');
     assert.ok(!/마감 탭만 남았는데/.test(blk), '★ 화면에 사유 문구 사본이 생겼다');
   });
   t('5d 시트 문자열을 onclick 에 보간하지 않는다', () => {
-    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _ptBox'));
+    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _coRender'));
     assert.ok(!/onclick="[^"]*\$\{(?!esc)/.test(blk.replace(/onclick="_rs[A-Za-z]*\(\)"/g, '')),
       '★ onclick 에 외부 문자열이 들어간다');
   });
@@ -239,7 +239,7 @@ const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
       '★ 주소 조립 사본이 생겼다(가상 시트ID 판정이 갈린다)');
   });
   t('5f ★ 화면은 서버가 준 주소만 쓴다(sheetId 로 조립하지 않는다)', () => {
-    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _ptBox'));
+    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _coRender'));
     assert.ok(/it\.sheetUrl/.test(blk), '서버 주소를 안 쓴다');
     assert.ok(!/spreadsheets\/d\/\$\{/.test(blk), '★ 화면이 주소를 조립한다(가상 시트에 죽은 링크가 생긴다)');
     assert.ok(/rel="noopener"/.test(blk), 'noopener 가 없다');
@@ -247,7 +247,7 @@ const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
 
   console.log('\n[6] 렌더러 실행 — 가짜 DOM 위에서');
   t('6a 세 사유가 표에 그려지고 미반영 주문 경고가 붙는다', () => {
-    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _coRender');
     assert.ok(start >= 0 && end > start, '렌더러 블록을 잘못 잘랐다');
     const box = { innerHTML: '' };
     const sandbox = {
@@ -273,7 +273,7 @@ const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
       '★ 실패 사유가 표에 안 그려진다 — 무엇이 왜 막혔는지 화면이 말하지 않는다');
   });
   t('6b 읽는 시트 0이면 "없습니다"로 끝낸다(빈 표를 그리지 않는다)', () => {
-    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _coRender');
     const box = { innerHTML: '' };
     const sandbox = { $: () => box, esc: v => String(v == null ? '' : v), api: async () => ({ ok: true }), Date, console };
     vm.createContext(sandbox);
@@ -309,7 +309,7 @@ const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
     assert.deepStrictEqual(R.retryableStatuses, require('../src/services/sheetReadScope.service').RETRYABLE_STATUSES);
   });
   t('7d ★ 구버전 백엔드(목록 미동봉)면 종전 문구로 접는다(빈 화면·거짓 분해 금지)', () => {
-    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _coRender');
     const sandbox = { $: () => ({ innerHTML: '' }), esc: v => String(v == null ? '' : v), api: async () => ({}), Date, console };
     vm.createContext(sandbox);
     vm.runInContext(FE.slice(start, end), sandbox);
@@ -352,7 +352,7 @@ const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
     });
   });
   t('8e ★ 화면은 서버 묶음을 그대로 그리고 사유를 escape 한다', () => {
-    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _coRender');
     const sandbox = { $: () => ({ innerHTML: '' }), esc: v => String(v == null ? '' : v).replace(/</g, '&lt;'), api: async () => ({}), Date, console };
     vm.createContext(sandbox);
     vm.runInContext(FE.slice(start, end), sandbox);
