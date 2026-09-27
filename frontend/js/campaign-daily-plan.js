@@ -1445,7 +1445,7 @@
     var wtNote = (j.worktableLinked === false)
       ? '<div class="cdp-note" style="border-color:#FCA5A5;background:#FEF2F2;color:#B42318">'
         + '⚠ 이 작업은 <b>무시트 작업표로 전환되지 않은 상태</b>입니다 — 여기서 조절하면 '
-        + '<b>정원만 바뀌고 작업표의 줄은 그대로</b>입니다. 표까지 맞추려면 먼저 탈시트 전환을 확인해주세요.'
+        + '<b>정원만 바뀌고 작업표의 줄은 그대로</b>입니다. 표까지 맞춰야 하면 담당 개발자에게 알려주세요.'
         + '</div>'
       : '';
     var schNote = '';

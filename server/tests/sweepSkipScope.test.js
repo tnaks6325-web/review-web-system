@@ -32,15 +32,15 @@ const src = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
       /SHEET_SWEEP_SKIP_WIDE === '0'[\s\S]{0,80}FULLY_SHEETLESS_SHEET_IDS_SQL/.test(s));
     ok('조회 실패는 빈 집합(fail-open — 게이트가 죽어도 스윕은 계속)',
       /catch \(_\) \{\s*return new Set\(\);/.test(s));
-    // ★ 소비처 4곳이 같은 함수를 부른다 — 한 곳만 옛 이름으로 남으면 그 스윕만 계속 읽는다
+    // ★ 소비처 3곳이 같은 함수를 부른다(읽는 범위 진단 sheetReadScope 는 2026-09-28 제거 — 결정 186 2번) — 한 곳만 옛 이름으로 남으면 그 스윕만 계속 읽는다
     for (const f of ['src/services/rawMirror.service.js', 'src/services/smartBuild.service.js',
-                     'src/services/indexBuilder.service.js', 'src/services/sheetReadScope.service.js']) {
+                     'src/services/indexBuilder.service.js']) {
       ok(`${path.basename(f)} 가 게이트 함수를 부른다`, /sweepSkipSheetIds\(/.test(src(f)));
     }
     ok('옛 이름(fullySheetlessSheetIds) 호출부 0 — 이름이 남으면 의미가 갈린다',
       !/fullySheetlessSheetIds\s*\(/.test(
         ['src/services/rawMirror.service.js', 'src/services/smartBuild.service.js',
-         'src/services/indexBuilder.service.js', 'src/services/sheetReadScope.service.js']
+         'src/services/indexBuilder.service.js']
           .map(src).join('\n')));
   }
 

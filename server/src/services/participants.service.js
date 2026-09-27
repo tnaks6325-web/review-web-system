@@ -532,27 +532,6 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
   return { ...stat, retired: rowCount };
 }
 
-/**
- * 시트에서 이미 사라진 줄 은퇴 — 이관(cutover) 직후 1회.
- *
- * 왜: 마지막 반영의 투영이 `_reconcileSeen` 으로 **시트에 더는 없는 import 줄**을 `active = FALSE` 로
- * 내려놓는데, 뒤이은 장부 재생성은 `deleted_at` 만 보므로 그 줄들을 검색 명단으로 되살렸다
- * (실측 2026-08-07 쿠팡(26년): 50명 → 216명). 이관은 "시트 실물을 그대로 승계"하는 것이므로
- * 여기서 소프트 삭제로 승격시킨다.
- * ★ `source='import'` 만 — 준비 자리(`worktable`)·수기 추가(`manual`)는 seen-set 대상이 아니라
- *   비활성이 될 수 없고, 건드리면 빈 슬롯이 통째로 사라진다.
- */
-async function retireInactiveImportRows({ sheetId, tabName, by = 'cutover' } = {}) {
-  if (!sheetId || !tabName) throw new Error('retireInactiveImportRows: sheetId, tabName 필수');
-  const { rowCount } = await getPool().query(
-    `UPDATE campaign_participants
-        SET deleted_at = NOW(), updated_by = $3, updated_at = NOW()
-      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
-        AND source = 'import' AND active = FALSE`,
-    [sheetId, tabName, String(by).slice(0, 100)]);
-  return { ok: true, rows: rowCount };
-}
-
 async function prepareRosterSlots({ sheetId, tabName, target, options = [], productName = null, by = 'system' } = {}) {
   if (!sheetId || !tabName) throw new Error('prepareRosterSlots: sheetId, tabName 필수');
   const tgt = Math.max(0, Math.min(parseInt(target, 10) || 0, 2000));   // 상한(폭주 방지)
@@ -744,7 +723,7 @@ async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
 
 module.exports = {
   holdRows, listHeldRows,
-  createWorktableSlots, createSlotsFromSheetRows, appendSlot, deleteWorktableRows, retireRows, retireInactiveImportRows,
+  createWorktableSlots, createSlotsFromSheetRows, appendSlot, deleteWorktableRows, retireRows,
   purgeImportedRows,
   importTabFromIndex,
   syncImportedTabs,

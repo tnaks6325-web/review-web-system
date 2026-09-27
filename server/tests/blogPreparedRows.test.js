@@ -25,7 +25,7 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1
 
 const R = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const SLOT = R('src/services/sheetSlotSync.service.js');
-const CUT = R('src/services/sheetlessCutover.service.js');
+// (sheetlessCutover.service.js 는 탈시트 전환 화면 제거로 삭제 — 2026-09-28, 결정 186 2번)
 const RES = R('src/services/columnResolver.js');
 const WKC = R('src/services/workKindContext.service.js');
 const LINK = R('src/utils/workOrderLink.js');
@@ -218,9 +218,9 @@ await ta('★ 블로그 탭은 날짜 칸이 아예 없어도 no_date_column 으
 /* ══ 4) 분기는 한 곳 — 호출부가 전부 tabName 을 넘긴다 ═══════ */
 console.log('\n4) 분기 단일 지점 · 배선');
 
-t('★★ readPreparedRows 호출부 4곳이 모두 tabName 을 넘긴다', () => {
-  const calls = (SLOT + CUT).match(/readPreparedRows\(\s*db,\s*\{[^}]*\}/g) || [];
-  assert.ok(calls.length >= 4, `호출부가 ${calls.length}곳뿐 — 배선이 빠졌다`);
+t('★★ readPreparedRows 정의·호출부 3곳이 모두 tabName 을 넘긴다', () => {
+  const calls = SLOT.match(/readPreparedRows\(\s*db,\s*\{[^}]*\}/g) || [];
+  assert.ok(calls.length >= 3, `호출부가 ${calls.length}곳뿐 — 배선이 빠졌다`);
   calls.forEach(c => assert.ok(/tabName/.test(c),
     'tabName 을 안 넘기는 호출부가 있다 — 그 경로에서 블로그 탭이 조용히 날짜 기준으로 떨어진다: ' + c));
 });

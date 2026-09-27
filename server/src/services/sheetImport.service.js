@@ -36,6 +36,10 @@
  */
 'use strict';
 
+/** 가져온 뒤 시트에 남길 안내(종전 sheetlessCutover.CUTOVER_NOTICE — 전환 화면 제거 2026-09-28 로 이리 옮김).
+ *  ★ 헤더 탐지 키워드를 2개 이상 넣지 말 것(sheetNotice.validateNoticeText 가 차단 — 결정 148). */
+const CUTOVER_NOTICE = '⛔ 이 작업은 리뷰웹시스템으로 이관되었습니다 · 이 문서는 더 이상 반영되지 않으니 리뷰웹시스템에서 작업해 주세요';
+
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
@@ -578,7 +582,6 @@ async function importSheet({
   let noticeResult = null;
   if (notice) {
     try {
-      const { CUTOVER_NOTICE } = require('./sheetlessCutover.service');
       noticeResult = await require('./sheetNotice.service')
         .applySheetNotice(sheetId, { gid: read.gid, tabName: read.tabName, text: CUTOVER_NOTICE, force: true });
     } catch (e) {
@@ -755,5 +758,6 @@ module.exports = {
   revertImport,
   ImportError,
   MAX_ROWS,
+  CUTOVER_NOTICE,
   __setPoolForTest,
 };

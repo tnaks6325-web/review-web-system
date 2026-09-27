@@ -142,10 +142,10 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
       && (wd.match(/_isNoSheet\(/g) || []).length >= 8);
     ok('★ 서버 재료(`sheetless`)는 그대로 — 배지만 뺐지 판정을 없앤 게 아니다',
       /sheetless/.test(read('src/services/trackB.service.js')));
-    /* ★ `.ns-b` CSS 와 「무시트」 문구는 **탈시트 전환 화면(`_coRows`)** 이 계속 쓴다 —
-       그 화면에서는 "이관됐다/아니다"가 곧 주제라 배지가 신호로 작동한다. */
-    ok('★ 탈시트 전환 화면의 무시트 표시는 남는다(그 화면의 주제다)',
-      /t\.sheetless\?'<span class="ns-b">무시트<\/span>':''/.test(wd) && /\.ns-b\{/.test(wd));
+    /* ★ `.ns-b` 를 쓰던 유일한 곳(탈시트 전환 화면 `_coRows`)이 2026-09-28 제거됐다(결정 186 2번) —
+       배지 CSS 도 함께 뺐다. 되살아나면 쓰는 곳 없는 CSS 이거나 상시 표기의 부활이다. */
+    ok('★ 무시트 배지(.ns-b)는 CSS·마크업 모두 없다(주석 제외)',
+      !/\bns-b\b/.test(noLineComments(wd).replace(/\/\*[\s\S]*?\*\//g, '')));
   }
 
   /* ══════════════ E. 공고 카드 — 시트 흔적 0 ══════════════ */

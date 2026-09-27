@@ -11,7 +11,7 @@
  *  B. 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대상 미선택 거부
  *  C. 순서 계약 — soft-delete → 장부 재생성 (반대면 투영이 `deleted_at=NULL` 로 되살린다)
  *  D. 미리보기는 쓰기 0 / 실행은 같은 조건으로 지운다
- *  E. 이관 시 `active=FALSE` 인 **import 줄만** 은퇴(준비 자리·수기 추가 보존) · fail-soft
+ *  (E. 이관 시 은퇴 — 탈시트 전환 화면 제거로 2026-09-28 삭제, 결정 186 2번)
  *  F. 라우트·화면 배선
  */
 const assert = require('assert');
@@ -53,33 +53,6 @@ console.log('\n[A] 쓰기 소유자 — campaign_participants 쓰기는 particip
   ok('★ 쓰기는 participants.service.retireRows 에 위임',
     /participants\.service'\)[\s\S]{0,60}\.retireRows\(/.test(retireBlk.slice(0, 2000)));
 
-  const cut = noLineComments(read('src/services/sheetlessCutover.service.js'));
-  /* ★★ 쓰기 표면은 두 구역으로 나눠 본다(2026-08-19 정리).
-       ㉮ 이관 본체 = 여전히 `tab_configs` 한 곳(표식 켜기/끄기).
-       ㉯ `_provisionUnlinkedCampaign` = 연결 없는 활성 공고에 서버 작업표를 만들어 주는 경로라
-          등록·연결 4테이블을 쓴다. 그 함수 **안에서만** 허용하고, 목록을 넘어서면 실패한다.
-       합쳐서 검사하면 이 구역이 조용히 넓어져도 통과한다(8/18~19 실제로 빨간 채 방치됐다). */
-  const provIdx = cut.indexOf('async function _provisionUnlinkedCampaign(');
-  ok('★ 작업표 프로비저닝 구역이 있다(경계를 지우지 말 것)', provIdx > 0);
-  const provEnd = cut.indexOf('\nasync function ', provIdx + 10);
-  const prov = cut.slice(provIdx, provEnd > 0 ? provEnd : undefined);
-  const body = cut.slice(0, provIdx) + (provEnd > 0 ? cut.slice(provEnd) : '');
-  // `ON CONFLICT … DO UPDATE SET` 은 같은 문장의 upsert 절이라 대상 테이블이 아니다 → 제외 후 판정
-  const writesOf = src =>
-    ((src.replace(/DO UPDATE SET/gi, '')).match(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+([a-z_]+)/gi) || []);
-  const wBody = writesOf(body);
-  ok('★ 이관 본체의 쓰기 표면은 여전히 tab_configs 한 곳',
-    wBody.every(x => /tab_configs/i.test(x)), wBody.join(','));
-  const PROV_ALLOW = /(campaigns|tab_configs|recruit_campaigns|work_orders)$/i;
-  const wProv = writesOf(prov);
-  ok('★ 프로비저닝 구역의 쓰기도 등록·연결 4테이블을 넘지 않는다',
-    wProv.length > 0 && wProv.every(x => PROV_ALLOW.test(x.trim())), wProv.join(','));
-  ok('★ 작업표 생성은 접수 경로와 같은 서비스에 위임(사본 금지)',
-    /require\('\.\/sheetlessAccept\.service'\)[\s\S]{0,80}createSheetlessWorktable/.test(prov));
-  ok('★ 프로비저닝도 campaign_participants 에 직접 쓰지 않는다',
-    !/(INSERT INTO|UPDATE|DELETE FROM)\s+campaign_participants/i.test(prov));
-  ok('★ 사라진 줄 은퇴도 participants.service 위임',
-    /retireInactiveImportRows\(/.test(cut));
 }
 
 console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대상 미선택 거부');
@@ -177,31 +150,6 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
       /if \(!r\.retired\) return/.test(blk.slice(0, 1600)));
   }
 
-  console.log('\n[E] 이관 시 사라진 줄 은퇴 — import 줄만 · fail-soft');
-  {
-    const pp = makePool([[/^\s*UPDATE campaign_participants/, { rowCount: 166 }]]);
-    P.__setPoolForTest(pp);
-    const r = await P.retireInactiveImportRows({ sheetId: 's', tabName: 't', by: 'cutover:김수만' });
-    ok('은퇴 건수를 돌려준다', r.ok === true && r.rows === 166);
-    const sql = pp.calls[0].sql;
-    ok("★★ source='import' 만 — 준비 자리(worktable)·수기(manual)는 건드리지 않는다", /source = 'import'/.test(sql));
-    ok('★ active = FALSE 인 줄만(시트에 더는 없는 줄)', /active = FALSE/.test(sql));
-    ok('★ 소프트 삭제(deleted_at)', /SET deleted_at = NOW\(\)/.test(sql));
-    ok('★ 이미 내려간 줄은 다시 안 건드린다(멱등)', /deleted_at IS NULL/.test(sql));
-
-    const cut = noLineComments(read('src/services/sheetlessCutover.service.js'));
-    const i1 = cut.indexOf('retireInactiveImportRows(');
-    const i2 = cut.indexOf('rebuildLedgers({', i1);
-    ok('★★ 이관에서도 은퇴가 장부 재생성보다 앞(그래야 되살아나지 않는다)', i1 > 0 && i2 > i1);
-    /* ★ 순서만 보면  같은 죽은 호출도 통과한다 — 결과를 받아 쓰는 형태를 고정한다. */
-    ok('★ 은퇴 결과를 실제로 받아 응답에 싣는다(죽은 호출 금지)',
-      /retired = await require\('\.\/participants\.service'\)\s*\n?\s*\.retireInactiveImportRows\(/.test(cut));
-    ok('★ 실패해도 이관은 유지하고 사유를 응답에 싣는다(retired)',
-      /retired = \{ ok: false/.test(cut) && /reflect, handoff, retired, ledger, notice/.test(cut));
-    ok('★ 표식을 켠 뒤에 은퇴한다(무시트 게이트 통과 순서)',
-      cut.indexOf('SET sheetless = TRUE') < i1);
-  }
-
   console.log('\n[F] 수동 창구 제거 — 줄을 내리는 길은 [행 삭제]·[♻ 중복 정리] 둘');
   {
     const routes = read('src/routes/trackB.routes.js');
@@ -224,11 +172,6 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
     ok('★★★ 화면이 서버보다 넓지 않다(staff·internalRole 금지)',
       !/_isInternalRole|'staff'/.test(ddCan));
 
-    /* 아래 두 건은 탈시트 전환 화면(줄 정리와 무관) — 그대로 유지한다. */
-    ok('★ 전환 화면이 연도 미상 건수를 말한다(조용한 누락 금지)',
-      /m\.yearUnknown\?[\s\S]{0,200}과거 자료로 보고 목록에서 제외/.test(wd));
-    ok('★ [보기] 로 그 목록을 열 수 있다(막다른 길 금지)',
-      /function _coToggleUnknown\(\)/.test(wd) && /includeUnknown=1/.test(wd));
   }
 
   console.log(`\n✅ sheetlessRetireRows: ${passed} cases passed`);

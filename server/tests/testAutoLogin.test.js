@@ -28,5 +28,7 @@ assert.match(workdesk, /window\.REVIEW_API_URL\s*=\s*TEST_AUTO_LOGIN_API/, 'test
 assert.match(workdesk, /\/api\/admin\/test-auto-login/, 'test frontend requests the dedicated endpoint');
 assert.match(workdesk, /sessionStorage\.setItem\('admin_token',\s*result\.token\)/, 'issued token is stored in the existing session location');
 assert.match(workdesk, /if\s*\(await tryTestAutoLogin\(\)\)\s*return boot\(\)/, 'boot retries after automatic session creation');
+// (종전 releaseTodayUnsubmittedHolds.test.js 에 얹혀 있던 가드 — 그 도구 제거(2026-09-28, 결정 186 2번)로 이리 옮김)
+assert.match(workdesk, /test-review-wdb-web-review-web-system-pr-\(\\d\+\)/, 'PR workdesk routes API calls to its matching PR API instead of production');
 
 console.log('testAutoLogin: passed');
