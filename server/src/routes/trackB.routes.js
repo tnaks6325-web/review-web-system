@@ -67,17 +67,7 @@ async function _ensureThreadScope(req, sheetId, tabName) {
   return { ok: false, code: 403, error: '권한이 없습니다.' };
 }
 
-// ── 그림자 투영(라이브 읽어 B 최신화) — master 전용 ──
-router.post('/project', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (sheetId && tabName) return res.json({ ok: true, ...(await svc.projectTab({ sheetId, tabName, by: _by(req) })) });
-    // bulk 투영은 cron(trackb_project 락)과 상호배제 — 멀티인스턴스 이중투영·seen-set 플래핑 차단.
-    const { withJobLock } = require('../utils/jobLock');
-    const r = await withJobLock('trackb_project', () => svc.projectActive({ by: _by(req) }));
-    res.json({ ok: true, ...r });
-  } catch (err) { next(err); }
-});
+// (수동 그림자 투영 POST /project 는 2026-09-28 제거 — 결정 186 5번. 자동 투영 크론은 그대로.)
 
 // ── parity 리포트(B ↔ A, 6차원×3버킷) — 내부 담당자(master/admin/staff) ──
 //   관측 뷰의 [정밀] 버튼이 호출하는데 게이트가 더 좁으면 그 버튼이 dead-end 가 된다.
@@ -566,138 +556,16 @@ router.post('/sheet-sync/quota-fix', authMiddleware, adminOrMasterMiddleware, as
   } catch (err) { next(err); }
 });
 
-/* ══════════════ 탈 구글시트 전환 관리 (W4 · C) ══════════════
-   무시트 표식을 켜는 **유일한 창구**. 권한 = adminOrMaster(사용자 확정) — 실무 담당자가
-   직접 이관하고, 실수 방어는 **점검표 fail-closed + 작업명 타이핑 확정**이 맡는다.
-   ★ 42P01(096 미적용)은 not_ready 로 말한다 — /api/trackb/* 는 마스킹 대상이라 원인이 안 보인다. */
-const cutover = require('../services/sheetlessCutover.service');
+/* 탈 구글시트 전환 화면(W4 · C)은 전환 완료(150개 중 149개)로 2026-09-28 제거(결정 186 2번).
+   ★ 42P01(096 미적용)은 not_ready 로 말한다 — /api/trackb/* 는 마스킹 대상이라 원인이 안 보인다.
+   아래 review-submit-time-backfill 이 아직 쓴다. */
 function _cutoverErr(err, res, next) {
   if (err && err.code === '42P01') {
     return res.json({ ok: false, code: 'not_ready',
-      error: '탈시트 전환 준비 전입니다(migration 096 미적용) — 배포 완료 후 다시 시도해주세요.' });
+      error: '탈시트 준비 전입니다(migration 096 미적용) — 배포 완료 후 다시 시도해주세요.' });
   }
   return next(err);
 }
-router.get('/sheetless/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { since, includeUnknown, limit } = req.query;
-    res.json(await cutover.listCutoverTabs({
-      since, limit, includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
-    }));
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-/* 준비 자리 일괄 점검 — "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에.
-   ★ 읽기 전용 · RAW 미러만(시트 API 0) — 점검표 ①과 같은 함수로 판정한다(사본 0). */
-router.get('/sheetless/slot-sweep', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { since, includeUnknown, limit } = req.query;
-    res.json(await cutover.sweepPreparedRows({
-      since, limit, includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
-    }));
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-/* ══════════════ 무시트 접수 잔재(빈 가상 탭) 정리 ══════════════
-   2026-08-19 실사고 수습 창구 — 랜덤 시트ID 시절 재시도가 남긴 "어디에도 쓰이지 않는 빈 탭"을
-   목록에서 내린다(`is_closed=TRUE` 한 칸 · 데이터 삭제 0 · 되돌리기 가능).
-   ★ 미리보기(GET)는 쓰기 0 · 실행(POST)은 서버가 후보를 다시 골라 그 교집합만 닫는다. */
-const orphanCleanup = require('../services/sheetlessOrphanCleanup.service');
-router.get('/sheetless/orphan-tabs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    res.json(await orphanCleanup.findOrphanTabs({ limit: req.query.limit }));
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-router.post('/sheetless/orphan-tabs/close', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    // ★ 기본은 미리보기 — 값이 빠진 요청이 곧바로 실행되지 않게(`dryRun !== false`).
-    res.json(await orphanCleanup.closeOrphanTabs({
-      dryRun: b.dryRun !== false,
-      sheetIds: Array.isArray(b.sheetIds) ? b.sheetIds : null,
-      by: _by(req),
-    }));
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-router.get('/sheetless/checklist', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json(await cutover.cutoverChecklist({ sheetId, tabName }));
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-router.post('/sheetless/cutover', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, force } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    // ★ force 는 **명시적으로 true 일 때만** — 값이 빠지거나 문자열이면 점검표를 그대로 건다.
-    const out = await cutover.enableSheetless({
-      sheetId, tabName, by: _by(req), force: force === true,
-    });
-    res.status(out.ok ? 200 : 409).json(out);
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-// 활성 모집공고 전수 전환: 작업보드/서버 원장만 진실원본으로 사용한다.
-// 외부 시트 읽기·마지막 동기화·시트 안내문 쓰기를 절대 수행하지 않는다.
-// 실수로 전체 작업을 전환하지 않도록 정확한 확인 문구를 요구한다.
-router.post('/sheetless/cutover-active-server-only', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (req.body?.confirm !== 'server-only-active-campaigns') {
-      return res.status(400).json({ ok: false,
-        error: '활성 모집공고 전환 확인이 필요합니다.',
-        confirmRequired: 'server-only-active-campaigns' });
-    }
-    res.json(await cutover.cutoverActiveCampaignsServerOnly({ by: _by(req) }));
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-// 당일 미제출 홀드 해제 — 운영 중 잘못 적용됐던 "참여 클릭만으로 당일 제한"을 복구하는 1회성 안전 도구.
-// 대상 공고·날짜·상태를 서버에 고정해, 완료된 구매양식(submitted)·다른 공고는 절대 건드리지 않는다.
-router.post('/campaigns/release-today-unsubmitted-holds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (req.body?.confirm !== 'release-today-unsubmitted-holds') {
-      return res.status(400).json({ ok: false, error: '당일 미제출 홀드 해제 확인이 필요합니다.' });
-    }
-    const campaignId = String(req.body?.campaignId || '').trim();
-    if (!campaignId || campaignId.length > 100) {
-      return res.status(400).json({ ok: false, error: '활성 모집공고를 선택해 주세요.' });
-    }
-    const { rows: campaigns } = await pool.query(
-      `SELECT id, title
-         FROM recruit_campaigns
-        WHERE id = $1 AND status = 'active'
-        LIMIT 1`,
-      [campaignId]
-    );
-    const campaign = campaigns[0];
-    if (!campaign) return res.status(409).json({ ok: false, error: '선택한 공고가 활성 상태가 아닙니다. 목록을 새로고침해 주세요.' });
-    const { rows } = await pool.query(
-      `WITH released AS (
-         UPDATE campaign_applications
-            SET status = 'cancelled', expires_at = NOW(), hold_token = NULL
-          WHERE campaign_id = $1
-            AND status = 'applied'
-            AND applied_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
-            AND EXISTS (
-              SELECT 1 FROM recruit_campaigns
-               WHERE id = $1 AND status = 'active'
-            )
-          RETURNING campaign_id
-       )
-       SELECT campaign_id, COUNT(*)::int AS released
-         FROM released GROUP BY campaign_id`,
-      [campaignId]
-    );
-    const released = Object.fromEntries(rows.map(row => [row.campaign_id, Number(row.released) || 0]));
-    const total = rows.reduce((sum, row) => sum + (Number(row.released) || 0), 0);
-    logger.info(`[trackb] today unsubmitted holds released by=${_by(req)} campaign=${campaignId} title=${campaign.title} total=${total}`);
-    res.json({ ok: true, campaign: { id: campaign.id, title: campaign.title }, released, total });
-  } catch (err) { next(err); }
-});
-router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json(await cutover.disableSheetless({ sheetId, tabName, by: _by(req) }));
-  } catch (err) { _cutoverErr(err, res, next); }
-});
 
 /* ── 구글시트 주소로 작업 가져오기 (탈 구글시트 잔재 처리) — adminOrMaster ──
    preview : 시트를 1회 읽어 "무엇을 가져올지"만 돌려준다(**DB 쓰기 0**)
@@ -782,65 +650,7 @@ router.get('/parity-trend', authMiddleware, internalMiddleware, async (req, res,
   } catch (err) { next(err); }
 });
 
-// ── 진실원천(source_of_truth) 컨트롤 — 옵션 A cutover 스위치 ──
-//   ★ 격리: 이 플래그를 읽는 소비처는 Track B write-back 엔진(P2, 미착수)뿐 — 값을 바꿔도 Track A 라이브 불변.
-//   읽기는 내부 담당자(master/admin/staff)(관측), 플립(설정)은 master 전용(되돌리기 어려운 방향 전환이라 보수적).
-router.get('/source-of-truth', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json({ ok: true, sourceOfTruth: await svc.getSourceOfTruth({ sheetId, tabName }) });
-  } catch (err) { next(err); }
-});
-router.post('/source-of-truth', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, value, force } = req.body || {};
-    if (!sheetId || !tabName || !value) return res.status(400).json({ ok: false, error: 'sheetId, tabName, value 필수' });
-    const out = await svc.setSourceOfTruth({ sheetId, tabName, value, by: _by(req), force: !!force });
-    res.status(out.ok ? 200 : (out.error === 'parity_not_clean' ? 409 : 400)).json(out);
-  } catch (err) { next(err); }
-});
-// ── 일괄 cutover: "전환 가능(candidate)" 탭 전부를 단건 게이트 그대로 순차 플립 — master 전용 ──
-//   ★ force 를 받지도 넘기지도 않는다(일괄 우회 금지). 게이트에 걸린 탭은 사유와 함께 보고만.
-router.post('/source-of-truth/all', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, ...(await svc.cutoverAll({ by: _by(req) })) }); }
-  catch (err) { next(err); }
-});
-
-// ── P2 상태 토글 write-back 관측/수동 트리거 — master 전용 ──
-//   status = held/blocked/written 카운트(관측). run = 즉시 스윕(탭 지정 시 그 탭만). 락으로 cron과 상호배제.
-router.get('/writeback/status', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, ...(await svc.writebackStatus()) }); }
-  catch (err) { next(err); }
-});
-router.post('/writeback/run', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    const { withJobLock } = require('../utils/jobLock');
-    const r = await withJobLock('trackb_writeback',
-      () => (sheetId && tabName) ? svc.executeWriteback({ sheetId, tabName }) : svc.writebackSweep({}));
-    res.json({ ok: true, ...r });
-  } catch (err) { next(err); }
-});
-
-// ── P2-2 확장 write-back — 시뮬레이션(시트 무접촉) + 실제 적용 트리거(TRACK_B_WRITEBACK_FULL 게이트) — master ──
-//   simulate = 무엇이 시트에 반영될지 플랜만(안전). apply-full = 트리거 ON+cutover 에서만 안전군 적용(수동).
-router.get('/writeback/simulate', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json({ ok: true, ...(await svc.simulateWriteback({ sheetId, tabName })) });
-  } catch (err) { next(err); }
-});
-router.post('/writeback/apply-full', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const { withJobLock } = require('../utils/jobLock');
-    const r = await withJobLock('trackb_writeback', () => svc.applyWritebackFull({ sheetId, tabName }));
-    res.json({ ok: true, ...r });
-  } catch (err) { next(err); }
-});
+// (진실원천 전환 /source-of-truth* · write-back /writeback/* 는 2026-09-28 제거 — 결정 186 5번.)
 
 // ── 작업오더(발주) 연동 — 수동 링크 + 작업세부 + 명단 골격 준비 — admin/master ──
 //   ★ Track A 무접촉: 링크는 Track B 전용 테이블 trackb_work_order_links(051)에만 저장(work_orders는 읽기만).
@@ -1489,57 +1299,7 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     res.json(out);
   } catch (err) { next(err); }
 });
-/* 읽는 범위 진단 — "지금 어느 시트를 왜 읽는가"(2026-08-19).
- *  ★ 읽기 전용(쓰기 0 · 시트/Drive API 0). 스윕과 **같은 열거식·같은 게이트**를 태운다.
- *  ★ 게이트는 이관·정리와 같은 adminOrMaster(시트 목록·미반영 주문 수가 실린다). */
-const _readScope = require('../services/sheetReadScope.service');
-router.get('/sheetless/read-scope', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    res.json(await _readScope.readScope({ limit: req.query.limit }));
-  } catch (err) {
-    // 42P01/42703(미적용) 은 500 마스킹에 묻히면 원인을 알 수 없다 — 사유를 말한다.
-    if (err && (err.code === '42P01' || err.code === '42703')) {
-      return res.status(503).json({ ok: false, error: 'not_ready', detail: err.message });
-    }
-    return next(err);
-  }
-});
 
-/* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
- *  "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
- *  조작은 tab_configs.is_closed 한 칸뿐이고 되돌릴 수 있다(서비스 주석 참조).
- *  게이트는 이관(cutover)과 같은 adminOrMaster — 무엇을 읽을지 정하는 전사 조작이다. */
-const _pastTabs = require('../services/pastSheetTabCleanup.service');
-function _pastTabErr(res, err, next) {
-  if (err && typeof err.code === 'string' && !/^\d/.test(err.code)) {
-    const st = err.code === 'not_ready' ? 503 : 400;
-    return res.status(st).json({ ok: false, error: err.code, max: err.max, got: err.got });
-  }
-  return next(err);
-}
-router.get('/past-tabs/scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await _pastTabs.scanPastSheetTabs({ since: req.query.since, limit: req.query.limit })); }
-  catch (err) { _pastTabErr(res, err, next); }
-});
-router.post('/past-tabs/close', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { tabs, since, dryRun } = req.body || {};
-    // 미리보기가 기본 — 값이 빠진 요청이 곧바로 닫으면 안 된다
-    res.json(await _pastTabs.closePastTabs({ tabs, since, by: _by(req), dryRun: dryRun !== false }));
-  } catch (err) { _pastTabErr(res, err, next); }
-});
-// 빈 껍데기 행 삭제 — 이 도구에서 **유일하게 되돌릴 수 없는** 조작이라 미리보기가 기본이고
-// 서버가 스캔을 다시 돌려 ghost 로 판정된 것만, 장부가 비어 있을 때만 지운다.
-router.post('/past-tabs/delete-ghost', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { tabs, dryRun } = req.body || {};
-    res.json(await _pastTabs.deleteGhostRows({ tabs, by: _by(req), dryRun: dryRun !== false }));
-  } catch (err) { _pastTabErr(res, err, next); }
-});
-router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
-  catch (err) { _pastTabErr(res, err, next); }
-});
 /* 수동 리뷰제출 사전 확인 — **쓰기 0**.
    ★ 화면이 캡처를 올리기 **전에** 부른다: 종전에는 업로드 뒤에 거부되어 **드라이브에는 파일이
      남고 제출만 실패**했다(2026-08-21 실사고 — 재시도마다 같은 줄에 캡처가 쌓였다).

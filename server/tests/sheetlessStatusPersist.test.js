@@ -209,28 +209,12 @@ console.log('\n[F] recent uploaded reviews with O are backfilled safely');
   ok('backfill rebuilds the one changed tab after writing', rebuilt.length === 1 && rebuilt[0].sheetId === 'sheetless-1' && rebuilt[0].tabName === 'campaign');
 }
 
-/* ══════════════ D. Track B write-back 무시트 분기 ══════════════ */
-console.log('\n[D] cutover 된 무시트 탭은 시트를 읽지 않는다');
-{
-  const tb = noLineComments(srv('src/services/trackB.service.js'));
-  ok('executeWriteback 이 무시트를 분기', /if \(sheetless\) return _writebackSheetless\(/.test(tb));
-  ok('판정 실패는 종전 엔진(fail-open)', /catch \(_\) \{ sheetless = false; \}/.test(tb));
-  const fn = tb.slice(tb.indexOf('async function _writebackSheetless'), tb.indexOf('async function writebackSweep'));
-  ok('★ 무시트 분기는 readSheet 를 부르지 않는다', !/readSheet\(/.test(fn));
-  ok('★ 무시트 분기는 시트 쓰기를 하지 않는다', !/batchUpdateSheet\(|writeSheet\(/.test(fn));
-  ok('기록은 markStatusCell 단일 경로', /markStatusCell\(\{/.test(fn));
-  ok('해제(false)는 held — 두 경로 의미가 갈리지 않게', /value_bool !== true[\s\S]{0,80}?'held'/.test(fn));
-  ok('행 앵커 없으면 blocked(자가치유 재시도)', /!e\.row_index[\s\S]{0,80}?'blocked'/.test(fn));
-  ok('앵커 3종을 모두 해석(order·manual·identity)',
-    /anchor_type = 'order'/.test(fn) && /anchor_type = 'manual'/.test(fn) && /anchor_type = 'identity'/.test(fn));
-  ok('★ 모호한 identity 는 쓰지 않는다(엉뚱한 줄 기록 차단)', /cur\.row_index = null/.test(fn));
-}
+/* (D. Track B write-back 무시트 분기 — 엔진 제거로 삭제 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거)) */
 
 /* ══════════════ E. 무회귀 — 시트 기반 경로 ══════════════ */
 console.log('\n[E] 시트 기반 탭은 한 줄도 안 바뀐다');
 {
   const tb = noLineComments(srv('src/services/trackB.service.js'));
-  ok('시트 엔진 진입은 그대로', /return _writebackEngine\(\{ sheetId, tabName, tier: 'base' \}\);/.test(tb));
   const sub = noLineComments(srv('src/routes/submit.routes.js'));
   ok('기존 review_index UPDATE 는 유지(시트 탭이 쓰는 경로)',
     /UPDATE review_index SET is_submitted = TRUE, built_at = NOW\(\)/.test(sub));

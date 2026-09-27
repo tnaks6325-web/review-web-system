@@ -48,6 +48,8 @@ const writeRe = /\b(INSERT INTO|UPDATE|DELETE FROM)\b/i;
 const writes = pool => pool.calls.filter(c => writeRe.test(c.sql));
 
 const S = require('../src/services/sheetImport.service');
+// 안내문 검증은 진짜 함수로 — 아래 D 절이 sheetNotice 를 require.cache 로 스텁하므로 미리 잡아 둔다.
+const { validateNoticeText: _validateNotice } = require('../src/services/sheetNotice.service');
 
 /* ── 실측 시트 표본(개인정보는 가명) ────────────────────────────
    상단 안내 8줄 → 9번째 줄이 열 이름 → 데이터. 번호 없는 줄과 연습 줄을 함께 담았다. */
@@ -303,9 +305,8 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     const ledPath = require.resolve('../src/services/sheetlessLedger.service');
     const tbPath = require.resolve('../src/services/trackB.service');
     const notePath = require.resolve('../src/services/sheetNotice.service');
-    const cutPath = require.resolve('../src/services/sheetlessCutover.service');
     const savedP = require.cache[partPath], savedL = require.cache[ledPath], savedT = require.cache[tbPath],
-          savedN = require.cache[notePath], savedC = require.cache[cutPath];
+          savedN = require.cache[notePath];
     const seen = { slots: null, ledger: null, own: null, notice: null };
     require.cache[partPath] = { id: partPath, filename: partPath, loaded: true, exports: {
       createSlotsFromSheetRows: async (a) => { seen.slots = a; return { created: (a.rows || []).length, requested: (a.rows || []).length }; },
@@ -327,7 +328,6 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     require.cache[notePath] = { id: notePath, filename: notePath, loaded: true, exports: {
       applySheetNotice: async (sid, o) => { seen.notice = { sid, ...o }; return { ok: true }; },
     } };
-    require.cache[cutPath] = { id: cutPath, filename: cutPath, loaded: true, exports: { CUTOVER_NOTICE: '⛔ 이관되었습니다' } };
 
     const advOk = [[/FROM advertisers/i, { rows: [{ id: 'adv_1', name: '수진코리아', status: 'active' }] }],
                    [/FROM tab_configs/i, { rows: [] }]];
@@ -369,6 +369,11 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     ok('★ 장부는 rebuildLedgers 가 만든다 — 열 구성을 함께 넘긴다',
       seen.ledger && Array.isArray(seen.ledger.columns) && seen.ledger.columns[9] === '연락처');
     ok('★ 시트에 쓰는 것은 안내문 한 줄뿐', seen.notice && /이관/.test(seen.notice.text) && seen.notice.force === true);
+    // (종전 sheetlessCutover.test.js G 에서 이관 — 전환 화면 제거 2026-09-28, 결정 186 2번)
+    ok('★ 안내문 문구가 헤더 탐지 검증을 통과한다(파싱 붕괴 방지 · 결정 148)', (() => {
+      return typeof S.CUTOVER_NOTICE === 'string' && _validateNotice(S.CUTOVER_NOTICE).ok === true
+        && seen.notice.text === S.CUTOVER_NOTICE;
+    })());
     ok('★ 결과에 명단 수·제출 수를 실어 화면이 사실대로 말한다',
       out.indexRows === 4 && out.submittedCount === 2);
 
@@ -450,7 +455,6 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     if (savedL) require.cache[ledPath] = savedL; else delete require.cache[ledPath];
     if (savedT) require.cache[tbPath] = savedT; else delete require.cache[tbPath];
     if (savedN) require.cache[notePath] = savedN; else delete require.cache[notePath];
-    if (savedC) require.cache[cutPath] = savedC; else delete require.cache[cutPath];
 
     /* ── [G-2] 수리 — "등록은 됐는데 안 보이는" 작업 되살리기 ── */
     console.log('\n[G-2] 수리(repair) — 가져오기가 막힌 작업의 유일한 복구 경로');

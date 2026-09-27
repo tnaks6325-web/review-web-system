@@ -189,7 +189,7 @@ async function run() {
   ok('★ 헤더·요약 스트립이 본문 폭과 같은 값으로 캡(광고주 화면만)',
     // 상단 요약이 8칸 스트립(.stripA) → 3분할 카드(.tp3grid, 시안 B)로 바뀌며 캡 대상도 함께 옮겼다(검사 의미 불변)
     /body\.advm \.main \.mh,body\.advm \.tp3grid,body\.advm \.wobar,body\.advm \.wodetail\{max-width:1380px\}/.test(css));
-  ok('★ 원본(sot) 배지는 광고주에게 안 나간다(내부 용어)', /STATE\.role==='advertiser'\?'':sotBadge/.test(src));
+  ok('★ 원본(sot) 배지는 누구에게도 안 나간다(내부 용어 · 전환 기능 제거 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거))', !/sotBadge|원본: Track B/.test(src));
   ok('광고주도 진행 현황 안의 공통 정산 버튼을 사용하고 하단 정산 카드는 없다',
     /const setlIn=`<div class="setlin" id="setlCell">/.test(src)
     && !/id="setldetail"/.test(src) && !/id="settlementsec"/.test(src));
