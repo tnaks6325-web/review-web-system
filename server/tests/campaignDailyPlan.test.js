@@ -418,9 +418,11 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ok('★★ 조절 저장 = 작업표 빈 줄 날짜 맞추기(결정 182)', !!seen);
     ok('★ 맞추는 기준은 날짜별 예상 인원(오늘 이후 날짜 배열) — 저장한 날짜만이 아니다',
       seen && Array.isArray(seen.days) && seen.days.length > 2 && seen.days.every(x => x.date >= today) && seen.today === today);
-    ok('★ 관리자 [작업표 재구성] 버튼과 같은 함수(사본 0)',
-      /async function rebuildWorktableFromPlans[\s\S]*_relayInTx\(client, camp/.test(readS('services/campaignPlan.service.js'))
-      && !/rebuildAdjustedPlansToWorktable\(/.test(readS('services/campaignPlan.service.js')));
+    // ★ 결정 185 — 수동 [작업표 재구성]은 지웠다(전 기간 사용 0회) — 날짜 맞추기는 자동 경로(_relayInTx·relayCampaignWorktable) 하나
+    ok('★ 수동 재구성 함수·옛 재배치 함수가 되살아나지 않았다(날짜 맞추기 = _relayInTx 하나)',
+      !/async function rebuildWorktableFromPlans/.test(readS('services/campaignPlan.service.js'))
+      && !/rebuildAdjustedPlansToWorktable\(/.test(readS('services/campaignPlan.service.js'))
+      && /async function _relayInTx/.test(readS('services/campaignPlan.service.js')));
     ok('★★ SAVEPOINT 격리(재구성 실패가 계획 저장을 죽이지 않는다)',
       /* ★ 부분일치로 보면 RELEASE/ROLLBACK TO 가 대신 통과시킨다(변이시험 실측) — 정확일치로 본다. */
       CALLS.some(c => c.sql.trim() === 'SAVEPOINT cp_auto_rebuild'));
@@ -430,18 +432,21 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       && r.worktableSync.slotCap.retire === 3);
 
     // ② 날짜 맞추기가 실패해도 계획 저장은 살아남는다(throw 없음 · ROLLBACK TO 만)
-    sdp.relayWorktableToProjection = async () => { const e = new Error('boom'); e.code = 'worktable_rebuild_below_used'; throw e; };
+    sdp.relayWorktableToProjection = async () => { const e = new Error('boom'); e.code = 'relay_failed'; throw e; };
     STUB = stubWithPlans(); CALLS.length = 0;
     r = await P.savePlans('c1', { set: [{ date: d(1), count: 20 }] }, 'tester');
     eq('★★ 재구성 실패해도 계획 저장은 성공', r.applied, 1);
     ok('★ 실패는 사유로 드러난다(조용한 누락 금지)',
-      r.worktableSync.rebuild.ok === false && r.worktableSync.rebuild.reason === 'worktable_rebuild_below_used');
+      r.worktableSync.rebuild.ok === false && r.worktableSync.rebuild.reason === 'relay_failed');
     ok('★ 트랜잭션 전체가 아니라 SAVEPOINT 만 되돌린다',
       CALLS.some(c => c.sql.includes('ROLLBACK TO SAVEPOINT cp_auto_rebuild'))
       && !CALLS.some(c => c.sql.trim() === 'ROLLBACK'));
     ok('★ 화면이 재구성 실패를 말한다',
       /worktableSync\.rebuild/.test(readF('js/campaign-daily-plan.js'))
-      && /worktable_rebuild_empty/.test(readF('js/campaign-daily-plan.js')));
+      && /no_worktable_rows/.test(readF('js/campaign-daily-plan.js'))
+      && /매일 새벽 4시 20분에 자동으로 다시 맞춥니다/.test(readF('js/campaign-daily-plan.js'))
+      && !/바로 하려면 다시 저장/.test(readF('js/campaign-daily-plan.js'))   // 저장 직후엔 저장 버튼이 잠겨 못 하는 일을 약속하지 않는다
+      && !/\[작업표 재구성\]/.test(readF('js/campaign-daily-plan.js')));
 
     // ③ 킬스위치 = 날짜 맞추기 생략
     seen = null;
@@ -1335,9 +1340,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   {
     const baseFt = CDP.indexOf("'#cdpModal .cdp-ft{display:flex");
     const mqFt = CDP.indexOf("'@media (max-width:560px){#cdpModal .cdp-ft{flex-wrap:wrap");
-    ok('8-2d 휴대폰 하단 = 안내 윗줄 전체 폭 · 버튼 3개 한 줄(줄바꿈 금지) · ★ 일반 규칙 뒤',
+    ok('8-2d 휴대폰 하단 = 안내 윗줄 전체 폭 · 버튼([닫기][확정 저장]) 한 줄(줄바꿈 금지) · ★ 일반 규칙 뒤',
       baseFt > 0 && mqFt > baseFt && /#cdpModal \.cdp-acts\{display:flex;flex:1 1 100%;justify-content:flex-end;gap:6px;flex-wrap:nowrap\}/.test(CDP)
-      && /<span class="cdp-acts"><button type="button" class="cdp-btn" id="cdpRebuildBtn"/.test(CDP));
+      && /'<span class="cdp-acts">'\s*\n\s*\+ '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan\.close\(\)">닫기<\/button>/.test(CDP)
+      && !/cdpRebuildBtn|_rebuildWorktable|worktable-rebuild/.test(CDP));   // 결정 185 — 수동 재구성 버튼 제거
   }
   ok('8-2b 창 폭 780px · 날짜 배지는 날짜 아래(block)',
     /width:min\(780px,94vw\)/.test(CDP) && /#cdpModal \.cdp-d \.cdp-tag\{display:block/.test(CDP));

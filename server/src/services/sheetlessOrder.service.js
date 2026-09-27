@@ -708,7 +708,7 @@ async function writeOrderToWorktable({
   }
 
   /* ★ 138 — 「상품」 칸이 없어 **리뷰어가 고른 상품이 표에서 사라지는** 경우. 옵션 칸과 같은 규율:
-     조용히 넘기지 않는다. 조치는 공고 저장(연결 작업표에 상품 칸 보장) 또는 작업표 재구성. */
+     조용히 넘기지 않는다. 조치는 공고 저장(연결 작업표에 상품 칸 보장). */
   if (productUnmapped) {
     logger.warn(`[sheetlessOrder] ⚠️ 상품 기입 칸 없음 — 리뷰어가 고른 상품이 표에 안 들어감 ` +
       `tab=${tabName} seq=${seq} 선택="${productUnmapped}" os=${orderSubmissionId}`);

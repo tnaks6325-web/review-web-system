@@ -47,7 +47,7 @@ const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
   'POST /manual-order/preview', 'POST /manual-order/submit'];
 const AE_CAMPAIGN_CONTROL = [
   'GET /campaigns/:id/daily-plan', 'POST /campaigns/:id/daily-plan',
-  'PUT /campaigns/:id/carry-strategy', 'POST /campaigns/:id/worktable-rebuild',
+  'PUT /campaigns/:id/carry-strategy',
   'POST /campaigns/:id/rounds', 'DELETE /campaigns/:id/rounds',
   'GET /campaigns/:id/reviewer-gate', 'GET /campaigns/:id/reviewer-gate/search',
   'POST /campaigns/:id/reviewer-gate',
@@ -74,7 +74,9 @@ t('★★ 편집은 전부 공통 게이트 뒤 — AE 허용과 광고주 차�
 t('★ 열람 라우트에는 편집 게이트를 걸지 않는다(읽기까지 막히면 탭이 무의미)', () => {
   READ.forEach(k => assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 열람에 편집 게이트'));
 });
-t('날짜별 인원·차수·작업표 재구성·참여 제한도 AE가 조절', () => {
+t('날짜별 인원·차수·참여 제한도 AE가 조절', () => {
+  // 결정 185 — 수동 [작업표 재구성] 경로는 지웠다(전 기간 사용 0회) · 되살아나면 여기서 잡는다
+  assert.ok(!L['POST /campaigns/:id/worktable-rebuild'], '지운 수동 재구성 경로가 되살아났다');
   AE_CAMPAIGN_CONTROL.forEach(k => {
     assert.ok(L[k], '없음: ' + k);
     assert.ok(L[k].includes('internalMiddleware'), k + ': AE 허용 internalMiddleware 없음');

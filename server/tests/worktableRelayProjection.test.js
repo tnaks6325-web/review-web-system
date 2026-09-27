@@ -13,7 +13,7 @@
  * ⑤ ★ 옮길 줄 순서: 날짜 없음 → 지난 날 → 앞날 — 가까운 앞날 줄을 흔들지 않는다.
  * ⑥ 표기는 작업표를 만든 함수와 같은 `8 / 19 (수)`(worktablePlan.sheetDateStr) — 한 열에 두 표기 금지.
  * ⑦ 조회 기준은 active = TRUE(그리드·조절 창 기준선과 같다).
- * ⑧ 화면·서버 배선: 무시트가 아니면 경고로 올리고, 재구성 버튼은 비활성 + 사유, 확인창은 실제 동작을 말한다.
+ * ⑧ 화면·서버 배선: 무시트가 아니면 경고로 올린다 · 수동 [작업표 재구성]은 지웠다(결정 185 · 전 기간 사용 0회).
  *
  * 실행: node tests/worktableRelayProjection.test.js
  */
@@ -148,26 +148,18 @@ async function run(rows, days, today = '2026-09-26') {
     ok('조절 화면이 전환 누락을 알린다', /무시트 작업표로 전환되지 않은 상태/.test(front));
     ok('연결 상태는 서버가 판정해 내려준다(모르면 null)',
       /worktableLinked: sheetlessLinked/.test(planSrc) && /sheetlessLinked = null;/.test(planSrc));
-    ok('★ [작업표 재구성]은 무시트가 아니면 비활성 + 사유(죽은 버튼 금지)',
-      /function syncRebuildBtn\(\)[\s\S]{0,500}btn\.disabled = \(linked === false\)/.test(front));
-    ok('★ 툴팁·확인창이 실제 동작(날짜 이동·비우기·줄 안 만듦·보호 대상)을 말한다',
-      /줄은 새로 만들지 않음/.test(front)
-      && /빈 줄의 구매일자를 필요한 날짜로 옮깁니다/.test(front)
-      && /줄은 새로 만들지 않습니다/.test(front)
-      && /어느 날에도 필요 없는 빈 줄은 구매일자를 비웁니다/.test(front)
-      && /참여자·연락처·주문이 있는 줄은 건드리지 않습니다/.test(front));
+    ok('★ 수동 [작업표 재구성] 버튼·경로가 되살아나지 않았다(결정 185)',
+      !/cdpRebuildBtn|syncRebuildBtn|_rebuildWorktable|worktable-rebuild/.test(front)
+      && !/async function rebuildWorktableFromPlans/.test(planSrc) && !/worktable-rebuild/.test(rd('src/routes/trackB.routes.js')));
     ok('★ 옛 문구(줄을 새로 만든다)가 남아 있지 않다', !/빈 줄을 새로 만듭니다/.test(front));
-    const rb = planSrc.slice(planSrc.indexOf('async function rebuildWorktableFromPlans'));
-    ok('재구성은 relay(_relayInTx)를 쓴다', /await _relayInTx\(client, camp, today/.test(rb));
-    ok('재구성은 장부 재생성 전에 화면 번호를 정리한다',
-      rb.indexOf('renumberTab({') > 0 && rb.indexOf('renumberTab({') < rb.indexOf('rebuildLedgers({ ...target'));
+    const rl = planSrc.slice(planSrc.indexOf('async function relayCampaignWorktable'));
+    ok('자동 날짜 맞추기는 장부 재생성 전에 화면 번호를 정리한다',
+      rl.indexOf('renumberTab({') > 0 && rl.indexOf('renumberTab({') < rl.indexOf('rebuildLedgers({ ...target'));
     // ★★ 잠금 순서 = 탭 → 공고 → 줄(주문 기록·줄 보충·번호 정리와 같다). 거꾸로면 교착(결정 182 코드리뷰)
     const sp = planSrc.slice(planSrc.indexOf('async function savePlans'), planSrc.indexOf('async function', planSrc.indexOf('async function savePlans') + 30));
     ok('★★ 조절 저장은 탭 잠금을 공고 잠금보다 먼저 잡는다',
       sp.indexOf('_lockTabFirst(client, camp)') > 0 && sp.indexOf('_lockTabFirst(client, camp)') < sp.indexOf("FOR UPDATE', [campaignId]"));
-    ok('★★ [작업표 재구성]도 탭 잠금이 먼저', rb.indexOf('_lockTabFirst(client, camp)') > 0
-      && rb.indexOf('_lockTabFirst(client, camp)') < rb.indexOf('FOR UPDATE'));
-    ok('잠그는 사이 연결이 바뀌면 새 탭 잠금을 잡지 않는다', /_sameTab\(heldTab, camp\)/.test(sp) && /link_changed/.test(rb));
+    ok('잠그는 사이 연결이 바뀌면 새 탭 잠금을 잡지 않는다', /_sameTab\(heldTab, camp\)/.test(sp) && /link_changed/.test(sp));
     ok('총량 초과는 서버가 최종 방어', /code = 'over_total'/.test(planSrc)
       && /over_total: 422/.test(rd('src/routes/trackB.routes.js')));
   }
