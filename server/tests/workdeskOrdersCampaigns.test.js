@@ -35,7 +35,7 @@ const READ = ['GET /work-orders/list', 'GET /campaigns/list', 'GET /campaigns/:i
   'GET /campaigns/:id/activity-log',
   'GET /campaigns/:id/preview', 'GET /perm'];
 const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
-  'PUT /work-orders/update', 'PUT /work-orders/edit', 'POST /work-orders/submit',
+  'PUT /work-orders/update', 'PUT /work-orders/edit',   // (POST /work-orders/submit = 🧪 테스트 오더 — 결정 186 17번 제거)
   'POST /campaigns/create', 'PUT /campaigns/:id', 'POST /campaigns/:id/flags',
   'DELETE /campaigns/:id', 'POST /campaigns/:id/confirm', 'PUT /campaigns/:id/status',
   'POST /campaigns/:id/dismiss', 'POST /campaigns/:id/blog-approve',
