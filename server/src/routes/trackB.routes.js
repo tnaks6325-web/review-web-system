@@ -3925,17 +3925,7 @@ router.post('/payment/batch/:id/deposit-date-backfill', authMiddleware, adminOrM
   } catch (err) { _resultErr(err, res, next); }
 });
 
-// 2026-08-11 manual payment marks were used to exclude targets before board
-// writeback existed.  Restore that historical date without changing batch or
-// target-lock state; date merging keeps any later transfer date visible too.
-router.post('/payment/repair/manual-811-deposit-dates', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if ((req.body || {}).confirm !== true) {
-      return res.status(400).json({ ok: false, code: 'need_confirm', error: '8/11 입금일 복구를 확인해 주세요.' });
-    }
-    res.json(await manualDepositRepairSvc.restoreManual811DepositDates({ by: _by(req) }));
-  } catch (err) { next(err); }
-});
+// (POST /payment/repair/manual-811-deposit-dates·GET /manual-811-transfer-preview — 실행 완료된 1회용 복구, 2026-09-28 제거 · 결정 186 59번)
 
 // "직원이 최초로 적은 입금일" 복원 — 원래 줄에 새기고, 번진 줄에서 지우고, 오버레이를 이력으로 내린다.
 //   판정: 리뷰 제출된 줄이 정확히 1개일 때만 자동. 0개·2개 이상은 보류(사람이 고른다).
@@ -3999,11 +3989,6 @@ router.get('/payment/repair/deposit-anomalies', authMiddleware, adminOrMasterMid
       sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || ''),
     }));
   } catch (err) { next(err); }
-});
-
-router.get('/payment/repair/manual-811-transfer-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await manualDepositRepairSvc.previewManual811Transfer()); }
-  catch (err) { next(err); }
 });
 
 // Admin-only, explicit support correction.  Accept visible workboard seq values

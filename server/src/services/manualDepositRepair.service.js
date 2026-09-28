@@ -3,14 +3,11 @@
 // One-time recovery for the final 8/11 manual payment marks.  A reverted edit
 // is historical evidence only; it must never be re-materialized as a payment.
 const pool = require('../db/pool');
-const { markDepositCells } = require('./paymentApply.service');
 const { rebuildLedgers } = require('./sheetlessLedger.service');
 const { mergeDepositStamps, removeDepositStamp } = require('../utils/depositStamp');
-const { extractAmountNumber } = require('../utils/paymentAmount');
 
 // 직전 후보 산출에서 "앵커가 여러 줄"이라 제외한 행들 — 화면·응답이 사실대로 말하기 위한 값이다
 // (조용히 빼면 담당자가 "왜 N건이 줄었지"를 알 수 없다).
-let _lastAmbiguous = [];
 
 class ManualDepositRepairError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -25,86 +22,6 @@ function _seqs(values, label) {
     throw new ManualDepositRepairError('bad_request', `${label} 순번이 올바르지 않거나 중복되었습니다.`);
   }
   return seqs;
-}
-
-async function _manual811Candidates(client) {
-  const { rows } = await client.query(
-    `WITH marked AS (
-       SELECT DISTINCT pe.id::text AS edit_id, pe.sheet_id, pe.tab_name, pe.anchor_type, pe.anchor_value
-         FROM participant_edits pe
-        WHERE pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
-          AND btrim(pe.value_text) = '8/11'
-     ), resolved AS (
-       SELECT DISTINCT pe.edit_id, pe.sheet_id, pe.tab_name, pe.anchor_type, pe.anchor_value,
-              cp.seq AS row_index, cp.row_json
-         FROM marked pe
-         JOIN campaign_participants cp
-           ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
-          AND cp.deleted_at IS NULL AND cp.active = TRUE
-          AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
-            OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
-            OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
-     )
-       SELECT r.edit_id AS "editId", r.sheet_id AS "sheetId", r.tab_name AS "tabName", r.row_index AS "rowIndex",
-              r.anchor_type AS "anchorType", r.anchor_value AS "anchorValue", r.row_json AS "rowJson",
-            ri.submit_col2 AS "depositColKey", ri.tab_gid AS gid,
-            COALESCE(tc.sheetless, FALSE) AS sheetless,
-            os.price AS "productPrice", os.review_fee_snapshot AS "reviewFeeSnapshot",
-            rc.review_fee AS "reviewFee", ri.reviewer_name AS "reviewerName"
-       FROM resolved r
-       JOIN review_index ri
-         ON ri.sheet_id = r.sheet_id AND ri.tab_name = r.tab_name AND ri.row_index = r.row_index
-       LEFT JOIN tab_configs tc ON tc.sheet_id = r.sheet_id AND tc.tab_name = r.tab_name
-       LEFT JOIN order_submissions os ON os.sheet_id = r.sheet_id AND os.tab_name = r.tab_name
-         AND os.sheet_row = r.row_index AND os.deleted_at IS NULL
-       LEFT JOIN LATERAL (
-         SELECT review_fee FROM recruit_campaigns c
-          WHERE c.linked_sheet_id = r.sheet_id AND c.linked_tab_name = r.tab_name
-          ORDER BY c.created_at DESC LIMIT 1
-       ) rc ON TRUE
-      WHERE COALESCE(ri.submit_col2, '') <> ''
-      ORDER BY r.sheet_id, r.tab_name, r.row_index`);
-
-  const uniqueRows = [...new Map(rows.map(r => [`${r.sheetId}\t${r.tabName}\t${r.rowIndex}`, r])).values()];
-  // ★★ 한 앵커가 여러 줄을 가리키면 그 앵커 전체를 제외한다 (완화 금지 · 2026-08-19 실사고)
-  //   `order_submission_id` 는 유니크가 아니고 `identity_key` 는 `num:<주문번호>` 라서, 중복 줄이
-  //   생긴 탭에서는 수기 표기 1건이 **여러 줄의 입금 원장**(payment_records·batch_items)으로 승격돼
-  //   "이체 1건 = 입금완료 N건" 이 된다. 어느 줄이 진짜인지 모르면 **한 줄도 만들지 않는다.**
-  const perAnchor = new Map();
-  for (const r of uniqueRows) {
-    const k = `${r.sheetId}\t${r.tabName}\t${r.anchorType}\t${r.anchorValue}`;
-    perAnchor.set(k, (perAnchor.get(k) || 0) + 1);
-  }
-  const ambiguous = uniqueRows.filter(r =>
-    perAnchor.get(`${r.sheetId}\t${r.tabName}\t${r.anchorType}\t${r.anchorValue}`) > 1);
-  const single = uniqueRows.filter(r =>
-    perAnchor.get(`${r.sheetId}\t${r.tabName}\t${r.anchorType}\t${r.anchorValue}`) === 1);
-  _lastAmbiguous = ambiguous.map(r => ({
-    sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
-    anchorType: r.anchorType, anchorValue: r.anchorValue, reviewerName: r.reviewerName || '',
-  }));
-  return single.map(r => ({
-    ...r,
-    stamp: '8/11',
-    sourceKey: `manual-811:${r.editId}`,
-    amount: Math.max(0, Number(r.productPrice || extractAmountNumber(r.rowJson) || 0)
-      + Number(r.reviewFeeSnapshot != null ? r.reviewFeeSnapshot : (r.reviewFee || 0))),
-  }));
-}
-
-async function previewManual811Transfer() {
-  const items = await _manual811Candidates(pool);
-  const { rows: existing } = await pool.query(
-    `SELECT historical_key FROM payment_batches WHERE historical_key = 'manual-811' LIMIT 1`);
-  const { rows: conflicts } = items.length ? await pool.query(
-    `SELECT sheet_id, tab_name, row_index FROM payment_batch_items
-      WHERE (sheet_id, tab_name, row_index) IN (SELECT * FROM unnest($1::text[], $2::text[], $3::int[]))
-        AND status IN ('pending','paid')`,
-    [items.map(x => x.sheetId), items.map(x => x.tabName), items.map(x => x.rowIndex)]) : { rows: [] };
-  return { ok: true, candidates: items.length, totalAmount: items.reduce((n, x) => n + x.amount, 0),
-    existingBatch: !!existing.length, conflicts: conflicts.length, blocked: items.filter(x => !x.sheetless || !x.depositColKey).length,
-    // 앵커가 여러 줄을 가리켜 제외한 행 — 조용히 빼지 않는다(중복 줄부터 정리해야 한다는 신호).
-    ambiguous: _lastAmbiguous.length, ambiguousRows: _lastAmbiguous.slice(0, 200) };
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -218,68 +135,9 @@ async function depositAnomalyReport({ sheetId = '', tabName = '' } = {}) {
   return out;
 }
 
-async function restoreManual811DepositDates({ by = 'payment-repair' } = {}) {
-  const client = await pool.connect();
-  let items = [];
-  let batch;
-  try {
-    await client.query('BEGIN');
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext('manual_811_transfer_batch'))`);
-    items = await _manual811Candidates(client);
-    if (!items.length) throw new ManualDepositRepairError('empty', '복구할 8/11 수동 입금 기록을 찾지 못했습니다.');
-    if (items.some(x => !x.sheetless || !x.depositColKey)) throw new ManualDepositRepairError('unresolved', '입금 컬럼 또는 무시트 작업표를 찾지 못한 행이 있어 전체 복구를 중단했습니다.');
-    const { rows: existingBatches } = await client.query(
-      `SELECT * FROM payment_batches WHERE historical_key = 'manual-811' FOR UPDATE`);
-    if (existingBatches.length) {
-      batch = existingBatches[0];
-      await client.query('COMMIT');
-    } else {
-    const { rows: conflicts } = await client.query(
-      `SELECT sheet_id, tab_name, row_index FROM payment_batch_items
-        WHERE (sheet_id, tab_name, row_index) IN (SELECT * FROM unnest($1::text[], $2::text[], $3::int[]))
-          AND status IN ('pending','paid')`, [items.map(x => x.sheetId), items.map(x => x.tabName), items.map(x => x.rowIndex)]);
-    if (conflicts.length) throw new ManualDepositRepairError('already_locked', `기존 이체 회차와 겹치는 ${conflicts.length}건이 있어 중복 기록을 중단했습니다.`);
-    const { rows: batches } = await client.query(
-      `INSERT INTO payment_batches (seq, bank, status, item_count, total_amount, created_by, created_at, historical_key)
-       VALUES (0, 'manual', 'applied', $1, $2, $3, '2026-08-11 00:00:00+09', 'manual-811')
-       RETURNING *`, [items.length, items.reduce((n, x) => n + x.amount, 0), by]);
-    batch = batches[0];
-    for (const item of items) {
-      await client.query(
-        `INSERT INTO payment_batch_items (batch_id, sheet_id, tab_name, row_index, reviewer_name, product_price, review_fee, amount, status, paid_at, transfer_memo)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'paid','2026-08-11 00:00:00+09','수동 이력 #0')`, [batch.id, item.sheetId, item.tabName, item.rowIndex, item.reviewerName || '',
-          Number(item.productPrice || extractAmountNumber(item.rowJson) || 0), Number(item.reviewFeeSnapshot != null ? item.reviewFeeSnapshot : (item.reviewFee || 0)), item.amount]);
-      await client.query(
-        `INSERT INTO manual_payment_marks (source_key, batch_id, sheet_id, tab_name, anchor_type, anchor_value, deposit_col_key, stamp, paid_at, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'8/11','2026-08-11 00:00:00+09',$8)
-         ON CONFLICT (source_key) DO NOTHING`, [item.sourceKey, batch.id, item.sheetId, item.tabName, item.anchorType, item.anchorValue, item.depositColKey, by]);
-      await client.query(
-        `INSERT INTO payment_records (sheet_id, tab_name, reviewer_name, row_index, amount, paid_by, paid_at, source_key)
-         VALUES ($1,$2,$3,$4,$5,$6,'2026-08-11 00:00:00+09',$7)
-         ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO NOTHING`, [item.sheetId, item.tabName, item.reviewerName || '', item.rowIndex, item.amount, by, item.sourceKey]);
-    }
-    await client.query('COMMIT');
-    }
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw err;
-  } finally { client.release(); }
-
-  const board = await markDepositCells(items, { by, deferSheetlessRebuild: true });
-  // #0도 자동 이체회차와 같은 작업보드 반영 이력을 남긴다. 이 값이 없으면 입금칸이
-  // 실제로 복구돼도 회차 목록에는 "입금일 미기록"으로 보여 운영자가 다시 실행하게 된다.
-  await pool.query(
-    `UPDATE payment_batches
-        SET board_recorded_count = $2, board_queued_count = $3, board_skipped_count = $4,
-            board_failed_count = $5, board_stamp = '8/11', board_recorded_at = NOW(), board_recorded_by = $6
-      WHERE id = $1`, [batch.id, board.recorded, board.queued, board.skipped, board.failed, by]);
-  const sheetlessTabs = [...new Map(items.filter(x => x.sheetless)
-    .map(x => [`${x.sheetId}\t${x.tabName}`, x])).values()];
-  for (const tab of sheetlessTabs) {
-    await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by });
-  }
-  return { ok: true, batch: { id: batch.id, seq: 0, totalAmount: Number(batch.total_amount || 0) }, candidates: items.length, stamp: '8/11', rebuiltTabs: sheetlessTabs.length, ...board };
-}
+/* (8/11 수동 이체 #0 회차 복구 restoreManual811DepositDates·previewManual811Transfer 는 운영에서 이미 실행 완료
+   (payment_batches.historical_key='manual-811', 339건) → 2026-09-28 제거, 결정 186 59번.
+   #0 회차 자체와 manual_payment_marks·rehydrate 는 그대로 쓴다.) */
 
 // Controlled support operation for a verified pair of row groups.  It is
 // intentionally fail-closed: populated destinations, missing source dates,
@@ -1045,4 +903,4 @@ async function applyOverlayFanoutFix({ sheetId = '', tabName = '', by = 'payment
     rebuiltTabs: rebuilt, summary: _overlaySummary(groups), items: _overlayView(groups) };
 }
 
-module.exports = { previewManual811Transfer, depositAnomalyReport, previewOverlayFanoutFix, applyOverlayFanoutFix, previewDepositFanoutCleanup, applyDepositFanoutCleanup, restoreManual811DepositDates, moveDepositDateBetweenRows, ManualDepositRepairError };
+module.exports = { depositAnomalyReport, previewOverlayFanoutFix, applyOverlayFanoutFix, previewDepositFanoutCleanup, applyDepositFanoutCleanup, moveDepositDateBetweenRows, ManualDepositRepairError };
