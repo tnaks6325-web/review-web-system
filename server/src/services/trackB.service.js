@@ -958,7 +958,6 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             rc.recruit_total AS "recruitTotal", rc.cash_receipt_required AS "cashReceiptRequired",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
-            tm.memo,
             EXISTS (SELECT 1 FROM index_master im WHERE im.status = 'active' AND im.sheet_id = t.sheet_id
                       AND (im.tab_gid = t.tab_gid OR im.tab_name = t.tab_name)) AS "active"
        /*
@@ -1094,7 +1093,6 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           WHERE c.sheet_id = t.sheet_id AND c.tab_name = t.tab_name AND c.deleted_at IS NULL
           ORDER BY c.created_at DESC, c.id DESC LIMIT 1
        ) co ON TRUE
-       LEFT JOIN trackb_tab_memos tm ON tm.sheet_id = t.sheet_id AND tm.tab_name = t.tab_name
       ORDER BY COALESCE(wo.latest_work_order_created_at, cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
   // ── 자료 폴더 바로가기(시안 A) 재료 — ★ 쿼리 순증 0(tab_configs 를 이미 조인하고 있다).
   //   현영 대상 여부는 captureSlots.hasCashReceiptSlot 단일 규칙(홈 버튼·/tab-folders 와 같은 함수).
@@ -2179,17 +2177,7 @@ function _normIntraDate(s) {
   return v.slice(0, 10);
 }
 
-// ── 연결탭 비고(자유 텍스트, migration 056) — 탭당 1행 upsert. 관제실 '비고(인애드)' 대응. ──
-async function saveTabMemo({ sheetId, tabName, memo = '', by = '' } = {}) {
-  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
-  const text = ((typeof memo === 'string' || typeof memo === 'number') ? String(memo) : '').slice(0, 2000);
-  await getPool().query(
-    `INSERT INTO trackb_tab_memos (sheet_id, tab_name, memo, updated_by, updated_at)
-     VALUES ($1,$2,$3,$4,NOW())
-     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET memo=$3, updated_by=$4, updated_at=NOW()`,
-    [sheetId, tabName, text, String(by || '').slice(0, 100)]);
-  return { ok: true, memo: text };
-}
+// (연결탭 비고 saveTabMemo — 업체관리 비고 칸(결정 186 33번) 제거 뒤 호출처 0 → 2026-09-28 제거(58번). trackb_tab_memos 표는 보존.)
 
 // ══════════════════════════════════════════════════════════════════════════
 // P3 — 마감자료 자동 생성(리뷰완료 증빙 스냅샷, migration 055)
@@ -6186,7 +6174,7 @@ module.exports = {
   invoiceDocForTab,
   brandsForAdvertiser, createBrand, updateBrand, assignBrandTabs, brandTabAllowed,
   tabBrandManagersMap, tabBrandManagersFor, setTabBrandManagers, _normBrandManagers,
-  settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
+  settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   __advertiserHeaderCandidatesForTest: _advertiserHeaderCandidates,
   __advertiserColumnValueForTest: _advertiserColumnValue,

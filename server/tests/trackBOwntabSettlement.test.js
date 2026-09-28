@@ -4,7 +4,7 @@
  *      날짜 정규화(YYYYMMDD→YYYY-MM-DD), 입금액=matched_bank_amount, 총비용=견적 우선.
  *   2. 금액 불일치(견적≠계약) — amountMismatch 신호(자동 판정 없음), totalCost 는 견적 금액 유지.
  *   3. 인트라넷 장애 — proxyDown 표기(스로우 금지, fail-soft).
- *   4. saveTabMemo — upsert(ON CONFLICT) + 2000자 캡.
+ *   4. (saveTabMemo — 결정 186 58번에서 제거. 되살아나지 않는지만 본다)
  *   5. Track A 무접촉 — 읽기만(비 trackb 테이블 write 0).
  * 실행: node tests/trackBOwntabSettlement.test.js
  */
@@ -82,19 +82,11 @@ async function run() {
   assert.equal(items[0].contractNumber, 'C-1', '3c: 링크의 계약번호는 유지(로컬)');
   console.log('  3. 인트라넷 장애 fail-soft(proxyDown) ✓');
 
-  // ═══ 4. saveTabMemo — upsert + 2000자 캡 ═══
-  p = pool([[/INSERT INTO trackb_tab_memos/, (s, prm) => ({ rows: [], rowCount: 1, _prm: prm })]]);
-  svc.__setPoolForTest(p);
-  let r = await svc.saveTabMemo({ sheetId: 'S', tabName: 'T1', memo: 'x'.repeat(3000), by: 'kim' });
-  assert.equal(r.ok, true); assert.equal(r.memo.length, 2000, '4a: 2000자 캡');
-  const ins = p.q.find(x => /INSERT INTO trackb_tab_memos/.test(x.s));
-  assert.ok(/ON CONFLICT \(sheet_id, tab_name\) DO UPDATE/.test(ins.s), '4b: 탭당 1행 upsert');
-  assert.equal(ins.params[3], 'kim', '4c: updated_by 기록');
-  r = await svc.saveTabMemo({ sheetId: '', tabName: 'T' });
-  assert.equal(r.ok, false, '4d: sheetId 필수');
-  console.log('  4. saveTabMemo — upsert·캡·검증 ✓');
+  // ═══ 4. 비고 저장(saveTabMemo·POST /tab-memo)은 결정 186 58번에서 제거 — 호출 화면 0 ═══
+  assert.equal(typeof svc.saveTabMemo, 'undefined', '4a: saveTabMemo 가 되살아났다(호출 화면 없음)');
+  console.log('  4. 비고 저장 경로 부재 ✓');
 
-  // ═══ 5. Track A 무접촉(요약은 읽기만, 비고는 trackb_tab_memos 만 write) ═══
+  // ═══ 5. Track A 무접촉(요약은 읽기만) ═══
   const writes = p.q.filter(x => /INSERT|UPDATE|DELETE/i.test(x.s) && !/trackb_/.test(x.s));
   assert.equal(writes.length, 0, '5a: 비 trackb 테이블 write 0');
   console.log('  5. Track A 무접촉 ✓');
