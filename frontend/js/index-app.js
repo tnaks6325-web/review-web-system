@@ -23,7 +23,6 @@ const SYSTEM_NOTICES = [
     title: "신기능 — 캠페인탭 참여자 명단을 시스템에서 직접 관리 (테스트 단계)",
     changes: [
       { type: "feat", text: "시트 참여자 명단을 시스템으로 가져와 화면에서 보기·추가/수정/삭제·리뷰제출/입금 체크 (최고관리자 전용)" },
-      { type: "feat", text: "직원 안내서(유저플로우) 제공 — 공지 팝업의 '직원 안내서 보기' 또는 db-first-guide.html" },
       { type: "warn", text: "안전 테스트 단계: 모든 동작이 테스트 저장공간에만 반영 → 리뷰어·구글시트·주문에 영향 없음" },
     ]
   },
@@ -119,24 +118,6 @@ function checkAndShowNotice() {
     content.style.display = "none";
     _updateNoticeButtons(false, true);
   }
-}
-
-// ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) — 확인 전까지 로그인 시마다 표시.
-const DBFIRST_GUIDE_VERSION = "v1";
-function _showDbFirstGuidePopup() {
-  try {
-    if (localStorage.getItem("dbfirst_guide_seen") === DBFIRST_GUIDE_VERSION) return; // 다시 안 보기 처리됨
-    if (typeof show === "function") show("dbFirstGuideModal", "flex");
-    else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.remove("hidden"); m.style.display = "flex"; } }
-  } catch (_) {}
-}
-function closeDbFirstGuide(markSeen) {
-  try { if (markSeen) localStorage.setItem("dbfirst_guide_seen", DBFIRST_GUIDE_VERSION); } catch (_) {}
-  if (typeof hide === "function") hide("dbFirstGuideModal");
-  else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.add("hidden"); m.style.display = "none"; } }
-}
-function openDbFirstGuide() {
-  window.open("db-first-guide.html", "_blank");
 }
 
 function _renderNoticeList(content, dismissedVersion, collapsed) {
@@ -886,26 +867,7 @@ function getAdminSessionRemaining() {
   return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
 }
 
-/* ── 업무포털 새창 열기 (로그인 세션 이어주기) ──
-   portal.html은 새 탭이라 sessionStorage(admin_token)를 공유하지 않으므로,
-   동일 출처 localStorage로 토큰/이름/역할을 잠시 넘겨준다(포털이 읽는 즉시 삭제).
-   admin·portal 모두 /api/admin/login 토큰을 쓰므로 같은 JWT로 자동 로그인된다. */
-function openWorkPortal() {
-  const token = sessionStorage.getItem("admin_token") || "";
-  if (!token || !isAdminLoggedIn()) {
-    showToast("관리자 로그인이 필요합니다.", "warning");
-    return;
-  }
-  try {
-    localStorage.setItem("portal_sso", JSON.stringify({
-      token,
-      name: getAdminName(),
-      role: getAdminRole(),
-      ts: Date.now()
-    }));
-  } catch (e) { /* localStorage 불가 시에도 포털 자체 로그인으로 폴백 */ }
-  window.open("portal.html", "_blank");
-}
+/* (업무포털 새창 openWorkPortal 은 portal.html 과 함께 2026-09-28 제거 — 결정 186 45번.) */
 
 /* ── 구글시트 RAW 미러 페이지 열기 (자동 로그인 핸드오프) ── */
 function openRawMirror() {
@@ -1077,9 +1039,6 @@ function enterAdminScreen() {
 
   // ★ 관리자 공지 팝업 (DB 기반, 마스터가 작성한 공지)
   setTimeout(_checkAdminNoticePopup, 400);
-
-  // ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단) — 확인 전까지 표시
-  setTimeout(_showDbFirstGuidePopup, 700);
 
   // ── Phase 5/6: 시스템 모니터링 + API 메트릭 자동 로드 ──
   if (typeof loadSystemMonitor === 'function') {
@@ -1375,7 +1334,6 @@ function switchAdminTab(tabName) {
   if (tabName === "cs-inquiry") { try { loadCsRooms(); } catch(_){} }
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
-  if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadAiSamples(); } catch(_){} try { loadMyNickname(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} try { loadWorktableTemplate(); } catch(_){} try { loadGateCriteria(); } catch(_){} }
@@ -2358,9 +2316,6 @@ const _CTX_TOOLBAR_DEFS = {
     { id:'ctx-rec-notice',  label:'공지설정',  icon:'fa-bullhorn',    style:'yellow',     onclick:"openNoticePanel()", title:'공지 배너 설정'},
     { id:'ctx-rec-preview', label:'미리보기',  icon:'fa-eye',         style:'',           onclick:"window.open('recruit.html','_blank')", title:'모집 페이지 미리보기'},
   ],
-  payment: [
-    { id:'ctx-pay-refresh', label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"initPaymentPanel()", title:'입금 목록 새로고침'},
-  ],
 };
 
 const _CTX_STYLE_MAP = {
@@ -3202,7 +3157,6 @@ async function loadAdminDashboard() {
     loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용 (DOM 재빌드 시 인라인 스타일 유지)
     _loadHiddenCols();  // ★ 열 숨김 상태 복원
     _resetSort();       // ★ 정렬 초기화
-    _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
     clearDashSearch();  // ★ 새로고침 시 검색 초기화
     setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
     _lastDashData = data;
@@ -3395,7 +3349,6 @@ function renderDashboard(data) {
   loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용
   _loadHiddenCols();  // ★ 열 숨김 상태 복원
   _resetSort();       // ★ 정렬 초기화
-  _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
   clearDashSearch();  // ★ 렌더 시 검색 초기화
   setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
   // ★ v10.0 P1-D: 재렌더 후 dirty 배지도 갱신
@@ -3554,86 +3507,6 @@ function _buildEndDateHtml(tabKey, endDate, isTabDone, isClosedTab) {
   return `<span style="display:flex;align-items:center;gap:2px">${badge}${refreshBtn}</span>`;
 }
 
-/* ── v9.9: 메모 공유 패널 ── */
-let _memoCurrentTab = null; // { sheetId, tabName, displayName }
-
-async function openMemoPanel(sheetId, tabName, displayName) {
-  _memoCurrentTab = { sheetId, tabName, displayName };
-  const overlay = document.getElementById("memoOverlay");
-  const titleEl = document.getElementById("memoModalTitle");
-  if (titleEl) titleEl.textContent = (displayName || tabName) + " 메모";
-  overlay.classList.add("open");
-  await _loadMemoMessages();
-}
-
-function closeMemoPanel() {
-  document.getElementById("memoOverlay").classList.remove("open");
-  _memoCurrentTab = null;
-}
-
-async function _loadMemoMessages() {
-  const chatArea = document.getElementById("memoChatArea");
-  if (!chatArea || !_memoCurrentTab) return;
-  chatArea.innerHTML = '<div class="memo-empty"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
-  try {
-    const data = await gasGet({ action: "getMemo", sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName });
-    const msgs = (data && data.messages) ? data.messages : [];
-    if (msgs.length === 0) {
-      chatArea.innerHTML = '<div class="memo-empty">아직 메모가 없습니다.<br>첫 메모를 남겨보세요!</div>';
-      return;
-    }
-    chatArea.innerHTML = msgs.map(m => {
-      const roleClass  = m.role === "admin" ? "admin" : "staff";
-      const roleLabel  = m.role === "admin" ? "👔 관리자" : "💼 AE";
-      const timeStr    = m.ts ? new Date(m.ts).toLocaleString("ko-KR", { month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
-      return `<div class="memo-bubble ${roleClass}">
-        <div>${escHtml(m.text)}</div>
-        <div class="memo-bubble-meta">${roleLabel} ${escHtml(m.name)} · ${timeStr}</div>
-      </div>`;
-    }).join("");
-    chatArea.scrollTop = chatArea.scrollHeight;
-  } catch(e) {
-    chatArea.innerHTML = `<div class="memo-empty" style="color:#EF4444">불러오기 실패: ${escHtml(e.message)}</div>`;
-  }
-}
-
-async function sendMemoMsg() {
-  if (!_memoCurrentTab) return;
-  const textEl = document.getElementById("memoInputText");
-  const text   = (textEl ? textEl.value : "").trim();
-  if (!text) { showToast("메모 내용을 입력하세요.", "warning"); return; }
-
-  // 관리자 세션에서 이름 가져오기
-  const _sess = (() => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch(_) { return null; }
-  })();
-  if (!_sess || !_sess.name) { showToast("로그인이 필요합니다.", "error"); return; }
-
-  const sendBtn = document.querySelector(".memo-send-btn");
-  if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>'; }
-  try {
-    await gasGet({ action: "saveMemo",
-      sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName,
-      role: "admin", name: _sess.name, text });
-    if (textEl) textEl.value = "";
-    await _loadMemoMessages();
-    // ★ 메모 미리보기 캐시 무효화
-    const tabKey = _memoCurrentTab.sheetId + "||" + _memoCurrentTab.tabName;
-    _invalidateMemoCache(tabKey);
-    document.querySelectorAll(`.btn-tab-memo`).forEach(btn => {
-      if (btn.closest("[data-tabkey='" + tabKey + "']") || btn.onclick?.toString().includes(escHtml(tabKey))) {
-        btn.classList.add("has-memo");
-      }
-    });
-  } catch(e) {
-    showToast("메모 저장 실패: " + e.message, "error");
-  } finally {
-    if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
-  }
-}
 async function refreshTabEndDate(btnEl, tabKey) {
   const parts = tabKey.split("||");
   if (parts.length < 2) return;
@@ -3883,7 +3756,6 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     <div style="display:flex;align-items:center;justify-content:center;gap:3px;flex-wrap:nowrap;overflow:hidden;min-width:0;padding:0 2px">
       <button class="tc-info-btn tc-clickable" data-tc="${tcAttr}" title="일괄 정보 입력·수정" style="flex-shrink:0">+정보</button>
       <button class="btn-tab-stats" onclick="event.stopPropagation();openStatsPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="진행률 상세 보기" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-chart-bar"></i></button>
-      <button class="btn-tab-memo" onclick="event.stopPropagation();openMemoPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="메모 보기/입력" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-comment-dots"></i></button>
     </div>`;
 }
 
@@ -4630,94 +4502,6 @@ function _resetSort() {
     const icon = cell.querySelector('.col-sort-icon');
     if (icon) icon.innerHTML = '⇅';
   });
-}
-
-/* ══════════════════════════════════════════════════════════
-   ★ 기능 3: 메모 미리보기 툴팁
-   ══════════════════════════════════════════════════════════ */
-// 탭키별 메모 최근 내용 캐시 { tabKey: "최근메모텍스트" }
-const _memoPreviewCache = {};
-let _memoTooltipTimer = null;
-
-/** 메모 버튼에 hover 이벤트 등록 (대시보드 렌더 후 호출) */
-function _bindMemoPreviewTooltips() {
-  const wrap = document.getElementById('dashboardWrap');
-  if (!wrap) return;
-
-  // 위임 방식으로 등록 (행이 동적으로 추가되어도 동작)
-  wrap.addEventListener('mouseenter', _onMemoMouseEnter, true);
-  wrap.addEventListener('mouseleave', _onMemoMouseLeave, true);
-}
-
-function _onMemoMouseEnter(e) {
-  const btn = e.target.closest('.btn-tab-memo.has-memo');
-  if (!btn) return;
-
-  // onclick 속성에서 tabKey 추출 (sheetId + tabName)
-  const onclickStr = btn.getAttribute('onclick') || '';
-  const m = onclickStr.match(/openMemoPanel\('([^']+)'\s*,\s*'([^']+)'/);
-  if (!m) return;
-  const sheetId = m[1];
-  const tabName = m[2];
-  const tabKey  = sheetId + '||' + tabName;
-
-  clearTimeout(_memoTooltipTimer);
-  _memoTooltipTimer = setTimeout(async () => {
-    const tooltip = document.getElementById('memoPreviewTooltip');
-    if (!tooltip) return;
-
-    // 캐시 없으면 GAS 호출
-    if (!_memoPreviewCache[tabKey]) {
-      tooltip.textContent = '📝 로딩 중...';
-      _showMemoTooltipAt(tooltip, btn);
-      try {
-        const data = await gasGet({ action: 'getMemo', sheetId, tabName });
-        const msgs = (data && data.messages) ? data.messages : [];
-        if (msgs.length === 0) {
-          _memoPreviewCache[tabKey] = '(메모 없음)';
-        } else {
-          const last = msgs[msgs.length - 1];
-          const role = last.role === 'admin' ? '관리자' : 'AE';
-          const text = (last.text || '').slice(0, 60) + ((last.text||'').length > 60 ? '…' : '');
-          _memoPreviewCache[tabKey] = `💬 ${role}: ${text}`;
-        }
-      } catch(_) {
-        _memoPreviewCache[tabKey] = '(불러오기 실패)';
-      }
-    }
-
-    // 툴팁이 아직 표시 중이면 내용 업데이트
-    if (tooltip.style.display !== 'none') {
-      tooltip.textContent = _memoPreviewCache[tabKey] || '';
-      _showMemoTooltipAt(tooltip, btn);
-    }
-  }, 400); // 400ms 딜레이
-}
-
-function _onMemoMouseLeave(e) {
-  const btn = e.target.closest('.btn-tab-memo');
-  if (!btn) return;
-  clearTimeout(_memoTooltipTimer);
-  const tooltip = document.getElementById('memoPreviewTooltip');
-  if (tooltip) tooltip.style.display = 'none';
-}
-
-function _showMemoTooltipAt(tooltip, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  tooltip.style.display = 'block';
-  tooltip.style.left = (rect.left + window.scrollX) + 'px';
-  tooltip.style.top  = (rect.top  + window.scrollY - tooltip.offsetHeight - 10) + 'px';
-  // 화면 오른쪽 초과 방지
-  const tw = tooltip.offsetWidth;
-  const overRight = rect.left + tw - window.innerWidth + 12;
-  if (overRight > 0) {
-    tooltip.style.left = (rect.left + window.scrollX - overRight) + 'px';
-  }
-}
-
-// 메모 캐시 무효화 (메모 전송 후 호출)
-function _invalidateMemoCache(tabKey) {
-  delete _memoPreviewCache[tabKey];
 }
 
 /**
@@ -5781,146 +5565,6 @@ async function copyShortLink(btnEl) {
   } catch (e) {
     markCopied(false);
     showToast("❌ 클립보드 복사 실패: " + e.message, "error");
-  }
-}
-
-/* ── 광고주 뷰 URL 복사 (sheetId 단위 고정 URL + 단축URL) ── */
-/* 캠페인 헤더 광고주 URL 복사 (sheetId 직접 전달) */
-async function copyCampViewerLink(btnEl) {
-  const sheetId = btnEl.getAttribute("data-sheetid") || "";
-  if (!sheetId) {
-    showToast("광고주 URL 생성 실패: sheetId가 없습니다.", "error");
-    return;
-  }
-
-  const base    = location.origin + location.pathname.replace(/[^/]*$/, "") + "viewer.html";
-  const longUrl = base + "?s=" + encodeURIComponent(sheetId);
-
-  const origHtml = btnEl.innerHTML;
-  btnEl.classList.add("loading");
-  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
-  btnEl.disabled  = true;
-
-  let finalUrl = longUrl;
-  try {
-    if (APP_CONFIG.GAS_WEB_APP_URL) {
-      const data = await gasGet({
-        action: "createShort",
-        s: sheetId, g: "", t: "__viewer__", d: ""
-      });
-      if (data && data.success && data.code) {
-        finalUrl = base + "?code=" + data.code;
-      }
-    }
-  } catch(e) {
-    console.warn("[campViewerLink] 단축URL 실패, 긴URL로 폴백:", e.message);
-  }
-
-  btnEl.classList.remove("loading");
-  btnEl.disabled = false;
-
-  const _markCopied = (ok) => {
-    btnEl.classList.add(ok ? "copied" : "error");
-    btnEl.innerHTML = ok
-      ? '<i class="fas fa-check"></i> 복사됨'
-      : '<i class="fas fa-times"></i> 실패';
-    setTimeout(() => {
-      btnEl.classList.remove("copied", "error");
-      btnEl.innerHTML = origHtml;
-    }, 2500);
-  };
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(finalUrl);
-    } else {
-      const ta = document.createElement("textarea");
-      ta.value = finalUrl;
-      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-    _markCopied(true);
-    showToast("👁 광고주 URL 복사 완료!", "success");
-  } catch(e) {
-    _markCopied(false);
-    showToast("복사 실패: " + e.message, "error");
-  }
-}
-
-async function copyViewerLink(btnEl) {
-  let tc = {};
-  try {
-    const raw = btnEl.getAttribute("data-tc") || "";
-    tc = JSON.parse(raw.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>'));
-  } catch(e) {
-    showToast("광고주 URL 생성 실패: 데이터 파싱 오류", "error");
-    return;
-  }
-
-  const sheetId = tc.sheetId || "";
-  if (!sheetId) {
-    showToast("광고주 URL 생성 실패: sheetId가 없습니다.", "error");
-    return;
-  }
-
-  // viewer.html 기본 URL (sheetId만 사용)
-  const base    = location.origin + location.pathname.replace(/[^/]*$/, "") + "viewer.html";
-  const longUrl = base + "?s=" + encodeURIComponent(sheetId);
-
-  const origHtml = btnEl.innerHTML;
-  btnEl.classList.add("loading");
-  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
-  btnEl.disabled  = true;
-
-  // 단축 URL 생성 (viewer 타입 — tabName을 "__viewer__"로 구분)
-  let finalUrl = longUrl;
-  try {
-    if (APP_CONFIG.GAS_WEB_APP_URL) {
-      const data = await gasGet({
-        action: "createShort",
-        s: sheetId, g: "", t: "__viewer__", d: ""
-      });
-      if (data && data.success && data.code) {
-        finalUrl = base + "?code=" + data.code;
-      }
-    }
-  } catch(e) {
-    console.warn("[viewerLink] 단축URL 실패, 긴URL로 폴백:", e.message);
-  }
-
-  btnEl.classList.remove("loading");
-  btnEl.disabled = false;
-
-  // 복사
-  const _markCopied = (ok) => {
-    btnEl.classList.add(ok ? "copied" : "error");
-    btnEl.innerHTML = ok ? '<i class="fas fa-check"></i>' : '<i class="fas fa-times"></i>';
-    setTimeout(() => {
-      btnEl.classList.remove("copied","error");
-      btnEl.innerHTML = origHtml;
-    }, 2500);
-  };
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(finalUrl);
-    } else {
-      const ta = document.createElement("textarea");
-      ta.value = finalUrl;
-      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-    _markCopied(true);
-    showToast("👁 광고주 URL 복사 완료!", "success");
-  } catch(e) {
-    _markCopied(false);
-    showToast("❌ 복사 실패: " + e.message, "error");
   }
 }
 
@@ -14159,15 +13803,7 @@ function openTabDashDetail(idx) {
     ]},
   ];
 
-  // 🧾 외부모집 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
-  //   값을 onclick 문자열에 심지 않고 인덱스로만 넘긴다(탭명·시트명 주입 벡터 차단).
-  let html = `<div style="display:flex;align-items:center;gap:8px;background:#F0FDFA;border:1px solid #99E6D8;border-radius:10px;padding:9px 12px;margin-bottom:14px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.78rem;font-weight:800;color:#0F766E">외부모집 리뷰어 구매양식</div>
-        <div style="font-size:.68rem;color:#6B7280;margin-top:1px">카톡으로 받은 슬래시양식을 붙여넣으면 리뷰어 등록·시트 기록까지 한 번에 처리됩니다</div>
-      </div>
-      <button onclick="openManualOrderForTab(${idx})" style="font-size:.74rem;font-weight:800;background:#0F766E;color:#fff;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap">🧾 수동제출</button>
-    </div>`;
+  let html = '';
   groups.forEach(g => {
     html += `<div style="margin-bottom:14px">
       <div style="font-size:.82rem;font-weight:700;color:${g.color};margin-bottom:6px"><i class="fas ${g.icon}" style="margin-right:5px"></i>${g.title}</div>
@@ -14189,20 +13825,6 @@ function openTabDashDetail(idx) {
 function closeTabDashDetail() {
   const modal = document.getElementById("tabDashDetailModal");
   if (modal) modal.style.display = "none";
-}
-
-/** 🧾 작업 탭 관리 상세 → 외부모집 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
-function openManualOrderForTab(idx) {
-  const t = _filterTabDashData()[idx];
-  if (!t) return;
-  if (!window.ManualOrder) { showToast("수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.", "error"); return; }
-  window.ManualOrder.open({
-    sheetId: t.sheet_id || "",
-    tabName: t.tab_name || "",
-    gid: t.tab_gid ? String(t.tab_gid) : "",
-    campaignId: null,          // 탭 단위 진입 — 참여형 정원 차감은 공고 카드·관제 패널 경로에서만
-    title: t.display_name || t.tab_name || "",
-  });
 }
 
 // ── CSV 내보내기 ──
@@ -14921,284 +14543,6 @@ function _showSyncTabNamesResult(res, dryRun) {
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 }
 
-// ═══════════════════════════════════════════════════════════
-// 중복 파일 정리 (Dedupe) — 미리보기 → 확인 → 실행
-// ═══════════════════════════════════════════════════════════
-
-/**
- * 미리보기 모달 열기
- */
-async function openDedupePreview(btn) {
-  const sheetId = btn.dataset.sheetid;
-  const tabName = btn.dataset.tabname;
-  if (!sheetId || !tabName) return showToast("탭 정보 누락", "error");
-
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-  try {
-    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
-    const resp = await fetch(API_BASE_URL + '/api/dedupe/preview', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? 'Bearer ' + token : '',
-      },
-      body: JSON.stringify({ sheetId, tabName }),
-    });
-    const data = await resp.json();
-
-    if (!resp.ok || data.error) {
-      showToast(data.error || '중복 검사 실패', 'error');
-      return;
-    }
-
-    if (data.duplicateGroups === 0) {
-      showToast(`중복 파일 없음 (총 ${data.totalFiles}개 파일 검사 완료)`, 'success');
-      return;
-    }
-
-    // 미리보기 모달 렌더
-    _renderDedupeModal(data, sheetId, tabName, btn.dataset.folderurl || '');
-  } catch (err) {
-    showToast('중복 검사 오류: ' + err.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-broom"></i>';
-  }
-}
-
-/**
- * 미리보기 모달 렌더링
- */
-function _renderDedupeModal(data, sheetId, tabName, folderUrl) {
-  // folderUrl이 data에 없으면 파라미터에서 가져옴
-  if (!data.folderUrl && folderUrl) data.folderUrl = folderUrl;
-  // 기존 모달 제거
-  const existing = document.getElementById('dedupeModal');
-  if (existing) existing.remove();
-
-  const groupRows = data.duplicateDetails.map((group, i) => {
-    const keepName = escHtml(group.keepFile.fileName);
-    const removeRows = group.removeFiles.map(f =>
-      `<div style="display:flex;align-items:center;gap:6px;padding:2px 0">
-        <i class="fas fa-trash-alt" style="color:#EF4444;font-size:.7rem"></i>
-        <span style="font-size:.75rem;color:#374151">${escHtml(f.fileName)}</span>
-        <span style="font-size:.65rem;color:#9CA3AF">(${escHtml(f.reviewerName || '이름불명')})</span>
-      </div>`
-    ).join('');
-
-    return `
-      <div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px;margin-bottom:8px;background:#FAFAFA">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-          <span style="background:#DCFCE7;color:#166534;font-size:.65rem;font-weight:700;padding:2px 6px;border-radius:4px">유지</span>
-          <span style="font-size:.75rem;font-weight:500">${keepName}</span>
-          <span style="font-size:.65rem;color:#9CA3AF">(${escHtml(group.keepFile.reviewerName || '')})</span>
-        </div>
-        <div style="padding-left:12px;border-left:2px solid #FCA5A5">
-          <div style="font-size:.65rem;color:#DC2626;font-weight:600;margin-bottom:2px">삭제 대상 (${group.removeFiles.length}건):</div>
-          ${removeRows}
-        </div>
-      </div>`;
-  }).join('');
-
-  const affectedList = data.affectedReviewers.length > 0
-    ? `<div style="margin-top:10px;padding:8px 12px;background:#FEF3C7;border-radius:6px;font-size:.72rem">
-        <strong><i class="fas fa-pen"></i> 시트 "중복" 마킹 대상:</strong>
-        ${[...new Set(data.affectedReviewers.map(a => a.reviewerName))].map(n => `<span style="background:#FDE68A;padding:1px 5px;border-radius:3px;margin:0 2px">${escHtml(n)}</span>`).join('')}
-       </div>`
-    : '';
-
-  const modal = document.createElement('div');
-  modal.id = 'dedupeModal';
-  modal.className = 'modal-overlay';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-broom" style="color:#3182f6"></i> 중복 파일 정리 미리보기</h3>
-          <a href="${escHtml(data.folderUrl || '')}" target="_blank" style="font-size:.72rem;color:#0ca678;text-decoration:none;font-weight:600;padding:4px 10px;background:#F0FDF4;border-radius:6px;border:1px solid #BBF7D0;display:${data.folderUrl ? 'inline-flex' : 'none'};align-items:center;gap:4px" title="리뷰폴더 열기"><i class="fas fa-external-link-alt"></i> 폴더 열기</a>
-        </div>
-        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">${escHtml(data.displayName || tabName)}</div>
-      </div>
-      <div style="padding:16px 20px;overflow-y:auto;flex:1">
-        <div style="display:flex;gap:12px;margin-bottom:12px">
-          <div style="flex:1;background:#F3F4F6;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:1.2rem;font-weight:700;color:#111">${data.totalFiles}</div>
-            <div style="font-size:.65rem;color:#6B7280">전체 파일</div>
-          </div>
-          <div style="flex:1;background:#FEF2F2;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:1.2rem;font-weight:700;color:#DC2626">${data.duplicateFileCount}</div>
-            <div style="font-size:.65rem;color:#6B7280">중복 파일</div>
-          </div>
-          <div style="flex:1;background:#F0FDF4;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:1.2rem;font-weight:700;color:#166534">${data.duplicateGroups}</div>
-            <div style="font-size:.65rem;color:#6B7280">중복 그룹</div>
-          </div>
-        </div>
-        ${groupRows}
-        ${affectedList}
-      </div>
-      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end;flex-shrink:0">
-        <button onclick="this.closest('#dedupeModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">취소</button>
-        <button id="btnDedupeExecute" onclick="executeDedupeFromModal()" style="padding:8px 16px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-trash-alt"></i> ${data.duplicateFileCount}건 정리 실행</button>
-      </div>
-    </div>`;
-
-  // 모달에 데이터 저장
-  modal.dataset.sheetid = sheetId;
-  modal.dataset.tabname = tabName;
-  modal.dataset.files = JSON.stringify(
-    data.duplicateDetails.flatMap(g => g.removeFiles.map(f => ({
-      fileId: f.fileId,
-      fileName: f.fileName,
-      reviewerName: f.reviewerName,
-    })))
-  );
-
-  document.body.appendChild(modal);
-}
-
-/**
- * 중복정리 실행 (모달에서 호출)
- */
-async function executeDedupeFromModal() {
-  const modal = document.getElementById('dedupeModal');
-  if (!modal) return;
-
-  const sheetId = modal.dataset.sheetid;
-  const tabName = modal.dataset.tabname;
-  const filesToRemove = JSON.parse(modal.dataset.files || '[]');
-
-  if (filesToRemove.length === 0) {
-    showToast('삭제할 파일이 없습니다.', 'info');
-    modal.remove();
-    return;
-  }
-
-  const btn = document.getElementById('btnDedupeExecute');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리중...'; }
-
-  try {
-    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
-    const resp = await fetch(API_BASE_URL + '/api/dedupe/execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? 'Bearer ' + token : '',
-      },
-      body: JSON.stringify({ sheetId, tabName, filesToRemove }),
-    });
-    const data = await resp.json();
-
-    if (!resp.ok || data.error) {
-      showToast(data.error || '실행 실패', 'error');
-      return;
-    }
-
-    showToast(data.summary || `중복 정리 완료: ${data.trashResult.success}건 삭제`, 'success');
-    modal.remove();
-
-    // 대시보드 새로고침
-    if (typeof loadTabDashboard === 'function') loadTabDashboard();
-  } catch (err) {
-    showToast('실행 오류: ' + err.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash-alt"></i> 실행'; }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// 중복 파일 정리 — 탭 선택 모달 (상단 툴바 버튼에서 호출)
-// ═══════════════════════════════════════════════════════════
-
-/**
- * 상단 "중복정리" 버튼 클릭 → 리뷰폴더가 설정된 탭 목록 표시
- */
-function openDedupeSelector() {
-  // 기존 모달 제거
-  const existing = document.getElementById('dedupeSelectorModal');
-  if (existing) existing.remove();
-
-  // _tabDashData 또는 _lastDashData에서 리뷰폴더가 설정된 탭 필터링
-  let tabsWithFolder = [];
-
-  // 1차: _tabDashData (탭 관리 대시보드 데이터 — 현재 화면)
-  if (_tabDashData && _tabDashData.tabs) {
-    _tabDashData.tabs.forEach(t => {
-      if (t.folder_url) {
-        tabsWithFolder.push({
-          sheetId: t.sheet_id,
-          tabName: t.tab_name,
-          displayName: t.display_name || t.tab_name,
-          campName: t.campaign_name || '',
-          folderUrl: t.folder_url,
-        });
-      }
-    });
-  }
-
-  // 2차 fallback: _lastDashData (캠페인 대시보드 데이터)
-  if (tabsWithFolder.length === 0 && _lastDashData && _lastDashData.stats) {
-    _lastDashData.stats.forEach(camp => {
-      (camp.tabs || []).forEach(t => {
-        if (t.folderUrl) {
-          tabsWithFolder.push({
-            sheetId: t.sheetId,
-            tabName: t.tab,
-            displayName: t.displayName || t.tab,
-            campName: camp.campaign || '',
-            folderUrl: t.folderUrl,
-          });
-        }
-      });
-    });
-  }
-
-  if (tabsWithFolder.length === 0) {
-    showToast('리뷰폴더가 설정된 탭이 없습니다.', 'info');
-    return;
-  }
-
-  // 탭 목록 렌더링
-  const tabRows = tabsWithFolder.map((t, i) => `
-    <div class="dedupe-sel-row" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;cursor:pointer;transition:background .15s;border:1px solid #E5E7EB;margin-bottom:6px"
-         onmouseover="this.style.background='#FEF3C7'" onmouseout="this.style.background='#fff'"
-         onclick="selectDedupeTab(${i})">
-      <i class="fas fa-folder-open" style="color:#D97706;font-size:.9rem"></i>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.8rem;font-weight:600;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
-        <div style="font-size:.65rem;color:#6B7280;margin-top:1px">${escHtml(t.campName)}</div>
-      </div>
-      <i class="fas fa-chevron-right" style="color:#9CA3AF;font-size:.7rem"></i>
-    </div>
-  `).join('');
-
-  const modal = document.createElement('div');
-  modal.id = 'dedupeSelectorModal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.classList.add('toss-overlay');
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:12px;width:100%;max-width:480px;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
-        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-copy" style="color:#D97706"></i> 중복 파일 정리</h3>
-        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">정리할 리뷰폴더를 선택하세요 (${tabsWithFolder.length}개 탭)</div>
-      </div>
-      <div style="padding:14px 20px;overflow-y:auto;flex:1">
-        ${tabRows}
-      </div>
-      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end;flex-shrink:0">
-        <button onclick="this.closest('#dedupeSelectorModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
-      </div>
-    </div>`;
-
-  // 탭 데이터를 모달에 저장
-  modal._tabsWithFolder = tabsWithFolder;
-  document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-}
-
 /* ═══════════════════════════════════════════════════════════
    폴더 찾기 & 재연결 — 사라진 캡처/리뷰 폴더를 탭명으로 검색하여 재연결
    ═══════════════════════════════════════════════════════════ */
@@ -15383,56 +14727,6 @@ async function saveFolderRelink() {
   showToast('폴더 링크가 재연결되었습니다.', 'info');
   modal.remove();
   try { loadTabDashboard(); } catch (_) {}
-}
-
-/**
- * 탭 선택 후 해당 탭의 중복 미리보기 실행
- */
-async function selectDedupeTab(idx) {
-  const modal = document.getElementById('dedupeSelectorModal');
-  if (!modal || !modal._tabsWithFolder) return;
-
-  const tab = modal._tabsWithFolder[idx];
-  if (!tab) return;
-
-  // 선택된 항목 로딩 표시
-  const rows = modal.querySelectorAll('.dedupe-sel-row');
-  if (rows[idx]) {
-    rows[idx].style.background = '#FEF3C7';
-    rows[idx].innerHTML = `<i class="fas fa-spinner fa-spin" style="color:#D97706"></i><span style="font-size:.8rem;color:#6B7280">중복 검사 중...</span>`;
-  }
-
-  try {
-    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
-    const resp = await fetch(API_BASE_URL + '/api/dedupe/preview', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? 'Bearer ' + token : '',
-      },
-      body: JSON.stringify({ sheetId: tab.sheetId, tabName: tab.tabName }),
-    });
-    const data = await resp.json();
-
-    // 선택 모달 닫기
-    modal.remove();
-
-    if (!resp.ok || data.error) {
-      showToast(data.error || '중복 검사 실패', 'error');
-      return;
-    }
-
-    if (data.duplicateGroups === 0) {
-      showToast(`중복 파일 없음 (총 ${data.totalFiles}개 파일 검사 완료)`, 'success');
-      return;
-    }
-
-    // 미리보기 모달 표시
-    _renderDedupeModal(data, tab.sheetId, tab.tabName, tab.folderUrl);
-  } catch (err) {
-    modal.remove();
-    showToast('중복 검사 오류: ' + err.message, 'error');
-  }
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -977,15 +977,7 @@ router.post('/brands/assign', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── 연결탭 비고(자유 텍스트) 저장 — master/admin 전체 · staff 담당 탭만(_ensureEditScope). ──
-router.post('/tab-memo', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, memo } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json(await svc.saveTabMemo({ sheetId, tabName, memo, by: _by(req) }));
-  } catch (err) { next(err); }
-});
+// (POST /tab-memo — 연결탭 비고 저장은 2026-09-28 제거, 결정 186 58번. 호출 화면 0)
 
 // ── 업체 소유 매핑(1:N) — 읽기=내부인 · 쓰기=admin/master 전체, staff는 자기 담당(inad_pm) 업체만 ──
 router.get('/ownership', authMiddleware, internalMiddleware, async (req, res, next) => {

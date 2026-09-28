@@ -167,9 +167,9 @@ const ran = (log, re) => log.some(q => re.test(q.text));
     ok('업체관리 등록이 인트라넷 원본 ID·사업자번호를 함께 저장한다',
       /intranet_advertiser_id, intranet_business_number\)\s+VALUES \(\$1,\$2,'active',\$3,'','',0,\$4,\$5\)/.test(tb));
     ok('등록 전에 같은 업체로 보이는 기존 업체를 찾아 막는다', /const same = await findSameAdvertiser\(db,/.test(tb));
-    const portal = read('src/routes/portal.routes.js');
-    ok('업무포털 거래처 추가도 같은 규칙(원본 ID 저장 + 같은 업체 차단)',
-      /trackB\.findSameAdvertiser\(pool,/.test(portal) && /intranet_advertiser_id, intranet_business_number\)/.test(portal));
+    // 업무포털 거래처 추가 창구(portal.routes)는 결정 186 45번에서 제거 — 업체 등록 창구는 업체관리 한 곳.
+    ok('업무포털 거래처 추가 창구가 되살아나지 않았다(규칙이 다른 두 번째 등록 창구 금지)',
+      !fs.existsSync(path.join(__dirname, '..', 'src', 'routes', 'portal.routes.js')));
     ok('링크 회전은 병합으로 붙은 옛 주소도 지운다(업체·브랜드)',
       /DELETE FROM trackb_link_aliases WHERE kind = 'advertiser' AND target_id = \$1/.test(tb)
       && /DELETE FROM trackb_link_aliases WHERE kind = 'brand' AND target_id = \$1/.test(tb));

@@ -116,24 +116,6 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
   return { imported: liveIdx.length, inserted, updated, skippedDeleted: deletedSeqs.size };
 }
 
-// 탭 로스터 조회(DB). phone8은 마스킹.
-async function listParticipants({ sheetId, tabName, limit = 1000 } = {}) {
-  if (!sheetId || !tabName) throw new Error('listParticipants: sheetId, tabName 필수');
-  const db = getPool();
-  const lim = Math.min(Math.max(parseInt(limit, 10) || 1000, 1), 5000);
-  const { rows } = await db.query(
-    `SELECT id, seq, reviewer_name AS "reviewerName", recipient_name AS "recipientName",
-            phone8, round, option_text AS "optionText", product_name AS "productName",
-            is_submitted AS "isSubmitted", is_paid AS "isPaid", source,
-            updated_at AS "updatedAt", updated_by AS "updatedBy"
-       FROM campaign_participants
-      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
-      ORDER BY seq LIMIT $3`,
-    [sheetId, tabName, lim]
-  );
-  return rows.map(r => ({ ...r, phone8: _mask(r.phone8) }));
-}
-
 // shadow 검증: DB 로스터 vs review_index를 seq로 대조(임포트 충실도).
 async function compareWithIndex({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) throw new Error('compareWithIndex: sheetId, tabName 필수');
@@ -157,21 +139,6 @@ async function compareWithIndex({ sheetId, tabName } = {}) {
     indexRows: r.index_rows, dbRows: r.db_rows, nameMatch: r.name_match, manualEdited: r.manual_edited,
     inSync: r.index_rows === r.db_rows && r.name_match === r.db_rows,
   };
-}
-
-// 테스트용 상태 토글(신규 테이블에만 — 시트/review_index 미변경). source='manual'로 표시.
-async function setParticipantStatus({ id, isSubmitted, isPaid, by = 'test' } = {}) {
-  if (!id) throw new Error('setParticipantStatus: id 필수');
-  const db = getPool();
-  const sets = ['updated_at = NOW()', 'updated_by = $2', "source = 'manual'"];
-  const vals = [id, String(by).slice(0, 100)];
-  if (typeof isSubmitted === 'boolean') { vals.push(isSubmitted); sets.push(`is_submitted = $${vals.length}`); sets.push(`submitted_at = ${isSubmitted ? 'NOW()' : 'NULL'}`); }
-  if (typeof isPaid === 'boolean') { vals.push(isPaid); sets.push(`is_paid = $${vals.length}`); sets.push(`paid_at = ${isPaid ? 'NOW()' : 'NULL'}`); }
-  const { rows } = await db.query(
-    `UPDATE campaign_participants SET ${sets.join(', ')} WHERE id = $1 AND deleted_at IS NULL
-     RETURNING id, is_submitted AS "isSubmitted", is_paid AS "isPaid"`, vals);
-  if (!rows.length) return { updated: 0 };
-  return { updated: 1, ...rows[0] };
 }
 
 // ── Phase 4: DB를 "살아있는 원본"으로 — 이미 가져온 탭들을 review_index에서 주기 최신화(시트 재읽기 0). ──
@@ -199,130 +166,9 @@ async function syncImportedTabs({ limit = 200, by = 'auto-sync' } = {}) {
   return { candidateTabs: tabs.length, tabsSynced, inserted, updated, errors, skipped };
 }
 
-// ── Phase 2a: 참여자 직접 추가/수정/삭제 (여전히 신규 테이블만 — 라이브·시트 무영향) ──
-function _toPhone8(v) { const d = String(v == null ? '' : v).replace(/[^0-9]/g, ''); return d.length >= 8 ? d.slice(-8) : (d || null); }
-
-// 수동 추가: import 행(seq=row_index, 보통 1~수백)과 절대 충돌 안 하게 seq를 900000+ 범위로 배정.
+// 수동(비시트) 줄의 격리 seq 대역 — 실제 행 번호(1~수백)와 겹치지 않게. 새 배정은 하지 않고 **제외** 판정에만 쓴다.
 const _MANUAL_SEQ_BASE = 900000;
-async function addParticipant({ sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by = 'test' } = {}) {
-  if (!sheetId || !tabName) throw new Error('addParticipant: sheetId, tabName 필수');
-  const db = getPool();
-  /* ★★ 무시트(sheetless) 탭은 900000 대역을 쓰지 않는다 (2026-08-21 실측 결함 수정).
-     그 대역은 "시트 행을 모를 때"의 격리 대역인데, 무시트 탭에서는 작업표 seq 가 곧 장부의
-     행 번호라 ① 장부 생성기(sheetlessLedger.buildValues)가 seq 크기만큼 시트 모양 배열을
-     만들며 90만 칸을 할당하고 ② row_json 이 빈 줄은 파서가 이름 없는 행으로 버려
-     **검색 명단·입금대상에서 영영 빠진다**. → 실제 행 번호에 이어붙이고 row_json 을 채운 뒤
-     장부를 재생성한다(sheetlessApplicant.addApplicantRow 와 같은 재료·같은 규율).
-     ★ 판정 실패 = 종전 경로(fail-open — 시트 기반이 절대 다수, manualOrder 와 같은 판단). */
-  let sheetless = false;
-  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); } catch (_) { sheetless = false; }
-  if (sheetless) {
-    return _addParticipantSheetless(db, { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by });
-  }
-  // 동시 add가 같은 nextSeq를 계산해도 uq_participants_seq(sheet_id,tab_name,seq)가 중복행을 차단한다.
-  //   23505(유니크 위반) 시 seq를 재계산해 재시도(advisory 락 불필요 — 예방 대신 회복, 동일 정확성).
-  for (let attempt = 0; ; attempt++) {
-    const { rows: meta } = await db.query(
-      `SELECT COALESCE(MAX(seq) FILTER (WHERE seq >= ${_MANUAL_SEQ_BASE}), ${_MANUAL_SEQ_BASE - 1}) + 1 AS nextseq,
-              (SELECT tab_gid FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL LIMIT 1) AS tab_gid
-         FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
-      [sheetId, tabName]
-    );
-    const nextSeq = meta[0].nextseq;
-    const tabGid = meta[0].tab_gid || null;
-    try {
-      const { rows } = await db.query(
-        `INSERT INTO campaign_participants
-           (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'manual',$11,NOW())
-         RETURNING id, seq`,
-        [sheetId, tabGid, tabName, nextSeq, reviewerName || null, recipientName || null, _toPhone8(phone),
-         round || null, optionText || null, productName || null, String(by).slice(0, 100)]
-      );
-      return { added: 1, id: rows[0].id, seq: rows[0].seq };
-    } catch (e) {
-      if (e && e.code === '23505' && attempt < 4) continue;   // seq 레이스 → 재계산 재시도
-      throw e;
-    }
-  }
-}
 
-/**
- * 무시트 탭 전용 참여자 추가 — 실제 행 번호 대역 + row_json + 장부 재생성.
- *
- * ★★ fail-closed 3종(sheetlessApplicant·registerBlogger 와 같은 규율):
- *   이름 없음 / 미등록 탭 / 열 구성 미상이면 **쓰기 0건으로 거부**한다 — 조용히 900000 대역으로
- *   낙하시키면 "표에는 있고 어디에도 안 잡히는 줄"이라는 원래 결함이 그대로 재현된다.
- * ★ 번호 칸은 **비워 둔다** — 자동 재번호 스윕(5분)이 구매일자 순으로 채운다. 여기서 seq−1 을
- *   적으면 헤더가 1행이 아닌 탭에서 틀린 번호가 박힌다(틀린 값보다 빈 값).
- * ★ `source='worktable'` — 'manual' 로 넣으면 투영 상태 CASE 가 인정하지 않아
- *   리뷰제출·입금 표시가 영영 안 켜진다(M2b-2 규율 그대로).
- * ★ 장부 재생성 실패는 add 를 되돌리지 않는다 — 줄은 이미 표에 있고 다음 재생성이 메운다.
- *   대신 결과(`ledger`)로 사실을 말한다(조용한 누락 금지).
- */
-async function _addParticipantSheetless(db, { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by }) {
-  const nm = String(reviewerName || recipientName || '').trim();
-  if (!nm) throw new Error('무시트 작업은 이름이 필요합니다 — 이름 없는 줄은 검색 명단에 실리지 않습니다.');
-
-  const { rows: tc } = await db.query(
-    `SELECT tab_gid, campaign_name FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
-    [sheetId, tabName]);
-  if (!tc.length) throw new Error('등록되지 않은 작업입니다(접수 후 이용해주세요).');
-  const tabGid = String(tc[0].tab_gid || '');
-
-  // 열 이름 = 장부가 쓰는 것과 같은 원본(detected_headers 우선 — 시트 A1 행이 아니라 진짜 헤더).
-  const { rows: rt } = await db.query(
-    `SELECT detected_headers, headers FROM raw_sheet_tabs WHERE sheet_id=$1 AND tab_gid=$2 LIMIT 1`,
-    [sheetId, tabGid]);
-  const rawH = rt.length ? (rt[0].detected_headers || rt[0].headers) : null;
-  const headers = (Array.isArray(rawH) ? rawH : []).map(h => String(h == null ? '' : h)).filter(h => h.trim());
-  if (!headers.length) throw new Error('이 작업의 열 구성을 알 수 없습니다(작업표 열 이름 줄을 확인해주세요).');
-  const col = require('../utils/applicantColumns').resolveApplicantColumns(headers);
-  if (col.name < 0) throw new Error('이름(수취인) 열이 없어 사람을 넣을 수 없습니다.');
-
-  // row_json = 장부 생성기의 유일한 재료 — 이 맵이 비면 그 줄은 명단에서 사라진다(결함의 본체).
-  const rowJson = {};
-  rowJson[headers[col.name]] = nm;
-  if (col.phone >= 0 && phone) rowJson[headers[col.phone]] = String(phone).trim();
-
-  for (let attempt = 0; ; attempt++) {
-    /* ★ 실제 행 번호 대역(< _MANUAL_SEQ_BASE)만 세어 이어붙인다 — 과거에 잘못 들어간 900000 대역
-       줄이 있어도 그 위(900001+)로 이어붙지 않는다. 빈 표는 1+1=2(1행 = 헤더 가정,
-       addApplicantRow 와 동일). 23505 는 재계산 재시도(기존 add 와 같은 회복 전략). */
-    const { rows: mx } = await db.query(
-      `SELECT COALESCE(MAX(seq) FILTER (WHERE seq < ${_MANUAL_SEQ_BASE}), 1) + 1 AS nextseq
-         FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
-    const nextSeq = Number(mx[0].nextseq);
-    try {
-      const { rows } = await db.query(
-        `INSERT INTO campaign_participants
-           (sheet_id, tab_gid, tab_name, campaign_name, seq, reviewer_name, recipient_name, phone8,
-            round, option_text, product_name, row_json, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,'worktable',$13,NOW())
-         RETURNING id, seq`,
-        [sheetId, tabGid || null, tabName, tc[0].campaign_name || null, nextSeq,
-         nm, recipientName || null, _toPhone8(phone), round || null, optionText || null,
-         productName || null, JSON.stringify(rowJson), String(by).slice(0, 100)]);
-      // 장부 재생성 — 이걸 빼면 표에는 있는데 **검색·행배정·입금대상에는 없는** 줄이 된다.
-      let ledger = null;
-      try {
-        const r = await require('./sheetlessLedger.service').rebuildLedgers({ sheetId, tabName, by });
-        ledger = { ok: !!(r && r.ok) };
-      } catch (e) {
-        ledger = { ok: false, error: e.message };
-        logger.warn(`[participants] 무시트 추가 후 장부 재생성 실패 tab=${tabName} seq=${nextSeq}: ${e.message} — 줄은 남아 있고 다음 재생성이 메운다`);
-      }
-      return { added: 1, id: rows[0].id, seq: rows[0].seq, sheetless: true, ledger };
-    } catch (e) {
-      if (e && e.code === '23505' && attempt < 4) continue;   // seq 레이스 → 재계산 재시도
-      throw e;
-    }
-  }
-}
-
-// 발주 기준 명단 골격(빈 슬롯) 벌크 생성 — 부족분(target − 현재 활성)만큼 manual 슬롯을 원자 배정.
-//   ★ B 내부 전용(구글시트·주문 무접촉), gap-fill·멱등(이미 target 충족이면 0개). seq 레이스는 23505 재시도.
-//   슬롯 = reviewer 공란 + option_text(옵션 라운드로빈)·product_name(발주 상품) 프리필. 재투영에 면역(source='manual').
 /**
  * 작업표 스켈레톤 행 — 시트에 만든 빈 줄을 작업대 표에도 미리 보이게 한다. (M2b-2)
  *
@@ -505,38 +351,6 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
   return { ...stat, retired: rowCount };
 }
 
-const _EDITABLE_FIELDS = ['reviewer_name', 'recipient_name', 'phone8', 'round', 'option_text', 'product_name'];
-async function updateParticipant({ id, fields, by = 'test' } = {}) {
-  if (!id) throw new Error('updateParticipant: id 필수');
-  const db = getPool();
-  const clean = {};
-  for (const k of Object.keys(fields || {})) {
-    if (!_EDITABLE_FIELDS.includes(k)) continue;               // 화이트리스트(인젝션 방어)
-    clean[k] = k === 'phone8' ? _toPhone8(fields[k]) : (fields[k] == null ? null : String(fields[k]));
-  }
-  const cols = Object.keys(clean);
-  if (!cols.length) return { updated: 0, reason: 'no_editable_fields' };
-  const vals = [id, ...cols.map(c => clean[c])];
-  const sets = cols.map((c, i) => `${c} = $${i + 2}`);           // c는 화이트리스트라 인젝션 불가
-  const { rows } = await db.query(
-    `UPDATE campaign_participants SET ${sets.join(', ')}, source='manual', updated_at=NOW(), updated_by=$${vals.length + 1}
-       WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
-    [...vals, String(by).slice(0, 100)]
-  );
-  return { updated: rows.length };
-}
-
-async function softDeleteParticipant({ id, by = 'test' } = {}) {
-  if (!id) throw new Error('softDeleteParticipant: id 필수');
-  const db = getPool();
-  const { rows } = await db.query(
-    `UPDATE campaign_participants SET deleted_at=NOW(), updated_at=NOW(), updated_by=$2
-       WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
-    [id, String(by).slice(0, 100)]
-  );
-  return { deleted: rows.length };
-}
-
 // 프리뷰 탭 셀렉터용 활성 캠페인 탭 목록(master 전용 라우트에서 사용 — /api/raw/tabs 의존 제거).
 async function listActiveTabs({ limit = 500 } = {}) {
   const db = getPool();
@@ -663,12 +477,7 @@ module.exports = {
   purgeImportedRows,
   importTabFromIndex,
   syncImportedTabs,
-  listParticipants,
   compareWithIndex,
-  setParticipantStatus,
-  addParticipant,
-  updateParticipant,
-  softDeleteParticipant,
   listActiveTabs,
   MANUAL_SEQ_BASE: _MANUAL_SEQ_BASE,
   __setPoolForTest,

@@ -103,31 +103,6 @@ body{ letter-spacing:-.01em; }
   </div>
 </div>
 
-<!-- ────────── 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) ────────── -->
-<div id="dbFirstGuideModal" class="modal-overlay hidden" style="display:none;z-index:9999">
-  <div class="modal-box" style="max-width:520px">
-    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between">
-      <h2 style="margin:0"><i class="fas fa-bullhorn" style="color:#3B82F6"></i> 새 기능 안내</h2>
-      <button class="btn-icon-sm" onclick="closeDbFirstGuide(false)" title="닫기"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" style="font-size:14px;line-height:1.65">
-      <p style="margin:0 0 8px"><b>캠페인탭 참여자 명단</b>을 구글시트가 아니라 <b>시스템에서 직접 관리</b>하는 기능을 준비했습니다.</p>
-      <ul style="margin:6px 0 10px;padding-left:18px">
-        <li>시트 명단을 <b>시스템으로 가져오기</b> → 화면에서 보기·<b>추가/수정/삭제</b>·리뷰제출/입금 체크</li>
-        <li>지금은 <b>안전 테스트 단계</b> — 모든 동작이 <b>테스트 저장공간에만</b> 반영되어 <b>리뷰어·구글시트·주문에 영향 0</b></li>
-        <li>현재 <b>최고관리자 전용</b> (검증 후 단계적 확대)</li>
-      </ul>
-      <div style="background:#e6f6ec;border-left:4px solid #1a7f37;padding:9px 12px;border-radius:0 8px 8px 0;font-size:13px">
-        직원분들께 설명할 수 있는 <b>쉬운 안내서(유저플로우)</b>를 준비했습니다. 아래 버튼으로 열어보세요.
-      </div>
-      <div class="modal-actions" style="margin-top:16px">
-        <button class="btn-primary" onclick="openDbFirstGuide()"><i class="fas fa-book-open"></i> 직원 안내서 보기</button>
-        <button class="btn-secondary" onclick="closeDbFirstGuide(true)">확인했어요 (다시 안 보기)</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ────────── 시작일 편집 팝업 ────────── -->
 <div id="startDatePopup">
   <div class="sdp-title"><i class="fas fa-calendar-edit"></i> 시작일 수정</div>
@@ -643,14 +618,6 @@ body{ letter-spacing:-.01em; }
 
         <!-- 외부 링크 그룹 (항상 표시) -->
         <div class="admin-header-actions" style="gap:5px">
-          <button class="btn-header-sq btn-header-portal" onclick="openWorkPortal()" title="업무포털 새창 열기 (자동 로그인)">
-            <i class="fas fa-briefcase"></i>
-            <span>업무포털</span>
-          </button>
-          <button class="btn-header-sq btn-header-staff" onclick="window.open('staff.html','_blank')" title="AE담당자 페이지 바로가기">
-            <i class="fas fa-user-tie"></i>
-            <span>AE담당자</span>
-          </button>
           <button class="btn-header-sq btn-header-review" onclick="window.open('search.html','_blank')" title="리뷰제출페이지 바로가기">
             <i class="fas fa-external-link-alt"></i>
             <span>리뷰제출</span>
@@ -698,9 +665,6 @@ body{ letter-spacing:-.01em; }
         </button>
         <button class="admin-tab-btn" data-tab="recruit" onclick="switchAdminTab('recruit')">
           <i class="fas fa-bullhorn"></i> 모집공고
-        </button>
-        <button class="admin-tab-btn" data-tab="payment" onclick="switchAdminTab('payment')">
-          <i class="fas fa-money-bill-wave"></i> 입금처리
         </button>
         <button class="admin-tab-btn" data-tab="archive" onclick="switchAdminTab('archive')">
           <i class="fas fa-archive"></i> 마감 <span id="archiveBadge" style="display:none;background:#4F84E0;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
@@ -775,9 +739,6 @@ body{ letter-spacing:-.01em; }
               <span id="archiveDetectBadge" style="display:none;background:#fff;color:#4F84E0;font-size:.65rem;padding:0 5px;border-radius:99px;margin-left:4px;font-weight:700">0</span>
             </button>
 
-            <button class="btn-sm" onclick="openDedupeSelector()" style="font-size:.78rem;background:#D97706;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="리뷰폴더 중복 파일 정리">
-              <i class="fas fa-copy"></i> 리뷰폴더 중복정리
-            </button>
             <button class="btn-sm" onclick="openReviewRelocate()" style="font-size:.78rem;background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="내 드라이브 루트에 흩어진 리뷰 캡처를 해당 탭 [리뷰] 폴더로 모아 이동">
               <i class="fas fa-folder-tree"></i> 리뷰 캡처 정리
             </button>
@@ -872,7 +833,7 @@ body{ letter-spacing:-.01em; }
           <div id="colVisWrap"><button id="btnColVis"></button><div id="colVisDropdown"></div></div>
           <button id="pollToggleBtn"></button>
           <div id="dashSearchBar"><input id="dashSearchInput"><div id="dashSearchCount"></div></div>
-          <div id="colDragTooltip"></div><div id="colDragLine"></div><div id="memoPreviewTooltip"></div>
+          <div id="colDragTooltip"></div><div id="colDragLine"></div>
           <label id="liveModeToggleWrap"><input type="checkbox" id="liveModeCheckbox"><span id="liveModeLabel">LIVE</span></label>
         </div>
         <!-- ═══════════════════════════════════════════════════════ -->
@@ -1246,109 +1207,6 @@ body{ letter-spacing:-.01em; }
         <div id="woListWrap"><div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">불러오는 중...</div></div>
       </div><!-- /tab-work-orders -->
 
-      <!-- ★ 입금처리 탭 -->
-      <div id="tab-payment" class="admin-tab-pane payment-panel">
-        <!-- 헤더 -->
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-money-bill-wave" style="color:#065F46;margin-right:6px"></i>입금처리
-          </span>
-          <span style="font-size:.73rem;color:var(--t3)">리뷰 완료 + 입금 미완료 대상자 목록을 조회하여 이체파일을 생성합니다.</span>
-        </div>
-
-        <!-- 이체 은행 선택 -->
-        <div style="margin-bottom:14px">
-          <div style="font-size:.73rem;font-weight:600;color:var(--t2);margin-bottom:8px">이체 은행 선택</div>
-          <div class="payment-bank-selector">
-            <button class="payment-bank-btn active" id="payBankHana" onclick="selectPayBank('하나은행')">
-              <i class="fas fa-university"></i> 하나은행 (KEB하나)
-            </button>
-            <button class="payment-bank-btn" id="payBankK" onclick="selectPayBank('케이뱅크')">
-              <i class="fas fa-mobile-alt"></i> 케이뱅크
-            </button>
-          </div>
-        </div>
-
-        <!-- 필터 -->
-        <div class="payment-filter-bar">
-          <label>&#45812;&#45817;&#51088;</label>
-          <select class="payment-campaign-select" id="payFilterManager" onchange="applyPaymentFilters()">
-            <option value="">&#51204;&#52404; &#45812;&#45817;&#51088;</option>
-            <option value="&#47564;&#46160;">&#47564;&#46160;</option>
-            <option value="&#47581;&#44256;">&#47581;&#44256;</option>
-          </select>
-          <label>캠페인 필터</label>
-          <select class="payment-campaign-select" id="payFilterCampaign" onchange="applyPaymentFilters()">
-            <option value="">전체 캠페인</option>
-          </select>
-          <button class="payment-load-btn" id="payLoadBtn" onclick="loadPaymentTargets()">
-            <i class="fas fa-search"></i> 대상 조회
-          </button>
-          <span style="font-size:.7rem;color:var(--t3)">마감 탭은 자동 제외됩니다</span>
-        </div>
-
-        <!-- 입금명 미설정 경고 -->
-        <div id="payDepositNameWarning" style="display:none;background:#FFF7ED;border:1.5px solid #FED7AA;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:.76rem;color:#92400E">
-          <i class="fas fa-exclamation-triangle" style="margin-right:5px;color:#D97706"></i>
-          <span id="payDepositNameWarningText"></span>
-          <button onclick="openDepositNameModal()" style="margin-left:8px;padding:3px 10px;background:#D97706;color:#fff;border:none;border-radius:5px;font-size:.72rem;font-weight:600;cursor:pointer">
-            일괄 입력하기
-          </button>
-        </div>
-
-        <!-- 정리 요약 (총건수 / 이체은행별 건수·금액 / 총금액) -->
-        <div id="paySummary" class="payment-summary" style="display:none"></div>
-
-        <!-- 미리보기 테이블 -->
-        <div class="payment-preview-wrap" id="payPreviewWrap" style="display:none">
-          <div class="payment-preview-header">
-            <span class="payment-preview-title"><i class="fas fa-list" style="color:var(--p);margin-right:5px"></i>입금 대상 목록</span>
-            <span class="payment-preview-count" id="payPreviewCount">0건</span>
-          </div>
-          <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
-            <table class="payment-preview-table">
-              <thead>
-                <tr>
-                  <th class="col-check"><input type="checkbox" id="paySelectAll" onchange="togglePaySelectAll(this)" title="전체 선택/해제"></th>
-                  <th>결제방식</th>
-                  <th>이체은행</th>
-                  <th class="col-tab">탭명</th>
-                  <th>상품명</th>
-                  <th>입금자명</th>
-                  <th>은행</th>
-                  <th class="col-account">계좌번호</th>
-                  <th>예금주</th>
-                  <th class="col-amount">결제금액</th>
-                  <th>소득명의</th>
-                  <th>주민등록번호</th>
-                </tr>
-              </thead>
-              <tbody id="payPreviewBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- 액션 버튼 -->
-        <div class="payment-action-bar" id="payActionBar" style="display:none">
-          <span class="payment-sel-count" id="paySelCount">0건 선택</span>
-          <span class="payment-sel-count" id="paySelAmount" style="color:#065F46">&#49440;&#53469; &#44552;&#50529; 0&#50896;</span>
-          <button class="payment-dl-btn" id="payDlBtn" onclick="downloadPaymentExcel()">
-            <i class="fas fa-file-excel"></i> 이체파일 다운로드
-          </button>
-          <button class="payment-dl-btn" id="payDlOverviewBtn" onclick="downloadPaymentOverviewExcel()" style="background:#475569">
-            <i class="fas fa-table"></i> 전체내역 다운로드
-          </button>
-          <button class="payment-done-btn" id="payDoneBtn" onclick="openPaymentConfirm()">
-            <i class="fas fa-check-circle"></i> 이체 완료 처리
-          </button>
-        </div>
-
-        <!-- 빈 상태 -->
-        <div id="payEmptyState" style="display:none;text-align:center;padding:40px 20px;color:var(--t3)">
-          <i class="fas fa-inbox" style="font-size:2rem;margin-bottom:10px;opacity:.4"></i>
-          <p id="payEmptyMsg" style="font-size:.83rem;margin:0">대상 조회 버튼을 클릭하세요.</p>
-        </div>
-      </div><!-- /tab-payment -->
 
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- Phase 10: 마감 관리 탭 -->
@@ -2103,42 +1961,6 @@ body{ letter-spacing:-.01em; }
 </div><!-- /tc-popover-inner -->
 </div>
 
-<!-- ══════════════════════════════════
-     입금명 일괄 입력 팝업
-     ══════════════════════════════════ -->
-<div class="deposit-name-modal-overlay" id="depositNameModalOverlay" onclick="if(event.target===this)closeDepositNameModal()">
-  <div class="deposit-name-modal">
-    <h3><i class="fas fa-exclamation-triangle" style="color:#D97706;margin-right:6px"></i>입금명 미설정 탭</h3>
-    <div class="desc">아래 탭들의 입금명이 설정되지 않았습니다.<br>이체파일 생성을 위해 입금명을 입력해주세요.</div>
-    <div class="deposit-name-modal-body" id="depositNameModalBody"></div>
-    <div class="deposit-name-modal-actions">
-      <button class="btn-ghost" onclick="closeDepositNameModal()">취소</button>
-      <button style="padding:7px 18px;background:var(--p);color:#fff;border:none;border-radius:7px;font-size:.8rem;font-weight:600;cursor:pointer" onclick="saveDepositNames()">
-        <i class="fas fa-save"></i> 저장 후 조회
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════
-     이체 완료 확인 팝업
-     ══════════════════════════════════ -->
-<div class="payment-confirm-overlay" id="paymentConfirmOverlay" onclick="if(event.target===this)closePaymentConfirm()">
-  <div class="payment-confirm-modal">
-    <h3><i class="fas fa-check-circle" style="color:#EF4444;margin-right:6px"></i>이체 완료 처리</h3>
-    <p id="paymentConfirmMsg">선택한 건들을 이체 완료 처리하시겠습니까?<br>각 시트의 입금 컬럼에 오늘 날짜가 기록됩니다.</p>
-    <div style="margin-bottom:12px">
-      <label style="font-size:.73rem;font-weight:600;color:var(--t2)">관리자 비밀번호</label>
-      <input type="password" id="payConfirmPw" placeholder="비밀번호 입력" style="width:100%;padding:7px 10px;border:1.5px solid var(--bd);border-radius:7px;font-size:.82rem;margin-top:4px;box-sizing:border-box;outline:none">
-    </div>
-    <div class="actions">
-      <button class="btn-ghost" onclick="closePaymentConfirm()">취소</button>
-      <button style="padding:7px 18px;background:#EF4444;color:#fff;border:none;border-radius:7px;font-size:.8rem;font-weight:600;cursor:pointer" onclick="confirmPaymentDone()">
-        <i class="fas fa-check"></i> 이체 완료 처리
-      </button>
-    </div>
-  </div>
-</div>
 
 <!-- ══════════════════════════════════
      Phase 1-1: 진행률 통계 패널
@@ -2264,24 +2086,6 @@ body{ letter-spacing:-.01em; }
 </div>
 
 
-
-<!-- ── v9.9 메모 공유 모달 ── -->
-<div class="memo-overlay" id="memoOverlay" onclick="if(event.target===this)closeMemoPanel()">
-  <div class="memo-modal">
-    <div class="memo-modal-head">
-      <i class="fas fa-comment-dots" style="color:#3182f6;font-size:.95rem"></i>
-      <span class="memo-modal-title" id="memoModalTitle">메모</span>
-      <button onclick="closeMemoPanel()" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:1rem;padding:2px 4px"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="memo-chat-area" id="memoChatArea">
-      <div class="memo-empty">메모가 없습니다.</div>
-    </div>
-    <div class="memo-input-area">
-      <textarea id="memoInputText" placeholder="메모를 입력하세요..." maxlength="500" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMemoMsg()}"></textarea>
-      <button class="memo-send-btn" onclick="sendMemoMsg()"><i class="fas fa-paper-plane"></i></button>
-    </div>
-  </div>
-</div>
 
 <!-- ── 마감 확인 팝업 ── -->
 <div class="closed-confirm-overlay" id="closedConfirmOverlay">
@@ -2585,9 +2389,6 @@ body{ letter-spacing:-.01em; }
 <script src="js/campaign-daily-plan.js?v=20260927-norebuild"></script>
 <script src="js/campaign-workdetail.js"></script>
 <script src="js/index-recruit.js?v=20260914-recruit-thumb-paste"></script>
-
-<!-- 외부모집 구매양식 관리자 수동제출(공용 모달) — 작업 탭 관리·관제 패널·공고 카드 공용 -->
-<script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
 
 <!-- ══════════════════════════════════════════════════════
      Phase 1-2: search.html 블랙리스트 배너 (공지 배너)

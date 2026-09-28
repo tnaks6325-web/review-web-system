@@ -24,8 +24,6 @@
   <script src="js/image-shrink.js"></script>
   <script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
   <script src="js/campaign-workdetail.js"></script>
-  <!-- 외부모집 수동제출(공용 모달) — 진짜 admin_token 보유자가 참여형 카드에서 여는 경로 -->
-  <script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
   <style>
     :root {
       --p: #3182f6; --p-light: #e8f1fe; --p-dark: #1b64da; --p-m: #a6c8fb;
@@ -819,7 +817,7 @@
     <div id="homeAdminLoginOvl" style="display:none;position:fixed;inset:0;z-index:100002;background:rgba(17,24,39,.5);align-items:center;justify-content:center;padding:20px">
       <div style="background:#fff;border-radius:16px;width:320px;max-width:94vw;padding:18px 18px 16px;box-shadow:0 20px 50px rgba(0,0,0,.3)">
         <div style="font-weight:800;font-size:.95rem;margin-bottom:4px">🔑 관리자 로그인</div>
-        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px">로그인하면 이 화면의 모집공고 카드에서 <b>⭐ 우선노출</b>과 <b>🧾 외부제출</b>을 바로 쓸 수 있어요.</div>
+        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px">로그인하면 이 화면의 모집공고 카드에서 <b>⭐ 우선노출</b>을 바로 쓸 수 있어요.</div>
         <input id="halId" placeholder="아이디" autocomplete="username"
                style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;margin-bottom:7px;outline:none">
         <input id="halPw" type="password" placeholder="비밀번호" autocomplete="current-password"
@@ -1284,8 +1282,8 @@ function refreshAdminModeBanner() {
   if (btn) btn.style.display = has ? "none" : "";
   if (msg) {
     msg.innerHTML = has
-      ? "카드에서 <b>[✏️ 관리자 수정]</b>·<b>[⭐ 우선노출]</b>·<b>[🧾 외부제출]</b>을 쓸 수 있어요."
-      : "카드의 <b>[✏️ 관리자 수정]</b>으로 공고를 고칠 수 있어요. <b>외부모집 수동제출</b>은 관리자 로그인이 필요해요.";
+      ? "카드에서 <b>[✏️ 관리자 수정]</b>·<b>[⭐ 우선노출]</b>을 쓸 수 있어요."
+      : "카드의 <b>[✏️ 관리자 수정]</b>으로 공고를 고칠 수 있어요. <b>⭐ 우선노출</b>은 관리자 로그인이 필요해요.";
   }
 }
 
@@ -1305,7 +1303,7 @@ function closeHomeAdminLogin() {
 /**
  * 홈에서 관리자 로그인 — 기존 `POST /api/admin/login` 그대로(서버 변경 0).
  * 성공하면 sessionStorage.admin_token 에 담고 공고 목록만 다시 그린다
- * (⭐·🧾 는 둘 다 `_realAdminTok()` 게이트라 한 번에 나타난다).
+ * (⭐ 는 `_realAdminTok()` 게이트 — 🧾 외부모집 수동제출은 결정 186 54번에서 3버전 전용).
  * ★ 리뷰어 세션은 건드리지 않는다 — 실패해도 보던 화면 그대로.
  */
 async function doHomeAdminLogin() {
@@ -1329,7 +1327,7 @@ async function doHomeAdminLogin() {
     closeHomeAdminLogin();
     refreshAdminModeBanner();
     showToast("관리자로 로그인되었습니다.");
-    if (typeof loadRecruitPreview === "function") loadRecruitPreview();   // ⭐·🧾 표시 반영
+    if (typeof loadRecruitPreview === "function") loadRecruitPreview();   // ⭐ 표시 반영
   } catch (e) {
     fail(e && e.message ? e.message : "로그인에 실패했습니다.");
   } finally {

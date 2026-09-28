@@ -125,10 +125,10 @@ ok('★ 서버 무접촉 — 프록시에는 종전 302 폴백 하나뿐', (() =
 
 console.log('\nD) 배선 — 스크립트 태그 · 모듈 부재 시 원본으로 접는다');
 {
-  const pages = ['frontend/search.html', 'frontend/admin.html', 'frontend/admin-siand.html',
-    'frontend/index.html', 'frontend/workdesk.html', 'frontend/report.html'];
+  const pages = ['frontend/search.html', 'frontend/admin.html',
+    'frontend/index.html', 'frontend/workdesk.html', 'frontend/report.html'];   // (admin-siand.html 은 결정 186 44번에서 제거)
   const missing = pages.filter(p => !/<script src="js\/drive-thumb\.js"><\/script>/.test(R(p)));
-  ok('★ 소비처를 로드하는 6개 페이지 전부에 script 태그', missing.length === 0, missing.join(','));
+  ok('★ 소비처를 로드하는 5개 페이지 전부에 script 태그', missing.length === 0, missing.join(','));
   // api.js 보다 뒤(= API_BASE_URL 이 먼저) — 순서 계약
   /* ⚠ 위치 비교는 **태그 문자열**로 한다 — 파일 안 설명 주석이 먼저 나오면 오판한다(실측). */
   ok('★ api.js 다음에 온다', pages.every(p => {

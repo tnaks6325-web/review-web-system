@@ -203,17 +203,15 @@ function withSolapiEnv(fn) {
     assert.ok(/COALESCE\(s\.review_status, 'pending'\) = 'pending'[\s\S]*ORDER BY ri\.end_date[\s\S]*LIMIT \$1/.test(source));
   });
 
-  await test('입금대상 양쪽 경로와 마이그레이션에 미작성 종결 방어가 있다', () => {
+  await test('입금대상 경로와 마이그레이션에 미작성 종결 방어가 있다', () => {
     const root = path.resolve(__dirname, '..');
     const payService = fs.readFileSync(path.join(root, 'src/services/payment.service.js'), 'utf8');
-    const payRoutes = fs.readFileSync(path.join(root, 'src/routes/payment.routes.js'), 'utf8');
     const searchService = fs.readFileSync(path.join(root, 'src/services/search.service.js'), 'utf8');
     const reviewerRoutes = fs.readFileSync(path.join(root, 'src/routes/reviewer.routes.js'), 'utf8');
     const submitRoutes = fs.readFileSync(path.join(root, 'src/routes/submit.routes.js'), 'utf8');
     const diagRoutes = fs.readFileSync(path.join(root, 'src/routes/diag.routes.js'), 'utf8');
     const migration = fs.readFileSync(path.join(root, 'migrations/160_review_reminder_alimtalk.sql'), 'utf8');
     assert.ok(/review_status = 'closed_no_review'/.test(payService));
-    assert.ok(/review_status = 'closed_no_review'/.test(payRoutes));
     assert.ok(/OPEN_REVIEW_COND[\s\S]*closed_no_review/.test(searchService));
     assert.ok(/reviewReminderStatus[\s\S]*closed_no_review/.test(reviewerRoutes));
     assert.ok(/review-earnings[\s\S]*review_closed_targets/.test(reviewerRoutes));

@@ -23,7 +23,6 @@ const utilSrc = readS('utils/worktableTemplate.js');
 const svcSrc = readS('services/worktable.service.js');
 const routes = readS('routes/trackB.routes.js');
 const order = readS('routes/order.routes.js');
-const staff = readF('staff.html');
 const wdesk = readF('workdesk.html');
 const idxApp = readF('js/index-app.js');
 const adminHtml = readF('admin.html');
@@ -232,13 +231,7 @@ ok('★★ URL 없는 접수는 막다른 길이 아니라 무시트로 간다(�
 ok('★★ 그래도 "접수된 오더 = linked_tab_* 보유" 불변식은 유지(무시트도 가상 탭을 등록한다)',
   /const gidMatch = url\.match\(\/\[#\?&\]gid=\(\\d\+\)\/\)/.test(order)
   && /linked_tab_sheet_id = \$3/.test(order));
-ok('AE 폼: 시트URL 이 선택 항목으로 표시된다',
-  !/작업시트탭URL <span class="req">\*<\/span>/.test(staff)
-  && /비워두셔도 됩니다/.test(staff));
-ok('AE 폼: 제출 시 클라이언트 필수 검증도 제거',
-  !/showToast\("작업시트탭URL은 필수입니다"/.test(staff));
-ok('AE 목록: 시트 미첨부 오더가 그렇게 보인다(빈 값이 조용히 "-" 로 숨지 않음)',
-  /시트 미첨부 — 접수 시 작업표 생성/.test(staff));
+// (AE 폼 staff.html 검사 3종 — 페이지 제거로 삭제, 결정 186 49번)
 // ★★ 탈 구글시트(2026-08-10): 시트URL 없는 오더는 막지 않고 **무시트로 접수**한다 — 화면은 확인만 받는다.
 ok('관리자 접수 안내 문구가 새 흐름을 알려준다(무시트 접수 확인)',
   /구글시트 없이 시스템 작업표로 접수할까요\?/.test(idxApp)

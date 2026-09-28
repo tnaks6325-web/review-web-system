@@ -9,7 +9,7 @@
  *   **주문 한 건만 더 들어와도 통째로 증발**한다.
  *
  *     · 리뷰 제출 표시  `is_submitted = TRUE`      (submit.routes 캡처 제출 완료)
- *     · 입금 완료 표시  `is_submitted2 = 'PAID'`   (payment.routes 입금 완료 처리)
+ *     · 입금 완료 표시  `is_submitted2 = 'PAID'`   (paymentApply.service.recordDeposits — 3버전 입금관리)
  *
  *   시트 기반 탭에서는 같은 값이 **시트 칸에도 써져서** 다음 빌드에 살아남는다.
  *   무시트 탭은 시트 쓰기가 막혀 있으므로(W2-a 4중 차단) **어디에도 안 남는다.**

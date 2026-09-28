@@ -87,7 +87,8 @@ const db = {
   );
 
   const paymentService = fs.readFileSync(path.join(__dirname, '../src/services/payment.service.js'), 'utf8');
-  const paymentRoute = fs.readFileSync(path.join(__dirname, '../src/routes/payment.routes.js'), 'utf8');
+  assert.ok(!fs.existsSync(path.join(__dirname, '../src/routes/payment.routes.js')),
+    '옛 입금처리 옆길(/api/payment — 회차를 건너뛰는 수동 이체완료)은 결정 186 57번에서 제거 — 되살리지 않는다');
   const trackBRoute = fs.readFileSync(path.join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
   const searchService = fs.readFileSync(path.join(__dirname, '../src/services/search.service.js'), 'utf8');
   assert.match(paymentService, /filterReceiptEligiblePaymentRows\(pool, pageRows\)/,
@@ -97,11 +98,6 @@ const db = {
     '현금영수증 게이트를 페이지 LIMIT 뒤 한 번만 적용하면 뒤쪽 정상 지급 대상이 막힌다');
   assert.match(paymentList, /LIMIT \$\$\{limitParam\} OFFSET \$\$\{offsetParam\}/,
     '입금 후보는 지급 가능 2,000건을 채울 때까지 페이지 이동해야 한다');
-  assert.match(paymentRoute, /filterReceiptEligiblePaymentRows\(pool, rows\)/,
-    '기존 입금목록 API가 현금영수증 공용 게이트를 거치지 않는다');
-  const markDone = paymentRoute.match(/router\.post\('\/mark-done'[\s\S]*?\n}\);/)?.[0] || '';
-  assert.match(markDone, /BEGIN[\s\S]*filterReceiptEligiblePaymentRows\(client, items, \{ lock: true \}\)[\s\S]*CASH_RECEIPT_NOT_VERIFIED[\s\S]*recordDeposits\(client, receiptEligibleItems/,
-    '입금 완료 API는 같은 transaction 안에서 현금영수증 근거를 잠그고 다시 검증해야 한다');
   const receiptGate = fs.readFileSync(path.join(__dirname, '../src/services/paymentReceiptGate.service.js'), 'utf8');
   assert.match(receiptGate, /rowIndex: Number\(row\?\.rowIndex \?\? row\?\.rowNum\)[\s\S]*rowKey\(row\.sheetId, row\.tabName, Number\(row\?\.rowIndex \?\? row\?\.rowNum\)\)/,
     '구형 rowNum과 숫자 문자열은 입금 검증 전 같은 rowIndex로 정규화해야 한다');
@@ -109,8 +105,6 @@ const db = {
     '영수증 제출·검수 행 잠금 없이 검증 후 반려·교체가 끼어들 수 있다');
   assert.match(receiptGate, /if \(lock\)[\s\S]*JOIN tab_configs tc[\s\S]*FOR UPDATE OF tc[\s\S]*JOIN order_submissions os[\s\S]*FOR UPDATE OF os[\s\S]*JOIN campaign_participants cp[\s\S]*FOR UPDATE OF cp[\s\S]*FROM campaign_applications ca[\s\S]*FOR UPDATE OF ca[\s\S]*FROM recruit_campaigns rc[\s\S]*exact_campaigns[\s\S]*FOR UPDATE OF rc/,
     '지급 검증 중 탭 설정과 행 출처 원장·현재/과거 공고 설정을 같은 transaction에서 잠가야 한다');
-  assert.match(paymentRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*filterReceiptEligiblePaymentRows\(client, items, \{ lock: true \}\)/,
-    '직접 입금 처리는 설정 신규 삽입·연결 변경 phantom도 충돌로 중단해야 한다');
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\(\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');

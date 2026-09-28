@@ -63,14 +63,6 @@ const ORDER_TRANSITIONS = {
   revision:       ['submitted', 'reviewing'], // AE 보완 후 재제출
 };
 
-// AE 가 입력/수정 가능한 필드 (status/created_by/processed_by/admin_memo 등은 제외)
-const AE_FIELDS = [
-  'title', 'start_date', 'product_option', 'product_options_json', 'pay_amount', 'review_fee', 'daily_count', 'daily_count_text',
-  'purchase_time', 'inflow_type', 'inflow_guide', 'delivery_type', 'courier_proxy',
-  'review_type', 'recruit_count', 'review_guide', 'special_notes',
-  'product_url', 'work_sheet_url', 'goods_cost_type', 'work_manager',
-];
-
 // 인트라넷 intake 수정 가능 필드 (status/created_by/processed_by/admin_memo 등 내부 상태는 제외)
 // updated_by / updated_by_name 은 감사용으로 별도 처리(컨텐츠 수정으로 카운트하지 않음).
 const INTAKE_EDITABLE_FIELDS = [
@@ -1472,124 +1464,8 @@ router.get('/guide-image/:id', async (req, res) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// AE(영업담당자) — 제출 / 본인 조회 / 본인 수정
-// created_by 는 항상 JWT name 으로 강제 (클라이언트 입력 무시)
-// ═══════════════════════════════════════════════════════════
-
-// POST /api/order/submit — 작업 오더 제출
-router.post('/submit', authMiddleware, async (req, res, next) => {
-  try {
-    await _ensureTables();
-    const b = req.body || {};
-
-    if (!b.title || !String(b.title).trim()) {
-      return res.status(400).json({ ok: false, error: '작업명을 입력해주세요.' });
-    }
-    // ★ 작업시트탭URL은 **선택 항목**(작업표 생성 도입으로 제출 필수 해제 — PRD Q2 확정).
-    //   시트를 미리 만들어 둔 경우엔 그대로 첨부하고, 리뷰웹시스템[3버전]에서 작업표를 생성할 경우 비워 둔다.
-    //   접수(accept)는 여전히 URL+gid를 요구하므로 "접수된 오더 = linked_tab_* 보유" 불변식은 유지된다.
-
-    const data = await _insertWorkOrder(b, req.admin?.name || '');
-    _emitWorkOrderNew(data);
-    res.json({ ok: true, data });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/order/my — 본인 오더 목록
-router.get('/my', authMiddleware, async (req, res, next) => {
-  try {
-    await _ensureTables();
-    const { rows } = await pool.query(
-      `SELECT * FROM work_orders WHERE created_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC`,
-      [req.admin?.name || '']
-    );
-    res.json({ ok: true, data: rows });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// PUT /api/order/my/update — 본인 오더 수정 (제출됨/보완요청 상태에서만)
-// body: { id, ...AE_FIELDS }
-router.put('/my/update', authMiddleware, async (req, res, next) => {
-  try {
-    await _ensureTables();
-    const b = req.body || {};
-    if (!b.id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
-
-    const { rows: cur } = await pool.query(
-      `SELECT created_by, status, delivery_type, courier_proxy FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [b.id]
-    );
-    if (cur.length === 0) {
-      return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
-    }
-    // 본인 것만
-    if (cur[0].created_by !== (req.admin?.name || '')) {
-      return res.status(403).json({ ok: false, error: '본인이 제출한 오더만 수정할 수 있습니다.' });
-    }
-    // 제출됨/보완요청 상태에서만 수정 허용
-    if (!['submitted', 'revision'].includes(cur[0].status)) {
-      return res.status(400).json({ ok: false, error: '검토가 시작된 오더는 수정할 수 없습니다.' });
-    }
-
-    // AE 수정 경로도 배송유형 하나를 진실원천으로 사용한다. 과거 courier_proxy만
-    // 전송하는 화면과 함께 동작하도록 두 DB 열은 항상 같은 의미로 갱신한다.
-    if (b.delivery_type !== undefined || b.courier_proxy !== undefined) {
-      const deliveryType = _canonicalDeliveryType(
-        b.delivery_type !== undefined ? b.delivery_type : cur[0].delivery_type,
-        b.courier_proxy
-      );
-      b.delivery_type = deliveryType;
-      b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
-      /* ★★ 배송유형이 바뀌면 부속정보도 그 종류에 맞춰 다시 세운다 — 안 하면 혼합→실배송으로
-         바꿔도 옛 조합이 남아 **작업표가 유령 배분을 돈다**(_reviewTypeMixJson 의 정리 규율과 같다).
-         ★ 명시 전송이 없으면 문장 파싱 폴백이 채우고, 종류가 아니면 빈 값으로 정리된다. */
-      b.delivery_type_mix = _deliveryMixJson(b, deliveryType);
-      const _rc = _recallFields(b, deliveryType);
-      b.recall_courier = _rc.courier;
-      b.recall_product = _rc.product;
-    }
-
-    // 동적 SET (전달된 AE 필드만)
-    const sets = [];
-    const vals = [];
-    let i = 1;
-    for (const f of AE_FIELDS) {
-      if (b[f] === undefined) continue;
-      sets.push(`${f} = $${i++}`);
-      if (f === 'start_date') vals.push(_dateOrNull(b[f]));
-      else if (f === 'courier_proxy') vals.push(b[f] === true || b[f] === 'true');
-      else if (f === 'review_fee') vals.push(_intOrZero(b[f]));
-      else vals.push(b[f]);
-    }
-    if (sets.length === 0) {
-      return res.status(400).json({ ok: false, error: '수정할 항목이 없습니다.' });
-    }
-    // ★ 시트탭URL은 선택 항목 — 빈값으로 지우는 것도 허용(작업표 생성으로 진행 전환).
-    //   접수 게이트가 URL+gid를 재검증하므로 빈값이 접수 흐름을 오염시키지 않는다.
-    // ★ 보완요청(revision) 상태에서 AE가 수정하면 재제출(submitted)으로 자동 복귀
-    if (cur[0].status === 'revision') {
-      sets.push(`status = 'submitted'`);
-    }
-    sets.push(`updated_at = NOW()`);
-    vals.push(b.id);
-
-    const { rows } = await pool.query(
-      `UPDATE work_orders SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`,
-      vals
-    );
-    // 보완요청(revision) → 재제출(submitted) 복귀 = 관리자 인박스에 다시 알림
-    if (cur[0].status === 'revision') {
-      _emitWorkOrderNew(rows[0], { resubmitted: true });
-    }
-    res.json({ ok: true, data: rows[0] });
-  } catch (err) {
-    next(err);
-  }
-});
+// (AE 대시보드 staff.html 전용 POST /submit · GET /my · PUT /my/update 는 2026-09-28 제거 — 결정 186 49번.
+//  AE 오더는 인트라넷 → /intake 로 들어온다.)
 
 // ═══════════════════════════════════════════════════════════
 // 관리자(admin/master) — 인박스 / 상태변경 / 필드보정

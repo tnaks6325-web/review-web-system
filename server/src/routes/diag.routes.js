@@ -165,52 +165,7 @@ router.post('/check-duplicate', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/viewer/data — 뷰어 데이터 조회 (GAS: getViewerData)
-// ═══════════════════════════════════════════════════════════
-router.get('/viewer-data', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId) return res.json({ error: 'sheetId 필요' });
-
-    // sheetId 단위 전체 캠페인 데이터 조회
-    let sql = `
-      SELECT
-        ri.reviewer_name AS "reviewerName",
-        ri.tab_name AS "tabName",
-        ri.row_index AS "rowIndex",
-        ri.is_submitted AS "isSubmitted",
-        ri.product_name AS "productName",
-        ri.campaign_name AS "campaignName",
-        ri.row_json AS "rowJson",
-        tc.display_name AS "displayName",
-        tc.is_closed AS "isClosed"
-      FROM review_index ri
-      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      WHERE ri.sheet_id = $1
-    `;
-    const params = [sheetId];
-
-    if (tabName) {
-      sql += ' AND ri.tab_name = $2';
-      params.push(tabName);
-    }
-
-    sql += ' ORDER BY ri.tab_name, ri.row_index';
-    const { rows } = await pool.query(sql, params);
-
-    // 탭별 그룹화
-    const tabMap = {};
-    rows.forEach(r => {
-      if (!tabMap[r.tabName]) tabMap[r.tabName] = { displayName: r.displayName || r.tabName, rows: [] };
-      tabMap[r.tabName].rows.push(r);
-    });
-
-    res.json({ ok: true, rows, tabMap, total: rows.length });
-  } catch (err) {
-    next(err);
-  }
-});
+// (GET /api/viewer/viewer-data — 광고주 뷰어 viewer.html 전용, 2026-09-28 제거 · 결정 186 47번)
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/blacklist — 블랙리스트 관리 (GAS: blacklist)

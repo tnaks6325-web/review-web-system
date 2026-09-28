@@ -63,7 +63,7 @@ function menuContext({ field='col:리뷰제출', role='staff', count=1, archived
     assert.equal(rows[0].isSubmitted,false); assert.equal(rows[1].isSubmitted,true);
   });
   await test('종결 조회는 홈·리뷰내역·입금·알림에서 공용 뷰 사용',()=>{
-    for(const p of ['src/services/search.service.js','src/routes/reviewer.routes.js','src/services/payment.service.js','src/routes/payment.routes.js','src/services/reviewReminder.service.js']) {
+    for(const p of ['src/services/search.service.js','src/routes/reviewer.routes.js','src/services/payment.service.js','src/services/reviewReminder.service.js']) {
       assert.match(read(p),/FROM review_closed_targets/,p);
     }
     assert.match(read('src/services/trackB.service.js'),/recordResolution\(client, row, 'order_cancelled'/);

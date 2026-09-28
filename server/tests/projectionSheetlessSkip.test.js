@@ -83,9 +83,9 @@ function makePool(shapes) {
     ok('★ 판정은 utils/sheetlessScope 단일 출처(사본 0)', /require\('\.\.\/utils\/sheetlessScope'\)/.test(fn));
     /* 호출부 열거 — 늘어나면 여기서 드러난다(바깥에 게이트를 또 두지 말 것). */
     const callers = [];
-    ['src/services/trackB.service.js', 'src/services/participants.service.js', 'src/routes/participants.routes.js']
+    ['src/services/trackB.service.js', 'src/services/participants.service.js']
       .forEach(f => { const n = (read(f).match(/importTabFromIndex\(/g) || []).length; if (n) callers.push(f + ':' + n); });
-    ok('★ 호출부는 여전히 3파일(투영·동기화·수동 라우트)', callers.length === 3, callers.join(', '));
+    ok('★ 호출부는 2파일(투영·동기화) — 수동 라우트 participants.routes 는 결정 186 46번 제거', callers.length === 2, callers.join(', '));
     ok('★ 동기화 크론은 건너뛴 탭을 "동기화했다"로 세지 않는다', /if \(r && r\.skipped\) \{ skipped\+\+; continue; \}/.test(ps));
   }
 

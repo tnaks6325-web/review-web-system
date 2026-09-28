@@ -390,7 +390,9 @@ console.log('\nC. 라우트 권한');
 }
 {
   const app = nc(R('src/app.js'));
-  ok('C8 app.js 에 /api/manual-order 로 마운트', /app\.use\('\/api\/manual-order',\s*manualOrderRoutes\)/.test(app));
+  // 옛 입구는 결정 186 54번에서 제거 — 게이트가 더 넓은(adminOrMaster) 두 번째 문을 다시 열지 않는다.
+  ok('C8 ★ app.js 에 옛 입구 /api/manual-order 를 다시 마운트하지 않는다(3버전 /api/trackb/manual-order 만)',
+    !/app\.use\('\/api\/manual-order'/.test(app) && !/manualOrder\.routes/.test(app));
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -426,7 +428,7 @@ console.log('\nD. 프론트 배선');
   const cc = F('js/campaign-cards.js');
   ok('D8 CampCards 가 openManualOrder 를 노출', /openManualOrder,/.test(cc));
   ok('D9 ★ 리뷰어 홈 칩은 진짜 admin_token + 참여형일 때만 — 스코프 토큰에겐 미노출(403 막다른 길 금지)',
-    /const moChip = \(!admin && c\.participation_mode && _realAdminTok\(\)\)/.test(cc));
+    /const moChip = \(!admin && c\.participation_mode && _realAdminTok\(\) && window\.ManualOrder\)/.test(cc));
   ok('D10 칩이 실제로 카드에 삽입된다', cc.includes('${editChip}${moChip}'));
   const irNames = F('js/index-recruit.js');
   ok('D10b 카드와 모집공고 로그의 버튼 명칭은 외부모집 수동제출로 통일',
@@ -446,26 +448,21 @@ console.log('\nD. 프론트 배선');
   ok('D16 모집공고 로그에 외부모집 수동제출 버튼', ir.includes('id="ccMoBtn"') && ir.includes('외부모집 수동제출'));
   ok('D17 관제 버튼은 열 때마다 현재 공고로 다시 배선(오버레이 재사용 함정)',
     /_moBtn\.onclick = \(\) =>/.test(ir) && ir.includes('CampCards.openManualOrder(campId)'));
-  ok('D17b 모듈이 없는 화면(admin-siand)에서는 버튼을 숨긴다 — 눌러도 안 되는 버튼 금지',
+  ok('D17b 모듈이 없는 화면에서는 버튼을 숨긴다 — 눌러도 안 되는 버튼 금지',
     /_moBtn\.style\.display = _moReady \? "" : "none"/.test(ir));
   ok('D18 문맥 해석 사본을 index-recruit 에 두지 않는다', !ir.includes('ManualOrder.open('));
 }
 {
+  // 옛 대시보드 작업 탭 관리의 [🧾 수동제출]과 리뷰어 홈 칩은 결정 186 54번에서 제거(옛 입구 제거와 짝).
   const ia = F('js/index-app.js');
-  ok('D19 작업 탭 관리 상세에 수동제출 진입', /function openManualOrderForTab\(idx\)/.test(ia));
-  ok('D20 ★ 탭명·시트명을 onclick 문자열에 심지 않는다(주입 벡터 차단)',
-    ia.includes('openManualOrderForTab(${idx})') && !/openManualOrderForTab\('\$\{/.test(ia));
-  ok('D21 탭 단위 진입은 참여형 정원을 건드리지 않는다',
-    /campaignId: null,\s*\/\/ 탭 단위 진입/.test(ia));
-}
-{
-  const pages = [['admin.html', F('admin.html')], ['index.html', F('index.html')], ['admin-siand.html', F('admin-siand.html')]];
-  pages.forEach(([name, html]) => {
-    ok(`D22 ${name} 이 manual-order.js 를 로드`, html.includes('js/manual-order.js'));
+  ok('D19 ★ 옛 대시보드에 수동제출 진입이 남아 있지 않다(막다른 버튼 금지)', !ia.includes('openManualOrderForTab'));
+  [['admin.html', F('admin.html')], ['index.html', F('index.html')]].forEach(([name, html]) => {
+    ok(`D22 ${name} 은 manual-order.js 를 싣지 않는다(옛 입구 제거 — 싣으면 칩·버튼이 막다른 길)`, !html.includes('js/manual-order.js'));
   });
-  const idx = F('index.html');
-  ok('D23 index.html 은 api.js → manual-order.js 순서(오리진 판정 선행)',
-    idx.indexOf('src="api.js"') < idx.indexOf('js/manual-order.js'));
+  const wd = F('workdesk.html');
+  ok('D23 3버전은 manual-order.js 를 싣고, 싣기 전에 재기준 경로를 세운다',
+    wd.includes('js/manual-order.js') && wd.indexOf("window.MANUAL_ORDER_API = '/api/trackb/manual-order'") > -1
+    && wd.indexOf("window.MANUAL_ORDER_API = '/api/trackb/manual-order'") < wd.indexOf('js/manual-order.js'));
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -527,8 +524,7 @@ console.log('\nE. 데이터 보전 가드');
 }
 {
   const em = R('src/middleware/error.middleware.js');
-  ok('E18 관리자 전용 도구라 오류 메시지를 마스킹하지 않는다', em.includes("startsWith('/api/manual-order/')"));
-  ok('E18b Track B 프록시 경로도 같은 안내를 준다', em.includes("startsWith('/api/trackb/manual-order/')"));
+  ok('E18 관리자 전용 도구라 오류 메시지를 마스킹하지 않는다(3버전 프록시 경로)', em.includes("startsWith('/api/trackb/manual-order/')"));
 }
 {
   const mo = F('js/manual-order.js');

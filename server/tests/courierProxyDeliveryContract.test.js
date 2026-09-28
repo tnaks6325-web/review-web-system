@@ -55,14 +55,8 @@ assert.match(intakePatch, /if \(b\.delivery_type !== undefined \|\| b\.courier_p
 assert.match(intakePatch, /_canonicalDeliveryType\([\s\S]{0,140}cur\[0\]\.delivery_type/);
 assert.match(intakePatch, /b\.courier_proxy = _courierProxyFromDelivery/);
 
-const aeUpdate = orderRoutes.slice(
-  orderRoutes.indexOf("router.put('/my/update'"),
-  orderRoutes.indexOf("// ═══════════════════════════════════════════════════════════", orderRoutes.indexOf("router.put('/my/update'") + 1)
-);
-assert.match(aeUpdate, /SELECT created_by, status, delivery_type, courier_proxy/);
-assert.match(aeUpdate, /if \(b\.delivery_type !== undefined \|\| b\.courier_proxy !== undefined\)/);
-assert.match(aeUpdate, /const deliveryType = _canonicalDeliveryType/);
-assert.match(aeUpdate, /b\.delivery_type = deliveryType/);
+// (AE 수정 경로 PUT /my/update 는 staff.html 과 함께 결정 186 49번에서 제거)
+assert.ok(!orderRoutes.includes("router.put('/my/update'"), 'AE 수정 경로는 없다 — 수정은 intake·관리자 두 경로');
 
 const workOrderDetail = read('../frontend/js/work-order-detail.js');
 // 프론트 어휘는 서버 DELIVERY_TYPES 의 최소 사본 — 값·순서가 어긋나면 화면과 판정이 갈린다.
@@ -90,7 +84,6 @@ DELIVERY_TYPES.forEach((v) => {
 [
   ['../frontend/js/recruit-modal.js', recruitModal],
   ['../frontend/js/campaign-cards.js', read('../frontend/js/campaign-cards.js')],
-  ['../frontend/admin-siand.html', read('../frontend/admin-siand.html')],
 ].forEach(([name, src]) => {
   assert.doesNotMatch(src, /<option value="회수건">/, name + ' 에 옛 어휘 회수건이 남으면 안 된다');
   assert.doesNotMatch(src, /<option value="빈택배">/, name + ' 에 옛 어휘 빈택배가 남으면 안 된다');
