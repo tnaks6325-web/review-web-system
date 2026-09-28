@@ -269,8 +269,9 @@ t('부속정보 파생 — 구조화 우선, 문장 폴백, 종류가 다르면 
 
 t('★★ 배송유형을 바꾸면 부속정보도 다시 세운다 — 옛 조합이 남으면 작업표가 유령 배분을 돈다', () => {
   const hits = (ORD.match(/b\.delivery_type_mix = _deliveryMixJson\(b, deliveryType\);/g) || []).length;
-  assert.strictEqual(hits, 3, '수정 경로 3곳(인트라넷 intake · AE · 관리자) 전부에 정리가 걸려야 한다');
-  assert.strictEqual((ORD.match(/b\.recall_courier = _rc\.courier;/g) || []).length, 3);
+  // (AE 수정 경로 PUT /my/update 는 staff.html 과 함께 결정 186 49번에서 제거)
+  assert.strictEqual(hits, 2, '수정 경로 2곳(인트라넷 intake · 관리자) 전부에 정리가 걸려야 한다');
+  assert.strictEqual((ORD.match(/b\.recall_courier = _rc\.courier;/g) || []).length, 2);
 });
 
 t('수정 화이트리스트 3종(인트라넷 intake · 관리자)', () => {

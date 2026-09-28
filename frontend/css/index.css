@@ -267,7 +267,6 @@ input,textarea,button{font-family:inherit}
 .btn-header-sq.active-mode{background:rgba(253,224,71,.18);border-color:#FDE047;color:#FDE047}
 .btn-header-review{background:rgba(18,184,134,.18)!important;border-color:rgba(18,184,134,.55)!important;color:#6EE7B7!important}
 .btn-header-review:hover{background:rgba(18,184,134,.32)!important;border-color:#6EE7B7!important;color:#fff!important}
-.btn-header-staff{background:rgba(49,130,246,.22)!important;border-color:rgba(49,130,246,.55)!important;color:#a6c8fb!important}
 
 /* ══ 컨텍스트 툴바 (탭별 버튼 표시) ══ */
 .admin-context-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:4px}
@@ -285,7 +284,6 @@ input,textarea,button{font-family:inherit}
 .ctx-menu-item.indigo{color:#1b64da}.ctx-menu-item.indigo i{color:#1b64da}.ctx-menu-item.indigo:hover{background:#e8f1fe}
 .ctx-menu-sep{border:none;border-top:1px solid #F3F4F6;margin:4px 0}
 /* ── 진단 모달 섹션 ── */
-.btn-header-staff:hover{background:rgba(49,130,246,.38)!important;border-color:#a6c8fb!important;color:#fff!important}
 .btn-header-createsheet{background:rgba(12,184,134,.18)!important;border-color:rgba(12,184,134,.5)!important;color:#34D399!important}
 .btn-header-createsheet:hover{background:rgba(12,184,134,.32)!important;border-color:#34D399!important;color:#fff!important}
 /* ── 진단 모달 섹션 ── */

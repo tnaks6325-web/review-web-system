@@ -260,14 +260,7 @@ t('★ 그 파생의 전제 — 관리자 화면이 index-recruit.js 를 로드�
 t('★ search-app 의 빠른편집은 그 화면 팝오버(#tcOptReview)에서 읽는다(사본 0)',
   /querySelectorAll\('#tcOptReview \.tc-opt'\)/.test(F('js/search-app.js'))
   && !/\['실배송','빈박스','구매확정','믹스'\]/.test(F('js/search-app.js')));
-/* ★ AE 작업오더 제출(staff.html)의 리뷰타입은 **자유 입력**이라 목록으로 강제할 수 없다.
-   그런데 종전 안내문이 `텍스트20·포토80` 같은 형태를 권해, 그렇게 적으면 `normalizeReviewType`
-   이 혼합을 못 읽고 **'포토' 단일로 판정**한다(혼합 키워드가 없다). 사람이 보는 유일한 지침이
-   그 placeholder 라 표준 어휘와 혼합 표기를 그대로 보여준다. */
-t('★ 작업오더 제출 폼의 리뷰타입 안내가 표준 어휘를 보여준다(혼합 표기 포함)', (() => {
-  const ph = (F('staff.html').match(/id="soReviewType"[^>]*placeholder="([^"]*)"/) || [, ''])[1];
-  return RT.REVIEW_TYPE_LABELS.every(l => ph.includes(l)) && /혼합\(포토 \d+건, 텍스트 \d+건\)/.test(ph);
-})());
+/* (AE 작업오더 제출 폼 안내 검사 — staff.html 제거로 삭제 (staff.html 은 결정 186 49번에서 제거)) */
 t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지)',
   /'실배송': 'tc-review-실배송'/.test(APP) && /'믹스': 'tc-review-믹스'/.test(APP)
   && /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
@@ -276,7 +269,7 @@ t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지
   && ['실배송', '빈박스', '믹스'].every(v => new RegExp(`"${v}":"#`).test(APP))
   && ['css/index.css', 'css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
-  ['admin.html', 'staff.html', 'workdesk.html',
+  ['admin.html', 'workdesk.html',
    'js/index-app.js', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));
 
 /* ── 9) 정리 화면 — 리뷰웹시스템[3버전]에서 부를 수 있어야 한다 ── */
