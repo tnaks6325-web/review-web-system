@@ -3155,47 +3155,8 @@ router.get('/worktable/template', authMiddleware, adminOrMasterMiddleware, async
     res.json({ ok: true, data: await getTemplate() });
   } catch (err) { next(err); }
 });
-// 작업표 생성 미리보기 — ★ 읽기 전용(DB·시트 쓰기 0). 실제 생성은 사람이 확인 후 누를 때만(M2b).
-//   권한 = 작업오더 편집 명단(editorOnly) — 표를 만들 사람이 미리보기를 본다.
-router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { getTemplate } = require('../services/worktable.service');
-    const { buildWorktablePlan } = require('../utils/worktablePlan');
-    const q = req.query || {};
-    const id = String(q.workOrderId || '').trim();
-    if (!id) return res.json({ ok: false, error: 'workOrderId 가 필요합니다.' });
-
-    // ★ 접수(accept)는 work_orders **전체 행**으로 같은 buildWorktablePlan 을 부른다 —
-    //   여기서 컬럼이 빠지면 "미리보기 ≠ 실제 표"가 된다(리뷰 종류 배분(review_type_mix)·
-    //   주말 제외/휴무일 신호(097)·택배대행/작업유형 트리거가 실제로 빠져 있던 자리).
-    const { rows } = await pool.query(
-      `SELECT id, title, start_date, recruit_count, daily_count, product_url,
-              product_option, product_options_json, work_sheet_url, status,
-              skip_weekends, holidays, workboard_schema_version,
-              work_series_id, work_round, delivery_type, courier_proxy,
-              review_type, review_type_mix, product_distribution_mode, source_revision
-         FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
-    const wo = rows[0];
-    if (!wo) return res.json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
-
-    // 미리보기에서 사람이 조정한 값만 덮어쓴다(미전송 = 작업오더 값 유지).
-    const opt = {};
-    if (q.total != null && q.total !== '') opt.total = q.total;
-    if (q.daily != null && q.daily !== '') opt.daily = q.daily;
-    if (q.startDate != null && q.startDate !== '') opt.startDate = q.startDate;
-    if (q.skipWeekends != null && q.skipWeekends !== '') opt.skipWeekends = q.skipWeekends !== '0' && q.skipWeekends !== 'false';
-    if (q.channel) opt.channel = String(q.channel);
-    if (q.options) { try { opt.options = JSON.parse(q.options); } catch (_) { /* 깨진 값은 작업오더 파생으로 */ } }
-    /* 켠 작업유형 — 쉼표 구분 키. ★ 미전송 = 없음(제안을 서버가 조용히 적용하지 않는다). */
-    if (q.workTypes != null) opt.workTypes = String(q.workTypes).split(',').map(v => v.trim()).filter(Boolean);
-    // 제외 날짜(공휴일·업체 휴무) — 쉼표 구분 YYYY-MM-DD. 형식 검증은 plan 이 최종 판정한다.
-    if (q.holidays) opt.holidays = String(q.holidays).split(',').map(v => v.trim()).filter(Boolean);
-
-    const template = await getTemplate();
-    const plan = buildWorktablePlan({ workOrder: wo, template, options: opt });
-    res.json({ ok: true, data: { plan, workOrder: { id: wo.id, title: wo.title, status: wo.status, workSheetUrl: wo.work_sheet_url || '' }, templateConfigured: !!template.configured } });
-  } catch (err) { next(err); }
-});
+// (작업표 생성 미리보기 GET /worktable/plan 은 2026-09-28 제거 — 결정 186 40번. 창을 열 버튼이 8/22 부터 없었다.
+//  실제 접수는 order.routes 가 work_orders 전체 행(SELECT *)으로 같은 buildWorktablePlan 을 부른다.)
 
 // (작업표 시트 탭 생성 /worktable/create · 되돌리기 /worktable/delete · 시트 탭 삭제 /worktable/delete-tab 은
 //  2026-09-28 제거 — 결정 186 10번. 화면 버튼은 2026-08-10 탈시트 때 제거, 접수가 시스템 작업표를 만든다.)

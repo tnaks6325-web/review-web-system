@@ -286,34 +286,15 @@ console.log('\nG. 미리보기 라우트');
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
 const router = require('../src/routes/trackB.routes');
 const layers = (router.stack || []).filter(l => l.route);
-const planLayer = layers.find(l => l.route.path === '/worktable/plan');
-ok('GET /worktable/plan 등록', !!planLayer && !!planLayer.route.methods.get);
-ok('★ 권한 = 내부인 + 작업오더 편집 명단(표를 만들 사람이 미리보기를 본다)',
-  (() => {
-    const names = planLayer.route.stack.map(s => s.handle.name);
-    return names[0] === 'authMiddleware' && names.includes('internalMiddleware') && names.includes('editorOnlyMiddleware');
-  })());
-ok('★ 미리보기는 읽기 전용 — 쓰기 메서드로 등록되지 않는다',
-  !layers.some(l => l.route.path === '/worktable/plan'
-    && (l.route.methods.post || l.route.methods.put || l.route.methods.delete)));
-ok('★★ 라우트가 실제로 도는 이름을 쓴다(pool) — getPool 은 이 파일에 없다(런타임 500 재발 방지)',
-  (() => {
-    const i = routes.indexOf("router.get('/worktable/plan'");
-    const j = routes.indexOf("router.post('/worktable/template'", i);
-    const body = routes.slice(i, j > i ? j : i + 3000);
-    return /await pool\.query\(/.test(body) && !/getPool\(\)/.test(body);
-  })());
-ok('작업오더 조회는 삭제되지 않은 행만',
-  /FROM work_orders WHERE id = \$1 AND deleted_at IS NULL/.test(routes));
-ok('미전송 조정값은 작업오더 값을 유지한다(부분 덮어쓰기)',
-  (() => {
-    const i = routes.indexOf("router.get('/worktable/plan'");
-    const body = routes.slice(i, i + 3000);
-    return /if \(q\.total != null && q\.total !== ''\) opt\.total/.test(body)
-      && /if \(q\.startDate != null/.test(body);
-  })());
-ok('깨진 options 쿼리는 작업오더 파생으로 폴백(fail-soft)',
-  /catch \(_\) \{ \/\* 깨진 값은 작업오더 파생으로 \*\/ \}/.test(routes));
+/* 미리보기 라우트는 제거 (결정 186 40번 — 2026-09-28 작업표 미리보기 창·GET /worktable/plan 제거) — 되살아나지 않는지와, 실제 접수가 **오더 전체 행**으로
+   계획을 만드는지만 본다(미리보기 ≡ 접수 계약의 남은 한쪽). */
+ok('★ GET /worktable/plan 이 없다(열 수 없는 창의 서버 입구)', !layers.some(l => l.route.path === '/worktable/plan'));
+{
+  const ordr = readS('routes/order.routes.js');
+  ok('★★ 접수는 work_orders 전체 행(SELECT *)으로 계획을 만든다 — 열 누락으로 계획이 신호를 못 보는 일 차단',
+    /SELECT \* FROM work_orders WHERE id = \$1 AND deleted_at IS NULL LIMIT 1/.test(ordr)
+    && /createSheetlessWorktable\(\{\s*workOrder: o,/.test(ordr));
+}
 
 /* ══════════════════════════════════════════════════════════
    H. 프론트 배선 — 미리보기는 서버 계산을 그대로 그린다
@@ -323,44 +304,12 @@ const wdesk = readF('workdesk.html');
 /* ★★ 사용자 확정 2026-08-21 — 흐름은 **접수하기 → 모집공고** 두 단계다.
    작업오더 행의 [📋 작업표] 미리보기 버튼은 없앴다(같은 일이 세 군데로 갈라져 번잡했다):
    접수는 오더 값을 그대로 믿고 만들고, 총건수·일건수·시작일·주말은 모집공고에서 고친다.
-   ★ 모달·서버 계획 산출은 그대로 남겨 두었다(되살리기 쉽게) — 아래 검사들이 그것을 고정한다. */
+   ★ 모달·서버 미리보기 라우트도 2026-09-28 제거(결정 186 40번) — 창 전용 검사는 함께 뺐다. */
 ok('★ 행에는 [작업표] 버튼이 없다 — 접수하기 → 모집공고 두 단계(사용자 확정)',
   !/function _woEditActions\(o\)\{[\s\S]{0,1600}openWtPlan/.test(wdesk));
 ok('★ 접수 뒤에는 실제 작업보드로, 공고가 없으면 [⚙ 작업 시작 설정] 로 보낸다',
   /function _woEditActions\(o\)\{[\s\S]{0,1600}_woOpenBoard\('\$\{id\}'\)/.test(wdesk)
   && /⚙ 작업 시작 설정/.test(wdesk));
-ok('★★ 프론트가 날짜·옵션을 다시 계산하지 않는다(서버 계획을 그대로 렌더 — 미리보기 ≡ 실제 표)',
-  (() => {
-    const i = wdesk.indexOf('function _wtpRender()');
-    const body = wdesk.slice(i, i + 6000);
-    return i > -1
-      && /p\.dates\.map/.test(body) && /p\.optionBuckets\.map/.test(body) && /p\.columns\.map/.test(body)
-      // 재계산의 흔적(날짜 산술·분배 루프)이 없어야 한다.
-      //   `p.skipWeekends?'checked':''` 는 서버 값을 체크박스에 비추는 것뿐이라 금지 대상이 아니다.
-      && !/addDays|getUTCDay|Date\.UTC|setDate\(|86400000/.test(body);
-  })());
-ok('조정하면 서버에 다시 물어본다(로컬 재계산 금지)',
-  /function _wtpOnEdit\(\)[\s\S]{0,200}_wtpLoad\(\)/.test(wdesk)
-  && /worktable\/plan\?/.test(wdesk));
-ok('★ 제외 날짜 UI 가 붙어 있고 판정 사본이 없다(서버가 형식·중복·정렬 최종 판정)',
-  /function wtpHolAdd/.test(wdesk) && /function wtpHolDel/.test(wdesk)
-  && /q\.set\('holidays',f\.holidays\.join\(','\)\)/.test(wdesk)
-  && /p\.holidays\|\|\[\]/.test(wdesk));
-ok('★ 제외 날짜는 다른 칸을 고쳐도 유지된다 — 값 읽기는 _wtpSyncForm 한 벌(사본 금지)',
-  /function _wtpSyncForm/.test(wdesk)
-  && /if\(f\.holidays==null\) f\.holidays/.test(wdesk)
-  && /function _wtpOnEdit\(\)\{ _wtpSyncForm\(\); _wtpLoad\(\); \}/.test(wdesk));
-ok('라우트가 holidays 쿼리를 받는다',
-  /if \(q\.holidays\) opt\.holidays = String\(q\.holidays\)\.split\(','\)/.test(routes));
-ok('열 이름·옵션명은 esc() 통과(시트·사용자 자유 문자열)',
-  /esc\(c\.name\)/.test(wdesk) && /esc\(b\.key\)/.test(wdesk) && /esc\(d\.label\)/.test(wdesk));
-ok('★ 접수 버튼은 잠긴 계획·이미 접수된 오더에서 비활성 + 사유를 화면이 말한다',
-  /id="wtpCreateBtn"[\s\S]{0,160}\(p\.canCreate&&_wtpAcceptable\(\)\)\?''\:'disabled/.test(wdesk)
-  && /지금 구성으로는 만들 수 없습니다\(위 빨간 사유\)/.test(wdesk)
-  && /이미 접수된 작업오더입니다/.test(wdesk));
-ok('표준 열 미설정이면 어디서 정하는지 안내한다',
-  /설정 › 작업표 표준 열<\/b>에서 먼저 정하세요/.test(wdesk));
-
 /* ══════════════════════════════════════════════════════════
    I. 생성(M2b-1) — 시트 쓰기·권한·라이브 무접촉
    ══════════════════════════════════════════════════════════ */
@@ -419,14 +368,6 @@ ok('설정 화면에 템플릿 시트 입력칸이 있고 저장에 실린다',
 ok('★★ 프론트에 시트 생성·삭제 창구가 없다(창구 하나 = 접수)',
   !/wtpCreate\(\)/.test(wdesk) && !/wtpDelete\(\)/.test(wdesk) && !/wtpDeleteTab\(\)/.test(wdesk)
   && !/id="wtpSheet"/.test(wdesk) && !/id="wtpMode"/.test(wdesk));
-ok('★ 미리보기의 유일한 실행 버튼 = 접수(같은 `_woAccept` 로 수렴 — 사본 0)',
-  /onclick="wtpAccept\(\)"/.test(wdesk) && /id="wtpTabName"/.test(wdesk)
-  && /await _woAccept\(_WTP\.id, null, \{ tabName, planOptions:\{/.test(wdesk));
-ok('★ 조정한 구성이 그대로 접수에 실린다(서버가 같은 계획으로 작업표를 만든다)',
-  /if\(opts&&opts\.tabName\) body\.tabName=opts\.tabName;/.test(wdesk)
-  && /if\(opts&&opts\.planOptions\) body\.planOptions=opts\.planOptions;/.test(wdesk));
-ok('★ 시트탭URL 이 있는 오더는 그 구성이 미적용임을 화면이 말한다(조용한 불일치 금지)',
-  /접수 시 그 시트 탭이 등록됩니다\(아래 구성은 미적용\)/.test(wdesk));
 // ⚠ '대상 시트 드롭다운'은 시트 생성 창구와 함께 제거됐다(탈 구글시트) — 목록 키 계약만 서버 쪽에 남긴다.
 ok('★★ /tabs 응답의 목록 키는 `tabs` (다른 소비처가 그대로 읽는다)',
   /const out = \{ ok: true, count: tabs\.length, tabs[,\s}]/.test(readS('routes/trackB.routes.js')));
@@ -577,16 +518,8 @@ ok('★★ 행배정 매칭은 리뷰옵션 칸을 대조하지 않는다 — �
     // B 행(3·4행)이 리뷰옵션 값('텍스트'·'포토리뷰')과 무관하게 먼저 온다
     return cand[0] === 3 && cand[1] === 4;
   })());
-ok('★ 미리보기가 리뷰 배분을 그린다(reviewBuckets + 리뷰옵션 칸 — 서버 계획 재계산 금지)',
-  (() => {
-    const w = readF('workdesk.html');
-    return /p\.reviewBuckets/.test(w) && /리뷰 종류 배분/.test(w)
-      && /r\.reviewOption\|\|'—'/.test(w);
-  })());
-ok('★ plan 라우트 SELECT 에 리뷰 배분 재료가 실린다(빠지면 미리보기 ≠ 실제 표)',
-  /skip_weekends, holidays, workboard_schema_version,[\s\S]{0,120}work_series_id, work_round, delivery_type, courier_proxy,[\s\S]{0,120}review_type, review_type_mix/.test(routes));
-ok('★ 접수 확인창의 휴무일 — 화면에서 안 건드렸으면 계획 값 그대로(빈 배열 = 오더 휴무일 삭제 사고)',
-  /Array\.isArray\(f\.holidays\)\?f\.holidays:\(\(_WTP\.plan&&_WTP\.plan\.holidays\)\|\|\[\]\)/.test(readF('workdesk.html')));
+/* (미리보기 창의 리뷰 배분 표시 · plan 라우트 SELECT · 미리보기 휴무일 인자 검사는 창·라우트 제거로 삭제 —
+   결정 186 40번. 접수가 전체 행을 쓰는지는 G 절이 본다.) */
 
 console.log(`\n✅ worktablePlan: ${n}개 통과`);
 process.exit(0);   // trackB.routes 가 DB 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

@@ -630,20 +630,9 @@ ok('★ 유형 열이 옵션 역할이면 생성 시 값도 채워진다(planToS
     return /idxOpt = plan\.columns\.findIndex\(c => c\.role === 'option' && !isReviewOptionHeader\(c\.name\)\)/.test(create);
   })());
 
-/* ── 배선: 작업오더 [📋 작업표] 미리보기 ── */
-ok('★ 작업표 미리보기가 채널·작업유형을 서버에 보낸다(계획은 서버가 최종 계산)',
-  /q\.set\('channel',f\.channel\)/.test(wdesk)
-  && /q\.set\('workTypes',f\.workTypes\.join\(','\)\)/.test(wdesk)
-  && /channel:f\.channel\|\|'', workTypes:f\.workTypes\|\|\[\]/.test(wdesk));
-ok('★ 값 읽기는 _wtpSyncForm 한 벌(사본 금지) — 체크박스가 있는 화면에서만 읽는다',
-  /function _wtpSyncForm[\s\S]{0,700}querySelectorAll\('\.wtpType'\)/.test(wdesk)
-  && /if\(tb\.length\) f\.workTypes=/.test(wdesk));
-ok('★★ 제안 반영은 **첫 열림 1회**(무한 재조회 금지) + 체크로 보인다',
-  /_WTP\.suggestApplied/.test(wdesk) && /suggestedWorkTypes/.test(wdesk)
-  && /class="wtpType"[\s\S]{0,120}\$\{t\.enabled\?'checked':''\}/.test(wdesk));
-ok('★ 서버 라우트가 workTypes 를 받는다(미전송 = 없음)',
-  /q\.workTypes != null\) opt\.workTypes = String\(q\.workTypes\)\.split\(','\)/.test(routes)
-  && /customChannels: b\.customChannels, workTypes: b\.workTypes/.test(routes));
+/* ── 배선: 작업오더 [📋 작업표] 미리보기 — 창·라우트 제거 (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거) ── */
+ok('★ 템플릿 저장 라우트가 채널·작업유형을 받는다',
+  /customChannels: b\.customChannels, workTypes: b\.workTypes/.test(routes));
 ok('★ onclick 함수는 전부 window 에 노출된다(IIFE — 빠지면 클릭이 조용히 죽는다)',
   ['wtPvChan', 'wtPvType', 'wtAddChannel', 'wtDelChannel', 'wtRenameChannel', 'wtDelType',
    'wtOpenChanMgr', 'wtOpenTypeMgr', 'wtOpenTypeModal', 'wtCloseTypeModal', 'wtTypePos',
@@ -749,10 +738,9 @@ ok('★★ 사용자 시나리오 실행 — "쿠팡 + 상품옵션 2가지" 작
     const names = p2.columns.map(c => c.name);
     return names.indexOf('옵션') === 2 && names.indexOf('쿠팡ID') > 0 && names.indexOf('택배송장번호') < 0;
   })());
-ok('★ 제안 근거를 화면이 말한다(근거 없는 자동 체크 금지)',
+ok('★ 제안 근거를 계획이 함께 싣는다(근거 없는 자동 체크 금지 — 그리던 미리보기 창은 결정 186 40번에서 제거)',
   /function workTypeTriggerReason/.test(readS('utils/worktablePlan.js'))
-  && /suggestReason: suggested \? workTypeTriggerReason/.test(readS('utils/worktablePlan.js'))
-  && /자동 제안 — \$\{esc\(t\.suggestReason\)\}/.test(wdesk));
+  && /suggestReason: suggested \? workTypeTriggerReason/.test(readS('utils/worktablePlan.js')));
 ok('★ 옵션 개수는 **작업오더가 말한 종류 수**로 센다 — 총 건수 0(미정)이어도 제안이 죽지 않는다',
   (() => {
     const tpl = { core: ['번호'], channels: {}, customChannels: [],
@@ -760,9 +748,6 @@ ok('★ 옵션 개수는 **작업오더가 말한 종류 수**로 센다 — 총
     const wo = { recruit_count: 0, product_options_json: JSON.stringify([{ name: 'A', options: [{ label: 'ㄱ' }, { label: 'ㄴ' }] }]) };
     return plan2.buildWorktablePlan({ workOrder: wo, template: tpl, options: {} }).suggestedWorkTypes.join(',') === 't1';
   })());
-ok('★ 작업표 미리보기가 자동 선택 결과를 화면에 말해 준다(조용히 켜 두지 않는다)',
-  /autoOn\s*=\s*types\.filter\(t=>t\.suggested&&t\.enabled\)/.test(wdesk)
-  && /작업오더를 보고 \$\{autoOn\.length\}종이 자동 선택됨/.test(wdesk));
 ok('★★ 자동 선택 조건은 **저장 페이로드 안**에 실린다 — 빠뜨리면 조용히 auto 로 되돌아간다(실측 버그)',
   (() => {
     const i = setJs.indexOf('async function wtSaveTemplate');

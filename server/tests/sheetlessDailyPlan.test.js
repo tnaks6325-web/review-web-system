@@ -248,9 +248,9 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
   }
   {
     // 종전 대상 worktableCreate._loadWorkOrder 는 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거) — 살아 있는 두 로더를 본다.
-    const tbr = srv('src/routes/trackB.routes.js'), ordr = srv('src/routes/order.routes.js');
-    ok('작업오더 로드에 신호 컬럼 포함(안 실으면 계획이 못 본다) — 미리보기·접수',
-      /skip_weekends, holidays/.test(tbr) && /skip_weekends, holidays/.test(ordr));
+    // 미리보기 로더도 제거 (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거) — 접수가 전체 행을 읽으므로 신호 컬럼(skip_weekends·holidays)이 빠질 수 없다.
+    const ordr = srv('src/routes/order.routes.js');
+    ok('작업오더 로드에 신호 컬럼 포함(안 실으면 계획이 못 본다) — 접수는 전체 행', /SELECT \* FROM work_orders WHERE id = \$1 AND deleted_at IS NULL LIMIT 1/.test(ordr));
   }
 
   /* ══════════════ F. 마이그레이션·프리플라이트 ══════════════ */

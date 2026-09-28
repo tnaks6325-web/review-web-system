@@ -109,8 +109,9 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
     /NOT EXISTS \([\s\S]{0,500}scope_co\.unit_kind[\s\S]{0,180}scope_co\.opt_key = cp\.option_text/.test(sl));
 
   // (시트 생성 조회 createWorktable 은 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거))
-  const preview = read('src/routes/trackB.routes.js');
-  ok('작업표 미리보기도 투입방식을 읽는다', /review_type_mix, product_distribution_mode, source_revision/.test(preview));
+  // (작업표 미리보기 로더도 제거 (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거)) — 접수는 전체 행(SELECT *)이라 투입방식이 빠질 수 없다.
+  { const ordr = read('src/routes/order.routes.js');
+    ok('접수가 투입방식 포함 전체 행을 읽는다', /SELECT \* FROM work_orders WHERE id = \$1 AND deleted_at IS NULL LIMIT 1/.test(ordr)); }
 
   const sub = read('src/routes/submit.routes.js');
   ok('제출이 홀드에서 상품명을 읽는다', /co\.product_name AS product_name/.test(sub));

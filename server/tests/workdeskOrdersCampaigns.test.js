@@ -40,7 +40,7 @@ const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
   'DELETE /campaigns/:id', 'POST /campaigns/:id/confirm', 'PUT /campaigns/:id/status',
   'POST /campaigns/:id/dismiss', 'POST /campaigns/:id/blog-approve',
   'POST /campaigns/:id/blog-reject', 'POST /campaigns/:id/archive',
-  'GET /worktable/plan',   // (create·delete·delete-tab 은 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거))
+  // (GET /worktable/plan (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거) · create·delete·delete-tab 은 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거))
   // 외부모집 구매양식 수동제출 — 리뷰어 등록·주문 원장·정원 차감·시트 쓰기를 일으키는 창구라
   // 접수·발행과 같은 공통 권한을 적용한다.
   'POST /manual-order/preview', 'POST /manual-order/submit'];
