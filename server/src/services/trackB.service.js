@@ -1010,14 +1010,23 @@ async function intranetSalesSearch({ q = '', limit = 30 } = {}) {
   return { ok: true, items: (_intraSalesCache.rows || []).slice(0, lim) };
 }
 function _mapSales(r) {
+  // 계약관리 화면은 상태값 외에도 발행일·은행 매칭값을 보존한다. 이전 레코드나
+  // 일괄등록 레코드처럼 상태 문자열이 비어 있더라도 이 원천 증거가 있으면 정산
+  // 화면을 "미발행/미입금"으로 잘못 보이지 않게 파생한다.
+  const amount = Number(r.amount != null ? r.amount : r.contract_amount) || 0;
+  const invoiceDate = r.invoice_date || null;
+  const paymentDate = r.payment_date || null;
+  const paidAmount = Number(r.matched_bank_amount) || 0;
+  const invoiceStatus = r.invoice_status || (invoiceDate || r.matched_tax_invoice_id ? 'issued' : 'not_issued');
+  const paymentStatus = r.payment_status || (paymentDate || (amount > 0 && paidAmount >= amount) ? 'paid' : (paidAmount > 0 ? 'partial' : 'unpaid'));
   return {
     salesId: r.id, contractNumber: String(r.contract_number || '').trim(),
     advertiserName: String(r.advertiser_name || '').trim(), productName: String(r.product_name || '').trim(),
-    manager: String(r.manager || '').trim() || null, amount: Number(r.amount) || 0,
-    paymentStatus: r.payment_status || 'unpaid', invoiceStatus: r.invoice_status || 'not_issued',
-    paymentDate: r.payment_date || null, invoiceDate: r.invoice_date || null,
+    manager: String(r.manager || '').trim() || null, amount,
+    paymentStatus, invoiceStatus,
+    paymentDate, invoiceDate,
     // 입금매칭(인트라넷 계약관리 sales_bank_matches 의 집계 파생값): 누적 입금액 + 최근 입금일
-    paidAmount: Number(r.matched_bank_amount) || 0, paidDate: r.matched_bank_date || null,
+    paidAmount, paidDate: r.matched_bank_date || null,
     // ── 계약 매칭(작업명 유사도) 재료 — 추가만. 기존 소비처(스텝퍼·정산 요약)는 이 필드를 안 본다.
     //    ★ 신형 계약등록 폼은 업체를 `business_name`(사업자명)에 넣는다(`advertiser_name`은 레거시라 대개 공란).
     businessName: String(r.business_name || '').trim(),

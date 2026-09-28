@@ -36,6 +36,10 @@ async function run() {
     SA2: { id: 'SA2', contract_number: 'C-99', advertiser_name: '어니스트캄', product_name: '헤어틴트', amount: 3000000,
            payment_status: 'paid', invoice_status: 'not_issued', invoice_date: null, payment_date: '2026-06-25',
            matched_bank_amount: 2500000, matched_bank_date: null },
+    // 레거시/일괄등록 계약: 상태문자열은 비어 있지만 발행일·입금 매칭은 이미 존재.
+    SA3: { id: 'SA3', contract_number: 'C-100', advertiser_name: '어니스트캄', product_name: '세탁세제', contract_amount: 1354100,
+           invoice_date: '2026-08-11', payment_date: '2026-08-11', matched_tax_invoice_id: 'TI-1',
+           matched_bank_amount: 1354100, matched_bank_date: '20260811' },
   };
   const quoteDb = { SA1: { quote_number: 'Q-7', status: 'sent', quote_date: '2026-07-01', total_amount: 2381126 },
                     SA2: { quote_number: 'Q-8', status: 'sent', quote_date: '2026-06-10', total_amount: 2500000 } };
@@ -72,6 +76,15 @@ async function run() {
   assert.equal(items[0].amountMismatch, true, '2b: 견적≠계약 → ⚠ 신호');
   assert.equal(items[0].paidDate, '2026-06-25', '2c: matched_bank_date 없으면 payment_date 폴백');
   console.log('  2. 금액 불일치 신호 + 입금일 폴백 ✓');
+
+  // ═══ 2.5 상태 문자열이 없는 기존 계약도 날짜·은행매칭 증거로 발행/완납을 표시 ═══
+  p = pool([[/WITH own AS/, () => ({ rows: [{ sheetId: 'S', tabName: 'T10', salesId: 'SA3', contractNumber: '', closeoutDate: null, memo: null }] })]]);
+  svc.__setPoolForTest(p);
+  items = await svc.settlementSummaryForAdvertiser({ advertiserId: 'A1' });
+  assert.equal(items[0].invoiceStatus, 'issued', '2d: 발행일/계산서 링크가 있으면 발행완료로 파생');
+  assert.equal(items[0].paymentStatus, 'paid', '2e: 계약금액과 같은 은행매칭액이면 입금완료로 파생');
+  assert.equal(items[0].paidDate, '2026-08-11', '2f: 은행매칭일 정규화');
+  console.log('  2.5 기존 계약 상태 보강 — 발행일·은행매칭으로 계산서/입금 파생 ✓');
 
   // ═══ 3. 인트라넷 장애 → proxyDown(스로우 금지) ═══
   p = pool([[/WITH own AS/, () => ({ rows: [{ sheetId: 'S', tabName: 'TF', salesId: 'SFAIL', contractNumber: 'C-1', closeoutDate: null, memo: null }] })]]);

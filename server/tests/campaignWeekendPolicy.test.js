@@ -27,4 +27,13 @@ test('주말 포함 공고는 주말에도 차단되지 않는다', () => {
   assert.strictEqual(state.blocked, false);
 });
 
+test('주말 제외 공고라도 날짜별 모집계획이 있는 주말은 모집을 연다', () => {
+  const state = weekendPublicationState(
+    { skip_weekends: true },
+    new Date('2026-08-14T15:00:00.000Z'),
+    { '2026-08-15': 20 }
+  );
+  assert.strictEqual(state.blocked, false);
+});
+
 console.log('campaignWeekendPolicy: passed');
