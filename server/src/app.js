@@ -31,7 +31,6 @@ const productRoutes  = require('./routes/product.routes');
 const rawRoutes      = require('./routes/raw.routes');
 const csRoutes       = require('./routes/cs.routes');
 const mappingRoutes  = require('./routes/mapping.routes');
-const participantsRoutes = require('./routes/participants.routes');
 const trackBRoutes = require('./routes/trackB.routes');
 const reviewEditRoutes = require('./routes/reviewEdit.routes');
 const workboardConsolidationRoutes = require('./routes/workboardConsolidation.routes');
@@ -122,7 +121,7 @@ app.use('/api/raw',       rawRoutes);
 
 // 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
 app.use('/api/mapping',   mappingRoutes);
-app.use('/api/participants', participantsRoutes);  // Phase 1 shadow — master 전용, 신규 테이블만
+// (/api/participants — 참여자 명단 테스트 화면 전용 라우트는 2026-09-28 제거, 결정 186 46번)
 // 인트라넷 SSO 토큰은 /api/trackb/* 밖으로 나갈 수 없다. 알림톡 운영 화면도 Track B 셸에서
 // 열리므로 같은 관리자 전용 라우터를 이 경로에도 먼저 마운트한다(기존 직접 관리자 경로 유지).
 app.use('/api/trackb/review-reminders', reviewReminderRoutes);
