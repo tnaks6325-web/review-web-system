@@ -22,7 +22,6 @@ const paymentRoutes  = require('./routes/payment.routes');
 const submitRoutes   = require('./routes/submit.routes');
 const diagRoutes     = require('./routes/diag.routes');
 const archiveRoutes  = require('./routes/archive.routes');
-const dedupeRoutes   = require('./routes/dedupe.routes');
 const campaignRoutes = require('./routes/campaign.routes');
 const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
@@ -101,7 +100,7 @@ app.use('/api/submit',    submitRoutes);
 // 진단/디버그/뷰어/블랙리스트/캠페인/이미지 (Section 12)
 app.use('/api/diag',      diagRoutes);
 app.use('/api/archive',   archiveRoutes);
-app.use('/api/dedupe',    dedupeRoutes);
+// (/api/dedupe — 옛 대시보드 리뷰폴더 중복정리(Drive 휴지통 + 시트 '중복' 마킹)는 2026-09-28 제거, 결정 186 56번)
 app.use('/api/campaign',  campaignRoutes);
 app.use('/api/order',     orderRoutes);
 app.use('/api/product',   productRoutes);
