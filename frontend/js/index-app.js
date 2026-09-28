@@ -3161,7 +3161,6 @@ async function loadAdminDashboard() {
     loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용 (DOM 재빌드 시 인라인 스타일 유지)
     _loadHiddenCols();  // ★ 열 숨김 상태 복원
     _resetSort();       // ★ 정렬 초기화
-    _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
     clearDashSearch();  // ★ 새로고침 시 검색 초기화
     setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
     _lastDashData = data;
@@ -3354,7 +3353,6 @@ function renderDashboard(data) {
   loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용
   _loadHiddenCols();  // ★ 열 숨김 상태 복원
   _resetSort();       // ★ 정렬 초기화
-  _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
   clearDashSearch();  // ★ 렌더 시 검색 초기화
   setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
   // ★ v10.0 P1-D: 재렌더 후 dirty 배지도 갱신
@@ -3513,86 +3511,6 @@ function _buildEndDateHtml(tabKey, endDate, isTabDone, isClosedTab) {
   return `<span style="display:flex;align-items:center;gap:2px">${badge}${refreshBtn}</span>`;
 }
 
-/* ── v9.9: 메모 공유 패널 ── */
-let _memoCurrentTab = null; // { sheetId, tabName, displayName }
-
-async function openMemoPanel(sheetId, tabName, displayName) {
-  _memoCurrentTab = { sheetId, tabName, displayName };
-  const overlay = document.getElementById("memoOverlay");
-  const titleEl = document.getElementById("memoModalTitle");
-  if (titleEl) titleEl.textContent = (displayName || tabName) + " 메모";
-  overlay.classList.add("open");
-  await _loadMemoMessages();
-}
-
-function closeMemoPanel() {
-  document.getElementById("memoOverlay").classList.remove("open");
-  _memoCurrentTab = null;
-}
-
-async function _loadMemoMessages() {
-  const chatArea = document.getElementById("memoChatArea");
-  if (!chatArea || !_memoCurrentTab) return;
-  chatArea.innerHTML = '<div class="memo-empty"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
-  try {
-    const data = await gasGet({ action: "getMemo", sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName });
-    const msgs = (data && data.messages) ? data.messages : [];
-    if (msgs.length === 0) {
-      chatArea.innerHTML = '<div class="memo-empty">아직 메모가 없습니다.<br>첫 메모를 남겨보세요!</div>';
-      return;
-    }
-    chatArea.innerHTML = msgs.map(m => {
-      const roleClass  = m.role === "admin" ? "admin" : "staff";
-      const roleLabel  = m.role === "admin" ? "👔 관리자" : "💼 AE";
-      const timeStr    = m.ts ? new Date(m.ts).toLocaleString("ko-KR", { month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
-      return `<div class="memo-bubble ${roleClass}">
-        <div>${escHtml(m.text)}</div>
-        <div class="memo-bubble-meta">${roleLabel} ${escHtml(m.name)} · ${timeStr}</div>
-      </div>`;
-    }).join("");
-    chatArea.scrollTop = chatArea.scrollHeight;
-  } catch(e) {
-    chatArea.innerHTML = `<div class="memo-empty" style="color:#EF4444">불러오기 실패: ${escHtml(e.message)}</div>`;
-  }
-}
-
-async function sendMemoMsg() {
-  if (!_memoCurrentTab) return;
-  const textEl = document.getElementById("memoInputText");
-  const text   = (textEl ? textEl.value : "").trim();
-  if (!text) { showToast("메모 내용을 입력하세요.", "warning"); return; }
-
-  // 관리자 세션에서 이름 가져오기
-  const _sess = (() => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch(_) { return null; }
-  })();
-  if (!_sess || !_sess.name) { showToast("로그인이 필요합니다.", "error"); return; }
-
-  const sendBtn = document.querySelector(".memo-send-btn");
-  if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>'; }
-  try {
-    await gasGet({ action: "saveMemo",
-      sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName,
-      role: "admin", name: _sess.name, text });
-    if (textEl) textEl.value = "";
-    await _loadMemoMessages();
-    // ★ 메모 미리보기 캐시 무효화
-    const tabKey = _memoCurrentTab.sheetId + "||" + _memoCurrentTab.tabName;
-    _invalidateMemoCache(tabKey);
-    document.querySelectorAll(`.btn-tab-memo`).forEach(btn => {
-      if (btn.closest("[data-tabkey='" + tabKey + "']") || btn.onclick?.toString().includes(escHtml(tabKey))) {
-        btn.classList.add("has-memo");
-      }
-    });
-  } catch(e) {
-    showToast("메모 저장 실패: " + e.message, "error");
-  } finally {
-    if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
-  }
-}
 async function refreshTabEndDate(btnEl, tabKey) {
   const parts = tabKey.split("||");
   if (parts.length < 2) return;
@@ -3842,7 +3760,6 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     <div style="display:flex;align-items:center;justify-content:center;gap:3px;flex-wrap:nowrap;overflow:hidden;min-width:0;padding:0 2px">
       <button class="tc-info-btn tc-clickable" data-tc="${tcAttr}" title="일괄 정보 입력·수정" style="flex-shrink:0">+정보</button>
       <button class="btn-tab-stats" onclick="event.stopPropagation();openStatsPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="진행률 상세 보기" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-chart-bar"></i></button>
-      <button class="btn-tab-memo" onclick="event.stopPropagation();openMemoPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="메모 보기/입력" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-comment-dots"></i></button>
     </div>`;
 }
 
@@ -4589,94 +4506,6 @@ function _resetSort() {
     const icon = cell.querySelector('.col-sort-icon');
     if (icon) icon.innerHTML = '⇅';
   });
-}
-
-/* ══════════════════════════════════════════════════════════
-   ★ 기능 3: 메모 미리보기 툴팁
-   ══════════════════════════════════════════════════════════ */
-// 탭키별 메모 최근 내용 캐시 { tabKey: "최근메모텍스트" }
-const _memoPreviewCache = {};
-let _memoTooltipTimer = null;
-
-/** 메모 버튼에 hover 이벤트 등록 (대시보드 렌더 후 호출) */
-function _bindMemoPreviewTooltips() {
-  const wrap = document.getElementById('dashboardWrap');
-  if (!wrap) return;
-
-  // 위임 방식으로 등록 (행이 동적으로 추가되어도 동작)
-  wrap.addEventListener('mouseenter', _onMemoMouseEnter, true);
-  wrap.addEventListener('mouseleave', _onMemoMouseLeave, true);
-}
-
-function _onMemoMouseEnter(e) {
-  const btn = e.target.closest('.btn-tab-memo.has-memo');
-  if (!btn) return;
-
-  // onclick 속성에서 tabKey 추출 (sheetId + tabName)
-  const onclickStr = btn.getAttribute('onclick') || '';
-  const m = onclickStr.match(/openMemoPanel\('([^']+)'\s*,\s*'([^']+)'/);
-  if (!m) return;
-  const sheetId = m[1];
-  const tabName = m[2];
-  const tabKey  = sheetId + '||' + tabName;
-
-  clearTimeout(_memoTooltipTimer);
-  _memoTooltipTimer = setTimeout(async () => {
-    const tooltip = document.getElementById('memoPreviewTooltip');
-    if (!tooltip) return;
-
-    // 캐시 없으면 GAS 호출
-    if (!_memoPreviewCache[tabKey]) {
-      tooltip.textContent = '📝 로딩 중...';
-      _showMemoTooltipAt(tooltip, btn);
-      try {
-        const data = await gasGet({ action: 'getMemo', sheetId, tabName });
-        const msgs = (data && data.messages) ? data.messages : [];
-        if (msgs.length === 0) {
-          _memoPreviewCache[tabKey] = '(메모 없음)';
-        } else {
-          const last = msgs[msgs.length - 1];
-          const role = last.role === 'admin' ? '관리자' : 'AE';
-          const text = (last.text || '').slice(0, 60) + ((last.text||'').length > 60 ? '…' : '');
-          _memoPreviewCache[tabKey] = `💬 ${role}: ${text}`;
-        }
-      } catch(_) {
-        _memoPreviewCache[tabKey] = '(불러오기 실패)';
-      }
-    }
-
-    // 툴팁이 아직 표시 중이면 내용 업데이트
-    if (tooltip.style.display !== 'none') {
-      tooltip.textContent = _memoPreviewCache[tabKey] || '';
-      _showMemoTooltipAt(tooltip, btn);
-    }
-  }, 400); // 400ms 딜레이
-}
-
-function _onMemoMouseLeave(e) {
-  const btn = e.target.closest('.btn-tab-memo');
-  if (!btn) return;
-  clearTimeout(_memoTooltipTimer);
-  const tooltip = document.getElementById('memoPreviewTooltip');
-  if (tooltip) tooltip.style.display = 'none';
-}
-
-function _showMemoTooltipAt(tooltip, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  tooltip.style.display = 'block';
-  tooltip.style.left = (rect.left + window.scrollX) + 'px';
-  tooltip.style.top  = (rect.top  + window.scrollY - tooltip.offsetHeight - 10) + 'px';
-  // 화면 오른쪽 초과 방지
-  const tw = tooltip.offsetWidth;
-  const overRight = rect.left + tw - window.innerWidth + 12;
-  if (overRight > 0) {
-    tooltip.style.left = (rect.left + window.scrollX - overRight) + 'px';
-  }
-}
-
-// 메모 캐시 무효화 (메모 전송 후 호출)
-function _invalidateMemoCache(tabKey) {
-  delete _memoPreviewCache[tabKey];
 }
 
 /**

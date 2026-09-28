@@ -166,9 +166,6 @@ const _ACTION_MAP = {
   // 단축URL / 메모 (Section 10)
   'createShort':  { method: 'POST', path: '/api/short/create' },
   'resolveShort': { method: 'GET',  path: '/api/short/resolve' },
-  'getMemo':      { method: 'GET',  path: '/api/memo' },
-  'saveMemo':     { method: 'POST', path: '/api/memo' },
-  'deleteMemo':   { method: 'POST', path: '/api/memo' }, // DELETE는 브라우저 제약이 있으므로 POST
 
   // 입금처리 (Section 11)
   'getPaymentTargets': { method: 'GET',  path: '/api/payment/targets' },

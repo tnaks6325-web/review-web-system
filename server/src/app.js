@@ -18,7 +18,6 @@ const reviewerRoutes = require('./routes/reviewer.routes');
 const adminRoutes    = require('./routes/admin.routes');
 const driveRoutes    = require('./routes/drive.routes');
 const shortRoutes    = require('./routes/shortlink.routes');
-const memoRoutes     = require('./routes/memo.routes');
 const paymentRoutes  = require('./routes/payment.routes');
 const submitRoutes   = require('./routes/submit.routes');
 const diagRoutes     = require('./routes/diag.routes');
@@ -90,8 +89,7 @@ app.use('/api/drive',     driveRoutes);
 // 단축URL (Section 10)
 app.use('/api/short',     shortRoutes);
 
-// 메모 (Section 10)
-app.use('/api/memo',      memoRoutes);
+// (/api/memo — 옛 대시보드 탭 메모는 2026-09-28 제거, 결정 186 55번. memos 표는 보존)
 
 // 입금처리 (Section 11)
 app.use('/api/payment',   paymentRoutes);
@@ -242,7 +240,6 @@ app.get('/health', async (req, res) => {
       admin: '/api/admin/login',
       drive: '/api/drive/*',
       short: '/api/short/*',
-      memo: '/api/memo',
       payment: '/api/payment/targets',
       submit: '/api/submit/*',
       diag: '/api/diag/*',

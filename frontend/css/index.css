@@ -631,33 +631,6 @@ input,textarea,button{font-family:inherit}
 .dday-near{background:#FEF3C7;color:#92400E;border-color:#FCD34D}
 .dday-normal{background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE}
 .dday-done{background:#F0FDF4;color:#065F46;border-color:#A7F3D0}
-/* ── v9.9: 메모 버튼 ── */
-.btn-tab-memo{
-  display:inline-flex;align-items:center;justify-content:center;
-  background:none;border:1px solid #E5E7EB;border-radius:5px;
-  padding:2px 5px;font-size:.65rem;color:#6B7280;cursor:pointer;
-  transition:all .15s;
-}
-.btn-tab-memo:hover{background:#e8f1fe;color:#3182f6;border-color:#cce0fb}
-.btn-tab-memo.has-memo{color:#3182f6;background:#e8f1fe;border-color:#a6c8fb}
-/* ── v9.9: 메모 모달 ── */
-.memo-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:3500;display:none;align-items:center;justify-content:center}
-.memo-overlay.open{display:flex}
-.memo-modal{background:#fff;border-radius:16px;width:420px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.18)}
-.memo-modal-head{padding:14px 18px 10px;border-bottom:1px solid #F3F4F6;display:flex;align-items:center;gap:8px}
-.memo-modal-title{font-size:.9rem;font-weight:700;color:#111827;flex:1}
-.memo-chat-area{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-height:0}
-.memo-bubble{max-width:80%;padding:8px 12px;border-radius:12px;font-size:.78rem;line-height:1.5;word-break:break-word}
-.memo-bubble.admin{align-self:flex-end;background:#e8f1fe;color:#1b64da;border-bottom-right-radius:3px}
-.memo-bubble.staff{align-self:flex-start;background:#F0FDF4;color:#065F46;border-bottom-left-radius:3px}
-.memo-bubble-meta{font-size:.65rem;opacity:.7;margin-top:3px}
-.memo-bubble.admin .memo-bubble-meta{text-align:right}
-.memo-input-area{padding:10px 14px;border-top:1px solid #F3F4F6;display:flex;gap:8px}
-.memo-input-area textarea{flex:1;border:1px solid #E5E7EB;border-radius:8px;padding:7px 10px;font-size:.8rem;resize:none;height:54px;font-family:inherit;outline:none}
-.memo-input-area textarea:focus{border-color:#3182f6;box-shadow:0 0 0 2px rgba(49,130,246,.12)}
-.memo-send-btn{background:#3182f6;color:#fff;border:none;border-radius:8px;padding:0 14px;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap}
-.memo-send-btn:hover{background:#1b64da}
-.memo-empty{text-align:center;color:#9CA3AF;font-size:.78rem;padding:20px 0}
 /* 마감 확인 팝업 */
 .closed-confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;display:none;align-items:center;justify-content:center}
 .closed-confirm-overlay.open{display:flex}
@@ -1003,24 +976,6 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 .dash-col-header-cell.sort-desc .col-sort-icon { opacity:1; color:var(--p); }
 .dash-col-header-cell.sort-asc  { background:rgba(49,130,246,.07)!important; color:var(--p-d)!important; }
 .dash-col-header-cell.sort-desc { background:rgba(49,130,246,.07)!important; color:var(--p-d)!important; }
-
-/* ══════════════════════════════════════════════
-   ★ 메모 미리보기 툴팁
-   ══════════════════════════════════════════════ */
-#memoPreviewTooltip {
-  position:fixed; z-index:9800; pointer-events:none;
-  background:#14213a; color:#fff;
-  font-size:.75rem; line-height:1.55;
-  padding:8px 12px; border-radius:9px;
-  box-shadow:0 6px 20px rgba(13,40,99,.28);
-  max-width:240px; word-break:break-word;
-  display:none; white-space:pre-wrap;
-}
-#memoPreviewTooltip::after {
-  content:''; position:absolute; bottom:-5px; left:16px;
-  width:10px; height:10px; background:#14213a;
-  transform:rotate(45deg);
-}
 
 /*
   ★ v11.1: 엑셀형 플랫 그리드 (22열 = closedcb + campaign + 20열):

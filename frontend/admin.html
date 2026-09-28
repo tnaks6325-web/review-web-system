@@ -839,7 +839,7 @@ body{ letter-spacing:-.01em; }
           <div id="colVisWrap"><button id="btnColVis"></button><div id="colVisDropdown"></div></div>
           <button id="pollToggleBtn"></button>
           <div id="dashSearchBar"><input id="dashSearchInput"><div id="dashSearchCount"></div></div>
-          <div id="colDragTooltip"></div><div id="colDragLine"></div><div id="memoPreviewTooltip"></div>
+          <div id="colDragTooltip"></div><div id="colDragLine"></div>
           <label id="liveModeToggleWrap"><input type="checkbox" id="liveModeCheckbox"><span id="liveModeLabel">LIVE</span></label>
         </div>
         <!-- ═══════════════════════════════════════════════════════ -->
@@ -2231,24 +2231,6 @@ body{ letter-spacing:-.01em; }
 </div>
 
 
-
-<!-- ── v9.9 메모 공유 모달 ── -->
-<div class="memo-overlay" id="memoOverlay" onclick="if(event.target===this)closeMemoPanel()">
-  <div class="memo-modal">
-    <div class="memo-modal-head">
-      <i class="fas fa-comment-dots" style="color:#3182f6;font-size:.95rem"></i>
-      <span class="memo-modal-title" id="memoModalTitle">메모</span>
-      <button onclick="closeMemoPanel()" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:1rem;padding:2px 4px"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="memo-chat-area" id="memoChatArea">
-      <div class="memo-empty">메모가 없습니다.</div>
-    </div>
-    <div class="memo-input-area">
-      <textarea id="memoInputText" placeholder="메모를 입력하세요..." maxlength="500" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMemoMsg()}"></textarea>
-      <button class="memo-send-btn" onclick="sendMemoMsg()"><i class="fas fa-paper-plane"></i></button>
-    </div>
-  </div>
-</div>
 
 <!-- ── 마감 확인 팝업 ── -->
 <div class="closed-confirm-overlay" id="closedConfirmOverlay">
