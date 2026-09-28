@@ -86,7 +86,6 @@ const _ACTION_MAP = {
   // 인덱스 스캔 + DB 동기화 (정상 경로)
   'indexScan':        { method: 'POST', path: '/api/tab/index-scan' },
   'indexScanSync':    { method: 'POST', path: '/api/tab/index-scan-sync' },
-  'resetAllData':     { method: 'POST', path: '/api/tab/reset-all' },
 
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
   'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },
@@ -155,8 +154,6 @@ const _ACTION_MAP = {
   'syncReviewFolders':      { method: 'POST', path: '/api/drive/sync-review' },
   'syncAllFolders':         { method: 'POST', path: '/api/drive/sync-all' },
   'batchCreateFolders':     { method: 'POST', path: '/api/drive/batch-create' },
-  'resetTabFolderUrls':     { method: 'POST', path: '/api/drive/reset-folder-urls' },
-  'migrateFolderNames':     { method: 'POST', path: '/api/drive/migrate-names' },
   'organizeCaptureFolders': { method: 'POST', path: '/api/drive/organize-capture' },
   'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
   'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
@@ -225,7 +222,6 @@ const _ACTION_MAP = {
   'syncReviewFolders':   { method: 'POST', path: '/api/drive/sync-review' },
   'syncAllFolders':      { method: 'POST', path: '/api/drive/sync-all' },
   'batchCreateFolders':  { method: 'POST', path: '/api/drive/batch-create' },
-  'migrateToNewStructure': { method: 'POST', path: '/api/drive/migrate-to-new-structure' },
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
   'driveAccountInfo':    { method: 'GET',  path: '/api/drive/account-info' },
   'driveOwnershipAudit': { method: 'POST', path: '/api/drive/ownership-audit' },

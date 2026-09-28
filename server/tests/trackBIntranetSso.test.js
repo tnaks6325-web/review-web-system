@@ -185,16 +185,16 @@ async function run() {
   }
   let mw = await runMw(intraToken, '/api/trackb', '/tabs');
   assert.equal(mw.nexted, true, '1.5a: intranet 토큰 — /api/trackb/* 통과');
-  mw = await runMw(intraToken, '/api/tab', '/reset-all');
-  assert.equal(mw.code, 403, '1.5b: intranet 토큰 — Track A(탭설정 리셋) 차단');
+  mw = await runMw(intraToken, '/api/tab', '/config');
+  assert.equal(mw.code, 403, '1.5b: intranet 토큰 — Track A(탭설정) 차단');
   mw = await runMw(intraToken, '/api/memo', '/save');
   assert.equal(mw.code, 403, '1.5c: intranet 토큰 — Track A(메모) 차단');
-  mw = await runMw(staffToken, '/api/tab', '/reset-all');
+  mw = await runMw(staffToken, '/api/tab', '/config');
   assert.equal(mw.nexted, true, '1.5d: 자체 staff 토큰(via 없음)은 기존 동작 불변');
   // 1.5e: 지정계정 admin 승격 토큰도 격리 유지 — Track A 도달 불가(폭발반경 불변)
   mw = await runMw(adminIntraToken, '/api/trackb', '/overview');
   assert.equal(mw.nexted, true, '1.5e: intranet admin — /api/trackb/* 통과');
-  mw = await runMw(adminIntraToken, '/api/tab', '/reset-all');
+  mw = await runMw(adminIntraToken, '/api/tab', '/config');
   assert.equal(mw.code, 403, '1.5e: intranet admin 이어도 Track A 차단(role 무관 격리)');
   console.log('  1.5 authMiddleware — via:intranet 토큰 Track B 전용 격리(Track A 차단·기존 토큰 불변·admin 승격에도 유지) ✓');
 

@@ -11738,7 +11738,6 @@ function _pmRender(){
     <span class="sp" style="flex:1"></span>
     <button class="btn" onclick="_pmOpenDepositAnomalies()">입금일 점검</button>
     <button class="btn" onclick="_pmOpenDepositDateCorrection()">수동 입금일 이동</button>
-    <button class="btn" onclick="_pmRestoreManual811()">#0 · 8/11 수동 이체 복구</button>
     <button class="btn" onclick="_pmLoad()">새로고침</button></div>`;
 
   const stat=(k,v,cls)=>`<div class="pmstat ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
@@ -12780,19 +12779,6 @@ async function _pmMarkApplied(i){
     { method:'POST', body: JSON.stringify({ confirm:true }) });
   if(!r || !r.ok){ toast((r&&r.error)||'적용완료 처리 실패'); return; }
   toast(`적용완료로 처리했습니다${r.remainingPending ? ` · 결과 확인 대기 ${r.remainingPending}건` : ''}`);
-  await _pmLoad(true);
-}
-
-async function _pmRestoreManual811(){
-  if(!confirm('과거 8/11 수동 입금 대상을 #0 수동 이체회차와 입금 원장으로 기록하고 작업표에 복구할까요?\n기존 이체회차와 겹치는 건이 있으면 중단됩니다.')) return;
-  const r=await api('/api/trackb/payment/repair/manual-811-deposit-dates',
-    {method:'POST',body:JSON.stringify({confirm:true})});
-  if(!r||!r.ok){ toast((r&&r.error)||'#0 수동 이체 복구에 실패했습니다.'); return; }
-  const parts=[`${r.recorded||0}건 기록`];
-  if(r.queued) parts.push(`${r.queued}건 재시도 대기`);
-  if(r.skipped) parts.push(`${r.skipped}건 제외`);
-  if(r.failed) parts.push(`${r.failed}건 실패`);
-  toast(`#0 수동 이체 복구 완료 · 대상 ${r.candidates||0}건 · ${parts.join(' · ')}`);
   await _pmLoad(true);
 }
 

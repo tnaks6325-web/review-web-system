@@ -5,7 +5,7 @@
  * 사고: `campaign_participants.order_submission_id` 는 유니크가 아니고 `identity_key` 는
  *   `num:<주문번호>` 라, 무시트 중복 줄 사고가 난 탭에서 마커 1건이 여러 줄을 가리켰다.
  *   `rehydrateManualPaymentMarks` 는 **장부 재생성마다** 돌면서 그 모든 줄에 입금일을 다시 찍었고
- *   (→ 리뷰 미작성 줄에 입금일), `_manual811Candidates` 는 그 줄마다 입금 원장을 만들었다
+ *   (→ 리뷰 미작성 줄에 입금일), `_manual811Candidates`(결정 186 59번 제거) 는 그 줄마다 입금 원장을 만들었다
  *   (→ 실제 이체 1건인데 입금완료 N건).
  *
  * ★ 이 가드는 문자열 존재가 아니라 **스텁 DB 로 실제 실행**해 "2줄 이상이면 한 줄도 안 쓴다"를 본다
@@ -58,10 +58,8 @@ function stubClient(targetRows) {
 
 /* ── 2. 복구 도구: 같은 앵커가 여러 행이면 그 앵커 전체를 후보에서 제외 ────── */
 const repair = fs.readFileSync(path.join(root, 'src/services/manualDepositRepair.service.js'), 'utf8');
-assert.match(repair, /perAnchor/, '복구 후보 산출에 앵커별 집계가 있어야 한다');
-assert.match(repair, /=== 1\)/, '유일한 앵커만 후보로 남겨야 한다');
-assert.match(repair, /_lastAmbiguous/, '제외한 행을 화면이 말할 수 있어야 한다');
-assert.match(repair, /ambiguousRows/, '미리보기 응답이 제외 사유를 실어야 한다');
+// (8/11 복구 후보 산출 _manual811Candidates 는 복구 실행 완료로 결정 186 59번에서 제거 — 번짐 방어는 1절 rehydrate 가 맡는다)
+assert.doesNotMatch(repair, /_manual811Candidates/, '실행 완료된 8/11 복구 후보 산출이 되살아났다');
 
 /* ── 3. 진단은 읽기 전용 ─────────────────────────────────────────────────── */
 const anomalyStart = repair.indexOf('async function depositAnomalyReport');

@@ -430,35 +430,6 @@ body{ letter-spacing:-.01em; }
 
           <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
 
-          <!-- ⚠ DB 선택적 초기화 -->
-          <div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#DC2626;margin-bottom:4px">
-              <i class="fas fa-exclamation-triangle" style="color:#DC2626"></i> DB 초기화
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(선택 항목만 삭제)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:6px">
-              초기화할 항목을 선택하세요. <b style="color:#DC2626">되돌릴 수 없습니다.</b>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px">
-              <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
-                <input type="checkbox" id="resetDashboard" checked style="accent-color:#DC2626">
-                <span><b>대시보드</b> — campaigns, tab_configs, review_index, index_master</span>
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
-                <input type="checkbox" id="resetArchive" checked style="accent-color:#DC2626">
-                <span><b>마감</b> — index_master_archive, review_index_archive, archive_history</span>
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
-                <input type="checkbox" id="resetUnrecognized" checked style="accent-color:#DC2626">
-                <span><b>인식 실패 탭</b> — unrecognized_tabs</span>
-              </label>
-            </div>
-            <button id="btnResetAll" onclick="resetAllData()"
-              style="padding:6px 16px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-trash-alt"></i> 선택 항목 초기화
-            </button>
-          </div>
-
           <!-- 캡처폴더 구조 재편성 -->
           <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
             <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
@@ -486,27 +457,6 @@ body{ letter-spacing:-.01em; }
             <div id="organizeResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:200px;overflow-y:auto"></div>
           </div>
 
-          <!-- 폴더명 마이그레이션 -->
-          <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-exchange-alt" style="color:#D97706"></i> 폴더명 형식 변환
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">({탭명} → {탭명}_{캠페인명})</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              탭명이 동일한 캠페인 간 폴더 충돌 방지를 위해 Drive 폴더명 변경
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnMigrateDry" onclick="migrateFolderNames(true)"
-                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnMigrateRun" onclick="migrateFolderNames(false)"
-                style="flex:1;padding:7px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실제 변환
-              </button>
-            </div>
-            <div id="migrateResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:180px;overflow-y:auto"></div>
-          </div>
 
           <!-- 탭 파싱 진단 -->
           <div style="border-top:1px solid #F3F4F6;padding-top:8px">
