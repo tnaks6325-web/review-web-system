@@ -80,24 +80,22 @@ t('원본 라우트는 무변경 — /api/admin·/api/tab·/api/reviewer 게이�
 console.log('\n3) 사본 금지(프론트)');
 const mod = F('js/admin-settings.js');
 const adm = F('admin.html');
-const siand = F('admin-siand.html');
 const wdk = F('workdesk.html');
 const app = F('js/index-app.js');
 
 t('마크업·로직은 공유 모듈 한 벌', /window\.AdminSettings\s*=/.test(mod)
   && /function _nicknameHtml/.test(mod) && /function _businessHtml/.test(mod) && /function _noticeHtml/.test(mod));
-t('★ 세 화면이 같은 모듈을 로드한다', [adm, siand, wdk].every(h => /js\/admin-settings\.js/.test(h)));
+t('★ 두 화면이 같은 모듈을 로드한다 (admin-siand.html 은 결정 186 44번에서 제거)', [adm, wdk].every(h => /js\/admin-settings\.js/.test(h)));
 t('★ 화면에는 사본이 없다 — 마운트 지점만',
   !/id="myNicknameInput"/.test(adm) && !/id="companyBusinessNoInput"/.test(adm) && !/id="rvNoticeList"/.test(adm)
-  && !/id="myNicknameInput"/.test(siand)
   && /id="adminSettingsMount"/.test(adm) && /id="rvNoticeMount"/.test(adm)
-  && /id="adminSettingsMount"/.test(siand) && /id="adminSettingsMount"/.test(wdk));
+  && /id="adminSettingsMount"/.test(wdk));
 t('★ index-app.js 에 같은 이름의 선언이 남아 있지 않다(뒤에 로드되어 모듈 전역을 덮는다)',
   !/function saveMyNickname/.test(app) && !/function saveCompanyBusinessNo/.test(app)
   && !/function uploadCashReceiptGuide/.test(app) && !/function saveReviewerNotice/.test(app)
   && !/const CR_GUIDE_CHANNELS/.test(app));
 t('★ 모듈은 index-app.js **앞**에 로드된다(순서가 바뀌면 전역이 덮인다)',
-  [adm, siand].every(h => h.indexOf('js/admin-settings.js') < h.indexOf('js/index-app.js')));
+  [adm].every(h => h.indexOf('js/admin-settings.js') < h.indexOf('js/index-app.js')));
 t('탭 전환 훅(호출부)은 그대로 — 로드 타이밍 불변',
   /tabName === "settings"[\s\S]{0,400}loadMyNickname/.test(app)
   && /tabName === "dashboard"[\s\S]{0,400}loadReviewerNoticesAdmin/.test(app)

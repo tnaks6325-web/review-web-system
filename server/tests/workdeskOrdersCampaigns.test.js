@@ -346,8 +346,8 @@ t('★ 상세 본문은 관리자 대시보드와 **같은 렌더러**(사본 �
   assert.ok(!/function _woDetailHtml/.test(APP), 'index-app.js 에 사본이 남아 있다');
   assert.ok(!/function _woDetailHtml/.test(HTML), 'workdesk.html 에 사본을 만들면 안 된다');
 });
-t('두 화면이 같은 모듈을 로드한다(admin·admin-siand·workdesk)', () => {
-  ['admin.html', 'admin-siand.html'].forEach(p => {
+t('두 화면이 같은 모듈을 로드한다(admin·workdesk) (admin-siand.html 은 결정 186 44번에서 제거)', () => {
+  ['admin.html'].forEach(p => {
     const s = F(p);
     // ★ 캐시버스팅 쿼리(?v=…)가 붙을 수 있다 — 고정하는 것은 **그 모듈을 로드한다**는 사실이다.
     assert.ok(/<script src="js\/work-order-detail\.js(\?[^"]*)?"><\/script>/.test(s), p + ' 미로드');

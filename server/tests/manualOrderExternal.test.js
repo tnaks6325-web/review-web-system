@@ -446,7 +446,7 @@ console.log('\nD. 프론트 배선');
   ok('D16 모집공고 로그에 외부모집 수동제출 버튼', ir.includes('id="ccMoBtn"') && ir.includes('외부모집 수동제출'));
   ok('D17 관제 버튼은 열 때마다 현재 공고로 다시 배선(오버레이 재사용 함정)',
     /_moBtn\.onclick = \(\) =>/.test(ir) && ir.includes('CampCards.openManualOrder(campId)'));
-  ok('D17b 모듈이 없는 화면(admin-siand)에서는 버튼을 숨긴다 — 눌러도 안 되는 버튼 금지',
+  ok('D17b 모듈이 없는 화면에서는 버튼을 숨긴다 — 눌러도 안 되는 버튼 금지',
     /_moBtn\.style\.display = _moReady \? "" : "none"/.test(ir));
   ok('D18 문맥 해석 사본을 index-recruit 에 두지 않는다', !ir.includes('ManualOrder.open('));
 }
@@ -459,7 +459,7 @@ console.log('\nD. 프론트 배선');
     /campaignId: null,\s*\/\/ 탭 단위 진입/.test(ia));
 }
 {
-  const pages = [['admin.html', F('admin.html')], ['index.html', F('index.html')], ['admin-siand.html', F('admin-siand.html')]];
+  const pages = [['admin.html', F('admin.html')], ['index.html', F('index.html')]];   // (admin-siand.html 은 결정 186 44번에서 제거)
   pages.forEach(([name, html]) => {
     ok(`D22 ${name} 이 manual-order.js 를 로드`, html.includes('js/manual-order.js'));
   });

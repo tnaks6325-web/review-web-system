@@ -107,7 +107,6 @@ ok('★ 접수 시 탭 담당자는 매핑된 닉네임 — 담당AE 실명을 �
 /* ═══ 프론트 배선 ═══ */
 const rec = readF('js/index-recruit.js');
 const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');   // 모달 마크업은 공유 모듈로 이관
-const siand = readF('admin-siand.html');
 
 ok('프리필에 채널·담당자·연결탭이 실린다',
   /String\(o && o\.purchase_channel \|\| ''\)\.trim\(\)/.test(appSrc)
@@ -132,15 +131,15 @@ ok('★ 목록에 없는 탭은 선택하지 않는다(잘못된 탭 연결 방�
   /if \(!_recruitTabList\.some\(t => t\.sheetId === sid && t\.tabName === tabName\)\) return _miss\(tabName\);/.test(rec)
   && /const _miss = [\s\S]{0,300}?return false;/.test(rec)
   && !/const _miss = [\s\S]{0,300}?_restoreLinkedTab/.test(rec));
-ok('올리브영 채널 버튼(관리자 화면 2종)',
-  /data-val="올리브영"/.test(adm) && /data-val="올리브영"/.test(siand));
+ok('올리브영 채널 버튼(관리자 화면) (admin-siand.html 은 결정 186 44번에서 제거)',
+  /data-val="올리브영"/.test(adm));
 /* ★ 판정값에 대응하는 버튼이 없으면 _rfPickBtn 이 '직접입력'으로 흡수해 값은 살지만,
    관리자가 매번 채널명을 손으로 확인해야 한다 — 판정하는 채널은 버튼도 함께 둔다. */
-ok('카카오메이커스 채널 버튼(관리자 화면 2종)',
-  /data-val="카카오메이커스"/.test(adm) && /data-val="카카오메이커스"/.test(siand));
+ok('카카오메이커스 채널 버튼(관리자 화면)',
+  /data-val="카카오메이커스"/.test(adm));
 ok('★ WO_CHANNEL_HOSTS 가 판정하는 채널은 전부 버튼이 있다(직접입력 흡수에 기대지 않는다)',
   ['쿠팡', '네이버', '올리브영', '카카오메이커스'].every(v =>
-    new RegExp(`data-val="${v}"`).test(adm) && new RegExp(`data-val="${v}"`).test(siand)));
+    new RegExp(`data-val="${v}"`).test(adm)));
 ok('버튼 없는 채널은 직접입력으로 흡수(값 유실 방지)',
   /selectRfBtn\("channel", custom\);[\s\S]{0,120}ci\.value = val;/.test(rec));
 ok('작업오더 카드에 담당AE·작업담당 표시',

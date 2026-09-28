@@ -312,7 +312,7 @@ t('모집공고 모달 선택지·토글 6종', () => {
 });
 
 t('★ 옛 어휘(회수건·빈택배)는 어느 저장 경로에도 없다', () => {
-  ['../frontend/js/recruit-modal.js', '../frontend/js/campaign-cards.js', '../frontend/admin-siand.html'].forEach((f) => {
+  ['../frontend/js/recruit-modal.js', '../frontend/js/campaign-cards.js'].forEach((f) => {   // (admin-siand.html 은 결정 186 44번에서 제거)
     const src = read(f);
     assert.ok(!/<option value="회수건">/.test(src), f + ' 회수건');
     assert.ok(!/<option value="빈택배">/.test(src), f + ' 빈택배');

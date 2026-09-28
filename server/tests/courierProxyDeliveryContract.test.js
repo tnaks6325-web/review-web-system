@@ -90,7 +90,6 @@ DELIVERY_TYPES.forEach((v) => {
 [
   ['../frontend/js/recruit-modal.js', recruitModal],
   ['../frontend/js/campaign-cards.js', read('../frontend/js/campaign-cards.js')],
-  ['../frontend/admin-siand.html', read('../frontend/admin-siand.html')],
 ].forEach(([name, src]) => {
   assert.doesNotMatch(src, /<option value="회수건">/, name + ' 에 옛 어휘 회수건이 남으면 안 된다');
   assert.doesNotMatch(src, /<option value="빈택배">/, name + ' 에 옛 어휘 빈택배가 남으면 안 된다');

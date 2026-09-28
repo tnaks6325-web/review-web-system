@@ -70,7 +70,6 @@ console.log('\n2) 사본 금지(공유 모듈)');
 const MOD = F('js/cs-inquiry.js');
 const APP = F('js/index-app.js');
 const ADM = F('admin.html');
-const SIA = F('admin-siand.html');
 const WD = F('workdesk.html');
 const API = F('api.js');
 
@@ -90,12 +89,12 @@ t('★ 마크업도 모듈이 들고 있다(두 화면이 같은 판을 마운�
   assert.ok(!/id="csRoomListWrap"/.test(WD), 'workdesk.html 에 마크업 사본이 있다');
   assert.ok(/CsInquiry\.mount\('csInquiryMount'\)/.test(WD), '리뷰웹시스템[3버전]이 모듈 마운트를 안 쓴다');
 });
-t('세 화면이 같은 모듈을 로드한다', () => {
-  [['admin.html', ADM], ['admin-siand.html', SIA], ['workdesk.html', WD]].forEach(([n, s]) => {
+t('두 화면이 같은 모듈을 로드한다', () => {
+  [['admin.html', ADM], ['workdesk.html', WD]].forEach(([n, s]) => {   // (admin-siand.html 은 결정 186 44번에서 제거)
     assert.ok(/<script src="js\/cs-inquiry\.js"><\/script>/.test(s), n + ' 미로드');
   });
   // admin 계열은 index-app.js 앞 — onclick 문자열이 전역 이름으로 참조한다
-  [['admin.html', ADM], ['admin-siand.html', SIA]].forEach(([n, s]) => {
+  [['admin.html', ADM]].forEach(([n, s]) => {
     assert.ok(s.indexOf('js/cs-inquiry.js') < s.indexOf('js/index-app.js'), n + ': 로드 순서');
   });
 });
@@ -132,7 +131,7 @@ t('★ api.js 가 /api/cs 만 재기준한다 — 전역 미설정이면 동작 
 });
 t('리뷰웹시스템[3버전]만 Track B 네임스페이스를 가리킨다', () => {
   assert.ok(/window\.CS_API_BASE = '\/api\/trackb\/cs'/.test(WD));
-  assert.ok(!/CS_API_BASE\s*=/.test(ADM) && !/CS_API_BASE\s*=/.test(SIA),
+  assert.ok(!/CS_API_BASE\s*=/.test(ADM),
     'admin 이 베이스를 바꾸면 기존 경로가 죽는다');
   // ★ 문자열이 주석에도 나오므로 **실제 태그 위치**로 비교한다(주석 순서에 속지 않게)
   assert.ok(WD.indexOf("<script>window.CS_API_BASE") < WD.indexOf('<script src="js/cs-inquiry.js">'),

@@ -12,7 +12,7 @@
  *     → 판정 순수함수를 **실행**해 그 예외가 살아 있는지 고정한다.
  *  ③ **창구 단일화** — 관리자 대시보드의 「오류디버깅」 화면이 남아 있으면 창구가 둘이 되고,
  *     index-app.js 에서 코드만 지우고 HTML 버튼을 남기면 **누르면 ReferenceError 로 죽는 탭**이 된다.
- *     → 세 화면(admin/admin-siand/index-app) 모두에서 흔적 0 을 고정한다.
+ *     → 두 화면(admin/index-app) 모두에서 흔적 0 을 고정한다(admin-siand 는 결정 186 44번 제거).
  *  ④ **프리변수·사본** — 렌더 함수가 자기 스코프에 없는 변수를 참조하면 화면이 조용히 매달린다
  *     (리뷰검수 `isAdmin` 실측 사고). → 로그 뷰 렌더 블록을 **vm 으로 꺼내 실제 실행**한다.
  */
@@ -108,8 +108,7 @@ t('작업보드 프록시는 기본 제외 · includeAdminUi 로만 포함',
 console.log('\n4) 관리자 대시보드 「오류디버깅」 제거');
 const IA = F('js/index-app.js');
 const ADMIN_HTML = F('admin.html');
-const SIAND = F('admin-siand.html');
-[['admin.html', ADMIN_HTML], ['admin-siand.html', SIAND]].forEach(([nm, src]) => {
+[['admin.html', ADMIN_HTML]].forEach(([nm, src]) => {   // (admin-siand.html 은 결정 186 44번에서 제거)
   t(`${nm} — 탭 버튼 제거`, !/data-tab="errorlogs"/.test(src));
   t(`${nm} — 패널 마크업 제거`, !/id="tab-errorlogs"/.test(src) && !/id="errorLogListWrap"/.test(src));
 });
