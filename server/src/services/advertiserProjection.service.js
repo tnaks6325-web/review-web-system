@@ -15,6 +15,7 @@
  */
 const crypto = require('crypto');
 const defaultPool = require('../db/pool');
+const { sameAdvertiser } = require('../utils/advertiserIdentity');
 
 const ADVERTISER_NAME_CONFLICT = 'advertiser_name_conflict';
 
@@ -109,11 +110,25 @@ async function projectIntranetAdvertiser(order, context, deps) {
       const { rows: sameNameRows } = await client.query(
         `SELECT id, intranet_advertiser_id FROM advertisers WHERE name = $1 FOR UPDATE`, [name]
       );
-      if (sameNameRows.length && !linkId) {
+      // ★★ 표기만 다른 같은 업체도 후보로 올린다(2026-09-28 올곧은무역·어니스트캄 실사고):
+      //   인트라넷에서 사업자명을 정정하면(`주식회사 올곧은무역` → `(주)올곧은무역`) 원본 ID 가 없는
+      //   옛 업체와 이름이 정확히 같지 않아 조용히 **새 업체가 하나 더** 만들어졌다.
+      //   판정 = utils/advertiserIdentity.sameAdvertiser(법인격 표기 무시 이름 일치 또는 사업자번호 숫자 일치).
+      //   ★ 원본 ID 가 없는 업체만 — 이미 다른 인트라넷 광고주에 연결된 업체는 확실히 다른 원본이다.
+      //   ★ 자동 병합은 여전히 금지 — 후보로 돌려주고 사람이 확인한다(결정 004).
+      const { rows: looseRows } = await client.query(
+        `SELECT id, name, COALESCE(intranet_business_number,'') AS biz FROM advertisers
+          WHERE COALESCE(intranet_advertiser_id,'') = '' AND COALESCE(status,'') <> 'ended'`);
+      const exactIds = new Set(sameNameRows.map(r => r.id));
+      const similarIds = looseRows
+        .filter(r => !exactIds.has(r.id) && sameAdvertiser({ name: r.name, businessNumber: r.biz }, { name, businessNumber }))
+        .map(r => r.id);
+      const conflictIds = sameNameRows.map(r => r.id).concat(similarIds);
+      if (conflictIds.length && !linkId) {
         // ★ 자동 병합 금지 — 대신 사람이 고를 후보를 함께 돌려준다.
-        const candidates = await _candidates(client, sameNameRows.map(r => r.id));
+        const candidates = await _candidates(client, conflictIds);
         throw new AdvertiserLinkError(
-          '동일 이름의 기존 광고주가 있어 자동 병합하지 않았습니다. 같은 업체인지 확인해 주세요.',
+          '같은 업체로 보이는 기존 광고주가 있어 자동 병합하지 않았습니다. 같은 업체인지 확인해 주세요.',
           ADVERTISER_NAME_CONFLICT,
           { name, intranetAdvertiserId: intranetId, businessNumber, contact, candidates }
         );
@@ -121,7 +136,8 @@ async function projectIntranetAdvertiser(order, context, deps) {
       if (linkId) {
         // ── 사람이 확인한 기존 업체에 원본 ID 를 백필해 연결 ──
         const { rows: picked } = await client.query(
-          `SELECT id, name, COALESCE(intranet_advertiser_id,'') AS cur
+          `SELECT id, name, COALESCE(intranet_advertiser_id,'') AS cur,
+                  COALESCE(intranet_business_number,'') AS biz
              FROM advertisers WHERE id = $1 FOR UPDATE`, [linkId]);
         if (!picked.length) {
           throw new AdvertiserLinkError('고른 업체를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.', 'advertiser_not_found');
@@ -130,19 +146,26 @@ async function projectIntranetAdvertiser(order, context, deps) {
           // ★ 남의 원본을 빼앗지 않는다(fail-closed).
           throw new AdvertiserLinkError('그 업체는 이미 다른 인트라넷 광고주에 연결되어 있습니다.', 'advertiser_already_linked');
         }
-        if (_text(picked[0].name, 200) !== name) {
-          // ★ 화면이 보여준 뒤 이름이 바뀌었다면 판단 근거가 달라진 것이다 — 다시 확인시킨다.
+        // ★ 고른 업체가 **지금도** 후보 조건(이름 정확일치 · 표기만 다른 이름 · 사업자번호 일치)에 맞는지
+        //   다시 본다 — 화면이 보여준 뒤 이름이 바뀌었다면 판단 근거가 달라진 것이다(결정 004).
+        const stillCandidate = _text(picked[0].name, 200) === name
+          || sameAdvertiser({ name: picked[0].name, businessNumber: picked[0].biz }, { name, businessNumber });
+        if (!stillCandidate) {
           throw new AdvertiserLinkError('그 사이 업체명이 바뀌었습니다. 다시 접수해 확인해 주세요.', 'advertiser_name_changed');
         }
+        // ★ 연결하면 이름도 원본(인트라넷 사업자명)을 따른다 — 단 다른 업체가 이미 그 이름을 쓰면
+        //   그대로 둔다(advertisers.name UNIQUE — 접수를 23505 로 죽이지 않는다).
         const upd = await client.query(
           `UPDATE advertisers SET
              intranet_advertiser_id   = $2,
              intranet_contact         = COALESCE(NULLIF($3, ''), intranet_contact),
              intranet_business_number = COALESCE(NULLIF($4, ''), intranet_business_number),
+             name = CASE WHEN NOT EXISTS (SELECT 1 FROM advertisers o WHERE o.name = $5 AND o.id <> $1)
+                         THEN $5 ELSE name END,
              updated_at = NOW()
            WHERE id = $1 AND COALESCE(intranet_advertiser_id,'') = ''
            RETURNING id`,
-          [linkId, intranetId, contact, businessNumber]
+          [linkId, intranetId, contact, businessNumber, name]
         );
         if (!upd.rows.length) {
           throw new AdvertiserLinkError('그 업체의 원본 연결이 방금 바뀌었습니다. 다시 시도해 주세요.', 'advertiser_link_race');
@@ -167,8 +190,12 @@ async function projectIntranetAdvertiser(order, context, deps) {
       }
     } else {
       await client.query(
+        // ★ 인트라넷에서 사업자명을 정정하면 여기서 이름이 따라간다. 단 다른 업체(원본 미연결 옛 행)가
+        //   그 이름을 이미 쓰고 있으면 UNIQUE 충돌로 **접수 전체가 죽는다** — 그때는 이름을 두고
+        //   (업체관리의 인트라넷 연결 점검이 그 두 업체를 병합 대상으로 알려 준다).
         `UPDATE advertisers SET
-           name = $2,
+           name = CASE WHEN NOT EXISTS (SELECT 1 FROM advertisers o WHERE o.name = $2 AND o.id <> $1)
+                       THEN $2 ELSE name END,
            intranet_contact = COALESCE(NULLIF($3, ''), intranet_contact),
            intranet_business_number = COALESCE(NULLIF($4, ''), intranet_business_number),
            updated_at = NOW()

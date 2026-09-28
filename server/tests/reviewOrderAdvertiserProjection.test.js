@@ -26,8 +26,10 @@ ok('접수 시 원본 광고주를 업서트하고 작업오더 기준으로 포
   /function projectIntranetAdvertiser/.test(projection)
   && /ON CONFLICT \(work_order_id\) WHERE work_order_id <> ''/.test(projection)
   && /projectIntranetAdvertiser\(o, \{/.test(orderRoute));
-ok('광고주 이름만 같은 기존 레코드는 자동 병합하지 않는다',
-  /동일 이름의 기존 광고주/.test(projection));
+// 2026-09-28: 표기만 다른 이름·같은 사업자번호도 후보에 올리도록 넓혀 문구가 바뀌었다(검사 의미 불변 —
+//   여전히 충돌 코드를 던지고 자동 병합하지 않는다).
+ok('광고주 이름만 같은(또는 비슷한) 기존 레코드는 자동 병합하지 않는다',
+  /자동 병합하지 않았습니다/.test(projection) && /ADVERTISER_NAME_CONFLICT,/.test(projection));
 ok('미적용 스키마는 부팅 전 차단한다',
   /\['advertisers', 'intranet_advertiser_id'\]/.test(boot)
   && /\['portal_works', 'work_order_id'\]/.test(boot));

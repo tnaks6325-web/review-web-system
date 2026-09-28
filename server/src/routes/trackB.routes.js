@@ -819,6 +819,33 @@ router.post('/advertiser-account', authMiddleware, internalMiddleware, async (re
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ══ 업체 ↔ 인트라넷 광고주 연결 점검 · 업체 합치기 (2026-09-28 올곧은무역·어니스트캄) ══
+//   ★ 전부 adminOrMaster — 업체 원장을 고치고(합치기는 옛 업체를 지운다) 접속 링크의 행선지를 바꾼다.
+//   점검은 미리보기(쓰기 0), 고치기·합치기는 confirm:true 일 때만.
+router.get('/advertisers/intranet-sync', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await require('../services/advertiserIntranetSync.service').previewIntranetSync();
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/advertisers/intranet-sync', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) return res.status(400).json({ ok: false, error: 'confirm:true 가 필요합니다(먼저 미리보기로 확인하세요).' });
+    const out = await require('../services/advertiserIntranetSync.service')
+      .applyIntranetSync({ kinds: b.kinds, ids: b.ids, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/advertisers/merge', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../services/advertiserMerge.service')
+      .mergeAdvertisers({ sourceId: b.sourceId, targetId: b.targetId, confirm: b.confirm === true, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 업체(거래처) 삭제(soft) — 내부 담당자(master/admin/staff). 포털 공유 원장이라 status='ended'로 숨김(가역)+소유 매핑 해제. ──
 router.delete('/advertisers/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {

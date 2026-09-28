@@ -1345,10 +1345,10 @@ function woAdvertiserLinkPicker(resp, onLink) {
   var head = document.createElement("div");
   head.style.cssText = "padding:16px 18px 12px;border-bottom:1px solid #E5E7EB";
   var h = document.createElement("div");
-  h.textContent = "⚠ 같은 이름의 업체가 이미 있습니다";
+  h.textContent = "⚠ 같은 업체로 보이는 업체가 이미 있습니다";
   h.style.cssText = "font-size:15px;font-weight:700;color:#B91C1C;margin-bottom:6px";
   var p = document.createElement("div");
-  p.textContent = "이름만으로는 같은 회사인지 알 수 없어 자동으로 붙이지 않았습니다. 아래 업체가 이 광고주와 같은 회사라면 연결해 접수합니다(연결하면 이후 접수는 자동으로 이어집니다).";
+  p.textContent = "이름이 같거나, 법인 표기(주식회사·(주))만 다르거나, 사업자번호가 같은 업체입니다. 그것만으로는 같은 회사인지 알 수 없어 자동으로 붙이지 않았습니다. 아래 업체가 이 광고주와 같은 회사라면 연결해 접수합니다(연결하면 이후 접수는 자동으로 이어집니다).";
   p.style.cssText = "font-size:12.5px;color:#6B7280;line-height:1.5";
   head.appendChild(h); head.appendChild(p);
 
@@ -1410,13 +1410,13 @@ function woAdvertiserLinkPicker(resp, onLink) {
   });
   if (!cands.length) {
     var empty = document.createElement("div");
-    empty.textContent = "겹치는 업체 정보를 가져오지 못했습니다. 업체관리에서 같은 이름의 업체를 확인해 주세요.";
+    empty.textContent = "겹치는 업체 정보를 가져오지 못했습니다. 업체관리에서 비슷한 이름의 업체를 확인해 주세요.";
     empty.style.cssText = "font-size:13px;color:#6B7280;padding:14px";
     list.appendChild(empty);
   }
 
   var note = document.createElement("div");
-  note.textContent = "다른 회사라면 연결하지 마세요. 업무포털 거래처 관리에서 기존 업체 이름을 구분되게 바꾼 뒤 다시 접수하면 새 업체로 등록됩니다.";
+  note.textContent = "다른 회사라면 연결하지 마세요. 업무포털 거래처 관리에서 기존 업체 이름을 구분되게 바꾼 뒤(법인 표기만 바꾸는 것으로는 구분되지 않습니다) 다시 접수하면 새 업체로 등록됩니다.";
   note.style.cssText = "margin:0 14px 10px;font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:9px 11px;line-height:1.5";
 
   var foot = document.createElement("div");
