@@ -1165,58 +1165,8 @@ function onParticipationToggle(on) {
 }
 
 /** 👥 타계정 참여(063) 토글 — 하위 설정(하루한도·타계정 제한시간) 표시. 끄면 기본 [불가] 그대로. */
-/* ═══════════════════════════════════════════════════════════════════════
-   🧪 테스트 공고 만들기 — 대량구매(타계정 다건 일괄 제출) 검증용 프리셋
-   ─────────────────────────────────────────────────────────────────────
-   기존 발행 모달을 그대로 열고 값만 미리 채운다(신규 엔드포인트·신규 모달 0).
-   저장은 평소와 같은 [저장] 버튼 → 같은 검증·같은 라우트를 탄다.
-
-   ★ 왜 이 값들인가
-     - 상태 active : 참여·제출이 실제로 되어야 테스트가 된다
-       (status 를 draft 로 두면 상태엔진이 closed 로 판정해 참여 자체가 막힌다).
-       ⚠ 모달의 [리뷰어에게 숨김] 토글은 사용자 확정(2026-08-19)으로 제거됐다 —
-         테스트 공고도 모집중이면 리뷰어 목록에 뜬다. 테스트가 끝나면 게시(모집중) 토글을 내린다.
-     - 타계정 허용 + 하루한도 5 : 한 사람이 여러 명의로 같은 날 참여해야 일괄 제출이 켜진다.
-     - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 30/15분).
-     - 구매 시간대 비움 = 자율주문(종일 오픈).
-   ★ 연결 탭만 사람이 고른다 — 어느 시트에 테스트 행을 쓸지는 시스템이 정할 수 없다.
-   ═══════════════════════════════════════════════════════════════════════ */
-async function openTestCampaignModal() {
-  await openRecruitModal(null);
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-  const chk = (id, on, after) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.checked = !!on;
-    if (typeof after === "function") { try { after(!!on); } catch (_) { /* noop */ } }
-  };
-
-  set("rf_title", "🧪 [테스트] 대량구매 일괄제출 검증");
-  set("rf_status", "active");            // ★ 참여가 실제로 되어야 테스트가 된다
-  set("rf_review_fee", 1000);
-  set("rf_time_range", "");              // 자율주문(종일 오픈)
-  set("rf_window_start", "");
-  set("rf_window_end", "");
-  set("rf_hold_ttl", 30);                // 테스트 중 만료로 끊기지 않게
-
-  chk("rf_participation", true, onParticipationToggle);   // 참여형이라야 홀드·일괄제출 경로를 탄다
-  chk("rf_multi_account", true, onMultiAccountToggle);    // 타계정 허용 = 일괄 제출의 전제
-  set("rf_multi_daily", 5);              // 하루에 여러 명의로 참여 가능해야 배치가 켜진다
-  set("rf_sub_ttl", 30);
-
-  // 진행상품 표가 정원의 진실원본 — 한 줄 넣어 총모집/일건수를 파생시킨다
-  try {
-    renderOptRows([]);
-    addOptRow({ productName: "테스트 상품", optKey: "", payAmount: 10000, recruitTotal: 100, dailyLimit: 20 });
-    if (typeof _syncPreviewFromOptRows === "function") _syncPreviewFromOptRows();
-  } catch (_) { /* 표가 없는 축약 화면이면 건너뛴다 */ }
-
-  try { renderPartCheck(); } catch (_) { /* noop */ }
-  if (typeof showToast === "function") {
-    showToast("🧪 테스트 공고 값을 채웠어요. 연결 탭만 고른 뒤 저장하세요.", "info");
-  }
-}
-if (typeof window !== "undefined") window.openTestCampaignModal = openTestCampaignModal;
+/* (🧪 테스트 공고 프리셋 openTestCampaignModal 은 2026-09-28 제거 — 결정 186 18번. 8/19 숨김 토글 제거 뒤로
+   이 프리셋 공고는 실제 리뷰어 목록에 떴다. 대량구매 검증은 테스트 서버에서 한다.) */
 
 /* 모집이월 배치 방식 — 공고에 carry_strategy(next|spread|extend)로 저장하고
    서버 상태엔진이 실제 오늘 정원을 계산한다. carry_mode(auto|hold)는 보류 기능 전용이다. */

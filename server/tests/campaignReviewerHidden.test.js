@@ -93,16 +93,10 @@ ok('편집 프리필 복원 코드는 유지(토글이 다시 생겨도 값이 �
 ok('★ 카드 배지는 관리자 화면에서만(admin 분기) — 이미 숨김인 공고를 알아볼 유일한 표식',
   /const hidBadge = \(admin && c\.reviewer_hidden === true\)/.test(cards));
 
-ok('테스트 공고 프리셋 함수 존재', /async function openTestCampaignModal\(\)/.test(recruitJs));
-ok('★ 프리셋은 status=active(참여가 실제로 되어야 테스트가 된다)', /set\("rf_status", "active"\)/.test(recruitJs));
-ok('★ 프리셋은 더 이상 리뷰어 숨김을 켜지 않는다(토글 제거)', !/chk\("rf_reviewer_hidden"/.test(recruitJs));
-ok('★ 프리셋이 타계정 허용을 켠다(일괄 제출의 전제)', /chk\("rf_multi_account", true, onMultiAccountToggle\)/.test(recruitJs));
-ok('프리셋이 참여형을 켠다(홀드·배치 경로)', /chk\("rf_participation", true, onParticipationToggle\)/.test(recruitJs));
-ok('프리셋은 기존 발행 모달을 재사용(신규 모달 사본 금지)', /await openRecruitModal\(null\);/.test(recruitJs));
-// ★ 창구는 리뷰웹시스템[3버전] 하나 — 관리자 대시보드에는 두지 않는다(사용자 확정).
-ok('★ [🧪 테스트 공고] 버튼은 리뷰웹시스템[3버전]에만(편집 권한자에게만)',
-  /STATE\.canEdit\?'<button class="btn" onclick="openTestCampaignModal\(\)"/.test(workdesk));
-ok('★ 관리자 대시보드에는 버튼을 두지 않는다(창구 이중화 금지)', !/openTestCampaignModal/.test(adminHtml));
+/* 🧪 테스트 공고 프리셋·버튼은 2026-09-28 제거(결정 186 18번) — 숨김 토글이 없어진 뒤로 그 프리셋
+   공고가 실제 리뷰어 목록에 떴다. 되살아나지 않는지만 본다(창구 0). */
+ok('★ 테스트 공고 프리셋·버튼이 없다(운영에서 리뷰어에게 보이는 테스트 공고를 만들지 않는다)',
+  !/function openTestCampaignModal/.test(recruitJs) && !/openTestCampaignModal/.test(workdesk) && !/openTestCampaignModal/.test(adminHtml));
 
 // ── E. 진짜 PG 로 필터 실행 확인(있을 때만) ──
 (async () => {

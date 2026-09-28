@@ -11284,7 +11284,6 @@ async function renderCampaignsView(){
 function _rcRenderHead(total){
   $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
     <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
-    ${STATE.canEdit?'<button class="btn" onclick="openTestCampaignModal()" title="리뷰어에게 보이지 않는 내부 테스트 공고를 미리 채워서 엽니다">🧪 테스트 공고</button>':''}
     ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
     <button class="btn" id="recruitArchiveBtn" onclick="toggleRecruitArchivedView()" title="보관(폐기)한 공고 보기 — 끝난 공고는 카드 [⋯] → [📦 보관]">📦 보관함</button>
     ${_taskDelAllowed()?'<button class="btn" onclick="openOrphanCampaigns()" title="작업이 삭제됐는데 남아 있는 공고를 찾아 정리합니다(무엇이 지워질지 먼저 보여줍니다)">🧹 지워진 작업의 공고</button>':''}
@@ -13643,9 +13642,6 @@ const WORK_GUIDES = [
   { cat:'업무 절차', icon:'🧾', title:'외부모집 구매양식 수동제출',
     desc:'카톡으로 모집한 외부 리뷰어의 슬래시 양식을 붙여넣어 접수하는 절차',
     file:'외부모집_구매양식_수동제출_안내.html', tag:'주문' },
-  { cat:'업무 절차', icon:'🧪', title:'대량구매 테스트 공고 만들기',
-    desc:'리뷰어 목록에는 안 뜨지만 실제 참여·제출까지 되는 내부 테스트 공고 만들기',
-    file:'대량구매_테스트공고_만들기.html', tag:'공고' },
   { cat:'업무 절차', icon:'📱', title:'리뷰어 로그인 번호 변경',
     desc:'리뷰어가 번호를 바꿨을 때 과거 참여·리뷰비 계좌를 잃지 않고 로그인 번호를 바꾸는 방법',
     file:'리뷰어_로그인번호_변경_안내.html', tag:'리뷰어' },
