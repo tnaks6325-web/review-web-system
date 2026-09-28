@@ -103,10 +103,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
 .camp-progress-wrap{width:80px;background:#F3F4F6;border-radius:99px;height:6px;overflow:hidden}
 .camp-progress-bar{height:100%;background:var(--p);border-radius:99px;transition:width .4s}
 .camp-rate{font-size:.78rem;font-weight:700;color:var(--p);width:32px;text-align:right}
-.btn-viewer{display:inline-flex;align-items:center;gap:3px;font-size:.68rem;font-weight:700;color:#3182f6;background:#e8f1fe;border:1px solid #cce0fb;border-radius:6px;padding:3px 8px;cursor:pointer;transition:all .2s;white-space:nowrap;flex-shrink:0}
-.btn-viewer:hover{background:#3182f6;color:#fff;border-color:#3182f6}
-.btn-viewer.copied{background:#0ca678;border-color:#0ca678;color:#fff}
-.btn-viewer.loading{opacity:.6;pointer-events:none}
 
 /* ── 탭 테이블 ── */
 .tab-table{width:100%;border-collapse:collapse}
@@ -990,11 +986,7 @@ function renderDashboard(stats, highlightName) {
     const isDone  = tabs.every(t => t.isClosed || t.pending === 0);
     // 캠페인의 sheetId (첫 탭에서 추출)
     const campSheetId = (tabs[0] && tabs[0].sheetId) ? tabs[0].sheetId : "";
-    const viewerBtnHtml = campSheetId
-      ? `<button class="btn-viewer" id="vbtn-${ci}" onclick="event.stopPropagation();copyViewerUrl('${campSheetId}','vbtn-${ci}')" title="광고주 페이지 URL 복사">
-           <i class="fas fa-eye"></i> 광고주URL
-         </button>`
-      : "";
+    const viewerBtnHtml = "";   // (광고주URL 버튼 — viewer.html 과 함께 2026-09-28 제거, 결정 186 47번)
 
     html += `
     <div class="campaign-block" id="camp-${ci}">
@@ -1164,52 +1156,6 @@ function toggleCamp(ci) {
   body.style.display = isOpen ? "none" : "";
   if (icon) icon.classList.toggle("open", !isOpen);
   if (!isOpen) _expandedCamps.add(ci); else _expandedCamps.delete(ci);
-}
-
-/* ══ 광고주 URL 복사 ══════════════════════════════ */
-async function copyViewerUrl(sheetId, btnId) {
-  const btn = document.getElementById(btnId);
-  if (!btn) return;
-  const origHtml = btn.innerHTML;
-  btn.classList.add("loading");
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
-
-  const base    = location.origin + location.pathname.replace(/[^/]*$/, "") + "viewer.html";
-  const longUrl = base + "?s=" + encodeURIComponent(sheetId);
-  let   finalUrl = longUrl;
-
-  try {
-    // 단축URL 생성 시도
-    const data = await gasGet({ action: "createShort", s: sheetId, g: "", t: "__viewer__", d: "" });
-    if (data && data.success && data.code) {
-      finalUrl = base + "?code=" + data.code;
-    }
-  } catch(e) {
-    console.warn("[viewerUrl] 단축URL 실패, 긴URL 사용:", e.message);
-  }
-
-  btn.classList.remove("loading");
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(finalUrl);
-    } else {
-      const ta = document.createElement("textarea");
-      ta.value = finalUrl;
-      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-    btn.classList.add("copied");
-    btn.innerHTML = '<i class="fas fa-check"></i> 복사됨';
-    showToast("👁 광고주 URL이 복사되었습니다!", "success");
-    setTimeout(() => { btn.classList.remove("copied"); btn.innerHTML = origHtml; }, 2500);
-  } catch(e) {
-    btn.innerHTML = origHtml;
-    showToast("복사 실패: " + e.message, "error");
-  }
 }
 
 /* ══ 리뷰어 목록 펼치기/접기 ══════════════════════ */
