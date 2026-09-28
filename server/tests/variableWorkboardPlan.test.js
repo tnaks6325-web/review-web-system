@@ -183,8 +183,9 @@ test('v2는 표준 앵커가 없으면 append하지 않고 차단한다', () => 
   assert.ok(plan.blockers.some(blocker => blocker.code === 'v2_required_anchor_missing'));
 });
 
-test('미리보기와 직접 생성 조회는 v2 가변열 원본을 모두 읽는다', () => {
-  assert.match(previewRoute, /work_series_id, work_round, delivery_type, courier_proxy,[\s\S]{0,80}review_type, review_type_mix/);
+test('접수는 v2 가변열 원본을 모두 읽는다(전체 행) (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거)', () => {
+  const ordr = fs.readFileSync(require.resolve('../src/routes/order.routes'), 'utf8');
+  assert.match(ordr, /SELECT \* FROM work_orders WHERE id = \$1 AND deleted_at IS NULL LIMIT 1/);
 });
 
 test('리뷰옵션은 리뷰제출이나 상품 옵션 쓰기 대상으로 추정되지 않는다', () => {

@@ -969,12 +969,7 @@ router.get('/ownership', authMiddleware, internalMiddleware, async (req, res, ne
    종전에는 staff 를 자기 담당 업체로 묶었는데, **이관(`/ownership/transfer`)은 이미 담당 무관**이라
    "옮기는 건 되는데 처음 지정하는 건 막히는" 비대칭이었다. 게다가 화면(업체 지정 팝업)은 전 업체를
    보여줘서 고르고 나서야 403 이 나는 막다른 길이었다.
-   ★ 이 함수는 **레거시 시트 전체 소유 펼치기(expand) 전용**으로만 남는다 — 그쪽은 화면 창구가 없는
-     레거시 정리 경로라 종전 스코프를 유지한다(서비스도 staffName 으로 이중 게이트). */
-async function _ownershipExpandAllowed(req, advertiserId) {
-  if (_role(req) !== 'staff') return true;   // master/admin — 전체 허용(기존 시맨틱)
-  return svc.staffOwnsAdvertiser({ advertiserId, staffName: (req.admin && req.admin.name) || '' });
-}
+   (담당 게이트를 쓰던 레거시 시트 전체 소유 펼치기 expand 와 _ownershipExpandAllowed 는 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인).) */
 router.post('/ownership', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
@@ -992,24 +987,7 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
-// ── 시트 전체 소유 → 작업(탭) 단위 펼치기 (사용자 확정 2026-08-23 — 업체 지정은 작업 단위 하나).
-//   ★ 미리보기 기본(confirm !== true 면 쓰기 0) · staff 는 자기 담당(inad_pm) 업체만(서비스와 이중 게이트).
-router.post('/ownership/expand', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { advertiserId, sheetId, confirm } = req.body || {};
-    if (advertiserId && !(await _ownershipExpandAllowed(req, advertiserId))) {
-      return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 변경할 수 없습니다.' });
-    }
-    const staffName = _role(req) === 'staff' ? String((req.admin && req.admin.name) || '').trim() : null;
-    if (_role(req) === 'staff' && !staffName) {
-      return res.status(403).json({ ok: false, error: '로그인 정보에 담당자명이 없습니다.' });
-    }
-    res.json(await svc.expandSheetOwnerships({
-      advertiserId: advertiserId || null, sheetId: sheetId || null,
-      confirm: confirm === true, by: _by(req), staffName,
-    }));
-  } catch (err) { next(err); }
-});
+// (POST /ownership/expand — 시트 전체 소유 펼치기는 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인).)
 
 // ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ 내부 담당자(master/admin/staff):
 //    사용자 확정(2026-08)으로 AE 도 업체 간 재배치를 한다(광고주는 차단). 대상 검증은 서비스가
@@ -1660,13 +1638,7 @@ const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
 const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
 const _updateHandler = _delegate(_orderRoutes, 'put', '/admin/update');
 const _adminEditHandler = _delegate(_orderRoutes, 'put', '/admin/edit');
-/* 🧪 테스트 작업오더 — 접수 → 모집공고 흐름을 실제로 눌러 보려면 `submitted` 오더가 하나 필요하다.
-   ★ 실행부는 AE 제출과 **같은 핸들러**(`POST /api/order/submit`) — 오더를 만드는 코드를 새로
-     쓰지 않는다(사본 0). 값은 화면이 채운다.
-   ★ 인트라넷 SSO 토큰(via:'intranet')은 `/api/order/*` 에 도달 불가라 여기로 위임한다.
-   ★ 게이트는 접수·발행과 같은 2단(내부인 열람 · **AE 또는 편집 허용 admin**) — 원본(`authMiddleware`)
-     보다 **좁다**(프록시가 원본보다 넓어지면 안 된다). */
-const _woSubmitHandler = _delegate(_orderRoutes, 'post', '/submit');
+// (🧪 테스트 작업오더 프록시 POST /work-orders/submit 은 2026-09-28 제거 — 결정 186 17번. 연습은 테스트 서버에서.)
 
 router.post('/work-orders/accept', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _acceptHandler(req, res, next));
@@ -1681,8 +1653,6 @@ router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnly
 // 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · AE 또는 편집 허용 admin).
 router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _adminEditHandler(req, res, next));
-router.post('/work-orders/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
-  _woSubmitHandler(req, res, next));
 
 // ── 외부모집 구매양식 수동제출 ──────────────────────────────
 //   원본 `/api/manual-order/*` 는 adminOrMaster 전용인데, 인트라넷 SSO 토큰(via:'intranet')은
@@ -3185,47 +3155,8 @@ router.get('/worktable/template', authMiddleware, adminOrMasterMiddleware, async
     res.json({ ok: true, data: await getTemplate() });
   } catch (err) { next(err); }
 });
-// 작업표 생성 미리보기 — ★ 읽기 전용(DB·시트 쓰기 0). 실제 생성은 사람이 확인 후 누를 때만(M2b).
-//   권한 = 작업오더 편집 명단(editorOnly) — 표를 만들 사람이 미리보기를 본다.
-router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
-  try {
-    const { getTemplate } = require('../services/worktable.service');
-    const { buildWorktablePlan } = require('../utils/worktablePlan');
-    const q = req.query || {};
-    const id = String(q.workOrderId || '').trim();
-    if (!id) return res.json({ ok: false, error: 'workOrderId 가 필요합니다.' });
-
-    // ★ 접수(accept)는 work_orders **전체 행**으로 같은 buildWorktablePlan 을 부른다 —
-    //   여기서 컬럼이 빠지면 "미리보기 ≠ 실제 표"가 된다(리뷰 종류 배분(review_type_mix)·
-    //   주말 제외/휴무일 신호(097)·택배대행/작업유형 트리거가 실제로 빠져 있던 자리).
-    const { rows } = await pool.query(
-      `SELECT id, title, start_date, recruit_count, daily_count, product_url,
-              product_option, product_options_json, work_sheet_url, status,
-              skip_weekends, holidays, workboard_schema_version,
-              work_series_id, work_round, delivery_type, courier_proxy,
-              review_type, review_type_mix, product_distribution_mode, source_revision
-         FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
-    const wo = rows[0];
-    if (!wo) return res.json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
-
-    // 미리보기에서 사람이 조정한 값만 덮어쓴다(미전송 = 작업오더 값 유지).
-    const opt = {};
-    if (q.total != null && q.total !== '') opt.total = q.total;
-    if (q.daily != null && q.daily !== '') opt.daily = q.daily;
-    if (q.startDate != null && q.startDate !== '') opt.startDate = q.startDate;
-    if (q.skipWeekends != null && q.skipWeekends !== '') opt.skipWeekends = q.skipWeekends !== '0' && q.skipWeekends !== 'false';
-    if (q.channel) opt.channel = String(q.channel);
-    if (q.options) { try { opt.options = JSON.parse(q.options); } catch (_) { /* 깨진 값은 작업오더 파생으로 */ } }
-    /* 켠 작업유형 — 쉼표 구분 키. ★ 미전송 = 없음(제안을 서버가 조용히 적용하지 않는다). */
-    if (q.workTypes != null) opt.workTypes = String(q.workTypes).split(',').map(v => v.trim()).filter(Boolean);
-    // 제외 날짜(공휴일·업체 휴무) — 쉼표 구분 YYYY-MM-DD. 형식 검증은 plan 이 최종 판정한다.
-    if (q.holidays) opt.holidays = String(q.holidays).split(',').map(v => v.trim()).filter(Boolean);
-
-    const template = await getTemplate();
-    const plan = buildWorktablePlan({ workOrder: wo, template, options: opt });
-    res.json({ ok: true, data: { plan, workOrder: { id: wo.id, title: wo.title, status: wo.status, workSheetUrl: wo.work_sheet_url || '' }, templateConfigured: !!template.configured } });
-  } catch (err) { next(err); }
-});
+// (작업표 생성 미리보기 GET /worktable/plan 은 2026-09-28 제거 — 결정 186 40번. 창을 열 버튼이 8/22 부터 없었다.
+//  실제 접수는 order.routes 가 work_orders 전체 행(SELECT *)으로 같은 buildWorktablePlan 을 부른다.)
 
 // (작업표 시트 탭 생성 /worktable/create · 되돌리기 /worktable/delete · 시트 탭 삭제 /worktable/delete-tab 은
 //  2026-09-28 제거 — 결정 186 10번. 화면 버튼은 2026-08-10 탈시트 때 제거, 접수가 시스템 작업표를 만든다.)

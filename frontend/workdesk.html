@@ -511,10 +511,6 @@
     border:1px dashed var(--accent-line);color:var(--accent-deep);background:transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .octrb:hover{background:var(--accent-soft)}
   .octrb.on{border-style:solid;border-color:transparent;background:var(--accent-soft);font-variant-numeric:tabular-nums}
-  .owntab .omemo{font-size:11.5px;color:var(--muted);cursor:text;border-radius:6px;padding:3px 6px;margin:-3px -6px}
-  .owntab .omemo:hover{background:var(--card2);outline:1px dashed var(--accent-line)}
-  .owntab .omemo i{color:var(--faint);font-style:normal;opacity:.6}
-  .omemoin{width:100%;font:inherit;font-size:11.5px;padding:3px 6px;border:1px solid var(--accent-line);border-radius:6px;background:var(--card);color:var(--ink);outline:none}
   /* 브랜드 필터 칩(한 광고주가 다수 브랜드 보유 — 관제실 '브랜드' 컬럼 대응) */
   .obchips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}
   .obchip{font-size:11px;font-weight:650;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);cursor:pointer;color:var(--muted)}
@@ -6464,7 +6460,7 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; if(STATE.gW
 /* ══ 작업명 편집 — 제목 자리에서 바로 (사용자 확정 2026-08-24) ═══════════════════
    종전에는 브라우저 `prompt` 창이었다. 화면이 가려져 지금 어느 작업을 고치는지 안 보이고,
    붙여넣은 값을 눈으로 확인하기도 어려웠다(그 창구로 탭 문자가 섞인 이름이 저장됐다).
-   ★ 관용구는 업체관리 비고 편집(`editTabMemo`)과 같다 — 그 자리를 input 으로 갈아끼우고
+   ★ 관용구는 (제거된) 업체관리 비고 편집과 같았다 — 그 자리를 input 으로 갈아끼우고
      Enter=저장 · Esc=취소 · 포커스가 빠지면 저장.
    ★★ 편집 중에는 **머리를 다시 그리지 않는다** — 입력칸 DOM 이 새로 만들어지면 한글 IME
      조합이 파괴된다(홈 목록 검색에서 실측한 `ㅁ며면면` 계열). 그래서 성공했을 때만 전체 재렌더.
@@ -10760,58 +10756,11 @@ function _renderWoHead(){
     <input class="ovsearch" placeholder="작업명/담당 검색 후 Enter" value="${esc(STATE.woq||'')}"
       onkeydown="if(event.key==='Enter'){STATE.woq=this.value.trim();_loadOrders();}">
     <button class="btn" onclick="_loadOrders()">새로고침</button>
-    ${STATE.canEdit?'<button class="btn" onclick="makeTestWorkOrder()" title="접수 → 모집공고 흐름을 눌러 보려고 만드는 연습용 오더입니다">🧪 테스트 작업오더</button>':''}
     ${STATE.canManageEditors?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
     <div class="ovnote">AE가 제출한 작업오더입니다. <b>접수</b>하면 작업이 시스템에 등록되고 인덱스가 만들어집니다
       (구글시트탭URL이 없는 오더는 <b>시스템 작업표</b>가 자동 생성됩니다) —
       신규 탭이 등록되는 유일한 경로이며 <b>AE는 바로 처리</b>할 수 있습니다.
       ${STATE.canEdit?'':'<b style="color:var(--muted)">(현재 계정은 열람 전용)</b>'}</div>`;
-}
-/* ══════════════════════════════════════════════════════════════
-   🧪 테스트 작업오더 — 접수 → 모집공고 흐름을 실제로 눌러 보기 위한 연습용 오더
-   (모집공고 탭의 [🧪 테스트 공고] 와 같은 규율: **창구 하나** · 사람이 누를 때만)
-
-   ★★ 오더를 만드는 코드를 새로 쓰지 않는다 — AE 제출과 **같은 핸들러**(`POST /api/order/submit`)
-      로 위임하는 프록시 하나만 열었다(사본 0). 여기서는 값만 채운다.
-   ★ 제목에 `🧪 [테스트]` + 만든 시각 — 실제 오더와 눈으로 구분되고, 여러 번 만들어도 안 겹친다.
-   ★ 구글시트탭URL 은 **비운다** — 그래야 접수가 시스템 작업표를 만드는 무시트 경로를 탄다.
-   ★ 상태는 서버가 항상 `submitted` 로 넣는다(그래야 [접수하기] 가 보인다).
-   ══════════════════════════════════════════════════════════════ */
-async function makeTestWorkOrder(){
-  if(!STATE.canEdit){ _toast('편집 허용명단에 있는 담당자만 만들 수 있습니다.'); return; }
-  const now=new Date();
-  const kst=new Date(now.getTime()+(now.getTimezoneOffset()+540)*60000);
-  const p=n=>String(n).padStart(2,'0');
-  const stamp=`${p(kst.getMonth()+1)}/${p(kst.getDate())} ${p(kst.getHours())}:${p(kst.getMinutes())}`;
-  const ymd=`${kst.getFullYear()}-${p(kst.getMonth()+1)}-${p(kst.getDate())}`;
-  const title=`🧪 [테스트] 접수→모집공고 검증 ${stamp}`;
-  if(!confirm(`연습용 작업오더를 만들까요?\n\n· ${title}\n· 총 10건 · 일 5건 · 오늘(${ymd}) 시작 · 쿠팡 · 실배송 · 포토\n`
-    +'· 구글시트 없이 만들어져 [접수하기] → 모집공고 흐름을 그대로 확인할 수 있습니다.\n'
-    +'· 목록 [⋯] 에서 언제든 지울 수 있습니다.')) return;
-  const body={
-    title,
-    start_date: ymd,
-    recruit_count: 10,
-    daily_count: 5,
-    pay_amount: 10000,
-    review_fee: 1000,
-    product_option: '테스트 상품 - 결제금액 10,000원 / 10명',
-    product_url: 'https://www.coupang.com/vp/products/0000000000',
-    delivery_type: '실배송',
-    review_type: '포토',
-    inflow_type: 'link',
-    goods_cost_type: '현금',
-    purchase_time: '',
-    review_guide: '연습용 오더입니다. 실제 리뷰어에게 나가지 않습니다.',
-    special_notes: '🧪 테스트용 — 확인이 끝나면 삭제하세요.',
-    work_sheet_url: '',
-  };
-  const r=await api('/api/trackb/work-orders/submit',{method:'POST',body:JSON.stringify(body)});
-  if(r&&r.ok){
-    _toast('🧪 테스트 작업오더를 만들었습니다 — [접수하기] 를 눌러 흐름을 확인하세요.');
-    STATE.woStatus=''; STATE.woq='';
-    await _loadOrders();
-  } else _toast('⚠ 만들지 못했습니다'+(r&&r.error?': '+r.error:''));
 }
 function _woBStyleSummary(c){
   const n=k=>Number(c[k])||0;
@@ -10957,245 +10906,12 @@ function _woFillDetail(i){
     <div class="woldoc">${_woDetailHtml(o)}${o.admin_memo?_woKv('관리자메모',o.admin_memo):''}</div>
     ${acts?'':'<div class="wolnote">열람 전용 계정입니다 — 접수·보완&반려는 편집 허용명단에 있는 담당자만 할 수 있습니다.</div>'}`;
 }
-/* ══════════════════════════════════════════════════════════════
-   작업표 생성 미리보기 (M2a) — 읽기 전용
-   ★ 화면은 서버 `GET /api/trackb/worktable/plan` 이 준 계획을 **그대로** 그린다.
-     프론트에서 날짜·옵션을 다시 계산하지 않는다 — 그렇게 하면 "미리보기 ≠ 실제 표"가 된다
-     (실제 생성도 같은 서버 함수를 쓴다).
-   ══════════════════════════════════════════════════════════════ */
-let _WTP = null;   // { id, plan, workOrder }
-
-function _wtpEl(){
-  let el=document.getElementById('wtPlanModal');
-  if(el) return el;
-  el=document.createElement('div');
-  el.id='wtPlanModal';
-  el.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9000;display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto';
-  el.onclick=e=>{ if(e.target===el) closeWtPlan(); };
-  el.innerHTML='<div id="wtPlanBox" style="background:#fff;border-radius:14px;max-width:920px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden"></div>';
-  document.body.appendChild(el);
-  return el;
-}
-function closeWtPlan(){ const el=document.getElementById('wtPlanModal'); if(el) el.style.display='none'; _WTP=null; }
-
-async function openWtPlan(id){
-  const el=_wtpEl(); el.style.display='flex';
-  document.getElementById('wtPlanBox').innerHTML='<div style="padding:28px;color:#6B7280;font-size:13px">작업표 구성을 계산하는 중…</div>';
-  _WTP={ id };
-  await _wtpLoad();
-}
-async function _wtpLoad(){
-  if(!_WTP) return;
-  const q=new URLSearchParams({ workOrderId:_WTP.id });
-  const f=_WTP.form||{};
-  ['total','daily','startDate'].forEach(k=>{ if(f[k]!=null && f[k]!=='') q.set(k,f[k]); });
-  if(f.skipWeekends===false) q.set('skipWeekends','0');
-  if(Array.isArray(f.holidays)&&f.holidays.length) q.set('holidays',f.holidays.join(','));
-  if(f.channel) q.set('channel',f.channel);
-  /* ★ 작업유형은 **켠 것만** 보낸다. 하나도 안 켠 상태(빈 배열)와 "아직 안 정함"(undefined)을
-     구분해야 첫 열림에서 제안을 한 번만 반영할 수 있다 → 빈 값도 명시적으로 보낸다. */
-  if(Array.isArray(f.workTypes)) q.set('workTypes',f.workTypes.join(','));
-  const r=await api('/api/trackb/worktable/plan?'+q.toString());
-  if(!r||!r.ok){ document.getElementById('wtPlanBox').innerHTML=`<div style="padding:28px;color:#B91C1C;font-size:13px">불러오지 못했습니다: ${esc((r&&r.error)||'오류')}<div style="margin-top:14px"><button class="btn" onclick="closeWtPlan()">닫기</button></div></div>`; return; }
-  _WTP.plan=r.data.plan; _WTP.workOrder=r.data.workOrder; _WTP.templateConfigured=r.data.templateConfigured;
-  /* ★★ 자동 제안은 **체크를 미리 해 주는 것까지** — 서버는 켠 것만 반영하므로 여기서 한 번
-     체크에 반영하고 다시 불러온다(확정은 담당자, 학습은 제안까지 규율). 한 번만 한다. */
-  if(!_WTP.suggestApplied && !Array.isArray((_WTP.form||{}).workTypes)){
-    _WTP.suggestApplied=1;
-    const sg=(_WTP.plan.suggestedWorkTypes||[]);
-    _WTP.form=_WTP.form||{}; _WTP.form.workTypes=sg.slice();
-    if(sg.length) return _wtpLoad();
-  }
-  _wtpRender();
-}
-function _wtpOnEdit(){ _wtpSyncForm(); _wtpLoad(); }   // 값 읽기는 _wtpSyncForm 한 벌(사본 금지)
-/* 제외 날짜(공휴일·업체 휴무) — 작업오더에 날짜 필드가 없어 담당자가 여기서 지정한다.
-   ★ 서버가 형식·중복·정렬을 최종 판정하므로 여기서는 넘기기만 한다(판정 사본 금지). */
-function wtpHolAdd(){
-  const el=document.getElementById('wtpHolDate'); const v=(el&&el.value||'').trim();
-  if(!v) return;
-  const f=_WTP.form||(_WTP.form={});
-  const cur=Array.isArray(f.holidays)?f.holidays:((_WTP.plan&&_WTP.plan.holidays)||[]);
-  if(cur.includes(v)){ _toast('이미 제외한 날짜입니다'); return; }
-  _wtpSyncForm(); _WTP.form.holidays=cur.concat(v);
-  if(el) el.value='';
-  _wtpLoad();
-}
-function wtpHolDel(d){
-  _wtpSyncForm();
-  const cur=Array.isArray(_WTP.form.holidays)?_WTP.form.holidays:((_WTP.plan&&_WTP.plan.holidays)||[]);
-  _WTP.form.holidays=cur.filter(x=>x!==d);
-  _wtpLoad();
-}
-/** 화면의 조정값을 form 에 담는다(제외 날짜 편집 중 다른 칸 값이 날아가지 않게). */
-function _wtpSyncForm(){
-  const g=id=>document.getElementById(id);
-  const f=_WTP.form||(_WTP.form={});
-  if(g('wtpTotal')) f.total=g('wtpTotal').value;
-  if(g('wtpDaily')) f.daily=g('wtpDaily').value;
-  if(g('wtpStart')) f.startDate=g('wtpStart').value;
-  if(g('wtpSkipWe')) f.skipWeekends=g('wtpSkipWe').checked;
-  if(g('wtpChannel')) f.channel=g('wtpChannel').value;
-  // 작업유형 체크 — 화면에 체크박스가 있을 때만 읽는다(없는 화면이 설정을 지우지 않게).
-  const tb=document.querySelectorAll('.wtpType');
-  if(tb.length) f.workTypes=Array.prototype.filter.call(tb,x=>x.checked).map(x=>x.value);
-  if(f.holidays==null) f.holidays=((_WTP.plan&&_WTP.plan.holidays)||[]).slice();
-}
-
-/* ★★ 탈 구글시트(사용자 확정 2026-08-10) — 이 미리보기에는 **구글시트 생성 창구가 없다**.
-   접수(`wtpAccept` → `_woAccept`)가 시스템 작업표를 만들므로 시트 탭 생성·삭제 버튼을 두면
-   그 오더에 `work_sheet_url` 이 붙어 **다시 시트 기반으로 접수되는 역행**이 된다.
-   서버 라우트(`/worktable/create`·`/delete`·`/delete-tab`)는 되살리기 쉽게 그대로 남겨 두었다. */
-
-function _wtpRender(){
-  const p=_WTP.plan, wo=_WTP.workOrder;
-  /* 열 칩 — 어느 묶음(공통·채널·작업유형)에서 왔는지 색과 꼬리표로 구분한다. */
-  const ORG={ channel:{e:'#FDE68A',b:'#FFFBEB',c:'#92400E',t:'채널'},
-              worktype:{e:'#D8BCE9',b:'#F9F1FD',c:'#7A3FA8',t:'유형'},
-              common:{e:'#BFDBFE',b:'#EFF6FF',c:'#1D4ED8',t:''} };
-  const cols=p.columns.map(c=>{
-    const o=ORG[c.origin]||ORG.common;
-    const role=c.label?('시스템 인식: '+c.label):'제출이 값을 쓰지 않는 열';
-    return `<span title="${esc(role)}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid ${o.e};background:${o.b};color:${o.c}">${esc(c.name)}${o.t?`<i style="font-style:normal;font-size:10px;opacity:.7">${o.t}</i>`:''}</span>`;
-  }).join(' ');
-  /* 구매채널 — 자동 판정(상품 URL 호스트)이 기본, 직접 추가한 채널은 담당자가 고른다. */
-  const chOpts=[`<option value="">자동 판정 (${esc(p.channelLabel)})</option>`]
-    .concat((p.channels||[]).map(c=>`<option value="${esc(c.key)}"${p.channel===c.key&&(_WTP.form&&_WTP.form.channel)?' selected':''}>${esc(c.label)}${c.custom?' (직접 추가)':''}</option>`)).join('');
-  /* 작업유형 — 그 작업일 때만 붙는 열 묶음. ★ 제안은 체크를 미리 해 줄 뿐 확정은 담당자가 한다. */
-  const types=(p.workTypes||[]);
-  /* ★ 자동 반영 결과를 화면이 **말해 준다** — 체크만 조용히 켜 두면 담당자가 왜 켜졌는지 모른다.
-     (작업오더가 "쿠팡 + 상품옵션 2가지"면 채널 쿠팡 · 상품옵션 유형이 켜진 채로 열린다.) */
-  const autoOn=types.filter(t=>t.suggested&&t.enabled);
-  const autoNote=autoOn.length
-    ? ` · <b style="color:#127A5E">작업오더를 보고 ${autoOn.length}종이 자동 선택됨</b>`
-    : '';
-  const typeHtml=types.length
-    ? types.map(t=>`<label style="display:flex;align-items:flex-start;gap:8px;border:1px solid ${t.enabled?'#D8BCE9':'#E5E7EB'};background:${t.enabled?'#FDFBFF':'#fff'};border-radius:9px;padding:8px 11px;font-size:13px;cursor:pointer">
-        <input type="checkbox" class="wtpType" value="${esc(t.key)}" ${t.enabled?'checked':''} onchange="_wtpOnEdit()" style="margin-top:3px">
-        <span><b>${esc(t.label)}</b>${t.desc?`<span style="display:block;font-size:11.5px;color:#6B7280">${esc(t.desc)}</span>`:''}
-          <span style="display:block;font-size:11.5px;color:#9CA3AF">${t.columns.length?('붙는 열: '+t.columns.map(c=>esc(c.name)).join(', ')+' · '+(t.position==='front'?'앞쪽':'뒤쪽')):'담긴 열 없음'}</span></span>
-        ${t.suggested?`<span style="margin-left:auto;flex:none;font-size:10.5px;font-weight:750;color:#127A5E;background:#E5F3EE;border:1px solid #A6D6C6;border-radius:999px;padding:1px 8px">자동 제안 — ${esc(t.suggestReason)}</span>`:''}
-      </label>`).join('')
-    : '<span style="font-size:12.5px;color:#9CA3AF">등록된 작업유형이 없습니다 — <b>설정 › 작업표 표준 열</b>에서 만들 수 있습니다.</span>';
-  const days=p.dates.length
-    ? p.dates.map(d=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#F3F4F6;color:#374151">${esc(d.label)} <b>${d.count}</b></span>`).join(' ')
-    : '<span style="font-size:12.5px;color:#9CA3AF">날짜를 나누지 않았습니다(시작일·일건수 확인)</span>';
-  const opts=p.optionBuckets.length
-    ? p.optionBuckets.map(b=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#F0FDF4;color:#166534;border:1px solid #BBF7D0">${esc(b.key)} <b>${b.count}</b></span>`).join(' ')
-    : '<span style="font-size:12.5px;color:#9CA3AF">옵션 배분 없음</span>';
-  /* 리뷰 종류(포토리뷰/텍스트/구매확정/별점) 배분 — 서버 계획을 그대로 그린다(재계산 금지). */
-  const rmix=(p.reviewBuckets&&p.reviewBuckets.length)
-    ? p.reviewBuckets.map(b=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE">${esc(b.label)} <b>${b.count}</b></span>`).join(' ')
-    : '<span style="font-size:12.5px;color:#9CA3AF">리뷰 종류 배분 없음 — 혼합 오더(유형별 수량)일 때 리뷰옵션 칸에 나눠 적습니다</span>';
-  const msg=(arr,color,bg,edge)=>arr.length?`<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">${arr.map(m=>`<div style="font-size:12.5px;color:${color};background:${bg};border:1px solid ${edge};border-radius:8px;padding:7px 10px">${esc(m.message)}</div>`).join('')}</div>`:'';
-  const sample=p.rows.slice(0,3).concat(p.rows.length>3?[null]:[]).concat(p.rows.length>3?[p.rows[p.rows.length-1]]:[]);
-  const sampleRows=sample.map(r=>r
-    ? `<tr><td style="padding:4px 8px;border:1px solid #E5E7EB">${r.seq}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.dateLabel||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.optionKey||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.reviewOption||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB;color:#9CA3AF">제출이 채웁니다</td></tr>`
-    : `<tr><td colspan="5" style="padding:4px 8px;border:1px solid #E5E7EB;text-align:center;color:#9CA3AF">⋮</td></tr>`).join('');
-
-  document.getElementById('wtPlanBox').innerHTML=`
-    <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;gap:10px">
-      <div style="font-size:15px;font-weight:750">📋 작업표 생성 미리보기</div>
-      <div style="font-size:12.5px;color:#6B7280">${esc(wo.title||'')}</div>
-      <span style="flex:1"></span>
-      <button class="btn xs" onclick="closeWtPlan()">닫기</button>
-    </div>
-    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">
-      ${_WTP.templateConfigured?'':'<div style="font-size:12.5px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px 11px">표준 열이 아직 정해지지 않았습니다 — <b>설정 › 작업표 표준 열</b>에서 먼저 정하세요.</div>'}
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-        <label style="font-size:12px;color:#6B7280">총 건수<br><input id="wtpTotal" type="number" min="0" value="${p.totals.rows}" onchange="_wtpOnEdit()" style="width:90px;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
-        <label style="font-size:12px;color:#6B7280">일건수<br><input id="wtpDaily" type="number" min="0" value="${p.totals.daily}" onchange="_wtpOnEdit()" style="width:90px;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
-        <label style="font-size:12px;color:#6B7280">시작일<br><input id="wtpStart" type="date" value="${esc(p.startDate||'')}" onchange="_wtpOnEdit()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
-        <label style="font-size:12.5px;color:#374151;display:flex;align-items:center;gap:5px;padding-bottom:7px"><input id="wtpSkipWe" type="checkbox" ${p.skipWeekends?'checked':''} onchange="_wtpOnEdit()"> 주말 제외</label>
-        <span style="flex:1"></span>
-        <label style="font-size:12px;color:#6B7280">구매채널<br>
-          <select id="wtpChannel" onchange="_wtpOnEdit()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px">${chOpts}</select></label>
-      </div>
-
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">작업유형
-          <span style="font-weight:400;color:#9CA3AF">— 켜면 그 열이 덧붙습니다${autoNote}</span></div>
-        <div style="display:flex;flex-direction:column;gap:6px">${typeHtml}</div></div>
-
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">표 구성 (${p.columns.length}열)</div>${cols||'<span style="font-size:12.5px;color:#9CA3AF">열이 없습니다</span>'}</div>
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">날짜 분배 (${p.totals.days}일)</div>${days}
-        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          <span style="font-size:12px;color:#6B7280">제외 날짜</span>
-          ${(p.holidays||[]).map(d=>`<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 7px;border-radius:6px;border:1px solid #FECACA;background:#FEF2F2;color:#B91C1C">${esc(d)}<button onclick="wtpHolDel('${esc(d)}')" title="빼기" style="border:none;background:transparent;color:#F87171;cursor:pointer;font-size:11px;padding:0 2px">✕</button></span>`).join('')}
-          ${(p.holidays||[]).length?'':'<span style="font-size:12px;color:#9CA3AF">없음</span>'}
-          <input id="wtpHolDate" type="date" style="padding:4px 8px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:12px">
-          <button class="btn xs" onclick="wtpHolAdd()">＋ 제외</button>
-        </div>
-        <div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">공휴일·업체 휴무처럼 그날 진행하지 않는 날을 빼면 그만큼 뒤로 밀립니다.</div>
-      </div>
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">옵션 배분</div>${opts}</div>
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">리뷰 종류 배분 <span style="font-weight:400;color:#9CA3AF">— 날짜별 비율을 유지해 리뷰옵션 칸에 적습니다</span></div>${rmix}</div>
-
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">만들어질 표 (${p.totals.rows}행)</div>
-        <table style="border-collapse:collapse;font-size:12px"><thead><tr>
-          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">번호</th>
-          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">구매일자</th>
-          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">옵션</th>
-          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">리뷰옵션</th>
-          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">나머지 열</th>
-        </tr></thead><tbody>${sampleRows}</tbody></table></div>
-
-      ${msg(p.blockers,'#B91C1C','#FEF2F2','#FECACA')}
-      ${msg(p.warnings,'#92400E','#FFFBEB','#FDE68A')}
-
-      <div style="border-top:1px solid #E5E7EB;padding-top:12px;display:flex;flex-direction:column;gap:9px">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <label style="font-size:12px;color:#6B7280;flex:1;min-width:200px">작업 이름<br>
-            <input id="wtpTabName" maxlength="90" value="${esc(wo.title||'')}" style="width:100%;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <button class="btn" onclick="closeWtPlan()">닫기</button>
-          <button class="btn pri" id="wtpCreateBtn" onclick="wtpAccept()" ${(p.canCreate&&_wtpAcceptable())?'':'disabled style="opacity:.5;cursor:default"'}>✅ 이 구성으로 접수하기</button>
-          <span id="wtpCreateMsg" style="font-size:12px;color:#6B7280">${
-            !p.canCreate ? '<b style="color:#B91C1C">지금 구성으로는 만들 수 없습니다(위 빨간 사유).</b>'
-            : !_wtpAcceptable() ? '<b>이미 접수된 작업오더입니다.</b> 구성만 확인할 수 있습니다.'
-            : _wtpSheetBound()
-              ? '<b style="color:#B45309">이 오더에는 작업시트탭URL이 있어</b> 접수 시 그 시트 탭이 등록됩니다(아래 구성은 미적용).'
-              : '구글시트 없이 <b>시스템 작업표</b>가 이 구성 그대로 만들어지고 접수됩니다.'}</span>
-        </div>
-      </div>
-    </div>`;
-}
-/* 이 오더를 지금 접수할 수 있는가 / 시트에 묶여 있는가 — 판정 사본 없이 공유 모듈을 그대로 쓴다. */
-function _wtpAcceptable(){
-  const wo=_WTP&&_WTP.workOrder; if(!wo) return false;
-  return (typeof _woAcceptable==='function') ? _woAcceptable(wo) : true;
-}
-function _wtpSheetBound(){
-  const wo=_WTP&&_WTP.workOrder; if(!wo) return false;
-  // ★ 모듈 미로드 폴백도 **무시트**(서버 규칙과 같은 방향) — 옛 폴백은 URL 유무를 봐서 화면만 시트 기반으로 말했다.
-  return (typeof _woAcceptSheetless==='function') ? !_woAcceptSheetless(wo) : false;
-}
-/* ★★ 탈 구글시트 — 미리보기에서 바로 **접수**한다(시트 생성 창구 없음).
-   조정한 값(총건수·일건수·시작일·주말제외·휴무일·채널·작업유형)과 작업 이름을 그대로 접수에 실어
-   서버가 **같은 계획으로** 작업표를 만든다(계획 재계산은 여전히 서버 — 화면 행 목록 불신).
-   ★ 접수는 등록 단일 관문이라 이 버튼도 결국 같은 `_woAccept` 를 탄다(사본 0). */
-async function wtpAccept(){
-  const btn=document.getElementById('wtpCreateBtn'), msg=document.getElementById('wtpCreateMsg');
-  if(!btn||btn.disabled) return;
-  _wtpSyncForm();
-  const f=_WTP.form||{};
-  const tabName=((document.getElementById('wtpTabName')||{}).value||'').trim();
-  btn.disabled=true; const old=btn.textContent; btn.textContent='접수 중…';
-  if(msg) msg.textContent='작업표를 만들고 등록하는 중입니다…';
-  // ★ 휴무일은 화면에서 안 건드렸으면 **계획에 보인 값 그대로**(작업오더 신호 포함) —
-  //   빈 배열로 보내면 명시 "제외 없음"이 되어 오더의 휴무일이 조용히 지워진다.
-  const okDone = await _woAccept(_WTP.id, null, { tabName, planOptions:{
-    total:f.total, daily:f.daily, startDate:f.startDate,
-    skipWeekends:f.skipWeekends!==false,
-    holidays:Array.isArray(f.holidays)?f.holidays:((_WTP.plan&&_WTP.plan.holidays)||[]),
-    channel:f.channel||'', workTypes:f.workTypes||[] } });
-  if(okDone){ closeWtPlan(); }
-  else { btn.disabled=false; btn.textContent=old; if(msg) msg.innerHTML='<b style="color:#B91C1C">접수하지 못했습니다 — 위 안내를 확인하세요.</b>'; }
-}
+/* (작업표 생성 미리보기 창 openWtPlan·_wtp*·wtpAccept 는 2026-09-28 제거 — 결정 186 40번.
+   8/22 [📋 작업표] 버튼 제거 뒤 열 수 없는 화면이었다. 접수는 _woAccept 가 오더 값 그대로 만든다.) */
 
 async function _woAccept(id, pickGid, opts){
   // pickGid = 탭 교정 재접수(gid 미발견 404 팝업에서 고른 탭) — 그때는 confirm 을 이미 팝업이 받았다.
-  // opts   = 작업표 미리보기에서 조정한 구성(tabName·planOptions) — 무시트 접수에만 쓰인다.
+  // opts   = { linkAdvertiserId } (광고주 연결 팝업) · tabName·planOptions 는 종전 미리보기 창의 잔재 인자(호출부 0 — 결정 186 40번).
   //  ★ 구글시트탭URL 이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성) — 확인창이 그 사실을 말한다.
   //    판정은 공유 모듈 `_woAcceptSheetless`(표시용) 하나이고 최종 판정은 서버가 한다.
   const o=(STATE.wo||[]).find(x=>x.id===id);
@@ -11331,7 +11047,6 @@ async function renderCampaignsView(){
 function _rcRenderHead(total){
   $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
     <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
-    ${STATE.canEdit?'<button class="btn" onclick="openTestCampaignModal()" title="리뷰어에게 보이지 않는 내부 테스트 공고를 미리 채워서 엽니다">🧪 테스트 공고</button>':''}
     ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
     <button class="btn" id="recruitArchiveBtn" onclick="toggleRecruitArchivedView()" title="보관(폐기)한 공고 보기 — 끝난 공고는 카드 [⋯] → [📦 보관]">📦 보관함</button>
     ${_taskDelAllowed()?'<button class="btn" onclick="openOrphanCampaigns()" title="작업이 삭제됐는데 남아 있는 공고를 찾아 정리합니다(무엇이 지워질지 먼저 보여줍니다)">🧹 지워진 작업의 공고</button>':''}
@@ -13690,9 +13405,6 @@ const WORK_GUIDES = [
   { cat:'업무 절차', icon:'🧾', title:'외부모집 구매양식 수동제출',
     desc:'카톡으로 모집한 외부 리뷰어의 슬래시 양식을 붙여넣어 접수하는 절차',
     file:'외부모집_구매양식_수동제출_안내.html', tag:'주문' },
-  { cat:'업무 절차', icon:'🧪', title:'대량구매 테스트 공고 만들기',
-    desc:'리뷰어 목록에는 안 뜨지만 실제 참여·제출까지 되는 내부 테스트 공고 만들기',
-    file:'대량구매_테스트공고_만들기.html', tag:'공고' },
   { cat:'업무 절차', icon:'📱', title:'리뷰어 로그인 번호 변경',
     desc:'리뷰어가 번호를 바꿨을 때 과거 참여·리뷰비 계좌를 잃지 않고 로그인 번호를 바꾸는 방법',
     file:'리뷰어_로그인번호_변경_안내.html', tag:'리뷰어' },
@@ -16959,7 +16671,7 @@ async function renderOwnershipView(){
 /* ══ 업체관리 리디자인(시안 A) — 사이드바 검색·필터 / 전체 개요 / 우측 설정 패널 ══════════════
    설계·시안 = frontend/docs/design-vendor-management.html (사용자 확정 A안)
    ★★ 기존 계약은 한 줄도 바꾸지 않는다 — #ownPanel·#owntabsSect·#advs·.advitem[data-i]·.ct·.pmn·
-     openOwnTab(i)·editTabMemo(event,i)·ownMatchContract(event,i)·_contractMatchApplied·selAdv·
+     openOwnTab(i)·ownMatchContract(event,i)·_contractMatchApplied·selAdv·
      refreshAdvCounts·saveAe 가 그대로 동작해야 한다(바뀐 것은 배치와 조작뿐).                     */
 let _ovmAdvQ='', _ovmAdvF='all', _ovmQ='', _ovmF='all', _ovmDrawer=null, _ovmDTab='link';
 const _OVM_COLS_KEY='wd_own_cols';
@@ -17731,8 +17443,8 @@ async function saveAe(){ const a=STATE.advCur; if(!a) return;
      섹션을 통째로 innerHTML 교체하면 입력칸 DOM 이 재생성되며 **한글 IME 조합이 파괴**된다
      ('ㅁ며면면' — 홈 작업목록 검색에서 실측한 사고와 같은 자리). 정산 요약이 늦게 도착해도
      같은 이유로 행만 다시 그린다(_rerenderOwnTabs).
-   ★ openOwnTab/editTabMemo/ownMatchContract 인덱스는 **STATE.ownTabs 원본 기준**(필터로 순서가
-     바뀌어도 원본 i 를 넘긴다 — 어긋나면 옆 작업을 열거나 남의 비고를 고친다).
+   ★ openOwnTab/ownMatchContract 인덱스는 **STATE.ownTabs 원본 기준**(필터로 순서가
+     바뀌어도 원본 i 를 넘긴다 — 어긋나면 옆 작업을 열거나 남의 계약을 고친다).
    ★ 열 폭은 JS 가 정한다(_ovmGrid) — 묶음을 접으면 폭도 함께 줄어야 하므로 CSS 고정값을 쓸 수 없다.
      헤더 칸 수 ≡ 행 칸 수 ≡ grid 열 수 는 회귀가드가 두 빌더를 실행해 대조한다.               */
 function _ownTabsHtml(){
@@ -17752,7 +17464,7 @@ function _ownTabsHtml(){
     <div class="ovm-tools">
       <div class="tr">
         <label class="ovm-srch"><span class="ic">🔍</span>
-          <input id="ovmQ" value="${esc(_ovmQ)}" placeholder="작업명 · 브랜드 · 상품 · 계약번호 · 비고 검색" autocomplete="off" oninput="_ovmSearch(this.value)">
+          <input id="ovmQ" value="${esc(_ovmQ)}" placeholder="작업명 · 브랜드 · 상품 · 계약번호 검색" autocomplete="off" oninput="_ovmSearch(this.value)">
           <button class="clr" title="지우기" onclick="_ovmClear()">×</button></label>
         <span class="ovm-cnt" id="ovmCnt"></span>
         <span style="flex:1"></span>
@@ -17827,7 +17539,6 @@ function _ovmGrid(){
   F(92);                       /* 계약 */
   if(c.setl){ F(62); F(62); F(62); F(62); }            /* 견적서·마감자료·계산서·입금일 */
   F(148);                      /* 입금액/총비용 */
-  X(96,1);                     /* 비고 */
   F(44);                       /* 열기 */
   const min=fixed+flexMin+(cols.length-1)*10;
   return { cols:cols.join(' '), min, n:cols.length };
@@ -17840,7 +17551,7 @@ function _ovmHead(){
   if(c.mat)  h.push('<span>자료</span>');
   h.push('<span>계약</span>');
   if(c.setl) h.push('<span>견적서</span>','<span>마감자료</span>','<span>계산서</span>','<span>입금일</span>');
-  h.push('<span>입금액/총비용</span>','<span>비고</span>','<span></span>');
+  h.push('<span>입금액/총비용</span>','<span></span>');
   return `<div class="othead" style="grid-template-columns:${g.cols};min-width:${g.min}px">${h.join('')}</div>`;
 }
 // 행 필터 — ★ 상태 칩 숫자와 목록이 **같은 판정**을 쓴다(따로 세면 "칩은 12인데 표는 3줄"이 된다).
@@ -17857,7 +17568,7 @@ function _ovmRowMatch(t,f,q){
   const pm=parseTabMeta(t.tabName);
   const ob=_ownBrand(t);   // 검색어는 지정 브랜드명으로도 걸린다(작업명에 없는 브랜드로 배정한 경우)
   // ★ 표에 그리는 이름(_tabLabel)도 검색 대상 — 안 넣으면 화면에 보이는 그 글자로 검색해도 안 걸린다.
-  return [_tabLabel(t),t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber,t.memo]
+  return [_tabLabel(t),t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber]
     .some(v=>String(v==null?'':v).toLowerCase().includes(nq));
 }
 function _ownRowsHtml(){
@@ -17925,15 +17636,14 @@ function _ownRowsHtml(){
     if(c.setl){ cells.push(`<span class="ocol odate">${quoteCell}</span>`,`<span class="ocol odate">${closeoutCell}</span>`,
       `<span class="ocol odate">${invoiceCell}</span>`,`<span class="ocol odate">${paidDateCell}</span>`); }
     cells.push(`<span class="ocol omoney">${moneyCell}</span>`);
-    cells.push(`<span class="ocol omemo" onclick="editTabMemo(event,${i})" title="클릭하여 비고 편집">${t.memo?_ovmHl(t.memo,q):'<i>비고…</i>'}</span>`);
     cells.push(`<span class="openb">열기 ›</span>`);
     return `<div class="owntab" style="grid-template-columns:${g.cols};min-width:${g.min}px" onclick="openOwnTab(${i})" title="${esc(_tabTip(t))}">${cells.join('')}</div>`;
   }).join('');
   if(!list) return _ovmHead()+`<div class="ovm-empty"><b>조건에 맞는 작업이 없습니다</b>${q?`검색어 “${esc(q)}”`:'선택한 필터'}에 맞는 작업이 없습니다. 검색어를 지우거나 [전체]를 눌러보세요.</div>`;
   return _ovmHead()+list;
 }
-// 건수·칩 표기 — ★ 전체 렌더(비고 저장·정산 도착)와 행 렌더가 **같은 함수**를 쓴다.
-//   한쪽만 채우면 검색 중 비고를 저장했을 때 입력칸·건수는 비어 보이는데 표는 계속 걸러진 상태가 된다.
+// 건수·칩 표기 — ★ 전체 렌더(정산 도착 등)와 행 렌더가 **같은 함수**를 쓴다.
+//   한쪽만 채우면 입력칸·건수는 비어 보이는데 표는 계속 걸러진 상태가 된다.
 function _ovmSyncCnt(){
   const box=$('#ownRows'); if(!box) return;
   const ot=STATE.ownTabs||[], q=_ovmQ.trim();
@@ -17972,11 +17682,8 @@ function _md(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return
 function _won(n){ return n==null?'—':Number(n).toLocaleString('ko-KR'); }
 function setOwnBrand(i){ STATE.ownBrand = i===-1?null : i===-2?'' : ((STATE.ownBrandList||[])[i]!=null?STATE.ownBrandList[i]:null);
   setOwnBrandByName(STATE.ownBrand); }
-// 연결탭 섹션 재렌더 — 비고 편집 중(.omemoin 존재)이면 연기(포커스 input이 innerHTML 교체로
-// 제거되면 blur 미발생 → 입력 무음 소실). 저장/취소 후 rerender 가 pending 을 소화.
+// 연결탭 섹션 재렌더(종전 비고 편집 중 연기 로직은 비고 칸과 함께 제거 — 결정 186 33번 — 2026-09-28 업체관리 비고 칸 제거(작업 148개 중 비고 0)).
 function _rerenderOwnTabs(){ const el=$('#owntabsSect'); if(!el) return;
-  if(el.querySelector('.omemoin')){ STATE._ownRerenderPending=true; return; }
-  STATE._ownRerenderPending=false;
   // ★★ 도구줄(검색 입력칸)이 이미 그려져 있으면 **행만** 갈아치운다 — 정산 요약이 타이핑 중에
   //   도착해 섹션을 통째로 교체하면 입력칸 DOM 이 재생성되며 한글 IME 조합이 파괴된다(실측 사고 계열).
   if(el.querySelector('#ownRows')){ _ovmRenderRows(); return; }
@@ -17990,29 +17697,6 @@ async function loadOwnSettlement(advId){
   else { for(const t of (STATE.ownTabs||[])) if(t.salesId) m[t.sheetId+'\t'+t.tabName]={proxyDown:true}; }   // 로드 실패 = '…' 영구 대신 '?' 표기
   STATE.ownSettle=m;
   _rerenderOwnTabs();
-}
-// 비고 인라인 편집: 셀 클릭 → input 치환 → Enter/blur 저장, Esc 취소. 행 클릭(탭 열기)과 격리(stopPropagation).
-function editTabMemo(ev,i){ ev.stopPropagation(); const t=(STATE.ownTabs||[])[i]; if(!t) return;
-  const cell=ev.currentTarget; if(cell.querySelector('input')) return;
-  cell.innerHTML=`<input class="omemoin" maxlength="2000" onclick="event.stopPropagation()" onkeydown="_memoKey(event)" onblur="saveOwnMemo(${i},this)">`;
-  const inp=cell.querySelector('input'); inp.value=t.memo||''; inp.focus(); inp.select();
-}
-function _memoKey(ev){ if(ev.key==='Enter') ev.target.blur(); else if(ev.key==='Escape'){ ev.target.dataset.esc='1'; ev.target.blur(); } }
-async function saveOwnMemo(i,inp){ const t=(STATE.ownTabs||[])[i];
-  // 편집 종료 시점 = 연기된 재렌더(_ownRerenderPending)까지 함께 소화(최신 STATE 로 강제 렌더).
-  // ★ 행 컨테이너가 있으면 행만 갈아치운다 — 섹션을 통째로 그리면 검색어·건수 표기가 초기화되는데
-  //   표는 계속 걸러진 상태라 "왜 3건만 보이지"의 원인이 화면에서 사라진다(코드리뷰 지적).
-  const rerender=()=>{ STATE._ownRerenderPending=false;
-    if($('#ownRows')){ _ovmRenderRows(); return; }
-    const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); };
-  if(!t||inp.dataset.esc){ rerender(); return; }
-  const memo=inp.value.trim();
-  if(memo===(t.memo||'')){ rerender(); return; }
-  try{
-    const r=await api('/api/trackb/tab-memo',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,memo})});
-    if(r&&r.ok){ t.memo=r.memo; toast('비고 저장됨'); } else toast('비고 저장 실패'+(r&&r.error?': '+r.error:''));
-  }catch(_){ toast('비고 저장 실패: 네트워크 오류'); }
-  rerender();
 }
 let _ovmAddList=[];
 async function assignOwn(){ const a=STATE.advCur; if(!a) return;

@@ -595,94 +595,8 @@ async function transferOwnership({ sheetId, tabGid = null, toAdvertiserId, by = 
     throw e;
   } finally { client.release(); }
 }
-// ══════════════════════════════════════════════════════════════════════════
-// 시트 전체 소유 → 작업(탭) 단위로 펼치기 (사용자 확정 2026-08-23)
-//   업체관리의 지정 창구가 **작업(탭) 단위 하나**로 바뀌었지만, 이미 저장된 `tab_gid IS NULL`
-//   (시트 전체) 행은 그대로 살아 그 시트의 모든 탭을 계속 덮는다 — 새 탭이 생기면 자동 포함까지 된다.
-//   ★★ 무시트화(전환)는 `tab_configs.sheetless` 플래그만 켜고 `sheet_id` 는 그대로 두므로
-//      시트 축을 없애지 못한다(sheetlessCutover.service.js). 실제로 없애는 것은 이 펼치기다.
-//   ★★ 완화 금지 4종:
-//     ① 대상 탭은 **활성 작업 목록**(participants.listActiveTabs) — 화면의 미지정 판정과 같은 재료.
-//     ② **gid 없는 탭이 하나라도 있으면 그 시트는 펼치지 않는다**(fail-closed) — 그 작업은 개별
-//        소유를 만들 수 없어 시트 전체 행을 지우는 순간 **주인 없이 남는다**.
-//     ③ **다른 업체가 탭 지정으로 가져간 탭은 건너뛴다**(탭 지정 우선 = 사람이 명시한 더 강한 결정,
-//        transferOwnership 의 keptTabOverrides 와 같은 규율).
-//     ④ **미리보기 기본**(confirm !== true 면 쓰기 0) · 시트 하나당 한 트랜잭션(전부 아니면 전무).
-//   ★ 쓰기 표면 = advertiser_campaigns 한 곳(시트·장부·주문 무접촉).
-async function expandSheetOwnerships({ advertiserId = null, sheetId = null, confirm = false, by = 'admin', staffName = null } = {}) {
-  const db = getPool();
-  const where = ['ac.deleted_at IS NULL', 'ac.tab_gid IS NULL', `COALESCE(a.status,'') <> 'ended'`];
-  const vals = [];
-  if (advertiserId) { vals.push(String(advertiserId)); where.push(`ac.advertiser_id = $${vals.length}`); }
-  if (sheetId) { vals.push(String(sheetId)); where.push(`ac.sheet_id = $${vals.length}`); }
-  // staff(AE)는 자기 담당(inad_pm) 업체만 — 라우트 게이트와 이중.
-  if (staffName) { vals.push(String(staffName).trim()); where.push(`TRIM(COALESCE(a.inad_pm,'')) = TRIM($${vals.length})`); }
-  const { rows: owns } = await db.query(
-    `SELECT ac.advertiser_id AS "advertiserId", a.name AS "advertiserName", ac.sheet_id AS "sheetId"
-       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
-      WHERE ${where.join(' AND ')} ORDER BY a.name, ac.sheet_id`, vals);
-  if (!owns.length) return { ok: true, dryRun: !confirm, items: [], expanded: 0, assigned: 0, skipped: 0 };
-
-  const tabs = await participants.listActiveTabs({ limit: 2000 });
-  const bySheet = new Map();
-  tabs.forEach(t => { const a = bySheet.get(t.sheetId) || []; a.push(t); bySheet.set(t.sheetId, a); });
-  const sids = [...new Set(owns.map(o => o.sheetId))];
-  const { rows: ovr } = await db.query(
-    `SELECT ac.sheet_id AS "sheetId", ac.tab_gid AS "tabGid", ac.advertiser_id AS "advertiserId", a.name AS "advertiserName"
-       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
-      WHERE ac.deleted_at IS NULL AND ac.tab_gid IS NOT NULL AND ac.sheet_id = ANY($1)`, [sids]);
-
-  const items = [];
-  let expanded = 0, assigned = 0, skipped = 0;
-  for (const o of owns) {
-    const list = bySheet.get(o.sheetId) || [];
-    const title = (list[0] && list[0].spreadsheetTitle) || o.sheetId;
-    const gidless = list.filter(t => !String(t.tabGid == null ? '' : t.tabGid).trim());
-    const taken = new Map();   // gid → 그 탭을 탭지정으로 가진 타 업체
-    ovr.forEach(x => { if (x.sheetId === o.sheetId && x.advertiserId !== o.advertiserId) taken.set(String(x.tabGid), x.advertiserName); });
-    const targets = list.filter(t => {
-      const g = String(t.tabGid == null ? '' : t.tabGid).trim();
-      return g && !taken.has(g);
-    });
-    const kept = list.map(t => String(t.tabGid == null ? '' : t.tabGid).trim())
-      .filter(g => g && taken.has(g)).map(g => ({ tabGid: g, advertiserName: taken.get(g) }));
-    const row = {
-      advertiserId: o.advertiserId, advertiserName: o.advertiserName, sheetId: o.sheetId, sheetTitle: title,
-      tabs: targets.map(t => ({ tabGid: String(t.tabGid), tabName: t.tabName })),
-      keptTabOverrides: kept, gidlessCount: gidless.length,
-    };
-    // fail-closed — 모르는 채로 소유를 지우지 않는다(주인 없는 작업 금지).
-    if (!list.length) row.skipped = 'no_active_tabs';
-    else if (gidless.length) row.skipped = 'gidless_tab';
-    else if (!targets.length) row.skipped = 'all_tabs_taken';
-    if (row.skipped) { skipped++; items.push(row); continue; }
-    if (confirm) {
-      const client = await db.connect();
-      try {
-        await client.query('BEGIN');
-        for (const t of row.tabs) {
-          await client.query(
-            `INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid, assigned_by)
-               VALUES ($1,$2,$3,$4)
-             ON CONFLICT (advertiser_id, sheet_id, COALESCE(tab_gid,'')) DO UPDATE
-               SET deleted_at = NULL, assigned_by = EXCLUDED.assigned_by`,
-            [o.advertiserId, o.sheetId, t.tabGid, String(by).slice(0, 100)]);
-        }
-        await client.query(
-          `UPDATE advertiser_campaigns SET deleted_at = NOW()
-            WHERE advertiser_id=$1 AND sheet_id=$2 AND tab_gid IS NULL AND deleted_at IS NULL`,
-          [o.advertiserId, o.sheetId]);
-        await client.query('COMMIT');
-        row.applied = true; expanded++; assigned += row.tabs.length;
-      } catch (e) {
-        try { await client.query('ROLLBACK'); } catch (_) {}
-        row.skipped = 'error'; row.error = (e && e.message) || String(e); skipped++;
-      } finally { client.release(); }
-    } else { expanded++; assigned += row.tabs.length; }
-    items.push(row);
-  }
-  return { ok: true, dryRun: !confirm, items, expanded, assigned, skipped };
-}
+// (시트 전체 소유 펼치기 expandSheetOwnerships 는 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인). 082 의 완화 금지 4종은 대상 제거로 효력 종료.
+//  tab_gid IS NULL 을 읽는 소비처는 그대로 — 혹시 남은 레거시 행도 계속 정상 동작한다.)
 async function listOwnership({ advertiserId, sheetId } = {}) {
   const db = getPool();
   const where = ['deleted_at IS NULL']; const vals = [];
@@ -951,12 +865,7 @@ async function createAdvertiserScoped({ name, inadPm = '', role = 'admin', byNam
   }
 }
 
-// ── staff(AE) 소유권 게이트: 해당 업체의 담당(inad_pm)이 본인인 경우만 소유 지정/해제 허용. ──
-async function staffOwnsAdvertiser({ advertiserId, staffName } = {}) {
-  if (!advertiserId || !String(staffName || '').trim()) return false;
-  const { rows } = await getPool().query('SELECT inad_pm FROM advertisers WHERE id = $1', [advertiserId]);
-  return rows.length > 0 && String(rows[0].inad_pm || '').trim() === String(staffName).trim();
-}
+// (staff 담당 게이트 staffOwnsAdvertiser — 유일 소비처 _ownershipExpandAllowed 와 함께 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인).)
 
 /* ★★ staff 초기매핑 시트 게이트(`sheetAssignableByStaff`)는 **제거됐다**(사용자 확정 2026-08-24).
      "타 AE 업체가 이미 소유한 시트로의 자가 스코프 확장 차단"이 존재 이유였는데, 업체 지정 자체가
@@ -6197,7 +6106,6 @@ module.exports = {
   setOwnership,
   removeOwnership,
   transferOwnership,
-  expandSheetOwnerships,
   listOwnership,
   listAdvertisersWithOwnership,
   ownedTabsForAdvertiser,
@@ -6209,7 +6117,6 @@ module.exports = {
   getAdvertiserLink, ensureAdvertiserLink, generateAdvertiserLink, setAdvertiserLinkActive,
   setAdvertiserLinkLoginRequired,
   isRegisteredIntranetAdvertiser,
-  staffOwnsAdvertiser,
   intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
   intranetSalesSearch,
   advertiserForTab,
