@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>업체 합치기 시안</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   업체관리 — [업체 합치기] · [인트라넷 연결 점검] 화면 시안 3종 (2026-09-28)
+   - 배경: 같은 업체가 둘로 갈린 사고(올곧은무역·어니스트캄). 서버 기능은 이미 있다
+     (POST /api/trackb/advertisers/merge · GET/POST /advertisers/intranet-sync). 화면 창구만 없다.
+   - 외부 리소스 0(오프라인 열람) · color-scheme:light 고정 · 가짜 데이터로 실제 동작.
+   - ?v=A / ?v=B / ?v=C 를 붙이면 그 시안만 단독으로 본다.
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#5d6b7f;--faint:#8b95a6;
+  --line:#e6eaf0;--line2:#d0d9e4;
+  --accent:#2563eb;--accent-soft:#eff4ff;--accent-line:#d7e3fd;
+  --safe:#15803d;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#c92a2e;--bad-soft:#fdf0f0;
+  --adv:#5f4bbd;--adv-soft:#efecfa;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+  --sh2:0 2px 10px rgba(16,24,40,.06);--sh3:0 12px 40px rgba(16,24,40,.18);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 16px 80px}
+h1{font-size:22px;margin:0 0 6px}
+.lead{color:var(--muted);margin:0 0 20px}
+.intro{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:26px;box-shadow:var(--sh2)}
+.intro h2{font-size:15px;margin:0 0 10px}
+table.cmp{width:100%;border-collapse:collapse;font-size:13px}
+table.cmp th,table.cmp td{border-top:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
+table.cmp th{background:var(--card2);font-weight:650;color:var(--muted);font-size:12px}
+table.cmp td:first-child{font-weight:700;white-space:nowrap}
+.rec{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:#fff;background:var(--safe);border-radius:99px;padding:1px 8px;vertical-align:1px}
+.sec{margin:34px 0 0}
+.sec>h2{font-size:18px;margin:0 0 4px}
+.sec>p{margin:0 0 12px;color:var(--muted);font-size:13px}
+.hint{font-size:12px;color:var(--faint);margin:8px 2px 0}
+
+/* ── 업체관리 화면 뼈대(목업) ── */
+.frame{position:relative;background:var(--paper);border:1px solid var(--line2);border-radius:14px;overflow:hidden;box-shadow:var(--sh2);min-height:540px}
+.topbar{height:46px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 16px;font-size:13px}
+.topbar b{font-size:14px}
+.topbar .nav{color:var(--faint)}.topbar .nav.on{color:var(--accent);font-weight:700}
+.shell{display:grid;grid-template-columns:230px 1fr;min-height:494px}
+.side{background:#fff;border-right:1px solid var(--line);padding:12px 10px;overflow:auto}
+.side .t{font-size:11px;color:var(--faint);font-weight:700;margin:2px 6px 8px}
+.adv{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:9px;cursor:pointer;font-size:13px;border:1px solid transparent}
+.adv:hover{background:var(--card2)}
+.adv.on{background:var(--accent-soft);border-color:var(--accent-line)}
+.adv .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adv .c{font-size:11px;color:var(--faint)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--safe);flex:none}
+.dot.off{background:var(--line2)}
+.main{padding:16px 18px;overflow:auto}
+.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--sh2)}
+.ph{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ph h3{margin:0;font-size:16px;flex:1}
+.chip{font-size:11px;font-weight:700;border-radius:99px;padding:2px 8px;white-space:nowrap}
+.chip.ok{background:var(--safe-soft);color:var(--safe)}
+.chip.no{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.adv{background:var(--adv-soft);color:var(--adv)}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:13px;margin:4px 0 12px}
+.kv dt{color:var(--faint)}.kv dd{margin:0}
+.mini{width:100%;border-collapse:collapse;font-size:12.5px}
+.mini th,.mini td{border-top:1px solid var(--line);padding:7px 8px;text-align:left}
+.mini th{color:var(--faint);font-weight:650;font-size:11.5px}
+.btn{font:inherit;font-size:13px;border:1px solid var(--line2);background:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;color:var(--ink)}
+.btn:hover{background:var(--card2)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+.btn.pri:hover{background:#1d4ed8}
+.btn.danger{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:700}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{font-size:12px;padding:4px 9px}
+.more{position:relative}
+.menu{position:absolute;right:0;top:34px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--sh3);padding:5px;min-width:210px;z-index:5}
+.menu div{padding:8px 10px;border-radius:7px;font-size:13px;cursor:pointer}
+.menu div:hover{background:var(--card2)}
+.menu .sep{height:1px;background:var(--line);padding:0;margin:4px 0}
+
+/* 팝업(기존 [이관] 팝업과 같은 모양) */
+.ov{position:absolute;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:18px;z-index:10}
+.pop{width:min(500px,100%);max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh3);padding:16px 18px}
+.pop h3{margin:0 0 4px;font-size:15px}
+.pop .src{font-size:12px;color:var(--muted);margin-bottom:6px}
+.pop label.l{font-size:11px;color:var(--faint);font-weight:700;display:block;margin:12px 0 5px}
+.cand{border:1.5px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:7px;cursor:pointer;font-size:13px}
+.cand:hover{border-color:var(--line2)}
+.cand.on{border-color:var(--accent);background:var(--accent-soft)}
+.cand .why{font-size:11.5px;color:var(--adv);font-weight:650;margin-top:2px}
+.cand .meta{font-size:11.5px;color:var(--faint);margin-top:2px}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
+.seg div{padding:8px 10px;font-size:12.5px;cursor:pointer;text-align:center;background:#fff}
+.seg div+div{border-left:1px solid var(--line2)}
+.seg div.on{background:var(--accent);color:#fff;font-weight:700}
+.moves{background:var(--card2);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-top:4px}
+.moves li{margin:2px 0}
+.moves ul{margin:4px 0 0;padding-left:18px}
+.note{font-size:12px;border-radius:9px;padding:9px 11px;margin-top:10px;line-height:1.5}
+.note.warn{background:var(--warn-soft);color:#7c3a06}
+.note.ok{background:var(--safe-soft);color:#0f5a2c}
+.note.bad{background:var(--bad-soft);color:#8a1c1f}
+.chk{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;margin-top:12px;cursor:pointer}
+.act{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:#101828;color:#fff;font-size:13px;border-radius:9px;padding:9px 14px;z-index:20;box-shadow:var(--sh3)}
+
+/* B: 점검 배너 + 짝 카드 */
+.banner{display:flex;align-items:center;gap:12px;background:#fff7e6;border:1px solid #f5d9a6;border-radius:12px;padding:11px 14px;margin-bottom:14px;font-size:13.5px}
+.banner .ic{width:30px;height:30px;border-radius:50%;background:#fde7bf;display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--warn);flex:none}
+.banner .tx{flex:1}
+.banner .tx small{display:block;color:var(--muted);font-size:12px}
+.banner.ok{background:var(--safe-soft);border-color:#b9e2c6}
+.banner.ok .ic{background:#cdebd6;color:var(--safe)}
+.pair{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--sh2)}
+.pair .row{display:grid;grid-template-columns:1fr 34px 1fr auto;gap:10px;align-items:center}
+.side-card{border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:13px;cursor:pointer;background:#fff}
+.side-card.keep{border-color:var(--safe);background:var(--safe-soft)}
+.side-card.gone{background:#fafbfc;color:var(--muted)}
+.side-card .nm{font-weight:700;color:var(--ink)}
+.side-card.gone .nm{text-decoration:line-through;text-decoration-color:#c0c7d2}
+.side-card .tag{font-size:11px;margin-top:2px}
+.arrow{text-align:center;color:var(--faint);font-size:18px}
+.pair .reason{font-size:12px;color:var(--adv);margin-top:8px}
+.pair.done{opacity:.55}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.stat .v{font-size:19px;font-weight:800}.stat .k{font-size:11.5px;color:var(--faint)}
+
+/* C: 오른쪽 서랍 + 비교 화면 */
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(560px,100%);background:#fff;border-left:1px solid var(--line);box-shadow:var(--sh3);z-index:9;display:flex;flex-direction:column}
+.dh{padding:14px 16px 0;border-bottom:1px solid var(--line)}
+.dh h3{margin:0 0 2px;font-size:15px;display:flex;align-items:center;gap:8px}
+.dh h3 .x{margin-left:auto;cursor:pointer;color:var(--faint);font-size:18px;font-weight:400}
+.tabs{display:flex;gap:2px;margin-top:10px}
+.tabs div{padding:8px 11px;font-size:12.5px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)}
+.tabs div.on{border-color:var(--accent);color:var(--accent);font-weight:700}
+.tabs .cnt{font-size:11px;background:var(--card2);border-radius:99px;padding:0 6px;margin-left:4px}
+.tabs div.on .cnt{background:var(--accent-soft)}
+.db{flex:1;min-height:0;overflow:auto;padding:12px 16px}
+.lrow{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:8px;font-size:13px}
+.lrow .t{flex:1}.lrow small{display:block;color:var(--faint);font-size:11.5px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+.col{border:1.5px solid var(--line);border-radius:11px;padding:10px 12px;font-size:12.5px;cursor:pointer}
+.col.keep{border-color:var(--safe);background:var(--safe-soft)}
+.col h4{margin:0 0 6px;font-size:13.5px;display:flex;gap:6px;align-items:center}
+.col dl{display:grid;grid-template-columns:78px 1fr;gap:3px 8px;margin:0}
+.col dt{color:var(--faint)}.col dd{margin:0}
+.log{font-size:12.5px;border-left:2px solid var(--line2);padding:2px 0 2px 10px;margin:0 0 10px}
+.log small{color:var(--faint)}
+@media (max-width:760px){
+  .shell{grid-template-columns:1fr}.side{display:none}
+  .pair .row{grid-template-columns:1fr;}.arrow{transform:rotate(90deg)}
+  .stats{grid-template-columns:repeat(2,1fr)}.compare{grid-template-columns:1fr}
+}
+body.solo .intro,body.solo .sec:not(.show){display:none}
+</style></head>
+<body>
+<div class="wrap">
+  <h1>업체 합치기 · 인트라넷 연결 점검 — 화면 시안 3종</h1>
+  <p class="lead">같은 업체가 둘로 갈렸을 때(예: 주식회사 올곧은무역 ↔ (주)올곧은무역) 직원이 화면에서 직접 하나로 합치는 창구입니다. 아래 목업은 가짜 데이터로 실제로 눌러 볼 수 있습니다.</p>
+
+  <div class="intro">
+    <h2>세 시안 비교</h2>
+    <table class="cmp">
+      <tr><th>시안</th><th>무엇이 바뀌나</th><th>어떤 문제를 해결하나</th><th>위험 · 단점</th></tr>
+      <tr><td>A. 업체 패널 [⋯] 팝업</td><td>업체 패널의 [⋯] 메뉴에 「다른 업체와 합치기」 한 줄 추가. 기존 [이관] 팝업과 같은 모양.</td><td>이미 둘로 갈린 걸 알아챈 직원이 그 자리에서 바로 합친다. 새로 배울 화면이 없다.</td><td>시스템이 찾아 준 "합칠 대상"을 먼저 알려주지 않는다 — 직원이 알아채야만 쓴다.</td></tr>
+      <tr><td>B. 업체관리 첫 화면 알림 배너<span class="rec">권장</span></td><td>업체관리를 열면 맨 위에 「같은 업체로 보이는 2쌍」 배너. 누르면 짝 카드 목록, 쌍마다 [합치기] 한 번.</td><td>시스템이 매시간 찾아낸 중복을 **사람이 찾지 않아도** 눈앞에 보여준다. 이번 사고처럼 "몰라서 방치"를 막는다.</td><td>화면 맨 위에 한 줄이 늘어난다(문제가 없으면 초록 한 줄 또는 숨김).</td></tr>
+      <tr><td>C. 오른쪽 서랍 「인트라넷 연결 점검」</td><td>업체관리 헤더에 버튼 하나. 서랍 안에 탭 3개(합칠 대상 / 확인 필요 / 자동 처리 기록) + 두 업체 비교 화면.</td><td>무엇이 자동으로 고쳐졌는지까지 기록으로 본다. 관리자가 정기 점검하기 좋다.</td><td>버튼을 눌러야만 보인다(발견성은 A와 비슷). 화면이 가장 크다.</td></tr>
+    </table>
+    <p class="hint">★ 세 시안 모두 공통: 합치기 전에 <b>옮겨질 것</b>(작업·브랜드·계정·링크)을 보여주고, <b>확인 체크</b>를 해야 실행된다. 옛 업체의 접속 링크는 합친 뒤에도 계속 열린다. 서로 다른 인트라넷 광고주에 연결된 두 업체는 합칠 수 없다(버튼이 잠김 + 사유).</p>
+  </div>
+
+  <section class="sec" id="secA">
+    <h2>A. 업체 패널 [⋯] → 「다른 업체와 합치기」 팝업</h2>
+    <p>왼쪽에서 <b>주식회사 올곧은무역</b>을 고르고, 패널 오른쪽 위 <b>[⋯]</b>를 눌러 보세요.</p>
+    <div class="frame" id="fA"></div>
+  </section>
+
+  <section class="sec" id="secB">
+    <h2>B. 업체관리 첫 화면 알림 배너 → 짝 카드에서 합치기 <span class="rec">권장</span></h2>
+    <p>배너의 <b>[확인하기]</b>를 누르세요. 카드의 두 업체 중 하나를 누르면 <b>남길 쪽</b>이 바뀝니다.</p>
+    <div class="frame" id="fB"></div>
+  </section>
+
+  <section class="sec" id="secC">
+    <h2>C. 헤더 [인트라넷 연결 점검] → 오른쪽 서랍</h2>
+    <p>오른쪽 위 <b>[인트라넷 연결 점검]</b>을 누르고 탭을 오가 보세요.</p>
+    <div class="frame" id="fC"></div>
+  </section>
+</div>
+
+<script>
+// ── 가짜 데이터(실사고 모양 그대로) ──
+const SEED = () => ([
+  { id:'a1', name:'주식회사 올곧은무역', linked:false, tabs:6, brands:0, users:0, pm:'이만수', link:'사용 중(오늘 접속)', biz:'' },
+  { id:'a2', name:'(주)올곧은무역', linked:true, tabs:1, brands:0, users:0, pm:'', link:'새로 만들어짐(미사용)', biz:'534-88-03338' },
+  { id:'a3', name:'어니스트캄', linked:false, tabs:13, brands:2, users:0, pm:'이만수', link:'사용 중(9/21)', biz:'' },
+  { id:'a4', name:'주식회사 어니스트캄', linked:true, tabs:31, brands:5, users:0, pm:'이만수', link:'사용 중(오늘)', biz:'123-45-67890' },
+  { id:'a5', name:'(주)위드프렌즈', linked:true, tabs:9, brands:0, users:1, pm:'박세희', link:'사용 중', biz:'111-22-33333' },
+  { id:'a6', name:'주식회사 든든푸드', linked:true, tabs:4, brands:1, users:0, pm:'이만수', link:'사용 중', biz:'222-33-44444' },
+]);
+const PAIRS = [['a1','a2','법인 표기만 다름 · 인트라넷에는 (주)올곧은무역 한 곳'],['a3','a4','법인 표기만 다름 · 인트라넷에는 주식회사 어니스트캄 한 곳']];
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(root,msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; root.appendChild(t); setTimeout(()=>t.remove(),2600); }
+function sideHtml(advs,cur,onPick){ return '<div class="t">업체 '+advs.length+'</div>'+advs.map(a=>`<div class="adv ${a.id===cur?'on':''}" data-pick="${a.id}"><span class="dot ${a.linked?'':'off'}" title="${a.linked?'인트라넷 연결됨':'인트라넷 미연결'}"></span><span class="n">${esc(a.name)}</span><span class="c">${a.tabs}</span></div>`).join(''); }
+function movesHtml(src,dst){
+  return `<div class="moves"><b>${esc(src.name)}</b> → <b>${esc(dst.name)}</b> 로 옮겨지는 것<ul>
+    <li>작업 ${src.tabs}개 (합친 뒤 총 ${src.tabs+dst.tabs}개)</li>
+    <li>브랜드 ${src.brands}개${src.brands&&dst.brands?' — 같은 이름은 하나로 합침':''}</li>
+    <li>광고주 계정 ${src.users}개 · 정산 노출 설정</li>
+    <li>접속 링크: 옛 링크(${esc(src.link)})는 <b>계속 열림</b> → 합친 업체로 들어감</li>
+    ${!dst.pm&&src.pm?`<li>담당AE 비어 있음 → <b>${esc(src.pm)}</b> 로 채움</li>`:''}
+  </ul></div>`;
+}
+function blockedReason(a,b){ return (a.linked&&b.linked) ? '두 업체가 서로 다른 인트라넷 광고주에 연결돼 있어 합칠 수 없습니다(다른 회사입니다).' : ''; }
+function doMerge(state,srcId,dstId){
+  const s=state.advs.find(a=>a.id===srcId), d=state.advs.find(a=>a.id===dstId);
+  d.tabs+=s.tabs; d.brands=Math.max(d.brands,s.brands)+(s.brands&&d.brands?0:0); if(!d.pm) d.pm=s.pm; d.linked=d.linked||s.linked;
+  state.advs=state.advs.filter(a=>a.id!==srcId); return {s,d};
+}
+
+// ══════════ A ══════════
+(function(){
+  const root=document.getElementById('fA'); const S={advs:SEED(),cur:'a1',menu:false,pop:null};
+  function render(){
+    const a=S.advs.find(x=>x.id===S.cur)||S.advs[0]; S.cur=a.id;
+    root.innerHTML=`<div class="topbar"><b>리뷰웹시스템</b><span class="nav">작업보드</span><span class="nav on">업체관리</span><span class="nav">모집공고</span></div>
+    <div class="shell"><div class="side">${sideHtml(S.advs,S.cur)}</div><div class="main"><div class="panel">
+      <div class="ph"><h3>${esc(a.name)}</h3><span class="chip ${a.linked?'ok':'no'}">${a.linked?'인트라넷 연결됨':'인트라넷 미연결'}</span>
+        <span class="more"><button class="btn sm" data-act="menu">⋯</button>${S.menu?`<div class="menu"><div>접속 링크 복사</div><div>광고주 계정</div><div class="sep"></div><div data-act="open">🔗 다른 업체와 합치기</div><div style="color:var(--bad)">업체 삭제</div></div>`:''}</span></div>
+      <dl class="kv"><dt>담당AE</dt><dd>${esc(a.pm)||'<span style="color:var(--faint)">미지정</span>'}</dd><dt>사업자번호</dt><dd>${esc(a.biz)||'<span style="color:var(--faint)">미등록</span>'}</dd><dt>연결된 작업</dt><dd>${a.tabs}개</dd></dl>
+      <table class="mini"><tr><th>작업</th><th>인원</th><th>제출</th><th>계약</th></tr>
+      ${Array.from({length:Math.min(a.tabs,4)},(_,i)=>`<tr><td>${['9/17 아르퓨레 상품2종','0812 아르퓨레 세탁세제','7/3 스팟리무버','6/18 아르퓨레 행주'][i]}</td><td>${30-i*5}/30</td><td>${20-i*4}</td><td>C-10${i}</td></tr>`).join('')}</table>
+    </div></div></div>${S.pop?popHtml(a):''}`;
+  }
+  function popHtml(a){
+    const P=S.pop; const others=S.advs.filter(x=>x.id!==a.id);
+    const rec=others.filter(x=>PAIRS.some(p=>(p[0]===a.id&&p[1]===x.id)||(p[1]===a.id&&p[0]===x.id)));
+    const rest=others.filter(x=>!rec.includes(x));
+    const t=P.target?S.advs.find(x=>x.id===P.target):null;
+    const keepThis=P.keep==='this'; const src=t?(keepThis?t:a):null, dst=t?(keepThis?a:t):null;
+    const block=t?blockedReason(a,t):'';
+    const card=(x,why)=>`<div class="cand ${P.target===x.id?'on':''}" data-target="${x.id}"><b>${esc(x.name)}</b> <span class="chip ${x.linked?'ok':'no'}">${x.linked?'인트라넷 연결':'미연결'}</span>${why?`<div class="why">★ ${why}</div>`:''}<div class="meta">작업 ${x.tabs} · 브랜드 ${x.brands} · 담당 ${esc(x.pm)||'미지정'}</div></div>`;
+    return `<div class="ov"><div class="pop">
+      <h3>다른 업체와 합치기</h3><div class="src">지금 업체: <b>${esc(a.name)}</b></div>
+      <label class="l">합칠 업체</label>
+      ${rec.map(x=>card(x,'같은 업체로 보입니다 — 법인 표기만 다름')).join('')}
+      <details ${rec.length?'':'open'}><summary style="font-size:12px;color:var(--muted);cursor:pointer;margin:4px 0 6px">다른 업체에서 고르기 (${rest.length})</summary>${rest.map(x=>card(x,'')).join('')}</details>
+      ${t?`<label class="l">어느 쪽을 남길까요?</label><div class="seg"><div class="${keepThis?'':'on'}" data-keep="other">${esc(t.name)} 남기기${t.linked&&!a.linked?' (권장)':''}</div><div class="${keepThis?'on':''}" data-keep="this">${esc(a.name)} 남기기${a.linked&&!t.linked?' (권장)':''}</div></div>
+        ${block?`<div class="note bad">${block}</div>`:movesHtml(src,dst)+`<div class="note warn">합치면 <b>${esc(src.name)}</b> 은 업체 목록에서 사라집니다. 되돌리는 버튼은 없습니다.</div>
+        <label class="chk"><input type="checkbox" data-act="ok" ${P.ok?'checked':''}> 두 업체가 같은 회사인 것을 확인했습니다</label>`}`:''}
+      <div class="act"><button class="btn" data-act="close">취소</button><button class="btn danger" data-act="go" ${t&&!block&&P.ok?'':'disabled'}>합치기</button></div>
+    </div></div>`;
+  }
+  root.addEventListener('click',e=>{
+    const el=e.target.closest('[data-pick],[data-act],[data-target],[data-keep]'); if(!el) { if(S.menu){S.menu=false;render();} return; }
+    if(el.dataset.pick){S.cur=el.dataset.pick;S.menu=false;S.pop=null;}
+    else if(el.dataset.target){S.pop.target=el.dataset.target;S.pop.ok=false;const t=S.advs.find(x=>x.id===el.dataset.target);const a=S.advs.find(x=>x.id===S.cur);S.pop.keep=(a.linked&&!t.linked)?'this':'other';}
+    else if(el.dataset.keep){S.pop.keep=el.dataset.keep;}
+    else { const act=el.dataset.act;
+      if(act==='menu'){S.menu=!S.menu;}
+      else if(act==='open'){S.menu=false;S.pop={target:'',keep:'other',ok:false};}
+      else if(act==='close'){S.pop=null;}
+      else if(act==='ok'){S.pop.ok=el.checked; render(); return;}
+      else if(act==='go'){const a=S.advs.find(x=>x.id===S.cur),t=S.advs.find(x=>x.id===S.pop.target);const keepThis=S.pop.keep==='this';const r=doMerge(S,keepThis?t.id:a.id,keepThis?a.id:t.id);S.cur=r.d.id;S.pop=null;render();toast(root,`합쳤습니다 → ${r.d.name} (작업 ${r.d.tabs}개)`);return;}
+    }
+    render();
+  });
+  render();
+})();
+
+// ══════════ B ══════════
+(function(){
+  const root=document.getElementById('fB');
+  const S={advs:SEED(),open:false,keep:{0:'a2',1:'a4'},done:{},confirm:null,ok:false};
+  function pairs(){ return PAIRS.map((p,i)=>({i,a:S.advs.find(x=>x.id===p[0])||null,b:S.advs.find(x=>x.id===p[1])||null,why:p[2]})).filter(p=>p.a&&p.b); }
+  function render(){
+    const P=pairs(); const left=P.length;
+    const linked=S.advs.filter(a=>a.linked).length;
+    root.innerHTML=`<div class="topbar"><b>리뷰웹시스템</b><span class="nav">작업보드</span><span class="nav on">업체관리</span><span class="nav">모집공고</span></div>
+    <div class="shell"><div class="side">${sideHtml(S.advs,'')}</div><div class="main">
+      ${left?`<div class="banner"><div class="ic">!</div><div class="tx"><b>같은 업체로 보이는 업체가 ${left}쌍 있습니다</b><small>인트라넷에서 이름(법인 표기)이 바뀌면서 둘로 갈린 것으로 보입니다. 확인하고 하나로 합치세요.</small></div><button class="btn pri" data-act="toggle">${S.open?'접기':'확인하기'}</button></div>`
+        :`<div class="banner ok"><div class="ic">✓</div><div class="tx"><b>모든 업체가 인트라넷과 하나씩 연결돼 있습니다</b><small>매시간 자동 점검 · 인트라넷에서 이름이 바뀌면 자동으로 따라갑니다.</small></div></div>`}
+      ${S.open&&left?P.map(p=>pairHtml(p)).join(''):''}
+      ${!S.open||!left?`<div class="stats"><div class="stat"><div class="v">${S.advs.length}</div><div class="k">운영 중 업체</div></div><div class="stat"><div class="v">${linked}</div><div class="k">인트라넷 연결</div></div><div class="stat"><div class="v">${S.advs.reduce((n,a)=>n+a.tabs,0)}</div><div class="k">연결된 작업</div></div><div class="stat"><div class="v">${left}</div><div class="k">합칠 대상</div></div></div>
+      <div class="panel"><div class="ph"><h3>전체 업체</h3></div><table class="mini"><tr><th>업체</th><th>인트라넷</th><th>작업</th><th>담당AE</th></tr>${S.advs.map(a=>`<tr><td>${esc(a.name)}</td><td><span class="chip ${a.linked?'ok':'no'}">${a.linked?'연결':'미연결'}</span></td><td>${a.tabs}</td><td>${esc(a.pm)||'—'}</td></tr>`).join('')}</table></div>`:''}
+    </div></div>${S.confirm!=null?confirmHtml():''}`;
+  }
+  function pairHtml(p){
+    const keep=S.keep[p.i]; const K=keep===p.a.id?p.a:p.b, G=keep===p.a.id?p.b:p.a;
+    const side=(x)=>`<div class="side-card ${x===K?'keep':'gone'}" data-keep="${p.i}:${x.id}"><div class="nm">${esc(x.name)}</div><div class="tag">${x===K?'<b style="color:var(--safe)">남김</b>':'합친 뒤 사라짐'} · 작업 ${x.tabs} · 브랜드 ${x.brands} · ${x.linked?'인트라넷 연결':'인트라넷 미연결'}</div></div>`;
+    return `<div class="pair"><div class="row">${side(G)}<div class="arrow">→</div>${side(K)}<button class="btn danger" data-merge="${p.i}">합치기</button></div>
+      <div class="reason">★ ${esc(p.why)} · 카드를 누르면 남길 쪽이 바뀝니다</div></div>`;
+  }
+  function confirmHtml(){
+    const p=pairs().find(x=>x.i===S.confirm); const keep=S.keep[p.i]; const K=keep===p.a.id?p.a:p.b, G=keep===p.a.id?p.b:p.a;
+    const block=blockedReason(p.a,p.b);
+    return `<div class="ov"><div class="pop"><h3>업체 합치기</h3><div class="src"><b>${esc(G.name)}</b> → <b>${esc(K.name)}</b></div>
+      ${block?`<div class="note bad">${block}</div>`:movesHtml(G,K)+`<div class="note warn"><b>${esc(G.name)}</b> 은 업체 목록에서 사라집니다. 되돌리는 버튼은 없습니다.</div>
+      <label class="chk"><input type="checkbox" data-act="ok" ${S.ok?'checked':''}> 두 업체가 같은 회사인 것을 확인했습니다</label>`}
+      <div class="act"><button class="btn" data-act="close">취소</button><button class="btn danger" data-act="go" ${!block&&S.ok?'':'disabled'}>합치기</button></div></div></div>`;
+  }
+  root.addEventListener('click',e=>{
+    const el=e.target.closest('[data-act],[data-keep],[data-merge]'); if(!el) return;
+    if(el.dataset.keep){const [i,id]=el.dataset.keep.split(':');S.keep[i]=id;}
+    else if(el.dataset.merge!=null){S.confirm=+el.dataset.merge;S.ok=false;}
+    else { const act=el.dataset.act;
+      if(act==='toggle') S.open=!S.open;
+      else if(act==='close') S.confirm=null;
+      else if(act==='ok'){S.ok=el.checked;render();return;}
+      else if(act==='go'){const p=pairs().find(x=>x.i===S.confirm);const keep=S.keep[p.i];const r=doMerge(S,keep===p.a.id?p.b.id:p.a.id,keep);S.confirm=null;render();toast(root,`합쳤습니다 → ${r.d.name} (작업 ${r.d.tabs}개)`);return;}
+    }
+    render();
+  });
+  render();
+})();
+
+// ══════════ C ══════════
+(function(){
+  const root=document.getElementById('fC');
+  const S={advs:SEED(),open:false,tab:'merge',cmp:null,keep:null,ok:false,log:[
+    {at:'오늘 16:47',t:'인트라넷 번호 채움 20곳',d:'자연생각 · 스마트윈솔루션 · 티피링크코리아 유한회사 외 17곳 (이름 정확히 일치)'},
+    {at:'어제 11:23',t:'이름 따라감 1곳',d:'테이크투 → 테이크 투 인터랙티브 (인트라넷에서 사업자명 정정)'},
+  ],suggest:[{name:'비슷무역',to:'주식회사 비슷무역'}]};
+  function pairs(){ return PAIRS.map((p,i)=>({i,a:S.advs.find(x=>x.id===p[0])||null,b:S.advs.find(x=>x.id===p[1])||null,why:p[2]})).filter(p=>p.a&&p.b); }
+  function render(){
+    const P=pairs();
+    root.innerHTML=`<div class="topbar"><b>리뷰웹시스템</b><span class="nav">작업보드</span><span class="nav on">업체관리</span><span class="nav">모집공고</span><span style="flex:1"></span><button class="btn sm" data-act="open">🔎 인트라넷 연결 점검${P.length?` <span class="chip bad">${P.length}</span>`:''}</button></div>
+    <div class="shell"><div class="side">${sideHtml(S.advs,'')}</div><div class="main"><div class="panel"><div class="ph"><h3>전체 업체</h3></div>
+      <table class="mini"><tr><th>업체</th><th>인트라넷</th><th>작업</th></tr>${S.advs.map(a=>`<tr><td>${esc(a.name)}</td><td><span class="chip ${a.linked?'ok':'no'}">${a.linked?'연결':'미연결'}</span></td><td>${a.tabs}</td></tr>`).join('')}</table></div></div></div>
+    ${S.open?drawerHtml(P):''}${S.cmp!=null?compareHtml(P):''}`;
+  }
+  function drawerHtml(P){
+    const tab=(k,l,n)=>`<div class="${S.tab===k?'on':''}" data-tab="${k}">${l}<span class="cnt">${n}</span></div>`;
+    let body='';
+    if(S.tab==='merge') body = P.length? P.map(p=>`<div class="lrow"><div class="t"><b>${esc(p.a.name)}</b> · <b>${esc(p.b.name)}</b><small>${esc(p.why)}</small></div><button class="btn sm pri" data-cmp="${p.i}">비교하고 합치기</button></div>`).join('') : '<div class="note ok">합칠 대상이 없습니다.</div>';
+    if(S.tab==='check') body = S.suggest.map(s=>`<div class="lrow"><div class="t"><b>${esc(s.name)}</b><small>인트라넷에 이름이 정확히 같은 광고주가 없습니다 — 비슷한 곳: ${esc(s.to)}</small></div><button class="btn sm">같은 업체로 연결</button><button class="btn sm">아님</button></div>`).join('')+`<p class="hint">이름이 정확히 같으면 시스템이 자동으로 연결합니다. 여기에는 사람이 판단해야 하는 것만 남습니다.</p>`;
+    if(S.tab==='log') body = S.log.map(l=>`<div class="log"><b>${esc(l.t)}</b> <small>${esc(l.at)}</small><br><small>${esc(l.d)}</small></div>`).join('');
+    return `<div class="drawer"><div class="dh"><h3>인트라넷 연결 점검 <span class="x" data-act="shut">×</span></h3><div style="font-size:12px;color:var(--muted)">매시간 자동 점검 · 마지막 점검 오늘 16:23</div>
+      <div class="tabs">${tab('merge','합칠 대상',P.length)}${tab('check','확인 필요',S.suggest.length)}${tab('log','자동 처리 기록',S.log.length)}</div></div><div class="db">${body}</div></div>`;
+  }
+  function compareHtml(P){
+    const p=P.find(x=>x.i===S.cmp); const keep=S.keep||(p.b.linked?p.b.id:p.a.id);
+    const col=x=>`<div class="col ${x.id===keep?'keep':''}" data-k="${x.id}"><h4>${esc(x.name)} ${x.id===keep?'<span class="chip ok">남김</span>':'<span class="chip no">사라짐</span>'}</h4><dl>
+      <dt>인트라넷</dt><dd>${x.linked?'연결됨':'미연결'}</dd><dt>사업자번호</dt><dd>${esc(x.biz)||'미등록'}</dd><dt>작업</dt><dd>${x.tabs}개</dd><dt>브랜드</dt><dd>${x.brands}개</dd><dt>담당AE</dt><dd>${esc(x.pm)||'미지정'}</dd><dt>접속 링크</dt><dd>${esc(x.link)}</dd></dl></div>`;
+    const K=keep===p.a.id?p.a:p.b, G=keep===p.a.id?p.b:p.a; const block=blockedReason(p.a,p.b);
+    return `<div class="ov"><div class="pop" style="width:min(640px,100%)"><h3>두 업체 비교</h3><div class="src">남길 쪽을 누르세요 (인트라넷에 연결된 쪽을 권장)</div>
+      <div class="compare">${col(p.a)}${col(p.b)}</div>
+      ${block?`<div class="note bad">${block}</div>`:movesHtml(G,K)+`<label class="chk"><input type="checkbox" data-act="ok" ${S.ok?'checked':''}> 두 업체가 같은 회사인 것을 확인했습니다 (${esc(G.name)} 은 사라집니다)</label>`}
+      <div class="act"><button class="btn" data-act="close">취소</button><button class="btn danger" data-act="go" ${!block&&S.ok?'':'disabled'}>합치기</button></div></div></div>`;
+  }
+  root.addEventListener('click',e=>{
+    const el=e.target.closest('[data-act],[data-tab],[data-cmp],[data-k]'); if(!el) return;
+    if(el.dataset.tab) S.tab=el.dataset.tab;
+    else if(el.dataset.cmp!=null){S.cmp=+el.dataset.cmp;S.keep=null;S.ok=false;}
+    else if(el.dataset.k) S.keep=el.dataset.k;
+    else { const act=el.dataset.act;
+      if(act==='open') S.open=true; else if(act==='shut') S.open=false; else if(act==='close') S.cmp=null;
+      else if(act==='ok'){S.ok=el.checked;render();return;}
+      else if(act==='go'){const p=pairs().find(x=>x.i===S.cmp);const keep=S.keep||(p.b.linked?p.b.id:p.a.id);const r=doMerge(S,keep===p.a.id?p.b.id:p.a.id,keep);S.log.unshift({at:'방금',t:'업체 합치기',d:`${r.s.name} → ${r.d.name} (작업 ${r.d.tabs}개)`});S.cmp=null;render();toast(root,`합쳤습니다 → ${r.d.name}`);return;}
+    }
+    render();
+  });
+  render();
+})();
+
+// ?v=A|B|C 단독 보기
+(function(){ const v=(new URLSearchParams(location.search).get('v')||'').toUpperCase(); if(!/^[ABC]$/.test(v)) return;
+  document.body.classList.add('solo'); document.getElementById('sec'+v).classList.add('show'); })();
+</script>
+</body></html>
