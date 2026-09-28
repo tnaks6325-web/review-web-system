@@ -1039,7 +1039,8 @@ router.get('/review-earnings', async (req, res, next) => {
                (ri.is_submitted2 = 'PAID' OR EXISTS (
                   SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
                   WHERE kv.key ILIKE ANY($2) AND btrim(kv.value) <> ''
-               )) AS "isPaid"
+               )) AS "isPaid",
+               ${require('../services/reviewObligation.service').finishedTabSql('ri.sheet_id', 'ri.tab_name', 'ri.tab_gid')} AS "finished"
          FROM earnings_rows ri
          LEFT JOIN campaign_participants cp
            ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
@@ -1283,6 +1284,7 @@ router.get('/review-earnings', async (req, res, next) => {
        SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               cp.sheet_id AS "participantSheetId", cp.tab_name AS "participantTabName", cp.seq AS "participantRowIndex",
               ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, FALSE)', 'cp', 'seq')} AS "isSubmitted",
+              ${require('../services/reviewObligation.service').finishedTabSql('cp.sheet_id', 'cp.tab_name', 'cp.tab_gid')} AS "finished",
               COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
@@ -1504,9 +1506,12 @@ router.get('/review-earnings', async (req, res, next) => {
         purchaseDate: of.orderDate || sheetDateToIso(r.startDate, camp.campStartDate) || null,
       };
       if (!r.isSubmitted) {
-        count++;
-        reviewTotal += reviewFee;
-        if (price != null) productTotal += price; else productUnknown++;
+        // 마감된 작업의 미제출 행은 "받을 예정"이 아니다(리뷰 내역 대기 목록에서도 빠진다).
+        if (!r.finished) {
+          count++;
+          reviewTotal += reviewFee;
+          if (price != null) productTotal += price; else productUnknown++;
+        }
       } else if (r.isPaid) {
         dCount++;
         dReviewTotal += reviewFee;
@@ -1546,6 +1551,7 @@ router.get('/review-earnings', async (req, res, next) => {
         dUnpaidCount++;
         continue;
       }
+      if (o.finished) continue;
       const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
       const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
       if (existingFallback) {

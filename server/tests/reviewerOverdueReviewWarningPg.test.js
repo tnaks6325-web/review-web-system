@@ -82,8 +82,9 @@ async function callRoute(router, ownerReviewerId) {
       is_submitted BOOLEAN DEFAULT FALSE, deleted_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE TABLE review_index (
-      sheet_id TEXT, tab_name TEXT, row_index INT, is_submitted BOOLEAN DEFAULT FALSE, campaign_name TEXT, phone8 TEXT
+      sheet_id TEXT, tab_name TEXT, row_index INT, is_submitted BOOLEAN DEFAULT FALSE, campaign_name TEXT, phone8 TEXT, tab_gid TEXT
     );
+    CREATE TABLE trackb_tab_finished (sheet_id TEXT, tab_name TEXT, tab_gid TEXT, deleted_at TIMESTAMPTZ);
     CREATE TABLE review_index_archive (
       sheet_id TEXT, tab_name TEXT, row_index INT, is_submitted BOOLEAN DEFAULT FALSE, campaign_name TEXT, phone8 TEXT
     );
