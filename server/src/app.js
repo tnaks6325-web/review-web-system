@@ -28,7 +28,6 @@ const dedupeRoutes   = require('./routes/dedupe.routes');
 const campaignRoutes = require('./routes/campaign.routes');
 const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
-const portalRoutes   = require('./routes/portal.routes');
 const rawRoutes      = require('./routes/raw.routes');
 const csRoutes       = require('./routes/cs.routes');
 const mappingRoutes  = require('./routes/mapping.routes');
@@ -113,7 +112,7 @@ app.use('/api/order',     orderRoutes);
 app.use('/api/product',   productRoutes);
 
 // 업무포털 — 거래처(광고주)별 작업 관리 (Section 13)
-app.use('/api/portal',    portalRoutes);
+// (/api/portal — 업무포털 전용 라우트는 2026-09-28 제거, 결정 186 45번. portal_works 표는 advertiserProjection 이 계속 사용.)
 
 // 리뷰어 C/S 문의창구 — 관리자 (Section 15)
 app.use('/api/cs',        csRoutes);
