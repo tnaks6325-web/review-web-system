@@ -71,6 +71,11 @@ const t = async (name, fn) => { await fn(); passed++; console.log('PASS ' + name
     assert.deepStrictEqual(out.slice(0, 8), Array(8).fill(200));
     assert.deepStrictEqual(out.slice(8), [429, 429]);
   });
+  await t('프록시 주소가 같아도 실제 사용자 주소(X-Real-IP)가 다르면 다른 통', async () => {
+    const h1 = { 'X-Real-IP': '211.1.1.1' }, h2 = { 'X-Real-IP': '211.1.1.2' };
+    assert.deepStrictEqual(await burst(4, { ip: '152.233.15.120', headers: h1 }), [200, 200, 200, 429]);
+    assert.equal((await req('/api/x', { ip: '152.233.15.120', headers: h2 })).status, 200);
+  });
   await t('신원 없는 요청은 종전처럼 주소별', async () => {
     assert.deepStrictEqual(await burst(4, { ip: '5.5.5.1' }), [200, 200, 200, 429]);
   });

@@ -30,6 +30,18 @@ function _rlSkip(req) {
       || (req.method === 'GET' && p === '/api/campaign/list');
 }
 
+// ★★ 실제 사용자 주소 — Railway 는 앞단 프록시를 여러 겹 거쳐 req.ip 가 프록시 주소(152.233.x)로
+//   모인다(운영 로그 실측 2026-09-28: 모든 요청이 소수의 프록시 주소로 기록). 그래서 종전 "주소별
+//   120" 은 사실상 **전 사용자 공용 통**이었다. Railway 는 사용자 주소를 X-Real-IP 로 준다(공식 문서).
+//   형식이 주소가 아니면 req.ip 로 접는다. 끄는 스위치 RL_TRUST_X_REAL_IP=0.
+function clientIp(req) {
+  if (process.env.RL_TRUST_X_REAL_IP !== '0') {
+    const v = String(req.headers['x-real-ip'] || '').split(',')[0].trim();
+    if (/^[0-9a-fA-F:.]{3,45}$/.test(v)) return v;
+  }
+  return req.ip;
+}
+
 function _verify(token) {
   if (!token || !process.env.JWT_SECRET) return null;
   try { return jwt.verify(String(token), process.env.JWT_SECRET); } catch (_) { return null; }
@@ -59,8 +71,8 @@ function rateIdentity(req) {
     const raw = (req.query && req.query.phone8) || (req.body && typeof req.body === 'object' && req.body.phone8) || '';
     const p8 = String(raw || '').replace(/\D/g, '').slice(-8);
     id = p8.length === 8
-      ? { kind: 'phone', key: `p:${req.ip}:${p8}`, verified: false }
-      : { kind: 'anon', key: `i:${req.ip}`, verified: false };
+      ? { kind: 'phone', key: `p:${clientIp(req)}:${p8}`, verified: false }
+      : { kind: 'anon', key: `i:${clientIp(req)}`, verified: false };
   }
   req._rlIdentity = id;
   return id;
@@ -82,7 +94,7 @@ const identityLimiter = rateLimit({
 const ipCeilingLimiter = rateLimit({
   windowMs: RL_WINDOW_MS,
   max: RL_IP_CEILING,
-  keyGenerator: (req) => `ipc:${req.ip}`,
+  keyGenerator: (req) => `ipc:${clientIp(req)}`,
   message: RL_MESSAGE,
   standardHeaders: true,
   legacyHeaders: false,
@@ -99,6 +111,7 @@ function rateLimiter(req, res, next) {
 
 // 리뷰어 등록은 더 엄격한 제한
 const registerLimiter = rateLimit({
+  keyGenerator: (req) => clientIp(req),   // 실제 사용자 주소(프록시 주소 공용 통 방지)
   windowMs: 60 * 1000,
   max: 10,
   message: { error: '등록 요청이 너무 많습니다.' },
@@ -107,6 +120,7 @@ const registerLimiter = rateLimit({
 // ── 인트라넷 SSO 로그인(무인증 자격 프록시) 전용 — 리뷰서버가 인트라넷 대상
 //    크리덴셜 스터핑 오라클/프록시가 되는 것 방지(전역 120/분 대비 강한 10/분).
 const intranetLoginLimiter = rateLimit({
+  keyGenerator: (req) => clientIp(req),   // 실제 사용자 주소(프록시 주소 공용 통 방지)
   windowMs: 60 * 1000,
   max: 10,
   message: { success: false, error: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.' },
@@ -117,6 +131,7 @@ const intranetLoginLimiter = rateLimit({
 // ── 이미지 API 전용 rate limiter (Gemini/Drive 비용 보호) ──
 // 관리자 로그인 시 skip, 비로그인은 분당 10회 제한
 const imageApiLimiter = rateLimit({
+  keyGenerator: (req) => clientIp(req),   // 실제 사용자 주소(프록시 주소 공용 통 방지)
   windowMs: 60 * 1000,  // 1분
   max: 10,              // 분당 10회 (비로그인 사용자)
   message: { ok: false, error: '이미지 분석 요청이 너무 많습니다. 잠시 후 다시 시도하세요.' },
@@ -142,6 +157,7 @@ const imageApiLimiter = rateLimit({
 //   그때 **유실되는 것은 정산 증빙(구매 캡처)** 이다. 업로드는 AI 콜이 아니라 Drive 저장이라
 //   비용 성격도 다르다. 무제한이 아니라 통만 분리한다(남용 방어 유지).
 const imageUploadLimiter = rateLimit({
+  keyGenerator: (req) => clientIp(req),   // 실제 사용자 주소(프록시 주소 공용 통 방지)
   windowMs: 60 * 1000,  // 1분
   max: 30,              // 분당 30회 (비로그인 리뷰어 — 다건 제출 + 재시도 여유)
   message: { ok: false, error: '이미지 업로드 요청이 너무 많습니다. 잠시 후 다시 시도하세요.' },
@@ -157,6 +173,7 @@ const imageUploadLimiter = rateLimit({
 
 // ── 광고주 접속 링크 교환(무인증 공개 경로) 전용 — 토큰 브루트포스 완화. IP당 분당 30회. ──
 const advertiserLinkLimiter = rateLimit({
+  keyGenerator: (req) => clientIp(req),   // 실제 사용자 주소(프록시 주소 공용 통 방지)
   windowMs: 60 * 1000,
   max: 30,
   message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도하세요.' },
@@ -167,6 +184,7 @@ const advertiserLinkLimiter = rateLimit({
 // ── 리뷰어 공고수정 토큰 발급(무인증 공개 경로) 전용 — 허용명단 phone8 브루트포스 완화.
 //    발급 자체가 verifyReviewer(이름+phone8) + active 명단 이중 게이트지만, 오라클/스터핑 억제. ──
 const campaignTokenLimiter = rateLimit({
+  keyGenerator: (req) => clientIp(req),   // 실제 사용자 주소(프록시 주소 공용 통 방지)
   windowMs: 60 * 1000,
   max: 20,
   message: { ok: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도하세요.' },
@@ -174,4 +192,4 @@ const campaignTokenLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { rateLimiter, rateIdentity, identityLimiter, ipCeilingLimiter, registerLimiter, imageApiLimiter, imageUploadLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter };
+module.exports = { rateLimiter, rateIdentity, clientIp, identityLimiter, ipCeilingLimiter, registerLimiter, imageApiLimiter, imageUploadLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter };

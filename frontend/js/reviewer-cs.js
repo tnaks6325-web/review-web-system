@@ -56,13 +56,24 @@
     else { dot.textContent = ""; dot.style.display = "none"; }
   }
   // 서버에서 총 미확인 수를 조회해 탭 뱃지 갱신
-  async function refreshUnread() {
+  // 같은 계정의 조회가 진행 중이거나 방금(2초 안) 끝났으면 다시 보내지 않는다 — 홈을 열 때
+  // 초기화와 세션 동기화가 거의 동시에 불러 같은 요청이 두 번 나가던 것을 하나로 합친다.
+  let _unreadInflight = null, _unreadKey = "", _unreadAt = 0;
+  async function refreshUnread(force) {
     const user = getUser();
     if (!user || !user.phone8) { setTabBadge(0); return; }
-    try {
-      const d = await gasGet({ action: "csReviewerUnread", phone8: user.phone8 });
-      if (d && d.ok !== false) setTabBadge(d.totalUnread || 0);
-    } catch (_) {}
+    const key = String(user.phone8);
+    if (force !== true && key === _unreadKey && (_unreadInflight || Date.now() - _unreadAt < 2000)) return _unreadInflight || undefined;
+    _unreadKey = key;
+    _unreadInflight = (async () => {
+      try {
+        const d = await gasGet({ action: "csReviewerUnread", phone8: user.phone8 });
+        const cur = getUser();
+        if (cur && String(cur.phone8) === key && d && d.ok !== false) setTabBadge(d.totalUnread || 0);
+      } catch (_) {}
+      finally { _unreadAt = Date.now(); _unreadInflight = null; }
+    })();
+    return _unreadInflight;
   }
 
   // ── 공통 오버레이 ──
@@ -144,7 +155,7 @@
       _open.threadId = data.threadId || _open.threadId;
       renderMessages(data.messages || []);
       // 이 방을 열람하면 서버에서 해당 방 미확인이 리셋됨 → 탭 총 뱃지 갱신
-      refreshUnread();
+      refreshUnread(true);
     } catch (err) {
       const box = document.getElementById("rcsThread");
       if (box) box.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.82rem">오류: ${esc(err.message)}</div>`;
@@ -293,7 +304,7 @@
       _sse.addEventListener("cs_message", function (event) {
         let data = {}; try { data = JSON.parse(event.data); } catch (_) {}
         // 총 미확인 수 뱃지 갱신(카톡식 숫자)
-        refreshUnread();
+        refreshUnread(true);
         if (_open && _open.threadId && data.threadId === _open.threadId) {
           // 지금 보고 있는 방 → 새 메시지 즉시 표시(열람 처리됨)
           reloadChat();
@@ -321,7 +332,7 @@
     // 로그인/로그아웃 후 상태 변화 대응(가벼운 폴링) — SSE 연결 보장
     setInterval(ensureConnected, 3000);
     // SSE 누락 대비 안전망: 주기적 총 미확인 수 갱신
-    setInterval(refreshUnread, 20000);
+    setInterval(() => refreshUnread(true), 20000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

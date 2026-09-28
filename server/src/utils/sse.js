@@ -50,6 +50,10 @@ if (typeof process !== 'undefined') {
   process.on('SIGINT', () => clearInterval(heartbeatTimer));
 }
 
+function normalizedRetry(meta) {
+  return meta && meta.role === 'reviewer' ? 30000 : 3000;   // 관리자는 브라우저 기본값(3초) 그대로
+}
+
 /**
  * SSE 연결 등록 (Express 라우트 핸들러에서 호출)
  * @param {import('express').Request} req
@@ -81,6 +85,9 @@ function addClient(req, res, meta = { role: 'admin' }) {
   });
 
   // 초기 연결 메시지
+  // 끊겼을 때 다시 붙기까지 기다리는 시간. 기본(3초)이면 연결 수 상한에서 밀려난 리뷰어가 3초마다 다시
+  // 붙어 다른 리뷰어를 밀어내는 반복이 된다 → 리뷰어는 30초(관리자는 종전과 같은 3초) — decision 189.
+  res.write(`retry: ${normalizedRetry(meta)}\n`);
   res.write(`data: ${JSON.stringify({ type: 'connected', clientId, ts: Date.now() })}\n\n`);
 
   const normalizedMeta = meta || { role: 'admin' };
