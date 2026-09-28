@@ -47,7 +47,7 @@ async function loadPage(selectFields, options, db=pool) {
       OR (p.participant_identity_id IS NULL AND p.participant_phone8=ANY($4::text[]))))`;
   // 마감된 작업의 미제출 행은 "리뷰를 써야 하는 작업"이 아니다 — 대기 목록·대기 건수에서 뺀다(완료 이력은 유지).
   const openPending=`p.review_obligation_status IN ('pending','unknown')
-    AND NOT ${require('./reviewObligation.service').finishedTabSql('p.sheet_id','p.tab_name','tc.tab_gid')}`;
+    AND NOT ${require('./reviewObligation.service').finishedTabSql('p.sheet_id','p.tab_name',"COALESCE(NULLIF(p.index_snapshot->>'tab_gid',''),NULLIF(tc.tab_gid,''))")}`;
   const filter=`($5='all' AND (${openPending} OR p.review_obligation_status='fulfilled')
     OR $5='pending' AND ${openPending} OR $5='fulfilled' AND p.review_obligation_status='fulfilled')`;
   // Count and page run in one statement/snapshot; no global review_index COUNT/MAX.

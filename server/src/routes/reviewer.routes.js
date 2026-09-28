@@ -1284,7 +1284,12 @@ router.get('/review-earnings', async (req, res, next) => {
        SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               cp.sheet_id AS "participantSheetId", cp.tab_name AS "participantTabName", cp.seq AS "participantRowIndex",
               ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, FALSE)', 'cp', 'seq')} AS "isSubmitted",
-              ${require('../services/reviewObligation.service').finishedTabSql('cp.sheet_id', 'cp.tab_name', 'cp.tab_gid')} AS "finished",
+              (CASE WHEN cp.id IS NOT NULL
+                    THEN ${require('../services/reviewObligation.service').finishedTabSql('cp.sheet_id', 'cp.tab_name', "NULLIF(cp.tab_gid,'')")}
+                    WHEN os.sheet_id NOT LIKE 'campaign:%'
+                    THEN ${require('../services/reviewObligation.service').finishedTabSql('os.sheet_id', 'os.tab_name', "NULLIF(os.tab_gid,'')")}
+                    ELSE ${require('../services/reviewObligation.service').finishedTabSql('rc.linked_sheet_id', 'rc.linked_tab_name', "NULLIF(rc.linked_tab_gid,'')")}
+               END) AS "finished",
               COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",

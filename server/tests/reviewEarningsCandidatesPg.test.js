@@ -109,6 +109,15 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
  assert.equal((await indexed()).rows.find(r=>r.rowIndex===4).finished,false,'other tabs are not flagged');
  await db.query("UPDATE trackb_tab_finished SET deleted_at=now()");
  assert.equal((await indexed()).rows.find(r=>r.rowIndex===2).finished,false,'reopened (복귀) tab is not finished');
+ // 작업표 줄이 없는 참여형 주문(campaign:<id>)은 연결 공고의 작업표 좌표로 마감을 판정한다.
+ const cand=(await sheetless()).rows.filter(r=>!r.participantSheetId&&/^campaign:/.test(r.sheetId));
+ assert.ok(cand.length,'fixture must include a participant-less campaign order');
+ const target=cand[0];
+ await db.query("UPDATE recruit_campaigns SET linked_sheet_id='fin-sheet',linked_tab_name='fin-tab',linked_tab_gid='55' WHERE id=$1",[target.campaignId]);
+ assert.equal((await sheetless()).rows.find(r=>r.id===target.id).finished,false,'not finished yet');
+ await db.query("INSERT INTO trackb_tab_finished VALUES('fin-sheet','renamed','55',NULL)");
+ assert.equal((await sheetless()).rows.find(r=>r.id===target.id).finished,true,'participant-less order resolves finished via linked board gid');
+ await db.query("DELETE FROM trackb_tab_finished");
  assert.match(route,/status\(503\)\.json\(\{ ok: false, code: 'REVIEW_EARNINGS_DEFERRED'/);
  assert.doesNotMatch(route,/catch \(err\)[\s\S]*grandTotal: 0/,'failed query must not claim zero earnings');
  console.log(`PASS earnings SQL parity: ${comparisons} comparisons on 162 ownership/legacy fixtures; ${nonempty} nonempty results; 7 completion and 8 archive regressions`);

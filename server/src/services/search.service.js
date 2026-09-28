@@ -262,6 +262,12 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
         WHERE ${orderOwnerCondition}
           AND os.deleted_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed WHERE closed.order_submission_id=os.id)
+          -- 마감된 작업의 주문은 "써야 할 리뷰"로 붙이지 않는다. 참여형 주문(campaign:<id>)은
+          -- 원장 좌표가 가상이라 연결 공고의 작업표 좌표로 판정한다(decision 187).
+          AND NOT ${reviewObligation.finishedTabSql('os.sheet_id', 'os.tab_name', "NULLIF(os.tab_gid,'')")}
+          AND NOT EXISTS (SELECT 1 FROM recruit_campaigns frc
+                WHERE frc.id = COALESCE(ca.campaign_id, NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''))
+                  AND ${reviewObligation.finishedTabSql('frc.linked_sheet_id', 'frc.linked_tab_name', "NULLIF(frc.linked_tab_gid,'')")})
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
           AND os.submitted_at > now() - ($2 || ' days')::interval
           AND (os.mirror_status <> 'written' OR os.sheet_written_at > now() - interval '2 hours')
