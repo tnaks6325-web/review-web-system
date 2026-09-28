@@ -1337,6 +1337,8 @@ async function doHomeAdminLogin() {
   }
 }
 
+// 함수 선언은 끌어올려지므로 스크립트 어느 시점에 불려도 안전하다(const 는 선언 전 접근 시 오류).
+function _campEditDenyKey() { return "rapp_camp_edit_deny"; }
 async function maybeFetchCampEditToken(user) {
   const setBanner = (on) => {
     const b = document.getElementById("adminModeBanner");
@@ -1347,12 +1349,22 @@ async function maybeFetchCampEditToken(user) {
     const phone8 = user && user.phone8;
     const name = user && user.name;
     if (!phone8 || !name) { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return; }
+    // 허용명단에 없는 리뷰어(대부분)는 홈을 열 때마다 거절(401)을 받는다 — 같은 탭에서 10분 안에 다시
+    // 묻지 않는다. 새로 로그인하면 이 기억을 지워 바로 다시 확인한다(doLogin).
+    let deny = null;
+    try { deny = JSON.parse(sessionStorage.getItem(_campEditDenyKey()) || "null"); } catch (_) {}
+    if (deny && deny.p8 === String(phone8) && Date.now() - Number(deny.at) < 10 * 60 * 1000) {
+      sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return;
+    }
     const r = await fetch(API_BASE_URL + "/api/reviewer/campaign-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, phone8 }),
     });
-    if (!r.ok) { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return; }  // 비허용자=401 → 조용히
+    if (!r.ok) {   // 비허용자=401 → 조용히
+      if (r.status === 401) { try { sessionStorage.setItem(_campEditDenyKey(), JSON.stringify({ p8: String(phone8), at: Date.now() })); } catch (_) {} }
+      sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return;
+    }
     const j = await r.json();
     if (j && j.ok && j.token) { sessionStorage.setItem("rapp_camp_edit_token", j.token); setBanner(true); }
     else { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); }
@@ -1386,6 +1398,7 @@ async function doLogin() {
   const phone = document.getElementById("loginPhone").value.replace(/[^0-9]/g, "");
   if (!name) { showToast("이름을 입력해주세요"); document.getElementById("loginName").focus(); return; }
   if (!phone || phone.length !== 8) { showToast("전화번호 뒤 8자리를 입력해주세요"); return; }
+  try { sessionStorage.removeItem(_campEditDenyKey()); } catch (_) {}   // 새 로그인은 공고수정 권한을 바로 다시 확인
 
   const btn = document.querySelector(".login-btn");
   btn.disabled = true;
@@ -1594,10 +1607,23 @@ let _historyGeneration=0;
 let _historyCursors={pending:null,done:null},_historyMoreBusy=false;
 
 function _historyKey(user){return String(user&&user.reviewerToken||'')+'|'+String(user&&user.phone8||'');}
+// 새 조회(participations)가 아직 이 리뷰어에게 열리지 않았다는 답(legacy)을 10분 기억한다.
+// 대부분 리뷰어가 이 상태라 홈을 열 때마다 "확인 1번 + 옛 조회 1번" 두 요청이 나가던 것을 한 번으로 줄인다.
+// 옛 조회는 새 조회가 열린 뒤에도 정확하므로, 기억이 늦게 풀려도 화면 내용은 같다.
+function _historyLegacyKey(){ return 'rapp_history_legacy'; }
+function _historyLegacyRemembered(user){
+  try{ const m=JSON.parse(sessionStorage.getItem(_historyLegacyKey())||'null');
+    return !!(m&&m.k===String(user&&user.phone8||'')&&Date.now()-Number(m.at)<10*60*1000); }catch(_){ return false; }
+}
+function _rememberHistoryLegacy(user,on){
+  try{ if(on) sessionStorage.setItem(_historyLegacyKey(),JSON.stringify({k:String(user&&user.phone8||''),at:Date.now()}));
+    else sessionStorage.removeItem(_historyLegacyKey()); }catch(_){}
+}
 async function _fetchReviewHistory(user){
   const token=user.reviewerToken;
-  if(token){
+  if(token&&!_historyLegacyRemembered(user)){
     const pending=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'pending');
+    if(pending.mode!=='owner_id') _rememberHistoryLegacy(user,true);
     if(pending.mode==='owner_id'){
       const done=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'fulfilled');
       if(done.mode!=='owner_id') throw new Error('조회 전환 상태가 바뀌었습니다. 다시 불러와 주세요.');

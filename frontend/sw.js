@@ -7,7 +7,7 @@
      3) 아이콘 캐시(immutable)
    navigation/JS/CSS/API는 항상 네트워크 우선 → 코드 신선도 보장.
    ══════════════════════════════════════════════════════════════ */
-const VERSION = 'iarev-pwa-v1';
+const VERSION = 'iarev-pwa-v2';
 const CACHE = `${VERSION}`;
 const PRECACHE = ['/offline.html', '/manifest.webmanifest'];
 
@@ -37,6 +37,13 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return; // 업로드 등 비-GET은 건드리지 않음
 
   const url = new URL(req.url);
+
+  // 0) 다른 주소(API 서버 등)로 가는 요청은 서비스워커가 건드리지 않는다 — 브라우저가 직접 보낸다.
+  //    여기서 다시 보내면 실시간 알림(EventSource) 요청에 헤더가 붙어 서버 사전 확인이 거절되고,
+  //    연결이 3초마다 재시도되는 헛요청 루프가 됐다(운영 실측 2026-09-28 — decision 189).
+  //    API 응답은 원래 캐시하지 않으므로(아래 3번) 동작 차이는 없다.
+  if (url.origin !== self.location.origin) return;
+  if ((req.headers.get('accept') || '').includes('text/event-stream')) return;
 
   // 1) 아이콘/매니페스트 → cache-first (변경 빈도 낮음, immutable)
   if (url.origin === self.location.origin && isIcon(url)) {
