@@ -557,15 +557,7 @@ router.post('/sheet-sync/quota-fix', authMiddleware, adminOrMasterMiddleware, as
 });
 
 /* 탈 구글시트 전환 화면(W4 · C)은 전환 완료(150개 중 149개)로 2026-09-28 제거(결정 186 2번).
-   ★ 42P01(096 미적용)은 not_ready 로 말한다 — /api/trackb/* 는 마스킹 대상이라 원인이 안 보인다.
-   아래 review-submit-time-backfill 이 아직 쓴다. */
-function _cutoverErr(err, res, next) {
-  if (err && err.code === '42P01') {
-    return res.json({ ok: false, code: 'not_ready',
-      error: '탈시트 준비 전입니다(migration 096 미적용) — 배포 완료 후 다시 시도해주세요.' });
-  }
-  return next(err);
-}
+   (review-submit-time-backfill·_cutoverErr 는 결정 186 63번에서 제거.) */
 
 /* ── 구글시트 주소로 작업 가져오기 (탈 구글시트 잔재 처리) — adminOrMaster ──
    preview : 시트를 1회 읽어 "무엇을 가져올지"만 돌려준다(**DB 쓰기 0**)
@@ -575,19 +567,6 @@ function _cutoverErr(err, res, next) {
    ★★ **adminOrMaster 전용** — 이 경로는 접수에 이은 두 번째 등록 창구다(복원 성격 예외).
      AE 담당자에게 열면 담당 범위 밖의 시트를 시스템 작업으로 만들 수 있게 된다.
    ★ 이 경로는 재기준하지 않는다 — `/api/trackb/*` 라 관리자 토큰·인트라넷 SSO 양쪽이 그대로 닿는다. */
-// 최근 5일간 리뷰 파일 원장이 있고, 현재 작업표에 과거 표기('O')가 남은 무시트 행만
-// 업로드 시각으로 바꾼다. 기본은 dry-run이며 master가 확인 문구를 명시해야만 실제 변경한다.
-router.post('/sheetless/review-submit-time-backfill', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const dryRun = req.body?.dryRun !== false;
-    if (!dryRun && req.body?.confirm !== 'replace-o-with-submission-time') {
-      return res.status(400).json({ ok: false, error: '실제 반영에는 confirm: replace-o-with-submission-time 이 필요합니다.' });
-    }
-    const out = await sheetlessStatus.backfillReviewSubmitTimes({ dryRun, by: _by(req) });
-    res.json(out);
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-
 const sheetImport = require('../services/sheetImport.service');
 function _importErr(err, res, next) {
   if (err instanceof sheetImport.ImportError) {
