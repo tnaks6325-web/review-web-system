@@ -119,40 +119,14 @@ console.log('\n[5] 작업표 분배 · 프리필');
     && /const planMoved = false;/.test(hide));
 }
 
-/* ── [6] 정리 도구 ─────────────────────────────────────────── */
-console.log('\n[6] 정리 도구');
+/* ── [6] 정리 도구 — 1회성 도구(closedDayPlanCleanup)는 결정 186 61번에서 제거(운영 대상 0건) ── */
+console.log('\n[6] 정리 도구(제거 확인)');
 const cleanupP = (async () => {
-  const svc = require('../src/services/closedDayPlanCleanup.service');
-  ok('시스템 작성자 판정', svc.isSystemAuthor('작업표:master') && svc.isSystemAuthor('행삭제 이동:a') && !svc.isSystemAuthor('망고'));
-  const rows = [
-    { campaign_id: 'c1', title: 'T', skip_weekends: true, date: '2026-09-24', planned_count: 30, updated_by: '작업표:master' },
-    { campaign_id: 'c1', title: 'T', skip_weekends: true, date: '2026-09-28', planned_count: 30, updated_by: '작업표:master' },   // 평일 = 대상 아님
-    { campaign_id: 'c1', title: 'T', skip_weekends: true, date: '2026-09-26', planned_count: 5, updated_by: '박세희' },           // 사람 = 대상 아님(SQL이 걸러도 이중 방어)
-  ];
-  const log = [];
-  const client = { query: async (q, p) => { log.push(q); if (/^DELETE/.test(q.trim())) return { rowCount: 1, rows: [{}] }; return { rows: [], rowCount: 0 }; }, release() {} };
-  svc.__setPoolForTest({
-    query: async (q) => { log.push(q); return { rows }; },
-    connect: async () => client,
-  });
-  const pv = await svc.cleanupClosedDaySystemPlans({ confirm: false, today: '2026-09-23' });
-  ok('★★ 미리보기는 쓰기 0건', pv.dryRun === true && !log.some(q => /DELETE|INSERT|UPDATE/.test(q)));
-  ok('★★ 대상 = 쉬는 날 + 시스템 작성분만(평일·사람 값 제외)', pv.days === 1 && pv.campaigns[0].days[0].date === '2026-09-24');
-  ok('공휴일 이름을 함께 보여준다', pv.campaigns[0].days[0].holidayName === '추석 연휴');
-  log.length = 0;
-  const run = await svc.cleanupClosedDaySystemPlans({ confirm: true, today: '2026-09-23', by: 'master' });
-  ok('실행 시 그 날짜만 지운다', run.removed === 1 && log.filter(q => /DELETE FROM campaign_daily_plans/.test(q)).length === 1);
-  ok('★ 낙관적 조건 — 인원·작성자가 바뀌었으면 안 지운다', log.some(q => /planned_count = \$3 AND updated_by = \$4/.test(q)));
-  ok('★★ 지운 값을 이력에 남긴다(되돌리기 재료)', log.some(q => /closed_day_system_plan_cleanup/.test(q)));
-  ok('★ SQL 이 사람 값을 애초에 고르지 않는다(작성자 접두 조건)',
-    /updated_by LIKE '작업표:%'/.test(read('src/services/closedDayPlanCleanup.service.js')));
-  svc.__setPoolForTest(null);
-
+  const fs2 = require('fs'); const path2 = require('path');
+  ok('1회성 쉬는 날 정리 도구가 되살아나지 않았다',
+    !fs2.existsSync(path2.join(__dirname, '..', 'src', 'services', 'closedDayPlanCleanup.service.js')));
   const router = require('../src/routes/trackB.routes');
-  const layer = router.stack.find(l => l.route && l.route.path === '/settings/closed-day-plan-cleanup');
-  ok('★ 라우트 존재 · POST', !!(layer && layer.route.methods.post));
-  const names = layer ? layer.route.stack.map(s => s.name) : [];
-  ok('★★ 관리자 전용(adminOrMaster)', names.includes('authMiddleware') && names.includes('adminOrMasterMiddleware'));
+  ok('정리 입구 라우트 없음', !router.stack.some(l => l.route && l.route.path === '/settings/closed-day-plan-cleanup'));
 })();
 
 /* ── [7] 조절 화면 — 0명 확정 ─────────────────────────────── */
