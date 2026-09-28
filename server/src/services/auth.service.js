@@ -235,7 +235,12 @@ async function loginByLinkToken(linkToken, _pool = pool) {
     `SELECT l.advertiser_id, a.name AS advertiser_name, a.status AS advertiser_status
        FROM trackb_advertiser_links l JOIN advertisers a ON a.id = l.advertiser_id
       WHERE l.token = $1 AND l.active = TRUE LIMIT 1`, [tok]);
-  if (rows.length === 0) return loginByBrandToken(tok, _pool);   // 094: 광고주 링크가 아니면 브랜드 링크 폴백
+  if (rows.length === 0) {
+    const brand = await loginByBrandToken(tok, _pool);   // 094: 광고주 링크가 아니면 브랜드 링크 폴백
+    if (brand && brand.success) return brand;
+    const aliased = await loginByLinkAlias(tok, _pool);   // 169: 합쳐진 업체·브랜드의 옛 링크
+    return aliased || brand;
+  }
   if (rows[0].advertiser_status === 'ended') return { success: false, error: '종료된 거래처입니다.' };
   // ★ 로그인 게이트 = **명시 플래그**(083 `login_required`). 관리자가 업체관리에서 "광고주 계정 사용"을
   //   켠 업체만 로그인 화면을 거친다. 계정을 발급해도 켜지 않으면 링크는 그대로 공개(=계정은 선택적 보안).
@@ -273,6 +278,45 @@ async function loginByBrandToken(linkToken, _pool = pool) {
   );
   return { success: true, name: rows[0].name, role: 'advertiser', advertiserId: rows[0].advertiser_id,
     brandId: rows[0].id, brandName: rows[0].name, advertiserName: rows[0].advertiser_name, token };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 합쳐진 업체·브랜드의 옛 링크(169 trackb_link_aliases) — 업체 병합 뒤에도 옛 주소가 열리게 한다.
+//   ★★ 별칭은 권한을 새로 만들지 않는다: **대상의 현재 링크 상태**(업체 링크 active / 브랜드 link_active·
+//      deleted_at · 거래처 종료)를 그대로 따른다. 대상 링크를 회전하면 별칭은 서비스가 지운다.
+//   ★ fail-soft — 표가 없거나(마이그레이션 미적용) 조회가 실패하면 null(= 종전대로 "유효하지 않은 링크").
+// ═══════════════════════════════════════════════════════════
+async function loginByLinkAlias(tok, _pool = pool) {
+  let al;
+  try {
+    const { rows } = await _pool.query(
+      `SELECT token, kind, target_id FROM trackb_link_aliases WHERE token = $1 LIMIT 1`, [tok]);
+    al = rows[0];
+  } catch (_) { return null; }
+  if (!al) return null;
+  if (al.kind === 'advertiser') {
+    const { rows } = await _pool.query(
+      `SELECT a.id AS advertiser_id, a.name AS advertiser_name, a.status AS advertiser_status
+         FROM advertisers a JOIN trackb_advertiser_links l ON l.advertiser_id = a.id AND l.active = TRUE
+        WHERE a.id = $1 LIMIT 1`, [al.target_id]);
+    if (!rows.length) return { success: false, error: '유효하지 않거나 폐기된 링크입니다.' };
+    if (rows[0].advertiser_status === 'ended') return { success: false, error: '종료된 거래처입니다.' };
+    _pool.query('UPDATE trackb_link_aliases SET last_used_at = NOW() WHERE token = $1', [tok]).catch(() => {});
+    const token = jwt.sign(
+      { name: rows[0].advertiser_name, role: 'advertiser', advertiser_id: rows[0].advertiser_id, via: 'link' },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+    );
+    return { success: true, name: rows[0].advertiser_name, role: 'advertiser', advertiserId: rows[0].advertiser_id, advertiserName: rows[0].advertiser_name, token };
+  }
+  if (al.kind === 'brand') {
+    const { rows } = await _pool.query(`SELECT link_token FROM trackb_brands WHERE id = $1 LIMIT 1`, [al.target_id]);
+    if (!rows.length || !rows[0].link_token) return { success: false, error: '유효하지 않거나 폐기된 링크입니다.' };
+    const out = await loginByBrandToken(rows[0].link_token, _pool);   // 대상 브랜드의 현재 상태를 그대로 따른다
+    if (out && out.success) _pool.query('UPDATE trackb_link_aliases SET last_used_at = NOW() WHERE token = $1', [tok]).catch(() => {});
+    return out;
+  }
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -530,6 +574,7 @@ module.exports = {
   loginIntranet,
   loginAdvertiser,
   loginByLinkToken,
+  loginByLinkAlias,
   loginByBrandToken,
   addAdvertiserUser,
   editAdvertiserUser,

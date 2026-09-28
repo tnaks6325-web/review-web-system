@@ -194,11 +194,30 @@ router.post('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req,
     if (dup.rows.length > 0) {
       return res.status(409).json({ ok: false, error: '이미 존재하는 거래처명입니다.' });
     }
+    // ★★ 업체관리 등록과 같은 규칙(2026-09-28 근본 원인 수정): 인트라넷 광고주DB에서 이름이 하나로
+    //   정해지면 원본 ID·사업자번호를 함께 저장하고, 같은 업체로 보이는 기존 업체가 있으면 새로 만들지 않는다.
+    //   ★ 인트라넷 확인은 fail-soft — 이 화면은 인트라넷 미등록 거래처도 만들 수 있던 창구라 막지 않는다
+    //     (원본 ID 가 비면 업체관리 [인트라넷 연결 점검]이 나중에 채운다).
+    const trackB = require('../services/trackB.service');
+    const nm = String(name).trim();
+    let origin = { intranetId: '', businessNumber: '' };
+    try {
+      const chk = await trackB.isRegisteredIntranetAdvertiser(nm);
+      const ms = (chk && chk.ok && Array.isArray(chk.matches)) ? chk.matches.filter(m => m && m.intranetId) : [];
+      if (ms.length === 1) origin = { intranetId: ms[0].intranetId, businessNumber: ms[0].bizNo || '' };
+    } catch (e) { logger.warn(`[portal] 인트라넷 광고주 확인 실패(원본 ID 없이 등록): ${e.message}`); }
+    const same = await trackB.findSameAdvertiser(pool, { name: nm, intranetId: origin.intranetId, businessNumber: origin.businessNumber });
+    if (same) {
+      return res.status(409).json({ ok: false, existingId: same.id,
+        error: `이미 「${same.name}」 업체로 등록돼 있습니다 — 같은 업체로 보여 새로 만들지 않았습니다.` });
+    }
     const { rows } = await pool.query(
-      `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [_genAdvId(), String(name).trim(), status || 'active',
-       inad_pm || '', contact || '', memo || '', _intOrNull(sort_order) || 0]
+      `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order,
+                                intranet_advertiser_id, intranet_business_number)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [_genAdvId(), nm, status || 'active',
+       inad_pm || '', contact || '', memo || '', _intOrNull(sort_order) || 0,
+       origin.intranetId, origin.businessNumber]
     );
     res.json({ ok: true, data: rows[0] });
   } catch (err) { next(err); }

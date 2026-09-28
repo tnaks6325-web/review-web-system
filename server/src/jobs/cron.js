@@ -418,6 +418,33 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 업체 ↔ 인트라넷 광고주 연결 동기화 (2026-09-28 올곧은무역·어니스트캄 — 같은 업체가 둘로 갈린 사고) ──
+  //   인트라넷에서 사업자명을 정정해도 리뷰웹 업체가 따라가게 한다: 원본 ID 로 연결된 업체는 이름·사업자번호를
+  //   맞추고, ID 가 비어 있는 업체는 인트라넷 사업자명이 **정확히 같은** 광고주가 하나일 때만 ID 를 채운다.
+  //   ★ 자동 병합은 하지 않는다(결정 004) — 같은 업체로 보이는 두 업체는 로그로만 알린다(합치기는 사람이).
+  //   ★ 인트라넷 도달 불가면 아무것도 쓰지 않는다. 되돌리기 = Railway `ADVERTISER_INTRANET_SYNC=0`.
+  if (process.env.ADVERTISER_INTRANET_SYNC !== '0') {
+    const asSchedule = process.env.ADVERTISER_INTRANET_SYNC_SCHEDULE || '23 * * * *';
+    let asRunning = false;
+    cron.schedule(asSchedule, async () => {
+      if (asRunning) return;
+      asRunning = true;
+      try {
+        const { applyIntranetSync } = require('../services/advertiserIntranetSync.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('advertiser_intranet_sync', () => applyIntranetSync({ by: 'cron' }));
+        if (r && r.skipped) logger.debug('[CRON-AdvSync] lock busy — 양보');
+        else if (r && r.ok) {
+          const c = r.remaining || {};
+          const needHuman = (c.duplicate || 0) + (c.rename_blocked || 0) + (c.suggest || 0) + (c.ambiguous || 0);
+          if (needHuman) logger.warn(`[CRON-AdvSync] 사람 확인 필요 ${needHuman}건(합치기 대상 ${(c.duplicate || 0) + (c.rename_blocked || 0)}) — 업체관리 인트라넷 연결 점검`);
+        } else if (r && !r.ok) logger.warn(`[CRON-AdvSync] ${r.error}`);
+      } catch (err) {
+        logger.error(`[CRON-AdvSync] error: ${err.message}`);
+      } finally { asRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 명의 카드 거울(조각 2-1 · 결정 기록 176): 10분마다 카드를 리뷰어 정보(sub_accounts)에 맞춘다 ──
   //   ★ 저장 경로 19곳은 건드리지 않는다 — 달라진 리뷰어만 짧은 트랜잭션으로 맞춘다(FOR NO KEY UPDATE + lock_timeout).
   //   ★ 아직 아무도 카드를 읽지 않으므로 최대 10분 늦어도 영향 없다. 되돌리기 = Railway `IDENTITY_CARDS_RECONCILE=0`.

@@ -773,6 +773,8 @@ async function generateAdvertiserLink({ advertiserId, by = '' } = {}) {
      ON CONFLICT (advertiser_id) DO UPDATE
        SET token = EXCLUDED.token, active = TRUE, created_by = EXCLUDED.created_by, created_at = NOW(), last_used_at = NULL
      RETURNING token, active`, [advertiserId, token, String(by).slice(0, 100)]);
+  // ★ 회전 = 유출 대응 — 병합으로 붙어 있던 옛 주소(169 별칭)도 함께 막는다(fail-soft: 표 미적용이면 무시).
+  await getPool().query(`DELETE FROM trackb_link_aliases WHERE kind = 'advertiser' AND target_id = $1`, [advertiserId]).catch(() => {});
   logger.info(`[trackB] 광고주 접속링크 발급/회전: ${advertiserId} by ${by}`);
   return { ok: true, token: rows[0].token, active: rows[0].active };
 }
@@ -853,16 +855,58 @@ async function createAdvertiserScoped({ name, inadPm = '', role = 'admin', byNam
   const db = getPool();
   const dup = await db.query('SELECT 1 FROM advertisers WHERE name = $1', [nm]);
   if (dup.rows.length > 0) return { ok: false, code: 409, error: '이미 존재하는 거래처명입니다.' };
+  // ★★ 근본 원인 수정(2026-09-28 올곧은무역·어니스트캄): 종전에는 인트라넷에서 이름을 확인만 하고
+  //   **원본 ID 를 버렸다**. 그래서 인트라넷에서 사업자명을 정정하면(법인 표기 변경 등) 다음 작업오더
+  //   접수가 이 업체를 못 찾고 **같은 업체를 하나 더** 만들었다. 이제 확인한 원본 ID·사업자번호를
+  //   함께 저장한다 — 이후 이름이 바뀌어도 원본 ID 로 같은 업체를 찾고 이름이 따라간다.
+  //   ★ 인트라넷에 같은 이름이 둘 이상이면 어느 쪽인지 정할 수 없어 ID 를 비워 둔다(추측 금지 —
+  //     업체관리 [인트라넷 연결 점검]이 그 업체를 '확인 필요'로 알려 준다).
+  const origin = _uniqueIntranetOrigin(chk);
+  const same = await findSameAdvertiser(db, { name: nm, intranetId: origin.intranetId, businessNumber: origin.businessNumber });
+  if (same) return _sameAdvertiserError(same);
   const id = 'adv_' + require('crypto').randomBytes(6).toString('hex');
   try {
     const { rows } = await db.query(
-      `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order)
-       VALUES ($1,$2,'active',$3,'','',0) RETURNING *`, [id, nm, pm]);
-    return { ok: true, data: rows[0] };
+      `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order,
+                                intranet_advertiser_id, intranet_business_number)
+       VALUES ($1,$2,'active',$3,'','',0,$4,$5) RETURNING *`,
+      [id, nm, pm, origin.intranetId, origin.businessNumber]);
+    return { ok: true, data: rows[0], intranetLinked: !!origin.intranetId };
   } catch (e) {
-    if (e && e.code === '23505') return { ok: false, code: 409, error: '이미 존재하는 거래처명입니다.' };   // 동시 생성 레이스(UNIQUE 백스톱)
+    if (e && e.code === '23505') return { ok: false, code: 409, error: '이미 존재하는 거래처명이거나, 같은 인트라넷 광고주로 등록된 업체가 있습니다.' };   // 동시 생성 레이스(UNIQUE 백스톱)
     throw e;
   }
+}
+
+// 인트라넷 이름 확인 결과에서 **하나로 정해지는** 원본만 꺼낸다(둘 이상이면 빈 값 — 추측 금지).
+function _uniqueIntranetOrigin(chk) {
+  const ms = (chk && Array.isArray(chk.matches)) ? chk.matches.filter(m => m && m.intranetId) : [];
+  if (ms.length !== 1) return { intranetId: '', businessNumber: '' };
+  return { intranetId: String(ms[0].intranetId).slice(0, 128), businessNumber: String(ms[0].bizNo || '').slice(0, 80) };
+}
+
+/**
+ * 새로 만들려는 업체와 **같은 업체로 보이는** 기존 업체를 찾는다 — 있으면 새로 만들지 않는다.
+ *   같은 인트라넷 원본 ID · 법인 표기만 다른 이름 · 같은 사업자번호(utils/advertiserIdentity 단일 출처).
+ *   ★ 이미 **다른** 인트라넷 광고주에 연결된 업체는 표기가 비슷해도 다른 원본이라 제외한다.
+ *   ★ 종료(ended)된 업체는 제외(되살리는 것은 이 함수의 일이 아니다).
+ */
+async function findSameAdvertiser(db, { name, intranetId = '', businessNumber = '' } = {}) {
+  const { sameAdvertiser } = require('../utils/advertiserIdentity');
+  const { rows } = await db.query(
+    `SELECT id, name, COALESCE(intranet_advertiser_id,'') AS "intranetId",
+            COALESCE(intranet_business_number,'') AS "businessNumber"
+       FROM advertisers WHERE COALESCE(status,'') <> 'ended'`);
+  const iid = String(intranetId || '');
+  return rows.find(r =>
+    (iid && r.intranetId === iid)
+    || ((!r.intranetId || !iid || r.intranetId === iid)
+        && sameAdvertiser({ name: r.name, businessNumber: r.businessNumber }, { name, businessNumber }))
+  ) || null;
+}
+function _sameAdvertiserError(same) {
+  return { ok: false, code: 409, existingId: same.id, existingName: same.name,
+    error: `이미 「${same.name}」 업체로 등록돼 있습니다 — 법인 표기만 다르거나 같은 인트라넷 광고주라 같은 업체로 보고 새로 만들지 않았습니다. 그 업체를 사용하세요.` };
 }
 
 // (staff 담당 게이트 staffOwnsAdvertiser — 유일 소비처 _ownershipExpandAllowed 와 함께 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인).)
@@ -1132,6 +1176,14 @@ async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
   return { ok: true, items };
 }
 
+// 인트라넷 광고주DB 전체(원본 ID·사업자명·사업자번호) — 업체↔인트라넷 연결 점검용(advertiserIntranetSync).
+//   intranetAdvertisers 와 **같은 캐시**를 쓴다(사본 조회 금지). 도달 불가 + 캐시 없음이면 ok:false.
+async function intranetAdvertiserIndex() {
+  const r = await intranetAdvertisers({ q: '', limit: 1 });
+  if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'intranet_unreachable', rows: [] };
+  return { ok: true, rows: (_intraAdvCache.rows || []).map(x => ({ intranetId: String(x.intranetId || ''), name: x.name, bizNo: x.bizNo || '' })) };
+}
+
 // ── 거래처 등록 검증: 인트라넷 광고주DB(business_name)에 "정확히" 존재하는 이름만 Track B 업체로 등록 허용.
 //   부분일치 유입 방지 위해 정확일치(공백제거·대소문 무시). 인트라넷 도달 불가면 unreachable=true(상위 fail-closed).
 async function isRegisteredIntranetAdvertiser(name) {
@@ -1139,8 +1191,10 @@ async function isRegisteredIntranetAdvertiser(name) {
   if (!nm) return { ok: true, registered: false };
   const r = await intranetAdvertisers({ q: name, limit: 50 });
   if (!r || !r.ok) return { ok: false, unreachable: true };
-  const registered = (r.items || []).some(it => String(it.name || '').trim().toLowerCase() === nm);
-  return { ok: true, registered };
+  const matches = (r.items || []).filter(it => String(it.name || '').trim().toLowerCase() === nm)
+    .map(it => ({ intranetId: String(it.intranetId || ''), bizNo: String(it.bizNo || ''), name: it.name }));
+  // matches = 등록 시 원본 ID 를 함께 저장하기 위한 재료(근본 원인 수정 2026-09-28).
+  return { ok: true, registered: matches.length > 0, matches };
 }
 
 // ══ 인트라넷 사용자(AE) 자동완성 프록시 ══ 담당AE(inad_pm) 매칭용. 스코프 키인 display_name +
@@ -2010,6 +2064,8 @@ async function updateBrand({ advertiserId, brandId, action, name, color, on } = 
   if (action === 'link-rotate') {   // 유출 대응 — 새 토큰 발급(이전 링크 즉시 무효)
     const token = _linkToken();
     await db.query('UPDATE trackb_brands SET link_token=$2, link_active=TRUE WHERE id=$1', [brandId, token]);
+    // ★ 병합으로 붙어 있던 옛 브랜드 주소(169 별칭)도 함께 막는다.
+    await db.query(`DELETE FROM trackb_link_aliases WHERE kind = 'brand' AND target_id = $1`, [brandId]).catch(() => {});
     return { ok: true, linkToken: token };
   }
   if (action === 'settlement-visible') { await db.query('UPDATE trackb_brands SET settlement_visible=$2 WHERE id=$1', [brandId, on === true]); return { ok: true }; }
@@ -6116,7 +6172,7 @@ module.exports = {
   ownedSheetIds,
   getAdvertiserLink, ensureAdvertiserLink, generateAdvertiserLink, setAdvertiserLinkActive,
   setAdvertiserLinkLoginRequired,
-  isRegisteredIntranetAdvertiser,
+  isRegisteredIntranetAdvertiser, findSameAdvertiser, intranetAdvertiserIndex,
   intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
   intranetSalesSearch,
   advertiserForTab,
