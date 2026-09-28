@@ -707,7 +707,9 @@
     //   관리자가 그 자리에서 대리 제출한다. **진짜 admin_token 보유자에게만** 보여준다:
     //   리뷰어앱 공고수정 스코프 토큰(via:'reviewer_campaign')은 /api/manual-order/* 에 도달할 수
     //   없어(403) 버튼을 보여주면 막다른 길이 된다(별표 칩과 같은 규율).
-    const moChip = (!admin && c.participation_mode && _realAdminTok())
+    //   ★ 수동제출 모듈(window.ManualOrder)을 싣는 화면에서만 — 옛 입구(/api/manual-order)는 결정 186 54번에서
+    //     제거돼 모듈은 리뷰웹시스템[3버전](/api/trackb/manual-order 재기준)만 싣는다. 리뷰어 홈·공고 상세엔 칩 없음.
+    const moChip = (!admin && c.participation_mode && _realAdminTok() && window.ManualOrder)
       ? `<button type="button" class="pmochip" onclick="event.stopPropagation();event.preventDefault();CampCards.openManualOrder('${_esc(c.id)}')">🧾 외부모집 수동제출</button>`
       : '';
     // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(최근 1일 일반 제출완료 1건당 1건 참여 조건)

@@ -21,7 +21,6 @@ const shortRoutes    = require('./routes/shortlink.routes');
 const memoRoutes     = require('./routes/memo.routes');
 const paymentRoutes  = require('./routes/payment.routes');
 const submitRoutes   = require('./routes/submit.routes');
-const manualOrderRoutes = require('./routes/manualOrder.routes');
 const diagRoutes     = require('./routes/diag.routes');
 const archiveRoutes  = require('./routes/archive.routes');
 const dedupeRoutes   = require('./routes/dedupe.routes');
@@ -99,8 +98,7 @@ app.use('/api/payment',   paymentRoutes);
 
 // 리뷰제출 + 구매양식 (Section 5/12)
 app.use('/api/submit',    submitRoutes);
-// 외부모집 구매양식 관리자 수동제출(admin/master 전용) — 무인증 submit 경로와 분리
-app.use('/api/manual-order', manualOrderRoutes);
+// (/api/manual-order — 외부모집 수동제출 옛 입구는 2026-09-28 제거, 결정 186 54번. 핸들러는 /api/trackb/manual-order/* 가 위임으로 계속 사용)
 
 // 진단/디버그/뷰어/블랙리스트/캠페인/이미지 (Section 12)
 app.use('/api/diag',      diagRoutes);
