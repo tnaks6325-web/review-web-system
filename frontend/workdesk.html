@@ -511,10 +511,6 @@
     border:1px dashed var(--accent-line);color:var(--accent-deep);background:transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .octrb:hover{background:var(--accent-soft)}
   .octrb.on{border-style:solid;border-color:transparent;background:var(--accent-soft);font-variant-numeric:tabular-nums}
-  .owntab .omemo{font-size:11.5px;color:var(--muted);cursor:text;border-radius:6px;padding:3px 6px;margin:-3px -6px}
-  .owntab .omemo:hover{background:var(--card2);outline:1px dashed var(--accent-line)}
-  .owntab .omemo i{color:var(--faint);font-style:normal;opacity:.6}
-  .omemoin{width:100%;font:inherit;font-size:11.5px;padding:3px 6px;border:1px solid var(--accent-line);border-radius:6px;background:var(--card);color:var(--ink);outline:none}
   /* 브랜드 필터 칩(한 광고주가 다수 브랜드 보유 — 관제실 '브랜드' 컬럼 대응) */
   .obchips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}
   .obchip{font-size:11px;font-weight:650;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);cursor:pointer;color:var(--muted)}
@@ -6464,7 +6460,7 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; if(STATE.gW
 /* ══ 작업명 편집 — 제목 자리에서 바로 (사용자 확정 2026-08-24) ═══════════════════
    종전에는 브라우저 `prompt` 창이었다. 화면이 가려져 지금 어느 작업을 고치는지 안 보이고,
    붙여넣은 값을 눈으로 확인하기도 어려웠다(그 창구로 탭 문자가 섞인 이름이 저장됐다).
-   ★ 관용구는 업체관리 비고 편집(`editTabMemo`)과 같다 — 그 자리를 input 으로 갈아끼우고
+   ★ 관용구는 (제거된) 업체관리 비고 편집과 같았다 — 그 자리를 input 으로 갈아끼우고
      Enter=저장 · Esc=취소 · 포커스가 빠지면 저장.
    ★★ 편집 중에는 **머리를 다시 그리지 않는다** — 입력칸 DOM 이 새로 만들어지면 한글 IME
      조합이 파괴된다(홈 목록 검색에서 실측한 `ㅁ며면면` 계열). 그래서 성공했을 때만 전체 재렌더.
@@ -16908,7 +16904,7 @@ async function renderOwnershipView(){
 /* ══ 업체관리 리디자인(시안 A) — 사이드바 검색·필터 / 전체 개요 / 우측 설정 패널 ══════════════
    설계·시안 = frontend/docs/design-vendor-management.html (사용자 확정 A안)
    ★★ 기존 계약은 한 줄도 바꾸지 않는다 — #ownPanel·#owntabsSect·#advs·.advitem[data-i]·.ct·.pmn·
-     openOwnTab(i)·editTabMemo(event,i)·ownMatchContract(event,i)·_contractMatchApplied·selAdv·
+     openOwnTab(i)·ownMatchContract(event,i)·_contractMatchApplied·selAdv·
      refreshAdvCounts·saveAe 가 그대로 동작해야 한다(바뀐 것은 배치와 조작뿐).                     */
 let _ovmAdvQ='', _ovmAdvF='all', _ovmQ='', _ovmF='all', _ovmDrawer=null, _ovmDTab='link';
 const _OVM_COLS_KEY='wd_own_cols';
@@ -17680,8 +17676,8 @@ async function saveAe(){ const a=STATE.advCur; if(!a) return;
      섹션을 통째로 innerHTML 교체하면 입력칸 DOM 이 재생성되며 **한글 IME 조합이 파괴**된다
      ('ㅁ며면면' — 홈 작업목록 검색에서 실측한 사고와 같은 자리). 정산 요약이 늦게 도착해도
      같은 이유로 행만 다시 그린다(_rerenderOwnTabs).
-   ★ openOwnTab/editTabMemo/ownMatchContract 인덱스는 **STATE.ownTabs 원본 기준**(필터로 순서가
-     바뀌어도 원본 i 를 넘긴다 — 어긋나면 옆 작업을 열거나 남의 비고를 고친다).
+   ★ openOwnTab/ownMatchContract 인덱스는 **STATE.ownTabs 원본 기준**(필터로 순서가
+     바뀌어도 원본 i 를 넘긴다 — 어긋나면 옆 작업을 열거나 남의 계약을 고친다).
    ★ 열 폭은 JS 가 정한다(_ovmGrid) — 묶음을 접으면 폭도 함께 줄어야 하므로 CSS 고정값을 쓸 수 없다.
      헤더 칸 수 ≡ 행 칸 수 ≡ grid 열 수 는 회귀가드가 두 빌더를 실행해 대조한다.               */
 function _ownTabsHtml(){
@@ -17701,7 +17697,7 @@ function _ownTabsHtml(){
     <div class="ovm-tools">
       <div class="tr">
         <label class="ovm-srch"><span class="ic">🔍</span>
-          <input id="ovmQ" value="${esc(_ovmQ)}" placeholder="작업명 · 브랜드 · 상품 · 계약번호 · 비고 검색" autocomplete="off" oninput="_ovmSearch(this.value)">
+          <input id="ovmQ" value="${esc(_ovmQ)}" placeholder="작업명 · 브랜드 · 상품 · 계약번호 검색" autocomplete="off" oninput="_ovmSearch(this.value)">
           <button class="clr" title="지우기" onclick="_ovmClear()">×</button></label>
         <span class="ovm-cnt" id="ovmCnt"></span>
         <span style="flex:1"></span>
@@ -17776,7 +17772,6 @@ function _ovmGrid(){
   F(92);                       /* 계약 */
   if(c.setl){ F(62); F(62); F(62); F(62); }            /* 견적서·마감자료·계산서·입금일 */
   F(148);                      /* 입금액/총비용 */
-  X(96,1);                     /* 비고 */
   F(44);                       /* 열기 */
   const min=fixed+flexMin+(cols.length-1)*10;
   return { cols:cols.join(' '), min, n:cols.length };
@@ -17789,7 +17784,7 @@ function _ovmHead(){
   if(c.mat)  h.push('<span>자료</span>');
   h.push('<span>계약</span>');
   if(c.setl) h.push('<span>견적서</span>','<span>마감자료</span>','<span>계산서</span>','<span>입금일</span>');
-  h.push('<span>입금액/총비용</span>','<span>비고</span>','<span></span>');
+  h.push('<span>입금액/총비용</span>','<span></span>');
   return `<div class="othead" style="grid-template-columns:${g.cols};min-width:${g.min}px">${h.join('')}</div>`;
 }
 // 행 필터 — ★ 상태 칩 숫자와 목록이 **같은 판정**을 쓴다(따로 세면 "칩은 12인데 표는 3줄"이 된다).
@@ -17806,7 +17801,7 @@ function _ovmRowMatch(t,f,q){
   const pm=parseTabMeta(t.tabName);
   const ob=_ownBrand(t);   // 검색어는 지정 브랜드명으로도 걸린다(작업명에 없는 브랜드로 배정한 경우)
   // ★ 표에 그리는 이름(_tabLabel)도 검색 대상 — 안 넣으면 화면에 보이는 그 글자로 검색해도 안 걸린다.
-  return [_tabLabel(t),t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber,t.memo]
+  return [_tabLabel(t),t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber]
     .some(v=>String(v==null?'':v).toLowerCase().includes(nq));
 }
 function _ownRowsHtml(){
@@ -17874,15 +17869,14 @@ function _ownRowsHtml(){
     if(c.setl){ cells.push(`<span class="ocol odate">${quoteCell}</span>`,`<span class="ocol odate">${closeoutCell}</span>`,
       `<span class="ocol odate">${invoiceCell}</span>`,`<span class="ocol odate">${paidDateCell}</span>`); }
     cells.push(`<span class="ocol omoney">${moneyCell}</span>`);
-    cells.push(`<span class="ocol omemo" onclick="editTabMemo(event,${i})" title="클릭하여 비고 편집">${t.memo?_ovmHl(t.memo,q):'<i>비고…</i>'}</span>`);
     cells.push(`<span class="openb">열기 ›</span>`);
     return `<div class="owntab" style="grid-template-columns:${g.cols};min-width:${g.min}px" onclick="openOwnTab(${i})" title="${esc(_tabTip(t))}">${cells.join('')}</div>`;
   }).join('');
   if(!list) return _ovmHead()+`<div class="ovm-empty"><b>조건에 맞는 작업이 없습니다</b>${q?`검색어 “${esc(q)}”`:'선택한 필터'}에 맞는 작업이 없습니다. 검색어를 지우거나 [전체]를 눌러보세요.</div>`;
   return _ovmHead()+list;
 }
-// 건수·칩 표기 — ★ 전체 렌더(비고 저장·정산 도착)와 행 렌더가 **같은 함수**를 쓴다.
-//   한쪽만 채우면 검색 중 비고를 저장했을 때 입력칸·건수는 비어 보이는데 표는 계속 걸러진 상태가 된다.
+// 건수·칩 표기 — ★ 전체 렌더(정산 도착 등)와 행 렌더가 **같은 함수**를 쓴다.
+//   한쪽만 채우면 입력칸·건수는 비어 보이는데 표는 계속 걸러진 상태가 된다.
 function _ovmSyncCnt(){
   const box=$('#ownRows'); if(!box) return;
   const ot=STATE.ownTabs||[], q=_ovmQ.trim();
@@ -17921,11 +17915,8 @@ function _md(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return
 function _won(n){ return n==null?'—':Number(n).toLocaleString('ko-KR'); }
 function setOwnBrand(i){ STATE.ownBrand = i===-1?null : i===-2?'' : ((STATE.ownBrandList||[])[i]!=null?STATE.ownBrandList[i]:null);
   setOwnBrandByName(STATE.ownBrand); }
-// 연결탭 섹션 재렌더 — 비고 편집 중(.omemoin 존재)이면 연기(포커스 input이 innerHTML 교체로
-// 제거되면 blur 미발생 → 입력 무음 소실). 저장/취소 후 rerender 가 pending 을 소화.
+// 연결탭 섹션 재렌더(종전 비고 편집 중 연기 로직은 비고 칸과 함께 제거 — 결정 186 33번 — 2026-09-28 업체관리 비고 칸 제거(작업 148개 중 비고 0)).
 function _rerenderOwnTabs(){ const el=$('#owntabsSect'); if(!el) return;
-  if(el.querySelector('.omemoin')){ STATE._ownRerenderPending=true; return; }
-  STATE._ownRerenderPending=false;
   // ★★ 도구줄(검색 입력칸)이 이미 그려져 있으면 **행만** 갈아치운다 — 정산 요약이 타이핑 중에
   //   도착해 섹션을 통째로 교체하면 입력칸 DOM 이 재생성되며 한글 IME 조합이 파괴된다(실측 사고 계열).
   if(el.querySelector('#ownRows')){ _ovmRenderRows(); return; }
@@ -17939,29 +17930,6 @@ async function loadOwnSettlement(advId){
   else { for(const t of (STATE.ownTabs||[])) if(t.salesId) m[t.sheetId+'\t'+t.tabName]={proxyDown:true}; }   // 로드 실패 = '…' 영구 대신 '?' 표기
   STATE.ownSettle=m;
   _rerenderOwnTabs();
-}
-// 비고 인라인 편집: 셀 클릭 → input 치환 → Enter/blur 저장, Esc 취소. 행 클릭(탭 열기)과 격리(stopPropagation).
-function editTabMemo(ev,i){ ev.stopPropagation(); const t=(STATE.ownTabs||[])[i]; if(!t) return;
-  const cell=ev.currentTarget; if(cell.querySelector('input')) return;
-  cell.innerHTML=`<input class="omemoin" maxlength="2000" onclick="event.stopPropagation()" onkeydown="_memoKey(event)" onblur="saveOwnMemo(${i},this)">`;
-  const inp=cell.querySelector('input'); inp.value=t.memo||''; inp.focus(); inp.select();
-}
-function _memoKey(ev){ if(ev.key==='Enter') ev.target.blur(); else if(ev.key==='Escape'){ ev.target.dataset.esc='1'; ev.target.blur(); } }
-async function saveOwnMemo(i,inp){ const t=(STATE.ownTabs||[])[i];
-  // 편집 종료 시점 = 연기된 재렌더(_ownRerenderPending)까지 함께 소화(최신 STATE 로 강제 렌더).
-  // ★ 행 컨테이너가 있으면 행만 갈아치운다 — 섹션을 통째로 그리면 검색어·건수 표기가 초기화되는데
-  //   표는 계속 걸러진 상태라 "왜 3건만 보이지"의 원인이 화면에서 사라진다(코드리뷰 지적).
-  const rerender=()=>{ STATE._ownRerenderPending=false;
-    if($('#ownRows')){ _ovmRenderRows(); return; }
-    const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); };
-  if(!t||inp.dataset.esc){ rerender(); return; }
-  const memo=inp.value.trim();
-  if(memo===(t.memo||'')){ rerender(); return; }
-  try{
-    const r=await api('/api/trackb/tab-memo',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,memo})});
-    if(r&&r.ok){ t.memo=r.memo; toast('비고 저장됨'); } else toast('비고 저장 실패'+(r&&r.error?': '+r.error:''));
-  }catch(_){ toast('비고 저장 실패: 네트워크 오류'); }
-  rerender();
 }
 let _ovmAddList=[];
 async function assignOwn(){ const a=STATE.advCur; if(!a) return;
