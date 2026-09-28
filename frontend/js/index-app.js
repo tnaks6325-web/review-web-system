@@ -1334,7 +1334,6 @@ function switchAdminTab(tabName) {
   if (tabName === "cs-inquiry") { try { loadCsRooms(); } catch(_){} }
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
-  if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadAiSamples(); } catch(_){} try { loadMyNickname(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} try { loadWorktableTemplate(); } catch(_){} try { loadGateCriteria(); } catch(_){} }
@@ -2316,9 +2315,6 @@ const _CTX_TOOLBAR_DEFS = {
     { id:'ctx-rec-add',     label:'공고추가',  icon:'fa-plus',        style:'green',      onclick:"openRecruitModal(null)", title:'공고 추가'},
     { id:'ctx-rec-notice',  label:'공지설정',  icon:'fa-bullhorn',    style:'yellow',     onclick:"openNoticePanel()", title:'공지 배너 설정'},
     { id:'ctx-rec-preview', label:'미리보기',  icon:'fa-eye',         style:'',           onclick:"window.open('recruit.html','_blank')", title:'모집 페이지 미리보기'},
-  ],
-  payment: [
-    { id:'ctx-pay-refresh', label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"initPaymentPanel()", title:'입금 목록 새로고침'},
   ],
 };
 

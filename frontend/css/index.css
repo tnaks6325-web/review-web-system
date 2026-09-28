@@ -1191,68 +1191,6 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 .dash-tab-row.no-product-warn{background:linear-gradient(90deg,#FFF5F5 0%,#FFF5F5 100%)!important}
 .dash-tab-row-round.no-product-warn{background:#FFF8F8!important}
 .badge-no-product{display:inline-flex;align-items:center;gap:3px;font-size:.6rem;font-weight:700;color:#DC2626;background:#FEE2E2;border:1px solid #FECACA;border-radius:4px;padding:1px 5px;white-space:nowrap;flex-shrink:0}
-/* ★ 입금처리 패널 CSS */
-.payment-panel{padding:16px}
-.payment-bank-selector{display:flex;gap:8px;margin-bottom:14px}
-.payment-bank-btn{flex:1;padding:10px;border:2px solid var(--bd);border-radius:10px;font-size:.8rem;font-weight:700;cursor:pointer;background:#fff;color:var(--t2);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px}
-.payment-bank-btn.active{border-color:var(--p);background:#e8f1fe;color:var(--p)}
-.payment-bank-btn:hover:not(.active){border-color:#a6c8fb;color:var(--p)}
-.payment-filter-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:#F9FAFB;border:1.5px solid var(--bd);border-radius:10px}
-.payment-filter-bar label{font-size:.73rem;font-weight:600;color:var(--t2)}
-.payment-campaign-select{padding:5px 10px;border:1.5px solid var(--bd);border-radius:7px;font-size:.75rem;color:var(--t1);outline:none;background:#fff;min-width:180px}
-.payment-load-btn{padding:6px 14px;background:var(--p);color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer;white-space:nowrap}
-.payment-load-btn:hover{background:#1b64da}
-.payment-load-btn:disabled{opacity:.5;cursor:not-allowed}
-.payment-preview-wrap{border:1.5px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:14px}
-.payment-preview-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#F3F4F6;border-bottom:1px solid var(--bd)}
-.payment-preview-title{font-size:.78rem;font-weight:700;color:var(--t1)}
-.payment-preview-count{font-size:.73rem;color:var(--p);font-weight:700}
-.payment-preview-table{width:100%;border-collapse:collapse;font-size:.72rem}
-.payment-preview-table th{background:#F9FAFB;padding:6px 8px;text-align:left;font-weight:600;color:var(--t2);border-bottom:1px solid var(--bd);white-space:nowrap}
-.payment-preview-table td{padding:6px 8px;border-bottom:1px solid #F3F4F6;color:var(--t1);vertical-align:middle}
-.payment-preview-table tr:last-child td{border-bottom:none}
-.payment-preview-table tr:hover td{background:#f4f8ff}
-.payment-preview-table .col-check{width:28px;text-align:center}
-.payment-preview-table .col-bank{max-width:70px}
-.payment-preview-table .col-account{font-family:monospace;max-width:120px}
-.payment-preview-table .col-amount{text-align:right;font-weight:600;color:#065F46;max-width:80px}
-.payment-preview-table .col-tab{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.payment-action-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.payment-dl-btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;background:#065F46;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s}
-.payment-dl-btn:hover{background:#047857}
-.payment-dl-btn:disabled{opacity:.5;cursor:not-allowed}
-.payment-done-btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;background:#EF4444;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s}
-.payment-done-btn:hover{background:#DC2626}
-.payment-done-btn:disabled{opacity:.5;cursor:not-allowed}
-.payment-sel-count{font-size:.73rem;color:var(--t2);font-weight:600}
-.payment-preview-table .pay-cell-missing{background:#FFF5F5}
-/* 입금처리 정리 요약 */
-.payment-summary{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:12px 14px;margin-bottom:12px;background:#ECFDF5;border:1.5px solid #A7F3D0;border-radius:10px}
-.payment-summary .pay-sum-total{font-size:.82rem;font-weight:700;color:#065F46}
-.payment-summary .pay-sum-total b{color:#047857}
-.payment-summary .pay-sum-banks{display:flex;flex-wrap:wrap;gap:6px}
-.payment-summary .pay-sum-chip{font-size:.72rem;color:var(--t2);background:#fff;border:1px solid #A7F3D0;border-radius:999px;padding:3px 10px;white-space:nowrap}
-.payment-summary .pay-sum-chip b{color:#065F46;margin-right:3px}
-/* 입금명 일괄 팝업 */
-.deposit-name-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2200;align-items:center;justify-content:center}
-.deposit-name-modal-overlay.open{display:flex}
-.deposit-name-modal{background:#fff;border-radius:14px;padding:22px;max-width:460px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,.2);max-height:80vh;display:flex;flex-direction:column}
-.deposit-name-modal h3{font-size:.92rem;font-weight:700;color:var(--t1);margin:0 0 6px}
-.deposit-name-modal .desc{font-size:.73rem;color:var(--t3);margin-bottom:14px;line-height:1.5}
-.deposit-name-modal-body{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px}
-.deposit-name-row{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#F9FAFB;border-radius:8px;border:1.5px solid var(--bd)}
-.deposit-name-row label{font-size:.75rem;font-weight:600;color:var(--t2);min-width:100px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.deposit-name-input{flex:1;padding:5px 9px;border:1.5px solid var(--bd);border-radius:6px;font-size:.76rem;outline:none}
-.deposit-name-input:focus{border-color:var(--p)}
-.deposit-name-input.warn{border-color:#EF4444;background:#FFF5F5}
-.deposit-name-modal-actions{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
-/* 이체완료 확인 팝업 */
-.payment-confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2200;align-items:center;justify-content:center}
-.payment-confirm-overlay.open{display:flex}
-.payment-confirm-modal{background:#fff;border-radius:14px;padding:22px;max-width:380px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,.2)}
-.payment-confirm-modal h3{font-size:.9rem;font-weight:700;margin:0 0 10px}
-.payment-confirm-modal p{font-size:.78rem;color:var(--t2);margin:0 0 16px;line-height:1.6}
-.payment-confirm-modal .actions{display:flex;gap:8px;justify-content:flex-end}
 .tc-time-picker{border:1.5px solid var(--bd);border-radius:8px;overflow:hidden;margin-bottom:2px;transition:opacity .15s}
 .tc-time-picker-disabled{opacity:.38;pointer-events:none}
 .tc-time-picker-hint{font-size:.68rem;color:var(--p);font-weight:600;padding:4px 8px;background:#F0F9FF;border-bottom:1px solid #E0F2FE;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

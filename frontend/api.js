@@ -168,8 +168,6 @@ const _ACTION_MAP = {
   'resolveShort': { method: 'GET',  path: '/api/short/resolve' },
 
   // 입금처리 (Section 11)
-  'getPaymentTargets': { method: 'GET',  path: '/api/payment/targets' },
-  'markPaymentDone':   { method: 'POST', path: '/api/payment/mark-done' },
 
   // 제출 (Section 12)
   'submitReview':       { method: 'POST', path: '/api/submit/review' },

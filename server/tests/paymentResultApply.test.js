@@ -339,11 +339,8 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       /require\('\.\/paymentApply\.service'\)/.test(resSrc)
       && /recordDeposits\(client,/.test(resSrc) && /markDepositCells\(/.test(resSrc));
 
-    const routeSrc = noLineComments(read('src/routes/payment.routes.js'));
-    ok('★ 기존 수동 처리(mark-done)도 같은 함수를 쓴다(사본이 남아 있지 않다)',
-      /paymentApply\.service/.test(routeSrc)
-      && !/UPDATE review_index SET is_submitted2/i.test(routeSrc)
-      && !/INSERT INTO payment_records/i.test(routeSrc));
+    ok('★ 회차를 건너뛰는 옛 수동 처리(mark-done) 라우트가 없다(결정 186 57번)',
+      !fs.existsSync(path.join(__dirname, '..', 'src', 'routes', 'payment.routes.js')));
 
     const applySrc = noLineComments(read('src/services/paymentApply.service.js'));
     ok('★ 무시트 탭은 작업표 칸에 쓰고 시트·큐로 내려가지 않는다(W3-a)',

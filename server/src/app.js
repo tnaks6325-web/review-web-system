@@ -18,7 +18,6 @@ const reviewerRoutes = require('./routes/reviewer.routes');
 const adminRoutes    = require('./routes/admin.routes');
 const driveRoutes    = require('./routes/drive.routes');
 const shortRoutes    = require('./routes/shortlink.routes');
-const paymentRoutes  = require('./routes/payment.routes');
 const submitRoutes   = require('./routes/submit.routes');
 const diagRoutes     = require('./routes/diag.routes');
 const archiveRoutes  = require('./routes/archive.routes');
@@ -90,8 +89,7 @@ app.use('/api/short',     shortRoutes);
 
 // (/api/memo — 옛 대시보드 탭 메모는 2026-09-28 제거, 결정 186 55번. memos 표는 보존)
 
-// 입금처리 (Section 11)
-app.use('/api/payment',   paymentRoutes);
+// (/api/payment — 옛 대시보드 입금처리 탭 전용(회차를 건너뛰는 수동 이체완료)은 2026-09-28 제거, 결정 186 57번. 입금은 /api/trackb/payment/*)
 
 // 리뷰제출 + 구매양식 (Section 5/12)
 app.use('/api/submit',    submitRoutes);
@@ -239,7 +237,6 @@ app.get('/health', async (req, res) => {
       admin: '/api/admin/login',
       drive: '/api/drive/*',
       short: '/api/short/*',
-      payment: '/api/payment/targets',
       submit: '/api/submit/*',
       diag: '/api/diag/*',
     }
