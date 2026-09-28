@@ -86,7 +86,6 @@ const _ACTION_MAP = {
   // 인덱스 스캔 + DB 동기화 (정상 경로)
   'indexScan':        { method: 'POST', path: '/api/tab/index-scan' },
   'indexScanSync':    { method: 'POST', path: '/api/tab/index-scan-sync' },
-  'resetAllData':     { method: 'POST', path: '/api/tab/reset-all' },
 
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
   'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },

@@ -13686,48 +13686,6 @@ async function syncTabFromSheet() {
   showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
 }
 
-// ── DB 선택적 초기화 ──
-async function resetAllData() {
-  // 체크박스에서 선택된 항목 수집
-  const targets = [];
-  const labels = [];
-  if (document.getElementById("resetDashboard")?.checked) { targets.push("dashboard"); labels.push("대시보드"); }
-  if (document.getElementById("resetArchive")?.checked) { targets.push("archive"); labels.push("마감"); }
-  if (document.getElementById("resetUnrecognized")?.checked) { targets.push("unrecognized"); labels.push("인식실패탭"); }
-
-  if (targets.length === 0) { showToast("초기화할 항목을 1개 이상 선택하세요.", "warning"); return; }
-
-  const step1 = prompt(
-    `⚠ 경고: 선택된 항목의 데이터가 삭제됩니다.\n\n` +
-    `삭제 대상: ${labels.join(", ")}\n\n` +
-    `계속하려면 'RESET' 을 입력하세요:`
-  );
-  if (step1 !== "RESET") { showToast("초기화 취소됨", "info"); return; }
-
-  const step2 = confirm(`[${labels.join(", ")}] 데이터를 삭제합니다.\n이 작업은 되돌릴 수 없습니다.`);
-  if (!step2) { showToast("초기화 취소됨", "info"); return; }
-
-  const btn = document.getElementById("btnResetAll");
-  const _save = btn ? btn.innerHTML : "";
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 초기화 중...'; }
-
-  try {
-    const res = await gasPost({ action: "resetAllData", confirm: "RESET_ALL_DATA", targets }, 60000);
-    if (res.error) { showToast("초기화 오류: " + res.error, "error"); return; }
-
-    const d = res.deleted || {};
-    const parts = Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ");
-    showToast(`✅ 초기화 완료 [${labels.join("+")}]: ${parts}`, "success");
-
-    // 대시보드 새로고침
-    if (typeof loadTabDashboard === "function") loadTabDashboard();
-  } catch (err) {
-    showToast("초기화 오류: " + err.message, "error");
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = _save; }
-  }
-}
-
 // ═══════════════════════════════════════════════════════════
 // [DEPRECATED v11.8.0] 통합 구조 동기화 — 2탭 통합으로 폐기
 // → 인덱스 스캔(indexScan) + DB 동기화(indexScanSync)를 사용하세요
