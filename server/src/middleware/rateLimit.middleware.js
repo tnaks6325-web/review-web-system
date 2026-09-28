@@ -45,8 +45,12 @@ function rateIdentity(req) {
   const reviewerPayload = _verify(req.headers['x-reviewer-token'])
     || (bearerPayload && bearerPayload.scope === 'reviewer_session' ? bearerPayload : null);
   if (bearerPayload && bearerPayload.scope !== 'reviewer_session') {
-    const who = bearerPayload.id || bearerPayload.iu || bearerPayload.name || bearerPayload.username || '';
-    if (who) id = { kind: 'staff', key: `s:${bearerPayload.role || ''}:${who}`, verified: true };
+    // 서명된 고유 ID를 이름보다 먼저 쓴다 — 브랜드·광고주 이름은 겹칠 수 있다(같은 이름 = 같은 통 금지).
+    const pl = bearerPayload;
+    const who = pl.brand_id != null ? `b${pl.brand_id}`
+      : pl.advertiser_id != null ? `a${pl.advertiser_id}:${pl.via || ''}:${pl.name || ''}`
+      : (pl.id || pl.iu || pl.name || pl.username || '');
+    if (who) id = { kind: 'staff', key: `s:${pl.role || ''}:${who}`, verified: true };
   }
   if (!id && reviewerPayload && reviewerPayload.scope === 'reviewer_session' && reviewerPayload.ownerReviewerId) {
     id = { kind: 'reviewer', key: `r:${reviewerPayload.ownerReviewerId}`, verified: true };

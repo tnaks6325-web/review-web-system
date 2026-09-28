@@ -48,6 +48,13 @@ const t = async (name, fn) => { await fn(); passed++; console.log('PASS ' + name
   await t('검증된 직원은 주소별 상한에서 빠진다(같은 IP 10명이어도 막히지 않는다)', async () => {
     for (let i = 0; i < 4; i++) assert.deepStrictEqual(await burst(3, { ip: '9.9.9.2', headers: { Authorization: 'Bearer ' + staff('s' + i) } }), [200, 200, 200]);
   });
+  await t('이름이 같은 두 브랜드 링크는 서로 다른 통', async () => {
+    const b1 = jwt.sign({ name: '같은이름', role: 'advertiser', advertiser_id: 'A1', brand_id: 1, via: 'brand-link' }, process.env.JWT_SECRET);
+    const b2 = jwt.sign({ name: '같은이름', role: 'advertiser', advertiser_id: 'A2', brand_id: 2, via: 'brand-link' }, process.env.JWT_SECRET);
+    await burst(5, { ip: '9.9.9.3', headers: { Authorization: 'Bearer ' + b1 } });
+    assert.equal((await req('/api/x', { ip: '9.9.9.3', headers: { Authorization: 'Bearer ' + b1 } })).status, 429);
+    assert.equal((await req('/api/x', { ip: '9.9.9.3', headers: { Authorization: 'Bearer ' + b2 } })).status, 200);
+  });
   await t('로그인 리뷰어는 리뷰어별 통', async () => {
     assert.deepStrictEqual(await burst(4, { ip: '8.8.8.1', headers: { 'X-Reviewer-Token': reviewer('r1') } }), [200, 200, 200, 200]);
     assert.equal((await req('/api/x', { ip: '8.8.8.1', headers: { 'X-Reviewer-Token': reviewer('r1') } })).status, 429);
