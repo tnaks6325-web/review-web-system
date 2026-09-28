@@ -827,21 +827,34 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
 
     const { rows } = await require('../services/boundedReviewRead.service').boundedReviewRead(client => client.query(`
       WITH warning_candidate_ids AS MATERIALIZED (
+        /* 후보 주문 ID 모으기 — "계정ID 또는 전화번호"를 한 조건(OR)으로 쓰면 인덱스를 못 타고 표 전체를
+           읽어(주문표는 전화번호 정리식을 모든 행에 계산) 1.5초 제한에 걸렸다(운영 실측 약 50% 503).
+           갈래별로 나눠 각자 인덱스를 탄다(migration 168). 결과 집합은 OR 과 같다.
+           ★ 조건은 한 글자도 좁히지 않았다(삭제 여부 등은 종전처럼 아래 단계가 거른다). */
+        SELECT id FROM order_submissions WHERE owner_reviewer_id = $1
+        UNION
         SELECT id FROM order_submissions
-         WHERE owner_reviewer_id = $1
-            OR RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2)
+         WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2)
         UNION
-        SELECT order_submission_id FROM campaign_participants
-         WHERE owner_reviewer_id = $1 OR phone8 = ANY($2)
-            OR participant_identity_id IN (SELECT id FROM reviewer_identities WHERE owner_reviewer_id = $1)
+        SELECT order_submission_id FROM campaign_participants WHERE owner_reviewer_id = $1
         UNION
-        SELECT os.id FROM order_submissions os
-          JOIN campaign_applications app ON app.id = os.campaign_application_id
-         WHERE app.owner_reviewer_id = $1 OR app.owner_phone8 = ANY($2)
+        SELECT order_submission_id FROM campaign_participants WHERE phone8 = ANY($2)
+        UNION
+        SELECT cp.order_submission_id FROM reviewer_identities ri_owner
+          JOIN campaign_participants cp ON cp.participant_identity_id = ri_owner.id
+         WHERE ri_owner.owner_reviewer_id = $1
+        UNION
+        SELECT os.id FROM campaign_applications app
+          JOIN order_submissions os ON os.campaign_application_id = app.id
+         WHERE app.owner_reviewer_id = $1
+        UNION
+        SELECT os.id FROM campaign_applications app
+          JOIN order_submissions os ON os.campaign_application_id = app.id
+         WHERE app.owner_phone8 = ANY($2)
       ), warning_orders AS MATERIALIZED (
         SELECT os.* FROM order_submissions os
-          JOIN warning_candidate_ids candidate ON candidate.id = os.id
-         WHERE os.deleted_at IS NULL AND os.mirror_status = 'written'
+         WHERE os.id IN (SELECT id FROM warning_candidate_ids WHERE id IS NOT NULL)
+           AND os.deleted_at IS NULL AND os.mirror_status = 'written'
            AND os.submitted_at <= NOW() - INTERVAL '10 days'
       ), warning_participants AS MATERIALIZED (
       -- Resolve an order's participant once, before the index/obligation joins.
