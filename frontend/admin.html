@@ -486,27 +486,6 @@ body{ letter-spacing:-.01em; }
             <div id="organizeResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:200px;overflow-y:auto"></div>
           </div>
 
-          <!-- 폴더명 마이그레이션 -->
-          <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-exchange-alt" style="color:#D97706"></i> 폴더명 형식 변환
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">({탭명} → {탭명}_{캠페인명})</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              탭명이 동일한 캠페인 간 폴더 충돌 방지를 위해 Drive 폴더명 변경
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnMigrateDry" onclick="migrateFolderNames(true)"
-                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnMigrateRun" onclick="migrateFolderNames(false)"
-                style="flex:1;padding:7px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실제 변환
-              </button>
-            </div>
-            <div id="migrateResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:180px;overflow-y:auto"></div>
-          </div>
 
           <!-- 탭 파싱 진단 -->
           <div style="border-top:1px solid #F3F4F6;padding-top:8px">
