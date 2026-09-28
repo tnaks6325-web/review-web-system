@@ -969,12 +969,7 @@ router.get('/ownership', authMiddleware, internalMiddleware, async (req, res, ne
    종전에는 staff 를 자기 담당 업체로 묶었는데, **이관(`/ownership/transfer`)은 이미 담당 무관**이라
    "옮기는 건 되는데 처음 지정하는 건 막히는" 비대칭이었다. 게다가 화면(업체 지정 팝업)은 전 업체를
    보여줘서 고르고 나서야 403 이 나는 막다른 길이었다.
-   ★ 이 함수는 **레거시 시트 전체 소유 펼치기(expand) 전용**으로만 남는다 — 그쪽은 화면 창구가 없는
-     레거시 정리 경로라 종전 스코프를 유지한다(서비스도 staffName 으로 이중 게이트). */
-async function _ownershipExpandAllowed(req, advertiserId) {
-  if (_role(req) !== 'staff') return true;   // master/admin — 전체 허용(기존 시맨틱)
-  return svc.staffOwnsAdvertiser({ advertiserId, staffName: (req.admin && req.admin.name) || '' });
-}
+   (담당 게이트를 쓰던 레거시 시트 전체 소유 펼치기 expand 와 _ownershipExpandAllowed 는 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인).) */
 router.post('/ownership', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
@@ -992,24 +987,7 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
-// ── 시트 전체 소유 → 작업(탭) 단위 펼치기 (사용자 확정 2026-08-23 — 업체 지정은 작업 단위 하나).
-//   ★ 미리보기 기본(confirm !== true 면 쓰기 0) · staff 는 자기 담당(inad_pm) 업체만(서비스와 이중 게이트).
-router.post('/ownership/expand', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { advertiserId, sheetId, confirm } = req.body || {};
-    if (advertiserId && !(await _ownershipExpandAllowed(req, advertiserId))) {
-      return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 변경할 수 없습니다.' });
-    }
-    const staffName = _role(req) === 'staff' ? String((req.admin && req.admin.name) || '').trim() : null;
-    if (_role(req) === 'staff' && !staffName) {
-      return res.status(403).json({ ok: false, error: '로그인 정보에 담당자명이 없습니다.' });
-    }
-    res.json(await svc.expandSheetOwnerships({
-      advertiserId: advertiserId || null, sheetId: sheetId || null,
-      confirm: confirm === true, by: _by(req), staffName,
-    }));
-  } catch (err) { next(err); }
-});
+// (POST /ownership/expand — 시트 전체 소유 펼치기는 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인).)
 
 // ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ 내부 담당자(master/admin/staff):
 //    사용자 확정(2026-08)으로 AE 도 업체 간 재배치를 한다(광고주는 차단). 대상 검증은 서비스가

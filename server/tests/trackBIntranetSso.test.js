@@ -6,7 +6,7 @@
  *      실패/연결불가/입력누락 = fail-closed. 공유키 없음(비밀번호 결속).
  *      ★ admin 승격 토큰도 via:'intranet' 격리 유지(/api/trackb/* 전용 — 1.5e).
  *   2. createAdvertiserScoped — staff는 inad_pm=자기 로그인명 강제(타 AE 명의 차단)·중복 409.
- *   3. staffOwnsAdvertiser — inad_pm TRIM 일치만 허용(폴더 링크 마스킹·펼치기 게이트).
+ *   (3. staffOwnsAdvertiser — 제거 (결정 186 29번 — 2026-09-28 expandSheetOwnerships·staffOwnsAdvertiser 제거, 옛 시트 전체 소유 0건))
  *   3.5 업체 지정·해제는 담당 무관(2026-08-24) — 게이트 2종 부재를 고정한다.
  *   4. scopedActiveTabs forMapping — staff만 전체 개방, advertiser는 무시(스코프 유지 = 교차열람 차단).
  * 실행: node tests/trackBIntranetSso.test.js
@@ -325,12 +325,7 @@ async function run() {
   assert.equal(lr.success, true, '2.8g: 이전 플래그 ON + 계정 0개여도 링크로 입장');
   console.log('  2.8 loginByLinkToken — 활성 링크 무로그인·무효/종료/빈값 거부 ✓');
 
-  // ═══ 3. staffOwnsAdvertiser ═══
-  assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '김수만' }), true, '3a: TRIM 일치 허용');
-  assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_other', staffName: '김수만' }), false, '3b: 타 AE 업체 거부');
-  assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_none', staffName: '김수만' }), false, '3c: 없는 업체 거부');
-  assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '' }), false, '3d: 무명 거부');
-  console.log('  3. staffOwnsAdvertiser — 자기 담당만 허용(fail-closed) ✓');
+  // (3. staffOwnsAdvertiser 단위 검사는 함수 제거로 삭제 (결정 186 29번 — 2026-09-28 expandSheetOwnerships·staffOwnsAdvertiser 제거, 옛 시트 전체 소유 0건))
 
   /* ═══ 3.5 업체 지정·해제는 담당(inad_pm) 무관 — 게이트 2종이 **없다**(사용자 확정 2026-08-24) ═══
      종전: staff 는 ㉮ 자기 담당 업체에만 ㉯ 남이 안 쓰는 시트에만 지정할 수 있었다.
@@ -354,8 +349,6 @@ async function run() {
     for (const decl of ["router.post('/ownership',", "router.delete('/ownership',"]) {
       assert.ok(/authMiddleware, internalMiddleware/.test(grabRoute(decl)), '3.5e: 내부인 게이트는 그대로 — ' + decl);
     }
-    // ★ 레거시 시트 전체 소유 펼치기(expand)는 종전 스코프 유지(화면 창구 없는 정리 경로).
-    assert.ok(/_ownershipExpandAllowed/.test(grabRoute("router.post('/ownership/expand',")), '3.5f: 펼치기는 담당 게이트 유지');
     console.log('  3.5 업체 지정·해제 — 담당 무관(게이트 2종 부재) · 광고주 차단 유지 ✓');
   }
 
