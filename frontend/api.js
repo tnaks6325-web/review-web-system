@@ -297,7 +297,6 @@ const _ACTION_MAP = {
   'smartBuildStop':        { method: 'POST', path: '/api/admin/smart-build/stop' },
 
   // ★ DB 전체 재구축 (초기화 → 탭목록 재등록 → 스마트빌드)
-  'dbRebuild':             { method: 'POST', path: '/api/admin/db-rebuild' },
 
   // ★ 모집공고(캠페인) 시스템
   'campaignList':          { method: 'GET',  path: '/api/campaign/list' },
