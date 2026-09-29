@@ -2356,18 +2356,7 @@ router.post('/review-inspect/reinspect', authMiddleware, adminOrMasterMiddleware
   }
 });
 
-/* 배치 스윕 수동 실행 — 과거분 따라잡기를 관리자가 당길 수 있게(master/admin) */
-router.post('/review-inspect/sweep', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
-  try {
-    const { withJobLock } = require('../utils/jobLock');
-    const limit = Math.min(Number((req.body || {}).limit) || 20, 100);
-    const r = await withJobLock('review_inspect_sweep', () => _inspectSvc.runInspectSweep({ limit }),
-      { onBusy: () => ({ busy: true }) });
-    res.json({ ok: true, ...(r || {}) });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: '스윕 실행에 실패했습니다.' });
-  }
-});
+/* (POST /review-inspect/sweep — 수동 스윕, 호출 화면 0·cron 과 [♻ 재검수]가 대신 → 2026-09-29 제거 · 결정 186 68번) */
 
 /* ══════════════════════════════════════════════════════════════
    C/S 문의창구 — 리뷰웹시스템[3버전] 상단탭
