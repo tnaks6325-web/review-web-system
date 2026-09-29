@@ -171,11 +171,7 @@ async function run() {
     ok('★ 이름에 슬래시가 섞여도 파일명이 깨지지 않는다',
       !/[\/\\:*?"<>|]/.test(drive.generateReviewFileName('김/석:진', 2, 'image/png')));
   }
-  {
-    const LINK = srv('src/services/reviewFileLink.service.js');
-    ok('★★ 이름↔행 매칭이 수취인·주문자 **둘 다** 후보로 쓴다(수취인 파일명이 매칭된다)',
-      /addRow\(r\.reviewer_name, r\); addRow\(r\.recipient_name, r\);/.test(LINK));
-  }
+  /* (폴더 백필 헬퍼 reviewFileLink.service 는 「리뷰 캡처 정리」 창과 함께 결정 186 72번에서 제거) */
 
   console.log('\n[G] 해석 1순위(장부의 수취인)가 실제로 채워지는 전제');
   {

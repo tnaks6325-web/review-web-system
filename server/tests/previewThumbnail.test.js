@@ -101,8 +101,8 @@ ok('④ 리뷰어 중복 안내 목록(34×44)', /DriveThumb\.attrs\(it\.reviewF
 ok('⑤ 리뷰어 중복 경고 카드(44×58)', /DriveThumb\.attrs\(d\.fileId, 400, _du\)/.test(SA));
 ok('⑥ C/S 교체요청 카드(132×132)', /DriveThumb\.attrs\(fileId, 400, u\)/.test(CS));
 ok('⑦ 리뷰 보고 페이지 그리드(150px)', /DriveThumb\.attrs\(im\.id, 400, IMG\(im\.id\)\)/.test(RP));
-ok('⑧ 캡처 정리 인라인 펼침(440px) — 원본 우선 순서를 뒤집었다',
-  /DriveThumb\.attrs\(id, 800, proxy\)/.test(IA));
+ok('⑧ (옛 대시보드 「리뷰 캡처 정리」 인라인 펼침은 결정 186 72번에서 창째 제거 — 소비처 없음)',
+  !/DriveThumb/.test(IA));
 
 console.log('\nC-2) 원본 유지 자리 (완화 금지)');
 ok('★ 작업보드 크게 보기 팝업은 원본 프록시', (() => {
@@ -136,9 +136,9 @@ console.log('\nD) 배선 — 스크립트 태그 · 모듈 부재 시 원본으�
     return s.indexOf('<script src="js/drive-thumb.js"></script>') > s.indexOf('<script src="api.js"></script>');
   }));
 }
-ok('★ 모듈이 없으면 원본으로 접는다 — 소비처 6곳 모두 window.DriveThumb 를 확인한다',
+ok('★ 모듈이 없으면 원본으로 접는다 — 소비처 5곳 모두 window.DriveThumb 를 확인한다',
   (SA.match(/window\.DriveThumb \?/g) || []).length === 2
-  && /window\.DriveThumb \?/.test(CS) && /window\.DriveThumb\s*$|window\.DriveThumb\r?\n/.test(IA + '\n')
+  && /window\.DriveThumb \?/.test(CS)
   && /window\.DriveThumb \?/.test(RP) && /window\.DriveThumb \? DriveThumb\.url\(fileId, 400\)/.test(IX)
   && /window\.DriveThumb \? DriveThumb\.attrs\(id, px, full\)/.test(WD));
 
