@@ -572,10 +572,6 @@ body{ letter-spacing:-.01em; }
             <i class="fas fa-external-link-alt"></i>
             <span>리뷰제출</span>
           </button>
-          <button class="btn-header-sq btn-header-mirror" onclick="openRawMirror()" title="구글시트 RAW 미러 — 전체 미러링 실행 + 시트별 데이터 뷰어 (자동 로그인)">
-            <i class="fas fa-database"></i>
-            <span>RAW 미러</span>
-          </button>
           <button class="btn-header-sq btn-header-mirror" onclick="openThrottleMonitor()" title="구글 시트 API 45/분 쿼터 실시간 모니터 — 어디서 얼마나 쓰는지 + 잔량 (자동 로그인)">
             <i class="fas fa-gauge-high"></i>
             <span>시트API 모니터</span>
@@ -1325,25 +1321,6 @@ body{ letter-spacing:-.01em; }
           </button>
         </div>
         <div id="unrecogListWrap" style="font-size:.82rem;color:var(--t2)">
-          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
-        </div>
-
-        <!-- 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) -->
-        <div class="admin-section-header" style="margin-top:28px">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-map-signs" style="color:#1D4ED8;margin-right:6px"></i>컬럼매핑 현황
-          </span>
-          <div style="display:flex;gap:6px;margin-left:auto">
-            <button class="btn-sm" onclick="loadMappingCoverage()" style="font-size:.78rem">
-              <i class="fas fa-sync-alt"></i> 새로고침
-            </button>
-          </div>
-        </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
-          활성 탭별로 제출/입금 등 컬럼 위치가 DB에 기록돼 있는지, 시트 구조 변경으로 기록과 어긋난 탭(드리프트 ⚠)이 있는지 보여줍니다.
-          드리프트 탭은 <a href="raw-mirror.html" target="_blank" style="color:#1D4ED8;text-decoration:underline">RAW 미러 › 컬럼 매핑</a>에서 바로잡으세요.
-        </p>
-        <div id="mappingCoverageWrap" style="font-size:.82rem;color:var(--t2)">
           <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
         </div>
 

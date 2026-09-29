@@ -869,24 +869,6 @@ function getAdminSessionRemaining() {
 
 /* (업무포털 새창 openWorkPortal 은 portal.html 과 함께 2026-09-28 제거 — 결정 186 45번.) */
 
-/* ── 구글시트 RAW 미러 페이지 열기 (자동 로그인 핸드오프) ── */
-function openRawMirror() {
-  const token = sessionStorage.getItem("admin_token") || "";
-  if (!token || !isAdminLoggedIn()) {
-    showToast("관리자 로그인이 필요합니다.", "warning");
-    return;
-  }
-  try {
-    localStorage.setItem("raw_sso", JSON.stringify({
-      token,
-      name: getAdminName(),
-      role: getAdminRole(),
-      ts: Date.now()
-    }));
-  } catch (e) { /* localStorage 불가 시에도 페이지 자체 처리로 폴백 */ }
-  window.open("raw-mirror.html", "_blank");
-}
-
 /* ── Track B 리뷰웹시스템[3버전](그림자) 열기 (자동 로그인 핸드오프) ── */
 function openWorkdesk() {
   const token = sessionStorage.getItem("admin_token") || "";
@@ -1336,7 +1318,7 @@ function switchAdminTab(tabName) {
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadAiSamples(); } catch(_){} try { loadMyNickname(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} try { loadWorktableTemplate(); } catch(_){} try { loadGateCriteria(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadAiSamples(); } catch(_){} try { loadMyNickname(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} try { loadWorktableTemplate(); } catch(_){} try { loadGateCriteria(); } catch(_){} }
   if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
@@ -11254,56 +11236,6 @@ async function removeCampEditor(phone8) {
     showToast('삭제되었습니다.');
     loadCampEditors();
   } catch (e) { showToast('❌ ' + e.message, true); }
-}
-
-/* ── 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) ──
-   활성 탭별 매핑 보유율 + 출처(자동기록/수동) + 드리프트(기록≠현재 시트 → 키워드 폴백 중) 목록 */
-async function loadMappingCoverage() {
-  const wrap = document.getElementById('mappingCoverageWrap');
-  if (!wrap) return;
-  wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
-  try {
-    const data = await gasGet({ action: 'mappingCoverage' });
-    if (!data.ok) {
-      wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error || '조회 실패')}</div>`;
-      return;
-    }
-    const s = data.stats || {};
-    const tabs = data.tabs || [];
-    const drifting = tabs.filter(t => (t.drift || []).length > 0);
-
-    const chip = (label, val, color) =>
-      `<div style="flex:1 1 110px;min-width:100px;border:1px solid #E5E7EB;border-radius:8px;padding:8px 10px;background:var(--bg2,#fff)">
-        <div style="font-size:.68rem;color:var(--t3)">${label}</div>
-        <div style="font-size:1.05rem;font-weight:700;color:${color || 'var(--t1)'}">${val}</div>
-      </div>`;
-
-    let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">`
-      + chip('활성 탭', s.total ?? 0)
-      + chip('매핑 기록됨', `${s.mapped ?? 0} (자동 ${s.byProvenance?.auto ?? 0} · 수동 ${s.byProvenance?.manual ?? 0})`, '#0ca678')
-      + chip('미기록', s.unmapped ?? 0, (s.unmapped ? '#D97706' : undefined))
-      + chip('gid 없음(기록 불가)', s.noGid ?? 0, (s.noGid ? '#6B7280' : undefined))
-      + chip('⚠ 드리프트', s.drifting ?? 0, (s.drifting ? '#DC2626' : '#0ca678'))
-      + `</div>`;
-
-    if (drifting.length === 0) {
-      html += '<div style="padding:8px 4px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#12b886"></i> 드리프트 없음 — 모든 기록이 현재 시트 구조와 일치합니다.</div>';
-    } else {
-      html += `<div style="font-size:.75rem;color:var(--t3);margin:4px 0 6px">⚠ 드리프트 탭 ${drifting.length}건 — 시트 구조가 기록과 어긋나 해당 항목은 임시(키워드) 방식으로 감지 중. 컬럼 매핑에서 재확인하세요.</div>`;
-      drifting.forEach(t => {
-        const fields = (t.drift || []).map(d => `${escHtml(d.field)}(${escHtml(d.reason)})`).join(', ');
-        const mapUrl = `raw-mirror.html?sheetId=${encodeURIComponent(t.sheetId || '')}&gid=${encodeURIComponent(t.tabGid || '')}`;
-        html += `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #FDE68A;background:#FFFBEB;border-radius:8px;margin-bottom:6px;flex-wrap:wrap">
-          <span style="font-weight:600">${escHtml(t.campaignName || '')} / ${escHtml(t.tabName || '')}</span>
-          <span style="font-size:.72rem;color:#92400E">${fields}</span>
-          <a href="${mapUrl}" target="_blank" style="margin-left:auto;font-size:.74rem;color:#1D4ED8;text-decoration:underline;white-space:nowrap">컬럼 매핑 열기</a>
-        </div>`;
-      });
-    }
-    wrap.innerHTML = html;
-  } catch (e) {
-    wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message || '조회 실패')}</div>`;
-  }
 }
 
 async function loadUnrecognizedTabs() {
