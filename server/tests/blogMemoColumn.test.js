@@ -236,7 +236,7 @@ await ta('★ 성공 시 장부를 다시 만든다(화면 반영)', async () =>
 });
 t('★★ 상태 칸·memo 칸이 같은 쓰기 함수를 쓴다(쓰기 규율 사본 금지)', () => {
   const writerStart = statusSrc.indexOf('async function _writeCellAndRebuild');
-  const writerEnd = statusSrc.indexOf('const REVIEW_SUBMIT_TIME_BACKFILL_DAYS', writerStart);
+  const writerEnd = statusSrc.indexOf("/* (8/10 이전 'O' 표기", writerStart);   // (옛 끝 표지 REVIEW_SUBMIT_TIME_BACKFILL_DAYS 는 결정 186 63번에서 제거)
   assert.ok(writerStart >= 0 && writerEnd > writerStart, 'common writer not found');
   const writer = statusSrc.slice(writerStart, writerEnd);
   const n = (writer.match(/UPDATE campaign_participants/g) || []).length;

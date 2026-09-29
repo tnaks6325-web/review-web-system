@@ -400,17 +400,6 @@ function _aisamplesHtml() {
         <div class="as-sub">
           <div class="as-subt">🎯 오제출 자동분류 정확도 <span>— 리뷰검수에서 사람이 수동 분류한 결과(정답)와 AI의 관측 판단을 대조합니다. 일치율이 충분히 오르면 자동 이동(auto) 전환을 검토하세요</span></div>
           <div id="asRtStats" style="font-size:.78rem;color:#6B7280;margin-top:6px;line-height:1.6">불러오는 중…</div>
-        </div>
-        <div class="as-sub">
-          <div class="as-subt">🧹 오제출 소급 정리 <span>— 과거 제출분에서 잘못 들어간 캡처(리뷰 칸의 영수증 등)를 찾아 올바른 폴더로 이동합니다. <b>미리보기 → 실행</b> 2단계(자동으로 옮기지 않습니다)</span></div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 0">
-            <select id="asRtTab" style="flex:1;min-width:220px;max-width:420px;padding:7px 9px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem;outline:none">
-              <option value="">탭 목록 불러오는 중…</option>
-            </select>
-            <button onclick="previewRouteSweep()" style="padding:7px 14px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.76rem;font-weight:700;cursor:pointer">🔍 미리보기</button>
-            <button id="asRtRunBtn" onclick="runRouteSweep()" style="display:none;padding:7px 14px;background:#B91C1C;color:#fff;border:none;border-radius:7px;font-size:.76rem;font-weight:700;cursor:pointer">▶ 이동 실행</button>
-          </div>
-          <div id="asRtResult" style="font-size:.76rem;color:#6B7280;margin-top:8px;line-height:1.6"></div>
         </div>`;
 }
 
@@ -571,7 +560,6 @@ async function loadAiSamples() {
       if (rt) rt.innerHTML = '<div class="as-smpload">서버가 아직 자동 분류 예시를 지원하지 않습니다(배포 대기).</div>';
     }
     _smpBadge(j);
-    _rtLoadTabs();   // 소급 정리 탭 목록(지연·fail-soft)
     _rtLoadStats();  // 자동분류 정확도(지연·fail-soft — 구백엔드면 안내만)
   } catch (e) {
     var msg = '<div class="as-smpload">불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
@@ -751,103 +739,6 @@ async function clearAiSample(kind, key, idx) {
     loadAiSamples();
   } catch (e) {
     showToast('❌ 제거 실패: ' + e.message, true);
-  }
-}
-
-/* ── 오제출 소급 정리 (자동 분류 스윕 · 미리보기 → 실행 2단계) ─────────────
-   서버 판정·이동은 /api/trackb/file-route/sweep 하나(dryRun 기본 true).
-   ★ 탭 선택은 캐시 배열 인덱스만 전달(onclick 문자열에 시트발 문자열 보간 금지). */
-var _rtTabs = null;
-var _rtLastPreview = null;   // { sheetId, tabName, plans } — 실행은 미리보기와 같은 탭만
-
-async function _rtLoadTabs() {
-  var sel = document.getElementById('asRtTab');
-  if (!sel || _rtTabs) { if (sel && _rtTabs) _rtRenderTabs(); return; }
-  try {
-    var r = await fetch(_apiBase() + '/api/trackb/tabs?limit=800', { headers: _headers() });
-    var j = await r.json();
-    if (!j || j.ok === false || !Array.isArray(j.tabs)) throw new Error((j && j.error) || 'HTTP ' + r.status);
-    _rtTabs = j.tabs;
-    _rtRenderTabs();
-  } catch (e) {
-    sel.innerHTML = '<option value="">탭 목록을 불러오지 못했습니다</option>';
-  }
-}
-function _rtRenderTabs() {
-  var sel = document.getElementById('asRtTab');
-  if (!sel) return;
-  var opts = ['<option value="">— 정리할 작업(탭) 선택 —</option>'];
-  for (var i = 0; i < _rtTabs.length; i++) {
-    var t = _rtTabs[i];
-    opts.push('<option value="' + i + '">' + escHtml((t.spreadsheetTitle || t.sheetId || '') + ' › ' + (t.tabName || '')) + '</option>');
-  }
-  sel.innerHTML = opts.join('');
-}
-function _rtPicked() {
-  var sel = document.getElementById('asRtTab');
-  var i = sel ? parseInt(sel.value, 10) : NaN;
-  return (_rtTabs && !isNaN(i) && _rtTabs[i]) ? _rtTabs[i] : null;
-}
-async function previewRouteSweep() {
-  var t = _rtPicked();
-  var out = document.getElementById('asRtResult');
-  var runBtn = document.getElementById('asRtRunBtn');
-  if (runBtn) runBtn.style.display = 'none';
-  _rtLastPreview = null;
-  if (!t) { showToast('정리할 작업(탭)을 먼저 선택해주세요.', true); return; }
-  if (out) out.textContent = '검사 중… (파일을 내려받아 AI로 판정합니다 — 최대 1~2분)';
-  try {
-    var r = await fetch(_apiBase() + '/api/trackb/file-route/sweep', {
-      method: 'POST', headers: _headers(),
-      body: JSON.stringify({ sheetId: t.sheetId, tabName: t.tabName, dryRun: true, limit: 40 }),
-    });
-    var j = await r.json();
-    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
-    var plans = j.plans || [];
-    if (!plans.length) {
-      if (out) out.innerHTML = '검사 ' + j.scanned + '건 — 옮길 파일이 없습니다.'
-        + (!j.hasRouteSamples ? ' <span style="color:#B45309">(구매캡처·구매확정 예시 2장이 등록되지 않아 구매캡처 이동은 검사에서 제외됐습니다)</span>' : '');
-      return;
-    }
-    _rtLastPreview = { sheetId: t.sheetId, tabName: t.tabName, plans: plans };
-    var rows = plans.map(function (p) {
-      return '<div style="padding:4px 0;border-bottom:1px solid #F3F4F6">'
-        + (p.rowIndex != null ? p.rowIndex + '행 · ' : '') + escHtml(p.reviewerName || '') + ' — '
-        + '<b>' + escHtml(p.fromSlot) + ' → ' + escHtml(p.toSlot) + '</b>'
-        + ' (AI ' + Math.round((p.confidence || 0) * 100) + '%)'
-        + (p.duplicate ? ' <span style="color:#B91C1C;font-weight:700">중복 — 휴지통 대상</span>' : '')
-        + '</div>';
-    }).join('');
-    if (out) out.innerHTML = '검사 ' + j.scanned + '건 중 <b>' + plans.length + '건</b>이 이동 대상입니다:' + rows
-      + '<div style="color:#B45309;margin-top:6px">아직 아무것도 옮기지 않았습니다 — [▶ 이동 실행]을 눌러야 적용됩니다.</div>';
-    if (runBtn) runBtn.style.display = '';
-  } catch (e) {
-    if (out) out.innerHTML = '<span style="color:#B91C1C">검사 실패: ' + escHtml(e.message) + '</span>';
-  }
-}
-async function runRouteSweep() {
-  var t = _rtPicked();
-  var out = document.getElementById('asRtResult');
-  if (!t || !_rtLastPreview || _rtLastPreview.sheetId !== t.sheetId || _rtLastPreview.tabName !== t.tabName) {
-    showToast('먼저 [🔍 미리보기]로 대상을 확인해주세요.', true); return;
-  }
-  if (!confirm('미리보기에서 확인한 ' + _rtLastPreview.plans.length + '건을 실제로 이동할까요?\n\n· 파일이 올바른 폴더로 이동합니다(원장 슬롯도 함께 정정).\n· 중복 표시 건은 휴지통으로 갑니다(30일 내 복구 가능).\n· 각 건은 로그에 남고, 이동 건은 [원위치] 버튼으로 되돌릴 수 있습니다.')) return;
-  if (out) out.textContent = '이동 중…';
-  try {
-    var r = await fetch(_apiBase() + '/api/trackb/file-route/sweep', {
-      method: 'POST', headers: _headers(),
-      body: JSON.stringify({ sheetId: t.sheetId, tabName: t.tabName, dryRun: false, limit: 40 }),
-    });
-    var j = await r.json();
-    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
-    if (out) out.innerHTML = '✅ 완료 — 이동 <b>' + (j.moved || 0) + '</b>건 · 휴지통 <b>' + (j.trashed || 0) + '</b>건'
-      + (j.failed ? ' · <span style="color:#B91C1C">실패 ' + j.failed + '건</span>' : '')
-      + '<br>결과는 리뷰웹시스템[3버전] 「로그」 탭에서 건별로 확인·되돌리기 할 수 있습니다.';
-    var runBtn = document.getElementById('asRtRunBtn');
-    if (runBtn) runBtn.style.display = 'none';
-    _rtLastPreview = null;
-  } catch (e) {
-    if (out) out.innerHTML = '<span style="color:#B91C1C">실행 실패: ' + escHtml(e.message) + '</span>';
   }
 }
 
@@ -2933,8 +2824,6 @@ async function saveGateCriteria() {
   window._smpZoomStep = _smpZoomStep;
   window._smpZoomClose = _smpZoomClose;
   window._smpZoomDel = _smpZoomDel;
-  window.previewRouteSweep = previewRouteSweep;   // 오제출 소급 정리(미리보기)
-  window.runRouteSweep = runRouteSweep;           // 오제출 소급 정리(실행)
   window.loadReviewTypeCleanup = loadReviewTypeCleanup;
   window.reviewTypeCleanupRun = reviewTypeCleanupRun;
   window.loadManagerCleanup = loadManagerCleanup;

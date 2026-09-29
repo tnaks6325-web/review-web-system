@@ -47,8 +47,8 @@ ok('차단: GET /admin/:id/applications (신청자 명단)',
   runAuth(campTok, 'GET', '/api/campaign', '/admin/abc123/applications').status === 403);
 ok('차단: POST /api/admin/campaign-editors (허용명단 자기증식 불가)',
   runAuth(campTok, 'POST', '/api/admin', '/campaign-editors').status === 403);
-ok('차단: 타 관리자 API 전반(/api/admin/db-rebuild)',
-  runAuth(campTok, 'POST', '/api/admin', '/db-rebuild').status === 403);
+ok('차단: 타 관리자 API 전반(/api/admin/smart-build/stop)',
+  runAuth(campTok, 'POST', '/api/admin', '/smart-build/stop').status === 403);
 ok('차단: Track B(/api/trackb/*)',
   runAuth(campTok, 'GET', '/api/trackb', '/overview').status === 403);
 ok('차단: 주문 원장(/api/order/*)',

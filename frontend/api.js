@@ -229,13 +229,8 @@ const _ACTION_MAP = {
   'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
-  'relocateOrphanReviews': { method: 'POST', path: '/api/drive/relocate-orphan-reviews' },
-  'reviewFolderBackfill': { method: 'POST', path: '/api/drive/review-folder-backfill' },
   'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
   'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
-  'folderAudit':           { method: 'POST', path: '/api/drive/folder-audit' },
-  'shareReviewFolder':     { method: 'POST', path: '/api/drive/share-review-folder' },
-  'reviewReportLink':      { method: 'POST', path: '/api/drive/report-link' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
@@ -302,7 +297,6 @@ const _ACTION_MAP = {
   'smartBuildStop':        { method: 'POST', path: '/api/admin/smart-build/stop' },
 
   // ★ DB 전체 재구축 (초기화 → 탭목록 재등록 → 스마트빌드)
-  'dbRebuild':             { method: 'POST', path: '/api/admin/db-rebuild' },
 
   // ★ 모집공고(캠페인) 시스템
   'campaignList':          { method: 'GET',  path: '/api/campaign/list' },

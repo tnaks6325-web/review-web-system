@@ -557,15 +557,7 @@ router.post('/sheet-sync/quota-fix', authMiddleware, adminOrMasterMiddleware, as
 });
 
 /* 탈 구글시트 전환 화면(W4 · C)은 전환 완료(150개 중 149개)로 2026-09-28 제거(결정 186 2번).
-   ★ 42P01(096 미적용)은 not_ready 로 말한다 — /api/trackb/* 는 마스킹 대상이라 원인이 안 보인다.
-   아래 review-submit-time-backfill 이 아직 쓴다. */
-function _cutoverErr(err, res, next) {
-  if (err && err.code === '42P01') {
-    return res.json({ ok: false, code: 'not_ready',
-      error: '탈시트 준비 전입니다(migration 096 미적용) — 배포 완료 후 다시 시도해주세요.' });
-  }
-  return next(err);
-}
+   (review-submit-time-backfill·_cutoverErr 는 결정 186 63번에서 제거.) */
 
 /* ── 구글시트 주소로 작업 가져오기 (탈 구글시트 잔재 처리) — adminOrMaster ──
    preview : 시트를 1회 읽어 "무엇을 가져올지"만 돌려준다(**DB 쓰기 0**)
@@ -575,19 +567,6 @@ function _cutoverErr(err, res, next) {
    ★★ **adminOrMaster 전용** — 이 경로는 접수에 이은 두 번째 등록 창구다(복원 성격 예외).
      AE 담당자에게 열면 담당 범위 밖의 시트를 시스템 작업으로 만들 수 있게 된다.
    ★ 이 경로는 재기준하지 않는다 — `/api/trackb/*` 라 관리자 토큰·인트라넷 SSO 양쪽이 그대로 닿는다. */
-// 최근 5일간 리뷰 파일 원장이 있고, 현재 작업표에 과거 표기('O')가 남은 무시트 행만
-// 업로드 시각으로 바꾼다. 기본은 dry-run이며 master가 확인 문구를 명시해야만 실제 변경한다.
-router.post('/sheetless/review-submit-time-backfill', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const dryRun = req.body?.dryRun !== false;
-    if (!dryRun && req.body?.confirm !== 'replace-o-with-submission-time') {
-      return res.status(400).json({ ok: false, error: '실제 반영에는 confirm: replace-o-with-submission-time 이 필요합니다.' });
-    }
-    const out = await sheetlessStatus.backfillReviewSubmitTimes({ dryRun, by: _by(req) });
-    res.json(out);
-  } catch (err) { _cutoverErr(err, res, next); }
-});
-
 const sheetImport = require('../services/sheetImport.service');
 function _importErr(err, res, next) {
   if (err instanceof sheetImport.ImportError) {
@@ -1425,70 +1404,7 @@ router.post('/workdesk/assign-unslotted-order', authMiddleware, internalMiddlewa
    서비스(`rowNumbering.service`)는 그 자동 경로가 쓰므로 그대로 있다.
    옛 라우트: POST /worktable/renumber · GET /worktable/renumber-scan · POST /worktable/renumber-all */
 
-// 테스트 자동제출 정리 — 테스트 전용 식별자가 모두 일치하는 경우에만 영구 제거한다.
-// 일반 주문은 이 경로로 절대 삭제할 수 없으며, 운영 주문 삭제는 위 order-delete만 사용한다.
-router.post('/workdesk/test-auto-delete-cleanup', authMiddleware, async (req, res, next) => {
-  const TEST_CAMPAIGN_ID = 'camp_4c981df9de49';
-  const TEST_NAME = '테스트자동삭제';
-  const TEST_PHONE8 = '00000000';
-  const TEST_ORDER_NUM = 'TEST-AUTO-DELETE-20260815';
-  try {
-    const { rowId, confirm } = req.body || {};
-    if (!rowId || confirm !== true) {
-      return res.status(400).json({ ok: false, error: '테스트 행 식별자와 확인값이 필요합니다.' });
-    }
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const { rows: found } = await client.query(
-        `SELECT cp.id AS participant_id, cp.order_submission_id, os.campaign_application_id
-           FROM campaign_participants cp
-           JOIN order_submissions os ON os.id = cp.order_submission_id
-          WHERE cp.id = $1 AND cp.deleted_at IS NULL
-            AND cp.reviewer_name = $2 AND cp.phone8 = $3
-            AND os.order_num = $4 AND os.deleted_at IS NULL
-          FOR UPDATE OF cp, os`,
-        [rowId, TEST_NAME, TEST_PHONE8, TEST_ORDER_NUM]
-      );
-      if (found.length !== 1) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ ok: false, error: '삭제 가능한 자동 테스트 기록이 아닙니다.' });
-      }
-      const target = found[0];
-      const { rows: apps } = await client.query(
-        `DELETE FROM campaign_applications
-          WHERE campaign_id = $1
-            AND (id = $2 OR order_submission_id = $3::uuid)
-            AND phone8 = $4
-          RETURNING id`,
-        [TEST_CAMPAIGN_ID, target.campaign_application_id || -1, target.order_submission_id, TEST_PHONE8]
-      );
-      const participants = await client.query(
-        'DELETE FROM campaign_participants WHERE id = $1 AND order_submission_id = $2::uuid',
-        [rowId, target.order_submission_id]
-      );
-      await client.query(
-        `DELETE FROM sync_queue WHERE payload->>'orderSubmissionId' = $1`,
-        [String(target.order_submission_id)]
-      );
-      await client.query('DELETE FROM sheet_row_claims WHERE order_id = $1::uuid', [target.order_submission_id]);
-      const orders = await client.query(
-        `DELETE FROM order_submissions
-          WHERE id = $1::uuid AND order_num = $2 AND deleted_at IS NULL`,
-        [target.order_submission_id, TEST_ORDER_NUM]
-      );
-      const reviewers = await client.query(
-        'DELETE FROM reviewers WHERE name = $1 AND phone8 = $2',
-        [TEST_NAME, TEST_PHONE8]
-      );
-      await client.query('COMMIT');
-      res.json({ ok: true, deleted: { application: apps.rowCount, participant: participants.rowCount, order: orders.rowCount, reviewer: reviewers.rowCount } });
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-      throw err;
-    } finally { client.release(); }
-  } catch (err) { next(err); }
-});
+// (POST /workdesk/test-auto-delete-cleanup — 8/15 자동 테스트 기록 전용 정리, 운영에 대상 없음 → 2026-09-28 제거 · 결정 186 65번)
 /* ── 작업 로그 — 이 작업에 무슨 일이 있었나 (2026-08-23 사용자 확정 ⑥-㉮ 6종 전부) ──
    ★★ **읽기 전용 · 신규 저장소 0** — 이미 쌓이는 기록을 한 타임라인으로 모으기만 한다.
    ★ 게이트는 편집 이력과 **같은 `_ensureEditScope`**(master/admin 전체 · staff 담당 탭 ·
@@ -2410,25 +2326,7 @@ router.post('/review-inspect/samples', authMiddleware, adminOrMasterMiddleware, 
   }
 });
 
-/* ── 제출 이미지 자동 분류(파일 라우팅) — 소급 정리 스윕 ─────────────────────
-   과거 오제출(리뷰 칸의 영수증 등)을 탭 단위로 찾아 [미리보기 → 실행] 2단계로 정리한다
-   (사용자 확정 2026-08-05 "소급정리 필요"). dryRun 기본 true — 실행은 명시할 때만.
-   ★ adminOrMaster — 파일 이동·휴지통이 걸린 파괴적 작업이라 AE 스코프로 열지 않는다.
-   ★ 건당 Drive 다운로드 1회 + AI 1콜이라 limit 상한(서비스에서 60 캡). */
-router.post('/file-route/sweep', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
-  try {
-    const b = req.body || {};
-    const { sweepTab } = require('../services/fileRoute.service');
-    const out = await sweepTab({
-      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
-      dryRun: b.dryRun !== false,          // 기본 미리보기 — 명시적 false 만 실행
-      limit: b.limit, by: _by(req),
-    });
-    res.status(out.ok ? 200 : 400).json(out);
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || '소급 정리에 실패했습니다.' });
-  }
-});
+/* (POST /file-route/sweep — 오제출 소급 정리, 8/5 이후 실시간 자동 분류로 대체 → 2026-09-29 제거 · 결정 186 67번) */
 
 /* 자동 이동 되돌리기 — capture_routed 알림 1건에서 파일을 원래 슬롯 폴더로 원복(adminOrMaster). */
 router.post('/reviewer-logs/route-revert', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
@@ -2458,18 +2356,7 @@ router.post('/review-inspect/reinspect', authMiddleware, adminOrMasterMiddleware
   }
 });
 
-/* 배치 스윕 수동 실행 — 과거분 따라잡기를 관리자가 당길 수 있게(master/admin) */
-router.post('/review-inspect/sweep', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
-  try {
-    const { withJobLock } = require('../utils/jobLock');
-    const limit = Math.min(Number((req.body || {}).limit) || 20, 100);
-    const r = await withJobLock('review_inspect_sweep', () => _inspectSvc.runInspectSweep({ limit }),
-      { onBusy: () => ({ busy: true }) });
-    res.json({ ok: true, ...(r || {}) });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: '스윕 실행에 실패했습니다.' });
-  }
-});
+/* (POST /review-inspect/sweep — 수동 스윕, 호출 화면 0·cron 과 [♻ 재검수]가 대신 → 2026-09-29 제거 · 결정 186 68번) */
 
 /* ══════════════════════════════════════════════════════════════
    C/S 문의창구 — 리뷰웹시스템[3버전] 상단탭
