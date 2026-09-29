@@ -176,11 +176,7 @@ const fileRoute = require('../src/services/fileRoute.service');
     assert.ok(diag.includes('markRouted({'), '이동 이력 기록(되돌리기 재료)');
     ok('E3: 원장 정합(최종 슬롯·이동 이력·대표 재계산) 배선');
 
-    const fr = read('src/services/fileRoute.service.js');
-    assert.ok(/cashReceiptRequirementsForRows\([\s\S]*subs\.map\(s => \(\{ sheetId, tabName, rowIndex/.test(fr)
-      && /hasReceiptSlot: rowHasReceiptSlot/.test(fr)
-      && /receiptSlotKey: rowReceiptSlotKey/.test(fr),
-      '소급 자동정리도 제출 행의 공고 원본으로 영수증 이동 가능 여부를 판정');
+    // (소급 자동정리 sweepTab 의 행 단위 공고 원본 판정 가드는 스윕 제거(결정 186 67번)와 함께 삭제)
 
     // 샘플 조립 단일화 — diag 에서 loadSamplesFor/loadReceiptSamplesFor 직접 호출 금지
     assert.ok(!/loadSamplesFor\(/.test(diag) && !/loadReceiptSamplesFor\(/.test(diag),
@@ -226,10 +222,9 @@ const fileRoute = require('../src/services/fileRoute.service');
     const tb = read('src/routes/trackB.routes.js');
     assert.ok(tb.includes('routeSampleSettings()'), 'GET samples 에 routeSamples');
     assert.ok(tb.includes("String(b.kind || '') === 'route'"), 'POST kind route 분기');
-    assert.ok(/'\/file-route\/sweep', authMiddleware, adminOrMasterMiddleware/.test(tb), '소급 스윕 = adminOrMaster');
+    assert.ok(!/router\.post\('\/file-route\/sweep'/.test(tb), '소급 스윕은 결정 186 67번에서 제거 — 되살리지 않는다');
     assert.ok(/'\/reviewer-logs\/route-revert', authMiddleware, adminOrMasterMiddleware/.test(tb), '되돌리기 = adminOrMaster');
-    assert.ok(tb.includes('dryRun: b.dryRun !== false'), '스윕 기본 dryRun(명시적 false 만 실행)');
-    ok('E8: trackB 라우트(스윕·되돌리기·route 예시) + 권한·dryRun 기본');
+    ok('E8: trackB 라우트(되돌리기·route 예시) + 권한 · 소급 스윕 부재');
   }
   {
     const mig = read('migrations/091_review_submission_routing.sql');
@@ -248,13 +243,9 @@ const fileRoute = require('../src/services/fileRoute.service');
 
     const as = readFront('js/admin-settings.js');
     assert.ok(as.includes("kind: 'route'") && as.includes('asSmpRoute'), '설정탭 route 예시 슬롯');
-    assert.ok(as.includes('previewRouteSweep') && as.includes('runRouteSweep'), '소급 정리 미리보기→실행');
-    assert.ok(as.includes("dryRun: true") && as.includes("dryRun: false"), '스윕 2단계(dryRun)');
-    assert.ok(as.includes('window.previewRouteSweep = previewRouteSweep'), 'IIFE 밖 노출(onclick 은 window 필수)');
+    assert.ok(!as.includes('previewRouteSweep') && !as.includes('runRouteSweep'), '소급 정리 UI 는 결정 186 67번에서 제거');
     assert.ok(!/route_sample_/.test(as), '프론트에 예시 settingKey 사본 없음(서버 응답 그대로 렌더)');
-    // ★ onclick 에 시트발 문자열 보간 금지 — 탭 선택은 인덱스만
-    assert.ok(as.includes("opts.push('<option value=\"' + i + '\">'"), '탭 옵션 value = 인덱스');
-    ok('E11: 설정탭 — 예시 등록 + 소급 정리 UI(인덱스 전달·사본 금지)');
+    ok('E11: 설정탭 — 예시 등록(사본 금지) · 소급 정리 UI 부재');
 
     const wd = readFront('workdesk.html');
     assert.ok(wd.includes("_LOG_REVERTIBLE = new Set(['capture_routed'])"), '되돌리기 대상 = capture_routed 만');
@@ -267,19 +258,12 @@ const fileRoute = require('../src/services/fileRoute.service');
     const fr = read('src/services/fileRoute.service.js');
     assert.ok(fr.includes('trashFiles') && !/permanentlyDelete|files\.delete\(/.test(fr), '삭제는 휴지통만');
     assert.ok(fr.includes('routed_from_slot IS NULL'), '이미 라우팅된 파일 재라우팅 금지(핑퐁 방지)');
-    assert.ok(fr.includes("slot_key = ANY($3::text[])") && fr.includes("['review', 'receipt', receiptSlotKey]"),
-      '스윕 대상은 review/receipt와 수동 현금영수증 슬롯만');
-    assert.ok(/const toSlot = rd\.toSlot === 'receipt' \? rowReceiptSlotKey : rd\.toSlot/.test(fr),
-      '소급 스윕도 현금영수증 역할을 수동 slot2 원장 key로 바꾼다');
-    assert.ok(/const movedToReceipt = p\.toSlot === p\.receiptSlotKey[\s\S]*receipt: movedToReceipt[\s\S]*reinspectReceiptFile\(\{ fileId: p\.fileId \}\)/.test(fr),
-      '소급 스윕이 현영 칸으로 옮긴 파일도 기존 검수를 무효화하고 receipt 재검수한다');
+    assert.ok(!/async function sweepTab/.test(fr), '소급 스윕 서비스는 결정 186 67번에서 제거');
     assert.ok(/const backTarget = isCashReceiptSlot\([\s\S]{0,260}\) \? 'receipt' : 'review'/.test(fr),
       '수동 slot2 현금영수증의 이동 되돌리기도 현금영수증 폴더로 복귀');
     assert.ok(/backTarget === 'receipt'[\s\S]*WITH restored AS[\s\S]*status = 'pending'[\s\S]*resolution = NULL[\s\S]*reinspectReceiptFile\(\{ fileId \}\)/.test(fr),
       '현영 원위치 복구는 기존 리뷰 검수를 무효화하고 영수증 재검수를 실행');
-    assert.ok(fr.includes('if (dryRun) return'), '스윕 dryRun = 무변경 반환');
-    assert.ok(fr.includes('is_submitted 는 건드리지 않는다'), '스윕이 제출 상태를 뒤집지 않음(문서화된 한계)');
-    ok('E13: fileRoute — 휴지통·핑퐁 방지·dryRun 무변경');
+    ok('E13: fileRoute — 휴지통·핑퐁 방지 · 소급 스윕 부재');
   }
 
   /* ═══ F. 2026-08-05 실측 신고 3건 보완 ═══ */

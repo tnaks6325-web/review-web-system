@@ -2326,25 +2326,7 @@ router.post('/review-inspect/samples', authMiddleware, adminOrMasterMiddleware, 
   }
 });
 
-/* ── 제출 이미지 자동 분류(파일 라우팅) — 소급 정리 스윕 ─────────────────────
-   과거 오제출(리뷰 칸의 영수증 등)을 탭 단위로 찾아 [미리보기 → 실행] 2단계로 정리한다
-   (사용자 확정 2026-08-05 "소급정리 필요"). dryRun 기본 true — 실행은 명시할 때만.
-   ★ adminOrMaster — 파일 이동·휴지통이 걸린 파괴적 작업이라 AE 스코프로 열지 않는다.
-   ★ 건당 Drive 다운로드 1회 + AI 1콜이라 limit 상한(서비스에서 60 캡). */
-router.post('/file-route/sweep', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
-  try {
-    const b = req.body || {};
-    const { sweepTab } = require('../services/fileRoute.service');
-    const out = await sweepTab({
-      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
-      dryRun: b.dryRun !== false,          // 기본 미리보기 — 명시적 false 만 실행
-      limit: b.limit, by: _by(req),
-    });
-    res.status(out.ok ? 200 : 400).json(out);
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || '소급 정리에 실패했습니다.' });
-  }
-});
+/* (POST /file-route/sweep — 오제출 소급 정리, 8/5 이후 실시간 자동 분류로 대체 → 2026-09-29 제거 · 결정 186 67번) */
 
 /* 자동 이동 되돌리기 — capture_routed 알림 1건에서 파일을 원래 슬롯 폴더로 원복(adminOrMaster). */
 router.post('/reviewer-logs/route-revert', authMiddleware, adminOrMasterMiddleware, async (req, res) => {

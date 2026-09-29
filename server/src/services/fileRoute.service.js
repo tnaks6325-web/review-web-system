@@ -12,7 +12,7 @@
  * ★ 전부 fail-soft: 라우팅의 어떤 실패도 업로드·제출을 죽이지 않는다(호출부 try/catch 이중).
  */
 const { logger } = require('../utils/logger');
-const { routeDecision, routeMode, rejectEnabled, routeSlotLabel } = require('../utils/captureRoute');
+const { routeMode, rejectEnabled, routeSlotLabel } = require('../utils/captureRoute');
 
 let _pool;
 function _db() {
@@ -379,170 +379,7 @@ async function _recordRouteMove({ fileId, targetSlot, routedBy, receipt = false,
   );
 }
 
-/* ── 소급 정리 스윕 (과거 오제출 — 사용자 확정 "소급정리 필요") ──────────
- * 그 탭의 기존 제출 원장을 훑어 오제출을 찾아 [미리보기 → 실행] 2단계로 정리한다.
- * 건당 Drive 다운로드 1회 + AI 1콜(캐시 미스 가정)이라 limit 으로 상한(기본 20).
- * ★ 이미 라우팅된 파일(routed_from_slot NOT NULL)은 건너뜀 — 핑퐁 방지.
- * ★ 실행 시에도 이동/휴지통 규칙은 실시간 경로와 동일(전이표·해시 중복만).
- * ★ is_submitted 는 건드리지 않는다(문서화된 한계) — 이동으로 리뷰 캡처가 빈 행은
- *   알림(capture_routed)으로 남아 관리자가 리뷰어에게 재요청한다.
- */
-async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'sweep' } = {}) {
-  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
-  const cap = Math.max(1, Math.min(Number(limit) || 20, 60));
-  const driveService = require('./drive.service');
-  const { verifyCapture } = require('./captureVerify.service');
-  const inspect = require('./reviewInspect.service');
-
-  const ctx = await _tabRouteCtx(sheetId, tabName);
-  if (!ctx.reviewBaseFolderId) {
-    return { ok: false, error: '이 탭에 [리뷰] 폴더가 연결돼 있지 않아 정리할 수 없습니다.' };
-  }
-  let expectedChannel = null;
-  try { expectedChannel = (await inspect.loadTabExpectations({ sheetId, tabName })).expectedChannel; } catch (_) {}
-  const samplesBySlot = {
-    review: await inspect.submissionSamples({ expectedChannel, slotKey: 'review' }).catch(() => []),
-    receipt: await inspect.submissionSamples({ expectedChannel, slotKey: 'receipt' }).catch(() => []),
-  };
-  const routeKinds = new Set((await inspect.loadRouteSamples().catch(() => [])).map(s => s.kind));
-  const hasRouteSamples = routeKinds.has('order_capture') && routeKinds.has('purchase_confirm');
-  const receiptSlotKey = (() => {
-    try {
-      const info = require('../utils/captureSlots').cashReceiptSlotInfo(
-        ctx.cfg.capture_slots, ctx.cfg.income_type, ctx.campaignCashReceipt, ctx.reviewType);
-      return (info.slot && info.slot.key) || 'receipt';
-    } catch (_) { return 'receipt'; }
-  })();
-
-  let subs;
-  try {
-    const r = await _db().query(
-      `SELECT file_id, file_name, row_index, reviewer_name, slot_key, file_hash
-         FROM review_submissions
-        WHERE sheet_id = $1 AND tab_name = $2
-          AND slot_key = ANY($3::text[])
-          AND routed_from_slot IS NULL
-        ORDER BY uploaded_at DESC
-        LIMIT $4`, [sheetId, tabName, [...new Set(['review', 'receipt', receiptSlotKey])], cap]);
-    subs = r.rows;
-  } catch (e) {
-    return { ok: false, error: `원장 조회 실패(migration 091 적용 확인): ${e.message}`, code: 'not_ready' };
-  }
-
-  // 재사용 탭은 공고별 현영 설정이 섞일 수 있으므로 각 제출 행의 주문/신청 provenance를 먼저 본다.
-  let receiptRequirementsByRow = new Map();
-  try {
-    receiptRequirementsByRow = await require('./cashReceiptContext.service').cashReceiptRequirementsForRows(
-      subs.map(s => ({ sheetId, tabName, rowIndex: Number(s.row_index) }))
-    );
-  } catch (_) {}
-  let hasReceiptSlot = false; // 응답 요약: 이번 스윕 후보 중 하나라도 영수증 슬롯이 있는가
-
-  const plans = [];
-  const errors = [];
-  let scanned = 0;
-  for (const s of subs) {
-    scanned++;
-    try {
-      const f = await driveService.downloadFile(s.file_id);
-      if (!f || !f.buffer) { continue; }
-      const b64 = f.buffer.toString('base64');
-      const rowKey = `${sheetId}\u0000${tabName}\u0000${Number(s.row_index)}`;
-      const rowRequirement = receiptRequirementsByRow.get(rowKey);
-      const rowCampaignCashReceipt = rowRequirement == null
-        ? ctx.campaignCashReceipt
-        : rowRequirement === true;
-      const { hasCashReceiptSlot, cashReceiptSlotInfo } = require('../utils/captureSlots');
-      const rowReceiptInfo = cashReceiptSlotInfo(
-        ctx.cfg.capture_slots, ctx.cfg.income_type, rowCampaignCashReceipt, ctx.reviewType);
-      const rowReceiptSlotKey = (rowReceiptInfo.slot && rowReceiptInfo.slot.key) || receiptSlotKey;
-      const rowHasReceiptSlot = hasCashReceiptSlot(
-        ctx.cfg.capture_slots, ctx.cfg.income_type, rowCampaignCashReceipt, ctx.reviewType);
-      hasReceiptSlot = hasReceiptSlot || rowHasReceiptSlot;
-      const slotRole = s.slot_key === rowReceiptSlotKey ? 'receipt' : s.slot_key;
-      const verdict = await verifyCapture({
-        base64: b64, mimeType: f.mimeType || 'image/jpeg', slotKey: slotRole,
-        reviewType: ctx.reviewType, samples: samplesBySlot[slotRole] || [],
-      });
-      const rd = routeDecision({
-        slotKey: slotRole, verdict, hasReceiptSlot: rowHasReceiptSlot, hasRouteSamples, expectedChannel,
-      });
-      if (rd.action !== 'route') continue;
-      const toSlot = rd.toSlot === 'receipt' ? rowReceiptSlotKey : rd.toSlot;
-      const dup = await findSlotDuplicate({
-        sheetId, tabName, rowIndex: s.row_index, reviewerName: s.reviewer_name,
-        toSlot, fileHash: s.file_hash || inspect.hashBase64(b64), fileId: s.file_id,
-      });
-      plans.push({
-        fileId: s.file_id, fileName: s.file_name, rowIndex: s.row_index,
-        reviewerName: s.reviewer_name, fromSlot: s.slot_key, toSlot, target: rd.target,
-        receiptSlotKey: rowReceiptSlotKey,
-        got: verdict.got, confidence: verdict.confidence,
-        duplicate: dup ? { matchFileId: dup.file_id } : null,
-      });
-    } catch (e) {
-      errors.push({ fileId: s.file_id, error: e.message });
-    }
-  }
-
-  if (dryRun) return { ok: true, dryRun: true, scanned, plans, errors, hasRouteSamples, hasReceiptSlot };
-
-  // ── 실행 ──
-  let moved = 0, trashed = 0, failed = 0;
-  for (const p of plans) {
-    try {
-      if (p.duplicate) {
-        // 대상 슬롯에 같은 지문의 정본이 이미 있음 → 이 파일은 중복 사본 = 휴지통
-        await driveService.trashFiles([{ id: p.fileId, name: p.fileName || p.fileId }]);
-        await _db().query(
-          `UPDATE review_submissions
-              SET routed_from_slot = slot_key, slot_key = 'trashed', routed_at = NOW(), routed_by = $2
-            WHERE file_id = $1`, [p.fileId, 'dup:' + by]);
-        trashed++;
-        await logRouteEvent({
-          eventType: 'capture_dup_rejected', severity: 'warn',
-          sheetId, tabName, reviewerName: p.reviewerName,
-          message: `${p.reviewerName || '리뷰어'}님의 ${p.rowIndex != null ? p.rowIndex + '행 ' : ''}` +
-            `${routeSlotLabel(p.fromSlot)} 캡처가 ${routeSlotLabel(p.toSlot)} 칸의 기존 제출과 동일 파일(SHA-256 일치)이라 휴지통으로 옮겼습니다(소급 정리).`,
-          context: { fileId: p.fileId, matchFileId: p.duplicate.matchFileId, from: p.fromSlot, to: p.toSlot, row: String(p.rowIndex ?? ''), sweep: true },
-        });
-      } else {
-        const toFolderId = await resolveTargetFolder({
-          target: p.target, sheetId, tabName,
-          reviewBaseFolderId: ctx.reviewBaseFolderId, receiptLabel: ctx.receiptLabel,
-        });
-        if (!toFolderId) { failed++; errors.push({ fileId: p.fileId, error: '대상 폴더 확보 실패' }); continue; }
-        const cur = await driveService.getFileParents(p.fileId);
-        const parent = (cur.parents || [])[0] || null;
-        if (parent !== toFolderId) await driveService.moveFile(p.fileId, toFolderId, parent);
-        const movedToReceipt = p.toSlot === p.receiptSlotKey;
-        await _recordRouteMove({
-          fileId: p.fileId, targetSlot: p.toSlot, routedBy: 'sweep:' + by,
-          receipt: movedToReceipt, requireUnrouted: true,
-        });
-        moved++;
-        await recomputePrimary({ sheetId, tabName, rowIndex: p.rowIndex });
-        if (movedToReceipt) {
-          const reinspection = await inspect.reinspectReceiptFile({ fileId: p.fileId });
-          if (!reinspection || !reinspection.ok) {
-            errors.push({ fileId: p.fileId, pending: true, error: reinspection?.error || '영수증 재검수 대기' });
-          }
-        }
-        await logRouteEvent({
-          eventType: 'capture_routed', severity: 'warn',
-          sheetId, tabName, reviewerName: p.reviewerName,
-          message: `${p.reviewerName || '리뷰어'}님의 ${p.rowIndex != null ? p.rowIndex + '행 ' : ''}` +
-            `${routeSlotLabel(p.fromSlot)} 캡처가 ${routeSlotLabel(p.toSlot)}(AI 확신 ${Math.round((p.confidence || 0) * 100)}%)으로 판정되어 ${routeSlotLabel(p.toSlot)} 폴더로 이동했습니다(소급 정리).`,
-          context: { fileId: p.fileId, from: p.fromSlot, to: p.toSlot, row: String(p.rowIndex ?? ''), sweep: true },
-        });
-      }
-    } catch (e) {
-      failed++;
-      errors.push({ fileId: p.fileId, error: e.message });
-    }
-  }
-  return { ok: true, dryRun: false, scanned, planned: plans.length, moved, trashed, failed, errors };
-}
+/* (소급 정리 스윕 sweepTab — 8/5 이후 실시간 자동 분류로 대체, 9월 0 → 2026-09-29 제거 · 결정 186 67번) */
 
 /* ── 수동 분류(이동) — 검수 화면에서 사람이 대상 칸을 직접 고른다 ──────────
  * 자동 이동과 **같은 실행부**(폴더 해석·이동·원장·대표 이미지·로그)를 타므로 결과 상태가
@@ -691,7 +528,7 @@ async function routeAccuracyStats({ days = 30 } = {}) {
 
 module.exports = {
   findSlotDuplicate, resolveTargetFolder, markRouted, recomputePrimary,
-  logRouteEvent, revertRoute, revertRouteFromEvent, sweepTab,
+  logRouteEvent, revertRoute, revertRouteFromEvent,
   manualRoute, dedupManual, routeAccuracyStats,
   routeMode, rejectEnabled,
   __setPoolForTest,
