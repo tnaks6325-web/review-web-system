@@ -462,7 +462,7 @@ router.post('/identity-cards/decision-undo', authMiddleware, adminOrMasterMiddle
   try { res.json(await identityMerge.undoDecision({ decisionId: b.decisionId, by: _by(req) })); } catch (err) { _imFail(res, err, next); }
 });
 /* (시트 데이터 반영 점검 /sheet-sync/* 9개 — 화면 sheet-sync-audit.html 과 함께 2026-09-29 제거 · 결정 186 77번.
-   sheetSlotSync.service 의 판정 헬퍼는 부팅 1회성 블로그 준비행 동기화 잡이 아직 쓴다.) */
+   남아 있던 칸 보충 부품 sheetSlotSync.service 는 78번에서 함께 제거.) */
 
 /* 탈 구글시트 전환 화면(W4 · C)은 전환 완료(150개 중 149개)로 2026-09-28 제거(결정 186 2번).
    (review-submit-time-backfill·_cutoverErr 는 결정 186 63번에서 제거.) */
