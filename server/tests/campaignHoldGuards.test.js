@@ -31,6 +31,14 @@ ok('045: 스윕 부분 인덱스 존재', /idx_campaign_apps_sweep[\s\S]*?WHERE 
 // 레드 #3: apply 잠금 계층(캠페인 행 직렬화 → write-skew 차단)
 ok('apply: 캠페인 행 FOR UPDATE', /_applyParticipation[\s\S]*?FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(routes));
 ok('apply: phone8 advisory xact lock', /pg_advisory_xact_lock\(hashtext\('camp_hold_phone:/.test(routes));
+// 공유 작업표의 재발행 공고끼리도 일일 정원 판정을 직렬화한다. PostgreSQL text에는
+// NUL(0x00)을 넣을 수 없으므로, 두 int-key advisory lock으로 식별한다.
+const tabDailyLockStart = routes.indexOf("pg_advisory_xact_lock(hashtext('camp_tab_daily:'");
+const tabDailyLock = tabDailyLockStart < 0 ? '' : routes.slice(tabDailyLockStart, tabDailyLockStart + 260);
+ok('apply: 공유 작업표 일일 정원 advisory lock',
+  tabDailyLock.includes("pg_advisory_xact_lock(hashtext('camp_tab_daily:' || $1::text), hashtext($2::text))"));
+ok('apply: 작업표 잠금 SQL에 NUL 구분자를 만들지 않음',
+  !tabDailyLock.includes("E'\\\\000'") && !tabDailyLock.includes('\u0000'));
 ok('apply: 23505 백스톱(duplicate_hold)', /duplicate_hold/.test(routes));
 ok('apply: 재참여 전 만료 applied 홀드를 같은 grace 경계로 정리',
   /UPDATE campaign_applications[\s\S]*?SET status = 'expired'[\s\S]*?expires_at <= NOW\(\) - make_interval[\s\S]*?HOLD_GRACE_SEC/.test(routes));
@@ -63,7 +71,7 @@ ok("state: '24:00' → 1440", /hh === 24 && mm === 0/.test(state));
 ok("state: stateReason 'window_invalid'", /window_invalid/.test(state));
 // 심판 J7: COALESCE 편집 활성화 우회 차단(양 라우트 게이트)
 ok('활성화 게이트: 2개 라우트 적용', (routes.match(/_participationActivationErrors\(/g) || []).length >= 3); // 정의 1 + 호출 2
-// 레드 #7: 수동확정 선-취소 + 이중확정 거부
+// 레드 #7: 수동확정 시 남아 있는 진행 중 홀드 선-취소
 ok('수동확정: applied 선-취소', /admin\/:id\/confirm[\s\S]*?SET status = 'cancelled'\s+WHERE campaign_id = \$1 AND phone8 = \$2 AND id <> \$3 AND status = 'applied'/.test(routes));
 // 코드리뷰 #1: provenance 링크는 소유권(campaign+phone8+holdToken) 검증 통과 신청에만 — 위조 applicationId 오염 차단
 // ★ 082: 참여 시점 리뷰비 스냅샷을 함께 전파하려고 EXISTS 서브쿼리 → FROM 조인으로 바꿨다.

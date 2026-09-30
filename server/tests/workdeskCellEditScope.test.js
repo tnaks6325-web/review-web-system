@@ -35,7 +35,7 @@ assert.match(cellScope, /return \{ ok: false, code: 403/, '광고주를 포함�
 
 for (const [method, routePath] of [['post', '/workdesk/edit'], ['post', '/workdesk/revert']]) {
   const body = routeBody(method, routePath);
-  assert.match(body, /_ensureWorkdeskCellEditScope\(req\)/, `${routePath}는 직원 전체용 셀 편집 가드를 써야 합니다.`);
+  assert.match(body, /_ensureWorkdeskCellEditScope\(req\b/, `${routePath}는 직원 전체용 셀 편집 가드를 써야 합니다.`);
   assert.doesNotMatch(body, /_ensureEditScope\(req, sheetId, tabName\)/, `${routePath}에 담당 작업 스코프가 남으면 안 됩니다.`);
 }
 

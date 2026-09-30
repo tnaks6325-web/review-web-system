@@ -26,8 +26,6 @@
 const ROUTE_TRANSITIONS = {
   'review>receipt':        { toSlot: 'receipt',       target: 'receipt', needsReceiptSlot: true },
   'review>order_capture':  { toSlot: 'order_capture', target: 'capture', needsRouteSamples: true },
-  'receipt>review':        { toSlot: 'review',        target: 'review' },
-  'receipt>order_capture': { toSlot: 'order_capture', target: 'capture', needsRouteSamples: true },
 };
 
 const EXEMPT_CHANNELS = ['kakao'];
@@ -61,6 +59,11 @@ function routeDecision({ slotKey, verdict, hasReceiptSlot, hasRouteSamples, expe
   if (!verdict || verdict.status !== 'mismatch') return { action: 'none', reason: 'no_mismatch' };
   if (!verdict.sure) return { action: 'none', reason: 'not_sure' };
   if (EXEMPT_CHANNELS.includes(String(expectedChannel || ''))) return { action: 'none', reason: 'channel_exempt' };
+  // 영수증은 비공개 전용 트리에 보관된다. AI 오판만으로 review/capture 폴더로 내리면
+  // 업체 공유 대상이 될 수 있으므로, 영수증 출발 이동은 내부 담당자의 수동 확인만 허용한다.
+  if (String(slotKey || '') === 'receipt') {
+    return { action: 'none', reason: 'private_receipt_requires_manual' };
+  }
   const t = ROUTE_TRANSITIONS[`${String(slotKey || '')}>${String(verdict.got || '')}`];
   if (!t) return { action: 'none', reason: 'no_transition' };
   if (t.needsReceiptSlot && !hasReceiptSlot) return { action: 'none', reason: 'no_receipt_slot' };

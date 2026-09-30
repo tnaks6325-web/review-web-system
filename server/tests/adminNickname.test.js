@@ -26,7 +26,6 @@ const migration = read('migrations/078_admin_nicknames.sql');
    (recruit-modal.js 를 뺐을 때 cashReceiptGuide 가드를 넓힌 것과 같은 방식 — 검사 의미는 불변). */
 const settingsJs = read('../frontend/js/admin-settings.js');
 const adminHtml = settingsJs + '\n' + read('../frontend/admin.html');
-const siandHtml = settingsJs + '\n' + read('../frontend/admin-siand.html');
 const appJs = settingsJs + '\n' + read('../frontend/js/index-app.js');
 const apiJs = read('../frontend/api.js');
 
@@ -97,13 +96,10 @@ console.log('\n② 메시지 마스킹(리뷰어 메시지는 손대지 않음)'
       /ON CONFLICT \(login_name\) DO NOTHING/.test(migration));
     ok('api.js 액션 매핑', /'adminMyNickname'/.test(apiJs) && /'adminSaveNickname'/.test(apiJs));
     ok('설정 탭 UI(admin.html)', /id="myNicknameInput"/.test(adminHtml) && /saveMyNickname\(\)/.test(adminHtml));
-    ok('설정 탭 UI(admin-siand.html) — 두 화면 동일', /id="myNicknameInput"/.test(siandHtml) && /saveMyNickname\(\)/.test(siandHtml));
     ok('설정 탭 진입 시 로드', /loadMyNickname\(\);/.test(appJs) && /tabName === "settings"[\s\S]{0,400}loadMyNickname/.test(appJs));
-    ok('★ 마크업·로직은 공유 모듈 한 벌 — admin.html·admin-siand.html 은 마운트만(사본 금지)',
+    ok('★ 마크업·로직은 공유 모듈 한 벌 — admin.html 은 마운트만(사본 금지) (admin-siand.html 은 결정 186 44번에서 제거)',
       /id="adminSettingsMount"/.test(read('../frontend/admin.html'))
-      && /id="adminSettingsMount"/.test(read('../frontend/admin-siand.html'))
       && !/id="myNicknameInput"/.test(read('../frontend/admin.html'))
-      && !/id="myNicknameInput"/.test(read('../frontend/admin-siand.html'))
       && !/function saveMyNickname/.test(read('../frontend/js/index-app.js')));
     ok('★ 리뷰웹시스템[3버전]도 같은 모듈 — 서버 경로만 Track B 네임스페이스로 재기준',
       (() => { const w = read('../frontend/workdesk.html');

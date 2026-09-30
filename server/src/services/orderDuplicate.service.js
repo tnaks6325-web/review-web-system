@@ -74,7 +74,46 @@ async function findSameDayDuplicateInTx(client, { sheetId, tabName, campaignId, 
   return rows[0] || null;
 }
 
+// ★★ 날짜를 넘는 같은 구매 차단(무시트 경로 전용, 2026-08-19).
+//   시트 경로에는 `sheet_row_claims` 의 `(sheet_id,tab_name,dedup_key)` 유니크가 최종 수렴점으로 남아
+//   있지만, 무시트 경로는 그 계층을 건너뛴다(`skipSheetMirror`). 그래서 "어제 낸 것과 같은 주문이
+//   오늘 다시" 들어오면 새 주문원장 행 → 새 작업보드 줄이 됐다.
+//   ★ 판정 키를 **전 필드 완전일치가 아니라 4개**(주문번호·연락처·수취인·결제금액)로 잡는 이유:
+//     메모·옵션 표기 한 글자 차이로 뚫리면 막는 의미가 없다. 반대로 이 4개가 같은데 다른 구매인
+//     경우는 실무상 없다.
+//   ★ 주문번호가 6자리 미만(비번호 쿠팡 등)이면 판정하지 않는다 — 모르면 막지 않는다(fail-open).
+async function findEquivalentOrderInTx(client, { sheetId, tabName, campaignId, orderData } = {}) {
+  const v = normalizeSameDayOrder(orderData);
+  if (!v.orderNum || v.orderNum.length < 6) return null;
+  const params = [String(sheetId || ''), String(tabName || '')];
+  const param = value => { params.push(value); return `$${params.length}`; };
+  const scope = campaignId
+    ? ` AND EXISTS (
+          SELECT 1 FROM campaign_applications ca
+           WHERE ca.campaign_id = ${param(String(campaignId))}
+             AND (ca.order_submission_id = os.id OR ca.late_order_id = os.id)
+        )`
+    : '';
+  const equal = (sql, value) => `${sql} = ${param(value)}`;
+  const where = [
+    `os.sheet_id = $1`,
+    `os.tab_name = $2`,
+    `os.deleted_at IS NULL`,
+    equal(`regexp_replace(COALESCE(os.order_num,''), '\\D', '', 'g')`, v.orderNum),
+    equal(`regexp_replace(COALESCE(os.phone,''), '\\D', '', 'g')`, v.phone),
+    equal(`regexp_replace(COALESCE(os.recipient,''), '\\s+', '', 'g')`, v.recipient),
+    equal(`regexp_replace(COALESCE(os.price,''), '\\D', '', 'g')`, v.price),
+  ];
+  const { rows } = await client.query(
+    `SELECT os.id FROM order_submissions os WHERE ${where.join(' AND ')}${scope}
+      ORDER BY os.submitted_at DESC LIMIT 1`,
+    params,
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
+  findEquivalentOrderInTx,
   normalizeSameDayOrder,
   isSameDayOrderDuplicate,
   sameDayDuplicateLockKey,

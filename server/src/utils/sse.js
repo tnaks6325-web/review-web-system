@@ -36,15 +36,22 @@ const heartbeatTimer = setInterval(() => {
       client.lastPing = now;
     } catch (err) {
       logger.warn(`[SSE] 클라이언트 ${id} ping 실패 — 제거`);
+      if (client.expiryTimer) clearTimeout(client.expiryTimer);
       clients.delete(id);
     }
   }
 }, HEARTBEAT_MS);
+// 하트비트만 남았을 때 테스트/정상 종료를 붙잡지 않는다. 실제 서버에서는 HTTP 리스너가 프로세스를 유지한다.
+if (typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();
 
 // 프로세스 종료 시 타이머 정리
 if (typeof process !== 'undefined') {
   process.on('SIGTERM', () => clearInterval(heartbeatTimer));
   process.on('SIGINT', () => clearInterval(heartbeatTimer));
+}
+
+function normalizedRetry(meta) {
+  return meta && meta.role === 'reviewer' ? 30000 : 3000;   // 관리자는 브라우저 기본값(3초) 그대로
 }
 
 /**
@@ -59,6 +66,7 @@ function addClient(req, res, meta = { role: 'admin' }) {
     const sorted = [...clients.entries()].sort((a, b) => a[1].connectedAt - b[1].connectedAt);
     const victim = sorted.find(([, c]) => c.meta && c.meta.role === 'reviewer') || sorted[0];
     if (victim) {
+      if (victim[1].expiryTimer) clearTimeout(victim[1].expiryTimer);
       try { victim[1].res.end(); } catch (_) {}
       clients.delete(victim[0]);
       logger.info(`[SSE] 최대 연결 초과 — 클라이언트 ${victim[0]} 해제`);
@@ -77,20 +85,40 @@ function addClient(req, res, meta = { role: 'admin' }) {
   });
 
   // 초기 연결 메시지
+  // 끊겼을 때 다시 붙기까지 기다리는 시간. 기본(3초)이면 연결 수 상한에서 밀려난 리뷰어가 3초마다 다시
+  // 붙어 다른 리뷰어를 밀어내는 반복이 된다 → 리뷰어는 30초(관리자는 종전과 같은 3초) — decision 189.
+  res.write(`retry: ${normalizedRetry(meta)}\n`);
   res.write(`data: ${JSON.stringify({ type: 'connected', clientId, ts: Date.now() })}\n\n`);
+
+  const normalizedMeta = meta || { role: 'admin' };
+  const expiresAt = Number(normalizedMeta.expiresAt);
+  let expiryTimer = null;
+  if (Number.isFinite(expiresAt)) {
+    expiryTimer = setTimeout(() => {
+      const client = clients.get(clientId);
+      if (!client) return;
+      try { client.res.end(); } catch (_) {}
+      clients.delete(clientId);
+      logger.info(`[SSE] 클라이언트 ${clientId} 인증 만료 — 연결 해제 (현재 ${clients.size}명)`);
+    }, Math.max(0, expiresAt - Date.now()));
+    if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
+  }
 
   clients.set(clientId, {
     res,
     connectedAt: Date.now(),
     lastPing: Date.now(),
     ip: req.ip,
-    meta: meta || { role: 'admin' },
+    meta: normalizedMeta,
+    expiryTimer,
   });
 
   logger.info(`[SSE] 클라이언트 ${clientId} 연결 (현재 ${clients.size}명)`);
 
   // 연결 종료 처리
   req.on('close', () => {
+    const client = clients.get(clientId);
+    if (client && client.expiryTimer) clearTimeout(client.expiryTimer);
     clients.delete(clientId);
     logger.info(`[SSE] 클라이언트 ${clientId} 연결 해제 (현재 ${clients.size}명)`);
   });
@@ -169,6 +197,9 @@ function emitOrderSubmit(data) {
   broadcast('order_submit', {
     message: `구매양식 제출: ${data.tabName || ''} — ${data.orderer || ''}`,
     ...data,
+  }, (client) => {
+    const role = client && client.meta && client.meta.role;
+    return role === 'admin' || role === 'workdesk';
   });
 }
 

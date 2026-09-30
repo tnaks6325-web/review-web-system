@@ -13,11 +13,11 @@ function test(name, fn) { tests.push({ name, fn }); }
 test('uses the B-style full-width ownership shell instead of a visible sidebar', () => {
   assert.match(source, /<div class="own-wrap ovm-bwrap">/);
   assert.match(source, /\.own-wrap\.ovm-bwrap \.ovm-side\{display:none\}/);
-  assert.match(source, /\.own-wrap\.ovm-bwrap \.own-panel\{max-width:1520px/);
+  assert.match(source, /\.own-wrap\.ovm-bwrap \.own-panel\{max-width:1608px/);
 });
 
 test('renders B-style command dashboard and searchable company ledger', () => {
-  assert.match(source, /function _ovmbSummaryHtml\(advs, works, total, free, bad, matchKnown, candKnown\)/);
+  assert.match(source, /function _ovmbSummaryHtml\(advs, works, bad, matchKnown, candKnown\)/);   // 시트 개수 인자 제거(2026-08-23)
   assert.match(source, /class="[^"]*ovm-bledger/);
   assert.match(source, /id="ovmbQ"/);
   assert.match(source, /function _ovmbFilterRows\(v\)/);
@@ -26,15 +26,24 @@ test('renders B-style command dashboard and searchable company ledger', () => {
 test('shows manager-specific workload in the dashboard summary', () => {
   const match = source.match(/function _ovmbSummaryHtml\([^)]*\)\{[\s\S]*?\n\}/);
   assert.ok(match, 'summary helper should be extractable');
-  const sandbox = { esc: value => String(value) };
+  // ★ 지정 현황은 **작업(작업보드) 기준**(2026-08-23 사용자 확정) — 그 카운터는 스텁이 아니라
+  //   구현을 그대로 넣는다(스텁을 두면 그 함수의 회귀를 여기서만 못 본다).
+  const counts = source.match(/function _ovmTabCounts\(\)\{[\s\S]*?\n\}/);
+  const live = source.match(/function _ovmLiveTabs\(\)\{[^\n]*\}/);
+  const unass = source.match(/function _ovmUnassignedTabs\(\)\{[^\n]*\}/);
+  assert.ok(counts && unass && live, 'tab counters should be extractable');
+  const sandbox = { esc: value => String(value), Number, String, Object, Array,
+    STATE: { mapTabs: [{ sheetId: 'S1', tabGid: '1', advertiserId: 'adv_a' }, { sheetId: 'S1', tabGid: '2' }] } };
   vm.createContext(sandbox);
-  vm.runInContext(match[0], sandbox);
+  vm.runInContext(live[0] + '\n' + unass[0] + '\n' + counts[0] + '\n' + match[0], sandbox);
   const html = sandbox._ovmbSummaryHtml([
     { inadPm: '만두', works: 7, noMatch: 1, finishCand: 0 },
     { inadPm: '망고', works: 4, noMatch: 0, finishCand: 2 },
-  ], 11, 6, 1, false, true, true);
+  ], 11, false, true, true);
   assert.match(html, /만두 1개 업체 · 7건/);
   assert.match(html, /망고 1개 업체 · 4건/);
+  assert.match(html, /업체 지정 작업/);            // 시트 개수가 아니라 작업 기준으로 말한다
+  assert.match(html, /진행 중 작업 2건 · 미지정 1건/);
 });
 
 test('keeps rows safe and selectable through the existing company selector', () => {
@@ -43,10 +52,14 @@ test('keeps rows safe and selectable through the existing company selector', () 
   assert.match(source, /document\.querySelectorAll\('\.advitem'\)/);
 });
 
-test('renders the ownership footer without relying on another function scope for admin access', () => {
+// ★ 사용자 확정(2026-08-23): 사이드바 하단에서 [시트에서 가져오기]가 사라져 역할 분기 자체가 없다.
+//   대신 재료(mapTabs)를 못 받았을 때 0 으로 위장하지 않는 것이 이 자리의 계약이다.
+test('ownership footer counts unassigned works and never fakes zero', () => {
   const footer = source.match(/function _ovmRenderFoot\(\)\{[\s\S]*?\n\}/);
   assert.ok(footer, 'ownership footer should be extractable');
-  assert.match(footer[0], /const isAdmin\s*=\s*STATE\.role==='master'\s*\|\|\s*STATE\.role==='admin';/);
+  assert.doesNotMatch(footer[0], /openSheetImport|ownedSheetIds|시트/);
+  assert.match(footer[0], /_ovmUnassignedTabs\(\)\.length/);
+  assert.match(footer[0], /불러오지 못함/);
 });
 
 test('ends the loading state when the mapping-tab request rejects', () => {
@@ -72,6 +85,54 @@ test('renders an error state instead of leaving the B-style screen loading after
   vm.runInContext(match[0].replace(/\r?\n\/\* ══ 업체관리 리디자인$/, ''), sandbox);
   await vm.runInContext('renderOwnershipView()', sandbox);
   assert.equal(failure, 'mapping tabs unavailable');
+});
+
+/* ── 업체관리 개요 표: 검색 동작 + 업체별 뷰어 링크복사 (2026-08-19) ─────────────────────── */
+
+test('hides filtered-out rows for real (grid display beats the UA [hidden] rule)', () => {
+  // ★ 이 한 줄이 없으면 row.hidden 을 세워도 .ovm-ovt{display:grid} 가 이겨 검색이 무동작이 된다.
+  assert.match(source, /\.ovm-ovt\[hidden\]\{display:none\}/);
+  // 그 뒤에 .ovm-ovt 에 display 를 다시 세우는 규칙이 없어야 한다(있으면 다시 무동작).
+  const after = source.slice(source.indexOf('.ovm-ovt[hidden]{display:none}'));
+  assert.ok(!/\n\s*\.ovm-ovt(\.[a-z]+)?\{[^}]*display:/.test(after), '.ovm-ovt 에 display 재선언 금지');
+});
+
+test('search compares lowercase on both sides and reports an empty result', () => {
+  const fn = source.match(/function _ovmbFilterRows\(v\)\{[\s\S]*?\n\}/);
+  assert.ok(fn, 'filter helper should be extractable');
+  // 행 쪽 값도 소문자로 저장해야 영문 담당AE 가 걸린다.
+  assert.match(source, /data-ovmb-search="\$\{esc\(\(String\(a\.name\|\|''\)\+' '\+String\(a\.inadPm\|\|''\)\)\.toLowerCase\(\)\)\}"/);
+  const rows = [
+    { dataset: { ovmbSearch: '자연생각 김수만' }, hidden: false },
+    { dataset: { ovmbSearch: '어니스트캄 kim ae' }, hidden: false },
+  ];
+  const out = { textContent: '' };
+  const sandbox = { document: { querySelectorAll: () => rows }, $: sel => (sel === '#ovmbCnt' ? out : null) };
+  vm.createContext(sandbox);
+  vm.runInContext(fn[0], sandbox);
+  sandbox._ovmbFilterRows('어니');
+  assert.deepEqual(rows.map(r => r.hidden), [true, false]);
+  assert.equal(out.textContent, '1개 업체');
+  sandbox._ovmbFilterRows('KIM');           // 영문은 대소문 무관하게 걸려야 한다
+  assert.deepEqual(rows.map(r => r.hidden), [true, false]);
+  sandbox._ovmbFilterRows('없는업체');       // 0건은 조용히 빈 표로 두지 않는다
+  assert.match(out.textContent, /검색 결과 없음/);
+  sandbox._ovmbFilterRows('');
+  assert.deepEqual(rows.map(r => r.hidden), [false, false]);
+  assert.equal(out.textContent, '2개 업체');
+});
+
+test('company rows show only link status; the expanded company has the single link manager', () => {
+  assert.doesNotMatch(source, /ovm-lkcopy|_ovmCopyAdvLink/);
+  // 게이트 = 서버 라우트(internalMiddleware) 와 1:1 — AE 포함(2026-08-19 사용자 확정).
+  assert.match(source, /class="ovm-lkcell">\$\{_isInternalRole\(\)\?lkb/);
+  // 업체 패널의 접속 링크 섹션도 같은 게이트여야 한다(복사 버튼이 안내하는 [다시 활성]에 갈 곳이 있어야 한다).
+  assert.match(source, /function _advLinkHtml\(a\)\{[\s\S]{0,300}?if\(!_isInternalRole\(\)\) return '';/);
+  assert.match(source, /광고주 접속 링크/);
+  // 헤더 칸 수 ≡ 행 칸 수 (열을 끼워 넣을 때 가장 흔히 깨지는 자리)
+  const head = source.match(/<div class="ovm-ovt h">([\s\S]*?)<\/div>/);
+  assert.ok(head, 'overview header should be extractable');
+  assert.equal((head[1].match(/<span>/g) || []).length, 8);
 });
 
 async function run() {

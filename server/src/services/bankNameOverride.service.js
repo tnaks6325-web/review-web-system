@@ -10,8 +10,11 @@
  * ★★ 저장은 `app_settings.bank_name_overrides` JSON **한 키**(신규 테이블 0) — 레포 관용구.
  * ★★ **조회 실패는 기본 표 유지**(fail-open) — 이 화면이 죽었다고 이체 판정이 멈추면 안 된다.
  *   반대로 **저장은 fail-closed**: 겹침(같은 표기가 두 은행)이면 저장 자체를 막는다.
- * ★ 이미 만든 회차는 바뀌지 않는다 — 회차 생성 시점 값이 `payment_batch_items` 에 박제되므로
- *   여기서 무엇을 고쳐도 과거 파일은 그대로다(다음 회차부터 적용).
+ * ★ 금액·통장표시·계좌는 회차 생성 시점 값이 `payment_batch_items` 에 박제된다. 다만 **서식의
+ *   은행 칸은 박제된 이름이 아니라 `bank_code` 로 다운로드 시점에 다시 계산**하므로(`buildWorkbook`
+ *   → `bankFormLabel`), 여기서 이름을 고치면 **과거 회차를 다시 받아도 새 이름**으로 나간다.
+ * ★★ 단, 케이뱅크가 이름을 인식 못 하는 기관(`FORM_CODE_ONLY` — 031 대구은행)은 여기서 무엇을
+ *   고쳐도 **코드**로 나간다(화면이 `formCodeOnly` 로 그 사실을 말한다).
  */
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');

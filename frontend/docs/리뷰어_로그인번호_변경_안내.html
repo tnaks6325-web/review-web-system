@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰어 로그인 번호 변경 안내 — 어디서 어떻게 바꾸나</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"D2Coding",monospace;
+    --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+      --line:#252B33; --line-soft:#1E232A;
+      --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+      --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+      --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+      --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+    }
+  }
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.72;
+       -webkit-font-smoothing:antialiased;font-size:15px}
+  .wrap{max-width:940px;margin:0 auto;padding:34px 20px 90px}
+  header.top{margin-bottom:26px}
+  .eyebrow{font-size:.74rem;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;font-weight:700}
+  h1{font-size:1.72rem;line-height:1.3;margin:8px 0 10px;letter-spacing:-.02em}
+  .lede{color:var(--muted);font-size:.98rem;margin:0}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;
+          padding:22px 24px;margin:18px 0;box-shadow:var(--shadow)}
+  h2{font-size:1.12rem;margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+  h2 .n{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;
+        border-radius:8px;background:var(--acc-bg);color:var(--acc);border:1px solid var(--acc-edge);
+        font-size:.82rem;font-weight:800}
+  h3{font-size:.96rem;margin:20px 0 8px}
+  p{margin:9px 0}
+  ul,ol{margin:9px 0;padding-left:22px}
+  li{margin:5px 0}
+  b{font-weight:700}
+  code{font-family:var(--mono);font-size:.86em;background:var(--line-soft);
+       border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+  .note{border-radius:10px;padding:12px 14px;margin:14px 0;font-size:.9rem;border:1px solid}
+  .note.info{background:var(--acc-bg);border-color:var(--acc-edge);color:var(--acc)}
+  .note.good{background:var(--pass-bg);border-color:var(--pass-edge);color:var(--pass)}
+  .note.warn{background:var(--susp-bg);border-color:var(--susp-edge);color:var(--susp)}
+  .note.bad {background:var(--fail-bg);border-color:var(--fail-edge);color:var(--fail)}
+  .note b{color:inherit}
+  .steps{counter-reset:s;list-style:none;padding:0;margin:0}
+  .steps > li{position:relative;padding:0 0 0 44px;margin:0 0 18px}
+  .steps > li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:1px;
+      width:29px;height:29px;border-radius:9px;background:var(--acc);color:#fff;
+      display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.86rem}
+  .steps h3{margin:2px 0 6px;font-size:1rem}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:.9rem}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--line-soft);font-weight:700}
+  .kbd{display:inline-block;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;
+       padding:1px 7px;font-size:.84em;background:var(--card);font-weight:600}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
+  .box{border:1px solid var(--line);border-radius:10px;padding:13px 15px;background:var(--card)}
+  .box h4{margin:0 0 6px;font-size:.92rem}
+  .box p{margin:4px 0;font-size:.88rem;color:var(--muted)}
+
+  /* ── 화면 재현 목업 ─────────────────────────────────
+     ★ 실물 화면과 같아 보여야 하므로 라이트 고정(다크에서 색이 뒤집히면 "실물과 같다"가 깨진다). */
+  .mock{color-scheme:light;background:#F8FAFC;border:1px solid #CBD5E1;border-radius:12px;
+        padding:14px;margin:14px 0;color:#111827;font-size:.84rem;overflow-x:auto}
+  .mock .cap{font-size:.72rem;color:#64748B;margin:0 0 9px;font-weight:700;letter-spacing:.04em}
+  .mock table{background:#fff;font-size:.8rem;margin:0}
+  .mock th,.mock td{border:1px solid #E2E8F0;padding:6px 8px;color:#111827}
+  .mock th{background:#F1F5F9}
+  .mbtn{display:inline-block;border:1px solid #D1D5DB;background:#fff;color:#111827;
+        border-radius:6px;padding:1px 7px;font-size:.72rem;font-weight:600}
+  .mbtn.pri{background:#111827;color:#fff;border-color:#111827}
+  .mpop{background:#fff;border:1px solid #E5E7EB;border-radius:12px;max-width:520px;
+        box-shadow:0 12px 40px rgba(0,0,0,.14);overflow:hidden}
+  .mpop .hd{padding:11px 14px;border-bottom:1px solid #E5E7EB;font-weight:800;display:flex;gap:8px;align-items:center}
+  .mpop .bd{padding:13px 14px;display:flex;flex-direction:column;gap:9px}
+  .mpop .lb{font-size:.74rem;color:#6B7280}
+  .mpop .inp{border:1px solid #D1D5DB;border-radius:6px;padding:6px 9px;background:#fff;color:#111827}
+  .mpop .hint{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:9px 11px;
+              font-size:.76rem;color:#1E3A8A;line-height:1.6}
+  .mpop .sum{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:10px 12px;
+             font-size:.78rem;color:#334155;line-height:1.7}
+  .mpop .sum .row{display:flex;justify-content:space-between}
+  .mpop .err{background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 12px;
+             font-size:.78rem;color:#991B1B;line-height:1.6}
+  .mpop .ft{display:flex;gap:8px;justify-content:flex-end;padding-top:2px}
+  .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0}
+  .flow .n{border:1px solid var(--line);border-radius:10px;padding:9px 13px;background:var(--card);
+           font-size:.86rem;font-weight:600}
+  .flow .n.on{background:var(--acc-bg);border-color:var(--acc-edge);color:var(--acc)}
+  .flow .ar{color:var(--faint);font-weight:800}
+  footer{color:var(--faint);font-size:.8rem;margin-top:34px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">업무 절차 · 등록리뷰어DB</div>
+  <h1>리뷰어 로그인 번호 변경 안내</h1>
+  <p class="lede">리뷰어가 휴대폰 번호를 바꿨을 때, <b>과거 참여 내역과 리뷰비 계좌를 잃지 않고</b> 로그인 번호를 바꾸는 방법입니다.
+  (예: 김수만 <code>010-8592-6325</code> → <code>010-9186-9944</code>)</p>
+</header>
+
+<section>
+  <h2><span class="n">!</span> 한 장 요약</h2>
+  <div class="flow">
+    <span class="n on">리뷰웹시스템[3버전]</span><span class="ar">›</span>
+    <span class="n on">등록리뷰어DB</span><span class="ar">›</span>
+    <span class="n on">이름·번호로 검색</span><span class="ar">›</span>
+    <span class="n on">연락처 칸 [변경]</span><span class="ar">›</span>
+    <span class="n on">새 번호 입력 → [확인]</span><span class="ar">›</span>
+    <span class="n on">[이대로 변경]</span>
+  </div>
+  <div class="note good"><b>새 번호가 본계정이 되고, 지금 번호는 “타계정”으로 남습니다.</b>
+  그래서 그 리뷰어의 <b>과거 참여·리뷰 내역, 받을 리뷰비와 계좌 매칭이 그대로 유지</b>됩니다.
+  번호를 그냥 지우고 새로 쓰는 것이 아닙니다.</div>
+  <div class="note warn"><b>누가 할 수 있나:</b> 관리자(master·admin)만 보입니다. AE 담당자에게는 이 메뉴 자체가 없습니다.
+  <b>리뷰어 본인은 내정보에서 바꿀 수 없습니다</b> — 본인 화면은 이름과 번호 뒤 8자리만으로 열리기 때문에,
+  거기서 번호를 바꾸게 하면 남의 계정을 가져가는 일이 생길 수 있어 일부러 막아 두었습니다.</div>
+</section>
+
+<section>
+  <h2><span class="n">1</span> 어디로 들어가나</h2>
+  <ol>
+    <li>리뷰웹시스템[3버전] 접속 → 상단 메뉴 <span class="kbd">등록리뷰어DB</span></li>
+    <li>검색창에 <b>이름</b> 또는 <b>연락처 일부</b>(숫자만 쳐도 됩니다)를 넣어 그 리뷰어를 찾습니다.</li>
+    <li>그 줄의 <b>연락처 칸</b> 안에 있는 <span class="kbd">변경</span> 버튼을 누릅니다.</li>
+  </ol>
+
+  <div class="mock">
+    <p class="cap">화면 재현 — 등록리뷰어DB 목록</p>
+    <table>
+      <tr><th>이름</th><th>연락처</th><th>주소</th><th>은행</th><th>계좌번호</th><th>…</th></tr>
+      <tr>
+        <td><b>김수만</b></td>
+        <td>010-8592-6325 <span class="mbtn">변경</span></td>
+        <td>서울 …</td><td>하나</td><td>123456****</td><td>…</td>
+      </tr>
+    </table>
+  </div>
+  <div class="note info">번호가 <b>비슷한 사람이 여럿</b>일 수 있습니다. 이름·연락처·계좌를 한 번 더 보고
+  <b>정확히 그 사람 줄</b>의 [변경]을 누르세요.</div>
+</section>
+
+<section>
+  <h2><span class="n">2</span> 어떻게 바꾸나 (4단계)</h2>
+  <ol class="steps">
+    <li>
+      <h3>새 번호를 적습니다</h3>
+      <p>숫자 11자리. <code>-</code>를 넣어도 되고 안 넣어도 됩니다(자동으로 정리됩니다).</p>
+      <div class="mock">
+        <p class="cap">화면 재현 — [변경] 팝업</p>
+        <div class="mpop">
+          <div class="hd">로그인 번호 변경 <span style="flex:1"></span><span class="mbtn">닫기</span></div>
+          <div class="bd">
+            <div><b>김수만</b> · 현재 <b>01085926325</b></div>
+            <div class="lb">새 로그인 번호 (숫자 11자리)</div>
+            <div class="inp">010-9186-9944</div>
+            <div class="hint">새 번호가 <b>본계정</b>이 되고 지금 번호는 <b>타계정으로 남습니다</b> —
+              과거 참여·리뷰 내역과 리뷰비 계좌 매칭은 그대로 유지됩니다.<br>
+              1:1문의방·공고별 참여 예외·공고수정 허용명단은 새 번호로 옮기고,
+              블랙리스트에 올라 있으면 <b>새 번호에도 함께</b> 등록합니다.</div>
+            <div class="ft"><span class="mbtn">취소</span><span class="mbtn pri">확인</span></div>
+          </div>
+        </div>
+      </div>
+    </li>
+
+    <li>
+      <h3><span class="kbd">확인</span>을 눌러 미리 봅니다 — 이때는 아무것도 바뀌지 않습니다</h3>
+      <p>그 번호로 바꿔도 되는지 시스템이 먼저 검사하고, <b>영향을 받는 기록의 건수</b>를 보여줍니다.</p>
+      <div class="mock">
+        <p class="cap">화면 재현 — 확인 결과(문제 없음)</p>
+        <div class="mpop" style="max-width:460px">
+          <div class="bd">
+            <div class="sum">
+              <b>01085926325 → 01091869944</b>
+              <div class="row"><span>구매양식 제출</span><b>12건</b></div>
+              <div class="row"><span>공고 참여</span><b>7건</b></div>
+              <div class="row"><span>1:1 문의방</span><b>2건</b></div>
+              <div class="row"><span>작업표 참여 행</span><b>15건</b></div>
+              <div class="row"><span>공고별 참여 예외</span><b>0건</b></div>
+            </div>
+            <div class="ft"><span class="mbtn pri">이대로 변경</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="note info">이 숫자는 “<b>이만큼의 기록이 이 사람에게 매달려 있다</b>”는 뜻입니다.
+      지워지는 게 아니라 <b>그대로 유지</b>되니 놀라지 않으셔도 됩니다.</div>
+    </li>
+
+    <li>
+      <h3><span class="kbd">이대로 변경</span> → 마지막 확인창에서 <span class="kbd">확인</span></h3>
+      <p>이때 실제로 바뀝니다. 바뀐 뒤에는 목록이 새로고침되고 새 번호가 보입니다.</p>
+    </li>
+
+    <li>
+      <h3>리뷰어에게 알려 줍니다 <b>(꼭!)</b></h3>
+      <p>시스템이 리뷰어에게 자동으로 알리지 않습니다. 카톡·문자로
+      <b>“이제 새 번호 뒤 8자리로 로그인하세요”</b> 라고 안내해 주세요.</p>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2><span class="n">3</span> “바꿀 수 없습니다”라고 나올 때 — 사유별 조치</h2>
+  <p>아래 네 가지 중 하나면 <b>빨간 상자로 사유가 나오고 [이대로 변경] 버튼이 아예 생기지 않습니다.</b>
+  강제로 넘기는 방법은 없습니다(그대로 진행하면 데이터가 어긋나기 때문입니다).</p>
+
+  <div class="mock">
+    <p class="cap">화면 재현 — 차단</p>
+    <div class="mpop" style="max-width:460px">
+      <div class="bd"><div class="err"><b>이 번호로는 바꿀 수 없습니다</b>
+        <ul style="margin:6px 0 0;padding-left:18px"><li>뒤 8자리가 「홍길동」 리뷰어와 겹칩니다 — 로그인·검색·계좌 매칭이 섞입니다.</li></ul>
+      </div></div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th style="width:34%">나오는 문구</th><th>무슨 뜻</th><th style="width:30%">어떻게 하나</th></tr>
+    <tr>
+      <td>그 번호는 이미 「○○○」 리뷰어의 번호입니다</td>
+      <td>그 번호로 <b>이미 다른 계정이 등록</b>돼 있습니다. 그대로 두면 두 사람이 한 계정으로 섞입니다.</td>
+      <td>번호를 잘못 받아 적은 것은 아닌지 확인. 정말 같은 사람이면 <b>어느 쪽을 남길지</b> 정한 뒤 관리자끼리 상의해 주세요.</td>
+    </tr>
+    <tr>
+      <td>뒤 8자리가 「○○○」 리뷰어와 겹칩니다</td>
+      <td>앞자리만 다르고 <b>뒤 8자리가 같은 사람</b>이 있습니다. 우리 시스템은 뒤 8자리로 사람을 구분해서, 그대로 두면 로그인·검색·계좌가 섞입니다.</td>
+      <td>바꿀 수 없습니다. 리뷰어에게 번호를 다시 확인해 주세요.</td>
+    </tr>
+    <tr>
+      <td>그 번호는 「○○○」 리뷰어의 타계정으로 등록돼 있습니다</td>
+      <td>다른 사람이 이미 <b>자기 타계정</b>으로 그 번호를 올려 뒀습니다.</td>
+      <td>그 리뷰어에게 타계정에서 그 번호를 빼 달라고 요청한 뒤 다시 시도하세요.</td>
+    </tr>
+    <tr>
+      <td>진행 중인 참여(자리 확보) ○건이 있습니다</td>
+      <td>지금 <b>공고에 참여해 구매·제출 중</b>입니다. 이때 번호를 바꾸면 그 참여가 제출되지 못하고 날아갑니다.</td>
+      <td><b>10~15분 뒤 다시 시도</b>하세요(자리는 저절로 풀립니다). 급하면 제출을 끝낸 뒤에.</td>
+    </tr>
+  </table>
+</section>
+
+<section>
+  <h2><span class="n">4</span> 바꾸고 나면 어떻게 되나</h2>
+  <div class="grid2">
+    <div class="box">
+      <h4>✅ 그대로 유지되는 것</h4>
+      <p>· 리뷰어 홈의 <b>리뷰 내역</b>(참여중·제출완료)</p>
+      <p>· 받을 예정 금액·누적 금액</p>
+      <p>· 작업표에 적힌 참여 행</p>
+      <p>· <b>리뷰비 입금 대상·계좌 매칭</b></p>
+      <p>· 등록해 둔 계좌·주소·주민번호</p>
+    </div>
+    <div class="box">
+      <h4>🔄 새 번호로 옮겨지는 것</h4>
+      <p>· 1:1 문의방</p>
+      <p>· 공고별 참여 예외(🚫 리뷰어 관리)</p>
+      <p>· 리뷰어앱 공고수정 허용명단</p>
+      <p>· 블랙리스트는 <b>옮기지 않고 새 번호에도 추가</b>됩니다
+        (번호를 바꿔 차단을 피할 수 없게)</p>
+    </div>
+  </div>
+  <div class="note warn"><b>한 가지 예외:</b> 새 번호로 <b>이미 1:1문의방이 있던 경우</b>에는 옮기지 않고 그대로 둡니다(방이 둘로 남습니다).
+  이때는 변경 직후 안내에 <b>“옮기지 못한 항목 N건”</b>이라고 나옵니다 — 문의창구에서 두 방을 함께 확인해 주세요.</div>
+  <div class="note info"><b>옛 번호로도 로그인은 됩니다</b>(타계정으로 남아 있어서요). 다만 그 화면에서는 새 번호로 한 참여가 보이지 않습니다.
+  그래서 리뷰어에게는 <b>새 번호로 로그인</b>하도록 안내해 주세요.</div>
+</section>
+
+<section>
+  <h2><span class="n">5</span> 잘못 바꿨을 때 (되돌리기)</h2>
+  <p>같은 자리에서 <b>다시 [변경]</b>을 눌러 <b>원래 번호</b>를 넣으면 되돌아갑니다. 옛 번호가 타계정으로 남아 있기 때문에 막히지 않습니다.</p>
+  <div class="note bad"><b>주의:</b> 되돌려도 그 사이에 새 번호로 새로 만들어진 1:1문의방은 그대로 남습니다.
+  또 번호 변경 기록은 <b>이력으로 남습니다</b>(누가 언제 어떤 번호로 바꿨는지) — 지워지지 않습니다.</div>
+</section>
+
+<section>
+  <h2><span class="n">?</span> 자주 묻는 질문</h2>
+  <h3>Q. 이름도 같이 바꿀 수 있나요?</h3>
+  <p>아니요. 이 기능은 <b>로그인 번호만</b> 바꿉니다. 이름이 잘못됐다면 별도로 문의해 주세요.</p>
+
+  <h3>Q. 리뷰어가 직접 내정보에서 바꾸게 하면 안 되나요?</h3>
+  <p>안 됩니다. 리뷰어 화면은 <b>이름 + 번호 뒤 8자리</b>만으로 열립니다. 거기서 번호 변경을 열면,
+  남의 뒤 8자리만 아는 사람이 그 계정을 자기 번호로 가져가 <b>주민번호·계좌·리뷰비까지</b> 볼 수 있게 됩니다.</p>
+
+  <h3>Q. 시트(구글시트)의 연락처도 바뀌나요?</h3>
+  <p>아니요. 시트에 적힌 연락처는 <b>그대로 둡니다</b>(그게 그 줄의 원본 기록이라서요).
+  대신 옛 번호가 타계정으로 남아 있어 <b>그 줄이 계속 그 리뷰어 것으로 조회</b>됩니다.</p>
+
+  <h3>Q. 이미 만든 입금 회차의 금액·계좌가 바뀌나요?</h3>
+  <p>아니요. 이미 만든 회차는 그때 값이 <b>그대로 박제</b>돼 있어 영향이 없습니다.
+  다음 회차부터 새 정보로 잡힙니다.</p>
+
+  <h3>Q. 블랙리스트였던 사람이 번호를 바꾸면 풀리나요?</h3>
+  <p>풀리지 않습니다. <b>새 번호에도 블랙리스트가 함께 등록</b>됩니다.</p>
+</section>
+
+<footer>리뷰웹시스템 · 등록리뷰어DB 로그인 번호 변경 안내</footer>
+</div>
+</body>
+</html>

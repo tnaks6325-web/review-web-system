@@ -23,7 +23,6 @@ const SYSTEM_NOTICES = [
     title: "신기능 — 캠페인탭 참여자 명단을 시스템에서 직접 관리 (테스트 단계)",
     changes: [
       { type: "feat", text: "시트 참여자 명단을 시스템으로 가져와 화면에서 보기·추가/수정/삭제·리뷰제출/입금 체크 (최고관리자 전용)" },
-      { type: "feat", text: "직원 안내서(유저플로우) 제공 — 공지 팝업의 '직원 안내서 보기' 또는 db-first-guide.html" },
       { type: "warn", text: "안전 테스트 단계: 모든 동작이 테스트 저장공간에만 반영 → 리뷰어·구글시트·주문에 영향 없음" },
     ]
   },
@@ -119,24 +118,6 @@ function checkAndShowNotice() {
     content.style.display = "none";
     _updateNoticeButtons(false, true);
   }
-}
-
-// ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) — 확인 전까지 로그인 시마다 표시.
-const DBFIRST_GUIDE_VERSION = "v1";
-function _showDbFirstGuidePopup() {
-  try {
-    if (localStorage.getItem("dbfirst_guide_seen") === DBFIRST_GUIDE_VERSION) return; // 다시 안 보기 처리됨
-    if (typeof show === "function") show("dbFirstGuideModal", "flex");
-    else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.remove("hidden"); m.style.display = "flex"; } }
-  } catch (_) {}
-}
-function closeDbFirstGuide(markSeen) {
-  try { if (markSeen) localStorage.setItem("dbfirst_guide_seen", DBFIRST_GUIDE_VERSION); } catch (_) {}
-  if (typeof hide === "function") hide("dbFirstGuideModal");
-  else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.add("hidden"); m.style.display = "none"; } }
-}
-function openDbFirstGuide() {
-  window.open("db-first-guide.html", "_blank");
 }
 
 function _renderNoticeList(content, dismissedVersion, collapsed) {
@@ -886,44 +867,7 @@ function getAdminSessionRemaining() {
   return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
 }
 
-/* ── 업무포털 새창 열기 (로그인 세션 이어주기) ──
-   portal.html은 새 탭이라 sessionStorage(admin_token)를 공유하지 않으므로,
-   동일 출처 localStorage로 토큰/이름/역할을 잠시 넘겨준다(포털이 읽는 즉시 삭제).
-   admin·portal 모두 /api/admin/login 토큰을 쓰므로 같은 JWT로 자동 로그인된다. */
-function openWorkPortal() {
-  const token = sessionStorage.getItem("admin_token") || "";
-  if (!token || !isAdminLoggedIn()) {
-    showToast("관리자 로그인이 필요합니다.", "warning");
-    return;
-  }
-  try {
-    localStorage.setItem("portal_sso", JSON.stringify({
-      token,
-      name: getAdminName(),
-      role: getAdminRole(),
-      ts: Date.now()
-    }));
-  } catch (e) { /* localStorage 불가 시에도 포털 자체 로그인으로 폴백 */ }
-  window.open("portal.html", "_blank");
-}
-
-/* ── 구글시트 RAW 미러 페이지 열기 (자동 로그인 핸드오프) ── */
-function openRawMirror() {
-  const token = sessionStorage.getItem("admin_token") || "";
-  if (!token || !isAdminLoggedIn()) {
-    showToast("관리자 로그인이 필요합니다.", "warning");
-    return;
-  }
-  try {
-    localStorage.setItem("raw_sso", JSON.stringify({
-      token,
-      name: getAdminName(),
-      role: getAdminRole(),
-      ts: Date.now()
-    }));
-  } catch (e) { /* localStorage 불가 시에도 페이지 자체 처리로 폴백 */ }
-  window.open("raw-mirror.html", "_blank");
-}
+/* (업무포털 새창 openWorkPortal 은 portal.html 과 함께 2026-09-28 제거 — 결정 186 45번.) */
 
 /* ── Track B 리뷰웹시스템[3버전](그림자) 열기 (자동 로그인 핸드오프) ── */
 function openWorkdesk() {
@@ -941,51 +885,6 @@ function openWorkdesk() {
     }));
   } catch (e) { /* localStorage 불가 시에도 페이지 자체 로그인으로 폴백 */ }
   window.open("workdesk.html", "_blank");
-}
-
-/* ── 시트 API 쿼터 모니터(45/분 실시간 사용량·출처·잔량) — 인페이지 팝업(iframe) ── */
-function openThrottleMonitor() {
-  const token = sessionStorage.getItem("admin_token") || "";
-  if (!token || !isAdminLoggedIn()) { showToast("관리자 로그인이 필요합니다.", "warning"); return; }
-  try {
-    localStorage.setItem("raw_sso", JSON.stringify({ token, name: getAdminName(), role: getAdminRole(), ts: Date.now() }));
-  } catch (e) { /* 폴백: 페이지에서 로그인 */ }
-
-  let ov = document.getElementById("throttleMonitorOverlay");
-  if (!ov) {
-    ov = document.createElement("div");
-    ov.id = "throttleMonitorOverlay";
-    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px";
-    ov.addEventListener("click", (e) => { if (e.target === ov) closeThrottleMonitor(); });
-    ov.innerHTML = `
-      <div style="background:#fff;border-radius:14px;width:1080px;max-width:96vw;height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.3)">
-        <div style="padding:11px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px;flex-shrink:0">
-          <i class="fas fa-gauge-high" style="color:#3182f6"></i>
-          <span style="font-weight:700;font-size:.92rem;color:var(--t1)">시트API 모니터</span>
-          <span style="font-size:.7rem;color:var(--t3)">구글 시트 API 45/분 쿼터 실시간 사용량·출처·잔량</span>
-          <div style="margin-left:auto;display:flex;gap:6px">
-            <button onclick="window.open('throttle-monitor.html','_blank')" title="새 창으로 열기" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-up-right-from-square"></i></button>
-            <button onclick="closeThrottleMonitor()" title="닫기" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-times"></i></button>
-          </div>
-        </div>
-        <iframe id="throttleMonitorFrame" src="" style="flex:1;border:none;width:100%"></iframe>
-      </div>`;
-    document.body.appendChild(ov);
-  }
-  ov.style.display = "flex";
-  // 열 때마다 새로 로드(SSO 토큰 최신 반영)
-  const frame = document.getElementById("throttleMonitorFrame");
-  if (frame) frame.src = "throttle-monitor.html";
-}
-
-function closeThrottleMonitor() {
-  const ov = document.getElementById("throttleMonitorOverlay");
-  if (ov) {
-    ov.style.display = "none";
-    // 폴링 중단을 위해 iframe 언로드
-    const frame = document.getElementById("throttleMonitorFrame");
-    if (frame) frame.src = "about:blank";
-  }
 }
 
 /* ── 관리자 로그인 모달 열기 ── */
@@ -1069,16 +968,14 @@ function enterAdminScreen() {
   // ★ 컨텍스트 툴바 초기화
   _updateContextToolbar('dashboard');
 
-  loadAdminDashboard();
+  // 서버 설정을 먼저 가져와야 다른 기기에서 맞춘 컬럼 폭으로 첫 렌더링된다.
+  _loadServerColWidths().finally(() => loadAdminDashboard());
 
   // ★ 공지사항 자동 표시 (배포 변경 이력)
   checkAndShowNotice();
 
   // ★ 관리자 공지 팝업 (DB 기반, 마스터가 작성한 공지)
   setTimeout(_checkAdminNoticePopup, 400);
-
-  // ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단) — 확인 전까지 표시
-  setTimeout(_showDbFirstGuidePopup, 700);
 
   // ── Phase 5/6: 시스템 모니터링 + API 메트릭 자동 로드 ──
   if (typeof loadSystemMonitor === 'function') {
@@ -1374,10 +1271,9 @@ function switchAdminTab(tabName) {
   if (tabName === "cs-inquiry") { try { loadCsRooms(); } catch(_){} }
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
-  if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadAiSamples(); } catch(_){} try { loadMyNickname(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} try { loadWorktableTemplate(); } catch(_){} try { loadGateCriteria(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadAiSamples(); } catch(_){} try { loadMyNickname(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} try { loadWorktableTemplate(); } catch(_){} try { loadGateCriteria(); } catch(_){} }
   if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
@@ -1438,7 +1334,7 @@ function _renderWorkOrderWorkspace(list) {
         <b style="font-size:11px;line-height:1.35;color:#243247">${escHtml(order.title || "(제목 없음)")}</b>
         <span style="flex:none;padding:2px 5px;border-radius:4px;background:${bg};color:${fg};font-size:9px;font-weight:800;white-space:nowrap">${WO_LABELS[status] || status}</span>
       </span>
-      <span style="display:block;margin-top:3px;color:#718096;font-size:10px">${escHtml(order.created_by || "-")} · ${order.courier_proxy ? "택배발송대행" : (order.delivery_type || "배송유형 미지정")}</span>
+      <span style="display:block;margin-top:3px;color:#718096;font-size:10px">${escHtml(order.created_by || "-")} · ${order.courier_proxy ? "택배발송대행" : ((typeof _woDeliveryBase === "function" ? _woDeliveryBase(order.delivery_type) : "") || order.delivery_type || "배송유형 미지정")}</span>
     </button>`;
   }).join("");
 
@@ -1759,20 +1655,20 @@ async function woSendMemo(id) {
 //   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
 // ★ pickGid: 탭 교정 재접수 — URL의 gid가 시트에 없을 때(404 gidNotFound) 팝업에서
 //   사람이 고른 탭의 gid. 서버가 이 gid로 접수하고 work_sheet_url까지 교정한다.
-async function woAccept(id, pickGid) {
+async function woAccept(id, pickGid, linkAdvertiserId) {
   const o = (_woCache || []).find(x => x.id === id);
   const url = ((o && o.work_sheet_url) || "").trim();
 
   // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
-  // ★★ 시트탭URL이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성 — 사용자 확정 2026-08-10).
-  //   종전엔 여기서 막아 인트라넷 리뷰오더(시트URL 칸 없음)를 접수할 방법이 없었다.
-  //   판정·생성은 서버(`sheetlessAccept.resolveAcceptMode`)가 하고 화면은 확인만 받는다.
-  if (!url) {
-    if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.")) return;
-  }
-  if (url && !/[#?&]gid=\d+/.test(url) && !pickGid) {
-    woNotice("작업시트탭URL에 gid가 없습니다.\n특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.\n\n현재 URL:\n" + url);
-    return;
+  // ★★ 접수는 **항상 무시트**다(서버 `sheetlessAccept.resolveAcceptMode` = v3_sheetless_only).
+  //   판정 사본을 두지 않고 공유 모듈 `_woAcceptSheetless`(표시용)를 그대로 쓴다.
+  //   ★ 종전에는 여기서 `work_sheet_url` 을 보고 ① URL 이 있으면 시트 접수인 양 확인창을 건너뛰고
+  //     ② gid 가 없으면 **접수를 아예 막았다** — 서버는 무시트로 등록하는데 화면만 시트 기반으로
+  //     인식하던 막다른 길이다(2026-08-19 신고). URL 은 과거 이력일 뿐 접수 모드를 바꾸지 않는다.
+  const _ns = (typeof _woAcceptSheetless === "function") ? _woAcceptSheetless(o) : true;
+  if (_ns && !linkAdvertiserId && !pickGid) {
+    if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다."
+      + (url ? "\n\n※ 이 오더에 남아 있는 작업시트탭URL은 사용하지 않습니다(과거 이력)." : ""))) return;
   }
 
   const btn = document.getElementById("woAcceptBtn_" + id);
@@ -1780,13 +1676,22 @@ async function woAccept(id, pickGid) {
   try {
     // 2) 접수 단일 처리 (탭 등록 + 작업오더 기본정보 메타 매핑 + 인덱스 빌드 + 상태 reviewing)
     const payload = pickGid ? { action: "orderAdminAccept", id, gid: pickGid } : { action: "orderAdminAccept", id };
+    // ★ 같은 이름의 기존 업체를 사람이 "같은 업체"라고 확인한 경우에만 실린다(자동 병합 금지).
+    if (linkAdvertiserId) payload.linkAdvertiserId = linkAdvertiserId;
     const r = await gasGet(payload, 60000);
     if (!(r && r.ok)) {
       // ★ URL의 gid가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서
       //   사람이 골라 재접수(교정 흐름). 공용 팝업 = work-order-detail.js woAcceptTabPicker.
       if (r && r.gidNotFound && typeof woAcceptTabPicker === "function") {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
-        woAcceptTabPicker(r, g => woAccept(id, g));
+        woAcceptTabPicker(r, g => woAccept(id, g, linkAdvertiserId));
+        return;
+      }
+      // ★ 같은 이름의 기존 업체가 있어 자동 병합하지 않음 → 사람이 확인해 연결하고 재접수.
+      //   공용 팝업 = work-order-detail.js woAdvertiserLinkPicker.
+      if (r && r.advertiserNameConflict && typeof woAdvertiserLinkPicker === "function") {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
+        woAdvertiserLinkPicker(r, advId => woAccept(id, pickGid, advId));
         return;
       }
       // ★ 무시트 접수가 막힌 경우는 사유(건수 0·표준 열 미설정 등)를 그대로 보여준다.
@@ -2348,9 +2253,6 @@ const _CTX_TOOLBAR_DEFS = {
     { id:'ctx-rec-notice',  label:'공지설정',  icon:'fa-bullhorn',    style:'yellow',     onclick:"openNoticePanel()", title:'공지 배너 설정'},
     { id:'ctx-rec-preview', label:'미리보기',  icon:'fa-eye',         style:'',           onclick:"window.open('recruit.html','_blank')", title:'모집 페이지 미리보기'},
   ],
-  payment: [
-    { id:'ctx-pay-refresh', label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"initPaymentPanel()", title:'입금 목록 새로고침'},
-  ],
 };
 
 const _CTX_STYLE_MAP = {
@@ -2463,7 +2365,7 @@ function _renderReviewerList(list) {
 
   const rows = list.map((r, i) => {
     const name    = escHtml(r.name || "-");
-    const phone   = escHtml(r.phone || "-");
+    const phone   = escHtml((typeof fmtPhone==='function'?fmtPhone(r.phone):r.phone) || "-");
     const regAt   = escHtml(r.registeredAt || "-");
     const consent = r.consent ? '<span style="color:#0ca678;font-weight:700">동의</span>' : '<span style="color:#9CA3AF">-</span>';
     const incomeName = escHtml(r.incomeType || "");
@@ -2479,8 +2381,7 @@ function _renderReviewerList(list) {
       if (Array.isArray(subs) && subs.length > 0) {
         subAccountsHtml = subs.map(s => {
           const sName = escHtml(s.name || '?');
-          const sPhone = (s.phone || '').replace(/[^0-9]/g,'');
-          const sPhoneFmt = sPhone.length === 11 ? sPhone.slice(0,3)+'-'+sPhone.slice(3,7)+'-'+sPhone.slice(7) : sPhone;
+          const sPhoneFmt = (typeof fmtPhone==='function'?fmtPhone(s.phone || ''):s.phone || '');
           return `<div style="margin-bottom:2px"><span style="font-weight:600">${sName}</span> <span style="color:var(--t3);font-family:monospace;font-size:.72rem">${escHtml(sPhoneFmt)}</span></div>`;
         }).join('');
       }
@@ -3192,7 +3093,6 @@ async function loadAdminDashboard() {
     loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용 (DOM 재빌드 시 인라인 스타일 유지)
     _loadHiddenCols();  // ★ 열 숨김 상태 복원
     _resetSort();       // ★ 정렬 초기화
-    _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
     clearDashSearch();  // ★ 새로고침 시 검색 초기화
     setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
     _lastDashData = data;
@@ -3385,7 +3285,6 @@ function renderDashboard(data) {
   loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용
   _loadHiddenCols();  // ★ 열 숨김 상태 복원
   _resetSort();       // ★ 정렬 초기화
-  _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
   clearDashSearch();  // ★ 렌더 시 검색 초기화
   setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
   // ★ v10.0 P1-D: 재렌더 후 dirty 배지도 갱신
@@ -3544,86 +3443,6 @@ function _buildEndDateHtml(tabKey, endDate, isTabDone, isClosedTab) {
   return `<span style="display:flex;align-items:center;gap:2px">${badge}${refreshBtn}</span>`;
 }
 
-/* ── v9.9: 메모 공유 패널 ── */
-let _memoCurrentTab = null; // { sheetId, tabName, displayName }
-
-async function openMemoPanel(sheetId, tabName, displayName) {
-  _memoCurrentTab = { sheetId, tabName, displayName };
-  const overlay = document.getElementById("memoOverlay");
-  const titleEl = document.getElementById("memoModalTitle");
-  if (titleEl) titleEl.textContent = (displayName || tabName) + " 메모";
-  overlay.classList.add("open");
-  await _loadMemoMessages();
-}
-
-function closeMemoPanel() {
-  document.getElementById("memoOverlay").classList.remove("open");
-  _memoCurrentTab = null;
-}
-
-async function _loadMemoMessages() {
-  const chatArea = document.getElementById("memoChatArea");
-  if (!chatArea || !_memoCurrentTab) return;
-  chatArea.innerHTML = '<div class="memo-empty"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
-  try {
-    const data = await gasGet({ action: "getMemo", sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName });
-    const msgs = (data && data.messages) ? data.messages : [];
-    if (msgs.length === 0) {
-      chatArea.innerHTML = '<div class="memo-empty">아직 메모가 없습니다.<br>첫 메모를 남겨보세요!</div>';
-      return;
-    }
-    chatArea.innerHTML = msgs.map(m => {
-      const roleClass  = m.role === "admin" ? "admin" : "staff";
-      const roleLabel  = m.role === "admin" ? "👔 관리자" : "💼 AE";
-      const timeStr    = m.ts ? new Date(m.ts).toLocaleString("ko-KR", { month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
-      return `<div class="memo-bubble ${roleClass}">
-        <div>${escHtml(m.text)}</div>
-        <div class="memo-bubble-meta">${roleLabel} ${escHtml(m.name)} · ${timeStr}</div>
-      </div>`;
-    }).join("");
-    chatArea.scrollTop = chatArea.scrollHeight;
-  } catch(e) {
-    chatArea.innerHTML = `<div class="memo-empty" style="color:#EF4444">불러오기 실패: ${escHtml(e.message)}</div>`;
-  }
-}
-
-async function sendMemoMsg() {
-  if (!_memoCurrentTab) return;
-  const textEl = document.getElementById("memoInputText");
-  const text   = (textEl ? textEl.value : "").trim();
-  if (!text) { showToast("메모 내용을 입력하세요.", "warning"); return; }
-
-  // 관리자 세션에서 이름 가져오기
-  const _sess = (() => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch(_) { return null; }
-  })();
-  if (!_sess || !_sess.name) { showToast("로그인이 필요합니다.", "error"); return; }
-
-  const sendBtn = document.querySelector(".memo-send-btn");
-  if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>'; }
-  try {
-    await gasGet({ action: "saveMemo",
-      sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName,
-      role: "admin", name: _sess.name, text });
-    if (textEl) textEl.value = "";
-    await _loadMemoMessages();
-    // ★ 메모 미리보기 캐시 무효화
-    const tabKey = _memoCurrentTab.sheetId + "||" + _memoCurrentTab.tabName;
-    _invalidateMemoCache(tabKey);
-    document.querySelectorAll(`.btn-tab-memo`).forEach(btn => {
-      if (btn.closest("[data-tabkey='" + tabKey + "']") || btn.onclick?.toString().includes(escHtml(tabKey))) {
-        btn.classList.add("has-memo");
-      }
-    });
-  } catch(e) {
-    showToast("메모 저장 실패: " + e.message, "error");
-  } finally {
-    if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
-  }
-}
 async function refreshTabEndDate(btnEl, tabKey) {
   const parts = tabKey.split("||");
   if (parts.length < 2) return;
@@ -3873,7 +3692,6 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     <div style="display:flex;align-items:center;justify-content:center;gap:3px;flex-wrap:nowrap;overflow:hidden;min-width:0;padding:0 2px">
       <button class="tc-info-btn tc-clickable" data-tc="${tcAttr}" title="일괄 정보 입력·수정" style="flex-shrink:0">+정보</button>
       <button class="btn-tab-stats" onclick="event.stopPropagation();openStatsPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="진행률 상세 보기" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-chart-bar"></i></button>
-      <button class="btn-tab-memo" onclick="event.stopPropagation();openMemoPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="메모 보기/입력" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-comment-dots"></i></button>
     </div>`;
 }
 
@@ -3909,6 +3727,116 @@ const DASH_COL_DEFS = [
   { key: 'info',        varName: '--dc-info',        label: '⚙',         minPx: 82,  default: 90, noScale: true  },
 ];
 const COL_WIDTH_LS_KEY = 'dashColWidths_v11'; // ★ v11.1: 새 컬럼 레이아웃
+const COL_WIDTH_PENDING_LS_KEY = 'dashColWidthsPending_v1';
+let _serverColWidths = null; // null=서버 미저장/오프라인, {}=사용자가 서버에서 기본값으로 초기화함
+let _colWidthsSaveVersion = 0;
+let _colWidthsSaveChain = Promise.resolve();
+
+function _readLocalColWidths() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _savedColWidths() {
+  return _serverColWidths === null ? _readLocalColWidths() : _serverColWidths;
+}
+
+function _readPendingColWidths() {
+  try {
+    const pending = JSON.parse(localStorage.getItem(COL_WIDTH_PENDING_LS_KEY) || 'null');
+    return pending && typeof pending === 'object' && !Array.isArray(pending) ? pending : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function _setPendingColWidths(columnWidths) {
+  try { localStorage.setItem(COL_WIDTH_PENDING_LS_KEY, JSON.stringify(columnWidths)); } catch (_) {}
+}
+
+function _clearPendingColWidths() {
+  try { localStorage.removeItem(COL_WIDTH_PENDING_LS_KEY); } catch (_) {}
+}
+
+function _workboardPreferenceHeaders() {
+  const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
+  return token ? { 'Authorization': 'Bearer ' + token } : null;
+}
+
+async function _saveServerColWidths(columnWidths) {
+  const headers = _workboardPreferenceHeaders();
+  if (!headers) return false;
+  let timer;
+  try {
+    const controller = new AbortController();
+    timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(API_BASE_URL + '/api/admin/my-workboard-preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ columnWidths }),
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch (_) {
+    // 네트워크 실패는 로컬 폴백을 보존하며 다음 저장 때 다시 시도한다.
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// 모든 저장은 순서대로 처리한다. 각 요청 직전에 최신 버전인지 재확인하므로,
+// 빠르게 두 번 드래그해도 오래된 전체 스냅샷이 나중에 DB를 덮어쓰지 않는다.
+function _queueServerColWidths(columnWidths) {
+  const snapshot = { ...columnWidths };
+  const version = ++_colWidthsSaveVersion;
+  _setPendingColWidths(snapshot);
+  _colWidthsSaveChain = _colWidthsSaveChain.catch(() => false).then(async () => {
+    if (version !== _colWidthsSaveVersion) return false;
+    const saved = await _saveServerColWidths(snapshot);
+    if (saved && version === _colWidthsSaveVersion) _clearPendingColWidths();
+    return saved;
+  });
+  return _colWidthsSaveChain;
+}
+
+async function _loadServerColWidths() {
+  _serverColWidths = null;
+  const headers = _workboardPreferenceHeaders();
+  if (!headers) return false;
+  let timer;
+  try {
+    // 설정 API 지연이 작업보드 자체를 막지 않도록 짧게 제한한다.
+    const controller = new AbortController();
+    timer = setTimeout(() => controller.abort(), 4000);
+    const response = await fetch(API_BASE_URL + '/api/admin/my-workboard-preferences', { headers, signal: controller.signal });
+    if (!response.ok) return false;
+    const data = await response.json();
+    if (!data || !data.ok) return false;
+
+    const pending = _readPendingColWidths();
+    if (pending) {
+      // 실패했던 로컬 변경은 서버의 오래된 값보다 우선하며, 온라인이 되면 다시 저장한다.
+      _serverColWidths = pending;
+      void _queueServerColWidths(pending);
+    } else if (data.hasSaved) {
+      _serverColWidths = data.columnWidths && typeof data.columnWidths === 'object' ? data.columnWidths : {};
+    } else {
+      // 기존 브라우저 설정은 최초 한 번 서버로 이관해 사용자가 다시 조절하지 않게 한다.
+      _serverColWidths = _readLocalColWidths();
+      if (Object.keys(_serverColWidths).length) void _queueServerColWidths(_serverColWidths);
+    }
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** 컨테이너 content 너비 반환 (padding/border 제외, 실제 사용 가능한 너비) */
 function _getContainerWidth() {
@@ -3942,8 +3870,7 @@ function _getContainerWidth() {
 
 /** localStorage에서 저장된 너비 로드 후 CSS 변수 적용 (CB 컬럼 제외 - 모드 토글이 관리) */
 function loadColWidths() {
-  let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) {}
+  const saved = _savedColWidths();
   const root = document.documentElement;
   let applied = 0;
   DASH_COL_DEFS.forEach(col => {
@@ -3970,6 +3897,8 @@ function saveColWidths() {
     if (w && Number.isFinite(w) && w > 0) data[col.key] = w;
   });
   try { localStorage.setItem(COL_WIDTH_LS_KEY, JSON.stringify(data)); } catch(_) {}
+  _serverColWidths = data;
+  void _queueServerColWidths(data);
 }
 
 /** (호환성 stub) */
@@ -4003,9 +3932,7 @@ function _syncTabnameWidth(availW) {
   _lastAppliedW = availW;
 
   const root = document.documentElement;
-  const savedWidths = (() => {
-    try { return JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) { return {}; }
-  })();
+  const savedWidths = _savedColWidths();
   const pad = 28; // 좌우 padding 합계
 
   // 사용자가 수동으로 숨긴 열 (col-hidden 시스템)
@@ -4175,6 +4102,8 @@ function resetColWidths() {
     root.style.removeProperty(col.varName);
   });
   try { localStorage.removeItem(COL_WIDTH_LS_KEY); } catch(_) {}
+  _serverColWidths = {};
+  void _queueServerColWidths({});
   _closeColResizePopup();
   _lastAppliedW = 0; // 강제 재계산
   _syncTabnameWidth(); // 초기화 후 반응형 재계산
@@ -4509,94 +4438,6 @@ function _resetSort() {
     const icon = cell.querySelector('.col-sort-icon');
     if (icon) icon.innerHTML = '⇅';
   });
-}
-
-/* ══════════════════════════════════════════════════════════
-   ★ 기능 3: 메모 미리보기 툴팁
-   ══════════════════════════════════════════════════════════ */
-// 탭키별 메모 최근 내용 캐시 { tabKey: "최근메모텍스트" }
-const _memoPreviewCache = {};
-let _memoTooltipTimer = null;
-
-/** 메모 버튼에 hover 이벤트 등록 (대시보드 렌더 후 호출) */
-function _bindMemoPreviewTooltips() {
-  const wrap = document.getElementById('dashboardWrap');
-  if (!wrap) return;
-
-  // 위임 방식으로 등록 (행이 동적으로 추가되어도 동작)
-  wrap.addEventListener('mouseenter', _onMemoMouseEnter, true);
-  wrap.addEventListener('mouseleave', _onMemoMouseLeave, true);
-}
-
-function _onMemoMouseEnter(e) {
-  const btn = e.target.closest('.btn-tab-memo.has-memo');
-  if (!btn) return;
-
-  // onclick 속성에서 tabKey 추출 (sheetId + tabName)
-  const onclickStr = btn.getAttribute('onclick') || '';
-  const m = onclickStr.match(/openMemoPanel\('([^']+)'\s*,\s*'([^']+)'/);
-  if (!m) return;
-  const sheetId = m[1];
-  const tabName = m[2];
-  const tabKey  = sheetId + '||' + tabName;
-
-  clearTimeout(_memoTooltipTimer);
-  _memoTooltipTimer = setTimeout(async () => {
-    const tooltip = document.getElementById('memoPreviewTooltip');
-    if (!tooltip) return;
-
-    // 캐시 없으면 GAS 호출
-    if (!_memoPreviewCache[tabKey]) {
-      tooltip.textContent = '📝 로딩 중...';
-      _showMemoTooltipAt(tooltip, btn);
-      try {
-        const data = await gasGet({ action: 'getMemo', sheetId, tabName });
-        const msgs = (data && data.messages) ? data.messages : [];
-        if (msgs.length === 0) {
-          _memoPreviewCache[tabKey] = '(메모 없음)';
-        } else {
-          const last = msgs[msgs.length - 1];
-          const role = last.role === 'admin' ? '관리자' : 'AE';
-          const text = (last.text || '').slice(0, 60) + ((last.text||'').length > 60 ? '…' : '');
-          _memoPreviewCache[tabKey] = `💬 ${role}: ${text}`;
-        }
-      } catch(_) {
-        _memoPreviewCache[tabKey] = '(불러오기 실패)';
-      }
-    }
-
-    // 툴팁이 아직 표시 중이면 내용 업데이트
-    if (tooltip.style.display !== 'none') {
-      tooltip.textContent = _memoPreviewCache[tabKey] || '';
-      _showMemoTooltipAt(tooltip, btn);
-    }
-  }, 400); // 400ms 딜레이
-}
-
-function _onMemoMouseLeave(e) {
-  const btn = e.target.closest('.btn-tab-memo');
-  if (!btn) return;
-  clearTimeout(_memoTooltipTimer);
-  const tooltip = document.getElementById('memoPreviewTooltip');
-  if (tooltip) tooltip.style.display = 'none';
-}
-
-function _showMemoTooltipAt(tooltip, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  tooltip.style.display = 'block';
-  tooltip.style.left = (rect.left + window.scrollX) + 'px';
-  tooltip.style.top  = (rect.top  + window.scrollY - tooltip.offsetHeight - 10) + 'px';
-  // 화면 오른쪽 초과 방지
-  const tw = tooltip.offsetWidth;
-  const overRight = rect.left + tw - window.innerWidth + 12;
-  if (overRight > 0) {
-    tooltip.style.left = (rect.left + window.scrollX - overRight) + 'px';
-  }
-}
-
-// 메모 캐시 무효화 (메모 전송 후 호출)
-function _invalidateMemoCache(tabKey) {
-  delete _memoPreviewCache[tabKey];
 }
 
 /**
@@ -5663,146 +5504,6 @@ async function copyShortLink(btnEl) {
   }
 }
 
-/* ── 광고주 뷰 URL 복사 (sheetId 단위 고정 URL + 단축URL) ── */
-/* 캠페인 헤더 광고주 URL 복사 (sheetId 직접 전달) */
-async function copyCampViewerLink(btnEl) {
-  const sheetId = btnEl.getAttribute("data-sheetid") || "";
-  if (!sheetId) {
-    showToast("광고주 URL 생성 실패: sheetId가 없습니다.", "error");
-    return;
-  }
-
-  const base    = location.origin + location.pathname.replace(/[^/]*$/, "") + "viewer.html";
-  const longUrl = base + "?s=" + encodeURIComponent(sheetId);
-
-  const origHtml = btnEl.innerHTML;
-  btnEl.classList.add("loading");
-  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
-  btnEl.disabled  = true;
-
-  let finalUrl = longUrl;
-  try {
-    if (APP_CONFIG.GAS_WEB_APP_URL) {
-      const data = await gasGet({
-        action: "createShort",
-        s: sheetId, g: "", t: "__viewer__", d: ""
-      });
-      if (data && data.success && data.code) {
-        finalUrl = base + "?code=" + data.code;
-      }
-    }
-  } catch(e) {
-    console.warn("[campViewerLink] 단축URL 실패, 긴URL로 폴백:", e.message);
-  }
-
-  btnEl.classList.remove("loading");
-  btnEl.disabled = false;
-
-  const _markCopied = (ok) => {
-    btnEl.classList.add(ok ? "copied" : "error");
-    btnEl.innerHTML = ok
-      ? '<i class="fas fa-check"></i> 복사됨'
-      : '<i class="fas fa-times"></i> 실패';
-    setTimeout(() => {
-      btnEl.classList.remove("copied", "error");
-      btnEl.innerHTML = origHtml;
-    }, 2500);
-  };
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(finalUrl);
-    } else {
-      const ta = document.createElement("textarea");
-      ta.value = finalUrl;
-      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-    _markCopied(true);
-    showToast("👁 광고주 URL 복사 완료!", "success");
-  } catch(e) {
-    _markCopied(false);
-    showToast("복사 실패: " + e.message, "error");
-  }
-}
-
-async function copyViewerLink(btnEl) {
-  let tc = {};
-  try {
-    const raw = btnEl.getAttribute("data-tc") || "";
-    tc = JSON.parse(raw.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>'));
-  } catch(e) {
-    showToast("광고주 URL 생성 실패: 데이터 파싱 오류", "error");
-    return;
-  }
-
-  const sheetId = tc.sheetId || "";
-  if (!sheetId) {
-    showToast("광고주 URL 생성 실패: sheetId가 없습니다.", "error");
-    return;
-  }
-
-  // viewer.html 기본 URL (sheetId만 사용)
-  const base    = location.origin + location.pathname.replace(/[^/]*$/, "") + "viewer.html";
-  const longUrl = base + "?s=" + encodeURIComponent(sheetId);
-
-  const origHtml = btnEl.innerHTML;
-  btnEl.classList.add("loading");
-  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
-  btnEl.disabled  = true;
-
-  // 단축 URL 생성 (viewer 타입 — tabName을 "__viewer__"로 구분)
-  let finalUrl = longUrl;
-  try {
-    if (APP_CONFIG.GAS_WEB_APP_URL) {
-      const data = await gasGet({
-        action: "createShort",
-        s: sheetId, g: "", t: "__viewer__", d: ""
-      });
-      if (data && data.success && data.code) {
-        finalUrl = base + "?code=" + data.code;
-      }
-    }
-  } catch(e) {
-    console.warn("[viewerLink] 단축URL 실패, 긴URL로 폴백:", e.message);
-  }
-
-  btnEl.classList.remove("loading");
-  btnEl.disabled = false;
-
-  // 복사
-  const _markCopied = (ok) => {
-    btnEl.classList.add(ok ? "copied" : "error");
-    btnEl.innerHTML = ok ? '<i class="fas fa-check"></i>' : '<i class="fas fa-times"></i>';
-    setTimeout(() => {
-      btnEl.classList.remove("copied","error");
-      btnEl.innerHTML = origHtml;
-    }, 2500);
-  };
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(finalUrl);
-    } else {
-      const ta = document.createElement("textarea");
-      ta.value = finalUrl;
-      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-    _markCopied(true);
-    showToast("👁 광고주 URL 복사 완료!", "success");
-  } catch(e) {
-    _markCopied(false);
-    showToast("❌ 복사 실패: " + e.message, "error");
-  }
-}
-
 /**
  * 구매양식 전용 화면을 표시하고 true 반환 (일반 초기화 스킵)
  */
@@ -6685,8 +6386,15 @@ async function submitOrderForm() {
             displayName: ctx.displayName || "",  // 상품명 → 캠페인폴더명
             tabName:     ctx.tabName,            // 탭명 → 인덱스폴더명 기준
             round:       ctx.round       || "",  // 차수 → 폴더명에 삽입
-            sheetId:     ctx.sheetId     || ""   // ★ 탭명 변경 대응: ID로 세부목록 조회
+            sheetId:     ctx.sheetId     || "",  // ★ 탭명 변경 대응: ID로 세부목록 조회
+            orderSubmissionId: res.orderSubmissionId || "",
+            captureSessionId: res.captureSession && res.captureSession.id || "",
+            captureSessionToken: res.captureSession && res.captureSession.token || ""
           };
+
+          if (!uploadPayload.orderSubmissionId || !uploadPayload.captureSessionId || !uploadPayload.captureSessionToken) {
+            throw new Error("구매캡처 제출 세션을 발급받지 못했습니다.");
+          }
 
           // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 — 진행률 표시 + 2회 재시도
           let upJson = null;
@@ -6705,26 +6413,6 @@ async function submitOrderForm() {
           }
           if (upJson && upJson.ok) {
             console.log("[이미지 업로드] 완료:", upJson.fileUrl);
-            // ── 캡처 폴더 URL을 세부목록에 저장 (대시보드 바로가기 버튼용) ──
-            if (upJson.captureFolderUrl) {
-              try {
-                // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
-                const sfJson = await gasPost({
-                  action:           "saveCaptureFolder",
-                  sheetId:          ctx.sheetId  || "",
-                  sheetUrl:         ctx.sheetUrl || "",
-                  tabName:          ctx.tabName,
-                  captureFolderUrl: upJson.captureFolderUrl
-                });
-                if (sfJson && sfJson.ok) {
-                  console.log("[캡처폴더 저장] 완료:", upJson.captureFolderUrl);
-                } else {
-                  console.warn("[캡처폴더 저장] 실패:", sfJson?.error);
-                }
-              } catch(sfErr) {
-                console.warn("[캡처폴더 저장] 실패 (무시):", sfErr.message);
-              }
-            }
           } else {
             console.warn("[이미지 업로드] 실패:", upJson?.error);
           }
@@ -6903,7 +6591,12 @@ async function quickEditCell(e, cell) {
 
   } else if (field === '리뷰타입') {
     const _existingReview = (tcData.reviewType || '').trim();
-    const opts = ['실배송','빈박스','구매확정','믹스'];
+    const opts = _tcReviewOptions();          // ★ 단일 출처(위 _tcReviewOptions 주석 참조)
+    if (!opts.length) {
+      // 목록 모듈을 못 불러왔다 — 빈 선택지를 그려 "고를 게 없는 창"을 만들지 않는다.
+      popup.innerHTML += `<div style="font-size:.72rem;color:#B91C1C;padding:4px 2px">리뷰타입 목록 모듈을 불러오지 못했습니다 — 새로고침 후 다시 시도하세요.</div>`;
+      getValue = () => _existingReview;       // 저장해도 값이 바뀌지 않는다(조용한 해제 금지)
+    } else {
     popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
     getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
     // 기존값 pre-select
@@ -6918,6 +6611,7 @@ async function quickEditCell(e, cell) {
         btn.classList.add("sel");
       });
     });
+    }
 
   } else if (field === '담당자') {
     const _existingManager = (tcData.manager || '').trim();
@@ -7724,17 +7418,18 @@ async function _renderCaptureSlotsEditor(tcData) {
 
   list.innerHTML = "";
   if (!slots || slots.length === 0) {
-    _csAddSlotRow("리뷰");   // 첫 슬롯 시드 (기존 리뷰 제출과 호환)
+    _csAddSlotRow("리뷰", "review");   // 첫 슬롯 시드 (기존 리뷰 제출과 호환)
   } else {
-    slots.forEach(s => _csAddSlotRow((s && s.label) || ""));
+    slots.forEach(s => _csAddSlotRow((s && s.label) || "", (s && s.key) || ""));
   }
 }
 
-function _csAddSlotRow(label) {
+function _csAddSlotRow(label, key) {
   const list = document.getElementById("tcCaptureSlotsList");
   if (!list) return;
   const row = document.createElement("div");
   row.className = "tc-cs-row";
+  row.dataset.slotKey = key || "";
   row.style.cssText = "display:flex;gap:6px;margin-bottom:5px;align-items:center";
   row.innerHTML =
     '<span class="tc-cs-num" style="font-size:.66rem;color:#92400E;width:14px;text-align:center;flex-shrink:0"></span>' +
@@ -7760,15 +7455,17 @@ async function saveCaptureSlots() {
   const tabName = _tcCurrent.tabName || "";
   if (!sheetId || !tabName) { showToast("sheetId/tabName을 특정할 수 없습니다.", true); return; }
 
-  const labels = Array.from(document.querySelectorAll("#tcCaptureSlotsList .tc-cs-label"))
-    .map(i => i.value.trim()).filter(Boolean);
+  const slots = Array.from(document.querySelectorAll("#tcCaptureSlotsList .tc-cs-row"))
+    .map(row => ({ key: row.dataset.slotKey || "", label: row.querySelector(".tc-cs-label")?.value.trim() || "" }))
+    .filter(slot => slot.label);
+  const labels = slots.map(slot => slot.label);
 
   // 라벨 중복 방지
   const dup = labels.find((l, i) => labels.indexOf(l) !== i);
   if (dup) { showToast(`슬롯 라벨이 중복됩니다: "${dup}"`, "error"); return; }
 
   try {
-    const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: labels });
+    const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: slots });
     if (json && json.ok) {
       const n = (json.captureSlots || []).length;
       if (n > 1) {
@@ -8452,565 +8149,6 @@ function stopBuildProgress() {
   }, 2500);
 }
 
-
-// ── 탭 파싱 진단 ────────────────────────────────────────────────
-async function runSheetDiag() {
-  const urlInput = document.getElementById("diagSheetUrl");
-  const resultEl = document.getElementById("diagResult");
-  const rawUrl   = (urlInput?.value || "").trim();
-  if (!rawUrl) { showToast("시트 URL을 입력해주세요.", "warning"); return; }
-
-  // URL에서 sheetId, gid 추출
-  const sheetIdMatch = rawUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-  const gidMatch     = rawUrl.match(/[#&?]gid=(\d+)/);
-  if (!sheetIdMatch) { showToast("올바른 스프레드시트 URL이 아닙니다.", "error"); return; }
-
-  const sheetId = sheetIdMatch[1];
-  const gid     = gidMatch ? gidMatch[1] : "";
-
-  resultEl.style.display = "block";
-  resultEl.innerHTML = '<span style="color:#3182f6"><i class="fas fa-circle-notch fa-spin"></i> 진단 중...</span>';
-
-  try {
-    const data = await gasGet({ action: "debugSheet", sheetId, gid }, 30000);
-
-    if (data.error) {
-      resultEl.innerHTML = `<div style="color:#EF4444;padding:6px;background:#FEF2F2;border-radius:6px">❌ ${escHtml(data.error)}</div>`;
-      return;
-    }
-
-    const willParse = data.willParse;
-    const bg        = willParse ? "#F0FDF4" : "#FFF7ED";
-    const border    = willParse ? "#BBF7D0" : "#FED7AA";
-    const icon      = willParse ? "✅" : "⚠️";
-    const statusMsg = willParse
-      ? "정상 파싱 가능 — 동기화 시 조회됩니다"
-      : "파싱 불가 — 헤더 키워드가 인식되지 않아 인덱스에서 제외됩니다";
-
-    const headerPreview  = (data.detectedHeaders || []).filter(h => h).join(", ") || "(헤더 탐지 실패)";
-    const nameColsPreview = (data.nameColsFound  || []).map(x => `${x.header}(${x.keyword})`).join(", ") || "(없음)";
-    const previewHtml    = (data.previewRows || []).map(r =>
-      `<div style="color:${r.isDataRow ? "#166534" : "#6B7280"}">행${r.rowNum}${r.isDataRow ? " ★헤더" : ""}: ${escHtml(r.cells.substring(0,80))}</div>`
-    ).join("");
-
-    resultEl.innerHTML = `
-      <div style="padding:8px;background:${bg};border:1px solid ${border};border-radius:6px;line-height:1.6">
-        <div style="font-weight:700;font-size:.78rem">${icon} ${data.sheetName} — ${statusMsg}</div>
-        <div style="margin-top:4px;font-size:.71rem;color:#374151">
-          <b>헤더 행:</b> ${data.detectedHeaderRow > 0 ? data.detectedHeaderRow + "행" : "미탐지"}<br>
-          <b>인식된 헤더:</b> ${escHtml(headerPreview)}<br>
-          <b>이름 컬럼:</b> ${escHtml(nameColsPreview)}<br>
-          <b>전체 행수:</b> ${data.totalRows}행 / <b>전체 열수:</b> ${data.totalCols}열
-        </div>
-        ${!willParse ? `
-        <div style="margin-top:6px;font-size:.71rem;color:#92400E;border-top:1px solid ${border};padding-top:5px">
-          <b>탐지 키워드:</b> ${escHtml((data.DATA_TAB_KEYWORDS||[]).join(", "))}<br>
-          <b>이름 키워드:</b> ${escHtml((data.SEARCH_COLS||[]).join(", "))}<br>
-          → 위 키워드가 헤더에 없으면 GAS 담당자에게 헤더 확인 요청이 필요합니다.
-        </div>` : ""}
-        <details style="margin-top:4px">
-          <summary style="font-size:.7rem;color:#6B7280;cursor:pointer">상위 행 미리보기</summary>
-          <div style="font-size:.68rem;color:#4B5563;margin-top:2px">${previewHtml}</div>
-        </details>
-      </div>`;
-  } catch (err) {
-    resultEl.innerHTML = `<div style="color:#EF4444">❌ 오류: ${escHtml(err.message)}</div>`;
-  }
-}
-
-// ── 폴더 일괄 생성/배치 ──────────────────────────────────────
-// target: "capture" | "review" | "both"
-
-// ── 캡처폴더 현황 진단 ────────────────────────────────────────
-// 드라이브 실제 폴더명 vs 세부목록 tab_name/display_name 매핑 결과 표시
-async function diagCaptureFolders() {
-  const btn   = document.getElementById("btnDiagCapture");
-  const resEl = document.getElementById("diagCaptureResult");
-  if (btn) btn.disabled = true;
-  resEl.style.display = "block";
-  resEl.innerHTML = `<span style="color:#6B7280"><i class="fas fa-spinner fa-spin"></i> 폴더 현황 조회 중...</span>`;
-
-  try {
-    const data = await gasGet({ action: "diagCaptureFolders" });
-    if (!data || data.error) {
-      resEl.innerHTML = `<span style="color:#EF4444">&cross; 오류: ${escHtml(data?.error || "응답 없음")}</span>`;
-      return;
-    }
-
-    const details = data.details || [];
-    const total   = data.total || details.length;
-    const noFolder  = data.noFolderUrl  || 0;
-    const noCapture = data.noCaptureFolderUrl || 0;
-    const oauth     = data.oauthStatus || "unknown";
-
-    // 활성/마감 분류
-    const active = details.filter(d => !d.isClosed);
-    const activeNoCapture = active.filter(d => !d.captureFolderUrl);
-    const activeNoFolder  = active.filter(d => !d.folderUrl);
-
-    let html = `<div style="padding:6px 8px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;margin-bottom:6px;font-size:.72rem">
-      <b style="color:#1D4ED8"><i class="fas fa-chart-pie"></i> 진단 결과</b>
-      &nbsp;&middot;&nbsp; 전체 탭 <b>${total}개</b>
-      &nbsp;&middot;&nbsp; 활성 탭 <b>${active.length}개</b>
-      &nbsp;&middot;&nbsp; OAuth <b style="color:${oauth==='ok'?'#166534':'#B45309'}">${oauth}</b>
-    </div>`;
-
-    // 요약 카드
-    html += `<div style="display:flex;gap:6px;margin-bottom:6px;font-size:.70rem">
-      <div style="flex:1;padding:5px 8px;background:${activeNoCapture.length?'#FFF7ED':'#F0FDF4'};border:1px solid ${activeNoCapture.length?'#FED7AA':'#BBF7D0'};border-radius:6px">
-        <b>캡처폴더 미설정</b><br>활성 탭 중 <b style="color:${activeNoCapture.length?'#B45309':'#166534'}">${activeNoCapture.length}개</b>
-      </div>
-      <div style="flex:1;padding:5px 8px;background:${activeNoFolder.length?'#FFF7ED':'#F0FDF4'};border:1px solid ${activeNoFolder.length?'#FED7AA':'#BBF7D0'};border-radius:6px">
-        <b>리뷰폴더 미설정</b><br>활성 탭 중 <b style="color:${activeNoFolder.length?'#B45309':'#166534'}">${activeNoFolder.length}개</b>
-      </div>
-    </div>`;
-
-    // 미설정 탭 목록 (활성 중)
-    if (activeNoCapture.length > 0 || activeNoFolder.length > 0) {
-      const missingTabs = active.filter(d => !d.captureFolderUrl || !d.folderUrl);
-      html += `<details style="margin-bottom:6px"><summary style="font-size:.70rem;color:#92400E;cursor:pointer;font-weight:600">
-        <i class="fas fa-exclamation-triangle"></i> 미설정 탭 ${missingTabs.length}개 (클릭해서 보기)
-      </summary>
-      <table style="width:100%;border-collapse:collapse;font-size:.67rem;margin-top:3px">
-        <tr style="background:#F3F4F6">
-          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">탭명</th>
-          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">캠페인</th>
-          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">캡처</th>
-          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">리뷰</th>
-        </tr>
-        ${missingTabs.map(d => `<tr>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB;font-family:monospace">${escHtml(d.tabName)}</td>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB">${escHtml(d.campaignName||"-")}</td>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.captureFolderUrl?"&check;":"<span style='color:#EF4444'>&cross;</span>"}</td>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.folderUrl?"&check;":"<span style='color:#EF4444'>&cross;</span>"}</td>
-        </tr>`).join("")}
-      </table></details>`;
-    }
-
-    // 전체 탭 목록
-    html += `<details><summary style="font-size:.70rem;color:#6B7280;cursor:pointer;font-weight:600">
-      <i class="fas fa-list"></i> 전체 탭 목록 (${total}개)
-    </summary>
-    <table style="width:100%;border-collapse:collapse;font-size:.66rem;margin-top:3px">
-      <tr style="background:#F3F4F6">
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">탭명</th>
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">캠페인</th>
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">캡처</th>
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">리뷰</th>
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">상태</th>
-      </tr>
-      ${details.map(d => {
-        const st = d.isClosed ? "마감" : "활성";
-        const stColor = d.isClosed ? "#6B7280" : "#166534";
-        return `<tr style="background:${d.isClosed?'#F9FAFB':'#fff'}">
-          <td style="padding:2px 5px;border:1px solid #E5E7EB;font-family:monospace">${escHtml(d.tabName)}</td>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB">${escHtml(d.campaignName||"-")}</td>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.captureFolderUrl?"&check;":"&mdash;"}</td>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.folderUrl?"&check;":"&mdash;"}</td>
-          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center;color:${stColor}">${st}</td>
-        </tr>`;
-      }).join("")}
-    </table></details>`;
-
-    resEl.innerHTML = html;
-
-  } catch (err) {
-    resEl.innerHTML = `<span style="color:#EF4444">&cross; 예외: ${escHtml(err.message)}</span>`;
-    console.error("[diagCaptureFolders] 오류:", err);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-// ── 캡처폴더 구조 재편성 (단층 → 캠페인폴더 하위) ─────────────
-// dryRun=true → 미리보기 / dryRun=false → 실제 이동
-async function organizeCaptureFolders(dryRun) {
-  const btnDry = document.getElementById("btnOrganizeDry");
-  const btnRun = document.getElementById("btnOrganizeRun");
-  const resEl  = document.getElementById("organizeResult");
-
-  if (btnDry) btnDry.disabled = true;
-  if (btnRun) btnRun.disabled = true;
-  resEl.style.display = "block";
-  resEl.innerHTML = `<span style="color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${dryRun ? "미리보기 분석 중..." : "폴더 재편성 실행 중..."}</span>`;
-
-  try {
-    const payload = { action: "organizeCaptureFolders", dryRun: dryRun ? "true" : "false" };
-    const timeout = dryRun ? 60000 : 300000;
-    const data = dryRun
-      ? await gasGet({ action: "organizeCaptureFolders", dryRun: "true" })
-      : await gasPost(payload, timeout, { forcePost: true });
-
-    if (!data || data.error) {
-      resEl.innerHTML = `<span style="color:#EF4444">❌ 오류: ${escHtml(data?.error || "응답 없음")}</span>`;
-      return;
-    }
-
-    const movedCount   = (data.moved   || []).length;
-    const createdCount = (data.created || []).length;
-    const skippedCount = (data.skipped || []).length;
-    const errorCount   = (data.errors  || []).length;
-    const isDry        = data.dryRun;
-
-    // ── 결과 헤더 ──
-    let html = `<div style="padding:6px 8px;background:${isDry ? "#FFFBEB" : "#F0FDF4"};border:1px solid ${isDry ? "#FDE68A" : "#86EFAC"};border-radius:6px;margin-bottom:4px">
-      <b style="color:${isDry ? "#92400E" : "#166534"}">${isDry ? "🔍 미리보기 결과" : "✅ 재편성 완료"}</b>
-      &nbsp;·&nbsp; 이동 <b>${movedCount}건</b>
-      &nbsp;·&nbsp; 신규 캠페인폴더 <b>${createdCount}건</b>
-      &nbsp;·&nbsp; 스킵 <b>${skippedCount}건</b>
-      ${errorCount > 0 ? `&nbsp;·&nbsp; <span style="color:#EF4444">오류 ${errorCount}건</span>` : ""}
-      &nbsp;·&nbsp; <span style="color:#6B7280">${data.elapsed}초</span>
-    </div>`;
-
-    // ── 이동 목록 ──
-    if (movedCount > 0) {
-      html += `<div style="font-weight:700;color:#166534;margin:4px 0 2px">
-        📂 이동${isDry ? "(예정)" : "완료"} — 결과 경로: 📁캠페인폴더 / 📁인덱스폴더(원본명 그대로) / 🖼️캡처이미지
-      </div>`;
-      (data.moved || []).forEach(m => {
-        html += `<div style="padding:3px 6px;border-bottom:1px solid #E5E7EB;font-size:.68rem;display:flex;align-items:center;gap:3px">
-          <span style="color:#6B7280;font-size:.63rem">이전:</span>
-          <span style="color:#9CA3AF;font-family:monospace">📁${escHtml(m.folder)}</span>
-          <span style="color:#9CA3AF;font-size:.65rem"> ▶ </span>
-          <span style="color:#6B7280;font-size:.63rem">이후:</span>
-          <span style="font-family:monospace">
-            📁<b style="color:#166534">${escHtml(m.campFolder)}</b>
-            <span style="color:#9CA3AF">/</span>
-            📁<span style="color:#1F2937">${escHtml(m.folder)}</span>
-            <span style="color:#9CA3AF;font-size:.62rem"> / 🖼️이미지</span>
-          </span>
-        </div>`;
-      });
-    }
-
-    // ── 신규 생성 캠페인폴더 ──
-    if (createdCount > 0) {
-      html += `<div style="font-weight:700;color:#0369A1;margin:4px 0 2px">🆕 생성된 캠페인폴더${isDry ? "(예정)" : ""}:</div>`;
-      (data.created || []).forEach(c => {
-        html += `<div style="padding:2px 4px;color:#0369A1">📁 ${escHtml(c.campFolder)}</div>`;
-      });
-    }
-
-    // ── 스킵 목록 ──
-    if (skippedCount > 0) {
-      html += `<details style="margin-top:4px"><summary style="font-size:.7rem;color:#6B7280;cursor:pointer">스킵 ${skippedCount}건 (클릭해서 보기)</summary>`;
-      (data.skipped || []).forEach(s => {
-        html += `<div style="padding:2px 4px;font-size:.68rem;color:#6B7280;border-bottom:1px solid #F3F4F6">
-          <span style="color:#374151">${escHtml(s.folder)}</span> — ${escHtml(s.reason)}
-        </div>`;
-      });
-      html += `</details>`;
-    }
-
-    // ── 오류 ──
-    if (errorCount > 0) {
-      html += `<div style="font-weight:700;color:#EF4444;margin:4px 0 2px">❌ 오류:</div>`;
-      (data.errors || []).forEach(er => {
-        html += `<div style="padding:2px 4px;color:#EF4444;font-size:.68rem">${escHtml(er.folder)}: ${escHtml(er.message)}</div>`;
-      });
-    }
-
-    // ── 실행 후 안내 ──
-    if (!isDry && movedCount > 0) {
-      html += `<div style="margin-top:6px;padding:5px 8px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;font-size:.69rem;color:#1D4ED8">
-        <i class="fas fa-info-circle"></i>
-        이동 완료! <b>폴더 URL 동기화</b> 버튼을 눌러 세부목록 URL을 갱신하세요.
-      </div>`;
-    }
-
-    resEl.innerHTML = html;
-
-    if (!isDry && movedCount > 0) {
-      showToast(`✅ 캡처폴더 재편성 완료 — ${movedCount}건 이동, 캠페인폴더 ${createdCount}건 생성`, "success");
-    }
-
-  } catch (err) {
-    resEl.innerHTML = `<span style="color:#EF4444">❌ 예외: ${escHtml(err.message)}</span>`;
-    console.error("[organizeCaptureFolders] 오류:", err);
-  } finally {
-    if (btnDry) btnDry.disabled = false;
-    if (btnRun) btnRun.disabled = false;
-  }
-}
-
-// ── 구버전 폴더명 → 신규형식 일괄 마이그레이션 ────────────────
-async function migrateFolderNames(dryRun) {
-
-  const resultEl = document.getElementById("migrateResult");
-
-  // 실제 변환은 확인 팝업
-  if (!dryRun) {
-    const ok = confirm(
-      "⚠️ 구버전 폴더명 실제 변환\n\n" +
-      "Drive 폴더명이 {탭명} → {탭명}_{캠페인명} 형식으로 변경됩니다.\n" +
-      "파일이 신규 폴더에 이미 존재하면 파일이동 후 구버전 폴더는 휴지통으로 이동합니다.\n\n" +
-      "폴더 ID는 그대로이므로 기존 북마크/링크는 계속 동작합니다.\n\n계속하시겠습니까?"
-    );
-    if (!ok) return;
-  }
-
-  const dryBtn = document.getElementById("btnMigrateDry");
-  const runBtn = document.getElementById("btnMigrateRun");
-  if (dryBtn) dryBtn.disabled = true;
-  if (runBtn) runBtn.disabled = true;
-  if (dryBtn) dryBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> ' + (dryRun ? "분석 중..." : "변환 중...");
-
-  if (resultEl) { resultEl.style.display = "none"; resultEl.innerHTML = ""; }
-
-  try {
-    // 미리보기: JSONP GET (빠름) / 실제 변환: fetch POST 강제 (Drive 작업이 길어도 안전)
-    const data = dryRun
-      ? await gasPost({ action: "migrateFolderNames", target: "both", dryRun: "true"  }, 60000)
-      : await gasPost({ action: "migrateFolderNames", target: "both", dryRun: "false" }, 300000, { forcePost: true });
-
-    if (data && data.ok) {
-      const s = data.summary || {};
-      const renamed = data.renamed || [];
-      const skipped = data.skipped || [];
-      const errors  = data.errors  || [];
-
-      // 변환 예정/완료 목록 테이블 생성
-      let rows = "";
-      renamed.forEach(r => {
-        const badge = r.action === "이름변경"
-          ? `<span style="color:#0ca678;background:#D1FAE5;padding:1px 5px;border-radius:3px;font-size:.65rem">${r.action}</span>`
-          : `<span style="color:#D97706;background:#FEF3C7;padding:1px 5px;border-radius:3px;font-size:.65rem">${r.action}</span>`;
-        rows += `<tr style="border-bottom:1px solid #F3F4F6">
-          <td style="padding:3px 5px">${escHtml(r.type)}</td>
-          <td style="padding:3px 5px;color:#6B7280">${escHtml(r.old)}</td>
-          <td style="padding:3px 5px">→</td>
-          <td style="padding:3px 5px;color:#1D4ED8;font-weight:600">${escHtml(r.newName)}</td>
-          <td style="padding:3px 5px">${badge}</td>
-        </tr>`;
-      });
-
-      // 오류 행
-      errors.forEach(e => {
-        rows += `<tr style="background:#FEF2F2;border-bottom:1px solid #FECACA">
-          <td style="padding:3px 5px;color:#EF4444">${escHtml(e.type)}</td>
-          <td colspan="3" style="padding:3px 5px;color:#EF4444">${escHtml(e.tab)}: ${escHtml(e.message)}</td>
-          <td></td>
-        </tr>`;
-      });
-
-      const headerColor = dryRun ? "#FFFBEB" : "#F0FDF4";
-      const headerBorder = dryRun ? "#FDE68A" : "#BBF7D0";
-      const titleIcon = dryRun ? "🔍" : "✅";
-
-      let html = `<div style="padding:6px 8px;background:${headerColor};border:1px solid ${headerBorder};border-radius:6px;line-height:1.6">`;
-      html += `<b>${titleIcon} ${dryRun ? "[미리보기]" : "[완료]"} 폴더명 변환</b> (${data.elapsed}초)<br>`;
-      html += `캡처폴더 <b>${s.capture ? s.capture.renamed : 0}</b>건, 리뷰폴더 <b>${s.review ? s.review.renamed : 0}</b>건 변환 / 스킵 <b>${s.skipped || 0}</b>건`;
-      if (s.errors) html += ` / <span style="color:#EF4444">오류 ${s.errors}건</span>`;
-      html += `</div>`;
-
-      if (rows) {
-        html += `<div style="margin-top:4px;overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:.69rem">
-            <thead><tr style="background:#F9FAFB;font-weight:700">
-              <th style="padding:3px 5px;text-align:left">구분</th>
-              <th style="padding:3px 5px;text-align:left">기존 경로</th>
-              <th></th>
-              <th style="padding:3px 5px;text-align:left">신규 폴더명</th>
-              <th style="padding:3px 5px;text-align:left">처리</th>
-            </tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>`;
-      } else {
-        html += `<div style="color:#6B7280;font-size:.71rem;margin-top:3px">변환 대상 폴더 없음 (이미 모두 신규형식)</div>`;
-      }
-
-      if (resultEl) { resultEl.style.display = "block"; resultEl.innerHTML = html; }
-      showToast((dryRun ? "🔍 미리보기 완료" : "✅ 변환 완료") + " — " + renamed.length + "건", dryRun ? "" : "success");
-
-    } else {
-      const errMsg = data?.error || "알 수 없는 오류";
-      if (resultEl) {
-        resultEl.style.display = "block";
-        resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 실패: ${escHtml(errMsg)}</div>`;
-      }
-      showToast("❌ 실패: " + errMsg, "error");
-    }
-  } catch (err) {
-    const errMsg = err.message || "";
-    if (resultEl) {
-      resultEl.style.display = "block";
-      resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 오류: ${escHtml(errMsg)}</div>`;
-    }
-    showToast("❌ 오류: " + errMsg, "error");
-    console.error("[migrateFolderNames] 오류:", err);
-  } finally {
-    if (dryBtn) { dryBtn.disabled = false; dryBtn.innerHTML = '<i class="fas fa-search"></i> 미리보기'; }
-    if (runBtn) { runBtn.disabled = false; runBtn.innerHTML = '<i class="fas fa-play"></i> 실제 변환'; }
-  }
-}
-
-async function batchCreateFolders(target) {
-
-  const labelMap = { capture: "캡처폴더", review: "리뷰폴더", both: "캡처+리뷰폴더" };
-  const label    = labelMap[target] || target;
-
-  const ok = confirm(
-    `📂 ${label} 일괄 생성/배치\n\n` +
-    `세부목록의 미완료 탭에 대해 드라이브 폴더를 생성하고 세부목록 URL을 업데이트합니다.\n` +
-    `이미 폴더가 있는 경우 그대로 유지됩니다.\n\n계속하시겠습니까?`
-  );
-  if (!ok) return;
-
-  // 버튼 비활성화
-  const btns = ["btnBatchCapture", "btnBatchReview", "btnBatchBoth"].map(id => document.getElementById(id)).filter(Boolean);
-  btns.forEach(b => { b.disabled = true; });
-  const targetBtn = document.getElementById(target === "capture" ? "btnBatchCapture" : target === "review" ? "btnBatchReview" : "btnBatchBoth");
-  if (targetBtn) targetBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 생성 중...';
-
-  const resultEl = document.getElementById("batchFolderResult");
-  if (resultEl) { resultEl.style.display = "none"; resultEl.innerHTML = ""; }
-
-  try {
-    const data = await gasPost({ action: "batchCreateFolders", target }, 120000);
-
-    if (data && data.ok) {
-      const c = data.capture || {};
-      const r = data.review  || {};
-      const errNote = data.errors && data.errors.length
-        ? `<div style="color:#EF4444;margin-top:3px">⚠️ 오류 ${data.errors.length}건: ${escHtml(data.errors.slice(0,3).join(" / "))}</div>`
-        : "";
-
-      let html = `<div style="padding:6px 8px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;line-height:1.6">`;
-      html += `<b>✅ ${label} 일괄 생성/배치 완료</b> (${data.elapsed}초)<br>`;
-      if (target === "both" || target === "capture")
-        html += `📂 캡처폴더: 신규 <b>${c.created}</b>개 생성 / 기존 <b>${c.exists}</b>개 배치 / 완료·마감 <b>${c.skipped}</b>건 스킵<br>`;
-      if (target === "both" || target === "review")
-        html += `📁 리뷰폴더: 신규 <b>${r.created}</b>개 생성 / 기존 <b>${r.exists}</b>개 배치 / 완료·마감 <b>${r.skipped}</b>건 스킵`;
-      html += errNote + `</div>`;
-
-      if (resultEl) { resultEl.style.display = "block"; resultEl.innerHTML = html; }
-      showToast("✅ " + label + " 일괄 생성/배치 완료 (" + data.elapsed + "초)", "success");
-      try { await loadAdminDashboard(); } catch(_) {}
-    } else {
-      const errMsg = data?.error || "알 수 없는 오류";
-      if (resultEl) {
-        resultEl.style.display = "block";
-        resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 실패: ${escHtml(errMsg)}</div>`;
-      }
-      showToast("❌ 생성/배치 실패: " + errMsg, "error");
-    }
-  } catch (err) {
-    const errMsg = err.message || "";
-    if (resultEl) {
-      resultEl.style.display = "block";
-      resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 오류: ${escHtml(errMsg)}</div>`;
-    }
-    showToast("❌ 오류: " + errMsg, "error");
-    console.error("[batchCreateFolders] 오류:", err);
-  } finally {
-    btns.forEach(b => { b.disabled = false; });
-    const iconMap = { capture: '<i class="fas fa-camera"></i> 캡처폴더', review: '<i class="fas fa-folder-open"></i> 리뷰폴더', both: '<i class="fas fa-layer-group"></i> 전체' };
-    btns.forEach(b => {
-      const t = b.id === "btnBatchCapture" ? "capture" : b.id === "btnBatchReview" ? "review" : "both";
-      if (iconMap[t]) b.innerHTML = iconMap[t];
-    });
-  }
-}
-
-// ── 구매캡쳐/리뷰저장 폴더 일괄 동기화 ────────────────────────
-async function syncAllFolders() {
-
-  const forceChk = document.getElementById("chkForceSync");
-  const force    = forceChk && forceChk.checked;
-
-  // 강제 재설정이면 한 번 더 확인
-  if (force) {
-    const ok = confirm("⚠️ 강제 재설정 모드\n\n기존에 저장된 폴더 URL을 모두 지우고 드라이브에서 다시 탐색합니다.\n\n계속하시겠습니까?");
-    if (!ok) return;
-  }
-
-  const btn = document.getElementById("btnSyncAllFolders");
-  btn.disabled  = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> ' + (force ? "재설정 중..." : "동기화 중...");
-
-  try {
-    const data = await gasGet({ action: "syncAllFolders", force: force ? "true" : "false" }, 120000);
-    if (data.error) {
-      showToast("❌ 폴더 동기화 실패: " + data.error, "error");
-    } else {
-      const lines = [];
-      if (data.capture) lines.push(`📂 캡쳐폴더 ${data.capture.updated}건 업데이트, ${data.capture.skipped}건 유지`);
-      if (data.review)  lines.push(`📁 리뷰폴더 ${data.review.updated}건 업데이트, ${data.review.skipped}건 유지${data.review.notFound > 0 ? `, ${data.review.notFound}건 미매칭` : ""}`);
-      const modeLabel = force ? "[강제재설정] " : "";
-      showToast("✅ " + modeLabel + "동기화 완료 (" + data.elapsed + "초)\n" + lines.join(" / "), "success");
-      if (forceChk) forceChk.checked = false; // 완료 후 체크박스 해제
-      try { await loadAdminDashboard(); } catch(_) {}
-    }
-  } catch (err) {
-    showToast("❌ 폴더 동기화 오류: " + (err.message || ""), "error");
-  } finally {
-    btn.disabled  = false;
-    btn.innerHTML = '<i class="fas fa-folder-sync"></i> 구매캡쳐/리뷰저장 폴더 일괄동기화';
-  }
-}
-
-// ── 탭 단위 폴더 재설정 ────────────────────────────────────────
-// target: "capture" | "review" | "both"
-async function resetTabFolder(target) {
-  if (!_tcCurrent) { showToast("탭 정보를 확인할 수 없습니다.", "error"); return; }
-
-  const targetLabel = { capture: "캡처폴더", review: "리뷰폴더", both: "캡처+리뷰폴더" }[target] || target;
-  const ok = confirm(`⚠️ ${_tcCurrent.tabName || "이 탭"}\n\n${targetLabel}의 URL을 초기화하고 드라이브에서 다시 탐색합니다.\n드라이브에 폴더가 없으면 빈값으로 유지됩니다.\n\n계속하시겠습니까?`);
-  if (!ok) return;
-
-  // 버튼 피드백 (세 버튼 모두 비활성화)
-  const resetBtns = document.querySelectorAll("#tcPopover button[onclick^=\"resetTabFolder\"]");
-  resetBtns.forEach(b => { b.disabled = true; });
-  const targetBtn = document.querySelector(`#tcPopover button[onclick="resetTabFolder('${target}')"]`);
-  if (targetBtn) targetBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 탐색 중...';
-
-  try {
-    const data = await gasPost({
-      action:   "resetTabFolderUrls",
-      sheetId:  _tcCurrent.sheetId || "",
-      tabName:  _tcCurrent.tabName || "",
-      target:   target
-    });
-
-    if (data && data.ok) {
-      // ★ 결과값으로 입력란 즉시 업데이트
-      if ((target === "both" || target === "capture") && data.captureUrl && data.captureUrl !== "(미발견)") {
-        document.getElementById("tcCaptureFolderUrlInput").value = data.captureUrl;
-        _tcCurrent.captureFolderUrl = data.captureUrl;
-      }
-      if ((target === "both" || target === "review") && data.folderUrl && data.folderUrl !== "(미발견)") {
-        document.getElementById("tcFolderUrlInput").value = data.folderUrl;
-        _tcCurrent.folderUrl = data.folderUrl;
-      }
-
-      const captureMsg = (target === "both" || target === "capture")
-        ? `\n📂 캡처: ${data.captureUrl}` : "";
-      const reviewMsg  = (target === "both" || target === "review")
-        ? `\n📁 리뷰: ${data.folderUrl}`  : "";
-      showToast("✅ " + targetLabel + " 재설정 완료" + captureMsg + reviewMsg, "success");
-
-      // 대시보드 탭 데이터도 즉시 반영
-      _patchTabAndRerender(_tcCurrent.sheetId, _tcCurrent.tabName, {
-        folderUrl:        (target === "both" || target === "review")  ? (data.folderUrl  !== "(미발견)" ? data.folderUrl  : _tcCurrent.folderUrl)        : _tcCurrent.folderUrl,
-        captureFolderUrl: (target === "both" || target === "capture") ? (data.captureUrl !== "(미발견)" ? data.captureUrl : _tcCurrent.captureFolderUrl) : _tcCurrent.captureFolderUrl
-      });
-    } else {
-      showToast("❌ 재설정 실패: " + (data?.error || "서버 오류"), "error");
-    }
-  } catch (err) {
-    showToast("❌ 재설정 오류: " + (err.message || ""), "error");
-    console.error("[resetTabFolder] 오류:", err);
-  } finally {
-    resetBtns.forEach(b => { b.disabled = false; });
-    // 버튼 텍스트 원복
-    const labels = { capture: '<i class="fas fa-camera"></i> 캡처폴더 재설정', review: '<i class="fas fa-folder-open"></i> 리뷰폴더 재설정', both: '<i class="fas fa-sync-alt"></i> 전체 재설정' }; // 라벨 유지
-    resetBtns.forEach(b => {
-      const t = b.getAttribute("onclick")?.match(/resetTabFolder\('(.+?)'\)/)?.[1];
-      if (t && labels[t]) b.innerHTML = labels[t];
-    });
-  }
-}
 
 // ★ v9.12: 스마트 동기화 (증분 우선)
 // dirty 탭 있으면 해당 캠페인만 빠르게 갱신, 없으면 전체 갱신
@@ -11670,56 +10808,6 @@ async function removeCampEditor(phone8) {
   } catch (e) { showToast('❌ ' + e.message, true); }
 }
 
-/* ── 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) ──
-   활성 탭별 매핑 보유율 + 출처(자동기록/수동) + 드리프트(기록≠현재 시트 → 키워드 폴백 중) 목록 */
-async function loadMappingCoverage() {
-  const wrap = document.getElementById('mappingCoverageWrap');
-  if (!wrap) return;
-  wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
-  try {
-    const data = await gasGet({ action: 'mappingCoverage' });
-    if (!data.ok) {
-      wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error || '조회 실패')}</div>`;
-      return;
-    }
-    const s = data.stats || {};
-    const tabs = data.tabs || [];
-    const drifting = tabs.filter(t => (t.drift || []).length > 0);
-
-    const chip = (label, val, color) =>
-      `<div style="flex:1 1 110px;min-width:100px;border:1px solid #E5E7EB;border-radius:8px;padding:8px 10px;background:var(--bg2,#fff)">
-        <div style="font-size:.68rem;color:var(--t3)">${label}</div>
-        <div style="font-size:1.05rem;font-weight:700;color:${color || 'var(--t1)'}">${val}</div>
-      </div>`;
-
-    let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">`
-      + chip('활성 탭', s.total ?? 0)
-      + chip('매핑 기록됨', `${s.mapped ?? 0} (자동 ${s.byProvenance?.auto ?? 0} · 수동 ${s.byProvenance?.manual ?? 0})`, '#0ca678')
-      + chip('미기록', s.unmapped ?? 0, (s.unmapped ? '#D97706' : undefined))
-      + chip('gid 없음(기록 불가)', s.noGid ?? 0, (s.noGid ? '#6B7280' : undefined))
-      + chip('⚠ 드리프트', s.drifting ?? 0, (s.drifting ? '#DC2626' : '#0ca678'))
-      + `</div>`;
-
-    if (drifting.length === 0) {
-      html += '<div style="padding:8px 4px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#12b886"></i> 드리프트 없음 — 모든 기록이 현재 시트 구조와 일치합니다.</div>';
-    } else {
-      html += `<div style="font-size:.75rem;color:var(--t3);margin:4px 0 6px">⚠ 드리프트 탭 ${drifting.length}건 — 시트 구조가 기록과 어긋나 해당 항목은 임시(키워드) 방식으로 감지 중. 컬럼 매핑에서 재확인하세요.</div>`;
-      drifting.forEach(t => {
-        const fields = (t.drift || []).map(d => `${escHtml(d.field)}(${escHtml(d.reason)})`).join(', ');
-        const mapUrl = `raw-mirror.html?sheetId=${encodeURIComponent(t.sheetId || '')}&gid=${encodeURIComponent(t.tabGid || '')}`;
-        html += `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #FDE68A;background:#FFFBEB;border-radius:8px;margin-bottom:6px;flex-wrap:wrap">
-          <span style="font-weight:600">${escHtml(t.campaignName || '')} / ${escHtml(t.tabName || '')}</span>
-          <span style="font-size:.72rem;color:#92400E">${fields}</span>
-          <a href="${mapUrl}" target="_blank" style="margin-left:auto;font-size:.74rem;color:#1D4ED8;text-decoration:underline;white-space:nowrap">컬럼 매핑 열기</a>
-        </div>`;
-      });
-    }
-    wrap.innerHTML = html;
-  } catch (e) {
-    wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message || '조회 실패')}</div>`;
-  }
-}
-
 async function loadUnrecognizedTabs() {
   const wrap = document.getElementById('unrecogListWrap');
   if (!wrap) return;
@@ -12541,6 +11629,24 @@ async function _saveLinkInput(id, sheetId, tabName, apiKey, dbKey) {
 }
 
 /** 택일 팝업: 버튼 클릭 → 드롭다운 */
+/* ══ 리뷰타입 선택지 — **단일 출처는 서버 `utils/reviewType.REVIEW_TYPES`** ══════════════
+   화면 사본은 `index-recruit.js` 의 `RF_REVIEW_TYPE_LABELS` 하나뿐이고 회귀가드가 서버 목록과의
+   일치를 고정한다(workManager 사본 규율). 여기서 목록을 다시 적으면 안 되는 이유:
+   ★★ 옛 어휘(실배송·빈박스·믹스)를 고르면 `tab_configs.review_type` 에 **배송유형**이 들어가
+     `resolveReviewType` 이 null 로 떨어진다 → "설정했는데 검수는 미지정"(2026-08-06 실사고의 입구).
+   ★ 표시(배지)는 옛 값도 그대로 남긴다 — 입력 창구에서만 뺀다. */
+function _tcReviewOptions() {
+  return (typeof RF_REVIEW_TYPE_LABELS !== 'undefined')
+    ? RF_REVIEW_TYPE_LABELS.map(([, l]) => l) : [];
+}
+/* 배지 색 — 옛 값도 남긴다(그 탭에 무엇이 설정돼 있었는지 보여야 한다). 목록 밖은 회색 기본. */
+const TC_REVIEW_COLORS = {
+  "포토":"#5B21B6","포토_bg":"#EDE9FE","텍스트":"#075985","텍스트_bg":"#E0F2FE",
+  "구매확정":"#065F46","구매확정_bg":"#D1FAE5","별점":"#92400E","별점_bg":"#FEF3C7",
+  "혼합":"#9D174D","혼합_bg":"#FCE7F3",
+  "실배송":"#0ca678","실배송_bg":"#D1FAE5","빈박스":"#3182f6","빈박스_bg":"#e8f1fe",
+  "믹스":"#D97706","믹스_bg":"#FEF3C7"
+};
 function _inlineSelect(t, dbKey, apiKey, options, colorMap, round) {
   const cur = t[dbKey] || "";
   const display = cur || "—";
@@ -12942,9 +12048,8 @@ function _cellVal(t, col) {
   if (k === "manager") return _inlineSelect(t, "manager", "manager", ["만두","망고"], {
     "만두":"#1D4ED8","만두_bg":"#DBEAFE","망고":"#D97706","망고_bg":"#FEF3C7"
   }, t._isRoundRow ? t._roundLabel : null);
-  if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", ["실배송","빈박스","구매확정","믹스"], {
-    "실배송":"#0ca678","실배송_bg":"#D1FAE5","빈박스":"#3182f6","빈박스_bg":"#e8f1fe","구매확정":"#1D4ED8","구매확정_bg":"#DBEAFE","믹스":"#D97706","믹스_bg":"#FEF3C7"
-  }, t._isRoundRow ? t._roundLabel : null);
+  if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", _tcReviewOptions(),
+    TC_REVIEW_COLORS, t._isRoundRow ? t._roundLabel : null);
   if (k === "payment_type") return _inlineSelect(t, "payment_type", "paymentType", ["현금","현영","소득"], {
     "현금":"#0ca678","현금_bg":"#D1FAE5","현영":"#1D4ED8","현영_bg":"#DBEAFE","소득":"#3182f6","소득_bg":"#e8f1fe"
   }, t._isRoundRow ? t._roundLabel : null);
@@ -14025,15 +13130,7 @@ function openTabDashDetail(idx) {
     ]},
   ];
 
-  // 🧾 외부모집 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
-  //   값을 onclick 문자열에 심지 않고 인덱스로만 넘긴다(탭명·시트명 주입 벡터 차단).
-  let html = `<div style="display:flex;align-items:center;gap:8px;background:#F0FDFA;border:1px solid #99E6D8;border-radius:10px;padding:9px 12px;margin-bottom:14px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.78rem;font-weight:800;color:#0F766E">외부모집 리뷰어 구매양식</div>
-        <div style="font-size:.68rem;color:#6B7280;margin-top:1px">카톡으로 받은 슬래시양식을 붙여넣으면 리뷰어 등록·시트 기록까지 한 번에 처리됩니다</div>
-      </div>
-      <button onclick="openManualOrderForTab(${idx})" style="font-size:.74rem;font-weight:800;background:#0F766E;color:#fff;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap">🧾 수동제출</button>
-    </div>`;
+  let html = '';
   groups.forEach(g => {
     html += `<div style="margin-bottom:14px">
       <div style="font-size:.82rem;font-weight:700;color:${g.color};margin-bottom:6px"><i class="fas ${g.icon}" style="margin-right:5px"></i>${g.title}</div>
@@ -14055,20 +13152,6 @@ function openTabDashDetail(idx) {
 function closeTabDashDetail() {
   const modal = document.getElementById("tabDashDetailModal");
   if (modal) modal.style.display = "none";
-}
-
-/** 🧾 작업 탭 관리 상세 → 외부모집 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
-function openManualOrderForTab(idx) {
-  const t = _filterTabDashData()[idx];
-  if (!t) return;
-  if (!window.ManualOrder) { showToast("수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.", "error"); return; }
-  window.ManualOrder.open({
-    sheetId: t.sheet_id || "",
-    tabName: t.tab_name || "",
-    gid: t.tab_gid ? String(t.tab_gid) : "",
-    campaignId: null,          // 탭 단위 진입 — 참여형 정원 차감은 공고 카드·관제 패널 경로에서만
-    title: t.display_name || t.tab_name || "",
-  });
 }
 
 // ── CSV 내보내기 ──
@@ -14097,1208 +13180,6 @@ function exportTabDashCSV() {
   a.download = `탭설정현황_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   showToast(`${filtered.length}건 CSV 다운로드`, "success");
-}
-
-// ── [DEPRECATED] 시트 동기화 — 베이스시트 의존성 제거됨, DB가 원본 ──
-async function syncTabFromSheet() {
-  showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
-}
-
-// ── DB 선택적 초기화 ──
-async function resetAllData() {
-  // 체크박스에서 선택된 항목 수집
-  const targets = [];
-  const labels = [];
-  if (document.getElementById("resetDashboard")?.checked) { targets.push("dashboard"); labels.push("대시보드"); }
-  if (document.getElementById("resetArchive")?.checked) { targets.push("archive"); labels.push("마감"); }
-  if (document.getElementById("resetUnrecognized")?.checked) { targets.push("unrecognized"); labels.push("인식실패탭"); }
-
-  if (targets.length === 0) { showToast("초기화할 항목을 1개 이상 선택하세요.", "warning"); return; }
-
-  const step1 = prompt(
-    `⚠ 경고: 선택된 항목의 데이터가 삭제됩니다.\n\n` +
-    `삭제 대상: ${labels.join(", ")}\n\n` +
-    `계속하려면 'RESET' 을 입력하세요:`
-  );
-  if (step1 !== "RESET") { showToast("초기화 취소됨", "info"); return; }
-
-  const step2 = confirm(`[${labels.join(", ")}] 데이터를 삭제합니다.\n이 작업은 되돌릴 수 없습니다.`);
-  if (!step2) { showToast("초기화 취소됨", "info"); return; }
-
-  const btn = document.getElementById("btnResetAll");
-  const _save = btn ? btn.innerHTML : "";
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 초기화 중...'; }
-
-  try {
-    const res = await gasPost({ action: "resetAllData", confirm: "RESET_ALL_DATA", targets }, 60000);
-    if (res.error) { showToast("초기화 오류: " + res.error, "error"); return; }
-
-    const d = res.deleted || {};
-    const parts = Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ");
-    showToast(`✅ 초기화 완료 [${labels.join("+")}]: ${parts}`, "success");
-
-    // 대시보드 새로고침
-    if (typeof loadTabDashboard === "function") loadTabDashboard();
-  } catch (err) {
-    showToast("초기화 오류: " + err.message, "error");
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = _save; }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// [DEPRECATED v11.8.0] 통합 구조 동기화 — 2탭 통합으로 폐기
-// → 인덱스 스캔(indexScan) + DB 동기화(indexScanSync)를 사용하세요
-// ═══════════════════════════════════════════════════════════
-async function fullMasterSync(dryRun) {
-  showToast("[v11.8.0] 구조 동기화는 폐기되었습니다. '인덱스 스캔' + 'DB 동기화'를 사용하세요.", "warning");
-}
-    "• 파싱 결과를 DB에 즉시 반영 (추가/수정/삭제)\n" +
-// [DEPRECATED v11.8.0] _showFullSyncPreview 제거됨
-// [DEPRECATED v11.8.0] syncSettingsOnly 제거됨 — DB가 설정 원본
-async function syncSettingsOnly() {
-  showToast("[v11.8.0] 설정 동기화는 폐기되었습니다. DB가 설정 원본이므로 웹 UI에서 직접 설정하세요.", "warning");
-}
-
-// ═══════════════════════════════════════════════════════════
-// ★ 인덱스 스캔 (시트DB → 각 시트 파싱 → 탭목록 기록)
-// HTML: btnIndexScanDry / btnIndexScanRun → indexScan(dryRun)
-// 백엔드: POST /api/tab/index-scan
-// ═══════════════════════════════════════════════════════════
-async function indexScan(dryRun) {
-  const btnDry = document.getElementById("btnIndexScanDry");
-  const btnRun = document.getElementById("btnIndexScanRun");
-  const resultEl = document.getElementById("indexScanResult");
-  const activeBtn = dryRun ? btnDry : btnRun;
-  const actionLabel = dryRun ? "미리보기" : "실행";
-
-  if (!dryRun && !confirm(
-    "인덱스 스캔을 실행합니다.\n\n" +
-    "• 시트DB에서 모든 시트 URL을 읽어옵니다\n" +
-    "• 각 시트에 접속하여 탭이름, 탭URL을 파싱합니다\n" +
-    "• 파싱 결과를 탭목록 시트에 기록합니다\n" +
-    "• 기존 설정값(담당자, 택배 등)은 보존됩니다\n\n" +
-    "계속하시겠습니까?"
-  )) return;
-
-  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
-  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
-  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
-  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
-
-  showToast(`🔍 인덱스 스캔 ${actionLabel} 진행중... (약 60~120초 소요)`, "info");
-
-  try {
-    const res = await gasPost({ action: "indexScan", dryRun: !!dryRun }, 300000);
-    if (res.error) { showToast(res.error, "error"); return; }
-
-    if (dryRun) {
-      // ── 미리보기 결과 ──
-      const parts = [];
-      parts.push(`${res.sheetsScanned || 0}개 시트 스캔`);
-      parts.push(`총 ${res.totalTabs || 0}개 탭`);
-      if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
-      showToast(`[미리보기] ${parts.join(", ")} (${res.elapsed || ''})`, res.errors > 0 ? "warning" : "info");
-
-      // 미리보기 상세 표시
-      if (res.preview && res.preview.length > 0 && resultEl) {
-        _showIndexScanPreview(res, resultEl);
-      }
-    } else {
-      // ── 실행 결과 ──
-      const cacheLabel = res.usedCache ? " (캐시 적용 — 재스캔 생략)" : "";
-      showToast(`✅ 인덱스 스캔 완료: ${res.totalTabs || 0}개 탭 기록${cacheLabel} (${res.elapsed || ''})`, "success");
-
-      // 결과 표시
-      if (resultEl) {
-        resultEl.style.display = "block";
-        resultEl.innerHTML = `<div style="font-size:.72rem;color:#065F46;background:#D1FAE5;padding:6px 8px;border-radius:4px">
-          ✅ ${res.totalTabs}개 탭 → 탭목록 시트에 기록 완료 (${res.elapsed})
-          ${res.usedCache ? '<br><small style="color:#92400E">캐시 적용 — 재스캔 생략됨</small>' : ''}
-        </div>`;
-      }
-    }
-  } catch (err) {
-    showToast("인덱스 스캔 오류: " + err.message, "error");
-  } finally {
-    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
-    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
-    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
-  }
-}
-
-function _showIndexScanPreview(res, resultEl) {
-  if (!resultEl) return;
-  // 캠페인별 그룹핑
-  const groups = {};
-  (res.preview || []).forEach(p => {
-    const key = p.campaign || '(알 수 없음)';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(p);
-  });
-
-  let html = `<div style="margin-bottom:6px;font-size:.72rem;color:#374151">
-    <b>📊 ${res.sheetsScanned}개 시트</b> · 총 ${res.totalTabs}탭
-    ${res.errors > 0 ? ` · <span style="color:#DC2626">오류 ${res.errors}</span>` : ''}
-    · 소요: ${res.elapsed || '?'}
-  </div>`;
-
-  for (const [campaign, tabs] of Object.entries(groups)) {
-    html += `<div style="margin-top:4px;font-size:.7rem;font-weight:600;color:#15803D">📁 ${campaign} (${tabs.length})</div>`;
-    for (const tab of tabs) {
-      const tabUrlShort = tab.tabUrl ? tab.tabUrl.replace(/.*#/, '#') : '';
-      html += `<div style="padding:1px 0 1px 12px;font-size:.68rem;color:#4B5563">
-        ${tab.tabName} <span style="color:#9CA3AF;font-size:.6rem">${tabUrlShort}</span>
-      </div>`;
-    }
-  }
-
-  if (res.errorDetails && res.errorDetails.length > 0) {
-    html += `<div style="margin-top:6px;padding:4px 6px;background:#FEF2F2;border-radius:4px;font-size:.66rem;color:#DC2626">
-      ⚠ 오류 ${res.errors}건:
-    </div>`;
-    for (const err of res.errorDetails) {
-      const desc = err.desc || (typeof _translateErrorClient === 'function' ? _translateErrorClient(err.error) : err.error);
-      html += `<div style="padding:2px 0 2px 12px;font-size:.64rem;color:#B91C1C;line-height:1.5">
-        ${err.sheetId || '?'} — ${err.error} (${err.errorCode || ''})
-        <span style="color:#DC2626;font-weight:600">→ ${desc}</span>
-      </div>`;
-    }
-  }
-
-  html += `<div style="margin-top:6px;font-size:.66rem;color:#92400E;background:#FEF3C7;padding:4px 6px;border-radius:4px">
-    ⚠ 미리보기 모드 — "실행"을 클릭해야 탭목록 시트에 기록됩니다.
-  </div>`;
-
-  resultEl.style.display = "block";
-  resultEl.innerHTML = html;
-}
-
-// ═══════════════════════════════════════════════════════════
-// ★ 인덱스 스캔 → DB 동기화 (탭목록 시트 → DB 직접 반영)
-// HTML: btnIndexSyncDry / btnIndexSyncRun → indexScanSync(dryRun)
-// 백엔드: POST /api/tab/index-scan-sync
-// ═══════════════════════════════════════════════════════════
-async function indexScanSync(dryRun) {
-  const btnDry = document.getElementById("btnIndexSyncDry");
-  const btnRun = document.getElementById("btnIndexSyncRun");
-  const resultEl = document.getElementById("indexSyncResult");
-  const activeBtn = dryRun ? btnDry : btnRun;
-  const actionLabel = dryRun ? "미리보기" : "DB 반영";
-
-  if (!dryRun && !confirm(
-    "탭목록 시트 데이터를 DB에 직접 반영합니다.\n\n" +
-    "• campaigns, tab_configs, index_master 테이블에 UPSERT\n" +
-    "• 대시보드에 탭 목록이 즉시 표시됩니다\n" +
-    "• 기존 설정값(담당자, 택배 등)은 보존됩니다\n\n" +
-    "계속하시겠습니까?"
-  )) return;
-
-  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
-  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
-  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
-  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
-
-  showToast(`🔄 DB ${actionLabel} 진행중...`, "info");
-
-  try {
-    const res = await gasPost({ action: "indexScanSync", dryRun: !!dryRun, fromCache: false }, 60000);
-    if (res.error) { showToast(res.error, "error"); return; }
-
-    if (dryRun) {
-      // ── 미리보기 결과 ──
-      const c = res.campaigns || {};
-      const t = res.tabs || {};
-      const ix = res.index || {};
-      const parts = [];
-      parts.push(`campaigns: 기존 ${c.existing || 0} / +${c.toAdd || 0}`);
-      parts.push(`tabs: 기존 ${t.existing || 0} / +${t.toAdd || 0} / ~${t.toUpdate || 0}`);
-      parts.push(`index: 기존 ${ix.existing || 0} / +${ix.toAdd || 0}`);
-      showToast(`[미리보기] ${parts.join(", ")}`, "info");
-
-      if (resultEl) {
-        resultEl.style.display = "block";
-        resultEl.innerHTML = `<div style="font-size:.7rem;color:#374151">
-          <div>📊 총 ${res.totalRows || 0}행 분석 (${res.elapsed || '?'})</div>
-          <div style="margin-top:3px">• campaigns: 기존 ${c.existing || 0} / <b style="color:#15803D">+${c.toAdd || 0}</b></div>
-          <div>• tab_configs: 기존 ${t.existing || 0} / <b style="color:#15803D">+${t.toAdd || 0}</b> / <b style="color:#D97706">~${t.toUpdate || 0}</b></div>
-          <div>• index_master: 기존 ${ix.existing || 0} / <b style="color:#15803D">+${ix.toAdd || 0}</b></div>
-          <div style="margin-top:4px;color:#92400E;font-size:.66rem">⚠ 미리보기 — "DB 반영"을 클릭해야 실제로 저장됩니다.</div>
-        </div>`;
-      }
-    } else {
-      // ── 실행 결과 ──
-      showToast(`✅ DB 동기화 완료: ${res.message || ''}`, "success");
-
-      if (resultEl) {
-        resultEl.style.display = "block";
-        resultEl.innerHTML = `<div style="font-size:.7rem;color:#065F46;background:#D1FAE5;padding:6px;border-radius:4px">
-          ✅ ${res.message || 'DB 반영 완료'}
-        </div>`;
-      }
-
-      // 대시보드 새로고침
-      if (typeof loadAdminDashboard === "function") loadAdminDashboard();
-    }
-  } catch (err) {
-    showToast("DB 동기화 오류: " + err.message, "error");
-  } finally {
-    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
-    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
-    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
-  }
-}
-
-async function scanMasterSheet(dryRun) {
-  const btnDry = document.getElementById("btnScanMasterDry");
-  const btnRun = document.getElementById("btnScanMasterRun");
-  const activeBtn = dryRun ? btnDry : btnRun;
-  const actionLabel = dryRun ? "스캔 미리보기" : "스캔 실행";
-
-  if (!dryRun && !confirm(
-    "마스터 시트 A열의 sheet_url에 직접 접속하여 시트 제목(campaign_name)과 탭 목록(tab_name)을 새로 파싱합니다.\n\n" +
-    "• campaign_name: 각 시트의 실제 제목으로 채워집니다\n" +
-    "• tab_name: 각 시트의 실제 탭 이름으로 채워집니다\n" +
-    "• 기존 설정값(담당자, 택합 등)은 tab_name 기준으로 보존됩니다\n\n" +
-    "계속하시겠습니까?"
-  )) return;
-
-  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
-  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
-  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
-  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
-
-  showToast(`🔍 ${actionLabel} 진행중... (마스터 시트 URL에서 직접 파싱, 약 60~120초 소요)`, "info");
-
-  try {
-    const res = await gasPost({ action: "scanMasterSheet", dryRun: !!dryRun }, 300000);
-    if (res.error) { showToast(res.error, "error"); return; }
-
-    const parts = [];
-    parts.push(`${res.sheetsScanned || 0}개 시트 스캔`);
-    parts.push(`총 ${res.totalTabs || 0}개 탭`);
-    if (res.newTabs > 0) parts.push(`신규 ${res.newTabs}개`);
-    if (res.preservedTabs > 0) parts.push(`기존설정 보존 ${res.preservedTabs}개`);
-    if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
-
-    const prefix = dryRun ? "[미리보기] " : "✅ ";
-    showToast(`${prefix}${parts.join(", ")} (${res.elapsed})`, res.errors > 0 ? "warning" : "success");
-
-    // 미리보기 결과 모달
-    if (res.preview && res.preview.length > 0) {
-      _showScanResult(res, dryRun);
-    }
-  } catch (err) {
-    showToast("스캔 오류: " + err.message, "error");
-  } finally {
-    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
-    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
-    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
-  }
-}
-
-function _showScanResult(res, dryRun) {
-  const old = document.getElementById("scanMasterResultModal");
-  if (old) old.remove();
-
-  // 캠페인별 그룹핑
-  const groups = {};
-  (res.preview || []).forEach(p => {
-    const key = p.campaign || '(알 수 없음)';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(p);
-  });
-
-  let tableHtml = '';
-  for (const [campaign, tabs] of Object.entries(groups)) {
-    tableHtml += `<tr style="background:#F0FDF4"><td colspan="3" style="padding:6px 8px;font-size:.72rem;font-weight:700;color:#15803D">
-      📁 ${campaign} (${tabs.length}개 탭)</td></tr>`;
-    for (const tab of tabs) {
-      const badge = tab.isNew
-        ? '<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 6px;border-radius:4px;font-size:.64rem">신규</span>'
-        : '<span style="background:#F3F4F6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:.64rem">기존</span>';
-      tableHtml += `<tr>
-        <td style="padding:3px 8px 3px 24px;font-size:.7rem">${tab.tabName}</td>
-        <td style="padding:3px 8px;font-size:.7rem">${badge}</td>
-      </tr>`;
-    }
-  }
-
-  const errHtml = (res.errorDetails || []).length > 0
-    ? `<div style="margin-top:8px;padding:6px;background:#FEF2F2;border-radius:6px;font-size:.68rem;color:#DC2626">
-        <b>오류:</b><br>${res.errorDetails.map(function(e) {
-          var desc = e.desc || (typeof _translateErrorClient === 'function' ? _translateErrorClient(e.error) : e.error);
-          return '<span style="color:#6B7280">' + (e.sheetId||'?') + ': ' + e.error + '</span><br><span style="color:#DC2626;font-weight:600">→ ' + desc + '</span>';
-        }).join('<br>')}</div>` : '';
-
-  const modal = document.createElement('div');
-  modal.id = 'scanMasterResultModal';
-  modal.className = 'modal-overlay';
-  modal.innerHTML = `
-    <div class="modal-box" style="max-width:600px;max-height:80vh;overflow:auto">
-      <div class="modal-header">
-        <h3><i class="fas fa-search" style="color:#15803D"></i>
-          시트 스캔 ${dryRun ? '미리보기' : '결과'}</h3>
-        <button class="btn-icon-sm" onclick="document.getElementById('scanMasterResultModal').remove()">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-      <div style="display:flex;gap:12px;margin-bottom:8px;font-size:.72rem;flex-wrap:wrap">
-        <span>📊 ${res.sheetsScanned}개 시트 스캔</span>
-        <span>📄 총 ${res.totalTabs}개 탭</span>
-        <span>🆕 신규 ${res.newTabs}개</span>
-        <span>♻ 설정보존 ${res.preservedTabs}개</span>
-        ${res.errors > 0 ? `<span style="color:#DC2626">❌ 오류 ${res.errors}건</span>` : ''}
-      </div>
-      <table style="width:100%;border-collapse:collapse">${tableHtml}</table>
-      ${errHtml}
-      ${dryRun ? '<div style="margin-top:8px;padding:6px;background:#FEF3C7;border-radius:6px;font-size:.68rem;color:#92400E">⚠ 미리보기 모드 — "스캔 실행"을 클릭해야 마스터 시트에 실제로 기록됩니다.</div>' : ''}
-    </div>`;
-  document.body.appendChild(modal);
-}
-
-// ── 마스터 구글시트 → DB 동기화 ──
-async function syncMasterSheet(dryRun) {
-  const btnDry = document.getElementById("btnSyncMasterDry");
-  const btnRun = document.getElementById("btnSyncMasterRun");
-  const activeBtn = dryRun ? btnDry : btnRun;
-  const actionLabel = dryRun ? "미리보기" : "동기화";
-
-  if (!dryRun && !confirm(
-    "마스터 구글시트 데이터를 DB에 동기화합니다.\n\n" +
-    "• campaigns 테이블: 시트 목록 추가/삭제\n" +
-    "• tab_configs 테이블: 탭 설정 추가/수정/삭제\n\n" +
-    "⚠ 시트에 없는 DB 데이터는 삭제됩니다.\n계속하시겠습니까?"
-  )) return;
-
-  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
-  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
-  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
-  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
-
-  showToast(`🔄 마스터 시트 ${actionLabel} 진행중...`, "info");
-
-  try {
-    const res = await gasPost({ action: "syncMasterSheet", dryRun: !!dryRun }, 180000);
-    if (res.error) { showToast(res.error, "error"); return; }
-
-    // 결과 요약 토스트
-    const parts = [];
-    const c = res.campaigns || {};
-    const t = res.tabs || {};
-    if (c.added > 0) parts.push(`캠페인 +${c.added}`);
-    if (c.removed > 0) parts.push(`캠페인 -${c.removed}`);
-    if (t.added > 0) parts.push(`탭 +${t.added}`);
-    if (t.updated > 0) parts.push(`탭 ~${t.updated}`);
-    if (t.removed > 0) parts.push(`탭 -${t.removed}`);
-    if (parts.length === 0) parts.push("변경 없음 — DB와 시트가 일치합니다");
-
-    const prefix = dryRun ? "[미리보기] " : "✅ ";
-    const totalChanges = (c.added || 0) + (c.removed || 0) + (t.added || 0) + (t.updated || 0) + (t.removed || 0);
-    showToast(`${prefix}${parts.join(", ")} (${res.elapsed})`, totalChanges > 0 ? (dryRun ? "info" : "success") : "success");
-
-    // 상세 결과 모달 표시
-    if (res.details && res.details.length > 0) {
-      _showMasterSyncResult(res, dryRun);
-    }
-
-    // 실제 실행 후 대시보드 새로고침
-    if (!dryRun && totalChanges > 0) {
-      loadTabDashboard();
-    }
-  } catch (err) {
-    showToast("마스터 시트 동기화 오류: " + err.message, "error");
-  } finally {
-    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
-    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
-    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
-  }
-}
-
-function _showMasterSyncResult(res, dryRun) {
-  const old = document.getElementById("masterSyncResultModal");
-  if (old) old.remove();
-
-  const actionColor = (action) => {
-    if (action.includes('add')) return '#0ca678';
-    if (action.includes('update')) return '#0369A1';
-    if (action.includes('remove')) return '#DC2626';
-    return '#6B7280';
-  };
-  const actionLabel = (action) => {
-    if (action.includes('dry_add')) return '추가 예정';
-    if (action.includes('dry_update')) return '수정 예정';
-    if (action.includes('dry_remove')) return '삭제 예정';
-    if (action.includes('added')) return '추가됨';
-    if (action.includes('updated')) return '수정됨';
-    if (action.includes('removed')) return '삭제됨';
-    return action;
-  };
-
-  const rows = (res.details || []).map(d => {
-    const name = d.type === 'campaign' ? `📁 ${d.name}` : `📄 ${d.campaign || ''} / ${d.tabName}`;
-    const changeDetail = d.changes
-      ? d.changes.map(c => `${c.col}: ${c.from || '(빈값)'} → ${c.to || '(빈값)'}`).join('<br>')
-      : '';
-    return `<tr>
-      <td style="padding:4px 8px;font-size:.72rem;white-space:nowrap">
-        <span style="color:${actionColor(d.action)};font-weight:600">${actionLabel(d.action)}</span>
-      </td>
-      <td style="padding:4px 8px;font-size:.72rem">${name}</td>
-      <td style="padding:4px 8px;font-size:.68rem;color:#6B7280">${changeDetail}</td>
-    </tr>`;
-  }).join('');
-
-  const c = res.campaigns || {};
-  const t = res.tabs || {};
-  const summaryHtml = `
-    <div style="display:flex;gap:12px;margin-bottom:8px;font-size:.72rem">
-      <span>📊 시트 ${res.sheetRows || 0}행</span>
-      <span>📁 캠페인: +${c.added || 0} / -${c.removed || 0} / =${c.unchanged || 0}</span>
-      <span>📄 탭: +${t.added || 0} / ~${t.updated || 0} / -${t.removed || 0} / =${t.unchanged || 0}</span>
-    </div>`;
-
-  const modal = document.createElement('div');
-  modal.id = 'masterSyncResultModal';
-  modal.className = 'modal-overlay';
-  modal.innerHTML = `
-    <div class="modal-box" style="max-width:700px;max-height:80vh;overflow:auto">
-      <div class="modal-header">
-        <h3><i class="fas fa-cloud-download-alt" style="color:#0ca678"></i>
-          마스터 시트 동기화 ${dryRun ? '미리보기' : '결과'}</h3>
-        <button class="btn-icon-sm" onclick="document.getElementById('masterSyncResultModal').remove()">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-      ${summaryHtml}
-      <table style="width:100%;border-collapse:collapse">
-        <thead><tr style="background:#F9FAFB;border-bottom:1px solid #E5E7EB">
-          <th style="padding:6px 8px;text-align:left;font-size:.7rem">상태</th>
-          <th style="padding:6px 8px;text-align:left;font-size:.7rem">대상</th>
-          <th style="padding:6px 8px;text-align:left;font-size:.7rem">변경 내용</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-  document.body.appendChild(modal);
-}
-
-// ── 탭명·URL 동기화 (시트 실제 탭명 ↔ DB) ──
-async function syncTabNames(dryRun) {
-  // ★ 유지보수 도구 버튼(btnSyncTabNamesDry/Run) + 설정 탭 버튼(btnSyncTabNames) 모두 지원
-  const btnDry = document.getElementById("btnSyncTabNamesDry");
-  const btnRun = document.getElementById("btnSyncTabNamesRun");
-  const btnSettings = document.getElementById("btnSyncTabNames");
-  const activeBtn = dryRun ? (btnDry || btnSettings) : (btnRun || btnSettings);
-  const actionLabel = dryRun ? "탐지" : "적용";
-
-  // ★ 버튼 로딩 상태 + 즉시 피드백 토스트
-  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
-  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
-  // 양쪽 버튼 모두 비활성화
-  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
-  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
-  if (btnSettings && btnSettings !== activeBtn) btnSettings.disabled = true;
-
-  // ★ 고정 프로그레스 배너 표시 (진행 상태를 명확히 전달)
-  _showSyncProgressBanner(actionLabel);
-
-  try {
-    const res = await gasPost({ action: "syncTabNames", dryRun: !!dryRun }, 180000);
-    _hideSyncProgressBanner();
-    if (res.error) { showToast(res.error, "error"); return; }
-
-    // 결과 요약 토스트
-    const parts = [];
-    if (res.renamed > 0) parts.push(`탭명 변경 ${res.renamed}건`);
-    if (res.urlFixed > 0) parts.push(`URL 교정 ${res.urlFixed}건`);
-    if (res.gidFilled > 0) parts.push(`GID 보충 ${res.gidFilled}건`);
-    if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
-    if (parts.length === 0) parts.push("변경 없음 — 모든 탭명이 일치합니다");
-
-    const prefix = dryRun ? "[1단계 탐지] " : "[2단계 적용] ";
-    const sheetInfo = res.totalSheets ? `${res.totalSheets}개 시트, ` : "";
-    showToast(`${prefix}${sheetInfo}${parts.join(", ")} (${res.elapsed})`, res.errors > 0 ? "warning" : "success");
-
-    // ★ 미리보기(dryRun)에서는 항상 모달 표시 (변경 없어도 결과 확인 가능)
-    // 실행 모드에서는 변경 있을 때만 표시
-    if (dryRun || (res.results && res.results.length > 0)) {
-      _showSyncTabNamesResult(res, dryRun);
-    }
-
-    // 실제 실행 후 대시보드 새로고침
-    if (!dryRun && (res.renamed > 0 || res.urlFixed > 0 || res.gidFilled > 0)) {
-      loadTabDashboard();
-    }
-  } catch (err) {
-    _hideSyncProgressBanner();
-    showToast("탭명 동기화 오류: " + err.message, "error");
-  } finally {
-    // ★ 모든 관련 버튼 복원
-    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
-    if (btnDry && btnDry !== activeBtn) { btnDry.disabled = false; }
-    if (btnRun && btnRun !== activeBtn) { btnRun.disabled = false; }
-    if (btnSettings && btnSettings !== activeBtn) { btnSettings.disabled = false; btnSettings.innerHTML = '<i class="fas fa-exchange-alt"></i> 탭명 동기화'; }
-  }
-}
-
-// ★ 탭명 동기화 진행 상태 고정 배너
-let _syncProgressInterval = null;
-function _showSyncProgressBanner(actionLabel) {
-  _hideSyncProgressBanner(); // 기존 배너 제거
-  const banner = document.createElement('div');
-  banner.id = 'syncProgressBanner';
-  banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:9999;background:#1E40AF;color:#fff;border-radius:10px;padding:12px 24px;box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:12px;font-size:.82rem;min-width:320px;animation:slideInR .3s ease';
-  const startTime = Date.now();
-  banner.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;flex:1">
-      <div class="sync-spinner" style="width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite"></div>
-      <div>
-        <div style="font-weight:600">탭명 동기화 ${actionLabel} 진행중</div>
-        <div style="font-size:.72rem;opacity:.8;margin-top:2px">
-          전체 시트 확인 중... <span id="syncProgressTimer">0초</span> 경과
-        </div>
-      </div>
-    </div>
-    <div style="font-size:.68rem;opacity:.7;text-align:right">약 30~90초 소요</div>
-  `;
-  document.body.appendChild(banner);
-
-  // 경과 시간 업데이트
-  _syncProgressInterval = setInterval(() => {
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    const timerEl = document.getElementById('syncProgressTimer');
-    if (timerEl) timerEl.textContent = `${elapsed}초`;
-  }, 1000);
-}
-
-function _hideSyncProgressBanner() {
-  clearInterval(_syncProgressInterval);
-  _syncProgressInterval = null;
-  const banner = document.getElementById('syncProgressBanner');
-  if (banner) {
-    banner.style.opacity = '0';
-    banner.style.transform = 'translateX(-50%) translateY(-10px)';
-    banner.style.transition = 'opacity .3s, transform .3s';
-    setTimeout(() => banner.remove(), 300);
-  }
-}
-
-function _showSyncTabNamesResult(res, dryRun) {
-  // 기존 결과 모달 제거
-  const old = document.getElementById("syncTabNamesResultModal");
-  if (old) old.remove();
-
-  const statusColor = (s) => {
-    if (s === 'renamed') return '#0ca678';
-    if (s === 'url_fixed') return '#0369A1';
-    if (s === 'gid_filled') return '#0891B2';
-    if (s === 'dry_run' || s === 'dry_run_url' || s === 'dry_run_gid') return '#3182f6';
-    if (s === 'error' || s === 'sheet_error') return '#DC2626';
-    if (s === 'no_gid' || s === 'no_gid_missing') return '#D97706';
-    return '#6B7280';
-  };
-  const statusLabel = (s) => {
-    if (s === 'renamed') return '변경 완료';
-    if (s === 'url_fixed') return 'URL 교정';
-    if (s === 'gid_filled') return 'GID 보충';
-    if (s === 'dry_run') return '변경 예정';
-    if (s === 'dry_run_url') return 'URL 교정 예정';
-    if (s === 'dry_run_gid') return 'GID 보충 예정';
-    if (s === 'error' || s === 'sheet_error') return '오류';
-    if (s === 'no_gid' || s === 'no_gid_missing') return 'GID 없음';
-    return s;
-  };
-
-  const resultItems = res.results || [];
-  let tableRows = '';
-  if (resultItems.length === 0) {
-    tableRows = `<tr><td colspan="3" style="padding:20px;text-align:center;font-size:.82rem;color:#0ca678"><i class="fas fa-check-circle" style="margin-right:6px"></i>${dryRun ? '변경할 항목이 없습니다 — 모든 탭명이 시트와 일치합니다.' : '동기화 완료 — 모든 변경이 적용되었습니다.'}</td></tr>`;
-  } else {
-    tableRows = resultItems.map(r => {
-    const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:600;color:#fff;background:${statusColor(r.status)}">${statusLabel(r.status)}</span>`;
-    let detail = '';
-    if (r.newName && r.newName !== r.oldName) {
-      detail += `<span style="color:#DC2626;text-decoration:line-through">${escHtml(r.oldName)}</span> → <b style="color:#0ca678">${escHtml(r.newName)}</b>`;
-    } else {
-      detail += escHtml(r.oldName || '');
-    }
-    if (r.urlFixed) {
-      detail += `<br><span style="font-size:.65rem;color:#0369A1"><i class="fas fa-link"></i> URL 교정됨</span>`;
-    }
-    if (r.gidFilled) {
-      detail += `<br><span style="font-size:.65rem;color:#0891B2"><i class="fas fa-fingerprint"></i> GID=${r.filledGid} 보충${r.status && r.status.includes('dry') ? ' 예정' : '됨'}</span>`;
-    }
-    if (r.error) {
-      detail += `<br><span style="font-size:.65rem;color:#DC2626">${escHtml(r.error)}</span>`;
-    }
-    if (r.message) {
-      detail += `<br><span style="font-size:.65rem;color:#D97706">${escHtml(r.message)}</span>`;
-    }
-    if (r.hint) {
-      detail += `<br><span style="font-size:.63rem;color:#3182f6"><i class="fas fa-lightbulb"></i> ${escHtml(r.hint)}</span>`;
-    }
-    if (r.affectedTabs && r.affectedTabs.length > 0) {
-      detail += `<br><span style="font-size:.63rem;color:#6B7280">영향 탭(${r.affectedTabCount}개): ${r.affectedTabs.map(t => escHtml(t)).join(', ')}${r.affectedTabCount > 5 ? '...' : ''}</span>`;
-    }
-    if (r.sheetTabs && r.sheetTabs.length > 0) {
-      detail += `<br><span style="font-size:.63rem;color:#9CA3AF">시트 탭 목록: ${r.sheetTabs.map(t => escHtml(t)).join(', ')}</span>`;
-    }
-    return `<tr>
-      <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${badge}</td>
-      <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${escHtml(r.campaign || '')}</td>
-      <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${detail}</td>
-    </tr>`;
-  }).join('');
-  } // end if/else resultItems.length
-
-  const title = dryRun ? "🔍 1단계: 탭명 동기화 미리보기 (탐지)" : "✅ 2단계: 탭명 동기화 완료 (적용)";
-  const summary = `시트 ${res.totalSheets}개 · 탭 ${res.totalTabs}개 검사 → 변경 ${res.renamed}건, URL교정 ${res.urlFixed}건, GID보충 ${res.gidFilled || 0}건, 스킵 ${res.skipped}건, 오류 ${res.errors}건 (${res.elapsed})`;
-
-  const modal = document.createElement('div');
-  modal.id = 'syncTabNamesResultModal';
-  modal.className = 'modal-overlay';
-  modal.style.cssText = 'display:flex;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:10000;align-items:center;justify-content:center';
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:12px;max-width:600px;width:95%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,.15)">
-      <div style="padding:12px 16px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
-        <h3 style="margin:0;font-size:.95rem;color:#1E293B"><i class="fas fa-exchange-alt" style="color:#3182f6;margin-right:6px"></i>${title}</h3>
-        <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;cursor:pointer;font-size:1rem;color:#6B7280;padding:4px"><i class="fas fa-times"></i></button>
-      </div>
-      <div style="padding:10px 16px;font-size:.73rem;color:#6B7280;background:#F8FAFC;border-bottom:1px solid #E5E7EB">${summary}</div>
-      <div style="overflow-y:auto;flex:1;padding:0">
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:#F9FAFB">
-            <th style="padding:6px;font-size:.7rem;text-align:left;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB">상태</th>
-            <th style="padding:6px;font-size:.7rem;text-align:left;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB">캠페인</th>
-            <th style="padding:6px;font-size:.7rem;text-align:left;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB">탭명</th>
-          </tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>
-      <div style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end;align-items:center">
-        ${dryRun ? `<span style="flex:1;font-size:.72rem;color:#6B7280">위 내용을 확인 후 [적용] 버튼을 클릭하세요</span>
-        <button onclick="syncTabNames(false);this.closest('.modal-overlay').remove()" style="padding:7px 20px;background:#0ca678;color:#fff;border:none;border-radius:6px;font-size:.82rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px"><i class="fas fa-check-circle"></i> 2단계: 적용</button>` : ''}
-        <button onclick="this.closest('.modal-overlay').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-}
-
-// ═══════════════════════════════════════════════════════════
-// 중복 파일 정리 (Dedupe) — 미리보기 → 확인 → 실행
-// ═══════════════════════════════════════════════════════════
-
-/**
- * 미리보기 모달 열기
- */
-async function openDedupePreview(btn) {
-  const sheetId = btn.dataset.sheetid;
-  const tabName = btn.dataset.tabname;
-  if (!sheetId || !tabName) return showToast("탭 정보 누락", "error");
-
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-  try {
-    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
-    const resp = await fetch(API_BASE_URL + '/api/dedupe/preview', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? 'Bearer ' + token : '',
-      },
-      body: JSON.stringify({ sheetId, tabName }),
-    });
-    const data = await resp.json();
-
-    if (!resp.ok || data.error) {
-      showToast(data.error || '중복 검사 실패', 'error');
-      return;
-    }
-
-    if (data.duplicateGroups === 0) {
-      showToast(`중복 파일 없음 (총 ${data.totalFiles}개 파일 검사 완료)`, 'success');
-      return;
-    }
-
-    // 미리보기 모달 렌더
-    _renderDedupeModal(data, sheetId, tabName, btn.dataset.folderurl || '');
-  } catch (err) {
-    showToast('중복 검사 오류: ' + err.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-broom"></i>';
-  }
-}
-
-/**
- * 미리보기 모달 렌더링
- */
-function _renderDedupeModal(data, sheetId, tabName, folderUrl) {
-  // folderUrl이 data에 없으면 파라미터에서 가져옴
-  if (!data.folderUrl && folderUrl) data.folderUrl = folderUrl;
-  // 기존 모달 제거
-  const existing = document.getElementById('dedupeModal');
-  if (existing) existing.remove();
-
-  const groupRows = data.duplicateDetails.map((group, i) => {
-    const keepName = escHtml(group.keepFile.fileName);
-    const removeRows = group.removeFiles.map(f =>
-      `<div style="display:flex;align-items:center;gap:6px;padding:2px 0">
-        <i class="fas fa-trash-alt" style="color:#EF4444;font-size:.7rem"></i>
-        <span style="font-size:.75rem;color:#374151">${escHtml(f.fileName)}</span>
-        <span style="font-size:.65rem;color:#9CA3AF">(${escHtml(f.reviewerName || '이름불명')})</span>
-      </div>`
-    ).join('');
-
-    return `
-      <div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px;margin-bottom:8px;background:#FAFAFA">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-          <span style="background:#DCFCE7;color:#166534;font-size:.65rem;font-weight:700;padding:2px 6px;border-radius:4px">유지</span>
-          <span style="font-size:.75rem;font-weight:500">${keepName}</span>
-          <span style="font-size:.65rem;color:#9CA3AF">(${escHtml(group.keepFile.reviewerName || '')})</span>
-        </div>
-        <div style="padding-left:12px;border-left:2px solid #FCA5A5">
-          <div style="font-size:.65rem;color:#DC2626;font-weight:600;margin-bottom:2px">삭제 대상 (${group.removeFiles.length}건):</div>
-          ${removeRows}
-        </div>
-      </div>`;
-  }).join('');
-
-  const affectedList = data.affectedReviewers.length > 0
-    ? `<div style="margin-top:10px;padding:8px 12px;background:#FEF3C7;border-radius:6px;font-size:.72rem">
-        <strong><i class="fas fa-pen"></i> 시트 "중복" 마킹 대상:</strong>
-        ${[...new Set(data.affectedReviewers.map(a => a.reviewerName))].map(n => `<span style="background:#FDE68A;padding:1px 5px;border-radius:3px;margin:0 2px">${escHtml(n)}</span>`).join('')}
-       </div>`
-    : '';
-
-  const modal = document.createElement('div');
-  modal.id = 'dedupeModal';
-  modal.className = 'modal-overlay';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-broom" style="color:#3182f6"></i> 중복 파일 정리 미리보기</h3>
-          <a href="${escHtml(data.folderUrl || '')}" target="_blank" style="font-size:.72rem;color:#0ca678;text-decoration:none;font-weight:600;padding:4px 10px;background:#F0FDF4;border-radius:6px;border:1px solid #BBF7D0;display:${data.folderUrl ? 'inline-flex' : 'none'};align-items:center;gap:4px" title="리뷰폴더 열기"><i class="fas fa-external-link-alt"></i> 폴더 열기</a>
-        </div>
-        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">${escHtml(data.displayName || tabName)}</div>
-      </div>
-      <div style="padding:16px 20px;overflow-y:auto;flex:1">
-        <div style="display:flex;gap:12px;margin-bottom:12px">
-          <div style="flex:1;background:#F3F4F6;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:1.2rem;font-weight:700;color:#111">${data.totalFiles}</div>
-            <div style="font-size:.65rem;color:#6B7280">전체 파일</div>
-          </div>
-          <div style="flex:1;background:#FEF2F2;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:1.2rem;font-weight:700;color:#DC2626">${data.duplicateFileCount}</div>
-            <div style="font-size:.65rem;color:#6B7280">중복 파일</div>
-          </div>
-          <div style="flex:1;background:#F0FDF4;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:1.2rem;font-weight:700;color:#166534">${data.duplicateGroups}</div>
-            <div style="font-size:.65rem;color:#6B7280">중복 그룹</div>
-          </div>
-        </div>
-        ${groupRows}
-        ${affectedList}
-      </div>
-      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end;flex-shrink:0">
-        <button onclick="this.closest('#dedupeModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">취소</button>
-        <button id="btnDedupeExecute" onclick="executeDedupeFromModal()" style="padding:8px 16px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-trash-alt"></i> ${data.duplicateFileCount}건 정리 실행</button>
-      </div>
-    </div>`;
-
-  // 모달에 데이터 저장
-  modal.dataset.sheetid = sheetId;
-  modal.dataset.tabname = tabName;
-  modal.dataset.files = JSON.stringify(
-    data.duplicateDetails.flatMap(g => g.removeFiles.map(f => ({
-      fileId: f.fileId,
-      fileName: f.fileName,
-      reviewerName: f.reviewerName,
-    })))
-  );
-
-  document.body.appendChild(modal);
-}
-
-/**
- * 중복정리 실행 (모달에서 호출)
- */
-async function executeDedupeFromModal() {
-  const modal = document.getElementById('dedupeModal');
-  if (!modal) return;
-
-  const sheetId = modal.dataset.sheetid;
-  const tabName = modal.dataset.tabname;
-  const filesToRemove = JSON.parse(modal.dataset.files || '[]');
-
-  if (filesToRemove.length === 0) {
-    showToast('삭제할 파일이 없습니다.', 'info');
-    modal.remove();
-    return;
-  }
-
-  const btn = document.getElementById('btnDedupeExecute');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리중...'; }
-
-  try {
-    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
-    const resp = await fetch(API_BASE_URL + '/api/dedupe/execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? 'Bearer ' + token : '',
-      },
-      body: JSON.stringify({ sheetId, tabName, filesToRemove }),
-    });
-    const data = await resp.json();
-
-    if (!resp.ok || data.error) {
-      showToast(data.error || '실행 실패', 'error');
-      return;
-    }
-
-    showToast(data.summary || `중복 정리 완료: ${data.trashResult.success}건 삭제`, 'success');
-    modal.remove();
-
-    // 대시보드 새로고침
-    if (typeof loadTabDashboard === 'function') loadTabDashboard();
-  } catch (err) {
-    showToast('실행 오류: ' + err.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash-alt"></i> 실행'; }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// 중복 파일 정리 — 탭 선택 모달 (상단 툴바 버튼에서 호출)
-// ═══════════════════════════════════════════════════════════
-
-/**
- * 상단 "중복정리" 버튼 클릭 → 리뷰폴더가 설정된 탭 목록 표시
- */
-function openDedupeSelector() {
-  // 기존 모달 제거
-  const existing = document.getElementById('dedupeSelectorModal');
-  if (existing) existing.remove();
-
-  // _tabDashData 또는 _lastDashData에서 리뷰폴더가 설정된 탭 필터링
-  let tabsWithFolder = [];
-
-  // 1차: _tabDashData (탭 관리 대시보드 데이터 — 현재 화면)
-  if (_tabDashData && _tabDashData.tabs) {
-    _tabDashData.tabs.forEach(t => {
-      if (t.folder_url) {
-        tabsWithFolder.push({
-          sheetId: t.sheet_id,
-          tabName: t.tab_name,
-          displayName: t.display_name || t.tab_name,
-          campName: t.campaign_name || '',
-          folderUrl: t.folder_url,
-        });
-      }
-    });
-  }
-
-  // 2차 fallback: _lastDashData (캠페인 대시보드 데이터)
-  if (tabsWithFolder.length === 0 && _lastDashData && _lastDashData.stats) {
-    _lastDashData.stats.forEach(camp => {
-      (camp.tabs || []).forEach(t => {
-        if (t.folderUrl) {
-          tabsWithFolder.push({
-            sheetId: t.sheetId,
-            tabName: t.tab,
-            displayName: t.displayName || t.tab,
-            campName: camp.campaign || '',
-            folderUrl: t.folderUrl,
-          });
-        }
-      });
-    });
-  }
-
-  if (tabsWithFolder.length === 0) {
-    showToast('리뷰폴더가 설정된 탭이 없습니다.', 'info');
-    return;
-  }
-
-  // 탭 목록 렌더링
-  const tabRows = tabsWithFolder.map((t, i) => `
-    <div class="dedupe-sel-row" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;cursor:pointer;transition:background .15s;border:1px solid #E5E7EB;margin-bottom:6px"
-         onmouseover="this.style.background='#FEF3C7'" onmouseout="this.style.background='#fff'"
-         onclick="selectDedupeTab(${i})">
-      <i class="fas fa-folder-open" style="color:#D97706;font-size:.9rem"></i>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.8rem;font-weight:600;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
-        <div style="font-size:.65rem;color:#6B7280;margin-top:1px">${escHtml(t.campName)}</div>
-      </div>
-      <i class="fas fa-chevron-right" style="color:#9CA3AF;font-size:.7rem"></i>
-    </div>
-  `).join('');
-
-  const modal = document.createElement('div');
-  modal.id = 'dedupeSelectorModal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.classList.add('toss-overlay');
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:12px;width:100%;max-width:480px;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
-        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-copy" style="color:#D97706"></i> 중복 파일 정리</h3>
-        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">정리할 리뷰폴더를 선택하세요 (${tabsWithFolder.length}개 탭)</div>
-      </div>
-      <div style="padding:14px 20px;overflow-y:auto;flex:1">
-        ${tabRows}
-      </div>
-      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end;flex-shrink:0">
-        <button onclick="this.closest('#dedupeSelectorModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
-      </div>
-    </div>`;
-
-  // 탭 데이터를 모달에 저장
-  modal._tabsWithFolder = tabsWithFolder;
-  document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-}
-
-/* ═══════════════════════════════════════════════════════════
-   폴더 찾기 & 재연결 — 사라진 캡처/리뷰 폴더를 탭명으로 검색하여 재연결
-   ═══════════════════════════════════════════════════════════ */
-
-/** 모달 열기 (presetSheetId/presetTabName 지정 시 해당 탭 자동 선택) */
-function openFolderRelink(presetSheetId, presetTabName) {
-  const existing = document.getElementById('folderRelinkModal');
-  if (existing) existing.remove();
-
-  let tabs = [];
-  if (_tabDashData && _tabDashData.tabs) {
-    tabs = _tabDashData.tabs.map(t => ({
-      sheetId: t.sheet_id, tabName: t.tab_name,
-      displayName: t.display_name || t.tab_name,
-      campName: t.campaign_name || '',
-      folderUrl: t.folder_url || '', captureUrl: t.capture_folder_url || '',
-    }));
-  }
-  if (tabs.length === 0) { showToast('먼저 탭 대시보드를 로드하세요.', 'info'); return; }
-
-  const options = tabs.map((t, i) =>
-    `<option value="${i}">${escHtml(t.displayName)}${t.campName ? ' — ' + escHtml(t.campName) : ''}</option>`
-  ).join('');
-
-  const modal = document.createElement('div');
-  modal.id = 'folderRelinkModal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.classList.add('toss-overlay');
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:12px;width:100%;max-width:640px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
-        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결</h3>
-        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">탭 선택 후 [폴더 찾기] → Drive에서 실제 폴더 후보 표시 → 맞는 폴더를 캡처/리뷰로 지정 → [재연결 저장].</div>
-      </div>
-      <div style="padding:14px 20px;overflow-y:auto;flex:1">
-        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
-          <label style="flex:2;min-width:220px;font-size:.72rem;color:#374151">탭 선택
-            <select id="frlTabSel" style="width:100%;margin-top:3px;padding:7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem">${options}</select>
-          </label>
-          <label style="flex:1;min-width:150px;font-size:.72rem;color:#374151">검색어(선택)
-            <input id="frlQuery" type="text" placeholder="비우면 탭명에서 자동" style="width:100%;margin-top:3px;padding:7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem">
-          </label>
-          <button id="frlSearchBtn" onclick="findFolderCandidatesUI()" style="padding:8px 14px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-search"></i> 폴더 찾기</button>
-        </div>
-        <div id="frlPick" style="display:none;font-size:.75rem;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:10px;margin-bottom:10px"></div>
-        <div id="frlResult" style="font-size:.75rem"></div>
-      </div>
-      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;gap:8px;flex-shrink:0">
-        <button onclick="this.closest('#folderRelinkModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
-        <button id="frlSaveBtn" onclick="saveFolderRelink()" disabled style="padding:8px 16px;background:#0ca678;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:700;cursor:pointer;opacity:.5"><i class="fas fa-save"></i> 재연결 저장</button>
-      </div>
-    </div>`;
-  modal._tabs = tabs;
-  modal._pick = { captureUrl: '', captureName: '', reviewUrl: '', reviewName: '' };
-  document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-
-  if (presetSheetId && presetTabName) {
-    const idx = tabs.findIndex(t => t.sheetId === presetSheetId && t.tabName === presetTabName);
-    if (idx >= 0) document.getElementById('frlTabSel').value = String(idx);
-  }
-}
-
-/** 선택한 탭으로 Drive 폴더 후보 검색 */
-async function findFolderCandidatesUI() {
-  const modal = document.getElementById('folderRelinkModal');
-  if (!modal) return;
-  const tab = modal._tabs[parseInt(document.getElementById('frlTabSel').value, 10)];
-  if (!tab) return;
-  const query = (document.getElementById('frlQuery').value || '').trim();
-  const resultEl = document.getElementById('frlResult');
-  resultEl.innerHTML = '<div style="padding:12px;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> Drive에서 폴더 검색 중...</div>';
-
-  let data;
-  try {
-    data = await gasPost({ action: 'findFolderCandidates', sheetId: tab.sheetId, tabName: tab.tabName, query }, 60000);
-  } catch (e) { resultEl.innerHTML = `<div style="color:#DC2626">검색 실패: ${escHtml(e.message || '')}</div>`; return; }
-  if (!data || data.error) { resultEl.innerHTML = `<div style="color:#DC2626">${escHtml((data && data.error) || '검색 실패')}</div>`; return; }
-
-  modal._candidates = data.candidates || [];
-
-  const warn = (data.warnings || []).map(w => `<div style="color:#B45309;font-size:.72rem"><i class="fas fa-triangle-exclamation"></i> ${escHtml(w)}</div>`).join('');
-  const curC = data.current && data.current.captureFolderUrl ? `<a href="${data.current.captureFolderUrl}" target="_blank">현재 캡처</a>` : '<span style="color:#9CA3AF">캡처 미연결</span>';
-  const curR = data.current && data.current.folderUrl ? `<a href="${data.current.folderUrl}" target="_blank">현재 리뷰</a>` : '<span style="color:#9CA3AF">리뷰 미연결</span>';
-  const curLine = `현재 연결: ${curC} · ${curR}`;
-
-  const badge = (g) => {
-    if (g === 'capture') return '<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">캡처후보</span>';
-    if (g === 'review') return '<span style="background:#DCFCE7;color:#166534;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">리뷰후보</span>';
-    if (g === 'container') return '<span style="background:#F3E8FF;color:#7C3AED;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">상위폴더</span>';
-    return '<span style="background:#F3F4F6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:.66rem">기타</span>';
-  };
-
-  if (modal._candidates.length === 0) {
-    resultEl.innerHTML = `${warn ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;margin-bottom:8px">${warn}</div>` : ''}<div style="padding:12px;color:#6B7280">검색 결과가 없습니다. 검색어를 바꿔 다시 시도하세요.<br><span style="color:#9CA3AF;font-size:.68rem">시도한 검색어: ${escHtml((data.searchTerms || []).join(' / '))}</span></div>`;
-    return;
-  }
-
-  const rows = modal._candidates.map((c, i) => `
-    <div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px;margin-bottom:7px">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
-        ${badge(c.guess)}
-        <span style="font-weight:600;color:#111;font-size:.78rem;word-break:break-all">${escHtml(c.name)}</span>
-        <a href="${c.url}" target="_blank" style="margin-left:auto;color:#3182f6;font-size:.7rem;white-space:nowrap"><i class="fas fa-up-right-from-square"></i> 열기</a>
-      </div>
-      <div style="font-size:.68rem;color:#6B7280;margin-bottom:5px">
-        상위: ${escHtml(c.parentName || '-')} · 파일 ${c.fileCount}개${c.reviewLikeCount ? ` (리뷰형식 ${c.reviewLikeCount})` : ''}${c.owner ? ' · ' + escHtml(c.owner) : ''}
-      </div>
-      <div style="display:flex;gap:6px">
-        <button onclick="pickFolderCandidate('capture',${i})" style="flex:1;padding:5px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:5px;font-size:.7rem;font-weight:600;cursor:pointer">📸 캡처로 지정</button>
-        <button onclick="pickFolderCandidate('review',${i})" style="flex:1;padding:5px;background:#F0FDF4;color:#166534;border:1px solid #BBF7D0;border-radius:5px;font-size:.7rem;font-weight:600;cursor:pointer">📝 리뷰로 지정</button>
-      </div>
-    </div>`).join('');
-
-  resultEl.innerHTML = `${warn
-    ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;margin-bottom:8px">${warn}<div style="font-size:.68rem;color:#92400E;margin-top:2px">${curLine}</div></div>`
-    : `<div style="font-size:.7rem;color:#6B7280;margin-bottom:8px">${curLine}</div>`}${rows}`;
-  _renderFolderPick();
-}
-
-/** 후보를 캡처/리뷰 대상으로 지정 */
-function pickFolderCandidate(kind, idx) {
-  const modal = document.getElementById('folderRelinkModal');
-  if (!modal || !modal._candidates) return;
-  const c = modal._candidates[idx];
-  if (!c) return;
-  const label = c.name + (c.parentName ? ' (' + c.parentName + ')' : '');
-  if (kind === 'capture') { modal._pick.captureUrl = c.url; modal._pick.captureName = label; }
-  else { modal._pick.reviewUrl = c.url; modal._pick.reviewName = label; }
-  _renderFolderPick();
-}
-
-/** 지정 현황 + 저장버튼 상태 갱신 */
-function _renderFolderPick() {
-  const modal = document.getElementById('folderRelinkModal');
-  if (!modal) return;
-  const p = modal._pick;
-  const box = document.getElementById('frlPick');
-  const saveBtn = document.getElementById('frlSaveBtn');
-  const hasAny = !!(p.captureUrl || p.reviewUrl);
-  if (box) {
-    box.style.display = hasAny ? 'block' : 'none';
-    if (hasAny) {
-      box.innerHTML =
-        `<div style="font-weight:700;color:#6D28D9;margin-bottom:4px"><i class="fas fa-link"></i> 재연결 대상</div>` +
-        `<div>📸 캡처폴더: ${p.captureUrl ? escHtml(p.captureName) : '<span style="color:#9CA3AF">미지정(변경 안 함)</span>'}</div>` +
-        `<div>📝 리뷰폴더: ${p.reviewUrl ? escHtml(p.reviewName) : '<span style="color:#9CA3AF">미지정(변경 안 함)</span>'}</div>`;
-    }
-  }
-  if (saveBtn) { saveBtn.disabled = !hasAny; saveBtn.style.opacity = hasAny ? '1' : '.5'; }
-}
-
-/** 지정한 폴더 URL을 tab_configs에 저장(재연결) */
-async function saveFolderRelink() {
-  const modal = document.getElementById('folderRelinkModal');
-  if (!modal) return;
-  const tab = modal._tabs[parseInt(document.getElementById('frlTabSel').value, 10)];
-  const p = modal._pick;
-  if (!tab || (!p.captureUrl && !p.reviewUrl)) { showToast('지정된 폴더가 없습니다.', 'info'); return; }
-
-  const urls = {};
-  if (p.captureUrl) urls.captureFolderUrl = p.captureUrl;
-  if (p.reviewUrl) urls.folderUrl = p.reviewUrl;
-
-  const saveBtn = document.getElementById('frlSaveBtn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 저장 중...'; }
-
-  let data;
-  try {
-    data = await gasPost({ action: 'updateFolderUrls', sheetId: tab.sheetId, tabName: tab.tabName, urls });
-  } catch (e) {
-    showToast('저장 실패: ' + (e.message || ''), 'error');
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> 재연결 저장'; }
-    return;
-  }
-  if (!data || data.error) {
-    showToast((data && data.error) || '저장 실패', 'error');
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> 재연결 저장'; }
-    return;
-  }
-
-  showToast('폴더 링크가 재연결되었습니다.', 'info');
-  modal.remove();
-  try { loadTabDashboard(); } catch (_) {}
-}
-
-/**
- * 탭 선택 후 해당 탭의 중복 미리보기 실행
- */
-async function selectDedupeTab(idx) {
-  const modal = document.getElementById('dedupeSelectorModal');
-  if (!modal || !modal._tabsWithFolder) return;
-
-  const tab = modal._tabsWithFolder[idx];
-  if (!tab) return;
-
-  // 선택된 항목 로딩 표시
-  const rows = modal.querySelectorAll('.dedupe-sel-row');
-  if (rows[idx]) {
-    rows[idx].style.background = '#FEF3C7';
-    rows[idx].innerHTML = `<i class="fas fa-spinner fa-spin" style="color:#D97706"></i><span style="font-size:.8rem;color:#6B7280">중복 검사 중...</span>`;
-  }
-
-  try {
-    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
-    const resp = await fetch(API_BASE_URL + '/api/dedupe/preview', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? 'Bearer ' + token : '',
-      },
-      body: JSON.stringify({ sheetId: tab.sheetId, tabName: tab.tabName }),
-    });
-    const data = await resp.json();
-
-    // 선택 모달 닫기
-    modal.remove();
-
-    if (!resp.ok || data.error) {
-      showToast(data.error || '중복 검사 실패', 'error');
-      return;
-    }
-
-    if (data.duplicateGroups === 0) {
-      showToast(`중복 파일 없음 (총 ${data.totalFiles}개 파일 검사 완료)`, 'success');
-      return;
-    }
-
-    // 미리보기 모달 표시
-    _renderDedupeModal(data, tab.sheetId, tab.tabName, tab.folderUrl);
-  } catch (err) {
-    modal.remove();
-    showToast('중복 검사 오류: ' + err.message, 'error');
-  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -15821,710 +13702,6 @@ async function _deleteNotice(id) {
 
 /* C/S 문의창구(마크업+화면 코드)는 js/cs-inquiry.js 공유 모듈로 이관 —
    리뷰웹시스템[3버전] 상단탭에서 같은 화면을 쓴다(사본 금지). 전역 이름은 그대로라 호출부 무수정. */
-
-// ═══════════════════════════════════════════════════════════
-// 리뷰 캡처 정리 — 내 드라이브 루트 등에 흩어진 리뷰 캡처를
-//   선택한 탭의 [리뷰] 폴더로 모아 이동 (미리보기 → 실제 이동)
-//   POST /api/drive/relocate-orphan-reviews (relocateOrphanReviews)
-// ═══════════════════════════════════════════════════════════
-let _relocateTabs = [];
-let _relocateSelIdx = -1; // 콤보박스에서 선택된 탭 인덱스
-let _relocateScanStop = false; // 전체 탭 스캔 중지 플래그
-let _relocateScanResults = {}; // 탭별 스캔 결과 (localStorage 임시저장)
-
-function _relocateCollectTabs() {
-  // folder_url이 비어 있어도(=리뷰폴더 미연결) 선택 가능하도록 모든 탭을 포함.
-  // (리뷰 캡처가 루트로 샌 탭은 folder_url이 비어 있을 수 있으므로)
-  const out = [];
-  if (typeof _tabDashData !== 'undefined' && _tabDashData && _tabDashData.tabs) {
-    _tabDashData.tabs.forEach(t => {
-      out.push({ sheetId: t.sheet_id, tabName: t.tab_name, displayName: t.display_name || t.tab_name, campName: t.campaign_name || '', folderUrl: t.folder_url || '' });
-    });
-  }
-  if (out.length === 0 && typeof _lastDashData !== 'undefined' && _lastDashData && _lastDashData.stats) {
-    _lastDashData.stats.forEach(camp => (camp.tabs || []).forEach(t => {
-      out.push({ sheetId: t.sheetId, tabName: t.tab, displayName: t.displayName || t.tab, campName: camp.campaign || '', folderUrl: t.folderUrl || '' });
-    }));
-  }
-  return out;
-}
-
-// 플랫폼/채널/일반어 — 키워드에서 제외(이게 들어가면 다른 캠페인까지 과대매칭됨)
-const _RELOCATE_STOPWORDS = new Set([
-  '네이버','쿠팡','쿠팡파트너스','파트너스','메이커스','카카오','카카오메이커스','11번가','지마켓','g마켓',
-  '옥션','위메프','티몬','자사몰','스마트스토어','스토어','인스타','인스타그램','블로그','카페','체험단',
-  '바이럴','리뷰','리뷰체험단','세트','박스','골드박스','시트','업무시트','견적서','실','현영'
-]);
-
-// 탭명에서 OCR 검색에 쓸 브랜드/상품 키워드 후보 추출 (플랫폼/일반어 제외)
-//   "5/28(쿠팡)서일농원_명인콩물두유 170건" → ["서일농원", "명인콩물두유"]
-//   "6/11퓨비아표백제_네이버15건" → ["퓨비아표백제"]  (네이버 제외)
-function _relocateDeriveKeywords(tabName) {
-  const out = [];
-  const push = v => {
-    v = (v || '').trim().replace(/\d+건?$/, '').trim();
-    if (v && v.length >= 2 && !/^\d+$/.test(v) && !_RELOCATE_STOPWORDS.has(v) && !out.includes(v)) out.push(v);
-  };
-  let core = String(tabName || '');
-  // 선두 날짜/채널 제거: "6/11", "6.17", "0618", "0528" + optional "(쿠팡)"
-  core = core.replace(/^\s*(\d{1,2}\s*[\/.]\s*\d{1,2}|\d{3,4})\s*(\([^)]*\))?\s*/, '');
-  // 후미 건수/차수 제거
-  core = core.replace(/\s*\d+\s*건\s*$/, '').replace(/\s*\d+\s*차\s*$/, '').trim();
-  core.split(/[_,/\s]+/).forEach(seg => push(seg));
-  return out;
-}
-
-// 탭명에서 "작업건수"(N건) 추출 — 과대매칭 판정 기준
-function _relocateParseCount(tabName) {
-  const m = String(tabName || '').match(/(\d+)\s*건/);
-  return m ? parseInt(m[1], 10) : 0;
-}
-
-// 후보 파일명 클릭 → 모달 내에서 이미지 인라인 펼침/접기 (서버 프록시로 비공개 파일도 표시)
-function _relocateToggleImg(headerEl, id) {
-  const box = headerEl.parentElement;
-  const wrap = box && box.querySelector('.rlc-img');
-  const chev = headerEl.querySelector('.fa-chevron-right');
-  if (!wrap) return;
-  if (wrap.style.display === 'none' || !wrap.style.display) {
-    if (!wrap.dataset.loaded) {
-      const proxy = `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
-      const thumb = `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`;
-      wrap.innerHTML = `<div style="padding:4px 0 8px"><img src="${proxy}" loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block" onerror="this.onerror=null;this.src='${thumb}'"></div>`;
-      wrap.dataset.loaded = '1';
-    }
-    wrap.style.display = 'block';
-    if (chev) chev.style.transform = 'rotate(90deg)';
-  } else {
-    wrap.style.display = 'none';
-    if (chev) chev.style.transform = '';
-  }
-}
-
-// 활성 탭 리뷰폴더 현황 점검 — 대시보드 활성탭 한정 + '리뷰폼' 제외 + 26.3+ 판정
-async function _relocateFolderAudit() {
-  const resultEl = document.getElementById('rlcResult');
-  if (!resultEl) return;
-  if (!_relocateTabs || !_relocateTabs.length) _relocateTabs = _relocateCollectTabs();
-  const all = (_relocateTabs || []).map(t => ({ sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName, folderUrl: t.folderUrl }));
-  if (!all.length) {
-    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">활성 탭 목록을 불러오지 못했습니다. 캠페인 탭 관리 대시보드를 먼저 연 뒤 다시 시도하세요.</div>`;
-    return;
-  }
-  // 긴 단일요청 대신 여러 탭씩 나눠 호출 + 진행률 (타임아웃/멈춤 방지)
-  resultEl.innerHTML = `<div style="font-size:.8rem;color:#3730A3;font-weight:700"><i class="fas fa-spinner fa-spin"></i> <span id="rlcAuditProg">리뷰폴더 점검 0/${all.length}…</span></div>`;
-  const agg = { totalTabs: all.length, excluded: 0, connected: 0, nonEmpty: 0, empty: 0, noFolder: 0, preMarch: 0, errors: 0, ownerTally: {}, details: [] };
-  const CHUNK = 8;
-  for (let i = 0; i < all.length; i += CHUNK) {
-    const chunk = all.slice(i, i + CHUNK);
-    try {
-      const res = await gasPost({ action: 'folderAudit', tabs: chunk, excludeName: '리뷰폼', sinceDate: '2026-03-01T00:00:00Z' }, 120000);
-      if (res && res.ok !== false) {
-        agg.excluded += res.excluded || 0; agg.connected += res.connected || 0; agg.nonEmpty += res.nonEmpty || 0;
-        agg.empty += res.empty || 0; agg.noFolder += res.noFolder || 0; agg.preMarch += res.preMarch || 0; agg.errors += res.errors || 0;
-        if (res.ownerTally) for (const k in res.ownerTally) agg.ownerTally[k] = (agg.ownerTally[k] || 0) + res.ownerTally[k];
-        if (Array.isArray(res.details)) agg.details.push(...res.details);
-      } else {
-        agg.errors += chunk.length;
-      }
-    } catch (e) {
-      agg.errors += chunk.length;
-    }
-    const prog = document.getElementById('rlcAuditProg');
-    if (prog) prog.textContent = `리뷰폴더 점검 ${Math.min(i + CHUNK, all.length)}/${all.length}…`;
-  }
-  _renderFolderAudit(resultEl, agg);
-}
-
-function _renderFolderAudit(resultEl, res) {
-  const d = res.details || [];
-  const empties = d.filter(x => x.status === 'empty');
-  const nofolder = d.filter(x => x.status === 'no-folder');
-  const haves = d.filter(x => x.status === 'has-files').sort((a, b) => b.count - a.count);
-  const pre = haves.filter(x => x.preMarch);
-  const target = haves.filter(x => !x.preMarch); // 26.3+ 정상 폴더
-  // 소유자 라벨 → 배지 (tnaks 외 소유자는 이관 대상이므로 강조)
-  const ownBadge = (lbl) => {
-    if (!lbl || lbl === 'tnaks6325') return '';
-    const color = (lbl === '박세희' || lbl === '박은비') ? '#DC2626' : (lbl === 'service-account' ? '#6B7280' : '#B45309');
-    return ` <span style="font-size:.62rem;font-weight:700;color:${color};background:${color}1A;border-radius:4px;padding:0 4px">${escHtml(lbl)}</span>`;
-  };
-  const liH = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건${x.earliest ? `, 최초 ${x.earliest}` : ''}</span>` : ''}</li>`).join('');
-  const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}</li>`).join('');
-  // 소유자 집계 + 이관 대상(tnaks 외) 강조
-  const ot = res.ownerTally || {};
-  const otOrder = ['tnaks6325', '박세희', '박은비', 'service-account', '기타', 'unknown'];
-  const otKeys = otOrder.filter(k => ot[k]).concat(Object.keys(ot).filter(k => otOrder.indexOf(k) < 0));
-  const nonTnaks = Object.keys(ot).reduce((s, k) => s + (k === 'tnaks6325' ? 0 : (ot[k] || 0)), 0);
-  const ownerChips = otKeys.map(k => {
-    const isMine = k === 'tnaks6325';
-    const c = isMine ? '#059669' : (k === '박세희' || k === '박은비') ? '#DC2626' : '#B45309';
-    return `<span style="font-size:.68rem;font-weight:700;color:${c};background:${c}14;border-radius:6px;padding:2px 7px">${escHtml(k)} ${ot[k]}</span>`;
-  }).join(' ');
-  resultEl.innerHTML = `
-    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px">
-      <div style="font-size:.82rem;font-weight:800;color:#0F172A;margin-bottom:6px">활성 탭 리뷰폴더 현황</div>
-      <div style="font-size:.68rem;color:#9CA3AF;margin-bottom:8px">활성 ${res.totalTabs}개 중 '리뷰폼' ${res.excluded}개 제외 · 26.3+ 기준</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.74rem">
-        <div style="background:#EEF2FF;border-radius:6px;padding:8px"><b>① 리뷰폴더 연결</b><br><span style="font-size:.92rem;font-weight:800;color:#4338CA">${res.connected}개</span></div>
-        <div style="background:#ECFDF5;border-radius:6px;padding:8px"><b>② 정상(파일 있음)</b><br><span style="font-size:.92rem;font-weight:800;color:#059669">${res.nonEmpty}개</span><br><span style="font-size:.64rem;color:#6B7280">26.3+ ${target.length} · 26.3이전 ${res.preMarch}</span></div>
-        <div style="background:#FEF2F2;border-radius:6px;padding:8px"><b>③ 비어있음</b><br><span style="font-size:.92rem;font-weight:800;color:#DC2626">${res.empty}개</span></div>
-        <div style="background:#FFFBEB;border-radius:6px;padding:8px"><b>폴더 미연결</b><br><span style="font-size:.92rem;font-weight:800;color:#B45309">${res.noFolder}개</span>${res.errors ? ` · 오류 ${res.errors}` : ''}</div>
-      </div>
-      ${ownerChips ? `<div style="margin-top:10px;background:#fff;border:1px solid #E2E8F0;border-radius:6px;padding:8px">
-        <div style="font-size:.72rem;font-weight:700;color:#0F172A;margin-bottom:5px">연결 폴더 소유자 <span style="font-weight:400;color:#9CA3AF">(이관 범위 판정)</span></div>
-        <div style="display:flex;flex-wrap:wrap;gap:5px">${ownerChips}</div>
-        ${nonTnaks ? `<div style="font-size:.66rem;color:#DC2626;margin-top:6px">※ tnaks6325 외 소유 <b>${nonTnaks}개</b> = 소유권 이관 대상 (아래 목록에 빨간 배지 표시)</div>` : `<div style="font-size:.66rem;color:#059669;margin-top:6px">※ 모든 연결 폴더가 tnaks6325 소유 — 이관 불필요</div>`}
-      </div>` : ''}
-      ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length}) — 정리 필요</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(empties)}</ul></div>` : ''}
-      ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(nofolder)}</ul>
-        <button id="rlcConnectBtn" onclick="_relocateConnectUnlinked()" style="margin-top:8px;width:100%;padding:8px;background:#B45309;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)</button>
-        <div style="font-size:.64rem;color:#9CA3AF;margin-top:3px">※ 비마감 탭 중 폴더가 없는 탭에 빈 [리뷰] 폴더를 만들어 연결합니다(이미 연결된 탭은 건너뜀). 흩어진 캡처가 있으면 생성 후 위 '리뷰 캡처 정리'로 모으세요.</div>
-      </div>` : ''}
-      ${pre.length ? `<details style="margin-top:8px"><summary style="font-size:.72rem;font-weight:700;color:#9CA3AF;cursor:pointer">26.3 이전 파일 포함(대상 제외) (${pre.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${liH(pre)}</ul></details>` : ''}
-      ${target.length ? `<details style="margin-top:8px" open><summary style="font-size:.74rem;font-weight:700;color:#059669;cursor:pointer">② 26.3+ 정상 폴더 (${target.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:220px;overflow:auto">${liH(target)}</ul></details>` : ''}
-    </div>`;
-}
-
-// 미연결 활성 탭에 [리뷰] 폴더 생성·연결 (OAuth=tnaks6325 소유로 생성, 비파괴/idempotent)
-//   sync-review: 비마감 탭 중 folder_url 없는 탭만 새 [리뷰] 폴더 생성 후 tab_configs 저장
-async function _relocateConnectUnlinked() {
-  if (!confirm('미연결 활성 탭에 빈 [리뷰] 폴더를 생성하고 연결합니다.\n· tnaks6325 소유로 생성 · 이미 연결된 탭은 건너뜀 · 파일 변경 없음\n\n진행할까요?')) return;
-  const btnEl = document.getElementById('rlcConnectBtn');
-  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성·연결 중...'; }
-  try {
-    const res = await gasPost({ action: 'syncReviewFolders' }, 180000);
-    if (!res || res.ok === false || res.error) {
-      showToast('실패: ' + ((res && res.error) || '알수없음'), 'error');
-      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
-      return;
-    }
-    showToast(`[리뷰] 폴더 ${res.created || 0}개 신규 생성 · 연결 확인 ${res.synced || 0}${res.errors ? ` · 오류 ${res.errors}` : ''}`, 'success');
-    _relocateFolderAudit(); // 현황 자동 재점검
-  } catch (e) {
-    showToast('오류: ' + e.message, 'error');
-    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
-  }
-}
-
-// 원본 폴더 비우기 — 원본 폴더의 모든 파일을 선택 탭의 [리뷰] 폴더로 이동
-async function _relocateMoveFolder(apply) {
-  const fromUrl = (document.getElementById('rlcMoveFrom').value || '').trim();
-  const toUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
-  if (!fromUrl) { showToast('비울 원본 폴더 링크를 입력하세요.', 'error'); return; }
-  if (!toUrl) { showToast('대상 [리뷰] 폴더 링크가 필요합니다 (탭을 선택하세요).', 'error'); return; }
-  if (apply && !confirm('원본 폴더의 모든 파일을 [리뷰] 폴더로 이동합니다. 진행할까요?')) return;
-  const resultEl = document.getElementById('rlcResult');
-  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '조회 중'}...</div>`;
-  try {
-    const res = await gasPost({ action: 'moveFolderContents', fromFolderUrl: fromUrl, toFolderUrl: toUrl, dryRun: !apply });
-    if (!res || res.ok === false) {
-      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
-      return;
-    }
-    if (apply) {
-      const failHtml = (res.failed || []).map(f => `<li style="font-size:.66rem;color:#DC2626;word-break:break-all">${escHtml(f.name)} — ${escHtml(f.error || '')}</li>`).join('');
-      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
-        ${res.failedCount ? `<ul style="margin:6px 0 0;padding-left:18px">${failHtml}</ul><div style="font-size:.66rem;color:#9CA3AF;margin-top:2px">실패 건은 보통 그 파일 소유자(예: 박세희) 권한이 필요합니다 — 소유자 측에서 옮기거나 사본 처리해야 합니다.</div>` : ''}`;
-      showToast(`${res.movedCount}건 이동`, 'success');
-      return;
-    }
-    const list = (res.files || []).slice(0, 50).map(c => `
-      <div style="border-bottom:1px solid #E0F2FE">
-        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
-          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
-          <span style="flex:1">${escHtml(c.name)}</span>
-        </div>
-        <div class="rlc-img" style="display:none"></div>
-      </div>`).join('');
-    const sub = (res.subfolders || []).length ? `<div style="font-size:.66rem;color:#D97706;margin-top:4px">※ 서브폴더 ${res.subfolders.length}개는 이동 대상에서 제외됩니다.</div>` : '';
-    resultEl.innerHTML = `
-      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:12px">
-        <div style="font-size:.84rem;font-weight:700;color:#155E75">원본 폴더 파일: ${res.total}건 → [리뷰]로 이동 예정</div>
-        ${sub}
-        ${res.total
-          ? `<div style="margin:8px 0 0">${list}</div>
-             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이미지를 펼쳐 볼 수 있습니다.</div>
-             <button onclick="_relocateMoveFolder(true)" style="margin-top:12px;width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> ${res.total}건 전체 이동 실행</button>`
-          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">원본 폴더에 이동할 파일이 없습니다.</div>`}
-      </div>`;
-  } catch (err) {
-    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
-  }
-}
-
-function openReviewRelocate() {
-  const existing = document.getElementById('reviewRelocateModal');
-  if (existing) existing.remove();
-
-  _relocateTabs = _relocateCollectTabs();
-  _relocateSelIdx = -1;
-  if (_relocateTabs.length === 0) {
-    showToast('탭 목록을 불러오지 못했습니다. 탭 관리 대시보드를 먼저 여세요.', 'info');
-    return;
-  }
-
-  const modal = document.createElement('div');
-  modal.id = 'reviewRelocateModal';
-  modal.classList.add('toss-overlay');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
-        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-folder-tree" style="color:#7C3AED"></i> 리뷰 캡처 정리</h3>
-        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">내 드라이브 루트 등에 흩어진 리뷰 캡처를 선택한 탭의 <b>[리뷰]</b> 폴더로 이동합니다.</div>
-      </div>
-      <div style="padding:14px 20px;overflow-y:auto;flex:1">
-        <label style="font-size:.74rem;font-weight:600;color:#374151">대상 탭 <span style="color:#9CA3AF;font-weight:400">(검색해서 선택)</span></label>
-        <div style="position:relative;margin:4px 0 12px">
-          <input id="rlcTabSearch" type="text" autocomplete="off" placeholder="탭·상품·캠페인 검색…"
-            oninput="_relocateFilterTabs()" onfocus="_relocateFilterTabs()"
-            onblur="setTimeout(function(){var l=document.getElementById('rlcTabList');if(l)l.style.display='none'},150)"
-            style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem">
-          <div id="rlcTabList" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;background:#fff;border:1px solid #E5E7EB;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:240px;overflow-y:auto;z-index:5"></div>
-          <div id="rlcTabSelected" style="font-size:.7rem;color:#6B7280;margin-top:4px"></div>
-        </div>
-
-        <label style="font-size:.74rem;font-weight:600;color:#374151">[리뷰] 폴더 링크 <span style="color:#9CA3AF;font-weight:400">(비어 있으면 대상 [리뷰] 폴더 링크를 붙여넣으세요)</span></label>
-        <input id="rlcFolderUrl" type="text" placeholder="https://drive.google.com/drive/folders/..." style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;margin:4px 0 12px;font-family:monospace">
-
-        <label style="font-size:.74rem;font-weight:600;color:#374151">브랜드/상품 키워드 <span style="color:#9CA3AF;font-weight:400">(쉼표 구분 — 캡처에 보이는 단어)</span></label>
-        <input id="rlcKeywords" type="text" placeholder="예: 서일농원, 콩물" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">
-
-        <label style="font-size:.74rem;font-weight:600;color:#374151">시작일 <span style="color:#9CA3AF;font-weight:400">(이 날짜 이후 업로드만 — 비우면 전체)</span></label>
-        <input id="rlcSince" type="date" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 4px">
-
-        <details style="margin-top:10px;border:1px dashed #CBD5E1;border-radius:8px;padding:8px 10px">
-          <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#155E75">원본 폴더 비우기 (레거시/잘못된 폴더 → 위 [리뷰]로 전체 이동)</summary>
-          <div style="margin-top:8px">
-            <input id="rlcMoveFrom" type="text" placeholder="비울 원본 폴더 링크 (예: 박세희 소유 폴더)" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;font-family:monospace">
-            <div style="font-size:.64rem;color:#9CA3AF;margin:5px 0">위 <b>[리뷰] 폴더 링크</b>가 이동 대상입니다(탭 선택 필요). 파일명 무관 <b>전체 이동</b>, 서브폴더는 제외.</div>
-            <button onclick="_relocateMoveFolder(false)" style="width:100%;padding:8px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 원본 폴더 미리보기</button>
-          </div>
-        </details>
-
-        <div style="display:flex;gap:8px;margin-top:14px">
-          <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
-          <button onclick="_relocateScanAll()" style="flex:1;padding:9px;background:#4338CA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-layer-group"></i> 전체 탭 자동 스캔</button>
-        </div>
-        <button onclick="_reviewFolderBackfill(false)" style="width:100%;margin-top:8px;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-images"></i> 선택 탭 폴더 이미지 연결 (백필 미리보기)</button>
-        <div style="font-size:.66rem;color:#9CA3AF;margin-top:4px">※ 그 탭의 <b>[리뷰] 폴더 안 이미지</b>를 파일명 이름으로 명단 행과 연결해 업체 뷰어 미리보기에 표시합니다. 폴더 연결이 없으면 자동으로 찾아(없으면 생성) 매핑합니다. 키워드·이동 없음 — 폴더 링크 칸이 비면 탭에 연결된 폴더를 씁니다.</div>
-        <button onclick="_relocateFolderAudit()" style="width:100%;margin-top:8px;padding:9px;background:#0F172A;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-clipboard-list"></i> 리뷰폴더 현황 점검 (활성 탭 전체)</button>
-        <div style="font-size:.66rem;color:#9CA3AF;margin-top:6px">※ 전체 스캔은 모든 탭을 하나씩 조회해 탭별 대상 건수를 보여줍니다. 폴더 링크·키워드 칸은 무시하고 탭마다 자동 적용합니다.</div>
-
-        <div style="margin-top:14px;border-top:1px dashed #E5E7EB;padding-top:14px">
-          <div style="font-size:.82rem;font-weight:800;color:#0F172A"><i class="fas fa-paper-plane" style="color:#0891B2"></i> 업체 보고 링크 <span style="font-weight:600;color:#9CA3AF;font-size:.7rem">(직원 복제 불필요)</span></div>
-          <div style="font-size:.68rem;color:#6B7280;margin:4px 0 8px">위에서 <b>탭을 선택</b>한 뒤 링크를 만들어 업체에 전달하세요. 업체는 <b>로그인 없이</b> 열람하고, 원본은 그대로(내 소유)라 <b>직원 드라이브에 복제되지 않습니다</b>.</div>
-          <button onclick="_relocateMakeReportPageLink()" style="width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 선택 탭 보고 링크 만들기 (이미지 모아보기)</button>
-          <div id="rlcReportResult" style="margin-top:10px"></div>
-          <details style="margin-top:8px">
-            <summary style="cursor:pointer;font-size:.7rem;color:#6B7280">또는 Drive 폴더 공유링크로 전달 (폴더 그대로)</summary>
-            <div style="margin-top:6px">
-              <button onclick="_relocateMakeReportLink()" style="width:100%;padding:8px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 선택 탭 [리뷰] 폴더 공유링크 만들기</button>
-              <div id="rlcFolderShareResult" style="margin-top:8px"></div>
-            </div>
-          </details>
-        </div>
-
-        <div style="margin-top:8px;text-align:right">
-          <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:7px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
-        </div>
-        <div id="rlcResult" style="margin-top:14px"></div>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  const sb = document.getElementById('rlcTabSearch');
-  if (sb) sb.focus();
-
-  // 임시저장된 전체 스캔 결과가 있으면 자동 복원
-  _relocateScanStop = false;
-  _relocateScanResults = _relocateLoadScan().byTab || {};
-  if (Object.keys(_relocateScanResults).length) _relocateRenderScan();
-}
-
-// 검색어로 탭 목록 필터링 → 자동완성 리스트 렌더
-function _relocateFilterTabs() {
-  const inp = document.getElementById('rlcTabSearch');
-  const listEl = document.getElementById('rlcTabList');
-  if (!inp || !listEl) return;
-  const q = (inp.value || '').trim().toLowerCase();
-  const matches = [];
-  for (let i = 0; i < _relocateTabs.length && matches.length < 50; i++) {
-    const t = _relocateTabs[i];
-    const hay = `${t.displayName} ${t.campName} ${t.tabName}`.toLowerCase();
-    if (!q || hay.includes(q)) matches.push(i);
-  }
-  if (matches.length === 0) {
-    listEl.innerHTML = `<div style="padding:10px 12px;font-size:.74rem;color:#9CA3AF">검색 결과 없음</div>`;
-    listEl.style.display = 'block';
-    return;
-  }
-  listEl.innerHTML = matches.map(i => {
-    const t = _relocateTabs[i];
-    return `<div onmousedown="_relocateSelectTab(${i})" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #F3F4F6"
-        onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background='#fff'">
-        <div style="font-size:.78rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
-        ${t.campName ? `<div style="font-size:.66rem;color:#9CA3AF">${escHtml(t.campName)}</div>` : ''}
-      </div>`;
-  }).join('');
-  listEl.style.display = 'block';
-}
-
-// 자동완성 항목 선택 → 폴더링크·키워드 자동 채움
-function _relocateSelectTab(i) {
-  const t = _relocateTabs[i];
-  if (!t) return;
-  _relocateSelIdx = i;
-  const sb = document.getElementById('rlcTabSearch');
-  if (sb) sb.value = t.displayName;
-  const listEl = document.getElementById('rlcTabList');
-  if (listEl) listEl.style.display = 'none';
-  const selEl = document.getElementById('rlcTabSelected');
-  if (selEl) selEl.innerHTML = `선택됨: <b>${escHtml(t.displayName)}</b>${t.campName ? ' — ' + escHtml(t.campName) : ''}`;
-  document.getElementById('rlcFolderUrl').value = t.folderUrl || '';
-  document.getElementById('rlcKeywords').value = _relocateDeriveKeywords(t.tabName).join(', ');
-  document.getElementById('rlcResult').innerHTML = '';
-}
-
-// [주] 공개 보고 페이지 링크 만들기 — 선택 탭의 추측불가 코드를 발급하고
-//   report.html 공개 페이지 링크를 반환. 업체는 로그인 없이 이미지 모아보기로 열람.
-//   이미지는 서버 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0.
-async function _relocateMakeReportPageLink() {
-  const t = _relocateTabs[_relocateSelIdx];
-  if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
-  const out = document.getElementById('rlcReportResult');
-  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 보고 링크 생성 중…</div>`;
-  try {
-    const res = await gasPost({ action: 'reviewReportLink', sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName }, 60000);
-    if (!res || res.ok === false || res.error || !res.reportUrl) {
-      if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
-      return;
-    }
-    const link = res.reportUrl;
-    if (out) out.innerHTML = `
-      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:10px">
-        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> 업체 보고 링크 준비됨 <span style="font-weight:500;color:#0E7490">(이미지 모아보기 페이지)</span></div>
-        <div style="display:flex;gap:6px;align-items:stretch">
-          <input id="rlcReportPageLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #A5F3FC;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
-          <button onclick="_relocateCopyLink('rlcReportPageLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
-          <a href="${escHtml(link)}" target="_blank" rel="noopener" title="미리보기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
-        </div>
-        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 이미지를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
-        <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 링크를 아는 사람은 열람할 수 있습니다(추측불가 코드). 리뷰어 이름이 함께 표시됩니다.</div>
-      </div>`;
-    showToast('업체 보고 링크 준비됨', 'success');
-  } catch (e) {
-    if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
-  }
-}
-
-// [보조] Drive 폴더 공유링크 만들기 — 선택 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
-//   설정하고 폴더 링크를 반환(폴더 그대로 전달). 원본은 tnaks 소유 그대로 → 복제 불필요.
-async function _relocateMakeReportLink() {
-  const t = _relocateTabs[_relocateSelIdx];
-  if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
-  const folderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
-  const out = document.getElementById('rlcFolderShareResult');
-  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 폴더 공유링크 생성 중…</div>`;
-  try {
-    const res = await gasPost({ action: 'shareReviewFolder', sheetId: t.sheetId, tabName: t.tabName, folderUrl }, 60000);
-    if (!res || res.ok === false || res.error) {
-      if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
-      return;
-    }
-    const link = res.folderUrl;
-    document.getElementById('rlcFolderUrl').value = link; // 폴더 링크 칸 동기화
-    const cntTxt = (res.fileCount != null) ? `${res.fileCount}개 파일` : '파일 수 확인 안 됨';
-    const note = res.created
-      ? ' · 빈 [리뷰] 폴더를 새로 만들어 연결했습니다(아직 제출 0건)'
-      : (res.alreadyShared ? ' · 이미 공유돼 있던 폴더' : '');
-    if (out) out.innerHTML = `
-      <div style="background:#F8FAFC;border:1px solid #CBD5E1;border-radius:8px;padding:10px">
-        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> Drive 폴더 공유링크 준비됨 <span style="font-weight:500;color:#0E7490">(${cntTxt})</span></div>
-        <div style="display:flex;gap:6px;align-items:stretch">
-          <input id="rlcFolderShareLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #CBD5E1;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
-          <button onclick="_relocateCopyLink('rlcFolderShareLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
-          <a href="${escHtml(link)}" target="_blank" rel="noopener" title="새 창에서 열기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
-        </div>
-        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">폴더를 그대로 전달합니다. 업체는 로그인 없이 열람·다운로드, 직원 복제 불필요.${note}</div>
-        <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 파일명에 리뷰어 이름이 보입니다. 공유 해제는 구글 드라이브에서 폴더 '공유 → 링크 보기 제한'으로 가능합니다.</div>
-      </div>`;
-    showToast(res.created ? '빈 [리뷰] 폴더 생성·공유링크 준비' : 'Drive 폴더 공유링크 준비됨', 'success');
-  } catch (e) {
-    if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
-  }
-}
-
-// 보고 링크 클립보드 복사 (입력칸 id 지정)
-function _relocateCopyLink(inputId) {
-  const el = document.getElementById(inputId);
-  if (!el) return;
-  const v = el.value || '';
-  const done = () => showToast('보고 링크를 복사했습니다.', 'success');
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(v).then(done).catch(() => { el.select(); document.execCommand('copy'); done(); });
-  } else {
-    el.select(); document.execCommand('copy'); done();
-  }
-}
-
-// ── 선택 탭 [리뷰] 폴더 이미지 연결 백필 — POST /api/drive/review-folder-backfill ──
-//   폴더 안 이미지를 파일명 이름↔행 결정적 매칭으로 원장(review_submissions)·대표 이미지에 연결.
-//   업체 뷰어 "리뷰 이미지 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
-async function _reviewFolderBackfill(apply) {
-  const t = _relocateTabs[_relocateSelIdx];
-  if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }
-  const folderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();   // 비우면 탭 연결 폴더 자동
-  const resultEl = document.getElementById('rlcResult');
-  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '연결 중' : '폴더 스캔 중'}...</div>`;
-  try {
-    const res = await gasPost({
-      action: 'reviewFolderBackfill',
-      sheetId: t.sheetId, tabName: t.tabName,
-      folderUrl: folderUrl || undefined,
-      dryRun: !apply,
-    });
-    if (!res || res.ok === false) {
-      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
-      return;
-    }
-    const lk = res.link || {};
-    const samp = (arr, label) => (arr && arr.length)
-      ? `<div style="font-size:.66rem;color:#9CA3AF;margin-top:3px;font-family:monospace;word-break:break-all">${label}: ${arr.slice(0, 10).map(escHtml).join(', ')}${arr.length > 10 ? ` 외 ${arr.length - 10}` : ''}</div>` : '';
-    const body = `
-      <div style="font-size:.74rem;color:#374151;margin-top:6px">폴더 이미지 <b>${res.fileCount}</b>장 · 명단 <b>${res.indexRowCount}</b>행${res.mapped ? ' · <span style="color:#059669">폴더 자동 매핑됨</span>' : ''}</div>
-      <div style="font-size:.72rem;color:#4338CA;margin-top:4px"><i class="fas fa-link"></i> 연결 ${lk.linked || 0} · 기존 ${lk.already || 0} · 모호 ${lk.ambiguous || 0} · 명단없음 ${lk.unmatched || 0}${apply ? ` · 원장기록 ${lk.recorded || 0}` : ''}</div>
-      ${samp((lk.samples || {}).ambiguous, '모호(동명 2행+)')}${samp((lk.samples || {}).unmatched, '명단없음')}
-      <div style="font-size:.66rem;color:#9CA3AF;margin-top:4px">※ 모호/명단없음 파일은 자동 연결하지 않습니다 — 파일명을 <b>이름_순번</b> 형식으로 맞추면 다음 실행에서 연결됩니다.</div>`;
-    if (apply) {
-      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> 연결 완료 — 업체 뷰어 미리보기에 바로 반영됩니다.</div>${body}`;
-      showToast(`이미지 ${lk.linked || 0}건 연결 · 원장 ${lk.recorded || 0}건 기록`, 'success');
-    } else {
-      resultEl.innerHTML = `<div style="font-size:.84rem;color:#0F172A;font-weight:700"><i class="fas fa-eye"></i> 미리보기 (아직 아무것도 기록하지 않음)</div>${body}
-        <button onclick="_reviewFolderBackfill(true)" style="width:100%;margin-top:10px;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 실제 연결 실행 (연결 ${lk.linked || 0}건 + 원장 기록)</button>`;
-    }
-  } catch (e) {
-    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(e.message || '실패')}</div>`;
-  }
-}
-
-async function _relocateRun(apply) {
-  const t = _relocateTabs[_relocateSelIdx];
-  if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }
-  const reviewFolderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
-  const brandKeywords = (document.getElementById('rlcKeywords').value || '').split(',').map(s => s.trim()).filter(Boolean);
-  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
-  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
-
-  if (!reviewFolderUrl) { showToast('[리뷰] 폴더 링크가 필요합니다.', 'error'); return; }
-  if (brandKeywords.length === 0) { showToast('브랜드/상품 키워드를 1개 이상 입력하세요.', 'error'); return; }
-  if (apply && !confirm(`선택한 캡처들을 [리뷰] 폴더로 이동합니다. 진행할까요?`)) return;
-
-  const resultEl = document.getElementById('rlcResult');
-  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '검색 중'}...</div>`;
-
-  try {
-    const res = await gasPost({
-      action: 'relocateOrphanReviews',
-      sheetId: t.sheetId, tabName: t.tabName,
-      reviewFolderUrl, brandKeywords, sinceDate,
-      dryRun: !apply,
-    });
-    if (!res || res.ok === false) {
-      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
-      return;
-    }
-    // 인덱스 결정적 링크(B) 요약 — 모든 결과에 공통 표기
-    const lk = res.link || {};
-    const linkLine = (lk.linked || lk.ambiguous || lk.unmatched || lk.already)
-      ? `<div style="font-size:.72rem;color:#4338CA;margin-top:6px"><i class="fas fa-link"></i> 인덱스 링크: 연결 ${lk.linked || 0}${lk.already ? ` · 기존 ${lk.already}` : ''}${lk.ambiguous ? ` · 모호 ${lk.ambiguous}` : ''}${lk.unmatched ? ` · 명단없음 ${lk.unmatched}` : ''}</div>`
-      : '';
-
-    // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
-    const dg = res.diag || {};
-    const ss = (dg.searchStats || []).map(s => `${escHtml(s.kw)}[SA:${s.sa == null ? '-' : s.sa}/OAuth:${s.oauth == null ? '-' : s.oauth}${s.oauthError ? '⚠' : ''}]`).join(' ');
-    const errMsg = (dg.searchStats || []).map(s => s.oauthError || s.saError).find(Boolean);
-    const errLine = errMsg ? `<div style="font-size:.66rem;color:#DC2626;margin-top:3px;font-family:monospace;word-break:break-all">⚠ ${escHtml(String(errMsg).slice(0, 300))}</div>` : '';
-    const diagLine = `<div style="font-size:.68rem;color:#9CA3AF;margin-top:6px;font-family:monospace">🔎 서버검색 ${dg.searchFound ?? '-'}건(리뷰형식 ${dg.reviewFormatCount ?? '-'}) ${ss}</div>${errLine}`;
-
-    if (apply) {
-      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
-        ${linkLine}${diagLine}
-        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">[리뷰] 폴더를 새로고침해 확인하세요. (이미 폴더에 있던 파일은 건너뜀)</div>`;
-      showToast(`${res.movedCount}건 이동${lk.linked ? ` · 인덱스 ${lk.linked}건 연결` : ''}`, 'success');
-      return;
-    }
-    // 후보 목록 — 파일명 클릭 시 모달 내에서 이미지 인라인 펼침(아코디언)
-    const showN = 50;
-    const list = (res.candidates || []).slice(0, showN).map(c => `
-      <div style="border-bottom:1px solid #ECECF5">
-        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
-          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
-          <span style="flex:1">${escHtml(c.name)}</span>
-        </div>
-        <div class="rlc-img" style="display:none"></div>
-      </div>`).join('');
-    const more = res.candidateCount > showN ? `<div style="font-size:.7rem;color:#9CA3AF;margin-top:4px">… 외 ${res.candidateCount - showN}건</div>` : '';
-    const inTargetLine = res.alreadyInTarget ? `<div style="font-size:.7rem;color:#6B7280;margin-top:4px">이미 [리뷰] 폴더에 있는 ${res.alreadyInTarget}건도 인덱스 링크 대상에 포함됩니다.</div>` : '';
-    resultEl.innerHTML = `
-      <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:12px">
-        <div style="font-size:.84rem;font-weight:700;color:#5B21B6">이동 대상: ${res.candidateCount}건</div>
-        ${linkLine}${inTargetLine}${diagLine}
-        ${(res.candidateCount || res.alreadyInTarget)
-          ? `<div style="margin:8px 0 0">${list}</div>${more}
-             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이 화면에서 바로 이미지를 펼쳐 볼 수 있습니다.</div>
-             <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> 실행 (이동 ${res.candidateCount}건 + 인덱스 링크)</button>`
-          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">대상이 없습니다. 키워드/시작일을 조정해 보세요. (OCR 색인이 안 된 캡처는 검색에 안 걸릴 수 있습니다.)</div>`}
-      </div>`;
-  } catch (err) {
-    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
-  }
-}
-
-// ── 전체 탭 스캔: 임시저장(localStorage) ──
-function _relocateTabKey(t) { return (t.sheetId || '') + '||' + (t.tabName || ''); }
-function _relocateLoadScan() {
-  try { const o = JSON.parse(localStorage.getItem('rlcScanResults_v1') || '{}'); return (o && o.byTab) ? o : { ts: 0, byTab: {} }; }
-  catch (_) { return { ts: 0, byTab: {} }; }
-}
-function _relocateSaveScan() {
-  try { localStorage.setItem('rlcScanResults_v1', JSON.stringify({ ts: Date.now(), byTab: _relocateScanResults })); } catch (_) {}
-}
-
-// 결과 1건 → 상태/액션 셀 HTML
-function _relocateScanRowInner(i, t, r) {
-  if (!t.folderUrl) return { status: `<span style="color:#D97706">폴더 미설정</span>`, action: '' };
-  if (!r) return { status: `<span style="color:#9CA3AF">대기</span>`, action: '' };
-  if (r.status === 'scanning') return { status: `<i class="fas fa-spinner fa-spin"></i> 스캔중`, action: '' };
-  if (r.status === 'error') return { status: `<span style="color:#DC2626" title="${escHtml(r.error || '')}">오류</span>`, action: '' };
-  if (r.status === 'moved') return { status: `<span style="color:#065F46;font-weight:700">✅ ${r.movedCount}건 이동</span>${r.linked ? ` <span style="color:#4338CA">링크 ${r.linked}</span>` : ''}`, action: '' };
-  const n = r.candidateCount || 0;
-  if (n === 0) return { status: `<span style="color:#9CA3AF">대상 0</span>`, action: '' };
-  if (r.over) return {
-    status: `<span style="color:#DC2626;font-weight:700" title="작업건수(${r.expected || '?'})보다 대상이 많음 — 단일 탭 모드에서 정확한 키워드로 확인하세요">⚠ 과다 ${n}/${r.expected || '?'}</span>`,
-    action: `<button onclick="_relocateSelectTab(${i});showToast('단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요','info')" style="font-size:.68rem;background:#FEF3C7;color:#92400E;border:none;border-radius:6px;padding:4px 9px;cursor:pointer">검토</button>`,
-  };
-  return {
-    status: `<b style="color:#5B21B6">대상 ${n}건</b>${r.expected ? `<span style="color:#9CA3AF">/${r.expected}</span>` : ''}${r.ambiguous ? ` <span style="color:#9CA3AF">모호 ${r.ambiguous}</span>` : ''}`,
-    action: `<button id="rlcScanBtn_${i}" onclick="_relocateApplyTab(${i})" style="font-size:.72rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:4px 11px;cursor:pointer">이동</button>`,
-  };
-}
-
-function _relocateUpdateRow(i) {
-  const t = _relocateTabs[i];
-  const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
-  const s = document.getElementById('rlcScanStatus_' + i);
-  const a = document.getElementById('rlcScanAction_' + i);
-  if (s) s.innerHTML = inner.status;
-  if (a) a.innerHTML = inner.action;
-}
-
-// 저장된(또는 현재) 결과로 전체 목록 렌더
-function _relocateRenderScan() {
-  const resultEl = document.getElementById('rlcResult');
-  if (!resultEl) return;
-  const rows = _relocateTabs.map((t, i) => {
-    const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
-    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #F3F4F6">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.74rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
-        ${t.campName ? `<div style="font-size:.62rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.campName)}</div>` : ''}
-      </div>
-      <div id="rlcScanStatus_${i}" style="font-size:.7rem;white-space:nowrap">${inner.status}</div>
-      <div id="rlcScanAction_${i}" style="min-width:54px;text-align:right">${inner.action}</div>
-    </div>`;
-  }).join('');
-  const saved = _relocateLoadScan();
-  const tsTxt = saved.ts ? new Date(saved.ts).toLocaleString() : '';
-  resultEl.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
-      <div id="rlcScanProgress" style="font-size:.72rem;font-weight:700;color:#3730A3;min-width:0;overflow:hidden;text-overflow:ellipsis">${tsTxt ? '임시저장 ' + escHtml(tsTxt) : '스캔 준비됨'}</div>
-      <div style="display:flex;gap:6px;flex-shrink:0">
-        <button onclick="_relocateScanAll()" style="font-size:.7rem;background:#4338CA;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">다시 스캔</button>
-        <button onclick="_relocateScanStop=true" style="font-size:.7rem;background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">중지</button>
-      </div>
-    </div>
-    <div style="max-height:360px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">${rows}</div>`;
-}
-
-// 전체 탭 자동 스캔 — 모든 탭 순차 dryRun. requireRoster로 참여자 명단 제약 + 과대매칭 차단.
-async function _relocateScanAll() {
-  _relocateScanStop = false;
-  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
-  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
-  _relocateRenderScan();
-  const setProg = (txt) => { const p = document.getElementById('rlcScanProgress'); if (p) p.textContent = txt; };
-
-  let scanned = 0, withTargets = 0;
-  for (let i = 0; i < _relocateTabs.length; i++) {
-    if (_relocateScanStop) { setProg(`중지됨 (${scanned}/${_relocateTabs.length})`); _relocateSaveScan(); return; }
-    const t = _relocateTabs[i];
-    const key = _relocateTabKey(t);
-    if (_relocateScanResults[key] && _relocateScanResults[key].status === 'moved') { scanned++; continue; } // 이미 이동 → 건너뜀
-
-    if (!t.folderUrl) { _relocateScanResults[key] = { displayName: t.displayName, status: 'nofolder' }; _relocateUpdateRow(i); scanned++; continue; }
-    _relocateScanResults[key] = { displayName: t.displayName, status: 'scanning' }; _relocateUpdateRow(i);
-    try {
-      const res = await gasPost({
-        action: 'relocateOrphanReviews',
-        sheetId: t.sheetId, tabName: t.tabName,
-        reviewFolderUrl: t.folderUrl,
-        brandKeywords: _relocateDeriveKeywords(t.tabName),
-        requireRoster: true, sinceDate, dryRun: true,
-      });
-      if (!res || res.ok === false) {
-        _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: (res && res.error) || '' };
-      } else {
-        const n = res.candidateCount || 0;
-        const expected = (res.indexRowCount && res.indexRowCount > 0) ? res.indexRowCount : _relocateParseCount(t.tabName);
-        const over = expected > 0 ? (n > expected * 2 + 5) : (n > 50);
-        if (n > 0) withTargets++;
-        _relocateScanResults[key] = { displayName: t.displayName, status: 'ok', candidateCount: n, expected, over, ambiguous: (res.link && res.link.ambiguous) || 0 };
-      }
-    } catch (e) {
-      _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: e.message };
-    }
-    _relocateUpdateRow(i);
-    scanned++;
-    setProg(`스캔 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
-    _relocateSaveScan();
-  }
-  setProg(`스캔 완료 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
-  _relocateSaveScan();
-}
-
-// 스캔 목록에서 한 탭만 실제 이동(apply) — 과대매칭(over)은 차단
-async function _relocateApplyTab(i) {
-  const t = _relocateTabs[i];
-  if (!t || !t.folderUrl) return;
-  const key = _relocateTabKey(t);
-  const prev = _relocateScanResults[key];
-  if (prev && prev.over) { showToast('과대매칭 의심 — 단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요', 'error'); return; }
-  const btn = document.getElementById('rlcScanBtn_' + i);
-  if (btn) { btn.disabled = true; btn.textContent = '이동중'; }
-  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
-  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
-  try {
-    const res = await gasPost({
-      action: 'relocateOrphanReviews',
-      sheetId: t.sheetId, tabName: t.tabName,
-      reviewFolderUrl: t.folderUrl,
-      brandKeywords: _relocateDeriveKeywords(t.tabName),
-      requireRoster: true, sinceDate, dryRun: false,
-    });
-    if (!res || res.ok === false) {
-      _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: (res && res.error) || '' });
-      _relocateUpdateRow(i); _relocateSaveScan(); return;
-    }
-    const lk = res.link || {};
-    _relocateScanResults[key] = { displayName: t.displayName, status: 'moved', movedCount: res.movedCount, linked: lk.linked || 0 };
-    _relocateUpdateRow(i); _relocateSaveScan();
-    showToast(`${t.displayName}: ${res.movedCount}건 이동`, 'success');
-  } catch (e) {
-    _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: e.message });
-    _relocateUpdateRow(i); _relocateSaveScan();
-  }
-}
 
 /* ══════════════════════════════════════════════════════════════
    ★ 리뷰어 소식·공지 관리 (관리자) — 리뷰어 홈 상단 노출

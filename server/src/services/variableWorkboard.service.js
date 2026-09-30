@@ -3,7 +3,7 @@
 // v2 가변 작업표 열의 원본 판정은 이 파일 한 곳에 둔다. 화면 문자열이나
 // 기존 시트 헤더를 역으로 읽지 않는다. 그래야 preview·시트·sheetless가 같은
 // 값을 만들고, 원본이 불완전한 경우 임의의 열/행을 만드는 사고를 막을 수 있다.
-const { normalizeReviewType, reviewTypeLabel } = require('../utils/reviewType');
+const { normalizeReviewType, reviewTypeLabel, isFreeChoiceReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 
 function asPositiveInt(value) {
@@ -59,6 +59,11 @@ function labelsFromMix(raw, expectedCount) {
 function reviewOptionAssignments({ total, selections = [], rowSelections = [], reviewType, reviewTypeMix } = {}) {
   const n = asPositiveInt(total);
   const type = normalizeReviewType(reviewType);
+  // `자율리뷰`는 행별 유형을 지정하지 않는 정상 값이다. v2 표에는 리뷰옵션 열을
+  // 유지하되 값을 비워 두며, 모르는/깨진 리뷰타입까지 허용하지 않도록 정확한 표기만 예외 처리한다.
+  if (n && !type && isFreeChoiceReviewType(reviewType)) {
+    return { labels: new Array(n).fill(''), blocker: null };
+  }
   if (!n || !type) return { labels: new Array(n).fill(''), blocker: 'invalid_review_type' };
   if (type !== 'mixed') {
     const label = reviewTypeLabel(type);

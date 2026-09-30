@@ -116,6 +116,11 @@ function describeEvent(row = {}) {
         problem: `구매양식이 시트에서 반복 소실되어 자동 재기록을 중단함${at(c.row) ? `(마지막 기록 ${at(c.row)}행)` : ''}.`,
         action: "수동 확인·입력이 필요(관리자 대시보드 '구매주문 시트반영 현황' 참조).",
       };
+    case 'identity_blocked_expired':
+      return {
+        problem: `구매 캡처가 참여 명의와 맞지 않아 제출이 막힌 채 참여가 만료됨${at(c.blockedTries) ? `(명의 확인 ${at(c.blockedTries)}회 막힘)` : ''}.`,
+        action: '실제로 구매했는지 1:1 문의로 확인하고, 내 정보에 같은 이름이 두 번 저장돼 있거나 주소가 비어 있으면 정리해주세요.',
+      };
     case 'order_row_shifted':
       return {
         problem: `기록 행이 ${at(c.oldRow) || '?'}→${at(c.newRow) || '?'}행으로 이동됨(시트 중간 행 삽입·정렬 감지).`,
@@ -140,6 +145,13 @@ function describeEvent(row = {}) {
     }
     case 'order_no_capture':
       return { problem: '구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.', action: '구매캡쳐 보완 필요.' };
+    case 'capture_replaced':
+      return {
+        problem: `직원이 구매캡처를 ${c.oldFileId ? '새 사진으로 교체함' : '새로 올림'}${at(c.by) ? `(${at(c.by)})` : ''}.`,
+        action: c.oldFileId
+          ? (c.oldTrashed ? '이전 사진은 드라이브 휴지통으로 이동(30일 안에 복구 가능).' : '이전 사진은 드라이브에 그대로 남겨 둠.')
+          : '조치 불필요.',
+      };
     case 'capture_mismatch': {
       let slot = at(c.slotKey) || '캡처';
       try { slot = require('../utils/captureSlots').slotLabel(null, '', c.slotKey) || slot; } catch (_) { /* 라벨 실패는 key 그대로 */ }

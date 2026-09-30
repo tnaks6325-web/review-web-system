@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>카톡 아이디 시안</title>
+<style>
+/* 레이아웃: 화면별 세로 섹션, 우클릭 시안은 A/B/C 토글로 같은 표 위에서 비교 */
+:root{
+  --bg:#F3F5F9; --panel:#FFFFFF; --fg:#1B2233; --mute:#6B7385; --line:#E2E6EE;
+  --accent:#2F6BEA; --accent-soft:#E8EFFD; --kakao:#FEE500; --kakao-fg:#3A1D1D;
+  --warn:#B45309; --warn-soft:#FEF3C7; --ok:#15803D;
+  --f-body:-apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12151C; --panel:#1B1F29; --fg:#E7EAF0; --mute:#9AA2B3; --line:#2C3240;
+  --accent:#6E9BFF; --accent-soft:#1E2B47; --warn:#F2B25C; --warn-soft:#3A2C12; --ok:#4ADE80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12151C; --panel:#1B1F29; --fg:#E7EAF0; --mute:#9AA2B3; --line:#2C3240;
+  --accent:#6E9BFF; --accent-soft:#1E2B47; --warn:#F2B25C; --warn-soft:#3A2C12; --ok:#4ADE80; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.55}
+.wrap{max-width:980px;margin:0 auto;padding-inline:16px;padding-block:28px 60px;display:flex;flex-direction:column;gap:28px}
+h1{font-size:1.45rem;margin:0;text-wrap:balance}
+h2{font-size:1.05rem;margin:0 0 4px}
+.lead{color:var(--mute);margin:4px 0 0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:14px}
+.eyebrow{font-size:.72rem;letter-spacing:.06em;color:var(--accent);font-weight:700}
+.note{font-size:.82rem;color:var(--mute)}
+.q{background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:10px 12px;font-size:.84rem}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
+.phone{border:1px solid var(--line);border-radius:18px;padding:16px;background:var(--bg);display:flex;flex-direction:column;gap:10px;max-width:380px}
+label{font-size:.78rem;font-weight:600;color:var(--mute)}
+input{font:inherit;width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg)}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{font:inherit;border:0;border-radius:8px;padding:10px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer}
+.req{color:#DC2626}
+.pf{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 14px}
+.pf-ln{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);font-size:.86rem}
+.pf-ln:last-child{border-bottom:0}
+.pf-k{color:var(--mute);font-size:.76rem}
+.pf-v{display:flex;gap:6px;align-items:center;min-width:0;flex-wrap:wrap}
+.chip{font-size:.7rem;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);border:0;cursor:pointer}
+.new{outline:2px dashed var(--accent);outline-offset:3px;border-radius:6px}
+.kk{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;background:var(--kakao);color:var(--kakao-fg);font-size:.6rem;font-weight:800;flex:none}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:7px 14px;border-radius:99px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.desc{font-size:.85rem;min-height:3.2em}
+.tblwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;position:relative}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:.82rem}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;white-space:nowrap}
+th{background:var(--bg);color:var(--mute);font-weight:600}
+tbody tr{cursor:context-menu}
+tbody tr.sel td{background:var(--accent-soft)}
+.visit{font-size:.66rem;padding:1px 6px;border-radius:5px;background:#DBEAFE;color:#1D4ED8;margin-left:4px}
+.stage{position:relative;min-height:340px}
+.menu{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);width:250px;padding:6px;z-index:5;font-size:.83rem}
+.menu[hidden]{display:none}
+.mi{display:flex;gap:8px;align-items:center;padding:7px 8px;border-radius:6px;color:var(--fg)}
+.mi.hl{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.mdiv{height:1px;background:var(--line);margin:4px 0}
+.who{padding:8px;display:flex;flex-direction:column;gap:5px;border-radius:8px;background:var(--bg);margin-bottom:4px}
+.who b{font-size:.88rem}
+.wrow{display:flex;gap:6px;align-items:center;font-size:.8rem;min-width:0}
+.wrow .k{color:var(--mute);width:40px;flex:none}
+.cp{margin-left:auto;font-size:.68rem;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:5px;padding:1px 6px;cursor:pointer}
+.miss{color:var(--warn);font-size:.78rem}
+.pop{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.2);width:290px;padding:14px;z-index:6;display:flex;flex-direction:column;gap:8px;font-size:.84rem}
+.pop[hidden]{display:none}
+.pop h3{margin:0;font-size:.95rem;display:flex;gap:6px;align-items:center}
+.tag{font-size:.66rem;padding:1px 6px;border-radius:5px;background:var(--accent-soft);color:var(--accent)}
+.hint{font-size:.76rem;color:var(--mute)}
+@media (prefers-reduced-motion:no-preference){.menu,.pop{animation:in .12s ease-out}@keyframes in{from{opacity:.4;transform:translateY(-3px)}}}
+</style>
+</head><body>
+
+<div class="wrap">
+  <header>
+    <h1>카카오톡 아이디 등록 · 확인 시안</h1>
+    <p class="lead">리뷰 미작성자에게 연락이 안 되는 문제를 줄이려고, 리뷰어의 카톡 아이디를 받아 두고 담당자가 작업보드에서 바로 확인하는 흐름입니다. 모든 값은 예시입니다.</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">① 처음 가입할 때</div>
+    <h2>가입 화면에 카톡 아이디 칸 추가</h2>
+    <div class="two">
+      <form class="phone" onsubmit="event.preventDefault()">
+        <div><label for="rn">이름 <span class="req">*</span></label><input id="rn" value="김리뷰"></div>
+        <div><label for="rp">전화번호 <span class="req">*</span></label><input id="rp" value="010-1234-5678"></div>
+        <div class="new"><label for="rk">카카오톡 아이디 <span class="req">*</span></label><input id="rk" placeholder="예: review_kim" value="review_kim"></div>
+        <div class="note">리뷰 기한 안내를 카톡으로 드려요. 카톡 → 설정 → 프로필 관리에서 확인할 수 있어요.</div>
+        <button class="btn" type="submit">가입하기</button>
+      </form>
+      <div class="q"><b>확인 필요</b><br>가입 때 이 칸을 <b>반드시 입력</b>하게 할까요, <b>비워도 가입</b>되게 할까요?<br>· 필수: 새 가입자는 빠짐없이 모입니다. 카톡 아이디를 모르는 분은 가입이 막힙니다.<br>· 선택: 막히는 사람은 없지만 비워 두는 분이 생깁니다.<br>시안에는 필수(*)로 그려 두었습니다.</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">② 이미 회원인 분</div>
+    <h2>내정보 · 소득 줄 바로 아래에 카톡 아이디</h2>
+    <div class="two">
+      <div class="pf">
+        <div class="pf-ln"><span class="pf-k">주소</span><span class="pf-v">경기도 안산시 상록구 일동 … <button class="chip" type="button">수정</button></span></div>
+        <div class="pf-ln"><span class="pf-k">아이디</span><span class="pf-v"><input id="sid" value="dream7191@naver.com" style="flex:1;min-width:0"><button class="chip" type="button">저장</button></span></div>
+        <div class="pf-ln"><span class="pf-k">계좌</span><span class="pf-v">토스뱅크 · 1000-4381-7593 · 박은비</span></div>
+        <div class="pf-ln"><span class="pf-k">소득</span><span class="pf-v">미등록 <button class="chip" type="button">추가</button></span></div>
+        <div class="pf-ln new"><span class="pf-k">카톡</span><span class="pf-v"><span class="kk">TALK</span><input id="kid" placeholder="카카오톡 아이디" style="flex:1;min-width:0"><button class="chip" type="button">저장</button></span></div>
+      </div>
+      <div class="note">본계정에만 한 칸 둡니다. 타계정 카드에는 이 줄이 없습니다.<br><br>아직 비어 있는 기존 회원에게는 내정보 맨 위에 “카톡 아이디를 등록해 주세요” 한 줄 안내를 띄우는 것도 가능합니다(원하시면 추가).</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">③ 담당자 화면</div>
+    <h2>작업보드에서 줄을 우클릭하면 리뷰어 정보</h2>
+    <p class="note" style="margin:0">아래 표의 줄을 <b>우클릭</b>(또는 눌러서) 해 보세요. 세 가지 중 하나를 골라 주세요.</p>
+    <div class="seg" role="group" aria-label="시안 선택">
+      <button type="button" data-v="A" aria-pressed="true">A · 메뉴 맨 위에 바로</button>
+      <button type="button" data-v="B" aria-pressed="false">B · 메뉴 → 정보 카드</button>
+      <button type="button" data-v="C" aria-pressed="false">C · A + 이름 옆 카톡 표시</button>
+    </div>
+    <p class="desc" id="desc"></p>
+    <div class="stage" id="stage">
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>구매일자</th><th>수취인</th><th>리뷰</th></tr></thead>
+          <tbody id="tb"></tbody>
+        </table>
+      </div>
+      <div class="menu" id="menu" hidden></div>
+      <div class="pop" id="pop" hidden></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">공통 규칙</div>
+    <ul class="note" style="margin:0;padding-left:18px">
+      <li>표에 적힌 사람이 타계정 명의여도, 보여 주는 카톡 아이디는 <b>그 사람의 본계정</b> 것입니다(리뷰어에게 메시지 보내기와 같은 판정).</li>
+      <li>누구 것인지 확실히 가릴 수 없는 줄(동명이인 등)은 추측하지 않고 “리뷰어를 특정할 수 없음”이라고 적습니다.</li>
+      <li>업체(광고주) 화면에는 보이지 않습니다. 내부 담당자만 봅니다.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+(function(){
+  var rows=[
+    {n:1,name:'김리뷰',ph:'010-1234-5678',d:'9/22 (월)',rc:'김리뷰',rv:'미제출',kakao:'review_kim',sub:false,visits:1},
+    {n:2,name:'박은비',ph:'010-2705-9518',d:'9/22 (월)',rc:'양승호',rv:'미제출',kakao:'',sub:true,owner:'박은비',visits:1},
+    {n:3,name:'이하나',ph:'010-5555-0101',d:'9/23 (화)',rc:'이하나',rv:'9/29',kakao:'hana_lee22',sub:false,visits:2}
+  ];
+  var v='A', tb=document.getElementById('tb'), menu=document.getElementById('menu'), pop=document.getElementById('pop'), stage=document.getElementById('stage');
+  var D={A:'우클릭 메뉴를 열자마자 맨 위에 이름·연락처·카톡 아이디가 보이고, 옆 [복사]로 바로 복사합니다. 클릭 한 번 덜 듭니다.',
+         B:'메뉴에는 [👤 리뷰어 정보] 한 줄만 추가하고, 누르면 셀 옆에 자세한 카드(본계정/타계정·이 작업 참여 횟수·리뷰 상태)가 뜹니다. 메뉴가 길어지지 않습니다.',
+         C:'A 방식에 더해, 표의 참여자 이름 옆에 카톡이 등록된 사람은 노란 TALK 표시가 붙습니다. 누가 등록 안 했는지 표만 훑어도 보입니다.'};
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function draw(){
+    tb.innerHTML=rows.map(function(r,i){
+      var badge=(v==='C'&&r.kakao)?' <span class="kk" title="카톡 등록됨">TALK</span>':'';
+      return '<tr data-i="'+i+'"><td>'+r.n+'</td><td>'+esc(r.name)+'<span class="visit">'+r.visits+'회</span>'+badge+'</td><td>'+r.ph+'</td><td>'+r.d+'</td><td>'+esc(r.rc)+'</td><td>'+r.rv+'</td></tr>';
+    }).join('');
+    document.getElementById('desc').textContent=D[v];
+  }
+  function who(r){
+    var k=r.kakao?'<span class="kk">TALK</span><span>'+esc(r.kakao)+'</span><button class="cp" type="button">복사</button>'
+                 :'<span class="miss">카톡 아이디 미등록</span>';
+    return '<div class="who"><b>'+esc(r.sub?r.owner:r.name)+(r.sub?' <span class="tag">타계정 참여 · 명의 '+esc(r.rc)+'</span>':'')+'</b>'
+      +'<div class="wrow"><span class="k">연락처</span><span>'+r.ph+'</span><button class="cp" type="button">복사</button></div>'
+      +'<div class="wrow"><span class="k">카톡</span>'+k+'</div></div>';
+  }
+  var base='<div class="mi">✏️ 이 셀 편집</div><div class="mi">💬 리뷰어에게 메시지</div><div class="mi">🕘 편집기록</div><div class="mi">📋 복사</div><div class="mdiv"></div><div class="mi">🗑 행 삭제</div>';
+  function place(el,x,y){var sr=stage.getBoundingClientRect();var w=el.offsetWidth,h=el.offsetHeight;
+    el.style.left=Math.max(4,Math.min(x-sr.left,sr.width-w-4))+'px';el.style.top=Math.max(4,Math.min(y-sr.top,stage.offsetHeight-h-4))+'px';}
+  function openMenu(r,x,y,tr){
+    pop.hidden=true;
+    [].forEach.call(tb.children,function(t){t.classList.remove('sel')});tr.classList.add('sel');
+    menu.innerHTML=(v==='B'?'<div class="mi hl" id="miInfo" tabindex="0">👤 리뷰어 정보</div><div class="mdiv"></div>':who(r))+base;
+    menu.hidden=false;place(menu,x,y);
+    var mi=document.getElementById('miInfo');
+    if(mi) mi.onclick=function(){menu.hidden=true;
+      pop.innerHTML='<h3>👤 '+esc(r.sub?r.owner:r.name)+(r.sub?' <span class="tag">타계정 참여</span>':' <span class="tag">본계정</span>')+'</h3>'
+        +(r.sub?'<div class="hint">표의 명의는 '+esc(r.rc)+' — 카톡·연락처는 본계정 기준입니다</div>':'')
+        +who(r).replace('<div class="who">','<div class="who" style="margin:0">')
+        +'<div class="wrow"><span class="k">참여</span><span>이 작업 '+r.visits+'회 · 리뷰 '+r.rv+'</span></div>'
+        +'<div class="hint">Esc 또는 바깥을 누르면 닫힙니다</div>';
+      pop.hidden=false;place(pop,x+10,y);};
+  }
+  tb.addEventListener('contextmenu',function(e){var tr=e.target.closest('tr');if(!tr)return;e.preventDefault();openMenu(rows[+tr.dataset.i],e.clientX,e.clientY,tr);});
+  tb.addEventListener('click',function(e){var tr=e.target.closest('tr');if(!tr)return;e.stopPropagation();openMenu(rows[+tr.dataset.i],e.clientX,e.clientY,tr);});
+  menu.addEventListener('click',function(e){e.stopPropagation();var b=e.target.closest('.cp');if(b){b.textContent='복사됨';}});
+  pop.addEventListener('click',function(e){e.stopPropagation();var b=e.target.closest('.cp');if(b){b.textContent='복사됨';}});
+  document.addEventListener('click',function(){menu.hidden=true;pop.hidden=true;});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'){menu.hidden=true;pop.hidden=true;}});
+  document.querySelectorAll('.seg button').forEach(function(b){b.onclick=function(){v=b.dataset.v;
+    document.querySelectorAll('.seg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});
+    menu.hidden=true;pop.hidden=true;draw();
+    var tr=tb.children[1];var r=tr.getBoundingClientRect();openMenu(rows[1],r.left+120,r.top+r.height,tr);};});
+  draw();
+  var tr=tb.children[1];requestAnimationFrame(function(){var r=tr.getBoundingClientRect();openMenu(rows[1],r.left+120,r.top+r.height,tr);});
+})();
+</script>
+</body></html>

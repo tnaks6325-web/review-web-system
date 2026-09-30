@@ -23,7 +23,6 @@ const utilSrc = readS('utils/worktableTemplate.js');
 const svcSrc = readS('services/worktable.service.js');
 const routes = readS('routes/trackB.routes.js');
 const order = readS('routes/order.routes.js');
-const staff = readF('staff.html');
 const wdesk = readF('workdesk.html');
 const idxApp = readF('js/index-app.js');
 const adminHtml = readF('admin.html');
@@ -190,14 +189,18 @@ ok('★ 역할 미들웨어 앞에 authMiddleware 가 있다(빠지면 마스터
     const names = hs.route.stack.map(s => s.handle.name);
     return names.indexOf('authMiddleware') < names.indexOf('adminOrMasterMiddleware');
   })());
-ok('작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리기 어려운 표면 최소화)',
+// ★★ 목록을 손으로 적어 두지 않는다 — 새 `/worktable/*` 라우트가 합류할 때마다 이 가드가 조용히
+//   빨개졌고(주석이 두 번이나 그 사실을 적고 있었다), 빨간 가드는 새 변경도 못 지킨다.
+//   고정하는 것은 **불변식 자체**다: 되돌리기 어려운 PUT/DELETE 표면을 만들지 않는다 + 쓰기는 전부 게이트 뒤.
+ok('★ 작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리기 어려운 표면 최소화)',
   (() => {
     const wt = _layers.filter(l => /^\/worktable/.test(l.route.path));
-    const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
-    const paths = writes.map(l => l.route.path).sort();
-    // ⚠ W5 줄 정리(`/retire-rows`)가 뒤늦게 합류해 이 목록이 드리프트해 있었다(가드가 계속 빨간 상태였다).
-    return paths.join(',') === '/worktable/add-blogger,/worktable/create,/worktable/delete,/worktable/delete-tab,/worktable/retire-rows,/worktable/template'
-      && writes.every(l => l.route.methods.post && !l.route.methods.put && !l.route.methods.delete);
+    return wt.length >= 5 && wt.every(l => !l.route.methods.put && !l.route.methods.delete);
+  })());
+ok('★ 작업표 쓰기 라우트는 전부 authMiddleware 를 먼저 탄다(무인증 도달 0)',
+  (() => {
+    const writes = _layers.filter(l => /^\/worktable/.test(l.route.path) && l.route.methods.post);
+    return writes.length >= 4 && writes.every(l => l.route.stack.map(s => s.handle.name)[0] === 'authMiddleware');
   })());
 ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',
   ['get', 'post'].every(m => {
@@ -228,13 +231,7 @@ ok('★★ URL 없는 접수는 막다른 길이 아니라 무시트로 간다(�
 ok('★★ 그래도 "접수된 오더 = linked_tab_* 보유" 불변식은 유지(무시트도 가상 탭을 등록한다)',
   /const gidMatch = url\.match\(\/\[#\?&\]gid=\(\\d\+\)\/\)/.test(order)
   && /linked_tab_sheet_id = \$3/.test(order));
-ok('AE 폼: 시트URL 이 선택 항목으로 표시된다',
-  !/작업시트탭URL <span class="req">\*<\/span>/.test(staff)
-  && /비워두셔도 됩니다/.test(staff));
-ok('AE 폼: 제출 시 클라이언트 필수 검증도 제거',
-  !/showToast\("작업시트탭URL은 필수입니다"/.test(staff));
-ok('AE 목록: 시트 미첨부 오더가 그렇게 보인다(빈 값이 조용히 "-" 로 숨지 않음)',
-  /시트 미첨부 — 접수 시 작업표 생성/.test(staff));
+// (AE 폼 staff.html 검사 3종 — 페이지 제거로 삭제, 결정 186 49번)
 // ★★ 탈 구글시트(2026-08-10): 시트URL 없는 오더는 막지 않고 **무시트로 접수**한다 — 화면은 확인만 받는다.
 ok('관리자 접수 안내 문구가 새 흐름을 알려준다(무시트 접수 확인)',
   /구글시트 없이 시스템 작업표로 접수할까요\?/.test(idxApp)
@@ -249,8 +246,12 @@ ok('★ 작업표는 상단 탭이 아니라 **설정 안**에 있다(사용자 
   && !/_wtRenderReport|_loadWorktableStats/.test(wdesk));
 // ★ 패널이 늘어도 통과하도록 **목록 전체**가 아니라 "관리자 목록에 worktable 이 있고
 //   AE 목록엔 없다"를 본다(검사 의미 불변 — 패널 하나 추가에 무관한 가드가 깨지지 않게).
-ok('리뷰웹시스템[3버전] 설정 패널 목록에 worktable 이 있다(관리자만 — 서버 adminOrMaster 와 1:1)',
-  /panels: isAdmin \? \[[^\]]*'worktable'[^\]]*\] : \['nickname'\]/.test(wdesk));
+// ★ AE 목록도 늘 수 있으므로(2026-08: gatecriteria 개방) "AE 목록에 worktable 이 **없다**"로 본다
+//   — 작업표 표준 열은 전사 설정이라 서버가 여전히 adminOrMaster 다.
+ok('리뷰웹시스템[3버전] 설정 패널 목록에 worktable 이 있다(관리자만 — 서버 adminOrMaster 와 1:1)', (() => {
+  const m = /panels: isAdmin \? \[([^\]]*)\] : \[([^\]]*)\]/.exec(wdesk);
+  return !!m && /'worktable'/.test(m[1]) && !/'worktable'/.test(m[2]);
+})());
 ok('관리자 대시보드 설정 탭에도 같은 패널이 뜬다(공유 모듈 — 두 화면이 갈라지지 않는다)',
   /panels: \[[^\]]*'worktable'[^\]]*\], autoload: false/.test(adminHtml)
   && /loadWorktableTemplate\(\)/.test(idxApp));
@@ -306,14 +307,22 @@ ok('★ 공통 = 표준 열 한 벌(별도 개념 없음) — core 배열을 두
   && /function _wtSyncColumns[\s\S]{0,600}_wtRenderChans\(\)/.test(setJs));
 ok('★ 공통에 이미 있는 열을 채널에 또 넣지 못한다(작업표에 같은 열 2번 생성 차단)',
   /이미 공통 열입니다/.test(setJs));
-ok('공통 기본값 프리셋 15열이 사용자 확정 목록과 일치한다',
+ok('공통 기본값 프리셋 14열이 사용자 확정 목록과 일치한다',
   (() => {
     const m = /var WT_PRESET_CORE = \[([\s\S]*?)\];/.exec(setJs);
     if (!m) return false;
     const got = m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
-    const want = ['번호','구매일자','주문자','수취인','ID','연락처','주소','은행','계좌번호',
-                  '예금주','결제금액','주문번호','리뷰제출','입금','비고'];
+    const want = ['번호','구매일자','수취인','ID','연락처','주소','은행','계좌번호',
+                  '예금주','결제금액','주문번호','리뷰','입금','비고'];   // ★ 리뷰제출 칸의 표준 이름 = '리뷰'(2026-08-21)
     return got.length === want.length && got.every((v, i) => v === want[i]);
+  })());
+/* ★★ `주문자` 는 프리셋에 없다(사용자 확정 2026-08-24) — 참여자 칸이 그 자리를 대체한다.
+   버튼 한 번에 되살아나면 그 확정이 조용히 뒤집힌다(되살리려면 이 가드부터 고쳐야 한다).
+   ★ 열 이름으로서의 `주문자`(= orderer 역할)는 그대로 유효하다 — 위 분류 케이스는 불변. */
+ok('★ 프리셋에 `주문자` 가 없다(참여자 칸이 대체 — 사용자 확정 2026-08-24)',
+  (() => {
+    const m = /var WT_PRESET_CORE = \[([\s\S]*?)\];/.exec(setJs);
+    return !!m && !/'주문자'/.test(m[1]);
   })());
 ok('★ 프리셋은 버튼으로만 — 저장값이 없을 때 조용히 적용되지 않는다(확정은 사람이)',
   /function wtLoadPreset/.test(setJs) && /onclick="wtLoadPreset\(\)"/.test(setJs)
@@ -538,7 +547,9 @@ ok('★ 열이 담긴 채널·유형 삭제는 한 번 더 묻는다(시트 무�
   && /function wtDelType[\s\S]{0,500}confirm\([\s\S]{0,200}이미 만들어진 시트에는 영향이 없습니다/.test(setJs));
 ok('★★ 채널 키는 **서버가 발급**한다 — 화면 임시 키는 저장 응답으로 교체된다(고아 방지)',
   /_keyMinter\('c', keys\)/.test(svcSrc) && /_keyMinter\('t', keys\)/.test(svcSrc)
-  && /function wtSaveTemplate[\s\S]{0,1100}_wtRenderChans\(\)/.test(setJs));
+  // ★ 저장 응답 반영은 `_wtApplySaved` 한 벌로 모였다(되돌리기와 공용) — 고정 폭 창 대신 그 경로를 본다.
+  && /function wtSaveTemplate[\s\S]{0,1600}_wtApplySaved\(j\.data\)/.test(setJs)
+  && /function _wtApplySaved\([\s\S]{0,300}_wtRenderChans\(\)/.test(setJs));
 ok('★ 같은 이름 채널·유형 중복 추가 차단(화면·서버 양쪽)',
   /이미 있는 채널입니다/.test(setJs) && /이미 있는 작업유형 이름입니다/.test(setJs)
   && /seenLabel\.has\(label\.toLowerCase\(\)\)/.test(svcSrc));
@@ -567,13 +578,21 @@ ok('★★ 작업유형은 **켠 것만** 반영된다 — 미전송이면 종�
   (() => {
     const off = planMod.buildWorktablePlan({ workOrder: _woD, template: _tplD, options: {} });
     const base = planMod.buildColumns({ template: _tplD, channel: 'unknown' });
-    return off.columns.map(c => c.name).join('|') === base.map(c => c.name).join('|');
+    /* ★ 2026-08-20: 시스템이 보장하는 열(옵션·택배송장번호·블로그 3열)은 **작업유형이 아니다** —
+       칸이 없으면 값이 조용히 사라지는 자리라 origin:'system' 으로 따로 붙는다.
+       이 검사가 고정하는 것은 "작업유형(t1·t2) 열이 켜지지 않았다" 이므로 그것만 본다. */
+    const tplCols = off.columns.filter(c => c.origin !== 'system');
+    return tplCols.map(c => c.name).join('|') === base.map(c => c.name).join('|')
+      && !off.columns.some(c => c.typeKey === 't1' || c.typeKey === 't2');
   })());
 ok('★★ 제안(suggestedWorkTypes)은 계산만 하고 **자동 적용하지 않는다**(확정은 사람)',
   (() => {
     const p = planMod.buildWorktablePlan({ workOrder: _woD, template: _tplD, options: {} });
+    /* ★ 2026-08-20: 시스템이 옵션 칸을 보장하므로 '옵션' 이라는 **이름의 열은 생긴다** —
+       그러나 그건 작업유형 t1 이 켜진 것이 아니다(typeKey 없음 · 유형의 나머지 열은 안 붙는다).
+       이 검사가 고정하는 것은 "제안을 자동 적용하지 않는다" 이므로 그 축으로 본다. */
     return p.suggestedWorkTypes.join(',') === 't1'          // 옵션 2종 → 상품옵션 제안
-      && !p.columns.some(c => c.name === '옵션')            // 그런데 열은 안 붙었다
+      && !p.columns.some(c => c.typeKey === 't1')           // 그런데 유형은 안 켜졌다
       && p.enabledWorkTypes.length === 0;
   })());
 ok('★ 제안 근거는 **열 역할 파생**(이름 매칭 아님) — 유형 이름을 바꿔도 따라온다',
@@ -598,24 +617,15 @@ ok('★ 켠 유형의 열이 이미 있어 하나도 안 붙으면 조용히 넘
   })());
 ok('★ 유형 열이 옵션 역할이면 생성 시 값도 채워진다(planToSheetValues 는 role 로 판정 — 사본 없음)',
   (() => {
+    // ★ 2026-08-19: 리뷰옵션 칸(리뷰형태 전용)은 상품옵션 기입 대상에서 제외 — 판정은
+    //   utils/reviewType.isReviewOptionHeader 단일 출처(검사 의미 확장).
     const create = readS('services/worktableCreate.service.js');
-    return /idxOpt = plan\.columns\.findIndex\(c => c\.role === 'option'\)/.test(create);
+    return /idxOpt = plan\.columns\.findIndex\(c => c\.role === 'option' && !isReviewOptionHeader\(c\.name\)\)/.test(create);
   })());
 
-/* ── 배선: 작업오더 [📋 작업표] 미리보기 ── */
-ok('★ 작업표 미리보기가 채널·작업유형을 서버에 보낸다(계획은 서버가 최종 계산)',
-  /q\.set\('channel',f\.channel\)/.test(wdesk)
-  && /q\.set\('workTypes',f\.workTypes\.join\(','\)\)/.test(wdesk)
-  && /channel:f\.channel\|\|'', workTypes:f\.workTypes\|\|\[\]/.test(wdesk));
-ok('★ 값 읽기는 _wtpSyncForm 한 벌(사본 금지) — 체크박스가 있는 화면에서만 읽는다',
-  /function _wtpSyncForm[\s\S]{0,700}querySelectorAll\('\.wtpType'\)/.test(wdesk)
-  && /if\(tb\.length\) f\.workTypes=/.test(wdesk));
-ok('★★ 제안 반영은 **첫 열림 1회**(무한 재조회 금지) + 체크로 보인다',
-  /_WTP\.suggestApplied/.test(wdesk) && /suggestedWorkTypes/.test(wdesk)
-  && /class="wtpType"[\s\S]{0,120}\$\{t\.enabled\?'checked':''\}/.test(wdesk));
-ok('★ 서버 라우트가 workTypes 를 받는다(미전송 = 없음)',
-  /q\.workTypes != null\) opt\.workTypes = String\(q\.workTypes\)\.split\(','\)/.test(routes)
-  && /customChannels: b\.customChannels, workTypes: b\.workTypes/.test(routes));
+/* ── 배선: 작업오더 [📋 작업표] 미리보기 — 창·라우트 제거 (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거) ── */
+ok('★ 템플릿 저장 라우트가 채널·작업유형을 받는다',
+  /customChannels: b\.customChannels, workTypes: b\.workTypes/.test(routes));
 ok('★ onclick 함수는 전부 window 에 노출된다(IIFE — 빠지면 클릭이 조용히 죽는다)',
   ['wtPvChan', 'wtPvType', 'wtAddChannel', 'wtDelChannel', 'wtRenameChannel', 'wtDelType',
    'wtOpenChanMgr', 'wtOpenTypeMgr', 'wtOpenTypeModal', 'wtCloseTypeModal', 'wtTypePos',
@@ -721,10 +731,9 @@ ok('★★ 사용자 시나리오 실행 — "쿠팡 + 상품옵션 2가지" 작
     const names = p2.columns.map(c => c.name);
     return names.indexOf('옵션') === 2 && names.indexOf('쿠팡ID') > 0 && names.indexOf('택배송장번호') < 0;
   })());
-ok('★ 제안 근거를 화면이 말한다(근거 없는 자동 체크 금지)',
+ok('★ 제안 근거를 계획이 함께 싣는다(근거 없는 자동 체크 금지 — 그리던 미리보기 창은 결정 186 40번에서 제거)',
   /function workTypeTriggerReason/.test(readS('utils/worktablePlan.js'))
-  && /suggestReason: suggested \? workTypeTriggerReason/.test(readS('utils/worktablePlan.js'))
-  && /자동 제안 — \$\{esc\(t\.suggestReason\)\}/.test(wdesk));
+  && /suggestReason: suggested \? workTypeTriggerReason/.test(readS('utils/worktablePlan.js')));
 ok('★ 옵션 개수는 **작업오더가 말한 종류 수**로 센다 — 총 건수 0(미정)이어도 제안이 죽지 않는다',
   (() => {
     const tpl = { core: ['번호'], channels: {}, customChannels: [],
@@ -732,9 +741,6 @@ ok('★ 옵션 개수는 **작업오더가 말한 종류 수**로 센다 — 총
     const wo = { recruit_count: 0, product_options_json: JSON.stringify([{ name: 'A', options: [{ label: 'ㄱ' }, { label: 'ㄴ' }] }]) };
     return plan2.buildWorktablePlan({ workOrder: wo, template: tpl, options: {} }).suggestedWorkTypes.join(',') === 't1';
   })());
-ok('★ 작업표 미리보기가 자동 선택 결과를 화면에 말해 준다(조용히 켜 두지 않는다)',
-  /autoOn\s*=\s*types\.filter\(t=>t\.suggested&&t\.enabled\)/.test(wdesk)
-  && /작업오더를 보고 \$\{autoOn\.length\}종이 자동 선택됨/.test(wdesk));
 ok('★★ 자동 선택 조건은 **저장 페이로드 안**에 실린다 — 빠뜨리면 조용히 auto 로 되돌아간다(실측 버그)',
   (() => {
     const i = setJs.indexOf('async function wtSaveTemplate');

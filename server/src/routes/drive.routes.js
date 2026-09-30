@@ -1,11 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { linkReviewFilesToRows } = require('../services/reviewFileLink.service');
+const captureRename = require('../services/captureFileRename.service');
+
+// 공개 리포트에서 제외할 영수증 검수 증거. 리뷰 슬롯 파일을 AI가 영수증으로 오판했어도
+// 담당자가 정상(ok)으로 확정했다면 format 흔적만으로 숨기지 않는다. 영수증 전용
+// receiptValidation이 있으면 승인 상태와 무관하게 계속 제외한다.
+const PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL = `(
+  COALESCE(ri.checks, '{}'::jsonb) ? 'receiptValidation'
+  OR (
+    COALESCE(ri.checks->'format'->>'got', ri.checks->'format'->>'kind', '') = 'receipt'
+    AND NOT (COALESCE(ri.status, '') = 'resolved' AND COALESCE(ri.resolution, '') = 'ok')
+  )
+)`;
 
 /**
  * 헬퍼: Google Drive URL에서 폴더 ID 추출
@@ -24,623 +35,15 @@ function getRootFolderId() {
   return process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID || null;
 }
 
-/**
- * 헬퍼: 탭의 시트 제목(캠페인명=업체명) 조회
- * tab_configs.campaign_name → Google Sheets API 폴백
- */
-async function getSheetTitle(sheetId, fallbackName) {
-  // 1. tab_configs.campaign_name에서 조회
-  try {
-    const { rows } = await pool.query(
-      `SELECT DISTINCT campaign_name FROM tab_configs WHERE sheet_id = $1 AND campaign_name IS NOT NULL AND campaign_name <> '' LIMIT 1`,
-      [sheetId]
-    );
-    if (rows[0]?.campaign_name) return rows[0].campaign_name;
-  } catch (_) {}
-
-  // 2. campaigns 테이블에서 조회
-  try {
-    const { rows } = await pool.query(
-      `SELECT campaign_name FROM campaigns WHERE sheet_id = $1 LIMIT 1`,
-      [sheetId]
-    );
-    if (rows[0]?.campaign_name) return rows[0].campaign_name;
-  } catch (_) {}
-
-  // 3. Google Sheets API로 시트 제목 조회
-  try {
-    const meta = await getSpreadsheetMeta(sheetId);
-    if (meta._spreadsheetTitle) return meta._spreadsheetTitle;
-  } catch (_) {}
-
-  return fallbackName || sheetId;
-}
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/init-root — AI_REVIEW_FOLDER 루트 폴더 초기화
-// 새 루트 폴더를 생성하고 AI_REVIEW_FOLDER_ID를 반환
-// ═══════════════════════════════════════════════════════════
-router.post('/init-root', authMiddleware, async (req, res, next) => {
-  try {
-    const { parentFolderId } = req.body;
-    // 이미 설정되어 있으면 그대로 사용
-    const existingRootId = getRootFolderId();
-    if (existingRootId) {
-      return res.json({
-        ok: true,
-        rootFolderId: existingRootId,
-        message: '루트 폴더가 이미 설정되어 있습니다.',
-        alreadyExists: true,
-      });
-    }
-
-    // 새 루트 폴더 생성
-    const targetParent = parentFolderId || 'root'; // My Drive root
-    const folder = await driveService.createFolder('AI_REVIEW_FOLDER', targetParent);
-
-    res.json({
-      ok: true,
-      rootFolderId: folder.id,
-      folderUrl: `https://drive.google.com/drive/folders/${folder.id}`,
-      message: `AI_REVIEW_FOLDER 생성 완료. Railway 환경변수에 AI_REVIEW_FOLDER_ID=${folder.id} 를 추가하세요.`,
-      alreadyExists: false,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/sync-capture — 캡처폴더 동기화 (새 3단계 구조)
-// 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [구매캡처]
-// ═══════════════════════════════════════════════════════════
-router.post('/sync-capture', authMiddleware, async (req, res, next) => {
-  try {
-    const { force } = req.body;
-    const rootFolderId = getRootFolderId();
-    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const { rows: tabs } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
-       FROM tab_configs
-       WHERE (is_closed = FALSE OR is_closed IS NULL)`
-    );
-
-    let synced = 0, created = 0, errors = 0;
-    const details = [];
-
-    // sheet_id별로 그룹핑하여 시트 제목 조회 횟수 최소화
-    const sheetTitleCache = {};
-
-    for (const tab of tabs) {
-      try {
-        if (tab.capture_folder_url && !force) {
-          synced++;
-          continue;
-        }
-
-        // 시트 제목 조회 (캐시)
-        if (!sheetTitleCache[tab.sheet_id]) {
-          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
-        }
-        const sheetTitle = sheetTitleCache[tab.sheet_id];
-
-        // 3단계 폴더 생성: 시트제목 → 탭명 → [구매캡처]
-        const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tab.tab_name);
-
-        // tab_configs에 URL 저장
-        await pool.query(
-          'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-          [result.url, tab.sheet_id, tab.tab_name]
-        );
-
-        if (!tab.capture_folder_url) created++;
-        synced++;
-        details.push({ tabName: tab.tab_name, path: result.path.join(' → '), url: result.url });
-      } catch (err) {
-        logger.error(`[syncCapture] 오류 (${tab.tab_name}): ${err.message}`);
-        errors++;
-      }
-    }
-
-    res.json({ ok: true, synced, created, errors, total: tabs.length, details });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/sync-review — 리뷰폴더 동기화 (새 3단계 구조)
-// 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰]
-// ═══════════════════════════════════════════════════════════
-router.post('/sync-review', authMiddleware, async (req, res, next) => {
-  try {
-    const { force } = req.body;
-    const rootFolderId = getRootFolderId();
-    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const { rows: tabs } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, folder_url
-       FROM tab_configs
-       WHERE (is_closed = FALSE OR is_closed IS NULL)`
-    );
-
-    let synced = 0, created = 0, errors = 0;
-    const details = [];
-
-    const sheetTitleCache = {};
-
-    for (const tab of tabs) {
-      try {
-        if (tab.folder_url && !force) { synced++; continue; }
-
-        if (!sheetTitleCache[tab.sheet_id]) {
-          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
-        }
-        const sheetTitle = sheetTitleCache[tab.sheet_id];
-
-        // 3단계 폴더 생성: 시트제목 → 탭명 → [리뷰]
-        const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tab.tab_name);
-
-        await pool.query(
-          'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-          [result.url, tab.sheet_id, tab.tab_name]
-        );
-
-        if (!tab.folder_url) created++;
-        synced++;
-        details.push({ tabName: tab.tab_name, path: result.path.join(' → '), url: result.url });
-      } catch (err) {
-        logger.error(`[syncReview] 오류 (${tab.tab_name}): ${err.message}`);
-        errors++;
-      }
-    }
-
-    res.json({ ok: true, synced, created, errors, total: tabs.length, details });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/sync-all — 전체 폴더 동기화
-// ═══════════════════════════════════════════════════════════
-router.post('/sync-all', authMiddleware, async (req, res, next) => {
-  try {
-    const { force } = req.body;
-    const rootFolderId = getRootFolderId();
-    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const startTime = Date.now();
-
-    const { rows: tabs } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, folder_url, capture_folder_url
-       FROM tab_configs
-       WHERE (is_closed = FALSE OR is_closed IS NULL)`
-    );
-
-    const sheetTitleCache = {};
-    const capture = { synced: 0, created: 0, errors: 0 };
-    const review = { synced: 0, created: 0, errors: 0 };
-
-    for (const tab of tabs) {
-      // 시트 제목 캐시
-      if (!sheetTitleCache[tab.sheet_id]) {
-        sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
-      }
-      const sheetTitle = sheetTitleCache[tab.sheet_id];
-
-      // 캡처폴더
-      try {
-        if (tab.capture_folder_url && !force) {
-          capture.synced++;
-        } else {
-          const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tab.tab_name);
-          await pool.query(
-            'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-            [result.url, tab.sheet_id, tab.tab_name]
-          );
-          if (!tab.capture_folder_url) capture.created++;
-          capture.synced++;
-        }
-      } catch (err) {
-        logger.error(`[syncAll/capture] 오류 (${tab.tab_name}): ${err.message}`);
-        capture.errors++;
-      }
-
-      // 리뷰폴더
-      try {
-        if (tab.folder_url && !force) {
-          review.synced++;
-        } else {
-          const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tab.tab_name);
-          await pool.query(
-            'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-            [result.url, tab.sheet_id, tab.tab_name]
-          );
-          if (!tab.folder_url) review.created++;
-          review.synced++;
-        }
-      } catch (err) {
-        logger.error(`[syncAll/review] 오류 (${tab.tab_name}): ${err.message}`);
-        review.errors++;
-      }
-    }
-
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({
-      ok: true,
-      capture: { updated: capture.created, skipped: capture.synced - capture.created, errors: capture.errors },
-      review: { updated: review.created, skipped: review.synced - review.created, errors: review.errors },
-      elapsed,
-      total: tabs.length,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/batch-create — 폴더 일괄 생성 (새 구조)
-// ═══════════════════════════════════════════════════════════
-router.post('/batch-create', authMiddleware, async (req, res, next) => {
-  try {
-    const { target } = req.body; // 'capture', 'review', 'both'
-    const rootFolderId = getRootFolderId();
-    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const { rows: tabs } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, folder_url, capture_folder_url
-       FROM tab_configs
-       WHERE (is_closed = FALSE OR is_closed IS NULL)`
-    );
-
-    const startTime = Date.now();
-    const captureStats = { created: 0, exists: 0, skipped: 0 };
-    const reviewStats  = { created: 0, exists: 0, skipped: 0 };
-    const errorList = [];
-
-    const sheetTitleCache = {};
-
-    for (const tab of tabs) {
-      try {
-        if (!sheetTitleCache[tab.sheet_id]) {
-          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
-        }
-        const sheetTitle = sheetTitleCache[tab.sheet_id];
-
-        // 캡처폴더
-        if (!target || target === 'both' || target === 'capture') {
-          if (tab.capture_folder_url) {
-            captureStats.exists++;
-          } else {
-            const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tab.tab_name);
-            await pool.query(
-              'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-              [result.url, tab.sheet_id, tab.tab_name]
-            );
-            captureStats.created++;
-          }
-        }
-
-        // 리뷰폴더
-        if (!target || target === 'both' || target === 'review') {
-          if (tab.folder_url) {
-            reviewStats.exists++;
-          } else {
-            const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tab.tab_name);
-            await pool.query(
-              'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-              [result.url, tab.sheet_id, tab.tab_name]
-            );
-            reviewStats.created++;
-          }
-        }
-      } catch (err) {
-        logger.error(`[batchCreate] 오류 (${tab.tab_name}): ${err.message}`);
-        errorList.push(`${tab.tab_name}: ${err.message}`);
-      }
-    }
-
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({ ok: true, capture: captureStats, review: reviewStats, errors: errorList, elapsed, total: tabs.length });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/reset-folder-urls — 폴더 URL 재설정
-// ═══════════════════════════════════════════════════════════
-router.post('/reset-folder-urls', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, target } = req.body;
-    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
-
-    const updates = {};
-    if (!target || target === 'both' || target === 'capture') updates.capture_folder_url = '';
-    if (!target || target === 'both' || target === 'review') updates.folder_url = '';
-
-    const entries = Object.entries(updates);
-    const setClause = entries.map(([k], i) => `${k} = $${i + 3}`).join(', ');
-    const values = entries.map(([, v]) => v);
-
-    await pool.query(
-      `UPDATE tab_configs SET ${setClause}, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2`,
-      [sheetId, tabName, ...values]
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/migrate-names — 폴더명 마이그레이션 (새 구조 적용)
-// ═══════════════════════════════════════════════════════════
-router.post('/migrate-names', authMiddleware, async (req, res, next) => {
-  try {
-    const { target, dryRun } = req.body;
-    const rootFolderId = getRootFolderId();
-    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const { rows: tabs } = await pool.query('SELECT * FROM tab_configs');
-    let renamed = 0, errors = 0;
-    const actions = [];
-
-    for (const tab of tabs) {
-      try {
-        // 리뷰폴더
-        if ((!target || target === 'both' || target === 'review') && tab.folder_url) {
-          const folderId = extractFolderId(tab.folder_url);
-          if (folderId) {
-            const newName = `[리뷰]`;
-            if (!dryRun) {
-              await driveService.renameFile(folderId, newName);
-            }
-            actions.push({ type: 'review', tabName: tab.tab_name, newName });
-            renamed++;
-          }
-        }
-        // 캡처폴더
-        if ((!target || target === 'both' || target === 'capture') && tab.capture_folder_url) {
-          const folderId = extractFolderId(tab.capture_folder_url);
-          if (folderId) {
-            const newName = `[구매캡처]`;
-            if (!dryRun) {
-              await driveService.renameFile(folderId, newName);
-            }
-            actions.push({ type: 'capture', tabName: tab.tab_name, newName });
-            renamed++;
-          }
-        }
-      } catch (err) {
-        errors++;
-      }
-    }
-
-    res.json({ ok: true, renamed, errors, dryRun: !!dryRun, actions });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/migrate-to-new-structure — 기존 파일을 새 폴더 구조로 복사 이관
-//
-// ★ 복사(Copy) 방식: 기존 폴더의 파일을 그대로 유지하고, 새 구조에 사본을 생성
-//    → 기존 시스템에서 참조하는 링크/파일이 유실되지 않음
-//    → 스토리지는 2배 사용되지만 안전한 이관
-//
-// 기존: DRIVE_ROOT / [캡처] 캠페인명 / 파일 (원본 유지)
-// 새:   AI_REVIEW / 시트제목 / 탭명 / [구매캡처] / 파일 (사본)
-//
-// 기존: DRIVE_ROOT / [리뷰] 캠페인명 / 파일 (원본 유지)
-// 새:   AI_REVIEW / 시트제목 / 탭명 / [리뷰] / 파일 (사본)
-// ═══════════════════════════════════════════════════════════
-router.post('/migrate-to-new-structure', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun } = req.body;
-    const isDryRun = dryRun === true || dryRun === 'true';
-    const newRootId = getRootFolderId();
-
-    if (!newRootId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const { rows: tabs } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, folder_url, capture_folder_url
-       FROM tab_configs
-       WHERE (folder_url IS NOT NULL AND folder_url <> '')
-          OR (capture_folder_url IS NOT NULL AND capture_folder_url <> '')`
-    );
-
-    const startTime = Date.now();
-    const migrated = [], skipped = [], errorList = [];
-    const sheetTitleCache = {};
-
-    for (const tab of tabs) {
-      try {
-        if (!sheetTitleCache[tab.sheet_id]) {
-          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
-        }
-        const sheetTitle = sheetTitleCache[tab.sheet_id];
-
-        // ── 캡처폴더 이관 (복사) ──
-        if (tab.capture_folder_url) {
-          const oldFolderId = extractFolderId(tab.capture_folder_url);
-          if (oldFolderId) {
-            const newCapture = await driveService.ensureCaptureFolderPath(newRootId, sheetTitle, tab.tab_name);
-
-            if (!isDryRun) {
-              try {
-                const files = await driveService.listFolderContents(oldFolderId);
-                let copied = 0;
-                for (const file of files) {
-                  // 폴더는 재귀 복사 불가 → 건너뜀 (서브폴더는 별도 처리 필요)
-                  if (file.mimeType === 'application/vnd.google-apps.folder') {
-                    skipped.push({ type: 'capture', tabName: tab.tab_name, fileName: file.name, reason: '서브폴더 — 수동 이관 필요' });
-                    continue;
-                  }
-                  await driveService.copyFile(file.id, newCapture.id);
-                  copied++;
-                }
-                // tab_configs의 capture_folder_url을 새 경로로 업데이트
-                await pool.query(
-                  'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-                  [newCapture.url, tab.sheet_id, tab.tab_name]
-                );
-                migrated.push({
-                  type: 'capture', tabName: tab.tab_name,
-                  fileCount: copied, totalFiles: files.length,
-                  newPath: newCapture.path.join(' → '),
-                  oldUrl: tab.capture_folder_url,
-                  newUrl: newCapture.url,
-                });
-              } catch (copyErr) {
-                errorList.push({ type: 'capture', tabName: tab.tab_name, error: copyErr.message });
-              }
-            } else {
-              // dryRun: 파일 개수만 조회
-              try {
-                const files = await driveService.listFolderContents(oldFolderId);
-                migrated.push({
-                  type: 'capture', tabName: tab.tab_name, dryRun: true,
-                  fileCount: files.length,
-                  newPath: newCapture.path.join(' → '),
-                  oldUrl: tab.capture_folder_url,
-                });
-              } catch (_) {
-                migrated.push({ type: 'capture', tabName: tab.tab_name, dryRun: true, fileCount: '조회실패', newPath: newCapture.path.join(' → ') });
-              }
-            }
-          }
-        }
-
-        // ── 리뷰폴더 이관 (복사) ──
-        if (tab.folder_url) {
-          const oldFolderId = extractFolderId(tab.folder_url);
-          if (oldFolderId) {
-            const newReview = await driveService.ensureReviewFolderPath(newRootId, sheetTitle, tab.tab_name);
-
-            if (!isDryRun) {
-              try {
-                const files = await driveService.listFolderContents(oldFolderId);
-                let copied = 0;
-                for (const file of files) {
-                  if (file.mimeType === 'application/vnd.google-apps.folder') {
-                    skipped.push({ type: 'review', tabName: tab.tab_name, fileName: file.name, reason: '서브폴더 — 수동 이관 필요' });
-                    continue;
-                  }
-                  await driveService.copyFile(file.id, newReview.id);
-                  copied++;
-                }
-                await pool.query(
-                  'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-                  [newReview.url, tab.sheet_id, tab.tab_name]
-                );
-                migrated.push({
-                  type: 'review', tabName: tab.tab_name,
-                  fileCount: copied, totalFiles: files.length,
-                  newPath: newReview.path.join(' → '),
-                  oldUrl: tab.folder_url,
-                  newUrl: newReview.url,
-                });
-              } catch (copyErr) {
-                errorList.push({ type: 'review', tabName: tab.tab_name, error: copyErr.message });
-              }
-            } else {
-              try {
-                const files = await driveService.listFolderContents(oldFolderId);
-                migrated.push({
-                  type: 'review', tabName: tab.tab_name, dryRun: true,
-                  fileCount: files.length,
-                  newPath: newReview.path.join(' → '),
-                  oldUrl: tab.folder_url,
-                });
-              } catch (_) {
-                migrated.push({ type: 'review', tabName: tab.tab_name, dryRun: true, fileCount: '조회실패', newPath: newReview.path.join(' → ') });
-              }
-            }
-          }
-        }
-      } catch (err) {
-        logger.error(`[migrate] 오류 (${tab.tab_name}): ${err.message}`);
-        errorList.push({ tabName: tab.tab_name, error: err.message });
-      }
-    }
-
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({
-      ok: true,
-      method: 'copy',
-      note: '기존 폴더/파일은 그대로 유지됩니다. 새 구조에 사본이 생성됩니다.',
-      migrated, skipped, errors: errorList,
-      dryRun: isDryRun, elapsed, totalTabs: tabs.length,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/organize-capture — 캡처폴더 재배치 (레거시 호환)
-// ═══════════════════════════════════════════════════════════
-router.post('/organize-capture', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun } = req.body;
-    const isDryRun = dryRun === true || dryRun === 'true';
-    const rootFolderId = getRootFolderId();
-    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const { rows: tabs } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
-       FROM tab_configs
-       WHERE capture_folder_url IS NOT NULL AND capture_folder_url <> ''`
-    );
-
-    const moved = [], skippedList = [], errorList = [];
-    const startTime = Date.now();
-
-    let rootChildren = [];
-    try {
-      rootChildren = await driveService.listFolderContents(rootFolderId, 'application/vnd.google-apps.folder');
-    } catch (listErr) {
-      logger.warn(`[organizeCapture] 루트 폴더 목록 조회 실패: ${listErr.message}`);
-    }
-    const rootChildIds = new Set(rootChildren.map(f => f.id));
-
-    for (const tab of tabs) {
-      try {
-        const folderId = extractFolderId(tab.capture_folder_url);
-        if (!folderId) { skippedList.push({ folder: tab.tab_name, reason: 'URL 파싱 실패' }); continue; }
-
-        if (rootChildIds.has(folderId)) {
-          skippedList.push({ folder: tab.tab_name, reason: '이미 루트 폴더 내' });
-          continue;
-        }
-
-        if (!isDryRun) {
-          await driveService.moveFile(folderId, rootFolderId, null);
-        }
-        moved.push({ folder: tab.tab_name, folderId, campFolder: tab.campaign_name || tab.tab_name });
-      } catch (err) {
-        logger.error(`[organizeCapture] 오류 (${tab.tab_name}): ${err.message}`);
-        errorList.push({ folder: tab.tab_name, message: err.message });
-      }
-    }
-
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({ ok: true, moved, created: [], skipped: skippedList, errors: errorList, dryRun: isDryRun, elapsed });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/drive/save-capture — 캡처폴더 URL 저장
 // ═══════════════════════════════════════════════════════════
 router.post('/save-capture', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, folderUrl } = req.body;
+    const { sheetId, tabName } = req.body;
+    // 공개 구매양식이 사용하던 이름(captureFolderUrl)과 관리자 API 이름(folderUrl)을 함께 받는다.
+    const folderUrl = req.body.folderUrl || req.body.captureFolderUrl || '';
     if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
 
     await pool.query(
@@ -681,151 +84,6 @@ router.post('/update-urls', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/find-candidates — 탭(gid)으로 Drive 폴더 후보 검색
-//   캡처/리뷰 폴더가 "사라진" 경우 탭명으로 실제 폴더를 찾아 재연결을 돕는다.
-//   - 자동 폴더(시트제목/탭명/[구매캡처]·[리뷰])와 수동 브랜드 폴더를 모두 후보로 반환
-//   - 각 후보의 파일수·리뷰형식 파일수·상위폴더·소유자 + 추천(guess) 제공
-//   - 현재 연결과 비교해 위치 불일치(drift) 경고
-// ═══════════════════════════════════════════════════════════
-router.post('/find-candidates', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, query } = req.body;
-    if (!tabName) return res.json({ ok: false, error: 'tabName 필요' });
-
-    // 현재 연결 상태 (컨텍스트)
-    let current = { folderUrl: '', captureFolderUrl: '' };
-    if (sheetId) {
-      const { rows } = await pool.query(
-        'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
-      );
-      if (rows[0]) current = { folderUrl: rows[0].folder_url || '', captureFolderUrl: rows[0].capture_folder_url || '' };
-    }
-
-    // 검색어: 직접 지정 우선, 없으면 탭명에서 자동 추출
-    const terms = (query && String(query).trim())
-      ? [String(query).trim()]
-      : driveService.deriveFolderSearchTerms(tabName);
-
-    // 검색 & 병합
-    const byId = new Map();
-    for (const term of terms) {
-      const found = await driveService.searchFolders(term, { limit: 30 });
-      for (const f of found) if (!byId.has(f.id)) byId.set(f.id, f);
-    }
-    const folders = [...byId.values()].slice(0, 15); // 심층조회 상한
-
-    const nameCache = new Map();
-    const parentName = async (id) => {
-      if (!id) return '';
-      if (nameCache.has(id)) return nameCache.get(id);
-      const meta = await driveService.getFolderMeta(id);
-      const n = meta ? meta.name : '';
-      nameCache.set(id, n);
-      return n;
-    };
-
-    const candidates = [];
-    const seen = new Set();
-    const pushCand = (c) => { if (!seen.has(c.id)) { seen.add(c.id); candidates.push(c); } };
-
-    for (const f of folders) {
-      const insp = await driveService.inspectFolder(f.id);
-      const pName = await parentName((f.parents || [])[0]);
-
-      // 하위 [구매캡처]/[리뷰] 폴더를 직접 후보로 노출
-      for (const sub of insp.subfolders) {
-        if (sub.name === '[구매캡처]' || sub.name === '[리뷰]') {
-          const sInsp = await driveService.inspectFolder(sub.id);
-          pushCand({
-            id: sub.id, name: sub.name,
-            url: `https://drive.google.com/drive/folders/${sub.id}`,
-            parentName: f.name, owner: f.owner, createdTime: f.createdTime,
-            fileCount: sInsp.fileCount, reviewLikeCount: sInsp.reviewLikeCount,
-            subfolders: [], guess: sub.name === '[구매캡처]' ? 'capture' : 'review',
-          });
-        }
-      }
-
-      // 매칭된 폴더 자체
-      let guess = 'unknown';
-      if (f.name === '[구매캡처]') guess = 'capture';
-      else if (f.name === '[리뷰]') guess = 'review';
-      else if (insp.subfolders.some(s => s.name === '[구매캡처]' || s.name === '[리뷰]')) guess = 'container';
-      else if (insp.reviewLikeCount > 0) guess = 'review';
-      else if (insp.fileCount > 0) guess = 'capture';
-      pushCand({
-        id: f.id, name: f.name,
-        url: f.webViewLink || `https://drive.google.com/drive/folders/${f.id}`,
-        parentName: pName, owner: f.owner, createdTime: f.createdTime,
-        fileCount: insp.fileCount, reviewLikeCount: insp.reviewLikeCount,
-        subfolders: insp.subfolders.map(s => s.name), guess,
-      });
-    }
-
-    // 위치 불일치(drift) 경고
-    const warnings = [];
-    const curReviewId = extractFolderId(current.folderUrl);
-    if (curReviewId) {
-      const curInsp = await driveService.inspectFolder(curReviewId);
-      const hasReviewElsewhere = candidates.some(c => c.id !== curReviewId && c.reviewLikeCount > 0);
-      if (curInsp.fileCount === 0 && hasReviewElsewhere) {
-        warnings.push('현재 연결된 리뷰폴더가 비어 있고, 리뷰 이미지가 다른 폴더에 있습니다. 위치 불일치(drift)로 보입니다.');
-      }
-    } else {
-      warnings.push('현재 리뷰폴더(folder_url)가 연결되어 있지 않습니다.');
-    }
-    if (!current.captureFolderUrl) warnings.push('현재 캡처폴더(capture_folder_url)가 연결되어 있지 않습니다.');
-
-    // 정렬: 추천(capture/review) 우선, 파일 많은 순
-    const order = { capture: 0, review: 0, container: 1, unknown: 2 };
-    candidates.sort((a, b) => ((order[a.guess] ?? 3) - (order[b.guess] ?? 3)) || (b.fileCount - a.fileCount));
-
-    res.json({ ok: true, sheetId: sheetId || '', tabName, searchTerms: terms, current, warnings, candidates });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/drive/diag — 폴더 현황 진단
-// ═══════════════════════════════════════════════════════════
-router.get('/diag', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT sheet_id AS "sheetId", tab_name AS "tabName",
-             campaign_name AS "campaignName",
-             folder_url AS "folderUrl", capture_folder_url AS "captureFolderUrl",
-             is_closed AS "isClosed"
-      FROM tab_configs
-      ORDER BY tab_name
-    `);
-    const noFolder = rows.filter(r => !r.folderUrl);
-    const noCapture = rows.filter(r => !r.captureFolderUrl);
-
-    // 실제 OAuth 계정/쿼터 — "용량이 어느 계정에 귀속되는지" 확인용
-    let accountDiagnostics = null;
-    try {
-      accountDiagnostics = await driveService.getAccountDiagnostics();
-    } catch (e) {
-      accountDiagnostics = { error: e.message };
-    }
-
-    res.json({
-      ok: true,
-      total: rows.length,
-      noFolderUrl: noFolder.length,
-      noCaptureFolderUrl: noCapture.length,
-      rootFolderId: getRootFolderId() || '미설정',
-      oauthStatus: driveService.getOAuthStatus(),
-      accountDiagnostics,
-      details: rows,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/drive/list-folder — 폴더 내용 조회 (복구용 임시 엔드포인트)
@@ -1207,257 +465,42 @@ router.post('/transfer-ownership', authMiddleware, async (req, res, next) => {
   }
 });
 
+// (POST /relocate-orphan-reviews — 옛 대시보드 「리뷰 캡처 정리」 창 전용, 2026-09-29 제거 · 결정 186 72번)
+
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/relocate-orphan-reviews — 루트(또는 엉뚱한 위치)에 흩어진
-//   리뷰 캡처를 해당 탭의 [리뷰] 폴더로 모아 이동(move)한다.
-//
-// 배경: 과거 일부 캠페인의 리뷰 업로드가 [리뷰] 폴더 ID를 확보하지 못한 채
-//   실행되어, 파일이 "내 드라이브 최상위(루트)"에 흩어졌다. ([리뷰]는 0개)
-//   이 엔드포인트는 OCR 전문검색(fullText=브랜드 키워드)으로 해당 캠페인의
-//   리뷰형식 파일을 찾아 [리뷰] 폴더로 addParents/removeParents 이동한다.
-//
-// body: {
-//   sheetId?, tabName?,            // tab_configs.folder_url 자동 조회용
-//   reviewFolderUrl?,             // 대상 [리뷰] 폴더(미지정 시 tab_configs.folder_url)
-//   brandKeywords: string|string[], // ★필수 — fullText 필터 (예: ["서일농원","명인 콩물"])
-//   sinceDate?, untilDate?,       // createdTime 범위 (ISO, 예: 2026-06-01T00:00:00Z)
-//   requireRoster?: bool,         // review_index 명단과 파일명 이름 일치 강제
-//   excludeFolderUrls?: string[], // 절대 건드리지 않을 폴더(예: [구매캡처])
-//   dryRun?: bool                 // 기본 true — 계획만, 실제 이동 없음
-// }
-//
-// 안전장치:
-//   - 리뷰형식 파일명(`{이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext`)만 대상 → 구매캡처(`{이름}.jpg`) 제외
-//   - 대상 [리뷰] 폴더 / 제외 폴더 / 구매캡처 폴더에 이미 있는 파일은 건너뜀
-//   - brandKeywords 필수 → 다른 캠페인 파일 오이동 방지
-//   - dryRun 기본값 true
 // ═══════════════════════════════════════════════════════════
-router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) => {
+// POST /api/drive/capture-rename-recipient — 과거 리뷰 캡처 파일명 소급 정정(주문자 → 수취인)
+//
+// 배경: 타계정 참여 캡처가 Drive 에 전부 주문자(로그인 본계정) 이름으로 쌓여 어떤 타계정의
+//   리뷰인지 구분할 수 없다(2026-09-22 신고 · 결정 009 후속). 앞으로의 저장은 서버 판정으로
+//   고쳤고, 이미 올라간 파일은 이 창구가 **이름만** 바꾼다(꼬리 = 순번·제출시각·확장자 보존).
+//
+// ★★ 되돌리기 어려운 외부 저장 쓰기라 **미리보기 기본** — `dryRun:false` **와** `confirm:true`
+//    가 둘 다 있어야 실행한다. 바꾸기 전 이름은 `review_submissions.renamed_from`(164)에 남고
+//    `revert:true` 로 되돌린다.
+// ★ adminOrMaster — 리뷰 캡처 정리(relocate)와 같은 급의 Drive 쓰기 도구다.
+// ═══════════════════════════════════════════════════════════
+router.post('/capture-rename-recipient', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const {
-      sheetId, tabName, reviewFolderUrl,
-      brandKeywords, sinceDate, untilDate,
-      requireRoster, excludeFolderUrls, dryRun,
-    } = req.body || {};
-
-    const isDryRun = dryRun !== false; // 기본 true
-
-    // ── 1) 대상 [리뷰] 폴더 확보 ──
-    //   reviewFolderUrl(직접 지정) 우선, 없으면 tab_configs.folder_url.
-    //   capture_folder_url은 sheetId/tabName이 있으면 항상 조회해 제외 폴더로 사용.
-    let targetUrl = reviewFolderUrl || '';
-    let captureUrl = '';
-    if (sheetId && tabName) {
-      const { rows } = await pool.query(
-        'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
-      );
-      if (!targetUrl) targetUrl = rows[0]?.folder_url || '';
-      captureUrl = rows[0]?.capture_folder_url || '';
-    }
-    const targetId = extractFolderId(targetUrl);
-    if (!targetId) {
-      return res.json({ ok: false, error: '대상 [리뷰] 폴더를 확인할 수 없습니다. reviewFolderUrl 또는 tab_configs.folder_url 가 필요합니다.' });
-    }
-
-    // ── 2) 브랜드 키워드 (필수) ──
-    const kws = (Array.isArray(brandKeywords) ? brandKeywords : [brandKeywords])
-      .map(s => String(s || '').trim()).filter(Boolean);
-    if (kws.length === 0) {
-      return res.json({ ok: false, error: 'brandKeywords가 필요합니다. (예: ["서일농원","명인 콩물"])' });
-    }
-
-    // ── 3) 제외 폴더 집합 (대상/구매캡처/사용자지정) ──
-    const excludeIds = new Set([targetId]);
-    const capId = extractFolderId(captureUrl);
-    if (capId) excludeIds.add(capId);
-    for (const u of (excludeFolderUrls || [])) {
-      const id = extractFolderId(u);
-      if (id) excludeIds.add(id);
-    }
-
-    // ── 4) 인덱스 행(review_index) 로드 — 명단 필터 + 결정적 링크(B 백필) ──
-    //   sheetId/tabName이 있으면 해당 탭 인덱스 행을 불러와
-    //   (a) requireRoster 시 명단 필터, (b) 파일명 이름 ↔ 행 매칭으로 링크 백필.
-    let indexRows = [];
-    let roster = null;
-    const doLink = !!(sheetId && tabName);
-    if (doLink) {
-      const { rows } = await pool.query(
-        `SELECT id, row_index, reviewer_name, recipient_name, review_file_id
-           FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
-        [sheetId, tabName]
-      );
-      indexRows = rows;
-    }
-    if (requireRoster && indexRows.length) {
-      roster = new Set();
-      for (const r of indexRows) {
-        const a = (r.recipient_name || '').trim(); if (a) roster.add(a);
-        const b = (r.reviewer_name || '').trim(); if (b) roster.add(b);
-      }
-    }
-    // (이름→행 매핑은 공용 헬퍼 linkReviewFilesToRows 가 내부에서 구성한다)
-
-    // ── 5) 후보 검색 (fullText=브랜드 키워드) ──
-    const byId = new Map();
-    const searchStats = []; // 진단: 키워드별 SA/OAuth 검색 반환 수
-    for (const kw of kws) {
-      const safe = kw.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      let q = `mimeType contains 'image/' and trashed = false and fullText contains '${safe}'`;
-      if (sinceDate) q += ` and createdTime >= '${sinceDate}'`;
-      if (untilDate) q += ` and createdTime <= '${untilDate}'`;
-      const st = {};
-      const files = await driveService.searchFiles(q, { limit: 1000, stats: st });
-      searchStats.push({ kw, sa: st.sa, oauth: st.oauth, saError: st.saError, oauthError: st.oauthError });
-      for (const f of files) if (!byId.has(f.id)) byId.set(f.id, f);
-    }
-    const searchFound = byId.size; // 검색이 반환한 전체(중복 제거) 이미지 수
-
-    // ── 6) 분류: 이동대상(toMove) / 대상폴더내(linkOnly) / 제외 ──
-    //   리뷰형식 파일명만: {이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext
-    const reviewPattern = /_\d+_\d{8}_\d{6}\.[A-Za-z0-9]+$/;
-    let reviewFormatCount = 0;
-    const toMove = [];
-    const linkOnly = []; // 이미 [리뷰] 폴더에 있음 → 이동 불필요, 링크만
-    const skipped = [];
-    for (const f of byId.values()) {
-      if (!reviewPattern.test(f.name)) continue; // 구매캡처/기타 → 제외
-      reviewFormatCount++;
-      const parents = f.parents || [];
-      if (roster) {
-        const nm = driveService.extractReviewerNameFromFile(f.name);
-        if (!nm || !roster.has(nm)) { skipped.push({ id: f.id, name: f.name, reason: '명단 불일치' }); continue; }
-      }
-      if (parents.includes(targetId)) { linkOnly.push(f); continue; }
-      if (parents.some(p => excludeIds.has(p))) { skipped.push({ id: f.id, name: f.name, reason: '구매캡처/제외 폴더 내' }); continue; }
-      toMove.push(f);
-    }
-
-    // ── 7) 이동 실행 (dryRun이면 계획만) ──
-    const moved = [];
-    const failed = [];
-    if (!isDryRun) {
-      for (const f of toMove) {
-        try {
-          const oldParents = (f.parents || []).join(',') || undefined;
-          await driveService.moveFile(f.id, targetId, oldParents);
-          moved.push({ id: f.id, name: f.name });
-        } catch (e) {
-          logger.error(`[relocate-orphan-reviews] 이동 실패 (${f.name}): ${e.message}`);
-          failed.push({ id: f.id, name: f.name, error: e.message });
-        }
-      }
-    }
-
-    // ── 8) 결정적 링크 백필(B/A-1) + 제출 원장 적재(A-2) — 공용 헬퍼(reviewFileLink.service) ──
-    //   대상: 이동분 + 이미 [리뷰] 폴더에 있던 분. 모호하면 링크하지 않고 리포트하되
-    //   파일 자체는 review_submissions 원장에 전수 기록(A-2). 규칙은 review-folder-backfill 과 한 벌.
-    let linkResult = { linked: 0, ambiguous: 0, unmatched: 0, already: 0, recorded: 0, samples: { ambiguous: [], unmatched: [] } };
-    if (doLink) {
-      linkResult = await linkReviewFilesToRows({
-        db: pool, sheetId, tabName, files: [...toMove, ...linkOnly], indexRows,
-        isDryRun, extractName: driveService.extractReviewerNameFromFile, logger,
-      });
-    }
-
-    res.json({
-      ok: true,
-      dryRun: isDryRun,
-      targetFolderId: targetId,
-      targetFolderUrl: `https://drive.google.com/drive/folders/${targetId}`,
-      keywords: kws,
-      indexRowCount: indexRows.length, // 탭의 작업건수(인덱스 행 수) — 과대매칭 판정 기준
-      candidateCount: toMove.length,
-      candidates: toMove.map(f => ({
-        id: f.id, name: f.name,
-        currentParents: f.parents || [],
-        createdTime: f.createdTime, owner: f.owner,
-      })),
-      movedCount: moved.length,
-      moved,
-      failedCount: failed.length,
-      failed,
-      alreadyInTarget: linkOnly.length,
-      link: linkResult, // 인덱스 결정적 링크 결과 (B)
-      skippedCount: skipped.length,
-      skipped: skipped.slice(0, 100),
-      // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
-      diag: { searchFound, reviewFormatCount, searchStats },
-    });
+    const { sheetId, tabName, limit, dryRun, confirm, revert } = req.body || {};
+    const by = (req.admin && req.admin.name) || 'admin';
+    const args = { db: pool, sheetId: sheetId || null, tabName: tabName || null,
+                   limit, dryRun: dryRun !== false, confirm: confirm === true, by };
+    const out = revert === true
+      ? await captureRename.revertRecipientRenames(args)
+      : await captureRename.applyRecipientRenames(args);
+    res.json({ ok: true, revert: revert === true, ...out });
   } catch (err) {
+    // 마이그레이션 164 미적용은 원인을 말해 준다(조용한 500 금지).
+    if (err && err.code === '42703') {
+      return res.status(400).json({ ok: false, code: 'not_ready',
+        error: '이 기능은 migration 164(review_submissions.renamed_from) 적용 후 사용할 수 있습니다.' });
+    }
     next(err);
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/review-folder-backfill — 탭 [리뷰] 폴더 스캔 → 파일↔행 링크 백필
-//
-// 배경: 업체 뷰어 리뷰 미리보기는 원장(review_submissions)·대표 이미지(review_index.review_file_*)를
-//   읽는데, 031/032 배포 이전 제출분·직원이 Drive 에 직접 넣은 캡처는 폴더에만 있고 원장이 비어
-//   "리뷰 이미지 미등록"으로 뜬다. 이 엔드포인트가 그 탭의 [리뷰] 폴더를 스캔해 파일명 이름↔행
-//   결정적 매칭으로 백필한다(규칙 = relocate-orphan-reviews 와 공용 헬퍼 한 벌).
-//
-// relocate-orphan-reviews 와의 차이: 저쪽은 "흩어진 파일"을 OCR 전문검색(brandKeywords 필수)으로
-//   찾아 이동+링크, 이쪽은 "이미 폴더에 있는 파일"만 나열해 링크(키워드 불필요·이동 없음·읽기+DB만).
-//
-// body: { sheetId, tabName, folderUrl?, dryRun? (기본 true) }
-//   folderUrl 미지정 시 tab_configs.folder_url → 그것도 없으면 ensureReviewFolderPath 로
-//   기존 폴더를 찾아(없으면 생성) tab_configs 에 연결까지 해 준다("리뷰폴더 매핑").
-// ═══════════════════════════════════════════════════════════
-router.post('/review-folder-backfill', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, folderUrl, dryRun } = req.body || {};
-    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
-    const isDryRun = dryRun !== false; // 기본 true — 미리보기 먼저
-
-    // ── 1) [리뷰] 폴더 확보: 직접 지정 → tab_configs → 자동 매핑(기존 폴더 탐색·없으면 생성) ──
-    let targetUrl = String(folderUrl || '').trim();
-    let mapped = false;
-    if (!targetUrl) {
-      const { rows } = await pool.query(
-        'SELECT folder_url, campaign_name FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]);
-      targetUrl = rows[0]?.folder_url || '';
-      if (!targetUrl) {
-        const rootFolderId = getRootFolderId();
-        if (!rootFolderId) return res.json({ ok: false, error: '폴더 연결이 없고 AI_REVIEW_FOLDER_ID 도 미설정입니다.' });
-        const sheetTitle = await getSheetTitle(sheetId, rows[0]?.campaign_name);
-        const ensured = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);   // idempotent — 있으면 찾고 없으면 생성
-        targetUrl = ensured.url;
-        await pool.query(
-          'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-          [targetUrl, sheetId, tabName]);
-        mapped = true;
-      }
-    }
-    const targetId = extractFolderId(targetUrl);
-    if (!targetId) return res.json({ ok: false, error: '[리뷰] 폴더 URL 을 해석할 수 없습니다.' });
-
-    // ── 2) 폴더 내 이미지 나열(서브폴더 제외) — 폴더 자체가 스코프라 키워드 불필요 ──
-    const files = await driveService.searchFiles(
-      `'${targetId}' in parents and trashed = false and mimeType contains 'image/'`, { limit: 1000 });
-
-    // ── 3) 인덱스 행 로드 → 공용 헬퍼로 결정적 링크 + 원장 백필 ──
-    const { rows: indexRows } = await pool.query(
-      `SELECT id, row_index, reviewer_name, recipient_name, review_file_id
-         FROM review_index WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName]);
-    const link = await linkReviewFilesToRows({
-      db: pool, sheetId, tabName, files, indexRows,
-      isDryRun, extractName: driveService.extractReviewerNameFromFile, logger,
-    });
-
-    if (!isDryRun) logger.info(`[review-folder-backfill] ${tabName}: 파일 ${files.length} → 링크 ${link.linked} · 원장 ${link.recorded}`);
-    res.json({
-      ok: true, dryRun: isDryRun, mapped,
-      targetFolderUrl: `https://drive.google.com/drive/folders/${targetId}`,
-      fileCount: files.length, indexRowCount: indexRows.length,
-      link,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+// (POST /review-folder-backfill — 같은 창 전용, 결정 186 72번 제거)
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/drive/review-submissions — 탭별 리뷰 제출 원장 조회 (A-2)
@@ -1492,223 +535,12 @@ router.get('/review-submissions', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/move-folder-contents — 원본 폴더의 모든 파일을 대상 폴더로 이동
-//   레거시/잘못된 위치(예: 관리자 소유 폴더)에 남은 파일을 [리뷰] 폴더로 비우기.
-//   파일명 패턴 무관 전체 이동(서브폴더는 제외·리포트). dryRun 기본 true.
-//   body: { fromFolderUrl, toFolderUrl, dryRun }
-// ═══════════════════════════════════════════════════════════
-router.post('/move-folder-contents', authMiddleware, async (req, res, next) => {
-  try {
-    const { fromFolderUrl, toFolderUrl, dryRun } = req.body || {};
-    const fromId = extractFolderId(fromFolderUrl);
-    const toId = extractFolderId(toFolderUrl);
-    if (!fromId || !toId) return res.json({ ok: false, error: 'fromFolderUrl, toFolderUrl (둘 다 폴더 링크) 가 필요합니다.' });
-    if (fromId === toId) return res.json({ ok: false, error: '원본과 대상 폴더가 같습니다.' });
-    const isDryRun = dryRun !== false;
-
-    // SA+OAuth 병합 조회 (원본이 tnaks6325에만 공유된 폴더여도 누락 없이)
-    const items = await driveService.searchFiles(`'${fromId}' in parents and trashed = false`, { limit: 1000 });
-    const folders = items.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
-    const files = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
-
-    const moved = [], failed = [];
-    if (!isDryRun) {
-      for (const f of files) {
-        try {
-          await driveService.moveFile(f.id, toId, fromId);
-          moved.push({ id: f.id, name: f.name });
-        } catch (e) {
-          logger.error(`[move-folder-contents] 이동 실패 (${f.name}): ${e.message}`);
-          failed.push({ id: f.id, name: f.name, error: e.message });
-        }
-      }
-    }
-
-    res.json({
-      ok: true, dryRun: isDryRun, fromId, toId,
-      total: files.length,
-      files: files.map(f => ({ id: f.id, name: f.name })),
-      subfolders: folders.map(f => f.name),
-      movedCount: moved.length, moved,
-      failedCount: failed.length, failed,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/folder-audit — 활성 탭(프론트 제공) 리뷰폴더 현황 점검
-//   body: { tabs:[{sheetId,tabName,displayName,folderUrl}], excludeName, sinceDate }
-//   - 활성 탭은 대시보드(_tabDashData)에서 받아 한정(마감 탭 제외)
-//   - excludeName 포함 탭 제외(예: '리뷰폼')
-//   - 각 폴더 파일수 + "가장 이른 이미지 날짜" → sinceDate(예 26-03-01) 이전 파일 유무 판정
-//     (이미지가 모두 sinceDate 이후 = 26.3+ 캠페인 → 이관/정리 대상)
-// ═══════════════════════════════════════════════════════════
-router.post('/folder-audit', authMiddleware, async (req, res, next) => {
-  try {
-    const { tabs, excludeName, sinceDate } = req.body || {};
-    if (!Array.isArray(tabs)) return res.json({ ok: false, error: 'tabs 배열이 필요합니다.' });
-    const excl = (excludeName || '').trim();
-    const sinceTs = sinceDate ? new Date(sinceDate).getTime() : null;
-
-    // 폴더 파일수 + 가장 이른 이미지 생성일 (옵션 서브폴더까지 2단계)
-    const scanFolder = async (folderId) => {
-      let count = 0, earliest = null;
-      const walk = async (fid, depth) => {
-        const items = await driveService.searchFiles(`'${fid}' in parents and trashed = false`, { limit: 1000 });
-        for (const f of items) {
-          if (f.mimeType === 'application/vnd.google-apps.folder') { if (depth > 1) await walk(f.id, depth - 1); continue; }
-          count++;
-          if (f.mimeType && f.mimeType.indexOf('image/') === 0 && f.createdTime) {
-            const ts = new Date(f.createdTime).getTime();
-            if (earliest === null || ts < earliest) earliest = ts;
-          }
-        }
-      };
-      await walk(folderId, 2);
-      return { count, earliest };
-    };
-
-    // 소유자 이메일 → 라벨(이관 범위 판정용). 알려진 관리자/서비스계정만 구분, 나머지는 '기타'
-    const ownerLabel = (email) => {
-      const e = (email || '').toLowerCase();
-      if (!e) return 'unknown';
-      if (e === 'tnaks6325@gmail.com') return 'tnaks6325';
-      if (e === 'paksehui94@gmail.com') return '박세희';
-      if (e === 'ebbbb97@gmail.com') return '박은비';
-      if (e.indexOf('iam.gserviceaccount.com') >= 0) return 'service-account';
-      return '기타';
-    };
-
-    let connected = 0, nonEmpty = 0, empty = 0, noFolder = 0, excluded = 0, preMarch = 0, errors = 0;
-    const ownerTally = {}; // 연결된 폴더의 소유자 집계
-    const details = [];
-    for (const t of tabs) {
-      const name = t.tabName || t.displayName || '';
-      if (excl && name.indexOf(excl) >= 0) { excluded++; continue; } // 리뷰폼 등 제외
-      const folderId = extractFolderId(t.folderUrl);
-      if (!folderId) { noFolder++; details.push({ tab: name, status: 'no-folder' }); continue; }
-      connected++;
-      // 폴더 소유자 조회(이관 범위 판정) — 실패해도 스캔은 진행
-      let owner = '', ownerLbl = 'unknown';
-      try {
-        const meta = await driveService.getFolderMeta(folderId);
-        owner = (meta && meta.owner) || '';
-        ownerLbl = ownerLabel(owner);
-      } catch (_) {}
-      ownerTally[ownerLbl] = (ownerTally[ownerLbl] || 0) + 1;
-      try {
-        const { count, earliest } = await scanFolder(folderId);
-        const earliestIso = earliest ? new Date(earliest).toISOString().slice(0, 10) : null;
-        const hasPre = (sinceTs !== null && earliest !== null && earliest < sinceTs);
-        if (count > 0) {
-          nonEmpty++;
-          if (hasPre) preMarch++;
-          details.push({ tab: name, status: 'has-files', count, earliest: earliestIso, preMarch: hasPre, owner, ownerLabel: ownerLbl });
-        } else {
-          empty++;
-          details.push({ tab: name, status: 'empty', count: 0, owner, ownerLabel: ownerLbl });
-        }
-      } catch (e) {
-        errors++; details.push({ tab: name, status: 'error', error: e.message, owner, ownerLabel: ownerLbl });
-      }
-    }
-
-    res.json({
-      ok: true,
-      totalTabs: tabs.length,
-      excluded,                 // 리뷰폼 등 제외된 탭 수
-      connected,                // ① 리뷰폴더 연결된 탭 수
-      nonEmpty,                 // ② 파일 있는(정상) 폴더 수
-      preMarch,                 //   그중 26.3 이전 파일이 있어 대상에서 빠지는 수
-      empty,                    // ③ 비어있는 폴더 수
-      noFolder,                 // 폴더 미연결(비-리뷰폼) 수
-      errors,
-      ownerTally,               // 연결된 폴더의 소유자별 수 (이관 범위 판정)
-      sinceDate: sinceDate || null,
-      details,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/share-review-folder — 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
-//   만들어 업체 보고용 폴더 링크를 반환한다.
-//
-// 목적: 직원이 리뷰 이미지를 자기 드라이브에 복제(→ 직원 용량 차감)하지 않고도,
-//   tnaks 소유 원본 [리뷰] 폴더 링크를 그대로 업체에 전달해 보고할 수 있게 한다.
-//   (복제 0 · 직원 용량 0 · 업체는 로그인 없이 열람·다운로드)
-//
-// body: { sheetId?, tabName?, folderUrl? }
-//   - folderUrl 우선 → 없으면 tab_configs.folder_url → 그래도 없으면 [리뷰] 폴더를
-//     생성·연결한 뒤 공유(미연결 탭이어도 유효한 링크 확보, 빈 폴더 가능).
-// 비파괴: 파일 이동/복제 없음. 폴더에 읽기 권한만 부여(드라이브에서 언제든 해제 가능).
-// ═══════════════════════════════════════════════════════════
-router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, folderUrl } = req.body || {};
-
-    // ── 1) 대상 [리뷰] 폴더 확보 ──
-    let url = (folderUrl || '').trim();
-    if (!url && sheetId && tabName) {
-      const { rows } = await pool.query(
-        'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
-      );
-      url = rows[0]?.folder_url || '';
-    }
-    let folderId = extractFolderId(url);
-
-    // 미연결 탭이면 [리뷰] 폴더를 생성·연결 (빈 폴더라도 유효한 링크 확보)
-    let created = false;
-    if (!folderId) {
-      if (!sheetId || !tabName) {
-        return res.json({ ok: false, error: '폴더를 찾을 수 없습니다. folderUrl 또는 sheetId+tabName이 필요합니다.' });
-      }
-      const rootFolderId = getRootFolderId();
-      if (!rootFolderId) return res.json({ ok: false, error: 'AI_REVIEW_FOLDER_ID 미설정' });
-      const sheetTitle = await getSheetTitle(sheetId, tabName);
-      const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);
-      folderId = result.id;
-      url = result.url;
-      created = true;
-      await pool.query(
-        'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-        [url, sheetId, tabName]
-      );
-    }
-
-    // ── 2) 링크공유(anyone reader) 설정 (idempotent) ──
-    const share = await driveService.setFolderAnyoneReader(folderId);
-
-    // ── 3) 폴더 내 파일 수(참고용 — 실패해도 무시) ──
-    let fileCount = null;
-    try {
-      const items = await driveService.listFolderContents(folderId);
-      fileCount = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder').length;
-    } catch (_) {}
-
-    res.json({
-      ok: true,
-      folderId,
-      folderUrl: url || `https://drive.google.com/drive/folders/${folderId}`,
-      alreadyShared: share.alreadyShared,
-      created,
-      fileCount,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+// (POST /share-review-folder — 같은 창 전용, 결정 186 72번 제거)
 
 // ═══════════════════════════════════════════════════════════
 // 업체 보고용 공개 링크 (탭 단위)
 //   - POST /report-link (관리자): 탭당 추측불가 코드 발급(재생성 시 동일 코드 재사용)
-//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 이미지 목록 반환(이미지 자체는
+//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 캡처 목록 반환(이미지 자체는
 //     기존 /api/drive/image/:id 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0)
 // ═══════════════════════════════════════════════════════════
 const _REPORT_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'; // 혼동문자 제외
@@ -1772,8 +604,9 @@ router.post('/report-link', authMiddleware, async (req, res, next) => {
   }
 });
 
-// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 이미지 목록 (무인증)
-//   review_submissions 원장 우선 → 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백.
+// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 캡처 목록 (무인증)
+//   명시적 review 원장 우선 → 비어 있으면 review_index 대표 리뷰만 사용.
+//   폴더 재귀 스캔은 역할을 판별할 수 없어 현금영수증을 노출하므로 공개 경로에서 사용하지 않는다.
 router.get('/report/:code', async (req, res, next) => {
   try {
     const code = String(req.params.code || '').trim();
@@ -1790,9 +623,16 @@ router.get('/report/:code', async (req, res, next) => {
     let images = [];
     try {
       const sub = await pool.query(
-        `SELECT file_id, file_name, reviewer_name, uploaded_at
-           FROM review_submissions
-          WHERE sheet_id = $1 AND tab_name = $2 AND file_id IS NOT NULL AND file_id <> ''
+        `SELECT rs.file_id, rs.file_name, rs.reviewer_name, rs.uploaded_at
+           FROM review_submissions rs
+          WHERE rs.sheet_id = $1 AND rs.tab_name = $2
+            AND rs.file_id IS NOT NULL AND rs.file_id <> ''
+            AND COALESCE(rs.slot_key, 'review') = 'review'
+            AND NOT EXISTS (
+              SELECT 1 FROM review_inspections ri
+               WHERE ri.file_id = rs.file_id
+                 AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
+            )
           ORDER BY reviewer_name NULLS LAST, uploaded_at ASC NULLS LAST`,
         [sheetId, tabName]
       );
@@ -1803,22 +643,35 @@ router.get('/report/:code', async (req, res, next) => {
       }));
     } catch (_) {}
 
-    // 2) 원장이 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백
+    // 2) 원장이 비어 있으면 명시적 대표 리뷰만 폴백
     if (images.length === 0) {
       try {
-        const { rows: tcfg } = await pool.query(
-          'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        const fallback = await pool.query(
+          `SELECT r.review_file_id AS file_id, r.review_file_name AS file_name,
+                  r.reviewer_name, r.review_file_at AS uploaded_at
+             FROM review_index r
+            WHERE r.sheet_id = $1 AND r.tab_name = $2
+               AND r.review_file_id IS NOT NULL AND r.review_file_id <> ''
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_submissions rs_role
+                  WHERE rs_role.file_id = r.review_file_id
+                    AND COALESCE(rs_role.slot_key, 'review') <> 'review'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM review_inspections ri
+                 WHERE ri.file_id = r.review_file_id
+                   AND ${PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL}
+              )
+            ORDER BY r.reviewer_name NULLS LAST, r.review_file_at ASC NULLS LAST`,
           [sheetId, tabName]
         );
-        const folderId = extractFolderId(tcfg[0]?.folder_url);
-        if (folderId) {
-          const files = await driveService.listFolderFilesRecursive(folderId);
-          images = files
-            .filter(f => (f.mimeType || '').indexOf('image/') === 0 || /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''))
-            .map(f => ({ id: f.id, name: f.name || '', reviewer: (driveService.extractReviewerNameFromFile(f.name) || '').trim() }));
-        }
+        images = fallback.rows.map(r => ({
+          id: r.file_id,
+          name: r.file_name || '',
+          reviewer: (r.reviewer_name || driveService.extractReviewerNameFromFile(r.file_name) || '').trim(),
+        }));
       } catch (e) {
-        logger.warn(`[report] 폴더 스캔 폴백 실패 (${code}): ${e.message}`);
+        logger.warn(`[report] 대표 리뷰 폴백 실패 (${code}): ${e.message}`);
       }
     }
 
@@ -1852,6 +705,54 @@ router.get('/image/:id', async (req, res) => {
     logger.warn(`[drive] image 프록시 실패(${id}): ${err.message} → thumbnail 폴백`);
     return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w1600`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/orphan-capture-cleanup — 고아 캡처 미리보기·정리 (세 종류 한 창구)
+//
+// A 'linked'(기본) 링크 끊김 — 원장은 살아 있는데 그 칸이 파일을 더는 안 가리킨다
+//     크론(매일 04:40, `ORPHAN_CAPTURE_CLEAN`)이 하는 일과 **완전히 같은 함수**를 부른다.
+//     사본을 두면 "자동 정리와 손으로 누른 정리가 다른 것을 지우는" 드리프트가 생긴다.
+// C 'tombstoned'  작업 소멸 — 작업이 통째로 지워져 원장 자체가 없다(묘비 134 가 좌표를 남긴다)
+// B 'folder'      원장 없음 — Drive 폴더에는 있는데 원장 어디에서도 안 가리킨다
+//     ★★★ B 는 **사람이 고른 파일만**(`fileIds` 필수) 처리한다. "원장에 없다"에는
+//        업로드는 됐는데 기록만 실패한 **정상 캡처**가 섞이므로 일괄 삭제 표면을 두지 않는다.
+//     ★ 그래서 B·C 는 크론이 절대 부르지 않는다 — 사람이 눌러야만 움직인다.
+//
+// body: { kind? ('linked'|'tombstoned'|'folder', 기본 'linked'), dryRun? (기본 true),
+//         fileIds?: string[], sheetId?/tabName? (folder 필수) }
+//   ★ fileIds 를 줘도 서버가 후보를 다시 골라 **교집합**만 처리한다(화면 목록 불신).
+//   ★ 삭제는 휴지통만(30일 복구창) — 영구삭제 API 를 쓰지 않는다.
+//   ★ 모르는 kind 는 400 으로 거부한다 — 오타가 조용히 A 를 실행하면 안 된다.
+// ═══════════════════════════════════════════════════════════
+router.post('/orphan-capture-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const by = (req.admin && req.admin.name) || 'admin';
+    const dryRun = b.dryRun !== false;   // ★ 기본 미리보기 — 실행은 dryRun:false 를 명시해야만
+    const fileIds = Array.isArray(b.fileIds) && b.fileIds.length ? b.fileIds : null;
+    const svc = require('../services/orphanCaptureCleanup.service');
+
+    /* kind — 어떤 종류의 고아를 다루는가. 미지정은 종전 동작(A) 그대로.
+         'linked'(기본) A 링크 끊김   — 크론이 자동으로 도는 것과 같은 함수
+         'tombstoned'   C 작업 소멸   — 묘비(134) 기준, 사람이 실행
+         'folder'       B 원장 없음   — Drive 스캔, **고른 파일만** 실행 */
+    const kind = String(b.kind || 'linked');
+    if (kind === 'tombstoned') {
+      return res.json(await svc.trashTombstonedCaptures({ dryRun, fileIds, by }));
+    }
+    if (kind === 'folder') {
+      if (!b.sheetId || !b.tabName) {
+        return res.status(400).json({ ok: false, error: 'folder 종류는 sheetId, tabName 이 필요합니다.' });
+      }
+      return res.json(await svc.trashFolderOrphans({
+        sheetId: b.sheetId, tabName: b.tabName, fileIds, dryRun, by }));
+    }
+    if (kind !== 'linked') {
+      return res.status(400).json({ ok: false, error: `알 수 없는 kind: ${kind}` });
+    }
+    return res.json(await svc.trashOrphanCaptures({ dryRun, fileIds, by }));
+  } catch (err) { return next(err); }
 });
 
 module.exports = router;

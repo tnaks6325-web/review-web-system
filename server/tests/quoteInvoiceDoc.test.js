@@ -12,7 +12,8 @@
  *      - 같은 내용 재조회 → 스냅샷 추가 0회(해시 동일)
  *      - 상태 전이(draft→accepted) → v2 적재(초안/최종 자동 라벨 근거)
  *   3. invoiceDocForTab: tax_invoices 역링크 요약 + 팝빌 UID 는 뒤 4자리만(전체 미노출).
- *   4. 프론트 배선: 목록 표 견적서/계산서 칸 클릭 → awDocOpen, 버전 탭, 인쇄, 원본(홈택스) 안내.
+ *   4. 프론트 배선: 목록 표 견적서/계산서 칸 클릭 → awDocOpen, 인트라넷 PDF와 같은 실물 견적서 페이지,
+ *      버전 탭, 인쇄, 원본(홈택스) 안내.
  *
  * 실행: node tests/quoteInvoiceDoc.test.js
  */
@@ -58,6 +59,9 @@ global.fetch = async (url) => {
   if (u.includes('/api/tables/sales/')) return { ok: true, json: async () => ({ data: {
     id: 'sales-doc1', contract_number: 'C-2026-100', advertiser_name: '어니스트캄', product_name: '선스틱',
     amount: 1650000, invoice_status: 'issued', invoice_date: '2026-07-31', payment_status: 'partial',
+  } }) };
+  if (u.includes('/api/brand-assets/active/')) return { ok: true, json: async () => ({ data: {
+    mime_type: 'image/png', file_data: 'aGVsbG8=',
   } }) };
   return { ok: false, json: async () => ({}) };
 };
@@ -109,6 +113,7 @@ async function run() {
   ok('품목 JSON 파싱(이름·단가·수량·금액·세액)', p1.items.length === 1 && p1.items[0].unitPrice === 15000 && p1.items[0].tax === 150000);
   ok('견적 유형·수신자·합계 동봉', p1.quoteType === 'online_marketing' && p1.receiver === '어니스트캄 귀하' && p1.totalAmount === 1650000);
   ok('상태 draft(초안 라벨 근거)', p1.status === 'draft');
+  ok('실물 견적서용 활성 로고·직인 data URI 동봉', d1.brandAssets && d1.brandAssets.logoHorizontal === 'data:image/png;base64,aGVsbG8=' && d1.brandAssets.companySeal === 'data:image/png;base64,aGVsbG8=');
 
   // 같은 내용 재조회 — 스냅샷 추가 0
   await svc.quoteDocForTab({ sheetId: 's1', tabName: 't1', role: 'advertiser', advertiserId: 'adv-1' });
@@ -138,11 +143,20 @@ async function run() {
   ok('목록 표 견적서 칸 클릭 → awDocOpen(quote)', /onclick="awDocOpen\(event,'quote',\$\{i\}\)"/.test(src));
   ok('목록 표 계산서 칸 클릭 → awDocOpen(invoice)', /onclick="awDocOpen\(event,'invoice',\$\{i\}\)"/.test(src));
   ok('셀 클릭이 행 이동(selTab)과 분리(stopPropagation)', /function awDocOpen[\s\S]{0,200}stopPropagation/.test(src));
-  ok('정산 카드 6칸의 견적서·계산서도 클릭 열람', /class="ambox st docv" onclick="awDocOpen\(event,'quote'\)"/.test(src));
+  ok('진행 현황의 견적서·계산서 버튼도 클릭 열람',
+    /btn\('quote','견적서'/.test(src) && /btn\('invoice','계산서'/.test(src)
+    && /function openSettlementDocument\(ev,kind\)[\s\S]{0,180}awDocOpen\(ev,kind\)/.test(src));
   ok('버전 탭(초안/최종 자동 라벨) 렌더', src.includes("_QDOC_ST={draft:['초안'") && src.includes('qvtab'));
   ok('인쇄/PDF 저장 버튼', src.includes('_qdocPrint'));
   ok('계산서 원본(홈택스) 안내 문구', src.includes('국세청 홈택스'));
-  ok('상품구입비용 견적서(orange·부가세 없음) 분기', src.includes("quoteType==='product_purchase'") && src.includes('상품구입비용 견적서'));
+  ok('인트라넷 PDF의 단일 실물 견적서 렌더러 사용', src.includes('quote-document-renderer.js?v=20260908-1') && src.includes('InaddQuoteDocument.render(q,_QDOC_ASSETS)'));
+  ok('인트라넷 활성 로고·직인·워터마크를 실물 문서에 적용', src.includes('InaddQuoteDocument.prepareAssets') && src.includes('InaddQuoteDocument.render(q,_QDOC_ASSETS)'));
+  ok('인트라넷 단일 공식 렌더러를 직접 로드', src.includes('https://inadd-system.pages.dev/static/js/quote-document-renderer.js?v=20260908-1'));
+  ok('리뷰웹은 별도 문서 DOM을 만들지 않고 공식 렌더러에 위임', /function _qdocHtml\(q\)\{[\s\S]{0,260}InaddQuoteDocument\.render\(q,_QDOC_ASSETS\)/.test(src));
+  ok('리뷰웹 내부에 별도 견적서 HTML·세액 근거표 사본이 남지 않음', !src.includes('function _qdocHtmlLegacy') && !src.includes('function _qdocTax33Rows') && !src.includes('width:794px;height:1123px'));
+  ok('브랜드 에셋도 공식 렌더러의 동일 전처리를 거침', src.includes('InaddQuoteDocument.prepareAssets') && src.includes("baseUrl:'https://inadd-system.pages.dev'"));
+  ok('과거 리뷰웹 전용 워터마크 보정값 제거', !src.includes('top:43%') && !src.includes('opacity:.085'));
+  ok('인트라넷과 같은 중앙 정렬·미리보기 크기', src.includes('id="qdocPane" style="display:flex;justify-content:center"') && src.includes("officialQuote?'860px':'720px'") && src.includes("officialQuote?'95vh':'88vh'"));
 
   console.log(`\n✅ quoteInvoiceDoc: ${n} cases passed`);
 }

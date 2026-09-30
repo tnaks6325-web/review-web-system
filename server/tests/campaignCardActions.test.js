@@ -4,7 +4,7 @@
  * 배경(사용자 신고 2026-08-07): 액션 버튼이 6개로 늘면서 카드 UI가 깨졌다.
  *   실측 = 카드 266px → 액션 줄 244px → 「게시」 토글 57px 고정 → 버튼 하나에 27px,
  *   그런데 라벨은 35~48px 필요 = 6개 전부 넘치고 마지막 버튼이 토글과 겹쳤다.
- * 확정안(시안 C) = **주 버튼 3개(수정·보기·관제) + [⋯] 더보기**, 나머지는 메뉴로.
+ * 확정안(시안 C) = **주 버튼 3개(수정·보기·로그) + [⋯] 더보기**, 나머지는 메뉴로.
  *
  * 여기서 고정하는 것:
  *   ① 주 줄에 버튼이 다시 늘어나지 않는다(늘리려면 [⋯] 안으로)
@@ -12,7 +12,7 @@
  *   ③ 리스너는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
  *   ④ 항목을 고르면 메뉴가 닫힌다 — 항목 onclick 이 stopPropagation 을 하므로
  *      document 리스너로는 못 닫는다(**캡처 단계**로 메뉴 자신에게 걸어야 한다)
- *   ⑤ 관제의 빨간 배지(지각 = 수동확정 필요)는 주 줄에 남는다
+ *   ⑤ 로그의 빨간 배지(지각 = 수동확정 필요)는 주 줄에 남는다
  *   ⑥ onclick 에는 고정 문자열·id 만(시트발 문자열 보간 금지 — 실측 XSS 선례)
  * 실행: node tests/campaignCardActions.test.js
  */
@@ -36,7 +36,7 @@ const actHtml = act[1];
 
 // 주 줄의 직접 버튼(<button class="uic"…) 개수 — viewBtn/pubToggle 은 변수 보간이라 따로 센다
 const mainBtns = (actHtml.match(/<button type="button" class="uic/g) || []).length;
-ok('★ 주 줄 직접 버튼 = 3개(수정·관제·⋯) + ${viewBtn} 보간 1 = 4개', mainBtns === 3 && /\$\{viewBtn\}/.test(actHtml), mainBtns);
+ok('★ 주 줄 직접 버튼 = 3개(수정·로그·⋯) + ${viewBtn} 보간 1 = 4개', mainBtns === 3 && /\$\{viewBtn\}/.test(actHtml), mainBtns);
 ok('★ 주 줄에 시트·인원조절·리뷰어게이트 버튼이 없다(전부 [⋯] 안으로)',
   !/sheetBtn/.test(actHtml) && !/planBtn/.test(actHtml) && !/gateBtn/.test(actHtml));
 ok('[⋯] 버튼이 주 줄 마지막(게시 토글 앞)', /class="uic more"[\s\S]*\$\{pubToggle\}/.test(actHtml));
@@ -46,12 +46,13 @@ ok('메뉴 항목은 인원조절·리뷰어게이트·보관만 모은다(시�
   /_ACT_MORE\[c\.id\] = \[planBtn, gateBtn, arcBtn\]\.filter\(Boolean\)\.join\(''\)/.test(cc)
   && !/sheetBtn/.test(cc));
 
-// ⑤ 관제 배지는 주 줄에
-ok('★ 관제 빨간 배지(지각)는 주 줄에 남는다(목록에서 바로 보여야 한다)',
+// ⑤ 로그 배지는 주 줄에
+ok('★ 로그 빨간 배지(지각)는 주 줄에 남는다(목록에서 바로 보여야 한다)',
   /class="uic ctrl"[\s\S]{0,160}\$\{bdg\}/.test(actHtml));
+ok('★ 모집공고 진입 명칭은 관제가 아니라 로그', /<span class="lbl">🧾 로그<\/span>/.test(actHtml) && !/📡 관제/.test(actHtml));
 
 // 라벨은 .lbl 로 감싼다(넘침 측정·말줄임의 단일 지점)
-ok('주 줄 라벨은 <span class="lbl"> 로 감싼다(수정·관제 + 보기 2변형)',
+ok('주 줄 라벨은 <span class="lbl"> 로 감싼다(수정·로그 + 보기 2변형)',
   (actHtml.match(/<span class="lbl">/g) || []).length === 2
   && (cc.match(/<span class="lbl">👁 보기<\/span>/g) || []).length === 2
   && /\.pcard \.uic \.lbl\{[^}]*text-overflow:ellipsis/.test(cc));

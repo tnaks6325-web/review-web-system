@@ -102,8 +102,11 @@ async function registerBlogger({ sheetId, tabName, name, phone, blogUrl, dryRun 
   }
 
   // 다음 자리 = 표의 마지막 seq + 1. ★ 삭제된 줄도 세어 재사용하지 않는다((sheet,tab,seq) 키 충돌).
+  //   ★ 실제 행 번호 대역(< 900000)만 센다 — 900000 대역(수동 격리 대역) 줄이 섞여 있으면
+  //     그 뒤로 이어붙어 장부 배열이 90만 칸이 된다(participants.MANUAL_SEQ_BASE 단일 출처).
+  const { MANUAL_SEQ_BASE } = require('./participants.service');
   const { rows: mx } = await db.query(
-    `SELECT COALESCE(MAX(seq), 1) AS m FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
+    `SELECT COALESCE(MAX(seq) FILTER (WHERE seq < ${MANUAL_SEQ_BASE}), 1) AS m FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
     [sheetId, tabName]);
   const seq = Number(mx[0].m) + 1;
 

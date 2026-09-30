@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>미완료 인원 보기 — 팝업 시안 (스킬 3종 비교)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   토큰 — Refactoring UI 규칙을 그대로 따른다(세 시안 공통 바탕).
+   · 간격/크기: 4 8 12 16 24 32 48 64 96 …  (인접 값 간 25% 이상 차이)
+   · 타입:      12 14 16 18 20 24 30 36
+   · 굵기:      400/500(본문) · 600/700(강조)  — 그 사이·이하 없음
+   · 텍스트 색: 진함/중간/옅음 **3단계까지만**
+   · 그림자:    z축 위치로 고르는 5단계
+   ══════════════════════════════════════════════════════════════════════ */
+:root{color-scheme:light;
+  --ink:#1a2233;--muted:#5b667a;--faint:#98a2b3;       /* 텍스트 3단계 */
+  --line:#e5e8ee;--line2:#d8dde6;--card:#fff;--card2:#f7f8fa;--bg:#eef1f5;
+  --accent:#2f6bff;--accent-deep:#1d4fd7;--accent-soft:#eaf0ff;--accent-line:#c5d4ff;
+  --warn:#a15c00;--warn-soft:#fdf3e2;--warn-line:#f0dcb8;
+  /* 그림자 5단계 — "z축 어디에 있나"로 고른다 */
+  --e1:0 1px 3px hsla(0,0%,0%,.2);
+  --e2:0 4px 6px hsla(0,0%,0%,.2);
+  --e3:0 5px 15px hsla(0,0%,0%,.2);
+  --e4:0 10px 24px hsla(0,0%,0%,.2);
+  --e5:0 15px 35px hsla(0,0%,0%,.2);
+  /* 모션 — Prototyper animate-ui 수치 */
+  --ease-out-fluid:cubic-bezier(.16,1,.3,1);
+  --ease-in-quart:cubic-bezier(.5,0,.75,0);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6;padding:24px 16px 96px}
+.page{max-width:1060px;margin:0 auto}
+h1{font-size:24px;font-weight:700;margin-bottom:4px}
+.lead{color:var(--muted);font-size:13px;margin-bottom:16px}
+h2{font-size:18px;font-weight:700;margin:32px 0 8px;padding-left:12px;border-left:4px solid var(--accent)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0;box-shadow:var(--e1)}
+.note{font-size:12px;color:var(--muted)}
+code{background:var(--card2);border:1px solid var(--line);border-radius:4px;padding:1px 4px;font-size:12px;font-family:ui-monospace,Consolas,monospace}
+ul{padding-left:20px}li{margin:4px 0}
+table.doc{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0}
+table.doc th{background:var(--card2);text-align:left;padding:8px;border:1px solid var(--line);font-size:12px;color:var(--muted);white-space:nowrap}
+table.doc td{padding:8px;border:1px solid var(--line);vertical-align:top}
+
+/* ── 스킬 선택 ───────────────────────────────────────────────── */
+.skillbar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.skillbar button{font-size:13px;font-weight:500;border:1px solid var(--line2);background:var(--card);color:var(--muted);border-radius:8px;padding:8px 16px;cursor:pointer;
+  transition:color .15s,background-color .15s,border-color .15s}
+.skillbar button:hover{border-color:var(--accent-line);color:var(--ink)}
+.skillbar button.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+@media (prefers-reduced-motion:reduce){.skillbar button{transition:none}}
+
+/* ── 작업 목록 표(실제 화면 재현 · B-1 확정안) ────────────────── */
+.wbl-box{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:var(--e1)}
+.wbl-h{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--line);background:var(--card2);font-size:13px}
+.wbl-ttl{font-weight:700}
+table.wbl-t{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+table.wbl-t th{background:var(--card2);text-align:left;padding:8px;font-size:12px;color:var(--muted);font-weight:500;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--line)}
+table.wbl-t td{padding:12px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.wbl-t tr:last-child td{border-bottom:0}
+table.wbl-t th.nh,table.wbl-t td.nc{text-align:center;white-space:nowrap;padding-left:4px;padding-right:4px}
+table.wbl-t th.nh{width:48px}
+.nm{font-weight:600;font-size:13px}
+.sub{font-size:12px;color:var(--faint)}
+td.nc{font-variant-numeric:tabular-nums;font-size:12px;font-weight:600}
+/* ★ 상자 높이를 키워 **네 칸을 같은 크기로 통일**한다(사용자 결정 2026-09-22).
+   「N명 남음」이 말풍선으로 빠지면서 줄이 납작해졌던 것을 상자가 대신 채운다.
+   ★ inline-flex 로 세로 가운데 — 버튼(<button>)이든 그냥 칸(<span>)이든 같은 높이가 나온다. */
+td.nc .box{display:inline-flex;align-items:center;justify-content:center;
+  width:44px;min-height:32px;padding:0 4px;text-align:center;border-radius:6px;
+  background:var(--card2);border:1px solid var(--line);color:var(--ink)}
+td.nc .box.tot{background:transparent;border-color:transparent;color:var(--muted)}
+td.nc .box.full{background:var(--accent);border-color:var(--accent);color:#fff}
+.badge{display:inline-block;font-size:12px;font-weight:400;border-radius:6px;padding:2px 8px;background:var(--card2);color:var(--muted)}
+.badge.cand{background:var(--accent);color:#fff}
+
+/* ★★ 클릭할 수 있다는 신호 — 세 가지를 겹쳐 쓴다(하나만으로는 못 알아챈다):
+   ① 점선 밑줄 ② 커서 변경 ③ 호버 시 테두리·배경 변화. 또 남은 수를 옆에 적어
+   "여기에 볼 것이 있다"를 글자로도 말한다(색·모양만으로 알리지 않는다). */
+/* ★ 밑줄은 쓰지 않는다(사용자 결정) — 남은 신호는 **연파랑 상자 + 손가락 커서 + 호버 진해짐
+   + 키보드 포커스 테두리 + 올리면 뜨는 말풍선** 다섯이다. 표에서 이 칸만 색이 다르므로
+   밑줄 없이도 "여기는 누를 수 있다"가 구분된다(밑줄은 글자를 지저분하게 만들었다). */
+td.nc .box.clickable{cursor:pointer;border-color:var(--accent-line);
+  background:var(--accent-soft);color:var(--accent-deep);font-weight:600;
+  transition:background-color .15s,border-color .15s,box-shadow .15s}
+td.nc .box.clickable:hover{background:#dce7ff;border-color:var(--accent);box-shadow:var(--e1)}
+td.nc .box.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* ★ 「N명 남음」은 **마우스를 올렸을 때만** 뜬다(사용자 지시 2026-09-22).
+   ★★ 흐름에서 빼서 띄운다(absolute) — 자리를 비워 두면 표가 그만큼 헐렁해지고,
+     흐름에 둔 채 숨기면 뜰 때마다 **행 높이가 흔들린다**(레이아웃 시프트).
+   ★ 키보드로 닿았을 때도 뜬다(:focus-within) — 마우스만의 기능이 되지 않게.
+   ★ 스크린리더에는 버튼의 aria-label("제출 안 한 11명 보기")이 이미 그 수를 말한다. */
+td.nc{position:relative}
+td.nc .rest{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:4px;
+  font-size:12px;font-weight:400;color:var(--muted);line-height:1.3;white-space:nowrap;
+  background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 8px;
+  box-shadow:var(--e1);opacity:0;pointer-events:none;z-index:10;
+  transition:opacity .15s}
+td.nc:hover .rest,td.nc:focus-within .rest{opacity:1}
+@media (prefers-reduced-motion:reduce){td.nc .rest{transition:none}}
+@media (prefers-reduced-motion:reduce){td.nc .box.clickable{transition:none}}
+/* Prototyper 패턴 D — press feedback (motion-safe 에서만) */
+@media (prefers-reduced-motion:no-preference){
+  .press:active{transform:scale(.97)}
+}
+
+/* ══ 팝업 A — Refactoring UI : 중앙 다이얼로그 ═══════════════════════ */
+.ovl{position:fixed;inset:0;display:none;z-index:50}
+.ovl.open{display:block}
+.ovl .scrim{position:absolute;inset:0;background:hsla(0,0%,0%,.4)}
+.dlgA{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(384px,calc(100vw - 32px));background:var(--card);border-radius:12px;box-shadow:var(--e5);overflow:hidden}
+.dlgA header{padding:16px 16px 12px}
+.dlgA h4{font-size:16px;font-weight:600}
+.dlgA .meta{font-size:12px;color:var(--muted);margin-top:4px}
+.dlgA .list{max-height:288px;overflow:auto;border-top:1px solid var(--line)}
+.dlgA .row{display:flex;align-items:baseline;gap:8px;padding:8px 16px;border-bottom:1px solid var(--line);font-size:13px}
+.dlgA .row:last-child{border-bottom:0}
+.dlgA .row .who{font-weight:500}
+.dlgA .row .det{color:var(--muted);font-size:12px;margin-left:auto;font-variant-numeric:tabular-nums}
+.dlgA footer{padding:12px 16px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--line);background:var(--card2)}
+.btn{font-size:13px;font-weight:500;border-radius:8px;padding:8px 16px;cursor:pointer;border:1px solid var(--line2);background:var(--card);color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+
+/* ══ 팝업 B — Apple HIG : 앵커 팝오버 + 화살표 ═══════════════════════ */
+.popB{position:absolute;z-index:60;width:264px;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--e4);display:none}
+.popB.open{display:block}
+.popB::before{content:'';position:absolute;top:-7px;left:var(--ax,50%);margin-left:-7px;
+  width:12px;height:12px;background:var(--card);border-left:1px solid var(--line);border-top:1px solid var(--line);
+  transform:rotate(45deg);border-radius:2px}
+.popB .hd{padding:12px 12px 8px;font-size:13px;font-weight:600}
+.popB .hd .s{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px}
+.popB .list{max-height:240px;overflow:auto;border-top:1px solid var(--line)}
+.popB .row{display:flex;gap:8px;padding:8px 12px;font-size:13px;border-bottom:1px solid var(--line)}
+.popB .row:last-child{border-bottom:0}
+.popB .row .det{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+
+/* ══ 팝업 C — Prototyper animate-ui : 팝오버 + 정밀 모션 ═════════════ */
+.popC{position:absolute;z-index:60;width:264px;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--e3);display:none;transform-origin:top center}
+.popC.open{display:block;animation:cIn 150ms var(--ease-out-fluid)}
+.popC.closing{display:block;animation:cOut 100ms var(--ease-in-quart) forwards}
+@keyframes cIn{from{opacity:0;transform:scale(.95) translateY(-8px)}to{opacity:1;transform:none}}
+@keyframes cOut{from{opacity:1;transform:none}to{opacity:0;transform:scale(.95) translateY(-8px)}}
+.popC .hd{padding:12px 12px 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.popC .hd .n{margin-left:auto;font-size:12px;font-weight:400;color:var(--muted)}
+.popC .list{max-height:240px;overflow:auto;border-top:1px solid var(--line)}
+.popC .row{display:flex;gap:8px;padding:8px 12px;font-size:13px;border-bottom:1px solid var(--line);
+  transition:background-color .15s}
+.popC .row:last-child{border-bottom:0}
+.popC .row:hover{background:var(--card2)}
+.popC .row .det{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){
+  .popC.open,.popC.closing{animation:none}
+  .popC .row{transition:none}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>미완료 인원 보기 — 팝업 시안</h1>
+<p class="lead">
+  제출·입금이 <b>거의 끝난 작업</b>(남은 인원이 총건수의 10% 이하)에서 숫자를 누르면 <b>아직 안 낸 사람들</b>이 나옵니다.
+  아래 표는 <b>실제로 눌러볼 수 있습니다</b> — 위 버튼으로 <b>적용 스킬</b>을 바꿔 가며 비교해 보세요.
+</p>
+
+<div class="card" style="border-color:var(--accent-line);background:var(--accent-soft)">
+  <p style="margin:0;font-size:13px">
+    <b>설치해서 쓴 스킬</b> — <code>superdesigndev/superdesign</code> · <code>dickwu/apple-design</code>(Apple HIG 122쪽) ·
+    <code>ui-skills</code> 모음의 <code>refactoring-ui</code> · <code>animate-ui</code> · <code>interactive-hit-areas</code>.
+    <br><span class="note">세 시안의 <b>바탕(간격·글자·색·그림자 스케일)은 Refactoring UI 규칙을 공통으로</b> 따르고,
+    <b>팝업의 형태와 움직임만</b> 스킬별로 다릅니다 — 그래야 무엇이 달라졌는지가 분명해집니다.</span>
+  </p>
+</div>
+
+<div class="skillbar" id="skillbar"></div>
+<div class="card" id="skillinfo"></div>
+
+<h2>눌러보기</h2>
+<div class="wbl-box">
+  <div class="wbl-h"><span class="wbl-ttl">📋 작업 목록</span><span class="note" style="margin-left:auto">파란 칸을 눌러보세요</span></div>
+  <table class="wbl-t"><thead><tr>
+    <th>작업명</th><th>담당</th>
+    <th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th>
+    <th>상태</th>
+  </tr></thead><tbody id="tb"></tbody></table>
+</div>
+<p class="note" style="margin-top:8px">
+  ※ <b>0807 바디로션</b>은 제출이 11명(11%) 남아 <b>아직 안 눌립니다</b> — 10% 이하로 내려오면 열립니다.
+  <b>0528핸드크림</b>은 다 끝나 볼 것이 없습니다.
+</p>
+
+<h2>왜 10%부터인가</h2>
+<div class="card">
+  <ul>
+    <li><b>막바지에만 쓸모가 있습니다.</b> 100명 중 50명이 남았을 때 목록은 그냥 명단이지만, 8명이 남았을 때는 <b>오늘 챙길 8명</b>입니다.</li>
+    <li>항상 눌리게 하면 <b>모든 숫자가 링크처럼 보여</b> 표가 시끄러워집니다. 볼 값이 있을 때만 신호를 켭니다.</li>
+    <li>기준은 <b>남은 인원 ÷ 총건수 ≤ 10%</b>, 그리고 <b>남은 인원이 1명 이상</b>일 때입니다.</li>
+  </ul>
+</div>
+
+<h2>클릭할 수 있다는 걸 어떻게 알리나</h2>
+<div class="card">
+  <p>하나만으로는 놓칩니다. <b>세 가지를 겹쳐</b> 씁니다 — 그리고 <b>색·모양에만 기대지 않습니다</b>.</p>
+  <ul>
+    <li><b>연한 파랑 상자</b> — 가만히 있어도 이 칸만 색이 달라 "여기는 다르다"가 보입니다</li>
+    <li><b>손가락 커서 + 호버 시 진해짐</b> — 마우스를 올리면 확실해집니다</li>
+    <li><b>마우스를 올리면 「11명 남음」</b> — 몇 명인지 글자로 말합니다(평소에는 숨겨 표를 조용하게 둡니다).
+        키보드로 닿아도 같이 뜨고, 화면낭독기에는 버튼 이름이 그 수를 그대로 읽어 줍니다</li>
+    <li><b>키보드 포커스 테두리</b> — 탭으로도 닿습니다</li>
+  </ul>
+</div>
+
+<h2>세 시안의 차이</h2>
+<div class="card">
+  <table class="doc">
+    <thead><tr><th style="width:120px">스킬</th><th>형태</th><th>움직임</th><th>닫는 법</th></tr></thead>
+    <tbody>
+      <tr><td><b>Refactoring UI</b></td><td>화면 가운데 <b>다이얼로그</b> + 어두운 배경</td><td>없음(즉시)</td><td>[닫기] 버튼 · 배경 클릭 · Esc</td></tr>
+      <tr><td><b>Apple HIG</b></td><td>누른 숫자 옆 <b>팝오버 + 화살표</b></td><td>없음(즉시)</td><td>바깥 클릭 · Esc <span class="note">(HIG: 닫기 버튼은 꼭 필요할 때만)</span></td></tr>
+      <tr><td><b>animate-ui</b></td><td>팝오버(화살표 없음)</td><td><b>열기 150ms · 닫기 100ms</b><br>fade + 살짝 축소에서 제자리로</td><td>바깥 클릭 · Esc</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</div>
+
+<!-- ══ 팝업 A : 중앙 다이얼로그 ══ -->
+<div class="ovl" id="ovlA" role="dialog" aria-modal="true" aria-labelledby="dlgAt">
+  <div class="scrim" data-close></div>
+  <div class="dlgA">
+    <header><h4 id="dlgAt">—</h4><div class="meta" id="dlgAm">—</div></header>
+    <div class="list" id="dlgAl"></div>
+    <footer><button class="btn primary press" data-close>닫기</button></footer>
+  </div>
+</div>
+
+<!-- ══ 팝업 B : Apple 팝오버 ══ -->
+<div class="popB" id="popB" role="dialog" aria-labelledby="popBt">
+  <div class="hd"><span id="popBt">—</span><span class="s" id="popBs">—</span></div>
+  <div class="list" id="popBl"></div>
+</div>
+
+<!-- ══ 팝업 C : animate-ui 팝오버 ══ -->
+<div class="popC" id="popC" role="dialog" aria-labelledby="popCt">
+  <div class="hd"><span id="popCt">—</span><span class="n" id="popCn">—</span></div>
+  <div class="list" id="popCl"></div>
+</div>
+
+<script>
+/* ── 목업 데이터 ─────────────────────────────────────────────────────
+   작업명은 실제 목록에서, 인원 수치는 예시. 미완료 인원은 가짜 이름이다. */
+var ROWS=[
+  {n:'0528핸드크림',                         a:'주식회사 키오스킨', m:'만두', t:60,  f:60,  s:60,  p:60},
+  {n:'0326삼푸실배송',                        a:'주식회사 키오스킨', m:'만두', t:50,  f:50,  s:49,  p:47},
+  {n:'0807(올리브영)블랑카우 바디로션 100건',   a:'주식회사 키오스킨', m:'만두', t:100, f:100, s:89,  p:80},
+  {n:'0727(올리브영)블랑카우 바디로션 100건',   a:'주식회사 키오스킨', m:'만두', t:100, f:97,  s:95,  p:90},
+  {n:'노티드_ 두바이 쫀득쿠키',                 a:'주식회사 지에프에프씨', m:'만두', t:98, f:98, s:96, p:96},
+  {n:'0915(쿠팡)대용량 세탁세제 1000건',        a:'주식회사 키오스킨', m:'망고', t:1000,f:1000,s:987, p:950}
+];
+var NAMES=['김서연','이준호','박민지','최우진','정하늘','강시우','윤도현','임수아','한지훈','오예린',
+           '서연우','신재민','권나윤','황태경','문서진','배현우','조은채','남기훈','허유진','곽승민'];
+function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+/* 남은 사람 목록 — 자리표시자(실제로는 서버가 그 작업의 미완료 줄을 준다) */
+function pending(row,kind){
+  var done = kind==='s' ? row.s : row.p;
+  var n = Math.max(0, row.t - done);
+  var out=[];
+  for(var i=0;i<n;i++){
+    out.push({ name:NAMES[i%NAMES.length], tail:String(1000+((i*37)%9000)).slice(-4),
+               day:(i%3===0?'8/18':(i%3===1?'8/19':'8/20')), seq:(done+i+1) });
+  }
+  return out;
+}
+/* ★ 클릭 가능 판정 — 남은 인원이 총건수의 10% 이하이고 1명 이상일 때만 */
+var THRESHOLD=0.10;
+function openable(row,kind){
+  var done = kind==='s' ? row.s : row.p;
+  var rest = row.t - done;
+  return rest>0 && row.t>0 && (rest/row.t)<=THRESHOLD;
+}
+
+/* ── 표 ──────────────────────────────────────────────────────────── */
+function numCell(v,row,kind){
+  if(kind==='t') return '<td class="nc"><span class="box tot">'+v+'</span></td>';
+  var full = v>=row.t;
+  if(kind==='f') return '<td class="nc"><span class="box'+(full?' full':'')+'">'+v+'</span></td>';
+  var rest=row.t-v;
+  if(full) return '<td class="nc"><span class="box full">'+v+'</span></td>';
+  if(!openable(row,kind))
+    return '<td class="nc"><span class="box">'+v+'</span><span class="rest">'+rest+'명 남음</span></td>';
+  var label=(kind==='s'?'제출':'입금')+' 안 한 '+rest+'명 보기';
+  return '<td class="nc"><button type="button" class="box clickable press" '
+       + 'data-r="'+ROWS.indexOf(row)+'" data-k="'+kind+'" aria-label="'+esc(label)+'">'+v+'</button>'
+       + '<span class="rest">'+rest+'명 남음</span></td>';
+}
+function render(){
+  document.getElementById('tb').innerHTML=ROWS.map(function(r){
+    var done=(r.f>=r.t&&r.s>=r.t&&r.p>=r.t);
+    return '<tr><td><div class="nm">'+esc(r.n)+'</div><div class="sub">'+esc(r.a)+'</div></td>'
+      +'<td>'+esc(r.m)+'</td>'
+      +numCell(r.t,r,'t')+numCell(r.f,r,'f')+numCell(r.s,r,'s')+numCell(r.p,r,'p')
+      +'<td><span class="badge'+(done?' cand':'')+'">'+(done?'마감 후보':'진행 중')+'</span></td></tr>';
+  }).join('');
+}
+
+/* ── 스킬 선택 ───────────────────────────────────────────────────── */
+var SKILLS=[
+  {k:'A',name:'Refactoring UI',
+   why:'값을 <b>스케일에서만</b> 고르고(간격 4·8·12·16·24…, 글자 12·14·16·18), 굵기는 <b>두 단계</b>(400/600)만 쓴다. 텍스트 색도 <b>세 단계</b>까지. 그림자는 "z축 어디에 있나"로 고른 <b>5단계</b> 중 모달용(<code>0 15px 35px</code>).',
+   pick:'<b>화면 가운데 다이얼로그.</b> 목록이 길어질 수 있으니 공간을 넉넉히 주고, 어두운 배경으로 "지금은 이것만 본다"를 만든다.',
+   watch:'화면을 덮으므로 표의 맥락(어느 줄이었는지)을 잃는다 → 제목에 작업명을 넣어 보완했다.'},
+  {k:'B',name:'Apple HIG',
+   why:'Apple 지침 <code>popovers.md</code>: <b>화살표가 그것을 연 요소를 가리킨다</b> · 그 요소를 <b>가리지 않는다</b> · <b>작게</b> 만든다 · 닫기 버튼은 명확성이 필요할 때만, 보통 <b>바깥을 누르면 닫힌다</b> · 한 번에 <b>하나만</b> 띄운다.',
+   pick:'<b>누른 숫자 옆 팝오버.</b> 어느 줄의 무엇을 보고 있는지 눈이 그대로 붙어 있다.',
+   watch:'화면 아래쪽 줄에서는 위로 뒤집어야 한다(아래 여백이 모자라면 자동으로 뒤집는다).'},
+  {k:'C',name:'animate-ui (Prototyper)',
+   why:'오버레이 모션 수치를 그대로 따른다 — <b>열기 150ms</b> <code>ease-out-fluid</code> + fade + <code>zoom-95</code> + 방향 슬라이드 8px, <b>닫기 100ms</b> <code>ease-in-quart</code>. 누를 때 <code>scale(.97)</code>, 그리고 <b>움직임을 줄인 설정에서는 애니메이션을 끈다</b>.',
+   pick:'<b>팝오버 + 정밀한 등장/퇴장.</b> "어디서 나왔는지"를 움직임이 설명한다.',
+   watch:'모션이 과하면 그 자체가 AI티가 된다 → 거리 8px·시간 150ms로 <b>거의 안 보이게</b> 눌러 뒀다.'}
+];
+var CUR='B';
+function renderSkillbar(){
+  document.getElementById('skillbar').innerHTML=SKILLS.map(function(s,i){
+    return '<button type="button" class="press'+(CUR===s.k?' on':'')+'" data-s="'+s.k+'">'+esc(s.name)+'</button>';
+  }).join('');
+  var s=SKILLS.filter(function(x){return x.k===CUR;})[0];
+  document.getElementById('skillinfo').innerHTML=
+    '<h3 style="margin-top:0">'+esc(s.name)+' 를 적용하면</h3>'
+    +'<table class="doc"><tr><th style="width:96px">규칙</th><td>'+s.why+'</td></tr>'
+    +'<tr><th>이 팝업은</th><td>'+s.pick+'</td></tr>'
+    +'<tr><th>주의</th><td>'+s.watch+'</td></tr></table>';
+}
+
+/* ── 팝업 열기/닫기 ──────────────────────────────────────────────── */
+var openEl=null;
+function closeAll(){
+  document.getElementById('ovlA').classList.remove('open');
+  document.getElementById('popB').classList.remove('open');
+  var c=document.getElementById('popC');
+  if(c.classList.contains('open')){
+    c.classList.remove('open'); c.classList.add('closing');
+    setTimeout(function(){ c.classList.remove('closing'); },110);   // 닫기 100ms + 여유
+  }
+  openEl=null;
+}
+function listHtml(items,cls){
+  return items.map(function(x){
+    return '<div class="row"><span class="who">'+esc(x.name)+'</span>'
+         + '<span class="det">···'+esc(x.tail)+' · '+esc(x.day)+' 참여 · '+x.seq+'번</span></div>';
+  }).join('');
+}
+function place(el,btn,arrow){
+  var r=btn.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight;
+  var left=r.left+window.scrollX+r.width/2-w/2;
+  left=Math.max(8, Math.min(left, window.innerWidth-w-8));
+  var top=r.bottom+window.scrollY+8, flip=false;
+  if(r.bottom+h+16>window.innerHeight){ top=r.top+window.scrollY-h-8; flip=true; }
+  el.style.left=left+'px'; el.style.top=top+'px';
+  if(arrow){ el.style.setProperty('--ax',(r.left+window.scrollX+r.width/2-left)+'px'); }
+  return flip;
+}
+function open(btn){
+  var row=ROWS[+btn.dataset.r], kind=btn.dataset.k;
+  var items=pending(row,kind), what=(kind==='s'?'리뷰 제출':'입금');
+  closeAll();
+  if(CUR==='A'){
+    document.getElementById('dlgAt').textContent=what+' 안 한 '+items.length+'명';
+    document.getElementById('dlgAm').textContent=row.n+' · 총 '+row.t+'건 중';
+    document.getElementById('dlgAl').innerHTML=listHtml(items);
+    document.getElementById('ovlA').classList.add('open');
+  } else if(CUR==='B'){
+    var el=document.getElementById('popB');
+    document.getElementById('popBt').textContent=what+' 안 한 '+items.length+'명';
+    document.getElementById('popBs').textContent=row.n;
+    document.getElementById('popBl').innerHTML=listHtml(items);
+    el.classList.add('open'); place(el,btn,true);
+  } else {
+    var c=document.getElementById('popC');
+    document.getElementById('popCt').textContent=what+' 안 한 사람';
+    document.getElementById('popCn').textContent=items.length+'명';
+    document.getElementById('popCl').innerHTML=listHtml(items);
+    c.classList.remove('closing'); c.classList.add('open'); place(c,btn,false);
+  }
+  openEl=btn;
+}
+
+/* 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+document.addEventListener('click',function(e){
+  var s=e.target.closest('[data-s]');
+  if(s){ CUR=s.dataset.s; renderSkillbar(); closeAll(); return; }
+  var b=e.target.closest('.box.clickable');
+  if(b){ open(b); return; }
+  if(e.target.closest('[data-close]')){ closeAll(); return; }
+  if(openEl && !e.target.closest('.popB,.popC,.dlgA')) closeAll();
+});
+document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeAll(); });
+window.addEventListener('scroll',function(){ if(openEl&&CUR!=='A') closeAll(); },{passive:true});
+window.addEventListener('resize',function(){ if(openEl&&CUR!=='A') closeAll(); });
+
+render(); renderSkillbar();
+</script>
+</body>
+</html>

@@ -123,7 +123,7 @@ function nextOpenDate(c, fromDateStr, sch, plans) {
   if (!first) return null;
   let d = first;
   for (let i = 0; i < NEXT_OPEN_SCAN_DAYS && d; i++) {
-    const closed = isWeekendClosedOn(c, d) || planOverrideFor(plans, d) === 0;
+    const closed = isWeekendClosedOn(c, d, plans) || planOverrideFor(plans, d) === 0;
     if (!closed) return d;
     d = sch ? nextWorkDate(sch, d) : addIsoDays(d, 1);
   }
@@ -157,6 +157,130 @@ const CARRY_ENABLED = process.env.CAMPAIGN_DAILY_CARRY !== '0';
 // 계획 행이 없는 캠페인/날짜 = 기본 일건수(daily_limit) — 옵트인이라 기존 동작 100% 불변.
 // 킬스위치: CAMPAIGN_DAILY_PLAN=0 이면 계획표 전체 무시(전건 기존 동작 즉시 복귀).
 const PLAN_ENABLED = process.env.CAMPAIGN_DAILY_PLAN !== '0';
+
+// ── 표(주문 원장) 기준 총량 게이트(2단계) ──
+// 'off' | 'observe' | 'on'(기본). off = 집계 쿼리 0(완전 킬스위치 · 되돌리기 = env 만).
+// observe = counts.linked 만 싣고 게이트 무변경 — 긴급 진단 때만 명시적으로 사용한다.
+// on = soft_full 게이트 반영(stateReason:'table_over_total' · 비영속 — maybePersistClosed 무접촉).
+// ★★ 게이트 재료는 campaign_participants(작업표 줄)가 아니라 order_submissions(주문 원장) —
+//   선기입 이름만 줄(참여 소각)·링크 오염·투영 지연이 정원 계산에 못 들어오게 하는 구조적 선택.
+//   표시(카드 누적)는 작업표 줄(archiveSuggest.filled)이 맡는다 — 두 재료의 용도가 다르다.
+// ── 발주(작업오더) 정원 폴백 ─────────────────────────────────────────────────
+// ★★ 공고의 총인원·일건수가 **미설정(0)** 이면 연결된 작업오더의 총건수·일건수를
+//   **실제 정원으로 적용**한다(사용자 확정 2026-08-21 — "단순 표시가 아니라 실제 적용").
+//   종전에는 recruit_total=0 = "무제한"이라 100건짜리 작업이 무제한으로 열려 있었고,
+//   같은 화면에서 참여자 게이지만 발주 총건수(/100)를 봐 **한 화면에 두 숫자**가 있었다.
+// ★ 공고에 값이 있으면 언제나 공고가 이긴다(폴백은 0/미설정일 때만) — 판정 규칙 자체는
+//   `linkedRecruitQuota.displayRecruitTotal` 한 곳이고 여기서는 그것을 그대로 태운다(사본 0).
+// ★★ 비영속 — `maybePersistClosed` 는 DB 의 `rc.recruit_total > 0` 을 그대로 보므로 이 폴백으로
+//   status='closed' 가 굳는 일이 구조적으로 없다. 발주 건수가 바뀌거나 공고에 총인원을 넣으면
+//   그 순간 다시 반영된다(표 기준 게이트와 같은 규율).
+// ★ 킬스위치 `CAMPAIGN_ORDER_QUOTA=0` = 재료 미부착 = 전건 종전 동작 즉시 복귀.
+const ORDER_QUOTA_ENABLED = process.env.CAMPAIGN_ORDER_QUOTA !== '0';
+
+// ── 확정 인원 기준(결정 184 · 사용자 확정 2026-09-27 「A — 신청·주문 중 큰 값」) ──
+// 'max'(기본) = 어제까지 확정·이월/보류 기준선 이후 확정을 **구간마다 신청·주문 중 큰 값**으로 센다.
+//   공고를 거치지 않은 실구매(대신 제출·외부 모집·늦은 구매)도 남은 자리·이월·예상 종료일·작업표 날짜에 들어간다.
+//   ★ 오늘 확정(todaySubmitted)은 합치지 않는다 — 신청 게이트는 이미 작업표 오늘 채움(tableTodayFilled)으로
+//     공고 밖 참여를 세고, 탭 공유 공고의 오늘 합산(_groupedTableTodayCounts)이 공고마다 합친 값을 **다시 더해**
+//     같은 주문을 두 번 센다(레드팀 R1) · 주문만 저장되고 홀드가 남은 건이 오늘 두 번 세진다(Y1).
+// 'applications' = 종전(신청 기록만) — 되돌리기 = env 만.
+const COUNT_BASIS = String(process.env.CAMPAIGN_COUNT_BASIS || 'max').toLowerCase() === 'applications' ? 'applications' : 'max';
+
+/**
+ * fetchCampaignCounts 깔때기 안에서 — 연결 작업표의 주문 원장 구간 수와 신청 구간 수를 **구간마다 큰 값**으로 합친다.
+ * ★ 합치는 것: submittedBeforeToday · carry.submittedSince · hold.submittedSince. (todaySubmitted 는 합치지 않는다 — 위 스위치 주석)
+ * ★ 표(주문 원장) 기준 게이트가 켜졌을 때(`CAMPAIGN_TABLE_QUOTA=on`)만 — observe 에서 합치면 총원 마감(soft_full)은
+ *   신청 기준인데 하루 인원만 0 으로 잘려 매일 "내일 다시 오픈"으로 영구히 잠긴다(레드팀 Y4 · 031 "on 은 사람이 결정").
+ * ★★ submittedAll 은 합치지 않는다 — soft_full(총원 마감)의 `usedAll` 재료이고, 주문 기준 마감은 이미
+ *   `table_over_total`(비영속) 경로가 맡는다. 합치면 031 의 두 경로 분리가 무너진다(완화 금지).
+ * ★ 공유 작업표(한 탭에 공고 둘 이상)·탭 없음·조회 실패·구간 수 없음(구버전 캐시) = 합치지 않는다(종전 · 정원을 좁히지 않는다).
+ * ★ 원래 신청 수는 `applications` 에 보존한다(진단·표시용).
+ */
+function _mergeCountBasis(o) {
+  if (COUNT_BASIS !== 'max' || TABLE_QUOTA_MODE !== 'on' || !o) return;
+  const L = o.linked;
+  if (!L || !L.ok || L.noTab || L.sharedTab || !Number.isFinite(L.ordersBefore)) return;
+  o.applications = {
+    submittedBeforeToday: o.submittedBeforeToday,
+    carrySince: o.carry ? o.carry.submittedSince : null, holdSince: o.hold ? o.hold.submittedSince : null,
+  };
+  o.submittedBeforeToday = Math.max(Number(o.submittedBeforeToday) || 0, L.ordersBefore);
+  // ★ 오늘 주문은 **남은 자리·앞날 예상 전용** 재료로 따로 싣는다(Codex 리뷰) — todaySubmitted(오늘 판정 재료)에는 섞지 않는다.
+  //   없으면 "총 100 · 어제까지 90 · 오늘 공고 밖 10" 에서 남은 자리를 10 으로 말하고 작업표에 날짜 줄을 더 깐다.
+  o.todayOrders = Math.max(0, Number(L.ordersToday) || 0);
+  if (o.carry) o.carry = { ...o.carry, submittedSince: Math.max(Number(o.carry.submittedSince) || 0, Number(L.ordersSinceCarry) || 0) };
+  if (o.hold) o.hold = { ...o.hold, submittedSince: Math.max(Number(o.hold.submittedSince) || 0, Number(L.ordersSinceHold) || 0) };
+  o.countBasis = 'max';
+}
+
+/**
+ * 그 공고에 실제로 적용되는 정원 — 공고 값 우선, 0(미설정)이면 연결 발주 값.
+ * ★★ 정원을 읽는 모든 자리(상태엔진·이월·총량 clamp·표시)가 **이 함수 하나**를 쓴다.
+ *   사본을 두면 "카드는 100인데 참여는 무제한"처럼 화면과 게이트가 갈린다(counts 깔때기 규율).
+ * @returns {{recruitTotal:number, dailyLimit:number, totalSource:string, dailySource:string}}
+ */
+function effectiveQuota(c, counts) {
+  const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
+  const oq = (ORDER_QUOTA_ENABLED && counts && counts.orderQuota) || null;
+  const t = displayRecruitTotal(c && c.recruit_total, oq && oq.recruitCount);
+  const d = displayRecruitTotal(c && c.daily_limit, oq && oq.dailyCount);
+  return {
+    recruitTotal: t.total, dailyLimit: d.total,
+    totalSource: t.source, dailySource: d.source,
+  };
+}
+
+const TABLE_QUOTA_MODE = (() => {
+  const v = String(process.env.CAMPAIGN_TABLE_QUOTA || 'on').toLowerCase();
+  if (['0', 'false', 'off'].includes(v)) return 'off';
+  if (['observe', 'dry', 'shadow'].includes(v)) return 'observe';
+  return 'on';
+})();
+
+/**
+ * 총 모집 소비량의 단일 판정.
+ *
+ * - 기본 신청 원장: submitted + 유효 홀드
+ * - 주문 원장 게이트(on): max(submitted, 연결 주문) + 유효 홀드
+ * - 공유 탭: 탭 주문을 공고별로 귀속할 수 없으므로 신청 원장만 사용
+ * - 연결 탭이 있는데 주문 원장 조회가 실패하면 known=false. 읽기 화면은 계속 표시할 수 있지만
+ *   신규 참여·계획 증원 같은 정원 증가 쓰기는 호출부가 fail-closed 한다.
+ */
+function totalQuotaUsage(c, counts, schedule = null) {
+  const cnt = counts || {};
+  const sch = isUsableSchedule(schedule) ? schedule : null;
+  const cap = sch ? (Number(sch.totalSlots) || 0) : effectiveQuota(c, cnt).recruitTotal;
+  const submitted = Math.max(0, Number(cnt.submittedAll) || 0);
+  const activeHolds = Math.max(0, Number(cnt.activeHolds) || 0);
+  const applicationUsed = submitted + activeHolds;
+  const expectsLinked = !!(c && c.linked_sheet_id && c.linked_tab_name);
+  const linked = cnt.linked;
+  const linkedKnown = !!(linked && linked.ok && !linked.noTab);
+  const sharedTab = linkedKnown && !!linked.sharedTab;
+  const orders = linkedKnown ? Math.max(0, Number(linked.orders) || 0) : null;
+  const tableUsed = linkedKnown && !sharedTab
+    ? Math.max(submitted, orders) + activeHolds
+    : applicationUsed;
+  const enforced = TABLE_QUOTA_MODE === 'on';
+  const known = !enforced || !expectsLinked || linkedKnown;
+  const used = enforced ? tableUsed : applicationUsed;
+  return {
+    mode: TABLE_QUOTA_MODE,
+    cap,
+    submitted,
+    activeHolds,
+    applicationUsed,
+    orders,
+    sharedTab,
+    known,
+    used,
+    tableUsed,
+    source: enforced && linkedKnown && !sharedTab ? 'order_ledger' : 'applications',
+    full: cap > 0 && used >= cap,
+    wouldClose: cap > 0 && linkedKnown && !sharedTab && tableUsed >= cap,
+  };
+}
 
 /** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
  *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
@@ -193,14 +317,68 @@ const CARRY_HOLD_ENABLED = process.env.CAMPAIGN_CARRY_HOLD !== '0';
 function isCarryHold(c) {
   return CARRY_HOLD_ENABLED && String((c && c.carry_mode) || 'auto') === 'hold';
 }
+// ★ 139: 이월 "보류"와 "배치"는 다른 개념이다. 기존 공고의 NULL/알 수 없는 값은
+// 현행 next로 접어 배포만으로 이미 운영 중인 공고의 정원이 바뀌지 않게 한다.
+const CARRY_STRATEGIES = new Set(['next', 'spread', 'extend']);
+function carryStrategy(c) {
+  const value = String((c && c.carry_strategy) || 'next');
+  return CARRY_STRATEGIES.has(value) ? value : 'next';
+}
 // ★ 상한 — 이월이 아무리 쌓여도 하루 한도의 이 배수를 넘지 않는다.
 //   상한이 없으면 오래 미달한 캠페인이 어느 날 갑자기 수십 건을 한꺼번에 열어
 //   시트 기입·검수 인력이 감당 못 하는 버스트가 난다.
 const CARRY_CAP_MULT = Math.max(1, Number(process.env.CAMPAIGN_DAILY_CARRY_CAP || 2));
 
+/**
+ * [from, to] 구간(양끝 포함)에서 **계획이 없고 공고가 닫는 날**(주말·공휴일)의 수.
+ * ★★ 이월 계산의 "원래 받기로 한 인원" 누적에서 이 날들의 기본 일건수를 뺀다(사용자 확정
+ *   2026-09-23 — 주말·공휴일 몫이 다음 진행일로 몰리지 않게). 판정은 isWeekendClosedOn 하나
+ *   (신청 관문·카드와 같은 판정 — 사본 금지). 계획이 있는 날은 plans 루프가 이미 반영한다.
+ * ★ 주말 포함 공고(skip_weekends≠true)는 0 — 종전 동작 그대로.
+ */
+function _closedDaysWithoutPlan(c, from, to, plans) {
+  if (!c || c.skip_weekends !== true || !from || !to || from > to) return 0;
+  let n = 0, d = from, guard = 0;
+  while (d && d <= to && guard++ < 1500) {
+    if (!(plans && plans[d] != null) && isWeekendClosedOn(c, d, plans)) n++;
+    d = addIsoDays(d, 1);
+  }
+  return n;
+}
+
 /** 'YYYY-MM-DD' 두 개의 날짜 차이(일). b - a */
 function _dayDiff(a, b) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+}
+
+/**
+ * 그날 **원래 받기로 한 인원** — 명시 계획이 있으면 그 값, 없으면 쉬는 날 0 · 진행일 기본 일건수.
+ * ★ 이월 누적(dailyQuota·pendingCarry)이 쓰는 규칙과 같은 판정이다(계획 우선 → isWeekendClosedOn).
+ */
+function _plannedOn(c, d, plans, dl) {
+  if (plans && plans[d] != null) return Math.max(0, Number(plans[d]) || 0);
+  if (isWeekendClosedOn(c, d, plans)) return 0;
+  return dl;
+}
+
+/**
+ * 원래 계획대로 받았다면 총 모집인원을 다 채우는 날(원래 종료일)까지, [fromDate ~ 그날] 중
+ * **실제로 받는 날(원래 인원 ≥ 1)** 의 수. 「남은 날에 나눠 담기」의 나눌 날 수다.
+ * ★★ 종전 식(`총원 ÷ 일건수 − 지난 달력일수`)은 쉬는 날(주말·공휴일)을 진행일로 세어 나눌 날을
+ *   적게 잡았다(= 하루 몫이 커졌다) — 2026-09-26 오류 전수조사.
+ * ★ 원래 종료일이 이미 지났으면 1(오늘 하루에 담는다 — 상한은 호출부가 건다). 판정 불가도 1.
+ */
+function _remainingOpenDays(c, startDate, fromDate, rt, dl, plans) {
+  if (!startDate || !fromDate || rt <= 0 || dl <= 0) return 1;
+  let cum = 0, d = startDate, open = 0, guard = 0;
+  while (d && guard++ < 1500) {
+    const p = _plannedOn(c, d, plans, dl);
+    cum += p;
+    if (d >= fromDate && p > 0) open++;
+    if (cum >= rt) break;
+    d = addIsoDays(d, 1);
+  }
+  return Math.max(1, open);
 }
 
 /**
@@ -216,9 +394,10 @@ function _dayDiff(a, b) {
  *   ② **총 모집인원은 그대로** — 마지막 clamp(rt - submittedBeforeToday)가 유지되므로
  *      이월이 총원을 넘겨 모집하는 일은 구조적으로 불가능하다.
  */
-function dailyQuota(c, submittedBeforeToday, carry, planCtx) {
-  const dl = Number(c.daily_limit) || 0;
-  const rt = Number(c.recruit_total) || 0;
+function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
+  // ★ 정원은 effectiveQuota 단일 출처 — 미전달(구 호출부)이면 공고 값 그대로(종전 동작).
+  const dl = eff ? Number(eff.dailyLimit) || 0 : Number(c.daily_limit) || 0;
+  const rt = eff ? Number(eff.recruitTotal) || 0 : Number(c.recruit_total) || 0;
   const before = Number(submittedBeforeToday) || 0;
 
   // ── 날짜별 계획(095): planCtx = { today, plans:{'YYYY-MM-DD': n} } ──
@@ -236,7 +415,11 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx) {
     q = dl;
     // ★ 098: 보류 공고는 자동 이월을 얹지 않는다 — 미달분은 보류 잔량(heldCarry)으로 쌓이고
     //   관리자가 날짜별 계획으로 골라 반영한다. 총량 clamp 는 그대로라 물량 소실은 없다.
-    if (!isCarryHold(c) && CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
+    const strategy = carryStrategy(c);
+    // extend는 일건수만 열어 미달분을 뒤 날짜로 자연스럽게 넘긴다. 총량 clamp가
+    // 남은 인원을 계속 보장하므로 물량은 소실되지 않는다. 명시 계획일은 위 ov 분기에서
+    // 이미 우선하므로 수동 조절을 덮지 않는다.
+    if (!isCarryHold(c) && strategy !== 'extend' && CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
       const sd = dateOnlyStr(c.start_date);
       const anchor = (sd && sd > carry.startDate) ? sd : carry.startDate;   // 늦게 시작한 캠페인은 자기 시작일부터
       const days = _dayDiff(anchor, carry.today) + 1;                        // 오늘 포함 경과일수
@@ -250,8 +433,19 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx) {
             if (d >= anchor && d <= carry.today) planned += Math.max(0, Number(plans[d]) || 0) - dl;
           }
         }
+        // 쉬는 날(주말·공휴일)은 원래 받지 않는 날이라 계획 누적에서 뺀다 — 미달로 세면 다음 진행일로 몰린다.
+        planned -= dl * _closedDaysWithoutPlan(c, anchor, carry.today, plans);
         const done = Number(carry.submittedSince) || 0;
-        q = Math.min(planned - done, dl * CARRY_CAP_MULT);
+        const raw = planned - done;           // 오늘 받을 인원(이월 포함, 상한 적용 전)
+        q = Math.min(raw, dl * CARRY_CAP_MULT);
+        // spread는 원래 종료일까지 남은 **진행일**(쉬는 날 제외)에 현재 미달분을 고르게 나눈다.
+        // ★ 나누는 양은 상한 적용 **전** 미달분이다 — 상한을 먼저 걸면 큰 미달분이 두 배 몫으로
+        //   잘린 뒤에 나눠져 하루 몫이 실제보다 작게 나온다. 상한은 나눈 뒤 다시 건다.
+        // 총원이 없는 공고는 끝점을 알 수 없으므로 현행 next로 안전하게 유지한다.
+        if (strategy === 'spread' && rt > 0 && raw > dl) {
+          const remainingDays = _remainingOpenDays(c, sd || anchor, carry.today, rt, dl, plans);
+          q = Math.min(dl + Math.ceil((raw - dl) / remainingDays), dl * CARRY_CAP_MULT);
+        }
         if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 그날 계획(기본 일건수)을 줄이지 않는다
       }
     }
@@ -265,7 +459,8 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx) {
  * 상태 판정 (순수 함수 — DB 없이 테스트 가능)
  * @param c      recruit_campaigns 행 (participation_mode, status, window_start, window_end,
  *               close_buffer_min, hold_ttl_min, daily_limit, recruit_total)
- * @param counts { activeHolds, todayActiveHolds, submittedAll, todaySubmitted, submittedBeforeToday }
+ * @param counts { activeHolds, todayActiveHolds, submittedAll, todaySubmitted, submittedBeforeToday,
+ *                 tableTodayFilled?, tableTodayQuota?, tableTodaySubmitted?, tableTodayActiveHolds? }
  *               (유효 홀드 = applied AND expires_at>now 로 이미 집계된 값)
  * @param now    Date
  * @returns { state, todayCount, dailyQuota, serverNow, opensAt, closesAt, cutoffAt }
@@ -281,6 +476,9 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const sch = isUsableSchedule(schedule) ? schedule : null;
   const todayStr = kstTodayStr(now);
   const submittedBefore = Number(counts.submittedBeforeToday) || 0;
+  /* ★★ 적용 정원(공고 우선 · 0이면 발주) — 아래 총량 clamp·이월·soft_full·표시 재료가 전부
+     이 값을 본다. 시트 일정(063) 경로는 시트가 총량의 진실원본이라 무접촉이다. */
+  const eff = effectiveQuota(c, counts);
 
   // 시트 일정이 있으면 그 일정이 이월까지 계산한다(063). 없으면 daily_limit 경로가 이월(066)
   // + 날짜별 계획 조절(095 — counts.plans). ★ 2026-08-07부터 **시트 일정 캠페인에도 적용**된다
@@ -291,7 +489,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   //   조절하지 않은 날은 종전대로 시트가 정한다 — 진실원본이 통째로 넘어오지 않아, 시트를 계속
   //   고쳐 쓰는 운영과 공존한다. 조절을 해제하면 그 날은 즉시 시트 값으로 복귀한다.
   const ovToday = planOverrideFor(counts.plans || null, todayStr);
-  const quota = sch
+  const campaignQuota = sch
     ? (ovToday !== null
         // 명시 조절일 = 그 값이 그날의 전부(095 규율 — 이월을 얹지도 빼지도 않는다).
         //   ★ 총량 clamp 는 유지: 시트 총건수를 넘겨 열 수는 없다(095 불변식 ②).
@@ -301,8 +499,33 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
         : Math.max(0, Math.min(plannedThrough(sch, todayStr) + planDeltaThrough(sch, counts.plans || null, todayStr),
             sch.totalSlots) - submittedBefore))
     : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
-        { today: todayStr, plans: counts.plans || null });
-  const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
+        { today: todayStr, plans: counts.plans || null }, eff);
+  // 동일 탭을 공유한 재발행 공고는 표의 채움 수가 탭 전체 수다. 호출부가 탭 전체 정원·신청·홀드를
+  // 함께 전달하면 각 공고에 같은 표 수를 개별 정원으로 적용하지 않고 공유 정원으로 판정한다.
+  const tableTodayQuota = Number(counts.tableTodayQuota);
+  const quota = Number.isFinite(tableTodayQuota) ? Math.max(0, tableTodayQuota) : campaignQuota;
+  const ownTodaySubmitted = Math.max(0, Number(counts.todaySubmitted) || 0);
+  const ownTodayActiveHolds = Math.max(0, Number(counts.todayActiveHolds) || 0);
+  const groupedTodaySubmitted = Number(counts.tableTodaySubmitted);
+  const groupedTodayActiveHolds = Number(counts.tableTodayActiveHolds);
+  const todaySubmitted = Number.isFinite(groupedTodaySubmitted)
+    ? Math.max(0, groupedTodaySubmitted)
+    : ownTodaySubmitted;
+  const todayActiveHolds = Number.isFinite(groupedTodayActiveHolds)
+    ? Math.max(0, groupedTodayActiveHolds)
+    : ownTodayActiveHolds;
+  /*
+   * 관리자 카드의 "오늘 모집 N/N"과 실제 일일 마감 게이트는 반드시 같은 작업표 기준을 쓴다.
+   * tableTodayFilled 는 연결 작업표에서 오늘 구매일자로 채워진 줄 수이며, 수기입력·외부모집·지각
+   * 참여처럼 campaign_applications 를 거치지 않은 정상 작업도 포함한다. 값이 없는 호출부는 기존
+   * 공고 신청 집계를 유지하고, 둘 다 있으면 누락 투영 때문에 공고 신청 수가 더 큰 경우도 보존한다.
+   * 표에는 확정 행만 있으므로, 아직 표에 쓰이지 않은 유효 홀드는 별도로 더한다.
+   */
+  const tableTodayFilled = Number(counts.tableTodayFilled);
+  const confirmedTodayCount = Number.isFinite(tableTodayFilled)
+    ? Math.max(todaySubmitted, Math.max(0, tableTodayFilled))
+    : todaySubmitted;
+  const todayCount = confirmedTodayCount + todayActiveHolds;
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
   const bufferMin = Number(c.close_buffer_min ?? 10) || 0;
@@ -318,15 +541,37 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     // ★ 기준선은 그 공고의 "평소 그날 인원" — 시트 일정 공고는 **시트의 그날 행 수**이지
     //   daily_limit 이 아니다(둘은 아무 관계가 없어 근거 없는 "+15 이월" 칩이 뜬다).
     carryAdded: ovToday !== null ? 0
-      : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : (Number(c.daily_limit) || 0))),
+      : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : eff.dailyLimit)),
     todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
     planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
     // 카드가 "기본 N" 을 시트 기준으로 말할 수 있게 그날 시트 계획을 함께 싣는다(시트 공고만).
-    todayBaseline: sch ? (Number(sch.byDate[todayStr]) || 0) : (Number(c.daily_limit) || 0),
+    todayBaseline: sch ? (Number(sch.byDate[todayStr]) || 0) : eff.dailyLimit,
+    /* 화면이 "왜 이 숫자인지" 말할 수 있게 적용 정원과 그 출처를 함께 싣는다(조용한 변경 금지). */
+    effectiveTotal: eff.recruitTotal,
+    effectiveDaily: eff.dailyLimit,
+    quotaSource: { total: eff.totalSource, daily: eff.dailySource },
     opensAt: opensAt ? opensAt.toISOString() : null,
     closesAt: closesAt ? closesAt.toISOString() : null,
     cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,
   };
+
+  // ★★ 표(주문 원장) 기준 소비량(2단계) — payload 에 먼저 싣는다: closed·preopen·daily_done 로
+  //   반환되는 카드에도 관측 칩이 떠야 observe 가 관측 구실을 한다. 게이트 판정(wouldClose)은
+  //   아래 soft_full 지점에서만 상태를 바꾼다.
+  // ★ rt 공식은 여기서 한 번만 계산해 아래 soft_full 판정과 공유한다(판정 사본 0).
+  const totalUsage = totalQuotaUsage(c, counts, sch);
+  const rtTotal = totalUsage.cap;
+  {
+    const L = counts.linked;
+    if (L && L.ok && !L.noTab) {
+      payload.tableQuota = {
+        mode: TABLE_QUOTA_MODE, orders: L.orders, ordersAll: L.ordersAll, sharedTab: !!L.sharedTab,
+        // ★ sharedTab(한 탭에 살아있는 참여형 공고 2개↑)은 게이트 비활성 — 같은 주문을 두 공고
+        //   rt 에 각각 얹으면 이중 차단(귀속 배분은 범위 밖, 관제가 사실을 말한다).
+        wouldClose: totalUsage.wouldClose,
+      };
+    }
+  }
 
   if (c.status !== 'active') return { ...payload, state: 'closed' }; // closed는 영속값(제출확정 도달 시 저장)
 
@@ -377,6 +622,20 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     nextOpenDate(c, todayStr, sch, counts.plans || null),
     openMinutesFor(c));
 
+  // 명시적으로 0명을 저장한 날은 "오늘 정원을 다 채움"이 아니라 관리자가 정한 휴무다.
+  // 시트 일정이 없는 공고도 같은 의미로 처리해야, 0명 계획 구간이 `daily_done`으로
+  // 떨어지며 "오늘 모집 완료"라고 잘못 보이는 일이 없다. 다음 실제 진행일은
+  // nextOpenDate 하나로 구해 카드·참여 게이트·재오픈 안내가 모두 같은 날짜를 본다.
+  if (ovToday === 0) {
+    const nw = nextOpenDate(c, todayStr, sch, counts.plans || null);
+    const openIso = kstDateAtIso(nw, openMinutesFor(c));
+    return {
+      ...payload, state: 'daily_done', stateReason: 'rest_day', nextWorkDate: nw,
+      opensAt: openIso || payload.opensAt,
+      reopensAt: openIso || null,
+    };
+  }
+
   const t = kstMinutesOfDay(now);
   if (!allDay && t < startMin) return { ...payload, state: 'preopen' };
   if (!allDay && t >= endMin) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
@@ -404,9 +663,17 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   //   apply 게이트는 soft_full·daily_done 둘 다 차단이라 **참여 동작은 이 순서와 무관**하다
   //   (바뀌는 것은 관리자·리뷰어에게 보이는 상태 문구뿐).
   //   ★ soft_full 에는 reopensAt 을 싣지 않는다 — 총원이 찼으니 "다시 열림"이 아니다.
-  const rt = sch ? sch.totalSlots : (Number(c.recruit_total) || 0);
+  const rt = rtTotal;   // (payload 부착 지점에서 한 번만 계산 — 표 기준 게이트와 같은 값)
   const usedAll = (Number(counts.submittedAll) || 0) + (Number(counts.activeHolds) || 0);
   if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 총원 충족 — 신청 차단
+
+  // ★★ 표(주문 원장) 기준 총량 게이트(2단계) — 공고를 안 거친 실구매(외부모집 수동제출·수기 원장
+  //   기록·지각 구매)가 총량을 소비했으면 신규 신청을 닫는다. observe 는 payload 만 싣고 통과.
+  //   ★ 영속하지 않는다(maybePersistClosed 무접촉) — 주문 취소·앵커 정정 시 자동 재오픈.
+  //   ★ soft_full 규율 그대로 reopensAt 없음. noTab·null(모름)은 종전 판정(정원을 좁히지 않는다).
+  if (TABLE_QUOTA_MODE === 'on' && payload.tableQuota && payload.tableQuota.wouldClose) {
+    return { ...payload, state: 'soft_full', stateReason: 'table_over_total' };
+  }
 
   // 금일완료(홀드 만료 반환 시 open 복귀)
   if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
@@ -441,6 +708,8 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
     carry: carryStart ? { startDate: carryStart, submittedSince: 0 } : null,
     hold: holdStart ? { startDate: holdStart, submittedSince: 0 } : null,
     plans: null,
+    linked: null,
+    orderQuota: null,
   });
   for (const id of ids) out.set(id, blank());
   if (!ids.length) return out;
@@ -490,7 +759,75 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
       if (o) o.plans = planMaps.get(id) || null;
     }
   }
+  // ★ 표(주문 원장) 기준 소비량(2단계) — **반드시 이 깔때기에 싣는다**(목록/상세/apply/외부접수가
+  //   같은 정원을 본다 — 별도 인자로 흩으면 "카드는 열렸는데 참여 거부"). 시그니처 무변경 =
+  //   소비처 4파일(campaign.routes·trackB·manualOrder·campaignPlan) 호출부 변경 0.
+  //   ★ planMaps 뒤에 둔다 — 쿼리 순서를 보는 기존 회귀가드(066 q[0]/q[1])의 계약을 흔들지 않는다.
+  const linkedMap = await _loadLinkedOrderCounts(pool, ids, now, { dayStart, carryFrom: carryFromUtc, holdFrom: holdFromUtc });
+  if (linkedMap) {
+    for (const id of ids) {
+      const o = out.get(id);
+      if (o) { o.linked = linkedMap.get(id) || null; _mergeCountBasis(o); }
+    }
+  }
+  /* ★ 발주 정원 폴백 재료(2026-08-21) — **이 깔때기에 싣는다**: 목록·상세·apply 게이트·카드가
+     같은 정원을 봐야 한다(별도 인자로 흩으면 "카드는 100인데 참여는 무제한"). 시그니처 무변경.
+     ★ 쿼리 순서 계약(066 가드 q[0]/q[1])을 흔들지 않게 **맨 뒤**에 둔다. */
+  const orderMap = await _loadOrderQuota(pool, ids, now);
+  if (orderMap) {
+    for (const id of ids) {
+      const o = out.get(id);
+      if (o) o.orderQuota = orderMap.get(id) || null;
+    }
+  }
   return out;
+}
+
+/**
+ * 연결 작업오더의 총건수·일건수 일괄 로드 → Map(campaignId → {recruitCount, dailyCount}).
+ *
+ * ★★ 짝짓기 규칙은 `linkedRecruitQuota.displayRecruitTotalForCampaign` 과 **글자 그대로 같다** —
+ *   역방향 링크(`work_orders.linked_campaign_id`) 우선 → 정방향(`recruit_campaigns.source_work_order_id`),
+ *   같으면 최근 수정 오더. 규칙이 두 벌이면 [📅 인원] 모달과 정원 게이트가 서로 다른 발주를 본다.
+ * ★ 소프트삭제된 오더는 근거가 아니다.
+ * ★★ fail-soft **null** — 조회 실패 = 재료 미부착 = 종전 동작(무제한). 모른다고 정원을 좁히지 않는다.
+ * ★★ apply/change-option 은 잠금 tx 의 client 로 이 깔때기를 부른다 — tx 안에서는 실패한 쿼리
+ *   하나가 tx 전체를 abort(25P02) 시키므로 SAVEPOINT 로 격리한다(082 규율).
+ */
+const _oqCache = new Map();
+const OQ_CACHE_MS = 10 * 1000;
+async function _loadOrderQuota(db, ids, now = new Date()) {
+  if (!ORDER_QUOTA_ENABLED || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  const inClient = typeof db.release === 'function';   // 체크아웃된 클라이언트 = 잠금 tx 가능성
+  if (!inClient && ids.every(id => { const c = _oqCache.get(id); return c && now.getTime() - c.at < OQ_CACHE_MS; })) {
+    return new Map(ids.map(id => [id, _oqCache.get(id).val]));
+  }
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT cs_order_quota'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    /* ★★ 짝짓기 SQL 사본을 두지 않는다 — 공유 조각(linkedRecruitQuota) 한 곳을 태운다.
+       규칙이 두 벌이면 [📅 인원] 모달·유입방식 보정과 **다른 작업오더**를 볼 수 있다. */
+    const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
+    const rows = await linkedWorkOrdersForCampaigns(db, ids, ['recruit_count', 'daily_count']);
+    if (sp) await db.query('RELEASE SAVEPOINT cs_order_quota').catch(() => {});
+    const map = new Map();
+    for (const [cid, r] of rows) {
+      map.set(cid, {
+        recruitCount: Math.max(0, Number(r.recruit_count) || 0),
+        dailyCount: Math.max(0, Number(r.daily_count) || 0),
+      });
+    }
+    if (!inClient) for (const id of ids) _oqCache.set(id, { at: now.getTime(), val: map.get(id) || null });
+    return map;
+  } catch (e) {
+    if (sp) await db.query('ROLLBACK TO SAVEPOINT cs_order_quota').catch(() => {});
+    /* ★ 이 모듈은 logger 를 import 하지 않는다(순수함수 위주) — 지연 require 로 가져오되
+       로깅 실패가 정원 판정을 죽이지 않게 통째로 감싼다. */
+    try { require('../utils/logger').logger.warn(`[campaignState] 발주 정원 조회 실패(폴백 미적용): ${e.message}`); } catch (_) {}
+    return null;   // ★ 모르면 종전 동작 — 정원을 좁히지 않는다
+  }
 }
 
 /**
@@ -505,11 +842,32 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
  * ★ 재료는 dailyQuota 와 같은 counts(plans 포함) — 계산이 갈리면 화면과 정원이 어긋난다.
  * ★ null = 계산 불가(기준선 모름 · 일건수 0 · 시트 일정) — 화면은 0 으로 꾸미지 않는다.
  */
+/** 남은 자리 = 총 인원(effectiveQuota) − 확정(오늘 포함). 총 인원 없음(무제한) = null(자르지 않는다). */
+function _remainingSeats(c, counts) {
+  const rt = effectiveQuota(c, counts).recruitTotal;
+  if (!(rt > 0)) return null;
+  const cnt = counts || {};
+  const done = Math.max(Number(cnt.submittedAll) || 0,
+    (Number(cnt.submittedBeforeToday) || 0) + Math.max(Number(cnt.todaySubmitted) || 0, Number(cnt.todayOrders) || 0));
+  return Math.max(0, rt - done);
+}
+function _capSeats(n, c, counts) {
+  const left = _remainingSeats(c, counts);
+  return left === null ? n : Math.min(n, left);
+}
+
 function pendingCarry(c, counts, todayStr, win, schedule = null) {
+  const raw = _pendingShortfall(c, counts, todayStr, win, schedule);
+  return raw === null ? null : _capSeats(raw, c, counts);
+}
+/* 자르기 전 부족분(일건수 × 날수 − 확정). ★ 밖에서 직접 쓰지 말 것 — pendingCarry/heldCarry 가 남은 자리로 자른다. */
+function _pendingShortfall(c, counts, todayStr, win, schedule = null) {
   // ★★ 시트 일정 캠페인(063)은 정원을 시트 계획(plannedThrough)이 정하므로 자동 이월 자체가
   //   없다 = 이월 개념이 없다. 숫자를 돌려주면 화면에 **효과 없는** 이월 표시가 떠 막다른 길이 된다.
   if (isUsableSchedule(schedule)) return null;
-  const dl = Number(c.daily_limit) || 0;
+  // ★ 이월 계산의 기준 일건수도 적용 정원(공고 우선 · 0이면 발주) — dailyQuota 와 갈리면
+  //   "칩은 5인데 반영하니 3"이 된다.
+  const dl = effectiveQuota(c, counts).dailyLimit;
   if (!win || !win.startDate || !todayStr || dl <= 0) return null;
   const sd = dateOnlyStr(c.start_date);
   const anchor = (sd && sd > win.startDate) ? sd : win.startDate;
@@ -523,6 +881,11 @@ function pendingCarry(c, counts, todayStr, win, schedule = null) {
       if (d >= anchor && d < todayStr) planned += Math.max(0, Number(plans[d]) || 0) - dl;
     }
   }
+  // dailyQuota 와 같은 규칙 — 계획 없는 쉬는 날(주말·공휴일)은 원래 받기로 한 인원이 아니다.
+  planned -= dl * _closedDaysWithoutPlan(c, anchor, addIsoDays(todayStr, -1), plans);
+  /* ★★ 결정 183 — 이 값은 **총 인원을 모른다**("받았어야 할 인원" = 일건수 × 지난 날수는 총원을 넘어서도 쌓인다:
+     일건수 100 · 총 100 · 4일 → 366). 남은 자리 자르기는 pendingCarry·heldCarry 가 **마지막에** 한다 —
+     보류는 반영분을 **뺀 뒤** 잘라야 한다(먼저 자르고 빼면 채워지지 않은 과거 반영분 때문에 빈자리를 0 으로 말한다 · Codex 리뷰). */
   return Math.max(0, planned - (Number(win.submittedSince) || 0));
 }
 
@@ -532,9 +895,72 @@ function pendingCarry(c, counts, todayStr, win, schedule = null) {
  */
 function heldCarry(c, counts, todayStr, appliedSum = 0, schedule = null) {
   if (!isCarryHold(c)) return null;
-  const base = pendingCarry(c, counts, todayStr, counts && counts.hold, schedule);
+  const base = _pendingShortfall(c, counts, todayStr, counts && counts.hold, schedule);
   if (base === null) return null;
-  return Math.max(0, base - Math.max(0, Number(appliedSum) || 0));
+  // ★ 반영분을 먼저 빼고 **그다음** 남은 자리로 자른다(결정 183 · 순서 뒤집기 금지)
+  return _capSeats(Math.max(0, base - Math.max(0, Number(appliedSum) || 0)), c, counts);
+}
+
+/**
+ * 날짜별 **예상** 모집 인원 — 오늘부터 앞으로 매일 몇 명이 열리는가(2026-09-26 사용자 확정:
+ * "일건수·주말·이월 규칙이 날짜별 인원을 정하고 작업표가 따라간다").
+ *
+ * ★★ 새 규칙을 만들지 않는다 — 날마다 **dailyQuota(실제 정원 판정)를 그대로** 불러, 앞날은 "그날
+ *   정원만큼 채워진다"고 가정하며 한 날씩 나아간다. 그래서 이월 방식(다음날에 더하기·남은 날에
+ *   나눠 담기·종료일 뒤에 붙이기)·하루 상한·사람이 정한 날·총량 clamp 가 실제 정원과 **같은 식**으로
+ *   반영된다(화면·작업표가 따로 계산하면 "표는 30인데 실제는 45"로 갈린다).
+ * ★ 오늘은 computeCampaignState 의 값(=실제 오늘 정원)을 쓴다. 쉬는 날(주말·공휴일)·0명 조절일은 0.
+ * ★ 시트 일정 공고(063)·레거시 공고는 대상이 아니다 → null(모르는 것을 지어내지 않는다).
+ * @returns {null | { today, from, days:[{date, quota, planned, closed}], endDate, remaining, truncated }}
+ *   planned = 그날의 명시 계획값(없으면 null) · remaining = 총량 − 어제까지 확정(무제한이면 null)
+ */
+function projectDailyQuotas(c, counts, opts = {}) {
+  if (!c || !c.participation_mode) return null;
+  if (isUsableSchedule(opts.schedule)) return null;
+  const now = opts.now || new Date();
+  const maxDays = Math.max(1, Math.min(400, Number(opts.maxDays) || 180));
+  const cnt = counts || {};
+  const eff = effectiveQuota(c, cnt);
+  const dl = eff.dailyLimit, rt = eff.recruitTotal;
+  const plans = (PLAN_ENABLED && cnt.plans) || null;
+  const todayStr = kstTodayStr(now);
+  const sd = dateOnlyStr(c.start_date);
+  const from = (sd && sd > todayStr) ? sd : todayStr;
+  const closedOn = d => isWeekendClosedOn(c, d, plans) || planOverrideFor(plans, d) === 0;
+
+  let before = Number(cnt.submittedBeforeToday) || 0;
+  let carrySince = cnt.carry ? (Number(cnt.carry.submittedSince) || 0) : 0;
+  const remaining = rt > 0 ? Math.max(0, rt - before) : null;
+  const days = [];
+  let endDate = null, truncated = false;
+  let d = todayStr;
+  for (let i = 0; i < maxDays + 400; i++) {
+    if (rt > 0 && before >= rt) break;
+    if (days.length >= maxDays) { truncated = true; break; }
+    let quota = 0, fill = 0;
+    const closed = d < from ? true : closedOn(d);
+    if (d === todayStr) {
+      const st = computeCampaignState(c, cnt, now, null);
+      quota = closed ? 0 : Math.max(0, Number(st.dailyQuota) || 0);
+      // 오늘 이미 들어온 사람 = 판정 수(신청+홀드) · 오늘 주문(공고 밖 포함 — 결정 184) 중 큰 값
+      fill = Math.max(quota, Number(st.todayCount) || 0, Number(cnt.todayOrders) || 0);
+    } else if (!closed) {
+      quota = dailyQuota(c, before,
+        cnt.carry ? { ...cnt.carry, today: d, submittedSince: carrySince } : null,
+        { today: d, plans }, eff);
+      fill = quota;
+    }
+    if (d >= from) {
+      days.push({ date: d, quota, planned: planOverrideFor(plans, d), closed });
+      if (quota > 0) endDate = d;
+    }
+    before += fill;
+    carrySince += fill;
+    // 일건수도 계획도 없는 공고는 영원히 0 이다 — 빈 날만 이어 붙이지 않는다.
+    if (!(dl > 0) && !plans) break;
+    d = addIsoDays(d, 1);
+  }
+  return { today: todayStr, from, days, endDate: rt > 0 ? endDate : null, remaining, truncated };
 }
 
 /**
@@ -577,6 +1003,140 @@ async function _loadPlanMaps(db, ids) {
   }
 }
 function __resetPlanCacheForTest() { _planTableMissingAt = 0; }
+
+/**
+ * 연결 탭의 "실구매 소비량"(주문 원장 기준) 일괄 로드 (2단계 표 기준 게이트 재료)
+ *   → Map(campaignId → {ok:true, orders, ordersAll, sharedTab} | {ok:true, noTab:true}) | null
+ * ★ 재료는 order_submissions 뿐 — 작업표 줄(campaign_participants)·order_submission_id 링크를
+ *   읽지 않는다(선기입 이름만 줄·링크 오염·투영 지연 면역). 시트 API 호출 0.
+ * ★ 앵커 = start_date(KST 자정) ?? created_at — 재사용 탭의 과거 블록 주문 배제.
+ *   (`NULL::text || '…' = NULL` → COALESCE 가 created_at 으로 폴백한다.)
+ * ★ fail 방향: off·조회 실패 = null = counts.linked 미부착 = 기존 동작 100%.
+ *   "없다"(noTab = 연결 탭 없음)와 "모른다"(null)를 구분해 화면이 다르게 말한다.
+ * ★★ 잠금 tx(client)에서는 SAVEPOINT 격리 — 실패 쿼리 하나가 apply tx 를 25P02 로 죽이면
+ *   참여 INSERT 가 전멸한다(_loadPlanMaps 와 같은 자리·같은 이유·같은 판정식).
+ * ★ 캐시는 pool 경로 전용 + 성공 결과만 담는다(client 게이트는 항상 신선 조회 = 잠금 안 최신 판정).
+ */
+let _ctqCache = new Map();               // campaignId → {at, val}
+const CTQ_CACHE_MS = 10 * 1000;
+const CTQ_CACHE_MAX = 800;               // 무한 성장 방지(넘으면 통째 비움 — LRU 불필요한 규모)
+/* ★★ 주문 원장 "구매 1건" 판정 (2026-09-30 모기위키 499/500 사고 — 결정 193).
+ *   ① 같은 구매가 두 기록으로 남는 경우가 있다: 리뷰어가 앱(공고)으로 낸 주문을 담당자가 외부모집
+ *      수동제출로 **같은 주문번호**로 다시 등록 → 기록 2건·표 줄 1개. `DISTINCT os.id` 로 세면
+ *      총원 마감(`table_over_total`)이 표보다 먼저 닫힌다(실측: 표 498 · 기록 500 → 마감).
+ *      → 주문번호가 6자리 이상(dedup_key 'num:')이면 **주문번호 + 연락처 끝 8자리**를 한 구매로 본다.
+ *      ★ 연락처까지 묶는다 — 주문번호만 보면 서로 다른 두 사람이 같은 번호를 적은 줄(실측 1쌍)을
+ *        한 명으로 접어 정원이 과소집계된다(초과 모집 방향). 약한 번호는 종전대로 기록 id 로 센다.
+ *   ② 취소(soft delete)된 기록이라도 **살아 있는 작업표 줄이 그 기록을 가리키면** 센다 — 8/19 정리
+ *      작업(migration 120)이 "표에는 들어갔는데 상태만 실패"인 기록을 닫아, 실제 참여자(리뷰 제출·입금
+ *      완료)가 원장에서 빠져 있다(전체 14줄). 빼면 ①과 합쳐 정원이 과소집계된다.
+ *      ★ [행 삭제]·중복 정리처럼 줄까지 내린 취소는 줄이 없으므로 종전대로 빠진다(자동 재오픈 규율 유지 — 031). */
+const ORDER_PURCHASE_KEY_SQL = `CASE WHEN os.dedup_key LIKE 'num:%'
+             THEN os.dedup_key || '|' || RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
+             ELSE 'id:' || os.id::text END`;
+// ★ 줄은 **이 공고의 연결 작업표** 줄이어야 한다 — 다른 작업표에 남은 옛 링크가 취소 기록을 되살리지 않게(Codex 리뷰).
+const ORDER_COUNTED_SQL = `(os.deleted_at IS NULL OR EXISTS (
+             SELECT 1 FROM campaign_participants cpx
+              WHERE cpx.order_submission_id = os.id AND cpx.deleted_at IS NULL AND cpx.active
+                AND cpx.sheet_id = rc.linked_sheet_id
+                AND (cpx.tab_name = rc.linked_tab_name
+                     OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                         AND NULLIF(cpx.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))))`;
+
+async function _loadLinkedOrderCounts(db, ids, now = new Date(), win = null) {
+  // win = { dayStart, carryFrom, holdFrom } (ISO) — 주문을 신청 집계와 **같은 시간 구간**으로 나눠 센다(결정 184).
+  const dayStart = (win && win.dayStart) || kstDayStartUtc(now).toISOString();
+  const carryFrom = (win && win.carryFrom) || dayStart;
+  const holdFrom = (win && win.holdFrom) || dayStart;
+  if (TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  const inClient = typeof db.release === 'function';   // 체크아웃된 클라이언트 = 잠금 tx 가능성
+  // ★ 캐시는 같은 구간(오늘 0시·이월 기준선)으로 센 값만 쓴다 — 자정을 넘긴 10초 사이 어제 기준 값을 쓰지 않게.
+  const winKey = dayStart + '|' + carryFrom + '|' + holdFrom;
+  if (!inClient && ids.every(id => { const c = _ctqCache.get(id); return c && c.win === winKey && now.getTime() - c.at < CTQ_CACHE_MS; })) {
+    return new Map(ids.map(id => [id, _ctqCache.get(id).val]));
+  }
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT ctq_orders'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    // ★★ 주문 좌표는 두 계열이다(프로덕션 실측 2026-08-20): 공고 경유(홀드 확정) 주문은
+    //   `campaign:<공고ID>` 좌표(submit.routes._resolveCampaignOrderScope), 공고 미경유
+    //   (외부모집 수동제출·직접 제출·시트 시절)는 연결 탭 좌표. 탭 좌표만 보면 공고 경유분이
+    //   통째로 빠져(확정 67인데 orders 0) 관측·게이트가 과소해진다 → **합집합**으로 센다.
+    //   `DISTINCT os.id` 라 과거 시트 시절(공고 경유도 탭 좌표) 겹침도 이중계수가 없다.
+    // ★ 앵커(start_date 절단)는 **탭 좌표에만** 건다 — campaign: 좌표는 그 공고 귀속이 자명해
+    //   재사용 탭의 과거 블록 문제가 없고, 잘라내면 공고 경유 확정이 과소집계된다.
+    const { rows } = await db.query(`
+      SELECT rc.id,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
+               WHERE os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at)
+             )::int AS orders,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL})::int AS orders_all,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND (os.submitted_at < $2 OR os.submitted_at IS NULL)
+             )::int AS orders_before,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND os.submitted_at >= $2
+             )::int AS orders_today,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND os.submitted_at >= $3 AND os.submitted_at < $2
+             )::int AS orders_since_carry,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
+               WHERE (os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+                 AND os.submitted_at >= $4 AND os.submitted_at < $2
+             )::int AS orders_since_hold,
+             shared.n::int AS live_campaigns
+        FROM recruit_campaigns rc
+        JOIN LATERAL (
+          SELECT COUNT(*) AS n FROM recruit_campaigns rc2
+           WHERE rc2.participation_mode AND rc2.status = 'active' AND rc2.archived_at IS NULL
+             AND rc2.linked_sheet_id = rc.linked_sheet_id
+             AND (rc2.linked_tab_name = rc.linked_tab_name
+                  OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                      AND NULLIF(rc2.linked_tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
+        ) shared ON TRUE
+        LEFT JOIN order_submissions os
+          ON ${ORDER_COUNTED_SQL}
+         AND (
+              (os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id)
+           OR (os.sheet_id = rc.linked_sheet_id
+               AND (os.tab_name = rc.linked_tab_name
+                    OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                        AND NULLIF(os.tab_gid,'') = NULLIF(rc.linked_tab_gid,''))))
+         )
+       WHERE rc.id = ANY($1) AND rc.participation_mode
+         AND NULLIF(rc.linked_sheet_id,'') IS NOT NULL AND NULLIF(rc.linked_tab_name,'') IS NOT NULL
+       GROUP BY rc.id, shared.n`, [ids, dayStart, carryFrom, holdFrom]);
+    if (sp) { try { await db.query('RELEASE SAVEPOINT ctq_orders'); } catch (_) {} }
+    const m = new Map();
+    for (const r of rows) {
+      if (!r || r.id == null) continue;   // 범용 스텁 폴백 행 방어(id 없는 행은 재료가 아니다)
+      m.set(r.id, { ok: true, orders: Number(r.orders) || 0, ordersAll: Number(r.orders_all) || 0,
+                    ordersBefore: Number(r.orders_before) || 0, ordersToday: Number(r.orders_today) || 0,
+                    ordersSinceCarry: Number(r.orders_since_carry) || 0, ordersSinceHold: Number(r.orders_since_hold) || 0,
+                    sharedTab: Number(r.live_campaigns) > 1 });
+    }
+    for (const id of ids) if (!m.has(id)) m.set(id, { ok: true, noTab: true });
+    if (!inClient) {
+      if (_ctqCache.size > CTQ_CACHE_MAX) _ctqCache = new Map();
+      for (const [id, val] of m) _ctqCache.set(id, { at: now.getTime(), win: winKey, val });
+    }
+    return m;
+  } catch (e) {
+    if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT ctq_orders'); } catch (_) {} }
+    return null;   // 모른다 = 미부착 = 게이트·표시 전부 종전 동작(모른다고 정원을 좁히지 않는다)
+  }
+}
+function __resetTableQuotaCacheForTest() { _ctqCache = new Map(); }
 
 /**
  * 이월 기준선(app_settings.campaign_carry_start, 066) — 프로세스 캐시.
@@ -724,6 +1284,8 @@ module.exports = {
   computeOptionView,
   liveOptions,
   dailyQuota,
+  effectiveQuota,
+  totalQuotaUsage,
   timeStrToMinutes,
   kstDayStartUtc,
   kstMinutesOfDay,
@@ -740,10 +1302,16 @@ module.exports = {
   APPLY_BLOCK_REASON,
   KST_OFFSET_MS,
   CARRY_CAP_MULT,
+  carryStrategy,
   isCarryHold,
   pendingCarry,
   heldCarry,
+  projectDailyQuotas,
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
+  TABLE_QUOTA_MODE,
+  COUNT_BASIS,
+  _mergeCountBasis,
+  __resetTableQuotaCacheForTest,
   __resetHoldCacheForTest,
 };

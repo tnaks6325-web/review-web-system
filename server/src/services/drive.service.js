@@ -386,34 +386,60 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, 
         'DRIVE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN 또는 서비스 계정을 설정하세요.'
       );
     }
-    const res = await sa.files.create(makeParams(_makeStream()));
-    data = res.data;
-    usedClient = 'SA';
+    try {
+      const res = await sa.files.create(makeParams(_makeStream()));
+      data = res.data;
+      usedClient = 'SA';
+    } catch (e) {
+      /* ★ 대상 폴더가 사라졌을 수 있다 — 그 폴더를 가리키던 캐시를 그 자리에서 버린다.
+         다음 시도는 다시 물어 찾거나 새로 만든다(자가치유). 실패 자체는 그대로 올린다. */
+      invalidateSubFolderById(parentFolderId);
+      throw e;
+    }
   }
 
   logger.info(`[Drive] 업로드 성공: ${data.id} (${usedClient})`);
 
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
   // opts.shareAnyone === false 면 공개하지 않음(비공개 유지 — 예: 유입가이드 이미지는 서버 프록시로만 노출)
+  /* ★★ opts.deferShare === true 면 **응답을 기다리지 않고** 뒤에서 건다.
+     ★ 왜: 이 호출은 Drive 왕복 1회(약 1초)인데 업로드 결과에는 아무 영향이 없다 —
+       파일 ID·링크는 위 files.create 가 이미 돌려줬다. 리뷰 캡처 제출은 이 1초를
+       그대로 리뷰어가 기다리고 있었다(2026-09-23 실측 4.1초 중).
+     ★ 공개가 늦어지는 동안의 영향은 **구글 CDN 썸네일이 잠깐 실패하고 우리 프록시로
+       폴백**하는 것뿐이다(008 — 화면은 계속 뜬다). 권한 자체는 종전과 같이 걸린다.
+     ★ 그래서 **미루기는 옵트인**이다 — 인자를 안 주면 종전대로 기다린다(무회귀). */
+  let _postUpload = null;
   if (opts.shareAnyone !== false) {
-    try {
-      const d = usedClient === 'OAuth' ? oauth : _getReadDrive();
-      if (d) {
-        await d.permissions.create({
-          fileId: data.id,
-          requestBody: { role: 'reader', type: 'anyone' },
-          supportsAllDrives: true,
-        });
+    const _share = async () => {
+      try {
+        const d = usedClient === 'OAuth' ? oauth : _getReadDrive();
+        if (d) {
+          await d.permissions.create({
+            fileId: data.id,
+            requestBody: { role: 'reader', type: 'anyone' },
+            supportsAllDrives: true,
+          });
+        }
+      } catch (permErr) {
+        logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
       }
-    } catch (permErr) {
-      logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
-    }
+    };
+    _postUpload = _share;
   }
 
-  // ── ② 소유권 보정: DRIVE_OWNER_EMAIL(tnaks6325)로 이전 ──
-  //   기존엔 SA 경로만 이전했으나, OAuth 계정이 tnaks6325가 아니면 OAuth 업로드도
-  //   잘못된 계정 소유로 남는다 → SA는 항상, OAuth는 계정 불일치 시 이전.
-  await _normalizeOwner(usedClient, oauth, data.id);
+  /* ── ② 소유권 보정: DRIVE_OWNER_EMAIL(tnaks6325)로 이전 ──
+       기존엔 SA 경로만 이전했으나, OAuth 계정이 tnaks6325가 아니면 OAuth 업로드도
+       잘못된 계정 소유로 남는다 → SA는 항상, OAuth는 계정 불일치 시 이전.
+     ★★ 공개 권한과 **함께** 미룬다 — 둘 다 업로드 결과(파일 ID·링크)에 영향이 없는
+       뒷정리인데, 한쪽만 미루면 남은 쪽의 await 사이에 미룬 쪽이 끼어들어 결국 기다린 셈이 된다.
+       (OAuth 가 이미 소유주면 이 단계는 왕복 0회라 평소에도 비용이 없다.) */
+  const _after = async () => {
+    if (_postUpload) await _postUpload();
+    await _normalizeOwner(usedClient, oauth, data.id);
+  };
+  if (opts.deferShare) setImmediate(() => { _after().catch(() => {}); });
+  else await _after();
 
   return data;
 }
@@ -511,13 +537,49 @@ async function setFolderAnyoneReader(folderId) {
  * 캡처폴더 하위의 차수별 서브폴더 찾기/생성
  * 경로: DRIVE_ROOT / [캡처] 캠페인명 / 차수명(또는 탭명) /
  */
+/* ★★ 서브폴더 위치 캐시 — 같은 (부모, 이름) 을 매 요청 Drive 에 다시 묻지 않는다.
+   ★ 왜: `findFolderByName` 은 SA 로 먼저 묻고 못 찾으면 OAuth 로 한 번 더 묻는다(최대 왕복 2회).
+     Drive 는 파일 크기와 무관하게 **왕복 하나당 0.8~1.5초**라(008 실측) 리뷰 캡처 제출
+     4.1초 중 **0.9초가 이 조회 하나**였다(2026-09-23 실측).
+   ★ 폴더 ID 는 거의 변하지 않는다 — 바뀌는 경우는 사람이 폴더를 지우거나 옮겼을 때뿐이고,
+     그때는 업로드가 실패하면서 `invalidateSubFolderById` 가 그 자리에서 캐시를 비운다
+     (다음 시도는 다시 물어 찾거나 새로 만든다 = 자가치유).
+   ★ 프로세스 메모리 캐시다 — 재배포하면 비고, 인스턴스마다 따로 데워진다(정합성 문제 없음:
+     같은 이름의 폴더를 두 번 만들지 않도록 Drive 조회 결과를 담을 뿐이다). */
+const _subFolderCache = new Map();
+const SUBFOLDER_TTL_MS = Number(process.env.DRIVE_SUBFOLDER_TTL_MS || 5 * 60 * 1000);
+const SUBFOLDER_CACHE_MAX = 500;
+const _subKey = (parentFolderId, name) => String(parentFolderId) + '\u0000' + String(name);
+
+/** 그 폴더를 가리키던 캐시를 버린다(업로드가 실패하면 그 자리에서 부른다). */
+function invalidateSubFolderById(folderId) {
+  if (!folderId) return 0;
+  let n = 0;
+  for (const [k, e] of _subFolderCache) {
+    if (e && e.v && e.v.id === folderId) { _subFolderCache.delete(k); n++; }
+  }
+  return n;
+}
+
 async function getOrCreateSubFolder(parentFolderId, subFolderName) {
+  const key = _subKey(parentFolderId, subFolderName);
+  const hit = _subFolderCache.get(key);
+  if (hit && (Date.now() - hit.ts) < SUBFOLDER_TTL_MS) return hit.v;
+
   // 기존 서브폴더 검색
   const existing = await findFolderByName(subFolderName, parentFolderId);
-  if (existing) return existing;
-
   // 없으면 생성 (OAuth 사용)
-  return await createFolder(subFolderName, parentFolderId);
+  const folder = existing || await createFolder(subFolderName, parentFolderId);
+
+  if (folder && folder.id) {
+    // 오래된 항목부터 버려 메모리를 묶어 둔다(첫 항목 = 가장 먼저 들어온 것)
+    if (_subFolderCache.size >= SUBFOLDER_CACHE_MAX) {
+      const first = _subFolderCache.keys().next().value;
+      if (first !== undefined) _subFolderCache.delete(first);
+    }
+    _subFolderCache.set(key, { v: folder, ts: Date.now() });
+  }
+  return folder;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -569,6 +631,42 @@ async function ensureFolderPath(rootFolderId, folderNames) {
  */
 async function ensureCaptureFolderPath(rootFolderId, sheetTitle, tabName) {
   return ensureFolderPath(rootFolderId, [sheetTitle, tabName, '[구매캡처]']);
+}
+
+/** 폴더 경로를 생성하지 않고 탐색한다. 중간 경로 하나라도 없으면 null. */
+async function findFolderPath(rootFolderId, folderNames) {
+  if (!rootFolderId) return null;
+  let currentParentId = rootFolderId;
+  let folder = null;
+  for (const name of folderNames) {
+    if (!name) continue;
+    folder = await findFolderByName(name, currentParentId);
+    if (!folder) return null;
+    currentParentId = folder.id;
+  }
+  return folder ? {
+    ...folder,
+    url: folder.webViewLink || `https://drive.google.com/drive/folders/${folder.id}`,
+  } : null;
+}
+
+/**
+ * 현금영수증 전용 내부 폴더. 업체에 노출되는 [리뷰]·[구매캡처] 트리의 형제가 아니라
+ * 별도 내부 루트 아래에 둔다. CASH_RECEIPT_FOLDER_ID가 있으면 그 전용 루트를 우선한다.
+ */
+async function ensureReceiptFolderPath(rootFolderId, sheetId, tabName, receiptLabel = '현금영수증') {
+  const privateRootId = process.env.CASH_RECEIPT_FOLDER_ID || rootFolderId;
+  if (!privateRootId || !sheetId || !tabName) return null;
+  const prefix = process.env.CASH_RECEIPT_FOLDER_ID ? [] : ['[내부전용-현금영수증]'];
+  return ensureFolderPath(privateRootId, [...prefix, sheetId, tabName, receiptLabel]);
+}
+
+/** 현금영수증 전용 내부 폴더를 생성 없이 찾는다. */
+async function findReceiptFolderPath(rootFolderId, sheetId, tabName, receiptLabel = '현금영수증') {
+  const privateRootId = process.env.CASH_RECEIPT_FOLDER_ID || rootFolderId;
+  if (!privateRootId || !sheetId || !tabName) return null;
+  const prefix = process.env.CASH_RECEIPT_FOLDER_ID ? [] : ['[내부전용-현금영수증]'];
+  return findFolderPath(privateRootId, [...prefix, sheetId, tabName, receiptLabel]);
 }
 
 /**
@@ -805,6 +903,32 @@ async function trashFiles(filesToTrash) {
     }
   }
 
+  return { success, failed, errors };
+}
+
+/** 자동 정리 도중 DB 반영이 실패했을 때 휴지통 이동을 되돌리는 보상 작업. */
+async function restoreFiles(filesToRestore) {
+  const d = _getUploadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  let success = 0;
+  let failed = 0;
+  const errors = [];
+  for (const file of filesToRestore) {
+    try {
+      await d.files.update({
+        fileId: file.id,
+        requestBody: { trashed: false },
+        supportsAllDrives: true,
+      });
+      success++;
+      logger.info(`[Drive-Dedupe] 휴지통 복구: "${file.name}" (${file.id})`);
+    } catch (err) {
+      failed++;
+      errors.push({ fileId: file.id, name: file.name, error: err.message });
+      logger.error(`[Drive-Dedupe] 휴지통 복구 실패: "${file.name}" (${file.id}) - ${err.message}`);
+    }
+  }
   return { success, failed, errors };
 }
 
@@ -1079,7 +1203,33 @@ async function getFolderMeta(folderId) {
 }
 
 /**
+ * content-disposition 헤더에서 파일명 추출 (없으면 null - 지어내지 않는다)
+ */
+function _filenameFromDisposition(v) {
+  const s = String(v || '');
+  if (!s) return null;
+  // RFC 5987 filename*=UTF-8''... 우선, 없으면 filename="..."
+  let m = /filename\*\s*=\s*[^']*''([^;]+)/i.exec(s);
+  if (m) {
+    const raw = m[1].trim();
+    try { return decodeURIComponent(raw) || null; } catch (_) { return raw || null; }
+  }
+  m = /filename\s*=\s*"([^"]*)"/i.exec(s) || /filename\s*=\s*([^;]+)/i.exec(s);
+  return (m && m[1].trim()) || null;
+}
+
+/**
  * Drive 파일 내용을 서버에서 다운로드 (비공개 파일 프록시 스트리밍용)
+ *
+ * ★★ 왕복 1회 - mime 은 media 응답 헤더가 준다.
+ *   종전에는 파일 1장마다 files.get 을 **두 번**(메타 + 본문) 쳤고 프록시에 서버 캐시가
+ *   없어서, 31KB 짜리 리뷰 캡처 한 장이 실측 2.0~2.6초였다(크기와 무관 = 왕복 지연이 지배).
+ *   media 응답의 content-type 이 곧 그 파일의 mime 이므로 메타 조회가 필요 없다.
+ * ★ 헤더로 못 알아낸 경우에만 메타 1회 폴백 - 헤더만 믿고 octet-stream 으로 접으면
+ *   <img> 가 안 그려지는 조용한 회귀가 된다(종전 동작 복원 = fail-safe).
+ * ★ name 계약 불변: 헤더(content-disposition) -> 메타 -> fileId 순으로 채운다.
+ *   소비처 5곳은 buffer/mimeType 만 쓰지만 계약을 좁히지 않는다.
+ *
  * @param {string} fileId
  * @returns {{ buffer: Buffer, mimeType: string, name: string }}
  */
@@ -1089,15 +1239,26 @@ async function downloadFile(fileId) {
   let lastErr = null;
   for (const d of clients) {
     try {
-      const meta = await d.files.get({ fileId, fields: 'mimeType, name', supportsAllDrives: true });
       const res = await d.files.get(
         { fileId, alt: 'media', supportsAllDrives: true },
         { responseType: 'arraybuffer' }
       );
+      // gaxios 는 응답 헤더를 소문자 키 평범한 객체로 변환해 돌려준다
+      const hdr = (res && res.headers) || {};
+      let mimeType = String(hdr['content-type'] || hdr['Content-Type'] || '').split(';')[0].trim();
+      let name = _filenameFromDisposition(hdr['content-disposition'] || hdr['Content-Disposition']);
+      if (!mimeType || !name) {
+        // 헤더로 못 알아낸 것만 메타 1회 (기본 경로는 왕복 1회)
+        try {
+          const meta = await d.files.get({ fileId, fields: 'mimeType, name', supportsAllDrives: true });
+          mimeType = mimeType || (meta.data && meta.data.mimeType) || '';
+          name = name || (meta.data && meta.data.name) || '';
+        } catch (_) { /* 메타 실패해도 본문은 이미 받았다 */ }
+      }
       return {
         buffer: Buffer.from(res.data),
-        mimeType: (meta.data && meta.data.mimeType) || 'application/octet-stream',
-        name: (meta.data && meta.data.name) || fileId,
+        mimeType: mimeType || 'application/octet-stream',
+        name: name || fileId,
       };
     } catch (e) {
       lastErr = e;
@@ -1332,6 +1493,7 @@ async function transferOwnershipInFolders(folderIds, opts = {}) {
 }
 
 module.exports = {
+  invalidateSubFolderById,
   listFolderContents,
   downloadFile,
   createFolder,
@@ -1351,6 +1513,8 @@ module.exports = {
   // 새 통합 폴더 구조 함수
   ensureFolderPath,
   ensureCaptureFolderPath,
+  ensureReceiptFolderPath,
+  findReceiptFolderPath,
   ensureReviewFolderPath,
   trashDuplicateFile,
   generateReviewFileName,
@@ -1366,5 +1530,6 @@ module.exports = {
   listFolderFilesRecursive,
   detectDuplicates,
   trashFiles,
+  restoreFiles,
   extractReviewerNameFromFile,
 };

@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>주문취소(리뷰어) + 작업 로그 — PRD · 유저플로우 · 와이어프레임</title>
+<style>
+/* ★ 외부 리소스 0 — 오프라인에서도 그대로 열린다. 라이트 고정(색이 뒤집히면 "실물과 같다"가 깨진다). */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--safe-line:#bbe7c9;
+  --warn:#b45309;--warn-soft:#fdf6ec;--warn-line:#f0dcbd;
+  --bad:#e5484d;--bad-soft:#fdf0f0;--bad-line:#f5c9cb;
+  --violet:#7c3aed;--violet-soft:#f5f3ff;--violet-line:#ddd6fe;
+  --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+  --mono:'SF Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.62}
+.page{max-width:1200px;margin:0 auto;padding:26px 22px 90px}
+h1{font-size:22px;margin:0 0 4px;letter-spacing:-.015em}
+.sub{color:var(--muted);font-size:13px;margin:0 0 18px}
+h2{font-size:15.5px;margin:32px 0 4px;display:flex;align-items:center;gap:8px}
+h2 .no{width:22px;height:22px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;display:grid;place-items:center;flex:none;font-weight:800}
+h3{font-size:13.5px;margin:20px 0 7px}
+.lead{color:var(--muted);font-size:12.6px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:960px){.grid2,.grid3{grid-template-columns:1fr}}
+code{font-family:var(--mono);font-size:12px;background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+table{width:100%;border-collapse:collapse;font-size:12.6px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--card2);font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.02em}
+tbody tr:last-child td{border-bottom:none}
+.pill{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.p-bad{background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad-line)}
+.p-safe{background:var(--safe-soft);color:var(--safe);border:1px solid var(--safe-line)}
+.p-warn{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn-line)}
+.p-acc{background:var(--accent-soft);color:var(--accent-deep);border:1px solid var(--accent-line)}
+.p-vio{background:var(--violet-soft);color:var(--violet);border:1px solid var(--violet-line)}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 9px 9px 0;padding:10px 13px;font-size:12.6px;margin:12px 0}
+.note.bad{border-color:var(--bad);background:var(--bad-soft)}
+.note.warn{border-color:var(--warn);background:var(--warn-soft)}
+.note.safe{border-color:var(--safe);background:var(--safe-soft)}
+.note b{font-weight:800}
+ul.tight{margin:8px 0 0;padding-left:18px}
+ul.tight li{margin:4px 0;font-size:12.8px}
+/* 탭 */
+.tabs{position:sticky;top:0;z-index:30;background:var(--paper);padding:10px 0 12px;margin:0 0 4px;border-bottom:1px solid var(--line)}
+.tabs .row{display:flex;gap:6px;flex-wrap:wrap}
+.tb{border:1px solid var(--line2);background:var(--card);color:var(--muted);border-radius:9px;padding:7px 13px;font-size:12.6px;font-weight:700;cursor:pointer;font-family:inherit}
+.tb.on{background:var(--ink);border-color:var(--ink);color:#fff}
+section[data-pane]{display:none}
+section[data-pane].on{display:block}
+/* 폰 목업 */
+.phone{width:360px;max-width:100%;border:1px solid var(--line2);border-radius:22px;background:#eef1f6;overflow:hidden;box-shadow:0 8px 24px rgba(16,24,40,.09);position:relative}
+.phone .bar{height:30px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--faint);font-weight:700}
+.phone .body{padding:12px;min-height:520px;position:relative;overflow:hidden}
+.sheetov{position:absolute;inset:0;background:rgba(16,24,40,.34);display:none;align-items:flex-end;z-index:5}
+.sheetov.on{display:flex}
+.sheet{width:100%;background:#fff;border-radius:18px 18px 0 0;padding:16px 15px 18px;max-height:96%;overflow:auto}
+.rvcard{background:#fff;border:1px solid var(--line);border-radius:13px;padding:11px 12px;margin-bottom:9px}
+.rvcard .t1{font-size:12.4px;color:var(--muted)}
+.rvcard .t2{font-size:13.4px;font-weight:800;margin-top:2px}
+.rvcard .t3{font-size:12px;color:var(--accent-deep);font-weight:700;margin-top:3px}
+.mbtn{display:block;width:100%;text-align:center;border:none;cursor:pointer;font-size:13px;font-weight:800;border-radius:11px;padding:12px;margin-top:8px;font-family:inherit}
+.mbtn.dark{background:#111827;color:#fff}
+.mbtn.blue{background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff}
+.mbtn.ghost{background:#EEF3FB;color:#1B4F9C;border:1.5px solid var(--accent-line)}
+.mbtn.cancel{background:#fff;color:var(--bad);border:1.5px solid var(--bad-line)}
+.mbtn.solidbad{background:var(--bad);color:#fff}
+.mbtn:disabled{opacity:.45;cursor:not-allowed}
+.kv{display:flex;gap:8px;font-size:12.4px;background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-bottom:8px}
+.kv .k{color:var(--faint);flex:none;width:44px}
+.rsn{display:block;width:100%;text-align:left;border:1.5px solid var(--line2);background:#fff;border-radius:10px;padding:10px 12px;font-size:12.6px;margin-bottom:6px;cursor:pointer;font-family:inherit;font-weight:600}
+.rsn.on{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
+.chkrow{display:flex;gap:8px;align-items:flex-start;background:var(--bad-soft);border:1px solid var(--bad-line);border-radius:10px;padding:10px 11px;font-size:12.2px;margin:10px 0 4px;cursor:pointer}
+.chkrow input{margin-top:2px}
+/* 작업보드 목업 */
+.wb{border:1px solid var(--line2);border-radius:13px;background:#fff;overflow:hidden}
+.wb .hd{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.wb .hd b{font-size:13.4px}
+.wbtn{border:1px solid var(--line2);background:#fff;border-radius:8px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:var(--ink)}
+.wbtn.act{background:var(--ink);color:#fff;border-color:var(--ink)}
+.logov{position:fixed;inset:0;background:rgba(16,24,40,.42);display:none;align-items:center;justify-content:center;z-index:60;padding:22px}
+.logov.on{display:flex}
+.logbox{width:min(860px,100%);max-height:86vh;background:#fff;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 50px rgba(16,24,40,.28)}
+.loghd{display:flex;align-items:center;gap:9px;padding:13px 15px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.logbd{flex:1;min-height:0;overflow:auto;padding:12px 15px 18px}
+.chip{border:1px solid var(--line2);background:#fff;border-radius:999px;padding:4px 11px;font-size:11.8px;font-weight:700;cursor:pointer;font-family:inherit;color:var(--muted)}
+.chip.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.tl{position:relative;padding-left:22px}
+.tl::before{content:'';position:absolute;left:6px;top:4px;bottom:4px;width:2px;background:var(--line)}
+.ev{position:relative;padding:9px 0 9px 4px;border-bottom:1px dashed var(--line)}
+.ev:last-child{border-bottom:none}
+.ev::before{content:'';position:absolute;left:-19px;top:15px;width:9px;height:9px;border-radius:50%;background:var(--faint);border:2px solid #fff;box-shadow:0 0 0 1px var(--line2)}
+.ev.k-order::before{background:var(--accent)} .ev.k-cancel::before{background:var(--violet)}
+.ev.k-review::before{background:var(--safe)} .ev.k-edit::before{background:var(--warn)}
+.ev.k-money::before{background:#0891b2} .ev.k-sys::before{background:var(--bad)}
+.ev .top{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+.ev .when{font-size:11.4px;color:var(--faint);font-family:var(--mono);flex:none}
+.ev .msg{font-size:12.8px;font-weight:600}
+.ev .who{font-size:11.4px;color:var(--muted);margin-top:2px}
+.empty{text-align:center;color:var(--faint);font-size:12.4px;padding:26px}
+.flowwrap{display:flex;gap:10px;flex-wrap:wrap;align-items:stretch}
+.step{flex:1 1 168px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px 12px;position:relative}
+.step .n{font-size:10.5px;font-weight:800;color:var(--accent);letter-spacing:.05em}
+.step .t{font-size:12.9px;font-weight:800;margin:3px 0 3px}
+.step .d{font-size:11.9px;color:var(--muted)}
+.step.stop{border-color:var(--bad-line);background:var(--bad-soft)}
+.step.stop .n{color:var(--bad)}
+.arw{align-self:center;color:var(--faint);font-size:16px;flex:none}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11.6px;color:var(--muted);margin-top:8px}
+.legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:4px}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>주문취소(리뷰어) + 작업 로그</h1>
+<p class="sub">PRD · 유저플로우 · 와이어프레임 목업 &nbsp;·&nbsp; 2026-08-23 &nbsp;·&nbsp; <b style="color:#16a34a">✓ 결정 확정 · 구현 완료</b> — 아래 ⑥ 에 확정 내용이 반영돼 있습니다</p>
+
+<div class="tabs"><div class="row">
+  <button class="tb on" data-go="now">① 지금 · 왜</button>
+  <button class="tb" data-go="prd">② PRD — 주문취소</button>
+  <button class="tb" data-go="flow">③ 유저플로우</button>
+  <button class="tb" data-go="rv">④ 리뷰어 화면 목업</button>
+  <button class="tb" data-go="log">⑤ 작업 로그 목업</button>
+  <button class="tb" data-go="decide">⑥ 결정사안</button>
+</div></div>
+
+<!-- ══════════ ① 지금 ══════════ -->
+<section data-pane="now" class="on">
+  <h2><span class="no">1</span>지금은 리뷰어가 스스로 취소할 방법이 없다</h2>
+  <p class="lead">구매양식을 내기 <b>전</b>에는 취소가 되는데, 낸 <b>뒤</b>에는 창구가 없어 전부 사람 손으로 돌아갑니다.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="pill p-safe">지금 되는 것</span>
+      <h3 style="margin-top:9px">구매 전 — 자리(홀드) 취소</h3>
+      <p style="font-size:12.6px;color:var(--muted);margin:0">공고 화면의 [참여 취소]. <code>campaign_applications</code> 가 <code>applied</code>·<code>blog_pending</code> 일 때만 동작합니다.</p>
+      <ul class="tight">
+        <li>자리를 아직 소비하지 않은 상태라 되돌려도 잃는 것이 없습니다.</li>
+        <li>작업표에는 아직 줄이 없습니다.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="pill p-bad">지금 안 되는 것</span>
+      <h3 style="margin-top:9px">구매양식 제출 후 — 주문취소</h3>
+      <p style="font-size:12.6px;color:var(--muted);margin:0">리뷰어 화면 어디에도 버튼이 없습니다.</p>
+      <ul class="tight">
+        <li>리뷰어는 카톡·1:1문의로 말합니다.</li>
+        <li>담당자가 작업보드에서 [행 삭제]를 누릅니다.</li>
+        <li><b>사람이 놓치면</b> 표에 유령 줄이 남고 정원·정산이 어긋납니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note safe">
+    <b>다행히 실행부는 이미 있습니다 — 새로 만들 파괴 로직이 0입니다.</b><br>
+    작업보드 [행 삭제]가 쓰는 <code>cancelOrderSubmission</code> + <code>_hideParticipantInTx</code> 가
+    <i>주문 무효 → 큐 정리 → 자리 반환 → 작업표 줄 제거 → <b>보충 슬롯 생성</b> → 장부 재생성</i> 을 <b>한 트랜잭션</b>으로 이미 합니다.
+    이번 작업은 <b>그 함수를 리뷰어 쪽에서도 부를 수 있게 창구를 여는 것</b>입니다.
+  </div>
+
+  <h3>취소 한 번이 실제로 건드리는 것</h3>
+  <div class="card" style="padding:0;overflow:hidden">
+  <table>
+    <thead><tr><th style="width:210px">대상</th><th>무슨 일이 일어나나</th><th style="width:118px">누가 하나</th></tr></thead>
+    <tbody>
+      <tr><td><code>order_submissions</code></td><td><code>deleted_at</code>·<code>canceled_by</code> 기록 = 구매양식 제출 <b>무효</b></td><td><span class="pill p-acc">기존 함수</span></td></tr>
+      <tr><td><code>sync_queue</code></td><td>대기 중인 시트 쓰기 작업 제거 + 시트 값 비우기 예약</td><td><span class="pill p-acc">기존 함수</span></td></tr>
+      <tr><td><code>campaign_applications</code></td><td><code>cancelled</code> 로 <b>자리 반환</b> — 그 자리에 다른 리뷰어가 들어올 수 있다</td><td><span class="pill p-acc">기존 함수</span></td></tr>
+      <tr><td><code>campaign_participants</code></td><td>작업보드 줄 <b>제거</b> + 마지막 진행일에 <b>빈 자리 보충</b>(총 모집수 불변)</td><td><span class="pill p-acc">기존 함수</span></td></tr>
+      <tr><td>장부 3권 · 표 번호</td><td>검색 명단·입금 대상 재생성, 표의 <code>번호</code> 다시 매김</td><td><span class="pill p-acc">기존 함수</span></td></tr>
+      <tr><td><code>reviewer_event_logs</code></td><td>“누가 · 언제 · 왜 취소했는지” 한 줄 기록</td><td><span class="pill p-warn">이번에 추가</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="lead" style="margin-top:9px">→ <b>신규 테이블 0 · 신규 파괴 경로 0 · 신규 인증 표면 0.</b> 여는 것은 창구와 로그 한 줄뿐입니다.</p>
+</section>
+
+<!-- ══════════ ② PRD ══════════ -->
+<section data-pane="prd">
+  <h2><span class="no">2</span>PRD — 리뷰어 주문취소</h2>
+
+  <h3>창구</h3>
+  <p class="lead">리뷰 내역 → <b>참여상품 정보 팝업</b> 맨 아래. 문의·리뷰제출과 같은 자리라 새 진입점을 만들지 않습니다.</p>
+
+  <h3>실행 순서 (한 트랜잭션 — 중간에 끊기면 전부 되돌아간다)</h3>
+  <div class="flowwrap">
+    <div class="step"><div class="n">STEP 1</div><div class="t">본인 확인</div><div class="d">리뷰 내역 팝업이 이미 통과하는 <b>강한 키</b>로 그 줄의 주인인지 확인</div></div>
+    <div class="arw">→</div>
+    <div class="step"><div class="n">STEP 2</div><div class="t">주문 찾기</div><div class="d">주문 번호는 <b>서버가 좌표로 다시 찾는다</b> — 화면이 보낸 값을 믿지 않음</div></div>
+    <div class="arw">→</div>
+    <div class="step"><div class="n">STEP 3</div><div class="t">막을 것 검사</div><div class="d">아래 5종 중 하나라도 걸리면 <b>쓰기 0건</b>으로 거부</div></div>
+    <div class="arw">→</div>
+    <div class="step"><div class="n">STEP 4</div><div class="t">기존 실행부 호출</div><div class="d">작업보드 [행 삭제]와 <b>같은 함수</b> — 사본 0</div></div>
+    <div class="arw">→</div>
+    <div class="step"><div class="n">STEP 5</div><div class="t">로그 남기기</div><div class="d">커밋 뒤 사유 기록. 실패해도 취소를 되돌리지 않음</div></div>
+  </div>
+
+  <h3 style="margin-top:22px">막을 것 — fail-closed 5종 <span class="pill p-bad">완화 금지</span></h3>
+  <div class="card" style="padding:0;overflow:hidden">
+  <table>
+    <thead><tr><th style="width:170px">조건</th><th>왜 막나</th><th style="width:230px">화면이 뭐라고 하나</th></tr></thead>
+    <tbody>
+      <tr><td><b>리뷰비 입금 완료</b></td><td>이미 돈이 나갔습니다. 취소하면 지급 기록과 작업 기록이 어긋납니다.</td><td>“리뷰비가 이미 입금되어 스스로 취소할 수 없어요 — 1:1 문의로 알려주세요”</td></tr>
+      <tr><td><b>리뷰 제출 완료</b></td><td>결과물이 이미 업체에 전달될 수 있는 상태입니다.</td><td>“리뷰를 이미 제출하셨어요 — 취소가 필요하면 1:1 문의로”</td></tr>
+      <tr><td><b>시트 기반 작업</b></td><td>줄을 지워도 <b>다음 시트 반영이 되살립니다</b>(<code>not_sheetless</code>). 지웠는데 돌아오는 상태를 만들지 않습니다.</td><td>“이 작업은 담당자 확인이 필요해요 — 1:1 문의로”</td></tr>
+      <tr><td><b>이미 취소된 건</b></td><td>두 번 눌러도 사고가 나지 않아야 합니다.</td><td>멱등 성공 — “이미 취소된 참여입니다”</td></tr>
+      <tr><td><b>판정 실패</b></td><td>입금·제출 여부를 <b>모르는 채로 지우지 않습니다</b>.</td><td>“지금은 확인이 어려워요 — 잠시 후 다시 시도해주세요”</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note bad" style="margin-top:14px">
+    <b>되돌릴 수 없습니다.</b> 그래서 확인은 <b>2단</b>입니다 — 사유를 고르고, “되돌릴 수 없음”에 체크해야 [취소하기]가 열립니다.
+    그리고 확인창이 <b>당일 재참여가 안 된다는 사실</b>을 반드시 말합니다.
+  </div>
+  <div class="note warn">
+    <b>⚠ 취소해도 오늘은 다시 참여할 수 없습니다.</b> 참여 게이트가 “그날 신청한 이력이 있는가”를 <b>상태와 무관하게</b> 보기 때문입니다(취소·만료 포함).
+    이건 원래 그렇게 설계된 규칙이라 이번에 바꾸지 않고, <b>확인창이 미리 말합니다</b> — 모르고 눌렀다가 그날 참여를 잃는 일이 없어야 합니다.
+    <span class="pill p-warn">⑥-5 에서 확답 필요</span>
+  </div>
+
+  <h3>사유 — 왜 받나</h3>
+  <p class="lead">취소가 늘면 <b>왜 느는지</b>를 알아야 손을 쓸 수 있습니다(품절·가격 변동·개인 사정). 저장은 <code>reviewer_event_logs</code> 한 줄 — 신규 테이블 0.</p>
+  <ul class="tight">
+    <li>선택지 3 + 직접 입력. <b>선택은 필수, 직접 입력은 선택</b>.</li>
+    <li>사유 기록이 실패해도 <b>취소는 되돌리지 않습니다</b>(이미 끝난 일). 로그만 빕니다.</li>
+    <li>관리자 화면에는 “조용히 사라진 줄”이 아니라 <b>취소 이벤트</b>로 남습니다 → ⑤ 작업 로그.</li>
+  </ul>
+
+  <h3>권한 · 안전</h3>
+  <ul class="tight">
+    <li><b>신규 인증 표면 0</b> — 리뷰 내역 팝업이 이미 쓰는 본인 확인을 그대로 씁니다.</li>
+    <li>주문 번호는 <b>서버가 좌표로 다시 찾습니다</b> — 낡은 화면·조작 요청이 남의 주문을 지목할 수 없습니다.</li>
+    <li>구글시트는 <b>기존 경로 그대로</b> 큐가 비웁니다(직접 접촉 0).</li>
+    <li>취소 요청에도 <b>연타 방지</b>가 걸립니다(참여·취소와 같은 제한).</li>
+  </ul>
+</section>
+
+<!-- ══════════ ③ 유저플로우 ══════════ -->
+<section data-pane="flow">
+  <h2><span class="no">3</span>유저플로우</h2>
+
+  <h3>리뷰어 — 정상 경로</h3>
+  <div class="flowwrap">
+    <div class="step"><div class="n">1</div><div class="t">리뷰 내역</div><div class="d">[참여중] 탭에서 그 카드를 누른다</div></div><div class="arw">→</div>
+    <div class="step"><div class="n">2</div><div class="t">참여상품 정보</div><div class="d">맨 아래 <b>[🚫 주문취소]</b></div></div><div class="arw">→</div>
+    <div class="step"><div class="n">3</div><div class="t">사유 고르기</div><div class="d">품절 / 가격이 달라요 / 개인 사정 + 직접 입력</div></div><div class="arw">→</div>
+    <div class="step"><div class="n">4</div><div class="t">확인 (2단)</div><div class="d">“되돌릴 수 없음 · 오늘 재참여 불가” 체크</div></div><div class="arw">→</div>
+    <div class="step"><div class="n">5</div><div class="t">완료</div><div class="d">카드가 리뷰 내역에서 사라진다</div></div>
+  </div>
+
+  <h3 style="margin-top:20px">리뷰어 — 막히는 경로</h3>
+  <div class="flowwrap">
+    <div class="step"><div class="n">1</div><div class="t">참여상품 정보</div><div class="d">[🚫 주문취소]가 <b>흐리게</b> 보인다</div></div><div class="arw">→</div>
+    <div class="step stop"><div class="n">막힘</div><div class="t">사유를 말한다</div><div class="d">“리뷰비가 이미 입금되어 스스로 취소할 수 없어요”</div></div><div class="arw">→</div>
+    <div class="step"><div class="n">2</div><div class="t">다음 행동</div><div class="d">바로 아래 <b>[🎧 1:1 문의하기]</b> 로 이어진다 — 막다른 길을 만들지 않는다</div></div>
+  </div>
+
+  <h3 style="margin-top:20px">담당자 — 무슨 일이 일어났는지 아는 경로</h3>
+  <div class="flowwrap">
+    <div class="step"><div class="n">1</div><div class="t">작업보드</div><div class="d">그 줄이 사라지고 <b>빈 자리</b>가 마지막 진행일에 생긴다(총 건수 불변)</div></div><div class="arw">→</div>
+    <div class="step"><div class="n">2</div><div class="t">[🗒 로그]</div><div class="d">“홍길동 님이 주문을 취소했습니다 — 품절”</div></div><div class="arw">→</div>
+    <div class="step"><div class="n">3</div><div class="t">필요하면</div><div class="d">1:1 문의로 이어서 확인</div></div>
+  </div>
+
+  <div class="note">
+    <b>조용히 사라지지 않는다</b>가 이 흐름의 핵심입니다. 줄이 없어지는 것은 정상 동작이지만,
+    <b>왜 없어졌는지</b>가 어디에도 안 남으면 담당자는 “유령 줄이 사라졌다”와 구분할 수 없습니다.
+  </div>
+</section>
+
+<!-- ══════════ ④ 리뷰어 목업 ══════════ -->
+<section data-pane="rv">
+  <h2><span class="no">4</span>리뷰어 화면 — 실제로 눌러보세요</h2>
+  <p class="lead">가짜 데이터로 <b>실제 동작</b>합니다. 상태를 바꿔가며 막히는 화면도 확인할 수 있습니다.</p>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    <button class="wbtn act" data-st="ok">정상 (취소 가능)</button>
+    <button class="wbtn" data-st="paid">리뷰비 입금 완료</button>
+    <button class="wbtn" data-st="submitted">리뷰 제출 완료</button>
+    <button class="wbtn" data-st="sheet">시트 기반 작업</button>
+  </div>
+
+  <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+    <div class="phone">
+      <div class="bar">참여상품 정보</div>
+      <div class="body" id="rvBody">
+        <div class="rvcard">
+          <div class="t1">8 / 18 (화)</div>
+          <div class="t2">모기위키 모기기피제</div>
+          <div class="t3">상품비 13,900원 · 리뷰비 0원</div>
+        </div>
+        <div class="kv"><span class="k">상품</span><span>모기위키 모기기피제 — 결제금액 13,900원</span></div>
+        <div id="rvState"></div>
+        <button class="mbtn dark">🛒 상품 바로가기</button>
+        <button class="mbtn blue">🖼 리뷰제출하기</button>
+        <button class="mbtn ghost">🎧 1:1 문의하기</button>
+        <button class="mbtn cancel" id="rvCancelBtn" onclick="rvOpen()">🚫 주문취소</button>
+        <div id="rvWhy" style="font-size:11.4px;color:var(--muted);text-align:center;margin-top:7px"></div>
+      </div>
+      <!-- 사유 시트 -->
+      <div class="sheetov" id="rvSheet">
+        <div class="sheet">
+          <div style="font-size:14px;font-weight:800;margin-bottom:3px">주문을 취소할까요?</div>
+          <div style="font-size:12.2px;color:var(--muted);margin-bottom:12px">모기위키 모기기피제 · 8/18 (화)</div>
+          <div style="font-size:12px;font-weight:800;margin-bottom:6px">취소 사유를 알려주세요</div>
+          <button class="rsn" data-r="품절">품절이라 구매하지 못했어요</button>
+          <button class="rsn" data-r="가격 상이">화면과 가격이 달라요</button>
+          <button class="rsn" data-r="개인 사정">개인 사정으로 진행이 어려워요</button>
+          <input id="rvEtc" placeholder="직접 입력 (선택)" style="width:100%;border:1.5px solid var(--line2);border-radius:10px;padding:9px 11px;font-size:12.4px;font-family:inherit;margin-top:2px">
+          <label class="chkrow"><input type="checkbox" id="rvChk">
+            <span><b>되돌릴 수 없습니다.</b> 제출한 구매양식이 무효가 되고 작업 명단에서도 빠집니다.
+            그리고 <b>오늘은 이 작업에 다시 참여할 수 없어요.</b></span></label>
+          <button class="mbtn solidbad" id="rvGo" disabled>주문 취소하기</button>
+          <button class="mbtn ghost" onclick="rvClose()">그대로 두기</button>
+        </div>
+      </div>
+      <!-- 완료 -->
+      <div class="sheetov" id="rvDone">
+        <div class="sheet" style="text-align:center;padding-bottom:24px">
+          <div style="font-size:30px;margin:8px 0 4px">✓</div>
+          <div style="font-size:14.5px;font-weight:800">주문이 취소되었습니다</div>
+          <div style="font-size:12.2px;color:var(--muted);margin:6px 0 4px">
+            구매양식 제출이 무효 처리되고<br>작업 명단에서도 빠졌어요.</div>
+          <div style="font-size:11.6px;color:var(--faint)">담당자에게도 취소 사유가 함께 전달됩니다.</div>
+          <button class="mbtn ghost" onclick="rvReset()" style="margin-top:14px">리뷰 내역으로</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1 1 320px;min-width:280px">
+      <h3 style="margin-top:0">이 목업이 고정하는 것</h3>
+      <ul class="tight">
+        <li><b>[🚫 주문취소]는 맨 아래</b> — 파괴적인 조작이라 리뷰제출·문의보다 아래에 둡니다.</li>
+        <li><b>흐리게 + 사유</b> — 못 누를 때 <b>숨기지 않습니다</b>. 왜 못 누르는지 모르면 문의가 늘어납니다.</li>
+        <li><b>2단 확인</b> — 사유 선택 <i>그리고</i> 체크를 해야 버튼이 열립니다.</li>
+        <li><b>“오늘 다시 참여 불가”를 미리 말합니다</b> — 누른 뒤에 알면 늦습니다.</li>
+        <li><b>바깥을 눌러도 닫히지 않습니다</b> — 입력해 둔 사유를 실수로 잃지 않게(Esc·[그대로 두기]만).</li>
+      </ul>
+      <div class="note" style="margin-bottom:0">
+        완료 화면이 <b>“담당자에게도 전달됩니다”</b> 라고 말합니다 —
+        리뷰어가 별도로 카톡을 보내지 않아도 되도록.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ ⑤ 로그 목업 ══════════ -->
+<section data-pane="log">
+  <h2><span class="no">5</span>작업 로그 — 이 작업에 무슨 일이 있었나</h2>
+  <p class="lead">작업보드 상단에 <b>[🗒 로그]</b> 를 두고, 이미 쌓이고 있는 기록을 <b>한 타임라인</b>으로 모읍니다. <b>신규 저장소 0.</b></p>
+
+  <div class="wb" style="margin-bottom:16px">
+    <div class="hd">
+      <b>웰스앤헬스 천기 약도라지 삼백초캔디 …</b>
+      <span class="pill p-acc">무시트</span>
+      <span style="flex:1"></span>
+      <button class="wbtn">표 · 전체 열</button>
+      <button class="wbtn">🔗 링크 복사</button>
+      <button class="wbtn">📅 모집인원 조절</button>
+      <button class="wbtn act" id="logBtn" onclick="logOpen()">🗒 로그</button>
+      <button class="wbtn">🏁 마감</button>
+      <button class="wbtn">⋯</button>
+    </div>
+    <div style="padding:13px 15px;font-size:12.4px;color:var(--muted)">
+      ↑ <b>[🗒 로그]</b> 를 눌러보세요. 자리는 <b>[⋯] 왼쪽 · 주 줄</b> — 자주 쓰는 조회 기능이라 메뉴 안에 숨기지 않습니다.
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">모으는 재료 <span class="pill p-safe">전부 이미 있음</span></h3>
+      <div style="overflow:hidden;border-radius:9px;border:1px solid var(--line)">
+      <table>
+        <thead><tr><th style="width:98px">종류</th><th>무엇</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill p-acc">주문</span></td><td>구매양식 접수 · 취소(누가·왜)</td></tr>
+          <tr><td><span class="pill p-safe">리뷰</span></td><td>리뷰 캡처 제출 · 검수 결과(정상/불량)</td></tr>
+          <tr><td><span class="pill p-warn">편집</span></td><td>표 셀 편집 · 되돌리기 · 행 삭제/보충</td></tr>
+          <tr><td><span class="pill p-acc">정원</span></td><td>날짜별 인원 조절 · 차수 추가</td></tr>
+          <tr><td><span class="pill p-vio">정산</span></td><td>입금 회차 반영 · 마감/복귀</td></tr>
+          <tr><td><span class="pill p-bad">시스템</span></td><td>주문 유실·미반영 등 비정상 신호</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">규율</h3>
+      <ul class="tight">
+        <li><b>읽기 전용</b> — 로그 팝업에서 되돌리거나 고치지 않습니다. 조치는 각자의 자리에서.</li>
+        <li><b>내부인 전용</b> — 리뷰어 이름·연락처가 실리므로 광고주에게는 버튼을 그리지 않습니다.</li>
+        <li><b>못 받은 소스는 “조회 실패”라고 말합니다</b> — 0건으로 꾸미면 “아무 일도 없었다”로 읽힙니다.</li>
+        <li><b>기존 [편집 이력] 버튼은 흡수</b>합니다 — 같은 일을 하는 창구를 둘로 두지 않습니다.</li>
+        <li>기본 <b>최근 60건</b> + [더 보기]. 필터는 화면에서만 거릅니다.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--accent)"></i>주문</span><span><i style="background:var(--violet)"></i>취소</span>
+    <span><i style="background:var(--safe)"></i>리뷰</span><span><i style="background:var(--warn)"></i>편집</span>
+    <span><i style="background:#0891b2"></i>정산</span><span><i style="background:var(--bad)"></i>시스템</span>
+  </div>
+</section>
+
+<!-- ══════════ ⑥ 결정사안 ══════════ -->
+<section data-pane="decide">
+  <h2><span class="no">6</span>확정된 결정 <span class="pill p-safe">2026-08-23</span></h2>
+  <div class="card" style="padding:0;overflow:hidden">
+  <table>
+    <thead><tr><th style="width:36px">#</th><th style="width:210px">질문</th><th style="width:250px">확정</th><th>구현에 반영된 것</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>취소 가능 기간</td><td><b>제한 없음</b> — 리뷰 제출 전이면 언제든</td><td>기간 조건 없음. 리뷰 제출·입금이 이미 막는다.</td></tr>
+      <tr><td>2</td><td>리뷰 제출 완료 건</td><td><b>취소 불가 · 선택지에서 제거</b></td><td>그 건에는 <b>버튼 자체를 그리지 않는다</b>(흐리게도 아님). 서버도 <code>review_submitted</code> 로 거부.</td></tr>
+      <tr><td>3</td><td>취소한 참여를 남길지</td><td><b>목록에서 사라짐</b> + 로그창에 유형별 탭</td><td>리뷰 내역에서 사라지고, 작업 로그의 <b>[취소] 탭</b>에서 모아 본다.</td></tr>
+      <tr><td>4</td><td>담당자 통지</td><td><b>로그 + 1:1문의방 자동 안내</b></td><td>취소 사유가 로그 한 줄 + 그 리뷰어 문의방 메시지로 함께 간다.</td></tr>
+      <tr><td>5</td><td>당일 재참여</td><td><b>취소 건은 예외로 허용</b></td><td>★ <b>코드 변경 0으로 이미 성립</b> — 아래 참조.</td></tr>
+      <tr><td>6</td><td>로그 1단계 범위</td><td><b>6종 전부</b></td><td>주문·취소·리뷰·편집·정원·정산·시스템 7유형(8소스).</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note safe" style="margin-top:16px">
+    <b>⑤ 당일 재참여 — 원래 열려 있었습니다(제 앞선 설명이 틀렸습니다).</b><br>
+    참여 게이트를 실제로 읽어 보니 <b>전부 “구매양식 제출 완료(<code>submitted</code>)” 기준</b>이었습니다
+    — 같은 공고 재참여 차단도, 하루 총량도, 타계정 하루한도도. 주문취소는 그 기록을 <code>cancelled</code> 로
+    바꾸므로 <b>취소한 순간 그날 다시 참여할 수 있습니다.</b> 확정하신 ㉯가 <b>코드를 한 줄도 고치지 않고</b> 성립합니다.
+    <br><span style="color:var(--muted)">억제 장치는 그대로입니다 — 하루 제출 10건 · 동시 자리 2건.</span>
+  </div>
+
+  <div class="note" style="margin-top:12px">
+    <b>시트 기반 작업</b>은 이제 시스템에 없지만, 서버 게이트는 <b>남겨 두었습니다</b> —
+    하나라도 생기면 그 순간 필요하고, 비용이 0입니다. 리뷰어 화면에는 그 상태를 위한 별도 설계를 두지 않았습니다.
+  </div>
+</section>
+
+<!-- 로그 팝업 -->
+<div class="logov" id="logOv">
+  <div class="logbox">
+    <div class="loghd">
+      <b>🗒 작업 로그</b>
+      <span style="font-size:12.2px;color:var(--muted)">웰스앤헬스 천기 약도라지 삼백초캔디 …</span>
+      <span style="flex:1"></span>
+      <button class="wbtn" onclick="logClose()">닫기</button>
+    </div>
+    <div style="padding:9px 15px;border-bottom:1px solid var(--line);display:flex;gap:5px;flex-wrap:wrap" id="logChips"></div>
+    <div class="logbd"><div class="tl" id="logList"></div></div>
+  </div>
+</div>
+
+</div>
+<script>
+/* ── 탭 ── */
+document.querySelectorAll('.tb').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tb').forEach(x=>x.classList.toggle('on',x===b));
+  const g=b.dataset.go;
+  document.querySelectorAll('section[data-pane]').forEach(s=>s.classList.toggle('on',s.dataset.pane===g));
+  window.scrollTo({top:0,behavior:'smooth'});
+});
+
+/* ── ④ 리뷰어 목업 ── */
+var RV_STATE='ok', RV_REASON='';
+var BLOCK={
+  paid:{why:'리뷰비가 이미 입금되어 스스로 취소할 수 없어요 — 1:1 문의로 알려주세요',
+        badge:'<div class="kv" style="background:var(--safe-soft);border-color:var(--safe-line)"><span class="k">입금</span><span><b>리뷰비 입금 완료</b> · 13,900원</span></div>'},
+  submitted:{why:'리뷰를 이미 제출하셨어요 — 취소가 필요하면 1:1 문의로 알려주세요',
+        badge:'<div class="kv" style="background:var(--accent-soft);border-color:var(--accent-line)"><span class="k">리뷰</span><span><b>제출 완료</b> · 8/21</span></div>'},
+  sheet:{why:'이 작업은 담당자 확인이 필요해요 — 1:1 문의로 알려주세요',
+        badge:'<div class="kv" style="background:var(--warn-soft);border-color:var(--warn-line)"><span class="k">작업</span><span>시트로 관리되는 작업입니다</span></div>'}
+};
+function rvPaint(){
+  var b=BLOCK[RV_STATE], btn=document.getElementById('rvCancelBtn');
+  document.getElementById('rvState').innerHTML = b ? b.badge : '';
+  document.getElementById('rvWhy').textContent = b ? b.why : '';
+  btn.disabled = !!b;
+}
+document.querySelectorAll('[data-st]').forEach(function(b){
+  b.onclick=function(){
+    document.querySelectorAll('[data-st]').forEach(function(x){x.classList.toggle('act',x===b);});
+    RV_STATE=b.dataset.st; rvClose(); rvPaint();
+  };
+});
+function rvOpen(){ if(document.getElementById('rvCancelBtn').disabled) return; document.getElementById('rvSheet').classList.add('on'); }
+function rvClose(){ document.getElementById('rvSheet').classList.remove('on'); document.getElementById('rvDone').classList.remove('on'); }
+function rvReset(){ rvClose(); RV_REASON=''; document.getElementById('rvChk').checked=false;
+  document.getElementById('rvEtc').value=''; document.querySelectorAll('.rsn').forEach(function(x){x.classList.remove('on');}); rvSync(); }
+document.querySelectorAll('.rsn').forEach(function(b){
+  b.onclick=function(){ document.querySelectorAll('.rsn').forEach(function(x){x.classList.toggle('on',x===b);}); RV_REASON=b.dataset.r; rvSync(); };
+});
+document.getElementById('rvChk').onchange=rvSync;
+/* ★ 사유 선택 AND 체크 — 둘 다여야 열린다(2단 확인) */
+function rvSync(){ document.getElementById('rvGo').disabled = !(RV_REASON && document.getElementById('rvChk').checked); }
+document.getElementById('rvGo').onclick=function(){
+  document.getElementById('rvSheet').classList.remove('on');
+  document.getElementById('rvDone').classList.add('on');
+};
+rvPaint(); rvSync();
+
+/* ── ⑤ 로그 목업 ── */
+var LOG_KINDS=[['all','전체'],['order','주문'],['cancel','취소'],['review','리뷰'],['edit','편집'],['quota','정원'],['money','정산'],['sys','시스템']];
+var LOG_CLS={order:'k-order',cancel:'k-cancel',review:'k-review',edit:'k-edit',quota:'k-edit',money:'k-money',sys:'k-sys'};
+var LOG=[
+ {t:'08-23 14:02',k:'cancel',m:'홍길동 님이 주문을 취소했습니다 — 품절이라 구매하지 못했어요',w:'리뷰어 · 12행 · 자리 반환됨 · 8/30 에 빈 자리 보충'},
+ {t:'08-23 13:41',k:'review',m:'리뷰 캡처 검수 — 불량 (주문이 취소된 화면)',w:'시스템 · 이은지 · 2행'},
+ {t:'08-23 11:20',k:'edit',m:'표 편집 — 수취인 “이원준” → “이원지”',w:'만두 · 1행'},
+ {t:'08-23 10:07',k:'money',m:'입금 회차 #12 반영 — 101건 입금 완료',w:'망고'},
+ {t:'08-22 18:55',k:'quota',m:'날짜별 인원 조절 — 8/25 30명 → 20명 (남은 날에 나눠 담기)',w:'만두'},
+ {t:'08-22 16:30',k:'order',m:'구매양식 접수 — 심수현',w:'리뷰어 · 4행 · 결제금액 14,310원'},
+ {t:'08-22 16:12',k:'sys',m:'구매양식이 시트에 반영되지 못했습니다 — 자동 재기록됨',w:'시스템 · 홍순덕 · 3행'},
+ {t:'08-22 09:41',k:'edit',m:'행 삭제 — 8행 (주문 취소 동반) · 9/2 에 빈 자리 보충',w:'망고'},
+ {t:'08-21 17:03',k:'review',m:'리뷰 캡처 제출 — 이은지',w:'리뷰어 · 2행 · 2장'},
+ {t:'08-21 15:22',k:'order',m:'구매양식 접수 — 박한결',w:'리뷰어 · 1행 · 결제금액 14,310원'}
+];
+var LOG_F='all';
+function logPaint(){
+  document.getElementById('logChips').innerHTML = LOG_KINDS.map(function(k){
+    var n = k[0]==='all' ? LOG.length : LOG.filter(function(e){return e.k===k[0];}).length;
+    return '<button class="chip'+(LOG_F===k[0]?' on':'')+'" onclick="logFilter(\''+k[0]+'\')">'+k[1]+' '+n+'</button>';
+  }).join('');
+  var view = LOG_F==='all' ? LOG : LOG.filter(function(e){return e.k===LOG_F;});
+  document.getElementById('logList').innerHTML = view.length
+    ? view.map(function(e){
+        return '<div class="ev '+(LOG_CLS[e.k]||'')+'"><div class="top"><span class="when">'+e.t+'</span>'
+             + '<span class="msg">'+e.m+'</span></div><div class="who">'+e.w+'</div></div>';
+      }).join('')
+    : '<div class="empty">이 종류의 기록이 없습니다.</div>';
+}
+function logFilter(k){ LOG_F=k; logPaint(); }
+function logOpen(){ document.getElementById('logOv').classList.add('on'); logPaint(); }
+function logClose(){ document.getElementById('logOv').classList.remove('on'); }
+/* ★ 바깥 클릭·Esc 로 닫는다 — 로그는 읽기 전용이라 잃을 입력이 없다(취소 시트와 반대) */
+document.getElementById('logOv').onclick=function(e){ if(e.target===this) logClose(); };
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape') return;
+  logClose();
+  document.getElementById('rvSheet').classList.remove('on');
+});
+</script>
+</body>
+</html>

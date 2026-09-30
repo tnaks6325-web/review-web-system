@@ -19,7 +19,9 @@ assert.match(app, /rf_sheet_link_row/);
 assert.match(app, /function _syncSourceWorkOrderLinkUi\(\)[\s\S]{0,350}_woPrefillOrderId[\s\S]{0,350}rf_sheet_link_row/);
 assert.match(app, /if \(tabKey && !\(tabMeta && tabMeta\.tabGid\)\)/);
 assert.match(app, /시트 탭 미연결 — 나중에 추가 가능/);
-assert.match(app, /linked_tab_mode:\s*tabKey \? "linked" : "unlinked"/);
+// ★ 연결 해제는 "사람이 비웠을 때만" — 목록 미로드·복원 실패는 판단 불가(keep)라 기존 연결을 지우지 않는다.
+assert.match(app, /linked_tab_mode:\s*tabKey \? "linked" : \(_rfExplicitUnlink\(\) \? "unlinked" : "keep"\)/);
+assert.match(app, /function _rfExplicitUnlink\(\)/);
 assert.match(modal, /시트·탭 연결은 나중에 추가할 수 있습니다/);
 
 const createRoute = routes.slice(routes.indexOf("router.post('/admin/create'"), routes.indexOf("router.put('/admin/:id'"));

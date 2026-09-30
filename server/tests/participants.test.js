@@ -2,7 +2,6 @@
  * participants.service 회귀 가드 (Phase 1 shadow 임포트).
  *   - importTabFromIndex: review_index→campaign_participants 매핑(is_submitted2='PAID'→is_paid),
  *     dryRun 무쓰기, upsert가 is_submitted/is_paid를 conflict update SET에 넣지 않음(토글 보존).
- *   - setParticipantStatus: source='manual' + 상태 UPDATE.
  * 실행: node tests/participants.test.js
  */
 const assert = require('assert');
@@ -65,51 +64,8 @@ async function run() {
   assert.ok(/deleted_at = NULL/.test(doUpdate), '재임포트 시 소프트삭제 해제');
   console.log('  실임포트 upsert·상태최신화(수동보존) 통과');
 
-  // ── setParticipantStatus: source='manual' + 상태 UPDATE ──
-  pool = makePool({});
-  svc.__setPoolForTest(pool);
-  r = await svc.setParticipantStatus({ id: 'uuid-1', isSubmitted: true, by: 'master' });
-  assert.equal(r.updated, 1);
-  const upd = pool.q.find(x => /UPDATE campaign_participants SET/.test(x.s));
-  assert.ok(/source = 'manual'/.test(upd.s), '토글은 source=manual 표시');
-  assert.ok(/is_submitted = \$/.test(upd.s), 'is_submitted UPDATE');
-  console.log('  status 토글 통과');
-
-  // ── Phase 2a: 추가 — seq 900000+ 범위 + phone8 정규화 + source=manual ──
-  pool = makePool({ nextseq: 900001 });
-  svc.__setPoolForTest(pool);
-  let a = await svc.addParticipant({ sheetId: 's1', tabName: 'T', reviewerName: '수동추가', phone: '010-9999-1234', by: 'master' });
-  assert.equal(a.added, 1); assert.equal(a.seq, 900001, '수동 seq는 900000+ (import와 비충돌)');
-  const ins2 = pool.q.find(x => /INSERT INTO campaign_participants[\s\S]*RETURNING id, seq/.test(x.s));
-  assert.ok(/'manual'/.test(ins2.s), '추가는 source=manual');
-  assert.equal(ins2.params[6], '99991234', 'phone→phone8 끝8자리 정규화'); // seq idx: sheet,gid,tab,seq,name,recip,phone8...
-  console.log('  추가(seq범위·phone8·manual) 통과');
-
-  // ── 수정: 화이트리스트 필드만 + source=manual ──
-  pool = makePool({});
-  svc.__setPoolForTest(pool);
-  let u = await svc.updateParticipant({ id: 'x', fields: { reviewer_name: '수정됨', bogus: 'DROP', phone8: '010-1' }, by: 'master' });
-  const upd2 = pool.q.find(x => /UPDATE campaign_participants SET reviewer_name/.test(x.s));
-  assert.ok(upd2, 'reviewer_name 수정');
-  assert.ok(!/bogus/.test(upd2.s), '화이트리스트 외 필드 무시(인젝션 방어)');
-  assert.ok(/source='manual'/.test(upd2.s), '수정은 source=manual');
-  // 빈 편집 → 400성
-  const u0 = await svc.updateParticipant({ id: 'x', fields: { nope: 1 }, by: 'm' });
-  assert.equal(u0.updated, 0); assert.equal(u0.reason, 'no_editable_fields');
-  console.log('  수정(화이트리스트·no-op) 통과');
-
-  // ── 삭제: 소프트삭제 ──
-  pool = makePool({});
-  svc.__setPoolForTest(pool);
-  let d = await svc.softDeleteParticipant({ id: 'x', by: 'master' });
-  assert.equal(d.deleted, 1);
-  const del = pool.q.find(x => /UPDATE campaign_participants SET deleted_at/.test(x.s));
-  assert.ok(/deleted_at=NOW\(\)/.test(del.s), '소프트삭제(deleted_at)');
-  // 없는 id → deleted 0
-  svc.__setPoolForTest(makePool({ delMiss: true }));
-  const dMiss = await svc.softDeleteParticipant({ id: 'gone', by: 'm' });
-  assert.equal(dMiss.deleted, 0, '없는 id → deleted 0');
-  console.log('  삭제(소프트) 통과');
+  // (상태 토글·추가·수정·삭제 — setParticipantStatus/addParticipant/updateParticipant/softDeleteParticipant 는
+  //  참여자 명단 테스트 화면과 함께 2026-09-28 제거, 결정 186 46번)
 
   // ── Phase 4: syncImportedTabs — 가져온 탭들을 순회하며 importTabFromIndex(시트 재읽기 0) ──
   pool = makePool({ syncTabs: [{ sheetId: 's1', tabName: 'T1' }, { sheetId: 's1', tabName: 'T2' }], index: [] });

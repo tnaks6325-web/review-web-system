@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildV2StatusBindings, validateV2StatusBindings, isV2ReviewSubmitted, isV2PaymentSubmitted } = require('../src/services/statusColumnBinding.service');
+const { buildV2StatusBindings, validateV2StatusBindings, isV2ReviewSubmitted, isV2PaymentSubmitted, loadV2StatusBindings } = require('../src/services/statusColumnBinding.service');
 const { parseTabRows } = require('../src/services/columnResolver');
 const { recordDeposits } = require('../src/services/paymentApply.service');
 
@@ -19,6 +19,58 @@ test('v2 상태열은 정확한 헤더·위치만 바인딩한다', () => {
     /변경되어 처리를 중단/);
 });
 
+test('v2 상태열은 정확한 단일 헤더가 이동한 경우에만 좌표를 자동 재동기화한다', async () => {
+  const calls = [];
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    if (/^SELECT role/.test(sql.trim())) {
+      return { rows: [
+        { role: 'review_submit', header_text: '리뷰', col_index: 2 },
+        { role: 'payment_status', header_text: '입금일', col_index: 3 },
+      ] };
+    }
+    return { rows: [] };
+  }};
+  const bindings = await loadV2StatusBindings(db, {
+    sheetId: 's', tabGid: '1', headers: ['번호', '주문자', '신규열', '리뷰', '입금일'],
+  });
+  assert.deepEqual(bindings, {
+    review_submit: { header: '리뷰', colIndex: 3 },
+    payment_status: { header: '입금일', colIndex: 4 },
+  });
+  assert.ok(calls.some(c => /SET col_index = col_index \+ 1000000/.test(c.sql)));
+  assert.equal(calls.filter(c => /ON CONFLICT \(sheet_id, tab_gid, role\) DO UPDATE/.test(c.sql)).length, 2);
+});
+
+test('v2 상태열 dry-run 검증은 바인딩을 수정하지 않는다', async () => {
+  const calls = [];
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    return { rows: [
+      { role: 'review_submit', header_text: '리뷰', col_index: 2 },
+      { role: 'payment_status', header_text: '입금일', col_index: 3 },
+    ] };
+  }};
+  await assert.rejects(
+    loadV2StatusBindings(db, {
+      sheetId: 's', tabGid: '1', headers: ['번호', '주문자', '신규열', '리뷰', '입금일'], allowRebind: false,
+    }),
+    error => error.code === 'v2_status_binding_drift'
+  );
+  assert.equal(calls.length, 1);
+});
+
+test('v2 상태열 자동 재동기화는 중복 상태 헤더를 허용하지 않는다', async () => {
+  const db = { query: async () => ({ rows: [
+    { role: 'review_submit', header_text: '리뷰', col_index: 1 },
+    { role: 'payment_status', header_text: '입금일', col_index: 2 },
+  ] }) };
+  await assert.rejects(
+    loadV2StatusBindings(db, { sheetId: 's', tabGid: '1', headers: ['리뷰', '리뷰', '입금일'] }),
+    error => error.code === 'v2_status_binding_missing'
+  );
+});
+
 test('v2는 리뷰옵션·임의 입금 텍스트를 상태로 인정하지 않는다', () => {
   const values = [
     ['번호', '주문자', '리뷰옵션', '리뷰', '입금일'],
@@ -32,6 +84,23 @@ test('v2는 리뷰옵션·임의 입금 텍스트를 상태로 인정하지 않�
   assert.equal(rows[1].isSubmitted2, 'PAID');
   assert.equal(isV2ReviewSubmitted('포토'), false);
   assert.equal(isV2PaymentSubmitted('입금완료'), false);
+});
+
+test('v2 리뷰는 시스템이 쓰는 유효한 제출 날짜·시각만 인정한다', () => {
+  for (const value of ['8/31 10:08', '9/1 00:03', '8/1', '2026-08-31', '26.8.31(월)']) {
+    assert.equal(isV2ReviewSubmitted(value), true, `${value}를 제출으로 인정해야 한다`);
+  }
+  for (const value of ['', '포토', '완료', '1차', '2/30 09:10', '8/31 24:00', '8/31 12:60', '8/31 12:59:60']) {
+    assert.equal(isV2ReviewSubmitted(value), false, `${value}는 제출으로 인정하면 안 된다`);
+  }
+
+  const values = [
+    ['번호', '주문자', '리뷰옵션', '리뷰', '입금일'],
+    ['1', '홍길동', '포토', '8/31 10:08', ''],
+  ];
+  const rows = parseTabRows(values, 's', 't', '1', 'c', kw, null, null, buildV2StatusBindings(values[0]));
+  assert.equal(rows[0].isSubmitted, true);
+  assert.equal(rows[0].isSubmitted2, 'NONE');
 });
 
 test('v2는 리뷰 제출 전 입금 원장 기록도 막는다', async () => {

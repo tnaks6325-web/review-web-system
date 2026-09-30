@@ -24,8 +24,6 @@ assert.ok(/concurrentMap\(/.test(ib), 'indexBuilder: concurrentMap 교체 확인
 assert.ok(!/await\s+getSheetModifiedTime\(/.test(ib), 'checkDirtySheets: 맨 호출 잔존(R4 — 무제한 버스트)');
 assert.ok(/driveThrottledCall\(\(\)\s*=>\s*getSheetModifiedTime/.test(ib), 'indexBuilder: drive lane 래핑 확인');
 
-const scan = read('services/indexScan.service.js');
-assert.ok(!/await\s+throttledMap\(/.test(scan), 'indexScan: 팬텀 throttledMap 잔존');
-assert.ok(/concurrentMap\(/.test(scan), 'indexScan: concurrentMap 교체 확인');
+// (indexScan.service 는 결정 186 80번에서 제거)
 
 console.log('✅ driveLaneCallsites 전체 통과');

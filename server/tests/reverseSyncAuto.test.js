@@ -50,6 +50,11 @@ function makePool(scenario) {
         sheet_id: 's1', tab_gid: '9', tab_name: 'T', headers: HEADERS,
         detected_headers: HEADERS, header_row_index: 1, data_start_row: 2, _dup: '1' }] };
       if (s.includes('FROM raw_sheet_rows')) return { rows: [] };
+      /* 감지대상 허용목록(sheetlessScope.DETECTABLE_TABS_SQL) — 이 시나리오의 T 탭은
+         무시트도 마감도 아닌 **살아 있는 시트 탭**이다. 여기 없으면 감지·자동적용에서 제외된다. */
+      if (s.includes('FROM tab_configs') && s.includes('is_closed')) {
+        return { rows: [{ sheet_id: 's1', tab_name: 'T', tab_gid: '9' }] };
+      }
       if (s.includes('FROM reverse_sync_proposals p JOIN order_submissions o')) return { rows: scenario.candidates };
       if (s.includes('SELECT orderer, user_id, memo, date_str')) return { rows: scenario.order ? [scenario.order] : [] };
       if (s.startsWith('UPDATE order_submissions SET') && s.includes('reverse_sync_last_auto_at = NOW()')) { calls.updates.push({ s, params }); return { rowCount: 1 }; }

@@ -12,7 +12,7 @@
  * ★ 전부 fail-soft: 라우팅의 어떤 실패도 업로드·제출을 죽이지 않는다(호출부 try/catch 이중).
  */
 const { logger } = require('../utils/logger');
-const { routeDecision, routeMode, rejectEnabled, routeSlotLabel } = require('../utils/captureRoute');
+const { routeMode, rejectEnabled, routeSlotLabel } = require('../utils/captureRoute');
 
 let _pool;
 function _db() {
@@ -69,7 +69,7 @@ async function _sheetTitleFor(sheetId, tabName) {
 /**
  * 이동 대상 폴더 ID.
  * @param {object} p { target: 'review'|'receipt'|'capture', sheetId, tabName,
- *                    reviewBaseFolderId(그 탭 [리뷰] 폴더 — review/receipt 대상에 필수),
+ *                    reviewBaseFolderId(그 탭 [리뷰] 폴더 — review 대상에 필수),
  *                    receiptLabel(현금영수증 서브폴더명) }
  * @returns {string|null} 확보 실패 = null(이동하지 않음 — fail-closed)
  */
@@ -78,8 +78,10 @@ async function resolveTargetFolder({ target, sheetId, tabName, reviewBaseFolderI
   try {
     if (target === 'review') return reviewBaseFolderId || null;
     if (target === 'receipt') {
-      if (!reviewBaseFolderId || !receiptLabel) return null;
-      const f = await driveService.getOrCreateSubFolder(reviewBaseFolderId, receiptLabel);
+      if (!receiptLabel) return null;
+      // 업체 화면에 URL이 내려가는 [리뷰]·[구매캡처] 아래에는 영수증을 두지 않는다.
+      const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+      const f = await driveService.ensureReceiptFolderPath(rootFolderId, sheetId, tabName, receiptLabel);
       return f && f.id ? f.id : null;
     }
     if (target === 'capture') {
@@ -130,34 +132,39 @@ async function markRouted({ fileId, fromSlot, by = 'auto:upload' } = {}) {
 /**
  * 대표 리뷰 이미지(review_index.review_file_*, A-1) 재계산 — 라우팅으로 review 슬롯
  * 구성이 바뀐 행에서만 호출한다. 남은 review 슬롯 파일 중 최신을 대표로, 없으면 비움
- * (영수증이 대표 이미지로 남아 업체 뷰어에 나가는 것 방지). fail-soft.
+ * (영수증이 대표 이미지로 남아 업체 뷰어에 나가는 것 방지).
  */
-async function recomputePrimary({ sheetId, tabName, rowIndex } = {}) {
-  if (!sheetId || !tabName || rowIndex == null) return;
+async function recomputePrimary({ sheetId, tabName, rowIndex, db } = {}) {
+  if (!sheetId || !tabName || rowIndex == null) return { ok: false, error: 'target_required' };
+  const q = db || _db();
   try {
-    const { rows } = await _db().query(
+    const { rows } = await q.query(
       `SELECT file_id, file_url, file_name, uploaded_at FROM review_submissions
         WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND slot_key = 'review'
         ORDER BY uploaded_at DESC NULLS LAST`,
       [sheetId, tabName, rowIndex]);
     if (rows.length) {
       const p = rows[0];
-      await _db().query(
+      const updated = await q.query(
         `UPDATE review_index
             SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
                 review_file_count = $4, review_file_at = COALESCE($5, review_file_at)
           WHERE sheet_id = $6 AND tab_name = $7 AND row_index = $8`,
         [p.file_id, p.file_url, p.file_name, rows.length, p.uploaded_at, sheetId, tabName, rowIndex]);
+      if (!updated.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
     } else {
-      await _db().query(
+      const updated = await q.query(
         `UPDATE review_index
             SET review_file_id = NULL, review_file_url = NULL, review_file_name = NULL,
                 review_file_count = 0
           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
         [sheetId, tabName, rowIndex]);
+      if (!updated.rowCount) throw new Error('review_index 대상 행을 찾을 수 없습니다.');
     }
+    return { ok: true };
   } catch (e) {
-    logger.warn(`[fileRoute] 대표 이미지 재계산 실패(무시): ${e.message}`);
+    logger.warn(`[fileRoute] 대표 이미지 재계산 실패: ${e.message}`);
+    return { ok: false, error: e.message };
   }
 }
 
@@ -174,7 +181,7 @@ async function logRouteEvent({ eventType, severity = 'warn', resolved = false,
 
 /* ── 되돌리기 ─────────────────────────────────────────────────────── */
 
-/** 탭 설정 + 리뷰타입 + [리뷰] 폴더 ID + 현금영수증 서브폴더 라벨. */
+/** 탭 설정 + 리뷰타입 + [리뷰] 폴더 ID + 현금영수증 슬롯 키/라벨. */
 async function _tabRouteCtx(sheetId, tabName) {
   const driveService = require('./drive.service');
   const { rows } = await _db().query(
@@ -183,12 +190,25 @@ async function _tabRouteCtx(sheetId, tabName) {
   const cfg = rows[0] || {};
   let reviewType = null;
   try { reviewType = await require('./reviewTypeContext.service').reviewTypeForTab({ sheetId, tabName }); } catch (_) {}
+  let campaignCashReceipt = false;
+  try {
+    campaignCashReceipt = (await require('./cashReceiptContext.service')
+      .cashReceiptRequiredForTab({ sheetId, tabName })) === true;
+  } catch (_) {}
   const reviewBaseFolderId = cfg.folder_url ? driveService.extractFolderIdFromUrl(cfg.folder_url) : null;
   let receiptLabel = null;
+  let receiptKey = null;
   try {
-    receiptLabel = require('../utils/captureSlots').slotLabel(cfg.capture_slots, cfg.income_type, 'receipt', reviewType);
+    const info = require('../utils/captureSlots')
+      .cashReceiptSlotInfo(cfg.capture_slots, cfg.income_type, campaignCashReceipt, reviewType);
+    receiptLabel = info.slot && info.slot.label;
+    receiptKey = info.slot && info.slot.key;
   } catch (_) {}
-  return { cfg, reviewType, reviewBaseFolderId, receiptLabel: receiptLabel || '현금영수증' };
+  return {
+    cfg, reviewType, campaignCashReceipt, reviewBaseFolderId,
+    receiptLabel: receiptLabel || '현금영수증',
+    receiptKey: receiptKey || 'receipt',
+  };
 }
 
 /**
@@ -206,7 +226,14 @@ async function revertRoute({ fileId, by = 'revert' } = {}) {
   if (!sub.routed_from_slot) return { ok: false, error: '자동 이동 이력이 없는 파일입니다.' };
 
   const ctx = await _tabRouteCtx(sub.sheet_id, sub.tab_name);
-  const backTarget = sub.routed_from_slot === 'receipt' ? 'receipt' : 'review';
+  const { isCashReceiptSlot } = require('../utils/captureSlots');
+  const backTarget = isCashReceiptSlot(
+    ctx.cfg.capture_slots,
+    ctx.cfg.income_type,
+    sub.routed_from_slot,
+    ctx.reviewType,
+    ctx.campaignCashReceipt,
+  ) ? 'receipt' : 'review';
   const toFolderId = await resolveTargetFolder({
     target: backTarget, sheetId: sub.sheet_id, tabName: sub.tab_name,
     reviewBaseFolderId: ctx.reviewBaseFolderId, receiptLabel: ctx.receiptLabel,
@@ -219,11 +246,53 @@ async function revertRoute({ fileId, by = 'revert' } = {}) {
   const parent = (cur.parents || [])[0] || null;
   if (parent !== toFolderId) await driveService.moveFile(fileId, toFolderId, parent);
 
-  await _db().query(
-    `UPDATE review_submissions
-        SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
-      WHERE file_id = $1`, [fileId]);
+  if (backTarget === 'receipt') {
+    const pendingChecks = JSON.stringify({
+      receiptValidation: { verdict: 'warn', status: 'retry_pending', reason: 'receipt_route_revert' },
+    });
+    await _db().query(
+      `WITH restored AS (
+         UPDATE review_submissions
+            SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
+          WHERE file_id = $1
+          RETURNING file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key
+       )
+       INSERT INTO review_inspections
+         (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
+          inspected_at, updated_at)
+       SELECT file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key,
+              'pending', $2::jsonb, NOW(), NOW()
+         FROM restored
+       ON CONFLICT (file_id) DO UPDATE
+         SET sheet_id = EXCLUDED.sheet_id, tab_name = EXCLUDED.tab_name,
+             row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
+             slot_key = EXCLUDED.slot_key, status = 'pending', checks = EXCLUDED.checks,
+             resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+             attempts = 0, inspected_at = NOW(), updated_at = NOW()`,
+      [fileId, pendingChecks]
+    );
+  } else {
+    await _db().query(
+      `WITH restored AS (
+         UPDATE review_submissions
+            SET slot_key = routed_from_slot, routed_from_slot = NULL, routed_at = NULL, routed_by = NULL
+          WHERE file_id = $1
+          RETURNING file_id, slot_key
+       )
+       UPDATE review_inspections i
+          SET slot_key = restored.slot_key,
+              checks = COALESCE(i.checks, '{}'::jsonb) - 'receiptValidation',
+              status = 'pending', resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+              attempts = 0, updated_at = NOW()
+         FROM restored
+        WHERE i.file_id = restored.file_id`, [fileId]);
+  }
   await recomputePrimary({ sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index });
+  let reinspection = null;
+  if (backTarget === 'receipt') {
+    try { reinspection = await require('./reviewInspect.service').reinspectReceiptFile({ fileId }); }
+    catch (_) { reinspection = { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' }; }
+  }
   // 이 파일로 열린 자동 이동 알림은 원인이 사라졌으니 함께 닫는다
   try {
     await _db().query(
@@ -237,7 +306,8 @@ async function revertRoute({ fileId, by = 'revert' } = {}) {
     message: `자동 이동을 되돌렸습니다 — ${routeSlotLabel(sub.slot_key)} → ${routeSlotLabel(sub.routed_from_slot)} (${by})`,
     context: { fileId, from: sub.slot_key, to: sub.routed_from_slot, row: String(sub.row_index ?? '') },
   });
-  return { ok: true, fileId, restoredSlot: sub.routed_from_slot };
+  return { ok: true, fileId, restoredSlot: sub.routed_from_slot,
+    ...(backTarget === 'receipt' ? { reinspection } : {}) };
 }
 
 /** 리뷰웹시스템[3버전] 로그의 capture_routed 알림 1건에서 되돌리기. */
@@ -260,136 +330,56 @@ async function revertRouteFromEvent({ id, by = 'revert' } = {}) {
   return out;
 }
 
-/* ── 소급 정리 스윕 (과거 오제출 — 사용자 확정 "소급정리 필요") ──────────
- * 그 탭의 기존 제출 원장을 훑어 오제출을 찾아 [미리보기 → 실행] 2단계로 정리한다.
- * 건당 Drive 다운로드 1회 + AI 1콜(캐시 미스 가정)이라 limit 으로 상한(기본 20).
- * ★ 이미 라우팅된 파일(routed_from_slot NOT NULL)은 건너뜀 — 핑퐁 방지.
- * ★ 실행 시에도 이동/휴지통 규칙은 실시간 경로와 동일(전이표·해시 중복만).
- * ★ is_submitted 는 건드리지 않는다(문서화된 한계) — 이동으로 리뷰 캡처가 빈 행은
- *   알림(capture_routed)으로 남아 관리자가 리뷰어에게 재요청한다.
- */
-async function sweepTab({ sheetId, tabName, dryRun = true, limit = 20, by = 'sweep' } = {}) {
-  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
-  const cap = Math.max(1, Math.min(Number(limit) || 20, 60));
-  const driveService = require('./drive.service');
-  const { verifyCapture } = require('./captureVerify.service');
-  const inspect = require('./reviewInspect.service');
-
-  const ctx = await _tabRouteCtx(sheetId, tabName);
-  if (!ctx.reviewBaseFolderId) {
-    return { ok: false, error: '이 탭에 [리뷰] 폴더가 연결돼 있지 않아 정리할 수 없습니다.' };
+async function _recordRouteMove({ fileId, targetSlot, routedBy, receipt = false, requireUnrouted = false } = {}) {
+  if (!receipt) {
+    return _db().query(
+      `WITH moved AS (
+         UPDATE review_submissions
+            SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
+                routed_at = NOW(), routed_by = $3
+          WHERE file_id = $1${requireUnrouted ? ' AND routed_from_slot IS NULL' : ''}
+          RETURNING file_id, slot_key
+       )
+       UPDATE review_inspections i
+          SET slot_key = moved.slot_key,
+              checks = COALESCE(i.checks, '{}'::jsonb) - 'receiptValidation',
+              status = 'pending', resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+              attempts = 0, updated_at = NOW()
+         FROM moved
+        WHERE i.file_id = moved.file_id`,
+      [fileId, targetSlot, routedBy]
+    );
   }
-  let expectedChannel = null;
-  try { expectedChannel = (await inspect.loadTabExpectations({ sheetId, tabName })).expectedChannel; } catch (_) {}
-  const samplesBySlot = {
-    review: await inspect.submissionSamples({ expectedChannel, slotKey: 'review' }).catch(() => []),
-    receipt: await inspect.submissionSamples({ expectedChannel, slotKey: 'receipt' }).catch(() => []),
-  };
-  const routeKinds = new Set((await inspect.loadRouteSamples().catch(() => [])).map(s => s.kind));
-  const hasRouteSamples = routeKinds.has('order_capture') && routeKinds.has('purchase_confirm');
-  let hasReceiptSlot = false;
-  try {
-    const { effectiveCaptureSlots } = require('../utils/captureSlots');
-    hasReceiptSlot = (effectiveCaptureSlots(ctx.cfg.capture_slots, ctx.cfg.income_type, ctx.reviewType) || [])
-      .some(s => s.key === 'receipt');
-  } catch (_) {}
-
-  let subs;
-  try {
-    const r = await _db().query(
-      `SELECT file_id, file_name, row_index, reviewer_name, slot_key, file_hash
-         FROM review_submissions
-        WHERE sheet_id = $1 AND tab_name = $2
-          AND slot_key IN ('review', 'receipt')
-          AND routed_from_slot IS NULL
-        ORDER BY uploaded_at DESC
-        LIMIT $3`, [sheetId, tabName, cap]);
-    subs = r.rows;
-  } catch (e) {
-    return { ok: false, error: `원장 조회 실패(migration 091 적용 확인): ${e.message}`, code: 'not_ready' };
-  }
-
-  const plans = [];
-  const errors = [];
-  let scanned = 0;
-  for (const s of subs) {
-    scanned++;
-    try {
-      const f = await driveService.downloadFile(s.file_id);
-      if (!f || !f.buffer) { continue; }
-      const b64 = f.buffer.toString('base64');
-      const verdict = await verifyCapture({
-        base64: b64, mimeType: f.mimeType || 'image/jpeg', slotKey: s.slot_key,
-        reviewType: ctx.reviewType, samples: samplesBySlot[s.slot_key] || [],
-      });
-      const rd = routeDecision({ slotKey: s.slot_key, verdict, hasReceiptSlot, hasRouteSamples, expectedChannel });
-      if (rd.action !== 'route') continue;
-      const dup = await findSlotDuplicate({
-        sheetId, tabName, rowIndex: s.row_index, reviewerName: s.reviewer_name,
-        toSlot: rd.toSlot, fileHash: s.file_hash || inspect.hashBase64(b64), fileId: s.file_id,
-      });
-      plans.push({
-        fileId: s.file_id, fileName: s.file_name, rowIndex: s.row_index,
-        reviewerName: s.reviewer_name, fromSlot: s.slot_key, toSlot: rd.toSlot, target: rd.target,
-        got: verdict.got, confidence: verdict.confidence,
-        duplicate: dup ? { matchFileId: dup.file_id } : null,
-      });
-    } catch (e) {
-      errors.push({ fileId: s.file_id, error: e.message });
-    }
-  }
-
-  if (dryRun) return { ok: true, dryRun: true, scanned, plans, errors, hasRouteSamples, hasReceiptSlot };
-
-  // ── 실행 ──
-  let moved = 0, trashed = 0, failed = 0;
-  for (const p of plans) {
-    try {
-      if (p.duplicate) {
-        // 대상 슬롯에 같은 지문의 정본이 이미 있음 → 이 파일은 중복 사본 = 휴지통
-        await driveService.trashFiles([{ id: p.fileId, name: p.fileName || p.fileId }]);
-        await _db().query(
-          `UPDATE review_submissions
-              SET routed_from_slot = slot_key, slot_key = 'trashed', routed_at = NOW(), routed_by = $2
-            WHERE file_id = $1`, [p.fileId, 'dup:' + by]);
-        trashed++;
-        await logRouteEvent({
-          eventType: 'capture_dup_rejected', severity: 'warn',
-          sheetId, tabName, reviewerName: p.reviewerName,
-          message: `${p.reviewerName || '리뷰어'}님의 ${p.rowIndex != null ? p.rowIndex + '행 ' : ''}` +
-            `${routeSlotLabel(p.fromSlot)} 캡처가 ${routeSlotLabel(p.toSlot)} 칸의 기존 제출과 동일 파일(SHA-256 일치)이라 휴지통으로 옮겼습니다(소급 정리).`,
-          context: { fileId: p.fileId, matchFileId: p.duplicate.matchFileId, from: p.fromSlot, to: p.toSlot, row: String(p.rowIndex ?? ''), sweep: true },
-        });
-      } else {
-        const toFolderId = await resolveTargetFolder({
-          target: p.target, sheetId, tabName,
-          reviewBaseFolderId: ctx.reviewBaseFolderId, receiptLabel: ctx.receiptLabel,
-        });
-        if (!toFolderId) { failed++; errors.push({ fileId: p.fileId, error: '대상 폴더 확보 실패' }); continue; }
-        const cur = await driveService.getFileParents(p.fileId);
-        const parent = (cur.parents || [])[0] || null;
-        if (parent !== toFolderId) await driveService.moveFile(p.fileId, toFolderId, parent);
-        await _db().query(
-          `UPDATE review_submissions
-              SET routed_from_slot = slot_key, slot_key = $2, routed_at = NOW(), routed_by = $3
-            WHERE file_id = $1 AND routed_from_slot IS NULL`, [p.fileId, p.toSlot, 'sweep:' + by]);
-        moved++;
-        await recomputePrimary({ sheetId, tabName, rowIndex: p.rowIndex });
-        await logRouteEvent({
-          eventType: 'capture_routed', severity: 'warn',
-          sheetId, tabName, reviewerName: p.reviewerName,
-          message: `${p.reviewerName || '리뷰어'}님의 ${p.rowIndex != null ? p.rowIndex + '행 ' : ''}` +
-            `${routeSlotLabel(p.fromSlot)} 캡처가 ${routeSlotLabel(p.toSlot)}(AI 확신 ${Math.round((p.confidence || 0) * 100)}%)으로 판정되어 ${routeSlotLabel(p.toSlot)} 폴더로 이동했습니다(소급 정리).`,
-          context: { fileId: p.fileId, from: p.fromSlot, to: p.toSlot, row: String(p.rowIndex ?? ''), sweep: true },
-        });
-      }
-    } catch (e) {
-      failed++;
-      errors.push({ fileId: p.fileId, error: e.message });
-    }
-  }
-  return { ok: true, dryRun: false, scanned, planned: plans.length, moved, trashed, failed, errors };
+  // 영수증 칸 이동과 기존 일반 검수 무효화는 한 SQL 문으로 묶는다. 둘 사이에 입금 요청이
+  // 끼어도 예전 resolution='ok'가 새 영수증 제출의 승인으로 재사용될 수 없다.
+  const pendingChecks = JSON.stringify({
+    receiptValidation: { verdict: 'warn', status: 'retry_pending', reason: 'receipt_route' },
+  });
+  return _db().query(
+    `WITH moved AS (
+       UPDATE review_submissions
+          SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
+              routed_at = NOW(), routed_by = $3
+        WHERE file_id = $1${requireUnrouted ? ' AND routed_from_slot IS NULL' : ''}
+        RETURNING file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key
+     )
+     INSERT INTO review_inspections
+       (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
+        inspected_at, updated_at)
+     SELECT file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key,
+            'pending', $4::jsonb, NOW(), NOW()
+       FROM moved
+     ON CONFLICT (file_id) DO UPDATE
+       SET sheet_id = EXCLUDED.sheet_id, tab_name = EXCLUDED.tab_name,
+           row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
+           slot_key = EXCLUDED.slot_key, status = 'pending', checks = EXCLUDED.checks,
+           resolution = NULL, resolved_at = NULL, resolved_by = NULL,
+           attempts = 0, inspected_at = NOW(), updated_at = NOW()`,
+    [fileId, targetSlot, routedBy, pendingChecks]
+  );
 }
+
+/* (소급 정리 스윕 sweepTab — 8/5 이후 실시간 자동 분류로 대체, 9월 0 → 2026-09-29 제거 · 결정 186 67번) */
 
 /* ── 수동 분류(이동) — 검수 화면에서 사람이 대상 칸을 직접 고른다 ──────────
  * 자동 이동과 **같은 실행부**(폴더 해석·이동·원장·대표 이미지·로그)를 타므로 결과 상태가
@@ -416,15 +406,18 @@ async function manualRoute({ fileId, target, by = '' } = {}) {
     sub = rows[0];
   } catch (e) { return { ok: false, error: `원장 조회 실패: ${e.message}` }; }
   if (!sub) return { ok: false, error: '원장에 없는 파일이라 이동할 수 없습니다.' };
-  if (sub.slot_key === t) return { ok: false, error: '이미 그 칸에 있는 파일입니다.' };
-
   const ctx = await _tabRouteCtx(sub.sheet_id, sub.tab_name);
+  // UI/API target='receipt'는 폴더 종류이다. 원장에는 캠페인에 설정된 실제 슬롯 키
+  // (e.g. slot2)를 써야 중복 판정과 입금 자격 검사가 같은 제출물을 본다.
+  const targetSlot = t === 'receipt' ? ctx.receiptKey : t;
+  const targetLabel = t === 'receipt' ? ctx.receiptLabel : routeSlotLabel(targetSlot);
+  if (sub.slot_key === targetSlot) return { ok: false, error: '이미 그 칸에 있는 파일입니다.' };
   if ((t === 'review' || t === 'receipt') && !ctx.reviewBaseFolderId) {
     return { ok: false, error: '이 탭에 [리뷰] 폴더가 연결돼 있지 않아 이동할 수 없습니다.' };
   }
   const dup = await findSlotDuplicate({
     sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index,
-    reviewerName: sub.reviewer_name, toSlot: t, fileHash: sub.file_hash, fileId,
+    reviewerName: sub.reviewer_name, toSlot: targetSlot, fileHash: sub.file_hash, fileId,
   });
   if (dup) return { ok: false, error: '대상 칸에 같은 파일이 이미 있습니다 — 이동 대신 기존 파일을 확인해 주세요.' };
 
@@ -442,20 +435,18 @@ async function manualRoute({ fileId, target, by = '' } = {}) {
 
   // ★ routed_from_slot 은 COALESCE — 자동 이동 뒤 사람이 다시 옮겨도 **최초 출처**를 보존해
   //   되돌리기가 항상 원래 칸으로 간다.
-  await _db().query(
-    `UPDATE review_submissions
-        SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = $2,
-            routed_at = NOW(), routed_by = $3
-      WHERE file_id = $1`, [fileId, t, 'manual:' + (by || 'admin')]);
+  await _recordRouteMove({
+    fileId, targetSlot, routedBy: 'manual:' + (by || 'admin'), receipt: t === 'receipt',
+  });
   await recomputePrimary({ sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index });
   await logRouteEvent({
     eventType: 'capture_routed', severity: 'warn', resolved: true,   // 사람이 한 행동 — 알림으로 쌓지 않는다
     sheetId: sub.sheet_id, tabName: sub.tab_name, reviewerName: sub.reviewer_name,
     message: `${sub.reviewer_name || '리뷰어'}님의 ${sub.row_index != null ? sub.row_index + '행 ' : ''}` +
-      `${routeSlotLabel(sub.slot_key)} 캡처를 ${by || '관리자'}님이 ${routeSlotLabel(t)} 폴더로 수동 분류했습니다.`,
-    context: { fileId, from: sub.slot_key, to: t, row: String(sub.row_index ?? ''), manual: true },
+      `${routeSlotLabel(sub.slot_key)} 캡처를 ${by || '관리자'}님이 ${targetLabel} 폴더로 수동 분류했습니다.`,
+    context: { fileId, from: sub.slot_key, to: targetSlot, row: String(sub.row_index ?? ''), manual: true },
   });
-  return { ok: true, from: sub.slot_key, to: t, sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index };
+  return { ok: true, from: sub.slot_key, to: targetSlot, sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index };
 }
 
 /**
@@ -537,7 +528,7 @@ async function routeAccuracyStats({ days = 30 } = {}) {
 
 module.exports = {
   findSlotDuplicate, resolveTargetFolder, markRouted, recomputePrimary,
-  logRouteEvent, revertRoute, revertRouteFromEvent, sweepTab,
+  logRouteEvent, revertRoute, revertRouteFromEvent,
   manualRoute, dedupManual, routeAccuracyStats,
   routeMode, rejectEnabled,
   __setPoolForTest,

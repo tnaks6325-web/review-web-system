@@ -248,8 +248,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('통계는 읽기 전용(SELECT 만)', /FROM tab_configs tc/.test(finBlock) && !/UPDATE tab_configs/.test(finBlock));
   t('마감자료 표시는 기존 정산 원장 재사용(신규 저장소 0)', /trackb_tab_closeouts/.test(finBlock));
   t('★ LATERAL LIMIT 1 — 마감자료가 여러 건이어도 행 곱증식 없음', /LATERAL[\s\S]{0,220}LIMIT 1/.test(finBlock));
-  t('★ 입금 집계는 WHERE 로 대상을 줄인다(홈 진입마다 review_index 전 행을 훑지 않는다)',
-    /FROM review_index WHERE is_submitted2 = 'PAID' GROUP BY/.test(finBlock));
+  t('★ 입금 집계는 탭별 LATERAL 범위로 제한한다(홈 진입마다 전체 원장을 훑지 않는다)',
+    /FROM campaign_participants p[\s\S]{0,180}p\.sheet_id = tc\.sheet_id AND p\.tab_name = tc\.tab_name/.test(finBlock)
+    && /p\.active = TRUE AND p\.deleted_at IS NULL AND p\.held_at IS NULL/.test(finBlock));
   t('마감/복귀는 감사 로그를 남긴다(같은 파일의 다른 전사 공통 쓰기와 같은 관례)',
     /logger\.info\(`\[trackB\] 작업 마감/.test(finBlock) && /logger\.info\(`\[trackB\] 작업 진행중 복귀/.test(finBlock));
   // ★★ 이 맵은 전 탭 무스코프 — 응답에 통째로 실으면 전 업체 담당자·캠페인명이 staff 에게 샌다.
@@ -269,8 +270,8 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     /id="finGo" disabled/.test(WD) && /doFinish\(\)\{[\s\S]{0,200}if\(!chk\|\|!chk\.checked\) return;/.test(WD));
   t('★ 확인창은 body 직속(뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다 — 레포 실측 사고)',
     /document\.body\.appendChild\(ov\)/.test(WD));
-  t('마감자료 미생성은 경고만(하드블록 금지 — 안 쓰는 작업 유형까지 막지 않는다)',
-    /wbl-warn[\s\S]{0,200}마감자료가 아직/.test(WD) && !/closeoutDate[\s\S]{0,120}disabled=true/.test(WD));
+  t('마감 확인창은 제거된 마감자료 생성 기능을 안내하지 않고 리뷰 캡처 검수만 확인한다',
+    !/마감자료가 아직|정산 카드에서 먼저 생성/.test(WD) && /리뷰폴더의 리뷰 캡처 검수를 확인했습니다/.test(WD));
   t('★ 히어로 "진행 중 작업" writer 는 한 곳(두 곳에서 세면 마감 직후 3 과 2 로 갈린다)',
     (WD.match(/getElementById\('hmStTabs'\)/g) || []).length === 1);
   t('★ 그 한 곳이 목록 렌더 안 = 목록 [진행 중] 개수와 같은 재료',
@@ -280,7 +281,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('목록 → 작업 열기는 기존 pendingTab 계약 재사용(히스토리 규칙과 자동 정합)',
     /openTaskFromHome\(i\)\{[\s\S]{0,320}STATE\.pendingTab=[\s\S]{0,200}switchView\('workdesk'\)/.test(WD));
   t('★ 검색은 마감 작업도 찾아주되 마감이라고 말한다(작업바에서 빠진 작업을 되찾는 유일한 길)',
-    /isFinished\(t\)\?'🏁 마감 · ':''/.test(WD));
+    /`\*마감 : \$\{_tabLabel\(t\)\}`/.test(WD));
   // ★★ 실측 취약점(이 작업에서 브라우저로 재현): onclick 에 시트에서 온 이름을 넣으면 esc() 로도 못 막는다.
   //   HTML 속성은 엔티티 디코드 후 JS 로 파싱되므로 탭명 `x'),alert(1),String('` 하나로 임의 JS 가 실행되고
   //   서버엔 잘린 탭명이 전송됐다. 레포 관용구 = **인덱스만 넘긴다**(worktable 후보 클릭·_idAttr 전례).
