@@ -350,28 +350,10 @@ router.get('/overview', authMiddleware, internalMiddleware, async (req, res, nex
     res.json({ ok: true, items, coverage });
   } catch (err) { next(err); }
 });
-// ── 명의 카드(2단계 조각 1 · migration 166 · 결정 기록 175) — adminOrMaster ──
-//   리뷰어 명의(본인·타계정)를 고유 번호 카드로 옮긴다. 이 조각에서는 아무도 카드를 읽지 않는다.
-//   미리보기 = 쓰기 0 / 적용 = confirm:true 필수 · 소유자마다 한 트랜잭션 · 여러 번 돌려도 결과 동일.
+// ── 명의 카드(migration 166 · 결정 기록 175~181) — adminOrMaster ──
+//   (조각 1 의 일괄 카드 만들기 preview/apply 는 전원 카드 완료(3,365/3,365)로 2026-09-30 제거 — 결정 186 70번.
+//    새 리뷰어·바뀐 명의는 아래 reconcile 이 10분 cron 으로 맞춘다.)
 const identityCards = require('../services/reviewerIdentityCards.service');
-router.get('/identity-cards/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await identityCards.previewCards()); } catch (err) { next(err); }
-});
-router.post('/identity-cards/apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    const out = await identityCards.applyCards({
-      confirm: b.confirm === true, limit: b.limit, afterId: b.afterId || null,
-      by: (req.admin && req.admin.name) || '',
-    });
-    res.status(out.ok === false ? 400 : 200).json(out);
-  } catch (err) {
-    if (err && err.code === '42P01') {
-      return res.json({ ok: false, code: 'not_ready', error: '명의 카드 표(migration 166)가 아직 적용되지 않았습니다 — 배포 완료 후 다시 시도해주세요.' });
-    }
-    next(err);
-  }
-});
 // 조각 2-1: 카드 ↔ 리뷰어 정보(sub_accounts) 대조. drift = 쓰기 0(달라진 리뷰어 수만), reconcile = confirm:true 필수.
 router.get('/identity-cards/drift', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await identityCards.reconcileCards({ dryRun: true })); } catch (err) {
