@@ -31,29 +31,9 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const LOCK_PREFIX = 'purchase_capture:';   // purchaseSubmissionSession.completeCapture 와 같은 키
 
 const { tableOrderNumSql, MIN_ORDER_NUM_DIGITS } = require('../utils/tableOrderNum');
-
+// ★★ 줄 → 주문 판정은 제출물 미리보기와 같은 함수(utils/rowOrderMatch 단일 출처).
+const { orderMatchesRow, pickRowOrder } = require('../utils/rowOrderMatch');
 const _digits = v => String(v == null ? '' : v).replace(/\D/g, '');
-const _nm = v => String(v == null ? '' : v).replace(/\s+/g, '').replace(/\(.*?\)/g, '');
-
-/**
- * ★★ 그 주문이 **이 줄 사람의 주문인지** 확인한다(2026-09-30 운영 실측으로 추가).
- *   `sheet_row` 는 시트 시절 줄 번호라 줄이 재배치된 작업에서 **남의 주문**을 가리킨다
- *   (마감 작업 1곳에서 캡처 있는 57줄 중 36줄이 다른 사람 주문). 그래서 번호만 믿지 않는다.
- *   순서: 표 주문번호 ↔ 원장 주문번호(둘 다 6자리 이상이면 이것만으로 판정)
- *        → 연락처 뒤 8자리 → 이름(참여자·수취인 ↔ 원장 수취인·주문자). 근거가 없으면 **아니다**.
- */
-function orderMatchesRow(row, order) {
-  const rowNum = _digits(row.table_order_num);
-  const oNum = _digits(order.order_num);
-  if (rowNum.length >= MIN_ORDER_NUM_DIGITS && oNum.length >= MIN_ORDER_NUM_DIGITS) {
-    return rowNum === oNum || rowNum.includes(oNum);
-  }
-  const rp = _digits(row.phone8).slice(-8), op = _digits(order.phone).slice(-8);
-  if (rp.length === 8 && op.length === 8) return rp === op;
-  const rowNames = [row.reviewer_name, row.recipient_name].map(_nm).filter(Boolean);
-  const oNames = [order.recipient, order.orderer].map(_nm).filter(Boolean);
-  return rowNames.some(n => oNames.includes(n));
-}
 
 /** 그 작업표 줄의 주문(구매양식) 하나를 찾는다. 읽기 전용.
  *  후보 = (줄 번호 일치 ∪ 줄의 주문 링크 ∪ 표 주문번호 일치) — 탭 좌표 또는 연결 공고 좌표 주문만.
@@ -87,13 +67,9 @@ async function resolveRowOrder(db, { sheetId, tabName, rowId }) {
       ORDER BY os.submitted_at
       LIMIT 20`,
     [sheetId, tabName, p.seq, gid, p.order_submission_id || null, tnum.length >= MIN_ORDER_NUM_DIGITS ? tnum : '']);
-  if (!cands.length) return { ok: false, error: 'no_order', participant: p };
-  const mine = cands.filter(c => orderMatchesRow(p, c));
-  if (!mine.length) return { ok: false, error: 'order_mismatch', participant: p };
-  let order = null;
-  if (mine.length === 1) order = mine[0];
-  else if (p.order_submission_id) order = mine.find(c => String(c.id) === String(p.order_submission_id)) || null;
-  if (!order) return { ok: false, error: 'ambiguous_order', participant: p };
+  const picked = pickRowOrder(p, cands);
+  if (!picked.order) return { ok: false, error: picked.error, participant: p };
+  const order = picked.order;
   return { ok: true, participant: p, order };
 }
 

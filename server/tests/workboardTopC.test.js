@@ -123,9 +123,8 @@ t('★ 정원 폴백 규칙은 사본을 만들지 않는다 — linkedRecruitQu
 
 console.log('\n── B. 서버: 구매 캡처 묶음 ──');
 const rv = fnBody(svc, 'async function reviewImagesForTab(');
-t('④ 구매 캡처 짝짓기는 sheet_row 하나 — 오염된 링크(order_submission_id)로 붙이지 않는다',
-  /FROM order_submissions/.test(rv) && /sheet_row IS NOT NULL/.test(rv)
-  && !/FROM campaign_participants/.test(rv) && !/JOIN campaign_participants/.test(rv));
+t('④ 구매 캡처 짝짓기는 이 줄 사람의 주문으로 확인된 것만(2026-09-30 — sheet_row 단독 금지)',
+  /FROM order_submissions/.test(rv) && /matchRowsToOrders/.test(rv) && !/os\.sheet_row IS NOT NULL/.test(rv));
 t('④ 삭제된 주문은 근거가 아니다', /deleted_at IS NULL/.test(rv));
 t('★ 묶음 key 는 order_capture', /'order_capture'/.test(rv));
 t('⑤ 상한은 묶음별로 센다(전체 개수로 자르면 나중 묶음이 통째로 잘린다)',
