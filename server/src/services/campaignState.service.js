@@ -1020,6 +1020,29 @@ function __resetPlanCacheForTest() { _planTableMissingAt = 0; }
 let _ctqCache = new Map();               // campaignId → {at, val}
 const CTQ_CACHE_MS = 10 * 1000;
 const CTQ_CACHE_MAX = 800;               // 무한 성장 방지(넘으면 통째 비움 — LRU 불필요한 규모)
+/* ★★ 주문 원장 "구매 1건" 판정 (2026-09-30 모기위키 499/500 사고 — 결정 193).
+ *   ① 같은 구매가 두 기록으로 남는 경우가 있다: 리뷰어가 앱(공고)으로 낸 주문을 담당자가 외부모집
+ *      수동제출로 **같은 주문번호**로 다시 등록 → 기록 2건·표 줄 1개. `DISTINCT os.id` 로 세면
+ *      총원 마감(`table_over_total`)이 표보다 먼저 닫힌다(실측: 표 498 · 기록 500 → 마감).
+ *      → 주문번호가 6자리 이상(dedup_key 'num:')이면 **주문번호 + 연락처 끝 8자리**를 한 구매로 본다.
+ *      ★ 연락처까지 묶는다 — 주문번호만 보면 서로 다른 두 사람이 같은 번호를 적은 줄(실측 1쌍)을
+ *        한 명으로 접어 정원이 과소집계된다(초과 모집 방향). 약한 번호는 종전대로 기록 id 로 센다.
+ *   ② 취소(soft delete)된 기록이라도 **살아 있는 작업표 줄이 그 기록을 가리키면** 센다 — 8/19 정리
+ *      작업(migration 120)이 "표에는 들어갔는데 상태만 실패"인 기록을 닫아, 실제 참여자(리뷰 제출·입금
+ *      완료)가 원장에서 빠져 있다(전체 14줄). 빼면 ①과 합쳐 정원이 과소집계된다.
+ *      ★ [행 삭제]·중복 정리처럼 줄까지 내린 취소는 줄이 없으므로 종전대로 빠진다(자동 재오픈 규율 유지 — 031). */
+const ORDER_PURCHASE_KEY_SQL = `CASE WHEN os.dedup_key LIKE 'num:%'
+             THEN os.dedup_key || '|' || RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
+             ELSE 'id:' || os.id::text END`;
+// ★ 줄은 **이 공고의 연결 작업표** 줄이어야 한다 — 다른 작업표에 남은 옛 링크가 취소 기록을 되살리지 않게(Codex 리뷰).
+const ORDER_COUNTED_SQL = `(os.deleted_at IS NULL OR EXISTS (
+             SELECT 1 FROM campaign_participants cpx
+              WHERE cpx.order_submission_id = os.id AND cpx.deleted_at IS NULL AND cpx.active
+                AND cpx.sheet_id = rc.linked_sheet_id
+                AND (cpx.tab_name = rc.linked_tab_name
+                     OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                         AND NULLIF(cpx.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))))`;
+
 async function _loadLinkedOrderCounts(db, ids, now = new Date(), win = null) {
   // win = { dayStart, carryFrom, holdFrom } (ISO) — 주문을 신청 집계와 **같은 시간 구간**으로 나눠 센다(결정 184).
   const dayStart = (win && win.dayStart) || kstDayStartUtc(now).toISOString();
@@ -1046,27 +1069,27 @@ async function _loadLinkedOrderCounts(db, ids, now = new Date(), win = null) {
     //   재사용 탭의 과거 블록 문제가 없고, 잘라내면 공고 경유 확정이 과소집계된다.
     const { rows } = await db.query(`
       SELECT rc.id,
-             COUNT(DISTINCT os.id) FILTER (
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
                WHERE os.sheet_id = 'campaign:' || rc.id
                   OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at)
              )::int AS orders,
-             COUNT(DISTINCT os.id)::int AS orders_all,
-             COUNT(DISTINCT os.id) FILTER (
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL})::int AS orders_all,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
                WHERE (os.sheet_id = 'campaign:' || rc.id
                   OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
                  AND (os.submitted_at < $2 OR os.submitted_at IS NULL)
              )::int AS orders_before,
-             COUNT(DISTINCT os.id) FILTER (
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
                WHERE (os.sheet_id = 'campaign:' || rc.id
                   OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
                  AND os.submitted_at >= $2
              )::int AS orders_today,
-             COUNT(DISTINCT os.id) FILTER (
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
                WHERE (os.sheet_id = 'campaign:' || rc.id
                   OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
                  AND os.submitted_at >= $3 AND os.submitted_at < $2
              )::int AS orders_since_carry,
-             COUNT(DISTINCT os.id) FILTER (
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (
                WHERE (os.sheet_id = 'campaign:' || rc.id
                   OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
                  AND os.submitted_at >= $4 AND os.submitted_at < $2
@@ -1082,7 +1105,7 @@ async function _loadLinkedOrderCounts(db, ids, now = new Date(), win = null) {
                       AND NULLIF(rc2.linked_tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
         ) shared ON TRUE
         LEFT JOIN order_submissions os
-          ON os.deleted_at IS NULL
+          ON ${ORDER_COUNTED_SQL}
          AND (
               (os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id)
            OR (os.sheet_id = rc.linked_sheet_id
