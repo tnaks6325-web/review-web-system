@@ -11684,6 +11684,18 @@ async function _rsDismiss(i){
   toast('기각됨'); _rsOpen();
 }
 
+/* ★ 마감(🏁)된 작업은 서버가 입금 대상에서 뺀다(사용자 확정 2026-09-30). 화면은 뺀 사실을 한 줄로 말하고
+     [보기]로 펼칠 수 있다(조용히 숨기지 않는다). 주소는 이 함수 하나로 만든다(조회 두 곳이 갈리지 않게). */
+function _pmTargetsUrl(){ return '/api/trackb/payment/targets'+(STATE.pmShowFinished?'?includeFinished=1':''); }
+function _pmToggleFinished(){ STATE.pmShowFinished=!STATE.pmShowFinished; _pmLoad(true); }
+function _pmFinishedNoteHtml(){
+  if(STATE.pmFinUnknown) return `<div class="pmnote">⚠ 마감 여부를 확인하지 못해 <b>마감된 작업도 함께</b> 보여주고 있습니다.</div>`;
+  if(STATE.pmShowFinished) return `<div class="pmnote">🏁 <b>마감된 작업도 함께</b> 보고 있습니다. <button class="btn sm" onclick="_pmToggleFinished()">다시 숨기기</button></div>`;
+  const f=STATE.pmFinEx;
+  if(!f||!f.rows) return '';
+  return `<div class="pmnote">🏁 마감된 작업 <b>${Number(f.works)||0}개</b>의 <b>${Number(f.rows)||0}건</b>은 목록에서 뺐습니다${f.payable?` — 이 중 <b>지금 입금 가능한 ${Number(f.payable)}건</b>이 있습니다`:''}. <button class="btn sm" onclick="_pmToggleFinished()">보기</button></div>`;
+}
+
 async function _pmLoad(force){
   // 한 브라우저에서도 메뉴 재클릭·새로고침이 같은 대형 집계를 중복 호출하지 않게 한다.
   // 쓰기 성공 뒤 force=true이면 쓰기 전에 시작된 조회를 버리고 새 요청을 대표값으로 바꾼다.
@@ -11696,7 +11708,7 @@ async function _pmLoad(force){
   let t,b;
   try{
     [t,b]=await Promise.all([
-      api('/api/trackb/payment/targets',controller?{signal:controller.signal}:undefined),
+      api(_pmTargetsUrl(),controller?{signal:controller.signal}:undefined),
       api('/api/trackb/payment/batches?limit=30',controller?{signal:controller.signal}:undefined)
     ]);
   }catch(e){
@@ -11713,6 +11725,7 @@ async function _pmLoad(force){
     return;
   }
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
+  STATE.pmFinEx = t.finishedExcluded||null; STATE.pmFinUnknown = !!t.finishedUnavailable;
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
   // 새 결과 파일은 result-apply 경로에서 즉시 기록하므로, 이 경로는 기존 실패 이력에만 해당한다.
   const legacyFailed = STATE.pmBatches.filter(batch => batch.status === 'applied'
@@ -12003,6 +12016,7 @@ function _pmRender(){
         <h2 class="pmh2">이체 회차</h2>
         ${_pmBatchTable(STATE.pmBatches||[])}
       </section>
+      ${_pmFinishedNoteHtml()}
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다.</div>`:''}
       ${priceOutliers.length?`<div class="pmnote">⚠ <b>같은 작업의 대부분 금액과 크게 다른 단독 금액 ${priceOutliers.length}건</b>이 있습니다. 자동으로 막지는 않지만 다운로드 전에 아래의 ‘금액 확인’ 행을 검토해 주세요.</div>`:''}
@@ -13612,8 +13626,8 @@ async function _bnSave(){
   // 저장 즉시 판정 표가 바뀌므로 입금대상도 다시 읽어 **보류가 실제로 풀렸는지** 화면에 반영한다.
   // ★ 여기서 화면을 갈아타지 않는다(사용자는 은행 이름 탭에 그대로 머문다).
   try{
-    const t = await api('/api/trackb/payment/targets');
-    if(t && t.ok){ STATE.pmItems=t.items||[]; STATE.pmSum=t.summary||{}; }
+    const t = await api(_pmTargetsUrl());
+    if(t && t.ok){ STATE.pmItems=t.items||[]; STATE.pmSum=t.summary||{}; STATE.pmFinEx=t.finishedExcluded||null; STATE.pmFinUnknown=!!t.finishedUnavailable; }
   }catch(_){}
   STATE.bn = {
     rows:(r.banks||[]).map(b=>({ ...b, aliases:(b.aliases||[]).map(a=>({...a})) })),

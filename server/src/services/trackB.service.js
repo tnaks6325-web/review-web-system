@@ -5232,6 +5232,13 @@ const _FIN_KEY = (sheetId, tabName) => `${sheetId}\t${tabName}`;
  *  ★ **gid 폴백**: 운영 중 탭 리네임이 실재하므로(sync-tab-names·fix-swap) 이름만으로 매칭하면 마감이
  *    조용히 풀린다. 레포 규율 = "gid 우선 재매칭". 빈 gid 는 키를 만들지 않는다(전부 매칭되는 사고 방지). */
 const _FIN_GKEY = (sheetId, tabGid) => `${sheetId}\tgid:${tabGid}`;
+/** 그 탭이 마감됐는가 — finishedTabsMap 의 map 을 받아 **이름 → gid 폴백**으로 판정한다(키 규칙 단일 출처). */
+function isTabFinishedIn(map, sheetId, tabName, tabGid) {
+  if (!map) return false;
+  if (map[_FIN_KEY(sheetId, tabName)]) return true;
+  const g = String(tabGid == null ? '' : tabGid).trim();
+  return !!(g && map[_FIN_GKEY(sheetId, g)]);
+}
 async function finishedTabsMap() {
   try {
     const { rows } = await getPool().query(
@@ -6130,7 +6137,7 @@ module.exports = {
   setWorkdeskWorktabs,
   dailyDoneMap,
   setTabDailyDone,
-  finishedTabsMap,
+  finishedTabsMap, isTabFinishedIn,
   setTabFinished,
   autoFinishEligibleTabs,
   tabStatsMap,

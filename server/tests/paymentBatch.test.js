@@ -221,7 +221,7 @@ t('★ 리뷰비는 utils/campaignFee 단일 출처로 판정한다', () => {
 t('createBatch 는 화면 값을 믿지 않고 대상을 서버에서 재계산한다', () => {
   const fn = svcSrc.match(/async function createBatch[\s\S]*?\n}/);
   assert.ok(fn, 'createBatch 없음');
-  assert.ok(/listPaymentTargets\(\)/.test(fn[0]), '재계산 없이 요청 값을 그대로 담고 있다');
+  assert.ok(/listPaymentTargets\((\{ includeFinished: true \})?\)/.test(fn[0]), '재계산 없이 요청 값을 그대로 담고 있다');
   assert.ok(/it\.bank !== bank/.test(fn[0]), '다른 은행 건이 섞여도 걸러내지 않는다');
   assert.ok(/23505/.test(fn[0]), '동시 담기(부분유니크 위반) 처리가 없다');
 });
