@@ -45,7 +45,10 @@ const corsOptions = {
     callback(new Error(`CORS 차단: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Intake-Key'],
+  // Cache-Control·Last-Event-ID: 리뷰어 앱의 서비스워커가 실시간 알림(EventSource) 요청을 다시 보낼 때
+  // 브라우저가 붙이는 헤더다. 빠지면 사전 확인이 거절돼 연결이 3초마다 재시도되는 헛요청 루프가 된다
+  // (운영 실측 2026-09-28 — decision 189).
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Intake-Key', 'X-Reviewer-Token', 'Cache-Control', 'Last-Event-ID'],
   credentials: true,
   maxAge: 86400,
 };

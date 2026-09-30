@@ -11,7 +11,7 @@
  *   여기서는 그 모듈 안의 사진 첨부 배선만 검사한다.
  *
  * 고정하는 불변식
- *  ① 업로드 라우트는 authMiddleware+adminOrMaster 보호 아래(router.use 상속) 위치한다.
+ *  ① 업로드 라우트는 authMiddleware+internal 보호 아래(router.use 상속) 위치한다.
  *  ② 업로드 검증 규칙(mime 화이트리스트·8MB 상한)이 리뷰어측과 동일 — 갈라지면 한쪽만
  *     느슨해져 우회 경로가 생긴다.
  *  ③ 반환 URL은 기존 _sanitizeCsImageUrls 화이트리스트(guide-image 프록시)를 통과해야
@@ -39,8 +39,8 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 console.log('\n① 라우트 위치·보호');
 ok('업로드 라우트 존재(POST /upload)', /router\.post\('\/upload'/.test(csRoutes));
 {
-  // router.use(authMiddleware, adminOrMasterMiddleware) 아래(이전)에 있어야 보호가 상속된다.
-  const useIdx = csRoutes.indexOf("router.use(authMiddleware, adminOrMasterMiddleware)");
+  // router.use(authMiddleware, internalMiddleware) 뒤에 있어야 내부인 전용 보호가 상속된다.
+  const useIdx = csRoutes.indexOf("router.use(authMiddleware, internalMiddleware)");
   const upIdx = csRoutes.indexOf("router.post('/upload'");
   ok('업로드 라우트가 router.use 보호 이후에 선언(인증 상속)', useIdx > -1 && upIdx > useIdx);
 }
@@ -89,7 +89,7 @@ ok('8MB 초과 파일 차단(프론트 사전 검증)', /f\.size > 8 \* 1024 \* 
 console.log('\n⑤ 리뷰웹시스템[3버전](Track B) 프록시 대칭');
 ok('trackB가 /cs/upload도 위임(다른 6개 경로와 동일 패턴)',
   /upload:\s*_delegate\(_csRoutes, 'post', '\/upload'\)/.test(trackBRoutes));
-ok('trackB 마운트 경로도 authMiddleware+adminOrMaster로 보호',
-  /router\.post\('\/cs\/upload', authMiddleware, adminOrMasterMiddleware/.test(trackBRoutes));
+ok('trackB 마운트 경로도 authMiddleware+internalMiddleware로 보호',
+  /router\.post\('\/cs\/upload', authMiddleware, internalMiddleware/.test(trackBRoutes));
 
 console.log(`\n✅ csAdminImageUpload: ${passed}개 통과\n`);

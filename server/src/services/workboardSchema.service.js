@@ -40,10 +40,18 @@ function assertSupportedWorkboardSchemaVersion(value) {
   return version;
 }
 
+// 본섭 최초 반영 직후에는 코드·DB만 배포하고 새 v2 데이터 생성을 멈춰 둘 수 있다.
+// 값은 명시적으로 켠 경우에만 true다. 끄면 기존 v2를 지우거나 v1로 재해석하지 않고,
+// 아직 생성되지 않은 v2 원본만 v1 경로로 안전하게 보류한다.
+function isAutomatedWorkboardEnabled(env = process.env) {
+  return /^(1|true|t|yes|y|on)$/i.test(String((env && env.WORKBOARD_V2_ENABLED) || '').trim());
+}
+
 module.exports = {
   LEGACY_WORKBOARD_SCHEMA_VERSION,
   AUTOMATED_WORKBOARD_SCHEMA_VERSION,
   WorkboardSchemaError,
   normalizeWorkboardSchemaVersion,
   assertSupportedWorkboardSchemaVersion,
+  isAutomatedWorkboardEnabled,
 };

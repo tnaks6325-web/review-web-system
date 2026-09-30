@@ -11,7 +11,7 @@
  *  B. 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대상 미선택 거부
  *  C. 순서 계약 — soft-delete → 장부 재생성 (반대면 투영이 `deleted_at=NULL` 로 되살린다)
  *  D. 미리보기는 쓰기 0 / 실행은 같은 조건으로 지운다
- *  E. 이관 시 `active=FALSE` 인 **import 줄만** 은퇴(준비 자리·수기 추가 보존) · fail-soft
+ *  (E. 이관 시 은퇴 — 탈시트 전환 화면 제거로 2026-09-28 삭제, 결정 186 2번)
  *  F. 라우트·화면 배선
  */
 const assert = require('assert');
@@ -53,24 +53,18 @@ console.log('\n[A] 쓰기 소유자 — campaign_participants 쓰기는 particip
   ok('★ 쓰기는 participants.service.retireRows 에 위임',
     /participants\.service'\)[\s\S]{0,60}\.retireRows\(/.test(retireBlk.slice(0, 2000)));
 
-  const cut = noLineComments(read('src/services/sheetlessCutover.service.js'));
-  const w = cut.match(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+([a-z_]+)/gi) || [];
-  ok('★ 이관 서비스의 쓰기 표면은 여전히 tab_configs 한 곳', w.every(x => /tab_configs/i.test(x)), w.join(','));
-  ok('★ 사라진 줄 은퇴도 participants.service 위임',
-    /retireInactiveImportRows\(/.test(cut));
 }
 
 console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대상 미선택 거부');
 {
   ok('retireRows 를 내보낸다', typeof L.retireRows === 'function' && typeof P.retireRows === 'function');
-  /* ★ 파일 전체를 보면 다른 라우트(slot-backfill 등)의 같은 표현이 대신 통과시킨다 —
-     retire-rows 라우트 본문으로 스코프해서 본다. 경계는 `});` 가 아니라 다음 `router.`. */
+  /* ★★ 수동 라우트는 제거됐다(사용자 확정 2026-08-23) — 실행부는 중복 정리가 계속 쓴다.
+     그래서 여기서 보는 것은 "창구가 없다 + 서비스는 살아 있다" 두 가지다. */
   const _rt = read('src/routes/trackB.routes.js');
-  const _i0 = _rt.indexOf("router.post('/worktable/retire-rows'");
-  const _body = _i0 > 0 ? _rt.slice(_i0, _rt.indexOf('\nrouter.', _i0 + 10)) : '';
-  ok('retire-rows 라우트 본문을 찾았다', !!_body);
-  ok('★ 라우트가 dryRun 기본(!== false) — 값이 빠진 요청이 곧바로 실행되지 않는다',
-    /dryRun: b\.dryRun !== false/.test(_body));
+  ok('★★ 수동 라우트가 없다(POST /worktable/retire-rows)',
+    !/router\.post\('\/worktable\/retire-rows'/.test(_rt));
+  ok('★★ 실행부는 그대로 — 중복 정리가 쓴다(지우면 그쪽이 죽는다)',
+    /retireRows\(\{[^}]*by: `dedupe:/.test(read('src/services/sheetlessLedger.service.js')));
 }
 
 (async () => {
@@ -156,63 +150,28 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
       /if \(!r\.retired\) return/.test(blk.slice(0, 1600)));
   }
 
-  console.log('\n[E] 이관 시 사라진 줄 은퇴 — import 줄만 · fail-soft');
-  {
-    const pp = makePool([[/^\s*UPDATE campaign_participants/, { rowCount: 166 }]]);
-    P.__setPoolForTest(pp);
-    const r = await P.retireInactiveImportRows({ sheetId: 's', tabName: 't', by: 'cutover:김수만' });
-    ok('은퇴 건수를 돌려준다', r.ok === true && r.rows === 166);
-    const sql = pp.calls[0].sql;
-    ok("★★ source='import' 만 — 준비 자리(worktable)·수기(manual)는 건드리지 않는다", /source = 'import'/.test(sql));
-    ok('★ active = FALSE 인 줄만(시트에 더는 없는 줄)', /active = FALSE/.test(sql));
-    ok('★ 소프트 삭제(deleted_at)', /SET deleted_at = NOW\(\)/.test(sql));
-    ok('★ 이미 내려간 줄은 다시 안 건드린다(멱등)', /deleted_at IS NULL/.test(sql));
-
-    const cut = noLineComments(read('src/services/sheetlessCutover.service.js'));
-    const i1 = cut.indexOf('retireInactiveImportRows(');
-    const i2 = cut.indexOf('rebuildLedgers({', i1);
-    ok('★★ 이관에서도 은퇴가 장부 재생성보다 앞(그래야 되살아나지 않는다)', i1 > 0 && i2 > i1);
-    /* ★ 순서만 보면  같은 죽은 호출도 통과한다 — 결과를 받아 쓰는 형태를 고정한다. */
-    ok('★ 은퇴 결과를 실제로 받아 응답에 싣는다(죽은 호출 금지)',
-      /retired = await require\('\.\/participants\.service'\)\s*\n?\s*\.retireInactiveImportRows\(/.test(cut));
-    ok('★ 실패해도 이관은 유지하고 사유를 응답에 싣는다(retired)',
-      /retired = \{ ok: false/.test(cut) && /reflect, handoff, retired, ledger, notice/.test(cut));
-    ok('★ 표식을 켠 뒤에 은퇴한다(무시트 게이트 통과 순서)',
-      cut.indexOf('SET sheetless = TRUE') < i1);
-  }
-
-  console.log('\n[F] 라우트·화면 배선');
+  console.log('\n[F] 수동 창구 제거 — 줄을 내리는 길은 [행 삭제]·[♻ 중복 정리] 둘');
   {
     const routes = read('src/routes/trackB.routes.js');
-    ok('POST /worktable/retire-rows 등록', /router\.post\('\/worktable\/retire-rows'/.test(routes));
-    const line = /router\.post\('\/worktable\/retire-rows'[^\n]*/.exec(routes)[0];
-    ok('★ adminOrMaster — 검색 명단에서 사람을 빼는 조작(정원 변경과 같은 급)',
-      /authMiddleware/.test(line) && /adminOrMasterMiddleware/.test(line));
-    ok('★ 검증 오류는 400대로(errorHandler 마스킹 방지)', /LedgerError\) return res\.status\(400\)/.test(routes));
-
     const wd = read('../frontend/workdesk.html');
-    ok('★ 무시트 + admin/master 일 때만 버튼(_wrCanRetire)',
-      /function _wrCanRetire\(\)\{[\s\S]{0,220}sheetless === true[\s\S]{0,120}'master'[\s\S]{0,40}'admin'/.test(wd));
-    ok('도구 메뉴에 [🧹 줄 정리]', /openRetireModal\(\)/.test(wd) && /🧹 줄 정리/.test(wd));
-    ok('★ 미리보기 → 실행 2단계(미리보기 전에는 실행 비활성)',
-      /id="wrGo" disabled/.test(wd) && /go\.disabled = !\(_WR\.prev/.test(wd));
-    ok('★ 실행 전 confirm — 명단에서도 빠진다는 사실을 말한다',
-      /confirm\(`「\$\{_WR\.tabName\}」[\s\S]{0,200}검색 명단에서도 빠집니다/.test(wd));
-    ok('★★ onclick 은 인덱스만(차수 문자열은 시트발 — 보간 금지)',
-      /wrToggle\(\$\{i\}\)/.test(wd) && !/wrToggle\('\$\{/.test(wd));
-    ok('★ 오버레이는 body 직속', /wrOv[\s\S]{0,400}document\.body\.appendChild\(ov\)/.test(wd));
-    ok('★ Esc 리스너는 최상위 1회(_wrKeyBound)', /window\._wrKeyBound/.test(wd));
-    ok('★ 바깥클릭으로 닫지 않는다(고른 것이 실수로 날아가지 않게)',
-      !/ov\.addEventListener\('click'[\s\S]{0,80}closeRetireModal/.test(wd));
-    ok('★ 재료는 이미 받아 둔 표에서 센다(신규 조회 0)', /STATE\.wd && STATE\.wd\.roster/.test(wd));
-    ok('★ 장부 재생성 실패는 화면이 말한다', /j\.ledgerError/.test(wd));
-    ok('★ CSS 는 wbl- 접두(홈 CSS 스코프 가드 계약 유지)',
-      /\.wbl-wrt\{/.test(wd) && !/(^|[^-\w])\.wrt\{/.test(wd));
+    /* ★★ 사용자 확정 2026-08-23 — 원인이던 탈시트 이관이 끝나 수동 창구를 없앴다.
+       되살리면 "화면에서만 줄을 빼는" 계열 창구가 다시 늘어난다. */
+    ok('★★ 수동 라우트가 없다', !/router\.post\('\/worktable\/retire-rows'/.test(routes));
+    ok('★★ 화면에 줄 정리 창구가 없다',
+      !/openRetireModal|_wrCanRetire|_wrRender|wrToggle/.test(wd));
+    ok('★ 전용 CSS 도 남기지 않는다(.wbl-wrt)', !/\.wbl-wrt\{/.test(wd));
+    /* ★★ 권한 ≠ 노출 (사용자 확정 2026-08-24 — 08-23 의 1:1 을 되돌림):
+         서버 = adminOrMaster · 화면 버튼 = **master 전용**. 화면이 서버보다 **일부러 좁다**.
+       ★★★ 고정하는 것은 **방향**이다 — 화면이 서버보다 넓어지는 것만 금지(좁은 것은 의도).
+         `_isInternalRole()`(staff) 로 넓히면 AE 에게 "눌러도 403" 인 죽은 버튼이 생긴다. */
+    ok('★★ 남은 정리 창구는 [♻ 중복 정리] 하나 — 서버는 adminOrMaster',
+      /router\.post\('\/worktable\/dedupe-rows',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(routes));
+    const ddCan = wd.slice(wd.indexOf('function _ddCan()'), wd.indexOf('function closeDedupeModal'));
+    ok('★★ 화면 버튼은 master 전용(admin 에게 내밀지 않는다)',
+      /STATE\.role === 'master'/.test(ddCan) && !/'admin'/.test(ddCan));
+    ok('★★★ 화면이 서버보다 넓지 않다(staff·internalRole 금지)',
+      !/_isInternalRole|'staff'/.test(ddCan));
 
-    ok('★ 전환 화면이 연도 미상 건수를 말한다(조용한 누락 금지)',
-      /m\.yearUnknown\?[\s\S]{0,200}과거 자료로 보고 목록에서 제외/.test(wd));
-    ok('★ [보기] 로 그 목록을 열 수 있다(막다른 길 금지)',
-      /function _coToggleUnknown\(\)/.test(wd) && /includeUnknown=1/.test(wd));
   }
 
   console.log(`\n✅ sheetlessRetireRows: ${passed} cases passed`);

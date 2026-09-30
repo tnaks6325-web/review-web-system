@@ -34,11 +34,67 @@ const REVIEW_TYPE_KEYS = REVIEW_TYPES.map(t => t.key);
 const REVIEW_TYPE_LABELS = REVIEW_TYPES.map(t => t.label);
 
 /**
+ * ★★ 시트/작업표 **리뷰옵션 칸에 실제로 적는 표기** — ㉯ 작업옵션(리뷰형태) 관행 그대로
+ *   (`텍스트`·`포토리뷰`, 7/31·8/3 사고 문서의 어휘). label(`포토`)과 다른 이유:
+ *   시트 시절 직원이 손으로 적어 온 값이 이것이고, `normalizeReviewType` 이 정확히
+ *   되읽는다(왕복 보장 — 회귀가드가 고정). 혼합(mixed)은 행에 적는 값이 아니라 제외.
+ */
+const REVIEW_TYPE_SHEET_LABELS = { photo: '포토리뷰', text: '텍스트', confirm: '구매확정', star: '별점' };
+
+/**
+ * 이 헤더가 **리뷰옵션 칸**(행별 리뷰형태 지시 전용)인가.
+ * ★ 작업표 생성이 리뷰 종류를 적는 열 = 이 판정을 통과하는 열 하나 — 상품옵션 칸과
+ *   구분해야 "상품옵션이 리뷰옵션 칸에, 리뷰형태가 상품옵션 칸에" 섞이지 않는다.
+ * ★ 소비처 2곳(worktablePlan/planToSheetValues 의 기입 대상 · orderLedger 행배정 매칭 제외)이
+ *   같은 판정을 쓴다 — 사본을 두면 "적는 칸과 매칭에서 빼는 칸"이 갈린다.
+ */
+function isReviewOptionHeader(name) {
+  return /리뷰\s*옵션/.test(String(name == null ? '' : name).trim());
+}
+
+/**
+ * 이 **행**의 작업옵션 칸 값들에서 리뷰타입을 읽는다(순수함수 — 조회는 호출자가).
+ *
+ * @param {object} rowJson        review_index.row_json (헤더명→값 맵)
+ * @param {string[]} optionHeaders 옵션 기입 칸의 헤더명들(`orderLedger.optionWriteColumns` 파생 —
+ *                                 여기서 '옵션' 키워드 표를 다시 만들면 `옵션금액`(결제금액)을 오분류한다)
+ * @returns {string|null} 표준 key. 판정 불가 = null(= 오늘 동작 그대로).
+ *
+ * ★ **리뷰옵션 칸을 먼저** 본다 — 상품옵션 칸 값(예 '포토 카드지갑')이 우연히 리뷰타입
+ *   키워드에 걸려 행 판정을 가로채면, 혼합 오더의 구매확정 행이 리뷰로 잘못 검수된다.
+ */
+function rowOptionReviewType(rowJson, optionHeaders = []) {
+  if (!rowJson || typeof rowJson !== 'object') return null;
+  const list = (optionHeaders || []).filter(h => h != null);
+  const ordered = list.filter(h => isReviewOptionHeader(h)).concat(list.filter(h => !isReviewOptionHeader(h)));
+  for (const h of ordered) {
+    const t = normalizeReviewType(rowJson[h]);
+    if (t && t !== 'mixed') return t;
+  }
+  return null;
+}
+
+/**
+ * ★★ `자율리뷰` — **리뷰 형태를 리뷰어가 정한다**는 뜻이라 표준 리뷰타입이 아니다.
+ *   모집공고 모달의 `자율리뷰` 칩도 `data-val=""`(= 지정하지 않음)이고, 작업오더를 거쳐
+ *   `tab_configs.review_type` 에 이 문자열이 그대로 남는 탭이 있다(2026-08-23 운영 실측 4건).
+ *
+ * ★ **판정은 그대로 null 이다**(= 오늘 동작 그대로 · 리뷰 화면 기대) — 여기서 유형을 만들어
+ *   내면 검수·캡처 슬롯이 있지도 않은 기대를 갖는다. 이 값은 **표기 전용**이다:
+ *   사람이 그렇게 적어 뒀는데 화면이 "미설정"이라고 말하면 거짓이 된다(혼합과 같은 자리).
+ */
+const FREE_CHOICE_REVIEW_LABEL = '자율리뷰';
+/** 이 값이 '자율리뷰'인가 — 표기 전용(판정에는 쓰지 않는다). */
+function isFreeChoiceReviewType(raw) {
+  return String(raw == null ? '' : raw).trim() === FREE_CHOICE_REVIEW_LABEL;
+}
+
+/**
  * ★ 리뷰타입 칸에 잘못 들어가 있던 **배송유형** 값.
  *   판정에서는 무시(null)하되, 화면 표시와 이관 대상 판별에는 이 목록을 쓴다.
  *   (자동 이관은 `delivery_type` 이 비어 있을 때만 — 접수가 채운 값을 덮으면 안 된다)
  */
-const LEGACY_DELIVERY_VALUES = ['실배송', '빈박스', '택배발송대행'];
+const LEGACY_DELIVERY_VALUES = ['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)'];
 
 /** key → label. 모르는 key 는 빈 문자열. */
 function reviewTypeLabel(key) {
@@ -154,7 +210,8 @@ function isPurchaseConfirm(p) {
 }
 
 module.exports = {
-  REVIEW_TYPES, REVIEW_TYPE_KEYS, REVIEW_TYPE_LABELS, LEGACY_DELIVERY_VALUES,
-  reviewTypeLabel, normalizeReviewType, isLegacyDeliveryValue,
+  REVIEW_TYPES, REVIEW_TYPE_KEYS, REVIEW_TYPE_LABELS, REVIEW_TYPE_SHEET_LABELS, LEGACY_DELIVERY_VALUES,
+  FREE_CHOICE_REVIEW_LABEL, isFreeChoiceReviewType,
+  reviewTypeLabel, normalizeReviewType, isLegacyDeliveryValue, isReviewOptionHeader, rowOptionReviewType,
   parseWorkOrderReviewType, resolveReviewType, isPurchaseConfirm,
 };

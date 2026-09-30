@@ -82,7 +82,6 @@ const _FILE_LABEL = {
   'orderLedger.service.js': '주문행배정/역동기',
   'smartBuild.service.js': '리뷰인덱스빌드',
   'indexBuilder.service.js': '리뷰인덱스빌드',
-  'indexScan.service.js': '인덱스스캔',
   'submit.routes.js': '제출(리뷰/구매)',
   'tabconfig.routes.js': '탭설정',
   'diag.routes.js': '진단/수동도구',

@@ -18,8 +18,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
-  <link rel="stylesheet" href="css/index.css"/>
+  <link rel="stylesheet" href="css/index.css?v=20260908-two-line-log"/>
 <script src="api.js"></script>
+<script src="js/drive-thumb.js"></script>
 <style id="sianC">
 /* ===== 관리자 컬러: 토스 블루 #3182F6 (딥 #1B64DA / 라이트 #E8F1FE) ===== */
 :root{
@@ -99,31 +100,6 @@ body{ letter-spacing:-.01em; }
     <button class="btn-primary full-width" onclick="resetApp()">
       <i class="fas fa-redo"></i> 처음으로
     </button>
-  </div>
-</div>
-
-<!-- ────────── 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) ────────── -->
-<div id="dbFirstGuideModal" class="modal-overlay hidden" style="display:none;z-index:9999">
-  <div class="modal-box" style="max-width:520px">
-    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between">
-      <h2 style="margin:0"><i class="fas fa-bullhorn" style="color:#3B82F6"></i> 새 기능 안내</h2>
-      <button class="btn-icon-sm" onclick="closeDbFirstGuide(false)" title="닫기"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" style="font-size:14px;line-height:1.65">
-      <p style="margin:0 0 8px"><b>캠페인탭 참여자 명단</b>을 구글시트가 아니라 <b>시스템에서 직접 관리</b>하는 기능을 준비했습니다.</p>
-      <ul style="margin:6px 0 10px;padding-left:18px">
-        <li>시트 명단을 <b>시스템으로 가져오기</b> → 화면에서 보기·<b>추가/수정/삭제</b>·리뷰제출/입금 체크</li>
-        <li>지금은 <b>안전 테스트 단계</b> — 모든 동작이 <b>테스트 저장공간에만</b> 반영되어 <b>리뷰어·구글시트·주문에 영향 0</b></li>
-        <li>현재 <b>최고관리자 전용</b> (검증 후 단계적 확대)</li>
-      </ul>
-      <div style="background:#e6f6ec;border-left:4px solid #1a7f37;padding:9px 12px;border-radius:0 8px 8px 0;font-size:13px">
-        직원분들께 설명할 수 있는 <b>쉬운 안내서(유저플로우)</b>를 준비했습니다. 아래 버튼으로 열어보세요.
-      </div>
-      <div class="modal-actions" style="margin-top:16px">
-        <button class="btn-primary" onclick="openDbFirstGuide()"><i class="fas fa-book-open"></i> 직원 안내서 보기</button>
-        <button class="btn-secondary" onclick="closeDbFirstGuide(true)">확인했어요 (다시 안 보기)</button>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -320,236 +296,7 @@ body{ letter-spacing:-.01em; }
         </div>
       </div>
 
-      <!-- ━━━━━ ③ 폴더 관리 (접기/펼치기) ━━━━━ -->
-      <div style="border-top:1px solid #E5E7EB">
-        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
-          style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
-          <i class="fas fa-folder-open" style="color:#0ca678"></i> 폴더 관리
-          <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
-        </button>
-        <div style="display:none;padding:8px 16px 12px">
-          <!-- 폴더 일괄 생성 -->
-          <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
-            <i class="fas fa-folder-plus" style="color:#0ca678"></i> 일괄 생성 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(완료·마감 탭 제외)</span>
-          </div>
-          <div style="display:flex;gap:4px">
-            <button id="btnBatchCapture" onclick="batchCreateFolders('capture')"
-              style="flex:1;padding:7px 4px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-camera"></i> 캡처폴더
-            </button>
-            <button id="btnBatchReview" onclick="batchCreateFolders('review')"
-              style="flex:1;padding:7px 4px;background:#F0FFF4;color:#166534;border:1px solid #BBF7D0;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-folder-open"></i> 리뷰폴더
-            </button>
-            <button id="btnBatchBoth" onclick="batchCreateFolders('both')"
-              style="flex:1;padding:7px 4px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-layer-group"></i> 전체
-            </button>
-          </div>
-          <div id="batchFolderResult" style="display:none;font-size:.71rem;margin-top:3px"></div>
 
-          <!-- 폴더 URL 동기화 -->
-          <div style="margin-top:8px;font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
-            <i class="fas fa-link" style="color:#0369A1"></i> 폴더 URL 동기화 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(드라이브 → DB 매칭)</span>
-          </div>
-          <button id="btnSyncAllFolders" onclick="syncAllFolders()" style="width:100%;padding:8px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-            <i class="fas fa-link"></i> 캡처/리뷰 폴더 일괄동기화
-          </button>
-          <label style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:6px;font-size:.72rem;color:#92400E;cursor:pointer;user-select:none;margin-top:4px">
-            <input type="checkbox" id="chkForceSync" style="width:13px;height:13px;accent-color:#EA580C;cursor:pointer">
-            <span><b>강제 재설정</b> — 기존 URL도 덮어쓰기</span>
-          </label>
-
-          <!-- 폴더 찾기 & 재연결 -->
-          <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결
-              <span style="font-size:.66rem;font-weight:400;color:#6B7280">(사라진 폴더를 탭명으로 검색 → 확인 → 재연결)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:5px">
-              캡처/리뷰 폴더 링크가 비었거나 위치가 바뀐 탭을, Drive에서 실제 폴더를 찾아 다시 연결합니다.
-            </div>
-            <button id="btnFolderRelink" onclick="openFolderRelink()"
-              style="width:100%;padding:8px;background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-              <i class="fas fa-magnifying-glass-location"></i> 폴더 찾기 / 재연결 열기
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ━━━━━ ④ 유지보수 도구 (접기/펼치기) ━━━━━ -->
-      <div style="border-top:1px solid #E5E7EB">
-        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
-          style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
-          <i class="fas fa-wrench" style="color:#D97706"></i> 유지보수 도구
-          <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
-        </button>
-        <div style="display:none;padding:8px 16px 12px">
-
-          <!-- ★ 인덱스 스캔 (시트DB → 각 시트 파싱 → 탭목록 기록) -->
-          <div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-search-plus" style="color:#D97706"></i> 인덱스 스캔
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(시트DB → 각 시트 파싱 → 탭목록 기록)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              시트DB에 등록된 모든 시트에 접속하여 <b>sheet_url, campaign_name, tab_url, tab_name</b>을 파싱하고 탭목록 시트에 기록합니다.
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnIndexScanDry" onclick="indexScan(true)"
-                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnIndexScanRun" onclick="indexScan(false)"
-                style="flex:1;padding:7px;background:#D97706;color:#fff;border:1px solid #D97706;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실행
-              </button>
-            </div>
-            <div id="indexScanResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
-            <div style="margin-top:6px;border-top:1px dashed #E5E7EB;padding-top:6px">
-              <div style="font-size:.66rem;color:#6B7280;margin-bottom:4px">
-                <i class="fas fa-database" style="color:#3182f6"></i> <b>DB 동기화</b> — 스캔 결과를 DB에 직접 반영 (대시보드에 표시)
-              </div>
-              <div style="font-size:.64rem;color:#B7791F;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 6px;margin-bottom:4px">
-                <i class="fas fa-lock"></i> 신규 시트/탭 등록은 <b>작업오더 접수</b>로만 됩니다 — 여기서는 기존 탭의 탭명·gid 교정만 반영됩니다.
-              </div>
-              <div style="display:flex;gap:4px">
-                <button id="btnIndexSyncDry" onclick="indexScanSync(true)"
-                  style="flex:1;padding:6px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-search"></i> DB 미리보기
-                </button>
-                <button id="btnIndexSyncRun" onclick="indexScanSync(false)"
-                  style="flex:1;padding:6px;background:#3182f6;color:#fff;border:1px solid #3182f6;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-database"></i> DB 반영
-                </button>
-              </div>
-              <div id="indexSyncResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:150px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
-            </div>
-          </div>
-
-          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
-
-          <!-- [DEPRECATED v11.8.0] 구조 동기화, 설정 동기화 제거 — 인덱스 스캔 + DB 동기화로 통합됨 -->
-
-          <!-- 탭명·URL 동기화 -->
-          <div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-exchange-alt" style="color:#3182f6"></i> 탭명·URL 동기화
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(시트 실제 탭명 ↔ DB)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              Google Sheets에서 탭 이름이 변경된 경우 DB를 일괄 업데이트합니다.
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnSyncTabNamesDry" onclick="syncTabNames(true)"
-                style="flex:1;padding:7px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnSyncTabNamesRun" onclick="syncTabNames(false)"
-                style="flex:1;padding:7px;background:#3182f6;color:#fff;border:1px solid #3182f6;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실행
-              </button>
-            </div>
-          </div>
-
-          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
-
-          <!-- ⚠ DB 선택적 초기화 -->
-          <div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#DC2626;margin-bottom:4px">
-              <i class="fas fa-exclamation-triangle" style="color:#DC2626"></i> DB 초기화
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(선택 항목만 삭제)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:6px">
-              초기화할 항목을 선택하세요. <b style="color:#DC2626">되돌릴 수 없습니다.</b>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px">
-              <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
-                <input type="checkbox" id="resetDashboard" checked style="accent-color:#DC2626">
-                <span><b>대시보드</b> — campaigns, tab_configs, review_index, index_master</span>
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
-                <input type="checkbox" id="resetArchive" checked style="accent-color:#DC2626">
-                <span><b>마감</b> — index_master_archive, review_index_archive, archive_history</span>
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
-                <input type="checkbox" id="resetUnrecognized" checked style="accent-color:#DC2626">
-                <span><b>인식 실패 탭</b> — unrecognized_tabs</span>
-              </label>
-            </div>
-            <button id="btnResetAll" onclick="resetAllData()"
-              style="padding:6px 16px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-trash-alt"></i> 선택 항목 초기화
-            </button>
-          </div>
-
-          <!-- 캡처폴더 구조 재편성 -->
-          <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-sitemap" style="color:#3182f6"></i> 캡처폴더 구조 재편성
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(단층 → 캠페인폴더 하위)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              <b style="color:#92400E">📁 캡처루트/{폴더}</b> → <b style="color:#166534">📁 캡처루트/{캠페인}/{폴더}</b>
-            </div>
-            <button id="btnDiagCapture" onclick="diagCaptureFolders()"
-              style="width:100%;padding:6px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:3px">
-              <i class="fas fa-microscope"></i> 폴더 현황 진단
-            </button>
-            <div id="diagCaptureResult" style="display:none;font-size:.71rem;margin-bottom:3px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
-            <div style="display:flex;gap:4px">
-              <button id="btnOrganizeDry" onclick="organizeCaptureFolders(true)"
-                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnOrganizeRun" onclick="organizeCaptureFolders(false)"
-                style="flex:1;padding:7px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-sitemap"></i> 실제 재편성
-              </button>
-            </div>
-            <div id="organizeResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:200px;overflow-y:auto"></div>
-          </div>
-
-          <!-- 폴더명 마이그레이션 -->
-          <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-exchange-alt" style="color:#D97706"></i> 폴더명 형식 변환
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">({탭명} → {탭명}_{캠페인명})</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              탭명이 동일한 캠페인 간 폴더 충돌 방지를 위해 Drive 폴더명 변경
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnMigrateDry" onclick="migrateFolderNames(true)"
-                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnMigrateRun" onclick="migrateFolderNames(false)"
-                style="flex:1;padding:7px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실제 변환
-              </button>
-            </div>
-            <div id="migrateResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:180px;overflow-y:auto"></div>
-          </div>
-
-          <!-- 탭 파싱 진단 -->
-          <div style="border-top:1px solid #F3F4F6;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-stethoscope" style="color:#3182f6"></i> 탭 파싱 진단
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(조회 안 되는 탭 원인 확인)</span>
-            </div>
-            <div style="display:flex;gap:4px;align-items:center">
-              <input id="diagSheetUrl" type="url" placeholder="시트 URL (gid 포함) 붙여넣기"
-                style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem">
-              <button onclick="runSheetDiag()"
-                style="padding:6px 10px;background:#3182f6;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;white-space:nowrap">
-                <i class="fas fa-stethoscope"></i> 진단
-              </button>
-            </div>
-            <div id="diagResult" style="margin-top:5px;font-size:.72rem;display:none"></div>
-          </div>
-        </div>
-      </div>
 
     </div>
     <div class="modal-actions" style="border-top:1px solid #E5E7EB">
@@ -642,25 +389,9 @@ body{ letter-spacing:-.01em; }
 
         <!-- 외부 링크 그룹 (항상 표시) -->
         <div class="admin-header-actions" style="gap:5px">
-          <button class="btn-header-sq btn-header-portal" onclick="openWorkPortal()" title="업무포털 새창 열기 (자동 로그인)">
-            <i class="fas fa-briefcase"></i>
-            <span>업무포털</span>
-          </button>
-          <button class="btn-header-sq btn-header-staff" onclick="window.open('staff.html','_blank')" title="AE담당자 페이지 바로가기">
-            <i class="fas fa-user-tie"></i>
-            <span>AE담당자</span>
-          </button>
           <button class="btn-header-sq btn-header-review" onclick="window.open('search.html','_blank')" title="리뷰제출페이지 바로가기">
             <i class="fas fa-external-link-alt"></i>
             <span>리뷰제출</span>
-          </button>
-          <button class="btn-header-sq btn-header-mirror" onclick="openRawMirror()" title="구글시트 RAW 미러 — 전체 미러링 실행 + 시트별 데이터 뷰어 (자동 로그인)">
-            <i class="fas fa-database"></i>
-            <span>RAW 미러</span>
-          </button>
-          <button class="btn-header-sq btn-header-mirror" onclick="openThrottleMonitor()" title="구글 시트 API 45/분 쿼터 실시간 모니터 — 어디서 얼마나 쓰는지 + 잔량 (자동 로그인)">
-            <i class="fas fa-gauge-high"></i>
-            <span>시트API 모니터</span>
           </button>
           <button class="btn-header-sq btn-header-mirror" onclick="openWorkdesk()" title="Track B 리뷰웹시스템[3버전](그림자) — 구글시트 대체 평행 트랙: 명단·상태·소유 열람/편집 리허설. 라이브 무영향 (자동 로그인)">
             <i class="fas fa-layer-group"></i>
@@ -697,9 +428,6 @@ body{ letter-spacing:-.01em; }
         </button>
         <button class="admin-tab-btn" data-tab="recruit" onclick="switchAdminTab('recruit')">
           <i class="fas fa-bullhorn"></i> 모집공고
-        </button>
-        <button class="admin-tab-btn" data-tab="payment" onclick="switchAdminTab('payment')">
-          <i class="fas fa-money-bill-wave"></i> 입금처리
         </button>
         <button class="admin-tab-btn" data-tab="archive" onclick="switchAdminTab('archive')">
           <i class="fas fa-archive"></i> 마감 <span id="archiveBadge" style="display:none;background:#4F84E0;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
@@ -766,20 +494,11 @@ body{ letter-spacing:-.01em; }
             </span>
             <span id="cronCountdownBadge" class="cron-countdown-badge" style="display:none"></span>
             <span id="dashboardIndexInfo" class="section-index-info" style="font-size:.72rem;color:var(--t3)"></span>
-            <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(true)" style="font-size:.78rem;background:#3182f6;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다 (먼저 미리보기 실행)">
-              <i class="fas fa-exchange-alt"></i> 탭명 동기화
-            </button>
             <button id="btnArchiveDetect" class="btn-sm" onclick="dashboardArchiveDetect()" style="font-size:.78rem;background:#4F84E0;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="완료된 탭/차수를 자동 감지하고 마감 여부를 결정합니다">
               <i class="fas fa-archive"></i> 완료감지
               <span id="archiveDetectBadge" style="display:none;background:#fff;color:#4F84E0;font-size:.65rem;padding:0 5px;border-radius:99px;margin-left:4px;font-weight:700">0</span>
             </button>
 
-            <button class="btn-sm" onclick="openDedupeSelector()" style="font-size:.78rem;background:#D97706;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="리뷰폴더 중복 파일 정리">
-              <i class="fas fa-copy"></i> 리뷰폴더 중복정리
-            </button>
-            <button class="btn-sm" onclick="openReviewRelocate()" style="font-size:.78rem;background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="내 드라이브 루트에 흩어진 리뷰 캡처를 해당 탭 [리뷰] 폴더로 모아 이동">
-              <i class="fas fa-folder-tree"></i> 리뷰 캡처 정리
-            </button>
             <button class="btn-sm" onclick="exportTabDashCSV()" style="font-size:.78rem;background:#0ca678;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
               <i class="fas fa-file-csv"></i> CSV 내보내기
             </button>
@@ -871,7 +590,7 @@ body{ letter-spacing:-.01em; }
           <div id="colVisWrap"><button id="btnColVis"></button><div id="colVisDropdown"></div></div>
           <button id="pollToggleBtn"></button>
           <div id="dashSearchBar"><input id="dashSearchInput"><div id="dashSearchCount"></div></div>
-          <div id="colDragTooltip"></div><div id="colDragLine"></div><div id="memoPreviewTooltip"></div>
+          <div id="colDragTooltip"></div><div id="colDragLine"></div>
           <label id="liveModeToggleWrap"><input type="checkbox" id="liveModeCheckbox"><span id="liveModeLabel">LIVE</span></label>
         </div>
         <!-- ═══════════════════════════════════════════════════════ -->
@@ -924,9 +643,6 @@ body{ letter-spacing:-.01em; }
                 </button>
                 <button id="btnSmartBuildScheduler" onclick="toggleSmartBuildScheduler()" class="btn-sm" style="font-size:.72rem;background:#0ca678;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="5분 주기 자동 실행 토글">
                   <i class="fas fa-clock"></i> 스케줄러: ON
-                </button>
-                <button onclick="triggerDbRebuild()" class="btn-sm" style="font-size:.72rem;background:#DC2626;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="DB 전체 초기화 → 탭목록 재등록 → 스마트빌드">
-                  <i class="fas fa-database"></i> DB 재구축
                 </button>
                 <button onclick="loadSmartBuildStatus()" class="btn-sm" style="font-size:.72rem" title="상태 새로고침">
                   <i class="fas fa-sync-alt"></i>
@@ -999,10 +715,10 @@ body{ letter-spacing:-.01em; }
             </div>
           </div>
 
-          <!-- 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인) -->
+          <!-- 리뷰 캡처 수정요청 (리뷰어 → 관리자 승인) -->
           <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
             <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
-              <i class="fas fa-images" style="color:#3182f6"></i> 리뷰 이미지 수정요청
+              <i class="fas fa-images" style="color:#3182f6"></i> 리뷰 캡처 수정요청
               <span id="reviewEditBadge" class="hidden" style="background:#DC2626;color:#fff;font-size:.66rem;font-weight:700;border-radius:10px;padding:1px 7px;margin-left:4px"></span>
               <button class="btn-sm" onclick="loadReviewEditRequests()" style="float:right;font-size:.7rem;background:#E5E7EB;color:#111;border:none;padding:3px 8px;border-radius:6px;cursor:pointer"><i class="fas fa-sync"></i> 새로고침</button>
             </h4>
@@ -1185,6 +901,11 @@ body{ letter-spacing:-.01em; }
                style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#F1F6FF;color:#1b64da;border:1.5px solid #C9D8F4;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
               <i class="fas fa-cog"></i> 공통 설정
             </button>
+            <!-- 📦 130 보관함 — 끝난 공고는 [⋯] → [보관]으로 내리고, 여기서 다시 본다 -->
+            <button id="recruitArchiveBtn" onclick="toggleRecruitArchivedView()"
+               style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#F4F6FA;color:#334155;border:1.5px solid #D7DEE9;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
+              📦 보관함
+            </button>
             <!-- 삭제는 카드에서 빼고 여기로 — 카드가 조밀해 오클릭으로 공고가 사라지는 것 방지 -->
             <button id="recruitDelModeBtn" onclick="toggleRecruitDelMode()"
                style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#FFF5F5;color:#B42318;border:1.5px solid #F7C9C9;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
@@ -1240,109 +961,6 @@ body{ letter-spacing:-.01em; }
         <div id="woListWrap"><div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">불러오는 중...</div></div>
       </div><!-- /tab-work-orders -->
 
-      <!-- ★ 입금처리 탭 -->
-      <div id="tab-payment" class="admin-tab-pane payment-panel">
-        <!-- 헤더 -->
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-money-bill-wave" style="color:#065F46;margin-right:6px"></i>입금처리
-          </span>
-          <span style="font-size:.73rem;color:var(--t3)">리뷰 완료 + 입금 미완료 대상자 목록을 조회하여 이체파일을 생성합니다.</span>
-        </div>
-
-        <!-- 이체 은행 선택 -->
-        <div style="margin-bottom:14px">
-          <div style="font-size:.73rem;font-weight:600;color:var(--t2);margin-bottom:8px">이체 은행 선택</div>
-          <div class="payment-bank-selector">
-            <button class="payment-bank-btn active" id="payBankHana" onclick="selectPayBank('하나은행')">
-              <i class="fas fa-university"></i> 하나은행 (KEB하나)
-            </button>
-            <button class="payment-bank-btn" id="payBankK" onclick="selectPayBank('케이뱅크')">
-              <i class="fas fa-mobile-alt"></i> 케이뱅크
-            </button>
-          </div>
-        </div>
-
-        <!-- 필터 -->
-        <div class="payment-filter-bar">
-          <label>&#45812;&#45817;&#51088;</label>
-          <select class="payment-campaign-select" id="payFilterManager" onchange="applyPaymentFilters()">
-            <option value="">&#51204;&#52404; &#45812;&#45817;&#51088;</option>
-            <option value="&#47564;&#46160;">&#47564;&#46160;</option>
-            <option value="&#47581;&#44256;">&#47581;&#44256;</option>
-          </select>
-          <label>캠페인 필터</label>
-          <select class="payment-campaign-select" id="payFilterCampaign" onchange="applyPaymentFilters()">
-            <option value="">전체 캠페인</option>
-          </select>
-          <button class="payment-load-btn" id="payLoadBtn" onclick="loadPaymentTargets()">
-            <i class="fas fa-search"></i> 대상 조회
-          </button>
-          <span style="font-size:.7rem;color:var(--t3)">마감 탭은 자동 제외됩니다</span>
-        </div>
-
-        <!-- 입금명 미설정 경고 -->
-        <div id="payDepositNameWarning" style="display:none;background:#FFF7ED;border:1.5px solid #FED7AA;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:.76rem;color:#92400E">
-          <i class="fas fa-exclamation-triangle" style="margin-right:5px;color:#D97706"></i>
-          <span id="payDepositNameWarningText"></span>
-          <button onclick="openDepositNameModal()" style="margin-left:8px;padding:3px 10px;background:#D97706;color:#fff;border:none;border-radius:5px;font-size:.72rem;font-weight:600;cursor:pointer">
-            일괄 입력하기
-          </button>
-        </div>
-
-        <!-- 정리 요약 (총건수 / 이체은행별 건수·금액 / 총금액) -->
-        <div id="paySummary" class="payment-summary" style="display:none"></div>
-
-        <!-- 미리보기 테이블 -->
-        <div class="payment-preview-wrap" id="payPreviewWrap" style="display:none">
-          <div class="payment-preview-header">
-            <span class="payment-preview-title"><i class="fas fa-list" style="color:var(--p);margin-right:5px"></i>입금 대상 목록</span>
-            <span class="payment-preview-count" id="payPreviewCount">0건</span>
-          </div>
-          <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
-            <table class="payment-preview-table">
-              <thead>
-                <tr>
-                  <th class="col-check"><input type="checkbox" id="paySelectAll" onchange="togglePaySelectAll(this)" title="전체 선택/해제"></th>
-                  <th>결제방식</th>
-                  <th>이체은행</th>
-                  <th class="col-tab">탭명</th>
-                  <th>상품명</th>
-                  <th>입금자명</th>
-                  <th>은행</th>
-                  <th class="col-account">계좌번호</th>
-                  <th>예금주</th>
-                  <th class="col-amount">결제금액</th>
-                  <th>소득명의</th>
-                  <th>주민등록번호</th>
-                </tr>
-              </thead>
-              <tbody id="payPreviewBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- 액션 버튼 -->
-        <div class="payment-action-bar" id="payActionBar" style="display:none">
-          <span class="payment-sel-count" id="paySelCount">0건 선택</span>
-          <span class="payment-sel-count" id="paySelAmount" style="color:#065F46">&#49440;&#53469; &#44552;&#50529; 0&#50896;</span>
-          <button class="payment-dl-btn" id="payDlBtn" onclick="downloadPaymentExcel()">
-            <i class="fas fa-file-excel"></i> 이체파일 다운로드
-          </button>
-          <button class="payment-dl-btn" id="payDlOverviewBtn" onclick="downloadPaymentOverviewExcel()" style="background:#475569">
-            <i class="fas fa-table"></i> 전체내역 다운로드
-          </button>
-          <button class="payment-done-btn" id="payDoneBtn" onclick="openPaymentConfirm()">
-            <i class="fas fa-check-circle"></i> 이체 완료 처리
-          </button>
-        </div>
-
-        <!-- 빈 상태 -->
-        <div id="payEmptyState" style="display:none;text-align:center;padding:40px 20px;color:var(--t3)">
-          <i class="fas fa-inbox" style="font-size:2rem;margin-bottom:10px;opacity:.4"></i>
-          <p id="payEmptyMsg" style="font-size:.83rem;margin:0">대상 조회 버튼을 클릭하세요.</p>
-        </div>
-      </div><!-- /tab-payment -->
 
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- Phase 10: 마감 관리 탭 -->
@@ -1517,25 +1135,6 @@ body{ letter-spacing:-.01em; }
           </button>
         </div>
         <div id="unrecogListWrap" style="font-size:.82rem;color:var(--t2)">
-          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
-        </div>
-
-        <!-- 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) -->
-        <div class="admin-section-header" style="margin-top:28px">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-map-signs" style="color:#1D4ED8;margin-right:6px"></i>컬럼매핑 현황
-          </span>
-          <div style="display:flex;gap:6px;margin-left:auto">
-            <button class="btn-sm" onclick="loadMappingCoverage()" style="font-size:.78rem">
-              <i class="fas fa-sync-alt"></i> 새로고침
-            </button>
-          </div>
-        </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
-          활성 탭별로 제출/입금 등 컬럼 위치가 DB에 기록돼 있는지, 시트 구조 변경으로 기록과 어긋난 탭(드리프트 ⚠)이 있는지 보여줍니다.
-          드리프트 탭은 <a href="raw-mirror.html" target="_blank" style="color:#1D4ED8;text-decoration:underline">RAW 미러 › 컬럼 매핑</a>에서 바로잡으세요.
-        </p>
-        <div id="mappingCoverageWrap" style="font-size:.82rem;color:var(--t2)">
           <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
         </div>
 
@@ -2097,42 +1696,6 @@ body{ letter-spacing:-.01em; }
 </div><!-- /tc-popover-inner -->
 </div>
 
-<!-- ══════════════════════════════════
-     입금명 일괄 입력 팝업
-     ══════════════════════════════════ -->
-<div class="deposit-name-modal-overlay" id="depositNameModalOverlay" onclick="if(event.target===this)closeDepositNameModal()">
-  <div class="deposit-name-modal">
-    <h3><i class="fas fa-exclamation-triangle" style="color:#D97706;margin-right:6px"></i>입금명 미설정 탭</h3>
-    <div class="desc">아래 탭들의 입금명이 설정되지 않았습니다.<br>이체파일 생성을 위해 입금명을 입력해주세요.</div>
-    <div class="deposit-name-modal-body" id="depositNameModalBody"></div>
-    <div class="deposit-name-modal-actions">
-      <button class="btn-ghost" onclick="closeDepositNameModal()">취소</button>
-      <button style="padding:7px 18px;background:var(--p);color:#fff;border:none;border-radius:7px;font-size:.8rem;font-weight:600;cursor:pointer" onclick="saveDepositNames()">
-        <i class="fas fa-save"></i> 저장 후 조회
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════
-     이체 완료 확인 팝업
-     ══════════════════════════════════ -->
-<div class="payment-confirm-overlay" id="paymentConfirmOverlay" onclick="if(event.target===this)closePaymentConfirm()">
-  <div class="payment-confirm-modal">
-    <h3><i class="fas fa-check-circle" style="color:#EF4444;margin-right:6px"></i>이체 완료 처리</h3>
-    <p id="paymentConfirmMsg">선택한 건들을 이체 완료 처리하시겠습니까?<br>각 시트의 입금 컬럼에 오늘 날짜가 기록됩니다.</p>
-    <div style="margin-bottom:12px">
-      <label style="font-size:.73rem;font-weight:600;color:var(--t2)">관리자 비밀번호</label>
-      <input type="password" id="payConfirmPw" placeholder="비밀번호 입력" style="width:100%;padding:7px 10px;border:1.5px solid var(--bd);border-radius:7px;font-size:.82rem;margin-top:4px;box-sizing:border-box;outline:none">
-    </div>
-    <div class="actions">
-      <button class="btn-ghost" onclick="closePaymentConfirm()">취소</button>
-      <button style="padding:7px 18px;background:#EF4444;color:#fff;border:none;border-radius:7px;font-size:.8rem;font-weight:600;cursor:pointer" onclick="confirmPaymentDone()">
-        <i class="fas fa-check"></i> 이체 완료 처리
-      </button>
-    </div>
-  </div>
-</div>
 
 <!-- ══════════════════════════════════
      Phase 1-1: 진행률 통계 패널
@@ -2258,24 +1821,6 @@ body{ letter-spacing:-.01em; }
 </div>
 
 
-
-<!-- ── v9.9 메모 공유 모달 ── -->
-<div class="memo-overlay" id="memoOverlay" onclick="if(event.target===this)closeMemoPanel()">
-  <div class="memo-modal">
-    <div class="memo-modal-head">
-      <i class="fas fa-comment-dots" style="color:#3182f6;font-size:.95rem"></i>
-      <span class="memo-modal-title" id="memoModalTitle">메모</span>
-      <button onclick="closeMemoPanel()" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:1rem;padding:2px 4px"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="memo-chat-area" id="memoChatArea">
-      <div class="memo-empty">메모가 없습니다.</div>
-    </div>
-    <div class="memo-input-area">
-      <textarea id="memoInputText" placeholder="메모를 입력하세요..." maxlength="500" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMemoMsg()}"></textarea>
-      <button class="memo-send-btn" onclick="sendMemoMsg()"><i class="fas fa-paper-plane"></i></button>
-    </div>
-  </div>
-</div>
 
 <!-- ── 마감 확인 팝업 ── -->
 <div class="closed-confirm-overlay" id="closedConfirmOverlay">
@@ -2426,9 +1971,9 @@ body{ letter-spacing:-.01em; }
 
 <!-- 작업오더 상세 렌더러 — 리뷰웹시스템[3버전]과 한 벌로 쓰는 공유 모듈. index-app.js 앞에 둔다
      (호출부·onclick 문자열이 전역 이름으로 참조하므로 먼저 정의돼 있어야 한다). -->
-<script src="js/work-order-detail.js?v=20260814-order-prefill-c111"></script>
+<script src="js/work-order-detail.js?v=20260916-direct-delivery"></script>
 <!-- C/S 문의창구 — 같은 이유로 공유 모듈. 마크업(#csInquiryMount)도 여기서 마운트한다. -->
-<!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
+<!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
 <!-- 관리자 설정 패널(내 닉네임 · 회사 사업자번호 · 리뷰어 소식·공지) — 리뷰웹시스템[3버전]과 한 벌로 쓰는 공유 모듈.
@@ -2497,6 +2042,20 @@ body{ letter-spacing:-.01em; }
           />
         </div>
       </div>
+
+        <!-- 카카오톡 아이디(필수, 사용자 확정 2026-09-30) — 리뷰 기한 안내 연락용 -->
+        <div class="reg-section">
+          <label class="reg-field-label" for="regKakao">
+            <i class="fas fa-comment" style="color:var(--p);margin-right:4px"></i>카카오톡 아이디 <span style="color:var(--err)">*</span>
+          </label>
+          <input id="regKakao" class="reg-input" type="text"
+            placeholder="예: review_kim"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="31"
+            oninput="regClearError()"
+            onkeydown="if(event.key==='Enter')window.regAgree()"
+          />
+          <div style="font-size:.72rem;color:#6B7280;margin-top:4px">리뷰 기한 안내를 카톡으로 드려요 · 카톡 → 설정 → 프로필 관리에서 확인</div>
+        </div>
 
       <!-- 에러 -->
       <div id="regError" class="reg-error" style="display:none"><i class="fas fa-exclamation-circle"></i><span id="regErrorText"></span></div>
@@ -2570,18 +2129,15 @@ body{ letter-spacing:-.01em; }
 <!-- ══════════════════════════════════════════════════════
      모집공고 관리 (recruit) JS
      ══════════════════════════════════════════════════════ -->
-<script src="js/recruit-modal.js?v=20260817-editor-ui-c117"></script>
-<script src="js/campaign-cards.js?v=20260817-hidden-prerequisite-c119"></script>
+<script src="js/recruit-modal.js?v=20260916-direct-delivery"></script>
+<script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
 <!-- 공고별 참여 리뷰어 관리(블랙리스트 건별, 091) — 카드 [🚫 리뷰어] 버튼이 여는 공유 모달.
      campaign-cards.js 뒤에 로드해도 무방(버튼 렌더 시점에 window.ReviewerGate 존재만 본다). -->
 <script src="js/campaign-reviewer-gate.js"></script>
 <!-- 날짜별 모집인원 조절 + 차수(095) — 카드 [📅 인원] 버튼이 여는 공유 모달(workdesk.html 과 한 벌) -->
-<script src="js/campaign-daily-plan.js"></script>
+<script src="js/campaign-daily-plan.js?v=20260927-norebuild"></script>
 <script src="js/campaign-workdetail.js"></script>
-<script src="js/index-recruit.js?v=20260817-hidden-prerequisite-c125"></script>
-
-<!-- 외부모집 구매양식 관리자 수동제출(공용 모달) — 작업 탭 관리·관제 패널·공고 카드 공용 -->
-<script src="js/manual-order.js"></script>
+<script src="js/index-recruit.js?v=20260914-recruit-thumb-paste"></script>
 
 <!-- ══════════════════════════════════════════════════════
      Phase 1-2: search.html 블랙리스트 배너 (공지 배너)
@@ -2605,7 +2161,7 @@ body{ letter-spacing:-.01em; }
     function _mountAdminSettings() {
       if (!window.AdminSettings) return;
       AdminSettings.mount('rvNoticeMount', { panels: ['notice'], autoload: false });
-      AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business', 'aisamples', 'inspectmsg', 'worktable', 'reviewtype', 'gatecriteria', 'capturelink'], autoload: false });
+      AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business', 'aisamples', 'inspectmsg', 'worktable', 'reviewtype', 'managercleanup', 'deliverycleanup', 'gatecriteria', 'capturelink'], autoload: false });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _mountAdminSettings);
     else _mountAdminSettings();

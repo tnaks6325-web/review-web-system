@@ -339,25 +339,20 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       /require\('\.\/paymentApply\.service'\)/.test(resSrc)
       && /recordDeposits\(client,/.test(resSrc) && /markDepositCells\(/.test(resSrc));
 
-    const routeSrc = noLineComments(read('src/routes/payment.routes.js'));
-    ok('★ 기존 수동 처리(mark-done)도 같은 함수를 쓴다(사본이 남아 있지 않다)',
-      /paymentApply\.service/.test(routeSrc)
-      && !/UPDATE review_index SET is_submitted2/i.test(routeSrc)
-      && !/INSERT INTO payment_records/i.test(routeSrc));
+    ok('★ 회차를 건너뛰는 옛 수동 처리(mark-done) 라우트가 없다(결정 186 57번)',
+      !fs.existsSync(path.join(__dirname, '..', 'src', 'routes', 'payment.routes.js')));
 
     const applySrc = noLineComments(read('src/services/paymentApply.service.js'));
     ok('★ 무시트 탭은 작업표 칸에 쓰고 시트·큐로 내려가지 않는다(W3-a)',
       /markStatusCell\(/.test(applySrc) && /if \(st\.handled\)/.test(applySrc) && /continue;/.test(applySrc));
-    ok('★ 무시트 판정 실패는 fail-open(시트 경로로 진행)',
-      /무시트 판정 예외/.test(applySrc));
+    ok('★ 무시트 판정 실패에도 구글시트로 전환하지 않는다',
+      !/require\('\.\/sheets\.service'\)/.test(applySrc) && !/enqueue\('deposit_mark'/.test(applySrc));
     ok('★ 시각은 호출자가 준다(건별 stamp 우선)',
       /item\.stamp \|\| opts\.stamp/.test(applySrc) && /item\.paidAt \|\| opts\.paidAt/.test(applySrc));
     ok('★ paid_at 미지정이면 DEFAULT NOW()(종전 동작 보존)',
       /COALESCE\(\$7::timestamptz, NOW\(\)\)/.test(applySrc));
-    ok('★ 저장된 입금 열이 비어도 실제 헤더의 입금일을 찾아 기록·검증한다',
-      /findPaymentColumnIndex\(headers\)/.test(applySrc)
-      && /let resolvedDepositColKey = depositColKey;/.test(applySrc)
-      && /depositColKey: resolvedDepositColKey/.test(applySrc));
+    ok('★ 입금일 표기는 DB 작업표 경로만 사용한다',
+      /markStatusCell\(/.test(applySrc) && !/writeSheet\(/.test(applySrc));
   }
 
   /* ══════════════════════════════════════════════════════════

@@ -50,7 +50,7 @@ t('공유 모듈이 라벨·설명·전이표·접수판정을 갖는다', () =>
 t('★ 사본 금지 — workdesk·index-app 어디에도 두 번째 표가 없다', () => {
   assert.ok(!/const WO_STATUS\s*=/.test(HTML), 'workdesk 에 WO_STATUS 사본이 되살아났다');
   [HTML, APP].forEach((src, i) => {
-    ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_MAP', 'WO_CHANNEL_HOSTS'].forEach(n =>
+    ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_TYPES', 'WO_CHANNEL_HOSTS'].forEach(n =>
       assert.ok(!new RegExp('(const|let|var)\\s+' + n + '\\s*=').test(src),
         (i ? 'index-app' : 'workdesk') + ' 에 ' + n + ' 사본이 있다'));
   });
@@ -183,7 +183,7 @@ t('★ 프리필은 공유 모듈 — 관리자 대시보드와 같은 공고가
   assert.ok(/const prefill = _woCampaignPrefill\(o\);/.test(APP), 'index-app 이 공유 프리필을 쓰지 않는다');
   const i = HTML.indexOf('async function _woCampaign(id){');
   const body = HTML.slice(i, i + 1200);
-  assert.ok(/o\.linked_campaign_id\) await openRecruitModal\(o\.linked_campaign_id\)/.test(body),
+  assert.ok(/o\.linked_campaign_id\) await openRecruitModal\(o\.linked_campaign_id, _woCampaignPrefill\(o\), id\)/.test(body),
     '연결된 공고는 그 공고를 열어야 한다(새 공고를 또 만들면 중복 발행)');
   assert.ok(/await loadRecruitTabOptions\(\)/.test(body),
     '연결 탭 목록을 기다리지 않으면 드롭다운이 빈 채로 열린다');

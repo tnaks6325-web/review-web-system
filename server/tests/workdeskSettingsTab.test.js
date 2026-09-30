@@ -80,24 +80,22 @@ t('원본 라우트는 무변경 — /api/admin·/api/tab·/api/reviewer 게이�
 console.log('\n3) 사본 금지(프론트)');
 const mod = F('js/admin-settings.js');
 const adm = F('admin.html');
-const siand = F('admin-siand.html');
 const wdk = F('workdesk.html');
 const app = F('js/index-app.js');
 
 t('마크업·로직은 공유 모듈 한 벌', /window\.AdminSettings\s*=/.test(mod)
   && /function _nicknameHtml/.test(mod) && /function _businessHtml/.test(mod) && /function _noticeHtml/.test(mod));
-t('★ 세 화면이 같은 모듈을 로드한다', [adm, siand, wdk].every(h => /js\/admin-settings\.js/.test(h)));
+t('★ 두 화면이 같은 모듈을 로드한다 (admin-siand.html 은 결정 186 44번에서 제거)', [adm, wdk].every(h => /js\/admin-settings\.js/.test(h)));
 t('★ 화면에는 사본이 없다 — 마운트 지점만',
   !/id="myNicknameInput"/.test(adm) && !/id="companyBusinessNoInput"/.test(adm) && !/id="rvNoticeList"/.test(adm)
-  && !/id="myNicknameInput"/.test(siand)
   && /id="adminSettingsMount"/.test(adm) && /id="rvNoticeMount"/.test(adm)
-  && /id="adminSettingsMount"/.test(siand) && /id="adminSettingsMount"/.test(wdk));
+  && /id="adminSettingsMount"/.test(wdk));
 t('★ index-app.js 에 같은 이름의 선언이 남아 있지 않다(뒤에 로드되어 모듈 전역을 덮는다)',
   !/function saveMyNickname/.test(app) && !/function saveCompanyBusinessNo/.test(app)
   && !/function uploadCashReceiptGuide/.test(app) && !/function saveReviewerNotice/.test(app)
   && !/const CR_GUIDE_CHANNELS/.test(app));
 t('★ 모듈은 index-app.js **앞**에 로드된다(순서가 바뀌면 전역이 덮인다)',
-  [adm, siand].every(h => h.indexOf('js/admin-settings.js') < h.indexOf('js/index-app.js')));
+  [adm].every(h => h.indexOf('js/admin-settings.js') < h.indexOf('js/index-app.js')));
 t('탭 전환 훅(호출부)은 그대로 — 로드 타이밍 불변',
   /tabName === "settings"[\s\S]{0,400}loadMyNickname/.test(app)
   && /tabName === "dashboard"[\s\S]{0,400}loadReviewerNoticesAdmin/.test(app)
@@ -109,9 +107,16 @@ t('nav 에 설정 탭(관리자·AE 양쪽)', (wdk.match(/data-v="settings"/g) |
 t('switchView 분기', /v==='settings'\) renderSettingsView\(\)/.test(wdk));
 t('★ 서버 경로 재기준 — /api/trackb/settings (SSO 토큰이 도달 가능한 유일 경로)',
   /window\.ADMIN_SETTINGS_API\s*=\s*'\/api\/trackb\/settings'/.test(wdk));
-t('★ 패널 노출 = 서버 게이트와 1:1(AE 는 닉네임만 — 작업표 표준열·AI 예시·블랙리스트 관리기준은 adminOrMaster)',
-  // ⚠ 패널이 늘어도 검사 의미는 불변: 관리자 목록에 포함 + AE 는 nickname 하나뿐.
-  /isAdmin \? \[[^\]]*'aisamples'[^\]]*'inspectmsg'[^\]]*\] : \['nickname'\]/.test(wdk));
+t('★ 패널 노출 = 서버 게이트와 1:1(전사 설정은 AE 에게 안 보인다 — 작업표 표준열·AI 예시·안내문구·공지)',
+  // ⚠ 패널이 늘어도 검사 의미는 불변: 관리자 목록에 포함 + **adminOrMaster 인 패널은 AE 목록에 없다**.
+  //   AE 목록 자체는 늘 수 있다(2026-08: gatecriteria = 공고별 참여 리뷰어 관리와 같은 범위로 개방).
+  (() => {
+    const m = /isAdmin \? \[([^\]]*)\] : \[([^\]]*)\]/.exec(wdk);
+    if (!m) return false;
+    const adminOnly = ['business', 'aisamples', 'inspectmsg', 'worktable', 'homebanner', 'notice'];
+    return adminOnly.every(p => m[1].includes(`'${p}'`) && !m[2].includes(`'${p}'`))
+      && m[2].includes("'nickname'");
+  })());
 t('모듈 미로드 시 조용히 빈 화면이 아니라 사유를 보여준다',
   /설정 모듈\(js\/admin-settings\.js\)을 불러오지 못했습니다/.test(wdk));
 
@@ -128,7 +133,7 @@ t('경로 매핑이 기본값·접미사 양쪽에 같은 키를 갖는다(한�
     const g = re => [...mod.matchAll(re)].map(m => m[1]);
     const a = g(/^\s{4}(\w+):\s+"\/api\//gm);
     const b = g(/^\s{4}(\w+):\s+"\/(?!api)/gm);
-    return a.length === 8 && a.join(',') === b.join(',');
+    return a.length === 10 && a.join(',') === b.join(',');
   })());
 
 // 실제 실행 — 전역이 하나도 없는 가짜 DOM 에서 mount() 가 도는지

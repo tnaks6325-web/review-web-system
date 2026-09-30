@@ -17,8 +17,8 @@ ok('campaign stores the weekend rule independently of a worktable',
 ok('card projection reports the weekend unpublished state from the shared policy',
   /state: weekend\.blocked \? 'weekend_unpublished' : st\.state/.test(route)
   && /stateMessage: weekend\.blocked \? weekend\.message/.test(route));
-ok('both participation and legacy application paths block weekend applications server-side',
-  (route.match(/reason: weekend\.reason/g) || []).length >= 2
-  && /weekendPublicationState\(camp, now\)/.test(route));
+ok('participation gate uses the shared policy with the saved daily plan',
+  /reason: weekend\.reason/.test(route)
+  && /weekendPublicationState\(camp, now, countsMap\.get\(id\) && countsMap\.get\(id\)\.plans\)/.test(route));
 
 console.log('campaignWeekendIntegration: passed');

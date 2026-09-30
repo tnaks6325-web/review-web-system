@@ -1,5 +1,8 @@
 'use strict';
 
+// 8/11 수동 이체 #0 회차 복구 도구는 운영에서 실행 완료(payment_batches.historical_key='manual-811', 339건)
+// → 결정 186 59번에서 버튼·라우트·서비스를 제거했다. 남는 계약: #0 회차 저장소(마이그레이션 117)와
+// 장부 재생성마다 수동 입금 표기를 되살리는 rehydrate. 복구 도구가 되살아나지 않는지도 본다.
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -10,22 +13,12 @@ const workdesk = fs.readFileSync(path.join(root, '..', 'frontend/workdesk.html')
 const migration = fs.readFileSync(path.join(root, 'migrations/117_manual_811_transfer_ledger.sql'), 'utf8');
 const ledger = fs.readFileSync(path.join(root, 'src/services/sheetlessLedger.service.js'), 'utf8');
 
-assert.match(repair, /btrim\(pe\.value_text\) = '8\/11'/, 'repair scope must be fixed to the historical 8/11 marker');
-assert.match(repair, /pe\.reverted_at IS NULL/, 'only the administrator\'s final active manual mark may be restored');
-assert.match(repair, /markDepositCells\(items, \{ by, deferSheetlessRebuild: true \}\)/, 'repair writes through the shared board path but rebuilds a tab once');
-assert.match(repair, /rebuildLedgers\(/, 'sheetless workboard ledgers are rebuilt after the repair');
-assert.match(repair, /stamp: '8\/11'/, 'repair must write the original historical payment date');
-assert.match(routes, /payment\/repair\/manual-811-deposit-dates', authMiddleware, adminOrMasterMiddleware/, 'repair endpoint must be admin protected');
-assert.match(routes, /need_confirm/, 'repair endpoint requires an explicit confirmation');
-assert.match(workdesk, /_pmRestoreManual811/, 'payment UI exposes the repair action');
-assert.match(repair, /seq, bank, status, item_count, total_amount/, 'recovery creates an auditable transfer batch');
-assert.match(repair, /VALUES \(0, 'manual', 'applied'/, 'historical batch is always #0 and applied');
-assert.match(repair, /manual_payment_marks/, 'persistent marker is recorded beside the batch');
-assert.match(repair, /payment_records[\s\S]*source_key/, 'payment ledger has an idempotent source key');
-assert.match(repair, /board_recorded_count[\s\S]*board_stamp = '8\/11'/, 'batch table records the real workboard write outcome');
-assert.match(repair, /already_locked/, 'existing active transfer items stop a duplicate recovery');
+assert.doesNotMatch(routes, /router\.(get|post)\('\/payment\/repair\/manual-811/, '실행 완료된 8/11 복구 입구가 되살아났다(다시 누르면 339줄에 재기록)');
+assert.doesNotMatch(workdesk, /_pmRestoreManual811/, '입금관리에 8/11 복구 버튼이 되살아났다');
+assert.doesNotMatch(repair, /function restoreManual811DepositDates|function previewManual811Transfer/, '8/11 복구 서비스가 되살아났다');
+assert.match(repair, /historical_key = 'manual-811'/, '번진 입금일 정리는 #0 수동 이력 회차를 계속 식별한다');
 assert.match(migration, /historical_key/, 'only one #0 historical batch can exist');
 assert.match(migration, /manual_payment_marks/, 'migration creates durable manual payment marker storage');
 assert.match(ledger, /rehydrateManualPaymentMarks/, 'every sheetless ledger rebuild restores permanent manual payment marks first');
 
-console.log('manual 8/11 deposit repair contract passed');
+console.log('manual 8/11 deposit repair retirement contract passed');

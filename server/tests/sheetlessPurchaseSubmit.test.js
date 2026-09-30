@@ -33,14 +33,81 @@ test('embedded purchase form opens and submits without sheet parameters', () => 
 test('server uses a DB-only campaign scope and writes the verified order to the DB worktable', () => {
   assert.ok(/async function _resolveCampaignOrderScope/.test(submit), 'server-owned campaign scope resolver is missing');
   assert.ok(/sheetless: true/.test(submit), 'DB-only campaign branch is missing');
-  assert.ok(/skipSheetMirror: orderScope\.sheetless/.test(submit), 'sheetless submissions must skip Google Sheet mirroring');
+  assert.ok(/skipSheetMirror: skipSheetMirrorForWrite/.test(submit), 'sheetless submissions must skip Google Sheet mirroring');
+  assert.ok(/const skipSheetMirrorForWrite = !!orderScope\.sheetless \|\| queuedWorkboardApply/.test(submit),
+    'an approved queued workboard target must skip legacy sheet-row claiming even for a non-campaign submission');
   assert.ok(/if \(!orderScope\) \{[\s\S]*?참여 문맥/.test(submit), 'anonymous sheetless submission must remain blocked');
   assert.ok(/if \(skipSheetMirror\) \{[\s\S]*?mirror_status = 'written'/.test(ledger),
     'DB-only submission must finish without row claim or sync queue');
-  assert.ok(/linked_sheet_id, linked_tab_name, linked_tab_gid/.test(submit),
+  assert.ok(/linked_sheet_id, rc\.linked_tab_name, rc\.linked_tab_gid/.test(submit),
     'verified campaign must resolve its DB worktable key');
+  assert.ok(/COALESCE\(rc\.workboard_id, tc\.workboard_id\) AS workboard_id/.test(submit),
+    'verified campaign must resolve the authoritative workboard id');
   assert.ok(/orderScope\.worktable/.test(submit) && /writeOrderToWorktable/.test(submit),
     'DB-only submission must be written to the worktable, not only the order ledger');
+  assert.ok(/workboardId: wt\.workboardId \|\| null/.test(submit) && /allowConfirmedCampaignOverflow: true/.test(submit),
+    'confirmed campaign purchase must be allowed to converge even when prepared slots drifted');
+});
+
+test('sheetless worktable write failure is persisted instead of leaving the ledger pending', () => {
+  const start = submit.indexOf('if (ledger.sheetRow && !queuedWorkboardApply)');
+  const end = submit.indexOf('if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply)', start);
+  const branch = submit.slice(start, end);
+  assert.ok(start >= 0 && end > start, 'sheetless follow-up branch is missing');
+  assert.ok(/if \(!sheetlessDone\.ok\) \{[\s\S]*?try \{[\s\S]*?await markOrderMirrorFailed\(ledger\.orderSubmissionId, sheetlessDone\.message \|\| sheetlessDone\.reason\)[\s\S]*?\} catch \(statusErr\)/.test(branch),
+    'failed sheetless worktable writes must persist failed status and the reason');
+  assert.ok(/무시트 실패상태 저장 실패\(원장 저장은 완료\)/.test(branch),
+    'a secondary status-write failure must not turn a saved submission into a client-visible failure');
+});
+
+test('client completion screen does not hide a workboard mirror failure', () => {
+  const body = search.slice(search.indexOf('async function submitOrderForm'), search.indexOf('function _renderCaptureChecklist'));
+  assert.ok(/mirrorStatuses\.some\(s => s === 'failed' \|\| s === 'pending_no_row'\)/.test(body),
+    'completion screen must consume the mirror status returned by the server');
+  assert.ok(/작업보드 반영 확인이 필요합니다/.test(body),
+    'mirror failure must show a visible warning instead of normal submission copy');
+});
+
+test('idempotent retry returns the original order mirror status', () => {
+  assert.ok(/so\.mirror_status AS sub_mirror_status/.test(submit) && /lo\.mirror_status AS late_mirror_status/.test(submit),
+    'hold lookup must read the durable mirror status without another round trip');
+  assert.ok(/mirrorStatus: holdCtx\.doneMirrorStatus \|\| ''/.test(submit),
+    'already-submitted responses must preserve failed or pending mirror status');
+});
+
+test('approved workboard queue targets always enqueue outside the campaign-only branch', () => {
+  const queueStart = submit.indexOf('if (queuedWorkboardApply) {');
+  const queueEnd = submit.indexOf('} else if (orderScope.sheetless) {', queueStart);
+  const queueBranch = submit.slice(queueStart, queueEnd);
+  assert.ok(queueStart >= 0 && queueEnd > queueStart, 'queued workboard branch must precede the campaign-only direct branch');
+  assert.ok(/enqueue\('workboard_apply'/.test(queueBranch) && /await markOrderQueued\(ledger\.orderSubmissionId\)/.test(queueBranch),
+    'an approved target must either be queued and marked queued before any direct-write branch is considered');
+});
+
+test('queued workboard targets use no-row duplicate protection and do not emit a RAW-row failure', () => {
+  assert.ok(/crossDay: skipSheetMirrorForWrite/.test(submit),
+    'every path that skips sheet-row claiming must use cross-day duplicate protection');
+  assert.ok(/else if \(!ledger\.sheetRow && !skipSheetMirrorForWrite\)/.test(submit),
+    'an intentional workboard queue target must not be reported as a RAW row-claim failure');
+});
+
+test('failed workboard queue registration is durably re-enqueued by reconciliation', () => {
+  const reconcileStart = ledger.indexOf('async function reconcileStuckOrders');
+  const reconcile = ledger.slice(reconcileStart);
+  assert.ok(/resolveQueuedWorkboardTarget/.test(reconcile),
+    'reconciliation must re-evaluate workboard queue targets');
+  assert.ok(/type = 'workboard_apply'/.test(reconcile) && /await enqueue\('workboard_apply'/.test(reconcile),
+    'a failed workboard queue registration must be re-enqueued by exact order submission ID');
+  assert.ok(/await markOrderQueued\(row\.id\)/.test(reconcile),
+    'successful re-enqueue must restore the durable queued state');
+});
+
+test('queued workboard registration failure is persisted rather than left pending', () => {
+  const dispatchStart = submit.indexOf('if (queuedWorkboardApply) {');
+  const dispatchEnd = submit.indexOf('if (ledger.sheetRow && !queuedWorkboardApply)', dispatchStart);
+  const dispatch = submit.slice(dispatchStart, dispatchEnd);
+  assert.ok(/if \(sheetlessDone && !sheetlessDone\.ok\) \{[\s\S]*?await markOrderMirrorFailed\(ledger\.orderSubmissionId, sheetlessDone\.message \|\| sheetlessDone\.reason\)/.test(dispatch),
+    'a failed queue registration must transition the durable order ledger to failed');
 });
 
 test('campaign confirmation can explicitly bypass old sheet binding after server hold verification', () => {

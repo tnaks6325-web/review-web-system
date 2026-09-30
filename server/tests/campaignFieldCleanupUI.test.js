@@ -92,8 +92,8 @@ ok('유의사항 지문 감지 — 덤프는 잡고 정상 안내는 통과',
 
 /* ══ C. 배선 — 경고 전용·미리보기 게이트·rawHtml 보호 ══ */
 console.log('\n[C] 배선(완화 금지 3종)');
-ok('경고 컨테이너 3곳이 모달 마크업에 있다',
-  ['rf_clean_inflow', 'rf_clean_review', 'rf_clean_notes'].every(id => modal.includes(`id="${id}"`))
+ok('현재 편집 가능한 리뷰가이드·특이사항 경고 컨테이너가 모달에 있다',
+  ['rf_clean_review', 'rf_clean_notes'].every(id => modal.includes(`id="${id}"`))
   && /\.rf-clean-warn\{/.test(modal) && /\.rf-clean-pv\{/.test(modal));
 ok('모달을 열 때(신규·수정 공통) 감지가 돈다 — 개선 ④의 소급 경로',
   /try \{ renderRecruitFieldCleanup\(\); \} catch/.test(rec));

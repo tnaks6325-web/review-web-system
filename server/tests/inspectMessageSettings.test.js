@@ -33,7 +33,16 @@ require.cache[poolPath] = {
       if (h instanceof Error) throw h;
       return h || { rows: [], rowCount: 0 };
     },
-    connect: async () => { throw new Error('connect 불필요'); },
+    /* ★ csBridge 는 방 생성·메시지·방 갱신을 **한 트랜잭션**으로 묶는다(빈 방 방지, 2026-08-21).
+         그래서 스텁도 client 를 내줘야 한다 — 쿼리는 같은 핸들러로 흘려보내고
+         BEGIN/COMMIT/ROLLBACK 만 흡수한다(검사 의미는 그대로). */
+    connect: async () => ({
+      query: async (sql, params) => {
+        if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(String(sql))) return { rows: [], rowCount: 0 };
+        return require('../src/db/pool').query(sql, params);
+      },
+      release: () => {},
+    }),
   },
 };
 function resetPool(handlers) { _q = []; _handlers = handlers || []; _hi = 0; }
@@ -140,7 +149,9 @@ const IM = require('../src/utils/inspectMessages');
     assert.ok(/_fid = \(v\) =>[\s\S]*replace\(\/\[\^-\\w\]\/g, ''\)/.test(fn),
       '★ 파일ID 는 [-\\w] 밖 전부 제거(잘못된 값이 <img> 로 나가지 않게)');
     assert.ok(/const meta = card \?/.test(fn), 'card 있을 때만 meta');
-    const metaBlock = fn.slice(fn.indexOf('const meta = card ?'), fn.indexOf('const { rows: mRows }'));
+    // ★ 경계는 **SQL 문**으로 잡는다 — 선언 형태(const/구조분해)에 기대면 코드가 조금만 바뀌어도
+    //   slice 가 -1 로 무너져 검사가 조용히 무의미해진다(2026-08-21 실측: 트랜잭션 도입 때 밟음).
+    const metaBlock = fn.slice(fn.indexOf('const meta = card ?'), fn.indexOf('INSERT INTO cs_messages'));
     assert.ok(!/senderName|by\b|sheetId/.test(metaBlock),
       '★★ meta 에 관리자 실명·시트 제목 금지(리뷰어 응답에 그대로 실린다)');
     assert.ok(/msg_type, meta/.test(fn) && /'inspect_result' : 'text'/.test(fn),

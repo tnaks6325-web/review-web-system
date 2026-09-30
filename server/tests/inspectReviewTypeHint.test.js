@@ -86,8 +86,16 @@ const CTX = require('../src/services/reviewTypeContext.service');
     ok('B3: ★ fail-soft · 빈 입력 무쿼리');
 
     const src = read('src/services/reviewTypeContext.service.js');
-    assert.ok(!/normalizeReviewType|구매확정|실배송/.test(src.split('module.exports')[0].replace(/\/\*[\s\S]*?\*\//g, '')),
-      '★ 판정 규칙 사본 금지 — resolveReviewType 에만 맡긴다');
+    const _body = src.split('module.exports')[0].replace(/\/\*[\s\S]*?\*\//g, '');
+    /* ★ 검사 의미 불변 — 금지하는 것은 **규칙을 여기서 다시 쓰는 것**이다(어휘 리터럴·자체 구현).
+       utils/reviewType 의 export 를 그대로 태우는 호출은 단일 출처를 쓰는 것이라 허용한다
+       (2026-08-23: 혼합 표기를 위해 normalizeReviewType 을 그 util 에서 가져와 쓴다). */
+    assert.ok(!/구매확정|실배송|빈박스|믹스|포토/.test(_body),
+      '★ 판정 규칙 사본 금지 — 어휘를 여기서 다시 적지 않는다');
+    assert.ok(!/function\s+normalizeReviewType|function\s+resolveReviewType/.test(_body),
+      '★ 판정 함수를 여기서 다시 구현하지 않는다');
+    assert.ok(/require\('\.\.\/utils\/reviewType'\)/.test(_body),
+      '★ 판정은 utils/reviewType 단일 출처에서 가져온다');
     ok('B4: ★ 판정 규칙 사본 0(utils/reviewType 단일 출처)');
   }
 
@@ -161,7 +169,9 @@ const CTX = require('../src/services/reviewTypeContext.service');
       '목록에 실린 건들의 탭만 조회');
     assert.ok(/let reviewTypes = \[\];[\s\S]{0,400}catch \(_\)/.test(tb),
       '★ 실패해도 목록은 나간다(표시 보조)');
-    assert.ok(/scoped: !!sc\.scoped, reviewTypes \}\)/.test(tb), '응답 동봉');
+    // ⚠ 응답 객체는 뒤로 계속 늘어난다(#1090 typeCounts) — 줄 끝(`})`)에 기대면 무관한 변경마다
+    //    이 가드가 조용히 빨개진다. **`reviewTypes` 가 응답에 실리는가**만 본다(검사 의미 불변).
+    assert.ok(/scoped: !!sc\.scoped, reviewTypes[,\s}]/.test(tb), '응답 동봉');
     ok('C1: 목록 응답 동봉 + fail-soft');
   }
 
@@ -216,7 +226,10 @@ const CTX = require('../src/services/reviewTypeContext.service');
     // XSS — 설정값(tabRaw)이 화면으로 나가는 자리가 esc 를 거치는지 **소스로** 고정한다.
     //   (지금은 '실배송'·'빈박스' 두 리터럴일 때만 출력돼 값으로는 재현할 수 없다 —
     //    조건을 넓히는 순간 설정발 문자열이 그대로 나가므로 여기서 막아 둔다.)
-    const noteFn = WD.slice(WD.indexOf('function _riRTNote('), WD.indexOf('function _riRTNote(') + 700);
+    /* ★ 고정 폭 슬라이스 금지 — 함수가 길어지면 가드가 조용히 빨개진다(레포 규율).
+       최상위 함수는 열 0 의 `}` 로 닫힌다. */
+    const _nfI = WD.indexOf('function _riRTNote(');
+    const noteFn = WD.slice(_nfI, WD.indexOf('\n}', _nfI) + 2);
     const raws = noteFn.match(/\$\{[^}]*rt\.(tabRaw|campRaw)[^}]*\}/g) || [];
     assert.ok(raws.length > 0, 'tabRaw 를 화면에 쓰는 자리가 있다');
     assert.ok(raws.every(x => /esc\(/.test(x)), '★ 설정값 출력은 전부 esc 경유: ' + raws.join(' | '));

@@ -1,0 +1,198 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>브랜드별 담당자(업체 셀프 입력) — 시안</title>
+<style>
+/* 외부 리소스 0 · 가짜 데이터로 실제 동작. ?v=A|B|C 로 한 안만 보기. */
+:root{--ink:#111827;--muted:#6b7280;--faint:#9ca3af;--line:#e5e7eb;--line2:#d1d5db;--card:#fff;
+      --card2:#f9fafb;--bg:#f3f4f6;--accent:#2563eb;--accent-soft:#eff6ff;--bad:#dc2626;--bad-soft:#fef2f2;
+      --warn:#b45309;--warn-soft:#fffbeb;--ok:#16a34a;--ok-soft:#f0fdf4;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 20px 60px}
+h1{font-size:19px;margin:0 0 4px}
+.lead{font-size:12.5px;color:var(--muted);margin:0 0 18px;max-width:840px}
+.vsw{display:flex;gap:6px;margin:0 0 18px;flex-wrap:wrap}
+.vsw a{font-size:11.5px;font-weight:700;text-decoration:none;color:var(--muted);background:var(--card);
+       border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+.vsw a.on{background:var(--ink);border-color:var(--ink);color:#fff}
+section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:0 0 16px}
+h2{font-size:14px;margin:0 0 3px}
+h2 .tag{font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 8px;margin-left:7px;vertical-align:1px}
+.tag.self{background:var(--accent-soft);color:var(--accent)}
+.tag.br{background:var(--ok-soft);color:var(--ok)}
+.sub{font-size:12px;color:var(--muted);margin:0 0 14px}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.split{grid-template-columns:1fr}}
+
+/* ── 대행사: 브랜드 관리 행(실물 .brdcard 근사) ── */
+.brdlist{display:grid;gap:9px}
+.brdcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 14px;
+         display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.brddot{width:12px;height:12px;border-radius:4px;flex:none}
+.brdname{font-size:13px;font-weight:800;min-width:86px}
+.brdmeta{font-size:11.5px;color:var(--muted);flex:1;min-width:110px}
+.btn{font:inherit;font-size:11.5px;font-weight:700;background:var(--card);border:1px solid var(--line2);
+     border-radius:8px;padding:4px 9px;cursor:pointer;color:var(--ink)}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.mgrchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;
+         background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 9px;cursor:pointer}
+.mgrchip.empty{color:var(--faint);font-weight:600;border-style:dashed}
+.mgrchip .sep{color:var(--faint);font-weight:600}
+/* 인라인 입력 줄(행 자리에서 그대로 폼) */
+.mgredit{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;margin-top:8px;
+         padding-top:9px;border-top:1px dashed var(--line)}
+.mgredit .lb{font-size:11px;color:var(--muted);font-weight:700}
+.fld{display:inline-flex;align-items:center;background:var(--card);border:1px solid var(--line2);
+     border-radius:8px;padding:4px 9px;min-width:150px}
+.fld input{border:0;outline:0;font:inherit;font-size:12.5px;width:100%;background:transparent;color:var(--ink)}
+.fld.focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.hint{font-size:10.5px;color:var(--faint)}
+.cap{font-size:10.5px;color:var(--warn);background:var(--warn-soft);border-radius:7px;padding:2px 8px;font-weight:700}
+
+/* ── 브랜드사: 작업 조건 카드(실물 .cndl 근사) ── */
+.cnd{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.cndh{font-size:11px;font-weight:800;color:var(--faint);letter-spacing:.4px;margin:0 0 8px}
+.cndl{display:grid;grid-template-columns:62px minmax(0,1fr);gap:0 8px;font-size:11.5px;margin:0}
+.cndl dt{color:var(--faint);font-weight:650;padding:4px 0;border-top:1px solid var(--line)}
+.cndl dd{margin:0;font-weight:700;padding:4px 0;border-top:1px solid var(--line)}
+.cndl dt:first-of-type,.cndl dd:first-of-type{border-top:0}
+.cndl .role{font-size:10px;font-weight:700;color:var(--faint);margin-right:3px}
+.cndl .sep{color:var(--faint);font-weight:600;margin:0 5px}
+.cnna{color:var(--faint);font-weight:600}
+.hl{background:#fff7cc;border-radius:5px;padding:1px 4px;box-shadow:0 0 0 1px #f5e18a inset}
+.note{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px solid var(--line);
+      border-radius:9px;padding:9px 11px;margin-top:11px}
+.note b{color:var(--ink)}
+.q{font-size:12.5px;background:var(--warn-soft);border:1px solid #f5e5c0;border-radius:10px;padding:11px 13px;margin-top:12px}
+.q b{display:block;margin-bottom:3px}
+ul{margin:6px 0 0;padding-left:17px}li{margin:2px 0;font-size:12px;color:var(--muted)}
+</style></head><body><div class="wrap">
+
+<h1>브랜드별 담당자 — 업체(대행사)가 셀프로 입력</h1>
+<p class="lead">대행사가 브랜드마다 <b>자기 쪽 담당자를 최대 2명</b> 자유입력하면, 그 브랜드사가 보는
+  <b>작업 조건 카드의 「담당」 행</b>에 그대로 표시됩니다. 아래는 <b>확정이 필요한 갈래 A/B/C</b> 와 입력 화면 시안입니다.
+  가짜 데이터로 실제 동작합니다 — 왼쪽에 입력하면 오른쪽 미리보기가 즉시 바뀝니다.</p>
+
+<div class="vsw" id="vsw"></div>
+
+<!-- ── 입력 화면(대행사) ── -->
+<section id="sec-in">
+  <h2>① 입력 — 업체용 뷰어 › 브랜드 관리<span class="tag self">대행사만 보는 화면</span></h2>
+  <p class="sub">행마다 인라인. <b>[담당자]</b> 를 누르면 그 행 자리에서 입력칸 2개가 펼쳐집니다(팝업 없음). 최대 2명.</p>
+  <div class="brdlist" id="brdlist"></div>
+</section>
+
+<!-- ── 결과 화면(브랜드사) ── -->
+<section id="sec-out">
+  <h2>② 결과 — 브랜드사가 보는 작업 조건 카드<span class="tag br">브랜드 링크로 들어온 화면</span></h2>
+  <p class="sub">지금은 이 자리에 <b>내부 담당(AE팀 김수만 / 관리자 망고)</b> 이 그대로 나갑니다. 세 갈래 중 무엇으로 할지 정해주세요.</p>
+  <div class="split">
+    <div id="pv-A"></div>
+    <div id="pv-B"></div>
+  </div>
+  <div class="split" style="margin-top:16px">
+    <div id="pv-C"></div>
+    <div id="pv-D"></div>
+  </div>
+</section>
+
+<section>
+  <h2>확인이 필요한 것</h2>
+  <div class="q"><b>Q1. 내부 담당(AE팀 김수만 / 관리자 망고)을 어떻게 할까요?</b>
+    A 대체(브랜드사에게는 업체가 정한 담당만) · B 병기(내부 담당 아래 한 줄 더) — 예시 문장으로는 <b>A</b> 로 읽었습니다.</div>
+  <div class="q"><b>Q2. 담당자를 입력하지 않은 브랜드의 브랜드사 화면은?</b>
+    C-1 지금처럼 내부 담당 노출 · C-2 「담당」 행을 숨김 · C-3 「—」 — 시안은 <b>C-1</b>(기존 동작 유지)로 그렸습니다.</div>
+  <div class="q"><b>Q3. 역할 라벨을 붙일까요?</b>
+    지금은 <span class="role" style="color:#9ca3af;font-size:10px;font-weight:700">AE팀</span>·<span class="role" style="color:#9ca3af;font-size:10px;font-weight:700">관리자</span> 라벨이 이름 앞에 붙습니다.
+    자유입력 2칸은 라벨 없이 <b>박가람 차장 / 개똥이밥먹어</b> 로만 적으면 되는지, 아니면 라벨 칸도 따로 받을지.</div>
+  <div class="q"><b>Q4. 대행사 자기 화면(작업 조건 카드)에도 이 담당이 보여야 하나요?</b>
+    D안처럼 <b>내부 담당 + 업체 담당을 함께</b> 보여주면 "브랜드사에게 무엇이 나가는지" 를 대행사가 확인할 수 있습니다.</div>
+  <div class="q"><b>Q5. 저장 단위는 브랜드 1벌이 맞나요?</b>
+    (그 브랜드에 귀속된 <b>모든 작업</b>에 같은 담당이 표시됩니다. 작업마다 다르게 두는 게 아니라면 이 쪽이 맞습니다.)</div>
+</section>
+
+<script>
+/* 가짜 데이터 — 실제 저장 없음 */
+var BRANDS=[
+  {id:'b1',name:'웰스앤헬스',color:'#2563eb',cnt:2,mgr:['박가람 차장','개똥이밥먹어'],open:false},
+  {id:'b2',name:'봉구',color:'#0e7490',cnt:0,mgr:[],open:false}
+];
+var CUR='b1';
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+function chip(b){
+  var m=(b.mgr||[]).filter(function(x){return String(x||'').trim();});
+  if(!m.length) return '<span class="mgrchip empty" onclick="openEdit(\''+b.id+'\')">＋ 담당자</span>';
+  return '<span class="mgrchip" onclick="openEdit(\''+b.id+'\')">'+m.map(esc).join('<span class="sep">/</span>')+' <span style="color:#9ca3af">✎</span></span>';
+}
+function row(b){
+  var edit=b.open?
+   '<div class="mgredit" onclick="event.stopPropagation()">'+
+     '<span class="lb">담당자</span>'+
+     '<span class="fld"><input value="'+esc(b.mgr[0]||'')+'" maxlength="20" placeholder="예: 박가람 차장" oninput="setMgr(\''+b.id+'\',0,this.value)"></span>'+
+     '<span class="fld"><input value="'+esc(b.mgr[1]||'')+'" maxlength="20" placeholder="두 번째 담당자(선택)" oninput="setMgr(\''+b.id+'\',1,this.value)"></span>'+
+     '<button class="btn pri" onclick="closeEdit()">저장</button>'+
+     '<button class="btn" onclick="closeEdit()">취소</button>'+
+     '<span class="cap">최대 2명</span>'+
+     '<span class="hint">브랜드사 화면 「담당」 행에 이대로 보입니다 · 비우면 표시하지 않습니다</span>'+
+   '</div>':'';
+  return '<div class="brdcard">'+
+    '<span class="brddot" style="background:'+esc(b.color)+'"></span>'+
+    '<span class="brdname">'+esc(b.name)+'</span>'+
+    '<span class="brdmeta">작업 '+b.cnt+'건 귀속</span>'+
+    chip(b)+
+    '<button class="btn" onclick="preview(\''+b.id+'\')">🔗 링크 복사</button>'+
+    '<button class="btn">작업 귀속</button>'+
+    '<button class="btn">이름</button>'+
+    edit+'</div>';
+}
+function openEdit(id){ BRANDS.forEach(function(b){ b.open=(b.id===id); }); CUR=id; render(); var el=document.querySelector('.mgredit input'); if(el) el.focus(); }
+function closeEdit(){ BRANDS.forEach(function(b){ b.open=false; }); render(); }
+function setMgr(id,i,v){ var b=BRANDS.filter(function(x){return x.id===id;})[0]; if(!b) return; b.mgr[i]=v; CUR=id; renderPreview(); }
+function preview(id){ CUR=id; render(); }
+
+/* ── 브랜드사가 보는 카드 ── */
+function cardHtml(title,desc,mgrRowHtml,tone){
+  return '<div class="cnd"><div class="cndh">작업 조건 <span style="float:right;font-weight:700;color:'+(tone||'#2563eb')+'">'+esc(title)+'</span></div>'+
+    '<dl class="cndl">'+
+      '<dt>메인URL</dt><dd style="color:#2563eb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">https://www.coupang.com/vp/products/96599…</dd>'+
+      '<dt>일정</dt><dd>2026-08-15 ~ 2026-09-02</dd>'+
+      '<dt>구매시간</dt><dd>자율</dd>'+
+      mgrRowHtml+
+      '<dt>총건수</dt><dd>500 건</dd>'+
+      '<dt>구매채널</dt><dd>쿠팡</dd>'+
+    '</dl><div class="note">'+desc+'</div></div>';
+}
+function mgrParts(){
+  var b=BRANDS.filter(function(x){return x.id===CUR;})[0]||{mgr:[]};
+  return (b.mgr||[]).map(function(v){return String(v||'').trim();}).filter(Boolean);
+}
+var INTERNAL='<span class="role">AE팀</span>김수만<span class="sep">/</span><span class="role">관리자</span>망고';
+function renderPreview(){
+  var m=mgrParts(), self=m.map(esc).join('<span class="sep">/</span>');
+  var A=m.length?'<dt>담당</dt><dd><span class="hl">'+self+'</span></dd>'
+                :'<dt>담당</dt><dd>'+INTERNAL+'</dd>';
+  var B=m.length?'<dt>담당</dt><dd>'+INTERNAL+'</dd><dt>브랜드<br>담당</dt><dd><span class="hl">'+self+'</span></dd>'
+                :'<dt>담당</dt><dd>'+INTERNAL+'</dd>';
+  document.getElementById('pv-A').innerHTML=cardHtml('A안 · 대체','업체가 정한 담당만 나갑니다. <b>내부 담당(AE·관리자) 실명은 브랜드사에게 노출되지 않습니다.</b> 예시 문장은 이 안으로 읽었습니다.',A);
+  document.getElementById('pv-B').innerHTML=cardHtml('B안 · 병기','내부 담당 아래 「브랜드 담당」 한 줄을 더합니다. 브랜드사가 <b>양쪽 연락처를 다 알아야 할 때</b>만 의미가 있습니다.',B,'#0e7490');
+  document.getElementById('pv-C').innerHTML=cardHtml('C안 · 미입력 브랜드','담당자를 넣지 않은 브랜드는 <b>지금과 똑같이</b> 내부 담당이 나갑니다(C-1). 숨기거나 「—」로 둘 수도 있습니다(C-2·C-3).','<dt>담당</dt><dd>'+INTERNAL+'</dd>','#b45309');
+  document.getElementById('pv-D').innerHTML=cardHtml('D안 · 대행사 자기 화면','대행사 화면에는 <b>내부 담당 + 브랜드사에게 나가는 담당</b>을 함께 보여 "무엇이 나가는지" 를 확인하게 합니다.',
+    '<dt>담당</dt><dd>'+INTERNAL+'</dd><dt>브랜드사<br>표시</dt><dd>'+(m.length?'<span class="hl">'+self+'</span>':'<span class="cnna">미입력 — 내부 담당이 그대로 나갑니다</span>')+'</dd>','#16a34a');
+}
+function render(){ document.getElementById('brdlist').innerHTML=BRANDS.map(row).join(''); renderPreview(); }
+
+/* ?v=A|B|C 단독 보기 */
+(function(){
+  var v=(location.search.match(/[?&]v=([^&]+)/)||[])[1];
+  var sw=document.getElementById('vsw');
+  sw.innerHTML=['전체','A','B','C'].map(function(k){
+    var q=k==='전체'?'':'?v='+k, on=(k==='전체'&&!v)||(v===k);
+    return '<a class="'+(on?'on':'')+'" href="'+(location.pathname+q)+'">'+(k==='전체'?'전체 보기':k+'안만')+'</a>';
+  }).join('');
+  if(v){ ['A','B','C','D'].forEach(function(k){ var el=document.getElementById('pv-'+k); if(el&&k!==v&&!(v==='C'&&k==='D')) el.style.display='none'; }); }
+})();
+render();
+</script>
+</div></body></html>

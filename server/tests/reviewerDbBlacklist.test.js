@@ -15,7 +15,7 @@
  *  C. setGlobalBlacklist / listGlobalBlacklist 실행 — upsert/삭제 · 마스킹 · fail-soft
  *  D. 라우터 — /reviewers/blacklist 등록(권한 체인) · /reviewers 주석 fail-soft(statsUnavailable) ·
  *     계좌 검색 · flag 필터 자리표시자 정합 · reviewer-gate 응답에 globalBlacklist(fail-soft 미동봉)
- *  E. 프론트(등록리뷰어DB) — 신규 3열 · RV_COLSPAN 16 · 토글 즉시 적용(확인창 없음)·실패 롤백 ·
+ *  E. 프론트(등록리뷰어DB) — 홈 링크+기존 13열+신규 3열 · RV_COLSPAN 17 · 토글 즉시 적용(확인창 없음)·실패 롤백 ·
  *     행 배경/배지 없음 · 집계 실패 '?' · 필터 칩 · 엑셀 다운로드 부재
  *  F. 프론트(공고별 팝업) — globalBlacklist 맨 위 병합 · 조회 실패 = 구역 미표시 · 모두 차단은 allow 미덮음
  */
@@ -126,7 +126,7 @@ function ok(name, cond, extra) {
   console.log('\n[E] 프론트 — 등록리뷰어DB');
   ok('신규 3열(누적참여·이전 리뷰·참여설정)', /<th style="width:92px">누적참여<\/th>/.test(wdk)
     && />이전 리뷰<\/th>/.test(wdk) && />참여설정<\/th>/.test(wdk));
-  ok('RV_COLSPAN = 16(13+3 — 타계정 펼침행 colspan 어긋나면 표가 무너진다)', /const RV_COLSPAN = 16;/.test(wdk));
+  ok('RV_COLSPAN = 17(홈 링크+13+3 — 타계정 펼침행 colspan 어긋나면 표가 무너진다)', /const RV_COLSPAN = 17;/.test(wdk));
   {
     const body = wdk.slice(wdk.indexOf('async function _rvBlkToggle'), wdk.indexOf('async function _rvBlkToggle') + 1600);
     ok('★ 토글 = 즉시 적용(확인창 없음 — 사용자 확정)', !/confirm\(/.test(body));
@@ -137,10 +137,12 @@ function ok(name, cond, extra) {
   ok('★ 집계 실패 = "집계 실패 ?"(0건·정상으로 꾸미지 않음)', (wdk.match(/집계 실패 \?/g) || []).length >= 2);
   ok('★ 후보·블랙리스트 행 배경색 없음(사용자 확정 — cand/blk 행 클래스 부재)',
     !/tr class="\$\{[^}]*cand/.test(wdk) && !/class="rvsq/.test(wdk.match(/<tr>[\s\S]{0,100}c-nm/) ? '' : ''));
-  ok('이름 옆 배지 없음(이름 셀은 이름만)', /<td class="c-nm" style="font-weight:700">\$\{esc\(r\.name\|\|''\)\}<\/td>/.test(wdk));
+  ok('이름 옆에는 안정적인 소유자 코드만 표시(상태·블랙리스트 배지 금지)',
+    /<td class="c-nm" style="font-weight:700">\$\{esc\(r\.name\|\|''\)\}\$\{r\.reviewerNo!=null\?/.test(wdk)
+    && /title="소유자 코드/.test(wdk));
   ok('필터 칩 5종 + 단일 진입점 _rvSetFlag', /_rvSetFlag\('\$\{f\}'\)/.test(wdk)
     && /\['candidate','🚨 후보 \(미작성 1건↑\)'\]/.test(wdk));
-  ok('검색 안내에 계좌번호 포함', /이름 \/ 연락처 \/ 계좌번호 검색 후 Enter/.test(wdk));
+  ok('검색 안내에 계좌번호와 실시간 검색 방식 포함', /이름 \/ 연락처 \/ 계좌번호 실시간 검색/.test(wdk));
   ok('★ 엑셀 다운로드 없음(Q4 — 등록리뷰어DB 화면에 다운로드 버튼 부재)',
     !/엑셀 다운로드|download.*csv/i.test(wdk.slice(wdk.indexOf('function _renderRvHead'), wdk.indexOf('const RV_COLSPAN'))));
 

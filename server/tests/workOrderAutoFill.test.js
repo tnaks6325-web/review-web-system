@@ -85,16 +85,17 @@ const ord = readS('routes/order.routes.js');
 ok('인트라넷·AE 양쪽에서 work_manager 를 받는다',
   /'goods_cost_type', 'work_manager'/.test(ord) && /'work_manager',\s+\/\/ 작업담당/.test(ord));
 ok('인트라넷 구매채널은 작업오더에 보존한다',
-  /'daily_count_text', 'purchase_channel', 'purchase_time'/.test(ord)
+  /'daily_count_text', 'product_distribution_mode', 'purchase_channel', 'purchase_time'/.test(ord)
   && /ADD COLUMN IF NOT EXISTS purchase_channel/.test(ord)
   && /String\(b\.purchase_channel \|\| ''\)\.trim\(\)/.test(ord));
 // ⚠ 088(계약건 컬럼)에서 컬럼 목록 중간에 sales_id/contract_number/quote_id 가 들어와 옛 패턴
 //   (`manager_name, work_manager, status, created_by`)이 드리프트했다 — 검사 의미는 불변(INSERT 에
 //   work_manager 가 있고 값은 pickWorkManager 에서 온다)이라 패턴만 갱신한다.
+// ⚠ 135(배송유형 5종)에서 꼬리에 delivery_type_mix·recall_* 이 붙어 `work_kind)` 가 또 드리프트했다.
 // ⚠ 099(체험단 종류)에서 컬럼 목록 꼬리에 work_kind 가 붙어 `status, created_by)` 가 다시
 //   드리프트했다 — 검사 의미는 불변(INSERT 에 work_manager 가 있고 값은 pickWorkManager 에서 온다).
 ok('신규 오더 INSERT 에 work_manager 포함(별칭·본문 폴백 경유)',
-  /manager_name, work_manager,/.test(ord) && /status, created_by, work_kind\)/.test(ord) && /pickWorkManager\(b\)/.test(ord));
+  /manager_name, work_manager,/.test(ord) && /status, created_by, work_kind,/.test(ord) && /pickWorkManager\(b\)/.test(ord));
 ok('컬럼 자동생성 안전장치(마이그레이션 실패 대비)',
   /ADD COLUMN IF NOT EXISTS work_manager/.test(ord));
 ok('마이그레이션 065 존재',
@@ -106,7 +107,6 @@ ok('★ 접수 시 탭 담당자는 매핑된 닉네임 — 담당AE 실명을 �
 /* ═══ 프론트 배선 ═══ */
 const rec = readF('js/index-recruit.js');
 const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');   // 모달 마크업은 공유 모듈로 이관
-const siand = readF('admin-siand.html');
 
 ok('프리필에 채널·담당자·연결탭이 실린다',
   /String\(o && o\.purchase_channel \|\| ''\)\.trim\(\)/.test(appSrc)
@@ -131,15 +131,15 @@ ok('★ 목록에 없는 탭은 선택하지 않는다(잘못된 탭 연결 방�
   /if \(!_recruitTabList\.some\(t => t\.sheetId === sid && t\.tabName === tabName\)\) return _miss\(tabName\);/.test(rec)
   && /const _miss = [\s\S]{0,300}?return false;/.test(rec)
   && !/const _miss = [\s\S]{0,300}?_restoreLinkedTab/.test(rec));
-ok('올리브영 채널 버튼(관리자 화면 2종)',
-  /data-val="올리브영"/.test(adm) && /data-val="올리브영"/.test(siand));
+ok('올리브영 채널 버튼(관리자 화면) (admin-siand.html 은 결정 186 44번에서 제거)',
+  /data-val="올리브영"/.test(adm));
 /* ★ 판정값에 대응하는 버튼이 없으면 _rfPickBtn 이 '직접입력'으로 흡수해 값은 살지만,
    관리자가 매번 채널명을 손으로 확인해야 한다 — 판정하는 채널은 버튼도 함께 둔다. */
-ok('카카오메이커스 채널 버튼(관리자 화면 2종)',
-  /data-val="카카오메이커스"/.test(adm) && /data-val="카카오메이커스"/.test(siand));
+ok('카카오메이커스 채널 버튼(관리자 화면)',
+  /data-val="카카오메이커스"/.test(adm));
 ok('★ WO_CHANNEL_HOSTS 가 판정하는 채널은 전부 버튼이 있다(직접입력 흡수에 기대지 않는다)',
   ['쿠팡', '네이버', '올리브영', '카카오메이커스'].every(v =>
-    new RegExp(`data-val="${v}"`).test(adm) && new RegExp(`data-val="${v}"`).test(siand)));
+    new RegExp(`data-val="${v}"`).test(adm)));
 ok('버튼 없는 채널은 직접입력으로 흡수(값 유실 방지)',
   /selectRfBtn\("channel", custom\);[\s\S]{0,120}ci\.value = val;/.test(rec));
 ok('작업오더 카드에 담당AE·작업담당 표시',

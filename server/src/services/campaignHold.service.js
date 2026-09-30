@@ -106,7 +106,12 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
   await client.query(
     `UPDATE order_submissions os
         SET campaign_application_id = ca.id,
+            campaign_was_late = os.campaign_was_late
+              OR ca.status IN ('expired','cancelled')
+              OR (ca.expires_at IS NOT NULL
+                  AND ca.expires_at <= NOW() - make_interval(secs => $6)),
             review_fee_snapshot = COALESCE(os.review_fee_snapshot, ca.review_fee_snapshot),
+            delivery_review_fee_mix_snapshot = COALESCE(os.delivery_review_fee_mix_snapshot, ca.delivery_review_fee_mix_snapshot),
             -- ★ 101: 블로그 주소도 같은 자리에서 전파(시트/작업표 '블로그URL' 칸의 출처).
             --   COALESCE = **이미 있는 값은 안 덮는다** — 관리자가 사전등록해 둔 주소가 있으면 그것이 이긴다.
             blog_url = COALESCE(NULLIF(os.blog_url, ''), ca.blog_url)
@@ -114,7 +119,7 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
       WHERE os.id = $1 AND os.campaign_application_id IS NULL
         AND ca.id = $2 AND ca.campaign_id = $3 AND ca.phone8 = $4
         AND ca.hold_token = $5 AND ca.hold_token <> ''`,
-    [orderSubmissionId, appId, campaignId, phone8, holdToken]
+    [orderSubmissionId, appId, campaignId, phone8, holdToken, HOLD_GRACE_SEC]
   );
 
   // 탈시트 구매양식은 서버가 검증한 캠페인 홀드로만 진입한다.
@@ -151,13 +156,52 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
     return 'confirmed';
   }
   // 지각/스윕 선점/취소 후 제출: 자동확정 없음 — 관제 수동확정 대상 표기(레드 #5·#7의 구제경로 입력)
-  await client.query(
+  const late = await client.query(
     `UPDATE campaign_applications SET late_order_id = $2
       WHERE id = $1 AND campaign_id = $3 AND phone8 = $4 AND hold_token = $5
-        AND status IN ('expired','cancelled') AND late_order_id IS NULL`,
+        AND status IN ('expired','cancelled') AND late_order_id IS NULL
+      RETURNING id`,
     [appId, orderSubmissionId, campaignId, phone8, holdToken]
   );
+  /* 신청의 late_order_id는 주문 취소 때 다음 제출을 받을 수 있도록 비워진다.
+     사건 당시의 지각 여부는 주문 원장에 따로 남겨 작업 로그의 과거가 바뀌지 않게 한다. */
+  if (late.rows.length) {
+    await client.query(
+      `UPDATE order_submissions SET campaign_was_late = TRUE WHERE id = $1::uuid`,
+      [orderSubmissionId]
+    );
+  }
   return 'late';
+}
+
+async function logIdentityBlockedExpiries(pool, ids) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ca.id, ca.applicant_name, ca.phone8, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
+              COUNT(a.*) FILTER (WHERE a.status = 'MISMATCH') AS blocked_tries
+         FROM campaign_applications ca
+         JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+         JOIN reviewer_identity_match_audits a ON a.campaign_application_id = ca.id
+        WHERE ca.id = ANY($1::int[])
+        GROUP BY ca.id, rc.id
+       HAVING bool_or(a.status = 'MISMATCH')
+          AND NOT bool_or(a.status IN ('MATCH', 'MANUAL_CONFIRMED'))`, [ids]);
+    if (!rows.length) return;
+    const { logReviewerEvent } = require('./reviewerEventLog.service');
+    for (const r of rows) {
+      const who = r.applicant_name || '리뷰어';
+      await logReviewerEvent({
+        sheetId: r.linked_sheet_id || '', tabName: r.linked_tab_name || '', tabGid: r.linked_tab_gid || null,
+        reviewerName: r.applicant_name || '', phone8: r.phone8 || '',
+        eventType: 'identity_blocked_expired', severity: 'warn',
+        message: `${who} 리뷰어가 구매 캡처의 명의 확인에 막혀 구매양식을 내지 못하고 참여가 만료됐습니다.`,
+        context: { applicationId: r.id, blockedTries: Number(r.blocked_tries) || 0 },
+      }).catch((e) => logger.warn(`[campaignHold] 명의막힘 만료 로그 실패 app=${r.id}: ${e.message}`));
+    }
+  } catch (e) {
+    // 감사 테이블 미적용(42P01) 등 — 알림은 부가 기능이라 만료 처리를 막지 않는다.
+    logger.warn(`[campaignHold] 명의막힘 만료 조회 스킵: ${e.message}`);
+  }
 }
 
 /** 만료 스윕(정리용 — 판정 SoT는 시각 기준이라 지연·미실행 무해). DB-only, 시트 쿼터 0. */
@@ -173,6 +217,9 @@ async function sweepExpiredHolds(pool) {
       RETURNING id`,
     [HOLD_GRACE_SEC]
   );
+  // ①-2 명의 확인에 막혀 만료된 참여를 담당자 로그에 남긴다(보고서 원인 5 — 20일간 82건이 아무도
+  //   모르게 만료됐다). 방금 만료된 id 만 보므로 같은 건이 두 번 쌓이지 않는다. 실패해도 스윕은 계속.
+  if (exp.rowCount) await logIdentityBlockedExpiries(pool, exp.rows.map(r => r.id));
   // ② late 백필: 확정 못 한 주문의 provenance 링크가 있으면 관제 수동확정 목록에 노출
   await pool.query(
     `UPDATE campaign_applications a SET late_order_id = o.id
@@ -258,4 +305,4 @@ async function sweepExpiredHolds(pool) {
   return { expired: exp.rowCount, autoDismissed, revived, closedPersisted: closedCount };
 }
 
-module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds };
+module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds, logIdentityBlockedExpiries };

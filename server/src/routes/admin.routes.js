@@ -166,6 +166,64 @@ router.post('/my-nickname', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 내 작업보드 컬럼 너비 — 사용자 단위 공통 설정 (migration 151)
+// 로컬 저장소는 구버전/오프라인 폴백만 맡고, 정상 로그인 환경에서는 DB가 단일 출처다.
+// ═══════════════════════════════════════════════════════════
+const WORKBOARD_COLUMN_MIN_WIDTHS = Object.freeze({
+  campaign: 60, tabname: 60, product: 60, capture: 35, folder: 35,
+  round: 28, date: 40, time: 50, review: 35, formlink: 28, manager: 28,
+  bar: 120, nums: 40, payment: 28, income: 60, depositname: 80,
+  bank: 60, taekhap: 28, memo: 40, enddate: 70,
+});
+
+function normalizeWorkboardColumnWidths(value) {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return null;
+  const normalized = {};
+  for (const [key, minWidth] of Object.entries(WORKBOARD_COLUMN_MIN_WIDTHS)) {
+    const width = value[key];
+    if (typeof width !== 'number' || !Number.isFinite(width)) continue;
+    const rounded = Math.round(width);
+    if (rounded >= minWidth && rounded <= 2000) normalized[key] = rounded;
+  }
+  return normalized;
+}
+
+router.get('/my-workboard-preferences', authMiddleware, async (req, res, next) => {
+  try {
+    const loginName = req.admin?.name || '';
+    if (!loginName) return res.status(400).json({ ok: false, error: '로그인 계정을 확인할 수 없습니다.' });
+    const { rows } = await pool.query(
+      `SELECT column_widths AS "columnWidths"
+         FROM admin_workboard_preferences
+        WHERE login_name = $1`,
+      [loginName]
+    );
+    return res.json({ ok: true, hasSaved: rows.length > 0, columnWidths: rows[0]?.columnWidths || {} });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/my-workboard-preferences', authMiddleware, async (req, res, next) => {
+  try {
+    const loginName = req.admin?.name || '';
+    if (!loginName) return res.status(400).json({ ok: false, error: '로그인 계정을 확인할 수 없습니다.' });
+    const columnWidths = normalizeWorkboardColumnWidths((req.body || {}).columnWidths);
+    if (!columnWidths) return res.status(400).json({ ok: false, error: '유효한 컬럼 너비가 필요합니다.' });
+    await pool.query(
+      `INSERT INTO admin_workboard_preferences (login_name, column_widths, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (login_name) DO UPDATE
+         SET column_widths = EXCLUDED.column_widths, updated_at = NOW()`,
+      [loginName, JSON.stringify(columnWidths)]
+    );
+    return res.json({ ok: true, columnWidths });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/admin/change-master-pw — 마스터 비밀번호 변경 (GAS: changeMasterPw)
 // ═══════════════════════════════════════════════════════════
 router.post('/change-master-pw', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
@@ -863,115 +921,7 @@ router.post('/smart-build/stop', authMiddleware, masterOnlyMiddleware, async (re
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════════════════════════
-// POST /api/admin/db-rebuild — DB 전체 초기화 + 탭목록에서 재등록 + 스마트빌드
-// 단계: ① 4테이블 TRUNCATE ② 캐시 리셋 ③ syncTabListToDB ④ smartBuild
-// ══════════════════════════════════════════════════════════════
-router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  const { logger } = require('../utils/logger');
-  const { broadcast } = require('../utils/sse');
-
-  try {
-    const { confirm } = req.body;
-    if (confirm !== 'REBUILD_DB') {
-      return res.status(400).json({
-        error: '확인 코드가 올바르지 않습니다. confirm: "REBUILD_DB" 필요'
-      });
-    }
-
-    // 스마트빌드 실행 중이면 거부
-    const sbStatus = getSmartBuildStatus();
-    if (sbStatus.running) {
-      return res.status(409).json({
-        error: '스마트빌드가 실행 중입니다. 완료 후 다시 시도하세요.'
-      });
-    }
-
-    const startTime = Date.now();
-    const steps = [];
-
-    // ── Step 1: 4개 테이블 TRUNCATE ──
-    logger.warn(`[db-rebuild] ⚠ DB 전체 초기화 시작 — by ${req.admin?.name || 'unknown'}`);
-    broadcast('db_rebuild_progress', { step: 1, message: 'DB 테이블 초기화 중...' });
-
-    const client = await pool.connect();
-    const deleted = {};
-    try {
-      await client.query('BEGIN');
-      const tables = ['review_index', 'index_master', 'tab_configs', 'campaigns'];
-      for (const table of tables) {
-        const r = await client.query(`DELETE FROM ${table}`);
-        deleted[table] = r.rowCount;
-      }
-      // build_history, smart build 로그도 초기화
-      const r2 = await client.query('DELETE FROM build_history');
-      deleted.build_history = r2.rowCount;
-
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    steps.push({ step: 1, action: 'TRUNCATE', deleted, elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
-    logger.info(`[db-rebuild] Step1 완료: ${JSON.stringify(deleted)}`);
-
-    // ── Step 2: 스마트빌드 캐시 리셋 ──
-    broadcast('db_rebuild_progress', { step: 2, message: '캐시 리셋 중...' });
-    const cacheReset = resetSmartBuildCache();
-    steps.push({ step: 2, action: 'CACHE_RESET', ...cacheReset });
-    logger.info(`[db-rebuild] Step2 캐시 리셋: ${JSON.stringify(cacheReset)}`);
-
-    // ── Step 3a: 시트DB에서 전체 탭 스캔 (시트DB → 각 시트 탭 파싱 → 탭목록 시트 기록) ──
-    broadcast('db_rebuild_progress', { step: '3a', message: '시트DB에서 전체 탭 스캔 중... (시간 소요)' });
-    const { runIndexScan, syncTabListToDB } = require('../services/indexScan.service');
-    const scanResult = await runIndexScan(false);  // dryRun=false: 탭목록 시트에 기록 + 캐시 저장
-    steps.push({ step: '3a', action: 'INDEX_SCAN', sheets: scanResult.sheetsScanned, tabs: scanResult.totalTabs, errors: scanResult.errors, errorDetails: scanResult.errorDetails, elapsed: scanResult.elapsed });
-    logger.info(`[db-rebuild] Step3a 인덱스 스캔 완료: ${scanResult.sheetsScanned}시트, ${scanResult.totalTabs}탭, 오류 ${scanResult.errors}건 (${scanResult.elapsed})`);
-
-    // ── Step 3b: 스캔 캐시를 DB에 반영 (campaigns + tab_configs + index_master 재등록) ──
-    // ★ allowNewTabs:true — DB 재구축은 "현 상태 복원"(재해복구)이므로 등록 단일경로 게이트 예외
-    broadcast('db_rebuild_progress', { step: '3b', message: '스캔 결과를 DB에 등록 중...' });
-    const syncResult = await syncTabListToDB({ dryRun: false, fromCache: true, allowNewTabs: true });
-    steps.push({ step: '3b', action: 'SYNC_TAB_LIST', ...syncResult });
-    logger.info(`[db-rebuild] Step3b DB 동기화: ${syncResult.message}`);
-
-    // ── Step 4: 스마트빌드 1회 실행 (백그라운드) ──
-    broadcast('db_rebuild_progress', { step: 4, message: '스마트빌드 실행 시작... (백그라운드)' });
-
-    // 백그라운드로 스마트빌드 실행 — DB 재구축은 양보 없이 완주("완료" 보고가 부분완료가 되지 않게)
-    runSmartBuild({ noYield: true }).then(result => {
-      const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      logger.info(`[db-rebuild] Step4 스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵`);
-      broadcast('db_rebuild_done', {
-        message: `DB 재구축 완료 (${totalElapsed}s): ${result.tabsUpdated}탭 갱신`,
-        steps: [...steps, { step: 4, action: 'SMART_BUILD', ...result }],
-        totalElapsed: `${totalElapsed}s`,
-      });
-    }).catch(err => {
-      logger.error(`[db-rebuild] Step4 스마트빌드 오류: ${err.message}`);
-      broadcast('db_rebuild_done', {
-        message: `DB 재구축 부분 완료 (스마트빌드 오류): ${err.message}`,
-        steps,
-        error: err.message,
-      });
-    });
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    res.json({
-      ok: true,
-      message: `DB 초기화 + 탭목록 재등록 완료 (${elapsed}s). 스마트빌드가 백그라운드에서 실행 중입니다.`,
-      steps,
-      elapsed: `${elapsed}s`,
-    });
-
-  } catch (err) {
-    logger.error(`[db-rebuild] 오류: ${err.message}`);
-    next(err);
-  }
-});
+// (POST /db-rebuild — 운영 4표 전체 DELETE 후 구글시트 탭목록에서 재등록: 무시트 작업은 복구 불가 → 2026-09-29 제거 · 결정 186 74번)
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/admin/campaign-delete/:sheetId — 오류 시트(캠페인) DB 일괄 삭제

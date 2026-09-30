@@ -136,9 +136,10 @@ const CTX = { sheetId: 'S1', tabName: '노티드_우유크림폭탄떡 쿠팡 20
     ok('D3: ★★ 카드 — 유형 유지 · 사정 설명 · 주 조치 뒤집기 · 제거는 보조');
 
     const sa = readFront('js/search-app.js');
-    assert.ok(/d\.sameTab \? ''/.test(sa) && /한 화면에 두 리뷰가 같이 보이는 캡처/.test(sa),
-      '★ 첨부 즉시 안내도 다른 작업 건은 "그대로 제출해도 된다"를 말한다(맞게 한 리뷰어가 헤매지 않게)');
-    ok('D4: ★ 리뷰어 첨부 안내 — 다른 작업 건은 정상일 수 있음을 함께 안내');
+    assert.ok(/duplicateBlocked/.test(sa) && /이미 제출됬던 사진이에요/.test(sa)
+      && !/한 화면에 두 리뷰가 같이 보이는 캡처/.test(sa),
+      '★ 리뷰어 첨부 단계는 다른 구매양식에 반영 완료된 동일 캡처를 차단한다');
+    ok('D4: ★ 리뷰어 첨부 안내 — 반영 완료된 다른 구매양식 동일 캡처 차단');
   }
 
   console.log(`\n✅ duplicateMultiReview 회귀가드 ${n}케이스 통과`);

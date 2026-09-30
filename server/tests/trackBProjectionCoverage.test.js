@@ -215,10 +215,12 @@ async function runRoute() {
   const layer = router.stack.find(l => l.route && l.route.path === '/overview' && l.route.methods.get);
   assert.ok(layer, 'GET /overview 미등록');
 
-  t('권한 게이트는 종전 그대로(authMiddleware + adminOrMaster)', () => {
+  // ★ 2026-08 사용자 확정: 관측(overview·parity·cutover 판정)은 AE(staff)도 본다 —
+  //   게이트는 internal 로 넓혔고, **무인증·광고주 도달**은 여전히 회귀다.
+  t('권한 게이트(authMiddleware + internal — 광고주 차단)', () => {
     const names = layer.route.stack.map(s => s.handle.name);
     assert.ok(names.includes('authMiddleware'), '인증 미들웨어가 빠졌다: ' + names.join(','));
-    assert.ok(names.some(n => /adminOrMaster/.test(n)), '관리자 게이트가 빠졌다: ' + names.join(','));
+    assert.ok(names.some(n => /internalMiddleware|adminOrMaster/.test(n)), '역할 게이트가 빠졌다: ' + names.join(','));
   });
 
   const handler = layer.route.stack[layer.route.stack.length - 1].handle;

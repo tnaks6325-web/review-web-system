@@ -1,4 +1,6 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 // 신규 인트라넷 → 리뷰웹 수신 계약의 최소 불변식.
 // 실제 HTTP/DB 이전에 경계값을 고정해, 재시도·중복 방지 키가 임의 문자열로 흐르지 않게 한다.
@@ -6,6 +8,8 @@ const {
   SourceContractError,
   normalizeReviewOrderSourceContract,
 } = require('../src/services/reviewOrderSourceContract.service');
+const { isAutomatedWorkboardEnabled } = require('../src/services/workboardSchema.service');
+const orderRouteSource = fs.readFileSync(path.join(__dirname, '../src/routes/order.routes.js'), 'utf8');
 
 let passed = 0;
 function test(name, fn) {
@@ -57,6 +61,19 @@ test('작업표 규격은 누락 시 v1이며 정의된 v1·v2만 계약으로 �
   assert.strictEqual(v2.workRound, 2);
   assert.throws(() => normalizeReviewOrderSourceContract({ ...base, workboard_schema_version: 2 }), SourceContractError);
   assert.throws(() => normalizeReviewOrderSourceContract({ ...base, workboard_schema_version: 3 }), SourceContractError);
+});
+
+test('v2 생성은 본섭 킬스위치를 명시적으로 켠 경우에만 연다', () => {
+  assert.strictEqual(isAutomatedWorkboardEnabled({}), false);
+  assert.strictEqual(isAutomatedWorkboardEnabled({ WORKBOARD_V2_ENABLED: 'true' }), true);
+  assert.strictEqual(isAutomatedWorkboardEnabled({ WORKBOARD_V2_ENABLED: '0' }), false);
+});
+
+test('인트라넷 수신 INSERT는 광고주 사업자번호까지 모든 컬럼 값을 전달한다', () => {
+  assert.ok(orderRouteSource.includes('$37,$38,$39,$40,$41,\'submitted\',$42,$43,$44,$45,$46,$47,$48'));
+  assert.match(orderRouteSource, /err\.intakeHttp500 = true;\r?\n\s+next\(err\);/);
+  const errorMiddleware = fs.readFileSync(path.join(__dirname, '../src/middleware/error.middleware.js'), 'utf8');
+  assert.match(errorMiddleware, /if \(err\.intakeHttp500\) \{\r?\n\s+return res\.status\(500\)\.json\(\{\r?\n\s+ok: false,\r?\n\s+code: 'order_intake_failed'/);
 });
 
 test('신규 형식의 식별자 일부만 전달하면 거부한다', () => {

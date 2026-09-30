@@ -3,16 +3,24 @@
    - 문의 시작 = 리뷰 내역 카드 → 참여상품 정보 팝업의 [1:1 문의하기] (index.html)
    - 1:1문의 탭 = 이미 문의한 목록(내 문의함, index.html의 #sectionCsInbox) — 팝업 없음
    - 이 파일은 대화창 + 미확인 뱃지 + 관리자 답장 실시간(SSE) 담당
-   의존: api.js(gasGet/gasPost, API_BASE_URL), localStorage "iad_reviewer_user"
+   의존: api.js(gasGet/gasPost, API_BASE_URL), index.html getSavedUser()
    ═══════════════════════════════════════════════════════════ */
 (function () {
   const USER_KEY = "iad_reviewer_user";
+  const HOME_SESSION_KEY = "iad_reviewer_home_session";
   let _open = null;        // { campaignKey, campaignLabel, campaignSource, threadId }
   let _sse = null;
+  let _ssePhone8 = "";
   let _unread = false;
 
   function getUser() {
-    try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { return null; }
+    // 목록(index.html)과 대화창이 반드시 같은 리뷰어를 보아야 한다.
+    // 관리자 바로가기는 현재 탭의 sessionStorage를 우선하므로, 이 모듈에서
+    // localStorage를 다시 직접 읽으면 목록은 A, 대화는 B 계정을 조회할 수 있다.
+    try {
+      if (typeof window.getSavedUser === "function") return window.getSavedUser();
+      return JSON.parse(sessionStorage.getItem(HOME_SESSION_KEY) || localStorage.getItem(USER_KEY));
+    } catch (e) { return null; }
   }
   function esc(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -31,7 +39,13 @@
   //    여기서는 미확인 표시 점(#rcsTabDot)과 SSE 연결만 관리한다.
   function ensureConnected() {
     const user = getUser();
-    if (user && user.name && !_sse) connectSSE();
+    const phone8 = user && user.name && user.phone8 ? String(user.phone8) : "";
+    if (!phone8) {
+      if (_sse) { try { _sse.close(); } catch (_) {} }
+      _sse = null; _ssePhone8 = ""; setTabBadge(0);
+      return;
+    }
+    if (!_sse || _ssePhone8 !== phone8) connectSSE();
   }
   // 하단 탭바 "1:1문의" 뱃지에 총 미확인 수(숫자) 표기
   function setTabBadge(count) {
@@ -42,13 +56,24 @@
     else { dot.textContent = ""; dot.style.display = "none"; }
   }
   // 서버에서 총 미확인 수를 조회해 탭 뱃지 갱신
-  async function refreshUnread() {
+  // 같은 계정의 조회가 진행 중이거나 방금(2초 안) 끝났으면 다시 보내지 않는다 — 홈을 열 때
+  // 초기화와 세션 동기화가 거의 동시에 불러 같은 요청이 두 번 나가던 것을 하나로 합친다.
+  let _unreadInflight = null, _unreadKey = "", _unreadAt = 0;
+  async function refreshUnread(force) {
     const user = getUser();
     if (!user || !user.phone8) { setTabBadge(0); return; }
-    try {
-      const d = await gasGet({ action: "csReviewerUnread", phone8: user.phone8 });
-      if (d && d.ok !== false) setTabBadge(d.totalUnread || 0);
-    } catch (_) {}
+    const key = String(user.phone8);
+    if (force !== true && key === _unreadKey && (_unreadInflight || Date.now() - _unreadAt < 2000)) return _unreadInflight || undefined;
+    _unreadKey = key;
+    _unreadInflight = (async () => {
+      try {
+        const d = await gasGet({ action: "csReviewerUnread", phone8: user.phone8 });
+        const cur = getUser();
+        if (cur && String(cur.phone8) === key && d && d.ok !== false) setTabBadge(d.totalUnread || 0);
+      } catch (_) {}
+      finally { _unreadAt = Date.now(); _unreadInflight = null; }
+    })();
+    return _unreadInflight;
   }
 
   // ── 공통 오버레이 ──
@@ -85,10 +110,10 @@
   }
 
   // ── 대화창 ──
-  async function openChat(campaignKey, campaignLabel, campaignSource) {
+  async function openChat(campaignKey, campaignLabel, campaignSource, threadId) {
     const user = getUser();
     if (!user || !user.phone8) { toast("로그인이 필요합니다"); return; }
-    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", threadId: null };
+    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", threadId: threadId || null };
     const headerSub = "관리자에게 문의를 남겨주세요";
     _pending = [];                                   // 방을 바꾸면 이전 첨부는 버린다
     const ov = overlay();
@@ -122,12 +147,15 @@
     if (!_open) return;
     const user = getUser();
     try {
-      const data = await gasGet({ action: "csReviewerMessages", phone8: user.phone8, campaignKey: _open.campaignKey });
+      // 목록에서 연 방은 threadId로 정확히 조회한다. campaignKey는 새 문의창과
+      // 예전 호출부를 위한 폴백이다. 서버는 threadId와 phone8 소유권을 함께 확인한다.
+      const data = await gasGet({ action: "csReviewerMessages", phone8: user.phone8,
+        threadId: _open.threadId || undefined, campaignKey: _open.campaignKey });
       if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
       _open.threadId = data.threadId || _open.threadId;
       renderMessages(data.messages || []);
       // 이 방을 열람하면 서버에서 해당 방 미확인이 리셋됨 → 탭 총 뱃지 갱신
-      refreshUnread();
+      refreshUnread(true);
     } catch (err) {
       const box = document.getElementById("rcsThread");
       if (box) box.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.82rem">오류: ${esc(err.message)}</div>`;
@@ -143,7 +171,7 @@
     }
     box.innerHTML = messages.map(m => {
       const mine = m.senderRole === 'reviewer';
-      // 리뷰이미지 교체요청 = 카드(관리자 화면과 **같은 렌더러**, 여기선 읽기 전용).
+      // 리뷰캡처 교체요청 = 카드(관리자 화면과 **같은 렌더러**, 여기선 읽기 전용).
       //   리뷰어가 자기 요청의 진행 상태를 채팅 안에서 그대로 확인한다.
       if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
         return `<div style="display:flex;flex-direction:column;align-items:${mine ? 'flex-end' : 'flex-start'}">
@@ -271,11 +299,12 @@
     if (!user || !user.phone8) return;
     if (_sse) { try { _sse.close(); } catch (_) {} _sse = null; }
     try {
+      _ssePhone8 = String(user.phone8);
       _sse = new EventSource(API_BASE_URL + "/api/reviewer/cs/events?phone8=" + encodeURIComponent(user.phone8));
       _sse.addEventListener("cs_message", function (event) {
         let data = {}; try { data = JSON.parse(event.data); } catch (_) {}
         // 총 미확인 수 뱃지 갱신(카톡식 숫자)
-        refreshUnread();
+        refreshUnread(true);
         if (_open && _open.threadId && data.threadId === _open.threadId) {
           // 지금 보고 있는 방 → 새 메시지 즉시 표시(열람 처리됨)
           reloadChat();
@@ -287,7 +316,13 @@
           toast("관리자 답변이 도착했습니다");
         }
       });
-    } catch (_) {}
+    } catch (_) { _sse = null; _ssePhone8 = ""; }
+  }
+
+  // 로그인·관리자 바로가기 계정이 바뀌면 폴링을 기다리지 않고 즉시 반영한다.
+  function syncSession() {
+    ensureConnected();
+    refreshUnread();
   }
 
   // ── 초기화 ──
@@ -297,11 +332,11 @@
     // 로그인/로그아웃 후 상태 변화 대응(가벼운 폴링) — SSE 연결 보장
     setInterval(ensureConnected, 3000);
     // SSE 누락 대비 안전망: 주기적 총 미확인 수 갱신
-    setInterval(refreshUnread, 20000);
+    setInterval(() => refreshUnread(true), 20000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 
   window.ReviewerCS = { open: openInbox, openChat, send, back: backToInbox, close: closeAll,
-                        pickFiles, removeAttach, viewImage, refreshUnread };
+                        pickFiles, removeAttach, viewImage, refreshUnread, syncSession };
 })();

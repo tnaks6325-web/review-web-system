@@ -244,25 +244,32 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   // ★ 개수가 아니라 **경로별로** 본다 — 라우트를 늘릴 때마다 숫자를 고치는 가드는
   //   결국 숫자만 맞춰 통과시키게 된다(무엇이 있어야 하는지를 고정해야 한다).
   const riHas = (p, m) => riLayers.some(l => l.p === p && l.m.includes(m));
-  ok('검수 목록·확인·기대상품명·예시·스윕·CSV 라우트가 모두 등록돼 있다',
+  ok('검수 목록·확인·기대상품명·예시 라우트가 모두 등록돼 있다(CSV 는 결정 186 13번·수동 스윕은 68번에서 제거)',
     riHas('/review-inspect/list', 'get') && riHas('/review-inspect/resolve', 'post')
     && riHas('/review-inspect/product-names', 'get') && riHas('/review-inspect/product-names', 'post')
     && riHas('/review-inspect/samples', 'get') && riHas('/review-inspect/samples', 'post')
-    && riHas('/review-inspect/sweep', 'post') && riHas('/review-inspect/export.csv', 'get'));
+    && !riHas('/review-inspect/sweep', 'post') && !riHas('/review-inspect/export.csv', 'get'));
   ok('★★ 전부 authMiddleware 뒤 — 무인증 도달 불가',
     riLayers.every(l => l.mw.includes('authMiddleware')));
   ok('★★ 조회 계열은 _reInternal(내부인) — 광고주는 도달 불가',
     riLayers.filter(l => !/samples|sweep/.test(l.p) || l.m.includes('get'))
       .every(l => l.mw.includes('_reInternal') || l.mw.includes('adminOrMasterMiddleware')));
-  ok('★ 전사 설정(예시 등록)·스윕 실행은 adminOrMaster — AE 는 못 바꾼다',
-    riLayers.filter(l => (l.p === '/review-inspect/samples' && l.m.includes('post')) || l.p === '/review-inspect/sweep')
+  ok('★ 전사 설정(예시 등록)은 adminOrMaster — AE 는 못 바꾼다',
+    riLayers.filter(l => (l.p === '/review-inspect/samples' && l.m.includes('post')))
       .every(l => l.mw.includes('adminOrMasterMiddleware')));
   const tb = readS('routes/trackB.routes.js');
   ok('★ staff 는 담당 탭만 — 스코프 판정 실패는 거절(fail-closed)',
     /_riCanTouch/.test(tb) && /canAccessTab/.test(tb)
     && /return \{ ok: false, code: 503, error: '담당 범위를 확인하지 못했습니다\./.test(tb));
+  /* ★ 종전에는 전체에서 뽑은 200건을 라우트가 `allow.has(...)` 로 걸렀는데, 담당 건이 그 200건
+       밖이면 화면이 거의 비고 요약도 200 에서 잘렸다 → 스코프를 **SQL 로 내린다**(2026-08-23).
+       검사 의미는 같거나 더 강하다: 목록·요약·유형집계가 **같은 담당 탭 목록**을 받는다. */
   ok('★ 탭 미지정 staff 는 담당 탭 목록으로 거른다(넓게 보여주지 않는다)',
-    /scopedActiveTabs\(\{ role: 'staff'/.test(tb) && /allow\.has\(JSON\.stringify\(\[it\.sheet_id, it\.tab_name\]\)\)/.test(tb));
+    /scopedActiveTabs\(\{ role: 'staff'/.test(tb)
+    && /const tabs = \(sc\.scoped && !sc\.tabName\) \? \(sc\.allow \|\| \[\]\) : undefined;/.test(tb)
+    && /listInspections\(\{[\s\S]{0,200}tabs,/.test(tb)
+    && /inspectionSummary\(\{[^)]*tabs \}\)/.test(tb)
+    && /inspectionTypeCounts\(\{[\s\S]{0,200}tabs,/.test(tb));
 
   const wdk = readF('workdesk.html');
   ok('리뷰웹시스템[3버전]에 리뷰검수 탭 + 뱃지',
@@ -293,9 +300,11 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   ok('★★ 캐시 키에 예시 지문이 섞인다 — 안 그러면 예시를 등록·교체해도 옛 판정이 히트한다',
     /_getCacheKey\('classify[2-9]\d*:' \+ sampleSig \+ ':' \+ base64Data\)/.test(gem)
     && /sampleSig = samples\.length/.test(gem));
-  ok('★★ 두 호출부가 같은 samples 를 넘긴다 — 다르면 같은 이미지에 AI 콜이 두 번',
+  ok('★★ 자동 이동 없으면 같은 samples, 역할이 바뀌면 최종 슬롯 samples를 넘긴다',
     /samples: _inspectSamples,/.test(diag)
-    && (diag.match(/samples: _inspectSamples/g) || []).length >= 2
+    && /let _finalInspectSamples = _inspectSamples/.test(diag)
+    && /_finalSlotRole !== _slotRole[\s\S]*slotKey: _finalSlotRole/.test(diag)
+    && /samples: _finalInspectSamples/.test(diag)
     && /classifySubmissionImage\(base64, mimeType, \{ samples \}\)/.test(readS('services/captureVerify.service.js')));
   // ★ 창(window)은 "루프 앞에서 준비한다"를 고정하기 위한 것 — 주석이 늘면 함께 넓힌다
   //   (검사 의미는 불변: 준비 블록과 파일 루프 사이에 다른 준비가 끼어들지 않는다).
@@ -305,7 +314,7 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     /let _inspectSamples = \[\];[\s\S]{0,3500}for \(let i = 0; i < files\.length/.test(diag));
   // 조립은 submissionSamples 한 곳으로 수렴 — 슬롯 분기는 서비스 안에 있다(검사 의미 불변)
   ok('★ 슬롯에 맞는 예시를 고른다 — 영수증 슬롯엔 현금영수증 예시(리뷰 예시를 주면 판정이 흔들린다)',
-    /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: slot \}\)/.test(diag)
+    /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: _slotRole \}\)/.test(diag)
     && /slotKey === 'receipt'\s*\?\s*await loadReceiptSamplesFor\(expectedChannel\)/.test(readS('services/reviewInspect.service.js')));
   ok('★ 등록된 예시가 없으면 빈 배열 = 오늘과 동작 동일',
     /if \(!SAMPLES_ENABLED \|\| !expectedChannel\) return \[\];/.test(readS('services/reviewInspect.service.js')));
@@ -337,15 +346,11 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     && !/findAuthorReuse[\s\S]{0,900}verdict: 'fail'/.test(svcSrc));
   ok('★ 같은 리뷰어 자신의 제출은 재사용으로 세지 않는다',
     /COALESCE\(reviewer_name,''\) <> COALESCE\(\$3,''\)/.test(svcSrc));
-  ok('CSV 내보내기(UTF-8 BOM · 판정사유 문장화)',
-    /function inspectionsCsv/.test(svcSrc) && /'\\ufeff'|﻿/.test(svcSrc)
-    && /review-inspect\/export\.csv/.test(tb));
   ok('★ 예시이미지 저장은 adminOrMaster(전사 설정이라 AE 가 못 바꾼다)',
     /router\.post\('\/review-inspect\/samples', authMiddleware, adminOrMasterMiddleware/.test(tb)
     && /router\.get\('\/review-inspect\/samples', authMiddleware, _reInternal/.test(tb));
-  ok('스윕 수동 실행도 adminOrMaster + 같은 락',
-    /router\.post\('\/review-inspect\/sweep', authMiddleware, adminOrMasterMiddleware/.test(tb)
-    && /withJobLock\('review_inspect_sweep'/.test(tb));
+  ok('수동 스윕 입구 없음(결정 186 68번) — 스윕은 cron·재검수가 같은 락으로 돈다',
+    !/router\.post\('\/review-inspect\/sweep'/.test(tb));
   /* ⚠ 2026-08-06: [↻ 과거분 검수]·[CSV] 는 화면에서 제거(사용자 확정 — 기능 불필요).
        과거분 따라잡기는 10분 크론이 계속 돈다(수동 버튼만 없앤 것)이라 서버는 무변경. */
   ok('프론트 — 예시 등록 버튼(제거된 과거분 검수·CSV 는 흔적 0)',
