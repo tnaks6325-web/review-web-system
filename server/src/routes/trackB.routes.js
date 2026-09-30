@@ -467,61 +467,8 @@ router.post('/identity-cards/decision-undo', authMiddleware, adminOrMasterMiddle
 /* 탈 구글시트 전환 화면(W4 · C)은 전환 완료(150개 중 149개)로 2026-09-28 제거(결정 186 2번).
    (review-submit-time-backfill·_cutoverErr 는 결정 186 63번에서 제거.) */
 
-/* ── 구글시트 주소로 작업 가져오기 (탈 구글시트 잔재 처리) — adminOrMaster ──
-   preview : 시트를 1회 읽어 "무엇을 가져올지"만 돌려준다(**DB 쓰기 0**)
-   run     : 등록 + 업체 소유 + 작업표 + 장부 + 무시트 표식 + 시트 안내문
-   revert  : 가져오기 직후 되돌리기(주문이 들어왔으면 거부)
-
-   ★★ **adminOrMaster 전용** — 이 경로는 접수에 이은 두 번째 등록 창구다(복원 성격 예외).
-     AE 담당자에게 열면 담당 범위 밖의 시트를 시스템 작업으로 만들 수 있게 된다.
-   ★ 이 경로는 재기준하지 않는다 — `/api/trackb/*` 라 관리자 토큰·인트라넷 SSO 양쪽이 그대로 닿는다. */
-const sheetImport = require('../services/sheetImport.service');
-function _importErr(err, res, next) {
-  if (err instanceof sheetImport.ImportError) {
-    // ★ 화면이 사유별로 다르게 안내해야 하므로 코드를 그대로 넘긴다(errorHandler 500 마스킹 방지).
-    return res.status(400).json({
-      ok: false, code: err.code, error: err.message,
-      ...(err.availableTabs ? { availableTabs: err.availableTabs } : {}),
-    });
-  }
-  if (err && err.code === '42P01') {
-    return res.json({ ok: false, code: 'not_ready', error: '준비 전입니다 — 배포 완료 후 다시 시도해주세요.' });
-  }
-  return next(err);
-}
-router.post('/sheet-import/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { url, sheetId, gid } = req.body || {};
-    res.json(await sheetImport.previewSheetImport({ url, sheetId, gid }));
-  } catch (err) { _importErr(err, res, next); }
-});
-router.post('/sheet-import/run', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { url, sheetId, gid, advertiserId, displayName, skipSeqs, notice } = req.body || {};
-    res.json(await sheetImport.importSheet({
-      url, sheetId, gid, advertiserId, displayName, skipSeqs,
-      // ★ 안내문은 **명시적으로 false 일 때만** 끈다(값이 빠진 요청은 기본 동작 = 갱신).
-      notice: notice !== false,
-      by: _by(req),
-    }));
-  } catch (err) { _importErr(err, res, next); }
-});
-/* 수리 — "등록은 됐는데 어디에도 안 보이는" 작업을 되살린다(가져오기=덮어쓰기가 **아니다**).
-   ★ 주문이 붙어 있어 가져오기가 막힌 작업의 **유일한 복구 경로**라 같은 권한(adminOrMaster)으로 연다. */
-router.post('/sheet-import/repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, action, advertiserId } = req.body || {};
-    res.json(await sheetImport.repairRegistered({ sheetId, tabName, action, advertiserId, by: _by(req) }));
-  } catch (err) { _importErr(err, res, next); }
-});
-router.post('/sheet-import/revert', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const out = await sheetImport.revertImport({ sheetId, tabName, by: _by(req) });
-    res.status(out.ok ? 200 : 409).json(out);
-  } catch (err) { _importErr(err, res, next); }
-});
+/* (구글시트 주소로 작업 가져오기 /sheet-import/* 4개·sheetImport.service — 화면은 8/23 제거, 서버도 2026-09-30 제거 · 결정 186 79번.
+   작업 등록 경로는 인트라넷 리뷰오더 → 작업오더 → 작업보드 하나다.) */
 
 // ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — 내부 담당자(master/admin/staff) ──
 router.post('/parity-all', authMiddleware, internalMiddleware, async (req, res, next) => {

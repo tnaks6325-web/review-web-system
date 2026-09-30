@@ -283,24 +283,7 @@ async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignNam
   return rows[0] || null;
 }
 
-/**
- * 가져오기 되돌리기 전용 — 그 탭의 표 줄을 **하드 삭제**한다.
- *
- * ★★ 왜 하드인가: "시트에서 가져오기"의 되돌리기는 **가져오기 전 상태로 복귀**하는 것이고,
- *   그때 `tab_configs` 등록까지 지우므로 소프트로 남기면 등록 없는 유령 줄만 떠돈다.
- *   (평상시 정리는 소프트인 `retireRows` 가 맡는다 — 그쪽을 바꾸지 말 것. `deleteWorktableRows` 는 2026-09-28 제거 — 결정 186 10번.)
- * ★★ **주문이 붙은 줄이 있으면 호출부가 이미 거부**한 뒤다(sheetImport.revertImport 의 fail-closed 게이트).
- *   여기서도 마지막 방어로 `order_submission_id IS NULL` 을 걸어 **주문이 붙은 줄은 절대 지우지 않는다**.
- * ★ `client` 를 받는다 — 등록·장부 삭제와 **같은 트랜잭션**이어야 반쯤 지워진 상태가 남지 않는다.
- */
-async function purgeImportedRows(client, { sheetId, tabName } = {}) {
-  if (!client || !sheetId || !tabName) throw new Error('purgeImportedRows: client, sheetId, tabName 필수');
-  const { rowCount } = await client.query(
-    `DELETE FROM campaign_participants
-      WHERE sheet_id = $1 AND tab_name = $2 AND order_submission_id IS NULL`,
-    [sheetId, tabName]);
-  return rowCount;
-}
+/* (가져오기 되돌리기 전용 하드 삭제 purgeImportedRows — 시트 가져오기 서버 제거와 함께 2026-09-30 제거 · 결정 186 79번) */
 
 /* 정리(은퇴) 대상 선정 조건 — 조회·삭제가 **같은 조건**을 써야 미리보기와 결과가 갈리지 않는다.
    ★ 차수는 빈 값('(빈값)')도 고를 수 있어야 하므로 정규화해서 비교한다. */
@@ -474,7 +457,6 @@ async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
 module.exports = {
   holdRows, listHeldRows,
   createWorktableSlots, createSlotsFromSheetRows, appendSlot, retireRows,
-  purgeImportedRows,
   importTabFromIndex,
   syncImportedTabs,
   compareWithIndex,
