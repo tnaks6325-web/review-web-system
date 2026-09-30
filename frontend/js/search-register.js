@@ -128,7 +128,7 @@ function openRegisterModal(){
   var modal=document.getElementById('registerModal');
   if(!modal){if(typeof showToast==='function')showToast('등록 창을 찾을 수 없습니다.','error');return;}
 
-  ['regName','regPhone1','regPhone2'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+  ['regName','regPhone1','regPhone2','regKakao'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
   var wrap=document.getElementById('regPhoneWrap');if(wrap)wrap.style.borderColor='#d1d5db';
   regClearError();
 
@@ -173,8 +173,12 @@ window.regAgree = function(){
   if(!isValidKoreanName(name)){_regShowError('올바른 이름을 입력해주세요. (자음·모음만 불가, 최소 2자)');var nEl2=document.getElementById('regName');if(nEl2)nEl2.focus();return;}
   if(phone1.length!==4){_regShowError('전화번호 앞 4자리를 모두 입력해주세요.');var p1El=document.getElementById('regPhone1');if(p1El)p1El.focus();return;}
   if(phone2.length!==4){_regShowError('전화번호 뒤 4자리를 모두 입력해주세요.');var p2El=document.getElementById('regPhone2');if(p2El)p2El.focus();return;}
+  // 카카오톡 아이디 — 필수(사용자 확정 2026-09-30). 앞의 @ 는 뗀다. 최종 판정은 서버 utils/kakaoId.js.
+  var kakaoId=(document.getElementById('regKakao')?document.getElementById('regKakao').value:'').trim().replace(/^@+/,'');
+  if(!kakaoId){_regShowError('카카오톡 아이디를 입력해주세요.');var kEl=document.getElementById('regKakao');if(kEl)kEl.focus();return;}
+  if(!/^[A-Za-z0-9._-]{2,30}$/.test(kakaoId)){_regShowError('카카오톡 아이디는 영문·숫자·. _ - 로 2~30자입니다. (카톡 → 설정 → 프로필 관리에서 확인)');var kEl2=document.getElementById('regKakao');if(kEl2)kEl2.focus();return;}
 
-  window._regName=name;window._regPhone1=phone1;window._regPhone2=phone2;
+  window._regName=name;window._regPhone1=phone1;window._regPhone2=phone2;window._regKakao=kakaoId;
 
   var pad=function(n){return String(n).padStart(2,'0');};
   var now=new Date();
@@ -185,6 +189,7 @@ window.regAgree = function(){
     '작업알림 수신동의 합니다.\n'+
     '이름: '+name+'\n'+
     '전화번호: 010-'+phone1+'-'+phone2+'\n'+
+    '카카오톡 아이디: '+kakaoId+'\n'+
     '등록일시: '+regTime+'\n'+
     '리뷰웹으로 돌아가서 등록마치기.\n'+
     siteUrl;
@@ -269,7 +274,7 @@ window.submitRegister = async function(){
   regClearError();
 
   var sheetId=(window._orderFormCtx&&window._orderFormCtx.sheetId)||'';
-  var payload={action:'registerReviewer',name:name,phone:phone,consent:'true',sheetId:sheetId};
+  var payload={action:'registerReviewer',name:name,phone:phone,consent:'true',sheetId:sheetId,kakaoId:window._regKakao||''};
   try{
     var data;
     try{data=await gasPost(payload);}catch(e1){try{data=await gasGet(payload);}catch(e2){throw new Error('서버 연결 실패');}}

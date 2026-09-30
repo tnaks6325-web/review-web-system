@@ -2434,6 +2434,24 @@ function _msgIds(v) {
   return [...new Set(arr.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
 }
 
+/* 작업보드 우클릭 "리뷰어 정보" + 이름 옆 카톡 표시(시안 C, 사용자 확정 2026-09-30).
+   ★ 받는 사람 판정은 메시지 보내기와 같은 `resolveRecipients` 한 벌 · 쓰기 0건.
+   ★ 광고주 차단(internalMiddleware) — 리뷰어 연락처·카톡 아이디는 내부 전용. */
+router.post('/workdesk/reviewer-contacts', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || '');
+    const tabName = String(b.tabName || '');
+    const ids = Array.isArray(b.ids) ? b.ids : [];
+    if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, ids 가 필요합니다.' });
+    const out = await require('../services/reviewerContact.service').reviewerContactsForRows({ sheetId, tabName, participantIds: ids });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    logger.warn(`[trackB] 리뷰어 정보 조회 실패: ${e.message}`);
+    res.status(500).json({ ok: false, error: '리뷰어 정보를 불러오지 못했습니다.' });
+  }
+});
+
 // 미리보기 — **쓰기 0건**. 받는 사람이 누구인지 보내기 전에 화면이 말하기 위한 재료.
 router.get('/cs/participant-recipients', authMiddleware, internalMiddleware, async (req, res) => {
   try {

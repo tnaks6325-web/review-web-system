@@ -30,6 +30,7 @@ const REQUIRED_SCHEMA = [
   ['reviewer_history_control', 'coverage_epoch'],
   ['workdesk_review_resolutions', 'resolution'],
   ['review_closed_targets', 'resolution_id'],
+  ['reviewers', 'kakao_id'],                       // 170 — 리뷰어 가입 INSERT·내정보 저장(없으면 가입 전면 42703)
   ['reviewers', 'shopping_id'],                    // 147 — 명의별 공통 쇼핑 아이디(본인)
   ['reviewer_identities', 'shopping_id'],          // 147 — 코드 명의별 공통 쇼핑 아이디
   ['campaign_applications', 'owner_phone8'],       // 063 — apply INSERT·my-status·관제
