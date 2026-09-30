@@ -2919,46 +2919,39 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     push(r.row_index, r.review_file_id, 'review', r.review_file_at);
   }
   /* ── 구매 캡처(062 `order_submissions.capture_file_id`) ─────────────────────────
-     ★★ 줄 짝짓기는 **`sheet_row`(그 주문이 실제로 기록된 줄)** 하나로 한다.
-       `campaign_participants.order_submission_id` 링크는 오염 사례가 문서화돼 있어
-       (2026-08-19 장수산업 건) 그것으로 붙이면 **남의 구매 캡처가 이 줄에 뜬다** —
-       검수에서 잘못된 판단의 근거가 되므로, 근거가 확실한 값만 쓴다.
-     ★ 아직 표에 반영되지 않은 주문(sheet_row NULL)은 안 보인다 — 정직한 상태다.
+     ★★ 줄 짝짓기는 **이 줄 사람의 주문으로 확인된 것만** 쓴다(2026-09-30 운영 실측 · 사용자 확정).
+       종전에는 `sheet_row`(시트 시절 줄 번호) 하나로 붙였는데, 줄이 재배치된 작업에서 그 번호가
+       **남의 주문**을 가리켜 57줄 중 36줄에 다른 사람 구매캡처가 떴다(검수 판단을 흐리는 사고).
+       `order_submission_id` 링크도 오염 사례가 있다(2026-08-19 장수산업 건). 그래서 후보(줄 번호 ∪
+       링크 ∪ 표 주문번호)를 모은 뒤 **주문번호 → 연락처 → 이름**으로 확인한다.
+     ★★ 판정 단일 출처 = `utils/rowOrderMatch.matchRowsToOrders` — 구매캡처 교체와 같은 함수.
+     ★ 주문 좌표는 두 갈래: 탭 좌표 · 연결 공고 `campaign:<id>` 좌표(2026-08-23 블랑카우 건).
+       공고 매칭은 이름 → gid 폴백이고 **빈 gid 는 절을 켜지 않는다**. gid 는 서버가 tab_configs 에서 다시 구한다.
+     ★ 확인 못 한 줄에는 **싣지 않는다**(남의 사진을 보여주는 것보다 없다고 하는 편이 낫다).
      ★ fail-soft: 실패해도 리뷰 이미지는 그대로 나간다. */
-  const { rows: caps } = await db.query(
-    `SELECT sheet_row, capture_file_id, capture_uploaded_at
-       FROM order_submissions
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
-        AND sheet_row IS NOT NULL AND capture_file_id IS NOT NULL
-      ORDER BY sheet_row, capture_uploaded_at NULLS LAST`,
-    [sheetId, tabName]).catch(() => ({ rows: [] }));
-  for (const r of caps) push(r.sheet_row, r.capture_file_id, 'order_capture', r.capture_uploaded_at);
-  /* ── 구매 캡처 ② **공고(참여형) 좌표 주문** ────────────────────────────────────
-     ★★ 실사고(2026-08-23 「0807(올리브영)블랑카우 바디로션 100건」): 8/19 이후 제출한 9명의
-       구매 캡처가 전부 "미제출"로 보였다. 파일은 Drive 에 있고 주문에도 연결돼 있었다 —
-       **공고를 거쳐 제출한 주문은 원장 좌표가 `campaign:<공고ID>`**(submit.routes
-       `_resolveCampaignOrderScope`)라 위 탭 좌표 조회에 **한 건도 안 걸렸을 뿐**이다.
-       그 탭에 공고가 붙은 순간부터 모든 신규 제출이 이 갈래로 들어오므로, 이 조회가 없으면
-       화면이 "제출 안 했다"고 거짓말을 계속한다.
-     ★ 짝짓기는 위와 **같은 `sheet_row`** 하나 — `campaign_participants.order_submission_id`
-       링크는 오염 사례가 문서화돼 있어 쓰지 않는다(2026-08-19 장수산업 건과 같은 규율).
-     ★ 공고 매칭은 이름 → gid 폴백이고 **빈 gid 는 절을 켜지 않는다**. gid 는 **서버가
-       tab_configs 에서 다시 구한다** — 화면이 보낸 값을 믿으면 낡은 화면이 남의 공고를 끌어온다.
-     ★ 차수 재발행으로 공고가 여럿이면 전부 합류한다(같은 작업표 줄에 기록된 주문들이다).
-     ★ fail-soft: 실패해도 위에서 모은 것은 그대로 나간다. */
   const _gid = tabCfg.gid || '';
-  const { rows: campCaps } = await db.query(
-    `SELECT os.sheet_row, os.capture_file_id, os.capture_uploaded_at
+  const { rows: capOrders } = await db.query(
+    `SELECT os.id, os.sheet_row, os.capture_file_id, os.capture_uploaded_at,
+            os.order_num, os.phone, os.recipient, os.orderer
        FROM order_submissions os
-       JOIN recruit_campaigns rc
-         ON os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id
-      WHERE rc.linked_sheet_id = $1
-        AND (rc.linked_tab_name = $2 OR ($3 <> '' AND rc.linked_tab_gid = $3))
-        AND os.deleted_at IS NULL
-        AND os.sheet_row IS NOT NULL AND os.capture_file_id IS NOT NULL
-      ORDER BY os.sheet_row, os.capture_uploaded_at NULLS LAST`,
+      WHERE os.deleted_at IS NULL AND os.capture_file_id IS NOT NULL
+        AND ((os.sheet_id = $1 AND os.tab_name = $2)
+          OR EXISTS (SELECT 1 FROM recruit_campaigns rc
+                      WHERE os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id
+                        AND rc.linked_sheet_id = $1
+                        AND (rc.linked_tab_name = $2 OR ($3 <> '' AND rc.linked_tab_gid = $3))))
+      ORDER BY os.capture_uploaded_at NULLS LAST`,
     [sheetId, tabName, _gid]).catch(() => ({ rows: [] }));
-  for (const r of campCaps) push(r.sheet_row, r.capture_file_id, 'order_capture', r.capture_uploaded_at);
+  if (capOrders.length) {
+    const { rows: capRows } = await db.query(
+      `SELECT cp.seq, cp.order_submission_id, cp.reviewer_name, cp.recipient_name, cp.phone8,
+              ${require('../utils/tableOrderNum').tableOrderNumSql('cp')} AS table_order_num
+         FROM campaign_participants cp
+        WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL`,
+      [sheetId, tabName]).catch(() => ({ rows: [] }));
+    const matched = require('../utils/rowOrderMatch').matchRowsToOrders(capRows, capOrders);
+    for (const [seq, o] of matched) push(seq, o.capture_file_id, 'order_capture', o.capture_uploaded_at);
+  }
   return Object.fromEntries(out);
 }
 
