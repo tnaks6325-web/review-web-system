@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
-const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const captureRename = require('../services/captureFileRename.service');
@@ -27,13 +26,6 @@ function extractFolderId(url) {
   return m ? m[1] : null;
 }
 
-/**
- * 헬퍼: AI_REVIEW_FOLDER_ID 환경변수 조회
- * AI_REVIEW_FOLDER_ID → DRIVE_ROOT_FOLDER_ID 순서 폴백
- */
-function getRootFolderId() {
-  return process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID || null;
-}
 
 
 // ═══════════════════════════════════════════════════════════
@@ -79,72 +71,6 @@ router.post('/update-urls', authMiddleware, async (req, res, next) => {
       [sheetId, tabName, ...values]
     );
     res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/drive/list-folder — 폴더 내용 조회 (복구용 임시 엔드포인트)
-// ═══════════════════════════════════════════════════════════
-router.get('/list-folder', authMiddleware, async (req, res, next) => {
-  try {
-    const { folderId, type } = req.query;
-    const targetId = folderId || getRootFolderId();
-    if (!targetId) return res.json({ error: 'folderId 또는 AI_REVIEW_FOLDER_ID 미설정' });
-
-    const mimeType = type === 'folder' ? 'application/vnd.google-apps.folder' : null;
-    const files = await driveService.listFolderContents(targetId, mimeType);
-    res.json({ ok: true, folderId: targetId, count: files.length, files });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/check-duplicates — 리뷰폴더 중복 파일 검사
-// body: { folderUrls: [ "https://drive.google.com/drive/folders/xxx", ... ] }
-// ═══════════════════════════════════════════════════════════
-router.post('/check-duplicates', authMiddleware, async (req, res, next) => {
-  try {
-    const { folderUrls } = req.body;
-    if (!folderUrls || !Array.isArray(folderUrls) || folderUrls.length === 0) {
-      return res.json({ error: '검사할 폴더 URL이 없습니다.' });
-    }
-
-    const results = [];
-    let totalDuplicateFiles = 0;
-
-    for (const url of folderUrls) {
-      const folderId = extractFolderId(url);
-      if (!folderId) {
-        results.push({ url, error: '폴더 ID 추출 실패' });
-        continue;
-      }
-
-      try {
-        const dupResult = await driveService.detectDuplicates(folderId);
-        totalDuplicateFiles += dupResult.duplicateFileCount;
-        results.push({
-          url,
-          folderId,
-          totalFiles: dupResult.totalFiles,
-          duplicateGroups: dupResult.duplicateGroups,
-          duplicateFileCount: dupResult.duplicateFileCount,
-          duplicates: dupResult.duplicates.map(g => ({
-            md5: g.md5,
-            keep: { id: g.keep.id, name: g.keep.name, size: g.keep.size, createdTime: g.keep.createdTime },
-            remove: g.remove.map(f => ({ id: f.id, name: f.name, size: f.size, createdTime: f.createdTime })),
-          })),
-        });
-      } catch (err) {
-        logger.error(`[checkDuplicates] 폴더 검사 실패 (${folderId}): ${err.message}`);
-        results.push({ url, folderId, error: err.message });
-      }
-    }
-
-    res.json({ ok: true, results, totalDuplicateFiles });
   } catch (err) {
     next(err);
   }
@@ -370,100 +296,6 @@ router.post('/check-submission-status', authMiddleware, async (req, res, next) =
 // (3) tnaks6325로 소유권 이전을 수행한다.
 // ═══════════════════════════════════════════════════════════
 
-/**
- * 헬퍼: 감사/이전 대상 폴더 ID 수집
- * - body.folderUrls 가 있으면 그것을, 없으면 tab_configs의 캡처+리뷰 폴더를 사용
- */
-async function collectAuditFolderIds(body = {}) {
-  const ids = [];
-  if (Array.isArray(body.folderUrls) && body.folderUrls.length) {
-    for (const u of body.folderUrls) {
-      const id = extractFolderId(u);
-      if (id) ids.push(id);
-    }
-    return [...new Set(ids)];
-  }
-  const includeClosed = body.includeClosed === true;
-  const where = includeClosed ? '' : 'WHERE (is_closed = FALSE OR is_closed IS NULL)';
-  const { rows } = await pool.query(`SELECT folder_url, capture_folder_url FROM tab_configs ${where}`);
-  for (const r of rows) {
-    const cap = extractFolderId(r.capture_folder_url);
-    const rev = extractFolderId(r.folder_url);
-    if (cap) ids.push(cap);
-    if (rev) ids.push(rev);
-  }
-  return [...new Set(ids)];
-}
-
-// ───────────────────────────────────────────────────────────
-// GET /api/drive/account-info — 현재 Drive OAuth 계정/쿼터 진단
-//   "구매캡처/리뷰 업로드 용량이 어느 구글계정에 귀속되는지" 를 즉시 확인
-//   (테스트 업로드 없이 about.get 만 호출 — 가벼움)
-// ───────────────────────────────────────────────────────────
-router.get('/account-info', authMiddleware, async (req, res, next) => {
-  try {
-    const info = await driveService.getAccountDiagnostics();
-    res.json({ ok: true, ...info });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ───────────────────────────────────────────────────────────
-// POST /api/drive/ownership-audit — 폴더 내 파일을 소유자별로 집계 (읽기전용)
-//   body: { folderUrls?: [], includeClosed?: bool }
-//   - folderUrls 미지정 시 tab_configs의 모든 캡처+리뷰 폴더를 재귀 스캔
-//   - 응답: 소유자별 파일수/용량 → 관리자(박세희/박은비) 용량을 수치로 확인
-// ───────────────────────────────────────────────────────────
-router.post('/ownership-audit', authMiddleware, async (req, res, next) => {
-  try {
-    const folderIds = await collectAuditFolderIds(req.body || {});
-    if (folderIds.length === 0) return res.json({ ok: false, error: '감사할 폴더가 없습니다.' });
-
-    const startTime = Date.now();
-    const result = await driveService.auditOwnership(folderIds);
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-
-    res.json({ ok: true, scannedFolders: folderIds.length, elapsed, ...result });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ───────────────────────────────────────────────────────────
-// POST /api/drive/transfer-ownership — 비-tnaks 소유 파일을 tnaks6325로 이전
-//   body: {
-//     folderUrls?: [], includeClosed?: bool,
-//     dryRun?: bool (기본 true — 계획만, 실제 변경 없음),
-//     fromOwners?: ["관리자이메일", ...] (지정 시 해당 소유자 파일만),
-//     sourceRefreshToken?: "관리자 계정 refresh token" (실제 이전에 필요할 수 있음),
-//     targetOwnerEmail?: "tnaks6325@gmail.com" (기본 DRIVE_OWNER_EMAIL)
-//   }
-//
-//   ⚠️ 소유권 이전은 "현재 소유자" 자격으로만 가능 (구글 제약).
-//      관리자 소유 파일은 sourceRefreshToken(관리자 토큰) 없이는 403 실패하며
-//      failures 에 기록된다(비파괴 — 데이터 삭제/복사 없음, 소유권만 변경).
-// ───────────────────────────────────────────────────────────
-router.post('/transfer-ownership', authMiddleware, async (req, res, next) => {
-  try {
-    const body = req.body || {};
-    const folderIds = await collectAuditFolderIds(body);
-    if (folderIds.length === 0) return res.json({ ok: false, error: '대상 폴더가 없습니다.' });
-
-    const startTime = Date.now();
-    const result = await driveService.transferOwnershipInFolders(folderIds, {
-      targetOwnerEmail: body.targetOwnerEmail,
-      dryRun: body.dryRun !== false,
-      fromOwners: body.fromOwners,
-      sourceRefreshToken: body.sourceRefreshToken,
-    });
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-
-    res.json({ ok: true, scannedFolders: folderIds.length, elapsed, ...result });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // (POST /relocate-orphan-reviews — 옛 대시보드 「리뷰 캡처 정리」 창 전용, 2026-09-29 제거 · 결정 186 72번)
 
@@ -499,41 +331,7 @@ router.post('/capture-rename-recipient', authMiddleware, adminOrMasterMiddleware
     next(err);
   }
 });
-
 // (POST /review-folder-backfill — 같은 창 전용, 결정 186 72번 제거)
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/drive/review-submissions — 탭별 리뷰 제출 원장 조회 (A-2)
-//   query: { sheetId, tabName, limit? }
-//   응답: 파일 단위 제출 목록 + 인덱스 연결 요약
-// ═══════════════════════════════════════════════════════════
-router.get('/review-submissions', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
-    const lim = Math.min(parseInt(req.query.limit || '1000', 10) || 1000, 5000);
-
-    const { rows } = await pool.query(
-      `SELECT id, row_index, reviewer_name, review_index_id,
-              file_id, file_url, file_name, source, uploaded_at, created_at
-         FROM review_submissions
-        WHERE sheet_id = $1 AND tab_name = $2
-        ORDER BY uploaded_at DESC NULLS LAST, created_at DESC
-        LIMIT $3`,
-      [sheetId, tabName, lim]
-    );
-    const linkedToIndex = rows.filter(r => r.review_index_id).length;
-    res.json({
-      ok: true,
-      total: rows.length,
-      linkedToIndex,
-      unlinked: rows.length - linkedToIndex,
-      submissions: rows,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // (POST /share-review-folder — 같은 창 전용, 결정 186 72번 제거)
 

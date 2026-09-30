@@ -194,13 +194,8 @@ const _ACTION_MAP = {
 
   // Drive 폴더 관리
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
-  'driveAccountInfo':    { method: 'GET',  path: '/api/drive/account-info' },
-  'driveOwnershipAudit': { method: 'POST', path: '/api/drive/ownership-audit' },
-  'driveTransferOwnership': { method: 'POST', path: '/api/drive/transfer-ownership' },
-  'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
-  'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
