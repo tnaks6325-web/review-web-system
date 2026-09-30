@@ -1148,7 +1148,7 @@ router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware
      `expectFileId` 로 다시 보내 그 사이 바뀌었으면 거부된다(서비스가 업로드 전·확정 순간 두 번 본다). */
 const _captureReplace = require('../services/purchaseCaptureReplace.service');
 const _CAPTURE_REPLACE_STATUS = { bad_request: 400, not_image: 400, too_large: 413, row_not_found: 404,
-  no_order: 409, ambiguous_order: 409, capture_changed: 409, drive_not_configured: 503 };
+  no_order: 409, order_mismatch: 409, ambiguous_order: 409, capture_changed: 409, drive_not_configured: 503 };
 router.get('/workdesk/purchase-capture', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId } = req.query || {};

@@ -30,35 +30,69 @@ function __setPoolForTest(db) { _testPool = db || null; }
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const LOCK_PREFIX = 'purchase_capture:';   // purchaseSubmissionSession.completeCapture 와 같은 키
 
-/** 그 작업표 줄의 주문(구매양식) 하나를 찾는다. 읽기 전용. */
+const { tableOrderNumSql, MIN_ORDER_NUM_DIGITS } = require('../utils/tableOrderNum');
+
+const _digits = v => String(v == null ? '' : v).replace(/\D/g, '');
+const _nm = v => String(v == null ? '' : v).replace(/\s+/g, '').replace(/\(.*?\)/g, '');
+
+/**
+ * ★★ 그 주문이 **이 줄 사람의 주문인지** 확인한다(2026-09-30 운영 실측으로 추가).
+ *   `sheet_row` 는 시트 시절 줄 번호라 줄이 재배치된 작업에서 **남의 주문**을 가리킨다
+ *   (마감 작업 1곳에서 캡처 있는 57줄 중 36줄이 다른 사람 주문). 그래서 번호만 믿지 않는다.
+ *   순서: 표 주문번호 ↔ 원장 주문번호(둘 다 6자리 이상이면 이것만으로 판정)
+ *        → 연락처 뒤 8자리 → 이름(참여자·수취인 ↔ 원장 수취인·주문자). 근거가 없으면 **아니다**.
+ */
+function orderMatchesRow(row, order) {
+  const rowNum = _digits(row.table_order_num);
+  const oNum = _digits(order.order_num);
+  if (rowNum.length >= MIN_ORDER_NUM_DIGITS && oNum.length >= MIN_ORDER_NUM_DIGITS) {
+    return rowNum === oNum || rowNum.includes(oNum);
+  }
+  const rp = _digits(row.phone8).slice(-8), op = _digits(order.phone).slice(-8);
+  if (rp.length === 8 && op.length === 8) return rp === op;
+  const rowNames = [row.reviewer_name, row.recipient_name].map(_nm).filter(Boolean);
+  const oNames = [order.recipient, order.orderer].map(_nm).filter(Boolean);
+  return rowNames.some(n => oNames.includes(n));
+}
+
+/** 그 작업표 줄의 주문(구매양식) 하나를 찾는다. 읽기 전용.
+ *  후보 = (줄 번호 일치 ∪ 줄의 주문 링크 ∪ 표 주문번호 일치) — 탭 좌표 또는 연결 공고 좌표 주문만.
+ *  그중 **이 줄 사람의 주문으로 확인된 것**만 남기고, 하나로 좁혀질 때만 쓴다. */
 async function resolveRowOrder(db, { sheetId, tabName, rowId }) {
   const { rows: pr } = await db.query(
-    `SELECT id, seq, order_submission_id, reviewer_name, recipient_name
-       FROM campaign_participants
-      WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
+    `SELECT cp.id, cp.seq, cp.order_submission_id, cp.reviewer_name, cp.recipient_name, cp.phone8,
+            ${tableOrderNumSql('cp')} AS table_order_num
+       FROM campaign_participants cp
+      WHERE cp.id=$1 AND cp.sheet_id=$2 AND cp.tab_name=$3 AND cp.deleted_at IS NULL`,
     [rowId, sheetId, tabName]);
   if (!pr.length) return { ok: false, error: 'row_not_found' };
   const p = pr[0];
-  if (p.seq == null) return { ok: false, error: 'no_order' };
   const { rows: tc } = await db.query(
     `SELECT COALESCE(tab_gid,'') AS gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
     [sheetId, tabName]);
   const gid = (tc[0] && tc[0].gid) || '';
+  const tnum = _digits(p.table_order_num);
   const { rows: cands } = await db.query(
-    `SELECT os.id, os.capture_file_id, os.recipient, os.orderer
+    `SELECT os.id, os.capture_file_id, os.recipient, os.orderer, os.phone, os.order_num
        FROM order_submissions os
-      WHERE os.deleted_at IS NULL AND os.sheet_row = $3
+      WHERE os.deleted_at IS NULL
         AND ((os.sheet_id = $1 AND os.tab_name = $2)
           OR EXISTS (SELECT 1 FROM recruit_campaigns rc
                       WHERE os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id
                         AND rc.linked_sheet_id = $1
                         AND (rc.linked_tab_name = $2 OR ($4 <> '' AND rc.linked_tab_gid = $4))))
-      ORDER BY os.submitted_at`,
-    [sheetId, tabName, p.seq, gid]);
+        AND (os.sheet_row = $3
+          OR ($5::uuid IS NOT NULL AND os.id = $5::uuid)
+          OR ($6 <> '' AND regexp_replace(COALESCE(os.order_num,''), '\\D', '', 'g') = $6))
+      ORDER BY os.submitted_at
+      LIMIT 20`,
+    [sheetId, tabName, p.seq, gid, p.order_submission_id || null, tnum.length >= MIN_ORDER_NUM_DIGITS ? tnum : '']);
   if (!cands.length) return { ok: false, error: 'no_order', participant: p };
+  const mine = cands.filter(c => orderMatchesRow(p, c));
+  if (!mine.length) return { ok: false, error: 'order_mismatch', participant: p };
   let order = null;
-  if (cands.length === 1) order = cands[0];
-  else if (p.order_submission_id) order = cands.find(c => String(c.id) === String(p.order_submission_id)) || null;
+  if (mine.length === 1) order = mine[0];
+  else if (p.order_submission_id) order = mine.find(c => String(c.id) === String(p.order_submission_id)) || null;
   if (!order) return { ok: false, error: 'ambiguous_order', participant: p };
   return { ok: true, participant: p, order };
 }
@@ -177,4 +211,4 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
   return { ok: true, fileId: uploaded.id, oldFileId: before || null, replaced: !!before, oldTrashed, oldKept };
 }
 
-module.exports = { resolveRowOrder, previewReplace, replaceCapture, MAX_IMAGE_BYTES, __setPoolForTest };
+module.exports = { resolveRowOrder, orderMatchesRow, previewReplace, replaceCapture, MAX_IMAGE_BYTES, __setPoolForTest };
