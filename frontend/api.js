@@ -238,7 +238,6 @@ const _ACTION_MAP = {
   // Phase 11: Campaign Name Fix
 
   // Phase 13: Empty Index Cleanup
-  'cleanupEmptyIndexes': { method: 'POST', path: '/api/diag/cleanup-empty-indexes' },
 
   // Phase 14: 키워드 관리 + 인식 실패 탭 진단
   'getKeywords':           { method: 'GET',    path: '/api/admin/keywords' },
