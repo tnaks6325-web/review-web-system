@@ -1354,73 +1354,17 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       return res.json({ ok: false, error: 'Drive 루트 폴더가 설정되지 않았습니다. (AI_REVIEW_FOLDER_ID)' });
     }
 
-    // ── 1단계: 캡처 폴더 ID 확보 (3단계 폴백) ──
+    // ── 1·2단계: 캡처 폴더 확보 — 작업보드 [구매캡처 교체]와 같은 함수(captureFolder.service 단일 출처) ──
     let targetFolderId = null;
     let captureFolderUrl = null;
-
-    // STEP 1: 세션에 고정된 작업의 tab_configs.capture_folder_url
-    if (!targetFolderId && sheetId && tabName) {
-      const { rows } = await pool.query(
-        'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
-      );
-      if (rows[0]?.capture_folder_url) {
-        targetFolderId = driveService.extractFolderIdFromUrl(rows[0].capture_folder_url);
-        if (targetFolderId) {
-          captureFolderUrl = rows[0].capture_folder_url;
-          logger.info(`[image-upload] DB capture_folder_url 사용: ${targetFolderId}`);
-        }
-      }
-    }
-
-    // STEP 2: 자동 생성 (3단계 구조: 시트제목 → 탭명 → [구매캡처])
-    if (!targetFolderId) {
-      try {
-        // 시트 제목 조회
-        let sheetTitle = tabName || '기타';
-        if (sheetId) {
-          try {
-            // campaign_name에서 먼저 조회
-            const { rows: campRows } = await pool.query(
-              `SELECT DISTINCT campaign_name FROM tab_configs WHERE sheet_id = $1 AND campaign_name IS NOT NULL AND campaign_name <> '' LIMIT 1`,
-              [sheetId]
-            );
-            if (campRows[0]?.campaign_name) {
-              sheetTitle = campRows[0].campaign_name;
-            } else {
-              // Sheets API로 시트 제목 조회
-              const meta = await getSpreadsheetMeta(sheetId);
-              if (meta._spreadsheetTitle) sheetTitle = meta._spreadsheetTitle;
-            }
-          } catch (_) {}
-        }
-
-        const tabFolderName = tabName || '기타';
-        logger.info(`[image-upload] 폴더 자동 생성: ${sheetTitle} → ${tabFolderName} → [구매캡처]`);
-
-        const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tabFolderName);
-        targetFolderId = result.id;
-        captureFolderUrl = result.url;
-
-        logger.info(`[image-upload] 캡처폴더 확보: ${targetFolderId} (${result.path.join(' → ')})`);
-
-        // tab_configs에 캡처폴더 URL 저장
-        if (sheetId && tabName) {
-          await pool.query(
-            'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-            [captureFolderUrl, sheetId, tabName]
-          );
-        }
-      } catch (folderErr) {
-        logger.error(`[image-upload] 폴더 생성 실패: ${folderErr.message}`);
-        throw folderErr;
-      }
-    }
-
-    // ── 2단계: 차수별 서브폴더 (round) ──
-    if (round) {
-      const sub = await driveService.getOrCreateSubFolder(targetFolderId, String(round));
-      targetFolderId = sub.id;
+    try {
+      const folder = await require('../services/captureFolder.service')
+        .resolveCaptureFolder({ sheetId, tabName, round, rootFolderId });
+      targetFolderId = folder.folderId;
+      captureFolderUrl = folder.folderUrl;
+    } catch (folderErr) {
+      logger.error(`[image-upload] 폴더 생성 실패: ${folderErr.message}`);
+      throw folderErr;
     }
 
     // ── 3단계: 중복 파일 처리 (동일 이름 → 휴지통 이동) ──

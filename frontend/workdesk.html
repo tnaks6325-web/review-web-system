@@ -2101,33 +2101,43 @@
   #wdDatePick .wdp-d.cur{background:#2563eb;color:#fff}
   #wdDatePick .wdp-ft{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:11.5px;color:var(--faint,#64748b)}
   /* 관리자 수동 리뷰제출 인라인 팝오버 — 셀 옆에 붙는다(중앙 모달 아님) · 붙여넣기 전용 */
-  #wdRevPop{position:fixed;inset:0;background:transparent;z-index:1210}
-  #wdRevPop .wrp-box{position:fixed;background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 10px 32px rgba(15,23,42,.24);padding:11px;width:320px;box-sizing:border-box;outline:none}
-  #wdRevPop .wrp-hd{display:flex;align-items:baseline;gap:7px;margin-bottom:8px;font-size:13px}
-  #wdRevPop .wrp-who{font-size:11.5px;color:var(--faint,#64748b);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #wdRevPop .wrp-drop{border:1.5px dashed var(--line,#cbd5e1);border-radius:10px;background:var(--card2,#f8fafc);padding:14px 10px;text-align:center;min-height:86px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:4px}
-  #wdRevPop .wrp-drop.over{border-color:#2563eb;background:#eff6ff}
-  #wdRevPop .wrp-drop.has{padding:9px;min-height:0;text-align:left}
-  #wdRevPop .wrp-ico{font-size:20px;line-height:1}
-  #wdRevPop .wrp-msg{font-size:12.5px;color:var(--t1,#0f172a)}
-  #wdRevPop .wrp-sub{font-size:11px;color:var(--faint,#94a3b8)}
-  #wdRevPop .wrp-ths{display:flex;flex-wrap:wrap;gap:6px}
-  #wdRevPop .wrp-th{position:relative;width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--line,#e2e8f0);background:#fff}
-  #wdRevPop .wrp-th img{width:100%;height:100%;object-fit:cover;display:block}
-  #wdRevPop .wrp-x{position:absolute;top:2px;right:2px;width:17px;height:17px;line-height:15px;padding:0;border:0;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;font-size:10px;cursor:pointer}
-  #wdRevPop .wrp-cnt{margin-top:6px;font-size:11px;color:var(--faint,#94a3b8)}
-  #wdRevPop .wrp-err{margin-top:7px;font-size:11.5px;color:var(--bad,#dc2626);line-height:1.45}
-  #wdRevPop .wrp-ft{display:flex;align-items:center;gap:6px;margin-top:9px}
-  #wdRevPop .wrp-note{flex:1;font-size:10.5px;color:var(--faint,#94a3b8);line-height:1.35}
-  #wdRevPop .wrp-alt{margin-top:8px;padding-top:7px;border-top:1px dashed var(--line,#e2e8f0);font-size:11px;color:var(--faint,#64748b);display:flex;align-items:center;gap:5px}
-  #wdRevPop .wrp-alt input{font:inherit;font-size:11px;padding:2px 4px;border:1px solid var(--line,#e2e8f0);border-radius:6px;background:var(--card,#fff);color:var(--t1,#0f172a)}
-  #wdRevPop .wrp-pre{margin-bottom:7px;font-size:11.5px;color:var(--faint,#94a3b8)}
-  #wdRevPop .wrp-block{margin-bottom:8px;padding:8px 10px;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:9px;font-size:11.5px;line-height:1.5}
-  #wdRevPop .wrp-exist{margin-bottom:9px;padding:9px;border:1px solid var(--line,#e2e8f0);border-radius:10px;background:var(--card2,#f8fafc)}
-  #wdRevPop .wrp-exhd{font-size:11.5px;color:var(--t1,#0f172a);margin-bottom:6px}
-  #wdRevPop .wrp-exhd small{color:var(--faint,#94a3b8)}
-  #wdRevPop .wrp-exgo{width:100%;margin-top:8px}
-  #wdRevPop .wrp-exnote{margin-top:5px;font-size:10.5px;color:var(--faint,#94a3b8);line-height:1.4}
+  :is(#wdRevPop,#wdCapPop){position:fixed;inset:0;background:transparent;z-index:1210}
+  :is(#wdRevPop,#wdCapPop) .wrp-box{position:fixed;background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 10px 32px rgba(15,23,42,.24);padding:11px;width:320px;box-sizing:border-box;outline:none}
+  :is(#wdRevPop,#wdCapPop) .wrp-hd{display:flex;align-items:baseline;gap:7px;margin-bottom:8px;font-size:13px}
+  :is(#wdRevPop,#wdCapPop) .wrp-who{font-size:11.5px;color:var(--faint,#64748b);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  :is(#wdRevPop,#wdCapPop) .wrp-drop{border:1.5px dashed var(--line,#cbd5e1);border-radius:10px;background:var(--card2,#f8fafc);padding:14px 10px;text-align:center;min-height:86px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:4px}
+  :is(#wdRevPop,#wdCapPop) .wrp-drop.over{border-color:#2563eb;background:#eff6ff}
+  :is(#wdRevPop,#wdCapPop) .wrp-drop.has{padding:9px;min-height:0;text-align:left}
+  :is(#wdRevPop,#wdCapPop) .wrp-ico{font-size:20px;line-height:1}
+  :is(#wdRevPop,#wdCapPop) .wrp-msg{font-size:12.5px;color:var(--t1,#0f172a)}
+  :is(#wdRevPop,#wdCapPop) .wrp-sub{font-size:11px;color:var(--faint,#94a3b8)}
+  :is(#wdRevPop,#wdCapPop) .wrp-ths{display:flex;flex-wrap:wrap;gap:6px}
+  :is(#wdRevPop,#wdCapPop) .wrp-th{position:relative;width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--line,#e2e8f0);background:#fff}
+  :is(#wdRevPop,#wdCapPop) .wrp-th img{width:100%;height:100%;object-fit:cover;display:block}
+  :is(#wdRevPop,#wdCapPop) .wrp-x{position:absolute;top:2px;right:2px;width:17px;height:17px;line-height:15px;padding:0;border:0;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;font-size:10px;cursor:pointer}
+  :is(#wdRevPop,#wdCapPop) .wrp-cnt{margin-top:6px;font-size:11px;color:var(--faint,#94a3b8)}
+  :is(#wdRevPop,#wdCapPop) .wrp-err{margin-top:7px;font-size:11.5px;color:var(--bad,#dc2626);line-height:1.45}
+  :is(#wdRevPop,#wdCapPop) .wrp-ft{display:flex;align-items:center;gap:6px;margin-top:9px}
+  :is(#wdRevPop,#wdCapPop) .wrp-note{flex:1;font-size:10.5px;color:var(--faint,#94a3b8);line-height:1.35}
+  :is(#wdRevPop,#wdCapPop) .wrp-alt{margin-top:8px;padding-top:7px;border-top:1px dashed var(--line,#e2e8f0);font-size:11px;color:var(--faint,#64748b);display:flex;align-items:center;gap:5px}
+  :is(#wdRevPop,#wdCapPop) .wrp-alt input{font:inherit;font-size:11px;padding:2px 4px;border:1px solid var(--line,#e2e8f0);border-radius:6px;background:var(--card,#fff);color:var(--t1,#0f172a)}
+  :is(#wdRevPop,#wdCapPop) .wrp-pre{margin-bottom:7px;font-size:11.5px;color:var(--faint,#94a3b8)}
+  :is(#wdRevPop,#wdCapPop) .wrp-block{margin-bottom:8px;padding:8px 10px;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:9px;font-size:11.5px;line-height:1.5}
+  :is(#wdRevPop,#wdCapPop) .wrp-exist{margin-bottom:9px;padding:9px;border:1px solid var(--line,#e2e8f0);border-radius:10px;background:var(--card2,#f8fafc)}
+  :is(#wdRevPop,#wdCapPop) .wrp-exhd{font-size:11.5px;color:var(--t1,#0f172a);margin-bottom:6px}
+  :is(#wdRevPop,#wdCapPop) .wrp-exhd small{color:var(--faint,#94a3b8)}
+  :is(#wdRevPop,#wdCapPop) .wrp-exgo{width:100%;margin-top:8px}
+  :is(#wdRevPop,#wdCapPop) .wrp-exnote{margin-top:5px;font-size:10.5px;color:var(--faint,#94a3b8);line-height:1.4}
+  /* 구매캡처 교체 — 지금 사진 → 새 사진 나란히(같은 팝오버 골격 · 사용자 확정 2026-09-30) */
+  #wdCapPop .wcp-pair{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  #wdCapPop .wcp-side{flex:1;min-width:0;text-align:center}
+  #wdCapPop .wcp-cap{font-size:10.5px;color:var(--faint,#64748b);margin-bottom:3px}
+  #wdCapPop .wcp-img{height:150px;border:1px solid var(--line,#e2e8f0);border-radius:8px;background:#fff;overflow:hidden;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
+  #wdCapPop .wcp-img img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+  #wdCapPop .wcp-img.none{font-size:11px;color:var(--faint,#94a3b8);background:var(--card2,#f8fafc)}
+  #wdCapPop .wcp-arrow{font-size:14px;color:var(--faint,#94a3b8)}
+  .rv2 .rvcaprep{position:absolute;right:4px;top:4px;z-index:2;border:1px solid var(--line,#e2e8f0);border-radius:7px;background:var(--card,#fff);color:var(--t1,#0f172a);font-size:10.5px;font-weight:700;padding:2px 7px;cursor:pointer;box-shadow:0 1px 4px rgba(15,23,42,.12)}
+  .rv2 .rvcaprep:hover{border-color:#2563eb;color:#2563eb}
   .gcmrow .i{width:16px;text-align:center}
   .gcmdiv{height:1px;background:var(--line);margin:5px 4px}
   .gcmsw{display:flex;align-items:center;gap:5px;padding:3px 7px 5px}
@@ -6817,8 +6827,10 @@ function _rvRender2(pane){
     /* ★ 칸 제목에는 폴더 바로가기를 두지 않는다(사용자 확정 2026-08-21) — 창구는 위의
        제출현황 요약 줄 하나다. 이 자리는 지금 보고 있는 **그 리뷰어의 제출물**을 말하는
        칸이라, 같은 자리에서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
+    /* 🛒 구매캡처 교체 — 내부 직원에게만(업체 화면엔 그리지 않는다). 실행부는 우클릭과 같은 팝오버. */
+    const capBtn=(kind==='cap'&&_isInternalRole())?`<button type="button" class="rvcaprep" onclick="openCaptureReplaceFromPane(this)" title="이 줄 주문의 구매캡처를 새 사진으로 바꿉니다">${n?'교체':'올리기'}</button>`:'';
     const label=showReceipt?`<div class="rv2label">${kind==='cap'?'🛒':kind==='rev'?'📷':'🧾'} ${esc(title)}<span class="cnt">${n}</span></div>`:'';
-    return `<div class="rv2c">${label}<div class="rv2b">${body}</div></div>`;
+    return `<div class="rv2c">${label}<div class="rv2b">${capBtn}${body}</div></div>`;
   };
   const left=col('cap','구매 캡처',
     r.submitted?'캡처 없음':'미제출',
@@ -9844,6 +9856,7 @@ function _openCellMenu(x,y,td){
         '참여행을 제거합니다. 연결된 구매기록도 취소하며 처리 기록은 남깁니다') : '')
     + (msgN?row('💬', msgN>1?`리뷰어 ${msgN}명에게 메시지`:'리뷰어에게 메시지', "openReviewerMsg()", false, false,
         msgN>1?'선택한 줄의 리뷰어들에게 같은 내용을 보냅니다(같은 리뷰어는 한 번만)':'이 줄 리뷰어의 1:1 문의방으로 보냅니다'):'')
+    + (one&&selectedRow&&_isInternalRole()?row('🛒','구매캡처 교체','openCaptureReplaceFromMenu()',false,false,'이 줄 주문의 구매캡처를 새 사진으로 바꿉니다(없으면 새로 올립니다)'):'')
     + (one&&(field||'')?row('🕘','편집기록','_menuCellHistory()',false,false,'이 셀을 언제 누가 어떻게 고쳤는지 봅니다(되돌리지는 않습니다)'):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')
@@ -10368,6 +10381,171 @@ async function _manualReviewDateOnly(){
     _manualReviewClose(); await reloadWorkdesk(); toast('리뷰제출일을 기록했습니다.');
   }catch(e){
     if(_manualReviewState){ _manualReviewState.saving=false; _manualReviewState.err=(e&&e.message)?e.message:'기록에 실패했습니다.'; _manualReviewRender(); }
+  }
+}
+/* ── 🛒 구매캡처 교체 (인라인 팝오버 · 붙여넣기 전용, 사용자 확정 2026-09-30) ──────────────
+   리뷰어가 처음 낸 구매캡처가 바뀌었을 때 직원이 새 사진으로 갈아끼운다(캡처가 없는 주문엔 새로 올린다).
+   ★ 창구 2곳(표 우클릭 · 제출물 미리보기 구매 칸) → 실행부는 이 팝오버 **한 벌**.
+   ★ [리뷰 대신 제출]과 같은 규율: 누른 자리 옆 · body 직속 · 파일 탐색기 없음(Ctrl+V·끌어놓기만,
+     `_capTake` 한 함수로 수렴) · 붙여넣기만으로 바꾸지 않는다([교체] 한 번 더).
+   ★ 줄 → 주문 판정·그 사이 바뀜 확인은 **서버**가 한다(화면은 받은 값을 그리기만).
+     열 때 받은 지금 사진(currentFileId)을 교체 요청에 다시 실어 보내 그 사이 바뀌었으면 거부된다. */
+const _CAP_MAX_ONE=8*1024*1024, _CAP_SHRINK_OVER=3*1024*1024;
+let _capState=null;
+const _CAP_ERR={
+  no_order:'이 줄에 연결된 구매기록(구매양식)이 없어 구매캡처를 붙일 수 없습니다.',
+  ambiguous_order:'이 줄에 구매기록이 여러 건 겹쳐 있어 어느 주문의 캡처인지 정할 수 없습니다 — 줄을 먼저 정리해 주세요.',
+  row_not_found:'이 줄을 찾지 못했습니다 — 표를 새로고침한 뒤 다시 시도해 주세요.',
+  capture_changed:'그 사이 이 주문의 구매캡처가 바뀌었습니다 — 창을 다시 열어 지금 사진을 확인해 주세요.',
+  not_image:'이미지가 아닙니다 — 구매캡처 이미지를 붙여넣어 주세요.',
+  too_large:'사진이 너무 큽니다(8MB 초과) — 캡처를 다시 떠서 붙여넣어 주세요.',
+  drive_not_configured:'드라이브 저장 폴더가 설정되지 않아 저장할 수 없습니다 — 관리자에게 알려 주세요.',
+};
+function _capErr(code,fallback){ const k=String(code||'').trim(); return _CAP_ERR[k]||(k?`${fallback||'처리에 실패했습니다.'} (${k})`:(fallback||'처리에 실패했습니다.')); }
+function _capClose(){
+  const st=_capState; if(st&&st.file&&st.file._url){ try{ URL.revokeObjectURL(st.file._url); }catch(_){ } }
+  const ov=document.getElementById('wdCapPop'); if(ov) ov.remove();
+  _capState=null;
+}
+function _capTake(list){
+  const st=_capState; if(!st||st.saving) return;
+  if(st.pre==='loading'){ st.err='확인하는 중입니다 — 잠시 후 붙여넣어 주세요.'; _capRender(); return; }
+  if(st.pre&&st.pre.ok===false){ _capRender(); return; }
+  const imgs=[...(list||[])].filter(f=>f&&String(f.type||'').startsWith('image/'));
+  if(!imgs.length){ st.err='이미지가 아닙니다 — 구매캡처 이미지를 복사해 붙여넣어 주세요.'; _capRender(); return; }
+  const f=imgs[0];
+  if(st.file&&st.file._url){ try{ URL.revokeObjectURL(st.file._url); }catch(_){ } }
+  try{ f._url=URL.createObjectURL(f); }catch(_){ f._url=''; }
+  st.file=f; st.err=imgs.length>1?'사진은 한 장만 붙일 수 있어 첫 장만 받았습니다.':''; _capRender();
+}
+/* 큰 캡처는 보내기 전에 줄인다(긴 변 2400px · JPEG) — 본문 상한에 걸려 실패하지 않게. */
+function _capEncode(file){
+  return new Promise((resolve,reject)=>{
+    const rd=new FileReader();
+    rd.onerror=()=>reject(new Error('파일을 읽지 못했습니다.'));
+    rd.onload=()=>{
+      const url=String(rd.result||'');
+      if(file.size<=_CAP_SHRINK_OVER){ resolve({b64:url.slice(url.indexOf(',')+1),mime:file.type||'image/png'}); return; }
+      const img=new Image();
+      img.onerror=()=>resolve({b64:url.slice(url.indexOf(',')+1),mime:file.type||'image/png'});
+      img.onload=()=>{
+        const k=Math.min(1,2400/Math.max(img.width||1,img.height||1));
+        const c=document.createElement('canvas'); c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+        c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+        const out=c.toDataURL('image/jpeg',0.85);
+        resolve({b64:out.slice(out.indexOf(',')+1),mime:'image/jpeg'});
+      };
+      img.src=url;
+    };
+    rd.readAsDataURL(file);
+  });
+}
+function _capPlace(){
+  const st=_capState, box=document.querySelector('#wdCapPop .wrp-box'); if(!st||!box||!st.anchor)return;
+  const w=box.offsetWidth||340, h=box.offsetHeight||300, a=st.anchor;
+  const left=Math.max(8, Math.min(a.left, window.innerWidth-w-10));
+  let top=a.bottom+4;
+  if(top+h>window.innerHeight-8) top=Math.max(8, a.top-h-4);
+  box.style.left=left+'px'; box.style.top=top+'px';
+}
+function _capRender(){
+  const st=_capState, box=document.querySelector('#wdCapPop .wrp-box'); if(!st||!box)return;
+  const pre=st.pre, blocked=!!(pre&&pre.ok===false), ready=!!(pre&&pre.ok);
+  const cur=ready?String(pre.currentFileId||''):'';
+  const curUrl=cur?_rvUrl(cur):'';
+  const verb=cur?'교체':'올리기';
+  box.innerHTML=
+    `<div class="wrp-hd"><b>🛒 구매캡처 ${cur||!ready?'교체':'올리기'}</b><span class="wrp-who" title="${esc(st.name||'')}">${esc(st.name||'참여자')}</span></div>`
+    + (pre==='loading'?'<div class="wrp-pre">이 줄의 구매기록을 확인하는 중…</div>':'')
+    + (blocked?`<div class="wrp-block">${esc(_capErr(pre.error,'지금은 구매캡처를 바꿀 수 없습니다.'))}</div>`:'')
+    + (ready?`<div class="wcp-pair"><div class="wcp-side"><div class="wcp-cap">지금 사진</div>${
+        curUrl?`<div class="wcp-img"><img src="${esc(curUrl)}" alt="지금 구매캡처" loading="lazy"></div>`:'<div class="wcp-img none">없음</div>'}</div>`
+      + `<span class="wcp-arrow">→</span><div class="wcp-side"><div class="wcp-cap">새 사진</div>${
+        st.file?`<div class="wcp-img"><img src="${esc(st.file._url||'')}" alt="새 구매캡처"></div>`:'<div class="wcp-img none">아래에 붙여넣기</div>'}</div></div>`
+      + `<div class="wrp-drop" id="wcpDrop"><div class="wrp-msg"><b>Ctrl</b>(⌘)<b>+V</b> 로 새 구매캡처를 붙여넣으세요</div><div class="wrp-sub">끌어다 놓아도 됩니다 · 한 장</div></div>`:'')
+    + (st.err?`<div class="wrp-err">${esc(st.err)}</div>`:'')
+    + `<div class="wrp-ft"><span class="wrp-note">${st.saving?'저장 중…':(cur?'이전 사진은 드라이브 휴지통으로 옮겨집니다(30일 안에 복구 가능)':'새 사진이 이 주문의 구매캡처로 저장됩니다')}</span>`
+    + `<button class="btn" type="button" onclick="_capClose()"${st.saving?' disabled':''}>취소</button>`
+    + `<button class="btn pri" type="button" onclick="_capSubmit()"${(!st.file||st.saving||!ready)?' disabled':''}>${verb}</button></div>`;
+  _capPlace();
+  const dz=document.getElementById('wcpDrop');
+  if(dz){
+    dz.addEventListener('dragover',e=>{ if(e.dataTransfer&&[...(e.dataTransfer.types||[])].includes('Files')){ e.preventDefault(); dz.classList.add('over'); } });
+    dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+    dz.addEventListener('drop',e=>{ e.preventDefault(); dz.classList.remove('over'); _capTake(e.dataTransfer&&e.dataTransfer.files); });
+  }
+  try{ box.focus({preventScroll:true}); }catch(_){ }
+}
+/* 창구 ① 표 우클릭 */
+function openCaptureReplaceFromMenu(){
+  const rowId=STATE._gMenuRowId, td=_selAnchorTd(); _closeCellMenu();
+  _capOpen(rowId, td);
+}
+/* 창구 ② 제출물 미리보기 구매 칸 */
+function openCaptureReplaceFromPane(btn){ if(btn&&btn.blur) btn.blur(); _capOpen(STATE.rvSel, btn); }
+function _capOpen(rowId, anchorEl){
+  const t=STATE.cur, row=(STATE.wd&&STATE.wd.roster||[]).find(r=>String(r.id)===String(rowId));
+  if(!t||!row) return;
+  if(!_isInternalRole()){ toast('구매캡처 교체는 내부 담당자만 할 수 있습니다.'); return; }
+  _capClose();
+  const rect=anchorEl&&anchorEl.getBoundingClientRect?anchorEl.getBoundingClientRect():{left:window.innerWidth/2-170,top:120,bottom:150};
+  _capState={t,row,name:_rvWho(row)||row.name||'',file:null,saving:false,err:'',pre:'loading',anchor:{left:rect.left,top:rect.top,bottom:rect.bottom}};
+  const ov=document.createElement('div'); ov.id='wdCapPop';
+  ov.innerHTML='<div class="wrp-box" role="dialog" aria-label="구매캡처 교체" tabindex="-1" style="width:340px"></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('mousedown',e=>{ if(e.target===ov&&!(_capState&&_capState.saving)) _capClose(); });
+  /* 리스너는 최상위 1회만 — [리뷰 대신 제출] 팝오버와 같은 규율(캡처 단계 붙여넣기 · Esc · 스크롤 닫기). */
+  if(!window._wdCapPopBound){ window._wdCapPopBound=true;
+    document.addEventListener('paste',e=>{
+      if(!_capState||!document.getElementById('wdCapPop')) return;
+      const items=(e.clipboardData&&e.clipboardData.files&&e.clipboardData.files.length)
+        ? [...e.clipboardData.files]
+        : [...((e.clipboardData&&e.clipboardData.items)||[])].filter(it=>it&&it.kind==='file').map(it=>it.getAsFile()).filter(Boolean);
+      e.preventDefault(); e.stopPropagation();
+      _capTake(items);
+    }, true);
+    document.addEventListener('keydown',e=>{
+      if(e.key!=='Escape'||!document.getElementById('wdCapPop')) return;
+      if(_capState&&_capState.saving) return;
+      e.stopPropagation(); _capClose();
+    }, true);
+    window.addEventListener('scroll',e=>{
+      if(!document.getElementById('wdCapPop')||(_capState&&_capState.saving)) return;
+      if(e.target&&e.target.closest&&e.target.closest('#wdCapPop')) return;
+      _capClose();
+    }, true);
+    window.addEventListener('resize',()=>{ if(document.getElementById('wdCapPop')&&!(_capState&&_capState.saving)) _capClose(); });
+  }
+  _capRender();
+  const want=_capState;
+  api(`/api/trackb/workdesk/purchase-capture?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&rowId=${encodeURIComponent(row.id)}`)
+    .then(r=>{ if(_capState===want){ _capState.pre=(r&&typeof r.ok==='boolean')?r:{ok:false,error:'unknown'}; if(r&&r.ok&&r.name) _capState.name=r.name; _capRender(); } })
+    .catch(()=>{ if(_capState===want){ _capState.pre={ok:false,error:'network'}; _capRender(); } });
+}
+/* 교체 뒤 제출물 미리보기만 다시 받는다 — 보던 줄 선택은 그대로 둔다. */
+async function _capRefreshImages(t){
+  const r=await api(`/api/trackb/workdesk/review-images?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+  if(!(STATE.cur&&STATE.cur.sheetId===t.sheetId&&STATE.cur.tabName===t.tabName)) return;
+  if(r&&r.ok&&r.rows){ STATE.rvImgs=r.rows; STATE.rvIdx={}; _rvRender(); }
+}
+async function _capSubmit(){
+  const st=_capState;
+  if(!st||st.saving||!st.file||!(st.pre&&st.pre.ok))return;
+  if(st.file.size>_CAP_MAX_ONE*3){ st.err=_capErr('too_large'); _capRender(); return; }
+  st.saving=true; st.err=''; _capRender();
+  try{
+    const enc=await _capEncode(st.file);
+    const out=await api('/api/trackb/workdesk/purchase-capture/replace',{method:'POST',body:JSON.stringify({
+      sheetId:st.t.sheetId,tabName:st.t.tabName,rowId:st.row.id,imageBase64:enc.b64,mimeType:enc.mime,
+      expectFileId:String(st.pre.currentFileId||'')})});
+    if(!out||!out.ok) throw new Error(_capErr(out&&out.error,'구매캡처를 저장하지 못했습니다.'));
+    const t=st.t; _capClose();
+    toast(out.replaced
+      ? (out.oldTrashed?'구매캡처를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다':'구매캡처를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다')
+      : '구매캡처를 올렸습니다');
+    await _capRefreshImages(t);
+  }catch(e){
+    if(_capState===st){ st.saving=false; st.err=(e&&e.message)?e.message:'처리에 실패했습니다.'; _capRender(); }
   }
 }
 // 우클릭 [행 삭제]는 그 행을 실제로 없앤다 — 구매양식(주문)이 붙어 있으면 그 구매기록까지
