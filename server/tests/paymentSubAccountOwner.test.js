@@ -69,6 +69,11 @@ function handler(opts) {
     if (/FROM reviewers WHERE phone8/.test(sql) && !/AS "subAccounts"/.test(sql)) return { rows: opts.ownRows || [] };
     if (/FROM reviewer_phone_changes/.test(sql)) return { rows: opts.movedPhoneRows || [] };
     if (/FROM reviewer_identities/.test(sql)) return { rows: opts.identityRows || [] };
+    // ── 작업표 줄의 주문 연결로 찾는 구매양식 계좌(모집공고 경유 주문 · 2026-09-30)
+    if (/os\.sheet_row = cp\.seq/.test(sql)) {
+      if (opts.throwOnLinked) throw new Error('linked boom');
+      return { rows: opts.linkedForm || [] };
+    }
     // ── 현재 참여행 owner UUID
     if (/FROM unnest[\s\S]*JOIN campaign_participants cp/.test(sql)) return { rows: opts.viaParticipant || [] };
     // ── 폴백 ① 참여 원장
@@ -445,7 +450,7 @@ const owner = (over = {}) => Object.assign({
       const it = (await svc.listPaymentTargets()).items[0];
       assert.strictEqual(it.accountSource, 'self');
       assert.strictEqual(calls.filter(c => /FROM participation_links pl/.test(c.sql)).length, 1);
-      assert.strictEqual(calls.filter(c => /FROM unnest[\s\S]*JOIN order_submissions os/.test(c.sql)).length, 1);
+      assert.strictEqual(calls.filter(c => /FROM unnest[\s\S]*JOIN order_submissions os[\s\S]*campaign_applications/.test(c.sql)).length, 1);
     });
   });
 
@@ -455,6 +460,58 @@ const owner = (over = {}) => Object.assign({
       assert.strictEqual(items.length, 1);
       assert.ok(items[0].issues.includes('no_reviewer'));
     });
+  });
+
+  console.log('\n§6 모집공고 경유 주문 — 작업표 줄의 주문 연결로 구매양식 계좌를 찾는다(2026-09-30 풍성에프엔비 간장 272)');
+
+  const LINKED = [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, bank: '신한', account: '110-479-816262', depositor: '최하영' }];
+
+  await ta('6a ★ 번호가 겹쳐 등록 계좌를 못 정해도 양식 계좌로 통과한다 — 이번 사고', async () => {
+    await withStubPool(handler({ linkedForm: LINKED }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(!it.issues.includes('no_reviewer'), '보류가 풀려야 한다: ' + it.issues.join(','));
+      assert.strictEqual(it.payable, true, '남은 보류: ' + it.issues.join(','));
+      assert.strictEqual(it.accountSource, 'order');
+      assert.strictEqual(it.bankAccount, '110479816262');
+      assert.strictEqual(it.accountHolder, '최하영');
+      assert.strictEqual(it.amount, 20000, '금액은 이 경로로 바뀌지 않는다');
+    });
+  });
+
+  await ta('6b 좌표로 이미 찾은 행은 연결 조회를 하지 않는다(가산적)', async () => {
+    await withStubPool(handler({
+      orderRows: [{ sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: 20000, bank: '국민', account: '999', depositor: '명지수' }],
+      linkedForm: LINKED,
+    }), async (svc, calls) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(calls.filter(c => /os\.sheet_row = cp\.seq/.test(c.sql)).length, 0);
+      assert.strictEqual(it.accountHolder, '명지수', '좌표로 찾은 원장 값이 그대로 이긴다');
+    });
+  });
+
+  await ta('6c 연결 조회가 실패해도 목록은 죽지 않고 종전 보류로 끝난다', async () => {
+    await withStubPool(handler({ throwOnLinked: true }), async (svc) => {
+      const { items } = await svc.listPaymentTargets();
+      assert.strictEqual(items.length, 1);
+      assert.ok(items[0].issues.includes('no_reviewer'));
+    });
+  });
+
+  await ta('6d 한 줄에 연결 주문이 둘이면(모호) 쓰지 않는다', async () => {
+    await withStubPool(handler({ linkedForm: [LINKED[0], { ...LINKED[0], account: '222', depositor: '타인' }] }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.issues.includes('no_reviewer'), '모호하면 남의 계좌로 보내지 않는다');
+    });
+  });
+
+  t('6e 연결 조회는 주문 줄 번호 = 작업표 줄 번호일 때만 인정한다(오염 링크 차단) · 금액 원장에 섞지 않는다', () => {
+    const src = fs.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    const body = src.slice(src.indexOf('async function _loadLinkedFormAccounts'), src.indexOf('function _orderAccount'));
+    assert.ok(/os\.id = cp\.order_submission_id/.test(body), '주문 id 로 짝짓는다');
+    assert.ok(/os\.sheet_row = cp\.seq/.test(body), '줄 번호 일치 가드');
+    assert.ok(/os\.deleted_at IS NULL/.test(body) && /cp\.deleted_at IS NULL/.test(body), '취소·삭제 줄 제외');
+    assert.ok(!/price|review_fee_snapshot/.test(body), '금액 재료를 싣지 않는다');
+    assert.ok(/_orderAccount\(ord \|\| linkedFormMap\[/.test(src), '계좌 근거로만 쓴다');
   });
 
   console.log('\n§4 배선');
