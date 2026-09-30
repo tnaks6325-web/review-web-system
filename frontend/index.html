@@ -1497,7 +1497,7 @@ async function loadInlineProfile(user) {
       window._reviewerProfile = { ...res, ...p, found: true };
       if (nameEl) nameEl.textContent = p.name || name || "-";
       const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = p.phone || "-";
+      if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
       
       renderSelfKakaoId(p.kakaoId);
 
@@ -3073,7 +3073,7 @@ function renderInlineSubList(subs) {
       <div class="pf-head">
         <div class="pf-id"><div class="pf-nm">
           <span class="pf-who">${escHtml(sub.name || '-')}</span>
-          <span class="pf-ph">${escHtml(sub.phone || '')}</span>
+          <span class="pf-ph">${escHtml((typeof fmtPhone==='function'?fmtPhone(sub.phone || ''):sub.phone || ''))}</span>
           <span class="pf-chip pf-chip-idx">타계정 ${idx+1}</span>
         </div></div>
         <div class="pf-acts">

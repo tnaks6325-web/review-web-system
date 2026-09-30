@@ -4571,7 +4571,7 @@ function _ddRender(){
   const tg = _ddTarget();
   /* 어느 규칙으로 묶였는지 — ㉯(같은 주문 기록) 축이 실제로 듣고 있는지 화면에서 갈린다. */
   const rows = p ? (p.plan || []).map(g =>
-    `<tr><td>${esc(g.name || '')}</td><td class="num">${esc(String(g.phone8 || ''))}</td>
+    `<tr><td>${esc(g.name || '')}</td><td class="num">${esc(_fmtPhone(g.phone8 || ''))}</td>
       <td class="num">${esc(String(g.orderNum || ''))}</td>
       <td>${_ddAxis(g.matchedBy)}</td>
       <td class="num">${esc(String(g.keepSeq))}</td>
@@ -4869,7 +4869,7 @@ function _abGroupHtml(g, i){
         title="이 줄을 표에서 내립니다" onclick="abRem(${i},${Number(r.seq)},this.checked)"></td>` : '';
     return `<tr class="${isKeep ? 'keeprow' : (isRem ? 'remrow' : '')}">${pick}
       <td class="num">${esc(String(r.seq))}</td><td>${esc(r.name || '')}</td>
-      <td class="num">${esc(r.phone8 || '')}</td>
+      <td class="num">${esc(_fmtPhone(r.phone8 || ''))}</td>
       <td class="num">${esc(r.rowOrderNum || '—')}</td>
       <td class="num">${esc(r.ledgerOrderNum || '—')}</td>
       <td class="num">${esc(_ddDay(r.submittedAt))}</td>
@@ -4981,7 +4981,7 @@ function _hbRender(){
   const rows = (_HB.rows || []).map((r, i) =>
     `<tr><td class="num"><input type="checkbox" ${_HB.picked.has(Number(r.seq)) ? 'checked' : ''} onclick="hbPick(${i})"></td>
       <td class="num">${esc(String(r.seq))}</td><td>${esc(r.name || '')}</td>
-      <td class="num">${esc(String(r.phone8 || ''))}</td>
+      <td class="num">${esc(_fmtPhone(r.phone8 || ''))}</td>
       <td>${[r.submitted ? '리뷰제출' : '', r.paid ? '입금' : ''].filter(Boolean).join(' · ')}</td>
       <td>${esc(_ddDay(r.heldAt))}</td><td>${esc(r.heldBy || '')}</td>
       <td title="${esc(r.heldReason || '')}">${esc(String(r.heldReason || '').slice(0, 40))}</td></tr>`).join('');
@@ -6602,7 +6602,7 @@ function _menuWhoHtml(rowId){
   const phone = it.phoneFull || ('···'+String(it.phone8||'').slice(-4));
   return wrap(
     `<div class="wn">${esc(it.name||'—')}${it.isSub?` <span class="wtag" title="${esc(it.viaLabel||'')}">타계정 참여 · 명의 ${esc(it.rowName||'')}</span>`:''}</div>`
-   +`<div class="wr"><span class="wk">연락처</span><span class="wv">${esc(phone)}</span>${it.phoneFull?`<button type="button" class="wcp" onclick="_copyContact('phone',this)">복사</button>`:''}</div>`
+   +`<div class="wr"><span class="wk">연락처</span><span class="wv">${esc(_fmtPhone(phone))}</span>${it.phoneFull?`<button type="button" class="wcp" onclick="_copyContact('phone',this)">복사</button>`:''}</div>`
    +`<div class="wr"><span class="wk">카톡</span>${kakao}</div>`);
 }
 async function _copyContact(kind,btn){
@@ -8224,6 +8224,7 @@ function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return '';
 function _isPhoneHeader(h){ const s=String(h||''); return /(연락처|휴대폰|핸드폰|전화|폰번호)/.test(s) || /^(hp|tel|mobile|phone)$/i.test(s.trim()); }
 function _fmtPhone(v){
   if(v==null) return ''; const s=String(v).trim(); if(!s) return '';
+  if(/[^0-9\s\-.()+]/.test(s)) return s;                                      // 글자·마스킹(*)이 섞인 값은 원본 유지(숫자만 남기면 글자가 사라진다)
   let d=s.replace(/[^0-9]/g,''); if(!d) return s;
   if(d.length===10 && d[0]!=='0') d='0'+d;                                     // 앞자리 0 소실 보정(엑셀/시트 숫자화 흔적)
   if(d.length===8) return '010-'+d.slice(0,4)+'-'+d.slice(4);                 // phone8(뒤8자리) → 010-XXXX-XXXX
@@ -15343,7 +15344,7 @@ function _rvImRender(){
     ${ds.length? `<div class="rvimtw"><table class="rvimt"><thead><tr><th>판단 시각</th><th>종류</th><th>대상</th><th>내용</th><th>담당자</th><th>상태</th><th></th></tr></thead><tbody>
       ${ds.map((x,i)=>`<tr><td>${esc(_rvImDT(x.decidedAt))}</td><td>${esc(kindLb[x.kind]||x.kind)}</td>
         <td>${x.kind==='shared_phone_ok'?`<span class="mono">…${esc(String(x.phone8||'').slice(-4))}</span>`:esc(x.ownerName||'')}</td>
-        <td style="white-space:normal;min-width:220px">${x.kind==='merge'&&x.kept?`${esc(x.kept.name)} ${esc(x.kept.phone||'')} 로 남김 · 합친 번호 ${(x.merged||[]).map(m=>esc(m.phone||'')).join(', ')}${x.filled&&x.filled.length?' · 빈 칸 채움: '+x.filled.map(esc).join(', '):''}`:esc(x.memo||'')}</td>
+        <td style="white-space:normal;min-width:220px">${x.kind==='merge'&&x.kept?`${esc(x.kept.name)} ${esc(_fmtPhone(x.kept.phone||''))} 로 남김 · 합친 번호 ${(x.merged||[]).map(m=>esc(_fmtPhone(m.phone||''))).join(', ')}${x.filled&&x.filled.length?' · 빈 칸 채움: '+x.filled.map(esc).join(', '):''}`:esc(x.memo||'')}</td>
         <td>${esc(x.decidedBy||'')}</td>
         <td>${x.undone?`<span class="rvimtag">되돌림 · ${esc(x.undoneBy||'')}</span>`:'<span class="rvimtag m">적용 중</span>'}</td>
         <td>${x.undone?'':`<button class="rvimlink" type="button" onclick="_rvImUndo(${i})">되돌리기</button>`}</td></tr>`).join('')}
@@ -15368,17 +15369,17 @@ function _rvImGroupHtml(g,gi){
   const rows=g.cards.map((c,ci)=>`<tr class="pk${sel===ci?' sel':''}${selfIdx>=0?' fixed':''}" ${selfIdx>=0?'':`tabindex="0" onclick="_rvImPick(${gi},${ci})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_rvImPick(${gi},${ci});}"`}>
       <td><span class="rvimchk" aria-hidden="true">✓</span></td>
       <td><b>${esc(c.name)}</b>${c.kind==='self'?' <span class="rvimtag">본인</span>':''}${sel===ci?'<span class="rvimkeep">남길 명의</span>':''}</td>
-      <td class="mono">${esc(c.phone||'')}</td>
+      <td class="mono">${esc(_fmtPhone(c.phone||''))}</td>
       <td>${c.hasAddress?'<span class="rvimok">있음</span>':'<span class="rvimno">없음</span>'}</td>
       <td>${c.hasBank?'<span class="rvimok">있음</span>':'<span class="rvimno">없음</span>'}</td>
       <td>${c.participation|0}건</td><td>${esc(_rvImDate(c.lastParticipatedAt))}</td></tr>`).join('');
   const keep = sel!=null ? g.cards[sel] : null;
   const others = keep ? g.cards.filter((_,i)=>i!==sel) : [];
   const askHtml = ask ? `<div class="rvimask" role="group" aria-label="합치기 확인">
-      <h4>${esc(keep.name)} ${esc(keep.phone||'')} 로 합칩니다</h4>
+      <h4>${esc(keep.name)} ${esc(_fmtPhone(keep.phone||''))} 로 합칩니다</h4>
       <ul>
         <li>참여 내역 ${total}건이 이 명의 하나로 모여 보입니다.</li>
-        <li>${others.map(o=>esc(o.phone||'')).join(', ')} 는 <b>옛 번호</b>로 남습니다. 옛 번호로도 로그인되고 옛 참여 내역도 그대로 보입니다.</li>
+        <li>${others.map(o=>esc(_fmtPhone(o.phone||''))).join(', ')} 는 <b>옛 번호</b>로 남습니다. 옛 번호로도 로그인되고 옛 참여 내역도 그대로 보입니다.</li>
         <li>남길 명의에 비어 있는 주소·계좌는 다른 명의의 값으로 채웁니다(값이 있는 칸은 덮지 않음).</li>
         <li>리뷰어가 참여할 때 고르는 명의 목록에는 하나만 보입니다.</li>
       </ul>
@@ -15394,7 +15395,7 @@ function _rvImGroupHtml(g,gi){
 }
 function _rvImSharedHtml(x,xi){
   const done=STATE.rvImDone[x.groupKey];
-  const head=`<div class="rvimgh"><span class="who mono">${esc(x.entries[0]?x.entries[0].phone:'')}</span><span class="why">리뷰어 ${new Set(x.entries.map(e=>e.ownerId)).size}명 밑에 등록됨</span></div>`;
+  const head=`<div class="rvimgh"><span class="who mono">${esc(_fmtPhone(x.entries[0]?x.entries[0].phone:''))}</span><span class="why">리뷰어 ${new Set(x.entries.map(e=>e.ownerId)).size}명 밑에 등록됨</span></div>`;
   if(done) return `<div class="rvimg">${head}<div class="rvimdone"><span class="rvimtag m">확인함</span><span>${esc(done.text||'메모 없음')}</span>
     <span style="color:var(--muted);font-size:12px;flex:1">방금</span><button class="rvimlink" type="button" onclick="_rvImUndoDone(${xi})">되돌리기</button></div></div>`;
   const side=e=>`<div class="rvimside"><span style="font-size:11px;color:var(--muted);font-weight:700">리뷰어</span><span class="nm">${esc(e.ownerName||'')}</span>
@@ -15424,7 +15425,7 @@ async function _rvImMerge(gi){
   let r; try{ r=await api('/api/trackb/identity-cards/merge',{method:'POST',body:JSON.stringify({ownerId:g.ownerId,nameKey:g.nameKey,groupKey:g.groupKey,keepCardId:keep.cardId})}); }catch(e){ r={ok:false,error:e.message}; }
   if(!r || !r.ok){ toast(_rvImFailMsg(r)); return; }
   STATE.rvImAsk=null;
-  STATE.rvImDone[g.groupKey]={kind:'merge',decisionId:r.decisionId,text:`${keep.name} ${keep.phone||''} 로 남김${r.filled&&Object.keys(r.filled).length?' · 빈 칸('+Object.keys(r.filled).length+'개) 채움':''}`};
+  STATE.rvImDone[g.groupKey]={kind:'merge',decisionId:r.decisionId,text:`${keep.name} ${_fmtPhone(keep.phone||'')} 로 남김${r.filled&&Object.keys(r.filled).length?' · 빈 칸('+Object.keys(r.filled).length+'개) 채움':''}`};
   if(STATE.rvImCounts && Number.isFinite(STATE.rvImCounts.duplicates)) STATE.rvImCounts.duplicates=Math.max(0,STATE.rvImCounts.duplicates-1);
   _rvImRefreshChips(); _rvImRender(); toast('합쳤습니다');
 }
@@ -15538,7 +15539,7 @@ function _renderRvBody(){
       <tr>
         <td style="text-align:center"><button type="button" class="btn" style="padding:3px 7px;font-size:.68rem;border-radius:6px" onclick="_rvOpenHome(${i})" title="이 리뷰어로 로그인된 아이에이리뷰 홈을 새 탭에서 엽니다">홈 열기</button></td>
         <td class="c-nm" style="font-weight:700">${esc(r.name||'')}${r.reviewerNo!=null?` <span class="bd" style="font-size:.62rem" title="소유자 코드 · 본계정 실제 참여자 ${esc(String(r.reviewerNo).padStart(4,'0'))}-0">${esc(String(r.reviewerNo).padStart(4,'0'))}</span>`:''}</td>
-        <td class="c-ph">${dash(r.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvIdentityChange(${i},0)" title="코드 신원을 기준으로 이름과 번호를 변경합니다. 코드 미등록 행은 기존 번호변경 절차로 안내됩니다.">이름 및 번호변경</button></td>
+        <td class="c-ph">${dash(_fmtPhone(r.phone))}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvIdentityChange(${i},0)" title="코드 신원을 기준으로 이름과 번호를 변경합니다. 코드 미등록 행은 기존 번호변경 절차로 안내됩니다.">이름 및 번호변경</button></td>
         <td class="c-addr" title="${esc(r.address||'')}">${dash(r.address)}</td>
         <td class="c-bank">${dash(r.bankName)}</td>
         <td class="c-num">${dash(r.bankAccount)}</td>
@@ -15652,7 +15653,7 @@ function _rvSubHtml(r){
       <th style="width:90px">소득자명</th><th>주소</th><th style="width:230px">계좌</th>
     </tr></thead><tbody>${subs.map((s,subIndex)=>`<tr>
       <td style="font-weight:700">${dash(s.name)}</td>
-      <td style="font-variant-numeric:tabular-nums">${dash(s.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvIdentityChange(${(STATE.rv||[]).indexOf(r)},${subIndex+1})">이름 및 번호변경</button></td>
+      <td style="font-variant-numeric:tabular-nums">${dash(_fmtPhone(s.phone))}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvIdentityChange(${(STATE.rv||[]).indexOf(r)},${subIndex+1})">이름 및 번호변경</button></td>
       <td style="font-variant-numeric:tabular-nums">${dash(s.jumin)}</td>
       <td>${dash(s.incomeName)}</td>
       <td>${dash(s.address)}</td>
@@ -15718,7 +15719,7 @@ function _rvPhone(i){
     </div>
     <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
       <div style="font-size:.82rem;color:#374151">
-        <b>${esc(row.name||'')}</b> · 현재 <b>${esc(row.phone||'')}</b>
+        <b>${esc(row.name||'')}</b> · 현재 <b>${esc(_fmtPhone(row.phone||''))}</b>
       </div>
       <label style="font-size:.78rem;color:#6b7280">새 로그인 번호 (숫자 11자리)</label>
       <input id="rvPhInput" class="ovsearch" inputmode="numeric" placeholder="01091869944" style="width:100%">
@@ -15758,7 +15759,7 @@ function _rvIdentityChange(i, memberNo){
   d.innerHTML=`<div style="background:#fff;color:#111827;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px"><b style="font-size:.95rem">이름 및 번호변경 · ${esc(code)}</b><span style="flex:1"></span><button type="button" class="btn" onclick="_rvPhClose()">닫기</button></div>
     <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
-      <div style="font-size:.8rem;color:#475569">현재: <b>${esc(current.name)}</b> · <b>${esc(current.phone)}</b></div>
+      <div style="font-size:.8rem;color:#475569">현재: <b>${esc(current.name)}</b> · <b>${esc(_fmtPhone(current.phone))}</b></div>
       <label style="font-size:.78rem;color:#6b7280">이름</label><input id="rvIdName" class="ovsearch" value="${esc(current.name)}" style="width:100%">
       <label style="font-size:.78rem;color:#6b7280">새 연락처</label><input id="rvIdPhone" class="ovsearch" inputmode="numeric" value="${esc(current.phone)}" style="width:100%">
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 11px;font-size:.74rem;color:#1e3a8a;line-height:1.55">과거 이름·번호는 삭제하지 않고 이 코드의 이력으로 보존합니다. 소유자 화면에서는 이전 참여·제출기록도 계속 합산되며, 동일 공고 제한은 이 실제 참여자 코드에만 적용됩니다.</div>
@@ -15773,11 +15774,11 @@ async function _rvIdentityCheck(i, memberNo){
   let r; try{r=await api('/api/trackb/reviewers/identity-codes/'+encodeURIComponent(row.id)+'/change',{method:'POST',body:JSON.stringify({memberNo,name,phone})});}catch(_){r=null;} if(go)go.disabled=false;
   if(!r){out.innerHTML='<div style="font-size:.78rem;color:#b91c1c">확인하지 못했습니다 — 잠시 후 다시 시도해주세요.</div>';return;}
   if(r.error&&!r.needConfirm){out.innerHTML=`<div style="font-size:.78rem;color:#b91c1c">${esc(r.error)}</div>`;return;}
-  const p=r.requested||{}; out.innerHTML=`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:.76rem;color:#334155;line-height:1.65"><b>${esc(r.code||'')}</b><br>${esc((r.current||{}).name||'')} · ${esc((r.current||{}).phone||'')} → <b>${esc(p.name||name)}</b> · <b>${esc(p.phone||phone)}</b></div><div style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px"><button type="button" class="btn pri" onclick="_rvIdentityApply(${i},${memberNo})">이대로 변경</button></div>`;
+  const p=r.requested||{}; out.innerHTML=`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:.76rem;color:#334155;line-height:1.65"><b>${esc(r.code||'')}</b><br>${esc((r.current||{}).name||'')} · ${esc(_fmtPhone((r.current||{}).phone||''))} → <b>${esc(p.name||name)}</b> · <b>${esc(_fmtPhone(p.phone||phone))}</b></div><div style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px"><button type="button" class="btn pri" onclick="_rvIdentityApply(${i},${memberNo})">이대로 변경</button></div>`;
 }
 async function _rvIdentityApply(i, memberNo){
   const row=(STATE.rv||[])[i], name=document.getElementById('rvIdName')?.value.trim(), phone=(document.getElementById('rvIdPhone')?.value||'').replace(/[^0-9]/g,''), out=document.getElementById('rvIdOut'); if(!row||!out)return;
-  if(!confirm(`${row.name||''}의 실제 참여자 ${String(row.reviewerNo).padStart(4,'0')}-${memberNo} 정보를\n${name} / ${phone} 로 변경할까요?\n\n과거 이름·번호는 이력으로 보존됩니다.`))return;
+  if(!confirm(`${row.name||''}의 실제 참여자 ${String(row.reviewerNo).padStart(4,'0')}-${memberNo} 정보를\n${name} / ${_fmtPhone(phone)} 로 변경할까요?\n\n과거 이름·번호는 이력으로 보존됩니다.`))return;
   out.innerHTML='<div style="font-size:.78rem;color:#6b7280">변경 중…</div>'; const r=await api('/api/trackb/reviewers/identity-codes/'+encodeURIComponent(row.id)+'/change',{method:'POST',body:JSON.stringify({memberNo,name,phone,confirm:true})});
   if(r&&r.ok){_rvPhClose();_toast(`${r.code||'참여자'}의 이름 및 번호를 변경했습니다.`);_loadReviewers();}else out.innerHTML=`<div style="font-size:.78rem;color:#b91c1c">변경하지 못했습니다${r&&r.error?': '+esc(r.error):''}</div>`;
 }
@@ -15806,7 +15807,7 @@ async function _rvPhCheck(i){
   }
   const line=(lb,n)=>`<div style="display:flex;justify-content:space-between"><span>${lb}</span><b>${n|0}건</b></div>`;
   out.innerHTML=`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:.76rem;color:#334155;line-height:1.7">
-      <b>${esc(row.phone||'')} → ${esc(r.newPhone||phone)}</b>
+      <b>${esc(_fmtPhone(row.phone||''))} → ${esc(_fmtPhone(r.newPhone||phone))}</b>
       ${line('구매양식 제출', c.orders)}${line('공고 참여', c.applications)}${line('1:1 문의방', c.inquiries)}
       ${line('작업표 참여 행', c.reviewRows)}${line('공고별 참여 예외', c.gates)}
       ${(c.blacklisted|0)>0?'<div style="color:#b91c1c">· 블랙리스트 등록 상태 — 새 번호에도 함께 등록됩니다</div>':''}
@@ -15821,7 +15822,7 @@ async function _rvPhApply(i){
   const row=(STATE.rv||[])[i]; const inp=document.getElementById('rvPhInput');
   const out=document.getElementById('rvPhOut'); if(!row||!inp||!out) return;
   const phone=(inp.value||'').replace(/[^0-9]/g,'');
-  if(!confirm(`${row.name||''} 리뷰어의 로그인 번호를\n${row.phone} → ${phone} 로 변경할까요?\n\n· 지금 번호는 타계정으로 남아 과거 내역은 계속 조회됩니다.\n· 리뷰어에게 새 번호로 로그인해야 한다고 안내해 주세요.`)) return;
+  if(!confirm(`${row.name||''} 리뷰어의 로그인 번호를\n${_fmtPhone(row.phone)} → ${_fmtPhone(phone)} 로 변경할까요?\n\n· 지금 번호는 타계정으로 남아 과거 내역은 계속 조회됩니다.\n· 리뷰어에게 새 번호로 로그인해야 한다고 안내해 주세요.`)) return;
   out.innerHTML='<div style="font-size:.78rem;color:#6b7280">변경 중…</div>';
   const r=await api('/api/trackb/reviewers/phone',{method:'POST',body:JSON.stringify({id:row.id,phone,confirm:true})});
   if(r&&r.ok){
@@ -15844,7 +15845,7 @@ async function _rvPhApply(i){
 async function _rvDelete(i){
   const row=(STATE.rv||[])[i];
   if(!row) return;
-  const who=`${row.name||''} ${row.phone||''}`.trim();
+  const who=`${row.name||''} ${_fmtPhone(row.phone||'')}`.trim();
   if(!confirm(`${who} 리뷰어를 삭제할까요?\n\n· 등록 정보(주민번호·계좌 등)가 완전히 지워집니다.\n· 되돌릴 수 없습니다.`)) return;
 
   let r=await api('/api/trackb/reviewers/delete',{method:'POST',body:JSON.stringify({id:row.id})});

@@ -252,7 +252,11 @@ async function code(fn) { try { await fn(); return null; } catch (e) { return e.
         _abCan: () => role === 'admin' || role === 'master',
         _AB: { pick: {}, rep: { groups: [g] } }, api: async () => ({}), confirm: () => false, alert: () => {},
       };
-      sb.window = sb; vm.createContext(sb); vm.runInContext(src, sb);
+      sb.window = sb; vm.createContext(sb);
+      // 연락처 칸 표기 함수는 스텁이 아니라 구현을 넣는다(2026-09-30 번호 표기 통일 — 사본을 두면 회귀를 못 본다).
+      const f0 = HTML.indexOf('function _fmtPhone('), f1 = HTML.indexOf('function _fmtKDate(');
+      vm.runInContext(HTML.slice(f0, f1), sb);
+      vm.runInContext(src, sb);
       return sb._abGroupHtml(g, 0);
     };
     for (const role of ['admin', 'staff']) {

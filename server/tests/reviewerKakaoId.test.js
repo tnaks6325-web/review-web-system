@@ -162,7 +162,9 @@ const reviewer = require('../src/services/reviewer.service');
     ]) } } },
     esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     _isInternalRole() { return ['master', 'admin', 'staff'].includes(S.STATE.role); } };
-  vm.runInNewContext(blk + '\nthis.t=_talkBadge;this.w=_menuWhoHtml;', S);
+  // 연락처 표기 함수는 스텁이 아니라 구현을 넣는다(2026-09-30 번호 표기 통일).
+  const fph = wd.slice(wd.indexOf('function _fmtPhone('), wd.indexOf('function _fmtKDate('));
+  vm.runInNewContext(fph + '\n' + blk + '\nthis.t=_talkBadge;this.w=_menuWhoHtml;', S);
   ok('등록자 이름 옆 TALK', /class="talk"/.test(S.t({ id: 'a' })));
   ok('미등록자는 자리만(표시 없음)', S.t({ id: 'b' }) === '<span class="talkslot" data-tk="b"></span>');
   ok('메뉴 맨 위에 카톡 아이디 + 복사', /kim/.test(S.w('a')) && /_copyContact\('kakao'/.test(S.w('a')));
