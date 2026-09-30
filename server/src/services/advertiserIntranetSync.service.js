@@ -12,6 +12,7 @@
  *   bizno     — ID 있음 + 사업자번호 칸이 비어 있음 → 채움
  *   suggest   — ID 없음 + 법인 표기만 다른 인트라넷 광고주 하나 → **사람 확인 후에만**(ids 로 지목) 연결
  *   duplicate — 그 인트라넷 광고주가 이미 다른 업체에 연결됨 → **업체 합치기 대상**(mergeWith 동봉)
+ *   name_taken — 새 이름을 **다른 인트라넷 광고주에 연결된** 업체가 쓰고 있음(합치기 대상 아님 — 이름 구분 필요)
  *   ambiguous / not_found / orphan — 사람이 본다(자동 조치 없음)
  *
  * ★★ 자동 병합은 하지 않는다(결정 004). 자동으로 고치는 것은 link·rename·bizno 셋뿐이고,
@@ -40,7 +41,12 @@ function planIntranetSync(advs, intra) {
       const iname = _trim(ir.name);
       if (iname && iname !== name) {
         const holder = advNames.get(iname);
-        if (holder && holder.id !== a.id) items.push({ kind: 'rename_blocked', id: a.id, name, to: iname, blockedBy: { id: holder.id, name: holder.name } });
+        // ★ 그 이름을 쥔 업체가 **다른 인트라넷 광고주에 연결돼 있으면** 같은 업체가 아니다(합치기 대상 아님 —
+        //   서버 합치기도 different_intranet 으로 거부한다). 사람이 한쪽 이름을 구분되게 바꿔야 하는 name_taken 으로 둔다.
+        if (holder && holder.id !== a.id) {
+          if (holder.intranetId && holder.intranetId !== a.intranetId) items.push({ kind: 'name_taken', id: a.id, name, to: iname, takenBy: { id: holder.id, name: holder.name } });
+          else items.push({ kind: 'rename_blocked', id: a.id, name, to: iname, blockedBy: { id: holder.id, name: holder.name, intranetLinked: !!holder.intranetId } });
+        }
         else items.push({ kind: 'rename', id: a.id, name, to: iname, intranetId: a.intranetId });
       }
       if (!_trim(a.businessNumber) && _trim(ir.bizNo)) items.push({ kind: 'bizno', id: a.id, name, bizNo: _trim(ir.bizNo), intranetId: a.intranetId });

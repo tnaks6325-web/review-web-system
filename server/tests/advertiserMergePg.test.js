@@ -66,6 +66,7 @@ async function seed() {
     pv.ok && pv.dryRun && pv.preview.source.campaigns === 3 && pv.preview.target.brands === 1
     && (await n(`SELECT COUNT(*) n FROM advertisers WHERE id=$1`, [S])) === 1);
 
+  ok('미리보기가 옛 링크가 살아 있는지 알려 준다(폐기 링크를 "계속 열림"으로 말하지 않게)', pv.preview.source.link === 1 && pv.preview.source.linkActive === 1);
   // 2) 다른 인트라넷 광고주끼리는 거부(쓰기 0)
   const diff = await mergeAdvertisers({ sourceId: X, targetId: T, confirm: true, by: 'tester' });
   ok('서로 다른 인트라넷 광고주에 연결된 업체는 합치지 않는다',

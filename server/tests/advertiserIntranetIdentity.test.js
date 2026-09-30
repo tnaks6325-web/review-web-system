@@ -123,6 +123,12 @@ const ran = (log, re) => log.some(q => re.test(q.text));
     [{ intranetId: 'j1', name: '새표기', bizNo: '' }]);
   ok('새 이름을 다른 업체가 쓰고 있으면 이름을 바꾸지 않고 합치기 대상으로 알린다',
     blocked.items.some(it => it.kind === 'rename_blocked' && it.blockedBy.id === 'x2'));
+  const taken = planIntranetSync(
+    [{ id: 'y1', name: '옛표기', intranetId: 'k1', businessNumber: '' }, { id: 'y2', name: '새표기', intranetId: 'k2', businessNumber: '' }],
+    [{ intranetId: 'k1', name: '새표기', bizNo: '' }, { intranetId: 'k2', name: '새표기', bizNo: '' }]);
+  ok('새 이름을 쥔 업체가 다른 인트라넷 광고주에 연결돼 있으면 합치기 대상이 아니라 name_taken',
+    taken.items.some(it => it.id === 'y1' && it.kind === 'name_taken') && !taken.items.some(it => it.kind === 'rename_blocked'));
+  ok('rename_blocked 는 이름을 쥔 쪽의 연결 여부를 싣는다', blocked.items.find(it => it.kind === 'rename_blocked').blockedBy.intranetLinked === false);
   {
     const sync = read('src/services/advertiserIntranetSync.service.js');
     ok('인트라넷 도달 불가면 아무것도 쓰지 않는다(fail-closed)', /if \(!L\.ok\) return \{ ok: false, code: 503/.test(sync));
