@@ -20,7 +20,7 @@ function menuContext({ field='col:리뷰제출', role='staff', count=1, archived
   const context={STATE:{role,canEdit:!archived&&role!=='advertiser',cur:{sheetless},wd:{roster:[{id:'row-1',name:'참여자',revision:'r1',filled:true}]}},
     $:()=>menu,_selectionGrid:()=>[Array(count).fill(td)],_canEditCells:()=>true,
     _workdeskStatusKindForField:f=>f==='col:리뷰제출'?'review':'',_isInternalRole:()=>['master','admin','staff'].includes(role),
-    _isPurchaseDateHeader:()=>false,_msgCanSend:()=>false,esc:s=>s,_CELL_COLORS:[],_selRanges:()=>[1],
+    _isPurchaseDateHeader:()=>false,_msgCanSend:()=>false,_menuWhoHtml:()=>'',esc:s=>s,_CELL_COLORS:[],_selRanges:()=>[1],
     _cellLockReason:()=>'',window:{innerWidth:900,innerHeight:900}};
   vm.createContext(context); vm.runInContext(fn('_openCellMenu'),context); context._openCellMenu(100,100,td);
   return menu.innerHTML;

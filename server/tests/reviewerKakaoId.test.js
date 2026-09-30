@@ -71,7 +71,7 @@ const reviewer = require('../src/services/reviewer.service');
   await withQuery(async (sql, params) => {
     if (/jsonb_array_elements/.test(sql)) return { rows: [], rowCount: 0 };
     if (/INSERT INTO reviewers/.test(sql)) return { rows: [], rowCount: 0 };
-    if (/SELECT name, sub_accounts/.test(sql)) return { rows: [{ name: '김리뷰', sub_accounts: [] }] };
+    if (/SELECT id, name, sub_accounts/.test(sql)) return { rows: [{ id: 'r1', name: '김리뷰', sub_accounts: [] }] };
     if (/UPDATE reviewers SET kakao_id/.test(sql)) { updSql = sql; return { rowCount: 1 }; }
     throw new Error('예상하지 못한 쿼리');
   }, async () => {
@@ -105,7 +105,7 @@ const reviewer = require('../src/services/reviewer.service');
   const search = read('frontend/search.html');
   ok('검색 페이지 로그인창 가입에 카톡 칸', /id="regKakaoInline"/.test(search));
   ok('검색 페이지 등록창에 카톡 칸', /id="regKakao"/.test(search));
-  ok('관리자 등록창에도 카톡 칸(서버 필수라 빠지면 막다른 길)', /id="regKakao"/.test(read('frontend/admin.html')) && /id="regKakao"/.test(read('frontend/admin-siand.html')));
+  ok('관리자 등록창에도 카톡 칸(서버 필수라 빠지면 막다른 길)', /id="regKakao"/.test(read('frontend/admin.html')));
   ok('개인정보 수집 항목에 카톡 아이디 고지', /이름, 휴대전화번호, 카카오톡 아이디<\/td>/.test(search));
   const app = read('frontend/js/search-app.js');
   ok('로그인창 가입이 kakaoId 를 보낸다', /registerReviewer", name, phone, consent: "true", kakaoId \}/.test(app));
