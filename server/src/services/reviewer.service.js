@@ -1,11 +1,17 @@
 const pool = require('../db/pool');
 const { mutateSubAccounts } = require('./reviewerIdentityCards.service');
+const { normalizeKakaoId, KAKAO_ID_HINT } = require('../utils/kakaoId');
 
 /**
  * 리뷰어 등록 (GAS: registerReviewer)
  */
-async function registerReviewer({ name, phone, consent, sheetId }) {
+async function registerReviewer({ name, phone, consent, sheetId, kakaoId, requireKakaoId }) {
   if (!name || !name.trim()) return { ok: false, error: '이름을 입력하세요.' };
+  // ★ 카카오톡 아이디 — 리뷰어 본인 가입(/api/reviewer/register)에서만 필수(requireKakaoId).
+  //   관리자 경유 등록(외부모집 수동제출)은 값이 없어도 된다(그 경로는 카톡 아이디를 모른다).
+  const kakao = normalizeKakaoId(kakaoId);
+  if (kakao === null) return { ok: false, field: 'kakaoId', error: KAKAO_ID_HINT };
+  if (requireKakaoId && !kakao) return { ok: false, field: 'kakaoId', error: '카카오톡 아이디를 입력하세요.' };
 
   const cleanPhone = (phone || '').replace(/[^0-9]/g, '');
   if (cleanPhone.length !== 11) {
@@ -42,11 +48,11 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
 
     // UNIQUE(phone) 제약을 활용한 중복 처리
     const result = await pool.query(`
-      INSERT INTO reviewers (name, phone, consent)
-      VALUES ($1, $2, $3)
+      INSERT INTO reviewers (name, phone, consent, kakao_id)
+      VALUES ($1, $2, $3, $4)
       ON CONFLICT (phone) DO NOTHING
       RETURNING *
-    `, [name.trim(), cleanPhone, true]);
+    `, [name.trim(), cleanPhone, true, kakao || '']);
 
     if (result.rowCount === 0) {
       // 번호 중복 — 기존 레코드 조회
@@ -59,6 +65,12 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
 
       // 같은 이름으로 재등록 → 진짜 중복 (이미 등록된 본인)
       if (existingName === newName) {
+        // 이미 등록된 본인 — 카톡 아이디는 빈 칸일 때만 채운다(내정보에서 정한 값을 덮지 않는다).
+        if (kakao) {
+          await pool.query(
+            `UPDATE reviewers SET kakao_id = $1 WHERE phone = $2 AND COALESCE(kakao_id,'') = ''`,
+            [kakao, cleanPhone]);
+        }
         return { ok: true, name: newName, phone: cleanPhone, alreadyRegistered: true };
       }
 
@@ -244,6 +256,7 @@ async function handleReviewerProfile(body = {}) {
     bankName, bankAccount, accountHolder,      // saveBankInfo
     onlyIfEmpty,                               // saveBankInfo — 빈 칸만 채움(구매양식 제출 후 자동 저장)
     address,                                   // saveAddress
+    kakaoId,                                   // saveKakaoId
     ownerReviewerId,                           // 서명 리뷰어 세션 사용 시 UUID 스코프
   } = body;
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
@@ -257,7 +270,7 @@ async function handleReviewerProfile(body = {}) {
       `SELECT name, phone, income_type AS "incomeType", resident_num AS "residentNum",
               bank_name AS "bankName", bank_account AS "bankAccount",
               account_holder AS "accountHolder", address,
-              sub_accounts AS "subAccounts", status
+              sub_accounts AS "subAccounts", status, kakao_id AS "kakaoId"
        FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 1`, [scopeValue]
     );
     if (rows.length === 0) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
@@ -385,6 +398,15 @@ async function handleReviewerProfile(body = {}) {
     const addr = (address == null ? '' : address).toString().trim();
     await pool.query(`UPDATE reviewers SET address = $1 WHERE ${scopeColumn} = $2`, [addr, scopeValue]);
     return { ok: true };
+  }
+
+  if (action === 'saveKakaoId') {
+    // 본계정 카카오톡 아이디 저장. 빈 값 저장 = 지우기 허용(주소 저장과 같은 규칙).
+    const kakao = normalizeKakaoId(kakaoId);
+    if (kakao === null) return { ok: false, error: KAKAO_ID_HINT };
+    const r = await pool.query(`UPDATE reviewers SET kakao_id = $1 WHERE ${scopeColumn} = $2`, [kakao, scopeValue]);
+    if (!r.rowCount) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
+    return { ok: true, kakaoId: kakao };
   }
 
   return { ok: false, error: '알 수 없는 action' };

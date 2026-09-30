@@ -2252,6 +2252,20 @@ body{ letter-spacing:-.01em; }
         </div>
       </div>
 
+        <!-- 카카오톡 아이디(필수, 사용자 확정 2026-09-30) — 리뷰 기한 안내 연락용 -->
+        <div class="reg-section">
+          <label class="reg-field-label" for="regKakao">
+            <i class="fas fa-comment" style="color:var(--p);margin-right:4px"></i>카카오톡 아이디 <span style="color:var(--err)">*</span>
+          </label>
+          <input id="regKakao" class="reg-input" type="text"
+            placeholder="예: review_kim"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="31"
+            oninput="regClearError()"
+            onkeydown="if(event.key==='Enter')window.regAgree()"
+          />
+          <div style="font-size:.72rem;color:#6B7280;margin-top:4px">리뷰 기한 안내를 카톡으로 드려요 · 카톡 → 설정 → 프로필 관리에서 확인</div>
+        </div>
+
       <!-- 에러 -->
       <div id="regError" class="reg-error" style="display:none"><i class="fas fa-exclamation-circle"></i><span id="regErrorText"></span></div>
 

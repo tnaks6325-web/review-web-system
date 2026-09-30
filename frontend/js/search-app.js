@@ -1876,10 +1876,11 @@ function _hideLoginBlocked() {
 /* ── 등록 확인 모달 제어 ── */
 let _pendingRegData = null; // 확인 대기 중인 등록 데이터
 
-function _showRegConfirm(name, phone) {
+function _showRegConfirm(name, phone, kakaoId) {
   // 정보 채우기
   document.getElementById("rcName").textContent  = name;
   document.getElementById("rcPhone").textContent = phone;
+  const rcK = document.getElementById("rcKakao"); if (rcK) rcK.textContent = kakaoId || "—";
   // 모달 표시
   document.getElementById("regConfirmOverlay").classList.add("show");
   // 포커스 트랩
@@ -1897,9 +1898,9 @@ function _hideRegConfirm() {
 async function _confirmRegister() {
   if (!_pendingRegData) return;
   _hideRegConfirm();
-  const { name, phone, p1, p2 } = _pendingRegData;
+  const { name, phone, p1, p2, kakaoId } = _pendingRegData;
   _pendingRegData = null;
-  await _submitRegister(name, phone, p1, p2);
+  await _submitRegister(name, phone, p1, p2, kakaoId);
 }
 
 // "아니요, 처음부터 다시 입력" 클릭 → 폼 초기화 후 모달 닫기
@@ -1910,6 +1911,7 @@ function _cancelRegister() {
   document.getElementById("regNameInline").value    = "";
   document.getElementById("regPhone1Inline").value  = "";
   document.getElementById("regPhone2Inline").value  = "";
+  { const k = document.getElementById("regKakaoInline"); if (k) k.value = ""; }
   document.getElementById("regConsentInline").checked = false;
   _clearRegErr();
   // 이름 입력 필드에 포커스
@@ -1938,6 +1940,8 @@ async function _doRegister() {
   const p1     = (document.getElementById("regPhone1Inline").value || "").replace(/[^0-9]/g, "");
   const p2     = (document.getElementById("regPhone2Inline").value || "").replace(/[^0-9]/g, "");
   const agree  = document.getElementById("regConsentInline").checked;
+  // 카카오톡 아이디 — 필수. 앞의 @ 는 떼고, 형식은 서버(utils/kakaoId.js)와 같은 규칙으로 먼저 알려 준다.
+  const kakaoId = ((document.getElementById("regKakaoInline") || {}).value || "").trim().replace(/^@+/, "");
 
   if (!name || name.length < 2) {
     _showRegErr("이름을 2글자 이상 입력하세요.");
@@ -1947,6 +1951,16 @@ async function _doRegister() {
   if (p1.length !== 4 || p2.length !== 4) {
     _showRegErr("전화번호를 정확히 입력하세요. (각 4자리)");
     document.getElementById(p1.length < 4 ? "regPhone1Inline" : "regPhone2Inline").focus();
+    return;
+  }
+  if (!kakaoId) {
+    _showRegErr("카카오톡 아이디를 입력하세요.");
+    document.getElementById("regKakaoInline").focus();
+    return;
+  }
+  if (!/^[A-Za-z0-9._-]{2,30}$/.test(kakaoId)) {
+    _showRegErr("카카오톡 아이디는 영문·숫자·. _ - 로 2~30자입니다. (카톡 → 설정 → 프로필 관리에서 확인)");
+    document.getElementById("regKakaoInline").focus();
     return;
   }
   if (!agree) {
@@ -1961,12 +1975,12 @@ async function _doRegister() {
   // ── 검증 통과 → 확인 모달 표시 ──
   const phone = "010" + p1 + p2;
   const phoneFmt = "010-" + p1 + "-" + p2;
-  _pendingRegData = { name, phone, p1, p2 };
-  _showRegConfirm(name, phoneFmt);
+  _pendingRegData = { name, phone, p1, p2, kakaoId };
+  _showRegConfirm(name, phoneFmt, kakaoId);
 }
 
 // 실제 서버 전송 (확인 버튼 클릭 후 호출)
-async function _submitRegister(name, phone, p1, p2) {
+async function _submitRegister(name, phone, p1, p2, kakaoId) {
   const btn = document.getElementById("btnRegisterInline");
   btn.disabled  = true;
   btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 등록 중...';
@@ -1975,9 +1989,9 @@ async function _submitRegister(name, phone, p1, p2) {
   try {
     let data;
     try {
-      data = await gasPost({ action: "registerReviewer", name, phone, consent: "true" });
+      data = await gasPost({ action: "registerReviewer", name, phone, consent: "true", kakaoId });
     } catch (_) {
-      data = await gasGet({ action: "registerReviewer", name, phone, consent: "true" });
+      data = await gasGet({ action: "registerReviewer", name, phone, consent: "true", kakaoId });
     }
 
     if (data && data.ok) {

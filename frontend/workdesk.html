@@ -613,6 +613,17 @@
   tr.gover>td:first-child{box-shadow:3px 0 0 #ef4444 inset}
   .visit.v2{background:#fef3c7;color:#b45309}
   .visit.v3{background:#fee2e2;color:#b91c1c}
+  /* 카카오톡 아이디 등록 표시(시안 C, 2026-09-30) — 노랑은 카카오 브랜드색이라 테마와 무관하게 고정 */
+  .talk{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.02em;padding:1px 4px;border-radius:4px;background:#FEE500;color:#3A1D1D;margin-left:3px;vertical-align:1px}
+  .gcmwho{margin:2px 2px 4px;padding:7px 8px;border-radius:8px;background:var(--card2,#f8fafc);display:flex;flex-direction:column;gap:4px;font-size:12px}
+  .gcmwho .wn{font-weight:700;color:var(--t1,#0f172a);display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+  .gcmwho .wtag{font-size:10px;font-weight:600;padding:1px 6px;border-radius:5px;background:var(--line,#e2e8f0);color:var(--muted,#64748b)}
+  .gcmwho .wr{display:flex;gap:6px;align-items:center;min-width:0}
+  .gcmwho .wk{color:var(--muted,#64748b);width:36px;flex:none;font-size:11px}
+  .gcmwho .wv{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .gcmwho .wcp{margin-left:auto;flex:none;font-size:10.5px;padding:1px 7px;border:1px solid var(--line,#e2e8f0);background:var(--card,#fff);color:var(--t1,#0f172a);border-radius:5px;cursor:pointer}
+  .gcmwho .wmiss{color:#b45309;font-size:11.5px}
+  .gcmwho .wdim{color:var(--muted,#64748b);font-size:11.5px;line-height:1.45}
   /* ── 편집 UI ── */
   .ecell{cursor:text;border-bottom:1px dashed transparent;border-radius:3px;padding:1px 3px} .ecell:hover{border-bottom-color:var(--line2);background:var(--card2)}
   .ecell.edited{background:var(--accent-soft);border-bottom-color:var(--accent)}
@@ -6544,9 +6555,66 @@ function _visitBadge(r){
   const link=r.hasOrder?'구매양식 주문과 연결된 줄':'주문 연결 없음(수기 입력 등)';
   return ` <span class="visit ${cls}" title="이 작업에서 이 계정(명의)의 ${n}번째 참여 — ${link}">${n}회</span>`;
 }
+/* ── 리뷰어 연락처·카카오톡 아이디 (시안 C, 사용자 확정 2026-09-30) ──
+   ★ 누구의 정보인지는 서버가 정한다(리뷰어에게 메시지와 같은 판정 — 타계정 참여 줄은 본계정 정보).
+   ★ 내부 담당자에게만 조회·표시(광고주 미표시 = 서버 게이트와 1:1).
+   ★ 재료는 탭 데이터(wd)에 매달아 둔다 → 같은 탭 재렌더는 다시 부르지 않고, 탭을 새로 열면 새로 받는다.
+   ★ 이름 옆 TALK 표시는 자리(.talkslot)만 먼저 그리고 도착하면 그 자리만 채운다(표 전체 재렌더 금지). */
+function _contactOf(id){
+  const c=STATE.wd&&STATE.wd._contacts;
+  return (c&&c.map)?c.map.get(String(id)):undefined;
+}
+function _talkInner(id){
+  const it=_contactOf(id);
+  return (it&&it.ok&&it.kakaoKnown&&it.kakaoId)?`<span class="talk" title="카카오톡 아이디 등록됨: ${esc(it.kakaoId)}">TALK</span>`:'';
+}
+function _talkBadge(r){
+  if(!_isInternalRole()||!r||!r.id) return '';
+  return `<span class="talkslot" data-tk="${esc(r.id)}">${_talkInner(r.id)}</span>`;
+}
+async function _loadReviewerContacts(wd){
+  if(!wd||wd._contacts||!_isInternalRole()||!STATE.cur) return;
+  const ids=(wd.roster||[]).map(r=>r&&r.id).filter(Boolean);
+  if(!ids.length) return;
+  const st={map:null,loading:true,error:''}; wd._contacts=st;
+  try{
+    const j=await api('/api/trackb/workdesk/reviewer-contacts',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName,ids})});
+    if(!j||!j.ok) throw new Error((j&&j.error)||'조회 실패');
+    st.map=new Map((j.items||[]).map(it=>[String(it.participantId),it]));
+    st.kakaoUnavailable=!!j.kakaoUnavailable;
+  }catch(e){ st.error=e.message||'조회 실패'; }
+  st.loading=false;
+  if(STATE.wd!==wd) return;   // 그 사이 다른 작업으로 옮겼다
+  document.querySelectorAll('.talkslot[data-tk]').forEach(el=>{ el.innerHTML=_talkInner(el.getAttribute('data-tk')); });
+}
+function _menuWhoHtml(rowId){
+  if(!_isInternalRole()||!rowId) return '';
+  const st=STATE.wd&&STATE.wd._contacts;
+  const wrap=h=>`<div class="gcmwho">${h}</div><div class="gcmdiv"></div>`;
+  if(!st||st.loading) return wrap('<span class="wdim">리뷰어 정보 불러오는 중…</span>');
+  if(st.error) return wrap(`<span class="wdim">리뷰어 정보를 불러오지 못했습니다 — ${esc(st.error)}</span>`);
+  const it=st.map&&st.map.get(String(rowId));
+  if(!it) return wrap('<span class="wdim">이 줄의 리뷰어 정보가 없습니다</span>');
+  if(!it.ok) return wrap(`<span class="wdim">${esc(it.reason||'리뷰어를 특정할 수 없습니다')}</span>`);
+  const kakao = !it.kakaoKnown ? '<span class="wdim">카톡 아이디를 불러오지 못했습니다</span>'
+    : (it.kakaoId ? `<span class="talk" style="margin:0">TALK</span><span class="wv">${esc(it.kakaoId)}</span><button type="button" class="wcp" onclick="_copyContact('kakao',this)">복사</button>`
+                  : '<span class="wmiss">카톡 아이디 미등록</span>');
+  const phone = it.phoneFull || ('···'+String(it.phone8||'').slice(-4));
+  return wrap(
+    `<div class="wn">${esc(it.name||'—')}${it.isSub?` <span class="wtag" title="${esc(it.viaLabel||'')}">타계정 참여 · 명의 ${esc(it.rowName||'')}</span>`:''}</div>`
+   +`<div class="wr"><span class="wk">연락처</span><span class="wv">${esc(phone)}</span>${it.phoneFull?`<button type="button" class="wcp" onclick="_copyContact('phone',this)">복사</button>`:''}</div>`
+   +`<div class="wr"><span class="wk">카톡</span>${kakao}</div>`);
+}
+async function _copyContact(kind,btn){
+  const it=_contactOf(STATE._gMenuRowId); if(!it||!it.ok) return;
+  const v=kind==='kakao'?it.kakaoId:it.phoneFull; if(!v) return;
+  const ok=await _copyText(v);
+  if(btn) btn.textContent=ok?'복사됨':'복사 실패';
+}
 function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser'&&!wd.archived);   // 아카이브·광고주는 열람 전용
+  _loadReviewerContacts(wd);   // 리뷰어 연락처·카톡 아이디(비차단 — 도착하면 이름 옆 TALK 자리만 채운다)
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
   const canDeleteOrder=_isInternalRole();
   /* 무시트 판정은 여기서 한 번 — 헤더의 시트 표기 3종(시트 제목·원본·그리드 배지)이 같은 값을 본다.
@@ -6576,7 +6644,7 @@ function renderWorkdesk(wd){
   } else {
     const rows=(wd.roster||[]).map((r,displayIndex)=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${displayIndex+1}</td>`+
       `<td class="gidlock" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}`+
-      `${r.source==='manual'?' <span class="src manual">수동</span>':''}${_visitBadge(r)}${r.popularPurpose?' <span class="src" style="background:#FFF7ED;color:#9A3412" title="이 일반상품 구매양식 제출은 이후 인기상품 참여 1건의 참여권으로 실제 사용되었습니다">🔥 인기상품목적 참여건</span>':''}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
+      `${r.source==='manual'?' <span class="src manual">수동</span>':''}${_visitBadge(r)}${_talkBadge(r)}${r.popularPurpose?' <span class="src" style="background:#FFF7ED;color:#9A3412" title="이 일반상품 구매양식 제출은 이후 인기상품 참여 1건의 참여권으로 실제 사용되었습니다">🔥 인기상품목적 참여건</span>':''}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
       `<td class="ph">${esc(_fmtPhone(r.phone8))}</td>`+
       _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
       _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
@@ -8473,7 +8541,7 @@ function buildGrid(wd){
     // 빈 슬롯을 찾아 재배정한다. 번호는 브라우저가 정하지 않는다.
     const numberKey=Object.keys(rj).find(k=>/^(번호|no|#)$/i.test(String(k).trim()));
     const canAssignUnslotted=canDeleteOrder && !String(numberKey?rj[numberKey]:'').trim();
-    const badge = (r.source==='manual'?' <span class="src manual">수동</span>':'') + _visitBadge(r)
+    const badge = (r.source==='manual'?' <span class="src manual">수동</span>':'') + _visitBadge(r) + _talkBadge(r)
                 + (r.over===true?' <span class="govb" title="총건수(정원)를 넘겨 들어온 줄입니다 — 줄을 지우지 않고 표시만 합니다">초과</span>':'')
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
     // 배경색 오버레이(migration 080, 드래그 범위 지정) — field 별 저장색을 인라인 style로(클래스 배경보다 우선).
@@ -9706,7 +9774,7 @@ function _cellCopyText(td){
   const dv=td.getAttribute('data-val');
   if(dv!=null) return dv;
   const c=td.cloneNode(true);
-  c.querySelectorAll('.ehist,.rdel,.src,.visit,.lock,.govb,.glockmark').forEach(x=>x.remove());
+  c.querySelectorAll('.ehist,.rdel,.src,.visit,.talkslot,.lock,.govb,.glockmark').forEach(x=>x.remove());
   const s=(c.textContent||'').trim();
   return s==='—'?'':s;
 }
@@ -9843,7 +9911,8 @@ function _openCellMenu(x,y,td){
   const msgRowIds=_msgCanSend()?_msgRowIds():[];
   const msgN=new Set(msgRowIds).size;
   m.innerHTML=
-      (isReviewCell
+      _menuWhoHtml(STATE._gMenuRowId)
+    + (isReviewCell
         ? row('📎','리뷰 대신 제출',"openManualReviewSubmission()",!!reviewBlockReason,false,
               reviewBlockReason||'리뷰 캡처를 붙여넣으면 이 리뷰어의 리뷰제출이 완료 처리됩니다')
         : (isPayCell

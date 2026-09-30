@@ -112,6 +112,7 @@ const _ACTION_MAP = {
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
   'saveBankInfo':       { method: 'POST', path: '/api/reviewer/profile', remap: 'saveBankInfo' },
   'saveAddress':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveAddress' },
+  'saveKakaoId':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveKakaoId' },
   'identityPrecheck':   { method: 'POST', path: '/api/reviewer/identity-precheck' },
 
   // 리뷰어 소식·공지

@@ -166,7 +166,8 @@ async function bindProfileOwnerWhenEnabled(req, res, next) {
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
   try {
-    const result = await registerReviewer(req.body);
+    // ★ 리뷰어 본인 가입은 카카오톡 아이디 필수(사용자 확정 2026-09-30). 요청 본문으로 끌 수 없게 서버가 세운다.
+    const result = await registerReviewer({ ...(req.body || {}), requireKakaoId: true });
     res.json(result);
   } catch (err) {
     next(err);
