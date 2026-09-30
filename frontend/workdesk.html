@@ -6602,7 +6602,7 @@ function _menuWhoHtml(rowId){
   const phone = it.phoneFull || ('···'+String(it.phone8||'').slice(-4));
   return wrap(
     `<div class="wn">${esc(it.name||'—')}${it.isSub?` <span class="wtag" title="${esc(it.viaLabel||'')}">타계정 참여 · 명의 ${esc(it.rowName||'')}</span>`:''}</div>`
-   +`<div class="wr"><span class="wk">연락처</span><span class="wv">${esc(phone)}</span>${it.phoneFull?`<button type="button" class="wcp" onclick="_copyContact('phone',this)">복사</button>`:''}</div>`
+   +`<div class="wr"><span class="wk">연락처</span><span class="wv">${esc(_fmtPhone(phone))}</span>${it.phoneFull?`<button type="button" class="wcp" onclick="_copyContact('phone',this)">복사</button>`:''}</div>`
    +`<div class="wr"><span class="wk">카톡</span>${kakao}</div>`);
 }
 async function _copyContact(kind,btn){
