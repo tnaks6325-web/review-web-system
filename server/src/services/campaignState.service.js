@@ -1034,9 +1034,14 @@ const CTQ_CACHE_MAX = 800;               // 무한 성장 방지(넘으면 통�
 const ORDER_PURCHASE_KEY_SQL = `CASE WHEN os.dedup_key LIKE 'num:%'
              THEN os.dedup_key || '|' || RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
              ELSE 'id:' || os.id::text END`;
+// ★ 줄은 **이 공고의 연결 작업표** 줄이어야 한다 — 다른 작업표에 남은 옛 링크가 취소 기록을 되살리지 않게(Codex 리뷰).
 const ORDER_COUNTED_SQL = `(os.deleted_at IS NULL OR EXISTS (
              SELECT 1 FROM campaign_participants cpx
-              WHERE cpx.order_submission_id = os.id AND cpx.deleted_at IS NULL AND cpx.active))`;
+              WHERE cpx.order_submission_id = os.id AND cpx.deleted_at IS NULL AND cpx.active
+                AND cpx.sheet_id = rc.linked_sheet_id
+                AND (cpx.tab_name = rc.linked_tab_name
+                     OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                         AND NULLIF(cpx.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))))`;
 
 async function _loadLinkedOrderCounts(db, ids, now = new Date(), win = null) {
   // win = { dayStart, carryFrom, holdFrom } (ISO) — 주문을 신청 집계와 **같은 시간 구간**으로 나눠 센다(결정 184).

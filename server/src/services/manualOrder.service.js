@@ -383,9 +383,12 @@ async function submitExternalOrder({
               AND ((os.sheet_id = $1 AND os.tab_name = $2)
                 OR os.sheet_id = 'campaign:' || NULLIF($5, '')
                 OR os.sheet_id IN (SELECT 'campaign:' || rc.id FROM recruit_campaigns rc
-                                    WHERE rc.linked_sheet_id = $1 AND rc.linked_tab_name = $2))
+                                    WHERE rc.linked_sheet_id = $1
+                                      AND (rc.linked_tab_name = $2
+                                           -- 탭 이름이 바뀌어 공고의 연결 탭 이름이 옛 이름인 경우(gid 폴백 · 빈 gid 는 절 미발동)
+                                           OR (NULLIF($6, '') IS NOT NULL AND NULLIF(rc.linked_tab_gid, '') = $6))))
             ORDER BY os.submitted_at DESC LIMIT 1`,
-          [sheetId, tabName, 'num:' + onum, p8, campaignId ? String(campaignId) : '']);
+          [sheetId, tabName, 'num:' + onum, p8, campaignId ? String(campaignId) : '', gid ? String(gid) : '']);
         if (sameBuy.length) {
           const at = new Date(sameBuy[0].submitted_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
           return {

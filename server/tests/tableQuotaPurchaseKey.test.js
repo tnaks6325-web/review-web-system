@@ -19,6 +19,9 @@ const moSrc = fs.readFileSync(path.join(__dirname, '../src/services/manualOrder.
     /dedup_key \|\| '\|' \|\| RIGHT\(regexp_replace\(COALESCE\(os\.phone, ''\), '\[\^0-9\]', '', 'g'\), 8\)/.test(keySql));
   ok('약한 번호는 기록 id 로 센다', /ELSE 'id:' \|\| os\.id::text/.test(keySql));
   ok('취소 기록은 살아 있는 줄이 가리킬 때만 포함', /os\.deleted_at IS NULL OR EXISTS/.test(keySql) && /cpx\.deleted_at IS NULL AND cpx\.active/.test(keySql));
+  ok('★ 그 줄은 이 공고의 연결 작업표 줄이어야 한다(다른 표의 옛 링크 차단 · gid 폴백)',
+    /cpx\.sheet_id = rc\.linked_sheet_id/.test(keySql) && /cpx\.tab_name = rc\.linked_tab_name/.test(keySql)
+      && /NULLIF\(cpx\.tab_gid,''\) = NULLIF\(rc\.linked_tab_gid,''\)/.test(keySql));
   const body = stateSrc.slice(stateSrc.indexOf('async function _loadLinkedOrderCounts'), stateSrc.indexOf('function __resetTableQuotaCacheForTest'));
   const nKey = (body.match(/COUNT\(DISTINCT \$\{ORDER_PURCHASE_KEY_SQL\}\)/g) || []).length;
   ok('모든 구간(전체·어제까지·오늘·이월·보류)이 같은 키로 센다', nKey === 6 && !/COUNT\(DISTINCT os\.id\)/.test(body), nKey);
@@ -34,7 +37,7 @@ const moSrc = fs.readFileSync(path.join(__dirname, '../src/services/manualOrder.
     return { rows: [] };
   };
   const fields = { recipient: '고은지', phone: '010-3313-3999', address: 'a', bank: 'b', account: 'c', depositor: 'd', orderNum: '20102794569385' };
-  const base = { sheetId: 'wt_x', tabName: '모기위키', gid: '', fields, campaignId: null, adminName: 'A' };
+  const base = { sheetId: 'wt_x', tabName: '모기위키', gid: '773477918', fields, campaignId: null, adminName: 'A' };
   const run = async (args) => {
     try { return await svc.submitExternalOrder(args); } catch (e) { return { threw: true, msg: e.message }; }
   };
@@ -45,6 +48,7 @@ const moSrc = fs.readFileSync(path.join(__dirname, '../src/services/manualOrder.
   ok('문구가 "앱으로 직접 참여"와 두 번 세어진다는 사실을 말한다', a && /앱으로 직접 참여/.test(a.error) && /두 명으로 세어/.test(a.error));
   ok('★★ 연결 공고(campaign:) 좌표까지 본다', sameBuySql && /'campaign:' \|\| rc\.id FROM recruit_campaigns rc/.test(sameBuySql) && /os\.deleted_at IS NULL/.test(sameBuySql));
   ok('키 = num:<숫자> + 연락처 끝8', sameBuyParams && sameBuyParams[2] === 'num:20102794569385' && sameBuyParams[3] === '33133999', sameBuyParams);
+  ok('★ 탭 이름이 바뀐 공고도 gid 로 찾는다(빈 gid 는 절 미발동)', /NULLIF\(\$6, ''\) IS NOT NULL AND NULLIF\(rc\.linked_tab_gid, ''\) = \$6/.test(sameBuySql || ''));
 
   sameBuySql = null;
   poolMod.query = stub(true);
@@ -61,6 +65,14 @@ const moSrc = fs.readFileSync(path.join(__dirname, '../src/services/manualOrder.
   ok('조회 실패는 막지 않는다(fail-open — 원장 단계까지 진행)', !(d && d.sameOrderNum));
 
   poolMod.query = realQuery;
+  ok('gid 가 6번째 인자로 간다', sameBuyParams && sameBuyParams[5] === '773477918', sameBuyParams);
+
+  console.log('\n[3] 화면 — 중복으로 되돌아온 건만 확인 후 force 재전송(막다른 길 금지)');
+  const fe = fs.readFileSync(path.join(__dirname, '../../frontend/js/manual-order.js'), 'utf8');
+  ok('force 를 요청 본문에 싣는다', /force: force === true/.test(fe));
+  ok('중복 건만 골라 다시 보낸다', /filter\(r => r && !r\.ok && r\.duplicate\)/.test(fe) && /post\(_overDailyOk, _repurchaseOk, idxs, true\)/.test(fe));
+  ok('확인창을 거친다', /if \(okGo\) \{\s*const idxs = dups\.map/.test(fe));
+  ok('다시 보낸 결과를 원래 자리로 되돌려 캡처 연결이 맞는 줄에 간다', /r2\.index = orig/.test(fe));
   ok('검사는 원장 기록보다 앞에 있다', moSrc.indexOf('⓪-0.5') > 0 && moSrc.indexOf('⓪-0.5') < moSrc.indexOf('createOrderLedgerEntry({'));
 
   console.log(`\n${fail ? '❌' : '✅'} tableQuotaPurchaseKey: ${pass}개 통과${fail ? `, ${fail}개 실패` : ''}`);

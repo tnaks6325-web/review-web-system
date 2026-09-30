@@ -533,19 +533,23 @@
     // ★ 오늘 정원 초과는 **막지 않고 확인만 받는다**(사용자 확정 2026-08-19). 서버가 배치를
     //   시작하기 전에 판정해 `needConfirm`으로 되돌리므로, 이 시점까지 **쓰기는 0건**이다.
     //   확인하면 `allowOverDaily`로 재전송한다.
-    const post = (allowOverDaily, allowRepurchase) => api(_moBase() + '/submit', {
+    // subset = 다시 보낼 targets 인덱스 목록(없으면 전체) · force = 중복 경고 확인 후 재시도
+    const post = (allowOverDaily, allowRepurchase, subset, force) => api(_moBase() + '/submit', {
       method: 'POST',
       body: JSON.stringify({
         sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '',
         campaignId: CTX.campaignId || null,
         allowOverDaily: allowOverDaily === true,
         allowRepurchase: allowRepurchase === true,
-        items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '', targetApplicationId: x.r.targetApplicationId || null })),
+        force: force === true,
+        items: (subset ? subset.map(i => targets[i]) : targets)
+          .map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '', targetApplicationId: x.r.targetApplicationId || null })),
       }),
     });
 
     let out;
     let _repurchaseOk = false;
+    let _overDailyOk = false;
     try {
       out = await post(false, false);
       // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)"에 최근 며칠 안에 같은 연락처로 이미 접수된
@@ -586,7 +590,38 @@
           if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
           return;   // 서버는 아직 아무것도 쓰지 않았다
         }
+        _overDailyOk = true;
         out = await post(true, _repurchaseOk);
+      }
+      // ★ 같은 구매로 보이는 건(24시간 내 같은 연락처 · 같은 주문번호·연락처 — 결정 193)은 서버가 **그 건만**
+      //   접수하지 않고 되돌린다(나머지는 이미 접수됨). 다른 구매가 맞는 경우가 있어 막다른 길로 두지 않고,
+      //   확인을 받은 뒤 **그 건들만** force 로 다시 보낸다. 결과는 원래 자리(index)에 덮어쓴다.
+      const dups = (out && out.ok && Array.isArray(out.results)) ? out.results.filter(r => r && !r.ok && r.duplicate) : [];
+      if (dups.length) {
+        const list = dups.map(r => `· ${r.name || '(이름없음)'} — ${r.error || ''}`).join('\n');
+        const okGo = confirm(
+          `${dups.length}건이 이미 접수된 구매와 겹쳐 접수하지 않았어요(나머지는 접수됨).\n\n${list}\n\n`
+          + `같은 구매를 두 번 등록하면 한 구매가 두 명으로 세어져 모집이 일찍 마감됩니다.\n`
+          + `[확인] 다른 구매가 맞으니 따로 접수합니다.\n`
+          + `[취소] 이 건들은 접수하지 않습니다.`);
+        if (okGo) {
+          const idxs = dups.map(r => r.index);
+          try {
+            const out2 = await post(_overDailyOk, _repurchaseOk, idxs, true);
+            if (out2 && out2.ok && Array.isArray(out2.results)) {
+              for (const r2 of out2.results) {
+                const orig = idxs[r2.index];
+                r2.index = orig;
+                const pos = out.results.findIndex(r => r && r.index === orig);
+                if (pos >= 0) out.results[pos] = r2;
+              }
+              out.okCount = out.results.filter(r => r && r.ok).length;
+              out.failCount = out.results.length - out.okCount;
+            } else {
+              alert('다시 접수 실패: ' + ((out2 && (out2.error || out2.needConfirm)) || '오류') + '\n(처음 접수된 건은 그대로입니다)');
+            }
+          } catch (e) { alert('다시 접수 실패: ' + e.message + '\n(처음 접수된 건은 그대로입니다)'); }
+        }
       }
     } catch (e) { out = { ok: false, error: e.message }; }
 
