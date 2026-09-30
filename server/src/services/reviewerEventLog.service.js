@@ -145,6 +145,13 @@ function describeEvent(row = {}) {
     }
     case 'order_no_capture':
       return { problem: '구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.', action: '구매캡쳐 보완 필요.' };
+    case 'capture_replaced':
+      return {
+        problem: `직원이 구매캡처를 ${c.oldFileId ? '새 사진으로 교체함' : '새로 올림'}${at(c.by) ? `(${at(c.by)})` : ''}.`,
+        action: c.oldFileId
+          ? (c.oldTrashed ? '이전 사진은 드라이브 휴지통으로 이동(30일 안에 복구 가능).' : '이전 사진은 드라이브에 그대로 남겨 둠.')
+          : '조치 불필요.',
+      };
     case 'capture_mismatch': {
       let slot = at(c.slotKey) || '캡처';
       try { slot = require('../utils/captureSlots').slotLabel(null, '', c.slotKey) || slot; } catch (_) { /* 라벨 실패는 key 그대로 */ }

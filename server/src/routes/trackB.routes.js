@@ -1288,6 +1288,26 @@ router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware
     res.status(out.ok ? 200 : (out.error === 'already_submitted' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+/* 작업보드 [🛒 구매캡처 교체] (사용자 확정 2026-09-30) — 내부 직원(AE 포함)만, 광고주 차단.
+   ★ 조회(GET)는 쓰기 0 — 팝오버가 지금 붙어 있는 캡처를 보여 주고, 교체(POST)는 그 값을
+     `expectFileId` 로 다시 보내 그 사이 바뀌었으면 거부된다(서비스가 업로드 전·확정 순간 두 번 본다). */
+const _captureReplace = require('../services/purchaseCaptureReplace.service');
+const _CAPTURE_REPLACE_STATUS = { bad_request: 400, not_image: 400, too_large: 413, row_not_found: 404,
+  no_order: 409, ambiguous_order: 409, capture_changed: 409, drive_not_configured: 503 };
+router.get('/workdesk/purchase-capture', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.query || {};
+    const out = await _captureReplace.previewReplace({ sheetId, tabName, rowId });
+    res.status(out.ok ? 200 : (_CAPTURE_REPLACE_STATUS[out.error] || 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/purchase-capture/replace', authMiddleware, internalMiddleware, imageApiLimiter, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, imageBase64, mimeType, expectFileId } = req.body || {};
+    const out = await _captureReplace.replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, expectFileId, by: _by(req) });
+    res.status(out.ok ? 200 : (_CAPTURE_REPLACE_STATUS[out.error] || 400)).json(out);
+  } catch (err) { next(err); }
+});
 // 구매일자 달력 편집(무시트 전용) — 그리드 오버레이(표시 전용)와 달리 row_json·원장까지 진짜로 쓴다.
 //   시트 기반 탭은 409(화면은 종전 오버레이 경로 유지). 스코프는 셀 편집과 동일(내부 직원).
 router.post('/workdesk/purchase-date', authMiddleware, async (req, res, next) => {
