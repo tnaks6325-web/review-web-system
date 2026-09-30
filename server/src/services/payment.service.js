@@ -458,7 +458,34 @@ async function listPaymentTargets(opts = {}) {
   });
 
   flagPriceOutliers(items, workboardPopulation);
-  return { items, summary: _summarize(items) };
+
+  /* ★★ 마감(🏁)된 작업은 입금 대상에서 뺀다 (사용자 확정 2026-09-30 — "이미 종결된 작업은 관리할 필요 없다")
+       왜: 마감은 작업보드·홈에서만 빠지고 입금관리에는 그대로 남아, 작년 작업 286건 등 끝난 작업의 보류가
+       진짜 챙길 건을 가렸다(보류 331건 중 대부분).
+     ★ 마감 판정은 trackB.service 한 곳(이름 → gid 폴백) — 사본 금지.
+     ★ **조용히 빼지 않는다** — 뺀 건수(`finishedExcluded`)를 싣고 화면이 한 줄로 말하며 펼쳐 볼 수 있다.
+     ★ **모르면 빼지 않는다(fail-open)** — 마감 조회가 실패하면 전부 보여주고 `finishedUnavailable` 로 알린다.
+     ★ 회차 만들기(createBatch)는 `includeFinished:true` 로 부른다 — 사람이 펼쳐서 고른 건은 담을 수 있어야 한다. */
+  let shown = items, finishedExcluded = null, finishedUnavailable = false;
+  if (!opts.includeFinished) {
+    const tb = require('./trackB.service');   // 지연 require — trackB.service 도 이 모듈을 부른다(순환 방지)
+    const fin = await tb.finishedTabsMap();
+    if (fin.ok) {
+      const out = items.filter(it => tb.isTabFinishedIn(fin.map, it.sheetId, it.tabName, it.tabGid));
+      if (out.length) {
+        const outSet = new Set(out);
+        shown = items.filter(it => !outSet.has(it));
+        finishedExcluded = {
+          rows: out.length,
+          works: new Set(out.map(it => it.sheetId + '||' + it.tabName)).size,
+          payable: out.filter(it => it.payable).length,
+        };
+      }
+    } else {
+      finishedUnavailable = true;
+    }
+  }
+  return { items: shown, summary: _summarize(shown), finishedExcluded, finishedUnavailable };
 }
 
 /**
@@ -1057,7 +1084,8 @@ async function createBatch({ bank, rows, by }) {
   if (!want.length) return { ok: false, error: '선택된 건이 없습니다.' };
 
   // 화면 값은 신뢰하지 않는다 — 대상 목록을 서버에서 다시 계산해 교집합만 담는다.
-  const { items: fresh } = await listPaymentTargets();
+  // ★ 마감 작업도 포함해 계산한다 — 화면에서 펼쳐 고른 건을 '대상 아님'으로 튕기지 않게.
+  const { items: fresh } = await listPaymentTargets({ includeFinished: true });
   const freshMap = new Map(fresh.map(it => [it.sheetId + '||' + it.tabName + '||' + it.rowIndex, it]));
 
   const picked = [];

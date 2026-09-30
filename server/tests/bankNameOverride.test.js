@@ -515,7 +515,7 @@ t('7j 신규 은행 추가는 브라우저 prompt 를 쓰지 않는다(인라인
 t('7k 저장 후 입금대상을 다시 읽어 보류가 풀렸는지 반영한다(화면 이동 없이)', () => {
   const i = WD.indexOf('async function _bnSave(');
   const body = WD.slice(i, WD.indexOf('\n/* ═', i));
-  assert.ok(/payment\/targets/.test(body), '저장하고 끝내면 보류가 그대로인 것처럼 보인다');
+  assert.ok(/payment\/targets|_pmTargetsUrl\(\)/.test(body), '저장하고 끝내면 보류가 그대로인 것처럼 보인다');
   assert.ok(!/_pmPaint\(\)/.test(body), '저장 뒤 화면을 갈아타면 사용자가 하던 자리를 잃는다');
 });
 

@@ -3341,7 +3341,7 @@ const PAYMENT_TARGET_FLIGHT_MAX_MS = 55 * 1000;
 let _paymentTargetGeneration = 0;
 function _invalidatePaymentTargetFlights() { _paymentTargetGeneration += 1; }
 function _sharedPaymentTargets(opts) {
-  const key = JSON.stringify([_paymentTargetGeneration, opts.sheetId || '', opts.tabName || '']);
+  const key = JSON.stringify([_paymentTargetGeneration, opts.sheetId || '', opts.tabName || '', !!opts.includeFinished]);
   const active = _paymentTargetFlights.get(key);
   if (active) return active;
   let timer;
@@ -3378,8 +3378,10 @@ router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (r
     const out = await _sharedPaymentTargets({
       sheetId: String(req.query.sheetId || '').trim() || undefined,
       tabName: String(req.query.tabName || '').trim() || undefined,
+      includeFinished: String(req.query.includeFinished || '') === '1',
     });
-    res.json({ ok: true, items: out.items, summary: out.summary });
+    res.json({ ok: true, items: out.items, summary: out.summary,
+      finishedExcluded: out.finishedExcluded || null, finishedUnavailable: !!out.finishedUnavailable });
   } catch (err) {
     if (err && err.code === 'payment_target_timeout') {
       return res.status(504).json({ ok: false, code: err.code, error: err.message });

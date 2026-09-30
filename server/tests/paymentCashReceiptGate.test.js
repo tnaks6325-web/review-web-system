@@ -106,7 +106,7 @@ const db = {
   assert.match(receiptGate, /if \(lock\)[\s\S]*JOIN tab_configs tc[\s\S]*FOR UPDATE OF tc[\s\S]*JOIN order_submissions os[\s\S]*FOR UPDATE OF os[\s\S]*JOIN campaign_participants cp[\s\S]*FOR UPDATE OF cp[\s\S]*FROM campaign_applications ca[\s\S]*FOR UPDATE OF ca[\s\S]*FROM recruit_campaigns rc[\s\S]*exact_campaigns[\s\S]*FOR UPDATE OF rc/,
     '지급 검증 중 탭 설정과 행 출처 원장·현재/과거 공고 설정을 같은 transaction에서 잠가야 한다');
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
-  assert.match(createBatch, /listPaymentTargets\(\)/,
+  assert.match(createBatch, /listPaymentTargets\((\{ includeFinished: true \})?\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
   assert.match(trackBRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*getBatch\(req\.params\.id, \{ db: client, lock: true \}\)[\s\S]*downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out, \{ db: client, lock: true \}\)[\s\S]*cash_receipt_not_verified[\s\S]*buildWorkbook[\s\S]*markDownloaded\(out\.batch\.id, _by\(req\), \{ db: client \}\)[\s\S]*COMMIT/,
     '최초 이체파일 다운로드 직전에 현금영수증 현재 상태를 다시 검증해야 한다');
