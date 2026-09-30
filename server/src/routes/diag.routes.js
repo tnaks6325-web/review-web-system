@@ -95,30 +95,6 @@ router.get('/debug-tab', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/debug-sheet — 특정 시트 파싱 가능 여부 확인 (GAS: debugSheet)
-// ═══════════════════════════════════════════════════════════
-router.get('/debug-sheet', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId } = req.query;
-    if (!sheetId) return res.json({ error: 'sheetId 필요' });
-
-    try {
-      const meta = await getSpreadsheetMeta(sheetId);
-      const tabs = meta.map(s => ({
-        title: s.properties.title,
-        gid: s.properties.sheetId,
-        rowCount: s.properties.gridProperties?.rowCount || 0,
-        colCount: s.properties.gridProperties?.columnCount || 0,
-      }));
-      res.json({ ok: true, sheetId, tabs });
-    } catch (sheetsErr) {
-      res.json({ ok: false, error: `시트 접근 불가: ${sheetsErr.message}` });
-    }
-  } catch (err) {
-    next(err);
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/debug-base — [DEPRECATED] 베이스시트 진단

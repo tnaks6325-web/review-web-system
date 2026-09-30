@@ -10,6 +10,8 @@
  * 실행: node tests/tabRegistrationGate.test.js
  */
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 process.env.MASTER_SHEET_ID = 'MASTER1';
 delete process.env.TAB_REGISTRATION_MODE;
@@ -109,7 +111,6 @@ mockModule('../src/services/reviewFolders.service', {
 const reg = require('../src/utils/tabRegistration');
 const sb = require('../src/services/smartBuild.service');
 const ib = require('../src/services/indexBuilder.service');
-const { syncTabListToDB } = require('../src/services/indexScan.service');
 
 function _tab(title, gid) { return { properties: { title, sheetId: gid } }; }
 
@@ -182,63 +183,8 @@ async function run() {
   assert.deepEqual(_batchCalls[0].ranges, ["'RegTab2New'!A:Z"], '전체빌드 gid 리네임 유지');
   console.log('  ③ indexBuilder 게이트 통과');
 
-  // ══ ④ syncTabListToDB 게이트 ══
-  const SHEET_URL = 'https://docs.google.com/spreadsheets/d/SHEET1/edit';
-  _tabListValues = [
-    ['sheet_url', 'campaign_name', 'tab_url', 'tab_name'],
-    [SHEET_URL, '캠프A', `${SHEET_URL}#gid=111`, 'ExistTab'],
-    [SHEET_URL, '캠프A', `${SHEET_URL}#gid=222`, 'BrandNewTab'],
-  ];
-  _campRows = [{ sheet_id: 'SHEET1', campaign_name: '캠프A' }];
-  _tcRowsAll = [{ sheet_id: 'SHEET1', tab_name: 'ExistTab', tab_gid: '' }];
-  _imRows = [{ sheet_id: 'SHEET1', tab_name: 'ExistTab', tab_gid: '111' }];
-
-  // 게이트 ON(기본 order): 신규 INSERT 없음 + 기존 탭 gid 보정 유지
-  _writes.length = 0;
-  const s1 = await syncTabListToDB({ dryRun: false, fromCache: false });
-  assert.equal(s1.registrationGate.active, true);
-  assert.equal(s1.registrationGate.skippedNewTabs, 1, 'BrandNewTab 스킵');
-  assert.equal(s1.registrationGate.skippedNewIndex, 1, '미등록 탭 index 껍데기 스킵');
-  assert.equal(s1.tabs.toAdd, 0);
-  assert.ok(!_wrote(/INSERT INTO tab_configs/), '게이트: tab_configs 신규 INSERT 없음');
-  assert.ok(!_wrote(/INSERT INTO campaigns/), '게이트: campaigns 신규 INSERT 없음');
-  assert.ok(!_wrote(/INSERT INTO index_master/), '게이트: 미등록 index_master 껍데기 없음');
-  assert.ok(_wrote(/UPDATE tab_configs SET tab_gid/), '기존 탭 gid 보정은 유지');
-  assert.ok(/작업오더 접수로만 등록/.test(s1.message), '메시지에 게이트 안내 포함');
-  console.log('  ④ sync: 게이트 ON 신규 차단 통과');
-
-  // manual 모드도 자동 신규추가는 차단('auto'만 허용)
-  process.env.TAB_REGISTRATION_MODE = 'manual';
-  _writes.length = 0;
-  const s2 = await syncTabListToDB({ dryRun: false, fromCache: false });
-  assert.equal(s2.registrationGate.active, true, 'manual 모드도 sync 자동추가는 차단');
-  assert.ok(!_wrote(/INSERT INTO tab_configs/));
-  delete process.env.TAB_REGISTRATION_MODE;
-  console.log('  ④ sync: manual 모드 자동추가 차단 통과');
-
-  // allowNewTabs:true (DB 재구축 재해복구 경로) → 신규 INSERT 실행
-  _writes.length = 0;
-  const s3 = await syncTabListToDB({ dryRun: false, fromCache: false, allowNewTabs: true });
-  assert.equal(s3.registrationGate.active, false);
-  assert.ok(_wrote(/INSERT INTO tab_configs/), 'allowNewTabs: BrandNewTab INSERT 실행');
-  assert.ok(_wrote(/INSERT INTO index_master/), 'allowNewTabs: index 껍데기 생성');
-  console.log('  ④ sync: allowNewTabs(DB 재구축) 예외 통과');
-
-  // 게이트 ON에서도 gid 기반 리네임은 유지
-  _tabListValues = [
-    ['sheet_url', 'campaign_name', 'tab_url', 'tab_name'],
-    [SHEET_URL, '캠프A', `${SHEET_URL}#gid=222`, 'NewNameTab'],
-  ];
-  _tcRowsAll = [{ sheet_id: 'SHEET1', tab_name: 'OldTab', tab_gid: '222' }];
-  _imRows = [{ sheet_id: 'SHEET1', tab_name: 'OldTab', tab_gid: '222' }];
-  _writes.length = 0;
-  const s4 = await syncTabListToDB({ dryRun: false, fromCache: false });
-  assert.equal(s4.tabs.toRename, 1, '리네임 감지');
-  assert.ok(_wrote(/UPDATE tab_configs SET tab_name/), '게이트 ON에도 리네임 UPDATE 유지');
-  assert.ok(_wrote(/UPDATE review_index SET tab_name/), 'review_index 리네임 보존');
-  assert.ok(!_wrote(/INSERT INTO tab_configs/), '리네임은 INSERT 아님');
-  console.log('  ④ sync: 게이트 ON 리네임 유지 통과');
-
+  // (④ syncTabListToDB 게이트 — 인덱스 스캔(indexScan.service)은 결정 186 80번에서 제거. 신규 탭 등록은 작업오더 접수 한 길)
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src', 'services', 'indexScan.service.js')), '④ 시트 탭목록 → DB 등록 경로(indexScan)가 되살아났다');
   console.log('✅ tabRegistrationGate 전체 통과');
   process.exit(0);
 }

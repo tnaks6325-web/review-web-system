@@ -76,16 +76,8 @@ const _ACTION_MAP = {
   'orderEdit':        { method: 'POST', path: '/api/diag/order-edit' },
   'orderCancel':      { method: 'POST', path: '/api/diag/order-cancel' },
   'orderManualAdd':   { method: 'POST', path: '/api/diag/order-manual-add' },
-  'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },  // deprecated
-  'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
   // [DEPRECATED v11.8.0] 2탭 통합으로 폐기된 액션 — 서버에서 deprecated 응답 반환
-  'syncMasterSheet':  { method: 'POST', path: '/api/tab/sync-master' },       // deprecated
-  'scanMasterSheet':  { method: 'POST', path: '/api/tab/scan-master' },       // deprecated
-  'fullMasterSync':   { method: 'POST', path: '/api/tab/full-sync' },         // deprecated
-  'syncSettingsOnly': { method: 'POST', path: '/api/tab/sync-settings' },     // deprecated
   // 인덱스 스캔 + DB 동기화 (정상 경로)
-  'indexScan':        { method: 'POST', path: '/api/tab/index-scan' },
-  'indexScanSync':    { method: 'POST', path: '/api/tab/index-scan-sync' },
 
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
   'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },
@@ -155,11 +147,9 @@ const _ACTION_MAP = {
   'syncReviewFolders':      { method: 'POST', path: '/api/drive/sync-review' },
   'syncAllFolders':         { method: 'POST', path: '/api/drive/sync-all' },
   'batchCreateFolders':     { method: 'POST', path: '/api/drive/batch-create' },
-  'organizeCaptureFolders': { method: 'POST', path: '/api/drive/organize-capture' },
   'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
   'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
   'findFolderCandidates':   { method: 'POST', path: '/api/drive/find-candidates' },
-  'diagCaptureFolders':     { method: 'GET',  path: '/api/drive/diag' },
 
   // 단축URL / 메모 (Section 10)
   'createShort':  { method: 'POST', path: '/api/short/create' },
@@ -176,7 +166,6 @@ const _ACTION_MAP = {
 
   // 진단/기타
   'debugTabConfig':     { method: 'GET',  path: '/api/diag/debug-tab' },
-  'debugSheet':         { method: 'GET',  path: '/api/diag/debug-sheet' },
   'debugBaseSheet':     { method: 'GET',  path: '/api/diag/debug-base' },
   'debugDetailSheet':   { method: 'GET',  path: '/api/diag/debug-tab' },
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },

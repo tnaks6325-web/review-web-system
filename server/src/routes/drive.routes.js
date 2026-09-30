@@ -360,61 +360,6 @@ router.post('/batch-create', authMiddleware, async (req, res, next) => {
   }
 });
 
-// (POST /reset-folder-urls·/migrate-names·/migrate-to-new-structure — 끝난 구글 시절 폴더 이관 도구, 2026-09-28 제거 · 결정 186 60번)
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/organize-capture — 캡처폴더 재배치 (레거시 호환)
-// ═══════════════════════════════════════════════════════════
-router.post('/organize-capture', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun } = req.body;
-    const isDryRun = dryRun === true || dryRun === 'true';
-    const rootFolderId = getRootFolderId();
-    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
-
-    const { rows: tabs } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
-       FROM tab_configs
-       WHERE capture_folder_url IS NOT NULL AND capture_folder_url <> ''`
-    );
-
-    const moved = [], skippedList = [], errorList = [];
-    const startTime = Date.now();
-
-    let rootChildren = [];
-    try {
-      rootChildren = await driveService.listFolderContents(rootFolderId, 'application/vnd.google-apps.folder');
-    } catch (listErr) {
-      logger.warn(`[organizeCapture] 루트 폴더 목록 조회 실패: ${listErr.message}`);
-    }
-    const rootChildIds = new Set(rootChildren.map(f => f.id));
-
-    for (const tab of tabs) {
-      try {
-        const folderId = extractFolderId(tab.capture_folder_url);
-        if (!folderId) { skippedList.push({ folder: tab.tab_name, reason: 'URL 파싱 실패' }); continue; }
-
-        if (rootChildIds.has(folderId)) {
-          skippedList.push({ folder: tab.tab_name, reason: '이미 루트 폴더 내' });
-          continue;
-        }
-
-        if (!isDryRun) {
-          await driveService.moveFile(folderId, rootFolderId, null);
-        }
-        moved.push({ folder: tab.tab_name, folderId, campFolder: tab.campaign_name || tab.tab_name });
-      } catch (err) {
-        logger.error(`[organizeCapture] 오류 (${tab.tab_name}): ${err.message}`);
-        errorList.push({ folder: tab.tab_name, message: err.message });
-      }
-    }
-
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({ ok: true, moved, created: [], skipped: skippedList, errors: errorList, dryRun: isDryRun, elapsed });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/drive/save-capture — 캡처폴더 URL 저장
@@ -571,44 +516,6 @@ router.post('/find-candidates', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/drive/diag — 폴더 현황 진단
-// ═══════════════════════════════════════════════════════════
-router.get('/diag', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT sheet_id AS "sheetId", tab_name AS "tabName",
-             campaign_name AS "campaignName",
-             folder_url AS "folderUrl", capture_folder_url AS "captureFolderUrl",
-             is_closed AS "isClosed"
-      FROM tab_configs
-      ORDER BY tab_name
-    `);
-    const noFolder = rows.filter(r => !r.folderUrl);
-    const noCapture = rows.filter(r => !r.captureFolderUrl);
-
-    // 실제 OAuth 계정/쿼터 — "용량이 어느 계정에 귀속되는지" 확인용
-    let accountDiagnostics = null;
-    try {
-      accountDiagnostics = await driveService.getAccountDiagnostics();
-    } catch (e) {
-      accountDiagnostics = { error: e.message };
-    }
-
-    res.json({
-      ok: true,
-      total: rows.length,
-      noFolderUrl: noFolder.length,
-      noCaptureFolderUrl: noCapture.length,
-      rootFolderId: getRootFolderId() || '미설정',
-      oauthStatus: driveService.getOAuthStatus(),
-      accountDiagnostics,
-      details: rows,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/drive/list-folder — 폴더 내용 조회 (복구용 임시 엔드포인트)

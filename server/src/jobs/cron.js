@@ -4,7 +4,6 @@ const { processQueue, purgeCompleted, retryAllFailed } = require('../services/sy
 const { mirrorAllSheets } = require('../services/rawMirror.service');
 const { getThrottleStatus } = require('../utils/sheetsThrottle');
 // [DEPRECATED — v11.8.0] syncSettingsOnly 제거: DB가 설정 원본이므로 시트→DB 동기화 불필요
-// const { syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild, broadcast } = require('../utils/sse');
 const { logAbnormal } = require('../services/errorLog.service');

@@ -19,7 +19,6 @@ const t = (name, cond, extra) => { assert(cond, name + (extra ? ' → ' + extra 
 const { renameCampaignLinkedTab } = require('../src/utils/campaignTabLateral');
 const lat = S('src/utils/campaignTabLateral.js');
 const ib = S('src/services/indexBuilder.service.js');
-const isc = S('src/services/indexScan.service.js');
 const tc = S('src/routes/tabconfig.routes.js');
 const renameSvc = S('src/services/tabRename.service.js');
 const { renameTabState } = require('../src/services/tabRename.service');
@@ -72,13 +71,13 @@ console.log('── A. 실행부 ──');
   t('★★ 절대 throw 하지 않는다 — 실패해도 탭 이름 자가치유는 계속돼야 한다', !threw && r0 === 0);
 
   console.log('── B. 모든 보정 지점에 공용 탭 리네임 배선 ──');
-  t('indexBuilder·indexScan이 공용 renameTabState를 호출한다',
-    /renameTabState\(pool, \{/.test(ib) && /renameTabState\(client, \{/.test(isc));
-  t('수동 sync-tab-names·fix-campaign-tab-swap도 같은 공용 함수를 호출한다',
-    (tc.match(/renameTabState\(pool, \{/g) || []).length === 2);
+  t('indexBuilder가 공용 renameTabState를 호출한다(indexScan 은 결정 186 80번에서 제거)',
+    /renameTabState\(pool, \{/.test(ib));
+  t('수동 fix-campaign-tab-swap도 같은 공용 함수를 호출한다(sync-tab-names 는 결정 186 80번에서 제거)',
+    (tc.match(/renameTabState\(pool, \{/g) || []).length === 1);
   t('★ 규칙 사본 0 — UPDATE recruit_campaigns 는 공유 헬퍼에만 있다',
     !/UPDATE recruit_campaigns[\s\S]{0,120}linked_tab_name/.test(ib)
-    && !/UPDATE recruit_campaigns[\s\S]{0,120}linked_tab_name/.test(isc));
+    );
 
   const seg = src => {
     const i = src.indexOf('renameTabState(');
@@ -94,7 +93,7 @@ console.log('── A. 실행부 ──');
   t('★ 다운로드 여부와 무관하게 모든 pending 회차를 새 탭 좌표로 옮긴다(중복 회차 차단)',
     /UPDATE payment_batch_items[\s\S]*status = 'pending'/.test(renameSvc)
     && !/UPDATE payment_batch_items[\s\S]{0,300}download_count/.test(renameSvc));
-  t('보정은 URL 교정 앞에 들어간다(같은 묶음 안)', seg(ib) && seg(isc));
+  t('보정은 URL 교정 앞에 들어간다(같은 묶음 안)', seg(ib));
 
   console.log('── C. 판정 함수는 건드리지 않았다 ──');
   const scope = S('src/utils/sheetlessScope.js');
@@ -102,14 +101,7 @@ console.log('── A. 실행부 ──');
   t('★★ isSheetless 시그니처 불변 — gid 폴백을 넣으면 "연결됐다는데 0줄"이 된다',
     !!m && m[1].replace(/\s+/g, ' ').trim() === 'db, sheetId, tabName');
 
-  /* (종전 pastSheetTabCleanup.test.js 9-sync — 그 도구 제거(2026-09-28, 결정 186 1번)로 이리 옮김)
-     auto-clean-closed 가 index_master 행을 지우므로 im.tab_gid 만 보면 마감·아카이브 탭의 gid 가 null →
-     그 탭의 리네임을 영영 못 잡는다(2026-08-19 실측: 「변경 0건 · 스킵 27건」에 3건이 묻혔다). */
-  {
-    const q = tc.slice(tc.indexOf("router.post('/sync-tab-names'"), tc.indexOf('2. 고유 sheet_id'));
-    t('★ 탭명 교정이 마감·아카이브 탭의 gid 를 tab_configs 에서도 찾는다(index_master 우선 · tab_configs 폴백)',
-      /COALESCE\(NULLIF\(im\.tab_gid, ''\), NULLIF\(tc\.tab_gid, ''\)\)\s+AS tab_gid/.test(q));
-  }
+  /* (sync-tab-names 의 마감·아카이브 gid 폴백 검사 — 그 라우트는 결정 186 80번에서 제거) */
 
   console.log(`\n✅ campaignLinkFollowRename: ${pass} cases passed`);
   process.exit(0);
