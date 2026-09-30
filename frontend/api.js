@@ -167,7 +167,6 @@ const _ACTION_MAP = {
   'previewCampaign':    { method: 'GET',  path: '/api/diag/preview-campaign' },
   'addCampaign':        { method: 'POST', path: '/api/diag/add-campaign' },
   'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
-  'createBaseSheet':    { method: 'POST', path: '/api/diag/new-sheet' },
 
   // 뷰어
   'getViewerData':  { method: 'GET', path: '/api/viewer/viewer-data' },
@@ -181,10 +180,6 @@ const _ACTION_MAP = {
   'reviewerLogCancelOrder': { method: 'POST', path: '/api/trackb/reviewer-logs/cancel-order' },
 
   // 시트 상단 강제 공지문 (C1:R1) — 신규 탭 자동 삽입 + 기존 탭 일괄 적용
-  'sheetNoticeGet':      { method: 'GET',  path: '/api/diag/sheet-notice' },
-  'sheetNoticeSet':      { method: 'POST', path: '/api/diag/sheet-notice' },
-  'sheetNoticeBulk':     { method: 'POST', path: '/api/diag/sheet-notice-bulk' },
-  'sheetNoticeBulkStat': { method: 'GET',  path: '/api/diag/sheet-notice-bulk' },
 
   // 이미지 (Gemini AI + Drive)
   'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
@@ -219,7 +214,6 @@ const _ACTION_MAP = {
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
   'saveAppUrl':     { method: 'POST', path: '/api/diag/app-url' },
   'convertToNcHeaders': { method: 'POST', path: '/api/diag/convert-nc-headers' },
-  'createCampaignSheet': { method: 'POST', path: '/api/diag/create-campaign-sheet' },
 
   // Phase 2-5: Sync Queue + Build History
   'syncQueueStats':     { method: 'GET',  path: '/api/diag/sync-queue' },
@@ -232,9 +226,6 @@ const _ACTION_MAP = {
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
   // Phase 12: 시트 권한 관리
-  'shareSheet':         { method: 'POST', path: '/api/diag/share-sheet' },
-  'shareAllSheets':     { method: 'POST', path: '/api/diag/share-all-sheets' },
-  'sheetPermissions':   { method: 'GET',  path: '/api/diag/sheet-permissions' },
 
   // Phase 10: Archive (탭 단위 마감)
   'archiveDetect':      { method: 'GET',  path: '/api/archive/detect' },
@@ -248,7 +239,6 @@ const _ACTION_MAP = {
 
   // Phase 11: Campaign Name Fix
   'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },
-  'sheetTitles':        { method: 'GET',  path: '/api/diag/sheet-titles' },
 
   // Phase 13: Empty Index Cleanup
   'cleanupEmptyIndexes': { method: 'POST', path: '/api/diag/cleanup-empty-indexes' },
