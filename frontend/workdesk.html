@@ -18205,8 +18205,7 @@ document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&_trS){ e.s
       업체관리 화면은 구글시트를 찾아오지도(가져오기), 참조하지도(시트 제목), 목록을 보여주지도
       않는다. 그래서 이 4단계 마법사(openSheetImport/_siPreview/_siRun/_siRevert)는 화면에서
       통째로 걷어냈다 — 진입점만 지우고 함수를 남기면 다음 사람이 되살린다.
-   ★ 서버(`/api/trackb/sheet-import/*` · sheetImport.service)는 **그대로 남겼다** — 되살릴 일이
-      생기면 화면만 다시 붙이면 된다(라우트·게이트·회귀가드 무변경).
+   ★ 서버(`/api/trackb/sheet-import/*` · sheetImport.service)도 2026-09-30 제거했다(결정 186 79번).
    ══════════════════════════════════════════════════════════════════ */
 async function refreshAdvCounts(){
   // ★ 소유가 바뀌면 '업체 미지정 작업 N' 도 함께 바뀐다 — 그 판정의 유일한 재료가 mapTabs 이므로
