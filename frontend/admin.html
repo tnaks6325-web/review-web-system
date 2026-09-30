@@ -296,62 +296,6 @@ body{ letter-spacing:-.01em; }
         </div>
       </div>
 
-      <!-- ━━━━━ ③ 폴더 관리 (접기/펼치기) ━━━━━ -->
-      <div style="border-top:1px solid #E5E7EB">
-        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
-          style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
-          <i class="fas fa-folder-open" style="color:#0ca678"></i> 폴더 관리
-          <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
-        </button>
-        <div style="display:none;padding:8px 16px 12px">
-          <!-- 폴더 일괄 생성 -->
-          <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
-            <i class="fas fa-folder-plus" style="color:#0ca678"></i> 일괄 생성 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(완료·마감 탭 제외)</span>
-          </div>
-          <div style="display:flex;gap:4px">
-            <button id="btnBatchCapture" onclick="batchCreateFolders('capture')"
-              style="flex:1;padding:7px 4px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-camera"></i> 캡처폴더
-            </button>
-            <button id="btnBatchReview" onclick="batchCreateFolders('review')"
-              style="flex:1;padding:7px 4px;background:#F0FFF4;color:#166534;border:1px solid #BBF7D0;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-folder-open"></i> 리뷰폴더
-            </button>
-            <button id="btnBatchBoth" onclick="batchCreateFolders('both')"
-              style="flex:1;padding:7px 4px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-layer-group"></i> 전체
-            </button>
-          </div>
-          <div id="batchFolderResult" style="display:none;font-size:.71rem;margin-top:3px"></div>
-
-          <!-- 폴더 URL 동기화 -->
-          <div style="margin-top:8px;font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
-            <i class="fas fa-link" style="color:#0369A1"></i> 폴더 URL 동기화 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(드라이브 → DB 매칭)</span>
-          </div>
-          <button id="btnSyncAllFolders" onclick="syncAllFolders()" style="width:100%;padding:8px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-            <i class="fas fa-link"></i> 캡처/리뷰 폴더 일괄동기화
-          </button>
-          <label style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:6px;font-size:.72rem;color:#92400E;cursor:pointer;user-select:none;margin-top:4px">
-            <input type="checkbox" id="chkForceSync" style="width:13px;height:13px;accent-color:#EA580C;cursor:pointer">
-            <span><b>강제 재설정</b> — 기존 URL도 덮어쓰기</span>
-          </label>
-
-          <!-- 폴더 찾기 & 재연결 -->
-          <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결
-              <span style="font-size:.66rem;font-weight:400;color:#6B7280">(사라진 폴더를 탭명으로 검색 → 확인 → 재연결)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:5px">
-              캡처/리뷰 폴더 링크가 비었거나 위치가 바뀐 탭을, Drive에서 실제 폴더를 찾아 다시 연결합니다.
-            </div>
-            <button id="btnFolderRelink" onclick="openFolderRelink()"
-              style="width:100%;padding:8px;background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-              <i class="fas fa-magnifying-glass-location"></i> 폴더 찾기 / 재연결 열기
-            </button>
-          </div>
-        </div>
-      </div>
 
 
     </div>

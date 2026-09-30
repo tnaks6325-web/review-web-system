@@ -143,13 +143,8 @@ const _ACTION_MAP = {
   'markNoticeRead':     { method: 'POST', path: '/api/admin/notices/read' },
 
   // Drive 폴더 (Section 9)
-  'syncCaptureFolders':     { method: 'POST', path: '/api/drive/sync-capture' },
-  'syncReviewFolders':      { method: 'POST', path: '/api/drive/sync-review' },
-  'syncAllFolders':         { method: 'POST', path: '/api/drive/sync-all' },
-  'batchCreateFolders':     { method: 'POST', path: '/api/drive/batch-create' },
   'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
   'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
-  'findFolderCandidates':   { method: 'POST', path: '/api/drive/find-candidates' },
 
   // 단축URL / 메모 (Section 10)
   'createShort':  { method: 'POST', path: '/api/short/create' },
@@ -207,11 +202,6 @@ const _ACTION_MAP = {
   'reviewEditReject':     { method: 'POST', path: '/api/review-edit/reject' },
 
   // Drive 폴더 관리
-  'initRootFolder':      { method: 'POST', path: '/api/drive/init-root' },
-  'syncCaptureFolders':  { method: 'POST', path: '/api/drive/sync-capture' },
-  'syncReviewFolders':   { method: 'POST', path: '/api/drive/sync-review' },
-  'syncAllFolders':      { method: 'POST', path: '/api/drive/sync-all' },
-  'batchCreateFolders':  { method: 'POST', path: '/api/drive/batch-create' },
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
   'driveAccountInfo':    { method: 'GET',  path: '/api/drive/account-info' },
   'driveOwnershipAudit': { method: 'POST', path: '/api/drive/ownership-audit' },
@@ -220,7 +210,6 @@ const _ACTION_MAP = {
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
   'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
-  'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },

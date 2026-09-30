@@ -11828,32 +11828,6 @@ async function testTabConfigSave() {
   }
 }
 
-// ── 구매캡쳐/리뷰저장 폴더 일괄 동기화 ────────────────────────
-async function syncAllFolders() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const btn = document.getElementById("btnSyncAllFolders");
-  btn.disabled  = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 동기화 중...';
-
-  try {
-    const data = await gasGet({ action: "syncAllFolders" }, 120000);
-    if (data.error) {
-      showToast("❌ 폴더 동기화 실패: " + data.error, "error");
-    } else {
-      const lines = [];
-      if (data.capture) lines.push(`📂 캡쳐폴더 ${data.capture.updated}건 업데이트, ${data.capture.skipped}건 유지`);
-      if (data.review)  lines.push(`📁 리뷰폴더 ${data.review.updated}건 업데이트, ${data.review.skipped}건 유지${data.review.notFound > 0 ? `, ${data.review.notFound}건 미매칭` : ""}`);
-      showToast("✅ 일괄 동기화 완료 (" + data.elapsed + "초)\n" + lines.join(" / "), "success");
-      try { await loadAdminDashboard(); } catch(_) {}
-    }
-  } catch (err) {
-    showToast("❌ 폴더 동기화 오류: " + (err.message || ""), "error");
-  } finally {
-    btn.disabled  = false;
-    btn.innerHTML = '<i class="fas fa-folder-sync"></i> 구매캡쳐/리뷰저장 폴더 일괄동기화';
-  }
-}
-
 /** ★ 동기화 완료 후 대시보드 자동 새로고침 */
 function _autoRefreshDashboardAfterBuild() {
   // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 동기화
