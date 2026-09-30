@@ -259,7 +259,7 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
     ok('★ 버튼은 master/admin 에만(서버 게이트와 1:1 — 눌러도 403 인 버튼 금지)',
       /function _taskDelAllowed\(\)\{\s*return STATE\.role==='master'\|\|STATE\.role==='admin';/.test(WD));
     ok('[⋯] 셀은 _taskDelAllowed 를 본다', /_taskMoreCell\(i\)\{[\s\S]{0,200}_taskDelAllowed\(\)/.test(WD));
-    ok('행에 [⋯] 칸이 붙어 있다', /\$\{tdToday\}\$\{tdFinish\}\$\{_taskMoreCell\(i\)\}/.test(WD));
+    ok('행에 [⋯] 칸이 붙어 있다', /\$\{tdFinish\}\$\{_taskMoreCell\(i\)\}/.test(WD));
     ok('★ onclick 은 인덱스만(시트발 탭명 보간 금지)',
       /openTaskMenu\(\$\{i\},this\)/.test(WD) && !/openTaskMenu\('/.test(WD)
       && /openTaskDelete\(\$\{i\}\)/.test(WD) && !/openTaskDelete\('/.test(WD));

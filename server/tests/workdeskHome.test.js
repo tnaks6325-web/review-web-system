@@ -50,7 +50,7 @@ ok('모바일 작업 목록은 표 머리글을 숨기고 같은 행을 압축 �
   /table\.wbl-t thead\{display:none\}/.test(src)
     && /table\.wbl-t tbody tr\{display:grid;grid-template-columns:minmax\(0,1fr\) auto auto auto/.test(src));
 ok('모바일 카드 필드에 읽을 수 있는 라벨을 제공',
-  ['작업명','작업표','공유','담당','상태','저장폴더','모집공고','오늘완료','마감','더보기']
+  ['작업명','작업표','공유','담당','상태','저장폴더','모집공고','마감','더보기']
     .every(label => src.includes(`data-label="${label}"`) || label === '마감')
   // 숫자 4칸은 한 함수가 `data-label="${label}"` 로 찍으므로 라벨 리터럴로 확인한다(시안 확정 2026-09-22).
   && ['총건수','참여','제출','입금'].every(label => src.includes(`,'${label}')`)));

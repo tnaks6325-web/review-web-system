@@ -88,7 +88,6 @@ let bodyEl = null;   // #wblBody — 검색이 갱신하는 조각(아래 IME �
 const sandbox = {
   STATE: { tabs: [], finTab: 'run', finMgr: '', finQ: '', finFilter: '' },
   isFinished: t2 => !!(t2 && t2.finished),
-  isTodayDone: t2 => !!(t2 && t2.todayDone),
   isFinishCandidate: t2 => { candCalls.push(t2); const s = t2 && t2.stats; return !!(s && s.total && (s.submitted | 0) >= s.total && (s.paid | 0) >= s.total); },
   _finCanEdit: () => true,
   _finDate: v => String(v || ''),
@@ -104,11 +103,10 @@ vm.runInContext(BLOCK, sandbox, { filename: 'wbl-block.js' });
 const TAB = (o) => Object.assign({ sheetId: 'S1', advertiserName: '업체', campaigns: [], stats: {} }, o);
 const tOpen = TAB({ tabName: '모집중탭', campaigns: [{ id: 'c1', state: 'open' }], stats: { manager: '만두', total: 10, submitted: 8, paid: 5, folderUrl: 'https://drive.google.com/drive/folders/aaa', captureFolderUrl: 'https://drive.google.com/drive/folders/bbb', cashReceipt: true } });
 const tNone = TAB({ tabName: '공고없는탭', stats: { manager: '망고', total: 10, submitted: 10, paid: 10, cashReceipt: false } });
-const tDone = TAB({ tabName: '오늘완료탭', todayDone: true, campaigns: [{ id: 'c2', state: 'open' }], stats: { total: 5, submitted: 1, paid: 0, cashReceipt: false } });
 const tClosed = TAB({ tabName: '마감공고탭', campaigns: [{ id: 'c3', state: 'closed' }], stats: { total: 5, submitted: 3, paid: 3, cashReceipt: false } });
 
-t('금일 진행 = 오늘 완료 미체크 ∧ 공고 모집중(Q1 확정)', sandbox._finMatchFilter(tOpen, 'today') === true);
-t('오늘 완료 체크된 작업은 금일 진행에서 빠진다', sandbox._finMatchFilter(tDone, 'today') === false);
+// 오늘 완료 체크는 2026-09-30 코드 다이어트로 제거 → 금일 진행 = 공고 모집중 하나로 판정한다.
+t('금일 진행 = 공고 모집중(Q1 확정)', sandbox._finMatchFilter(tOpen, 'today') === true);
 t('공고가 마감이면 금일 진행 아님', sandbox._finMatchFilter(tClosed, 'today') === false);
 t('공고 자체가 없으면 금일 진행 아님(정의상 판정 불가)', sandbox._finMatchFilter(tNone, 'today') === false);
 t('레거시 공고는 status active 를 모집중으로(카드 점 색과 같은 _campRank 판정)',
@@ -146,12 +144,12 @@ const thCount = (thead.match(/<th[>\s]/g) || []).length;   // <thead 오계수 �
 const tb = html.indexOf('<tbody>');
 const firstRow = html.slice(tb, html.indexOf('</tr>', tb));   // 헤더의 </tr> 을 집지 않게 tbody 뒤에서 탐색
 const tdCount = (firstRow.match(/<td/g) || []).length;
-t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 14, `th=${thCount} td=${tdCount}`);
+t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 13, `th=${thCount} td=${tdCount}`);
 // 2026-08-19 사용자 확정: 목록에서 바로 공유 주소를 복사하는 [🔗 링크] 열이 작업표 옆에 붙었다.
 t('공유 열이 작업표 바로 뒤(작업표=내가 연다 / 공유=남에게 보낸다)',
   /작업표<\/th>\s*<th[^>]*>공유<\/th>/.test(thead));
-t('v3 헤더열 — 작업표·저장폴더·모집공고·오늘완료·마감이 독립 열',
-  /<th class="wbl-c">작업표<\/th>/.test(thead) && /저장폴더/.test(thead) && /모집공고/.test(thead) && /오늘완료/.test(thead) && /<th class="wbl-c">마감<\/th>/.test(thead));
+t('v3 헤더열 — 작업표·저장폴더·모집공고·마감이 독립 열(오늘완료 열은 2026-09-30 제거)',
+  /<th class="wbl-c">작업표<\/th>/.test(thead) && /저장폴더/.test(thead) && /모집공고/.test(thead) && !/오늘완료/.test(thead) && /<th class="wbl-c">마감<\/th>/.test(thead));
 t('작업표 열이 작업명↔담당 사이(사용자 확정)', /작업명[\s\S]{0,60}작업표[\s\S]{0,60}담당/.test(thead));
 t('히어로 "진행 중 작업" 단일 writer 유지', hero.textContent === '2');
 // 현영 비활성(사용자 확정): 숨기지 않고 옅은색 + 클릭 불가 + 사유
@@ -193,7 +191,7 @@ sandbox._finRenderList();
 t('보관함에는 스위치 없음 + 필터 무시', !/wbl-sw/.test(host.innerHTML) && /끝난탭/.test(host.innerHTML));
 const finTb = host.innerHTML.indexOf('<tbody>');
 t('보관함 행도 칸 수 동일(빈 칸 유지 — 열 수가 사람·모드마다 달라지지 않는다)',
-  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 14);
+  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 13);
 sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = '';
 t('탭 전환이 필터를 초기화한다', (sandbox._finPickTab('fin'), sandbox.STATE.finFilter === ''));
 

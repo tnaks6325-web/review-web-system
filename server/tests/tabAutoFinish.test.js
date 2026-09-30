@@ -284,7 +284,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
       _finDate: v => v || '',
       _folBtnsHtml: () => '', _campBtnHtml: () => '', _taskMoreCell: () => '<td></td>',
       _tabLabel: t => t.tabName, _tabTip: () => '', _mobileToggleTaskRow: () => {},
-      isTodayDone: () => false, isFinishCandidate: () => false,
+      isFinishCandidate: () => false,
       esc: v => String(v == null ? '' : v),
     };
     vm.createContext(sandbox);
@@ -306,7 +306,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   // ⚠ `<th` 로 세면 `<thead>` 까지 잡혀 항상 +1 이 된다(이 가드를 쓰다 실제로 밟았다) — 경계 문자를 붙인다.
   const nTh = (htmlRun.match(/<th[\s>]/g) || []).length, nTd = (htmlRun.match(/<td[\s>]/g) || []).length;
   t('진행 중 탭의 열 수는 그대로(헤더 칸 수 ≡ 행 칸 수 — 안내 추가로 표 구조가 밀리지 않았다)',
-    nTh === nTd && nTh === 14, `th=${nTh} td=${nTd}`);   // 시안 확정(2026-09-22): 숫자 4칸 분리로 12 → 14
+    nTh === nTd && nTh === 13, `th=${nTh} td=${nTd}`);   // 시안 확정(2026-09-22): 숫자 4칸 분리로 12 → 14 · 2026-09-30 오늘완료 열 제거로 13
 
   console.log(`\n✅ ${pass} 케이스 통과\n`);
   process.exit(0);

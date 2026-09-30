@@ -1,5 +1,5 @@
 /**
- * homeCampaignButton.test.js — 홈 작업목록 → [공고] 버튼 + 버튼 열 고정 + 오늘 완료 색표시 회귀가드
+ * homeCampaignButton.test.js — 홈 작업목록 → [공고] 버튼 + 버튼 열 고정 회귀가드
  * 실행: node tests/homeCampaignButton.test.js
  * 시안: frontend/docs/design-home-campaign-popup.html (사용자 확정)
  *
@@ -12,7 +12,7 @@
  *     → `computeCampaignState` 를 실제로 태우는지 고정.
  *  ④ **XSS** — onclick 에 시트/공고에서 온 문자열을 넣으면 따옴표 하나로 탈출된다(레포 실측 사고). 인덱스만.
  *  ⑤ **버튼 열 흔들림** — flex(내용 폭)로 되돌리면 같은 버튼이 줄마다 다른 자리에 온다(사용자 신고).
- *  ⑥ **오늘 완료 라벨 스왑 부활** — '☑ 오늘 완료' ↔ '해제' 로 글자가 바뀌면 폭이 달라져 ⑤ 가 재발한다.
+ *  ⑥ (오늘 완료 라벨 스왑 가드) — 오늘 완료 버튼 자체가 2026-09-30 코드 다이어트로 제거돼 "제거 고정"으로 바꿨다.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -114,7 +114,6 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
       scopedActiveTabs: async () => [{ sheetId: 'S1', tabName: 'T1', tabGid: '111' }, { sheetId: 'S1', tabName: 'T2', tabGid: '' }],
       finishedTabsMap: async () => ({ ok: true, map: {} }),
       tabStatsMap: async () => ({ ok: true, map: {} }),
-      dailyDoneMap: async () => ({ ok: true, map: {}, date: '2026-08-05' }),
       tabCampaignsMap: async () => ({ ok: true, map: { 'S1\tT1': [{ id: 'c1', title: '공고A', state: 'open', createdAt: 'x' }], 'S9\tT9': [{ id: 'zz', title: '남의 공고' }] } }),
     }, over || {});
     Object.keys(fake).forEach(k => { saved[k] = svc[k]; svc[k] = fake[k]; });
@@ -257,7 +256,7 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   t('레거시 마감도 회색(등급 2)', ctx._campRank({ state: 'legacy', status: 'closed' }) === 2);
 
   /* ── 5) 프론트 배선 ──────────────────────────────────────────── */
-  console.log('\n5) 배선 · 열 고정 · 오늘 완료 표시');
+  console.log('\n5) 배선 · 열 고정');
   t('목록 행 액션에 [공고] 버튼이 들어간다', /_campBtnHtml\(t,i\)/.test(WD));
   // v3(사용자 확정): 통합 .wbl-act grid → **독립 헤더열**로 승격. 검사 의미는 그대로 "버튼은 줄마다 자기 열" —
   //   이제 표 구조가 정렬을 보장하므로, 남은 고정폭 요구는 저장폴더 칸 내부 3분할뿐이다.
@@ -265,9 +264,9 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
     /\.wbl-fol\{display:inline-grid;grid-template-columns:repeat\(3,40px\)/.test(WD));
   t('통합 .wbl-act grid 는 부활 금지(열 정렬은 표 구조가 담당)', !/\.wbl-act\{display:grid/.test(WD));
   t('모집공고는 독립 헤더열', /<th class="wbl-c">모집공고<\/th>/.test(WD));
-  t('★ 오늘 완료 라벨 스왑 부활 금지(폭이 달라져 열이 어긋난다)',
-    !/\$\{td\?'해제':'☑ 오늘 완료'\}/.test(WD) && /title="\$\{td\?'오늘 완료됨[^"]*}">☑ 오늘 완료</.test(WD));
-  t('★ 켜짐은 파란 채움으로 말한다', /\.wbl-b\.today\.on\{background:var\(--accent\);/.test(WD));
+  // ⑥ 오늘 완료 버튼은 2026-09-30 코드 다이어트(결정 186 · 킵 재검토 7번)로 열째 제거 — 라벨 스왑·파란 채움 가드도 대상이 사라졌다.
+  t('오늘 완료 버튼은 제거됐다(열 수가 줄어도 헤더·행 칸 수는 homeTasklistFilters 가 고정)',
+    !/toggleTodayDone|☑ 오늘 완료/.test(WD));
   t('조회 실패를 목록 상단에도 고지', /campsUnavailable[\s\S]{0,120}\[공고\] 버튼이 잠시 비활성/.test(WD));
   t('★ 실패 응답으로 기존 공고 주석을 덮지 않는다', /if\(!r\.campaignsUnavailable\) t\.campaigns=n\.campaigns\|\|\[\]/.test(WD));
   t('작업바 로드(stats 없음)에서 주석을 이월한다(버튼이 깜빡이며 사라지지 않게)', /_prevCamp\[k\]/.test(WD));
