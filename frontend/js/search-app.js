@@ -716,7 +716,7 @@ function _renderOrderInfoSuggestions() {
       const recipient = document.createElement("strong");
       recipient.textContent = item.recipient || "수취인 없음";
       const phone = document.createElement("span");
-      phone.textContent = item.phone || "";
+      phone.textContent = (typeof fmtPhone==='function'?fmtPhone(item.phone || ""):item.phone || "");
       top.append(recipient, phone);
       if (Number(item.useCount) > 1) {
         const used = document.createElement("span");
@@ -1879,7 +1879,7 @@ let _pendingRegData = null; // 확인 대기 중인 등록 데이터
 function _showRegConfirm(name, phone, kakaoId) {
   // 정보 채우기
   document.getElementById("rcName").textContent  = name;
-  document.getElementById("rcPhone").textContent = phone;
+  document.getElementById("rcPhone").textContent = (typeof fmtPhone==='function'?fmtPhone(phone):phone);
   const rcK = document.getElementById("rcKakao"); if (rcK) rcK.textContent = kakaoId || "—";
   // 모달 표시
   document.getElementById("regConfirmOverlay").classList.add("show");
@@ -7882,7 +7882,7 @@ async function _loadInlineProfile() {
       window._reviewerProfile = { ...res, ...p, found: true };
       if (nameEl) nameEl.textContent = p.name || name || "-";
       const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = p.phone || "-";
+      if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
       const incomeEl = document.getElementById("inlineSelfIncomeName");
       if (incomeEl) {
         const incVal = p.incomeType || "";
@@ -8002,7 +8002,7 @@ function _renderReviewerProfileModal(profile) {
   const subs       = _parseSubAccounts(profile.subAccounts);
 
   document.getElementById("rpmSelfName").textContent       = name || "-";
-  document.getElementById("rpmSelfPhone").textContent      = phone || "-";
+  document.getElementById("rpmSelfPhone").textContent      = (typeof fmtPhone==='function'?fmtPhone(phone):phone) || "-";
   document.getElementById("rpmSelfIncomeName").textContent = incomeName || "미등록";
   // 주민번호 마스킹 표시: 앞6자리-뒤1자리만 표시
   const juminDigits = jumin.replace(/[^0-9]/g, "");
@@ -8027,7 +8027,7 @@ function _renderReviewerProfileModal(profile) {
     return `
     <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px">
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.72rem">${escHtml(sub.phone||'')}</span></div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.72rem">${escHtml((typeof fmtPhone==='function'?fmtPhone(sub.phone||''):sub.phone||''))}</span></div>
         <div style="font-size:.72rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> &nbsp;|&nbsp; 주민번호: <span style="color:var(--t2)">${juminDisplay}</span></div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
@@ -8509,7 +8509,7 @@ function _renderInlineSubList(subs) {
     const identityKey = secureSub?.identityKey || "";
     return `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">
       <div style="flex:1;min-width:0">
-        <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
+        <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml((typeof fmtPhone==='function'?fmtPhone(sub.phone||''):sub.phone||''))}</span></div>
         <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
         <div style="display:flex;gap:5px;margin-top:5px"><input id="inlineSubShoppingId_${idx}" data-identity-key="${escHtml(identityKey)}" data-saved-value="${escHtml(shoppingId)}" value="${escHtml(shoppingId)}" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:5px 7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem"><button onclick="_saveIdentityShoppingId(${idx + 1})" style="padding:4px 8px;border:1px solid #93C5FD;border-radius:6px;background:#EFF6FF;color:#2563EB;font-size:.65rem;font-weight:700">저장</button></div>
       </div>
@@ -9451,7 +9451,7 @@ async function _runIdentityPrecheck(auth, orders) {
           return false;
         }
         const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
-          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
+          + `이름: ${idn.name || "-"}\n연락처: ${(typeof fmtPhone==='function'?fmtPhone(idn.phone):idn.phone) || "-"}\n주소: ${idn.address || "-"}\n`
           + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
           + "현재 입력값을 나의 타계정으로 등록할까요?\n(등록해야 제출을 계속할 수 있습니다)";
         if (!confirm(msg)) {
@@ -10115,7 +10115,7 @@ async function submitOrderForm() {
       } else if (!res.ok && res.code === "NEED_SUB_REGISTER") {
         const idn = res.identity || {};
         const msgR = `⚠️ ${i+1}번째 주문: 내 정보와 다른 정보가 감지되었습니다.\n\n`
-          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
+          + `이름: ${idn.name || "-"}\n연락처: ${(typeof fmtPhone==='function'?fmtPhone(idn.phone):idn.phone) || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
         if (confirm(msgR)) {
           const reg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
           if (reg2.ok) {

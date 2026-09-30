@@ -96,7 +96,7 @@ async function loadBlacklist() {
       <div class="bl-item">
         <div class="bl-item-info">
           <div class="bl-item-name"><i class="fas fa-ban" style="font-size:.72rem"></i> ${escHtml(item.name)}</div>
-          <div class="bl-item-meta">등록일: ${escHtml(item.date)} · 등록자: ${escHtml(item.addedBy||'관리자')}${item.phone ? ` · ${escHtml(item.phone)}` : ''}</div>
+          <div class="bl-item-meta">등록일: ${escHtml(item.date)} · 등록자: ${escHtml(item.addedBy||'관리자')}${item.phone ? ` · ${escHtml((typeof fmtPhone==='function'?fmtPhone(item.phone):item.phone))}` : ''}</div>
           ${item.reason ? `<div class="bl-item-reason">사유: ${escHtml(item.reason)}</div>` : ''}
         </div>
         <button class="btn-bl-remove" onclick="removeBlacklist(${item.rowNum},'${escHtml(item.name)}')">해제</button>

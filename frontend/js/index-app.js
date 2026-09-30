@@ -2428,7 +2428,7 @@ function _renderReviewerList(list) {
 
   const rows = list.map((r, i) => {
     const name    = escHtml(r.name || "-");
-    const phone   = escHtml(r.phone || "-");
+    const phone   = escHtml((typeof fmtPhone==='function'?fmtPhone(r.phone):r.phone) || "-");
     const regAt   = escHtml(r.registeredAt || "-");
     const consent = r.consent ? '<span style="color:#0ca678;font-weight:700">동의</span>' : '<span style="color:#9CA3AF">-</span>';
     const incomeName = escHtml(r.incomeType || "");
@@ -2444,8 +2444,7 @@ function _renderReviewerList(list) {
       if (Array.isArray(subs) && subs.length > 0) {
         subAccountsHtml = subs.map(s => {
           const sName = escHtml(s.name || '?');
-          const sPhone = (s.phone || '').replace(/[^0-9]/g,'');
-          const sPhoneFmt = sPhone.length === 11 ? sPhone.slice(0,3)+'-'+sPhone.slice(3,7)+'-'+sPhone.slice(7) : sPhone;
+          const sPhoneFmt = (typeof fmtPhone==='function'?fmtPhone(s.phone || ''):s.phone || '');
           return `<div style="margin-bottom:2px"><span style="font-weight:600">${sName}</span> <span style="color:var(--t3);font-family:monospace;font-size:.72rem">${escHtml(sPhoneFmt)}</span></div>`;
         }).join('');
       }

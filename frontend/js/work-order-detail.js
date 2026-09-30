@@ -1361,7 +1361,7 @@ function woAdvertiserLinkPicker(resp, onLink) {
   var srcB = document.createElement("div");
   srcB.textContent = (c.name || "(이름 없음)")
     + (c.businessNumber ? "  ·  사업자 " + c.businessNumber : "")
-    + (c.contact ? "  ·  " + c.contact : "");
+    + (c.contact ? "  ·  " + (typeof fmtPhone==='function'?fmtPhone(c.contact):c.contact) : "");
   src.appendChild(srcT); src.appendChild(srcB);
 
   var list = document.createElement("div");
@@ -1382,7 +1382,7 @@ function woAdvertiserLinkPicker(resp, onLink) {
       + (biz.tone === "warn" || biz.tone === "ok" ? ";font-weight:700" : "");
     var meta = document.createElement("div");
     var bits = [];
-    if (a.contact) bits.push(a.contact);
+    if (a.contact) bits.push((typeof fmtPhone==='function'?fmtPhone(a.contact):a.contact));
     if (a.inadPm) bits.push("담당 " + a.inadPm);
     bits.push(a.ownedTabs == null ? "소유 작업 ?" : "소유 작업 " + a.ownedTabs + "건");
     meta.textContent = bits.join("  ·  ");

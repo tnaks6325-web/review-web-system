@@ -839,3 +839,21 @@ function clearAdminSession() {
 
 // console에서 확인용
 console.log('[api.js] 리뷰웹시스템 API 모듈 로드됨 — 서버:', API_BASE_URL);
+
+/**
+ * 전화번호 화면 표기 단일 출처 — `010-0000-0000` (사용자 확정 2026-09-30).
+ * ★ 표시 전용이다. 저장값은 바꾸지 않는다(로그인·중복 확인·신원 연결이 숫자만 있는 원본으로 비교한다).
+ * ★ 규칙은 workdesk.html `_fmtPhone` 과 글자 그대로 같아야 한다 — 회귀가드 tests/phoneDisplayFormat.test.js 가 대조한다.
+ * ★ 모양을 맞출 수 없는 값(번호 두 개·자릿수 이상·글자)은 원본 그대로 둔다(지어내지 않는다).
+ */
+function fmtPhone(v){
+  if(v==null) return ''; const s=String(v).trim(); if(!s) return '';
+  if(/[^0-9\s\-.()+]/.test(s)) return s;                                      // 글자·마스킹(*)이 섞인 값은 원본 유지(숫자만 남기면 글자가 사라진다)
+  let d=s.replace(/[^0-9]/g,''); if(!d) return s;
+  if(d.length===10 && d[0]!=='0') d='0'+d;
+  if(d.length===8) return '010-'+d.slice(0,4)+'-'+d.slice(4);
+  if(d.length===11) return d.slice(0,3)+'-'+d.slice(3,7)+'-'+d.slice(7);
+  if(d.length===10) return d.startsWith('02') ? '02-'+d.slice(2,6)+'-'+d.slice(6) : d.slice(0,3)+'-'+d.slice(3,6)+'-'+d.slice(6);
+  if(d.length===9 && d.startsWith('02')) return '02-'+d.slice(2,5)+'-'+d.slice(5);
+  return s;
+}
