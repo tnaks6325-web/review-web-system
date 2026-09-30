@@ -95,30 +95,6 @@ router.get('/debug-tab', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/debug-sheet — 특정 시트 파싱 가능 여부 확인 (GAS: debugSheet)
-// ═══════════════════════════════════════════════════════════
-router.get('/debug-sheet', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId } = req.query;
-    if (!sheetId) return res.json({ error: 'sheetId 필요' });
-
-    try {
-      const meta = await getSpreadsheetMeta(sheetId);
-      const tabs = meta.map(s => ({
-        title: s.properties.title,
-        gid: s.properties.sheetId,
-        rowCount: s.properties.gridProperties?.rowCount || 0,
-        colCount: s.properties.gridProperties?.columnCount || 0,
-      }));
-      res.json({ ok: true, sheetId, tabs });
-    } catch (sheetsErr) {
-      res.json({ ok: false, error: `시트 접근 불가: ${sheetsErr.message}` });
-    }
-  } catch (err) {
-    next(err);
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/debug-base — [DEPRECATED] 베이스시트 진단
@@ -3684,13 +3660,7 @@ router.post('/order-orphan-cleanup', authMiddleware, adminOrMasterMiddleware, as
   } catch (err) { next(err); }
 });
 
-// GET /api/diag/throttle-monitor — 시트 API 45/분 실시간 사용량·출처분해·최근로그·잔량(#3)
-router.get('/throttle-monitor', authMiddleware, async (req, res, next) => {
-  try {
-    const { getThrottleMonitor } = require('../utils/sheetsThrottle');
-    res.json({ ok: true, ...getThrottleMonitor() });
-  } catch (err) { next(err); }
-});
+// (GET /throttle-monitor — 시트API 모니터 화면 전용, 2026-09-29 제거 · 결정 186 76번. getThrottleMonitor 는 sheetsThrottle 에 유지)
 
 // GET /api/diag/order-batch-state — 배치 스케줄러 내부상태 + 사이클 이력(인터리브 기아 디버그)
 router.get('/order-batch-state', authMiddleware, async (req, res, next) => {

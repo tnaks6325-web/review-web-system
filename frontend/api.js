@@ -76,16 +76,8 @@ const _ACTION_MAP = {
   'orderEdit':        { method: 'POST', path: '/api/diag/order-edit' },
   'orderCancel':      { method: 'POST', path: '/api/diag/order-cancel' },
   'orderManualAdd':   { method: 'POST', path: '/api/diag/order-manual-add' },
-  'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },  // deprecated
-  'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
   // [DEPRECATED v11.8.0] 2탭 통합으로 폐기된 액션 — 서버에서 deprecated 응답 반환
-  'syncMasterSheet':  { method: 'POST', path: '/api/tab/sync-master' },       // deprecated
-  'scanMasterSheet':  { method: 'POST', path: '/api/tab/scan-master' },       // deprecated
-  'fullMasterSync':   { method: 'POST', path: '/api/tab/full-sync' },         // deprecated
-  'syncSettingsOnly': { method: 'POST', path: '/api/tab/sync-settings' },     // deprecated
   // 인덱스 스캔 + DB 동기화 (정상 경로)
-  'indexScan':        { method: 'POST', path: '/api/tab/index-scan' },
-  'indexScanSync':    { method: 'POST', path: '/api/tab/index-scan-sync' },
 
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
   'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },
@@ -151,15 +143,8 @@ const _ACTION_MAP = {
   'markNoticeRead':     { method: 'POST', path: '/api/admin/notices/read' },
 
   // Drive 폴더 (Section 9)
-  'syncCaptureFolders':     { method: 'POST', path: '/api/drive/sync-capture' },
-  'syncReviewFolders':      { method: 'POST', path: '/api/drive/sync-review' },
-  'syncAllFolders':         { method: 'POST', path: '/api/drive/sync-all' },
-  'batchCreateFolders':     { method: 'POST', path: '/api/drive/batch-create' },
-  'organizeCaptureFolders': { method: 'POST', path: '/api/drive/organize-capture' },
   'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
   'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
-  'findFolderCandidates':   { method: 'POST', path: '/api/drive/find-candidates' },
-  'diagCaptureFolders':     { method: 'GET',  path: '/api/drive/diag' },
 
   // 단축URL / 메모 (Section 10)
   'createShort':  { method: 'POST', path: '/api/short/create' },
@@ -176,7 +161,6 @@ const _ACTION_MAP = {
 
   // 진단/기타
   'debugTabConfig':     { method: 'GET',  path: '/api/diag/debug-tab' },
-  'debugSheet':         { method: 'GET',  path: '/api/diag/debug-sheet' },
   'debugBaseSheet':     { method: 'GET',  path: '/api/diag/debug-base' },
   'debugDetailSheet':   { method: 'GET',  path: '/api/diag/debug-tab' },
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
@@ -218,11 +202,6 @@ const _ACTION_MAP = {
   'reviewEditReject':     { method: 'POST', path: '/api/review-edit/reject' },
 
   // Drive 폴더 관리
-  'initRootFolder':      { method: 'POST', path: '/api/drive/init-root' },
-  'syncCaptureFolders':  { method: 'POST', path: '/api/drive/sync-capture' },
-  'syncReviewFolders':   { method: 'POST', path: '/api/drive/sync-review' },
-  'syncAllFolders':      { method: 'POST', path: '/api/drive/sync-all' },
-  'batchCreateFolders':  { method: 'POST', path: '/api/drive/batch-create' },
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
   'driveAccountInfo':    { method: 'GET',  path: '/api/drive/account-info' },
   'driveOwnershipAudit': { method: 'POST', path: '/api/drive/ownership-audit' },
@@ -231,7 +210,6 @@ const _ACTION_MAP = {
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
   'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
-  'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
@@ -344,17 +322,8 @@ const _ACTION_MAP = {
   'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },
 
   // ★ 구글시트 전체 RAW 미러링 (Section 14)
-  'rawMirror':  { method: 'POST', path: '/api/raw/mirror' },
-  'rawStatus':  { method: 'GET',  path: '/api/raw/status' },
-  'rawTabs':    { method: 'GET',  path: '/api/raw/tabs' },
-  'rawRows':    { method: 'GET',  path: '/api/raw/rows' },
 
   // ★ 명시적 컬럼 매핑 (Section 15)
-  'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
-  'mappingGet':    { method: 'GET',  path: '/api/mapping' },
-  'mappingSave':   { method: 'POST', path: '/api/mapping' },
-  'mappingCoverage': { method: 'GET', path: '/api/mapping/coverage' },
-  'mappingDrift':    { method: 'GET', path: '/api/mapping/drift' },
 };
 
 // ═══════════════════════════════════════════════════════════

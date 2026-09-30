@@ -296,186 +296,7 @@ body{ letter-spacing:-.01em; }
         </div>
       </div>
 
-      <!-- ━━━━━ ③ 폴더 관리 (접기/펼치기) ━━━━━ -->
-      <div style="border-top:1px solid #E5E7EB">
-        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
-          style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
-          <i class="fas fa-folder-open" style="color:#0ca678"></i> 폴더 관리
-          <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
-        </button>
-        <div style="display:none;padding:8px 16px 12px">
-          <!-- 폴더 일괄 생성 -->
-          <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
-            <i class="fas fa-folder-plus" style="color:#0ca678"></i> 일괄 생성 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(완료·마감 탭 제외)</span>
-          </div>
-          <div style="display:flex;gap:4px">
-            <button id="btnBatchCapture" onclick="batchCreateFolders('capture')"
-              style="flex:1;padding:7px 4px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-camera"></i> 캡처폴더
-            </button>
-            <button id="btnBatchReview" onclick="batchCreateFolders('review')"
-              style="flex:1;padding:7px 4px;background:#F0FFF4;color:#166534;border:1px solid #BBF7D0;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-folder-open"></i> 리뷰폴더
-            </button>
-            <button id="btnBatchBoth" onclick="batchCreateFolders('both')"
-              style="flex:1;padding:7px 4px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-              <i class="fas fa-layer-group"></i> 전체
-            </button>
-          </div>
-          <div id="batchFolderResult" style="display:none;font-size:.71rem;margin-top:3px"></div>
 
-          <!-- 폴더 URL 동기화 -->
-          <div style="margin-top:8px;font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
-            <i class="fas fa-link" style="color:#0369A1"></i> 폴더 URL 동기화 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(드라이브 → DB 매칭)</span>
-          </div>
-          <button id="btnSyncAllFolders" onclick="syncAllFolders()" style="width:100%;padding:8px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-            <i class="fas fa-link"></i> 캡처/리뷰 폴더 일괄동기화
-          </button>
-          <label style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:6px;font-size:.72rem;color:#92400E;cursor:pointer;user-select:none;margin-top:4px">
-            <input type="checkbox" id="chkForceSync" style="width:13px;height:13px;accent-color:#EA580C;cursor:pointer">
-            <span><b>강제 재설정</b> — 기존 URL도 덮어쓰기</span>
-          </label>
-
-          <!-- 폴더 찾기 & 재연결 -->
-          <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결
-              <span style="font-size:.66rem;font-weight:400;color:#6B7280">(사라진 폴더를 탭명으로 검색 → 확인 → 재연결)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:5px">
-              캡처/리뷰 폴더 링크가 비었거나 위치가 바뀐 탭을, Drive에서 실제 폴더를 찾아 다시 연결합니다.
-            </div>
-            <button id="btnFolderRelink" onclick="openFolderRelink()"
-              style="width:100%;padding:8px;background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-              <i class="fas fa-magnifying-glass-location"></i> 폴더 찾기 / 재연결 열기
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ━━━━━ ④ 유지보수 도구 (접기/펼치기) ━━━━━ -->
-      <div style="border-top:1px solid #E5E7EB">
-        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
-          style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
-          <i class="fas fa-wrench" style="color:#D97706"></i> 유지보수 도구
-          <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
-        </button>
-        <div style="display:none;padding:8px 16px 12px">
-
-          <!-- ★ 인덱스 스캔 (시트DB → 각 시트 파싱 → 탭목록 기록) -->
-          <div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-search-plus" style="color:#D97706"></i> 인덱스 스캔
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(시트DB → 각 시트 파싱 → 탭목록 기록)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              시트DB에 등록된 모든 시트에 접속하여 <b>sheet_url, campaign_name, tab_url, tab_name</b>을 파싱하고 탭목록 시트에 기록합니다.
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnIndexScanDry" onclick="indexScan(true)"
-                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnIndexScanRun" onclick="indexScan(false)"
-                style="flex:1;padding:7px;background:#D97706;color:#fff;border:1px solid #D97706;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실행
-              </button>
-            </div>
-            <div id="indexScanResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
-            <div style="margin-top:6px;border-top:1px dashed #E5E7EB;padding-top:6px">
-              <div style="font-size:.66rem;color:#6B7280;margin-bottom:4px">
-                <i class="fas fa-database" style="color:#3182f6"></i> <b>DB 동기화</b> — 스캔 결과를 DB에 직접 반영 (대시보드에 표시)
-              </div>
-              <div style="font-size:.64rem;color:#B7791F;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 6px;margin-bottom:4px">
-                <i class="fas fa-lock"></i> 신규 시트/탭 등록은 <b>작업오더 접수</b>로만 됩니다 — 여기서는 기존 탭의 탭명·gid 교정만 반영됩니다.
-              </div>
-              <div style="display:flex;gap:4px">
-                <button id="btnIndexSyncDry" onclick="indexScanSync(true)"
-                  style="flex:1;padding:6px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-search"></i> DB 미리보기
-                </button>
-                <button id="btnIndexSyncRun" onclick="indexScanSync(false)"
-                  style="flex:1;padding:6px;background:#3182f6;color:#fff;border:1px solid #3182f6;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-database"></i> DB 반영
-                </button>
-              </div>
-              <div id="indexSyncResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:150px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
-            </div>
-          </div>
-
-          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
-
-          <!-- [DEPRECATED v11.8.0] 구조 동기화, 설정 동기화 제거 — 인덱스 스캔 + DB 동기화로 통합됨 -->
-
-          <!-- 탭명·URL 동기화 -->
-          <div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-exchange-alt" style="color:#3182f6"></i> 탭명·URL 동기화
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(시트 실제 탭명 ↔ DB)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              Google Sheets에서 탭 이름이 변경된 경우 DB를 일괄 업데이트합니다.
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnSyncTabNamesDry" onclick="syncTabNames(true)"
-                style="flex:1;padding:7px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnSyncTabNamesRun" onclick="syncTabNames(false)"
-                style="flex:1;padding:7px;background:#3182f6;color:#fff;border:1px solid #3182f6;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실행
-              </button>
-            </div>
-          </div>
-
-          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
-
-          <!-- 캡처폴더 구조 재편성 -->
-          <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-sitemap" style="color:#3182f6"></i> 캡처폴더 구조 재편성
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(단층 → 캠페인폴더 하위)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              <b style="color:#92400E">📁 캡처루트/{폴더}</b> → <b style="color:#166534">📁 캡처루트/{캠페인}/{폴더}</b>
-            </div>
-            <button id="btnDiagCapture" onclick="diagCaptureFolders()"
-              style="width:100%;padding:6px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:3px">
-              <i class="fas fa-microscope"></i> 폴더 현황 진단
-            </button>
-            <div id="diagCaptureResult" style="display:none;font-size:.71rem;margin-bottom:3px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
-            <div style="display:flex;gap:4px">
-              <button id="btnOrganizeDry" onclick="organizeCaptureFolders(true)"
-                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnOrganizeRun" onclick="organizeCaptureFolders(false)"
-                style="flex:1;padding:7px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-sitemap"></i> 실제 재편성
-              </button>
-            </div>
-            <div id="organizeResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:200px;overflow-y:auto"></div>
-          </div>
-
-
-          <!-- 탭 파싱 진단 -->
-          <div style="border-top:1px solid #F3F4F6;padding-top:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-stethoscope" style="color:#3182f6"></i> 탭 파싱 진단
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(조회 안 되는 탭 원인 확인)</span>
-            </div>
-            <div style="display:flex;gap:4px;align-items:center">
-              <input id="diagSheetUrl" type="url" placeholder="시트 URL (gid 포함) 붙여넣기"
-                style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem">
-              <button onclick="runSheetDiag()"
-                style="padding:6px 10px;background:#3182f6;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;white-space:nowrap">
-                <i class="fas fa-stethoscope"></i> 진단
-              </button>
-            </div>
-            <div id="diagResult" style="margin-top:5px;font-size:.72rem;display:none"></div>
-          </div>
-        </div>
-      </div>
 
     </div>
     <div class="modal-actions" style="border-top:1px solid #E5E7EB">
@@ -571,14 +392,6 @@ body{ letter-spacing:-.01em; }
           <button class="btn-header-sq btn-header-review" onclick="window.open('search.html','_blank')" title="리뷰제출페이지 바로가기">
             <i class="fas fa-external-link-alt"></i>
             <span>리뷰제출</span>
-          </button>
-          <button class="btn-header-sq btn-header-mirror" onclick="openRawMirror()" title="구글시트 RAW 미러 — 전체 미러링 실행 + 시트별 데이터 뷰어 (자동 로그인)">
-            <i class="fas fa-database"></i>
-            <span>RAW 미러</span>
-          </button>
-          <button class="btn-header-sq btn-header-mirror" onclick="openThrottleMonitor()" title="구글 시트 API 45/분 쿼터 실시간 모니터 — 어디서 얼마나 쓰는지 + 잔량 (자동 로그인)">
-            <i class="fas fa-gauge-high"></i>
-            <span>시트API 모니터</span>
           </button>
           <button class="btn-header-sq btn-header-mirror" onclick="openWorkdesk()" title="Track B 리뷰웹시스템[3버전](그림자) — 구글시트 대체 평행 트랙: 명단·상태·소유 열람/편집 리허설. 라이브 무영향 (자동 로그인)">
             <i class="fas fa-layer-group"></i>
@@ -681,9 +494,6 @@ body{ letter-spacing:-.01em; }
             </span>
             <span id="cronCountdownBadge" class="cron-countdown-badge" style="display:none"></span>
             <span id="dashboardIndexInfo" class="section-index-info" style="font-size:.72rem;color:var(--t3)"></span>
-            <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(true)" style="font-size:.78rem;background:#3182f6;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다 (먼저 미리보기 실행)">
-              <i class="fas fa-exchange-alt"></i> 탭명 동기화
-            </button>
             <button id="btnArchiveDetect" class="btn-sm" onclick="dashboardArchiveDetect()" style="font-size:.78rem;background:#4F84E0;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="완료된 탭/차수를 자동 감지하고 마감 여부를 결정합니다">
               <i class="fas fa-archive"></i> 완료감지
               <span id="archiveDetectBadge" style="display:none;background:#fff;color:#4F84E0;font-size:.65rem;padding:0 5px;border-radius:99px;margin-left:4px;font-weight:700">0</span>
@@ -1325,25 +1135,6 @@ body{ letter-spacing:-.01em; }
           </button>
         </div>
         <div id="unrecogListWrap" style="font-size:.82rem;color:var(--t2)">
-          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
-        </div>
-
-        <!-- 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) -->
-        <div class="admin-section-header" style="margin-top:28px">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-map-signs" style="color:#1D4ED8;margin-right:6px"></i>컬럼매핑 현황
-          </span>
-          <div style="display:flex;gap:6px;margin-left:auto">
-            <button class="btn-sm" onclick="loadMappingCoverage()" style="font-size:.78rem">
-              <i class="fas fa-sync-alt"></i> 새로고침
-            </button>
-          </div>
-        </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
-          활성 탭별로 제출/입금 등 컬럼 위치가 DB에 기록돼 있는지, 시트 구조 변경으로 기록과 어긋난 탭(드리프트 ⚠)이 있는지 보여줍니다.
-          드리프트 탭은 <a href="raw-mirror.html" target="_blank" style="color:#1D4ED8;text-decoration:underline">RAW 미러 › 컬럼 매핑</a>에서 바로잡으세요.
-        </p>
-        <div id="mappingCoverageWrap" style="font-size:.82rem;color:var(--t2)">
           <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
         </div>
 

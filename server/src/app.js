@@ -24,9 +24,7 @@ const archiveRoutes  = require('./routes/archive.routes');
 const campaignRoutes = require('./routes/campaign.routes');
 const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
-const rawRoutes      = require('./routes/raw.routes');
 const csRoutes       = require('./routes/cs.routes');
-const mappingRoutes  = require('./routes/mapping.routes');
 const trackBRoutes = require('./routes/trackB.routes');
 const reviewEditRoutes = require('./routes/reviewEdit.routes');
 const workboardConsolidationRoutes = require('./routes/workboardConsolidation.routes');
@@ -109,11 +107,9 @@ app.use('/api/product',   productRoutes);
 // 리뷰어 C/S 문의창구 — 관리자 (Section 15)
 app.use('/api/cs',        csRoutes);
 
-// 구글시트 전체 RAW 미러링 (Section 14)
-app.use('/api/raw',       rawRoutes);
+// (/api/raw — RAW 미러 뷰어 입구는 2026-09-29 제거, 결정 186 75번. 5분 자동 미러 cron·rawMirror.service 는 유지)
 
-// 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
-app.use('/api/mapping',   mappingRoutes);
+// (/api/mapping — 컬럼 매핑 편집 입구는 결정 186 75번에서 제거. columnMapping.service 는 장부·빌더가 계속 사용)
 // (/api/participants — 참여자 명단 테스트 화면 전용 라우트는 2026-09-28 제거, 결정 186 46번)
 // 인트라넷 SSO 토큰은 /api/trackb/* 밖으로 나갈 수 없다. 알림톡 운영 화면도 Track B 셸에서
 // 열리므로 같은 관리자 전용 라우터를 이 경로에도 먼저 마운트한다(기존 직접 관리자 경로 유지).

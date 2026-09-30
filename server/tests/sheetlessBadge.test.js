@@ -61,12 +61,7 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
     ok('★ 쿼리 순증 0 — tab_configs 조인은 이미 있던 것을 쓴다', /JOIN tab_configs tc/i.test(body));
   }
 
-  /* A-3. 반영 점검(sheet-sync audit) */
-  {
-    const src = read('src/services/sheetSyncAudit.service.js');
-    ok('auditSheetSync 본 쿼리가 sheetless 를 싣는다',
-      /COALESCE\(tc\.sheetless,\s*FALSE\)\s+AS\s+"sheetless"/i.test(src));
-  }
+  /* (A-3. 반영 점검 sheetSyncAudit 는 결정 186 77번에서 제거) */
 
   /* ══════════════ B. 광고주에게는 안 나간다 ══════════════ */
   console.log('\n[B] 광고주 렌즈 = 화이트리스트 재구성 (표시용 sheetless 한 칸만)');
@@ -83,49 +78,7 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
       !/items:\s*tabs\.map\([^)]*=>\s*\(\{\s*\.\.\./.test(body));
   }
 
-  /* ══════════════ C. 무시트 = 죽은 링크를 만들지 않는다 ══════════════ */
-  console.log('\n[C] 무시트 작업에는 구글시트 링크를 만들지 않는다');
-  {
-    const svc = require('../src/services/sheetSyncAudit.service');
-    const base = {
-      sheetId: 'S1', tabName: 'T', displayName: 'T', campaignName: null,
-      registeredAt: '2026-07-01T00:00:00Z', rawRows: 10, mirroredAt: 'x', mirrorTabName: 'T', mirrorGid: '77',
-      idxStatus: 'active', idxBuiltAt: 'x', idxErrorMsg: null, indexRows: 5, boardRows: 5,
-      lastOrderAt: '2026-07-02T00:00:00Z',
-    };
-    svc.__setPoolForTest({
-      query: async () => ({ rows: [
-        { ...base, tabName: 'sheet-based', displayName: 'sheet-based', tabGid: '77', sheetless: false },
-        { ...base, sheetId: 'wt_deadbeef', tabName: 'sheetless-new', displayName: 'sheetless-new', tabGid: '900001', sheetless: true },
-        // 이관된 기존 작업 = **진짜 시트 ID** 를 그대로 쓰면서 무시트가 된다(모양으로는 못 잡는 케이스)
-        { ...base, sheetId: 'S9', tabName: 'sheetless-migrated', displayName: 'sheetless-migrated', tabGid: '78', sheetless: true },
-      ] }),
-    });
-    // ★ 무시트는 이제 기본 제외(점검 대상 아님 — sheetSyncAudit.test.js §10)라 여기서는
-    //   `includeSheetless` 로 열어서 본다. 이 절의 검사 의미(무시트에는 시트 링크를 만들지 않는다)는 불변.
-    const out = await svc.auditSheetSync({ before: null, includeUnknown: true, includeSheetless: true });
-    svc.__setPoolForTest(null);
-    const byName = new Map(out.items.map(i => [i.tabName, i]));
-
-    await oka('시트 기반 작업은 종전대로 구글시트 링크가 나온다(무회귀)', async () => {
-      const r = byName.get('sheet-based');
-      assert(r, 'sheet-based 누락');
-      assert(/^https:\/\/docs\.google\.com\//.test(String(r.tabUrl || '')), '시트 링크가 사라졌다');
-      assert.strictEqual(r.sheetless, false);
-    });
-    await oka('★ 무시트(가상 ID) 작업은 tabUrl 이 null 이고 sheetless=true 로 사유를 말한다', async () => {
-      const r = byName.get('sheetless-new');
-      assert(r, 'sheetless-new 누락');
-      assert.strictEqual(r.tabUrl, null, '죽은 구글 링크가 만들어졌다');
-      assert.strictEqual(r.sheetless, true);
-    });
-    await oka('★★ 이관된 기존 작업(진짜 시트 ID)도 링크를 만들지 않는다 — 판정은 플래그이지 ID 모양이 아니다', async () => {
-      const r = byName.get('sheetless-migrated');
-      assert(r, 'sheetless-migrated 누락');
-      assert.strictEqual(r.tabUrl, null, 'ID 모양으로만 판정하면 이 케이스가 뚫린다');
-      assert.strictEqual(r.sheetless, true);
-    });
-  }
+  /* (C. 반영 점검 화면의 시트 링크 판정 — sheetSyncAudit 제거(결정 186 77번)로 대상 소멸) */
 
   /* ══════════════ D. 무시트 배지 제거(사용자 확정 2026-08-23) ══════════════ */
   console.log('\n[D] 「무시트」 배지 — 목록·작업보드·업체관리에서 제거됨');
@@ -175,15 +128,7 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
     ok('★ workdesk.html 에 구글시트 직링크 0 — 광고주·내부 모두 리뷰웹 화면에서 끝낸다', hits === 0);
   }
 
-  /* ══════════════ G. 반영 점검 화면 배선 ══════════════ */
-  console.log('\n[G] 반영 점검 화면 — 무시트는 링크 대신 배지');
-  {
-    const html = readFe('sheet-sync-audit.html');
-    ok('tabLink 가 sheetless 를 먼저 보고 배지를 그린다', /it\.sheetless === true.*무시트/s.test(html));
-    ok('★ 링크 렌더는 여전히 docs.google.com 호스트 검증 뒤에만(신뢰 베이스 재구성)',
-      /\/\^https:\\\/\\\/docs\\\.google\\\.com\\\//.test(html));
-    ok('배지 CSS 가 있다', /\.ns-b \{/.test(html));
-  }
+  /* (G. 반영 점검 화면 sheet-sync-audit.html 은 결정 186 77번에서 제거) */
 
   console.log(`\n✅ sheetlessBadge: ${passed} cases passed`);
   process.exit(0);
