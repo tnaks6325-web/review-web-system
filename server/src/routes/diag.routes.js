@@ -4,7 +4,7 @@ const { randomUUID } = require('crypto');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
-const { readSheet, getSpreadsheetMeta, writeSheet } = require('../services/sheets.service');
+const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
 const { imageApiLimiter, imageUploadLimiter } = require('../middleware/rateLimit.middleware');
 const captureLinkBackfill = require('../services/captureLinkBackfill.service');
@@ -1819,80 +1819,6 @@ router.post('/verify-address', imageApiLimiter, async (req, res, next) => {
       confidence: 0,
       reason: err.message || 'AI 주소 비교 중 오류',
     });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/diag/convert-nc-headers — NC 헤더 변환 (네이버+쿠팡 동시진행 모드)
-// 주문번호 → 네이버주문번호 + 쿠팡주문번호
-// 아이디   → 네이버ID + 쿠팡ID
-// 결제금액 → 네이버결제금액 + 쿠팡결제금액
-// ═══════════════════════════════════════════════════════════
-router.post('/convert-nc-headers', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.body;
-    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
-
-    // 1. 현재 헤더(1행) 읽기
-    const headerRange = `'${tabName}'!1:1`;
-    const rows = await readSheet(sheetId, headerRange);
-    if (!rows || rows.length === 0) {
-      return res.json({ ok: false, error: '시트 헤더를 읽을 수 없습니다.' });
-    }
-
-    const headers = rows[0];
-    logger.info(`[NC 변환] 원본 헤더 (${headers.length}개): ${headers.slice(0, 15).join(', ')}`);
-
-    // 2. 이미 변환 여부 확인
-    const ncKeywords = ['네이버주문번호', '쿠팡주문번호', '네이버ID', '쿠팡ID', '네이버결제금액', '쿠팡결제금액'];
-    const alreadyConverted = ncKeywords.some(kw => headers.includes(kw));
-    if (alreadyConverted) {
-      return res.json({ ok: true, alreadyConverted: true, message: '이미 네이버+쿠팡 모드로 변환된 탭입니다.' });
-    }
-
-    // 3. 변환 대상 컬럼 인덱스 찾기
-    const findCol = (keywords) => headers.findIndex(h =>
-      keywords.some(kw => String(h || '').includes(kw))
-    );
-
-    const orderIdx  = findCol(['주문번호', '번호']);
-    const userIdx   = findCol(['아이디', 'ID', 'id']);
-    const priceIdx  = findCol(['결제금액', '결제', '금액']);
-
-    if (orderIdx < 0 && userIdx < 0 && priceIdx < 0) {
-      return res.json({ ok: false, error: '변환할 헤더(주문번호/아이디/결제금액)를 찾을 수 없습니다.' });
-    }
-
-    // 4. 새 헤더 배열 구성 (원본 복사 후 치환)
-    const newHeaders = [...headers];
-
-    // 변환 매핑 (인덱스 큰 것부터 처리 → splice 영향 방지)
-    const replacements = [];
-    if (orderIdx >= 0) replacements.push({ idx: orderIdx, from: headers[orderIdx], to: ['네이버주문번호', '쿠팡주문번호'] });
-    if (userIdx >= 0)  replacements.push({ idx: userIdx,  from: headers[userIdx],  to: ['네이버ID', '쿠팡ID'] });
-    if (priceIdx >= 0) replacements.push({ idx: priceIdx, from: headers[priceIdx], to: ['네이버결제금액', '쿠팡결제금액'] });
-
-    // 인덱스 큰 것부터 splice
-    replacements.sort((a, b) => b.idx - a.idx);
-    for (const r of replacements) {
-      newHeaders.splice(r.idx, 1, ...r.to);
-    }
-
-    // 5. 시트에 새 헤더 쓰기
-    const writeRange = `'${tabName}'!A1`;
-    await writeSheet(sheetId, writeRange, [newHeaders]);
-
-    logger.info(`[NC 변환] 완료: ${tabName} — 변환 ${replacements.length}건`);
-
-    res.json({
-      ok: true,
-      alreadyConverted: false,
-      converted: replacements.map(r => `${r.from} → ${r.to.join(' + ')}`),
-      newHeaderCount: newHeaders.length,
-    });
-  } catch (err) {
-    logger.error(`[NC 변환] 오류: ${err.message}`);
-    next(err);
   }
 });
 

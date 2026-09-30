@@ -7504,39 +7504,6 @@ async function reopenIncompleteSlots() {
 }
 
 /* ── 네이버+쿠팡 모드 헤더 변환 ── */
-async function convertToNcHeaders() {
-  if (!_tcCurrent) return;
-  const btn = document.getElementById("btnConvertNcHeaders");
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL이 설정되지 않았습니다.", "error"); return; }
-
-  const sheetId = _tcCurrent.sheetId || "";
-  const tabName = _tcCurrent.tabName || "";
-  if (!sheetId || !tabName) { showToast("sheetId 또는 tabName이 없습니다.", "error"); return; }
-
-  if (!confirm(`"${tabName}" 탭의 시트 헤더를 네이버+쿠팡 모드로 변환하시겠습니까?\n\n기존 주문번호·아이디·결제금액 컬럼 데이터가 삭제됩니다.`)) return;
-
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 변환 중...'; }
-
-  try {
-    const payload = { action: "convertToNcHeaders", sheetId, tabName };
-    let res = null;
-    try { res = await gasPost(payload); } catch(e){ try { res = await gasGet(payload); } catch(e2){} }
-
-    if (res?.ok) {
-      if (res.alreadyConverted) {
-        showToast("ℹ️ 이미 네이버+쿠팡 모드로 변환된 탭입니다.", "info");
-      } else {
-        showToast("✅ 헤더 변환 완료! 네이버+쿠팡 모드가 적용되었습니다.", "success");
-      }
-    } else {
-      showToast("❌ 변환 실패: " + (res?.error || "알 수 없는 오류"), "error");
-    }
-  } catch(err) {
-    showToast("❌ 오류: " + err.message, "error");
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-exchange-alt"></i> 이 탭 시트 헤더 → 네이버+쿠팡 모드 변환'; }
-  }
-}
 // 팝오버 UI만 닫고 _tcCurrent는 유지 (confirmTcSave 내부용)
 function _closeTcPopoverUiOnly() {
   document.getElementById("tcPopover").classList.remove("open");

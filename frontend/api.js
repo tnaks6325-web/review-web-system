@@ -154,7 +154,6 @@ const _ACTION_MAP = {
   'submitReview':       { method: 'POST', path: '/api/submit/review' },
   'submitOrderForm':    { method: 'POST', path: '/api/submit/order' },
   'checkReviewFiles':   { method: 'POST', path: '/api/submit/check-files' },
-  'checkDuplicateOrder':{ method: 'POST', path: '/api/submit/check-duplicate' },
   'findSlot':           { method: 'POST', path: '/api/submit/find-slot' },
 
   // 진단/기타
@@ -204,7 +203,6 @@ const _ACTION_MAP = {
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
   'saveAppUrl':     { method: 'POST', path: '/api/diag/app-url' },
-  'convertToNcHeaders': { method: 'POST', path: '/api/diag/convert-nc-headers' },
 
   // Phase 2-5: Sync Queue + Build History
   'syncQueueStats':     { method: 'GET',  path: '/api/diag/sync-queue' },
