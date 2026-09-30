@@ -364,6 +364,37 @@ async function submitExternalOrder({
         };
       }
     } catch (e) { warnings.push('중복 확인 실패(제출은 계속): ' + e.message); }
+
+    // ⓪-0.5 같은 구매의 이중 등록 방지 (2026-09-30 모기위키 사고 — 결정 193).
+    //   리뷰어가 앱(모집공고)으로 낸 주문은 `campaign:<공고ID>` 좌표에 저장돼 위 24시간 확인(작업표 좌표만 봄)에
+    //   안 잡힌다. 그래서 앱으로 이미 참여한 사람을 외부모집으로 **같은 주문번호** 로 다시 등록하면 기록 2건·표 줄 1개가
+    //   되어 총원 마감이 표보다 먼저 닫혔다. → 주문번호(6자리 이상) + 연락처 끝 8자리가 같은 살아 있는 기록을
+    //   **이 작업표 좌표 + 이 작업표에 연결된 공고 좌표** 전체에서 찾는다(기간 무관 — 같은 구매는 언제 와도 같은 구매).
+    //   ★ force(중복 경고 확인 후 재시도)로만 통과 — 기존 24시간 중복과 같은 계약.
+    const onum = digits(f.orderNum || '');
+    if (onum.length >= 6 && p8.length === 8) {
+      try {
+        const { rows: sameBuy } = await pool.query(
+          `SELECT os.submitted_at, (os.sheet_id LIKE 'campaign:%') AS via_app
+             FROM order_submissions os
+            WHERE os.deleted_at IS NULL
+              AND os.dedup_key = $3
+              AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $4
+              AND ((os.sheet_id = $1 AND os.tab_name = $2)
+                OR os.sheet_id = 'campaign:' || NULLIF($5, '')
+                OR os.sheet_id IN (SELECT 'campaign:' || rc.id FROM recruit_campaigns rc
+                                    WHERE rc.linked_sheet_id = $1 AND rc.linked_tab_name = $2))
+            ORDER BY os.submitted_at DESC LIMIT 1`,
+          [sheetId, tabName, 'num:' + onum, p8, campaignId ? String(campaignId) : '']);
+        if (sameBuy.length) {
+          const at = new Date(sameBuy[0].submitted_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+          return {
+            ok: false, duplicate: true, sameOrderNum: true,
+            error: `같은 주문번호·연락처로 이미 접수된 구매가 있습니다${sameBuy[0].via_app ? ' (리뷰어가 앱으로 직접 참여)' : ''} — 제출 ${at}. 다시 등록하면 한 구매가 두 명으로 세어집니다`,
+          };
+        }
+      } catch (e) { warnings.push('같은 주문번호 확인 실패(제출은 계속): ' + e.message); }
+    }
   }
 
   // ⓪-1.5 재참여(재구매) 기간 제한 — **"같은 작업(탭)" 기준**(사용자 확정 2026-08-24). 위 24시간

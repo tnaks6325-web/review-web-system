@@ -179,8 +179,14 @@ const ok = (name, cond, extra) => {
   const loaderBody = stateSrc.slice(stateSrc.indexOf('async function _loadLinkedOrderCounts'),
     stateSrc.indexOf('function __resetTableQuotaCacheForTest'));
   ok('로더 존재 + 본문 확보', loaderBody.length > 500);
-  ok('★ DISTINCT os.id(중복 조인 배증 방지)', /COUNT\(DISTINCT os\.id\)/.test(loaderBody));
-  ok('★ 소프트삭제 주문 제외(os.deleted_at IS NULL)', /os\.deleted_at IS NULL/.test(loaderBody));
+  // 결정 193: 세는 단위 = "구매 1건"(주문번호+연락처 끝8, 약한 번호는 기록 id) — 조인 배증 방지 의미는 그대로다.
+  const keySql = stateSrc.slice(stateSrc.indexOf('const ORDER_PURCHASE_KEY_SQL'), stateSrc.indexOf('async function _loadLinkedOrderCounts'));
+  ok('★ DISTINCT 구매 키(중복 조인 배증 방지 · 약한 번호는 os.id 폴백)',
+    /COUNT\(DISTINCT \$\{ORDER_PURCHASE_KEY_SQL\}\)/.test(loaderBody) && !/COUNT\(DISTINCT os\.id\)/.test(loaderBody)
+      && /'id:' \|\| os\.id::text/.test(keySql) && /dedup_key LIKE 'num:%'/.test(keySql));
+  ok('★ 소프트삭제 주문 제외(os.deleted_at IS NULL) — 살아 있는 작업표 줄이 가리키는 기록만 예외',
+    /ON \$\{ORDER_COUNTED_SQL\}/.test(loaderBody) && /os\.deleted_at IS NULL OR EXISTS/.test(keySql)
+      && /cpx\.deleted_at IS NULL AND cpx\.active/.test(keySql));
   ok("★ 앵커 = start_date(KST) ?? created_at(탭 재사용 과거 블록 배제)",
     /submitted_at >= COALESCE\(\(rc\.start_date::text \|\| 'T00:00:00\+09:00'\)::timestamptz, rc\.created_at\)/.test(loaderBody));
   ok("★ 빈 gid 는 절을 켜지 않는다(NULLIF 게이트)",
