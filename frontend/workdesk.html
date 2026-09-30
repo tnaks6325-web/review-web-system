@@ -1599,6 +1599,31 @@
   .ovm-cta{display:flex;align-items:center;gap:11px;background:var(--warn-soft);border:1px solid color-mix(in srgb,var(--warn) 25%,transparent);
     border-radius:12px;padding:11px 13px;margin-bottom:13px}
   .ovm-cta .ct{flex:1;min-width:0}
+  /* 같은 업체 알림 배너(시안 B) — 클래스는 ovm-mg- 접두(다른 화면과 충돌 방지) */
+  .ovm-mg-bn{display:flex;align-items:center;gap:12px;margin:0 0 12px;padding:10px 14px;border-radius:10px;background:#FFF8ED;border:1px solid #F0D4A8;font-size:13px}
+  .ovm-mg-bn .ic{width:26px;height:26px;border-radius:50%;background:#FDE7BF;color:var(--warn);font-weight:800;display:flex;align-items:center;justify-content:center;flex:none}
+  .ovm-mg-bn .tx{flex:1;min-width:0}.ovm-mg-bn .tx small{display:block;font-size:11.5px;color:var(--muted);margin-top:1px}
+  .ovm-mg-bn.ok{background:var(--safe-soft);border-color:color-mix(in srgb,var(--safe) 25%,transparent);padding:7px 12px}
+  .ovm-mg-bn.ok .ic{background:color-mix(in srgb,var(--safe) 18%,#fff);color:var(--safe)}
+  .ovm-mg-bn.off{background:var(--card2);border-color:var(--line)}.ovm-mg-bn.off .ic{background:var(--line);color:var(--muted)}
+  .ovm-mg-pair{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 9px;box-shadow:var(--shadow-card)}
+  .ovm-mg-pair .row{display:grid;grid-template-columns:1fr 28px 1fr auto;gap:10px;align-items:center}
+  .ovm-mg-pair .ar{text-align:center;color:var(--faint)}
+  .ovm-mg-pair .why{font-size:11.5px;color:var(--adv);margin-top:7px}
+  .ovm-mg-side{border:1px solid var(--line);border-radius:9px;padding:8px 10px;cursor:pointer;min-width:0}
+  .ovm-mg-side .nm{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ovm-mg-side .tg{font-size:11px;color:var(--muted)}
+  .ovm-mg-side.keep{border-color:var(--safe);background:var(--safe-soft)}.ovm-mg-side.keep .tg b{color:var(--safe)}
+  .ovm-mg-side.gone{background:var(--card2)}.ovm-mg-side.gone .nm{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line2)}
+  .btn.ovm-mg-go{background:var(--bad);border-color:var(--bad);color:#fff}.btn.ovm-mg-go:hover{background:#c92a2e;border-color:#c92a2e}
+  .btn.ovm-mg-go:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2)}
+  .ovm-mg-moves{background:var(--card2);border-radius:9px;padding:9px 11px;font-size:12.5px;margin-top:6px}.ovm-mg-moves ul{margin:4px 0 0;padding-left:18px}
+  .ovm-mg-note{font-size:12px;border-radius:8px;padding:8px 10px;margin-top:9px;line-height:1.5;background:var(--card2)}
+  .ovm-mg-note.warn{background:var(--warn-soft);color:#7c3a06}.ovm-mg-note.bad{background:var(--bad-soft);color:#8a1c1f}
+  /* ★ 팝업은 기존 .owntr 모양을 쓰는데 .owntr label(작은 회색·block) 이 이겨 체크칸과 문구가 갈라졌다 — 같은 특이성 이상으로 되돌린다 */
+  .owntr .ovm-mg-chk{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;font-weight:600;color:var(--ink);margin:11px 0 0;cursor:pointer}
+  .owntr .ovm-mg-chk input{width:auto;height:auto;flex:none;margin:2px 0 0}
+  @media (max-width:760px){.ovm-mg-pair .row{grid-template-columns:1fr}.ovm-mg-pair .ar{transform:rotate(90deg)}}
   .ovm-cta .ct b{display:block;font-size:13px;font-weight:800;color:var(--warn)}
   .ovm-cta .ct span{font-size:11.5px;color:var(--muted)}
   .ovm-ovt{display:grid;grid-template-columns:minmax(150px,1.3fr) 78px 62px 92px 108px 96px 74px;gap:9px;align-items:center}
@@ -17313,6 +17338,7 @@ function _ovmRenderOverview(opt){
   p.innerHTML=`<div class="ovm-bpage">
     <header class="ovm-bhead"><div><h2>업체 관리</h2><p>관계 상태를 한 화면에서 확인하고, 업체 원장에서 바로 상세 업무로 이동합니다.</p></div>
       <span class="ovm-bsp"></span><button class="btn" onclick="renderOwnershipView()">새로고침</button><button class="btn pri" onclick="showAddAdvertiser()">업체 등록</button></header>
+    <div id="ovmmBox">${_ovmmBoxHtml()}</div>
     ${_ovmbSummaryHtml(advs,works,bad,matchKnown,candKnown)}
     <section class="ovm-ov ovm-bledger">
     <div class="ovm-ovh"><h2>업체 ${advs.length}곳 · 작업 ${bad?'?':works.toLocaleString('ko-KR')}건</h2>
@@ -17330,7 +17356,119 @@ function _ovmRenderOverview(opt){
     <p class="ovm-lead" style="margin-top:12px">미입금 현황은 업체를 고르면 표의 <b>미입금</b> 필터로 확인합니다(입금액은 인트라넷 계약에서 가져오므로 이 개요에서는 세지 않습니다).</p>
     </section>
   </div>`;
+  _ovmmLoad();
 }
+
+/* ══ 같은 업체로 보이는 업체 알림 배너 + 합치기 (시안 B · 사용자 확정 2026-10-01) ══════════════
+   시안 = frontend/docs/design-advertiser-merge.html(B). 배경 = 인트라넷 사업자명 정정으로 같은 업체가
+   둘로 갈린 사고(2026-09-28 올곧은무역·어니스트캄 — 결정 191).
+   ★ 재료 = GET /api/trackb/advertisers/intranet-sync(판정 사본 0 — 서버 분류 duplicate·rename_blocked 를
+     그대로 짝으로 그린다) · 실행 = POST /api/trackb/advertisers/merge(미리보기 → confirm:true).
+   ★★ 둘 다 adminOrMaster 라 **AE 에게는 배너를 그리지 않는다**(눌러도 403 인 막다른 길 금지).
+   ★ 점검을 못 하면(인트라넷 도달 불가·오류) "문제없음"으로 꾸미지 않고 사유 + [다시 시도].
+   ★ 자동 병합 없음(결정 004) — 사람이 쌍마다 확인 체크 후 누를 때만 합친다.
+   ★ onclick 에는 **인덱스만**(업체명은 외부발 문자열). 팝업은 body 직속 · 바깥 클릭으로 닫지 않음(Esc·[취소]). */
+let _OVMM={ at:0, state:'idle', pairs:[], open:false, keep:{}, error:'' }, _ovmmPop=null;
+const _OVMM_TTL=60*1000;
+function _ovmmAllowed(){ return STATE.role==='master'||STATE.role==='admin'; }
+// 서버 분류를 "옛 업체(원본 미연결) → 남길 업체(원본 연결)" 짝으로 바꾼다(같은 쌍 중복 제거).
+function _ovmmPairsFrom(items){
+  const out=[], seen=new Set();
+  for(const it of (items||[])){
+    let a=null,b=null;
+    if(it.kind==='duplicate'&&it.mergeWith) { a={id:it.id,name:it.name}; b={id:it.mergeWith.id,name:it.mergeWith.name}; }
+    else if(it.kind==='rename_blocked'&&it.blockedBy) { a={id:it.blockedBy.id,name:it.blockedBy.name}; b={id:it.id,name:it.name}; }
+    if(!a||!b||a.id===b.id) continue;
+    const k=[a.id,b.id].sort().join('|'); if(seen.has(k)) continue; seen.add(k);
+    out.push({a,b,why: it.kind==='duplicate'
+      ? `인트라넷에는 「${it.intranetName||b.name}」 한 곳뿐입니다 — 이름(법인 표기)이 바뀌면서 둘로 갈린 것으로 보입니다`
+      : `인트라넷 사업자명이 「${it.to||a.name}」 로 바뀌었는데 그 이름을 다른 업체가 쓰고 있습니다`});
+  }
+  return out;
+}
+async function _ovmmLoad(force){
+  if(!_ovmmAllowed()) return;
+  if(!force && _OVMM.state==='ok' && Date.now()-_OVMM.at<_OVMM_TTL){ _ovmmPaint(); return; }
+  _OVMM.state='loading'; _ovmmPaint();
+  let r=null;
+  try{ r=await api('/api/trackb/advertisers/intranet-sync'); }catch(e){ r={ok:false,error:e&&e.message}; }
+  if(r&&r.ok){ _OVMM={...(_OVMM),at:Date.now(),state:'ok',pairs:_ovmmPairsFrom(r.items),error:''};
+    _OVMM.pairs.forEach((p,i)=>{ if(!_OVMM.keep[p.a.id+'|'+p.b.id]) _OVMM.keep[p.a.id+'|'+p.b.id]=p.b.id; }); }
+  else { _OVMM.state='fail'; _OVMM.error=(r&&r.error)||'인트라넷 연결 점검을 불러오지 못했습니다'; }
+  _ovmmPaint();
+}
+function _ovmmPaint(){ const el=document.getElementById('ovmmBox'); if(el) el.innerHTML=_ovmmBoxHtml(); }
+function _ovmmAdv(id){ return (STATE.advs||[]).find(x=>x.id===id)||null; }
+function _ovmmBoxHtml(){
+  if(!_ovmmAllowed()) return '';
+  const S=_OVMM;
+  if(S.state==='idle'||S.state==='loading') return '';
+  if(S.state==='fail') return `<div class="ovm-mg-bn off"><span class="ic">?</span><span class="tx"><b>업체 중복 점검을 하지 못했습니다</b><small>${esc(S.error)} — 중복이 없다는 뜻은 아닙니다.</small></span><button class="btn" onclick="_ovmmLoad(true)">다시 시도</button></div>`;
+  const n=S.pairs.length;
+  if(!n) return `<div class="ovm-mg-bn ok"><span class="ic">✓</span><span class="tx"><b>같은 업체로 보이는 중복 업체가 없습니다</b><small>인트라넷 광고주와 매시간 대조합니다 · 인트라넷에서 이름이 바뀌면 자동으로 따라갑니다</small></span></div>`;
+  const cards=S.open ? S.pairs.map((p,i)=>{
+    const keepId=S.keep[p.a.id+'|'+p.b.id]||p.b.id;
+    const side=(x,isB)=>{ const adv=_ovmmAdv(x.id); const keep=x.id===keepId;
+      return `<div class="ovm-mg-side ${keep?'keep':'gone'}" role="button" tabindex="0" onclick="_ovmmKeep(${i},${isB?1:0})" onkeydown="if(event.key==='Enter'){_ovmmKeep(${i},${isB?1:0});}">
+        <div class="nm">${esc(x.name)}</div><div class="tg">${keep?'<b>남김</b>':'합친 뒤 사라짐'} · 작업 ${adv?(+adv.works||0):'?'} · ${isB?'인트라넷 연결':'인트라넷 미연결'}</div></div>`; };
+    const gone=keepId===p.b.id?p.a:p.b, kept=keepId===p.b.id?p.b:p.a;
+    return `<div class="ovm-mg-pair"><div class="row">${side(gone,gone===p.b)}<span class="ar">→</span>${side(kept,kept===p.b)}<button class="btn ovm-mg-go" onclick="_ovmmOpen(${i})">합치기</button></div>
+      <div class="why">★ ${esc(p.why)} · 카드를 누르면 남길 쪽이 바뀝니다</div></div>`; }).join('') : '';
+  return `<div class="ovm-mg-bn"><span class="ic">!</span><span class="tx"><b>같은 업체로 보이는 업체가 ${n}쌍 있습니다</b><small>인트라넷에서 이름(법인 표기)이 바뀌면서 둘로 갈린 것으로 보입니다. 확인하고 하나로 합치세요.</small></span>
+    <button class="btn pri" onclick="_ovmmToggle()">${S.open?'접기':'확인하기'}</button></div>${cards}`;
+}
+function _ovmmToggle(){ _OVMM.open=!_OVMM.open; _ovmmPaint(); }
+// 남길 쪽 고르기 — 누른 카드가 남는다.
+function _ovmmKeep(i,isB){ const p=_OVMM.pairs[i]; if(!p) return; _OVMM.keep[p.a.id+'|'+p.b.id]=isB?p.b.id:p.a.id; _ovmmPaint(); }
+async function _ovmmOpen(i){
+  const p=_OVMM.pairs[i]; if(!p) return;
+  const keepId=_OVMM.keep[p.a.id+'|'+p.b.id]||p.b.id;
+  const src=keepId===p.b.id?p.a:p.b, dst=keepId===p.b.id?p.b:p.a;
+  _ovmmPop={i,src,dst,prev:null,ok:false,busy:false,err:''};
+  _ovmmPopPaint(true);
+  let r=null;
+  try{ r=await api('/api/trackb/advertisers/merge',{method:'POST',body:JSON.stringify({sourceId:src.id,targetId:dst.id})}); }catch(e){ r={ok:false,error:e&&e.message}; }
+  if(!_ovmmPop) return;
+  if(r&&r.ok&&r.preview) _ovmmPop.prev=r.preview; else _ovmmPop.err=(r&&r.error)||'미리보기를 불러오지 못했습니다';
+  _ovmmPopPaint();
+}
+function _ovmmPopHtml(){
+  const P=_ovmmPop; if(!P) return '';
+  const S=P.prev&&P.prev.source, T=P.prev&&P.prev.target;
+  const body = P.err ? `<div class="ovm-mg-note bad">${esc(P.err)}</div>`
+    : !P.prev ? '<div class="ovm-mg-note">옮겨질 것을 확인하는 중…</div>'
+    : `<div class="ovm-mg-moves"><b>${esc(S.name)}</b> → <b>${esc(T.name)}</b> 로 옮겨지는 것<ul>
+        <li>작업 ${S.campaigns}개 (합친 뒤 약 ${S.campaigns+T.campaigns}개)</li>
+        <li>브랜드 ${S.brands}개${S.brands&&T.brands?' — 이름이 같은 브랜드는 하나로 합칩니다':''}</li>
+        <li>광고주 계정 ${S.users}개 · 작업오더 연결 ${S.workOrders}건 · 정산 노출 설정</li>
+        <li>접속 링크: ${S.link?'옛 링크는 <b>계속 열리고</b> 합친 업체로 들어갑니다':'옛 링크 없음'}</li>
+        <li>담당AE 등 비어 있는 칸만 옛 업체 값으로 채웁니다</li></ul></div>
+      <div class="ovm-mg-note warn"><b>${esc(S.name)}</b> 은 업체 목록에서 사라집니다. 되돌리는 버튼은 없습니다.</div>
+      <label class="ovm-mg-chk"><input type="checkbox" ${P.ok?'checked':''} onchange="_ovmmPop&&(_ovmmPop.ok=this.checked,document.getElementById('ovmmGo').disabled=!this.checked)"> 두 업체가 같은 회사인 것을 확인했습니다</label>`;
+  return `<div class="owntr"><h3>업체 합치기</h3><div class="src"><b>${esc(P.src.name)}</b> → <b>${esc(P.dst.name)}</b></div>${body}
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" onclick="_ovmmClose()">취소</button>
+    <button class="btn ovm-mg-go" id="ovmmGo" onclick="_ovmmRun()" ${P.prev&&P.ok&&!P.busy?'':'disabled'}>${P.busy?'합치는 중…':'합치기'}</button></div></div>`;
+}
+function _ovmmPopPaint(first){
+  let ov=document.getElementById('ovmmPop');
+  if(!ov){ ov=document.createElement('div'); ov.id='ovmmPop'; ov.className='owntr-ov'; document.body.appendChild(ov); }
+  ov.style.display='flex'; ov.innerHTML=_ovmmPopHtml();
+}
+function _ovmmClose(){ _ovmmPop=null; const ov=document.getElementById('ovmmPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } }
+async function _ovmmRun(){
+  const P=_ovmmPop; if(!P||!P.ok||P.busy) return;
+  P.busy=true; _ovmmPopPaint();
+  let r=null;
+  try{ r=await api('/api/trackb/advertisers/merge',{method:'POST',body:JSON.stringify({sourceId:P.src.id,targetId:P.dst.id,confirm:true})}); }catch(e){ r={ok:false,error:e&&e.message}; }
+  if(!_ovmmPop) return;
+  if(!(r&&r.ok)){ P.busy=false; P.err=(r&&r.error)||'합치지 못했습니다'; P.prev=null; _ovmmPopPaint(); return; }
+  _ovmmClose();
+  toast('합쳤습니다 → '+P.dst.name);
+  _OVMM.at=0; _OVMM.open=true;
+  await renderOwnershipView();
+}
+// Esc = 팝업 닫기(최상위 1회 — 열 때마다 걸면 겹쳐 쌓인다). 입력 중이어도 팝업만 닫는다.
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&_ovmmPop){ e.stopImmediatePropagation(); _ovmmClose(); } },true);
 
 /* ── 우측 설정 패널(접속링크·계정·소유·거래처추가·미지정 시트) ──
    ★ 매일 보는 표가 화면 위를 차지하고, 어쩌다 하는 설정은 필요할 때만 열린다.
