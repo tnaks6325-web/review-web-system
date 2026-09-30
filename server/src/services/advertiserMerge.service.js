@@ -51,6 +51,8 @@ async function _inventory(client, id) {
     brandTabs: await q(`SELECT COUNT(*) n FROM trackb_brand_tab_map WHERE advertiser_id=$1`),
     brandManagers: await q(`SELECT COUNT(*) n FROM trackb_tab_brand_managers WHERE advertiser_id=$1`),
     link: await q(`SELECT COUNT(*) n FROM trackb_advertiser_links WHERE advertiser_id=$1`),
+    // 미리보기가 "옛 링크는 계속 열린다"고 말하려면 **살아 있는** 링크인지 알아야 한다(폐기된 링크는 별칭으로 살리지 않는다).
+    linkActive: await q(`SELECT COUNT(*) n FROM trackb_advertiser_links WHERE advertiser_id=$1 AND active = TRUE`),
   };
 }
 

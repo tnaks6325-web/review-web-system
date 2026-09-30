@@ -17377,7 +17377,8 @@ function _ovmmPairsFrom(items){
   for(const it of (items||[])){
     let a=null,b=null;
     if(it.kind==='duplicate'&&it.mergeWith) { a={id:it.id,name:it.name}; b={id:it.mergeWith.id,name:it.mergeWith.name}; }
-    else if(it.kind==='rename_blocked'&&it.blockedBy) { a={id:it.blockedBy.id,name:it.blockedBy.name}; b={id:it.id,name:it.name}; }
+    // ★ 이름을 쥔 쪽이 이미 인트라넷에 연결돼 있으면 다른 원본이다 — 합칠 짝이 아니다(서버도 거부한다).
+    else if(it.kind==='rename_blocked'&&it.blockedBy&&!it.blockedBy.intranetLinked) { a={id:it.blockedBy.id,name:it.blockedBy.name}; b={id:it.id,name:it.name}; }
     if(!a||!b||a.id===b.id) continue;
     const k=[a.id,b.id].sort().join('|'); if(seen.has(k)) continue; seen.add(k);
     out.push({a,b,why: it.kind==='duplicate'
@@ -17424,11 +17425,14 @@ async function _ovmmOpen(i){
   const p=_OVMM.pairs[i]; if(!p) return;
   const keepId=_OVMM.keep[p.a.id+'|'+p.b.id]||p.b.id;
   const src=keepId===p.b.id?p.a:p.b, dst=keepId===p.b.id?p.b:p.a;
-  _ovmmPop={i,src,dst,prev:null,ok:false,busy:false,err:''};
+  const me={i,src,dst,prev:null,ok:false,busy:false,err:''};
+  _ovmmPop=me;
   _ovmmPopPaint(true);
   let r=null;
   try{ r=await api('/api/trackb/advertisers/merge',{method:'POST',body:JSON.stringify({sourceId:src.id,targetId:dst.id})}); }catch(e){ r={ok:false,error:e&&e.message}; }
-  if(!_ovmmPop) return;
+  // ★ 그 사이 팝업을 닫고 다른 쌍을 열었으면 이 응답은 버린다(늦게 온 앞 쌍 미리보기가 새 쌍에 섞이지 않게).
+  if(_ovmmPop!==me) return;
+  if(_ovmmGone()) return;
   if(r&&r.ok&&r.preview) _ovmmPop.prev=r.preview; else _ovmmPop.err=(r&&r.error)||'미리보기를 불러오지 못했습니다';
   _ovmmPopPaint();
 }
@@ -17441,12 +17445,12 @@ function _ovmmPopHtml(){
         <li>작업 ${S.campaigns}개 (합친 뒤 약 ${S.campaigns+T.campaigns}개)</li>
         <li>브랜드 ${S.brands}개${S.brands&&T.brands?' — 이름이 같은 브랜드는 하나로 합칩니다':''}</li>
         <li>광고주 계정 ${S.users}개 · 작업오더 연결 ${S.workOrders}건 · 정산 노출 설정</li>
-        <li>접속 링크: ${S.link?'옛 링크는 <b>계속 열리고</b> 합친 업체로 들어갑니다':'옛 링크 없음'}</li>
+        <li>접속 링크: ${!S.link?'옛 링크 없음':(S.linkActive===0?'옛 링크는 <b>이미 폐기된 상태</b>라 합친 뒤에도 열리지 않습니다':'옛 링크는 <b>계속 열리고</b> 합친 업체로 들어갑니다')}</li>
         <li>담당AE 등 비어 있는 칸만 옛 업체 값으로 채웁니다</li></ul></div>
       <div class="ovm-mg-note warn"><b>${esc(S.name)}</b> 은 업체 목록에서 사라집니다. 되돌리는 버튼은 없습니다.</div>
       <label class="ovm-mg-chk"><input type="checkbox" ${P.ok?'checked':''} onchange="_ovmmPop&&(_ovmmPop.ok=this.checked,document.getElementById('ovmmGo').disabled=!this.checked)"> 두 업체가 같은 회사인 것을 확인했습니다</label>`;
   return `<div class="owntr"><h3>업체 합치기</h3><div class="src"><b>${esc(P.src.name)}</b> → <b>${esc(P.dst.name)}</b></div>${body}
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" onclick="_ovmmClose()">취소</button>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" onclick="_ovmmClose()" ${P.busy?'disabled':''}>취소</button>
     <button class="btn ovm-mg-go" id="ovmmGo" onclick="_ovmmRun()" ${P.prev&&P.ok&&!P.busy?'':'disabled'}>${P.busy?'합치는 중…':'합치기'}</button></div></div>`;
 }
 function _ovmmPopPaint(first){
@@ -17454,15 +17458,19 @@ function _ovmmPopPaint(first){
   if(!ov){ ov=document.createElement('div'); ov.id='ovmmPop'; ov.className='owntr-ov'; document.body.appendChild(ov); }
   ov.style.display='flex'; ov.innerHTML=_ovmmPopHtml();
 }
-function _ovmmClose(){ _ovmmPop=null; const ov=document.getElementById('ovmmPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } }
+// ★ 세션이 끝나 화면이 로그인으로 바뀌었으면(업체관리 화면이 사라짐) 팝업도 걷는다 — 로그인 화면 위에 남지 않게.
+function _ovmmGone(){ if(document.getElementById('ovmmBox')) return false; _ovmmClose(true); return true; }
+// ★ 합치기 실행 중(busy)에는 닫지 않는다 — 닫아도 요청은 계속 돌아 결과를 모르게 된다.
+function _ovmmClose(force){ if(!force&&_ovmmPop&&_ovmmPop.busy) return; _ovmmPop=null; const ov=document.getElementById('ovmmPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } }
 async function _ovmmRun(){
   const P=_ovmmPop; if(!P||!P.ok||P.busy) return;
   P.busy=true; _ovmmPopPaint();
   let r=null;
   try{ r=await api('/api/trackb/advertisers/merge',{method:'POST',body:JSON.stringify({sourceId:P.src.id,targetId:P.dst.id,confirm:true})}); }catch(e){ r={ok:false,error:e&&e.message}; }
-  if(!_ovmmPop) return;
+  if(_ovmmPop!==P) return;
+  if(_ovmmGone()){ return; }
   if(!(r&&r.ok)){ P.busy=false; P.err=(r&&r.error)||'합치지 못했습니다'; P.prev=null; _ovmmPopPaint(); return; }
-  _ovmmClose();
+  _ovmmClose(true);
   toast('합쳤습니다 → '+P.dst.name);
   _OVMM.at=0; _OVMM.open=true;
   await renderOwnershipView();

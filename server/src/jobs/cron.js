@@ -435,7 +435,7 @@ function startCronJobs() {
         if (r && r.skipped) logger.debug('[CRON-AdvSync] lock busy — 양보');
         else if (r && r.ok) {
           const c = r.remaining || {};
-          const needHuman = (c.duplicate || 0) + (c.rename_blocked || 0) + (c.suggest || 0) + (c.ambiguous || 0);
+          const needHuman = (c.duplicate || 0) + (c.rename_blocked || 0) + (c.name_taken || 0) + (c.suggest || 0) + (c.ambiguous || 0);
           if (needHuman) logger.warn(`[CRON-AdvSync] 사람 확인 필요 ${needHuman}건(합치기 대상 ${(c.duplicate || 0) + (c.rename_blocked || 0)}) — 업체관리 인트라넷 연결 점검`);
         } else if (r && !r.ok) logger.warn(`[CRON-AdvSync] ${r.error}`);
       } catch (err) {

@@ -80,8 +80,54 @@ const items = [
   sb3.api = async () => { called = true; return { ok: true, items } };
   await sb3._ovmmLoad(true);
   ok('AE 는 점검 API 를 부르지도 않는다', !called);
+  await reviewFixes();
   finish();
 })();
+
+// 코드리뷰 지적 5종(2026-10-01) — 실제 실행으로 고정
+async function reviewFixes() {
+  const mkDoc = (hasBox) => {
+    const els = {}; if (hasBox) els.ovmmBox = { innerHTML: '' };
+    return { els, getElementById: id => els[id] || null,
+      createElement: () => { const e = { style: {}, innerHTML: '' }; return e; },
+      body: { appendChild(e) { els[e.id] = e; } } };
+  };
+  const sb = sandbox('master'); sb.document = mkDoc(true);
+  // ② 다른 원본에 연결된 업체는 짝이 아니다
+  ok('이름을 쥔 쪽이 인트라넷에 이미 연결돼 있으면 합칠 짝으로 보이지 않는다',
+    sb._ovmmPairsFrom([{ kind: 'rename_blocked', id: 'x2', name: '옛', to: '새', blockedBy: { id: 'x1', name: '새', intranetLinked: true } }]).length === 0);
+  // ① 늦게 온 미리보기 응답은 버린다
+  const S = sb._OVMM_(); S.state = 'ok'; S.pairs = sb._ovmmPairsFrom([
+    { kind: 'duplicate', id: 'a1', name: 'A옛', mergeWith: { id: 'a2', name: 'A' } },
+    { kind: 'duplicate', id: 'b1', name: 'B옛', mergeWith: { id: 'b2', name: 'B' } }]);
+  let release; const slow = new Promise(r => { release = r; });
+  sb.api = async (u, o) => JSON.parse(o.body).sourceId === 'a1'
+    ? slow : { ok: true, preview: { source: { name: 'B옛', campaigns: 1, link: 1, linkActive: 1 }, target: { name: 'B', campaigns: 2 } } };
+  const first = sb._ovmmOpen(0);
+  sb._ovmmClose();
+  await sb._ovmmOpen(1);
+  release({ ok: true, preview: { source: { name: 'A옛', campaigns: 9, link: 1, linkActive: 1 }, target: { name: 'A', campaigns: 9 } } });
+  await first;
+  ok('팝업을 닫고 다른 쌍을 연 뒤 늦게 온 앞 쌍 미리보기는 새 팝업에 섞이지 않는다',
+    /B옛/.test(sb.document.els.ovmmPop.innerHTML) && !/A옛/.test(sb.document.els.ovmmPop.innerHTML));
+  // ④ 폐기된 옛 링크는 "계속 열림"이라 말하지 않는다
+  sb.api = async () => ({ ok: true, preview: { source: { name: 'B옛', campaigns: 1, link: 1, linkActive: 0 }, target: { name: 'B', campaigns: 2 } } });
+  await sb._ovmmOpen(1);
+  const txt = sb.document.els.ovmmPop.innerHTML;
+  ok('옛 링크가 폐기돼 있으면 "열리지 않습니다"라고 말한다', /이미 폐기된 상태/.test(txt) && !/계속 열리고/.test(txt));
+  // ③ 실행 중에는 닫히지 않는다
+  let done; sb.api = () => new Promise(r => { done = r; });
+  const P = sb.vm_pop = null;
+  vm.runInContext('_ovmmPop.ok=true;', sb);
+  const run = sb._ovmmRun();
+  sb._ovmmClose();
+  ok('합치기 실행 중에는 [취소]·Esc 로 팝업이 닫히지 않는다', vm.runInContext('!!_ovmmPop && _ovmmPop.busy', sb)
+    && /취소<\/button>/.test(sb.document.els.ovmmPop.innerHTML) && /onclick="_ovmmClose\(\)" disabled/.test(sb.document.els.ovmmPop.innerHTML));
+  // ⑤ 세션이 끝나 화면이 바뀌면 팝업을 걷는다
+  delete sb.document.els.ovmmBox;
+  done({ ok: false, error: '세션 만료' }); await run;
+  ok('세션이 끝나 업체관리 화면이 사라지면 팝업도 걷힌다', vm.runInContext('_ovmmPop===null', sb) && sb.document.els.ovmmPop.style.display === 'none');
+}
 // 배선
 ok('점검은 intranet-sync, 실행은 merge API', /api\('\/api\/trackb\/advertisers\/intranet-sync'\)/.test(block)
   && /body:JSON\.stringify\(\{sourceId:src\.id,targetId:dst\.id\}\)/.test(block)
