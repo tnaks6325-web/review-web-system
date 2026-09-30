@@ -278,7 +278,6 @@ CREATE TABLE slot_locks (
 | `/api/review-reminders/run` | POST | 알림톡 dry-run 또는 수동 실행(관리자 인증, 기본 dry-run) |
 | `/api/archive/*` | GET/POST | 아카이브 |
 | `/api/diag/*` | GET/POST | 진단/모니터링 |
-| `/api/tab/fix-campaign-tab-swap` | POST | campaign_name/tab_gid 일괄 교정 (인증 필요, dryRun 지원) |
 | `/api/tab/clean-closed` | POST | 마감 탭 아카이브 처리 (인증 필요) |
 
 > 코드 다이어트(결정 186)로 제거된 입구: `/api/admin/db-rebuild`·`/api/tab/reset-all`·`/api/memo`·`/api/payment/*`(입금은 `/api/trackb/payment/*`)·`/api/portal/*`·`/api/participants/*`·`/api/dedupe/*`·옛 `/api/manual-order`(3버전 `/api/trackb/manual-order/*`) 등 — 목록은 `docs/decisions/186-코드-다이어트-장부-2026-09-28.md`.
