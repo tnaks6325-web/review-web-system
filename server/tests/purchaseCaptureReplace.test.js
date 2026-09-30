@@ -24,11 +24,11 @@ const NEW = 'NEWFILE_bbbbbbbbbbbbbbbbbbbb';
 
 function makeDb(opts = {}) {
   const calls = [];
-  const cands = opts.cands || [{ id: 'os-1', capture_file_id: OLD, recipient: '김선미', orderer: '김선미' }];
+  const cands = opts.cands || [{ id: 'os-1', capture_file_id: OLD, recipient: '김선미', orderer: '김선미', order_num: 'Y2609293353567', phone: '010-4515-4844' }];
   const q = async (sql, params) => {
     sql = String(sql); calls.push({ sql, params });
     if (/FROM campaign_participants/.test(sql)) {
-      return { rows: opts.noRow ? [] : [{ id: 'r1', seq: 49, order_submission_id: opts.link || null, reviewer_name: '김선미', recipient_name: '김선미' }] };
+      return { rows: opts.noRow ? [] : [{ id: 'r1', seq: 49, order_submission_id: opts.link || null, reviewer_name: '김선미', recipient_name: '김선미', phone8: '45154844', table_order_num: opts.tnum !== undefined ? opts.tnum : '2609293353567' }] };
     }
     if (/FROM tab_configs WHERE sheet_id=\$1 AND tab_name=\$2 LIMIT 1/.test(sql) && /tab_gid/.test(sql)) return { rows: [{ gid: '123' }] };
     if (/FROM order_submissions os/.test(sql)) return { rows: cands };
@@ -83,7 +83,7 @@ const base = { sheetId: 'S1', tabName: 'T1', rowId: 'r1', imageBase64: IMG, mime
     assert.ok(calls.some(c => /INSERT INTO reviewer_event_logs/.test(c.sql) && c.params.includes('capture_replaced')), '로그 없음');
     assert.ok(dlog.find(x => x[0] === 'upload')[3] === 'FOLDER', '구매캡처 폴더에 올리지 않음');
   }));
-  await t('캡처 없는 주문엔 새로 올린다(휴지통 호출 0)', () => withDb({ cands: [{ id: 'os-1', capture_file_id: null, recipient: '김' }] }, async ({ dlog }) => {
+  await t('캡처 없는 주문엔 새로 올린다(휴지통 호출 0)', () => withDb({ cands: [{ id: 'os-1', capture_file_id: null, recipient: '김선미', order_num: 'Y2609293353567' }] }, async ({ dlog }) => {
     const out = await svc.replaceCapture({ ...base, expectFileId: '' });
     assert.strictEqual(out.ok, true); assert.strictEqual(out.replaced, false);
     assert.ok(!dlog.some(x => x[0] === 'trash'));
@@ -110,15 +110,32 @@ const base = { sheetId: 'S1', tabName: 'T1', rowId: 'r1', imageBase64: IMG, mime
     assert.strictEqual(out.ok, true); assert.strictEqual(out.oldTrashed, false);
     assert.ok(!dlog.some(x => x[0] === 'trash'));
   }));
+  await t('★★ 줄 번호가 남의 주문을 가리키면 거부(운영 실측 36/57)', () => withDb({ cands: [{ id: 'x', capture_file_id: OLD, recipient: '조현아', order_num: '25101369900000', phone: '010-1111-2222' }] }, async ({ dlog, calls }) => {
+    const out = await svc.replaceCapture({ ...base, expectFileId: OLD });
+    assert.strictEqual(out.error, 'order_mismatch');
+    assert.ok(!dlog.length); assert.ok(!calls.some(c => /UPDATE order_submissions/.test(c.sql)));
+  }));
+  await t('★★ 후보 중 이 줄 사람의 주문(주문번호 일치)만 고른다', () => withDb({ cands: [
+      { id: 'wrong', capture_file_id: OLD, recipient: '조현아', order_num: '25101369900000' },
+      { id: 'right', capture_file_id: null, recipient: '김선미', order_num: 'Y2609293353567' }] }, async () => {
+    const out = await svc.previewReplace({ sheetId: 'S1', tabName: 'T1', rowId: 'r1' });
+    assert.strictEqual(out.ok, true); assert.strictEqual(out.orderSubmissionId, 'right');
+  }));
+  await t('판정 순서: 주문번호가 있으면 이름이 같아도 번호가 다르면 아니다', () => {
+    assert.strictEqual(svc.orderMatchesRow({ table_order_num: '111111', reviewer_name: '김' }, { order_num: '222222', recipient: '김' }), false);
+    assert.strictEqual(svc.orderMatchesRow({ table_order_num: '', phone8: '12345678', reviewer_name: '김' }, { phone: '010-9999-8888', recipient: '김' }), false);
+    assert.strictEqual(svc.orderMatchesRow({ table_order_num: '', phone8: '', reviewer_name: '박승혜(박승혁)' }, { recipient: '박승혜' }), true);
+    assert.strictEqual(svc.orderMatchesRow({ table_order_num: '', phone8: '', reviewer_name: '' }, { recipient: '' }), false);
+  });
   await t('주문 없음 = no_order', () => withDb({ cands: [] }, async ({ dlog }) => {
     const out = await svc.replaceCapture({ ...base, expectFileId: '' });
     assert.strictEqual(out.error, 'no_order'); assert.ok(!dlog.length);
   }));
-  await t('★ 주문이 겹치고 링크로도 못 좁히면 거부', () => withDb({ cands: [{ id: 'a', capture_file_id: OLD }, { id: 'b', capture_file_id: null }] }, async () => {
+  await t('★ 주문이 겹치고 링크로도 못 좁히면 거부', () => withDb({ cands: [{ id: 'a', capture_file_id: OLD, recipient: '김선미' }, { id: 'b', capture_file_id: null, recipient: '김선미' }], tnum: '' }, async () => {
     const out = await svc.previewReplace({ sheetId: 'S1', tabName: 'T1', rowId: 'r1' });
     assert.strictEqual(out.error, 'ambiguous_order');
   }));
-  await t('겹쳐도 줄의 링크가 후보 중 하나면 그것', () => withDb({ link: 'b', cands: [{ id: 'a', capture_file_id: OLD }, { id: 'b', capture_file_id: null }] }, async () => {
+  await t('겹쳐도 줄의 링크가 후보 중 하나면 그것', () => withDb({ link: 'b', tnum: '', cands: [{ id: 'a', capture_file_id: OLD, recipient: '김선미' }, { id: 'b', capture_file_id: null, recipient: '김선미' }] }, async () => {
     const out = await svc.previewReplace({ sheetId: 'S1', tabName: 'T1', rowId: 'r1' });
     assert.strictEqual(out.ok, true); assert.strictEqual(out.orderSubmissionId, 'b'); assert.strictEqual(out.currentFileId, '');
   }));
