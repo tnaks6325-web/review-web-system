@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/sooman/dev/wt/review-web-system--내정보란-카카오톡기입/.codex/hooks/session-start.sh'"
+          }
+        ]
+      }
+    ]
+  }
+}

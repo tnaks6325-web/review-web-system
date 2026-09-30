@@ -117,6 +117,8 @@ const KEEP_TABLES = [
     why: '통폐합 롤백이 이번 백업에서 만든 연결만 되돌리도록 증명하는 변경 저널이라 작업 삭제 뒤에도 보존한다' },
   { table: 'workboard_consolidation_targets',
     why: '승인된 기존 작업의 통폐합 상태와 새 workboard 연결을 보존하는 전환 원장이라 레거시 탭 삭제와 함께 지우지 않는다' },
+  { table: 'manual_message_sends',
+    why: '담당자가 리뷰어에게 보낸 문자·알림톡 기록 — 작업을 지워도 누가 언제 무엇을 보냈는지는 남아야 한다(요금·분쟁 확인)' },
 ];
 
 let _pool = null;

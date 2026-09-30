@@ -3580,6 +3580,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     try { switchTab("review"); } catch (_) {}
   } else if (location.hash === "#my" || location.hash === "#info") {
     try { switchTab("my"); } catch (_) {}
+  } else if (location.hash === "#cs") {
+    // 담당자가 보낸 문자의 "문의는 1:1 문의로" 링크 — 문자 답장 대신 직원이 보는 C/S 창구로 모은다.
+    try { switchTab("cs"); } catch (_) {}
   }
   // ★ 063 2단계: 공고에서 "타계정 정보 먼저 등록하기"로 넘어온 경우 —
   //   내정보 탭을 열고 상단에 "등록 후 공고로 돌아가기" 안내를 띄운다(파라미터 없으면 동작 불변).

@@ -2283,6 +2283,38 @@ function _msgIds(v) {
   return [...new Set(arr.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
 }
 
+/* 작업보드 수동 발송 — 문자·알림톡(시안 A, 사용자 확정 2026-09-30).
+   ★ 내부 담당자 전원(AE 포함) · 광고주 차단. 여러 줄 한 번에(최대 200). 실행부 = manualMessage.service. */
+function _manualSendArgs(req) {
+  const b = req.body || {};
+  return { sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+    ids: Array.isArray(b.ids) ? b.ids : [], text: String(b.text || ''), kind: String(b.kind || ''),
+    by: (req.admin && req.admin.name) || '담당자' };
+}
+router.post('/workdesk/manual-send/preview', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const a = _manualSendArgs(req);
+    if (!a.sheetId || !a.tabName || !a.ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, ids 가 필요합니다.' });
+    res.json({ ok: true, ...(await require('../services/manualMessage.service').previewManualSend(a)) });
+  } catch (e) {
+    logger.warn(`[trackB] 수동 발송 미리보기 실패: ${e.message}`);
+    res.status(500).json({ ok: false, error: '받는 사람을 확인하지 못했습니다.' });
+  }
+});
+router.post('/workdesk/manual-send', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const a = _manualSendArgs(req);
+    if (!a.sheetId || !a.tabName || !a.ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, ids 가 필요합니다.' });
+    const svc = require('../services/manualMessage.service');
+    if (a.kind === 'sms') return res.json(await svc.sendManualSms(a));
+    if (a.kind === 'alimtalk') return res.json(await svc.sendManualAlimtalk(a));
+    res.status(400).json({ ok: false, error: '보낼 방식(sms|alimtalk)이 필요합니다.' });
+  } catch (e) {
+    logger.warn(`[trackB] 수동 발송 실패: ${e.message}`);
+    res.status(500).json({ ok: false, error: '발송에 실패했습니다.' });
+  }
+});
+
 /* 작업보드 우클릭 "리뷰어 정보" + 이름 옆 카톡 표시(시안 C, 사용자 확정 2026-09-30).
    ★ 받는 사람 판정은 메시지 보내기와 같은 `resolveRecipients` 한 벌 · 쓰기 0건.
    ★ 광고주 차단(internalMiddleware) — 리뷰어 연락처·카톡 아이디는 내부 전용. */

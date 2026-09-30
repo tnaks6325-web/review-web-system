@@ -2822,6 +2822,31 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   background:var(--card,#fff);color:var(--ink,#111827);outline:none}
 #rmOv .rmsub{margin-top:5px;font-size:10.5px;color:var(--faint,#9ca3af)}
 #rmOv .rmok{margin-top:9px;padding:9px 11px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:9px;color:#166534;font-size:11.5px}
+/* 📨 문자·알림톡 직접 보내기(시안 A, 2026-09-30) — 「리뷰어에게 메시지」 팝오버와 같은 모양 · ms 접두 */
+#msOv{position:fixed;inset:0;z-index:9000;pointer-events:none}
+#msOv .msbox{position:fixed;width:390px;max-height:82vh;box-sizing:border-box;display:flex;flex-direction:column;pointer-events:auto;
+  background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 12px 34px rgba(15,23,42,.24);overflow:hidden}
+#msOv .mshd{padding:10px 13px;font-size:12.5px;font-weight:800;color:var(--ink,#0f172a);border-bottom:1px solid var(--line,#e2e8f0)}
+#msOv .msbd{padding:11px 13px;font-size:12px;color:var(--ink,#0f172a);line-height:1.6;flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:9px}
+#msOv .msft{display:flex;gap:7px;justify-content:flex-end;padding:9px 12px;background:var(--card2,#f8fafc);border-top:1px solid var(--line,#e2e8f0)}
+#msOv .mstabs{display:flex;border:1px solid var(--line,#e2e8f0);border-radius:8px;overflow:hidden}
+#msOv .mstabs button{flex:1;border:0;background:var(--card,#fff);color:var(--ink,#0f172a);padding:6px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+#msOv .mstabs button.mson{background:#2563eb;color:#fff}
+#msOv .mslist{background:var(--info-soft,#eff6ff);border:1px solid var(--info-line,#bfdbfe);border-radius:9px;padding:8px 11px;font-size:11.5px;max-height:190px;overflow:auto}
+#msOv .msrow{padding:4px 0;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+#msOv .msrow + .msrow{border-top:1px solid rgba(15,23,42,.07)}
+#msOv .msrow b{font-weight:800}
+#msOv .msrow .msn{color:var(--muted,#6b7280);font-variant-numeric:tabular-nums}
+#msOv .msrow .mswhy{flex-basis:100%;font-size:10.5px;color:#b42318}
+#msOv .msrow .msok{color:#166534;font-size:10.5px}
+#msOv .msrow.no b{color:var(--muted,#6b7280)}
+#msOv textarea{width:100%;box-sizing:border-box;min-height:96px;resize:vertical;padding:9px;border:1px solid var(--line,#e5e7eb);border-radius:9px;
+  font-size:12px;font-family:inherit;line-height:1.6;background:var(--card,#fff);color:var(--ink,#111827);outline:none}
+#msOv .msmeta{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted,#6b7280);font-variant-numeric:tabular-nums}
+#msOv .msfoot{font-size:10.5px;color:var(--muted,#6b7280);white-space:pre-line;background:var(--card2,#f8fafc);border-radius:8px;padding:6px 8px}
+#msOv .msinfo{font-size:11px;color:#1d4ed8;background:#eff6ff;border-radius:8px;padding:7px 9px}
+#msOv .msbad{font-size:11.5px;color:#b42318;background:#fef2f2;border:1px solid #f3c0c0;border-radius:9px;padding:8px 10px}
+#msOv .msdone{font-size:11.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;padding:8px 10px}
 #hbOv table.wbl-t{font-size:11.5px} #hbOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
 #ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
 #ddOv table.wbl-t{font-size:11.5px}
@@ -9924,6 +9949,8 @@ function _openCellMenu(x,y,td){
         '미작성으로 종결합니다. 제출완료로 세지 않으며 추가 제출·독촉·지급대상에서 제외합니다')
       + row('🗑','주문 취소','_menuCancelReviewOrder()',resolutionBlocked,true,
         '참여행을 제거합니다. 연결된 구매기록도 취소하며 처리 기록은 남깁니다') : '')
+    + (msgN?row('📨', msgN>1?`${msgN}명에게 문자·알림톡`:'문자·알림톡 보내기', "openManualSend()", false, false,
+        '리뷰어 휴대폰으로 문자(직접 입력) 또는 알림톡(승인 문구 · 다음 회차)을 보냅니다'):'')
     + (msgN?row('💬', msgN>1?`리뷰어 ${msgN}명에게 메시지`:'리뷰어에게 메시지', "openReviewerMsg()", false, false,
         msgN>1?'선택한 줄의 리뷰어들에게 같은 내용을 보냅니다(같은 리뷰어는 한 번만)':'이 줄 리뷰어의 1:1 문의방으로 보냅니다'):'')
     + (one&&selectedRow&&_isInternalRole()?row('🛒','구매캡처 교체','openCaptureReplaceFromMenu()',false,false,'이 줄 주문의 구매캡처를 새 사진으로 바꿉니다(없으면 새로 올립니다)'):'')
@@ -9954,6 +9981,139 @@ function _openCellMenu(x,y,td){
 function _closeCellMenu(){ const m=$('#gcellmenu'); if(m) m.classList.remove('show'); }
 function _menuEditCell(){ const td=_selAnchorTd(); _closeCellMenu(); if(td&&td.classList.contains('gedit')) beginEditCell(td); }
 
+/* ══ 📨 문자·알림톡 직접 보내기 (시안 A, 사용자 확정 2026-09-30) ═══════════════════
+   ★ 받는 사람·보낼 수 있는지는 **서버가** 정한다(/workdesk/manual-send/preview) — 화면은 그리기만.
+   ★ 탭 전환·목록 갱신이 textarea 를 다시 만들지 않는다(한글 IME 보호) — 틀은 한 번만 그린다.
+   ★ 문자에는 서버가 "발신 전용 · 1:1 문의로" 안내를 붙이고 같은 내용을 1:1 문의방에도 남긴다.
+   ★ body 직속 · 바깥 클릭으로 닫지 않는다(입력 보호) · Esc·[취소]만. onclick 에 시트 문자열 보간 0. */
+let _MS=null;
+function _msClose(){ const o=document.getElementById('msOv'); if(o) o.remove(); _MS=null; }
+if(!window._msKeyBound){
+  window._msKeyBound=true;
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('msOv')) _msClose(); });
+  window.addEventListener('scroll',()=>{ if(_MS) _msPlace(); },true);
+  window.addEventListener('resize',()=>{ if(_MS) _msPlace(); });
+}
+function _msPlace(){
+  const box=document.querySelector('#msOv .msbox'); if(!box||!_MS) return;
+  const el=_MS.anchorEl;
+  if(el&&el.isConnected){ const r=el.getBoundingClientRect(); if(r.width||r.height) _MS.anchor={left:r.left,top:r.top,bottom:r.bottom}; }
+  const a=_MS.anchor; const w=box.offsetWidth||390, vh=window.innerHeight;
+  const below=vh-a.bottom-12, above=a.top-12, down=below>=above;
+  const room=Math.max(240, Math.min(vh*0.82, down?below:above));
+  box.style.maxHeight=Math.round(room)+'px';
+  const h=Math.min(box.offsetHeight||360, room);
+  box.style.left=Math.max(8, Math.min(a.left, window.innerWidth-w-10))+'px';
+  box.style.top=(down ? a.bottom+4 : Math.max(8, a.top-h-4))+'px';
+}
+function _msBytes(t){ let n=0; for(const ch of String(t||'')) n+=ch.charCodeAt(0)>127?2:1; return n; }
+function openManualSend(){
+  const t=STATE.cur, ids=_msgRowIds(), td=_selAnchorTd(), r=td?td.getBoundingClientRect():null;
+  _closeCellMenu();
+  if(!_msgCanSend()||!ids.length) return;
+  _msClose();
+  _MS={ sheetId:t.sheetId, tabName:t.tabName, ids, tab:'sms', items:null, footer:'', err:'', busy:false, done:null,
+        anchorEl:td||null, anchor:r?{left:r.left,top:r.top,bottom:r.bottom}:{left:120,top:120,bottom:150} };
+  const ov=document.createElement('div'); ov.id='msOv';
+  ov.innerHTML=`<div class="msbox"><div class="mshd">📨 문자·알림톡 보내기</div>
+    <div class="msbd">
+      <div class="mstabs"><button type="button" data-mt="sms" class="mson">✉️ 문자</button><button type="button" data-mt="alimtalk">💬 알림톡</button></div>
+      <div id="msList" class="mslist">받는 사람을 확인하는 중…</div>
+      <div id="msSmsBox"><textarea id="msText" placeholder="보낼 내용을 입력하세요"></textarea>
+        <div class="msmeta"><span id="msBytes"></span><span id="msKind"></span></div>
+        <div class="msfoot" id="msFoot"></div></div>
+      <div id="msAtaBox" style="display:none" class="msinfo">승인된 알림톡 문구의 <b>다음 회차</b>를 지금 보냅니다. 자동 알림에도 그 회차를 보낸 것으로 기록돼 같은 회차가 두 번 가지 않습니다.</div>
+      <div id="msResult"></div>
+    </div>
+    <div class="msft" id="msBtns"></div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('.mstabs').addEventListener('click',e=>{ const b=e.target.closest('[data-mt]'); if(b) _msSetTab(b.getAttribute('data-mt')); });
+  ov.querySelector('#msText').addEventListener('input',_msPaintMeta);
+  _msPaintMeta(); _msPaintBtns(); _msPlace(); _msLoad();
+}
+function _msSetTab(tab){
+  if(!_MS||_MS.busy) return; _MS.tab=tab; _MS.done=null;
+  document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.classList.toggle('mson', b.getAttribute('data-mt')===tab));
+  const sb=document.getElementById('msSmsBox'), ab=document.getElementById('msAtaBox');
+  if(sb) sb.style.display=tab==='sms'?'':'none'; if(ab) ab.style.display=tab==='alimtalk'?'':'none';
+  const rs=document.getElementById('msResult'); if(rs) rs.innerHTML='';
+  _msPaintList(); _msPaintBtns(); _msPlace();
+}
+async function _msLoad(){
+  try{
+    const d=await api('/api/trackb/workdesk/manual-send/preview',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,ids:_MS.ids})});
+    if(!_MS) return;
+    if(!d||d.ok===false){ _MS.err=(d&&d.error)||'받는 사람을 확인하지 못했습니다.'; }
+    else { _MS.items=d.items||[]; _MS.footer=d.footer||''; _MS.provider=d.providerConfigured!==false; }
+  }catch(e){ if(_MS) _MS.err='받는 사람을 확인하지 못했습니다 — '+(e.message||'네트워크 오류'); }
+  if(!_MS) return;
+  const f=document.getElementById('msFoot'); if(f) f.textContent='자동으로 붙는 안내:'+(_MS.footer||'');
+  _msPaintMeta(); _msPaintList(); _msPaintBtns(); _msPlace();
+}
+function _msOkItems(){
+  const items=(_MS&&_MS.items)||[];
+  if(_MS.tab==='sms'){ const seen=new Set(); return items.filter(x=>x.sms&&x.sms.ok&&!seen.has(x.sms.phone)&&seen.add(x.sms.phone)); }
+  return items.filter(x=>x.ata&&x.ata.ok);
+}
+function _msPaintList(){
+  const l=document.getElementById('msList'); if(!l||!_MS) return;
+  if(_MS.err){ l.className='msbad'; l.textContent=_MS.err; return; }
+  if(!_MS.items){ l.className='mslist'; l.textContent='받는 사람을 확인하는 중…'; return; }
+  l.className='mslist';
+  const res=_MS.done?new Map(_MS.done.map(x=>[x.participantId,x])):null;
+  const n=_msOkItems().length;
+  l.innerHTML=`<div style="font-weight:800;margin-bottom:3px">${_MS.tab==='sms'?'문자':'알림톡'} 받을 사람 ${n}명</div>`+
+    _MS.items.map(x=>{
+      const p=_MS.tab==='sms'?x.sms:x.ata; const ok=p&&p.ok; const r=res&&res.get(x.participantId);
+      const who=esc((x.sms&&x.sms.name)||x.rowName||'(이름 없음)');
+      const num=_MS.tab==='sms' ? (ok?esc(_fmtPhone(p.phone)):'') : (ok?`${p.reminderNo}차 · ···${esc(p.phoneTail)} · 기한 ${esc(p.deadline)}`:'');
+      const tail = r ? (r.sent?`<span class="msok">✓ 보냄${r.roomOk===false&&_MS.tab==='sms'?' (문의방 기록은 실패)':''}</span>`:`<span class="mswhy">${esc(r.reason||'보내지 못했습니다')}</span>`)
+        : (ok?'':`<span class="mswhy">${esc((p&&p.reason)||'보낼 수 없습니다')}</span>`);
+      return `<div class="msrow${ok?'':' no'}"><b>${who}</b><span class="msn">${num}</span>${tail}</div>`;
+    }).join('');
+}
+function _msPaintMeta(){
+  const ta=document.getElementById('msText'); if(!ta||!_MS) return;
+  const b=_msBytes(String(ta.value||'').trim()+(_MS.footer||''));
+  const eb=document.getElementById('msBytes'), ek=document.getElementById('msKind');
+  if(eb) eb.textContent=`${b} 바이트(안내 문구 포함)`;
+  if(ek) ek.textContent=b>2000?'너무 깁니다(2000바이트까지)':(b>90?'장문 문자(LMS)로 발송':'단문 문자(SMS)로 발송');
+  _msPaintBtns();
+}
+function _msPaintBtns(){
+  const f=document.getElementById('msBtns'); if(!f||!_MS) return;
+  const n=_MS.items?_msOkItems().length:0;
+  const txt=String((document.getElementById('msText')||{}).value||'').trim();
+  const tooLong=_msBytes(txt+(_MS.footer||''))>2000;
+  const dis=_MS.busy||!n||(_MS.tab==='sms'&&(!txt||tooLong))||_MS.provider===false;
+  const label=_MS.busy?'보내는 중…':`${n}명에게 ${_MS.tab==='sms'?'문자':'알림톡'} 보내기`;
+  f.innerHTML=`<button class="btn" type="button" onclick="_msClose()">${_MS.done?'닫기':'취소'}</button>
+    <button class="btn pri" type="button" onclick="_msSend()"${dis?' disabled':''}>${label}</button>`;
+}
+async function _msSend(){
+  if(!_MS||_MS.busy) return;
+  const n=_msOkItems().length; if(!n) return;
+  const kind=_MS.tab;
+  const text=String((document.getElementById('msText')||{}).value||'').trim();
+  if(!confirm(`${n}명에게 ${kind==='sms'?'문자':'알림톡'}를 보냅니다. 요금이 발생하고 보낸 뒤에는 취소할 수 없습니다.`)) return;
+  _MS.busy=true; _msPaintBtns();
+  let d=null;
+  try{
+    d=await api('/api/trackb/workdesk/manual-send',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,
+      ids:_msOkItems().map(x=>x.participantId), kind, text})});
+  }catch(e){ d={ok:false,error:'발송 실패 — '+(e.message||'네트워크 오류')}; }
+  if(!_MS) return;
+  _MS.busy=false;
+  const results=(d&&d.results)||[];
+  const sent=results.filter(x=>x.sent).length;
+  _MS.done=results;
+  const rs=document.getElementById('msResult');
+  if(rs) rs.innerHTML = sent
+    ? `<div class="msdone">✓ ${sent}명에게 보냈습니다${results.length>sent?` · 못 보낸 ${results.length-sent}건은 위 목록에 사유가 있습니다`:''}</div>`
+    : `<div class="msbad">보내지 못했습니다 — ${esc((d&&d.error)||(results[0]&&results[0].reason)||'서버가 사유를 알려주지 않았습니다')}</div>`;
+  _msPaintList(); _msPaintBtns(); _msPlace();
+  if(sent) toast(`${kind==='sms'?'문자':'알림톡'} ${sent}건을 보냈습니다`);
+}
 /* ══ 💬 리뷰어에게 메시지 (우클릭 → 1:1 문의방을 관리자가 먼저 연다) ═══════════════
    종전에는 **리뷰어가 먼저 문의를 보내야만** 방이 생겼다. 이제 표에서 그 줄을 우클릭해
    바로 보낼 수 있다. 방을 여는 실행부는 서버의 `csBridge.postAdminNotice` 한 벌이다.
