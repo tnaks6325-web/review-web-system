@@ -15761,7 +15761,7 @@ function _rvIdentityChange(i, memberNo){
     <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
       <div style="font-size:.8rem;color:#475569">현재: <b>${esc(current.name)}</b> · <b>${esc(_fmtPhone(current.phone))}</b></div>
       <label style="font-size:.78rem;color:#6b7280">이름</label><input id="rvIdName" class="ovsearch" value="${esc(current.name)}" style="width:100%">
-      <label style="font-size:.78rem;color:#6b7280">새 연락처</label><input id="rvIdPhone" class="ovsearch" inputmode="numeric" value="${esc(_fmtPhone(current.phone))}" style="width:100%">
+      <label style="font-size:.78rem;color:#6b7280">새 연락처</label><input id="rvIdPhone" class="ovsearch" inputmode="numeric" value="${esc(current.phone)}" style="width:100%">
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 11px;font-size:.74rem;color:#1e3a8a;line-height:1.55">과거 이름·번호는 삭제하지 않고 이 코드의 이력으로 보존합니다. 소유자 화면에서는 이전 참여·제출기록도 계속 합산되며, 동일 공고 제한은 이 실제 참여자 코드에만 적용됩니다.</div>
       <div id="rvIdOut"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn" onclick="_rvPhClose()">취소</button><button type="button" class="btn pri" id="rvIdGo" onclick="_rvIdentityCheck(${i},${memberNo})">확인</button></div>
     </div></div>`;

@@ -76,8 +76,17 @@ for (const [f, pats] of Object.entries(WIRED)) {
   const src = fs.readFileSync(FE(f), 'utf8');
   pats.forEach((re, k) => t(`${f} #${k + 1}`, () => assert.ok(re.test(src), re.toString())));
 }
+console.log('\n§4 표시 전용 — 저장으로 이어지는 자리·리뷰어 번호가 아닌 칸에는 입히지 않는다(코드리뷰 P2 2건)');
+t('번호 변경 입력칸은 원래 값 그대로(서식을 입히면 옛 8자리에 010 이 붙은 채 저장된다)', () => {
+  assert.ok(/id="rvIdPhone" class="ovsearch" inputmode="numeric" value="\$\{esc\(current\.phone\)\}"/.test(wdSrc));
+});
+t('광고주 연락처는 서식을 입히지 않는다(1588-1234 가 010-1588-1234 로 둔갑)', () => {
+  const src = fs.readFileSync(FE('js/work-order-detail.js'), 'utf8');
+  assert.ok(!/fmtPhone\((c|a)\.contact\)/.test(src));
+});
 t('workdesk 등록리뷰어DB 구간에 가공 없는 phone 출력이 남지 않는다', () => {
-  const raw = (wdSrc.match(/\$\{(?:esc|dash)\((?:[a-z]+\.)?phone(?:\|\|'')?\)\}/g) || []);
+  // 입력칸 value(저장으로 이어지는 자리)는 §4 가 따로 고정한다 — 여기서는 화면 표시만 본다.
+  const raw = (wdSrc.match(/(?<!value=")\$\{(?:esc|dash)\((?:[a-z]+\.)?phone(?:\|\|'')?\)\}/g) || []);
   assert.deepStrictEqual(raw, []);
 });
 
