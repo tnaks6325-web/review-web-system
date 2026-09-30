@@ -1321,8 +1321,6 @@ function _batchView(b) {
     boardFailedCount: Number(b.board_failed_count || 0),
     boardStamp: b.board_stamp || '',
     boardRecordedAt: b.board_recorded_at || null,
-    resultCanApply: !!(b.result_upload_id && b.result_has_file && b.result_applied !== true
-      && (Number(b.result_success_count || 0) + Number(b.result_failed_count || 0) > 0)),
   };
 }
 

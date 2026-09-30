@@ -264,16 +264,15 @@ const trackB = require('../src/routes/trackB.routes');
 const layers = trackB.stack.filter(l => l.route);
 const findRoute = (method, p) => layers.find(l => l.route.path === p && l.route.methods[method]);
 
-t('입금관리 라우트 6종이 등록돼 있다', () => {
+t('입금관리 라우트 5종이 등록돼 있다', () => {
   const want = [['get', '/payment/targets'], ['post', '/payment/batch'], ['get', '/payment/batches'],
-    ['get', '/payment/batch/:id'], ['get', '/payment/batch/:id/file'], ['post', '/payment/batch/:id/cancel']];
+    ['get', '/payment/batch/:id/file'], ['post', '/payment/batch/:id/cancel']];
   for (const [m, p] of want) assert.ok(findRoute(m, p), `${m.toUpperCase()} ${p} 미등록`);
 });
 
-t('★ 목록 라우트가 상세보다 먼저 등록됐다(라우트 삼킴 방지)', () => {
-  const iList = layers.findIndex(l => l.route.path === '/payment/batches');
-  const iOne = layers.findIndex(l => l.route.path === '/payment/batch/:id');
-  assert.ok(iList >= 0 && iOne >= 0 && iList < iOne, '/payment/batches 가 /payment/batch/:id 뒤에 있다');
+// 회차 상세(GET /payment/batch/:id)는 부르는 화면이 없어 2026-09-30 코드 다이어트(결정 186 · 14번-①)로 제거했다.
+t('회차 상세 입구(GET /payment/batch/:id)는 제거 상태(부르는 화면 0)', () => {
+  assert.ok(!findRoute('get', '/payment/batch/:id'), 'GET /payment/batch/:id 가 되살아났다');
 });
 
 t('★ 회차 결과는 재업로드 미리보기보다 실제 반영된 결과를 우선 표시한다', () => {

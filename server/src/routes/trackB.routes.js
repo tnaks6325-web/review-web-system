@@ -3460,14 +3460,6 @@ router.get('/payment/batches', authMiddleware, adminOrMasterMiddleware, async (r
   try { res.json({ ok: true, items: await paymentSvc.listBatches(parseInt(req.query.limit, 10) || 50) }); }
   catch (err) { next(err); }
 });
-router.get('/payment/batch/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const out = await paymentSvc.getBatch(req.params.id);
-    if (!out) return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
-    res.json({ ok: true, ...out });
-  } catch (err) { next(err); }
-});
-
 // 은행 서식 파일 — 재다운로드도 이력에 남는다(사용자 확정 규칙)
 router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   let client;
@@ -3605,8 +3597,10 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
 });
 
 /* ── M2: 이체결과 파일 반영 ─────────────────────────────────
-   ★ 미리보기(result-preview)는 **쓰기 0** — 사람이 확인 화면을 본 뒤에만 반영한다.
-   ★ 반영(result-apply)은 서버가 **파일을 다시 해석·재매칭**한다(화면이 보낸 목록 불신).
+   ★ 반영 입구는 result-auto-apply 하나 — 서버가 **파일을 다시 해석·재매칭**하고(화면이 보낸 목록 불신)
+     승인된 자동 반영 조건·중복 파일 가드를 통과할 때만 입금 상태를 바꾼다. GET result-preview 는 저장된
+     마스킹 미리보기 조회(쓰기 0). 옛 수동 입구(POST result-preview·result-apply·GET batch/:id)는
+     부르는 화면이 없어 2026-09-30 코드 다이어트(결정 186 · 14번-①)로 제거 — 계산 함수는 그대로다.
    ★ 42P01(migration 100 미적용) = `not_ready` 로 사유를 말한다(마스킹된 200 방지 — 088 규율). */
 const paymentResultSvc = require('../services/paymentResult.service');
 const manualDepositRepairSvc = require('../services/manualDepositRepair.service');
@@ -3622,15 +3616,6 @@ function _resultErr(err, res, next) {
   }
   return next(err);
 }
-
-router.post('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    res.json(await paymentResultSvc.previewResultFile({
-      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
-    }));
-  } catch (err) { _resultErr(err, res, next); }
-});
 
 // 결과 원문을 다시 열지 않고, 업로드 당시 저장한 마스킹 미리보기만 확인한다.
 // The server re-parses and re-matches the uploaded file.  Only the approved
@@ -3714,21 +3699,6 @@ router.post('/payment/batch/:id/amount-mismatch-reconcile', authMiddleware, admi
     res.json(await paymentResultSvc.reconcileAmountMismatch({
       batchId: req.params.id, uploadId: b.uploadId, itemId: b.itemId,
       resultSeq: b.resultSeq, note: b.note, by: _by(req),
-    }));
-  } catch (err) { _resultErr(err, res, next); }
-});
-
-router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    // ★ 사람이 확인 화면에서 누른 것만 반영한다(빠뜨리면 업로드 즉시 입금 기록이 되어 되돌릴 수 없다).
-    if (b.confirm !== true) {
-      return res.status(400).json({ ok: false, code: 'need_confirm', error: '확인 화면에서 [이대로 반영]을 눌러 주세요.' });
-    }
-    res.json(await paymentResultSvc.applyResultFile({
-      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, uploadId: b.uploadId, by: _by(req),
-      // ★ 기본은 보냄 — 화면에서 명시적으로 끈 경우(`false`)만 안 보낸다(검수 반려 팝업과 같은 규율).
-      notifyFailed: b.notifyFailed !== false,
     }));
   } catch (err) { _resultErr(err, res, next); }
 });

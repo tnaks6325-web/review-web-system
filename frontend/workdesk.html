@@ -11991,7 +11991,7 @@ async function _pmLoad(force){
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
   STATE.pmFinEx = t.finishedExcluded||null; STATE.pmFinUnknown = !!t.finishedUnavailable;
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
-  // 새 결과 파일은 result-apply 경로에서 즉시 기록하므로, 이 경로는 기존 실패 이력에만 해당한다.
+  // 새 결과 파일은 result-auto-apply(안에서 같은 반영 계산) 경로에서 즉시 기록하므로, 이 경로는 기록 실패 이력에만 해당한다.
   const legacyFailed = STATE.pmBatches.filter(batch => batch.status === 'applied'
     && batch.resultUploadId && Number(batch.boardFailedCount) > 0);
   const compactDepositFormat = STATE.pmBatches.filter(batch => batch.status === 'applied'
@@ -12442,14 +12442,6 @@ async function _pmDepositBackfill(i){
   if(r.skipped) msg.push(`제외 ${r.skipped}건`);
   toast(msg.join(' · '));
   await _pmLoad(true);
-}
-function _pmBoardApplyText(board){
-  const b=board||{};
-  const parts=[`작업보드 입금일 ${b.recorded||0}건 기록`];
-  if(b.queued) parts.push(`${b.queued}건 기록 대기`);
-  if(b.skipped) parts.push(`${b.skipped}건 제외`);
-  if(b.failed) parts.push(`${b.failed}건 실패`);
-  return parts.join(' · ');
 }
 function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
@@ -13258,42 +13250,6 @@ function _pmResultModal(){
 function _pmResultClose(){
   const el = document.getElementById('pmResultOv'); if(el) el.remove();
   STATE.pmResult = null;
-}
-
-async function _pmResultApply(){
-  const R = STATE.pmResult; if(!R) return;
-  const s = R.preview.summary || {};
-  if(!confirm(`#${R.batch.seq} 회차에 이체결과를 반영합니다.\n\n· 입금완료 기록 ${s.success||0}건\n· 이체실패 처리 ${s.failed||0}건 (결과없음 ${s.notInFile||0}건 포함 · 다음 회차에 다시 담깁니다)\n\n입금완료로 기록된 건은 되돌릴 수 없습니다.`)) return;
-  const nf = document.getElementById('pmNotifyFail');
-  const notifyFailed = !!(nf && nf.checked);
-  const btn = document.getElementById('pmApplyBtn');
-  if(btn){ btn.disabled = true; btn.textContent = '반영 중…'; }
-  const r = await api('/api/trackb/payment/batch/'+R.batch.id+'/result-apply',
-    { method:'POST', body: JSON.stringify({ confirm:true, notifyFailed, uploadId:R.preview.uploadId||'', fileName:R.file.name, base64:R.file.base64||'' }) });
-  if(!r || !r.ok){
-    toast((r&&r.error)||'반영 실패');
-    if(btn){ btn.disabled = false; btn.textContent = '이대로 반영'; }
-    return;
-  }
-  _pmResultClose();
-  /* ★ 안내 전송 결과도 말한다 — 보냈다고 했는데 조용히 0건이면 담당자가 알 방법이 없다. */
-  const notice = r.notifyTargets
-    ? ` · 안내 ${r.notified||0}/${r.notifyTargets}건`
-    : '';
-  const boardText = r.applied ? ` · ${_pmBoardApplyText(r.board)}` : '';
-  toast(`반영 완료 — 입금 ${r.applied}건 · 실패 ${r.failed}건${r.notInFile?` · 결과없음 ${r.notInFile}건(대기 유지)`:''}${boardText}${notice}`);
-  await _pmLoad(true);
-}
-
-async function _pmApplySavedResult(i){
-  const b = (STATE.pmBatches||[])[i];
-  if(!b || !b.resultCanApply || !b.resultUploadId){ toast('반영할 저장 결과 파일이 없습니다.'); return; }
-  if(!confirm(`#${b.seq} 회차의 저장된 이체결과를 반영합니다.\n\n원본 결과 파일을 다시 선택하지 않고 처리합니다. 입금완료 기록은 되돌릴 수 없습니다.`)) return;
-  const r = await api('/api/trackb/payment/batch/'+b.id+'/result-apply',
-    { method:'POST', body: JSON.stringify({ confirm:true, uploadId:b.resultUploadId, notifyFailed:true }) });
-  if(!r || !r.ok){ toast((r&&r.error)||'반영 실패'); return; }
-  toast(`반영 완료 · 입금 ${r.applied}건 · 실패 ${r.failed}건${r.applied?` · ${_pmBoardApplyText(r.board)}`:''}`);
-  await _pmLoad(true);
 }
 
 async function _pmMarkApplied(i){
