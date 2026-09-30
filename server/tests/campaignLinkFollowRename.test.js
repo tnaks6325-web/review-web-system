@@ -73,8 +73,8 @@ console.log('── A. 실행부 ──');
   console.log('── B. 모든 보정 지점에 공용 탭 리네임 배선 ──');
   t('indexBuilder가 공용 renameTabState를 호출한다(indexScan 은 결정 186 80번에서 제거)',
     /renameTabState\(pool, \{/.test(ib));
-  t('수동 fix-campaign-tab-swap도 같은 공용 함수를 호출한다(sync-tab-names 는 결정 186 80번에서 제거)',
-    (tc.match(/renameTabState\(pool, \{/g) || []).length === 1);
+  t('탭설정 라우트에는 수동 탭 리네임 경로가 남아 있지 않다(sync-tab-names 80번·fix-campaign-tab-swap 87번에서 제거)',
+    !/renameTabState\(/.test(tc));
   t('★ 규칙 사본 0 — UPDATE recruit_campaigns 는 공유 헬퍼에만 있다',
     !/UPDATE recruit_campaigns[\s\S]{0,120}linked_tab_name/.test(ib)
     );

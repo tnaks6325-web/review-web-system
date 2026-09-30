@@ -8,7 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
-const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
@@ -562,12 +562,6 @@ router.post('/advertisers', authMiddleware, internalMiddleware, async (req, res,
     const out = await svc.createAdvertiserScoped({ name, inadPm: inad_pm, role: _role(req), byName: (req.admin && req.admin.name) || '' });
     res.status(out.ok ? 200 : (out.code || 400)).json(out);
   } catch (err) { next(err); }
-});
-
-// ── 이미 소유 지정된 시트 ID 목록 — 업체추가 폼 시트 드롭다운에서 제외용(내부인). ──
-router.get('/owned-sheets', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, sheetIds: await svc.ownedSheetIds() }); }
-  catch (err) { next(err); }
 });
 
 // ══════════════════════════════════════════════════════════════════════════

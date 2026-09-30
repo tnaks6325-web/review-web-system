@@ -82,8 +82,6 @@ const _ACTION_MAP = {
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
   'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },
   'saveColPrefs':     { method: 'POST', path: '/api/tab/col-prefs' },
-  'backfillGid':      { method: 'POST', path: '/api/tab/backfill-gid' },
-  'fixSheetUrls':     { method: 'POST', path: '/api/tab/fix-sheet-urls' },
   // 옵션(Option) 기능
   'getOptionHeaders': { method: 'GET',  path: '/api/tab/option-headers' },
   'saveOptionColumns':{ method: 'POST', path: '/api/tab/option-columns' },
@@ -156,7 +154,6 @@ const _ACTION_MAP = {
   'submitReview':       { method: 'POST', path: '/api/submit/review' },
   'submitOrderForm':    { method: 'POST', path: '/api/submit/order' },
   'checkReviewFiles':   { method: 'POST', path: '/api/submit/check-files' },
-  'checkDuplicateOrder':{ method: 'POST', path: '/api/submit/check-duplicate' },
   'findSlot':           { method: 'POST', path: '/api/submit/find-slot' },
 
   // 진단/기타
@@ -164,10 +161,7 @@ const _ACTION_MAP = {
   'debugBaseSheet':     { method: 'GET',  path: '/api/diag/debug-base' },
   'debugDetailSheet':   { method: 'GET',  path: '/api/diag/debug-tab' },
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
-  'previewCampaign':    { method: 'GET',  path: '/api/diag/preview-campaign' },
-  'addCampaign':        { method: 'POST', path: '/api/diag/add-campaign' },
   'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
-  'createBaseSheet':    { method: 'POST', path: '/api/diag/new-sheet' },
 
   // 뷰어
   'getViewerData':  { method: 'GET', path: '/api/viewer/viewer-data' },
@@ -181,10 +175,6 @@ const _ACTION_MAP = {
   'reviewerLogCancelOrder': { method: 'POST', path: '/api/trackb/reviewer-logs/cancel-order' },
 
   // 시트 상단 강제 공지문 (C1:R1) — 신규 탭 자동 삽입 + 기존 탭 일괄 적용
-  'sheetNoticeGet':      { method: 'GET',  path: '/api/diag/sheet-notice' },
-  'sheetNoticeSet':      { method: 'POST', path: '/api/diag/sheet-notice' },
-  'sheetNoticeBulk':     { method: 'POST', path: '/api/diag/sheet-notice-bulk' },
-  'sheetNoticeBulkStat': { method: 'GET',  path: '/api/diag/sheet-notice-bulk' },
 
   // 이미지 (Gemini AI + Drive)
   'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
@@ -203,13 +193,8 @@ const _ACTION_MAP = {
 
   // Drive 폴더 관리
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
-  'driveAccountInfo':    { method: 'GET',  path: '/api/drive/account-info' },
-  'driveOwnershipAudit': { method: 'POST', path: '/api/drive/ownership-audit' },
-  'driveTransferOwnership': { method: 'POST', path: '/api/drive/transfer-ownership' },
-  'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
-  'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
@@ -218,8 +203,6 @@ const _ACTION_MAP = {
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
   'saveAppUrl':     { method: 'POST', path: '/api/diag/app-url' },
-  'convertToNcHeaders': { method: 'POST', path: '/api/diag/convert-nc-headers' },
-  'createCampaignSheet': { method: 'POST', path: '/api/diag/create-campaign-sheet' },
 
   // Phase 2-5: Sync Queue + Build History
   'syncQueueStats':     { method: 'GET',  path: '/api/diag/sync-queue' },
@@ -232,9 +215,6 @@ const _ACTION_MAP = {
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
   // Phase 12: 시트 권한 관리
-  'shareSheet':         { method: 'POST', path: '/api/diag/share-sheet' },
-  'shareAllSheets':     { method: 'POST', path: '/api/diag/share-all-sheets' },
-  'sheetPermissions':   { method: 'GET',  path: '/api/diag/sheet-permissions' },
 
   // Phase 10: Archive (탭 단위 마감)
   'archiveDetect':      { method: 'GET',  path: '/api/archive/detect' },
@@ -247,11 +227,8 @@ const _ACTION_MAP = {
   'archiveRestoreRound': { method: 'POST', path: '/api/archive/restore-round' },
 
   // Phase 11: Campaign Name Fix
-  'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },
-  'sheetTitles':        { method: 'GET',  path: '/api/diag/sheet-titles' },
 
   // Phase 13: Empty Index Cleanup
-  'cleanupEmptyIndexes': { method: 'POST', path: '/api/diag/cleanup-empty-indexes' },
 
   // Phase 14: 키워드 관리 + 인식 실패 탭 진단
   'getKeywords':           { method: 'GET',    path: '/api/admin/keywords' },

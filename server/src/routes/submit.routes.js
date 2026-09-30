@@ -1,7 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
-const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
+const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta } = require('../services/sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
@@ -196,25 +196,6 @@ router.post('/debug-tabs', authMiddleware, async (req, res, next) => {
       hidden: s.properties?.hidden || false,
     }));
     return res.json({ ok: true, tabs });
-  } catch (err) {
-    return res.json({ ok: false, error: err.message });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// 진단: 시트 데이터 조회 (헤더 감지 디버그용)
-// ═══════════════════════════════════════════════════════════
-router.post('/debug-sheet-data', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, rows = 10 } = req.body;
-    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
-    const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ${rows}`);
-    // 각 행에 대해 _isHeaderRow 결과도 함께 반환
-    const analyzed = (allRows || []).map((row, i) => {
-      const cells = (row || []).map(c => String(c || '').trim());
-      return { rowIdx: i, isHeader: _isHeaderRow(cells), cells: cells.slice(0, 20) };
-    });
-    return res.json({ ok: true, rowCount: (allRows || []).length, analyzed });
   } catch (err) {
     return res.json({ ok: false, error: err.message });
   }
@@ -1649,69 +1630,6 @@ router.post('/order', async (req, res, next) => {
       } catch (e) { logger.warn(`[submit/order] kick 실패(무시, cron 백스톱): ${e.message}`); }
     }
 
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/submit/check-duplicate — 중복 검사
-//
-// Phase 4: DB 전용 전환
-//   - Sheets readSheet 호출 완전 제거
-//   - order_submissions + review_index 기반 검사
-//   - 응답시간: 5~15초 → 3ms
-// ═══════════════════════════════════════════════════════════
-router.post('/check-duplicate', async (req, res, next) => {
-  try {
-    const { sheetId, tabName, userId, dateStr, orderNum, recipient, phone, address } = req.body;
-    if (!sheetId || !tabName) {
-      return res.json({ error: 'sheetId, tabName 필요' });
-    }
-
-    // ── DB 기반 중복 검사 (Sheets 읽기 완전 제거) ──
-    let isDuplicate = false;
-
-    // 1차: order_submissions 테이블에서 검사
-    if (userId || orderNum) {
-      const conditions = ['sheet_id = $1', 'tab_name = $2'];
-      const params = [sheetId, tabName];
-      let idx = 3;
-
-      if (userId) { conditions.push(`user_id = $${idx++}`); params.push(userId); }
-      if (orderNum) { conditions.push(`order_num = $${idx++}`); params.push(orderNum); }
-
-      const { rows } = await pool.query(
-        `SELECT COUNT(*) FROM order_submissions WHERE ${conditions.join(' AND ')}`,
-        params
-      );
-      isDuplicate = parseInt(rows[0].count) > 0;
-    }
-
-    // 2차: 아직 안 찾았으면 review_index에서도 검사 (phone8 기반)
-    if (!isDuplicate && phone) {
-      const phone8 = phone.replace(/[^0-9]/g, '').slice(-8);
-      if (phone8.length === 8) {
-        const { rows } = await pool.query(
-          `SELECT COUNT(*) FROM review_index
-           WHERE sheet_id = $1 AND tab_name = $2 AND phone8 = $3`,
-          [sheetId, tabName, phone8]
-        );
-        isDuplicate = parseInt(rows[0].count) > 0;
-      }
-    }
-
-    // 3차: recipient + address 조합으로도 검사
-    if (!isDuplicate && recipient && address) {
-      const { rows } = await pool.query(
-        `SELECT COUNT(*) FROM order_submissions
-         WHERE sheet_id = $1 AND tab_name = $2 AND recipient = $3 AND address = $4`,
-        [sheetId, tabName, recipient, address]
-      );
-      isDuplicate = parseInt(rows[0].count) > 0;
-    }
-
-    res.json({ ok: true, isDuplicate, source: 'db' });
   } catch (err) {
     next(err);
   }
