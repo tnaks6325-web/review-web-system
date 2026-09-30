@@ -253,6 +253,9 @@ async function listPaymentTargets(opts = {}) {
   // 참여행/주문의 현재 소유자 링크는 행 연락처보다 먼저 쓴다. 레거시 제출 링크만 있는 행은
   // 현재 연락처가 등록 리뷰어 한 명에게 정확히 연결되면 현재 계좌를 우선한다.
   const ownerAcctMap = await _loadOwnerAccountsByRow(rows);
+  // 좌표로 못 찾은 행만 — 모집공고 경유 주문은 원장 좌표가 `campaign:<공고ID>` 라 위 조회에 안 걸린다.
+  const linkedFormMap = await _loadLinkedFormAccounts(
+    rows.filter(r => !orderMap[r.sheetId + '||' + r.tabName + '||' + r.rowIndex]));
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
@@ -282,7 +285,8 @@ async function listPaymentTargets(opts = {}) {
        ★ **`reviewerId` 는 만들지 않는다**(112 규율 유지) — 양식 계좌는 지목할 등록 리뷰어가 없어
          회차 스냅샷 대조에서 `unverifiable` 로 빠져야 다운로드가 막히지 않는다.
        ★ 되돌리기 = env `PAYMENT_FORM_ACCOUNT_FIRST=0` (코드 변경 0). */
-    const formAcct = _orderAccount(ord, r);
+    // ★ 계좌 근거로만 쓴다 — 상품비·리뷰비 스냅샷(`ord`)에는 섞지 않는다(금액 불변).
+    const formAcct = _orderAccount(ord || linkedFormMap[key + '||' + r.rowIndex] || null, r);
     const useForm = _formAccountFirst() && !!formAcct;
     const acct = useForm
       // 신원 추적 필드(누가 참여했나)는 **등록DB 기준을 유지**한다 — 계좌(어디로 보내나)와 별개다.
@@ -599,6 +603,44 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     };
   }
   return map;
+}
+
+/**
+ * 좌표로 못 찾은 행의 구매양식 계좌 — **작업표 줄의 주문 연결**(campaign_participants.order_submission_id)로 찾는다.
+ *
+ * ★★ 왜(실사고 2026-09-30 풍성에프엔비 간장 272 최하영): 모집공고를 거친 주문은 원장 좌표가
+ *    `campaign:<공고ID>` 라 `_loadOrderPrices`(작업표 시트ID로 조회)에 **절대 안 걸린다**(그 탭 463건 중 424건).
+ *    그래서 157 "구매양식 계좌가 이긴다" 가 이 주문들에는 적용되지 않았고, 번호가 두 리뷰어에게 겹쳐
+ *    등록 계좌도 못 정한 건은 양식에 계좌가 멀쩡히 있는데 **"리뷰어 정보 없음"으로 매 회차 보류**됐다.
+ * ★ 짝짓기 키 = 주문 id(좌표·이름 불변). 단 **주문의 줄 번호 = 그 작업표 줄 번호**일 때만 인정한다 —
+ *    오염된 링크(남의 주문을 가리키는 줄)로 남의 계좌를 끌어오지 않는다(fail-closed).
+ * ★ 계좌 3칸만 돌려준다 — 금액·스냅샷은 여기서 싣지 않는다(이 경로로 금액이 바뀌면 안 된다).
+ * ★ 조회 실패는 빈 결과(종전 동작 그대로 — 입금대상 목록이 죽으면 안 된다).
+ */
+async function _loadLinkedFormAccounts(rows) {
+  const out = {};
+  if (!rows || !rows.length) return out;
+  try {
+    const { rows: found } = await pool.query(
+      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
+              os.bank AS "bank", os.account AS "account", os.depositor AS "depositor"
+         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+         JOIN campaign_participants cp
+           ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+         JOIN order_submissions os
+           ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+          AND os.sheet_row = cp.seq`,
+      [rows.map(r => r.sheetId), rows.map(r => r.tabName), rows.map(r => r.rowIndex)]);
+    for (const o of found) {
+      const k = o.sheetId + '||' + o.tabName + '||' + o.rowIndex;
+      if (out[k]) { out[k] = null; continue; }   // 한 줄에 둘 이상 = 모호 → 쓰지 않는다
+      out[k] = { bank: o.bank || '', account: o.account || '', depositor: o.depositor || '' };
+    }
+  } catch (e) {
+    try { require('../utils/logger').logger.warn(`[payment] 연결 주문 계좌 조회 실패(무시): ${e.message}`); } catch (_) {}
+  }
+  return out;
 }
 
 /**
