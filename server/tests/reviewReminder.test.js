@@ -138,29 +138,29 @@ function withSolapiEnv(fn) {
     assert.strictEqual(Object.prototype.hasOwnProperty.call(billing, 'accountId'), false);
   }));
 
-  await test('마감 후 대상만 추리고 대기 접수·재시도 유예·3회 완료를 제외한다', () => {
-    const now = new Date('2026-09-17T01:00:00Z');
-    const config = {
-      firstOffsetDays: 0, intervalHours: 24, retryHours: 6,
-    };
+  await test('구매일 기준 7·13·14일 발송 창과 대기 접수·재시도 유예·3회 완료 제외', () => {
+    const config = reminder.getReviewReminderConfig({});
+    assert.deepStrictEqual(config.scheduleDays, [7, 13, 14]);
+    const kst = s => new Date(s + '+09:00');
     const base = {
-      endDate: '2026-09-16', orderedAt: '2026-09-01T00:00:00Z', orderPhone: '01012345678',
+      orderedAt: kst('2026-09-01T12:00:00'), orderPhone: '01012345678',
       reminderCount: 0, reviewStatus: 'pending', hasOpenAttempt: false,
     };
-    const rows = [
-      { ...base, orderSubmissionId: 'due' },
-      { ...base, orderSubmissionId: 'open', hasOpenAttempt: true },
-      { ...base, orderSubmissionId: 'cooldown', latestAttemptAt: new Date('2026-09-16T23:00:00Z') },
-      { ...base, orderSubmissionId: 'done', reminderCount: 3 },
-      { ...base, orderSubmissionId: 'extended', endDate: '2026-09-20', reminderCount: 1,
-        lastRemindedAt: new Date('2026-09-15T01:00:00Z') },
-    ];
-    const preview = reminder._summarizePreview(rows, now, config);
-    assert.strictEqual(preview[0].reason, null);
-    assert.strictEqual(preview[1].reason, 'provider_result_pending');
-    assert.strictEqual(preview[2].reason, 'retry_cooldown');
-    assert.strictEqual(preview[3].reason, 'all_reminders_delivered');
-    assert.strictEqual(preview[4].reason, 'not_due', '연장된 현재 마감일보다 먼저 2차를 보내면 안 된다');
+    const at = (now, row) => reminder._summarizePreview([{ ...base, ...row }], kst(now), config)[0];
+    assert.strictEqual(at('2026-09-07T23:00:00', {}).reason, 'not_due', '구매 +7일 전에는 1차를 보내지 않는다');
+    const first = at('2026-09-08T10:00:00', {});
+    assert.strictEqual(first.reason, null); assert.strictEqual(first.reminderNo, 1);
+    assert.strictEqual(reminder.formatKstDate(first.deadline), '2026.09.15', '제출기한 = 구매 +14일');
+    assert.strictEqual(at('2026-09-13T10:00:00', { reminderCount: 1, lastRemindedAt: kst('2026-09-08T10:01:00') }).reason, 'not_due', '2차는 +13일부터');
+    assert.strictEqual(at('2026-09-14T10:00:00', { reminderCount: 1, lastRemindedAt: kst('2026-09-08T10:01:00') }).reason, null, '2차 = +13일');
+    assert.strictEqual(at('2026-09-15T10:00:00', { reminderCount: 2, lastRemindedAt: kst('2026-09-14T10:01:00') }).reason, null, '3차 = +14일(전날 2차 다음 날 또)');
+    assert.strictEqual(at('2026-09-14T20:00:00', { reminderCount: 1, lastRemindedAt: kst('2026-09-14T18:00:00') }).reason, 'not_due', '앞 회차가 늦게 나갔으면 최소 간격을 둔다');
+    assert.strictEqual(at('2026-09-16T10:00:00', {}).reason, 'schedule_passed', '마지막 회차 날이 지나면 1차부터 뒤늦게 몰아 보내지 않는다');
+    assert.strictEqual(at('2026-09-08T10:00:00', { orderedAt: null }).reason, 'purchase_date_unknown');
+    assert.strictEqual(at('2026-09-08T10:00:00', { hasOpenAttempt: true }).reason, 'provider_result_pending');
+    assert.strictEqual(at('2026-09-08T10:00:00', { latestAttemptAt: kst('2026-09-08T09:00:00') }).reason, 'retry_cooldown');
+    assert.strictEqual(at('2026-09-15T10:00:00', { reminderCount: 3 }).reason, 'all_reminders_delivered');
+    assert.deepStrictEqual(reminder.getReviewReminderConfig({ REVIEW_REMINDER_SCHEDULE_DAYS: '7,13' }).scheduleDays, [7, 13, 14], '잘못된 설정값은 기본값으로');
   });
 
   await test('성공 결과 조정은 delivery를 delivered로 바꾸고 상태 횟수를 올린다', async () => {
@@ -200,7 +200,9 @@ function withSolapiEnv(fn) {
 
   await test('종결·제출 상태는 LIMIT 전에 후보에서 제외한다', () => {
     const source = fs.readFileSync(path.join(__dirname, '../src/services/reviewReminder.service.js'), 'utf8');
-    assert.ok(/COALESCE\(s\.review_status, 'pending'\) = 'pending'[\s\S]*ORDER BY ri\.end_date[\s\S]*LIMIT \$1/.test(source));
+    assert.ok(/COALESCE\(s\.review_status, 'pending'\) = 'pending'[\s\S]*ORDER BY ord\.submitted_at[\s\S]*LIMIT \$1/.test(source));
+    assert.ok(/ord\.submitted_at >= NOW\(\) - \(\$2::int \* INTERVAL '1 day'\)/.test(source), '발송 창보다 오래된 구매는 읽지 않는다');
+    assert.ok(!/COALESCE\(ri\.end_date, ''\) <> ''/.test(source), '비어 있는 시트 마감일 칸에 의존하지 않는다');
   });
 
   await test('입금대상 경로와 마이그레이션에 미작성 종결 방어가 있다', () => {
