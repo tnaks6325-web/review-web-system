@@ -2638,13 +2638,6 @@ router.post('/review-reflect', authMiddleware, adminOrMasterMiddleware, async (r
   } catch (err) { next(err); }
 });
 
-// POST /api/diag/backfill-userid { sheetId, tabName, gid?, dryRun?, limit? } (admin/master, PII)
-//   과거 미기록된 단일 id열(쿠팡id 등)을 written 주문의 id셀만 채운다(전체행 재기입 금지 = 직원 수동편집 보존).
-//   배경: 시트쓰기 매퍼가 옛날 '쿠팡id' 헤더를 못 잡아 쿠팡탭 id열이 공란이던 버그의 소급 복구.
-//   방어: 라이브헤더 재감지 + 단일 id열일 때만 진행(오배정/NC 방지) · 탭당 1 rect read + 청크 write(쿼터안전)
-//        · identity AND 강검증(오각인 방지) · id셀 빈칸만(멱등/수동보존) · 절대행오프셋(그리드밖 skip)
-//        · order_reconcile 락 + busy양보 + 중복가드 + 쓰기직전 취소 재확인 · dryRun 기본 ON.
-
 // POST /api/diag/order-orphan-cleanup { dryRun? } (admin/master)
 // ★ 고아 큐 정리: written/deleted된 주문의 잔여 pending/processing order_append를 시트콜 0으로 done 처리.
 //   reconcile 재큐잉이 남긴 고아가 throttle를 반복 잠식하던 것을 1회성으로 청소. dryRun=true면 카운트만.
