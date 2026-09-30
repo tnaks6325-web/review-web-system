@@ -27,7 +27,6 @@ const R = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const FRONT = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 const SRC = R('src/services/sheetSlotSync.service.js');
 const PSRC = R('src/services/participants.service.js');
-const HTML = FRONT('sheet-sync-audit.html');
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
@@ -413,60 +412,12 @@ t('★ 유효하지 않은 seq 는 버린다(0·음수·비정수)', () => {
   assert.ok(/Number\.isInteger\(parseInt\(r\.seq, 10\)\)/.test(body) && /> 0/.test(body), 'seq 검증이 없다');
 });
 
-/* ══ 8) 라우트 ═════════════════════════════════════════════ */
-console.log('\n8) 라우트 권한·기본값');
-const router = require('../src/routes/trackB.routes');
-const layers = router.stack.filter(l => l.route).map(l => ({
-  path: l.route.path, methods: Object.keys(l.route.methods), mw: l.route.stack.map(s => s.name) }));
-const audit = layers.find(l => l.path === '/sheet-sync/slot-audit');
-const back = layers.find(l => l.path === '/sheet-sync/slot-backfill');
-const quota = layers.find(l => l.path === '/sheet-sync/quota-fix');
-
-t('3개 라우트가 등록돼 있다', () => {
-  assert.ok(audit && audit.methods.includes('get'), 'GET /sheet-sync/slot-audit 없음');
-  assert.ok(back && back.methods.includes('post'), 'POST /sheet-sync/slot-backfill 없음');
-  assert.ok(quota && quota.methods.includes('post'), 'POST /sheet-sync/quota-fix 없음');
-});
-t('★ 전부 authMiddleware + adminOrMasterMiddleware(AE·광고주 차단)', () => {
-  [audit, back, quota].forEach(l => {
-    assert.ok(l.mw.includes('authMiddleware'), l.path + ': authMiddleware 없음');
-    assert.ok(l.mw.includes('adminOrMasterMiddleware'), l.path + ': adminOrMasterMiddleware 없음');
-    assert.ok(!l.mw.includes('internalMiddleware'), l.path + ': staff 가 통과한다');
-  });
-});
-t('★★ 백필 기본은 미리보기 — dryRun 이 빠지면 실행하지 않는다(파괴적 기본값 금지)', () => {
-  const ROUTES = R('src/routes/trackB.routes.js');
-  const i = ROUTES.indexOf("router.post('/sheet-sync/slot-backfill'");
-  // ★ 핸들러 경계는 다음 router. 등록까지 — `});` 로 자르면 400 응답의 `});` 에서 잘려
-  //   검사하려던 줄이 통째로 빠진다(약한 경계는 잘못된 이유로 통과/실패한다).
-  const body = ROUTES.slice(i, ROUTES.indexOf('\nrouter.', i + 10));
-  assert.ok(/dryRun:\s*dryRun\s*!==\s*false/.test(body),
-    'dryRun 기본값이 미리보기가 아니다 — 값이 빠진 요청이 곧바로 실행된다');
-});
-
-/* ══ 9) 프론트 배선 ════════════════════════════════════════ */
-console.log('\n9) 프론트(sheet-sync-audit.html)');
-
-t('세 엔드포인트를 호출한다', () => {
-  ['/api/trackb/sheet-sync/slot-audit', '/api/trackb/sheet-sync/slot-backfill', '/api/trackb/sheet-sync/quota-fix']
-    .forEach(p => assert.ok(HTML.includes(p), p + ' 호출이 없다'));
-});
-t('★ onclick 은 인덱스만(시트발 탭명·공고명 보간 금지 — 실측 XSS 규율)', () => {
-  assert.ok(/slotBackfill\(' \+ i \+ '\)/.test(HTML), '동기화 버튼이 인덱스 방식이 아니다');
-  assert.ok(/quotaFix\(' \+ i \+ '\)/.test(HTML), '정원 교정 버튼이 인덱스 방식이 아니다');
-  assert.ok(!/slotBackfill\('\s*\+\s*(esc\()?it\./.test(HTML), 'onclick 에 데이터가 보간됐다');
-});
-t('★ 실행 전 미리보기 → confirm 2단계(조용한 실행 금지)', () => {
-  const i = HTML.indexOf('async function slotBackfill(');
-  const body = HTML.slice(i, HTML.indexOf('async function quotaFix(', i));
-  assert.ok(/dryRun: true/.test(body) && /confirm\(/.test(body) && /dryRun: false/.test(body),
-    '미리보기 → 확인 → 실행 2단계가 아니다');
-  assert.ok(body.indexOf('dryRun: true') < body.indexOf('confirm('), '확인창이 미리보기보다 먼저다');
-});
-t('★ 상태·사유를 문장으로 말한다(숫자만 두지 않는다)', () => {
-  assert.ok(HTML.includes('SS_REASON') && HTML.includes('QUOTA_SKIP'), '사유 표기 표가 없다');
-  assert.ok(HTML.includes('multi_option_manual'), '옵션 2개 이상 사유를 화면이 설명하지 않는다');
-  assert.ok(HTML.includes('scanCapped'), '스캔 절단 고지가 없다');
+/* ══ 8) 라우트·9) 프론트 — /sheet-sync/* 입구와 sheet-sync-audit.html 은 결정 186 77번에서 제거 ══ */
+console.log('\n8) 입구 부재');
+t('/sheet-sync/* 입구가 되살아나지 않았다', () => {
+  const router = require('../src/routes/trackB.routes');
+  assert.ok(!router.stack.some(l => l.route && /^\/sheet-sync\//.test(l.route.path)), '/sheet-sync/* 라우트가 남아 있다');
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', '..', 'frontend', 'sheet-sync-audit.html')), 'sheet-sync-audit.html 이 남아 있다');
 });
 
 console.log('\n✅ 전체 통과: ' + pass + '케이스');
