@@ -164,8 +164,6 @@ const _ACTION_MAP = {
   'debugBaseSheet':     { method: 'GET',  path: '/api/diag/debug-base' },
   'debugDetailSheet':   { method: 'GET',  path: '/api/diag/debug-tab' },
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
-  'previewCampaign':    { method: 'GET',  path: '/api/diag/preview-campaign' },
-  'addCampaign':        { method: 'POST', path: '/api/diag/add-campaign' },
   'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
 
   // 뷰어
@@ -238,7 +236,6 @@ const _ACTION_MAP = {
   'archiveRestoreRound': { method: 'POST', path: '/api/archive/restore-round' },
 
   // Phase 11: Campaign Name Fix
-  'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },
 
   // Phase 13: Empty Index Cleanup
   'cleanupEmptyIndexes': { method: 'POST', path: '/api/diag/cleanup-empty-indexes' },

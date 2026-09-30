@@ -4,7 +4,7 @@ const { randomUUID } = require('crypto');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
-const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, shareSheetWithServiceAccount } = require('../services/sheets.service');
+const { readSheet, getSpreadsheetMeta, writeSheet } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
 const { imageApiLimiter, imageUploadLimiter } = require('../middleware/rateLimit.middleware');
 const captureLinkBackfill = require('../services/captureLinkBackfill.service');
@@ -18,7 +18,6 @@ const { slotLabel: slotLabelOf, effectiveCaptureSlots, isCashReceiptSlot } = req
 const { verifyCapture, logCaptureMismatch, resolveCaptureMismatch } = require('../services/captureVerify.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
-const { mirrorOneSheet } = require('../services/rawMirror.service');
 const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistration');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
@@ -121,26 +120,6 @@ router.get('/debug-base', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/diag/check-duplicate — 구매양식 중복 검사 (GAS: checkDuplicateOrder)
-// ═══════════════════════════════════════════════════════════
-router.post('/check-duplicate', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, userId, orderNum } = req.body;
-    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
-
-    const { rows } = await pool.query(
-      `SELECT COUNT(*) FROM order_submissions
-       WHERE sheet_id = $1 AND tab_name = $2 AND (user_id = $3 OR order_num = $4)`,
-      [sheetId, tabName, userId || '', orderNum || '']
-    );
-
-    res.json({ ok: true, isDuplicate: parseInt(rows[0].count) > 0 });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // (GET /api/viewer/viewer-data — 광고주 뷰어 viewer.html 전용, 2026-09-28 제거 · 결정 186 47번)
 
 // ═══════════════════════════════════════════════════════════
@@ -186,212 +165,6 @@ router.post('/', authMiddleware, async (req, res, next) => {
         return res.json({ ok: true, blacklist: rows, total: rows.length });
       }
     }
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/index/preview-campaign — 캠페인 추가 전 시트 미리보기
-// sheetId로 시트 제목과 탭 목록을 반환 (등록 전 확인용)
-// ═══════════════════════════════════════════════════════════
-router.get('/preview-campaign', authMiddleware, async (req, res, next) => {
-  try {
-    const { url, sheetId: rawSheetId } = req.query;
-    const finalSheetId = rawSheetId || extractSheetId(url);
-    if (!finalSheetId) {
-      return res.json({ ok: false, error: 'sheetId 또는 url이 필요합니다.' });
-    }
-
-    // 시트 메타데이터 조회
-    const meta = await getSpreadsheetMeta(finalSheetId);
-    if (!meta || meta.length === 0) {
-      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(미설정)';
-      return res.json({ ok: false, error: `시트에 접근할 수 없습니다. 아래 서비스 계정에 공유해주세요.`, serviceAccount: sa });
-    }
-
-    const spreadsheetTitle = meta._spreadsheetTitle || finalSheetId;
-    const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정',
-                        '시트DB', '탭목록', 'tab_configs', '캠페인목록', '시트목록', '매크로', '서식', '요약', '대시보드', '템플릿', '양식'];
-    const tabs = meta
-      .filter(s => !systemTabs.includes(s.properties.title) && !s.properties.hidden)
-      .map(s => ({
-        name: s.properties.title,
-        gid: String(s.properties.sheetId),
-      }));
-
-    // 이미 등록된 캠페인인지 확인
-    const { rows: existingCamp } = await pool.query(
-      'SELECT campaign_name FROM campaigns WHERE sheet_id = $1 LIMIT 1',
-      [finalSheetId]
-    );
-
-    res.json({
-      ok: true,
-      sheetId: finalSheetId,
-      spreadsheetTitle,
-      tabs,
-      tabCount: tabs.length,
-      alreadyRegistered: existingCamp.length > 0,
-      existingName: existingCamp[0]?.campaign_name || null,
-    });
-  } catch (err) {
-    if (err.message && (err.message.includes('not found') || err.message.includes('404'))) {
-      return res.json({ ok: false, error: '시트를 찾을 수 없습니다. URL을 확인하세요.' });
-    }
-    if (err.message && err.message.includes('permission')) {
-      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(미설정)';
-      return res.json({ ok: false, error: `시트 접근 권한이 없습니다. 아래 서비스 계정에 공유해주세요.`, serviceAccount: sa });
-    }
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/index/add-campaign — 캠페인 추가 (GAS: addCampaign)
-// ═══════════════════════════════════════════════════════════
-router.post('/add-campaign', authMiddleware, async (req, res, next) => {
-  try {
-    // ★ 등록 단일경로 게이트: 신규 등록은 작업오더 접수로만 (TAB_REGISTRATION_MODE=manual로 일시 재개 가능)
-    if (!allowManualRegister()) {
-      return res.json({ ok: false, error: REGISTER_GUIDE_MSG, registrationLocked: true });
-    }
-    const { sheetId, campaignName, sheetUrl, url } = req.body;
-    const finalSheetId = sheetId || extractSheetId(url);
-    const finalCampaignName = campaignName || '';
-
-    if (!finalSheetId) {
-      return res.json({ error: 'sheetId 또는 url이 필요합니다.' });
-    }
-
-    // ★ 중복 등록 방지: 이미 campaigns에 등록된 sheet_id인지 확인
-    const { rows: existingCampaigns } = await pool.query(
-      'SELECT campaign_name FROM campaigns WHERE sheet_id = $1 LIMIT 1',
-      [finalSheetId]
-    );
-    if (existingCampaigns.length > 0) {
-      const existingName = existingCampaigns[0].campaign_name;
-      return res.json({
-        error: `이미 등록된 캠페인입니다 (${existingName}).\n기존에 등록된 작업시트는 스마트빌드 갱신 시 새 탭이 자동으로 인식됩니다.\n별도로 다시 등록할 필요가 없습니다.`,
-        duplicate: true,
-        existingCampaignName: existingName,
-        sheetId: finalSheetId,
-      });
-    }
-
-    // 시트 메타데이터에서 캠페인명 가져오기
-    // ★ meta._spreadsheetTitle = 스프레드시트 전체 제목 (문서명)
-    // ★ meta[0].properties.title = 첫 번째 탭 이름 (잘못된 값이었음)
-    let resolvedName = finalCampaignName;
-    if (!resolvedName) {
-      try {
-        const meta = await getSpreadsheetMeta(finalSheetId);
-        if (meta && meta._spreadsheetTitle) {
-          resolvedName = meta._spreadsheetTitle;
-        } else if (meta && meta.length > 0) {
-          resolvedName = finalSheetId; // fallback: sheetId 사용 (탭명 사용 안 함)
-        }
-      } catch (_) {
-        resolvedName = finalSheetId;
-      }
-    }
-
-    await pool.query(
-      `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
-         sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
-      [finalSheetId, resolvedName, sheetUrl || url || `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit`]
-    );
-
-    // tab_configs에도 해당 시트의 탭 목록 동기화 (★ GID + sheet_url#gid= 포함)
-    let autoInsertedTabs = 0;
-    try {
-      const meta = await getSpreadsheetMeta(finalSheetId);
-      const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정'];
-      // ★ 아카이브된 탭은 재등록하지 않음 (이름 + gid 양쪽 매칭)
-      const { rows: archivedTabs } = await pool.query(
-        'SELECT tab_name, tab_gid FROM index_master_archive WHERE sheet_id = $1',
-        [finalSheetId]
-      );
-      const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
-      const archivedGidSet = new Set(archivedTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
-      for (const sheet of meta) {
-        const tabName = sheet.properties.title;
-        if (systemTabs.includes(tabName)) continue;
-        const tabGid = String(sheet.properties.sheetId);
-        // 아카이브된(마감 후 정리된) 탭이면 스킵 — 대시보드 재등장 방지
-        if (archivedSet.has(tabName) || archivedGidSet.has(tabGid)) continue;
-        const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit#gid=${tabGid}`;
-        await pool.query(
-          `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-             campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
-             sheet_url = EXCLUDED.sheet_url,
-             tab_gid = COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
-             updated_at = NOW()`,
-          [finalSheetId, tabName, resolvedName, tabSheetUrl, tabGid]
-        );
-        autoInsertedTabs++;
-      }
-    } catch (_) { /* 메타 로드 실패 시 무시 */ }
-
-    // ★ 서비스 계정에 시트 편집자 권한 자동 부여 (비차단: 실패해도 등록은 유지)
-    let shareResult = null;
-    try {
-      shareResult = await shareSheetWithServiceAccount(finalSheetId);
-      if (shareResult.alreadyShared) {
-        logger.info(`[add-campaign] 시트 권한 이미 존재: ${finalSheetId} (${shareResult.method})`);
-      } else {
-        logger.info(`[add-campaign] 시트 권한 자동 부여 완료: ${finalSheetId} (${shareResult.method})`);
-      }
-    } catch (shareErr) {
-      logger.warn(`[add-campaign] 시트 권한 자동 부여 실패 (등록은 완료): ${finalSheetId} — ${shareErr.message}`);
-      shareResult = { ok: false, error: shareErr.message };
-    }
-
-    // ★ 시트DB 탭에도 추가 (A열: sheet_url, B열: campaign_name)
-    const finalUrl = sheetUrl || url || `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit`;
-    let addedToSheetDB = false;
-    try {
-      const MASTER_SHEET_ID = process.env.MASTER_SHEET_ID || '';
-      if (MASTER_SHEET_ID) {
-        // 시트DB 탭에서 기존 URL 목록 읽기 (중복 방지)
-        const existing = await readSheet(MASTER_SHEET_ID, "'시트DB'!A:A");
-        const existingIds = new Set();
-        if (existing) {
-          for (const row of existing) {
-            const u = (row[0] || '').toString().trim();
-            const m = u.match(/\/d\/([a-zA-Z0-9_-]+)/);
-            if (m) existingIds.add(m[1]);
-          }
-        }
-
-        if (!existingIds.has(finalSheetId)) {
-          // 마지막 행 다음에 추가
-          await appendSheet(MASTER_SHEET_ID, "'시트DB'!A:B", [[finalUrl, resolvedName]]);
-          addedToSheetDB = true;
-          logger.info(`[add-campaign] 시트DB에 추가: ${resolvedName} (${finalSheetId})`);
-        } else {
-          logger.info(`[add-campaign] 시트DB에 이미 존재: ${finalSheetId}`);
-        }
-      } else {
-        logger.warn('[add-campaign] MASTER_SHEET_ID 미설정 — 시트DB 동기화 건너뜀');
-      }
-    } catch (sheetErr) {
-      logger.error(`[add-campaign] 시트DB 추가 실패 (DB 등록은 완료): ${sheetErr.message}`);
-    }
-
-    // ★ RAW 미러 즉시 반영 (best-effort, 비차단 — 등록과 동시에 RAW 미러에 채워짐)
-    //   단일 시트만 미러(전체 미러 대기 없음), throttle 경유라 쿼터 안전. 실패해도 등록은 유지.
-    setImmediate(() => {
-      mirrorOneSheet(finalSheetId).catch(mirrorErr =>
-        logger.warn(`[add-campaign] RAW 미러 즉시반영 실패 (등록은 완료): ${mirrorErr.message}`)
-      );
-    });
-
-    res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB, shareResult, autoInsertedTabs, url: `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit` });
   } catch (err) {
     next(err);
   }
@@ -860,40 +633,6 @@ router.get('/campaign-list', authMiddleware, async (req, res, next) => {
       ORDER BY campaign_name
     `);
     res.json({ ok: true, campaigns: rows, total: rows.length });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/campaign-stats — 캠페인 통계 (GAS: getCampaignStats)
-// ═══════════════════════════════════════════════════════════
-router.get('/campaign-stats', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName } = req.query;
-
-    let sql = `
-      SELECT
-        im.sheet_id AS "sheetId", im.tab_name AS "tabName",
-        im.tab_gid AS "imTabGid", tc.tab_gid AS "tcTabGid",
-        COALESCE(im.tab_gid, tc.tab_gid) AS "tabGid",
-        im.campaign_name AS "campaignName",
-        im.row_count AS "totalCount", im.submitted_count AS "submittedCount",
-        im.status, im.built_at AS "builtAt",
-        tc.manager, tc.review_type AS "reviewType",
-        tc.is_closed AS "isClosed"
-      FROM index_master im
-      LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
-    `;
-    const params = [];
-    const where = [];
-    if (sheetId) { where.push(`im.sheet_id = $${params.length + 1}`); params.push(sheetId); }
-    if (tabName) { where.push(`im.tab_name = $${params.length + 1}`); params.push(tabName); }
-    if (where.length) sql += ' WHERE ' + where.join(' AND ');
-    sql += ' ORDER BY im.built_at DESC NULLS LAST';
-
-    const { rows } = await pool.query(sql, params);
-    res.json({ ok: true, stats: rows });
   } catch (err) {
     next(err);
   }
@@ -4595,104 +4334,6 @@ router.get('/stats/overview', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/diag/fix-campaign-names — 캠페인명 일괄 수정
-// 각 sheetId에 대해 Google Sheets API로 실제 스프레드시트 제목을 가져와
-// index_master와 review_index의 campaign_name을 업데이트
-// ═══════════════════════════════════════════════════════════
-router.post('/fix-campaign-names', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun } = req.body || {};
-
-    // 1. 고유 sheetId 목록 조회
-    const { rows: sheetRows } = await pool.query(`
-      SELECT DISTINCT sheet_id FROM index_master WHERE status = 'active'
-    `);
-
-    if (sheetRows.length === 0) {
-      return res.json({ ok: true, message: '업데이트할 시트가 없습니다.', updated: 0 });
-    }
-
-    const results = [];
-    let updatedSheets = 0;
-    let updatedMasterRows = 0;
-    let updatedIndexRows = 0;
-    let errorCount = 0;
-
-    // 2. 각 sheetId에 대해 스프레드시트 제목 조회
-    for (const row of sheetRows) {
-      const sheetId = row.sheet_id;
-      try {
-        const meta = await getSpreadsheetMeta(sheetId);
-        const spreadsheetTitle = meta._spreadsheetTitle || '';
-
-        if (!spreadsheetTitle) {
-          results.push({ sheetId: sheetId.substring(0, 20) + '...', title: '(제목 없음)', status: 'skipped' });
-          continue;
-        }
-
-        // 현재 DB의 캠페인명 확인
-        const { rows: currentNames } = await pool.query(
-          `SELECT DISTINCT campaign_name FROM index_master WHERE sheet_id = $1`,
-          [sheetId]
-        );
-        const currentName = currentNames.map(r => r.campaign_name).join(', ');
-
-        if (!dryRun) {
-          // index_master 업데이트
-          const masterResult = await pool.query(
-            `UPDATE index_master SET campaign_name = $1 WHERE sheet_id = $2 AND campaign_name != $1`,
-            [spreadsheetTitle, sheetId]
-          );
-          updatedMasterRows += masterResult.rowCount;
-
-          // review_index 업데이트
-          const indexResult = await pool.query(
-            `UPDATE review_index SET campaign_name = $1 WHERE sheet_id = $2 AND campaign_name != $1`,
-            [spreadsheetTitle, sheetId]
-          );
-          updatedIndexRows += indexResult.rowCount;
-        }
-
-        results.push({
-          sheetId: sheetId.substring(0, 20) + '...',
-          oldCampaignName: currentName,
-          newCampaignName: spreadsheetTitle,
-          changed: currentName !== spreadsheetTitle,
-          status: dryRun ? 'dry_run' : 'updated',
-        });
-        updatedSheets++;
-
-      } catch (err) {
-        results.push({
-          sheetId: sheetId.substring(0, 20) + '...',
-          status: 'error',
-          error: err.message,
-        });
-        errorCount++;
-      }
-    }
-
-    res.json({
-      ok: true,
-      dryRun: !!dryRun,
-      totalSheets: sheetRows.length,
-      updatedSheets,
-      updatedMasterRows,
-      updatedIndexRows,
-      errorCount,
-      results,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── 헬퍼 ──
-function extractSheetId(url) {
-  const m = (url || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : null;
-}
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/cleanup-empty-indexes — row_count=0인 탭 일괄 정리
