@@ -2855,38 +2855,63 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   background:var(--card,#fff);color:var(--ink,#111827);outline:none}
 #rmOv .rmsub{margin-top:5px;font-size:10.5px;color:var(--faint,#9ca3af)}
 #rmOv .rmok{margin-top:9px;padding:9px 11px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:9px;color:#166534;font-size:11.5px}
-/* 📨 문자·알림톡 직접 보내기(시안 A, 2026-09-30) — 「리뷰어에게 메시지」 팝오버와 같은 모양 · ms 접두 */
+/* 문자·알림톡 직접 보내기 — 바뀐 창(사용자 확정 2026-10-01). ms 접두 · 작업보드 토큰만 · 색 상자 겹침 없이 얇은 줄로 나눈다 */
 #msOv{position:fixed;inset:0;z-index:9000;pointer-events:none}
-#msOv .msbox{position:fixed;width:390px;max-height:82vh;box-sizing:border-box;display:flex;flex-direction:column;pointer-events:auto;
-  background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 12px 34px rgba(15,23,42,.24);overflow:hidden}
-#msOv .mshd{padding:10px 13px;font-size:12.5px;font-weight:800;color:var(--ink,#0f172a);border-bottom:1px solid var(--line,#e2e8f0)}
-#msOv .msbd{padding:11px 13px;font-size:12px;color:var(--ink,#0f172a);line-height:1.6;flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:9px}
-#msOv .msft{display:flex;gap:7px;justify-content:flex-end;padding:9px 12px;background:var(--card2,#f8fafc);border-top:1px solid var(--line,#e2e8f0)}
-#msOv .mstabs{display:flex;border:1px solid var(--line,#e2e8f0);border-radius:8px;overflow:hidden}
-#msOv .mstabs button{flex:1;border:0;background:var(--card,#fff);color:var(--ink,#0f172a);padding:6px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
-#msOv .mstabs button.mson{background:#2563eb;color:#fff}
-#msOv .mslist{background:var(--info-soft,#eff6ff);border:1px solid var(--info-line,#bfdbfe);border-radius:9px;padding:8px 11px;font-size:11.5px;max-height:190px;overflow:auto}
-#msOv .msrow{padding:4px 0;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
-#msOv .msrow + .msrow{border-top:1px solid rgba(15,23,42,.07)}
-#msOv .msrow b{font-weight:800}
-#msOv .msrow .msn{color:var(--muted,#6b7280);font-variant-numeric:tabular-nums}
-#msOv .msrow .mswhy{flex-basis:100%;font-size:10.5px;color:#b42318}
-#msOv .msrow .msok{color:#166534;font-size:10.5px}
-#msOv .msrow.no b{color:var(--muted,#6b7280)}
-#msOv textarea{width:100%;box-sizing:border-box;min-height:96px;resize:vertical;padding:9px;border:1px solid var(--line,#e5e7eb);border-radius:9px;
-  font-size:12px;font-family:inherit;line-height:1.6;background:var(--card,#fff);color:var(--ink,#111827);outline:none}
-#msOv .msmeta{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted,#6b7280);font-variant-numeric:tabular-nums}
-#msOv .msfoot{font-size:10.5px;color:var(--muted,#6b7280);white-space:pre-line;background:var(--card2,#f8fafc);border-radius:8px;padding:6px 8px}
-#msOv .msinfo{font-size:11px;color:#1d4ed8;background:#eff6ff;border-radius:8px;padding:7px 9px}
-#msOv .msbad{font-size:11.5px;color:#b42318;background:#fef2f2;border:1px solid #f3c0c0;border-radius:9px;padding:8px 10px}
-#msOv .msconfirm{border:1px solid #bfdbfe;background:#f8fbff;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px}
-#msOv .msctitle{font-size:12.5px;font-weight:800;color:#1e3a8a;margin-bottom:2px}
-#msOv .mscrow{display:flex;justify-content:space-between;gap:10px;font-size:12px;font-variant-numeric:tabular-nums}
-#msOv .mscrow > span:first-child{color:var(--muted,#6b7280)}
-#msOv .mscrow.mstotal{border-top:1px dashed #bfdbfe;padding-top:5px;font-size:13px}
-#msOv .msmuted{color:var(--muted,#6b7280);font-size:11px}
-#msOv .mscnote{font-size:10.5px;color:var(--muted,#6b7280);margin-top:2px}
-#msOv .msdone{font-size:11.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;padding:8px 10px}
+#msOv .msbox{position:fixed;width:372px;max-height:86vh;box-sizing:border-box;display:flex;flex-direction:column;pointer-events:auto;
+  background:var(--card,#fff);border-radius:12px;overflow:hidden;color:var(--ink,#101828);font-variant-numeric:tabular-nums;
+  box-shadow:0 0 0 1px rgba(16,24,40,.07),0 12px 32px -6px rgba(16,24,40,.18),0 4px 8px -4px rgba(16,24,40,.08)}
+#msOv .mshd{display:flex;align-items:center;gap:8px;padding:14px 16px 10px}
+#msOv .mshd h2{font-size:14px;font-weight:700;margin:0;letter-spacing:-.01em}
+#msOv .msx{margin-left:auto;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:var(--muted,#667085);display:grid;place-items:center;cursor:pointer;padding:0}
+#msOv .msx:hover{background:var(--card2,#f1f4f8);color:var(--ink,#101828)}
+#msOv .msseg{margin:0 16px;display:grid;grid-template-columns:1fr 1fr;background:var(--card2,#f1f4f8);border-radius:8px;padding:3px}
+#msOv .msseg button{border:0;background:transparent;border-radius:6px;padding:7px 8px;font:inherit;font-size:12.5px;color:var(--muted,#667085);cursor:pointer;display:flex;justify-content:center;gap:6px;align-items:baseline}
+#msOv .msseg button b{font-weight:600;color:inherit}
+#msOv .msseg button span{font-size:11px;color:var(--faint,#98a2b3)}
+#msOv .msseg button[aria-pressed="true"]{background:var(--card,#fff);color:var(--ink,#101828);box-shadow:0 1px 2px rgba(16,24,40,.08),0 0 0 1px rgba(16,24,40,.04)}
+#msOv .msseg button[aria-pressed="true"] span{color:var(--muted,#667085)}
+#msOv .msseg button:disabled{cursor:default}
+#msOv .msbd{padding:14px 16px 4px;display:flex;flex-direction:column;gap:14px;flex:1;min-height:0;overflow:auto}
+#msOv .mslbl{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--muted,#667085);margin-bottom:6px}
+#msOv .mslbl b{color:var(--ink,#101828);font-weight:600}
+#msOv .msno{color:var(--bad,#e5484d)}
+#msOv .mswho{list-style:none;margin:0;padding:0}
+#msOv .mswho li{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 0;border-top:1px solid var(--line,#e6eaf0);font-size:13px}
+#msOv .mswho li:first-child{border-top:0;padding-top:0}
+#msOv .msn{font-weight:600;min-width:0}
+#msOv .msp{color:var(--muted,#667085);font-size:12.5px;white-space:nowrap}
+#msOv .mswho .mswhy,#msOv .mswho .msok{grid-column:1 / -1;font-size:11.5px}
+#msOv .mswhy{color:var(--bad,#e5484d)}
+#msOv .msok{color:var(--safe,#16a34a)}
+#msOv .mswho li.msoff .msn{color:var(--faint,#98a2b3);font-weight:500;text-decoration:line-through;text-decoration-color:var(--line2,#d0d9e4)}
+#msOv .mstag{font-size:11px;color:var(--muted,#667085);border:1px solid var(--line2,#d0d9e4);border-radius:4px;padding:0 5px;margin-left:6px;font-weight:500}
+#msOv textarea{width:100%;box-sizing:border-box;min-height:92px;resize:vertical;font:inherit;font-size:13px;line-height:1.6;color:var(--ink,#101828);background:var(--card,#fff);border:1px solid var(--line2,#d0d9e4);border-radius:8px;padding:9px 10px;outline:none}
+#msOv textarea:focus{border-color:var(--accent,#2563eb);box-shadow:0 0 0 3px var(--accent-soft,#eff4ff)}
+#msOv .msmeta{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted,#667085);margin-top:5px}
+#msOv .mstail{font-size:11.5px;color:var(--muted,#667085);line-height:1.55;margin-top:8px;white-space:pre-line}
+#msOv .mstail b{display:block;color:var(--ink,#101828);font-weight:600;margin-bottom:2px}
+#msOv .msnote{font-size:12px;color:var(--muted,#667085);line-height:1.55;margin:0}
+#msOv .msrcpt{margin:10px 16px 0;padding:12px 0 2px;border-top:1px solid var(--line,#e6eaf0)}
+#msOv .msrcpt h3{font-size:13px;margin:0 0 8px;font-weight:700}
+#msOv .msrcpt dl{margin:0;display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:12.5px}
+#msOv .msrcpt dt{color:var(--muted,#667085)}
+#msOv .msrcpt dd{margin:0;text-align:right}
+#msOv .msrcpt dd small{color:var(--muted,#667085);font-size:11px;margin-left:4px}
+#msOv .msrcpt .mstot{border-top:1px dashed var(--line2,#d0d9e4);padding-top:8px;margin-top:2px}
+#msOv .msrcpt dd.mstot{font-size:16px;font-weight:700;letter-spacing:-.01em}
+#msOv .msrcpt .msfull{grid-column:1 / -1;text-align:left;font-size:11.5px}
+#msOv .msrcpt .msfine{color:var(--muted,#667085);margin-top:2px}
+#msOv .msdone{margin:10px 16px 0;padding-top:10px;border-top:1px solid var(--line,#e6eaf0);font-size:12.5px;color:var(--muted,#667085)}
+#msOv .msdone b{color:var(--safe,#16a34a);font-weight:600}
+#msOv .msdone.msfail b{color:var(--bad,#e5484d)}
+#msOv .msconfirming textarea{background:var(--card2,#f1f4f8);color:var(--muted,#667085)}
+#msOv .msft{margin-top:10px;padding:12px 16px 14px;border-top:1px solid var(--line,#e6eaf0);display:flex;align-items:center;gap:8px}
+#msOv .mssum{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+#msOv .mssum b{font-size:15px;font-weight:700;letter-spacing:-.01em}
+#msOv .mssum span{font-size:11px;color:var(--muted,#667085)}
+#msOv .msbtns{margin-left:auto;display:flex;gap:6px}
+#msOv .msgo{margin-left:auto}
+#msOv .msx:focus-visible,#msOv .msseg button:focus-visible{outline:2px solid var(--accent,#2563eb);outline-offset:2px}
 #hbOv table.wbl-t{font-size:11.5px} #hbOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
 #ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
 #ddOv table.wbl-t{font-size:11.5px}
@@ -10023,11 +10048,14 @@ function _openCellMenu(x,y,td){
 function _closeCellMenu(){ const m=$('#gcellmenu'); if(m) m.classList.remove('show'); }
 function _menuEditCell(){ const td=_selAnchorTd(); _closeCellMenu(); if(td&&td.classList.contains('gedit')) beginEditCell(td); }
 
-/* ══ 📨 문자·알림톡 직접 보내기 (시안 A, 사용자 확정 2026-09-30) ═══════════════════
+/* ══ 문자·알림톡 직접 보내기 (시안 A 2026-09-30 · 바뀐 창 2026-10-01) ═══════════════════
    ★ 받는 사람·보낼 수 있는지는 **서버가** 정한다(/workdesk/manual-send/preview) — 화면은 그리기만.
    ★ 탭 전환·목록 갱신이 textarea 를 다시 만들지 않는다(한글 IME 보호) — 틀은 한 번만 그린다.
    ★ 문자에는 서버가 "발신 전용 · 1:1 문의로" 안내를 붙이고 같은 내용을 1:1 문의방에도 남긴다.
-   ★ body 직속 · 바깥 클릭으로 닫지 않는다(입력 보호) · Esc·[취소]만. onclick 에 시트 문자열 보간 0. */
+   ★ body 직속 · 바깥 클릭으로 닫지 않는다(입력 보호) · Esc·[취소]·[×]만. onclick 에 시트 문자열 보간 0.
+   ★ 디자인(사용자 확정 2026-10-01): 이모지 아이콘 금지 · 색 상자 겹침 금지(얇은 줄로만 나눈다) ·
+     파란색은 선택 탭과 보내기 버튼에만 · 금액은 처음부터(탭에 건당, 아래 줄에 합계) ·
+     확인 단계는 같은 창 아래가 영수증처럼 펼쳐지고 버튼은 "N명에게 보내기"(금액은 영수증에만). */
 let _MS=null;
 function _msClose(){ const o=document.getElementById('msOv'); if(o) o.remove(); _MS=null; }
 if(!window._msKeyBound){
@@ -10040,15 +10068,16 @@ function _msPlace(){
   const box=document.querySelector('#msOv .msbox'); if(!box||!_MS) return;
   const el=_MS.anchorEl;
   if(el&&el.isConnected){ const r=el.getBoundingClientRect(); if(r.width||r.height) _MS.anchor={left:r.left,top:r.top,bottom:r.bottom}; }
-  const a=_MS.anchor; const w=box.offsetWidth||390, vh=window.innerHeight;
+  const a=_MS.anchor; const w=box.offsetWidth||372, vh=window.innerHeight;
   const below=vh-a.bottom-12, above=a.top-12, down=below>=above;
-  const room=Math.max(240, Math.min(vh*0.82, down?below:above));
+  const room=Math.max(260, Math.min(vh*0.86, down?below:above));
   box.style.maxHeight=Math.round(room)+'px';
-  const h=Math.min(box.offsetHeight||360, room);
+  const h=Math.min(box.offsetHeight||380, room);
   box.style.left=Math.max(8, Math.min(a.left, window.innerWidth-w-10))+'px';
   box.style.top=(down ? a.bottom+4 : Math.max(8, a.top-h-4))+'px';
 }
 function _msBytes(t){ let n=0; for(const ch of String(t||'')) n+=ch.charCodeAt(0)>127?2:1; return n; }
+const _MS_X='<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8"/></svg>';
 function openManualSend(){
   const t=STATE.cur, ids=_msgRowIds(), td=_selAnchorTd(), r=td?td.getBoundingClientRect():null;
   _closeCellMenu();
@@ -10057,25 +10086,26 @@ function openManualSend(){
   _MS={ sheetId:t.sheetId, tabName:t.tabName, ids, tab:'sms', items:null, footer:'', err:'', busy:false, done:null,
         anchorEl:td||null, anchor:r?{left:r.left,top:r.top,bottom:r.bottom}:{left:120,top:120,bottom:150} };
   const ov=document.createElement('div'); ov.id='msOv';
-  ov.innerHTML=`<div class="msbox"><div class="mshd">📨 문자·알림톡 보내기</div>
+  ov.innerHTML=`<div class="msbox" role="dialog" aria-label="문자·알림톡 보내기">
+    <div class="mshd"><h2>문자·알림톡 보내기</h2><button type="button" class="msx" aria-label="닫기" onclick="_msClose()">${_MS_X}</button></div>
+    <div class="msseg" role="group" aria-label="보내는 방식"><button type="button" data-mt="sms" aria-pressed="true"><b>문자</b><span id="msPriceSms"></span></button><button type="button" data-mt="alimtalk" aria-pressed="false"><b>알림톡</b><span id="msPriceAta"></span></button></div>
     <div class="msbd">
-      <div class="mstabs"><button type="button" data-mt="sms" class="mson">✉️ 문자</button><button type="button" data-mt="alimtalk">💬 알림톡</button></div>
-      <div id="msList" class="mslist">받는 사람을 확인하는 중…</div>
-      <div id="msSmsBox"><textarea id="msText" placeholder="보낼 내용을 입력하세요"></textarea>
+      <div><div class="mslbl" id="msHead">받는 사람을 확인하는 중…</div><ul class="mswho" id="msList"></ul></div>
+      <div id="msSmsBox"><div class="mslbl"><span>내용</span></div><textarea id="msText" placeholder="보낼 내용을 입력하세요"></textarea>
         <div class="msmeta"><span id="msBytes"></span><span id="msKind"></span></div>
-        <div class="msfoot" id="msFoot"></div></div>
-      <div id="msAtaBox" style="display:none" class="msinfo">승인된 알림톡 문구의 <b>다음 회차</b>를 지금 보냅니다. 자동 알림에도 그 회차를 보낸 것으로 기록돼 같은 회차가 두 번 가지 않습니다.</div>
-      <div id="msResult"></div>
+        <div class="mstail" id="msFoot"></div></div>
+      <p id="msAtaBox" style="display:none" class="msnote">카카오가 승인한 문구 중 각자의 다음 회차가 나갑니다. 자동 알림도 이 회차를 보낸 것으로 기록해 같은 회차를 다시 보내지 않습니다.</p>
     </div>
+    <div id="msResult"></div>
     <div class="msft" id="msBtns"></div></div>`;
   document.body.appendChild(ov);
-  ov.querySelector('.mstabs').addEventListener('click',e=>{ const b=e.target.closest('[data-mt]'); if(b) _msSetTab(b.getAttribute('data-mt')); });
+  ov.querySelector('.msseg').addEventListener('click',e=>{ const b=e.target.closest('[data-mt]'); if(b) _msSetTab(b.getAttribute('data-mt')); });
   ov.querySelector('#msText').addEventListener('input',_msPaintMeta);
   _msPaintMeta(); _msPaintBtns(); _msPlace(); _msLoad();
 }
 function _msSetTab(tab){
-  if(!_MS||_MS.busy) return; _MS.tab=tab; _MS.done=null;
-  document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.classList.toggle('mson', b.getAttribute('data-mt')===tab));
+  if(!_MS||_MS.busy||_MS.confirming) return; _MS.tab=tab; _MS.done=null;
+  document.querySelectorAll('#msOv .msseg button').forEach(b=>b.setAttribute('aria-pressed', String(b.getAttribute('data-mt')===tab)));
   const sb=document.getElementById('msSmsBox'), ab=document.getElementById('msAtaBox');
   if(sb) sb.style.display=tab==='sms'?'':'none'; if(ab) ab.style.display=tab==='alimtalk'?'':'none';
   const rs=document.getElementById('msResult'); if(rs) rs.innerHTML='';
@@ -10087,9 +10117,11 @@ async function _msLoad(){
     if(!_MS) return;
     if(!d||d.ok===false){ _MS.err=(d&&d.error)||'받는 사람을 확인하지 못했습니다.'; }
     else { _MS.items=d.items||[]; _MS.footer=d.footer||''; _MS.provider=d.providerConfigured!==false; _MS.billing=d.billing||null; }
-  }catch(e){ if(_MS) _MS.err='받는 사람을 확인하지 못했습니다 — '+(e.message||'네트워크 오류'); }
+  }catch(e){ if(_MS) _MS.err='받는 사람을 확인하지 못했습니다. '+(e.message||'네트워크 오류'); }
   if(!_MS) return;
-  const f=document.getElementById('msFoot'); if(f) f.textContent='자동으로 붙는 안내:'+(_MS.footer||'');
+  const f=document.getElementById('msFoot');
+  if(f){ f.innerHTML=''; const b=document.createElement('b'); b.textContent='끝에 자동으로 붙는 안내';
+    f.appendChild(b); f.appendChild(document.createTextNode(String(_MS.footer||'').trim())); }
   _msPaintMeta(); _msPaintList(); _msPaintBtns(); _msPlace();
 }
 function _msOkItems(){
@@ -10098,28 +10130,31 @@ function _msOkItems(){
   return items.filter(x=>x.ata&&x.ata.ok);
 }
 function _msPaintList(){
-  const l=document.getElementById('msList'); if(!l||!_MS) return;
-  if(_MS.err){ l.className='msbad'; l.textContent=_MS.err; return; }
-  if(!_MS.items){ l.className='mslist'; l.textContent='받는 사람을 확인하는 중…'; return; }
-  l.className='mslist';
+  const l=document.getElementById('msList'), h=document.getElementById('msHead'); if(!l||!h||!_MS) return;
+  if(_MS.err){ h.innerHTML=`<span class="mswhy">${esc(_MS.err)}</span>`; l.innerHTML=''; return; }
+  if(!_MS.items){ h.textContent='받는 사람을 확인하는 중…'; l.innerHTML=''; return; }
   const res=_MS.done?new Map(_MS.done.map(x=>[x.participantId,x])):null;
-  const n=_msOkItems().length;
-  l.innerHTML=`<div style="font-weight:800;margin-bottom:3px">${_MS.tab==='sms'?'문자':'알림톡'} 받을 사람 ${n}명</div>`+
-    _MS.items.map(x=>{
-      const p=_MS.tab==='sms'?x.sms:x.ata; const ok=p&&p.ok; const r=res&&res.get(x.participantId);
-      const who=esc((x.sms&&x.sms.name)||x.rowName||'(이름 없음)');
-      const num=_MS.tab==='sms' ? (ok?esc(_fmtPhone(p.phone)):'') : (ok?`${p.reminderNo}차 · ···${esc(p.phoneTail)} · 기한 ${esc(p.deadline)}`:'');
-      const tail = r ? (r.sent?`<span class="msok">✓ 보냄${r.roomOk===false&&_MS.tab==='sms'?' (문의방 기록은 실패)':''}</span>`:`<span class="mswhy">${esc(r.reason||'보내지 못했습니다')}</span>`)
-        : (ok?'':`<span class="mswhy">${esc((p&&p.reason)||'보낼 수 없습니다')}</span>`);
-      return `<div class="msrow${ok?'':' no'}"><b>${who}</b><span class="msn">${num}</span>${tail}</div>`;
-    }).join('');
+  const n=_msOkItems().length, off=_MS.items.length-_MS.items.filter(x=>{ const p=_MS.tab==='sms'?x.sms:x.ata; return p&&p.ok; }).length;
+  h.innerHTML=`<span>받는 사람 <b>${n}명</b></span>${off?`<span class="msno">보낼 수 없음 ${off}</span>`:''}`;
+  l.innerHTML=_MS.items.map(x=>{
+    const p=_MS.tab==='sms'?x.sms:x.ata; const ok=p&&p.ok; const r=res&&res.get(x.participantId);
+    const who=esc((x.sms&&x.sms.name)||x.rowName||'(이름 없음)');
+    const tag=_MS.tab==='sms' ? (ok&&p.isSub?'<span class="mstag">타계정 참여</span>':'') : (ok?`<span class="mstag">${esc(p.reminderNo)}차</span>`:'');
+    const num=_MS.tab==='sms' ? (ok?esc(_fmtPhone(p.phone)):'') : (ok?`···${esc(p.phoneTail)} · 기한 ${esc(String(p.deadline||'').slice(5))}`:'');
+    const tail = r ? (r.sent?`<span class="msok">보냄${r.roomOk===false&&_MS.tab==='sms'?' · 문의방 기록은 실패':''}</span>`:`<span class="mswhy">${esc(r.reason||'보내지 못했습니다')}</span>`)
+      : (ok?'':`<span class="mswhy">${esc((p&&p.reason)||'보낼 수 없습니다')}</span>`);
+    return `<li class="${ok?'':'msoff'}"><span class="msn">${who}${tag}</span><span class="msp">${num}</span>${tail}</li>`;
+  }).join('');
 }
 function _msPaintMeta(){
   const ta=document.getElementById('msText'); if(!ta||!_MS) return;
   const b=_msBytes(String(ta.value||'').trim()+(_MS.footer||''));
   const eb=document.getElementById('msBytes'), ek=document.getElementById('msKind');
-  if(eb) eb.textContent=`${b} 바이트(안내 문구 포함)`;
-  if(ek) ek.textContent=b>2000?'너무 깁니다(2000바이트까지)':(b>90?'장문 문자(LMS)로 발송':'단문 문자(SMS)로 발송');
+  if(eb) eb.textContent=`${b.toLocaleString('ko-KR')}바이트 · ${b>2000?'너무 깁니다(2000바이트까지)':(b>90?'장문 문자':'단문 문자')}`;
+  if(ek) ek.textContent='안내 문구 포함';
+  const ps=document.getElementById('msPriceSms'), pa=document.getElementById('msPriceAta');
+  const sp=_msPrice('sms', ta.value).price, ap=_msPrice('alimtalk','').price;
+  if(ps) ps.textContent=sp?_msWon(sp.vat):''; if(pa) pa.textContent=ap?_msWon(ap.vat):'';
   _msPaintBtns();
 }
 function _msPaintBtns(){
@@ -10130,23 +10165,26 @@ function _msPaintBtns(){
   const dis=_MS.busy||!n||(_MS.tab==='sms'&&(!txt||tooLong))||_MS.provider===false;
   if(_MS.confirming){
     f.innerHTML=`<button class="btn" type="button" onclick="_msConfirmBack()"${_MS.busy?' disabled':''}>돌아가기</button>
-      <button class="btn pri" type="button" onclick="_msSendConfirmed()"${_MS.busy?' disabled':''}>${_MS.busy?'보내는 중…':`${n}명에게 보내기 확정`}</button>`;
+      <button class="btn pri msgo" type="button" onclick="_msSendConfirmed()"${_MS.busy?' disabled':''}>${_MS.busy?'보내는 중…':`${n}명에게 보내기`}</button>`;
     return;
   }
-  const label=_MS.busy?'보내는 중…':`${n}명에게 ${_MS.tab==='sms'?'문자':'알림톡'} 보내기`;
-  f.innerHTML=`<button class="btn" type="button" onclick="_msClose()">${_MS.done?'닫기':'취소'}</button>
-    <button class="btn pri" type="button" onclick="_msSend()"${dis?' disabled':''}>${label}</button>`;
+  const pr=_msPrice(_MS.tab, txt).price;
+  const sum = n&&pr ? `<div class="mssum"><b>${_msWon(pr.vat*n)}</b><span>${n}명 × ${_msWon(pr.vat)}</span></div>`
+    : (n&&_MS.billing===null&&_MS.items ? '<div class="mssum"><span>단가를 불러오지 못했습니다</span></div>' : '<div class="mssum"></div>');
+  f.innerHTML=`${_MS.done?'<div class="mssum"></div>':sum}<div class="msbtns"><button class="btn" type="button" onclick="_msClose()">${_MS.done?'닫기':'취소'}</button>
+    ${_MS.done?'':`<button class="btn pri" type="button" onclick="_msSend()"${dis?' disabled':''}>다음</button>`}</div>`;
 }
 async function _msSend(){
   if(!_MS||_MS.busy) return;
   const n=_msOkItems().length; if(!n) return;
   const kind=_MS.tab;
   const text=String((document.getElementById('msText')||{}).value||'').trim();
-  /* ★ 시스템 확인창(confirm) 대신 창 안의 확인 화면 — 건당 비용·예상 합계·잔액을 숫자로 보여준다(사용자 확정 2026-10-01). */
+  /* ★ 시스템 확인창(confirm) 대신 같은 창 아래가 영수증처럼 펼쳐진다 — 건당·합계·잔액을 숫자로(사용자 확정 2026-10-01). */
   _MS.confirming=true;
   const rs=document.getElementById('msResult'); if(rs) rs.innerHTML=_msConfirmHtml(n, kind, text);
+  const box=document.querySelector('#msOv .msbox'); if(box) box.classList.add('msconfirming');
   const ta=document.getElementById('msText'); if(ta) ta.readOnly=true;
-  document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.disabled=true);
+  document.querySelectorAll('#msOv .msseg button').forEach(b=>b.disabled=true);
   _msPaintBtns(); _msPlace();
   const card=document.getElementById('msConfirm'); if(card) card.scrollIntoView({block:'nearest'});
 }
@@ -10160,26 +10198,29 @@ function _msPrice(kind, text){
 function _msWon(v){ return (Math.round(v*100)/100).toLocaleString('ko-KR')+'원'; }
 function _msConfirmHtml(n, kind, text){
   const k=_msPrice(kind, text), pr=k.price;
-  const unit = pr ? `${_msWon(pr.vat)} <span class="msmuted">(부가세 별도 ${_msWon(pr.unit)})</span>` : '<span class="msmuted">단가를 불러오지 못했습니다</span>';
-  const total = pr ? `<b>${_msWon(pr.vat*n)}</b> <span class="msmuted">(부가세 별도 ${_msWon(pr.unit*n)})</span>` : '—';
-  const bal = (_MS.billing&&Number.isFinite(_MS.billing.spendable)) ? _msWon(_MS.billing.spendable) : '<span class="msmuted">확인 못 함</span>';
-  const short = pr && _MS.billing && Number.isFinite(_MS.billing.spendable) && _MS.billing.spendable < pr.vat*n;
-  return `<div class="msconfirm" id="msConfirm">
-    <div class="msctitle">보내기 전에 확인해 주세요</div>
-    <div class="mscrow"><span>받는 사람</span><b>${n}명</b></div>
-    <div class="mscrow"><span>보내는 방식</span><b>${esc(k.type)}</b></div>
-    <div class="mscrow"><span>1건당 비용</span><span>${unit}</span></div>
-    <div class="mscrow mstotal"><span>예상 합계</span><span>${total}</span></div>
-    <div class="mscrow"><span>발송 계정 잔액</span><span>${bal}</span></div>
-    ${short?'<div class="msbad">잔액이 예상 합계보다 적습니다 — 일부가 발송되지 않을 수 있습니다.</div>':''}
-    <div class="mscnote">보낸 뒤에는 취소할 수 없습니다. 발송에 실패한 건은 비용이 청구되지 않습니다.</div>
+  const bal=_MS.billing&&Number.isFinite(_MS.billing.spendable) ? _MS.billing.spendable : null;
+  const unit = pr ? `${_msWon(pr.vat)}<small>부가세 별도 ${_msWon(pr.unit)}</small>` : '<small>단가를 불러오지 못했습니다</small>';
+  const total = pr ? _msWon(pr.vat*n) : '—';
+  const balTxt = bal==null ? '<small>확인 못 함</small>' : (pr ? `${_msWon(bal)} → ${_msWon(Math.max(0,bal-pr.vat*n))}` : _msWon(bal));
+  const short = pr && bal!=null && bal < pr.vat*n;
+  return `<div class="msrcpt" id="msConfirm">
+    <h3>이대로 보낼까요?</h3>
+    <dl>
+      <dt>${esc(k.type)} 1건</dt><dd>${unit}</dd>
+      <dt>받는 사람</dt><dd>${n}명</dd>
+      <dt class="mstot">합계</dt><dd class="mstot">${total}</dd>
+      <dt>발송 계정 잔액</dt><dd>${balTxt}</dd>
+      ${short?'<dd class="msfull mswhy">잔액이 예상 합계보다 적습니다 — 일부가 발송되지 않을 수 있습니다.</dd>':''}
+      <dd class="msfull msfine">보낸 뒤에는 취소할 수 없습니다. 발송에 실패한 건은 비용이 청구되지 않습니다.</dd>
+    </dl>
   </div>`;
 }
 function _msConfirmBack(){
   if(!_MS||_MS.busy) return; _MS.confirming=false;
   const rs=document.getElementById('msResult'); if(rs) rs.innerHTML='';
+  const box=document.querySelector('#msOv .msbox'); if(box) box.classList.remove('msconfirming');
   const ta=document.getElementById('msText'); if(ta) ta.readOnly=false;
-  document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.disabled=false);
+  document.querySelectorAll('#msOv .msseg button').forEach(b=>b.disabled=false);
   _msPaintBtns(); _msPlace();
 }
 async function _msSendConfirmed(){
@@ -10192,18 +10233,19 @@ async function _msSendConfirmed(){
   try{
     d=await api('/api/trackb/workdesk/manual-send',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,
       ids:_msOkItems().map(x=>x.participantId), kind, text})});
-  }catch(e){ d={ok:false,error:'발송 실패 — '+(e.message||'네트워크 오류')}; }
+  }catch(e){ d={ok:false,error:'발송 실패. '+(e.message||'네트워크 오류')}; }
   if(!_MS) return;
   _MS.busy=false; _MS.confirming=false;
-  { const ta=document.getElementById('msText'); if(ta) ta.readOnly=false;
-    document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.disabled=false); }
+  { const box=document.querySelector('#msOv .msbox'); if(box) box.classList.remove('msconfirming');
+    const ta=document.getElementById('msText'); if(ta) ta.readOnly=false;
+    document.querySelectorAll('#msOv .msseg button').forEach(b=>b.disabled=false); }
   const results=(d&&d.results)||[];
   const sent=results.filter(x=>x.sent).length;
   _MS.done=results;
   const rs=document.getElementById('msResult');
   if(rs) rs.innerHTML = sent
-    ? `<div class="msdone">✓ ${sent}명에게 보냈습니다${results.length>sent?` · 못 보낸 ${results.length-sent}건은 위 목록에 사유가 있습니다`:''}</div>`
-    : `<div class="msbad">보내지 못했습니다 — ${esc((d&&d.error)||(results[0]&&results[0].reason)||'서버가 사유를 알려주지 않았습니다')}</div>`;
+    ? `<div class="msdone"><b>${sent}명에게 보냈습니다.</b>${results.length>sent?` 못 보낸 ${results.length-sent}건은 위 목록에 이유가 있습니다.`:''}</div>`
+    : `<div class="msdone msfail"><b>보내지 못했습니다.</b> ${esc((d&&d.error)||(results[0]&&results[0].reason)||'서버가 이유를 알려주지 않았습니다')}</div>`;
   _msPaintList(); _msPaintBtns(); _msPlace();
   if(sent) toast(`${kind==='sms'?'문자':'알림톡'} ${sent}건을 보냈습니다`);
 }
