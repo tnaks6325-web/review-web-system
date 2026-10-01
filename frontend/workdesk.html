@@ -2897,7 +2897,7 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #msOv .msrcpt dt{color:var(--muted,#667085)}
 #msOv .msrcpt dd{margin:0;text-align:right}
 #msOv .msrcpt dd small{color:var(--muted,#667085);font-size:11px;margin-left:4px}
-#msOv .msrcpt .mstot{border-top:1px dashed var(--line2,#d0d9e4);padding-top:8px;margin-top:2px}
+#msOv .msrcpt .mshr{grid-column:1 / -1;height:0;border-top:1px dashed var(--line2,#d0d9e4);margin:2px 0 0}
 #msOv .msrcpt dd.mstot{font-size:16px;font-weight:700;letter-spacing:-.01em}
 #msOv .msrcpt .msfull{grid-column:1 / -1;text-align:left;font-size:11.5px}
 #msOv .msrcpt .msfine{color:var(--muted,#667085);margin-top:2px}
@@ -10208,6 +10208,7 @@ function _msConfirmHtml(n, kind, text){
     <dl>
       <dt>${esc(k.type)} 1건</dt><dd>${unit}</dd>
       <dt>받는 사람</dt><dd>${n}명</dd>
+      <dd class="mshr" aria-hidden="true"></dd>
       <dt class="mstot">합계</dt><dd class="mstot">${total}</dd>
       <dt>발송 계정 잔액</dt><dd>${balTxt}</dd>
       ${short?'<dd class="msfull mswhy">잔액이 예상 합계보다 적습니다 — 일부가 발송되지 않을 수 있습니다.</dd>':''}
