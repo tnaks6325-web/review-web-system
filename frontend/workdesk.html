@@ -1605,6 +1605,8 @@
   .ovm-mg-bn .tx{flex:1;min-width:0}.ovm-mg-bn .tx small{display:block;font-size:11.5px;color:var(--muted);margin-top:1px}
   .ovm-mg-bn.ok{background:var(--safe-soft);border-color:color-mix(in srgb,var(--safe) 25%,transparent);padding:7px 12px}
   .ovm-mg-bn.ok .ic{background:color-mix(in srgb,var(--safe) 18%,#fff);color:var(--safe)}
+  .ovm-mg-bn.info{background:var(--accent-soft);border-color:var(--accent-line)}.ovm-mg-bn.info .ic{background:#dbe6ff;color:var(--accent-deep)}
+  .ovm-mg-acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
   .ovm-mg-bn.off{background:var(--card2);border-color:var(--line)}.ovm-mg-bn.off .ic{background:var(--line);color:var(--muted)}
   .ovm-mg-pair{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 9px;box-shadow:var(--shadow-card)}
   .ovm-mg-pair .row{display:grid;grid-template-columns:1fr 28px 1fr auto;gap:10px;align-items:center}
@@ -17368,7 +17370,7 @@ function _ovmRenderOverview(opt){
    ★ 점검을 못 하면(인트라넷 도달 불가·오류) "문제없음"으로 꾸미지 않고 사유 + [다시 시도].
    ★ 자동 병합 없음(결정 004) — 사람이 쌍마다 확인 체크 후 누를 때만 합친다.
    ★ onclick 에는 **인덱스만**(업체명은 외부발 문자열). 팝업은 body 직속 · 바깥 클릭으로 닫지 않음(Esc·[취소]). */
-let _OVMM={ at:0, state:'idle', pairs:[], open:false, keep:{}, error:'' }, _ovmmPop=null;
+let _OVMM={ at:0, state:'idle', pairs:[], open:false, keep:{}, error:'', suggests:[], sOpen:false, sBusy:-1 }, _ovmmPop=null;
 const _OVMM_TTL=60*1000;
 function _ovmmAllowed(){ return STATE.role==='master'||STATE.role==='admin'; }
 // 서버 분류를 "옛 업체(원본 미연결) → 남길 업체(원본 연결)" 짝으로 바꾼다(같은 쌍 중복 제거).
@@ -17393,10 +17395,57 @@ async function _ovmmLoad(force){
   _OVMM.state='loading'; _ovmmPaint();
   let r=null;
   try{ r=await api('/api/trackb/advertisers/intranet-sync'); }catch(e){ r={ok:false,error:e&&e.message}; }
-  if(r&&r.ok){ _OVMM={...(_OVMM),at:Date.now(),state:'ok',pairs:_ovmmPairsFrom(r.items),error:''};
+  if(r&&r.ok){ _OVMM={...(_OVMM),at:Date.now(),state:'ok',pairs:_ovmmPairsFrom(r.items),suggests:_ovmmSuggestsFrom(r.items),canDismiss:r.dismissSupported===true,sBusy:-1,error:''};
     _OVMM.pairs.forEach((p,i)=>{ if(!_OVMM.keep[p.a.id+'|'+p.b.id]) _OVMM.keep[p.a.id+'|'+p.b.id]=p.b.id; }); }
   else { _OVMM.state='fail'; _OVMM.error=(r&&r.error)||'인트라넷 연결 점검을 불러오지 못했습니다'; }
   _ovmmPaint();
+}
+// ★ [다른 회사]는 서버가 dismissSupported 를 줄 때만 그린다(화면이 서버보다 먼저 배포돼도 죽은 버튼 금지).
+// 「연결 확인」 — 원본 ID 없는 업체와 법인 표기만 다른 인트라넷 광고주 하나(서버 분류 suggest 그대로 · 판정 사본 0).
+//   ★ 사람이 [같은 업체]를 누를 때만 연결, [다른 회사]는 서버가 기억해 다시 묻지 않는다(dismissed).
+function _ovmmSuggestsFrom(items){
+  return (items||[]).filter(it=>it&&it.kind==='suggest'&&it.id&&it.intranetId)
+    .map(it=>({id:it.id,name:it.name,intranetId:it.intranetId,intranetName:it.intranetName||'',bizNo:it.bizNo||''}));
+}
+function _ovmmSuggestHtml(){
+  const S=_OVMM, n=S.suggests.length; if(!n) return '';
+  const cards=S.sOpen ? S.suggests.map((g,i)=>{ const adv=_ovmmAdv(g.id); const busy=S.sBusy===i;
+    return `<div class="ovm-mg-pair"><div class="row">
+      <div class="ovm-mg-side"><div class="nm">${esc(g.name)}</div><div class="tg">리뷰웹 업체 · 작업 ${adv?(+adv.works||0):'?'} · 인트라넷 미연결</div></div>
+      <span class="ar">↔</span>
+      <div class="ovm-mg-side"><div class="nm">${esc(g.intranetName)}</div><div class="tg">인트라넷 광고주${g.bizNo?' · 사업자 '+esc(g.bizNo):''}</div></div>
+      <span class="ovm-mg-acts"><button class="btn pri" onclick="_ovmmSuggestLink(${i})" ${busy?'disabled':''}>같은 업체 · 연결</button>
+      ${S.canDismiss?`<button class="btn" onclick="_ovmmSuggestDismiss(${i})" ${busy?'disabled':''}>다른 회사</button>`:''}</span></div>
+      <div class="why">★ 이름이 법인 표기(주식회사·(주))만 다릅니다 — 같은 회사면 연결하세요. 연결하면 이후 인트라넷에서 이름이 바뀌어도 따라갑니다</div></div>`; }).join('') : '';
+  return `<div class="ovm-mg-bn info"><span class="ic">?</span><span class="tx"><b>인트라넷 연결 확인이 필요한 업체가 ${n}곳 있습니다</b><small>이름이 비슷한 인트라넷 광고주가 있지만 같은 회사인지 시스템이 정할 수 없습니다. 확인해 주세요.</small></span>
+    <button class="btn" onclick="_ovmmSuggestToggle()">${S.sOpen?'접기':'확인하기'}</button></div>${cards}`;
+}
+function _ovmmSuggestToggle(){ _OVMM.sOpen=!_OVMM.sOpen; _ovmmPaint(); }
+async function _ovmmSuggestLink(i){
+  const g=_OVMM.suggests[i]; if(!g||_OVMM.sBusy>=0) return;
+  if(!confirm('「'+g.name+'」 업체를 인트라넷 광고주 「'+g.intranetName+'」에 연결할까요?\n\n· 같은 회사일 때만 눌러주세요.\n· 업체 이름이 인트라넷 표기(「'+g.intranetName+'」)로 바뀝니다(다른 업체가 그 이름을 쓰면 그대로 둡니다).')) return;
+  _OVMM.sBusy=i; _ovmmPaint();
+  let r=null;
+  try{ r=await api('/api/trackb/advertisers/intranet-sync',{method:'POST',body:JSON.stringify({confirm:true,kinds:[],ids:[g.id],expect:{[g.id]:g.intranetId}})}); }catch(e){ r={ok:false,error:e&&e.message}; }
+  if(!document.getElementById('ovmmBox')) return;
+  const done=r&&r.ok&&(r.done||[]).some(d=>d.id===g.id);
+  if(!done){ _OVMM.sBusy=-1; _ovmmPaint();
+    const why=(r&&r.error)||((r&&r.failed||[]).find(f=>f.id===g.id)||{}).reason||'연결하지 못했습니다';
+    toast('연결하지 못했습니다 — '+why); return; }
+  toast('연결했습니다 → '+g.intranetName);
+  _OVMM.at=0; _OVMM.sOpen=true;
+  await renderOwnershipView();
+}
+async function _ovmmSuggestDismiss(i){
+  const g=_OVMM.suggests[i]; if(!g||_OVMM.sBusy>=0||!_OVMM.canDismiss) return;
+  if(!confirm('「'+g.name+'」와 인트라넷 「'+g.intranetName+'」는 다른 회사로 표시할까요?\n\n· 이 조합은 다시 묻지 않습니다.')) return;
+  _OVMM.sBusy=i; _ovmmPaint();
+  let r=null;
+  try{ r=await api('/api/trackb/advertisers/intranet-sync/dismiss',{method:'POST',body:JSON.stringify({advertiserId:g.id,intranetId:g.intranetId})}); }catch(e){ r={ok:false,error:e&&e.message}; }
+  if(!document.getElementById('ovmmBox')) return;
+  if(!(r&&r.ok)){ _OVMM.sBusy=-1; _ovmmPaint(); toast('처리하지 못했습니다 — '+((r&&r.error)||'오류')); return; }
+  toast('다른 회사로 표시했습니다 — 다시 묻지 않습니다');
+  _OVMM.suggests.splice(i,1); _OVMM.sBusy=-1; _ovmmPaint();
 }
 function _ovmmPaint(){ const el=document.getElementById('ovmmBox'); if(el) el.innerHTML=_ovmmBoxHtml(); }
 function _ovmmAdv(id){ return (STATE.advs||[]).find(x=>x.id===id)||null; }
@@ -17406,6 +17455,7 @@ function _ovmmBoxHtml(){
   if(S.state==='idle'||S.state==='loading') return '';
   if(S.state==='fail') return `<div class="ovm-mg-bn off"><span class="ic">?</span><span class="tx"><b>업체 중복 점검을 하지 못했습니다</b><small>${esc(S.error)} — 중복이 없다는 뜻은 아닙니다.</small></span><button class="btn" onclick="_ovmmLoad(true)">다시 시도</button></div>`;
   const n=S.pairs.length;
+  if(!n&&S.suggests.length) return _ovmmSuggestHtml();
   if(!n) return `<div class="ovm-mg-bn ok"><span class="ic">✓</span><span class="tx"><b>같은 업체로 보이는 중복 업체가 없습니다</b><small>인트라넷 광고주와 매시간 대조합니다 · 인트라넷에서 이름이 바뀌면 자동으로 따라갑니다</small></span></div>`;
   const cards=S.open ? S.pairs.map((p,i)=>{
     const keepId=S.keep[p.a.id+'|'+p.b.id]||p.b.id;
@@ -17416,7 +17466,7 @@ function _ovmmBoxHtml(){
     return `<div class="ovm-mg-pair"><div class="row">${side(gone,gone===p.b)}<span class="ar">→</span>${side(kept,kept===p.b)}<button class="btn ovm-mg-go" onclick="_ovmmOpen(${i})">합치기</button></div>
       <div class="why">★ ${esc(p.why)} · 카드를 누르면 남길 쪽이 바뀝니다</div></div>`; }).join('') : '';
   return `<div class="ovm-mg-bn"><span class="ic">!</span><span class="tx"><b>같은 업체로 보이는 업체가 ${n}쌍 있습니다</b><small>인트라넷에서 이름(법인 표기)이 바뀌면서 둘로 갈린 것으로 보입니다. 확인하고 하나로 합치세요.</small></span>
-    <button class="btn pri" onclick="_ovmmToggle()">${S.open?'접기':'확인하기'}</button></div>${cards}`;
+    <button class="btn pri" onclick="_ovmmToggle()">${S.open?'접기':'확인하기'}</button></div>${cards}${_ovmmSuggestHtml()}`;
 }
 function _ovmmToggle(){ _OVMM.open=!_OVMM.open; _ovmmPaint(); }
 // 남길 쪽 고르기 — 누른 카드가 남는다.
