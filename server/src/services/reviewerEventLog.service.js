@@ -152,6 +152,11 @@ function describeEvent(row = {}) {
           ? (c.oldTrashed ? '이전 사진은 드라이브 휴지통으로 이동(30일 안에 복구 가능).' : '이전 사진은 드라이브에 그대로 남겨 둠.')
           : '조치 불필요.',
       };
+    case 'review_capture_replaced':
+      return {
+        problem: `직원이 리뷰캡처 한 장을 새 사진으로 교체함${at(c.by) ? `(${at(c.by)})` : ''}.`,
+        action: c.oldTrashed ? '이전 사진은 드라이브 휴지통으로 이동(30일 안에 복구 가능) · 새 사진은 리뷰 검수를 다시 받습니다.' : '이전 사진은 드라이브에 그대로 남겨 둠 · 새 사진은 리뷰 검수를 다시 받습니다.',
+      };
     case 'capture_mismatch': {
       let slot = at(c.slotKey) || '캡처';
       try { slot = require('../utils/captureSlots').slotLabel(null, '', c.slotKey) || slot; } catch (_) { /* 라벨 실패는 key 그대로 */ }

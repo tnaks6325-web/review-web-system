@@ -1166,6 +1166,25 @@ router.post('/workdesk/purchase-capture/replace', authMiddleware, internalMiddle
     res.status(out.ok ? 200 : (_CAPTURE_REPLACE_STATUS[out.error] || 400)).json(out);
   } catch (err) { next(err); }
 });
+/* 작업보드 [🖼 리뷰캡처 교체] (사용자 확정 2026-10-01) — 구매캡처 교체와 같은 게이트(내부 직원 · 광고주 차단).
+   ★ 조회(GET)는 쓰기 0 — 그 줄의 리뷰캡처 목록. 교체(POST)는 고른 한 장(oldFileId)을 확정 순간에 다시 본다. */
+const _reviewReplace = require('../services/reviewCaptureReplace.service');
+const _REVIEW_REPLACE_STATUS = { bad_request: 400, not_image: 400, too_large: 413, row_not_found: 404,
+  no_review: 409, capture_changed: 409, pending_edit_request: 409 };
+router.get('/workdesk/review-capture', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.query || {};
+    const out = await _reviewReplace.previewReviewReplace({ sheetId, tabName, rowId });
+    res.status(out.ok ? 200 : (_REVIEW_REPLACE_STATUS[out.error] || 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/review-capture/replace', authMiddleware, internalMiddleware, imageApiLimiter, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, oldFileId, imageBase64, mimeType } = req.body || {};
+    const out = await _reviewReplace.replaceReviewCapture({ sheetId, tabName, rowId, oldFileId, imageBase64, mimeType, by: _by(req) });
+    res.status(out.ok ? 200 : (_REVIEW_REPLACE_STATUS[out.error] || 400)).json(out);
+  } catch (err) { next(err); }
+});
 // 구매일자 달력 편집(무시트 전용) — 그리드 오버레이(표시 전용)와 달리 row_json·원장까지 진짜로 쓴다.
 //   시트 기반 탭은 409(화면은 종전 오버레이 경로 유지). 스코프는 셀 편집과 동일(내부 직원).
 router.post('/workdesk/purchase-date', authMiddleware, async (req, res, next) => {
