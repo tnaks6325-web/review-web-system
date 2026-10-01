@@ -661,7 +661,16 @@ router.post('/advertisers/intranet-sync', authMiddleware, adminOrMasterMiddlewar
     const b = req.body || {};
     if (b.confirm !== true) return res.status(400).json({ ok: false, error: 'confirm:true 가 필요합니다(먼저 미리보기로 확인하세요).' });
     const out = await require('../services/advertiserIntranetSync.service')
-      .applyIntranetSync({ kinds: b.kinds, ids: b.ids, by: _by(req) });
+      .applyIntranetSync({ kinds: b.kinds, ids: b.ids, expect: b.expect, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+// "다른 회사입니다" — 그 연결 제안을 다시 묻지 않는다(관리자 전용).
+router.post('/advertisers/intranet-sync/dismiss', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../services/advertiserIntranetSync.service')
+      .dismissSuggest({ advertiserId: b.advertiserId, intranetId: b.intranetId, by: _by(req) });
     res.status(out.ok ? 200 : (out.code || 400)).json(out);
   } catch (err) { next(err); }
 });
