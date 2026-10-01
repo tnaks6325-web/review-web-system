@@ -51,7 +51,7 @@ function _ids(v) {
 }
 
 /** 미리보기 — 쓰기 0건(알림톡 도착 확인 갱신만 예외: reconcileAccepted). */
-async function previewManualSend({ sheetId, tabName, ids }) {
+async function previewManualSend({ sheetId, tabName, ids, withBilling = true }) {
   const want = _ids(ids);
   if (!sheetId || !tabName || !want.length) return { items: [] };
   const cps = await _participants(sheetId, tabName, want);
@@ -80,7 +80,8 @@ async function previewManualSend({ sheetId, tabName, ids }) {
   });
   // 건당 비용·잔액 — 확인창이 정확한 금액을 말하게. 조회 실패는 null(화면이 "확인 못 함"이라고 말한다).
   let billing = null;
-  try {
+  // ★ 실제 발송 경로(withBilling:false)는 단가를 다시 조회하지 않는다 — 단가 서버가 느려도 발송이 기다리지 않게.
+  if (withBilling) try {
     const b = await solapi.getAccountBilling();
     if (b && b.available) billing = { prices: b.prices || null, spendable: b.spendable, checkedAt: b.checkedAt };
   } catch (e) { logger.warn(`[manualMessage] 단가 조회 실패: ${e.message}`); }
@@ -108,7 +109,7 @@ async function sendManualSms({ sheetId, tabName, ids, text, by }) {
   const full = composeSms(body);
   if (solapi.smsBytes(full) > TEXT_MAX_BYTES) return { ok: false, error: '내용이 너무 깁니다(안내 문구 포함 2000바이트까지)' };
   if (!solapi.getSolapiStatus().configured) return { ok: false, error: '문자 발송 설정이 비어 있습니다' };
-  const { items } = await previewManualSend({ sheetId, tabName, ids });
+  const { items } = await previewManualSend({ sheetId, tabName, ids, withBilling: false });
   const results = [];
   const seen = new Map();
   for (const it of items) {

@@ -57,7 +57,13 @@ pool.query = async (sql, params) => {
   solapi.sendSms = async (a) => { sent.push(a); return { accepted: true, messageId: 'm1', type: 'LMS' }; };
   csBridge.postAdminNotice = async (a) => { rooms.push(a); return { threadId: 't1' }; };
 
+  let billingCalls = 0; const origBilling = solapi.getAccountBilling;
+  solapi.getAccountBilling = async () => { billingCalls++; return { available: true, prices: {}, spendable: 0 }; };
   let r = await svc.sendManualSms({ sheetId: 's', tabName: 't', ids: ['a', 'b', 'c', 'd'], text: '리뷰 부탁드립니다', by: '망고' });
+  ok('실제 발송 경로는 단가를 다시 조회하지 않는다(단가 서버가 느려도 발송이 안 기다림)', billingCalls === 0);
+  await svc.previewManualSend({ sheetId: 's', tabName: 't', ids: ['a'] });
+  ok('미리보기는 단가를 조회한다', billingCalls === 1);
+  solapi.getAccountBilling = origBilling;
   ok('같은 번호는 한 번만 보낸다', sent.length === 1 && sent[0].to === '01011112222');
   ok('보낸 문자에 안내 문구가 붙어 있다', /발신 전용/.test(sent[0].text));
   ok('1:1 문의방에는 안내 없이 본문만 남긴다', rooms.length === 1 && rooms[0].message === '리뷰 부탁드립니다' && rooms[0].phone8 === '11112222' && rooms[0].by === '망고');
