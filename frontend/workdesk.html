@@ -10025,9 +10025,11 @@ function _msTplProduct(txt){
   const end=s.indexOf(' '+t.body, head.length); return end>head.length?s.slice(head.length,end).trim():'';
 }
 async function _msLoadShort(){
-  const cd=(STATE.wd&&STATE.wd.condition)||{}, src=String(cd.workboardDisplayName||cd.productName||'').trim();
+  /* 상품명 + 작업 이름을 함께 보낸다 — 상품명 칸이 시트 제목인 작업이 있어(실측 "…체험단 시트_2026") 작업 이름이 힌트가 된다 */
+  const cd=(STATE.wd&&STATE.wd.condition)||{}, src=String(cd.productName||'').trim();
+  const task=String(cd.workboardDisplayName||(STATE.cur&&(STATE.cur.displayName||STATE.cur.tabName))||'').trim();
   try{
-    const d=await api('/api/trackb/workdesk/sms-product-name',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,productName:src})});
+    const d=await api('/api/trackb/workdesk/sms-product-name',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,productName:src,taskName:task})});
     if(_MS&&d&&d.name){ _MS.shortName=d.name; _MS.shortSource=d.source; }
   }catch(_){ /* 추천 실패 = 빈 자리로 둔다(문자 창을 막지 않는다) */ }
 }

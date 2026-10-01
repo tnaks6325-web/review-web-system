@@ -228,13 +228,13 @@ pool.query = async (sql, params) => {
   {
     let asked = 0; const ai = n => { asked++; return n.includes('유산균') ? '유산균' : '에셀라이트유산균프로'; };
     const A = { sheetId: 'S', tabName: 'T' };
-    ok('이름 판정: 한글 5자(10바이트) 이내만', svc.normalizeShortName('수딩 선크림') === '수딩선크림' && svc.normalizeShortName('에셀라이트유산균') === '' && svc.normalizeShortName('○○○○○') === '');
+    ok('이름 판정: 한글 6자(12바이트) 이내만', svc.normalizeShortName('마시는비타민') === '마시는비타민' && svc.normalizeShortName('수딩 선크림') === '수딩선크림' && svc.normalizeShortName('에셀라이트유산균') === '' && svc.normalizeShortName('○○○○○') === '');
     let r = await svc.productShortName({ ...A, productName: '[상품/옵션/금액]\n1. 에셀라이트 유산균 30포 (https://x.y/z)', suggest: ai });
     ok('처음에는 AI 가 추천한다', r.name === '유산균' && r.source === 'ai' && asked === 1);
     r = await svc.productShortName({ ...A, productName: '[상품/옵션/금액]\n1. 에셀라이트 유산균 30포 (https://x.y/z)', suggest: ai });
     ok('같은 상품명이면 저장된 추천을 다시 쓴다(AI 재호출 없음)', r.name === '유산균' && asked === 1);
     r = await svc.productShortName({ ...A, productName: '완전히 다른 긴 상품', suggest: ai });
-    ok('추천이 10바이트를 넘으면 추천 없음(장문 방지)', r.name === '' && r.source === 'none' && asked === 2);
+    ok('추천이 12바이트를 넘으면 추천 없음(장문 방지)', r.name === '' && r.source === 'none' && asked === 2);
     ok('직원이 고친 이름 저장 — 긴 이름은 거부', !(await svc.saveShortName({ ...A, name: '에셀라이트유산균' })).ok);
     ok('직원이 고친 이름 저장', (await svc.saveShortName({ ...A, name: '유산균젤리', by: 'x' })).ok);
     r = await svc.productShortName({ ...A, productName: '아무거나', suggest: ai });
@@ -242,7 +242,7 @@ pool.query = async (sql, params) => {
     ok('작업마다 키가 따로(동시 저장이 서로를 지우지 않게)', [...SETTINGS.keys()].every(k => /^sms_short_name:S\|\|T$/.test(k)));
   }
   ok('라우트: 추천·저장 창구는 내부 담당자 전원', /router\.post\('\/workdesk\/sms-product-name', authMiddleware, internalMiddleware/.test(read('server/src/routes/trackB.routes.js')));
-  ok('AI 프롬프트: 원문에 없는 단어를 지어내지 않는다', /원문에 없는 단어를 지어내지 마라/.test(read('server/src/services/gemini.service.js')));
+  ok('AI 프롬프트: 원문에 없는 단어를 지어내지 않는다', /에 없는 단어를 지어내지 마라/.test(read('server/src/services/gemini.service.js')));
   {
     const vm = require('vm');
     const blk = wd.slice(wd.indexOf('function _msHasLink'), wd.indexOf('function openManualSend'));

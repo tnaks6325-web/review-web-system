@@ -2298,7 +2298,7 @@ router.post('/workdesk/sms-product-name', authMiddleware, internalMiddleware, as
       const out = await svc.saveShortName({ sheetId, tabName, name: b.name, by: req.admin && req.admin.name });
       return res.status(out.ok ? 200 : 400).json(out);
     }
-    res.json({ ok: true, ...(await svc.productShortName({ sheetId, tabName, productName: b.productName })) });
+    res.json({ ok: true, ...(await svc.productShortName({ sheetId, tabName, productName: b.productName, taskName: b.taskName })) });
   } catch (e) {
     logger.warn(`[trackB] 짧은 상품명 처리 실패: ${e.message}`);
     if (req.body && req.body.save) return res.status(500).json({ ok: false, error: '상품명을 저장하지 못했습니다' });
