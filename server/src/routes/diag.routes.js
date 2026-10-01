@@ -145,6 +145,10 @@ router.post('/', authMiddleware, async (req, res, next) => {
       }
       case 'remove': {
         if (!phone) return res.json({ error: '전화번호가 필요합니다.' });
+        // ★ 해제는 공고별 참여 불가까지 일괄로 푼다 — 등록리뷰어DB 토글과 같은 권한(관리자·마스터)만 허용.
+        //   이 라우트는 authMiddleware 뿐이라 여기서 막지 않으면 낮은 권한 계정이 일괄 해제를 할 수 있다.
+        const role = req.admin && req.admin.role;
+        if (role !== 'admin' && role !== 'master') return res.status(403).json({ ok: false, error: '관리자 권한이 필요합니다.' });
         const cleanPhone = phone.replace(/[^0-9]/g, '');
         // 해제 = 다시 참여 가능 — 공고별 참여 불가까지 함께 푸는 단일 경로(reviewerGate.setGlobalBlacklist)를 쓴다.
         const out = await require('../services/reviewerGate.service')

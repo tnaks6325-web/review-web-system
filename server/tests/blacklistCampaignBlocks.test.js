@@ -133,9 +133,12 @@ async function withModule(rel, handler, run) {
   const dg = fs.readFileSync(SRC('routes/diag.routes.js'), 'utf8');
   const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   t('3a 관리자 대시보드 옛 해제 경로도 같은 함수를 쓴다(어디서 풀든 같은 결과)', () =>
-    assert.ok(/case 'remove'[\s\S]{0,400}setGlobalBlacklist\(\{ phone: cleanPhone, on: false/.test(dg)));
-  t('3b 따로 푸는 창구·화면 확인창은 없다(자동이라 필요 없다)', () => {
-    assert.ok(!/campaign-blocks\/release/.test(rt) && !/campaign-blocks\/release/.test(wd));
+    assert.ok((() => { const i = dg.indexOf("case 'remove'"), j = dg.indexOf("case 'check'", i); return i >= 0 && j > i && /setGlobalBlacklist\(\{ phone: cleanPhone, on: false/.test(dg.slice(i, j)); })()));
+  t('3a2 ★ 옛 해제 경로는 관리자·마스터만(일괄 해제 권한 확대 금지)', () =>
+    assert.ok(/case 'remove'[\s\S]{0,500}role !== 'admin' && role !== 'master'[\s\S]{0,200}status\(403\)[\s\S]{0,400}setGlobalBlacklist/.test(dg)));
+  t('3b 새 서버에는 따로 푸는 창구가 없고 화면 확인창도 없다 · 옛 서버 응답일 때만 옛 창구로 대신 푼다', () => {
+    assert.ok(!/campaign-blocks\/release/.test(rt));
+    assert.ok(/campaignBlocksReleased===undefined && resp\.campaignBlocks && resp\.campaignBlocks\.total>0/.test(wd));
     const i = wd.indexOf('async function _rvBlkToggle('), body = wd.slice(i, wd.indexOf('\n}\n', i));
     assert.ok(!/confirm\(/.test(body));
     assert.ok(/campaignBlocksReleased/.test(body), '함께 푼 개수를 말한다');
