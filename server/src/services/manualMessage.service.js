@@ -37,8 +37,12 @@ function smsFooter(env = process.env) {
 }
 /** 리뷰웹 주소(호스트) — 본문에 이미 있으면 안내 문구를 붙이지 않는다(단문 문안 · 사용자 확정 2026-10-01). */
 function homeHost(env = process.env) { return homeLink(env).replace(/\/#cs$/, ''); }
+/* ★ 호스트 경계까지 본다 — `notreview-web-system.pages.dev`·`…pages.dev.example.com` 같은 비슷한 주소를
+   우리 주소로 보고 안내 문구를 빼면 답할 길이 없는 문자가 나간다. 화면(_msHasLink)과 같은 정규식. */
 function hasHomeLink(text, env = process.env) {
-  return String(text || '').toLowerCase().includes(homeHost(env).toLowerCase());
+  const h = homeHost(env); if (!h) return false;
+  const re = new RegExp('(^|[^A-Za-z0-9.-])' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[/?#:\\s])', 'i');
+  return re.test(String(text || ''));
 }
 function composeSms(text, env = process.env) {
   const body = String(text || '').trim();

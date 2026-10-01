@@ -2872,7 +2872,8 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
 #msOv .mstpl button{border:1px solid var(--line2,#d0d9e4);background:var(--card,#fff);border-radius:7px;padding:6px 8px;font:inherit;font-size:12px;color:var(--ink,#101828);cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left}
 #msOv .mstpl button b{font-weight:600}
 #msOv .mstpl button span{font-size:11px;color:var(--muted,#667085)}
-#msOv .mstpl button:hover{border-color:var(--p,#2563eb)}
+#msOv .mstpl button:hover:not(:disabled){border-color:var(--p,#2563eb)}
+#msOv .mstpl button:disabled{opacity:.5;cursor:default}
 #msOv textarea{width:100%;box-sizing:border-box;min-height:92px;resize:vertical;font:inherit;font-size:13px;line-height:1.6;color:var(--ink,#101828);background:var(--card,#fff);border:1px solid var(--line2,#d0d9e4);border-radius:8px;padding:9px 10px;outline:none}
 #msOv textarea:focus{border-color:var(--accent,#2563eb);box-shadow:0 0 0 3px var(--accent-soft,#eff4ff)}
 #msOv .msmeta{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted,#667085);margin-top:5px}
@@ -10011,7 +10012,8 @@ function _msPlace(){
 function _msBytes(t){ let n=0; for(const ch of String(t||'')) n+=ch.charCodeAt(0)>127?2:1; return n; }
 /* ★ 본문에 리뷰웹 주소가 이미 있으면 서버가 안내 문구를 붙이지 않는다(manualMessage.composeSms 와 같은 규칙).
    주소 판정 재료(homeHost)는 서버가 준 값만 쓴다 — 못 받았으면(구버전 서버) 종전대로 항상 붙는 것으로 센다. */
-function _msHasLink(txt){ const h=_MS&&_MS.homeHost; return !!h && String(txt||'').toLowerCase().includes(String(h).toLowerCase()); }
+function _msHasLink(txt){ const h=_MS&&_MS.homeHost; if(!h) return false;
+  return new RegExp('(^|[^A-Za-z0-9.-])'+String(h).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?=$|[/?#:\\s])','i').test(String(txt||'')); }
 function _msFull(txt){ const b=String(txt||'').trim(); return _msHasLink(b)?b:b+(_MS.footer||''); }
 /* 리뷰 독촉 단문 문안 — 알림톡 일정(결정 194: 구매 7·13·14일)과 같은 세 단계. ○○○○○ = 상품명 자리(한글 5자 = 10바이트). */
 const _MS_PH='○○○○○';
@@ -10021,7 +10023,8 @@ const _MS_TPL=[
   { key:'r3', label:'최종', sub:'마감 당일', body:'오늘이 리뷰 작성 마감일입니다.' },
 ];
 function _msUseTpl(i){
-  const t=_MS_TPL[i], ta=document.getElementById('msText'); if(!t||!ta||!_MS||_MS.confirming||_MS.busy) return;
+  /* ★ 주소(homeLink)를 받기 전에는 넣지 않는다 — 주소가 빠진 문안은 안내 문구가 붙어 장문이 된다 */
+  const t=_MS_TPL[i], ta=document.getElementById('msText'); if(!t||!ta||!_MS||_MS.confirming||_MS.busy||!_MS.homeLink) return;
   const txt=`[IA리뷰] ${_MS_PH} ${t.body}`+(_MS.homeLink?`\n${_MS.homeLink}`:'');
   ta.focus(); ta.select();
   /* execCommand 로 넣어야 Ctrl+Z 로 직전 입력을 되살릴 수 있다(value 대입은 실행취소 기록을 지운다) */
@@ -10045,7 +10048,7 @@ function openManualSend(){
     <div class="msbd">
       <div><div class="mslbl" id="msHead">받는 사람을 확인하는 중…</div><ul class="mswho" id="msList"></ul></div>
       <div id="msSmsBox"><div class="mslbl"><span>내용</span></div>
-        <div class="mstpl" role="group" aria-label="리뷰 독촉 문안">${_MS_TPL.map((t,i)=>`<button type="button" data-tpl="${i}"><b>${t.label}</b><span>${t.sub}</span></button>`).join('')}</div>
+        <div class="mstpl" role="group" aria-label="리뷰 독촉 문안">${_MS_TPL.map((t,i)=>`<button type="button" data-tpl="${i}" disabled><b>${t.label}</b><span>${t.sub}</span></button>`).join('')}</div>
         <textarea id="msText" placeholder="보낼 내용을 입력하세요"></textarea>
         <div class="msmeta"><span id="msBytes"></span><span id="msKind"></span></div>
         <div class="mstail" id="msFoot"></div></div>
@@ -10075,6 +10078,8 @@ async function _msLoad(){
     else { _MS.items=d.items||[]; _MS.footer=d.footer||''; _MS.homeLink=d.homeLink||''; _MS.homeHost=d.homeHost||''; _MS.provider=d.providerConfigured!==false; _MS.billing=d.billing||null; }
   }catch(e){ if(_MS) _MS.err='받는 사람을 확인하지 못했습니다. '+(e.message||'네트워크 오류'); }
   if(!_MS) return;
+  /* 문안 버튼은 리뷰웹 주소를 받은 뒤에만 연다(구버전 서버 = 주소 없음 → 계속 잠김) */
+  document.querySelectorAll('#msOv .mstpl button').forEach(b=>{ b.disabled=!_MS.homeLink; if(!_MS.homeLink) b.title='리뷰웹 주소를 받지 못해 문안을 쓸 수 없습니다'; });
   _msPaintMeta(); _msPaintList(); _msPaintBtns(); _msPlace();
 }
 function _msOkItems(){
