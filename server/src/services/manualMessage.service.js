@@ -35,7 +35,19 @@ function homeLink(env = process.env) {
 function smsFooter(env = process.env) {
   return `\n\n※ 발신 전용 번호라 답장을 확인할 수 없습니다. 문의는 리뷰웹 1:1 문의로 남겨 주세요.\n${homeLink(env)}`;
 }
-function composeSms(text, env = process.env) { return String(text || '').trim() + smsFooter(env); }
+/** 리뷰웹 주소(호스트) — 본문에 이미 있으면 안내 문구를 붙이지 않는다(단문 문안 · 사용자 확정 2026-10-01). */
+function homeHost(env = process.env) { return homeLink(env).replace(/\/#cs$/, ''); }
+/* ★ 호스트 경계까지 본다 — `notreview-web-system.pages.dev`·`…pages.dev.example.com` 같은 비슷한 주소를
+   우리 주소로 보고 안내 문구를 빼면 답할 길이 없는 문자가 나간다. 화면(_msHasLink)과 같은 정규식. */
+function hasHomeLink(text, env = process.env) {
+  const h = homeHost(env); if (!h) return false;
+  const re = new RegExp('(^|[^A-Za-z0-9.-])' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[/?#:\\s])', 'i');
+  return re.test(String(text || ''));
+}
+function composeSms(text, env = process.env) {
+  const body = String(text || '').trim();
+  return hasHomeLink(body, env) ? body : body + smsFooter(env);
+}
 
 async function _participants(sheetId, tabName, ids) {
   const { rows } = await pool.query(
@@ -85,7 +97,7 @@ async function previewManualSend({ sheetId, tabName, ids, withBilling = true }) 
     const b = await solapi.getAccountBilling();
     if (b && b.available) billing = { prices: b.prices || null, spendable: b.spendable, checkedAt: b.checkedAt };
   } catch (e) { logger.warn(`[manualMessage] 단가 조회 실패: ${e.message}`); }
-  return { items, footer: smsFooter(), providerConfigured: solapi.getSolapiStatus().configured, billing };
+  return { items, footer: smsFooter(), homeLink: homeLink(), homeHost: homeHost(), providerConfigured: solapi.getSolapiStatus().configured, billing };
 }
 
 async function _log(row) {
@@ -119,7 +131,7 @@ async function sendManualSms({ sheetId, tabName, ids, text, by }) {
     seen.set(it.sms.phone, true);
     let out;
     try {
-      out = await solapi.sendSms({ to: it.sms.phone, text: full, subject: '인애드 리뷰 안내',
+      out = await solapi.sendSms({ to: it.sms.phone, text: full, subject: 'IA리뷰 안내',
         customFields: { participantId: String(it.participantId), kind: 'manual_sms' } });
     } catch (e) {
       out = { accepted: false, reason: e.code || e.message || '발송 실패' };
@@ -169,4 +181,4 @@ async function sendManualAlimtalk({ sheetId, tabName, ids, by }) {
   return { ok: results.some(r => r.sent), error: out.ok === false ? out.error : undefined, results };
 }
 
-module.exports = { previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, MAX_ROWS };
+module.exports = { previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };

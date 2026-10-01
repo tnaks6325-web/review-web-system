@@ -2868,6 +2868,12 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
 #msOv .msok{color:var(--safe,#16a34a)}
 #msOv .mswho li.msoff .msn{color:var(--faint,#98a2b3);font-weight:500;text-decoration:line-through;text-decoration-color:var(--line2,#d0d9e4)}
 #msOv .mstag{font-size:11px;color:var(--muted,#667085);border:1px solid var(--line2,#d0d9e4);border-radius:4px;padding:0 5px;margin-left:6px;font-weight:500}
+#msOv .mstpl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+#msOv .mstpl button{border:1px solid var(--line2,#d0d9e4);background:var(--card,#fff);border-radius:7px;padding:6px 8px;font:inherit;font-size:12px;color:var(--ink,#101828);cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left}
+#msOv .mstpl button b{font-weight:600}
+#msOv .mstpl button span{font-size:11px;color:var(--muted,#667085)}
+#msOv .mstpl button:hover:not(:disabled){border-color:var(--p,#2563eb)}
+#msOv .mstpl button:disabled{opacity:.5;cursor:default}
 #msOv textarea{width:100%;box-sizing:border-box;min-height:92px;resize:vertical;font:inherit;font-size:13px;line-height:1.6;color:var(--ink,#101828);background:var(--card,#fff);border:1px solid var(--line2,#d0d9e4);border-radius:8px;padding:9px 10px;outline:none}
 #msOv textarea:focus{border-color:var(--accent,#2563eb);box-shadow:0 0 0 3px var(--accent-soft,#eff4ff)}
 #msOv .msmeta{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted,#667085);margin-top:5px}
@@ -10004,6 +10010,29 @@ function _msPlace(){
   box.style.top=(down ? a.bottom+4 : Math.max(8, a.top-h-4))+'px';
 }
 function _msBytes(t){ let n=0; for(const ch of String(t||'')) n+=ch.charCodeAt(0)>127?2:1; return n; }
+/* ★ 본문에 리뷰웹 주소가 이미 있으면 서버가 안내 문구를 붙이지 않는다(manualMessage.composeSms 와 같은 규칙).
+   주소 판정 재료(homeHost)는 서버가 준 값만 쓴다 — 못 받았으면(구버전 서버) 종전대로 항상 붙는 것으로 센다. */
+function _msHasLink(txt){ const h=_MS&&_MS.homeHost; if(!h) return false;
+  return new RegExp('(^|[^A-Za-z0-9.-])'+String(h).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?=$|[/?#:\\s])','i').test(String(txt||'')); }
+function _msFull(txt){ const b=String(txt||'').trim(); return _msHasLink(b)?b:b+(_MS.footer||''); }
+/* 리뷰 독촉 단문 문안 — 알림톡 일정(결정 194: 구매 7·13·14일)과 같은 세 단계. ○○○○○ = 상품명 자리(한글 5자 = 10바이트). */
+const _MS_PH='○○○○○';
+const _MS_TPL=[
+  { key:'r1', label:'1차', sub:'마감 7일 전', body:'리뷰 작성 기한이 7일 남았습니다.' },
+  { key:'r2', label:'2차', sub:'마감 전날', body:'리뷰 작성 기한이 내일까지입니다.' },
+  { key:'r3', label:'최종', sub:'마감 당일', body:'오늘이 리뷰 작성 마감일입니다.' },
+];
+function _msUseTpl(i){
+  /* ★ 주소(homeLink)를 받기 전에는 넣지 않는다 — 주소가 빠진 문안은 안내 문구가 붙어 장문이 된다 */
+  const t=_MS_TPL[i], ta=document.getElementById('msText'); if(!t||!ta||!_MS||_MS.confirming||_MS.busy||!_MS.homeLink) return;
+  const txt=`[IA리뷰] ${_MS_PH} ${t.body}`+(_MS.homeLink?`\n${_MS.homeLink}`:'');
+  ta.focus(); ta.select();
+  /* execCommand 로 넣어야 Ctrl+Z 로 직전 입력을 되살릴 수 있다(value 대입은 실행취소 기록을 지운다) */
+  let done=false; try{ done=document.execCommand('insertText',false,txt); }catch(_){ done=false; }
+  if(!done||ta.value!==txt) ta.value=txt;
+  const at=ta.value.indexOf(_MS_PH); if(at>=0) ta.setSelectionRange(at, at+_MS_PH.length);
+  _msPaintMeta();
+}
 const _MS_X='<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8"/></svg>';
 function openManualSend(){
   const t=STATE.cur, ids=_msgRowIds(), td=_selAnchorTd(), r=td?td.getBoundingClientRect():null;
@@ -10018,7 +10047,9 @@ function openManualSend(){
     <div class="msseg" role="group" aria-label="보내는 방식"><button type="button" data-mt="sms" aria-pressed="true"><b>문자</b><span id="msPriceSms"></span></button><button type="button" data-mt="alimtalk" aria-pressed="false"><b>알림톡</b><span id="msPriceAta"></span></button></div>
     <div class="msbd">
       <div><div class="mslbl" id="msHead">받는 사람을 확인하는 중…</div><ul class="mswho" id="msList"></ul></div>
-      <div id="msSmsBox"><div class="mslbl"><span>내용</span></div><textarea id="msText" placeholder="보낼 내용을 입력하세요"></textarea>
+      <div id="msSmsBox"><div class="mslbl"><span>내용</span></div>
+        <div class="mstpl" role="group" aria-label="리뷰 독촉 문안">${_MS_TPL.map((t,i)=>`<button type="button" data-tpl="${i}" disabled><b>${t.label}</b><span>${t.sub}</span></button>`).join('')}</div>
+        <textarea id="msText" placeholder="보낼 내용을 입력하세요"></textarea>
         <div class="msmeta"><span id="msBytes"></span><span id="msKind"></span></div>
         <div class="mstail" id="msFoot"></div></div>
       <p id="msAtaBox" style="display:none" class="msnote">카카오가 승인한 문구 중 각자의 다음 회차가 나갑니다. 자동 알림도 이 회차를 보낸 것으로 기록해 같은 회차를 다시 보내지 않습니다.</p>
@@ -10028,6 +10059,7 @@ function openManualSend(){
   document.body.appendChild(ov);
   ov.querySelector('.msseg').addEventListener('click',e=>{ const b=e.target.closest('[data-mt]'); if(b) _msSetTab(b.getAttribute('data-mt')); });
   ov.querySelector('#msText').addEventListener('input',_msPaintMeta);
+  ov.querySelector('.mstpl').addEventListener('click',e=>{ const b=e.target.closest('[data-tpl]'); if(b) _msUseTpl(Number(b.getAttribute('data-tpl'))); });
   _msPaintMeta(); _msPaintBtns(); _msPlace(); _msLoad();
 }
 function _msSetTab(tab){
@@ -10043,12 +10075,11 @@ async function _msLoad(){
     const d=await api('/api/trackb/workdesk/manual-send/preview',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,ids:_MS.ids})});
     if(!_MS) return;
     if(!d||d.ok===false){ _MS.err=(d&&d.error)||'받는 사람을 확인하지 못했습니다.'; }
-    else { _MS.items=d.items||[]; _MS.footer=d.footer||''; _MS.provider=d.providerConfigured!==false; _MS.billing=d.billing||null; }
+    else { _MS.items=d.items||[]; _MS.footer=d.footer||''; _MS.homeLink=d.homeLink||''; _MS.homeHost=d.homeHost||''; _MS.provider=d.providerConfigured!==false; _MS.billing=d.billing||null; }
   }catch(e){ if(_MS) _MS.err='받는 사람을 확인하지 못했습니다. '+(e.message||'네트워크 오류'); }
   if(!_MS) return;
-  const f=document.getElementById('msFoot');
-  if(f){ f.innerHTML=''; const b=document.createElement('b'); b.textContent='끝에 자동으로 붙는 안내';
-    f.appendChild(b); f.appendChild(document.createTextNode(String(_MS.footer||'').trim())); }
+  /* 문안 버튼은 리뷰웹 주소를 받은 뒤에만 연다(구버전 서버 = 주소 없음 → 계속 잠김) */
+  document.querySelectorAll('#msOv .mstpl button').forEach(b=>{ b.disabled=!_MS.homeLink; if(!_MS.homeLink) b.title='리뷰웹 주소를 받지 못해 문안을 쓸 수 없습니다'; });
   _msPaintMeta(); _msPaintList(); _msPaintBtns(); _msPlace();
 }
 function _msOkItems(){
@@ -10075,10 +10106,13 @@ function _msPaintList(){
 }
 function _msPaintMeta(){
   const ta=document.getElementById('msText'); if(!ta||!_MS) return;
-  const b=_msBytes(String(ta.value||'').trim()+(_MS.footer||''));
+  const b=_msBytes(_msFull(ta.value)), link=_msHasLink(ta.value), ph=String(ta.value||'').includes(_MS_PH);
   const eb=document.getElementById('msBytes'), ek=document.getElementById('msKind');
   if(eb) eb.textContent=`${b.toLocaleString('ko-KR')}바이트 · ${b>2000?'너무 깁니다(2000바이트까지)':(b>90?'장문 문자':'단문 문자')}`;
-  if(ek) ek.textContent='안내 문구 포함';
+  if(ek){ ek.textContent=ph?'○○○○○ 자리에 상품명을 넣어 주세요':(link?'리뷰웹 주소가 있어 안내 문구 생략':'안내 문구 포함'); ek.classList.toggle('mswhy',ph); }
+  const f=document.getElementById('msFoot');
+  if(f){ f.innerHTML=''; if(_MS.footer&&!link){ const fb=document.createElement('b'); fb.textContent='끝에 자동으로 붙는 안내';
+    f.appendChild(fb); f.appendChild(document.createTextNode(String(_MS.footer).trim())); } f.style.display=(_MS.footer&&!link)?'':'none'; }
   const ps=document.getElementById('msPriceSms'), pa=document.getElementById('msPriceAta');
   const sp=_msPrice('sms', ta.value).price, ap=_msPrice('alimtalk','').price;
   if(ps) ps.textContent=sp?_msWon(sp.vat):''; if(pa) pa.textContent=ap?_msWon(ap.vat):'';
@@ -10088,8 +10122,9 @@ function _msPaintBtns(){
   const f=document.getElementById('msBtns'); if(!f||!_MS) return;
   const n=_MS.items?_msOkItems().length:0;
   const txt=String((document.getElementById('msText')||{}).value||'').trim();
-  const tooLong=_msBytes(txt+(_MS.footer||''))>2000;
-  const dis=_MS.busy||!n||(_MS.tab==='sms'&&(!txt||tooLong))||_MS.provider===false;
+  const tooLong=_msBytes(_msFull(txt))>2000;
+  /* ★ 상품명 자리(○○○○○)를 그대로 두고 보내지 않게 잠근다 */
+  const dis=_MS.busy||!n||(_MS.tab==='sms'&&(!txt||tooLong||txt.includes(_MS_PH)))||_MS.provider===false;
   if(_MS.confirming){
     f.innerHTML=`<button class="btn" type="button" onclick="_msConfirmBack()"${_MS.busy?' disabled':''}>돌아가기</button>
       <button class="btn pri msgo" type="button" onclick="_msSendConfirmed()"${_MS.busy?' disabled':''}>${_MS.busy?'보내는 중…':`${n}명에게 보내기`}</button>`;
@@ -10119,7 +10154,7 @@ async function _msSend(){
 function _msPrice(kind, text){
   const p=(_MS.billing&&_MS.billing.prices)||null;
   if(kind!=='sms') return { type:'알림톡', key:'ata', price:p&&p.ata };
-  const lms=_msBytes(String(text||'').trim()+(_MS.footer||''))>90;
+  const lms=_msBytes(_msFull(text))>90;
   return { type:lms?'장문 문자(LMS)':'단문 문자(SMS)', key:lms?'lms':'sms', price:p&&p[lms?'lms':'sms'] };
 }
 function _msWon(v){ return (Math.round(v*100)/100).toLocaleString('ko-KR')+'원'; }
