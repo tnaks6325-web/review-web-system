@@ -229,6 +229,12 @@ async function getAccountBilling(opts = {}) {
     spendable: balance + point,
     unitPrice,
     unitPriceVatIncluded: Math.round(unitPrice * 1.1 * 100) / 100,
+    // 담당자 수동 발송 확인창용 종류별 단가(부가세 별도 · 포함). 값이 없으면 null(모르는 값을 0으로 꾸미지 않는다).
+    prices: ['ata', 'sms', 'lms'].reduce((o, k) => {
+      const v = _finiteNumber(pricing[k]);
+      o[k] = v == null ? null : { unit: v, vat: Math.round(v * 1.1 * 100) / 100 };
+      return o;
+    }, {}),
     autoRecharge: Number(cash.autoRecharge) > 0,
     checkedAt: new Date(now).toISOString(),
   };

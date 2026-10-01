@@ -2879,6 +2879,13 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #msOv .msfoot{font-size:10.5px;color:var(--muted,#6b7280);white-space:pre-line;background:var(--card2,#f8fafc);border-radius:8px;padding:6px 8px}
 #msOv .msinfo{font-size:11px;color:#1d4ed8;background:#eff6ff;border-radius:8px;padding:7px 9px}
 #msOv .msbad{font-size:11.5px;color:#b42318;background:#fef2f2;border:1px solid #f3c0c0;border-radius:9px;padding:8px 10px}
+#msOv .msconfirm{border:1px solid #bfdbfe;background:#f8fbff;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px}
+#msOv .msctitle{font-size:12.5px;font-weight:800;color:#1e3a8a;margin-bottom:2px}
+#msOv .mscrow{display:flex;justify-content:space-between;gap:10px;font-size:12px;font-variant-numeric:tabular-nums}
+#msOv .mscrow > span:first-child{color:var(--muted,#6b7280)}
+#msOv .mscrow.mstotal{border-top:1px dashed #bfdbfe;padding-top:5px;font-size:13px}
+#msOv .msmuted{color:var(--muted,#6b7280);font-size:11px}
+#msOv .mscnote{font-size:10.5px;color:var(--muted,#6b7280);margin-top:2px}
 #msOv .msdone{font-size:11.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;padding:8px 10px}
 #hbOv table.wbl-t{font-size:11.5px} #hbOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
 #ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
@@ -10079,7 +10086,7 @@ async function _msLoad(){
     const d=await api('/api/trackb/workdesk/manual-send/preview',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,ids:_MS.ids})});
     if(!_MS) return;
     if(!d||d.ok===false){ _MS.err=(d&&d.error)||'받는 사람을 확인하지 못했습니다.'; }
-    else { _MS.items=d.items||[]; _MS.footer=d.footer||''; _MS.provider=d.providerConfigured!==false; }
+    else { _MS.items=d.items||[]; _MS.footer=d.footer||''; _MS.provider=d.providerConfigured!==false; _MS.billing=d.billing||null; }
   }catch(e){ if(_MS) _MS.err='받는 사람을 확인하지 못했습니다 — '+(e.message||'네트워크 오류'); }
   if(!_MS) return;
   const f=document.getElementById('msFoot'); if(f) f.textContent='자동으로 붙는 안내:'+(_MS.footer||'');
@@ -10121,6 +10128,11 @@ function _msPaintBtns(){
   const txt=String((document.getElementById('msText')||{}).value||'').trim();
   const tooLong=_msBytes(txt+(_MS.footer||''))>2000;
   const dis=_MS.busy||!n||(_MS.tab==='sms'&&(!txt||tooLong))||_MS.provider===false;
+  if(_MS.confirming){
+    f.innerHTML=`<button class="btn" type="button" onclick="_msConfirmBack()"${_MS.busy?' disabled':''}>돌아가기</button>
+      <button class="btn pri" type="button" onclick="_msSendConfirmed()"${_MS.busy?' disabled':''}>${_MS.busy?'보내는 중…':`${n}명에게 보내기 확정`}</button>`;
+    return;
+  }
   const label=_MS.busy?'보내는 중…':`${n}명에게 ${_MS.tab==='sms'?'문자':'알림톡'} 보내기`;
   f.innerHTML=`<button class="btn" type="button" onclick="_msClose()">${_MS.done?'닫기':'취소'}</button>
     <button class="btn pri" type="button" onclick="_msSend()"${dis?' disabled':''}>${label}</button>`;
@@ -10130,7 +10142,51 @@ async function _msSend(){
   const n=_msOkItems().length; if(!n) return;
   const kind=_MS.tab;
   const text=String((document.getElementById('msText')||{}).value||'').trim();
-  if(!confirm(`${n}명에게 ${kind==='sms'?'문자':'알림톡'}를 보냅니다. 요금이 발생하고 보낸 뒤에는 취소할 수 없습니다.`)) return;
+  /* ★ 시스템 확인창(confirm) 대신 창 안의 확인 화면 — 건당 비용·예상 합계·잔액을 숫자로 보여준다(사용자 확정 2026-10-01). */
+  _MS.confirming=true;
+  const rs=document.getElementById('msResult'); if(rs) rs.innerHTML=_msConfirmHtml(n, kind, text);
+  const ta=document.getElementById('msText'); if(ta) ta.readOnly=true;
+  document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.disabled=true);
+  _msPaintBtns(); _msPlace();
+  const card=document.getElementById('msConfirm'); if(card) card.scrollIntoView({block:'nearest'});
+}
+/* 확인 화면 — 종류는 서버와 같은 기준(90바이트 초과 = 장문). 단가를 못 받으면 금액을 지어내지 않고 그 사실을 말한다. */
+function _msPrice(kind, text){
+  const p=(_MS.billing&&_MS.billing.prices)||null;
+  if(kind!=='sms') return { type:'알림톡', key:'ata', price:p&&p.ata };
+  const lms=_msBytes(String(text||'').trim()+(_MS.footer||''))>90;
+  return { type:lms?'장문 문자(LMS)':'단문 문자(SMS)', key:lms?'lms':'sms', price:p&&p[lms?'lms':'sms'] };
+}
+function _msWon(v){ return (Math.round(v*100)/100).toLocaleString('ko-KR')+'원'; }
+function _msConfirmHtml(n, kind, text){
+  const k=_msPrice(kind, text), pr=k.price;
+  const unit = pr ? `${_msWon(pr.vat)} <span class="msmuted">(부가세 별도 ${_msWon(pr.unit)})</span>` : '<span class="msmuted">단가를 불러오지 못했습니다</span>';
+  const total = pr ? `<b>${_msWon(pr.vat*n)}</b> <span class="msmuted">(부가세 별도 ${_msWon(pr.unit*n)})</span>` : '—';
+  const bal = (_MS.billing&&Number.isFinite(_MS.billing.spendable)) ? _msWon(_MS.billing.spendable) : '<span class="msmuted">확인 못 함</span>';
+  const short = pr && _MS.billing && Number.isFinite(_MS.billing.spendable) && _MS.billing.spendable < pr.vat*n;
+  return `<div class="msconfirm" id="msConfirm">
+    <div class="msctitle">보내기 전에 확인해 주세요</div>
+    <div class="mscrow"><span>받는 사람</span><b>${n}명</b></div>
+    <div class="mscrow"><span>보내는 방식</span><b>${esc(k.type)}</b></div>
+    <div class="mscrow"><span>1건당 비용</span><span>${unit}</span></div>
+    <div class="mscrow mstotal"><span>예상 합계</span><span>${total}</span></div>
+    <div class="mscrow"><span>발송 계정 잔액</span><span>${bal}</span></div>
+    ${short?'<div class="msbad">잔액이 예상 합계보다 적습니다 — 일부가 발송되지 않을 수 있습니다.</div>':''}
+    <div class="mscnote">보낸 뒤에는 취소할 수 없습니다. 발송에 실패한 건은 비용이 청구되지 않습니다.</div>
+  </div>`;
+}
+function _msConfirmBack(){
+  if(!_MS||_MS.busy) return; _MS.confirming=false;
+  const rs=document.getElementById('msResult'); if(rs) rs.innerHTML='';
+  const ta=document.getElementById('msText'); if(ta) ta.readOnly=false;
+  document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.disabled=false);
+  _msPaintBtns(); _msPlace();
+}
+async function _msSendConfirmed(){
+  if(!_MS||_MS.busy||!_MS.confirming) return;
+  const n=_msOkItems().length; if(!n) return;
+  const kind=_MS.tab;
+  const text=String((document.getElementById('msText')||{}).value||'').trim();
   _MS.busy=true; _msPaintBtns();
   let d=null;
   try{
@@ -10138,7 +10194,9 @@ async function _msSend(){
       ids:_msOkItems().map(x=>x.participantId), kind, text})});
   }catch(e){ d={ok:false,error:'발송 실패 — '+(e.message||'네트워크 오류')}; }
   if(!_MS) return;
-  _MS.busy=false;
+  _MS.busy=false; _MS.confirming=false;
+  { const ta=document.getElementById('msText'); if(ta) ta.readOnly=false;
+    document.querySelectorAll('#msOv .mstabs button').forEach(b=>b.disabled=false); }
   const results=(d&&d.results)||[];
   const sent=results.filter(x=>x.sent).length;
   _MS.done=results;

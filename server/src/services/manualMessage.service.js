@@ -78,7 +78,13 @@ async function previewManualSend({ sheetId, tabName, ids }) {
       : { ok: a.ok, reminderNo: a.reminderNo, deadline: a.deadline, phoneTail: a.phoneTail, reason: a.reason };
     return { participantId: id, seq: cp.seq, rowName: cp.rowName, sms, ata: atap };
   });
-  return { items, footer: smsFooter(), providerConfigured: solapi.getSolapiStatus().configured };
+  // 건당 비용·잔액 — 확인창이 정확한 금액을 말하게. 조회 실패는 null(화면이 "확인 못 함"이라고 말한다).
+  let billing = null;
+  try {
+    const b = await solapi.getAccountBilling();
+    if (b && b.available) billing = { prices: b.prices || null, spendable: b.spendable, checkedAt: b.checkedAt };
+  } catch (e) { logger.warn(`[manualMessage] 단가 조회 실패: ${e.message}`); }
+  return { items, footer: smsFooter(), providerConfigured: solapi.getSolapiStatus().configured, billing };
 }
 
 async function _log(row) {
