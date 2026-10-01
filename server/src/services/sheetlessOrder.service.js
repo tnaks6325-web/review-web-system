@@ -102,7 +102,11 @@ async function _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
  * @returns {{patch:object, optionSuppressed:Array<{header,want,cur}>}}
  *   patch = 덮어쓸 {헤더명: 값}. 매퍼가 `null` 을 준 칸(관리자 보호열 등)은 들어가지 않는다.
  */
-function buildRowPatch(headers, orderData, currentRowJson = {}) {
+function buildRowPatch(headers, orderData, currentRowJson = {}, opts = {}) {
+  // ★ opts.productOverwrite — **방금 고른 빈 줄**에 미리 적힌 상품은 작업표가 배정한 계획값이지
+  //   담당자 지시가 아니므로 실제로 고른 상품으로 덮는다(2026-10-01 친구사이·고양이사료 등 221줄 사고).
+  //   이미 주문이 붙어 있던 줄의 재기록에는 넘기지 않는다 → 그때는 종전 blank-only 그대로.
+  const productOverwrite = !!(opts && opts.productOverwrite);
   const { mapOrderToSheetRow, optionWriteColumns, productWriteColumns } = require('./orderLedger.service');
   const mapped = mapOrderToSheetRow(headers || [], orderData || {});
   const optCols = new Set(optionWriteColumns(headers || []));
@@ -125,7 +129,7 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
       const cur = String((currentRowJson || {})[name] == null ? '' : (currentRowJson || {})[name]).trim();
       if (cur) { optionSuppressed.push({ header: name, want: String(val), cur }); return; }
     }
-    if (prodCols.has(i) && blankOnly) {
+    if (prodCols.has(i) && blankOnly && !productOverwrite) {
       const cur = String((currentRowJson || {})[name] == null ? '' : (currentRowJson || {})[name]).trim();
       if (cur) { productSuppressed.push({ header: name, want: String(val), cur }); return; }
     }
@@ -152,6 +156,32 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
   return { patch, optionSuppressed, optionUnmapped, productSuppressed, productUnmapped };
 }
 
+/**
+ * 리뷰어가 고른 상품(공고 표기)을 작업표가 쓰는 상품 표기 중 하나로 짝짓는다(2026-10-01).
+ * 공고 표기("6.웜 블렌드 티셔츠 아이보리 - 결제금액 94,200원…")와 작업표 표기("웜 블렌드 티셔츠 아이보리")가
+ * 다를 수 있어(#1349 의 우려) **정확일치 → 포함 관계가 하나로 정해질 때만** 짝을 짓는다.
+ * 애매하면 '' (추측 금지 — 종전처럼 상품을 보지 않고 줄을 고른다).
+ */
+function resolveProductLabel(picked, labels) {
+  const norm = v => String(v == null ? '' : v).replace(/\s+/g, '').toLowerCase();
+  const p = norm(picked);
+  const uniq = [...new Set((labels || []).map(l => String(l == null ? '' : l).trim()).filter(Boolean))];
+  if (!p || !uniq.length) return '';
+  const exact = uniq.filter(l => norm(l) === p);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return '';
+  const inPick = uniq.filter(l => p.includes(norm(l)));
+  if (inPick.length === 1) return inPick[0];
+  if (inPick.length > 1) {
+    // 가장 긴 표기가 나머지를 모두 품으면 그것("블랙"과 "웜 블렌드 티셔츠 블랙" → 뒤의 것)
+    const sorted = inPick.slice().sort((a, b) => norm(b).length - norm(a).length);
+    if (norm(sorted[0]).length > norm(sorted[1]).length && sorted.every(x => norm(sorted[0]).includes(norm(x)))) return sorted[0];
+    return '';
+  }
+  const inLabel = uniq.filter(l => norm(l).includes(p));
+  return inLabel.length === 1 ? inLabel[0] : '';
+}
+
 /** 빈 줄 후보를 한 번에 읽는 상한 — 한 작업표의 빈 줄이 이보다 많아도 앞에서부터 고르면 충분하다. */
 const PICK_CANDIDATE_CAP = 3000;
 
@@ -168,7 +198,7 @@ const PICK_CANDIDATE_CAP = 3000;
  *   ★ 킬스위치 `WORKTABLE_OPTION_RELABEL=0` = 종전 동작(바꿔 쓰지 않음).
  * @returns {Promise<{rows:Array, relabelFrom:string}>} rows 는 잠근 줄 0~1개
  */
-async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers, where }) {
+async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers, where, productPick = '' }) {
   const key = String(scheduledOptionKey || '');
   const { findDateColumnIndex } = require('./campaignSchedule.service');
   const { parseDateColumn } = require('../utils/koreanDate');
@@ -212,7 +242,59 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
       if (key) return ot === key ? 0 : 1;
       return ot ? 1 : 0;
     };
-    return { rows: await lockFirst(rank(cands, optTier)), relabelFrom: '' };
+    /* ★★ 상품 단위 선택(옵션 키 없음) — 그 상품으로 미리 정해진 빈 줄을 먼저 쓴다(2026-10-01).
+         종전에는 상품을 보지 않고 아무 빈 줄을 써서, 그 줄에 미리 적힌 다른 상품이 그대로 남았다.
+       ★ 상품 표기가 2종 이상일 때만(상품이 하나뿐인 작업은 종전 그대로).
+       ★ 그 상품 줄이 동났으면 **같은 리뷰옵션(포토/텍스트) 줄**을 먼저 쓴다 — 작업표는 상품별로
+         리뷰옵션을 따로 배정할 수 있어, 아무 줄이나 쓰면 그 줄의 리뷰옵션 계획이 어긋난다. */
+    let productKey = '';
+    let productWrite = '';   // 처음 채우는 줄에 적을 값 — 짝지은 작업표 표기, 못 지으면 고른 상품 원문(상품 2종 이상일 때만)
+    if (!key && productPick) {
+      const labels = [...new Set(cands.map(r => String(r.option_text == null ? '' : r.option_text).trim()).filter(Boolean))];
+      let allLabels = labels;
+      try {
+        const { rows: lr } = await client.query(
+          `SELECT DISTINCT btrim(option_text) AS l FROM campaign_participants
+            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+              AND ($3::uuid IS NULL OR workboard_id = $3) AND COALESCE(btrim(option_text), '') <> ''`,
+          [sheetId, tabName, workboardId]);
+        allLabels = [...new Set([...labels, ...lr.map(x => x.l)])];
+      } catch (_) { /* 후보 표기만으로 판정 */ }
+      if (allLabels.length >= 2) {
+        productKey = resolveProductLabel(productPick, allLabels);
+        // ★ 짝을 못 지어도 미리 적힌 **다른** 상품을 남기지 않는다 — 표기가 달라도 정확한 값이 틀린 값보다 낫다.
+        productWrite = productKey || productPick;
+      }
+    }
+    if (productKey) {
+      const { isReviewOptionHeader } = require('../utils/reviewType');
+      const rvHeader = (headers || []).find(h => isReviewOptionHeader(h));
+      let wantRv = '';
+      if (rvHeader) {
+        const counts = new Map();
+        const tally = (rj) => { const v = String(((rj || {})[rvHeader]) == null ? '' : (rj || {})[rvHeader]).trim(); if (v) counts.set(v, (counts.get(v) || 0) + 1); };
+        cands.filter(r => String(r.option_text || '').trim() === productKey).forEach(r => tally(r.row_json));
+        if (!counts.size) {
+          try {
+            const { rows: fr } = await client.query(
+              `SELECT row_json FROM campaign_participants
+                WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+                  AND btrim(COALESCE(option_text, '')) = $3 LIMIT 500`, [sheetId, tabName, productKey]);
+            fr.forEach(r => tally(r.row_json));
+          } catch (_) { /* 리뷰옵션 선호 없이 */ }
+        }
+        wantRv = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      }
+      const prodTier = r => {
+        const ot = String(r.option_text == null ? '' : r.option_text).trim();
+        if (ot === productKey) return 0;
+        const rv = rvHeader ? String(((r.row_json || {})[rvHeader]) == null ? '' : (r.row_json || {})[rvHeader]).trim() : '';
+        const sameRv = !wantRv || rv === wantRv;
+        return ot ? (sameRv ? 2 : 3) : (sameRv ? 1 : 3);
+      };
+      return { rows: await lockFirst(rank(cands, prodTier)), relabelFrom: '', productKey, productWrite };
+    }
+    return { rows: await lockFirst(rank(cands, optTier)), relabelFrom: '', productKey: '', productWrite };
   }
 
   if (!key || process.env.WORKTABLE_OPTION_RELABEL === '0') return { rows: [], relabelFrom: '' };
@@ -328,6 +410,9 @@ async function writeOrderToWorktable({
   let scheduledOptionKey = '';
   // 다른 옵션 이름이 적힌 빈 줄을 옵션을 바꿔 쓸 때, 그 줄에 적혀 있던 옛 옵션 이름(없으면 '')
   let relabelFrom = '';
+  // 방금 빈 줄을 새로 골랐는지 · 그 줄에 맞춘 상품 표기(2026-10-01)
+  let freshClaim = false;
+  let claimedProductKey = '';
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -460,6 +545,7 @@ async function writeOrderToWorktable({
            ★ 탭 잠금(pg_advisory_xact_lock) 안이라 후보를 읽고 JS 로 고른 뒤 잠가도 두 주문이 같은 줄을 집지 않는다. */
         const picked = await _pickOpenSlot(client, {
           sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers,
+          productPick: scheduledOptionKey ? '' : String(orderData.selectedProduct || '').trim(),
           where: `
             WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
               AND ($3::uuid IS NULL OR cp.workboard_id = $3)
@@ -485,6 +571,8 @@ async function writeOrderToWorktable({
               )`,
         });
         cur = picked.rows;
+        freshClaim = cur.length > 0;
+        claimedProductKey = picked.productWrite || '';
         relabelFrom = picked.relabelFrom;
       }
       if (!cur.length) {
@@ -537,7 +625,11 @@ async function writeOrderToWorktable({
       currentRowJson = cleared;
       logger.info(`[sheetlessOrder] 빈 줄 옵션 바꿔 쓰기 tab=${tabName} seq=${cur[0].seq} ${relabelFrom} → ${scheduledOptionKey} os=${orderSubmissionId}`);
     }
-    const built = buildRowPatch(headers, orderData, currentRowJson);
+    /* ★ 처음 채우는 빈 줄 + 상품 단위 선택(상품 표기 2종 이상으로 짝지어진 경우)일 때만 상품 칸을
+         실제 선택으로 덮는다. 값은 작업표 표기(claimedProductKey) — 표기를 섞지 않는다. */
+    const productOverwrite = freshClaim && !!claimedProductKey;
+    const patchOrderData = productOverwrite ? { ...orderData, selectedProduct: claimedProductKey } : orderData;
+    const built = buildRowPatch(headers, patchOrderData, currentRowJson, { productOverwrite });
     optionSuppressed = built.optionSuppressed;
     optionUnmapped = built.optionUnmapped || '';
     productSuppressed = built.productSuppressed || [];
@@ -548,7 +640,8 @@ async function writeOrderToWorktable({
     const recipientName = String(orderData.recipient || '').slice(0, 200);
     const p8 = _phone8(orderData.phone) || String(loginPhone8 || '').replace(/\D/g, '').slice(-8);
     // ★ 옵션은 리뷰어가 고른 값만 원장에 — 시트값 역주입 금지(C′ 규율). 빈 값이면 기존 값 보존.
-    const optText = selectedOptKey;
+    // ★ 상품 단위 + 처음 채우는 줄이면 배정 표식(option_text)도 실제 상품으로 맞춘다(다음 빈 줄 고르기가 이 표식을 본다).
+    const optText = selectedOptKey || (productOverwrite ? claimedProductKey : '');
 
     if (cur.length) {
       const persisted = await client.query(
@@ -973,6 +1066,7 @@ module.exports = {
   reconcileCampaignWorktableLinks,
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,
+  resolveProductLabel,
   __canAppendConfirmedOverflowOrderForTest: _canAppendConfirmedOverflowOrder,
   __pickOpenSlotForTest: _pickOpenSlot,
   __setPoolForTest,

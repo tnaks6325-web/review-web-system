@@ -103,8 +103,12 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
     !/scheduledUnitKey/.test(sl));
   ok('큐 원장을 다시 읽은 뒤에 옵션 키를 계산한다',
     /orderData = ledgerSvc\._osRowToOrderData\(freshOrders\[0\]\);[\s\S]{0,180}scheduledOptionKey =/.test(sl));
-  ok('슬롯 구분과 옵션 칸 기록은 옵션 키만 쓴다',
-    /const optText = selectedOptKey;/.test(sl) && /_pickOpenSlot\(client, \{\s*sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers,/.test(sl));
+  // 2026-10-01: 상품은 **거르는 조건이 아니라 우선순위**(productPick)로만 넘긴다 — 슬롯 거르기(where)는 여전히 옵션 키뿐.
+  //   표식(option_text)은 옵션 키가 없을 때 **처음 채우는 줄 + 작업표 표기와 짝지어진 상품**으로만 맞춘다.
+  ok('슬롯 구분과 옵션 칸 기록은 옵션 키만 쓴다(상품은 우선순위·처음 채우는 줄 표식만)',
+    /const optText = selectedOptKey \|\| \(productOverwrite \? claimedProductKey : ''\);/.test(sl)
+    && /_pickOpenSlot\(client, \{\s*sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers,\s*productPick: scheduledOptionKey \? '' :/.test(sl)
+    && /const productOverwrite = freshClaim && !!claimedProductKey;/.test(sl));
   ok('상품형은 실제 옵션 키로 예약된 슬롯만 제외한다',
     /NOT EXISTS \([\s\S]{0,500}scope_co\.unit_kind[\s\S]{0,180}scope_co\.opt_key = cp\.option_text/.test(sl));
 
