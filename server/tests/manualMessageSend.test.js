@@ -57,7 +57,13 @@ pool.query = async (sql, params) => {
   solapi.sendSms = async (a) => { sent.push(a); return { accepted: true, messageId: 'm1', type: 'LMS' }; };
   csBridge.postAdminNotice = async (a) => { rooms.push(a); return { threadId: 't1' }; };
 
+  let billingCalls = 0; const origBilling = solapi.getAccountBilling;
+  solapi.getAccountBilling = async () => { billingCalls++; return { available: true, prices: {}, spendable: 0 }; };
   let r = await svc.sendManualSms({ sheetId: 's', tabName: 't', ids: ['a', 'b', 'c', 'd'], text: '리뷰 부탁드립니다', by: '망고' });
+  ok('실제 발송 경로는 단가를 다시 조회하지 않는다(단가 서버가 느려도 발송이 안 기다림)', billingCalls === 0);
+  await svc.previewManualSend({ sheetId: 's', tabName: 't', ids: ['a'] });
+  ok('미리보기는 단가를 조회한다', billingCalls === 1);
+  solapi.getAccountBilling = origBilling;
   ok('같은 번호는 한 번만 보낸다', sent.length === 1 && sent[0].to === '01011112222');
   ok('보낸 문자에 안내 문구가 붙어 있다', /발신 전용/.test(sent[0].text));
   ok('1:1 문의방에는 안내 없이 본문만 남긴다', rooms.length === 1 && rooms[0].message === '리뷰 부탁드립니다' && rooms[0].phone8 === '11112222' && rooms[0].by === '망고');
@@ -153,7 +159,24 @@ pool.query = async (sql, params) => {
   const setTab = wd.slice(wd.indexOf('function _msSetTab'), wd.indexOf('async function _msLoad'));
   ok('탭 전환이 입력칸을 다시 만들지 않는다(IME 보호)', !/innerHTML/.test(setTab.replace(/rs\.innerHTML=''/, '')) && /style\.display/.test(setTab));
   ok('팝오버는 body 직속 · Esc 로 닫힘 · 리스너 1회', /document\.body\.appendChild\(ov\);[\s\S]{0,400}_msLoad\(\)/.test(wd) && /window\._msKeyBound/.test(wd));
-  ok('보내기 전에 요금·취소 불가를 확인받는다', /요금이 발생하고 보낸 뒤에는 취소할 수 없습니다/.test(wd));
+  ok('시스템 확인창(confirm)을 쓰지 않는다', !/confirm\(`\$\{n\}명에게/.test(wd));
+  {
+    const vm = require('vm');
+    const blk = wd.slice(wd.indexOf('function _msBytes'), wd.indexOf('function openManualSend'))
+      + wd.slice(wd.indexOf('function _msPrice'), wd.indexOf('function _msConfirmBack'));
+    const S = { esc: x => String(x), _MS: { footer: '', billing: { spendable: 30,
+      prices: { ata: { unit: 13, vat: 14.3 }, sms: { unit: 18, vat: 19.8 }, lms: { unit: 45, vat: 49.5 } } } } };
+    vm.runInNewContext(blk + '\nthis.h=_msConfirmHtml;', S);
+    const ata = S.h(3, 'alimtalk', '');
+    ok('확인 화면: 알림톡 1건당 부가세 포함 14.3원 · 별도 13원', /14\.3원/.test(ata) && /부가세 별도 13원/.test(ata));
+    ok('확인 화면: 예상 합계 = 건당 × 인원', /42\.9원/.test(ata) && /3명/.test(ata));
+    ok('확인 화면: 잔액이 모자라면 경고', /잔액이 예상 합계보다 적습니다/.test(ata));
+    ok('문자는 길이로 단문/장문 단가를 고른다', /단문 문자\(SMS\)/.test(S.h(1, 'sms', '짧음')) && /19\.8원/.test(S.h(1, 'sms', '짧음'))
+      && /장문 문자\(LMS\)/.test(S.h(1, 'sms', '가'.repeat(60))) && /49\.5원/.test(S.h(1, 'sms', '가'.repeat(60))));
+    S._MS.billing = null;
+    ok('단가를 못 받으면 금액을 지어내지 않는다', /단가를 불러오지 못했습니다/.test(S.h(1, 'alimtalk', '')) && !/\d원/.test(S.h(1, 'alimtalk', '').replace(/발송에 실패한/, '')));
+  }
+  ok('단가표: 종류별(알림톡·단문·장문) 부가세 포함 값을 싣는다', /prices: \['ata', 'sms', 'lms'\]/.test(read('server/src/services/solapi.service.js')));
   ok('문자 글자 수는 안내 문구 포함으로 센다', /_msBytes\(String\(ta\.value\|\|''\)\.trim\(\)\+\(_MS\.footer\|\|''\)\)/.test(wd));
 
   console.log(`\n✅ manualMessageSend: ${passed}개 통과`);
