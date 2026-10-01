@@ -15,13 +15,14 @@ const ADVS = [{ id: 'a1', name: '비슷무역', intranetId: '', businessNumber: 
 const INTRA = [{ intranetId: 'i1', name: '주식회사 비슷무역', bizNo: '111-22-33333' }];
 function stub(dismissed) {
   const writes = [];
-  const pool = { query: async (sql, p) => {
+  const q = async (sql, p) => {
     const t = String(sql);
     if (/FROM advertisers WHERE COALESCE\(status/.test(t)) return { rows: ADVS };
     if (/SELECT value FROM app_settings/.test(t)) return { rows: dismissed == null ? [] : [{ value: JSON.stringify(dismissed) }] };
     writes.push({ t, p });
     return { rows: [], rowCount: /UPDATE advertisers/.test(t) ? 1 : 0 };
-  } };
+  };
+  const pool = { query: q, connect: async () => ({ query: q, release() {} }) };
   return { deps: { pool, trackB: { intranetAdvertiserIndex: async () => ({ ok: true, rows: INTRA }) } }, writes };
 }
 
@@ -35,11 +36,28 @@ function stub(dismissed) {
   ok('다른 인트라넷 광고주면 다시 묻는다(조합 단위로만 기억)',
     svc.planIntranetSync(ADVS, INTRA, { dismissed: new Set(['a1|i9']) }).items[0].kind === 'suggest');
 
+  // ③ "다른 회사" 답은 모든 분류보다 먼저(Codex 리뷰)
+  { const advs = [{ id: 'a1', name: '비슷무역', intranetId: '', businessNumber: '' }, { id: 'h', name: '주식회사 비슷무역', intranetId: 'i1', businessNumber: '' }];
+    const p = svc.planIntranetSync(advs, INTRA, { dismissed: new Set(['a1|i1']) });
+    ok('그 인트라넷 광고주가 나중에 다른 업체에 연결돼도 합치기 권유(duplicate)로 되살아나지 않는다',
+      p.items.find(x => x.id === 'a1').kind === 'dismissed' && !p.items.some(x => x.kind === 'duplicate')); }
+  { const p = svc.planIntranetSync([{ id: 'a1', name: '주식회사 비슷무역', intranetId: '', businessNumber: '' }], INTRA, { dismissed: new Set(['a1|i1']) });
+    ok('이름이 정확히 같아져도 자동 연결(link)로 되살아나지 않는다', p.items[0].kind === 'dismissed'); }
+  { const p = svc.planIntranetSync([{ id: 'x1', name: '옛표기', intranetId: 'i1', businessNumber: '' }, { id: 'h2', name: '주식회사 비슷무역', intranetId: '', businessNumber: '' }],
+      INTRA, { dismissed: new Set(['h2|i1']) });
+    ok('이름을 쥔 쪽을 "다른 회사"라 답했으면 합칠 짝이 아니라 name_taken', p.items.some(x => x.id === 'x1' && x.kind === 'name_taken') && !p.items.some(x => x.kind === 'rename_blocked')); }
+  ok('미리보기가 [다른 회사] 창구 지원 여부를 알린다', (await svc.previewIntranetSync(stub([]).deps)).dismissSupported === true);
+  // ① 동시 거절 직렬화 — 같은 트랜잭션에서 잠금 후 읽고 쓴다
+  { const { deps, writes } = stub([]);
+    await svc.dismissSuggest({ advertiserId: 'a1', intranetId: 'i1' }, deps);
+    const iLock = writes.findIndex(x => /pg_advisory_xact_lock/.test(x.t)), iIns = writes.findIndex(x => /INSERT INTO app_settings/.test(x.t));
+    ok('거절 기록은 트랜잭션 잠금 안에서 쓴다(동시 거절이 서로 지우지 않게)', writes[0] && /BEGIN/.test(writes[0].t) && iLock >= 0 && iLock < iIns && writes.some(x => /COMMIT/.test(x.t))); }
+
   // dismissSuggest
   { const { deps, writes } = stub([]);
     const r = await svc.dismissSuggest({ advertiserId: 'a1', intranetId: 'i1', by: 't' }, deps);
     const w = writes.find(x => /INSERT INTO app_settings/.test(x.t));
-    ok('다른 회사 표시는 app_settings 한 키에만 쓴다', r.ok && w && w.p[0] === svc.DISMISS_KEY
+    ok('다른 회사 표시는 app_settings 한 키에만 쓴다', r.ok && w && w.p[0] === svc.DISMISS_KEY && !writes.some(x => /UPDATE advertisers|DELETE FROM/.test(x.t))
       && JSON.parse(w.p[1])[0].advertiserId === 'a1' && JSON.parse(w.p[1])[0].intranetId === 'i1'
       && !writes.some(x => /UPDATE advertisers/.test(x.t))); }
   { const { deps, writes } = stub([]);
@@ -82,7 +100,7 @@ function stub(dismissed) {
       api: async (u, o) => { calls.push({ u, b: o && o.body ? JSON.parse(o.body) : null });
         if (/dismiss/.test(u)) return { ok: true };
         if (o && o.method === 'POST') return { ok: true, done: [{ id: 'a1' }], failed: [] };
-        return { ok: true, items: [{ kind: 'suggest', id: 'a1', name: '비슷무역', intranetId: 'i1', intranetName: '주식회사 비슷무역', bizNo: '111-22-33333' }, { kind: 'link', id: 'x' }] }; } };
+        return { ok: true, dismissSupported: sb.__cap !== false, items: [{ kind: 'suggest', id: 'a1', name: '비슷무역', intranetId: 'i1', intranetName: '주식회사 비슷무역', bizNo: '111-22-33333' }, { kind: 'link', id: 'x' }] }; } };
     vm.createContext(sb);
     vm.runInContext(block.replace(/^let _OVMM=/m, 'var _OVMM=') + '\nthis._S=()=>_OVMM;', sb);
     return { sb, els, calls };
@@ -108,6 +126,11 @@ function stub(dismissed) {
   { const { sb, calls } = mk('master'); sb.confirm = () => false;
     await sb._ovmmLoad(true); await sb._ovmmSuggestLink(0); await sb._ovmmSuggestDismiss(0);
     ok('확인창에서 취소하면 아무 요청도 안 보낸다', !calls.some(x => x.b)); }
+  { const { sb, els, calls } = mk('master'); sb.__cap = false;
+    await sb._ovmmLoad(true); sb._ovmmSuggestToggle();
+    await sb._ovmmSuggestDismiss(0);
+    ok('서버가 [다른 회사]를 지원하지 않으면(구버전) 버튼을 그리지도 부르지도 않는다',
+      !/_ovmmSuggestDismiss/.test(els.ovmmBox.innerHTML) && /_ovmmSuggestLink\(0\)/.test(els.ovmmBox.innerHTML) && !calls.some(x => /dismiss/.test(x.u))); }
   { const { sb, els, calls } = mk('staff');
     await sb._ovmmLoad(true);
     ok('AE 에게는 그리지도 부르지도 않는다', els.ovmmBox.innerHTML === '' && calls.length === 0); }

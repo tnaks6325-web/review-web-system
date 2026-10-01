@@ -51,7 +51,9 @@ function planIntranetSync(advs, intra, opts) {
         // ★ 그 이름을 쥔 업체가 **다른 인트라넷 광고주에 연결돼 있으면** 같은 업체가 아니다(합치기 대상 아님 —
         //   서버 합치기도 different_intranet 으로 거부한다). 사람이 한쪽 이름을 구분되게 바꿔야 하는 name_taken 으로 둔다.
         if (holder && holder.id !== a.id) {
-          if (holder.intranetId && holder.intranetId !== a.intranetId) items.push({ kind: 'name_taken', id: a.id, name, to: iname, takenBy: { id: holder.id, name: holder.name } });
+          // ★ 사람이 그 업체와 이 인트라넷 광고주를 "다른 회사"라고 답했다면 합칠 짝이 아니다(이름만 겹친 다른 회사).
+          const saidDifferent = !holder.intranetId && dismissed.has(_dkey(holder.id, a.intranetId));
+          if ((holder.intranetId && holder.intranetId !== a.intranetId) || saidDifferent) items.push({ kind: 'name_taken', id: a.id, name, to: iname, takenBy: { id: holder.id, name: holder.name } });
           else items.push({ kind: 'rename_blocked', id: a.id, name, to: iname, blockedBy: { id: holder.id, name: holder.name, intranetLinked: !!holder.intranetId } });
         }
         else items.push({ kind: 'rename', id: a.id, name, to: iname, intranetId: a.intranetId });
@@ -60,9 +62,16 @@ function planIntranetSync(advs, intra, opts) {
       continue;
     }
     const exact = intra.filter(r => _trim(r.name) === name && r.intranetId);
-    const pool = exact.length ? exact
+    const allPool = exact.length ? exact
       : intra.filter(r => r.intranetId && sameAdvertiser({ name: r.name, businessNumber: r.bizNo }, { name, businessNumber: a.businessNumber }));
-    if (!pool.length) { items.push({ kind: 'not_found', id: a.id, name }); continue; }
+    if (!allPool.length) { items.push({ kind: 'not_found', id: a.id, name }); continue; }
+    // ★★ "다른 회사" 답은 **모든 분류보다 먼저** 적용한다(Codex 리뷰) — 뒤에서만 보면 그 인트라넷 광고주가 나중에
+    //   다른 업체에 연결되는 순간 duplicate(합치기 권유)로, 이름이 같아지면 link(자동 연결)로 되살아난다.
+    const pool = allPool.filter(r => !dismissed.has(_dkey(a.id, r.intranetId)));
+    if (!pool.length) {
+      items.push({ kind: 'dismissed', id: a.id, name, intranetId: allPool[0].intranetId, intranetName: allPool[0].name, bizNo: _trim(allPool[0].bizNo) });
+      continue;
+    }
     if (pool.length > 1) { items.push({ kind: 'ambiguous', id: a.id, name, options: pool.map(r => r.name) }); continue; }
     const ir = pool[0];
     const holder = advByIid.get(ir.intranetId);
@@ -70,7 +79,7 @@ function planIntranetSync(advs, intra, opts) {
       items.push({ kind: 'duplicate', id: a.id, name, intranetName: ir.name, mergeWith: { id: holder.id, name: holder.name } });
       continue;
     }
-    const kind = exact.length ? 'link' : (dismissed.has(_dkey(a.id, ir.intranetId)) ? 'dismissed' : 'suggest');
+    const kind = exact.length ? 'link' : 'suggest';
     items.push({ kind, id: a.id, name, intranetId: ir.intranetId, intranetName: ir.name, bizNo: _trim(ir.bizNo) });
   }
   const counts = {};
@@ -108,18 +117,30 @@ async function dismissSuggest({ advertiserId, intranetId, by = '' } = {}, deps) 
   if (!aid || !iid) return { ok: false, code: 400, error: '업체와 인트라넷 광고주를 지정하세요.' };
   const L = await _load(db, deps);
   if (!L.ok) return { ok: false, code: 503, error: L.error };
+  if (L.dismissed.has(_dkey(aid, iid))) return { ok: true, already: true };
   const plan = planIntranetSync(L.advs, L.intra, { dismissed: L.dismissed });
-  const it = plan.items.find(x => x.id === aid && x.intranetId === iid && (x.kind === 'suggest' || x.kind === 'dismissed'));
+  const it = plan.items.find(x => x.id === aid && x.intranetId === iid && x.kind === 'suggest');
   if (!it) return { ok: false, code: 409, error: '그 사이 점검 결과가 바뀌었습니다. 새로고침한 뒤 다시 확인하세요.' };
-  if (it.kind === 'dismissed') return { ok: true, already: true };
-  const { rows } = await db.query(`SELECT value FROM app_settings WHERE key = $1`, [DISMISS_KEY]);
-  let arr = []; try { arr = JSON.parse((rows[0] && rows[0].value) || '[]'); } catch (_) { arr = []; }
-  if (!Array.isArray(arr)) arr = [];
-  arr.unshift({ advertiserId: aid, intranetId: iid, name: it.name, intranetName: it.intranetName, by: _trim(by).slice(0, 100), at: new Date().toISOString() });
-  await db.query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [DISMISS_KEY, JSON.stringify(arr.slice(0, DISMISS_CAP))]);
+  // ★ 관리자 둘이 동시에 눌러도 서로의 기록을 지우지 않게 — 읽기·쓰기를 한 트랜잭션 + 잠금으로 직렬화(Codex 리뷰).
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [DISMISS_KEY]);
+    const { rows } = await client.query(`SELECT value FROM app_settings WHERE key = $1`, [DISMISS_KEY]);
+    let arr = []; try { arr = JSON.parse((rows[0] && rows[0].value) || '[]'); } catch (_) { arr = []; }
+    if (!Array.isArray(arr)) arr = [];
+    if (!arr.some(x => _dkey(x.advertiserId, x.intranetId) === _dkey(aid, iid))) {
+      arr.unshift({ advertiserId: aid, intranetId: iid, name: it.name, intranetName: it.intranetName, by: _trim(by).slice(0, 100), at: new Date().toISOString() });
+      await client.query(
+        `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [DISMISS_KEY, JSON.stringify(arr.slice(0, DISMISS_CAP))]);
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally { client.release(); }
   logger.info(`[advSync] 연결 제안 거절: ${it.name} ↔ ${it.intranetName} by ${by}`);
   return { ok: true };
 }
@@ -128,7 +149,8 @@ async function previewIntranetSync(deps) {
   const db = (deps && deps.pool) || defaultPool;
   const L = await _load(db, deps);
   if (!L.ok) return { ok: false, code: 503, error: L.error };
-  return { ok: true, ...planIntranetSync(L.advs, L.intra, { dismissed: L.dismissed }) };
+  // dismissSupported = 이 서버가 [다른 회사] 창구를 갖고 있다는 표식(화면이 먼저 배포돼도 죽은 버튼을 그리지 않게).
+  return { ok: true, dismissSupported: true, ...planIntranetSync(L.advs, L.intra, { dismissed: L.dismissed }) };
 }
 
 /**
