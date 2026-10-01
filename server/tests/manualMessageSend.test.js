@@ -176,6 +176,16 @@ pool.query = async (sql, params) => {
     S._MS.billing = null;
     ok('단가를 못 받으면 금액을 지어내지 않는다', /단가를 불러오지 못했습니다/.test(S.h(1, 'alimtalk', '')) && !/\d원/.test(S.h(1, 'alimtalk', '').replace(/발송에 실패한/, '')));
   }
+  {
+    const blk = wd.slice(wd.indexOf('function openManualSend'), wd.indexOf('function _msSetTab'));
+    ok('창 제목·탭에 이모지를 쓰지 않는다(바뀐 창 2026-10-01)', !/[\u{1F300}-\u{1FAFF}\u2709]/u.test(blk));
+    ok('탭에 건당 금액 자리가 있다', /id="msPriceSms"/.test(blk) && /id="msPriceAta"/.test(blk));
+    const btns = wd.slice(wd.indexOf('function _msPaintBtns'), wd.indexOf('async function _msSend()'));
+    ok('확인 단계 버튼은 "N명에게 보내기"(금액은 영수증에만 · 사용자 확정)', /`\$\{n\}명에게 보내기`/.test(btns) && !/원 내고/.test(btns));
+    ok('아래 줄에 합계를 처음부터 보여준다', /class="mssum"><b>\$\{_msWon\(pr\.vat\*n\)\}<\/b>/.test(btns));
+    const css = wd.slice(wd.indexOf('#msOv{position:fixed'), wd.indexOf('#hbOv table.wbl-t'));
+    ok('색 상자 겹침 없이 얇은 줄로 나눈다(연한 파란 상자 배경 없음)', !/#eff6ff|#bfdbfe|#f8fbff/.test(css));
+  }
   ok('단가표: 종류별(알림톡·단문·장문) 부가세 포함 값을 싣는다', /prices: \['ata', 'sms', 'lms'\]/.test(read('server/src/services/solapi.service.js')));
   ok('문자 글자 수는 안내 문구 포함으로 센다', /_msBytes\(String\(ta\.value\|\|''\)\.trim\(\)\+\(_MS\.footer\|\|''\)\)/.test(wd));
 
