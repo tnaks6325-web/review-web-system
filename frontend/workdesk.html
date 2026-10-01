@@ -15923,14 +15923,15 @@ async function _rvBlkToggle(i, el){
   el.classList.remove('busy');
   if(resp && resp.ok){
     r.blacklisted = toOn ? { reason, addedBy:'나', addedAt:new Date().toISOString() } : null;
-    toast(toOn ? '블랙리스트에 등록했습니다 — 공고별 [🚫 리뷰어] 팝업 상단에 표시됩니다' : '참여가능으로 되돌렸습니다');
-    /* ★ 블랙리스트를 풀어도 공고별 "참여 불가"는 별개라 그대로 남는다(2026-10-01 이미정 건 — 39곳이 남아
-         리뷰어에게 계속 "마감"으로 보였다). 남아 있을 때만 묻는다 — 토글 자체는 종전대로 즉시 적용. */
-    const cb = !toOn && resp.campaignBlocks;
-    if(cb && cb.total>0 && confirm(`${r.name||''} 리뷰어는 공고 ${cb.total}곳(지금 모집 중 ${cb.live|0}곳)에서도 "참여 불가"로 막혀 있습니다.\n블랙리스트만 풀면 그 공고들에서는 계속 "마감"으로 보입니다.\n\n공고별 참여 불가도 함께 풀까요?`)){
+    let released = resp.campaignBlocksReleased|0;
+    /* 배포 순서 틈(화면만 새 버전, 서버는 옛 버전): 옛 서버는 공고별 차단을 안 풀고 개수만 돌려준다
+       (campaignBlocks). 그때는 옛 서버에 있는 해제 창구를 대신 불러 결과를 같게 맞춘다. */
+    if(!toOn && resp.campaignBlocksReleased===undefined && resp.campaignBlocks && resp.campaignBlocks.total>0){
       const rr = await api('/api/trackb/reviewers/campaign-blocks/release', { method:'POST', body: JSON.stringify({ phone:r.phone }) });
-      toast(rr && rr.ok ? `공고 ${rr.released|0}곳의 참여 불가도 풀었습니다` : '공고별 참여 불가를 풀지 못했습니다'+(rr&&rr.error?': '+rr.error:''));
+      if(rr && rr.ok) released = rr.released|0;
     }
+    toast(toOn ? '블랙리스트에 등록했습니다 — 공고별 [🚫 리뷰어] 팝업 상단에 표시됩니다'
+      : '참여가능으로 되돌렸습니다'+(released>0?` — 공고 ${released}곳의 참여 불가도 함께 풀었습니다`:''));
   }else{
     // 실패 = 낙관 반영 롤백(화면이 서버와 어긋난 채 남지 않게)
     el.classList.toggle('on', !toOn);

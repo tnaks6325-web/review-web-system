@@ -129,12 +129,7 @@ function ok(name, cond, extra) {
   ok('RV_COLSPAN = 17(홈 링크+13+3 — 타계정 펼침행 colspan 어긋나면 표가 무너진다)', /const RV_COLSPAN = 17;/.test(wdk));
   {
     const body = wdk.slice(wdk.indexOf('async function _rvBlkToggle'), wdk.indexOf('async function _rvBlkToggle') + 1600);
-    // 토글 자체는 확인 없이 즉시 적용(사용자 확정). 2026-10-01 확정으로 **적용 뒤에** 남은 공고별 차단을
-    // 함께 풀지 묻는 확인창 하나만 허용 — 그 확인창은 블랙리스트 저장 요청보다 뒤, 남아 있을 때만 뜬다.
-    ok('★ 토글 = 즉시 적용(저장 요청 전에 확인창 없음 — 사용자 확정)',
-      (() => { const ci = body.indexOf('confirm('); const ai = body.indexOf("api('/api/trackb/reviewers/blacklist'");
-               return ai >= 0 && (ci < 0 || ci > ai) && (body.match(/confirm\(/g) || []).length <= 1
-                 && (ci < 0 || /cb && cb\.total>0 && confirm\(/.test(body)); })());
+    ok('★ 토글 = 즉시 적용(확인창 없음 — 사용자 확정)', !/confirm\(/.test(body));
     ok('★ 실패 시 낙관 반영 롤백(화면·서버 불일치 잔존 금지)', /el\.classList\.toggle\('on', !toOn\)/.test(body));
     ok('토글 onclick 은 배열 인덱스만(XSS 규율)', /_rvBlkToggle\(\$\{i\},this\)/.test(wdk));
     ok('body 는 JSON.stringify(api 헬퍼 계약)', /JSON\.stringify\(\{ phone:r\.phone, on:toOn, reason \}\)/.test(body));

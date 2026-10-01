@@ -2749,6 +2749,7 @@ router.post('/reviewers/home-link', authMiddleware, adminOrMasterMiddleware, asy
 });
 
 /* 전역 블랙리스트 토글(등록리뷰어DB 참여설정 스위치) — 즉시 적용(사용자 확정: 확인창 없음).
+   ★ 해제 = 다시 참여 가능(2026-10-01 사용자 확정) — 공고별 참여 불가까지 서비스가 함께 푼다.
    기존 blacklist 테이블 재사용 · 효력 = 공고별 [🚫 리뷰어] 팝업 상단 자동 표시(Q1=B —
    전 공고 자동 차단은 여전히 CAMPAIGN_REVIEWER_GATE_GLOBAL=1 옵트인 뒤에만). */
 router.post('/reviewers/blacklist', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -2757,23 +2758,7 @@ router.post('/reviewers/blacklist', authMiddleware, adminOrMasterMiddleware, asy
     const b = req.body || {};
     const out = await setGlobalBlacklist({ phone: b.phone, on: b.on === true, reason: b.reason, by: _by(req) });
     logger.info(`[reviewers/blacklist] ${_by(req)} — ${String(b.phone || '').slice(-4)} ${out.on ? '등록' : '해제'}`);
-    // 해제할 때만 — 공고별 차단이 남아 있으면 개수를 알린다(세지 못하면 null = 화면이 묻지 않는다, fail-soft)
-    let campaignBlocks = null;
-    if (!out.on) {
-      try { campaignBlocks = await require('../services/reviewerGate.service').countCampaignBlocks(b.phone); }
-      catch (e) { logger.warn(`[reviewers/blacklist] 공고별 차단 집계 실패(무시): ${e.message}`); }
-    }
-    res.json({ ok: true, ...out, campaignBlocks });
-  } catch (err) { next(err); }
-});
-
-// 공고별 "참여 불가" 일괄 해제 — 블랙리스트를 푼 뒤 화면이 확인을 받고 부른다(2026-10-01).
-router.post('/reviewers/campaign-blocks/release', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { releaseCampaignBlocks } = require('../services/reviewerGate.service');
-    const b = req.body || {};
-    const out = await releaseCampaignBlocks(b.phone, _by(req));
-    logger.info(`[reviewers/campaign-blocks] ${_by(req)} — ${String(b.phone || '').slice(-4)} 공고별 차단 ${out.released}건 해제`);
+    // 해제는 공고별 참여 불가까지 함께 푼다(서비스 한 곳) — 푼 개수(campaignBlocksReleased)를 화면이 말한다.
     res.json({ ok: true, ...out });
   } catch (err) {
     if (/전화번호/.test(err && err.message)) return res.status(400).json({ ok: false, error: err.message });
