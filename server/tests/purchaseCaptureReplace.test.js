@@ -183,7 +183,7 @@ const base = { sheetId: 'S1', tabName: 'T1', rowId: 'r1', imageBase64: IMG, mime
     assert.ok(a > 0 && b > a);
     assert.ok(!/type="file"|type=\\"file\\"/.test(seg), '파일 선택 창구가 생겼다');
     assert.ok((seg.match(/_capTake\(/g) || []).length >= 3);
-    assert.ok(/expectFileId:String\(st\.pre\.currentFileId/.test(seg), '지금 사진 대조값을 보내지 않는다');
+    assert.ok(/expectFileId[:=]String\(st\.pre\.currentFileId/.test(seg), '지금 사진 대조값을 보내지 않는다');
     assert.ok(!/_capTake\([^)]*\)[^;]*_capSubmit\(/.test(seg));
   });
   await t('★ 화면: 두 창구 모두 내부 직원에게만', () => {
