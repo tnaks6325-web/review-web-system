@@ -29,9 +29,12 @@ const CPS = [
   { id: 'c', seq: 12, rowName: '이중' }, { id: 'd', seq: 13, rowName: '없음' },
 ];
 let logs = [];
+const SETTINGS = new Map();
 pool.query = async (sql, params) => {
   if (/FROM campaign_participants/.test(sql)) return { rows: CPS.filter(c => params[2].includes(c.id)) };
   if (/INSERT INTO manual_message_sends/.test(sql)) { logs.push(params); return { rowCount: 1 }; }
+  if (/FROM app_settings WHERE key/.test(sql)) { const v = SETTINGS.get(params[0]); return { rows: v ? [{ value: v }] : [] }; }
+  if (/INSERT INTO app_settings/.test(sql)) { SETTINGS.set(params[0], params[1]); return { rowCount: 1 }; }
   throw new Error('예상하지 못한 쿼리: ' + sql.slice(0, 80));
 };
 
@@ -166,7 +169,7 @@ pool.query = async (sql, params) => {
   console.log('\n▶ ④ 화면');
   const wd = read('frontend/workdesk.html');
   ok('우클릭 메뉴에 한 줄 추가(여러 줄이면 인원수)', /row\('📨', msgN>1\?`\$\{msgN\}명에게 문자·알림톡`:'문자·알림톡 보내기', "openManualSend\(\)"/.test(wd));
-  const setTab = wd.slice(wd.indexOf('function _msSetTab'), wd.indexOf('async function _msLoad'));
+  const setTab = wd.slice(wd.indexOf('function _msSetTab'), wd.indexOf('async function _msLoad('));
   ok('탭 전환이 입력칸을 다시 만들지 않는다(IME 보호)', !/innerHTML/.test(setTab.replace(/rs\.innerHTML=''/, '')) && /style\.display/.test(setTab));
   ok('팝오버는 body 직속 · Esc 로 닫힘 · 리스너 1회', /document\.body\.appendChild\(ov\);[\s\S]{0,700}_msLoad\(\)/.test(wd) && /window\._msKeyBound/.test(wd));
   ok('시스템 확인창(confirm)을 쓰지 않는다', !/confirm\(`\$\{n\}명에게/.test(wd));
@@ -221,6 +224,37 @@ pool.query = async (sql, params) => {
   ok('문안 버튼은 처음엔 잠겨 있고 미리보기를 받은 뒤 연다', /data-tpl="\$\{i\}" disabled/.test(wd) && /mstpl button'\)\.forEach\(b=>\{ b\.disabled=!_MS\.homeLink/.test(wd));
   ok('상품명 자리를 그대로 두면 보내기 버튼을 잠근다', /txt\.includes\(_MS_PH\)/.test(wd));
 
+  console.log('\n▶ ⑤ 문안용 짧은 상품 이름(추천)');
+  {
+    let asked = 0; const ai = n => { asked++; return n.includes('유산균') ? '유산균' : '에셀라이트유산균프로'; };
+    const A = { sheetId: 'S', tabName: 'T' };
+    ok('이름 판정: 한글 5자(10바이트) 이내만', svc.normalizeShortName('수딩 선크림') === '수딩선크림' && svc.normalizeShortName('에셀라이트유산균') === '' && svc.normalizeShortName('○○○○○') === '');
+    let r = await svc.productShortName({ ...A, productName: '[상품/옵션/금액]\n1. 에셀라이트 유산균 30포 (https://x.y/z)', suggest: ai });
+    ok('처음에는 AI 가 추천한다', r.name === '유산균' && r.source === 'ai' && asked === 1);
+    r = await svc.productShortName({ ...A, productName: '[상품/옵션/금액]\n1. 에셀라이트 유산균 30포 (https://x.y/z)', suggest: ai });
+    ok('같은 상품명이면 저장된 추천을 다시 쓴다(AI 재호출 없음)', r.name === '유산균' && asked === 1);
+    r = await svc.productShortName({ ...A, productName: '완전히 다른 긴 상품', suggest: ai });
+    ok('추천이 10바이트를 넘으면 추천 없음(장문 방지)', r.name === '' && r.source === 'none' && asked === 2);
+    ok('직원이 고친 이름 저장 — 긴 이름은 거부', !(await svc.saveShortName({ ...A, name: '에셀라이트유산균' })).ok);
+    ok('직원이 고친 이름 저장', (await svc.saveShortName({ ...A, name: '유산균젤리', by: 'x' })).ok);
+    r = await svc.productShortName({ ...A, productName: '아무거나', suggest: ai });
+    ok('직원이 정한 이름이 AI 보다 우선', r.name === '유산균젤리' && r.source === 'manual' && asked === 2);
+    ok('작업마다 키가 따로(동시 저장이 서로를 지우지 않게)', [...SETTINGS.keys()].every(k => /^sms_short_name:S\|\|T$/.test(k)));
+  }
+  ok('라우트: 추천·저장 창구는 내부 담당자 전원', /router\.post\('\/workdesk\/sms-product-name', authMiddleware, internalMiddleware/.test(read('server/src/routes/trackB.routes.js')));
+  ok('AI 프롬프트: 원문에 없는 단어를 지어내지 않는다', /원문에 없는 단어를 지어내지 마라/.test(read('server/src/services/gemini.service.js')));
+  {
+    const vm = require('vm');
+    const blk = wd.slice(wd.indexOf('function _msHasLink'), wd.indexOf('function openManualSend'));
+    const ta = { value: '', focus(){}, select(){}, setSelectionRange(a, b){ this.sel = [a, b]; } };
+    const S = { _MS: { homeHost: 'review-web-system.pages.dev', homeLink: 'review-web-system.pages.dev/#cs', footer: '', shortName: '유산균', shortSource: 'ai' },
+      document: { getElementById: () => ta, execCommand: () => false }, _msPaintMeta(){} };
+    vm.runInNewContext(blk + '\nthis.use=_msUseTpl;this.prod=_msTplProduct;', S);
+    S.use(1);
+    ok('추천 상품명이 채워지고 그 자리가 선택된다', ta.value.startsWith('[IA리뷰] 유산균 리뷰 작성 기한이 내일까지') && ta.sel[0] === 7 && ta.sel[1] === 10);
+    ok('문안에서 고쳐 쓴 상품명을 읽어낸다', S.prod('[IA리뷰] 수딩선크림 리뷰 작성 기한이 내일까지입니다.\nx') === '수딩선크림' && S.prod('직접 쓴 문자') === '');
+  }
+  ok('문안으로 보낸 상품명을 그 작업 이름으로 기억한다', /_msTplProduct\(text\)[\s\S]{0,300}save:true/.test(wd));
   console.log(`\n✅ manualMessageSend: ${passed}개 통과`);
   pool.query = origQuery;
   process.exit(0);

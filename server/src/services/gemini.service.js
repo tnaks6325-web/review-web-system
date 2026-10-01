@@ -645,6 +645,38 @@ confident 는 9칸을 자신 있게 나눴으면 true, 추측이 섞였으면 fa
   }
 }
 
+/**
+ * 문자 문안용 짧은 상품 이름 추천(작업보드 리뷰 독촉 단문 · 사용자 확정 2026-10-01).
+ * ★ 원문에 없는 단어를 지어내지 않는다 · 실패·미설정은 null(호출부가 상품명 자리를 비워 둔다).
+ */
+async function suggestShortProductName(productName) {
+  try {
+    if (!_initGemini()) return null;
+    const src = String(productName || '').trim().slice(0, 300);
+    if (!src) return null;
+    const prompt = `아래는 리뷰 체험단 작업의 상품명이다. 리뷰어에게 보내는 짧은 문자에 넣을 "짧은 상품 이름"을 하나 만들어라.
+
+규칙:
+- 한글 5글자 이내(영문·숫자는 2개가 한글 1글자). 띄어쓰기 없이.
+- 리뷰어가 어떤 상품인지 바로 알아볼 수 있는 핵심 품목 이름(예: "유산균", "수딩선크림", "탈취제").
+- 용량·개수·가격·옵션·URL·괄호 내용은 빼라. 브랜드는 짧고 그 자체가 핵심일 때만.
+- **원문에 없는 단어를 지어내지 마라.** 원문 단어를 줄이거나 고르는 것만 허용.
+
+상품명: ${src}
+
+반드시 JSON 으로만 답하라: {"name":""}`;
+    const { text } = await _runModel([{ text: prompt }], '[ShortProductName]');
+    let obj;
+    try { obj = JSON.parse(text); }
+    catch (_) { const m = text && text.match(/\{[\s\S]*\}/); if (!m) return null; try { obj = JSON.parse(m[0]); } catch (_2) { return null; } }
+    const name = obj && typeof obj.name === 'string' ? obj.name.trim() : '';
+    return name || null;
+  } catch (err) {
+    logger.warn(`[Gemini] 짧은 상품명 추천 실패(무시): ${err.message}`);
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 4. 오류디버깅 다중 에이전트 분석 — 레드팀/블루팀/감독관/예방가드/결정자
 //    (errorDebug.service 의 "오류검증 및 분석"에서 호출)
@@ -712,6 +744,7 @@ module.exports = {
   classifySubmissionImage,
   explainErrorKo,
   repairSlashFormLine,
+  suggestShortProductName,
   analyzeErrorAgents,
   getGeminiStatus,
 };
