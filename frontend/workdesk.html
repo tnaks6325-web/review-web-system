@@ -2173,6 +2173,12 @@
   #wdCapPop .wcp-img{height:150px;border:1px solid var(--line,#e2e8f0);border-radius:8px;background:#fff;overflow:hidden;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
   #wdCapPop .wcp-img img{max-width:100%;max-height:100%;object-fit:contain;display:block}
   #wdCapPop .wcp-img.none{font-size:11px;color:var(--faint,#94a3b8);background:var(--card2,#f8fafc)}
+  #wdCapPop .wcp-pick{margin-bottom:8px}
+  #wdCapPop .wcp-picks{display:flex;flex-wrap:wrap;gap:6px}
+  #wdCapPop .wcp-pk{position:relative;width:52px;height:52px;padding:0;border:2px solid var(--line,#e2e8f0);border-radius:8px;overflow:hidden;background:#fff;cursor:pointer}
+  #wdCapPop .wcp-pk.on{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.25)}
+  #wdCapPop .wcp-pk img{width:100%;height:100%;object-fit:cover;display:block}
+  #wdCapPop .wcp-pk span{position:absolute;left:2px;top:2px;background:rgba(15,23,42,.65);color:#fff;font-size:10px;border-radius:4px;padding:0 4px}
   #wdCapPop .wcp-arrow{font-size:14px;color:var(--faint,#94a3b8)}
   .rv2 .rvcaprep{position:absolute;right:4px;top:4px;z-index:2;border:1px solid var(--line,#e2e8f0);border-radius:7px;background:var(--card,#fff);color:var(--t1,#0f172a);font-size:10.5px;font-weight:700;padding:2px 7px;cursor:pointer;box-shadow:0 1px 4px rgba(15,23,42,.12)}
   .rv2 .rvcaprep:hover{border-color:#2563eb;color:#2563eb}
@@ -6948,7 +6954,8 @@ function _rvRender2(pane){
        제출현황 요약 줄 하나다. 이 자리는 지금 보고 있는 **그 리뷰어의 제출물**을 말하는
        칸이라, 같은 자리에서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
     /* 🛒 구매캡처 교체 — 내부 직원에게만(업체 화면엔 그리지 않는다). 실행부는 우클릭과 같은 팝오버. */
-    const capBtn=(kind==='cap'&&_isInternalRole())?`<button type="button" class="rvcaprep" onclick="openCaptureReplaceFromPane(this)" title="이 줄 주문의 구매캡처를 새 사진으로 바꿉니다">${n?'교체':'올리기'}</button>`:'';
+    const capBtn=(kind==='cap'&&_isInternalRole())?`<button type="button" class="rvcaprep" onclick="openCaptureReplaceFromPane(this)" title="이 줄 주문의 구매캡처를 새 사진으로 바꿉니다">${n?'교체':'올리기'}</button>`
+      : (kind==='rev'&&n&&_isInternalRole())?`<button type="button" class="rvcaprep" onclick="openReviewReplaceFromPane(this)" title="지금 보이는 리뷰캡처를 새 사진으로 바꿉니다">교체</button>`:'';
     const label=showReceipt?`<div class="rv2label">${kind==='cap'?'🛒':kind==='rev'?'📷':'🧾'} ${esc(title)}<span class="cnt">${n}</span></div>`:'';
     return `<div class="rv2c">${label}<div class="rv2b">${capBtn}${body}</div></div>`;
   };
@@ -9981,6 +9988,7 @@ function _openCellMenu(x,y,td){
     + (msgN?row('💬', msgN>1?`리뷰어 ${msgN}명에게 메시지`:'리뷰어에게 메시지', "openReviewerMsg()", false, false,
         msgN>1?'선택한 줄의 리뷰어들에게 같은 내용을 보냅니다(같은 리뷰어는 한 번만)':'이 줄 리뷰어의 1:1 문의방으로 보냅니다'):'')
     + (one&&selectedRow&&_isInternalRole()?row('🛒','구매캡처 교체','openCaptureReplaceFromMenu()',false,false,'이 줄 주문의 구매캡처를 새 사진으로 바꿉니다(없으면 새로 올립니다)'):'')
+    + (one&&selectedRow&&_isInternalRole()?row('🖼','리뷰캡처 교체','openReviewReplaceFromMenu()',false,false,'이 줄의 리뷰캡처 한 장을 새 사진으로 바꿉니다(이전 사진은 휴지통 · 리뷰어에게 알리지 않습니다)'):'')
     + (one&&(field||'')?row('🕘','편집기록','_menuCellHistory()',false,false,'이 셀을 언제 누가 어떻게 고쳤는지 봅니다(되돌리지는 않습니다)'):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')
@@ -10649,9 +10657,34 @@ async function _manualReviewDateOnly(){
      열 때 받은 지금 사진(currentFileId)을 교체 요청에 다시 실어 보내 그 사이 바뀌었으면 거부된다. */
 const _CAP_MAX_ONE=8*1024*1024, _CAP_SHRINK_OVER=3*1024*1024;
 let _capState=null;
+/* 리뷰캡처 교체(사용자 확정 2026-10-01)도 **같은 팝오버**를 쓴다 — 다른 것은 서버 주소·문구·"고를 사진 목록"뿐.
+   ★ 리뷰는 한 줄에 여러 장일 수 있어 바꿀 한 장을 고르고(oldFileId), 구매는 주문당 한 장(expectFileId). */
+const _CAP_KIND={
+  cap:{icon:'🛒',label:'구매캡처',get:'/api/trackb/workdesk/purchase-capture',post:'/api/trackb/workdesk/purchase-capture/replace',checking:'이 줄의 구매기록을 확인하는 중…'},
+  rev:{icon:'🖼',label:'리뷰캡처',get:'/api/trackb/workdesk/review-capture',post:'/api/trackb/workdesk/review-capture/replace',checking:'이 줄의 리뷰캡처를 불러오는 중…'},
+};
+function _capKind(st){ return _CAP_KIND[(st&&st.kind)||'cap']; }
+function _capReviewFiles(st){ return (st&&st.pre&&st.pre.ok&&Array.isArray(st.pre.files))?st.pre.files:[]; }
+function _capCurrent(st){
+  if(!st||!st.pre||!st.pre.ok) return '';
+  if(st.kind!=='rev') return String(st.pre.currentFileId||'');
+  const f=_capReviewFiles(st)[st.pick||0]; return f?String(f.fileId||''):'';
+}
+/* 리뷰: 사진이 없거나 대기 중 교체요청이 있으면 막는다(사유를 말한다). 판정은 여기 한 곳. */
+function _capBlock(st){
+  const pre=st&&st.pre;
+  if(!pre||pre==='loading') return null;
+  if(pre.ok===false) return pre.error||'unknown';
+  if(st.kind==='rev'){ if(pre.pendingEditRequest) return 'pending_edit_request'; if(!_capReviewFiles(st).length) return 'no_review_files'; }
+  return null;
+}
+function _capPick(i){ const st=_capState; if(!st||st.saving) return; st.pick=i; _capRender(); }
 const _CAP_ERR={
   no_order:'이 줄에 연결된 구매기록(구매양식)이 없어 구매캡처를 붙일 수 없습니다.',
   order_mismatch:'이 줄에 연결된 구매기록이 이 참여자의 주문이 아닙니다(주문번호·연락처·이름이 다름) — 남의 캡처를 바꾸지 않도록 막았습니다. 줄 정보를 확인해 주세요.',
+  no_review_files:'이 줄에는 아직 리뷰캡처가 없습니다 — 리뷰제출 칸을 우클릭해 [📎 리뷰 대신 제출]을 쓰세요.',
+  no_review:'이 줄에는 아직 리뷰캡처가 없습니다 — 리뷰제출 칸을 우클릭해 [📎 리뷰 대신 제출]을 쓰세요.',
+  pending_edit_request:'리뷰어가 보낸 리뷰캡처 교체요청이 처리를 기다리고 있습니다 — C/S 화면에서 그 요청을 먼저 승인·반려해 주세요.',
   ambiguous_order:'이 줄에 구매기록이 여러 건 겹쳐 있어 어느 주문의 캡처인지 정할 수 없습니다 — 줄을 먼저 정리해 주세요.',
   row_not_found:'이 줄을 찾지 못했습니다 — 표를 새로고침한 뒤 다시 시도해 주세요.',
   capture_changed:'그 사이 이 주문의 구매캡처가 바뀌었습니다 — 창을 다시 열어 지금 사진을 확인해 주세요.',
@@ -10668,9 +10701,9 @@ function _capClose(){
 function _capTake(list){
   const st=_capState; if(!st||st.saving) return;
   if(st.pre==='loading'){ st.err='확인하는 중입니다 — 잠시 후 붙여넣어 주세요.'; _capRender(); return; }
-  if(st.pre&&st.pre.ok===false){ _capRender(); return; }
+  if(_capBlock(st)){ _capRender(); return; }
   const imgs=[...(list||[])].filter(f=>f&&String(f.type||'').startsWith('image/'));
-  if(!imgs.length){ st.err='이미지가 아닙니다 — 구매캡처 이미지를 복사해 붙여넣어 주세요.'; _capRender(); return; }
+  if(!imgs.length){ st.err='이미지가 아닙니다 — '+_capKind(st).label+' 이미지를 복사해 붙여넣어 주세요.'; _capRender(); return; }
   const f=imgs[0];
   if(st.file&&st.file._url){ try{ URL.revokeObjectURL(st.file._url); }catch(_){ } }
   try{ f._url=URL.createObjectURL(f); }catch(_){ f._url=''; }
@@ -10708,21 +10741,28 @@ function _capPlace(){
 }
 function _capRender(){
   const st=_capState, box=document.querySelector('#wdCapPop .wrp-box'); if(!st||!box)return;
-  const pre=st.pre, blocked=!!(pre&&pre.ok===false), ready=!!(pre&&pre.ok);
-  const cur=ready?String(pre.currentFileId||''):'';
+  const K=_capKind(st), isRev=st.kind==='rev';
+  const block=_capBlock(st), loading=st.pre==='loading', ready=!loading&&!block;
+  const cur=ready?_capCurrent(st):'';
   const curUrl=cur?_rvUrl(cur):'';
-  const verb=cur?'교체':'올리기';
+  const verb=(isRev||cur)?'교체':'올리기';
+  const files=isRev?_capReviewFiles(st):[];
+  const picker=(ready&&isRev&&files.length>1)
+    ? `<div class="wcp-pick"><div class="wcp-cap">바꿀 사진을 고르세요 (${files.length}장)</div><div class="wcp-picks">${
+        files.map((f,i)=>`<button type="button" class="wcp-pk${i===(st.pick||0)?' on':''}" onclick="_capPick(${i})"${st.saving?' disabled':''} title="${i+1}번째 사진"><img src="${esc(_rvUrl(f.fileId))}" alt="" loading="lazy"><span>${i+1}</span></button>`).join('')
+      }</div></div>`:'';
   box.innerHTML=
-    `<div class="wrp-hd"><b>🛒 구매캡처 ${cur||!ready?'교체':'올리기'}</b><span class="wrp-who" title="${esc(st.name||'')}">${esc(st.name||'참여자')}</span></div>`
-    + (pre==='loading'?'<div class="wrp-pre">이 줄의 구매기록을 확인하는 중…</div>':'')
-    + (blocked?`<div class="wrp-block">${esc(_capErr(pre.error,'지금은 구매캡처를 바꿀 수 없습니다.'))}</div>`:'')
+    `<div class="wrp-hd"><b>${K.icon} ${K.label} ${verb}</b><span class="wrp-who" title="${esc(st.name||'')}">${esc(st.name||'참여자')}</span></div>`
+    + (loading?`<div class="wrp-pre">${K.checking}</div>`:'')
+    + (block?`<div class="wrp-block">${esc(_capErr(block,'지금은 '+K.label+'를 바꿀 수 없습니다.'))}</div>`:'')
+    + picker
     + (ready?`<div class="wcp-pair"><div class="wcp-side"><div class="wcp-cap">지금 사진</div>${
-        curUrl?`<div class="wcp-img"><img src="${esc(curUrl)}" alt="지금 구매캡처" loading="lazy"></div>`:'<div class="wcp-img none">없음</div>'}</div>`
+        curUrl?`<div class="wcp-img"><img src="${esc(curUrl)}" alt="지금 ${K.label}" loading="lazy"></div>`:'<div class="wcp-img none">없음</div>'}</div>`
       + `<span class="wcp-arrow">→</span><div class="wcp-side"><div class="wcp-cap">새 사진</div>${
-        st.file?`<div class="wcp-img"><img src="${esc(st.file._url||'')}" alt="새 구매캡처"></div>`:'<div class="wcp-img none">아래에 붙여넣기</div>'}</div></div>`
-      + `<div class="wrp-drop" id="wcpDrop"><div class="wrp-msg"><b>Ctrl</b>(⌘)<b>+V</b> 로 새 구매캡처를 붙여넣으세요</div><div class="wrp-sub">끌어다 놓아도 됩니다 · 한 장</div></div>`:'')
+        st.file?`<div class="wcp-img"><img src="${esc(st.file._url||'')}" alt="새 ${K.label}"></div>`:'<div class="wcp-img none">아래에 붙여넣기</div>'}</div></div>`
+      + `<div class="wrp-drop" id="wcpDrop"><div class="wrp-msg"><b>Ctrl</b>(⌘)<b>+V</b> 로 새 ${K.label}를 붙여넣으세요</div><div class="wrp-sub">끌어다 놓아도 됩니다 · 한 장</div></div>`:'')
     + (st.err?`<div class="wrp-err">${esc(st.err)}</div>`:'')
-    + `<div class="wrp-ft"><span class="wrp-note">${st.saving?'저장 중…':(cur?'이전 사진은 드라이브 휴지통으로 옮겨집니다(30일 안에 복구 가능)':'새 사진이 이 주문의 구매캡처로 저장됩니다')}</span>`
+    + `<div class="wrp-ft"><span class="wrp-note">${st.saving?'저장 중…':(cur?('이전 사진은 드라이브 휴지통으로 옮겨집니다(30일 안에 복구 가능)'+(isRev?' · 새 사진은 리뷰 검수를 다시 받습니다':'')):'새 사진이 이 주문의 구매캡처로 저장됩니다')}</span>`
     + `<button class="btn" type="button" onclick="_capClose()"${st.saving?' disabled':''}>취소</button>`
     + `<button class="btn pri" type="button" onclick="_capSubmit()"${(!st.file||st.saving||!ready)?' disabled':''}>${verb}</button></div>`;
   _capPlace();
@@ -10741,15 +10781,19 @@ function openCaptureReplaceFromMenu(){
 }
 /* 창구 ② 제출물 미리보기 구매 칸 */
 function openCaptureReplaceFromPane(btn){ if(btn&&btn.blur) btn.blur(); _capOpen(STATE.rvSel, btn); }
-function _capOpen(rowId, anchorEl){
+/* 리뷰캡처 교체 창구 ① 표 우클릭 ② 미리보기 리뷰 칸 — 미리보기에서 보던 그 장을 먼저 고른다. */
+function openReviewReplaceFromMenu(){ const rowId=STATE._gMenuRowId, td=_selAnchorTd(); _closeCellMenu(); _capOpen(rowId, td, 'rev'); }
+function openReviewReplaceFromPane(btn){ if(btn&&btn.blur) btn.blur(); _capOpen(STATE.rvSel, btn, 'rev', (STATE.rvIdx&&STATE.rvIdx.rev)||0); }
+function _capOpen(rowId, anchorEl, kind, pick){
   const t=STATE.cur, row=(STATE.wd&&STATE.wd.roster||[]).find(r=>String(r.id)===String(rowId));
   if(!t||!row) return;
-  if(!_isInternalRole()){ toast('구매캡처 교체는 내부 담당자만 할 수 있습니다.'); return; }
+  const K=_CAP_KIND[kind==='rev'?'rev':'cap'];
+  if(!_isInternalRole()){ toast(K.label+' 교체는 내부 담당자만 할 수 있습니다.'); return; }
   _capClose();
   const rect=anchorEl&&anchorEl.getBoundingClientRect?anchorEl.getBoundingClientRect():{left:window.innerWidth/2-170,top:120,bottom:150};
-  _capState={t,row,name:_rvWho(row)||row.name||'',file:null,saving:false,err:'',pre:'loading',anchor:{left:rect.left,top:rect.top,bottom:rect.bottom}};
+  _capState={t,row,kind:kind==='rev'?'rev':'cap',pick:Math.max(0,+pick||0),name:_rvWho(row)||row.name||'',file:null,saving:false,err:'',pre:'loading',anchor:{left:rect.left,top:rect.top,bottom:rect.bottom}};
   const ov=document.createElement('div'); ov.id='wdCapPop';
-  ov.innerHTML='<div class="wrp-box" role="dialog" aria-label="구매캡처 교체" tabindex="-1" style="width:340px"></div>';
+  ov.innerHTML=`<div class="wrp-box" role="dialog" aria-label="${K.label} 교체" tabindex="-1" style="width:340px"></div>`;
   document.body.appendChild(ov);
   ov.addEventListener('mousedown',e=>{ if(e.target===ov&&!(_capState&&_capState.saving)) _capClose(); });
   /* 리스너는 최상위 1회만 — [리뷰 대신 제출] 팝오버와 같은 규율(캡처 단계 붙여넣기 · Esc · 스크롤 닫기). */
@@ -10776,8 +10820,9 @@ function _capOpen(rowId, anchorEl){
   }
   _capRender();
   const want=_capState;
-  api(`/api/trackb/workdesk/purchase-capture?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&rowId=${encodeURIComponent(row.id)}`)
-    .then(r=>{ if(_capState===want){ _capState.pre=(r&&typeof r.ok==='boolean')?r:{ok:false,error:'unknown'}; if(r&&r.ok&&r.name) _capState.name=r.name; _capRender(); } })
+  api(`${K.get}?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&rowId=${encodeURIComponent(row.id)}`)
+    .then(r=>{ if(_capState===want){ _capState.pre=(r&&typeof r.ok==='boolean')?r:{ok:false,error:'unknown'}; if(r&&r.ok&&r.name) _capState.name=r.name;
+      if(r&&r.ok&&Array.isArray(r.files)&&_capState.pick>=r.files.length) _capState.pick=0; _capRender(); } })
     .catch(()=>{ if(_capState===want){ _capState.pre={ok:false,error:'network'}; _capRender(); } });
 }
 /* 교체 뒤 제출물 미리보기만 다시 받는다 — 보던 줄 선택은 그대로 둔다. */
@@ -10788,17 +10833,20 @@ async function _capRefreshImages(t){
 }
 async function _capSubmit(){
   const st=_capState;
-  if(!st||st.saving||!st.file||!(st.pre&&st.pre.ok))return;
+  if(!st||st.saving||!st.file||_capBlock(st)||st.pre==='loading')return;
   if(st.file.size>_CAP_MAX_ONE*3){ st.err=_capErr('too_large'); _capRender(); return; }
   st.saving=true; st.err=''; _capRender();
   try{
     const enc=await _capEncode(st.file);
-    const out=await api('/api/trackb/workdesk/purchase-capture/replace',{method:'POST',body:JSON.stringify({
-      sheetId:st.t.sheetId,tabName:st.t.tabName,rowId:st.row.id,imageBase64:enc.b64,mimeType:enc.mime,
-      expectFileId:String(st.pre.currentFileId||'')})});
-    if(!out||!out.ok) throw new Error(_capErr(out&&out.error,'구매캡처를 저장하지 못했습니다.'));
+    const K=_capKind(st), isRev=st.kind==='rev';
+    const body={sheetId:st.t.sheetId,tabName:st.t.tabName,rowId:st.row.id,imageBase64:enc.b64,mimeType:enc.mime};
+    if(isRev) body.oldFileId=_capCurrent(st); else body.expectFileId=String(st.pre.currentFileId||'');
+    const out=await api(K.post,{method:'POST',body:JSON.stringify(body)});
+    if(!out||!out.ok) throw new Error(_capErr(out&&out.error,K.label+'를 저장하지 못했습니다.'));
     const t=st.t; _capClose();
-    toast(out.replaced
+    toast(isRev
+      ? (out.oldTrashed?'리뷰캡처를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다':'리뷰캡처를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다')
+      : out.replaced
       ? (out.oldTrashed?'구매캡처를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다':'구매캡처를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다')
       : '구매캡처를 올렸습니다');
     await _capRefreshImages(t);

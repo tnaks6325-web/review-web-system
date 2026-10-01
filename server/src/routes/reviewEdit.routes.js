@@ -929,3 +929,6 @@ router.post('/reject', authMiddleware, adminOrMasterMiddleware, async (req, res)
 });
 
 module.exports = router;
+/* 작업보드 [🖼 리뷰캡처 교체](reviewCaptureReplace.service)가 **같은 폴더 판정**을 쓰도록 내보낸다
+   (사본 금지 — 갈리면 직원 교체본과 리뷰어 교체요청 승인본이 다른 폴더에 쌓인다). */
+module.exports._resolveFolders = _resolveFolders;
