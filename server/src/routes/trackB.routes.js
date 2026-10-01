@@ -2738,8 +2738,28 @@ router.post('/reviewers/blacklist', authMiddleware, adminOrMasterMiddleware, asy
     const b = req.body || {};
     const out = await setGlobalBlacklist({ phone: b.phone, on: b.on === true, reason: b.reason, by: _by(req) });
     logger.info(`[reviewers/blacklist] ${_by(req)} — ${String(b.phone || '').slice(-4)} ${out.on ? '등록' : '해제'}`);
-    res.json({ ok: true, ...out });
+    // 해제할 때만 — 공고별 차단이 남아 있으면 개수를 알린다(세지 못하면 null = 화면이 묻지 않는다, fail-soft)
+    let campaignBlocks = null;
+    if (!out.on) {
+      try { campaignBlocks = await require('../services/reviewerGate.service').countCampaignBlocks(b.phone); }
+      catch (e) { logger.warn(`[reviewers/blacklist] 공고별 차단 집계 실패(무시): ${e.message}`); }
+    }
+    res.json({ ok: true, ...out, campaignBlocks });
   } catch (err) { next(err); }
+});
+
+// 공고별 "참여 불가" 일괄 해제 — 블랙리스트를 푼 뒤 화면이 확인을 받고 부른다(2026-10-01).
+router.post('/reviewers/campaign-blocks/release', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { releaseCampaignBlocks } = require('../services/reviewerGate.service');
+    const b = req.body || {};
+    const out = await releaseCampaignBlocks(b.phone, _by(req));
+    logger.info(`[reviewers/campaign-blocks] ${_by(req)} — ${String(b.phone || '').slice(-4)} 공고별 차단 ${out.released}건 해제`);
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    if (/전화번호/.test(err && err.message)) return res.status(400).json({ ok: false, error: err.message });
+    next(err);
+  }
 });
 
 // 관리자 메모만 수정(사용자 확정: 다른 필드는 조회 전용 — 정산·신원 필드를 여기서 고치지 않는다)
@@ -2852,7 +2872,23 @@ router.post('/reviewers/delete', authMiddleware, adminOrMasterMiddleware, async 
       });
     }
 
-    const { rowCount } = await pool.query('DELETE FROM reviewers WHERE id = $1', [id]);
+    /* ★ 계좌 변경 기록(reviewer_account_change_audit)이 이 리뷰어를 RESTRICT 로 붙잡는다 — 돈이 어디로
+       갔는지 추적하는 기록이라 리뷰어를 지워도 남아야 한다(완화 금지). 종전에는 DELETE 가 23001 로 죽어
+       화면에 "서버오류"만 떴다(2026-10-01 이미정 건, 누적 20회). 그 사유를 문장으로 말한다.
+       ★ 재가입은 해결책이 아니다 — 공고별 차단·이력은 전화번호(phone8)에 매달려 있어 다시 가입해도 그대로다. */
+    let rowCount;
+    try {
+      ({ rowCount } = await pool.query('DELETE FROM reviewers WHERE id = $1', [id]));
+    } catch (delErr) {
+      if (delErr && (delErr.code === '23001' || delErr.code === '23503')) {
+        const audit = /reviewer_account_change_audit/.test(String(delErr.message || delErr.constraint || ''));
+        return res.status(409).json({ ok: false, code: 'delete_blocked_by_history',
+          error: audit
+            ? '계좌 변경 기록이 있어 삭제할 수 없습니다(입금 추적을 위해 보존). 다시 가입할 필요도 없습니다 — 블랙리스트·공고별 차단은 이 화면에서 풀 수 있습니다.'
+            : '이 리뷰어를 참조하는 보존 기록이 있어 삭제할 수 없습니다. 다시 가입할 필요는 없습니다 — 필요한 변경은 이 화면에서 하세요.' });
+      }
+      throw delErr;
+    }
     if (!rowCount) return res.status(404).json({ ok: false, error: '해당 리뷰어를 찾을 수 없습니다.' });
     logger.warn(`[reviewers/delete] ${req.admin && req.admin.name} 가 리뷰어 삭제 — ${r.name}/${r.phone} (이력 ${historyTotal}건 잔존)`);
     res.json({ ok: true, deleted: 1, counts, historyTotal });
