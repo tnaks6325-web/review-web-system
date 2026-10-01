@@ -101,30 +101,44 @@ async function withModule(rel, handler, run) {
     });
   });
 
-  await ta('2b 블랙리스트 해제 응답이 남은 공고별 차단 개수를 싣는다', async () => {
-    await withModule('routes/trackB.routes', (sql) => {
-      if (/FROM campaign_reviewer_gates g/.test(sql)) return { rows: [{ total: 39, live: 7 }] };
-    }, async (router) => {
-      const gatePath = require.resolve(SRC('services/reviewerGate.service'));
-      delete require.cache[gatePath];
-      const h = getRoute(router, '/reviewers/blacklist');
-      const res = fakeRes();
-      await h[h.length - 1].handle({ body: { phone: '01037653335', on: false }, admin: { name: 't' } }, res, e => { throw e; });
-      delete require.cache[gatePath];
-      assert.deepStrictEqual(res.body.campaignBlocks, { total: 39, live: 7 });
-      assert.strictEqual(res.body.on, false);
+  await ta('2b ★ 블랙리스트 해제 = 공고별 차단도 같은 트랜잭션에서 함께 푼다(묻지 않는다)', async () => {
+    await withModule('services/reviewerGate.service', (sql) => {
+      if (/UPDATE campaign_reviewer_gates/.test(sql)) return { rows: [], rowCount: 20 };
+    }, async (svc, calls) => {
+      const r = await svc.setGlobalBlacklist({ phone: '010-5767-1782', on: false, by: '박세희' });
+      assert.deepStrictEqual(r, { on: false, campaignBlocksReleased: 20 });
+      const seq = calls.map(c => c.sql.trim().split(/\s+/).slice(0, 2).join(' '));
+      assert.deepStrictEqual(seq, ['BEGIN', 'DELETE FROM', 'UPDATE campaign_reviewer_gates', 'COMMIT']);
+    });
+  });
+
+  await ta('2c 풀다가 실패하면 블랙리스트 해제도 되돌린다(반쪽 상태 금지)', async () => {
+    await withModule('services/reviewerGate.service', (sql) => {
+      if (/UPDATE campaign_reviewer_gates/.test(sql)) throw new Error('boom');
+    }, async (svc, calls) => {
+      await assert.rejects(() => svc.setGlobalBlacklist({ phone: '01057671782', on: false, by: 'x' }));
+      assert.ok(calls.some(c => /ROLLBACK/.test(c.sql)) && !calls.some(c => /COMMIT/.test(c.sql)));
+    });
+  });
+
+  await ta('2d 블랙리스트 등록(on)은 공고별 차단을 건드리지 않는다', async () => {
+    await withModule('services/reviewerGate.service', () => null, async (svc, calls) => {
+      await svc.setGlobalBlacklist({ phone: '01057671782', on: true, reason: 'r', by: 'x' });
+      assert.ok(!calls.some(c => /campaign_reviewer_gates/.test(c.sql)));
     });
   });
 
   console.log('\n§3 배선');
   const rt = fs.readFileSync(SRC('routes/trackB.routes.js'), 'utf8');
+  const dg = fs.readFileSync(SRC('routes/diag.routes.js'), 'utf8');
   const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
-  t('3a 함께 풀기 창구는 adminOrMaster(블랙리스트 토글과 같은 게이트)', () =>
-    assert.ok(/router\.post\('\/reviewers\/campaign-blocks\/release', authMiddleware, adminOrMasterMiddleware/.test(rt)));
-  t('3b 화면: 남아 있을 때만 묻고, 확인하면 함께 푼다', () => {
+  t('3a 관리자 대시보드 옛 해제 경로도 같은 함수를 쓴다(어디서 풀든 같은 결과)', () =>
+    assert.ok(/case 'remove'[\s\S]{0,400}setGlobalBlacklist\(\{ phone: cleanPhone, on: false/.test(dg)));
+  t('3b 따로 푸는 창구·화면 확인창은 없다(자동이라 필요 없다)', () => {
+    assert.ok(!/campaign-blocks\/release/.test(rt) && !/campaign-blocks\/release/.test(wd));
     const i = wd.indexOf('async function _rvBlkToggle('), body = wd.slice(i, wd.indexOf('\n}\n', i));
-    assert.ok(/cb && cb\.total>0 && confirm\(/.test(body));
-    assert.ok(/\/api\/trackb\/reviewers\/campaign-blocks\/release/.test(body));
+    assert.ok(!/confirm\(/.test(body));
+    assert.ok(/campaignBlocksReleased/.test(body), '함께 푼 개수를 말한다');
   });
 
   console.log(`\n결과: ${pass} pass / ${fail} fail`);

@@ -197,8 +197,22 @@ async function setGlobalBlacklist({ phone, on, reason, by }, db = pool) {
       [clean, String(reason || '').slice(0, 200), String(by || '')]);
     return { on: true };
   }
-  await db.query(`DELETE FROM blacklist WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1`, [clean]);
-  return { on: false };
+  /* ★★ 블랙리스트 해제 = 다시 참여 가능 (사용자 확정 2026-10-01 — "똑같이 풀어져야 한다")
+       공고별 "참여 불가"(campaign_reviewer_gates block)는 별개 표라, 블랙리스트만 지우면 리뷰어에게는
+       계속 "마감"으로 보였다(실측: 이미정 39곳 · 다른 6명 31곳). 해제할 때 그 번호의 공고별 차단도
+       **같은 트랜잭션에서** 함께 푼다(묻지 않는다). ★ 'allow'(허용 예외)는 무접촉 · 소프트 해제(이력 보존). */
+  const client = typeof db.connect === 'function' ? await db.connect() : null;
+  const q = client || db;
+  try {
+    if (client) await q.query('BEGIN');
+    await q.query(`DELETE FROM blacklist WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1`, [clean]);
+    const { released } = await releaseCampaignBlocks(clean, by, q);
+    if (client) await q.query('COMMIT');
+    return { on: false, campaignBlocksReleased: released };
+  } catch (err) {
+    if (client) { try { await q.query('ROLLBACK'); } catch (_) { /* noop */ } }
+    throw err;
+  } finally { if (client) client.release(); }
 }
 
 /* ── 블랙리스트를 풀어도 공고별 차단은 남는다 (2026-10-01 이미정 건) ──

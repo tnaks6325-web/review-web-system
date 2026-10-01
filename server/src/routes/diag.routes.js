@@ -146,8 +146,10 @@ router.post('/', authMiddleware, async (req, res, next) => {
       case 'remove': {
         if (!phone) return res.json({ error: '전화번호가 필요합니다.' });
         const cleanPhone = phone.replace(/[^0-9]/g, '');
-        await pool.query('DELETE FROM blacklist WHERE phone = $1', [cleanPhone]);
-        return res.json({ ok: true });
+        // 해제 = 다시 참여 가능 — 공고별 참여 불가까지 함께 푸는 단일 경로(reviewerGate.setGlobalBlacklist)를 쓴다.
+        const out = await require('../services/reviewerGate.service')
+          .setGlobalBlacklist({ phone: cleanPhone, on: false, by: req.admin?.name || '' });
+        return res.json({ ok: true, ...out });
       }
       case 'check': {
         // 이름으로 블랙리스트 확인
