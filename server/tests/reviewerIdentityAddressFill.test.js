@@ -90,7 +90,7 @@ const between = (s, a, b) => { const i = s.indexOf(a); const j = s.indexOf(b, i 
       _orderInfoSuggestions: suggestions, _orderCardIds: ['c'], _cardAiState: { c: cardState || { analysisRequestId: 1 } },
       _identityContextPromise: 'cached', API_BASE_URL: 'http://x', _getAuthHeaders: () => ({ Authorization: 'Bearer t' }),
       _hasIdentityMask: (v) => /[*＊●○◯◉•·xX]/.test(String(v || '')),
-      showToast: (m, e) => log.toasts.push([m, !!e]), _ofClearError: () => {}, _embedSaveForm: () => {}, _syncSubmissionIdentityAction: () => {},
+      showToast: (m, e) => log.toasts.push([m, e]), _ofClearError: () => {}, _embedSaveForm: () => {}, _syncSubmissionIdentityAction: () => {},
       _invalidateIdentityApproval: () => { log.invalidated++; },
       _loadOrderIdentityContext: async () => { log.ctxLoads++; },
       _renderIdentityMatchState: (cid, st, r) => log.rendered.push(st),
@@ -204,7 +204,7 @@ const between = (s, a, b) => { const i = s.indexOf(a); const j = s.indexOf(b, i 
       await vm.runInContext("_saveCardAddress('c')", f.sb);
       assert.strictEqual(f.els.c_addrSaveBtn.disabled, false, '다시 누를 수 있다');
       assert.strictEqual(f.els.c_addrSaveBtn.innerHTML, '저장');
-      assert.ok(f.log.toasts.some(([, e]) => e), '실패를 알린다');
+      assert.ok(f.log.toasts.some(([, e]) => e === 'error'), '실패를 오류 모양으로 알린다(구매양식 showToast(msg, type) — true 는 안내 모양이 된다)');
       assert.strictEqual(f.log.matched, 0);
     }
   });
@@ -217,6 +217,17 @@ const between = (s, a, b) => { const i = s.indexOf(a); const j = s.indexOf(b, i 
   });
   await test('참여 전에는 주소를 묻지 않는다(명의 선택 창에 주소 칸 없음)', async () => {
     assert.ok(!/\/address'|_acctNeedAddr|acctAddrIn|주소 필요/.test(campHtml));
+  });
+  await test('"내 정보를 먼저 등록" 목록에 빈 주소가 ✓(등록됨)로 보이지 않는다 — 서버가 요구할 때만 주소를 보여 준다', async () => {
+    const fnSrc = between(campHtml, 'function renderMissing(missing){', '\n}\n');
+    const els = { missTtl: {}, missList: {} };
+    const sb = { $: (id) => els[id], holdTtlText: () => '30분', show: () => {} };
+    vm.createContext(sb); vm.runInContext(fnSrc + '\n}', sb);
+    sb.renderMissing(['계좌']);
+    assert.ok(!/주소/.test(els.missList.innerHTML), '주소는 참여 조건이 아니다');
+    assert.ok(/✗ 계좌/.test(els.missList.innerHTML) && /✓ 사용자명/.test(els.missList.innerHTML));
+    sb.renderMissing(['주소']);
+    assert.ok(/✗ 주소/.test(els.missList.innerHTML), '서버가 주소를 요구하면 ✗ 로 보인다(옛 서버)');
   });
 
   if (!process.env.PGTEST_URL) {
