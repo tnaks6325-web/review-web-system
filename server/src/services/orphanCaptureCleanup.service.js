@@ -120,9 +120,15 @@ function candidateSql({ oneFile = false } = {}) {
      AND NOT EXISTS (SELECT 1 FROM review_index_archive ria
                       WHERE ria.sheet_id = rs.sheet_id AND ria.tab_name = rs.tab_name
                         AND ria.row_index = rs.row_index)
+     /* ★★ 작업표의 줄 좌표 칸은 seq 다(041 주석: seq = review_index.row_index).
+        cp 쪽 row_index 는 존재하지 않는 칸이라 이 쿼리가 통째로 42703 으로 죽었다 —
+        만든 날(2026-08-21)부터 이 정리가 한 번도 돌지 못했다(매일 새벽 error 로그).
+        실패 방향이 '아무것도 안 지움'이라 데이터 손실은 없었지만, 이 제외 조건이
+        살아있는 줄의 캡처를 지키는 방어이므로 고치는 순간 함께 되살아난다.
+        ⚠ 이 문자열은 템플릿 리터럴이다 — 주석에도 백틱을 쓰지 말 것(리터럴이 끊긴다). */
      AND NOT EXISTS (SELECT 1 FROM campaign_participants cp
                       WHERE cp.sheet_id = rs.sheet_id AND cp.tab_name = rs.tab_name
-                        AND cp.row_index = rs.row_index
+                        AND cp.seq = rs.row_index
                         AND cp.deleted_at IS NULL AND cp.active = TRUE)
      ${oneFile ? 'AND rs.file_id = $3' : ''}
    ORDER BY COALESCE(rs.uploaded_at, rs.created_at) ASC
