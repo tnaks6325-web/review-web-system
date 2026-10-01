@@ -181,4 +181,71 @@ async function sendManualAlimtalk({ sheetId, tabName, ids, by }) {
   return { ok: results.some(r => r.sent), error: out.ok === false ? out.error : undefined, results };
 }
 
-module.exports = { previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };
+/* ══ 문안용 짧은 상품 이름 — 시스템이 추천하고(AI), 직원이 고쳐 보내면 그 이름을 기억한다 ══
+   ★ 작업마다 app_settings 한 키(`sms_short_name:<시트>||<탭>`) — 동시 저장이 서로를 지우지 않게 키를 나눈다.
+   ★ 직원이 정한 이름(manual)이 언제나 이긴다 · AI 추천은 원래 상품명이 바뀌면 다시 만든다.
+   ★ 한글 6자(12바이트) 이내만 인정한다 — 넘으면 단문 문안이 장문이 된다(그때는 추천 없음). */
+const SHORT_MAX_BYTES = 12;   // 한글 6자 — 가장 긴 문안(74바이트)+12 = 86 ≤ 90, 줄바꿈을 2바이트로 세는 경우까지 여유
+function _shortKey(sheetId, tabName) { return `sms_short_name:${sheetId}||${tabName}`; }
+function normalizeShortName(v) {
+  const s = String(v || '').replace(/["'“”‘’\[\]()<>{}]/g, '').replace(/\s+/g, '').trim();
+  if (!s || /https?:|○|\.(com|kr|net)/i.test(s)) return '';
+  const b = solapi.smsBytes(s);
+  return b >= 2 && b <= SHORT_MAX_BYTES ? s : '';
+}
+function _cleanProductSource(v) {
+  return String(v || '').replace(/^\s*\[상품\/옵션\/금액\]\s*/, '').replace(/^\s*\d{1,3}\.\s+/, '')
+    .split('\n')[0].replace(/\s*\(?\s*https?:\/\/\S*/gi, '').trim().slice(0, 200);
+}
+/* ★ 읽기 실패와 "없음"을 구분한다 — 실패를 없음으로 접으면 AI 추천이 직원이 정한 이름을 덮는다(fail-closed) */
+async function _readShort(sheetId, tabName) {
+  try {
+    const { rows } = await pool.query('SELECT value FROM app_settings WHERE key = $1', [_shortKey(sheetId, tabName)]);
+    return { ok: true, val: rows[0] ? JSON.parse(rows[0].value) : null };
+  } catch (_) { return { ok: false, val: null }; }
+}
+/* ★ AI 추천 저장은 직원이 정한 이름(manual)이 없을 때만 — 늦게 끝난 추천이 방금 저장된 직원 이름을 덮지 않게 */
+async function _writeShort(sheetId, tabName, val, { keepManual = false } = {}) {
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()` +
+    (keepManual ? ` WHERE COALESCE(app_settings.value::jsonb->>'source', '') <> 'manual'` : ''),
+    [_shortKey(sheetId, tabName), JSON.stringify(val)]);
+}
+/* ★ 추천은 원문(상품명·작업 이름)의 조각으로만 이뤄져야 한다 — 2글자 이상 조각들로 이어 붙일 수 있는지 본다.
+   AI 가 예시(유산균·탈취제)를 되뇌거나 지어낸 이름은 버린다. */
+function derivedFromSource(name, source) {
+  const n = String(name || ''), src = String(source || '').replace(/\s+/g, '').toLowerCase();
+  if (!n || !src) return false;
+  const low = n.toLowerCase(), ok = new Array(low.length + 1).fill(false); ok[0] = true;
+  for (let i = 0; i < low.length; i++) {
+    if (!ok[i]) continue;
+    for (let j = i + 2; j <= low.length; j++) if (src.includes(low.slice(i, j))) ok[j] = true;
+  }
+  return ok[low.length];
+}
+async function productShortName({ sheetId, tabName, productName, taskName, suggest }) {
+  if (!sheetId || !tabName) return { name: '', source: 'none' };
+  const rd = await _readShort(sheetId, tabName);
+  if (!rd.ok) return { name: '', source: 'none' };
+  const saved = rd.val;
+  if (saved && saved.source === 'manual' && normalizeShortName(saved.name)) return { name: saved.name, source: 'manual' };
+  const task = String(taskName || '').trim().slice(0, 120);
+  const from = [_cleanProductSource(productName), task].filter(Boolean).join(' | ');
+  if (!from) return { name: '', source: 'none' };
+  if (saved && saved.source === 'ai' && saved.from === from && normalizeShortName(saved.name)) return { name: saved.name, source: 'ai' };
+  const ask = suggest || require('./gemini.service').suggestShortProductName;
+  const name = normalizeShortName(await ask(_cleanProductSource(productName), task));
+  if (!name || !derivedFromSource(name, from)) return { name: '', source: 'none' };
+  try { await _writeShort(sheetId, tabName, { name, source: 'ai', from, at: new Date().toISOString() }, { keepManual: true }); }
+  catch (e) { logger.warn(`[manualMessage] 추천 상품명 저장 실패(추천은 유지): ${e.message}`); }
+  return { name, source: 'ai' };
+}
+async function saveShortName({ sheetId, tabName, name, by }) {
+  const n = normalizeShortName(name);
+  if (!sheetId || !tabName || !n) return { ok: false, error: '상품명은 한글 6자(12바이트) 이내로 넣어 주세요' };
+  await _writeShort(sheetId, tabName, { name: n, source: 'manual', by: String(by || ''), at: new Date().toISOString() });
+  return { ok: true, name: n };
+}
+
+module.exports = { productShortName, saveShortName, normalizeShortName, derivedFromSource, cleanProductSource: _cleanProductSource, SHORT_MAX_BYTES, previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };

@@ -2287,6 +2287,24 @@ router.post('/workdesk/manual-send/preview', authMiddleware, internalMiddleware,
     res.status(500).json({ ok: false, error: '받는 사람을 확인하지 못했습니다.' });
   }
 });
+/* 문안용 짧은 상품 이름 — 추천(AI) 조회 · 직원이 고친 이름 저장. 실패는 "추천 없음"으로(문자 창을 막지 않는다). */
+router.post('/workdesk/sms-product-name', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || '').trim(), tabName = String(b.tabName || '').trim();
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 이 필요합니다.' });
+    const svc = require('../services/manualMessage.service');
+    if (b.save) {
+      const out = await svc.saveShortName({ sheetId, tabName, name: b.name, by: req.admin && req.admin.name });
+      return res.status(out.ok ? 200 : 400).json(out);
+    }
+    res.json({ ok: true, ...(await svc.productShortName({ sheetId, tabName, productName: b.productName, taskName: b.taskName })) });
+  } catch (e) {
+    logger.warn(`[trackB] 짧은 상품명 처리 실패: ${e.message}`);
+    if (req.body && req.body.save) return res.status(500).json({ ok: false, error: '상품명을 저장하지 못했습니다' });
+    res.json({ ok: true, name: '', source: 'none' });
+  }
+});
 router.post('/workdesk/manual-send', authMiddleware, internalMiddleware, async (req, res) => {
   try {
     const a = _manualSendArgs(req);

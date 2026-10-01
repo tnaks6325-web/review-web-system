@@ -29,9 +29,12 @@ const CPS = [
   { id: 'c', seq: 12, rowName: '이중' }, { id: 'd', seq: 13, rowName: '없음' },
 ];
 let logs = [];
+const SETTINGS = new Map();
 pool.query = async (sql, params) => {
   if (/FROM campaign_participants/.test(sql)) return { rows: CPS.filter(c => params[2].includes(c.id)) };
   if (/INSERT INTO manual_message_sends/.test(sql)) { logs.push(params); return { rowCount: 1 }; }
+  if (/FROM app_settings WHERE key/.test(sql)) { const v = SETTINGS.get(params[0]); return { rows: v ? [{ value: v }] : [] }; }
+  if (/INSERT INTO app_settings/.test(sql)) { SETTINGS.set(params[0], params[1]); return { rowCount: 1 }; }
   throw new Error('예상하지 못한 쿼리: ' + sql.slice(0, 80));
 };
 
@@ -166,7 +169,7 @@ pool.query = async (sql, params) => {
   console.log('\n▶ ④ 화면');
   const wd = read('frontend/workdesk.html');
   ok('우클릭 메뉴에 한 줄 추가(여러 줄이면 인원수)', /row\('📨', msgN>1\?`\$\{msgN\}명에게 문자·알림톡`:'문자·알림톡 보내기', "openManualSend\(\)"/.test(wd));
-  const setTab = wd.slice(wd.indexOf('function _msSetTab'), wd.indexOf('async function _msLoad'));
+  const setTab = wd.slice(wd.indexOf('function _msSetTab'), wd.indexOf('async function _msLoad('));
   ok('탭 전환이 입력칸을 다시 만들지 않는다(IME 보호)', !/innerHTML/.test(setTab.replace(/rs\.innerHTML=''/, '')) && /style\.display/.test(setTab));
   ok('팝오버는 body 직속 · Esc 로 닫힘 · 리스너 1회', /document\.body\.appendChild\(ov\);[\s\S]{0,700}_msLoad\(\)/.test(wd) && /window\._msKeyBound/.test(wd));
   ok('시스템 확인창(confirm)을 쓰지 않는다', !/confirm\(`\$\{n\}명에게/.test(wd));
@@ -218,9 +221,56 @@ pool.query = async (sql, params) => {
     S._MS.homeHost = '';
     ok('주소 재료를 못 받으면(구버전 서버) 안내 문구가 붙는 것으로 센다', S.full('x review-web-system.pages.dev').includes('발신 전용'));
   }
-  ok('문안 버튼은 처음엔 잠겨 있고 미리보기를 받은 뒤 연다', /data-tpl="\$\{i\}" disabled/.test(wd) && /mstpl button'\)\.forEach\(b=>\{ b\.disabled=!_MS\.homeLink/.test(wd));
+  ok('문안 버튼은 처음엔 잠겨 있고 주소와 추천(또는 5초)을 받은 뒤 연다', /data-tpl="\$\{i\}" disabled/.test(wd)
+    && /const on=!!_MS\.homeLink&&!!_MS\.shortDone/.test(wd) && /setTimeout\(\(\)=>\{ if\(_MS===me\)\{ me\.shortDone=true/.test(wd));
+  ok('늦게 온 추천은 다른 작업 창에 들어가지 않는다', /const me=_MS;[\s\S]{0,600}if\(_MS!==me\) return;/.test(wd));
+  ok('늦게 온 추천이 빈 자리(○○○○○)를 채운다', /ta\.value\.includes\(_MS_PH\)\)\{ const at=ta\.value\.indexOf\(_MS_PH\);/.test(wd));
+  ok('추천을 그대로 보낸 경우는 저장하지 않는다(고친 것만 기억)', /p!==_MS\.shortName&&_msBytes\(p\)<=12/.test(wd));
+  ok('기억 실패는 조용히 버리지 않는다', /고친 상품명을 기억하지 못했습니다/.test(wd));
   ok('상품명 자리를 그대로 두면 보내기 버튼을 잠근다', /txt\.includes\(_MS_PH\)/.test(wd));
 
+  console.log('\n▶ ⑤ 문안용 짧은 상품 이름(추천)');
+  {
+    let asked = 0; const ai = n => { asked++; return n.includes('유산균') ? '유산균' : '에셀라이트유산균프로'; };
+    const A = { sheetId: 'S', tabName: 'T' };
+    ok('이름 판정: 한글 6자(12바이트) 이내만', svc.normalizeShortName('마시는비타민') === '마시는비타민' && svc.normalizeShortName('수딩 선크림') === '수딩선크림' && svc.normalizeShortName('에셀라이트유산균') === '' && svc.normalizeShortName('○○○○○') === '');
+    let r = await svc.productShortName({ ...A, productName: '[상품/옵션/금액]\n1. 에셀라이트 유산균 30포 (https://x.y/z)', suggest: ai });
+    ok('처음에는 AI 가 추천한다', r.name === '유산균' && r.source === 'ai' && asked === 1);
+    r = await svc.productShortName({ ...A, productName: '[상품/옵션/금액]\n1. 에셀라이트 유산균 30포 (https://x.y/z)', suggest: ai });
+    ok('같은 상품명이면 저장된 추천을 다시 쓴다(AI 재호출 없음)', r.name === '유산균' && asked === 1);
+    r = await svc.productShortName({ ...A, productName: '완전히 다른 긴 상품', suggest: ai });
+    ok('추천이 12바이트를 넘으면 추천 없음(장문 방지)', r.name === '' && r.source === 'none' && asked === 2);
+    ok('직원이 고친 이름 저장 — 긴 이름은 거부', !(await svc.saveShortName({ ...A, name: '에셀라이트유산균' })).ok);
+    ok('직원이 고친 이름 저장', (await svc.saveShortName({ ...A, name: '유산균젤리', by: 'x' })).ok);
+    r = await svc.productShortName({ ...A, productName: '아무거나', suggest: ai });
+    ok('직원이 정한 이름이 AI 보다 우선', r.name === '유산균젤리' && r.source === 'manual' && asked === 2);
+    ok('원문 조각으로 된 추천만 인정(예시를 되뇌거나 지어낸 이름은 버림)', svc.derivedFromSource('마시는비타민', '마시는 고함량 비타민')
+      && svc.derivedFromSource('유아옷걸이', '아기 유아 어린이 옷걸이') && !svc.derivedFromSource('탈취제', '유산균 30포') && !svc.derivedFromSource('유산균젤리', '유산균 30포'));
+    ok('작업마다 키가 따로(동시 저장이 서로를 지우지 않게)', [...SETTINGS.keys()].every(k => /^sms_short_name:S\|\|T$/.test(k)));
+  }
+  {
+    const src = read('server/src/services/manualMessage.service.js');
+    ok('AI 저장은 직원 이름(manual)을 덮지 않는다', /keepManual \? ` WHERE COALESCE\(app_settings\.value::jsonb->>'source', ''\) <> 'manual'`/.test(src) && /\{ keepManual: true \}/.test(src));
+    const prevQ = pool.query; pool.query = async () => { throw new Error('db down'); };
+    let asked = 0;
+    const r = await svc.productShortName({ sheetId: 'S2', tabName: 'T', productName: '유산균', suggest: () => { asked++; return '유산균'; } });
+    pool.query = prevQ;
+    ok('저장된 이름을 못 읽으면 추천하지 않는다(fail-closed)', r.name === '' && asked === 0);
+  }
+  ok('라우트: 추천·저장 창구는 내부 담당자 전원', /router\.post\('\/workdesk\/sms-product-name', authMiddleware, internalMiddleware/.test(read('server/src/routes/trackB.routes.js')));
+  ok('AI 프롬프트: 원문에 없는 단어를 지어내지 않는다', /에 없는 단어를 지어내지 마라/.test(read('server/src/services/gemini.service.js')));
+  {
+    const vm = require('vm');
+    const blk = wd.slice(wd.indexOf('function _msHasLink'), wd.indexOf('function openManualSend'));
+    const ta = { value: '', focus(){}, select(){}, setSelectionRange(a, b){ this.sel = [a, b]; } };
+    const S = { _MS: { homeHost: 'review-web-system.pages.dev', homeLink: 'review-web-system.pages.dev/#cs', footer: '', shortName: '유산균', shortSource: 'ai' },
+      document: { getElementById: () => ta, execCommand: () => false }, _msPaintMeta(){} };
+    vm.runInNewContext(blk + '\nthis.use=_msUseTpl;this.prod=_msTplProduct;', S);
+    S.use(1);
+    ok('추천 상품명이 채워지고 그 자리가 선택된다', ta.value.startsWith('[IA리뷰] 유산균 리뷰 작성 기한이 내일까지') && ta.sel[0] === 7 && ta.sel[1] === 10);
+    ok('문안에서 고쳐 쓴 상품명을 읽어낸다', S.prod('[IA리뷰] 수딩선크림 리뷰 작성 기한이 내일까지입니다.\nx') === '수딩선크림' && S.prod('직접 쓴 문자') === '');
+  }
+  ok('문안으로 보낸 상품명을 그 작업 이름으로 기억한다', /_msTplProduct\(text\)[\s\S]{0,300}save:true/.test(wd));
   console.log(`\n✅ manualMessageSend: ${passed}개 통과`);
   pool.query = origQuery;
   process.exit(0);
