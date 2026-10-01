@@ -37,3 +37,6 @@ Thumbs.db
 # Wrangler
 .wrangler/
 frontend-backup/
+
+# 브라우저 자동화 캡처(운영 데이터가 찍힐 수 있다 — 절대 커밋 금지)
+.playwright-mcp/
