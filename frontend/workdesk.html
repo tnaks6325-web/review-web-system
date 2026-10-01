@@ -10022,7 +10022,7 @@ const _MS_TPL=[
 ];
 function _msUseTpl(i){
   const t=_MS_TPL[i], ta=document.getElementById('msText'); if(!t||!ta||!_MS||_MS.confirming||_MS.busy) return;
-  const txt=`[인애드] ${_MS_PH} ${t.body}`+(_MS.homeLink?`\n${_MS.homeLink}`:'');
+  const txt=`[IA리뷰] ${_MS_PH} ${t.body}`+(_MS.homeLink?`\n${_MS.homeLink}`:'');
   ta.focus(); ta.select();
   /* execCommand 로 넣어야 Ctrl+Z 로 직전 입력을 되살릴 수 있다(value 대입은 실행취소 기록을 지운다) */
   let done=false; try{ done=document.execCommand('insertText',false,txt); }catch(_){ done=false; }

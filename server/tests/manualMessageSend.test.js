@@ -41,7 +41,7 @@ pool.query = async (sql, params) => {
   ok('발신 전용 안내와 1:1 문의 주소가 자동으로 붙는다', /발신 전용 번호라 답장을 확인할 수 없습니다/.test(full) && /review-web-system\.pages\.dev\/#cs$/.test(full));
   {
     const env = { REVIEW_WEB_HOME_URL: '' };
-    const tpl = '[인애드] 비타민젤리 리뷰 작성 기한이 7일 남았습니다.\nreview-web-system.pages.dev/#cs';
+    const tpl = '[IA리뷰] 비타민젤리 리뷰 작성 기한이 7일 남았습니다.\nreview-web-system.pages.dev/#cs';
     ok('본문에 리뷰웹 주소가 있으면 안내 문구를 붙이지 않는다(단문 문안)', svc.composeSms(tpl, env) === tpl);
     ok('주소 판정은 대소문자 무시', svc.hasHomeLink('REVIEW-WEB-SYSTEM.PAGES.DEV', env));
     ok('주소가 없으면 종전대로 안내 문구를 붙인다', svc.composeSms('리뷰 부탁', env).includes('발신 전용'));
@@ -207,7 +207,7 @@ pool.query = async (sql, params) => {
     vm.runInNewContext(blk + '\nthis.use=_msUseTpl;this.full=_msFull;this.T=_MS_TPL;', S);
     ok('문안 버튼은 1차·2차·최종 세 단계', S.T.length === 3 && S.T.map(t => t.label).join() === '1차,2차,최종');
     S.use(2);
-    ok('문안을 넣으면 상품명 자리가 선택된다', ta.value.startsWith('[인애드] ○○○○○ 오늘이') && ta.sel && ta.sel[1] - ta.sel[0] === 5);
+    ok('문안을 넣으면 상품명 자리가 선택된다', ta.value.startsWith('[IA리뷰] ○○○○○ 오늘이') && ta.sel && ta.sel[1] - ta.sel[0] === 5);
     ok('문안에는 리뷰웹 주소가 들어가 안내 문구가 빠진다', S.full(ta.value) === ta.value && /pages\.dev\/#cs$/.test(ta.value));
     S._MS.homeHost = '';
     ok('주소 재료를 못 받으면(구버전 서버) 안내 문구가 붙는 것으로 센다', S.full('x review-web-system.pages.dev').includes('발신 전용'));

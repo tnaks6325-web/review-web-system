@@ -127,7 +127,7 @@ async function sendManualSms({ sheetId, tabName, ids, text, by }) {
     seen.set(it.sms.phone, true);
     let out;
     try {
-      out = await solapi.sendSms({ to: it.sms.phone, text: full, subject: '인애드 리뷰 안내',
+      out = await solapi.sendSms({ to: it.sms.phone, text: full, subject: 'IA리뷰 안내',
         customFields: { participantId: String(it.participantId), kind: 'manual_sms' } });
     } catch (e) {
       out = { accepted: false, reason: e.code || e.message || '발송 실패' };
