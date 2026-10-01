@@ -130,7 +130,8 @@
 <body>
 <div class="page">
 
-<h1>📑 작업보드 작업탭 워크플로우 — 구현계획(PRD)·와이어프레임 <span class="pill info">v1.3 · M1·M2 구현 완료</span></h1>
+<h1>📑 작업보드 작업탭 워크플로우 — 구현계획(PRD)·와이어프레임 <span class="pill info">v1.3 · M1·M2 구현 완료 · 오늘 완료는 2026-09-30 제거</span></h1>
+<div class="decided" style="border-color:#b4323a;background:#fbeced"><b class="q">⚠ 2026-09-30 「☑ 오늘 완료」 제거 — 이 문서의 오늘 완료 부분(㉯)은 과거 기록입니다</b> 9월 한 달 사용 0으로 코드 다이어트(결정 186 · 킵 재검토 7번)에서 뺐습니다. <code>POST /api/trackb/workdesk/tab-daily-done</code> · 목록 응답의 <code>todayDone</code>·<code>kstDate</code>·<code>dailyUnavailable</code> · 홈 "오늘 완료 n / m" · 열린 줄 ☑ 는 <b>더 이상 없습니다</b>(표 <code>trackb_tab_daily_done</code> 만 보존). 되살리려면 새로 설계·결정하세요 — 아래 명세를 그대로 복원하지 마세요. ㉮ 열린 작업 줄 · ㉰ 마감 · ㉱ 홈 작업 목록은 그대로 유효합니다.</div>
 <p class="sub">2026-08-04 · 대상: 리뷰웹시스템[3버전](workdesk) 내부인 화면(관리자·AE) · 목적: <b>"브라우저에 시트 탭을 여러 개 열어두고, 진행 중인 것은 앞에, 끝난 것은 뒤로 보내던" 직원의 실제 워크플로우</b>를 작업보드 안에서 그대로 할 수 있게 한다.<br>
 v1.1 변경: <b>"오늘 완료"와 "마감"을 명확히 분리</b>(작업 자체의 종료는 '마감'으로 표기) · 관리자 대시보드는 폐기 예정이므로 <b>그쪽 개념(아카이브 등)을 가져오지 않음</b>.<br>
 v1.2 변경: 세부 결정 5건 <b>전부 확정</b>(§7) — 특히 <b>마감 전 "리뷰폴더 마감자료 검수"는 사람이 최종 확인</b>(확인창 체크 게이트, §5).</p>

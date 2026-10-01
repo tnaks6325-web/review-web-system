@@ -396,13 +396,10 @@
   .wt0{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:220px;padding:5px 7px 5px 11px;border:1px solid var(--accent-line);border-bottom:none;border-radius:8px 8px 0 0;background:var(--card);font-size:11.5px;color:var(--muted);cursor:pointer;white-space:nowrap;user-select:none}
   .wt0:hover{color:var(--ink)}
   .wt0.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:750}
-  .wt0.td{background:var(--card2);border-color:var(--line);color:var(--faint)}
-  .wt0.td.on{background:var(--muted);border-color:var(--muted);color:#fff}
   .wt0 .nm{overflow:hidden;text-overflow:ellipsis;min-width:0}
   .wt0 .x{flex:none;opacity:.5;font-weight:800;font-size:12px;padding:0 1px;border-radius:4px}
   .wt0 .x:hover{opacity:1;background:rgba(0,0,0,.08)}
   .wt0.on .x:hover{background:rgba(255,255,255,.25)}
-  .wt0 .ck{flex:none;font-size:10px}
   .wt0.drag{opacity:.4}
   .wt0.over{box-shadow:-2px 0 0 var(--accent) inset}
   .wt0add{flex:none;align-self:center;margin-bottom:4px;font:inherit;font-size:11px;font-weight:700;color:var(--accent-deep);background:none;border:1px dashed var(--accent-line);border-radius:8px;padding:3px 9px;cursor:pointer}
@@ -872,7 +869,6 @@
   .taskbar.wb-topbar .wt0{max-width:270px;gap:5px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;background:var(--card);font-family:"Noto Sans KR","Malgun Gothic","Segoe UI",sans-serif;font-size:11px;font-weight:700;letter-spacing:-.018em;color:var(--muted)}
   .taskbar.wb-topbar .wt0:hover{background:#f6f9ff;border-color:#9fbee9;color:var(--accent-deep);transform:translateY(-1px)}
   .taskbar.wb-topbar .wt0.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
-  .taskbar.wb-topbar .wt0.td,.taskbar.wb-topbar .wt0.td.on{background:var(--card2);border-color:var(--line);color:var(--faint)}
   .taskbar.wb-topbar .wt0add{align-self:center;margin:0;border-style:solid;border-radius:7px;padding:5px 8px}
   .taskbar.wb-topbar .wt0note{align-self:center;margin:0}
   /* 작업목록은 상시 두 번째 행이 아니라 업체를 눌렀을 때만 바로 아래에 뜬다. */
@@ -2524,7 +2520,6 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
 .wbl-seg{display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
 .wbl-seg button{font:inherit;font-size:11.5px;font-weight:750;padding:4px 12px;border:none;background:var(--card);color:var(--muted);cursor:pointer}
 .wbl-seg button.on{background:var(--accent);color:#fff}
-.wbl-today{font-size:11px;font-weight:750;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:999px;padding:2px 10px;font-variant-numeric:tabular-nums}
 .wbl-chip{font:inherit;font-size:11px;font-weight:700;padding:3px 11px;border-radius:999px;border:1px solid var(--line2);background:var(--card);color:var(--muted);cursor:pointer}
 .wbl-chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .wbl-q{margin-left:auto;font:inherit;font-size:11.5px;padding:5px 11px;border:1px solid var(--line2);border-radius:9px;background:var(--card);color:var(--ink);min-width:210px}
@@ -2555,7 +2550,6 @@ table.wbl-t tr.fin td{color:var(--faint)}
 .wbl-s.run{background:var(--card2);color:var(--muted)}
 .wbl-s.cand{background:var(--accent);color:#fff}
 .wbl-s.fin{background:var(--card2);color:var(--muted)}
-.wbl-s.today{background:#e0e7ff;color:#3730a3}
 .wbl-s-sub{display:block;font-size:10.5px;color:var(--faint);margin-top:2px;white-space:nowrap}
 
 /* ══ 홈 작업목록 진행 숫자 4칸 — 총건수 / 참여 / 제출 / 입금 ══════════════════
@@ -2614,20 +2608,12 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
 #wblPend .row .det{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;flex:none}
 #wblPend .ft{padding:8px 12px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);background:var(--card2);border-radius:0 0 12px 12px}
 @media (prefers-reduced-motion:reduce){#wblPend.open,#wblPend.closing{animation:none} #wblPend .row{transition:none}}
-.wbl-b.today{border-color:var(--accent-line);color:var(--accent-deep)}
-/* ★★ 오늘 완료는 **글자를 바꾸지 않고 색으로** 말한다(시안 design-home-campaign-popup.html ⑥).
-   종전엔 라벨을 '☑ 오늘 완료' ↔ '해제' 로 갈아끼웠는데 ① 폭이 달라져 아래 줄과 어긋나고
-   ② '해제'가 무엇을 해제하는지 한 번 더 생각하게 된다. 켜짐 = 파란 채움. */
-.wbl-b.today.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.wbl-b.today.on:hover{background:var(--accent-deep);border-color:var(--accent-deep);color:#fff}
-table.wbl-t tr.tdone td{background:var(--card2);color:var(--faint)}
-table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-b{font:inherit;font-size:10.5px;font-weight:750;padding:3px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
 .wbl-b:hover{border-color:var(--accent-line);color:var(--accent-deep)}
 .wbl-b.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
 .wbl-b.dark:hover{opacity:.85;color:#fff}
 /* ★★ 버튼은 줄마다 **자기 열**을 지킨다 — v3(사용자 확정)에서 통합 "폴더/처리" 칸을 폐지하고
-   작업표·저장폴더·모집공고·오늘완료·마감을 **독립 헤더열**로 분리했다. 열 정렬은 표 구조가 보장하므로
+   작업표·저장폴더·모집공고·마감을 **독립 헤더열**로 분리했다(오늘완료 열은 2026-09-30 코드 다이어트로 제거). 열 정렬은 표 구조가 보장하므로
    종전 .wbl-act 고정 폭 grid 는 제거 — 저장폴더 칸 안의 3버튼만 내부 고정 3분할을 유지한다
    (현영 비활성이어도 자리를 지켜 전 줄의 버튼 x 좌표가 같다 — 사용자 규율). */
 .wbl-btncol{width:1px;white-space:nowrap}
@@ -2686,7 +2672,6 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   .wbl-ttl{width:100%;font-size:14px}
   .wbl-seg{flex:1;display:grid;grid-template-columns:1fr 1fr;border-radius:10px;background:var(--card)}
   .wbl-seg button{min-height:40px;padding:5px 9px;font-size:11.5px}
-  .wbl-today{order:3;padding:4px 9px}
   .wbl-sw{order:4;width:100%;grid-template-columns:repeat(3,1fr);border-radius:10px}
   .wbl-sw i{display:none}
   .wbl-sw button{min-height:38px;padding:5px 2px;background:var(--card);border-right:1px solid var(--line)}
@@ -2706,12 +2691,11 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   table.wbl-t tbody{display:grid;gap:6px}
   /* ★★ 좁은 화면 배치는 **칸 번호에 묶여 있다** — 숫자 4칸(총건수·참여·제출·입금)으로 나누면서
      번호가 2씩 밀렸다. 새 순서: 1작업명 2작업표 3공유 4담당 5총건수 6참여 7제출 8입금
-     9상태 10저장폴더 11모집공고 12오늘완료 13마감 14더보기.
+     9상태 10저장폴더 11모집공고 12마감 13더보기(12오늘완료 열은 2026-09-30 제거 — 뒤 번호가 1씩 당겨졌다).
      ★ 상태 배지는 **작업명과 같은 줄 오른쪽**에 얹는다(숫자 5칸이 둘째 줄을 다 쓴다).
      ★ 숫자 칸 라벨은 **한 글자**로 줄인다(`총건수 50`이면 네 칸이 화면을 넘는다). */
   table.wbl-t tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:3px 8px;padding:9px 11px;background:var(--card);border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
   table.wbl-t tbody tr:hover{background:var(--card);border-color:var(--accent-line)}
-  table.wbl-t tr.tdone td{background:transparent}
   table.wbl-t td{display:flex;flex-direction:row;align-items:center;gap:3px;min-width:0;padding:0;border:0;white-space:nowrap;font-size:10.5px}
   table.wbl-t td::before{content:attr(data-label);display:inline-block;margin:0;color:var(--faint);font-size:9px;font-weight:700}
   table.wbl-t td:nth-child(1){display:block;position:relative;grid-column:1/-1;grid-row:1;padding:0 104px 2px 0;border:0}
@@ -2739,10 +2723,9 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   table.wbl-t tr.mob-open td:nth-child(2){grid-column:1/3;grid-row:3}
   table.wbl-t tr.mob-open td:nth-child(3){grid-column:3/6;grid-row:3}
   table.wbl-t tr.mob-open td:nth-child(10){grid-column:1/-1;grid-row:4}
-  table.wbl-t tr.mob-open td:nth-child(11){grid-column:1/3;grid-row:5}
-  table.wbl-t tr.mob-open td:nth-child(12){grid-column:3/6;grid-row:5}
-  table.wbl-t tr.mob-open td:nth-child(13){grid-column:1/3;grid-row:6}
-  table.wbl-t tr.mob-open td:nth-child(14){grid-column:3/6;grid-row:6}
+  table.wbl-t tr.mob-open td:nth-child(11){grid-column:1/-1;grid-row:5}
+  table.wbl-t tr.mob-open td:nth-child(12){grid-column:1/3;grid-row:6}
+  table.wbl-t tr.mob-open td:nth-child(13){grid-column:3/6;grid-row:6}
   table.wbl-t td.wbl-btncol{width:auto}
   table.wbl-t td.wbl-c{text-align:left;align-items:stretch}
   table.wbl-t td .wbl-b{width:100%;min-height:38px;font-size:11px}
@@ -3021,7 +3004,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
-                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
+                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,
                         favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
                         rvIm:'',rvImData:null,rvImSel:null,rvImAsk:null,rvImDone:null,rvImCounts:null,rvImMemo:null });   // ★ 명의 합치기 목록(실명·번호) 잔재 제거
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
@@ -3247,9 +3230,9 @@ function logout(){
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false,
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
-                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,kstDate:null,
+                        advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,
                         favs:null,_favLoaded:false,_finStatsAt:0,
-                        finUnavailable:false,statsUnavailable:false,dailyUnavailable:false,finTruncated:false,worktabsUnavailable:false,
+                        finUnavailable:false,statsUnavailable:false,finTruncated:false,worktabsUnavailable:false,
                         campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
                         rvIm:'',rvImData:null,rvImSel:null,rvImAsk:null,rvImDone:null,rvImCounts:null,rvImMemo:null });   // ★ 명의 합치기 목록(실명·번호) 잔재 제거
   _NAVCS.cs=null; _NAVCS.re=null;   // 합산 뱃지도 초기화 — 안 하면 이전 계정의 건수가 다음 로그인에 남는다
@@ -3343,7 +3326,7 @@ function _csStartBadgePoll(){
   _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); } }, CS_BADGE_POLL_MS);
   if(!_csStartBadgePoll._bound){
     _csStartBadgePoll._bound = true;
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); _finDayRollCheck(); } });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); } });
   }
 }
 /** 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(직전 값 유지). */
@@ -3619,23 +3602,19 @@ async function loadTabs(){
   if(!r||!r.ok){ const b=$('#segwrap'); if(b) b.innerHTML=''; _renderTaskMenu(); return; }
   // ★ 작업바 로드는 stats=1 을 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다) — 대신 이미 받아둔
   //   통계를 **이월**해 마감 후보 배지가 화면을 오갈 때마다 사라졌다 나타나지 않게 한다(_finStatsAt 캐시와 정합).
-  const _prevStats={}, _prevFin={}, _prevTd={}, _prevCamp={};
+  const _prevStats={}, _prevFin={}, _prevCamp={};
   (STATE.tabs||[]).forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
     if(t.stats) _prevStats[k]=t.stats;
     if(t.campaigns) _prevCamp[k]=t.campaigns;   // 공고 주석도 stats 와 같은 이월(작업바 로드엔 안 실린다)
-    if(t.finished) _prevFin[k]={finishedAt:t.finishedAt,finishedBy:t.finishedBy};
-    if(t.todayDone) _prevTd[k]=true; });
+    if(t.finished) _prevFin[k]={finishedAt:t.finishedAt,finishedBy:t.finishedBy}; });
   STATE.tabs=r.tabs||[];
   STATE.finTruncated=!!r.truncated;
   STATE.finUnavailable=!!r.finishedUnavailable;
-  STATE.dailyUnavailable=!!r.dailyUnavailable;
-  if(r.kstDate) STATE.kstDate=r.kstDate;   // 두 흡수 경로가 같은 기준을 갖게(자정 자가치유)
   STATE.tabs.forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
     if(!t.stats){ const s=_prevStats[k]; if(s) t.stats=s; }
     if(!t.campaigns){ const c=_prevCamp[k]; if(c) t.campaigns=c; }
     // ★ 마감 조회가 실패한 응답으로 기존 마감 표시를 지우지 않는다(그러면 마감 작업이 보드로 되살아난다)
-    if(r.finishedUnavailable && _prevFin[k]){ t.finished=true; t.finishedAt=_prevFin[k].finishedAt; t.finishedBy=_prevFin[k].finishedBy; }
-    if(r.dailyUnavailable && _prevTd[k]) t.todayDone=true; });
+    if(r.finishedUnavailable && _prevFin[k]){ t.finished=true; t.finishedAt=_prevFin[k].finishedAt; t.finishedBy=_prevFin[k].finishedBy; } });
   _wtPruneFinished();        // 마감분 정리(목록이 막 도착한 지점)
   _renderTabList();          // 계정별 캐시로 즉시 렌더
   // ★ 작업바 정렬(모집중 먼저)의 재료 = campaigns·stats 인데 이 응답엔 없다 → **뒤따라 한 번** 받아
@@ -4348,42 +4327,6 @@ function isFinishCandidate(t){
   return (s.submitted|0)>=s.total && (s.paid|0)>=s.total;
 }
 function _finCanEdit(){ return STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff'; }
-// ══ M2: 오늘 완료(전사 공통) — migration 089 ═══════════════════════════════════════════
-//   ★★ 마감과 **다른 상태**다: 마감은 보드에서 빼고(영구), 오늘 완료는 **뒤로 밀고 회색으로 표시**만
-//     하며 **다음날 자동 해제**된다(서버가 KST 날짜로 판정 — 리셋 크론 없음).
-//   ★ 목록에서 사라지지 않는다 — 사라지는 것은 마감뿐(그래야 오늘 몫을 끝낸 뒤에도 그 작업을 열 수 있다).
-function isTodayDone(t){ return !!(t && t.todayDone); }
-// 밤새 띄워 둔 화면 자가치유 — 화면으로 돌아왔을 때 날짜가 넘어갔으면 오늘 완료 표시를 새로 받는다.
-//   ★ 조작이 없으면 어제 체크(☑)가 그대로 보여 "이미 한 일"로 오해하고 그 작업을 건너뛴다.
-//   ★ 비교는 화면이 마지막으로 받은 **서버 날짜**(STATE.kstDate) 대비 클라 KST 추정 — 다르면 서버에
-//     다시 물어 서버 값으로 확정한다(클라 시계는 "물어볼 때"만 정하고 값은 서버가 준다).
-function _finDayRollCheck(){
-  if(!STATE.kstDate || STATE.role==='advertiser') return;
-  const nowKst=new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
-  if(nowKst===STATE.kstDate) return;
-  _finEnsureStats(true).then(()=>{ _finRenderList(); _renderWorktabs(); _renderTabList(); }).catch(()=>{});
-}
-async function toggleTodayDone(i, ev){
-  if(ev) ev.stopPropagation();
-  const t=(STATE.tabs||[])[i]; if(!t||!_finCanEdit()) return;
-  const want=!isTodayDone(t);
-  t.todayDone=want;                                     // 낙관적 반영(가벼운 토글 — 확인창 없음)
-  _finRenderList(); _renderWorktabs(); _renderTabList();
-  const r=await api('/api/trackb/workdesk/tab-daily-done',{method:'POST',
-    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,done:want})}).catch(()=>null);
-  if(!(r&&r.ok)){                                       // 실패하면 되돌린다(화면만 바뀐 채 두지 않는다)
-    t.todayDone=!want; _finRenderList(); _renderWorktabs(); _renderTabList();
-    toast((r&&r.error)||'오늘 완료 처리 실패');
-    return;
-  }
-  // ★★ 자정을 넘긴 채 떠 있던 화면 자가치유: 서버가 쓴 날짜가 이 화면이 알던 "오늘"과 다르면
-  //   **다른 탭들의 체크도 전부 어제 것**이다(내가 누른 것만 맞고 나머지는 stale) → 목록을 다시 받는다.
-  //   서버 날짜(KST)를 기준으로 삼는다 — 클라이언트 시계를 믿지 않는다.
-  if(r.date && STATE.kstDate && r.date!==STATE.kstDate){
-    toast('날짜가 바뀌어 오늘 완료 표시를 새로 불러왔어요');
-    await _finEnsureStats(true); _finRenderList(); _renderWorktabs(); _renderTabList();
-  }
-}
 function _finTab(sheetId,tabName){ return STATE.tabs.find(t=>t.sheetId===sheetId&&t.tabName===tabName)||null; }
 function _finDate(v){ if(!v) return ''; const d=new Date(v); return isNaN(d)?'':`${d.getMonth()+1}/${d.getDate()}`; }
 
@@ -4404,9 +4347,7 @@ function _finAbsorb(r){
   STATE.finUnavailable=!!r.finishedUnavailable;
   STATE.statsUnavailable=!!r.statsUnavailable;
   STATE.campsUnavailable=!!r.campaignsUnavailable;
-  STATE.dailyUnavailable=!!r.dailyUnavailable;
   STATE.finTruncated=!!r.truncated;
-  if(r.kstDate) STATE.kstDate=r.kstDate;   // 서버가 판정한 "오늘" — 자정 넘긴 화면의 자가치유 기준
   const by={}; r.tabs.forEach(n=>{ by[n.sheetId+'\t'+n.tabName]=n; });
   STATE.tabs.forEach(t=>{ const n=by[t.sheetId+'\t'+t.tabName]; if(!n) return;
     if(n.stats) t.stats=n.stats;
@@ -4414,8 +4355,6 @@ function _finAbsorb(r){
     //   담당자가 이미 있는 공고를 또 발행한다). 성공했으면 없어진 연결도 반영해야 하므로 [] 로 대입.
     if(!r.campaignsUnavailable) t.campaigns=n.campaigns||[];
     if(!r.finishedUnavailable){ t.finished=!!n.finished; t.finishedAt=n.finishedAt; t.finishedBy=n.finishedBy; }
-    // 오늘 완료도 같은 규율 — 조회 실패 응답으로 체크를 지우면 "체크했는데 풀렸다"가 된다
-    if(!r.dailyUnavailable){ t.todayDone=!!n.todayDone; t.todayDoneBy=n.todayDoneBy; }
   });
   r.tabs.forEach(n=>{ if(!STATE.tabs.some(t=>t.sheetId===n.sheetId&&t.tabName===n.tabName)) STATE.tabs.push(n); });
   _wtPruneFinished();   // 마감분 정리는 데이터가 도착한 이 지점에서(렌더는 순수하게 둔다)
@@ -5259,20 +5198,18 @@ function _finVisible(){
   //   목록과 스위치 건수가 같은 함수를 봐야 "스위치는 21인데 목록은 19줄"로 갈라지지 않는다.
   const f=fin?'':(STATE.finFilter||'');
   if(f) list=list.filter(t=>_finMatchFilter(t,f));
-  // 보관함은 최근 마감 순(방금 마감한 것이 위) · 진행 중은 서버 순서(업체·작업명) 유지하되
-  // ★ 오늘 완료한 작업은 **아래로** 민다(시트에서 탭을 뒤로 끌던 동작 — 목록에서 사라지진 않는다).
+  // 보관함은 최근 마감 순(방금 마감한 것이 위) · 진행 중은 서버 순서(업체·작업명) 그대로.
   if(fin) list=list.slice().sort((a,b)=>String(b.finishedAt||'').localeCompare(String(a.finishedAt||'')));
   else if(f==='pay') list=list.slice().sort((a,b)=>_finUnpaid(b)-_finUnpaid(a));   // 미입금 큰 순(안정 정렬)
-  else { const n=list.filter(t=>!isTodayDone(t)), d=list.filter(t=>isTodayDone(t)); list=[...n,...d]; }
   return list;
 }
 /* ── 필터 3종 판정(단일 출처 — 목록·스위치 건수 공용) ──────────────────────────────
-   today = 금일 진행: 오늘 완료 미체크 ∧ 연결 공고가 "모집중"(사용자 확정 Q1 — 공고 상태는
+   today = 금일 진행: 연결 공고가 "모집중"(사용자 확정 Q1 — 공고 상태는
            서버 상태엔진 값(_campRank 0 = open·레거시 active)을 그대로 소비, 화면 재계산 금지).
    pay   = 입금 체크: 제출 > 입금(제출됐는데 입금 안 된 건이 있는 작업).
    cand  = 마감 체크: isFinishCandidate **그대로**(인원 충족+전건 제출+전건 입금 — 사본 금지). */
 function _finMatchFilter(t,f){
-  if(f==='today') return !isTodayDone(t)&&_finRecruitOpen(t);
+  if(f==='today') return _finRecruitOpen(t);
   if(f==='pay') return _finUnpaid(t)>0;
   if(f==='cand') return isFinishCandidate(t);
   return true;
@@ -5476,7 +5413,7 @@ window.CAMP_ON_SAVED=function(){
 /* ── 표 본문(행 + 빈 안내)만 그리는 조각 ────────────────────────────────────────
    ★★ **검색 입력이 이 조각만 다시 그리게 하려고 분리했다**(사용자 신고 실측 수정):
      종전엔 한 글자 칠 때마다 _finRenderList 가 헤더까지 통째로 innerHTML 교체 → 입력칸 DOM 이
-     매번 새로 만들어져 **한글 IME 조합이 끊겼다**('면' → 'ㅁㅕㄴ'). 헤더 숫자(진행 중·오늘 완료·
+     매번 새로 만들어져 **한글 IME 조합이 끊겼다**('면' → 'ㅁㅕㄴ'). 헤더 숫자(진행 중·
      스위치 건수)는 전부 `all` 기준이라 검색으로 바뀌지 않으므로, 검색은 본문만 갈아 끼우면 된다.
    ★ 두 호출부(전체 렌더·검색)가 **같은 조각**을 쓴다 — 사본을 두면 검색 결과 행만 열 구성이 어긋난다. */
 /* ★★ "이 작업이 무시트인가" 판정 **단일 출처** — 시트 제목 라벨 숨김·목록 4곳·
@@ -5888,25 +5825,21 @@ function _finBodyHtml(){
   const filt=fin?'':(STATE.finFilter||'');
   const body=rows.length?rows.map(t=>{
     const s=t.stats||{}, i=all.indexOf(t);
-    const td=isTodayDone(t);
     /* ★ 보관함에서는 「마감일 · 마감자」를 **상태 칸 안**으로 넣는다 — 숫자 4칸을 세우면서
        열 수를 그대로 두기 위해서다(v3 규율: 사람·모드마다 열 수가 달라지지 않는다). */
     const st=fin?`<span class="wbl-s fin">🏁 마감</span><span class="wbl-s-sub">${esc(_finDate(t.finishedAt)||'—')}${t.finishedBy?' · '+esc(t.finishedBy):''}</span>`
-      :(td?`<span class="wbl-s today">☑ 오늘 완료</span>`
-         :(isFinishCandidate(t)?`<span class="wbl-s cand" title="인원·제출·입금이 모두 채워졌습니다 — 잠시 후 마감 보관함으로 자동 이동합니다.">✓ 마감 후보</span>`:`<span class="wbl-s run">진행 중</span>`));
-    // v3(사용자 확정): 통합 "폴더/처리" 칸 폐지 → 작업표·저장폴더·모집공고·오늘완료·마감 **독립 열**.
+      :(isFinishCandidate(t)?`<span class="wbl-s cand" title="인원·제출·입금이 모두 채워졌습니다 — 잠시 후 마감 보관함으로 자동 이동합니다.">✓ 마감 후보</span>`:`<span class="wbl-s run">진행 중</span>`);
+    // v3(사용자 확정): 통합 "폴더/처리" 칸 폐지 → 작업표·저장폴더·모집공고·마감 **독립 열**.
     //   열 정렬은 표 구조가 보장한다. 열람전용·보관함도 열 수는 같다(빈 칸 유지 — 사람마다 열이 달라지면 눈이 헤맨다).
     // ★ 인덱스만 넘긴다(위 _FIN 주석) — 시트에서 온 이름을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다.
     const tdOpen=`<td class="wbl-c wbl-btncol" data-label="작업표"><button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">${fin?'열람':'열기'}</button></td>`;
     // [🔗] — 그 줄 작업의 공유 주소를 복사한다(작업보드를 열지 않고 목록에서 바로).
     //   ★ 마감 보관함에도 같은 칸을 둔다 — 열 수가 모드마다 달라지면 눈이 열을 다시 찾는다(v3 규율).
     const tdLink=`<td class="wbl-c wbl-btncol" data-label="공유"><button class="wbl-b" onclick="event.stopPropagation();copyTaskLinkFromHome(${i})" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 작업보드로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크</button></td>`;
-    const tdToday=`<td class="wbl-c wbl-btncol" data-label="오늘완료">${(fin||!canEdit)?''
-      :`<button class="wbl-b today${td?' on':''}" onclick="toggleTodayDone(${i},event)" title="${td?'오늘 완료됨 — 다시 누르면 해제됩니다':'오늘 할 일을 끝냈다면 클릭 — 다음날 자동으로 풀립니다'}">☑ 오늘 완료</button>`}</td>`;
     const tdFinish=`<td class="wbl-c wbl-btncol" data-label="${fin?'복귀':'마감'}">${!canEdit?''
       :(fin?`<button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
-    return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(_tabTip(t))}">
+    return `<tr class="${fin?'fin':''}" onclick="openTaskFromHome(${i})" title="${esc(_tabTip(t))}">
       <td data-label="작업명"><div class="wbl-nm">${esc(_tabLabel(t))}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div><button type="button" class="wbl-mobile-toggle" aria-expanded="false" aria-label="작업 도구 펼치기" onclick="_mobileToggleTaskRow(this,event)">⌄</button></td>
       ${tdOpen}${tdLink}
       <td data-label="담당">${esc((s.manager)||'—')}</td>
@@ -5914,7 +5847,7 @@ function _finBodyHtml(){
       <td data-label="상태">${st}</td>
       <td class="wbl-c wbl-btncol" data-label="저장폴더">${_folBtnsHtml(t,i)}</td>
       <td class="wbl-c wbl-btncol" data-label="모집공고">${_campBtnHtml(t,i)}</td>
-      ${tdToday}${tdFinish}${_taskMoreCell(i)}</tr>`;
+      ${tdFinish}${_taskMoreCell(i)}</tr>`;
   }).join(''):'';
   // ★ 보관함에는 사람이 안 눌러도 들어온 작업이 섞인다 — 조용히 옮기지 않고 **왜 여기 있는지** 말한다.
   //   되돌리는 길([↩ 진행중으로 복귀])과 "되돌리면 다시 안 넘어온다"는 사실을 함께 적는다.
@@ -5924,7 +5857,7 @@ function _finBodyHtml(){
     ? `<div class="wbl-facts" style="margin:0;border-radius:0;border-left:0;border-right:0;border-top:0">인원·제출·입금이 모두 채워진 작업은 <b>자동으로 이곳으로 옮겨집니다</b>(마감자 칸에 <b>자동 마감</b>으로 표시). 아직 끝난 게 아니면 <b>[↩ 진행중으로 복귀]</b>를 누르세요 — 되돌린 작업은 다시 자동으로 넘어오지 않습니다.</div>`
     : '';
   return rows.length?`${autoNote}<div class="wbl-tw"><table class="wbl-t"><thead><tr>
-      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
+      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
     : `${autoNote}<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }
@@ -5934,8 +5867,6 @@ function _finRenderList(){
   const fin=STATE.finTab==='fin';
   const all=STATE.tabs||[];
   const nRun=all.filter(t=>!isFinished(t)).length, nFin=all.filter(t=>isFinished(t)).length;
-  // 오늘 완료 = 팀 진행률(전사 공통). 퇴근 전 "n / n" 을 만드는 것이 하루의 목표가 된다.
-  const nToday=all.filter(t=>!isFinished(t)&&isTodayDone(t)).length;
   // ★ 히어로 "진행 중 작업"도 **여기서만** 쓴다 — 두 곳에서 세면 마감 직후 히어로는 3, 목록은 2로 갈린다
   //   (실제로 브라우저 검증이 이 어긋남을 잡았다). 같은 재료·한 명의 writer = 구조적으로 일치.
   const hero=document.getElementById('hmStTabs'); if(hero) hero.textContent=String(nRun);
@@ -5951,7 +5882,6 @@ function _finRenderList(){
         <button class="${fin?'on':''}" onclick="_finPickTab('fin')">마감 보관함 ${nFin}</button>
       </span>
       ${fin?'':_finSwitchHtml(all)}
-      ${fin?'':`<span class="wbl-today" title="오늘 할 일을 끝낸 작업 수 — 다음날 자동으로 초기화됩니다">오늘 완료 ${nToday} / ${nRun}</span>`}
       ${mgrs.length?`<button class="wbl-chip${STATE.finMgr?'':' on'}" onclick="_finPickMgr('')">전체</button>`+
         mgrs.map(m=>`<button class="wbl-chip${STATE.finMgr===m?' on':''}" onclick="_finPickMgr(this.dataset.m)" data-m="${esc(m)}">${esc(m)}</button>`).join(''):''}
       <input class="wbl-q" id="wblQ" placeholder="🔎 작업명 · 업체 · 담당자 검색" value="${esc(STATE.finQ||'')}" oninput="_finSearch(this.value)">
@@ -6130,7 +6060,6 @@ function _finNoticeHtml(){
   if(STATE.finUnavailable) n.push('⚠ 마감 상태를 불러오지 못했습니다 — 마감한 작업이 진행 중으로 보일 수 있습니다(새로고침해 주세요).');
   if(STATE.statsUnavailable) n.push('⚠ 인원·제출·입금 수치를 불러오지 못했습니다 — 표의 숫자와 마감 후보 배지가 비어 있습니다.');
   if(STATE.campsUnavailable) n.push('⚠ 연결된 모집공고를 불러오지 못했습니다 — [공고] 버튼이 잠시 비활성입니다(공고가 없다는 뜻이 아닙니다).');
-  if(STATE.dailyUnavailable) n.push('⚠ 오늘 완료 표시를 불러오지 못했습니다 — 체크한 작업이 미완료로 보일 수 있습니다(새로고침해 주세요).');
   if(STATE.finTruncated) n.push('⚠ 작업이 많아 목록 일부만 표시됩니다 — 마감한 작업을 정리하면 더 보입니다.');
   if(STATE.worktabsUnavailable) n.push('⚠ 열린 작업 줄을 불러오지 못했습니다 — 이 기기에 남아 있던 목록을 그대로 쓰고 있습니다(새로고침해 주세요).');
   return n.length?`<div class="wbl-warn" style="margin:0;border-radius:0;border-left:0;border-right:0">${n.map(esc).join('<br>')}</div>`:'';
@@ -6141,7 +6070,7 @@ function _finPickMgr(m){ STATE.finMgr=m; _finRenderList(); }
    원인: 종전엔 입력 한 글자마다 _finRenderList 가 헤더까지 innerHTML 로 통째 교체해 **입력칸 DOM 이
    매번 새로 만들어졌고**, 그 순간 브라우저의 IME 조합 상태가 파괴되어 자모가 낱개로 확정됐다.
    (재생성 뒤의 focus/setSelectionRange 복구도 조합을 되살리지 못한다 — 그래서 함께 제거했다.)
-   ★ 헤더 숫자(진행 중·오늘 완료·스위치 건수·담당자 칩)는 전부 `all` 기준이라 검색으로 바뀌지 않는다
+   ★ 헤더 숫자(진행 중·스위치 건수·담당자 칩)는 전부 `all` 기준이라 검색으로 바뀌지 않는다
      → 본문만 갈아 끼워도 화면이 어긋나지 않는다. 본문이 아직 없으면(마운트 직후) 전체 렌더로 폴백. */
 /* ★★ 검색 중에는 본문 **바깥 높이**를 붙잡아 둔다(사용자 신고 실측 2026-09-21 —
      "검색하는 과정에서 화면이 위아래로 흔들린다"). 한글은 조합 중간값(`ㅁ`·`모ㅈ`)에서 결과가
@@ -6276,18 +6205,16 @@ function _renderWorktabs(){
   const cur=STATE.cur, now=_wtList();
   const label='<span class="wb-tier-label">&#50676;&#47536;&#53485;</span>';
   if(!now.length){ host.innerHTML=label+`<button class="wt0add" onclick="switchView('home')" title="홈 작업 목록에서 작업을 고르세요">＋ 작업 열기</button>`; _syncWbScrollMeter(host); return; }
-  // 오늘 완료한 탭은 **뒤로** 민다(시트에서 탭을 손으로 뒤로 끌던 그 동작을 시스템이 대신한다).
-  const known=now.map(k=>({k,t:_wtTabFor(k)}));
-  const ordered=[...known.filter(x=>!isTodayDone(x.t)), ...known.filter(x=>isTodayDone(x.t))];
-  host.innerHTML = label + ordered.map(({k,t})=>{
-    const on=!!(cur&&t&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName), td=isTodayDone(t);
+  host.innerHTML = label + now.map(k=>{
+    const t=_wtTabFor(k);
+    const on=!!(cur&&t&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName);
     const nm=t?t.tabName:k.split('␟')[1]||k;
     // ★ onclick 에 시트에서 온 이름을 넣지 않는다 — data 속성으로 넘긴다(M1 에서 실측한 따옴표 탈출 사고).
-    return `<div class="wt0${on?' on':''}${td?' td':''}" draggable="true" data-k="${esc(k)}"
-      onclick="wtPick(this.dataset.k)" title="${esc(nm)}${td?' · 오늘 완료':''}"
+    return `<div class="wt0${on?' on':''}" draggable="true" data-k="${esc(k)}"
+      onclick="wtPick(this.dataset.k)" title="${esc(nm)}"
       ondragstart="wtDragStart(event,this.dataset.k)" ondragover="wtDragOver(event,this.dataset.k)"
       ondragleave="wtDragLeave(event)" ondrop="wtDrop(event,this.dataset.k)" ondragend="wtDragEnd()"
-      >${td?'<span class="ck">☑</span>':''}<span class="nm">${esc(nm)}</span><span class="x" data-k="${esc(k)}" title="닫기(작업은 그대로 남습니다)" onclick="wtClose(event,this.dataset.k)">×</span></div>`;
+      ><span class="nm">${esc(nm)}</span><span class="x" data-k="${esc(k)}" title="닫기(작업은 그대로 남습니다)" onclick="wtClose(event,this.dataset.k)">×</span></div>`;
     // ★ data-k 를 × 에도 붙인다 — 부모(.wt0)에만 두면 × 핸들러의 this.dataset.k 가 undefined 라 닫기가 죽는다
     //   (브라우저 검증이 잡은 실측 버그). onclick 문자열에 시트에서 온 이름을 넣지 않는 규율은 그대로.
   }).join('')
@@ -12064,7 +11991,7 @@ async function _pmLoad(force){
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
   STATE.pmFinEx = t.finishedExcluded||null; STATE.pmFinUnknown = !!t.finishedUnavailable;
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
-  // 새 결과 파일은 result-apply 경로에서 즉시 기록하므로, 이 경로는 기존 실패 이력에만 해당한다.
+  // 새 결과 파일은 result-auto-apply(안에서 같은 반영 계산) 경로에서 즉시 기록하므로, 이 경로는 기록 실패 이력에만 해당한다.
   const legacyFailed = STATE.pmBatches.filter(batch => batch.status === 'applied'
     && batch.resultUploadId && Number(batch.boardFailedCount) > 0);
   const compactDepositFormat = STATE.pmBatches.filter(batch => batch.status === 'applied'
@@ -12515,14 +12442,6 @@ async function _pmDepositBackfill(i){
   if(r.skipped) msg.push(`제외 ${r.skipped}건`);
   toast(msg.join(' · '));
   await _pmLoad(true);
-}
-function _pmBoardApplyText(board){
-  const b=board||{};
-  const parts=[`작업보드 입금일 ${b.recorded||0}건 기록`];
-  if(b.queued) parts.push(`${b.queued}건 기록 대기`);
-  if(b.skipped) parts.push(`${b.skipped}건 제외`);
-  if(b.failed) parts.push(`${b.failed}건 실패`);
-  return parts.join(' · ');
 }
 function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
@@ -13331,42 +13250,6 @@ function _pmResultModal(){
 function _pmResultClose(){
   const el = document.getElementById('pmResultOv'); if(el) el.remove();
   STATE.pmResult = null;
-}
-
-async function _pmResultApply(){
-  const R = STATE.pmResult; if(!R) return;
-  const s = R.preview.summary || {};
-  if(!confirm(`#${R.batch.seq} 회차에 이체결과를 반영합니다.\n\n· 입금완료 기록 ${s.success||0}건\n· 이체실패 처리 ${s.failed||0}건 (결과없음 ${s.notInFile||0}건 포함 · 다음 회차에 다시 담깁니다)\n\n입금완료로 기록된 건은 되돌릴 수 없습니다.`)) return;
-  const nf = document.getElementById('pmNotifyFail');
-  const notifyFailed = !!(nf && nf.checked);
-  const btn = document.getElementById('pmApplyBtn');
-  if(btn){ btn.disabled = true; btn.textContent = '반영 중…'; }
-  const r = await api('/api/trackb/payment/batch/'+R.batch.id+'/result-apply',
-    { method:'POST', body: JSON.stringify({ confirm:true, notifyFailed, uploadId:R.preview.uploadId||'', fileName:R.file.name, base64:R.file.base64||'' }) });
-  if(!r || !r.ok){
-    toast((r&&r.error)||'반영 실패');
-    if(btn){ btn.disabled = false; btn.textContent = '이대로 반영'; }
-    return;
-  }
-  _pmResultClose();
-  /* ★ 안내 전송 결과도 말한다 — 보냈다고 했는데 조용히 0건이면 담당자가 알 방법이 없다. */
-  const notice = r.notifyTargets
-    ? ` · 안내 ${r.notified||0}/${r.notifyTargets}건`
-    : '';
-  const boardText = r.applied ? ` · ${_pmBoardApplyText(r.board)}` : '';
-  toast(`반영 완료 — 입금 ${r.applied}건 · 실패 ${r.failed}건${r.notInFile?` · 결과없음 ${r.notInFile}건(대기 유지)`:''}${boardText}${notice}`);
-  await _pmLoad(true);
-}
-
-async function _pmApplySavedResult(i){
-  const b = (STATE.pmBatches||[])[i];
-  if(!b || !b.resultCanApply || !b.resultUploadId){ toast('반영할 저장 결과 파일이 없습니다.'); return; }
-  if(!confirm(`#${b.seq} 회차의 저장된 이체결과를 반영합니다.\n\n원본 결과 파일을 다시 선택하지 않고 처리합니다. 입금완료 기록은 되돌릴 수 없습니다.`)) return;
-  const r = await api('/api/trackb/payment/batch/'+b.id+'/result-apply',
-    { method:'POST', body: JSON.stringify({ confirm:true, uploadId:b.resultUploadId, notifyFailed:true }) });
-  if(!r || !r.ok){ toast((r&&r.error)||'반영 실패'); return; }
-  toast(`반영 완료 · 입금 ${r.applied}건 · 실패 ${r.failed}건${r.applied?` · ${_pmBoardApplyText(r.board)}`:''}`);
-  await _pmLoad(true);
 }
 
 async function _pmMarkApplied(i){

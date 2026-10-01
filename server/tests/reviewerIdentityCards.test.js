@@ -82,28 +82,28 @@ const OWNER = {
     // 조각 4(결정 179): 담당자 합치기 서비스도 카드 표를 다룬다 — 카드 표를 만지는 곳은 이 두 서비스뿐.
     assert.deepStrictEqual(hits.sort(), ['services/reviewerIdentityCards.service.js', 'services/reviewerIdentityMerge.service.js']);
   });
-  await test('미리보기·적용 라우트는 관리자 전용이다', async () => {
+  // 조각 1 의 일괄 카드 만들기(preview/apply)는 전원 카드 완료로 2026-09-30 제거(결정 186 70번) —
+  //   카드 생성·갱신은 reconcile(10분 cron + 수동 입구)이 같은 syncOwnerCards 로 한다.
+  await test('맞추기 라우트는 관리자 전용이고, 일괄 만들기 입구는 제거 상태다', async () => {
     const routes = fs.readFileSync(path.resolve(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
-    assert.match(routes, /router\.get\('\/identity-cards\/preview', authMiddleware, adminOrMasterMiddleware/);
-    assert.match(routes, /router\.post\('\/identity-cards\/apply', authMiddleware, adminOrMasterMiddleware/);
-    assert.match(routes, /confirm: b\.confirm === true/);
-  });
-  await test('confirm 없이 적용하면 쓰기 없이 거절한다', async () => {
-    let queried = false;
-    const out = await svc.applyCards({ db: { query: async () => { queried = true; return { rows: [] }; } } });
-    assert.strictEqual(out.code, 'confirm_required');
-    assert.strictEqual(queried, false);
+    assert.match(routes, /router\.get\('\/identity-cards\/drift', authMiddleware, adminOrMasterMiddleware/);
+    assert.match(routes, /router\.post\('\/identity-cards\/reconcile', authMiddleware, adminOrMasterMiddleware/);
+    assert.doesNotMatch(routes, /\/identity-cards\/(preview|apply)'/);
+    assert.strictEqual(svc.applyCards, undefined);
+    assert.strictEqual(svc.previewCards, undefined);
   });
 
   await test('카드 표가 없으면(마이그레이션 미적용) 성공으로 꾸미지 않고 멈춘다', async () => {
     let released = 0;
     const client = { query: async (sql) => {
-      if (/FOR UPDATE/.test(sql)) return { rows: [{ ...OWNER }] };
+      if (/FOR NO KEY UPDATE/.test(sql)) return { rows: [{ ...OWNER }] };
       if (/reviewer_identity_cards/.test(sql)) { const e = new Error('relation does not exist'); e.code = '42P01'; throw e; }
       return { rows: [] };
     }, release: () => { released++; } };
-    const db = { query: async () => ({ rows: [{ id: OWNER.id }] }), connect: async () => client };
-    await assert.rejects(svc.applyCards({ db, confirm: true }), (e) => e.code === '42P01');
+    // 전수 조회의 카드 표는 비어 있다고 답해 OWNER 가 어긋난 것으로 잡히게 한 뒤, 소유자 트랜잭션 안에서 42P01
+    const db = { query: async (sql) => ({ rows: /FROM reviewers/.test(sql) && !/owner_reviewer_id/.test(sql) ? [{ ...OWNER }] : [] }),
+      connect: async () => client };
+    await assert.rejects(svc.reconcileCards({ db, dryRun: false }), (e) => e.code === '42P01');
     assert.strictEqual(released, 1, '커넥션은 반납한다');
   });
 
@@ -135,27 +135,21 @@ const OWNER = {
     await db.query(migration);
     await db.query(migration);
   });
-  await test('미리보기는 쓰지 않고 수를 센다', async () => {
-    const p = await svc.previewCards({ db });
+  await test('어긋남 확인(dryRun)은 쓰지 않고 어긋난 리뷰어 수만 센다', async () => {
+    const d = await svc.reconcileCards({ db, dryRun: true });
     assert.strictEqual((await db.query('SELECT COUNT(*)::int n FROM reviewer_identity_cards')).rows[0].n, 0);
-    assert.strictEqual(p.summary.cards, 6);
-    assert.strictEqual(p.summary.exactDuplicatesCollapsed, 1);
-    assert.strictEqual(p.summary.sameNameDiffPhoneOwners, 1);
-    assert.strictEqual(p.summary.sharedPhoneFamilyOwners, 1);
-    assert.strictEqual(p.summary.crossOwnerPhones, 1, '010-3333-5678 은 두 소유자 밑에 있다');
-    assert.strictEqual(p.summary.skippedEntries, 1);
+    assert.strictEqual(d.drifted, 2);
   });
-  await test('적용하면 카드가 생기고, 다시 돌려도 늘지 않으며, 옛 목록은 그대로다', async () => {
-    const a = await svc.applyCards({ db, confirm: true });
+  await test('맞추면 카드가 생기고, 다시 돌려도 늘지 않으며, 옛 목록은 그대로다', async () => {
+    const a = await svc.reconcileCards({ db, dryRun: false });
     assert.strictEqual(a.inserted, 6);
     assert.deepStrictEqual(a.failed, []);
-    const b = await svc.applyCards({ db, confirm: true });
+    const b = await svc.reconcileCards({ db, dryRun: false });
     assert.strictEqual(b.inserted, 0);
-    assert.strictEqual(b.filled, 0);
+    assert.strictEqual(b.updated + b.reactivated, 0);
     assert.strictEqual((await db.query('SELECT COUNT(*)::int n FROM reviewer_identity_cards')).rows[0].n, 6);
     assert.deepStrictEqual((await db.query('SELECT sub_accounts FROM reviewers ORDER BY id')).rows, before);
-    const p = await svc.previewCards({ db });
-    assert.strictEqual(p.summary.ownersAlreadyCarded, 2);
+    assert.strictEqual((await svc.reconcileCards({ db, dryRun: true })).drifted, 0);
   });
   // ★ 조각 2-1(결정 기록 176): 카드는 JSON 의 거울 — 값이 바뀌면 덮는다(조각 1 의 "빈 칸만 채움"을 대체).
   await test('목록에 명의가 늘거나 값이 바뀌면 카드도 그대로 따라간다', async () => {
@@ -163,9 +157,9 @@ const OWNER = {
     subs[0].bankName = '우리'; subs[0].address = '바뀐 주소';
     subs.push({ name: '정새명', phone: '010-7777-8888' });
     await db.query('UPDATE reviewers SET sub_accounts = $2 WHERE id = $1', [OWNER.id, JSON.stringify(subs)]);
-    const r = await svc.applyCards({ db, confirm: true });
+    const r = await svc.reconcileCards({ db, dryRun: false });
     assert.strictEqual(r.inserted, 1);
-    assert.strictEqual(r.filled, 1);
+    assert.strictEqual(r.updated + r.reactivated, 1);
     const lee = (await db.query(`SELECT address, bank_name FROM reviewer_identity_cards WHERE name = '이영희'`)).rows[0];
     assert.deepStrictEqual(lee, { address: '바뀐 주소', bank_name: '우리' });
   });
@@ -182,10 +176,6 @@ const OWNER = {
     assert.ok(extra.id);
     await db.query('DELETE FROM reviewers WHERE id = $1', [OTHER.id]);
     assert.strictEqual((await db.query('SELECT COUNT(*)::int n FROM reviewer_identity_cards WHERE owner_reviewer_id = $1', [OTHER.id])).rows[0].n, 0);
-  });
-  await test('잘못된 afterId 는 쓰기 없이 거절한다', async () => {
-    const out = await svc.applyCards({ db, confirm: true, afterId: 'x' });
-    assert.strictEqual(out.code, 'bad_after_id');
   });
 
   await db.end();

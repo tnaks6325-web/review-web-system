@@ -106,9 +106,6 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
       const stats = req.query.stats === '1' ? await svc.tabStatsMap() : null;
       // ★★ 조회 실패를 **응답에 실어** 프론트가 기존 주석을 덮지 않게 한다 — 빈 맵만 주면 프론트가
       //   "아무것도 마감 안 됨"으로 읽어 **마감 작업 전부가 작업보드로 되살아나고 보관함이 빈다**(무신호).
-      // 오늘 완료(전사 공통, migration 089) — 마감과 **다른 상태**다. 마감은 보드에서 빼고,
-      //   오늘 완료는 뒤로 밀고 회색으로만 표시한다(다음날 자동 해제).
-      const daily = await svc.dailyDoneMap();
       // 연결된 모집공고 주석([공고] 버튼 재료) — 홈 작업 목록 전용(stats=1). 실패해도 목록은 뜬다.
       //   ★ 조회 실패를 빈 맵으로 접으면 화면이 "공고 없음"으로 읽어 **이미 있는 공고를 또 발행**한다.
       //   ★ fresh=1 = 공고를 방금 저장한 직후의 재조회(30초 캐시를 건너뛴다). 없으면 발행하고도
@@ -117,18 +114,11 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
       if (!fin.ok) out.finishedUnavailable = true;
       if (stats && !stats.ok) out.statsUnavailable = true;
       if (camps && !camps.ok) out.campaignsUnavailable = true;
-      if (!daily.ok) out.dailyUnavailable = true;
-      out.kstDate = daily.date;          // 화면이 "오늘"의 기준을 서버 시각으로 잡게(클라 시계 불신)
       for (const t of tabs) {
         // 이름 우선 → gid 폴백(운영 중 탭 리네임으로 마감이 조용히 풀리는 것 방지)
         const g = String(t.tabGid == null ? '' : t.tabGid).trim();
         const f = fin.map[`${t.sheetId}\t${t.tabName}`] || (g ? fin.map[`${t.sheetId}\tgid:${g}`] : null);
         if (f) { t.finished = true; t.finishedAt = f.finishedAt; t.finishedBy = f.finishedBy; }
-        // ★ 오늘 완료는 **이름으로만** 찾는다(마감과 달리 gid 폴백이 없다) — 의도된 비대칭:
-        //   `trackb_tab_daily_done` 에는 tab_gid 컬럼이 없고, 이 상태는 **하루짜리**라 리네임으로 풀려도
-        //   다음날 어차피 초기화된다. 마감은 영구라 리네임 한 번에 보관함에서 사라지면 피해가 크다.
-        const d = daily.map[`${t.sheetId}\t${t.tabName}`];
-        if (d) { t.todayDone = true; t.todayDoneBy = d.doneBy; }
         // ★ stats 맵은 전 탭 무스코프다 — 응답엔 **이 루프로 걸러진 탭의 값만** 실린다(맵 자체 전달 금지).
         if (stats && stats.map[`${t.sheetId}\t${t.tabName}`]) t.stats = stats.map[`${t.sheetId}\t${t.tabName}`];
         // ★ 공고 주석도 **이 루프로 걸러진 탭의 값만** 실린다(맵 자체 전달 금지 — stats 와 같은 규율).
@@ -283,20 +273,6 @@ router.post('/workdesk/worktabs', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── 오늘 완료 토글(전사 공통) — 마감과 같은 스코프 게이트, 검수 확인은 없다(가벼운 토글) ──
-router.post('/workdesk/tab-daily-done', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, done } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const scope = await _ensureEditScope(req, sheetId, tabName);
-    if (!scope.ok) return res.status(scope.code || 403).json({ ok: false, error: scope.error });
-    // 해제는 명시적으로만(마감 라우트와 같은 규율 — 'false'·0 을 완료로 오해하지 않는다)
-    const wantDone = !(done === false || done === 'false' || done === 0 || done === '0');
-    const out = await svc.setTabDailyDone({ sheetId, tabName, done: wantDone, by: _by(req) });
-    res.status(out.ok ? 200 : 400).json(out);
-  } catch (err) { next(err); }
-});
-
 // ── 작업 마감/복귀(전사 공통) — master/admin 전체 · staff 담당 탭만 · advertiser 차단 ──
 //   ★ finish=true 는 body.inspected(리뷰폴더 마감자료 검수 확인) 없이는 서비스가 거부한다 —
 //     확인창 체크를 우회한 요청을 서버가 막는다(프론트만 믿지 않는다).
@@ -374,28 +350,10 @@ router.get('/overview', authMiddleware, internalMiddleware, async (req, res, nex
     res.json({ ok: true, items, coverage });
   } catch (err) { next(err); }
 });
-// ── 명의 카드(2단계 조각 1 · migration 166 · 결정 기록 175) — adminOrMaster ──
-//   리뷰어 명의(본인·타계정)를 고유 번호 카드로 옮긴다. 이 조각에서는 아무도 카드를 읽지 않는다.
-//   미리보기 = 쓰기 0 / 적용 = confirm:true 필수 · 소유자마다 한 트랜잭션 · 여러 번 돌려도 결과 동일.
+// ── 명의 카드(migration 166 · 결정 기록 175~181) — adminOrMaster ──
+//   (조각 1 의 일괄 카드 만들기 preview/apply 는 전원 카드 완료(3,365/3,365)로 2026-09-30 제거 — 결정 186 70번.
+//    새 리뷰어·바뀐 명의는 아래 reconcile 이 10분 cron 으로 맞춘다.)
 const identityCards = require('../services/reviewerIdentityCards.service');
-router.get('/identity-cards/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await identityCards.previewCards()); } catch (err) { next(err); }
-});
-router.post('/identity-cards/apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    const out = await identityCards.applyCards({
-      confirm: b.confirm === true, limit: b.limit, afterId: b.afterId || null,
-      by: (req.admin && req.admin.name) || '',
-    });
-    res.status(out.ok === false ? 400 : 200).json(out);
-  } catch (err) {
-    if (err && err.code === '42P01') {
-      return res.json({ ok: false, code: 'not_ready', error: '명의 카드 표(migration 166)가 아직 적용되지 않았습니다 — 배포 완료 후 다시 시도해주세요.' });
-    }
-    next(err);
-  }
-});
 // 조각 2-1: 카드 ↔ 리뷰어 정보(sub_accounts) 대조. drift = 쓰기 0(달라진 리뷰어 수만), reconcile = confirm:true 필수.
 router.get('/identity-cards/drift', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await identityCards.reconcileCards({ dryRun: true })); } catch (err) {
@@ -3484,14 +3442,6 @@ router.get('/payment/batches', authMiddleware, adminOrMasterMiddleware, async (r
   try { res.json({ ok: true, items: await paymentSvc.listBatches(parseInt(req.query.limit, 10) || 50) }); }
   catch (err) { next(err); }
 });
-router.get('/payment/batch/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const out = await paymentSvc.getBatch(req.params.id);
-    if (!out) return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
-    res.json({ ok: true, ...out });
-  } catch (err) { next(err); }
-});
-
 // 은행 서식 파일 — 재다운로드도 이력에 남는다(사용자 확정 규칙)
 router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   let client;
@@ -3629,8 +3579,10 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
 });
 
 /* ── M2: 이체결과 파일 반영 ─────────────────────────────────
-   ★ 미리보기(result-preview)는 **쓰기 0** — 사람이 확인 화면을 본 뒤에만 반영한다.
-   ★ 반영(result-apply)은 서버가 **파일을 다시 해석·재매칭**한다(화면이 보낸 목록 불신).
+   ★ 반영 입구는 result-auto-apply 하나 — 서버가 **파일을 다시 해석·재매칭**하고(화면이 보낸 목록 불신)
+     승인된 자동 반영 조건·중복 파일 가드를 통과할 때만 입금 상태를 바꾼다. GET result-preview 는 저장된
+     마스킹 미리보기 조회(쓰기 0). 옛 수동 입구(POST result-preview·result-apply·GET batch/:id)는
+     부르는 화면이 없어 2026-09-30 코드 다이어트(결정 186 · 14번-①)로 제거 — 계산 함수는 그대로다.
    ★ 42P01(migration 100 미적용) = `not_ready` 로 사유를 말한다(마스킹된 200 방지 — 088 규율). */
 const paymentResultSvc = require('../services/paymentResult.service');
 const manualDepositRepairSvc = require('../services/manualDepositRepair.service');
@@ -3646,15 +3598,6 @@ function _resultErr(err, res, next) {
   }
   return next(err);
 }
-
-router.post('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    res.json(await paymentResultSvc.previewResultFile({
-      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
-    }));
-  } catch (err) { _resultErr(err, res, next); }
-});
 
 // 결과 원문을 다시 열지 않고, 업로드 당시 저장한 마스킹 미리보기만 확인한다.
 // The server re-parses and re-matches the uploaded file.  Only the approved
@@ -3738,21 +3681,6 @@ router.post('/payment/batch/:id/amount-mismatch-reconcile', authMiddleware, admi
     res.json(await paymentResultSvc.reconcileAmountMismatch({
       batchId: req.params.id, uploadId: b.uploadId, itemId: b.itemId,
       resultSeq: b.resultSeq, note: b.note, by: _by(req),
-    }));
-  } catch (err) { _resultErr(err, res, next); }
-});
-
-router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    // ★ 사람이 확인 화면에서 누른 것만 반영한다(빠뜨리면 업로드 즉시 입금 기록이 되어 되돌릴 수 없다).
-    if (b.confirm !== true) {
-      return res.status(400).json({ ok: false, code: 'need_confirm', error: '확인 화면에서 [이대로 반영]을 눌러 주세요.' });
-    }
-    res.json(await paymentResultSvc.applyResultFile({
-      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, uploadId: b.uploadId, by: _by(req),
-      // ★ 기본은 보냄 — 화면에서 명시적으로 끈 경우(`false`)만 안 보낸다(검수 반려 팝업과 같은 규율).
-      notifyFailed: b.notifyFailed !== false,
     }));
   } catch (err) { _resultErr(err, res, next); }
 });

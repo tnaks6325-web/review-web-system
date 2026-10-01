@@ -83,55 +83,6 @@ function buildCardsFromReviewer(reviewer) {
   return { cards, issues };
 }
 
-async function _allReviewers(db) {
-  const { rows } = await db.query(
-    `SELECT id, name, phone, address, bank_name, bank_account, account_holder, shopping_id, income_type, sub_accounts
-       FROM reviewers ORDER BY registered_at NULLS LAST, id`);
-  return rows;
-}
-
-/** 미리보기 — 쓰기 0. 카드 몇 장이 생기고 사람 확인이 몇 건인지 센다. */
-async function previewCards({ db = pool } = {}) {
-  const reviewers = await _allReviewers(db);
-  let carded = new Set();
-  try {
-    const { rows } = await db.query(`SELECT DISTINCT owner_reviewer_id FROM reviewer_identity_cards WHERE status = 'active'`);
-    carded = new Set(rows.map((r) => String(r.owner_reviewer_id)));
-  } catch (err) {
-    if (err.code !== '42P01') throw err;
-  }
-  const summary = {
-    owners: reviewers.length, ownersAlreadyCarded: 0, cards: 0, selfCards: 0, subCards: 0,
-    exactDuplicatesCollapsed: 0, exactDuplicatesWithDifferentValues: 0,
-    sameNameDiffPhoneOwners: 0, sharedPhoneFamilyOwners: 0, crossOwnerPhones: 0, skippedEntries: 0,
-  };
-  const phoneOwners = new Map();
-  for (const r of reviewers) {
-    if (carded.has(String(r.id))) summary.ownersAlreadyCarded++;
-    const { cards, issues } = buildCardsFromReviewer(r);
-    summary.cards += cards.length;
-    summary.selfCards += cards.filter((c) => c.kind === 'self').length;
-    summary.subCards += cards.filter((c) => c.kind === 'sub').length;
-    for (const i of issues) {
-      if (i.code === 'exact_duplicate') {
-        summary.exactDuplicatesCollapsed++;
-        if (i.conflicts.length) summary.exactDuplicatesWithDifferentValues++;
-      } else if (i.code === 'missing_name' || i.code === 'missing_phone' || i.code === 'self_missing_name') {
-        summary.skippedEntries++;
-      }
-    }
-    if (issues.some((i) => i.code === 'same_name_diff_phone')) summary.sameNameDiffPhoneOwners++;
-    const p8s = cards.map((c) => c.phone8).filter(Boolean);
-    if (new Set(p8s).size < p8s.length) summary.sharedPhoneFamilyOwners++;
-    for (const p8 of new Set(p8s)) {
-      if (!phoneOwners.has(p8)) phoneOwners.set(p8, new Set());
-      phoneOwners.get(p8).add(String(r.id));
-    }
-  }
-  for (const owners of phoneOwners.values()) if (owners.size > 1) summary.crossOwnerPhones++;
-  return { ok: true, preview: true, summary };
-}
-
 // ── 조각 2-1: 카드 = sub_accounts(JSON)의 거울 ─────────────────────────────
 // JSON 이 진실원본이다(아직 아무도 카드를 읽지 않는다). 카드는 JSON 을 따라간다 — 값이 바뀌면 덮고,
 // 사라진 명의는 'removed', 돌아온 명의는 같은 카드를 되살린다(번호 유지).
@@ -305,45 +256,6 @@ async function reconcileCards({ db = pool, dryRun = true, by = '', lockTimeoutMs
   return out;
 }
 
-/** 적용 — confirm:true 일 때만 쓴다. 소유자마다 한 트랜잭션. 여러 번 돌려도 결과가 같다. */
-async function applyCards({ db = pool, confirm = false, limit = 500, afterId = null, by = '' } = {}) {
-  if (confirm !== true) return { ok: false, code: 'confirm_required', error: '미리보기를 확인한 뒤 confirm:true 로 적용하세요.' };
-  if (afterId != null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(afterId))) {
-    return { ok: false, code: 'bad_after_id', error: 'afterId 형식이 올바르지 않습니다.' };
-  }
-  const cap = Math.max(1, Math.min(Number(limit) || 500, 2000));
-  const { rows: ids } = await db.query(
-    `SELECT id FROM reviewers WHERE ($1::uuid IS NULL OR id > $1::uuid) ORDER BY id LIMIT $2`, [afterId, cap]);
-  const out = { ok: true, owners: 0, inserted: 0, filled: 0, failed: [], nextAfterId: null };
-  for (const { id } of ids) {
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN');
-      // 소유자 행을 잠가 그 사이 sub_accounts 가 바뀌지 않게 한다.
-      const { rows } = await client.query(
-        `SELECT id, name, phone, address, bank_name, bank_account, account_holder, shopping_id, income_type, sub_accounts
-           FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
-      if (rows.length) {
-        const r = await syncOwnerCards(client, rows[0], { source: 'backfill' });
-        out.inserted += r.inserted; out.filled += r.updated + r.reactivated;
-      }
-      await client.query('COMMIT');
-      out.owners++;
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-      // 표가 없으면(migration 166 미적용) 모든 소유자가 같은 이유로 실패한다 — 건별 실패로 삼키면
-      // ok:true + 다음 커서가 나가 백필 전체를 건너뛴 채 성공처럼 보인다(PR #1488 리뷰 P2). 멈추고 올린다.
-      if (err && err.code === '42P01') { client.release(); throw err; }
-      out.failed.push({ ownerId: id, code: err.code || '', error: String(err.message || err).slice(0, 200) });
-    }
-    client.release();
-    out.nextAfterId = id;
-  }
-  if (ids.length < cap) out.nextAfterId = null;
-  logger.info(`[identity-cards] apply by=${String(by).slice(0, 80)} owners=${out.owners} inserted=${out.inserted} filled=${out.filled} failed=${out.failed.length}`);
-  return out;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 조각 2-2 — 타계정 목록 쓰기 창구 하나 (결정 기록 177)
 // ★ 쓰는 곳 8곳이 각자 "읽기 → 고치기 → 통째로 저장"을 잠금 없이 해 왔다(동시 저장 한쪽 유실 ·
@@ -484,6 +396,6 @@ function mapSubsToCards(reviewer, cards) {
   return { byIndex, merged, misses };
 }
 
-module.exports = { buildCardsFromReviewer, previewCards, applyCards, syncOwnerCards, planOwnerSync, reconcileCards,
+module.exports = { buildCardsFromReviewer, syncOwnerCards, planOwnerSync, reconcileCards,
   findSubIndex, syncCardsAfterWrite, mutateSubAccountsInTx, mutateSubAccounts,
   cardKeysEnabled, loadActiveCards, mapSubsToCards, _test: { nameKey, phone8Of } };

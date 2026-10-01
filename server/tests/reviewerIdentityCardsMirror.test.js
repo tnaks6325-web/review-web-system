@@ -122,7 +122,13 @@ const opsOf = (ops) => ops.map((o) => `${o.op}:${o.id || (o.card && o.card.name 
   });
   await test('대조는 FOR NO KEY UPDATE + lock_timeout 으로 짧게 잠근다(자식 INSERT 를 막지 않는다)', async () => {
     const s = src('src/services/reviewerIdentityCards.service.js');
-    const body = s.slice(s.indexOf('async function reconcileCards'), s.indexOf('/** 적용 — confirm:true'));
+    // 끝 경계 = 바로 뒤 '조각 2-2' 구역 머리(종전 끝 표식 applyCards 는 2026-09-30 제거 — 결정 186 70번).
+    //   ★ 끝을 못 찾아 -1 이 되면 뒤의 mutateSubAccountsInTx 까지 긁어 FOR NO KEY UPDATE 가 거기서 잡혀
+    //     reconcile 쪽 잠금이 빠져도 통과한다 → 두 경계를 모두 단언한다.
+    const i0 = s.indexOf('async function reconcileCards'), i1 = s.indexOf('// 조각 2-2 — 타계정 목록 쓰기 창구 하나');
+    assert.ok(i0 >= 0 && i1 > i0, 'reconcileCards 구역 경계를 찾지 못했다');
+    const body = s.slice(i0, i1);
+    assert.ok(!/async function mutateSubAccountsInTx/.test(body), '구역이 다음 함수까지 번졌다');
     assert.match(body, /FOR NO KEY UPDATE/);
     assert.match(body, /set_config\('lock_timeout'/);
     assert.ok(!/FOR UPDATE`/.test(body.replace(/FOR NO KEY UPDATE/g, '')), '리뷰어 행을 FOR UPDATE 로 잠그지 않는다');
