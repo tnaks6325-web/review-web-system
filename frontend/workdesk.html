@@ -10028,10 +10028,26 @@ async function _msLoadShort(){
   /* 상품명 + 작업 이름을 함께 보낸다 — 상품명 칸이 시트 제목인 작업이 있어(실측 "…체험단 시트_2026") 작업 이름이 힌트가 된다 */
   const cd=(STATE.wd&&STATE.wd.condition)||{}, src=String(cd.productName||'').trim();
   const task=String(cd.workboardDisplayName||(STATE.cur&&(STATE.cur.displayName||STATE.cur.tabName))||'').trim();
-  try{
-    const d=await api('/api/trackb/workdesk/sms-product-name',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,productName:src,taskName:task})});
-    if(_MS&&d&&d.name){ _MS.shortName=d.name; _MS.shortSource=d.source; }
-  }catch(_){ /* 추천 실패 = 빈 자리로 둔다(문자 창을 막지 않는다) */ }
+  /* ★ 요청을 보낸 창(me)과 지금 창이 다르면 버린다 — 다른 작업 창에 이 작업 상품명이 들어가면 안 된다 */
+  const me=_MS;
+  /* 추천을 기다리되 오래 걸리면(5초) 문안 버튼을 먼저 연다 — 늦게 온 추천은 빈 자리(○○○○○)를 채운다 */
+  const t=setTimeout(()=>{ if(_MS===me){ me.shortDone=true; _msTplEnable(); } },5000);
+  let d=null;
+  try{ d=await api('/api/trackb/workdesk/sms-product-name',{method:'POST',body:JSON.stringify({sheetId:me.sheetId,tabName:me.tabName,productName:src,taskName:task})}); }
+  catch(_){ /* 추천 실패 = 빈 자리로 둔다(문자 창을 막지 않는다) */ }
+  clearTimeout(t);
+  if(_MS!==me) return;
+  if(d&&d.name){ me.shortName=d.name; me.shortSource=d.source;
+    const ta=document.getElementById('msText');
+    if(ta&&!me.confirming&&ta.value.includes(_MS_PH)){ const at=ta.value.indexOf(_MS_PH);
+      ta.value=ta.value.replace(_MS_PH,d.name); ta.setSelectionRange(at, at+d.name.length); _msPaintMeta(); } }
+  me.shortDone=true; _msTplEnable();
+}
+/* 문안 버튼 = 리뷰웹 주소(미리보기)와 추천(또는 5초 대기)이 둘 다 끝난 뒤에 연다 */
+function _msTplEnable(){
+  if(!_MS) return; const on=!!_MS.homeLink&&!!_MS.shortDone;
+  document.querySelectorAll('#msOv .mstpl button').forEach(b=>{ b.disabled=!on;
+    b.title=on?'':(_MS.items&&!_MS.homeLink?'리뷰웹 주소를 받지 못해 문안을 쓸 수 없습니다':'준비 중…'); });
 }
 const _MS_TPL=[
   { key:'r1', label:'1차', sub:'마감 7일 전', body:'리뷰 작성 기한이 7일 남았습니다.' },
@@ -10098,7 +10114,7 @@ async function _msLoad(){
   }catch(e){ if(_MS) _MS.err='받는 사람을 확인하지 못했습니다. '+(e.message||'네트워크 오류'); }
   if(!_MS) return;
   /* 문안 버튼은 리뷰웹 주소를 받은 뒤에만 연다(구버전 서버 = 주소 없음 → 계속 잠김) */
-  document.querySelectorAll('#msOv .mstpl button').forEach(b=>{ b.disabled=!_MS.homeLink; if(!_MS.homeLink) b.title='리뷰웹 주소를 받지 못해 문안을 쓸 수 없습니다'; });
+  _msTplEnable();
   _msPaintMeta(); _msPaintList(); _msPaintBtns(); _msPlace();
 }
 function _msOkItems(){
@@ -10128,8 +10144,8 @@ function _msPaintMeta(){
   const b=_msBytes(_msFull(ta.value)), link=_msHasLink(ta.value), ph=String(ta.value||'').includes(_MS_PH);
   const eb=document.getElementById('msBytes'), ek=document.getElementById('msKind');
   if(eb) eb.textContent=`${b.toLocaleString('ko-KR')}바이트 · ${b>2000?'너무 깁니다(2000바이트까지)':(b>90?'장문 문자':'단문 문자')}`;
-  const rec=!ph&&_MS.shortName&&_msTplProduct(ta.value)===_MS.shortName;
-  if(ek){ ek.textContent=ph?'○○○○○ 자리에 상품명을 넣어 주세요':(rec?(_MS.shortSource==='manual'?'지난번에 쓴 상품명 · 바꿔도 됩니다':'추천 상품명 · 바꿔도 됩니다'):(link?'리뷰웹 주소가 있어 안내 문구 생략':'안내 문구 포함')); ek.classList.toggle('mswhy',ph); }
+  const tp=_msTplProduct(ta.value), rec=!ph&&_MS.shortName&&tp===_MS.shortName, tlong=!ph&&tp&&_msBytes(tp)>12;
+  if(ek){ ek.textContent=ph?'○○○○○ 자리에 상품명을 넣어 주세요':tlong?'상품명이 한글 6자를 넘어 다음에 기억하지 않습니다':(rec?(_MS.shortSource==='manual'?'지난번에 쓴 상품명 · 바꿔도 됩니다':'추천 상품명 · 바꿔도 됩니다'):(link?'리뷰웹 주소가 있어 안내 문구 생략':'안내 문구 포함')); ek.classList.toggle('mswhy',ph); }
   const f=document.getElementById('msFoot');
   if(f){ f.innerHTML=''; if(_MS.footer&&!link){ const fb=document.createElement('b'); fb.textContent='끝에 자동으로 붙는 안내';
     f.appendChild(fb); f.appendChild(document.createTextNode(String(_MS.footer).trim())); } f.style.display=(_MS.footer&&!link)?'':'none'; }
@@ -10233,9 +10249,12 @@ async function _msSendConfirmed(){
   if(sent) toast(`${kind==='sms'?'문자':'알림톡'} ${sent}건을 보냈습니다`);
   /* 문안으로 보냈으면 그때 쓴 상품명을 이 작업의 이름으로 기억한다(다음에 그대로 채워진다). 실패는 조용히 무시 */
   if(sent&&kind==='sms'){ const p=_msTplProduct(text);
-    if(p&&p!==_MS_PH&&!(p===_MS.shortName&&_MS.shortSource==='manual')){
-      api('/api/trackb/workdesk/sms-product-name',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,name:p,save:true})})
-        .then(d=>{ if(_MS&&d&&d.ok){ _MS.shortName=d.name; _MS.shortSource='manual'; } }).catch(()=>{}); } }
+    /* ★ 추천을 그대로 쓴 경우는 저장하지 않는다(고친 것만 기억 — 상품명이 바뀌면 추천도 다시 만들어지게) */
+    const me=_MS;
+    if(p&&p!==_MS_PH&&p!==_MS.shortName&&_msBytes(p)<=12){
+      api('/api/trackb/workdesk/sms-product-name',{method:'POST',body:JSON.stringify({sheetId:me.sheetId,tabName:me.tabName,name:p,save:true})})
+        .then(d=>{ if(d&&d.ok){ if(_MS===me){ me.shortName=d.name; me.shortSource='manual'; } } else toast('고친 상품명을 기억하지 못했습니다'+(d&&d.error?' — '+d.error:'')); })
+        .catch(()=>toast('고친 상품명을 기억하지 못했습니다')); } }
 }
 /* ══ 💬 리뷰어에게 메시지 (우클릭 → 1:1 문의방을 관리자가 먼저 연다) ═══════════════
    종전에는 **리뷰어가 먼저 문의를 보내야만** 방이 생겼다. 이제 표에서 그 줄을 우클릭해

@@ -221,7 +221,12 @@ pool.query = async (sql, params) => {
     S._MS.homeHost = '';
     ok('주소 재료를 못 받으면(구버전 서버) 안내 문구가 붙는 것으로 센다', S.full('x review-web-system.pages.dev').includes('발신 전용'));
   }
-  ok('문안 버튼은 처음엔 잠겨 있고 미리보기를 받은 뒤 연다', /data-tpl="\$\{i\}" disabled/.test(wd) && /mstpl button'\)\.forEach\(b=>\{ b\.disabled=!_MS\.homeLink/.test(wd));
+  ok('문안 버튼은 처음엔 잠겨 있고 주소와 추천(또는 5초)을 받은 뒤 연다', /data-tpl="\$\{i\}" disabled/.test(wd)
+    && /const on=!!_MS\.homeLink&&!!_MS\.shortDone/.test(wd) && /setTimeout\(\(\)=>\{ if\(_MS===me\)\{ me\.shortDone=true/.test(wd));
+  ok('늦게 온 추천은 다른 작업 창에 들어가지 않는다', /const me=_MS;[\s\S]{0,600}if\(_MS!==me\) return;/.test(wd));
+  ok('늦게 온 추천이 빈 자리(○○○○○)를 채운다', /ta\.value\.includes\(_MS_PH\)\)\{ const at=ta\.value\.indexOf\(_MS_PH\);/.test(wd));
+  ok('추천을 그대로 보낸 경우는 저장하지 않는다(고친 것만 기억)', /p!==_MS\.shortName&&_msBytes\(p\)<=12/.test(wd));
+  ok('기억 실패는 조용히 버리지 않는다', /고친 상품명을 기억하지 못했습니다/.test(wd));
   ok('상품명 자리를 그대로 두면 보내기 버튼을 잠근다', /txt\.includes\(_MS_PH\)/.test(wd));
 
   console.log('\n▶ ⑤ 문안용 짧은 상품 이름(추천)');
@@ -239,7 +244,18 @@ pool.query = async (sql, params) => {
     ok('직원이 고친 이름 저장', (await svc.saveShortName({ ...A, name: '유산균젤리', by: 'x' })).ok);
     r = await svc.productShortName({ ...A, productName: '아무거나', suggest: ai });
     ok('직원이 정한 이름이 AI 보다 우선', r.name === '유산균젤리' && r.source === 'manual' && asked === 2);
+    ok('원문 조각으로 된 추천만 인정(예시를 되뇌거나 지어낸 이름은 버림)', svc.derivedFromSource('마시는비타민', '마시는 고함량 비타민')
+      && svc.derivedFromSource('유아옷걸이', '아기 유아 어린이 옷걸이') && !svc.derivedFromSource('탈취제', '유산균 30포') && !svc.derivedFromSource('유산균젤리', '유산균 30포'));
     ok('작업마다 키가 따로(동시 저장이 서로를 지우지 않게)', [...SETTINGS.keys()].every(k => /^sms_short_name:S\|\|T$/.test(k)));
+  }
+  {
+    const src = read('server/src/services/manualMessage.service.js');
+    ok('AI 저장은 직원 이름(manual)을 덮지 않는다', /keepManual \? ` WHERE COALESCE\(app_settings\.value::jsonb->>'source', ''\) <> 'manual'`/.test(src) && /\{ keepManual: true \}/.test(src));
+    const prevQ = pool.query; pool.query = async () => { throw new Error('db down'); };
+    let asked = 0;
+    const r = await svc.productShortName({ sheetId: 'S2', tabName: 'T', productName: '유산균', suggest: () => { asked++; return '유산균'; } });
+    pool.query = prevQ;
+    ok('저장된 이름을 못 읽으면 추천하지 않는다(fail-closed)', r.name === '' && asked === 0);
   }
   ok('라우트: 추천·저장 창구는 내부 담당자 전원', /router\.post\('\/workdesk\/sms-product-name', authMiddleware, internalMiddleware/.test(read('server/src/routes/trackB.routes.js')));
   ok('AI 프롬프트: 원문에 없는 단어를 지어내지 않는다', /에 없는 단어를 지어내지 마라/.test(read('server/src/services/gemini.service.js')));

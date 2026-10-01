@@ -197,21 +197,38 @@ function _cleanProductSource(v) {
   return String(v || '').replace(/^\s*\[상품\/옵션\/금액\]\s*/, '').replace(/^\s*\d{1,3}\.\s+/, '')
     .split('\n')[0].replace(/\s*\(?\s*https?:\/\/\S*/gi, '').trim().slice(0, 200);
 }
+/* ★ 읽기 실패와 "없음"을 구분한다 — 실패를 없음으로 접으면 AI 추천이 직원이 정한 이름을 덮는다(fail-closed) */
 async function _readShort(sheetId, tabName) {
   try {
     const { rows } = await pool.query('SELECT value FROM app_settings WHERE key = $1', [_shortKey(sheetId, tabName)]);
-    return rows[0] ? JSON.parse(rows[0].value) : null;
-  } catch (_) { return null; }
+    return { ok: true, val: rows[0] ? JSON.parse(rows[0].value) : null };
+  } catch (_) { return { ok: false, val: null }; }
 }
-async function _writeShort(sheetId, tabName, val) {
+/* ★ AI 추천 저장은 직원이 정한 이름(manual)이 없을 때만 — 늦게 끝난 추천이 방금 저장된 직원 이름을 덮지 않게 */
+async function _writeShort(sheetId, tabName, val, { keepManual = false } = {}) {
   await pool.query(
     `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()` +
+    (keepManual ? ` WHERE COALESCE(app_settings.value::jsonb->>'source', '') <> 'manual'` : ''),
     [_shortKey(sheetId, tabName), JSON.stringify(val)]);
+}
+/* ★ 추천은 원문(상품명·작업 이름)의 조각으로만 이뤄져야 한다 — 2글자 이상 조각들로 이어 붙일 수 있는지 본다.
+   AI 가 예시(유산균·탈취제)를 되뇌거나 지어낸 이름은 버린다. */
+function derivedFromSource(name, source) {
+  const n = String(name || ''), src = String(source || '').replace(/\s+/g, '').toLowerCase();
+  if (!n || !src) return false;
+  const low = n.toLowerCase(), ok = new Array(low.length + 1).fill(false); ok[0] = true;
+  for (let i = 0; i < low.length; i++) {
+    if (!ok[i]) continue;
+    for (let j = i + 2; j <= low.length; j++) if (src.includes(low.slice(i, j))) ok[j] = true;
+  }
+  return ok[low.length];
 }
 async function productShortName({ sheetId, tabName, productName, taskName, suggest }) {
   if (!sheetId || !tabName) return { name: '', source: 'none' };
-  const saved = await _readShort(sheetId, tabName);
+  const rd = await _readShort(sheetId, tabName);
+  if (!rd.ok) return { name: '', source: 'none' };
+  const saved = rd.val;
   if (saved && saved.source === 'manual' && normalizeShortName(saved.name)) return { name: saved.name, source: 'manual' };
   const task = String(taskName || '').trim().slice(0, 120);
   const from = [_cleanProductSource(productName), task].filter(Boolean).join(' | ');
@@ -219,8 +236,8 @@ async function productShortName({ sheetId, tabName, productName, taskName, sugge
   if (saved && saved.source === 'ai' && saved.from === from && normalizeShortName(saved.name)) return { name: saved.name, source: 'ai' };
   const ask = suggest || require('./gemini.service').suggestShortProductName;
   const name = normalizeShortName(await ask(_cleanProductSource(productName), task));
-  if (!name) return { name: '', source: 'none' };
-  try { await _writeShort(sheetId, tabName, { name, source: 'ai', from, at: new Date().toISOString() }); }
+  if (!name || !derivedFromSource(name, from)) return { name: '', source: 'none' };
+  try { await _writeShort(sheetId, tabName, { name, source: 'ai', from, at: new Date().toISOString() }, { keepManual: true }); }
   catch (e) { logger.warn(`[manualMessage] 추천 상품명 저장 실패(추천은 유지): ${e.message}`); }
   return { name, source: 'ai' };
 }
@@ -231,4 +248,4 @@ async function saveShortName({ sheetId, tabName, name, by }) {
   return { ok: true, name: n };
 }
 
-module.exports = { productShortName, saveShortName, normalizeShortName, cleanProductSource: _cleanProductSource, SHORT_MAX_BYTES, previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };
+module.exports = { productShortName, saveShortName, normalizeShortName, derivedFromSource, cleanProductSource: _cleanProductSource, SHORT_MAX_BYTES, previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };
