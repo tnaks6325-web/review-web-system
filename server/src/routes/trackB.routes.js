@@ -350,6 +350,35 @@ router.get('/overview', authMiddleware, internalMiddleware, async (req, res, nex
     res.json({ ok: true, items, coverage });
   } catch (err) { next(err); }
 });
+// ── 리뷰 사진 줄 재연결(2026-10-02 · migration 172 · 결정 186 별건) — adminOrMaster ──
+//   시트 시절 줄 이동으로 옛 번호에 남은 리뷰 사진을 지금 그 사람의 줄로 다시 잇는다.
+//   summary·preview = 쓰기 0 / apply = confirm:true + 화면이 본 (파일·출발·도착)이 다시 계산한 계획과 같아야.
+const reviewPhotoRelink = require('../services/reviewPhotoRelink.service');
+function _relinkFail(res, err, next) {
+  if (err instanceof reviewPhotoRelink.RelinkError) return res.status(err.status || 400).json({ ok: false, code: err.code, error: err.message });
+  return next(err);
+}
+router.get('/review-photo-relink/summary', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await reviewPhotoRelink.summary()); } catch (err) { _relinkFail(res, err, next); }
+});
+router.get('/review-photo-relink/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await reviewPhotoRelink.preview({ sheetId: req.query.sheetId, tabName: req.query.tabName })); }
+  catch (err) { _relinkFail(res, err, next); }
+});
+router.post('/review-photo-relink/apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await reviewPhotoRelink.apply({ sheetId: b.sheetId, tabName: b.tabName, items: b.items,
+      confirm: b.confirm === true, by: _by(req) }));
+  } catch (err) { _relinkFail(res, err, next); }
+});
+router.post('/review-photo-relink/revert', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await reviewPhotoRelink.revert({ runId: b.runId, confirm: b.confirm === true, by: _by(req) }));
+  } catch (err) { _relinkFail(res, err, next); }
+});
+
 // ── 명의 카드(migration 166 · 결정 기록 175~181) — adminOrMaster ──
 //   (조각 1 의 일괄 카드 만들기 preview/apply 는 전원 카드 완료(3,365/3,365)로 2026-09-30 제거 — 결정 186 70번.
 //    새 리뷰어·바뀐 명의는 아래 reconcile 이 10분 cron 으로 맞춘다.)
