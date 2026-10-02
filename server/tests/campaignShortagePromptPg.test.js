@@ -44,7 +44,7 @@ async function app(cid, phone, when, status = 'submitted') {
   await pool.query(`DELETE FROM campaign_daily_plans WHERE campaign_id LIKE '${P}%'`);
   await pool.query(`DELETE FROM campaign_applications WHERE campaign_id LIKE '${P}%'`);
   await pool.query(`DELETE FROM work_orders WHERE id LIKE '${P}%'`);
-  await pool.query(`DELETE FROM order_submissions WHERE sheet_id LIKE '${P}%'`);
+  await pool.query(`DELETE FROM order_submissions WHERE sheet_id LIKE '${P}%' OR sheet_id LIKE 'campaign:${P}%'`);
   await pool.query(`DELETE FROM recruit_campaigns WHERE id LIKE '${P}%'`);
 
   // A: 담당 만두 · 종료일 뒤에 붙이기 · 어제 3명 계획 중 2명 → 1명 부족
@@ -285,6 +285,13 @@ async function app(cid, phone, when, status = 'submitted') {
     const has = mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + k);
     ok(`⑮ 어제 ${hh} 게시 → ${want ? '물음' : '묻지 않음'}`, has === want);
   }
+
+  // ⑯ 확정 시각을 모르는 참여가 있으면 어제 수를 알 수 없다 → 묻지 않음
+  await camp(P + 'X', { title: '테스트X' }); await app(P + 'X', '00000191', D2NOON);
+  ok('⑯-0 처음엔 물음', mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'X'));
+  // (신청 표는 제약으로 새 미상 행을 못 만든다 — 옛 행 대신 공고 경유 주문 원장의 미상 행으로 확인)
+  await pool.query(`INSERT INTO order_submissions (sheet_id, tab_name, phone, submitted_at) VALUES ($1,'t',$2,NULL)`, ['campaign:' + P + 'X', '01000000192']);
+  ok('⑯ 확정 시각 미상 주문이 있으면 묻지 않음', !mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'X'));
 
   console.log(`\ncampaignShortagePromptPg: ${passed} passed`);
   await pool.end().catch(() => {});

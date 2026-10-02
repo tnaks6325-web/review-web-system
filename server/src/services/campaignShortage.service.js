@@ -208,6 +208,37 @@ async function _loadFacts(db, ids, now, countsNow) {
   return m;
 }
 
+/**
+ * 확정 시각을 모르는 참여가 있는 공고 — 정원 깔때기는 그런 행을 "오늘 이전"으로 세므로, 어제 몇 명이었는지 알 수 없다
+ * → 그 공고는 묻지 않는다(코덱스 리뷰). 조회 실패 = null(모름) → 호출부가 전부 묻지 않는다.
+ */
+async function _unknownTimeIds(db, ids) {
+  try {
+    const { rows } = await db.query(
+      `SELECT campaign_id::text AS id FROM campaign_applications
+        WHERE campaign_id = ANY($1::text[]) AND status = 'submitted' AND submitted_at IS NULL
+       UNION
+       SELECT substring(sheet_id from 10) AS id FROM order_submissions
+        WHERE sheet_id = ANY($2::text[]) AND deleted_at IS NULL AND submitted_at IS NULL`,
+      [ids.map(String), ids.map(i => 'campaign:' + i)]);
+    return new Set(rows.map(r => String(r.id)));
+  } catch (e) {
+    logger.warn(`[campaignShortage] 확정 시각 미상 조회 실패: ${e.message}`);
+    return null;
+  }
+}
+
+/** 마이그레이션 177(기존 공고 규칙 변경 시각 채우기)이 실제로 적용됐는가 — 안 됐으면 팝업을 끈다(모르면 묻지 않는다 · 코덱스 리뷰) */
+let _m177Ok = false;
+async function _rulesHistoryReady(db) {
+  if (_m177Ok) return true;
+  try {
+    const { rows } = await db.query(`SELECT 1 FROM _migrations WHERE filename = '177_campaign_quota_rules_init.sql'`);
+    _m177Ok = rows.length > 0;
+  } catch (_) { _m177Ok = false; }
+  return _m177Ok;
+}
+
 async function _decidedFor(db, ids, date) {
   const { rows } = await db.query(
     `SELECT DISTINCT campaign_id FROM campaign_plan_events
@@ -230,15 +261,18 @@ async function listShortages(admin, opts = {}) {
     if (e && e.code === '42703') return { ok: true, items: [], date: yesterday, notReady: true };
     throw e;
   }
+  // ★ 규칙 변경 이력이 준비되지 않았으면(177 미적용) 팝업을 띄우지 않는다
+  if (!opts.skipReadyCheck && !(await _rulesHistoryReady(db))) return { ok: true, items: [], date: yesterday, notReady: true };
   if (opts.campaignIds) { const want = new Set(opts.campaignIds.map(String)); cands = cands.filter(c => want.has(String(c.id))); }
   if (!cands.length) return { ok: true, items: [], date: yesterday };
   const ids = cands.map(c => c.id);
   const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
-  const [wos, decided, countsMap, optCapped] = await Promise.all([
+  const [wos, decided, countsMap, optCapped, unknownTime] = await Promise.all([
     linkedWorkOrdersForCampaigns(db, ids, ['created_by']).catch(() => new Map()),
     _decidedFor(db, ids, yesterday),
     st.fetchCampaignCounts(db, ids, now),
     _optionCappedIds(db, ids),
+    _unknownTimeIds(db, ids),
   ]);
   const facts = await _loadFacts(db, ids, now, countsMap);
   // ★ 시트 일정 공고(063, CAMPAIGN_SHEET_SCHEDULE=1)는 정원을 시트가 정한다 — 이월 개념이 없어 묻지 않는다(코덱스 리뷰).
@@ -260,6 +294,7 @@ async function listShortages(admin, opts = {}) {
     // ★ 상품별 하루 한도가 걸린 공고는 어제 실제로 열 수 있던 인원이 공고 전체 인원보다 적을 수 있다 → 묻지 않는다.
     //   한도 조회 실패(null)도 모름이라 묻지 않는다(코덱스 리뷰).
     if (optCapped === null || optCapped.has(String(c.id))) continue;
+    if (unknownTime === null || unknownTime.has(String(c.id))) continue;   // 확정 시각 모르는 참여가 있으면 어제 수를 알 수 없다
     if (!opts.skipRecipient && !isRecipient(admin && admin.name, c, wos.get(c.id))) continue;
     if (scheduleUnknown(c) || (schMap && st.isUsableSchedule(scheduleFor(schMap, c)))) continue;
     const counts = countsMap.get(c.id);

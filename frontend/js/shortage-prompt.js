@@ -198,13 +198,14 @@
     S.items = Array.isArray(r.items) ? r.items : [];
     // 사라진 공고의 선택은 버린다
     var keep = {}; S.items.forEach(function (it) { if (S.sel[it.campaignId]) keep[it.campaignId] = S.sel[it.campaignId]; }); S.sel = keep;
-    S.loadedOnce = true;
+    S.loadedOnce = true; S.lastFetch = Date.now();
     if (show && !isDismissed() && visibleItems().length) render();
     else if (S.open) render();
     return true;
   }
 
   /** 1분마다: 1시간이 지난 "다시 묻기"가 있으면 다시 받아 띄운다. 숨긴 탭에서는 쉬었다가 돌아오면 확인. */
+  var REFRESH_MS = 15 * 60 * 1000;
   function kstYesterday() { return new Date(Date.now() + 9 * 3600000 - 86400000).toISOString().slice(0, 10); }
 
   function tick() {
@@ -222,7 +223,12 @@
     // ★ 화면을 켜 둔 채 한국 시간 자정을 넘기면 "어제"가 바뀐다 → 새 날짜 목록을 다시 받는다(코덱스 리뷰)
     if (S.date && kstYesterday() !== S.date) { S.loading = true; load(true).then(function () { S.loading = false; }, function () { S.loading = false; }); return; }
     var sn = readSnooze(), now = Date.now(), due = Object.keys(sn).filter(function (k) { return sn[k] <= now; });
-    if (!due.length) return;
+    // ★ 고를 게 없어도 15분마다 다시 받는다 — 결제 중 자리가 풀려 새로 물을 공고가 생길 수 있다(코덱스 리뷰).
+    //   ✕로 닫은 날은 다시 띄우지 않는다(load 안에서 isDismissed 확인).
+    if (!due.length) {
+      if (now - (S.lastFetch || 0) < REFRESH_MS) return;
+      S.loading = true; load(true).then(function () { S.loading = false; }, function () { S.loading = false; }); return;
+    }
     S.loading = true;
     load(true).then(function (ok) {
       S.loading = false;

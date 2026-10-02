@@ -138,5 +138,7 @@ ok('오늘 더할 인원은 하루 상한 9999 안에서', /MAX_DAY_COUNT - toda
 ok('작업표 줄 경고는 만든 쪽 문구(ra.message·ra.over)', /ra\.message \|\|/.test(src) && /ra\.over != null/.test(src) && !/ra\.excess/.test(src));
 ok('참여형으로 바꾼 날도 게시 시각을 새로 남김', /COALESCE\(\$20, participation_mode\) = TRUE AND participation_mode IS DISTINCT FROM TRUE/.test(require('fs').readFileSync(require('path').join(__dirname,'../src/routes/campaign.routes.js'),'utf8')));
 ok('177 = 작업 종류 변경도 기록 · 배포 시각으로 기존 공고 채움', (() => { const m = read('migrations/177_campaign_quota_rules_init.sql'); return /NEW\.work_kind\s+IS DISTINCT FROM OLD\.work_kind/.test(m) && /UPDATE recruit_campaigns SET quota_rules_changed_at = NOW\(\) WHERE quota_rules_changed_at IS NULL/.test(m); })());
+ok('177 미적용이면 팝업을 끈다 · 확정 시각 미상 공고 제외', /filename = '177_campaign_quota_rules_init\.sql'/.test(src) && /if \(unknownTime === null \|\| unknownTime\.has\(String\(c\.id\)\)\) continue/.test(src));
+ok('고를 게 없어도 15분마다 다시 받는다', /if \(now - \(S\.lastFetch \|\| 0\) < REFRESH_MS\) return;/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
 console.log(`\ncampaignShortagePrompt: ${passed} passed`);
 process.exit(0);
