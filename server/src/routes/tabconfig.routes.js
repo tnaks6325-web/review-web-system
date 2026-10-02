@@ -1220,6 +1220,19 @@ router.get('/option-column-audit', authMiddleware, adminOrMasterMiddleware, asyn
   }
 });
 
+// GET /api/tab/product-choices — 구매양식 링크 화면의 「구매한 상품」 선택지 (인증 불필요, 2026-10-02 B안)
+//   상품이 2종 이상인 무시트 작업만 값을 돌려준다(아니면 []). 상품명은 공고에 이미 공개된 값이다.
+//   ★ 판정·순서는 sheetlessOrder.listProductChoices 단일 출처 — 제출 검증도 같은 함수를 쓴다.
+//   ★ 조회 실패도 [] — 화면은 종전대로(선택 칸 없이) 동작한다.
+router.get('/product-choices', async (req, res) => {
+  const sheetId = String(req.query.sheetId || '').trim();
+  const tabName = String(req.query.tabName || '').trim();
+  if (!sheetId || !tabName) return res.json({ ok: true, products: [] });
+  const { listProductChoices } = require('../services/sheetlessOrder.service');
+  const products = await listProductChoices(pool, sheetId, tabName);
+  res.json({ ok: true, products });
+});
+
 // GET /api/tab/reviewer-options — 리뷰어용 옵션 데이터 조회 (인증 불필요)
 // Query: sheetId, tabName, (optional) name, (optional) gid, (optional) round
 // ★ name 없이 호출 시 → 옵션 컬럼 헤더만 반환 (headersOnly 모드)
