@@ -53,6 +53,17 @@ const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '172_review
   ok('is_submitted·입금·주문은 건드리지 않는다', !/is_submitted|is_paid|payment_|order_submissions\s+SET|UPDATE order_submissions|UPDATE campaign_participants/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')));
   ok('fileRoute.recomputePrimary 를 쓰지 않는다(옮긴 사진과 무관한 줄 대표까지 바꾸고 오류를 삼킨다)', !/recomputePrimary/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')));
 
+  console.log('\n[B2] 2단계 기준 — 근거 하나 이상 + 반대 증거 제외(완화 금지)');
+  const sql2 = SVC.__planSqlTier2ForTest();
+  ok('2단계도 시트 시절·리뷰 슬롯·교체요청·직원 교체 제외', /< \$3::timestamptz/.test(sql2) && /'review'/.test(sql2)
+    && /er\.old_file_id = s\.file_id/.test(sql2) && /staff_file_replacement/.test(sql2));
+  ok('2단계는 시트 작업(sheetless=FALSE)을 제외', /tc\.sheetless IS FALSE/.test(sql2));
+  ok('2단계도 같은 이름 활성 줄 딱 하나', /c\.name_rows = 1/.test(sql2));
+  ok('2단계도 타계정(지금 줄 주문자 = 사진 이름) 제외', /o\.id = c\.hos AND REPLACE\(COALESCE\(o\.orderer/.test(sql2));
+  ok('★★ OCR 작성자가 지금 줄 사람과 맞으면 제외', /WHERE NOT contra/.test(sql2));
+  ok('근거 3종 중 하나 이상', /ev_order OR ev_ocr OR \(shift = mshift AND mcount >= 10/.test(sql2));
+  ok('라우트는 tier=2 를 명시할 때만 2단계', /tier: req\.query\.tier === '2' \? 2 : 1/.test(routes) && /tier: b\.tier === 2 \? 2 : 1/.test(routes));
+
   if (!process.env.PGTEST_URL) {
     console.log(`\n✅ reviewPhotoRelink: ${passed}개 통과 (PGTEST_URL 없음 — 진짜 PG 단계 생략)`);
     process.exit(0);
@@ -135,6 +146,34 @@ const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '172_review
   ok('되돌리기: 그대로인 사진만 돌리고 바뀐 사진은 건너뜀', rv.reverted === 1 && rv.skipped === 1 && await rowOf('F_DARA') === 1 && await rowOf('F_GANA') === 7);
   ok('되돌린 줄 대표 복원', await repOf(1) === 'F_DARA');
   await assert.rejects(SVC.revert({ runId: ap.runId }), e => e.code === 'confirm_required');
+
+  // ── 2단계 — 설정 행이 없는 작업(T2) ──
+  await db.query(`ALTER TABLE review_inspections ADD COLUMN IF NOT EXISTS ocr_author TEXT`);
+  const T2 = 'T2', O2 = (n) => `10000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`;
+  // 줄 1..14: 사람01..사람14 (주문 연결은 1~4번만), 사진은 대부분 +1 밀림(줄 k 의 사진 = 줄 k+1 사람)
+  for (let k = 1; k <= 14; k++) {
+    const nm = '사람' + String(k).padStart(2, '0');
+    if (k <= 4) await db.query(`INSERT INTO order_submissions VALUES ($1,$2,$2)`, [O2(k), nm]);
+    await db.query(`INSERT INTO campaign_participants (sheet_id,tab_name,seq,reviewer_name,recipient_name,order_submission_id) VALUES ($1,$2,$3,$4,$4,$5)`,
+      [S, T2, k, nm, k <= 4 ? O2(k) : null]);
+    await db.query(`INSERT INTO review_index (sheet_id,tab_name,row_index) VALUES ($1,$2,$3)`, [S, T2, k]);
+  }
+  for (let k = 1; k <= 12; k++) {   // 줄 k 에 사람(k+1) 사진 — 12장이 +1 밀림 패턴
+    const nm = '사람' + String(k + 1).padStart(2, '0');
+    await db.query(`INSERT INTO review_submissions (sheet_id,tab_name,row_index,reviewer_name,file_id,file_url,file_name,uploaded_at) VALUES ($1,$2,$3,$4,$5,$5,$5,'2026-07-01')`,
+      [S, T2, k, nm, 'G' + k]);
+  }
+  // G5 는 OCR 이 지금 줄 사람(사람05)을 가리킨다 → 반대 증거로 제외
+  await db.query(`INSERT INTO review_inspections (file_id,sheet_id,tab_name,row_index,checks,ocr_author) VALUES ('G5',$1,$2,5,'{}','사*5')`, [S, T2]);
+  const p2 = await SVC.preview({ sheetId: S, tabName: T2, tier: 2 });
+  const ids2 = p2.items.map(i => i.fileId).sort();
+  ok('1단계는 설정 행 없는 작업을 대상에 넣지 않는다', (await SVC.preview({ sheetId: S, tabName: T2 })).total === 0);
+  ok('2단계: +1 밀림 패턴(다수)으로 대상 — 반대 증거(G5)는 제외', p2.total === 11 && !ids2.includes('G5') && p2.items.every(i => i.toRow === i.fromRow + 1), ids2.join(','));
+  ok('2단계 근거가 응답에 실린다', p2.items.every(i => i.evidence && (i.evidence.shift || i.evidence.order || i.evidence.reviewName)));
+  await assert.rejects(SVC.apply({ sheetId: S, tabName: T2, confirm: true, items: p2.items }), e => e.code === 'plan_changed');
+  ok('2단계 계획을 1단계로 실행하면 거부(tier 명시 필요)', true);
+  const ap2 = await SVC.apply({ sheetId: S, tabName: T2, confirm: true, items: p2.items, tier: 2, by: '테스트' });
+  ok('2단계 적용', ap2.moved === 11 && await rowOf('G1') === 2 && await rowOf('G5') === 5);
 
   await db.end();
   { const boot = new Pool({ connectionString: process.env.PGTEST_URL }); await boot.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`); await boot.end(); }
