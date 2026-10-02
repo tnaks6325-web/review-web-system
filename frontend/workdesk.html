@@ -1958,7 +1958,12 @@
   .tp3grid.c3.fold .advth-pane{min-height:0;contain:none}
   .tp3grid.c3.fold .advth-body{display:none}
   .tp3grid.c3.fold .advth-head{border-bottom:0}
+  /* 업체 사이드바(224px)까지 빼면 1320px 창 아래에선 네 박스 최소폭(≈1039px)이 본문을 넘친다(Codex 리뷰) →
+     내부 C/S 미니창과 같은 방식으로 세 박스 + 아래 한 줄. 1100px 이하는 한 열. */
+  @media(max-width:1320px){.tp3grid.c3.thmini{grid-template-columns:minmax(210px,1fr) minmax(262px,1fr) minmax(300px,1.5fr)}.tp3grid.c3.thmini .advth-pane{grid-column:1/-1;height:260px;min-height:0}}
   @media(max-width:1100px){.tp3grid.c3.thmini{grid-template-columns:1fr}.tp3grid.c3.thmini .advth-pane{grid-column:auto;height:330px}}
+  /* 접기는 고정 높이까지 풀어야 한다 — 미디어 규칙 뒤·더 높은 특이성(Codex 리뷰: 접어도 330px 빈 박스가 남던 것) */
+  .tp3grid.c3.thmini.fold .advth-pane{height:auto;min-height:0;contain:none}
   .tp3grid.c3.csmini .wdcsmini-pane{min-width:0;align-self:stretch;height:auto;min-height:330px;max-height:none;contain:size;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:12px}
   .wdcsmini{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--ink);background:var(--card)}
   /* 제목행은 작업 조건·진행 현황·제출물 미리보기와 같은 tp3 제목행을 쓴다.
