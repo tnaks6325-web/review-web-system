@@ -176,6 +176,13 @@ async function trashOrphanCaptures({ dryRun = true, fileIds = null, by = 'cron' 
   }
   const base = { ok: true, graceDays: found.graceDays, total: items.length, items };
   if (dryRun) return { ...base, dryRun: true };
+  /* ★★★ 실행은 사람이 고른 파일만(fileIds 필수 · 2026-10-02 · 완화 금지) — A 판정은 **번호가 다시 매겨진
+     정상 리뷰 사진**도 잡는다(실측 72 중 62, 11장은 유일한 증빙 가능성). fileIds 없이 실행하면 후보 전부가
+     휴지통으로 간다 → 폴더 고아(B)와 같은 규율로 막는다. 자동 크론은 제거됐다(결정 064 후속 2). */
+  if (!(Array.isArray(fileIds) && fileIds.length)) {
+    return { ...base, dryRun: false, trashed: 0, failed: 0,
+      error: 'fileIds 필수 — 링크 끊김 후보에는 번호가 바뀐 정상 리뷰 사진이 섞여 있어, 명단과 대조해 고른 파일만 정리합니다(일괄 실행 없음).' };
+  }
   if (!items.length) return { ...base, dryRun: false, trashed: 0, failed: 0 };
 
   const drive = _driveService();
