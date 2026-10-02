@@ -9,8 +9,8 @@ const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const migration = read('migrations/139_workboard_consolidation_foundation.sql');
 const safetyMigration = read('migrations/140_workboard_consolidation_safety.sql');
 const service = read('src/services/workboardConsolidation.service.js');
-// 전환 조작판 라우트(/api/workboard-consolidation)는 2026-10-02 제거(결정 186 71번 — 8/28 enabled 전환 완료).
-const routeGone = !fs.existsSync(path.join(ROOT, 'src/routes/workboardConsolidation.routes.js'));
+// 전환 준비 입구 5개는 2026-10-02 제거(결정 186 71번 — 8/28 enabled 전환 완료). 상태 보기·비상 정지만 남는다.
+const route = read('src/routes/workboardConsolidation.routes.js');
 const app = read('src/app.js');
 const orderLedgerUi = read('../frontend/js/index-order-ledger.js');
 const submitRoute = read('src/routes/submit.routes.js');
@@ -30,9 +30,13 @@ ok('백업 세부 기록은 행별 왕복 없이 테이블별 묶음 저장',
 ok('연결 변경은 sealed 백업과 동일한 대상만 허용', /backup_target_mismatch/.test(service) && /state = 'sealed'/.test(service));
 ok('연결 변경 저널이 있어야 ID를 비우는 롤백을 허용', /workboard_consolidation_link_events/.test(migration) && /revertAdditiveMappings/.test(service));
 ok('즉시 롤백은 legacy 경로만 되살린다', /mode = 'legacy'/.test(service));
-ok('전환 조작판 입구는 제거 상태(라우트 파일·앱 등록 모두 없음)',
-  routeGone && !/workboardConsolidationRoutes/.test(app) && !/app\.use\('\/api\/workboard-consolidation'/.test(app));
-ok('되돌리기 함수는 서비스에 보존(재연결 시 그대로 쓴다)', /async function rollbackToLegacy/.test(service) && /async function revertAdditiveMappings/.test(service));
+ok('★★ 비상 정지(rollback-mode)는 남아 있고 관리자 전용 + 명시 확인 문자열(완화 금지)',
+  /router\.post\('\/rollback-mode', authMiddleware, adminOrMasterMiddleware/.test(route)
+  && /confirm !== 'ROLLBACK-WORKBOARD-CONSOLIDATION'/.test(route) && /rollbackToLegacy\(/.test(route));
+ok('상태 보기는 관리자 전용', /router\.get\('\/status', authMiddleware, adminOrMasterMiddleware/.test(route));
+ok('라우터가 앱에 등록됨', /workboardConsolidationRoutes/.test(app) && /app\.use\('\/api\/workboard-consolidation', workboardConsolidationRoutes\)/.test(app));
+ok('전환 준비 입구 5개는 제거 상태', !/router\.(get|post)\('\/(targets\/approve-legacy|backups|mappings|mode|rollback-mappings)'/.test(route));
+ok('준비·연결 되돌리기 함수는 서비스에 보존', /async function setControlMode/.test(service) && /async function revertAdditiveMappings/.test(service));
 ok('기존 120건 승인목록과 새 작업은 서로 다른 출처로 고정',
   /legacy_120/.test(safetyMigration) && /new_work/.test(safetyMigration) && /ensureNewWorkTarget/.test(service));
 ok('전체 전환 뒤 새 작업도 자동으로 enabled 상태가 됨',
