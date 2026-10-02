@@ -107,6 +107,18 @@ const C = (fileId, extra = {}) => Object.assign({
     ok('dryRun 도 후보는 그대로 보고한다', r.total === 2);
   }
 
+  console.log('\n[B2] 실행은 고른 파일만(fileIds 필수 — 2026-10-02 · 완화 금지)');
+  {
+    const pool = makePool({ candidates: [C('f1'), C('f2')] });
+    const drive = makeDrive();
+    S.__setPoolForTest(pool); S.__setDriveForTest(drive);
+    const r = await S.trashOrphanCaptures({ dryRun: false });
+    ok('★★★ fileIds 없이 실행하면 아무것도 휴지통으로 보내지 않는다(번호 바뀐 정상 사진 보호)',
+      drive.trashed.length === 0 && pool.writes().length === 0 && r.trashed === 0 && /fileIds 필수/.test(r.error || ''));
+    const r2 = await S.trashOrphanCaptures({ dryRun: false, fileIds: [] });
+    ok('빈 목록도 실행 거부', drive.trashed.length === 0 && /fileIds 필수/.test(r2.error || ''));
+  }
+
   console.log('\n[C] 후보 교집합 — 화면 목록 불신');
   {
     const pool = makePool({ candidates: [C('f1')] });
@@ -131,7 +143,7 @@ const C = (fileId, extra = {}) => Object.assign({
     const pool = makePool({ candidates: [C('f1')], recheck: [] });
     const drive = makeDrive();
     S.__setPoolForTest(pool); S.__setDriveForTest(drive);
-    const r = await S.trashOrphanCaptures({ dryRun: false });
+    const r = await S.trashOrphanCaptures({ dryRun: false, fileIds: ['f1'] });
     ok('재검사에서 빠지면 휴지통으로 보내지 않는다', drive.trashed.length === 0);
     ok('건너뛴 건수를 보고한다(조용한 no-op 금지)', r.skippedRecheck === 1 && r.trashed === 0);
     ok('재검사는 파일 단위로 다시 조회한다', pool.findCalls >= 2);
@@ -161,7 +173,7 @@ const C = (fileId, extra = {}) => Object.assign({
     const pool = makePool({ candidates: [C('f1')] });
     const drive = makeDrive({ fail: true });
     S.__setPoolForTest(pool); S.__setDriveForTest(drive);
-    const r = await S.trashOrphanCaptures({ dryRun: false });
+    const r = await S.trashOrphanCaptures({ dryRun: false, fileIds: ['f1'] });
     ok('휴지통 실패면 원장을 고치지 않는다', pool.writes().length === 0);
     ok('실패 건수를 보고한다', r.failed === 1 && r.trashed === 0);
   }
@@ -169,7 +181,7 @@ const C = (fileId, extra = {}) => Object.assign({
     const pool = makePool({ candidates: [C('f1')] });
     const drive = makeDrive();
     S.__setPoolForTest(pool); S.__setDriveForTest(drive);
-    await S.trashOrphanCaptures({ dryRun: false, by: '망고' });
+    await S.trashOrphanCaptures({ dryRun: false, by: '망고', fileIds: ['f1'] });
     const w = pool.writes();
     ok('성공하면 원장 1건 갱신', w.length === 1);
     ok("slot_key='trashed' 로 표기(fileRoute 와 같은 칸)", /slot_key = 'trashed'/.test(w[0].q));
