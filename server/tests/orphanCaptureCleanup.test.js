@@ -182,8 +182,33 @@ const C = (fileId, extra = {}) => Object.assign({
     const cron = read('src/jobs/cron.js');
     ok('킬스위치 ORPHAN_CAPTURE_CLEAN', /ORPHAN_CAPTURE_CLEAN !== '0'/.test(cron));
     ok('jobLock 으로 직렬화', /withJobLock\('orphan_capture_clean'/.test(cron));
-    ok('크론은 실행 모드로 부른다', /trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
+    ok('★★ 크론의 실제 이동은 옵트인(ORPHAN_CAPTURE_CLEAN_LIVE=1)이고 기본은 세기만', /const live = process\.env\.ORPHAN_CAPTURE_CLEAN_LIVE === '1'/.test(cron)
+      && /trashOrphanCaptures\(\{ dryRun: !live, by: 'cron' \}\)/.test(cron) && !/trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
     ok('정리 실패가 크론을 죽이지 않는다', /\[CRON-OrphanCapture\] error/.test(cron));
+  }
+  {
+    console.log('\n[스키마] 후보 SQL 의 칸 이름이 실제 표에 있는가(2026-10-02 — cp.row_index 로 도입 이래 매일 실패)');
+    // ★ 가짜 pool 시험은 칸 이름 오류를 못 잡는다 → 마이그레이션 원문에서 표별 칸을 모아 대조한다.
+    const MIG = fs.readdirSync(path.join(__dirname, '..', 'migrations')).filter(f => f.endsWith('.sql'))
+      .map(f => fs.readFileSync(path.join(__dirname, '..', 'migrations', f), 'utf8')).join('\n');
+    const colsOf = (table) => {
+      const cols = new Set();
+      const re = new RegExp('CREATE TABLE(?: IF NOT EXISTS)? ' + table + '\\s*\\(([\\s\\S]*?)\\n\\);', 'g');
+      let m; while ((m = re.exec(MIG))) m[1].split('\n').forEach(l => { const c = (l.trim().match(/^([a-z_][a-z0-9_]*)\s/) || [])[1]; if (c) cols.add(c); });
+      const ra = new RegExp('ALTER TABLE(?: IF EXISTS)? ' + table + '\\b([\\s\\S]*?);', 'g');
+      while ((m = ra.exec(MIG))) for (const a of m[1].matchAll(/ADD COLUMN(?: IF NOT EXISTS)? ([a-z_][a-z0-9_]*)/g)) cols.add(a[1]);
+      return cols;
+    };
+    const ALIAS = { rs: 'review_submissions', oc: 'order_submissions', ol: 'order_submissions', ri: 'review_index',
+      rl: 'review_index', ins: 'review_inspections', er: 'review_edit_requests', ria: 'review_index_archive', cp: 'campaign_participants' };
+    const sql = (require('../src/services/orphanCaptureCleanup.service').__candidateSqlForTest || (() => ''))();
+    ok('후보 SQL 을 시험에서 꺼낼 수 있다', sql.length > 100);
+    const bad = [];
+    for (const m of sql.replace(/--[^\n]*/g, '').matchAll(/\b(rs|oc|ol|ri|rl|ins|er|ria|cp)\.([a-z_][a-z0-9_]*)/g)) {
+      if (!colsOf(ALIAS[m[1]]).has(m[2])) bad.push(m[1] + '.' + m[2]);
+    }
+    ok('★★ 후보 SQL 의 모든 칸이 마이그레이션에 존재한다', bad.length === 0, [...new Set(bad)].join(', '));
+    ok('활성 작업표 줄 제외는 cp.seq 로 맞춘다(cp.row_index 는 없는 칸)', /cp\.seq = rs\.row_index/.test(sql) && !/cp\.row_index/.test(sql.replace(/--[^\n]*/g, '')));
     const svc = src;
     ok('유예는 env 로 조절 가능', /ORPHAN_CAPTURE_GRACE_DAYS/.test(svc));
     ok('한 회차 상한이 있다(폭발반경 제한)', /ORPHAN_CAPTURE_CLEAN_CAP/.test(svc));
@@ -369,7 +394,7 @@ const C = (fileId, extra = {}) => Object.assign({
     const cron = read('src/jobs/cron.js');
     ok('★★ 크론이 B·C 를 부르지 않는다',
       !/trashTombstonedCaptures|trashFolderOrphans/.test(cron));
-    ok('크론은 A 만', /trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
+    ok('크론은 A 만', /trashOrphanCaptures\(\{ dryRun: !live, by: 'cron' \}\)/.test(cron));
     const routes = read('src/routes/drive.routes.js');
     ok('★ 수동 창구가 종류를 나눠 받는다', /kind === 'tombstoned'/.test(routes) && /kind === 'folder'/.test(routes));
     ok('★ 미지정은 종전 동작(A)', /String\(b\.kind \|\| 'linked'\)/.test(routes));
