@@ -268,6 +268,13 @@ async function app(cid, phone, when, status = 'submitted') {
   await pool.query(`UPDATE recruit_campaigns SET carry_strategy = 'extend' WHERE id=$1`, [P + 'V']);
   ok('⑭-3 이월 방식 변경도 기록 · 묻지 않음', !!(await pool.query(`SELECT quota_rules_changed_at FROM recruit_campaigns WHERE id=$1`, [P + 'V'])).rows[0].quota_rules_changed_at && !mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'V'));
 
+  // ⑭-4 일건수 0 = 작업오더 일건수를 빌려 쓰는 공고 → 어제 값을 알 수 없어 묻지 않음
+  await camp(P + 'W', { title: '테스트W', dl: 0 }); await app(P + 'W', '00000181', D2NOON);
+  await pool.query(`UPDATE recruit_campaigns SET quota_rules_changed_at = NULL WHERE id=$1`, [P + 'W']);
+  await pool.query(`INSERT INTO work_orders (id, status, recruit_count, daily_count, linked_campaign_id, created_by) VALUES ($1,'reviewing',10,3,$2,'김AE')`, [P + 'wo_W', P + 'W']).catch(() => {});
+  const hasW = mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'W');
+  ok('⑭-4 작업오더 일건수 기준 공고는 묻지 않음', hasW === false);
+
   // ⑮ 어제 신청 마감(18:00) 뒤에 처음 게시 → 어제는 아무도 신청할 수 없었다 → 묻지 않음 / 마감 전 게시는 물음
   for (const [k, hh, want] of [['T', '20:00', false], ['U', '09:00', true]]) {
     await camp(P + k, { title: '테스트' + k });

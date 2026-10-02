@@ -72,6 +72,8 @@ function computeShortage(c, counts, f, yesterday) {
   // ★ 날짜별 계획 킬스위치가 꺼져 있으면 정원 판정(computeCampaignState)처럼 계획을 무시한다(코덱스 리뷰)
   const plans = (PLAN_ON() && counts.plans) || null;
   const eff = st.effectiveQuota(c, counts);
+  // ★ 정원을 작업오더 값에서 빌려 쓰는 공고는 어제 값이 무엇이었는지 알 수 없다(작업오더 수정 이력 없음) → 묻지 않는다(코덱스 리뷰)
+  if (eff.dailySource === 'work_order' || eff.totalSource === 'work_order') return null;
   const dl = eff.dailyLimit, rt = eff.recruitTotal;
   let q;
   const ov = plans && plans[yesterday] != null ? Math.max(0, Number(plans[yesterday]) || 0) : null;
@@ -134,6 +136,7 @@ function _roomToday(c, counts, todayQuota, today, schedule) {
   return Math.max(0, cap - base - Math.max(Number(todayQuota) || 0, usedToday));
 }
 
+const MAX_DAY_COUNT = 9999;   // campaignPlan.savePlans 의 하루 인원 상한과 같은 값
 const PLAN_ON = () => process.env.CAMPAIGN_DAILY_PLAN !== '0';   // campaignPlan.getPlanOverview.planEnabled 와 같은 기준
 
 /**
@@ -278,6 +281,8 @@ async function listShortages(admin, opts = {}) {
     const rt = st.effectiveQuota(c, counts).recruitTotal;
     let addable = s.shortage;
     if (rt > 0 && todayQuota !== null) addable = Math.min(addable, _roomToday(c, counts, todayQuota, today, null));
+    // ★ 하루 인원 상한(9999 — [📅 인원] 저장 규칙)을 넘기면 저장이 통째로 거절된다 → 그 안에서만 더한다(코덱스 리뷰)
+    if (todayQuota !== null) addable = Math.max(0, Math.min(addable, MAX_DAY_COUNT - todayQuota));
     items.push({
       campaignId: c.id, title: c.title || '', thumbnailUrl: c.thumbnail_url || '',
       manager: c.manager || '', shortage: s.shortage,
@@ -310,7 +315,7 @@ function _worktableNote(ws) {
   if (ws.ok === false || (rb && rb.ok === false)) return { ok: false, reason: (rb && (rb.message || rb.reason)) || ws.message || '작업표 맞추기 실패' };
   if (ws.warn || ws.rowAudit) {
     const ra = ws.rowAudit;
-    const msg = ws.message || (ra ? `작업표 줄이 총인원보다 ${ra.excess != null ? ra.excess + '줄 ' : ''}많습니다 — [📅 인원]에서 확인해 주세요` : '작업표는 바뀌지 않았습니다');
+    const msg = ws.message || (ra ? (ra.message || `작업표 줄이 총인원보다 ${ra.over != null ? ra.over + '줄 ' : ''}많습니다 — [📅 인원]에서 확인해 주세요`) : '작업표는 바뀌지 않았습니다');
     return { ok: true, warn: true, reason: msg };
   }
   return { ok: true };

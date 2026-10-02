@@ -133,5 +133,9 @@ ok('어제 이후 인원 규칙이 바뀐 공고·어제 마감 뒤 게시 공�
 ok('175 트리거 = 인원 규칙 칸이 실제로 달라질 때만', (() => { const m = read('migrations/175_campaign_quota_rules_changed_at.sql'); return /BEFORE UPDATE ON recruit_campaigns/.test(m) && /NEW\.daily_limit\s+IS DISTINCT FROM OLD\.daily_limit/.test(m) && /NEW\.skip_weekends\s+IS DISTINCT FROM OLD\.skip_weekends/.test(m); })());
 ok('176 = 이월 방식·보류 변경도 기록', (() => { const m = read('migrations/176_campaign_quota_rules_carry.sql'); return /NEW\.carry_strategy\s+IS DISTINCT FROM OLD\.carry_strategy/.test(m) && /NEW\.carry_mode\s+IS DISTINCT FROM OLD\.carry_mode/.test(m); })());
 ok('175 칸도 부팅 점검 · 오늘 반영 후 목록 캐시 비움', /\['recruit_campaigns', 'quota_rules_changed_at'\]/.test(require('fs').readFileSync(require('path').join(__dirname,'../index.js'),'utf8')) && /cr\.invalidateListCache\(\)/.test(src));
+ok('작업오더에서 정원을 빌려 쓰는 공고는 묻지 않음', /eff\.dailySource === 'work_order' \|\| eff\.totalSource === 'work_order'\) return null/.test(src));
+ok('오늘 더할 인원은 하루 상한 9999 안에서', /MAX_DAY_COUNT - todayQuota/.test(src));
+ok('작업표 줄 경고는 만든 쪽 문구(ra.message·ra.over)', /ra\.message \|\|/.test(src) && /ra\.over != null/.test(src) && !/ra\.excess/.test(src));
+ok('참여형으로 바꾼 날도 게시 시각을 새로 남김', /COALESCE\(\$20, participation_mode\) = TRUE AND participation_mode IS DISTINCT FROM TRUE/.test(require('fs').readFileSync(require('path').join(__dirname,'../src/routes/campaign.routes.js'),'utf8')));
 console.log(`\ncampaignShortagePrompt: ${passed} passed`);
 process.exit(0);

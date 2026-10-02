@@ -3213,7 +3213,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         notes = COALESCE($10, notes),
         chat_url = COALESCE($11, chat_url),
         status = COALESCE($12, status),
-        published_at = CASE WHEN COALESCE($12, status) = 'active' AND status IS DISTINCT FROM 'active' THEN NOW() ELSE published_at END,
+        published_at = CASE WHEN (COALESCE($12, status) = 'active' AND status IS DISTINCT FROM 'active')
+                             OR (COALESCE($20, participation_mode) = TRUE AND participation_mode IS DISTINCT FROM TRUE)   -- 참여형으로 바꾼 날 = 그날부터 참여 가능(코덱스 리뷰)
+                            THEN NOW() ELSE published_at END,
         sort_order = COALESCE($13, sort_order),
         max_slots = COALESCE($14, max_slots),
         deadline = $15,
