@@ -651,10 +651,16 @@ function startCronJobs() {
       try {
         const { trashOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
         const { withJobLock } = require('../utils/jobLock');
+        /* ★★ 실제 휴지통 이동은 ORPHAN_CAPTURE_CLEAN_LIVE=1 일 때만(옵트인 · 2026-10-02).
+             조회 칸 오류(cp.row_index)로 도입 이래 한 번도 실행된 적이 없어, 고치는 순간 첫 이동이
+             무검증으로 시작되지 않게 기본은 **세기만** 한다 — 대상 수를 사람이 본 뒤 켠다(결정 064 후속). */
+        const live = process.env.ORPHAN_CAPTURE_CLEAN_LIVE === '1';
         const r = await withJobLock('orphan_capture_clean',
-          () => trashOrphanCaptures({ dryRun: false, by: 'cron' }));
+          () => trashOrphanCaptures({ dryRun: !live, by: 'cron' }));
         if (r && r.skipped) logger.debug('[CRON-OrphanCapture] lock busy — 양보');
-        else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
+        else if (r && r.ok && !live) {
+          logger.info(`[CRON-OrphanCapture] 미리보기 ${r.total || 0}건(이동 안 함 — ORPHAN_CAPTURE_CLEAN_LIVE=1 일 때만 휴지통) · 유예 ${r.graceDays}일`);
+        } else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
           logger.warn(`[CRON-OrphanCapture] 휴지통 ${r.trashed}건 · 실패 ${r.failed}건`
             + ` · 경합회피 ${r.skippedRecheck || 0}건 (유예 ${r.graceDays}일)`);
         }

@@ -122,7 +122,8 @@ function candidateSql({ oneFile = false } = {}) {
                         AND ria.row_index = rs.row_index)
      AND NOT EXISTS (SELECT 1 FROM campaign_participants cp
                       WHERE cp.sheet_id = rs.sheet_id AND cp.tab_name = rs.tab_name
-                        AND cp.row_index = rs.row_index
+                        AND cp.seq = rs.row_index   -- ★ 작업표 줄 순번 칸은 seq(= review_index.row_index · 041).
+                                                    --   종전 cp.row_index(없는 칸)로 2026-08-21 도입 이래 매일 42703 — 결정 064 후속
                         AND cp.deleted_at IS NULL AND cp.active = TRUE)
      ${oneFile ? 'AND rs.file_id = $3' : ''}
    ORDER BY COALESCE(rs.uploaded_at, rs.created_at) ASC
@@ -418,7 +419,7 @@ async function trashFolderOrphans({ sheetId, tabName, fileIds = null, dryRun = t
   return { ...found, dryRun: false, ...r };
 }
 
-module.exports = {
+module.exports = { __candidateSqlForTest: () => candidateSql(),
   findOrphanCaptures,
   trashOrphanCaptures,
   findTombstonedCaptures,
