@@ -359,17 +359,17 @@ function _relinkFail(res, err, next) {
   return next(err);
 }
 router.get('/review-photo-relink/summary', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await reviewPhotoRelink.summary()); } catch (err) { _relinkFail(res, err, next); }
+  try { res.json(await reviewPhotoRelink.summary({ tier: req.query.tier === '2' ? 2 : 1 })); } catch (err) { _relinkFail(res, err, next); }
 });
 router.get('/review-photo-relink/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await reviewPhotoRelink.preview({ sheetId: req.query.sheetId, tabName: req.query.tabName })); }
+  try { res.json(await reviewPhotoRelink.preview({ sheetId: req.query.sheetId, tabName: req.query.tabName, tier: req.query.tier === '2' ? 2 : 1 })); }
   catch (err) { _relinkFail(res, err, next); }
 });
 router.post('/review-photo-relink/apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
     res.json(await reviewPhotoRelink.apply({ sheetId: b.sheetId, tabName: b.tabName, items: b.items,
-      confirm: b.confirm === true, by: _by(req) }));
+      confirm: b.confirm === true, by: _by(req), tier: b.tier === 2 ? 2 : 1 }));
   } catch (err) { _relinkFail(res, err, next); }
 });
 router.post('/review-photo-relink/revert', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

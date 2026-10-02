@@ -103,32 +103,107 @@ function planSql() {
    ORDER BY u.row_index, u.file_id`;
 }
 
-async function _plan(q, sheetId, tabName) {
-  const { rows } = await q.query(planSql(), [sheetId || null, tabName || null, SHEET_ERA_END]);
+/* 2단계 기준(2026-10-02 · 사용자 승인) — 1단계에서 근거 부족으로 빠진 사진용. 공통 조건은 같다:
+   리뷰 슬롯·시트 시절·교체요청/직원 교체 제외 · 지금 줄 사람과 이름 다름 · 같은 이름 활성 줄 딱 하나 ·
+   대상 줄에 같은 이름 사진 없음 · 타계정(지금 줄 주문자=사진 이름) 제외 · 시트 작업(sheetless=FALSE) 제외.
+   여기에 근거 **하나 이상**:
+     (가) 대상 줄 주문의 주문자·수취인 = 사진 이름 (지금 줄 주문은 사진 이름이 아님)
+     (나) 리뷰 화면 작성자 이름(OCR)이 대상 줄 사람과 맞고 지금 줄 사람과는 다름
+     (다) 그 작업 후보의 다수(≥10장·≥60%)가 같은 칸 수만큼 밀렸고 이 사진도 그 칸 수
+   ★★ 반대 증거 제외(완화 금지): OCR 작성자가 **지금 줄 사람**과 맞으면 어떤 근거가 있어도 옮기지 않는다.
+   ★ tab_configs 행이 아예 없는 작업도 포함 — smartBuild 는 tab_configs 로 대상을 고르므로 행 번호로 다시 덮이지 않는다. */
+function planSqlTier2() {
+  const NM = (c) => `REPLACE(COALESCE(${c},''),' ','')`;
+  const NAMEISH = (o) => `(${o} IS NOT NULL AND ${o} !~ '^[A-Za-z0-9_.*-]+$')`;
+  const LIKE_NM = (o, p) => `(${p} IS NOT NULL AND ${p} <> '' AND left(${o},1)=left(${p},1) AND (right(${o},1)=right(${p},1) OR right(${o},1)='*'))`;
+  return `
+  WITH cp AS (
+    SELECT sheet_id, tab_name, seq, order_submission_id,
+           ${NM('reviewer_name')} AS n1, ${NM('recipient_name')} AS n2,
+           REPLACE(COALESCE(NULLIF(recipient_name,''), reviewer_name, ''),' ','') AS disp
+      FROM campaign_participants
+     WHERE deleted_at IS NULL AND active = TRUE
+       AND ($1::text IS NULL OR sheet_id = $1) AND ($2::text IS NULL OR tab_name = $2)
+  ), rs AS (
+    SELECT s.id AS rs_id, s.sheet_id, s.tab_name, s.row_index, s.file_id, s.review_index_id,
+           ${NM('s.reviewer_name')} AS nm, COALESCE(s.uploaded_at, s.created_at) AS at,
+           NULLIF(${NM('i.ocr_author')},'') AS ocr
+      FROM review_submissions s
+      LEFT JOIN review_inspections i ON i.file_id = s.file_id
+     WHERE COALESCE(s.slot_key, 'review') = 'review'
+       AND s.row_index IS NOT NULL AND s.file_id IS NOT NULL AND COALESCE(s.reviewer_name, '') <> ''
+       AND COALESCE(s.uploaded_at, s.created_at) < $3::timestamptz
+       AND ($1::text IS NULL OR s.sheet_id = $1) AND ($2::text IS NULL OR s.tab_name = $2)
+       AND NOT EXISTS (SELECT 1 FROM tab_configs tc WHERE tc.sheet_id = s.sheet_id AND tc.tab_name = s.tab_name AND tc.sheetless IS FALSE)
+       AND NOT EXISTS (SELECT 1 FROM review_edit_requests er WHERE er.old_file_id = s.file_id OR er.new_file_id = s.file_id)
+       AND NOT EXISTS (SELECT 1 FROM review_inspections x WHERE x.file_id = s.file_id
+                         AND x.checks -> 'replacement' ->> 'reason' = 'staff_file_replacement')
+  ), c AS (
+    SELECT rs.*, h.seq AS hseq, h.disp AS hdisp, h.order_submission_id AS hos,
+           (SELECT COUNT(*) FROM cp e WHERE e.sheet_id = rs.sheet_id AND e.tab_name = rs.tab_name AND (e.n1 = rs.nm OR e.n2 = rs.nm)) AS name_rows
+      FROM rs LEFT JOIN cp h ON h.sheet_id = rs.sheet_id AND h.tab_name = rs.tab_name AND h.seq = rs.row_index
+     WHERE EXISTS (SELECT 1 FROM cp WHERE cp.sheet_id = rs.sheet_id AND cp.tab_name = rs.tab_name)
+       AND NOT (h.seq IS NOT NULL AND (h.n1 = rs.nm OR h.n2 = rs.nm))
+  ), t AS (
+    SELECT c.*, e.seq AS tgt, e.disp AS tdisp, e.order_submission_id AS tos, (e.seq - c.row_index) AS shift
+      FROM c JOIN cp e ON e.sheet_id = c.sheet_id AND e.tab_name = c.tab_name AND (e.n1 = c.nm OR e.n2 = c.nm)
+     WHERE c.name_rows = 1 AND e.seq <> c.row_index
+       AND NOT EXISTS (SELECT 1 FROM review_submissions x WHERE x.sheet_id = c.sheet_id AND x.tab_name = c.tab_name AND x.row_index = e.seq
+                         AND COALESCE(x.slot_key, 'review') = 'review' AND ${NM('x.reviewer_name')} = c.nm)
+       AND NOT EXISTS (SELECT 1 FROM order_submissions o WHERE o.id = c.hos AND ${NM('o.orderer')} = c.nm)
+  ), ev AS (
+    SELECT t.*,
+      (t.tos IS NOT NULL
+        AND EXISTS (SELECT 1 FROM order_submissions o WHERE o.id = t.tos AND (${NM('o.orderer')} = t.nm OR ${NM('o.recipient')} = t.nm))
+        AND NOT EXISTS (SELECT 1 FROM order_submissions o WHERE o.id = t.hos AND (${NM('o.orderer')} = t.nm OR ${NM('o.recipient')} = t.nm))) AS ev_order,
+      (${NAMEISH('t.ocr')} AND ${LIKE_NM('t.ocr', 't.tdisp')} AND NOT ${LIKE_NM('t.ocr', 't.hdisp')}) AS ev_ocr,
+      (${NAMEISH('t.ocr')} AND ${LIKE_NM('t.ocr', 't.hdisp')} AND NOT ${LIKE_NM('t.ocr', 't.tdisp')}) AS contra,
+      (SELECT MODE() WITHIN GROUP (ORDER BY t2.shift) FROM t t2 WHERE t2.sheet_id = t.sheet_id AND t2.tab_name = t.tab_name) AS mshift,
+      (SELECT COUNT(*) FROM t t2 WHERE t2.sheet_id = t.sheet_id AND t2.tab_name = t.tab_name) AS tn
+      FROM t
+  ), ev2 AS (
+    SELECT ev.*, (SELECT COUNT(*) FROM ev e3 WHERE e3.sheet_id = ev.sheet_id AND e3.tab_name = ev.tab_name AND e3.shift = ev.mshift) AS mcount
+      FROM ev
+  )
+  SELECT rs_id, sheet_id AS "sheetId", tab_name AS "tabName", file_id AS "fileId",
+         row_index AS "fromRow", tgt AS "toRow", review_index_id AS "fromReviewIndexId",
+         to_char(at, 'YYYY-MM-DD') AS "uploadedAt",
+         ev_order AS "evOrder", ev_ocr AS "evOcr", (shift = mshift AND mcount >= 10 AND mcount::float / tn >= 0.6) AS "evShift"
+    FROM ev2
+   WHERE NOT contra
+     AND (ev_order OR ev_ocr OR (shift = mshift AND mcount >= 10 AND mcount::float / tn >= 0.6))
+   ORDER BY row_index, file_id`;
+}
+
+async function _plan(q, sheetId, tabName, tier = 1) {
+  const sql = Number(tier) === 2 ? planSqlTier2() : planSql();
+  const { rows } = await q.query(sql, [sheetId || null, tabName || null, SHEET_ERA_END]);
   return rows;
 }
 
 /** 전 작업 요약 — 쓰기 0. 작업별 대상 장수. */
-async function summary() {
-  const rows = await _plan(_db(), null, null);
+async function summary({ tier = 1 } = {}) {
+  const rows = await _plan(_db(), null, null, tier);
   const by = new Map();
   for (const r of rows) {
     const k = `${r.sheetId}\t${r.tabName}`;
     if (!by.has(k)) by.set(k, { sheetId: r.sheetId, tabName: r.tabName, count: 0 });
     by.get(k).count++;
   }
-  return { ok: true, total: rows.length, tabs: [...by.values()].sort((a, b) => b.count - a.count) };
+  return { ok: true, tier: Number(tier) === 2 ? 2 : 1, total: rows.length, tabs: [...by.values()].sort((a, b) => b.count - a.count) };
 }
 
 /** 작업 하나 미리보기 — 쓰기 0. */
-async function preview({ sheetId, tabName } = {}) {
+async function preview({ sheetId, tabName, tier = 1 } = {}) {
   if (!sheetId || !tabName) throw new RelinkError('bad_request', 'sheetId, tabName 이 필요합니다.');
-  const items = (await _plan(_db(), sheetId, tabName)).map(_view);
-  return { ok: true, dryRun: true, sheetId, tabName, total: items.length, items };
+  const items = (await _plan(_db(), sheetId, tabName, tier)).map(_view);
+  return { ok: true, dryRun: true, tier: Number(tier) === 2 ? 2 : 1, sheetId, tabName, total: items.length, items };
 }
 
 function _view(r) {
-  return { fileId: r.fileId, fromRow: Number(r.fromRow), toRow: Number(r.toRow), uploadedAt: r.uploadedAt };
+  const v = { fileId: r.fileId, fromRow: Number(r.fromRow), toRow: Number(r.toRow), uploadedAt: r.uploadedAt };
+  if (r.evOrder !== undefined) v.evidence = { order: !!r.evOrder, reviewName: !!r.evOcr, shift: !!r.evShift };
+  return v;
 }
 const _key = (x) => `${x.fileId}|${Number(x.fromRow)}|${Number(x.toRow)}`;
 
@@ -181,7 +256,7 @@ async function _lockRows(c, sheetId, tabName, rowsSet) {
  * 실행 — confirm:true + items(화면이 본 파일·출발·도착)가 다시 계산한 계획과 정확히 같아야 한다.
  * @returns {{ok, runId, moved, repChanged}}
  */
-async function apply({ sheetId, tabName, items, confirm = false, by = '' } = {}) {
+async function apply({ sheetId, tabName, items, confirm = false, by = '', tier = 1 } = {}) {
   if (!sheetId || !tabName) throw new RelinkError('bad_request', 'sheetId, tabName 이 필요합니다.');
   if (confirm !== true) throw new RelinkError('confirm_required', '미리보기로 확인한 뒤 confirm:true 로 실행하세요.');
   const want = Array.isArray(items) ? items : [];
@@ -200,7 +275,7 @@ async function apply({ sheetId, tabName, items, confirm = false, by = '' } = {})
     await _lockRows(c, sheetId, tabName, rowsSet);
 
     // ★ 잠금 뒤 다시 계산 — 화면이 본 세 값과 하나라도 다르면 전체 거부(R14)
-    const plan = await _plan(c, sheetId, tabName);
+    const plan = await _plan(c, sheetId, tabName, tier);
     const planMap = new Map(plan.map(p => [_key(p), p]));
     const stale = want.filter(x => !planMap.has(_key(x)));
     if (stale.length) {
@@ -331,4 +406,4 @@ async function revert({ runId, confirm = false, by = '' } = {}) {
   }
 }
 
-module.exports = { summary, preview, apply, revert, RelinkError, SHEET_ERA_END, __setPoolForTest, __planSqlForTest: planSql };
+module.exports = { summary, preview, apply, revert, RelinkError, SHEET_ERA_END, __setPoolForTest, __planSqlForTest: planSql, __planSqlTier2ForTest: planSqlTier2 };
