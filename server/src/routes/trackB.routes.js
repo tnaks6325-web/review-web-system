@@ -1482,6 +1482,7 @@ const _campHandlers = {
   blogApprove: _delegate(_campRoutes, 'post', '/admin/:id/blog-approve'),   // 127 블로그 승인
   blogReject: _delegate(_campRoutes, 'post', '/admin/:id/blog-reject'),     // 127 블로그 반려
   archive: _delegate(_campRoutes, 'post', '/admin/:id/archive'),           // 130 보관/보관 해제
+  optionMerge: _delegate(_campRoutes, 'post', '/admin/:id/options/merge'), // 갈라진 선택지 합치기(이름 바꾸기 이전분)
 };
 router.get('/campaigns/list', authMiddleware, internalMiddleware, async (req, res, next) => {
   // 편집 가능 여부를 함께 실어 준다 — 프론트가 버튼 노출을 정한다(서버 게이트가 최종 방어)
@@ -1516,6 +1517,9 @@ router.put('/campaigns/:id', authMiddleware, internalMiddleware, editorOnlyMiddl
   _campHandlers.update(req, res, next));
 router.post('/campaigns/:id/flags', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.flags(req, res, next));
+// 갈라진 선택지 합치기 — 참여 기록을 옮기고 마감 행을 지우는 데이터 정리라 관리자 전용(원본과 같은 게이트).
+router.post('/campaigns/:id/options/merge', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _campHandlers.optionMerge(req, res, next));
 router.delete('/campaigns/:id', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.del(req, res, next));
 router.post('/campaigns/:id/confirm', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>

@@ -2400,6 +2400,9 @@ function _buildOptRowEl(data) {
   const row = document.createElement("div");
   row.className = "rf-opt-row";
   row.dataset.status = status;
+  // ★★ 이름 바꾸기 추적 — 서버에서 불러온 선택지의 원래 이름. 저장 시 prevOptKey 로 보내
+  //   서버가 "새 선택지 + 옛 것 마감" 대신 같은 선택지의 이름만 바꾼다(정원·참여 인원 유지).
+  if (d.savedOptKey) row.dataset.origKey = String(d.savedOptKey);
   row.dataset.reviewTypeMix = JSON.stringify(Array.isArray(d.reviewTypeMix ?? d.review_type_mix) ? (d.reviewTypeMix ?? d.review_type_mix) : []);
   if (status === "closed") row.style.opacity = ".68";
   const lastBtn = status === "closed"
@@ -2548,6 +2551,7 @@ function renderOptRows(options, opts) {
       unitKind,
       optionUrl:   o.optionUrl ?? o.option_url ?? o.url ?? "",
       optKey:      o.optKey ?? o.opt_key ?? "",
+      savedOptKey: o.savedOptKey ?? "",
       payAmount:   o.payAmount ?? o.pay_amount ?? 0,
       recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
       dailyLimit:  o.dailyLimit ?? o.daily_limit ?? 0,
@@ -2606,7 +2610,7 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     //   ★ 상품 단위는 opt_key 가 곧 상품명이므로 마지막 폴백으로 그것까지 본다.
     const saved = o.productName ?? o.product_name;
     const unit = String(o.unitKind ?? o.unit_kind ?? "");
-    const row = { ...o, productName: String(saved || "").trim()
+    const row = { ...o, savedOptKey: key, productName: String(saved || "").trim()
       || (hit && hit.productName)
       || (unit === "product" ? key : "")
       || firstProd || "" };
@@ -2691,6 +2695,7 @@ function readOptRows() {
     const guide = _ugCompose(r, r.dataset.ig);
     out.push({
       optKey,
+      prevOptKey:    String(r.dataset.origKey || ""),
       productName,
       unitKind,
       optionUrl,

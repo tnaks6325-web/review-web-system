@@ -213,6 +213,8 @@ function _normalizeOptionsInput(arr) {
     const reviewMixState = normalizeReviewTypeMix(obj.reviewTypeMix ?? obj.review_type_mix);
     out.push({
       optKey,
+      // ★★ 이름 바꾸기(rename): 이 줄이 원래 어떤 선택지였는지(저장된 opt_key). 없으면 '' = 종전 동작.
+      prevOptKey: _normOptKey(obj.prevOptKey ?? obj.prev_opt_key) || '',
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
       // ★ 134 복합 작업: 선택 단위(unit)의 소속 상품명과 종류.
       //   unit_kind='product' = 옵션 없는 상품 자체가 선택지 → 시트 옵션 칸에 쓰지 않는다(submit.routes).
@@ -256,6 +258,65 @@ function _validateActiveUnitInflowGuides(inflowType, options) {
  *  ★★ 원자성·상호배제(레드/블루 #2·#7): 자체 트랜잭션 + recruit_campaigns 행 FOR UPDATE로
  *     apply/change-option과 동일 락 계층 확보 → "사용여부 SELECT→DELETE" 사이 동시 apply가
  *     끼어들어 방금 참여한 옵션을 삭제하는 TOCTOU를 봉합. 실패 시 전체 롤백(부분 저장 없음). */
+/**
+ * ★★ 선택지 이름 바꾸기(rename) — 같은 선택지를 새 이름으로 잇는다 (사용자 확정 2026-10-02).
+ * 종전엔 선택지를 이름(opt_key)으로만 구분해 이름을 바꾸면 "옛 선택지 빠짐 + 새 선택지 생김"이 되어
+ *  ① 참여자 있는 옛 이름이 리뷰어 화면에 '마감'으로 남고 ② 새 이름은 0명부터 다시 세어 정원 초과 모집이 됐다.
+ * → 화면이 보낸 prevOptKey(그 줄이 원래 어떤 선택지였는지)로 **선택지 행과 참여 기록의 이름을 함께 바꾼다**.
+ * ★ 바꾸는 곳 = campaign_options.opt_key + campaign_applications.option_key 두 곳뿐.
+ *   이미 접수된 주문(order_submissions.selected_opt_key)·작업표 옵션 칸은 **옛 이름 그대로 둔다**(사용자 확정 (나) — 산 시점의 사실).
+ * ★ fail-safe: 옛 이름이 이번 목록에도 그대로 있거나 / 원장에 없거나 / 같은 옛 이름을 두 줄이 주장하거나 /
+ *   새 이름이 이미 다른 선택지로 살아 있으면 **바꾸지 않는다**(종전 동작 = 새로 만들고 옛 것은 마감·삭제).
+ * ★ 서로 이름을 맞바꾸는 경우를 위해 임시 이름을 거쳐 두 단계로 바꾼다(유니크 충돌 방지).
+ * 호출자가 같은 트랜잭션·캠페인 행 잠금 안에서 부른다.
+ */
+function _planOptionRenames(currentKeys, options, keep) {
+  const cur = new Set(currentKeys);
+  const prevCount = new Map(), targetCount = new Map();
+  for (const o of options) {
+    const p = o && o.prevOptKey;
+    if (!p || p === o.optKey) continue;
+    prevCount.set(p, (prevCount.get(p) || 0) + 1);
+    targetCount.set(o.optKey, (targetCount.get(o.optKey) || 0) + 1);
+  }
+  // 이름을 안 바꾼(또는 새로 추가한) 줄의 이름 — 옛 이름이 여기 있으면 그 선택지는 그대로 남는다(이름 바꾸기 아님)
+  const stay = new Set(options.filter(o => o && (!o.prevOptKey || o.prevOptKey === o.optKey)).map(o => o.optKey));
+  let plan = options
+    .filter(o => o && o.prevOptKey && o.prevOptKey !== o.optKey)
+    .filter(o => cur.has(o.prevOptKey) && !stay.has(o.prevOptKey))
+    .filter(o => prevCount.get(o.prevOptKey) === 1 && targetCount.get(o.optKey) === 1)
+    .map(o => ({ from: o.prevOptKey, to: o.optKey }));
+  // 새 이름이 이미 원장에 있으면 그 이름도 이번에 다른 이름으로 비켜나야만 허용(맞바꾸기). 사슬은 안정될 때까지.
+  for (let changed = true; changed;) {
+    changed = false;
+    const leaving = new Set(plan.map(r => r.from));
+    const next = plan.filter(r => !cur.has(r.to) || leaving.has(r.to));
+    if (next.length !== plan.length) { plan = next; changed = true; }
+  }
+  return plan;
+}
+
+async function _applyOptionRenames(client, campaignId, options, keep) {
+  if (!options.some(o => o && o.prevOptKey && o.prevOptKey !== o.optKey)) return [];
+  const { rows } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+  const plan = _planOptionRenames(rows.map(r => r.opt_key), options, keep);
+  // ★ 임시 이름은 한 번만 만들어 두 표·두 단계에서 같은 값을 쓴다(호출마다 만들면 시각이 달라져
+  //   선택지와 참여 기록이 서로 다른 임시 이름으로 흩어진다 — 코드리뷰 P1).
+  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const tmpKeys = plan.map((_, i) => '__rename_tmp_' + i + '_' + stamp);
+  const tmp = (i) => tmpKeys[i];
+  for (let i = 0; i < plan.length; i++) {
+    await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
+    await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, plan[i].from, tmp(i)]);
+  }
+  for (let i = 0; i < plan.length; i++) {
+    await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
+    await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, tmp(i), plan[i].to]);
+  }
+  if (plan.length) logger.info('[campaign/options] 선택지 이름 변경 ' + campaignId + ' ' + plan.map(r => r.from + ' → ' + r.to).join(', '));
+  return plan;
+}
+
 async function _saveCampaignOptions(campaignId, options) {
   if (!Array.isArray(options)) return; // 미전달=변경 없음
   const keep = new Set(options.map(o => o.optKey));
@@ -264,6 +325,7 @@ async function _saveCampaignOptions(campaignId, options) {
     await client.query('BEGIN');
     const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
     if (!lock.length) { await client.query('ROLLBACK'); return; }
+    await _applyOptionRenames(client, campaignId, options, keep);
     for (const o of options) {
       await client.query(
         `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
@@ -3691,6 +3753,66 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
 // POST /api/campaign/admin/:id/confirm {applicationId} — 만료+기구매(late) 구제의 유일 경로 (admin/master)
 //   유예 정책 제거에 따라, 만료 후 도착한 제출(late_order_id)은 이 수동확정으로만 자리 확정된다.
 //   잠금 계층 apply·주문확정과 동일: 캠페인 행 FOR UPDATE → 신청 행 FOR UPDATE. 동일 phone8 applied 선-취소(레드 #7).
+/**
+ * ★★ 이미 갈라진 선택지 합치기 (2026-10-02 사용자 확정 — 이름 바꾸기 기능 이전에 생긴 분리 정리용)
+ * 이름만 바꿨는데 "옛 이름 = 마감 + 새 이름 = 새 선택지"로 갈라진 공고에서, 옛 선택지의 참여 기록을
+ * 새 선택지로 옮기고 옛 선택지 행을 지운다 → 새 선택지가 정원을 이어서 센다·마감 줄이 사라진다.
+ * ★ 미리보기 기본(confirm !== true 면 쓰기 0) · 캠페인 행 FOR UPDATE · 전부 아니면 전무.
+ * ★ fail-closed: 옛 선택지가 마감(closed)이 아니거나 / 새 선택지가 없거나 / 둘이 같으면 거부.
+ * ★ 주문 기록(order_submissions.selected_opt_key)·작업표 옵션 칸은 옛 이름 그대로 둔다(사용자 확정 (나)).
+ */
+router.post('/admin/:id/options/merge', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const id = String(req.params.id || '');
+  const pairs = (Array.isArray(req.body && req.body.pairs) ? req.body.pairs : [])
+    .map(p => ({ from: _normOptKey(p && p.from), to: _normOptKey(p && p.to) }))
+    .filter(p => p.from && p.to);
+  const confirm = req.body && req.body.confirm === true;
+  if (!pairs.length) return res.status(400).json({ ok: false, error: 'pairs(from,to) 필수' });
+  if (pairs.length > 50) return res.status(400).json({ ok: false, error: '한 번에 50쌍까지' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [id]);
+    if (!lock.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '공고를 찾을 수 없습니다.' }); }
+    const { rows: opts } = await client.query('SELECT opt_key, status FROM campaign_options WHERE campaign_id=$1', [id]);
+    const byKey = new Map(opts.map(o => [o.opt_key, o]));
+    const froms = new Set();
+    const result = [];
+    for (const p of pairs) {
+      const f = byKey.get(p.from), t = byKey.get(p.to);
+      let reason = '';
+      if (p.from === p.to) reason = '같은 이름';
+      else if (!f) reason = '옛 선택지 없음';
+      else if (f.status !== 'closed') reason = '옛 선택지가 마감 상태가 아님';
+      else if (!t) reason = '새 선택지 없음';
+      else if (froms.has(p.from)) reason = '중복 요청';
+      else if (pairs.some(q => q.from === p.to)) reason = '새 선택지가 다른 합치기의 옛 선택지';
+      if (reason) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, error: `${p.from} → ${p.to}: ${reason}`, pair: p }); }
+      froms.add(p.from);
+      const { rows: cnt } = await client.query(
+        'SELECT status, COUNT(*)::int AS n FROM campaign_applications WHERE campaign_id=$1 AND option_key=$2 GROUP BY status', [id, p.from]);
+      result.push({ from: p.from, to: p.to, applications: cnt.reduce((m, r) => (m[r.status] = r.n, m), {}) });
+      if (confirm) {
+        await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [id, p.from, p.to]);
+        await client.query('DELETE FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2', [id, p.from]);
+      }
+    }
+    if (confirm) {
+      await client.query('COMMIT');
+      _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
+      logger.info('[campaign/options/merge] ' + id + ' ' + result.map(r => r.from + ' → ' + r.to).join(', ') + ' by ' + ((req.admin && req.admin.name) || '?'));
+    } else {
+      await client.query('ROLLBACK');
+    }
+    return res.json({ ok: true, dryRun: !confirm, merged: result });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    return next(e);
+  } finally {
+    client.release();
+  }
+});
+
 router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   const { id } = req.params;
   const appId = parseInt(req.body.applicationId, 10);
