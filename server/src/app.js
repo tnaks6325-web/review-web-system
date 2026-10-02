@@ -27,7 +27,6 @@ const productRoutes  = require('./routes/product.routes');
 const csRoutes       = require('./routes/cs.routes');
 const trackBRoutes = require('./routes/trackB.routes');
 const reviewEditRoutes = require('./routes/reviewEdit.routes');
-const workboardConsolidationRoutes = require('./routes/workboardConsolidation.routes');
 const reviewReminderRoutes = require('./routes/reviewReminder.routes');
 
 const app = express();
@@ -118,7 +117,8 @@ app.use('/api/trackb', trackBRoutes);              // Track B(평행 트랙) —
 
 // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체)
 app.use('/api/review-edit', reviewEditRoutes);
-app.use('/api/workboard-consolidation', workboardConsolidationRoutes);
+// (/api/workboard-consolidation 전환 조작판 7개는 2026-08-28 enabled 전환 완료 뒤 미사용 → 2026-10-02 제거 — 결정 186 71번.
+//  전환·되돌리기 함수는 workboardConsolidation.service 에 그대로 있다.)
 app.use('/api/review-reminders', reviewReminderRoutes);
 
 app.use('/api/viewer',    diagRoutes);
