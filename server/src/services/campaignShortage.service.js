@@ -55,7 +55,20 @@ function computeShortage(c, counts, f, yesterday) {
   // 어제 열려 있었는가 — 게시 시각(173)이 오늘 이전이어야 한다. ★ 신청 기록 유무로 추측하지 않는다
   //   (어제 0명 참여가 가장 큰 부족이다 — 코덱스 리뷰). 게시 시각을 모르면(옛 행) 생성 시각으로 본다.
   const pub = c.published_at || c.created_at;
-  if (!pub || !(new Date(pub).getTime() < Number(f.todayStartMs))) return null;
+  const todayStartMs = Number(f.todayStartMs), yStartMs = todayStartMs - 86400000;
+  const pubMs = pub ? new Date(pub).getTime() : NaN;
+  if (!(pubMs < todayStartMs)) return null;
+  // ★ 어제 처음 게시했는데 어제 신청 마감 시각 뒤였다면 어제는 아무도 신청할 수 없었다 → 묻지 않는다(코덱스 리뷰)
+  if (pubMs >= yStartMs) {
+    const we = String(c.window_end || '').trim(), ws = String(c.window_start || '').trim();
+    const endMin = (ws && we) ? st.timeStrToMinutes(we) : null;
+    const buf = Number(c.close_buffer_min != null ? c.close_buffer_min : 10) || 0;
+    const cutoffMs = endMin != null ? yStartMs + (endMin - buf) * 60000 : todayStartMs;
+    if (pubMs >= cutoffMs) return null;
+  }
+  // ★ 어제 이후 인원 규칙(일건수·총원·주말·시작일·신청 시간)이 바뀌었으면 어제 정원을 다시 계산할 수 없다 → 묻지 않는다
+  //   (175 트리거가 남기는 시각 — 지금 설정으로 어제를 재구성하면 없는 부족이 생긴다 — 코덱스 리뷰)
+  if (c.quota_rules_changed_at && new Date(c.quota_rules_changed_at).getTime() >= yStartMs) return null;
   // ★ 날짜별 계획 킬스위치가 꺼져 있으면 정원 판정(computeCampaignState)처럼 계획을 무시한다(코덱스 리뷰)
   const plans = (PLAN_ON() && counts.plans) || null;
   const eff = st.effectiveQuota(c, counts);

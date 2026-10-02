@@ -129,5 +129,7 @@ ok('반영 요청은 화면 날짜를 싣고 서버가 다르면 거절', /date:
 ok('열린 팝업도 자정이 지나면 닫고 새 목록', /if \(S\.open && S\.date && kstYesterday\(\) !== S\.date/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
 ok('잠근 행으로 후보 조건 전체(이월 방식·보류 포함)·받는 사람 재확인', /if \(!_stillEligible\(camp\)\)/.test(src) && /carry_strategy \|\| 'next'\) === 'extend'/.test(src) && /'not_recipient'\)/.test(src));
 ok('함께 쓰는 작업표라 줄을 안 바꾼 경우 경고로 말한다', /reason === 'shared_worktable'\) \|\| \(rb && rb\.reason === 'shared_worktable'\)/.test(src));
+ok('어제 이후 인원 규칙이 바뀐 공고·어제 마감 뒤 게시 공고는 묻지 않음', /c\.quota_rules_changed_at && new Date\(c\.quota_rules_changed_at\)\.getTime\(\) >= yStartMs/.test(src) && /if \(pubMs >= cutoffMs\) return null/.test(src));
+ok('175 트리거 = 인원 규칙 칸이 실제로 달라질 때만', (() => { const m = read('migrations/175_campaign_quota_rules_changed_at.sql'); return /BEFORE UPDATE ON recruit_campaigns/.test(m) && /NEW\.daily_limit\s+IS DISTINCT FROM OLD\.daily_limit/.test(m) && /NEW\.skip_weekends\s+IS DISTINCT FROM OLD\.skip_weekends/.test(m); })());
 console.log(`\ncampaignShortagePrompt: ${passed} passed`);
 process.exit(0);

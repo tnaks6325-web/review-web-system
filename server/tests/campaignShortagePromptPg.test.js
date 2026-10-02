@@ -253,6 +253,27 @@ async function app(cid, phone, when, status = 'submitted') {
   const rR = await svc.applyDecisions({ name: '박세희' }, [{ campaignId: P + 'R', choice: 'extend' }]);
   ok('⑬ 보관된 공고는 반영 거절 · 기록 0', hasR && rR.results[0].ok === false && (await pool.query(`SELECT 1 FROM campaign_plan_events WHERE campaign_id=$1`, [P + 'R'])).rowCount === 0, rR);
 
+  // ⑭ 트리거(175)를 진짜 UPDATE 로 돌려 본다 — 상관없는 칸은 안 남기고, 인원 규칙이 바뀌면 남긴다 → 그 공고는 묻지 않음
+  await camp(P + 'S', { title: '테스트S' }); await app(P + 'S', '00000161', D2NOON);
+  ok('⑭-0 처음엔 물음', mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'S'));
+  await pool.query(`UPDATE recruit_campaigns SET title = '테스트S2' WHERE id=$1`, [P + 'S']);
+  const s1 = (await pool.query(`SELECT quota_rules_changed_at FROM recruit_campaigns WHERE id=$1`, [P + 'S'])).rows[0].quota_rules_changed_at;
+  ok('⑭-1 제목만 바꾸면 기록 없음 · 계속 물음', s1 === null && mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'S'));
+  await pool.query(`UPDATE recruit_campaigns SET daily_limit = 10 WHERE id=$1`, [P + 'S']);
+  const s2 = (await pool.query(`SELECT quota_rules_changed_at FROM recruit_campaigns WHERE id=$1`, [P + 'S'])).rows[0].quota_rules_changed_at;
+  ok('⑭-2 일건수를 바꾸면 기록 · 어제 정원을 알 수 없어 묻지 않음', !!s2 && !mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'S'));
+
+  // ⑮ 어제 신청 마감(18:00) 뒤에 처음 게시 → 어제는 아무도 신청할 수 없었다 → 묻지 않음 / 마감 전 게시는 물음
+  for (const [k, hh, want] of [['T', '20:00', false], ['U', '09:00', true]]) {
+    await camp(P + k, { title: '테스트' + k });
+    await pool.query(`UPDATE recruit_campaigns SET window_start='08:00', window_end='18:00', close_buffer_min=0,
+        quota_rules_changed_at = NULL,
+        published_at = ((date_trunc('day', now() AT TIME ZONE 'Asia/Seoul') - interval '1 day' + $2::time) AT TIME ZONE 'Asia/Seoul') WHERE id=$1`, [P + k, hh]);
+    await pool.query(`UPDATE recruit_campaigns SET quota_rules_changed_at = NULL WHERE id=$1`, [P + k]);
+    const has = mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + k);
+    ok(`⑮ 어제 ${hh} 게시 → ${want ? '물음' : '묻지 않음'}`, has === want);
+  }
+
   console.log(`\ncampaignShortagePromptPg: ${passed} passed`);
   await pool.end().catch(() => {});
   process.exit(process.exitCode || 0);
