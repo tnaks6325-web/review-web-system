@@ -53,7 +53,7 @@ ok('잠근 순간 오늘 인원을 다시 계산 — 바뀌었으면 거절(낡�
 const plan = read('src/services/campaignPlan.service.js');
 ok('savePlans 훅은 미전달이면 무동작(종전 동작)', /if \(opts && typeof opts\.afterLock === 'function'\)/.test(plan) && /if \(opts && typeof opts\.beforeCommit === 'function'\) await opts\.beforeCommit\(client\)/.test(plan)
   && plan.indexOf('opts.beforeCommit(client)') < plan.indexOf("await client.query('COMMIT');\n    // 작업표 원본"));
-ok('블로그 공고 제외', /COALESCE\(work_kind,''\) <> 'blog'/.test(src));
+ok('블로그 공고 제외', /COALESCE\(rc\.work_kind,''\) <> 'blog'/.test(src));
 ok('시트 일정 기능이 켜지면 시트 연결 공고는 묻지 않음(실패와 일정 없음을 구분할 수 없음)', /scheduleUnknown\(c\) \|\|/.test(src) && /schMap === null \|\| !st\.isUsableSchedule\(scheduleFor\(schMap, c\)\)/.test(src));
 ok('잠근 순간 오늘 다시 열 수 있는지 재확인', /const again = _canRaiseToday\(camp, stNow, lockNow\)/.test(src));
 const routesSrc = read('src/routes/campaign.routes.js');
@@ -114,13 +114,13 @@ ok('자율주문(시간창 없음)은 하루 종일 가능', sb.f({}, { state: '
 ok('적용된 173 는 처음 모양 그대로(컬럼 두 개만) — 뒤에 덧붙이지 않는다', (() => { const m = read('migrations/173_campaign_shortage_prompt.sql'); return /shortage_prompt_off_at/.test(m) && !/published_at/.test(m) && !/CREATE UNIQUE INDEX/.test(m); })());
 ok('보관 해제도 게시 시각을 새로 남긴다(보관 중은 리뷰어에게 안 보였다)', /published_at = CASE WHEN status = 'active' THEN NOW\(\) ELSE published_at END/.test(require('fs').readFileSync(require('path').join(__dirname,'../src/services/campaignArchive.service.js'),'utf8')));
 ok('반영 실패 뒤 재조회도 실패하면 계속 재시도(loadedOnce 되돌림)', /if \(failed\) \{ S\.loadedOnce = false;/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
-ok('리뷰어 숨김(테스트) 공고 제외 · 이월 보류는 isCarryHold 단일 출처', /COALESCE\(reviewer_hidden, FALSE\) = FALSE/.test(src) && /rows\.filter\(c => !st\.isCarryHold\(c\)\)/.test(src) && !/carry_mode,'auto'\) <> 'hold'/.test(src));
+ok('리뷰어 숨김(테스트) 공고 제외 · 이월 보류는 isCarryHold 단일 출처', /COALESCE\(reviewer_hidden, FALSE\) = FALSE/.test(src) && /rows\.filter\(c => !st\.isCarryHold\(c\) &&/.test(src) && !/carry_mode,'auto'\) <> 'hold'/.test(src));
 ok('날짜별 계획 킬스위치가 꺼지면 오늘 더하기 막음', /canAddToday: PLAN_ON\(\) &&/.test(src) && /CAMPAIGN_DAILY_PLAN !== '0'/.test(src));
 ok('173 컬럼도 부팅 점검 대상', /\['recruit_campaigns', 'shortage_prompt_off_at'\]/.test(require('fs').readFileSync(require('path').join(__dirname,'../index.js'),'utf8')));
 ok('자정을 넘기면 새 날짜 목록을 다시 받는다', /if \(S\.date && kstYesterday\(\) !== S\.date\)/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
 ok('리뷰어앱 스코프 편집으로 게시 전환해도 게시 시각 기록', /published_at = CASE WHEN \$3 = 'active' AND status IS DISTINCT FROM 'active' THEN NOW\(\)/.test(require('fs').readFileSync(require('path').join(__dirname,'../src/routes/campaign.routes.js'),'utf8')));
 ok('잠근 행으로 다시 확인 = 공용 함수를 두 갈래가 함께 씀(오늘 더하기·기간 늘리기)', /await _lockedRecheck\(client, camp, d, it, cur, admin, opts\)/.test(src) && /await _lockedRecheck\(client, lk\[0\], d, it, cur, admin, opts\)/.test(src) && /!c\.archived_at && !c\.shortage_prompt_off_at/.test(src));
-ok('상품별 하루 한도 공고는 오늘 더하기 막음(목록·잠금 둘 다)', /_optionCappedIds\(db, ids\)/.test(src) && /_optionCappedIds\(client, \[d\.campaignId\]\)/.test(src) && /if \(optCapped === null \|\| optCapped\.has\(String\(c\.id\)\)\) continue/.test(src));
+ok('상품별 하루 한도 공고는 오늘 더하기 막음(목록·잠금 둘 다)', /_optionCappedIds\(db, ids, /.test(src) && /_optionCappedIds\(client, \[d\.campaignId\], /.test(src) && /if \(optCapped === null \|\| optCapped\.has\(String\(c\.id\)\)\) continue/.test(src));
 ok('반영 요청은 50건씩 나눠 보낸다', /for \(var bi = 0; bi < send\.length; bi \+= 50\)/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
 ok('잠근 순간 어제 부족 인원도 다시 계산 — 바뀌었으면 거절', /_loadFacts\(client, \[d\.campaignId\], lockNow/.test(src) && /'stale_shortage'\)/.test(src));
 ok('계획 킬스위치가 꺼지면 어제 계획도 무시', /const plans = \(PLAN_ON\(\) && counts\.plans\) \|\| null/.test(src));
@@ -140,5 +140,9 @@ ok('참여형으로 바꾼 날도 게시 시각을 새로 남김', /COALESCE\(\$
 ok('177 = 작업 종류 변경도 기록 · 배포 시각으로 기존 공고 채움', (() => { const m = read('migrations/177_campaign_quota_rules_init.sql'); return /NEW\.work_kind\s+IS DISTINCT FROM OLD\.work_kind/.test(m) && /UPDATE recruit_campaigns SET quota_rules_changed_at = NOW\(\) WHERE quota_rules_changed_at IS NULL/.test(m); })());
 ok('177 미적용이면 팝업을 끈다 · 확정 시각 미상 공고 제외', /filename = '177_campaign_quota_rules_init\.sql'/.test(src) && /if \(unknownTime === null \|\| unknownTime\.has\(String\(c\.id\)\)\) continue/.test(src));
 ok('고를 게 없어도 15분마다 다시 받는다', /if \(now - \(S\.lastFetch \|\| 0\) < REFRESH_MS\) return;/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
+ok('178 = 연결 작업표 변경도 기록', (() => { const m = read('migrations/178_campaign_quota_rules_link.sql'); return /NEW\.linked_sheet_id\s+IS DISTINCT FROM OLD\.linked_sheet_id/.test(m) && /NEW\.linked_tab_name\s+IS DISTINCT FROM OLD\.linked_tab_name/.test(m); })());
+ok('주문 원장 조회 실패·함께 쓰는 작업표면 어제 수를 모른다 → 묻지 않음', /if \(!ln \|\| !lp \|\| !ln\.ok \|\| !lp\.ok\) continue/.test(src) && /ln\.sharedTab \|\| lp\.sharedTab\)\) continue/.test(src));
+ok('작업 종류는 공고>탭(resolveWorkKind) · 옵션 변경 공고 제외 · 연결 탭 미상 주문도 제외', /resolveWorkKind\(\{ campaignKind: c\.work_kind, tabKind: c\._tab_work_kind \}\)/.test(src) && /OR updated_at >= \$2/.test(src) && /os\.sheet_id = k\.sh AND os\.tab_name = k\.tb/.test(src));
+ok('잠근 순간 더할 수 있는 인원이 화면과 다르면 거절', /if \(full !== it\.addable\) throw/.test(src));
 console.log(`\ncampaignShortagePrompt: ${passed} passed`);
 process.exit(0);

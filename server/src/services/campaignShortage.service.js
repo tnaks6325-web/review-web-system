@@ -144,12 +144,14 @@ const PLAN_ON = () => process.env.CAMPAIGN_DAILY_PLAN !== '0';   // campaignPlan
  * 늘린 자리를 아무도 고를 수 없다 → 그런 공고는 "오늘에 더하기"를 막는다(코덱스 리뷰).
  * ★ 조회 실패 = null(모름) → 호출부가 막는 쪽으로 접는다(조용한 무동작 금지).
  */
-async function _optionCappedIds(db, ids) {
+async function _optionCappedIds(db, ids, sinceMs) {
   try {
+    // ★ 어제 이후 옵션(상태·한도)이 바뀐 공고도 어제 옵션 한도를 다시 알 수 없다 → 같이 뺀다(코덱스 리뷰)
     const { rows } = await db.query(
       `SELECT DISTINCT campaign_id FROM campaign_options
-        WHERE campaign_id = ANY($1::text[]) AND COALESCE(status,'active') <> 'closed'
-          AND COALESCE(daily_limit,0) > 0`, [ids.map(String)]);
+        WHERE campaign_id = ANY($1::text[])
+          AND ((COALESCE(status,'active') <> 'closed' AND COALESCE(daily_limit,0) > 0)
+               OR updated_at >= $2)`, [ids.map(String), new Date(sinceMs)]);
     return new Set(rows.map(r => String(r.campaign_id)));
   } catch (e) {
     if (e && e.code === '42P01') return new Set();
@@ -166,15 +168,19 @@ function _stillEligible(c) {
 
 async function _loadCandidates(db) {
   const { rows } = await db.query(
-    `SELECT * FROM recruit_campaigns
+    `SELECT rc.*, tk.work_kind AS _tab_work_kind FROM recruit_campaigns rc
+       LEFT JOIN LATERAL (SELECT tc.work_kind FROM tab_configs tc
+                           WHERE tc.sheet_id = rc.linked_sheet_id AND tc.tab_name = rc.linked_tab_name LIMIT 1) tk ON TRUE
       WHERE participation_mode = TRUE AND status = 'active'
         AND archived_at IS NULL AND shortage_prompt_off_at IS NULL
         AND COALESCE(reviewer_hidden, FALSE) = FALSE
         AND COALESCE(carry_strategy,'next') = 'extend'
-        AND COALESCE(work_kind,'') <> 'blog'`);   // 블로그는 하루 인원 개념이 없다(일건수 = 총원 보정값)
+        AND COALESCE(rc.work_kind,'') <> 'blog'`);   // 블로그는 하루 인원 개념이 없다(일건수 = 총원 보정값)
   // ★ 리뷰어 숨김(테스트) 공고는 운영 팝업에 올리지 않는다(코덱스 리뷰).
   // ★ 이월 보류 판정은 정원 판정과 같은 isCarryHold 단일 출처(킬스위치 CAMPAIGN_CARRY_HOLD=0 반영 — SQL 사본 금지).
-  return rows.filter(c => !st.isCarryHold(c));
+  // ★ 작업 종류는 공고 > 탭 순(단일 출처 resolveWorkKind) — 공고 칸이 비고 탭이 블로그인 옛 작업도 뺀다(코덱스 리뷰)
+  const { resolveWorkKind } = require('../utils/workKind');
+  return rows.filter(c => !st.isCarryHold(c) && resolveWorkKind({ campaignKind: c.work_kind, tabKind: c._tab_work_kind }) !== 'blog');
 }
 
 /**
@@ -197,6 +203,12 @@ async function _loadFacts(db, ids, now, countsNow) {
     const raw = (o) => (o && o.applications ? Number(o.applications.submittedBeforeToday) || 0 : Number(o && o.submittedBeforeToday) || 0);
     const appsY = Math.max(0, raw(cn) - raw(cp));
     const ln = cn.linked, lp = cp.linked;
+    // ★ 주문 원장을 합치는 운영(countBasis='max')인데 어제·오늘 어느 쪽이든 연결 주문을 못 셌거나(조회 실패)
+    //   다른 공고와 함께 쓰는 작업표라 주문을 이 공고에 돌릴 수 없으면 → 어제 수를 모른다 → 묻지 않는다(코덱스 리뷰)
+    if (cn.countBasis === 'max' && cp.countBasis === 'max') {
+      if (!ln || !lp || !ln.ok || !lp.ok) continue;
+      if (!ln.noTab && (ln.sharedTab || lp.sharedTab)) continue;
+    }
     // ★ 주문 원장은 깔때기가 실제로 합쳤을 때만(countBasis='max') 쓴다 — 운영 되돌리기 스위치
     //   (CAMPAIGN_COUNT_BASIS=applications · 표 기준 observe)를 따른다(코덱스 리뷰).
     const ordersY = (cn.countBasis === 'max' && cp.countBasis === 'max'
@@ -212,15 +224,21 @@ async function _loadFacts(db, ids, now, countsNow) {
  * 확정 시각을 모르는 참여가 있는 공고 — 정원 깔때기는 그런 행을 "오늘 이전"으로 세므로, 어제 몇 명이었는지 알 수 없다
  * → 그 공고는 묻지 않는다(코덱스 리뷰). 조회 실패 = null(모름) → 호출부가 전부 묻지 않는다.
  */
-async function _unknownTimeIds(db, ids) {
+async function _unknownTimeIds(db, cands) {
+  const ids = cands.map(c => String(c.id));
   try {
     const { rows } = await db.query(
       `SELECT campaign_id::text AS id FROM campaign_applications
         WHERE campaign_id = ANY($1::text[]) AND status = 'submitted' AND submitted_at IS NULL
        UNION
        SELECT substring(sheet_id from 10) AS id FROM order_submissions
-        WHERE sheet_id = ANY($2::text[]) AND deleted_at IS NULL AND submitted_at IS NULL`,
-      [ids.map(String), ids.map(i => 'campaign:' + i)]);
+        WHERE sheet_id = ANY($2::text[]) AND deleted_at IS NULL AND submitted_at IS NULL
+       UNION
+       SELECT k.id FROM unnest($1::text[], $3::text[], $4::text[]) AS k(id, sh, tb)
+        WHERE k.sh <> '' AND EXISTS (SELECT 1 FROM order_submissions os
+                 WHERE os.sheet_id = k.sh AND os.tab_name = k.tb AND os.deleted_at IS NULL AND os.submitted_at IS NULL)`,
+      [ids, ids.map(i => 'campaign:' + i),
+       cands.map(c => String(c.linked_sheet_id || '')), cands.map(c => String(c.linked_tab_name || ''))]);
     return new Set(rows.map(r => String(r.id)));
   } catch (e) {
     logger.warn(`[campaignShortage] 확정 시각 미상 조회 실패: ${e.message}`);
@@ -271,8 +289,8 @@ async function listShortages(admin, opts = {}) {
     linkedWorkOrdersForCampaigns(db, ids, ['created_by']).catch(() => new Map()),
     _decidedFor(db, ids, yesterday),
     st.fetchCampaignCounts(db, ids, now),
-    _optionCappedIds(db, ids),
-    _unknownTimeIds(db, ids),
+    _optionCappedIds(db, ids, st.kstDayStartUtc(now).getTime() - 86400000),
+    _unknownTimeIds(db, cands),
   ]);
   const facts = await _loadFacts(db, ids, now, countsMap);
   // ★ 시트 일정 공고(063, CAMPAIGN_SHEET_SCHEDULE=1)는 정원을 시트가 정한다 — 이월 개념이 없어 묻지 않는다(코덱스 리뷰).
@@ -367,7 +385,7 @@ function _worktableNote(ws) {
 async function _lockedRecheck(client, camp, d, it, cur, admin, opts) {
   const err = (msg, code) => Object.assign(new Error(msg), { code });
   if (!_stillEligible(camp)) throw err('그 사이 공고가 보관·게시 해제되었거나 이미 처리됐습니다', 'not_eligible');
-  const capNow = await _optionCappedIds(client, [d.campaignId]);
+  const capNow = await _optionCappedIds(client, [d.campaignId], st.kstDayStartUtc(new Date()).getTime() - 86400000);
   if (capNow === null || capNow.has(String(d.campaignId))) throw err('상품별 하루 한도가 정해진 공고라 처리할 수 없습니다', 'not_eligible');
   if (!opts.skipRecipient) {
     const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
@@ -436,7 +454,11 @@ async function applyDecisions(admin, decisions, opts = {}) {
             if (!again.ok || isWeekendClosedOn(camp, cur.today, counts && counts.plans)) throw Object.assign(new Error(again.why || '오늘은 쉬는 날이라 오늘에 더할 수 없습니다'), { code: 'today_blocked' });
             const q = Number(stNow.dailyQuota) || 0;
             if (q !== it.todayQuota) throw Object.assign(new Error(`그 사이 오늘 인원이 ${it.todayQuota}명 → ${q}명으로 바뀌었습니다 — 다시 확인해 주세요`), { code: 'stale_today' });
-            amount = Math.min(it.addable, _roomToday(camp, counts, q, cur.today, st.isUsableSchedule(schedule) ? schedule : null));
+            const full = Math.max(0, Math.min(it.shortage, _roomToday(camp, counts, q, cur.today, st.isUsableSchedule(schedule) ? schedule : null), MAX_DAY_COUNT - q));
+            // ★ 그 사이 앞날 계획 등이 바뀌어 더할 수 있는 인원이 화면과 달라졌으면 거절하고 다시 묻는다
+            //   (옛 값만 더하고 "처리함"을 남기면 나머지를 영영 다시 안 묻는다 — 코덱스 리뷰)
+            if (full !== it.addable) throw Object.assign(new Error(`그 사이 오늘 더할 수 있는 인원이 ${it.addable}명 → ${full}명으로 바뀌었습니다 — 다시 확인해 주세요`), { code: 'stale_today' });
+            amount = full;
             if (!(amount > 0)) throw Object.assign(new Error('남은 인원이 없어 오늘에 더할 수 없습니다'), { code: 'no_room' });
             from = q;
             return { todayCount: q + amount };

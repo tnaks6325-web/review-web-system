@@ -132,6 +132,8 @@ async function app(cid, phone, when, status = 'submitted') {
   await pool.query(`INSERT INTO tab_configs (sheet_id, tab_name, sheetless) VALUES ($1,$2,TRUE)`, [SH, TB]);
   await camp(P + 'H', { title: '테스트H', dl: 3, rt: 12 });
   await pool.query(`UPDATE recruit_campaigns SET linked_sheet_id=$2, linked_tab_name=$3 WHERE id=$1`, [P + 'H', SH, TB]);
+  // 연결 탭을 바꾸면 규칙 변경으로 기록된다(178) — 이 공고는 "그 전부터 연결돼 있던" 상황을 흉내 내므로 기록을 지운다
+  await pool.query(`UPDATE recruit_campaigns SET quota_rules_changed_at = NULL WHERE id=$1`, [P + 'H']);
   await app(P + 'H', '00000081', D2NOON); await app(P + 'H', '00000082', YNOON);   // 어제 3명 중 1명 → 2명 부족
   const { sheetDateStr } = require('../src/utils/worktablePlan');
   const today = st.kstTodayStr();
