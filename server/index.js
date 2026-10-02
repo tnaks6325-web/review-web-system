@@ -35,6 +35,10 @@ const REQUIRED_SCHEMA = [
   ['reviewer_identities', 'shopping_id'],          // 147 — 코드 명의별 공통 쇼핑 아이디
   ['campaign_applications', 'owner_phone8'],       // 063 — apply INSERT·my-status·관제
   ['recruit_campaigns', 'multi_account_mode'],     // 063 — 공개 /list 명시 SELECT
+  ['recruit_campaigns', 'shortage_prompt_off_at'], // 173 — 부족 인원 팝업 후보 조회·기간 늘리기(없으면 팝업이 조용히 빈다)
+  ['recruit_campaigns', 'shortage_prompt_off_by'],  // 173
+  ['recruit_campaigns', 'published_at'],           // 174 — 게시 토글·공고 수정 UPDATE(없으면 게시 전환 전면 42703)
+  ['recruit_campaigns', 'quota_rules_changed_at'], // 175 — 없으면 어제 정원을 지금 설정으로 잘못 다시 계산한다(부족 인원 팝업)
   ['recruit_campaigns', 'multi_daily_limit'],      // 063 — apply 게이트·공고 저장
   ['recruit_campaigns', 'sub_hold_ttl_min'],       // 063 — 공개 /list 명시 SELECT
   ['campaign_applications', 'review_fee_snapshot'],// 082 — apply INSERT(없으면 참여 전면 42703)·리뷰어 참여내역
