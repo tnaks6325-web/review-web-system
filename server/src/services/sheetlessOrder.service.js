@@ -182,6 +182,67 @@ function resolveProductLabel(picked, labels) {
   return inLabel.length === 1 ? inLabel[0] : '';
 }
 
+/** 구매양식 링크 화면의 「구매한 상품」 선택지 상한 — 이보다 많으면 고르는 화면이 성립하지 않는다. */
+const PRODUCT_CHOICE_CAP = 30;
+
+/**
+ * 구매양식 링크로 들어온 리뷰어가 고를 **상품 선택지**(2026-10-02, 사용자 확정 B안).
+ *
+ * 구매양식 링크(단축 링크·직접 주소) 화면에는 상품을 고르는 곳이 없어, 상품이 여럿인 작업에서
+ * 표에 미리 적힌 상품이 그대로 남았다(고양이사료 51건 중 37건이 실제 산 상품과 달랐다).
+ *
+ * 선택지 = ① 그 작업에 연결된 **살아 있는 모집공고의 상품명**(공고 순서)이 2종 이상이면 그것만,
+ *   아니면 ① ∪ ② **작업표 「상품」 칸의 값**(줄 순서).
+ *   ①이 기준인 이유: 공고에서 새로 연 상품은 아직 작업표에 줄이 없고(실측: 친구사이 HIA-1450HM),
+ *   공고에서 마감한 옛 모델은 작업표에만 남아 있다.
+ * ★ 무시트 작업만 — 시트 기반 탭은 「상품」 칸을 시스템이 쓰지 않는다.
+ * ★ 2종 미만이면 [] — 고를 것이 없다(화면은 종전 그대로).
+ * ★ 조회 실패도 [] (fail-open — 선택지를 못 그려도 접수는 종전대로 된다).
+ */
+async function listProductChoices(db, sheetId, tabName) {
+  if (!sheetId || !tabName) return [];
+  try {
+    const { isSheetless } = require('../utils/sheetlessScope');
+    if (!(await isSheetless(db, sheetId, tabName))) return [];
+    const { PRODUCT_HEADER } = require('./orderLedger.service');
+    const { rows: camp } = await db.query(
+      `SELECT btrim(COALESCE(NULLIF(o.product_name, ''), o.opt_key)) AS l,
+              MIN(COALESCE(o.sort_order, 0)) AS so, MIN(o.created_at) AS c
+         FROM recruit_campaigns rc
+         JOIN campaign_options o ON o.campaign_id = rc.id AND COALESCE(o.status, 'active') <> 'closed'
+         LEFT JOIN tab_configs tc ON tc.sheet_id = $1 AND tc.tab_name = $2
+        WHERE rc.linked_sheet_id = $1
+          AND (rc.linked_tab_name = $2 OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+          AND rc.archived_at IS NULL
+          AND COALESCE(btrim(COALESCE(NULLIF(o.product_name, ''), o.opt_key)), '') <> ''
+        GROUP BY 1 ORDER BY 2, 3`, [sheetId, tabName]);
+    const { rows: wt } = await db.query(
+      `SELECT btrim(row_json->>$3) AS l, MIN(seq) AS s
+         FROM campaign_participants
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+          AND COALESCE(btrim(row_json->>$3), '') <> ''
+        GROUP BY 1 ORDER BY 2`, [sheetId, tabName, PRODUCT_HEADER]);
+    const norm = v => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const seen = new Set();
+    const out = [];
+    // ★ 공고에 살아 있는 상품이 2종 이상이면 그것만 — 공고에서 마감한 옛 모델(작업표에만 남은 값)을
+    //   새 리뷰어에게 내밀지 않는다(실측: 친구사이 HA-HD1500→HD1590 교체). 공고가 1종 이하이면
+    //   (공고 하나가 여러 상품을 함께 모집) 작업표 값으로 채운다.
+    const source = camp.length >= 2 ? camp : [...camp, ...wt];
+    for (const r of source) {
+      const k = norm(r.l);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push(r.l);
+      if (out.length >= PRODUCT_CHOICE_CAP) break;
+    }
+    return out.length >= 2 ? out : [];
+  } catch (err) {
+    logger.warn(`[sheetlessOrder] 상품 선택지 조회 실패(무시 — 화면은 종전대로): ${err.message}`);
+    return [];
+  }
+}
+
 /** 빈 줄 후보를 한 번에 읽는 상한 — 한 작업표의 빈 줄이 이보다 많아도 앞에서부터 고르면 충분하다. */
 const PICK_CANDIDATE_CAP = 3000;
 
@@ -1067,6 +1128,7 @@ module.exports = {
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,
   resolveProductLabel,
+  listProductChoices,
   __canAppendConfirmedOverflowOrderForTest: _canAppendConfirmedOverflowOrder,
   __pickOpenSlotForTest: _pickOpenSlot,
   __setPoolForTest,

@@ -6031,6 +6031,9 @@ function initOrderFormMode() {
   // ★ 옵션 데이터 비동기 로드 (화면 표시와 병렬)
   _loadReviewerOptionData(sheetId, tabName, gid, round);
 
+  // ★ 2026-10-02 B안: 상품이 여럿인 작업이면 「구매한 상품」 선택지를 받아 카드마다 그린다
+  _ofpLoad(sheetId, tabName);
+
   // ★ 제공정보 추가안내(진행방식/사업자번호/특이사항) 비동기 로드
   _loadProviderInfo(sheetId, tabName, incomeType);
 
@@ -7310,6 +7313,9 @@ function _buildOrderCardHtml(cid, idx, type) {
       </div>
     </div>
 
+    <!-- ★ 2026-10-02 B안: 구매한 상품(상품 2종 이상인 작업 · 구매양식 링크 화면에서만 _ofpRender 가 채운다) -->
+    <div class="ofp" id="${cid}_prodPick" hidden></div>
+
     <!-- 입력 폼 -->
     <div style="font-size:.68rem;font-weight:700;color:var(--t3);margin-bottom:10px;letter-spacing:.04em">✏️ 아래 정보를 입력해주세요<span style="color:#F43F5E;font-weight:600">(*별표포함시 직접수정 필수.)</span></div>
 
@@ -8526,6 +8532,96 @@ function _renderInlineSubList(subs) {
 }
 
 /** ── 주문카드 추가 ── */
+/* ══════════════════════════════════════════════════════
+   구매한 상품 선택 (2026-10-02 사용자 확정 B안)
+   ──────────────────────────────────────────────────────
+   구매양식 링크로 들어온 리뷰어는 상품을 고를 곳이 없어, 상품이 여럿인 작업에서 표에 미리 적힌
+   상품이 그대로 남았다(고양이사료 51건 중 37건 불일치). 캡처를 올리면 서버가 읽은 상품을 그 작업
+   상품 중 하나로 짝지어(productLabel) 미리 골라 두고, 리뷰어는 확인만 한다.
+   ★ 선택지·짝짓기는 서버 단일 출처(listProductChoices·resolveProductLabel) — 여기엔 규칙 사본이 없다.
+   ★ 처음엔 아무것도 고르지 않는다(1번 자동 선택 = 이번 사고의 재현).
+   ★ 참여형 공고 화면(embed)·배치·네이버+쿠팡 모드는 대상 아님 — 상품은 홀드가 정한다.
+   ★ onclick 에 상품명을 넣지 않는다 — 인덱스만(위임 리스너).
+   ══════════════════════════════════════════════════════ */
+const _OFP = { products: [], pick: {}, ai: {}, aiDone: {}, capName: {}, open: {}, bound: false };
+
+function _ofpActive() {
+  return _OFP.products.length >= 2 && !_EMBED_CTX && !_BATCH && !window._ncMode && !_PREVIEW_MODE;
+}
+
+async function _ofpLoad(sheetId, tabName) {
+  _OFP.products = [];
+  if (_EMBED_CTX || !sheetId || !tabName) return;
+  try {
+    const qs = new URLSearchParams({ sheetId, tabName }).toString();
+    const r = await fetch(API_BASE_URL + "/api/tab/product-choices?" + qs);
+    const j = await r.json();
+    _OFP.products = (j && j.ok && Array.isArray(j.products)) ? j.products.map(x => String(x || "")).filter(Boolean) : [];
+  } catch (e) {
+    console.warn("[상품 선택] 선택지 조회 실패 — 종전 화면 유지:", e.message);
+    _OFP.products = [];
+  }
+  _orderCardIds.forEach(_ofpRender);
+}
+
+function _ofpOnExtracted(cid, label, rawName) {
+  _OFP.capName[cid] = rawName || "";
+  _OFP.aiDone[cid] = true;
+  const ok = label && _OFP.products.indexOf(label) >= 0 ? label : "";
+  _OFP.ai[cid] = ok;
+  // 리뷰어가 이미 직접 골랐으면 덮지 않는다(사람이 정한 값)
+  if (ok && !_OFP.pick[cid]) { _OFP.pick[cid] = ok; _OFP.open[cid] = false; }
+  _ofpRender(cid);
+}
+
+function _ofpOnCaptureCleared(cid) {
+  if (_OFP.pick[cid] && _OFP.pick[cid] === _OFP.ai[cid]) delete _OFP.pick[cid];
+  delete _OFP.ai[cid]; delete _OFP.aiDone[cid]; delete _OFP.capName[cid]; delete _OFP.open[cid];
+  _ofpRender(cid);
+}
+
+function _ofpRender(cid) {
+  const box = document.getElementById(cid + "_prodPick");
+  if (!box) return;
+  if (!_ofpActive()) { box.hidden = true; box.innerHTML = ""; return; }
+  if (!_OFP.bound) {
+    _OFP.bound = true;
+    document.addEventListener("click", function (ev) {
+      const b = ev.target && ev.target.closest ? ev.target.closest("[data-ofp-cid]") : null;
+      if (!b) return;
+      const c = b.getAttribute("data-ofp-cid");
+      if (b.hasAttribute("data-ofp-more")) { _OFP.open[c] = true; _ofpRender(c); return; }
+      const i = Number(b.getAttribute("data-ofp-i"));
+      if (!(i >= 0) || !_OFP.products[i]) return;
+      _OFP.pick[c] = _OFP.products[i];
+      _ofpRender(c);
+    });
+  }
+  const P = _OFP.products, pick = _OFP.pick[cid] || "", ai = _OFP.ai[cid] || "";
+  const icoOk = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.2l2 2 4-4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const icoMiss = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.2" r=".9" fill="currentColor"/></svg>';
+  const row = (i) => {
+    const on = P[i] === pick;
+    return '<button type="button" class="ofp-opt" role="radio" aria-checked="' + (on ? "true" : "false") + '" data-ofp-cid="' + cid + '" data-ofp-i="' + i + '">'
+      + '<span class="ofp-radio" aria-hidden="true"></span><span class="ofp-nm">' + _safeText(P[i]) + '</span>'
+      + (ai && P[i] === ai ? '<span class="ofp-match">캡처와 일치</span>' : "") + "</button>";
+  };
+  let h = '<div class="ofp-lbl">구매한 상품 <span class="ofp-req">필수</span></div>';
+  const collapsed = ai && pick === ai && !_OFP.open[cid];
+  if (collapsed) {
+    h += '<div class="ofp-read ok">' + icoOk + "<span>캡처에서 상품을 찾아 골라 두었어요. 맞는지 확인해주세요.</span></div>";
+    h += '<div class="ofp-list" role="radiogroup" aria-label="구매한 상품">' + row(P.indexOf(ai)) + "</div>";
+    h += '<button type="button" class="ofp-more" data-ofp-cid="' + cid + '" data-ofp-more="1">다른 상품을 샀어요</button>';
+  } else {
+    if (_OFP.aiDone[cid] && !ai) h += '<div class="ofp-read miss">' + icoMiss + "<span>캡처에서 상품명을 찾지 못했어요. 산 상품을 골라주세요.</span></div>";
+    else if (!_OFP.aiDone[cid] && !pick) h += '<div class="ofp-hint">구매 캡처를 올리면 산 상품을 찾아 골라 드려요.</div>';
+    h += '<div class="ofp-list" role="radiogroup" aria-label="구매한 상품">' + P.map((_, i) => row(i)).join("") + "</div>";
+    if (ai && pick && pick !== ai) h += '<div class="ofp-hint">캡처와 다르게 고르면 담당자에게 표시됩니다.</div>';
+  }
+  box.innerHTML = h;
+  box.hidden = false;
+}
+
 function addOrderCard() {
   if (_orderCardIds.length >= MAX_ORDER_CARDS) {
     showToast("최대 " + MAX_ORDER_CARDS + "건까지만 추가할 수 있습니다.", "warning");
@@ -8554,6 +8650,7 @@ function addOrderCard() {
   }
 
   _updateCardCountBadge();
+  _ofpRender(cid);
   // 스크롤
   setTimeout(() => cardEl.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
 }
@@ -8679,6 +8776,7 @@ function removeCardImg(cid) {
   if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
   if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = []; st.savedIdentitySelections = {}; }
   _syncSubmissionIdentityAction();
+  _ofpOnCaptureCleared(cid);
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
@@ -8796,7 +8894,10 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   }, 35000);
 
   try {
-    const payload = { action: "extractOrderImage", imageBase64: base64, mimeType };
+    const _ofpCtx = window._orderFormCtx || {};
+    // ★ 작업 좌표를 함께 보내면 서버가 캡처의 상품명을 그 작업 상품 중 하나로 짝지어 준다(productLabel)
+    const payload = { action: "extractOrderImage", imageBase64: base64, mimeType,
+                      sheetId: _ofpCtx.sheetId || "", tabName: _ofpCtx.tabName || "" };
     let json;
     try {
       // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
@@ -8825,6 +8926,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
     st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
+    _ofpOnExtracted(cid, json.productLabel || "", json.productName || "");
     // extractToken은 AI 원본 추출값의 해시에 결속된다. 서버가 가림정보를 보완한
     // st.extracted와 섞지 않고 재확인 때 동일 증명을 검증할 수 있도록 원본을 보존한다.
     st.proofExtracted = { ...st.extracted };
@@ -9760,6 +9862,15 @@ async function submitOrderForm() {
       _resetBtn(); return;
     }
   }
+  // ★ 2026-10-02 B안: 상품이 여럿인 작업은 카드마다 「구매한 상품」을 골라야 제출된다
+  if (_ofpActive()) {
+    const _ofpMiss = _orderCardIds.filter(c => !_OFP.pick[c]);
+    if (_ofpMiss.length) {
+      showToast("구매한 상품을 골라주세요.", "warning");
+      document.getElementById(_ofpMiss[0] + "_prodPick")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      _resetBtn(); return;
+    }
+  }
 
   // ── 각 카드 입력값 수집 및 유효성 검사 ──
   const gv = id => (document.getElementById(id)?.value || "").trim();
@@ -9953,6 +10064,9 @@ async function submitOrderForm() {
       extractedRecipient: _cardAiState[cid]?.extracted?.recipient || "",
       extractedPhone:     _cardAiState[cid]?.extracted?.phone     || "",
       extractedAddress:   _cardAiState[cid]?.extracted?.address   || "",
+      // ★ 2026-10-02 B안: 고른 상품 + 캡처에서 읽은 상품명(서버가 짝지어 다르면 로그에 남긴다)
+      selectedProduct:    _ofpActive() ? (_OFP.pick[cid] || "") : "",
+      productCaptureName: _ofpActive() ? (_OFP.capName[cid] || "") : "",
       identityConfirmed:  false
       ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
@@ -10070,6 +10184,8 @@ async function submitOrderForm() {
       extractedRecipient: o.extractedRecipient || "",
       extractedPhone:     o.extractedPhone     || "",
       extractedAddress:   o.extractedAddress   || "",
+      selectedProduct:    o.selectedProduct    || "",
+      productCaptureName: o.productCaptureName || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정

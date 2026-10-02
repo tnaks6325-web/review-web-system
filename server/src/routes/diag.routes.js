@@ -939,7 +939,21 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     }
 
     const proof = reviewerOrderIdentity.issueExtractionProof({ imageHash, extracted: result, ok: !!result.ok });
-    res.json({ ...result, ...proof });
+    // ★ 2026-10-02 B안 — 구매양식 링크 화면이 작업(sheetId·tabName)을 함께 보내면, 캡처에서 읽은 상품명을
+    //   그 작업의 상품 선택지 중 하나로 짝지어 돌려준다(productLabel). 짝짓기 규칙은 빈 줄 고르기와 같은
+    //   resolveProductLabel 하나 — 화면에 사본을 두지 않는다. 못 정하면 '' (리뷰어가 직접 고른다).
+    //   ★ 어떤 실패도 판독 응답을 막지 않는다(fail-open).
+    let productLabel = '';
+    try {
+      const pSheet = String((req.body && req.body.sheetId) || '').trim();
+      const pTab = String((req.body && req.body.tabName) || '').trim();
+      if (result.ok && result.productName && pSheet && pTab) {
+        const so = require('../services/sheetlessOrder.service');
+        const choices = await so.listProductChoices(pool, pSheet, pTab);
+        if (choices.length) productLabel = so.resolveProductLabel(result.productName, choices);
+      }
+    } catch (_) { productLabel = ''; }
+    res.json({ ...result, ...proof, productLabel });
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
     logAbnormal({

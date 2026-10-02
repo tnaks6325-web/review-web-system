@@ -1371,11 +1371,30 @@ router.post('/order', async (req, res, next) => {
 
     // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
     //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
+    /* ★★ 2026-10-02 B안 — 구매양식 링크로 들어온 리뷰어가 고른 **상품**.
+         홀드가 있으면 홀드 값이 이긴다(서버 권위 · 종전 그대로). 홀드가 없을 때만 화면 값을 받되,
+         **그 작업의 상품 선택지에 있는 값만** 받는다(resolveProductLabel 정확·포함 일치 — 지어낸 값 차단).
+         ★ 못 맞추거나 조회가 실패하면 '' = 종전 동작(상품을 모른 채 접수) — 제출을 막지 않는다
+           (구버전 화면·배포 순서 차이에서 접수가 끊기면 안 된다. 고르기 강제는 화면이 한다). */
+    let formPickedProduct = '';
+    let formCaptureProduct = '';
+    if (!(holdCtx && holdCtx.productName) && (b.selectedProduct || b.productCaptureName)) {
+      try {
+        const so = require('../services/sheetlessOrder.service');
+        const choices = await so.listProductChoices(pool, orderScope.sheetId, orderScope.tabName);
+        if (choices.length) {
+          formPickedProduct = so.resolveProductLabel(String(b.selectedProduct || '').slice(0, 300), choices);
+          formCaptureProduct = so.resolveProductLabel(String(b.productCaptureName || '').slice(0, 300), choices);
+        }
+      } catch (pickErr) {
+        logger.warn(`[submit/order] 상품 선택 확인 실패 — 종전대로 접수: ${pickErr.message}`);
+      }
+    }
     const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
                         selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
                         /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
-                        selectedProduct: (holdCtx && holdCtx.productName) || '' };
+                        selectedProduct: (holdCtx && holdCtx.productName) || formPickedProduct || '' };
     // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
     // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
     let queuedWorkboardApply = false;
@@ -1583,6 +1602,19 @@ router.post('/order', async (req, res, next) => {
     }
 
     const captureSession = await _issueCaptureSession(ledger.orderSubmissionId, captureTarget, 'order_submit');
+    // ★ 2026-10-02 B안 — 리뷰어가 캡처와 **다른 상품**을 골랐으면 막지 않고 접수하되(판독이 틀릴 수 있다)
+    //   리뷰어 비정상로그에 남겨 담당자가 확인하게 한다. 둘 다 그 작업 선택지로 짝지어진 경우만(모르면 침묵).
+    //   ★ 응답을 기다리게 하지 않는다 · 실패해도 접수에 영향 없음.
+    if (formPickedProduct && formCaptureProduct && formPickedProduct !== formCaptureProduct) {
+      require('../services/reviewerEventLog.service').logReviewerEvent({
+        sheetId: orderScope.sheetId, tabName: orderScope.tabName,
+        reviewerName: String(loginName || recipient || ''), phone8: String(loginPhone8 || ''),
+        eventType: 'product_capture_mismatch', severity: 'warn',
+        message: `『${orderScope.tabName}』에 ${String(loginName || recipient || '리뷰어')} 리뷰어가 구매 캡처와 다른 상품을 골라 제출했습니다.`,
+        context: { picked: formPickedProduct, capture: formCaptureProduct, row: ledger.sheetRow || null },
+        orderSubmissionId: ledger.orderSubmissionId,
+      }).catch(e => logger.warn(`[submit/order] 상품 불일치 로그 실패(무시): ${e.message}`));
+    }
     res.json({
       ok: true,
       dbSaved: true,

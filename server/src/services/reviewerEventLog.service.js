@@ -143,6 +143,11 @@ function describeEvent(row = {}) {
           action: '자동복구 대기 중 — 조치 불필요.',
         };
     }
+    case 'product_capture_mismatch':
+      return {
+        problem: `리뷰어가 고른 상품(${at(c.picked) || '?'})이 구매 캡처에서 읽은 상품(${at(c.capture) || '?'})과 다름.`,
+        action: '구매 캡처를 열어 실제로 산 상품을 확인하고, 다르면 작업보드 상품 칸을 고쳐주세요.',
+      };
     case 'order_no_capture':
       return { problem: '구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.', action: '구매캡쳐 보완 필요.' };
     case 'capture_replaced':
