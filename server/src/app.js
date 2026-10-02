@@ -118,6 +118,7 @@ app.use('/api/trackb', trackBRoutes);              // Track B(평행 트랙) —
 
 // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체)
 app.use('/api/review-edit', reviewEditRoutes);
+// 작업보드 통합 — 상태 보기·비상 정지(rollback-mode)만 남김(준비 입구 5개는 2026-10-02 제거, 결정 186 71번)
 app.use('/api/workboard-consolidation', workboardConsolidationRoutes);
 app.use('/api/review-reminders', reviewReminderRoutes);
 

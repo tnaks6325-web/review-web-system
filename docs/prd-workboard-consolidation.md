@@ -1,5 +1,7 @@
 # 작업표·작업보드 통폐합 PRD / 단계별 작업지시서
 
+> **2026-10-02**: 2026-08-28 enabled 전환 완료(대상 165 전부 enabled) 뒤 미사용으로 전환 **준비** 입구 5개(`targets/approve-legacy`·`backups`·`mappings`·`mode`·`rollback-mappings`)를 제거했다(결정 186 71번). **`GET /status` 와 비상 정지 `POST /rollback-mode` 는 그대로 있다** — 아래 "이상 시 즉시 rollback-mode" 절차는 유효하다. 제거된 입구의 함수는 `workboardConsolidation.service` 에 남아 있다.
+
 ## 목적
 
 사용자에게 보이는 `가상 무시트 작업표` 개념을 제거하고, 작업보드를 작업 설정·행 데이터·운영 화면의 단일 업무 단위로 만든다. 구매양식 원장은 최초 제출값과 감사 이력을 유지하며, 반영대기열은 작업보드 DB 반영의 유일한 비동기 전달 경로가 된다.
