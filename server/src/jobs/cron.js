@@ -632,44 +632,12 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  // ── 고아 캡처 정리(A종류: 링크 끊김): 기본 ON · 매일 새벽 4시 40분 ─────────
-  //   ★★ 왜 필요한가 — 행 삭제·구매기록 취소(`orderCancellation`)도, 작업 통째 삭제
-  //     (`workTabDelete`)도 **Drive 파일을 건드리지 않는다**. 그래서 지울수록 "폴더엔
-  //     캡처가 있는데 화면엔 리뷰 이미지 미등록"인 고아가 쌓이는데 치우는 자동 경로가
-  //     어디에도 없었다(중복 정리 도구는 같은 SHA-256 지문의 사본만 잡는다).
-  //   ★ 판정 근거는 file_id / review_index_id 뿐 — **위치키(row_index) 금지**
-  //     (번호 정리·재배정으로 수시로 깨져 멀쩡한 캡처를 지운다. 서비스 주석 참조).
-  //   ★ 삭제는 **휴지통만**(30일 복구창) · 유예 ORPHAN_CAPTURE_GRACE_DAYS(기본 7일)
-  //     · 한 회차 상한 ORPHAN_CAPTURE_CLEAN_CAP(기본 200).
-  //   되돌리기 = Railway `ORPHAN_CAPTURE_CLEAN=0`.
-  if (process.env.ORPHAN_CAPTURE_CLEAN !== '0') {
-    const occSchedule = process.env.ORPHAN_CAPTURE_CLEAN_SCHEDULE || '40 4 * * *';
-    let occRunning = false;
-    cron.schedule(occSchedule, async () => {
-      if (occRunning) return;
-      occRunning = true;
-      try {
-        const { trashOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
-        const { withJobLock } = require('../utils/jobLock');
-        /* ★★ 실제 휴지통 이동은 ORPHAN_CAPTURE_CLEAN_LIVE=1 일 때만(옵트인 · 2026-10-02).
-             조회 칸 오류(cp.row_index)로 도입 이래 한 번도 실행된 적이 없어, 고치는 순간 첫 이동이
-             무검증으로 시작되지 않게 기본은 **세기만** 한다 — 대상 수를 사람이 본 뒤 켠다(결정 064 후속). */
-        const live = process.env.ORPHAN_CAPTURE_CLEAN_LIVE === '1';
-        const r = await withJobLock('orphan_capture_clean',
-          () => trashOrphanCaptures({ dryRun: !live, by: 'cron' }));
-        if (r && r.skipped) logger.debug('[CRON-OrphanCapture] lock busy — 양보');
-        else if (r && r.ok && !live) {
-          logger.info(`[CRON-OrphanCapture] 미리보기 ${r.total || 0}건(이동 안 함 — ORPHAN_CAPTURE_CLEAN_LIVE=1 일 때만 휴지통) · 유예 ${r.graceDays}일`);
-        } else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
-          logger.warn(`[CRON-OrphanCapture] 휴지통 ${r.trashed}건 · 실패 ${r.failed}건`
-            + ` · 경합회피 ${r.skippedRecheck || 0}건 (유예 ${r.graceDays}일)`);
-        }
-      } catch (err) {
-        // ★ 정리가 크론을 죽이지 않는다.
-        logger.error(`[CRON-OrphanCapture] error: ${err.message}`);
-      } finally { occRunning = false; }
-    }, { timezone: 'Asia/Seoul' });
-  }
+  // ── (고아 캡처 자동 정리 04:40 은 2026-10-02 제거 — 결정 064 후속 · 결정 186 73번)
+  //   도입(08-21) 이래 조회 칸 오류로 한 번도 돌지 않았고, 고쳐서 세어 보니 대상 72장 중 62장이
+  //   **번호가 다시 매겨진 정상 리뷰 사진**(같은 작업에 같은 사람이 다른 번호로 살아 있음 — 그중 11장은
+  //   유일한 리뷰 증빙일 수 있음)이었다. A 판정("붙어 있던 명단 줄이 사라짐")이 번호 재매김을 고아로 읽는다.
+  //   진짜 고아는 10장 남짓이라 자동으로 돌릴 이유가 없다 → 크론 제거. 수동 미리보기는
+  //   POST /api/drive/orphan-capture-cleanup(dryRun 기본) 그대로.
 
   // ── 작업표 날짜 맞추기(결정 182 · 2026-09-26): 매일 새벽 4시 20분 ──
   //   날짜별 인원은 규칙(일건수·주말·이월·총량)이 정하고 작업표가 따라간다. 전날 못 채운 몫(이월)과

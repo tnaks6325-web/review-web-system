@@ -180,11 +180,9 @@ const C = (fileId, extra = {}) => Object.assign({
   console.log('\n[G] 크론 배선');
   {
     const cron = read('src/jobs/cron.js');
-    ok('킬스위치 ORPHAN_CAPTURE_CLEAN', /ORPHAN_CAPTURE_CLEAN !== '0'/.test(cron));
-    ok('jobLock 으로 직렬화', /withJobLock\('orphan_capture_clean'/.test(cron));
-    ok('★★ 크론의 실제 이동은 옵트인(ORPHAN_CAPTURE_CLEAN_LIVE=1)이고 기본은 세기만', /const live = process\.env\.ORPHAN_CAPTURE_CLEAN_LIVE === '1'/.test(cron)
-      && /trashOrphanCaptures\(\{ dryRun: !live, by: 'cron' \}\)/.test(cron) && !/trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
-    ok('정리 실패가 크론을 죽이지 않는다', /\[CRON-OrphanCapture\] error/.test(cron));
+    // 04:40 자동 정리는 2026-10-02 제거(결정 064 후속) — A 판정이 번호 재매김된 정상 사진을 잡는다(실측 72 중 62).
+    ok('★★ 고아 캡처 자동 정리 크론이 없다(되살리면 번호 바뀐 정상 리뷰 사진이 휴지통으로 간다)',
+      !/trashOrphanCaptures|orphanCaptureCleanup\.service|orphan_capture_clean/.test(cron));
   }
   {
     console.log('\n[스키마] 후보 SQL 의 칸 이름이 실제 표에 있는가(2026-10-02 — cp.row_index 로 도입 이래 매일 실패)');
@@ -389,12 +387,12 @@ const C = (fileId, extra = {}) => Object.assign({
     delete process.env.AI_REVIEW_FOLDER_ID;
   }
 
-  console.log('\n[J] 크론은 여전히 A만 돌린다');
+  console.log('\n[J] 크론은 고아 정리를 부르지 않는다(2026-10-02 제거)');
   {
     const cron = read('src/jobs/cron.js');
     ok('★★ 크론이 B·C 를 부르지 않는다',
       !/trashTombstonedCaptures|trashFolderOrphans/.test(cron));
-    ok('크론은 A 만', /trashOrphanCaptures\(\{ dryRun: !live, by: 'cron' \}\)/.test(cron));
+    ok('크론은 고아 정리를 아예 부르지 않는다(2026-10-02)', !/trashOrphanCaptures/.test(cron));
     const routes = read('src/routes/drive.routes.js');
     ok('★ 수동 창구가 종류를 나눠 받는다', /kind === 'tombstoned'/.test(routes) && /kind === 'folder'/.test(routes));
     ok('★ 미지정은 종전 동작(A)', /String\(b\.kind \|\| 'linked'\)/.test(routes));
