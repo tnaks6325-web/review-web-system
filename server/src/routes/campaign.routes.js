@@ -4162,4 +4162,7 @@ async function _addApplicationToSheet(campaign, applicant) {
   logger.info(`[campaign/sheet] 행 추가 완료: ${linked_tab_name} - ${applicant.name} (행 ${headerRowIdx + 1 + nextNum})`);
 }
 
+// 공고 목록 5초 캐시 비우기 — 다른 기능이 정원을 바꾼 직후 화면이 옛 숫자를 다시 그리지 않게(어제 부족 인원 팝업 — 코덱스 리뷰)
+router.invalidateListCache = function () { _listCache = { at: 0, rows: null, countsMap: null, feeMap: null }; };
+
 module.exports = router;

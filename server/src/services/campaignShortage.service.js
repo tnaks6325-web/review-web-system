@@ -439,6 +439,10 @@ async function applyDecisions(admin, decisions, opts = {}) {
       results.push({ campaignId: d.campaignId, ok: false, reason: e.message, code: e.code || null });
     }
   }
+  // ★ 오늘 인원을 바꿨으면 공고 목록 캐시를 비운다 — 안 비우면 반영 직후 다시 그린 카드가 옛 숫자를 보인다(코덱스 리뷰)
+  if (results.some(r => r.ok && r.choice === 'today')) {
+    try { const cr = require('../routes/campaign.routes'); if (cr && typeof cr.invalidateListCache === 'function') cr.invalidateListCache(); } catch (_) { /* 캐시 비우기 실패는 반영과 무관 */ }
+  }
   return { ok: true, date: cur.date, results };
 }
 

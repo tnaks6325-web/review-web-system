@@ -131,5 +131,7 @@ ok('잠근 행으로 후보 조건 전체(이월 방식·보류 포함)·받는 
 ok('함께 쓰는 작업표라 줄을 안 바꾼 경우 경고로 말한다', /reason === 'shared_worktable'\) \|\| \(rb && rb\.reason === 'shared_worktable'\)/.test(src));
 ok('어제 이후 인원 규칙이 바뀐 공고·어제 마감 뒤 게시 공고는 묻지 않음', /c\.quota_rules_changed_at && new Date\(c\.quota_rules_changed_at\)\.getTime\(\) >= yStartMs/.test(src) && /if \(pubMs >= cutoffMs\) return null/.test(src));
 ok('175 트리거 = 인원 규칙 칸이 실제로 달라질 때만', (() => { const m = read('migrations/175_campaign_quota_rules_changed_at.sql'); return /BEFORE UPDATE ON recruit_campaigns/.test(m) && /NEW\.daily_limit\s+IS DISTINCT FROM OLD\.daily_limit/.test(m) && /NEW\.skip_weekends\s+IS DISTINCT FROM OLD\.skip_weekends/.test(m); })());
+ok('176 = 이월 방식·보류 변경도 기록', (() => { const m = read('migrations/176_campaign_quota_rules_carry.sql'); return /NEW\.carry_strategy\s+IS DISTINCT FROM OLD\.carry_strategy/.test(m) && /NEW\.carry_mode\s+IS DISTINCT FROM OLD\.carry_mode/.test(m); })());
+ok('175 칸도 부팅 점검 · 오늘 반영 후 목록 캐시 비움', /\['recruit_campaigns', 'quota_rules_changed_at'\]/.test(require('fs').readFileSync(require('path').join(__dirname,'../index.js'),'utf8')) && /cr\.invalidateListCache\(\)/.test(src));
 console.log(`\ncampaignShortagePrompt: ${passed} passed`);
 process.exit(0);

@@ -263,6 +263,11 @@ async function app(cid, phone, when, status = 'submitted') {
   const s2 = (await pool.query(`SELECT quota_rules_changed_at FROM recruit_campaigns WHERE id=$1`, [P + 'S'])).rows[0].quota_rules_changed_at;
   ok('⑭-2 일건수를 바꾸면 기록 · 어제 정원을 알 수 없어 묻지 않음', !!s2 && !mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'S'));
 
+  // ⑭-3 이월 방식이 바뀌어도(다음 날에 더하기 → 종료일 뒤에 붙이기) 어제 정원을 알 수 없다 → 묻지 않음(176)
+  await camp(P + 'V', { title: '테스트V', strategy: 'next' }); await app(P + 'V', '00000171', D2NOON);
+  await pool.query(`UPDATE recruit_campaigns SET carry_strategy = 'extend' WHERE id=$1`, [P + 'V']);
+  ok('⑭-3 이월 방식 변경도 기록 · 묻지 않음', !!(await pool.query(`SELECT quota_rules_changed_at FROM recruit_campaigns WHERE id=$1`, [P + 'V'])).rows[0].quota_rules_changed_at && !mine(await svc.listShortages({ name: '박세희' })).some(i => i.campaignId === P + 'V'));
+
   // ⑮ 어제 신청 마감(18:00) 뒤에 처음 게시 → 어제는 아무도 신청할 수 없었다 → 묻지 않음 / 마감 전 게시는 물음
   for (const [k, hh, want] of [['T', '20:00', false], ['U', '09:00', true]]) {
     await camp(P + k, { title: '테스트' + k });
